@@ -241,7 +241,7 @@ func (r *renderer) typeExpr(t *Type) (syntax.Expr, error) {
 	if t == nil {
 		return nil, fmt.Errorf("missing type in const evaluation")
 	}
-	if t.Opaque || (t.Named != "" && !samePackageName(t)) {
+	if t.Opaque {
 		return nil, fmt.Errorf("cannot spell type in const evaluation")
 	}
 	if t.Named != "" {
@@ -313,8 +313,3 @@ func (r *renderer) typeExpr(t *Type) (syntax.Expr, error) {
 	}
 	return nil, fmt.Errorf("cannot spell type in const evaluation")
 }
-
-// samePackageName reports whether a named type spells by bare name.
-// Descriptors from other packages arrive Opaque, so Named alone
-// implies same-package here.
-func samePackageName(t *Type) bool { return !t.Opaque }
