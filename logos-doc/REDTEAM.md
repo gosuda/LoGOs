@@ -32,7 +32,6 @@ Resolutions: logos-doc/SPEC.md Section 17. Status values: planned, tested, satis
 | #26 | M8 | src/logos/sync/sync_test.go (TestHotUpdateConcurrent, TestHotLayout) | tested |
 | #27 | M16 | src/cmd/go/testdata/script/logos_wasm_loader.txt | tested |
 | #28 | M13 | test/logos/redteam/attack_028_self_aliased_rvo.lgo | tested |
-| #29 | M19 | test/logos/redteam/attack_029_zgc_syscall_untag.lgo | tested |
 | #30 | M13 | test/logos/redteam/attack_030_static_devirtualization.lgo | tested |
 | #31 | M6 | src/internal/types/testdata/logos/chains.lgo; test/logos/run/sort_side_effect.lgo | tested |
 | #32 |M1| test/logos/redteam/attack_032_defer_lifo_order | tested |
@@ -162,23 +161,17 @@ Resolutions: logos-doc/SPEC.md Section 17. Status values: planned, tested, satis
 | #156 | M3 | src/internal/types/testdata/logos/error_first.lgo | tested |
 | #157 | M7, M9 | test/logos/lint/infinite_recursion.lgo; test/logos/lint/infinite_recursion_go.go | tested |
 | #158 | M9 | test/logos/lint/large_backing_array_pin.lgo; test/logos/lint/large_backing_array_pin_go.go | tested |
-| #159 | M19 | src/cmd/go/testdata/script/logos_redteam_159.txt (blocked: M19-S5 immix phase 1, and zgc phase 2 for the pointer-keyed map half; scripts exist, no executed run) | blocked |
-| #160 | M19, M20 | src/cmd/go/testdata/script/logos_redteam_160.txt (blocked: M19-S5 immix phase 1; the script links immix explicitly, no executed run) | blocked |
-| #161 | M19 | src/runtime/logos_pacer_test.go (TestLogosElasticKeepsAssistBackstop, assists still run at u >= 0.95) | tested |
+| #160 | M20 | src/cmd/go/testdata/script/logos_redteam_160.txt (blocked: fastcall foreign hold verification; no executed run) | blocked |
 | #162 | M9 | src/cmd/go/testdata/script/logos_lint_go.txt | tested |
 | #163 | M9 | test/logos/lint/unbounded_channel_op.lgo; test/logos/lint/unbounded_channel_op_go.go | tested |
 | #164 | M9 | test/logos/lint/discarded_error.lgo; test/logos/lint/discarded_error_go.go | tested |
 | #165 | M20 | src/cmd/cgo/internal/testlogos/fastcall_test.go | tested |
-| #166 | M19 | src/runtime/logos_gcmode_test.go (TestLogosGCModeBatchTriggersAtNinetyPercent, TestLogosGCModeBatchHeapCorrect) | tested |
 | #167 | M8, M9 | test/logos/lint/reentrant_withlock_deadlock.lgo; test/logos/lint/reentrant_withlock_deadlock_go.go; src/logos/sync/sync_test.go (TestLockedWithLockMutates, TestLockedWithLockUnlocksAfterPanic) | tested |
-| #168 | M19 | src/cmd/go/testdata/script/logos_redteam_168.txt (blocked: M19-S7 zgc phase 2; the script links zgc explicitly, no executed run) | blocked |
 | #169 | M15 | test/logos/run/make_overflow.lgo (length and capacity); test/logos/run/make_overflow_go.go; test/logos/run/make_const.lgo; src/logos/rt/mullen_test.go | tested |
 | #170 | M9 | test/logos/lint/time_after_in_loop.lgo; test/logos/lint/time_after_in_loop_go.go | tested |
-| #171 | M19 | src/cmd/go/testdata/script/logos_redteam_171.txt (executed: the bulk leg failed at the script's `-race` command with `PC=0x424ebb addr=0x10`, a nil race thread state on the system stack, and passes after 507cee6e46; the script's own header keeps the row planned while the phase gates and the resident-set record stay open) | blocked |
 | #172 | M9 | test/logos/lint/time_after_in_loop.lgo; test/logos/lint/time_after_in_loop_go.go | tested |
 | #173 | M20 | src/cmd/cgo/internal/testlogos/fastcall_test.go | tested |
 | #174 | M7 | src/internal/types/testdata/logos/const_if.lgo; test/logos/run/const_if.lgo; test/logos/codegen/const_if_dead.lgo | tested |
-| #175 | M19 | src/cmd/go/testdata/script/logos_redteam_175.txt (blocked: M19-S5 immix phase 1; the script links immix explicitly, no executed run) | blocked |
 | #176 | M8 | src/logos/sync/sync_test.go (TestLockedWithLockUnlocksAfterPanic) | tested |
 | #177 | M6 | test/logos/run/interp.lgo (format verbs printed literally) | tested |
 | #178 | M8 | src/logos/rt/group_test.go; test/logos/run/group.lgo; src/internal/types/testdata/logos/group.lgo | tested |
@@ -212,4 +205,4 @@ The C operation and the performance thresholds are unchanged.
 Historical timings from the old recurrence are observations of a different workload.
 They do not prove acceptance of the corrected benchmark.
 
-Execution boundary (M20): the fastcall/M-owned, occupancy/dirty, and foreign-contract source changes in this worktree are authored/implemented but UNVERIFIED. Historical `tested` rows are preserved only where their executed evidence supports them; retained failures, skips, and blocked/noise-limited checks are not passes, and no row is flipped to `tested` by code reading. The M20 acceptance gate (`-race`, each passing M19 GC mode, G6 speed ratio of at least 1.05, blocking parity, command-default separation, `./run.bash --no-rebuild` with the plain-Go default unchanged) and the M19 phase 1/2 mode gates stay closed. Rows #159, #160, #168, #171, #175 stay `planned` (unmet); no unmet attack is closed here and no speedup is claimed.
+Execution boundary (M20): the fastcall/M-owned, occupancy/dirty, and foreign-contract source changes in this worktree are authored/implemented but UNVERIFIED. Historical `tested` rows are preserved only where their executed evidence supports them; retained failures, skips, and blocked/noise-limited checks are not passes, and no row is flipped to `tested` by code reading. The M20 acceptance gate (`-race`, G6 speed ratio of at least 1.05, blocking parity, command-default separation, `./run.bash --no-rebuild` with the plain-Go default unchanged) stays closed. Row #160 stays `planned` (unmet); no unmet attack is closed here and no speedup is claimed.

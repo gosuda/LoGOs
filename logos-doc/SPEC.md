@@ -1079,7 +1079,6 @@ A rule that sits behind a `GOEXPERIMENT` flag MUST stay behind it as this sectio
 
 ### 3.1 RFC-301: Pluggable GC engine and tier-0 arena
 
-The tier-0 arena MUST work under every `-gc` mode. [T-301.1]
 It MUST stay off unless the build sets `GOEXPERIMENT=logosarena`. [T-301.1]
 Under `logos`, `[build] arena` set to true MUST set that experiment for the build. [T-301.1][R-U1]
 Under plain `go`, `GOEXPERIMENT=logosarena` alone MUST enable the arena. [T-301.1][R-U1]
@@ -1091,24 +1090,6 @@ A loop back-edge MUST restore the watermark for iteration-local objects. [T-301.
 The runtime MUST zero popped regions before reuse. [T-301.1]
 Scan-region objects MUST carry a type word. [T-301.1]
 The collector MUST scan them with the goroutine stack. [T-301.1]
-Greentea MUST scale background workers by heap use. [T-301.2]
-It MUST keep mark assist as backstop when heap use reaches 95% of goal. [T-301.2]
-Under GOEXPERIMENT=logosgen, amd64 greentea MUST use a generational card table. [T-301.2]
-Batch MUST collect stop-the-world only. [T-301.2]
-It MUST start with `GOGC` off. [T-301.2]
-It MUST trigger collection at 90% of `GOMEMLIMIT`. [T-301.2]
-It MUST compile without write barriers. [T-301.2]
-Epsilon MUST start with `GOGC` off and no memory limit. [T-301.2]
-It MUST compile without write barriers. [T-301.2]
-The GC code MUST stay linked under epsilon. [T-301.2]
-The wasm collector MUST mark in slices during idle time of the JS event loop. [T-301.2]
-Phase 1 MUST evacuate stop-the-world with pinning of conservatively referenced objects, cgo-pinned objects, and pointer-keyed map keys. [T-301.2]
-Phase 2 MUST relocate concurrently with load barriers in zgc only. [T-301.2]
-Pointer-keyed maps under zgc MUST use a runtime side-table identity hash of 32 bits. [T-301.2]
-Address-hashed immix blocks MUST set the pin bit. [T-301.2]
-Pinned blocks MUST NOT evacuate. [T-301.2]
-Mode selection, defaults, and errors are defined in SPEC Sec 19. [T-301.2]
-Go runtime states objects do not move, so zgc and immix stay research tracks until their gates pass. [T-301.2]
 
 ### 3.2 RFC-302: Smart stack engine
 
@@ -1164,7 +1145,7 @@ The shared toolchain experiment baseline MUST remain off. [T-304]
 The default MUST NOT override explicit `logosfastcgo`, `nologosfastcgo`, or `none` tokens from the process environment or `go env -w`. [T-304]
 Explicit tokens MUST retain the standard experiment ordering rules. [T-304]
 Raw `logos tool` invocations MUST retain explicit experiment selection. They do not rebuild a matching runtime. [T-304]
-The M20 gate MUST cover race, SIGPROF, a blocking C call, every `-gc` mode whose M19 gate has passed, Go pointer validity, the `nocallback` panic, CPU profile attribution, and blocking parity. [T-304]
+The M20 gate MUST cover race, SIGPROF, a blocking C call, Go pointer validity, the `nocallback` panic, CPU profile attribution, and blocking parity. [T-304]
 Command default selection MUST NOT count as passing the M20 correctness or performance gates. [T-304]
 `GOEXPERIMENT=nologosfastcgo` and `GOEXPERIMENT=none` MUST disable the default under `logos`. [T-304][R-U1]
 The speed rule MUST be a ratio of at least 1.05 of the same `BenchmarkFastcall`, built once with `GOEXPERIMENT=logosfastcgo` and once with `GOEXPERIMENT=nologosfastcgo`, measured under rule G6 of `IMPLEMENTATION.md`. [T-304]
@@ -1178,7 +1159,7 @@ The fast path MUST NOT change the cgo file layout, the generated file names, or 
 Profiling with `SIGPROF` during fast calls MUST NOT crash. [T-304]
 A C function marked `nocallback` that calls into Go MUST still panic on the fast path. It MUST NOT hang and MUST NOT corrupt state. [T-304][R-U1]
 A CPU profile MUST attribute time in a fast-called C function to its Go call site. [T-304][R-U1]
-Go pointer validity under moving modes stays an M20 gate requirement, not a passing claim: the fast path canonicalizes only the top-level foreign word (`logosZgcForeignArg`) inside a `logosZgcForeignHoldEnter`/`Exit` bracket, and `runtime.Pinner`-pinned, conservatively scanned, and pointer-keyed-map-key objects are excluded from moving by the separate pin pass. [T-304]
+Go pointer arguments MUST stay valid during a fast call. [T-304]
 The original M holds diagnostics only: `m.fastCgoFrame[0]` records the DI/arg address copy and `m.inFastCall` marks entry; the slots are plain `uintptr`, not pins or roots, and only slot 0 is written. [T-304]
 The flag, the timestamp, and the slots MUST read zero after return. [T-304]
 POD and primitive-slice arguments MUST skip `_cgoCheckPointer`. [T-304]
@@ -1366,21 +1347,6 @@ Cgo pointer checks MUST NOT panic on arena addresses. [T-301.1]
 Pointer-containing arena objects MUST keep their heap referents alive across `runtime.GC()`. [T-301.1]
 After a frame exit, collection MUST find no stale pointers in popped scan memory. [T-301.1]
 
-### 8.4 Pluggable GC write and load barrier dispatch
-
-The `-gc` flag MUST select the barrier emitter at compile time. [T-301.2]
-Under GOEXPERIMENT=logosgen, on amd64 greentea, pointer stores into mature spans MUST mark the card table. [T-301.2]
-Under greentea, pointer loads MUST be plain loads with no barrier instructions. [T-301.2][T-PERF]
-Under zgc, pointer loads MUST test the color and heal or remap on mismatch. [T-301.2]
-Under zgc, pointer stores MUST be plain. [T-301.2]
-Under immix, pointer stores MUST set the line mark. [T-301.2]
-Under immix, pointer loads MUST be plain. [T-301.2]
-Under wasm, pointer stores MUST keep the write barrier. [T-301.2]
-Under batch and epsilon, pointer stores MUST be plain with no barrier. [T-301.2][T-PERF]
-Pointer-keyed maps MUST keep working with the standard hash under greentea, batch, and epsilon. [T-301.2]
-Under zgc they MUST use an identity hash that survives relocation. [T-301.2]
-Under immix an address-hashed block MUST stay in place. [T-301.2]
-
 ### 8.5 `//logos:cgo_fastcall` trampoline
 
 The original text of this section described implementation internals; it is archived in archive/runtime-memory.md. The build steps are in IMPLEMENTATION.md, milestone M20.
@@ -1448,9 +1414,6 @@ With cgo off, net and os/user use their pure-Go paths. [T-101.2]
 opt_level is a string with default "O2". [T-Sec10][T-105]
 See Sec 1.5 for accepted `opt_level` values.
 A `-O=<level>` flag on `logos build` MUST override the key. [T-105]
-gc is a string with default "greentea". [T-Sec10][T-301.2]
-It MUST be one of "greentea", "zgc", "immix", "wasm", "batch", or "epsilon". [T-Sec10][T-301.2]
-On GOARCH=wasm the default is "wasm". [T-301.2]
 synthetic_pgo MUST be one of "off", "standard", or "aggressive". [T-Sec10][T-105]
 When the key is absent, O2 uses standard. [T-105]
 When the key is absent, O3 uses aggressive. [T-105]
@@ -1770,7 +1733,6 @@ Each entry from #1 to #182 states the tailored resolution of its original attack
 - #26 ARM64 weak ordering exposing Hot fields: Concurrent Hot updates MUST NOT expose partial values. Hot stores MUST run the hybrid write barrier. See Sec 2.6. [T-206]
 - #27 WASM memory grow detaching JS views: The loader MUST re-read memory.buffer after every wasm call. Calls after growth MUST see current memory. See Sec 14.2. [T-Sec14]
 - #28 RVO destination aliasing corrupting input reverse: Destination passing MUST NOT exist. Self-aliased calls such as arr = Reverse(arr) MUST return correct results. See IMPLEMENTATION.md M13-S3. [T-105][T-203.4]
-- #29 ZGC colored pointers rejected by kernel: Every syscall and cgo entry MUST untag pointers. Color bits MUST survive addressing on ARM64 with TBI and on x86 with LAM or UAI. See Sec 19.2. [T-301.2]
 - #30 Self-modifying inline cache causing cache thrashing: Devirtualization MUST stay static with no runtime writes. No call-site cache MUST exist. See Sec 2.3. [T-203.4]
 - #31 Stream fusion over-executing side effects take: Fused take(5) loops MUST run map functions at most 5 times. Side effects before sortBy MUST warn suspicious::side_effect_before_sort. See Sec 1.4. [T-104.6][T-102]
 - #32 Execution order chaos between defers: `scope defer` MUST run at block exit. `defer`, `defer?`, and `errdefer` MUST share one LIFO order at function exit. See Sec 20.1. [T-104.2][T-104.7]
@@ -1900,23 +1862,17 @@ Each entry from #1 to #182 states the tailored resolution of its original attack
 - #156 Caller reading hash before Close error check: For callees declared in .lgo the compiler MUST fail reads before the err proof with [correctness::result_before_error_check]. Standard-library callees MUST keep their own contract, so use of n first stays allowed. See Sec 2.2. [T-202]
 - #157 Unconditional self-recursion in const switch branch: The compiler MUST fail a function whose every path calls itself with identical arguments before return with [correctness::infinite_recursion]. See Sec 1.2. [T-102]
 - #158 Substring pinning large backing array in heap: Escape analysis MUST warn with [perf::large_backing_array_pin] when a subslice or substring of a backing array above 64 KB escapes. See Sec 1.2. [T-102]
-- #159 Moving collector breaking pointer-keyed map lookup: Pinned blocks MUST NOT evacuate. Pointer-keyed maps under zgc MUST use a side-table identity hash that survives relocation. See Sec 8.4. [T-301.2]
-- #160 Collection moves live cgo arguments: Go pointer validity under moving modes stays an M20 gate requirement, not a passing claim. The fast path holds only the top-level word with a foreign-hold bracket; `Pinner`-pinned, conservatively scanned, and pointer-keyed-map-key objects are excluded by the pin pass, not by slots. The M diagnostics (flag, timestamp, slots) MUST read zero after return without clearing the caller's argument values. See Sec 3.4. [T-304]
-- #161 Removing mark assist causing out-of-memory failure: Greentea background goal MUST follow 0.25 below u 0.80, linear rise to 0.75 below u 0.95, and 0.75 at or above u 0.95. Mark assists MUST still run when u reaches 0.95 or more. See Sec 19.1. [T-301.2]
+- #160 Collection moves live cgo arguments: Go pointer arguments MUST stay valid during a fast call. The fast path holds only the top-level word with a foreign-hold bracket. The M diagnostics (flag, timestamp, slots) MUST read zero after return without clearing the caller's argument values. See Sec 3.4. [T-304]
 - #162 Strict lint breaking third-party module libraries: Third-party modules of either kind MUST get no code lints. Capability checks MUST apply to every module in the build. See Sec 1.2. [T-102][R-U1]
 - #163 Buffered channel send flagged as unbounded operation: The compiler MUST allow a channel operation outside a select with a done case only for a locally made channel with constant capacity and send count within capacity. Other operations MUST fail with [correctness::unbounded_channel_op]. See Sec 1.2. [T-102]
 - #164 Benign writer flagged as discarded error: The compiler MUST allow always-nil-error callees and benign writers to standard output, standard error, byte buffers, and string builders. Other dropped errors MUST fail with [slop::discarded_error]. See Sec 1.2. [T-102]
 - #165 Fastcall overflowing goroutine stack or handler crash: The fast path MUST switch stacks like asmcgocall and run the C call on the system stack. Profiling during the call MUST NOT crash the process. See IMPLEMENTATION.md M20-S1. [T-304]
-- #166 Batch mode dying on unexpected memory spike: Batch MUST trigger automatic collection when heap use reaches 90 percent of `GOMEMLIMIT`, or of physical memory when `GOMEMLIMIT` is unset; that collection MUST stop the world. Stores under batch MUST be plain with no barrier. See Sec 3.1. [T-301.2]
 - #167 Nested WithLock causing self-deadlock: The compiler MUST fail a WithLock call on the same receiver inside its own closure call graph with [concurrency::reentrant_withlock_deadlock]. See Sec 1.2. [T-102]
-- #168 ZGC crashing on CPUs lacking address tagging: Without hardware tagging loads MUST test the color and unmask to the canonical address. Every syscall and cgo entry MUST untag pointers. See Sec 19.2. [T-301.2]
 - #169 Make length integer overflow allocating tiny buffer: In .lgo a * inside a make length or capacity MUST lower to logos/rt.MulLen. On overflow MulLen MUST panic with logos: make length overflow: w * h. See Sec 15.2. [T-303]
 - #170 Time.After inside loop leaking timers: The compiler MUST warn with [perf::time_after_in_loop] against time.After inside a loop body. It MUST NOT hoist timers across iterations. See Sec 1.2. [T-102]
-- #171 ZGC multi-mapping inflating memory reporting: ZGC MUST use a single mapping with software unmasking. It MUST NOT multi-map pages. See Sec 19.2. [T-301.2]
 - #172 Hoisted timer firing from undrained channel: The compiler MUST warn with [perf::time_after_in_loop] against time.After inside a loop body. It MUST NOT hoist timers, so no drain bug can occur. See Sec 1.2. [T-102]
 - #173 SIGPROF during fastcall causing stack panic: Profiling with SIGPROF during a fast call MUST NOT crash the process. See Sec 3.4. [T-304]
 - #174 Const-if dead branch triggering unused lint: Both const-if branches MUST type-check. Only the live branch MUST reach lowering. See Sec 2.5. [T-205]
-- #175 Finalizer resurrection during moving collection: Finalizer and cleanup attachment MUST exclude the containing span from evacuation until span reuse without making that exclusion a GC root. Cleanup argument and closure references MUST remain valid when moved. Concurrent moving mode MUST remain unavailable until attachment and relocation are synchronized and verified. See IMPLEMENTATION.md M19-S5. [T-301.2][T-0.1]
 - #176 Panic inside WithLock leaving mutex locked: WithLock MUST hold Lock, defer Unlock, then call the function. It MUST unlock after a panic. See Sec 2.6. [T-206]
 - #177 User input causing format injection in interpolation: Operand text MUST NOT be read as a format string. User braces MUST print literally. See Sec 1.4. [T-104.4]
 - #178 Spawning many goroutines exhausting memory in group: A go group with limit = N MUST bound concurrency with a semaphore. A go statement outside any group body MUST fail with [concurrency::unsupervised_goroutine]. See Sec 2.6. [T-206]
@@ -1937,78 +1893,6 @@ Each entry from #1 to #182 states the tailored resolution of its original attack
 
 The build rules for upstream files live in `IMPLEMENTATION.md` under rule G3 and the per-slice file lists. [T-Sec18]
 The original text of this section is archived in `archive/file-manifest.md`.
-
-## 19. Pluggable GC state machines and memory layouts
-
-The build MUST select the collector with `-gc=MODE` on `logos build` or `go build`, or with `logos.toml [build] gc` under `logos`. [T-301.2][R-U1]
-MODE MUST be one of `greentea`, `zgc`, `immix`, `wasm`, `batch`, or `epsilon`. [T-301.2]
-Any other mode MUST fail with `logos build: unknown -gc mode "x" (want greentea, zgc, immix, wasm, batch, epsilon)`. [T-301.2]
-Under `logos`, the default MUST be `greentea`, or `wasm` when `GOARCH` equals `wasm`. [T-301.2]
-Elastic pacing MUST be the default for `greentea`; every other mode, including an empty production-controller mode, MUST keep upstream pacing. [T-301.2]
-Until phase 1 passes `go test -short std` with the experiment on, `-gc=immix` MUST fail with `logos build: -gc=immix requires GOEXPERIMENT=logosgcmoving phase 1, which is not complete`. [T-301.2]
-Until phase 2 passes, `-gc=zgc` MUST fail with `logos build: -gc=zgc requires GOEXPERIMENT=logosgcmoving phase 2, which is not complete`. [T-301.2]
-Batch MUST run no collection until heap use reaches 90% of `GOMEMLIMIT`. [T-301.2]
-When `GOMEMLIMIT` is unset, the trigger MUST be 90% of physical memory. [T-301.2]
-It MUST then run a stop-the-world collection. [T-301.2]
-A live heap at or above that mark after a collection MUST move the trigger a quarter of the live heap (at least the minimum heap) past it. [T-301.2]
-A platform whose runtime cannot read physical memory MUST start no batch collection on its own while `GOMEMLIMIT` is unset. [T-301.2]
-Batch MUST ignore `GOGC` and a `GODEBUG` request for concurrent collection. [T-301.2]
-Programs compiled without write barriers MUST produce correct heaps under batch collection. [T-301.2]
-Epsilon MUST NOT start a collection on its own, whatever the heap size, `GOGC`, or memory limit. [T-301.2]
-An explicit `runtime.GC` call under epsilon MUST still collect, with the world stopped. [T-301.2]
-Marking MUST stay single-threaded on wasm. [T-301.2]
-Mark slices MUST run during idle time of the JS event loop. [T-301.2]
-The heap MUST split into a low permanent region and a high scratch region. [T-301.2]
-Growth MUST extend only the high region. [T-301.2]
-The modes of this section MUST apply to Go packages and to loGo/s packages. [T-301.2][R-U1]
-Under plain `go`, each `logos build:` message above MUST use the prefix `go build:`. [T-301.2]
-
-### 19.1 Engine 1: Enhanced Green Tea GC
-
-A pointer store into a span MUST set the mark bit and the dirty flag without dereferencing the pointer. [T-301.2]
-Workers MUST drain dirty spans in monotonic address order, except on GOARCH=wasm where the span deck stays off. [T-301.2]
-`nologosspandeck` MUST retain the FIFO comparison path. [T-301.2]
-A single-page 8KB span MUST scan its grey objects sequentially in one pass. [T-301.2]
-The sequential span scan MUST use hardware prefetch on amd64. [T-301.2]
-Under greentea built with GOEXPERIMENT=logosgen, the card table MUST hold one byte per 512 bytes of heap. [T-301.2]
-Under GOEXPERIMENT=logosgen, a minor cycle MUST trigger when the heap grows 50% since the last cycle. [T-301.2]
-Under GOEXPERIMENT=logosgen, a span MUST count as mature after surviving 2 cycles. [T-301.2]
-Under GOEXPERIMENT=logosgen, a minor cycle MUST skip clean mature spans without reading their mark bits. [T-301.2]
-Under GOEXPERIMENT=logosgen, a full cycle MUST follow every 4 minor cycles. [T-301.2]
-Background CPU goal MUST be 0.25 when u is below 0.80. [T-301.2]
-It MUST rise linearly from 0.25 to 0.75 when u is at least 0.80 and below 0.95. [T-301.2]
-It MUST stay 0.75 when u is at or above 0.95. [T-301.2]
-Here u means live heap over heap goal. [T-301.2]
-Assists MUST still run when u reaches 0.95 or more. [T-301.2]
-Under GOEXPERIMENT=logosgen, amd64 greentea MUST use a generational card table. [T-301.2]
-
-### 19.2 Engine 2: Colored-pointer compactor
-
-On ARM64 with TBI and on x86 with LAM or UAI, color bits MUST survive addressing. [T-301.2]
-Without hardware tagging, loads MUST test the color. [T-301.2]
-On mismatch they MUST take the self-heal path. [T-301.2]
-They MUST unmask to the canonical address. [T-301.2]
-Unmask latency carries target: 1 clock, measured by BenchmarkLogosZgcUnmask. [T-PERF]
-Every syscall and cgo entry MUST untag pointers. [T-301.2]
-Evacuation MUST target pages over 35% fragmented. [T-301.2]
-Pages at or below 35% MUST NOT evacuate. [T-301.2]
-The forwarding table MUST live off-heap in page metadata headers. [T-301.2]
-Source pages MUST return to the OS with `madvise(DONTNEED)` right after relocation completes, before self-heal drains. [T-301.2]
-Conservatively referenced objects, cgo-pinned objects, and pointer-keyed map keys MUST pin. [T-301.2]
-They MUST NOT move. [T-301.2]
-
-### 19.3 Engine 3: Immix line and block throughput engine
-
-Each 32KiB block MUST split into 256 128B lines. [T-301.2]
-Line marks MUST live off-heap in block metadata. [T-301.2]
-Each active block MUST be exactly one 32KiB-aligned span with slot stride unchanged; occupancy and dirtiness are separate off-heap planes and no allocation decision derives from line marks. [T-301.2]
-Occupancy MUST be the `freeindex` OR `allocBits` composite set on every served slot and rebuilt at sweep from the post-swap composite; the barrier and the marker MUST NOT write it. [T-301.2]
-Dirtiness MUST be a parity pair flipped at cycle start and cleared for exactly the dirtied blocks at termination, both with the world stopped; the barrier MUST only OR into the active table and MUST never clear a mark. [T-301.2]
-The fast path MUST bump-allocate inside the current free hole. [T-301.2]
-Hole search carries target: 3ns, measured by BenchmarkLogosImmixHoleScan. [T-PERF]
-Blocks with the pin bit set MUST NOT evacuate. [T-301.2]
-Unpinned blocks over 50% dead lines MUST evacuate into fresh blocks during mark. [T-301.2]
-`unique` and `weak` handles MUST stay valid across evacuation. [T-301.2]
 
 ## 20. Unwind tables for scope defer and Locked
 
@@ -2096,8 +1980,7 @@ m.WithLock(func(c *Config) {
 ### 22.3 Red-team completeness
 
 - Every row of `logos-doc/REDTEAM.md` MUST reach `tested` or `satisfied upstream` with its proving test. [T-Sec22]
-- Runtime attack tests MUST run under `-race` and under each `-gc` mode whose gate has passed: greentea always, immix after its phase 1 gate, zgc after its phase 2 gate. [T-Sec22][T-301.2]
-- A mode whose gate has not passed MUST be recorded as blocked for that attack, never as tested. [T-Sec22]
+- Runtime attack tests MUST run under `-race`. [T-Sec22]
 
 ### 22.4 Zero-alloc and codegen checks
 
