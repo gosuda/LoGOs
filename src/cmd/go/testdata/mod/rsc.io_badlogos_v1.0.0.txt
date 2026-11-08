@@ -9,3 +9,7 @@ module rsc.io/badlogos
 module rsc.io/badlogos
 -- x.📜 --
 package badlogos
+-- x.⚡ --
+package badlogos
+-- x.ʕ◔ϖ◔ʔ --
+package badlogos

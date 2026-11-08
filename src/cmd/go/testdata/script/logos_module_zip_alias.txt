@@ -1,7 +1,9 @@
 env GO111MODULE=on
 
 ! go get rsc.io/badlogos@v1.0.0
-stderr 'unzip.*badlogos.*malformed file path "x.📜": invalid char'
+stderr 'badlogos.*malformed file path "x.📜": invalid char'
+stderr 'badlogos.*malformed file path "x.⚡": invalid char'
+stderr 'badlogos.*malformed file path "x.ʕ◔ϖ◔ʔ": invalid char'
 
 -- go.mod --
 module example.com/zipalias
