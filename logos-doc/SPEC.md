@@ -117,7 +117,8 @@ The `logos lint` check MUST run the language-neutral syntax and type rules on Go
 The `logos lint` check MUST run inside escape analysis for escape rules, on Go packages and on `.lgo` packages [T-102][R-U1].
 `logos lint` MUST lint Go packages with the language-neutral rules only [T-102][R-U1].
 A rule MUST count as language-neutral when a Go package can trigger it with Go syntax and types alone and the code it guards exists in Go packages. A loGo/s form inside its detection, such as a group child, a const view, or `?`, MUST stay inactive in Go [T-102][R-U1].
-The language-neutral rules MUST be `correctness::typed_nil_return` (in Go, the `(*T)(nil)` form only), `correctness::arena_pointer_escape`, `correctness::infinite_recursion`, `correctness::unclosed_io_closer`, `correctness::unbounded_channel_op`, `concurrency::concurrent_multiword_race`, `concurrency::reentrant_withlock_deadlock`, `slop::err_chain_reset`, `slop::discarded_error`, `slop::todo_placeholder`, `complexity::cognitive_overflow`, `perf::large_backing_array_pin`, `perf::time_after_in_loop`, `correctness::printf_misuse`, `suspicious::copy_lock`, `correctness::structtag_malformed`, `suspicious::string_intconv`, `suspicious::self_assignment`, `suspicious::defer_in_loop`, and `correctness::httpresponse` [T-102][R-U1].
+The language-neutral rules MUST be `correctness::typed_nil_return` (in Go, the `(*T)(nil)` form only), `correctness::arena_pointer_escape`, `correctness::infinite_recursion`, `correctness::unclosed_io_closer`, `correctness::unbounded_channel_op`, `concurrency::concurrent_multiword_race`, `concurrency::reentrant_withlock_deadlock`, `slop::err_chain_reset`, `slop::discarded_error`, `complexity::cognitive_overflow`, `perf::large_backing_array_pin`, and `perf::time_after_in_loop` [T-102][R-U1].
+`go vet` owns printf, copylocks, structtag, assign, httpresponse, and stringintconv checks; `logos lint` does not repeat them. [T-102]
 The rules `correctness::nil_deref_unproven`, `correctness::defer_erases_errdefer_state`, `concurrency::unsupervised_goroutine`, `suspicious::unapplied_struct_default`, `suspicious::side_effect_before_sort`, `portability::serialized_unsized_int`, `portability::alias_extension`, and `pedantic::exhaustive_union_switch` MUST NOT apply to Go packages, because each depends on loGo/s syntax, types, or generated code [T-102][R-U1].
 The rule `portability::serialized_unsized_int` guards the generated binary layout of Sec 12.1, which Go packages do not get [T-102][R-U1].
 A Go package MUST get the default group severities, the `logos.toml [lints]` table, and the `//logos:allow(<rule>)` directive of this section, with the cap that the next line states [T-102][R-U1].
@@ -156,7 +157,6 @@ The compiler MUST enforce `concurrency::reentrant_withlock_deadlock` as `forbid`
 The compiler MUST enforce `concurrency::unsupervised_goroutine` as `forbid` against a `go` statement in `.lgo` outside a `go group` block [T-102].
 The compiler MUST enforce `slop::err_chain_reset` as `deny` against formatting of an `error` operand with a verb other than `%w` or against passing of `err.Error()` [T-102].
 The compiler MUST enforce `slop::discarded_error` as `deny` against dropping of an `error` result, except callees with an always-nil-error fact, `fmt.Print*` calls, `fmt.Fprint*` calls to `os.Stdout` or `os.Stderr`, and `bytes.Buffer.Write*` and `strings.Builder.Write*` calls [T-102].
-The compiler MUST enforce `slop::todo_placeholder` as `deny` against TODO or FIXME comments and unimplemented panic stubs in non-test files [T-102].
 The compiler MUST enforce `correctness::unclosed_io_closer` as `deny` against a local `io.Closer` with no deferred close and no transfer out of the function [T-102].
 The compiler MUST enforce `correctness::unbounded_channel_op` as `deny` against a channel operation outside a select with a done case, unless the channel is locally made with constant capacity and send count stays within capacity [T-102].
 The compiler MUST enforce `complexity::cognitive_overflow` as `deny` against nesting depth above 3, parameter count above 4, line count above 60, or cognitive score above 15 [T-102].
@@ -170,13 +170,6 @@ The warnings of `suspicious::unapplied_struct_default`, `suspicious::side_effect
 A `//logos:allow(portability::alias_extension)` directive MUST silence the rule for an alias-extension file only when it sits in the comment block directly above the package clause of that file [T-102].
 The compiler MUST enforce `perf::time_after_in_loop` as `warn` against `time.After` inside a loop body [T-102].
 The compiler MUST enforce `pedantic::exhaustive_union_switch` as `allow` against a `default` clause in a switch over a closed union [T-102].
-The compiler MUST enforce `correctness::printf_misuse` as `forbid` against format verbs mismatched to argument count or types in formatted print calls [T-102].
-The compiler MUST enforce `suspicious::copy_lock` as `warn` against assignment, pass-by-value, or receiver copying of a struct holding a lock [T-102].
-The compiler MUST enforce `correctness::structtag_malformed` as `forbid` against a struct field tag literal not following key-value pairs [T-102].
-The compiler MUST enforce `suspicious::string_intconv` as `warn` against conversion of non-rune non-byte integers to string [T-102].
-The compiler MUST enforce `suspicious::self_assignment` as `warn` against an assignment where left-hand and right-hand expressions resolve to identical storage without side effects [T-102].
-The compiler MUST enforce `suspicious::defer_in_loop` as `warn` against a `defer` statement directly inside a loop body where cleanup delays until function exit [T-102].
-The compiler MUST enforce `correctness::httpresponse` as `forbid` against a deferred response `Body.Close()` call directly following an HTTP call before checking for errors [T-102].
 JSON output MUST offer autofix candidates for optional chaining with default, early-return guard, split of a misplaced `?`, verb fix to `%w`, and addition of `?` in an error-returning function [T-102].
 JSON output for a Go package MUST offer only the verb fix to `%w`, because the other candidates name loGo/s syntax [T-102][R-U1].
 
@@ -1317,13 +1310,7 @@ Each key MUST take effect in the milestone that reads it. [T-Sec10]
 
 ### 10.2 Project table
 
-The project table holds name, edition, and strict_files. [T-Sec10]
-name is a string. [T-Sec10]
-name MUST NOT be empty; an empty name fails with `logos.toml:<line>:<col>: project name must not be empty`. [T-Sec10]
-name is informational: two builds that differ only in name MUST produce identical binaries. [T-Sec10]
-edition is a string with default "2026". [T-Sec10]
-edition selects the language rules of this spec, and "2026" is the only valid value. [T-Sec10]
-Any other edition MUST fail with `logos.toml:<line>:<col>: unsupported edition "<value>" (want "2026")`. [T-Sec10]
+The project table holds strict_files. [T-Sec10]
 strict_files is a string array. [T-Sec10]
 strict_files lists the loGo/s extensions that the module enables, and its default is all four. [T-Sec10][T-101.1]
 A source file whose loGo/s extension is not listed MUST fail with `[correctness::extension_not_enabled] <file>: extension <ext> is not enabled by logos.toml strict_files`. [T-Sec10][T-101.1]
@@ -1357,8 +1344,7 @@ A true value enables the Tier-0 arena experiment for Go packages and loGo/s pack
 
 ### 10.4 Capabilities table
 
-The capabilities table holds five severity keys and four allowlist keys. [T-Sec10]
-direct_reflect is a string with default "deny". [T-Sec10]
+The capabilities table holds four severity keys and four allowlist keys. [T-Sec10]
 transitive_reflect is a string with default "warn". [T-Sec10]
 transitive_exec, transitive_net, and transitive_unsafe are strings with default "deny". [T-Sec10]
 Each severity key MUST be one of "deny", "warn", or "allow". [T-Sec10]
@@ -1877,12 +1863,6 @@ m.WithLock(func(c *Config) {
 
 - `logos test -O=1 std cmd`, `logos test -O=2 std cmd`, and `logos test -O=3 std cmd` MUST all pass without `-short` on the full unmodified `std` and `cmd` suites. [T-Sec22]
 - The upstream test suite that `./run.bash` runs MUST pass under plain `go` as the regression floor for Go semantics. [T-Sec22][T-0.1]
-
-### 22.2 Eject round-trip fuzzing
-
-- The eject round-trip suite MUST run each generated `.lgo` program with `logos run` and with `go run` after eject. [T-Sec22]
-- It MUST compare stdout, exit code, and stderr with stack-frame lines removed. [T-Sec22]
-- Routine runs MUST cover 1,000 generated programs and full runs MUST cover 10,000. [T-Sec22]
 
 ### 22.3 Red-team completeness
 
