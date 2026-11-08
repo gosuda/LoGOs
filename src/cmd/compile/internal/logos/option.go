@@ -1468,7 +1468,7 @@ func (fl *fileLower) lowerOptCallExpr(e *syntax.CallExpr) syntax.Expr {
 	}
 	for i, a := range e.ArgList {
 		la := fl.lowerOptExpr(a)
-		if targets != nil && i < len(targets) {
+		if targets != nil {
 			la = fl.wrapKnown(la, fl.optType(a), targets[i])
 		}
 		e.ArgList[i] = la
@@ -1962,21 +1962,15 @@ func (fl *fileLower) lowerOptAssign(s *syntax.AssignStmt) {
 		}
 		return
 	}
-	if s.Rhs == nil {
+	if s.Rhs == nil || s.Op != 0 {
 		if name, ok := syntax.Unparen(s.Lhs).(*syntax.Name); ok {
 			s.Lhs = fl.narrowAccess(name)
 		} else {
 			fl.lowerOptLHS(s.Lhs)
 		}
-		return
-	}
-	if s.Op != 0 {
-		if name, ok := syntax.Unparen(s.Lhs).(*syntax.Name); ok {
-			s.Lhs = fl.narrowAccess(name)
-		} else {
-			fl.lowerOptLHS(s.Lhs)
+		if s.Rhs != nil {
+			s.Rhs = fl.lowerOptExpr(s.Rhs)
 		}
-		s.Rhs = fl.lowerOptExpr(s.Rhs)
 		return
 	}
 	lhs, _ := unlist(s.Lhs)
@@ -2173,10 +2167,8 @@ func (fl *fileLower) lowerOptVarValues(names []*syntax.Name, typ, vals syntax.Ex
 	targets := make([]types2.Type, len(names))
 	for i, name := range names {
 		if obj := fl.pkg.info.Defs[name]; obj != nil {
-			switch obj := obj.(type) {
-			case *types2.Var:
-				targets[i] = obj.Type()
-			case *types2.Const:
+			switch obj.(type) {
+			case *types2.Var, *types2.Const:
 				targets[i] = obj.Type()
 			}
 		}
