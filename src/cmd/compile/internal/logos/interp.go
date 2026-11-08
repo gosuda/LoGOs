@@ -148,14 +148,9 @@ func (fl *fileLower) collectInterpKinds() {
 	})
 }
 
-// lowerInterp lowers every interpolated string of one file, innermost
-// first: an outer whole-span replacement would otherwise overlap the
-// splices of any inner interpolation it contains. Kinds come from the
-// collectInterpKinds pre-pass; operand texts drain through textOf, which
-// absorbs the inner whole-span splice of any nested literal.
-func (fl *fileLower) lowerInterp() {
+func interpLitsUnder(root syntax.Node) []*syntax.InterpExpr {
 	var lits []*syntax.InterpExpr
-	syntax.Inspect(fl.file, func(n syntax.Node) bool {
+	syntax.Inspect(root, func(n syntax.Node) bool {
 		if e, ok := n.(*syntax.InterpExpr); ok {
 			lits = append(lits, e)
 		}
@@ -164,11 +159,20 @@ func (fl *fileLower) lowerInterp() {
 	slices.SortFunc(lits, func(a, b *syntax.InterpExpr) int {
 		return len(a.Raw) - len(b.Raw)
 	})
+	return lits
+}
+
+// lowerInterp lowers every interpolated string of one file, innermost
+// first: an outer whole-span replacement would otherwise overlap the
+// splices of any inner interpolation it contains. Kinds come from the
+// collectInterpKinds pre-pass; operand texts drain through textOf, which
+// absorbs the inner whole-span splice of any nested literal.
+func (fl *fileLower) lowerInterp() {
 	// Scoped capture pre-lowering (D4, D7) credits its import needs
 	// here, so the flush below still runs once even when every
 	// interpolation was pre-lowered.
 	needConv, needUnsafe := fl.interpNeedConv, fl.interpNeedUnsafe
-	for _, e := range lits {
+	for _, e := range interpLitsUnder(fl.file) {
 		kinds := interpKinds[e]
 		delete(interpKinds, e)
 		if kinds == nil && len(e.Exprs) > 0 && base.Errors() > 0 {
@@ -183,12 +187,7 @@ func (fl *fileLower) lowerInterp() {
 	fl.flushInterpImports(needConv, needUnsafe)
 }
 
-// replaceInterpExprs replaces the *syntax.InterpExpr that n holds
-// directly, as a field or as an element of a list field, with repl of
-// it. It mirrors replaceSwitchExprs: the caller walks the whole tree
-// (lowerInterpLit) and lowers innermost first, so replacements never
-// nest inside a pending whole-span splice.
-func replaceInterpExprs(n syntax.Node, repl func(*syntax.InterpExpr) syntax.Expr) {
+func replaceFieldExprs(n syntax.Node, interfaceField func(reflect.Type) bool, repl func(syntax.Expr) syntax.Expr) {
 	v := reflect.ValueOf(n)
 	if v.Kind() != reflect.Pointer || v.IsNil() {
 		return
@@ -200,27 +199,35 @@ func replaceInterpExprs(n syntax.Node, repl func(*syntax.InterpExpr) syntax.Expr
 	typ := v.Type()
 	for i := range v.NumField() {
 		if typ.Field(i).IsExported() {
-			replaceInterpField(v.Field(i), repl)
+			replaceFieldExpr(v.Field(i), interfaceField, repl)
 		}
 	}
 }
 
-// replaceInterpField replaces an *syntax.InterpExpr held by the
-// interface value f, or by an element of the slice or array f.
-func replaceInterpField(f reflect.Value, repl func(*syntax.InterpExpr) syntax.Expr) {
+func replaceFieldExpr(f reflect.Value, interfaceField func(reflect.Type) bool, repl func(syntax.Expr) syntax.Expr) {
 	switch f.Kind() {
 	case reflect.Interface:
-		if f.IsNil() || !f.CanSet() {
+		if f.IsNil() || !f.CanSet() || !interfaceField(f.Type()) {
 			return
 		}
-		if e, ok := f.Elem().Interface().(*syntax.InterpExpr); ok {
-			f.Set(reflect.ValueOf(repl(e)))
+		e, ok := f.Elem().Interface().(syntax.Expr)
+		if !ok {
+			return
 		}
+		f.Set(reflect.ValueOf(repl(e)))
 	case reflect.Slice, reflect.Array:
 		for i := range f.Len() {
-			replaceInterpField(f.Index(i), repl)
+			replaceFieldExpr(f.Index(i), interfaceField, repl)
 		}
 	}
+}
+
+func exprTypeFields(t reflect.Type) bool {
+	return t == exprType
+}
+
+func anyInterfaceFields(t reflect.Type) bool {
+	return true
 }
 
 // lowerInterpExpr lowers one interpolation, returning whether it needed
@@ -422,18 +429,18 @@ func (fl *fileLower) lowerInterpExpr(e *syntax.InterpExpr, kinds []types2.LogosI
 }
 
 // replaceInterpLit swaps one interpolation for its lowered native form
-// wherever it sits in the file: replaceInterpExprs only sees direct
+// wherever it sits in the file: replaceFieldExprs only sees direct
 // children, so this walks the whole tree like lowerUnions does.
 func (fl *fileLower) replaceInterpLit(e *syntax.InterpExpr, native syntax.Expr) {
 	syntax.Inspect(fl.file, func(n syntax.Node) bool {
 		if n == nil {
 			return true
 		}
-		replaceInterpExprs(n, func(target *syntax.InterpExpr) syntax.Expr {
-			if target != e {
-				return target
+		replaceFieldExprs(n, anyInterfaceFields, func(x syntax.Expr) syntax.Expr {
+			if t, ok := x.(*syntax.InterpExpr); ok && t == e {
+				return native
 			}
-			return native
+			return x
 		})
 		return true
 	})

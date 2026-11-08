@@ -6,7 +6,6 @@ package logos
 
 import (
 	"go/token"
-	"reflect"
 
 	"cmd/compile/internal/base"
 	"cmd/compile/internal/syntax"
@@ -31,48 +30,14 @@ func (fl *fileLower) lowerAddrFresh() {
 		if n == nil {
 			return true
 		}
-		replaceAddrFresh(n, fresh, fl.lowerAddrOp)
+		replaceFieldExprs(n, anyInterfaceFields, func(x syntax.Expr) syntax.Expr {
+			if op, ok := x.(*syntax.Operation); ok && op.Op == syntax.And && fresh[op] {
+				return fl.lowerAddrOp(op)
+			}
+			return x
+		})
 		return true
 	})
-}
-
-// replaceAddrFresh replaces each recorded fresh `&` operation held
-// directly by n with repl of it. The caller walks n's children after
-// the call, so nested operations lower inside out through input-ordered
-// splices.
-func replaceAddrFresh(n syntax.Node, fresh map[syntax.Expr]bool, repl func(*syntax.Operation) syntax.Expr) {
-	v := reflect.ValueOf(n)
-	if v.Kind() != reflect.Pointer || v.IsNil() {
-		return
-	}
-	v = v.Elem()
-	if v.Kind() != reflect.Struct {
-		return
-	}
-	typ := v.Type()
-	for i := range v.NumField() {
-		if typ.Field(i).IsExported() {
-			replaceAddrField(v.Field(i), fresh, repl)
-		}
-	}
-}
-
-// replaceAddrField replaces a recorded fresh `&` operation held by the
-// interface value f, or by an element of the slice or array f.
-func replaceAddrField(f reflect.Value, fresh map[syntax.Expr]bool, repl func(*syntax.Operation) syntax.Expr) {
-	switch f.Kind() {
-	case reflect.Interface:
-		if f.IsNil() || !f.CanSet() {
-			return
-		}
-		if op, ok := f.Elem().Interface().(*syntax.Operation); ok && op.Op == syntax.And && fresh[op] {
-			f.Set(reflect.ValueOf(repl(op)))
-		}
-	case reflect.Slice, reflect.Array:
-		for i := range f.Len() {
-			replaceAddrField(f.Index(i), fresh, repl)
-		}
-	}
 }
 
 // lowerAddrOp lowers one fresh `&expr` to `new(expr)`.
