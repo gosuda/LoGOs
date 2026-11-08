@@ -127,6 +127,7 @@ func emitOwnedHelpers(plan *ejectPlan, staging, out string, ejected map[string]s
 		if err := os.WriteFile(d.dst, d.fixed, 0666); err != nil {
 			return false, fmt.Errorf("write owned helper: %v", err)
 		}
+		queueEjectGofmt(d.dst)
 	}
 	return usedRT, nil
 }
@@ -552,7 +553,7 @@ func ownedResolveGroup(plan *ejectPlan, dir string, dests []*ownedDest) ([]*owne
 		emitOne := func(rep *ownedDest, cond constraint.Expr, test bool) error {
 			header := ownedRenderHeader(cond)
 			finalSource := header + body
-			fixed, uses, ok := convertGoFile([]byte(finalSource))
+			fixed, uses, ok := remapEjectedFile([]byte(finalSource), "")
 			if !ok {
 				return fmt.Errorf("helper %s does not parse after condition merge", rep.req.ID)
 			}
