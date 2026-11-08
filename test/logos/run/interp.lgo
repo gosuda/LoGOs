@@ -46,6 +46,7 @@ func main() {
 	n := 3
 	fmt.Println($"User {name} has {n} items")
 	fmt.Println($"{{secret}}")
+	fmt.Println($"a{{b}}c")
 	fmt.Println($"{"shown"}")
 	fmt.Println($"n={42} t={"lit"} f={1.5} b={true}")
 	fmt.Println($"u={uint(7)} u8={uint8(8)} i8={int8(-8)} f32={float32(1.25)}")

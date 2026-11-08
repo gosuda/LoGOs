@@ -89,3 +89,10 @@ func badNest(x T??, y int) { // ERROR syntax error: T\?\? is not allowed; use \(
 func badSel(x int) {
 	_ = x?.
 } // ERROR syntax error: unexpected \}, expected name after \?\.
+func badLambdaHead(a int) {
+	_ = (a + 1) => a // ERROR lambda parameters must be names
+}
+
+func parenthesizedExpression(a int) {
+	_ = (a + 1)
+}
