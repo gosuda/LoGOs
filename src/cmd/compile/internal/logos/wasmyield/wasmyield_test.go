@@ -7,6 +7,7 @@ package wasmyield
 import (
 	"testing"
 
+	"cmd/compile/internal/ir"
 	"cmd/compile/internal/base"
 	"cmd/compile/internal/logos/facts"
 	"cmd/internal/goobj"
@@ -203,5 +204,29 @@ func TestMergeFnsKeepsOtherFlags(t *testing.T) {
 	}
 	if got[1].Object != "G" || got[1].MayYield || !got[1].HasMayYield {
 		t.Errorf("G = %+v, want MayYield=0", got[1])
+	}
+}
+
+func TestAddCallYieldSources(t *testing.T) {
+	resetUnits(t)
+	callee := internalSym("p.callee")
+	u := &unit{}
+	u.addCall(obj.Addr{Type: obj.TYPE_MEM, Sym: callee})
+	if len(u.calls) != 1 || u.calls[0] != callee || u.hard {
+		t.Fatalf("direct call: calls=%v hard=%v", u.calls, u.hard)
+	}
+	u.addCall(obj.Addr{Type: obj.TYPE_MEM, Sym: ir.Syms.Deferreturn})
+	if !u.hard {
+		t.Fatal("deferreturn must be a yield source")
+	}
+	v := &unit{}
+	v.addCall(obj.Addr{Type: obj.TYPE_MEM})
+	if !v.hard {
+		t.Fatal("missing callee must be a yield source")
+	}
+	w := &unit{}
+	w.addCall(obj.Addr{Type: obj.TYPE_NONE, Sym: callee})
+	if !w.hard {
+		t.Fatal("indirect call must be a yield source")
 	}
 }
