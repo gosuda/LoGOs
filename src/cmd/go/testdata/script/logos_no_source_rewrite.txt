@@ -1,0 +1,29 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+mkdir $WORK/orig
+cp main.lgo $WORK/orig/main.lgo
+cp go.mod $WORK/orig/go.mod
+
+logos build .
+logos lint .
+logos context 'example.com/readonly#Main'
+logos eject -o out
+
+cmp main.lgo $WORK/orig/main.lgo
+cmp go.mod $WORK/orig/go.mod
+exists out/main.go
+
+-- go.mod --
+module example.com/readonly
+
+go 1.27
+
+-- main.lgo --
+package main
+
+import "fmt"
+
+func Main() string { return "unchanged" }
+
+func main() { fmt.Println(Main()) }
