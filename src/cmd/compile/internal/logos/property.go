@@ -400,17 +400,11 @@ type propNeedle struct {
 	temp       string
 }
 
-// propPiece is one hoisted statement; its eject text renders from the
-// statement at composition time.
-type propPiece struct {
-	stmt syntax.Stmt
-}
-
 // propHoist collects the write-back temporaries of one statement: the
 // prelude statements before it and the write-backs after it.
 type propHoist struct {
-	pres  []propPiece
-	posts []propPiece
+	pres  []syntax.Stmt
+	posts []syntax.Stmt
 }
 
 // propCollect gathers one expression walk: every nested property read
@@ -762,19 +756,15 @@ func propNeedsWriteBack(info *types2.Info, sel *syntax.SelectorExpr) bool {
 // prelude builds the prelude statements for one hoisted property value:
 // the receiver pin when the receiver is not trivial, then the temporary
 // holding the Get result. Texts compose at statement level.
-func (t propTemp) prelude() []propPiece {
+func (t propTemp) prelude() []syntax.Stmt {
 	if t.pin == "" {
-		return []propPiece{{
-			stmt: defineOf(t.pos, []syntax.Expr{nameOf(t.pos, t.temp)}, []syntax.Expr{t.getCall(t.recv)}),
-		}}
+		return []syntax.Stmt{
+			defineOf(t.pos, []syntax.Expr{nameOf(t.pos, t.temp)}, []syntax.Expr{t.getCall(t.recv)}),
+		}
 	}
-	return []propPiece{
-		{
-			stmt: defineOf(t.pos, []syntax.Expr{nameOf(t.pos, t.pin)}, []syntax.Expr{t.recv}),
-		},
-		{
-			stmt: defineOf(t.pos, []syntax.Expr{nameOf(t.pos, t.temp)}, []syntax.Expr{t.getCall(nameOf(t.pos, t.pin))}),
-		},
+	return []syntax.Stmt{
+		defineOf(t.pos, []syntax.Expr{nameOf(t.pos, t.pin)}, []syntax.Expr{t.recv}),
+		defineOf(t.pos, []syntax.Expr{nameOf(t.pos, t.temp)}, []syntax.Expr{t.getCall(nameOf(t.pos, t.pin))}),
 	}
 }
 
@@ -785,14 +775,12 @@ func (t propTemp) getCall(recv syntax.Expr) syntax.Expr {
 
 // writeBack builds the write-back statement `R.Logos_SetF(_t)`, spelling
 // the receiver through the pin when one exists.
-func (t propTemp) writeBack() propPiece {
+func (t propTemp) writeBack() syntax.Stmt {
 	base := t.recv
 	if t.pin != "" {
 		base = nameOf(t.pos, t.pin)
 	}
-	return propPiece{
-		stmt: exprStmtOf(t.pos, callOf(t.pos, selOf(t.pos, base, "Logos_Set"+t.pr.Name), []syntax.Expr{nameOf(t.pos, t.temp)})),
-	}
+	return exprStmtOf(t.pos, callOf(t.pos, selOf(t.pos, base, "Logos_Set"+t.pr.Name), []syntax.Expr{nameOf(t.pos, t.temp)}))
 }
 
 // lowerPropBlock rewrites one statement list, splicing hoisted property
@@ -1201,28 +1189,28 @@ func (fl *fileLower) finishPropReplace(c *propCollect, sp span, mains []syntax.S
 	subs := fl.propSubstitutions(c.needles)
 	var texts []otext
 	var out []syntax.Stmt
-	for _, p := range c.hoist.pres {
-		texts = append(texts, propSubstText(gen(fl.propPieceText(p)), subs))
-		out = append(out, p.stmt)
+	for _, st := range c.hoist.pres {
+		texts = append(texts, propSubstText(gen(fl.propStmtText(st)), subs))
+		out = append(out, st)
 	}
 	for i, m := range mains {
 		texts = append(texts, propSubstText(mainTexts[i], subs))
 		out = append(out, m)
 	}
-	for _, p := range c.hoist.posts {
-		texts = append(texts, propSubstText(gen(fl.propPieceText(p)), subs))
-		out = append(out, p.stmt)
+	for _, st := range c.hoist.posts {
+		texts = append(texts, propSubstText(gen(fl.propStmtText(st)), subs))
+		out = append(out, st)
 	}
 	fl.addT(sp.start, sp.end, joinO(texts, "; "))
 	return out
 }
 
-// propPieceText renders one hoisted statement for eject text. The nodes
+// propStmtText renders one hoisted statement for eject text. The nodes
 // are synthetic but fully positioned, so the printer output is stable;
 // any property needles inside were substituted by the caller.
-func (fl *fileLower) propPieceText(p propPiece) string {
+func (fl *fileLower) propStmtText(st syntax.Stmt) string {
 	var buf bytes.Buffer
-	_, _ = syntax.Fprint(&buf, p.stmt, 0)
+	_, _ = syntax.Fprint(&buf, st, 0)
 	return buf.String()
 }
 
@@ -1276,9 +1264,7 @@ func (fl *fileLower) lowerPropCompound(s *syntax.AssignStmt, recv syntax.Expr, p
 	pin := ""
 	if !propTrivialRecv(recv) {
 		pin = propPinName(fl.off(mustPropSel(fl, s.Lhs).Sel.Pos()))
-		c.hoist.pres = append(c.hoist.pres, propPiece{
-			stmt: defineOf(pos, []syntax.Expr{nameOf(pos, pin)}, []syntax.Expr{recv}),
-		})
+		c.hoist.pres = append(c.hoist.pres, defineOf(pos, []syntax.Expr{nameOf(pos, pin)}, []syntax.Expr{recv}))
 	}
 	valueText := gen("1")
 	if rhs != nil {
@@ -1324,7 +1310,7 @@ func mustPropSel(fl *fileLower, e syntax.Expr) *syntax.SelectorExpr {
 // each property target becomes a fresh temporary declared up front,
 // and a Set call after the assignment writes it back.
 func (fl *fileLower) lowerPropMulti(s *syntax.AssignStmt, lhs []syntax.Expr, roots []int) []syntax.Stmt {
-	sps, spOK := fl.propStmtSpan(s, lhs[0])
+	sp, spOK := fl.propStmtSpan(s, lhs[0])
 	c := &propCollect{hoist: &propHoist{}}
 	for i, l := range lhs {
 		if slices.Contains(roots, i) {
@@ -1348,7 +1334,6 @@ func (fl *fileLower) lowerPropMulti(s *syntax.AssignStmt, lhs []syntax.Expr, roo
 		fl.emitPropReads(c)
 		return []syntax.Stmt{s}
 	}
-	sp := sps
 	pos := s.Pos()
 	// Target spans precede retargeting: replacing a target plants the
 	// temporary's statement position, which a later leftmost lookup
@@ -1384,19 +1369,13 @@ func (fl *fileLower) lowerPropMulti(s *syntax.AssignStmt, lhs []syntax.Expr, roo
 		setBase := recv
 		if !propTrivialRecv(recv) {
 			pin := temp + "r"
-			c.hoist.pres = append(c.hoist.pres, propPiece{
-				stmt: defineOf(pos, []syntax.Expr{nameOf(pos, pin)}, []syntax.Expr{recv}),
-			})
+			c.hoist.pres = append(c.hoist.pres, defineOf(pos, []syntax.Expr{nameOf(pos, pin)}, []syntax.Expr{recv}))
 			setBase = nameOf(pos, pin)
 		}
-		c.hoist.pres = append(c.hoist.pres, propPiece{
-			stmt: at(&syntax.DeclStmt{DeclList: []syntax.Decl{
-				at(&syntax.VarDecl{NameList: []*syntax.Name{nameOf(pos, temp)}, Type: typ}, pos),
-			}}, pos),
-		})
-		c.hoist.posts = append(c.hoist.posts, propPiece{
-			stmt: exprStmtOf(pos, callOf(pos, selOf(pos, setBase, "Logos_Set"+pr.Name), []syntax.Expr{nameOf(pos, temp)})),
-		})
+		c.hoist.pres = append(c.hoist.pres, at(&syntax.DeclStmt{DeclList: []syntax.Decl{
+			at(&syntax.VarDecl{NameList: []*syntax.Name{nameOf(pos, temp)}, Type: typ}, pos),
+		}}, pos))
+		c.hoist.posts = append(c.hoist.posts, exprStmtOf(pos, callOf(pos, selOf(pos, setBase, "Logos_Set"+pr.Name), []syntax.Expr{nameOf(pos, temp)})))
 		fl.propRetarget(s, i, temp)
 		lhsTexts[i] = gen(temp)
 	}
@@ -1460,7 +1439,7 @@ func (fl *fileLower) lowerPropExprStmt(s *syntax.ExprStmt) []syntax.Stmt {
 	if propSelIsField(fl.pkg.info, sel) || targ {
 		return fl.lowerPropCallArgs(s, call)
 	}
-	sps, spOK := fl.propStmtSpan(s, s.X)
+	sp, spOK := fl.propStmtSpan(s, s.X)
 	c := &propCollect{hoist: &propHoist{}}
 	temp := fl.hoistPropCall(c, propSite{sel: sel, recv: recv, pr: pr, inner: inner})
 	fl.propWalkArgs(call.ArgList, c)
@@ -1468,7 +1447,6 @@ func (fl *fileLower) lowerPropExprStmt(s *syntax.ExprStmt) []syntax.Stmt {
 		fl.emitPropReads(c)
 		return []syntax.Stmt{s}
 	}
-	sp := sps
 	args := make([]otext, 0, len(call.ArgList))
 	for _, a := range call.ArgList {
 		// A trailing `...` scans as part of the last argument, so
@@ -1486,7 +1464,7 @@ func (fl *fileLower) lowerPropExprStmt(s *syntax.ExprStmt) []syntax.Stmt {
 // lowerPropCallArgs collects hoists through a call that keeps its shape,
 // replacing the statement only when temporaries hoist around it.
 func (fl *fileLower) lowerPropCallArgs(s *syntax.ExprStmt, call *syntax.CallExpr) []syntax.Stmt {
-	sps, spOK := fl.propStmtSpan(s, s.X)
+	sp, spOK := fl.propStmtSpan(s, s.X)
 	c := &propCollect{hoist: &propHoist{}}
 	s.X = fl.propWalk(s.X, c)
 	if len(c.hoist.pres) == 0 && len(c.hoist.posts) == 0 && !propNeedlesNest(c.needles) {
@@ -1497,7 +1475,6 @@ func (fl *fileLower) lowerPropCallArgs(s *syntax.ExprStmt, call *syntax.CallExpr
 		fl.emitPropReads(c)
 		return []syntax.Stmt{s}
 	}
-	sp := sps
 	main := fl.textOf(sp)
 	subs := fl.propSubstitutions(c.needles)
 	return fl.finishPropReplace(c, sp, []syntax.Stmt{s}, []otext{propSubstText(main, subs)})
@@ -1507,10 +1484,10 @@ func (fl *fileLower) lowerPropCallArgs(s *syntax.ExprStmt, call *syntax.CallExpr
 // hoisting write-back temporaries around the preserved declaration.
 func (fl *fileLower) lowerPropDeclStmt(s *syntax.DeclStmt) []syntax.Stmt {
 	v0 := propDeclValue(s)
-	var sps span
+	var sp span
 	spOK := v0 != nil
 	if spOK {
-		sps, spOK = fl.propStmtSpan(s, v0)
+		sp, spOK = fl.propStmtSpan(s, v0)
 	}
 	c := &propCollect{hoist: &propHoist{}}
 	for _, d := range s.DeclList {
@@ -1526,7 +1503,6 @@ func (fl *fileLower) lowerPropDeclStmt(s *syntax.DeclStmt) []syntax.Stmt {
 		fl.emitPropReads(c)
 		return []syntax.Stmt{s}
 	}
-	sp := sps
 	main := fl.textOf(sp)
 	subs := fl.propSubstitutions(c.needles)
 	return fl.finishPropReplace(c, sp, []syntax.Stmt{s}, []otext{propSubstText(main, subs)})
@@ -1546,7 +1522,7 @@ func propDeclValue(s *syntax.DeclStmt) syntax.Expr {
 // lowerPropSend rewrites a send statement, hoisting write-back
 // temporaries around the preserved send.
 func (fl *fileLower) lowerPropSend(s *syntax.SendStmt) []syntax.Stmt {
-	sps, spOK := fl.propStmtSpan(s, s.Chan)
+	sp, spOK := fl.propStmtSpan(s, s.Chan)
 	c := &propCollect{hoist: &propHoist{}}
 	s.Chan = fl.propWalk(s.Chan, c)
 	s.Value = fl.propWalk(s.Value, c)
@@ -1558,7 +1534,6 @@ func (fl *fileLower) lowerPropSend(s *syntax.SendStmt) []syntax.Stmt {
 		fl.emitPropReads(c)
 		return []syntax.Stmt{s}
 	}
-	sp := sps
 	main := fl.textOf(sp)
 	subs := fl.propSubstitutions(c.needles)
 	return fl.finishPropReplace(c, sp, []syntax.Stmt{s}, []otext{propSubstText(main, subs)})
