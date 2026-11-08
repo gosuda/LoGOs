@@ -75,63 +75,25 @@ type rodataVar struct {
 // markRodataVar records an in-place lowering-created var; emitRodata adds
 // its eject marker line.
 func (fl *fileLower) markRodataVar(vd *syntax.VarDecl, v ctfe.Value) {
-	if rodataStaticValue(v) {
-		fl.rodataVars = append(fl.rodataVars, rodataVar{vd: vd, splice: true})
-	}
+	fl.markRodata(vd, v, true)
 }
 
 // markRodataMoved records a var moved past its group. insertVarText already
 // wrote its eject marker, so only the backend registration remains.
 func (fl *fileLower) markRodataMoved(vd *syntax.VarDecl, v ctfe.Value) {
+	fl.markRodata(vd, v, false)
+}
+
+func (fl *fileLower) markRodata(vd *syntax.VarDecl, v ctfe.Value, splice bool) {
 	if rodataStaticValue(v) {
-		fl.rodataVars = append(fl.rodataVars, rodataVar{vd: vd})
+		fl.rodataVars = append(fl.rodataVars, rodataVar{vd: vd, splice: splice})
 	}
 }
 
 // rodataStaticValue reports whether v and every type nested in it
 // (slice, array, struct fields, map key and element) avoid maps.
-// Maps keep dynamic initialization until M5-S4 lowers them to static
-// tables. The lowering has already realized the literal, so source
-// spellability does not change static storage eligibility.
 func rodataStaticValue(v ctfe.Value) bool {
 	return rodataStaticType(v.Type(), 0)
-}
-
-// rodataStaticKeptValue reports whether a kept-init value can init a
-// read-only var. The writer substitutes a static value for the kept
-// initializer or the build fails closed; only maps stay dynamic.
-func rodataStaticKeptValue(v ctfe.Value) bool {
-	t := v.Type()
-	return t != nil && rodataStaticKept(t, 0)
-}
-
-func rodataStaticKept(t *ctfe.Type, depth int) bool {
-	if t == nil || depth > 64 {
-		return false
-	}
-	switch t.Kind {
-	case ctfe.KMap:
-		return false
-	case ctfe.KSlice, ctfe.KArray:
-		return rodataStaticKept(t.Elem, depth+1)
-	case ctfe.KStruct:
-		for _, f := range t.Fields {
-			if !rodataStaticKept(f.Type, depth+1) {
-				return false
-			}
-		}
-		return true
-	}
-	return true
-}
-
-// markRodataKept records a kept-init var for read-only placement. The
-// writer substitutes a static value for the kept initializer, so the
-// backend sees static data.
-func (fl *fileLower) markRodataKept(vd *syntax.VarDecl, v ctfe.Value) {
-	if rodataStaticKeptValue(v) {
-		fl.rodataVars = append(fl.rodataVars, rodataVar{vd: vd})
-	}
 }
 
 // rodataStaticType walks a descriptor tree. Depth is bounded because

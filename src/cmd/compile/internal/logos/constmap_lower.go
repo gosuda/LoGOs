@@ -58,7 +58,7 @@ func (g *constMapGen) allName() string    { return g.name + "_all" }
 
 func constMapBearing(vals []ctfe.Value) bool {
 	for _, v := range vals {
-		if !rodataStaticKeptValue(v) {
+		if !rodataStaticValue(v) {
 			return true
 		}
 	}

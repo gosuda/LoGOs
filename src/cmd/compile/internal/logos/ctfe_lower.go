@@ -123,7 +123,7 @@ func (fl *fileLower) lowerCTFEFileList(gst *groupedMoveState) {
 			vd.SetPos(syntax.StartPos(cd))
 			(*list)[i] = vd
 			if r.keepCall {
-				fl.markRodataKept(vd, r.val)
+				fl.markRodataMoved(vd, r.val)
 			} else {
 				fl.markRodataVar(vd, r.val)
 			}
@@ -197,11 +197,7 @@ func (fl *fileLower) moveGroupedVar(cd *syntax.ConstDecl, i int, list *[]syntax.
 	fl.removeAt(list, i)
 	vd := &syntax.VarDecl{NameList: cd.NameList, Type: cd.Type, Values: r.lit}
 	vd.SetPos(syntax.StartPos(cd))
-	if r.keepCall {
-		fl.markRodataKept(vd, r.val)
-	} else {
-		fl.markRodataMoved(vd, r.val)
-	}
+	fl.markRodataMoved(vd, r.val)
 	at := end - 1
 	if tail, ok := gst.fileTails[cd.Group]; ok {
 		at = len(*list)
