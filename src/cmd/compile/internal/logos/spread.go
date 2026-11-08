@@ -6,7 +6,6 @@ package logos
 
 import (
 	"fmt"
-	"reflect"
 
 	"cmd/compile/internal/base"
 	"cmd/compile/internal/syntax"
@@ -183,61 +182,17 @@ func (fl *fileLower) spreadValue(e syntax.Expr) syntax.Expr {
 	}
 	if op, ok := e.(*syntax.Operation); ok && op.Op == syntax.And && op.Y == nil {
 		if c, ok := syntax.Unparen(op.X).(*syntax.CompositeLit); ok && fl.hasSpread(c) {
-			fl.spreadFields(c)
+			replaceFieldExprs(c, exprTypeFields, fl.spreadValue)
 			return fl.spreadAddrOp(op, c)
 		}
 		op.X = fl.spreadValue(op.X)
 		return e
 	}
-	fl.spreadFields(e)
+	replaceFieldExprs(e, exprTypeFields, fl.spreadValue)
 	if c, ok := e.(*syntax.CompositeLit); ok && fl.hasSpread(c) {
 		return fl.spreadValueComposite(c)
 	}
 	return e
-}
-
-// spreadFields rewrites the spreads held directly by n: every field of
-// static type syntax.Expr, []syntax.Expr, or [N]syntax.Expr goes
-// through spreadValue in a value position. Function literal bodies are
-// handled by the caller, never here.
-func (fl *fileLower) spreadFields(n syntax.Node) {
-	v := reflect.ValueOf(n)
-	if v.Kind() != reflect.Pointer || v.IsNil() {
-		return
-	}
-	v = v.Elem()
-	if v.Kind() != reflect.Struct {
-		return
-	}
-	t := v.Type()
-	for i := range v.NumField() {
-		if !t.Field(i).IsExported() {
-			continue
-		}
-		fl.spreadField(v.Field(i), t.Field(i).Type)
-	}
-}
-
-// spreadField rewrites one field of static type ft through spreadValue
-// when it holds expressions.
-func (fl *fileLower) spreadField(v reflect.Value, ft reflect.Type) {
-	if ft == exprType {
-		if v.IsNil() {
-			return
-		}
-		v.Set(reflect.ValueOf(fl.spreadValue(v.Interface().(syntax.Expr))))
-		return
-	}
-	k := ft.Kind()
-	if (k == reflect.Slice || k == reflect.Array) && ft.Elem() == exprType {
-		for i := range v.Len() {
-			ev := v.Index(i)
-			if ev.IsNil() {
-				continue
-			}
-			ev.Set(reflect.ValueOf(fl.spreadValue(ev.Interface().(syntax.Expr))))
-		}
-	}
 }
 
 // spreadBuilder carries one spread literal lowering: the file state,
@@ -258,40 +213,42 @@ type spreadBuilder struct {
 // spreadValueComposite lowers `T{..src}` to an immediately invoked
 // function literal returning T.
 func (fl *fileLower) spreadValueComposite(c *syntax.CompositeLit) syntax.Expr {
-	b := fl.spreadOpen(c)
-	b.body()
-	v := nameOf(b.pos, b.vSpelling)
-	b.native = append(b.native, returnOf(b.pos, []syntax.Expr{v}))
-	b.text = append(b.text, returnOf(b.pos, []syntax.Expr{nameOf(b.pos, b.vSpelling)}))
-	native := callOf(b.pos, at(&syntax.FuncLit{
-		Type: at(&syntax.FuncType{
-			ResultList: []*syntax.Field{at(&syntax.Field{Type: b.nativeType()}, b.pos)},
-		}, b.pos),
-		Body: blockOf(b.pos, b.native),
-	}, b.pos), nil)
-	text := cat(gen("func() "), b.typeText(), gen(" {\n"), renderText(b.text, b.tw.subs), gen("}()"))
-	fl.addT(fl.off(syntax.StartPos(c)), fl.off(c.Rbrace)+1, text)
-	return native
+	return fl.spreadComposite(c, false)
 }
 
 // spreadAddrComposite lowers a spread composite directly under `&` to
 // an immediately invoked function literal returning *T.
 func (fl *fileLower) spreadAddrComposite(c *syntax.CompositeLit) syntax.Expr {
+	return fl.spreadComposite(c, true)
+}
+
+func (fl *fileLower) spreadComposite(c *syntax.CompositeLit, addr bool) syntax.Expr {
 	b := fl.spreadOpen(c)
 	b.body()
-	b.native = append(b.native, returnOf(b.pos, []syntax.Expr{
-		at(&syntax.Operation{Op: syntax.And, X: nameOf(b.pos, b.vSpelling)}, b.pos)}))
-	b.text = append(b.text, returnOf(b.pos, []syntax.Expr{
-		at(&syntax.Operation{Op: syntax.And, X: nameOf(b.pos, b.vSpelling)}, b.pos)}))
+	ret := func() syntax.Expr {
+		v := nameOf(b.pos, b.vSpelling)
+		if addr {
+			return at(&syntax.Operation{Op: syntax.And, X: v}, b.pos)
+		}
+		return v
+	}
+	b.native = append(b.native, returnOf(b.pos, []syntax.Expr{ret()}))
+	b.text = append(b.text, returnOf(b.pos, []syntax.Expr{ret()}))
+	nat := b.nativeType()
+	if addr {
+		nat = at(&syntax.Operation{Op: syntax.Mul, X: nat}, b.pos)
+	}
 	native := callOf(b.pos, at(&syntax.FuncLit{
 		Type: at(&syntax.FuncType{
-			ResultList: []*syntax.Field{at(&syntax.Field{
-				Type: at(&syntax.Operation{Op: syntax.Mul, X: b.nativeType()}, b.pos),
-			}, b.pos)},
+			ResultList: []*syntax.Field{at(&syntax.Field{Type: nat}, b.pos)},
 		}, b.pos),
 		Body: blockOf(b.pos, b.native),
 	}, b.pos), nil)
-	text := cat(gen("func() *"), b.typeText(), gen(" {\n"), renderText(b.text, b.tw.subs), gen("}()"))
+	ptr := ""
+	if addr {
+		ptr = "*"
+	}
+	text := cat(gen("func() "+ptr), b.typeText(), gen(" {\n"), renderText(b.text, b.tw.subs), gen("}()"))
 	fl.addT(fl.off(syntax.StartPos(c)), fl.off(c.Rbrace)+1, text)
 	return native
 }
