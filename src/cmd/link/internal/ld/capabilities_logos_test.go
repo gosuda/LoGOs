@@ -120,17 +120,14 @@ func TestLogosCapSinkName(t *testing.T) {
 		{"runtime.cgocall.abi0", "runtime.cgocall"},
 		{"os.StartProcess", "os.StartProcess"},
 		{"example.com/dep.Init", "example.com/dep.Init"},
-		// Cloned sinks are the same sink as their base (SPEC T-203.4,
-		// T-205, red-team #9): a specialization, a middle-dot comptime
-		// expansion, or a source-level comptime copy must not evade the
-		// audit, in any link mode.
-		{"syscall.Connect·logosspec1", "syscall.Connect"},
+		// Comptime copies are the same sink as their base (SPEC T-205,
+		// red-team #9): a middle-dot expansion or a source-level copy must
+		// not evade the audit, in any link mode.
 		{"syscall.Connect·logosct12", "syscall.Connect"},
-		{"syscall.Connect·logosspec1.abi0", "syscall.Connect"},
+		{"syscall.Connect·logosct1.abi0", "syscall.Connect"},
 		{"example.com/dep.Foo_logosct1", "example.com/dep.Foo"},
-		{"example.com/dep.Bar_logosct1·logosspec2", "example.com/dep.Bar"},
-		{"example.com/dep.Bar·logosspec12_logosct3", "example.com/dep.Bar"},
-		{"reflect.Value.Method·logosspec1", "reflect.Value.Method"},
+		{"example.com/dep.Bar_logosct1.abi0", "example.com/dep.Bar"},
+		{"reflect.Value.Method·logosct1", "reflect.Value.Method"},
 	}
 	for _, tc := range tests {
 		if got := capSinkName(tc.sym); got != tc.want {
@@ -142,7 +139,7 @@ func TestLogosCapSinkName(t *testing.T) {
 func TestLogosCapReflectLookupClone(t *testing.T) {
 	for _, sym := range []string{
 		"reflect.Value.Method",
-		"reflect.Value.Method·logosspec1",
+		"reflect.Value.Method·logosct1",
 		"reflect.Value.MethodByName·logosct2",
 		"reflect.Type.Method.abi0",
 	} {
@@ -150,7 +147,7 @@ func TestLogosCapReflectLookupClone(t *testing.T) {
 			t.Errorf("capIsReflectLookupName(%q) = false, want true", sym)
 		}
 	}
-	if capIsReflectLookupName("example.com/dep.Foo·logosspec1") {
+	if capIsReflectLookupName("example.com/dep.Foo·logosct1") {
 		t.Error("capIsReflectLookupName(dep clone) = true, want false")
 	}
 }

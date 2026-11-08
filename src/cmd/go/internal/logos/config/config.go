@@ -50,8 +50,8 @@ type Project struct {
 }
 
 // Build holds the [build] table: the cgo policy and its allowlist, the
-// optimization level, the synthetic PGO level, the CPU target, the
-// arena experiment, and the collector mode.
+// optimization level, the CPU target, the arena experiment, and the
+// collector mode.
 type Build struct {
 	// Cgo is one of "forbid", "restricted", or "allow". It defaults to "forbid".
 	Cgo string
@@ -59,12 +59,8 @@ type Build struct {
 	CgoSet bool
 	// CgoAllowlist holds path globs enabled under the "restricted" policy.
 	CgoAllowlist []string
-	// OptLevel is one of "O0", "O1", "O2", "O3", "Os", or "Oz". It defaults to "O2".
+	// OptLevel is one of "O0", "O1", "O2", "O3", or "Os". It defaults to "O2".
 	OptLevel string
-	// SyntheticPGO is one of "off", "standard", or "aggressive".
-	SyntheticPGO string
-	// SynthPGOSet reports whether the synthetic_pgo key was present in the file.
-	SynthPGOSet bool
 	// TargetCPU is one of "deterministic", "baseline", or "native". It defaults to "deterministic".
 	TargetCPU string
 	// Arena enables the tier-0 arena experiment (GOEXPERIMENT=logosarena)
@@ -114,8 +110,7 @@ var strictFileExts = []string{".lgo", ".📜", ".⚡", ".ʕ◔ϖ◔ʔ"}
 
 // defaultFile returns the File used when logos.toml (or a table or key) is
 // absent: edition "2026", all four extensions enabled, cgo "forbid" with the
-// key marked absent, opt_level "O2", no synthetic_pgo key, and target_cpu
-// "deterministic".
+// key marked absent, opt_level "O2", and target_cpu "deterministic".
 func defaultFile() *File {
 	return &File{
 		Project: Project{Edition: "2026", StrictFiles: slices.Clone(strictFileExts)},
@@ -194,11 +189,6 @@ func (f *File) Format() []byte {
 	if f.Build.OptLevel != "" && f.Build.OptLevel != "O2" {
 		b.WriteString("opt_level = ")
 		appendQuoted(&b, f.Build.OptLevel)
-		b.WriteByte('\n')
-	}
-	if f.Build.SynthPGOSet {
-		b.WriteString("synthetic_pgo = ")
-		appendQuoted(&b, f.Build.SyntheticPGO)
 		b.WriteByte('\n')
 	}
 	if f.Build.TargetCPU != "" && f.Build.TargetCPU != "deterministic" {

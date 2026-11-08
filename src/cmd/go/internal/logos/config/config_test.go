@@ -123,19 +123,11 @@ var validDocs = []validCase{
 		},
 	},
 	{
-		name: "opt level, synthetic pgo, and target cpu",
-		data: "[build]\nopt_level = \"O3\"\nsynthetic_pgo = \"aggressive\"\ntarget_cpu = \"native\"\n",
+		name: "opt level and target cpu",
+		data: "[build]\nopt_level = \"O3\"\ntarget_cpu = \"native\"\n",
 		want: File{
 			Project: Project{Edition: "2026", StrictFiles: fourExts},
-			Build:   Build{Cgo: "forbid", OptLevel: "O3", SyntheticPGO: "aggressive", SynthPGOSet: true, TargetCPU: "native"},
-		},
-	},
-	{
-		name: "synthetic pgo off tracks presence",
-		data: "[build]\nsynthetic_pgo = \"off\"\n",
-		want: File{
-			Project: Project{Edition: "2026", StrictFiles: fourExts},
-			Build:   Build{Cgo: "forbid", OptLevel: "O2", SyntheticPGO: "off", SynthPGOSet: true, TargetCPU: "deterministic"},
+			Build:   Build{Cgo: "forbid", OptLevel: "O3", TargetCPU: "native"},
 		},
 	},
 	{
@@ -270,12 +262,6 @@ func checkFile(t *testing.T, got *File, want File) {
 	if got.Build.OptLevel != want.Build.OptLevel {
 		t.Errorf("Build.OptLevel = %q, want %q", got.Build.OptLevel, want.Build.OptLevel)
 	}
-	if got.Build.SyntheticPGO != want.Build.SyntheticPGO {
-		t.Errorf("Build.SyntheticPGO = %q, want %q", got.Build.SyntheticPGO, want.Build.SyntheticPGO)
-	}
-	if got.Build.SynthPGOSet != want.Build.SynthPGOSet {
-		t.Errorf("Build.SynthPGOSet = %v, want %v", got.Build.SynthPGOSet, want.Build.SynthPGOSet)
-	}
 	if got.Build.TargetCPU != want.Build.TargetCPU {
 		t.Errorf("Build.TargetCPU = %q, want %q", got.Build.TargetCPU, want.Build.TargetCPU)
 	}
@@ -326,9 +312,8 @@ func TestParseViolations(t *testing.T) {
 		{"invalid strict_files entry", "[project]\nstrict_files = [\".go\"]\n", `logos.toml:2:17: invalid strict_files entry ".go" (want ".lgo", ".📜", ".⚡", or ".ʕ◔ϖ◔ʔ")`},
 		{"empty project name", "[project]\nname = \"\"\n", `logos.toml:2:8: project name must not be empty`},
 		{"unsupported edition", "[project]\nedition = \"2027\"\n", `logos.toml:2:11: unsupported edition "2027" (want "2026")`},
-		{"bare opt level rejected", "[build]\nopt_level = \"3\"\n", `logos.toml:2:13: opt_level must be one of O0, O1, O2, O3, Os, Oz`},
-		{"unknown opt level rejected", "[build]\nopt_level = \"O4\"\n", `logos.toml:2:13: opt_level must be one of O0, O1, O2, O3, Os, Oz`},
-		{"invalid synthetic pgo", "[build]\nsynthetic_pgo = \"turbo\"\n", `logos.toml:2:17: synthetic_pgo must be one of off, standard, aggressive`},
+		{"bare opt level rejected", "[build]\nopt_level = \"3\"\n", `logos.toml:2:13: opt_level must be one of O0, O1, O2, O3, Os`},
+		{"unknown opt level rejected", "[build]\nopt_level = \"O4\"\n", `logos.toml:2:13: opt_level must be one of O0, O1, O2, O3, Os`},
 		{"invalid target cpu", "[build]\ntarget_cpu = \"laptop\"\n", `logos.toml:2:14: target_cpu must be one of deterministic, baseline, native`},
 	}
 	for _, tc := range tests {

@@ -23,10 +23,6 @@ type Site struct {
 	Line int
 }
 
-// Cold marks a branch unlikely. The backend lowers it to BranchUnlikely;
-// it emits no code and costs nothing at run time.
-func Cold() {}
-
 // Join combines two errors, matching errors.Join semantics. The lowering
 // keeps a nil result alone and calls Join only for two non-nil errors.
 func Join(a, b error) error {

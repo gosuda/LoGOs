@@ -831,15 +831,15 @@ func renderCapReport(word, ruleID, dep, sink string, frames []capFrame, help str
 }
 
 // capSinkName normalizes a linker symbol name for sink matching by
-// stripping clone suffixes to the base (SPEC T-203.4, T-205, red-team #9:
-// a cloned sink such as syscall.Connect·logosspec1 or a comptime copy
-// <f>_logosct1 is the same sink as its base) and ABI wrapper suffixes
-// (cgo trampolines and other ABI0 callers reach runtime.cgocall through
-// its .abi0 wrapper, not the bare symbol). Stripping loops to a fixpoint
-// so chained suffixes (<f>_logosct<M>·logosspec<N>.abi0) collapse fully;
-// the link symbol itself keeps the full suffix, so clones stay stable,
-// unique, and resolvable in the symbol table while the audit sees one
-// sink identity across shared, plugin, and internal links.
+// stripping clone suffixes to the base (SPEC T-205, red-team #9:
+// a comptime copy <f>_logosct1 is the same sink as its base) and ABI
+// wrapper suffixes (cgo trampolines and other ABI0 callers reach
+// runtime.cgocall through its .abi0 wrapper, not the bare symbol).
+// Stripping loops to a fixpoint so chained suffixes
+// (<f>_logosct<M>.abi0) collapse fully; the link symbol itself keeps the
+// full suffix, so clones stay stable, unique, and resolvable in the
+// symbol table while the audit sees one sink identity across shared,
+// plugin, and internal links.
 func capSinkName(name string) string {
 	for {
 		next := logosCloneBaseName(name)
@@ -856,10 +856,10 @@ func capSinkName(name string) string {
 }
 
 // capIsReflectLookupName reports whether name, after clone and ABI
-// normalization, names a reflective method-lookup function. Cloned
-// reflect helpers (reflect.Value.Method·logosspec1) are the same lookup
-// point as their base; without normalization a clone would evade the
-// reflective fan-out and capability metadata would not survive cloning.
+// normalization, names a reflective method-lookup function. A comptime
+// copy (reflect.Value.Method·logosct1) is the same lookup point as its
+// base; without normalization a copy would evade the reflective fan-out
+// and capability metadata would not survive copying.
 func capIsReflectLookupName(name string) bool {
 	return slices.Contains(reflectLookupSyms, capSinkName(name))
 }

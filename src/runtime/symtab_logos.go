@@ -14,11 +14,10 @@ import (
 )
 
 // logosCloneBaseName returns the base name with every terminal loGo/s
-// clone suffix stripped (SPEC T-203.4, T-205, red-team #9, #74): the
-// middle-dot infixes ·logosspec and ·logosct and the source-level
-// comptime infix _logosct, each with a nonempty ASCII decimal sequence
-// number, applied repeatedly to a fixpoint (a clone of a comptime copy
-// reads <f>_logosct<M>·logosspec<N>). It mirrors logosCloneBaseName in
+// comptime clone suffix stripped (SPEC T-205, red-team #9, #74): the
+// middle-dot infix ·logosct and the source-level comptime infix _logosct,
+// each with a nonempty ASCII decimal sequence number, applied repeatedly
+// to a fixpoint. It mirrors logosCloneBaseName in
 // cmd/link/internal/ld/pcln_logos.go and the capSinkName normalization in
 // cmd/link/internal/ld/capabilities_logos.go, with values from the single
 // source of truth in internal/abi (Logos*Infix).
@@ -54,7 +53,7 @@ func logosCloneBaseName(name string) string {
 // logosCutCloneInfix cuts one terminal clone infix from s, reporting the
 // base. One table-driven path handles every spelling.
 func logosCutCloneInfix(s string) (string, bool) {
-	infixes := [3]string{abi.LogosSpecDisplayInfix, abi.LogosCtDisplayInfix, abi.LogosCtASCIIInfix}
+	infixes := [2]string{abi.LogosCtDisplayInfix, abi.LogosCtASCIIInfix}
 	for _, infix := range infixes {
 		if len(s) >= len(infix) && s[len(s)-len(infix):] == infix {
 			return s[:len(s)-len(infix)], true

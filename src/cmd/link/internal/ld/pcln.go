@@ -316,14 +316,14 @@ func walkFuncs(ctxt *Link, funcs []loader.Sym, f func(loader.Sym)) {
 // generateFuncnametab creates the function name table. Returns a map of
 // func symbol to the name offset in runtime.funcnamtab.
 //
-// loGo/s clone rule (SPEC T-203.4, T-205, red-team #9, #74): each entry is
+// loGo/s clone rule (SPEC T-205, red-team #9, #74): each entry is
 // logosFuncDisplayName of the full link symbol, so comptime clones
-// (<f>_logosct<N>) and specializations (<f>·logosspec<N>) collapse to the
-// base <f> for traces and FuncForPC. The link symbol and go tool nm keep
-// the full suffix, preserving stable, unique, resolvable clones at link
-// time. This single path serves shared, plugin, and internal links, so
-// capability sink identity (capSinkName strips the same suffixes) and the
-// pclntab display agree in every link mode.
+// (<f>_logosct<N>) collapse to the base <f> for traces and FuncForPC.
+// The link symbol and go tool nm keep the full suffix, preserving stable,
+// unique, resolvable clones at link time. This single path serves shared,
+// plugin, and internal links, so capability sink identity (capSinkName
+// strips the same suffixes) and the pclntab display agree in every link
+// mode.
 func (state *pclntab) generateFuncnametab(ctxt *Link, funcs []loader.Sym) map[loader.Sym]uint32 {
 	nameOffsets := make(map[loader.Sym]uint32, state.nfunc)
 

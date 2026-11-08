@@ -1716,7 +1716,6 @@ func (s *state) stmt(n ir.Node) {
 			s.intrinsicCall(n)
 			return
 		}
-		logosSynthMark(s, n)
 		fallthrough
 
 	case ir.OCALLINTER:

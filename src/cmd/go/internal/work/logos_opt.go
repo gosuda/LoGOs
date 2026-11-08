@@ -43,9 +43,8 @@ func logosAddOptFlag(cmd *base.Command) {
 func logosApplyOpt() {
 	file := logosOptFile()
 	level := logosOptLevel(file)
-	gc, ld := logosFlagsFor(level, logosSynthLevel(file, level))
+	gc := logosFlagsFor(level)
 	forcedGcflags = append(forcedGcflags, gc...)
-	forcedLdflags = append(forcedLdflags, ld...)
 	logosApplyLoopStride()
 	logosApplyTargetCPU(file)
 }
@@ -77,7 +76,7 @@ func logosProgName() string {
 // logosValidOptLevel reports whether level names an accepted -O tier.
 func logosValidOptLevel(level string) bool {
 	switch level {
-	case "0", "1", "2", "3", "s", "z":
+	case "0", "1", "2", "3", "s":
 		return true
 	}
 	return false
@@ -89,7 +88,7 @@ func logosValidOptLevel(level string) bool {
 func logosOptLevel(file *config.File) string {
 	if logosOptFlag != "" {
 		if !logosValidOptLevel(logosOptFlag) {
-			base.Fatalf("%s build: invalid -O level %q (want 0, 1, 2, 3, s, z)", logosProgName(), logosOptFlag)
+			base.Fatalf("%s build: invalid -O level %q (want 0, 1, 2, 3, s)", logosProgName(), logosOptFlag)
 		}
 		return logosOptFlag
 	}
@@ -99,42 +98,19 @@ func logosOptLevel(file *config.File) string {
 	return "1"
 }
 
-// logosSynthLevel resolves the synthetic PGO level to pass as
-// -d=logossynthpgo. An explicit key wins over the per-level default (O2
-// standard, otherwise aggressive), and off maps to no flag. Only the O2
-// and O3 flag sets carry the result: the other levels emit nothing.
-func logosSynthLevel(file *config.File, level string) string {
-	if file != nil && file.Build.SynthPGOSet {
-		if file.Build.SyntheticPGO == "off" {
-			return ""
-		}
-		return file.Build.SyntheticPGO
-	}
-	if level == "2" {
-		return "standard"
-	}
-	return "aggressive"
-}
-
-// logosFlagsFor maps a level to forced compile and link flags. Os and Oz
-// also pass the linker -logos.icf flag.
-func logosFlagsFor(level, synth string) (gc, ld []string) {
-	suffix := ""
-	if synth != "" {
-		suffix = ",logossynthpgo=" + synth
-	}
+// logosFlagsFor maps a level to the forced compile flags.
+func logosFlagsFor(level string) []string {
 	switch level {
 	case "0":
-		gc = []string{"-N", "-l"}
+		return []string{"-N", "-l"}
 	case "2":
-		gc = []string{"-d=inlbudget=120,variablemakethreshold=256" + suffix}
+		return []string{"-d=inlbudget=120,variablemakethreshold=256"}
 	case "3":
-		gc = []string{"-d=inlbudget=400,inlrecursivebudget=80,variablemakethreshold=4096,logosspecialize=1" + suffix}
-	case "s", "z":
-		gc = []string{"-d=inlbudget=15"}
-		ld = []string{"-logos.icf"}
+		return []string{"-d=inlbudget=400,inlrecursivebudget=80,variablemakethreshold=4096"}
+	case "s":
+		return []string{"-d=inlbudget=15"}
 	}
-	return gc, ld
+	return nil
 }
 
 // logosApplyTargetCPU sets GOAMD64 and GOARM64 from target_cpu. An

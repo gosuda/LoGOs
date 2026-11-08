@@ -7,78 +7,65 @@ env GOTOOLCHAIN=local
 logos build -a -x -O=0 .
 stderr '\-N \-l'
 
-# No flag means O2 under logos: inline budget 120, make threshold 256,
-# standard synthetic PGO.
+# No flag means O2 under logos: inline budget 120, make threshold 256.
 logos build -a -x .
-stderr '\-d=inlbudget=120,variablemakethreshold=256,logossynthpgo=standard'
+stderr '\-d=inlbudget=120,variablemakethreshold=256'
 
 # O2 is explicit too.
 logos build -a -x -O=2 .
-stderr '\-d=inlbudget=120,variablemakethreshold=256,logossynthpgo=standard'
+stderr '\-d=inlbudget=120,variablemakethreshold=256'
 
 # O3 raises the inline budget, adds the recursive-cycle budget and the
-# variable-make threshold, turns on specialization and aggressive PGO.
+# variable-make threshold.
 logos build -a -x -O=3 .
-stderr '\-d=inlbudget=400,inlrecursivebudget=80,variablemakethreshold=4096,logosspecialize=1,logossynthpgo=aggressive'
+stderr '\-d=inlbudget=400,inlrecursivebudget=80,variablemakethreshold=4096'
 
 # The same flags apply to a Go module under logos build and go build.
 cd gomod
 logos build -a -x -O=2 .
-stderr '\-d=inlbudget=120,variablemakethreshold=256,logossynthpgo=standard'
+stderr '\-d=inlbudget=120,variablemakethreshold=256'
 go build -a -x -O=2 .
-stderr '\-d=inlbudget=120,variablemakethreshold=256,logossynthpgo=standard'
+stderr '\-d=inlbudget=120,variablemakethreshold=256'
 
 # Plain go without -O keeps the upstream default O1: none of the logos
 # debug flags appear.
 go build -a -x .
 ! stderr 'inlbudget'
 ! stderr 'variablemakethreshold'
-! stderr 'logossynthpgo'
-! stderr 'logosspecialize'
 
 # An invalid level fails under go with the accepted set.
 ! go build -O=4 .
-stderr 'go build: invalid -O level "4" \(want 0, 1, 2, 3, s, z\)'
+stderr 'go build: invalid -O level "4" \(want 0, 1, 2, 3, s\)'
 cd ..
 
-# An invalid level fails under logos with the accepted set.
+# An invalid level fails under logos with the accepted set, and -O=z is
+# no longer an accepted level.
 ! logos build -O=4 .
-stderr 'logos build: invalid -O level "4" \(want 0, 1, 2, 3, s, z\)'
+stderr 'logos build: invalid -O level "4" \(want 0, 1, 2, 3, s\)'
+! logos build -O=z .
+stderr 'logos build: invalid -O level "z" \(want 0, 1, 2, 3, s\)'
 
 # go help build carries no -O text.
 go help build
 ! stdout ' -O[= ]'
 
-# Os and Oz lower the inline budget and fold identical code in the
-# linker: the compile line carries -d=inlbudget=15, the link line carries
-# -logos.icf, and the folded program still runs.
+# Os lowers the inline budget: the compile line carries
+# -d=inlbudget=15, and the program still runs.
 logos build -a -x -O=s .
 stderr '\-d=inlbudget=15'
-stderr 'link .*-logos\.icf'
-! stderr 'logossynthpgo'
 logos run -O=s .
 stdout '^hello$'
-logos build -a -x -O=z .
-stderr '\-d=inlbudget=15'
-stderr 'link .*-logos\.icf'
-logos run -O=z .
-stdout '^hello$'
 
-# Only Os and Oz fold: O2 leaves the link line alone.
-logos build -a -x -O=2 .
-! stderr '\-logos\.icf'
-
-# Os and Oz fold the same way for a Go module under go build.
+# Os lowers the budget the same way for a Go module under go build.
 cd gomod
 go build -a -x -O=s .
 stderr '\-d=inlbudget=15'
-stderr 'link .*-logos\.icf'
 cd ..
 
 # The default level comes from logos.toml [build] opt_level.
 cd o3
 logos build -a -x .
-stderr '\-d=inlbudget=400,inlrecursivebudget=80,variablemakethreshold=4096,logosspecialize=1,logossynthpgo=aggressive'
+stderr '\-d=inlbudget=400,inlrecursivebudget=80,variablemakethreshold=4096'
 # An explicit -O overrides the file.
 logos build -a -x -O=1 .
 ! stderr 'inlbudget'
@@ -87,17 +74,17 @@ cd ..
 # Bare and unknown opt_level spellings fail with file and position.
 cd bad3
 ! logos build .
-stderr 'logos\.toml:5:13: opt_level must be one of O0, O1, O2, O3, Os, Oz'
+stderr 'logos\.toml:5:13: opt_level must be one of O0, O1, O2, O3, Os'
 cd ../badO4
 ! logos build .
-stderr 'logos\.toml:5:13: opt_level must be one of O0, O1, O2, O3, Os, Oz'
+stderr 'logos\.toml:5:13: opt_level must be one of O0, O1, O2, O3, Os'
 cd ..
 
 # File arguments ignore logos.toml: the invalid opt_level is never read
 # and the logos default level applies.
 cd bad3
 logos build -a -x main.lgo
-stderr '\-d=inlbudget=120,variablemakethreshold=256,logossynthpgo=standard'
+stderr '\-d=inlbudget=120,variablemakethreshold=256'
 cd ..
 
 # target_cpu deterministic (the default) selects v3 unless set.

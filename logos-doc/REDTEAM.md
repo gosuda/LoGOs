@@ -10,7 +10,7 @@ Rules: logos-doc/SPEC.md. Status values: planned, tested, satisfied upstream, bl
 | #6 | Block lambda return ambiguity inside map | M6 | test/logos/run/lambda.lgo; test/logos/run/chains.lgo (dblBlock, count with ?) | tested |
 | #7 | Non-nil pointer bypass via arrays maps JSON | M3, M11 | test/logos/run/json_unmarshal_test.lgo; src/internal/types/testdata/logos/nonnil_zero.lgo; src/internal/types/testdata/logos/map_index.lgo | tested |
 | #8 | Go functions returning nil into lgo | M3 | test/logos/run/platform.lgo | tested |
-| #9 | Text cold RVO corrupting debugger output | M7 | test/logos/redteam/attack_009_cold_last_trace_names.lgo (executed 2026-10-28: the fixpoint strip in src/cmd/link/internal/ld/pcln_logos.go:50-79 lands it; the fixture asserts the `·logosct<N>` suffix absent and the base name present, and passes) | tested |
+| #9 | Comptime copy suffix corrupting debugger output | M7 | test/logos/redteam/attack_009_comptime_trace_names.lgo (executed 2026-11-08: the fixpoint strip in src/cmd/link/internal/ld/pcln_logos.go lands it; the fixture asserts the `·logosct<N>` and `_logosct<N>` suffixes absent and the base name present, and passes) | tested |
 | #10 | Exhaustive union switch bypassed via default | M9 | test/logos/lint/exhaustive_union_switch.lgo; src/cmd/go/testdata/script/logos_pedantic_lint.txt | tested |
 | #11 | Async preemption migrating G mid-arena use | M18 | test/logos/redteam/attack_011_preempt_arena_reachable.lgo | tested |
 | #12 | Inline bump allocator corrupting mark bits | M18 | test/logos/codegen/redteam12_bump_scan_guard.lgo | tested |

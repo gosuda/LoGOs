@@ -50,7 +50,6 @@ func checkFiles(m posMap, noders []*noder) (*types2.Package, *types2.Info, map[*
 
 	didMidway := false
 	didLogos := false
-	didSpecialize := false
 	var logosProvenCarry map[string]bool // logos: invocation-local proof carry; see logosSealProvenCarry.
 
 recheck:
@@ -232,13 +231,6 @@ recheck:
 			}
 			// necessary to reset type checking
 			typecheck.Target.Imports = nil
-			goto recheck
-		}
-	}
-
-	if !didSpecialize {
-		didSpecialize = true
-		if logosSpecializeHook(pkg, info, files) { // logos M13-S3 hook: clone specialization, a neutral phase for Go and loGo/s packages.
 			goto recheck
 		}
 	}

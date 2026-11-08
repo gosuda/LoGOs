@@ -31,13 +31,8 @@ import (
 // call wraps the argument expression itself, so the argument is
 // evaluated once, left to right, exactly as before.
 //
-// The clone specializer (specialize.go) is the only consumer that may
-// drop the copy: for a callee whose parameter qualifies it recognizes
-// the CovSlice call, re-proves that the operand's element type
-// implements the interface, and passes the operand to a clone typed
-// with that element. Everywhere else (-O=1, ineligible callees,
-// function values) the copy stays. Nothing here reads the optimization
-// level, so one lowering serves every level.
+// Nothing here reads the optimization level, so one lowering serves
+// every level.
 //
 // The parent wires one call into lower.go, ahead of the passes that
 // rewrite call arguments:

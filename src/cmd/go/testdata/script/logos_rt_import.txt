@@ -47,7 +47,9 @@ import (
 )
 
 func main() {
-	rt.Cold()
+	if err := rt.Join(nil, nil); err != nil {
+		fmt.Println("join:", err)
+	}
 	fmt.Println("rt-ok")
 }
 

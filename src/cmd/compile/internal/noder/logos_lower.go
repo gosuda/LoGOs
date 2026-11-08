@@ -149,8 +149,8 @@ func logosProvenReadonlyMap(pkg *types2.Package) map[string]bool {
 // producer Config and returns it for the invocation-local carry in
 // checkFiles. The carry is nil on the first check and holds THAT first
 // package's map for the lowered recheck and any further rechecks of the
-// same package in THIS checkFiles invocation (midway/specialize stamp the
-// final package so the Writer keeps unqueried proofs). Local to that
+// same package in THIS checkFiles invocation (midway stamps the final
+// package so the Writer keeps unqueried proofs). Local to that
 // invocation only; other packages start nil. No global and no package var:
 // keeping the carry a checkFiles local keeps one package's proofs out of
 // the next package.
