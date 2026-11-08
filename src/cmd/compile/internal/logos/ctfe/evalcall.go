@@ -52,8 +52,7 @@ func (e *evaluator) evalCallMulti(fr *frame, c *syntax.CallExpr) ([]Value, bool,
 	if _, ok := fun.(*syntax.IndexExpr); ok {
 		return nil, false, e.impurity(fr, posOf(c), "generic call in const func")
 	}
-	if lit, ok := fun.(*syntax.FuncLit); ok {
-		_ = lit
+	if _, ok := fun.(*syntax.FuncLit); ok {
 		return nil, false, e.impurity(fr, posOf(c), "function literal in const func")
 	}
 	return nil, false, e.fail(posOf(c), "unsupported call in const evaluation")
@@ -254,9 +253,7 @@ func (e *evaluator) execFor(fr *frame, s *syntax.ForStmt, label string) (flow, e
 			return f, nil
 		}
 		if f.cont != "" && f.cont != unlabeled {
-			if label != "" && f.cont == label {
-				// Matching labeled continue: run post and iterate.
-			} else {
+			if label == "" || f.cont != label {
 				return f, nil
 			}
 		}

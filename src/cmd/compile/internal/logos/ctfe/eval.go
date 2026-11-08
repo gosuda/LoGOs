@@ -205,10 +205,8 @@ func (e *evaluator) execBranch(fr *frame, s *syntax.BranchStmt) (flow, error) {
 		return flow{cont: label}, nil
 	case syntax.Goto:
 		return flow{}, e.impurity(fr, posOf(s), "goto in const func")
-	case syntax.Fallthrough:
-		if e.inSwitch <= 0 {
-			return flow{}, e.fail(posOf(s), "fallthrough outside switch")
-		}
+	}
+	if s.Tok == syntax.Fallthrough && e.inSwitch > 0 {
 		return flow{fall: true}, nil
 	}
 	return flow{}, e.fail(posOf(s), "fallthrough outside switch")
@@ -300,13 +298,11 @@ func (e *evaluator) evalList(fr *frame, e2 syntax.Expr) ([]Value, error) {
 		return out, nil
 	}
 	if c, ok := e2.(*syntax.CallExpr); ok {
-		if vs, multi, err := e.evalCallMulti(fr, c); err != nil {
+		vs, _, err := e.evalCallMulti(fr, c)
+		if err != nil {
 			return nil, err
-		} else if multi {
-			return vs, nil
-		} else {
-			return vs, nil
 		}
+		return vs, nil
 	}
 	v, err := e.evalExpr(fr, e2)
 	if err != nil {
@@ -328,7 +324,7 @@ func (e *evaluator) execAssign(fr *frame, s *syntax.AssignStmt) error {
 		if v.typ != nil && isFloat(v.typ.Kind) {
 			one = FloatValue(1.0, v.typ)
 		} else {
-			one = intValue(big1(), v.typ, true)
+			one = intValue(big.NewInt(1), v.typ, true)
 		}
 		var r Value
 		if s.Op == syntax.Add {
@@ -657,11 +653,8 @@ func (e *evaluator) execIf(fr *frame, s *syntax.IfStmt) (flow, error) {
 
 // execSimple runs an init, condition-post, or short statement.
 func (e *evaluator) execSimple(fr *frame, s syntax.SimpleStmt) (flow, error) {
-	st, ok := s.(syntax.Stmt)
-	if !ok || st == nil {
+	if s == nil {
 		return flow{}, nil
 	}
-	return e.execStmt(fr, st)
+	return e.execStmt(fr, s.(syntax.Stmt))
 }
-
-func big1() *big.Int { return big.NewInt(1) }
