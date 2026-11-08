@@ -67,7 +67,6 @@ func runContext(ctx context.Context, cmd *base.Command, args []string) {
 	compile.Dir = pkg.Dir
 	compile.Stdout = os.Stdout
 	compile.Stderr = os.Stderr
-	compile.Env = os.Environ()
 	if err := compile.Run(); err != nil {
 		base.SetExitStatus(1)
 		base.Exit()
