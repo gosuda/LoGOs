@@ -182,7 +182,7 @@ func newCfExpander(shared *packageLower, files []*syntax.File, src map[*syntax.F
 		if !ok {
 			continue
 		}
-		fl := &fileLower{pkg: shared, file: file, src: data, origSrc: data, orig: len(data), start: lineStarts(data)}
+		fl := &fileLower{pkg: shared, file: file, src: data, orig: len(data), start: lineStarts(data)}
 		fl.srcMap = origBuf(data)
 		f = fl.registerComptime(exp, f)
 	}

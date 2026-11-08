@@ -82,7 +82,6 @@ func Lower(pkg *types2.Package, info *types2.Info, files []*syntax.File, src map
 			pkg:           shared,
 			file:          file,
 			src:           buf,
-			origSrc:       buf,
 			orig:          len(buf),
 			base:          file.Pos().FileBase(),
 			start:         lineStarts(buf),
@@ -154,7 +153,6 @@ type fileLower struct {
 	pkg         *packageLower
 	file        *syntax.File
 	src         []byte
-	origSrc     []byte
 	srcMap      srcBuf
 	orig        int
 	start       []int
@@ -268,18 +266,11 @@ func (fl *fileLower) moveContaining(s span) *chainMove {
 	return best
 }
 
-// moveAtInsertion returns the narrowest moved region strictly holding
-// off, or nil. Insertions on the boundary belong to the enclosing
-// region or file, never to the move.
-func (fl *fileLower) moveAtInsertion(off int) *chainMove {
-	return fl.moveContaining(span{start: off, end: off})
-}
-
 // ownerOfInsertion returns the list holding a zero-width splice at off:
 // the narrowest moved region strictly holding it, else its const for
 // region, else the file.
 func (fl *fileLower) ownerOfInsertion(off int) *[]splice {
-	if m := fl.moveAtInsertion(off); m != nil {
+	if m := fl.moveContaining(span{start: off, end: off}); m != nil {
 		return &m.inner
 	}
 	if r := fl.regionAt(off, off); r != nil {
