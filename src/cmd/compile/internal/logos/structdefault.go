@@ -26,14 +26,11 @@ import (
 func (fl *fileLower) lowerStructDefaults() {
 	stripped := make(map[*syntax.FieldDefault]bool)
 	syntax.Inspect(fl.file, func(n syntax.Node) bool {
-		if st, ok := n.(*syntax.StructType); ok {
-			fl.stripFieldDefaults(st, stripped)
-		}
-		return true
-	})
-	syntax.Inspect(fl.file, func(n syntax.Node) bool {
-		if lit, ok := n.(*syntax.CompositeLit); ok {
-			fl.fillStructDefaults(lit)
+		switch n := n.(type) {
+		case *syntax.StructType:
+			fl.stripFieldDefaults(n, stripped)
+		case *syntax.CompositeLit:
+			fl.fillStructDefaults(n)
 		}
 		return true
 	})
