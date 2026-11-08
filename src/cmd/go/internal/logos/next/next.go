@@ -203,12 +203,10 @@ func scanModule(ctx context.Context, moddir string) *scanState {
 // nextRoots returns the main-module Go packages to convert, sorted.
 func nextRoots(pkgs []*load.Package) []*load.Package {
 	var roots []*load.Package
-	seen := map[*load.Package]bool{}
 	for _, p := range load.PackageList(pkgs) {
-		if !nextRootKeep(p, seen) {
+		if !nextRootKeep(p) {
 			continue
 		}
-		seen[p] = true
 		roots = append(roots, p)
 	}
 	slices.SortFunc(roots, func(a, b *load.Package) int { return cmp.Compare(a.ImportPath, b.ImportPath) })
@@ -216,10 +214,7 @@ func nextRoots(pkgs []*load.Package) []*load.Package {
 }
 
 // nextRootKeep reports whether p is a main-module convertible package.
-func nextRootKeep(p *load.Package, seen map[*load.Package]bool) bool {
-	if seen[p] {
-		return false
-	}
+func nextRootKeep(p *load.Package) bool {
 	if p.Module == nil {
 		return false
 	}
