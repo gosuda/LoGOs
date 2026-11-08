@@ -30,14 +30,6 @@ import (
 // SchemaVersion is the version of the report this package reads.
 const SchemaVersion = "1.0"
 
-// Allocation tiers of Alloc.
-const (
-	TierStack  = "stack"
-	TierArena  = "arena"
-	TierHeap   = "heap"
-	TierRodata = "rodata"
-)
-
 // Site kinds of Site.
 const (
 	SiteTry         = "try"

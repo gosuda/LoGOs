@@ -203,7 +203,7 @@ func TestInlayAllocationBadges(t *testing.T) {
 // report carries it.
 func TestInlayArenaBadge(t *testing.T) {
 	r := &Report{Files: []File{{File: "a.lgo", Allocs: []Alloc{
-		{Position: Position{Line: 3, Character: 4}, Tier: TierArena, Message: "make([]byte, n) does not escape"},
+		{Position: Position{Line: 3, Character: 4}, Tier: "arena", Message: "make([]byte, n) does not escape"},
 	}}}}
 	hs := InlayHints(r, "/w/a.lgo", wholeFile)
 	if len(hs) != 1 || hs[0].Label != "[arena]" || hs[0].Tooltip != "make([]byte, n) does not escape" {
