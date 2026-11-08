@@ -60,6 +60,18 @@ env ZIGLOG=$WORK/zig-c.log
 [cgo] ! go build -o gb1.bin ./gb1
 [cgo] stderr 'build constraints exclude all Go files'
 [cgo] ! exists $WORK/zig-c.log
+[cgo] env GOOS=darwin
+[cgo] env GOARCH=arm64
+[cgo] env CGO_ENABLED=1
+[cgo] env CC=
+[cgo] env ZIGLOG=$WORK/zig-darwin.log
+[cgo] ! logos build -o gb-darwin.bin ./gb1
+[cgo] grep 'cc -target aarch64-macos' $WORK/zig-darwin.log
+[cgo] ! grep 'musl' $WORK/zig-darwin.log
+env GOOS=
+env GOARCH=
+env CGO_ENABLED=
+env CC=
 cd ..
 
 -- zm/go.mod --
