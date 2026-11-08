@@ -723,11 +723,6 @@ type unionPkgState struct {
 // lowering.
 var logosUnionPkgs = make(map[*types2.Package]*unionPkgState)
 
-// unionLower carries the per-file state of the M2-S4 lowering.
-type unionLower struct {
-	fl *fileLower
-}
-
 // logosUnionUses holds, per file under lowering, the unions first named
 // there; the file emits their helpers. lowerUnionMembers drains it.
 var logosUnionUses = make(map[*syntax.File][]*unionUse)
@@ -736,13 +731,12 @@ var logosUnionUses = make(map[*syntax.File][]*unionUse)
 // file, then emits the helpers of the unions the file introduced. Helpers
 // come last, so no walk ever visits generated declarations.
 func (fl *fileLower) lowerUnionMembers() {
-	ul := &unionLower{fl: fl}
-	ul.lowerUnionAsserts()
-	ul.lowerUnionCases()
+	fl.lowerUnionAsserts()
+	fl.lowerUnionCases()
 	uses := logosUnionUses[fl.file]
 	delete(logosUnionUses, fl.file)
 	for _, u := range uses {
-		ul.emitHelpers(u)
+		fl.emitHelpers(u)
 	}
 }
 
@@ -885,11 +879,10 @@ func sanitizeUnionName(text string) string {
 
 // useOf returns the unionUse for t, registering it for helper emission.
 // It returns nil when t is not a lowerable closed union.
-func (ul *unionLower) useOf(t types2.Type, pos syntax.Pos) *unionUse {
+func (fl *fileLower) useOf(t types2.Type, pos syntax.Pos) *unionUse {
 	if t == nil {
 		return nil
 	}
-	fl := ul.fl
 	key := types2.TypeString(t, func(p *types2.Package) string {
 		if p == nil {
 			return ""
@@ -973,8 +966,7 @@ func mustTypeExprsAt(fl *fileLower, texts []string, pos syntax.Pos) []syntax.Exp
 
 // emitHelpers appends the helper triple of u to the file, in the native
 // tree and the eject text.
-func (ul *unionLower) emitHelpers(u *unionUse) {
-	fl := ul.fl
+func (fl *fileLower) emitHelpers(u *unionUse) {
 	pos := fl.file.Pos()
 	fl.needRT = true // _logos_assert_U panics with _logos_rt.UnionAssertionError
 	// Native and eject decls stay paired per helper: native decls carry
@@ -996,9 +988,6 @@ func (ul *unionLower) emitHelpers(u *unionUse) {
 		}, pos)
 	}
 	build := func(utype syntax.Expr, mtypes []syntax.Expr) []syntax.Decl {
-		memberCases := func() []syntax.Expr {
-			return mtypes
-		}
 		isCall := func(x syntax.Expr) *syntax.CallExpr {
 			return callOf(pos, nameOf(pos, u.isName()), []syntax.Expr{x})
 		}
@@ -1014,7 +1003,7 @@ func (ul *unionLower) emitHelpers(u *unionUse) {
 			at(&syntax.SwitchStmt{
 				Tag: at(&syntax.TypeSwitchGuard{X: nameOf(pos, "v")}, pos),
 				Body: []*syntax.CaseClause{at(&syntax.CaseClause{
-					Cases: listOf(pos, memberCases()),
+					Cases: listOf(pos, mtypes),
 					Body:  []syntax.Stmt{returnOf(pos, []syntax.Expr{nameOf(pos, "true")})},
 					Colon: pos,
 				}, pos)},
@@ -1088,16 +1077,15 @@ func (ul *unionLower) emitHelpers(u *unionUse) {
 }
 
 // lowerUnionAsserts rewrites x.(U) and v, ok := x.(U) for closed unions.
-func (ul *unionLower) lowerUnionAsserts() {
-	fl := ul.fl
+func (fl *fileLower) lowerUnionAsserts() {
 	syntax.Inspect(fl.file, func(n syntax.Node) bool {
 		switch n := n.(type) {
 		case *syntax.AssignStmt:
-			ul.lowerCommaOkAssign(n)
+			fl.lowerCommaOkAssign(n)
 		case *syntax.VarDecl:
-			ul.lowerCommaOkVar(n)
+			fl.lowerCommaOkVar(n)
 		}
-		replaceUnionAssertExprs(n, ul.lowerSingleAssert)
+		replaceUnionAssertExprs(n, fl.lowerSingleAssert)
 		return true
 	})
 }
@@ -1117,12 +1105,12 @@ func unparenAssert(e syntax.Expr) (*syntax.AssertExpr, bool) {
 
 // commaOkTarget returns the assertion and union of value when value is a
 // single x.(U) naming a lowerable closed union.
-func (ul *unionLower) commaOkTarget(value syntax.Expr) (*syntax.AssertExpr, *unionUse) {
+func (fl *fileLower) commaOkTarget(value syntax.Expr) (*syntax.AssertExpr, *unionUse) {
 	a, ok := unparenAssert(value)
 	if !ok {
 		return nil, nil
 	}
-	u := ul.useOf(ul.fl.pkg.info.TypeOf(a.Type), a.Pos())
+	u := fl.useOf(fl.pkg.info.TypeOf(a.Type), a.Pos())
 	if u == nil {
 		return nil, nil
 	}
@@ -1130,42 +1118,41 @@ func (ul *unionLower) commaOkTarget(value syntax.Expr) (*syntax.AssertExpr, *uni
 }
 
 // lowerCommaOkAssign rewrites v, ok := x.(U) to v, ok := _logos_assert2_U(x).
-func (ul *unionLower) lowerCommaOkAssign(s *syntax.AssignStmt) {
+func (fl *fileLower) lowerCommaOkAssign(s *syntax.AssignStmt) {
 	if s.Rhs == nil {
 		return
 	}
 	if len(syntax.UnpackListExpr(s.Lhs)) != 2 {
 		return
 	}
-	if a, u := ul.commaOkTarget(s.Rhs); a != nil {
-		s.Rhs = ul.assertCall(a, u.assert2Name())
+	if a, u := fl.commaOkTarget(s.Rhs); a != nil {
+		s.Rhs = fl.assertCall(a, u.assert2Name())
 	}
 }
 
 // lowerCommaOkVar rewrites var v, ok = x.(U) to var v, ok = _logos_assert2_U(x).
-func (ul *unionLower) lowerCommaOkVar(d *syntax.VarDecl) {
+func (fl *fileLower) lowerCommaOkVar(d *syntax.VarDecl) {
 	if len(d.NameList) != 2 || d.Values == nil {
 		return
 	}
-	if a, u := ul.commaOkTarget(d.Values); a != nil {
-		d.Values = ul.assertCall(a, u.assert2Name())
+	if a, u := fl.commaOkTarget(d.Values); a != nil {
+		d.Values = fl.assertCall(a, u.assert2Name())
 	}
 }
 
 // lowerSingleAssert rewrites x.(U) to _logos_assert_U(x), or returns nil
 // when the assertion does not target a lowerable closed union.
-func (ul *unionLower) lowerSingleAssert(a *syntax.AssertExpr) syntax.Expr {
-	u := ul.useOf(ul.fl.pkg.info.TypeOf(a.Type), a.Pos())
+func (fl *fileLower) lowerSingleAssert(a *syntax.AssertExpr) syntax.Expr {
+	u := fl.useOf(fl.pkg.info.TypeOf(a.Type), a.Pos())
 	if u == nil {
 		return nil
 	}
-	return ul.assertCall(a, u.assertName())
+	return fl.assertCall(a, u.assertName())
 }
 
 // assertCall builds name(x) and records the eject splices turning the
 // source x.(U) into that call: the operand text stays verbatim.
-func (ul *unionLower) assertCall(a *syntax.AssertExpr, name string) syntax.Expr {
-	fl := ul.fl
+func (fl *fileLower) assertCall(a *syntax.AssertExpr, name string) syntax.Expr {
 	pos := a.Pos()
 	xStart := fl.off(a.X.Pos())
 	dot, end, ok := splitAssert(fl.src, xStart)
@@ -1313,8 +1300,7 @@ type caseSite struct {
 
 // lowerUnionCases expands the union case lists of type switch statements.
 // Switch expressions are expanded when they are lowered, in expandArmCases.
-func (ul *unionLower) lowerUnionCases() {
-	fl := ul.fl
+func (fl *fileLower) lowerUnionCases() {
 	syntax.Inspect(fl.file, func(n syntax.Node) bool {
 		sw, ok := n.(*syntax.SwitchStmt)
 		if !ok {
@@ -1324,7 +1310,7 @@ func (ul *unionLower) lowerUnionCases() {
 		if !ok {
 			return true
 		}
-		ul.expandSwitchStmt(sw, guard)
+		fl.expandSwitchStmt(sw, guard)
 		return true
 	})
 }
@@ -1333,13 +1319,12 @@ func (ul *unionLower) lowerUnionCases() {
 // A clause whose entries are all matched by earlier clauses is deleted. A
 // clause that binds the guard runs its body in a block that closes before
 // the next clause keyword, or before the closing brace of the switch.
-func (ul *unionLower) expandSwitchStmt(sw *syntax.SwitchStmt, guard *syntax.TypeSwitchGuard) {
-	fl := ul.fl
+func (fl *fileLower) expandSwitchStmt(sw *syntax.SwitchStmt, guard *syntax.TypeSwitchGuard) {
 	sites := make([]caseSite, len(sw.Body))
 	for i, cc := range sw.Body {
 		sites[i] = caseSite{cases: cc.Cases, colon: cc.Colon}
 	}
-	results := ul.expandCaseSites(guard, sites)
+	results := fl.expandCaseSites(guard, sites)
 	kept := make([]*syntax.CaseClause, 0, len(sw.Body))
 	for i, cc := range sw.Body {
 		end := fl.off(sw.Rbrace)
@@ -1385,7 +1370,7 @@ func (fl *fileLower) expandArmCases(e *syntax.SwitchExpr) []siteResult {
 	for i, arm := range e.Arms {
 		sites[i] = caseSite{cases: arm.Cases, colon: arm.Arrow}
 	}
-	results := (&unionLower{fl: fl}).expandCaseSites(guard, sites)
+	results := fl.expandCaseSites(guard, sites)
 	for i, arm := range e.Arms {
 		if results[i].cases != nil {
 			arm.Cases = results[i].cases
@@ -1415,14 +1400,14 @@ func (fl *fileLower) dropSpan(s span) {
 // dropped: first match wins, and a repeated case does not compile. A site
 // left with no entries is deleted. A kept `case U:` would match non-members
 // through the run-time interface, so no union entry survives as written.
-func (ul *unionLower) expandCaseSites(guard *syntax.TypeSwitchGuard, sites []caseSite) []siteResult {
+func (fl *fileLower) expandCaseSites(guard *syntax.TypeSwitchGuard, sites []caseSite) []siteResult {
 	var seen []types2.Type
 	results := make([]siteResult, len(sites))
 	for i, site := range sites {
 		if site.cases == nil {
 			continue
 		}
-		results[i] = ul.expandCaseList(guard, site, caseElems(site.cases), &seen)
+		results[i] = fl.expandCaseList(guard, site, caseElems(site.cases), &seen)
 	}
 	return results
 }
@@ -1431,8 +1416,7 @@ func (ul *unionLower) expandCaseSites(guard *syntax.TypeSwitchGuard, sites []cas
 // the types named so far. The binding of the guard variable exists only
 // when the list names exactly one union and no kept entry that a member
 // test cannot cover.
-func (ul *unionLower) expandCaseList(guard *syntax.TypeSwitchGuard, site caseSite, elems []syntax.Expr, seen *[]types2.Type) siteResult {
-	fl := ul.fl
+func (fl *fileLower) expandCaseList(guard *syntax.TypeSwitchGuard, site caseSite, elems []syntax.Expr, seen *[]types2.Type) siteResult {
 	changed := false
 	for _, e := range elems {
 		t := fl.pkg.info.TypeOf(e)
@@ -1464,7 +1448,7 @@ func (ul *unionLower) expandCaseList(guard *syntax.TypeSwitchGuard, site caseSit
 			text = gen(renderExpr(e))
 		}
 		if members, ok := unionTerms(t); ok {
-			u := ul.useOf(t, e.Pos())
+			u := fl.useOf(t, e.Pos())
 			if u == nil {
 				// Not lowerable (type parameters): keep verbatim.
 				out = append(out, e)
