@@ -44,7 +44,14 @@ type Ghost struct : Named {
 }
 
 func (g Ghost) Title() string { return "boo" }
+type PointerNamed interface {
+	const Title string
+}
 
+type PointerGhost struct : PointerNamed {
+}
+
+func (*PointerGhost) Title() string { return "pointer" }
 // Methods source a read-write property: Secret() plus SetSecret.
 
 type Vault interface {
@@ -108,8 +115,38 @@ func next() int {
 }
 
 func two() (int, int) { return 3, 4 }
+func requireAccessorMethod(t reflect.Type, name string) {
+	if _, ok := t.MethodByName(name); !ok {
+		panic(name)
+	}
+}
 
+func forbidAccessorMethod(t reflect.Type, name string) {
+	if _, ok := t.MethodByName(name); ok {
+		panic(name)
+	}
+}
+
+func checkPropertyAccessorReceivers() {
+	monsterValue := reflect.TypeOf(Monster{})
+	monsterPointer := reflect.TypeOf(&Monster{})
+	ghostValue := reflect.TypeOf(Ghost{})
+	pointerGhostValue := reflect.TypeOf(PointerGhost{})
+	pointerGhostPointer := reflect.TypeOf(&PointerGhost{})
+	safeValue := reflect.TypeOf(Safe{})
+	safePointer := reflect.TypeOf(&Safe{})
+	requireAccessorMethod(monsterValue, "Logos_GetName")
+	forbidAccessorMethod(monsterValue, "Logos_SetHP")
+	requireAccessorMethod(monsterPointer, "Logos_SetHP")
+	requireAccessorMethod(ghostValue, "Logos_GetTitle")
+	forbidAccessorMethod(pointerGhostValue, "Logos_GetTitle")
+	requireAccessorMethod(pointerGhostPointer, "Logos_GetTitle")
+	requireAccessorMethod(safeValue, "Logos_GetSecret")
+	requireAccessorMethod(safePointer, "Logos_SetSecret")
+	forbidAccessorMethod(safeValue, "Logos_SetSecret")
+}
 func main() {
+	checkPropertyAccessorReceivers()
 	var m Monster
 	m.Name = "gorg"
 	m.HP = 100
