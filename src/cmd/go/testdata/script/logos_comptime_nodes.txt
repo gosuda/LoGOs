@@ -33,6 +33,29 @@ logos run ./...
 stdout '^small-ok$'
 cd ..
 
+# logos.toml [lints.thresholds] max_comptime_ast_nodes reaches the
+# compiler. A raised value lets the triple nesting through; the exact
+# boundary holds when the value comes from the file.
+mkdir wtoml
+cp wbig/go.mod wtoml/go.mod
+cp wbig/big.lgo wtoml/big.lgo
+cd wtoml
+! logos build ./...
+stderr 'comptime::node_limit'
+cp ../toml-raised.toml logos.toml
+logos run ./...
+stdout '^big-ok$'
+cd ..
+
+cd wsmall
+cp ../toml-limit-23.toml logos.toml
+! logos build ./...
+stderr 'expansion has 24 nodes above the selected limit 23'
+cp ../toml-limit-24.toml logos.toml
+logos build ./...
+rm logos.toml
+cd ..
+
 -- wbig/go.mod --
 module example.com/bignest
 
@@ -111,3 +134,15 @@ func main() {
 	fmt.Println("show:", show(Small{X: 1, Y: 2}))
 	fmt.Println("small-ok")
 }
+
+-- toml-raised.toml --
+[lints.thresholds]
+max_comptime_ast_nodes = 1000000
+
+-- toml-limit-23.toml --
+[lints.thresholds]
+max_comptime_ast_nodes = 23
+
+-- toml-limit-24.toml --
+[lints.thresholds]
+max_comptime_ast_nodes = 24
