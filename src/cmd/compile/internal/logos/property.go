@@ -7,6 +7,7 @@ package logos
 import (
 	"bytes"
 	"slices"
+	"strconv"
 	"strings"
 
 	"cmd/compile/internal/base"
@@ -152,9 +153,6 @@ func (fl *fileLower) lowerPropertyDecls() {
 			continue
 		}
 		byDef[d.Def] = append(byDef[d.Def], d.Ifaces...)
-	}
-	if len(byDef) == 0 {
-		return
 	}
 	for _, decl := range fl.file.DeclList {
 		td, ok := decl.(*syntax.TypeDecl)
@@ -322,8 +320,7 @@ func recvTypePointer(base syntax.Expr, pos syntax.Pos) syntax.Expr {
 }
 
 // respellRecv re-parses the receiver shape, wrapping it for pointer
-// receivers. The boolean selects the spelling the two named builders
-// above name explicitly.
+// receivers.
 func respellRecv(shape syntax.Expr, pos syntax.Pos, pointer bool) syntax.Expr {
 	text, ok := respellType(shape, pos)
 	if !ok {
@@ -479,27 +476,12 @@ func (fl *fileLower) propSelSpan(sel *syntax.SelectorExpr) (whole, recv span, ok
 // threading counter state through the walk (identifiers with the
 // _logos_ prefix cannot collide with user code; C6 rejects them).
 func propTempName(selOff int) string {
-	return "_logos_pt" + itoa(selOff)
+	return "_logos_pt" + strconv.Itoa(selOff)
 }
 
 // propPinName mints the receiver pin for the selector at selOff.
 func propPinName(selOff int) string {
-	return "_logos_pr" + itoa(selOff)
-}
-
-// itoa spells a non-negative offset without importing strconv.
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	var b [20]byte
-	i := len(b)
-	for n > 0 {
-		i--
-		b[i] = byte('0' + n%10)
-		n /= 10
-	}
-	return string(b[i:])
+	return "_logos_pr" + strconv.Itoa(selOff)
 }
 
 // propTrivialRecv reports whether recv evaluates without observable
@@ -984,7 +966,7 @@ func (fl *fileLower) lowerPropAssign(s *syntax.AssignStmt) []syntax.Stmt {
 		if len(lhs) != 1 {
 			return []syntax.Stmt{s}
 		}
-		if recv, pr, ok := fl.propSelRoot(lhs[0]); ok {
+		if recv, pr, _, ok := fl.propSelOf(lhs[0]); ok {
 			if pr.ReadOnly {
 				return fl.lowerPropGeneric(s)
 			}
@@ -997,7 +979,7 @@ func (fl *fileLower) lowerPropAssign(s *syntax.AssignStmt) []syntax.Stmt {
 		if len(lhs) != 1 {
 			return []syntax.Stmt{s}
 		}
-		if recv, pr, ok := fl.propSelRoot(lhs[0]); ok {
+		if recv, pr, _, ok := fl.propSelOf(lhs[0]); ok {
 			if pr.ReadOnly {
 				return fl.lowerPropGeneric(s)
 			}
@@ -1010,7 +992,7 @@ func (fl *fileLower) lowerPropAssign(s *syntax.AssignStmt) []syntax.Stmt {
 		return fl.lowerPropGeneric(s)
 	}
 	if len(lhs) == 1 {
-		if recv, pr, ok := fl.propSelRoot(lhs[0]); ok {
+		if recv, pr, _, ok := fl.propSelOf(lhs[0]); ok {
 			if s.Op != 0 || pr.ReadOnly {
 				// `:=` on a property target, or a write to a
 				// read-only property, is a check error; keep the
@@ -1023,7 +1005,7 @@ func (fl *fileLower) lowerPropAssign(s *syntax.AssignStmt) []syntax.Stmt {
 	if len(lhs) > 1 {
 		roots := make([]int, 0, len(lhs))
 		for i, l := range lhs {
-			if _, _, ok := fl.propSelRoot(l); ok {
+			if _, _, _, ok := fl.propSelOf(l); ok {
 				roots = append(roots, i)
 			}
 		}
@@ -1035,16 +1017,6 @@ func (fl *fileLower) lowerPropAssign(s *syntax.AssignStmt) []syntax.Stmt {
 		}
 	}
 	return fl.lowerPropGeneric(s)
-}
-
-// propSelRoot returns the property receiver when e is a property
-// selector at its root.
-func (fl *fileLower) propSelRoot(e syntax.Expr) (syntax.Expr, types2.LogosProp, bool) {
-	recv, pr, _, ok := fl.propSelOf(e)
-	if !ok {
-		return nil, types2.LogosProp{}, false
-	}
-	return recv, pr, true
 }
 
 // propStmtSpan returns the source span of a simple statement, from the
@@ -1059,12 +1031,6 @@ func (fl *fileLower) propStmtSpan(s syntax.Stmt, first syntax.Expr) (span, bool)
 		return span{}, false
 	}
 	return span{start: sp.start, end: end}, true
-}
-
-// propSpanText returns the lowered text of a value region, draining the
-// splices of earlier passes inside it.
-func (fl *fileLower) propSpanText(sp span) otext {
-	return fl.textOf(sp)
 }
 
 // propNeedlesNest reports whether any needle strictly contains another.
@@ -1154,11 +1120,11 @@ func (fl *fileLower) lowerPropGeneric(s *syntax.AssignStmt) []syntax.Stmt {
 	}
 	lhsTexts := make([]otext, 0, len(lhs))
 	for _, lsp := range lhsSpans {
-		lhsTexts = append(lhsTexts, fl.propSpanText(lsp))
+		lhsTexts = append(lhsTexts, fl.textOf(lsp))
 	}
 	rhsText := otext{}
 	if s.Rhs != nil {
-		rhsText = fl.propSpanText(propMustSpan(fl, s.Rhs))
+		rhsText = fl.textOf(propMustSpan(fl, s.Rhs))
 	}
 	subs := fl.propSubstitutions(c.needles)
 	for i := range lhsTexts {
@@ -1278,7 +1244,7 @@ func (fl *fileLower) lowerPropWrite(s *syntax.AssignStmt, recv syntax.Expr, pr t
 	rhs := fl.propWalk(s.Rhs, c)
 	sel := mustPropSel(fl, s.Lhs)
 	recvText := fl.propRecvText(sel)
-	rhsText := fl.propSpanText(propMustSpan(fl, s.Rhs))
+	rhsText := fl.textOf(propMustSpan(fl, s.Rhs))
 	set := exprStmtOf(s.Pos(), callOf(s.Pos(), selOf(s.Pos(), recv, "Logos_Set"+pr.Name), []syntax.Expr{rhs}))
 	subs := fl.propSubstitutions(c.needles)
 	main := cat(propSubstText(recvText, subs), gen(".Logos_Set"+pr.Name+"("), propSubstText(rhsText, subs), gen(")"))
@@ -1316,7 +1282,7 @@ func (fl *fileLower) lowerPropCompound(s *syntax.AssignStmt, recv syntax.Expr, p
 	}
 	valueText := gen("1")
 	if rhs != nil {
-		valueText = fl.propSpanText(propMustSpan(fl, rhs))
+		valueText = fl.textOf(propMustSpan(fl, rhs))
 	}
 	bop := s.Op.String()
 	// The receiver node serves once natively: a pinned receiver moves
@@ -1438,9 +1404,9 @@ func (fl *fileLower) lowerPropMulti(s *syntax.AssignStmt, lhs []syntax.Expr, roo
 		if slices.Contains(roots, i) {
 			continue
 		}
-		lhsTexts[i] = fl.propSpanText(lhsSpans[i])
+		lhsTexts[i] = fl.textOf(lhsSpans[i])
 	}
-	rhsText := fl.propSpanText(propMustSpan(fl, s.Rhs))
+	rhsText := fl.textOf(propMustSpan(fl, s.Rhs))
 	subs := fl.propSubstitutions(c.needles)
 	for i := range lhsTexts {
 		lhsTexts[i] = propSubstText(lhsTexts[i], subs)
@@ -1507,7 +1473,7 @@ func (fl *fileLower) lowerPropExprStmt(s *syntax.ExprStmt) []syntax.Stmt {
 	for _, a := range call.ArgList {
 		// A trailing `...` scans as part of the last argument, so
 		// variadic spreads ride along without a special case.
-		args = append(args, fl.propSpanText(propMustSpan(fl, a)))
+		args = append(args, fl.textOf(propMustSpan(fl, a)))
 	}
 	subs := fl.propSubstitutions(c.needles)
 	for i := range args {
@@ -1532,7 +1498,7 @@ func (fl *fileLower) lowerPropCallArgs(s *syntax.ExprStmt, call *syntax.CallExpr
 		return []syntax.Stmt{s}
 	}
 	sp := sps
-	main := fl.propSpanText(sp)
+	main := fl.textOf(sp)
 	subs := fl.propSubstitutions(c.needles)
 	return fl.finishPropReplace(c, sp, []syntax.Stmt{s}, []otext{propSubstText(main, subs)})
 }
@@ -1561,7 +1527,7 @@ func (fl *fileLower) lowerPropDeclStmt(s *syntax.DeclStmt) []syntax.Stmt {
 		return []syntax.Stmt{s}
 	}
 	sp := sps
-	main := fl.propSpanText(sp)
+	main := fl.textOf(sp)
 	subs := fl.propSubstitutions(c.needles)
 	return fl.finishPropReplace(c, sp, []syntax.Stmt{s}, []otext{propSubstText(main, subs)})
 }
@@ -1593,7 +1559,7 @@ func (fl *fileLower) lowerPropSend(s *syntax.SendStmt) []syntax.Stmt {
 		return []syntax.Stmt{s}
 	}
 	sp := sps
-	main := fl.propSpanText(sp)
+	main := fl.textOf(sp)
 	subs := fl.propSubstitutions(c.needles)
 	return fl.finishPropReplace(c, sp, []syntax.Stmt{s}, []otext{propSubstText(main, subs)})
 }
