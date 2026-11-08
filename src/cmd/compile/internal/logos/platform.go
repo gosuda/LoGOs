@@ -100,36 +100,9 @@ func (fl *fileLower) lowerPlatform() {
 	}
 }
 
-// platformLeftmost finds the leftmost token of e, descending through
-// selectors, indexes, slices, assertions, calls, and binary operations,
-// whose Pos sits at an interior token.
-func platformLeftmost(e syntax.Expr) syntax.Pos {
-	for {
-		switch n := syntax.Unparen(e).(type) {
-		case *syntax.SelectorExpr:
-			e = n.X
-		case *syntax.IndexExpr:
-			e = n.X
-		case *syntax.SliceExpr:
-			e = n.X
-		case *syntax.AssertExpr:
-			e = n.X
-		case *syntax.CallExpr:
-			e = n.Fun
-		case *syntax.Operation:
-			if n.Y == nil {
-				return e.Pos()
-			}
-			e = n.X
-		default:
-			return e.Pos()
-		}
-	}
-}
-
 // platformSpan resolves the exact source span of a recorded expression.
 func (fl *fileLower) platformSpan(e syntax.Expr) (span, bool) {
-	start := fl.off(platformLeftmost(e))
+	start := fl.off(leftmostOf(e))
 	end, ok := platformEnd(fl.src, start)
 	if !ok || end <= start {
 		return span{}, false
