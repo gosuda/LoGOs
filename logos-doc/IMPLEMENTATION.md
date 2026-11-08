@@ -1624,7 +1624,7 @@ Anchor: Tony Hoare, J.R.R. Tolkien
 ### M7-S5 `comptime.ViewAs` (PLAN Sec 17 #19, #72)
 Anchor: Tony Hoare, John Carmack
 - Attack: `testdata/logos/viewas.lgo`: `comptime.ViewAs[Header](b)` allowed only for struct types with no padding, no `bool`, no pointers, no interfaces, no slices, maps, or strings -> otherwise `[comptime::viewas_not_pod] Header has padding at offset 3`; `test/logos/run/viewas.lgo`: `len(b) < sizeof(T)` panics with `logos: ViewAs: need 16 bytes, have 8`; a view of an odd offset reads correct values on amd64 and arm64; the view keeps `b` alive (GC test, #72); on architectures without unaligned loads (`GOARCH=mips`, compile only) the lowering copies into an aligned temporary.
-- Build: comptime API gains `func ViewAs[T any](b const []byte) const *T`; lowering: length check, then `(*T)(unsafe.Pointer(unsafe.SliceData(b)))` on amd64, arm64, 386, ppc64le, s390x, riscv64 (unaligned loads allowed by the backend) and a copy elsewhere.
+- Build: comptime API gains `func ViewAs[T any](b const []byte) const *T`; lowering: length check, then `(*T)(unsafe.Pointer(unsafe.SliceData(b)))` on amd64, arm64, 386, ppc64le, and s390x, and a copy elsewhere; `cmd/compile/internal/logos/viewas_arch_test.go` requires the copy on every `cmd/internal/sys` architecture whose `Alignment` is not 1 (riscv64 reports 8 because the OS emulates its unaligned loads).
 - Gate: types2 and testdir tests.
 - Red-team rows: #19, #37, #45, #57, #65, #72, #76, #86, #91, #108, #114, #128, #129, #130, #150, #157, #174.
 - Docs: P1-S3, P2.
