@@ -174,7 +174,7 @@ func UntypedBool() *Type { return &Type{Kind: KUntypedBool} }
 
 // BasicType returns the descriptor for a predeclared basic type name.
 // It returns nil for unknown names.
-func BasicType(name string, word int64) *Type {
+func BasicType(name string) *Type {
 	switch name {
 	case "bool":
 		return &Type{Kind: KBool}
@@ -266,7 +266,7 @@ func isNumeric(k Kind) bool {
 }
 
 // defaultType maps an untyped kind to its default type.
-func defaultType(k Kind, word int64) *Type {
+func defaultType(k Kind) *Type {
 	switch k {
 	case KUntypedInt:
 		return &Type{Kind: KInt}

@@ -24,7 +24,6 @@ import (
 // environment, and caller-provided const funcs.
 type fakeHost struct {
 	t       *testing.T
-	word    int64
 	vars    map[string]Value
 	funcs   map[string]*Func
 	types   map[syntax.Expr]*Type
@@ -32,10 +31,9 @@ type fakeHost struct {
 	pkgvars map[string]bool
 }
 
-func newFakeHost(t *testing.T, word int64) *fakeHost {
+func newFakeHost(t *testing.T) *fakeHost {
 	return &fakeHost{
 		t:       t,
-		word:    word,
 		vars:    map[string]Value{},
 		funcs:   map[string]*Func{},
 		types:   map[syntax.Expr]*Type{},
@@ -96,13 +94,13 @@ func (h *fakeHost) resolveTypeExpr(e syntax.Expr) *Type {
 	switch e := syntax.Unparen(e).(type) {
 	case *syntax.Name:
 		if e.Value == "byte" {
-			return BasicType("uint8", h.word)
+			return BasicType("uint8")
 		}
 		if e.Value == "rune" {
-			return BasicType("int32", h.word)
+			return BasicType("int32")
 		}
 		if isBasicName(e.Value) {
-			return BasicType(e.Value, h.word)
+			return BasicType(e.Value)
 		}
 	case *syntax.SliceType:
 		if el := h.resolveTypeExpr(e.Elem); el != nil {
@@ -240,10 +238,10 @@ func evalErr(t *testing.T, h *fakeHost, cfg Config, e syntax.Expr) *Error {
 // hold; variable values wrap while constants overflow.
 func TestWidths(t *testing.T) {
 	for _, word := range []int64{4, 8} {
-		h := newFakeHost(t, word)
+		h := newFakeHost(t)
 		cfg := Config{MaxSteps: 100000, MaxValueBytes: 1 << 20, WordSize: word}
 		conv := parseExpr(t, `int(1 << 32)`)
-		h.types[conv] = BasicType("int", word)
+		h.types[conv] = BasicType("int")
 		if word == 8 {
 			v, _ := evalOne(t, h, cfg, conv)
 			if v.Int64() != 4294967296 {
@@ -257,26 +255,26 @@ func TestWidths(t *testing.T) {
 		}
 	}
 
-	h := newFakeHost(t, 8)
+	h := newFakeHost(t)
 	cfg := Config{MaxSteps: 100000, MaxValueBytes: 1 << 20, WordSize: 8}
 	ok := parseExpr(t, `int8(127)`)
-	h.types[ok] = BasicType("int8", 8)
+	h.types[ok] = BasicType("int8")
 	v, _ := evalOne(t, h, cfg, ok)
 	if v.Int64() != 127 {
 		t.Fatalf("got %v, want 127", v)
 	}
 	bad := parseExpr(t, `int8(128)`)
-	h.types[bad] = BasicType("int8", 8)
+	h.types[bad] = BasicType("int8")
 	if cerr := evalErr(t, h, cfg, bad); cerr.Code != CodeEval {
 		t.Fatalf("code = %v, want CodeEval", cerr.Code)
 	}
 
 	// A variable int8 wraps instead of overflowing: Wrap(200) is -56.
 	fn := parseFunc(t, `package p
-func Wrap(x int) int8 { return int8(x) }`, false, []*Type{BasicType("int", 8)}, []*Type{BasicType("int8", 8)})
+func Wrap(x int) int8 { return int8(x) }`, false, []*Type{BasicType("int")}, []*Type{BasicType("int8")})
 	h.funcs["Wrap"] = fn
 	call := parseExpr(t, `Wrap(200)`)
-	h.types[call] = BasicType("int8", 8)
+	h.types[call] = BasicType("int8")
 	v, _ = evalOne(t, h, cfg, call)
 	if v.Int64() != -56 {
 		t.Fatalf("got %v, want -56", v)
@@ -290,7 +288,7 @@ func Wrap(x int) int8 { return int8(x) }`, false, []*Type{BasicType("int", 8)}, 
 // element-width bug that only fires inside literals.
 func TestWidthsComposite(t *testing.T) {
 	for _, word := range []int64{4, 8} {
-		h := newFakeHost(t, word)
+		h := newFakeHost(t)
 		cfg := Config{MaxSteps: 100000, MaxValueBytes: 1 << 20, WordSize: word}
 		lit := parseExpr(t, `[]int{1 << 32}`)
 		if word == 8 {
@@ -315,7 +313,7 @@ func TestWidthsComposite(t *testing.T) {
 // limit, measuring exact step counts first so the test stays aligned
 // with the step model.
 func TestStepBoundaries(t *testing.T) {
-	h := newFakeHost(t, 8)
+	h := newFakeHost(t)
 	fn := parseFunc(t, `package p
 func Burn(n int) int {
 	total := 0
@@ -323,13 +321,13 @@ func Burn(n int) int {
 		total++
 	}
 	return total
-}`, true, []*Type{BasicType("int", 8)}, []*Type{BasicType("int", 8)})
+}`, true, []*Type{BasicType("int")}, []*Type{BasicType("int")})
 	h.funcs["Burn"] = fn
 
 	// Measure exact step counts with no effective limit, then check
 	// the boundary at N-1, N, N+1 around a measured count.
 	measure := func(src string) (Value, int) {
-		hh := newFakeHost(t, 8)
+		hh := newFakeHost(t)
 		hh.funcs["Burn"] = fn
 		call := parseExpr(t, src)
 		v, st, err := Eval(hh, Config{MaxSteps: 1 << 30, MaxValueBytes: 1 << 20, WordSize: 8}, call)
@@ -346,7 +344,7 @@ func Burn(n int) int {
 		t.Fatalf("non-positive step count %d", steps2)
 	}
 	at := func(limit int) *Error {
-		hh := newFakeHost(t, 8)
+		hh := newFakeHost(t)
 		hh.funcs["Burn"] = fn
 		call := parseExpr(t, `Burn(2)`)
 		_, _, err := Eval(hh, Config{MaxSteps: limit, MaxValueBytes: 1 << 20, WordSize: 8}, call)
@@ -373,27 +371,27 @@ func Burn(n int) int {
 // TestValueSizeBoundaries checks the 1 MB cap at N-1, N, N+1 with a
 // small limit, plus the default-limit boundaries.
 func TestValueSizeBoundaries(t *testing.T) {
-	h := newFakeHost(t, 8)
+	h := newFakeHost(t)
 	small := Config{MaxSteps: 100000, MaxValueBytes: 10, WordSize: 8}
 	arr10 := parseExpr(t, `[10]byte{}`)
-	h.types[arr10] = &Type{Kind: KArray, Len: 10, Elem: BasicType("uint8", 8)}
+	h.types[arr10] = &Type{Kind: KArray, Len: 10, Elem: BasicType("uint8")}
 	if _, _, err := Eval(h, small, arr10); err != nil {
 		t.Fatalf("[10]byte{} with 10-byte cap: %v", err)
 	}
 	arr11 := parseExpr(t, `[11]byte{}`)
-	h.types[arr11] = &Type{Kind: KArray, Len: 11, Elem: BasicType("uint8", 8)}
+	h.types[arr11] = &Type{Kind: KArray, Len: 11, Elem: BasicType("uint8")}
 	if cerr := evalErr(t, h, small, arr11); cerr.Code != CodeTooLarge {
 		t.Fatalf("code = %v, want CodeTooLarge", cerr.Code)
 	}
 
 	def := DefaultConfig()
 	mega := parseExpr(t, `[1048576]byte{}`)
-	h.types[mega] = &Type{Kind: KArray, Len: 1048576, Elem: BasicType("uint8", 8)}
+	h.types[mega] = &Type{Kind: KArray, Len: 1048576, Elem: BasicType("uint8")}
 	if _, _, err := Eval(h, def, mega); err != nil {
 		t.Fatalf("1 MB array: %v", err)
 	}
 	mega1 := parseExpr(t, `[1048577]byte{}`)
-	h.types[mega1] = &Type{Kind: KArray, Len: 1048577, Elem: BasicType("uint8", 8)}
+	h.types[mega1] = &Type{Kind: KArray, Len: 1048577, Elem: BasicType("uint8")}
 	if cerr := evalErr(t, h, def, mega1); cerr.Code != CodeTooLarge {
 		t.Fatalf("code = %v, want CodeTooLarge", cerr.Code)
 	}
@@ -401,33 +399,33 @@ func TestValueSizeBoundaries(t *testing.T) {
 
 // TestFloatMapKeys checks -0.0 canonicalization and NaN rejection (#103).
 func TestFloatMapKeys(t *testing.T) {
-	h := newFakeHost(t, 8)
+	h := newFakeHost(t)
 	neg := parseFunc(t, `package p
 func NegZero(x float64) float64 {
 	z := x - x
 	return -z
-}`, true, []*Type{BasicType("float64", 8)}, []*Type{BasicType("float64", 8)})
+}`, true, []*Type{BasicType("float64")}, []*Type{BasicType("float64")})
 	h.funcs["NegZero"] = neg
 	frac := parseFunc(t, `package p
 func Frac(x float64) float64 {
 	z := x - x
 	return z / z
-}`, true, []*Type{BasicType("float64", 8)}, []*Type{BasicType("float64", 8)})
+}`, true, []*Type{BasicType("float64")}, []*Type{BasicType("float64")})
 	h.funcs["Frac"] = frac
 	cfg := DefaultConfig()
 
 	dup := parseExpr(t, `map[float64]string{0.0: "a", NegZero(1.0): "b"}`)
-	h.types[dup] = &Type{Kind: KMap, Key: BasicType("float64", 8), Elem: UntypedString()}
+	h.types[dup] = &Type{Kind: KMap, Key: BasicType("float64"), Elem: UntypedString()}
 	if cerr := evalErr(t, h, cfg, dup); cerr.Code != CodeEval || !strings.Contains(cerr.Detail, "duplicate") {
 		t.Fatalf("dup err = %v, want duplicate CodeEval", cerr)
 	}
 	nan := parseExpr(t, `map[float64]string{Frac(1.0): "nan"}`)
-	h.types[nan] = &Type{Kind: KMap, Key: BasicType("float64", 8), Elem: UntypedString()}
+	h.types[nan] = &Type{Kind: KMap, Key: BasicType("float64"), Elem: UntypedString()}
 	if cerr := evalErr(t, h, cfg, nan); cerr.Code != CodeEval || !strings.Contains(cerr.Detail, "NaN") {
 		t.Fatalf("nan err = %v, want NaN CodeEval", cerr)
 	}
 	ok := parseExpr(t, `map[float64]string{NegZero(1.0): "neg"}`)
-	h.types[ok] = &Type{Kind: KMap, Key: BasicType("float64", 8), Elem: UntypedString()}
+	h.types[ok] = &Type{Kind: KMap, Key: BasicType("float64"), Elem: UntypedString()}
 	v, _ := evalOne(t, h, cfg, ok)
 	if v.MapLen() != 1 {
 		t.Fatalf("map len = %d, want 1", v.MapLen())
@@ -440,11 +438,11 @@ func Frac(x float64) float64 {
 // TestAbsentMapKey checks that a missing key in a single-value const
 // map read fails instead of guessing a value.
 func TestAbsentMapKey(t *testing.T) {
-	h := newFakeHost(t, 8)
-	mk := &Type{Kind: KMap, Key: UntypedString(), Elem: BasicType("int", 8)}
+	h := newFakeHost(t)
+	mk := &Type{Kind: KMap, Key: UntypedString(), Elem: BasicType("int")}
 	mv := Value{typ: mk, mval: &mapVal{
 		keys: []Value{StringValue("a", UntypedString())},
-		vals: []Value{IntValue(big.NewInt(1), BasicType("int", 8))},
+		vals: []Value{IntValue(big.NewInt(1), BasicType("int"))},
 	}}
 	h.vars["m"] = mv
 	cfg := DefaultConfig()
@@ -463,7 +461,7 @@ func TestAbsentMapKey(t *testing.T) {
 // and recover fail, while an impurity inside a const func body aborts
 // silently (the static purity check reports it).
 func TestDynamicImpurity(t *testing.T) {
-	h := newFakeHost(t, 8)
+	h := newFakeHost(t)
 	h.imports["fmt"] = true
 	cfg := DefaultConfig()
 
@@ -480,7 +478,7 @@ func TestDynamicImpurity(t *testing.T) {
 func Bad() int {
 	println("x")
 	return 1
-}`, true, nil, []*Type{BasicType("int", 8)})
+}`, true, nil, []*Type{BasicType("int")})
 	h.funcs["Bad"] = bad
 	top := parseExpr(t, `Bad()`)
 	if cerr := evalErr(t, h, cfg, top); cerr.Code != CodeSilent {

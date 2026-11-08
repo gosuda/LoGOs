@@ -75,7 +75,7 @@ func defaulted(v Value) Value {
 	if v.typ == nil || !isUntyped(v.typ.Kind) {
 		return v
 	}
-	v.typ = defaultType(v.typ.Kind, 8)
+	v.typ = defaultType(v.typ.Kind)
 	return v
 }
 

@@ -47,7 +47,7 @@ func bootstrapHost(t *testing.T, h *fakeHost, name, src string) {
 // evaluation untouched, and must leave the host's stored value pristine
 // for later reads.
 func TestHostIngressTwoReadsIsolated(t *testing.T) {
-	boot := newFakeHost(t, 8)
+	boot := newFakeHost(t)
 	big := Config{MaxSteps: 1 << 20, MaxValueBytes: 1 << 20, WordSize: 8}
 	sliceHost, _, err := Eval(boot, big, parseExpr(t, `[]int{1, 2, 3}`))
 	if err != nil {
@@ -58,10 +58,10 @@ func TestHostIngressTwoReadsIsolated(t *testing.T) {
 		t.Fatalf("bootstrap map: %v", err)
 	}
 
-	h := newFakeHost(t, 8)
+	h := newFakeHost(t)
 	h.vars["C"] = sliceHost
 	h.vars["M"] = mapHost
-	intT := BasicType("int", 8)
+	intT := BasicType("int")
 	cfg := DefaultConfig()
 
 	sliceFn := parseFunc(t, `package p
@@ -101,11 +101,11 @@ func TwoReadsMap() int {
 // isolation rule: aliases derived from a single ingested read must
 // observe each other's writes, matching Go reference semantics.
 func TestHostIngressSingleReadAliasShares(t *testing.T) {
-	h := newFakeHost(t, 8)
+	h := newFakeHost(t)
 	bootstrapHost(t, h, "C", `[]int{1, 2, 3}`)
 	bootstrapHost(t, h, "M", `map[string]int{"k": 1}`)
 	bootstrapHost(t, h, "A", `[3]int{1, 2, 3}`)
-	intT := BasicType("int", 8)
+	intT := BasicType("int")
 	cfg := DefaultConfig()
 
 	sameSlice := parseFunc(t, `package p
@@ -168,11 +168,11 @@ func ArraySlicesShare() int {
 // aliases above never exercise this path because each is created after
 // ingress; only a shared host graph runs the copy's backing dedup.
 func TestHostIngressSharedBackingPreserved(t *testing.T) {
-	intT := BasicType("int", 8)
-	mapT := &Type{Kind: KMap, Key: BasicType("string", 8), Elem: &Type{Kind: KSlice, Elem: intT}}
+	intT := BasicType("int")
+	mapT := &Type{Kind: KMap, Key: BasicType("string"), Elem: &Type{Kind: KSlice, Elem: intT}}
 	cfg := DefaultConfig()
 
-	build := newFakeHost(t, 8)
+	build := newFakeHost(t)
 	share := parseFunc(t, `package p
 func Share() map[string][]int {
 	s := []int{1, 2}
@@ -184,7 +184,7 @@ func Share() map[string][]int {
 		t.Fatalf("Share(): %v", err)
 	}
 
-	h := newFakeHost(t, 8)
+	h := newFakeHost(t)
 	h.vars["H"] = shared
 	check := parseFunc(t, `package p
 func CheckShared() int {
@@ -209,14 +209,14 @@ func CheckShared() int {
 // bill its whole backing against MaxValueBytes on ingress. A len-only
 // accounting would let it through a tiny budget.
 func TestHostIngressCapTailCountsTowardBudget(t *testing.T) {
-	boot := newFakeHost(t, 8)
+	boot := newFakeHost(t)
 	big := Config{MaxSteps: 1 << 20, MaxValueBytes: 1 << 20, WordSize: 8}
 	tail, _, err := Eval(boot, big, parseExpr(t, `make([]byte, 0, 8)`))
 	if err != nil {
 		t.Fatalf("bootstrap make: %v", err)
 	}
 
-	h := newFakeHost(t, 8)
+	h := newFakeHost(t)
 	h.vars["C"] = tail
 
 	// Sanity under a generous budget: the copy preserves length and
@@ -251,9 +251,9 @@ func TestHostIngressCapTailCountsTowardBudget(t *testing.T) {
 // the frames already hold enough live bytes that the finished copy
 // overflows the cap.
 func TestHostIngressLiveFrameCheckRetained(t *testing.T) {
-	h := newFakeHost(t, 8)
+	h := newFakeHost(t)
 	bootstrapHost(t, h, "C", `[20]byte{}`)
-	intT := BasicType("int", 8)
+	intT := BasicType("int")
 
 	fn := parseFunc(t, `package p
 func LiveCheck() int {
@@ -287,12 +287,12 @@ func LiveCheck() int {
 // the boundary. MaxSteps zero means the default, so the two-container
 // shape is what lets N-1 stay a real (nonzero) limit.
 func TestHostIngressContainerStepBoundaries(t *testing.T) {
-	h := newFakeHost(t, 8)
+	h := newFakeHost(t)
 	bootstrapHost(t, h, "C1", `[]int{7}`)
 	bootstrapHost(t, h, "C2", `[]int{8}`)
 
 	measure := func() int {
-		hh := newFakeHost(t, 8)
+		hh := newFakeHost(t)
 		// Re-bootstrap per measurement so each Eval sees fresh hosts
 		// under the same generous bytes; only MaxSteps varies below.
 		bootstrapHost(t, hh, "C1", `[]int{7}`)
@@ -309,7 +309,7 @@ func TestHostIngressContainerStepBoundaries(t *testing.T) {
 	steps := measure()
 
 	at := func(limit int) *Error {
-		hh := newFakeHost(t, 8)
+		hh := newFakeHost(t)
 		bootstrapHost(t, hh, "C1", `[]int{7}`)
 		bootstrapHost(t, hh, "C2", `[]int{8}`)
 		_, _, err := Eval(hh, Config{MaxSteps: limit, MaxValueBytes: 1 << 20, WordSize: 8}, parseExpr(t, `C1[0] + C2[0]`))
@@ -333,7 +333,7 @@ func TestHostIngressContainerStepBoundaries(t *testing.T) {
 	}
 
 	measureSingle := func(src string) int {
-		hh := newFakeHost(t, 8)
+		hh := newFakeHost(t)
 		bootstrapHost(t, hh, "W", src)
 		_, st, err := Eval(hh, Config{MaxSteps: 1 << 30, MaxValueBytes: 1 << 20, WordSize: 8}, parseExpr(t, `W`))
 		if err != nil {

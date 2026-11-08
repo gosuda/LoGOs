@@ -297,14 +297,14 @@ func (h *ctfeHost) resolveTypeExpr(e syntax.Expr) *ctfe.Type {
 	check := h.check
 	switch e := syntax.Unparen(e).(type) {
 	case *syntax.Name:
-		if t := ctfe.BasicType(e.Value, check.logosWordSize()); t != nil {
+		if t := ctfe.BasicType(e.Value); t != nil {
 			return t
 		}
 		if e.Value == "byte" {
-			return ctfe.BasicType("uint8", check.logosWordSize())
+			return ctfe.BasicType("uint8")
 		}
 		if e.Value == "rune" {
-			return ctfe.BasicType("int32", check.logosWordSize())
+			return ctfe.BasicType("int32")
 		}
 		if e.Value == "any" || e.Value == "error" {
 			return nil

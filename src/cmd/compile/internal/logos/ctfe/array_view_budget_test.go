@@ -35,11 +35,11 @@ import (
 // two full views over one [4]int storage, then checks single-read
 // sharing and two-read isolation through Eval only.
 func TestArrayViewHostSharingAliasIsolation(t *testing.T) {
-	intT := BasicType("int", 8)
+	intT := BasicType("int")
 	arr2T := &Type{Kind: KArray, Len: 2, Elem: &Type{Kind: KSlice, Elem: intT}}
 	big := Config{MaxSteps: 1 << 20, MaxValueBytes: 1 << 20, WordSize: 8}
 
-	build := newFakeHost(t, 8)
+	build := newFakeHost(t)
 	buildFn := parseFunc(t, `package p
 func Build() [2][]int {
 	a := [4]int{1, 2, 3, 4}
@@ -53,7 +53,7 @@ func Build() [2][]int {
 		t.Fatalf("Build(): %v", err)
 	}
 
-	h := newFakeHost(t, 8)
+	h := newFakeHost(t)
 	h.vars["H"] = shared
 	cfg := DefaultConfig()
 

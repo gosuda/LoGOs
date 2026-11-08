@@ -14,9 +14,9 @@ import (
 // isolates the evaluator from the host's stored value. A const function
 // mutating s := C must not corrupt the host's recorded slice backing.
 func TestSemanticConstRecordedHostIsolationDirect(t *testing.T) {
-	intT := BasicType("int", 8)
+	intT := BasicType("int")
 
-	h := newFakeHost(t, 8)
+	h := newFakeHost(t)
 	// Recorded const C := []int{1, 2, 3}
 	cBacking := []Value{
 		intValue(big.NewInt(1), intT, true),
@@ -54,10 +54,10 @@ func DirectMutate() int {
 // calling Mutate(C) passes the hosted constant as a call argument.
 // In-interpreter argument passing must not reach the host's stored constant.
 func TestSemanticConstRecordedHostIsolationArg(t *testing.T) {
-	intT := BasicType("int", 8)
+	intT := BasicType("int")
 	sliceT := &Type{Kind: KSlice, Elem: intT}
 
-	h := newFakeHost(t, 8)
+	h := newFakeHost(t)
 	cBacking := []Value{
 		intValue(big.NewInt(1), intT, true),
 		intValue(big.NewInt(2), intT, true),
@@ -95,10 +95,10 @@ func CallMutate() int {
 // with a slice argument shares its backing store, adhering to Go sharing
 // semantics.
 func TestSemanticConstLocalArgAliasing(t *testing.T) {
-	intT := BasicType("int", 8)
+	intT := BasicType("int")
 	sliceT := &Type{Kind: KSlice, Elem: intT}
 
-	h := newFakeHost(t, 8)
+	h := newFakeHost(t)
 	setFn := parseFunc(t, `package p
 func Set(s []int, i int, v int) {
 	s[i] = v
@@ -123,10 +123,10 @@ func LocalSlice() int {
 // TestSemanticConstArrayCopyControl verifies that arrays copy by value
 // when passed to a function call.
 func TestSemanticConstArrayCopyControl(t *testing.T) {
-	intT := BasicType("int", 8)
+	intT := BasicType("int")
 	arrT := &Type{Kind: KArray, Len: 2, Elem: intT}
 
-	h := newFakeHost(t, 8)
+	h := newFakeHost(t)
 	setArrFn := parseFunc(t, `package p
 func SetArr(a [2]int) {
 	a[0] = 99
@@ -151,10 +151,10 @@ func LocalArray() int {
 // TestSemanticConstVariadicSpread verifies that f(xs...) binds xs directly
 // without repacking into a fresh slice, preserving slice backing and capacity.
 func TestSemanticConstVariadicSpread(t *testing.T) {
-	intT := BasicType("int", 8)
+	intT := BasicType("int")
 	sliceT := &Type{Kind: KSlice, Elem: intT}
 
-	h := newFakeHost(t, 8)
+	h := newFakeHost(t)
 	bumpFn := parseFunc(t, `package p
 func BumpFirst(xs ...int) {
 	xs[0] = 7

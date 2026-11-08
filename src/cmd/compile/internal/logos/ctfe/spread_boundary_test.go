@@ -35,10 +35,10 @@ import "testing"
 // spread non-slice". The nil slice is built with `var s []int` inside
 // the const func, so no host Value is constructed by hand.
 func TestSpreadTypedNilSliceBindsZeroLen(t *testing.T) {
-	intT := BasicType("int", 8)
+	intT := BasicType("int")
 	sliceT := &Type{Kind: KSlice, Elem: intT}
 
-	h := newFakeHost(t, 8)
+	h := newFakeHost(t)
 	fn := parseFunc(t, "package p\nfunc VLen(xs ...int) int { return len(xs) }",
 		true, []*Type{sliceT}, []*Type{intT})
 	fn.Variadic = true
@@ -59,11 +59,11 @@ func TestSpreadTypedNilSliceBindsZeroLen(t *testing.T) {
 // operands are built inside const funcs (`var s []int` vs `[]int{}`),
 // matching value_edges_regress_test.go:412-428.
 func TestSpreadNilVsEmptyIdentity(t *testing.T) {
-	intT := BasicType("int", 8)
+	intT := BasicType("int")
 	sliceT := &Type{Kind: KSlice, Elem: intT}
-	boolT := BasicType("bool", 8)
+	boolT := BasicType("bool")
 
-	h := newFakeHost(t, 8)
+	h := newFakeHost(t)
 	fn := parseFunc(t, "package p\nfunc IsNil(xs ...int) bool { return xs == nil }",
 		true, []*Type{sliceT}, []*Type{boolT})
 	fn.Variadic = true
@@ -90,9 +90,9 @@ func TestSpreadNilVsEmptyIdentity(t *testing.T) {
 // append([]byte{65}, "hi"...) must expand the literal exactly like a
 // typed string, yielding [65 'h' 'i'].
 func TestAppendUntypedStringSpread(t *testing.T) {
-	intT := BasicType("int", 8)
+	intT := BasicType("int")
 
-	h := newFakeHost(t, 8)
+	h := newFakeHost(t)
 	fn := parseFunc(t, "package p\nfunc AppendUntyped() int {\n\ts := append([]byte{65}, \"hi\"...)\n\treturn int(s[1])\n}",
 		true, nil, []*Type{intT})
 	h.funcs[fn.Name] = fn
@@ -108,9 +108,9 @@ func TestAppendUntypedStringSpread(t *testing.T) {
 // to bytes for append today, so this control must stay green while the
 // untyped literal above exposes the missing KUntypedString case.
 func TestAppendTypedStringSpreadControl(t *testing.T) {
-	intT := BasicType("int", 8)
+	intT := BasicType("int")
 
-	h := newFakeHost(t, 8)
+	h := newFakeHost(t)
 	fn := parseFunc(t, "package p\nfunc AppendTyped() int {\n\ts := append([]byte{65}, string(\"hi\")...)\n\treturn int(s[2])\n}",
 		true, nil, []*Type{intT})
 	h.funcs[fn.Name] = fn
@@ -125,8 +125,8 @@ func TestAppendTypedStringSpreadControl(t *testing.T) {
 // typed string spread into ordinary ...int or ...rune (non-append)
 // must be rejected. Only append has the string... special case.
 func TestSpreadTypedStringToIntRuneRejected(t *testing.T) {
-	intT := BasicType("int", 8)
-	int32T := BasicType("int32", 8)
+	intT := BasicType("int")
+	int32T := BasicType("int32")
 
 	for _, tc := range []struct {
 		name  string
@@ -136,7 +136,7 @@ func TestSpreadTypedStringToIntRuneRejected(t *testing.T) {
 		{"Int", intT, "int"},
 		{"Rune", int32T, "rune"},
 	} {
-		h := newFakeHost(t, 8)
+		h := newFakeHost(t)
 		sliceT := &Type{Kind: KSlice, Elem: tc.elem}
 		fn := parseFunc(t, "package p\nfunc VS"+tc.name+"(xs ..."+tc.param+") int { return len(xs) }",
 			true, []*Type{sliceT}, []*Type{intT})
@@ -154,11 +154,11 @@ func TestSpreadTypedStringToIntRuneRejected(t *testing.T) {
 // boundary: even with a matching element type, an ordinary (non-append)
 // ...byte callee must reject string... Only append expands strings.
 func TestSpreadTypedStringToOrdinaryByteRejected(t *testing.T) {
-	intT := BasicType("int", 8)
-	uint8T := BasicType("uint8", 8)
+	intT := BasicType("int")
+	uint8T := BasicType("uint8")
 	sliceT := &Type{Kind: KSlice, Elem: uint8T}
 
-	h := newFakeHost(t, 8)
+	h := newFakeHost(t)
 	fn := parseFunc(t, "package p\nfunc VByte(xs ...byte) int { return len(xs) }",
 		true, []*Type{sliceT}, []*Type{intT})
 	fn.Variadic = true

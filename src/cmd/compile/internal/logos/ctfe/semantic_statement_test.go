@@ -28,8 +28,8 @@ import (
 )
 
 var (
-	stmtIntT   = BasicType("int", 8)
-	stmtBoolT  = BasicType("bool", 8)
+	stmtIntT   = BasicType("int")
+	stmtBoolT  = BasicType("bool")
 	stmtSliceT = &Type{Kind: KSlice, Elem: stmtIntT}
 )
 
@@ -54,7 +54,7 @@ var stmtTruth = stmtIntFn("package p\nfunc Truth(b bool) int {\n\tif b {\n\t\tre
 // stmtHost registers every fn as a const func on a fresh 64-bit host.
 func stmtHost(t *testing.T, fns ...stmtFunc) *fakeHost {
 	t.Helper()
-	h := newFakeHost(t, 8)
+	h := newFakeHost(t)
 	for _, f := range fns {
 		fn := parseFunc(t, f.src, true, f.params, f.results)
 		h.funcs[fn.Name] = fn
