@@ -32,6 +32,7 @@ import (
 	"cmd/go/internal/load"
 	"cmd/go/internal/modload"
 	"cmd/go/internal/work"
+	"cmd/internal/sys"
 )
 
 // rtModulePath is the shared support module for ejected trees. Every
@@ -198,24 +199,56 @@ func ejectToDir(ctx context.Context, out string) {
 
 var ejectGofmtFiles []string
 
+var ejectToolExeSuffix = cfg.ToolExeSuffix()
+
+var ejectArgLengthLimit = sys.ExecArgLengthLimit
+
 func queueEjectGofmt(path string) {
 	ejectGofmtFiles = append(ejectGofmtFiles, path)
 }
 
 func runEjectGofmt() {
-	for len(ejectGofmtFiles) > 0 {
-		n := min(len(ejectGofmtFiles), 200)
-		batch := ejectGofmtFiles[:n]
-		ejectGofmtFiles = ejectGofmtFiles[n:]
-		cmd := exec.Command(gofmtBinary(), append([]string{"-w"}, batch...)...)
-		if out, err := cmd.CombinedOutput(); err != nil {
-			base.Fatalf("logos eject: gofmt: %v: %s", err, out)
+	gofmt := gofmtBinary()
+	args := []string{gofmt, "-w"}
+	argLen := len(gofmt) + len(" -w")
+	base, baseLen := len(args), argLen
+	flush := func() {
+		if len(args) > base {
+			gofmtRun(args, nil)
+			args = args[:base]
+			argLen = baseLen
 		}
 	}
+	for _, file := range ejectGofmtFiles {
+		if len(args) > base && argLen+1+len(file) >= ejectArgLengthLimit {
+			flush()
+		}
+		args = append(args, file)
+		argLen += 1 + len(file)
+	}
+	flush()
+	ejectGofmtFiles = nil
+}
+
+func gofmtRun(args []string, stdin []byte) []byte {
+	cmd := exec.Command(args[0], args[1:]...)
+	if stdin != nil {
+		cmd.Stdin = bytes.NewReader(stdin)
+	}
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		base.Fatalf("logos eject: gofmt: %v: %s", err, out)
+	}
+	return out
 }
 
 func gofmtBinary() string {
-	p := filepath.Join(cfg.GOROOT, "bin", "gofmt")
+	gofmt := "gofmt" + ejectToolExeSuffix
+	p := filepath.Join(cfg.GOBIN, gofmt)
+	if _, err := os.Stat(p); err == nil {
+		return p
+	}
+	p = filepath.Join(cfg.GOROOT, "bin", gofmt)
 	if _, err := os.Stat(p); err == nil {
 		return p
 	}
