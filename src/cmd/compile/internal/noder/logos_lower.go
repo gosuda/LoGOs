@@ -12,12 +12,14 @@ import (
 	"sync"
 
 	"cmd/compile/internal/base"
+	"cmd/compile/internal/escape"
 	"cmd/compile/internal/logos"
 	"cmd/compile/internal/logos/facts"
 	"cmd/compile/internal/syntax"
 	"cmd/compile/internal/typecheck"
 	"cmd/compile/internal/types"
 	"cmd/compile/internal/types2"
+	"cmd/internal/src"
 )
 
 // This file holds the loGo/s lowering integration for the compiler
@@ -189,6 +191,36 @@ func logosEmitAssertFacts(pkg *types2.Package) {
 	facts.SetCurrent(f)
 }
 
+// logosPublishConstViewDecls exposes the const view declaration positions
+// the lowering recorded to escape analysis (M18-S8 group capture checks).
+// The lowered syntax positions and the positions the IR reads back from
+// export data do not share a pos base, so the check compares the position
+// content both sides carry: the absolute file of the position's base plus
+// the raw line and column.
+func logosPublishConstViewDecls(decls []syntax.Pos) {
+	seen := make(map[cvDeclKey]bool, len(decls))
+	for _, pos := range decls {
+		if !pos.IsKnown() || pos.Base() == nil {
+			continue
+		}
+		seen[cvDeclKey{trimFilename(pos.Base()), pos.Line(), pos.Col()}] = true
+	}
+	escape.LogosConstViewDecl = func(xpos src.XPos) bool {
+		p := base.Ctxt.PosTable.Pos(xpos)
+		b := p.Base()
+		if !p.IsKnown() || b == nil {
+			return false
+		}
+		return seen[cvDeclKey{b.AbsFilename(), p.Line(), p.Col()}]
+	}
+}
+
+type cvDeclKey struct {
+	file string
+	line uint
+	col  uint
+}
+
 // logosRecheckHook runs the post-check loGo/s rewrite for the package that
 // conf checked: lowering for a loGo/s package, MustNonNil wraps for a Go
 // package that calls loGo/s code (M3-S7). It reports whether the caller
@@ -224,6 +256,7 @@ func lowerLogosHook(pkg *types2.Package, info *types2.Info, files []*syntax.File
 		return false
 	}
 	changed, edits := logos.Lower(pkg, info, files, lowerSrc)
+	logosPublishConstViewDecls(logos.ConstViewDecls())
 	if changed {
 		logos.LogosRestoreErasedAnonReadonly()
 	} else {

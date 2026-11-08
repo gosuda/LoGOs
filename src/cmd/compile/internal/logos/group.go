@@ -542,6 +542,11 @@ func (fc *funcLower) lowerGroupGo(s *syntax.CallStmt) []syntax.Stmt {
 	ft := groupChildFuncType(pos, top.gctx, cr)
 	callStart := fl.off(leftmostOf(call))
 	callEnd := groupExprEnd(fl.src, callStart)
+	for _, raw := range call.ArgList {
+		if constAsView(fl.pkg.info.TypeOf(raw)) != nil {
+			fl.recordConstViewDecl(pos)
+		}
+	}
 	capNative, capText := fc.groupCapture(pos, call)
 	var checkN syntax.Stmt
 	if hasErr {

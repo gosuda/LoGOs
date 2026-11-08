@@ -10,6 +10,7 @@ import (
 	"cmd/compile/internal/types2"
 	"fmt"
 	"reflect"
+	"slices"
 )
 
 // This file erases M5-S1 const views during lowering (SPEC Sec 2.1,
@@ -52,6 +53,54 @@ import (
 // restore. It lives only from Lower through the lowered rechecks of the
 // same checkFiles invocation.
 var erasedAnonReadonly []*syntax.Field
+
+var constViewDecls []syntax.Pos
+
+func (fl *fileLower) recordConstViewDecl(pos syntax.Pos) {
+	if !pos.IsKnown() {
+		return
+	}
+	if !slices.Contains(constViewDecls, pos) {
+		constViewDecls = append(constViewDecls, pos)
+	}
+}
+
+func ConstViewDecls() []syntax.Pos {
+	decls := constViewDecls
+	constViewDecls = nil
+	return decls
+}
+
+func (fl *fileLower) recordConstViewDecls() {
+	info := fl.pkg.info
+	if info == nil || info.Defs == nil {
+		return
+	}
+	syntax.Inspect(fl.file, func(n syntax.Node) bool {
+		switch n := n.(type) {
+		case *syntax.VarDecl:
+			for _, name := range n.NameList {
+				fl.recordIfConstView(name)
+			}
+		case *syntax.FuncType:
+			for _, field := range n.ParamList {
+				fl.recordIfConstView(field.Name)
+			}
+		}
+		return true
+	})
+}
+
+func (fl *fileLower) recordIfConstView(name *syntax.Name) {
+	if name == nil {
+		return
+	}
+	obj, ok := fl.pkg.info.Defs[name].(*types2.Var)
+	if !ok || constAsView(obj.Type()) == nil {
+		return
+	}
+	fl.recordConstViewDecl(name.Pos())
+}
 
 // LogosRestoreErasedAnonReadonly re-arms every recorded readonly method
 // flag for the lowered recheck. Call after Lower has finished all
@@ -124,6 +173,7 @@ func (fl *fileLower) eraseConstViews() {
 		fl.boundConstSlice(e)
 	}
 	fl.wrapConstSlices()
+	fl.recordConstViewDecls()
 }
 
 // eraseConstIn replaces ConstType wrappers in *e with their elements,
