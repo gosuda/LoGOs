@@ -545,7 +545,7 @@ func collectNamedFuncFacts(n *types2.Named, objects map[string]*types2.Func, vis
 	}
 	for i := range n.NumMethods() {
 		m := n.Method(i).Origin()
-		objects[methodObject(n.Obj().Name(), m.Signature().Recv(), m.Name())] = m
+		objects[facts.MethodObject(n.Obj().Name(), m.Signature().Recv(), m.Name())] = m
 		visit(m.Type())
 	}
 	if iface, ok := n.Underlying().(*types2.Interface); ok {
@@ -2006,7 +2006,7 @@ func (g *overlayGraph) prepare() error {
 		if n, ok := obj.Type().(*types2.Named); ok {
 			for i := range n.NumMethods() {
 				m := n.Method(i)
-				key := methodObject(name, m.Type().(*types2.Signature).Recv(), m.Name())
+				key := facts.MethodObject(name, m.Type().(*types2.Signature).Recv(), m.Name())
 				g.routeObject(key, m.Type())
 				g.routeReadonlyObject(key, m.Type())
 			}
@@ -2040,7 +2040,7 @@ func (g *overlayGraph) prepare() error {
 				for i := range n.NumMethods() {
 					m := n.Method(i)
 					g.references(m.Type(), refs, seen)
-					key := methodObject(name, m.Type().(*types2.Signature).Recv(), m.Name())
+					key := facts.MethodObject(name, m.Type().(*types2.Signature).Recv(), m.Name())
 					if len(g.paths[key]) != 0 || g.readonly[key] || len(g.readonlyPaths[key]) != 0 {
 						g.affected[node] = true
 					}
@@ -2252,7 +2252,7 @@ func (g *overlayGraph) addShellMethod(old *types2.Named, shell *types2.Named, i 
 		return nil
 	}
 	sig = substSignature(g.sub, sig)
-	key := methodObject(old.Obj().Name(), m.Type().(*types2.Signature).Recv(), m.Name())
+	key := facts.MethodObject(old.Obj().Name(), m.Type().(*types2.Signature).Recv(), m.Name())
 	for _, p := range g.paths[key] {
 		sig = wrapAtQual(g.sub.pkg, sig, strings.Split(p.path, "."), p.qual).(*types2.Signature)
 	}
