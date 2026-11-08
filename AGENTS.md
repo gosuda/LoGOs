@@ -34,4 +34,3 @@ Run from `src/` with the fork first on PATH: `export PATH="$(cd .. && pwd)/bin:$
 - Language spec: `logos-doc/SPEC.md`
 - Build plan, gates, and lexicon: `logos-doc/IMPLEMENTATION.md`
 - Red-team test ledger: `logos-doc/REDTEAM.md`
-- Original spec text (historical, not normative): `logos-doc/archive/`

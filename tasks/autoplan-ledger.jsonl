@@ -2,7 +2,6 @@
 {"id": "CEO-02", "description": "P0-S5 Create logos-doc/REDTEAM.md with 182 attack rows", "phase": "CEO"}
 {"id": "CEO-03", "description": "P0-S6 Create tasks/autoplan-ledger.jsonl from this ledger", "phase": "CEO"}
 {"id": "CEO-04", "description": "P0-S7 Replace the session todo list with one item per slice", "phase": "CEO"}
-{"id": "CEO-05", "description": "P0-S3 Archive the original spec by section in logos-doc/archive/ (table A, byte-exact cmp check)", "phase": "CEO"}
 {"id": "CEO-06", "description": "P0-S4 Commit this plan as logos-doc/IMPLEMENTATION.md without session-only references", "phase": "CEO"}
 {"id": "CEO-07", "description": "P0-S8 Create the root AGENTS.md for agents working on loGos (commands, gotchas, workflow, references)", "phase": "CEO"}
 {"id": "DX-01", "description": "M0-S1 The logos command", "phase": "DX"}
@@ -72,9 +71,6 @@
 {"id": "ENG-03", "description": "M12-S1 Policy and unsafe imports (cmd/go)", "phase": "ENG"}
 {"id": "ENG-04", "description": "M12-S2 Reachability sinks (linker)", "phase": "ENG"}
 {"id": "ENG-05", "description": "M13-S1 -O levels and CPU targets", "phase": "ENG"}
-{"id": "ENG-06", "description": "M13-S2 Synthetic PGO", "phase": "ENG"}
-{"id": "ENG-07", "description": "M13-S3 Clone specialization", "phase": "ENG"}
-{"id": "ENG-08", "description": "M13-S4 Identical code folding at Os/Oz", "phase": "ENG"}
 {"id": "ENG-09", "description": "M14-S1 Operators and reductions", "phase": "ENG"}
 {"id": "ENG-10", "description": "M15-S1 ARM64 load/store pairing", "phase": "ENG"}
 {"id": "ENG-11", "description": "M15-S2 amd64 masked tails, BMI2, CMOV, checked make", "phase": "ENG"}
@@ -86,11 +82,6 @@
 {"id": "ENG-17", "description": "M18-S1 Chunks, lease, release", "phase": "ENG"}
 {"id": "ENG-18", "description": "M18-S2 Compiler placement", "phase": "ENG"}
 {"id": "ENG-19", "description": "M18-S3 Inline noscan bump and GC scanning", "phase": "ENG"}
-{"id": "ENG-20", "description": "M19-S1 batch and epsilon", "phase": "ENG"}
-{"id": "ENG-21", "description": "M19-S2 greentea with elastic workers", "phase": "ENG"}
-{"id": "ENG-22", "description": "M19-S3 wasm idle marking", "phase": "ENG"}
-{"id": "ENG-23", "description": "M19-S4 Generational card table (GOEXPERIMENT=logosgen)", "phase": "ENG"}
-{"id": "ENG-24", "description": "M19-S5 Moving modes: immix (phase 1) and zgc (phase 2), GOEXPERIMENT=logosgcmoving", "phase": "ENG"}
 {"id": "ENG-25", "description": "M20-S0 cgo in .lgo packages", "phase": "ENG"}
 {"id": "ENG-26", "description": "M20-S1 //logos:cgo_fastcall (GOEXPERIMENT=logosfastcgo)", "phase": "ENG"}
 {"id": "DX-16", "description": "M21-S1 Proxy and position mapping", "phase": "DX"}
@@ -106,9 +97,6 @@
 {"id": "ENG-33", "description": "M11-S3 Binary encoding", "phase": "ENG"}
 {"id": "ENG-34", "description": "M11-S4 Unions, generics, and call sites", "phase": "ENG"}
 {"id": "ENG-35", "description": "M18-S4 Go-group cancellation without a g field", "phase": "ENG"}
-{"id": "ENG-36", "description": "M19-S6 Green Tea span deck", "phase": "ENG"}
-{"id": "ENG-37", "description": "M19-S7 zgc colored pointers", "phase": "ENG"}
-{"id": "ENG-38", "description": "M19-S8 immix blocks and lines", "phase": "ENG"}
 {"id": "DX-20", "description": "M0-S8 Go and loGo/s interop (replaces the import-edge rejection of M0-S2)", "phase": "DX"}
 {"id": "ENG-39", "description": "M18-S5 Comptime layout intrinsics", "phase": "ENG"}
 {"id": "ENG-40", "description": "M18-S6 Pointee-leak escape tag", "phase": "ENG"}
