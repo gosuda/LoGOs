@@ -664,7 +664,10 @@ func isIdent(s string) bool {
 func ValidObject(s string) bool { return validObject(s) }
 
 func validObject(s string) bool {
-	recv, _, _ := strings.Cut(s, "@")
+	recv, tag, hasTag := strings.Cut(s, "@")
+	if hasTag && !isIdent(tag) {
+		return false
+	}
 	if before, after, ok := strings.CutLast(recv, "."); ok {
 		if !isIdent(after) {
 			return false

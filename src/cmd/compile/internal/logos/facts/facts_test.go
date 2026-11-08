@@ -82,6 +82,44 @@ func TestEncodeDecodeRoundTrip(t *testing.T) {
 	}
 }
 
+func TestValidObjectTag(t *testing.T) {
+	cases := []struct {
+		object string
+		want   bool
+	}{
+		{"Float32sFromArch@simd0", true},
+		{"Foo@junk!", false},
+		{"Foo@", false},
+		{"Foo@1x", false},
+	}
+	for _, c := range cases {
+		t.Run(c.object, func(t *testing.T) {
+			if got := facts.ValidObject(c.object); got != c.want {
+				t.Fatalf("ValidObject(%q) = %v, want %v", c.object, got, c.want)
+			}
+		})
+	}
+}
+
+func TestTaggedObjectRoundTrip(t *testing.T) {
+	fp := goobj.FingerprintType{0, 1, 2, 3, 4, 5, 6, 7}
+	in := &facts.Facts{
+		Fingerprint: fp,
+		Fns:         []facts.FnFact{{Object: "Float32sFromArch@simd0", ReturnsNonNil: true}},
+	}
+	back, err := facts.Decode(facts.Encode(fp, in))
+	if err != nil {
+		t.Fatalf("Decode(Encode) failed: %v", err)
+	}
+	if !reflect.DeepEqual(back, in) {
+		t.Fatalf("round trip mismatch:\n got %+v\nwant %+v", back, in)
+	}
+	bad := "logos-facts 3\nfingerprint 0001020304050607\nfn Foo@junk! ReturnsNonNil\n"
+	if _, err := facts.Decode([]byte(bad)); err == nil || !strings.Contains(err.Error(), "bad object") {
+		t.Fatalf("Decode accepted a malformed tag: %v", err)
+	}
+}
+
 func TestEncodeNilHeaderOnly(t *testing.T) {
 	fp := goobj.FingerprintType{7, 6, 5, 4, 3, 2, 1, 0}
 	got := facts.Encode(fp, nil)
