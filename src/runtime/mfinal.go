@@ -442,10 +442,6 @@ func SetFinalizer(obj any, finalizer any) {
 	if ot.Elem == nil {
 		throw("nil elem type!")
 	}
-	if inUserArenaChunk(uintptr(e.data)) {
-		// Arena-allocated objects are not eligible for finalizers.
-		throw("runtime.SetFinalizer: first argument was allocated into an arena")
-	}
 	logosArenaReject(e.data, "SetFinalizer")
 	if debug.sbrk != 0 {
 		// debug.sbrk never frees memory, so no finalizers run

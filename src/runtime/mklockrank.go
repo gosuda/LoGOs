@@ -121,10 +121,6 @@ hchan,
   timers
 < synctest;
 
-# User arena state
-NONE < userArenaState;
-
-
 # Tracing without a P uses a global trace buffer.
 scavenge
 # Above TRACEGLOBAL can emit a trace event without a P.
@@ -148,7 +144,6 @@ allg,
   timer,
   traceStrings,
   typelinks,
-  userArenaState,
   vgetrandom
 # Above MALLOC are things that can allocate memory.
 < MALLOC

@@ -511,7 +511,7 @@ func (s *mspan) initHeapBits() {
 		for i := range b {
 			b[i] = ^uintptr(0)
 		}
-	} else if (!s.spanclass.noscan() && heapBitsInSpan(s.elemsize)) || s.isUserArenaChunk {
+	} else if !s.spanclass.noscan() && heapBitsInSpan(s.elemsize) {
 		b := s.heapBits()
 		clear(b)
 	}
@@ -525,19 +525,15 @@ func (s *mspan) initHeapBits() {
 //
 // Note that the uintptr of each element means something different for small object
 // spans and for heap arena spans. Small object spans are easy: they're never interpreted
-// as anything but uintptr, so they're immune to differences in endianness. However, the
-// heapBits for user arena spans is exposed through a dummy type descriptor, so the byte
-// ordering needs to match the same byte ordering the compiler would emit. The compiler always
-// emits the bitmap data in little endian byte ordering, so on big endian platforms these
-// uintptrs will have their byte orders swapped from what they normally would be.
+// as anything but uintptr, so they're immune to differences in endianness.
 //
-// heapBitsInSpan(span.elemsize) or span.isUserArenaChunk must be true.
+// heapBitsInSpan(span.elemsize) must be true.
 //
 //go:nosplit
 func (span *mspan) heapBits() []uintptr {
 	const doubleCheck = false
 
-	if doubleCheck && !span.isUserArenaChunk {
+	if doubleCheck {
 		if span.spanclass.noscan() {
 			throw("heapBits called for noscan")
 		}
@@ -547,7 +543,7 @@ func (span *mspan) heapBits() []uintptr {
 	}
 	// Find the bitmap at the end of the span.
 	//
-	// Nearly every span with heap bits is exactly one page in size. Arenas are the only exception.
+	// Nearly every span with heap bits is exactly one page in size.
 	if span.npages == 1 {
 		// This will be inlined and constant-folded down.
 		return heapBitsSlice(span.base(), pageSize, span.elemsize)
@@ -1974,4 +1970,14 @@ func pointerMask(ep any) (mask []byte) {
 	// possibly read-only data, like malloc(0).
 	// must not have pointers
 	return
+}
+
+func bswapIfBigEndian(x uintptr) uintptr {
+	if goarch.BigEndian {
+		if goarch.PtrSize == 8 {
+			return uintptr(sys.Bswap64(uint64(x)))
+		}
+		return uintptr(sys.Bswap32(uint32(x)))
+	}
+	return x
 }

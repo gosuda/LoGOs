@@ -97,10 +97,6 @@ func AddCleanup[T, S any](ptr *T, cleanup func(S), arg S) Cleanup {
 			panic("runtime.AddCleanup: ptr is equal to arg, cleanup will never run")
 		}
 	}
-	if inUserArenaChunk(usptr) {
-		// Arena-allocated objects are not eligible for cleanup.
-		panic("runtime.AddCleanup: ptr is arena-allocated")
-	}
 	logosArenaReject(unsafe.Pointer(ptr), "AddCleanup")
 	if debug.sbrk != 0 {
 		// debug.sbrk never frees memory, so no cleanup will ever run

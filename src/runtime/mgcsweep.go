@@ -632,17 +632,16 @@ func (sl *sweepLocked) sweep(preserve bool) bool {
 				if debug.clobberfree != 0 {
 					clobberfree(unsafe.Pointer(x), size)
 				}
-				// User arenas are handled on explicit free.
-				if raceenabled && !s.isUserArenaChunk {
+				if raceenabled {
 					racefree(unsafe.Pointer(x), size)
 				}
-				if msanenabled && !s.isUserArenaChunk {
+				if msanenabled {
 					msanfree(unsafe.Pointer(x), size)
 				}
-				if asanenabled && !s.isUserArenaChunk {
+				if asanenabled {
 					asanpoison(unsafe.Pointer(x), size)
 				}
-				if valgrindenabled && !s.isUserArenaChunk {
+				if valgrindenabled {
 					valgrindFree(unsafe.Pointer(x))
 				}
 			}
@@ -726,41 +725,6 @@ func (sl *sweepLocked) sweep(preserve bool) bool {
 	// At this point the mark bits are cleared and allocation ready
 	// to go so release the span.
 	atomic.Store(&s.sweepgen, sweepgen)
-
-	if s.isUserArenaChunk {
-		if preserve {
-			// This is a case that should never be handled by a sweeper that
-			// preserves the span for reuse.
-			throw("sweep: tried to preserve a user arena span")
-		}
-		if nalloc > 0 {
-			// There still exist pointers into the span or the span hasn't been
-			// freed yet. It's not ready to be reused. Put it back on the
-			// full swept list for the next cycle.
-			mheap_.central[spc].mcentral.fullSwept(sweepgen).push(s)
-			return false
-		}
-
-		// It's only at this point that the sweeper doesn't actually need to look
-		// at this arena anymore, so subtract from pagesInUse now.
-		mheap_.pagesInUse.Add(-s.npages)
-		s.state.set(mSpanDead)
-
-		// The arena is ready to be recycled. Remove it from the quarantine list
-		// and place it on the ready list. Don't add it back to any sweep lists.
-		systemstack(func() {
-			// It's the arena code's responsibility to get the chunk on the quarantine
-			// list by the time all references to the chunk are gone.
-			if s.list != &mheap_.userArena.quarantineList {
-				throw("user arena span is on the wrong list")
-			}
-			lock(&mheap_.lock)
-			mheap_.userArena.quarantineList.remove(s)
-			mheap_.userArena.readyList.insert(s)
-			unlock(&mheap_.lock)
-		})
-		return false
-	}
 
 	if spc.sizeclass() != 0 {
 		// Handle spans for small objects.

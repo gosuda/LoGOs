@@ -380,9 +380,6 @@ func ReadMemStatsSlow() (base, slow MemStats) {
 			if s.state.get() != mSpanInUse {
 				continue
 			}
-			if s.isUnusedUserArenaChunk() {
-				continue
-			}
 			if sizeclass := s.spanclass.sizeclass(); sizeclass == 0 {
 				slow.Mallocs++
 				slow.Alloc += uint64(s.elemsize)
@@ -1820,50 +1817,6 @@ func CheckPackScavChunkData(gen uint32, inUse, lastInUse uint16, flags uint8) bo
 const GTrackingPeriod = gTrackingPeriod
 
 var ZeroBase = unsafe.Pointer(&zerobase)
-
-const UserArenaChunkBytes = userArenaChunkBytes
-
-type UserArena struct {
-	arena *userArena
-}
-
-func NewUserArena() *UserArena {
-	return &UserArena{newUserArena()}
-}
-
-func (a *UserArena) New(out *any) {
-	i := efaceOf(out)
-	typ := i._type
-	if typ.Kind() != abi.Pointer {
-		panic("new result of non-ptr type")
-	}
-	typ = (*ptrtype)(unsafe.Pointer(typ)).Elem
-	i.data = a.arena.new(typ)
-}
-
-func (a *UserArena) Slice(sl any, cap int) {
-	a.arena.slice(sl, cap)
-}
-
-func (a *UserArena) Free() {
-	a.arena.free()
-}
-
-func GlobalWaitingArenaChunks() int {
-	n := 0
-	systemstack(func() {
-		lock(&mheap_.lock)
-		for s := mheap_.userArena.quarantineList.first; s != nil; s = s.next {
-			n++
-		}
-		unlock(&mheap_.lock)
-	})
-	return n
-}
-
-func UserArenaClone[T any](s T) T {
-	return arena_heapify(s).(T)
-}
 
 var AlignUp = alignUp
 

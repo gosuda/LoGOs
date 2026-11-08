@@ -177,15 +177,6 @@ type mheap struct {
 	// then release mheap_.lock.
 	heapArenas []arenaIdx
 
-	// userArenaArenas is the arenaIndex of every mapped arena mapped for
-	// user arenas.
-	//
-	// Access is protected by mheap_.lock. However, since this is
-	// append-only and old backing arrays are never freed, it is
-	// safe to acquire mheap_.lock, copy the slice header, and
-	// then release mheap_.lock.
-	userArenaArenas []arenaIdx
-
 	// sweepArenas is a snapshot of heapArenas taken at the
 	// beginning of the sweep cycle. This can be read safely by
 	// simply blocking GC (by disabling preemption).
@@ -228,25 +219,6 @@ type mheap struct {
 	specialSecretAlloc         fixalloc // allocator for specialSecret
 	speciallock                mutex    // lock for special record allocators.
 	arenaHintAlloc             fixalloc // allocator for arenaHints
-
-	// User arena state.
-	//
-	// Protected by mheap_.lock.
-	userArena struct {
-		// arenaHints is a list of addresses at which to attempt to
-		// add more heap arenas for user arena chunks. This is initially
-		// populated with a set of general hint addresses, and grown with
-		// the bounds of actual heap arena ranges.
-		arenaHints *arenaHint
-
-		// quarantineList is a list of user arena spans that have been set to fault, but
-		// are waiting for all pointers into them to go away. Sweeping handles
-		// identifying when this is true, and moves the span to the ready list.
-		quarantineList mSpanList
-
-		// readyList is a list of empty user arena spans that are ready for reuse.
-		readyList mSpanList
-	}
 
 	// cleanupID is a counter which is incremented each time a cleanup special is added
 	// to a span. It's used to create globally unique identifiers for individual cleanup.
@@ -505,14 +477,12 @@ type mspan struct {
 	spanclass             spanClass     // size class and noscan (uint8)
 	state                 mSpanStateBox // mSpanInUse etc; accessed atomically (get/set methods)
 	needzero              uint8         // needs to be zeroed before allocation
-	isUserArenaChunk      bool          // whether or not this span represents a user arena
 	isLogosArenaChunk     bool          // whether or not this span is a loGo/s arena chunk (arena_logos.go)
 	allocCountBeforeCache uint16        // a copy of allocCount that is stored just before this span is cached
 	elemsize              uintptr       // computed from sizeclass or from npages
 	limit                 uintptr       // end of data in span
 	speciallock           mutex         // guards specials list and changes to pinnerBits
 	specials              *special      // linked list of special records sorted by offset.
-	userArenaChunkFree    addrRange     // interval for managing chunk allocation
 	largeType             *_type        // malloc header for large objects.
 }
 
@@ -1729,9 +1699,6 @@ func (h *mheap) freeSpanLocked(s *mspan, typ spanAllocType) {
 			throw("mheap.freeSpanLocked - invalid stack free")
 		}
 	case mSpanInUse:
-		if s.isUserArenaChunk {
-			throw("mheap.freeSpanLocked - invalid free of user arena chunk")
-		}
 		if s.allocCount != 0 || s.sweepgen != h.sweepgen {
 			print("mheap.freeSpanLocked - span ", s, " ptr ", hex(s.base()), " allocCount ", s.allocCount, " sweepgen ", s.sweepgen, "/", h.sweepgen, "\n")
 			throw("mheap.freeSpanLocked - invalid free")

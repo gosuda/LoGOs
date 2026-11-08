@@ -1652,15 +1652,6 @@ func gcMarkTermination(stw worldStop) {
 		println("checkfinalizers: queue:", fn, "finalizers +", cn, "cleanups")
 	}
 
-	// Set any arena chunks that were deferred to fault.
-	lock(&userArenaState.lock)
-	faultList := userArenaState.fault
-	userArenaState.fault = nil
-	unlock(&userArenaState.lock)
-	for _, lc := range faultList {
-		lc.mspan.setUserArenaChunkToFault()
-	}
-
 	// Enable huge pages on some metadata if we cross a heap threshold.
 	if gcController.heapGoal() > minHeapForMetadataHugePages {
 		systemstack(func() {

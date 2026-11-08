@@ -131,10 +131,6 @@ func pinnerGetPtr(i *any) unsafe.Pointer {
 	if kind := etyp.Kind(); kind != abi.Pointer && kind != abi.UnsafePointer {
 		panic(errorString("runtime.Pinner: argument is not a pointer: " + toRType(etyp).string()))
 	}
-	if inUserArenaChunk(uintptr(e.data)) {
-		// Arena-allocated objects are not eligible for pinning.
-		panic(errorString("runtime.Pinner: object was allocated into an arena"))
-	}
 	return e.data
 }
 

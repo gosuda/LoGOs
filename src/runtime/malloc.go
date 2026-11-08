@@ -540,14 +540,6 @@ func mallocinit() {
 		// On AIX, mmaps starts at 0x0A00000000000000 for 64-bit.
 		// processes.
 		//
-		// Space mapped for user arenas comes immediately after the range
-		// originally reserved for the regular heap when race mode is not
-		// enabled because user arena chunks can never be used for regular heap
-		// allocations and we want to avoid fragmenting the address space.
-		//
-		// In race mode we have no choice but to just use the same hints because
-		// the race detector requires that the heap be mapped contiguously.
-		//
 		// If randomizeHeapBase is set, we attempt to randomize the base address
 		// as much as possible. We do this by generating a random uint64 via
 		// bootstrapRand and using it's bits to randomize portions of the base
@@ -632,16 +624,9 @@ func mallocinit() {
 			default:
 				p = uintptr(i)<<40 | uintptrMask&(0x00c0<<32)
 			}
-			// Switch to generating hints for user arenas if we've gone
-			// through about half the hints. In race mode, take only about
-			// a quarter; we don't have very much space to work with.
-			hintList := &mheap_.arenaHints
-			if (!raceenabled && i > 0x3f) || (raceenabled && i > 0x5f) {
-				hintList = &mheap_.userArena.arenaHints
-			}
 			hint := (*arenaHint)(mheap_.arenaHintAlloc.alloc())
 			hint.addr = p
-			hint.next, *hintList = *hintList, hint
+			hint.next, mheap_.arenaHints = mheap_.arenaHints, hint
 		}
 	} else {
 		// On a 32-bit machine, we're much more concerned
@@ -709,14 +694,6 @@ func mallocinit() {
 		hint := (*arenaHint)(mheap_.arenaHintAlloc.alloc())
 		hint.addr = p
 		hint.next, mheap_.arenaHints = mheap_.arenaHints, hint
-
-		// Place the hint for user arenas just after the large reservation.
-		//
-		// While this potentially competes with the hint above, in practice we probably
-		// aren't going to be getting this far anyway on 32-bit platforms.
-		userArenaHint := (*arenaHint)(mheap_.arenaHintAlloc.alloc())
-		userArenaHint.addr = p
-		userArenaHint.next, mheap_.userArena.arenaHints = mheap_.userArena.arenaHints, userArenaHint
 	}
 	// Initialize the memory limit here because the allocator is going to look at it
 	// but we haven't called gcinit yet and we're definitely going to allocate memory before then.

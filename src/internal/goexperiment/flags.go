@@ -83,10 +83,6 @@ type Flags struct {
 	// by default.
 	HeapMinimum512KiB bool
 
-	// Arenas causes the "arena" standard library package to be visible
-	// to the outside world.
-	Arenas bool
-
 	// CgoCheck2 enables an expensive cgo rule checker.
 	// When this experiment is enabled, cgo rule checks occur regardless
 	// of the GODEBUG=cgocheck setting provided at runtime.
