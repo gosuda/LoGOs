@@ -317,7 +317,7 @@ func walkFuncs(ctxt *Link, funcs []loader.Sym, f func(loader.Sym)) {
 // func symbol to the name offset in runtime.funcnamtab.
 //
 // loGo/s clone rule (SPEC T-205, red-team #9, #74): each entry is
-// logosFuncDisplayName of the full link symbol, so comptime clones
+// logosCloneBaseName of the full link symbol, so comptime clones
 // (<f>_logosct<N>) collapse to the base <f> for traces and FuncForPC.
 // The link symbol and go tool nm keep the full suffix, preserving stable,
 // unique, resolvable clones at link time. This single path serves shared,
@@ -331,7 +331,7 @@ func (state *pclntab) generateFuncnametab(ctxt *Link, funcs []loader.Sym) map[lo
 	writeFuncNameTab := func(ctxt *Link, s loader.Sym) {
 		symtab := ctxt.loader.MakeSymbolUpdater(s)
 		for s, off := range nameOffsets {
-			symtab.AddCStringAt(int64(off), logosFuncDisplayName(ctxt.loader.SymName(s)))
+			symtab.AddCStringAt(int64(off), logosCloneBaseName(ctxt.loader.SymName(s)))
 		}
 	}
 
@@ -339,7 +339,7 @@ func (state *pclntab) generateFuncnametab(ctxt *Link, funcs []loader.Sym) map[lo
 	var size int64
 	walkFuncs(ctxt, funcs, func(s loader.Sym) {
 		nameOffsets[s] = uint32(size)
-		size += int64(len(logosFuncDisplayName(ctxt.loader.SymName(s))) + 1) // NULL terminate
+		size += int64(len(logosCloneBaseName(ctxt.loader.SymName(s))) + 1) // NULL terminate
 	})
 
 	state.funcnametab = state.addGeneratedSym(ctxt, "runtime.funcnametab", size, 1, writeFuncNameTab)

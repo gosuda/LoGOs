@@ -6,7 +6,7 @@ package ld
 
 import "testing"
 
-func TestLogosFuncDisplayName(t *testing.T) {
+func TestLogosCloneBaseName(t *testing.T) {
 	checks := []struct {
 		label string
 		input string
@@ -29,6 +29,7 @@ func TestLogosFuncDisplayName(t *testing.T) {
 		{label: "comptimeASCIILetterAfterNumber", input: "example.com/p.Foo_logosct1x", want: "example.com/p.Foo_logosct1x"},
 		{label: "comptimeASCIIDigitsAfterOtherText", input: "example.com/p.Foo_logosct2extra3", want: "example.com/p.Foo_logosct2extra3"},
 		{label: "ordinaryFunction", input: "main.main", want: "main.main"},
+		{label: "abiWrapper", input: "runtime.cgocall.abi0", want: "runtime.cgocall.abi0"},
 		{label: "ordinaryMethodName", input: "main.Autowire", want: "main.Autowire"},
 		{label: "asciiPeriod", input: "example.com/p.Foo.logosct1", want: "example.com/p.Foo.logosct1"},
 		{label: "numberMissing", input: "example.com/p.Foo·logosct", want: "example.com/p.Foo·logosct"},
@@ -45,23 +46,9 @@ func TestLogosFuncDisplayName(t *testing.T) {
 
 	for _, tc := range checks {
 		t.Run(tc.label, func(t *testing.T) {
-			if got := logosFuncDisplayName(tc.input); got != tc.want {
-				t.Fatalf("logosFuncDisplayName(%q) = %q, want %q", tc.input, got, tc.want)
+			if got := logosCloneBaseName(tc.input); got != tc.want {
+				t.Fatalf("logosCloneBaseName(%q) = %q, want %q", tc.input, got, tc.want)
 			}
 		})
-	}
-}
-
-func TestLogosCloneBaseMatchesDisplay(t *testing.T) {
-	for _, name := range []string{
-		"main.main",
-		"main.Autowire·logosct7",
-		"example.com/p.Foo_logosct1",
-		"example.com/p.Foo·logosct12",
-		"runtime.cgocall.abi0",
-	} {
-		if got, want := logosCloneBaseName(name), logosFuncDisplayName(name); got != want {
-			t.Errorf("logosCloneBaseName(%q) = %q, display = %q, want identical", name, got, want)
-		}
 	}
 }

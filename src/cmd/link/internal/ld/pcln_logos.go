@@ -9,48 +9,29 @@ import (
 	"strings"
 )
 
-// Clone suffixes (SPEC T-205, red-team #9, #74). Values are the single
-// source of truth in internal/abi (Logos*Infix); the local names stay as
-// short aliases so call sites read plainly. The ASCII spelling must stay
-// in sync with cfCopyInfix in
-// cmd/compile/internal/logos/comptime.go. The dotted ASCII form
-// ".logosct" is ordinary text and is never a suffix.
-const (
-	logosCtDisplayInfix = abi.LogosCtDisplayInfix
-	// logosCtASCIIInfix is the source-level spelling of a comptime
-	// copy suffix.
-	logosCtASCIIInfix = abi.LogosCtASCIIInfix
-)
-
-// logosCloneInfixes lists every terminal clone suffix. One table-driven
-// path handles them all: adding a suffix spelling is a table entry, not a
-// new branch.
 var logosCloneInfixes = []string{
-	logosCtDisplayInfix,
-	logosCtASCIIInfix,
+	abi.LogosCtDisplayInfix,
+	abi.LogosCtASCIIInfix,
 }
 
 // Naming rule (SPEC T-205, red-team #9, #74): pclntab
 // (runtime.funcnametab) strips every terminal clone suffix to the base so
-// traces print <f> and FuncForPC resolves to the base name. The link
-// symbol and the symbol table (go tool nm) keep the full canonical
+// traces print <f> and FuncForPC resolves to the base name, while the
+// link symbol and the symbol table (go tool nm) keep the full canonical
 // suffix, so every clone stays stable, unique, and resolvable at link
-// time; only the pclntab copy is shortened. One generateFuncnametab path
-// in pcln.go serves shared, plugin, and internal links, so the base
-// display survives every link mode. logosCloneBaseName below performs the
-// identical strip for capability sink identity (capSinkName); the two
-// must stay identical.
-func logosFuncDisplayName(name string) string {
-	return logosCloneBaseName(name)
-}
-
-// logosCloneBaseName returns the base name with every terminal clone
-// suffix stripped: the middle-dot infix ·logosct and the source-level
-// comptime infix _logosct, each with a nonempty ASCII decimal
-// sequence number. It preserves everything else: package path, method
-// receiver, and generic shape spelling. Capability sink matching
-// (capSinkName) uses the base for sink identity; pclntab storage uses
-// logosFuncDisplayName above, which performs the identical strip.
+// time. One generateFuncnametab path in pcln.go serves shared, plugin,
+// and internal links, so the base display survives every link mode;
+// logosCloneBaseName performs the identical strip for capability sink
+// identity (capSinkName), and the two must stay identical.
+//
+// logosCloneBaseName strips every terminal clone suffix to the base: the
+// middle-dot infix ·logosct and the source-level comptime infix _logosct,
+// each with a nonempty ASCII decimal sequence number, preserving package
+// path, method receiver, and generic shape spelling. The infix values are
+// the single source of truth in internal/abi (Logos*Infix); the ASCII
+// spelling must stay in sync with cfCopyInfix in
+// cmd/compile/internal/logos/comptime.go. The dotted ASCII form
+// ".logosct" is ordinary text and is never a suffix.
 func logosCloneBaseName(name string) string {
 	orig := name
 	for {
