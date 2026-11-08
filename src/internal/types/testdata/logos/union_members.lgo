@@ -54,6 +54,12 @@ func caseSubset(x U) int {
 // An open union in value position fails.
 var v interface /* ERROR "correctness::open_union_value" */ { ~int | ~string }
 
+type Open interface {
+	~int | ~string
+}
+
+var vo Open /* ERROR "correctness::open_union_value" */
+
 // Member assertion out of the union compiles.
 func memberAssert(x U) int {
 	return x.(int)

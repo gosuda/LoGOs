@@ -59,6 +59,7 @@ type Ghost struct : Named {
 
 func (g Ghost) Name() string { return "boo" }
 
+
 var _ Named = Ghost{}
 
 // Embedded struct fields satisfy by Go selector depth.

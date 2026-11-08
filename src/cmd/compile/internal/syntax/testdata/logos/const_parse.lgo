@@ -36,3 +36,7 @@ func CVParseBad() {
 	var v const; // ERROR expected type
 	_ = v
 }
+
+const type T = int // ERROR syntax error: unexpected keyword type, expected name
+
+const var X = 1 // ERROR syntax error: unexpected keyword var, expected name
