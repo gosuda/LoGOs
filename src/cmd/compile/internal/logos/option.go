@@ -1171,7 +1171,7 @@ func (fl *fileLower) lowerMapIndex(e *syntax.IndexExpr) syntax.Expr {
 		return e
 	}
 	id := fl.nextWrapID()
-	mStart, _, lbrack, rbrack := fl.lookupSpans(e)
+	mStart, lbrack, rbrack := fl.lookupSpans(e)
 	fl.addOwned(id, mStart, mStart, rtAlias+".Lookup(")
 	e.X = fl.lowerOptExpr(e.X)
 	e.Index = fl.lowerOptExpr(e.Index)
@@ -1181,14 +1181,13 @@ func (fl *fileLower) lowerMapIndex(e *syntax.IndexExpr) syntax.Expr {
 }
 
 // lookupSpans returns the eject offsets of a map-read rewrite from the
-// original tree: the map start for the head, the key start for the
-// brackets, and both bracket offsets.
-func (fl *fileLower) lookupSpans(e *syntax.IndexExpr) (mStart, kStart, lbrack, rbrack int) {
+// original tree: the map start for the head and both bracket offsets.
+func (fl *fileLower) lookupSpans(e *syntax.IndexExpr) (mStart, lbrack, rbrack int) {
 	mStart = fl.off(fl.optLeftmost(e.X))
-	kStart = fl.off(leftmostOf(e.Index))
+	kStart := fl.off(leftmostOf(e.Index))
 	lbrack = fl.findLbrack(mStart, kStart)
 	rbrack = fl.findRbrack(kStart)
-	return mStart, kStart, lbrack, rbrack
+	return mStart, lbrack, rbrack
 }
 
 // lookupFinish builds `_logos_rt.Lookup(m, k)` for the read e whose
@@ -1252,7 +1251,7 @@ func (fl *fileLower) lowerCoalesce(e *syntax.CoalesceExpr) syntax.Expr {
 	fl.add(qoff, qoff+2, "")
 	fl.addOwned(id, yEnd, yEnd, " }()")
 	if isIndex {
-		mStart, _, lbrack, rbrack := fl.lookupSpans(ux)
+		mStart, lbrack, rbrack := fl.lookupSpans(ux)
 		// The head anchors before any grouping parens around the read,
 		// and the pair is deleted so the fused init stays valid Go.
 		// Without parens both are no-ops: the anchor equals mStart and

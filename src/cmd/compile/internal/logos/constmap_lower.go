@@ -508,7 +508,7 @@ func (fl *fileLower) lowerConstMapLen(e *syntax.CallExpr) (syntax.Expr, bool) {
 func (fl *fileLower) lowerConstMapRead(e *syntax.IndexExpr, g *constMapGen) syntax.Expr {
 	pos := e.Pos()
 	id := fl.nextWrapID()
-	mStart, _, lbrack, rbrack := fl.lookupSpans(e)
+	mStart, lbrack, rbrack := fl.lookupSpans(e)
 	e.Index = fl.lowerOptExpr(e.Index)
 	lookup := callOf(pos, nameOf(pos, g.lookupName()), []syntax.Expr{e.Index})
 	opt := fl.asOption(fl.optType(e))
