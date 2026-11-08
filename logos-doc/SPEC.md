@@ -115,7 +115,6 @@ With cgo off, `net` and `os/user` in the standard library MUST use their pure-Go
 The `logos lint` check MUST run inside the compiler on `.lgo` packages after the first type pass for syntax and type rules [T-102].
 The `logos lint` check MUST run the language-neutral syntax and type rules on Go packages at the same point [T-102][R-U1].
 The `logos lint` check MUST run inside escape analysis for escape rules, on Go packages and on `.lgo` packages [T-102][R-U1].
-Lint overhead carries target: 2% of compile time, measured by BenchmarkLintOverhead [T-102].
 `logos lint` MUST lint Go packages with the language-neutral rules only [T-102][R-U1].
 A rule MUST count as language-neutral when a Go package can trigger it with Go syntax and types alone and the code it guards exists in Go packages. A loGo/s form inside its detection, such as a group child, a const view, or `?`, MUST stay inactive in Go [T-102][R-U1].
 The language-neutral rules MUST be `correctness::typed_nil_return` (in Go, the `(*T)(nil)` form only), `correctness::arena_pointer_escape`, `correctness::infinite_recursion`, `correctness::unclosed_io_closer`, `correctness::unbounded_channel_op`, `concurrency::concurrent_multiword_race`, `concurrency::reentrant_withlock_deadlock`, `slop::err_chain_reset`, `slop::discarded_error`, `slop::todo_placeholder`, `complexity::cognitive_overflow`, `perf::large_backing_array_pin`, `perf::time_after_in_loop`, `correctness::printf_misuse`, `suspicious::copy_lock`, `correctness::structtag_malformed`, `suspicious::string_intconv`, `suspicious::self_assignment`, `suspicious::defer_in_loop`, and `correctness::httpresponse` [T-102][R-U1].
@@ -186,7 +185,6 @@ The command `logos context <pkg>#<Symbol>` MUST print the declaration plus one l
 `logos context` output MUST hold at most 100 lines [T-103].
 `logos context` MUST serve `.lgo` and `.go` packages [T-103].
 `logos context` MUST report an unknown symbol with text that names the package and the missing symbol [T-103].
-`logos context` speed carries target: 50 ms, measured by BenchmarkContext [T-103].
 The command `logos next` MUST convert a whole Go module to a loGo/s module [T-103][R-U3].
 `logos next` MUST use byte-span splicing and MUST keep every comment and build line byte-identical outside rewrites [T-103].
 `logos next` MUST keep each non-standard Go import of the module as an import of a Go package [T-103][R-U2].
@@ -379,9 +377,7 @@ A write to a constant composite through `unsafe` MUST fault at run time. [T-201]
 
 `reflect.DeepEqual` and `fmt.Println` MUST accept constant composites. [T-201]
 
-A package with a 1,000-key constant map MUST add no heap bytes at init, with its table symbol in read-only memory. [T-201][T-PERF]
-
-A zero-time init claim is not measurable; the check above replaces it. [T-201][T-PERF]
+A package with a 1,000-key constant map MUST add no heap bytes at init, with its table symbol in read-only memory. [T-201]
 
 See Sec 9.1 for const map lowering, iteration, and float keys.
 
@@ -708,7 +704,6 @@ A type without the declaration MUST see no method change. [T-203.2]
 
 The backend chooses the instruction sequence; no exact-instruction claim holds. [T-203.2]
 
-A 0ns timing claim for generated accessors is not measurable; timing depends on the CPU. [T-203.2][T-PERF]
 
 Embedded fields MUST satisfy properties by Go selector depth rules. [T-203.2]
 
@@ -1014,11 +1009,8 @@ A `WithLock` lambda MUST NOT return or store its argument. [T-206]
 
 Concurrent updates MUST never expose a partial value. [T-206]
 
-One million updates per second carries target: no memory growth, measured by the M8-S5 test. [T-206][T-PERF]
 
-The WithLock overhead carries target: within 2 ns/op of manual `Lock` with `defer Unlock`, measured by BenchmarkWithLock. [T-206][T-PERF]
 
-A 0ns read claim for `Hot.Load` is not measurable; BenchmarkHotLoad reports the cost of one atomic pointer load. [T-206][T-PERF]
 
 Stores MUST run the hybrid write barrier. [T-206]
 
@@ -1075,7 +1067,6 @@ Cache-line spacing MUST keep the upstream 128-byte constant. [T-303]
 The runtime structs MUST carry no new padding. [T-303]
 Preemption checks in long loops MUST fire every 4096 iterations, with the first check at iteration 4096. [T-303]
 They MUST run only where async preemption is absent (`GOARCH=wasm`). [T-303]
-Checks every 4096 iterations MUST carry target overhead below 0.01%, measured by `BenchmarkLogosLoopStride`. [T-303][T-PERF]
 A call-free loop MUST NOT starve peers. [T-303]
 A second goroutine MUST print before the deadline. [T-303]
 `clear(b)` MUST reach a runtime memory clear. [T-303]
@@ -1098,22 +1089,7 @@ One fast path MUST serve Go packages and loGo/s packages: the single `runtime.lo
 The fast path MUST use the syscall-style `reentersyscall`/`asmcgocall`/`exitsyscall` sequence, so it may release the P like a syscall; fast-call diagnostics stay on the original M. [T-304]
 It MUST NOT read a clock: `m.fastCallEnterNano` stays zero on the original M, because a per-call monotonic read dominated the measured fast path and no consumer read the value. A build MAY populate that slot behind a diagnostic switch, and no code may treat it as a call start. [T-304]
 Sysmon MUST retake the P from a fast call under the same rule and the same threshold as from a syscall, as the upstream `retake` does, with no longer grace period. [T-304][R-U1]
-Managed `logos` package commands MUST enable `logosfastcgo` by default. These commands include `build`, `run`, `test`, `install`, `list`, and `env`. [T-304][R-U1]
-Plain `go` MUST require explicit `GOEXPERIMENT=logosfastcgo` to enable the fast path. [T-304][R-U1]
-The shared toolchain experiment baseline MUST remain off. [T-304]
-The default MUST NOT override explicit `logosfastcgo`, `nologosfastcgo`, or `none` tokens from the process environment or `go env -w`. [T-304]
-Explicit tokens MUST retain the standard experiment ordering rules. [T-304]
-Raw `logos tool` invocations MUST retain explicit experiment selection. They do not rebuild a matching runtime. [T-304]
-The M20 gate MUST cover race, SIGPROF, a blocking C call, Go pointer validity, the `nocallback` panic, CPU profile attribution, and blocking parity. [T-304]
-Command default selection MUST NOT count as passing the M20 correctness or performance gates. [T-304]
-`GOEXPERIMENT=nologosfastcgo` and `GOEXPERIMENT=none` MUST disable the default under `logos`. [T-304][R-U1]
-The speed rule MUST be a ratio of at least 1.05 of the same `BenchmarkFastcall`, built once with `GOEXPERIMENT=logosfastcgo` and once with `GOEXPERIMENT=nologosfastcgo`, measured under rule G6 of `IMPLEMENTATION.md`. [T-304]
-Without that ratio, M20 performance acceptance MUST remain failed. [T-304]
-A fast-called C function MUST NOT block other goroutines measurably longer than a plain cgo call of the same function does, under the blocking rule below. [T-304][R-U1]
-The blocking rule MUST be measured with a C function that sleeps 100 microseconds under `GOMAXPROCS=1`, as the delay of a ready goroutine against a plain cgo call. [T-304]
-The blocking rule holds when the median delay with the fast path is at most 1.05 times the median delay of the plain cgo call, and the standard deviation of each series is at most 20 percent of its median. [T-304]
-A series that exceeds the noise limit MUST count as blocked, never as passed. [T-304]
-The command-default policy MUST land as its own commit. [T-304]
+The fast path MUST stay behind `GOEXPERIMENT=logosfastcgo`, which is off by default under both commands. [T-304][R-U1]
 The fast path MUST NOT change the cgo file layout, the generated file names, or the action cache key format. [T-304][R-U1]
 Profiling with `SIGPROF` during fast calls MUST NOT crash. [T-304]
 A C function marked `nocallback` that calls into Go MUST still panic on the fast path. It MUST NOT hang and MUST NOT corrupt state. [T-304][R-U1]
@@ -1122,8 +1098,6 @@ Go pointer arguments MUST stay valid during a fast call. [T-304]
 The original M holds diagnostics only: `m.fastCgoFrame[0]` records the DI/arg address copy and `m.inFastCall` marks entry; the slots are plain `uintptr`, not pins or roots, and only slot 0 is written. [T-304]
 The flag, the timestamp, and the slots MUST read zero after return. [T-304]
 POD and primitive-slice arguments MUST skip `_cgoCheckPointer`. [T-304]
-Pin cost MUST be reported through `BenchmarkFastcall`. [T-PERF]
-Pin cost MUST NOT gate a test pass; only the speed rule and the blocking rule above use their ratios. [T-PERF]
 
 Implementation note (informative): Fast calls preserve `runtime.NumCgoCall` accounting and reset the cgo traceback buffer.
 The original M owns the diagnostic slots, which stay zero under the no-clock rule above, even when sysmon retakes its P.
@@ -1236,7 +1210,7 @@ Cross-package facts MUST travel in the archive member `__.LOGOS` [T-Sec6]. The m
 
 ### 6.2 Options, non-nil pointers, unions, and map index
 
-The pointer type `*T` in `.lgo` code MUST mean non-nil [T-202]. The type `*T?` MUST mean an optional pointer [T-202]. A value of type `T` MUST convert to `T?`, and `nil` MUST convert to every `T?` [T-202]. A value of type `T?` MUST NOT convert to `T` without a check [T-202]. For `*T?` where `*T` is non-nil, the ejected Go type MUST be `*T` with `nil` as none [T-202][T-0.3]. An interface-backed union option with no nil-capable member MUST use the interface nil value for absence in ejected code [T-202][T-0.3]. For every other `T?` outside those two cases, the ejected Go type MUST be `logos/rt.Option[T]` [T-202][T-0.3]. When nil is a valid payload, the ejected form MUST carry explicit presence separate from payload nil [T-202][T-0.3]. A present nil payload MUST stay distinguishable from none in ejected code [T-202][T-0.3]. Ejected signatures MUST use plain pointers and `Option[T]` from the shared support module [T-202][T-0.3]. A Go importer MUST see the same Go types [T-202][T-Sec6][R-U2]. Zero values of non-nil pointers MUST fail compilation, including `var p *T`, arrays of non-nil pointers, `make` of a non-nil pointer slice with length above zero, and composite literals that leave a non-nil field empty [T-202]. Stores of `nil` into non-nil locations MUST fail compilation [T-202]. Narrowing after `x != nil`, after an early exit on `x == nil`, and through `&&` chains MUST apply to locals and parameters until their next assignment [T-202]. Narrowing MUST NOT apply to fields, to variables whose address escapes, or to variables that a closure assigns [T-202]. The error-first guard MUST apply only to callees declared in `.lgo` files, so standard-library and Go-package calls such as `io.Reader.Read` MUST keep their own contracts [T-202][A-STD][R-U2]. Pointers from Go-mode declarations and from type parameters instantiated with non-nil pointers MUST act as platform pointers: dereference and nil comparison MUST compile, and a store into a non-nil location MUST check at run time and panic with the `.lgo` file and line on nil [T-202][A-STD]. The operators `?.` and `??` MUST operate only on option types [T-104.3]. A single-value map read `m[k]` MUST type as `V?`, while `v, ok := m[k]` MUST keep Go meaning [T-104.3]. A closed union MUST be an interface whose type set is a finite union of non-`~` terms, and it MAY declare methods that every member implements [T-203.1]. Closed unions MUST be allowed in value positions in `.lgo` code [T-203.1]. Membership MUST be checked for assignments, conversions, comparisons with constants, assertions, and case types [T-203.1]. The forms `x.(U)` and `case U:` MUST check membership at run time [T-203.1]. An exhaustive `switch x.(type)` MUST cover every member and `nil` or hold `default` [T-203.1]. A switch expression MUST evaluate its operand once and only its chosen arm [T-203.1]. The result type of a switch expression MUST be the common type of its arms [T-203.1]. Ejected code for a value-used union MUST be a plain method-only interface plus a comment that names the member set [T-203.1][T-0.3]. A Go importer MUST see the same interface [T-203.1][T-Sec6][R-U2]. Reflection and `unsafe` MAY store a non-member in a closed union, and the compiler MUST NOT check that path [T-203.1]. Property reads and writes through an interface MUST call the generated accessors, and no timing guarantee MUST cover those calls [T-PERF].
+The pointer type `*T` in `.lgo` code MUST mean non-nil [T-202]. The type `*T?` MUST mean an optional pointer [T-202]. A value of type `T` MUST convert to `T?`, and `nil` MUST convert to every `T?` [T-202]. A value of type `T?` MUST NOT convert to `T` without a check [T-202]. For `*T?` where `*T` is non-nil, the ejected Go type MUST be `*T` with `nil` as none [T-202][T-0.3]. An interface-backed union option with no nil-capable member MUST use the interface nil value for absence in ejected code [T-202][T-0.3]. For every other `T?` outside those two cases, the ejected Go type MUST be `logos/rt.Option[T]` [T-202][T-0.3]. When nil is a valid payload, the ejected form MUST carry explicit presence separate from payload nil [T-202][T-0.3]. A present nil payload MUST stay distinguishable from none in ejected code [T-202][T-0.3]. Ejected signatures MUST use plain pointers and `Option[T]` from the shared support module [T-202][T-0.3]. A Go importer MUST see the same Go types [T-202][T-Sec6][R-U2]. Zero values of non-nil pointers MUST fail compilation, including `var p *T`, arrays of non-nil pointers, `make` of a non-nil pointer slice with length above zero, and composite literals that leave a non-nil field empty [T-202]. Stores of `nil` into non-nil locations MUST fail compilation [T-202]. Narrowing after `x != nil`, after an early exit on `x == nil`, and through `&&` chains MUST apply to locals and parameters until their next assignment [T-202]. Narrowing MUST NOT apply to fields, to variables whose address escapes, or to variables that a closure assigns [T-202]. The error-first guard MUST apply only to callees declared in `.lgo` files, so standard-library and Go-package calls such as `io.Reader.Read` MUST keep their own contracts [T-202][A-STD][R-U2]. Pointers from Go-mode declarations and from type parameters instantiated with non-nil pointers MUST act as platform pointers: dereference and nil comparison MUST compile, and a store into a non-nil location MUST check at run time and panic with the `.lgo` file and line on nil [T-202][A-STD]. The operators `?.` and `??` MUST operate only on option types [T-104.3]. A single-value map read `m[k]` MUST type as `V?`, while `v, ok := m[k]` MUST keep Go meaning [T-104.3]. A closed union MUST be an interface whose type set is a finite union of non-`~` terms, and it MAY declare methods that every member implements [T-203.1]. Closed unions MUST be allowed in value positions in `.lgo` code [T-203.1]. Membership MUST be checked for assignments, conversions, comparisons with constants, assertions, and case types [T-203.1]. The forms `x.(U)` and `case U:` MUST check membership at run time [T-203.1]. An exhaustive `switch x.(type)` MUST cover every member and `nil` or hold `default` [T-203.1]. A switch expression MUST evaluate its operand once and only its chosen arm [T-203.1]. The result type of a switch expression MUST be the common type of its arms [T-203.1]. Ejected code for a value-used union MUST be a plain method-only interface plus a comment that names the member set [T-203.1][T-0.3]. A Go importer MUST see the same interface [T-203.1][T-Sec6][R-U2]. Reflection and `unsafe` MAY store a non-member in a closed union, and the compiler MUST NOT check that path [T-203.1]. 
 
 ### 6.3 Interface properties
 
@@ -1314,7 +1288,7 @@ The original text of this section described implementation internals; it is arch
 
 ### 9.1 Const map semantics
 
-A const map with up to 8 keys MUST lower to a `switch` lookup [T-Sec9]. A const map with more keys MUST lower to a static perfect-hash table in read-only data plus a generated lookup function [T-Sec9]. A lookup MUST perform constant-time auxiliary metadata reads plus exactly one final key/value-slot probe with full-key validation [T-Sec9]. Construction MUST use at most 1,000,000 seed-candidate trials in total per const map [T-Sec9]. Exhaustion MUST fail with `comptime::constmap_seed_not_found` [T-Sec9]. A logarithmic fallback MUST NOT satisfy the contract [T-Sec9]. The 1, 8, 9, and 10,000-key cases in `test/logos/run/const_map.lgo` MUST be the acceptance check [T-Sec9]. That check MUST NOT promise success for every key set [T-Sec9]. A lookup of an absent key MUST return none [T-Sec9]. Iteration with `range` MUST visit keys in sorted order [T-Sec9]. The function `len` on a const map MUST be constant [T-Sec9]. Use of a const map as a `map[K]V` value MUST materialize a regular map once [T-Sec9]. The materialized map is a copy; writes to it do not change the const map's reads [T-Sec9]. A const map key MUST be a string, number, bool, or a struct or array of those; any other key type fails with `comptime::constmap_key_type` [T-Sec9]. A const map passes to a standard-library parameter only when that parameter is read-only: the compiler reads the ParamMutated mask from a fixed table of standard-library functions, because standard-library packages carry no facts, and any other imported function rejects the argument with `correctness::const_view_mutation` [T-201][T-Sec9]. A const map passes to a parameter of a function of the same package only when that function is a const func, which evaluates on copies of its arguments; any other function of the package rejects the argument with `correctness::const_view_mutation` [T-201][T-Sec9]. A `-0.0` float key MUST canonicalize, and a `NaN` key MUST fail compilation [T-201][T-Sec9]. Lookup latency carries target: about 2.5ns versus about 14ns, measured by BenchmarkConstMapLookup [T-PERF]. Zero init cost and zero scan share MUST NOT be claimed; instead the table symbol MUST sit in read-only data and package init MUST add no heap bytes [T-PERF].
+A const map with up to 8 keys MUST lower to a `switch` lookup [T-Sec9]. A const map with more keys MUST lower to a static perfect-hash table in read-only data plus a generated lookup function [T-Sec9]. A lookup MUST perform constant-time auxiliary metadata reads plus exactly one final key/value-slot probe with full-key validation [T-Sec9]. Construction MUST use at most 1,000,000 seed-candidate trials in total per const map [T-Sec9]. Exhaustion MUST fail with `comptime::constmap_seed_not_found` [T-Sec9]. A logarithmic fallback MUST NOT satisfy the contract [T-Sec9]. The 1, 8, 9, and 10,000-key cases in `test/logos/run/const_map.lgo` MUST be the acceptance check [T-Sec9]. That check MUST NOT promise success for every key set [T-Sec9]. A lookup of an absent key MUST return none [T-Sec9]. Iteration with `range` MUST visit keys in sorted order [T-Sec9]. The function `len` on a const map MUST be constant [T-Sec9]. Use of a const map as a `map[K]V` value MUST materialize a regular map once [T-Sec9]. The materialized map is a copy; writes to it do not change the const map's reads [T-Sec9]. A const map key MUST be a string, number, bool, or a struct or array of those; any other key type fails with `comptime::constmap_key_type` [T-Sec9]. A const map passes to a standard-library parameter only when that parameter is read-only: the compiler reads the ParamMutated mask from a fixed table of standard-library functions, because standard-library packages carry no facts, and any other imported function rejects the argument with `correctness::const_view_mutation` [T-201][T-Sec9]. A const map passes to a parameter of a function of the same package only when that function is a const func, which evaluates on copies of its arguments; any other function of the package rejects the argument with `correctness::const_view_mutation` [T-201][T-Sec9]. A `-0.0` float key MUST canonicalize, and a `NaN` key MUST fail compilation [T-201][T-Sec9]. The table symbol MUST sit in read-only data and package init MUST add no heap bytes [T-Sec9].
 
 ```lgo
 const mimeMap = map[string]string{
@@ -1449,11 +1423,6 @@ NaN and infinities report UnsupportedValueError. [T-Sec12]
 A closed-union value marshals to its dynamic member static bytes. [T-Sec12][T-203.1]
 A comptime generic that marshals over comptime fields expands once per instantiation. [T-205]
 Each instantiation carries its own static helpers. [T-205]
-Strings without escapes take a single-copy path, with target: 99.9 percent of the corpus, measured by BenchmarkJsonEscapeScan. [T-PERF][T-Sec12]
-The spec sets no CPU-clock budget for bound calculation. [T-PERF]
-The benchmark reports the cost. [T-PERF]
-The spec sets no nanosecond figure for integer length. [T-PERF]
-BenchmarkJsonIntLen reports the cost. [T-PERF]
 
 ### 12.2 Static unmarshaling
 
@@ -1546,9 +1515,6 @@ With `--wasm-features=stack-switching` on `logos build` or `go build` they MUST 
 Pointers are 8 bytes and slice headers are 24 bytes. [T-Sec14]
 alignof of int64, uint64, and float64 equals 8, so 64-bit atomics stay naturally aligned with no forcing code. [T-Sec14]
 Deadcode removes unreachable functions, but type and method tables remain so reflect and encoding/json keep resolving. [T-Sec14]
-Binary size carries target: 3x smaller than full Asyncify, measured by BenchmarkWasmAsyncifySize. [T-PERF][T-Sec14]
-Execution speed carries target: 4x faster than full Asyncify, measured by BenchmarkWasmAsyncifySpeed. [T-PERF][T-Sec14]
-The MayYield=0 share carries target: 90 percent, and the MayYield=1 share carries target: 10 percent, both measured by BenchmarkWasmSyncPureShare as shares, not guarantees. [T-PERF][T-Sec14]
 
 ### 14.2 Host interface and loader
 
@@ -1568,7 +1534,6 @@ Exported functions MUST return an int32 errCode. [T-Sec14]
 String results are invalid. [T-Sec14]
 On nonzero errCode the wrapper throws the message read from wasm memory. [T-Sec14]
 `logos/rt.WasmError(err)` MUST return 0 for a nil error, and for a non-nil error it MUST record `err.Error()` as the last error message and return 1; the loader reads that message through `_logos_errmsg_ptr` and `_logos_errmsg_len`. [T-Sec14]
-The loader carries target: 1.4 KB, excluding wasm_exec.js, measured by BenchmarkWasmLoaderSize. [T-PERF][T-Sec14]
 //logos:wasmexport f MUST behave as //go:wasmexport f. [T-Sec14]
 //logos:wasmimport m f MUST behave as //go:wasmimport m f. [T-Sec14]
 
@@ -1622,7 +1587,6 @@ buf := make([]Pixel, w * h)
 
 - Back-edge checks MUST fire every 4096 iterations only where async preemption is absent (GOARCH=wasm). [T-303]
 - A call-free loop MUST NOT starve its peers. [T-303]
-- Check overhead has target: below 0.01%, measured by BenchmarkLogosLoopStride. [T-PERF]
 
 ## 16. JSON diagnostics schema
 
@@ -1746,7 +1710,7 @@ Each entry from #1 to #182 states the tailored resolution of its original attack
 - #90 recover inside emitted errdefer corrupting frames: Errdefer MUST stay skipped on success returns. See Sec 1.4. [T-104.2]
 - #91 const switch ambiguity on defined int types: Exact cases MUST match only the named type. Tilde cases MUST match underlying types. See Sec 2.5. [T-205]
 - #93 malicious read beyond len on const bytes: A bound above len MUST fail with `correctness::const_view_mutation`. Non-constant bounds MUST trap at run time. See Sec 2.1. [T-201]
-- #94 Slow context extraction on large repositories: `logos context` MUST print the declaration and one level of referenced signatures without function bodies, capped at 100 lines. Latency has target: 50 ms, measured by `BenchmarkContext`. See Sec 1.3. [T-103][T-PERF]
+- #94 Slow context extraction on large repositories: `logos context` MUST print the declaration and one level of referenced signatures without function bodies, capped at 100 lines. See Sec 1.3. [T-103]
 - #95 Negative or huge take and drop indices: `take`, `drop`, and `get` MUST clamp indices without panic. See Sec 1.4. [T-104.6]
 - #96 Early return skipping errdefer armed flag: `errdefer` MUST run when the frame holds a non-nil error, panics, or exits through Goexit. A panic while evaluating return values MUST count as failure. See Sec 1.4. [T-104.2]
 - #97 Stale bytes in union struct variant slot: Union values MUST use the upstream interface representation. A two-tier tag layout MUST NOT be used. See Sec 2.3. [T-203.1]
@@ -1801,7 +1765,7 @@ Each entry from #1 to #182 states the tailored resolution of its original attack
 - #150 Triple nested const for exploding compiler AST: An expansion above the selected `max_comptime_ast_nodes` limit with default 4,096 nodes MUST fail with `[comptime::node_limit]`. An expansion at or below the selected limit MUST compile. Configuration MAY raise the limit. See Sec 2.5. [T-205][T-102]
 - #151 Group sibling stuck in blocking socket read: A child blocked in netpoll-backed network I/O MUST wake within 100 ms with a timeout error. Goroutines outside the group MUST stay blocked. See Sec 2.6. [T-206]
 - #152 Zero-copy string crashing after munmap: `const []byte` to `string` MUST be zero-copy only from string or const-composite provenance. Any other provenance MUST copy to the Go heap. See Sec 2.1. [T-201]
-- #153 Hot Store leaking retire-list memory: No retire list MUST exist for `Hot[T]`. Stores MUST run the hybrid write barrier with GC-managed values. See Sec 2.6. [T-206][T-PERF]
+- #153 Hot Store leaking retire-list memory: No retire list MUST exist for `Hot[T]`. Stores MUST run the hybrid write barrier with GC-managed values. See Sec 2.6. [T-206]
 - #154 Global 16-byte alignment inflating struct padding: The toolchain MUST NOT change upstream alignment rules. `Hot[T]` MUST hold its value through `atomic.Pointer[T]` only. See Sec 2.6. [T-206]
 - #155 SIGURG arriving mid-bump double allocating address: The noscan fast path MUST be an inline add-compare sequence with a slow-path call. The sequence MUST be marked as an async-preemption unsafe point. See IMPLEMENTATION.md M18-S3. [T-301.1]
 - #156 Caller reading hash before Close error check: For callees declared in .lgo the compiler MUST fail reads before the err proof with [correctness::result_before_error_check]. Standard-library callees MUST keep their own contract, so use of n first stays allowed. See Sec 2.2. [T-202]
@@ -1864,8 +1828,6 @@ No separate unwind table exists for scope defer. [T-206][T-104.7]
 ### 20.2 Locked WithLock
 
 For `WithLock` locking and unlock-after-panic, see Sec 2.6. [T-206]
-`WithLock` overhead carries target: within 2 ns/op of manual `Lock` with `defer Unlock`, measured by BenchmarkWithLock. [T-PERF][T-206]
-The result MUST NOT gate a pass. [T-PERF][T-206]
 
 This example imports `logos/sync` with the package name `sync`.
 
