@@ -91,11 +91,10 @@ func (fl *fileLower) lowerLambdaExpr(lam *syntax.LambdaExpr) {
 		}
 		params = append(params, fl.srcUser(fl.off(name.Pos()), fl.off(name.Pos())+len(name.Value)), gen(" "+spelled))
 	}
-	results, resultsText := fl.lambdaResultSpell(pos, sig)
+	resultsText := fl.lambdaResultSpell(pos, sig)
 	if resultsText == "" && sig.Results().Len() > 0 {
 		return
 	}
-	_ = results
 	if block, ok := lam.Body.(*syntax.BlockStmt); ok {
 		var ok2 bool
 		resultsText, ok2 = fl.lowerLambdaScopeDefers(lam, pos, sig, block, cat(params...).s, resultsText)
@@ -129,33 +128,27 @@ func (fl *fileLower) lowerLambdaExpr(lam *syntax.LambdaExpr) {
 	replaceTupleExpr(fl.file, lam, lit)
 }
 
-// lambdaResultSpell spells the result list and builds zero values.
-func (fl *fileLower) lambdaResultSpell(pos syntax.Pos, sig *types2.Signature) ([]syntax.Expr, string) {
+// lambdaResultSpell spells the result list.
+func (fl *fileLower) lambdaResultSpell(pos syntax.Pos, sig *types2.Signature) string {
 	n := sig.Results().Len()
 	if n == 0 {
-		return nil, ""
+		return ""
 	}
-	out := make([]syntax.Expr, n)
 	texts := make([]string, n)
-	for i := range out {
+	for i := range texts {
 		spelled, ok := fl.spellLowered(sig.Results().At(i).Type())
 		if !ok {
 			spelled, ok = fl.spellType(sig.Results().At(i).Type())
 			if !ok {
-				return nil, ""
+				return ""
 			}
 		}
 		texts[i] = spelled
-		tn, ok := typeExprAt(spelled, pos)
-		if !ok {
-			return nil, ""
-		}
-		out[i] = tn
 	}
 	if n == 1 {
-		return out, " " + texts[0]
+		return " " + texts[0]
 	}
-	return out, " (" + strings.Join(texts, ", ") + ")"
+	return " (" + strings.Join(texts, ", ") + ")"
 }
 
 // callBodySpan reports the source span of a call used as a lambda
