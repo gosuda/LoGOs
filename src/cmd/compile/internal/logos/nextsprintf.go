@@ -110,7 +110,13 @@ func sprintfCooked(call *syntax.CallExpr) (string, bool) {
 
 // sprintfOperands pairs each verb chunk with its argument source text.
 func (s *nextScan) sprintfOperands(items []verbItem, args []syntax.Expr) ([]string, bool) {
-	if countVerbs(items) != len(args) {
+	nverbs := 0
+	for _, it := range items {
+		if it.verb != 0 {
+			nverbs++
+		}
+	}
+	if nverbs != len(args) {
 		return nil, false
 	}
 	srcs := make([]string, 0, len(args))
@@ -199,47 +205,18 @@ func parseVerbs(cooked string) ([]verbItem, bool) {
 	return items, true
 }
 
-// countVerbs counts the verb chunks of parsed items.
-func countVerbs(items []verbItem) int {
-	n := 0
-	for _, it := range items {
-		if it.verb != 0 {
-			n++
-		}
-	}
-	return n
-}
-
 // verbKind reports whether a verb renders a kind identically under
 // fmt and interpolation.
 func verbKind(verb byte, kind types2.LogosInterpKind) bool {
 	switch verb {
 	case 's':
-		return verbKindS(kind)
+		return kind == types2.LogosInterpString || kind == types2.LogosInterpBytes
 	case 'd':
-		return verbKindD(kind)
+		return kind == types2.LogosInterpInt || kind == types2.LogosInterpUint
 	case 'v':
-		return verbKindV(kind)
+		return kind == types2.LogosInterpString || kind == types2.LogosInterpInt || kind == types2.LogosInterpUint || kind == types2.LogosInterpBool
 	}
 	return false
-}
-
-// verbKindS reports whether a kind renders identically under %s and
-// interpolation.
-func verbKindS(kind types2.LogosInterpKind) bool {
-	return kind == types2.LogosInterpString || kind == types2.LogosInterpBytes
-}
-
-// verbKindD reports whether a kind renders identically under %d and
-// interpolation.
-func verbKindD(kind types2.LogosInterpKind) bool {
-	return kind == types2.LogosInterpInt || kind == types2.LogosInterpUint
-}
-
-// verbKindV reports whether a kind renders identically under %v and
-// interpolation.
-func verbKindV(kind types2.LogosInterpKind) bool {
-	return kind == types2.LogosInterpString || kind == types2.LogosInterpInt || kind == types2.LogosInterpUint || kind == types2.LogosInterpBool
 }
 
 func implementsFormatter(t types2.Type) bool {
