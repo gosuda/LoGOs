@@ -111,7 +111,7 @@ func (fl *fileLower) lowerStaticJSONType(td *syntax.TypeDecl) {
 	if !jsonOK {
 		fields = binaryFields
 	}
-	js := fl.newJSONStruct(td.Name.Value, named.Underlying().(*types2.Struct), fields)
+	js := fl.buildJSONStruct(td.Name.Value, named.Underlying().(*types2.Struct), fields)
 	var b strings.Builder
 	if jsonOK && !userDeclaresMethod(named, "MarshalJSON") {
 		if plan := fl.planJSONWalk(js, named); plan.stateful {
@@ -202,13 +202,6 @@ func parseGeneratedDecls(text string, pos syntax.Pos) []syntax.Decl {
 	return decls
 }
 
-// newJSONStruct builds the generation model of one struct: its JSON
-// fields in declaration order with their classification, the default
-// assignments, and the names of the required fields.
-func (fl *fileLower) newJSONStruct(name string, st *types2.Struct, fields []*types2.Var) *jsonStruct {
-	return fl.buildJSONStruct(name, st, fields)
-}
-
 // buildJSONStruct builds the generation model for a struct with the
 // given JSON-visible fields: the compiler-resolved fields of an own
 // type, or every field of an imported struct (invisible ones are
@@ -294,7 +287,7 @@ func (fl *fileLower) classifyShape(t types2.Type) jsonShape {
 // shapes record whether omitzero consults IsZero; slices never do (the
 // slice itself is unnamed, so no method can fire).
 func (fl *fileLower) scalarShape(elem types2.Type, k shapeKind) jsonShape {
-	kind, ok := fl.scalarOf(elem)
+	kind, ok := scalarOf(elem)
 	if !ok || (k == shapeSlice && kind == scalarUint && isByteSized(elem)) {
 		return jsonShape{kind: shapeFallback}
 	}
@@ -323,7 +316,7 @@ var jsonMethodNames = []string{
 
 // scalarOf returns the scalar class of t when encoding/json treats it as a
 // plain bool, integer, float, or string.
-func (fl *fileLower) scalarOf(t types2.Type) (scalarKind, bool) {
+func scalarOf(t types2.Type) (scalarKind, bool) {
 	switch c := types2.Unalias(t).(type) {
 	case *types2.Basic:
 		return basicScalar(c)

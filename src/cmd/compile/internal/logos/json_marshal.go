@@ -134,10 +134,10 @@ func (g *marshalGen) litLen(f *jsonField, open string) int {
 // scalarParts spells the present value x of codec c.
 func (g *marshalGen) scalarParts(f *jsonField, c scalarCodec, x string) valueParts {
 	open := c.open()
-	p := valueParts{konst: g.litLen(f, open) + len(c.closeText())}
+	p := valueParts{konst: g.litLen(f, open) + len(open)}
 	p.size = []string{c.sizeStmt(x)}
 	p.emit = append(g.litStmts(f, open), c.emitStmt(x))
-	if c.closeText() != "" {
+	if open != "" {
 		p.emit = append(p.emit, `_logos_buf = append(_logos_buf, '"')`)
 	}
 	return p
@@ -331,7 +331,7 @@ func (g *marshalGen) sliceEmit(f *jsonField, c scalarCodec, x string) []string {
 // elemSize spells the size statements of one slice element x.
 func elemSize(c scalarCodec, x string) []string {
 	lines := []string{c.sizeStmt(x)}
-	if n := len(c.open()) + len(c.closeText()); n > 0 {
+	if n := 2 * len(c.open()); n > 0 {
 		lines = append(lines, fmt.Sprintf("_logos_n += %d", n))
 	}
 	return lines
@@ -344,7 +344,7 @@ func elemEmit(c scalarCodec, x string) []string {
 		lines = append(lines, `_logos_buf = append(_logos_buf, '"')`)
 	}
 	lines = append(lines, c.emitStmt(x))
-	if c.closeText() != "" {
+	if c.open() != "" {
 		lines = append(lines, `_logos_buf = append(_logos_buf, '"')`)
 	}
 	return lines
@@ -593,22 +593,6 @@ func isMarshalJSONSignature(obj types2.Object) bool {
 	return res1.String() == "error"
 }
 
-// unionScalarKind returns the scalar class of t when t is a plain or named
-// scalar without overriding JSON methods.
-func unionScalarKind(t types2.Type) (scalarKind, bool) {
-	switch c := types2.Unalias(t).(type) {
-	case *types2.Basic:
-		return basicScalar(c)
-	case *types2.Named:
-		b, ok := c.Underlying().(*types2.Basic)
-		if !ok || hasJSONMethods(c) {
-			return 0, false
-		}
-		return basicScalar(b)
-	}
-	return 0, false
-}
-
 // scalarStaticMarshal returns the inline statement emitting value val of
 // class kind into buffer b.
 func scalarStaticMarshal(kind scalarKind, val, b string) string {
@@ -641,7 +625,7 @@ func unionMemberStaticCall(m types2.Type, pkg *types2.Package, b, e string) stri
 		if elemObj != nil && !elemInd && isMarshalJSONSignature(elemObj) {
 			return fmt.Sprintf("\tif _logos_m != nil { %s, %s = _logos_m.MarshalJSON() } else { %s = []byte(\"null\") }", b, e, b)
 		}
-		if sk, ok := unionScalarKind(ptr.Elem()); ok {
+		if sk, ok := scalarOf(ptr.Elem()); ok {
 			return fmt.Sprintf("\tif _logos_m == nil { %s = []byte(\"null\") } else { %s }", b, scalarStaticMarshal(sk, "*_logos_m", b))
 		}
 		return fmt.Sprintf("\t%s, %s = %s.MarshalField(_logos_m)", b, e, jsonAlias)
@@ -654,7 +638,7 @@ func unionMemberStaticCall(m types2.Type, pkg *types2.Package, b, e string) stri
 	if obj != nil && indirect && isMarshalJSONSignature(obj) {
 		return fmt.Sprintf("\t_logos_tmp := _logos_m; %s, %s = _logos_tmp.MarshalJSON()", b, e)
 	}
-	if sk, ok := unionScalarKind(m); ok {
+	if sk, ok := scalarOf(m); ok {
 		return "\t" + scalarStaticMarshal(sk, "_logos_m", b)
 	}
 	return fmt.Sprintf("\t%s, %s = %s.MarshalField(_logos_m)", b, e, jsonAlias)
@@ -762,12 +746,6 @@ func (fl *fileLower) jsonEdgeOf(t types2.Type) jsonEdge {
 		if key, _, _ := fl.helperModelFor(p.Elem()); key != "" {
 			return edgePtrHelper
 		}
-		if _, ok := types2.Unalias(p.Elem()).(*types2.Pointer); ok {
-			return edgeWalk
-		}
-		if _, ok := scalarCore(p.Elem()); ok {
-			return edgeLegacy
-		}
 		return edgeWalk
 	}
 	if key, _, _ := fl.helperModelFor(core); key != "" {
@@ -791,14 +769,6 @@ func jsonEdgeCore(fl *fileLower, t types2.Type) types2.Type {
 		u = cv.Elem
 	}
 	return u
-}
-
-// scalarCore reports whether t is a modeled scalar kind.
-func scalarCore(t types2.Type) (scalarKind, bool) {
-	if b, ok := types2.Unalias(t).(*types2.Basic); ok {
-		return basicScalar(b)
-	}
-	return 0, false
 }
 
 // planJSONWalk builds the traversal plan for js rooted at rootNamed.

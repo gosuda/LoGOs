@@ -118,7 +118,7 @@ func (g *binaryGenerator) codec(t types2.Type) (int, bool) {
 				d("if len(src)-*off < %d { %s }; var n uint64; for i := uint(0); i < %d; i++ { n |= uint64(src[*off+int(i)]) << (8*i) }; *off += %d; *v = %s(%s)", width, fail, width, width, name, decode)
 			}
 		case *types2.Pointer:
-			pointed, ok := g.typeName(x.Elem())
+			pointed, ok := g.fl.spellLowered(x.Elem())
 			if !ok {
 				return 0, false
 			}
@@ -156,7 +156,7 @@ func (g *binaryGenerator) codec(t types2.Type) (int, bool) {
 				// cap with a count-out-of-range error, encoder symmetric, in
 				// constant time without per-element iteration. Accepted wire
 				// bytes are unchanged.
-				elemType, ok := g.typeName(x.Elem())
+				elemType, ok := g.fl.spellLowered(x.Elem())
 				if !ok {
 					return 0, false
 				}
@@ -172,7 +172,7 @@ func (g *binaryGenerator) codec(t types2.Type) (int, bool) {
 				d("*v = make(%s, int(n))", name)
 				break
 			}
-			elemType, ok := g.typeName(x.Elem())
+			elemType, ok := g.fl.spellLowered(x.Elem())
 			if !ok {
 				return 0, false
 			}
@@ -184,7 +184,7 @@ func (g *binaryGenerator) codec(t types2.Type) (int, bool) {
 			e("}")
 			d("*v = append(*v, elem) }")
 		case *types2.Array:
-			elemType, ok := g.typeName(x.Elem())
+			elemType, ok := g.fl.spellLowered(x.Elem())
 			if !ok {
 				return 0, false
 			}
@@ -196,8 +196,8 @@ func (g *binaryGenerator) codec(t types2.Type) (int, bool) {
 			e("}")
 			d("(*v)[i] = elem }")
 		case *types2.Map:
-			keyType, keyOK := g.typeName(x.Key())
-			valueType, valueOK := g.typeName(x.Elem())
+			keyType, keyOK := g.fl.spellLowered(x.Key())
+			valueType, valueOK := g.fl.spellLowered(x.Elem())
 			if !keyOK || !valueOK {
 				return 0, false
 			}
@@ -271,10 +271,6 @@ func (g *binaryGenerator) zeroWire(t types2.Type, seen map[types2.Type]bool) boo
 	default:
 		return false
 	}
-}
-
-func (g *binaryGenerator) typeName(t types2.Type) (string, bool) {
-	return g.fl.spellLowered(t)
 }
 
 // binaryImportTable lists the marker, alias, and path of every package the

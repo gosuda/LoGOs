@@ -36,11 +36,6 @@ func (c scalarCodec) open() string {
 	return ""
 }
 
-// closeText is the text written after the value body.
-func (c scalarCodec) closeText() string {
-	return c.open()
-}
-
 // isFloat reports whether the codec encodes a float.
 func (c scalarCodec) isFloat() bool {
 	return c.kind == scalarFloat32 || c.kind == scalarFloat64
