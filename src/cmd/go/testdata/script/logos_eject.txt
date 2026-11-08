@@ -65,6 +65,13 @@ grep -count=3 'example\.com/dep' out/go.mod
 grep -count=2 'gosuda/loGos/rt' out/go.mod
 grep 'module github\.com/gosuda/loGos/rt' out/_logos_deps/rt/go.mod
 
+# Support imports stay in the reserved set: no logos/ import path survives
+# the remap, the rt alias carries the shared module path, and no errors
+# helper import exists anywhere in the ejected tree.
+! exec grep -rnE '"logos/[a-z/]+"' out
+grep -count=1 '_logos_rt "github.com/gosuda/loGos/rt"' out/main.go
+! exec grep -rn '_logos_errors' out
+
 # A second eject into the non-empty directory fails.
 ! logos eject -o out
 stderr 'logos eject: out: directory is not empty'

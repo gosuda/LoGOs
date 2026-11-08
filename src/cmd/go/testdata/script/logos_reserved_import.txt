@@ -1,0 +1,20 @@
+# A reserved _logos_ import alias is rejected in .lgo, which keeps the
+# lowered helper-alias namespace collision-free (T-0.3, T-203.2).
+env GOPROXY=off
+env GOTOOLCHAIN=local
+cd m
+! logos build ./...
+stderr 'correctness::reserved_identifier'
+cd ..
+
+-- m/go.mod --
+module example.com/ri
+
+go 1.27
+
+-- m/m/m.lgo --
+package m
+
+import _logos_rt "logos/rt"
+
+var _ = _logos_rt.MustNonNil
