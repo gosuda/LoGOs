@@ -107,8 +107,8 @@ func ApplyEdits(src []byte, base *syntax.PosBase, edits []Edit) ([]byte, error) 
 	return out, err
 }
 
-// ApplyEditsSegments applies edits like ApplyEdits and also returns the
-// applied edits as spans and the origin segments of the whole output:
+// ApplyEditsSegments applies edits to src and returns the applied edits
+// as spans and the origin segments of the whole output:
 // every byte of the edited text is either a verbatim copy of an original
 // byte range or generated, so a reader maps any output offset to its
 // exact original offset or learns it has none.
