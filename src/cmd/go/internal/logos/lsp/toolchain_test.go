@@ -19,10 +19,9 @@ import (
 // allows, and returns the toolchain the tests drive: the go binary of the
 // toolchain under test, run as logos, as logos lsp runs it.
 
-// workspaceA is the loGo/s source realWorkspace writes for package a:
-// aLgo with an accurate package comment, so the good package is
-// ST1000-clean under the default full nogo registry. The body matches
-// aLgo one line down; fixtures derived from it keep exact coordinates.
+// workspaceA is the loGo/s source realWorkspace writes for package a: aLgo
+// under a package comment, one line down, so fixtures derived from it keep
+// exact coordinates.
 const workspaceA = "// Package a reads files.\n" + aLgo
 
 func realWorkspace(t *testing.T) (root string, tc *toolchain) {

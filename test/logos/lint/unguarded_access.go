@@ -1,6 +1,6 @@
 // errorcheck
 
-// REDTEAM #194: an unguarded field read after the deferred unlock was
+// REDTEAM #195: an unguarded field read after the deferred unlock was
 // moved. The closure is deferred before the unlock, so LIFO runs the
 // unlock first and the closure body reads the guarded field without the
 // lock.

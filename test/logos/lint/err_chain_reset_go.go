@@ -55,7 +55,7 @@ func errorCallV(err error) error {
 }
 
 func errorCallConcat(err error) error {
-	return fmt.Errorf("read: " + err.Error()) // ERROR "err_chain_reset.*passes err.Error" "\[nogo::printf\]"
+	return fmt.Errorf("read: " + err.Error()) // ERROR "err_chain_reset.*passes err.Error"
 }
 
 func concreteOperand(ce *codeErr) error {
