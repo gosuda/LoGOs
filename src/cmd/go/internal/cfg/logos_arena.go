@@ -34,7 +34,6 @@ func RefreshLogosArena(mainRoots []string) {
 	if !Logos {
 		return
 	}
-	defer RefreshLogosFastCgo()
 	defer RefreshLogosPreemptible()
 	roots := mainRoots
 	if len(roots) == 0 {

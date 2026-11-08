@@ -38,13 +38,8 @@ type File struct {
 	Lints Lints
 }
 
-// Project holds the [project] table: the module name (informational only),
-// the language edition, and the enabled loGo/s source extensions.
+// Project holds the [project] table: the enabled loGo/s source extensions.
 type Project struct {
-	// Name is informational and changes no build output. It must not be empty.
-	Name string
-	// Edition selects the language rules. Only "2026" is valid.
-	Edition string
 	// StrictFiles lists the enabled loGo/s extensions. It defaults to all four.
 	StrictFiles []string
 }
@@ -83,8 +78,6 @@ var GCModes = []string{"greentea", "zgc", "immix", "wasm", "batch", "epsilon"}
 // Severities default to deny, except TransitiveReflect which defaults to
 // warn; allowlists default to empty.
 type Capabilities struct {
-	// DirectReflect guards direct reachability of reflect sinks.
-	DirectReflect string
 	// TransitiveReflect guards transitive reachability of reflect sinks.
 	TransitiveReflect string
 	// TransitiveExec guards transitive reachability of exec sinks.
@@ -109,14 +102,13 @@ type Capabilities struct {
 var strictFileExts = []string{".lgo", ".📜", ".⚡", ".ʕ◔ϖ◔ʔ"}
 
 // defaultFile returns the File used when logos.toml (or a table or key) is
-// absent: edition "2026", all four extensions enabled, cgo "forbid" with the
+// absent: all four extensions enabled, cgo "forbid" with the
 // key marked absent, opt_level "O2", and target_cpu "deterministic".
 func defaultFile() *File {
 	return &File{
-		Project: Project{Edition: "2026", StrictFiles: slices.Clone(strictFileExts)},
+		Project: Project{StrictFiles: slices.Clone(strictFileExts)},
 		Build:   Build{Cgo: "forbid", OptLevel: "O2", TargetCPU: "deterministic"},
 		Capabilities: Capabilities{
-			DirectReflect:     "deny",
 			TransitiveReflect: "warn",
 			TransitiveExec:    "deny",
 			TransitiveNet:     "deny",
@@ -144,22 +136,11 @@ func Load(modRoot string) (*File, error) {
 }
 
 // Format renders f as canonical TOML that re-parses to an equal File.
-// Keys with default-absent state are omitted: an empty name (which could not
-// re-parse), an unset cgo or gc key (which must keep CgoSet or GCSet false),
-// and nil allowlists.
+// Keys with default-absent state are omitted: an unset cgo or gc key
+// (which must keep CgoSet or GCSet false) and nil allowlists.
 func (f *File) Format() []byte {
 	var b strings.Builder
 	b.WriteString("[project]\n")
-	if f.Project.Name != "" {
-		b.WriteString("name = ")
-		appendQuoted(&b, f.Project.Name)
-		b.WriteByte('\n')
-	}
-	if f.Project.Edition != "" {
-		b.WriteString("edition = ")
-		appendQuoted(&b, f.Project.Edition)
-		b.WriteByte('\n')
-	}
 	if f.Project.StrictFiles != nil {
 		b.WriteString("strict_files = [")
 		for i, s := range f.Project.StrictFiles {
@@ -234,8 +215,7 @@ func writeCapabilities(b *strings.Builder, c Capabilities) {
 		}
 		b.WriteString("]\n")
 	}
-	emit := c.DirectReflect != "" && c.DirectReflect != "deny" ||
-		c.TransitiveReflect != "" && c.TransitiveReflect != "warn" ||
+	emit := c.TransitiveReflect != "" && c.TransitiveReflect != "warn" ||
 		c.TransitiveExec != "" && c.TransitiveExec != "deny" ||
 		c.TransitiveNet != "" && c.TransitiveNet != "deny" ||
 		c.TransitiveUnsafe != "" && c.TransitiveUnsafe != "deny" ||
@@ -245,7 +225,6 @@ func writeCapabilities(b *strings.Builder, c Capabilities) {
 		return
 	}
 	b.WriteString("[capabilities]\n")
-	sev("direct_reflect", c.DirectReflect, "deny")
 	sev("transitive_reflect", c.TransitiveReflect, "warn")
 	sev("transitive_exec", c.TransitiveExec, "deny")
 	sev("transitive_net", c.TransitiveNet, "deny")

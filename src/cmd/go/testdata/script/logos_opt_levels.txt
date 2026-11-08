@@ -74,10 +74,10 @@ cd ..
 # Bare and unknown opt_level spellings fail with file and position.
 cd bad3
 ! logos build .
-stderr 'logos\.toml:5:13: opt_level must be one of O0, O1, O2, O3, Os'
+stderr 'logos\.toml:2:13: opt_level must be one of O0, O1, O2, O3, Os'
 cd ../badO4
 ! logos build .
-stderr 'logos\.toml:5:13: opt_level must be one of O0, O1, O2, O3, Os'
+stderr 'logos\.toml:2:13: opt_level must be one of O0, O1, O2, O3, Os'
 cd ..
 
 # File arguments ignore logos.toml: the invalid opt_level is never read
@@ -285,9 +285,6 @@ module example.com/optlevels/o3
 go 1.27
 
 -- o3/logos.toml --
-[project]
-name = "o3"
-
 [build]
 opt_level = "O3"
 
@@ -306,9 +303,6 @@ module example.com/optlevels/bad3
 go 1.27
 
 -- bad3/logos.toml --
-[project]
-name = "bad3"
-
 [build]
 opt_level = "3"
 
@@ -327,9 +321,6 @@ module example.com/optlevels/badO4
 go 1.27
 
 -- badO4/logos.toml --
-[project]
-name = "badO4"
-
 [build]
 opt_level = "O4"
 
@@ -348,9 +339,6 @@ module example.com/optlevels/baseline
 go 1.27
 
 -- baseline/logos.toml --
-[project]
-name = "baseline"
-
 [build]
 target_cpu = "baseline"
 
@@ -369,9 +357,6 @@ module example.com/optlevels/native
 go 1.27
 
 -- native/logos.toml --
-[project]
-name = "native"
-
 [build]
 target_cpu = "native"
 

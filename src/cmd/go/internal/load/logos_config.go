@@ -56,9 +56,7 @@ type logosConfigResult struct {
 // that module only, and a loGo/s source file whose extension is not in that
 // module's strict_files fails with [correctness::extension_not_enabled].
 // The generated test main and the standard library stay out of the census,
-// mirroring checkLogosModules. Project.Name is validated non-empty in Parse;
-// it is never passed to the compiler or linker, so builds differing only in
-// name stay identical.
+// mirroring checkLogosModules.
 func checkLogosConfig(ld *modload.Loader, p *Package) {
 	if !cfg.Logos || p.Internal.TestmainGo != nil || p.Standard {
 		return

@@ -234,11 +234,11 @@ func (p *parser) parseTable() error {
 func keyOwner(table, key string) (string, bool) {
 	var owner string
 	switch key {
-	case "name", "edition", "strict_files":
+	case "strict_files":
 		owner = "project"
 	case "cgo", "cgo_allowlist", "opt_level", "target_cpu", "arena", "gc":
 		owner = "build"
-	case "direct_reflect", "transitive_reflect", "transitive_exec", "transitive_net", "transitive_unsafe",
+	case "transitive_reflect", "transitive_exec", "transitive_net", "transitive_unsafe",
 		"reflect_allowlist", "transitive_exec_allowlist", "transitive_net_allowlist", "transitive_unsafe_allowlist":
 		owner = "capabilities"
 	default:
@@ -442,16 +442,6 @@ func (p *parser) parseArrayValue(key string) error {
 // assignString validates and stores a scalar value.
 func (p *parser) assignString(key, s string, valStart int) error {
 	switch key {
-	case "name":
-		if s == "" {
-			return p.errorf(valStart, "project name must not be empty")
-		}
-		p.file.Project.Name = s
-	case "edition":
-		if s != "2026" {
-			return p.errorf(valStart, "unsupported edition %q (want \"2026\")", s)
-		}
-		p.file.Project.Edition = s
 	case "cgo":
 		if s != "forbid" && s != "restricted" && s != "allow" {
 			return p.errorf(valStart, "invalid cgo value %q (want forbid, restricted, or allow)", s)
@@ -461,7 +451,7 @@ func (p *parser) assignString(key, s string, valStart int) error {
 	case "gc":
 		p.file.Build.GC = s
 		p.file.Build.GCSet = true
-	case "direct_reflect", "transitive_reflect", "transitive_exec", "transitive_net", "transitive_unsafe":
+	case "transitive_reflect", "transitive_exec", "transitive_net", "transitive_unsafe":
 		if s != "deny" && s != "warn" && s != "allow" {
 			return p.errorf(valStart, "invalid %s value %q (want deny, warn, or allow)", key, s)
 		}
@@ -500,8 +490,6 @@ func (p *parser) assignBuildEnum(key, s string, valStart int) error {
 // assignSeverity stores a validated capabilities severity value.
 func assignSeverity(c *Capabilities, key, s string) {
 	switch key {
-	case "direct_reflect":
-		c.DirectReflect = s
 	case "transitive_reflect":
 		c.TransitiveReflect = s
 	case "transitive_exec":

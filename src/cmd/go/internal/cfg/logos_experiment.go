@@ -53,3 +53,13 @@ func logosApplyRawExperiment(raw string) {
 		OrigEnv = append(OrigEnv, "GOEXPERIMENT="+raw)
 	}
 }
+
+func DropLogosExperiments() {
+	var kept []string
+	for f := range strings.SplitSeq(os.Getenv("GOEXPERIMENT"), ",") {
+		if f != "" && !strings.HasPrefix(f, "logos") && !strings.HasPrefix(f, "nologos") {
+			kept = append(kept, f)
+		}
+	}
+	os.Setenv("GOEXPERIMENT", strings.Join(kept, ","))
+}

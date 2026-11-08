@@ -31,7 +31,7 @@ stderr 'main\.lgo:7:.*\[nogo::assign\] self-assignment of x'
 stderr -count=1 '\[nogo::assign\]'
 ! stderr 'eject'
 logos build -o $WORK/bin/lgoconstswitch$GOEXE .
-stderr 'warning: \[suspicious::self_assignment\]'
+! stderr 'suspicious::self_assignment'
 cd ..
 
 # viewas: copylocks fires at its original .lgo line in a file whose
@@ -44,7 +44,7 @@ stderr -count=1 '\[nogo::copylocks\]'
 ! stderr 'eject'
 ! stderr '_logos_rt'
 logos build -o $WORK/bin/lgoviewas$GOEXE .
-stderr 'warning: \[suspicious::copy_lock\]'
+! stderr 'suspicious::copy_lock'
 cd ..
 
 # checkescape after pruning: a 60-line dead const-if branch above the

@@ -86,7 +86,7 @@ func ParseGOEXPERIMENT(goos, goarch, goexp string) (*ExperimentFlags, error) {
 		GreenTeaGC:            true,
 		JSONv2:                true,
 		SizeSpecializedMalloc: true,
-		LogosFastCgo:          false, // M20-S1: stays off until the M20 gate passes.
+		LogosFastCgo:          false,
 		LogosArena:            false, // M18-S1: stays off until run.bash passes with it on (G3).
 		LogosSpanDeck:         true,  // M19-S6: stable default; nologosspandeck keeps the FIFO comparison path.
 	}
