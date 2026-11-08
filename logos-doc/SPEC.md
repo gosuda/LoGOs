@@ -117,8 +117,18 @@ The `logos lint` check MUST run the language-neutral syntax and type rules on Go
 The `logos lint` check MUST run inside escape analysis for escape rules, on Go packages and on `.lgo` packages [T-102][R-U1].
 `logos lint` MUST lint Go packages with the language-neutral rules only [T-102][R-U1].
 A rule MUST count as language-neutral when a Go package can trigger it with Go syntax and types alone and the code it guards exists in Go packages. A loGo/s form inside its detection, such as a group child, a const view, or `?`, MUST stay inactive in Go [T-102][R-U1].
-The language-neutral rules MUST be `correctness::typed_nil_return` (in Go, the `(*T)(nil)` form only), `correctness::arena_pointer_escape`, `correctness::infinite_recursion`, `correctness::unclosed_io_closer`, `correctness::unbounded_channel_op`, `concurrency::concurrent_multiword_race`, `concurrency::reentrant_withlock_deadlock`, `slop::err_chain_reset`, `slop::discarded_error`, `complexity::cognitive_overflow`, `perf::large_backing_array_pin`, and `perf::time_after_in_loop` [T-102][R-U1].
+The language-neutral rules MUST be `correctness::typed_nil_return` (in Go, the `(*T)(nil)` form only), `correctness::arena_pointer_escape`, `correctness::infinite_recursion`, `correctness::unclosed_io_closer`, `correctness::unbounded_channel_op`, `concurrency::concurrent_multiword_race`, `concurrency::reentrant_withlock_deadlock`, `slop::err_chain_reset`, `slop::discarded_error`, `complexity::cognitive_overflow`, `perf::large_backing_array_pin`, `perf::time_after_in_loop`, `concurrency::unguarded_access`, `concurrency::nonatomic_access`, `concurrency::lock_requirement_unmet`, `correctness::layout_constant_mismatch`, `portability::atomic_plain_int64`, `correctness::linkname_mismatch`, and `pedantic::unsafe_outside_unsafe_file` [T-102][R-U1].
 `go vet` owns printf, copylocks, structtag, assign, httpresponse, and stringintconv checks; `logos lint` does not repeat them. [T-102]
+The compiler MUST enforce `concurrency::unguarded_access` as `forbid` against a read or write of a field that `//logos:guardedby` guards without its lock held [T-102].
+The compiler MUST enforce `concurrency::nonatomic_access` as `forbid` against a non-`sync/atomic` access of a field that `//logos:atomic` marks [T-102].
+The compiler MUST enforce `concurrency::lock_requirement_unmet` as `forbid` against a call whose `//logos:requires` set the caller does not hold [T-102].
+The compiler MUST enforce `correctness::layout_constant_mismatch` as `forbid` against a constant declared with `//logos:sizeof`, `//logos:offsetof`, or `//logos:alignof` whose value differs from the computed layout [T-102].
+The compiler MUST enforce `portability::atomic_plain_int64` as `warn` against a 64-bit `sync/atomic` call on the address of a plain `int64` or `uint64`, with an autofix to `atomic.Int64` or `atomic.Uint64` [T-102].
+The compiler MUST enforce `correctness::linkname_mismatch` as `forbid` against a `//go:linkname local pkg.name` whose imported signature differs from the local one, when `pkg` is in the import graph [T-102].
+The compiler MUST enforce `pedantic::unsafe_outside_unsafe_file` as `allow` against `import "unsafe"` in a file whose name does not end in `_unsafe.go` or `_test.go` [T-102].
+The compiler MUST enforce `correctness::region_escape` as `forbid` against a `logos/arena.Region` value that leaves its local scope in a `.lgo` package [T-102].
+The compiler MUST report `perf::arena_fallback` when a `logos/arena` call escapes to the heap [T-102].
+The directive grammar for these checks is `//logos:guardedby <mu>`, `//logos:atomic`, `//logos:requires <p.mu>`, `//logos:acquires <p.mu>`, `//logos:releases <p.mu>`, `//logos:zeroalloc [local]`, `//logos:sizeof T`, `//logos:offsetof T.f`, and `//logos:alignof T` [T-102]
 The rules `correctness::nil_deref_unproven`, `correctness::defer_erases_errdefer_state`, `concurrency::unsupervised_goroutine`, `suspicious::unapplied_struct_default`, `suspicious::side_effect_before_sort`, `portability::serialized_unsized_int`, `portability::alias_extension`, and `pedantic::exhaustive_union_switch` MUST NOT apply to Go packages, because each depends on loGo/s syntax, types, or generated code [T-102][R-U1].
 The rule `portability::serialized_unsized_int` guards the generated binary layout of Sec 12.1, which Go packages do not get [T-102][R-U1].
 A Go package MUST get the default group severities, the `logos.toml [lints]` table, and the `//logos:allow(<rule>)` directive of this section, with the cap that the next line states [T-102][R-U1].
@@ -1021,19 +1031,54 @@ c.WithLock(p => { p.Port = 8080 })
 Every rule in this section MUST apply to Go packages and to loGo/s packages, under `logos` and under plain `go`, except a rule that depends on `.lgo` syntax or on a loGo/s language rule [T-0.1][R-U1].
 A rule that sits behind a `GOEXPERIMENT` flag MUST stay behind it as this section states [T-0.1][R-U1].
 
-### 3.1 RFC-301: Pluggable GC engine and tier-0 arena
+### 3.1 RFC-301: Tier-0 arena and placement regions
 
-It MUST stay off unless the build sets `GOEXPERIMENT=logosarena`. [T-301.1]
-Under `logos`, `[build] arena` set to true MUST set that experiment for the build. [T-301.1][R-U1]
-Under plain `go`, `GOEXPERIMENT=logosarena` alone MUST enable the arena. [T-301.1][R-U1]
-The default value of `[build] arena` MUST be false. [T-301.1]
-Each goroutine MUST lease one 64KB chunk while it holds arena objects. [T-301.1]
-Objects that escape analysis proves do not outlive their frame, but that cannot live on the stack because of dynamic or large size, MUST allocate in the arena. [T-301.1]
-Frame exit MUST restore the watermark. [T-301.1]
-A loop back-edge MUST restore the watermark for iteration-local objects. [T-301.1]
-The runtime MUST zero popped regions before reuse. [T-301.1]
-Scan-region objects MUST carry a type word. [T-301.1]
-The collector MUST scan them with the goroutine stack. [T-301.1]
+Substrate [T-301.1]:
+Each goroutine MUST lease one 64 KB chunk while it holds region objects. [T-301.1]
+A chunk MUST hold a noscan region that grows up and a scan region that grows down. [T-301.1]
+An allocation that would cross the two cursors MUST link a fresh chunk and MUST still succeed. [T-301.1]
+Scan-region objects MUST carry a type word, and the collector MUST scan them with the goroutine stack. [T-301.1]
+Popped scan memory MUST be zeroed before reuse. [T-301.1]
+After a release, a collection MUST find no stale pointers. [T-301.1]
+Pointer-containing region objects MUST keep their heap referents alive across `runtime.GC()`. [T-301.1]
+A goroutine parked with empty regions MUST hold no chunk. [T-301.1]
+`runtime.SetFinalizer` and `runtime.AddCleanup` on a region object MUST panic with `runtime: SetFinalizer on loGo/s arena object`. [T-301.1]
+Cgo pointer checks MUST NOT panic on region addresses. [T-301.1]
+Region placement MUST NOT change program meaning: every program MUST print the same output when every region allocation is a heap allocation. [T-301.1]
+
+Implicit placement [T-301.1][R-U1]:
+With implicit placement on, an object that escape analysis proves does not outlive its frame, but that cannot live on the stack, MUST allocate in the frame's region. [T-301.1]
+Frame exit MUST release that region. [T-301.1]
+A loop back-edge MUST release iteration-local objects. [T-301.1]
+A returned value that the caller keeps MUST allocate in the caller's region. [T-301.1]
+A value stored into `sync.Pool` MUST stay on the heap. [T-301.1]
+Implicit placement MUST stay off unless the build sets `GOEXPERIMENT=logosarena`. [T-301.1]
+Under `logos`, `[build] arena` MUST set that experiment, and its default MUST be true. [T-301.1][R-U1]
+Under plain `go`, only `GOEXPERIMENT=logosarena` MUST enable it. [T-301.1][R-U1]
+
+Placement regions [T-301.2]:
+The std package `logos/arena` MUST provide `Open() Region`, `New[T any](r Region) *T`, `Make[T any](r Region, n int) []T`, and `Append[T any](r Region, s []T, v ...T) []T`. [T-301.2]
+Under an upstream toolchain and under plain `go`, these MUST behave exactly as `Region{}`, `new(T)`, `make([]T, n)`, and `append(s, v...)`. [T-301.2]
+Under `logos`, a call MUST expand as a comptime instance. [T-301.2]
+That instance MUST use the noscan region when `comptime.HasPointers[T]()` is false, and the scan region otherwise. [T-301.2]
+Noscan objects of at most 512 bytes MUST use the inline bump sequence, which is marked as an async-preemption unsafe point. [T-301.2]
+`Open` MUST make a region owned by the innermost enclosing block. [T-301.2]
+Exit from that block MUST release the region's objects, and inside a loop body each iteration MUST release them. [T-301.2]
+The compiler MUST place an object in `r` only when escape analysis proves that no pointer to it outlives the owner block of `r`. [T-301.2]
+Otherwise the object MUST go on the heap, with `perf::arena_fallback` naming the call and the escaping flow. [T-301.2]
+A store of a region pointer into a region object whose owner block is the same or older MUST NOT count as an escape. [T-301.2]
+A callee MAY place objects in an `r` it receives as a parameter. [T-301.2]
+In a `.lgo` package, a `Region` that is stored outside a local variable, returned, sent on a channel, captured by a `go` statement, or captured by an escaping closure MUST fail with `correctness::region_escape`. [T-301.2]
+In a Go package that use is allowed, and every placement through that region MUST fall back to the heap. [T-301.2][R-U1]
+A `go group` child MAY read a parent-region object through a const view. [T-301.2]
+A non-const capture MUST count as an escape of that object. [T-301.2]
+`logos eject` MUST lower the four calls to `logos/rt.Region{}`, `new(T)`, `make([]T, n)`, and `append(s, v...)`. [T-301.2]
+The toolchain MUST NOT ship the `arena` package, `reflect.ArenaNew`, or `GOEXPERIMENT=arenas`. [T-301.2]
+
+Comptime and escape analysis:
+`comptime.SizeOf[T]()`, `comptime.AlignOf[T]()`, and `comptime.HasPointers[T]()` MUST be compile-time-only untyped constants in each expansion. [T-205]
+Escape analysis MUST record a parameter that leaks only into the pointee of another parameter. [T-301.2][R-U1]
+This precision MUST apply to `.lgo` packages, and to Go packages under `GOEXPERIMENT=logosescape`, which is off by default. [T-301.2][R-U1]
 
 ### 3.2 RFC-302: Smart stack engine
 
@@ -1339,8 +1384,8 @@ It MUST be one of "deterministic", "baseline", or "native". [T-Sec10][T-105]
 With "deterministic", logos sets GOAMD64 to v3 and GOARM64 to v8.2 unless the environment already sets them. [T-105]
 With "native", logos uses the host level. [T-105]
 See Sec 1.5 for the default binary CPU requirement.
-arena is a boolean with default false. [T-Sec10]
-A true value enables the Tier-0 arena experiment for Go packages and loGo/s packages under `logos`. [T-Sec10][R-U1]
+arena is a boolean with default true. [T-Sec10][T-301.1]
+A true value enables implicit placement and the placement regions for Go packages and loGo/s packages under `logos`. [T-Sec10][T-301.1][R-U1]
 
 ### 10.4 Capabilities table
 
@@ -1829,8 +1874,11 @@ m.WithLock(func(c *Config) {
 
 ### 21.1 Proxy model and position mapping
 
-- `logos lsp` MUST act as a proxy over `gopls` for `.lgo` packages and for Go packages. [T-Sec21][R-U1]
-- It MUST serve stdio JSON-RPC and rewrite URIs and positions between `.lgo` files and the lowered overlay. [T-Sec21]
+- `logos lsp` MUST keep one document store keyed by source URI that holds the text, the client version, and at most one lowered snapshot per package. [T-Sec21]
+- A request on a `.lgo` document MUST use a snapshot whose versions equal the current client versions of every document of the package; the proxy MUST compute it on demand, once per version set, and concurrent requests MUST share one computation. [T-Sec21]
+- The proxy MUST NOT recompile without a request or a `didSave`. [T-Sec21]
+- The lowering MUST come from one `logos list -compiled -json -overlay=<file>` run that returns, per `.lgo` file, the lowered text, the edit map, the hints JSON, and the compiler diagnostics. [T-Sec21]
+- Position translation MUST use the shared edit map package. [T-Sec21]
 - Position translation MUST rest on the compiler-written origin segments of the eject map: a lowered offset inside a copied segment maps to its exact original offset, and offsets inside compiler-generated runs have no `.lgo` position of their own; no heuristic or size-capped textual matching takes part. [T-Sec21]
 - Closing an unsaved `.lgo` document MUST discard its unsaved overlay and MUST refresh the retained package's compiler results. [T-Sec21]
 - A `textDocument/formatting` request for a `.lgo` document MUST be refused instead of returning edits to lowered Go. Formatting requests for Go documents MUST pass through to `gopls`. [T-Sec21][R-U1]

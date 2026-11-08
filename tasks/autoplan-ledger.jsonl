@@ -1,4 +1,4 @@
-{"id": "CEO-01", "description": "P0-S1 Rename logos-doc/PLAN.md to logos-doc/SPEC.md (pure rename) and P0-S2 rewrite SPEC.md as the tailored spec (tables T, T-PERF, N, Section 23)", "phase": "CEO"}
+{"id": "CEO-01", "description": "P0-S1 Rename logos-doc/PLAN.md to logos-doc/SPEC.md (pure rename) and P0-S2 rewrite SPEC.md as the tailored spec (tables T, N, Section 23)", "phase": "CEO"}
 {"id": "CEO-02", "description": "P0-S5 Create logos-doc/REDTEAM.md with 182 attack rows", "phase": "CEO"}
 {"id": "CEO-03", "description": "P0-S6 Create tasks/autoplan-ledger.jsonl from this ledger", "phase": "CEO"}
 {"id": "CEO-04", "description": "P0-S7 Replace the session todo list with one item per slice", "phase": "CEO"}
@@ -110,3 +110,14 @@
 {"id": "ENG-37", "description": "M19-S7 zgc colored pointers", "phase": "ENG"}
 {"id": "ENG-38", "description": "M19-S8 immix blocks and lines", "phase": "ENG"}
 {"id": "DX-20", "description": "M0-S8 Go and loGo/s interop (replaces the import-edge rejection of M0-S2)", "phase": "DX"}
+{"id": "ENG-39", "description": "M18-S5 Comptime layout intrinsics", "phase": "ENG"}
+{"id": "ENG-40", "description": "M18-S6 Pointee-leak escape tag", "phase": "ENG"}
+{"id": "ENG-41", "description": "M18-S7 logos/arena and explicit placement", "phase": "ENG"}
+{"id": "ENG-42", "description": "M18-S8 Group read sharing", "phase": "ENG"}
+{"id": "ENG-43", "description": "M18-S9 Implicit placement on by default under logos", "phase": "ENG"}
+{"id": "ENG-44", "description": "M9-S9 Native nogo rules", "phase": "ENG"}
+{"id": "ENG-45", "description": "M21-S3 Pull-model proxy", "phase": "ENG"}
+{"id": "ENG-46", "description": "M23-S1 One facts writer", "phase": "ENG"}
+{"id": "ENG-47", "description": "M23-S2 Shared edit map package", "phase": "ENG"}
+{"id": "ENG-48", "description": "M23-S3 One eject printer", "phase": "ENG"}
+{"id": "ENG-49", "description": "M23-S4 One cmd/go settings path", "phase": "ENG"}

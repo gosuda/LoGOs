@@ -177,6 +177,13 @@ Resolutions: logos-doc/SPEC.md Section 17. Status values: planned, tested, satis
 | #187 | M16 | src/cmd/go/testdata/script/logos_wasm_loader.txt | tested |
 | #188 | M20 | src/cmd/cgo/internal/testlogos/fastcall_test.go | tested |
 | #189 | M20 | src/cmd/cgo/internal/testlogos/fastcall_test.go | tested |
+| #191 | M18 | (planned; region handle smuggled through a closure) | planned |
+| #192 | M18 | (planned; group child writes a parent-region object) | planned |
+| #193 | M18 | (planned; region pointer stored into an older region object across a call) | planned |
+| #194 | M18 | (planned; ejected region program changes output) | planned |
+| #195 | M9 | (planned; unguarded field read after deferred unlock moved) | planned |
+| #196 | M3 | (planned; facts object name with junk tag accepted) | planned |
+| #197 | M21 | (planned; stale LSP snapshot served after a newer edit) | planned |
 | #190 | M5 | test/logos/compile/const_interface_generic_assert.lgo; test/logos/run/const_interface_generic_assert.lgo; src/cmd/go/testdata/script/logos_const_interface_generic_assert.txt (local and imported function/receiver instantiations, wrappers, closures, type switches, composite/nested targets, and parameter indexes above 64; executed 2026-10-28: both testdir rows pass and `go test cmd/go -run 'Script/^logos_const_interface_generic_assert$'` passes) | tested |
 
 Generic assertion effects have source changes, not a completed parent verification gate. Ordinary assertion definitions remain legal; the compile fixture targets unsafe qualified instantiations, while the run fixture retains identity, ordinary named arguments, and known-zero storage-container controls. The script covers both Go-to-loGo/s and loGo/s-to-Go generic imports. Receiver-readonly facts must not stand in for parameter-mutation summaries, and neither assertion nor mutation masks may truncate positions at or above 64.
