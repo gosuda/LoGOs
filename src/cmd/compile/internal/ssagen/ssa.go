@@ -364,9 +364,6 @@ func buildssa(fn *ir.Func, worker int, isPgoHot bool) *ssa.Func {
 	if fn.Pragma&ir.Nosplit != 0 {
 		s.f.NoSplit = true
 	}
-	if base.LogosNoLB(base.Ctxt.Pkgpath, base.Ctxt.PosTable.Pos(fn.Pos()).Filename(), fn.Sym().Name) {
-		s.f.LogosNoLB = true
-	}
 	s.f.ABI0 = ssaConfig.ABI0
 	s.f.ABI1 = ssaConfig.ABI1
 	s.f.ABIDefault = abiForFunc(nil, ssaConfig.ABI0, ssaConfig.ABI1)
@@ -5057,10 +5054,6 @@ func (s *state) callAddr(n *ir.CallExpr, k callKind) *ssa.Value {
 // Returns the address of the return value (or nil if none).
 func (s *state) call(n *ir.CallExpr, k callKind, returnResultAddr bool, deferExtra ir.Expr) *ssa.Value {
 	s.prevCall = nil
-	// Syscall foreign admission (logosgcmoving only): the Admit half goes
-	// before argument lowering so it precedes the call in memory order.
-	// Pure no-op for non-qualifying sites; see logos_syscall_order.go.
-	syscallAdmit := s.logosSyscallEmitAdmit(n, k)
 	var calleeLSym *obj.LSym // target function (if static)
 	var closure *ssa.Value   // ptr to closure to run (if dynamic)
 	var codeptr *ssa.Value   // ptr to target code (if dynamic)
@@ -5264,9 +5257,6 @@ func (s *state) call(n *ir.CallExpr, k callKind, returnResultAddr bool, deferExt
 	}
 	s.prevCall = call
 	s.vars[memVar] = s.newValue1I(ssa.OpSelectN, types.TypeMem, int64(len(ACResults)), call)
-	// Syscall foreign admission: the End half pairs with the Admit token
-	// above. No-op unless Admit fired; preserves prevCall for ORESULTs.
-	s.logosSyscallEmitEnd(syscallAdmit)
 	// Insert VarLive opcodes.
 	for _, v := range n.KeepAlive {
 		if !v.Addrtaken() {
@@ -8149,8 +8139,6 @@ func (e *ssafn) Syslook(name string) *obj.LSym {
 		return ir.Syms.WBZero
 	case "wbMove":
 		return ir.Syms.WBMove
-	case "logosImmixStoreBarrier":
-		return typecheck.LookupRuntimeFunc("logosImmixStoreBarrier")
 	case "cgoCheckMemmove":
 		return ir.Syms.CgoCheckMemmove
 	case "cgoCheckPtrWrite":

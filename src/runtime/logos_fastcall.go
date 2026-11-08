@@ -21,9 +21,8 @@ import (
 // profiling state (syscallpc, syscallsp, ncgo) so SIGPROF and CPU
 // profiles attribute C time to the Go call site. It records the
 // fast-call state on the original M: m.inFastCall and the argument
-// frame in m.fastCgoFrame[0]. The frame word is a moving-GC root,
-// pinned during evacuation (logos_evac_pin.go); elsewhere the ordinary
-// goroutine stack scan plus KeepAlive keep the frame live.
+// frame in m.fastCgoFrame[0], which the ordinary goroutine stack scan
+// plus KeepAlive keep live.
 // m.fastCallEnterNano is diagnostic-only: the production path records
 // zero and performs no per-call clock read; only the test helper
 // exercises the timestamp.
@@ -44,17 +43,6 @@ func logosCgocallFast(fn, arg unsafe.Pointer) int32 {
 		throw("cgocall nil")
 	}
 
-	// The fast branch bypasses cgocall, whose top-level untag never
-	// runs here. Untag before logosRecordFastCall records the frame
-	// pointer and before reentersyscall and asmcgocall use it, so the
-	// record and the C call see a canonical frame pointer. With
-	// colors inert this is the identity, preserving the exact default
-	// behavior; foreign words pass through. The nested typed graph is
-	// canonicalized at the generated call site (the W2 emission), not
-	// here: this nosplit path cannot walk types.
-	arg = logosZgcForeignArg(arg)
-	logosZgcForeignHoldEnter(getg(), uintptr(arg))
-
 	mp := getg().m
 	if raceenabled {
 		racereleasemerge(unsafe.Pointer(&racecgosync))
@@ -68,8 +56,7 @@ func logosCgocallFast(fn, arg unsafe.Pointer) int32 {
 	// helper reads it (export_logos_test.go), no correctness path does.
 	// The per-call nanotime() read that fed it was the only fast-only
 	// time source versus plain cgocall, so record zero and skip the
-	// clock. fastCgoFrame[0] and inFastCall stay: the frame word is a
-	// moving-GC root pinned in logos_evac_pin.go, and the flag drives
+	// clock. fastCgoFrame[0] and inFastCall stay: the flag drives
 	// the nocallback-violation panic in cgocallbackg.
 	logosRecordFastCall(mp, arg, 0)
 
@@ -95,7 +82,6 @@ func logosCgocallFast(fn, arg unsafe.Pointer) int32 {
 	winsyscall := mp.winsyscall
 
 	exitsyscall()
-	logosZgcForeignHoldExit(getg())
 
 	getg().m.winsyscall = winsyscall
 

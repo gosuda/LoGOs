@@ -296,6 +296,7 @@ func TestParseViolations(t *testing.T) {
 		{"invalid capabilities severity", "[capabilities]\ntransitive_unsafe = \"forbid\"\n", `logos.toml:2:21: invalid transitive_unsafe value "forbid" (want deny, warn, or allow)`},
 		{"capabilities key in build table", "[build]\ntransitive_unsafe = \"deny\"\n", `logos.toml:2:1: unknown key "transitive_unsafe"`},
 		{"build key in capabilities table", "[capabilities]\ncgo = \"allow\"\n", `logos.toml:2:1: unknown key "cgo"`},
+		{"build gc key rejected", "[build]\ngc = \"greentea\"\n", `logos.toml:2:1: unknown key "gc"`},
 		{"invalid capabilities allowlist pattern", "[capabilities]\ntransitive_unsafe_allowlist = [\"[\"]\n", `logos.toml:2:32: [configuration::invalid_capabilities_allowlist] transitive_unsafe_allowlist pattern "[": syntax error in pattern`},
 		{"invalid strict_files entry", "[project]\nstrict_files = [\".go\"]\n", `logos.toml:2:17: invalid strict_files entry ".go" (want ".lgo", ".📜", ".⚡", or ".ʕ◔ϖ◔ʔ")`},
 		{"bare opt level rejected", "[build]\nopt_level = \"3\"\n", `logos.toml:2:13: opt_level must be one of O0, O1, O2, O3, Os`},

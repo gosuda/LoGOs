@@ -10,7 +10,6 @@ import (
 	"cmd/compile/internal/typecheck"
 	"cmd/compile/internal/types"
 	"cmd/internal/src"
-	"internal/buildcfg"
 	"strings"
 )
 
@@ -281,12 +280,6 @@ func (e *escape) rewriteArgument(arg ir.Node, call *ir.CallExpr, fns []*ir.Name)
 		if fn.Func != nil {
 			pragma |= fn.Func.Pragma
 		}
-	}
-	// For dynamic callees under the moving collector on supported architectures,
-	// keep pointer operands alive across the call so the indirect syscall admission
-	// lane can inspect the target at runtime and pin any foreign referents.
-	if len(fns) == 0 && ir.IsUintptrConv(arg) && buildcfg.Experiment.LogosGCMoving && (buildcfg.GOARCH == "amd64" || buildcfg.GOARCH == "arm64") {
-		pragma |= ir.UintptrKeepAlive
 	}
 	if pragma&(ir.UintptrKeepAlive|ir.UintptrEscapes) == 0 {
 		return

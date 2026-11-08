@@ -87,18 +87,3 @@ func logosConservativeCallCost(calleeCost, extraCost int32) int32 {
 	}
 	return calleeCost
 }
-
-// logosNoLBFence reports whether inlining callee into callerfn would mix
-// load-barrier policies under -lb: one side keeps plain loads while the
-// other takes barriers, so the inlined body would compile under the wrong
-// policy. Either direction fences; both plain and both barriered inline
-// unchanged. Each side is classified by its own package, file and name,
-// so a non-runtime file never counts as excluded.
-func logosNoLBFence(callerfn, callee *ir.Func) bool {
-	if !base.LogosLoadBarrier {
-		return false
-	}
-	caller := base.LogosNoLB(base.Ctxt.Pkgpath, base.Ctxt.PosTable.Pos(callerfn.Pos()).Filename(), callerfn.Sym().Name)
-	calleeNoLB := base.LogosNoLB(callee.Sym().Pkg.Path, base.Ctxt.PosTable.Pos(callee.Pos()).Filename(), callee.Sym().Name)
-	return caller != calleeNoLB
-}

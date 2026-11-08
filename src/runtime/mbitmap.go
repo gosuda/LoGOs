@@ -389,14 +389,11 @@ func bulkBarrierPreWrite(dst, src, size uintptr, typ *abi.Type) {
 	if (dst|src|size)&(goarch.PtrSize-1) != 0 {
 		throw("bulkBarrierPreWrite: unaligned arguments")
 	}
-	if !wbActive() {
+	if !writeBarrier.enabled {
 		return
 	}
 	s := spanOf(dst)
 	if s == nil {
-		if logosGenGlobalDst() {
-			return
-		}
 		// If dst is a global, use the data or BSS bitmaps to
 		// execute write barriers.
 		for _, datap := range activeModules() {
@@ -419,9 +416,6 @@ func bulkBarrierPreWrite(dst, src, size uintptr, typ *abi.Type) {
 		// another stack. Either way, no need for barriers.
 		// This will also catch if dst is in a freed span,
 		// though that should never have.
-		return
-	}
-	if logosGenBulk(s, dst, src, size) {
 		return
 	}
 	buf := &getg().m.p.ptr().wbBuf
@@ -658,7 +652,7 @@ func (span *mspan) writeHeapBitsSmall(x, dataSize uintptr, typ *_type) (scanSize
 
 	// Since we're never writing more than one uintptr's worth of bits, we're either going
 	// to do one or two writes.
-	dstBase, _ := spanHeapBitsRange(span.base(), span.npages*pageSize, span.elemsize)
+	dstBase, _ := spanHeapBitsRange(span.base(), pageSize, span.elemsize)
 	dst := unsafe.Pointer(dstBase)
 	o := (x - span.base()) / goarch.PtrSize
 	i := o / ptrBits
@@ -1367,12 +1361,6 @@ func badPointer(s *mspan, p, refBase, refOff uintptr) {
 //go:linkname findObject
 //go:nosplit
 func findObject(p, refBase, refOff uintptr) (base uintptr, s *mspan, objIndex uintptr) {
-	if zgcCycleEnabled() {
-		// Nosplit-safe canonicalization only (single upstream hook; the
-		// splitting zgcCanonical locks and may grow the stack, which is
-		// exactly the user-stack system-stack fatal).
-		p = logosZgcFindObjectPtr(p)
-	}
 	s = spanOf(p)
 	// If s is nil, the virtual address has never been part of the heap.
 	// This pointer may be to some mmap'd region, so we allow it.
@@ -1389,10 +1377,6 @@ func findObject(p, refBase, refOff uintptr) (base uintptr, s *mspan, objIndex ui
 	//
 	// Check s.state to synchronize with span initialization
 	// before checking other fields. See also spanOfHeap.
-	if zgcCycleEnabled() && zgcSpanQuarantined(s) {
-		base, s, objIndex = 0, nil, 0
-		return
-	}
 	if state := s.state.get(); state != mSpanInUse || p < s.base() || p >= s.limit {
 		// Pointers into stacks are also ok, the runtime manages these explicitly.
 		if state == mSpanManual {
@@ -1485,10 +1469,7 @@ func typeBitsBulkBarrier(typ *_type, dst, src, size uintptr) {
 		println("runtime: typeBitsBulkBarrier with type ", toRType(typ).string(), " of size ", typ.Size_, " but memory size", size)
 		throw("runtime: invalid typeBitsBulkBarrier")
 	}
-	if !wbActive() {
-		return
-	}
-	if logosGenTypeBits(typ, dst) {
+	if !writeBarrier.enabled {
 		return
 	}
 	ptrmask := getGCMask(typ)

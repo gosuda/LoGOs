@@ -41,16 +41,16 @@ func TestRouteLogosHarnessSkipBypass(t *testing.T) {
 	}
 }
 
-// TestLogosGCFlagsScopedToTestPackage pins test-only compiler flags to
+// TestLogosCompilerFlagsScopedToTestPackage pins test-only compiler flags to
 // the test package: the staged argv keeps an all=<base> element free of
 // -m, -e, and -d so dependencies compile with the shared base only. A
 // regression that folds test flags into the all= element rebuilds the
 // standard library with debug flags.
-func TestLogosGCFlagsScopedToTestPackage(t *testing.T) {
+func TestLogosCompilerFlagsScopedToTestPackage(t *testing.T) {
 	t.Setenv("GO_GCFLAGS", "-l")
-	args := logosGCFlagsArgs([]string{"-m"})
+	args := logosTestFlagsArgs([]string{"-m"})
 	if len(args) != 2 {
-		t.Fatalf("logosGCFlagsArgs returned %d elements, want 2: %q", len(args), args)
+		t.Fatalf("logosTestFlagsArgs returned %d elements, want 2: %q", len(args), args)
 	}
 	all, scoped := args[0], args[1]
 	if !strings.Contains(all, "all=-l") {

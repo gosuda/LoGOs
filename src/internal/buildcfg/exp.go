@@ -88,7 +88,6 @@ func ParseGOEXPERIMENT(goos, goarch, goexp string) (*ExperimentFlags, error) {
 		SizeSpecializedMalloc: true,
 		LogosFastCgo:          false,
 		LogosArena:            false, // M18-S1: stays off until run.bash passes with it on (G3).
-		LogosSpanDeck:         true,  // M19-S6: stable default; nologosspandeck keeps the FIFO comparison path.
 	}
 	flags := &ExperimentFlags{
 		Flags:    baseline,
@@ -140,11 +139,6 @@ func ParseGOEXPERIMENT(goos, goarch, goexp string) (*ExperimentFlags, error) {
 			set(val)
 		}
 	}
-
-	if flags.LogosGen && (!flags.GreenTeaGC || goarch != "amd64") {
-		return nil, fmt.Errorf("GOEXPERIMENT logosgen requires greenteagc on amd64")
-	}
-
 	if regabiAlwaysOn {
 		flags.RegabiWrappers = true
 		flags.RegabiArgs = true

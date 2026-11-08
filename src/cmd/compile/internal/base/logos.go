@@ -6,8 +6,6 @@ package base
 
 import (
 	"flag"
-	"internal/buildcfg"
-	"log"
 )
 
 // LogosEject is the -logos.eject output directory. After checkFiles
@@ -68,95 +66,4 @@ func logosRegisterFlags() {
 	flag.StringVar(&LogosHintsOut, "logos.hintsout", "", "write the logos editor hints of the package to `file`")
 	flag.StringVar(&LogosNextOut, "logos.nextout", "", "append logos next scan results to `file`")
 	flag.IntVar(&LogosComptimeNodes, "logos.comptime_nodes", 4096, "cap expanded nodes per comptime expansion")
-	flag.BoolVar(&LogosLoadBarrier, "lb", false, "emit zgc load barriers on pointer loads")
-}
-
-// LogosLoadBarrier is the -lb flag, which the go command passes under
-// -gc=zgc (SPEC Sec 8.4, M19-S5 phase 2): every pointer load tests the
-// color of the loaded word and calls runtime.zgcLoadBarrierSlow on a
-// mismatch. The runtime half exists only under GOEXPERIMENT=logosgcmoving
-// on amd64 and arm64.
-var LogosLoadBarrier bool
-
-// logosCheckFlags checks the loGoS compiler flags once CompilingRuntime is
-// known. Under -gc=zgc the runtime and internal/runtime/maps compile with
-// -lb too: most of their pointer loads take the barrier while the
-// excluded files (barrier implementation, GC scanners, allocator
-// bit-manipulation, signal delivery, stack growth) and the named
-// runtime syscall entries keep plain loads with explicit
-// canonicalization. Write barriers in the runtime stay on; only user
-// packages compile with -wb=false.
-func logosCheckFlags() {
-	if !LogosLoadBarrier {
-		return
-	}
-	if !buildcfg.Experiment.LogosGCMoving || (buildcfg.GOARCH != "amd64" && buildcfg.GOARCH != "arm64") {
-		log.Fatalf("-lb requires GOEXPERIMENT=logosgcmoving on amd64 or arm64")
-	}
-}
-
-// LogosNoLB reports whether the named function of a package keeps plain
-// loads under -lb: the runtime files whose pointer loads stay plain (the
-// barrier implementation itself, the GC scanner files, the allocator
-// bit-manipulation files, signal delivery files, stack growth mechanics,
-// and the debug-call machinery), and the named runtime syscall, cgo and
-// crash-stack entries whose slow path must never appear there, plus the
-// source-proven C-static sigaction exception and the C-static munmap,
-// libInit and stack-only sigaction.func1 leaves. A non-runtime package is
-// never excluded, whatever its file is called. Extend the set only on
-// audit rows or a link-time nosplit-limit error.
-func LogosNoLB(pkg, file, name string) bool {
-	if logosNoLBFunc(pkg, name) {
-		return true
-	}
-	return pkg == "runtime" && logosNoLBFile(file)
-}
-
-var logosNoLBFiles = [...]string{
-	"logos_zgc",
-	"mgcmark",
-	"mbitmap",
-	"mgcsweep",
-	"malloc",
-	"mcache",
-	"mcentral",
-	"mheap",
-	"mpagealloc",
-	"mspanset",
-	"signal_",
-	"sigaction",
-	"sigqueue",
-	"stack",
-	"debugcall",
-}
-
-func logosNoLBFunc(pkg, name string) bool {
-	if pkg != "runtime" {
-		return false
-	}
-	switch name {
-	case "entersyscall", "reentersyscall", "entersyscallblock",
-		"exitsyscall", "cgocall", "cgocallbackg",
-		"sigaction", "sigaction.func1",
-		"munmap", "libInit",
-		"switchToCrashStack", "badmorestackg0", "badmorestackg0.func1":
-		return true
-	}
-	return false
-}
-
-func logosNoLBFile(name string) bool {
-	file := name
-	for i := len(name) - 1; i >= 0; i-- {
-		if name[i] == '/' || name[i] == '\\' {
-			file = name[i+1:]
-			break
-		}
-	}
-	for _, prefix := range logosNoLBFiles {
-		if len(file) >= len(prefix) && file[:len(prefix)] == prefix {
-			return true
-		}
-	}
-	return false
 }

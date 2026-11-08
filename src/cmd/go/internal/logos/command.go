@@ -36,7 +36,6 @@ func ConfigureCommand(cmd *base.Command) {
 	addJSONDiagnosticsFlag(cmd.Lookup("build"))
 	addJSONDiagnosticsFlag(cmd.Lookup("lint"))
 	addWasmLoaderHelp(cmd.Lookup("build"))
-	addGCFlagHelp(cmd.Lookup("build"))
 }
 
 // pedanticFlag is the --pedantic flag value: a boolean that also records
@@ -85,16 +84,6 @@ func addJSONDiagnosticsFlag(cmd *base.Command) {
 		cmd.Flag.BoolVar(&cfg.LogosJSON, "json-diagnostics", false, "")
 	}
 	addHelp(cmd, "-json-diagnostics", "\n\t-json-diagnostics\n\t\tprint each compiler and lint diagnostic as one JSON object\n\t\tper line on stderr (logos builds only).\n")
-}
-
-// addGCFlagHelp documents the -gc flag in the logos help of cmd. The flag is
-// registered for every build-flag command under plain go too, where it has no
-// help text.
-func addGCFlagHelp(cmd *base.Command) {
-	if cmd == nil {
-		return
-	}
-	addHelp(cmd, "-gc mode", "\n\t-gc mode\n\t\tselect the garbage collector: greentea, zgc, immix, wasm,\n\t\tbatch, or epsilon. It overrides the gc key of logos.toml.\n\t\tThe default is greentea, or wasm on GOARCH=wasm.\n")
 }
 
 // addWasmLoaderHelp documents the --wasm-loader flag in the logos help of

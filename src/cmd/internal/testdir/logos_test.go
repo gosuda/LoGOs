@@ -231,13 +231,13 @@ func splitOptFlags(flags []string) (buildFlags, optFlags []string) {
 	return buildFlags, optFlags
 }
 
-// logosGCFlagsArgs builds the two -gcflags argv elements for .lgo
+// logosTestFlagsArgs builds the two -gcflags argv elements for .lgo
 // compile and errorcheck: the first matches t.goGcflags exactly so the
 // shared standard library build is reused, and the second carries the
 // GO_GCFLAGS base plus -e and the directive flags for the test package
 // only. The later match wins in cmd/go, so dependencies keep the base
 // while the staged package gets the test flags.
-func logosGCFlagsArgs(compilerFlags []string) []string {
+func logosTestFlagsArgs(compilerFlags []string) []string {
 	raw := os.Getenv("GO_GCFLAGS")
 	first := "-gcflags=all=" + raw
 	base := strings.TrimSpace(raw)
@@ -260,11 +260,11 @@ func logosGCFlagsArgs(compilerFlags []string) []string {
 	return []string{first, second}
 }
 
-// logosGCFlags joins logosGCFlagsArgs into one string for tests that
-// assert on the combined text. Command lines must use logosGCFlagsArgs
+// logosTestFlags joins logosTestFlagsArgs into one string for tests that
+// assert on the combined text. Command lines must use logosTestFlagsArgs
 // so the two flags reach exec as two real argv elements.
-func logosGCFlags(compilerFlags []string) string {
-	return strings.Join(logosGCFlagsArgs(compilerFlags), " ")
+func logosTestFlags(compilerFlags []string) string {
+	return strings.Join(logosTestFlagsArgs(compilerFlags), " ")
 }
 
 // withSSACheckOn returns flags with the errorcheck ssa/check/on
@@ -432,7 +432,7 @@ func (t test) runLogosLgo(c logosCase, base, tempDir string, runcmd runCmd) erro
 	case "compile":
 		cmd := []string{logosToolPath(t.T), "build"}
 		cmd = append(cmd, optFlags...)
-		cmd = append(cmd, logosGCFlagsArgs(buildFlags)...)
+		cmd = append(cmd, logosTestFlagsArgs(buildFlags)...)
 		cmd = append(cmd, ".")
 		_, err := runcmd(cmd...)
 		return err
@@ -622,7 +622,7 @@ func (t test) runLogosLgoErrorcheck(c logosCase, base, tempDir string, runcmd ru
 	}
 	cmd := []string{logosToolPath(t.T), "build"}
 	cmd = append(cmd, optFlags...)
-	cmd = append(cmd, logosGCFlagsArgs(flags)...)
+	cmd = append(cmd, logosTestFlagsArgs(flags)...)
 	cmd = append(cmd, ".")
 	out, err := runcmd(cmd...)
 	if c.wantError {
@@ -1237,10 +1237,10 @@ func TestLogosGoBuildPreservesFlags(t *testing.T) {
 	}
 }
 
-func TestLogosGCFlagsHasE(t *testing.T) {
-	got := logosGCFlags([]string{"-m"})
+func TestLogosCompilerFlagsHasE(t *testing.T) {
+	got := logosTestFlags([]string{"-m"})
 	if !strings.HasPrefix(got, "-gcflags=") || !strings.Contains(got, "-e") || !strings.Contains(got, "-m") {
-		t.Fatalf("logosGCFlags = %q, want -gcflags with -e and -m", got)
+		t.Fatalf("logosTestFlags = %q, want -gcflags with -e and -m", got)
 	}
 }
 

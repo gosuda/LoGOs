@@ -1098,19 +1098,6 @@ func canInlineCallExpr(callerfn *ir.Func, n *ir.CallExpr, callee *ir.Func, bigCa
 		return false, 0, false
 	}
 
-	if logosNoLBFence(callerfn, callee) {
-		if log {
-			if base.Flag.LowerM > 1 {
-				fmt.Printf("%v: cannot inline %v into %v: load-barrier policy differs\n", ir.Line(n), callee, ir.FuncName(callerfn))
-			}
-			if logopt.Enabled() {
-				logopt.LogOpt(n.Pos(), "cannotInlineCall", "inline", ir.FuncName(callerfn),
-					fmt.Sprintf("%s and %s differ in load-barrier policy", ir.PkgFuncName(callerfn), ir.PkgFuncName(callee)))
-			}
-		}
-		return false, 0, false
-	}
-
 	ok, maxCost, callSiteScore, hot := inlineCostOK(n, callerfn, callee, bigCaller, closureCalledOnce)
 	if !ok {
 		// callee cost too high for this call site.

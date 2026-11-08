@@ -140,13 +140,6 @@ func cgocall(fn, arg unsafe.Pointer) int32 {
 		throw("cgocall nil")
 	}
 
-	// The kernel and C reject colored addresses: untag and canonicalize
-	// the argument on the Go side before the trap. Foreign words pass through.
-	// We enter a foreign hold with arg as direct root before entersyscall,
-	// protecting both top-level and nested references across C execution.
-	arg = logosZgcForeignArg(arg)
-	logosZgcForeignHoldEnter(getg(), uintptr(arg))
-
 	if raceenabled {
 		racereleasemerge(unsafe.Pointer(&racecgosync))
 	}
@@ -203,7 +196,6 @@ func cgocall(fn, arg unsafe.Pointer) int32 {
 	winsyscall := mp.winsyscall
 
 	exitsyscall()
-	logosZgcForeignHoldExit(getg())
 
 	getg().m.winsyscall = winsyscall
 
@@ -594,7 +586,6 @@ func cgoCheckPointer(ptr any, arg any) {
 		if !t.IsDirectIface() {
 			p = *(*unsafe.Pointer)(p)
 		}
-		p = cgoCanonicalPP(p)
 		if p == nil || !cgoIsGoPointer(p) {
 			return
 		}
@@ -681,7 +672,6 @@ func cgoCheckArg(t *_type, p unsafe.Pointer, indir, top bool, msg cgoErrorMsg) {
 		if indir {
 			p = *(*unsafe.Pointer)(p)
 		}
-		p = cgoCanonicalPP(p)
 		if !cgoIsGoPointer(p) {
 			return
 		}
@@ -698,7 +688,6 @@ func cgoCheckArg(t *_type, p unsafe.Pointer, indir, top bool, msg cgoErrorMsg) {
 			panic(cgoFormatErr(msg, t.Kind()))
 		}
 		p = *(*unsafe.Pointer)(add(p, goarch.PtrSize))
-		p = cgoCanonicalPP(p)
 		if !cgoIsGoPointer(p) {
 			return
 		}
@@ -710,7 +699,6 @@ func cgoCheckArg(t *_type, p unsafe.Pointer, indir, top bool, msg cgoErrorMsg) {
 		st := (*slicetype)(unsafe.Pointer(t))
 		s := (*slice)(p)
 		p = s.array
-		p = cgoCanonicalPP(p)
 		if p == nil || !cgoIsGoPointer(p) {
 			return
 		}
@@ -726,11 +714,10 @@ func cgoCheckArg(t *_type, p unsafe.Pointer, indir, top bool, msg cgoErrorMsg) {
 		}
 	case abi.String:
 		ss := (*stringStruct)(p)
-		str := cgoCanonicalPP(ss.str)
-		if !cgoIsGoPointer(str) {
+		if !cgoIsGoPointer(ss.str) {
 			return
 		}
-		if !top && !isPinned(str) {
+		if !top && !isPinned(ss.str) {
 			panic(cgoFormatErr(msg, t.Kind()))
 		}
 	case abi.Struct:
@@ -755,8 +742,6 @@ func cgoCheckArg(t *_type, p unsafe.Pointer, indir, top bool, msg cgoErrorMsg) {
 				return
 			}
 		}
-		p = cgoCanonicalPP(p)
-
 		if !cgoIsGoPointer(p) {
 			return
 		}
@@ -773,7 +758,6 @@ func cgoCheckArg(t *_type, p unsafe.Pointer, indir, top bool, msg cgoErrorMsg) {
 // pointer into unpinned Go memory. If it does, we panic.
 // The return values are unused but useful to see in panic tracebacks.
 func cgoCheckUnknownPointer(p unsafe.Pointer, msg cgoErrorMsg) (base, i uintptr) {
-	p = cgoCanonicalPP(p)
 	if inheap(uintptr(p)) {
 		b, span, _ := findObject(uintptr(p), 0, 0)
 		base = b
@@ -787,7 +771,6 @@ func cgoCheckUnknownPointer(p unsafe.Pointer, msg cgoErrorMsg) (base, i uintptr)
 				break
 			}
 			pp := *(*unsafe.Pointer)(unsafe.Pointer(addr))
-			pp = cgoCanonicalPP(pp)
 			if cgoIsGoPointer(pp) && !isPinned(pp) {
 				panic(cgoFormatErr(msg, abi.Pointer))
 			}

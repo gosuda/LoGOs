@@ -124,12 +124,6 @@ hchan,
 # User arena state
 NONE < userArenaState;
 
-# ZGC page registry (logosgcmoving, logos_zgc_quarantine.go): the map lock
-# serializes the per-page entry mutexes and allocates while held (map and
-# state pool setup, fallback entry), so it is acquired before MALLOC. It is
-# a predecessor of the single MALLOC definition below, since a name has
-# exactly one defining rule. Per-page entry mutexes stay leaves.
-NONE < zgcPageSpans;
 
 # Tracing without a P uses a global trace buffer.
 scavenge
@@ -155,8 +149,7 @@ allg,
   traceStrings,
   typelinks,
   userArenaState,
-  vgetrandom,
-  zgcPageSpans
+  vgetrandom
 # Above MALLOC are things that can allocate memory.
 < MALLOC
 # Below MALLOC is the malloc implementation.
@@ -164,12 +157,6 @@ allg,
   spanSetSpine,
   mspanSpecial,
   traceTypeTab,
-  # ZGC identity table (logosgcmoving, logos_zgc_identity.go). The sweeper
-  # drops the identity of a freed object from inside mallocgc
-  # (zgcIdentitySweepFree), with whatever lock the allocating caller held,
-  # so it sits below MALLOC. It is held across the shared admission gate
-  # (a leaf) in zgcRelocateObject and takes no other ranked lock.
-  zgcIdentity,
   MPROF;
 
 # We can acquire gcBitsArenas for pinner bits, and
@@ -189,8 +176,7 @@ gcBitsArenas,
   spanSetSpine,
   synctest,
   fin,
-  root,
-  zgcIdentity # code under the identity lock can grow the stack
+  root
 # Anything that can grow the stack can acquire STACKGROW.
 # (Most higher layers imply STACKGROW, like MALLOC.)
 < STACKGROW

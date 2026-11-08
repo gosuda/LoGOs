@@ -236,7 +236,7 @@ func keyOwner(table, key string) (string, bool) {
 	switch key {
 	case "strict_files":
 		owner = "project"
-	case "cgo", "cgo_allowlist", "opt_level", "target_cpu", "arena", "gc":
+	case "cgo", "cgo_allowlist", "opt_level", "target_cpu", "arena":
 		owner = "build"
 	case "transitive_reflect", "transitive_exec", "transitive_net", "transitive_unsafe",
 		"reflect_allowlist", "transitive_exec_allowlist", "transitive_net_allowlist", "transitive_unsafe_allowlist":
@@ -448,9 +448,6 @@ func (p *parser) assignString(key, s string, valStart int) error {
 		}
 		p.file.Build.Cgo = s
 		p.file.Build.CgoSet = true
-	case "gc":
-		p.file.Build.GC = s
-		p.file.Build.GCSet = true
 	case "transitive_reflect", "transitive_exec", "transitive_net", "transitive_unsafe":
 		if s != "deny" && s != "warn" && s != "allow" {
 			return p.errorf(valStart, "invalid %s value %q (want deny, warn, or allow)", key, s)

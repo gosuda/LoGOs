@@ -143,16 +143,4 @@ type Flags struct {
 	// LogosArena enables the tier-0 arena: per-goroutine 64 KB side
 	// chunks that hold frame-local allocations (M18).
 	LogosArena bool
-
-	// LogosSpanDeck makes the Green Tea span queue drain dirty spans in
-	// monotonic address order and prefetch the mark bits of the spans
-	// a scanned span points into (M19-S6).
-	LogosSpanDeck bool
-
-	// LogosGen enables the generational card table of the Green Tea
-	// collector: minor cycles that skip mature spans (M19-S4).
-	LogosGen bool
-
-	// LogosGCMoving enables the moving collector modes immix and zgc (M19-S5).
-	LogosGCMoving bool
 }
