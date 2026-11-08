@@ -19,14 +19,6 @@ type capGraph struct {
 	preds  map[loader.Sym][]loader.Sym
 }
 
-// newCapGraph returns an empty graph.
-func newCapGraph() *capGraph {
-	return &capGraph{
-		parent: make(map[loader.Sym]loader.Sym),
-		preds:  make(map[loader.Sym][]loader.Sym),
-	}
-}
-
 // visit records the edge p -> s and reports whether s is new. Roots pass
 // p == 0. A node's edges arrive in one run, so comparing against the last
 // recorded predecessor drops every duplicate edge.

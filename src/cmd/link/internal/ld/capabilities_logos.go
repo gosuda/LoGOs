@@ -145,8 +145,11 @@ func logosCapAudit(ctxt *Link, d *deadcodePass) {
 		ldr:    ctxt.loader,
 		policy: &policy,
 		std:    ctxt.loader.StdPackages(),
-		graph:  newCapGraph(),
-		roles:  make(map[loader.Sym]capRole),
+		graph: &capGraph{
+			parent: make(map[loader.Sym]loader.Sym),
+			preds:  make(map[loader.Sym][]loader.Sym),
+		},
+		roles: make(map[loader.Sym]capRole),
 	}
 	a.deps = parseLogosModinfoDeps(strdata["runtime.modinfo"])
 	a.collectImpls(d)
@@ -273,8 +276,9 @@ func (a *logosCapAuditor) flood(d *deadcodePass) {
 		s := a.queue[0]
 		a.queue = a.queue[1:]
 		name := a.ldr.SymName(s)
-		if kind, ok := capabilitySinks[capSinkName(name)]; ok {
-			a.hits = append(a.hits, logosCapHit{sink: s, kind: kind, name: capSinkName(name)})
+		base := capSinkName(name)
+		if kind, ok := capabilitySinks[base]; ok {
+			a.hits = append(a.hits, logosCapHit{sink: s, kind: kind, name: base})
 		} else if capIsCgoTrampoline(name) && a.ldr.SymType(s).IsText() {
 			a.hits = append(a.hits, logosCapHit{sink: s, kind: CapCgo, name: "runtime.cgocall"})
 		}
@@ -357,8 +361,9 @@ func (a *logosCapAuditor) followInlTree(s loader.Sym) {
 		}
 		a.graph.visit(inlined, p)
 		name := a.ldr.SymName(inlined)
-		if kind, ok := capabilitySinks[capSinkName(name)]; ok {
-			a.hits = append(a.hits, logosCapHit{sink: inlined, kind: kind, name: capSinkName(name)})
+		base := capSinkName(name)
+		if kind, ok := capabilitySinks[base]; ok {
+			a.hits = append(a.hits, logosCapHit{sink: inlined, kind: kind, name: base})
 		} else if capIsCgoTrampoline(name) {
 			a.hits = append(a.hits, logosCapHit{sink: inlined, kind: CapCgo, name: "runtime.cgocall"})
 		}
@@ -425,10 +430,10 @@ func (a *logosCapAuditor) followRelocs(d *deadcodePass, s loader.Sym) {
 				continue
 			}
 			m := d.decodeIfaceMethod(a.ldr, a.ctxt.Arch, rs, r.Add())
-			a.followIfaceMethod(s, m.name, m.typ)
+			a.followIfaceImpls(s, m.name, m.typ)
 			continue
 		case objabi.R_USENAMEDMETHOD:
-			a.followIfaceMethodName(s, d.decodeGenericIfaceMethod(a.ldr, r.Sym()))
+			a.followIfaceImpls(s, d.decodeGenericIfaceMethod(a.ldr, r.Sym()), 0)
 			continue
 		}
 		a.enqueue(r.Sym(), s)
@@ -453,20 +458,9 @@ func (a *logosCapAuditor) followExportedImpls(from loader.Sym) {
 	}
 }
 
-// followIfaceMethod adds synthetic edges from a precise interface use
-// site to the implementations matching the used method name and type.
-func (a *logosCapAuditor) followIfaceMethod(from loader.Sym, name string, typ loader.Sym) {
-	a.followIfaceImpls(from, name, typ)
-}
-
-// followIfaceMethodName adds synthetic edges from a generic interface use
-// site to every implementation carrying the used method name.
-func (a *logosCapAuditor) followIfaceMethodName(from loader.Sym, name string) {
-	a.followIfaceImpls(from, name, 0)
-}
-
 // followIfaceImpls adds synthetic edges from an interface use site to the
-// matching implementations. The nil type symbol matches any type.
+// implementations matching the used method name; the nil type symbol
+// matches any type, so a generic use site fans out by name alone.
 func (a *logosCapAuditor) followIfaceImpls(from loader.Sym, name string, typ loader.Sym) {
 	for _, impl := range a.impls {
 		if impl.name != name {
