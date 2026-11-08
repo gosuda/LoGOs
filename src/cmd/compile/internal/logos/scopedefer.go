@@ -67,19 +67,8 @@ type scopeDeferCtx struct {
 // scopeFrame is one break/continue/goto target enclosing the current
 // point: a loop, switch, select, or labeled statement.
 type scopeFrame struct {
-	node  syntax.Node
 	label string
 	loop  bool
-	jump  bool
-}
-
-// scopeActiveItems returns the runnable items of active innermost first.
-func scopeActiveItems(active []*scopeDeferCtx) []scopeItem {
-	var out []scopeItem
-	for i := len(active) - 1; i >= 0; i-- {
-		out = append(out, ownScopeItems(active[i])...)
-	}
-	return out
 }
 
 // ownScopeItems returns one block's items last-in-first-out.
@@ -165,13 +154,6 @@ func (fc *funcLower) collectScopeInfo() {
 			}
 		case *syntax.LabeledStmt:
 			rec(n.Stmt, n)
-		default:
-			syntax.Inspect(n, func(x syntax.Node) bool {
-				if _, ok := x.(*syntax.FuncLit); ok {
-					return false
-				}
-				return true
-			})
 		}
 	}
 	rec(fc.body, nil)
@@ -288,7 +270,8 @@ func unwrapScopeLabels(s syntax.Stmt) (syntax.Stmt, []*syntax.Name) {
 func (fc *funcLower) scopeLabeledPrelude(sd *syntax.ScopeDeferStmt, labels []*syntax.Name, ctx *scopeDeferCtx) []syntax.Stmt {
 	stmtOff, prefix := fc.fl.off(sd.Pos()), gen("")
 	if len(labels) > 0 {
-		stmtOff, prefix = fc.fl.off(labels[0].Pos()), fc.labelPrefixText(sd, labels)
+		stmtOff = fc.fl.off(labels[0].Pos())
+		prefix = fc.fl.srcUser(stmtOff, fc.fl.off(sd.Pos()))
 	}
 	native := fc.scopePrelude(sd, ctx, stmtOff, prefix)
 	for i := len(labels) - 1; i >= 0; i-- {
@@ -298,12 +281,6 @@ func (fc *funcLower) scopeLabeledPrelude(sd *syntax.ScopeDeferStmt, labels []*sy
 		native[0] = lab
 	}
 	return native
-}
-
-// labelPrefixText spells the source from the first label to the scope
-// statement, so the prelude replacement keeps `L1: L2:` verbatim.
-func (fc *funcLower) labelPrefixText(sd *syntax.ScopeDeferStmt, labels []*syntax.Name) otext {
-	return fc.fl.srcUser(fc.fl.off(labels[0].Pos()), fc.fl.off(sd.Pos()))
 }
 
 // scopePrelude emits the capture bindings, armed flag, and guard defer
@@ -404,17 +381,17 @@ func (fc *funcLower) scopeStmt(s syntax.Stmt, active []*scopeDeferCtx, stack []s
 		}
 		return []syntax.Stmt{s}
 	case *syntax.ForStmt:
-		stack = append(stack, scopeFrame{node: s, loop: true, jump: true})
+		stack = append(stack, scopeFrame{loop: true})
 		s.Body.List = fc.scopeBlockList(s.Body.List, s.Body, fc.fl.off(s.Body.Rbrace), active, stack)
 		return []syntax.Stmt{s}
 	case *syntax.SwitchStmt:
-		stack = append(stack, scopeFrame{node: s, jump: true})
+		stack = append(stack, scopeFrame{})
 		for i, c := range s.Body {
 			c.Body = fc.scopeBlockList(c.Body, c, fc.caseEndOff(s, i), active, stack)
 		}
 		return []syntax.Stmt{s}
 	case *syntax.SelectStmt:
-		stack = append(stack, scopeFrame{node: s, jump: true})
+		stack = append(stack, scopeFrame{})
 		for i, c := range s.Body {
 			c.Body = fc.scopeBlockList(c.Body, c, fc.commEndOff(s, i), active, stack)
 		}
@@ -424,7 +401,7 @@ func (fc *funcLower) scopeStmt(s syntax.Stmt, active []*scopeDeferCtx, stack []s
 		if _, ok := s.Stmt.(*syntax.ForStmt); ok {
 			loop = true
 		}
-		stack = append(stack, scopeFrame{node: s, label: s.Label.Value, loop: loop, jump: true})
+		stack = append(stack, scopeFrame{label: s.Label.Value, loop: loop})
 		res := fc.scopeStmt(s.Stmt, active, stack)
 		if len(res) == 1 {
 			s.Stmt = res[0]
@@ -458,17 +435,15 @@ func (fc *funcLower) commEndOff(s *syntax.SelectStmt, i int) int {
 }
 
 // scopeItemsFor returns the runnable items of the contexts with depth
-// greater than d, innermost first.
+// greater than d (-1 for all), innermost first, last-in-first-out
+// within a block.
 func scopeItemsFor(active []*scopeDeferCtx, d int) []scopeItem {
 	var out []scopeItem
 	for i := len(active) - 1; i >= 0; i-- {
 		if active[i].depth <= d {
 			continue
 		}
-		items := active[i].items
-		for j := len(items) - 1; j >= 0; j-- {
-			out = append(out, items[j])
-		}
+		out = append(out, ownScopeItems(active[i])...)
 	}
 	return out
 }
@@ -481,7 +456,7 @@ func (fc *funcLower) scopeReturn(s *syntax.ReturnStmt, active []*scopeDeferCtx) 
 		return []syntax.Stmt{s}
 	}
 	pos := s.Pos()
-	items := scopeActiveItems(active)
+	items := scopeItemsFor(active, -1)
 	results := syntax.UnpackListExpr(s.Results)
 	if len(results) == 0 || (len(results) != len(fc.specs) && !(len(results) == 1 && len(fc.specs) > 1)) {
 		native, text, tw := fc.scopeStanza(pos, items)
@@ -542,7 +517,7 @@ func (fc *funcLower) scopeBranch(s *syntax.BranchStmt, active []*scopeDeferCtx, 
 		}
 		items = reverseScopeItems(active, fc, target)
 	case syntax.Fallthrough:
-		items = scopeActiveItems(active)
+		items = scopeItemsFor(active, -1)
 	default:
 		return []syntax.Stmt{s}
 	}
@@ -588,18 +563,15 @@ func (fc *funcLower) scopeLabeledItems(label string, active []*scopeDeferCtx, st
 // scopeTargetDepth returns the stack index of the innermost break or
 // continue target, or -1 when the traversal holds none.
 func scopeTargetDepth(tok syntax.Token, stack []scopeFrame) int {
-	for k := len(stack) - 1; k >= 0; k-- {
-		if tok == syntax.Continue {
+	if tok == syntax.Continue {
+		for k := len(stack) - 1; k >= 0; k-- {
 			if stack[k].loop {
 				return k
 			}
-			continue
 		}
-		if stack[k].jump {
-			return k
-		}
+		return -1
 	}
-	return -1
+	return len(stack) - 1
 }
 
 // scopeExitStanza builds the stanza for a generated exit (a `?` error
