@@ -20,7 +20,9 @@ stdout '^non-member$'
 cp stdout $WORK/eject-stdout.txt
 
 logos eject -o out
-exists out/main.go
+grep 'return func' out/main.go
+grep 'var _ Asserted = \(\*Checked\)\(nil\)' out/main.go
+grep 'switch' out/main.go
 exists out/go.mod
 grep 'loGo/s union: A \| B' out/main.go
 cd out
@@ -117,7 +119,15 @@ func Check(v any) string {
 // methods: a methods-only interface (which is what eject writes for U)
 // would accept any non-member that implements M, so the shared output
 // below only asserts membership behavior that native and ejected code
-// agree on.
+type Asserted interface {
+	Mark()
+}
+
+type Checked struct : Asserted {
+}
+
+func (Checked) Mark() {}
+
 type C struct {
 	Z int
 }

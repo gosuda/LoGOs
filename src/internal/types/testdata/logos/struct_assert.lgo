@@ -46,3 +46,5 @@ func (s S2) M() {}
 type SEmbed struct : I {
 	S2
 }
+
+type NonStruct int : /* ERROR "syntax error" */ I

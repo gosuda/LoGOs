@@ -102,3 +102,7 @@ type Greeter interface {
 type Person struct : Greeter {
 	Name string
 }
+
+type BadMethod interface {
+	M() int { return 1 } // ERROR syntax error: unexpected
+} // ERROR syntax error: non-declaration statement

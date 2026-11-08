@@ -11,6 +11,33 @@ package p
 type U interface {
 	int | string
 }
+type Shape interface {
+	HasMethod | string
+	M() int
+}
+
+type HasMethod struct{}
+
+func (HasMethod) M() int { return 1 }
+
+var _ Shape = HasMethod{}
+
+type MissingMethod interface {
+	int | string
+	M() int
+}
+
+var _ MissingMethod = int /* ERROR "does not implement" */ (0)
+
+type UnionHolder struct {
+	Value U
+	Items []U
+	Table map[U]int
+}
+
+func acceptsUnion(x U) U { return x }
+
+var compared = u == 7
 
 var u U = 7
 
