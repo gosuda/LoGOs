@@ -552,9 +552,6 @@ func (s *nextScan) receiverUnsafe(loop *syntax.ForStmt, xs string, ctx nextCtx) 
 	if isPackageVar(obj) {
 		return true
 	}
-	if ctx.fn == nil || s.addrTaken == nil || s.closureWritten == nil {
-		return true
-	}
 	return s.addrTaken[obj] || s.closureWritten[obj]
 }
 
