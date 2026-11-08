@@ -124,12 +124,8 @@ func (g *Group) Go(f func(context.Context) error) {
 	}()
 }
 
-// fail records the first child outcome and cancels the group. A nil
-// error records nothing.
+// fail records the first child outcome and cancels the group.
 func (g *Group) fail(err error) {
-	if err == nil {
-		return
-	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if g.first == nil {
