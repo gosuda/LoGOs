@@ -150,7 +150,7 @@ Rules: logos-doc/SPEC.md. Status values: planned, tested, satisfied upstream, bl
 | #156 | Caller reading hash before Close error check | M3 | src/internal/types/testdata/logos/error_first.lgo | tested |
 | #157 | Unconditional self-recursion in const switch branch | M7, M9 | test/logos/lint/infinite_recursion.lgo; test/logos/lint/infinite_recursion_go.go | tested |
 | #158 | Substring pinning large backing array in heap | M9 | test/logos/lint/large_backing_array_pin.lgo; test/logos/lint/large_backing_array_pin_go.go | tested |
-| #160 | Collection moves live cgo arguments | M20 | src/cmd/go/testdata/script/logos_redteam_160.txt (blocked: fastcall foreign hold verification; no executed run) | blocked |
+| #160 | Collection moves live cgo arguments | M20 | (planned; a long fast C call reads a stack-resident argument while another goroutine forces collection and stack shrinking, src/cmd/cgo/internal/testlogos) | planned |
 | #162 | Strict lint breaking third-party module libraries | M9 | src/cmd/go/testdata/script/logos_lint_go.txt | tested |
 | #163 | Buffered channel send flagged as unbounded operation | M9 | test/logos/lint/unbounded_channel_op.lgo; test/logos/lint/unbounded_channel_op_go.go | tested |
 | #164 | Benign writer flagged as discarded error | M9 | test/logos/lint/discarded_error.lgo; test/logos/lint/discarded_error_go.go | tested |
@@ -181,7 +181,7 @@ Rules: logos-doc/SPEC.md. Status values: planned, tested, satisfied upstream, bl
 | #194 | ejected region program changes output | M18 | (planned; ejected region program changes output) | planned |
 | #195 | unguarded field read after deferred unlock moved | M9 | (planned; unguarded field read after deferred unlock moved) | planned |
 | #196 | facts object name with junk tag accepted | M3 | src/cmd/compile/internal/logos/facts/facts_test.go (TestValidObjectTag, TestTaggedObjectRoundTrip) | tested |
-| #197 | stale LSP snapshot served after a newer edit | M21 | (planned; stale LSP snapshot served after a newer edit) | planned |
+| #197 | stale LSP snapshot served after a newer edit | M21 | src/cmd/go/internal/logos/lsp/lsp_test.go (TestProxyStaleLoweringAnswersNull, TestProxyOneRunForTwoEditsBeforeHover, TestProxyConcurrentHoversShareOneRun) | tested |
 | #190 | Generic assertions manufacturing erased readonly obligations | M5 | test/logos/compile/const_interface_generic_assert.lgo; test/logos/run/const_interface_generic_assert.lgo; src/cmd/go/testdata/script/logos_const_interface_generic_assert.txt (local and imported function/receiver instantiations, wrappers, closures, type switches, composite/nested targets, and parameter indexes above 64; executed 2026-10-28: both testdir rows pass and `go test cmd/go -run 'Script/^logos_const_interface_generic_assert$'` passes) | tested |
 
 Generic assertion effects have source changes, not a completed parent verification gate. Ordinary assertion definitions remain legal; the compile fixture targets unsafe qualified instantiations, while the run fixture retains identity, ordinary named arguments, and known-zero storage-container controls. The script covers both Go-to-loGo/s and loGo/s-to-Go generic imports. Receiver-readonly facts must not stand in for parameter-mutation summaries, and neither assertion nor mutation masks may truncate positions at or above 64.
