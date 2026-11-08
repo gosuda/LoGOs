@@ -1,0 +1,17 @@
+// run
+
+package main
+
+import "fmt"
+
+type U interface {
+	*int | int | string
+}
+
+func main() {
+	var typed U = (*int)(nil)
+	fmt.Println(U(1) == U(1))
+	fmt.Println(U(1) == U("1"))
+	fmt.Println(U(nil) == U(nil))
+	fmt.Println(typed == U(nil))
+}
