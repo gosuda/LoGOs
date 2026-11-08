@@ -168,10 +168,7 @@ func (fl *fileLower) lowerChainPkgDecl(decl *syntax.VarDecl) {
 		return
 	}
 	for _, call := range fl.chainsInDecl(decl) {
-		for _, h := range fl.lowerChainTopLevel(call, nil) {
-			_ = h
-			base.Fatalf("logos: ?-chain outside function at %s", call.Pos().String())
-		}
+		fl.lowerChainGuarded(call, nil, "")
 	}
 }
 
@@ -379,11 +376,6 @@ func (fl *fileLower) stmtStartOf(s syntax.Stmt) int {
 		}
 	}
 	return fl.off(syntax.StartPos(s))
-}
-
-// lowerChainTopLevel lowers one outermost chain, returning hoists.
-func (fl *fileLower) lowerChainTopLevel(call *syntax.CallExpr, enc []chainResult) []chainHoist {
-	return fl.lowerChainGuarded(call, enc, "")
 }
 
 // lowerChainGuarded lowers one outermost chain whose hoist runs only while
@@ -742,7 +734,8 @@ func (cg *chainGen) run(call *syntax.CallExpr) {
 		term.savedBody = term.lam.Body
 	}
 	cg.lowerArgChains(term.arg)
-	baseText := cg.sub(base, recv)
+	cg.lowerArgChains(base)
+	baseText := cg.fl.textOf(recv)
 	elemT := cg.baseElem(base)
 	resultT := cg.fl.pkg.info.TypeOf(call)
 	isTry := cg.runIsTry(ops, term)
@@ -825,17 +818,7 @@ func (fl *fileLower) preLowerCaptureInterps(root syntax.Node) {
 	if root == nil {
 		return
 	}
-	var lits []*syntax.InterpExpr
-	syntax.Inspect(root, func(n syntax.Node) bool {
-		if e, ok := n.(*syntax.InterpExpr); ok {
-			lits = append(lits, e)
-		}
-		return true
-	})
-	slices.SortFunc(lits, func(a, b *syntax.InterpExpr) int {
-		return len(a.Raw) - len(b.Raw)
-	})
-	for _, e := range lits {
+	for _, e := range interpLitsUnder(root) {
 		kinds, ok := interpKinds[e]
 		if !ok {
 			continue
@@ -901,23 +884,6 @@ func (cg *chainGen) lowerArgChains(arg syntax.Expr) {
 	for _, n := range cg.nestedChains(arg) {
 		cg.lowerNested(n)
 	}
-}
-
-// sub lowers nested chains in the run base e and returns the composed
-// text of its receiver span. A chain call in base position, such as a
-// mid-chain sortBy, lowers as its own run; its value feeds the outer
-// loop.
-func (cg *chainGen) sub(e syntax.Expr, recv span) otext {
-	var nested []*syntax.CallExpr
-	if bc, ok := syntax.Unparen(e).(*syntax.CallExpr); ok && cg.fl.isChainCall(bc) {
-		nested = []*syntax.CallExpr{bc}
-	} else {
-		nested = cg.nestedChains(e)
-	}
-	for _, n := range nested {
-		cg.lowerNested(n)
-	}
-	return cg.fl.textOf(recv)
 }
 
 // lowerNested lowers one nested chain through a child generator with
@@ -1055,7 +1021,10 @@ func (ce *chainEmit) opResult(op chainOp) string {
 	case "filter", "find", "any", "all", "count":
 		return "bool"
 	case "sortBy":
-		t := cgKeyType(cg, op)
+		t := cg.prodType(op)
+		if t != nil && isUntypedBasic(t) {
+			t = defaultBasicType(t)
+		}
 		if t == nil {
 			t = cg.elemT
 		}
@@ -1243,40 +1212,6 @@ func (cg *chainGen) zeroText(t types2.Type) string {
 	return renderExpr(cg.fl.lambdaZero(t, cg.pos))
 }
 
-// cgKeyType reports a sortBy key type for closures.
-func cgKeyType(cg *chainGen, op chainOp) types2.Type {
-	if op.lam == nil {
-		return cg.funcResult(op)
-	}
-	if block, ok := op.savedBody.(*syntax.BlockStmt); ok {
-		return cg.blockProdType(block)
-	}
-	body, ok := op.savedBody.(syntax.Expr)
-	if !ok {
-		return nil
-	}
-	if t, ok := syntax.Unparen(body).(*syntax.TryExpr); ok {
-		if tv := cg.fl.pkg.info.TypeOf(t); tv != nil {
-			return tv
-		}
-		return nil
-	}
-	if t := cg.fl.pkg.info.TypeOf(body); t != nil {
-		if isUntypedBasic(t) {
-			return defaultBasicType(t)
-		}
-		return t
-	}
-	// D4: replaced capture body; see prodType.
-	if st, ok := cg.fl.optBodyType[body]; ok {
-		if isUntypedBasic(st) {
-			return defaultBasicType(st)
-		}
-		return st
-	}
-	return nil
-}
-
 // spellType spells a type, defaulting untyped basics.
 func (cg *chainGen) spellType(t types2.Type) string {
 	if t == nil {
@@ -1407,25 +1342,6 @@ func (ce *chainEmit) mapLines(p, fname, cur, mname string, i int) []string {
 // receiver elements the caller owns.
 func (ce *chainEmit) failStage(p, errVar string) string {
 	if ce.hasMap() {
-		return ce.failProduct(p, errVar)
-	}
-	return ce.failPristine(p, errVar)
-}
-
-// failProduct spells the rollback plus error return for a failing stage
-// with produced elements: they close in reverse before returning errVar.
-func (ce *chainEmit) failProduct(p, errVar string) string {
-	return ce.failWith(p, errVar, true)
-}
-
-// failPristine spells the error return for a failing stage with nothing
-// produced yet: no rollback, just the return through errVar.
-func (ce *chainEmit) failPristine(p, errVar string) string {
-	return ce.failWith(p, errVar, false)
-}
-
-func (ce *chainEmit) failWith(p, errVar string, rollbackBefore bool) string {
-	if rollbackBefore {
 		return ce.rollback(p) + "; " + ce.failReturn(p, errVar)
 	}
 	return ce.failReturn(p, errVar)
@@ -1487,7 +1403,7 @@ func (ce *chainEmit) terminalLines(p, cur string) []string {
 	case "sum":
 		return appendCur
 	case "first":
-		return keep(ce.firstLines(p, cur))
+		return keep([]string{"return " + ce.someText(p, cur) + ce.rsuf()})
 	case "sortBy", "last", "get":
 		return appendCur
 	}
@@ -1547,11 +1463,6 @@ func (ce *chainEmit) countLines(p, cur string) []string {
 		return []string{fmt.Sprintf("if %[1]s_fv, %[2]s := %[3]s(%[4]s); %[2]s != nil { %[5]s } else if %[1]s_fv { %[1]s_c++ }", p, en, fname, cur, ce.failStage(p, en))}
 	}
 	return []string{fmt.Sprintf("if %s(%s) { %s_c++ }", fname, cur, p)}
-}
-
-// firstLines emits a first step.
-func (ce *chainEmit) firstLines(p, cur string) []string {
-	return []string{"return " + ce.someText(p, cur) + ce.rsuf()}
 }
 
 // epilogue emits the post-loop lines for terminals.

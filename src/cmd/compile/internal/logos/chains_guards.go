@@ -747,14 +747,14 @@ func (fl *fileLower) lowerChainUnit(root syntax.Node, calls []*syntax.CallExpr, 
 	if !guarded {
 		var out []chainHoist
 		for _, call := range calls {
-			out = append(out, fl.lowerChainTopLevel(call, enc)...)
+			out = append(out, fl.lowerChainGuarded(call, enc, "")...)
 		}
 		return out
 	}
 	// Chains that do not hoist lower where they stand, ahead of every
 	// operand text the guarded hoists copy.
 	for _, call := range calls {
-		if !fl.chainTries(call) && len(fl.lowerChainTopLevel(call, enc)) > 0 {
+		if !fl.chainTries(call) && len(fl.lowerChainGuarded(call, enc, "")) > 0 {
 			base.Fatalf("logos: chain at %s hoists without a `?` lambda", call.Pos().String())
 		}
 	}
