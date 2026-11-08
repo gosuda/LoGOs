@@ -6,6 +6,7 @@ package capabilities
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"maps"
 	"os"
@@ -122,15 +123,15 @@ func TestPolicyForLinkEmitsNestedModules(t *testing.T) {
 			t.Errorf("NestedModules = %q, missing %q", p.NestedModules, want)
 		}
 	}
-	data, err := MarshalPolicy(p)
+	data, err := json.Marshal(p)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(string(data), `"nested_modules":["example.com/nestemit/nested"`) {
 		t.Errorf("marshaled policy missing nested_modules key: %s", data)
 	}
-	back, err := UnmarshalPolicy(data)
-	if err != nil {
+	var back LinkPolicy
+	if err := json.Unmarshal(data, &back); err != nil {
 		t.Fatal(err)
 	}
 	if !slices.Equal(back.NestedModules, p.NestedModules) {
@@ -162,8 +163,8 @@ func TestSnapshotHashFlagRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	back, err := UnmarshalPolicy(data)
-	if err != nil {
+	var back LinkPolicy
+	if err := json.Unmarshal(data, &back); err != nil {
 		t.Fatal(err)
 	}
 	if !slices.Equal(back.MainModules, mains) || back.TransitiveExec != "deny" {
@@ -202,8 +203,8 @@ func TestSnapshotRecordsCgoAllowed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	back, err := UnmarshalPolicy(data)
-	if err != nil {
+	var back LinkPolicy
+	if err := json.Unmarshal(data, &back); err != nil {
 		t.Fatal(err)
 	}
 	if !slices.Contains(back.CgoAllowed, path) {
@@ -292,12 +293,12 @@ func TestPolicyForLinkSharedPluginInternal(t *testing.T) {
 			if p.TransitiveReflect != "warn" || p.TransitiveExec != "deny" || p.TransitiveNet != "allow" {
 				t.Errorf("severities = %q %q %q, want warn deny allow", p.TransitiveReflect, p.TransitiveExec, p.TransitiveNet)
 			}
-			data, err := MarshalPolicy(p)
+			data, err := json.Marshal(p)
 			if err != nil {
 				t.Fatal(err)
 			}
-			back, err := UnmarshalPolicy(data)
-			if err != nil {
+			var back LinkPolicy
+			if err := json.Unmarshal(data, &back); err != nil {
 				t.Fatal(err)
 			}
 			if !slices.Equal(back.MainModules, tc.mains) {

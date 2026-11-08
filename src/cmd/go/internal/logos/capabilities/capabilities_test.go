@@ -9,21 +9,6 @@ import (
 	"testing"
 )
 
-func TestParseSeverity(t *testing.T) {
-	for _, s := range []string{"deny", "warn", "allow"} {
-		got, err := ParseSeverity(s)
-		if err != nil {
-			t.Errorf("ParseSeverity(%q) error = %v", s, err)
-		}
-		if got != Severity(s) {
-			t.Errorf("ParseSeverity(%q) = %q, want %q", s, got, s)
-		}
-	}
-	if _, err := ParseSeverity("forbid"); err == nil {
-		t.Error("ParseSeverity(forbid) = nil error, want error")
-	}
-}
-
 func TestAllowlisted(t *testing.T) {
 	tests := []struct {
 		name       string

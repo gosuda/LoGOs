@@ -34,15 +34,6 @@ const (
 	Allow Severity = "allow"
 )
 
-// ParseSeverity validates a severity value from logos.toml.
-func ParseSeverity(s string) (Severity, error) {
-	switch Severity(s) {
-	case Deny, Warn, Allow:
-		return Severity(s), nil
-	}
-	return "", fmt.Errorf("invalid severity %q (want deny, warn, or allow)", s)
-}
-
 // Node is the auditor's view of one loaded package: its import path, the
 // resolved import paths it uses, and whether it is standard library or in
 // a main module. Main-module packages seed the import-chain search and are

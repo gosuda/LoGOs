@@ -63,20 +63,6 @@ func PolicyForLink(cf *config.File, mainModules []string) *LinkPolicy {
 	return p
 }
 
-// MarshalPolicy encodes a linker policy as JSON.
-func MarshalPolicy(p *LinkPolicy) ([]byte, error) {
-	return json.Marshal(p)
-}
-
-// UnmarshalPolicy decodes a linker policy from JSON.
-func UnmarshalPolicy(data []byte) (*LinkPolicy, error) {
-	var p LinkPolicy
-	if err := json.Unmarshal(data, &p); err != nil {
-		return nil, err
-	}
-	return &p, nil
-}
-
 // cgoAllowedSet records the import paths whose cgo use the M0 policy
 // allowed during load. The set is process-global because one cmd/go
 // invocation loads once and links after; entries are write-once.
@@ -188,7 +174,7 @@ func SnapshotLinkPolicy(cf *config.File, mainModules []string, err error) {
 	if err != nil || cf == nil {
 		return
 	}
-	data, merr := MarshalPolicy(PolicyForLink(cf, mainModules))
+	data, merr := json.Marshal(PolicyForLink(cf, mainModules))
 	if merr != nil {
 		return
 	}
