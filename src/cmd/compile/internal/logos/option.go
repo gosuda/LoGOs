@@ -1600,40 +1600,30 @@ func (fl *fileLower) lowerOptCall(e *syntax.CallExpr, osel *syntax.OptSelectExpr
 	// shared offset. Result spellings come before any lowering.
 	xStart := fl.off(fl.optLeftmost(osel.X))
 	rs := sig.Results()
-	var headText string
-	var rText string
-	var nrNode syntax.Expr
-	var rTexts []string
-	switch rs.Len() {
-	case 0:
-		headText = "func() { if " + optTemp + " := "
-	case 1:
-		r := rs.At(0).Type()
-		ro := r
-		if fl.asOption(r) == nil {
-			ro = &types2.Option{Elem: r}
-		}
-		var ok bool
-		nrNode, rText, ok = fl.spellLoweredBoth(ro, pos)
+	n := rs.Len()
+	rTexts := make([]string, n)
+	nrNodes := make([]syntax.Expr, n)
+	roList := make([]types2.Type, n)
+	recList := make([]types2.Type, n)
+	for i := range n {
+		r := rs.At(i).Type()
+		ro := fl.resultOption(r)
+		recList[i] = r
+		roList[i] = ro
+		nt, t, ok := fl.spellLoweredBoth(ro, pos)
 		if !ok {
 			base.Fatalf("logos: cannot spell type %s of the ?. call at %s", ro, pos.String())
 		}
-		headText = "func() " + rText + " { if " + optTemp + " := "
+		nrNodes[i] = nt
+		rTexts[i] = t
+	}
+	var headText string
+	switch n {
+	case 0:
+		headText = "func() { if " + optTemp + " := "
+	case 1:
+		headText = "func() " + rTexts[0] + " { if " + optTemp + " := "
 	default:
-		n := rs.Len()
-		rTexts = make([]string, n)
-		for i := range n {
-			r := rs.At(i).Type()
-			ro := r
-			if fl.asOption(r) == nil {
-				ro = &types2.Option{Elem: r}
-			}
-			_, t, ok := fl.spellLoweredBoth(ro, pos)
-			if !ok {
-				base.Fatalf("logos: cannot spell type %s of the ?. call at %s", ro, pos.String())
-			}
-			rTexts[i] = t
-		}
 		headText = "func() (" + strings.Join(rTexts, ", ") + ") { if " + optTemp + " := "
 	}
 	fl.addOwned(id, xStart, xStart, headText)
@@ -1681,22 +1671,17 @@ func (fl *fileLower) lowerOptCall(e *syntax.CallExpr, osel *syntax.OptSelectExpr
 		fl.wrapOwner[out] = id
 		return out
 	case 1:
-		r := rs.At(0).Type()
-		ro := r
-		if fl.asOption(r) == nil {
-			ro = &types2.Option{Elem: r}
-		}
-		some, someHead, someTail := fl.wrapParts(call, r, ro, pos)
+		some, someHead, someTail := fl.wrapParts(call, recList[0], roList[0], pos)
 		var none syntax.Expr
 		var noneT string
-		if bare, ok := fl.bareResult(ro); ok && bare {
+		if fl.bareResult(roList[0]) {
 			none = nilOf(pos)
 			noneT = "nil"
 		} else {
-			noneT = rText + "{}"
-			none = at(&syntax.CompositeLit{Type: nrNode, Rbrace: pos}, pos)
+			noneT = rTexts[0] + "{}"
+			none = at(&syntax.CompositeLit{Type: nrNodes[0], Rbrace: pos}, pos)
 		}
-		resultType := nrNode
+		resultType := nrNodes[0]
 		signature := at(&syntax.FuncType{
 			ParamList:  []*syntax.Field{},
 			ResultList: []*syntax.Field{at(&syntax.Field{Type: resultType}, pos)},
@@ -1716,26 +1701,6 @@ func (fl *fileLower) lowerOptCall(e *syntax.CallExpr, osel *syntax.OptSelectExpr
 		fl.wrapOwner[out] = id
 		return out
 	default:
-		n := rs.Len()
-		rTexts := make([]string, n)
-		nrNodes := make([]syntax.Expr, n)
-		roList := make([]types2.Type, n)
-		recList := make([]types2.Type, n)
-		for i := range n {
-			r := rs.At(i).Type()
-			ro := r
-			if fl.asOption(r) == nil {
-				ro = &types2.Option{Elem: r}
-			}
-			roList[i] = ro
-			recList[i] = r
-			nt, t, ok := fl.spellLoweredBoth(ro, pos)
-			if !ok {
-				base.Fatalf("logos: cannot spell type %s of the ?. call at %s", ro, pos.String())
-			}
-			rTexts[i] = t
-			nrNodes[i] = nt
-		}
 		fields := make([]*syntax.Field, n)
 		for i := range n {
 			fields[i] = at(&syntax.Field{Type: nrNodes[i]}, pos)
@@ -1746,17 +1711,22 @@ func (fl *fileLower) lowerOptCall(e *syntax.CallExpr, osel *syntax.OptSelectExpr
 		}, pos)
 		tmps := make([]syntax.Expr, n)
 		rets := make([]syntax.Expr, n)
-		var headNames, retWraps, noneList []string
+		noneNodes := make([]syntax.Expr, n)
+		noneList := make([]string, n)
+		var headNames, retWraps []string
 		for i := range n {
-			tmps[i] = nameOf(pos, fmt.Sprintf(optWrapTemp, i))
+			tmp := fmt.Sprintf(optWrapTemp, i)
+			tmps[i] = nameOf(pos, tmp)
 			some, sh, st := fl.wrapParts(tmps[i], recList[i], roList[i], pos)
 			rets[i] = some
-			headNames = append(headNames, fmt.Sprintf(optWrapTemp, i))
-			retWraps = append(retWraps, sh+fmt.Sprintf(optWrapTemp, i)+st)
-			if bare, ok := fl.bareResult(roList[i]); ok && bare {
-				noneList = append(noneList, "nil")
+			headNames = append(headNames, tmp)
+			retWraps = append(retWraps, sh+tmp+st)
+			if fl.bareResult(roList[i]) {
+				noneNodes[i] = nilOf(pos)
+				noneList[i] = "nil"
 			} else {
-				noneList = append(noneList, rTexts[i]+"{}")
+				noneNodes[i] = at(&syntax.CompositeLit{Type: nrNodes[i], Rbrace: pos}, pos)
+				noneList[i] = rTexts[i] + "{}"
 			}
 		}
 		then := []syntax.Stmt{
@@ -1765,7 +1735,7 @@ func (fl *fileLower) lowerOptCall(e *syntax.CallExpr, osel *syntax.OptSelectExpr
 		}
 		body := []syntax.Stmt{
 			ifOf(pos, init, cond, then),
-			returnOf(pos, fl.noneExprs(pos, rs, nrNodes)),
+			returnOf(pos, noneNodes),
 		}
 		lit := at(&syntax.FuncLit{Type: signature, Body: blockOf(pos, body)}, pos)
 		fl.addT(xEnd, rparen+1, cat(
@@ -1780,35 +1750,19 @@ func (fl *fileLower) lowerOptCall(e *syntax.CallExpr, osel *syntax.OptSelectExpr
 	}
 }
 
-// bareResult reports whether the `?.` result option uses the bare
-// payload form.
-func (fl *fileLower) bareResult(ro types2.Type) (bool, bool) {
-	o := fl.asOption(ro)
-	if o == nil {
-		return false, false
+// resultOption returns the option a `?.` call result lowers to: the
+// checked option type, or the plain type wrapped so none yields zero.
+func (fl *fileLower) resultOption(r types2.Type) types2.Type {
+	if fl.asOption(r) != nil {
+		return r
 	}
-	return keepMapRead(o.Elem), true
+	return &types2.Option{Elem: r}
 }
 
-// noneExprs builds the none-branch values of a multi-result optional
-// call from the callers' native result nodes: snapshot isolation across
-// the native tree (exact nodes here) and the eject text (alias spellings
-// in noneList at the call site), composed idempotently in one pass.
-func (fl *fileLower) noneExprs(pos syntax.Pos, rs *types2.Tuple, nrNodes []syntax.Expr) []syntax.Expr {
-	out := make([]syntax.Expr, rs.Len())
-	for i := range rs.Len() {
-		r := rs.At(i).Type()
-		ro := r
-		if fl.asOption(r) == nil {
-			ro = &types2.Option{Elem: r}
-		}
-		if bare, ok := fl.bareResult(ro); ok && bare {
-			out[i] = nilOf(pos)
-			continue
-		}
-		out[i] = at(&syntax.CompositeLit{Type: nrNodes[i], Rbrace: pos}, pos)
-	}
-	return out
+// bareResult reports whether the `?.` result option uses the bare
+// payload form.
+func (fl *fileLower) bareResult(ro types2.Type) bool {
+	return keepMapRead(fl.asOption(ro).Elem)
 }
 
 // lowerNilCompare lowers `x == nil` and `x != nil` (either operand
