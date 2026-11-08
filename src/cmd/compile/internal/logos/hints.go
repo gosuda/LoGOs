@@ -122,8 +122,6 @@ type Alloc struct {
 	Reason  string
 }
 
-// tierMergeRank orders how tiers supersede each other: heap, arena,
-// stack, rodata.
 var tierMergeRank = map[string]int{TierRodata: 0, TierStack: 1, TierArena: 2, TierHeap: 3}
 
 // tierWorse reports whether tier a supersedes tier b when two allocation
