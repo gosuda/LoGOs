@@ -15,7 +15,7 @@ import (
 
 // pinned names the scheduler entry points that always yield, whatever the
 // analysis of their bodies says. runtime.gopark is the anchor of SPEC
-// Sec 14.1: no function that can reach it keeps MayYield=0.
+// Sec 12.1: no function that can reach it keeps MayYield=0.
 var pinned = map[string]bool{
 	"runtime.gopark":       true,
 	"runtime.goparkunlock": true,

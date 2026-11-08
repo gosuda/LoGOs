@@ -2,7 +2,7 @@
 
 package main
 
-// REDTEAM #12 (SPEC Sec 19, T-301.1; IMPLEMENTATION.md M18-S3): the inline
+// REDTEAM #12 (SPEC Sec 3.1, T-301.1; IMPLEMENTATION.md M18-S3): the inline
 // noscan bump path must serve only pointer-free (noscan) objects of at most
 // 512 bytes. Every other object must take the slow path so heap mark bits
 // are never corrupted by a noscan bump without a GC header.

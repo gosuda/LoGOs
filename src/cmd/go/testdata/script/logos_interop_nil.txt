@@ -1,4 +1,4 @@
-# M3-S7: Go importers of loGo/s option and non-nil signatures (R-U2, T-Sec6).
+# M3-S7: Go importers of loGo/s option and non-nil signatures (R-U2, T-Sec5).
 # Package a exports F, Box, G, H; a Go package in another workspace module
 # sees plain pointers and rt.Option, builds under logos, and gets
 # MustNonNil panics on direct, go, defer, and method calls with nil.

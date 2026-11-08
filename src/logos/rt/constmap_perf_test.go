@@ -4,7 +4,7 @@
 
 package rt
 
-// BenchmarkConstMapLookup (M5-S4 and M22-S4, SPEC T-Sec9, Table T-PERF
+// BenchmarkConstMapLookup (M5-S4 and M22-S4, SPEC T-Sec7, Table T-PERF
 // "lookup about 2.5ns versus about 14ns") reports lookup latency. It
 // measures one const-map lookup against a runtime map of the same 1000 keys.
 // "const" hashes each key inside the loop, as the generated lookup does;

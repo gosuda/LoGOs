@@ -15,7 +15,7 @@ import (
 
 // identitySignature is eqSignature for the hash and equality functions of
 // a type descriptor, which maps and interface comparisons call. Under -lb
-// (-gc=zgc) objects move (SPEC Sec 19, M19-S7), and the runtime reads map
+// (-gc=zgc) objects move (SPEC Sec 3.1, M19-S7), and the runtime reads map
 // keys and interface data words without load barriers, so a stored word
 // may still name the source of a relocated object. Every pointer,
 // unsafe.Pointer and channel word therefore becomes sigPointer: it hashes

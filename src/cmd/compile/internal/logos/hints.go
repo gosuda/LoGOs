@@ -13,7 +13,7 @@ import (
 	"cmd/compile/internal/syntax"
 )
 
-// This file holds the report of -logos.mode=hints (SPEC Sec 21.2 and 21.3):
+// This file holds the report of -logos.mode=hints (SPEC Sec 16.2 and 21.3):
 // the facts the editor proxy turns into inlay hints and hovers. The compiler
 // computes every position in the protocol's own terms (0-based line, UTF-16
 // character) from the bytes it parsed, so the consumer needs no document

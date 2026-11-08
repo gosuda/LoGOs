@@ -15,7 +15,7 @@ import (
 	"cmd/compile/internal/types2"
 )
 
-// This file spells the generated UnmarshalJSON (SPEC Sec 12.2): defaults
+// This file spells the generated UnmarshalJSON (SPEC Sec 10.2): defaults
 // first, a seen mask over the required non-nil fields, key dispatch by a
 // switch (up to jsonKeySwitchMax keys) or a perfect-hash table, unknown
 // keys skipped, and a per-field reflective fallback for unmodeled kinds.
@@ -173,7 +173,7 @@ func (js *jsonStruct) fallbackQuotedValueLines(f *jsonField, field string, kind 
 // unionLines spells the decoding of a closed union: trials in declaration order
 // into scratch values with isolated scanners over Scanner.Value(), assigning
 // target only on a single success, returning UnionTrialError on zero successes
-// or multiple successes (SPEC Sec 12.2, T-Sec12, T-203.1).
+// or multiple successes (SPEC Sec 10.2, T-Sec10, T-203.1).
 func (js *jsonStruct) unionLines(f *jsonField, field string) []string {
 	members, ok := unionTerms(f.typ)
 	if !ok || len(members) == 0 {
@@ -197,7 +197,7 @@ func (js *jsonStruct) unionLines(f *jsonField, field string) []string {
 	membersList := strings.Join(memberQuotes, ", ")
 	// Collect the union keyspace: bare names of members with emitted key helpers.
 	// A key in _logos_raw modeled by any member but not this member disqualifies
-	// this member's trial; keys no member models are ignored (SPEC Sec 12.2).
+	// this member's trial; keys no member models are ignored (SPEC Sec 10.2).
 	type memberKeys struct {
 		bareName string
 		usable   bool
@@ -372,7 +372,7 @@ func (js *jsonStruct) keyFuncs(b *strings.Builder) {
 
 // writeKeyFunc writes one lookup function _logos_<kind>_<name>(k string)
 // int returning the field index of k or -1: a switch for few keys, a
-// perfect-hash table (SPEC Sec 9.1) for more.
+// perfect-hash table (SPEC Sec 7) for more.
 func writeKeyFunc(b *strings.Builder, name, kind string, keys []keyEntry) {
 	if len(keys) <= jsonKeySwitchMax {
 		fmt.Fprintf(b, "\nfunc _logos_%s_%s(k string) int {\n\tswitch k {\n", kind, name)

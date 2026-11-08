@@ -2,7 +2,7 @@
 
 package main
 
-// REDTEAM #20 (SPEC Sec 8.3; IMPLEMENTATION.md M18-S3): a side-stack
+// REDTEAM #20 (SPEC Sec 3.1; IMPLEMENTATION.md M18-S3): a side-stack
 // (arena) object pointing to a call-stack variable must stay valid across
 // stack growth and collection. A local whose address flows into an arena
 // object must allocate in the arena, so stack growth must not invalidate

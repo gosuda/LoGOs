@@ -933,7 +933,7 @@ func TestLogosArenaScanOverNoscanDirt(t *testing.T) {
 	})
 }
 
-// M18-S2 (SPEC Sec 8.3): the consent token is one-shot. Taking it returns
+// M18-S2 (SPEC Sec 3.1): the consent token is one-shot. Taking it returns
 // what the caller set and clears it, so a later take sees no consent.
 func TestLogosArenaRetTokenIsOneShot(t *testing.T) {
 	inFreshGoroutine(t, func() {

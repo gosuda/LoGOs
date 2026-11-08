@@ -4,7 +4,7 @@ package main
 
 import "fmt"
 
-// M22-S6 defect D9 (SPEC T-104.2 / Sec 20 RFC-206): `scope defer` inside a
+// M22-S6 defect D9 (SPEC T-104.2 / Sec 15 RFC-206): `scope defer` inside a
 // lambda body is lowered like the same statement inside a `func` literal:
 // it runs at lambda block exit. `logos eject` output matches.
 

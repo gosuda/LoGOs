@@ -17,11 +17,11 @@ import (
 
 // logosGCPendingPhase maps a collector mode that is not finished to the
 // moving-collector phase that must pass its gate before the mode opens
-// (SPEC Sec 19, M19-S5). Selecting such a mode is an error naming the phase;
+// (SPEC Sec 3.1, M19-S5). Selecting such a mode is an error naming the phase;
 // passing a phase deletes its entry.
 var logosGCPendingPhase = map[string]string{"immix": "phase 1", "zgc": "phase 2"}
 
-// gcModeFlag is the -gc flag value (SPEC Sec 19): it records the text and
+// gcModeFlag is the -gc flag value (SPEC Sec 3.1): it records the text and
 // that the flag appeared, and initLogosGC checks it. The flag has no help
 // text under plain go; logos documents it.
 type gcModeFlag struct{}

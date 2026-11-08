@@ -1,4 +1,4 @@
-# M18-S1 (#4) side-stack arena growth across parked goroutines (SPEC Sec 8.3,
+# M18-S1 (#4) side-stack arena growth across parked goroutines (SPEC Sec 3.1,
 # T-301.1, IMPLEMENTATION.md M18-S1 AR4). A goroutine parked with empty
 # arena regions must return its leased chunk, including empty chunks behind
 # a live chunk, while retaining every live chunk and preserving addresses.

@@ -16,7 +16,7 @@ import (
 )
 
 // This file carries the M5-S1 const facts (SPEC Sec 2.1, T-201 and
-// Sec 6.1, T-Sec6). EmitConstFacts records one const line per const
+// Sec 5, T-Sec5). EmitConstFacts records one const line per const
 // view position in the exported declarations of pkg, plus
 // ReceiverMutated and ParamMutated flags computed by a syntax pass
 // over each function body: a parameter counts as mutated when the body

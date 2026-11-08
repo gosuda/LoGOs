@@ -68,7 +68,7 @@
 //
 // The proxy publishes the diagnostics of gopls, mapped to the sources,
 // together with the compiler diagnostics of the package (logos lint
-// --json-diagnostics, SPEC Sec 16), without duplicates. It removes
+// --json-diagnostics, SPEC Sec 14), without duplicates. It removes
 // diagnosticProvider from the server capabilities, so clients take
 // diagnostics through publishDiagnostics, where the merge happens. Only
 // open loGo/s documents get diagnostics.

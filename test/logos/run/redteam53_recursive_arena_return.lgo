@@ -2,7 +2,7 @@
 
 package main
 
-// REDTEAM #53 (SPEC Sec 8.3, T-301.1; IMPLEMENTATION.md M18-S2): a
+// REDTEAM #53 (SPEC Sec 3.1, T-301.1; IMPLEMENTATION.md M18-S2): a
 // recursive call chain returning arena-allocated values must hand the
 // caller memory that lives until the caller exits. A returned arena value
 // that the caller keeps MUST allocate in the caller region, so the

@@ -2,7 +2,7 @@
 
 package p
 
-// M22-S4 (SPEC Sec 22.4): zeroalloc.lgo covers the allocation sites of
+// M22-S4 (SPEC Sec 17.4): zeroalloc.lgo covers the allocation sites of
 // composite literals, make, interface conversions, moved variables, closures
 // and channels. This file covers the remaining nodes the check reports, one
 // function for each: new, map make and map literal, string concatenation,

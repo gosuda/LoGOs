@@ -74,7 +74,7 @@ func endOf(t *testing.T, src []byte, needle string) HintPos {
 
 // TestHintsNarrowedUses checks that every use of an option variable that the
 // checker narrows carries the narrowed type, that unnarrowed uses carry none,
-// and that columns count UTF-16 code units (SPEC Sec 21.2).
+// and that columns count UTF-16 code units (SPEC Sec 16.2).
 func TestHintsNarrowedUses(t *testing.T) {
 	r, src := hintsFixture(t, "sites.lgo")
 	got := onlyFile(t, r).Narrowed
@@ -88,7 +88,7 @@ func TestHintsNarrowedUses(t *testing.T) {
 }
 
 // TestHintsUnionMembers checks the member list at a type switch over a closed
-// union, anchored just before the `.(type)` guard (SPEC Sec 21.2).
+// union, anchored just before the `.(type)` guard (SPEC Sec 16.2).
 func TestHintsUnionMembers(t *testing.T) {
 	r, src := hintsFixture(t, "sites.lgo")
 	got := onlyFile(t, r).Unions
@@ -103,7 +103,7 @@ func TestHintsUnionMembers(t *testing.T) {
 
 // TestHintsInterpFixedBytes checks fixedBytes per interpolation site: the
 // literal bytes plus 20 per integer, 24 per float, and 5 per bool; operands
-// that carry their own length add nothing (SPEC T-104.4, SPEC Sec 21.3).
+// that carry their own length add nothing (SPEC T-104.4, SPEC Sec 16.3).
 func TestHintsInterpFixedBytes(t *testing.T) {
 	r, src := hintsFixture(t, "interp.lgo")
 	var sites []SiteHint

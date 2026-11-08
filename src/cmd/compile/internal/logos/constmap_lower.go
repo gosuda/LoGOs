@@ -4,7 +4,7 @@
 
 package logos
 
-// This file lowers M5-S4 const maps (SPEC T-Sec9). A const map declaration
+// This file lowers M5-S4 const maps (SPEC T-Sec7). A const map declaration
 // becomes plain Go: a lookup function, a sorted entry list for range, and a
 // materializer that builds one regular map on first plain use. A map with at
 // most 8 keys looks up through a switch; a larger map looks up through a
@@ -258,7 +258,7 @@ func (fl *fileLower) lowerConstMapSpec(cd *syntax.ConstDecl, g *constMapGen) {
 }
 
 // markConstMapTables records the sorted-entry and perfect-hash table vars
-// of g for read-only placement (SPEC Sec 9.1). Their initializers are
+// of g for read-only placement (SPEC Sec 7). Their initializers are
 // constant literals, so static initialization fills them; the
 // materialized map var is built at run time and stays writable. The
 // generated text already carries the marker lines.

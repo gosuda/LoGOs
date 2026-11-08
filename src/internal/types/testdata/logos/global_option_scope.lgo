@@ -4,7 +4,7 @@
 
 package p
 
-// SPEC 1201 (Sec 6.2, T-202) scope: nil narrowing carries locals and
+// SPEC 1201 (Sec 2.2, T-202) scope: nil narrowing carries locals and
 // function parameters (receiver, parameter, and result kinds included).
 // A package-level option variable is never narrowed, through any of the
 // four narrowing forms.

@@ -1,6 +1,6 @@
 # M7-S3 cross-package comptime generic whose field type comes from a
 # package the instantiating source never names (SPEC Sec 2.5, T-205;
-# T-0.3, T-Sec6). Package wire holds Row, whose Level field has the type
+# T-0.3, T-Sec5). Package wire holds Row, whose Level field has the type
 # deep.Level, and an exported comptime generic Describe that converts each
 # field with Convert[f.Type](in)? and interpolates a string built from the
 # result. Package main instantiates Describe[wire.Row] and imports neither

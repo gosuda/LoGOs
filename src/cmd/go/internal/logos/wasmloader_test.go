@@ -12,7 +12,7 @@ import (
 	"cmd/go/internal/cfg"
 )
 
-// wasmLoaderBudget is the loader size target of SPEC Sec 14.2 (1.4 KB,
+// wasmLoaderBudget is the loader size target of SPEC Sec 12.2 (1.4 KB,
 // excluding wasm_exec.js), counted in bytes.
 const wasmLoaderBudget = 1400
 
@@ -61,7 +61,7 @@ func TestWasmLoaderRegistered(t *testing.T) {
 	}
 }
 
-// TestWasmLoaderContract pins the pieces of the loader that SPEC Sec 14.2
+// TestWasmLoaderContract pins the pieces of the loader that SPEC Sec 12.2
 // names: the wasm_exec.js startup, the instantiateLogos export, the
 // memory.buffer re-read through getMem, the errCode check, and the error
 // text read from wasm memory.

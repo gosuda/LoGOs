@@ -21,7 +21,7 @@ type diagSpan struct {
 	ByteLen    int `json:"byte_len"`
 }
 
-// diagFix matches jsonFix of SPEC Sec 16.5 for source edits.
+// diagFix matches jsonFix of SPEC Sec 14.5 for source edits.
 type diagFix struct {
 	Replacement      string `json:"replacement"`
 	InsertBeforeLine int    `json:"insert_before_line"`
@@ -108,7 +108,7 @@ func compileLgoJSON(t *testing.T, src string) ([]diagRecord, int) {
 }
 
 // applyFix applies an autofix candidate to source text according to the
-// SPEC Sec 16.5 contract.
+// SPEC Sec 14.5 contract.
 func applyFix(t *testing.T, src string, span diagSpan, fix diagFix) string {
 	t.Helper()
 	if fix.InsertBeforeLine > 0 {

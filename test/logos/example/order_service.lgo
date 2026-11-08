@@ -1,6 +1,6 @@
 // run
 
-// Command order_service is the loGo/s end-to-end example (SPEC Sec 11):
+// Command order_service is the loGo/s end-to-end example (SPEC Sec 9):
 // an order service over a fake database. main runs four batches through
 // ProcessBatch and prints receipts, the ledger, and the database counters.
 // order_service.out holds the expected output. It was worked out by hand

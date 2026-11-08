@@ -11,7 +11,7 @@ func g(m, n int) {
 func main() {
 	a, b, c, d := 1, 2, 3, 4
 	// A parenthesized expression without a top-level comma stays a
-	// parenthesized expression, exactly as in Go (SPEC Sec 5.2).
+	// parenthesized expression, exactly as in Go (SPEC Sec 4.2).
 	x := ((a+b) + (c+d))
 	fmt.Println(x)
 	y := ((a+b) * (c+d))

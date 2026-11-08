@@ -2,7 +2,7 @@
 
 package main
 
-// M18 loop-carry attack (SPEC Sec 3.1, Sec 8.3): loop back-edges must
+// M18 loop-carry attack (SPEC Sec 3.1, Sec 3.1): loop back-edges must
 // restore only iteration-local objects while retaining loop-carried state.
 // Each loop below allocates a runtime-sized 1024-byte slice per iteration
 // (size arrives as a function parameter, so the make is dynamic, not a

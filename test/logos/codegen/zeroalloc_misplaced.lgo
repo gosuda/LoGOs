@@ -2,7 +2,7 @@
 
 package p
 
-// M22-S4 (SPEC Sec 22.4): a //logos:zeroalloc directive that does not sit on
+// M22-S4 (SPEC Sec 17.4): a //logos:zeroalloc directive that does not sit on
 // its own line directly above a function declaration marks nothing, so a
 // function the author believes protected would go unchecked. Each such
 // directive fails with [perf::zeroalloc_violation]. A directive error ends

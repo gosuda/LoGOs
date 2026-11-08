@@ -13,7 +13,7 @@ import "internal/runtime/atomic"
 // publish it from any P while the scheduler loads it.
 type logosFractionalGoal = atomic.Float64
 
-// Elastic background marking (M19-S2, SPEC Sec 19, T-301.2). Under the
+// Elastic background marking (M19-S2, SPEC Sec 3.1, T-301.2). Under the
 // greentea collector the background mark utilization follows the PLAN curve
 // of live heap over heap goal instead of the fixed gcBackgroundUtilization.
 // Mark assist, its debt accounting and the CPU limiter are the upstream ones:

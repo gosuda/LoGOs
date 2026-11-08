@@ -37,7 +37,7 @@ var logosEscape *escapeLint
 // continues to escape analysis so every finding of the package prints
 // together.
 //
-// A function marked //logos:zeroalloc (SPEC Sec 22.4) is checked on the same
+// A function marked //logos:zeroalloc (SPEC Sec 17.4) is checked on the same
 // compiles, without a policy: the directive is the assertion, so the check
 // arms escape analysis whenever the package marks a function, and a directive
 // that marks nothing fails here.
@@ -97,7 +97,7 @@ func logosZeroAllocArm(in *lint.Input) ([]lint.Result, bool) {
 }
 
 // LogosLintEscape runs the checks that read escape analysis, once it has run
-// over the package (SPEC Sec 1.2, M9; Sec 22.4): perf::large_backing_array_pin
+// over the package (SPEC Sec 1.2, M9; Sec 17.4): perf::large_backing_array_pin
 // and perf::zeroalloc_violation. It reports findings like logosLintHook and
 // stops the compile on an error, except under -logos.lintonly, where the
 // compile ends right after.

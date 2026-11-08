@@ -56,7 +56,7 @@ func record(t *testing.T, line string) map[string]any {
 	return m
 }
 
-// TestLogosRecordFields checks the SPEC Sec 16 field set of a compiler
+// TestLogosRecordFields checks the SPEC Sec 14 field set of a compiler
 // diagnostic and of a lint finding.
 func TestLogosRecordFields(t *testing.T) {
 	wantKeys := []string{"autofix_candidates", "file", "message", "provenance", "rule_id", "schema_version", "severity", "span"}

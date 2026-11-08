@@ -9,7 +9,7 @@ package syntax
 // lines only (G3).
 
 // PropertyType is the type of a property element inside an interface
-// type in LogosMode (SPEC Sec 5.2: PropertyElem ::= ["const"] Name Type):
+// type in LogosMode (SPEC Sec 4.2: PropertyElem ::= ["const"] Name Type):
 //
 //	interface { const Name T; HP int; Start() error }
 //

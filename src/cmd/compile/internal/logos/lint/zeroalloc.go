@@ -15,7 +15,7 @@ import (
 )
 
 // ZeroAllocRule is the ID of the diagnostic for a function marked
-// //logos:zeroalloc that performs a heap allocation (SPEC Sec 22.4). It is
+// //logos:zeroalloc that performs a heap allocation (SPEC Sec 17.4). It is
 // not a configurable lint rule: the directive is the author's own assertion,
 // so no logos.toml severity lowers the diagnostic and no //logos:allow
 // directive silences it.

@@ -1,4 +1,4 @@
-# REDTEAM #59 (SPEC Sec 8.3, T-301.1; IMPLEMENTATION.md M18-S1): cgo
+# REDTEAM #59 (SPEC Sec 3.1, T-301.1; IMPLEMENTATION.md M18-S1): cgo
 # pointer checks panicking on arena addresses. Cgo pointer checks MUST
 # accept arena addresses without panic: an arena address is Go memory, so
 # storing into it is not a store into non-Go memory and no argument,

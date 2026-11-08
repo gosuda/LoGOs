@@ -2,7 +2,7 @@
 
 package p
 
-// M22-S4 (SPEC Sec 22.4): a function marked //logos:zeroalloc that performs
+// M22-S4 (SPEC Sec 17.4): a function marked //logos:zeroalloc that performs
 // a heap allocation fails with [perf::zeroalloc_violation], which names the
 // function and the reason escape analysis gives. Each failing function below
 // allocates at the lines that carry an ERROR comment; every other function,

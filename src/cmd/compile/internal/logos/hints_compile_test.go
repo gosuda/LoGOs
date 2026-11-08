@@ -90,7 +90,7 @@ func allocAt(allocs []AllocHint, pos HintPos) (AllocHint, bool) {
 
 // TestCompileHintsGoPackage checks the escape decisions of a plain Go
 // package: the same -m decisions as the compiler prints, as tiers at the
-// positions -m prints (SPEC Sec 21.2: badges appear for Go packages too).
+// positions -m prints (SPEC Sec 16.2: badges appear for Go packages too).
 func TestCompileHintsGoPackage(t *testing.T) {
 	run := runHints(t, []string{"-logos.mode=hints"}, "alloc.go")
 	if run.exit != 0 || run.report == nil {

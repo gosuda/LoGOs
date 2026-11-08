@@ -44,7 +44,7 @@ var LogosNextOut string
 var LogosCfg string
 
 // LogosJSON is the -logos.json flag: every compiler diagnostic prints as
-// one JSON object per line (SPEC Sec 16) instead of text.
+// one JSON object per line (SPEC Sec 14) instead of text.
 var LogosJSON bool
 
 // LogosLintOnly is the -logos.lintonly flag, passed only by logos lint:

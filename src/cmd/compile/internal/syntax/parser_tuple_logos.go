@@ -5,7 +5,7 @@
 package syntax
 
 // This file holds the loGo/s parser logic for M6-S5 tuples and the
-// shared `(` rule (SPEC Sec 2.4, T-204.1, and Sec 5.2-5.3, T-104.6).
+// shared `(` rule (SPEC Sec 2.4, T-204.1, and Sec 4.2-5.3, T-104.6).
 // parser.go calls into it through hook lines only (G3); the rule below
 // runs solely in LogosMode, so plain Go parses exactly as upstream.
 //
@@ -102,7 +102,7 @@ func (p *parser) logosParen(keepParens, inType bool) (Expr, bool) {
 		return px, true
 	}
 
-	// A single named field is never a complete tuple (SPEC Sec 5.2
+	// A single named field is never a complete tuple (SPEC Sec 4.2
 	// requires two or more elements).
 	if len(elems) == 1 {
 		if inType {

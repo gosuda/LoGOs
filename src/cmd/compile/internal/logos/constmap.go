@@ -5,7 +5,7 @@
 package logos
 
 // This file computes the M5-S4 layout of a const map with more than 8 keys
-// (SPEC T-Sec9): B = ceil(N/8) buckets chosen by the outer salt, each
+// (SPEC T-Sec7): B = ceil(N/8) buckets chosen by the outer salt, each
 // non-empty bucket owning a power-of-two slot region with its own seed,
 // and one shared empty slot for empty buckets. The lookup it feeds is
 // rt.ConstTable.Get, and rt.ConstMix and the hash functions in
@@ -32,7 +32,7 @@ type constMapBudget struct {
 	Rounds   int
 }
 
-// defaultConstMapBudget is the SPEC T-Sec9 budget: 1,000,000 trials in 8
+// defaultConstMapBudget is the SPEC T-Sec7 budget: 1,000,000 trials in 8
 // rounds of 125,000 (1000000//8 per round).
 var defaultConstMapBudget = constMapBudget{MaxSeeds: 1000000, Rounds: 8}
 

@@ -15,7 +15,7 @@ import (
 )
 
 // lowerMakeLen rewrites every product inside a make length or capacity of
-// one file (SPEC Sec 15.2, T-303; #169): `a*b` becomes
+// one file (SPEC Sec 13.2, T-303; #169): `a*b` becomes
 // _logos_rt.MulLen(a, b, "<product>"), so an overflowing product panics
 // instead of allocating a wrapped buffer. The native tree calls MulLen and
 // the eject text splices the same call over the product's source span. It

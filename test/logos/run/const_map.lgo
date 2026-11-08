@@ -7,7 +7,7 @@ import (
 	"maps"
 )
 
-// M5-S4 const maps (SPEC T-Sec9). Up to 8 keys lower to a switch; more keys
+// M5-S4 const maps (SPEC T-Sec7). Up to 8 keys lower to a switch; more keys
 // lower to bucketed perfect-hash tables with one slot probe per lookup. Absent
 // keys read as none, range runs in sorted key order, len is constant, and a
 // const map used as a plain map materializes once.

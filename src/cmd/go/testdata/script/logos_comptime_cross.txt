@@ -1,4 +1,4 @@
-# M7-S3: comptime generics cross packages through facts (T-Sec6, T-205).
+# M7-S3: comptime generics cross packages through facts (T-Sec5, T-205).
 # Package wire exports the comptime generics Autowire and Names; package
 # main instantiates them over a local type and over a wire type. The
 # expansion copies live in main, built from the comptime source text in

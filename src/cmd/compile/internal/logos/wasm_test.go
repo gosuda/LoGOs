@@ -19,7 +19,7 @@ import (
 )
 
 // These tests and benchmarks cover the WASM profile of M16-S1 (SPEC
-// Sec 14.1): the facts of Go packages on GOARCH=wasm, the behavior of
+// Sec 12.1): the facts of Go packages on GOARCH=wasm, the behavior of
 // programs built with and without selective resume points, a wrong
 // MayYield=0 that traps, and the three performance targets of Table T-PERF.
 // The runtime parts need node (A-NODE); without it they skip, which the

@@ -42,7 +42,7 @@ func logosArenaShadowSolvedHeap(shadow *location) bool {
 }
 
 // LogosArenaConsent says how a static call hands the callee the consent to
-// allocate returned objects in the caller's arena region (SPEC Sec 8.3).
+// allocate returned objects in the caller's arena region (SPEC Sec 3.1).
 type LogosArenaConsent uint8
 
 const (

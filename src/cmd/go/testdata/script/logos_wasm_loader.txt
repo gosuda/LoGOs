@@ -1,4 +1,4 @@
-# M16-S2 (SPEC Sec 14.2; #27, #78, #187): the wasm host loader.
+# M16-S2 (SPEC Sec 12.2; #27, #78, #187): the wasm host loader.
 # logos build writes <name>.loader.mjs beside a .wasm output; go build
 # writes the same bytes only with --wasm-loader (the plain-go default is
 # off until the run.bash flip, R-U1, G3). The loader re-reads memory.buffer

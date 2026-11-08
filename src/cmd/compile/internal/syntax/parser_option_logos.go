@@ -16,7 +16,7 @@ package syntax
 // character; it mirrors logosFatArrow (scanner_logos.go). A `?` that
 // joins a second `?` with no gap makes the pair one _Coalesce token, and
 // a `?` that joins `.` with no gap makes the pair one _QuestionDot token
-// unless a digit follows the dot (SPEC Sec 5.1). _Coalesce ends no
+// unless a digit follows the dot (SPEC Sec 4.1). _Coalesce ends no
 // operand (like `||`), _QuestionDot ends no operand (like `.`), and a
 // lone `?` keeps the M1-S1 behavior. It reports false when the tail is
 // neither, leaving the `.` or digit for the caller; plain Go never

@@ -14,7 +14,7 @@ import (
 	"cmd/compile/internal/types2"
 )
 
-// This file carries the M3-S7 option facts (SPEC T-Sec6, T-202). The
+// This file carries the M3-S7 option facts (SPEC T-Sec5, T-202). The
 // writer emits lowered Go-facing types in __.PKGDEF; EmitOptionFacts
 // records one opt line per option position for .lgo importers, and
 // CloneWithOverlay rebuilds those positions as Option for a .lgo view

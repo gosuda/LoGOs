@@ -8,7 +8,7 @@
 // header of the package's exported declarations in loGo/s syntax
 // (nilability, const, unions, tuples, property interfaces), per-function
 // facts, and comptime generic sources, bound to the __.PKGDEF fingerprint
-// (T-Sec6). S1 defines the format and the transport; S2-S7 populate the
+// (T-Sec5). S1 defines the format and the transport; S2-S7 populate the
 // records through SetCurrent. Until then every compiler-object archive
 // carries a header-only member so the binding itself is testable end to
 // end.

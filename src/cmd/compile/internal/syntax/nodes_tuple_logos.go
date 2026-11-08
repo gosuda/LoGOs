@@ -5,7 +5,7 @@
 package syntax
 
 // This file holds the loGo/s syntax nodes for M6-S5 tuples (SPEC Sec
-// 2.4, T-204.1, and Sec 5.2-5.3, T-104.6). Upstream files reference them
+// 2.4, T-204.1, and Sec 4.2-5.3, T-104.6). Upstream files reference them
 // through hook lines only (G3); the `(` rule below runs solely in
 // LogosMode, so plain Go parses exactly as upstream.
 //
@@ -32,7 +32,7 @@ type TupleType struct {
 	expr
 }
 
-// TupleLit is a loGo/s tuple literal `(a, b)` (SPEC Sec 5.2) in
+// TupleLit is a loGo/s tuple literal `(a, b)` (SPEC Sec 4.2) in
 // expression position: two or more values packed positionally. The
 // target type (from an assignment, declaration, argument, or return)
 // supplies any element names; the literal itself carries none.

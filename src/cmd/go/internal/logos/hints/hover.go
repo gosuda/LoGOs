@@ -19,7 +19,7 @@ var siteTitle = map[string]string{
 
 // HoverAt returns the hover of the lowering site under pos in the file named
 // file, or nil when no site lies there. It shows the lowered code and, for an
-// interpolation, `Fixed: <n>B + dynamic` (SPEC Sec 21.3). When sites nest,
+// interpolation, `Fixed: <n>B + dynamic` (SPEC Sec 16.3). When sites nest,
 // the innermost answers.
 func HoverAt(r *Report, file string, pos Position) *Hover {
 	f := r.file(file)

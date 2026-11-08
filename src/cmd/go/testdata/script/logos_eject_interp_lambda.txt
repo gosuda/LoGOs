@@ -1,5 +1,5 @@
 # M22-S6 D7: eject reproduces native output for `$"..."` inside a lambda
-# body, expression or block (T-Sec11, T-104.4).
+# body, expression or block (T-Sec9, T-104.4).
 env GOPROXY=off
 env GOTOOLCHAIN=local
 

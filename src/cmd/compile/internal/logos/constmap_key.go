@@ -5,7 +5,7 @@
 package logos
 
 // This file gives the M5-S4 const map keys their compile-time view (SPEC
-// T-Sec9): the base hash that places a key (constKeyHash, mirroring the
+// T-Sec7): the base hash that places a key (constKeyHash, mirroring the
 // hash expression the lowered lookup computes), the canonical bytes that
 // break hash ties (constKeyCanon), and the Go order that range follows
 // (constKeyCompare). Keys are evaluated ctfe values; a const map key of a

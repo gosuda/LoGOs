@@ -1,4 +1,4 @@
-# M5-S2: imported const func evaluation across separate modules (T-201, T-Sec6, R-U2).
+# M5-S2: imported const func evaluation across separate modules (T-201, T-Sec5, R-U2).
 # Package calc in module example.com/constlib exports const funcs that evaluate
 # through private helpers, private types, private constants, and a transitive
 # const function in package transitive. Results cover scalars, arrays, slices,
@@ -208,7 +208,7 @@ import (
 
 func main() {
 	// A Go importer sees calc.ComputeClosed as an ordinary function
-	// (SPEC T-201, T-Sec6, R-U2).
+	// (SPEC T-201, T-Sec5, R-U2).
 	var _ func(int) int = calc.ComputeClosed
 	var _ func(int, int, string) calc.Matrix = calc.MakeMatrix
 	var _ func(calc.Score) calc.Score = calc.ScoreMath

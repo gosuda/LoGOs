@@ -1,4 +1,4 @@
-# M22-S5: .lgo builds are reproducible (SPEC Sec 22.5).
+# M22-S5: .lgo builds are reproducible (SPEC Sec 17.5).
 # The example module builds twice from clean caches for linux/amd64,
 # linux/arm64, and js/wasm; each pair must have identical SHA-256 digests.
 # A throwaway copy of the embedded .lgo sources under a fresh go.mod must

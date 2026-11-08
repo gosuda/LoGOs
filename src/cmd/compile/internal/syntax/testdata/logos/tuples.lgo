@@ -4,7 +4,7 @@
 
 // M6-S5 parser attacks: tuple types `(A, B)` and `(a A, b B)`, tuple
 // literals `(a, b)`, and the shared `(` rule with lambdas and plain
-// parenthesized expressions (SPEC Sec 2.4, T-204.1; Sec 5.2-5.3,
+// parenthesized expressions (SPEC Sec 2.4, T-204.1; Sec 4.2-5.3,
 // T-104.6). Every form without an ERROR comment must parse cleanly in
 // LogosMode; each ERROR comment pins a parse error that M6-S5 keeps
 // (regex against the parser message, same matcher as TestSyntaxErrors).

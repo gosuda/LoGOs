@@ -2,7 +2,7 @@
 
 package main
 
-// M18 caller-region attack (SPEC Sec 8.3): a noinline producer returning a
+// M18 caller-region attack (SPEC Sec 3.1): a noinline producer returning a
 // runtime-sized noscan slice must allocate in the caller's region when the
 // caller keeps the result locally (Local consent, always) or returns it
 // through a static chain (Chain consent). This fixture is intentionally RED

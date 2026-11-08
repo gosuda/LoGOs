@@ -22,7 +22,7 @@ type Compiler interface {
 	Lower(ctx context.Context, dir string, buffers map[string][]byte) (*Lowering, error)
 
 	// Diagnose returns the compiler and lint diagnostics of the package in
-	// dir, from the logos JSON diagnostics (SPEC Sec 16).
+	// dir, from the logos JSON diagnostics (SPEC Sec 14).
 	Diagnose(ctx context.Context, dir string, buffers map[string][]byte) ([]Diagnostic, error)
 }
 
@@ -54,7 +54,7 @@ type LoweredFile struct {
 }
 
 // Diagnostic is one compiler or lint diagnostic in the JSON form of SPEC
-// Sec 16. Raw keeps the line as the compiler wrote it, for consumers that
+// Sec 14. Raw keeps the line as the compiler wrote it, for consumers that
 // read the autofix candidates.
 type Diagnostic struct {
 	SchemaVersion string `json:"schema_version"`

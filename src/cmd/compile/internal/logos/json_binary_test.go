@@ -94,7 +94,7 @@ func (s S) MarshalBinary() ([]byte, error) { return nil, nil }
 	}
 }
 
-// TestBinaryZeroWireBudget covers finding (3) per SPEC Sec 12.3: nonzero-wire
+// TestBinaryZeroWireBudget covers finding (3) per SPEC Sec 10.3: nonzero-wire
 // counts pre-allocate at most min(len(rest)/2, 1MB/elem) with no total-budget
 // rejection so lawful >1MiB payloads with all bytes present decode; zero-wire
 // counts (no lawful input bound) are capped at 1<<20 with count-out-of-range,

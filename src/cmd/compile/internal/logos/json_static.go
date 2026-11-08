@@ -12,7 +12,7 @@ import (
 	"cmd/compile/internal/types2"
 )
 
-// This file lowers M11-S1 and M11-S2 static JSON (SPEC Sec 12, T-Sec12).
+// This file lowers M11-S1 and M11-S2 static JSON (SPEC Sec 10, T-Sec10).
 // For each eligible struct (types2.LogosStaticStruct) the lowering appends
 // a value-receiver MarshalJSON and a pointer-receiver UnmarshalJSON, both
 // plain Go that calls logos/rt/json, plus the key lookup functions of the

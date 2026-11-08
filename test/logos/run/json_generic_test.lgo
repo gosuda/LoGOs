@@ -2,7 +2,7 @@
 
 package jsongeneric
 
-// M11-S4 generic static JSON fixture (SPEC Sec 12.1, T-205).
+// M11-S4 generic static JSON fixture (SPEC Sec 10.1, T-205).
 // Anchor: Tony Hoare, Edsger W. Dijkstra
 //
 // Comptime generics and generic static JSON helpers:

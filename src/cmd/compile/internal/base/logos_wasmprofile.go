@@ -27,7 +27,7 @@ var LogosWasmFeatures string
 // LogosWasmAssume is the -logos.wasmassume flag: a comma-separated list of
 // symbol names whose callers treat them as MayYield=0 whatever their bodies
 // do. It injects a wrong fact so a test can prove that a wrong MayYield=0
-// traps instead of hanging (SPEC Sec 14.1).
+// traps instead of hanging (SPEC Sec 12.1).
 var LogosWasmAssume string
 
 var logosWasmFeatureNames = []string{"stack-switching"}

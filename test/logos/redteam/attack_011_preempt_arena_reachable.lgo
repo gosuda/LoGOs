@@ -3,7 +3,7 @@
 package main
 
 // #11: async preemption migrating G mid-arena use (IMPLEMENTATION.md
-// M18-S3, SPEC Sec 8.3, T-301.1). Arena objects in use must stay reachable
+// M18-S3, SPEC Sec 3.1, T-301.1). Arena objects in use must stay reachable
 // across preemption, the bump sequence must be an async-preemption unsafe
 // point, and the collector must scan scan-region objects with the owning
 // goroutine stack. The PCDATA unsafe marker itself is pinned by

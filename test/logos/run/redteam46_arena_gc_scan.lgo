@@ -2,7 +2,7 @@
 
 package main
 
-// REDTEAM #46 (SPEC Sec 8.3, T-301.1; IMPLEMENTATION.md M18-S3, AR3): the
+// REDTEAM #46 (SPEC Sec 3.1, T-301.1; IMPLEMENTATION.md M18-S3, AR3): the
 // side-stack arena must hold a bottom-up noscan region and a top-down scan
 // region, and the collector must scan scan-region objects with the owning
 // goroutine stack, so pointer-containing arena objects keep their heap

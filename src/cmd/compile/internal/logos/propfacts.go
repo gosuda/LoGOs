@@ -10,7 +10,7 @@ import (
 )
 
 // This file carries the M4-S2 property facts (SPEC Sec 2.3, T-203.2,
-// Sec 6.1, T-Sec6). For each exported property interface it emits one
+// Sec 5, T-Sec5). For each exported property interface it emits one
 // prop record naming the interface and the accessor prefix; the property
 // set itself travels in the lowered Logos_GetF/Logos_SetF methods of the
 // export data, which .lgo importers read back through the same accessor

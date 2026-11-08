@@ -10,7 +10,7 @@ import (
 )
 
 // DiagnosticVersion is the schema version of the JSON diagnostics this
-// package reads (SPEC Sec 16).
+// package reads (SPEC Sec 14).
 const DiagnosticVersion = "1.0"
 
 // Span is the span object of a JSON diagnostic: 1-based lines and byte
@@ -57,7 +57,7 @@ func DecodeDiagnostic(line []byte) (Diagnostic, error) {
 
 // CodeActions returns the quick fixes for the diagnostics that intersect rng:
 // one action per autofix candidate, applying the candidate to the document
-// uri whose text is src (SPEC Sec 21.4). Diagnostics carry byte columns, so
+// uri whose text is src (SPEC Sec 16.4). Diagnostics carry byte columns, so
 // src converts them to protocol positions.
 func CodeActions(diags []Diagnostic, uri string, src []byte, rng Range) []CodeAction {
 	idx := newLineIndex(src)

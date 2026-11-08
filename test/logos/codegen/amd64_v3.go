@@ -4,7 +4,7 @@ package codegen
 
 import "math/bits"
 
-// M15-S2 amd64 BMI2 and CMOV (SPEC Sec 15.2, T-303). A constant-count
+// M15-S2 amd64 BMI2 and CMOV (SPEC Sec 13.2, T-303). A constant-count
 // rotate left by c is RORXQ or RORXL at GOAMD64=v3 and v4: the SSA rotate
 // turns left and RORX turns right, so the instruction carries the width
 // complement of c (a left rotate by 7 of a 64-bit value is RORXQ $57).

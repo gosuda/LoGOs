@@ -10,7 +10,7 @@ import (
 )
 
 // This file gives the M5-S4 const map view its standard-library rule (SPEC
-// T-201, T-Sec9): a const map passes to a standard-library parameter only
+// T-201, T-Sec7): a const map passes to a standard-library parameter only
 // when that parameter is read-only (fact ParamMutated=0).
 //
 // Facts travel in __.LOGOS, and no standard-library package carries that
@@ -88,7 +88,7 @@ func logosImportedCallee(check *Checker, call *syntax.CallExpr) (path, name stri
 }
 
 // logosConstMapKeyOK reports whether a const map key of type t has a base
-// hash the lowering can compute (SPEC T-Sec9): strings, numbers, and bools,
+// hash the lowering can compute (SPEC T-Sec7): strings, numbers, and bools,
 // and structs and arrays of them. Interfaces, pointers, channels, and complex
 // numbers have none.
 func logosConstMapKeyOK(t Type) bool {
@@ -144,7 +144,7 @@ func (check *Checker) logosConstMapReadOnly(call *syntax.CallExpr, imported, kno
 }
 
 // logosConstMapArgs decides the const map arguments of a call before type
-// inference (SPEC T-201, T-Sec9). A const map reaches a const parameter as its
+// inference (SPEC T-201, T-Sec7). A const map reaches a const parameter as its
 // view. Every other parameter takes the materialized map (the element type),
 // which is what inference must see for a ~map[K]V constraint, unless the
 // callee mutates it: a standard-library function the table marks mutating

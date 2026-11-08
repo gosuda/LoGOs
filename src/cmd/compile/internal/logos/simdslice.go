@@ -13,7 +13,7 @@ import (
 	"internal/buildcfg"
 )
 
-// LoGo/s M15-S2 vector form of the slice `.sum()` (SPEC Sec 15.2,
+// LoGo/s M15-S2 vector form of the slice `.sum()` (SPEC Sec 13.2,
 // T-303, #22). A `.sum()` on a bare slice receiver, with no fused
 // operation, takes this form when the build has GOEXPERIMENT=simd on
 // amd64 or arm64 and the element is a fixed-width numeric kind or an

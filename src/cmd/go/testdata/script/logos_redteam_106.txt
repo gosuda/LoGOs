@@ -1,4 +1,4 @@
-# REDTEAM #106 (SPEC Sec 8.3, T-301.1; IMPLEMENTATION.md M18-S3):
+# REDTEAM #106 (SPEC Sec 3.1, T-301.1; IMPLEMENTATION.md M18-S3):
 # runtime.SetFinalizer on an arena object MUST panic with
 # "runtime: SetFinalizer on loGo/s arena object", for both the noscan
 # and scan regions, while heap and fallback objects remain valid. A

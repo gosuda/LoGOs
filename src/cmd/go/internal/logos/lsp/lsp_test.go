@@ -1205,7 +1205,7 @@ func TestServeRejectsMissingParts(t *testing.T) {
 	}
 }
 
-// TestGoplsMissing checks the message of SPEC Sec 21.1 when gopls is not
+// TestGoplsMissing checks the message of SPEC Sec 16.1 when gopls is not
 // on PATH, and that a gopls on PATH is the one that runs.
 func TestGoplsMissing(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())

@@ -4,7 +4,7 @@ package p
 
 import "maps"
 
-// M5-S4 const maps (SPEC T-201, T-Sec9): a const map is a const view. A
+// M5-S4 const maps (SPEC T-201, T-Sec7): a const map is a const view. A
 // standard-library parameter whose ParamMutated bit is 1 (maps.DeleteFunc
 // deletes from its map) and a store through the map both fail with
 // const_view_mutation.

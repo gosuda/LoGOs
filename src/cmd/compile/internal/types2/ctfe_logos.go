@@ -225,7 +225,7 @@ func (check *Checker) logosRecordComposite(obj *Const, init syntax.Expr, x *oper
 		base = cv.Elem
 	}
 	if mt, ok := base.Underlying().(*Map); ok && v.Type().Kind == ctfe.KMap {
-		// A const map is a const view of its map type (M5-S4, SPEC T-Sec9).
+		// A const map is a const view of its map type (M5-S4, SPEC T-Sec7).
 		if !logosConstMapKeyOK(mt.Key()) {
 			check.errorf(obj, InvalidConstInit, "[comptime::constmap_key_type] const map key type %s cannot be hashed: use a string, number, bool, or a struct or array of them", mt.Key())
 			obj.typ = Typ[Invalid]

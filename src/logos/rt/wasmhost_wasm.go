@@ -20,7 +20,7 @@ func address(b []byte) int32 {
 }
 
 // scratchAlloc allocates n zeroed bytes of scratch memory and returns
-// their address for the host loader to fill (SPEC Sec 14.2). Growing the
+// their address for the host loader to fill (SPEC Sec 12.2). Growing the
 // heap may detach the host's memory views, so the loader reads
 // memory.buffer again after this call.
 //

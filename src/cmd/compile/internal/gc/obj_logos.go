@@ -30,7 +30,7 @@ import (
 // Until S2-S7 populate records through facts.SetCurrent, the member
 // carries the header and fingerprint only. The member is emitted only
 // for loGo/s packages and, for the MayYield facts of the WASM profile
-// (M16-S1, T-Sec6), for every package built for GOARCH=wasm: a plain-Go
+// (M16-S1, T-Sec5), for every package built for GOARCH=wasm: a plain-Go
 // archive on any other target stays byte-identical to upstream, and
 // every member-counting reader (pack's object check, nm, objdump) sees
 // the same stream it always has.

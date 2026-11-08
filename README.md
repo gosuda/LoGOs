@@ -523,8 +523,8 @@ Element-wise math is supported on arrays only, not slices, and requires a power-
 
 The language also provides these concise extensions defined in [logos-doc/SPEC.md](logos-doc/SPEC.md):
 
-- **Error propagation** (`n := f()?` or `f()?`): unwraps values or returns early on non-nil error from functions returning `(T, error)` ([logos-doc/SPEC.md](logos-doc/SPEC.md) Sec 7.1).
-- **Error cleanup** (`errdefer f()`): registers deferred cleanup executed only when the enclosing function exits with an error, a panic, or Goexit ([logos-doc/SPEC.md](logos-doc/SPEC.md) Sec 7.1).
+- **Error propagation** (`n := f()?` or `f()?`): unwraps values or returns early on non-nil error from functions returning `(T, error)` ([logos-doc/SPEC.md](logos-doc/SPEC.md) Sec 6).
+- **Error cleanup** (`errdefer f()`): registers deferred cleanup executed only when the enclosing function exits with an error, a panic, or Goexit ([logos-doc/SPEC.md](logos-doc/SPEC.md) Sec 6).
 - **String interpolation** (`$"user {name}: {count}"`): embeds formatted expressions directly within string literals ([logos-doc/SPEC.md](logos-doc/SPEC.md) Sec 2).
 - **Iterator chains** (`xs.filter(...).map(...).take(n)`): runs functional slice transformations with predicate and mapping closures ([logos-doc/SPEC.md](logos-doc/SPEC.md) Sec 2).
 - **Literal addressing** (`&100`, `&f()`): takes the address of scalar literals and function call returns without temporary variables ([logos-doc/SPEC.md](logos-doc/SPEC.md) Sec 2).
@@ -572,12 +572,11 @@ One row per shipped form, with milestone IDs from [logos-doc/IMPLEMENTATION.md](
 | M9 | `logos lint`, `--json-diagnostics` | In-compiler checks that stop before code generation, with one JSON object per diagnostic. |
 | M10 | `logos next`, `logos context` | Rewrites a Go module toward loGo/s; prints the declaration and signatures for one symbol. |
 | M11 | Generated `MarshalJSON` / `UnmarshalJSON` | Static JSON methods on tagged structs with `encoding/json`-matching output. |
-| M13 | `-O` | Optimization tiers from `-O=0` to `-O=3` plus `Os` and `Oz`, synthetic PGO, clone specialization, and identical code folding. Every backend, runtime, and tooling improvement that ships applies to Go packages as well as loGo/s packages under `logos` and plain `go`. |
+| M13 | `-O` | Optimization levels from `-O=0` to `-O=3` plus `Os`, with inline budgets, variable-make stack buffers, and `target_cpu`. Every backend, runtime, and tooling improvement that ships applies to Go packages as well as loGo/s packages under `logos` and plain `go`. |
 | M14 | Fixed-array SIMD | Element-wise operators and reductions on small fixed-size arrays behind `GOEXPERIMENT=simd`. |
 | M16 | WASM profile | Flag or directive only: `--wasm-features=stack-switching`, `--wasm-loader`, and the `//logos:wasmimport` / `//logos:wasmexport` directives. |
 | M17 | Smart stack | Flag only: `GOEXPERIMENT=logosstack` starts goroutines at per-call-site sizes. |
 | M18 | Arena and bump allocation | Flag only: `GOEXPERIMENT=logosarena`, or `[build] arena = true` in `logos.toml`. |
-| M19 | GC modes | Flag only: `-gc=` with `greentea`, `immix`, `zgc`, `wasm`, `batch`, or `epsilon`. |
 | M20 | Fast-CGo | Directive and flag only: `//logos:cgo_fastcall` (or `#cgo noescape` with `#cgo nocallback`) behind `GOEXPERIMENT=logosfastcgo`. |
 | M21 | `logos lsp` | Editor setup: gopls proxy mapping `.lgo` positions, with inlay hints, hover, and code actions. |
 | M22 | Verification suites | Directive only: `//logos:zeroalloc` rejects any heap allocation in the marked function. |

@@ -7,7 +7,7 @@ import (
 	"sync"
 )
 
-// REDTEAM #138 (SPEC Sec 8.3, T-301.1; IMPLEMENTATION.md M18-S3): a value
+// REDTEAM #138 (SPEC Sec 3.1, T-301.1; IMPLEMENTATION.md M18-S3): a value
 // stored into sync.Pool must stay on the heap; the compiler must keep such
 // values out of the arena. r138Put builds a dynamic byte slice (a shape the
 // arena would otherwise take) and stores it in the pool. The noinline keeps

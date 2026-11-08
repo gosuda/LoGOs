@@ -492,7 +492,7 @@ func TestCognitiveOverflowThresholds(t *testing.T) {
 	}
 }
 
-// TestCognitiveOverflowDefaults checks the default limits of SPEC Sec 10
+// TestCognitiveOverflowDefaults checks the default limits of SPEC Sec 8
 // against the metric values: 3 levels, 4 parameters, 60 lines, score 15.
 func TestCognitiveOverflowDefaults(t *testing.T) {
 	testenv.MustHaveGoBuild(t)

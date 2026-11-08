@@ -13,7 +13,7 @@ import (
 	"cmd/compile/internal/types2"
 )
 
-// This file spells the generated MarshalJSON (SPEC Sec 12.1). The method
+// This file spells the generated MarshalJSON (SPEC Sec 10.1). The method
 // pins every modeled field into a local, runs the checks that can fail
 // (floats, reflective fallbacks) in declaration order, computes the output
 // size from fixed key literals plus the helper lengths, then fills one
@@ -660,7 +660,7 @@ func unionMemberStaticCall(m types2.Type, pkg *types2.Package, b, e string) stri
 	return fmt.Sprintf("\t%s, %s = %s.MarshalField(_logos_m)", b, e, jsonAlias)
 }
 
-// unionCode spells a field holding a closed-union value. SPEC Sec 12: a
+// unionCode spells a field holding a closed-union value. SPEC Sec 10: a
 // closed-union value marshals to its dynamic member's static bytes.
 func (g *marshalGen) unionCode(f *jsonField) fieldCode {
 	x := f.local()

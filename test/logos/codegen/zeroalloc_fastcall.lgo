@@ -4,7 +4,7 @@ package main
 
 import "unsafe"
 
-// M22-S4 (SPEC Sec 22.4): a call through the M20 fast-call trampoline
+// M22-S4 (SPEC Sec 17.4): a call through the M20 fast-call trampoline
 // performs no heap allocation. The caller below is marked //logos:zeroalloc,
 // so the build itself proves escape analysis finds no allocation site, and
 // the emitted code shows the call goes to runtime.logosCgocallFast, not to

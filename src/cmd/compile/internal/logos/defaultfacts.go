@@ -9,7 +9,7 @@ import (
 	"cmd/compile/internal/types2"
 )
 
-// M6-S3 struct field default facts (SPEC T-104.5, T-Sec6): one default
+// M6-S3 struct field default facts (SPEC T-104.5, T-Sec5): one default
 // record per defaulted field of each exported struct type, carrying the
 // default expression source text for .lgo importers. Lower wires the
 // call beside EmitOptionFacts; the records pass through MergePropFacts.

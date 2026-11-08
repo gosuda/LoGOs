@@ -1,5 +1,5 @@
 # M7-S3 eject with inner lowering in cross-package comptime generics
-# (SPEC Sec 2.5, T-205; T-0.3, T-Sec6): package wire exports comptime
+# (SPEC Sec 2.5, T-205; T-0.3, T-Sec5): package wire exports comptime
 # generics whose const for bodies hold a `?` call, a `$"..."`
 # interpolation, a chain call, and a nested const for. Package main
 # instantiates them over a local type and over a wire type. The ejected

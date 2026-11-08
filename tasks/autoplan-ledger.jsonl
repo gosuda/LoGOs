@@ -1,4 +1,4 @@
-{"id": "CEO-01", "description": "P0-S1 Rename logos-doc/PLAN.md to logos-doc/SPEC.md (pure rename) and P0-S2 rewrite SPEC.md as the tailored spec (tables T, N, Section 23)", "phase": "CEO"}
+{"id": "CEO-01", "description": "P0-S1 Rename logos-doc/PLAN.md to logos-doc/SPEC.md (pure rename) and P0-S2 rewrite SPEC.md as the tailored spec (tables T, N, Section 18)", "phase": "CEO"}
 {"id": "CEO-02", "description": "P0-S5 Create logos-doc/REDTEAM.md with 182 attack rows", "phase": "CEO"}
 {"id": "CEO-03", "description": "P0-S6 Create tasks/autoplan-ledger.jsonl from this ledger", "phase": "CEO"}
 {"id": "CEO-04", "description": "P0-S7 Replace the session todo list with one item per slice", "phase": "CEO"}

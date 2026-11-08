@@ -4,7 +4,7 @@ package main
 
 import "fmt"
 
-// M5-S3 regression (SPEC Sec 2.1, T-201, Table T row T-Sec9): a named map
+// M5-S3 regression (SPEC Sec 2.1, T-201, Table T row T-Sec7): a named map
 // type reached through a const, directly and nested inside a struct, must
 // keep dynamic initialization. It must not trip the read-only backend's
 // internal error. The map index keeps Go's comma-ok meaning (T-104.3).

@@ -16,7 +16,7 @@ const (
 )
 
 // wantsWasmLoader reports the build-wide part of the loader decision (SPEC
-// Sec 14.2, R-U1): the --wasm-loader flag is on, the build command is
+// Sec 12.2, R-U1): the --wasm-loader flag is on, the build command is
 // build, the target is GOARCH=wasm, and p is a main package. It reads the
 // build configuration, never the module kind, so a Go main package and a
 // loGo/s main package behave alike.

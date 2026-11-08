@@ -1,4 +1,4 @@
-# M5-S2: imported const func boundary values and types (T-201, T-Sec6, R-U2).
+# M5-S2: imported const func boundary values and types (T-201, T-Sec5, R-U2).
 # Anchor: Tony Hoare, Richard Feynman
 #
 # Tests cross-package compile-time evaluation and boundary behavior:

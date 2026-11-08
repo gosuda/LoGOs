@@ -5,7 +5,7 @@
 package syntax
 
 // This file holds the loGo/s parser logic for M4-S1 property interfaces
-// (SPEC Sec 2.3, T-203.2; grammar Sec 5.2: PropertyElem ::=
+// (SPEC Sec 2.3, T-203.2; grammar Sec 4.2: PropertyElem ::=
 // ["const"] Name Type). parser.go calls into it through hook lines only
 // (G3); every rule below runs solely in LogosMode, so plain Go parses
 // exactly as upstream.

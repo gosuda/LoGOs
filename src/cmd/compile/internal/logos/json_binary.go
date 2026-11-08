@@ -146,7 +146,7 @@ func (g *binaryGenerator) codec(t types2.Type) (int, bool) {
 			}
 			if g.isZeroWire(x.Elem()) {
 				// Zero-wire elements encode zero bytes, so remaining input
-				// gives no lawful bound (SPEC Sec 12.3). Cap the count itself
+				// gives no lawful bound (SPEC Sec 10.3). Cap the count itself
 				// at the 1 MiB prealloc bound (unit 1) and additionally cap
 				// the single-allocation byte total (count times element size)
 				// at 64 MiB, so a tiny header cannot drive an arbitrarily large

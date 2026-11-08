@@ -4,7 +4,7 @@
 
 package logos
 
-// Attack tests for M5-S4 const maps (SPEC T-Sec9): the seed search has a
+// Attack tests for M5-S4 const maps (SPEC T-Sec7): the seed search has a
 // fixed budget, and exhausting it reports comptime::constmap_seed_not_found
 // instead of searching on. The 10,000-key acceptance and the run-time
 // lookups are owned by test/logos/run/const_map.lgo.
@@ -75,7 +75,7 @@ func TestConstmapProbeFindsEveryKey(t *testing.T) {
 	}
 }
 
-// TestConstmapBudgetIsOneMillion pins the SPEC T-Sec9 construction ceiling
+// TestConstmapBudgetIsOneMillion pins the SPEC T-Sec7 construction ceiling
 // (#140): 1,000,000 seed-candidate trials in total per const map, split
 // into 8 deterministic outer rounds of 125,000 trials each. A ceiling
 // off by one in either direction changes one of the two outcomes below.
@@ -91,7 +91,7 @@ func TestConstmapBudgetIsOneMillion(t *testing.T) {
 	}
 }
 
-// TestConstmapSwitchMax pins the SPEC T-Sec9 lowering boundary (#3): a
+// TestConstmapSwitchMax pins the SPEC T-Sec7 lowering boundary (#3): a
 // const map with up to 8 keys lowers to a switch lookup, and a larger
 // map lowers to the static perfect-hash table. The run fixture
 // test/logos/run/constmap_switch.lgo proves the emitted form end to
@@ -103,7 +103,7 @@ func TestConstmapSwitchMax(t *testing.T) {
 	}
 }
 
-// TestConstmapProbeIsSingleProbe pins the SPEC T-Sec9 lookup shape
+// TestConstmapProbeIsSingleProbe pins the SPEC T-Sec7 lookup shape
 // (#140): the compiler-side probe performs one bucket selection plus
 // exactly one slot read, with no loop and no logarithmic fallback. A
 // loop or a binary search in this path voids the constant-time proof,

@@ -7,7 +7,7 @@ import (
 	"math"
 )
 
-// M15-S2 attack (SPEC Sec 15.2 and 2.4, T-303, T-204.2): `.sum()` on a
+// M15-S2 attack (SPEC Sec 13.2 and 2.4, T-303, T-204.2): `.sum()` on a
 // bare slice matches a scalar oracle for every element kind at every
 // length from empty through two vectors plus one of the widest lane
 // count and beyond, so each tail size runs. Integer sums wrap like the

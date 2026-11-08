@@ -1,4 +1,4 @@
-# M22-S6: the Sec 11 end-to-end example ejects to pure Go and prints the same
+# M22-S6: the Sec 9 end-to-end example ejects to pure Go and prints the same
 # output. test/logos/example/order_service.lgo is the single source: a fake
 # database, a closed union, a property interface, a const map, struct defaults
 # with an assertion list, options, errdefer, go group, Locked and Hot, a const

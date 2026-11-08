@@ -16,7 +16,7 @@ import (
 // never run Go callbacks, keyed "module.name". poll_oneoff and sched_yield
 // block on wasip1; every syscall/js import can run a JavaScript function
 // that calls back into Go, and a callback may park; an import that is not
-// listed yields (SPEC Sec 14.1).
+// listed yields (SPEC Sec 12.1).
 var pureImports = func() map[string]bool {
 	m := make(map[string]bool)
 	for _, n := range []string{

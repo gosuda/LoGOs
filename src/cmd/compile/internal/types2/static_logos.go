@@ -11,7 +11,7 @@ import (
 	"unicode"
 )
 
-// LoGo/s M11 static serializer type rules (SPEC Sec 12). The lowering
+// LoGo/s M11 static serializer type rules (SPEC Sec 10). The lowering
 // generates the methods of logosStaticMethods for each eligible struct,
 // but user code in the same package calls those methods before any
 // lowering runs, so the checker declares them up front.
@@ -230,7 +230,7 @@ func logosStaticUnwrap(t Type) Type {
 }
 
 // logosStaticKindOK reports whether a field of type t may appear in a
-// statically serialized struct. SPEC Sec 12.1 skips generation for
+// statically serialized struct. SPEC Sec 10.1 skips generation for
 // interfaces (except closed unions) and for maps with non-string keys.
 func logosStaticKindOK(t Type) bool {
 	u := logosStaticUnwrap(t)
@@ -348,7 +348,7 @@ func logosContainsLockSeen(t Type, seen map[Type]bool) bool {
 }
 
 // LogosStaticStruct reports whether named is eligible for the static
-// serializer (SPEC Sec 12.1) and returns its fields in declaration order.
+// serializer (SPEC Sec 10.1) and returns its fields in declaration order.
 // A package-level, non-generic, non-alias type declared with a struct
 // literal (`type T struct{...}`) qualifies when it has no embedded field,
 // no interface field, no map field with a non-string key, no field named

@@ -38,7 +38,7 @@ var PedanticSet bool
 
 // LogosJSON is set by the logos-only --json-diagnostics flag of logos build
 // and logos lint: compile diagnostics print as one JSON object per line
-// (SPEC Sec 16). Plain go never sets it.
+// (SPEC Sec 14). Plain go never sets it.
 var LogosJSON bool
 
 // BuildWasmLoader is the value of the --wasm-loader build flag (SPEC Sec
@@ -59,7 +59,7 @@ var WasmLoader string
 // passes no lint policy to the compiler.
 var LogosLintCmd bool
 
-// BuildGC is the value of the -gc flag (SPEC Sec 19), and BuildGCSet reports
+// BuildGC is the value of the -gc flag (SPEC Sec 3.1), and BuildGCSet reports
 // whether the flag appeared, so -gc= can be told from an absent flag.
 var (
 	BuildGC    string

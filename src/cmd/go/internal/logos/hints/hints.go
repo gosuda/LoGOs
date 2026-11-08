@@ -3,7 +3,7 @@
 // license that can be found in the LICENSE file.
 
 // Package hints renders the editor features of the loGo/s language server
-// that the compiler computes (SPEC Sec 21.2 to 21.4): inlay hints for
+// that the compiler computes (SPEC Sec 16.2 to 21.4): inlay hints for
 // narrowed types, union members, and allocation tiers; hovers that show
 // lowered code and the fixed byte count of an interpolation; and code
 // actions that apply the autofix candidates of the JSON diagnostics.

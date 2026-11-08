@@ -11,7 +11,7 @@ import (
 )
 
 // This file holds the code generation of the stack-switching mode of the
-// WASM profile (loGo/s M16-S1, SPEC Sec 14.1), which the build selects with
+// WASM profile (loGo/s M16-S1, SPEC Sec 12.1), which the build selects with
 // --wasm-features=stack-switching and the tools see as ctxt.WasmStackSwitch.
 //
 // Every goroutine runs on its own WebAssembly continuation (the

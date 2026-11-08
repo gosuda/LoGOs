@@ -2,7 +2,7 @@
 
 package main
 
-// M18 pointer-slice attack (SPEC Sec 8.3): a runtime-sized nonescaping
+// M18 pointer-slice attack (SPEC Sec 3.1): a runtime-sized nonescaping
 // []*Node local large enough to exceed the stack buffer must allocate its
 // backing in the arena scan region, keeping heap referents alive across
 // runtime.GC(). Escape LogosArenaLocalShape allows any elem with Size>0

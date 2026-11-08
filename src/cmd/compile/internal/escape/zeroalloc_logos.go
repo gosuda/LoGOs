@@ -20,7 +20,7 @@ type LogosFuncKey struct {
 	Line uint
 }
 
-// LogosZeroAlloc maps each function marked //logos:zeroalloc (SPEC Sec 22.4)
+// LogosZeroAlloc maps each function marked //logos:zeroalloc (SPEC Sec 17.4)
 // to its declared name. The loGo/s lint hook sets it to the marked functions
 // of the package; it is empty for every other compile, so the flow graph and
 // the -m output stay those of plain Go.

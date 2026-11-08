@@ -2,7 +2,7 @@
 
 package main
 
-// M15-S2 (SPEC Sec 15.2, T-303; #169): a product whose type is not an
+// M15-S2 (SPEC Sec 13.2, T-303; #169): a product whose type is not an
 // integer stays out of _logos_rt.MulLen. A float product converted to
 // int for a make length compiles and runs instead of failing the
 // integer-constrained recheck, while a product of a defined integer

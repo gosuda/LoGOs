@@ -2,7 +2,7 @@
 
 package codegen
 
-// M16-S1 attack (SPEC Sec 14.1): the WASM profile activates for
+// M16-S1 attack (SPEC Sec 12.1): the WASM profile activates for
 // GOOS=js and GOOS=wasip1 on GOARCH=wasm under logos. A function whose
 // facts say MayYield=0 gets no resume-point dispatch; a caller reaches it
 // through a native call without a resume point; a wrong MayYield=0 that

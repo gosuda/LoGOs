@@ -3,7 +3,7 @@
 // license that can be found in the LICENSE file.
 
 // Package wasmyield computes the MayYield facts of the WASM profile
-// (loGo/s M16-S1, SPEC Sec 14.1) and applies them: a call whose callee can
+// (loGo/s M16-S1, SPEC Sec 12.1) and applies them: a call whose callee can
 // never unwind the wasm stack is emitted as obj/wasm ACALLNORESUME, and a
 // function left with no resume-point call keeps no br_table dispatch.
 //

@@ -147,7 +147,7 @@ func labelsAt(hs []InlayHint, pos Position) []string {
 }
 
 // TestInlayNarrowedAndUnion checks the narrowed-type and union-member hints
-// that the compiler wrote for a loGo/s file (SPEC Sec 21.2).
+// that the compiler wrote for a loGo/s file (SPEC Sec 16.2).
 func TestInlayNarrowedAndUnion(t *testing.T) {
 	f := compilerFixture(t, "sites.lgo")
 	r, _ := compileHints(t, f)
@@ -172,7 +172,7 @@ func TestInlayNarrowedAndUnion(t *testing.T) {
 }
 
 // TestInlayAllocationBadges checks the four tier badges and that a plain Go
-// file gets them too (SPEC Sec 21.2).
+// file gets them too (SPEC Sec 16.2).
 func TestInlayAllocationBadges(t *testing.T) {
 	lgo := compilerFixture(t, "sites.lgo")
 	r, _ := compileHints(t, lgo)
@@ -240,7 +240,7 @@ func TestInlayUnknownFile(t *testing.T) {
 }
 
 // TestHoverLoweredSites checks the hover of `?`, `const for`, `const switch T`,
-// and `$"..."`: the lowered code of the site (SPEC Sec 21.3).
+// and `$"..."`: the lowered code of the site (SPEC Sec 16.3).
 func TestHoverLoweredSites(t *testing.T) {
 	f := compilerFixture(t, "sites.lgo")
 	r, _ := compileHints(t, f)
@@ -278,7 +278,7 @@ func TestHoverLoweredSites(t *testing.T) {
 }
 
 // TestHoverFixedBytes checks the `Fixed: <n>B + dynamic` line of an
-// interpolation hover with the precomputed fixed byte count (SPEC Sec 21.3).
+// interpolation hover with the precomputed fixed byte count (SPEC Sec 16.3).
 func TestHoverFixedBytes(t *testing.T) {
 	f := compilerFixture(t, "interp.lgo")
 	r, _ := compileHints(t, f)
@@ -402,7 +402,7 @@ func applyEdits(t *testing.T, src []byte, edits []TextEdit) string {
 
 // TestCodeActionsApplyAutofix checks that each M9 autofix candidate becomes a
 // quick fix whose edit rewrites the source the way the candidate says: a
-// replacement over the span, and an insertion before a line (SPEC Sec 21.4).
+// replacement over the span, and an insertion before a line (SPEC Sec 16.4).
 func TestCodeActionsApplyAutofix(t *testing.T) {
 	const uri = "file:///w/fixes.lgo"
 	f := localFixture(t, "fixes.lgo")

@@ -10,7 +10,7 @@ import (
 	"strings"
 )
 
-// M19-S2 (SPEC Sec 19, T-301.2, G3): a plain go build with no -gc keeps
+// M19-S2 (SPEC Sec 3.1, T-301.2, G3): a plain go build with no -gc keeps
 // upstream pacing; elastic pacing is a greentea-only contract. The
 // program re-executes itself as "child" with GODEBUG=gcpacertrace=1; the
 // child starts two collections by hand, and only elastic pacing prints a

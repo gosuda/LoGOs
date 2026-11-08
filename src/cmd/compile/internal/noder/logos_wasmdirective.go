@@ -36,7 +36,7 @@ func isLogosWasmDirective(text string) bool {
 
 // rewriteLogosWasmDirectives spells each //logos:wasmexport and
 // //logos:wasmimport line comment of a loGo/s file as its //go: form
-// (SPEC Sec 14.2), so the pragma machinery, the lowered tree, and the
+// (SPEC Sec 12.2), so the pragma machinery, the lowered tree, and the
 // ejected text all see //go:wasmexport and //go:wasmimport. It finds the
 // comments with the scanner of the file's own mode, so a string literal
 // that holds the same text is never rewritten. The rewrite touches only

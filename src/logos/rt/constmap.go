@@ -10,7 +10,7 @@ import (
 	"sync"
 )
 
-// This file holds the runtime half of M5-S4 const maps (SPEC T-Sec9).
+// This file holds the runtime half of M5-S4 const maps (SPEC T-Sec7).
 // The compiler lays out a const map as bucketed perfect-hash tables and
 // emits a lookup function that computes a base hash with the functions
 // below and calls ConstTable.Get. Compiler and runtime share these
@@ -73,7 +73,7 @@ func ConstMix(seed, h uint64) uint64 {
 }
 
 // ConstMapMaterialization is zero-initialized once-only storage for one
-// top-level regular-map materialization (SPEC T-Sec9). The generated code
+// top-level regular-map materialization (SPEC T-Sec7). The generated code
 // declares one zero value per const map, one pure builder that rebuilds
 // the full regular map, and one accessor that returns
 // storage.Get(builder). The first Get runs the builder exactly once;
@@ -179,7 +179,7 @@ func Bare[V any](v V, ok bool) V {
 }
 
 // Materialize returns the function that builds a const map's regular map
-// once, on first use, and returns that same map afterwards (SPEC T-Sec9).
+// once, on first use, and returns that same map afterwards (SPEC T-Sec7).
 // Concurrent first uses share one build.
 func Materialize[M any](f func() M) func() M {
 	return sync.OnceValue(f)

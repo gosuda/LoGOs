@@ -4,7 +4,7 @@ package main
 
 import "fmt"
 
-// M22-S6 defect D7 (SPEC Sec 11, T-Sec11, T-104.4): `logos eject` on a
+// M22-S6 defect D7 (SPEC Sec 9, T-Sec9, T-104.4): `logos eject` on a
 // `$"..."` inside a lambda body reproduces the native output.
 
 func conv(g func(int) string) string { return g(1) }

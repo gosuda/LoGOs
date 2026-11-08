@@ -2,7 +2,7 @@
 
 package main
 
-// REDTEAM #35 (SPEC Sec 8.3, T-301.1; IMPLEMENTATION.md M18-S3): arena
+// REDTEAM #35 (SPEC Sec 3.1, T-301.1; IMPLEMENTATION.md M18-S3): arena
 // reuse under -race must report no false race, and watermark moves must
 // stay visible to the race detector (racemalloc on alloc, racefree on
 // restore; the inline bump is off under -race, so this exercises the

@@ -48,7 +48,7 @@ type fixDiag struct {
 }
 
 // autofixLine returns the diagnostic line of d, with the 1-based lines and
-// columns of SPEC Sec 16.
+// columns of SPEC Sec 14.
 func autofixLine(t *testing.T, d fixDiag) json.RawMessage {
 	t.Helper()
 	end := shift(d.Start, d.Len)

@@ -526,7 +526,7 @@ type Container struct {
 
 // TestUnionUnmarshalGenerated verifies that a struct holding a closed union
 // generates an UnmarshalJSON with trials in declaration order, scratch values
-// per trial, and an ambiguity error reference (SPEC Sec 12.2, T-Sec12, T-203.1).
+// per trial, and an ambiguity error reference (SPEC Sec 10.2, T-Sec10, T-203.1).
 func TestUnionUnmarshalGenerated(t *testing.T) {
 	src := `package p
 

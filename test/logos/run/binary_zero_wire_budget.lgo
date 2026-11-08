@@ -2,7 +2,7 @@
 
 package main
 
-// M11-S3 zero-wire count cap (SPEC Sec 12.3, red-team #139): the count
+// M11-S3 zero-wire count cap (SPEC Sec 10.3, red-team #139): the count
 // header is charged against no total budget, so a count whose element
 // bytes are present is lawful and must decode even when the total exceeds
 // 1 MiB. For slices whose elements encode zero wire bytes, only the count

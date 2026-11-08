@@ -138,7 +138,7 @@ func TestLoadSliceMaskedPageEnd(t *testing.T) {
 	})
 }
 
-// checkSliceMaskedAllOnes is the SPEC Sec 15.2 attack at the archsimd
+// checkSliceMaskedAllOnes is the SPEC Sec 13.2 attack at the archsimd
 // layer: load reads a slice that ends at the last byte of a page whose
 // successor is PROT_NONE, with an all-ones mask. Lanes at or past len(s)
 // must read no memory, so the load must not fault, and disabled lanes

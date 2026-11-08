@@ -10,7 +10,7 @@ import (
 	"strings"
 )
 
-// M19-S2 (SPEC Sec 19, T-301.2): go build -gc=greentea of a Go program runs
+// M19-S2 (SPEC Sec 3.1, T-301.2): go build -gc=greentea of a Go program runs
 // the elastic pacing, with the same Go source that gc_pacing_go.go builds with
 // no -gc. The program re-executes itself as "child" with
 // GODEBUG=gcpacertrace=1; the child starts two collections by hand, and a

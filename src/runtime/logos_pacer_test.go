@@ -17,7 +17,7 @@ import (
 	"testing"
 )
 
-// M19-S2 attacks (SPEC Sec 19, T-301.2, #161). Under the greentea mode the
+// M19-S2 attacks (SPEC Sec 3.1, T-301.2, #161). Under the greentea mode the
 // background utilization goal follows the PLAN curve of live heap over
 // heap goal, mark assist stays as backstop, endCycle credits the cycle
 // with the goal it ran with, and an empty test-controller mode keeps the

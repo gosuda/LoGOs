@@ -171,7 +171,7 @@ func TestTokenCountUnder64(t *testing.T) {
 
 // TestLogosCoalesceScan checks that in LogosMode `??` with no gap scans
 // as one _Coalesce token, while a gap keeps two _Question tokens
-// (M3-S2 Attack, SPEC Sec 5.1, T-104.3).
+// (M3-S2 Attack, SPEC Sec 4.1, T-104.3).
 func TestLogosCoalesceScan(t *testing.T) {
 	for _, test := range []struct {
 		src    string
@@ -208,7 +208,7 @@ func TestLogosCoalesceScan(t *testing.T) {
 
 // TestLogosQuestionDotScan checks that in LogosMode `?.` with no gap
 // scans as one _QuestionDot token, a gap keeps _Question plus _Dot, and
-// `?.5` stays _Question plus a number (M3-S2 Attack, SPEC Sec 5.1).
+// `?.5` stays _Question plus a number (M3-S2 Attack, SPEC Sec 4.1).
 func TestLogosQuestionDotScan(t *testing.T) {
 	for _, test := range []struct {
 		src    string

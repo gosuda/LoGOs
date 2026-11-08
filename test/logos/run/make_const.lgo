@@ -2,7 +2,7 @@
 
 package main
 
-// M15-S2 (SPEC Sec 15.2, T-303; #169): a make length that is a constant
+// M15-S2 (SPEC Sec 13.2, T-303; #169): a make length that is a constant
 // product stays a compile-time constant. Its lowering must not call
 // _logos_rt.MulLen, because untyped float constants such as 2.0 and 3.0
 // infer float64, which the integer constraint rejects. A product that

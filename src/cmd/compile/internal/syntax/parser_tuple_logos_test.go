@@ -10,7 +10,7 @@ import (
 	"testing"
 )
 
-// Regression (SPEC Sec 5.2): a tuple literal needs a comma at its top
+// Regression (SPEC Sec 4.2): a tuple literal needs a comma at its top
 // level; a parenthesized expression without one must parse exactly as
 // in Go. The defect: an element headed by a nested `(` ended at its
 // own `)`, so `((a+b) + (c+d))` failed with "unexpected +, expected )".

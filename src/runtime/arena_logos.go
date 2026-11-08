@@ -359,7 +359,7 @@ func logosArenaMarkRestore(chunk, noscan, scan uintptr) {
 
 // logosArenaRetSet records that the call the compiler emits right after it
 // consents to the callee allocating returned objects in the caller's arena
-// region (SPEC Sec 8.3). The compiler emits it only after every argument has
+// region (SPEC Sec 3.1). The compiler emits it only after every argument has
 // been evaluated and only before a static call to a function that takes the
 // token first thing, so no other code can run between the set and the take.
 // A function that sets the token passes it down only through a callee that

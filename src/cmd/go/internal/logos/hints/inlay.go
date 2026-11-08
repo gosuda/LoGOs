@@ -12,7 +12,7 @@ import (
 
 // InlayHints returns the inlay hints of the file named file that lie in rng:
 // the narrowed type of each narrowed use, the member list at each union type
-// switch, and the allocation tier of each allocation (SPEC Sec 21.2). A file
+// switch, and the allocation tier of each allocation (SPEC Sec 16.2). A file
 // the report does not cover has none. The hints come in position order.
 func InlayHints(r *Report, file string, rng Range) []InlayHint {
 	f := r.file(file)

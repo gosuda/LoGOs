@@ -4,7 +4,7 @@
 
 package rt_test
 
-// Guard for the M5-S4 one-probe lookup contract (SPEC T-Sec9, #140):
+// Guard for the M5-S4 one-probe lookup contract (SPEC T-Sec7, #140):
 // ConstTable.Get performs constant-time auxiliary metadata reads plus
 // exactly one final key/value-slot probe with full-key validation. A
 // loop or a logarithmic fallback in this path voids the contract, so

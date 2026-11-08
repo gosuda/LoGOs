@@ -2,7 +2,7 @@
 
 package main
 
-// M5-S3 and M5-S4 read-only placement (SPEC Sec 2.1, Sec 9.1, T-201;
+// M5-S3 and M5-S4 read-only placement (SPEC Sec 2.1, Sec 7, T-201;
 // T-PERF PLAN:687): touching const composites adds no heap bytes at
 // init, and a const array and both tables of a 1,000-key const map are
 // read-only symbols (type R in go tool nm).

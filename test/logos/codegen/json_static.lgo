@@ -2,7 +2,7 @@
 
 package jsoncheck
 
-// M11-S1 codegen check (SPEC Sec 12.1, T-Sec12): the generated MarshalJSON
+// M11-S1 codegen check (SPEC Sec 10.1, T-Sec10): the generated MarshalJSON
 // of a struct of scalars is a fast path. It calls no reflect, it makes its
 // one buffer with a single runtime.makeslice, and it takes no other
 // allocation: no new object, no interface boxing, no string

@@ -16,7 +16,7 @@ import (
 // logosFatArrow completes the `=>` token. It is called right after the
 // scanner consumed '=' and found no second '='. In LogosMode, a '>'
 // that joins the '=' with no gap makes the pair one _FatArrow token
-// (SPEC Sec 5.1, T-104.6); the token ends no operand, so a following
+// (SPEC Sec 4.1, T-104.6); the token ends no operand, so a following
 // newline yields no ';'. Otherwise it reports false and leaves the
 // scanner untouched, so plain Go keeps scanning `=` followed by `>`
 // exactly as upstream and `= >` with a gap keeps both tokens in
@@ -44,7 +44,7 @@ func (s *scanner) fillPeek() int {
 }
 
 // logosLeadingDot reports whether a newline at the current position
-// starts a leading-dot continuation (SPEC Sec 5.3, T-104.6): in
+// starts a leading-dot continuation (SPEC Sec 4.3, T-104.6): in
 // LogosMode, a newline followed by spaces, tabs, carriage returns, or
 // further newlines and then `.` plus a letter or `_` inserts no
 // semicolon. It peeks at the buffered source without consuming, filling

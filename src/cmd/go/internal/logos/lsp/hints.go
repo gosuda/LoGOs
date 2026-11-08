@@ -33,7 +33,7 @@ type HintsJSONFunc func(ctx context.Context, dir string, buffers map[string][]by
 // CodeActionsFunc turns the compiler autofix candidates into code actions
 // (M21-S2). The proxy calls it for every textDocument/codeAction request
 // with the compiler diagnostics of the document, each as the JSON line the
-// compiler wrote (SPEC Sec 16), the document's URI, its current text, and
+// compiler wrote (SPEC Sec 14), the document's URI, its current text, and
 // range of the request as LSP Range JSON in the client's own text. It
 // returns a JSON array of CodeAction, which the proxy appends to the
 // actions of gopls, or answers on its own when the document has no

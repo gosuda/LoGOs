@@ -2,7 +2,7 @@
 
 package main
 
-// REDTEAM #101 (SPEC Sec 8.3, T-301.1; IMPLEMENTATION.md M18-S3): race
+// REDTEAM #101 (SPEC Sec 3.1, T-301.1; IMPLEMENTATION.md M18-S3): race
 // builds must reset shadow memory on watermark moves, so reused chunks
 // report no false race. Every round allocates iteration-local noscan and
 // scan buffers whose watermark is restored at the loop back-edge, handing

@@ -9,7 +9,7 @@ import (
 	"unsafe"
 )
 
-// M15-S2 attack (SPEC Sec 15.2, T-303; PLAN #22): a slice reduction
+// M15-S2 attack (SPEC Sec 13.2, T-303; PLAN #22): a slice reduction
 // never reads past the last element. Each slice here ends at the last
 // byte of a page whose successor is PROT_NONE, so a vector load that
 // touches one byte past len(s) faults the process. Every length from 1

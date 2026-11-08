@@ -1,4 +1,4 @@
-# REDTEAM #81 (SPEC Sec 8.3, T-301.1; IMPLEMENTATION.md M18-S3): concurrent
+# REDTEAM #81 (SPEC Sec 3.1, T-301.1; IMPLEMENTATION.md M18-S3): concurrent
 # collector racing scan zeroing. After a frame exit, collection MUST find no
 # stale pointers in popped scan memory: a restore zeroes the popped scan
 # region before it can be reused, so the collector never retains dead

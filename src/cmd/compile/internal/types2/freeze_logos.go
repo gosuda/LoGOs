@@ -16,7 +16,7 @@ import (
 // from __.PKGDEF.
 //
 // A checker-side special case carries this, not facts: logos/rt is a
-// Go package, and Go packages emit no const facts (T-Sec6), so a fact
+// Go package, and Go packages emit no const facts (T-Sec5), so a fact
 // would need a new emitter plus a const overlay for Go packages that
 // Go importers must never see. The hook wraps the already-instantiated
 // result type, so inferred and explicitly instantiated calls agree,

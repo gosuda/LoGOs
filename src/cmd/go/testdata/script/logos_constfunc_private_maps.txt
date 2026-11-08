@@ -1,4 +1,4 @@
-# M5-S4: private-owner const-map consumer coverage (SPEC T-Sec9).
+# M5-S4: private-owner const-map consumer coverage (SPEC T-Sec7).
 # Anchor: Tony Hoare, Richard Feynman
 #
 # Offline multi-module cases for both const-map lowerings with

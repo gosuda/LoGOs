@@ -159,7 +159,7 @@ type storeKey struct {
 // hostCopy copies one value graph read from the host into evaluator-owned
 // storage. Isolation lives here, at ingress, because a const func writes
 // through whatever it can reach and a recorded const's storage must not be
-// reachable (SPEC T-201, T-Sec9: a const composite materializes as a copy,
+// reachable (SPEC T-201, T-Sec7: a const composite materializes as a copy,
 // and writes to it do not change later reads). Shape survives inside the
 // graph: shared backings, slices cut from an array, shared maps, and cycles
 // keep their aliasing because each storage is registered before its
@@ -873,7 +873,7 @@ func isNaNKey(k Value) bool {
 }
 
 // canonKey canonicalizes map keys: -0.0 becomes +0.0, recursively
-// through structs and arrays (SPEC T-Sec9).
+// through structs and arrays (SPEC T-Sec7).
 func (e *evaluator) canonKey(v Value) Value {
 	if v.typ != nil && (v.typ.Kind == KFloat32 || v.typ.Kind == KFloat64) && !v.constant {
 		if v.f64 == 0 {

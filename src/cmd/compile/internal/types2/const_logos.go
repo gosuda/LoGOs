@@ -51,7 +51,7 @@ const (
 type ConstView struct {
 	Elem Type
 	// ConstMap marks the view of a const map declaration (M5-S4, SPEC
-	// T-Sec9). Its plain uses materialize one regular map, so it converts
+	// T-Sec7). Its plain uses materialize one regular map, so it converts
 	// to map[K]V and passes to standard-library parameters that do not mutate
 	// their map argument; every store fails as for any const view.
 	ConstMap bool

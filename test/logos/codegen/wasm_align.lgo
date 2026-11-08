@@ -2,7 +2,7 @@
 
 package codegen
 
-// M16-S2 (SPEC Sec 14.1, T-Sec14; #78): on GOARCH=wasm the 64-bit types
+// M16-S2 (SPEC Sec 12.1, T-Sec12; #78): on GOARCH=wasm the 64-bit types
 // align on 8 bytes, so 64-bit atomics stay naturally aligned with no
 // forcing code. Alignof of int64, uint64, and float64 each equal 8; every
 // such field after a byte field sits at an offset that is a multiple of

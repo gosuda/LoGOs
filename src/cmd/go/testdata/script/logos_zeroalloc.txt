@@ -1,5 +1,5 @@
 # M22-S4: a function marked //logos:zeroalloc fails the build with
-# [perf::zeroalloc_violation] when it allocates on the heap (SPEC Sec 22.4).
+# [perf::zeroalloc_violation] when it allocates on the heap (SPEC Sec 17.4).
 # The directive is the author's assertion, so no policy lowers it and no
 # //logos:allow directive silences it. In a Go package only logos lint reads
 # the directive.

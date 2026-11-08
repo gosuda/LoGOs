@@ -19,7 +19,7 @@ import (
 // only below GOAMD64 v3 (cpu_x86.go), so at v3 the runtime rejects them with
 // "unknown cpu feature". simd_cpu.lgo pins the same level for the same reason.
 //
-// M15-S2 attack (SPEC Sec 15.2 and 2.4, T-303, T-204.2): `.sum()` on a
+// M15-S2 attack (SPEC Sec 13.2 and 2.4, T-303, T-204.2): `.sum()` on a
 // bare slice matches a scalar oracle for every element kind at every
 // length from empty through two vectors plus one of the widest lane
 // count and beyond, so each tail size runs. Integer sums wrap like the

@@ -2,7 +2,7 @@
 
 package jsoncallsite
 
-// M11-S4 call-site static JSON fixture (SPEC Sec 12.1, S8, S9, T-Sec12).
+// M11-S4 call-site static JSON fixture (SPEC Sec 10.1, S8, S9, T-Sec10).
 // Anchor: Tony Hoare, Edsger W. Dijkstra
 //
 // Call-site contracts for eligible static JSON structs under default jsonv2:

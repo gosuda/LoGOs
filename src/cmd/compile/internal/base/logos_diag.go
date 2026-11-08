@@ -15,7 +15,7 @@ import (
 	"cmd/internal/src"
 )
 
-// This file holds the loGo/s diagnostic sink (SPEC Sec 16). Lint findings
+// This file holds the loGo/s diagnostic sink (SPEC Sec 14). Lint findings
 // and every ErrorfAt or WarnfAt diagnostic print as text, or as one JSON
 // object per line when -logos.json is set. print.go carries only the hook
 // lines.
@@ -99,7 +99,7 @@ func printTooManyErrors(pos src.XPos) {
 	fmt.Println(logosRecord(m))
 }
 
-// jsonSpan is the span object of SPEC Sec 16.3.
+// jsonSpan is the span object of SPEC Sec 14.3.
 type jsonSpan struct {
 	StartLine  int `json:"start_line"`
 	StartCol   int `json:"start_col"`
@@ -109,21 +109,21 @@ type jsonSpan struct {
 	ByteLen    int `json:"byte_len"`
 }
 
-// jsonProvenance is the provenance object of SPEC Sec 16.4.
+// jsonProvenance is the provenance object of SPEC Sec 14.4.
 type jsonProvenance struct {
 	OriginExpr   string `json:"origin_expr"`
 	OriginLine   int    `json:"origin_line"`
 	InferredType string `json:"inferred_type"`
 }
 
-// jsonFix is an autofix object of SPEC Sec 16.5.
+// jsonFix is an autofix object of SPEC Sec 14.5.
 type jsonFix struct {
 	Description      string `json:"description"`
 	Replacement      string `json:"replacement"`
 	InsertBeforeLine int    `json:"insert_before_line,omitzero"`
 }
 
-// jsonRecord is one diagnostic line of SPEC Sec 16.2.
+// jsonRecord is one diagnostic line of SPEC Sec 14.2.
 type jsonRecord struct {
 	SchemaVersion     string         `json:"schema_version"`
 	Severity          string         `json:"severity"`

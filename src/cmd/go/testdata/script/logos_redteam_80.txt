@@ -1,4 +1,4 @@
-# REDTEAM #80 (SPEC Sec 22.1, T-Sec22; IMPLEMENTATION.md M22): cross-layer
+# REDTEAM #80 (SPEC Sec 17.1, T-Sec17; IMPLEMENTATION.md M22): cross-layer
 # regression matrix verification. `logos test -O=1 std cmd`,
 # `logos test -O=2 std cmd`, and `logos test -O=3 std cmd` MUST all pass
 # without -short on the full unmodified `std` and `cmd` suites, except for
@@ -10,7 +10,7 @@
 # present below, each its own grep invocation) instead of launching the
 # sweep recursively. No -short, no package subset, no representative probe:
 # the orchestrator runs the full matrix, so a smaller gate here cannot prove
-# it and a full gate here cannot terminate. Per SPEC Sec 22.3 the -race and
+# it and a full gate here cannot terminate. Per SPEC Sec 17.3 the -race and
 # per-gc-mode dimensions are proved by the individual runtime attack
 # fixtures, not here.
 env GOPROXY=off
@@ -87,7 +87,7 @@ env TMPDIR=/tmp/rt80-redteam80
 # run covers std minus exactly os (os/exec, os/signal, os/user and the
 # vendored std packages stay in the parallel run); os gets its own serialized
 # run at each -O level, so every package is still covered at every level.
-# Shape assertion, logos half: the three SPEC Sec 22.1 logos legs the
+# Shape assertion, logos half: the three SPEC Sec 17.1 logos legs the
 # orchestrator runs (one invocation per -O level, each over the full
 # unmodified std and cmd suites with the exclusions above, bulk at -p 4
 # plus os serialized with -parallel 1). Each grep below is one leg

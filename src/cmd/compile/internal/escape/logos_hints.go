@@ -13,7 +13,7 @@ import (
 )
 
 // LogosHintDecision is one escape decision that -logos.mode=hints reports
-// (SPEC Sec 21.2): where the allocation sits, whether it reaches the heap,
+// (SPEC Sec 16.2): where the allocation sits, whether it reaches the heap,
 // the text -m prints for it, and the reason the compiler forced it onto the
 // heap when it had one.
 type LogosHintDecision struct {

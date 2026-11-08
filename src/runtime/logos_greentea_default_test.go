@@ -14,7 +14,7 @@ import (
 )
 
 // TestLogosGreenteaDefaultContract pins the shipped GreenTea defaults
-// (SPEC Sec 19, T-301.2).
+// (SPEC Sec 3.1, T-301.2).
 func TestLogosGreenteaDefaultContract(t *testing.T) {
 	if !goexperiment.GreenTeaGC {
 		t.Errorf("goexperiment.GreenTeaGC = false, want true (greentea is the default collector with no opt-in)")

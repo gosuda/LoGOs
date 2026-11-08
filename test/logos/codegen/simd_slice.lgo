@@ -2,7 +2,7 @@
 
 package main
 
-// M15-S2 attack (SPEC Sec 15.2, T-303; PLAN #22): a slice `.sum()`
+// M15-S2 attack (SPEC Sec 13.2, T-303; PLAN #22): a slice `.sum()`
 // loads its tail through a fault-suppressing masked load, so no vector
 // load reads past the last element. On amd64 the instruction is
 // VPMASKMOVD or VPMASKMOVQ for 32 and 64-bit lanes (AVX2) and the

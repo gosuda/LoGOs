@@ -13,7 +13,7 @@ import (
 	"cmd/internal/src"
 )
 
-// This file drives -logos.mode=hints (SPEC Sec 21.2 and 21.3). The report is
+// This file drives -logos.mode=hints (SPEC Sec 16.2 and 21.3). The report is
 // built in three steps that follow the compile: logosHintsBegin records the
 // facts of the checked tree before lowering rewrites it, logosHintsLowered
 // adds the lowering edits and read-only placements right after lowering, and

@@ -2,7 +2,7 @@
 
 package jsoncycle
 
-// M11-R1/R2/R4 regression probes (SPEC Sec 12.1): cycles through static
+// M11-R1/R2/R4 regression probes (SPEC Sec 10.1): cycles through static
 // and dynamic edges terminate with the reflective cycle error instead
 // of overflowing the stack. Before the traversal repair every cyclic
 // value below overflowed: each fallback field started a fresh

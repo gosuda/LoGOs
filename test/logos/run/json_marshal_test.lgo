@@ -2,7 +2,7 @@
 
 package jsonmarshal
 
-// M11-S1 attack (SPEC Sec 12.1, T-Sec12): the generated MarshalJSON is
+// M11-S1 attack (SPEC Sec 10.1, T-Sec10): the generated MarshalJSON is
 // byte-identical to the reflective encoding/json output, compact, exact in
 // length for the User shape, and one allocation for a struct of scalars.
 // `mirror` is a method-less copy of the type, so it takes the reflective

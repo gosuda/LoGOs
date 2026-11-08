@@ -25,7 +25,7 @@ import (
 	"internal/testenv"
 )
 
-// M19-S1 attacks (SPEC Sec 19, T-301.2, red-team row #166). The helper
+// M19-S1 attacks (SPEC Sec 3.1, T-301.2, red-team row #166). The helper
 // program testdata/testlogosgc is built with go build -gc=MODE and
 // logos build -gc=MODE and run under the memory limits each attack needs.
 // Epsilon never starts a collection. Batch starts none before heap use

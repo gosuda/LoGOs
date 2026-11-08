@@ -2,7 +2,7 @@
 
 package jsonunmarshal
 
-// M11-S2 attack (SPEC Sec 12.2, T-Sec12; rows #7, #123, #139): the generated
+// M11-S2 attack (SPEC Sec 10.2, T-Sec10; rows #7, #123, #139): the generated
 // UnmarshalJSON fills defaults first, enforces required non-nil fields
 // through a seen mask, dispatches keys by switch or perfect-hash table,
 // skips unknown keys, keeps the last duplicate, grows arrays as elements

@@ -2,7 +2,7 @@
 
 package jsonunion
 
-// M11-S4 union JSON fixture (SPEC Sec 12.1, Sec 12.2, T-Sec12, T-203.1).
+// M11-S4 union JSON fixture (SPEC Sec 10.1, Sec 10.2, T-Sec10, T-203.1).
 // Anchor: Tony Hoare, Edsger W. Dijkstra
 //
 // Closed union marshaling and unmarshaling:

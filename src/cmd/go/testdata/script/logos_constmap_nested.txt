@@ -1,4 +1,4 @@
-# M5-S4: nested const-map storage (SPEC T-Sec9).
+# M5-S4: nested const-map storage (SPEC T-Sec7).
 # Anchor: Tony Hoare, David Parnas, John Carmack
 #
 # Offline cases for map-bearing const maps in both lowerings:
