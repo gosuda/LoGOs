@@ -881,7 +881,10 @@ var depsRules = `
 	FMT
 	< math/big/internal/asmgen;
 
-	context, errors, reflect, strings, unsafe
+	unsafe
+	< logos/arena;
+
+	context, errors, reflect, strings, unsafe, logos/arena
 	< logos/rt;
 
 	encoding/json, math, reflect, strconv, unicode, unicode/utf8, unsafe

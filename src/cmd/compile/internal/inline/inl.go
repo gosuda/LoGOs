@@ -1089,6 +1089,9 @@ func parsePos(pos src.XPos, posTmp []src.Pos) ([]src.Pos, src.Pos) {
 //
 // Preconditions: CanInline(callee) has already been called.
 func canInlineCallExpr(callerfn *ir.Func, n *ir.CallExpr, callee *ir.Func, bigCaller, closureCalledOnce bool, log bool) (bool, int32, bool) {
+	if ir.LogosRegionsEnabled() && ir.LogosRegionNoInline(callee) {
+		return false, 0, false
+	}
 	if callee.Inl == nil {
 		// callee is never inlinable.
 		if log && logopt.Enabled() {
