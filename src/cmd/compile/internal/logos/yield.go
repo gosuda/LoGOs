@@ -114,7 +114,7 @@ func (fc *funcLower) lowerYield() bool {
 		})
 		natives[i] = decl
 	}
-	fc.rewriteYields(natives)
+	fc.body.List = fc.rewriteYieldList(fc.body.List)
 	params := make([]*syntax.Field, len(natives))
 	for i, typ := range natives {
 		params[i] = at(&syntax.Field{Type: typ}, pos)
@@ -138,13 +138,6 @@ func (fc *funcLower) lowerYield() bool {
 	rbraceOff := fl.off(fc.body.Rbrace)
 	fl.add(rbraceOff, rbraceOff, " }")
 	return true
-}
-
-// rewriteYields replaces every yield and valued return of the generator
-// body with its lowered form, descending everywhere except nested
-// function literals (which lower on their own).
-func (fc *funcLower) rewriteYields(types []syntax.Expr) {
-	fc.body.List = fc.rewriteYieldList(fc.body.List)
 }
 
 // rewriteYieldList rewrites one statement list.
