@@ -18,7 +18,7 @@ import (
 )
 
 // TestEditMapDescribesEject is the oracle of the language server's
-// position map (M21-S1): for every run fixture, the spans ApplyEditsMapped
+// position map (M21-S1): for every run fixture, the spans ApplyEditsSegments
 // reports must account for every byte of the ejected text. Source bytes
 // outside the spans must appear unchanged in the ejected text, in order,
 // and the span lengths must add up to the ejected size.
@@ -44,7 +44,7 @@ func TestEditMapDescribesEject(t *testing.T) {
 			file := ejectParse(t, base, src, syntax.LogosMode|syntax.CheckBranches)
 			pkg, info := ejectCheck(t, file)
 			edits := ejectLower(t, pkg, info, file, src)
-			out, spans, err := ApplyEditsMapped(src, base, edits)
+			out, spans, _, err := ApplyEditsSegments(src, base, edits)
 			if err != nil {
 				t.Fatal(err)
 			}

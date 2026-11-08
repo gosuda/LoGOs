@@ -103,15 +103,8 @@ func resolve(src []byte, starts []int, base *syntax.PosBase, e Edit) (splice, er
 // given in any order; they must not overlap. Insertions at one offset keep
 // their input order.
 func ApplyEdits(src []byte, base *syntax.PosBase, edits []Edit) ([]byte, error) {
-	out, _, err := ApplyEditsMapped(src, base, edits)
+	out, _, _, err := ApplyEditsSegments(src, base, edits)
 	return out, err
-}
-
-// ApplyEditsMapped applies edits like ApplyEdits and also returns the
-// applied edits as spans of byte offsets, in the order they took effect.
-func ApplyEditsMapped(src []byte, base *syntax.PosBase, edits []Edit) ([]byte, []editmap.EditSpan, error) {
-	out, spans, _, err := ApplyEditsSegments(src, base, edits)
-	return out, spans, err
 }
 
 // ApplyEditsSegments applies edits like ApplyEdits and also returns the
