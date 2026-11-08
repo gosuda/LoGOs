@@ -126,12 +126,6 @@ func (fc *funcLower) groupTop() (groupFrame, bool) {
 	return groupFrame{}, false
 }
 
-// groupOf reports the group owning the statement under lowering: every
-// frame on the stack scopes one group, so the top frame owns the point.
-func (fc *funcLower) groupOf() (groupFrame, bool) {
-	return fc.groupTop()
-}
-
 // lowerGroupHook is the one entry statement lowering takes into group
 // lowering. It routes the statements a group frame rewrites (group
 // statements, child blocks, child calls, exits from a group body, and
@@ -158,7 +152,7 @@ func (fc *funcLower) groupCallStmt(s *syntax.CallStmt) ([]syntax.Stmt, bool) {
 	if s.Tok != syntax.Go {
 		return nil, false
 	}
-	if _, ok := fc.groupOf(); !ok {
+	if _, ok := fc.groupTop(); !ok {
 		return nil, false
 	}
 	return fc.lowerGroupGo(s), true
@@ -234,7 +228,7 @@ func (fc *funcLower) lowerGroupStmt(s *syntax.GroupStmt) []syntax.Stmt {
 // lowerGroupChild lowers a child block by wrapping it as a child of the
 // owning group.
 func (fc *funcLower) lowerGroupChild(s *syntax.GroupChild) []syntax.Stmt {
-	top, ok := fc.groupOf()
+	top, ok := fc.groupTop()
 	if !ok {
 		return []syntax.Stmt{s}
 	}
@@ -531,7 +525,7 @@ func (fc *funcLower) lowerGroupBranch(s *syntax.BranchStmt, top groupFrame) []sy
 // with user code, since `_logos_` names are rejected in .lgo, so the
 // split lands exactly around the call span.
 func (fc *funcLower) lowerGroupGo(s *syntax.CallStmt) []syntax.Stmt {
-	top, ok := fc.groupOf()
+	top, ok := fc.groupTop()
 	if !ok {
 		return []syntax.Stmt{s}
 	}
