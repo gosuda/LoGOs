@@ -32,13 +32,17 @@ package types2
 import (
 	"bytes"
 	"cmd/compile/internal/logos/ctfe"
-	"cmd/compile/internal/logos/facts"
 	"cmd/compile/internal/syntax"
 	"fmt"
 	"go/constant"
 	"math/big"
 	"strconv"
 )
+
+// LogosImportedConstFuncSource returns the constfn record source of
+// path.object, or nil when no record exists. Package facts installs it
+// in an init function; nil means no records.
+var LogosImportedConstFuncSource func(path, object string) []byte
 
 // logosConstFnUnit is one validated constfn record with its
 // defining-package context. file is the parsed record source; base is
@@ -133,16 +137,9 @@ func (check *Checker) logosResolveImportedConstFunc(path, object string) (*logos
 		}
 		return u, u.rootObj, u.root, nil
 	}
-	f, ok := facts.Lookup(path)
-	if !ok || f == nil {
-		return nil, nil, nil, nil
-	}
 	var src []byte
-	for _, c := range f.ConstFuncs {
-		if c.Object == object {
-			src = c.Source
-			break
-		}
+	if LogosImportedConstFuncSource != nil {
+		src = LogosImportedConstFuncSource(path, object)
 	}
 	if src == nil {
 		return nil, nil, nil, nil
