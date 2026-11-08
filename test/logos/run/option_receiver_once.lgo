@@ -1,0 +1,21 @@
+// run
+
+package main
+
+import "fmt"
+
+type User struct {
+	Name string
+}
+
+var calls int
+
+func receiver() *User? {
+	calls++
+	return &User{Name: "ok"}
+}
+
+func main() {
+	name := receiver()?.Name ?? "none"
+	fmt.Println(name, calls)
+}

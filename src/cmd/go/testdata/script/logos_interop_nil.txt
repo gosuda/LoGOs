@@ -12,7 +12,7 @@ cd w
 logos build ./...
 logos build -o $WORK/bin/interopnil$GOEXE ./g/cmd
 exec $WORK/bin/interopnil$GOEXE
-stdout '^F-nil H-none G-ok: gadget defer-ok: logos: nil from Go value stored into non-nil \*a\.User at q\.go:[0-9]+ method-ok: logos: nil from Go value stored into non-nil \*a\.User at q\.go:[0-9]+ func-value-ok$'
+stdout '^F-nil H-none I-seven G-ok: gadget defer-ok: logos: nil from Go value stored into non-nil \*a\.User at q\.go:[0-9]+ method-ok: logos: nil from Go value stored into non-nil \*a\.User at q\.go:[0-9]+ func-value-ok$'
 stdout '^direct-ok: logos: nil from Go value stored into non-nil \*a\.User at q\.go:[0-9]+$'
 cd ..
 
@@ -84,6 +84,10 @@ func H() []int? {
 	return nil
 }
 
+func I() int? {
+	return 7
+}
+
 -- w/g/go.mod --
 module example.com/g
 
@@ -103,6 +107,7 @@ import (
 var _ func() *a.User = a.F
 var _ func(*a.User) string = a.G
 var _ func() rt.Option[[]int] = a.H
+var _ func() rt.Option[int] = a.I
 var _ *a.T = a.Box{}.P
 
 func Run() string {
@@ -111,10 +116,14 @@ func Run() string {
 	}
 	h := a.H()
 	if h.Present {
-		return "H-present"
+		return "F-nil H-present"
+	}
+	i := a.I()
+	if !i.Present || i.Value != 7 {
+		return "F-nil H-none I-bad"
 	}
 	got := a.G(&a.User{Name: "gadget"})
-	out := "F-nil H-none G-ok: " + got
+	out := "F-nil H-none I-seven G-ok: " + got
 
 	func() {
 		defer func() {
