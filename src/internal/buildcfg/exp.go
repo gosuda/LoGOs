@@ -88,6 +88,7 @@ func ParseGOEXPERIMENT(goos, goarch, goexp string) (*ExperimentFlags, error) {
 		SizeSpecializedMalloc: true,
 		LogosFastCgo:          false,
 		LogosArena:            false, // M18-S1: stays off until run.bash passes with it on (G3).
+		LogosEscape:           false,
 	}
 	flags := &ExperimentFlags{
 		Flags:    baseline,

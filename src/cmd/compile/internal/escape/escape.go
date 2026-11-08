@@ -302,7 +302,7 @@ func (b *batch) finish(fns []*ir.Func) {
 		fn.SetEsc(escFuncTagged)
 
 		for i, param := range fn.Type().RecvParams() {
-			param.Note = b.paramTag(fn, 1+i, param)
+			param.Note = b.logosParamTag(fn, 1+i, param)
 		}
 	}
 

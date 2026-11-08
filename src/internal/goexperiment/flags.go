@@ -143,4 +143,9 @@ type Flags struct {
 	// LogosArena enables the tier-0 arena: per-goroutine 64 KB side
 	// chunks that hold frame-local allocations (M18).
 	LogosArena bool
+
+	// LogosEscape records a parameter that leaks only into the pointee of
+	// another parameter, so the caller keeps that pointee on the stack when
+	// nothing else makes it escape (M18-S6).
+	LogosEscape bool
 }

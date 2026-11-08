@@ -126,7 +126,7 @@ func (e *escape) call(ks []hole, call ir.Node) {
 			}
 			for i := range fntype.Params() {
 				e.rewriteArgument(args[i], call, fns)
-				argument(e.mergedTagHole(ks, fns, i, len(fntype.Params())), args[i])
+				argument(e.logosTagHole(ks, fns, len(fntype.Params()), args, i), args[i])
 			}
 		}
 		// Caller-region result modeling: records the static call result as a
