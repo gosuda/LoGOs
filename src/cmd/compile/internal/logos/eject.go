@@ -414,7 +414,7 @@ func classifyUnions(info *types2.Info, files []*syntax.File) *unionClass {
 	// interface element, descending through parentheses and | chains.
 	var walkEmbeddedNames func(e syntax.Expr, mark func(*syntax.Name))
 	walkEmbeddedNames = func(e syntax.Expr, mark func(*syntax.Name)) {
-		e = unwrapParens(e)
+		e = unwrapParen(e)
 		switch e := e.(type) {
 		case *syntax.Name:
 			mark(e)
@@ -536,7 +536,7 @@ func resolveUnionRef(obj types2.Object) *types2.TypeName {
 // any. SelectorExpr carries the qualifier separately; only Sel denotes
 // the target.
 func bareRefName(e syntax.Expr) *syntax.Name {
-	switch e := unwrapParens(e).(type) {
+	switch e := unwrapParen(e).(type) {
 	case *syntax.Name:
 		return e
 	case *syntax.SelectorExpr:
@@ -553,17 +553,6 @@ func unionNameRef(info *types2.Info, e syntax.Expr) *types2.TypeName {
 		return resolveUnionRef(info.Uses[name])
 	}
 	return nil
-}
-
-// unwrapParens strips parenthesized wrappers the checker folds away.
-func unwrapParens(e syntax.Expr) syntax.Expr {
-	for {
-		p, ok := e.(*syntax.ParenExpr)
-		if !ok || p == nil {
-			return e
-		}
-		e = p.X
-	}
 }
 
 // NativeUnionEdits records the union eject edits for an ordinary build.
@@ -639,7 +628,7 @@ func unionSplices(ud *unionDecl, data []byte) ([]splice, bool) {
 		if f == nil || f.Type == nil {
 			continue
 		}
-		op, ok := unwrapParens(f.Type).(*syntax.Operation)
+		op, ok := unwrapParen(f.Type).(*syntax.Operation)
 		if !ok || op.Op != syntax.Or {
 			continue
 		}

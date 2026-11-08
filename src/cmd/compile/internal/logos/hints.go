@@ -122,32 +122,14 @@ type Alloc struct {
 	Reason  string
 }
 
-// tierRank orders the tiers by allocation tier: rodata is 0, arena is 1,
-// stack is 2, heap is 3. TierArena sits between rodata and stack in the
-// hierarchy; tierWorse enforces that arena beats stack when both are possible
-// and heap beats both.
-var tierRank = map[string]int{TierRodata: 0, TierArena: 1, TierStack: 2, TierHeap: 3}
+// tierMergeRank orders how tiers supersede each other: heap, arena,
+// stack, rodata.
+var tierMergeRank = map[string]int{TierRodata: 0, TierStack: 1, TierArena: 2, TierHeap: 3}
 
 // tierWorse reports whether tier a supersedes tier b when two allocation
-// decisions land at the same source position. Heap beats both arena and stack;
-// arena beats stack when both are possible; all three beat rodata.
+// decisions land at the same source position.
 func tierWorse(a, b string) bool {
-	if a == b {
-		return false
-	}
-	if a == TierHeap {
-		return true
-	}
-	if b == TierHeap {
-		return false
-	}
-	if a == TierArena && b == TierStack {
-		return true
-	}
-	if a == TierStack && b == TierArena {
-		return false
-	}
-	return tierRank[a] > tierRank[b]
+	return tierMergeRank[a] > tierMergeRank[b]
 }
 
 // Hints builds the report of one package.

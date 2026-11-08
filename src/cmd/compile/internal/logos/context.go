@@ -64,15 +64,10 @@ func ContextLines(files []*syntax.File, symbol string) ([]string, error) {
 			lines = append(lines, renderDecl(decl)...)
 		}
 	}
-	return TruncateLines(lines, ContextLineCap), nil
-}
-
-// TruncateLines caps lines at max lines.
-func TruncateLines(lines []string, max int) []string {
-	if len(lines) <= max {
-		return lines
+	if len(lines) > ContextLineCap {
+		lines = lines[:ContextLineCap]
 	}
-	return lines[:max]
+	return lines, nil
 }
 
 // RunContext implements -logos.mode=context: it parses the input files
@@ -296,14 +291,6 @@ func typeNames(t syntax.Expr, out map[string]bool) {
 	case *syntax.IndexExpr:
 		typeNames(t.X, out)
 		typeNames(t.Index, out)
-	default:
-		typeNamesUnary(t, out)
-	}
-}
-
-// typeNamesUnary gathers names in single-element type wrappers.
-func typeNamesUnary(t syntax.Expr, out map[string]bool) {
-	switch t := t.(type) {
 	case *syntax.ParenExpr:
 		typeNames(t.X, out)
 	case *syntax.ArrayType:
