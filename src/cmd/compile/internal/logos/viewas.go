@@ -136,17 +136,8 @@ func importKeywordStart(src []byte, specOff int) (int, bool) {
 		off--
 	}
 	if off >= 6 && string(src[off-6:off]) == "import" &&
-		(off == 6 || !isNameByte(src[off-7])) {
+		(off == 6 || !isIdentChar(src[off-7]) && src[off-7] != '.') {
 		return off - 6, true
 	}
 	return 0, false
-}
-
-// isNameByte reports whether c continues an import rename: a letter, a
-// digit, or one of the dot and blank renames.
-func isNameByte(c byte) bool {
-	return c == '.' || c == '_' ||
-		c >= 'a' && c <= 'z' ||
-		c >= 'A' && c <= 'Z' ||
-		c >= '0' && c <= '9'
 }
