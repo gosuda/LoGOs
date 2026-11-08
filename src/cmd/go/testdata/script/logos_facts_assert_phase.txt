@@ -1,0 +1,35 @@
+# Phase guard for the generic assertion mask (M23-S1). A const switch over a
+# type parameter records no assertion during the first check; lowering
+# rewrites `const switch P { case *P: }` into a runtime type switch, and the
+# final recheck of the rewritten body feeds the emitter, so the __.LOGOS
+# member must carry AssertTP for the type parameter. The expected line is
+# written by hand from the wire grammar in
+# cmd/compile/internal/logos/facts/facts.go: version 3 header, 16-hex
+# fingerprint, one `fn` record with the mandatory AssertTP/AssertRTP pair in
+# canonical order; masks are lowercase hex, bit i = type parameter i. F has
+# one type parameter feeding the lowered assertion (0x1) and no receiver type
+# parameters (proven zero); no other flag is analyzed on F.
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+cd af
+logos build -o $WORK/af.a .
+cd ..
+go tool pack p $WORK/af.a __.LOGOS
+stdout '^logos-facts 3$'
+stdout '^fingerprint [0-9a-f]{16}$'
+stdout '^fn F AssertTP=1,AssertRTP=0$'
+
+-- af/go.mod --
+module example.com/af
+
+go 1.27
+
+-- af/af.lgo --
+package af
+
+func F[P any](x any) {
+	const switch P {
+	case *P:
+	}
+}
