@@ -43,14 +43,11 @@ func (s *nextScan) loopAppend(list []syntax.Stmt, i int, ctx nextCtx) bool {
 		return s.taskLoop(loop, ctx, "the loop body does more than append one element, so no single chain expresses it")
 	}
 	m := loopMatch{loop: loop, iv: iv, xs: xs, ys: ys, elem: call.ArgList[1]}
-	if s.receiverUnsafe(loop, xs, ctx) {
-		m.spans, ok = s.elemSpansUnsafe(m.elem, xs, iv, ys)
-	} else {
-		m.spans, ok = s.elemSpansSafe(m.elem, xs, iv, ys)
-	}
-	if !ok {
+	c := &elemCheck{scan: s, xs: xs, iv: iv, ys: ys, unsafeCalls: s.receiverUnsafe(loop, xs, ctx)}
+	if !c.expr(m.elem) {
 		return s.taskLoop(loop, ctx, "the appended element escapes the chain form, so the loop needs a manual rewrite")
 	}
+	m.spans = c.spans
 	if len(m.spans) == 0 {
 		return false
 	}
@@ -531,28 +528,6 @@ func assignedNames(lhs syntax.Expr) []*syntax.Name {
 		return assignedNames(n.X)
 	}
 	return nil
-}
-
-// elemSpansSafe checks the appended element when the receiver is an
-// unaliased local variable. Pure calls stay convertible.
-func (s *nextScan) elemSpansSafe(elem syntax.Expr, xs, iv, ys string) ([][2]int, bool) {
-	c := &elemCheck{scan: s, xs: xs, iv: iv, ys: ys, unsafeCalls: false}
-	if !c.expr(elem) {
-		return nil, false
-	}
-	return c.spans, true
-}
-
-// elemSpansUnsafe checks the appended element when the receiver is
-// unsafe across unknown calls (package variable, address-taken, or
-// mutated by a closure). Calls to user functions stay tasks. Len and cap
-// stay pure.
-func (s *nextScan) elemSpansUnsafe(elem syntax.Expr, xs, iv, ys string) ([][2]int, bool) {
-	c := &elemCheck{scan: s, xs: xs, iv: iv, ys: ys, unsafeCalls: true}
-	if !c.expr(elem) {
-		return nil, false
-	}
-	return c.spans, true
 }
 
 // elemCheck carries one purity walk.
