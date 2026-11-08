@@ -45,9 +45,12 @@ cd ..
 # Case 5: a workspace root builds a Go module and a loGo/s module; both binaries run.
 cd ws
 logos build ./...
+go build -o $WORK/bin/gohello-plain$GOEXE ./gomod
 logos build -o $WORK/bin/gohello$GOEXE ./gomod
 logos build -o $WORK/bin/lgohello$GOEXE ./lgomod
 exec $WORK/bin/gohello$GOEXE
+stdout '^go-ok$'
+exec $WORK/bin/gohello-plain$GOEXE
 stdout '^go-ok$'
 exec $WORK/bin/lgohello$GOEXE
 stdout '^lgo-ok$'
@@ -223,6 +226,12 @@ import "fmt"
 
 func main() {
 	fmt.Println("go-ok")
+}
+
+func init() {
+	_logos_reserved := 1
+	errdefer := 2
+	_, _ = _logos_reserved, errdefer
 }
 
 -- ws/lgomod/go.mod --
