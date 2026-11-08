@@ -1,0 +1,73 @@
+# M9-S9: //logos:zeroalloc is recursive by default. A marked function in
+# package b fails when it calls an allocating function of package a, because
+# the facts of a carry no AllocFree record for it, and stays silent for an
+# alloc-free callee. //logos:zeroalloc local checks the body only.
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+! logos build -o $WORK/bin/bad$GOEXE ./bad
+stderr 'bad/b\.go:\d+:\d+: \[perf::zeroalloc_violation\] Load allocates: a\.BigAlloc has no AllocFree fact'
+! exists $WORK/bin/bad$GOEXE
+
+logos build -o $WORK/bin/sum$GOEXE ./sum
+! stderr .
+
+-- go.mod --
+module logostest
+
+go 1.27
+
+-- a/a.go --
+package a
+
+func Sum(xs []int) int {
+	n := 0
+	for _, x := range xs {
+		n += x
+	}
+	return n
+}
+
+func BigAlloc(n int) []byte {
+	buf := make([]byte, n)
+	buf[0] = 1
+	buf[1] = 2
+	buf[2] = 3
+	buf[3] = 4
+	buf[4] = 5
+	buf[5] = 6
+	buf[6] = 7
+	buf[7] = 8
+	buf[8] = 9
+	buf[9] = 10
+	buf[10] = 11
+	buf[11] = 12
+	buf[12] = 13
+	buf[13] = 14
+	buf[14] = 15
+	buf[15] = 16
+	for i := 16; i < len(buf) && i < 96; i++ {
+		buf[i] = byte(i)
+	}
+	return buf
+}
+
+-- sum/sum.go --
+package sum
+
+import "logostest/a"
+
+//logos:zeroalloc
+func Total(xs []int) int {
+	return a.Sum(xs)
+}
+
+-- bad/b.go --
+package bad
+
+import "logostest/a"
+
+//logos:zeroalloc
+func Load(n int) []byte {
+	return a.BigAlloc(n)
+}

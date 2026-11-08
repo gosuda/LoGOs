@@ -1,0 +1,262 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package lint
+
+import (
+	"slices"
+	"testing"
+
+	"internal/testenv"
+)
+
+func TestLayoutConstant(t *testing.T) {
+	testenv.MustHaveGoBuild(t)
+	const head = `package p
+
+type payload struct {
+	a int32
+	b int64
+	c string
+}
+
+type head struct {
+	first int8
+	second int8
+}
+`
+	tests := []struct {
+		name string
+		body string
+		want []string
+	}{
+		{"sizeof match", `
+//logos:sizeof int64
+const sizeInt64 = 8
+`, nil},
+		{"sizeof mismatch", `
+//logos:sizeof int64
+const wrongSize = 4
+`, []string{"15 correctness::layout_constant_mismatch forbid"}},
+		{"alignof match", `
+//logos:alignof int64
+const alignInt64 = 8
+`, nil},
+		{"offsetof match", `
+//logos:offsetof head.second
+const offSecond = 1
+`, nil},
+		{"offsetof mismatch", `
+//logos:offsetof payload.b
+const wrongOff = 4
+`, []string{"15 correctness::layout_constant_mismatch forbid"}},
+		{"sizeof struct match", `
+//logos:sizeof payload
+const sizePayload = 32
+`, nil},
+		{"unknown type", `
+//logos:sizeof nosuchtype
+const missing = 0
+`, []string{"15 correctness::layout_constant_mismatch forbid"}},
+		{"unknown field", `
+//logos:sizeof payload.nofield
+const missingField = 0
+`, []string{"15 correctness::layout_constant_mismatch forbid"}},
+		{"not a const", `
+//logos:sizeof int64
+var notConst = 8
+`, []string{"15 correctness::layout_constant_mismatch forbid"}},
+		{"misplaced directive", `
+var x = 1
+
+//logos:sizeof int64
+
+func f() {
+	_ = x
+}
+`, []string{"16 correctness::layout_constant_mismatch forbid"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name+"/lgo", func(t *testing.T) {
+			got := summarize(Run(checkSrc(t, KindLgo, "x.lgo", head+tt.body)))
+			if !slices.Equal(got, tt.want) {
+				t.Errorf("results = %q, want %q", got, tt.want)
+			}
+		})
+		t.Run(tt.name+"/go", func(t *testing.T) {
+			got := summarize(Run(checkSrc(t, KindGo, "x.go", head+tt.body)))
+			if !slices.Equal(got, tt.want) {
+				t.Errorf("results = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAtomicPlainInt64(t *testing.T) {
+	testenv.MustHaveGoBuild(t)
+	const head = `package p
+
+import "sync/atomic"
+
+var plain int64
+
+var plainU uint64
+
+var safe atomic.Int64
+
+var small int32
+`
+	tests := []struct {
+		name string
+		body string
+		want []string
+	}{
+		{"load plain", `
+func reads() int64 {
+	return atomic.LoadInt64(&plain)
+}
+`, []string{"5 portability::atomic_plain_int64 warn"}},
+		{"add plain uint64", `
+func adds() {
+	atomic.AddUint64(&plainU, 1)
+}
+`, []string{"7 portability::atomic_plain_int64 warn"}},
+		{"cas plain", `
+func swaps() {
+	atomic.CompareAndSwapInt64(&plain, 0, 1)
+}
+`, []string{"5 portability::atomic_plain_int64 warn"}},
+		{"typed wrapper", `
+func reads() int64 {
+	return safe.Load()
+}
+`, nil},
+		{"32-bit ops", `
+func reads() int32 {
+	return atomic.LoadInt32(&small)
+}
+`, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			in := checkSrc(t, KindGo, "x.go", head+tt.body)
+			in.Policy = pedanticWarn()
+			got := summarize(Run(in))
+			if !slices.Equal(got, tt.want) {
+				t.Errorf("results = %q, want %q", got, tt.want)
+			}
+		})
+	}
+	t.Run("silent without pedantic", func(t *testing.T) {
+		in := checkSrc(t, KindGo, "x.go", head+`
+func reads() int64 {
+	return atomic.LoadInt64(&plain)
+}
+`)
+		got := summarize(Run(in))
+		if len(got) != 0 {
+			t.Errorf("results = %q, want none", got)
+		}
+	})
+}
+
+func TestLinknameMismatch(t *testing.T) {
+	testenv.MustHaveGoBuild(t)
+	const head = `package p
+
+import (
+	"sync"
+	_ "unsafe"
+)
+`
+	tests := []struct {
+		name string
+		body string
+		want []string
+	}{
+		{"signature match", `
+//go:linkname goodUnlock sync.(*Mutex).Unlock
+func goodUnlock(m *sync.Mutex)
+`, nil},
+		{"signature mismatch", `
+//go:linkname badLock sync.(*Mutex).Lock
+func badLock(n int)
+
+var keep = sync.Mutex{}
+`, []string{"8 correctness::linkname_mismatch forbid"}},
+		{"method mismatch", `
+//go:linkname badWait sync.WaitGroup.Done
+func badWait(x int)
+
+var keep = sync.Mutex{}
+`, []string{"8 correctness::linkname_mismatch forbid"}},
+		{"detached directive", `
+//go:linkname detached runtime.fastrand
+
+var keep = sync.Mutex{}
+`, nil},
+		{"package not imported", `
+//go:linkname notImported os.Getppid
+func notImported()
+
+var keep = sync.Mutex{}
+`, nil},
+		{"no remote name", `
+//go:linkname localOnly
+func localOnly()
+
+var keep = sync.Mutex{}
+`, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := summarize(Run(checkSrc(t, KindGo, "x.go", head+tt.body)))
+			if !slices.Equal(got, tt.want) {
+				t.Errorf("results = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestUnsafeOutsideUnsafeFile(t *testing.T) {
+	testenv.MustHaveGoBuild(t)
+	const src = `package p
+
+import "unsafe"
+
+var slot unsafe.Pointer
+`
+	t.Run("plain file reports", func(t *testing.T) {
+		in := checkSrc(t, KindGo, "x.go", src)
+		in.Policy = pedanticWarn()
+		got := summarize(Run(in))
+		if want := []string{"3 pedantic::unsafe_outside_unsafe_file warn"}; !slices.Equal(got, want) {
+			t.Errorf("results = %q, want %q", got, want)
+		}
+	})
+	t.Run("unsafe file exempt", func(t *testing.T) {
+		in := checkSrc(t, KindGo, "x_unsafe.go", src)
+		in.Policy = pedanticWarn()
+		got := summarize(Run(in))
+		if len(got) != 0 {
+			t.Errorf("results = %q, want none", got)
+		}
+	})
+	t.Run("test file exempt", func(t *testing.T) {
+		in := checkSrc(t, KindGo, "x_test.go", src)
+		in.Policy = pedanticWarn()
+		got := summarize(Run(in))
+		if len(got) != 0 {
+			t.Errorf("results = %q, want none", got)
+		}
+	})
+	t.Run("lgo unsafe suffix exempt", func(t *testing.T) {
+		in := checkSrc(t, KindLgo, "x_unsafe.lgo", src)
+		in.Policy = pedanticWarn()
+		got := summarize(Run(in))
+		if len(got) != 0 {
+			t.Errorf("results = %q, want none", got)
+		}
+	})
+}

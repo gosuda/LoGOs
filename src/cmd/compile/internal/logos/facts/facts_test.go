@@ -609,3 +609,70 @@ func TestHighestAssertBit(t *testing.T) {
 		}
 	}
 }
+
+func TestLocksFactRoundTrip(t *testing.T) {
+	fp := goobj.FingerprintType{1, 2, 3, 4, 5, 6, 7, 8}
+	in := &facts.Facts{
+		Fingerprint: fp,
+		Locks: []facts.LockFact{
+			{Object: "(*Tank).Fill", Effect: "requires", Path: "t.mu"},
+			{Object: "(*Tank).Seal", Effect: "acquires", Path: "t.mu"},
+			{Object: "(*Tank).Open", Effect: "releases", Path: "t.mu"},
+		},
+	}
+	want := "logos-facts 3\n" +
+		"fingerprint 0102030405060708\n" +
+		"locks (*Tank).Fill requires t.mu\n" +
+		"locks (*Tank).Open releases t.mu\n" +
+		"locks (*Tank).Seal acquires t.mu\n"
+	got := facts.Encode(fp, in)
+	if string(got) != want {
+		t.Fatalf("Encode mismatch:\n got %q\nwant %q", got, want)
+	}
+	back, err := facts.Decode(got)
+	if err != nil {
+		t.Fatalf("Decode(Encode) failed: %v", err)
+	}
+	if !reflect.DeepEqual(back.Locks, in.Locks) {
+		t.Errorf("round trip = %+v, want %+v", back.Locks, in.Locks)
+	}
+	for _, bad := range []string{
+		"locks F wrong mu\n",
+		"locks F requires\n",
+		"locks F requires t..mu\n",
+		"locks no!such requires mu\n",
+		"locks (*Tank).Fill requires t.mu\nallocfree Sum\n",
+	} {
+		full := "logos-facts 3\nfingerprint 0102030405060708\n" + bad
+		if _, err := facts.Decode([]byte(full)); err == nil {
+			t.Errorf("Decode accepted %q", bad)
+		}
+	}
+}
+
+func TestAllocFreeFactRoundTrip(t *testing.T) {
+	fp := goobj.FingerprintType{9, 8, 7, 6, 5, 4, 3, 2}
+	in := &facts.Facts{
+		Fingerprint: fp,
+		AllocFrees:  []facts.AllocFreeFact{{Object: "Sum"}, {Object: "(*Tank).Load"}},
+	}
+	want := "logos-facts 3\n" +
+		"fingerprint 0908070605040302\n" +
+		"allocfree (*Tank).Load\n" +
+		"allocfree Sum\n"
+	got := facts.Encode(fp, in)
+	if string(got) != want {
+		t.Fatalf("Encode mismatch:\n got %q\nwant %q", got, want)
+	}
+	back, err := facts.Decode(got)
+	if err != nil {
+		t.Fatalf("Decode(Encode) failed: %v", err)
+	}
+	if !reflect.DeepEqual(back.AllocFrees, in.AllocFrees) {
+		t.Errorf("round trip = %+v, want %+v", back.AllocFrees, in.AllocFrees)
+	}
+	full := "logos-facts 3\nfingerprint 0908070605040302\nallocfree no!such\n"
+	if _, err := facts.Decode([]byte(full)); err == nil {
+		t.Error("Decode accepted a bad allocfree object")
+	}
+}

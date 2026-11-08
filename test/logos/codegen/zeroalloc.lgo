@@ -171,3 +171,54 @@ func useGeneric() *int {
 func unmarked(v int) []int {
 	return []int{v}
 }
+
+// The recursive default (M9-S9): a marked function that calls a same-package
+// function that allocates fails, naming the callee chain, whether or not the
+// callee inlines. bigAlloc stays above the inlining budget.
+func bigAlloc(n int) []byte {
+	buf := make([]byte, n)
+	buf[0] = 1
+	buf[1] = 2
+	buf[2] = 3
+	buf[3] = 4
+	buf[4] = 5
+	buf[5] = 6
+	buf[6] = 7
+	buf[7] = 8
+	buf[8] = 9
+	buf[9] = 10
+	buf[10] = 11
+	buf[11] = 12
+	buf[12] = 13
+	buf[13] = 14
+	buf[14] = 15
+	buf[15] = 16
+	for i := 16; i < len(buf) && i < 96; i++ {
+		buf[i] = byte(i)
+	}
+	return buf
+}
+
+//logos:zeroalloc
+func viaBig(n int) []byte { // ERROR "\[perf::zeroalloc_violation\] viaBig allocates: bigAlloc allocates"
+	return bigAlloc(n)
+}
+
+// An interface call may dispatch to an allocating method, so a recursive
+// mark fails on it.
+type flusher interface {
+	Flush()
+}
+
+//logos:zeroalloc
+func viaIface(f flusher) { // ERROR "\[perf::zeroalloc_violation\] viaIface allocates: interface call may allocate"
+	f.Flush()
+}
+
+// A call through a function value is dynamic, so a recursive mark fails on
+// it.
+//logos:zeroalloc
+func viaValue() int { // ERROR "\[perf::zeroalloc_violation\] viaValue allocates: dynamic call may allocate"
+	return sinkFn()
+}
+
