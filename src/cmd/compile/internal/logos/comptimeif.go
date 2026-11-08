@@ -114,6 +114,9 @@ func cfBoolOp(x constant.Value, op token.Token, y constant.Value) (constant.Valu
 // cfPredicateValue evaluates comptime.IsStruct[X](): true when the type
 // X resolves to, under its underlying type, a struct.
 func (fl *fileLower) cfPredicateValue(call *syntax.CallExpr, active cfChain, sites *cfSites) (constant.Value, bool) {
+	if v, ok := fl.logosLayoutCallValue(call, active, sites); ok {
+		return v, true
+	}
 	targ, ok := cfPredicateTarget(call, sites)
 	if !ok {
 		return nil, false

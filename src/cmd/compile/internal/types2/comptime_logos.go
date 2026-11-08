@@ -22,8 +22,10 @@ import (
 //	type Field struct{ Name string; Index int; Type Type; Tag StructTag; Exported bool }
 //	func Fields[T any]() []Field
 //	func IsStruct[T any]() bool
+//	func SizeOf[T any]() int
+//	func AlignOf[T any]() int
+//	func HasPointers[T any]() bool
 //	func TypeOf[X any]() Type
-//	func Error(msg string)
 // ViewAs, declared by M7-S5 (viewas_logos.go), is part of the package
 // whichever provider creates it.
 
@@ -72,6 +74,9 @@ func logosComptimePackage() *Package {
 		fieldSlice := NewSlice(fieldNamed)
 		addGeneric("Fields", "T", NewTuple(), NewTuple(NewVar(nopos, pkg, "", fieldSlice)))
 		addGeneric("IsStruct", "T", NewTuple(), NewTuple(NewVar(nopos, pkg, "", Typ[Bool])))
+		addGeneric("SizeOf", "T", NewTuple(), NewTuple(NewVar(nopos, pkg, "", Typ[Int])))
+		addGeneric("AlignOf", "T", NewTuple(), NewTuple(NewVar(nopos, pkg, "", Typ[Int])))
+		addGeneric("HasPointers", "T", NewTuple(), NewTuple(NewVar(nopos, pkg, "", Typ[Bool])))
 		addGeneric("TypeOf", "X", NewTuple(), NewTuple(NewVar(nopos, pkg, "", typeNamed)))
 		pkg.Scope().Insert(NewFunc(nopos, pkg, "Error", NewSignatureType(
 			nil, nil, nil,
@@ -91,7 +96,7 @@ func logosComptimePackage() *Package {
 // sibling hook created the shell first. It reports whether all of them
 // are present afterwards.
 func logosComptimeEnsure(imp *Package) {
-	for _, name := range []string{"StructTag", "Type", "Field", "Fields", "IsStruct", "TypeOf", "Error"} {
+	for _, name := range []string{"StructTag", "Type", "Field", "Fields", "IsStruct", "SizeOf", "AlignOf", "HasPointers", "TypeOf", "Error"} {
 		if imp.Scope().Lookup(name) == nil {
 			full := logosComptimePackage()
 			if obj := full.Scope().Lookup(name); obj != nil {

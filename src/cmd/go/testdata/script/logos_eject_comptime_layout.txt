@@ -1,0 +1,28 @@
+# M18-S5: comptime layout intrinsics eject to plain constants. The run
+# fixture is the single source: its .out file is the expected output of
+# the native build and of the ejected tree, which builds with plain go
+# and stays gofmt-clean.
+
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+cp $GOROOT/test/logos/run/comptime_layout.lgo a/main.lgo
+
+cd a
+logos run .
+cmp stdout $GOROOT/test/logos/run/comptime_layout.out
+logos eject -o out
+exists out/main.go
+! exists out/main.lgo
+! grep '"comptime"' out/main.go
+cd out
+go run .
+cmp stdout $GOROOT/test/logos/run/comptime_layout.out
+exec $GOROOT/bin/gofmt -l .
+! stdout .
+cd ../..
+
+-- a/go.mod --
+module example.com/comptimelayout
+
+go 1.27
