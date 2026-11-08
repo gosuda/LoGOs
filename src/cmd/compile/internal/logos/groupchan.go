@@ -93,15 +93,6 @@ func groupHasRecv(s *syntax.AssignStmt) bool {
 	return false
 }
 
-// groupCallValues counts the values of a right-hand element: a tuple
-// supplies its length, anything else one.
-func groupCallValues(t types2.Type) int {
-	if tup, ok := t.(*types2.Tuple); ok {
-		return tup.Len()
-	}
-	return 1
-}
-
 // groupSpellType respells the runtime type t for eject text, qualifying
 // outside packages the way the file denotes them.
 func (fc *funcLower) groupSpellType(t types2.Type, pos syntax.Pos) syntax.Expr {
@@ -144,8 +135,10 @@ func (fc *funcLower) groupRecvLayout(lhsN int, rhs []syntax.Expr) ([]groupRecvEl
 				elems[i].vals = 2
 			}
 			recvCount++
+		} else if tup, ok := fc.fl.pkg.info.TypeOf(r).(*types2.Tuple); ok {
+			elems[i].vals = tup.Len()
 		} else {
-			elems[i].vals = groupCallValues(fc.fl.pkg.info.TypeOf(r))
+			elems[i].vals = 1
 		}
 		total += elems[i].vals
 	}
@@ -159,15 +152,6 @@ func (fc *funcLower) groupTempName(prefix string) string {
 	return nm
 }
 
-// groupNames builds name expressions for the given spellings.
-func groupNames(pos syntax.Pos, spellings []string) []syntax.Expr {
-	out := make([]syntax.Expr, len(spellings))
-	for i, sp := range spellings {
-		out[i] = nameOf(pos, sp)
-	}
-	return out
-}
-
 // groupPlainTemps binds a non-receiving right-hand element to vals
 // temporaries, keeping its source text, so evaluation order is kept.
 func (fc *funcLower) groupPlainTemps(pos syntax.Pos, r syntax.Expr, vals int) (syntax.Stmt, otext, []string) {
@@ -178,7 +162,7 @@ func (fc *funcLower) groupPlainTemps(pos syntax.Pos, r syntax.Expr, vals int) (s
 	for i := range names {
 		names[i] = fc.groupTempName("t")
 	}
-	return defineOf(pos, groupNames(pos, names), []syntax.Expr{r}), cat(gen(strings.Join(names, ", ")+" := "), elemText), names
+	return defineOf(pos, tempNodes(pos, names), []syntax.Expr{r}), cat(gen(strings.Join(names, ", ")+" := "), elemText), names
 }
 
 // groupRecvSelect declares the temporaries of a receiving element and
@@ -202,7 +186,7 @@ func (fc *funcLower) groupRecvSelect(pos syntax.Pos, top groupFrame, e *groupRec
 		text = append(text, gen("var "+e.otmp+" bool"))
 		caseLHS += ", " + e.otmp
 	}
-	recvN := assignOf(pos, groupNames(pos, names), []syntax.Expr{at(&syntax.Operation{Op: syntax.Recv, X: ch}, pos)})
+	recvN := assignOf(pos, tempNodes(pos, names), []syntax.Expr{at(&syntax.Operation{Op: syntax.Recv, X: ch}, pos)})
 	native = append(native, at(&syntax.SelectStmt{
 		Body: []*syntax.CommClause{at(&syntax.CommClause{Comm: recvN}, pos), groupDoneClause(pos, top.gctx)},
 	}, pos))
@@ -257,17 +241,10 @@ func (fc *funcLower) lowerGroupRecv(s *syntax.AssignStmt, top groupFrame) []synt
 	}
 	pos := s.Pos()
 	native, text, temps := fc.groupRecvTemps(pos, top, rhs, elems)
-	finalN, sep := groupAssignFinal(s, lhs, groupNames(pos, temps))
+	finalN, sep := groupAssignFinal(s, lhs, tempNodes(pos, temps))
 	start := fl.off(leftmostOf(lhs[0]))
 	text = append(text, cat(fl.textOf(span{start: start, end: fl.off(pos)}), gen(sep+strings.Join(temps, ", "))))
-	parts := make([]otext, 0, 2*len(text))
-	for i, line := range text {
-		if i > 0 {
-			parts = append(parts, gen("\n"))
-		}
-		parts = append(parts, line)
-	}
-	fl.addT(start, stmtEnd(fl.src, start), cat(parts...))
+	fl.addT(start, stmtEnd(fl.src, start), joinO(text, "\n"))
 	return append(native, finalN)
 }
 
@@ -307,12 +284,6 @@ func groupAssignOffset(src []byte, start int) int {
 	return off
 }
 
-// groupVarDeclOf rebuilds a variable declaration over new values.
-func groupVarDeclOf(pos syntax.Pos, d *syntax.VarDecl, values []syntax.Expr) syntax.Stmt {
-	nd := at(&syntax.VarDecl{NameList: d.NameList, Type: d.Type, Values: listOf(pos, values)}, pos)
-	return at(&syntax.DeclStmt{DeclList: []syntax.Decl{nd}}, pos)
-}
-
 // lowerGroupVarRecv rewrites a declaration that receives directly the
 // way lowerGroupRecv rewrites an assignment: temporaries first, then the
 // original declaration over the temporaries.
@@ -329,15 +300,9 @@ func (fc *funcLower) lowerGroupVarRecv(s *syntax.DeclStmt, d *syntax.VarDecl, to
 	start := fl.off(pos)
 	head := fl.textOf(span{start: start, end: groupAssignOffset(fl.src, start)}).trimRight(" \t\n")
 	text = append(text, cat(head, gen(" = "+strings.Join(temps, ", "))))
-	parts := make([]otext, 0, 2*len(text))
-	for i, line := range text {
-		if i > 0 {
-			parts = append(parts, gen("\n"))
-		}
-		parts = append(parts, line)
-	}
-	fl.addT(start, stmtEnd(fl.src, start), cat(parts...))
-	return append(native, groupVarDeclOf(pos, d, groupNames(pos, temps)))
+	fl.addT(start, stmtEnd(fl.src, start), joinO(text, "\n"))
+	nd := at(&syntax.VarDecl{NameList: d.NameList, Type: d.Type, Values: listOf(pos, tempNodes(pos, temps))}, pos)
+	return append(native, at(&syntax.DeclStmt{DeclList: []syntax.Decl{nd}}, pos))
 }
 
 // groupChanStmt rewrites the statements that communicate directly in a

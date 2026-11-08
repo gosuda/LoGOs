@@ -132,7 +132,7 @@ func (fl *fileLower) lowerTuplePackValues(decl *syntax.VarDecl, call *syntax.Cal
 	}
 	callSpan := fl.tupleCallSpan(call)
 	callText := fl.textOf(callSpan)
-	comp, compText := fl.tupleComposite(pos, names, types, tempNamesAsExpr(pos, tempNames), genList(tempNames))
+	comp, compText := fl.tupleComposite(pos, names, types, tempNodes(pos, tempNames), genList(tempNames))
 	parts := []otext{gen("var " + strings.Join(tempNames, ", ") + " = "), callText, gen("\nvar " + decl.NameList[0].Value)}
 	if decl.Type != nil {
 		parts = append(parts, gen(" "), fl.textOf(span{fl.off(syntax.StartPos(decl.Type)), fl.off(syntax.EndPos(decl.Type))}))
@@ -672,7 +672,7 @@ func (fl *fileLower) lowerTuplePackStmt(s *syntax.AssignStmt, lhs []syntax.Expr,
 	}
 	callSpan := fl.tupleCallSpan(call)
 	callText := fl.textOf(callSpan)
-	comp, compText := fl.tupleComposite(pos, names, types, tempNamesAsExpr(pos, tempNames), genList(tempNames))
+	comp, compText := fl.tupleComposite(pos, names, types, tempNodes(pos, tempNames), genList(tempNames))
 	parts := []otext{
 		gen(strings.Join(tempNames, ", ") + " := "),
 		callText,
@@ -690,15 +690,6 @@ func (fl *fileLower) lowerTuplePackStmt(s *syntax.AssignStmt, lhs []syntax.Expr,
 	hoist := defineOf(pos, temps, []syntax.Expr{call})
 	s.Rhs = comp
 	return []syntax.Stmt{hoist, s}
-}
-
-// tempNamesAsExpr builds name expressions for temps.
-func tempNamesAsExpr(pos syntax.Pos, temps []string) []syntax.Expr {
-	out := make([]syntax.Expr, len(temps))
-	for i, tn := range temps {
-		out[i] = nameOf(pos, tn)
-	}
-	return out
 }
 
 // packTargetTypes reports the lowered names and element types for a
