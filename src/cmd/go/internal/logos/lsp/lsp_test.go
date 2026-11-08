@@ -1541,3 +1541,88 @@ func TestProxyCodeActionInflightEditDropsWholeAnswer(t *testing.T) {
 		t.Errorf("fresh codeAction lost the current autofix: %s", fresh)
 	}
 }
+
+func TestProxyOneRunForTwoEditsBeforeHover(t *testing.T) {
+	edited1 := aLgo + "// v2\n"
+	edited2 := aLgo + "// v2\n// v3\n"
+	low2, _, ok := lowerQuestion([]byte(edited2))
+	if !ok {
+		t.Fatal("edited2 does not lower")
+	}
+	f := newFixture(t, map[string]string{"a/a.lgo": aLgo}, fixtureOptions{})
+	f.open("a/a.lgo", 1)
+	aURI, aPath := f.uri("a/a.lgo"), f.path("a/a.lgo")
+	for i, text := range []string{edited1, edited2} {
+		f.client.notify("textDocument/didChange", map[string]any{
+			"textDocument":   map[string]any{"uri": aURI, "version": i + 2},
+			"contentChanges": []any{map[string]any{"text": text}},
+		})
+	}
+	origOperand := shift(findPos(t, edited2, "ReadFile(path)?", 0), len("ReadFile("))
+	lowOperand := shift(findPos(t, string(low2), "ReadFile(path)", 0), len("ReadFile("))
+	f.client.call("textDocument/hover", positionParams(aURI, origOperand))
+
+	calls := f.comp.lowerCalls()
+	if len(calls) != 1 {
+		t.Fatalf("the proxy compiled %d times for one open, two edits, and one hover, want the one run the hover asked for: %v", len(calls), calls)
+	}
+	buffers := f.comp.bufferCalls()
+	if last := buffers[len(buffers)-1]; string(last[aPath]) != edited2 {
+		t.Errorf("the one run lowered %q, want the text of version 3", last[aPath])
+	}
+	if _, pos := forwardedPosition(t, f, "textDocument/hover", 0); pos != lowOperand {
+		t.Errorf("the hover was mapped at %v, want %v through the version 3 lowering", pos, lowOperand)
+	}
+}
+
+func TestProxyConcurrentHoversShareOneRun(t *testing.T) {
+	f := newFixture(t, map[string]string{"a/a.lgo": aLgo}, fixtureOptions{
+		Script: func(string) fakeScript {
+			return fakeScript{DelayMillis: 50}
+		},
+	})
+	f.open("a/a.lgo", 1)
+	aURI := f.uri("a/a.lgo")
+	p := Position{Line: 5, Character: 3}
+	ids := []json.RawMessage{f.client.request("textDocument/hover", positionParams(aURI, p)), f.client.request("textDocument/hover", positionParams(aURI, p))}
+	for _, id := range ids {
+		f.client.await("textDocument/hover", id)
+	}
+	if got := len(f.comp.lowerCalls()); got != 1 {
+		t.Errorf("two concurrent hovers caused %d lowerings, want the shared one", got)
+	}
+}
+
+func TestProxyHoverAfterCloseSeesDiskText(t *testing.T) {
+	unsaved := "// unsaved\n" + aLgo
+	lowDisk, _, ok := lowerQuestion([]byte(aLgo))
+	if !ok {
+		t.Fatal("aLgo does not lower")
+	}
+	f := newFixture(t, map[string]string{"a/a.lgo": aLgo}, fixtureOptions{})
+	aPath, aURI := f.path("a/a.lgo"), f.uri("a/a.lgo")
+	f.openText("a/a.lgo", 1, unsaved)
+	f.client.notify("textDocument/didClose", map[string]any{"textDocument": map[string]any{"uri": aURI}})
+
+	origOperand := shift(findPos(t, aLgo, "ReadFile(path)?", 0), len("ReadFile("))
+	lowOperand := shift(findPos(t, string(lowDisk), "ReadFile(path)", 0), len("ReadFile("))
+	res := f.client.call("textDocument/hover", positionParams(aURI, origOperand))
+	if string(res) == "null" {
+		t.Fatal("hover on a closed document answered null, want a lowering of the disk text")
+	}
+	for _, b := range f.comp.bufferCalls() {
+		if string(b[aPath]) == unsaved {
+			t.Errorf("a lowering used the discarded unsaved text")
+		}
+	}
+	opened := f.receivedMethod("textDocument/didOpen")
+	if len(opened) != 1 {
+		t.Fatalf("gopls got %d lowered didOpen messages, want the one of the disk text", len(opened))
+	}
+	if item, _ := opened[0]["textDocument"].(map[string]any); item["text"] != string(lowDisk) {
+		t.Errorf("gopls holds the lowering of %q, want the disk text", item["text"])
+	}
+	if _, pos := forwardedPosition(t, f, "textDocument/hover", 0); pos != lowOperand {
+		t.Errorf("the hover was mapped at %v, want %v through the disk lowering", pos, lowOperand)
+	}
+}
