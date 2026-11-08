@@ -7,6 +7,7 @@ package logos
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"strings"
 
 	"cmd/compile/internal/syntax"
 	"cmd/compile/internal/types2"
@@ -244,54 +245,29 @@ func (s *nextScan) children(stmt syntax.Stmt, ctx nextCtx) {
 	case *syntax.BlockStmt:
 		s.block(n.List, ctx)
 	case *syntax.IfStmt:
-		s.nextChildrenIf(n, ctx)
+		if n.Then != nil {
+			s.block(n.Then.List, ctx)
+		}
+		switch e := n.Else.(type) {
+		case *syntax.BlockStmt:
+			s.block(e.List, ctx)
+		case *syntax.IfStmt:
+			s.children(e, ctx)
+		}
 	case *syntax.ForStmt:
-		s.nextChildrenFor(n, ctx)
+		if n.Body != nil {
+			s.block(n.Body.List, ctx)
+		}
 	case *syntax.SwitchStmt:
-		s.nextChildrenSwitch(n, ctx)
+		for _, c := range n.Body {
+			s.block(c.Body, ctx)
+		}
 	case *syntax.SelectStmt:
-		s.nextChildrenSelect(n, ctx)
+		for _, c := range n.Body {
+			s.block(c.Body, ctx)
+		}
 	case *syntax.LabeledStmt:
 		s.children(n.Stmt, ctx)
-	}
-}
-
-// nextChildrenIf scans the branches of one if statement.
-func (s *nextScan) nextChildrenIf(n *syntax.IfStmt, ctx nextCtx) {
-	if n.Then != nil {
-		s.block(n.Then.List, ctx)
-	}
-	s.nextChildrenElse(n.Else, ctx)
-}
-
-// nextChildrenElse scans the else branch of one if statement.
-func (s *nextScan) nextChildrenElse(e syntax.Stmt, ctx nextCtx) {
-	switch n := e.(type) {
-	case *syntax.BlockStmt:
-		s.block(n.List, ctx)
-	case *syntax.IfStmt:
-		s.children(n, ctx)
-	}
-}
-
-// nextChildrenFor scans the body of one for statement.
-func (s *nextScan) nextChildrenFor(n *syntax.ForStmt, ctx nextCtx) {
-	if n.Body != nil {
-		s.block(n.Body.List, ctx)
-	}
-}
-
-// nextChildrenSwitch scans the clauses of one switch statement.
-func (s *nextScan) nextChildrenSwitch(n *syntax.SwitchStmt, ctx nextCtx) {
-	for _, c := range n.Body {
-		s.block(c.Body, ctx)
-	}
-}
-
-// nextChildrenSelect scans the clauses of one select statement.
-func (s *nextScan) nextChildrenSelect(n *syntax.SelectStmt, ctx nextCtx) {
-	for _, c := range n.Body {
-		s.block(c.Body, ctx)
 	}
 }
 
@@ -445,7 +421,7 @@ func (s *nextScan) nextErrAssignBuild(m nextErrMatch, callSrc string) string {
 	for _, n := range m.lhs[:len(m.lhs)-1] {
 		names = append(names, n.Value)
 	}
-	joined := joinNames(names)
+	joined := strings.Join(names, ", ")
 	if m.op == syntax.Def && s.hasNew(m.lhs[:len(m.lhs)-1]) {
 		return joined + " := " + callSrc + "?"
 	}
@@ -641,11 +617,7 @@ func (s *nextScan) isZeroExpr(e syntax.Expr) bool {
 	case *syntax.Name:
 		switch n.Value {
 		case "false":
-			want := types2.Universe.Lookup("false")
-			if _, ok := want.(*types2.Const); !ok {
-				return false
-			}
-			return s.nameObj(n) == want
+			return s.nameObj(n) == types2.Universe.Lookup("false")
 		case "nil":
 			return s.nameObj(n) == types2.Universe.Lookup("nil")
 		}
@@ -701,38 +673,25 @@ func (s *nextScan) task(n syntax.Node, ctx nextCtx, rule, instruction string) {
 	})
 }
 
-// nextFuncSigSpan resolves the byte range of one declaration header.
-func (s *nextScan) nextFuncSigSpan(fn *syntax.FuncDecl) (int, int, bool) {
-	if fn == nil || fn.Body == nil {
-		return 0, 0, false
-	}
-	start, ok := s.funcStart(fn)
-	if !ok {
-		return 0, 0, false
-	}
-	end, err := offsetOf(s.starts, len(s.src), fn.Body.Pos())
-	if err != nil || end <= start {
-		return 0, 0, false
-	}
-	return start, end, true
-}
-
-// nextFuncSigClip drops one trailing delimiter of a declaration header.
-func nextFuncSigClip(sig string) string {
-	if len(sig) > 0 && (sig[len(sig)-1] == '{' || sig[len(sig)-1] == ' ' || sig[len(sig)-1] == '\n' || sig[len(sig)-1] == '\t') {
-		sig = sig[:len(sig)-1]
-	}
-	return trimSpace(sig)
-}
-
 // funcSig returns the declaration header of a function, starting at
 // its func keyword.
 func (s *nextScan) funcSig(fn *syntax.FuncDecl) string {
-	start, end, ok := s.nextFuncSigSpan(fn)
+	if fn == nil || fn.Body == nil {
+		return ""
+	}
+	start, ok := s.funcStart(fn)
 	if !ok {
 		return ""
 	}
-	return nextFuncSigClip(string(s.src[start:end]))
+	end, err := offsetOf(s.starts, len(s.src), fn.Body.Pos())
+	if err != nil || end <= start {
+		return ""
+	}
+	sig := string(s.src[start:end])
+	if len(sig) > 0 && (sig[len(sig)-1] == '{' || sig[len(sig)-1] == ' ' || sig[len(sig)-1] == '\n' || sig[len(sig)-1] == '\t') {
+		sig = sig[:len(sig)-1]
+	}
+	return strings.Trim(sig, " \t\n\r")
 }
 
 // funcStart finds the func keyword opening a declaration. Function
@@ -904,45 +863,4 @@ func unwrapParen(e syntax.Expr) syntax.Expr {
 		}
 		e = p.X
 	}
-}
-
-// joinNames joins assigned names with commas.
-func joinNames(names []string) string {
-	out := ""
-	for i, n := range names {
-		if i > 0 {
-			out += ", "
-		}
-		out += n
-	}
-	return out
-}
-
-// nextTrimRight trims trailing whitespace of a signature.
-func nextTrimRight(s string) string {
-	for len(s) > 0 {
-		c := s[len(s)-1]
-		if c != ' ' && c != '\t' && c != '\n' && c != '\r' {
-			break
-		}
-		s = s[:len(s)-1]
-	}
-	return s
-}
-
-// nextTrimLeft trims leading whitespace of a signature.
-func nextTrimLeft(s string) string {
-	for len(s) > 0 {
-		c := s[0]
-		if c != ' ' && c != '\t' && c != '\n' && c != '\r' {
-			break
-		}
-		s = s[1:]
-	}
-	return s
-}
-
-// trimSpace trims trailing whitespace of a signature.
-func trimSpace(s string) string {
-	return nextTrimLeft(nextTrimRight(s))
 }
