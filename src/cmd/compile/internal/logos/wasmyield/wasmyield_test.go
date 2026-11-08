@@ -7,8 +7,8 @@ package wasmyield
 import (
 	"testing"
 
-	"cmd/compile/internal/ir"
 	"cmd/compile/internal/base"
+	"cmd/compile/internal/ir"
 	"cmd/compile/internal/logos/facts"
 	"cmd/internal/goobj"
 	"cmd/internal/obj"

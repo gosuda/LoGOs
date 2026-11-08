@@ -61,7 +61,6 @@ func (check *Checker) logosGeneratorArgs(sig *Signature) (targs []Type, ok bool)
 	return nil, false
 }
 
-
 func (check *Checker) logosGeneratorReturn(s *syntax.ReturnStmt) bool {
 	if !check.conf.Logos || !check.logosGeneratorSig(check.sig) {
 		return false
@@ -71,6 +70,7 @@ func (check *Checker) logosGeneratorReturn(s *syntax.ReturnStmt) bool {
 	}
 	return true
 }
+
 // logosYield checks a yield statement: generator position and value
 // types. A use outside a generator reports yield_outside_generator once
 // and still marks the value uses, so no follow-on errors surface.

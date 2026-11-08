@@ -25,15 +25,15 @@ import (
 
 // logosStdMutatedParams maps "importpath.Func" to its ParamMutated mask.
 var logosStdMutatedParams = map[string]uint64{
-	"fmt.Print":          0,
-	"fmt.Printf":         0,
-	"fmt.Println":        0,
-	"fmt.Sprint":         0,
-	"fmt.Sprintf":        0,
-	"fmt.Sprintln":       0,
-	"fmt.Append":         0,
-	"fmt.Appendf":        0,
-	"fmt.Appendln":       0,
+	"fmt.Print":       0,
+	"fmt.Printf":      0,
+	"fmt.Println":     0,
+	"fmt.Sprint":      0,
+	"fmt.Sprintf":     0,
+	"fmt.Sprintln":    0,
+	"fmt.Append":      0,
+	"fmt.Appendf":     0,
+	"fmt.Appendln":    0,
 	"maps.All":        0, // m: read
 	"maps.Clone":      0, // m: read
 	"maps.Collect":    0, // no map parameter

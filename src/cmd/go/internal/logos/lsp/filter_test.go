@@ -120,6 +120,7 @@ func TestFiltersKeepGoDocumentsWhole(t *testing.T) {
 		t.Errorf("a Go document's completion was filtered: %v", got)
 	}
 }
+
 // TestInsideGeneratedBoundaryRuns checks the predicate behind the answer
 // filters at every boundary kind through the general mapping: a
 // generated prefix at offset zero, a pure mid-text insertion, an
@@ -130,7 +131,7 @@ func TestFiltersKeepGoDocumentsWhole(t *testing.T) {
 func TestInsideGeneratedBoundaryRuns(t *testing.T) {
 	prefix := mustPosMap(t, "ab\n", "PRE\nab\n", editmap.EditMap{
 		Version: editmap.Version, Source: "p.lgo", Size: 3, Out: 7,
-		Edits: []editmap.EditSpan{{Start: 0, End: 0, Len: 4}},
+		Edits:    []editmap.EditSpan{{Start: 0, End: 0, Len: 4}},
 		Segments: spanSegs(3, []editmap.EditSpan{{Start: 0, End: 0, Len: 4}}),
 	})
 	for off, want := range map[int]bool{0: false, 1: true, 3: true, 4: false, 6: false, 7: false} {
@@ -152,7 +153,7 @@ func TestInsideGeneratedBoundaryRuns(t *testing.T) {
 
 	trailer := mustPosMap(t, "ab\n", "ab\nTRAILER\n", editmap.EditMap{
 		Version: editmap.Version, Source: "t.lgo", Size: 3, Out: 11,
-		Edits: []editmap.EditSpan{{Start: 3, End: 3, Len: 8}},
+		Edits:    []editmap.EditSpan{{Start: 3, End: 3, Len: 8}},
 		Segments: spanSegs(3, []editmap.EditSpan{{Start: 3, End: 3, Len: 8}}),
 	})
 	for off, want := range map[int]bool{0: false, 2: false, 3: false, 4: true, 10: true, 11: false} {

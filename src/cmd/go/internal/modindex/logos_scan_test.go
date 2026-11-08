@@ -119,7 +119,7 @@ func TestScanDirLogosIndexed(t *testing.T) {
 	// tag map because imports.AnyTags returns a shared map that must
 	// never be mutated.
 	plainTagSets := map[string]map[string]bool{
-		"plainAnyTags":        {"*": true},
+		"plainAnyTags":          {"*": true},
 		"plainExplicitLogosTag": {"*": true, "logos": true},
 	}
 	for name, tags := range plainTagSets {
