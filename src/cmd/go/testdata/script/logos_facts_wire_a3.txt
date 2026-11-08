@@ -1,0 +1,86 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+cd lgo
+logos build -o $WORK/lgo.a .
+cd ..
+go tool pack p $WORK/lgo.a __.LOGOS
+stdout '^logos-facts 3$'
+stdout '^fingerprint [0-9a-f]{16}$'
+stdout '^comptime Generate [0-9]+$'
+stdout '^const Box FF0$'
+stdout '^fn Add ParamMutated=1$'
+stdout '^fn ReadIface.Name Readonly$'
+stdout '^fn Assert AssertTP=1,AssertRTP=0$'
+stdout '^constfn GenerateConst [0-9]+$'
+! stdout '^lang go$'
+
+cd go
+logos build -o $WORK/go.a .
+cd ..
+go tool pack p $WORK/go.a __.LOGOS
+cp stdout $WORK/go.facts
+grep '^fn GoAssert AssertTP=1,AssertRTP=0$' $WORK/go.facts
+grep '^lang go$' $WORK/go.facts
+env GOOS=js
+env GOARCH=wasm
+cd go
+logos build -o $WORK/go-wasm.a .
+cd ..
+go tool pack p $WORK/go-wasm.a __.LOGOS
+stdout '^logos-facts 3$'
+stdout '^fn GoAssert AssertTP=1,AssertRTP=0$'
+stdout '^lang go$'
+
+-- lgo/go.mod --
+module example.com/lgo
+
+go 1.27
+
+-- lgo/wire.lgo --
+package wire
+
+import "comptime"
+
+type Box struct {
+	F0 const []int
+}
+
+type ReadIface interface {
+	const Name() string
+}
+
+type Row struct {
+	X int
+}
+
+func Add(p *int) {
+	*p = 1
+}
+
+func Assert[T any](x any) T {
+	return x.(T)
+}
+
+func Generate[T any]() int {
+	const for _, f := range comptime.Fields[T]() {
+		return f.Index
+	}
+	return 0
+}
+
+const func GenerateConst(x int) int {
+	return x + 1
+}
+
+-- go/go.mod --
+module example.com/go
+
+go 1.27
+
+-- go/wire.go --
+package wire
+
+func GoAssert[T any](x any) T {
+	return x.(T)
+}
