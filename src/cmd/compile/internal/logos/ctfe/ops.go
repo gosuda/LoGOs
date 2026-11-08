@@ -305,13 +305,13 @@ func (e *evaluator) numPair(x, y Value, pos syntax.Pos) (Value, Value, *Type, er
 		}
 		return x, y, UntypedInt(), nil
 	case isUntyped(xk):
-		c, err := e.coerceUntyped(x, y.typ, pos)
+		c, err := e.convert(x, y.typ, pos)
 		if err != nil {
 			return Value{}, Value{}, nil, err
 		}
 		return c, y, y.typ, nil
 	case isUntyped(yk):
-		c, err := e.coerceUntyped(y, x.typ, pos)
+		c, err := e.convert(y, x.typ, pos)
 		if err != nil {
 			return Value{}, Value{}, nil, err
 		}
@@ -331,12 +331,6 @@ func kindOf(v Value) Kind {
 		return KInvalid
 	}
 	return v.typ.Kind
-}
-
-// coerceUntyped converts an untyped operand to a typed target for
-// arithmetic, with range checks for constant values.
-func (e *evaluator) coerceUntyped(v Value, t *Type, pos syntax.Pos) (Value, error) {
-	return e.convert(v, t, pos)
 }
 
 func (e *evaluator) add(x, y Value, pos syntax.Pos) (Value, error) {
@@ -392,11 +386,11 @@ func (e *evaluator) quo(x, y Value, pos syntax.Pos) (Value, error) {
 	cst := x.constant && y.constant
 	if isFloat(t.Kind) {
 		if y.constant {
-			if isRatZero(yFloat(y)) {
+			if xFloat(y).Sign() == 0 {
 				return Value{}, e.fail(pos, "division by zero in const evaluation")
 			}
 			if cst {
-				return Value{typ: t, constant: true, fval: new(big.Rat).Quo(xFloat(x), yFloat(y))}, nil
+				return Value{typ: t, constant: true, fval: new(big.Rat).Quo(xFloat(x), xFloat(y))}, nil
 			}
 		}
 		xf, yf := toFloat64(x, t), toFloat64(y, t)
@@ -625,22 +619,6 @@ func xFloat(v Value) *big.Rat {
 	return new(big.Rat).SetFloat64(v.f64)
 }
 
-// yFloat mirrors xFloat for the second operand.
-func yFloat(v Value) *big.Rat { return xFloat(v) }
-
-// ratOf returns the exact rational value of a numeric constant: ints as
-// integers, floats as their literal rationals. Callers ensure both
-// operands are constant.
-func ratOf(v Value) *big.Rat {
-	if v.fval != nil {
-		return v.fval
-	}
-	if v.ival != nil {
-		return new(big.Rat).SetInt(v.ival)
-	}
-	return new(big.Rat).SetFloat64(v.f64)
-}
-
 func toFloat64(v Value, t *Type) float64 {
 	if v.fval != nil {
 		f, _ := v.fval.Float64()
@@ -662,21 +640,19 @@ func toFloat64(v Value, t *Type) float64 {
 	return v.f64
 }
 
-func isRatZero(r *big.Rat) bool { return r.Sign() == 0 }
-
 // floatOp evaluates a float binary op.
 func (e *evaluator) floatOp(op syntax.Operator, x, y Value, t *Type, cst bool, pos syntax.Pos) (Value, error) {
 	if cst {
 		var r *big.Rat
 		switch op {
 		case syntax.Add:
-			r = new(big.Rat).Add(xFloat(x), yFloat(y))
+			r = new(big.Rat).Add(xFloat(x), xFloat(y))
 		case syntax.Sub:
-			r = new(big.Rat).Sub(xFloat(x), yFloat(y))
+			r = new(big.Rat).Sub(xFloat(x), xFloat(y))
 		case syntax.Mul:
-			r = new(big.Rat).Mul(xFloat(x), yFloat(y))
+			r = new(big.Rat).Mul(xFloat(x), xFloat(y))
 		case syntax.Div:
-			r = new(big.Rat).Quo(xFloat(x), yFloat(y))
+			r = new(big.Rat).Quo(xFloat(x), xFloat(y))
 		}
 		if t.Kind == KFloat32 && !ratFitsFloat32(r) {
 			return Value{}, e.fail(pos, "constant overflows float32 in const evaluation")
@@ -726,7 +702,7 @@ func (e *evaluator) compare(op syntax.Operator, x, y Value, pos syntax.Pos) (Val
 		}
 		var c int
 		if fx.constant && fy.constant {
-			c = xFloat(fx).Cmp(yFloat(fy))
+			c = xFloat(fx).Cmp(xFloat(fy))
 		} else {
 			ax, ay := toFloat64(fx, t), toFloat64(fy, t)
 			// Unordered (either NaN) is false for every ordered
@@ -796,7 +772,7 @@ func (e *evaluator) equal(x, y Value, pos syntax.Pos) (bool, error) {
 			x, y = cx, cy
 		}
 		if x.constant && y.constant {
-			return ratOf(x).Cmp(ratOf(y)) == 0, nil
+			return xFloat(x).Cmp(xFloat(y)) == 0, nil
 		}
 		if isInteger(kindOf(x)) && !isFloat(kindOf(x)) {
 			xf, yf, t, err := e.numPair(x, y, pos)
