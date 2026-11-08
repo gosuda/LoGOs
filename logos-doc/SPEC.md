@@ -1244,7 +1244,7 @@ A rule that sits behind a `GOEXPERIMENT` flag MUST stay behind it as this sectio
 ### 3.1 RFC-301: Tier-0 arena and placement regions
 
 Substrate [T-301.1]:
-Each goroutine MUST lease one 64 KB chunk while it holds region objects. [T-301.1]
+Region memory MUST come from 64 KB chunks leased by the goroutine that holds region objects; each open region holds at most its own chain. [T-301.1]
 A chunk MUST hold a noscan region that grows up and a scan region that grows down. [T-301.1]
 An allocation that would cross the two cursors MUST link a fresh chunk and MUST still succeed. [T-301.1]
 Scan-region objects MUST carry a type word, and the collector MUST scan them with the goroutine stack. [T-301.1]
@@ -1252,7 +1252,7 @@ Popped scan memory MUST be zeroed before reuse. [T-301.1]
 After a release, a collection MUST find no stale pointers. [T-301.1]
 Pointer-containing region objects MUST keep their heap referents alive across `runtime.GC()`. [T-301.1]
 A goroutine parked with empty regions MUST hold no chunk. [T-301.1]
-`runtime.SetFinalizer` and `runtime.AddCleanup` on a region object MUST panic with `runtime: SetFinalizer on loGo/s arena object`. [T-301.1]
+`runtime.SetFinalizer` and `runtime.AddCleanup` on a region object MUST panic with `runtime: <API> on loGo/s arena object`, naming the called function. [T-301.1]
 Cgo pointer checks MUST NOT panic on region addresses. [T-301.1]
 Region placement MUST NOT change program meaning: every program MUST print the same output when every region allocation is a heap allocation. [T-301.1]
 
@@ -1268,21 +1268,23 @@ Under plain `go`, only `GOEXPERIMENT=logosarena` MUST enable it. [T-301.1][R-U1]
 
 Placement regions [T-301.2]:
 The std package `logos/arena` MUST provide `Open() Region`, `New[T any](r Region) *T`, `Make[T any](r Region, n int) []T`, and `Append[T any](r Region, s []T, v ...T) []T`. [T-301.2]
-Under an upstream toolchain and under plain `go`, these MUST behave exactly as `Region{}`, `new(T)`, `make([]T, n)`, and `append(s, v...)`. [T-301.2]
-Under `logos`, a call MUST expand as a comptime instance. [T-301.2]
-That instance MUST use the noscan region when `comptime.HasPointers[T]()` is false, and the scan region otherwise. [T-301.2]
-Noscan objects of at most 512 bytes MUST use the inline bump sequence, which is marked as an async-preemption unsafe point. [T-301.2]
+Without `GOEXPERIMENT=logosarena`, these MUST behave exactly as `Region{}`, `new(T)`, `make([]T, n)`, and `append(s, v...)`. [T-301.2]
+Under `logos` with `[build] arena` true, each call MUST resolve at compile time, per type argument, to the noscan region when `comptime.HasPointers[T]()` would be false, and to the scan region otherwise. [T-301.2]
+Constant-size noscan objects of at most 512 bytes MUST use the inline bump sequence on amd64 in non-race builds; other targets call the region slow path. [T-301.2]
 `Open` MUST make a region owned by the innermost enclosing block. [T-301.2]
 Exit from that block MUST release the region's objects, and inside a loop body each iteration MUST release them. [T-301.2]
 The compiler MUST place an object in `r` only when escape analysis proves that no pointer to it outlives the owner block of `r`. [T-301.2]
 Otherwise the object MUST go on the heap, with `perf::arena_fallback` naming the call and the escaping flow. [T-301.2]
-A store of a region pointer into a region object whose owner block is the same or older MUST NOT count as an escape. [T-301.2]
+A store of a region pointer into a region object whose owner block is the same as, or nested inside, the owner block of the stored pointer's region MUST NOT count as an escape. A store into an object of an enclosing region MUST count as an escape. [T-301.2]
 A callee MAY place objects in an `r` it receives as a parameter. [T-301.2]
 In a `.lgo` package, a `Region` that is stored outside a local variable, returned, sent on a channel, captured by a `go` statement, or captured by an escaping closure MUST fail with `correctness::region_escape`. [T-301.2]
 In a Go package that use is allowed, and every placement through that region MUST fall back to the heap. [T-301.2][R-U1]
 A `go group` child MAY read a parent-region object through a const view. [T-301.2]
 A non-const capture MUST count as an escape of that object. [T-301.2]
-`logos eject` MUST lower the four calls to `logos/rt.Region{}`, `new(T)`, `make([]T, n)`, and `append(s, v...)`. [T-301.2]
+`logos eject` MUST lower `arena.Open()` to `_logos_rt.Region{}`, `arena.New[T](r)` to `new(T)`, `arena.Make[T](r, n)` to `make([]T, n)`, and `arena.Append[T](r, s, v...)` to `append(s, v...)`. [T-301.2]
+`logos/rt` MUST provide `type Region = arena.Region`. [T-301.2]
+The eject support module MUST carry the `arena` package. [T-301.2]
+The eject MUST append `_ = r` after each local Region declaration. [T-301.2]
 The toolchain MUST NOT ship the `arena` package, `reflect.ArenaNew`, or `GOEXPERIMENT=arenas`. [T-301.2]
 
 Comptime and escape analysis:
@@ -1561,7 +1563,7 @@ With "deterministic", logos sets GOAMD64 to v3 and GOARM64 to v8.2 unless the en
 With "native", logos uses the host level. [T-105]
 See Sec 1.5 for the default binary CPU requirement.
 arena is a boolean with default true. [T-Sec8][T-301.1]
-A true value enables implicit placement and the placement regions for Go packages and loGo/s packages under `logos`. [T-Sec8][T-301.1][R-U1]
+A true value sets `GOEXPERIMENT=logosarena`, which enables implicit placement and the placement regions for Go packages and loGo/s packages under `logos`. [T-Sec8][T-301.1][R-U1]
 
 ### 8.4 Capabilities table
 

@@ -70,7 +70,7 @@ Rules: logos-doc/SPEC.md. Status values: planned, tested, satisfied upstream, bl
 | #71 | scan region dead pointers breaking barrier reuse | M18 | src/cmd/go/testdata/script/logos_redteam_71.txt (executed 2026-10-28: `go test cmd/go -run 'Script/^logos_redteam_71$'` passes, race leg included) | tested |
 | #72 | ViewAs interior pointer confusing collector scan | M7 | test/logos/run/viewas.lgo (GC keep-alive, need-have panic); src/logos/rt/viewas_test.go | tested |
 | #73 | Const-map seed search fails to terminate | M5 | test/logos/run/const_map.lgo; src/cmd/compile/internal/logos/constmap_test.go | tested |
-| #74 | - | M7 | test/logos/redteam/attack_074_funcforpc_spec_name.lgo | tested |
+| #74 | base function names without the comptime-copy suffix in runtime.FuncForPC and in traces | M7 | test/logos/redteam/attack_009_comptime_trace_names.lgo | tested |
 | #75 | order dependent inference in nil switch arms | M2 | test/logos/redteam/attack_075_nil_arm_common_type | tested |
 | #76 | const for skipping checks on unrolled bodies | M7 | test/logos/compile/const_for_perfield.lgo; test/logos/compile/const_for_error.lgo; test/logos/run/const_for_lines.lgo | tested |
 | #77 | plain defer clearing error after errdefer | M9 | test/logos/lint/defer_erases_errdefer_state.lgo | tested |
