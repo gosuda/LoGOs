@@ -9,7 +9,7 @@ Two engines, one policy.
 - **The in-compiler lint** (`cmd/compile/internal/logos/lint`) owns depth for both language scopes. It sees lowering, escape facts, and ownership that no external tool can recover. Per scope:
   - **Go scope**, for plain Go packages. Deep in-compiler rules run only under `logos lint`, never under `logos build` or plain `go` (T-102; `src/cmd/go/internal/work/logos_lint.go:24-54` dedicated lint actor). Rule severity is capped: `forbid` in Go lowers to `deny` so `//logos:allow` can silence a false positive (`src/cmd/compile/internal/logos/lint/policy.go:158-171`).
   - **loGo/s scope**, for `.lgo` packages. All 21 registered rules run on every compile that names a policy; findings print inline; `deny` and `forbid` stop the compile at the lint hook (`src/cmd/compile/internal/noder/logos_lint.go:80-84`, `logosLintHook`). The proposed target design specifies dedicated lint execution for both languages with no adoption performance budgets, while compiler language and type safety checks remain mandatory.
-- **golangci-lint** (`logos-docs/golangci.yml`) covers repository Go tooling code only: the compiler and cmd/go packages the fork adds. It never touches `.lgo` sources or lowered compiler representations. Its severities live in its own configuration, not in `logos.toml`.
+- **golangci-lint** (`logos-doc/golangci.yml`) covers repository Go tooling code only: the compiler and cmd/go packages the fork adds. It never touches `.lgo` sources or lowered compiler representations. Its severities live in its own configuration, not in `logos.toml`.
 
 Severity ladder, lowest to highest (`src/cmd/compile/internal/logos/lint/severity.go:12-31`):
 
@@ -1207,7 +1207,7 @@ Specifying `correctness = "forbid"` in `logos.toml` is not a neutral default: it
 
 ## golangci-lint reference integration
 
-For repository Go tooling (`src/cmd/` and `src/`), `logos-docs/golangci.yml` uses the following curated set from `.references/golangci-lint/.golangci.reference.yml`:
+For repository Go tooling (`src/cmd/` and `src/`), `logos-doc/golangci.yml` uses the following curated set from `.references/golangci-lint/.golangci.reference.yml`:
 
 - **Active linters**:
   - `errcheck`, `govet`, `ineffassign`, `staticcheck`, `unused`: standard base.

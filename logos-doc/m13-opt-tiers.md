@@ -1,7 +1,7 @@
 # M13 optimization tiers, synthetic PGO, clone specialization, ICF
 
-Normative sources: `logos-docs/SPEC.md` Sec 1.5 (RFC-105),
-`logos-docs/IMPLEMENTATION.md` M13-S1 to S4. This page closes the M13 P1-S3
+Normative sources: `logos-doc/SPEC.md` Sec 1.5 (RFC-105),
+`logos-doc/IMPLEMENTATION.md` M13-S1 to S4. This page closes the M13 P1-S3
 docs row. It describes the behavior the tree implements; parent runs the
 gates below to confirm the checkout.
 

@@ -578,7 +578,7 @@ the minimal default-equivalent table.
 ## golangci-lint for repository Go tooling
 
 Repository Go tooling code (the compiler, driver, and internal build
-utilities) is checked by `golangci-lint` using `logos-docs/golangci.yml`.
+utilities) is checked by `golangci-lint` using `logos-doc/golangci.yml`.
 
 - **Active configuration**: `default: none` with the curated set enabled:
   `errcheck`, `govet`, `ineffassign`, `staticcheck`, `unused`, `errorlint`
@@ -593,7 +593,7 @@ utilities) is checked by `golangci-lint` using `logos-docs/golangci.yml`.
   init files (`context.go`, `ownedconstant.go`, `wasmloader.go`,
   `eject/eject.go`, `next/next.go`) by the path rule in the config.
 - **Invocation**: from `src/cmd` with the fork's `bin` first on `PATH`,
-  `golangci-lint run --config ../../logos-docs/golangci.yml ./go/internal/logos/...`
+  `golangci-lint run --config ../../logos-doc/golangci.yml ./go/internal/logos/...`
   (new packages only). `logos lint` is a separate native surface over the
   in-compiler registry; it does not invoke golangci-lint, and this config
   does not route through `logos lint`.

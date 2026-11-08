@@ -2,7 +2,7 @@
 
 - Status: Tailored spec, 2026-10-19, amended for first-class Go support and two-way interop (no features removed except the two import-ban diagnostics)
 - Base: Go 1.27.2
-- Original: `logos-docs/PLAN.md` at commit 57475ed, archived in `logos-docs/archive/`
+- Original: `logos-doc/PLAN.md` at commit 57475ed, archived in `logos-doc/archive/`
 - Source files: `.lgo` (canonical); aliases U+1F4DC (scroll), U+26A1 (lightning), and U+0295 U+25D4 U+03D6 U+25D4 U+0294 (gopher); `.go` files stay Go source files with Go language semantics.
 
 The words MUST, MUST NOT, SHOULD, SHOULD NOT, and MAY follow RFC 2119. The text follows ASD-STE100.
@@ -2095,7 +2095,7 @@ m.WithLock(func(c *Config) {
 
 ### 22.3 Red-team completeness
 
-- Every row of `logos-docs/REDTEAM.md` MUST reach `tested` or `satisfied upstream` with its proving test. [T-Sec22]
+- Every row of `logos-doc/REDTEAM.md` MUST reach `tested` or `satisfied upstream` with its proving test. [T-Sec22]
 - Runtime attack tests MUST run under `-race` and under each `-gc` mode whose gate has passed: greentea always, immix after its phase 1 gate, zgc after its phase 2 gate. [T-Sec22][T-301.2]
 - A mode whose gate has not passed MUST be recorded as blocked for that attack, never as tested. [T-Sec22]
 

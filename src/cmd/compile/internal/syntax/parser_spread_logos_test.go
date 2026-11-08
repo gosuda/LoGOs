@@ -10,7 +10,7 @@ import (
 )
 
 // M6-S4 parser attacks for SpreadExpr{X Expr}
-// (logos-docs/IMPLEMENTATION.md): `..src` parses as a spread element in
+// (logos-doc/IMPLEMENTATION.md): `..src` parses as a spread element in
 // LogosMode only; plain mode keeps the upstream missing-operand error.
 
 func parseSpread(t *testing.T, src string) *File {

@@ -1,7 +1,7 @@
 # M11 static JSON
 
-Normative sources: `logos-docs/SPEC.md` Sec 12,
-`logos-docs/IMPLEMENTATION.md` M11-S1 to S4. This page closes the M11 P1-S3
+Normative sources: `logos-doc/SPEC.md` Sec 12,
+`logos-doc/IMPLEMENTATION.md` M11-S1 to S4. This page closes the M11 P1-S3
 docs row. It describes the behavior the tree implements; parent runs the
 gates below to confirm the checkout.
 

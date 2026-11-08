@@ -1,7 +1,7 @@
 # M17 smart stack
 
-Normative sources: `logos-docs/SPEC.md` Sec 3.2 (RFC-302),
-`logos-docs/IMPLEMENTATION.md` M17-S1 to S2. This page closes the M17 P1-S3
+Normative sources: `logos-doc/SPEC.md` Sec 3.2 (RFC-302),
+`logos-doc/IMPLEMENTATION.md` M17-S1 to S2. This page closes the M17 P1-S3
 docs row. It describes the behavior the tree implements; parent runs the
 gates below to confirm the checkout.
 

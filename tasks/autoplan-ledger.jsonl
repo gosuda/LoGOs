@@ -1,9 +1,9 @@
-{"id": "CEO-01", "description": "P0-S1 Rename logos-docs/PLAN.md to logos-docs/SPEC.md (pure rename) and P0-S2 rewrite SPEC.md as the tailored spec (tables T, T-PERF, N, Section 23)", "phase": "CEO"}
-{"id": "CEO-02", "description": "P0-S5 Create logos-docs/REDTEAM.md with 182 attack rows", "phase": "CEO"}
+{"id": "CEO-01", "description": "P0-S1 Rename logos-doc/PLAN.md to logos-doc/SPEC.md (pure rename) and P0-S2 rewrite SPEC.md as the tailored spec (tables T, T-PERF, N, Section 23)", "phase": "CEO"}
+{"id": "CEO-02", "description": "P0-S5 Create logos-doc/REDTEAM.md with 182 attack rows", "phase": "CEO"}
 {"id": "CEO-03", "description": "P0-S6 Create tasks/autoplan-ledger.jsonl from this ledger", "phase": "CEO"}
 {"id": "CEO-04", "description": "P0-S7 Replace the session todo list with one item per slice", "phase": "CEO"}
-{"id": "CEO-05", "description": "P0-S3 Archive the original spec by section in logos-docs/archive/ (table A, byte-exact cmp check)", "phase": "CEO"}
-{"id": "CEO-06", "description": "P0-S4 Commit this plan as logos-docs/IMPLEMENTATION.md without session-only references", "phase": "CEO"}
+{"id": "CEO-05", "description": "P0-S3 Archive the original spec by section in logos-doc/archive/ (table A, byte-exact cmp check)", "phase": "CEO"}
+{"id": "CEO-06", "description": "P0-S4 Commit this plan as logos-doc/IMPLEMENTATION.md without session-only references", "phase": "CEO"}
 {"id": "CEO-07", "description": "P0-S8 Create the root AGENTS.md for agents working on loGos (commands, gotchas, workflow, references)", "phase": "CEO"}
 {"id": "DX-01", "description": "M0-S1 The logos command", "phase": "DX"}
 {"id": "DX-02", "description": "M0-S2 Package classification in cmd/go and go/build", "phase": "DX"}

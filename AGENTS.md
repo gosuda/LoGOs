@@ -13,7 +13,7 @@ Run from `src/` with the fork first on PATH: `export PATH="$(cd .. && pwd)/bin:$
 - Script tests: `go test -count=1 cmd/go -run 'Script/^logos_<name>$'`.
 - Compiler run and errorcheck tests: `go test -count=1 cmd/internal/testdir -run 'Test/logos/'`.
 - Changed files: `gofmt -l <files>` prints nothing, and `go vet <pkgs>` passes.
-- Lint new packages only (golangci-lint 2.15.0 at `/home/linuxbrew/.linuxbrew/bin/golangci-lint`): from `src/cmd` with the fork's `bin` first on PATH, `golangci-lint run --config ../../logos-docs/golangci.yml ./go/internal/logos/...`.
+- Lint new packages only (golangci-lint 2.15.0 at `/home/linuxbrew/.linuxbrew/bin/golangci-lint`): from `src/cmd` with the fork's `bin` first on PATH, `golangci-lint run --config ../../logos-doc/golangci.yml ./go/internal/logos/...`.
 - Milestone gate: `./run.bash --no-rebuild`.
 
 ## Gotchas
@@ -25,13 +25,13 @@ Run from `src/` with the fork first on PATH: `export PATH="$(cd .. && pwd)/bin:$
 
 ## Workflow
 
-- Work slice by slice from `logos-docs/IMPLEMENTATION.md`: write the slice's attack tests, see them fail, build, then pass the slice gate (rules G1 and G2).
+- Work slice by slice from `logos-doc/IMPLEMENTATION.md`: write the slice's attack tests, see them fail, build, then pass the slice gate (rules G1 and G2).
 - A changed language rule updates its Table T row in IMPLEMENTATION.md and the matching SPEC.md sentence in the same commit.
 - A slice that stays red after three attempts is recorded as blocked (rule G1, item 7); tests are never weakened to reach green.
 
 ## References
 
-- Language spec: `logos-docs/SPEC.md`
-- Build plan, gates, and lexicon: `logos-docs/IMPLEMENTATION.md`
-- Red-team test ledger: `logos-docs/REDTEAM.md`
-- Original spec text (historical, not normative): `logos-docs/archive/`
+- Language spec: `logos-doc/SPEC.md`
+- Build plan, gates, and lexicon: `logos-doc/IMPLEMENTATION.md`
+- Red-team test ledger: `logos-doc/REDTEAM.md`
+- Original spec text (historical, not normative): `logos-doc/archive/`

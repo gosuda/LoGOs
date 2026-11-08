@@ -1,7 +1,7 @@
 # M22 verification suites and end to end example
 
-Normative sources: `logos-docs/SPEC.md` Sec 11 and Sec 22,
-`logos-docs/IMPLEMENTATION.md` M22. This page closes the M22 P1-S3 docs row.
+Normative sources: `logos-doc/SPEC.md` Sec 11 and Sec 22,
+`logos-doc/IMPLEMENTATION.md` M22. This page closes the M22 P1-S3 docs row.
 It describes the behavior the tree implements; parent runs the gates below
 to confirm the checkout.
 
@@ -9,7 +9,7 @@ to confirm the checkout.
 
 - S1 upstream regression (PLAN Sec 22.1): `logos test -O=1 std cmd`, `-O=2`,
   `-O=3` without `-short`, and the same three under plain `go`; no outcome
-  is recorded in the `logos-docs/REDTEAM.md` header today (title,
+  is recorded in the `logos-doc/REDTEAM.md` header today (title,
   resolutions line, and table header only), and the six-command matrix has
   not been run green, so parent records S1 as blocked and runs no -O gate
   here.
@@ -23,9 +23,9 @@ to confirm the checkout.
   frames removed (lines matching `goroutine`, `.go`, and `.lgo` frame
   patterns are dropped). Specified counts are 1,000 programs slice gate and
   10,000 milestone gate (`-count` flag).
-- S3 red team completeness (Sec 22.3): every row of `logos-docs/REDTEAM.md`
+- S3 red team completeness (Sec 22.3): every row of `logos-doc/REDTEAM.md`
   is `tested` or `satisfied upstream` with the proving test; gate
-  `grep -c '| planned |' logos-docs/REDTEAM.md` prints 0. Runtime attack
+  `grep -c '| planned |' logos-doc/REDTEAM.md` prints 0. Runtime attack
   tests (files under `test/logos/redteam` whose header line is `// runtime`)
   run under `-race` and under each `-gc` mode whose M19 gate has passed
   (greentea always, immix after phase 1, zgc after phase 2); a mode whose
@@ -58,7 +58,7 @@ to confirm the checkout.
 
 - Layout: codegen fixtures, size record, and example service live under
   `test/logos` with the paths named above; the red team ledger lives at
-  `logos-docs/REDTEAM.md`; the S2 generator and round trip test are absent
+  `logos-doc/REDTEAM.md`; the S2 generator and round trip test are absent
   (see above).
 - Parent to run: all of the above in slice then milestone counts, then
   `./run.bash --no-rebuild` as the final milestone gate. Paid or host

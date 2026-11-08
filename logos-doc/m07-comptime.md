@@ -1,6 +1,6 @@
 # M7 comptime (`const if`, `const for`, generics, `const switch`, `ViewAs`)
 
-Normative sources: `logos-docs/SPEC.md` Sec 2.5 (RFC-205), `logos-docs/IMPLEMENTATION.md`
+Normative sources: `logos-doc/SPEC.md` Sec 2.5 (RFC-205), `logos-doc/IMPLEMENTATION.md`
 M7-S1 to S5. This page closes the M7 P1-S3 docs row. It describes the behavior
 the tree implements; parent runs the gates below to confirm the checkout.
 

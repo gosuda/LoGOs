@@ -1,7 +1,7 @@
 # M18 tier 0 arena and bump allocation
 
-Normative sources: `logos-docs/SPEC.md` Sec 3.1 (RFC-301) and Sec 8.2 to 8.3,
-`logos-docs/IMPLEMENTATION.md` M18-S1 to S4. This page closes the M18 P1-S3
+Normative sources: `logos-doc/SPEC.md` Sec 3.1 (RFC-301) and Sec 8.2 to 8.3,
+`logos-doc/IMPLEMENTATION.md` M18-S1 to S4. This page closes the M18 P1-S3
 docs row. It describes the behavior the tree implements; parent runs the
 gates below to confirm the checkout.
 

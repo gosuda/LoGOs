@@ -1,7 +1,7 @@
 # M14 fixed array SIMD
 
-Normative sources: `logos-docs/SPEC.md` Sec 2.4 (RFC-204),
-`logos-docs/IMPLEMENTATION.md` M14-S1. This page closes the M14 P1-S3 docs
+Normative sources: `logos-doc/SPEC.md` Sec 2.4 (RFC-204),
+`logos-doc/IMPLEMENTATION.md` M14-S1. This page closes the M14 P1-S3 docs
 row. It describes the behavior the tree implements; parent runs the gates
 below to confirm the checkout.
 

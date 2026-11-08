@@ -14,7 +14,7 @@ import (
 var dumpPos = regexp.MustCompile(`(?m) @ .*$`)
 
 // M1-S2 parser attacks for TryExpr{X Expr} and ErrdeferStmt{Call Expr}
-// (logos-docs/IMPLEMENTATION.md).
+// (logos-doc/IMPLEMENTATION.md).
 //
 // Offensive-first TDD: each attack below fails against e53ef53619 for its
 // documented defect (missing, extra, or mismatched diagnostics; redundant

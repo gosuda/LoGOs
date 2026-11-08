@@ -1,7 +1,7 @@
 # M16 wasm profile
 
-Normative sources: `logos-docs/SPEC.md` Sec 14,
-`logos-docs/IMPLEMENTATION.md` M16-S1 to S2. This page closes the M16 P1-S3
+Normative sources: `logos-doc/SPEC.md` Sec 14,
+`logos-doc/IMPLEMENTATION.md` M16-S1 to S2. This page closes the M16 P1-S3
 docs row. It describes the behavior the tree implements; parent runs the
 gates below to confirm the checkout.
 

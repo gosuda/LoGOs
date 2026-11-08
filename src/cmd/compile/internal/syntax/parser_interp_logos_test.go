@@ -10,7 +10,7 @@ import (
 )
 
 // M6-S1 parser attacks for InterpExpr{Parts []string; Exprs []Expr}
-// (SPEC Sec 1.4, T-104.4; logos-docs/IMPLEMENTATION.md).
+// (SPEC Sec 1.4, T-104.4; logos-doc/IMPLEMENTATION.md).
 //
 // Offensive-first TDD: each attack below fails before the M6-S1
 // implementation (missing diagnostics, missing nodes) and passes after.

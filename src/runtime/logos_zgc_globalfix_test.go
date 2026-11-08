@@ -44,7 +44,7 @@ import (
 // LogosZgcAllocGranule instead reserves one whole-granule 1024-byte noscan
 // span, granule-aligned on a granule no page owns, by construction: the
 // victims' page is then ~0.4% live, far past the 35 percent threshold
-// (logos-docs/SPEC.md:1991), with no flood needed. The globals stay real
+// (logos-doc/SPEC.md:1991), with no flood needed. The globals stay real
 // globals and every step under test stays production code: root scan
 // through the global, greyobject mark (1024 still exceeds the 512-byte
 // inline ceiling), production copy, forwarding publication, and gcStart

@@ -1,7 +1,7 @@
 # M10 next and context
 
-Normative sources: `logos-docs/SPEC.md` Sec 1.3 (RFC-103),
-`logos-docs/IMPLEMENTATION.md` M10-S1 to S2. This page closes the M10 P1-S3
+Normative sources: `logos-doc/SPEC.md` Sec 1.3 (RFC-103),
+`logos-doc/IMPLEMENTATION.md` M10-S1 to S2. This page closes the M10 P1-S3
 docs row. It describes the behavior the tree implements; parent runs the
 gates below to confirm the checkout.
 

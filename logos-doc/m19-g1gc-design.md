@@ -83,11 +83,11 @@ evacuation entirely (`src/runtime/logos_evac_pin.go:154-168`).
 
 Barriers: stores mark the 512 B card and set the 128 B line bit; loads are
 plain. Two new SPEC Section 8.4 lines state exactly that, alongside the existing
-per-mode lines (`logos-docs/SPEC.md:1237-1248`).
+per-mode lines (`logos-doc/SPEC.md:1237-1248`).
 
 Pointer-keyed maps: a block whose address is used as a hash is pinned and never
 evacuates. That is the immix rule today
-(`src/runtime/logos_move_moving.go:71`, `logos-docs/SPEC.md:1246-1248`).
+(`src/runtime/logos_move_moving.go:71`, `logos-doc/SPEC.md:1246-1248`).
 
 Humongous: an object at or above half a region, and any span that crosses a
 block boundary, never enters the collection set and is swept in place
@@ -120,8 +120,8 @@ A new `-gc=g1` must touch exactly these sites. All are read, not inferred.
    elastic marking, so it must not take the nongreentea tag.
 8. Documentation: the M19 row and the `-gc` mode list, plus a new subsection.
 9. SPEC: Section 19 mode list and its exact error string
-   (`logos-docs/SPEC.md:1798-1804`), the `gc` key in Section 10.3
-   (`logos-docs/SPEC.md:1317-1318`), the phase-gate sentence shaped on the
+   (`logos-doc/SPEC.md:1798-1804`), the `gc` key in Section 10.3
+   (`logos-doc/SPEC.md:1317-1318`), the phase-gate sentence shaped on the
    immix and zgc templates, and the two barrier lines in Section 8.4.
 
 Acceptance gate: until phase 1 passes `go test -short std` with the experiment
@@ -129,7 +129,7 @@ on, `-gc=g1` must fail with a phase-3 message shaped like the immix and zgc
 errors. A `-run` subset does not satisfy the gate.
 
 Plain `go` is untouched: it keeps the upstream collector and pacing until
-`./run.bash` passes with a changed default (`logos-docs/SPEC.md:1803`). The
+`./run.bash` passes with a changed default (`logos-doc/SPEC.md:1803`). The
 defect to avoid is the hook you cannot revisit without a prod incident: every
 G1 branch sits behind the mode predicate, so the no-flag path compiles out.
 
@@ -214,7 +214,7 @@ Phase 1 (reuse plus policy; all sizes are estimates):
 | `src/runtime/logos_gcmode.go` | `g1` case | dispatch, predicates | 20 |
 | `src/cmd/go/internal/logos/config/config.go` | mode list entry | add `g1` | 5 |
 | `src/cmd/go/internal/work/logos_gc.go` | phase map, gate text, ldflags | wiring | 20 |
-| `logos-docs/SPEC.md`, `logos-docs/IMPLEMENTATION.md` | Section 19, 10.3, 8.4, M19 | normative rows | 20 |
+| `logos-doc/SPEC.md`, `logos-doc/IMPLEMENTATION.md` | Section 19, 10.3, 8.4, M19 | normative rows | 20 |
 | tests | ranking, card-clear ownership, humongous exclusion, mode text, gate text | pin the policy | 250 |
 
 Phase 2 (concurrent evacuation, only after the phase 1 gate):

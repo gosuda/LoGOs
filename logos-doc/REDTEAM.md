@@ -1,6 +1,6 @@
 # Red-team test ledger
 
-Resolutions: logos-docs/SPEC.md Section 17. Status values: planned, tested, satisfied upstream, blocked.
+Resolutions: logos-doc/SPEC.md Section 17. Status values: planned, tested, satisfied upstream, blocked.
 
 | ID | Milestone | Test | Status |
 | --- | --- | --- | --- |

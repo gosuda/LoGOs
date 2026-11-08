@@ -42,7 +42,7 @@ func main() { fmt.Println(double()) } // 42 <nil>
 
 In `double()`, the `?` operator tests the error result of `strconv.Atoi("21")`. If `Atoi` returns a non-nil error, `double()` returns early with that error. When the call succeeds, `n` receives the integer value. Running `logos run .` prints `42 <nil>`.
 
-The full language definition is in [logos-docs/SPEC.md](logos-docs/SPEC.md).
+The full language definition is in [logos-doc/SPEC.md](logos-doc/SPEC.md).
 
 ## Install
 
@@ -521,14 +521,14 @@ Element-wise math is supported on arrays only, not slices, and requires a power-
 
 ### Also in the language
 
-The language also provides these concise extensions defined in [logos-docs/SPEC.md](logos-docs/SPEC.md):
+The language also provides these concise extensions defined in [logos-doc/SPEC.md](logos-doc/SPEC.md):
 
-- **Error propagation** (`n := f()?` or `f()?`): unwraps values or returns early on non-nil error from functions returning `(T, error)` ([logos-docs/SPEC.md](logos-docs/SPEC.md) Sec 7.1).
-- **Error cleanup** (`errdefer f()`): registers deferred cleanup executed only when the enclosing function exits with an error, a panic, or Goexit ([logos-docs/SPEC.md](logos-docs/SPEC.md) Sec 7.1).
-- **String interpolation** (`$"user {name}: {count}"`): embeds formatted expressions directly within string literals ([logos-docs/SPEC.md](logos-docs/SPEC.md) Sec 2).
-- **Iterator chains** (`xs.filter(...).map(...).take(n)`): runs functional slice transformations with predicate and mapping closures ([logos-docs/SPEC.md](logos-docs/SPEC.md) Sec 2).
-- **Literal addressing** (`&100`, `&f()`): takes the address of scalar literals and function call returns without temporary variables ([logos-docs/SPEC.md](logos-docs/SPEC.md) Sec 2).
-- **Struct field defaults** (`type Config struct { Port int = 8080 }`): evaluates default field values when struct literals omit fields ([logos-docs/SPEC.md](logos-docs/SPEC.md) Sec 2).
+- **Error propagation** (`n := f()?` or `f()?`): unwraps values or returns early on non-nil error from functions returning `(T, error)` ([logos-doc/SPEC.md](logos-doc/SPEC.md) Sec 7.1).
+- **Error cleanup** (`errdefer f()`): registers deferred cleanup executed only when the enclosing function exits with an error, a panic, or Goexit ([logos-doc/SPEC.md](logos-doc/SPEC.md) Sec 7.1).
+- **String interpolation** (`$"user {name}: {count}"`): embeds formatted expressions directly within string literals ([logos-doc/SPEC.md](logos-doc/SPEC.md) Sec 2).
+- **Iterator chains** (`xs.filter(...).map(...).take(n)`): runs functional slice transformations with predicate and mapping closures ([logos-doc/SPEC.md](logos-doc/SPEC.md) Sec 2).
+- **Literal addressing** (`&100`, `&f()`): takes the address of scalar literals and function call returns without temporary variables ([logos-doc/SPEC.md](logos-doc/SPEC.md) Sec 2).
+- **Struct field defaults** (`type Config struct { Port int = 8080 }`): evaluates default field values when struct literals omit fields ([logos-doc/SPEC.md](logos-doc/SPEC.md) Sec 2).
 
 ## Usage
 
@@ -550,18 +550,18 @@ logos lint [build flags] [--pedantic] [--json-diagnostics] [packages]
   - In standard `.go` packages, the compiler runs language-neutral rules only.
 - **Directives**:
   - `//logos:allow(<rule>)`: Placed directly above a declaration or statement to suppress a `deny` or `warn` diagnostic. In Go packages, `forbid` rules run at `deny` severity and can be silenced by this directive; in `.lgo` packages, `forbid` rules cannot be silenced.
-  - `//logos:zeroalloc`: Placed above a function declaration as a static escape-analysis site contract requiring the compiler to reject local heap allocations at that site (see [logos-docs/LINT-RULES.md](logos-docs/LINT-RULES.md)).
+  - `//logos:zeroalloc`: Placed above a function declaration as a static escape-analysis site contract requiring the compiler to reject local heap allocations at that site (see [logos-doc/LINT-RULES.md](logos-doc/LINT-RULES.md)).
 - **Flags**:
   - `--pedantic`: Enables pedantic diagnostics overriding module configuration.
   - `--json-diagnostics`: Emits one JSON object per diagnostic line on standard error.
 
 For the normative rule set design and individual rule definitions, see:
-- [logos-docs/LINT-RULESET.md](logos-docs/LINT-RULESET.md): Proposed normative lint design for Go and loGo/s.
-- [logos-docs/LINT-RULES.md](logos-docs/LINT-RULES.md): Detailed reference catalog of in-compiler rules.
+- [logos-doc/LINT-RULESET.md](logos-doc/LINT-RULESET.md): Proposed normative lint design for Go and loGo/s.
+- [logos-doc/LINT-RULES.md](logos-doc/LINT-RULES.md): Detailed reference catalog of in-compiler rules.
 
 ## Language
 
-One row per shipped form, with milestone IDs from [logos-docs/IMPLEMENTATION.md](logos-docs/IMPLEMENTATION.md). The full language definition is in [logos-docs/SPEC.md](logos-docs/SPEC.md).
+One row per shipped form, with milestone IDs from [logos-doc/IMPLEMENTATION.md](logos-doc/IMPLEMENTATION.md). The full language definition is in [logos-doc/SPEC.md](logos-doc/SPEC.md).
 
 | Milestone | Form | Summary |
 |---|---|---|

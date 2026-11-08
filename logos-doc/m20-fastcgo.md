@@ -1,7 +1,7 @@
 # M20 cgo in loGo/s packages and fast cgo
 
-Normative sources: `logos-docs/SPEC.md` Sec 3.4 (RFC-304),
-`logos-docs/IMPLEMENTATION.md` M20-S0 to S1. This page closes the M20 P1-S3
+Normative sources: `logos-doc/SPEC.md` Sec 3.4 (RFC-304),
+`logos-doc/IMPLEMENTATION.md` M20-S0 to S1. This page closes the M20 P1-S3
 docs row. It describes the behavior the tree implements; parent runs the
 gates below to confirm the checkout.
 
@@ -80,7 +80,7 @@ gates below to confirm the checkout.
   `BenchmarkFastcall` on the same empty C function gave plain 57.77 ns
   per call and fast 49.24 ns per call at 33,559,636 iterations, ratio
   1.1733 as plain divided by fast, against the 1.05 acceptance ratio.
-  This matches T-304 and M20-S1 in `logos-docs/IMPLEMENTATION.md`.
+  This matches T-304 and M20-S1 in `logos-doc/IMPLEMENTATION.md`.
 - Method: two builds of the same benchmark, baseline with
   `GOEXPERIMENT=nologosfastcgo` and candidate with
   `GOEXPERIMENT=logosfastcgo`, same host and flags; the ratio is baseline

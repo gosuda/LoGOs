@@ -1,6 +1,6 @@
 # M8 go group and logos/sync
 
-Normative sources: `logos-docs/SPEC.md` Sec 2.6 (RFC-206), `logos-docs/IMPLEMENTATION.md`
+Normative sources: `logos-doc/SPEC.md` Sec 2.6 (RFC-206), `logos-doc/IMPLEMENTATION.md`
 M8-S1 to S5. This page closes the M8 P1-S3 docs row. It describes the behavior
 the tree implements; parent runs the gates below to confirm the checkout.
 

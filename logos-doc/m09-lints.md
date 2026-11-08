@@ -1,7 +1,7 @@
 # M9 lints and JSON diagnostics
 
-Normative sources: `logos-docs/SPEC.md` Sec 1.2 (RFC-102) and Sec 16,
-`logos-docs/IMPLEMENTATION.md` M9-S1 to S2. This page closes the M9 P1-S3 docs
+Normative sources: `logos-doc/SPEC.md` Sec 1.2 (RFC-102) and Sec 16,
+`logos-doc/IMPLEMENTATION.md` M9-S1 to S2. This page closes the M9 P1-S3 docs
 row. It describes the behavior the tree implements; parent runs the gates
 below to confirm the checkout.
 
