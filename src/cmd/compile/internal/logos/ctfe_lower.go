@@ -35,14 +35,6 @@ type groupedMoveState struct {
 	inserted   map[syntax.Node]bool
 }
 
-func newGroupedMoveState() *groupedMoveState {
-	return &groupedMoveState{
-		fileTails:  make(map[*syntax.Group]syntax.Decl),
-		blockTails: make(map[*syntax.DeclStmt]syntax.Stmt),
-		inserted:   make(map[syntax.Node]bool),
-	}
-}
-
 // lowerCTFE rewrites evaluated consts of one file.
 func (fl *fileLower) lowerCTFE() {
 	for i, decl := range fl.file.DeclList {
@@ -51,7 +43,11 @@ func (fl *fileLower) lowerCTFE() {
 			fl.add(fl.off(cfd.ConstPos), fl.off(cfd.Func.Pos()), "")
 		}
 	}
-	gst := newGroupedMoveState()
+	gst := &groupedMoveState{
+		fileTails:  map[*syntax.Group]syntax.Decl{},
+		blockTails: map[*syntax.DeclStmt]syntax.Stmt{},
+		inserted:   map[syntax.Node]bool{},
+	}
 	fl.lowerCTFEFileList(gst)
 	syntax.Inspect(fl.file, func(n syntax.Node) bool {
 		if b, ok := n.(*syntax.BlockStmt); ok {
@@ -109,7 +105,7 @@ func (fl *fileLower) lowerCTFEFileList(gst *groupedMoveState) {
 		}
 		if g, ok := fl.pkg.constMaps[r.obj]; ok { // M5-S4 hook: const maps lower to tables and lookups.
 			fl.lowerConstMapSpec(cd, g)
-			fl.removeAt(list, i)
+			*list = slices.Delete(*list, i, i+1)
 			i--
 			continue
 		}
@@ -194,7 +190,7 @@ func (fl *fileLower) lowerCTFEBlock(b *syntax.BlockStmt, gst *groupedMoveState) 
 func (fl *fileLower) moveGroupedVar(cd *syntax.ConstDecl, i int, list *[]syntax.Decl, r ctfeResult, indent string, gst *groupedMoveState) int {
 	_, end := groupRun(list, i, cd.Group)
 	fl.deleteSpec(cd)
-	fl.removeAt(list, i)
+	*list = slices.Delete(*list, i, i+1)
 	vd := &syntax.VarDecl{NameList: cd.NameList, Type: cd.Type, Values: r.lit}
 	vd.SetPos(syntax.StartPos(cd))
 	fl.markRodataMoved(vd, r.val)
@@ -213,16 +209,21 @@ func (fl *fileLower) moveGroupedVar(cd *syntax.ConstDecl, i int, list *[]syntax.
 	*list = append(*list, nil)
 	copy((*list)[at+1:], (*list)[at:])
 	(*list)[at] = vd
-	fl.insertVarText(cd, r, indent, func() (int, bool) {
-		off := groupEnd(fl.src, fl.off(syntax.StartPos(cd)))
-		for off < len(fl.src) && (fl.src[off] == ' ' || fl.src[off] == '\t') {
-			off++
-		}
-		if off < len(fl.src) && (fl.src[off] == ';' || fl.src[off] == '\n') {
-			return off + 1, true
-		}
-		return off, true
-	})
+	off := groupEnd(fl.src, fl.off(syntax.StartPos(cd)))
+	for off < len(fl.src) && (fl.src[off] == ' ' || fl.src[off] == '\t') {
+		off++
+	}
+	if off < len(fl.src) && (fl.src[off] == ';' || fl.src[off] == '\n') {
+		off++
+	}
+	line := indent + "var " + declNames(cd) + " = " + r.text + "\n"
+	if rodataStaticValue(r.val) {
+		line = rodataMarker + "\n" + line
+	}
+	if off > 0 && fl.src[off-1] != '\n' {
+		line = "\n" + line
+	}
+	fl.add(off, off, line)
 	return i - 1
 }
 
@@ -270,38 +271,14 @@ func (fl *fileLower) blockVarOffset(b *syntax.BlockStmt, at int, gst *groupedMov
 		if gst.inserted[b.List[k]] {
 			continue
 		}
-		return fl.lineStartOf(b.List[k]), true
+		return fl.lineStart(b.List[k]), true
 	}
 	return 0, false
 }
 
-// insertVarText inserts the var line at the offset next returns,
-// adding a leading newline unless the preceding byte is already a newline.
-func (fl *fileLower) insertVarText(cd *syntax.ConstDecl, r ctfeResult, indent string, next func() (int, bool)) {
-	line := indent + "var " + declNames(cd) + " = " + r.text + "\n"
-	if rodataStaticValue(r.val) {
-		line = rodataMarker + "\n" + line
-	}
-	off, _ := next()
-	if off > 0 && fl.src[off-1] != '\n' {
-		line = "\n" + line
-	}
-	fl.add(off, off, line)
-}
-
-// lineStart returns the start offset of the line containing the
-// declaration's first line.
-func (fl *fileLower) lineStart(d syntax.Decl) int {
-	off := fl.off(syntax.StartPos(d))
-	for off > 0 && fl.src[off-1] != '\n' {
-		off--
-	}
-	return off
-}
-
-// lineStartOf returns the start offset of a statement's line.
-func (fl *fileLower) lineStartOf(s syntax.Stmt) int {
-	off := fl.off(syntax.StartPos(s))
+// lineStart returns the start offset of the line containing n.
+func (fl *fileLower) lineStart(n syntax.Node) int {
+	off := fl.off(syntax.StartPos(n))
 	for off > 0 && fl.src[off-1] != '\n' {
 		off--
 	}
@@ -326,11 +303,6 @@ func groupRun(list *[]syntax.Decl, i int, g *syntax.Group) (int, int) {
 		end++
 	}
 	return start, end
-}
-
-// removeAt deletes index i from a decl list.
-func (fl *fileLower) removeAt(list *[]syntax.Decl, i int) {
-	*list = append((*list)[:i], (*list)[i+1:]...)
 }
 
 // deleteSpec deletes one spec's source text, swallowing one separator
