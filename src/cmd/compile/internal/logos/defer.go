@@ -37,12 +37,6 @@ type callPlan struct {
 	end  int
 }
 
-// asTuple matches a tuple type.
-func asTuple(typ types2.Type) (*types2.Tuple, bool) {
-	tup, ok := typ.(*types2.Tuple)
-	return tup, ok
-}
-
 // typeFlagsOf returns the recorded type flags of e.
 func typeFlagsOf(fc *funcLower, e syntax.Expr) (builtin, isType bool) {
 	info := fc.fl.pkg.info
@@ -66,12 +60,6 @@ func isBuiltinExpr(fc *funcLower, e syntax.Expr) bool {
 	return builtin
 }
 
-// isTypeExpr reports whether e denotes a type.
-func isTypeExpr(fc *funcLower, e syntax.Expr) bool {
-	_, isType := typeFlagsOf(fc, e)
-	return isType
-}
-
 // planCall maps a deferred call to its capture plan. It reports false for
 // conversions, which cannot be bound to a variable.
 func (fc *funcLower) planCall(call *syntax.CallExpr) (*callPlan, bool) {
@@ -86,7 +74,7 @@ func (fc *funcLower) planCall(call *syntax.CallExpr) (*callPlan, bool) {
 	fun := capturePiece{expr: call.Fun}
 	fun.start = fl.off(leftmostOf(call.Fun))
 	fun.end = lastTokenEnd(src, fun.start, lparen)
-	if isTypeExpr(fc, call.Fun) {
+	if _, isType := typeFlagsOf(fc, call.Fun); isType {
 		return nil, false
 	}
 	fun.capture = !isBuiltinExpr(fc, call.Fun) && !genericTarget(fc, call.Fun)
@@ -173,7 +161,7 @@ func argKind(fc *funcLower, raw syntax.Expr) argClass {
 		return argInline
 	}
 	typ := cmp.Or(fc.fl.pkg.info.TypeOf(raw), fc.fl.pkg.info.TypeOf(node))
-	if tup, ok := asTuple(typ); ok && tup.Len() > 1 {
+	if tup, ok := typ.(*types2.Tuple); ok && tup.Len() > 1 {
 		return argMulti
 	}
 	return argCapture
@@ -182,7 +170,7 @@ func argKind(fc *funcLower, raw syntax.Expr) argClass {
 // multiNames returns one fresh spelling per value of a tuple argument.
 func (fc *funcLower) multiNames(raw syntax.Expr) []string {
 	typ := fc.fl.pkg.info.TypeOf(raw)
-	tup, _ := asTuple(typ)
+	tup, _ := typ.(*types2.Tuple)
 	names := make([]string, tup.Len())
 	for i := range names {
 		names[i] = fc.nextArg()
@@ -219,7 +207,10 @@ func (fc *funcLower) checkPair(plan *callPlan, cpos syntax.Pos) ([]syntax.Stmt, 
 func (fc *funcLower) planUses(plan *callPlan, tw *twin) (syntax.Expr, []syntax.Expr, []syntax.Expr, []syntax.Expr) {
 	use := func(piece capturePiece, names []string) syntax.Expr {
 		if !piece.capture {
-			return useOne(piece, tw)
+			if tw == nil {
+				return piece.expr
+			}
+			return tw.mark(piece.expr.Pos(), piece.text)
 		}
 		if len(names) > 0 {
 			out := make([]syntax.Expr, len(names))
@@ -230,7 +221,7 @@ func (fc *funcLower) planUses(plan *callPlan, tw *twin) (syntax.Expr, []syntax.E
 		}
 		return nameOf(piece.expr.Pos(), piece.single)
 	}
-	funNames := funNameList(plan.fun)
+	funNames := pieceNames(plan.fun)
 	fun := use(plan.fun, funNames)
 	var args, names, vals []syntax.Expr
 	names = append(names, nameList(plan.fun)...)
@@ -245,22 +236,6 @@ func (fc *funcLower) planUses(plan *callPlan, tw *twin) (syntax.Expr, []syntax.E
 		vals = append(vals, valList(piece, tw)...)
 	}
 	return fun, args, names, vals
-}
-
-// useOne resolves one inline piece to its node or its marker.
-func useOne(piece capturePiece, tw *twin) syntax.Expr {
-	if tw == nil {
-		return piece.expr
-	}
-	return tw.mark(piece.expr.Pos(), piece.text)
-}
-
-// funNameList returns the capture names of the callee piece.
-func funNameList(piece capturePiece) []string {
-	if !piece.capture {
-		return nil
-	}
-	return []string{piece.single}
 }
 
 // pieceNames returns the capture names of an argument piece.
