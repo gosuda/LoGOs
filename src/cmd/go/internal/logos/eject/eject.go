@@ -242,6 +242,10 @@ func gofmtRun(args []string, stdin []byte) []byte {
 	return out
 }
 
+func gofmtSource(data []byte) []byte {
+	return gofmtRun([]string{gofmtBinary()}, data)
+}
+
 func gofmtBinary() string {
 	gofmt := "gofmt" + ejectToolExeSuffix
 	p := filepath.Join(cfg.GOBIN, gofmt)

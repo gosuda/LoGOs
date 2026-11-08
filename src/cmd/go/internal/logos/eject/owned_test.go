@@ -5,16 +5,19 @@
 package eject
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"go/parser"
 	"go/token"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 
+	"cmd/go/internal/cfg"
 	"cmd/go/internal/load"
 	"cmd/go/internal/modinfo"
 	"cmd/internal/logosowned"
@@ -1401,5 +1404,70 @@ const func ComputeClosed(x int) int {
 	writeOwnedSidecar(t, badStaging, "example.com/mod/bad", badReq)
 	if _, err := emitOwnedHelpers(badPlan, badStaging, t.TempDir(), map[string]string{}); err == nil {
 		t.Fatalf("malformed header accepted unexpectedly")
+	}
+}
+
+func TestOwnedHelperNameHashesFormattedOutput(t *testing.T) {
+	suffix := cfg.ToolExeSuffix()
+	gofmtPath := filepath.Join(cfg.GOROOT, "bin", "gofmt"+suffix)
+	if _, err := os.Stat(gofmtPath); err != nil {
+		gofmtPath = "gofmt"
+		if _, err := exec.LookPath(gofmtPath); err != nil {
+			t.Skip("gofmt binary not available")
+		}
+	}
+	newTree := func() (*ejectPlan, string) {
+		modDir := t.TempDir()
+		out := t.TempDir()
+		owner := ownedTestMainPackage(modDir, "example.com/mod/sub", "sub")
+		owner.GoFiles = []string{"a.go"}
+		ownedTestWriteBoth(t, owner.Dir, filepath.Join(out, "sub"), "a.go", "package sub\n\ntype subKey struct{ v int }\n")
+		return ownedTestPlan(modDir, owner), out
+	}
+	body := "package sub\n\nimport (\n\t\"io\"\n\t\"logos/rt\"\n)\n\nfunc Use() io.Writer { return rt.W }\n"
+	plan, out := newTree()
+	staging := t.TempDir()
+	req := ownedTestRequest(t, "example.com/mod/sub", "sub", body, []logosowned.Declaration{{Owner: "example.com/mod/sub", File: "a.go"}})
+	writeOwnedSidecar(t, staging, "example.com/mod/sub", req)
+	ejectGofmtFiles = nil
+	if _, err := emitOwnedHelpers(plan, staging, out, map[string]string{}); err != nil {
+		t.Fatalf("emit: %v", err)
+	}
+	runEjectGofmt()
+	matches, err := filepath.Glob(filepath.Join(out, "sub", "logos_owned_*.go"))
+	if err != nil || len(matches) != 1 {
+		t.Fatalf("expected 1 helper, got %v (err: %v)", matches, err)
+	}
+	data, err := os.ReadFile(matches[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(data)
+	want := "logos_owned_" + hex.EncodeToString(sum[:]) + ".go"
+	if name := filepath.Base(matches[0]); name != want {
+		t.Fatalf("output name %q must hash the final bytes, want %q", name, want)
+	}
+	cmd := exec.Command(gofmtPath, "-l")
+	cmd.Stdin = bytes.NewReader(data)
+	if dirty, err := cmd.CombinedOutput(); err != nil || len(dirty) > 0 {
+		t.Fatalf("helper bytes are not gofmt-clean: %q (%v)", dirty, err)
+	}
+	plan2, out2 := newTree()
+	if _, err := emitOwnedHelpers(plan2, staging, out2, map[string]string{}); err != nil {
+		t.Fatalf("emit again: %v", err)
+	}
+	matches2, err := filepath.Glob(filepath.Join(out2, "sub", "logos_owned_*.go"))
+	if err != nil || len(matches2) != 1 {
+		t.Fatalf("expected 1 helper on rerun, got %v (err: %v)", matches2, err)
+	}
+	data2, err := os.ReadFile(matches2[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if filepath.Base(matches2[0]) != filepath.Base(matches[0]) {
+		t.Fatalf("same input must keep the same output name: %q vs %q", filepath.Base(matches2[0]), filepath.Base(matches[0]))
+	}
+	if !bytes.Equal(data, data2) {
+		t.Fatalf("same input must produce identical output bytes")
 	}
 }

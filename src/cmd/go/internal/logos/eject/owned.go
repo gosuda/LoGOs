@@ -557,6 +557,7 @@ func ownedResolveGroup(plan *ejectPlan, dir string, dests []*ownedDest) ([]*owne
 			if !ok {
 				return fmt.Errorf("helper %s does not parse after condition merge", rep.req.ID)
 			}
+			fixed = gofmtSource(fixed)
 			sum := sha256.Sum256(fixed)
 			hash := hex.EncodeToString(sum[:])
 			if test {
