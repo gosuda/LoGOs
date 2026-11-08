@@ -427,10 +427,10 @@ func Frac(x float64) float64 {
 	ok := parseExpr(t, `map[float64]string{NegZero(1.0): "neg"}`)
 	h.types[ok] = &Type{Kind: KMap, Key: BasicType("float64"), Elem: UntypedString()}
 	v, _ := evalOne(t, h, cfg, ok)
-	if v.MapLen() != 1 {
-		t.Fatalf("map len = %d, want 1", v.MapLen())
+	if v.mapLen() != 1 {
+		t.Fatalf("map len = %d, want 1", v.mapLen())
 	}
-	if got := v.MapKeyBits(0); got != 0 || math.Signbit(math.Float64frombits(got)) {
+	if got := v.mapKeyBits(0); got != 0 || math.Signbit(math.Float64frombits(got)) {
 		t.Fatalf("key bits = %x, want +0.0", got)
 	}
 }

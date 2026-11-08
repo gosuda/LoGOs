@@ -297,7 +297,7 @@ func TestPR3RuneToStringReplacement(t *testing.T) {
 		if v.Str() != "\uFFFD" {
 			t.Fatalf("%s = %q, want U+FFFD", tc.name, v.Str())
 		}
-		if !v.IsConstant() {
+		if !v.isConstant() {
 			t.Fatalf("%s constant = false, want true", tc.name)
 		}
 	}

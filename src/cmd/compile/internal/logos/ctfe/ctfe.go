@@ -330,8 +330,7 @@ func (v Value) Float64() float64 {
 	return v.f64
 }
 
-// MapLen returns the number of map entries.
-func (v Value) MapLen() int {
+func (v Value) mapLen() int {
 	if v.mval == nil {
 		return 0
 	}
@@ -352,16 +351,14 @@ func (v Value) MapEntries() (keys, vals []Value) {
 	return v.mval.keys, v.mval.vals
 }
 
-// MapKeyBits returns the float64 bits of map key i (tests).
-func (v Value) MapKeyBits(i int) uint64 {
+func (v Value) mapKeyBits(i int) uint64 {
 	return v.mval.keys[i].floatBits()
 }
 
 // Type returns the value's descriptor.
 func (v Value) Type() *Type { return v.typ }
 
-// IsConstant reports constant semantics.
-func (v Value) IsConstant() bool { return v.constant }
+func (v Value) isConstant() bool { return v.constant }
 
 // IsValid reports whether the value holds a computed result (as
 // opposed to a memoized failure marker).

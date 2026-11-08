@@ -41,7 +41,7 @@ func DirectMutate() int {
 
 	// Host's recorded constant must remain pristine.
 	hostC := h.vars["C"]
-	vis := hostC.SliceVisible()
+	vis := hostC.sliceVisible()
 	if len(vis) != 3 {
 		t.Fatalf("host C len = %d, want 3", len(vis))
 	}
@@ -85,7 +85,7 @@ func CallMutate() int {
 	}
 
 	hostC := h.vars["C"]
-	vis := hostC.SliceVisible()
+	vis := hostC.sliceVisible()
 	if got := vis[0].Int64(); got != 1 {
 		t.Fatalf("host C[0] corrupted via arg call: got %d, want 1", got)
 	}

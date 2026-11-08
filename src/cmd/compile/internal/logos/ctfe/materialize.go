@@ -38,11 +38,7 @@ func (v Value) SliceNeedsBacking() bool {
 	return v.slice.lo != 0 || v.slice.cap_ != v.slice.length
 }
 
-// SliceAccessible returns the accessible backing window
-// backing[lo:cap_], or nil when the window is out of range. The
-// capacity endpoint is an absolute backing offset, so the window
-// length is cap_-lo.
-func (v Value) SliceAccessible() []Value {
+func (v Value) sliceAccessible() []Value {
 	if v.slice == nil || v.slice.backing == nil {
 		return nil
 	}
@@ -54,9 +50,7 @@ func (v Value) SliceAccessible() []Value {
 	return b[lo:hi]
 }
 
-// SliceVisible returns the visible elements backing[lo:lo+length],
-// or nil when the window is out of range.
-func (v Value) SliceVisible() []Value {
+func (v Value) sliceVisible() []Value {
 	if v.slice == nil || v.slice.backing == nil {
 		return nil
 	}
