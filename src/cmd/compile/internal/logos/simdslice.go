@@ -221,27 +221,3 @@ func (ce *chainEmit) guardedBody(f simdSliceForm, vector, scalar []string) []str
 	lines := []string{"if " + cond + " { " + strings.Join(vector, "; ") + " } else {"}
 	return append(append(lines, scalar...), "}")
 }
-
-// runLoop builds the loop lines of a run. A bare slice `.sum()` with a
-// vector form replaces the scalar loop with the vector form behind its
-// feature check, the scalar loop staying as the else branch. A float run
-// keeps the pairwise epilogue after either branch, so the recursion is
-// spelled once. An integer run returns from the vector branch, and
-// drops the scalar loop and the epilogue when no check guards it.
-func (ce *chainEmit) runLoop() (prelude, body, epilogue []string) {
-	prelude, body, epilogue = ce.loop()
-	f, ok := ce.sliceSumForm()
-	if !ok {
-		return prelude, body, epilogue
-	}
-	ce.cg.fl.needSimd = true
-	p := ce.cg.prefix
-	if f.isFloat {
-		return prelude, ce.guardedBody(f, simdSliceStage(p, f), body), epilogue
-	}
-	vector := simdSliceAccumulate(p, f)
-	if ce.cg.fl.simdGuardCond(f.feat) == "" {
-		return prelude[:1], vector, nil
-	}
-	return prelude, ce.guardedBody(f, vector, body), epilogue
-}

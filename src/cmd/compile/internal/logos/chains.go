@@ -951,7 +951,6 @@ func (cg *chainGen) enclosingZeros() string {
 // chainEmit holds one loop emission.
 type chainEmit struct {
 	cg       *chainGen
-	call     *syntax.CallExpr
 	ops      []chainOp
 	term     chainOp
 	baseText otext
@@ -1275,14 +1274,6 @@ func (ce *chainEmit) loopO() (prelude []otext, body, epilogue []string) {
 	return prelude, body, epilogue
 }
 
-func (ce *chainEmit) loop() (prelude, body, epilogue []string) {
-	pre, body, epilogue := ce.loopO()
-	for _, p := range pre {
-		prelude = append(prelude, p.s)
-	}
-	return prelude, body, epilogue
-}
-
 // needOut reports whether the run materializes elements: slice and
 // sum, sort, last, and get terminals always append; value terminals
 // append only when a `?` rollback may need produced elements.
@@ -1552,11 +1543,6 @@ func (ce *chainEmit) epilogueSort(p string) []string {
 	}
 }
 
-// runLoopO builds the loop lines of a run. It mirrors runLoop in
-// simdslice.go; keep them in sync. A bare slice `.sum()` with a vector
-// form replaces the scalar loop with the vector form behind its feature
-// check; when no check guards it, prelude[:1] keeps only the user
-// receiver line.
 func (ce *chainEmit) runLoopO() (prelude []otext, body, epilogue []string) {
 	prelude, body, epilogue = ce.loopO()
 	f, ok := ce.sliceSumForm()
@@ -1579,7 +1565,7 @@ func (ce *chainEmit) runLoopO() (prelude []otext, body, epilogue []string) {
 func (cg *chainGen) emit(call *syntax.CallExpr, ops []chainOp, baseText otext, elemT, resultT types2.Type, term chainOp, isTry bool) {
 	fl := cg.fl
 	cg.elemT = elemT
-	ce := &chainEmit{cg: cg, call: call, ops: ops, term: term, baseText: baseText, elemT: elemT, resultT: resultT, isTry: isTry}
+	ce := &chainEmit{cg: cg, ops: ops, term: term, baseText: baseText, elemT: elemT, resultT: resultT, isTry: isTry}
 	ce.prepare()
 	prelude, body, epilogue := ce.runLoopO()
 	var parts []otext
