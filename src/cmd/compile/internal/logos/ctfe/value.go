@@ -45,9 +45,6 @@ func sliceElems(v Value) []Value {
 	return (*v.slice.backing)[v.slice.lo : v.slice.lo+v.slice.length]
 }
 
-// sliceLen counts set slice elements.
-func sliceLen(v Value) int { return v.slice.length }
-
 // BoolValue builds a boolean value.
 func BoolValue(b bool, t *Type) Value { return Value{typ: t, constant: true, bval: b} }
 
@@ -111,9 +108,6 @@ func zeroValue(t *Type) Value {
 		k := t.Kind
 		if isUntyped(k) {
 			k = KInt
-		}
-		if k == KUntypedRune {
-			k = KInt32
 		}
 		return Value{typ: &Type{Kind: k}, ival: new(big.Int)}
 	}
@@ -454,11 +448,6 @@ func (e *evaluator) convert(v Value, t *Type, pos syntax.Pos) (Value, error) {
 		return e.coerceNil(v, t, pos)
 	}
 	vk := kindOf(v)
-	if vk == t.Kind {
-		v.typ = t
-		return v, nil
-	}
-	// Named types share their underlying kind; kinds match above.
 	if v.typ != nil && v.typ.Kind == t.Kind {
 		v.typ = t
 		return v, nil
@@ -573,19 +562,11 @@ func (e *evaluator) convertToString(v Value, t *Type, pos syntax.Pos) (Value, er
 		return Value{}, e.fail(pos, "cannot convert %s to string in const evaluation", typeName(v.typ))
 	}
 	n := v.ival.Int64()
-	if v.constant {
-		// Invalid constant runes yield U+FFFD, keeping constant
-		// status, exactly like ordinary execution.
-		if n < 0 || n > utf8.MaxRune || (n >= 0xD800 && n <= 0xDFFF) {
-			return Value{typ: t, constant: true, sval: "\uFFFD"}, nil
-		}
-		return Value{typ: t, constant: true, sval: string(rune(n))}, nil
-	}
-	r := rune(n)
+	s := string(rune(n))
 	if n < 0 || n > utf8.MaxRune || (n >= 0xD800 && n <= 0xDFFF) {
-		return Value{typ: t, sval: "\uFFFD"}, nil
+		s = "\uFFFD"
 	}
-	return Value{typ: t, sval: string(r)}, nil
+	return Value{typ: t, constant: v.constant, sval: s}, nil
 }
 
 // stringToSlice implements []byte(s) and []rune(s).
@@ -847,7 +828,7 @@ func (e *evaluator) mapInsert(m, k, v Value, pos syntax.Pos) error {
 		return &Error{Code: CodeEval, Detail: "NaN is not a valid const map key", Pos: pos}
 	}
 	k = e.canonKey(k)
-	for i, ek := range m.mval.keys {
+	for _, ek := range m.mval.keys {
 		eq, err := e.equal(ek, k, pos)
 		if err != nil {
 			return err
@@ -855,7 +836,6 @@ func (e *evaluator) mapInsert(m, k, v Value, pos syntax.Pos) error {
 		if eq {
 			return &Error{Code: CodeEval, Detail: "duplicate key in const map", Pos: pos}
 		}
-		_ = i
 	}
 	m.mval.keys = append(m.mval.keys, k)
 	m.mval.vals = append(m.mval.vals, v)
@@ -1335,7 +1315,7 @@ func (e *evaluator) evalBuiltin(fr *frame, name string, c *syntax.CallExpr) (Val
 			return zeroValue(&Type{Kind: KInt}), nil
 		case v.slice != nil:
 			zero := zeroValue(v.typ.Elem)
-			for i := range sliceLen(v) {
+			for i := range v.slice.length {
 				(*v.slice.backing)[v.slice.lo+i] = zero
 			}
 			return zeroValue(&Type{Kind: KInt}), nil
@@ -1572,13 +1552,9 @@ func (e *evaluator) evalMake(fr *frame, c *syntax.CallExpr) (Value, error) {
 		if cp > e.cfg.MaxValueBytes {
 			return Value{}, &Error{Code: CodeTooLarge, Detail: fmt.Sprintf("make of %d elements", cp), Pos: pos}
 		}
-		elems := make([]Value, ln)
-		for i := range elems {
-			elems[i] = zeroValue(t.Elem)
-		}
-		backing := append([]Value(nil), elems...)
-		for len(backing) < int(cp) {
-			backing = append(backing, zeroValue(t.Elem))
+		backing := make([]Value, cp)
+		for i := range backing {
+			backing[i] = zeroValue(t.Elem)
 		}
 		return Value{typ: t, slice: &sliceVal{backing: &backing, length: int(ln), cap_: int(cp)}}, nil
 	case KMap:
