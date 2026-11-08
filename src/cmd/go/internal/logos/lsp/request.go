@@ -100,11 +100,11 @@ func (p *Proxy) target(path string) (*lowered, bool) {
 }
 
 // request forwards one client request to gopls with its URIs and
-// positions mapped to the lowered documents. It first recompiles the
-// packages whose documents changed, so the request sees every edit the
-// client made before it. A request on a loGo/s document with no current
-// lowering gets a null result, except for textDocument/codeAction, which
-// answers the compiler autofix candidates of the source itself. A
+// positions mapped to the lowered documents. It first computes the
+// snapshots the open documents are waiting for, so the request sees every
+// edit the client made before it. A request on a loGo/s document with no
+// current lowering gets a null result, except for textDocument/codeAction,
+// which answers the compiler autofix candidates of the source itself. A
 // formatting request on a loGo/s document fails with codeRequestFailed,
 // see formattingMethods.
 func (p *Proxy) request(ctx context.Context, m *message) {
@@ -118,9 +118,9 @@ func (p *Proxy) request(ctx context.Context, m *message) {
 		p.declineFormatting(m)
 		return
 	}
+	p.ensure(ctx)
 	p.work.Lock()
 	defer p.work.Unlock()
-	p.refreshLocked(ctx)
 	lw, ok := p.target(path)
 	if !ok {
 		// A codeAction request names no lowered document when the

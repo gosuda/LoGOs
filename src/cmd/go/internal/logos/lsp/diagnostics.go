@@ -20,11 +20,13 @@ const (
 // publishAll publishes the diagnostics of every open document, and clears
 // the ones published for documents since closed.
 func (p *Proxy) publishAll() {
-	p.mu.Lock()
-	uris := make(map[string]bool, len(p.docs)+len(p.sent))
-	for _, doc := range p.docs {
+	p.st.mu.Lock()
+	uris := make(map[string]bool, len(p.st.docs))
+	for _, doc := range p.st.docs {
 		uris[doc.uri] = true
 	}
+	p.st.mu.Unlock()
+	p.mu.Lock()
 	for uri := range p.sent {
 		uris[uri] = true
 	}
@@ -49,7 +51,7 @@ func (p *Proxy) publish(uri string) {
 	p.mu.Lock()
 	prev, seen := p.sent[uri]
 	same := prev == string(raw) || (count == 0 && !seen)
-	if count == 0 && p.docs[uriPathOrEmpty(uri)] == nil {
+	if count == 0 && !p.st.open(uriPathOrEmpty(uri)) {
 		delete(p.sent, uri)
 	} else {
 		p.sent[uri] = string(raw)
@@ -77,30 +79,57 @@ func uriPathOrEmpty(uri string) string {
 // reported at the same place with the same text.
 func (p *Proxy) diagnosticsParams(uri string) (map[string]any, int) {
 	path := uriPathOrEmpty(uri)
+	p.st.mu.Lock()
+	doc := p.st.docs[path]
+	u := p.st.unitFor(path)
+	extra := p.compilerItems(path, doc, u)
+	p.st.mu.Unlock()
+	docState := documentState{open: doc != nil, version: docStateVersion(doc), text: docText(doc)}
 	tb := p.tables.Load()
 	p.mu.Lock()
-	doc := p.docs[path]
 	lw := tb.bySrc[path]
-	items := p.serverItems(tb, uri, path, lw, doc)
-	extra := p.compilerItems(path, doc)
+	items := p.serverItems(tb, uri, path, lw, docState)
 	p.mu.Unlock()
 	items = mergeDiagnostics(items, extra)
 	params := map[string]any{"uri": uri, "diagnostics": items}
 	if doc != nil {
-		params["version"] = doc.version
+		params["version"] = docState.version
 	}
 	return params, len(items)
+}
+
+// documentState is one locked observation of an open document.
+type documentState struct {
+	open    bool
+	version int
+	text    *text
+}
+
+// docStateVersion returns the version of doc, or zero for none.
+func docStateVersion(doc *document) int {
+	if doc == nil {
+		return 0
+	}
+	return doc.version
+}
+
+// docText returns the text of doc, or nil for none.
+func docText(doc *document) *text {
+	if doc == nil {
+		return nil
+	}
+	return doc.text
 }
 
 // serverItems returns the diagnostics gopls published for the document, in
 // the coordinates of the client's text. A loGo/s document shows them only
 // when it is open, its lowering is current, and gopls published them for
 // the lowered text it holds now. The caller holds p.mu.
-func (p *Proxy) serverItems(tb *tables, uri, path string, lw *lowered, doc *document) []any {
+func (p *Proxy) serverItems(tb *tables, uri, path string, lw *lowered, doc documentState) []any {
 	if !isLogosPath(path) {
 		return decodeItems(p.srvDiags[uri].raw, tb, nil)
 	}
-	if doc == nil || lw == nil || !lw.fresh {
+	if !doc.open || lw == nil || !lw.fresh {
 		return nil
 	}
 	sd := p.srvDiags[lw.virtURI()]
@@ -124,10 +153,9 @@ func decodeItems(raw json.RawMessage, tb *tables, lw *lowered) []any {
 
 // compilerItems returns the compiler diagnostics of the open document at
 // path as LSP diagnostics. Diagnostics computed against another version of
-// the document are left out until the next compile replaces them. The
-// caller holds p.mu.
-func (p *Proxy) compilerItems(path string, doc *document) []any {
-	u := p.unitFor(path)
+// the document are left out until the next snapshot replaces them. The
+// caller holds p.st.mu.
+func (p *Proxy) compilerItems(path string, doc *document, u *unit) []any {
 	if doc == nil || u == nil || u.diagVersions[path] != doc.version {
 		return nil
 	}

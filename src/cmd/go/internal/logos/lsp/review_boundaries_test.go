@@ -75,7 +75,6 @@ func Dependent() int {
 			}
 		},
 		Tune: func(f *fixture, o *Options) {
-			o.Debounce = -1
 			f.comp.setClosure(f.path("b"), f.path("a"))
 		},
 	})
@@ -178,9 +177,6 @@ func Read(path string) (string, error) {
 					},
 				}
 			},
-			Tune: func(f *fixture, o *Options) {
-				o.Debounce = -1
-			},
 		})
 
 		f.open("a/a.lgo", 1)
@@ -226,9 +222,6 @@ func Read(path string) (string, error) {
 						"textDocument/formatting": toJSON(t, goEdits),
 					},
 				}
-			},
-			Tune: func(f *fixture, o *Options) {
-				o.Debounce = -1
 			},
 		})
 

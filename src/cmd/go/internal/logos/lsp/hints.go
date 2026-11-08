@@ -121,36 +121,30 @@ type hintsSnapshot struct {
 
 // hintsState returns the hints snapshot of the package that holds path.
 func (p *Proxy) hintsState(path string) hintsSnapshot {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	u := p.unitFor(path)
+	p.st.mu.Lock()
+	defer p.st.mu.Unlock()
+	u := p.st.unitFor(path)
 	if u == nil {
 		return hintsSnapshot{}
 	}
 	if u.hintsOK {
 		return hintsSnapshot{unit: u, gen: u.gen, hit: true, hints: u.hints}
 	}
-	return hintsSnapshot{unit: u, gen: u.gen, buffers: p.buffersLocked()}
+	buffers := make(map[string][]byte, len(p.st.docs))
+	for path, doc := range p.st.docs {
+		buffers[path] = doc.text.data
+	}
+	return hintsSnapshot{unit: u, gen: u.gen, buffers: buffers}
 }
 
 // storeHints caches hints computed from the snapshot st, unless the unit
-// changed or was compiled again while they were computed.
+// changed or was computed again while they were computed.
 func (p *Proxy) storeHints(st hintsSnapshot, hints json.RawMessage) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.units[st.unit.dir] == st.unit && st.unit.gen == st.gen {
+	p.st.mu.Lock()
+	defer p.st.mu.Unlock()
+	if p.st.units[st.unit.dir] == st.unit && st.unit.gen == st.gen {
 		st.unit.hints, st.unit.hintsOK = hints, true
 	}
-}
-
-// buffersLocked returns the texts of the open documents by path. The
-// caller holds p.mu.
-func (p *Proxy) buffersLocked() map[string][]byte {
-	buffers := make(map[string][]byte, len(p.docs))
-	for path, doc := range p.docs {
-		buffers[path] = doc.text.data
-	}
-	return buffers
 }
 
 // appendList appends the list extra to the list base. A base that is not
@@ -238,9 +232,9 @@ func (p *Proxy) mergeCodeActions(pend pending, result any) any {
 // docVersion returns the version of the open document at path, or false
 // when the document is not open.
 func (p *Proxy) docVersion(path string) (int, bool) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	doc := p.docs[path]
+	p.st.mu.Lock()
+	defer p.st.mu.Unlock()
+	doc := p.st.docs[path]
 	if doc == nil {
 		return 0, false
 	}
@@ -262,9 +256,9 @@ type autofixState struct {
 // under one lock, so an edit cannot slip between the version check and
 // the read.
 func (p *Proxy) autofixObserve(path string) autofixState {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	doc, u := p.docs[path], p.unitFor(path)
+	p.st.mu.Lock()
+	defer p.st.mu.Unlock()
+	doc, u := p.st.docs[path], p.st.unitFor(path)
 	if doc == nil {
 		return autofixState{}
 	}

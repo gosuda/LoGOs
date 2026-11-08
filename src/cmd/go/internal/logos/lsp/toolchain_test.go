@@ -52,15 +52,7 @@ func realWorkspace(t *testing.T) (root string, tc *toolchain) {
 			t.Fatal(err)
 		}
 	}
-	tc, err = newToolchain(testenv.GoToolPath(t))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		if err := tc.Close(); err != nil {
-			t.Errorf("cleaning up toolchain: %v", err)
-		}
-	})
+	tc = newToolchain(testenv.GoToolPath(t))
 	return root, tc
 }
 
@@ -151,10 +143,6 @@ func TestToolchainWritesNoBinaryForMainPackage(t *testing.T) {
 	}
 	if after := listDir(t, appDir); !slices.Equal(before, after) {
 		t.Errorf("the package directory held %v and holds %v after lowering", before, after)
-	}
-	bin, err := os.ReadDir(filepath.Join(tc.stage, "bin"))
-	if err == nil && len(bin) != 0 {
-		t.Errorf("the scratch executable directory keeps %d entries", len(bin))
 	}
 }
 
@@ -287,125 +275,5 @@ func TestToolchainHints(t *testing.T) {
 				t.Errorf("report sites = %+v, want one try site", report.Files[0].Sites)
 			}
 		})
-	}
-}
-
-// TestImportConfigAndHintSources checks the two pure steps of the hints
-// runner: the importcfg holds the dependencies' export data but not the
-// target's own, and unsaved buffers are written under their base names.
-func TestImportConfigAndHintSources(t *testing.T) {
-	target := pkgInfo{importPath: "example.com/m/a", dir: "/w/a", files: []string{"a.lgo", "b.lgo"}, export: "/cache/a.a"}
-	pkgs := []pkgInfo{
-		{importPath: "fmt", export: "/cache/fmt.a", standard: true},
-		{importPath: "broken"},
-		target,
-	}
-	if got, want := string(importConfig(pkgs, target)), "packagefile fmt=/cache/fmt.a\n"; got != want {
-		t.Errorf("importConfig = %q, want %q", got, want)
-	}
-	work := t.TempDir()
-	files, err := hintSources(work, target, map[string][]byte{"/w/a/b.lgo": []byte("unsaved")})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if want := []string{"/w/a/a.lgo", filepath.Join(work, "src", "b.lgo")}; !slices.Equal(files, want) {
-		t.Errorf("hintSources = %v, want %v", files, want)
-	}
-	if data, _ := os.ReadFile(files[1]); string(data) != "unsaved" {
-		t.Errorf("the buffer copy holds %q", data)
-	}
-}
-
-// TestHintsArchLevelsFollowsModuleTargetCPU checks that the hints compile
-// environment follows the module's target_cpu and that an explicit user
-// setting wins over the file: a baseline module selects the baseline
-// levels, a module without logos.toml selects the deterministic levels,
-// the file's levels reach the compile environment, and GOAMD64/GOARM64
-// in the environment override the file.
-func TestHintsArchLevelsFollowsModuleTargetCPU(t *testing.T) {
-	root := t.TempDir()
-	writeFile := func(dir, name, content string) {
-		t.Helper()
-		if err := os.MkdirAll(dir, 0o777); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o666); err != nil {
-			t.Fatal(err)
-		}
-	}
-	baseline := filepath.Join(root, "baseline")
-	writeFile(baseline, "go.mod", "module example.com/base\n\ngo 1.27\n")
-	writeFile(baseline, "logos.toml", "[build]\ntarget_cpu = \"baseline\"\n")
-	if amd64, arm64 := hintsArchLevels(baseline); amd64 != "v1" || arm64 != "v8.0" {
-		t.Errorf("baseline levels = (%q, %q), want (v1, v8.0)", amd64, arm64)
-	}
-	plain := filepath.Join(root, "plain")
-	writeFile(plain, "go.mod", "module example.com/plain\n\ngo 1.27\n")
-	if amd64, arm64 := hintsArchLevels(plain); amd64 != "v3" || arm64 != "v8.2" {
-		t.Errorf("default levels = (%q, %q), want (v3, v8.2)", amd64, arm64)
-	}
-	// Without explicit settings the file's levels reach the compile
-	// environment: empty process values count as unset here, as in
-	// hintsEnv, so the file path is exercised deterministically.
-	t.Setenv("GOAMD64", "")
-	t.Setenv("GOARM64", "")
-	if env := hintsEnv(baseline); !slices.Contains(env, "GOAMD64=v1") || !slices.Contains(env, "GOARM64=v8.0") {
-		t.Errorf("file levels missing from hints env: %q", env)
-	}
-	// An explicit user setting wins over the file: the file's levels
-	// must not reach the compile environment.
-	t.Setenv("GOAMD64", "v4")
-	t.Setenv("GOARM64", "v8.1")
-	if env := hintsEnv(baseline); !slices.Contains(env, "GOAMD64=v4") || !slices.Contains(env, "GOARM64=v8.1") ||
-		slices.Contains(env, "GOAMD64=v1") || slices.Contains(env, "GOARM64=v8.0") {
-		t.Errorf("explicit environment lost in hints env: %q", env)
-	}
-}
-
-// TestExecutableDirFlag checks that only a single-main build gets an output
-// override, and that the override is the null device.
-func TestExecutableDirFlag(t *testing.T) {
-	bin := filepath.Join(t.TempDir(), "bin")
-	lib, app := pkgInfo{importPath: "m/lib", name: "lib"}, pkgInfo{importPath: "m/app", name: "main"}
-	cases := []struct {
-		name    string
-		targets []pkgInfo
-		want    bool
-	}{
-		{"one main package", []pkgInfo{app}, true},
-		{"one library", []pkgInfo{lib}, false},
-		{"a library and a main package", []pkgInfo{lib, app}, false},
-		{"two main packages", []pkgInfo{app, app}, false},
-	}
-	for _, c := range cases {
-		flag, err := executableDirFlag(c.targets, bin)
-		if err != nil {
-			t.Fatalf("%s: %v", c.name, err)
-		}
-		if got := len(flag) > 0; got != c.want {
-			t.Errorf("%s: flag = %v, want one: %v", c.name, flag, c.want)
-		}
-		if c.want && (len(flag) != 2 || flag[0] != "-o" || flag[1] != os.DevNull) {
-			t.Errorf("%s: flag = %v, want -o %s", c.name, flag, os.DevNull)
-		}
-	}
-}
-
-// TestParseClosure checks the list output parser, including a package with
-// no files and a malformed line.
-func TestParseClosure(t *testing.T) {
-	out := "fmt\t/g/fmt\tfmt\ttrue\t/c/fmt.a\tprint.go\tformat.go\nexample.com/m/a\t/w/a\ta\tfalse\t\ta.lgo\nexample.com/m/empty\t/w/e\tmain\tfalse\t\n"
-	pkgs, err := parseClosure([]byte(out))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(pkgs) != 3 || !pkgs[0].standard || pkgs[0].export != "/c/fmt.a" || !slices.Equal(pkgs[0].files, []string{"print.go", "format.go"}) {
-		t.Errorf("packages = %+v", pkgs)
-	}
-	if pkgs[1].standard || pkgs[1].name != "a" || pkgs[1].export != "" || !slices.Equal(pkgs[1].logosFiles(), []string{"a.lgo"}) || len(pkgs[2].files) != 0 || pkgs[2].name != "main" {
-		t.Errorf("packages = %+v", pkgs)
-	}
-	if _, err := parseClosure([]byte("only\ttwo\tthree\tfour\n")); err == nil {
-		t.Error("parseClosure accepted a short line")
 	}
 }

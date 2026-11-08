@@ -35,10 +35,11 @@
 // a loGo/s document whose lowering is not current, because the package
 // does not compile at the client's text, gets a null result, except for
 // textDocument/codeAction, which still answers the compiler autofix
-// candidates of the source itself. Edits of the
-// client update the proxy's text of the document at once; the proxy
-// recompiles before it forwards the next request, after the client stops
-// typing for the debounce delay, and on open and save.
+// candidates of the source itself. Edits of the client update the proxy's
+// text of the document at once; the lowered snapshots are computed on
+// demand, once per version set, by the next request, a didSave, or the
+// didClose of a document whose unsaved text a snapshot used. Nothing
+// compiles without one of those events.
 //
 // What gopls reports about text the lowering wrote, and the user never
 // did, is removed: inlay hints inside generated text (the type of the error
@@ -154,10 +155,7 @@ func runLSP(ctx context.Context, cmd *base.Command, args []string) {
 	if err != nil {
 		base.Fatalf("logos lsp: %v", err)
 	}
-	tc, err := newToolchain(exe)
-	if err != nil {
-		base.Fatalf("logos lsp: %v", err)
-	}
+	tc := newToolchain(exe)
 	err = Serve(ctx, os.Stdin, os.Stdout, Options{
 		Gopls:       gopls,
 		Env:         goplsEnv(os.Environ(), filepath.Join(cfg.GOROOT, "bin")),

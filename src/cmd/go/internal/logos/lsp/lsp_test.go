@@ -448,7 +448,6 @@ func newFixture(t *testing.T, files map[string]string, fo fixtureOptions) *fixtu
 		Gopls:    []string{os.Args[0], "-mode=stdio"},
 		Env:      append(os.Environ(), fakeEnv+"="+scriptPath, fakeLogEnv+"="+f.log),
 		Compiler: f.comp,
-		Debounce: -1,
 	}
 	if fo.Tune != nil {
 		fo.Tune(f, &opts)
@@ -685,15 +684,6 @@ func TestProxyMapsRequestsAndResponses(t *testing.T) {
 	f.sync()
 	aURI := f.uri("a/a.lgo")
 
-	if opened := f.receivedMethod("textDocument/didOpen"); len(opened) != 1 {
-		t.Fatalf("gopls got %d didOpen messages, want one for the lowered document: %v", len(opened), opened)
-	} else {
-		item, _ := opened[0]["textDocument"].(map[string]any)
-		if item["uri"] != f.virtURI("a/a.lgo") || item["text"] != lowText || item["languageId"] != "go" {
-			t.Errorf("lowered document opened as %v, want %s with the lowered text as go", item, f.virtURI("a/a.lgo"))
-		}
-	}
-
 	t.Run("hover on an operand inside the ? statement", func(t *testing.T) {
 		res := f.client.call("textDocument/hover", positionParams(aURI, origOperand))
 		uri, pos := forwardedPosition(t, f, "textDocument/hover", 0)
@@ -705,6 +695,14 @@ func TestProxyMapsRequestsAndResponses(t *testing.T) {
 			"range":    origCall,
 		})
 	})
+	if opened := f.receivedMethod("textDocument/didOpen"); len(opened) != 1 {
+		t.Fatalf("gopls got %d didOpen messages, want one for the lowered document: %v", len(opened), opened)
+	} else {
+		item, _ := opened[0]["textDocument"].(map[string]any)
+		if item["uri"] != f.virtURI("a/a.lgo") || item["text"] != lowText || item["languageId"] != "go" {
+			t.Errorf("lowered document opened as %v, want %s with the lowered text as go", item, f.virtURI("a/a.lgo"))
+		}
+	}
 	t.Run("hover on the ?", func(t *testing.T) {
 		f.client.call("textDocument/hover", positionParams(aURI, origQ))
 		_, pos := forwardedPosition(t, f, "textDocument/hover", 1)
@@ -850,23 +848,25 @@ func TestProxyEditsUpdateOverlay(t *testing.T) {
 	lowOperand := shift(findPos(t, string(lowEdited), "ReadFile(path)", 0), len("ReadFile("))
 	f.client.call("textDocument/hover", positionParams(aURI, origOperand))
 
+	opened := f.receivedMethod("textDocument/didOpen")
+	if len(opened) != 1 {
+		t.Fatalf("gopls got %d lowered didOpen messages, want the one of the edited text", len(opened))
+	}
+	if td, _ := opened[0]["textDocument"].(map[string]any); td["uri"] != f.virtURI("a/a.lgo") {
+		t.Errorf("didOpen sent for %v, want the lowered document", td["uri"])
+	}
+	if text, _ := opened[0]["textDocument"].(map[string]any)["text"].(string); text != string(lowEdited) {
+		t.Errorf("gopls got the lowered text %q, want %q", text, lowEdited)
+	}
 	var order []string
 	for _, m := range f.received() {
 		switch m.Method {
-		case "textDocument/didChange", "textDocument/hover":
+		case "textDocument/didOpen", "textDocument/hover":
 			order = append(order, m.Method)
 		}
 	}
-	if want := []string{"textDocument/didChange", "textDocument/hover"}; !slices.Equal(order, want) {
-		t.Fatalf("gopls got %v, want the lowered change before the request: %v", order, want)
-	}
-	changes := f.receivedMethod("textDocument/didChange")
-	edits, _ := changes[0]["contentChanges"].([]any)
-	if text, _ := edits[0].(map[string]any)["text"].(string); text != string(lowEdited) {
-		t.Errorf("gopls got the lowered text %q, want %q", text, lowEdited)
-	}
-	if td, _ := changes[0]["textDocument"].(map[string]any); td["uri"] != f.virtURI("a/a.lgo") {
-		t.Errorf("change sent for %v, want the lowered document", td["uri"])
+	if want := []string{"textDocument/didOpen", "textDocument/hover"}; !slices.Equal(order, want) {
+		t.Fatalf("gopls got %v, want the lowered document before the request: %v", order, want)
 	}
 	if _, pos := forwardedPosition(t, f, "textDocument/hover", 0); pos != lowOperand {
 		t.Errorf("hover forwarded at %v, want %v through the new lowering", pos, lowOperand)
@@ -950,6 +950,7 @@ func TestProxyMergesDiagnostics(t *testing.T) {
 			Start: [2]int{3, 1}, End: [2]int{3, 7}}),
 	)
 	f.open("a/a.lgo", 7)
+	f.client.call("textDocument/hover", positionParams(f.uri("a/a.lgo"), Position{}))
 
 	params := f.client.notification(func(m map[string]any) bool {
 		items, _ := m["diagnostics"].([]any)
@@ -994,6 +995,7 @@ func TestProxyDiagnosticsFollowEdits(t *testing.T) {
 	f.comp.setDiagnostics(filepath.Dir(aPath),
 		compilerDiag(t, diagSpec{Path: aPath, Severity: "deny", Message: "first", Start: [2]int{1, 1}, End: [2]int{1, 8}}))
 	f.open("a/a.lgo", 1)
+	f.client.call("textDocument/hover", positionParams(f.uri("a/a.lgo"), Position{}))
 	f.client.notification(func(m map[string]any) bool {
 		items, _ := m["diagnostics"].([]any)
 		return len(items) == 1
@@ -1116,6 +1118,7 @@ func TestProxyClosesLoweredDocuments(t *testing.T) {
 	f.comp.setDiagnostics(filepath.Dir(aPath),
 		compilerDiag(t, diagSpec{Path: aPath, Severity: "deny", Message: "m", Start: [2]int{1, 1}, End: [2]int{1, 2}}))
 	f.open("a/a.lgo", 1)
+	f.client.call("textDocument/hover", positionParams(f.uri("a/a.lgo"), Position{}))
 	f.client.notification(func(m map[string]any) bool {
 		items, _ := m["diagnostics"].([]any)
 		return len(items) == 1
@@ -1336,6 +1339,7 @@ func TestProxyMergesDiagnosticsOfGoDocuments(t *testing.T) {
 			Start: [2]int{3, 5}, End: [2]int{3, 6}}),
 	)
 	f.open("p/p.go", 4)
+	f.client.call("textDocument/hover", positionParams(f.uri("p/p.go"), Position{}))
 	params := f.client.notification(func(m map[string]any) bool {
 		items, _ := m["diagnostics"].([]any)
 		return m["uri"] == f.uri("p/p.go") && len(items) == 2
@@ -1416,7 +1420,6 @@ func TestProxyCodeActionWithoutLoweringUsesCompiler(t *testing.T) {
 		Gopls:       []string{os.Args[0], "-mode=stdio"},
 		Env:         append(os.Environ(), fakeEnv+"="+scriptPath, fakeLogEnv+"="+logPath),
 		Compiler:    tc,
-		Debounce:    -1,
 		CodeActions: codeActionsAdapter,
 	})
 	client.call("initialize", map[string]any{
@@ -1490,7 +1493,6 @@ func TestProxyCodeActionInflightEditDropsWholeAnswer(t *testing.T) {
 			}
 		},
 		Tune: func(f *fixture, o *Options) {
-			o.Debounce = -1
 			o.CodeActions = codeActionsAdapter
 		},
 	})
@@ -1599,7 +1601,13 @@ func TestProxyHoverAfterCloseSeesDiskText(t *testing.T) {
 	if !ok {
 		t.Fatal("aLgo does not lower")
 	}
-	f := newFixture(t, map[string]string{"a/a.lgo": aLgo}, fixtureOptions{})
+	f := newFixture(t, map[string]string{"a/a.lgo": aLgo}, fixtureOptions{
+		Script: func(string) fakeScript {
+			return fakeScript{Responses: map[string]json.RawMessage{
+				"textDocument/hover": toJSON(t, map[string]any{"contents": map[string]any{"kind": "plaintext", "value": "disk"}}),
+			}}
+		},
+	})
 	aPath, aURI := f.path("a/a.lgo"), f.uri("a/a.lgo")
 	f.openText("a/a.lgo", 1, unsaved)
 	f.client.notify("textDocument/didClose", map[string]any{"textDocument": map[string]any{"uri": aURI}})

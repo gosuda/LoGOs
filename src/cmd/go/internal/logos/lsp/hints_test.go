@@ -9,7 +9,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -265,36 +264,6 @@ func TestProxyCodeActionsHook(t *testing.T) {
 	sameJSON(t, "range given to the hook", c.rng, rng)
 }
 
-// TestProxyRecompilesAfterDebounce checks the background path: with a
-// debounce delay set, an edit reaches gopls without any request, and one
-// recompile covers a burst of edits.
-func TestProxyRecompilesAfterDebounce(t *testing.T) {
-	f := newFixture(t, map[string]string{"a/a.lgo": aLgo}, fixtureOptions{
-		Tune: func(f *fixture, o *Options) { o.Debounce = 80 * time.Millisecond },
-	})
-	f.open("a/a.lgo", 1)
-	f.sync()
-	before := len(f.comp.lowerCalls())
-	for v := 2; v <= 4; v++ {
-		f.client.notify("textDocument/didChange", map[string]any{
-			"textDocument":   map[string]any{"uri": f.uri("a/a.lgo"), "version": v},
-			"contentChanges": []any{map[string]any{"text": aLgo + "// v\n"}},
-		})
-	}
-	eventually(t, "the background recompile", func() bool { return len(f.comp.lowerCalls()) > before })
-	f.sync()
-	if got := len(f.receivedMethod("textDocument/didChange")); got != 1 {
-		t.Errorf("gopls got %d lowered changes, want the one of the background recompile", got)
-	}
-	if got := len(f.comp.lowerCalls()) - before; got != 1 {
-		t.Errorf("a burst of 3 edits caused %d recompiles, want 1", got)
-	}
-	data, _ := os.ReadFile(f.path("a/a.lgo"))
-	if string(data) != aLgo {
-		t.Errorf("the file on disk changed to %q", data)
-	}
-}
-
 // TestProxyHintsCacheKeepsEmptyAnswer checks the cache keys on a hit flag,
 // not on the content: a runner whose answer is JSON null is not run again
 // for the next request.
@@ -374,17 +343,5 @@ func TestProxyDoesNotCacheHintsOfAnOlderCompile(t *testing.T) {
 	defer mu.Unlock()
 	if runs != 2 {
 		t.Errorf("the runner ran %d times, want 2: the run of the old text must not be cached", runs)
-	}
-}
-
-// eventually polls cond until it holds, failing after waitLimit.
-func eventually(t *testing.T, what string, cond func() bool) {
-	t.Helper()
-	deadline := time.Now().Add(waitLimit)
-	for !cond() {
-		if time.Now().After(deadline) {
-			t.Fatalf("timed out waiting for %s", what)
-		}
-		time.Sleep(20 * time.Millisecond)
 	}
 }

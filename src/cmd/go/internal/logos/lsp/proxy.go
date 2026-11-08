@@ -18,10 +18,6 @@ import (
 	"time"
 )
 
-// defaultDebounce is how long the proxy waits after the last edit before
-// it recompiles in the background.
-const defaultDebounce = 300 * time.Millisecond
-
 // stopGrace is how long a stopping proxy waits for gopls to exit before it
 // kills it.
 const stopGrace = 3 * time.Second
@@ -45,12 +41,6 @@ type Options struct {
 	// Compiler lowers sources and reports compiler diagnostics.
 	Compiler Compiler
 
-	// Debounce is the delay between the last edit and the background
-	// recompile. Zero means 300 ms; a negative value turns background
-	// recompiles off, leaving the recompile before each request and on
-	// open and save.
-	Debounce time.Duration
-
 	// Hints serves compiler hints for inlayHint and hover requests, and
 	// HintsJSON produces the hints JSON of one package. Both nil means the
 	// proxy serves only what gopls reports. See HintsFunc.
@@ -60,35 +50,6 @@ type Options struct {
 	// CodeActions adds the code actions of the compiler autofix candidates
 	// to the answer of a codeAction request. See CodeActionsFunc.
 	CodeActions CodeActionsFunc
-}
-
-// document is an open document of the client.
-type document struct {
-	uri     string
-	path    string
-	version int
-	text    *text
-}
-
-// unit is one open package directory: the dependency closure it was last
-// compiled with, and what that compile produced.
-type unit struct {
-	dir   string
-	dirs  map[string]bool
-	paths map[string]bool
-	diags []Diagnostic
-	dirty bool
-
-	// diagVersions holds the version of each open document at the time diags
-	// was computed, so diagnostics are never shown against a newer text.
-	diagVersions map[string]int
-
-	// gen counts the changes of the unit's inputs and results, so work
-	// computed from an older state is never stored as current.
-	gen int
-
-	hints   json.RawMessage
-	hintsOK bool
 }
 
 // virtDoc is a lowered document open in gopls.
@@ -142,22 +103,21 @@ type Proxy struct {
 	// pub serializes diagnostics publication.
 	pub sync.Mutex
 
-	// tasks counts the background work: the debounce timer callback and
-	// the hint merges.
+	// tasks counts the hint merges running outside the loops.
 	tasks sync.WaitGroup
 
+	st store
+
 	mu       sync.Mutex
-	docs     map[string]*document
-	units    map[string]*unit
 	files    map[string]*lowered
 	virt     map[string]*virtDoc
 	pending  map[string]pending
 	srvDiags map[string]serverDiags
 	sent     map[string]string
-	timer      *time.Timer
-	stopped    bool
-	shutdown   bool
-	settled    chan struct{}
+	stopped  bool
+	shutdown bool
+	settled  chan struct{}
+
 	lastLogErr error
 }
 
@@ -166,12 +126,9 @@ func newProxy(out io.Writer, opts Options) *Proxy {
 	if opts.Stderr == nil {
 		opts.Stderr = os.Stderr
 	}
-	opts.Debounce = cmp.Or(opts.Debounce, defaultDebounce)
 	p := &Proxy{
 		opts:     opts,
 		client:   &writer{w: out},
-		docs:     make(map[string]*document),
-		units:    make(map[string]*unit),
 		files:    make(map[string]*lowered),
 		virt:     make(map[string]*virtDoc),
 		pending:  make(map[string]pending),
@@ -179,6 +136,7 @@ func newProxy(out io.Writer, opts Options) *Proxy {
 		sent:     make(map[string]string),
 		settled:  make(chan struct{}, 1),
 	}
+	p.st.init()
 	p.tables.Store(&tables{})
 	return p
 }
@@ -345,12 +303,9 @@ func (p *Proxy) drain(gopls <-chan struct{}) {
 // log; it does not change what Serve returns. ctx is the context given to
 // start.
 func (p *Proxy) stop(ctx context.Context, srv *server, cancelWork context.CancelFunc) {
-	p.mu.Lock()
+	p.st.mu.Lock()
 	p.stopped = true
-	if p.timer != nil && p.timer.Stop() {
-		p.tasks.Done()
-	}
-	p.mu.Unlock()
+	p.st.mu.Unlock()
 	cancelWork()
 	p.tasks.Wait()
 	if c, ok := p.server.w.(io.Closer); ok {

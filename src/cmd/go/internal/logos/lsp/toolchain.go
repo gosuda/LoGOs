@@ -5,11 +5,9 @@
 package lsp
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,69 +17,71 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
-	"strings"
 	"sync"
 
 	"cmd/go/internal/cfg"
-	"cmd/go/internal/logos/config"
-	"cmd/internal/logos/editmap"
-	"cmd/internal/quoted"
 )
 
-// listTemplate prints one tab-separated line for each package of the
-// dependency closure: import path, directory, package name, whether it
-// belongs to the standard library, the export data file (empty unless the
-// list was asked to build exports), then the file names of the package,
-// which include its loGo/s sources.
-const listTemplate = `{{.ImportPath}}{{"\t"}}{{.Dir}}{{"\t"}}{{.Name}}{{"\t"}}{{.Standard}}{{"\t"}}{{.Export}}{{range .GoFiles}}{{"\t"}}{{.}}{{end}}{{"\n"}}`
+// compiledArgs are the arguments of the one logos list run that lowers a
+// package and its closure: -compiled builds the export data, -json prints
+// the packages with the logos fields, the overlay carries the unsaved
+// buffers, and --json-diagnostics turns the compile diagnostics of the
+// build into JSON lines on stderr.
+var compiledArgs = []string{"list", "-e", "-deps", "-export", "-compiled", "-json", "--json-diagnostics"}
+
+// compiledPkg is one package of a logos list -compiled -json run.
+type compiledPkg struct {
+	ImportPath string
+	Dir        string
+	Name       string
+	Standard   bool
+	DepOnly    bool
+	GoFiles    []string
+	LogosFiles []compiledFile
+	LogosHints json.RawMessage
+	LogosDiags []json.RawMessage
+}
+
+// compiledFile is the lowering of one loGo/s source file.
+type compiledFile struct {
+	File         string
+	LogosLowered string
+	LogosEditMap json.RawMessage
+}
+
+// listRun is the result of one logos list -compiled run over a version
+// set: the lowering of every package of the closure, the diagnostics of
+// the build by package directory, and the hints JSON by package directory.
+type listRun struct {
+	key   string
+	pkgs  []compiledPkg
+	diags map[string][]Diagnostic
+	hints map[string]json.RawMessage
+}
 
 // toolchain is the production Compiler. It runs the logos command, the
-// executable of the process itself, as a subprocess for every request, so
-// a fatal error of the go command never takes the proxy down. Unsaved
-// buffers reach the subprocess through its -overlay flag; lowered text
-// comes from the -logos.eject compiler flag, which the build passes to the
-// loGo/s packages of the closure only, and which makes those packages skip
-// the build cache.
+// executable of the process itself, as a subprocess, so a fatal error of
+// the go command never takes the proxy down. One logos list -compiled
+// -json -overlay=<file> run lowers every loGo/s file of the closure, and
+// returns the lowered texts, the edit maps, the hints JSON, and the
+// compiler diagnostics of the build. Unsaved buffers reach the run through
+// its -overlay flag. The result of a run is kept for its version set: a
+// Lower, a Diagnose, and a Hints call on the same inputs share one run.
 type toolchain struct {
-	exe   string
-	stage string
+	exe string
 
-	mu  sync.Mutex
-	gen int
+	mu   sync.Mutex
+	last *listRun
 }
 
-// newToolchain returns a toolchain that runs exe and keeps its scratch
-// files in a fresh directory under the system temporary directory.
-func newToolchain(exe string) (*toolchain, error) {
-	stage, err := os.MkdirTemp("", "logoslsp")
-	if err != nil {
-		return nil, err
-	}
-	return &toolchain{exe: exe, stage: stage}, nil
-}
-
-// Close removes the scratch directory.
-func (t *toolchain) Close() error { return os.RemoveAll(t.stage) }
-
-// pkgInfo is one package of a dependency closure.
-type pkgInfo struct {
-	importPath string
-	dir        string
-	name       string
-	standard   bool
-	export     string
-	files      []string
-}
-
-// logosFiles returns the loGo/s source files of p.
-func (p pkgInfo) logosFiles() []string {
-	return slices.DeleteFunc(slices.Clone(p.files), func(name string) bool { return !cfg.IsLogosFile(name) })
+// newToolchain returns a toolchain that runs exe as logos.
+func newToolchain(exe string) *toolchain {
+	return &toolchain{exe: exe}
 }
 
 // overlay is the -overlay file of one run, with the backing copies of the
 // buffers it replaces.
 type overlay struct {
-	root string
 	json string
 	back map[string]string
 }
@@ -91,23 +91,22 @@ type overlay struct {
 // base name of its source, so the compiler still sees a loGo/s file and
 // names its output after the source; each lives in a directory of its own
 // so equal base names cannot collide.
-func (t *toolchain) newOverlay(buffers map[string][]byte) (*overlay, error) {
-	t.mu.Lock()
-	t.gen++
-	root := filepath.Join(t.stage, "buf", strconv.Itoa(t.gen))
-	t.mu.Unlock()
-	ov := &overlay{root: root, json: filepath.Join(root, "overlay.json"), back: make(map[string]string, len(buffers))}
-	replace := make(map[string]string, len(buffers))
-	if err := os.MkdirAll(root, 0o777); err != nil {
+func newOverlay(buffers map[string][]byte) (*overlay, error) {
+	root, err := os.MkdirTemp("", "logoslsp")
+	if err != nil {
 		return nil, err
 	}
+	ov := &overlay{json: filepath.Join(root, "overlay.json"), back: make(map[string]string, len(buffers))}
+	replace := make(map[string]string, len(buffers))
 	for i, path := range slices.Sorted(maps.Keys(buffers)) {
 		dir := filepath.Join(root, strconv.Itoa(i))
 		if err := os.MkdirAll(dir, 0o777); err != nil {
+			os.RemoveAll(root)
 			return nil, err
 		}
 		backing := filepath.Join(dir, filepath.Base(path))
 		if err := os.WriteFile(backing, buffers[path], 0o666); err != nil {
+			os.RemoveAll(root)
 			return nil, err
 		}
 		replace[path] = backing
@@ -115,13 +114,20 @@ func (t *toolchain) newOverlay(buffers map[string][]byte) (*overlay, error) {
 	}
 	data, err := json.Marshal(map[string]map[string]string{"Replace": replace})
 	if err != nil {
+		os.RemoveAll(root)
 		return nil, err
 	}
-	return ov, os.WriteFile(ov.json, data, 0o666)
+	if err := os.WriteFile(ov.json, data, 0o666); err != nil {
+		os.RemoveAll(root)
+		return nil, err
+	}
+	return ov, nil
 }
 
 // release removes the overlay files.
-func (ov *overlay) release() error { return os.RemoveAll(ov.root) }
+func (ov *overlay) release() error {
+	return os.RemoveAll(filepath.Dir(ov.json))
+}
 
 // source returns the source path a compiler path refers to: the path of
 // the buffer when file is one of the backing files, else file itself.
@@ -137,16 +143,9 @@ func (ov *overlay) source(file string) string {
 // executable is named, so it keeps logos mode. A command that ran and
 // failed is not an error here: its diagnostics are the answer.
 func (t *toolchain) run(ctx context.Context, dir string, args ...string) (stdout, stderr []byte, err error) {
-	return t.runEnv(ctx, dir, nil, args...)
-}
-
-// runEnv is run with cmd.Env set to env. A nil env inherits the process
-// environment.
-func (t *toolchain) runEnv(ctx context.Context, dir string, env []string, args ...string) (stdout, stderr []byte, err error) {
 	cmd := exec.CommandContext(ctx, t.exe, args...)
 	cmd.Args[0] = "logos"
 	cmd.Dir = dir
-	cmd.Env = env
 	var so, se bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &so, &se
 	err = cmd.Run()
@@ -156,65 +155,32 @@ func (t *toolchain) runEnv(ctx context.Context, dir string, env []string, args .
 	return so.Bytes(), se.Bytes(), err
 }
 
-// closure lists the packages the package in dir depends on, itself
-// included, with the flags in extra added to the list command.
-func (t *toolchain) closure(ctx context.Context, dir string, env []string, ov *overlay, extra ...string) ([]pkgInfo, error) {
-	args := append([]string{"list", "-e", "-deps", "-overlay=" + ov.json, "-f", listTemplate}, extra...)
-	out, stderr, err := t.runEnv(ctx, dir, env, append(args, ".")...)
-	if err != nil {
-		return nil, err
+// runKey identifies the inputs of one run: the package directory and the
+// unsaved buffers.
+func runKey(dir string, buffers map[string][]byte) string {
+	h := sha256.New()
+	h.Write([]byte(filepath.Clean(dir)))
+	h.Write([]byte{0})
+	for _, path := range slices.Sorted(maps.Keys(buffers)) {
+		h.Write([]byte(path))
+		h.Write([]byte{0})
+		h.Write([]byte(fmt.Sprintf("%d:", len(buffers[path]))))
+		h.Write(buffers[path])
 	}
-	pkgs, err := parseClosure(out)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %s", err, strings.TrimSpace(string(stderr)))
-	}
-	return pkgs, nil
+	return string(h.Sum(nil))
 }
 
-// parseClosure parses the output of listTemplate.
-func parseClosure(out []byte) ([]pkgInfo, error) {
-	var pkgs []pkgInfo
-	sc := bufio.NewScanner(bytes.NewReader(out))
-	sc.Buffer(nil, maxMessage)
-	for sc.Scan() {
-		fields := strings.Split(sc.Text(), "\t")
-		if len(fields) < 5 {
-			return nil, fmt.Errorf("unexpected list output %q", sc.Text())
-		}
-		pkgs = append(pkgs, pkgInfo{
-			importPath: fields[0],
-			dir:        filepath.Clean(fields[1]),
-			name:       fields[2],
-			standard:   fields[3] == "true",
-			export:     fields[4],
-			files:      fields[5:],
-		})
+// runOnce performs the one logos list run for dir over buffers, or returns
+// the result of the last run over the same inputs.
+func (t *toolchain) runOnce(ctx context.Context, dir string, buffers map[string][]byte) (*listRun, error) {
+	key := runKey(dir, buffers)
+	t.mu.Lock()
+	last := t.last
+	t.mu.Unlock()
+	if last != nil && last.key == key {
+		return last, nil
 	}
-	return pkgs, sc.Err()
-}
-
-// ejectDir returns the directory the compiler writes the lowered files of
-// the package importPath to. It is the same for every run, so the scratch
-// directory does not grow, and the build cache cannot hold stale output
-// because eject packages never use it.
-func (t *toolchain) ejectDir(importPath string) string {
-	sum := sha256.Sum256([]byte(importPath))
-	return filepath.Join(t.stage, "pkg", hex.EncodeToString(sum[:8]))
-}
-
-// gcflag returns the -gcflags argument that gives flags to the package
-// importPath only.
-func gcflag(importPath string, flags ...string) (string, error) {
-	joined, err := quoted.Join(flags)
-	if err != nil {
-		return "", err
-	}
-	return "-gcflags=" + importPath + "=" + joined, nil
-}
-
-// Lower implements Compiler.
-func (t *toolchain) Lower(ctx context.Context, dir string, buffers map[string][]byte) (low *Lowering, err error) {
-	ov, err := t.newOverlay(buffers)
+	ov, err := newOverlay(buffers)
 	if err != nil {
 		return nil, err
 	}
@@ -223,110 +189,135 @@ func (t *toolchain) Lower(ctx context.Context, dir string, buffers map[string][]
 			err = rerr
 		}
 	}()
-	pkgs, err := t.closure(ctx, dir, nil, ov)
+	stdout, stderr, err := t.run(ctx, dir, append(compiledArgs, "-overlay="+ov.json, ".")...)
 	if err != nil {
 		return nil, err
 	}
-	low = &Lowering{}
-	var targets []pkgInfo
-	for _, p := range pkgs {
-		if p.standard {
-			continue
+	var pkgs []compiledPkg
+	dec := json.NewDecoder(bytes.NewReader(stdout))
+	for dec.More() {
+		var p compiledPkg
+		if err := dec.Decode(&p); err != nil {
+			return nil, fmt.Errorf("decoding logos list -compiled output: %v", err)
 		}
-		low.Dirs = append(low.Dirs, p.dir)
-		if len(p.logosFiles()) > 0 {
-			targets = append(targets, p)
+		pkgs = append(pkgs, p)
+	}
+	last = &listRun{
+		key:   key,
+		pkgs:  pkgs,
+		diags: parseCompiledDiags(stderr, ov, pkgs),
+		hints: make(map[string]json.RawMessage, len(pkgs)),
+	}
+	for _, p := range pkgs {
+		if len(p.LogosHints) > 0 {
+			last.hints[filepath.Clean(p.Dir)] = p.LogosHints
 		}
 	}
-	if err := t.eject(ctx, dir, ov, targets); err != nil {
+	t.mu.Lock()
+	t.last = last
+	t.mu.Unlock()
+	return last, nil
+}
+
+// parseCompiledDiags decodes the diagnostics of the run: the JSON lines it
+// wrote to stderr, and the LogosDiags lines of each package, which carry
+// the compile diagnostics of a package that failed to build. Each file is
+// mapped back from its overlay backing copy to the source, and the
+// diagnostics are grouped by package directory.
+func parseCompiledDiags(stderr []byte, ov *overlay, pkgs []compiledPkg) map[string][]Diagnostic {
+	diags := make(map[string][]Diagnostic)
+	add := func(line []byte) {
+		d, ok := parseDiagnostic(line)
+		if !ok {
+			return
+		}
+		d.File = ov.source(d.File)
+		dir := filepath.Dir(d.File)
+		if d.RuleID == "" && hasDiagnostic(diags[dir], d) {
+			return
+		}
+		diags[dir] = append(diags[dir], d)
+	}
+	for line := range bytes.SplitSeq(stderr, []byte("\n")) {
+		add(line)
+	}
+	for _, p := range pkgs {
+		for _, line := range p.LogosDiags {
+			add(line)
+		}
+	}
+	return diags
+}
+
+// hasDiagnostic reports whether out already holds the rule-less diagnostic
+// d: same mapped file, span, severity, and message, and no rule on either
+// side. Every lint and helper finding carries a rule, so only the native
+// type errors both compile paths emit can match here.
+func hasDiagnostic(out []Diagnostic, d Diagnostic) bool {
+	if d.RuleID != "" {
+		return false
+	}
+	return slices.ContainsFunc(out, func(e Diagnostic) bool {
+		return e.RuleID == "" && e.File == d.File && e.Span == d.Span && e.Severity == d.Severity && e.Message == d.Message
+	})
+}
+
+// Lower implements Compiler. It takes the lowering of dir and its closure
+// from the one logos list run: every loGo/s file of the closure with a
+// lowered text and an edit map is a file of the result, one whose package
+// failed to compile is missing.
+func (t *toolchain) Lower(ctx context.Context, dir string, buffers map[string][]byte) (*Lowering, error) {
+	last, err := t.runOnce(ctx, dir, buffers)
+	if err != nil {
 		return nil, err
 	}
-	for _, p := range targets {
-		t.collect(low, p, buffers)
+	low := &Lowering{}
+	for _, p := range last.pkgs {
+		if p.Standard {
+			continue
+		}
+		low.Dirs = append(low.Dirs, filepath.Clean(p.Dir))
+		names := make(map[string]compiledFile, len(p.LogosFiles))
+		for _, f := range p.LogosFiles {
+			names[f.File] = f
+		}
+		for _, name := range p.GoFiles {
+			if !cfg.IsLogosFile(name) {
+				continue
+			}
+			path := filepath.Join(p.Dir, name)
+			f, ok := names[name]
+			if !ok {
+				low.Missing = append(low.Missing, path)
+				continue
+			}
+			file, err := compiledLoweredFile(path, f, buffers)
+			if err != nil {
+				low.Missing = append(low.Missing, path)
+				continue
+			}
+			low.Files = append(low.Files, file)
+		}
 	}
 	return low, nil
 }
 
-// eject builds the packages of targets with the eject flag, so the
-// compiler writes their lowered files. A package that fails to compile
-// writes nothing; the caller finds out by its missing files.
-func (t *toolchain) eject(ctx context.Context, dir string, ov *overlay, targets []pkgInfo) (err error) {
-	if len(targets) == 0 {
-		return nil
-	}
-	bin := filepath.Join(t.stage, "bin")
-	defer func() {
-		if rerr := os.RemoveAll(bin); rerr != nil && err == nil {
-			err = rerr
-		}
-	}()
-	output, err := executableDirFlag(targets, bin)
-	if err != nil {
-		return err
-	}
-	args := append([]string{"build", "-overlay=" + ov.json}, output...)
-	for _, p := range targets {
-		out := t.ejectDir(p.importPath)
-		if err := os.RemoveAll(out); err != nil {
-			return err
-		}
-		flag, err := gcflag(p.importPath, "-logos.eject="+out)
-		if err != nil {
-			return err
-		}
-		args = append(args, flag)
-	}
-	for _, p := range targets {
-		args = append(args, p.importPath)
-	}
-	_, _, err = t.run(ctx, dir, args...)
-	return err
-}
-
-// executableDirFlag prevents a single-main eject build from writing an
-// executable into the user's package directory. The null device also keeps
-// the build on the ordinary path that emits lowering sidecars.
-func executableDirFlag(targets []pkgInfo, _ string) ([]string, error) {
-	if len(targets) != 1 || targets[0].name != "main" {
-		return nil, nil
-	}
-	return []string{"-o", os.DevNull}, nil
-}
-
-// collect reads the lowered files of package p into low. A file is
-// missing from the result when its output or edit map is absent or
-// unreadable.
-func (t *toolchain) collect(low *Lowering, p pkgInfo, buffers map[string][]byte) {
-	out := t.ejectDir(p.importPath)
-	for _, name := range p.logosFiles() {
-		path := filepath.Join(p.dir, name)
-		file, err := readLowered(out, path, buffers)
-		if err != nil {
-			low.Missing = append(low.Missing, path)
-			continue
-		}
-		low.Files = append(low.Files, file)
-	}
-}
-
-// readLowered reads the lowered text and edit map the compiler wrote under
-// out for the source at path, and the source text the compiler read.
-func readLowered(out, path string, buffers map[string][]byte) (LoweredFile, error) {
-	ejected := filepath.Join(out, filepath.Base(virtualPath(path)))
-	text, err := os.ReadFile(ejected)
-	if err != nil {
-		return LoweredFile{}, err
-	}
-	raw, err := os.ReadFile(ejected + editmap.Suffix)
-	if err != nil {
-		return LoweredFile{}, err
-	}
-	file := LoweredFile{Path: path, Out: text}
-	if err := json.Unmarshal(raw, &file.Map); err != nil {
+// compiledLoweredFile assembles the LoweredFile of one compiled file. The
+// source text is the buffer when the document is open, else the file on
+// disk.
+func compiledLoweredFile(path string, f compiledFile, buffers map[string][]byte) (LoweredFile, error) {
+	var file LoweredFile
+	var err error
+	file.Out = []byte(f.LogosLowered)
+	if err := json.Unmarshal(f.LogosEditMap, &file.Map); err != nil {
 		return LoweredFile{}, err
 	}
 	file.Src, err = sourceText(path, buffers)
-	return file, err
+	if err != nil {
+		return LoweredFile{}, err
+	}
+	file.Path = path
+	return file, nil
 }
 
 // sourceText returns the text of the source at path: the buffer when the
@@ -338,260 +329,24 @@ func sourceText(path string, buffers map[string][]byte) ([]byte, error) {
 	return os.ReadFile(path)
 }
 
-// Diagnose implements Compiler. It runs logos lint, which type-checks the
-// package and runs the compiler lints without building a binary.
-func (t *toolchain) Diagnose(ctx context.Context, dir string, buffers map[string][]byte) (diags []Diagnostic, err error) {
-	ov, err := t.newOverlay(buffers)
+// Diagnose implements Compiler. The diagnostics come from the same logos
+// list run that lowered the package: --json-diagnostics turned them into
+// JSON lines on stderr.
+func (t *toolchain) Diagnose(ctx context.Context, dir string, buffers map[string][]byte) ([]Diagnostic, error) {
+	last, err := t.runOnce(ctx, dir, buffers)
 	if err != nil {
 		return nil, err
 	}
-	defer func() {
-		if rerr := ov.release(); rerr != nil && err == nil {
-			err = rerr
-		}
-	}()
-	_, stderr, err := t.run(ctx, dir, "lint", "--json-diagnostics", "-overlay="+ov.json, ".")
+	return last.diags[filepath.Clean(dir)], nil
+}
+
+// Hints returns the hints JSON of the package in dir, from the same logos
+// list run that lowered it: -compiled computed the hints of every package
+// that a client of the closure needs.
+func (t *toolchain) Hints(ctx context.Context, dir string, buffers map[string][]byte) (json.RawMessage, error) {
+	last, err := t.runOnce(ctx, dir, buffers)
 	if err != nil {
 		return nil, err
 	}
-	for line := range bytes.SplitSeq(stderr, []byte("\n")) {
-		if d, ok := parseDiagnostic(line); ok {
-			d.File = ov.source(d.File)
-			diags = append(diags, d)
-		}
-	}
-	// A lint run type-checks the package on two compile paths: the native
-	// lint compile and the archive compile the nogo action needs for its
-	// binary analyzer and export correlation. A hard type error such as an
-	// unused variable is a rule-less native diagnostic from both paths, so
-	// it reaches stderr twice with the same file, span, severity, and
-	// message. Report each such diagnostic once. Only rule-less exact
-	// duplicates merge: every lint and helper finding carries a rule, so
-	// helper failures and distinct findings always survive, and positions
-	// keep their mapped original coordinates.
-	return dedupNativeDiagnostics(diags), nil
-}
-
-// dedupNativeDiagnostics collapses the rule-less diagnostics a lint run
-// reports once per compile path: the two compile paths deliver each native
-// diagnostic at least once, so Diagnose consumes them idempotently and
-// reports each unique diagnostic a single time. Only rule-less exact
-// duplicates merge; the first occurrence, with its raw line, is kept.
-func dedupNativeDiagnostics(diags []Diagnostic) []Diagnostic {
-	var out []Diagnostic
-	for _, d := range diags {
-		if d.RuleID != "" || !hasDiagnostic(out, d) {
-			out = append(out, d)
-		}
-	}
-	return out
-}
-
-// hasDiagnostic reports whether out already holds the rule-less diagnostic
-// d: same mapped file, span, severity, and message, and no rule on either
-// side. Every lint and helper finding carries a rule, so only the native
-// type errors both compile paths emit can match here.
-func hasDiagnostic(out []Diagnostic, d Diagnostic) bool {
-	if d.RuleID != "" {
-		return false
-	}
-	for _, e := range out {
-		if e.RuleID == "" && e.File == d.File && e.Span == d.Span && e.Severity == d.Severity && e.Message == d.Message {
-			return true
-		}
-	}
-	return false
-}
-
-// Hints returns the hints JSON of the package in dir, the file the
-// compiler writes under -logos.mode=hints -logos.hintsout=FILE. The mode
-// stops before code generation and writes no object file, and the build
-// cache would answer a hit without running the compiler, so the compiler
-// runs directly: the export data of the package's imports comes from
-// logos list -export, and the sources are the package's own files, with
-// the text of unsaved buffers in place of the files on disk.
-func (t *toolchain) Hints(ctx context.Context, dir string, buffers map[string][]byte) (_ json.RawMessage, err error) {
-	ov, err := t.newOverlay(buffers)
-	if err != nil {
-		return nil, err
-	}
-	defer func() {
-		if rerr := ov.release(); rerr != nil && err == nil {
-			err = rerr
-		}
-	}()
-	env, err := t.managedHintsEnv(ctx, dir)
-	if err != nil {
-		return nil, err
-	}
-	pkgs, err := t.closure(ctx, dir, env, ov, "-export")
-	if err != nil {
-		return nil, err
-	}
-	i := slices.IndexFunc(pkgs, func(p pkgInfo) bool { return p.dir == filepath.Clean(dir) && !p.standard })
-	if i < 0 {
-		return nil, fmt.Errorf("no package in %s", dir)
-	}
-	work, err := os.MkdirTemp(t.stage, "hints")
-	if err != nil {
-		return nil, err
-	}
-	defer func() {
-		if rerr := os.RemoveAll(work); rerr != nil && err == nil {
-			err = rerr
-		}
-	}()
-	return t.compileHints(ctx, work, env, pkgs[i], pkgs, buffers)
-}
-
-// compileHints writes the importcfg and sources of target under work and
-// runs the compiler in hints mode.
-func (t *toolchain) compileHints(ctx context.Context, work string, env []string, target pkgInfo, pkgs []pkgInfo, buffers map[string][]byte) (json.RawMessage, error) {
-	importcfg := filepath.Join(work, "importcfg")
-	if err := os.WriteFile(importcfg, importConfig(pkgs, target), 0o666); err != nil {
-		return nil, err
-	}
-	files, err := hintSources(work, target, buffers)
-	if err != nil {
-		return nil, err
-	}
-	out := filepath.Join(work, "hints.json")
-	args := []string{"tool", "compile", "-p", target.importPath, "-importcfg", importcfg,
-		"-logos.mode=hints", "-logos.hintsout=" + out, "-o", filepath.Join(work, "x.a")}
-	stdout, stderr, err := t.runEnv(ctx, target.dir, env, append(args, files...)...)
-	if err != nil {
-		return nil, err
-	}
-	data, err := os.ReadFile(out)
-	if err != nil {
-		detail := strings.TrimSpace(string(stderr) + "\n" + string(stdout))
-		return nil, fmt.Errorf("no hints for %s: %s", target.importPath, detail)
-	}
-	return json.RawMessage(data), nil
-}
-
-// managedHintsEnv returns the environment for the hints runner: hintsEnv(dir)
-// merged with the GOEXPERIMENT and CGO_ENABLED the logos driver selected for dir.
-func (t *toolchain) managedHintsEnv(ctx context.Context, dir string) ([]string, error) {
-	stdout, stderr, err := t.run(ctx, dir, "env", "-json", "GOEXPERIMENT", "CGO_ENABLED")
-	if err != nil {
-		return nil, err
-	}
-	if ctx.Err() != nil {
-		return nil, ctx.Err()
-	}
-	var vals map[string]string
-	if err := json.Unmarshal(stdout, &vals); err != nil {
-		return nil, fmt.Errorf("logos env: %v: %s", err, strings.TrimSpace(string(stderr)))
-	}
-	return overrideEnv(hintsEnv(dir), vals), nil
-}
-
-// overrideEnv returns a fresh copy of base with keys in vals replaced or added.
-func overrideEnv(base []string, vals map[string]string) []string {
-	keep := make([]string, 0, len(base)+len(vals))
-	for _, kv := range base {
-		if k, _, ok := strings.Cut(kv, "="); ok {
-			if _, override := vals[k]; override {
-				continue
-			}
-		}
-		keep = append(keep, kv)
-	}
-	for _, k := range slices.Sorted(maps.Keys(vals)) {
-		keep = append(keep, k+"="+vals[k])
-	}
-	return keep
-}
-
-// hintsEnv returns the environment for the direct hints compile: the
-// process environment plus the GOAMD64 and GOARM64 levels logos list and
-// build compiled the importcfg exports with. A bare go tool compile
-// defaults to v1, while a logos build defaults to the deterministic
-// target_cpu (v3); the mismatch makes every import unreadable, so the
-// compile prints to stdout, writes no report, and Hints fails with an
-// empty message. An explicit user setting wins over the file.
-func hintsEnv(dir string) []string {
-	amd64, arm64 := hintsArchLevels(dir)
-	// An explicit user setting wins over the file, whether it is
-	// exported or lives only in the GOENV file: the bare compiler
-	// reads neither GOENV nor logos.toml, so a GOENV-only value must
-	// be materialized here or the compile still defaults to v1.
-	if v := cfg.Getenv("GOAMD64"); v != "" {
-		amd64 = v
-	}
-	if v := cfg.Getenv("GOARM64"); v != "" {
-		arm64 = v
-	}
-	env := os.Environ()
-	if os.Getenv("GOAMD64") == "" {
-		env = append(env, "GOAMD64="+amd64)
-	}
-	if os.Getenv("GOARM64") == "" {
-		env = append(env, "GOARM64="+arm64)
-	}
-	return env
-}
-
-// hintsArchLevels returns the GOAMD64 and GOARM64 levels for the module
-// holding dir. The selection is config.ArchLevels, the same owner the
-// build path calls; a load failure falls back to its deterministic
-// default, matching the build's treatment of a broken file.
-func hintsArchLevels(dir string) (amd64, arm64 string) {
-	file, err := config.Load(moduleRoot(dir))
-	if err != nil || file == nil {
-		return config.ArchLevels("")
-	}
-	return config.ArchLevels(file.Build.TargetCPU)
-}
-
-// moduleRoot returns the directory holding the go.mod enclosing dir, or
-// "" when there is none, so config.Load yields its defaults. It walks
-// target.dir itself, not the process working directory, which is the
-// test binary's directory under logos lsp.
-func moduleRoot(dir string) string {
-	for d := dir; ; {
-		if _, err := os.Stat(filepath.Join(d, "go.mod")); err == nil {
-			return d
-		}
-		parent := filepath.Dir(d)
-		if parent == d {
-			return ""
-		}
-		d = parent
-	}
-}
-
-// importConfig returns the importcfg text that maps every dependency of
-// target that has export data to its file.
-func importConfig(pkgs []pkgInfo, target pkgInfo) []byte {
-	var buf bytes.Buffer
-	for _, p := range pkgs {
-		if p.export != "" && p.importPath != target.importPath {
-			fmt.Fprintf(&buf, "packagefile %s=%s\n", p.importPath, p.export)
-		}
-	}
-	return buf.Bytes()
-}
-
-// hintSources returns the paths of the source files of target for the
-// compiler. A file with an unsaved buffer is written under work with its
-// own base name, since the hints name their file by base name.
-func hintSources(work string, target pkgInfo, buffers map[string][]byte) ([]string, error) {
-	src := filepath.Join(work, "src")
-	if err := os.MkdirAll(src, 0o777); err != nil {
-		return nil, err
-	}
-	files := make([]string, 0, len(target.files))
-	for _, name := range target.files {
-		path := filepath.Join(target.dir, name)
-		if data, ok := buffers[path]; ok {
-			path = filepath.Join(src, name)
-			if err := os.WriteFile(path, data, 0o666); err != nil {
-				return nil, err
-			}
-		}
-		files = append(files, path)
-	}
-	return files, nil
+	return last.hints[filepath.Clean(dir)], nil
 }

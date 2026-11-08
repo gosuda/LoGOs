@@ -8,7 +8,6 @@ import (
 	"context"
 	"encoding/json"
 	"path/filepath"
-	"time"
 )
 
 // textDocumentItem is the document of a didOpen notification.
@@ -116,9 +115,8 @@ func (p *Proxy) forwardUnlessLogos(m *message, path string) {
 	}
 }
 
-// didOpen records the opened document, compiles its package, and then
-// tells gopls: the compile has put the lowered documents the package needs
-// in gopls before gopls first loads the package.
+// didOpen records the opened document. Nothing compiles: gopls learns the
+// lowered documents of the package when the first request asks for them.
 func (p *Proxy) didOpen(ctx context.Context, m *message) {
 	var params didOpenParams
 	if err := json.Unmarshal(m.Params, &params); err != nil {
@@ -129,17 +127,13 @@ func (p *Proxy) didOpen(ctx context.Context, m *message) {
 	item := params.TextDocument
 	path := docPath(item.URI)
 	if path != "" {
-		p.mu.Lock()
-		p.docs[path] = &document{uri: item.URI, path: path, version: item.Version, text: newText([]byte(item.Text))}
-		p.touchLocked(path)
-		p.mu.Unlock()
-		p.refresh(ctx)
+		p.st.setDoc(item.URI, path, item.Version, newText([]byte(item.Text)))
 	}
 	p.forwardUnlessLogos(m, path)
 }
 
-// didChange applies the changes to the recorded text and schedules a
-// compile.
+// didChange applies the changes to the recorded text. No snapshot is
+// computed: the next request or didSave brings the lowering back in line.
 func (p *Proxy) didChange(ctx context.Context, m *message) {
 	var params didChangeParams
 	if err := json.Unmarshal(m.Params, &params); err != nil {
@@ -148,17 +142,7 @@ func (p *Proxy) didChange(ctx context.Context, m *message) {
 		return
 	}
 	path := docPath(params.TextDocument.URI)
-	p.mu.Lock()
-	doc := p.docs[path]
-	if doc != nil {
-		doc.text = applyChanges(doc.text, params.ContentChanges)
-		doc.version = params.TextDocument.Version
-		p.touchLocked(path)
-	}
-	p.mu.Unlock()
-	if doc != nil {
-		p.schedule(ctx)
-	}
+	p.st.change(path, params.TextDocument.Version, params.ContentChanges)
 	p.forwardUnlessLogos(m, path)
 }
 
@@ -175,7 +159,8 @@ func applyChanges(t *text, changes []contentChange) *text {
 	return t
 }
 
-// didSave compiles the package of the saved document.
+// didSave computes the snapshots the saved document's packages are
+// waiting for: a save is one of the two events a recompile may follow.
 func (p *Proxy) didSave(ctx context.Context, m *message) {
 	var params docParams
 	if err := json.Unmarshal(m.Params, &params); err != nil {
@@ -184,25 +169,17 @@ func (p *Proxy) didSave(ctx context.Context, m *message) {
 		return
 	}
 	path := docPath(params.TextDocument.URI)
-	p.mu.Lock()
-	known := p.docs[path] != nil
-	if known {
-		p.touchLocked(path)
-	}
-	p.mu.Unlock()
-	if known {
-		p.refresh(ctx)
+	if p.st.open(path) {
+		p.ensure(ctx)
 	}
 	p.forwardUnlessLogos(m, path)
 }
 
 // didClose forgets the document and what the compiles took from its
-// buffer. Closing discards the client's unsaved text, so every package
-// compiled with it, the package of the document and each one whose
-// closure holds that package, is marked dirty and recompiled from what is
-// on disk. The package of the document stays compiled while another of its
-// documents is open; when none is, the unit goes away, and with it the
-// lowered documents only it needed.
+// buffer. A package whose snapshot was computed from the discarded text
+// keeps its unit and refreshes it from what is on disk at once; a package
+// whose snapshot already matches the disk drops its unit when no open
+// document is left, and with it the lowered documents only it needed.
 func (p *Proxy) didClose(ctx context.Context, m *message) {
 	var params docParams
 	if err := json.Unmarshal(m.Params, &params); err != nil {
@@ -211,50 +188,38 @@ func (p *Proxy) didClose(ctx context.Context, m *message) {
 		return
 	}
 	path := docPath(params.TextDocument.URI)
+	retained := p.st.forget(path)
+	p.forwardUnlessLogos(m, path)
+	if retained {
+		p.ensure(ctx)
+		return
+	}
+	p.st.mu.Lock()
+	need := p.st.unitNeed()
+	p.st.mu.Unlock()
 	p.work.Lock()
 	defer p.work.Unlock()
-	open := p.forget(path)
-	p.forwardUnlessLogos(m, path)
-	if open {
-		p.refreshLocked(ctx)
-	}
+	p.mu.Lock()
+	p.pruneLocked(need)
+	p.mu.Unlock()
 	p.syncGopls()
 	p.publishAll()
 }
 
-// forget removes the open document at path, marks dirty the units that
-// compiled with its buffer, and drops the unit of its package when no
-// open document is left there. It reports whether the document was open.
-// The caller holds p.work.
-func (p *Proxy) forget(path string) bool {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	_, open := p.docs[path]
-	if open {
-		// The touch comes before the drop: touchLocked makes a unit for
-		// the package of path when it has none, so touching after the
-		// drop would bring back a unit no open document holds.
-		delete(p.docs, path)
-		p.touchLocked(path)
-		p.dropUnitLocked(filepath.Dir(path))
-	}
-	p.pruneLocked()
-	return open
-}
-
-// watched marks every package for recompilation when a watched file that
-// can change a compile changed on disk, and passes the notification on.
+// watched marks every package for a snapshot when a watched file that can
+// change a compile changed on disk, and passes the notification on. The
+// snapshots are computed by the next request or didSave.
 func (p *Proxy) watched(ctx context.Context, m *message) {
 	var params watchedParams
 	if err := json.Unmarshal(m.Params, &params); err == nil {
-		p.markIfRelevant(ctx, params)
+		p.markIfRelevant(params)
 	}
 	p.send(p.server, m)
 }
 
 // markIfRelevant marks every unit dirty when one of the changed files is a
 // source or a module file.
-func (p *Proxy) markIfRelevant(ctx context.Context, params watchedParams) {
+func (p *Proxy) markIfRelevant(params watchedParams) {
 	relevant := false
 	for _, c := range params.Changes {
 		path, err := uriPath(c.URI)
@@ -265,13 +230,12 @@ func (p *Proxy) markIfRelevant(ctx context.Context, params watchedParams) {
 	if !relevant {
 		return
 	}
-	p.mu.Lock()
-	for _, u := range p.units {
+	p.st.mu.Lock()
+	defer p.st.mu.Unlock()
+	for _, u := range p.st.units {
 		u.dirty = true
 		u.gen++
 	}
-	p.mu.Unlock()
-	p.schedule(ctx)
 }
 
 // isModuleFile reports whether path names a file that defines the module
@@ -282,51 +246,4 @@ func isModuleFile(path string) bool {
 		return true
 	}
 	return false
-}
-
-// touchLocked records that the document at path changed: its package gets
-// a unit, and every unit whose closure holds that package needs a compile.
-func (p *Proxy) touchLocked(path string) {
-	dir := filepath.Dir(path)
-	if p.units[dir] == nil {
-		p.units[dir] = &unit{dir: dir}
-	}
-	for _, u := range p.units {
-		if u.dir == dir || u.dirs[dir] {
-			u.dirty = true
-			u.gen++
-		}
-	}
-}
-
-// dropUnitLocked removes the unit of dir when no open document is left in
-// it.
-func (p *Proxy) dropUnitLocked(dir string) {
-	for path := range p.docs {
-		if filepath.Dir(path) == dir {
-			return
-		}
-	}
-	delete(p.units, dir)
-}
-
-// schedule recompiles in the background once the edits have been quiet for
-// the debounce delay.
-func (p *Proxy) schedule(ctx context.Context) {
-	if p.opts.Debounce < 0 {
-		return
-	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.stopped {
-		return
-	}
-	if p.timer != nil && p.timer.Stop() {
-		p.tasks.Done()
-	}
-	p.tasks.Add(1)
-	p.timer = time.AfterFunc(p.opts.Debounce, func() {
-		defer p.tasks.Done()
-		p.refresh(ctx)
-	})
 }
