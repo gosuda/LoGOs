@@ -33,7 +33,7 @@ func DirectMutate() int {
 }`, true, nil, []*Type{intT})
 	h.funcs[fn.Name] = fn
 
-	cfg := DefaultConfig()
+	cfg := Config{}
 	res, _ := evalOne(t, h, cfg, parseExpr(t, `DirectMutate()`))
 	if got := res.Int64(); got != 99 {
 		t.Fatalf("DirectMutate() = %d, want 99", got)
@@ -78,7 +78,7 @@ func CallMutate() int {
 }`, true, nil, []*Type{intT})
 	h.funcs[callFn.Name] = callFn
 
-	cfg := DefaultConfig()
+	cfg := Config{}
 	res, _ := evalOne(t, h, cfg, parseExpr(t, `CallMutate()`))
 	if got := res.Int64(); got != 99 {
 		t.Fatalf("CallMutate() = %d, want 99", got)
@@ -113,7 +113,7 @@ func LocalSlice() int {
 }`, true, nil, []*Type{intT})
 	h.funcs[localFn.Name] = localFn
 
-	cfg := DefaultConfig()
+	cfg := Config{}
 	res, _ := evalOne(t, h, cfg, parseExpr(t, `LocalSlice()`))
 	if got := res.Int64(); got != 42 {
 		t.Fatalf("LocalSlice() = %d, want 42", got)
@@ -141,7 +141,7 @@ func LocalArray() int {
 }`, true, nil, []*Type{intT})
 	h.funcs[localFn.Name] = localFn
 
-	cfg := DefaultConfig()
+	cfg := Config{}
 	res, _ := evalOne(t, h, cfg, parseExpr(t, `LocalArray()`))
 	if got := res.Int64(); got != 1 {
 		t.Fatalf("LocalArray() = %d, want 1", got)
@@ -170,7 +170,7 @@ func LocalSpread() int {
 }`, true, nil, []*Type{intT})
 	h.funcs[spreadFn.Name] = spreadFn
 
-	cfg := DefaultConfig()
+	cfg := Config{}
 	res, _ := evalOne(t, h, cfg, parseExpr(t, `LocalSpread()`))
 	if got := res.Int64(); got != 7 {
 		t.Fatalf("LocalSpread() = %d, want 7", got)

@@ -47,7 +47,7 @@ func TestSpreadTypedNilSliceBindsZeroLen(t *testing.T) {
 		true, nil, []*Type{intT})
 	h.funcs[caller.Name] = caller
 
-	v, _ := evalOne(t, h, DefaultConfig(), parseExpr(t, `CallNilLen()`))
+	v, _ := evalOne(t, h, Config{}, parseExpr(t, `CallNilLen()`))
 	if got := v.Int64(); got != 0 {
 		t.Fatalf("CallNilLen() = %d, want 0", got)
 	}
@@ -75,7 +75,7 @@ func TestSpreadNilVsEmptyIdentity(t *testing.T) {
 		true, nil, []*Type{boolT})
 	h.funcs[emptyCaller.Name] = emptyCaller
 
-	cfg := DefaultConfig()
+	cfg := Config{}
 	v, _ := evalOne(t, h, cfg, parseExpr(t, `CallNilIsNil()`))
 	if !v.Bool() {
 		t.Fatalf("CallNilIsNil() = false, want true")
@@ -97,7 +97,7 @@ func TestAppendUntypedStringSpread(t *testing.T) {
 		true, nil, []*Type{intT})
 	h.funcs[fn.Name] = fn
 
-	v, _ := evalOne(t, h, DefaultConfig(), parseExpr(t, `AppendUntyped()`))
+	v, _ := evalOne(t, h, Config{}, parseExpr(t, `AppendUntyped()`))
 	if got := v.Int64(); got != 104 {
 		t.Fatalf("AppendUntyped() = %d, want 104 ('h')", got)
 	}
@@ -115,7 +115,7 @@ func TestAppendTypedStringSpreadControl(t *testing.T) {
 		true, nil, []*Type{intT})
 	h.funcs[fn.Name] = fn
 
-	v, _ := evalOne(t, h, DefaultConfig(), parseExpr(t, `AppendTyped()`))
+	v, _ := evalOne(t, h, Config{}, parseExpr(t, `AppendTyped()`))
 	if got := v.Int64(); got != 105 {
 		t.Fatalf("AppendTyped() = %d, want 105 ('i')", got)
 	}
@@ -143,7 +143,7 @@ func TestSpreadTypedStringToIntRuneRejected(t *testing.T) {
 		fn.Variadic = true
 		h.funcs[fn.Name] = fn
 
-		cerr := evalErr(t, h, DefaultConfig(), parseExpr(t, fn.Name+`(string("hi")...)`))
+		cerr := evalErr(t, h, Config{}, parseExpr(t, fn.Name+`(string("hi")...)`))
 		if cerr.Code != CodeEval {
 			t.Fatalf("%s: code = %v, want CodeEval", tc.name, cerr.Code)
 		}
@@ -164,7 +164,7 @@ func TestSpreadTypedStringToOrdinaryByteRejected(t *testing.T) {
 	fn.Variadic = true
 	h.funcs["VByte"] = fn
 
-	cerr := evalErr(t, h, DefaultConfig(), parseExpr(t, `VByte(string("hi")...)`))
+	cerr := evalErr(t, h, Config{}, parseExpr(t, `VByte(string("hi")...)`))
 	if cerr.Code != CodeEval {
 		t.Fatalf("code = %v, want CodeEval", cerr.Code)
 	}

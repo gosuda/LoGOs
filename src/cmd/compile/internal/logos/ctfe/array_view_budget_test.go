@@ -55,7 +55,7 @@ func Build() [2][]int {
 
 	h := newFakeHost(t)
 	h.vars["H"] = shared
-	cfg := DefaultConfig()
+	cfg := Config{}
 
 	if v, _ := evalOne(t, h, cfg, parseExpr(t, `len(H)`)); v.Int64() != 2 {
 		t.Fatalf("len(H) = %d, want 2", v.Int64())

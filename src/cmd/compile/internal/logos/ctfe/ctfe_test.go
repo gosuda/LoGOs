@@ -384,7 +384,7 @@ func TestValueSizeBoundaries(t *testing.T) {
 		t.Fatalf("code = %v, want CodeTooLarge", cerr.Code)
 	}
 
-	def := DefaultConfig()
+	def := Config{}
 	mega := parseExpr(t, `[1048576]byte{}`)
 	h.types[mega] = &Type{Kind: KArray, Len: 1048576, Elem: BasicType("uint8")}
 	if _, _, err := Eval(h, def, mega); err != nil {
@@ -412,7 +412,7 @@ func Frac(x float64) float64 {
 	return z / z
 }`, true, []*Type{BasicType("float64")}, []*Type{BasicType("float64")})
 	h.funcs["Frac"] = frac
-	cfg := DefaultConfig()
+	cfg := Config{}
 
 	dup := parseExpr(t, `map[float64]string{0.0: "a", NegZero(1.0): "b"}`)
 	h.types[dup] = &Type{Kind: KMap, Key: BasicType("float64"), Elem: UntypedString()}
@@ -445,7 +445,7 @@ func TestAbsentMapKey(t *testing.T) {
 		vals: []Value{IntValue(big.NewInt(1), BasicType("int"))},
 	}}
 	h.vars["m"] = mv
-	cfg := DefaultConfig()
+	cfg := Config{}
 	idx := parseExpr(t, `m["zzz"]`)
 	if cerr := evalErr(t, h, cfg, idx); cerr.Code != CodeEval || !strings.Contains(cerr.Detail, "key not present") {
 		t.Fatalf("absent err = %v, want key-not-present CodeEval", cerr)
@@ -463,7 +463,7 @@ func TestAbsentMapKey(t *testing.T) {
 func TestDynamicImpurity(t *testing.T) {
 	h := newFakeHost(t)
 	h.imports["fmt"] = true
-	cfg := DefaultConfig()
+	cfg := Config{}
 
 	call := parseExpr(t, `fmt.Println("x")`)
 	if cerr := evalErr(t, h, cfg, call); cerr.Code != CodeEval {

@@ -34,21 +34,14 @@ import (
 // Config controls evaluation limits (SPEC T-201, T-102).
 type Config struct {
 	// MaxSteps bounds evaluation; a run that exceeds it fails with
-	// CodeStepLimit. Zero means DefaultConfig's value.
+	// CodeStepLimit. Zero means 100000.
 	MaxSteps int
 	// MaxValueBytes caps the total distinct bytes of a const value;
-	// a larger value fails with CodeTooLarge. Zero means default.
+	// a larger value fails with CodeTooLarge. Zero means 1 << 20.
 	MaxValueBytes int64
 	// WordSize is the target width of int, uint, and uintptr in
 	// bytes (4 or 8). Zero means 8.
 	WordSize int64
-}
-
-// DefaultConfig returns the SPEC defaults: 100,000 steps, a 1 MB value
-// cap, and 64-bit words. The word size is always overridden by the
-// caller with the target width.
-func DefaultConfig() Config {
-	return Config{MaxSteps: 100000, MaxValueBytes: 1 << 20, WordSize: 8}
 }
 
 func (c Config) withDefaults() Config {

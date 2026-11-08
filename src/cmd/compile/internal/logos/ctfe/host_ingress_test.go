@@ -62,7 +62,7 @@ func TestHostIngressTwoReadsIsolated(t *testing.T) {
 	h.vars["C"] = sliceHost
 	h.vars["M"] = mapHost
 	intT := BasicType("int")
-	cfg := DefaultConfig()
+	cfg := Config{}
 
 	sliceFn := parseFunc(t, `package p
 func TwoReadsSlice() int {
@@ -106,7 +106,7 @@ func TestHostIngressSingleReadAliasShares(t *testing.T) {
 	bootstrapHost(t, h, "M", `map[string]int{"k": 1}`)
 	bootstrapHost(t, h, "A", `[3]int{1, 2, 3}`)
 	intT := BasicType("int")
-	cfg := DefaultConfig()
+	cfg := Config{}
 
 	sameSlice := parseFunc(t, `package p
 func SameReadSlice() int {
@@ -170,7 +170,7 @@ func ArraySlicesShare() int {
 func TestHostIngressSharedBackingPreserved(t *testing.T) {
 	intT := BasicType("int")
 	mapT := &Type{Kind: KMap, Key: BasicType("string"), Elem: &Type{Kind: KSlice, Elem: intT}}
-	cfg := DefaultConfig()
+	cfg := Config{}
 
 	build := newFakeHost(t)
 	share := parseFunc(t, `package p
@@ -221,10 +221,10 @@ func TestHostIngressCapTailCountsTowardBudget(t *testing.T) {
 
 	// Sanity under a generous budget: the copy preserves length and
 	// capacity through the public len/cap builtins.
-	if v, _ := evalOne(t, h, DefaultConfig(), parseExpr(t, `len(C)`)); v.Int64() != 0 {
+	if v, _ := evalOne(t, h, Config{}, parseExpr(t, `len(C)`)); v.Int64() != 0 {
 		t.Fatalf("len(C) = %d, want 0", v.Int64())
 	}
-	if v, _ := evalOne(t, h, DefaultConfig(), parseExpr(t, `cap(C)`)); v.Int64() != 8 {
+	if v, _ := evalOne(t, h, Config{}, parseExpr(t, `cap(C)`)); v.Int64() != 8 {
 		t.Fatalf("cap(C) = %d, want 8", v.Int64())
 	}
 
@@ -346,7 +346,7 @@ func TestHostIngressContainerStepBoundaries(t *testing.T) {
 	}
 
 	// The summed value itself is observable through the public seam.
-	v, _ := evalOne(t, h, DefaultConfig(), parseExpr(t, `C1[0] + C2[0]`))
+	v, _ := evalOne(t, h, Config{}, parseExpr(t, `C1[0] + C2[0]`))
 	if v.Int64() != 15 {
 		t.Fatalf("C1[0]+C2[0] = %d, want 15", v.Int64())
 	}

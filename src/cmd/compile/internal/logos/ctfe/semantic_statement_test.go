@@ -72,7 +72,7 @@ type stmtProbe struct {
 // stmtWantInt evaluates call on h and compares it with want.
 func stmtWantInt(t *testing.T, h *fakeHost, p stmtProbe) {
 	t.Helper()
-	v, _ := evalOne(t, h, DefaultConfig(), parseExpr(t, p.call))
+	v, _ := evalOne(t, h, Config{}, parseExpr(t, p.call))
 	mustInt(t, v, p.want, p.call)
 }
 
@@ -199,7 +199,7 @@ func TestSemanticStatementDiscardedCallResults(t *testing.T) {
 	// swallowed with the dropped results nor replaced by a statement
 	// level error.
 	t.Run("failure inside a discarded call surfaces", func(t *testing.T) {
-		cerr := evalErr(t, h, DefaultConfig(), parseExpr(t, `Failing()`))
+		cerr := evalErr(t, h, Config{}, parseExpr(t, `Failing()`))
 		if cerr.Code != CodeEval || !strings.Contains(cerr.Detail, "index") {
 			t.Fatalf("error = %v (code %v), want CodeEval index failure", cerr, cerr.Code)
 		}
