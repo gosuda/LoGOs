@@ -160,6 +160,11 @@ func (check *Checker) logosConstCompute(obj *Const, init syntax.Expr, x *operand
 		obj.typ = Typ[Invalid]
 		return true
 	}
+	if mt, ok := x.typ().Underlying().(*Map); ok && !logosConstMapKeyOK(mt.Key()) {
+		check.errorf(obj, InvalidConstInit, "[comptime::constmap_key_type] const map key type %s cannot be hashed: use a string, number, bool, or a struct or array of them", mt.Key())
+		obj.typ = Typ[Invalid]
+		return true
+	}
 	host := &ctfeHost{check: check}
 	cfg := ctfe.Config{MaxSteps: check.conf.LogosCTFEMaxSteps, WordSize: check.logosWordSize()}
 	v, _, err := ctfe.Eval(host, cfg, init)

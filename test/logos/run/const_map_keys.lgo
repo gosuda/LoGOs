@@ -1,0 +1,25 @@
+// run
+
+package main
+
+import "fmt"
+
+type Pair struct {
+	N int
+	B bool
+}
+
+const boolMap = map[bool]string{false: "f", true: "t"}
+const pairMap = map[Pair]string{Pair{7, true}: "p"}
+const arrayMap = map[[2]int]string{[2]int{3, 4}: "a"}
+const floatMap = map[float64]string{-0.0: "z", 1.0: "one", 2.0: "two", 3.0: "three", 4.0: "four", 5.0: "five", 6.0: "six", 7.0: "seven", 8.0: "eight"}
+const source = map[string]int{"a": 1}
+
+func main() {
+	pair := Pair{7, true}
+	array := [2]int{3, 4}
+	fmt.Println(boolMap[false] ?? "?", boolMap[true] ?? "?", pairMap[pair] ?? "?", arrayMap[array] ?? "?", floatMap[0.0] ?? "?")
+	m := source
+	m["a"] = 2
+	fmt.Println(m["a"], source["a"] ?? -1)
+}

@@ -18,3 +18,21 @@ func cmDelete() {
 func cmStore() {
 	cm["c"] = 3 // ERROR "const_view_mutation"
 }
+
+func cmRead() {
+	_ = maps.Clone(cm)
+}
+
+const func cmConst(m map[string]int) int {
+	return m["a"] ?? 0
+}
+
+func cmConstCall() {
+	_ = cmConst(cm)
+}
+
+func cmPlain(m map[string]int) {}
+
+func cmPlainCall() {
+	cmPlain(cm) // ERROR "const_view_mutation"
+}
