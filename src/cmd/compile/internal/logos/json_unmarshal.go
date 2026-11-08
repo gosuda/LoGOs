@@ -201,25 +201,24 @@ func (js *jsonStruct) unionLines(f *jsonField, field string) []string {
 	type memberKeys struct {
 		bareName string
 		usable   bool
+		spell    string
+		st       *types2.Struct
+		isStruct bool
 	}
 	memberList := make([]memberKeys, len(members))
 	for i, m := range members {
-		var bareName string
-		samePkg := false
-		var st *types2.Struct
-		isStruct := false
+		memberList[i] = memberKeys{spell: types2.TypeString(m, qual)}
 		if ptr, ok := types2.Unalias(m).(*types2.Pointer); ok {
-			st, isStruct = types2.Unalias(ptr.Elem()).Underlying().(*types2.Struct)
+			memberList[i].st, memberList[i].isStruct = types2.Unalias(ptr.Elem()).Underlying().(*types2.Struct)
 			if named, ok := types2.Unalias(ptr.Elem()).(*types2.Named); ok && named.Obj() != nil {
-				bareName = named.Obj().Name()
-				samePkg = localPkg != nil && named.Obj().Pkg() != nil && localPkg.Path() == named.Obj().Pkg().Path()
+				memberList[i].bareName = named.Obj().Name()
+				memberList[i].usable = memberList[i].isStruct && memberList[i].st.NumFields() > 0 && memberList[i].bareName != "" && localPkg != nil && named.Obj().Pkg() != nil && localPkg.Path() == named.Obj().Pkg().Path()
 			}
 		} else if named, ok := types2.Unalias(m).(*types2.Named); ok && named.Obj() != nil {
-			st, isStruct = types2.Unalias(m).Underlying().(*types2.Struct)
-			bareName = named.Obj().Name()
-			samePkg = localPkg != nil && named.Obj().Pkg() != nil && localPkg.Path() == named.Obj().Pkg().Path()
+			memberList[i].st, memberList[i].isStruct = types2.Unalias(m).Underlying().(*types2.Struct)
+			memberList[i].bareName = named.Obj().Name()
+			memberList[i].usable = memberList[i].isStruct && memberList[i].st.NumFields() > 0 && memberList[i].bareName != "" && localPkg != nil && named.Obj().Pkg() != nil && localPkg.Path() == named.Obj().Pkg().Path()
 		}
-		memberList[i] = memberKeys{bareName: bareName, usable: isStruct && st.NumFields() > 0 && bareName != "" && samePkg}
 	}
 
 	var trials []string
@@ -228,39 +227,26 @@ func (js *jsonStruct) unionLines(f *jsonField, field string) []string {
 	trials = append(trials, fmt.Sprintf("var _logos_target %s", unionName))
 
 	for i, m := range members {
-		spell := types2.TypeString(m, qual)
 		scratch := fmt.Sprintf("_logos_scratch%d", i)
-		st, isStruct := types2.Unalias(m).Underlying().(*types2.Struct)
-		var bareName string
-		samePkg := false
-		if ptr, ok := types2.Unalias(m).(*types2.Pointer); ok {
-			st, isStruct = types2.Unalias(ptr.Elem()).Underlying().(*types2.Struct)
-			if named, ok := types2.Unalias(ptr.Elem()).(*types2.Named); ok && named.Obj() != nil {
-				bareName = named.Obj().Name()
-				samePkg = localPkg != nil && named.Obj().Pkg() != nil && localPkg.Path() == named.Obj().Pkg().Path()
-			}
-		} else if named, ok := types2.Unalias(m).(*types2.Named); ok && named.Obj() != nil {
-			bareName = named.Obj().Name()
-			samePkg = localPkg != nil && named.Obj().Pkg() != nil && localPkg.Path() == named.Obj().Pkg().Path()
-		}
-		hasKeyHelper := isStruct && st.NumFields() > 0 && bareName != "" && samePkg
+		s := memberList[i]
+		hasKeyHelper := s.usable
 
 		trials = append(trials, "{")
 		if ptr, ok := types2.Unalias(m).(*types2.Pointer); ok {
 			elem := types2.TypeString(ptr.Elem(), qual)
 			trials = append(trials, fmt.Sprintf("\t%s := new(%s)", scratch, elem))
 		} else {
-			trials = append(trials, fmt.Sprintf("\tvar %s %s", scratch, spell))
+			trials = append(trials, fmt.Sprintf("\tvar %s %s", scratch, s.spell))
 		}
 		trials = append(trials, fmt.Sprintf("\tif %s.UnmarshalJSON(_logos_raw) == nil {", scratch))
 		if hasKeyHelper {
 			trials = append(trials, "\t\t_logos_matched := false")
-			trials = append(trials, fmt.Sprintf("\t\t_logos_chk := %s.NewScanner(_logos_raw, (*%s)(nil))", jsonAlias, bareName))
+			trials = append(trials, fmt.Sprintf("\t\t_logos_chk := %s.NewScanner(_logos_raw, (*%s)(nil))", jsonAlias, s.bareName))
 			trials = append(trials, "\t\tif _logos_chk.Object() {")
 			trials = append(trials, "\t\t\t_logos_matched = true")
 			trials = append(trials, "\t\t\t_logos_keys := 0")
 			trials = append(trials, "\t\t\tfor _logos_chk.Next() {")
-			trials = append(trials, fmt.Sprintf("\t\t\t\tif _logos_jsonkey_%s(_logos_chk.Key()) >= 0 || _logos_jsonfold_%s(_logos_chk.FoldKey()) >= 0 {", bareName, bareName))
+			trials = append(trials, fmt.Sprintf("\t\t\t\tif _logos_jsonkey_%s(_logos_chk.Key()) >= 0 || _logos_jsonfold_%s(_logos_chk.FoldKey()) >= 0 {", s.bareName, s.bareName))
 			trials = append(trials, "\t\t\t\t\t_logos_keys++")
 			trials = append(trials, "\t\t\t\t} else {")
 			// A key modeled by any sibling member but not this one disqualifies
