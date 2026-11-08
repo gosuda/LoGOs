@@ -180,7 +180,7 @@ Rules: logos-doc/SPEC.md. Status values: planned, tested, satisfied upstream, bl
 | #193 | region pointer stored into an older region object across a call | M18 | (planned; region pointer stored into an older region object across a call) | planned |
 | #194 | ejected region program changes output | M18 | (planned; ejected region program changes output) | planned |
 | #195 | unguarded field read after deferred unlock moved | M9 | (planned; unguarded field read after deferred unlock moved) | planned |
-| #196 | facts object name with junk tag accepted | M3 | (planned; facts object name with junk tag accepted) | planned |
+| #196 | facts object name with junk tag accepted | M3 | src/cmd/compile/internal/logos/facts/facts_test.go (TestValidObjectTag, TestTaggedObjectRoundTrip) | tested |
 | #197 | stale LSP snapshot served after a newer edit | M21 | (planned; stale LSP snapshot served after a newer edit) | planned |
 | #190 | Generic assertions manufacturing erased readonly obligations | M5 | test/logos/compile/const_interface_generic_assert.lgo; test/logos/run/const_interface_generic_assert.lgo; src/cmd/go/testdata/script/logos_const_interface_generic_assert.txt (local and imported function/receiver instantiations, wrappers, closures, type switches, composite/nested targets, and parameter indexes above 64; executed 2026-10-28: both testdir rows pass and `go test cmd/go -run 'Script/^logos_const_interface_generic_assert$'` passes) | tested |
 
