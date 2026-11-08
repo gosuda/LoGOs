@@ -161,17 +161,13 @@ func (g *Group) Wait() error {
 		g.cond.Wait()
 	}
 	g.joined = true
-	stop := g.parentStop
-	done := g.parentDone
 	g.mu.Unlock()
 	// Stop and join any running parent wake before releasing the slot:
 	// a callback firing after release would wake an unrelated group
 	// reusing the slot. No locks are held across the wake, so the order
 	// stays acyclic with the runtime waiter lock.
-	if stop != nil {
-		if !stop() {
-			<-done
-		}
+	if !g.parentStop() {
+		<-g.parentDone
 	}
 	logosGroupRelease(g.slot)
 	g.cancel()
