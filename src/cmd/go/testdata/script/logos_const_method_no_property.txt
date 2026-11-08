@@ -1,0 +1,39 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+cd m
+logos run .
+stdout '^name$'
+logos eject -o out
+! grep -E 'Logos_Get|Logos_Set' out/main.go
+cd out
+go build ./...
+cd ../..
+
+-- m/go.mod --
+module example.com/constmethod
+
+go 1.27
+
+-- m/main.lgo --
+package main
+
+import "fmt"
+
+type Readable interface {
+	const Name() string
+}
+
+type Thing struct{}
+
+func (Thing) Name() string {
+	return "name"
+}
+
+func use(r Readable) string {
+	return r.Name()
+}
+
+func main() {
+	fmt.Println(use(Thing{}))
+}

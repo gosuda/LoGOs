@@ -1,0 +1,25 @@
+// run
+
+package main
+
+import (
+	"fmt"
+	"strings"
+)
+
+func bound(xs const []int, n int) int {
+	return len(xs[:n])
+}
+
+func main() {
+	xs := make([]int, 3, 5)
+	defer func() {
+		got := fmt.Sprint(recover())
+		if !strings.Contains(got, "slice bounds") {
+			panic("missing const-view bounds trap: " + got)
+		}
+		fmt.Println("const-view-bound-trap")
+	}()
+	_ = bound(xs, 5)
+	panic("const-view bound did not trap")
+}
