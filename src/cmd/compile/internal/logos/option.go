@@ -95,6 +95,7 @@ func (fl *fileLower) lowerOptions() {
 	fl.narrowDone = make(map[*syntax.Name]bool)
 	fl.wrapSpan = make(map[syntax.Expr]span)
 	fl.wrapOwner = make(map[syntax.Expr]int)
+	fl.optBodyType = make(map[syntax.Expr]types2.Type)
 	fl.collectOptReturns()
 	syntax.Inspect(fl.file, func(n syntax.Node) bool {
 		if n == nil {
@@ -114,11 +115,11 @@ func (fl *fileLower) lowerOptNode(n syntax.Node) {
 	switch n := n.(type) {
 	case *syntax.AssignStmt:
 		fl.lowerOptAssign(n)
-		fl.lowerOptFieldsExcept(n, "Lhs")
+		fl.lowerOptFields(n, "Lhs")
 		return
 	case *syntax.RangeClause:
 		fl.lowerOptRange(n)
-		fl.lowerOptFieldsExcept(n, "Lhs")
+		fl.lowerOptFields(n, "Lhs")
 		return
 	case *syntax.ReturnStmt:
 		fl.lowerOptReturn(n)
@@ -136,7 +137,7 @@ func (fl *fileLower) lowerOptNode(n syntax.Node) {
 		// prodType reads the live node afterwards.
 		fl.lowerOptLambdaBody(n)
 	}
-	fl.lowerOptFields(n)
+	fl.lowerOptFields(n, "")
 }
 
 // lowerOptLambdaBody lowers a top-level `??` or `?.` that sits
@@ -161,25 +162,16 @@ func (fl *fileLower) lowerOptLambdaBody(lam *syntax.LambdaExpr) {
 	lowered := fl.lowerOptExpr(body)
 	lam.Body = lowered
 	if lowered != body && orig != nil {
-		if fl.optBodyType == nil {
-			fl.optBodyType = make(map[syntax.Expr]types2.Type)
-		}
 		fl.optBodyType[lowered] = orig
 	}
 }
 
 // lowerOptFields rewrites the option forms held directly by n: every
 // field of static type syntax.Expr, []syntax.Expr, or [N]syntax.Expr
-// goes through lowerOptExpr. All other fields are left alone; Inspect
-// visits the nodes they hold.
-func (fl *fileLower) lowerOptFields(n syntax.Node) {
-	fl.lowerOptFieldsExcept(n, "")
-}
-
-// lowerOptFieldsExcept is lowerOptFields skipping the named struct
-// field. Assignment and range write targets go through lowerOptLHS
-// instead, so a plain write target never gains a narrowed `.Value`.
-func (fl *fileLower) lowerOptFieldsExcept(n syntax.Node, except string) {
+// goes through lowerOptExpr, skipping the named struct field.
+// Assignment and range write targets pass "Lhs", so a plain write
+// target never gains a narrowed `.Value`; every other caller passes "".
+func (fl *fileLower) lowerOptFields(n syntax.Node, except string) {
 	v := reflect.ValueOf(n)
 	if v.Kind() != reflect.Pointer || v.IsNil() {
 		return
@@ -556,17 +548,6 @@ func (fl *fileLower) optHeadStart(e syntax.Expr) syntax.Pos {
 	}
 }
 
-// spanStart returns the eject offset where the text of e begins: the
-// recorded span for a synthetic wrapper top, otherwise the leftmost
-// payload position. Builders lower embedded originals eagerly, so a
-// synthetic top always has an entry.
-func (fl *fileLower) spanStart(e syntax.Expr) int {
-	if s, ok := fl.wrapSpan[e]; ok {
-		return s.start
-	}
-	return fl.off(fl.optLeftmost(e))
-}
-
 // lowerTypeExpr lowers the option types inside the type expression e,
 // returning the expression to use in its place. Composite type
 // constructors recurse; every other node stands as is (the Inspect
@@ -658,48 +639,48 @@ func (fl *fileLower) spellLoweredBoth(t types2.Type, pos syntax.Pos) (native syn
 	return n, s, true
 }
 
-// selectAccessBare builds the `?.` access for a bare receiver: the native
-// access expression and the eject suffix spelling, separately. It selects
-// directly on recv.
+// selectAccessBare builds the `?.` access for a bare receiver: the
+// native access expression and the eject suffix spelling, separately.
 func (fl *fileLower) selectAccessBare(recv syntax.Expr, e *syntax.OptSelectExpr) (syntax.Expr, string) {
 	pos := e.Pos()
-	return fl.selectAccessCommon(e, selOf(pos, recv, e.Sel.Value), "."+e.Sel.Value)
+	return fl.selectAccess(e, selOf(pos, recv, e.Sel.Value), "."+e.Sel.Value)
 }
 
 // selectAccessPresent builds the `?.` access for a presence-bearing
 // receiver: the native access expression and the eject suffix spelling,
-// separately. It selects through `.Value`.
+// separately.
 func (fl *fileLower) selectAccessPresent(recv syntax.Expr, e *syntax.OptSelectExpr) (syntax.Expr, string) {
 	pos := e.Pos()
-	return fl.selectAccessCommon(e, selOf(pos, selOf(pos, recv, "Value"), e.Sel.Value), ".Value."+e.Sel.Value)
+	return fl.selectAccess(e, selOf(pos, selOf(pos, recv, "Value"), e.Sel.Value), ".Value."+e.Sel.Value)
 }
 
-// selectAccessCommon resolves the `?.` access for the selection e from
-// the caller's default native access and eject suffix. Exported members
+// selectAccess resolves the `?.` access for the selection e from the
+// caller's default native access and eject suffix. Exported members
 // (the only kind source can name on a private type) take the historical
 // path. An unexported member of another package takes the bridge path:
 // the adapter returns the ready-built native access over its exact
 // registered nodes plus the eject suffix, never source spelling in the
-// native tree. A missing registration is a compiler diagnostic at the use
-// site, never a guessed access. Causal consistency: the access shape
-// follows the receiver the wrapper already lowered, and the single-pass
-// walk stays idempotent.
-func (fl *fileLower) selectAccessCommon(e *syntax.OptSelectExpr, defNative syntax.Expr, defEject string) (syntax.Expr, string) {
+// native tree. A missing registration is a compiler diagnostic at the
+// use site, never a guessed access.
+func (fl *fileLower) selectAccess(e *syntax.OptSelectExpr, native syntax.Expr, suffix string) (syntax.Expr, string) {
 	pos := e.Pos()
 	ot := fl.coeType(e.X)
-	if ot != nil {
-		if obj, _, _ := types2.LookupFieldOrMethod(ot.Elem, true, fl.pkg.tpkg, e.Sel.Value); obj != nil {
-			if pkg := obj.Pkg(); pkg != nil && pkg != fl.pkg.tpkg && !obj.Exported() {
-				if ownedFieldBridge != nil {
-					if nacc, esuf, ok := ownedFieldBridge(fl, e, defNative, defEject); ok {
-						return nacc, esuf
-					}
-				}
-				base.Fatalf("logos: cannot access unexported selection %s of %s at %s without a registered private view", e.Sel.Value, ot.Elem, pos.String())
+	if ot == nil {
+		return native, suffix
+	}
+	obj, _, _ := types2.LookupFieldOrMethod(ot.Elem, true, fl.pkg.tpkg, e.Sel.Value)
+	if obj == nil {
+		return native, suffix
+	}
+	if pkg := obj.Pkg(); pkg != nil && pkg != fl.pkg.tpkg && !obj.Exported() {
+		if ownedFieldBridge != nil {
+			if nacc, esuf, ok := ownedFieldBridge(fl, e, native, suffix); ok {
+				return nacc, esuf
 			}
 		}
+		base.Fatalf("logos: cannot access unexported selection %s of %s at %s without a registered private view", e.Sel.Value, ot.Elem, pos.String())
 	}
-	return defNative, defEject
+	return native, suffix
 }
 
 // spellLowered renders the checked type t as lowered Go source in this
@@ -923,31 +904,12 @@ func (fl *fileLower) narrowTarget(e *syntax.Name) *types2.Option {
 	return dOpt
 }
 
-// narrowAccess lowers one narrowed variable read: a bare payload reads
-// as is, a wrapped payload reads its `.Value`, which the guard proved
-// present. The eject splice is a pure insertion, so it composes with
-// every enclosing rewrite.
+// narrowAccess lowers one narrowed variable read or in-place write
+// (`++`, `--`, compound assignment): a bare payload reads as is, a
+// wrapped payload reads its `.Value`, which the guard proved present.
+// The eject splice is a pure insertion, so it composes with every
+// enclosing rewrite.
 func (fl *fileLower) narrowAccess(e *syntax.Name) syntax.Expr {
-	if fl.narrowDone[e] {
-		return e
-	}
-	fl.narrowDone[e] = true
-	dOpt := fl.narrowTarget(e)
-	if dOpt == nil || keepMapRead(dOpt.Elem) {
-		return e
-	}
-	pos := e.Pos()
-	off := fl.off(pos) + len(e.Value)
-	acc := selOf(pos, e, "Value")
-	fl.wrapOwner[acc] = fl.nextWrapID()
-	fl.addOwned(fl.wrapOwner[acc], off, off, ".Value")
-	return acc
-}
-
-// narrowForWrite lowers a narrowed variable in a write position (`++`,
-// `--`, compound assignment): a wrapped payload updates its `.Value`
-// in place, a bare payload stays.
-func (fl *fileLower) narrowForWrite(e *syntax.Name) syntax.Expr {
 	if fl.narrowDone[e] {
 		return e
 	}
@@ -1240,7 +1202,10 @@ func (fl *fileLower) lookupFinish(e *syntax.IndexExpr, lbrack, rbrack int, id in
 	call := callOf(pos, selOf(pos, nameOf(pos, rtAlias), "Lookup"), []syntax.Expr{e.X, e.Index})
 	fl.add(lbrack, lbrack+1, ", ")
 	fl.add(rbrack, rbrack+1, ")")
-	mStart := fl.spanStart(e.X)
+	mStart := fl.off(fl.optLeftmost(e.X))
+	if s, ok := fl.wrapSpan[e.X]; ok {
+		mStart = s.start
+	}
 	fl.wrapSpan[call] = span{start: mStart, end: rbrack + 1}
 	return call
 }
@@ -1343,16 +1308,19 @@ func (fl *fileLower) lowerCoalesce(e *syntax.CoalesceExpr) syntax.Expr {
 	xEnd := lastTokenEnd(fl.src, xStart, qoff)
 	init := defineOf(pos, []syntax.Expr{nameOf(pos, optTemp)}, []syntax.Expr{nx})
 	var cond syntax.Expr
+	var taken syntax.Expr
 	var mid string
 	if bare {
 		cond = notNil(pos, nameOf(pos, optTemp))
+		taken = nameOf(pos, optTemp)
 		mid = "; " + optTemp + " != nil { return " + optTemp + " }; return "
 	} else {
 		cond = selOf(pos, nameOf(pos, optTemp), "Present")
+		taken = selOf(pos, nameOf(pos, optTemp), "Value")
 		mid = "; " + optTemp + ".Present { return " + optTemp + ".Value }; return "
 	}
 	body := []syntax.Stmt{
-		ifOf(pos, init, cond, []syntax.Stmt{returnOf(pos, []syntax.Expr{thenValue(pos, bare)})}),
+		ifOf(pos, init, cond, []syntax.Stmt{returnOf(pos, []syntax.Expr{taken})}),
 		returnOf(pos, []syntax.Expr{wy}),
 	}
 	lit := at(&syntax.FuncLit{Type: signature, Body: blockOf(pos, body)}, pos)
@@ -1361,15 +1329,6 @@ func (fl *fileLower) lowerCoalesce(e *syntax.CoalesceExpr) syntax.Expr {
 	fl.wrapSpan[out] = span{start: xStart, end: yEnd}
 	fl.wrapOwner[out] = id
 	return out
-}
-
-// thenValue builds the `??` wrapper's taken-branch value: the bare
-// temporary itself, or its `.Value`.
-func thenValue(pos syntax.Pos, bare bool) syntax.Expr {
-	if bare {
-		return nameOf(pos, optTemp)
-	}
-	return selOf(pos, nameOf(pos, optTemp), "Value")
 }
 
 // isCompositeType reports whether t's underlying type opens a brace in
@@ -1382,19 +1341,6 @@ func isCompositeType(t types2.Type) bool {
 		return true
 	}
 	return false
-}
-
-// fieldTypeOf returns the type a `?.` selection yields before option
-// wrapping: a field's type, or a method's signature (never an option
-// itself). It reports nil for anything else.
-func fieldTypeOf(obj types2.Object) types2.Type {
-	switch obj := obj.(type) {
-	case *types2.Var:
-		return obj.Type()
-	case *types2.Func:
-		return obj.Type()
-	}
-	return nil
 }
 
 // lowerOptSelect lowers `x?.Sel` to an immediately invoked function
@@ -1430,7 +1376,7 @@ func (fl *fileLower) lowerOptSelect(e *syntax.OptSelectExpr) syntax.Expr {
 	bareRecv := keepMapRead(ox.Elem)
 	accessRec := ro.Elem
 	if obj, _, _ := types2.LookupFieldOrMethod(ox.Elem, true, fl.pkg.tpkg, e.Sel.Value); obj != nil {
-		if ft := fieldTypeOf(obj); ft != nil && fl.asOption(ft) != nil {
+		if fl.asOption(obj.Type()) != nil {
 			accessRec = ro
 		}
 	}
@@ -2018,7 +1964,7 @@ func (fl *fileLower) lowerOptAssign(s *syntax.AssignStmt) {
 	}
 	if s.Rhs == nil {
 		if name, ok := syntax.Unparen(s.Lhs).(*syntax.Name); ok {
-			s.Lhs = fl.narrowForWrite(name)
+			s.Lhs = fl.narrowAccess(name)
 		} else {
 			fl.lowerOptLHS(s.Lhs)
 		}
@@ -2026,7 +1972,7 @@ func (fl *fileLower) lowerOptAssign(s *syntax.AssignStmt) {
 	}
 	if s.Op != 0 {
 		if name, ok := syntax.Unparen(s.Lhs).(*syntax.Name); ok {
-			s.Lhs = fl.narrowForWrite(name)
+			s.Lhs = fl.narrowAccess(name)
 		} else {
 			fl.lowerOptLHS(s.Lhs)
 		}
