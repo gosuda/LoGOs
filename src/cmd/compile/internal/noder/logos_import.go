@@ -44,16 +44,7 @@ func applyLogosOverlayForLgoImporter(path string, pkg *types2.Package, packages 
 	if pkg == nil || f == nil {
 		return pkg, nil
 	}
-	if f.GoPackage {
-		if err := logos.ApplyFuncFacts(pkg, f.Fns); err != nil {
-			return nil, err
-		}
-		if err := logos.ApplyReadonlyFactsInPlace(pkg, f.Readonlys); err != nil {
-			return nil, err
-		}
-		return pkg, nil
-	}
-	if !logosHasStructuralFacts(f) {
+	if f.GoPackage || !logosHasStructuralFacts(f) {
 		if err := logos.ApplyFuncFacts(pkg, f.Fns); err != nil {
 			return nil, err
 		}
