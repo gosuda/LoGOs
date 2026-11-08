@@ -81,6 +81,44 @@ func TestHotStoreLoad(t *testing.T) {
 	}
 }
 
+func TestHotKeepsValueReachable(t *testing.T) {
+	type value struct {
+		n    int
+		keep *int
+	}
+	finalized := make(chan struct{}, 1)
+	h := new(logosync.Hot[value])
+	v := &value{n: 7, keep: new(int)}
+	runtime.SetFinalizer(v, func(*value) { finalized <- struct{}{} })
+	h.Store(v)
+	v = nil
+	for range 20 {
+		runtime.GC()
+		select {
+		case <-finalized:
+			t.Fatal("Hot value finalized while still stored")
+		default:
+		}
+	}
+	if got := h.Load(); got == nil || got.n != 7 {
+		t.Fatalf("Hot value after GC = %v, want 7", got)
+	}
+	h.Store(nil)
+	deadline := time.NewTimer(5 * time.Second)
+	defer deadline.Stop()
+	for {
+		runtime.GC()
+		select {
+		case <-finalized:
+			return
+		case <-deadline.C:
+			t.Fatal("Hot value was not finalized after Store(nil)")
+		default:
+		}
+		runtime.Gosched()
+	}
+}
+
 func TestHotUpdateSequential(t *testing.T) {
 	h := new(logosync.Hot[int])
 	h.Update(func(old *int) *int {
