@@ -84,9 +84,6 @@ type Error struct {
 	Code   ErrorCode
 	Detail string
 	Pos    syntax.Pos
-	// silentIn marks the const function whose body holds the
-	// impurity, for junctions that must not convert silence.
-	silentIn *Func
 }
 
 func (e *Error) Error() string {
@@ -413,7 +410,6 @@ type Entity struct {
 	Fn      *Func
 	Const   Value
 	Name    string
-	Type    *Type
 }
 
 // Param is one function parameter or result.
@@ -446,8 +442,6 @@ type Host interface {
 	// TypeOf returns the static type of e: composite literal types,
 	// conversion targets, declared variable types, and make operands.
 	TypeOf(e syntax.Expr) *Type
-	// WordSize is the target int/uint width in bytes.
-	WordSize() int64
 }
 
 // Stats carries evaluation measurements.

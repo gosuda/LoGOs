@@ -80,7 +80,7 @@ func (e *evaluator) chargeSteps(n int, pos syntax.Pos) error {
 func (e *evaluator) impurity(fr *frame, pos syntax.Pos, format string, args ...any) *Error {
 	detail := fmt.Sprintf(format, args...)
 	if fr != nil && fr.fn != nil && fr.fn.Const {
-		return &Error{Code: CodeSilent, Detail: detail, Pos: pos, silentIn: fr.fn}
+		return &Error{Code: CodeSilent, Detail: detail, Pos: pos}
 	}
 	return &Error{Code: CodeEval, Detail: detail, Pos: pos}
 }

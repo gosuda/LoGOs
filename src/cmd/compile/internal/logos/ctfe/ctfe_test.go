@@ -44,8 +44,6 @@ func newFakeHost(t *testing.T, word int64) *fakeHost {
 	}
 }
 
-func (h *fakeHost) WordSize() int64 { return h.word }
-
 func (h *fakeHost) Resolve(id *syntax.Name) Entity {
 	if v, ok := h.vars[id.Value]; ok {
 		return Entity{Kind: EntConst, Const: v}
@@ -67,7 +65,7 @@ func (h *fakeHost) Resolve(id *syntax.Name) Entity {
 		return Entity{Kind: EntNone}
 	}
 	if isBasicName(id.Value) {
-		return Entity{Kind: EntType, Type: BasicType(id.Value, h.word)}
+		return Entity{Kind: EntType}
 	}
 	return Entity{Kind: EntNone}
 }

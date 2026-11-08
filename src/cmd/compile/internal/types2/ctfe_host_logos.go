@@ -24,10 +24,6 @@ type ctfeHost struct {
 	check *Checker
 }
 
-func (h *ctfeHost) WordSize() int64 {
-	return h.check.logosWordSize()
-}
-
 // Resolve maps an identifier to its entity.
 func (h *ctfeHost) Resolve(id *syntax.Name) ctfe.Entity {
 	check := h.check
