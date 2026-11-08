@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"cmd/internal/logos/editmap"
 )
 
 // TestInsideGeneratedExcludesSeams checks the predicate behind the inlay
@@ -126,10 +128,10 @@ func TestFiltersKeepGoDocumentsWhole(t *testing.T) {
 // count as generated. The ? statement case stays covered by
 // TestInsideGeneratedExcludesSeams.
 func TestInsideGeneratedBoundaryRuns(t *testing.T) {
-	prefix := mustPosMap(t, "ab\n", "PRE\nab\n", EditMap{
-		Version: EditMapVersion, Source: "p.lgo", Size: 3, Out: 7,
-		Edits: []EditSpan{{Start: 0, End: 0, Len: 4}},
-		Segments: spanSegs(3, []EditSpan{{Start: 0, End: 0, Len: 4}}),
+	prefix := mustPosMap(t, "ab\n", "PRE\nab\n", editmap.EditMap{
+		Version: editmap.Version, Source: "p.lgo", Size: 3, Out: 7,
+		Edits: []editmap.EditSpan{{Start: 0, End: 0, Len: 4}},
+		Segments: spanSegs(3, []editmap.EditSpan{{Start: 0, End: 0, Len: 4}}),
 	})
 	for off, want := range map[int]bool{0: false, 1: true, 3: true, 4: false, 6: false, 7: false} {
 		if got := prefix.insideGenerated(off); got != want {
@@ -137,9 +139,9 @@ func TestInsideGeneratedBoundaryRuns(t *testing.T) {
 		}
 	}
 
-	edits := []EditSpan{{Start: 1, End: 1, Len: 3}}
-	insert := mustPosMap(t, "ab", "aXYZb", EditMap{
-		Version: EditMapVersion, Source: "m.lgo", Size: 2, Out: 5,
+	edits := []editmap.EditSpan{{Start: 1, End: 1, Len: 3}}
+	insert := mustPosMap(t, "ab", "aXYZb", editmap.EditMap{
+		Version: editmap.Version, Source: "m.lgo", Size: 2, Out: 5,
 		Edits: edits, Segments: spanSegs(2, edits),
 	})
 	for off, want := range map[int]bool{0: false, 1: false, 2: true, 3: true, 4: false, 5: false} {
@@ -148,10 +150,10 @@ func TestInsideGeneratedBoundaryRuns(t *testing.T) {
 		}
 	}
 
-	trailer := mustPosMap(t, "ab\n", "ab\nTRAILER\n", EditMap{
-		Version: EditMapVersion, Source: "t.lgo", Size: 3, Out: 11,
-		Edits: []EditSpan{{Start: 3, End: 3, Len: 8}},
-		Segments: spanSegs(3, []EditSpan{{Start: 3, End: 3, Len: 8}}),
+	trailer := mustPosMap(t, "ab\n", "ab\nTRAILER\n", editmap.EditMap{
+		Version: editmap.Version, Source: "t.lgo", Size: 3, Out: 11,
+		Edits: []editmap.EditSpan{{Start: 3, End: 3, Len: 8}},
+		Segments: spanSegs(3, []editmap.EditSpan{{Start: 3, End: 3, Len: 8}}),
 	})
 	for off, want := range map[int]bool{0: false, 2: false, 3: false, 4: true, 10: true, 11: false} {
 		if got := trailer.insideGenerated(off); got != want {
@@ -159,9 +161,9 @@ func TestInsideGeneratedBoundaryRuns(t *testing.T) {
 		}
 	}
 
-	delEdits := []EditSpan{{Start: 4, End: 12, Len: 0}}
-	deleted := mustPosMap(t, "one\ndropped\ntwo\n", "one\ntwo\n", EditMap{
-		Version: EditMapVersion, Source: "d.lgo", Size: 16, Out: 8,
+	delEdits := []editmap.EditSpan{{Start: 4, End: 12, Len: 0}}
+	deleted := mustPosMap(t, "one\ndropped\ntwo\n", "one\ntwo\n", editmap.EditMap{
+		Version: editmap.Version, Source: "d.lgo", Size: 16, Out: 8,
 		Edits: delEdits, Segments: spanSegs(16, delEdits),
 	})
 	for _, off := range []int{0, 3, 4, 7, 8} {
@@ -177,9 +179,9 @@ func TestInsideGeneratedBoundaryRuns(t *testing.T) {
 // text are kept. The ? statement case stays covered by
 // TestProxyDropsWhatTheLoweringInvented.
 func TestDropGeneratedHintsKeepsSeamHints(t *testing.T) {
-	edits := []EditSpan{{Start: 1, End: 1, Len: 3}}
-	pm := mustPosMap(t, "ab", "aXYZb", EditMap{
-		Version: EditMapVersion, Source: "m.lgo", Size: 2, Out: 5,
+	edits := []editmap.EditSpan{{Start: 1, End: 1, Len: 3}}
+	pm := mustPosMap(t, "ab", "aXYZb", editmap.EditMap{
+		Version: editmap.Version, Source: "m.lgo", Size: 2, Out: 5,
 		Edits: edits, Segments: spanSegs(2, edits),
 	})
 	lw := &lowered{pm: pm}

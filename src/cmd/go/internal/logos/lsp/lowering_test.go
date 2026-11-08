@@ -16,6 +16,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"cmd/internal/logos/editmap"
 )
 
 // aLgo is a loGo/s source with a ? statement, the lowering of which the
@@ -42,9 +44,9 @@ const siteTrailer = "\nvar _logosSite0 = 0\n"
 // `x := f()?` becomes three lines (the call with its error, a trace, and
 // the error return), and a declaration is appended at the end of the file.
 // A source holding "SYNTAX ERROR" does not lower.
-func lowerQuestion(src []byte) ([]byte, EditMap, bool) {
+func lowerQuestion(src []byte) ([]byte, editmap.EditMap, bool) {
 	if bytes.Contains(src, []byte("SYNTAX ERROR")) {
-		return nil, EditMap{}, false
+		return nil, editmap.EditMap{}, false
 	}
 	// copyRun is one run of a replacement text copied from the original:
 	// the replacement-relative bytes [start, end) copy original offset orig.
@@ -53,7 +55,7 @@ func lowerQuestion(src []byte) ([]byte, EditMap, bool) {
 		orig       int
 	}
 	type step struct {
-		span   EditSpan
+		span   editmap.EditSpan
 		text   string
 		copies []copyRun
 	}
@@ -70,7 +72,7 @@ func lowerQuestion(src []byte) ([]byte, EditMap, bool) {
 			// return lines are generated.
 			operandStart := len(name) + len(", _e := ")
 			steps = append(steps, step{
-				span: EditSpan{Start: off + len(indent), End: off + len(text), Len: len(repl)},
+				span: editmap.EditSpan{Start: off + len(indent), End: off + len(text), Len: len(repl)},
 				text: repl,
 				copies: []copyRun{
 					{start: 0, end: len(name), orig: off + len(indent)},
@@ -80,9 +82,9 @@ func lowerQuestion(src []byte) ([]byte, EditMap, bool) {
 		}
 		off += len(line)
 	}
-	steps = append(steps, step{EditSpan{Start: len(src), End: len(src), Len: len(siteTrailer)}, siteTrailer, nil})
+	steps = append(steps, step{editmap.EditSpan{Start: len(src), End: len(src), Len: len(siteTrailer)}, siteTrailer, nil})
 	var out []byte
-	var spans []EditSpan
+	var spans []editmap.EditSpan
 	var segs segBuilder
 	prev := 0
 	for _, s := range steps {
@@ -101,7 +103,7 @@ func lowerQuestion(src []byte) ([]byte, EditMap, bool) {
 	}
 	out = append(out, src[prev:]...)
 	segs.copy(prev, len(src)-prev)
-	return out, EditMap{Version: EditMapVersion, Size: len(src), Out: len(out), Edits: spans, Segments: segs.done()}, true
+	return out, editmap.EditMap{Version: editmap.Version, Size: len(src), Out: len(out), Edits: spans, Segments: segs.done()}, true
 }
 
 // fakeCompiler is a Compiler that lowers with lowerQuestion. Every .lgo

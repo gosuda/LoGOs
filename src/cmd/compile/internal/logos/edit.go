@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"cmd/compile/internal/syntax"
+	"cmd/internal/logos/editmap"
 )
 
 // Edit replaces the source text from Start up to End with Text. Positions
@@ -97,16 +98,6 @@ func resolve(src []byte, starts []int, base *syntax.PosBase, e Edit) (splice, er
 	return splice{start: start, end: end, text: e.Text, chunks: e.Chunks}, nil
 }
 
-// EditSpan records one applied edit in byte offsets: the bytes of the
-// original text from Start up to End became Len bytes of the edited text.
-// An insertion has Start equal to End. Spans come in source order and never
-// overlap, so a reader can map offsets between the two texts.
-type EditSpan struct {
-	Start int `json:"start"`
-	End   int `json:"end"`
-	Len   int `json:"len"`
-}
-
 // ApplyEdits applies edits to src and returns the new text. base is the
 // file base of the file whose positions the edits carry. Edits may be
 // given in any order; they must not overlap. Insertions at one offset keep
@@ -118,7 +109,7 @@ func ApplyEdits(src []byte, base *syntax.PosBase, edits []Edit) ([]byte, error) 
 
 // ApplyEditsMapped applies edits like ApplyEdits and also returns the
 // applied edits as spans of byte offsets, in the order they took effect.
-func ApplyEditsMapped(src []byte, base *syntax.PosBase, edits []Edit) ([]byte, []EditSpan, error) {
+func ApplyEditsMapped(src []byte, base *syntax.PosBase, edits []Edit) ([]byte, []editmap.EditSpan, error) {
 	out, spans, _, err := ApplyEditsSegments(src, base, edits)
 	return out, spans, err
 }
@@ -128,7 +119,7 @@ func ApplyEditsMapped(src []byte, base *syntax.PosBase, edits []Edit) ([]byte, [
 // every byte of the edited text is either a verbatim copy of an original
 // byte range or generated, so a reader maps any output offset to its
 // exact original offset or learns it has none.
-func ApplyEditsSegments(src []byte, base *syntax.PosBase, edits []Edit) ([]byte, []EditSpan, []Segment, error) {
+func ApplyEditsSegments(src []byte, base *syntax.PosBase, edits []Edit) ([]byte, []editmap.EditSpan, []editmap.Segment, error) {
 	want := base.Pos().FileBase()
 	starts := lineStarts(src)
 	splices := make([]splice, len(edits))
@@ -149,12 +140,56 @@ func ApplyEditsSegments(src []byte, base *syntax.PosBase, edits []Edit) ([]byte,
 }
 
 // spansOf converts splices, already sorted by applySplices, to spans.
-func spansOf(sorted []splice) []EditSpan {
-	spans := make([]EditSpan, len(sorted))
+func spansOf(sorted []splice) []editmap.EditSpan {
+	spans := make([]editmap.EditSpan, len(sorted))
 	for i, s := range sorted {
-		spans[i] = EditSpan{Start: s.start, End: s.end, Len: len(s.text)}
+		spans[i] = editmap.EditSpan{Start: s.start, End: s.end, Len: len(s.text)}
 	}
 	return spans
+}
+
+// segmentsOf builds the origin segments of an edited text from splices
+// already sorted by applyChunks.
+func segmentsOf(sorted []splice, outLen int) []editmap.Segment {
+	var segs []editmap.Segment
+	seg := func(start, end, orig int) {
+		if end <= start {
+			return
+		}
+		if n := len(segs); n > 0 {
+			last := &segs[n-1]
+			if (last.Orig < 0 && orig < 0) ||
+				(last.Orig >= 0 && orig >= 0 && last.Orig+last.Len == orig && last.Out+last.Len == start) {
+				last.Len += end - start
+				return
+			}
+		}
+		segs = append(segs, editmap.Segment{Out: start, Len: end - start, Orig: orig})
+	}
+	out := 0
+	prev := 0
+	for _, s := range sorted {
+		seg(out, out+(s.start-prev), prev) // gap: copy at identical offsets
+		out += s.start - prev
+		cov := 0
+		for _, ch := range s.chunks {
+			if ch.n == 0 {
+				continue
+			}
+			if ch.out > cov {
+				seg(out+cov, out+ch.out, -1) // generated run before the chunk
+			}
+			seg(out+ch.out, out+ch.out+ch.n, ch.orig)
+			cov = ch.out + ch.n
+		}
+		if cov < len(s.text) {
+			seg(out+cov, out+len(s.text), -1) // generated tail
+		}
+		out += len(s.text)
+		prev = s.end
+	}
+	seg(out, outLen, prev)
+	return segs
 }
 
 // sortSplices orders splices by start, then end, keeping the input order

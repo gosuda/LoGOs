@@ -7,6 +7,8 @@ package lsp
 import (
 	"sort"
 	"unicode/utf8"
+
+	"cmd/internal/logos/editmap"
 )
 
 // Position is an LSP position: a zero-based line and a character offset
@@ -118,4 +120,68 @@ func utf16Units(b []byte) int {
 		b = b[size:]
 	}
 	return n
+}
+
+// posMap translates LSP positions between an original loGo/s text and its
+// lowered Go text through the edit map the compiler wrote beside the
+// lowered file.
+type posMap struct {
+	*editmap.Map
+	orig, low *text
+}
+
+// newPosMap checks m against the two texts and builds the map.
+func newPosMap(src, out []byte, m editmap.EditMap) (*posMap, error) {
+	em, err := editmap.New(src, out, m)
+	if err != nil {
+		return nil, err
+	}
+	return &posMap{Map: em, orig: newText(src), low: newText(out)}, nil
+}
+
+// toLowered maps a position of the original text to the lowered text. A
+// position inside deleted text maps to the start of what replaced it.
+func (m *posMap) toLowered(p Position) Position {
+	o := m.orig.offset(p)
+	if v, ok := m.LoweredOffset(o, editmap.Leading); ok {
+		return m.low.position(v)
+	}
+	return m.low.position(m.LoweredOffsetNear(o, editmap.Leading))
+}
+
+// toOriginal maps a position of the lowered text to the original text. A
+// position inside generated text maps to the original text that produced
+// it.
+func (m *posMap) toOriginal(p Position) Position {
+	o, _ := m.OriginalOffset(m.low.offset(p), editmap.Leading)
+	return m.orig.position(o)
+}
+
+// rangeToLowered maps a range of the original text to the lowered text. It
+// stays tight: the start sits after text inserted at its offset and the end
+// before text inserted at its offset.
+func (m *posMap) rangeToLowered(r Range) Range {
+	start := m.LoweredOffsetNear(m.orig.offset(r.Start), editmap.Leading)
+	end := max(start, m.LoweredOffsetNear(m.orig.offset(r.End), editmap.Trailing))
+	return Range{Start: m.low.position(start), End: m.low.position(end)}
+}
+
+// rangeToOriginal maps a range of the lowered text to the original text. A
+// range that touches generated text widens to the original text that
+// produced it: every generated run the range overlaps contributes its
+// anchor, so a highlight over the ? expansion maps to the ? token even
+// when its end sits exactly on the generated-to-copy seam.
+func (m *posMap) rangeToOriginal(r Range) Range {
+	loStart := m.low.offset(r.Start)
+	loEnd := m.low.offset(r.End)
+	if loEnd < loStart {
+		loEnd = loStart
+	}
+	start, _ := m.OriginalOffset(loStart, editmap.Leading)
+	end, _ := m.OriginalOffset(loEnd, editmap.Trailing)
+	if loStart < loEnd {
+		start, end = m.WidenOverGenerated(loStart, loEnd, start, end)
+	}
+	end = max(start, end)
+	return Range{Start: m.orig.position(start), End: m.orig.position(end)}
 }

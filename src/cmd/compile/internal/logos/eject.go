@@ -16,6 +16,7 @@ import (
 
 	"cmd/compile/internal/syntax"
 	"cmd/compile/internal/types2"
+	"cmd/internal/logos/editmap"
 	"cmd/internal/logosowned"
 )
 
@@ -23,8 +24,9 @@ import (
 // edits to the original bytes. Files without a src entry are skipped.
 // Every eject output comes from the same lowered nodes as the native
 // build, so comments outside replacement spans survive verbatim. Beside
-// each ejected file it writes the edit map of that file (see EditMap), so
-// a tool can translate positions between the original and ejected texts.
+// each ejected file it writes the edit map of that file
+// (cmd/internal/logos/editmap.EditMap), so a tool can translate positions
+// between the original and ejected texts.
 func Eject(dir string, files []*syntax.File, src map[*syntax.File][]byte, edits map[*syntax.File][]Edit) error {
 	if err := os.MkdirAll(dir, 0o777); err != nil {
 		return err
@@ -152,7 +154,7 @@ func Eject(dir string, files []*syntax.File, src map[*syntax.File][]byte, edits 
 		if err := os.WriteFile(name, out, 0o666); err != nil {
 			return err
 		}
-		if err := writeEditMap(name+EditMapSuffix, base.Filename(), len(data), len(out), spans, segments); err != nil {
+		if err := editmap.Write(name+editmap.Suffix, base.Filename(), len(data), len(out), spans, segments); err != nil {
 			return err
 		}
 	}

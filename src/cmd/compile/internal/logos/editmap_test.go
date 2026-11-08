@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"cmd/compile/internal/syntax"
+	"cmd/internal/logos/editmap"
 )
 
 // TestEditMapDescribesEject is the oracle of the language server's
@@ -57,7 +58,7 @@ func TestEditMapDescribesEject(t *testing.T) {
 
 // checkSpans verifies that spans describe the transformation from src to
 // out: ordered, disjoint, inside src, and consistent with both texts.
-func checkSpans(t *testing.T, src, out []byte, spans []EditSpan) {
+func checkSpans(t *testing.T, src, out []byte, spans []editmap.EditSpan) {
 	t.Helper()
 	prev, pos := 0, 0
 	for i, s := range spans {
@@ -101,16 +102,16 @@ func TestEjectWritesEditMap(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw, err := os.ReadFile(filepath.Join(out, "viewas.go"+EditMapSuffix))
+	raw, err := os.ReadFile(filepath.Join(out, "viewas.go"+editmap.Suffix))
 	if err != nil {
 		t.Fatal(err)
 	}
-	var m EditMap
+	var m editmap.EditMap
 	if err := json.Unmarshal(raw, &m); err != nil {
 		t.Fatal(err)
 	}
-	if m.Version != EditMapVersion || m.Source != name || m.Size != len(src) || m.Out != len(ejected) {
-		t.Errorf("edit map header = %+v, want version %d source %s size %d out %d", m, EditMapVersion, name, len(src), len(ejected))
+	if m.Version != editmap.Version || m.Source != name || m.Size != len(src) || m.Out != len(ejected) {
+		t.Errorf("edit map header = %+v, want version %d source %s size %d out %d", m, editmap.Version, name, len(src), len(ejected))
 	}
 	if len(m.Edits) == 0 {
 		t.Fatal("edit map has no spans for a fixture that lowers")

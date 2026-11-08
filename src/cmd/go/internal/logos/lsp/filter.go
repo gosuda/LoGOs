@@ -4,7 +4,11 @@
 
 package lsp
 
-import "strings"
+import (
+	"strings"
+
+	"cmd/internal/logos/editmap"
+)
 
 // reservedPrefix starts every identifier the lowering invents (_logos_e0,
 // _logos_rt, _logos_site0). The language reserves it, so no source of the
@@ -17,7 +21,7 @@ const reservedPrefix = "_logos_"
 // seams with the user's own text, and do not count: the answer comes from
 // the origin segments, so it is exact, not a span-geometry guess.
 func (m *posMap) insideGenerated(o int) bool {
-	_, generated := m.origOffset(o, leading)
+	_, generated := m.OriginalOffset(o, editmap.Leading)
 	return generated
 }
 

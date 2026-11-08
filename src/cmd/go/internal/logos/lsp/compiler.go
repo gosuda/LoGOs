@@ -8,6 +8,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+
+	"cmd/internal/logos/editmap"
 )
 
 // Compiler is the proxy's view of the toolchain. The production
@@ -50,7 +52,7 @@ type LoweredFile struct {
 	Src, Out []byte
 
 	// Map relates the two texts.
-	Map EditMap
+	Map editmap.EditMap
 }
 
 // Diagnostic is one compiler or lint diagnostic in the JSON form of SPEC

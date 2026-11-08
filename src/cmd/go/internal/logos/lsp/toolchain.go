@@ -24,6 +24,7 @@ import (
 
 	"cmd/go/internal/cfg"
 	"cmd/go/internal/logos/config"
+	"cmd/internal/logos/editmap"
 	"cmd/internal/quoted"
 )
 
@@ -316,7 +317,7 @@ func readLowered(out, path string, buffers map[string][]byte) (LoweredFile, erro
 	if err != nil {
 		return LoweredFile{}, err
 	}
-	raw, err := os.ReadFile(ejected + ".edits")
+	raw, err := os.ReadFile(ejected + editmap.Suffix)
 	if err != nil {
 		return LoweredFile{}, err
 	}
