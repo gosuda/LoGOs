@@ -251,3 +251,91 @@ func LogosArenaCgoCheckMemmove(elem any, dst, src unsafe.Pointer) {
 	typ := logosEfaceType(elem)
 	cgoCheckMemmove2(typ, dst, src, 0, typ.Size_)
 }
+
+const LogosRegionMaxBytes uintptr = logosRegionMaxBytes
+
+func LogosRegionOpen() (h unsafe.Pointer, gen uintptr) {
+	return logosRegionOpen()
+}
+
+func LogosRegionClose(h unsafe.Pointer, gen uintptr) {
+	logosRegionClose(h, gen)
+}
+
+func LogosRegionBump(h unsafe.Pointer, gen uintptr, size uintptr) unsafe.Pointer {
+	return logosRegionBump(h, gen, size)
+}
+
+func LogosRegionAllocNoscan(h unsafe.Pointer, gen uintptr, size, align uintptr) unsafe.Pointer {
+	return logosRegionAllocNoscan(h, gen, size, align)
+}
+
+func LogosRegionAllocScan(h unsafe.Pointer, gen uintptr, elem any, size uintptr) unsafe.Pointer {
+	return logosRegionAllocScan(h, gen, logosEfaceType(elem), size)
+}
+
+func LogosRegionMakeSlice(h unsafe.Pointer, gen uintptr, elem any, len64, cap64 int64) unsafe.Pointer {
+	return logosRegionMakeSlice(h, gen, logosEfaceType(elem), len64, cap64)
+}
+
+func LogosRegionGrowSlice(h unsafe.Pointer, gen uintptr, oldPtr unsafe.Pointer, newLen, oldCap, num int, elem any) (array unsafe.Pointer, capacity int) {
+	s := logosRegionGrowSlice(h, gen, oldPtr, newLen, oldCap, num, logosEfaceType(elem))
+	return s.array, s.cap
+}
+
+func LogosHeapGrowSlice(oldPtr unsafe.Pointer, newLen, oldCap, num int, elem any) (array unsafe.Pointer, capacity int) {
+	s := growslice(oldPtr, newLen, oldCap, num, logosEfaceType(elem))
+	return s.array, s.cap
+}
+
+func LogosRegionBytes() int {
+	return logosRegionBytes()
+}
+
+func LogosTypePointers(elem any) bool {
+	return logosEfaceType(elem).Pointers()
+}
+
+func LogosRegionChunks() []uintptr {
+	gp := getg()
+	n := 0
+	for rec := gp.logosRegions; rec != nil; rec = rec.prev {
+		for c := rec.chunk; c != nil; c = c.next {
+			n++
+		}
+	}
+	out := make([]uintptr, 0, n)
+	for rec := gp.logosRegions; rec != nil; rec = rec.prev {
+		for c := rec.chunk; c != nil; c = c.next {
+			out = append(out, uintptr(unsafe.Pointer(c)))
+		}
+	}
+	return out
+}
+
+func LogosRegionChunkTotal() int {
+	stw := stopTheWorld(stwForTestCountPagesInUse)
+	n := 0
+	forEachG(func(gp *g) {
+		for rec := gp.logosRegions; rec != nil; rec = rec.prev {
+			for c := rec.chunk; c != nil; c = c.next {
+				n++
+			}
+		}
+	})
+	startTheWorld(stw)
+	return n
+}
+
+func LogosRegionEmptyChunk(addr uintptr) bool {
+	for rec := getg().logosRegions; rec != nil; rec = rec.prev {
+		for c := rec.chunk; c != nil; c = c.next {
+			if uintptr(unsafe.Pointer(c)) == addr {
+				c.popScan(c.scanBase)
+				c.noscanCur = c.noscanBase
+				return true
+			}
+		}
+	}
+	return false
+}

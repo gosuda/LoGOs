@@ -490,6 +490,8 @@ type g struct {
 	// objects in the caller's arena region. The callee takes it (reads and
 	// clears it) as its first action; see logosArenaRetSet.
 	logosArenaRetOK bool
+	logosRegions    *logosRegion
+	logosRegionFree *logosRegion
 
 	_panic    *_panic // innermost panic
 	_defer    *_defer // innermost defer
@@ -873,6 +875,7 @@ type p struct {
 	// owned by this P and linked through sideStackChunk.next.
 	logosArenaPool  *sideStackChunk
 	logosArenaPoolN int32
+	logosRegionPool *logosRegion
 
 	trace pTraceState
 

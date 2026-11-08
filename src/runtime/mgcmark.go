@@ -952,8 +952,9 @@ func scanstack(gp *g, gcw *gcWork) int64 {
 	var state stackScanState
 	state.stack = gp.stack
 
-	if goexperiment.LogosArena && gp.logosArena != nil {
+	if goexperiment.LogosArena && (gp.logosArena != nil || gp.logosRegions != nil) {
 		logosArenaScanStack(gp, gcw, &state)
+		logosRegionScan(gp, gcw, &state)
 	}
 	if stackTraceDebug {
 		println("stack trace goroutine", gp.goid)

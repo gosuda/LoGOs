@@ -7,6 +7,7 @@ package runtime
 import (
 	"internal/abi"
 	"internal/goarch"
+	"internal/goexperiment"
 	"internal/runtime/atomic"
 	"internal/runtime/sys"
 	"internal/stringslite"
@@ -1402,6 +1403,10 @@ func recovery(gp *g) {
 	if sp != 0 && (sp < gp.stack.lo || gp.stack.hi < sp) {
 		print("recover: ", hex(sp), " not in [", hex(gp.stack.lo), ", ", hex(gp.stack.hi), "]\n")
 		throw("bad recovery")
+	}
+
+	if goexperiment.LogosArena && gp.logosRegions != nil {
+		logosRegionUnwind(gp, sp)
 	}
 
 	// branch directly to the deferreturn

@@ -391,13 +391,18 @@ func logosArenaRetTake() bool {
 //go:nowritebarrier
 func logosArenaScanStack(gp *g, gcw *gcWork, state *stackScanState) {
 	for c := gp.logosArena; c != nil; c = c.next {
-		for hdrAddr := c.scanCur; hdrAddr < c.scanBase; {
-			hdr := (*logosArenaScanHeader)(unsafe.Pointer(hdrAddr))
-			obj := hdrAddr + logosArenaScanHeaderBytes
-			hdrAddr = obj + alignUp(hdr.size, logosArenaUnit)
-			if hdr.typ != nil && hdr.size != 0 {
-				logosArenaScanObject(hdr.typ, obj, hdr.size, gcw, state)
-			}
+		logosArenaScanChunk(c, gcw, state)
+	}
+}
+
+//go:nowritebarrier
+func logosArenaScanChunk(c *sideStackChunk, gcw *gcWork, state *stackScanState) {
+	for hdrAddr := c.scanCur; hdrAddr < c.scanBase; {
+		hdr := (*logosArenaScanHeader)(unsafe.Pointer(hdrAddr))
+		obj := hdrAddr + logosArenaScanHeaderBytes
+		hdrAddr = obj + alignUp(hdr.size, logosArenaUnit)
+		if hdr.typ != nil && hdr.size != 0 {
+			logosArenaScanObject(hdr.typ, obj, hdr.size, gcw, state)
 		}
 	}
 }
@@ -521,6 +526,9 @@ func logosArenaPark(gp *g) {
 	if goexperiment.LogosArena && gp.logosArena != nil {
 		logosArenaParkChain(gp)
 	}
+	if goexperiment.LogosArena && gp.logosRegions != nil {
+		logosRegionPark(gp)
+	}
 }
 
 func logosArenaParkChain(gp *g) {
@@ -553,6 +561,9 @@ func logosArenaExit(gp *g) {
 	gp.logosArenaRetOK = false
 	if gp.logosArena != nil {
 		logosArenaDrop(gp)
+	}
+	if gp.logosRegions != nil || gp.logosRegionFree != nil {
+		logosRegionExit(gp)
 	}
 }
 
