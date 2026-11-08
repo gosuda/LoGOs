@@ -26,11 +26,11 @@ import (
 //     the wasm stack through runtime.morestack, so a function with a stack
 //     check can never be called without a resume point; the small leaf can.
 
-// LeafNoSplit reports whether the profile drops the stack check of the
+// leafNoSplit reports whether the profile drops the stack check of the
 // function whose first Prog is text: it has a frame below StackSmall and
 // no call of any kind. It reads only the Prog list, so the compiler asks it
 // before preprocess runs.
-func LeafNoSplit(ctxt *obj.Link, text *obj.Prog) bool {
+func leafNoSplit(ctxt *obj.Link, text *obj.Prog) bool {
 	if !ctxt.WasmProfile || ctxt.IsAsm {
 		return false
 	}
@@ -58,13 +58,13 @@ func LeafNoSplit(ctxt *obj.Link, text *obj.Prog) bool {
 // function whose first Prog is text, so the compiler can tell which
 // functions may unwind at entry.
 func NeedMoreStack(ctxt *obj.Link, text *obj.Prog) bool {
-	return text.To.Offset > 0 && !text.From.Sym.NoSplit() && !LeafNoSplit(ctxt, text)
+	return text.To.Offset > 0 && !text.From.Sym.NoSplit() && !leafNoSplit(ctxt, text)
 }
 
 // markLeafNoSplit drops the stack check of a leaf function and records the
 // nosplit attribute so the linker's stack check sees the same function.
 func markLeafNoSplit(ctxt *obj.Link, s *obj.LSym) bool {
-	if !LeafNoSplit(ctxt, s.Func().Text) {
+	if !leafNoSplit(ctxt, s.Func().Text) {
 		return false
 	}
 	s.Set(obj.AttrNoSplit, true)
