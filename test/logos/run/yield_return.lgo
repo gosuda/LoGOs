@@ -1,0 +1,20 @@
+// run
+
+package main
+
+import (
+	"fmt"
+	"iter"
+)
+
+func Values() iter.Seq[int] {
+	yield 1
+	return 99
+	yield 2
+}
+
+func main() {
+	for value := range Values() {
+		fmt.Println(value)
+	}
+}

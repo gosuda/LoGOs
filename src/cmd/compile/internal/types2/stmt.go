@@ -571,6 +571,9 @@ func (check *Checker) stmt(ctxt stmtContext, s syntax.Stmt) {
 		check.logosConstFor(s, inner) // logos M7-S2 hook.
 
 	case *syntax.ReturnStmt:
+		if check.logosGeneratorReturn(s) {
+			return
+		}
 		if check.logosGroupReturn(s) { // logos M8-S2 hook: returns cannot leave a group child.
 			return
 		}
