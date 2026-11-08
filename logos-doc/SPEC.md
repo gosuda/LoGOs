@@ -317,30 +317,22 @@ func Count(n int) iter.Seq[int] {
 }
 ```
 
-### 1.5 RFC-105: Optimization tiers and synthetic PGO
-`logos build` and `go build` MUST accept `-O=0`, `-O=1`, `-O=2`, `-O=3`, `-O=s`, and `-O=z` [T-105][R-U1].
+### 1.5 RFC-105: Optimization tiers
+`logos build` and `go build` MUST accept `-O=0`, `-O=1`, `-O=2`, `-O=3`, and `-O=s` [T-105][R-U1].
 A level MUST apply to every package of the build, Go or loGo/s [T-105][R-U1].
 Under `logos`, the default level MUST come from `logos.toml [build] opt_level` with default `O2` [T-105].
 Under plain `go`, the default level MUST be `O1` [T-105][R-U1].
 The plain `go` default level MUST stay `O1` until `./run.bash` and the G6 comparison of `IMPLEMENTATION.md` both pass with `O2` as the default [T-105][T-0.1].
-`[build] opt_level` MUST accept `O0`, `O1`, `O2`, `O3`, `Os`, and `Oz` only [T-105].
+`[build] opt_level` MUST accept `O0`, `O1`, `O2`, `O3`, and `Os` only [T-105].
 A bare spelling such as `2` MUST fail validation like an unknown level [T-105].
-An invalid level MUST fail with text that lists the six accepted levels [T-105].
+An invalid level MUST fail with text that lists the five accepted levels [T-105].
 O0 MUST pass debug flags for no inline and no debug-info loss protection [T-105].
 O1 MUST be the upstream baseline [T-105].
-O2 MUST set inline budget 120 and variable-make stack buffer 256 bytes for non-standard packages with standard synthetic PGO [T-105].
-O3 MUST set inline budget 400 with 80 inside recursive cycles, clone specialization, variable-make buffer 4096 bytes for non-standard packages, and aggressive synthetic PGO [T-105].
+O2 MUST set inline budget 120 and variable-make stack buffer 256 bytes for non-standard packages [T-105].
+O3 MUST set inline budget 400 with 80 inside recursive cycles, and variable-make stack buffer 4096 bytes for non-standard packages [T-105].
 A function in a recursive call-graph cycle MUST keep the upstream variable-make buffer of 32 bytes at every level, inlined bodies included [T-105][T-302].
 A standard-library-provenance package (a standard library package or its external test package) MUST keep the default variable-make buffer of 32 bytes at every opt level; non-standard packages MUST use 256 bytes at O2 and 4096 bytes at O3 [T-105][T-302].
-Os and Oz MUST set inline budget 15 with linker identical code folding [T-105].
-Linker identical code folding MUST fold only functions with identical machine code, relocations, call ABI, and function metadata (frame sizes, function identity and flags, stack-height, file, inline-mark, pcdata, and liveness tables); only the name and line table MAY be shared, with the kept function's name and line table serving every folded function, and cgo-exported functions MUST keep their own entries [T-105].
-Synthetic PGO MUST mark `?` error blocks, panics, and `os.Exit` paths unlikely through the intrinsic `logos/rt.cold()` [T-105].
-A Go package MUST get the same marks for `os.Exit` paths, and for panic paths where the aggressive level marks them, with no source change and no new import [T-105][R-U1].
-A Go package MUST NOT get a mark from a guess about `if err != nil` blocks, because Go has no `?` form to name an error block [T-105][R-U1].
-The backend scale MUST be ternary with no numeric probability [T-105].
-A cold successor MUST be placed last inside its function, never outlined to the tail of text [T-105].
-Loop hotness MUST come from real profiles only, never from a synthetic power formula [T-105].
-Generic code sharing MUST stay upstream shaped behavior with linker choice of one duplicate [T-105].
+Os MUST set inline budget 15 [T-105].
 O3 MUST add no escape-analysis or prove-pass work budget [T-105].
 `target_cpu` MUST accept `deterministic`, `baseline`, or `native` [T-105].
 `target_cpu` MUST apply to every package that `logos` builds, Go or loGo/s [T-105][R-U1].
@@ -583,7 +575,7 @@ func greet(u *User?) string {
 }
 ```
 
-### 2.3 RFC-203: Closed unions, property interfaces, inline assertions, and clone specialization
+### 2.3 RFC-203: Closed unions, property interfaces, and inline assertions
 
 A closed union MUST be an interface whose type set is a finite union of non-`~` terms. [T-203.1]
 
@@ -751,39 +743,6 @@ Each assertion MUST lower to `var _ I = (*S)(nil)`. [T-203.3]
 
 An assertion list on a non-struct type MUST be a syntax error. [T-203.3]
 
-At O2 and O3 the compiler MAY clone a same-package function and retype an interface parameter to the concrete argument type. [T-203.4]
-
-Such a clone MUST apply only when the parameter serves solely as a method receiver or a passed-on argument. [T-203.4]
-
-Specialization MUST stop at type depth 4. [T-203.4]
-
-O2 MUST cap callees at 200 nodes. [T-203.4]
-
-O3 MUST set no cost cap. [T-203.4]
-
-A clone MUST carry the name `<f>·logosspec<N>`. [T-203.4]
-
-The linker MUST strip that suffix in names written to pclntab, so traces print `<f>`. [T-203.4]
-
-A parameter compared with `nil`, reassigned, or stored MUST block specialization for that call. [T-203.4]
-
-A call site with more than 4 concrete types MUST NOT specialize. [T-203.4]
-
-A `const []Creature` parameter receiving `[]*Monster` MUST specialize with no copy loop. [T-203.4]
-
-The `const` in `const []Creature` MUST be a container qualifier over the slice; it MUST NOT require the element interface methods to be `const`, and an interface element MUST NOT ban the container qualifier. [T-201][T-203.4]
-
-Whether a dynamic call through that parameter is allowed MUST depend only on whether the called method is declared `const` in the interface, not on the container qualifier. [T-201]
-
-No run-time call-site cache MUST exist. [T-203.4]
-
-Function values MUST keep working. [T-203.4]
-
-No dedup pass MUST run for clones. [T-203.4]
-
-Unique package-local names MUST prevent duplicates. [T-203.4]
-
-Specialization MUST apply to Go packages and to loGo/s packages. [T-203.4][R-U1]
 
 ### 2.4 RFC-204: Tuples and fixed-array SIMD
 
@@ -1414,10 +1373,6 @@ With cgo off, net and os/user use their pure-Go paths. [T-101.2]
 opt_level is a string with default "O2". [T-Sec10][T-105]
 See Sec 1.5 for accepted `opt_level` values.
 A `-O=<level>` flag on `logos build` MUST override the key. [T-105]
-synthetic_pgo MUST be one of "off", "standard", or "aggressive". [T-Sec10][T-105]
-When the key is absent, O2 uses standard. [T-105]
-When the key is absent, O3 uses aggressive. [T-105]
-Other levels emit nothing. [T-105]
 target_cpu is a string with default "deterministic". [T-Sec10][T-105]
 It MUST be one of "deterministic", "baseline", or "native". [T-Sec10][T-105]
 With "deterministic", logos sets GOAMD64 to v3 and GOARM64 to v8.2 unless the environment already sets them. [T-105]
@@ -1713,13 +1668,12 @@ Each entry from #1 to #182 states the tailored resolution of its original attack
 - #6 Block lambda return ambiguity inside map: Lambdas MUST allow expression and block forms with known target types. A ? in an expression lambda MUST propagate from the enclosing function. See Sec 1.4. [T-104.6]
 - #7 Non-nil pointer bypass via arrays maps JSON: Zero values of non-nil pointers MUST fail with correctness::nonnil_uninitialized. Absent map and JSON values MUST check through V? and MissingFieldError. An absent key MUST read as none while a present nil payload MUST read as some. See Sec 2.2. [T-202][T-Sec12]
 - #8 Go functions returning nil into lgo: Pointers from Go declarations, in the standard library and in every other Go package, MUST act as platform pointers. Stores into non-nil locations MUST panic with logos: nil from Go value at the source line. See Sec 2.2. [T-202][R-U2]
-- #9 Text cold RVO corrupting debugger output: Cold successors MUST stay last inside their function. Traces MUST print base names without the `·logosspec<N>` or `·logosct<N>` suffix. See Sec 1.5, Sec 2.3, and Sec 2.5. [T-105][T-203.4][T-205]
+- #9 Text cold RVO corrupting debugger output: Traces MUST print base names without the `·logosct<N>` suffix. See Sec 2.5. [T-205]
 - #10 Exhaustive union switch bypassed via default: A default over a closed union MUST report pedantic::exhaustive_union_switch when the pedantic group is enabled; that rule defaults to allow and is silent otherwise. Exhaustive switches MUST still list every member or default. See Sec 1.2. [T-102]
 - #11 Async preemption migrating G mid-arena use: Arena objects in use MUST stay reachable across preemption. The bump sequence MUST be an async-preemption unsafe point. The collector MUST scan scan-region objects with the owning goroutine stack. See IMPLEMENTATION.md M18-S3. [T-301.1]
 - #12 Inline bump allocator corrupting mark bits: The inline fast path MUST serve noscan objects up to 512 bytes. All other objects MUST take the slow path. See IMPLEMENTATION.md M18-S3. [T-301.1]
 - #13 Concurrent multiword union write causing confusion: Unlocked sharing of a mutable multiword value with a child block plus a write on either side MUST fail with concurrency::concurrent_multiword_race. Const views and logos/sync types MUST pass. See Sec 1.2. [T-102]
 - #14 If x nil promotion breaking redeclarations: Block scoping MUST stay standard Go. Outer variables MUST narrow after if x == nil return guards. See Sec 2.2. [T-202]
-- #15 Auto-generification exploding binary size megamorphic: Specialization MUST stop at type depth 4. Sites with more than 4 types MUST keep the interface call. See Sec 2.3. [T-203.4]
 - #16 Auto-clip subslicing breaking buffer reuse loop: Ordinary reslicing such as s = s[:0] MUST stay allowed. Only const views MUST enforce the len bound. See Sec 2.1. [T-201]
 - #17 Tuple colliding with multi-return unpacking: Direct calls in multi-assignments MUST unpack. Single-variable bindings MUST pack into tuple values. See Sec 2.4. [T-204.1]
 - #18 Named return shadowing corrupting defer close: A bare return that a shadowed named error result would change MUST fail as upstream Go reports it. errdefer MUST run on panic, Goexit, or non-nil error. See Sec 1.4. [T-104.2]
@@ -1732,8 +1686,7 @@ Each entry from #1 to #182 states the tailored resolution of its original attack
 - #25 Transitive dependencies bypassing reflect ban unsafely: Transitive unsafe use MUST fail under transitive_unsafe severity deny unless its package matches transitive_unsafe_allowlist. Violations MUST list the shortest import chain. See Sec 10.4 and Sec 13.2. [T-Sec10][T-Sec13]
 - #26 ARM64 weak ordering exposing Hot fields: Concurrent Hot updates MUST NOT expose partial values. Hot stores MUST run the hybrid write barrier. See Sec 2.6. [T-206]
 - #27 WASM memory grow detaching JS views: The loader MUST re-read memory.buffer after every wasm call. Calls after growth MUST see current memory. See Sec 14.2. [T-Sec14]
-- #28 RVO destination aliasing corrupting input reverse: Destination passing MUST NOT exist. Self-aliased calls such as arr = Reverse(arr) MUST return correct results. See IMPLEMENTATION.md M13-S3. [T-105][T-203.4]
-- #30 Self-modifying inline cache causing cache thrashing: Devirtualization MUST stay static with no runtime writes. No call-site cache MUST exist. See Sec 2.3. [T-203.4]
+- #28 RVO destination aliasing corrupting input reverse: Destination passing MUST NOT exist. Self-aliased calls such as arr = Reverse(arr) MUST return correct results. See Sec 1.5. [T-105]
 - #31 Stream fusion over-executing side effects take: Fused take(5) loops MUST run map functions at most 5 times. Side effects before sortBy MUST warn suspicious::side_effect_before_sort. See Sec 1.4. [T-104.6][T-102]
 - #32 Execution order chaos between defers: `scope defer` MUST run at block exit. `defer`, `defer?`, and `errdefer` MUST share one LIFO order at function exit. See Sec 20.1. [T-104.2][T-104.7]
 - #33 Stack-first allocation exceeding its frame buffer: The stack buffer MUST hold 256 bytes at O2 and 4096 bytes at O3. Larger allocations MUST use the enabled arena when eligible, or the heap otherwise. See Sec 3.2. [T-302][T-301.1]
@@ -1751,7 +1704,6 @@ Each entry from #1 to #182 states the tailored resolution of its original attack
 - #45 Const switch rebinding slice of files as writers: An exact case MUST rebind the value to the case type. An interface case MUST keep the concrete layout and gain methods. See Sec 2.5. [T-205]
 - #46 Side-stack arena hiding heap pointers from GC: The arena MUST hold a bottom-up noscan region and a top-down scan region. The collector MUST scan scan-region objects with the goroutine stack. See Sec 8.3. [T-301.1]
 - #47 Const func purity broken by recover and addresses: A const func MUST NOT perform I/O, spawn a goroutine, read a mutable package variable, call recover, convert a pointer to uintptr, range over a dynamic map, or use a pointer. A violation MUST fail with correctness::const_func_impure naming the reason. See Sec 2.1. [T-201]
-- #48 Auto-generification breaking function value assignment: The original function MUST stay callable through a function value. Each clone MUST carry a unique package-local name. See Sec 2.3. [T-203.4]
 - #49 Optional union representation: Interface-backed union options with no nil-capable member MUST use the interface nil value for absence. An option whose payload can be nil MUST carry explicit presence as specified in Sec 2.2. Non-nilable value options and nested options MUST use `logos/rt.Option[T]` as specified in Sec 2.2. [T-202]
 - #50 Const rodata slices rejected by reflection and print: reflect.DeepEqual and fmt.Println MUST accept constant composites, and the M5 tests MUST pin that behavior. See Sec 2.1. [T-201]
 - #51 Infinite compile-time loop freezing the IDE: Compile-time evaluation MUST stop after the selected `max_ctfe_steps` limit with default 100,000 steps with `comptime::ctfe_step_limit`. Configuration MAY raise the limit. A value above 1 MB MUST fail with `comptime::const_too_large`. See Sec 2.1. [T-201][T-102]
@@ -1761,7 +1713,6 @@ Each entry from #1 to #182 states the tailored resolution of its original attack
 - #55 Ignored error leaving stale trace frames: A different error value MUST reset the trace. The trace MUST keep the last 8 sites. See Sec 1.4. [T-104.1]
 - #56 Inlined scope defer evaluating args too late: The function, receiver, and arguments of a `scope defer` MUST evaluate at the statement. They MUST NOT re-evaluate at block exit. See Sec 20.1. [T-104.7]
 - #57 Overlapping const switch cases shadowing each other: Cases MUST evaluate top-down in first-match order. A shadowed case MUST fail with `comptime::unreachable_case`. See Sec 2.5. [T-205]
-- #58 Duplicate specialized clones colliding across packages: Clones MUST carry unique package-local names. No name-based dedup pass MUST pick among clones. At Os/Oz, the linker MAY fold content-identical functions (T-105). See Sec 2.3. [T-203.4][T-105]
 - #59 Cgo pointer check panicking on arena addresses: Cgo pointer checks MUST accept arena addresses without panic. See Sec 8.3. [T-301.1]
 - #60 Value struct with non-nil pointer zero-cleared: Zero-clearing through `*p = S{}` MUST fail with `correctness::nonnil_uninitialized`. A literal MUST initialize every non-nil field. See Sec 2.2. [T-202]
 - #61 Nested option none versus some nil collision: The spelling `T??` MUST fail as a syntax error. `(T?)?` MUST lower to `Option[T?]`. See Sec 2.2. [T-202]
@@ -1777,7 +1728,6 @@ Each entry from #1 to #182 states the tailored resolution of its original attack
 - #71 scan region dead pointers breaking barrier reuse: The runtime MUST zero popped regions before reuse. See Sec 3.1. [T-301.1]
 - #72 ViewAs interior pointer confusing collector scan: The view MUST keep the backing bytes alive. A short input MUST panic with need and have byte counts in `logos: ViewAs` text. See Sec 2.5. [T-205]
 - #73 Const-map seed search fails to terminate: Every const map with more than 8 keys MUST provide one-probe lookup with constant-time auxiliary metadata reads plus exactly one final key/value-slot probe with full-key validation. Construction MUST use at most 1,000,000 seed-candidate trials in total per const map. A logarithmic fallback MUST NOT satisfy the contract. Exhaustion MUST fail with `comptime::constmap_seed_not_found`. The 1, 8, 9, and 10,000-key cases in `test/logos/run/const_map.lgo` MUST be the acceptance check. That check MUST NOT promise success for every key set. Iteration MUST visit keys in sorted order. See Sec 9.1. [T-Sec9]
-- #74 FuncForPC returning mangled specialized names: Traces MUST print the base name without the specialization suffix. See Sec 2.3. [T-203.4]
 - #75 order dependent inference in nil switch arms: Switch results MUST take the common type of the arms. See Sec 2.3. [T-203.1]
 - #76 const for skipping checks on unrolled bodies: Each unrolled body MUST pass full assignment and call checks. Pruned code MUST NOT skip verification. See IMPLEMENTATION.md M7-S2. [T-205]
 - #77 plain defer clearing error after errdefer: A plain deferred literal MUST NOT assign nil to the error result with errdefer present. The compiler MUST reject such code with `correctness::defer_erases_errdefer_state`. See Sec 1.2. [T-102]
@@ -1795,7 +1745,6 @@ Each entry from #1 to #182 states the tailored resolution of its original attack
 - #89 overlapped scalar union leaving tail garbage: Unions MUST use the upstream interface representation. See Sec 2.3. [T-203.1]
 - #90 recover inside emitted errdefer corrupting frames: Errdefer MUST stay skipped on success returns. See Sec 1.4. [T-104.2]
 - #91 const switch ambiguity on defined int types: Exact cases MUST match only the named type. Tilde cases MUST match underlying types. See Sec 2.5. [T-205]
-- #92 polymorphic recursion causing infinite specialization: Specialization MUST stop at type depth 4. See Sec 2.3. [T-203.4]
 - #93 malicious read beyond len on const bytes: A bound above len MUST fail with `correctness::const_view_mutation`. Non-constant bounds MUST trap at run time. See Sec 2.1. [T-201]
 - #94 Slow context extraction on large repositories: `logos context` MUST print the declaration and one level of referenced signatures without function bodies, capped at 100 lines. Latency has target: 50 ms, measured by `BenchmarkContext`. See Sec 1.3. [T-103][T-PERF]
 - #95 Negative or huge take and drop indices: `take`, `drop`, and `get` MUST clamp indices without panic. See Sec 1.4. [T-104.6]
@@ -1807,8 +1756,6 @@ Each entry from #1 to #182 states the tailored resolution of its original attack
 - #101 Race false positives on reused arena chunks: Race builds MUST reset shadow memory on watermark moves. Reused chunks MUST report no false race. See IMPLEMENTATION.md M18-S3. [T-301.1]
 - #102 CTFE integer width across compile targets: The compiler MUST evaluate CTFE integers with target widths. See Sec 2.1. [T-201]
 - #103 Negative zero and NaN float map keys: A `-0.0` float key MUST canonicalize to `+0.0`. A `NaN` key MUST fail compilation. See Sec 9.1. [T-201][T-Sec9]
-- #104 Profilers breaking on missing frame pointers: A cold successor MUST sit last inside its function. It MUST NOT outline to the tail of text. See Sec 1.5. [T-105]
-- #105 Codesign rejecting custom cold text section: A cold successor MUST sit last inside its function. It MUST NOT use a separate cold section. See Sec 1.5. [T-105]
 - #106 Finalizer registered on arena allocated object: `runtime.SetFinalizer` on an arena object MUST panic with `runtime: SetFinalizer on loGo/s arena object`. See Sec 8.3. [T-301.1]
 - #107 Native CPU settings break reproducibility: The deterministic target MUST select GOAMD64=v3 and GOARM64=v8.2 unless the environment overrides them. Host-specific selection MUST require `target_cpu = "native"`. See Sec 1.5. [T-105]
 - #108 Emit-go fallback for interface switch cases: Interface cases in run-time `const switch` MUST use assertion on the value. Native and ejected output MUST agree. See Sec 2.5. [T-205]
@@ -1824,10 +1771,8 @@ Each entry from #1 to #182 states the tailored resolution of its original attack
 - #118 Embedded fields satisfying property contract depth: Embedded fields MUST satisfy properties by Go selector depth rules. An ambiguous equal-depth selector MUST fail as ambiguous. See Sec 6.3. [T-203.2]
 - #119 Spread dropping mismatched same-name fields: Spread MUST copy fields with identical names and identical types. A different type MUST fail with `correctness::spread_type_mismatch`. See Sec 1.4. [T-104.5]
 - #120 Synthetic getters polluting reflection method count: Only a type with a `: I` list MUST gain accessor methods. `reflect` MUST count the generated accessors. See Sec 6.3. [T-203.2]
-- #121 Slice of pointers to interface slice copy: A `const []Creature` parameter receiving `[]*Monster` MUST specialize with no copy loop. The `const` there is container covariance, not a method effect obligation, and it MUST NOT ban `const []` over an interface. No run-time call-site cache MUST exist. See Sec 2.3. [T-203.4]
 - #122 Emoji file extensions with variation selectors: The loader MUST strip trailing U+FE0E and U+FE0F before matching. NFC normalization MUST be the identity on extension strings. See Sec 1.1. [T-101.1]
 - #123 Default value overriding explicit JSON false: Decoding MUST fill defaults first, then parse. Duplicate keys MUST keep the last value. See Sec 12.2. [T-Sec12]
-- #124 Specialized call breaking dynamic type assertion: A dynamic assertion in a specialized clone MUST give the same result as the unspecialized call. Function values MUST keep working. See Sec 2.3. [T-203.4]
 - #125 errdefer rollback overwriting primary return error: For `errdefer f()?`, a rollback error MUST join the primary error with errors join semantics, as `defer f()?` does. A nil primary error MUST take the rollback error as is. See Sec 1.4. [T-104.2]
 - #126 interpolation calling nextID twice in sizing: Interpolation operands MUST evaluate once from left to right. Each `{expr}` MUST bind to a local variable before sizing. See Sec 1.4. [T-104.4]
 - #127 Interface default methods causing diamond ambiguity: Method bodies inside interfaces MUST fail compilation. Structs MUST satisfy property interfaces only through an explicit `: I` declaration. See Sec 6.3. [T-203.2]

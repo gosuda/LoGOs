@@ -12,13 +12,12 @@ Resolutions: logos-doc/SPEC.md Section 17. Status values: planned, tested, satis
 | #6 | M6 | test/logos/run/lambda.lgo; test/logos/run/chains.lgo (dblBlock, count with ?) | tested |
 | #7 | M3, M11 | test/logos/run/json_unmarshal_test.lgo; src/internal/types/testdata/logos/nonnil_zero.lgo; src/internal/types/testdata/logos/map_index.lgo | tested |
 | #8 | M3 | test/logos/run/platform.lgo | tested |
-| #9 | M13 | test/logos/redteam/attack_009_cold_last_trace_names.lgo (executed 2026-10-28: the fixpoint strip in src/cmd/link/internal/ld/pcln_logos.go:50-79 lands it; the fixture now asserts both suffixes absent and the base name present, and passes) | tested |
+| #9 | M7 | test/logos/redteam/attack_009_cold_last_trace_names.lgo (executed 2026-10-28: the fixpoint strip in src/cmd/link/internal/ld/pcln_logos.go:50-79 lands it; the fixture asserts the `·logosct<N>` suffix absent and the base name present, and passes) | tested |
 | #10 | M9 | test/logos/lint/exhaustive_union_switch.lgo; src/cmd/go/testdata/script/logos_pedantic_lint.txt | tested |
 | #11 | M18 | test/logos/redteam/attack_011_preempt_arena_reachable.lgo | tested |
 | #12 | M18 | test/logos/codegen/redteam12_bump_scan_guard.lgo | tested |
 | #13 | M8, M9 | test/logos/lint/concurrent_multiword_race.lgo; test/logos/lint/concurrent_multiword_race_go.go | tested |
 | #14 | M3 | src/internal/types/testdata/logos/narrowing.lgo | tested |
-| #15 | M13 | test/logos/codegen/redteam15_megamorphic_limit.lgo | tested |
 | #16 | M5 | src/internal/types/testdata/logos/const_views.lgo (cvPlainReslice, cvPlainReuseLoop); test/logos/run/reslice_reuse.lgo | tested |
 | #17 | M6 | test/logos/run/tuples.lgo (direct) | tested |
 | #18 |M1| test/logos/redteam/attack_018_shadowed_named_return | tested |
@@ -32,7 +31,6 @@ Resolutions: logos-doc/SPEC.md Section 17. Status values: planned, tested, satis
 | #26 | M8 | src/logos/sync/sync_test.go (TestHotUpdateConcurrent, TestHotLayout) | tested |
 | #27 | M16 | src/cmd/go/testdata/script/logos_wasm_loader.txt | tested |
 | #28 | M13 | test/logos/redteam/attack_028_self_aliased_rvo.lgo | tested |
-| #30 | M13 | test/logos/redteam/attack_030_static_devirtualization.lgo | tested |
 | #31 | M6 | src/internal/types/testdata/logos/chains.lgo; test/logos/run/sort_side_effect.lgo | tested |
 | #32 |M1| test/logos/redteam/attack_032_defer_lifo_order | tested |
 | #33 | M17, M18 | test/logos/redteam/attack_033_stack_buffer_overflow.lgo | tested |
@@ -50,7 +48,6 @@ Resolutions: logos-doc/SPEC.md Section 17. Status values: planned, tested, satis
 | #45 | M7 | src/internal/types/testdata/logos/const_switch.lgo; test/logos/run/const_switch.lgo | tested |
 | #46 | M18 | test/logos/run/redteam46_arena_gc_scan.lgo | tested |
 | #47 | M5 | src/internal/types/testdata/logos/ctfe.lgo | tested |
-| #48 | M13 | test/logos/run/redteam48_generify_funcvalue.lgo | tested |
 | #49 | M3 | test/logos/run/option_union.lgo | tested |
 | #50 | M5 | test/logos/run/rodata_reflect.lgo | tested |
 | #51 | M5 | src/internal/types/testdata/logos/ctfe.lgo | tested |
@@ -60,7 +57,6 @@ Resolutions: logos-doc/SPEC.md Section 17. Status values: planned, tested, satis
 | #55 |M1| test/logos/redteam/attack_055_errtrace_reset_cap | tested |
 | #56 | M6 | test/logos/run/scope_defer.lgo (funcVarDefer, recvDefer) | tested |
 | #57 |M2, M7| test/logos/redteam/attack_057_case_first_match | tested |
-| #58 | M13 | src/cmd/go/testdata/script/logos_redteam_58.txt (executed 2026-10-28: `go test cmd/go -run 'Script/^logos_redteam_58$'` passes) | tested |
 | #59 | M18 | src/cmd/go/testdata/script/logos_redteam_59.txt (executed 2026-10-28: `go test cmd/go -run 'Script/^logos_redteam_59$'` passes, race leg included) | tested |
 | #60 | M3 | src/internal/types/testdata/logos/nonnil_zero.lgo | tested |
 | #61 | M3 | test/logos/run/option_nested.lgo | tested |
@@ -69,14 +65,14 @@ Resolutions: logos-doc/SPEC.md Section 17. Status values: planned, tested, satis
 | #64 | M6 | test/logos/run/interp.lgo (nextID once, tag order) | tested |
 | #65 | M7 | test/logos/run/const_for.lgo; src/cmd/go/testdata/script/logos_comptime_cross.txt | tested |
 | #66 |M1| test/logos/redteam/attack_066_errdefer_unnamed_results | tested |
-| #67 | M6, M13 | M6 half: src/cmd/compile/internal/logos/m6gaps_test.go (TestChainSumPairwise); test/logos/run/chains.lgo (sum order). M13 half: blocked on the arm64 leg, which this host cannot execute; no dedicated redteam67 attack fixture exists yet, and a cross-architecture FMA sum-drift attack needs both architectures to mean anything | blocked |
+| #67 | M6 | M6 half: src/cmd/compile/internal/logos/m6gaps_test.go (TestChainSumPairwise); test/logos/run/chains.lgo (sum order). The arm64 leg stays blocked on this host, which cannot execute arm64; a cross-architecture FMA sum-drift attack needs both architectures to mean anything | blocked |
 | #68 | M8 | src/logos/rt/group_test.go (FirstErrorWins, CancelReachesSibling); test/logos/run/group_exit.lgo | tested |
 | #69 | M10 | src/cmd/go/testdata/script/logos_next.txt; src/cmd/compile/internal/logos/next_test.go | tested |
 | #70 | M5 | test/logos/codegen/rodata.lgo | tested |
 | #71 | M18 | src/cmd/go/testdata/script/logos_redteam_71.txt (executed 2026-10-28: `go test cmd/go -run 'Script/^logos_redteam_71$'` passes, race leg included) | tested |
 | #72 | M7 | test/logos/run/viewas.lgo (GC keep-alive, need-have panic); src/logos/rt/viewas_test.go | tested |
 | #73 | M5 | test/logos/run/const_map.lgo; src/cmd/compile/internal/logos/constmap_test.go | tested |
-| #74 | M13 | test/logos/redteam/attack_074_funcforpc_spec_name.lgo | tested |
+| #74 | M7 | test/logos/redteam/attack_074_funcforpc_spec_name.lgo | tested |
 | #75 |M2| test/logos/redteam/attack_075_nil_arm_common_type | tested |
 | #76 | M7 | test/logos/compile/const_for_perfield.lgo; test/logos/compile/const_for_error.lgo; test/logos/run/const_for_lines.lgo | tested |
 | #77 | M9 | test/logos/lint/defer_erases_errdefer_state.lgo | tested |
@@ -94,7 +90,6 @@ Resolutions: logos-doc/SPEC.md Section 17. Status values: planned, tested, satis
 | #89 |M2| test/logos/redteam/attack_089_scalar_roundtrip | tested |
 | #90 |M1| test/logos/redteam/attack_090_errdefer_recover_success_skip | tested |
 | #91 | M7 | test/logos/run/const_switch.lgo; src/internal/types/testdata/logos/const_switch.lgo | tested |
-| #92 | M13 | test/logos/codegen/redteam92_polymorphic_recursion.lgo | tested |
 | #93 | M5 | test/logos/run/constview_bound.lgo | tested |
 | #94 | M10 | src/cmd/go/testdata/script/logos_context.txt; src/cmd/compile/internal/logos/context_test.go (TestContextLineCap); src/cmd/compile/internal/logos/context_bench_test.go (BenchmarkContext) | tested |
 | #95 | M6 | test/logos/run/chains.lgo (take, drop, get clamps) | tested |
@@ -106,8 +101,6 @@ Resolutions: logos-doc/SPEC.md Section 17. Status values: planned, tested, satis
 | #101 | M18 | test/logos/run/redteam101_arena_race_reuse.lgo | tested |
 | #102 | M5 | src/internal/types/testdata/logos/ctfe.lgo | tested |
 | #103 | M5 | src/internal/types/testdata/logos/ctfe.lgo | tested |
-| #104 | M13 | test/logos/codegen/cold_frame_pointer.lgo | tested |
-| #105 | M13 | test/logos/redteam/attack_105_no_cold_section.lgo | tested |
 | #106 | M18 | src/cmd/go/testdata/script/logos_redteam_106.txt (executed 2026-10-28: `go test cmd/go -run 'Script/^logos_redteam_106$'` passes, race leg included) | tested |
 | #107 | M13 | src/cmd/go/testdata/script/logos_opt_levels.txt | tested |
 | #108 | M7 | src/cmd/go/testdata/script/logos_eject_const_switch.txt; src/cmd/compile/internal/logos (TestEjectMatchesLowering) | tested |
@@ -123,10 +116,8 @@ Resolutions: logos-doc/SPEC.md Section 17. Status values: planned, tested, satis
 | #118 | M4 | src/internal/types/testdata/logos/property_iface.lgo | tested |
 | #119 | M6 | test/logos/run/spread.lgo; src/internal/types/testdata/logos/spread.lgo | tested |
 | #120 | M4 | test/logos/run/properties.lgo | tested |
-| #121 | M13 | test/logos/run/redteam121_const_slice.lgo; test/logos/codegen/redteam121_no_copy.lgo | tested |
 | #122 | M0 | src/cmd/go/testdata/script/logos_alias.txt | tested |
 | #123 | M6, M11 | test/logos/run/json_unmarshal_test.lgo (TestDefaultsAppliedFirst) | tested |
-| #124 | M13 | test/logos/run/redteam124_type_assert.lgo | tested |
 | #125 |M1| test/logos/redteam/attack_125_errdefer_join | tested |
 | #126 | M6 | src/cmd/compile/internal/logos/m6gaps_test.go (TestInterpBindBeforeSizing) | tested |
 | #127 | M4 | src/internal/types/testdata/logos/property_iface.lgo | tested |
