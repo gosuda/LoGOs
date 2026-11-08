@@ -170,17 +170,6 @@ func (fl *fileLower) keepCallResult(obj *types2.Const, v ctfe.Value, init syntax
 	return ctfeResult{obj: obj, val: v, init: init, lit: init, text: renderExpr(init), keepCall: true}, true
 }
 
-func matStructField(v ctfe.Value, index []int) (ctfe.Value, bool) {
-	for _, i := range index {
-		fields := v.Fields()
-		if i < 0 || i >= len(fields) {
-			return ctfe.Value{}, false
-		}
-		v = fields[i]
-	}
-	return v, true
-}
-
 func reparseTypeAt(text string, pos syntax.Pos) (syntax.Expr, bool) {
 	te, ok := reparseType(text)
 	if !ok {
@@ -568,25 +557,4 @@ func buildMatScalar(v ctfe.Value, t types2.Type, pos syntax.Pos) syntax.Expr {
 		return op
 	}
 	return nil
-}
-
-func matTypeHasOpaquePrivate(t *ctfe.Type) bool {
-	if t == nil {
-		return false
-	}
-	if t.Opaque && t.Named != "" && !token.IsExported(t.Named) {
-		return true
-	}
-	if matTypeHasOpaquePrivate(t.Elem) {
-		return true
-	}
-	if matTypeHasOpaquePrivate(t.Key) {
-		return true
-	}
-	for i := range t.Fields {
-		if matTypeHasOpaquePrivate(t.Fields[i].Type) {
-			return true
-		}
-	}
-	return false
 }

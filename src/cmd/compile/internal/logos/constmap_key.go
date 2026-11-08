@@ -90,49 +90,45 @@ func constKeyHash(v ctfe.Value) uint64 {
 // keys with equal base hashes. Equal keys have equal canonical bytes, and
 // struct fields and array elements are delimited so distinct keys differ.
 func constKeyCanon(v ctfe.Value) string {
-	var b strings.Builder
-	constKeyCanonInto(&b, v)
-	return b.String()
-}
-
-func constKeyCanonInto(b *strings.Builder, v ctfe.Value) {
 	t := v.Type()
 	switch {
 	case t.Kind == ctfe.KString:
-		b.WriteString(strconv.Itoa(len(v.Str())))
-		b.WriteByte(':')
-		b.WriteString(v.Str())
+		return strconv.Itoa(len(v.Str())) + ":" + v.Str()
 	case t.Kind == ctfe.KBool:
 		if v.Bool() {
-			b.WriteByte('t')
-		} else {
-			b.WriteByte('f')
+			return "t"
 		}
+		return "f"
 	case constKeyIsFloat(t.Kind):
 		f := constKeyFloat(v)
 		if f == 0 {
 			f = 0 // negative zero keys as positive zero, as the hash does
 		}
-		b.WriteString(strconv.FormatUint(math.Float64bits(f), 16))
+		return strconv.FormatUint(math.Float64bits(f), 16)
 	case constKeyIsInt(t.Kind):
-		b.WriteString(strconv.FormatUint(constKeyBits(v), 16))
+		return strconv.FormatUint(constKeyBits(v), 16)
 	case t.Kind == ctfe.KStruct:
+		b := strings.Builder{}
 		b.WriteByte('{')
 		for i, f := range t.Fields {
 			if f.Name != "_" {
-				constKeyCanonInto(b, v.Fields()[i])
+				b.WriteString(constKeyCanon(v.Fields()[i]))
 				b.WriteByte(',')
 			}
 		}
 		b.WriteByte('}')
+		return b.String()
 	case t.Kind == ctfe.KArray:
+		b := strings.Builder{}
 		b.WriteByte('[')
 		for _, e := range v.Elems() {
-			constKeyCanonInto(b, e)
+			b.WriteString(constKeyCanon(e))
 			b.WriteByte(',')
 		}
 		b.WriteByte(']')
+		return b.String()
 	}
+	return ""
 }
 
 // constKeyCompare orders two keys of one const map the way Go orders them:
@@ -145,7 +141,14 @@ func constKeyCompare(a, b ctfe.Value) int {
 	case t.Kind == ctfe.KString:
 		return strings.Compare(a.Str(), b.Str())
 	case t.Kind == ctfe.KBool:
-		return constKeyCmpBool(a.Bool(), b.Bool())
+		ab, bb := a.Bool(), b.Bool()
+		switch {
+		case ab == bb:
+			return 0
+		case !ab:
+			return -1
+		}
+		return 1
 	case constKeyIsFloat(t.Kind):
 		fa, fb := constKeyFloat(a), constKeyFloat(b)
 		switch {
@@ -177,14 +180,4 @@ func constKeyCompare(a, b ctfe.Value) int {
 		return 0
 	}
 	return 0
-}
-
-func constKeyCmpBool(a, b bool) int {
-	switch {
-	case a == b:
-		return 0
-	case !a:
-		return -1
-	}
-	return 1
 }

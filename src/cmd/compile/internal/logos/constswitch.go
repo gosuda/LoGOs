@@ -123,8 +123,10 @@ func newCswLower(fc *funcLower, s *syntax.ConstSwitchStmt) *cswLower {
 		switch {
 		case syn.Tilde:
 			cs.kind = cswTilde
-		case isIfaceLower(typ):
-			cs.kind = cswIface
+		default:
+			if _, ok := types2.Unalias(typ).Underlying().(*types2.Interface); ok {
+				cs.kind = cswIface
+			}
 		}
 		c.cases = append(c.cases, cs)
 	}
@@ -152,12 +154,6 @@ func checkedTypeOf(info *types2.Info, e syntax.Expr) types2.Type {
 	}
 	base.Fatalf("logos: const switch type at %s has no checked type", e.Pos().String())
 	return nil
-}
-
-// isIfaceLower reports whether typ is an interface type.
-func isIfaceLower(typ types2.Type) bool {
-	_, ok := types2.Unalias(typ).Underlying().(*types2.Interface)
-	return ok
 }
 
 // spell returns the source text of the switched type between the header at
