@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"cmd/go/internal/cfg"
+	"cmd/go/internal/logos/settings"
 )
 
 const (
@@ -21,7 +22,7 @@ const (
 // build configuration, never the module kind, so a Go main package and a
 // loGo/s main package behave alike.
 func wantsWasmLoader(p *Package) bool {
-	return cfg.BuildWasmLoader &&
+	return settings.Current().WasmLoader &&
 		cfg.CmdName == "build" &&
 		cfg.BuildContext.GOARCH == "wasm" &&
 		p.Name == "main"

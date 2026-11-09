@@ -6,7 +6,6 @@
 package logos
 
 import (
-	"strconv"
 	"strings"
 
 	"cmd/go/internal/base"
@@ -16,6 +15,7 @@ import (
 	"cmd/go/internal/logos/lintcmd"
 	"cmd/go/internal/logos/lsp"
 	"cmd/go/internal/logos/next"
+	"cmd/go/internal/logos/settings"
 )
 
 // ConfigureCommand adjusts the root command for logos mode.
@@ -38,37 +38,12 @@ func ConfigureCommand(cmd *base.Command) {
 	addWasmLoaderHelp(cmd.Lookup("build"))
 }
 
-// pedanticFlag is the --pedantic flag value: a boolean that also records
-// that it was given, so --pedantic=false overrides a logos.toml pedantic
-// key and an absent flag does not.
-type pedanticFlag struct{}
-
-// IsBoolFlag lets --pedantic stand without a value.
-func (pedanticFlag) IsBoolFlag() bool { return true }
-
-// String returns the current value.
-func (pedanticFlag) String() string { return strconv.FormatBool(cfg.Pedantic) }
-
-// Set parses a boolean and records that the flag was set.
-func (pedanticFlag) Set(s string) error {
-	v, err := strconv.ParseBool(s)
-	if err != nil {
-		return err
-	}
-	cfg.Pedantic, cfg.PedanticSet = v, true
-	return nil
-}
-
-// addPedanticFlag registers the logos-only --pedantic flag on cmd, a
-// logos build or logos lint command, and documents it in its help. It runs
-// only from ConfigureCommand, so plain "go build" keeps the upstream
-// unknown-flag error and "go help build" keeps the upstream text.
 func addPedanticFlag(cmd *base.Command) {
 	if cmd == nil {
 		return
 	}
 	if cmd.Flag.Lookup("pedantic") == nil {
-		cmd.Flag.Var(pedanticFlag{}, "pedantic", "")
+		cmd.Flag.Var(settings.PedanticFlag(&settings.CommandLine), "pedantic", "")
 	}
 	addHelp(cmd, "-pedantic", "\n\t-pedantic\n\t\tenable pedantic diagnostics (logos builds only).\n")
 }
@@ -81,7 +56,7 @@ func addJSONDiagnosticsFlag(cmd *base.Command) {
 		return
 	}
 	if cmd.Flag.Lookup("json-diagnostics") == nil {
-		cmd.Flag.BoolVar(&cfg.LogosJSON, "json-diagnostics", false, "")
+		cmd.Flag.BoolVar(&settings.CommandLine.JSON, "json-diagnostics", false, "")
 	}
 	addHelp(cmd, "-json-diagnostics", "\n\t-json-diagnostics\n\t\tprint each compiler and lint diagnostic as one JSON object\n\t\tper line on stderr (logos builds only).\n")
 }

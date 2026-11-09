@@ -13,10 +13,8 @@ import (
 	"cmd/go/internal/logos/settings"
 )
 
-var logosOptFlag string
-
 func logosAddOptFlag(cmd *base.Command) {
-	cmd.Flag.StringVar(&logosOptFlag, "O", "", "")
+	cmd.Flag.StringVar(&settings.CommandLine.Opt, "O", "", "")
 }
 
 func logosApplyOpt() {

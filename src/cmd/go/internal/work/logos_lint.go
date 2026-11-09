@@ -17,13 +17,14 @@ import (
 	"cmd/go/internal/cfg"
 	"cmd/go/internal/fsys"
 	"cmd/go/internal/load"
+	"cmd/go/internal/logos/settings"
 	"cmd/go/internal/str"
 )
 
 // This file holds the lint half of the build (M9): the lint action that
 // logos lint runs for each main-module package, the -logos.cfg and -logos.json
 // compiler flags, and the cache key of the lint policy. Plain go never
-// reaches any of it: no package carries a policy and cfg.LogosJSON stays
+// reaches any of it: no package carries a policy and JSON stays
 // false.
 
 // lintActor compiles one package with -logos.lintonly: the compiler
@@ -131,10 +132,10 @@ func logosCompilePolicy(a *Action) []byte {
 	if _, ok := a.Actor.(lintActor); ok {
 		return p.Internal.LogosLint
 	}
-	if p.IsLogos() && !cfg.LogosLintCmd {
+	if p.IsLogos() && !settings.Current().LintCmd {
 		return p.Internal.LogosLint
 	}
-	if cfg.LogosLintCmd && LintsPackage(p) {
+	if settings.Current().LintCmd && LintsPackage(p) {
 		return p.Internal.LogosLint
 	}
 	return nil
@@ -146,7 +147,7 @@ func logosCompilePolicy(a *Action) []byte {
 // for the lint action. It is the hook line in (gcToolchain).gc.
 func logosLintFlags(sh *Shell, a *Action) ([]string, error) {
 	var flags []string
-	if cfg.LogosJSON {
+	if settings.Current().JSON {
 		flags = append(flags, "-logos.json")
 	}
 	if cfg.Logos {
@@ -178,7 +179,7 @@ func logosLintActionID(h io.Writer, a *Action) {
 	if policy := logosCompilePolicy(a); policy != nil {
 		fmt.Fprintf(h, "logos lint %x\n", sha256.Sum256(policy))
 	}
-	if cfg.LogosJSON {
+	if settings.Current().JSON {
 		fmt.Fprintf(h, "logos json\n")
 	}
 	if cfg.Logos {
@@ -190,7 +191,7 @@ func logosLintActionID(h io.Writer, a *Action) {
 // under --json-diagnostics. Such output prints without the "# package"
 // header line, so every line of stderr is one JSON object.
 func logosJSONLines(text string) bool {
-	if !cfg.LogosJSON || strings.TrimSpace(text) == "" {
+	if !settings.Current().JSON || strings.TrimSpace(text) == "" {
 		return false
 	}
 	for line := range strings.Lines(text) {

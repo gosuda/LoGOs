@@ -10,8 +10,8 @@ import (
 	"context"
 
 	"cmd/go/internal/base"
-	"cmd/go/internal/cfg"
 	"cmd/go/internal/load"
+	"cmd/go/internal/logos/settings"
 	"cmd/go/internal/modload"
 	"cmd/go/internal/work"
 )
@@ -57,7 +57,7 @@ func Register(root *base.Command) {
 // runLint loads the packages and runs one lint action for each package of
 // a main module.
 func runLint(ctx context.Context, cmd *base.Command, args []string) {
-	cfg.LogosLintCmd = true
+	settings.CommandLine.LintCmd = true
 	moduleLoader := modload.NewLoader()
 	moduleLoader.InitWorkfile()
 	work.BuildInit(moduleLoader)

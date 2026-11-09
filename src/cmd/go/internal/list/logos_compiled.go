@@ -19,6 +19,7 @@ import (
 	"cmd/go/internal/fsys"
 	"cmd/go/internal/load"
 	"cmd/go/internal/logos/config"
+	"cmd/go/internal/logos/settings"
 	"cmd/internal/logos/editmap"
 )
 
@@ -32,7 +33,7 @@ type logosLoweredFile struct {
 
 func init() {
 	if cfg.Logos {
-		CmdList.Flag.BoolVar(&cfg.LogosJSON, "json-diagnostics", false, "")
+		CmdList.Flag.BoolVar(&settings.CommandLine.JSON, "json-diagnostics", false, "")
 	}
 }
 
@@ -222,9 +223,9 @@ func logosTargetCPU(p *load.Package) string {
 	if p.Module == nil || p.Module.Dir == "" {
 		return ""
 	}
-	cf, err := config.Load(p.Module.Dir)
-	if err != nil || cf == nil {
+	m := settings.ModuleAt(p.Module.Dir)
+	if m.Err != nil || m.File == nil {
 		return ""
 	}
-	return cf.Build.TargetCPU
+	return m.File.Build.TargetCPU
 }

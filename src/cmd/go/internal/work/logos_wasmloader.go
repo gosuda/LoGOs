@@ -11,6 +11,7 @@ import (
 	"cmd/go/internal/base"
 	"cmd/go/internal/cfg"
 	"cmd/go/internal/load"
+	"cmd/go/internal/logos/settings"
 )
 
 // addWasmLoaderFlag registers --wasm-loader (SPEC Sec 12.2, R-U1) on one
@@ -18,7 +19,7 @@ import (
 // upstream bytes (Sec 0.1). Its default is true under logos and false
 // under plain go until the run.bash flip.
 func addWasmLoaderFlag(fs *flag.FlagSet) {
-	fs.BoolVar(&cfg.BuildWasmLoader, "wasm-loader", cfg.Logos, "")
+	fs.BoolVar(&settings.CommandLine.WasmLoader, "wasm-loader", cfg.Logos, "")
 }
 
 // writeWasmLoader writes the host loader beside the .wasm output of the

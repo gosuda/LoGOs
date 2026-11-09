@@ -94,7 +94,7 @@ func Load(modRoot string, flags Flags) (*Settings, error) {
 	s.Module = m
 	f := m.File
 	if f == nil {
-		f, _ = config.Load("")
+		f = ModuleAt("").File
 	}
 	s.OptLevel = pickOptLevel(level, strings.TrimPrefix(f.Build.OptLevel, "O"))
 	s.Gcflags = flagsFor(s.OptLevel)

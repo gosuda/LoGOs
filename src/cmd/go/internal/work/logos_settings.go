@@ -20,7 +20,6 @@ var logosSettingsErr error
 func refreshLogosPolicy(ld *modload.Loader) {
 	f := settings.CommandLine
 	f.Logos, f.Env, f.Roots = cfg.Logos, cfg.LogosStartupEnv(), logosMainRoots(ld)
-	f.Opt = logosOptFlag
 	s, err := settings.Load(settings.CWDModuleRoot(), f)
 	settings.SetCurrent(s)
 	logosSettingsErr = err
