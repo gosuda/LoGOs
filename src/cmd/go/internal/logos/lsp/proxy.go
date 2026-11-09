@@ -116,6 +116,8 @@ type Proxy struct {
 	sent     map[string]string
 	stopped  bool
 	shutdown bool
+	ended    bool
+	endedErr error
 	settled  chan struct{}
 
 	lastLogErr error
@@ -223,6 +225,12 @@ func Serve(ctx context.Context, in io.Reader, out io.Writer, opts Options) error
 		}
 	case <-srv.done:
 		err = cmp.Or(srv.err, errors.New("gopls exited unexpectedly"))
+		p.mu.Lock()
+		bye, byeErr := p.ended, p.endedErr
+		p.mu.Unlock()
+		if bye {
+			err = byeErr
+		}
 	}
 	p.stop(ctx, srv, cancelWork)
 	p.closeInput(in, clientDone)
@@ -331,6 +339,9 @@ func (p *Proxy) clientLoop(ctx context.Context, rd *reader) error {
 	for {
 		m, err := rd.read()
 		if errors.Is(err, io.EOF) {
+			p.mu.Lock()
+			p.ended = true
+			p.mu.Unlock()
 			return nil
 		}
 		if err != nil {
@@ -346,13 +357,15 @@ func (p *Proxy) clientLoop(ctx context.Context, rd *reader) error {
 // exit forwards the exit notification and reports whether the client shut
 // the server down first.
 func (p *Proxy) exit(m *message) error {
-	p.send(p.server, m)
 	p.mu.Lock()
-	defer p.mu.Unlock()
+	endedErr := p.endedErr
 	if !p.shutdown {
-		return errors.New("logos lsp: exit without shutdown")
+		endedErr = errors.New("logos lsp: exit without shutdown")
 	}
-	return nil
+	p.ended, p.endedErr = true, endedErr
+	p.mu.Unlock()
+	p.send(p.server, m)
+	return endedErr
 }
 
 // serverLoop handles gopls messages until its output ends.

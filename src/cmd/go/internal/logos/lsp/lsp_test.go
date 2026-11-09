@@ -1193,6 +1193,29 @@ func TestServeReportsGoplsDeath(t *testing.T) {
 		t.Errorf("Serve = %v, want an error naming the gopls exit", err)
 	}
 }
+func TestServePrefersClientCloseOverGoplsExit(t *testing.T) {
+	t.Run("close", func(t *testing.T) {
+		for i := range 50 {
+			f := newFixture(t, nil, fixtureOptions{})
+			if err := f.client.shutdown(); err != nil {
+				t.Fatalf("iteration %d: Serve = %v, want nil", i, err)
+			}
+		}
+	})
+	t.Run("death", func(t *testing.T) {
+		f := newFixture(t, map[string]string{"a/a.lgo": aLgo}, fixtureOptions{
+			Script: func(string) fakeScript { return fakeScript{CrashOn: "textDocument/hover"} },
+		})
+		f.open("a/a.lgo", 1)
+		raw := toJSON(t, positionParams(f.uri("a/a.lgo"), Position{Line: 5, Character: 3}))
+		if err := f.client.w.write(&message{ID: json.RawMessage("5"), Method: "textDocument/hover", Params: raw}); err != nil {
+			t.Fatal(err)
+		}
+		if err := f.client.wait(); err == nil || !strings.Contains(err.Error(), "gopls exited") {
+			t.Errorf("Serve = %v, want an error naming the gopls exit", err)
+		}
+	})
+}
 
 // TestServeRejectsMissingParts checks the guard of Serve itself.
 func TestServeRejectsMissingParts(t *testing.T) {
