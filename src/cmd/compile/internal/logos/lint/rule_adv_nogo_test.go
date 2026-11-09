@@ -404,6 +404,26 @@ func TestAdvGuardedAccess(t *testing.T) {
 			"func t4(s *stats) {\n s.mu.TryLock()\n _ = s.total\n}\n",
 			[]string{"31 concurrency::unguarded_access forbid"},
 		},
+		{
+			"indexLockStaysClean",
+			"func i1() {\n arr[0].mu.Lock()\n arr[0].n = 1\n arr[0].mu.Unlock()\n}\n",
+			nil,
+		},
+		{
+			"indexLockVarStaysClean",
+			"func i2(i int) {\n arr[i].mu.Lock()\n arr[i].n = 2\n arr[i].mu.Unlock()\n}\n",
+			nil,
+		},
+		{
+			"indexLockOtherElementReported",
+			"func i3() {\n arr[0].mu.Lock()\n arr[1].n = 1\n arr[0].mu.Unlock()\n}\n",
+			[]string{"31 concurrency::unguarded_access forbid"},
+		},
+		{
+			"indexLockOtherVarReported",
+			"func i4(i, j int) {\n arr[i].mu.Lock()\n arr[j].n = 3\n}\n",
+			[]string{"31 concurrency::unguarded_access forbid"},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name+"/lgo", func(t *testing.T) {
@@ -433,11 +453,6 @@ func TestAdvGuardedAccessLimitations(t *testing.T) {
 		body string
 		want []string
 	}{
-		{
-			"indexLockReported",
-			"func g4() {\n arr[0].mu.Lock()\n arr[0].n = 1\n arr[0].mu.Unlock()\n}\n",
-			[]string{"31 concurrency::unguarded_access deny"},
-		},
 		{
 			"storedClosureReported",
 			"func h2(s *stats) int {\n s.mu.Lock()\n defer s.mu.Unlock()\n f := func() int { return s.total }\n return f()\n}\n",

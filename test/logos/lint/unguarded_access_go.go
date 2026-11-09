@@ -25,6 +25,15 @@ var gtotal int
 
 var gmu sync.Mutex
 
+type pair struct {
+	mu sync.Mutex
+
+	//logos:guardedby mu
+	n int
+}
+
+var arr [4]pair
+
 func okRead(s *stats) int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -199,4 +208,27 @@ func tryLockStored(s *stats) {
 		_ = s.total // ERROR "\[concurrency::unguarded_access\]"
 		s.mu.Unlock()
 	}
+}
+
+func indexLockSame() {
+	arr[0].mu.Lock()
+	arr[0].n = 1
+	arr[0].mu.Unlock()
+}
+
+func indexLockVarSame(i int) {
+	arr[i].mu.Lock()
+	arr[i].n = 2
+	arr[i].mu.Unlock()
+}
+
+func indexLockOtherElement() {
+	arr[0].mu.Lock()
+	arr[1].n = 1 // ERROR "\[concurrency::unguarded_access\]"
+	arr[0].mu.Unlock()
+}
+
+func indexLockOtherVar(i, j int) {
+	arr[i].mu.Lock()
+	arr[j].n = 3 // ERROR "\[concurrency::unguarded_access\]"
 }

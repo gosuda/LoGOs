@@ -96,6 +96,7 @@ type lockAudit struct {
 	atomics   map[types2.Object]bool
 	contracts map[*syntax.FuncDecl]*funcContract
 	byObject  map[types2.Object]*funcContract
+	indexIDs  map[types2.Object]string
 
 	unguarded []Diagnostic
 	nonatomic []Diagnostic
@@ -1300,10 +1301,49 @@ func (c *lockAudit) pathSteps(e syntax.Expr) ([]string, syntax.Expr, bool) {
 			}
 			steps = append(steps, x.Sel.Value)
 			e = x.X
+		case *syntax.IndexExpr:
+			step, ok := c.indexStep(x)
+			if !ok {
+				return nil, nil, false
+			}
+			steps = append(steps, step)
+			e = x.X
 		default:
 			return nil, nil, false
 		}
 	}
+}
+
+func (c *lockAudit) indexStep(x *syntax.IndexExpr) (string, bool) {
+	if c.in.Info == nil || c.in.Info.Uses == nil {
+		return "", false
+	}
+	switch i := syntax.Unparen(x.Index).(type) {
+	case *syntax.BasicLit:
+		if i.Bad {
+			return "", false
+		}
+		return i.Value, true
+	case *syntax.Name:
+		obj, ok := c.in.Info.Uses[i].(*types2.Var)
+		if !ok || obj == nil {
+			return "", false
+		}
+		return c.indexID(obj), true
+	}
+	return "", false
+}
+
+func (c *lockAudit) indexID(obj types2.Object) string {
+	if c.indexIDs == nil {
+		c.indexIDs = make(map[types2.Object]string)
+	}
+	if id, ok := c.indexIDs[obj]; ok {
+		return id
+	}
+	id := strings.Repeat("#", len(c.indexIDs)+1)
+	c.indexIDs[obj] = id
+	return id
 }
 
 // applyContractEffects applies a same-package contract to st at a body or
