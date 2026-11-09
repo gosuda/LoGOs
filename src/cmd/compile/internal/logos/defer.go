@@ -14,11 +14,6 @@ import (
 	"cmd/compile/internal/types2"
 )
 
-// This file lowers defer f()?, errdefer calls, and the return rewrite of
-// errdefer functions. Deferred callees and arguments are bound at the
-// statement into temporaries, matching the Go defer evaluation rule.
-
-// capturePiece is one callee or argument of a deferred call.
 type capturePiece struct {
 	expr    syntax.Expr
 	text    otext
@@ -29,7 +24,6 @@ type capturePiece struct {
 	multi   []string
 }
 
-// callPlan binds every callee and argument of a deferred call.
 type callPlan struct {
 	fun  capturePiece
 	args []capturePiece
@@ -37,7 +31,6 @@ type callPlan struct {
 	end  int
 }
 
-// typeFlagsOf returns the recorded type flags of e.
 func typeFlagsOf(fc *funcLower, e syntax.Expr) (builtin, isType bool) {
 	info := fc.fl.pkg.info
 	node := syntax.Unparen(e)
@@ -54,14 +47,11 @@ func typeFlagsOf(fc *funcLower, e syntax.Expr) (builtin, isType bool) {
 	return flags.IsBuiltin(), flags.IsType()
 }
 
-// isBuiltinExpr reports whether e denotes a builtin function.
 func isBuiltinExpr(fc *funcLower, e syntax.Expr) bool {
 	builtin, _ := typeFlagsOf(fc, e)
 	return builtin
 }
 
-// planCall maps a deferred call to its capture plan. It reports false for
-// conversions, which cannot be bound to a variable.
 func (fc *funcLower) planCall(call *syntax.CallExpr) (*callPlan, bool) {
 	fl := fc.fl
 	src := fl.src
@@ -107,10 +97,6 @@ func (fc *funcLower) planCall(call *syntax.CallExpr) (*callPlan, bool) {
 	return plan, true
 }
 
-// genericTarget reports whether fun is a reference to a generic function
-// or carries explicit type arguments. Such callees are spelled in the
-// closure so inference reruns on the captured arguments; binding one to a
-// variable would freeze or lose its type arguments.
 func genericTarget(fc *funcLower, fun syntax.Expr) bool {
 	node := syntax.Unparen(fun)
 	if _, ok := node.(*syntax.IndexExpr); ok {
@@ -137,7 +123,6 @@ func genericTarget(fc *funcLower, fun syntax.Expr) bool {
 	return sig.TypeParams().Len() > 0
 }
 
-// argClass selects inline or captured binding for one argument.
 type argClass int
 
 const (
@@ -146,9 +131,6 @@ const (
 	argMulti
 )
 
-// argKind binds constants and nil inline and captures the rest. Constants
-// keep their literal text so default types never shift; every other value
-// is already typed, so short declarations preserve it exactly.
 func argKind(fc *funcLower, raw syntax.Expr) argClass {
 	node := syntax.Unparen(raw)
 	if name, ok := node.(*syntax.Name); ok && name.Value == "nil" {
@@ -167,7 +149,6 @@ func argKind(fc *funcLower, raw syntax.Expr) argClass {
 	return argCapture
 }
 
-// multiNames returns one fresh spelling per value of a tuple argument.
 func (fc *funcLower) multiNames(raw syntax.Expr) []string {
 	typ := fc.fl.pkg.info.TypeOf(raw)
 	tup, _ := typ.(*types2.Tuple)
@@ -178,10 +159,8 @@ func (fc *funcLower) multiNames(raw syntax.Expr) []string {
 	return names
 }
 
-// checkPair builds the capture statement and the guarded call check of a
-// defer? or errdefer? body, twice each for the native tree and the twin.
 func (fc *funcLower) checkPair(plan *callPlan, cpos syntax.Pos) ([]syntax.Stmt, []syntax.Stmt, *twin) {
-	fc.fl.needRT = true // the join below calls _logos_rt.Join
+	fc.fl.needRT = true
 	tw := &twin{}
 	funN, argN, capNamesN, capValsN := fc.planUses(plan, nil)
 	funT, argT, capNamesT, capValsT := fc.planUses(plan, tw)
@@ -202,8 +181,6 @@ func (fc *funcLower) checkPair(plan *callPlan, cpos syntax.Pos) ([]syntax.Stmt, 
 	return append(native, checkN), append(text, checkT), tw
 }
 
-// planUses resolves one side of a capture plan: user nodes with nil twin,
-// markers with a twin.
 func (fc *funcLower) planUses(plan *callPlan, tw *twin) (syntax.Expr, []syntax.Expr, []syntax.Expr, []syntax.Expr) {
 	use := func(piece capturePiece, names []string) syntax.Expr {
 		if !piece.capture {
@@ -238,7 +215,6 @@ func (fc *funcLower) planUses(plan *callPlan, tw *twin) (syntax.Expr, []syntax.E
 	return fun, args, names, vals
 }
 
-// pieceNames returns the capture names of an argument piece.
 func pieceNames(piece capturePiece) []string {
 	if len(piece.multi) > 0 {
 		return piece.multi
@@ -246,7 +222,6 @@ func pieceNames(piece capturePiece) []string {
 	return []string{piece.single}
 }
 
-// nameList returns fresh name nodes for the capture names of a piece.
 func nameList(piece capturePiece) []syntax.Expr {
 	if !piece.capture {
 		return nil
@@ -259,7 +234,6 @@ func nameList(piece capturePiece) []syntax.Expr {
 	return out
 }
 
-// valList returns the captured value side: the user node, or its marker.
 func valList(piece capturePiece, tw *twin) []syntax.Expr {
 	if !piece.capture {
 		return nil
@@ -270,7 +244,6 @@ func valList(piece capturePiece, tw *twin) []syntax.Expr {
 	return []syntax.Expr{tw.mark(piece.expr.Pos(), piece.text)}
 }
 
-// lowerDeferTry lowers defer f()? in a statement list.
 func (fc *funcLower) lowerDeferTry(s *syntax.CallStmt, t *syntax.TryExpr, call *syntax.CallExpr) []syntax.Stmt {
 	fl := fc.fl
 	cpos := syntax.StartPos(s)
@@ -290,7 +263,6 @@ func (fc *funcLower) lowerDeferTry(s *syntax.CallStmt, t *syntax.TryExpr, call *
 	return headN
 }
 
-// lowerErrdefer lowers errdefer f() and errdefer f()?.
 func (fc *funcLower) lowerErrdefer(s *syntax.ErrdeferStmt) []syntax.Stmt {
 	fl := fc.fl
 	cpos := syntax.StartPos(s)
@@ -324,7 +296,6 @@ func (fc *funcLower) lowerErrdefer(s *syntax.ErrdeferStmt) []syntax.Stmt {
 	return native
 }
 
-// lowerErrdeferTry lowers errdefer f()? with a joining guarded body.
 func (fc *funcLower) lowerErrdeferTry(s *syntax.ErrdeferStmt, t *syntax.TryExpr, cpos syntax.Pos, stmtOff int) []syntax.Stmt {
 	fl := fc.fl
 	call, ok := syntax.Unparen(t.X).(*syntax.CallExpr)
@@ -346,8 +317,6 @@ func (fc *funcLower) lowerErrdeferTry(s *syntax.ErrdeferStmt, t *syntax.TryExpr,
 	return headN
 }
 
-// guardedDefer wraps a body in the errdefer guard and a defer statement,
-// preceded by an optional capture statement.
 func (fc *funcLower) guardedDefer(cpos syntax.Pos, body []syntax.Stmt, capNames, capVals []syntax.Expr) []syntax.Stmt {
 	guarded := guardedJoin(cpos, fc.okName, fc.errName, body)
 	closure := deferClosure(cpos, []syntax.Stmt{guarded})
@@ -358,7 +327,6 @@ func (fc *funcLower) guardedDefer(cpos syntax.Pos, body []syntax.Stmt, capNames,
 	return []syntax.Stmt{defineOf(cpos, capNames, capVals), deferStmt}
 }
 
-// planSpans returns the source spans owned by a capture plan.
 func planSpans(plan *callPlan) []span {
 	spans := []span{{start: plan.fun.start, end: plan.fun.end}}
 	for _, arg := range plan.args {
@@ -367,8 +335,6 @@ func planSpans(plan *callPlan) []span {
 	return spans
 }
 
-// leftoverComments lifts the comments of a replaced span that fall outside
-// every piece, so interior comments survive in the eject text.
 func leftoverComments(fl *fileLower, whole span, pieces []span) otext {
 	var parts []otext
 	for _, c := range commentsIn(fl.src, whole.start, whole.end) {
@@ -379,7 +345,6 @@ func leftoverComments(fl *fileLower, whole span, pieces []span) otext {
 	return cat(parts...)
 }
 
-// insideAny reports whether c lies inside one of pieces.
 func insideAny(c span, pieces []span) bool {
 	for _, p := range pieces {
 		if c.start >= p.start && c.end <= p.end {
@@ -389,10 +354,6 @@ func insideAny(c span, pieces []span) bool {
 	return false
 }
 
-// lowerReturn rewrites the returns of an errdefer function so a panic
-// while evaluating results counts as failure. Results go through fresh
-// temporaries, so a shadowing declaration at the return site cannot steal
-// the assignment the way a named target would.
 func (fc *funcLower) lowerReturn(s *syntax.ReturnStmt) []syntax.Stmt {
 	fl := fc.fl
 	scanForLiterals(fl, s.Results)
@@ -410,11 +371,6 @@ func (fc *funcLower) lowerReturn(s *syntax.ReturnStmt) []syntax.Stmt {
 	resText := fl.textOf(trimmed)
 	results := syntax.UnpackListExpr(s.Results)
 	temps := fc.nextTemps(len(fc.specs))
-	// Each temporary is declared with its result type and then assigned.
-	// A short declaration would type the temporary from the value alone:
-	// untyped nil has no type, and an untyped constant would take its
-	// default type instead of the result type. Assignment converts exactly
-	// as a return statement does.
 	build := func(rhs []syntax.Expr) []syntax.Stmt {
 		out := make([]syntax.Stmt, 0, len(temps)+3)
 		for i, spelling := range temps {
@@ -435,7 +391,6 @@ func (fc *funcLower) lowerReturn(s *syntax.ReturnStmt) []syntax.Stmt {
 	return native
 }
 
-// nextTemps returns n fresh per-function temporary spellings.
 func (fc *funcLower) nextTemps(n int) []string {
 	temps := make([]string, n)
 	for i := range temps {
@@ -445,7 +400,6 @@ func (fc *funcLower) nextTemps(n int) []string {
 	return temps
 }
 
-// tempNodes builds fresh name nodes for spellings at pos.
 func tempNodes(pos syntax.Pos, spellings []string) []syntax.Expr {
 	nodes := make([]syntax.Expr, len(spellings))
 	for i, spelling := range spellings {
@@ -454,7 +408,6 @@ func tempNodes(pos syntax.Pos, spellings []string) []syntax.Expr {
 	return nodes
 }
 
-// skipCloseParens extends a span past parentheses the parser dropped.
 func skipCloseParens(src []byte, from int) int {
 	end := from
 	scanSegment(src, from, len(src), func(t tok) bool {

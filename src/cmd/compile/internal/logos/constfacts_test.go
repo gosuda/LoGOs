@@ -15,9 +15,6 @@ import (
 	"cmd/compile/internal/types2"
 )
 
-// TestWriteConstFacts checks a small .lgo package, calls Write
-// directly, and asserts the const lines plus the ReceiverMutated and
-// ParamMutated flags, including propagation to a wrapper.
 func TestWriteConstFacts(t *testing.T) {
 	const src = `package factstest
 
@@ -193,7 +190,7 @@ func (Plain) As[U any](x any) U { return x.(U) }
 			t.Errorf("%s: AssertTP=%q AssertRTP=%q, want %q/%q", object, fn.AssertTP, fn.AssertRTP, tp, rtp)
 		}
 	}
-	check("Identity", "0", "0") // proven absence keeps Identity[Qualified] legal
+	check("Identity", "0", "0")
 	check("As", "1", "0")
 	check("Box.As", "0", "1")
 	check("Store.Get", "0", "0")

@@ -11,16 +11,6 @@ import (
 	"cmd/compile/internal/syntax"
 )
 
-// M6-S2 lowering of `&expr` over non-addressable operands (SPEC
-// T-104.5): each recorded operation becomes `new(expr)`, so every
-// evaluation yields a fresh variable. The native tree moves the operand
-// under a new call; the eject text replaces `&` with `new(` and closes
-// past the operand end. Small splices keep nested fresh operations
-// composable in input order.
-
-// lowerAddrFresh rewrites every fresh `&expr` of one file. It runs after
-// every pass that records splices inside operands, so operand text is
-// final when the closing splice lands.
 func (fl *fileLower) lowerAddrFresh() {
 	fresh := fl.pkg.info.LogosAddrFresh
 	if len(fresh) == 0 {
@@ -40,7 +30,6 @@ func (fl *fileLower) lowerAddrFresh() {
 	})
 }
 
-// lowerAddrOp lowers one fresh `&expr` to `new(expr)`.
 func (fl *fileLower) lowerAddrOp(e *syntax.Operation) syntax.Expr {
 	amp := fl.off(e.Pos())
 	fl.add(amp, amp+1, "new(")
@@ -49,13 +38,6 @@ func (fl *fileLower) lowerAddrOp(e *syntax.Operation) syntax.Expr {
 	return at(&syntax.CallExpr{Fun: nameOf(pos, "new"), ArgList: []syntax.Expr{e.X}}, pos)
 }
 
-// unaryOperandEnd returns the offset just past the unary operand opening
-// at from, where from holds the leading `&`. Depth-zero tokens that end
-// an operand stop the scan: binary operators, commas, semicolons,
-// colons, assignments, closing brackets, and block braces. Brackets of
-// any kind nest; a `?` followed by another `?` ends (the `??` fallback
-// binds looser than `&`), while any other `?` continues (postfix `?`
-// and `?.` bind tighter).
 func (fl *fileLower) unaryOperandEnd(from int) int {
 	end := len(fl.src)
 	const (
@@ -139,9 +121,6 @@ func (fl *fileLower) unaryOperandEnd(from int) int {
 	return end
 }
 
-// isUnaryOperandEndOp reports whether kind is a binary operator: one
-// that ends a unary operand after a complete operand but continues it
-// in operand position as a unary operator.
 func isUnaryOperandEndOp(kind token.Token) bool {
 	switch kind {
 	case token.ADD, token.SUB, token.MUL, token.QUO, token.REM,

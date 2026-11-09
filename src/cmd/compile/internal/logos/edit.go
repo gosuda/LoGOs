@@ -15,33 +15,20 @@ import (
 	"cmd/internal/logos/editmap"
 )
 
-// Edit replaces the source text from Start up to End with Text. Positions
-// are the 1-based line and byte column of the original file; an edit with
-// Start equal to End inserts Text.
 type Edit struct {
 	Start, End syntax.Pos
 	Text       string
-	// Chunks carry the origin of Text: nil means the whole text is
-	// generated, non-nil chunks say which bytes are verbatim copies of
-	// which original byte ranges (offsets into the original file).
-	Chunks []chunk
+	Chunks     []chunk
 }
 
-// splice is an Edit resolved to byte offsets of one source text.
 type splice struct {
 	start, end int
 	text       string
-	// chunks carry the origin of text: nil means the whole text is
-	// generated. applyChunks rebase-checks them like the offsets.
-	chunks []chunk
-	// owner is the wrapper ID of boundary inserts (heads, tails)
-	// that a later wrap of the same wrapper drains into fused text;
-	// zero for ordinary splices.
-	owner int
-	host  *cfHost
+	chunks     []chunk
+	owner      int
+	host       *cfHost
 }
 
-// lineStarts returns the byte offset at which each line of src begins.
 func lineStarts(src []byte) []int {
 	starts := []int{0}
 	for i, c := range src {
@@ -52,15 +39,10 @@ func lineStarts(src []byte) []int {
 	return starts
 }
 
-// offsetOf converts a position to a byte offset into a text of size bytes.
-// Columns are byte columns of the position's own line; a column past the
-// line end is rejected even when its offset lands inside a later line.
 func offsetOf(starts []int, size int, pos syntax.Pos) (int, error) {
 	return lineColOffset(starts, size, int(pos.Line()), int(pos.Col()))
 }
 
-// lineColOffset converts a 1-based line and byte column to a byte offset
-// into a text of size bytes, with the checks of offsetOf.
 func lineColOffset(starts []int, size, line, col int) (int, error) {
 	if line < 1 || line > len(starts) || col < 1 {
 		return 0, fmt.Errorf("position %d:%d is outside the source", line, col)
@@ -76,8 +58,6 @@ func lineColOffset(starts []int, size, line, col int) (int, error) {
 	return off, nil
 }
 
-// resolve converts e to byte offsets and rejects an edit that belongs to
-// another file or ends before it starts.
 func resolve(src []byte, starts []int, base *syntax.PosBase, e Edit) (splice, error) {
 	for _, pos := range []syntax.Pos{e.Start, e.End} {
 		if pos.FileBase() != base {
@@ -98,20 +78,11 @@ func resolve(src []byte, starts []int, base *syntax.PosBase, e Edit) (splice, er
 	return splice{start: start, end: end, text: e.Text, chunks: e.Chunks}, nil
 }
 
-// ApplyEdits applies edits to src and returns the new text. base is the
-// file base of the file whose positions the edits carry. Edits may be
-// given in any order; they must not overlap. Insertions at one offset keep
-// their input order.
 func ApplyEdits(src []byte, base *syntax.PosBase, edits []Edit) ([]byte, error) {
 	out, _, _, err := ApplyEditsSegments(src, base, edits)
 	return out, err
 }
 
-// ApplyEditsSegments applies edits to src and returns the applied edits
-// as spans and the origin segments of the whole output:
-// every byte of the edited text is either a verbatim copy of an original
-// byte range or generated, so a reader maps any output offset to its
-// exact original offset or learns it has none.
 func ApplyEditsSegments(src []byte, base *syntax.PosBase, edits []Edit) ([]byte, []editmap.EditSpan, []editmap.Segment, error) {
 	want := base.Pos().FileBase()
 	starts := lineStarts(src)
@@ -132,7 +103,6 @@ func ApplyEditsSegments(src []byte, base *syntax.PosBase, edits []Edit) ([]byte,
 	return out, spansOf(splices), segmentsOf(splices, len(out)), nil
 }
 
-// spansOf converts splices, already sorted by applySplices, to spans.
 func spansOf(sorted []splice) []editmap.EditSpan {
 	spans := make([]editmap.EditSpan, len(sorted))
 	for i, s := range sorted {
@@ -141,8 +111,6 @@ func spansOf(sorted []splice) []editmap.EditSpan {
 	return spans
 }
 
-// segmentsOf builds the origin segments of an edited text from splices
-// already sorted by applyChunks.
 func segmentsOf(sorted []splice, outLen int) []editmap.Segment {
 	var segs []editmap.Segment
 	seg := func(start, end, orig int) {
@@ -162,7 +130,7 @@ func segmentsOf(sorted []splice, outLen int) []editmap.Segment {
 	out := 0
 	prev := 0
 	for _, s := range sorted {
-		seg(out, out+(s.start-prev), prev) // gap: copy at identical offsets
+		seg(out, out+(s.start-prev), prev)
 		out += s.start - prev
 		cov := 0
 		for _, ch := range s.chunks {
@@ -170,13 +138,13 @@ func segmentsOf(sorted []splice, outLen int) []editmap.Segment {
 				continue
 			}
 			if ch.out > cov {
-				seg(out+cov, out+ch.out, -1) // generated run before the chunk
+				seg(out+cov, out+ch.out, -1)
 			}
 			seg(out+ch.out, out+ch.out+ch.n, ch.orig)
 			cov = ch.out + ch.n
 		}
 		if cov < len(s.text) {
-			seg(out+cov, out+len(s.text), -1) // generated tail
+			seg(out+cov, out+len(s.text), -1)
 		}
 		out += len(s.text)
 		prev = s.end
@@ -185,26 +153,17 @@ func segmentsOf(sorted []splice, outLen int) []editmap.Segment {
 	return segs
 }
 
-// sortSplices orders splices by start, then end, keeping the input order
-// of equal splices.
 func sortSplices(splices []splice) {
 	slices.SortStableFunc(splices, func(a, b splice) int {
 		return cmp.Or(cmp.Compare(a.start, b.start), cmp.Compare(a.end, b.end))
 	})
 }
 
-// applySplices applies byte-offset splices to src. It sorts splices in
-// place and reports an error when two of them overlap.
 func applySplices(src []byte, splices []splice) ([]byte, error) {
 	t, err := applyChunks(otext{s: string(src)}, splices)
 	return []byte(t.s), err
 }
 
-// applyChunks applies byte-offset splices to src and returns the
-// composed text with origin chunks: gap bytes inherit src's mapping and
-// splice text carries its own. The bytes of the result equal
-// applySplices'; only the origin is added. Splices are sorted in place;
-// overlapping splices are an error.
 func applyChunks(src otext, splices []splice) (otext, error) {
 	sortSplices(splices)
 	var sb strings.Builder
@@ -244,7 +203,6 @@ func applyChunks(src otext, splices []splice) (otext, error) {
 	return res, nil
 }
 
-// editsOf converts splices of one file to Edits positioned on base.
 func editsOf(src []byte, base *syntax.PosBase, splices []splice) []Edit {
 	starts := lineStarts(src)
 	posAt := func(off int) syntax.Pos {

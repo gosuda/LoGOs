@@ -4,25 +4,21 @@
 
 package logos
 
-// Attack tests for M5-S4 const maps (SPEC T-Sec7): the seed search has a
-// fixed budget, and exhausting it reports comptime::constmap_seed_not_found
-// instead of searching on. The 10,000-key acceptance and the run-time
-// lookups are owned by test/logos/run/const_map.lgo.
-
 import (
 	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"math"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+
+	rt "logos/rt"
 )
 
-// constmapKeys builds n string keys with their base hashes and canonical
-// bytes, the inputs buildConstMap takes.
 func constmapKeys(n int) []constMapKey {
 	keys := make([]constMapKey, n)
 	for i := range keys {
@@ -32,11 +28,6 @@ func constmapKeys(n int) []constMapKey {
 	return keys
 }
 
-// TestConstmapSeedExhausted forces comptime::constmap_seed_not_found with
-// an injected tiny budget: 4 trials split over 2 outer rounds, so each
-// round gets 2 trials and the 9-key set cannot place every bucket. The
-// production budget places the same keys, so the failure is the budget's
-// doing, not the keys'.
 func TestConstmapSeedExhausted(t *testing.T) {
 	keys := constmapKeys(9)
 
@@ -53,9 +44,6 @@ func TestConstmapSeedExhausted(t *testing.T) {
 	}
 }
 
-// TestConstmapProbeFindsEveryKey places 9, 1000, and 10,000 keys with the
-// production budget and checks that each key's single probe reads its own
-// slot, and that a key outside the set reads a slot holding no equal key.
 func TestConstmapProbeFindsEveryKey(t *testing.T) {
 	for _, n := range []int{9, 1000, 10000} {
 		keys := constmapKeys(n)
@@ -71,10 +59,6 @@ func TestConstmapProbeFindsEveryKey(t *testing.T) {
 	}
 }
 
-// TestConstmapBudgetIsOneMillion pins the SPEC T-Sec7 construction ceiling
-// (#140): 1,000,000 seed-candidate trials in total per const map, split
-// into 8 deterministic outer rounds of 125,000 trials each. A ceiling
-// off by one in either direction changes one of the two outcomes below.
 func TestConstmapBudgetIsOneMillion(t *testing.T) {
 	if defaultConstMapBudget.MaxSeeds != 1000000 {
 		t.Fatalf("defaultConstMapBudget.MaxSeeds = %d, want 1000000", defaultConstMapBudget.MaxSeeds)
@@ -87,23 +71,12 @@ func TestConstmapBudgetIsOneMillion(t *testing.T) {
 	}
 }
 
-// TestConstmapSwitchMax pins the SPEC T-Sec7 lowering boundary (#3): a
-// const map with up to 8 keys lowers to a switch lookup, and a larger
-// map lowers to the static perfect-hash table. The run fixture
-// test/logos/run/constmap_switch.lgo proves the emitted form end to
-// end (no _tab symbol at 8 keys, a read-only _tab symbol above that);
-// this pin keeps the boundary itself from drifting.
 func TestConstmapSwitchMax(t *testing.T) {
 	if constMapSwitchMax != 8 {
 		t.Fatalf("constMapSwitchMax = %d, want 8", constMapSwitchMax)
 	}
 }
 
-// TestConstmapProbeIsSingleProbe pins the SPEC T-Sec7 lookup shape
-// (#140): the compiler-side probe performs one bucket selection plus
-// exactly one slot read, with no loop and no logarithmic fallback. A
-// loop or a binary search in this path voids the constant-time proof,
-// so the test parses its own source and rejects both.
 func TestConstmapProbeIsSingleProbe(t *testing.T) {
 	_, file, _, ok := runtime.Caller(0)
 	if !ok {
@@ -127,12 +100,6 @@ func TestConstmapProbeIsSingleProbe(t *testing.T) {
 	if probe == nil {
 		t.Fatal("func probe not found in constmap.go")
 	}
-	// probe computes the single slot index the run-time Get reads: one
-	// bucket selection plus exactly one slot offset, with no loop. The
-	// slot read itself lives in rt.ConstTable.Get (guarded by
-	// TestConstTableGetSingleProbe in src/logos/rt), and the behavioral
-	// proof that the computed index reads the key's own slot is
-	// TestConstmapProbeFindsEveryKey above.
 	loops, buckets := 0, 0
 	ast.Inspect(probe.Body, func(n ast.Node) bool {
 		switch n := n.(type) {
@@ -164,9 +131,6 @@ func TestConstmapProbeIsSingleProbe(t *testing.T) {
 	}
 }
 
-// TestConstmapBudgetBoundary pins the seed budget at its exact edge: the
-// trials a layout spends are enough on their own, and one fewer is not. A
-// bound off by one in either direction changes one of the two outcomes.
 func TestConstmapBudgetBoundary(t *testing.T) {
 	keys := constmapKeys(9)
 	l, err := buildConstMap(keys, defaultConstMapBudget)
@@ -178,5 +142,41 @@ func TestConstmapBudgetBoundary(t *testing.T) {
 	}
 	if _, err := buildConstMap(keys, constMapBudget{MaxSeeds: l.spent - 1, Rounds: 1}); err == nil {
 		t.Fatalf("budget of %d trials (one fewer than spent) succeeded", l.spent-1)
+	}
+}
+
+func TestConstmapHashMatchesRuntime(t *testing.T) {
+	strs := []string{"", "a", "k00000", "hello, world", "const map key with spaces and unicode \u00e9"}
+	for _, s := range strs {
+		if got, want := constHashString(s), rt.HashString(s); got != want {
+			t.Fatalf("constHashString(%q) = %#x, want rt.HashString %#x", s, got, want)
+		}
+	}
+	uints := []uint64{0, 1, 2, 0x9e3779b97f4a7c15, 0xffffffffffffffff}
+	for _, x := range uints {
+		if got, want := constHashUint64(x), rt.HashUint64(x); got != want {
+			t.Fatalf("constHashUint64(%#x) = %#x, want rt %#x", x, got, want)
+		}
+	}
+	for _, b := range []bool{false, true} {
+		if got, want := constHashBool(b), rt.HashBool(b); got != want {
+			t.Fatalf("constHashBool(%v) = %#x, want rt %#x", b, got, want)
+		}
+	}
+	floats := []float64{0, math.Copysign(0, -1), 1.5, -273.15, math.MaxFloat64, math.SmallestNonzeroFloat64}
+	for _, f := range floats {
+		if got, want := constHashFloat64(f), rt.HashFloat64(f); got != want {
+			t.Fatalf("constHashFloat64(%v) = %#x, want rt %#x", f, got, want)
+		}
+	}
+	for _, x := range uints {
+		for _, y := range uints {
+			if got, want := constHashCombine(x, y), rt.HashCombine(x, y); got != want {
+				t.Fatalf("constHashCombine(%#x, %#x) = %#x, want rt %#x", x, y, got, want)
+			}
+			if got, want := constMix(x, y), rt.ConstMix(x, y); got != want {
+				t.Fatalf("constMix(%#x, %#x) = %#x, want rt %#x", x, y, got, want)
+			}
+		}
 	}
 }

@@ -17,31 +17,23 @@ import (
 	"cmd/compile/internal/syntax"
 )
 
-// ContextLineCap bounds logos context output lines.
 const ContextLineCap = 100
 
-// LogosSymbol names the symbol extracted by -logos.mode=context.
 var LogosSymbol string
 
-// init registers the context symbol flag beside its consumer.
 func init() {
 	flag.StringVar(&LogosSymbol, "logos.symbol", "", "symbol for -logos.mode=context")
 }
 
-// UnknownSymbolError reports a symbol missing from a context query.
 type UnknownSymbolError struct {
 	Pkg    string
 	Symbol string
 }
 
-// Error formats the unknown symbol report.
 func (e *UnknownSymbolError) Error() string {
 	return "logos context: " + e.Pkg + " has no symbol " + e.Symbol
 }
 
-// ContextLines returns the declaration of symbol, the signatures of its
-// methods, and the declarations of package types those mention one level
-// deep, with no function bodies, capped at ContextLineCap lines.
 func ContextLines(files []*syntax.File, symbol string) ([]string, error) {
 	all, types := collectDecls(files)
 	roots := matchRoots(all, symbol)
@@ -70,8 +62,6 @@ func ContextLines(files []*syntax.File, symbol string) ([]string, error) {
 	return lines, nil
 }
 
-// RunContext implements -logos.mode=context: it parses the input files
-// without imports and prints the context of -logos.symbol on stdout.
 func RunContext() {
 	symbol := LogosSymbol
 	if symbol == "" {
@@ -106,7 +96,6 @@ func RunContext() {
 	}
 }
 
-// contextPkg names the package of the first parsed file.
 func contextPkg(files []*syntax.File) string {
 	if len(files) == 0 {
 		return ""
@@ -114,7 +103,6 @@ func contextPkg(files []*syntax.File) string {
 	return files[0].PkgName.Value
 }
 
-// contextFileMode selects LogosMode for loGo/s files only.
 func contextFileMode(name string) syntax.Mode {
 	if contextLogosExt(name) {
 		return syntax.LogosMode
@@ -122,7 +110,6 @@ func contextFileMode(name string) syntax.Mode {
 	return 0
 }
 
-// contextLogosExt reports whether name carries a loGo/s extension.
 func contextLogosExt(name string) bool {
 	ext := filepath.Ext(name)
 	ext = strings.TrimRightFunc(ext, func(r rune) bool { return r == 0xFE0E || r == 0xFE0F })
@@ -133,7 +120,6 @@ func contextLogosExt(name string) bool {
 	return false
 }
 
-// collectDecls gathers top-level declarations and types by name.
 func collectDecls(files []*syntax.File) ([]syntax.Decl, map[string]*syntax.TypeDecl) {
 	var all []syntax.Decl
 	types := map[string]*syntax.TypeDecl{}
@@ -150,7 +136,6 @@ func collectDecls(files []*syntax.File) ([]syntax.Decl, map[string]*syntax.TypeD
 	return all, types
 }
 
-// matchRoots returns non-method declarations named symbol.
 func matchRoots(all []syntax.Decl, symbol string) []syntax.Decl {
 	var roots []syntax.Decl
 	for _, decl := range all {
@@ -161,7 +146,6 @@ func matchRoots(all []syntax.Decl, symbol string) []syntax.Decl {
 	return roots
 }
 
-// matchMentioners returns package functions whose signature names symbol.
 func matchMentioners(all []syntax.Decl, symbol string) []syntax.Decl {
 	var found []syntax.Decl
 	for _, decl := range all {
@@ -178,7 +162,6 @@ func matchMentioners(all []syntax.Decl, symbol string) []syntax.Decl {
 	return found
 }
 
-// matchMethods returns methods whose receiver base type is symbol.
 func matchMethods(all []syntax.Decl, symbol string) []syntax.Decl {
 	var methods []syntax.Decl
 	for _, decl := range all {
@@ -193,7 +176,6 @@ func matchMethods(all []syntax.Decl, symbol string) []syntax.Decl {
 	return methods
 }
 
-// namedDecl reports whether decl declares symbol outside a receiver.
 func namedDecl(decl syntax.Decl, symbol string) bool {
 	switch decl := decl.(type) {
 	case *syntax.TypeDecl:
@@ -208,7 +190,6 @@ func namedDecl(decl syntax.Decl, symbol string) bool {
 	return false
 }
 
-// nameListHas reports whether names holds symbol.
 func nameListHas(names []*syntax.Name, symbol string) bool {
 	for _, name := range names {
 		if name.Value == symbol {
@@ -218,7 +199,6 @@ func nameListHas(names []*syntax.Name, symbol string) bool {
 	return false
 }
 
-// recvBaseType unwraps pointer, paren, and index wrappers to a base name.
 func recvBaseType(t syntax.Expr) string {
 	switch t := t.(type) {
 	case *syntax.Name:
@@ -235,7 +215,6 @@ func recvBaseType(t syntax.Expr) string {
 	return ""
 }
 
-// collectSigNames gathers type names in the signature of decl.
 func collectSigNames(decl syntax.Decl, out map[string]bool) {
 	switch decl := decl.(type) {
 	case *syntax.TypeDecl:
@@ -259,7 +238,6 @@ func collectSigNames(decl syntax.Decl, out map[string]bool) {
 	}
 }
 
-// fieldTypeNames gathers names in the types of fields.
 func fieldTypeNames(fields []*syntax.Field, out map[string]bool) {
 	for _, field := range fields {
 		if field.Type != nil {
@@ -268,7 +246,6 @@ func fieldTypeNames(fields []*syntax.Field, out map[string]bool) {
 	}
 }
 
-// typeNames gathers names in composite type expressions.
 func typeNames(t syntax.Expr, out map[string]bool) {
 	switch t := t.(type) {
 	case *syntax.Name:
@@ -310,7 +287,6 @@ func typeNames(t syntax.Expr, out map[string]bool) {
 	}
 }
 
-// renderDecl prints decl without function bodies as source lines.
 func renderDecl(decl syntax.Decl) []string {
 	if fd, ok := decl.(*syntax.FuncDecl); ok {
 		bodiless := *fd

@@ -4,14 +4,6 @@
 
 package logos
 
-// This file gives the M5-S4 const map keys their compile-time view (SPEC
-// T-Sec7): the base hash that places a key (constKeyHash, mirroring the
-// hash expression the lowered lookup computes), the canonical bytes that
-// break hash ties (constKeyCanon), and the Go order that range follows
-// (constKeyCompare). Keys are evaluated ctfe values; a const map key of a
-// type these functions cannot hash never reaches here, because the checker
-// rejects it (types2 logosConstMapKeyOK).
-
 import (
 	"cmd/compile/internal/logos/ctfe"
 	"math"
@@ -20,11 +12,8 @@ import (
 	"strings"
 )
 
-// constKeyMask is 2^64-1, the mask that turns a big integer into its
-// 64-bit two's-complement bits.
 var constKeyMask = new(big.Int).SetUint64(math.MaxUint64)
 
-// constKeyIsInt reports whether k is an integer kind.
 func constKeyIsInt(k ctfe.Kind) bool {
 	switch k {
 	case ctfe.KInt, ctfe.KInt8, ctfe.KInt16, ctfe.KInt32, ctfe.KInt64,
@@ -34,18 +23,14 @@ func constKeyIsInt(k ctfe.Kind) bool {
 	return false
 }
 
-// constKeyIsFloat reports whether k is a float kind.
 func constKeyIsFloat(k ctfe.Kind) bool {
 	return k == ctfe.KFloat32 || k == ctfe.KFloat64
 }
 
-// constKeyBits returns the 64-bit two's-complement bits of an integer key.
 func constKeyBits(v ctfe.Value) uint64 {
 	return new(big.Int).And(v.BigInt(), constKeyMask).Uint64()
 }
 
-// constKeyFloat returns a float key widened to float64. A float32 key is
-// first rounded to float32, so both sides hash the same bits.
 func constKeyFloat(v ctfe.Value) float64 {
 	if v.Type().Kind == ctfe.KFloat32 {
 		return float64(float32(v.Float64()))
@@ -53,10 +38,6 @@ func constKeyFloat(v ctfe.Value) float64 {
 	return v.Float64()
 }
 
-// constKeyHash returns the base hash of a const map key. It mirrors the
-// lowered hash (constKeyHashText): string, bool, integer, and float keys
-// hash by value; struct and array keys fold their non-blank fields and
-// elements in order with rt.HashCombine.
 func constKeyHash(v ctfe.Value) uint64 {
 	t := v.Type()
 	switch {
@@ -86,9 +67,6 @@ func constKeyHash(v ctfe.Value) uint64 {
 	panic("logos: const map key kind is not hashable: " + strconv.Itoa(int(t.Kind)))
 }
 
-// constKeyCanon returns the canonical bytes of a key: the tie-break among
-// keys with equal base hashes. Equal keys have equal canonical bytes, and
-// struct fields and array elements are delimited so distinct keys differ.
 func constKeyCanon(v ctfe.Value) string {
 	t := v.Type()
 	switch {
@@ -102,7 +80,7 @@ func constKeyCanon(v ctfe.Value) string {
 	case constKeyIsFloat(t.Kind):
 		f := constKeyFloat(v)
 		if f == 0 {
-			f = 0 // negative zero keys as positive zero, as the hash does
+			f = 0
 		}
 		return strconv.FormatUint(math.Float64bits(f), 16)
 	case constKeyIsInt(t.Kind):
@@ -131,10 +109,6 @@ func constKeyCanon(v ctfe.Value) string {
 	return ""
 }
 
-// constKeyCompare orders two keys of one const map the way Go orders them:
-// strings bytewise, bools false before true, integers and floats
-// numerically, and structs and arrays lexicographically over their
-// non-blank fields and elements. Range visits keys in this order.
 func constKeyCompare(a, b ctfe.Value) int {
 	t := a.Type()
 	switch {

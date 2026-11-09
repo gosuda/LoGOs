@@ -4,26 +4,6 @@
 
 package logos
 
-// This file lowers M5-S4 const maps (SPEC T-Sec7). A const map declaration
-// becomes plain Go: a lookup function, a sorted entry list for range, and a
-// materializer that builds one regular map on first plain use. A map with at
-// most 8 keys looks up through a switch; a larger map looks up through a
-// rt.ConstTable whose layout the seed search fixed at compile time.
-//
-// The rewrites of one read:
-//
-//	m[k]         -> rt.Opt(_logos_cmN_m_lookup(k))   option read (SPEC T-202)
-//	m[k] (comma) -> _logos_cmN_m_lookup(k)           comma-ok read, (V, bool)
-//	range m      -> rt.ConstAll(_logos_cmN_m_sorted) sorted entries
-//	len(m)       -> the entry count, a constant
-//	m (other)    -> _logos_cmN_m_map()               the materialized map
-//
-// Lowering runs in two steps. Collect registers every const map of the
-// package before any file lowers, so a use in one file sees the declaration
-// in another. The declaring file then removes the const spec and appends the
-// generated declarations, which are parsed from text and spelled identically
-// in the ejected source.
-
 import (
 	"cmd/compile/internal/base"
 	"cmd/compile/internal/logos/ctfe"
@@ -35,12 +15,10 @@ import (
 	"strings"
 )
 
-// constMapSwitchMax is the largest key count that lowers to a switch.
 const constMapSwitchMax = 8
 
-// constMapGen is one registered const map of the package.
 type constMapGen struct {
-	name        string // prefix of the generated names, unique in the package
+	name        string
 	obj         *types2.Const
 	val         ctfe.Value
 	init        syntax.Expr
@@ -175,9 +153,6 @@ func emitConstMapDecls(e constMapEmission) string {
 	return b.String()
 }
 
-// collectConstMaps registers every single-name const of the package whose
-// evaluated value is a map. Names carry a package-wide sequence number, so
-// const maps in different functions never collide.
 func collectConstMaps(files []*syntax.File, info *types2.Info) map[*types2.Const]*constMapGen {
 	clearConstMat()
 	out := map[*types2.Const]*constMapGen{}
@@ -210,7 +185,6 @@ func collectConstMaps(files []*syntax.File, info *types2.Info) map[*types2.Const
 	return out
 }
 
-// constMapUse returns the const map that expression x names, if any.
 func (fl *fileLower) constMapUse(x syntax.Expr) (*constMapGen, bool) {
 	name, ok := syntax.Unparen(x).(*syntax.Name)
 	if !ok {
@@ -224,12 +198,10 @@ func (fl *fileLower) constMapUse(x syntax.Expr) (*constMapGen, bool) {
 	return g, ok
 }
 
-// constMapEntries returns the keys and values of g in insertion order.
 func (g *constMapGen) constMapEntries() (keys, vals []ctfe.Value) {
 	return g.val.MapEntries()
 }
 
-// constMapElem returns the map type of a const map's declared type.
 func constMapElem(t types2.Type) types2.Type {
 	if cv, ok := t.(*types2.ConstView); ok {
 		return cv.Elem
@@ -237,8 +209,6 @@ func constMapElem(t types2.Type) types2.Type {
 	return t
 }
 
-// lowerConstMapSpec removes one const map declaration from the source and
-// records its generated declarations for this file.
 func (fl *fileLower) lowerConstMapSpec(cd *syntax.ConstDecl, g *constMapGen) {
 	fl.needRT = true
 	if _, ejectText, ok := fl.constMapOwnedTexts(g, cd.Pos()); ok {
@@ -257,11 +227,6 @@ func (fl *fileLower) lowerConstMapSpec(cd *syntax.ConstDecl, g *constMapGen) {
 	fl.dropConstSpec(cd)
 }
 
-// markConstMapTables records the sorted-entry and perfect-hash table vars
-// of g for read-only placement (SPEC Sec 7). Their initializers are
-// constant literals, so static initialization fills them; the
-// materialized map var is built at run time and stays writable. The
-// generated text already carries the marker lines.
 func (fl *fileLower) markConstMapTables(decls []syntax.Decl, g *constMapGen) {
 	for _, d := range decls {
 		vd, ok := d.(*syntax.VarDecl)
@@ -276,9 +241,6 @@ func (fl *fileLower) markConstMapTables(decls []syntax.Decl, g *constMapGen) {
 	}
 }
 
-// dropConstSpec deletes a const spec's source text. A standalone spec also
-// takes its const keyword; a grouped spec uses the separator-swallowing
-// deletion of deleteSpec.
 func (fl *fileLower) dropConstSpec(cd *syntax.ConstDecl) {
 	if cd.Group == nil {
 		if kw, ok := constKeywordStart(fl.src, fl.off(syntax.StartPos(cd))); ok {
@@ -289,7 +251,6 @@ func (fl *fileLower) dropConstSpec(cd *syntax.ConstDecl) {
 	fl.deleteSpec(cd)
 }
 
-// constMapText spells the generated declarations of one const map.
 func (fl *fileLower) constMapText(g *constMapGen, pos syntax.Pos) string {
 	elem := constMapElem(g.obj.Type())
 	mt, ok := elem.Underlying().(*types2.Map)
@@ -342,8 +303,6 @@ func (fl *fileLower) constMapText(g *constMapGen, pos syntax.Pos) string {
 	})
 }
 
-// constKeyHashText spells the base hash of key x of type t: the expression
-// that mirrors constKeyHash over ctfe values.
 func (fl *fileLower) constKeyHashText(t types2.Type, x string, pos syntax.Pos) string {
 	switch u := t.Underlying().(type) {
 	case *types2.Basic:
@@ -377,7 +336,6 @@ func (fl *fileLower) constKeyHashText(t types2.Type, x string, pos syntax.Pos) s
 	return ""
 }
 
-// mustSpell spells a lowered type or stops compilation.
 func (fl *fileLower) mustSpell(t types2.Type, pos syntax.Pos) string {
 	s, ok := fl.spellLowered(t)
 	if !ok {
@@ -386,7 +344,6 @@ func (fl *fileLower) mustSpell(t types2.Type, pos syntax.Pos) string {
 	return s
 }
 
-// mustRender prints a key or value of a const map.
 func (fl *fileLower) mustRender(v ctfe.Value, pos syntax.Pos) string {
 	e, err := v.Expr(pos)
 	if err != nil {
@@ -395,7 +352,6 @@ func (fl *fileLower) mustRender(v ctfe.Value, pos syntax.Pos) string {
 	return renderExpr(e)
 }
 
-// mustRenderWith spells map elements with their declared type.
 func (fl *fileLower) mustRenderWith(v ctfe.Value, t types2.Type, pos syntax.Pos) string {
 	if e, err := v.Expr(pos); err == nil {
 		return renderExpr(e)
@@ -406,8 +362,6 @@ func (fl *fileLower) mustRenderWith(v ctfe.Value, t types2.Type, pos syntax.Pos)
 	return fl.mustRender(v, pos)
 }
 
-// parseConstMapDecls parses generated declaration text into nodes at pos,
-// so every generated node carries the declaration's position.
 func parseConstMapDecls(text string, pos syntax.Pos) []syntax.Decl {
 	file, err := syntax.Parse(syntax.NewFileBase("logos-constmap"), strings.NewReader("package p\n"+text), nil, nil, 0)
 	if err != nil {
@@ -425,10 +379,6 @@ func parseConstMapDecls(text string, pos syntax.Pos) []syntax.Decl {
 	return file.DeclList
 }
 
-// setRbrace moves the closing brace position of a block, switch, select,
-// or composite literal to pos, so every scope boundary of generated code
-// stays at the generated declaration (the scope marker of dwarfgen
-// requires non-decreasing positions inside one function).
 func setRbrace(n syntax.Node, pos syntax.Pos) {
 	switch n := n.(type) {
 	case *syntax.BlockStmt:
@@ -442,9 +392,6 @@ func setRbrace(n syntax.Node, pos syntax.Pos) {
 	}
 }
 
-// lowerConstMapRanges rewrites `range m` over a const map to the sorted
-// iterator. It runs before the option lowering so the iterator call is an
-// ordinary expression for every later pass.
 func (fl *fileLower) lowerConstMapRanges() {
 	syntax.Inspect(fl.file, func(n syntax.Node) bool {
 		rc, ok := n.(*syntax.RangeClause)
@@ -471,8 +418,6 @@ func (fl *fileLower) lowerConstMapRanges() {
 	})
 }
 
-// lowerConstMapName replaces a plain use of a const map with a call to its
-// materialized map.
 func (fl *fileLower) lowerConstMapName(e *syntax.Name) (syntax.Expr, bool) {
 	g, ok := fl.constMapUse(e)
 	if !ok {
@@ -483,7 +428,6 @@ func (fl *fileLower) lowerConstMapName(e *syntax.Name) (syntax.Expr, bool) {
 	return callOf(e.Pos(), nameOf(e.Pos(), g.mapName()), nil), true
 }
 
-// lowerConstMapLen folds len of a const map to its entry count.
 func (fl *fileLower) lowerConstMapLen(e *syntax.CallExpr) (syntax.Expr, bool) {
 	fn, ok := e.Fun.(*syntax.Name)
 	if !ok || fn.Value != "len" || len(e.ArgList) != 1 {
@@ -502,9 +446,6 @@ func (fl *fileLower) lowerConstMapLen(e *syntax.CallExpr) (syntax.Expr, bool) {
 	return at(&syntax.BasicLit{Value: n, Kind: syntax.IntLit}, e.Pos()), true
 }
 
-// lowerConstMapRead lowers one read of a const map. A single-value read
-// becomes an option (rt.Opt, or rt.Bare for payloads that keep nil as none);
-// a comma-ok read becomes the (V, bool) lookup itself.
 func (fl *fileLower) lowerConstMapRead(e *syntax.IndexExpr, g *constMapGen) syntax.Expr {
 	pos := e.Pos()
 	id := fl.nextWrapID()

@@ -17,11 +17,6 @@ import (
 	"cmd/internal/logos/editmap"
 )
 
-// TestEditMapDescribesEject is the oracle of the language server's
-// position map (M21-S1): for every run fixture, the spans ApplyEditsSegments
-// reports must account for every byte of the ejected text. Source bytes
-// outside the spans must appear unchanged in the ejected text, in order,
-// and the span lengths must add up to the ejected size.
 func TestEditMapDescribesEject(t *testing.T) {
 	testenv.MustHaveGoBuild(t)
 	dir := filepath.Join(testenv.GOROOT(t), "test", "logos", "run")
@@ -56,8 +51,6 @@ func TestEditMapDescribesEject(t *testing.T) {
 	}
 }
 
-// checkSpans verifies that spans describe the transformation from src to
-// out: ordered, disjoint, inside src, and consistent with both texts.
 func checkSpans(t *testing.T, src, out []byte, spans []editmap.EditSpan) {
 	t.Helper()
 	prev, pos := 0, 0
@@ -77,9 +70,6 @@ func checkSpans(t *testing.T, src, out []byte, spans []editmap.EditSpan) {
 	}
 }
 
-// TestEjectWritesEditMap pins the sidecar contract the language server
-// reads: Eject writes <stem>.go.edits beside <stem>.go with the version,
-// the sizes of both texts, and the spans.
 func TestEjectWritesEditMap(t *testing.T) {
 	testenv.MustHaveGoBuild(t)
 	dir := filepath.Join(testenv.GOROOT(t), "test", "logos", "run")

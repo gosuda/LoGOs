@@ -17,14 +17,6 @@ import (
 	"cmd/compile/internal/types2"
 )
 
-// TestEjectMatchesLowering is the A2 oracle for M1-S6: native and ejected
-// programs come from the same lowered nodes. For every .lgo file in
-// test/logos/run it parses and type-checks with Config.Logos, calls
-// Lower, splices the edits into the original bytes with ApplyEdits, and
-// requires syntax.String of the lowered file to equal syntax.String of
-// the re-parsed ejected text. A text-level check requires every comment
-// of the original source to appear verbatim in the ejected text, because
-// AST printing alone cannot prove comment preservation (A7).
 func TestEjectMatchesLowering(t *testing.T) {
 	testenv.MustHaveGoBuild(t)
 	dir := filepath.Join(testenv.GOROOT(t), "test", "logos", "run")
@@ -48,8 +40,6 @@ func TestEjectMatchesLowering(t *testing.T) {
 	}
 }
 
-// ejectCheckFile runs the A2 oracle on one run fixture: parse, check,
-// lower, splice, compare the printed trees, and verify comment text.
 func ejectCheckFile(t *testing.T, dir, name string) {
 	t.Helper()
 	src, err := os.ReadFile(filepath.Join(dir, name))
@@ -71,7 +61,6 @@ func ejectCheckFile(t *testing.T, dir, name string) {
 	ejectExpectComments(t, name, src, ejected)
 }
 
-// ejectParse parses src and fails the test on any syntax error.
 func ejectParse(t *testing.T, base *syntax.PosBase, src []byte, mode syntax.Mode) *syntax.File {
 	t.Helper()
 	var errs []error
@@ -90,8 +79,6 @@ func ejectParse(t *testing.T, base *syntax.PosBase, src []byte, mode syntax.Mode
 	return file
 }
 
-// ejectCheck type-checks one parsed loGo/s file with Config.Logos and
-// fails the test on any type error. It returns the package and info for Lower.
 func ejectCheck(t *testing.T, file *syntax.File) (*types2.Package, *types2.Info) {
 	t.Helper()
 	info := &types2.Info{
@@ -107,7 +94,7 @@ func ejectCheck(t *testing.T, file *syntax.File) (*types2.Package, *types2.Info)
 	conf := &types2.Config{
 		Importer: &ejectImporter{pkgs: make(map[string]*types2.Package)},
 		Error: func(err error) {
-			if types2.LogosWarnOnly(err) { // M6-S3: warn-severity rules never fail eject.
+			if types2.LogosWarnOnly(err) {
 				return
 			}
 			errs = append(errs, err)
@@ -124,15 +111,12 @@ func ejectCheck(t *testing.T, file *syntax.File) (*types2.Package, *types2.Info)
 	return pkg, info
 }
 
-// ejectLower lowers one checked file and returns its eject edits.
 func ejectLower(t *testing.T, pkg *types2.Package, info *types2.Info, file *syntax.File, src []byte) []Edit {
 	t.Helper()
 	_, edits := Lower(pkg, info, []*syntax.File{file}, map[*syntax.File][]byte{file: src})
 	return edits[file]
 }
 
-// ejectExpectComments fails the test when any comment of the original
-// source is missing verbatim from the ejected text.
 func ejectExpectComments(t *testing.T, name string, src, ejected []byte) {
 	t.Helper()
 	for _, c := range ejectComments(src) {
@@ -142,9 +126,6 @@ func ejectExpectComments(t *testing.T, name string, src, ejected []byte) {
 	}
 }
 
-// ejectComments returns every // and /* */ comment of src in order,
-// delimiters included. String, raw-string, and rune literals never
-// contribute comments.
 func ejectComments(src []byte) [][]byte {
 	var out [][]byte
 	i := 0
@@ -161,9 +142,6 @@ func ejectComments(src []byte) [][]byte {
 	return out
 }
 
-// ejectQuoted skips the literal starting at src[i] and returns the index
-// after it. Raw literals end at the next backquote; the other forms
-// honor backslash escapes.
 func ejectQuoted(src []byte, i int) int {
 	quote := src[i]
 	i++
@@ -181,9 +159,6 @@ func ejectQuoted(src []byte, i int) int {
 	return i
 }
 
-// ejectSlash records the comment starting at src[i] when that slash
-// opens one, and returns the index after the comment. A lone slash
-// advances by one.
 func ejectSlash(src []byte, i int, out *[][]byte) int {
 	if i+1 >= len(src) {
 		return i + 1
@@ -209,19 +184,14 @@ func ejectSlash(src []byte, i int, out *[][]byte) int {
 	}
 }
 
-// ejectImporter resolves imports through compiled export data, the same
-// mechanism the types2 tests use. GOROOT packages, including logos/rt,
-// resolve through the installed toolchain.
 type ejectImporter struct {
 	pkgs map[string]*types2.Package
 }
 
-// Import implements types2.Importer.
 func (m *ejectImporter) Import(path string) (*types2.Package, error) {
 	return m.ImportFrom(path, "", 0)
 }
 
-// ImportFrom implements types2.ImporterFrom.
 func (m *ejectImporter) ImportFrom(path, srcDir string, mode types2.ImportMode) (*types2.Package, error) {
 	return importer.Import(m.pkgs, path, srcDir, nil)
 }

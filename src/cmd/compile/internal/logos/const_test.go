@@ -17,9 +17,6 @@ import (
 	"cmd/compile/internal/types2"
 )
 
-// TestEraseConstViews checks and erases a small .lgo snippet directly:
-// no ConstType survives in the tree, the `const ` prefixes gain eject
-// splices, and a recorded non-constant slice bound gains a len max.
 func TestEraseConstViews(t *testing.T) {
 	const src = `package erasetest
 

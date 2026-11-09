@@ -15,10 +15,6 @@ import (
 	"cmd/compile/internal/types2"
 )
 
-// TestConstFactsUniverseMethod checks that a call of error.Error, a
-// method of the predeclared error type that belongs to no package, is a
-// fail-closed callee and not a nil dereference: slop::err_chain_reset code
-// passes err.Error() as an argument.
 func TestConstFactsUniverseMethod(t *testing.T) {
 	const src = `package factstest
 

@@ -4,11 +4,6 @@
 
 package logos
 
-// This file implements M5-S2 lowering (SPEC Sec 2.1, T-201): consts
-// with evaluated values splice their initializers to literals,
-// composite-valued consts become vars, and const func markers erase.
-// It runs first in lowerFile, ahead of the other passes.
-
 import (
 	"cmd/compile/internal/logos/ctfe"
 	"cmd/compile/internal/syntax"
@@ -16,7 +11,6 @@ import (
 	"slices"
 )
 
-// ctfeResult bundles one const rewrite.
 type ctfeResult struct {
 	obj      *types2.Const
 	val      ctfe.Value
@@ -26,16 +20,12 @@ type ctfeResult struct {
 	keepCall bool
 }
 
-// groupedMoveState tracks moved group vars within one file lowering so
-// later moves append after earlier ones and eject text lands after the
-// original group instead of on a synthesized position inside it.
 type groupedMoveState struct {
 	fileTails  map[*syntax.Group]syntax.Decl
 	blockTails map[*syntax.DeclStmt]syntax.Stmt
 	inserted   map[syntax.Node]bool
 }
 
-// lowerCTFE rewrites evaluated consts of one file.
 func (fl *fileLower) lowerCTFE() {
 	for i, decl := range fl.file.DeclList {
 		if cfd, ok := decl.(*syntax.ConstFuncDecl); ok {
@@ -55,12 +45,8 @@ func (fl *fileLower) lowerCTFE() {
 		}
 		return true
 	})
-	// Private scalars are true constants via the owned-constant bridge
-	// (ownedScalarBridge) preserving nominal identity in every constant
-	// context; no bound-only substitution pass remains.
 }
 
-// ctfeLookup returns the rewrite for one single-name const.
 func (fl *fileLower) ctfeLookup(cd *syntax.ConstDecl) (ctfeResult, bool) {
 	var zero ctfeResult
 	if len(cd.NameList) != 1 {
@@ -91,7 +77,6 @@ func (fl *fileLower) ctfeLookup(cd *syntax.ConstDecl) (ctfeResult, bool) {
 	return ctfeResult{obj: obj, val: v, init: init, lit: lit, text: renderExpr(lit)}, true
 }
 
-// lowerCTFEFileList rewrites consts in the file declaration list.
 func (fl *fileLower) lowerCTFEFileList(gst *groupedMoveState) {
 	list := &fl.file.DeclList
 	for i := 0; i < len(*list); i++ {
@@ -103,7 +88,7 @@ func (fl *fileLower) lowerCTFEFileList(gst *groupedMoveState) {
 		if !ok {
 			continue
 		}
-		if g, ok := fl.pkg.constMaps[r.obj]; ok { // M5-S4 hook: const maps lower to tables and lookups.
+		if g, ok := fl.pkg.constMaps[r.obj]; ok {
 			fl.lowerConstMapSpec(cd, g)
 			*list = slices.Delete(*list, i, i+1)
 			i--
@@ -135,8 +120,6 @@ func (fl *fileLower) lowerCTFEFileList(gst *groupedMoveState) {
 	}
 }
 
-// lowerCTFEBlock rewrites consts in one block, inserting moved grouped
-// vars as following statements.
 func (fl *fileLower) lowerCTFEBlock(b *syntax.BlockStmt, gst *groupedMoveState) {
 	for i := 0; i < len(b.List); i++ {
 		ds, ok := b.List[i].(*syntax.DeclStmt)
@@ -152,7 +135,7 @@ func (fl *fileLower) lowerCTFEBlock(b *syntax.BlockStmt, gst *groupedMoveState) 
 			if !ok {
 				continue
 			}
-			if g, ok := fl.pkg.constMaps[r.obj]; ok { // M5-S4 hook: const maps lower to tables and lookups.
+			if g, ok := fl.pkg.constMaps[r.obj]; ok {
 				fl.lowerConstMapSpec(cd, g)
 				ds.DeclList = slices.Delete(ds.DeclList, j, j+1)
 				j--
@@ -177,16 +160,13 @@ func (fl *fileLower) lowerCTFEBlock(b *syntax.BlockStmt, gst *groupedMoveState) 
 			}
 			j = fl.moveGroupedBlockVar(cd, j, blockMoveSite{ds: ds, b: b, i: i}, r, gst)
 		}
-		if len(ds.DeclList) == 0 { // M5-S4: a statement emptied by const map removal leaves the block.
+		if len(ds.DeclList) == 0 {
 			b.List = slices.Delete(b.List, i, i+1)
 			i--
 		}
 	}
 }
 
-// moveGroupedVar moves a grouped file-level composite const after its
-// group and deletes the spec. Init order stays dependency-ordered. It
-// returns the updated list index.
 func (fl *fileLower) moveGroupedVar(cd *syntax.ConstDecl, i int, list *[]syntax.Decl, r ctfeResult, indent string, gst *groupedMoveState) int {
 	_, end := groupRun(list, i, cd.Group)
 	fl.deleteSpec(cd)
@@ -227,8 +207,6 @@ func (fl *fileLower) moveGroupedVar(cd *syntax.ConstDecl, i int, list *[]syntax.
 	return i - 1
 }
 
-// moveGroupedBlockVar moves a grouped block-level composite const after
-// its DeclStmt and deletes the spec. It returns the updated decl index.
 type blockMoveSite struct {
 	ds *syntax.DeclStmt
 	b  *syntax.BlockStmt
@@ -276,7 +254,6 @@ func (fl *fileLower) blockVarOffset(b *syntax.BlockStmt, at int, gst *groupedMov
 	return 0, false
 }
 
-// lineStart returns the start offset of the line containing n.
 func (fl *fileLower) lineStart(n syntax.Node) int {
 	off := fl.off(syntax.StartPos(n))
 	for off > 0 && fl.src[off-1] != '\n' {
@@ -285,7 +262,6 @@ func (fl *fileLower) lineStart(n syntax.Node) int {
 	return off
 }
 
-// groupRun returns the [start, end) run sharing group g around i.
 func groupRun(list *[]syntax.Decl, i int, g *syntax.Group) (int, int) {
 	start, end := i, i+1
 	for start > 0 {
@@ -305,17 +281,12 @@ func groupRun(list *[]syntax.Decl, i int, g *syntax.Group) (int, int) {
 	return start, end
 }
 
-// deleteSpec deletes one spec's source text, swallowing one separator
-// unless a comment or paren intervenes (a lone ; is invalid Go).
 func (fl *fileLower) deleteSpec(cd *syntax.ConstDecl) {
 	start := fl.off(syntax.StartPos(cd))
 	end := fl.endOff(cd.Values)
 	fl.add(start, swallowSep(fl.src, end), "")
 }
 
-// endOff converts an expression end to an exclusive offset. EndPos
-// stops at a closing bracket for calls, indexes, slices, and composite
-// literals, so one closer byte joins the span when present.
 func (fl *fileLower) endOff(e syntax.Expr) int {
 	end := fl.off(syntax.EndPos(e))
 	if end < len(fl.src) && (fl.src[end] == ')' || fl.src[end] == ']' || fl.src[end] == '}') {
@@ -330,10 +301,6 @@ func (fl *fileLower) endOff(e syntax.Expr) int {
 	return end
 }
 
-// nullaryCallEnd consumes the empty parens of a nullary call whose EndPos
-// stops at its function: EndPos of `f()` is the end of `f`, so the plain
-// bracket join leaves `()` behind and eject re-parses `lit()` instead of
-// the literal.
 func nullaryCallEnd(src []byte, end int) (int, bool) {
 	off := end
 	for off < len(src) && (src[off] == ' ' || src[off] == '\t' || src[off] == '\n') {
@@ -352,9 +319,6 @@ func nullaryCallEnd(src []byte, end int) (int, bool) {
 	return off + 1, true
 }
 
-// constKeywordStart scans back from a spec name over spaces, tabs, and
-// comments for the `const` keyword. Grouped specs fail the scan (a
-// paren intervenes) and take the move path instead.
 func constKeywordStart(src []byte, nameOff int) (int, bool) {
 	off := nameOff
 	for off > 0 && (src[off-1] == ' ' || src[off-1] == '\t') {
@@ -380,7 +344,6 @@ func constKeywordStart(src []byte, nameOff int) (int, bool) {
 	return 0, false
 }
 
-// declNames joins declaration names.
 func declNames(cd *syntax.ConstDecl) string {
 	names := ""
 	for j, n := range cd.NameList {
@@ -392,7 +355,6 @@ func declNames(cd *syntax.ConstDecl) string {
 	return names
 }
 
-// stmtIndentOf reads the leading whitespace of a decl's line.
 func (fl *fileLower) stmtIndentOf(cd *syntax.ConstDecl) string {
 	off := fl.off(syntax.StartPos(cd))
 	line := off
@@ -409,8 +371,6 @@ func (fl *fileLower) stmtIndentOf(cd *syntax.ConstDecl) string {
 	return indent
 }
 
-// swallowSep extends an offset past trailing spaces, one semicolon,
-// and one newline, stopping at comments and parens.
 func swallowSep(src []byte, off int) int {
 	for off < len(src) && (src[off] == ' ' || src[off] == '\t') {
 		off++

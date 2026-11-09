@@ -16,8 +16,6 @@ import (
 	"cmd/compile/internal/types2"
 )
 
-// checkConstFnFixture parses and checks one Logos source for constfn
-// emission, failing on any parse or check diagnostic.
 func checkConstFnFixture(t *testing.T, src string) (*types2.Package, *types2.Info, *syntax.File) {
 	t.Helper()
 	dir := t.TempDir()
@@ -52,8 +50,6 @@ func checkConstFnFixture(t *testing.T, src string) (*types2.Package, *types2.Inf
 	return pkg, info, file
 }
 
-// parseConstFnPayload asserts one emitted source parses as real Logos
-// syntax, returning its text.
 func parseConstFnPayload(t *testing.T, rec facts.ConstFuncFact) string {
 	t.Helper()
 	text := string(rec.Source)
@@ -67,8 +63,6 @@ func parseConstFnPayload(t *testing.T, rec facts.ConstFuncFact) string {
 	return text
 }
 
-// wantScopeConst requires one scope name to be a constant of the expected
-// type and integer value.
 func wantScopeConst(t *testing.T, scope *types2.Scope, rec, name, wantType string, want int64) {
 	t.Helper()
 	obj := scope.Lookup(name)
@@ -85,8 +79,6 @@ func wantScopeConst(t *testing.T, scope *types2.Scope, rec, name, wantType strin
 	}
 }
 
-// wantScopeStruct requires one scope name to have a struct type with the
-// expected field types.
 func wantScopeStruct(t *testing.T, scope *types2.Scope, rec, name string, want []string) {
 	t.Helper()
 	obj := scope.Lookup(name)
@@ -107,10 +99,6 @@ func wantScopeStruct(t *testing.T, scope *types2.Scope, rec, name string, want [
 	}
 }
 
-// wantScopeConstFloat requires one scope name to be a constant with the
-// expected float64 value. A typed-int source constant cannot combine with
-// a fractional literal, so a clean recheck plus this value proves the
-// payload preserved the constant's untypedness.
 func wantScopeConstFloat(t *testing.T, scope *types2.Scope, rec, name string, want float64) {
 	t.Helper()
 	obj := scope.Lookup(name)
@@ -124,10 +112,6 @@ func wantScopeConstFloat(t *testing.T, scope *types2.Scope, rec, name string, wa
 	}
 }
 
-// wantScopeConstUint requires one scope name to be a constant with the
-// expected uint64 value. A typed-int source constant cannot shift past
-// the platform int width, so a clean recheck plus this value proves the
-// payload preserved the constant's untypedness.
 func wantScopeConstUint(t *testing.T, scope *types2.Scope, rec, name string, want uint64) {
 	t.Helper()
 	obj := scope.Lookup(name)
@@ -141,10 +125,6 @@ func wantScopeConstUint(t *testing.T, scope *types2.Scope, rec, name string, wan
 	}
 }
 
-// TestWriteConstFnFactsPayloadParses closes one const function over every
-// repaired span boundary and requires each exported const function to
-// have a record whose closed source reparses, rechecks, and evaluates
-// probe consts to the source-defined values.
 func TestWriteConstFnFactsPayloadParses(t *testing.T) {
 	const src = `package constfntest
 

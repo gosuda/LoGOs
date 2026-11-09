@@ -376,8 +376,6 @@ func (b GBox[T]) Len() int {
 	if orp := oldSig.RecvTypeParams(); orp != nil && orp.Len() == 1 && newT == orp.At(0) {
 		t.Fatal("view element reuses the old method receiver type parameter")
 	}
-	// Get declares a value receiver, so the clone must keep a value
-	// receiver whose base is an instance of the cloned GBox.
 	recv := types2.Unalias(newSig.Recv().Type())
 	inst, ok := recv.(*types2.Named)
 	if !ok || inst.Origin() != newNamed {

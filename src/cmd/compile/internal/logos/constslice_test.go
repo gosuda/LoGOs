@@ -15,11 +15,6 @@ import (
 	"cmd/compile/internal/types2"
 )
 
-// M13-S3 #121 (SPEC T-203.4): the checker records every []C argument that
-// flows into a `const []I` parameter, and lowerConstSlices wraps exactly
-// those arguments in rt.CovSlice. These tests check, lower, and print one
-// snippet at a time without the compiler driver.
-
 const covSliceDecls = `
 type Creature interface{ Name() string }
 
@@ -41,8 +36,6 @@ func Names(cs const []Creature) int { return len(cs) }
 func pair(a, b const []Creature) int { return len(a) + len(b) }
 `
 
-// covRTSource stands in for logos/rt: the checker recognizes the helper by
-// package path and name.
 const covRTSource = `package rt
 
 func CovSlice[I any, E any](s []E) []I {
@@ -84,9 +77,6 @@ func newCovRTImporter(t *testing.T) types2.Importer {
 	return covRTImporter{rt: pkg}
 }
 
-// covSliceCheck parses and checks one .lgo file made of the shared
-// declarations, the given import lines, and body. It returns the file, its
-// bytes, the package, the info, and every check error.
 func covSliceCheck(t *testing.T, imp types2.Importer, imports, body string) (*syntax.File, []byte, *types2.Package, *types2.Info, []error) {
 	t.Helper()
 	data := []byte("package covtest\n" + imports + covSliceDecls + body)
@@ -111,8 +101,6 @@ func newCovTestImporter(t *testing.T) types2.Importer {
 	return newTestImporter(t)
 }
 
-// covLower lowers the covariant arguments of a checked file and returns
-// the lowerer and the eject text.
 func covLower(t *testing.T, file *syntax.File, data []byte, pkg *types2.Package, info *types2.Info) (*fileLower, string) {
 	t.Helper()
 	fl := &fileLower{
@@ -130,7 +118,6 @@ func covLower(t *testing.T, file *syntax.File, data []byte, pkg *types2.Package,
 	return fl, string(out)
 }
 
-// covWrapped returns the operand of a `_logos_rt.CovSlice[I](x)` call.
 func covWrapped(e syntax.Expr) (syntax.Expr, bool) {
 	call, ok := e.(*syntax.CallExpr)
 	if !ok || len(call.ArgList) != 1 {
@@ -150,7 +137,6 @@ func covWrapped(e syntax.Expr) (syntax.Expr, bool) {
 	return call.ArgList[0], true
 }
 
-// covCalls returns the arguments of every call to the named function.
 func covCalls(file *syntax.File, name string) [][]syntax.Expr {
 	var out [][]syntax.Expr
 	syntax.Inspect(file, func(n syntax.Node) bool {
