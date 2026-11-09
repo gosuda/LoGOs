@@ -532,8 +532,6 @@ func (e *escape) logosRegionCall(ks []hole, call *ir.CallExpr) {
 	}
 }
 
-// refused_by: modify_delete_guard · collision: none (no common ancestor text)
-
 func (b *batch) logosRegionSeed(enqueue func(*location)) {
 	if !ir.LogosRegionsEnabled() {
 		return

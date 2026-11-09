@@ -9,12 +9,9 @@ import (
 	. "internal/types/errors"
 )
 
-// logosRegionEscape prefixes every region escape diagnostic. Lint
-// severity and JSON rule_id resolve from this prefix (SPEC Sec 14).
+// logosRegionEscape prefixes every region escape diagnostic.
 const logosRegionEscape = "[correctness::region_escape]"
 
-// logosRegionIsRegion reports whether t denotes logos/arena.Region,
-// through aliases and instantiations.
 func logosRegionIsRegion(t Type) bool {
 	n, _ := Unalias(t).(*Named)
 	if n == nil || n.Obj() == nil || n.Obj().Pkg() == nil {
@@ -23,9 +20,6 @@ func logosRegionIsRegion(t Type) bool {
 	return n.Obj().Pkg().Path() == "logos/arena" && n.Obj().Name() == "Region"
 }
 
-// logosRegionCarries reports whether a value of type t holds a region
-// handle: the Region type itself, or a struct or array that contains
-// one. Other composites do not carry.
 func logosRegionCarries(t Type) bool {
 	if t == nil || !isValid(t) {
 		return false
@@ -46,9 +40,6 @@ func logosRegionCarries(t Type) bool {
 	return false
 }
 
-// logosRegionLocal returns v when it is a variable of this package
-// declared inside a function, nil for the blank identifier, globals,
-// and non-variables.
 func (check *Checker) logosRegionLocal(v Object) *Var {
 	w, _ := v.(*Var)
 	if w == nil || w.pkg != check.pkg || w.Parent() == nil || w.Parent() == check.pkg.scope {
@@ -57,17 +48,11 @@ func (check *Checker) logosRegionLocal(v Object) *Var {
 	return w
 }
 
-// logosRegionBlank reports whether lhs is the blank identifier.
 func logosRegionBlank(lhs syntax.Expr) bool {
 	n, _ := syntax.Unparen(lhs).(*syntax.Name)
 	return n != nil && n.Value == "_"
 }
 
-// logosRegionRoot returns the local variable an lvalue denotes storage
-// of, reached only through field and array selection from that local.
-// It returns nil for the blank identifier and for every lvalue that
-// stores into other storage: globals, dereferences, pointer fields,
-// slices, maps, and interfaces.
 func (check *Checker) logosRegionRoot(lhs syntax.Expr) *Var {
 	switch e := syntax.Unparen(lhs).(type) {
 	case *syntax.Name:
@@ -94,8 +79,6 @@ func (check *Checker) logosRegionRoot(lhs syntax.Expr) *Var {
 	return nil
 }
 
-// logosRegionUnderlying returns the underlying type recorded for e, or
-// nil.
 func (check *Checker) logosRegionUnderlying(e syntax.Expr) Type {
 	t := check.Info.TypeOf(e)
 	if t == nil {
@@ -104,8 +87,6 @@ func (check *Checker) logosRegionUnderlying(e syntax.Expr) Type {
 	return Unalias(t).Underlying()
 }
 
-// logosRegionMarkedExpr reports whether e is a function literal that
-// captures a region value, or a name holding one.
 func (check *Checker) logosRegionMarkedExpr(e syntax.Expr) bool {
 	switch x := syntax.Unparen(e).(type) {
 	case *syntax.FuncLit:
@@ -118,7 +99,6 @@ func (check *Checker) logosRegionMarkedExpr(e syntax.Expr) bool {
 	return false
 }
 
-// logosRegionInitMap lazily allocates the checker state.
 func (check *Checker) logosRegionInitMap() {
 	if check.logosRegionLit == nil {
 		check.logosRegionLit = make(map[*syntax.FuncLit]bool)
@@ -128,7 +108,6 @@ func (check *Checker) logosRegionInitMap() {
 	}
 }
 
-// logosRegionScopeInside reports whether s is of or lies below of.
 func logosRegionScopeInside(s, of *Scope) bool {
 	for p := s; p != nil; p = p.Parent() {
 		if p == of {
@@ -138,9 +117,6 @@ func logosRegionScopeInside(s, of *Scope) bool {
 	return false
 }
 
-// logosRegionLitMark queues the capture analysis of one literal: after
-// its body checks, the literal is marked when it reads a region-carrying
-// variable of an enclosing function.
 func (check *Checker) logosRegionLitMark(e *syntax.FuncLit, sig *Signature) {
 	if !check.conf.Logos || e.Body == nil || sig == nil {
 		return
@@ -162,8 +138,6 @@ func (check *Checker) logosRegionLitMark(e *syntax.FuncLit, sig *Signature) {
 	})
 }
 
-// logosRegionEscapedLit reports a stored, returned, sent, or run literal
-// that captures a region value.
 func (check *Checker) logosRegionEscapedLit(at poser, what string, e syntax.Expr) {
 	check.later(func() {
 		if check.logosRegionMarkedExpr(e) {
@@ -172,8 +146,6 @@ func (check *Checker) logosRegionEscapedLit(at poser, what string, e syntax.Expr
 	})
 }
 
-// logosRegionQueueLit queues the literal escape report only when e could
-// carry one.
 func (check *Checker) logosRegionQueueLit(at poser, what string, e syntax.Expr) {
 	switch syntax.Unparen(e).(type) {
 	case *syntax.FuncLit, *syntax.Name:
@@ -181,10 +153,6 @@ func (check *Checker) logosRegionQueueLit(at poser, what string, e syntax.Expr) 
 	}
 }
 
-// logosRegionAssign checks one store lhs = x. A region-carrying value
-// may only land in storage of a local root reached by field or array
-// selection; a literal capturing a region value follows the same rule,
-// checked once its body ran, and marks a local target as holding it.
 func (check *Checker) logosRegionAssign(lhs syntax.Expr, x *operand) {
 	if !check.conf.Logos || x == nil || !x.isValid() {
 		return
@@ -210,8 +178,6 @@ func (check *Checker) logosRegionAssign(lhs syntax.Expr, x *operand) {
 	}
 }
 
-// logosRegionDecl marks a declared local that holds a literal capturing
-// a region value.
 func (check *Checker) logosRegionDecl(lhs *Var, x *operand) {
 	if !check.conf.Logos || x == nil || !x.isValid() {
 		return
@@ -232,7 +198,6 @@ func (check *Checker) logosRegionDecl(lhs *Var, x *operand) {
 	})
 }
 
-// logosRegionResults checks the results of one return statement.
 func (check *Checker) logosRegionResults(results []syntax.Expr) {
 	if !check.conf.Logos {
 		return
@@ -246,7 +211,6 @@ func (check *Checker) logosRegionResults(results []syntax.Expr) {
 	}
 }
 
-// logosRegionSend checks one channel send value.
 func (check *Checker) logosRegionSend(val *operand) {
 	if !check.conf.Logos || !val.isValid() {
 		return
@@ -258,9 +222,6 @@ func (check *Checker) logosRegionSend(val *operand) {
 	check.logosRegionQueueLit(val.expr, "send", val.expr)
 }
 
-// logosRegionSuspended checks the operands and the callee literal of a
-// go statement. A defer keeps everything: its capture is a runtime
-// backstop, not an escape.
 func (check *Checker) logosRegionSuspended(keyword string, call syntax.Expr) {
 	if !check.conf.Logos || keyword != "go" {
 		return
