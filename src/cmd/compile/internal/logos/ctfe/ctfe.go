@@ -364,6 +364,20 @@ func (v Value) isConstant() bool { return v.constant }
 // opposed to a memoized failure marker).
 func (v Value) IsValid() bool { return v.typ != nil }
 
+// IsComposite reports whether v is an array, slice, map, or struct
+// value: lowering spells it as a composite literal and records a var
+// instead of a const.
+func (v Value) IsComposite() bool {
+	if v.typ == nil {
+		return false
+	}
+	switch v.typ.Kind {
+	case KSlice, KArray, KMap, KStruct:
+		return true
+	}
+	return false
+}
+
 // EntityKind classifies a resolved identifier.
 type EntityKind int
 

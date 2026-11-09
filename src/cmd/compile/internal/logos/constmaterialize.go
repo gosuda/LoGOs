@@ -112,7 +112,7 @@ func (fl *fileLower) materializeImportedConst(cd *syntax.ConstDecl, obj *types2.
 		return zero, false
 	}
 	pos := syntax.StartPos(init)
-	if isCTFEComposite(v) {
+	if v.IsComposite() {
 		return fl.materializeComposite(obj, v, init, pos)
 	}
 	return fl.materializeScalar(obj, v, init, pos)

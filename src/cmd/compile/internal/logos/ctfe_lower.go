@@ -109,7 +109,7 @@ func (fl *fileLower) lowerCTFEFileList(gst *groupedMoveState) {
 			i--
 			continue
 		}
-		if !isCTFEComposite(r.val) && !r.keepCall {
+		if !r.val.IsComposite() && !r.keepCall {
 			cd.Values = r.lit
 			fl.add(fl.off(syntax.StartPos(r.init)), fl.endOff(r.init), r.text)
 			continue
@@ -158,7 +158,7 @@ func (fl *fileLower) lowerCTFEBlock(b *syntax.BlockStmt, gst *groupedMoveState) 
 				j--
 				continue
 			}
-			if !isCTFEComposite(r.val) && !r.keepCall {
+			if !r.val.IsComposite() && !r.keepCall {
 				cd.Values = r.lit
 				fl.add(fl.off(syntax.StartPos(r.init)), fl.endOff(r.init), r.text)
 				continue
@@ -407,19 +407,6 @@ func (fl *fileLower) stmtIndentOf(cd *syntax.ConstDecl) string {
 		indent += string(c)
 	}
 	return indent
-}
-
-// isCTFEComposite reports composite values.
-func isCTFEComposite(v ctfe.Value) bool {
-	t := v.Type()
-	if t == nil {
-		return false
-	}
-	switch t.Kind {
-	case ctfe.KSlice, ctfe.KArray, ctfe.KMap, ctfe.KStruct:
-		return true
-	}
-	return false
 }
 
 // swallowSep extends an offset past trailing spaces, one semicolon,

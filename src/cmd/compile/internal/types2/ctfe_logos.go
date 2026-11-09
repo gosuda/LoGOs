@@ -121,7 +121,7 @@ func (check *Checker) logosConstUse(obj *Const, x *operand) bool {
 	if !ok {
 		return false
 	}
-	return isCompositeValue(v)
+	return v.IsComposite()
 }
 
 // logosConstAlias copies a recorded const composite value.
@@ -175,7 +175,7 @@ func (check *Checker) logosConstCompute(obj *Const, init syntax.Expr, x *operand
 	// Every evaluated value records for lowering's literal splice
 	// (scalars keep flowing through initConst for typing below).
 	check.logosRecord(obj, v)
-	if isCompositeValue(v) || !isConstType(x.typ()) {
+	if v.IsComposite() || !isConstType(x.typ()) {
 		// Composite values and values of non-basic const type
 		// (such as option results of map indexes) record for
 		// lowering instead of flowing through initConst, whose
@@ -192,7 +192,7 @@ func (check *Checker) logosApplyMemo(obj *Const, init syntax.Expr, x *operand, v
 		return true
 	}
 	check.logosRecord(obj, v)
-	if isCompositeValue(v) || !isConstType(x.typ()) {
+	if v.IsComposite() || !isConstType(x.typ()) {
 		return check.logosRecordComposite(obj, init, x, v)
 	}
 	return check.logosApplyScalar(obj, init, x, v)
@@ -332,20 +332,6 @@ const (
 	logosTooLargeRule  = "[comptime::const_too_large]"
 	logosImpureRule    = "[correctness::const_func_impure]"
 )
-
-// isCompositeValue reports whether v needs a composite literal in
-// lowering (and a var declaration instead of a const).
-func isCompositeValue(v ctfe.Value) bool {
-	t := v.Type()
-	if t == nil {
-		return false
-	}
-	switch t.Kind {
-	case ctfe.KSlice, ctfe.KArray, ctfe.KMap, ctfe.KStruct:
-		return true
-	}
-	return false
-}
 
 // ctfeScalarConstant converts an evaluated scalar to a constant.Value
 // for the ordinary initConst path.
