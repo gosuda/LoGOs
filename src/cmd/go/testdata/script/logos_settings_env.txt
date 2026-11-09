@@ -21,6 +21,8 @@ mkdir -p $WORK/out
 cd arena
 logos env GOEXPERIMENT
 stdout '^logosarena$'
+go env GOEXPERIMENT
+! stdout 'logosarena'
 cd ..
 
 # The cgo switch follows the target module of -C, not the starting one:
@@ -30,6 +32,8 @@ cd forbid
 [cgo] stdout '^0$'
 [cgo] logos -C sub env CGO_ENABLED
 [cgo] stdout '^1$'
+logos env GOEXPERIMENT
+! stdout 'logosarena'
 cd ..
 
 # A workspace decides once for all members: wa carries arena = true and wb
@@ -48,6 +52,8 @@ env GOOS=js
 env GOARCH=wasm
 logos env GOEXPERIMENT
 stdout '^preemptibleloops$'
+go env GOEXPERIMENT
+! stdout 'preemptibleloops'
 env GOEXPERIMENT=nopreemptibleloops
 logos env GOEXPERIMENT
 stdout '^nopreemptibleloops$'
