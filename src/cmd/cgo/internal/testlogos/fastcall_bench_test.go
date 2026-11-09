@@ -126,7 +126,7 @@ func BenchmarkSlowcallStruct(b *testing.B) {
 	_ = sink
 }
 
-const benchBurnN = 20000
+const benchBurnN = 512
 
 func BenchmarkFastcallBurn(b *testing.B) {
 	var sink int32
