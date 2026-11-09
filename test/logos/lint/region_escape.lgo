@@ -1,0 +1,14 @@
+// errorcheck -goexperiment logosarena,logosescape
+
+package p
+
+import "logos/arena"
+
+type box struct {
+	r arena.Region
+}
+
+func Store(b *box) {
+	r := arena.Open()
+	b.r = r // ERROR "\[correctness::region_escape\]"
+}
