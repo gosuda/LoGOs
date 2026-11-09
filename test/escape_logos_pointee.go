@@ -160,3 +160,31 @@ func mlink(o, p *node, d int) { // ERROR "o does not escape" "p does not escape"
 func mutualCaller() { // ERROR "can inline mutualCaller"
 	mwrap(2)
 }
+
+//go:noinline
+func storeReassignedParam(o, p, q *node) { // ERROR "o does not escape" "leaking param: p" "q does not escape"
+	o.next = p
+	o = q
+	o.next = p
+}
+
+func storeReassignedParamCaller() {
+	var a, b, c node // ERROR "moved to heap: b"
+	storeReassignedParam(&a, &b, &c)
+	_, _, _ = a, b, c
+}
+
+//go:noinline
+func storeSeqOverwrite(o, p, q *node) { // ERROR "o does not escape" "p does not escape" "q does not escape"
+	o.next = p
+	o.next = q
+}
+
+var seqSink *node
+
+func seqEscapeCaller() {
+	var a, b, c node // ERROR "moved to heap: a" "moved to heap: b" "moved to heap: c"
+	seqSink = &a
+	storeSeqOverwrite(&a, &b, &c)
+	_, _, _ = a, b, c
+}
