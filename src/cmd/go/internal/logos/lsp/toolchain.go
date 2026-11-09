@@ -31,11 +31,8 @@ var compiledArgs = []string{"list", "-e", "-deps", "-export", "-compiled", "-jso
 
 // compiledPkg is one package of a logos list -compiled -json run.
 type compiledPkg struct {
-	ImportPath string
 	Dir        string
-	Name       string
 	Standard   bool
-	DepOnly    bool
 	GoFiles    []string
 	LogosFiles []compiledFile
 	LogosHints json.RawMessage
