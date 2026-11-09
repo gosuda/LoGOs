@@ -10,8 +10,10 @@ import (
 	"cmd/compile/internal/base"
 	"cmd/compile/internal/ir"
 	"cmd/compile/internal/logos/facts"
+	"cmd/compile/internal/types"
 	"cmd/internal/goobj"
 	"cmd/internal/obj"
+	"cmd/internal/obj/wasm"
 )
 
 func internalSym(name string) *obj.LSym {
@@ -228,5 +230,49 @@ func TestAddCallYieldSources(t *testing.T) {
 	w.addCall(obj.Addr{Type: obj.TYPE_NONE, Sym: callee})
 	if !w.hard {
 		t.Fatal("indirect call must be a yield source")
+	}
+}
+
+func wasmProfileCtxt(t *testing.T) {
+	t.Helper()
+	prev := base.Ctxt
+	base.Ctxt = &obj.Link{WasmProfile: true}
+	t.Cleanup(func() { base.Ctxt = prev })
+	prevPkg := types.LocalPkg
+	types.LocalPkg = types.NewPkg("example.com/wasmyield/lib", "lib")
+	t.Cleanup(func() { types.LocalPkg = prevPkg })
+}
+
+func TestSummarizeNilCheckYields(t *testing.T) {
+	wasmProfileCtxt(t)
+	nilText := &obj.Prog{From: obj.Addr{Sym: internalSym("p.nilfn")}}
+	nilText.Link = &obj.Prog{As: wasm.ACALLNORESUME, To: obj.Addr{Type: obj.TYPE_MEM, Sym: ir.Syms.SigPanic}}
+	if u := summarize(internalSym("p.nilfn"), nilText); !u.hard {
+		t.Fatal("a nil check that can panic must be a yield source")
+	}
+	quiet := &obj.Prog{From: obj.Addr{Sym: internalSym("p.quiet")}}
+	quiet.Link = &obj.Prog{As: wasm.ACALLNORESUME, To: obj.Addr{Type: obj.TYPE_MEM, Sym: internalSym("p.other")}}
+	if u := summarize(internalSym("p.quiet"), quiet); u.hard {
+		t.Fatal("a resumeless call to a known symbol must not yield by itself")
+	}
+}
+
+func TestSummarizeStackCheckYields(t *testing.T) {
+	wasmProfileCtxt(t)
+	frame := func(offset int64, link *obj.Prog) *obj.Prog {
+		p := &obj.Prog{From: obj.Addr{Sym: internalSym("p.stackfn")}}
+		p.To.Offset = offset
+		p.Link = link
+		return p
+	}
+	call := &obj.Prog{As: obj.ACALL, To: obj.Addr{Type: obj.TYPE_MEM, Sym: internalSym("p.callee")}}
+	if u := summarize(internalSym("p.stackfn"), frame(8, call)); !u.hard {
+		t.Fatal("a prologue stack check that unwinds through morestack must be a yield source")
+	}
+	if u := summarize(internalSym("p.smallleaf"), frame(8, nil)); u.hard {
+		t.Fatal("a small call-free leaf skips the stack check and must stay pure")
+	}
+	if u := summarize(internalSym("p.frameless"), frame(0, call)); u.hard {
+		t.Fatal("a frameless function has no prologue check and must stay pure")
 	}
 }
