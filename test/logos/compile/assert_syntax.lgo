@@ -1,0 +1,9 @@
+// errorcheck
+
+package p
+
+type I interface {
+	M() int
+}
+
+type N int : I // ERROR "after top level declaration"

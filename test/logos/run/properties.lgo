@@ -56,6 +56,23 @@ func (s Safe) Secret() int { return s.hidden }
 
 func (s *Safe) SetSecret(v int) { s.hidden = v }
 
+type Both interface {
+	const V int
+	V int
+}
+
+type HasBoth struct : Both {
+	V int
+}
+
+func checkBothMerge() {
+	mergedValue := reflect.TypeOf(HasBoth{})
+	mergedPointer := reflect.TypeOf(&HasBoth{})
+	requireAccessorMethod(mergedValue, "Logos_GetV")
+	forbidAccessorMethod(mergedValue, "Logos_SetV")
+	requireAccessorMethod(mergedPointer, "Logos_SetV")
+}
+
 type Vec struct {
 	X int
 	Y int
@@ -133,6 +150,7 @@ func checkPropertyAccessorReceivers() {
 }
 func main() {
 	checkPropertyAccessorReceivers()
+	checkBothMerge()
 	var m Monster
 	m.Name = "gorg"
 	m.HP = 100
@@ -176,6 +194,11 @@ func main() {
 	fmt.Println(a, m.HP)
 	k := crr.Pos.Len()
 	fmt.Println(k)
+	var h HasBoth
+	var both Both = &h
+	both.V = 41
+	both.V += 1
+	fmt.Println(h.V)
 
 	fmt.Println(reflect.TypeOf(Plain{}).NumMethod())
 	fmt.Println(reflect.TypeOf(Monster{}).NumMethod())

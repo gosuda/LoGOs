@@ -121,13 +121,21 @@ func (check *Checker) logosPropertyMethod(ityp *Interface, f *syntax.Field, pt *
 		}
 	}
 	pos := f.Name.Pos()
-	if !d.getter {
+	hasMethod := func(name string) bool {
+		for _, m := range ityp.methods {
+			if m.name == name {
+				return true
+			}
+		}
+		return false
+	}
+	if !d.getter && !hasMethod(logosGetterName(name)) {
 		d.getter = true
 		sig := &Signature{recv: newVar(RecvVar, pos, check.pkg, "", recvTyp)}
 		sig.results = NewTuple(NewParam(pos, check.pkg, "", ptyp))
 		ityp.methods = append(ityp.methods, NewFunc(pos, check.pkg, logosGetterName(name), sig))
 	}
-	if !pt.Const && !d.setter {
+	if !pt.Const && !d.setter && !hasMethod(logosSetterName(name)) {
 		d.setter = true
 		sig := &Signature{recv: newVar(RecvVar, pos, check.pkg, "", recvTyp)}
 		sig.params = NewTuple(NewParam(pos, check.pkg, "", ptyp))

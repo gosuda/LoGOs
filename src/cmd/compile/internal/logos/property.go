@@ -53,6 +53,17 @@ func (fl *fileLower) lowerPropertyInterfaces() {
 func (fl *fileLower) lowerPropertyInterface(it *syntax.InterfaceType) {
 	var out []*syntax.Field
 	changed := false
+	rw := make(map[string]bool)
+	for _, f := range it.MethodList {
+		pt, ok := f.Type.(*syntax.PropertyType)
+		if !ok || f.Name == nil {
+			continue
+		}
+		if !pt.Const {
+			rw[f.Name.Value] = true
+		}
+	}
+	seen := make(map[string]bool)
 	for _, f := range it.MethodList {
 		pt, ok := f.Type.(*syntax.PropertyType)
 		if !ok || f.Name == nil {
@@ -62,6 +73,19 @@ func (fl *fileLower) lowerPropertyInterface(it *syntax.InterfaceType) {
 		changed = true
 		pos := f.Pos()
 		name := f.Name.Value
+		if seen[name] {
+			typeSp, ok := fl.platformSpan(pt.Type)
+			if !ok {
+				base.Fatalf("logos: cannot span property type at %s", pos.String())
+			}
+			start := fl.off(pos)
+			if cpos := fl.off(pt.Pos()); cpos < start {
+				start = cpos
+			}
+			fl.addT(start, typeSp.end, gen(""))
+			continue
+		}
+		seen[name] = true
 		typeSp, ok := fl.platformSpan(pt.Type)
 		if !ok {
 			base.Fatalf("logos: cannot span property type at %s", pos.String())
@@ -77,7 +101,7 @@ func (fl *fileLower) lowerPropertyInterface(it *syntax.InterfaceType) {
 			Type: at(&syntax.FuncType{ResultList: []*syntax.Field{at(&syntax.Field{Type: getResult}, pos)}}, pos),
 		}, pos))
 		parts := []otext{gen("Logos_Get" + name + "() "), typeText}
-		if !pt.Const {
+		if !pt.Const || rw[name] {
 			setParam := cloneType(pt.Type, pos)
 			out = append(out, at(&syntax.Field{
 				Name: nameOf(pos, "Logos_Set"+name),
