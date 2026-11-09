@@ -29,6 +29,9 @@ func logosRegionBumpBuilder(s *state, n *ir.CallExpr, args []*ssa.Value) *ssa.Va
 	if !buildcfg.Experiment.LogosArena || Arch.LinkArch.Family != sys.AMD64 || base.Flag.Race {
 		return s.constNil(types.Types[types.TUNSAFEPTR])
 	}
+	if len(args) > 0 && args[0].Op == ssa.OpConstNil {
+		return s.constNil(types.Types[types.TUNSAFEPTR])
+	}
 	var size int64
 	if len(args) > 2 && (args[2].Op == ssa.OpConst64 || args[2].Op == ssa.OpConst32) {
 		size = args[2].AuxInt
