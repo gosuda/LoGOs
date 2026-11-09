@@ -4,13 +4,6 @@
 
 package p
 
-// M3-S4 nil narrowing (SPEC Sec 2.2, T-202): `if x != nil` narrows an
-// option-typed local or parameter to its element in the guarded block,
-// through `&&` chains, and after an early exit on `x == nil` (return,
-// panic, break, or continue). Assignment ends narrowing. Narrowing never
-// applies to fields, to variables whose address is taken, or to
-// variables assigned in a closure or a loop body.
-
 type User struct {
 	Name string
 	Age  int
@@ -22,8 +15,6 @@ type Holder struct {
 	P *User?
 }
 
-// In-block narrowing: field, deref, method, and stores into non-nil
-// slots are all legal on the narrowed value.
 func narrowBlock(up *User?) {
 	if up != nil {
 		_ = up.Name
@@ -37,8 +28,6 @@ func narrowBlock(up *User?) {
 	}
 }
 
-// `?.` and `??` still accept a narrowed receiver through its declared
-// option type.
 func narrowChain(up *User?) {
 	if up != nil {
 		_ = up?.Name
@@ -46,7 +35,6 @@ func narrowChain(up *User?) {
 	}
 }
 
-// Early exit on `== nil` narrows for the rest of the block.
 func earlyReturn(up *User?) {
 	if up == nil {
 		return
@@ -79,14 +67,12 @@ func earlyContinue(up *User?, n int) {
 	}
 }
 
-// `x != nil && rest` narrows x for rest and for the guarded block.
 func andChain(up *User?) {
 	if up != nil && up.Age > 0 {
 		_ = up.Name
 	}
 }
 
-// Assignment ends narrowing until the next re-narrow.
 func killAssign(up *User?, other *User?) {
 	if up != nil {
 		_ = up.Name
@@ -98,7 +84,6 @@ func killAssign(up *User?, other *User?) {
 	}
 }
 
-// Taking the address disables narrowing for the whole function.
 func addrTaken(up *User?) {
 	p := &up
 	_ = p
@@ -107,7 +92,6 @@ func addrTaken(up *User?) {
 	}
 }
 
-// Assigning in a closure disables narrowing for the whole function.
 func closureAssign(up *User?) {
 	f := func() {
 		up = nil
@@ -118,7 +102,6 @@ func closureAssign(up *User?) {
 	}
 }
 
-// Assigning in a loop body disables narrowing for the whole function.
 func loopAssign(up *User?, n int) {
 	for i := 0; i < n; i++ {
 		up = nil
@@ -128,14 +111,12 @@ func loopAssign(up *User?, n int) {
 	}
 }
 
-// A nil test on a field never narrows the field.
 func fieldNoNarrow(h Holder) {
 	if h.P != nil {
 		_ = h.P.Name /* ERROR "[correctness::nil_deref_unproven] cannot access field Name of *User? without proving != nil" */
 	}
 }
 
-// Copying the field to a local narrows normally.
 func fieldCopy(h Holder) {
 	loc := h.P
 	if loc != nil {
@@ -143,8 +124,6 @@ func fieldCopy(h Holder) {
 	}
 }
 
-// The else branch of `!= nil` is not narrowed, and neither is the code
-// after the if.
 func elseBranch(up *User?) {
 	if up != nil {
 		_ = up.Name
@@ -154,8 +133,6 @@ func elseBranch(up *User?) {
 	_ = up.Name /* ERROR "[correctness::nil_deref_unproven] cannot access field Name of *User? without proving != nil" */
 }
 
-// The else of `== nil` proves `!= nil`: narrowing holds inside the else
-// and after the if, since the only fall-through path has up != nil.
 func elseFall(up *User?) {
 	if up == nil {
 		return
@@ -165,7 +142,6 @@ func elseFall(up *User?) {
 	_ = up.Name
 }
 
-// An assignment in the else branch voids the proof after the if.
 func elseFallKill(up *User?, other *User?) {
 	if up == nil {
 		return
@@ -175,8 +151,6 @@ func elseFallKill(up *User?, other *User?) {
 	_ = up.Name /* ERROR "[correctness::nil_deref_unproven] cannot access field Name of *User? without proving != nil" */
 }
 
-// Narrowing survives nested blocks; shadowing inside does not kill the
-// outer narrowing (#14 keeps standard block scoping).
 func outerScope(up *User?) {
 	if up == nil {
 		return
@@ -204,7 +178,6 @@ func shadowBlock(up *User?) {
 	_ = up.Name
 }
 
-// Plain selections, derefs, and stores without a guard still fail.
 func noGuard(up *User?) {
 	_ = up.Name /* ERROR "[correctness::nil_deref_unproven] cannot access field Name of *User? without proving != nil" */
 	_ = *up /* ERROR "cannot indirect" */

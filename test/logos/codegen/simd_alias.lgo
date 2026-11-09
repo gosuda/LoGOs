@@ -2,12 +2,6 @@
 
 package main
 
-// M14-S1 attack (SPEC Sec 2.4, T-204.2): an alias of a fixed-width
-// numeric kind is the same type as its target, so it takes the vector
-// form exactly as the predeclared kind does. byte is an alias of uint8
-// and vectorizes. int stays scalar: its pointer is not the *[N]int64
-// the archsimd loaders take.
-
 type f32 = float32
 
 //go:noinline

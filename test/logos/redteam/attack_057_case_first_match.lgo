@@ -4,9 +4,6 @@ package main
 
 import "fmt"
 
-// #57: cases evaluate top-down in first-match order. A member case ahead
-// of a sub-union case wins for that member; other members still reach
-// the sub-union case (SPEC Sec 2.3 case coverage, T-203.1).
 type Sub interface {
 	int | string
 }

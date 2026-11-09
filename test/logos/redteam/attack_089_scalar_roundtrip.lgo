@@ -4,9 +4,6 @@ package main
 
 import "fmt"
 
-// #89: scalar union members round-trip through the upstream interface
-// representation with no overlapped-tail garbage; each extraction sees
-// exactly the stored value.
 type S interface {
 	int | string | bool
 }

@@ -1,9 +1,5 @@
 // errorcheck -0 --pedantic
 
-// pedantic::unsafe_outside_unsafe_file (M9-S9): an import of unsafe in a
-// file whose name does not end in _unsafe.go or _test.go warns. This file
-// carries neither suffix, so the import below reports.
-
 package p
 
 import "unsafe" // ERROR "\[pedantic::unsafe_outside_unsafe_file\]"

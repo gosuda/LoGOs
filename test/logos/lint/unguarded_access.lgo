@@ -1,11 +1,5 @@
 // errorcheck
 
-// concurrency::unguarded_access (M9-S9): a read or write of a field marked
-// //logos:guardedby reports when no holding of the guard is live at the
-// access. Branches merge by intersection, defer of Unlock holds the lock to
-// exit, and a deferred function literal runs in LIFO order against the
-// held-lock state of each exit path.
-
 package p
 
 import "sync"

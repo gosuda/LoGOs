@@ -7,9 +7,6 @@ import (
 	"runtime"
 )
 
-// #82: unions use the upstream interface representation, so no custom
-// GC bitmap or two-tier tag layout exists; ordinary collection reclaims
-// union values stored in slices and maps.
 type U interface {
 	int | string
 }

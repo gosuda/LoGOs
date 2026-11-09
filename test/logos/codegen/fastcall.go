@@ -1,10 +1,5 @@
 // build
 
-// M20-S1 attack (Go twin of fastcall.lgo): plain go references the same
-// single fast-call trampoline runtime.logosCgocallFast. Before the slice
-// lands the symbol does not exist, so linking fails. After, it succeeds.
-// The call is never executed (build action only links); the package
-// sink keeps the reference without producing output.
 package main
 
 import "unsafe"

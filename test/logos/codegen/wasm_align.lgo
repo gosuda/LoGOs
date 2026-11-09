@@ -2,15 +2,7 @@
 
 package codegen
 
-// M16-S2 (SPEC Sec 12.1, T-Sec12; #78): on GOARCH=wasm the 64-bit types
-// align on 8 bytes, so 64-bit atomics stay naturally aligned with no
-// forcing code. Alignof of int64, uint64, and float64 each equal 8; every
-// such field after a byte field sits at an offset that is a multiple of
-// 8; and every element of a [3]int64 inside a struct does too. Each
-// function adds 1000 to its constant, so the expected immediate is
-// unique and never collides with the 8-byte result slot offset that every
 // wasm function carries. The amd64 lines run on the default host and pin
-// the same constants.
 
 import "unsafe"
 
@@ -26,8 +18,6 @@ type words struct {
 	a [3]int64
 }
 
-// A wrong alignment or offset makes the constant index below invalid, so
-// the file stops compiling for the target instead of passing silently.
 var (
 	_ = [1]byte{}[unsafe.Alignof(int64(0))-8]
 	_ = [1]byte{}[unsafe.Alignof(uint64(0))-8]

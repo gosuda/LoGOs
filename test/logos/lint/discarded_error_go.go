@@ -9,14 +9,6 @@ import (
 	"strings"
 )
 
-// M9-S2 slop::discarded_error (SPEC Sec 1.2, #164), Go twin: logos lint
-// applies the rule to Go packages. An expression statement or `_ =` that
-// drops an `error` result is reported, except callees with an
-// AlwaysNilError fact, fmt.Print*, fmt.Fprint* to os.Stdout or os.Stderr,
-// and the Write* methods of *bytes.Buffer and *strings.Builder.
-// fmt.Fprint* to any other destination is reported. The rule is deny, so
-// the findings below fail the lint run.
-
 func f() error        { return nil }
 func g() (int, error) { return 0, nil }
 

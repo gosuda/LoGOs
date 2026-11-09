@@ -1,11 +1,5 @@
 // errorcheck -0
 
-// perf::large_backing_array_pin on a Go package (R-U1): logos lint runs the
-// rule inside escape analysis of Go code, so the Go twin of the loGo/s attack
-// file reports the same slices. The limit is 65536 bytes: one byte below and
-// exactly at it do not warn, one byte above does. A slice that covers the
-// whole backing store is the allocation itself and does not warn.
-
 package p
 
 type holder struct {

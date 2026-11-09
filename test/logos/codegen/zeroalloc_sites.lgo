@@ -2,17 +2,6 @@
 
 package p
 
-// M22-S4 (SPEC Sec 17.4): zeroalloc.lgo covers the allocation sites of
-// composite literals, make, interface conversions, moved variables, closures
-// and channels. This file covers the remaining nodes the check reports, one
-// function for each: new, map make and map literal, string concatenation,
-// every string and slice conversion that copies, and a method value. Each
-// returns its allocation, so escape analysis puts it on the heap and the
-// function fails with the node and the flow to the result. The last two
-// functions allocate nothing at run time, an empty slice literal and a
-// zero-size value in an interface, and compile without a diagnostic;
-// zeroalloc_run.lgo proves they never call the allocator.
-
 type box struct{ v int }
 
 func (b *box) get() int { return b.v }

@@ -4,10 +4,6 @@ package main
 
 import "fmt"
 
-// #28: RVO destination aliasing: destination passing must not exist.
-// Self-aliased calls such as arr = Reverse(arr) must return correct results
-// without copy-back corruption.
-
 func Reverse(a [4]int) (res [4]int) {
 	res[0] = a[3]
 	res[1] = a[2]

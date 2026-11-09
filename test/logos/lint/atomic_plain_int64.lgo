@@ -1,10 +1,5 @@
 // errorcheck -0 --pedantic
 
-// portability::atomic_plain_int64 (M9-S9): a sync/atomic 64-bit call on the
-// address of a plain int64 or uint64 warns, because a 32-bit target cannot
-// promise 8-byte alignment for such a value. The autofix replaces the
-// declared type with atomic.Int64 or atomic.Uint64.
-
 package p
 
 import (

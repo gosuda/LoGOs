@@ -1,11 +1,5 @@
 // errorcheck -0
 
-// perf::large_backing_array_pin (SPEC Sec 1.2, red-team #158): escape
-// analysis sees a subslice or substring of a backing array larger than 64 KB
-// escape, so the whole array stays reachable. The limit is 65536 bytes: one
-// byte below and exactly at it do not warn, one byte above does. A slice that
-// covers the whole backing store is the allocation itself and does not warn.
-
 package p
 
 type holder struct {

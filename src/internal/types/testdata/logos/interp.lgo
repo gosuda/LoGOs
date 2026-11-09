@@ -6,10 +6,6 @@ package p
 
 import "fmt"
 
-// M6-S1 types2 attacks: `$"..."` operand kinds (SPEC T-104.4).
-// Every allowed kind checks cleanly; each disallowed kind pins
-// [correctness::interp_type].
-
 type point struct{ X, Y int }
 
 type shout string

@@ -4,11 +4,6 @@ package p
 
 import "logos/sync"
 
-// Go twin of reentrant_withlock_deadlock.lgo: concurrency::reentrant_withlock_deadlock
-// (SPEC Sec 1.2, #167) on a Go package, where it runs at deny and the
-// callback is a function literal. Direct and transitive closure calls at
-// any depth fail; a different receiver passes.
-
 var global sync.Locked[int]
 
 var other sync.Locked[int]

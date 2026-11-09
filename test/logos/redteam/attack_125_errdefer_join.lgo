@@ -19,9 +19,6 @@ func both() (err error) {
 	return errPrimary
 }
 
-// onlyRollback arms errdefer through a swallowed panic, so errdefer runs
-// while the error result is still nil. T-104.2: a nil primary takes the
-// rollback error as is.
 func onlyRollback() (err error) {
 	defer func() { recover() }()
 	errdefer rollbackFail()?

@@ -1,10 +1,5 @@
 // build
 
-// M20-S1 attack: the .lgo toolchain references the single fast-call
-// trampoline runtime.logosCgocallFast. Before the slice lands the
-// symbol does not exist, so linking fails. After, the build succeeds.
-// The call is never executed (build action only links); the package
-// sink keeps the reference without producing output.
 package main
 
 import "unsafe"

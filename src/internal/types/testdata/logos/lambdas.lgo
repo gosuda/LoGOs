@@ -4,10 +4,6 @@
 
 package p
 
-// M6-S6 lambdas (SPEC Sec 1.4, T-104.6): target typing from the
-// expected function type, parameter count checks, block bodies checked
-// against the target results, and closure capture.
-
 func apply(f func(int) int, v int) int { return f(v) }
 
 func needTarget() {

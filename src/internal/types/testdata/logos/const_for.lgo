@@ -6,11 +6,6 @@ package p
 
 import "comptime"
 
-// M7-S2 const for attacks (SPEC Sec 2.5, T-205): the range operand must
-// be a comptime.Fields call; val.[f] needs a struct value and the field
-// variable of an enclosing const for; comptime package calls outside
-// their compile-time positions report runtime_use.
-
 type CFWidget struct {
 	Name  string
 	Count int

@@ -4,9 +4,6 @@ package main
 
 import "fmt"
 
-// #43: a closed union with a zero-sized member uses the upstream
-// interface representation, including upstream handling of the
-// zero-sized member.
 type Z interface {
 	struct{} | int
 }

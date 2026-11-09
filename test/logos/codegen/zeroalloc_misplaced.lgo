@@ -2,13 +2,6 @@
 
 package p
 
-// M22-S4 (SPEC Sec 17.4): a //logos:zeroalloc directive that does not sit on
-// its own line directly above a function declaration marks nothing, so a
-// function the author believes protected would go unchecked. Each such
-// directive fails with [perf::zeroalloc_violation]. A directive error ends
-// the compile before escape analysis, which is why this file holds no
-// allocating function.
-
 type counter struct{ n int }
 
 //logos:zeroalloc // ERROR "\[perf::zeroalloc_violation\] //logos:zeroalloc must be on its own line directly above a function declaration"

@@ -4,10 +4,6 @@ package p
 
 import "logos/rt"
 
-// M5-S6: rt.Freeze returns a const view (SPEC T-201). Stores through
-// the frozen view fail exactly like stores through a declared const
-// view, which proves the call result type is const *FCConfig.
-
 type FCChild struct {
 	N int
 }

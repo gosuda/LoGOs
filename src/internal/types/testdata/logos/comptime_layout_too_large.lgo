@@ -2,11 +2,6 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// Comptime layout calls refuse to fold a type whose size overflows
-// int64: gcSizes.Sizeof answers -1 for it, and unsafe.Sizeof reports
-// TypeTooLarge for the same shape instead of folding a negative size.
-// The alignment still folds.
-
 package p
 
 import "comptime"

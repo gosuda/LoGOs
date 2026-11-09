@@ -2,16 +2,6 @@
 
 package main
 
-// #11: async preemption migrating G mid-arena use (IMPLEMENTATION.md
-// M18-S3, SPEC Sec 3.1, T-301.1). Arena objects in use must stay reachable
-// across preemption, the bump sequence must be an async-preemption unsafe
-// point, and the collector must scan scan-region objects with the owning
-// goroutine stack. The PCDATA unsafe marker itself is pinned by
-// test/logos/codegen/arena_bump.lgo; this run fixture pins the end-to-end
-// reachability: scan objects keep heap referents alive across GC, and
-// noscan/scan allocations survive preemption (Gosched) with concurrent GC.
-// Small waves only, value checks only, no timing or counter asserts.
-
 import (
 	"context"
 	"fmt"
@@ -118,8 +108,6 @@ func preemptWaves(ctx context.Context) error {
 			return fmt.Errorf("worker %d sum zero", w)
 		}
 	}
-	// Determinism check: same computation without preemption must match
-	// the per-iteration sum shape (each iteration sums the same pattern).
 	single := preScratch(1024)
 	for w := 0; w < workers; w++ {
 		if sums[w] != single*iters {

@@ -2,16 +2,6 @@
 
 package main
 
-// M5-S3 read-only placement (SPEC Sec 2.1, T-201): the backing data of
-// a pointer-free const slice and const array must live in a read-only
-// section (nm type R), while an ordinary mutable var stays in writable
-// data (type D). The program inspects its own binary with the go tool
-// from its own GOROOT. Static slice backing temps (..stmp_N) never reach
-// the exe symtab, so nm asserts the global symbols here (slice header
-// main.roSlice, whole array main.roArray); test/logos/run/rodata_write.lgo
-// proves the temp backing itself faults on write. reflect.DeepEqual and
-// fmt.Println must accept const composites (#50, #98).
-
 import (
 	"fmt"
 	"os"

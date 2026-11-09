@@ -1,9 +1,5 @@
 // errorcheck
 
-// M7-S3 field copies through f.Type (SPEC Sec 2.5, T-205, #130): a copy
-// whose field types differ fails as an ordinary type mismatch at the
-// instantiation, while a copy with equal field types compiles.
-
 package p
 
 import "comptime"

@@ -4,9 +4,6 @@ package main
 
 import "fmt"
 
-// #1: a closed union mixing a pointer member with a scalar member must
-// use the upstream interface representation, so the two members never
-// share one overlapped slot.
 type Node struct{ V int }
 
 type PtrOrInt interface {

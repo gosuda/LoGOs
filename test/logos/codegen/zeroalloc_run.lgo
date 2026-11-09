@@ -8,13 +8,6 @@ import (
 	"testing"
 )
 
-// M22-S4 (SPEC Sec 17.4): the cases the //logos:zeroalloc check does not
-// report must allocate nothing at run time, or the exemption would let an
-// allocating function pass. Each function below is marked //logos:zeroalloc,
-// so the build already proves escape analysis finds no site in it, and
-// testing.AllocsPerRun proves the allocator is never called. test/logos/
-// codegen/zeroalloc.lgo holds the errorcheck half of the same cases.
-
 type box struct {
 	v  int
 	vs []int

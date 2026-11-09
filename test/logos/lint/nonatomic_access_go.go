@@ -1,10 +1,5 @@
 // errorcheck
 
-// concurrency::nonatomic_access (M9-S9): a field marked //logos:atomic is
-// read or written only through sync/atomic. A plain read, a plain write, or
-// an address that leaves an atomic call reports; the address of the field
-// inside a sync/atomic call is the blessed form.
-
 package p
 
 import "sync/atomic"

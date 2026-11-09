@@ -1,10 +1,5 @@
 // errorcheck
 
-// correctness::linkname_mismatch (M9-S9): a //go:linkname local pkg.name
-// reports when pkg is an import of this package, the named symbol is
-// visible in its export data, and the signatures differ. A remote that the
-// import graph cannot resolve is not checked.
-
 package p
 
 import (

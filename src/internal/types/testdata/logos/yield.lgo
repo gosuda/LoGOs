@@ -6,10 +6,6 @@ package p
 
 import "iter"
 
-// M6-S9 yield attacks: yield is allowed only directly inside a function
-// whose single result is iter.Seq[T] or iter.Seq2[K, V]; every other
-// position reports yield_outside_generator, and values must match.
-
 func seqOK(n int) iter.Seq[int] {
 	for i := range n {
 		yield i

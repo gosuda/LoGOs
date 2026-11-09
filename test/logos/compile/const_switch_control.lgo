@@ -1,15 +1,5 @@
 // errorcheck
 
-// M7-S4 const switch control flow (SPEC Sec 2.5, T-205): unlabeled
-// break and continue directly in a const switch case with no enclosing
-// loop/switch/select are forbidden (parser CheckBranches wording, upstream).
-// Inside an enclosing loop the parser keeps the outer targets
-// (syntax/branches_constif_logos.go) and noder skips types2 branch errors
-// (IgnoreBranchErrors in noder/irgen.go), so the break/continue binds
-// outward and is allowed; types2 would forbid (constswitch_logos.go clears
-// breakOk/continueOk) but that path is masked. Labeled break/continue to
-// an outer loop and control statements inside nested loops remain valid.
-
 package p
 
 func breakDirect[T any]() {

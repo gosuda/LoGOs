@@ -4,9 +4,6 @@ package main
 
 import "fmt"
 
-// #97: struct-variant union values use the upstream interface
-// representation, so overwriting one variant with another and back
-// leaves no stale bytes in any variant slot.
 type A struct {
 	X int
 	Y int

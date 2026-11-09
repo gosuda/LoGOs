@@ -7,11 +7,6 @@ import (
 	"logos/sync"
 )
 
-// concurrency::reentrant_withlock_deadlock (SPEC Sec 1.2, #167): inside a
-// WithLock lambda, a call to WithLock on the same receiver expression,
-// directly or through the synchronous call graph of same-package
-// functions at any depth. A different receiver passes.
-
 var global sync.Locked[int]
 
 var other sync.Locked[int]

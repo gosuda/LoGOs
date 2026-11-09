@@ -1,10 +1,5 @@
 // errorcheck
 
-// concurrency::lock_requirement_unmet (M9-S9): a call of a function marked
-// //logos:requires reports when the named lock is not held at the call.
-// //logos:acquires and //logos:releases move the held-lock state across the
-// call. A requires lock is held on entry to the callee body.
-
 package p
 
 import "sync"

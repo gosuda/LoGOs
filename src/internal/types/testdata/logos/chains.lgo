@@ -4,10 +4,6 @@
 
 package p
 
-// M6-S7 collection chains (SPEC Sec 1.4, T-104.6): method typing over
-// slices, `?` in expression lambdas, const-view parameters, and the
-// mutation and block-form errors.
-
 func chainShapes(xs []int, strs []string) {
 	_ = xs.filter(x => x > 0)
 	_ = xs.map(x => x * 2)

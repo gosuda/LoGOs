@@ -13,10 +13,6 @@ import (
 	"strings"
 )
 
-// #105: codesign rejecting custom cold text section: a cold successor
-// must sit last inside its function. It must not use a separate cold section.
-// debug/elf + readelf -S + go tool nm prove no separate .cold section.
-
 func fail() (int, error) {
 	return 0, errors.New("boom")
 }

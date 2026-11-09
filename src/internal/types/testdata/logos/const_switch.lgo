@@ -11,11 +11,6 @@ import (
 
 type UserID int
 
-// M7-S4 const switch (SPEC Sec 2.5, T-205): exact cases rebind T,
-// tilde cases match the underlying type, interface cases gain the
-// case methods while the outer constraint methods keep working, and a
-// slice of T never rebinds as a slice of the interface (#45).
-
 func validSwitch[T any](v T, items []T) string {
 	_, _ = v, items
 	const switch T {

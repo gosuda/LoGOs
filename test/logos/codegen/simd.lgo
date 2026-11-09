@@ -2,17 +2,6 @@
 
 package main
 
-// M14-S1 attack (SPEC Sec 2.4, T-204.2): with GOEXPERIMENT=simd the
-// [8]float32 addition lowers through simd/archsimd, so amd64 emits
-// VADDPS and arm64 emits the vector FADD form.
-//
-// M14-S2 attack. On amd64 each vector form sits behind the archsimd CPU
-// feature check its methods need, and the check disappears once the
-// GOAMD64 level guarantees the feature (AVX and AVX2 at v3, AVX512 at
-// v4). The feature call names the check, so each shape below pins which
-// one it takes: a 32-byte float vector needs AVX, a 32-byte integer
-// vector AVX2, a 64-byte vector AVX512, and a 64-bit integer multiply
-// AVX512 even at 16 bytes, while the 64-bit float multiply needs AVX.
 // arm64 is baseline NEON and never calls an X86 check.
 
 //go:noinline

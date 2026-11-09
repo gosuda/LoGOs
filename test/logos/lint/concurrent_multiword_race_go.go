@@ -4,11 +4,6 @@ package p
 
 import "logos/sync"
 
-// Go twin of concurrent_multiword_race.lgo: the go statement leg of
-// concurrency::concurrent_multiword_race (SPEC Sec 1.2, #13, #148) on a Go
-// package, where it runs at deny. The group child, the union, and the const
-// view of the .lgo file have no Go form; the logos/sync exemption stays.
-
 type Pair struct {
 	A, B int
 }

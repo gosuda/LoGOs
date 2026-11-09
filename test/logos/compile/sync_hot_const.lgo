@@ -4,10 +4,6 @@ package p
 
 import "logos/sync"
 
-// M8-S5: sync.Hot.Load returns a const view (SPEC T-206). Stores
-// through the loaded pointer fail exactly like stores through a
-// declared const view, which proves the call result type is const *T.
-
 type HSChild struct {
 	N int
 }
@@ -27,12 +23,6 @@ func hsHot() {
 	p.Tags[0] = "x" // ERROR "cannot assign index through const view"
 	_ = p
 }
-
-// M8-S5: sync.Hot.Update takes func(old const *T) *T in .lgo (SPEC
-// T-206). A literal declaring `old const *T` passes and reads through
-// the view; a literal declaring `old *T` fails ordinary assignability;
-// a lambda takes the const parameter from its target; stores through
-// `old` fail exactly like stores through Load's result.
 
 func hsHotUpdateOK() {
 	h := sync.Hot[HSConfig]{}

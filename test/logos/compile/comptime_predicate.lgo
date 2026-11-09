@@ -1,10 +1,6 @@
 // errorcheck
 
-// M7-S3 comptime predicates (SPEC Sec 2.5, T-205): comptime.IsStruct is
-// a constant only in a `const if` condition. Anywhere else it is a
 // run-time use. A condition that mixes it with a run-time value is not
-// constant. A const for over a non-struct type fails in a live branch and
-// is silent in a dead one. comptime.Error requires a constant message.
 
 package p
 

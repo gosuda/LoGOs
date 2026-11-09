@@ -4,10 +4,6 @@
 
 package p
 
-// M7-S1 const if (SPEC Sec 2.5, T-205): the condition must be a constant
-// boolean; both branches type-check, so an undefined name in the dead
-// branch is an error (#174).
-
 func constIfLive() int {
 	const if 1 == 1 {
 		return 1

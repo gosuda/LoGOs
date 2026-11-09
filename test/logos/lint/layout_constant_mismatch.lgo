@@ -1,10 +1,5 @@
 // errorcheck
 
-// correctness::layout_constant_mismatch (M9-S9): a constant marked
-// //logos:sizeof, //logos:offsetof, or //logos:alignof must equal the
-// compiler's value for the named type or field. The diagnostic states the
-// constant and the actual value. Values below hold for 64-bit targets.
-
 package p
 
 type payload struct {

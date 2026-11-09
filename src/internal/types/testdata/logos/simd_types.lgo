@@ -4,11 +4,6 @@
 
 package p
 
-// M14-S1 fixed-array SIMD typing (SPEC Sec 2.4, T-204.2): element-wise
-// operators and reductions on power-of-two-sized numeric arrays of at
-// most 64 bytes. Larger arrays fail with simd_array_too_large and
-// non-power-of-two lengths with simd_array_shape.
-
 func simdAllowed(
 	a4 [4]float64, b4 [4]float64,
 	a8 [8]float32, b8 [8]float32,

@@ -1,10 +1,5 @@
 // errorcheck
 
-// M7-S2/S3 lowering diagnostics (SPEC Sec 2.5, T-205): a const for index
-// variable is not assignable, a comptime generic cannot be instantiated
-// with a type parameter, and a method of a generic type cannot be a
-// comptime generic.
-
 package p
 
 import "comptime"

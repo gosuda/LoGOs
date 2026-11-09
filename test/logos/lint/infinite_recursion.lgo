@@ -1,10 +1,5 @@
 // errorcheck
 
-// correctness::infinite_recursion (SPEC Sec 1.2, #157): a function whose
-// every path from entry calls itself with identical arguments before any
-// return. The rule is forbid in loGo/s and deny in Go (twin file
-// infinite_recursion_go.go).
-
 package p
 
 func selfDirect(n int) int { return selfDirect(n) } // ERROR "correctness::infinite_recursion"
@@ -98,8 +93,6 @@ func reassigned(n int) int {
 	n--
 	return reassigned(n)
 }
-
-// Cases pinned by the M9-S2 callee-rule slice.
 
 func loop(n int) int { return loop(n) } // ERROR "infinite_recursion"
 
