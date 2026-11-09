@@ -72,8 +72,11 @@ func ownerShape(o *ir.LogosRegionOwner) string {
 }
 
 func TestLogosRegionEnabled(t *testing.T) {
+	old := buildcfg.Experiment.LogosArena
+	buildcfg.Experiment.LogosArena = false
+	t.Cleanup(func() { buildcfg.Experiment.LogosArena = old })
 	if ir.LogosRegionsEnabled() {
-		t.Fatalf("LogosRegionsEnabled() = true with GOEXPERIMENT unset")
+		t.Fatalf("LogosRegionsEnabled() = true with LogosArena off")
 	}
 	enableLogosArena(t)
 	if !ir.LogosRegionsEnabled() {
