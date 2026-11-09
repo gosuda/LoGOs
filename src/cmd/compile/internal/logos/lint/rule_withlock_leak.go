@@ -129,18 +129,6 @@ func (c *leakCheck) isParamObj(obj types2.Object) bool {
 			return true
 		}
 	}
-	v, ok := obj.(*types2.Var)
-	if !ok || v.Name() != c.paramName {
-		return false
-	}
-	for _, o := range c.paramObjs {
-		if o == nil || o.Type() == nil || v.Type() == nil {
-			continue
-		}
-		if types2.Identical(o.Type(), v.Type()) {
-			return true
-		}
-	}
 	return false
 }
 
