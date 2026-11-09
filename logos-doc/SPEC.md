@@ -1091,8 +1091,6 @@ No match MUST return the input unchanged. [T-205]
 
 Native and ejected output of the run-time form MUST agree. [T-205]
 
-A comptime generic that marshals through `const for` MUST expand once per instantiation with its own static JSON helpers. [T-205]
-
 `comptime.ViewAs[T](b)` MUST require a POD struct (no padding, no `bool`, no pointers, interfaces, slices, maps, or strings). [T-205]
 
 Any other shape MUST fail with `[comptime::viewas_not_pod]` naming the offset. [T-205]
@@ -1228,7 +1226,6 @@ Cancellation MUST reach blocked siblings. [T-206]
 The group MUST cancel siblings and return it. [T-206]
 No retire list MUST exist for `Hot[T]`. [T-206]
 Stores MUST run the hybrid write barrier with GC-managed values. [T-206]
-The toolchain MUST NOT change upstream alignment rules. [T-206]
 `Hot[T]` MUST hold its value through `atomic.Pointer[T]` only. [T-206]
 A go group with limit = N MUST bound concurrency with a semaphore. [T-206]
 A go statement outside any group body MUST fail with [concurrency::unsupervised_goroutine]. [T-206]
@@ -1521,7 +1518,6 @@ The parser MUST accept key and value pairs, basic strings, literal strings, inte
 Inputs larger than 1 MB MUST fail parsing. [T-Sec8]
 The parser MUST reject unknown tables and unknown keys. [T-Sec8]
 Each error MUST report file, line, and column as logos.toml:<line>:<col>: <message>. [T-Sec8]
-Each key MUST take effect in the milestone that reads it. [T-Sec8]
 
 ### 8.2 Project table
 
@@ -1545,7 +1541,7 @@ A double star matches any suffix. [T-Sec8][T-101.2]
 An example entry is "example.com/c-sqlite/**". [A-EXAMPLES][T-101.2]
 An explicit CGO_ENABLED value in the environment MUST win over the default only when the `cgo` key is absent [T-101.2]. It MUST NOT override an explicit `forbid` or a `restricted` allowlist refusal [T-101.2].
 When cgo is on, CC is unset, and no C compiler is present, logos and plain go MUST use zig cc with the build target for every cgo package, Go or loGo/s, if zig is on PATH. [T-101.2][R-U1] The build target is the GOOS/GOARCH pair of the build, not the host. [T-101.2][R-U1]
-With cgo off, net and os/user use their pure-Go paths. [T-101.2]
+With cgo off, net and os/user follow the upstream CGO_ENABLED=0 behavior. [T-101.2]
 opt_level is a string with default "O2". [T-Sec8][T-105]
 See Sec 1.5 for accepted `opt_level` values.
 A `-O=<level>` flag on `logos build` MUST override the key. [T-105]
