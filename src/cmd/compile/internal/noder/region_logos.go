@@ -1,6 +1,9 @@
 package noder
 
-import "cmd/compile/internal/ir"
+import (
+	"cmd/compile/internal/ir"
+	"cmd/compile/internal/typecheck"
+)
 
 func logosKeepRegionBlock(stmts []ir.Node) bool {
 	if !ir.LogosRegionsEnabled() {
@@ -12,6 +15,10 @@ func logosKeepRegionBlock(stmts []ir.Node) bool {
 		}
 	}
 	return false
+}
+
+func logosRegionBlock(stmts []ir.Node) ir.Node {
+	return typecheck.Stmt(ir.NewBlockStmt(stmts[0].Pos(), stmts))
 }
 
 func logosStmtOpens(n ir.Node) bool {

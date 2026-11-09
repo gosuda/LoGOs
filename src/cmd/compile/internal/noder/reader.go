@@ -1824,7 +1824,7 @@ func (r *reader) stmt1(tag codeStmt, out *ir.Nodes) ir.Node {
 	case stmtBlock:
 		stmts := r.blockStmt()
 		if logosKeepRegionBlock(stmts) {
-			out.Append(ir.NewBlockStmt(stmts[0].Pos(), stmts))
+			out.Append(logosRegionBlock(stmts))
 			return nil
 		}
 		out.Append(stmts...)
