@@ -528,15 +528,3 @@ func (fc *funcLower) tryExprCore(s *syntax.ExprStmt, t *syntax.TryExpr, call *sy
 	}
 	return fc.groupPrependJoin(stmtPos, spanStart, native), text, spanStart, spanEnd
 }
-
-func trimSpanBytes(src []byte) []byte {
-	start := 0
-	for start < len(src) && isSpace(src[start]) {
-		start++
-	}
-	end := len(src)
-	for end > start && isSpace(src[end-1]) {
-		end--
-	}
-	return src[start:end]
-}
