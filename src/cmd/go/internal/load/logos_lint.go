@@ -7,6 +7,7 @@ package load
 import (
 	"cmd/go/internal/cfg"
 	"cmd/go/internal/logos/config"
+	"cmd/go/internal/logos/settings"
 	"cmd/go/internal/modload"
 )
 
@@ -27,11 +28,11 @@ func logosLintMark(ld *modload.Loader, p *Package) {
 	if p.Module == nil || !p.Module.Main {
 		return
 	}
-	cf, err := logosConfigAt(logosConfigRootForPackage(ld, p))
-	if err != nil || cf == nil {
+	m := settings.ModuleAt(logosConfigRootForPackage(ld, p))
+	if m.Err != nil || m.File == nil {
 		return
 	}
-	policy, err := cf.Lints.PolicyJSON(logosPedanticMode())
+	policy, err := m.File.Lints.PolicyJSON(logosPedanticMode())
 	if err != nil {
 		return
 	}

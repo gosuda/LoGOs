@@ -16,6 +16,7 @@ import (
 
 	"cmd/go/internal/cfg"
 	"cmd/go/internal/fsys"
+	"cmd/go/internal/logos/settings"
 	"cmd/go/internal/modload"
 )
 
@@ -83,19 +84,8 @@ func logosAliasFiles(p *Package) []string {
 	return names
 }
 
-// logosAliasLevel returns the severity of the portability group for the
-// main module of p: its logos.toml key, else the group default, warn. A
-// module whose logos.toml does not parse takes the default, because
-// checkLogosConfig reports the parse error.
 func logosAliasLevel(ld *modload.Loader, p *Package) string {
-	cf, err := logosConfigAt(logosConfigRootForPackage(ld, p))
-	if err != nil || cf == nil {
-		return "warn"
-	}
-	if level, ok := cf.Lints.Groups["portability"]; ok {
-		return level
-	}
-	return "warn"
+	return settings.ModuleAt(logosConfigRootForPackage(ld, p)).Severity("portability", "warn")
 }
 
 // logosAliasDirective returns the position of the //logos:allow directive
