@@ -233,6 +233,46 @@ func TestGroupContextCancelledAtJoin(t *testing.T) {
 	})
 }
 
+func TestGroupOutsideGoroutineStaysBlocked(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		g, _ := NewGroup(t.Context(), 0)
+		g.Go(func(ctx context.Context) error { return errGroupFirst })
+		siblingWoke := make(chan struct{})
+		g.Go(func(ctx context.Context) error {
+			<-ctx.Done()
+			close(siblingWoke)
+			return ctx.Err()
+		})
+		outsiderDone := make(chan struct{})
+		release := make(chan struct{})
+		exited := make(chan struct{})
+		go func() {
+			defer close(exited)
+			select {
+			case <-t.Context().Done():
+				close(outsiderDone)
+			case <-release:
+			}
+		}()
+		if err := g.Wait(); !errors.Is(err, errGroupFirst) {
+			t.Fatalf("Wait = %v, want %v", err, errGroupFirst)
+		}
+		synctest.Wait()
+		select {
+		case <-siblingWoke:
+		default:
+			t.Fatal("sibling did not observe cancellation")
+		}
+		select {
+		case <-outsiderDone:
+			t.Fatal("outside goroutine woke on group failure")
+		default:
+		}
+		close(release)
+		<-exited
+	})
+}
+
 func holdSlot(cur, peak *atomic.Int32) {
 	n := cur.Add(1)
 	for {
