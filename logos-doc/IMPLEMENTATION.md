@@ -2903,6 +2903,85 @@ Notes (m22): the `//logos:zeroalloc` directive does not change allocation behavi
 - Docs: none (SPEC 17.4 carries the fallback rule).
 - Milestone gate: all of the above, then `./run.bash --no-rebuild`.
 
+### M22-C Closure re-audit of SPEC sections 0 to 18
+
+Anchor: Edward Tufte, Christopher Alexander
+
+Ten closure lanes re-verified the PARTIAL rows of the re-audit tables
+against the code and its tests. Each lane read the named assertion
+lines at HEAD, closed rows DONE-CITED where a test already proved the
+rule, added the smallest fixture or unit where none did, and proposed
+SPEC-CUT rows where the code does not implement the stated rule. The
+SPEC cuts land in the commits named "Apply SPEC-CUT rows ...". The
+per-lane records follow.
+
+- integ-cl-s0 (SPEC 0.1 to 1.3, rows 1 to 129): 97 DONE-CITED, 2
+  DONE-NEW, 8 SPEC-CUT plus one sub-item. Ejected builds prove the
+  upstream 1.27 gate in `logos_eject.txt` (skips without an upstream
+  toolchain on PATH). Language-neutral lint membership is pinned by
+  `src/cmd/compile/internal/logos/lint/lint_test.go` and the
+  `logos_lint_*` scripts.
+- integ-cl-s1d (SPEC 1.4 and 1.5): evidence in
+  `src/internal/types/testdata/logos/try.lgo`, `try_review.lgo`,
+  `chains.lgo` with `try_basic.out`, `try_zero.out`, `try_chain.out`;
+  `src/logos/rt/errtrace_test.go` pins trace order, reset, goroutine
+  traces, and the last-8 cap. `e8e988d11b` covers loader alias
+  normalization; `6c953ff4b1` pins errdefer rollback on panic.
+- integ-cl-s2a (SPEC 432 to 560): `const_eval_limits.lgo`,
+  `escape.lgo` (`a311c2784d`, `4ca1dbce3b`), `rodata.lgo` with
+  `reloc.txt`, `rodata_reflect.lgo`, `constmap_init`.
+- integ-cl-s2b (SPEC 565 to 768): `covariance_nonnil_element.lgo`,
+  `option_errors.lgo`, `option_syntax.lgo`, `option_chain.lgo`,
+  `option_nested.lgo`, `union_diagnostics.lgo`,
+  `union_positions.lgo`, `union_eval_once.lgo` (`4fb30fe9a5`,
+  `6a3f83b161`, `f2902440da`, `7b2567acd7`, `9db177ea95`); testdir run
+  over all eight fixtures exits 0.
+- integ-cl-s2c (properties, tuples, SIMD): `property_errors.lgo`,
+  `assert_syntax.lgo`, `interface_body.lgo`, `tuple_errors.lgo`,
+  `simd_errors.lgo`, unit `tuple_pack_test.go`,
+  `TestAssertedStructLowersToVarNil`,
+  `TestSimdArrayVectorScalarForms`, script `logos_simd_goplain.txt`
+  (`cbbffcd117`, `ca7d3cc189`, `c8c21df8d3`).
+- integ-cl-s2d (SPEC 987 to 1238): 39 DONE-CITED rows; DONE-NEW pins
+  `const_switch.lgo` case-list errors (`parser_constif_logos.go:209-228`)
+  and `TestGroupOutsideGoroutineStaysBlocked` in
+  `src/logos/rt/group_test.go` (`2fca8f844b`). Comptime TypeOf stays
+  pinned at `const_for.lgo:48`.
+- integ-cl-s3 (SPEC 3.1 to 3.4): `src/runtime/logos_region_test.go`,
+  `logos_arena_test.go`, run fixtures `region_meaning.lgo`,
+  `region_list.lgo`, `region_loop.lgo`, `region_exits.lgo`,
+  `redteam53_recursive_arena_return.lgo`, lint fixtures
+  `region_escape.lgo`, `region_nested_call.lgo`, scripts
+  `logos_arena_default.txt`, `logos_arena_lint.txt`,
+  `logos_arena_eject.txt`, `logos_preemptible_loops_amd64.txt`.
+  `logos_fastcall_test.go:13-52` pins the fast-call record and clear.
+  `TestLogosApplyLoopStrideOff` and `loopstride_logos.go:12` pin the
+  wasm-only 4096 stride.
+- integ-cl-s45 (SPEC 4.1 to 4.3 and 5): 41 rows; 21 DONE-CITED, 10
+  DONE-NEW (`TestGrammarConstFuncPositive`,
+  `TestGrammarOptionRejectsAndNests`, `TestGrammarReadonlyDistinct`,
+  `TestGrammarCoalesceShapes`, `TestLogosContextualWordsKeepGoMeaning`;
+  `5f0577d`, `e0fd516`), 10 SPEC-CUT recorded above.
+- integ-cl-s78 (SPEC 7 and 8): `TestConstmapEmissionRodataNoInit`,
+  `logos_constmap_keytype.txt`, `TestLoadBuildTablesApplyToGoModule`,
+  `TestArchLevelsNativeUsesHostLevel`,
+  `TestLogosLintMarkSkipsNonMainModules` (`e7a15eeefb`).
+- integ-cl-s1012 (SPEC 10.1 to 12.2): 39 DONE-CITED, 5 DONE-NEW: JSON
+  parity under nojsonv2 and per-instantiation comptime JSON helpers
+  (`json_callsite_jsonv1.lgo`, `comptime_json.lgo`; `40d45d9f0f`),
+  the wrong MayYield=0 trap (`wasm_noyield.lgo`; `9633443bd4`).
+  Binary layout rows cite `json_binary_test.lgo`; capability rows cite
+  `src/cmd/link/internal/ld/capabilities_logos.go` and the `logos_cap_*`
+  scripts.
+- integ-cl-s1318 (SPEC 13 to 18): integer lane sums
+  (`simdslice_test.go` matrix), negative make (`make_overflow.lgo`),
+  zeroalloc heap fallback (`zeroalloc.lgo` `concatLen`, `growCount`),
+  pair values (`pair_values.lgo`), the plain-Go clear twin
+  (`clear_kept.go`), and `TestTryLoweringShape` close the codegen rows.
+  LSP rows cite the `src/cmd/go/internal/logos/lsp` unit tests.
+  Zeroalloc in Go packages: `logos lint` and `logos build` apply the
+  check, `go build` ignores it (`logos_zeroalloc_recursive.txt`).
+
 ## M23. Architecture collapses
 
 Anchor: David Parnas, Christopher Alexander, Dieter Rams
