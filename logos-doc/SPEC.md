@@ -1758,7 +1758,7 @@ Accepted wire bytes MUST stay unchanged. [T-Sec12][T-Sec10.1]
 
 - Adjacent loads and stores that meet the safety predicates MAY fuse into one paired instruction. [T-303]
 - Fusion MUST NOT change program meaning, fault behavior, or atomic order. [T-303]
-- Candidates split by a call or an atomic MUST stay separate; loads MAY fuse across a single-predecessor block edge. [T-303]
+- Candidates split by a call or an atomic MUST stay separate; loads MAY fuse across a block edge only when the source block has one successor and the target block has one predecessor. [T-303]
 - A pair MUST NOT write back its base register. [T-303]
 - The two destinations of a pair MUST differ. [T-303]
 - A 16-byte pair offset outside the encodable range MUST stay separate loads or stores; 4-byte and 8-byte pairs MAY use the assembler fixup. [T-303]
