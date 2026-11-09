@@ -168,7 +168,7 @@ The compiler MUST enforce `correctness::arena_pointer_escape` as `forbid` agains
 The compiler MUST enforce `correctness::defer_erases_errdefer_state` as `forbid` against assignment of nil to the error result inside a plain deferred literal in a function with `errdefer` [T-102].
 The compiler MUST enforce `correctness::infinite_recursion` as `forbid` against a function whose every path from entry calls itself with identical arguments before any return [T-102].
 The compiler MUST enforce `concurrency::concurrent_multiword_race` as `forbid` against sharing of a mutable multi-word value with a child block plus a write on either side, unless the value is a const view or a `logos/sync` type [T-102].
-The compiler MUST enforce `concurrency::reentrant_withlock_deadlock` as `forbid` against a `WithLock` call on the same receiver inside its own closure call graph [T-102].
+The compiler MUST enforce `concurrency::reentrant_withlock_deadlock` as `forbid` against a `WithLock` call on the same receiver inside its own synchronous closure call graph. A relock that a `go` statement inside the callback spawns MUST NOT report. [T-102].
 The compiler MUST enforce `correctness::withlock_leak` as `deny` against a `WithLock` lambda that returns or stores its argument, sends it on a channel, or passes it to a goroutine [T-102].
 The compiler MUST enforce `concurrency::unsupervised_goroutine` as `forbid` against a `go` statement in `.lgo` outside a `go group` block [T-102].
 The compiler MUST enforce `slop::err_chain_reset` as `deny` against formatting of an `error` operand with a verb other than `%w` or against passing of `err.Error()` [T-102].
@@ -1359,7 +1359,7 @@ A C function that carries only one of the two directives, or none, MUST keep the
 `//logos:cgo_fastcall` MUST be the `.lgo` spelling of the same pair and MUST mark a cgo call `noescape` and `nocallback`. [T-304]
 One fast path MUST serve Go packages and loGo/s packages: the single `runtime.logosCgocallFast` trampoline and the one cgo pipeline of this section. [T-304][R-U1]
 The fast path MUST use the syscall-style `reentersyscall`/`asmcgocall`/`exitsyscall` sequence, so it may release the P like a syscall; fast-call diagnostics stay on the original M. [T-304]
-It MUST NOT read a clock: `m.fastCallEnterNano` stays zero on the original M, because a per-call monotonic read dominated the measured fast path and no consumer read the value. A build MAY populate that slot behind a diagnostic switch, and no code may treat it as a call start. [T-304]
+It MUST NOT read a clock in the fast body: no per-call monotonic read takes part, because that read dominated the measured fast path and no consumer read the value. [T-304]
 Sysmon MUST retake the P from a fast call under the same rule and the same threshold as from a syscall, as the upstream `retake` does, with no longer grace period. [T-304][R-U1]
 The fast path MUST stay behind `GOEXPERIMENT=logosfastcgo`, which is off by default under both commands. [T-304][R-U1]
 The fast path MUST NOT change the cgo file layout, the generated file names, or the action cache key format. [T-304][R-U1]
@@ -1368,7 +1368,7 @@ A C function marked `nocallback` that calls into Go MUST still panic on the fast
 A CPU profile MUST attribute time in a fast-called C function to its Go call site. [T-304][R-U1]
 Go pointer arguments MUST stay valid during a fast call. [T-304]
 The original M holds diagnostics only: `m.fastCgoFrame[0]` records the DI/arg address copy and `m.inFastCall` marks entry; the slots are plain `uintptr`, not pins or roots, and only slot 0 is written. [T-304]
-The flag, the timestamp, and the slots MUST read zero after return. [T-304]
+The flag and the slots MUST read zero after return. [T-304]
 POD and primitive-slice arguments MUST skip `_cgoCheckPointer`. [T-304]
 
 Implementation note (informative): Fast calls preserve `runtime.NumCgoCall` accounting and reset the cgo traceback buffer.
@@ -1409,10 +1409,10 @@ Selected exports recover Go panics and return status codes; this does not provid
 Concurrent reads use an immutable object.
 The caller joins all reader threads before deleting its handle.
 The fixture's `-buildvcs=false` isolates the test from VCS metadata; it is not an FFI requirement.
-The fast path MUST NOT read a clock to fill `m.fastCallEnterNano`, which stays zero; Sysmon MUST retake the P from a fast call under the same rule and threshold as from a syscall. [T-304]
+The fast path MUST NOT read a clock in the fast body; Sysmon MUST retake the P from a fast call under the same rule and threshold as from a syscall. [T-304]
 A fast call MUST NOT block other goroutines. [T-304]
 Fast calls MUST carry noescape and nocallback marks. [T-304]
-The M diagnostics (flag, timestamp, slots) MUST read zero after return without clearing the caller's argument values. [T-304]
+The M diagnostics (flag and slots) MUST read zero after return without clearing the caller's argument values. [T-304]
 Profiling with SIGPROF during a fast call MUST NOT crash the process. [T-304]
 
 ## 4. Lexer, parser, and syntax
