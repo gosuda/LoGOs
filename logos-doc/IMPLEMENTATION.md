@@ -489,6 +489,14 @@ Anchor: David Parnas, J.R.R. Tolkien, John Carmack
 - Red-team rows: none.
 - Docs: none.
 
+### M0-A-S5 Assert plain go reads no logos.toml
+Anchor: David Parnas, J.R.R. Tolkien, John Carmack
+- Attack: `src/cmd/go/testdata/script/logos_plain_go_ignores_toml.txt`: a hostile `logos.toml` (forbid cgo, deny variant) stops `logos build` while plain `go build` ignores every key.
+- Build: none (test-only; plain `go` already ignores every key).
+- Gate: `go test -vet=off -count=1 -run TestScript/logos_plain_go_ignores_toml cmd/go`.
+- Red-team rows: none.
+- Docs: none.
+
 ## M1. `?`, `defer f()?`, `errdefer`, error traces, eject
 
 Anchor: Tony Hoare, Christopher Alexander, Edsger W. Dijkstra
@@ -1547,6 +1555,14 @@ Anchor: Tony Hoare, Claude Shannon, John Carmack
 - Red-team rows: none.
 - Docs: none.
 
+### M3-A-S5 Assert readonly erasure and const-view hole
+Anchor: Tony Hoare, Claude Shannon, John Carmack
+- Attack: `src/cmd/compile/internal/logos/const_test.go` `TestEraseReadonlyMethod`: a surviving `Const` flag counts 1 instead of 0; `src/cmd/go/testdata/script/logos_interop_constview_hole.txt`: a Go mutation through a const view succeeds when the guard flips.
+- Build: none (test-only; lowering already erases only the `const` keyword).
+- Gate: `go test -vet=off -count=1 -run TestEraseReadonlyMethod cmd/compile/internal/logos`; `go test -vet=off -count=1 -run TestScript/logos_interop_constview_hole cmd/go`.
+- Red-team rows: none.
+- Docs: none.
+
 ## M4. Interface properties
 
 Anchor: Tony Hoare, David Parnas, J.R.R. Tolkien
@@ -1915,6 +1931,46 @@ Anchor: Tony Hoare, Dieter Rams, David Parnas
 - Docs: P1-S3, P2.
 - Milestone gate: G2 for this slice.
 
+### M9-A-S1 Attack the native nogo rule ports
+Anchor: Tony Hoare, Edward Tufte, Kenya Hara
+- Attack: `test/logos/lint/<rule>.lgo` and `.go` twins for the seven gVisor rule IDs, `test/logos/codegen/zeroalloc.lgo` recursive cases, `logos_lint_locks.txt` and `logos_zeroalloc_recursive.txt` scripts, `rule_native_nogo_test.go`, and facts round-trip tests; every RED line misses its diagnostic before the port.
+- Build: none (attack fixtures and unit tests only).
+- Gate: none (red attack; green in M9-A-S5).
+- Red-team rows: none.
+- Docs: none.
+
+### M9-A-S2 Remove the logos-nogo helper
+Anchor: Tony Hoare, Edward Tufte, Kenya Hara
+- Attack: none (deletion; the REDTEAM #195 fixture header names the row the docs lane assigned).
+- Build: delete `lib/logos-nogo`, the dist and cmd/go wiring, the `nogoEjectActor` branch, the `NogoAction` dependency, and the nine `logos_nogo` scripts and helper-only fixture expectations.
+- Gate: none (deletion; covered by the M9-S9 gate after the port).
+- Red-team rows: #195.
+- Docs: none.
+
+### M9-A-S3 Repair the native nogo attack fixtures
+Anchor: Tony Hoare, Edward Tufte, Kenya Hara
+- Attack: `test/logos/codegen/zeroalloc.lgo` (noinline chain, call through a parameter, a reassigned function value, a late-declared callee), `logos_zeroalloc_recursive.txt` (noinline `a.BigAlloc`), `logos_zeroalloc.txt` (Go marked-function case), `linkname_mismatch_go.go` (local declaration), `reentrant_withlock_deadlock_go.go` (stale ERROR lines dropped).
+- Build: none (mechanics fixes; no assertion weakens).
+- Gate: none (mechanics; green in M9-A-S5).
+- Red-team rows: none.
+- Docs: none.
+
+### M9-A-S4 Write locks and allocfree facts records
+Anchor: Tony Hoare, Edward Tufte, Kenya Hara
+- Attack: `src/cmd/compile/internal/logos/facts/facts_test.go` round-trips one locks record and one allocfree record and rejects unknown effect verbs and bad object or path grammar.
+- Build: the facts sidecar gains `locks` and `allocfree` record kinds with validating decode that fails closed on stale or foreign members.
+- Gate: `go test -count=1 cmd/compile/internal/logos/facts`.
+- Red-team rows: none.
+- Docs: none.
+
+### M9-A-S5 Port the gVisor nogo checkers into logos lint
+Anchor: Tony Hoare, Edward Tufte, Kenya Hara
+- Attack: `rule_native_nogo_test.go` (guarded access, nonatomic access, lock requirement, layout constant, plain-int64 atomics, linkname mismatch, unsafe outside unsafe file), `test/logos/codegen/zeroalloc.lgo` (`viaBig`, `viaIface`, `viaValue`), `logos_lint_locks.txt`, and `logos_zeroalloc_recursive.txt` scripts.
+- Build: nine native rule families in `cmd/compile/internal/logos/lint` with contracts, recursive zeroalloc over the call graph and escape facts, and facts emission under logos builds and logos lint.
+- Gate: `go test -count=1 cmd/compile/internal/logos/lint cmd/compile/internal/logos/facts cmd/compile/internal/escape`; `go test -count=1 cmd/internal/testdir -run 'Test/logos/(lint|codegen/zeroalloc)'`; `go test -count=1 cmd/go -run 'Script/^logos_(lint_locks|zeroalloc)'`.
+- Red-team rows: none.
+- Docs: none.
+
 - Milestone gate: G2.
 
 ## M10. `logos next` and `logos context`
@@ -1980,6 +2036,22 @@ Anchor: Tony Hoare, Richard Feynman
 - Attack: `src/cmd/go/testdata/script/logos_json_edges.txt`: null, unknown, duplicate, escaping, nonfinite, binary layout, and malformed diagnostics match `encoding/json` and the binary format rules, including sorted maps, nested fields, and options.
 - Build: none (test-only).
 - Gate: `go test -count=1 cmd/go -run 'Script/^logos_json_edges$'`.
+- Red-team rows: none.
+- Docs: none.
+
+### M11-A-S1 Enforce binary slice prealloc bound
+Anchor: Tony Hoare, Richard Feynman
+- Attack: `src/cmd/compile/internal/logos/json_binary_test.go` `TestBinaryByteSlicePreallocBound`: the `[]byte` path makes the whole count at once; `TestBinaryZeroWireNoIteration`, `largeLawful`, and `hostileByteCount` pin the nonzero-wire and zero-wire guards; `test/logos/run/json_binary_test.lgo` pins the wire layout.
+- Build: `json_binary.go` caps the `[]byte` preallocation and the zero-wire single-allocation byte total at 64 MiB.
+- Gate: `go test -count=1 cmd/compile/internal/logos`; `go test -count=1 cmd/internal/testdir` for the json fixtures.
+- Red-team rows: none.
+- Docs: none.
+
+### M11-A-S2 Assert static JSON marshal and unmarshal rules
+Anchor: Tony Hoare, Richard Feynman
+- Attack: `src/cmd/compile/internal/logos/json_static_test.go`: defaults-only trigger, single-make no-threshold, string read-once, key-literal escapes, single-probe dispatch, imported-member key skip, and the jsonv2 default build; `test/logos/run/json_marshal_test.lgo`, `json_union_test.lgo`, and `json_callsite_jsonv1.lgo` pin the run behavior.
+- Build: none (test-only).
+- Gate: `go test -count=1 cmd/compile/internal/logos`; `go test -count=1 cmd/internal/testdir` for the json fixtures.
 - Red-team rows: none.
 - Docs: none.
 
@@ -2108,6 +2180,22 @@ Anchor: John Carmack, Dieter Rams
 - Attack: `src/cmd/compile/internal/logos/wasmyield/wasmyield_test.go`: deferreturn, missing, indirect, and direct call sources keep or drop the `MayYield` dispatch as the rules require.
 - Build: none (test-only).
 - Gate: `go test -vet=off -count=1 ./cmd/compile/internal/logos/wasmyield -run 'Test(AddCallYieldSources|ImportYields|ImportedYieldReadsFacts)$'`.
+- Red-team rows: none.
+- Docs: none.
+
+### M16-A-S1 Assert wasm profile activation and branch dispatch evidence
+Anchor: John Carmack, Dieter Rams
+- Attack: `src/cmd/go/testdata/script/logos_wasm_stackswitch.txt`: plain-mode builds keep `br_table` for `waits` and `pureCond` but none for `pureLeaf` or `pureSum`; a bogus `--wasm-features` value fails under both commands; a restricted-PATH build without node still emits the file.
+- Build: none (test-only).
+- Gate: `go test -count=1 cmd/go -run 'TestScript/logos_wasm_stackswitch'`.
+- Red-team rows: none.
+- Docs: none.
+
+### M16-A-S2 Assert wasm yield sources for nil checks and stack growth
+Anchor: John Carmack, Dieter Rams
+- Attack: `src/cmd/compile/internal/logos/wasmyield/wasmyield_test.go` `TestSummarizeNilCheckYields`: a nil check that can panic is a yield source while a resumeless call to a known symbol is not; `TestSummarizeStackCheckYields`: a prologue stack check that unwinds through morestack is a yield source while a small call-free leaf and a frameless function stay pure.
+- Build: none (test-only).
+- Gate: `go test -count=1 cmd/compile/internal/logos/wasmyield`.
 - Red-team rows: none.
 - Docs: none.
 
@@ -2248,6 +2336,30 @@ Anchor: John Carmack, Tony Hoare, Edsger W. Dijkstra
 - Red-team rows: none.
 - Docs: none.
 
+### M18-A-S4 Pin the reassigned-target case of the pointee leak tag
+Anchor: John Carmack, Tony Hoare, Edsger W. Dijkstra
+- Attack: `test/escape_logos_pointee.go`: `storeSeqOverwrite` keeps both sources tagged so an escaping target argument moves all three referents; `storeReassignedParam` drops the tag when the target is reassigned between stores.
+- Build: none (test-only).
+- Gate: the commit body states the pass through `test/escape_logos_pointee.go` and names no literal command.
+- Red-team rows: none.
+- Docs: none.
+
+### M18-A-S5 Pin the pointee leak call shapes that stay conservative
+Anchor: John Carmack, Tony Hoare, Edsger W. Dijkstra
+- Attack: `test/escape_logos_pointee.go`: one fixture per conservative call shape (go and top-level defer statements, generic instantiation at a pointer type, variadic element store, explicit dereference, slice or array index, self store, returned parameter, field of another parameter); the defer wrapper moves only the stored argument while the sequential overwrite keeps both sources tagged.
+- Build: none (test-only).
+- Gate: the commit body states the pass through `test/escape_logos_pointee.go` and names no literal command.
+- Red-team rows: none.
+- Docs: none.
+
+### M18-A-S6 Reject oversize types in comptime SizeOf
+Anchor: John Carmack, Tony Hoare, Edsger W. Dijkstra
+- Attack: `src/internal/types/testdata/logos/comptime_layout_too_large.lgo`: an oversize array reports `too large` with `TypeTooLarge` instead of folding to -1; the oversize alignment still folds.
+- Build: the layout call mirrors the `unsafe.Sizeof` guard: a `SizeOf` whose concrete type argument folds negative reports the type argument text.
+- Gate: `go test -count=1 cmd/compile/internal/types2 -run TestLogos`.
+- Red-team rows: none.
+- Docs: none.
+
 
 ## M20. CGo in loGo/s packages and Fast-CGo for Go and loGo/s
 
@@ -2277,6 +2389,22 @@ Anchor: John Carmack, Tony Hoare
 - Spec must (red-team #165): The fast path MUST switch stacks like asmcgocall and run the C call on the system stack. [T-304]
 - Spec must (red-team #165): Profiling during the call MUST NOT crash the process. [T-304]
 
+### M20-A-S1 Assert fast-cgo call accounting
+Anchor: Tony Hoare, John Carmack
+- Attack: `src/cmd/cgo/internal/testlogos/fastcall_test.go` `TestFastcallNumCgoCallAccounting`: dropping one `mp.ncgocall` increment reports 1 instead of 2.
+- Build: none (test-only; the fast path already counted every call).
+- Gate: `GOEXPERIMENT=logosfastcgo go test -vet=off -count=1 -run TestFastcallNumCgoCallAccounting cmd/cgo/internal/testlogos`; same with the experiment off.
+- Red-team rows: none.
+- Docs: none.
+
+### M20-A-S2 Assert runtime structs carry no new padding
+Anchor: Tony Hoare, John Carmack
+- Attack: `src/runtime/logos_padding_test.go` `TestLogosRuntimeNoNewPadding`: a probe pad field moves the m tail from 40 to 48.
+- Build: none (test-only; the structs already pack the loGo/s additions).
+- Gate: `go test -vet=off -count=1 -run TestLogosRuntimeNoNewPadding runtime`.
+- Red-team rows: none.
+- Docs: none.
+
 ## M21. `logos lsp`
 
 Anchor: Kenya Hara, Edward Tufte
@@ -2303,6 +2431,14 @@ Anchor: David Parnas, Edsger W. Dijkstra, John Carmack
 - Gate: `go test -count=1 -race ./cmd/go/internal/logos/lsp/...` and `go test -count=1 cmd/go -run 'Script/^logos_lsp$'`; `gopls` must be on PATH, else the gate is blocked, never passed.
 - Red-team rows: #197.
 - Docs: P1-S3, P2.
+
+### M21-A-S1 Fix Serve misclassifying simultaneous client close and gopls exit
+Anchor: Kenya Hara, David Parnas
+- Attack: `src/cmd/go/internal/logos/lsp/lsp_test.go` `TestServePrefersClientCloseOverGoplsExit`: under load the verdict was `gopls exited unexpectedly` instead of nil; `TestProxyMapsRequestsAndResponses` shares the 600/600 pass.
+- Build: reorder the Serve shutdown verdict so a simultaneous client close wins over the gopls exit.
+- Gate: `go test -count=1 ./cmd/go/internal/logos/lsp`.
+- Red-team rows: none.
+- Docs: none.
 
 ## M22. Verification suites and the end-to-end example
 
@@ -2361,6 +2497,30 @@ Anchor: David Parnas, J.R.R. Tolkien
 - Red-team rows: none.
 - Docs: P1-S3, P2.
 
+### M23-A-S1 load: read logos.toml through settings.ModuleAt
+Anchor: David Parnas, J.R.R. Tolkien
+- Attack: `TestClaimErrorOnce` fails when the claim error is forced red; the load-local parse cache, error-once map, module-kind memo, tree walk, and skip predicates die with their last callers.
+- Build: resolve `checkLogosConfig`, `logosConfig`, `checkLogosCgo`, `logosAliasLevel`, and `logosLintMark` through `settings.ModuleAt`, parsing each `logos.toml` once per process.
+- Gate: `go test -count=1 cmd/go -run 'Script/^logos_(project_keys|strict_files_scope|cgo_restricted|cgo_restricted_deps|cgo_go_syntax_pkg|alias|lint_alias_extension|cap_policy|cgo_allowlist_invalid)$'`.
+- Red-team rows: none.
+- Docs: none.
+
+### M23-A-S2 cfg: apply settings decisions to the environment
+Anchor: David Parnas, J.R.R. Tolkien
+- Attack: `TestApplyLogosEnvWasmDefault` fails without the preemptible default chained through `ApplyLogosEnv`.
+- Build: `cfg.ApplyLogosEnv` carries the cgo opinion, the composed `GOEXPERIMENT`, and the wasm preemptible default into `BuildContext`, `CmdEnv`, and the process environment from one `settings.Settings`.
+- Gate: `go test -count=1 cmd/go -run 'Script/^logos_settings_env$'`; short tests for `cfg`, `settings`, `load`, `work`, and `envcmd`.
+- Red-team rows: none.
+- Docs: none.
+
+### M23-A-S3 Load logos settings once
+Anchor: David Parnas, J.R.R. Tolkien
+- Attack: ignoring `SetCurrent` fails the `logos_pedantic`, `logos_wasm_loader`, and lint JSON cache scripts.
+- Build: flag storage moves to `settings.CommandLine`; every reader after `BuildInit` goes through `settings.Current()` with lint policy, wasm flags, and arch levels resolved there.
+- Gate: `go test -count=1 cmd/go -run 'Script/^logos_(pedantic|pedantic_lint|lint_json_cache|wasm_loader|wasm_stackswitch|opt_levels|settings_env)$'`; short and race tests for `settings` and `cfg`.
+- Red-team rows: none.
+- Docs: none.
+
 - Milestone gate: G2 for each slice; the settings collapse lands last because `cfg` and `load` read it.
 
 ## Execution protocol
@@ -2404,7 +2564,7 @@ Prerequisites: `cd /home/alpha/compiler/loGos/src && ./make.bash`; `export PATH=
 
 Anchor: Tony Hoare
 
-Written to `tasks/autoplan-ledger.jsonl` by P0-S6. IDs: phase prefix plus a sequence in plan order. The original 103 rows are preserved verbatim; P0-S6 appends exactly the 5 remaining rows for M0-S7, P1-S3, M11-S3, M11-S4, and M18-S4 (listed at the end of the block); the M19 rows are pruned. The 2026-10-19 direction appended one more row after those, `DX-20` for the follow-up slice M0-S8; no other row changed (the descriptions of rows such as `ENG-26` name the slice as first written, and `CEO-02` names the original 182 REDTEAM rows; rows #183 to #189 were added later by the same direction). The audit direction appended rows `AUD-01` to `AUD-30` after those, one per recorded audit slice in commit order. The ledger holds 141 rows.
+Written to `tasks/autoplan-ledger.jsonl` by P0-S6. IDs: phase prefix plus a sequence in plan order. The original 103 rows are preserved verbatim; P0-S6 appends exactly the 5 remaining rows for M0-S7, P1-S3, M11-S3, M11-S4, and M18-S4 (listed at the end of the block); the M19 rows are pruned. The 2026-10-19 direction appended one more row after those, `DX-20` for the follow-up slice M0-S8; no other row changed (the descriptions of rows such as `ENG-26` name the slice as first written, and `CEO-02` names the original 182 REDTEAM rows; rows #183 to #189 were added later by the same direction). The audit direction appended rows `AUD-01` to `AUD-50` after those, one per recorded audit slice in commit order. The ledger holds 161 rows.
 
 ```jsonl
 {"id": "CEO-01", "description": "P0-S1 Rename logos-doc/PLAN.md to logos-doc/SPEC.md (pure rename) and P0-S2 rewrite SPEC.md as the tailored spec (tables T, N, Section 18)", "phase": "CEO"}
@@ -2548,4 +2708,24 @@ Written to `tasks/autoplan-ledger.jsonl` by P0-S6. IDs: phase prefix plus a sequ
 {"id": "AUD-28", "description": "M5-A-S1 Assert const map contract rules", "phase": "AUD"}
 {"id": "AUD-29", "description": "M18-A-S3 Record const view declarations for group capture checks", "phase": "AUD"}
 {"id": "AUD-30", "description": "M3-A-S4 Assert the const switch assertion mask reaches the facts", "phase": "AUD"}
+{"id": "AUD-31", "description": "M16-A-S1 Assert wasm profile activation and branch dispatch evidence", "phase": "AUD"}
+{"id": "AUD-32", "description": "M16-A-S2 Assert wasm yield sources for nil checks and stack growth", "phase": "AUD"}
+{"id": "AUD-33", "description": "M18-A-S4 Pin the reassigned-target case of the pointee leak tag", "phase": "AUD"}
+{"id": "AUD-34", "description": "M18-A-S5 Pin the pointee leak call shapes that stay conservative", "phase": "AUD"}
+{"id": "AUD-35", "description": "M11-A-S1 Enforce binary slice prealloc bound", "phase": "AUD"}
+{"id": "AUD-36", "description": "M11-A-S2 Assert static JSON marshal and unmarshal rules", "phase": "AUD"}
+{"id": "AUD-37", "description": "M18-A-S6 Reject oversize types in comptime SizeOf", "phase": "AUD"}
+{"id": "AUD-38", "description": "M21-A-S1 Fix Serve misclassifying simultaneous client close and gopls exit", "phase": "AUD"}
+{"id": "AUD-39", "description": "M9-A-S1 Attack the native nogo rule ports", "phase": "AUD"}
+{"id": "AUD-40", "description": "M9-A-S2 Remove the logos-nogo helper", "phase": "AUD"}
+{"id": "AUD-41", "description": "M9-A-S3 Repair the native nogo attack fixtures", "phase": "AUD"}
+{"id": "AUD-42", "description": "M9-A-S4 Write locks and allocfree facts records", "phase": "AUD"}
+{"id": "AUD-43", "description": "M9-A-S5 Port the gVisor nogo checkers into logos lint", "phase": "AUD"}
+{"id": "AUD-44", "description": "M23-A-S1 load: read logos.toml through settings.ModuleAt", "phase": "AUD"}
+{"id": "AUD-45", "description": "M23-A-S2 cfg: apply settings decisions to the environment", "phase": "AUD"}
+{"id": "AUD-46", "description": "M23-A-S3 Load logos settings once", "phase": "AUD"}
+{"id": "AUD-47", "description": "M20-A-S1 Assert fast-cgo call accounting", "phase": "AUD"}
+{"id": "AUD-48", "description": "M20-A-S2 Assert runtime structs carry no new padding", "phase": "AUD"}
+{"id": "AUD-49", "description": "M3-A-S5 Assert readonly erasure and const-view hole", "phase": "AUD"}
+{"id": "AUD-50", "description": "M0-A-S5 Assert plain go reads no logos.toml", "phase": "AUD"}
 ```

@@ -139,3 +139,23 @@
 {"id": "AUD-28", "description": "M5-A-S1 Assert const map contract rules", "phase": "AUD"}
 {"id": "AUD-29", "description": "M18-A-S3 Record const view declarations for group capture checks", "phase": "AUD"}
 {"id": "AUD-30", "description": "M3-A-S4 Assert the const switch assertion mask reaches the facts", "phase": "AUD"}
+{"id": "AUD-31", "description": "M16-A-S1 Assert wasm profile activation and branch dispatch evidence", "phase": "AUD"}
+{"id": "AUD-32", "description": "M16-A-S2 Assert wasm yield sources for nil checks and stack growth", "phase": "AUD"}
+{"id": "AUD-33", "description": "M18-A-S4 Pin the reassigned-target case of the pointee leak tag", "phase": "AUD"}
+{"id": "AUD-34", "description": "M18-A-S5 Pin the pointee leak call shapes that stay conservative", "phase": "AUD"}
+{"id": "AUD-35", "description": "M11-A-S1 Enforce binary slice prealloc bound", "phase": "AUD"}
+{"id": "AUD-36", "description": "M11-A-S2 Assert static JSON marshal and unmarshal rules", "phase": "AUD"}
+{"id": "AUD-37", "description": "M18-A-S6 Reject oversize types in comptime SizeOf", "phase": "AUD"}
+{"id": "AUD-38", "description": "M21-A-S1 Fix Serve misclassifying simultaneous client close and gopls exit", "phase": "AUD"}
+{"id": "AUD-39", "description": "M9-A-S1 Attack the native nogo rule ports", "phase": "AUD"}
+{"id": "AUD-40", "description": "M9-A-S2 Remove the logos-nogo helper", "phase": "AUD"}
+{"id": "AUD-41", "description": "M9-A-S3 Repair the native nogo attack fixtures", "phase": "AUD"}
+{"id": "AUD-42", "description": "M9-A-S4 Write locks and allocfree facts records", "phase": "AUD"}
+{"id": "AUD-43", "description": "M9-A-S5 Port the gVisor nogo checkers into logos lint", "phase": "AUD"}
+{"id": "AUD-44", "description": "M23-A-S1 load: read logos.toml through settings.ModuleAt", "phase": "AUD"}
+{"id": "AUD-45", "description": "M23-A-S2 cfg: apply settings decisions to the environment", "phase": "AUD"}
+{"id": "AUD-46", "description": "M23-A-S3 Load logos settings once", "phase": "AUD"}
+{"id": "AUD-47", "description": "M20-A-S1 Assert fast-cgo call accounting", "phase": "AUD"}
+{"id": "AUD-48", "description": "M20-A-S2 Assert runtime structs carry no new padding", "phase": "AUD"}
+{"id": "AUD-49", "description": "M3-A-S5 Assert readonly erasure and const-view hole", "phase": "AUD"}
+{"id": "AUD-50", "description": "M0-A-S5 Assert plain go reads no logos.toml", "phase": "AUD"}
