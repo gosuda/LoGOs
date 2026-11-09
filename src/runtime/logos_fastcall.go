@@ -13,21 +13,26 @@ import (
 //go:linkname logosCgocallFast
 //go:nosplit
 func logosCgocallFast(fn, arg unsafe.Pointer) int32 {
-	if !goexperiment.LogosFastCgo {
-		return cgocall(fn, arg)
-	}
 	if !iscgo && GOOS != "solaris" && GOOS != "illumos" && GOOS != "windows" {
 		throw("cgocall unavailable")
 	}
 	if fn == nil {
 		throw("cgocall nil")
 	}
-
-	mp := getg().m
+	gp := getg()
+	if gp.nocgocallback {
+		panic("runtime: unexpected setting cgoNoCallback")
+	}
+	gp.nocgocallback = true
+	if !goexperiment.LogosFastCgo {
+		errno := cgocall(fn, arg)
+		gp.nocgocallback = false
+		return errno
+	}
+	mp := gp.m
 	if raceenabled {
 		racereleasemerge(unsafe.Pointer(&racecgosync))
 	}
-
 	mp.ncgocall++
 	if mp.cgoCallers != nil {
 		mp.cgoCallers[0] = 0
@@ -43,6 +48,7 @@ func logosCgocallFast(fn, arg unsafe.Pointer) int32 {
 
 	errno := asmcgocall(fn, arg)
 
+	gp.nocgocallback = false
 	mp.incgo = false
 	mp.ncgo--
 	logosClearFastCall(mp)

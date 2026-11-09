@@ -657,9 +657,8 @@ func (p *Package) writeDefsFunc(fgo2 io.Writer, n *Name, callsMalloc *bool) {
 		arg = "uintptr(unsafe.Pointer(&r1))"
 	}
 
-	noCallback := p.noCallbacks[n.C]
+	noCallback := p.noCallbacks[n.C] && !logosFastCall(p, n)
 	if noCallback {
-		// disable cgocallback, will check it in runtime.
 		fmt.Fprintf(fgo2, "\t_Cgo_no_callback(true)\n")
 	}
 
