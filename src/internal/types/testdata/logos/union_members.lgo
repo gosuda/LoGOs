@@ -29,6 +29,7 @@ type UnionHolder struct {
 	Value U
 	Items []U
 	Table map[U]int
+	Vals map[string]U
 }
 
 func acceptsUnion(x U) U { return x }

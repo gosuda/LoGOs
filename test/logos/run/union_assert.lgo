@@ -7,6 +7,27 @@ import "fmt"
 type U interface {
 	int | string
 }
+type Empty struct{}
+type ZU interface {
+	Empty | int
+}
+func showZ(a any) string {
+	if _, ok := a.(ZU); ok {
+		return "zok"
+	}
+	return "znot"
+}
+func whichZ(a any) string {
+	switch v := a.(type) {
+	case ZU:
+		var _ ZU = v
+		return "Z"
+	case nil:
+		return "nil"
+	default:
+		return "other"
+	}
+}
 
 func show(a any) string {
 	if _, ok := a.(U); ok {
@@ -60,4 +81,12 @@ func main() {
 	fmt.Println(which(z))
 	fmt.Println(shadow(a))
 	fmt.Println(shadow(b))
+	var ze any = Empty{}
+	fmt.Println(showZ(ze))
+	fmt.Println(whichZ(ze))
+	var zi any = 7
+	fmt.Println(showZ(zi))
+	fmt.Println(whichZ(zi))
+	var zn any
+	fmt.Println(whichZ(zn))
 }
