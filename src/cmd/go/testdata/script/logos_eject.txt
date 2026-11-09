@@ -28,6 +28,7 @@ exec find out -name '*.gen.go'
 cd out
 go run .
 cmp stdout $WORK/eject-stdout.txt
+[exec:/home/linuxbrew/.linuxbrew/Cellar/go/1.27.3/libexec/bin/go] exec env GOROOT=/home/linuxbrew/.linuxbrew/Cellar/go/1.27.3/libexec /home/linuxbrew/.linuxbrew/Cellar/go/1.27.3/libexec/bin/go build ./...
 cd ..
 
 grep 'Command ejectdemo' out/main.go
