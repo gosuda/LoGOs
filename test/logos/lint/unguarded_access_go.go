@@ -177,3 +177,26 @@ func publishThenAccess() {
 	sink = t
 	t.total = 4 // ERROR "\[concurrency::unguarded_access\]"
 }
+
+func tryLockTaken(s *stats) {
+	if s.mu.TryLock() {
+		_ = s.total
+		s.mu.Unlock()
+	}
+}
+
+func tryLockNegatedElse(s *stats) {
+	if !s.mu.TryLock() {
+	} else {
+		_ = s.total
+		s.mu.Unlock()
+	}
+}
+
+func tryLockStored(s *stats) {
+	ok := s.mu.TryLock()
+	if ok {
+		_ = s.total // ERROR "\[concurrency::unguarded_access\]"
+		s.mu.Unlock()
+	}
+}

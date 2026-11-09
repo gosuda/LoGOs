@@ -288,15 +288,46 @@ func (v *lockFlow) walkIf(s *syntax.IfStmt) {
 	v.walkSimple(s.Init)
 	v.walkExpr(s.Cond)
 	before := v.st.held.clone()
+	if key, ok := v.tryLockThen(s.Cond); ok {
+		v.st.held.hold(key, holdWrite)
+	}
 	v.walkStmts(s.Then.List)
 	afterThen := v.st.held
 	v.st.held = before
 	if s.Else != nil {
+		if key, ok := v.tryLockElse(s.Cond); ok {
+			v.st.held.hold(key, holdWrite)
+		}
 		v.walkStmt(s.Else)
 	}
 	afterElse := v.st.held
 	v.st.held = afterThen
 	v.st.held.merge(afterElse)
+}
+
+func (v *lockFlow) tryLockThen(cond syntax.Expr) (heldLock, bool) {
+	return v.tryLockOperand(syntax.Unparen(cond))
+}
+
+func (v *lockFlow) tryLockElse(cond syntax.Expr) (heldLock, bool) {
+	op, ok := syntax.Unparen(cond).(*syntax.Operation)
+	if !ok || op.Op != syntax.Not || op.Y != nil {
+		return heldLock{}, false
+	}
+	return v.tryLockOperand(op.X)
+}
+
+func (v *lockFlow) tryLockOperand(e syntax.Expr) (heldLock, bool) {
+	call, ok := syntax.Unparen(e).(*syntax.CallExpr)
+	if !ok || len(call.ArgList) != 0 {
+		return heldLock{}, false
+	}
+	sel, ok := syntax.Unparen(call.Fun).(*syntax.SelectorExpr)
+	if !ok || sel.Sel.Value != "TryLock" {
+		return heldLock{}, false
+	}
+	key, _, ok := v.builtinLockOp(call)
+	return key, ok
 }
 
 func (v *lockFlow) walkFor(s *syntax.ForStmt) {

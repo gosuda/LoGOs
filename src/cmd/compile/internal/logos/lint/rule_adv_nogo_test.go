@@ -381,8 +381,28 @@ func TestAdvGuardedAccess(t *testing.T) {
 		},
 		{
 			"loopBodyHoldsLock",
-			"func g9(s *stats) {\n for i := 0; i < 3; i++ {\n s.mu.Lock()\n s.total++\n s.mu.Unlock()\n }\n}\n",
+			"func g9(s *stats) {\n for i := 0; i < 3; i++ {\n  s.mu.Lock()\n  s.total++\n  s.mu.Unlock()\n }\n}\n",
 			nil,
+		},
+		{
+			"tryLockSuccessBranchStaysClean",
+			"func t1(s *stats) {\n if s.mu.TryLock() {\n  _ = s.total\n  s.mu.Unlock()\n }\n}\n",
+			nil,
+		},
+		{
+			"tryLockNegatedElseStaysClean",
+			"func t2(s *stats) {\n if !s.mu.TryLock() {\n } else {\n  _ = s.total\n  s.mu.Unlock()\n }\n}\n",
+			nil,
+		},
+		{
+			"tryLockStoredResultReported",
+			"func t3(s *stats) {\n ok := s.mu.TryLock()\n if ok {\n  _ = s.total\n  s.mu.Unlock()\n }\n}\n",
+			[]string{"32 concurrency::unguarded_access forbid"},
+		},
+		{
+			"tryLockIgnoredResultReported",
+			"func t4(s *stats) {\n s.mu.TryLock()\n _ = s.total\n}\n",
+			[]string{"31 concurrency::unguarded_access forbid"},
 		},
 	}
 	for _, tt := range tests {
@@ -416,11 +436,6 @@ func TestAdvGuardedAccessLimitations(t *testing.T) {
 		{
 			"indexLockReported",
 			"func g4() {\n arr[0].mu.Lock()\n arr[0].n = 1\n arr[0].mu.Unlock()\n}\n",
-			[]string{"31 concurrency::unguarded_access deny"},
-		},
-		{
-			"tryLockReported",
-			"func g6(s *stats) {\n if s.mu.TryLock() {\n _ = s.total\n s.mu.Unlock()\n }\n}\n",
 			[]string{"31 concurrency::unguarded_access deny"},
 		},
 		{
