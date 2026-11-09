@@ -103,3 +103,19 @@ func (e *UnionAssertionError) Error() string {
 	}
 	return "interface conversion: " + actual + " is not a member of " + e.Union
 }
+
+func AppendInt(b []byte, x int64, base int) []byte {
+	return strconv.AppendInt(b, x, base)
+}
+
+func AppendUint(b []byte, x uint64, base int) []byte {
+	return strconv.AppendUint(b, x, base)
+}
+
+func AppendFloat(b []byte, f float64, fmt byte, prec, bitSize int) []byte {
+	return strconv.AppendFloat(b, f, fmt, prec, bitSize)
+}
+
+func AppendBool(b []byte, x bool) []byte {
+	return strconv.AppendBool(b, x)
+}

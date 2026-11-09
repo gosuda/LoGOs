@@ -71,6 +71,7 @@ grep 'module github\.com/gosuda/loGos/rt' out/_logos_deps/rt/go.mod
 ! exec grep -rnE '"logos/[a-z/]+"' out
 grep -count=1 '_logos_rt "github.com/gosuda/loGos/rt"' out/main.go
 ! exec grep -rn '_logos_errors' out
+! exec grep -rn '_logos_strconv' out
 
 # A second eject into the non-empty directory fails.
 ! logos eject -o out

@@ -336,10 +336,10 @@ func (fl *fileLower) lowerInterpExpr(e *syntax.InterpExpr, kinds []types2.LogosI
 		lines = append(lines, cat(gen(interpBuf+" = append("+interpBuf+", "), argText, gen(")")))
 	}
 	emitConv := func(name string, args []syntax.Expr, argTexts []otext) {
-		call := callOf(pos, selOf(pos, nameOf(pos, interpConvPkg), name), args)
+		call := callOf(pos, selOf(pos, nameOf(pos, rtAlias), name), args)
 		stmts = append(stmts, assignOf(pos, []syntax.Expr{nameOf(pos, interpBuf)}, []syntax.Expr{call}))
 		cparts := make([]otext, 0, 2*len(argTexts)+1)
-		cparts = append(cparts, gen(interpBuf+" = "+interpConvPkg+"."+name+"("))
+		cparts = append(cparts, gen(interpBuf+" = "+rtAlias+"."+name+"("))
 		for i, a := range argTexts {
 			if i > 0 {
 				cparts = append(cparts, gen(", "))
@@ -472,12 +472,10 @@ func (fl *fileLower) flushInterpImports(needConv, needUnsafe bool) {
 	pos := fl.file.Pos()
 	var decls []syntax.Decl
 	var text string
-	if needConv {
-		decls = append(decls, at(&syntax.ImportDecl{
-			LocalPkgName: nameOf(pos, interpConvPkg),
-			Path:         litOf(pos, `"strconv"`, syntax.StringLit),
-		}, pos))
-		text += "\nimport " + interpConvPkg + ` "strconv"`
+	if needConv && !fl.needRT {
+		decls = append(decls, rtImport(pos))
+		text += "\n\nimport " + rtAlias + " " + fmt.Sprintf("%q", rtImportPath)
+		fl.needRT = true
 	}
 	if needUnsafe {
 		decls = append(decls, at(&syntax.ImportDecl{

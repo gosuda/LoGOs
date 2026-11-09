@@ -11,6 +11,7 @@ cp stdout $WORK/eject-stdout.txt
 
 logos eject -o out
 exists out/main.go
+! exec grep -rn '_logos_strconv' out
 cd out
 go build ./...
 go run .
