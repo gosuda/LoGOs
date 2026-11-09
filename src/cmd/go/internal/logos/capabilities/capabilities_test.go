@@ -66,6 +66,24 @@ func TestCheckUnsafe(t *testing.T) {
 			t.Errorf("Chain = %q, want %q", v.Chain, want)
 		}
 	})
+
+	t.Run("diamond reports shortest chain", func(t *testing.T) {
+		all := []Node{
+			{ImportPath: "example.com/main", Imports: []string{"example.com/near", "example.com/far"}, Main: true},
+			{ImportPath: "example.com/near", Imports: []string{"example.com/dep"}},
+			{ImportPath: "example.com/far", Imports: []string{"example.com/near"}},
+			{ImportPath: "example.com/dep", Imports: []string{"unsafe"}},
+			{ImportPath: "unsafe", Goroot: true},
+		}
+		got := CheckUnsafe(Deny, nil, all)
+		if len(got) != 1 {
+			t.Fatalf("CheckUnsafe = %v, want one violation", got)
+		}
+		want := []string{"example.com/main", "example.com/near", "example.com/dep", "unsafe"}
+		if strings.Join(got[0].Chain, "\x00") != strings.Join(want, "\x00") {
+			t.Errorf("Chain = %q, want %q", got[0].Chain, want)
+		}
+	})
 	t.Run("allow skips walk", func(t *testing.T) {
 		if got := CheckUnsafe(Allow, nil, nodes()); len(got) != 0 {
 			t.Errorf("CheckUnsafe(allow) = %v, want none", got)

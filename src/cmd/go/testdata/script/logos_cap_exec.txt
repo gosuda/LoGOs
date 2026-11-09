@@ -71,6 +71,42 @@ exec $WORK/bin/s2h$GOEXE
 stdout '^hi$'
 cd ../..
 
+# Case I: a sink reached only from a dependency init function is denied in a
+# plain binary link: package inits are audit roots through d.pkginits.
+cd i/main
+! logos build -o $WORK/bin/s2i$GOEXE ./cmd
+stderr 'ERROR \[capabilities::unauthorized_exec\]: Transitive dependency ''example\.com/idep'' reaches ''syscall\.StartProcess'''
+stderr 'example\.com/idep\.launch\(\) +at [^ ]+\.go:\d+'
+stderr 'transitive_exec_allowlist'
+cd ../..
+
+# Case J: a loGo/s dependency module reaches a sink and is denied like a Go
+# dependency, so the audit covers modules of both kinds.
+cd j/main
+! logos build -o $WORK/bin/s2j$GOEXE ./cmd
+stderr 'ERROR \[capabilities::unauthorized_net\]: Transitive dependency ''example\.com/ldep'' reaches ''syscall\.Connect'''
+stderr 'example\.com/ldep\.Init\(\) +at [^ ]+\.lgo:\d+'
+stderr 'transitive_net_allowlist'
+cd ../..
+
+# Case K: reflection through reflect.Value.Method with an opaque index counts
+# as reachable: the fan-out over exported methods reaches the sink.
+cd k/main
+! logos build -o $WORK/bin/s2k$GOEXE ./cmd
+stderr 'ERROR \[capabilities::unauthorized_exec\]: Transitive dependency ''example\.com/kdep'' reaches ''os\.startProcess'''
+stderr 'example\.com/kdep\.Init\(\)'
+stderr 'os\.startProcess\(\) +at .*os/exec_posix\.go:\d+'
+cd ../..
+
+# Case L: a cgo dependency allowed by [build] cgo = "allow" links clean: the
+# recorded allowance reaches the linker audit.
+[cgo] cd l/main
+[cgo] logos build -o $WORK/bin/s2l$GOEXE ./cmd
+[cgo] ! stderr 'capabilities::'
+[cgo] exec $WORK/bin/s2l$GOEXE
+[cgo] stdout '^42$'
+[cgo] cd ../..
+
 -- a/main/go.mod --
 module example.com/xmain
 
@@ -437,4 +473,198 @@ import "os/exec"
 func Init() {
 	cmd := exec.Command("echo", "hi")
 	_ = cmd.Run()
+}
+
+-- i/main/go.mod --
+module example.com/imain
+
+go 1.27
+
+require example.com/idep v0.0.0
+
+replace example.com/idep => ../dep
+
+-- i/main/logos.toml --
+[capabilities]
+transitive_exec = "deny"
+
+-- i/main/cmd/main.lgo --
+package main
+
+import (
+	"fmt"
+
+	"example.com/idep"
+)
+
+func main() {
+	fmt.Println(dep.Msg())
+}
+
+-- i/dep/go.mod --
+module example.com/idep
+
+go 1.27
+
+-- i/dep/dep.go --
+package dep
+
+import "syscall"
+
+func init() {
+	launch()
+}
+
+//go:noinline
+func launch() {
+	pid, _, _ := syscall.StartProcess("/bin/true", []string{"true"}, nil)
+	_ = pid
+}
+
+//go:noinline
+func Msg() string { return "init-ok" }
+
+-- j/main/go.mod --
+module example.com/jmain
+
+go 1.27
+
+require example.com/ldep v0.0.0
+
+replace example.com/ldep => ../dep
+
+-- j/main/logos.toml --
+[capabilities]
+transitive_net = "deny"
+
+-- j/main/cmd/main.lgo --
+package main
+
+import (
+	"fmt"
+
+	"example.com/ldep"
+)
+
+func main() {
+	dep.Init()
+	fmt.Println("done")
+}
+
+-- j/dep/go.mod --
+module example.com/ldep
+
+go 1.27
+
+-- j/dep/dep.lgo --
+package dep
+
+import "syscall"
+
+//go:noinline
+func Init() {
+	fd, _ := syscall.Socket(syscall.AF_INET, syscall.SOCK_STREAM, 0)
+	_ = syscall.Connect(fd, &syscall.SockaddrInet4{})
+}
+
+-- k/main/go.mod --
+module example.com/kmain
+
+go 1.27
+
+require example.com/kdep v0.0.0
+
+replace example.com/kdep => ../dep
+
+-- k/main/logos.toml --
+[capabilities]
+transitive_exec = "deny"
+
+-- k/main/cmd/main.lgo --
+package main
+
+import (
+	"fmt"
+
+	"example.com/kdep"
+)
+
+func main() {
+	dep.Init()
+	fmt.Println("done")
+}
+
+-- k/dep/go.mod --
+module example.com/kdep
+
+go 1.27
+
+-- k/dep/dep.go --
+package dep
+
+import (
+	"os/exec"
+	"reflect"
+)
+
+//go:noinline
+func Init() {
+	cmd := exec.Command("echo", "hi")
+	v := reflect.ValueOf(cmd)
+	for i := 0; i < v.NumMethod(); i++ {
+		v.Method(i).Call(nil)
+	}
+}
+
+-- l/main/go.mod --
+module example.com/lmain
+
+go 1.27
+
+require example.com/ldep v0.0.0
+
+replace example.com/ldep => ../dep
+
+-- l/main/logos.toml --
+[build]
+cgo = "allow"
+
+[capabilities]
+transitive_unsafe_allowlist = ["example.com/ldep/**"]
+
+-- l/main/cmd/main.lgo --
+package main
+
+import (
+	"fmt"
+
+	"example.com/ldep"
+)
+
+func main() {
+	fmt.Println(dep.Answer())
+}
+
+-- l/dep/go.mod --
+module example.com/ldep
+
+go 1.27
+
+-- l/dep/bridge.lgo --
+package dep
+
+/*
+int fortytwo() { return 42; }
+*/
+import "C"
+
+func Answer() int {
+	return int(C.fortytwo())
+}
+
+-- l/dep/extra.lgo --
+package dep
+
+func Extra() string {
+	return "extra"
 }

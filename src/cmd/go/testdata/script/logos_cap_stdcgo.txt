@@ -20,19 +20,34 @@ stdout '_C2?func_getaddrinfo'
 exec $WORK/bin/stdcgo$GOEXE
 stdout '^ok$'
 
+# A dependency that owns a cgo wrapper is still blamed in a binary whose
+# standard library also uses cgo: the audit reaches the wrappers (it flags
+# the evil dependency) yet the net dependency takes no blame.
+! logos build -o $WORK/bin/stdcgoevil$GOEXE ./cmdevil
+stderr 'ERROR \[capabilities::unauthorized_cgo\]: Transitive dependency ''example\.com/evil'' reaches ''runtime\.cgocall'''
+stderr 'example\.com/evil\.Ping\(\)'
+! stderr 'example\.com/ndep'
+
 -- main/go.mod --
 module example.com/nmain
 
 go 1.27
 
-require example.com/ndep v0.0.0
+require (
+	example.com/ndep v0.0.0
+	example.com/evil v0.0.0
+)
 
-replace example.com/ndep => ../dep
+replace (
+	example.com/ndep => ../dep
+	example.com/evil => ../evil
+)
 
 -- main/logos.toml --
 [capabilities]
 transitive_net = "allow"
 transitive_reflect = "allow"
+transitive_unsafe_allowlist = ["example.com/evil/**"]
 
 -- main/cmd/main.go --
 package main
@@ -68,4 +83,37 @@ func Fetch(u string) string {
 		}
 	}
 	return "ok"
+}
+
+-- main/cmdevil/main.go --
+package main
+
+import (
+	"fmt"
+
+	"example.com/ndep"
+	"example.com/evil"
+)
+
+func main() {
+	fmt.Println(dep.Fetch(""))
+	fmt.Println(evil.Ping())
+}
+
+-- evil/go.mod --
+module example.com/evil
+
+go 1.27
+
+-- evil/evil.go --
+package evil
+
+/*
+int fortytwo() { return 42; }
+*/
+import "C"
+
+//go:noinline
+func Ping() int {
+	return int(C.fortytwo())
 }
