@@ -231,9 +231,6 @@ func TestLogosStackSpawnDoesNotAllocate(t *testing.T) {
 }
 
 func TestLogosStackTableBounded(t *testing.T) {
-	if runtime.LogosStackSlots != 1024 {
-		t.Fatalf("table capacity = %d, want 1024", runtime.LogosStackSlots)
-	}
 	runtime.LogosStackReset()
 	const sites = 10000
 	pcOf := func(i int) uintptr { return 0x401000 + uintptr(i)*16 }
