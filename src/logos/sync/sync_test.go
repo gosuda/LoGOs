@@ -80,6 +80,80 @@ func TestHotStoreLoad(t *testing.T) {
 		t.Fatalf("Load = %v, want stored pointer %v", got, v)
 	}
 }
+func TestHotStorePublishesUnderGC(t *testing.T) {
+	h := new(logosync.Hot[hotPoint])
+	h.Store(&hotPoint{x: 1, y: 1})
+	stop := make(chan struct{})
+	var gcLoop sync.WaitGroup
+	gcLoop.Go(func() {
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				runtime.GC()
+			}
+		}
+	})
+	const writers = 4
+	const perWriter = 2000
+	var workers sync.WaitGroup
+	for w := range writers {
+		workers.Go(func() {
+			for i := range perWriter {
+				n := int64(w*perWriter + i + 2)
+				h.Store(&hotPoint{x: n, y: n})
+			}
+		})
+	}
+	for range writers {
+		workers.Go(func() {
+			for range perWriter {
+				p := h.Load()
+				if p == nil {
+					t.Error("Load returned nil after initial Store")
+					return
+				}
+				if p.x != p.y {
+					t.Errorf("torn value: x=%d y=%d", p.x, p.y)
+					return
+				}
+			}
+		})
+	}
+	waitDone := make(chan struct{})
+	go func() {
+		workers.Wait()
+		close(waitDone)
+	}()
+	select {
+	case <-waitDone:
+	case <-time.After(60 * time.Second):
+		t.Fatal("workers did not finish")
+	}
+	close(stop)
+	gcLoop.Wait()
+	final := h.Load()
+	if final == nil || final.x != final.y {
+		t.Fatalf("final value torn or missing: %+v", final)
+	}
+	finalized := make(chan struct{}, 1)
+	runtime.AddCleanup(final, func(ch chan struct{}) { ch <- struct{}{} }, finalized)
+	h.Store(nil)
+	deadline := time.NewTimer(5 * time.Second)
+	defer deadline.Stop()
+	for {
+		runtime.GC()
+		select {
+		case <-finalized:
+			return
+		case <-deadline.C:
+			t.Fatal("stored value was not finalized after Store(nil)")
+		default:
+		}
+		runtime.Gosched()
+	}
+}
 
 func TestHotKeepsValueReachable(t *testing.T) {
 	type value struct {
