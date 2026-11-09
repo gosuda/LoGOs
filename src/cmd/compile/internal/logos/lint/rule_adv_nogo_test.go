@@ -451,6 +451,16 @@ func TestAdvLockRequirement(t *testing.T) {
 		want []string
 	}{
 		{
+			"deferredReleaseThenRequire",
+			"func r3(g *gate) {\n g.mu.Lock()\n defer g.toggle()\n defer g.release()\n}\n",
+			[]string{"21 concurrency::lock_requirement_unmet forbid"},
+		},
+		{
+			"deferredUnlockThenRequire",
+			"func m(g *gate) {\n g.mu.Lock()\n defer g.toggle()\n defer g.mu.Unlock()\n}\n",
+			[]string{"21 concurrency::lock_requirement_unmet forbid"},
+		},
+		{
 			"directRequireHeld",
 			"func r4(g *gate) {\n g.mu.Lock()\n g.toggle()\n g.mu.Unlock()\n}\n",
 			nil,

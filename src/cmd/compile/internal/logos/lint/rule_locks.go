@@ -1022,7 +1022,8 @@ func (v *lockFlow) checkDefers(list []syntax.Stmt) {
 			continue
 		}
 		if ct := v.callContract(d.call); ct != nil {
-			v.applyCallContract(d.call, ct)
+			sub := &lockFlow{c: v.c, pass: v.pass, decl: v.decl, file: d.file, st: &lockState{held: exit}, local: v.local, published: v.published}
+			sub.applyCallContract(d.call, ct)
 		}
 	}
 }
