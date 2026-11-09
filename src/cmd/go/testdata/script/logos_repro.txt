@@ -21,6 +21,18 @@ env CGO_ENABLED=0
 # below anchors at $GOPATH/src first, so relative and absolute values work.
 env LOGOS_EXAMPLE=repro
 
+# Sizegate boundary: 101 bytes against a recorded 100 is exactly 1%,
+# since 101*100 equals 100*101, and passes; 102 bytes exceeds it and the
+# gate fails. The byte counts below are hand-computed, not copied from
+# the tool: bound/exact.bin holds 100 a's plus its newline, and
+# bound/over.bin holds 101 a's plus its newline.
+cd $GOPATH/src
+cd tools
+go run . sizegate ../bound/exact.bin ../bound/rec100.txt
+stdout 'wasm size ok'
+! go run . sizegate ../bound/over.bin ../bound/rec100.txt
+stderr 'exceeds recorded'
+
 # The fixture runs before the matrix, proving it is a working program.
 # It uses ? propagation, so the gate also pins lowering stability.
 cd $GOPATH/src
@@ -109,6 +121,16 @@ env GOOS=
 env GOARCH=
 go run . sizegate $WORK/example.wasm $GOROOT/test/logos/size/wasm_size.txt
 stdout '^wasm size ok: '
+
+# Gross negative: the real stripped build must fail against a tiny
+# recorded size, proving the gate rejects growth instead of passing
+# unconditionally.
+cd $GOPATH/src
+cd tools
+env GOOS=
+env GOARCH=
+! go run . sizegate $WORK/example.wasm ../bound/tiny.txt
+stderr 'exceeds recorded'
 
 -- repro/go.mod --
 module example.com/repro
@@ -244,3 +266,12 @@ func sizegate(args []string) error {
 	}
 	return nil
 }
+
+-- bound/exact.bin --
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+-- bound/over.bin --
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+-- bound/rec100.txt --
+100
+-- bound/tiny.txt --
+100
