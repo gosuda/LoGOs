@@ -1,6 +1,3 @@
-# A Go caller mutating through a const view compiles (documented hole).
-# loGo/s rejects the same store with const_view_mutation.
-
 env GOPROXY=off
 env GOTOOLCHAIN=local
 mkdir $WORK/bin

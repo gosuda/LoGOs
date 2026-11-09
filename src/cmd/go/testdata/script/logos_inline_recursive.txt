@@ -1,7 +1,3 @@
-# O3 refuses recursive-cycle functions above the 80-cost budget while a
-# cheaper recursive pair and a same-size plain function still inline.
-# Raising the recursive budget admits the refused function, which pins the
-# refusal to the 80 limit rather than the 400 tier budget.
 env GOPROXY=off
 env GOTOOLCHAIN=local
 

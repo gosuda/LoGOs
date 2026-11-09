@@ -1,9 +1,3 @@
-# M3-S7: Go importers of loGo/s option and non-nil signatures (R-U2, T-Sec5).
-# Package a exports F, Box, G, H; a Go package in another workspace module
-# sees plain pointers and rt.Option, builds under logos, and gets
-# MustNonNil panics on direct, go, defer, and method calls with nil.
-# Calls through func values stay unchecked; eject plus upstream go stays
-# unchecked too.
 env GOPROXY=off
 env GOTOOLCHAIN=local
 mkdir $WORK/bin
@@ -16,14 +10,12 @@ stdout '^F-nil H-none I-seven G-ok: gadget defer-ok: logos: nil from Go value st
 stdout '^direct-ok: logos: nil from Go value stored into non-nil \*a\.User at q\.go:[0-9]+$'
 cd ..
 
-# go statements evaluate MustNonNil immediately and crash with the call position.
 cd w
 logos build -o $WORK/bin/interopnil-go$GOEXE ./g/cmdgo
 ! exec $WORK/bin/interopnil-go$GOEXE
 stderr 'logos: nil from Go value stored into non-nil \*a\.User at main\.go:[0-9]+'
 cd ..
 
-# Eject a Go main over a loGo/s dep via replace; upstream go has no checks.
 cd e/gapp
 logos run .
 stdout '^dep-ok$'

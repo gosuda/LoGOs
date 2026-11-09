@@ -1,24 +1,13 @@
-# M10-S1: logos next converts a Go module to a loGo/s module with
-# byte-span splicing. Plain next prints a unified diff and changes
-# nothing; next --fix renames every Go file to .lgo, rewrites err-return
-# patterns to ?, Sprintf calls to interpolation, and pure index-range
-# append loops to map chains. Complex refactors stay unchanged and land
-# in next_tasks.json. Comments and build lines survive byte-identical,
-# untouched files survive byte-identical, and the converted module builds
-# and tests green under logos, including the local-replace Go import.
-
 env GOPROXY=off
 env GOTOOLCHAIN=local
 
 cd m
 
-# The fixture is valid Go before conversion.
 logos build ./...
 logos test ./...
 logos run .
 cp stdout $WORK/run-before.txt
 
-# Snapshot every source file; plain next must change nothing.
 cp main.go $WORK/main.go.orig
 cp convert.go $WORK/convert.go.orig
 cp loop.go $WORK/loop.go.orig
@@ -28,7 +17,6 @@ cp tail.go $WORK/tail.go.orig
 cp convert_test.go $WORK/convert_test.go.orig
 cp go.mod $WORK/go.mod.orig
 
-# Plain next prints a unified diff and changes nothing (#69, #109).
 logos next
 stdout '^--- a/convert\.go$'
 stdout '^\+\+\+ b/convert\.lgo$'
@@ -47,18 +35,15 @@ cmp gap.go $WORK/gap.go.orig
 cmp tail.go $WORK/tail.go.orig
 cmp go.mod $WORK/go.mod.orig
 
-# The AI patch plan lists complex refactors without renaming anything.
 logos next --ai-patch
 exists next_tasks.json
 ! exists main.lgo
 stdout 'ai-patch'
 exec rm next_tasks.json
 
-# No logos fmt command exists (#109).
 ! logos fmt
 stderr 'logos fmt: unknown command'
 
-# Fix converts the module.
 logos next --fix
 stdout 'tasks in next_tasks.json'
 exists next_tasks.json
@@ -77,7 +62,6 @@ exists convert_test.lgo
 ! exists tail.go
 ! exists convert_test.go
 
-# Every comment and build line survives byte-identical (#69, #109).
 grep '^//go:build linux$' main.lgo
 grep 'Command nextdemo exercises logos next migration patterns' main.lgo
 grep 'clean input' convert.lgo
@@ -85,39 +69,28 @@ grep 'fall back handled below' convert.lgo
 grep 'Conversion patterns for index-range append loops' loop.lgo
 grep 'Plain helpers stay untouched by conversion' plain.lgo
 
-# Whole-file goldens pin every byte outside the rewrites (#69, #109).
 cmp main.lgo ../want/main.lgo
 cmp convert.lgo ../want/convert.lgo
 cmp gap.lgo $WORK/gap.go.orig
 cmp loop.lgo ../want/loop.lgo
 cmp tail.lgo ../want/tail.lgo
 
-# The task plan matches the schema, spans, and rules exactly.
 cmp next_tasks.json ../want/next_tasks.json
 
-# Error patterns became ?.
 grep 'v := clean\(s\)\? // clean input' convert.lgo
 grep 'v = clean\(s\)\?' convert.lgo
 grep 'check\(n\)\?' main.lgo
-# main returns no error, so its own check stays as written.
 grep 'if err != nil' main.lgo
 
-# Sprintf with only s d v operands became interpolation.
 grep '\$"hello \{msg\} \{n\} \{true\}"' main.lgo
 ! grep 'Sprintf' main.lgo
 
-# The pure index-range append loop became a map chain.
 grep 'ys := xs\.map\(x => double\(x\)\)' loop.lgo
 
-# A pure loop whose declaration is not adjacent stays byte-identical: the
-# statement between them survives (gap.lgo is byte-identical, checked with
-# the goldens above) and nothing is rewritten or listed.
 ! grep 'spaced' next_tasks.json
-# A target accumulated before the loop is listed, not rewritten.
 grep -count=1 '^\tys := \[\]int\{\}$' loop.lgo
 grep -count=1 '^\t\tys = append\(ys, double\(xs\[i\]\)\)$' loop.lgo
 
-# Complex refactors stayed unchanged and are listed for AI patching.
 grep 'fetch fallback for' convert.lgo
 grep 'return v, err' convert.lgo
 grep 'hex %x' convert.lgo
@@ -136,16 +109,11 @@ grep '"file": "convert.lgo"' next_tasks.json
 grep '"file": "loop.lgo"' next_tasks.json
 grep '"verification_cmd": "logos build \./\.\.\."' next_tasks.json
 
-# The local-replace Go import stays as written (R-U2).
 grep 'example\.com/dep/greet' main.lgo
 
-# Untouched code is byte-identical apart from the rename.
 cmp plain.lgo $WORK/plain.go.orig
 cmp convert_test.lgo $WORK/convert_test.go.orig
 
-# The converted module builds, tests, and runs identically under logos.
-# loop.lgo sorts after the synthetic logos-chain base file, so this build
-# covers the chain lowering positions under DWARF scope checks.
 logos build ./...
 logos test ./...
 logos run .

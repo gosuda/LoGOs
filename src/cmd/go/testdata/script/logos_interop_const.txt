@@ -1,11 +1,3 @@
-# M5-S6: Go importers of loGo/s const views (R-U2, T-Sec5).
-# Package c exports Primes (a const view over a package-level slice;
-# M5-S2 const composites are not on this base), Count (a const map
-# parameter), Config, and Snapshot (a const pointer result through
-# rt.Freeze). A Go package in another workspace module sees plain
-# []int, map[string]int, and *Config types, builds under logos, and
-# runs. A Go write through the Primes result is a documented hole
-# (A-GOBOUNDARY) and is not asserted here.
 env GOPROXY=off
 env GOTOOLCHAIN=local
 mkdir $WORK/bin

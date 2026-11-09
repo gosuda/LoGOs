@@ -1,14 +1,8 @@
-# M9-S2: portability::alias_extension is a warning of the portability group
-# and applies to loGo/s packages only. It fires once per alias-extension
-# file, test files included, only in a main module whose path starts with a
-# dotted element (a module that could be published); a canonical .lgo file
-# and a Go package never warn. The warning never fails the build.
 env GOPROXY=off
 env GOTOOLCHAIN=local
 
 mkdir $WORK/bin
 
-# A dotted module path warns once per alias file, test files included.
 cd dotted
 logos build -o $WORK/bin/dotted$GOEXE ./cmd
 stderr -count=1 'go: warning: \[portability::alias_extension\] main\.📜: loGo/s alias extension file'
@@ -20,8 +14,6 @@ stderr -count=1 'lib\.⚡:'
 stderr -count=1 'lib_test\.⚡:'
 cd ..
 
-# The same sources in a module whose first path element has no dot are silent:
-# the module zip rules that reject alias names apply to published modules.
 cd plain
 logos build -o $WORK/bin/plain$GOEXE ./cmd
 ! stderr .
@@ -30,14 +22,12 @@ logos build ./lib
 ! stderr .
 cd ..
 
-# A canonical .lgo file never warns, even in a dotted module.
 cd canonical
 logos build -o $WORK/bin/canonical$GOEXE .
 ! stderr .
 exists $WORK/bin/canonical$GOEXE
 cd ..
 
-# A Go module never warns: plain Go sources carry no alias extension.
 cd gomod
 logos build -o $WORK/bin/gomod$GOEXE .
 ! stderr .

@@ -1,10 +1,6 @@
-# M9-S1 (R-U1): logos lint applies the language-neutral rules to the Go
-# packages of the main module, while logos build and plain go run no lint.
 env GOPROXY=off
 env GOTOOLCHAIN=local
 
-# logos lint fails on the dropped error in the .go file, reports no
-# loGo/s-only rule for the bare go statement, and writes no binary.
 cd dropped
 ! logos lint ./...
 stderr 'main\.go:10:2: \[slop::discarded_error\]'
@@ -13,8 +9,6 @@ stderr 'main\.go:10:2: \[slop::discarded_error\]'
 ! exists dropped$GOEXE
 cd ..
 
-# logos build ./... and go build ./... on the same module print no lint
-# diagnostic and exit 0.
 cd dropped
 logos build ./...
 ! stderr .
@@ -22,60 +16,45 @@ go build ./...
 ! stderr .
 cd ..
 
-# //logos:allow(slop::discarded_error) silences the diagnostic.
 cd allowed
 logos lint ./...
 ! stderr .
 cd ..
 
-# logos.toml slop = "warn" turns it into a warning that does not fail.
 cd warned
 logos lint ./...
 stderr 'main\.go:6:2: warning: \[slop::discarded_error\]'
 cd ..
 
-# correctness::infinite_recursion defaults to forbid but runs at deny in a
-# Go package.
 cd recursive
 ! logos lint ./...
 stderr 'main\.go:3:6: \[correctness::infinite_recursion\]'
 ! stderr 'allow_forbidden_rule'
 cd ..
 
-# The directive silences it in the .go file.
 cd recursive_allowed
 logos lint ./...
 ! stderr .
 cd ..
 
-# The same directive in a .lgo file fails with allow_forbidden_rule.
 cd recursive_lgo
 ! logos lint ./...
 stderr 'main\.lgo:3:1: \[correctness::allow_forbidden_rule\]'
 cd ..
 
-# logos lint --json-diagnostics prints one record whose file ends in .go
-# with severity deny (the Go cap);
-# TestLogosJSONDiagnostics checks the record as JSON.
 cd dropped
 ! logos lint --json-diagnostics ./...
 cd ..
 
-# The capped severity of a forbid-default rule is deny in the JSON output;
-# TestLogosJSONDiagnostics checks the record as JSON.
 cd recursive
 ! logos lint --json-diagnostics ./...
 cd ..
 
-# A group configured forbid still runs at deny in a Go package, so the
-# directive silences it there.
 cd goforbid
 logos lint ./...
 ! stderr .
 cd ..
 
-# A Go dependency module, not the main module, gets no lint diagnostic, even
-# when named on the command line.
 cd app
 logos lint ./...
 ! stderr .
@@ -85,8 +64,6 @@ logos build ./...
 ! stderr .
 cd ..
 
-# A loGo dependency module, not the main module, gets no lint diagnostic,
-# even when named on the command line. No logos.toml disables any lint.
 cd lgoapp
 logos lint ./...
 ! stderr .
@@ -96,15 +73,11 @@ logos build ./...
 ! stderr .
 cd ..
 
-# The same dependency linted as its own main module fails, proving the
-# exclusion above is third-party status and not a clean file.
 cd lgodep
 ! logos lint ./...
 stderr 'dep\.lgo:6:2: \[slop::discarded_error\]'
 cd ..
 
-# Positive control: the same package of a workspace module, a main module of
-# the build, is linted.
 cd ws/a
 ! logos lint example.com/wsb
 stderr 'b\.go:6:2: \[slop::discarded_error\]'

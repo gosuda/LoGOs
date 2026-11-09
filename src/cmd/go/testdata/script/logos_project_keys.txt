@@ -1,26 +1,20 @@
-# [project] unknown keys are rejected and strict_files gates loGo/s
-# extensions.
 env GOPROXY=off
 env GOTOOLCHAIN=local
 
-# edition is not a key.
 cd badedition
 ! logos build .
 stderr 'logos\.toml:2:1: unknown key "edition"'
 cd ..
 
-# name is not a key.
 cd emptyname
 ! logos build .
 stderr 'logos\.toml:2:1: unknown key "name"'
 cd ..
 
-# strict_files = [".lgo"] rejects the .⚡ file with the pinned error.
 cd strict
 ! logos build .
 stderr '\[correctness::extension_not_enabled\] x\.⚡: extension \.⚡ is not enabled by logos\.toml strict_files'
 
-# With the key absent the same module builds and runs.
 rm logos.toml
 logos build .
 logos run .

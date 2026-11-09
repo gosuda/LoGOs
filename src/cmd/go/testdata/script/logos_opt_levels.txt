@@ -1,77 +1,57 @@
-# M13-S1: -O levels and CPU targets (SPEC T-105). Levels apply to Go and
-# loGo/s packages under logos and plain go; go help build stays upstream.
 env GOPROXY=off
 env GOTOOLCHAIN=local
 
-# O0 passes -N -l to the compiler.
 logos build -a -x -O=0 .
 stderr '\-N \-l'
 
-# No flag means O2 under logos: inline budget 120, make threshold 256.
 logos build -a -x .
 stderr '\-d=inlbudget=120,variablemakethreshold=256'
 
-# O2 is explicit too.
 logos build -a -x -O=2 .
 stderr '\-d=inlbudget=120,variablemakethreshold=256'
 
-# O3 raises the inline budget, adds the recursive-cycle budget and the
-# variable-make threshold.
 logos build -a -x -O=3 .
 stderr '\-d=inlbudget=400,inlrecursivebudget=80,variablemakethreshold=4096'
 
-# The same flags apply to a Go module under logos build and go build.
 cd gomod
 logos build -a -x -O=2 .
 stderr '\-d=inlbudget=120,variablemakethreshold=256'
 go build -a -x -O=2 .
 stderr '\-d=inlbudget=120,variablemakethreshold=256'
 
-# Plain go without -O keeps the upstream default O1: none of the logos
-# debug flags appear.
 go build -a -x .
 ! stderr 'inlbudget'
 ! stderr 'variablemakethreshold'
 
-# An invalid level fails under go with the accepted set.
 ! go build -O=4 .
 stderr 'go build: invalid -O level "4" \(want 0, 1, 2, 3, s\)'
 cd ..
 
-# An invalid level fails under logos with the accepted set, and -O=z is
-# no longer an accepted level.
 ! logos build -O=4 .
 stderr 'logos build: invalid -O level "4" \(want 0, 1, 2, 3, s\)'
 ! logos build -O=z .
 stderr 'logos build: invalid -O level "z" \(want 0, 1, 2, 3, s\)'
 
-# go help build carries no -O text.
 go help build
 ! stdout ' -O[= ]'
 
-# Os lowers the inline budget: the compile line carries
-# -d=inlbudget=15, and the program still runs.
 logos build -a -x -O=s .
 stderr '\-d=inlbudget=15'
 logos run -O=s .
 stdout '^hello$'
 
-# Os lowers the budget the same way for a Go module under go build.
 cd gomod
 go build -a -x -O=s .
 stderr '\-d=inlbudget=15'
 cd ..
 
-# The default level comes from logos.toml [build] opt_level.
 cd o3
 logos build -a -x .
 stderr '\-d=inlbudget=400,inlrecursivebudget=80,variablemakethreshold=4096'
-# An explicit -O overrides the file.
 logos build -a -x -O=1 .
 ! stderr 'inlbudget'
 cd ..
 
-# Bare and unknown opt_level spellings fail with file and position.
 cd bad3
 ! logos build .
 stderr 'logos\.toml:2:13: opt_level must be one of O0, O1, O2, O3, Os'
@@ -80,14 +60,11 @@ cd ../badO4
 stderr 'logos\.toml:2:13: opt_level must be one of O0, O1, O2, O3, Os'
 cd ..
 
-# File arguments ignore logos.toml: the invalid opt_level is never read
-# and the logos default level applies.
 cd bad3
 logos build -a -x main.lgo
 stderr '\-d=inlbudget=120,variablemakethreshold=256'
 cd ..
 
-# target_cpu deterministic (the default) selects v3 unless set.
 logos build -a -x .
 stderr 'GOAMD64=.v3.'
 env GOAMD64=v2
@@ -95,7 +72,6 @@ logos build -a -x .
 stderr 'GOAMD64=.v2.'
 env GOAMD64=
 
-# The arm64 lane follows the same rule under cross-compilation.
 env GOARCH=arm64
 logos build -a -x .
 stderr 'GOARM64=.v8\.2.'
@@ -105,7 +81,6 @@ stderr 'GOARM64=.v8\.1.'
 env GOARM64=
 env GOARCH=
 
-# baseline pins the oldest CPUs; native picks the host level.
 cd baseline
 logos build -a -x .
 stderr 'GOAMD64=.v1.'
@@ -114,14 +89,6 @@ logos build -a -x .
 stderr 'GOAMD64=.v[134].'
 cd ..
 
-# The levels change what the compiled code does, not only the flags the
-# compiler receives: a frame-local make of variable size stays off the
-# heap up to the level's stack buffer and takes the heap one byte past
-# it. The expected size is written here beside each command and is never
-# read back from the build under test, so an optimization that stops
-# working fails the probe. This fixture is the single owner of the
-# level-size pairs; standard-library packages never receive the
-# variable-make flag, so their own tests keep the upstream bodies.
 cd stackbuf
 env WANT_STACKBUF=32
 go test -count=1 .
@@ -143,13 +110,10 @@ stdout '^ok'
 logos test -count=1 -O=3 .
 stdout '^ok'
 
-# An explicit -gcflags pin still wins over the level's buffer.
 env WANT_STACKBUF=32
 go test -count=1 -O=3 -gcflags=all=-d=variablemakethreshold=32 .
 stdout '^ok'
 
-# A build whose buffer is not the expected one fails the probe: a level
-# that lost its optimization cannot pass as a level that kept it.
 env WANT_STACKBUF=4096
 ! go test -count=1 -O=3 -gcflags=all=-d=variablemakethreshold=32 .
 stdout 'FAIL'

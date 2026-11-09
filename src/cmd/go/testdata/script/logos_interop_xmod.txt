@@ -1,5 +1,3 @@
-# A third-party Go module (a golang.org/x module path) counts as a Go
-# package that loGo/s code imports [A-XMOD][R-U2].
 env GOPROXY=off
 env GOTOOLCHAIN=local
 mkdir $WORK/bin
