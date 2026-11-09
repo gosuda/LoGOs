@@ -26,6 +26,7 @@ import (
 //	func AlignOf[T any]() int
 //	func HasPointers[T any]() bool
 //	func TypeOf[X any]() Type
+//	func Error(msg string)
 // ViewAs, declared by M7-S5 (viewas_logos.go), is part of the package
 // whichever provider creates it.
 

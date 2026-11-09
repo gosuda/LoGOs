@@ -1196,7 +1196,7 @@ func (fl *fileLower) cfLeafSubs(root syntax.Node, active cfChain, covered []cfSp
 			}
 			if v, ok := fl.logosLayoutCallValue(n, active, sites); ok {
 				s, e := cfCallSpan(ctx, n)
-				add(s, e, logosLayoutText(v))
+				add(s, e, keepComments(ctx.buf.b, s, e, logosLayoutText(v)))
 				return false
 			}
 			if sites != nil && sites.comptimeName != "" {

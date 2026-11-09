@@ -252,7 +252,8 @@ func (b *cfRecordBuilder) foldCond(e syntax.Expr) {
 	if val, ok := typeConst(b.fl.pkg.info, e); ok && val.Kind() == constant.Bool {
 		ctx := cfCtx{buf: b.fl.srcMap, starts: b.fl.start}
 		s := offAt(ctx.starts, syntax.StartPos(e))
-		b.subs = append(b.subs, splice{start: s, end: cfFoldEnd(ctx, e), text: strconv.FormatBool(constant.BoolVal(val))})
+		end := cfFoldEnd(ctx, e)
+		b.subs = append(b.subs, splice{start: s, end: end, text: keepComments(ctx.buf.b, s, end, strconv.FormatBool(constant.BoolVal(val)))})
 		return
 	}
 	switch e := e.(type) {

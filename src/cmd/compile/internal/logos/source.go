@@ -93,6 +93,16 @@ func commentsIn(src []byte, from, to int) []span {
 	return out
 }
 
+// keepComments appends the verbatim comments inside src[from:to] to
+// text: folding consumes the folded region, and the ejected text has
+// to carry every comment of the original.
+func keepComments(src []byte, from, to int, text string) string {
+	for _, c := range commentsIn(src, from, to) {
+		text += " " + string(src[c.start:c.end])
+	}
+	return text
+}
+
 // lastTokenEnd returns the end of the last token inside src[from:to] that
 // is neither a comment nor an automatic semicolon, or from when there is
 // none.

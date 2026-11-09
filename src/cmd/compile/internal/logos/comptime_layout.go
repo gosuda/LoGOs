@@ -6,8 +6,8 @@ package logos
 
 import (
 	"go/constant"
+	"go/token"
 	"strconv"
-	"unicode"
 
 	"cmd/compile/internal/syntax"
 	"cmd/compile/internal/types2"
@@ -37,22 +37,26 @@ func logosLayoutName(call *syntax.CallExpr, sites *cfSites) (string, bool) {
 func cfCallSpan(ctx cfCtx, call *syntax.CallExpr) (int, int) {
 	start := offAt(ctx.starts, syntax.StartPos(call))
 	end := cfExactEnd(ctx, call.Fun)
-	src := ctx.buf.b
-	for end < len(src) && unicode.IsSpace(rune(src[end])) {
-		end++
-	}
 	depth := 0
-	for i := end; i < len(src); i++ {
-		switch src[i] {
-		case '(':
+	scanSegment(ctx.buf.b, end, len(ctx.buf.b), func(t tok) bool {
+		switch t.kind {
+		case token.LPAREN:
 			depth++
-		case ')':
+		case token.RPAREN:
 			depth--
-			if depth == 0 {
-				return start, i + 1
+			if depth < 0 {
+				return false
 			}
+			if depth == 0 {
+				end = t.end
+				return false
+			}
+		case token.COMMENT:
+		default:
+			return depth > 0
 		}
-	}
+		return true
+	})
 	return start, end
 }
 
