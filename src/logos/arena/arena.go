@@ -1,3 +1,7 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
 // Package arena provides lifetime-scoped allocation regions for loGo/s.
 //
 // Open returns a Region, and New, Make, and Append allocate into it. The
