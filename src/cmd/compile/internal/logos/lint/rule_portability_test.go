@@ -169,6 +169,26 @@ func TestSerializedUnsizedInt(t *testing.T) {
 	}
 }
 
+func TestSerializedUnsizedIntTagGate(t *testing.T) {
+	const id = "portability::serialized_unsized_int"
+	const src = `package p
+
+type Tagged struct {
+	N int    ` + "`json:\"n\"`" + ` // want
+	S string ` + "`json:\"s\"`" + `
+}
+
+type Plain struct {
+	N int
+	M uint
+}
+`
+	expect(t, KindLgo, nil, testSource{"x.lgo", src}, finding{id, Warn})
+	if got := summarize(Run(check(t, KindGo, "x.go", src))); len(got) != 0 {
+		t.Errorf("Go package results = %q, want none", got)
+	}
+}
+
 // TestSerializedUnsizedIntSeverity covers the group severity: allow drops
 // the finding and deny turns it into an error that the directive silences.
 func TestSerializedUnsizedIntSeverity(t *testing.T) {

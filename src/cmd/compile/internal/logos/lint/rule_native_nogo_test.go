@@ -165,6 +165,37 @@ func reads() int64 {
 			t.Errorf("results = %q, want %q", got, want)
 		}
 	})
+	t.Run("autofix names the wrapper type", func(t *testing.T) {
+		for _, tt := range []struct {
+			name string
+			body string
+			want string
+		}{
+			{"int64", `
+func reads() int64 {
+	return atomic.LoadInt64(&plain)
+}
+`, "atomic.Int64"},
+			{"uint64", `
+func adds() {
+	atomic.AddUint64(&plainU, 1)
+}
+`, "atomic.Uint64"},
+		} {
+			t.Run(tt.name, func(t *testing.T) {
+				in := checkSrc(t, KindGo, "x.go", head+tt.body)
+				var fixes []Fix
+				for _, r := range Run(in) {
+					if r.Rule == "portability::atomic_plain_int64" {
+						fixes = r.Fixes
+					}
+				}
+				if len(fixes) != 1 || fixes[0].Replacement != tt.want {
+					t.Errorf("fixes = %+v, want one fix with replacement %q", fixes, tt.want)
+				}
+			})
+		}
+	})
 }
 
 func TestLinknameMismatch(t *testing.T) {
