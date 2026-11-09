@@ -30,6 +30,7 @@ func TestEncodeDecodeRoundTrip(t *testing.T) {
 		Fns: []facts.FnFact{
 			{Object: "S.Set", ReceiverMutated: true, ParamMutated: "1f", MayYield: true, HasMayYield: true},
 			{Object: "(*S).Get", ReturnsNonNil: true, PureConst: true},
+			{Object: "R.M", Readonly: true},
 		},
 		Props: []facts.PropFact{
 			{Interface: "I", Prefix: "Get"},
@@ -45,6 +46,7 @@ func TestEncodeDecodeRoundTrip(t *testing.T) {
 		"\n" +
 		"const C K\n" +
 		"fn (*S).Get ReturnsNonNil,PureConst\n" +
+		"fn R.M Readonly\n" +
 		"fn S.Set ReceiverMutated,ParamMutated=1f,MayYield=1\n" +
 		"opt H P1\n" +
 		"opt S.F R0.FName\n" +
@@ -68,6 +70,7 @@ func TestEncodeDecodeRoundTrip(t *testing.T) {
 		},
 		Fns: []facts.FnFact{
 			{Object: "(*S).Get", ReturnsNonNil: true, PureConst: true},
+			{Object: "R.M", Readonly: true},
 			{Object: "S.Set", ReceiverMutated: true, ParamMutated: "1f", MayYield: true, HasMayYield: true},
 		},
 		Props: []facts.PropFact{

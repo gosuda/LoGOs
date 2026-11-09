@@ -307,3 +307,24 @@ func TestApplyFuncFactsRejectsMaskOutsideArity(t *testing.T) {
 		})
 	}
 }
+
+func TestCopyFuncReadonlyPropagatesBit(t *testing.T) {
+	pkg := types2.NewPackage("example/readonlycopy", "readonlycopy")
+	pos := syntax.Pos{}
+	sig := types2.NewSignatureType(nil, nil, nil, nil, nil, false)
+	src := types2.NewFunc(pos, pkg, "Src", sig)
+	dst := types2.NewFunc(pos, pkg, "Dst", sig)
+	src.SetLogosReadonly(true)
+	copyFuncReadonly(dst, src)
+	if !dst.LogosReadonly() {
+		t.Fatal("clone lost the readonly bit")
+	}
+	plain := types2.NewFunc(pos, pkg, "Plain", sig)
+	clean := types2.NewFunc(pos, pkg, "Clean", sig)
+	copyFuncReadonly(clean, plain)
+	if clean.LogosReadonly() {
+		t.Fatal("clone invented a readonly bit")
+	}
+	copyFuncReadonly(nil, src)
+	copyFuncReadonly(dst, nil)
+}
