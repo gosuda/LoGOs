@@ -123,4 +123,11 @@ func TestBinaryZeroWireBudget(t *testing.T) {
 	if !strings.Contains(big, "for i := uint64(0); i < n; i++ {") {
 		t.Errorf("nonzero-wire path must grow by append as bytes arrive:\n%s", big)
 	}
+	byts := lowerStaticText(t, "package p\ntype Y struct {\n\tV []byte `json:\"v\"`\n}\n")
+	if strings.Contains(byts, "make([]byte, 0, int(n))") {
+		t.Errorf("byte-slice path pre-allocates the full count:\n%s", byts)
+	}
+	if !strings.Contains(byts, "cap64 := min(n, uint64(len(src)-*off)/2, (1<<20))") {
+		t.Errorf("byte-slice path must cap pre-allocation at min(len(rest)/2, 1MB):\n%s", byts)
+	}
 }

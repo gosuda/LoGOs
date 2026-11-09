@@ -141,7 +141,7 @@ func (g *binaryGenerator) codec(t types2.Type) (int, bool) {
 		case *types2.Slice:
 			if b, ok := x.Elem().Underlying().(*types2.Basic); ok && b.Kind() == types2.Uint8 {
 				e("dst = _logos_bbinary.AppendUvarint(dst, uint64(len(v))); dst = append(dst, v...)")
-				d("n, used := _logos_bbinary.Uvarint(src[*off:]); if used <= 0 { %s }; *off += used; if n > uint64(len(src)-*off) { %s }; *v = append(make(%s, 0, int(n)), src[*off:*off+int(n)]...); *off += int(n)", fail, fail, name)
+				d("n, used := _logos_bbinary.Uvarint(src[*off:]); if used <= 0 { %s }; *off += used; if n > uint64(len(src)-*off) { %s }; cap64 := min(n, uint64(len(src)-*off)/2, (1<<20)); *v = append(make(%s, 0, int(cap64)), src[*off:*off+int(n)]...); *off += int(n)", fail, fail, name)
 				break
 			}
 			if g.isZeroWire(x.Elem()) {
