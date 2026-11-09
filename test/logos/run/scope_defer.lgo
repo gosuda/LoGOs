@@ -151,6 +151,37 @@ func loopIter() {
 	show("loop:")
 }
 
+func panicInLoop() {
+	defer func() {
+		_ = recover()
+		show("ploop:")
+	}()
+	for i := 0; i < 3; i++ {
+		scope defer note(fmt.Sprint("ploop:", i))
+		if i == 1 {
+			panic("boom")
+		}
+		note(fmt.Sprint("pwork:", i))
+	}
+}
+
+func nestedLoopPanic() {
+	defer func() {
+		_ = recover()
+		show("nploop:")
+	}()
+	for i := 0; i < 2; i++ {
+		scope defer note(fmt.Sprint("outer:", i))
+		for j := 0; j < 2; j++ {
+			scope defer note(fmt.Sprint("inner:", i, j))
+			if i == 1 && j == 1 {
+				panic("boom")
+			}
+			note(fmt.Sprint("work:", i, j))
+		}
+	}
+}
+
 func gotoLabel() {
 	{
 		note("start")
@@ -274,6 +305,8 @@ func main() {
 	fmt.Println("trytail:", err, log)
 	reset()
 	loopIter()
+	panicInLoop()
+	nestedLoopPanic()
 	namedResult()
 	show("named:")
 	funcVarDefer()

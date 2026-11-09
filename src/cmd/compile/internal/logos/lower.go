@@ -728,6 +728,7 @@ type funcLower struct {
 	scopeLabels      map[string]*syntax.LabeledStmt
 	scopeDeferLabels map[string]int
 	scopeCtxs        []*scopeDeferCtx
+	scopeHoists      []string
 }
 
 // newFuncLower builds the lowering state of one function body.

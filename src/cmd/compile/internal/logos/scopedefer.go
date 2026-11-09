@@ -7,6 +7,7 @@ package logos
 import (
 	"strconv"
 
+	"cmd/compile/internal/base"
 	"cmd/compile/internal/syntax"
 )
 
@@ -45,12 +46,11 @@ import (
 // return generated later inside the tail picks up the stanza through
 // exitPair, which consults the recorded tail spans.
 
-// scopeItem is one scope defer of one block: its capture plan, its armed
-// flag spelling, and its statement position.
 type scopeItem struct {
-	plan  *callPlan
-	armed string
-	pos   syntax.Pos
+	plan    *callPlan
+	armed   string
+	pos     syntax.Pos
+	hoisted bool
 }
 
 // scopeDeferCtx is the scope-defer state of one block: the tail region
@@ -98,6 +98,9 @@ func (fc *funcLower) lowerScopeDefers() {
 	fc.collectScopeInfo()
 	fl := fc.fl
 	fc.body.List = fc.scopeBlockList(fc.body.List, fc.body, fl.off(fc.body.Rbrace), nil, nil)
+	if len(fc.scopeHoists) != 0 {
+		base.Fatalf("logos: scope defer guard left inside loop")
+	}
 }
 
 // collectScopeInfo records the parent of every statement-level node and
@@ -195,6 +198,10 @@ func (fc *funcLower) scopeBlockList(list []syntax.Stmt, owner syntax.Node, endOf
 					fc.scopeDeferLabels[lab.Value] = len(stack)
 				}
 			}
+			if scopeInLoop(stack) {
+				out = append(out, fc.scopeLoopPrelude(sd, labels, ctx)...)
+				continue
+			}
 			out = append(out, fc.scopeLabeledPrelude(sd, labels, ctx)...)
 			continue
 		}
@@ -214,7 +221,7 @@ func (fc *funcLower) scopeBlockList(list []syntax.Stmt, owner syntax.Node, endOf
 		native, text, tw := fc.scopeStanza(syntax.EndPos(list[len(list)-1]), ownScopeItems(ctx))
 		out = append(out, native...)
 		fl := fc.fl
-		gapStart := stmtEnd(fl.src, fl.off(syntax.StartPos(list[len(list)-1])))
+		gapStart := max(stmtEnd(fl.src, fl.off(syntax.StartPos(list[len(list)-1]))), scopeStmtEnd(fl, list[len(list)-1]))
 		prefix := leftoverComments(fl, span{start: gapStart, end: endOff}, nil)
 		gap := cat(prefix, renderText(text, tw.subs))
 		if prefix.s == "" {
@@ -223,6 +230,14 @@ func (fc *funcLower) scopeBlockList(list []syntax.Stmt, owner syntax.Node, endOf
 		fl.addT(gapStart, endOff, gap)
 	}
 	return out
+}
+
+func scopeStmtEnd(fl *fileLower, s syntax.Stmt) int {
+	switch s.(type) {
+	case *syntax.ForStmt, *syntax.SwitchStmt, *syntax.SelectStmt, *syntax.IfStmt, *syntax.BlockStmt, *syntax.LabeledStmt:
+		return fl.off(syntax.EndPos(s)) + 1
+	}
+	return fl.off(syntax.EndPos(s))
 }
 
 // scopeFallthrough prefixes a case-body fallthrough with its own block's
@@ -263,10 +278,6 @@ func unwrapScopeLabels(s syntax.Stmt) (syntax.Stmt, []*syntax.Name) {
 		s = lab.Stmt
 	}
 }
-
-// scopeLabeledPrelude emits the prelude of a scope defer carrying labels
-// (`L: scope defer f()`): the labels stay on the first prelude statement
-// in source and tree, so a `goto L` re-registers the defer.
 func (fc *funcLower) scopeLabeledPrelude(sd *syntax.ScopeDeferStmt, labels []*syntax.Name, ctx *scopeDeferCtx) []syntax.Stmt {
 	stmtOff, prefix := fc.fl.off(sd.Pos()), gen("")
 	if len(labels) > 0 {
@@ -334,6 +345,108 @@ func (fc *funcLower) scopePrelude(sd *syntax.ScopeDeferStmt, ctx *scopeDeferCtx,
 	fl.addT(stmtOff, spanEnd, cat(prefix, kept, renderText(text, tw.subs)))
 	return native
 }
+func (fc *funcLower) scopeLoopPrelude(sd *syntax.ScopeDeferStmt, labels []*syntax.Name, ctx *scopeDeferCtx) []syntax.Stmt {
+	stmtOff, prefix := fc.fl.off(sd.Pos()), gen("")
+	if len(labels) > 0 {
+		stmtOff = fc.fl.off(labels[0].Pos())
+		prefix = fc.fl.srcUser(stmtOff, fc.fl.off(sd.Pos()))
+	}
+	native := fc.scopeHoistedPrelude(sd, ctx, stmtOff, prefix)
+	for i := len(labels) - 1; i >= 0; i-- {
+		inner := native[0]
+		lab := &syntax.LabeledStmt{Label: labels[i], Stmt: inner}
+		lab.SetPos(labels[i].Pos())
+		native[0] = lab
+	}
+	return native
+}
+
+func (fc *funcLower) scopeHoistedPrelude(sd *syntax.ScopeDeferStmt, ctx *scopeDeferCtx, stmtOff int, prefix otext) []syntax.Stmt {
+	fl := fc.fl
+	pos := sd.Pos()
+	call, ok := syntax.Unparen(sd.Call).(*syntax.CallExpr)
+	if !ok {
+		return []syntax.Stmt{sd}
+	}
+	plan, planned := fc.planCall(call)
+	if !planned {
+		return []syntax.Stmt{sd}
+	}
+	item := scopeItem{plan: plan, armed: fc.nextScope(), pos: pos, hoisted: true}
+	ctx.items = append(ctx.items, item)
+	fc.scopeHoists = append(fc.scopeHoists, item.armed)
+	tw := &twin{}
+	funN, argN, capNamesN, capValsN := fc.planUses(plan, nil)
+	funT, argT, capNamesT, capValsT := fc.planUses(plan, tw)
+	callN := callOf(pos, funN, argN)
+	callN.HasDots = plan.dots
+	callT := callOf(pos, funT, argT)
+	callT.HasDots = plan.dots
+	var native []syntax.Stmt
+	var text []syntax.Stmt
+	if len(capNamesN) > 0 {
+		native = append(native, defineOf(pos, capNamesN, capValsN))
+		text = append(text, defineOf(pos, capNamesT, capValsT))
+	}
+	native = append(native, assignOf(pos, []syntax.Expr{nameOf(pos, item.armed)}, []syntax.Expr{deferClosure(pos, []syntax.Stmt{exprStmtOf(pos, callN)})}))
+	text = append(text, assignOf(pos, []syntax.Expr{nameOf(pos, item.armed)}, []syntax.Expr{deferClosure(pos, []syntax.Stmt{exprStmtOf(pos, callT)})}))
+	spanEnd := skipCloseParens(fl.src, plan.end)
+	kept := leftoverComments(fl, span{start: stmtOff, end: spanEnd}, planSpans(plan))
+	fl.addT(stmtOff, spanEnd, cat(prefix, kept, renderText(text, tw.subs)))
+	return native
+}
+
+func scopeInLoop(stack []scopeFrame) bool {
+	for _, fr := range stack {
+		if fr.loop {
+			return true
+		}
+	}
+	return false
+}
+
+func scopeHolderDecl(pos syntax.Pos, armed string) *syntax.DeclStmt {
+	return at(&syntax.DeclStmt{DeclList: []syntax.Decl{at(&syntax.VarDecl{
+		NameList: []*syntax.Name{nameOf(pos, armed)},
+		Type:     at(&syntax.FuncType{ParamList: []*syntax.Field{}}, pos),
+	}, pos)}}, pos)
+}
+
+func scopeGuardDefer(pos syntax.Pos, armed, temp string) *syntax.CallStmt {
+	body := []syntax.Stmt{
+		defineOf(pos, []syntax.Expr{nameOf(pos, temp)}, []syntax.Expr{nameOf(pos, armed)}),
+		assignOf(pos, []syntax.Expr{nameOf(pos, armed)}, []syntax.Expr{nilOf(pos)}),
+		exprStmtOf(pos, callOf(pos, nameOf(pos, temp), nil)),
+	}
+	return deferOf(pos, callOf(pos, deferClosure(pos, []syntax.Stmt{ifOf(pos, nil, notNil(pos, nameOf(pos, armed)), body)}), nil))
+}
+
+func scopeHolderStanza(pos syntax.Pos, armed, temp string) *syntax.IfStmt {
+	body := []syntax.Stmt{
+		defineOf(pos, []syntax.Expr{nameOf(pos, temp)}, []syntax.Expr{nameOf(pos, armed)}),
+		assignOf(pos, []syntax.Expr{nameOf(pos, armed)}, []syntax.Expr{nilOf(pos)}),
+		exprStmtOf(pos, callOf(pos, nameOf(pos, temp), nil)),
+	}
+	return ifOf(pos, nil, notNil(pos, nameOf(pos, armed)), body)
+}
+
+func (fc *funcLower) drainScopeHoists(pos syntax.Pos) []syntax.Stmt {
+	if len(fc.scopeHoists) == 0 {
+		return nil
+	}
+	var native []syntax.Stmt
+	var text []syntax.Stmt
+	for _, armed := range fc.scopeHoists {
+		temp := fc.nextScope()
+		native = append(native, scopeHolderDecl(pos, armed))
+		native = append(native, scopeGuardDefer(pos, armed, temp))
+		text = append(text, scopeHolderDecl(pos, armed))
+		text = append(text, scopeGuardDefer(pos, armed, temp))
+	}
+	fc.scopeHoists = nil
+	fc.fl.addT(fc.fl.off(pos), fc.fl.off(pos), renderText(text, nil))
+	return native
+}
 
 // scopeStanza builds the runnable cleanup sequence for items twice:
 // native with user nodes, text with markers. Items run innermost first,
@@ -341,6 +454,12 @@ func (fc *funcLower) scopePrelude(sd *syntax.ScopeDeferStmt, ctx *scopeDeferCtx,
 func (fc *funcLower) scopeStanza(pos syntax.Pos, items []scopeItem) (native, text []syntax.Stmt, tw *twin) {
 	tw = &twin{}
 	for _, it := range items {
+		if it.hoisted {
+			temp := fc.nextScope()
+			native = append(native, scopeHolderStanza(pos, it.armed, temp))
+			text = append(text, scopeHolderStanza(pos, it.armed, temp))
+			continue
+		}
 		funN, argN, _, _ := fc.planUses(it.plan, nil)
 		funT, argT, _, _ := fc.planUses(it.plan, tw)
 		callN := callOf(pos, funN, argN)
@@ -381,8 +500,14 @@ func (fc *funcLower) scopeStmt(s syntax.Stmt, active []*scopeDeferCtx, stack []s
 		}
 		return []syntax.Stmt{s}
 	case *syntax.ForStmt:
+		outer := !scopeInLoop(stack)
 		stack = append(stack, scopeFrame{loop: true})
 		s.Body.List = fc.scopeBlockList(s.Body.List, s.Body, fc.fl.off(s.Body.Rbrace), active, stack)
+		if outer {
+			if pre := fc.drainScopeHoists(s.Pos()); pre != nil {
+				return append(pre, s)
+			}
+		}
 		return []syntax.Stmt{s}
 	case *syntax.SwitchStmt:
 		stack = append(stack, scopeFrame{})
@@ -401,8 +526,18 @@ func (fc *funcLower) scopeStmt(s syntax.Stmt, active []*scopeDeferCtx, stack []s
 		if _, ok := s.Stmt.(*syntax.ForStmt); ok {
 			loop = true
 		}
+		outer := !scopeInLoop(stack)
 		stack = append(stack, scopeFrame{label: s.Label.Value, loop: loop})
 		res := fc.scopeStmt(s.Stmt, active, stack)
+		if loop && outer {
+			if pre := fc.drainScopeHoists(s.Label.Pos()); pre != nil {
+				if len(res) == 1 {
+					s.Stmt = res[0]
+					return append(pre, s)
+				}
+				return append(pre, blockOf(s.Pos(), res))
+			}
+		}
 		if len(res) == 1 {
 			s.Stmt = res[0]
 			return []syntax.Stmt{s}

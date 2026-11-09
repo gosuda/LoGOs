@@ -65,37 +65,32 @@ func lowerSnippetSrc(t *testing.T, name, src string) string {
 	return string(out)
 }
 
-// TestScopeDeferOpenCoded proves SPEC #52 and #113 under the revised
-// T-104.7 technique: each scope defer binds its callee at the statement
-// behind an armed flag, registers one guarding `defer` for the panic
-// path, and every block exit runs the cleanup inline. There is no
-// function-literal wrapper around the block and no separate unwind
-// table: exactly the two guard closures are the only `func()` literals,
-// and no identifier mentions unwinding.
 func TestScopeDeferOpenCoded(t *testing.T) {
 	src := "package main\n\nimport \"fmt\"\n\nfunc note(s string) { fmt.Println(s) }\n\nfunc f(n int) int {\n\t{\n\t\tnote(\"lock\")\n\t\tscope defer note(\"unlock\")\n\t\tnote(\"body\")\n\t\tif n > 0 {\n\t\t\treturn 1\n\t\t}\n\t}\n\treturn 0\n}\n\nfunc g() {\n\tfor range 3 {\n\t\tscope defer note(\"iter\")\n\t\tnote(\"work\")\n\t}\n}\n"
 	out := lowerSnippetSrc(t, "scopesnip.lgo", src)
-	// One guarding defer per scope-defer site: block exit (f) and loop
-	// body (g). The guard is the panic path (#113).
 	if n := strings.Count(out, "defer func() {"); n != 2 {
 		t.Errorf("got %d guarding defers, want 2 (one per scope defer site)", n)
 	}
-	// No function-literal wrapper: the guards are every func literal.
-	if n := strings.Count(out, "func()"); n != 2 {
-		t.Errorf("got %d func() literals, want 2 (the guards only, no block wrapper)", n)
+	if n := strings.Count(out, "= func() {"); n != 1 {
+		t.Errorf("got %d holder closures, want 1 (the loop body rebinds one holder per iteration)", n)
 	}
-	// Armed-flag inline stanzas: guard-if plus return and fallthrough
-	// exits in f, guard-if plus iteration-end in g.
-	if n := strings.Count(out, "if _logos_sd0 {"); n != 5 {
-		t.Errorf("got %d armed-flag stanzas, want 5", n)
+	if !strings.Contains(out, "var _logos_sd0") {
+		t.Errorf("missing hoisted holder declaration:\n%s", out)
 	}
-	// Callee bound at the statement, not re-resolved at exit.
+	if n := strings.Count(out, "if _logos_sd0 {"); n != 3 {
+		t.Errorf("got %d armed-flag stanzas, want 3", n)
+	}
+	if n := strings.Count(out, "if _logos_sd0 != nil {"); n != 2 {
+		t.Errorf("got %d holder stanzas, want 2 (panic guard and iteration end)", n)
+	}
 	if !strings.Contains(out, "_logos_f0 := note") {
 		t.Errorf("callee capture missing:\n%s", out)
 	}
-	// No separate unwind table under any spelling.
 	if strings.Contains(strings.ToLower(out), "unwind") {
 		t.Errorf("unwind table reference in open-coded lowering:\n%s", out)
+	}
+	if strings.LastIndex(out, "defer func() {") > strings.Index(out, "for range") {
+		t.Errorf("loop guard sits inside the loop, disabling open-coded defers:\n%s", out)
 	}
 }
 
