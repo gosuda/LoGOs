@@ -69,7 +69,7 @@ func flat(n *node) int {
 	return sumA(n.data) + sumB(n.data)
 }
 
-// amd64:"TEXT .*, [$][0-9]{4,}-"
+// amd64:"TEXT .*, [$][0-9]{1,3}-"
 // arm64:"TEXT .*, [$][0-9]{4,}-"
 func flatLabel(n *node) int {
 	t := $"id={n.id} name={n.name}"

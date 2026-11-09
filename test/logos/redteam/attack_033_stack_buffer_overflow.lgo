@@ -12,7 +12,7 @@ func c33const() int {
 
 //go:noinline
 func c33var(n int) int {
-	// amd64:"CALL.*runtime.makeslice" arm64:"CALL.*runtime.makeslice"
+	// amd64:1"CALL.*runtime\\.logosArenaMakeSlice" amd64:-"CALL.*runtime\\.makeslice" arm64:"CALL.*runtime.makeslice"
 	s := make([]byte, n)
 	for i := range s {
 		s[i] = byte(i)
