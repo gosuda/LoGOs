@@ -98,6 +98,11 @@ func TestAdvWithlockLeak(t *testing.T) {
 			nil,
 		},
 		{
+			"aliasThroughLocal",
+			"func p2(l *Locked[Box]) { l.WithLock(func(b *Box) { c := b; leaked = c }) }\n",
+			[]string{"26 correctness::withlock_leak deny"},
+		},
+		{
 			"derefStoreEscapes",
 			"func p5(l *Locked[Box]) { l.WithLock(func(b *Box) { *pslot = b }) }\n",
 			[]string{"26 correctness::withlock_leak deny"},

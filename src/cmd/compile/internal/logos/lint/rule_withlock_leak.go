@@ -7,6 +7,7 @@ package lint
 import (
 	"cmd/compile/internal/syntax"
 	"cmd/compile/internal/types2"
+	"cmp"
 )
 
 var withlockLeak = Rule{
@@ -34,6 +35,7 @@ type leakCheck struct {
 	paramName string
 	paramObjs []types2.Object
 	locals    map[types2.Object]bool
+	aliases   map[types2.Object]bool
 	closures  []*leakClosure
 	returns   []leakReturn
 }
@@ -66,8 +68,9 @@ func checkWithlockLeak(pass *Pass) {
 			if name == "" || len(objs) == 0 {
 				return true
 			}
-			c := &leakCheck{pass: pass, paramName: name, paramObjs: objs, locals: make(map[types2.Object]bool)}
+			c := &leakCheck{pass: pass, paramName: name, paramObjs: objs, locals: make(map[types2.Object]bool), aliases: make(map[types2.Object]bool)}
 			c.indexLocals(body)
+			c.buildAliases(body)
 			c.scanUnit(body, nil)
 			c.markEscapes(body)
 			for _, r := range c.returns {
@@ -140,6 +143,14 @@ func (c *leakCheck) isParamUse(name *syntax.Name) bool {
 	return c.isParamObj(obj)
 }
 
+func (c *leakCheck) isAliasUse(name *syntax.Name) bool {
+	obj, ok := c.pass.Info.Uses[name]
+	if !ok {
+		return false
+	}
+	return c.aliases[obj]
+}
+
 func (c *leakCheck) indexLocals(body syntax.Node) {
 	syntax.Inspect(body, func(n syntax.Node) bool {
 		name, ok := n.(*syntax.Name)
@@ -151,6 +162,41 @@ func (c *leakCheck) indexLocals(body syntax.Node) {
 		}
 		return true
 	})
+}
+
+func (c *leakCheck) buildAliases(body syntax.Node) {
+	for grew := true; grew; {
+		grew = false
+		syntax.Inspect(body, func(n syntax.Node) bool {
+			if x, ok := n.(*syntax.AssignStmt); ok && x.Rhs != nil && c.aliasFromAssign(x) {
+				grew = true
+			}
+			return true
+		})
+	}
+}
+
+func (c *leakCheck) aliasFromAssign(x *syntax.AssignStmt) bool {
+	lhs, rhs := exprList(x.Lhs), exprList(x.Rhs)
+	grew := false
+	for i, el := range lhs {
+		if i >= len(rhs) {
+			break
+		}
+		name, ok := syntax.Unparen(el).(*syntax.Name)
+		if !ok || isBlank(name) {
+			continue
+		}
+		obj := cmp.Or(c.pass.Info.Defs[name], c.pass.Info.Uses[name])
+		if obj == nil || c.isParamObj(obj) || c.aliases[obj] {
+			continue
+		}
+		if c.carriesPtr(rhs[i]) {
+			c.aliases[obj] = true
+			grew = true
+		}
+	}
+	return grew
 }
 func (c *leakCheck) scanUnit(body syntax.Node, cl *leakClosure) {
 	syntax.Inspect(body, func(n syntax.Node) bool {
@@ -211,7 +257,7 @@ func (c *leakCheck) carriesPtr(e syntax.Expr) bool {
 		if !ok {
 			return true
 		}
-		if !c.isParamUse(name) {
+		if !c.isParamUse(name) && !c.isAliasUse(name) {
 			return true
 		}
 		if p := leakParent(e, name); p != nil {
@@ -257,7 +303,7 @@ func (c *leakCheck) captures(body syntax.Node) bool {
 		if !ok {
 			return true
 		}
-		if c.isParamUse(name) {
+		if c.isParamUse(name) || c.isAliasUse(name) {
 			captured = true
 			return false
 		}
