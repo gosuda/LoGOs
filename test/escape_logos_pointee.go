@@ -188,3 +188,113 @@ func seqEscapeCaller() {
 	storeSeqOverwrite(&a, &b, &c)
 	_, _, _ = a, b, c
 }
+
+func goCallSite() {
+	var a, b node // ERROR "moved to heap: a" "moved to heap: b"
+	go link(&a, &b) // ERROR "can inline goCallSite.gowrap1"
+}
+
+func deferCallSite() {
+	var a, b node // ERROR "moved to heap: b"
+	defer link(&a, &b) // ERROR "can inline deferCallSite.deferwrap1"
+}
+
+type gnode[T any] struct {
+	next *gnode[T]
+	val  T
+}
+
+//go:noinline
+func gstore[T any](o, p *gnode[T]) {
+	o.next = p
+}
+
+func gstoreCaller() { // ERROR "can inline gstoreCaller"
+	var a, b gnode[*node]
+	gstore[*node](&a, &b)
+	_, _ = a, b
+}
+
+//go:noinline
+func storeVariadic(o *node, ps ...*node) { // ERROR "o does not escape" "leaking param content: ps"
+	o.next = ps[0]
+}
+
+func storeVariadicCaller() { // ERROR "can inline storeVariadicCaller"
+	var a, b node // ERROR "moved to heap: b"
+	storeVariadic(&a, &b) // ERROR "... argument does not escape"
+	_, _ = a, b
+}
+
+//go:noinline
+func storeIndirect(o **node, p *node) { // ERROR "o does not escape" "leaking param: p"
+	*o = p
+}
+
+func storeIndirectCaller() { // ERROR "can inline storeIndirectCaller"
+	var x *node
+	var b node // ERROR "moved to heap: b"
+	storeIndirect(&x, &b)
+	_, _ = x, b
+}
+
+//go:noinline
+func storeIndexArr(o *[2]*node, p *node) { // ERROR "o does not escape" "leaking param: p"
+	o[0] = p
+}
+
+func storeIndexArrCaller() { // ERROR "can inline storeIndexArrCaller"
+	var arr [2]*node
+	var b node // ERROR "moved to heap: b"
+	storeIndexArr(&arr, &b)
+	_, _ = arr, b
+}
+
+//go:noinline
+func storeIndexSlice(o []*node, p *node) { // ERROR "o does not escape" "leaking param: p"
+	o[0] = p
+}
+
+func storeIndexSliceCaller() { // ERROR "can inline storeIndexSliceCaller"
+	var s [1]*node
+	var b node // ERROR "moved to heap: b"
+	storeIndexSlice(s[:], &b)
+	_, _ = s, b
+}
+
+//go:noinline
+func storeSelf(o, p *node) { // ERROR "leaking param: o" "p does not escape"
+	o.next = o
+}
+
+func storeSelfCaller() { // ERROR "can inline storeSelfCaller"
+	var a, b node // ERROR "moved to heap: a"
+	storeSelf(&a, &b)
+	_, _ = a, b
+}
+
+//go:noinline
+func storeResultParam(o, p *node) *node { // ERROR "leaking param: o to result ~r0 level=0" "leaking param: p"
+	o.next = p
+	return o
+}
+
+func storeResultParamCaller() {
+	var a, b node // ERROR "moved to heap: b"
+	r := storeResultParam(&a, &b)
+	_, _, _ = a, b, r
+}
+
+type wrap struct{ n *node }
+
+//go:noinline
+func storeFieldTarget(w *wrap, p *node) { // ERROR "w does not escape" "leaking param: p"
+	w.n.next = p
+}
+
+func storeFieldTargetCaller() { // ERROR "can inline storeFieldTargetCaller"
+	var w wrap
+	var b node // ERROR "moved to heap: b"
+	storeFieldTarget(&w, &b)
+	_, _ = w, b
+}
