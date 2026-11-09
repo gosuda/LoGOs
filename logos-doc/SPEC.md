@@ -379,7 +379,7 @@ NaN keys MUST order deterministically. [T-104.6]
 A level MUST apply to every package of the build, Go or loGo/s [T-105][R-U1].
 Under `logos`, the default level MUST come from `logos.toml [build] opt_level` with default `O2` [T-105].
 Under plain `go`, the default level MUST be `O1` [T-105][R-U1].
-The plain `go` default level MUST stay `O1` until `./run.bash` and the G6 comparison of `IMPLEMENTATION.md` both pass with `O2` as the default [T-105][T-0.1].
+The plain `go` default level MUST be `O1` [T-105][R-U1].
 `[build] opt_level` MUST accept `O0`, `O1`, `O2`, `O3`, and `Os` only [T-105].
 A bare spelling such as `2` MUST fail validation like an unknown level [T-105].
 An invalid level MUST fail with text that lists the five accepted levels [T-105].
@@ -427,7 +427,6 @@ A run that exceeds the selected `max_ctfe_steps` limit MUST fail with `[comptime
 
 Configuration MAY raise `max_ctfe_steps` above its default. [T-102]
 
-Validation and boundary tests MUST use the selected limit. [T-102]
 
 A constant value above 1 MB MUST fail with `[comptime::const_too_large]`. [T-201]
 
@@ -499,7 +498,7 @@ A `const []I`, `const *I`, or `const map[K]I` where `I` is an interface MUST rem
 
 Passing a constant view to a non-constant parameter of an `.lgo` function MUST fail with the same diagnostic. [T-201]
 
-Passing a constant view to a Go-mode parameter (the standard library or any Go package) MUST be allowed only when the parameter carries fact `ParamMutated=0`. [T-201][R-U2]
+A constant view that reaches a Go-mode parameter (the standard library or any Go package) is checked per the reference-free rule above and the caller-side `correctness::const_view_mutation` diagnostic; the compiler stores no per-parameter `ParamMutated` gate for Go-mode parameters. [T-201][R-U2]
 
 Assigning `const []*T` to `[]*T` MUST fail with `[correctness::const_view_escape]`. [T-201]
 
