@@ -22,8 +22,17 @@ logos build -gcflags=-S=2 -o $WORK/plain.wasm .
 ! stderr '\tResume\t'
 stderr 'main\.waits<1> STEXT'
 stderr '(?s)main\.waits<1> STEXT[^\n]*\n(\t[^\n]*\n)*\t[^\n]*\tBrTable'
-! stderr '(?s)main\.pureLeaf<1> STEXT[^\n]*\n(\t[^\n]*\n)*\t[^\n]*\t(BrTable|ContNew|Resume)\t'
-! stderr '(?s)main\.pureSum<1> STEXT[^\n]*\n(\t[^\n]*\n)*\t[^\n]*\t(BrTable|ContNew|Resume)\t'
+! stderr '(?s)main\.pureLeaf<1> STEXT[^\n]*\n(\t[^\n]*\n)*\t[^\n]*\t(BrTable|ContNew|Resume)'
+! stderr '(?s)main\.pureSum<1> STEXT[^\n]*\n(\t[^\n]*\n)*\t[^\n]*\t(BrTable|ContNew|Resume)'
+stderr 'main\.pureCond<1> STEXT'
+stderr '(?s)main\.pureCond<1> STEXT[^\n]*\n(\t[^\n]*\n)*\t[^\n]*\tBrTable'
+env GOOS=js
+logos build -gcflags=-S=2 -o $WORK/plain-js.wasm .
+! stderr '(?s)main\.pureLeaf<1> STEXT[^\n]*\n(\t[^\n]*\n)*\t[^\n]*\t(BrTable|ContNew|Resume)'
+! stderr '(?s)main\.pureSum<1> STEXT[^\n]*\n(\t[^\n]*\n)*\t[^\n]*\t(BrTable|ContNew|Resume)'
+stderr '(?s)main\.waits<1> STEXT[^\n]*\n(\t[^\n]*\n)*\t[^\n]*\tBrTable'
+stderr '(?s)main\.pureCond<1> STEXT[^\n]*\n(\t[^\n]*\n)*\t[^\n]*\tBrTable'
+env GOOS=wasip1
 
 # With the feature yielding user functions drop dispatch (their calls become
 # ACALLCONT): no BrTable remains in waits, pureLeaf, or pureSum. A caller of
@@ -33,9 +42,10 @@ stderr '(?s)main\.waits<1> STEXT[^\n]*\n(\t[^\n]*\n)*\t[^\n]*\tBrTable'
 # and never appears in compiler -S output; execution below is their proof.)
 logos build -wasm-features=stack-switching -gcflags=-S=2 -o $WORK/switch.wasm .
 ! stderr '(?s)main\.waits<1> STEXT[^\n]*\n(\t[^\n]*\n)*\t[^\n]*\tBrTable'
-! stderr '(?s)main\.pureLeaf<1> STEXT[^\n]*\n(\t[^\n]*\n)*\t[^\n]*\t(BrTable|ContNew|Resume)\t'
-! stderr '(?s)main\.pureSum<1> STEXT[^\n]*\n(\t[^\n]*\n)*\t[^\n]*\t(BrTable|ContNew|Resume)\t'
+! stderr '(?s)main\.pureLeaf<1> STEXT[^\n]*\n(\t[^\n]*\n)*\t[^\n]*\t(BrTable|ContNew|Resume)'
+! stderr '(?s)main\.pureSum<1> STEXT[^\n]*\n(\t[^\n]*\n)*\t[^\n]*\t(BrTable|ContNew|Resume)'
 stderr '(?s)main\.main<1> STEXT[^\n]*\n(\t[^\n]*\n)*\t[^\n]*\tBrTable'
+stderr '(?s)main\.pureCond<1> STEXT[^\n]*\n(\t[^\n]*\n)*\t[^\n]*\tBrTable'
 
 # The same flag works under go build for a Go main package.
 go build -wasm-features=stack-switching -o $WORK/gobuild.wasm .
@@ -51,11 +61,15 @@ go build -wasm-features=stack-switching -o $WORK/gobuild.wasm .
 logos build -wasm-features=stack-switching -o $WORK/exe.wasm .
 exec node --experimental-wasm-wasmfx run.mjs $WORK/exe.wasm
 stdout '(?m)^12$'
+stdout '(?m)^2 1$'
 stdout '(?m)^0$'
 stdout '(?m)^7$'
 stdout '(?m)^recovered: boom$'
 stdout '(?m)^1$'
 stdout '(?m)^done$'
+env PATH=$GOROOT${/}bin
+logos build -o $WORK/nopath.wasm .
+exists $WORK/nopath.wasm
 
 -- go.mod --
 module example.com/switch
@@ -75,6 +89,14 @@ func pureLeaf(a, b int) int { return a*b + 3 }
 
 //go:noinline
 func pureSum(x int) int { return pureLeaf(x, 1) + pureLeaf(x, 2) }
+
+//go:noinline
+func pureCond(x int) int {
+	if x > 10 {
+		return 1
+	}
+	return 2
+}
 
 //go:noinline
 func waits() int {
@@ -101,6 +123,7 @@ var switches int
 
 func main() {
 	fmt.Println(waits())
+	fmt.Println(pureCond(3), pureCond(30))
 	fmt.Println(grow(2000))
 	c := make(chan int, 1)
 	go func() { c <- 7 }()
