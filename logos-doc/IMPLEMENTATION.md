@@ -2325,7 +2325,7 @@ Depends on M21: the LSP consumes the shared edit map before `posmap.go` dies.
 ### M23-S1 One facts writer
 Anchor: David Parnas, Dieter Rams
 - Attack: `logos_facts*.txt` scripts and the facts tests pass unchanged; the `__.LOGOS` wire format is byte-identical on the fact fixtures.
-- Build: replace `EmitOptionFacts`, `EmitConstFacts`, `EmitAssertEffects`, `EmitDefaultFacts`, `EmitConstFnFacts`, and `EmitPropFacts` with `facts.Write(pkg *types2.Package, info *types2.Info, files []*syntax.File, src map[*syntax.File][]byte) *facts.Facts`, called once at the current start of the facts chain (`src/cmd/compile/internal/logos/lower.go:59`); move the test callers (`constfacts_test.go`, `constfacts_universe_test.go`, `constfnfacts*_test.go`, `constoverlay_test.go`) to `facts.Write` or the unexported per-kind functions it calls.
+- Build: `facts.Write(pkg *types2.Package, info *types2.Info, files []*syntax.File, src map[*syntax.File][]byte) *facts.Facts` replaces the five source-phase emitters at `lower.go:59`; `facts.WriteChecked` replaces `EmitAssertEffects` at the post-check hook and folds the step-15 `Locks` kind there, because assert masks are fixpoints of the final check (the `const switch` lowering adds assertion sites only the recheck sees); move the test callers (`constfacts_test.go`, `constfacts_universe_test.go`, `constfnfacts*_test.go`, `constoverlay_test.go`) to `facts.Write` or the unexported per-kind functions it calls.
 - Gate: `logos_facts*.txt` scripts and the facts tests.
 - Red-team rows: none.
 - Docs: P1-S3, P2.
