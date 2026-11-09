@@ -8,8 +8,12 @@ env GOTOOLCHAIN=local
 ! logos build -o $WORK/bin/bad$GOEXE ./bad
 stderr 'bad/b\.go:\d+:\d+: \[perf::zeroalloc_violation\] Load allocates: a\.BigAlloc has no AllocFree fact'
 ! exists $WORK/bin/bad$GOEXE
-
 logos build -o $WORK/bin/sum$GOEXE ./sum
+! stderr .
+
+# //logos:zeroalloc local checks the body only: a marked function calling
+# an allocating callee reports nothing.
+logos build -o $WORK/bin/local$GOEXE ./local
 ! stderr .
 
 -- go.mod --
@@ -69,6 +73,16 @@ package bad
 import "logostest/a"
 
 //logos:zeroalloc
+func Load(n int) []byte {
+	return a.BigAlloc(n)
+}
+
+-- local/local.go --
+package local
+
+import "logostest/a"
+
+//logos:zeroalloc local
 func Load(n int) []byte {
 	return a.BigAlloc(n)
 }

@@ -1,0 +1,17 @@
+// run
+
+package main
+
+import "time"
+
+func main() {
+	chs := make([]<-chan time.Time, 0, 2)
+	for i := 0; i < 2; i++ {
+		chs = append(chs, time.After(time.Hour))
+	}
+	if chs[0] == chs[1] {
+		println("hoisted")
+	} else {
+		println("per-iteration")
+	}
+}
