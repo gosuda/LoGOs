@@ -208,6 +208,7 @@ type lockFlow struct {
 	st        *lockState
 	local     map[types2.Object]bool
 	published map[types2.Object]bool
+	gotos     map[string]heldSet
 }
 
 func (v *lockFlow) walkStmts(list []syntax.Stmt) {
@@ -225,7 +226,12 @@ func (v *lockFlow) walkStmt(s syntax.Stmt) bool {
 	case *syntax.BlockStmt:
 		v.walkStmts(s.List)
 	case *syntax.LabeledStmt:
+		v.mergeGoto(s.Label.Value)
 		v.walkStmt(s.Stmt)
+	case *syntax.BranchStmt:
+		if s.Tok == syntax.Goto && s.Label != nil {
+			v.noteGoto(s.Label.Value)
+		}
 	case *syntax.IfStmt:
 		v.walkIf(s)
 	case *syntax.ForStmt:
@@ -251,6 +257,25 @@ func (v *lockFlow) walkStmt(s syntax.Stmt) bool {
 		v.walkSimple(s)
 	}
 	return true
+}
+
+func (v *lockFlow) noteGoto(label string) {
+	if v.gotos == nil {
+		v.gotos = make(map[string]heldSet)
+	}
+	if cur, ok := v.gotos[label]; ok {
+		cur.merge(v.st.held)
+		return
+	}
+	v.gotos[label] = v.st.held.clone()
+}
+func (v *lockFlow) mergeGoto(label string) {
+	if v.gotos == nil {
+		return
+	}
+	if g, ok := v.gotos[label]; ok {
+		v.st.held.merge(g)
+	}
 }
 
 func (v *lockFlow) walkIf(s *syntax.IfStmt) {

@@ -339,6 +339,11 @@ func TestAdvGuardedAccess(t *testing.T) {
 		want []string
 	}{
 		{
+			"gotoSkipsLockReported",
+			"func g1(s *stats) int {\n goto End\n s.mu.Lock()\nEnd:\n return s.total\n}\n",
+			[]string{"33 concurrency::unguarded_access forbid"},
+		},
+		{
 			"immediateLiteralReadsHeldLock",
 			"func g2(s *stats) int {\n s.mu.Lock()\n defer s.mu.Unlock()\n return func() int { return s.total }()\n}\n",
 			nil,
@@ -397,11 +402,6 @@ func TestAdvGuardedAccessLimitations(t *testing.T) {
 		body string
 		want []string
 	}{
-		{
-			"gotoSkipsLockUnreported",
-			"func g1(s *stats) int {\n goto End\n s.mu.Lock()\nEnd:\n return s.total\n}\n",
-			nil,
-		},
 		{
 			"methodValueUnlockUnreported",
 			"func g3(s *stats) int {\n s.mu.Lock()\n unlock := s.mu.Unlock\n _ = s.total\n unlock()\n return s.total\n}\n",
