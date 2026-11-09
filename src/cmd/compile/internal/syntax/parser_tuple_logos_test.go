@@ -217,3 +217,37 @@ func TestLogosParenColonMeansNamedType(t *testing.T) {
 		t.Fatalf("colon value first error is %q; want expected )", msgs)
 	}
 }
+
+func TestLogosParenOnceBranches(t *testing.T) {
+	for _, tc := range []struct {
+		shape  string
+		src    string
+		found  func(*File) bool
+		errSub string
+	}{
+		{"paren", "package p\nfunc f(x int) { _ = (x) }\n", hasNode[*ParenExpr], ""},
+		{"tuple", "package p\nfunc f(x int, y string) { _ = (x, y) }\n", hasNode[*TupleLit], ""},
+		{"named", "package p\nvar v (x: int)\n", nil, "tuple type needs at least two"},
+		{"namedpair", "package p\nvar v (x: int, y: string)\n", hasNode[*TupleType], ""},
+		{"lambda", "package p\nfunc f(x int) { g := (x) => x; _ = g }\n", hasNode[*LambdaExpr], ""},
+	} {
+		t.Run(tc.shape, func(t *testing.T) {
+			if tc.errSub != "" {
+				var msgs []string
+				_, _ = Parse(nil, strings.NewReader(tc.src), func(err error) {
+					msgs = append(msgs, err.Error())
+				}, nil, CheckBranches|LogosMode)
+				for _, m := range msgs {
+					if strings.Contains(m, tc.errSub) {
+						return
+					}
+				}
+				t.Errorf("%s: no error containing %q in %q", tc.shape, tc.errSub, msgs)
+				return
+			}
+			if !tc.found(parseLogos(t, tc.src)) {
+				t.Errorf("%s: no witness node in %q", tc.shape, tc.src)
+			}
+		})
+	}
+}
