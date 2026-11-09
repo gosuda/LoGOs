@@ -79,7 +79,7 @@ Rules:
 
 ## Tier-0 arena and bump allocation (M18)
 
-Goroutine-local arena allocation is controlled by `GOEXPERIMENT=logosarena` and `logos.toml [build] arena = true`.
+Goroutine-local arena allocation is controlled by `GOEXPERIMENT=logosarena` and `logos.toml [build] arena`. Under `logos`, implicit placement is on by default: a missing key still enables the experiment, an explicit `arena = false` opts out, and plain `go` enables it only through the experiment (`logos_arena_default.txt`).
 
 Rules:
 

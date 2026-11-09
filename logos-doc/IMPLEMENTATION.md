@@ -2575,7 +2575,7 @@ Anchor: John Carmack, Tony Hoare, Edsger W. Dijkstra
 
 Notes (m18): a chunk holds at most 64 KiB minus 1024 bytes of payload (`LogosArenaMaxBytes`); the inline bump covers rounded payloads at or below 512 bytes (`LogosArenaBumpMaxBytes`).
 
-Experiment `logosarena` (field `LogosArena`, added with the experiment procedure in M17-S2). `logos build` passes it through `GOEXPERIMENT` when `logos.toml [build] arena = true` (key added here, default `false`). GOEXPERIMENT is fixed per build, so `logos` rebuilds the standard library with it (cache keys differ automatically). Plain `go` selects it with `GOEXPERIMENT=logosarena` and reads no `logos.toml`; arena placement applies to Go and loGo/s packages alike, and the plain-`go` default stays off until `run.bash` passes with it on (G3).
+Experiment `logosarena` (field `LogosArena`, added with the experiment procedure in M17-S2). `logos build` passes it through `GOEXPERIMENT` unless `logos.toml [build] arena = false` (key added here; the default is true, so a missing file still enables the experiment; the appended entry beats an explicit `nologosarena` negation). GOEXPERIMENT is fixed per build, so `logos` rebuilds the standard library with it (cache keys differ automatically). Plain `go` selects it with `GOEXPERIMENT=logosarena` and reads no `logos.toml`; `logos_arena_default.txt` pins all cases. Arena placement applies to Go and loGo/s packages alike.
 
 Invariants:
 - AR1 An object allocated in the arena is reachable only from its allocating frame and frames it calls (escape analysis proof); no pointer to it is stored in the heap, a global, a channel, or another goroutine's stack.
@@ -2658,8 +2658,8 @@ Anchor: Tony Hoare, John Carmack, Edsger W. Dijkstra
 
 ### M18-S9 Implicit placement on by default under `logos`
 Anchor: Tony Hoare, John Carmack, Edsger W. Dijkstra
-- Attack: `logos_arena_default.txt`: `logos build -x` without `logos.toml` passes a `GOEXPERIMENT` containing `logosarena`; with `[build] arena = false` it does not; plain `go build -x` never does.
-- Build: the default in `cmd/go/internal/logos/config`.
+- Attack: `logos_arena_default.txt`: `logos build -x` without `logos.toml` passes a `GOEXPERIMENT` containing `logosarena`; with `[build] arena = false` it does not; plain `go build -x` never does, even with `arena = true` on disk; an appended `logosarena` entry beats an explicit `nologosarena` negation.
+- Build: the default in `cmd/go/internal/logos/config` is true (`config.go:63` `Arena *bool`, nil means true); `settings.go:268-281` `anyRootArena` treats a missing file, a missing key, and an explicit true as enabled and only an explicit false as off; `settings.go:112-114` appends the experiment through `WithArena` (`experiment.go:14`) when enabled; the plain-go path (`settings.go:87-92`) copies only `flags.Env.GOEXPERIMENT` and never applies `WithArena`.
 - Gate: lands only after `GOEXPERIMENT=logosarena go test -count=1 -short std` and `./run.bash --no-rebuild` pass.
 - Red-team rows: none.
 - Docs: P1-S3, P2.
