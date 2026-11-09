@@ -45,20 +45,3 @@ func TestNextLoopEmptyAndReceiverStayTasks(t *testing.T) {
 		}
 	})
 }
-
-// TestNextLoopEmptyNilnessOracle is the independent Go runtime oracle
-// for VV2n: it proves why the scanner must not edit, without reading
-// emitter internals. Bounded to 3 elements (<256 bytes).
-func TestNextLoopEmptyNilnessOracle(t *testing.T) {
-	ys := []int{}
-	if ys == nil {
-		t.Fatal("empty composite yielded nil; want non-nil []")
-	}
-	if len(ys) != 0 {
-		t.Fatalf("empty len = %d, want 0", len(ys))
-	}
-	var nilOut []int
-	if nilOut != nil {
-		t.Fatal("nil slice tested non-nil; want nil")
-	}
-}

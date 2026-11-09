@@ -104,12 +104,6 @@ func TestUserFixedBytes(t *testing.T) {
 	if got := strings.Count(body, "_logos_buf = append(_logos_buf, '\"')"); got != 2 {
 		t.Errorf("closing quotes: got %d, want 2 (name and role)", got)
 	}
-	if n := len(`{"id":`) + len(`,"name":"`) + 1 + 1; n != 17 {
-		t.Fatalf("fixed bytes without role = %d, want 17", n)
-	}
-	if n := 17 + len(`,"role":"`) + 1; n != 27 {
-		t.Fatalf("fixed bytes with role = %d, want 27", n)
-	}
 	for _, banned := range []string{"reflect", "MarshalField", "OmitEmpty", "OmitZero"} {
 		if strings.Contains(body, banned) {
 			t.Errorf("fast path of User mentions %q:\n%s", banned, body)

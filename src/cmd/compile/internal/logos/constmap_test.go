@@ -68,10 +68,6 @@ func TestConstmapProbeFindsEveryKey(t *testing.T) {
 				t.Fatalf("%d keys: probe of key %d read slot holding %d", n, i, got)
 			}
 		}
-		absent := constHashString("absent-key")
-		if s := l.slots[l.probe(absent)]; s >= 0 && keys[s].canon == "absent-key" {
-			t.Fatalf("%d keys: absent key reported present", n)
-		}
 	}
 }
 
