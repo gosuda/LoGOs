@@ -14,10 +14,6 @@ import (
 	"internal/buildcfg"
 )
 
-func logosLayoutSizes() types2.Sizes {
-	return types2.SizesFor("gc", buildcfg.GOARCH)
-}
-
 func logosLayoutName(call *syntax.CallExpr, sites *cfSites) (string, bool) {
 	idx, ok := call.Fun.(*syntax.IndexExpr)
 	if !ok || len(call.ArgList) != 0 || sites == nil || sites.comptimeName == "" {
@@ -73,11 +69,12 @@ func (fl *fileLower) logosLayoutCallValue(call *syntax.CallExpr, active cfChain,
 	if !ok || cfHasVarSize(t, make(map[types2.Type]bool)) {
 		return nil, false
 	}
+	sizes := types2.SizesFor("gc", buildcfg.GOARCH)
 	switch name {
 	case "SizeOf":
-		return constant.MakeInt64(logosLayoutSizes().Sizeof(t)), true
+		return constant.MakeInt64(sizes.Sizeof(t)), true
 	case "AlignOf":
-		return constant.MakeInt64(logosLayoutSizes().Alignof(t)), true
+		return constant.MakeInt64(sizes.Alignof(t)), true
 	}
 	return constant.MakeBool(types2.LogosHasPointers(t)), true
 }

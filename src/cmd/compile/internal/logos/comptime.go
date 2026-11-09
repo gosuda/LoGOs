@@ -192,15 +192,6 @@ func newCfExpander(shared *packageLower, files []*syntax.File, src map[*syntax.F
 	return exp
 }
 
-// register records one definition.
-func (e *cfExpander) register(def *cfGenericDef) {
-	e.defs = append(e.defs, def)
-	e.byDecl[def.decl] = def
-	if def.obj != nil {
-		e.byObj[def.obj] = def
-	}
-}
-
 // frameIndex returns the stack index of key, or -1.
 func (e *cfExpander) frameIndex(key string) int {
 	return slices.IndexFunc(e.stack, func(f cfFrame) bool { return f.key == key })
@@ -232,15 +223,19 @@ func cfShortKeys(targs []types2.Type) string {
 // and records the exported ones in f.
 func (fl *fileLower) registerComptime(exp *cfExpander, f *facts.Facts) *facts.Facts {
 	for _, def := range fl.cfCollectGenerics() {
-		def.record = fl.cfLocalRecord(def)
-		exp.register(def)
+		def.record = fl.cfRecordText(def, "")
+		exp.defs = append(exp.defs, def)
+		exp.byDecl[def.decl] = def
+		if def.obj != nil {
+			exp.byObj[def.obj] = def
+		}
 		if def.obj == nil || !def.obj.Exported() {
 			continue
 		}
 		if f == nil {
 			f = &facts.Facts{}
 		}
-		rec := fl.cfForeignRecord(def)
+		rec := fl.cfRecordText(def, cfPkgMarker)
 		f.Comptimes = append(f.Comptimes, facts.ComptimeFact{Object: rec.name, Source: []byte(rec.text())})
 	}
 	return f
@@ -287,17 +282,6 @@ func (fl *fileLower) cfIsComptimePkg(x syntax.Expr) bool {
 	}
 	pn, ok := fl.pkg.info.Uses[name].(*types2.PkgName)
 	return ok && pn.Imported().Path() == "comptime"
-}
-
-// cfLocalRecord builds the record used inside the defining package.
-func (fl *fileLower) cfLocalRecord(def *cfGenericDef) *cfRecord {
-	return fl.cfRecordText(def, "")
-}
-
-// cfForeignRecord builds the record that travels in __.LOGOS: names of
-// the defining package carry the package marker.
-func (fl *fileLower) cfForeignRecord(def *cfGenericDef) *cfRecord {
-	return fl.cfRecordText(def, cfPkgMarker)
 }
 
 // cfRecordBuilder collects the marker splices of one definition.
