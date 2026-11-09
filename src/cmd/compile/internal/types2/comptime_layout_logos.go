@@ -7,6 +7,7 @@ package types2
 import (
 	"cmd/compile/internal/syntax"
 	"go/constant"
+	. "internal/types/errors"
 )
 
 func isLogosLayoutName(name string) bool {
@@ -36,6 +37,12 @@ func (check *Checker) logosLayoutCall(x *operand, call *syntax.CallExpr, fname s
 		return true
 	}
 	if !check.hasVarSize(targ) && !check.logosGenericFieldType(targs[0]) {
+		if fname == "SizeOf" {
+			if size := check.conf.sizeof(targ); size < 0 {
+				check.errorf(x, TypeTooLarge, "%s is too large", targs[0])
+				return true
+			}
+		}
 		x.mode_ = constant_
 		x.typ_ = logosLayoutConstantType(fname)
 		x.val = check.logosLayoutFolded(targ, fname)

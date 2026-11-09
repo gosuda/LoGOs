@@ -1,0 +1,30 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+// Comptime layout calls refuse to fold a type whose size overflows
+// int64: gcSizes.Sizeof answers -1 for it, and unsafe.Sizeof reports
+// TypeTooLarge for the same shape instead of folding a negative size.
+// The alignment still folds.
+
+package p
+
+import "comptime"
+
+type Huge [1 << 62]int64
+
+type HugeCell struct {
+	Body Huge
+}
+
+func hugeSize[U any]() int {
+	return comptime /* ERROR "too large" */ .SizeOf[Huge]()
+}
+
+func hugeCellSize[U any]() int {
+	return comptime /* ERROR "too large" */ .SizeOf[HugeCell]()
+}
+
+func hugeAlign[U any]() int {
+	return comptime.AlignOf[Huge]()
+}
