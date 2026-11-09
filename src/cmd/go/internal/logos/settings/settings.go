@@ -81,7 +81,11 @@ func Load(modRoot string, flags Flags) (*Settings, error) {
 		if validOptLevel(flags.Opt) {
 			level = flags.Opt
 		} else {
-			err = fmt.Errorf("%s build: invalid -O level %q (want 0, 1, 2, 3, s)", progName(flags.Logos), flags.Opt)
+			prog := "go"
+			if flags.Logos {
+				prog = "logos"
+			}
+			err = fmt.Errorf("%s build: invalid -O level %q (want 0, 1, 2, 3, s)", prog, flags.Opt)
 		}
 	}
 	if !flags.Logos {
@@ -267,15 +271,11 @@ func anyRootArena(roots []string) bool {
 	}
 	for _, root := range roots {
 		m := ModuleAt(root)
-		if m.Err == nil && arenaOn(m.File) {
+		if m.Err == nil && (m.File == nil || m.File.Build.Arena == nil || *m.File.Build.Arena) {
 			return true
 		}
 	}
 	return false
-}
-
-func arenaOn(f *config.File) bool {
-	return f == nil || f.Build.Arena == nil || *f.Build.Arena
 }
 
 func pickOptLevel(level, fallback string) string {
@@ -283,13 +283,6 @@ func pickOptLevel(level, fallback string) string {
 		return level
 	}
 	return fallback
-}
-
-func progName(logos bool) string {
-	if logos {
-		return "logos"
-	}
-	return "go"
 }
 
 func validOptLevel(level string) bool {
