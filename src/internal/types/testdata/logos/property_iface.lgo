@@ -214,3 +214,7 @@ type Sneaky struct : Creature {
 func (s Sneaky) Start() error { return nil }
 
 func (s Sneaky) Logos_GetHP /* ERROR "correctness::reserved_identifier" */ () int { return 0 }
+
+type Token int
+
+var _ Named = Token /* ERROR "does not implement" */ (0)

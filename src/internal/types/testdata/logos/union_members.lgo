@@ -105,3 +105,7 @@ func memberCases(x U) int {
 	case nil => 0
 	}
 }
+
+func cmpNonMember(x U) bool {
+	return x == 1.5 /* ERROR "mismatched types" */
+}
