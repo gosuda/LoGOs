@@ -1635,6 +1635,22 @@ Anchor: Tony Hoare, Claude Shannon, John Carmack
 - Red-team rows: none.
 - Docs: none.
 
+### M3-A-S7 Assert Go importers see plain readonly method signatures
+Anchor: Tony Hoare, Claude Shannon, John Carmack
+- Attack: `src/cmd/go/testdata/script/logos_interop_readonly_method.txt`: a Go package importing a loGo/s package with readonly methods builds against the ejected plain-method signatures; red was an eject failure under a splice-identity probe that kept the `const` keyword.
+- Build: none (test-only; lowering already erases only the `const` keyword).
+- Gate: `go test -count=1 cmd/go -run 'Script/^logos_interop_readonly_method$'`.
+- Red-team rows: none.
+- Docs: none (SPEC 0.3 and 5 already carry the rule).
+
+### M3-A-S8 Pin nil-check hole for method values and interfaces
+Anchor: Tony Hoare, Claude Shannon, John Carmack
+- Attack: `src/cmd/go/testdata/script/logos_interop_nil_method_value.txt`: a call through a method value or an interface carries no nil check and stays a documented hole; the interface-receiver guard change is caught by the interface subtest.
+- Build: none (test-only).
+- Gate: `go test -count=1 cmd/go -run 'Script/^logos_interop_nil_method_value$'`.
+- Red-team rows: none.
+- Docs: none (SPEC 5 already carries the rule and the hole).
+
 ## M4. Interface properties
 
 Anchor: Tony Hoare, David Parnas, J.R.R. Tolkien
@@ -2110,6 +2126,14 @@ Anchor: Tony Hoare, Edward Tufte, Kenya Hara
 - Red-team rows: none.
 - Docs: none.
 
+### M9-A-S9 Harden WithLock leak, deadlock, and lock-flow analysis
+Anchor: Tony Hoare, Edward Tufte, Kenya Hara
+- Attack: `src/cmd/compile/internal/logos/lint/rule_adv_nogo_test.go`: `TestAdvWithlockLeak` (stores through a dereference, address-of-field, local aliases, named callbacks, interior pointer copies; shadowing locals stay clean by object identity), `TestAdvReentrantDeadlock` (pointer aliases, promoted receivers, stored and directly invoked literals, identical indices), `TestAdvGuardedAccess` (immediate literals, promoted methods, stored method values, forward goto), `TestAdvLockRequirement` (deferred contracts on the exit set), plus the limitation pins (go-spawned relock unreported, self-referential alias terminates). Sixteen fix commits: d9d0240 3605aa4 b7a2032 eeeed41 685c517 ec4c7ec 45baa10 32a1109 4ac7cd5 5d7d713 e96768a 6ec7489 936a45e 3caaf7d 816ebd8 21af863.
+- Build: the nogo checkers in `src/cmd/compile/internal/logos/lint/` (leak scan, receiver keys, alias index, literal inlining, exit-set contracts, cycle-safe resolution).
+- Gate: `go test -run TestAdvWithlockLeak|TestAdvReentrantDeadlock|TestAdvGuardedAccess|TestAdvLockRequirement|TestAdvLambdaArgReadsGuarded cmd/compile/internal/logos/lint`.
+- Red-team rows: none.
+- Docs: none (SPEC 1.2 carries the rule and the go-spawn exclusion).
+
 ## M10. `logos next` and `logos context`
 
 Anchor: Christopher Alexander, Kenya Hara
@@ -2322,6 +2346,14 @@ Anchor: John Carmack, Edsger W. Dijkstra
 - Gate: `go test -count=1 cmd/compile/internal/ssa -run TestLogosPair`; `go test -count=1 cmd/internal/testdir -run Test/logos/run/pair_hoist_exec`; `go test -count=1 cmd/internal/testdir -run Test/logos/codegen/arm64_pair -all_codegen`.
 - Red-team rows: none.
 - Docs: none.
+
+### M15-A-S3 Assert arm64 pair ops never write back base register
+Anchor: John Carmack, Edsger W. Dijkstra
+- Attack: `test/logos/codegen/arm64_pair_writeback.lgo`: every LDP, STP, FLDPQ, and FSTPQ the pair pass emits appears without a writeback suffix, and appears at all so the check is not vacuous.
+- Build: none (test-only).
+- Gate: `go test -count=1 cmd/internal/testdir -run Test/logos/codegen/arm64_pair_writeback -all_codegen`.
+- Red-team rows: none.
+- Docs: none (SPEC 13.1 already carries the rule).
 
 ## M16. WASM profile
 
@@ -2605,6 +2637,22 @@ Anchor: Tony Hoare, John Carmack
 - Red-team rows: none.
 - Docs: none.
 
+### M20-A-S4 Fold fast-cgo nocallback guards into the trampoline
+Anchor: Tony Hoare, John Carmack
+- Attack: objdump of the fast wrapper and the trampoline shows no `cgoNoCallback` call; only `getcallerfp`, `reentersyscall`, `asmcgocall`, and `exitsyscall` remain; FastcallThree drops from 375.9M to 344.2M instructions per 1M 3-arg calls.
+- Build: `src/runtime/logos_fastcall.go`: the trampoline sets and clears `gp.nocgocallback` around `asmcgocall` in the fallback and fast branches; plain wrappers and `cgocall` stay untouched.
+- Gate: `GOEXPERIMENT=logosfastcgo go test -vet=off -count=1 -run TestFastcallNoCallbackViolation cmd/cgo/internal/testlogos`; same with the experiment off.
+- Red-team rows: none.
+- Docs: none (SPEC 3.4 carries the fast-path rules).
+
+### M20-A-S5 Drop dead fastCallEnterNano stores and field
+Anchor: Tony Hoare, John Carmack
+- Attack: objdump of the fast body names no clock and no `cgoNoCallback`; the trampoline drops from 60 to 58 instructions; FastcallThree drops from 344.2M to 341.4M instructions per 1M calls.
+- Build: `src/runtime`: the `fastCallEnterNano` stores, field, helpers, and padding math are gone; `TestFastcallNoClockInFastBody` still guards the no-clock rule.
+- Gate: `GOEXPERIMENT=logosfastcgo go test -vet=off -count=1 -run TestFastcallNoClockInFastBody cmd/cgo/internal/testlogos`; `go test -vet=off -count=1 -run TestCgoFastcallPinSlots|TestLogosFastCall runtime`.
+- Red-team rows: none.
+- Docs: none (SPEC 3.4 carries the no-clock and post-return rules).
+
 ## M21. `logos lsp`
 
 Anchor: Kenya Hara, Edward Tufte
@@ -2819,7 +2867,7 @@ Prerequisites: `cd /home/alpha/compiler/loGos/src && ./make.bash`; `export PATH=
 
 Anchor: Tony Hoare
 
-Written to `tasks/autoplan-ledger.jsonl` by P0-S6. IDs: phase prefix plus a sequence in plan order. The original 103 rows are preserved verbatim; P0-S6 appends exactly the 5 remaining rows for M0-S7, P1-S3, M11-S3, M11-S4, and M18-S4 (listed at the end of the block); the M19 rows are pruned. The 2026-10-19 direction appended one more row after those, `DX-20` for the follow-up slice M0-S8; no other row changed (the descriptions of rows such as `ENG-26` name the slice as first written, and `CEO-02` names the original 182 REDTEAM rows; rows #183 to #189 were added later by the same direction). The audit direction appended rows `AUD-01` to `AUD-82` after those, one per recorded audit slice in commit order. The ledger holds 193 rows.
+Written to `tasks/autoplan-ledger.jsonl` by P0-S6. IDs: phase prefix plus a sequence in plan order. The original 103 rows are preserved verbatim; P0-S6 appends exactly the 5 remaining rows for M0-S7, P1-S3, M11-S3, M11-S4, and M18-S4 (listed at the end of the block); the M19 rows are pruned. The 2026-10-19 direction appended one more row after those, `DX-20` for the follow-up slice M0-S8; no other row changed (the descriptions of rows such as `ENG-26` name the slice as first written, and `CEO-02` names the original 182 REDTEAM rows; rows #183 to #189 were added later by the same direction). The audit direction appended rows `AUD-01` to `AUD-88` after those, one per recorded audit slice in commit order. The ledger holds 199 rows.
 
 ```jsonl
 {"id": "CEO-01", "description": "P0-S1 Rename logos-doc/PLAN.md to logos-doc/SPEC.md (pure rename) and P0-S2 rewrite SPEC.md as the tailored spec (tables T, N, Section 18)", "phase": "CEO"}
@@ -3015,4 +3063,10 @@ Written to `tasks/autoplan-ledger.jsonl` by P0-S6. IDs: phase prefix plus a sequ
 {"id": "AUD-80", "description": "M21-A-S6 Skip compilation when the request context is cancelled", "phase": "AUD"}
 {"id": "AUD-81", "description": "M21-A-S7 Pin UTF-16 astral mapping and overlay release", "phase": "AUD"}
 {"id": "AUD-82", "description": "M0-A-S11 Assert cmd/go plain-go parity, help hiding, and generator rules", "phase": "AUD"}
+{"id": "AUD-83", "description": "M3-A-S7 Assert Go importers see plain readonly method signatures", "phase": "AUD"}
+{"id": "AUD-84", "description": "M3-A-S8 Pin nil-check hole for method values and interfaces", "phase": "AUD"}
+{"id": "AUD-85", "description": "M15-A-S3 Assert arm64 pair ops never write back base register", "phase": "AUD"}
+{"id": "AUD-86", "description": "M20-A-S4 Fold fast-cgo nocallback guards into the trampoline", "phase": "AUD"}
+{"id": "AUD-87", "description": "M20-A-S5 Drop dead fastCallEnterNano stores and field", "phase": "AUD"}
+{"id": "AUD-88", "description": "M9-A-S9 Harden WithLock leak, deadlock, and lock-flow analysis", "phase": "AUD"}
 ```

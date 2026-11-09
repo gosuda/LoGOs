@@ -191,3 +191,9 @@
 {"id": "AUD-80", "description": "M21-A-S6 Skip compilation when the request context is cancelled", "phase": "AUD"}
 {"id": "AUD-81", "description": "M21-A-S7 Pin UTF-16 astral mapping and overlay release", "phase": "AUD"}
 {"id": "AUD-82", "description": "M0-A-S11 Assert cmd/go plain-go parity, help hiding, and generator rules", "phase": "AUD"}
+{"id": "AUD-83", "description": "M3-A-S7 Assert Go importers see plain readonly method signatures", "phase": "AUD"}
+{"id": "AUD-84", "description": "M3-A-S8 Pin nil-check hole for method values and interfaces", "phase": "AUD"}
+{"id": "AUD-85", "description": "M15-A-S3 Assert arm64 pair ops never write back base register", "phase": "AUD"}
+{"id": "AUD-86", "description": "M20-A-S4 Fold fast-cgo nocallback guards into the trampoline", "phase": "AUD"}
+{"id": "AUD-87", "description": "M20-A-S5 Drop dead fastCallEnterNano stores and field", "phase": "AUD"}
+{"id": "AUD-88", "description": "M9-A-S9 Harden WithLock leak, deadlock, and lock-flow analysis", "phase": "AUD"}
