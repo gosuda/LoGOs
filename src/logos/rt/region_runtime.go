@@ -8,10 +8,6 @@ package rt
 
 import _ "unsafe"
 
-// Pull of runtime.logosRegionBytes. The runtime definition carries a
-// push-style //go:linkname mark, so the linker's linkname check accepts
-// this reference.
-
 //go:linkname logosRegionBytes runtime.logosRegionBytes
 func logosRegionBytes() int
 
