@@ -909,6 +909,80 @@ func (e *escape) logosGroupTempSource(temp *ir.Name) *ir.Name {
 	return nil
 }
 
+func (b *batch) logosRegionVeto(fn *ir.Func) string {
+	if LogosArenaPlaceable(fn) {
+		return ""
+	}
+	info := logosArenaInfo(fn)
+	if info.hasGoto {
+		return "function contains goto"
+	}
+	if info.hasDefer && b.logosRegionHasUserDefer(fn) {
+		return "function contains defer"
+	}
+	if info.hasDefer {
+		return ""
+	}
+	return "region unknown"
+}
+
+func (b *batch) logosRegionHasUserDefer(fn *ir.Func) bool {
+	user := false
+	var scan func(n ir.Node)
+	scan = func(n ir.Node) {
+		if user {
+			return
+		}
+		switch n := n.(type) {
+		case nil:
+			return
+		case *ir.ClosureExpr:
+			return
+		case *ir.GoDeferStmt:
+			if n.Op() == ir.ODEFER && !b.logosRegionGuardDefer(n) {
+				user = true
+			}
+			return
+		}
+		ir.DoChildren(n, func(c ir.Node) bool {
+			scan(c)
+			return false
+		})
+	}
+	for _, st := range fn.Body {
+		scan(st)
+	}
+	return user
+}
+
+func (b *batch) logosRegionGuardDefer(d *ir.GoDeferStmt) bool {
+	found := false
+	var scan func(n ir.Node)
+	scan = func(n ir.Node) {
+		if found || n == nil {
+			return
+		}
+		if name, ok := n.(*ir.Name); ok {
+			if name.Sym() != nil && strings.HasPrefix(name.Sym().Name, "_logos_g") {
+				if b.logosRegion.groupOf[name.Canonical()] != nil {
+					found = true
+				}
+			}
+			return
+		}
+		if clo, ok := n.(*ir.ClosureExpr); ok && clo.Func != nil {
+			scan(clo.Func)
+			return
+		}
+		ir.DoChildren(n, func(c ir.Node) bool {
+			scan(c)
+			return false
+		})
+	}
+	scan(d)
+	return found
+}
+
 func (b *batch) logosRegionGroupLoc(l *location) *logosGroup {
 	if g := b.logosRegion.groups[l]; g != nil {
 		return g
@@ -987,15 +1061,8 @@ func (b *batch) logosRegionMark(fns []*ir.Func) {
 }
 
 func (b *batch) logosRegionSiteReason(site *logosCand) string {
-	if !LogosArenaPlaceable(site.fn) {
-		info := logosArenaInfo(site.fn)
-		if info.hasGoto {
-			return "function contains goto"
-		}
-		if info.hasDefer {
-			return "function contains defer"
-		}
-		return "region unknown"
+	if reason := b.logosRegionVeto(site.fn); reason != "" {
+		return reason
 	}
 	if site.fn.Dupok() || logosRegionShapedBody(site.fn) {
 		return "shaped generic body"
