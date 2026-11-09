@@ -158,11 +158,43 @@ func testRichParityUnderNoJSONv2() {
 		}
 	}
 }
+type RichV2 struct {
+	Title string            `json:"title,omitempty"`
+	N     int64             `json:"n,string"`
+	Flag  bool              `json:"flag,omitzero"`
+	Inner User              `json:"inner"`
+	Tags  []string          `json:"tags,omitempty"`
+	M     map[string]int64  `json:"m,omitempty"`
+}
+
+type RichV2Mirror RichV2
+
+func testRichV2ParityUnderNoJSONv2() {
+	vals := []RichV2{
+		{},
+		{Title: "a<b>&\"q\"", N: -12, Flag: true, Inner: User{ID: 7, Name: "n"}, Tags: []string{"x", "y z"}, M: map[string]int64{"b": 2, "a": 1}},
+		{Title: "plain", N: 1234567890, Inner: User{}, Tags: []string{}, M: map[string]int64{}},
+	}
+	for _, v := range vals {
+		direct, err := v.MarshalJSON()
+		if err != nil {
+			panic(err)
+		}
+		via, err := json.Marshal(RichV2Mirror(v))
+		if err != nil {
+			panic(err)
+		}
+		if !bytes.Equal(direct, via) {
+			panic(fmt.Sprintf("nojsonv2 RichV2(%+v):\n got %s\nwant %s", v, direct, via))
+		}
+	}
+}
 
 func main() {
 	testCallSiteParityWithMarshalJSON()
 	testPointerAndInterfaceFormsAgree()
 	testEncoderAddsOnlyTrailingNewline()
 	testRichParityUnderNoJSONv2()
+	testRichV2ParityUnderNoJSONv2()
 	fmt.Println("callsite nojsonv2 ok")
 }

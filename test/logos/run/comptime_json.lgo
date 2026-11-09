@@ -1,0 +1,109 @@
+// run
+
+package main
+
+import (
+	"bytes"
+	"comptime"
+	"encoding/json"
+	"fmt"
+	"os"
+)
+
+type CJS1 struct {
+	A int64  `json:"a"`
+	B string `json:"b,omitempty"`
+}
+
+type CJS1Mirror CJS1
+
+type CJS2 struct {
+	X float64 `json:"x"`
+	Y string  `json:"y"`
+	Z int64   `json:"z,omitempty"`
+}
+
+type CJS2Mirror CJS2
+
+func FieldCount[T any]() int {
+	n := 0
+	const for _, f := range comptime.Fields[T]() {
+		n++
+		_ = f.Name
+	}
+	return n
+}
+
+func JMarshal[T any](v T) []byte {
+	const for _, f := range comptime.Fields[T]() {
+		_ = f.Name
+	}
+	b, err := json.Marshal(v)
+	if err != nil {
+		panic(err)
+	}
+	return b
+}
+
+func checkMarshal[T any](v T, mirror any, direct, got []byte) error {
+	via, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	if !bytes.Equal(direct, via) {
+		return fmt.Errorf("direct %s != json.Marshal %s", direct, via)
+	}
+	want, err := json.Marshal(mirror)
+	if err != nil {
+		return err
+	}
+	if !bytes.Equal(direct, want) {
+		return fmt.Errorf("generated %s != reflective %s", direct, want)
+	}
+	if !bytes.Equal(got, want) {
+		return fmt.Errorf("comptime JMarshal %s != reflective %s", got, want)
+	}
+	return nil
+}
+
+func main() {
+	if FieldCount[CJS1]() != 2 {
+		fmt.Println("comptime: CJS1 field count wrong")
+		os.Exit(1)
+	}
+	if FieldCount[CJS2]() != 3 {
+		fmt.Println("comptime: CJS2 field count wrong")
+		os.Exit(1)
+	}
+	a := CJS1{A: 1, B: "x"}
+	ad, err := a.MarshalJSON()
+	if err != nil {
+		fmt.Println("comptime:", err)
+		os.Exit(1)
+	}
+	if err := checkMarshal(a, CJS1Mirror(a), ad, JMarshal(a)); err != nil {
+		fmt.Println("comptime CJS1:", err)
+		os.Exit(1)
+	}
+	b := CJS2{X: 1.5, Y: "a<b", Z: 0}
+	bd, err := b.MarshalJSON()
+	if err != nil {
+		fmt.Println("comptime:", err)
+		os.Exit(1)
+	}
+	if err := checkMarshal(b, CJS2Mirror(b), bd, JMarshal(b)); err != nil {
+		fmt.Println("comptime CJS2:", err)
+		os.Exit(1)
+	}
+	c := CJS2{X: -2.5, Y: "\xff\xfe\u2028end", Z: 9}
+	cd, err := c.MarshalJSON()
+	if err != nil {
+		fmt.Println("comptime:", err)
+		os.Exit(1)
+	}
+	if err := checkMarshal(c, CJS2Mirror(c), cd, JMarshal(c)); err != nil {
+		fmt.Println("comptime CJS2 escaping:", err)
+		os.Exit(1)
+	}
+	fmt.Println("comptime json: PASS")
+}
