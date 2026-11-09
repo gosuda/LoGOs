@@ -106,6 +106,7 @@ type lockCheck struct {
 	cbCallers    map[*types2.Func][]lockCallbackEdge
 	fileOf       map[*syntax.CallExpr]*syntax.File
 	asyncCall    map[*syntax.CallExpr]bool
+	aliases      map[types2.Object]lockKey
 	keyPathLimit int
 	reported     map[*syntax.CallExpr]bool
 }
@@ -128,6 +129,7 @@ func checkReentrantWithLock(pass *Pass) {
 	for _, f := range pass.Files {
 		c.markAsync(f)
 		c.index(f)
+		c.indexAliases(f)
 	}
 	for _, f := range pass.Files {
 		c.indexCalls(f)
@@ -178,6 +180,110 @@ func (c *lockCheck) index(f *syntax.File) {
 			}
 		}
 	}
+}
+
+func (c *lockCheck) indexAliases(f *syntax.File) {
+	counts := make(map[types2.Object]int)
+	targets := make(map[types2.Object]syntax.Expr)
+	syntax.Inspect(f, func(n syntax.Node) bool {
+		switch x := n.(type) {
+		case *syntax.AssignStmt:
+			if x.Op == syntax.Def {
+				c.noteDefAlias(x, counts, targets)
+			} else {
+				c.noteReassignAlias(x, counts, targets)
+			}
+		case *syntax.VarDecl:
+			c.noteVarAlias(x, counts, targets)
+		}
+		return true
+	})
+	for obj, n := range counts {
+		if n != 1 {
+			continue
+		}
+		e, ok := targets[obj]
+		if !ok {
+			continue
+		}
+		if k := c.keyOf(e); k.root != nil {
+			if c.aliases == nil {
+				c.aliases = make(map[types2.Object]lockKey)
+			}
+			c.aliases[obj] = k
+		}
+	}
+	for changed := true; changed; {
+		changed = false
+		for obj, k := range c.aliases {
+			a, ok := c.aliases[k.root]
+			if !ok {
+				continue
+			}
+			nk := lockKey{root: a.root, path: a.path + k.path}
+			if nk != k {
+				c.aliases[obj] = nk
+				changed = true
+			}
+		}
+	}
+}
+
+func (c *lockCheck) noteDefAlias(x *syntax.AssignStmt, counts map[types2.Object]int, targets map[types2.Object]syntax.Expr) {
+	lhs, rhs := exprList(x.Lhs), exprList(x.Rhs)
+	if len(lhs) != 1 || len(rhs) != 1 {
+		return
+	}
+	name, ok := syntax.Unparen(lhs[0]).(*syntax.Name)
+	if !ok || isBlank(name) {
+		return
+	}
+	c.noteAliasTarget(c.pass.Info.Defs[name], rhs[0], counts, targets)
+}
+
+func (c *lockCheck) noteReassignAlias(x *syntax.AssignStmt, counts map[types2.Object]int, targets map[types2.Object]syntax.Expr) {
+	lhs, rhs := exprList(x.Lhs), exprList(x.Rhs)
+	if len(lhs) != 1 || len(rhs) != 1 {
+		return
+	}
+	name, ok := syntax.Unparen(lhs[0]).(*syntax.Name)
+	if !ok || isBlank(name) {
+		return
+	}
+	c.noteAliasTarget(c.pass.Info.Uses[name], rhs[0], counts, targets)
+}
+
+func (c *lockCheck) noteVarAlias(x *syntax.VarDecl, counts map[types2.Object]int, targets map[types2.Object]syntax.Expr) {
+	vals := exprList(x.Values)
+	for i, nm := range x.NameList {
+		if i >= len(vals) {
+			break
+		}
+		c.noteAliasTarget(c.pass.Info.Defs[nm], vals[i], counts, targets)
+	}
+}
+
+func (c *lockCheck) noteAliasTarget(obj types2.Object, rhs syntax.Expr, counts map[types2.Object]int, targets map[types2.Object]syntax.Expr) {
+	if obj == nil {
+		return
+	}
+	counts[obj]++
+	if r := c.aliasTarget(rhs); r != nil {
+		targets[obj] = r
+	}
+}
+
+func (c *lockCheck) aliasTarget(rhs syntax.Expr) syntax.Expr {
+	r := syntax.Unparen(rhs)
+	if op, ok := r.(*syntax.Operation); ok && op.Op == syntax.And && op.Y == nil {
+		return r
+	}
+	if name, ok := r.(*syntax.Name); ok && !isBlank(name) {
+		if _, ok := TypeOf(rhs).(*types2.Pointer); ok {
+			return r
+		}
+	}
+	return nil
 }
 
 // indexCalls records the synchronous WithLock calls of f. Calls in
@@ -632,7 +738,13 @@ func (c *lockCheck) keyOf(e syntax.Expr) lockKey {
 	path := ""
 	for e != nil {
 		if name, ok := e.(*syntax.Name); ok {
-			return lockKey{root: c.variableOf(name), path: path}
+			root := c.variableOf(name)
+			if root != nil {
+				if a, ok := c.aliases[root]; ok {
+					return lockKey{root: a.root, path: a.path + path}
+				}
+			}
+			return lockKey{root: root, path: path}
 		}
 		var field string
 		e, field = c.keyStep(e)

@@ -203,6 +203,11 @@ func TestAdvReentrantDeadlock(t *testing.T) {
 		want []string
 	}{
 		{
+			"aliasReceiverDeadlocks",
+			"func d1(l Locked[int]) { p := &l; l.WithLock(func(n *int) { p.WithLock(func(m *int) { *m++ }) }) }\n",
+			[]string{"32 concurrency::reentrant_withlock_deadlock deny"},
+		},
+		{
 			"genericHelperDeadlocks",
 			"func relock[T any](l *Locked[T]) { l.WithLock(func(n *T) {}) }\nfunc d5(l *Locked[int]) { l.WithLock(func(n *int) { relock(l) }) }\n",
 			[]string{"33 concurrency::reentrant_withlock_deadlock deny"},
