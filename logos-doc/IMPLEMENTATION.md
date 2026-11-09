@@ -139,6 +139,13 @@ hyperfine --warmup 3 --min-runs 10 --export-json "$out/timing.json" "\"$out/work
 
 For the wasm row, compile with `GOOS=js GOARCH=wasm` and invoke the built binary through `"$PWD/../lib/wasm/go_js_wasm_exec"` in both timed and profile commands. Retain the experiment/flags established by M15-S3; do not invent a runtime `-d` flag. Record an unavailable profiling capability as a measurement blocker. None of these future workloads has been measured during planning.
 
+### G7. Change boundaries and test seams (from SPEC Sec 18)
+
+- Seams for the tests are `cmd/go` script tests, `syntax` testdata, `types2` testdata, `test/logos` run files, and unit tests beside new packages.
+- Exported API carries Go doc comments.
+- Ask first before changing `.go` package semantics, adding new exported standard-library API, or using network access.
+- Never commit secrets and never edit `src/vendor` or `src/cmd/vendor`.
+
 ## Architecture (Q-ARCH)
 
 ```mermaid

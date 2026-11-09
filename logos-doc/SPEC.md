@@ -1974,27 +1974,8 @@ loGo/s is a complete toolchain for Go and for the loGo/s language, which adds ch
 Writers write `.lgo` files, the `logos` command checks and lowers them, and the Go 1.27 backend builds them.
 The toolchain is one complete toolchain for Go and loGo/s: Go packages and loGo/s packages share one backend and one runtime, and each improvement serves both.
 
-### 18.2 Commands
+### 18.2 Compiler-made names
 
-The toolchain build runs `cd src && ./make.bash` and puts `bin` on `PATH`, which provides `bin/go` and `bin/logos`.
-Every slice gate runs `./make.bash`, the named `go test` commands with `-count=1`, a clean `gofmt -l` over changed `.go` files, and a clean `go vet` over changed packages.
-Slices that touch concurrency, runtime, or the `go` command also run their tests with `go test -race -short`.
-Each milestone gate runs `./run.bash --no-rebuild` first and then the milestone acceptance command.
-New packages also pass golangci-lint v2 with the `standard` linter set.
-
-### 18.3 Project structure
-
-Upstream files hold hook lines only, for rebase economics.
-A hook that selects loGo/s language behavior MUST sit behind a `logos` condition.
-A hook for an improvement to code generation, runtime, cgo, or tooling MUST NOT depend on that condition, because the improvement serves Go packages under `go` too.
-All logic lives in new files: `*_logos.go` beside the hook, or new packages under `cmd/compile/internal/logos`, `cmd/go/internal/logos`, `src/logos`, and `runtime`.
-LoGo/s language behavior comes only from the `logos` command and from `.lgo` input files.
-An improvement for Go packages comes from a build flag, from `GOEXPERIMENT`, or from a default that `./run.bash` accepted.
-
-### 18.4 Code style
-
-Changed `.go` files stay `gofmt` clean.
-Exported API carries Go doc comments.
 Compiler-made names use the `_logos_` prefix.
 The lowering of `v := parse(s)?` reads as follows.
 
@@ -2005,17 +1986,3 @@ if _logos_e0 != nil {
     return 0, _logos_e0
 }
 ```
-
-### 18.5 Testing strategy
-
-Attack tests come first and fail red for the predicted reason, with the red output saved in the commit body.
-Implementation follows without touching the attack tests in the same step, then green reruns the slice tests plus the slice gate with an empty test diff.
-A mutation probe flips one condition or bound, shows at least one attack failing, and reverts, recorded in the commit body.
-Each slice ships as one commit, with one violation test per error path and limit tests at N-1, N, and N+1.
-Seams for the tests are `cmd/go` script tests, `syntax` testdata, `types2` testdata, `test/logos` run files, and unit tests beside new packages.
-
-### 18.6 Boundaries
-
-The team always runs the test-first protocol and the environment gates.
-Ask first before changing `.go` package semantics, adding new exported standard-library API, or using network access.
-The team never commits secrets, never edits `src/vendor` or `src/cmd/vendor`, and never weakens a test to reach green.
