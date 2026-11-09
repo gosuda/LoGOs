@@ -5,7 +5,6 @@
 package logos
 
 import (
-	"go/token"
 	"slices"
 
 	"cmd/compile/internal/syntax"
@@ -101,47 +100,13 @@ func (fl *fileLower) lowerPlatform() {
 }
 
 // platformSpan resolves the exact source span of a recorded expression.
+// The end is the expression's own end: the generic scanner stops before
+// a depth-zero brace, so a for-post check cannot swallow the loop body.
 func (fl *fileLower) platformSpan(e syntax.Expr) (span, bool) {
 	start := fl.off(leftmostOf(e))
-	end, ok := platformEnd(fl.src, start)
-	if !ok || end <= start {
+	end := fl.exprEndOf(e)
+	if end <= start {
 		return span{}, false
 	}
-	return span{start: start, end: end}, true
-}
-
-// platformEnd scans one complete expression from off, tracking bracket
-// depth, and stops before a depth-zero separator or closer, an
-// automatic semicolon, or EOF.
-func platformEnd(src []byte, off int) (int, bool) {
-	end := -1
-	depth := 0
-	scanSegment(src, off, len(src), func(t tok) bool {
-		if t.auto {
-			return false
-		}
-		if t.comment {
-			end = t.end
-			return true
-		}
-		switch t.kind {
-		case token.LPAREN, token.LBRACK, token.LBRACE:
-			depth++
-		case token.RPAREN, token.RBRACK, token.RBRACE:
-			if depth == 0 {
-				return false
-			}
-			depth--
-		case token.COMMA, token.SEMICOLON:
-			if depth == 0 {
-				return false
-			}
-		}
-		end = t.end
-		return true
-	})
-	if end < 0 {
-		return 0, false
-	}
-	return end, true
+	return trimSpan(fl.src, span{start: start, end: end}), true
 }
