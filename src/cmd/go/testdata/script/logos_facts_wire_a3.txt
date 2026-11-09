@@ -22,6 +22,8 @@ go tool pack p $WORK/go.a __.LOGOS
 cp stdout $WORK/go.facts
 grep '^fn GoAssert AssertTP=1,AssertRTP=0$' $WORK/go.facts
 grep '^lang go$' $WORK/go.facts
+! grep 'ReturnsNonNil' $WORK/go.facts
+! grep 'ReceiverMutated' $WORK/go.facts
 env GOOS=js
 env GOARCH=wasm
 cd go
@@ -31,6 +33,38 @@ go tool pack p $WORK/go-wasm.a __.LOGOS
 stdout '^logos-facts 3$'
 stdout '^fn GoAssert AssertTP=1,AssertRTP=0$'
 stdout '^lang go$'
+env GOOS=
+env GOARCH=
+cd go
+logos build -O=0 -o $WORK/go-o0.a .
+cd ..
+go tool pack p $WORK/go-o0.a __.LOGOS
+stdout '^logos-facts 3$'
+stdout '^fn GoAssert AssertTP=1,AssertRTP=0$'
+stdout '^lang go$'
+cd go
+go tool compile -p example.com/go -o $WORK/go-go.a wire.go
+cd ..
+go tool pack p $WORK/go-go.a __.LOGOS
+stdout '^logos-facts 3$'
+stdout '^fn GoAssert AssertTP=1,AssertRTP=0$'
+stdout '^lang go$'
+cd mut
+logos build -o $WORK/mut.a .
+cd ..
+go tool pack p $WORK/mut.a __.LOGOS
+stdout '^logos-facts 3$'
+cd mut
+go build -o $WORK/mut-plain.a .
+cd ..
+! go tool pack p $WORK/mut-plain.a __.LOGOS
+mkdir $WORK/bin
+cd imp
+logos build -o $WORK/bin/imp$GOEXE .
+exec $WORK/bin/imp$GOEXE
+stdout '^imp-mut: 14$'
+stdout '^imp-assert: 7$'
+cd ..
 
 -- lgo/go.mod --
 module example.com/lgo
@@ -83,4 +117,61 @@ package wire
 
 func GoAssert[T any](x any) T {
 	return x.(T)
+}
+
+func GetItems() []int {
+	return []int{1, 2, 3}
+}
+
+type Counter struct {
+	N int
+}
+
+func (c *Counter) Inc() {
+	c.N++
+}
+
+func NewCounter() *Counter {
+	return &Counter{}
+}
+
+-- mut/go.mod --
+module example.com/mut
+
+go 1.27
+
+-- mut/mut.go --
+package mut
+
+type Acc struct {
+	N int
+}
+
+func (a *Acc) Add(n int) {
+	a.N += n
+}
+
+-- imp/go.mod --
+module example.com/imp
+
+go 1.27
+
+require example.com/go v1.0.0
+
+replace example.com/go => ../go
+
+-- imp/main.lgo --
+package main
+
+import (
+	"fmt"
+
+	"example.com/go"
+)
+
+func main() {
+	s := wire.GetItems()
+	s[0] = 9
+	fmt.Println("imp-mut:", s[0]+s[1]+s[2])
+	fmt.Println("imp-assert:", wire.GoAssert[int](any(7)))
 }

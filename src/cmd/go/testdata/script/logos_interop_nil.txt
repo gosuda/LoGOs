@@ -6,7 +6,7 @@ cd w
 logos build ./...
 logos build -o $WORK/bin/interopnil$GOEXE ./g/cmd
 exec $WORK/bin/interopnil$GOEXE
-stdout '^F-nil H-none I-seven G-ok: gadget defer-ok: logos: nil from Go value stored into non-nil \*a\.User at q\.go:[0-9]+ method-ok: logos: nil from Go value stored into non-nil \*a\.User at q\.go:[0-9]+ func-value-ok$'
+stdout '^F-nil H-none I-seven G-ok: gadget defer-ok: logos: nil from Go value stored into non-nil \*a\.User at q\.go:[0-9]+ method-ok: logos: nil from Go value stored into non-nil \*a\.User at q\.go:[0-9]+ func-value-ok speak-ok: gadget$'
 stdout '^direct-ok: logos: nil from Go value stored into non-nil \*a\.User at q\.go:[0-9]+$'
 cd ..
 
@@ -23,6 +23,8 @@ stdout '^eject-check: logos$'
 logos eject -o bout
 exists bout/main.go
 exists bout/_logos_deps/example.com/lp@v1.2.3/p/p.go
+grep 'Speak\(\) string' bout/_logos_deps/example.com/lp@v1.2.3/p/p.go
+! grep 'const Speak' bout/_logos_deps/example.com/lp@v1.2.3/p/p.go
 cd bout
 go build ./...
 go run .
@@ -80,6 +82,18 @@ func I() int? {
 	return 7
 }
 
+type Speaker interface {
+	const Speak() string
+}
+
+type Person struct {
+	Name string
+}
+
+func (p Person) Speak() string {
+	return p.Name
+}
+
 -- w/g/go.mod --
 module example.com/g
 
@@ -101,6 +115,12 @@ var _ func(*a.User) string = a.G
 var _ func() rt.Option[[]int] = a.H
 var _ func() rt.Option[int] = a.I
 var _ *a.T = a.Box{}.P
+var _ a.Speaker = a.Person{}
+
+func SpeakUp() string {
+	var s a.Speaker = a.Person{Name: "gadget"}
+	return s.Speak()
+}
 
 func Run() string {
 	if a.F() != nil {
@@ -151,6 +171,8 @@ func Run() string {
 		_ = f(nil)
 		out += " func-value-no-panic"
 	}()
+
+	out += " speak-ok: " + SpeakUp()
 
 	return out
 }
@@ -214,6 +236,18 @@ func G(u *User) string {
 
 func Msg() string {
 	return "dep-ok"
+}
+
+type Speaker interface {
+	const Speak() string
+}
+
+type Person struct {
+	Name string
+}
+
+func (p Person) Speak() string {
+	return p.Name
 }
 
 -- e/gapp/go.mod --
