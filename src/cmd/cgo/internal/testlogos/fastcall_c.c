@@ -90,12 +90,6 @@ cb_fire(void)
 	return GoCallback(41);
 }
 
-/* watch_spin reads through p for about micros microseconds (capped by
-   the caller) and reports whether the argument stayed put.  The reads
-   go through a volatile pointer saved at entry so the compiler cannot
-   fold them away: 0 means every read saw want and the pointer is the
-   entry pointer, 1 means the pointee value changed (the memory moved
-   or was reused), 2 means the pointer identity changed. */
 enum {
 	watch_ok = 0,
 	watch_value = 1,

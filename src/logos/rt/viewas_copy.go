@@ -6,9 +6,6 @@
 
 package rt
 
-// viewAsAddr copies the leading bytes of b into an aligned temporary
-// on architectures without unaligned loads (SPEC T-205, M7-S5: the
-// GOARCH=mips leg). The caller checks the length.
 func viewAsAddr[T any](b []byte) *T {
 	return viewAsCopy[T](b)
 }

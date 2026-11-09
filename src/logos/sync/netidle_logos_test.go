@@ -57,8 +57,6 @@ func TestLogosIdleConnectionsHeapGrowth(t *testing.T) {
 	}
 }
 
-// ensureIdleConnFileLimit raises the soft file limit to cover both ends
-// of every idle connection, skipping when the hard limit forbids it.
 func ensureIdleConnFileLimit(t *testing.T) {
 	t.Helper()
 	need := uint64(2*idleConnCount + idleConnFdSlack)
@@ -78,7 +76,6 @@ func ensureIdleConnFileLimit(t *testing.T) {
 	}
 }
 
-// acceptIdleConns accepts n connections, forwarding them to accepted.
 func acceptIdleConns(ln net.Listener, n int, accepted chan<- net.Conn, acceptErr chan<- error) {
 	for range n {
 		c, err := ln.Accept()
@@ -90,7 +87,6 @@ func acceptIdleConns(ln net.Listener, n int, accepted chan<- net.Conn, acceptErr
 	}
 }
 
-// dialIdleConns opens n loopback TCP clients to addr.
 func dialIdleConns(t *testing.T, addr string, n int) []net.Conn {
 	t.Helper()
 	conns := make([]net.Conn, 0, n)
@@ -105,7 +101,6 @@ func dialIdleConns(t *testing.T, addr string, n int) []net.Conn {
 	return conns
 }
 
-// collectIdleConns gathers the n server ends accepted by acceptIdleConns.
 func collectIdleConns(t *testing.T, accepted <-chan net.Conn, acceptErr <-chan error, n int) []net.Conn {
 	t.Helper()
 	conns := make([]net.Conn, 0, n)
@@ -125,7 +120,6 @@ func collectIdleConns(t *testing.T, accepted <-chan net.Conn, acceptErr <-chan e
 	return conns
 }
 
-// heapAllocAfterGC collects twice and reports live heap bytes.
 func heapAllocAfterGC() uint64 {
 	runtime.GC()
 	runtime.GC()
@@ -134,7 +128,6 @@ func heapAllocAfterGC() uint64 {
 	return m.HeapAlloc
 }
 
-// closeIdleConns closes every connection, ignoring close errors.
 func closeIdleConns(conns []net.Conn) {
 	for _, c := range conns {
 		_ = c.Close()

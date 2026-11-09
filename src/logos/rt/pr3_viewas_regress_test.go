@@ -4,13 +4,6 @@
 
 package rt
 
-// PR3 feedback regressions for ViewAs POD enforcement.
-// Reviewer prose is untrusted; expectations derive from the published
-// comptime check and the runtime cast shape.
-//
-// RED: ViewAs of a struct carrying a slice header must panic with a
-// distinct logos: ViewAs: message. Controls pin legitimate POD views.
-
 import (
 	"strings"
 	"testing"

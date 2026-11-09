@@ -1,9 +1,3 @@
-// Violator child (M20-S1): a C function that calls back into Go,
-// once through the directive pair (fast path) and once through
-// nocallback alone (plain path). Each violation panics with the
-// documented message; a second violation on the same goroutine
-// reports the stuck flag. The program exits via os.Exit so the
-// burned callback flag never meets the goroutine-exit check.
 package main
 
 /*

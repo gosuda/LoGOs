@@ -8,16 +8,6 @@ package rt
 
 import "unsafe"
 
-// Pulls of the runtime error-trace primitives. The definitions live in
-// src/runtime/logos_errtrace.go and carry push-style //go:linkname marks,
-// so the linker's linkname check accepts these references. Signatures must
-// match the runtime side exactly.
-//
-// logosTraceRecord retains site in the goroutine's trace ring past return,
-// so it is deliberately not //go:noescape: a retained site must escape to
-// the heap, or a later stack move would leave a stale pointer behind.
-// logosTraceRead only fills buf and retains nothing, so it is //go:noescape.
-
 //go:linkname logosTraceRecord runtime.logosTraceRecord
 func logosTraceRecord(site unsafe.Pointer, errData uintptr)
 
@@ -25,9 +15,6 @@ func logosTraceRecord(site unsafe.Pointer, errData uintptr)
 //go:noescape
 func logosTraceRead(buf []unsafe.Pointer) int
 
-// errorWords mirrors the two words of a non-empty interface value: the
-// type word followed by the data word. TraceErr reads only the data word
-// as the error's identity, the same shape reflect uses for ifaceWords.
 type errorWords struct {
 	typ  unsafe.Pointer
 	data uintptr

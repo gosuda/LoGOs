@@ -420,23 +420,15 @@ func (s *Scanner) FallbackQ(dst any) {
 		if t == nil {
 			t = reflect.TypeFor[any]()
 		}
-		// Same legacy ,string error the quoted scalar helpers save.
 		s.save(tagUnquoted(t))
 		return
 	case quotedContent:
-		// item is the unescaped inner content; it must itself be valid
-		// JSON for the field type (e.g. 7 for int, "a" for string).
-		// Decode it with the same error mapping as Fallback, with the
-		// offset rebased to the outer value start.
 		outerStart := s.start
 		err := stdjson.Unmarshal([]byte(item), dst)
 		if err == nil {
 			return
 		}
 		if ute, ok := err.(*stdjson.UnmarshalTypeError); ok {
-			// Rebase inner offset (relative to item) to whole input.
-			// item starts after the outer opening quote; use outerStart
-			// as the base like saveFallback does for outer spans.
 			ute.Offset += int64(outerStart)
 			if ute.Struct == "" {
 				ute.Struct = s.structName()
@@ -454,9 +446,6 @@ func (s *Scanner) FallbackQ(dst any) {
 		s.fatal(err)
 		return
 	default:
-		// quotedNone: null (or a scan error already recorded). Decode
-		// null into dst so pointers become nil and values stay unchanged,
-		// matching Fallback on null.
 		if s.err != nil {
 			return
 		}

@@ -10,13 +10,6 @@ import (
 	"sync"
 )
 
-// This file holds the runtime half of M5-S4 const maps (SPEC T-Sec7).
-// The compiler lays out a const map as bucketed perfect-hash tables and
-// emits a lookup function that computes a base hash with the functions
-// below and calls ConstTable.Get. Compiler and runtime share these
-// definitions: a change here changes the layout the compiler must emit.
-
-// finalize is the splitmix64 finalizer: a full-diffusion avalanche.
 func finalize(x uint64) uint64 {
 	x ^= x >> 30
 	x *= 0xbf58476d1ce4e5b9

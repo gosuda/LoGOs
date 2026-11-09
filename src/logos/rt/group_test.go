@@ -110,10 +110,6 @@ func TestGroupLimitBoundsConcurrency(t *testing.T) {
 						break
 					}
 				}
-				// Sleep holds both token holders inside at once: the
-				// first holder is still asleep when the second starts,
-				// so the peak reaches 2 deterministically under the
-				// synctest scheduler.
 				time.Sleep(time.Millisecond)
 				cur.Add(-1)
 				return nil
@@ -237,8 +233,6 @@ func TestGroupContextCancelledAtJoin(t *testing.T) {
 	})
 }
 
-// holdSlot records the current and peak concurrency around a one
-// millisecond hold, which is deterministic under synctest.
 func holdSlot(cur, peak *atomic.Int32) {
 	n := cur.Add(1)
 	for {

@@ -4,14 +4,6 @@
 
 package rt
 
-// PR3 group parent-cancel regression. Parent cancel and parent deadline
-// must wake a child held in netpoll-backed Read. Uses loopback TCP only,
-// bounded waits, no ambient dials. Sync uses child-started channels, not
-// scheduler sleeps; slot-reuse checks the received byte, not elapsed time.
-//
-// RED: on the head snapshot the held Read never wakes, so Wait hangs and
-// the bounded selects below time out.
-
 import (
 	"context"
 	"net"

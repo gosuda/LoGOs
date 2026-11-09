@@ -4,9 +4,6 @@
 
 package rt
 
-// errmsg is the text of the last error that WasmError recorded. On wasm,
-// _logos_errmsg_ptr and _logos_errmsg_len export its address and length so
-// the host loader can read it from linear memory.
 var errmsg []byte
 
 // WasmError is the error exit of a //go:wasmexport or //logos:wasmexport

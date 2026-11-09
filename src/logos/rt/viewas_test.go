@@ -58,7 +58,6 @@ func TestViewAsCopyPath(t *testing.T) {
 	if h.Magic != 84148994 || h.Version != 151521030 || h.Size != 1229499251294997258 {
 		t.Fatalf("copy-path ViewAs = %+v", *h)
 	}
-	// The copy owns its memory: mutating the source leaves the view intact.
 	for i := range b {
 		b[i] = 0
 	}

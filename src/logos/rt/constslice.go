@@ -4,13 +4,6 @@
 
 package rt
 
-// This file holds the runtime half of slice covariance in loGo/s.
-// In a loGo/s call, a []C argument may pass to a `const []I` parameter
-// when C implements the interface I. Lowering
-// (cmd/compile/internal/logos/constslice.go) wraps that argument in a
-// call to CovSlice below, so the callee's plain []I parameter receives
-// a real slice.
-
 // CovSlice converts a []E to a []I element by element. The checker
 // proves that E implements I for every conversion it lowers and for
 // every direct call in loGo/s source.

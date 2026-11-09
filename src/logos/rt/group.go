@@ -9,40 +9,19 @@ import (
 	"sync"
 )
 
-// This file implements M8-S1 `logos/rt.Group` (SPEC Sec 2.6, T-206): a
-// bound set of goroutines with context cancellation on the first child
-// error or panic, a live-count join, and a semaphore for `limit`.
-//
-// Ownership: every child is owned by its group; the group context
-// propagates cancellation to all children, and each child reports its
-// outcome to the group before exiting. Concurrency bound: at most
-// `limit` children run at once when limit > 0; a further Go blocks
-// until a token frees (backpressure, no queue). The join tolerates
-// children that spawn during the run: the live count carries one body
-// seed while the group statement runs, so a spawn concurrent with Wait
-// always finds a positive count.
-//
-// A Group is single-use: one body sequence of Go calls, then one Wait.
-// Go after Wait panics, because the slot of the group has gone back to
-// the runtime and a late child would carry it into another group. A
-// second Wait is misuse and panics.
-
 // Group is a bound set of goroutines. Build it with NewGroup, spawn
 // children with Go, and join them with Wait.
 type Group struct {
-	ctx    context.Context
-	cancel context.CancelFunc
-	sem    chan struct{}
-	mu     sync.Mutex
-	cond   sync.Cond
-	live   int
-	waited bool
-	joined bool
-	first  error
-	slot   uint32
-	// parentStop stops the parent-cancel wake; parentDone closes when
-	// that wake has run. Wait stops and joins it before releasing the
-	// slot so no callback fires after reuse.
+	ctx        context.Context
+	cancel     context.CancelFunc
+	sem        chan struct{}
+	mu         sync.Mutex
+	cond       sync.Cond
+	live       int
+	waited     bool
+	joined     bool
+	first      error
+	slot       uint32
 	parentStop func() bool
 	parentDone chan struct{}
 }
@@ -72,9 +51,6 @@ func NewGroup(ctx context.Context, limit int) (*Group, context.Context) {
 	c, cancel := context.WithCancel(ctx)
 	slot := logosGroupAcquire()
 	done := make(chan struct{})
-	// Wake netpoll waiters when the parent context is cancelled or its
-	// deadline expires. The runtime records the failure for the slot, so
-	// a waiter registering afterwards arms instead of parking.
 	stop := context.AfterFunc(ctx, func() {
 		logosCancelGroup(slot)
 		close(done)
@@ -124,7 +100,6 @@ func (g *Group) Go(f func(context.Context) error) {
 	}()
 }
 
-// fail records the first child outcome and cancels the group.
 func (g *Group) fail(err error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -162,10 +137,6 @@ func (g *Group) Wait() error {
 	}
 	g.joined = true
 	g.mu.Unlock()
-	// Stop and join any running parent wake before releasing the slot:
-	// a callback firing after release would wake an unrelated group
-	// reusing the slot. No locks are held across the wake, so the order
-	// stays acyclic with the runtime waiter lock.
 	if !g.parentStop() {
 		<-g.parentDone
 	}

@@ -8,9 +8,6 @@ package rt
 
 import "unsafe"
 
-// viewAsAddr reinterprets the leading bytes of b as a *T on
-// architectures whose backend allows unaligned loads (SPEC T-205,
-// M7-S5). The caller checks the length.
 func viewAsAddr[T any](b []byte) *T {
 	return (*T)(unsafe.Pointer(unsafe.SliceData(b)))
 }
