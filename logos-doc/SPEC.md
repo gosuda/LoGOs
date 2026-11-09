@@ -11,13 +11,13 @@ The words MUST, MUST NOT, SHOULD, SHOULD NOT, and MAY follow RFC 2119. The text 
 
 ### 0.1 Upstream compatibility
 The loGo/s toolchain MUST be one complete toolchain for Go packages and loGo/s packages [T-0.1][R-U1].
-Go support MUST be first-class and MUST NOT be a legacy mode [T-0.1][R-U1].
+Go support MUST stay first-class in every release [T-0.1][R-U1].
 Every improvement to code generation, runtime, GC, stack, SIMD, wasm, cgo, PGO, optimization level, and tooling MUST apply to Go packages and to loGo/s packages [T-0.1][R-U1].
 That rule MUST hold under `logos` and under plain `go` [T-0.1][R-U1].
-An improvement that this spec puts behind a `GOEXPERIMENT` flag MUST stay behind that flag as this spec states [T-0.1][R-U1].
+An improvement that this spec puts behind a `GOEXPERIMENT` flag MUST stay behind that flag as this spec states. The `logos_settings_env.txt` script gates the arena and preemptibleloops experiment defaults [T-0.1][R-U1].
 The `go` command MAY differ from upstream Go 1.27.2 in performance, code generation, runtime, and tooling [T-0.1][R-U1].
 The `go` command MUST keep Go language semantics, so every valid Go program MUST keep its Go meaning [T-0.1][R-U1].
-The upstream test suite that `run.bash` runs MUST stay the regression floor [T-0.1].
+The CI process MUST run `./run.bash` and MUST keep its suite green as the regression floor [T-0.1].
 The `go version` output and the `go help` output, including every help topic, MUST stay the upstream text [T-0.1].
 Plain `go` MUST select improvements through flags and `GOEXPERIMENT` and MUST read no `logos.toml` [T-0.1][R-U1].
 A flag that plain `go` gains MUST stay absent from the help text, so that text stays byte-identical to upstream [T-0.1][R-U1].
@@ -47,10 +47,10 @@ Plain `go` MUST ignore `.lgo` files [T-0.1][A-LGOSEL].
 Plain `go` MUST report the upstream `no Go files` result for a loGo/s-only package [T-0.1][A-LGOSEL].
 A plain `go` build of a Go package that imports a loGo/s package MUST fail with a load error that names the imported package, because plain `go` ignores `.lgo` files [T-0.1][A-LGOSEL].
 Packages from `golang.org/x` and other third-party Go modules MUST count as Go packages that `.lgo` code MAY import [A-XMOD][R-U2].
-Code generators MUST emit `.lgo` in loGo/s modules [A-CODEGEN].
+Code generators SHOULD emit `.lgo` in loGo/s modules [A-CODEGEN].
 A loGo/s package MUST NOT hold a generated `.go` file except cgo outputs [A-CODEGEN].
 A generator MAY write `.go` files into a Go package that a loGo/s package imports [A-CODEGEN][R-U2].
-Project tools MUST use `tool` directives in `go.mod`, never a Go file in a loGo/s module [A-MODKIND][R-U3].
+Project tools SHOULD use `tool` directives in `go.mod`, never a Go file in a loGo/s module [A-MODKIND][R-U3].
 
 ### 0.2 No new global keywords
 The language MUST add no new global keywords [T-0.2].
@@ -87,8 +87,8 @@ Ejected output MUST NOT emit `.gen.go` file names. [T-0.3]
 It MUST NOT emit a `//go:build !logos` line. [T-0.3]
 
 ### 0.4 Design axiom for explicit code
-Signatures and call sites MUST show side effects, mutability contracts, nilability states, and error paths [T-0.4].
-The compiler MUST reject dangerous edge cases through type rules and `logos lint` rules [T-0.4].
+Signatures and call sites MUST show side effects, mutability contracts, nilability states, and error paths [T-0.4]. Each later section states its own rules [T-0.4].
+The compiler MUST reject dangerous edge cases through type rules and `logos lint` rules [T-0.4]. The lint registry enumerates the enforced lint rules [T-0.4].
 
 ## 1. Tier 1 specification (toolchain, linter, desugaring)
 
@@ -187,7 +187,7 @@ A `//logos:allow(portability::alias_extension)` directive MUST silence the rule 
 The compiler MUST enforce `perf::time_after_in_loop` as `warn` against `time.After` inside a loop body [T-102].
 The compiler MUST enforce `pedantic::exhaustive_union_switch` as `allow` against a `default` clause in a switch over a closed union [T-102].
 JSON output MUST offer autofix candidates for optional chaining with default, early-return guard, split of a misplaced `?`, verb fix to `%w`, and addition of `?` in an error-returning function [T-102].
-JSON output for a Go package MUST offer only the verb fix to `%w`, because the other candidates name loGo/s syntax [T-102][R-U1].
+JSON output for a Go package MUST offer only the verb fix to `%w` among the previous sentence's candidates, because the other candidates name loGo/s syntax; it MAY also offer the `portability::atomic_plain_int64` wrapper fix. [T-102][R-U1]
 A default over a closed union MUST report pedantic::exhaustive_union_switch when the pedantic group is enabled; that rule defaults to allow and is silent otherwise. [T-102]
 Exhaustive switches MUST still list every member or default. [T-102]
 Unlocked sharing of a mutable multiword value with a child block plus a write on either side MUST fail with concurrency::concurrent_multiword_race. [T-102]
@@ -1636,7 +1636,7 @@ Each instantiation carries its own static helpers. [T-205]
 
 For each eligible struct, the lowering generates pointer-receiver UnmarshalJSON. [T-Sec10]
 Decoding fills defaults first, then parses. [T-Sec10]
-A _logos_seen mask sized [(K+63)/64]uint64 tracks matched keys against a required-mask constant. [T-Sec10]
+A _logos_seen mask sized [(K+63)/64]uint64 tracks matched keys against a required-mask constant, where K is the number of required non-nil fields of the struct. [T-Sec10]
 At the closing brace, a missing required non-nil field returns MissingFieldError naming type and field. [T-Sec10]
 JSON null for a non-nil field returns the same error. [T-Sec10]
 Keys MUST dispatch by switch up to 8 keys and by the Sec 7 const-map table above that, with constant-time auxiliary metadata reads plus exactly one final key/value-slot probe with full-key validation. [T-Sec10][T-Sec7]
@@ -1646,14 +1646,14 @@ Arrays grow incrementally with no pre-allocation cap. [T-Sec10]
 Decoding through json.Decoder uses the same method. [T-Sec10]
 No validate tags are needed. [T-Sec10]
 Unmarshal of a closed union tries members in declaration order into fresh scratch values and counts successes. [T-Sec10][T-203.1]
-A member trial counts a success only when its decode succeeds and at least one key in the object is modeled by that member; a key modeled by any sibling member but not this one disqualifies this member's trial, while keys no member models are ignored. [T-Sec10][T-203.1]
+A member trial with key helpers counts a success only when its decode succeeds and at least one key in the object is modeled by that member; a key modeled by any sibling member but not this one disqualifies this member's trial, while keys no member models are ignored. A member without key helpers counts a success when its decode succeeds. [T-Sec10][T-203.1]
 It assigns the target only on a single success. [T-Sec10][T-203.1]
 Ambiguity returns an error naming the union and the members. [T-Sec10][T-203.1]
 Failed trials leave the target untouched. [T-Sec10][T-203.1]
 
 ### 10.3 Binary encoding
 
-For each JSON-eligible struct, the lowering generates MarshalBinary, UnmarshalBinary, and AppendBinary. [T-Sec10.1]
+For each JSON-eligible struct whose every JSON-visible field has a binary representation, the lowering generates MarshalBinary, UnmarshalBinary, and AppendBinary. [T-Sec10.1]
 They implement encoding.BinaryMarshaler, encoding.BinaryUnmarshaler, and encoding.BinaryAppender. [T-Sec10.1]
 Output starts with version byte 0x01, then fields in declaration order. [T-Sec10.1]
 All integer kinds encode as 8 bytes little-endian of the 64-bit value. [T-Sec10.1]
@@ -1667,11 +1667,11 @@ Nested structs encode inline. [T-Sec10.1]
 Optional values MUST encode as 0x00 when absent or 0x01 plus payload when present. [T-Sec10.1]
 A field of type int or uint warns portability::serialized_unsized_int. [T-Sec10.1]
 Sized kinds are preferred. [T-Sec10.1]
-Tag options change nothing in binary output. [T-Sec10.1]
+A tag `-` excludes the field from binary output; other tag options change nothing. [T-Sec10.1]
 UnmarshalBinary rejects truncation, bad presence bytes, version mismatch, and trailing bytes with errors naming field and offset. [T-Sec10.1]
 For elements with a nonzero wire payload, a count header MUST pre-allocate at most min(len(rest)/2, 1 MB / sizeof(elem)) elements and MUST grow past that only as input bytes arrive. [T-Sec10.1]
 Charge nothing against a total budget on the count header; a count whose element bytes are all present in the input is lawful and MUST decode, even when the total exceeds 1 MiB. [T-Sec10.1]
-For slices whose elements have zero wire payload, the count itself MUST NOT exceed 1,048,576 (the 1 MiB prealloc bound at unit 1); larger counts MUST be rejected with a count-out-of-range error, encoder symmetric, checked before allocation or element iteration. [T-Sec10.1]
+For slices whose elements have zero wire payload, the count itself MUST NOT exceed 1,048,576 (the 1 MiB prealloc bound at unit 1); larger counts MUST be rejected with a count-out-of-range error, encoder symmetric, checked before allocation or element iteration. One count MUST NOT allocate more than 64 MiB of element storage in a single allocation. [T-Sec10.1]
 Zero-wire slices MUST be handled in constant time with respect to count, without per-element iteration. [T-Sec10.1]
 These resource bounds MUST NOT change the wire bytes of accepted values. [T-Sec10.1]
 
@@ -1683,7 +1683,7 @@ After deadcode, the linker MUST run a reachability audit from main.main and init
 The audit MUST run only in `logos` builds and MUST cover modules of both kinds. [T-Sec11][R-U1]
 The audit follows relocations. [T-Sec11]
 It adds synthetic edges for interface calls and reflective method lookups. [T-Sec11]
-Protected sinks are reflect.ValueOf, reflect.TypeOf, reflect.New, syscall.Exec, syscall.ForkExec, os.StartProcess, os.startProcess, net.sysSocket, runtime.cgocall, and runtime.logosCgocallFast. [T-Sec11]
+Protected sinks are reflect.ValueOf, reflect.TypeOf, reflect.New, syscall.Exec, syscall.ForkExec, syscall.StartProcess, os.StartProcess, os.startProcess, net.sysSocket, syscall.Socket, syscall.Connect, runtime.cgocall, and runtime.logosCgocallFast. [T-Sec11]
 Packages that import unsafe are found through a compiler fact on the package graph. [T-Sec11]
 The standard library, first-party packages under a main module, and the program's own packages are exempt. [T-Sec11]
 A dependency is not the standard library because its module path has no dot. [T-Sec11]
@@ -1712,12 +1712,12 @@ The tailored cgo sink is the per-call-site `pkg._Cfunc_*` wrapper, reported as `
 The WASM profile MUST activate automatically for GOOS=js GOARCH=wasm and GOOS=wasip1 GOARCH=wasm. [T-Sec12]
 It MUST apply to Go packages and to loGo/s packages, under `logos` and under plain `go`. [T-Sec12][R-U1]
 It uses the installed toolchain with no external tool. [T-Sec12]
-Functions with fact MayYield=0 compile without resume-point dispatch. [T-Sec12]
+A MayYield=0 function with straight-line code compiles without resume-point dispatch; one with inter-block jumps keeps the entry-loop dispatch that addresses those jumps. [T-Sec12]
 A function keeps MayYield=0 only with no defer, no indirect call, no call to MayYield=1 or unknown callees, no transitive runtime.gopark, no channel, select, time.Sleep, Gosched, or blocking wasmimport call, no nil check, and no prologue stack check, because stack growth and preemption unwind through runtime.morestack. [T-Sec12]
 Pure imports keep MayYield=0. [T-Sec12]
 Unknown wasmimport targets default to MayYield=1. [T-Sec12]
 A wrong MayYield=0 MUST trap instead of hanging. [T-Sec12]
-MayYield=1 functions MUST keep resume-point dispatch. [T-Sec12]
+A function keeps resume-point dispatch if and only if it has a call that keeps a resume point. MayYield=1 alone, through a prologue stack check or a nil check, needs none. Under --wasm-features=stack-switching, continuation calls replace dispatch, kept only for deferreturn, runtime and mcall-caller frames. [T-Sec12]
 A caller of runtime.mcall MUST keep resume-point dispatch even when it is not in the runtime: the goroutine switch back re-enters that frame, which inlining (Gosched) can place in user code. [T-Sec12]
 With `--wasm-features=stack-switching` on `logos build` or `go build` they MUST use stack switching instead. [T-Sec12][R-U1]
 Pointers are 8 bytes and slice headers are 24 bytes. [T-Sec12]
@@ -1738,7 +1738,7 @@ The loader MUST work under `GOOS=js` and, in a reactor module that the host init
 `logos/rt` MUST export the wasm helpers `_logos_scratch_alloc`, `_logos_scratch_reset`, `_logos_errmsg_ptr`, and `_logos_errmsg_len` for the loader. [T-Sec12]
 The loader exports instantiateLogos(wasmBytes, imports). [T-Sec12]
 The loader re-reads memory.buffer after every call into wasm. [T-Sec12]
-Exported functions MUST return an int32 errCode. [T-Sec12]
+Exported functions MUST return an int32 errCode. The host wrapper throws on any nonzero (truthy) return. [T-Sec12]
 String results are invalid. [T-Sec12]
 On nonzero errCode the wrapper throws the message read from wasm memory. [T-Sec12]
 `logos/rt.WasmError(err)` MUST return 0 for a nil error, and for a non-nil error it MUST record `err.Error()` as the last error message and return 1; the loader reads that message through `_logos_errmsg_ptr` and `_logos_errmsg_len`. [T-Sec12]
@@ -1747,7 +1747,7 @@ On nonzero errCode the wrapper throws the message read from wasm memory. [T-Sec1
 Decoding MUST fill defaults first, then parse. [T-Sec12]
 JSON decoders MUST grow arrays incrementally with no pre-allocation cap. [T-Sec12][T-Sec10.1]
 Binary counts for elements with nonzero wire payload MUST pre-allocate at most `min(len(rest)/2, 1 MB / sizeof(elem))` and grow only as bytes arrive, charging nothing on the count header; lawful large payloads with all bytes present MUST decode. [T-Sec12][T-Sec10.1]
-Zero-wire slice counts MUST NOT exceed 1,048,576, rejected with count-out-of-range, encoder symmetric, constant-time without per-element iteration. [T-Sec12][T-Sec10.1]
+Zero-wire slice counts MUST NOT exceed 1,048,576, rejected with count-out-of-range, encoder symmetric, constant-time without per-element iteration. One count MUST NOT allocate more than 64 MiB of element storage in a single allocation. [T-Sec12][T-Sec10.1]
 Accepted wire bytes MUST stay unchanged. [T-Sec12][T-Sec10.1]
 
 ## 13. Backend peephole and SIMD passes
@@ -1758,10 +1758,10 @@ Accepted wire bytes MUST stay unchanged. [T-Sec12][T-Sec10.1]
 
 - Adjacent loads and stores that meet the safety predicates MAY fuse into one paired instruction. [T-303]
 - Fusion MUST NOT change program meaning, fault behavior, or atomic order. [T-303]
-- Candidates split by a call, an atomic, or a block boundary MUST stay separate. [T-303]
-- A pair MUST NOT read or write its own base register. [T-303]
+- Candidates split by a call or an atomic MUST stay separate; loads MAY fuse across a single-predecessor block edge. [T-303]
+- A pair MUST NOT write back its base register. [T-303]
 - The two destinations of a pair MUST differ. [T-303]
-- Offsets outside the encodable range MUST stay separate loads or stores. [T-303]
+- A 16-byte pair offset outside the encodable range MUST stay separate loads or stores; 4-byte and 8-byte pairs MAY use the assembler fixup. [T-303]
 - The 4-byte and 8-byte pairing above is upstream behavior. [T-303]
 - Adjacent 16-byte vector loads MUST pair into FLDPQ when they meet the safety predicates with an encodable pair offset. [T-303]
 - Adjacent 16-byte vector stores MUST pair into FSTPQ under the same conditions. [T-303]
@@ -1784,7 +1784,7 @@ Accepted wire bytes MUST stay unchanged. [T-Sec12][T-Sec10.1]
 - At GOAMD64=v3/v4 an immediate 32/64-bit constant-count rotate MAY use RORXQ or RORXL besides SARX, SHLX, and SHRX. [T-303]
 - Variable-count rotates MUST stay on the existing path. [T-303]
 - A ternary-shaped branch at GOAMD64=v3 MAY compile to a conditional move. [T-303]
-- In `.lgo` files `*` inside a `make` length or capacity MUST lower to `logos/rt.MulLen`. [T-303]
+- In `.lgo` files a non-constant integer product in a `make` length or capacity MUST lower to `logos/rt.MulLen`; constant products stay constant. [T-303]
 - An overflowing `make` length MUST panic with `logos: make length overflow: <expr>`. [T-303]
 - A negative `make` length MUST panic. [T-303]
 - The call below panics with `logos: make length overflow: w * h` on overflow. [T-303]
