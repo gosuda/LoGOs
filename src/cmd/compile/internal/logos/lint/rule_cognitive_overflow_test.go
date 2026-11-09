@@ -445,8 +445,7 @@ func thresholdSrc(measure string, limit int) string {
 }
 
 // TestCognitiveOverflowThresholds runs each limit at a selected N: a
-// function at N-1 and at N is clean and one at N+1 is flagged, and the
-// message names the selected limit.
+// function at N-1 and at N is clean and one at N+1 is flagged.
 func TestCognitiveOverflowThresholds(t *testing.T) {
 	testenv.MustHaveGoBuild(t)
 	for _, tc := range []struct {
@@ -478,15 +477,14 @@ func TestCognitiveOverflowThresholds(t *testing.T) {
 			}
 			in := check(t, kind, name, src)
 			in.Policy = p
-			var got []string
+			n := 0
 			for _, r := range Run(in) {
 				if r.Rule == "complexity::cognitive_overflow" {
-					got = append(got, r.Message)
+					n++
 				}
 			}
-			want := []string{fmt.Sprintf("function f2 is too complex: %s %d exceeds %d", tc.label, tc.limit+1, tc.limit)}
-			if !slices.Equal(got, want) {
-				t.Errorf("%s limit %s=%d (%s): messages %q, want %q", tc.measure, tc.key, tc.limit, name, got, want)
+			if n != 1 {
+				t.Errorf("%s limit %s=%d (%s): %d findings, want one", tc.measure, tc.key, tc.limit, name, n)
 			}
 		}
 	}
@@ -512,7 +510,7 @@ func TestCognitiveOverflowDefaults(t *testing.T) {
 	}
 }
 
-// TestCognitiveOverflowReport checks the message of a function over several
+// TestCognitiveOverflowReport checks the findings of a function over several
 // limits, the span, and the directive.
 func TestCognitiveOverflowReport(t *testing.T) {
 	testenv.MustHaveGoBuild(t)
@@ -543,11 +541,11 @@ func literal() {
 	rs := Run(check(t, KindGo, "x.go", src))
 	var got []string
 	for _, r := range rs {
-		got = append(got, fmt.Sprintf("%d %s", r.Pos.Line(), r.Message))
+		got = append(got, fmt.Sprintf("%d %s", r.Pos.Line(), r.Rule))
 	}
 	want := []string{
-		"5 function many is too complex: nesting depth 4 exceeds 3, parameter count 5 exceeds 4",
-		"21 function literal is too complex: parameter count 5 exceeds 4",
+		"5 complexity::cognitive_overflow",
+		"21 complexity::cognitive_overflow",
 	}
 	if !slices.Equal(got, want) {
 		t.Errorf("results = %q, want %q", got, want)

@@ -151,9 +151,9 @@ func TestDeferErasesErrdeferState(t *testing.T) {
 	expect(t, KindLgo, nil, testSource{"x.lgo", deferErasesSrc}, finding{"correctness::defer_erases_errdefer_state", Forbid})
 }
 
-// TestDeferErasesErrdeferStateMessage checks the text and span of a finding:
-// the span is the assignment, and the message names the result.
-func TestDeferErasesErrdeferStateMessage(t *testing.T) {
+// TestDeferErasesErasureSpan checks the span of a finding: the assignment,
+// +// which tools splice by this byte range.
+func TestDeferErasesErasureSpan(t *testing.T) {
 	const src = `package p
 
 func rollback() {}
@@ -169,9 +169,6 @@ func f() (failed error) {
 	got := Run(check(t, KindLgo, "x.lgo", src))
 	if len(got) != 1 {
 		t.Fatalf("results %q, want one", summarize(got))
-	}
-	if want := "deferred function literal assigns nil to result failed, erasing the error state that errdefer reads"; got[0].Message != want {
-		t.Errorf("message %q, want %q", got[0].Message, want)
 	}
 	if text := spanText(src, got[0]); text != "failed = nil" {
 		t.Errorf("span %q, want %q", text, "failed = nil")

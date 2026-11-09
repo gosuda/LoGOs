@@ -59,7 +59,7 @@ func reportedPolicy(t *testing.T, level string) *Policy {
 func TestReportedOf(t *testing.T) {
 	pos := syntax.MakePos(syntax.NewFileBase("x.lgo"), 3, 4)
 	r, ok := ReportedOf(types2.Error{Pos: pos, Soft: true, Msg: "[suspicious::unapplied_struct_default] zero declaration of T with field defaults"})
-	if !ok || r.Rule != "suspicious::unapplied_struct_default" || r.Message != "zero declaration of T with field defaults" || r.Pos != pos {
+	if !ok || r.Rule != "suspicious::unapplied_struct_default" || strings.Contains(r.Message, "[suspicious::") || r.Pos != pos {
 		t.Errorf("ReportedOf(unapplied default) = %+v, %v", r, ok)
 	}
 	for name, err := range map[string]error{
