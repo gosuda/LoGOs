@@ -26,6 +26,7 @@ type escapeLint struct {
 	zeroAlloc  bool
 	allocFacts bool
 	graph      *logosAllocGraph
+	fallback   bool
 }
 
 // logosEscape is the state logosLintHook keeps for LogosLintEscape.
@@ -101,6 +102,13 @@ func logosLintHook(m *posMap, files []*syntax.File, pkg *types2.Package, info *t
 		logosEscape = &escapeLint{in: in, m: m, pins: pins, zeroAlloc: zeroAlloc, allocFacts: base.LogosAllocFacts, graph: graph}
 		escape.LogosPinning = pins
 	}
+	fallback := lint.FallbackActive(in)
+	if fallback {
+		if logosEscape == nil {
+			logosEscape = &escapeLint{in: in, m: m}
+		}
+		logosEscape.fallback = true
+	}
 }
 
 // logosLintActive reports whether the compile runs the lints: a policy is
@@ -155,6 +163,9 @@ func LogosLintEscape() {
 			logosMergeAllocFacts(st.graph.allocFreeObjects())
 		}
 	}
+	if st.fallback {
+		results = append(results, logosFallbackResults(st.in)...)
+	}
 	for _, r := range results {
 		base.LogosReport(logosDiag(st.m, r))
 	}
@@ -180,6 +191,21 @@ func logosZeroAllocResults(in *lint.Input) []lint.Result {
 		})
 	}
 	return lint.ZeroAllocResults(in, found)
+}
+
+func logosFallbackResults(in *lint.Input) []lint.Result {
+	found := escape.LogosRegionFallbacks()
+	findings := make([]lint.FallbackFinding, 0, len(found))
+	for _, f := range found {
+		pos := base.Ctxt.InnermostPos(f.Pos)
+		findings = append(findings, lint.FallbackFinding{
+			File:    pos.RelFilename(),
+			Line:    pos.Line(),
+			Col:     pos.Col(),
+			Message: f.Message,
+		})
+	}
+	return lint.RunFallback(in, findings)
 }
 
 // logosPinResults resolves the large backing store pins that escape analysis

@@ -45,11 +45,27 @@ func (b *batch) logosParamTag(fn *ir.Func, narg int, f *types.Field) string {
 
 func (e *escape) logosAssignHoles(dsts, srcs []ir.Node) []hole {
 	ks := e.addrs(dsts)
+	var routed []bool
+	if ir.LogosRegionsEnabled() {
+		e.logosRegionRecordStores(dsts, srcs, ks)
+		for i := range ks {
+			if k, ok := e.logosRegionStoreHole(dsts[i]); ok {
+				if routed == nil {
+					routed = make([]bool, len(ks))
+				}
+				ks[i] = k
+				routed[i] = true
+			}
+		}
+	}
 	if !logosPointeeActive() {
 		return ks
 	}
 	facts := pointeeFactsOf(e.curfn)
 	for i := range ks {
+		if routed != nil && routed[i] {
+			continue
+		}
 		if i >= len(srcs) {
 			return ks
 		}
@@ -85,6 +101,7 @@ func (e *escape) logosTagHole(ks []hole, fns []*ir.Name, nParams int, args ir.No
 		return e.heapHole()
 	}
 	if k, ok := e.logosStoreHole(args[target]); ok {
+		e.logosRegionRecordArg(args[paramIdx], fns[0])
 		return k
 	}
 	return e.heapHole()
@@ -111,6 +128,9 @@ func logosCallTarget(fn *ir.Name, nParams, paramIdx int) (int, bool) {
 }
 
 func (e *escape) logosStoreHole(base ir.Node) (hole, bool) {
+	if k, ok := e.logosRegionArgHole(base); ok {
+		return k, true
+	}
 	addr, ok := base.(*ir.AddrExpr)
 	if !ok || addr.Op() != ir.OADDR {
 		return e.heapHole(), false

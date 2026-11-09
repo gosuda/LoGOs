@@ -1,0 +1,38 @@
+// run -goexperiment logosarena
+
+package main
+
+import (
+	"fmt"
+	"logos/arena"
+	"logos/rt"
+)
+
+type node struct {
+	next *node
+	v    int
+}
+
+func main() {
+	sum := 0
+	inside := false
+	{
+		r := arena.Open()
+		head := arena.New[node](r)
+		tail := head
+		for i := range 10000 {
+			n := arena.New[node](r)
+			n.v = i
+			tail.next = n
+			tail = n
+		}
+		tail.next = head
+		for h := head.next; h != head; h = h.next {
+			sum += h.v
+		}
+		inside = rt.RegionBytes() > 0
+	}
+	fmt.Println(sum)
+	fmt.Println("rt.RegionBytes() > 0:", inside)
+	fmt.Println("region bytes after exit:", rt.RegionBytes())
+}

@@ -1,0 +1,821 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package escape
+
+import (
+	"fmt"
+	"slices"
+	"strings"
+
+	"cmd/compile/internal/base"
+	"cmd/compile/internal/ir"
+	"cmd/compile/internal/types"
+	"cmd/internal/src"
+)
+
+type logosRegion struct {
+	call     *ir.CallExpr
+	param    *ir.Name
+	fn       *ir.Func
+	owner    *ir.LogosRegionOwner
+	record   *location
+	contents *location
+}
+
+type logosCand struct {
+	call   *ir.CallExpr
+	fn     *ir.Func
+	region *logosRegion
+	loc    *location
+}
+
+type logosKill struct {
+	desc    string
+	closure bool
+}
+
+type logosRegionBatch struct {
+	regions     map[*ir.CallExpr]*logosRegion
+	sites       map[*ir.CallExpr]*logosCand
+	candLocs    map[*location]*logosCand
+	locs        map[*location]*logosRegion
+	kills       map[*location]*logosKill
+	flowDesc    map[*location]string
+	contentsAll []*location
+	ensured     map[*ir.Func]bool
+	facts       map[*ir.Func]*logosProvFacts
+}
+
+type logosProvFacts struct {
+	prov        map[*ir.Name]*logosRegion
+	paramRegion map[*ir.Name]*logosRegion
+}
+
+type LogosRegionFallback struct {
+	Pos     src.XPos
+	Message string
+}
+
+var logosRegionFallbacks []LogosRegionFallback
+
+func LogosRegionFallbacks() []LogosRegionFallback {
+	return logosRegionFallbacks
+}
+
+func logosRegionTypeOf(t *types.Type) bool {
+	if t == nil || t.Sym() == nil || t.Sym().Pkg == nil {
+		return false
+	}
+	return t.Sym().Pkg.Path == "logos/arena" && t.Sym().Name == "Region"
+}
+
+func (b *batch) logosRegionInit() {
+	if b.logosRegion.regions != nil {
+		return
+	}
+	b.logosRegion.regions = make(map[*ir.CallExpr]*logosRegion)
+	b.logosRegion.sites = make(map[*ir.CallExpr]*logosCand)
+	b.logosRegion.candLocs = make(map[*location]*logosCand)
+	b.logosRegion.locs = make(map[*location]*logosRegion)
+	b.logosRegion.kills = make(map[*location]*logosKill)
+	b.logosRegion.flowDesc = make(map[*location]string)
+	b.logosRegion.ensured = make(map[*ir.Func]bool)
+	b.logosRegion.facts = make(map[*ir.Func]*logosProvFacts)
+}
+
+func (b *batch) logosRegionEnsure(fn *ir.Func) {
+	if b.logosRegion.ensured[fn] {
+		return
+	}
+	b.logosRegionInit()
+	b.logosRegion.ensured[fn] = true
+	if !ir.LogosRegionsEnabled() {
+		return
+	}
+	owners := ir.LogosRegionOwners(fn)
+	ir.Visit(fn, func(n ir.Node) {
+		call, ok := n.(*ir.CallExpr)
+		if !ok {
+			return
+		}
+		switch ir.LogosRegionCallOp(call) {
+		case ir.LogosRegionOpen:
+			if _, seen := b.logosRegion.regions[call]; seen {
+				return
+			}
+			reg := &logosRegion{call: call, fn: fn, owner: owners[call]}
+			reg.record = &location{n: call, curfn: fn, loopDepth: 1}
+			reg.contents = b.logosRegionContentsLoc(call, fn)
+			b.logosRegion.locs[reg.record] = reg
+			b.logosRegion.locs[reg.contents] = reg
+			b.logosRegion.regions[call] = reg
+		case ir.LogosRegionNew, ir.LogosRegionMake, ir.LogosRegionAppend:
+			if _, seen := b.logosRegion.sites[call]; !seen {
+				b.logosRegion.sites[call] = &logosCand{call: call, fn: fn}
+			}
+		}
+	})
+}
+
+func (b *batch) logosRegionParamRegion(facts *logosProvFacts, fn *ir.Func, name *ir.Name) *logosRegion {
+	if reg, ok := facts.paramRegion[name.Canonical()]; ok {
+		return reg
+	}
+	reg := &logosRegion{param: name, fn: fn}
+	reg.contents = b.logosRegionContentsLoc(name, fn)
+	b.logosRegion.locs[reg.contents] = reg
+	facts.paramRegion[name.Canonical()] = reg
+	return reg
+}
+
+func (b *batch) logosRegionContentsLoc(n ir.Node, fn *ir.Func) *location {
+	loc := &location{n: n, curfn: fn, loopDepth: 1}
+	b.logosRegion.contentsAll = append(b.logosRegion.contentsAll, loc)
+	return loc
+}
+
+func (b *batch) logosRegionContents(reg *logosRegion) *location {
+	if reg.contents == nil {
+		n := ir.Node(reg.call)
+		if reg.call == nil {
+			n = reg.param
+		}
+		reg.contents = b.logosRegionContentsLoc(n, reg.fn)
+		b.logosRegion.locs[reg.contents] = reg
+	}
+	return reg.contents
+}
+
+func (b *batch) logosRegionProv(fn *ir.Func) *logosProvFacts {
+	if f, ok := b.logosRegion.facts[fn]; ok {
+		return f
+	}
+	facts := b.logosRegionCompute(fn)
+	b.logosRegion.facts[fn] = facts
+	return facts
+}
+
+func (b *batch) logosRegionCompute(fn *ir.Func) *logosProvFacts {
+	facts := &logosProvFacts{prov: make(map[*ir.Name]*logosRegion), paramRegion: make(map[*ir.Name]*logosRegion)}
+	if !ir.LogosRegionsEnabled() {
+		return facts
+	}
+	b.logosRegionInit()
+	d := b.logosRegionDefs(fn)
+	for _, f := range fn.Type().RecvParams() {
+		name, ok := f.Nname.(*ir.Name)
+		if !ok || name.Class != ir.PPARAM || !logosRegionTypeOf(name.Type()) {
+			continue
+		}
+		reg := b.logosRegionParamRegion(facts, fn, name)
+		facts.paramRegion[name.Canonical()] = reg
+		facts.prov[name.Canonical()] = reg
+		if _, hasDefs := d.defs[name.Canonical()]; hasDefs {
+			d.defs[name.Canonical()] = append([]ir.Node{name}, d.defs[name.Canonical()]...)
+		}
+	}
+	for name := range d.captured {
+		d.tainted[name] = true
+	}
+	pending := make(map[*ir.Name]bool, len(d.defs))
+	for name := range d.defs {
+		if !d.tainted[name] {
+			pending[name] = true
+		}
+	}
+	for range len(d.defs) + 1 {
+		changed := false
+		for name, rhss := range d.defs {
+			if d.tainted[name] || !pending[name] {
+				continue
+			}
+			var r *logosRegion
+			state := logosRhsOK
+			for _, rhs := range rhss {
+				rr, st := b.logosRegionRhs(rhs, facts.prov, pending)
+				if st == logosRhsBad {
+					state = logosRhsBad
+					break
+				}
+				if st == logosRhsPending {
+					state = logosRhsPending
+					continue
+				}
+				if rr == nil {
+					continue
+				}
+				if r == nil {
+					r = rr
+				} else if r != rr {
+					state = logosRhsBad
+					break
+				}
+			}
+			switch state {
+			case logosRhsBad:
+				d.tainted[name] = true
+				delete(facts.prov, name)
+				pending[name] = false
+				for other := range pending {
+					if !d.tainted[other] {
+						pending[other] = true
+					}
+				}
+				changed = true
+			case logosRhsOK:
+				pending[name] = false
+				if facts.prov[name] != r {
+					facts.prov[name] = r
+					changed = true
+				}
+			}
+		}
+		if !changed {
+			break
+		}
+	}
+	for name := range d.tainted {
+		delete(facts.prov, name)
+	}
+	return facts
+}
+
+func (b *batch) logosRegionDefs(fn *ir.Func) *logosDefs {
+	d := &logosDefs{
+		defs:     make(map[*ir.Name][]ir.Node),
+		tainted:  make(map[*ir.Name]bool),
+		captured: make(map[*ir.Name]bool),
+	}
+	var scan func(n ir.Node)
+	scan = func(n ir.Node) {
+		switch n := n.(type) {
+		case *ir.AssignStmt:
+			if dst, ok := n.X.(*ir.Name); ok && dst.Curfn == fn {
+				if n.Op() == ir.OAS {
+					d.defs[dst.Canonical()] = append(d.defs[dst.Canonical()], n.Y)
+				} else if n.Op() == ir.OASOP {
+					d.tainted[dst.Canonical()] = true
+				}
+			}
+		case *ir.AssignListStmt:
+			switch n.Op() {
+			case ir.OAS2:
+				for i, x := range n.Lhs {
+					if dst, ok := x.(*ir.Name); ok && dst.Curfn == fn && i < len(n.Rhs) {
+						d.defs[dst.Canonical()] = append(d.defs[dst.Canonical()], n.Rhs[i])
+					}
+				}
+			case ir.OAS2FUNC, ir.OAS2DOTTYPE, ir.OAS2MAPR, ir.OAS2RECV:
+				for _, x := range n.Lhs {
+					if dst, ok := x.(*ir.Name); ok && dst.Curfn == fn {
+						d.tainted[dst.Canonical()] = true
+					}
+				}
+			}
+		case *ir.RangeStmt:
+			for _, v := range []ir.Node{n.Key, n.Value} {
+				if name, ok := v.(*ir.Name); ok && name.Curfn == fn {
+					d.tainted[name.Canonical()] = true
+				}
+			}
+		case *ir.AddrExpr:
+			if x, ok := n.X.(*ir.Name); ok && x.Curfn == fn {
+				d.captured[x.Canonical()] = true
+			}
+		case *ir.ClosureExpr:
+			if n.Func != nil {
+				for _, cv := range n.Func.ClosureVars {
+					d.captured[cv.Canonical()] = true
+				}
+			}
+			return
+		}
+		ir.DoChildren(n, func(c ir.Node) bool {
+			scan(c)
+			return false
+		})
+	}
+	for _, st := range fn.Body {
+		scan(st)
+	}
+	return d
+}
+
+type logosDefs struct {
+	defs     map[*ir.Name][]ir.Node
+	tainted  map[*ir.Name]bool
+	captured map[*ir.Name]bool
+}
+
+type logosRhsState uint8
+
+const (
+	logosRhsBad logosRhsState = iota
+	logosRhsPending
+	logosRhsOK
+)
+
+func (b *batch) logosRegionRhs(rhs ir.Node, prov map[*ir.Name]*logosRegion, pending map[*ir.Name]bool) (*logosRegion, logosRhsState) {
+	switch n := rhs.(type) {
+	case nil:
+		return nil, logosRhsOK
+	case *ir.NilExpr:
+		return nil, logosRhsOK
+	case *ir.Name:
+		return b.logosRegionProvOf(n, prov, pending)
+	case *ir.CallExpr:
+		switch ir.LogosRegionCallOp(n) {
+		case ir.LogosRegionOpen:
+			r := b.logosRegion.regions[n]
+			if r == nil {
+				return nil, logosRhsBad
+			}
+			return r, logosRhsOK
+		case ir.LogosRegionNew, ir.LogosRegionMake:
+			return b.logosRegionProvOf(n.Args[logosRegionArgBase(n)], prov, pending)
+		case ir.LogosRegionAppend:
+			base := logosRegionArgBase(n)
+			r, st := b.logosRegionProvOf(n.Args[base], prov, pending)
+			if st != logosRhsOK {
+				return nil, st
+			}
+			switch s := n.Args[base+1].(type) {
+			case *ir.NilExpr:
+				return r, logosRhsOK
+			case *ir.Name:
+				if prov[s.Canonical()] == r {
+					return r, logosRhsOK
+				}
+				if pending[s.Canonical()] {
+					return nil, logosRhsPending
+				}
+			}
+			return nil, logosRhsBad
+		}
+	}
+	return nil, logosRhsBad
+}
+
+func (b *batch) logosRegionProvOf(n ir.Node, prov map[*ir.Name]*logosRegion, pending map[*ir.Name]bool) (*logosRegion, logosRhsState) {
+	name, ok := n.(*ir.Name)
+	if !ok {
+		if call, ok := n.(*ir.CallExpr); ok && ir.LogosRegionCallOp(call) == ir.LogosRegionOpen {
+			if r := b.logosRegion.regions[call]; r != nil {
+				return r, logosRhsOK
+			}
+		}
+		return nil, logosRhsBad
+	}
+	if r, ok := prov[name.Canonical()]; ok {
+		return r, logosRhsOK
+	}
+	if pending[name.Canonical()] {
+		return nil, logosRhsPending
+	}
+	return nil, logosRhsBad
+}
+
+func (b *batch) logosRegionOf(n ir.Node, prov map[*ir.Name]*logosRegion) *logosRegion {
+	for n.Op() == ir.OPAREN {
+		n = n.(*ir.ParenExpr).X
+	}
+	switch m := n.(type) {
+	case *ir.CallExpr:
+		if ir.LogosRegionCallOp(m) == ir.LogosRegionOpen {
+			return b.logosRegion.regions[m]
+		}
+	case *ir.Name:
+		return prov[m.Canonical()]
+	}
+	return nil
+}
+
+func (e *escape) logosRegionCall(ks []hole, call *ir.CallExpr) {
+	if !ir.LogosRegionsEnabled() || len(ks) == 0 {
+		return
+	}
+	e.logosRegionEnsure(e.curfn)
+	op := ir.LogosRegionCallOp(call)
+	switch op {
+	case ir.LogosRegionOpen:
+		reg := e.logosRegion.regions[call]
+		if reg != nil && ks[0].dst != &e.blankLoc {
+			e.flow(ks[0].addr(call, "region record"), reg.record)
+		}
+	case ir.LogosRegionNew, ir.LogosRegionMake, ir.LogosRegionAppend:
+		site := e.logosRegion.sites[call]
+		if site == nil {
+			return
+		}
+		prov := e.logosRegionProv(e.curfn)
+		argBase := logosRegionArgBase(call)
+		r := e.logosRegionOf(call.Args[argBase], prov.prov)
+		if r == nil {
+			return
+		}
+		if op == ir.LogosRegionAppend {
+			if _, ok := call.Args[argBase+1].(*ir.NilExpr); !ok {
+				if name, isName := call.Args[argBase+1].(*ir.Name); !isName || prov.prov[name.Canonical()] != r {
+					return
+				}
+			}
+		}
+		loc := &location{n: call, curfn: e.curfn, loopDepth: e.loopDepth}
+		site.region = r
+		site.loc = loc
+		e.logosRegion.candLocs[loc] = site
+		e.flow(ks[0].addr(call, "region alloc"), loc)
+		if op == ir.LogosRegionAppend {
+			e.exprSkipInit(e.logosRegionContents(r).asHole().note(call, "region append"), call.Args[argBase+2])
+		}
+	}
+}
+
+func logosRegionArgBase(call *ir.CallExpr) int {
+	callee := ir.StaticCalleeName(call.Fun)
+	if callee == nil {
+		return 0
+	}
+	if strings.IndexByte(callee.Sym().Name, '[') >= 0 {
+		return 1
+	}
+	return 0
+}
+
+func (b *batch) logosRegionSeed(enqueue func(*location)) {
+	if !ir.LogosRegionsEnabled() {
+		return
+	}
+	for _, loc := range b.logosRegion.contentsAll {
+		enqueue(loc)
+	}
+}
+
+func (b *batch) logosRegionOutlives(l, other *location) (bool, bool) {
+	if !ir.LogosRegionsEnabled() || len(b.logosRegion.candLocs) == 0 {
+		return false, false
+	}
+	if site, ok := b.logosRegion.candLocs[other]; ok {
+		return b.logosRegionRootOutlives(l, site), true
+	}
+	if reg, ok := b.logosRegion.locs[l]; ok && reg.contents == l {
+		return true, true
+	}
+	return false, false
+}
+
+func (b *batch) logosRegionRootOutlives(root *location, site *logosCand) bool {
+	if root == &b.heapLoc || root == &b.foreignLoc {
+		return true
+	}
+	if root.hasAttr(attrEscapes) {
+		return true
+	}
+	name := logosRegionLocName(root)
+	if name != nil {
+		if name.Class == ir.PEXTERN || root.paramOut {
+			return true
+		}
+		if root.param {
+			return false
+		}
+		reg := site.region
+		if reg == nil {
+			return true
+		}
+		if reg.owner == nil {
+			return name.Curfn != site.fn
+		}
+		if name.Curfn != reg.fn {
+			return true
+		}
+		declOwner := ir.LogosRegionDeclOwner(name.Curfn)[name]
+		if declOwner == nil && name.Canonical() != name {
+			declOwner = ir.LogosRegionDeclOwner(name.Curfn)[name.Canonical()]
+		}
+		if declOwner == nil {
+			return !(reg.owner.Parent == nil && reg.owner.List != nil && reg.owner.List == &reg.fn.Body)
+		}
+		return !reg.owner.Encloses(declOwner)
+	}
+	if reg, ok := b.logosRegion.locs[root]; ok && reg.contents == root {
+		if reg == site.region {
+			return false
+		}
+		if reg.owner != nil && site.region != nil && site.region.owner != nil {
+			return !site.region.owner.Encloses(reg.owner)
+		}
+		return true
+	}
+	return false
+}
+
+func logosRegionLocName(l *location) *ir.Name {
+	if l == nil || l.n == nil {
+		return nil
+	}
+	if name, ok := l.n.(*ir.Name); ok && name.Op() == ir.ONAME {
+		return name
+	}
+	return nil
+}
+
+func (b *batch) logosRegionEscaped(l, root *location) {
+	if !ir.LogosRegionsEnabled() {
+		return
+	}
+	known := false
+	if _, ok := b.logosRegion.candLocs[l]; ok {
+		known = true
+	} else if reg, ok := b.logosRegion.locs[l]; ok && reg.record == l {
+		known = true
+	}
+	if !known {
+		return
+	}
+	if _, done := b.logosRegion.kills[l]; done {
+		return
+	}
+	k := &logosKill{desc: b.logosRegionKillDesc(l, root)}
+	if reg, ok := b.logosRegion.locs[l]; ok && reg.record == l {
+		k.closure = b.logosRegionChainClosure(l, root)
+	}
+	b.logosRegion.kills[l] = k
+}
+
+func (b *batch) logosRegionKillDesc(l, root *location) string {
+	if l.dst != nil {
+		if desc, ok := b.logosRegion.flowDesc[l.dst]; ok {
+			return "value reaches " + desc
+		}
+	}
+	if reg, ok := b.logosRegion.locs[l]; ok && reg.record == l {
+		return "region handle reaches " + b.explainLoc(root)
+	}
+	return "flows to " + b.explainLoc(root)
+}
+
+func (b *batch) logosRegionChainClosure(l, root *location) bool {
+	for seen, d := 0, l.dst; d != nil && d != root && seen < 64; d, seen = d.dst, seen+1 {
+		if d.n != nil && d.n.Op() == ir.OCLOSURE {
+			return true
+		}
+	}
+	return false
+}
+
+func (e *escape) logosRegionRecordStores(dsts, srcs []ir.Node, ks []hole) {
+	e.logosRegionEnsure(e.curfn)
+	for i := range dsts {
+		if i >= len(srcs) {
+			return
+		}
+		desc := logosRegionStoreDesc(dsts[i])
+		if desc == "" {
+			continue
+		}
+		switch src := srcs[i].(type) {
+		case *ir.Name:
+			if src.Canonical().Opt == nil {
+				continue
+			}
+			e.logosRegion.flowDesc[e.oldLoc(src.Canonical())] = desc
+		case *ir.CallExpr:
+			if ir.LogosRegionCallOp(src) != ir.LogosRegionNone && i < len(ks) && ks[i].dst != nil {
+				e.logosRegion.flowDesc[ks[i].dst] = desc
+			}
+		}
+	}
+}
+
+func logosRegionStoreDesc(dst ir.Node) string {
+	for {
+		switch n := dst.(type) {
+		case *ir.ParenExpr:
+			dst = n.X
+		case *ir.Name:
+			if n.Op() != ir.ONAME || n.Sym() == nil || n.Sym().IsBlank() {
+				return ""
+			}
+			if n.Class == ir.PEXTERN {
+				return "global"
+			}
+			return fmt.Sprintf("%v", n)
+		case *ir.SelectorExpr:
+			dst = n.X
+		case *ir.StarExpr:
+			dst = n.X
+		case *ir.IndexExpr:
+			dst = n.X
+		default:
+			return ""
+		}
+	}
+}
+
+func (e *escape) logosRegionRecordArg(arg ir.Node, fnName *ir.Name) {
+	if !ir.LogosRegionsEnabled() || fnName == nil {
+		return
+	}
+	name, ok := arg.(*ir.Name)
+	if !ok || name.Canonical().Opt == nil {
+		return
+	}
+	e.logosRegionEnsure(e.curfn)
+	e.logosRegion.flowDesc[e.oldLoc(name.Canonical())] = "call to " + fnName.Sym().Name
+}
+
+func (e *escape) logosRegionStoreHole(dst ir.Node) (hole, bool) {
+	if !ir.LogosRegionsEnabled() {
+		return hole{}, false
+	}
+	switch dst.(type) {
+	case *ir.SelectorExpr, *ir.StarExpr, *ir.IndexExpr:
+	default:
+		return hole{}, false
+	}
+	name := logosRegionStoreRoot(dst)
+	if name == nil {
+		return hole{}, false
+	}
+	reg := e.logosRegionProv(e.curfn).prov[name.Canonical()]
+	if reg == nil {
+		return hole{}, false
+	}
+	return e.logosRegionContents(reg).asHole(), true
+}
+
+func logosRegionStoreRoot(dst ir.Node) *ir.Name {
+	for {
+		switch n := dst.(type) {
+		case *ir.ParenExpr:
+			dst = n.X
+		case *ir.Name:
+			if n.Op() != ir.ONAME || n.Class == ir.PEXTERN || n.Sym() == nil || n.Sym().IsBlank() {
+				return nil
+			}
+			return n
+		case *ir.SelectorExpr:
+			dst = n.X
+		case *ir.StarExpr:
+			dst = n.X
+		case *ir.IndexExpr:
+			dst = n.X
+		default:
+			return nil
+		}
+	}
+}
+
+func (e *escape) logosRegionArgHole(base ir.Node) (hole, bool) {
+	if !ir.LogosRegionsEnabled() {
+		return hole{}, false
+	}
+	var name *ir.Name
+	switch a := base.(type) {
+	case *ir.Name:
+		name = a
+	case *ir.AddrExpr:
+		name, _ = a.X.(*ir.Name)
+	}
+	if name == nil {
+		return hole{}, false
+	}
+	reg := e.logosRegionProv(e.curfn).prov[name.Canonical()]
+	if reg == nil {
+		return hole{}, false
+	}
+	return e.logosRegionContents(reg).asHole(), true
+}
+
+func (b *batch) logosRegionMark(fns []*ir.Func) {
+	if !ir.LogosRegionsEnabled() {
+		return
+	}
+	regCalls := make([]*ir.CallExpr, 0, len(b.logosRegion.regions))
+	for call := range b.logosRegion.regions {
+		regCalls = append(regCalls, call)
+	}
+	slices.SortFunc(regCalls, func(a, c *ir.CallExpr) int {
+		return strings.Compare(base.FmtPos(a.Pos()), base.FmtPos(c.Pos()))
+	})
+	for _, call := range regCalls {
+		reg := b.logosRegion.regions[call]
+		if !reg.record.hasAttr(attrEscapes) {
+			ir.LogosRegions.Live(call)
+			continue
+		}
+		k := b.logosRegion.kills[reg.record]
+		if base.Logos && k != nil && k.closure {
+			base.ErrorfAt(call.Pos(), 0, "[correctness::region_escape] region handle escapes through a closure")
+			continue
+		}
+		desc := "region handle escapes"
+		if k != nil && k.desc != "" {
+			desc = k.desc
+		}
+		b.logosRegionFallback("arena.Open", call.Pos(), desc)
+	}
+	siteCalls := make([]*ir.CallExpr, 0, len(b.logosRegion.sites))
+	for call := range b.logosRegion.sites {
+		siteCalls = append(siteCalls, call)
+	}
+	slices.SortFunc(siteCalls, func(a, c *ir.CallExpr) int {
+		return strings.Compare(base.FmtPos(a.Pos()), base.FmtPos(c.Pos()))
+	})
+	for _, call := range siteCalls {
+		site := b.logosRegion.sites[call]
+		if reason := b.logosRegionSiteReason(site); reason != "" {
+			b.logosRegionFallback(logosRegionCallText(call), call.Pos(), reason)
+			continue
+		}
+		ir.LogosRegions.Place(call)
+		if base.Flag.LowerM != 0 {
+			base.WarnfAt(call.Pos(), "%s", "placed in region")
+		}
+	}
+}
+
+func (b *batch) logosRegionSiteReason(site *logosCand) string {
+	if !LogosArenaPlaceable(site.fn) {
+		info := logosArenaInfo(site.fn)
+		if info.hasGoto {
+			return "function contains goto"
+		}
+		if info.hasDefer {
+			return "function contains defer"
+		}
+		return "region unknown"
+	}
+	if site.fn.Dupok() || logosRegionShapedBody(site.fn) {
+		return "shaped generic body"
+	}
+	if site.region == nil {
+		return "region unknown"
+	}
+	if site.region.record != nil && site.region.record.hasAttr(attrEscapes) {
+		if k := b.logosRegion.kills[site.region.record]; k != nil && k.desc != "" {
+			return k.desc
+		}
+		return "region handle escapes"
+	}
+	if site.loc != nil && site.loc.hasAttr(attrEscapes) {
+		if k := b.logosRegion.kills[site.loc]; k != nil && k.desc != "" {
+			return k.desc
+		}
+		return "flows to " + b.explainLoc(&b.heapLoc)
+	}
+	elem := ir.LogosRegionElem(site.call)
+	if elem == nil {
+		return ""
+	}
+	switch ir.LogosRegionCallOp(site.call) {
+	case ir.LogosRegionNew:
+		if elem.Size() > LogosArenaMaxBytes {
+			return "size exceeds region chunk"
+		}
+	case ir.LogosRegionMake:
+		if n, ok := constInt(site.call.Args[logosRegionArgBase(site.call)+1]); ok && n >= 0 && int64(elem.Size())*n > LogosArenaMaxBytes {
+			return "size exceeds region chunk"
+		}
+	}
+	return ""
+}
+
+func logosRegionShapedBody(fn *ir.Func) bool {
+	for _, f := range fn.Type().RecvParams() {
+		if f.Type != nil && f.Type.IsShape() {
+			return true
+		}
+	}
+	return false
+}
+
+func logosRegionCallText(call *ir.CallExpr) string {
+	name := "New"
+	switch ir.LogosRegionCallOp(call) {
+	case ir.LogosRegionOpen:
+		name = "Open"
+	case ir.LogosRegionMake:
+		name = "Make"
+	case ir.LogosRegionAppend:
+		name = "Append"
+	}
+	text := "arena." + name
+	if elem := ir.LogosRegionElem(call); elem != nil {
+		text += "[" + elem.String() + "]"
+	}
+	return text
+}
+
+func (b *batch) logosRegionFallback(text string, pos src.XPos, reason string) {
+	logosRegionFallbacks = append(logosRegionFallbacks, LogosRegionFallback{
+		Pos:     pos,
+		Message: fmt.Sprintf("%s at %s falls back to the heap: %s", text, base.FmtPos(pos), reason),
+	})
+	if base.Flag.LowerM != 0 {
+		base.WarnfAt(pos, "%s", "region fallback: "+reason)
+	}
+}

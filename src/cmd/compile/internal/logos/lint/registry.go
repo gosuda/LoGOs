@@ -11,6 +11,7 @@ var registry = []Rule{
 	discardedError,
 	exhaustiveUnionSwitch,
 	arenaPointerEscape,
+	arenaFallback,
 	concurrentMultiwordRace,
 	errChainReset,
 	nilDerefUnproven,

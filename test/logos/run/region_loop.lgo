@@ -1,0 +1,29 @@
+// run -goexperiment logosarena
+
+package main
+
+import (
+	"fmt"
+	"logos/arena"
+	"logos/rt"
+)
+
+func main() {
+	n := 0
+	for range 8 {
+		n += 128
+	}
+	peak := 0
+	for range 1000000 {
+		r := arena.Open()
+		b := arena.Make[byte](r, n)
+		b[0] = 1
+		if b[n-1] != 0 {
+			panic("bad make")
+		}
+		if rb := rt.RegionBytes(); rb > peak {
+			peak = rb
+		}
+	}
+	fmt.Println("peak <= 65536:", peak <= 65536)
+}

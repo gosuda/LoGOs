@@ -1,0 +1,26 @@
+// run -goexperiment logosarena
+
+package main
+
+import (
+	"fmt"
+	"logos/arena"
+	"runtime"
+)
+
+type box struct {
+	v int
+}
+
+var kept = new(box)
+
+func main() {
+	{
+		r := arena.Open()
+		p := arena.New[box](r)
+		p.v = 42
+		kept = p
+	}
+	runtime.GC()
+	fmt.Println("kept v after block:", kept.v)
+}

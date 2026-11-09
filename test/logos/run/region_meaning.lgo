@@ -1,0 +1,57 @@
+// run
+// run -goexperiment logosarena
+
+package main
+
+import (
+	"fmt"
+	"logos/arena"
+)
+
+type node struct {
+	next *node
+	v    int
+}
+
+type lone struct {
+	v int
+}
+
+var escaped = new(lone)
+
+//go:noinline
+func build() int {
+	sum := 0
+	r := arena.Open()
+	head := arena.New[node](r)
+	tail := head
+	for i := range 100 {
+		n := arena.New[node](r)
+		n.v = i
+		tail.next = n
+		tail = n
+	}
+	tail.next = head
+	keep := arena.New[lone](r)
+	keep.v = 1000
+	escaped = keep
+	for h := head.next; h != head; h = h.next {
+		sum += h.v
+	}
+	s := arena.Make[int](r, 4)
+	for i := range s {
+		s[i] = i * i
+		sum += s[i]
+	}
+	t := arena.Append[int](r, nil, 1, 2, 3)
+	for _, v := range t {
+		sum += v
+	}
+	return sum
+}
+
+func main() {
+	sum := build()
+	fmt.Println(sum)
+	fmt.Println("escaped:", escaped.v)
+}

@@ -134,6 +134,7 @@ func (e *escape) call(ks []hole, call ir.Node) {
 		// RetSet. Vetoes (defer/goto/loop/foreign/heap) stay in arena
 		// metadata; this only records flow.
 		e.logosArenaCall(ks, call, fns)
+		e.logosRegionCall(ks, call)
 
 	case ir.OINLCALL:
 		call := call.(*ir.InlinedCallExpr)

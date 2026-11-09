@@ -1,0 +1,53 @@
+// run -goexperiment logosarena
+
+package main
+
+import (
+	"fmt"
+	"logos/arena"
+	"runtime"
+	"sync/atomic"
+)
+
+type box struct {
+	v int
+}
+
+var ran int32
+
+func wait() {
+	for range 200 {
+		runtime.GC()
+		runtime.Gosched()
+		if atomic.LoadInt32(&ran) == 1 {
+			break
+		}
+	}
+}
+
+//go:noinline
+func warmup() {
+	p := new(box)
+	runtime.SetFinalizer(p, func(*box) { atomic.StoreInt32(&ran, 1) })
+	_ = p
+}
+
+//go:noinline
+func placeFinalizer() {
+	r := arena.Open()
+	p := arena.New[box](r)
+	p.v = 7
+	runtime.SetFinalizer(p, func(*box) { atomic.StoreInt32(&ran, 1) })
+	if p.v != 7 {
+		panic("bad new")
+	}
+}
+
+func main() {
+	warmup()
+	wait()
+	atomic.StoreInt32(&ran, 0)
+	placeFinalizer()
+	wait()
+	fmt.Println("ran:", atomic.LoadInt32(&ran))
+}

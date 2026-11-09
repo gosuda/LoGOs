@@ -1,0 +1,25 @@
+// run -goexperiment logosarena
+
+package main
+
+import (
+	"fmt"
+	"logos/arena"
+)
+
+func main() {
+	r := arena.Open()
+	func() {
+		defer func() {
+			fmt.Println("recovered:", recover())
+		}()
+		n := -1
+		_ = arena.Make[int](r, n)
+	}()
+	func() {
+		defer func() {
+			fmt.Println("recovered:", recover())
+		}()
+		_ = arena.Make[int](r, -1)
+	}()
+}

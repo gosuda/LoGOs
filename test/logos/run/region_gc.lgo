@@ -1,0 +1,57 @@
+// run -goexperiment logosarena
+
+package main
+
+import (
+	"fmt"
+	"logos/arena"
+	"runtime"
+	"sync/atomic"
+)
+
+type holder struct {
+	p *int
+}
+
+var ran int32
+
+//go:noinline
+func warmup() {
+	cell := new(int)
+	runtime.AddCleanup(cell, func(struct{}) { atomic.StoreInt32(&ran, 1) }, struct{}{})
+	_ = cell
+}
+
+//go:noinline
+func allocRegion() {
+	r := arena.Open()
+	h := arena.New[holder](r)
+	cell := new(int)
+	*cell = 7
+	h.p = cell
+	runtime.AddCleanup(cell, func(struct{}) { atomic.StoreInt32(&ran, 1) }, struct{}{})
+	runtime.GC()
+	runtime.GC()
+	fmt.Println("cleanup inside block:", atomic.LoadInt32(&ran))
+}
+
+func main() {
+	warmup()
+	for range 200 {
+		runtime.GC()
+		runtime.Gosched()
+		if atomic.LoadInt32(&ran) == 1 {
+			break
+		}
+	}
+	atomic.StoreInt32(&ran, 0)
+	allocRegion()
+	for range 200 {
+		runtime.GC()
+		runtime.Gosched()
+		if atomic.LoadInt32(&ran) == 1 {
+			break
+		}
+	}
+	fmt.Println("cleanup after exit:", atomic.LoadInt32(&ran))
+}
