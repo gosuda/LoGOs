@@ -19,15 +19,6 @@ func writeLocks(pkg *types2.Package, info *types2.Info, files []*syntax.File, f 
 		return
 	}
 	for _, l := range LogosLockFacts(pkg, info, files) {
-		dup := false
-		for _, have := range f.Locks {
-			if have == l {
-				dup = true
-				break
-			}
-		}
-		if !dup {
-			f.Locks = append(f.Locks, l)
-		}
+		f.Locks = appendUnique(f.Locks, l)
 	}
 }

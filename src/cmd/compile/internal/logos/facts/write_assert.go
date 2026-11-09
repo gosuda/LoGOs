@@ -25,62 +25,62 @@ func writeAsserts(pkg *types2.Package, f *Facts) {
 		return
 	}
 	for _, name := range scope.Names() {
-		obj, ok := scope.Lookup(name).(*types2.Func)
-		if !ok || obj == nil || !obj.Exported() {
-			continue
-		}
-		sig, ok := obj.Type().(*types2.Signature)
-		if !ok || sig.Recv() != nil {
-			continue
-		}
-		if tp := sig.TypeParams(); tp == nil || tp.Len() == 0 {
-			continue
-		}
-		tpMask, rtpMask, known := obj.LogosAssertEffects()
-		if !known {
-			continue
-		}
-		fn := findOrCreateFnFact(f, name)
-		fn.AssertTP = types2.LogosAssertMaskHex(tpMask)
-		fn.AssertRTP = types2.LogosAssertMaskHex(rtpMask)
-		fn.HasAssert = true
-	}
-	for _, name := range scope.Names() {
-		tn, ok := scope.Lookup(name).(*types2.TypeName)
-		if !ok || tn == nil || tn.IsAlias() {
-			continue
-		}
-		named, ok := tn.Type().(*types2.Named)
-		if !ok {
-			continue
-		}
-		// Unexported generic types are emitted too: an exported wrapper
-		// of an unexported clean container must stay exactly clean for
-		// importers, which recompute type aggregates from these records.
-		for i := range named.NumMethods() {
-			m := named.Method(i)
-			if m == nil {
+		switch obj := scope.Lookup(name).(type) {
+		case *types2.Func:
+			if obj == nil || !obj.Exported() {
 				continue
 			}
-			sig, ok := m.Type().(*types2.Signature)
-			if !ok {
+			sig, ok := obj.Type().(*types2.Signature)
+			if !ok || sig.Recv() != nil {
 				continue
 			}
-			om := m.Origin()
-			if om == nil {
+			if tp := sig.TypeParams(); tp == nil || tp.Len() == 0 {
 				continue
 			}
-			if sig.TypeParams().Len() == 0 && sig.RecvTypeParams().Len() == 0 {
-				continue
-			}
-			tpMask, rtpMask, known := om.LogosAssertEffects()
+			tpMask, rtpMask, known := obj.LogosAssertEffects()
 			if !known {
 				continue
 			}
-			fn := findOrCreateFnFact(f, MethodObject(name, sig.Recv(), m.Name()))
+			fn := findOrCreateFnFact(f, name)
 			fn.AssertTP = types2.LogosAssertMaskHex(tpMask)
 			fn.AssertRTP = types2.LogosAssertMaskHex(rtpMask)
 			fn.HasAssert = true
+		case *types2.TypeName:
+			if obj == nil || obj.IsAlias() {
+				continue
+			}
+			named, ok := obj.Type().(*types2.Named)
+			if !ok {
+				continue
+			}
+			// Unexported generic types are emitted too: an exported wrapper
+			// of an unexported clean container must stay exactly clean for
+			// importers, which recompute type aggregates from these records.
+			for i := range named.NumMethods() {
+				m := named.Method(i)
+				if m == nil {
+					continue
+				}
+				sig, ok := m.Type().(*types2.Signature)
+				if !ok {
+					continue
+				}
+				om := m.Origin()
+				if om == nil {
+					continue
+				}
+				if sig.TypeParams().Len() == 0 && sig.RecvTypeParams().Len() == 0 {
+					continue
+				}
+				tpMask, rtpMask, known := om.LogosAssertEffects()
+				if !known {
+					continue
+				}
+				fn := findOrCreateFnFact(f, MethodObject(name, sig.Recv(), m.Name()))
+				fn.AssertTP = types2.LogosAssertMaskHex(tpMask)
+				fn.AssertRTP = types2.LogosAssertMaskHex(rtpMask)
+				fn.HasAssert = true
+			}
 		}
 	}
 }

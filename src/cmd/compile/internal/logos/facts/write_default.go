@@ -19,16 +19,8 @@ func writeDefaults(pkg *types2.Package, info *types2.Info, f *Facts) {
 	if pkg == nil || pkg.Scope() == nil || info == nil || len(info.LogosFieldDefaults) == 0 {
 		return
 	}
-	known := make(map[DefaultFact]bool)
-	for _, d := range f.Defaults {
-		known[d] = true
-	}
 	add := func(d DefaultFact) {
-		if known[d] {
-			return
-		}
-		known[d] = true
-		f.Defaults = append(f.Defaults, d)
+		f.Defaults = appendUnique(f.Defaults, d)
 	}
 	for _, name := range pkg.Scope().Names() {
 		obj, ok := pkg.Scope().Lookup(name).(*types2.TypeName)

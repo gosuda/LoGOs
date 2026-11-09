@@ -175,22 +175,10 @@ func constFnClosure(pkg *types2.Package, info *types2.Info, files []*syntax.File
 		b.WriteString("\n")
 	}
 
-	for _, fn := range funcs {
-		b.WriteString(fn.text)
-		b.WriteString("\n\n")
-	}
-	for _, td := range typesList {
-		b.WriteString(td.text)
-		b.WriteString("\n\n")
-	}
-	for _, cd := range constsList {
-		b.WriteString(cd.text)
-		b.WriteString("\n\n")
-	}
-	for _, vd := range varsList {
-		b.WriteString(vd.text)
-		b.WriteString("\n\n")
-	}
+	writePieces(&b, funcs)
+	writePieces(&b, typesList)
+	writePieces(&b, constsList)
+	writePieces(&b, varsList)
 
 	return []byte(b.String()), nil
 }
@@ -211,6 +199,13 @@ func sortPieces(list []constFnPiece) {
 		}
 		return cmp.Compare(a.pos.Col(), b.pos.Col())
 	})
+}
+
+func writePieces(b *strings.Builder, list []constFnPiece) {
+	for _, p := range list {
+		b.WriteString(p.text)
+		b.WriteString("\n\n")
+	}
 }
 
 type constFnDecl struct {
