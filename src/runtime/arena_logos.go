@@ -363,11 +363,16 @@ func logosArenaTake() *sideStackChunk {
 	releasem(mp)
 	if c == nil {
 		c = logosArenaNewChunk()
+	} else if asanenabled {
+		asanunpoison(unsafe.Pointer(c), logosArenaChunkBytes)
 	}
 	return c
 }
 
 func logosArenaRelease(c *sideStackChunk) {
+	if asanenabled {
+		asanpoison(unsafe.Pointer(c), logosArenaChunkBytes)
+	}
 	mp := acquirem()
 	pp := mp.p.ptr()
 	c.next = pp.logosArenaPool
@@ -395,6 +400,9 @@ func logosArenaNewChunk() *sideStackChunk {
 	}
 	c := (*sideStackChunk)(unsafe.Pointer(s.base()))
 	c.reset()
+	if asanenabled {
+		asanunpoison(unsafe.Pointer(s.base()), logosArenaChunkBytes)
+	}
 	return c
 }
 
@@ -470,6 +478,9 @@ func logosArenaFreePool(pp *p) {
 		next := c.next
 		s := spanOf(uintptr(unsafe.Pointer(c)))
 		s.isLogosArenaChunk = false
+		if asanenabled {
+			asanpoison(unsafe.Pointer(c), logosArenaChunkBytes)
+		}
 		mheap_.freeManual(s, spanAllocLogosArena)
 		logosArenaChunkTotal.Add(-1)
 		c = next
