@@ -97,7 +97,7 @@ func (fl *fileLower) lowerConstFor() {
 			fl.lowerConstForLits(decl)
 			continue
 		}
-		fl.lowerConstForBody(fn.Body, cfFuncCtx{sig: fl.cfFuncSig(fn), body: fn.Body})
+		fl.lowerConstForList(&fn.Body.List, cfFuncCtx{sig: fl.cfFuncSig(fn), body: fn.Body})
 		fl.lowerConstForLits(fn.Body)
 	}
 	fl.collectInterpKinds()
@@ -110,7 +110,7 @@ func (fl *fileLower) lowerConstFor() {
 // fresh copies, whose types the copy checks recorded.
 func (fl *fileLower) lowerConstForLits(root syntax.Node) {
 	for _, lit := range collectFuncLits(root) {
-		fl.lowerConstForBody(lit.Body, cfFuncCtx{sig: fl.cfLitSig(lit), body: lit.Body})
+		fl.lowerConstForList(&lit.Body.List, cfFuncCtx{sig: fl.cfLitSig(lit), body: lit.Body})
 		fl.lowerConstForLits(lit.Body)
 	}
 }
@@ -149,13 +149,6 @@ func collectFuncLits(root syntax.Node) []*syntax.FuncLit {
 	return out
 }
 
-// lowerConstForBody expands the ancestorless const fors of one body in
-// place: each is replaced by its unrolled statements with one splice
-// carrying the expansion text.
-func (fl *fileLower) lowerConstForBody(body *syntax.BlockStmt, fctx cfFuncCtx) {
-	fl.lowerConstForList(&body.List, fctx)
-}
-
 // lowerConstForList expands the const fors of one statement list in
 // place, recursing into child lists of the statements it keeps. A
 // statement of a dead `const if` branch is left alone: the pruning of
@@ -167,7 +160,9 @@ func (fl *fileLower) lowerConstForList(list *[]syntax.Stmt, fctx cfFuncCtx) {
 		}
 		cf, ok := (*list)[i].(*syntax.ConstForStmt)
 		if !ok {
-			fl.lowerConstForNested((*list)[i], fctx)
+			eachStmtList((*list)[i], func(child *[]syntax.Stmt) {
+				fl.lowerConstForList(child, fctx)
+			})
 			continue
 		}
 		info := fl.pkg.info.LogosConstFor[cf]
@@ -179,14 +174,6 @@ func (fl *fileLower) lowerConstForList(list *[]syntax.Stmt, fctx cfFuncCtx) {
 		fl.addHost(fl.off(syntax.StartPos(cf)), fl.off(syntax.EndPos(cf))+1, host)
 		i += len(stmts) - 1
 	}
-}
-
-// lowerConstForNested expands const fors nested inside one statement's
-// child lists (if, for, switch bodies and plain blocks).
-func (fl *fileLower) lowerConstForNested(s syntax.Stmt, fctx cfFuncCtx) {
-	eachStmtList(s, func(list *[]syntax.Stmt) {
-		fl.lowerConstForList(list, fctx)
-	})
 }
 
 // cfFieldsFunc resolves the fields one const for iterates, given the
@@ -280,16 +267,12 @@ type cfActive struct {
 // outer chain applied inside. It returns the replacement statements and
 // their text.
 func (fl *fileLower) unrollConstFor(cf *syntax.ConstForStmt, info *types2.LogosConstFor, run *cfRun, fctx cfFuncCtx) ([]syntax.Stmt, *cfHost) {
-	return fl.unrollConstForTop(cf, cfFieldsOf(fl, info.Struct), run, fctx)
-}
-
-func (fl *fileLower) unrollConstForTop(cf *syntax.ConstForStmt, fields []cfField, run *cfRun, fctx cfFuncCtx) ([]syntax.Stmt, *cfHost) {
 	bodyOff := offAt(run.ctx.starts, syntax.StartPos(cf.Body))
 	bodyEnd := offAt(run.ctx.starts, syntax.EndPos(cf.Body)) + 1
 	bodySrc := run.ctx.buf.sliceO(bodyOff, bodyEnd)
 	var out []syntax.Stmt
 	host := &cfHost{sep: "\n"}
-	for ord, fd := range fields {
+	for ord, fd := range cfFieldsOf(fl, info.Struct) {
 		active := cfChain{{name: cf.Field.Value, field: fd, body: cf.Body}}
 		if cf.Index != nil && cf.Index.Value != "_" {
 			active = append(active, cfActive{name: cf.Index.Value, index: true, idx: ord, body: cf.Body})
@@ -579,9 +562,10 @@ func (fl *fileLower) unrollConstForFields(cf *syntax.ConstForStmt, fields []cfFi
 		if cf.Index != nil && cf.Index.Value != "_" {
 			active = append(active, cfActive{name: cf.Index.Value, index: true, idx: ord, body: cf.Body})
 		}
-		iter, itext := fl.unrollIteration(cf, active, bodySrc, bodyOff, run)
-		out = append(out, iter...)
-		parts = append(parts, itext, gen("\n"))
+		m := &cfMapper{start: bodyOff}
+		text := fl.expandLevel(cf.Body, active, bodySrc, 0, m, run)
+		out = append(out, fl.reparseStmts(text.s, run.ctx.stamp)...)
+		parts = append(parts, text, gen("\n"))
 	}
 	return out, cat(parts...)
 }
@@ -667,16 +651,6 @@ func (v cfParentVisitor) Visit(n syntax.Node) syntax.Visitor {
 	return v
 }
 
-// unrollIteration expands one field iteration: substitute the active
-// bindings in the body source, recursively unroll nested const fors in
-// the result, and re-parse the final text for the native tree.
-func (fl *fileLower) unrollIteration(cf *syntax.ConstForStmt, active cfChain, bodySrc otext, bodyOff int, run *cfRun) ([]syntax.Stmt, otext) {
-	m := &cfMapper{start: bodyOff}
-	text := fl.expandLevel(cf.Body, active, bodySrc, 0, m, run)
-	stmts := fl.reparseStmts(text.s, run.ctx.stamp)
-	return stmts, text
-}
-
 // expandLevel substitutes the active bindings in the body text slice and
 // recursively expands nested const fors right to left. sliceStart is the
 // mapped offset of text[0]; m maps base offsets to the evolving text.
@@ -722,28 +696,13 @@ func (fl *fileLower) expandLevel(body *syntax.BlockStmt, active cfChain, text ot
 	return text
 }
 
-// cfCovered converts applied subs to covered spans.
-func cfCovered(subs []cfSub) []cfSpan {
-	out := make([]cfSpan, 0, len(subs))
-	for _, s := range subs {
+// covered reports the covered spans of a mapper.
+func (m *cfMapper) covered() []cfSpan {
+	out := make([]cfSpan, 0, len(m.subs))
+	for _, s := range m.subs {
 		out = append(out, cfSpan{s.start, s.end})
 	}
 	return out
-}
-
-// covered reports the covered spans of a mapper.
-func (m *cfMapper) covered() []cfSpan {
-	return cfCovered(m.subs)
-}
-
-// unquote strips the quotes of an import path literal.
-func unquote(s string) string {
-	if len(s) >= 2 && s[0] == '"' {
-		if u, err := strconv.Unquote(s); err == nil {
-			return u
-		}
-	}
-	return s
 }
 
 // reparseStmts parses text as a statement list for the native tree and
@@ -910,11 +869,11 @@ func (fl *fileLower) cfResolveTypeExpr(e syntax.Expr, active cfChain, sites *cfS
 			return t, true
 		}
 	case *syntax.Operation:
-		if t, ok := fl.cfElemType(e.X, active, sites); ok && e.Op == syntax.Mul && e.Y == nil {
+		if t, ok := fl.cfResolveTypeExpr(e.X, active, sites); ok && e.Op == syntax.Mul && e.Y == nil {
 			return types2.NewPointer(t), true
 		}
 	case *syntax.SliceType:
-		if t, ok := fl.cfElemType(e.Elem, active, sites); ok {
+		if t, ok := fl.cfResolveTypeExpr(e.Elem, active, sites); ok {
 			return types2.NewSlice(t), true
 		}
 	}
@@ -939,11 +898,6 @@ func (fl *fileLower) cfRecordedType(e syntax.Expr) types2.Type {
 		return tv.Type
 	}
 	return nil
-}
-
-// cfElemType resolves the element expression of a composite type.
-func (fl *fileLower) cfElemType(e syntax.Expr, active cfChain, sites *cfSites) (types2.Type, bool) {
-	return fl.cfResolveTypeExpr(e, active, sites)
 }
 
 // cfSelectorType resolves `f.Type` and `<pkg marker>.Name`.
@@ -1030,7 +984,10 @@ func (fl *fileLower) cfSitesFor() *cfSites {
 		if !ok {
 			continue
 		}
-		if imp.Path == nil || unquote(imp.Path.Value) != "comptime" {
+		if imp.Path == nil {
+			continue
+		}
+		if path, _ := strconv.Unquote(imp.Path.Value); path != "comptime" {
 			continue
 		}
 		if imp.LocalPkgName != nil {
@@ -1393,9 +1350,6 @@ func (fl *fileLower) cfBlankAssign(s *syntax.AssignStmt, active cfChain, parents
 	rn, ok := rhs[0].(*syntax.Name)
 	if !ok {
 		return
-	}
-	if un, ok := rhs[0].(*syntax.ParenExpr); ok {
-		_ = un
 	}
 	a := cfBindingFor(rn, active, parents)
 	if a == nil || a.index {
