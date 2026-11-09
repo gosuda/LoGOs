@@ -180,6 +180,20 @@ type ConstFuncFact struct {
 	Object string
 	Source []byte
 }
+// LockFact is one locks record: a lock requirement or effect of an exported
+// function, with the effect verb and the path from the receiver or a
+// parameter to the lock field.
+type LockFact struct {
+	Object string
+	Effect string
+	Path   string
+}
+
+// AllocFreeFact is one allocfree record: an exported function whose body and
+// callees allocate nothing on the heap.
+type AllocFreeFact struct {
+	Object string
+}
 
 // Facts is the decoded content of one __.LOGOS member.
 type Facts struct {
@@ -193,6 +207,8 @@ type Facts struct {
 	Comptimes   []ComptimeFact
 	ConstFuncs  []ConstFuncFact
 	Defaults    []DefaultFact
+	Locks       []LockFact
+	AllocFrees  []AllocFreeFact
 	// GoPackage marks a package compiled from .go sources. Such a package
 	// carries per-function backend facts such as MayYield and nothing
 	// that makes it a loGo/s package, so importers must not read it as one.
@@ -266,6 +282,16 @@ func Encode(fp goobj.FingerprintType, f *Facts) []byte {
 		for _, d := range f.Defaults {
 			if d.Type != "" && d.Field != "" && d.Text != "" {
 				recs = append(recs, record{line: "default " + d.Type + " " + d.Field + " " + strconv.Itoa(len(d.Text)), body: []byte(d.Text)})
+			}
+		}
+		for _, l := range f.Locks {
+			if l.Object != "" && l.Effect != "" && l.Path != "" {
+				recs = append(recs, record{line: "locks " + l.Object + " " + l.Effect + " " + l.Path})
+			}
+		}
+		for _, a := range f.AllocFrees {
+			if a.Object != "" {
+				recs = append(recs, record{line: "allocfree " + a.Object})
 			}
 		}
 	}
@@ -505,6 +531,30 @@ func Decode(data []byte) (*Facts, error) {
 			}
 		case line == "lang go":
 			f.GoPackage = true
+		case strings.HasPrefix(line, "locks "):
+			if len(fields) != 4 {
+				return nil, fmt.Errorf(`logos facts line %d: bad locks record %q (want "locks <object> <requires|acquires|releases> <path>")`, ln, line)
+			}
+			if !validObject(fields[1]) {
+				return nil, fmt.Errorf("logos facts line %d: bad object %q", ln, fields[1])
+			}
+			switch fields[2] {
+			case "requires", "acquires", "releases":
+			default:
+				return nil, fmt.Errorf("logos facts line %d: bad lock effect %q (want requires, acquires, or releases)", ln, fields[2])
+			}
+			if !validLockPath(fields[3]) {
+				return nil, fmt.Errorf("logos facts line %d: bad lock path %q", ln, fields[3])
+			}
+			f.Locks = append(f.Locks, LockFact{Object: fields[1], Effect: fields[2], Path: fields[3]})
+		case strings.HasPrefix(line, "allocfree "):
+			if len(fields) != 2 {
+				return nil, fmt.Errorf(`logos facts line %d: bad allocfree record %q (want "allocfree <object>")`, ln, line)
+			}
+			if !validObject(fields[1]) {
+				return nil, fmt.Errorf("logos facts line %d: bad object %q", ln, fields[1])
+			}
+			f.AllocFrees = append(f.AllocFrees, AllocFreeFact{Object: fields[1]})
 		case strings.HasPrefix(line, "fn "):
 			if len(fields) != 3 {
 				return nil, fmt.Errorf("logos facts line %d: bad fn record %q (want %q)", ln, line, "fn <object> <flag>[,<flag>...]")
@@ -729,6 +779,20 @@ func validPath(s string) bool {
 	return true
 }
 
+// validLockPath reports whether s is a dot-separated path of identifiers,
+// the path a locks record names from its receiver or parameter to the lock
+// field.
+func validLockPath(s string) bool {
+	if s == "" {
+		return false
+	}
+	for step := range strings.SplitSeq(s, ".") {
+		if !isIdent(step) {
+			return false
+		}
+	}
+	return true
+}
 func validPrefix(s string) bool {
 	if s == "" {
 		return false

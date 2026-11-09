@@ -633,8 +633,13 @@ func TestLocksFactRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Decode(Encode) failed: %v", err)
 	}
-	if !reflect.DeepEqual(back.Locks, in.Locks) {
-		t.Errorf("round trip = %+v, want %+v", back.Locks, in.Locks)
+	wantBack := []facts.LockFact{
+		{Object: "(*Tank).Fill", Effect: "requires", Path: "t.mu"},
+		{Object: "(*Tank).Open", Effect: "releases", Path: "t.mu"},
+		{Object: "(*Tank).Seal", Effect: "acquires", Path: "t.mu"},
+	}
+	if !reflect.DeepEqual(back.Locks, wantBack) {
+		t.Errorf("round trip = %+v, want %+v", back.Locks, wantBack)
 	}
 	for _, bad := range []string{
 		"locks F wrong mu\n",
@@ -668,8 +673,9 @@ func TestAllocFreeFactRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Decode(Encode) failed: %v", err)
 	}
-	if !reflect.DeepEqual(back.AllocFrees, in.AllocFrees) {
-		t.Errorf("round trip = %+v, want %+v", back.AllocFrees, in.AllocFrees)
+	wantBack := []facts.AllocFreeFact{{Object: "(*Tank).Load"}, {Object: "Sum"}}
+	if !reflect.DeepEqual(back.AllocFrees, wantBack) {
+		t.Errorf("round trip = %+v, want %+v", back.AllocFrees, wantBack)
 	}
 	full := "logos-facts 3\nfingerprint 0908070605040302\nallocfree no!such\n"
 	if _, err := facts.Decode([]byte(full)); err == nil {
