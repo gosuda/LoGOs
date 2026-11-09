@@ -132,32 +132,14 @@ func Load(modRoot string) (*File, error) {
 func (f *File) Format() []byte {
 	var b strings.Builder
 	b.WriteString("[project]\n")
-	if f.Project.StrictFiles != nil {
-		b.WriteString("strict_files = [")
-		for i, s := range f.Project.StrictFiles {
-			if i > 0 {
-				b.WriteString(", ")
-			}
-			appendQuoted(&b, s)
-		}
-		b.WriteString("]\n")
-	}
+	writeStringArray(&b, "strict_files", f.Project.StrictFiles)
 	b.WriteString("[build]\n")
 	if f.Build.CgoSet {
 		b.WriteString("cgo = ")
 		appendQuoted(&b, f.Build.Cgo)
 		b.WriteByte('\n')
 	}
-	if f.Build.CgoAllowlist != nil {
-		b.WriteString("cgo_allowlist = [")
-		for i, s := range f.Build.CgoAllowlist {
-			if i > 0 {
-				b.WriteString(", ")
-			}
-			appendQuoted(&b, s)
-		}
-		b.WriteString("]\n")
-	}
+	writeStringArray(&b, "cgo_allowlist", f.Build.CgoAllowlist)
 	if f.Build.OptLevel != "" && f.Build.OptLevel != "O2" {
 		b.WriteString("opt_level = ")
 		appendQuoted(&b, f.Build.OptLevel)
@@ -191,20 +173,6 @@ func writeCapabilities(b *strings.Builder, c Capabilities) {
 			b.WriteByte('\n')
 		}
 	}
-	list := func(key string, vs []string) {
-		if vs == nil {
-			return
-		}
-		b.WriteString(key)
-		b.WriteString(" = [")
-		for i, s := range vs {
-			if i > 0 {
-				b.WriteString(", ")
-			}
-			appendQuoted(b, s)
-		}
-		b.WriteString("]\n")
-	}
 	emit := c.TransitiveReflect != "" && c.TransitiveReflect != "warn" ||
 		c.TransitiveExec != "" && c.TransitiveExec != "deny" ||
 		c.TransitiveNet != "" && c.TransitiveNet != "deny" ||
@@ -219,10 +187,25 @@ func writeCapabilities(b *strings.Builder, c Capabilities) {
 	sev("transitive_exec", c.TransitiveExec, "deny")
 	sev("transitive_net", c.TransitiveNet, "deny")
 	sev("transitive_unsafe", c.TransitiveUnsafe, "deny")
-	list("reflect_allowlist", c.ReflectAllowlist)
-	list("transitive_exec_allowlist", c.TransitiveExecAllowlist)
-	list("transitive_net_allowlist", c.TransitiveNetAllowlist)
-	list("transitive_unsafe_allowlist", c.TransitiveUnsafeAllowlist)
+	writeStringArray(b, "reflect_allowlist", c.ReflectAllowlist)
+	writeStringArray(b, "transitive_exec_allowlist", c.TransitiveExecAllowlist)
+	writeStringArray(b, "transitive_net_allowlist", c.TransitiveNetAllowlist)
+	writeStringArray(b, "transitive_unsafe_allowlist", c.TransitiveUnsafeAllowlist)
+}
+
+func writeStringArray(b *strings.Builder, key string, vs []string) {
+	if vs == nil {
+		return
+	}
+	b.WriteString(key)
+	b.WriteString(" = [")
+	for i, s := range vs {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		appendQuoted(b, s)
+	}
+	b.WriteString("]\n")
 }
 
 // appendQuoted writes s as a TOML basic string, escaping quotes, backslashes,

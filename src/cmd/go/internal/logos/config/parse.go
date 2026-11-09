@@ -216,7 +216,12 @@ func keyOwner(table, key string) (string, bool) {
 		"reflect_allowlist", "transitive_exec_allowlist", "transitive_net_allowlist", "transitive_unsafe_allowlist":
 		owner = "capabilities"
 	default:
-		owner = lintsOwner(key)
+		switch {
+		case isLintGroup(key):
+			owner = "lints"
+		case isLintThreshold(key):
+			owner = "lints.thresholds"
+		}
 	}
 	if owner == "" {
 		return "", false
@@ -260,9 +265,11 @@ func (p *parser) parseKeyVal() error {
 	p.keys[id] = true
 	var err error
 	switch {
-	case isArrayKey(key):
+	case key == "strict_files" || key == "cgo_allowlist" ||
+		key == "reflect_allowlist" || key == "transitive_exec_allowlist" ||
+		key == "transitive_net_allowlist" || key == "transitive_unsafe_allowlist":
 		err = p.parseArrayValue(key)
-	case isBoolKey(key):
+	case key == "arena":
 		err = p.parseBoolValue(key, valStart)
 	case isLintThreshold(key):
 		err = p.parseIntValue(key, valStart)
@@ -295,19 +302,23 @@ func (p *parser) parseStringValue(key string, valStart int) error {
 	case c == '\n' || c == 0 || c == '#':
 		return p.errorf(valStart, "expected value for key %q", key)
 	case isBareChar(c):
-		tok, start := p.readBare()
-		switch classifyBare(tok) {
-		case bareBool, bareInt:
-			return p.errorf(start, "want string for key %q", key)
-		case bareFloat:
-			return p.errorf(start, "float not allowed")
-		case bareDate:
-			return p.errorf(start, "date not allowed")
-		default:
-			return p.errorf(start, "invalid value")
-		}
+		return p.rejectBare(key, "string")
 	default:
 		return p.errorf(valStart, "unexpected character %q", string(rune(c)))
+	}
+}
+
+func (p *parser) rejectBare(key, want string) error {
+	tok, start := p.readBare()
+	switch classifyBare(tok) {
+	case bareBool, bareInt:
+		return p.errorf(start, "want %s for key %q", want, key)
+	case bareFloat:
+		return p.errorf(start, "float not allowed")
+	case bareDate:
+		return p.errorf(start, "date not allowed")
+	default:
+		return p.errorf(start, "invalid value")
 	}
 }
 
@@ -325,17 +336,7 @@ func (p *parser) parseArrayValue(key string) error {
 	case c == '\n' || c == 0 || c == '#':
 		return p.errorf(p.pos, "expected value for key %q", key)
 	case isBareChar(c):
-		tok, start := p.readBare()
-		switch classifyBare(tok) {
-		case bareBool, bareInt:
-			return p.errorf(start, "want string array for key %q", key)
-		case bareFloat:
-			return p.errorf(start, "float not allowed")
-		case bareDate:
-			return p.errorf(start, "date not allowed")
-		default:
-			return p.errorf(start, "invalid value")
-		}
+		return p.rejectBare(key, "string array")
 	case c != '[':
 		return p.errorf(p.pos, "unexpected character %q", string(rune(c)))
 	}
@@ -344,31 +345,23 @@ func (p *parser) parseArrayValue(key string) error {
 	out := []string{}
 	for {
 		p.skipArraySpace()
+		switch p.peek() {
+		case 0:
+			return p.errorf(arrStart, "unterminated array")
+		case ']':
+			p.next()
+			return p.assignArray(key, out)
+		}
 		elemStart := p.pos
 		c := p.peek()
 		switch {
-		case c == 0:
-			return p.errorf(arrStart, "unterminated array")
-		case c == ']':
-			p.next()
-			return p.assignArray(key, out)
 		case c == '"' || c == '\'':
 			s, err := p.parseString()
 			if err != nil {
 				return err
 			}
-			if key == "strict_files" && !slices.Contains(strictFileExts, s) {
-				return p.errorf(elemStart, "invalid strict_files entry %q (want %s)", s, strictFilesWant)
-			}
-			if key == "cgo_allowlist" {
-				if _, err := path.Match(s, ""); err != nil {
-					return p.errorf(elemStart, "[configuration::invalid_cgo_allowlist] cgo_allowlist pattern %q: %s", s, err)
-				}
-			}
-			if isCapabilitiesAllowlist(key) {
-				if _, err := path.Match(s, ""); err != nil {
-					return p.errorf(elemStart, "[configuration::invalid_capabilities_allowlist] %s pattern %q: %s", key, s, err)
-				}
+			if err := p.checkArrayElem(key, elemStart, s); err != nil {
+				return err
 			}
 			out = append(out, s)
 		case c == '{':
@@ -378,17 +371,7 @@ func (p *parser) parseArrayValue(key string) error {
 		case c == ',':
 			return p.errorf(elemStart, "expected string in array")
 		case isBareChar(c):
-			tok, start := p.readBare()
-			switch classifyBare(tok) {
-			case bareBool, bareInt:
-				return p.errorf(start, "want string for key %q", key)
-			case bareFloat:
-				return p.errorf(start, "float not allowed")
-			case bareDate:
-				return p.errorf(start, "date not allowed")
-			default:
-				return p.errorf(start, "invalid value")
-			}
+			return p.rejectBare(key, "string")
 		default:
 			return p.errorf(elemStart, "unexpected character %q", string(rune(c)))
 		}
@@ -405,6 +388,25 @@ func (p *parser) parseArrayValue(key string) error {
 			return p.errorf(p.pos, "expected \",\" or \"]\" in array")
 		}
 	}
+}
+
+func (p *parser) checkArrayElem(key string, elemStart int, s string) error {
+	if key == "strict_files" && !slices.Contains(strictFileExts, s) {
+		return p.errorf(elemStart, "invalid strict_files entry %q (want %s)", s, strictFilesWant)
+	}
+	var tag string
+	switch key {
+	case "cgo_allowlist":
+		tag = "configuration::invalid_cgo_allowlist"
+	case "reflect_allowlist", "transitive_exec_allowlist", "transitive_net_allowlist", "transitive_unsafe_allowlist":
+		tag = "configuration::invalid_capabilities_allowlist"
+	default:
+		return nil
+	}
+	if _, err := path.Match(s, ""); err != nil {
+		return p.errorf(elemStart, "[%s] %s pattern %q: %s", tag, key, s, err)
+	}
+	return nil
 }
 
 func (p *parser) assignString(key, s string, valStart int) error {
@@ -459,14 +461,6 @@ func assignSeverity(c *Capabilities, key, s string) {
 	case "transitive_unsafe":
 		c.TransitiveUnsafe = s
 	}
-}
-
-func isCapabilitiesAllowlist(key string) bool {
-	switch key {
-	case "reflect_allowlist", "transitive_exec_allowlist", "transitive_net_allowlist", "transitive_unsafe_allowlist":
-		return true
-	}
-	return false
 }
 
 func (p *parser) assignArray(key string, out []string) error {
