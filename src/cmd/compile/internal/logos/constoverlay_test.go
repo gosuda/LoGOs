@@ -298,12 +298,12 @@ func Sum(xs const []int) int {
 	if len(opts) == 0 || len(consts) == 0 {
 		t.Fatalf("want both opt and const facts, got %d opts and %d consts", len(opts), len(consts))
 	}
-	cloned := CloneWithOverlay(lowered, opts)
+	cloned := CloneWithOverlays(lowered, opts, nil)
 	if optAsOption(funcResult(t, cloned, "Find", 0)) == nil {
-		t.Fatal("CloneWithOverlay did not restore the option result")
+		t.Fatal("CloneWithOverlays did not restore the option result")
 	}
 	if constAsView(funcParam(t, cloned, "Sum", 0)) != nil {
-		t.Fatal("CloneWithOverlay unexpectedly restored a const view")
+		t.Fatal("CloneWithOverlays unexpectedly restored a const view")
 	}
 }
 

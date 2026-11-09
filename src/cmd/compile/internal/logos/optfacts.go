@@ -69,37 +69,6 @@ func copyFuncReadonly(dst, src *types2.Func) {
 	}
 }
 
-func readonlyObjects(fns []facts.FnFact) map[string]bool {
-	var out map[string]bool
-	for _, fn := range fns {
-		if !fn.Readonly || fn.Object == "" {
-			continue
-		}
-		if out == nil {
-			out = make(map[string]bool)
-		}
-		out[fn.Object] = true
-	}
-	return out
-}
-
-// assertObjects indexes the generic assertion-effect records of fns by
-// object. Only HasAssert records qualify; anything else leaves the clone
-// unknown so the consumer fails closed.
-func assertObjects(fns []facts.FnFact) map[string]facts.FnFact {
-	var out map[string]facts.FnFact
-	for _, fn := range fns {
-		if !fn.HasAssert || fn.Object == "" {
-			continue
-		}
-		if out == nil {
-			out = make(map[string]facts.FnFact)
-		}
-		out[fn.Object] = fn
-	}
-	return out
-}
-
 // copyFuncAssert copies generic assertion effects onto a cloned Func from
 // the record keyed by one of objects: the package-func name for plain
 // functions, the MethodObject form for concrete methods. Records without
@@ -302,37 +271,36 @@ func collectNamedFuncFacts(n *types2.Named, objects map[string]*types2.Func, vis
 	}
 }
 
-func CloneWithOverlay(orig *types2.Package, opts []facts.PathFact) *types2.Package {
-	return CloneWithOverlays(orig, opts, nil)
-}
-
 func CloneWithOverlaysAndReadonly(orig *types2.Package, opts, consts []facts.PathFact, fns []facts.FnFact, readonlys []facts.ReadonlyFact) (*types2.Package, error) {
 	if err := ApplyFuncFacts(orig, fns); err != nil {
 		return nil, err
 	}
-	readonly := readonlyObjects(fns)
-	assert := assertObjects(fns)
+	var readonly map[string]bool
+	var assert map[string]facts.FnFact
+	for _, fn := range fns {
+		if fn.Object == "" {
+			continue
+		}
+		if fn.Readonly {
+			if readonly == nil {
+				readonly = make(map[string]bool)
+			}
+			readonly[fn.Object] = true
+		}
+		if fn.HasAssert {
+			if assert == nil {
+				assert = make(map[string]facts.FnFact)
+			}
+			assert[fn.Object] = fn
+		}
+	}
 	if len(opts) == 0 && len(consts) == 0 {
 		if err := ApplyReadonlyFactsInPlace(orig, readonlys); err != nil {
 			return nil, err
 		}
 		return orig, nil
 	}
-	if orig == nil {
-		return orig, nil
-	}
-	byObj := make(map[string][]qualPath)
-	add := func(f facts.PathFact, q qualKind) {
-		if f.Object != "" && f.Path != "" {
-			byObj[f.Object] = append(byObj[f.Object], qualPath{path: f.Path, qual: q})
-		}
-	}
-	for _, o := range opts {
-		add(o, qualOption)
-	}
-	for _, c := range consts {
-		add(c, qualConst)
-	}
+	byObj := qualByObj(opts, consts)
 	byReadonly := make(map[string][]string)
 	for _, r := range readonlys {
 		if r.Object != "" && r.Path != "" {
@@ -385,7 +353,6 @@ func applyReadonlyToUnderlying(pkg *types2.Package, owner string, u types2.Type,
 			continue
 		}
 		nf := types2.NewFunc(m.Pos(), pkg, m.Name(), sig)
-		copyFuncReadonly(nf, m)
 		nf.SetLogosReadonly(true)
 		methods[i] = nf
 	}
@@ -396,40 +363,12 @@ func applyReadonlyToUnderlying(pkg *types2.Package, owner string, u types2.Type,
 	return types2.NewInterfaceType(methods, embeddeds)
 }
 
-func markReadonlyOwnersAffected(g *overlayGraph) {
-	if len(g.readonly) == 0 {
+func markOwnersAffected(g *overlayGraph, keys []string) {
+	if len(keys) == 0 {
 		return
 	}
-	owners := make(map[string]bool, len(g.readonly))
-	for key := range g.readonly {
-		owners[ownerBase(key)] = true
-	}
-	for node := range g.nodes {
-		var name string
-		switch n := node.(type) {
-		case *types2.Named:
-			name = n.Obj().Name()
-		case *types2.Alias:
-			name = n.Obj().Name()
-		default:
-			continue
-		}
-		if owners[name] {
-			g.affected[node] = true
-		}
-	}
-}
-
-// markAssertOwnersAffected marks the nominals owning assert-recorded
-// methods affected so an assert-only member still rebuilds their shells
-// and methods. Package-level function records name no nominal and need no
-// marking; insertOverlayFunc clones those directly.
-func markAssertOwnersAffected(g *overlayGraph) {
-	if len(g.assert) == 0 {
-		return
-	}
-	owners := make(map[string]bool, len(g.assert))
-	for key := range g.assert {
+	owners := make(map[string]bool, len(keys))
+	for _, key := range keys {
 		owners[ownerBase(key)] = true
 	}
 	for node := range g.nodes {
@@ -1656,7 +1595,6 @@ func markReadonlyInterface(pkg *types2.Package, orig *types2.Package, iface *typ
 				return iface, nil
 			}
 			nf := types2.NewFunc(m.Pos(), pkg, m.Name(), sig)
-			copyFuncReadonly(nf, m)
 			nf.SetLogosReadonly(true)
 			methods[i] = nf
 			embeddeds := make([]types2.Type, iface.NumEmbeddeds())
@@ -1808,9 +1746,9 @@ func (g *overlayGraph) prepare() error {
 			break
 		}
 	}
-	markReadonlyOwnersAffected(g)
+	markOwnersAffected(g, slices.Sorted(maps.Keys(g.readonly)))
 	markReadonlyPathsAffected(g)
-	markAssertOwnersAffected(g)
+	markOwnersAffected(g, slices.Sorted(maps.Keys(g.assert)))
 	for {
 		changed := false
 		for node, refs := range g.deps {
