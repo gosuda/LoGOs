@@ -1,0 +1,39 @@
+// run
+
+package main
+
+import (
+	"fmt"
+	"reflect"
+)
+
+type U interface {
+	int | string
+}
+
+type Box struct {
+	Item U
+}
+
+func first(u U) U {
+	return u
+}
+
+func main() {
+	var u U = 7
+	vals := map[string]U{"a": u, "b": "x"}
+	fmt.Println(vals["a"] ?? "dflt")
+	fmt.Println(vals["b"] ?? "dflt")
+	keys := map[U]int{u: 1, "x": 2}
+	fmt.Println(keys[u] ?? -1)
+	fmt.Println(keys["x"] ?? -1)
+	s := []U{u, "seven"}
+	fmt.Println(len(s), s[0], s[1])
+	b := Box{Item: u}
+	fmt.Println(b.Item)
+	fmt.Println(first("done"))
+	var held U = 7
+	rv := reflect.ValueOf(&held).Elem()
+	rv.Set(reflect.ValueOf(1.5))
+	fmt.Println(held)
+}

@@ -1,0 +1,35 @@
+// run
+
+package main
+
+import "fmt"
+
+var evals int
+var armRuns int
+
+func taggedKind(n int) int {
+	evals++
+	return n
+}
+
+func armA() string {
+	armRuns++
+	return "a"
+}
+
+func armB() string {
+	armRuns++
+	return "b"
+}
+
+func pick(n int) string {
+	return switch taggedKind(n) {
+	case 1 => armA()
+	default => armB()
+	}
+}
+
+func main() {
+	fmt.Println(pick(1), evals, armRuns)
+	fmt.Println(pick(9), evals, armRuns)
+}
