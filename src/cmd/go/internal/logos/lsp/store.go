@@ -141,6 +141,12 @@ func (s *store) unitNeed() map[string]bool {
 
 func (p *Proxy) ensure(ctx context.Context) {
 	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
 		p.st.mu.Lock()
 		var dir string
 		for _, d := range slices.Sorted(maps.Keys(p.st.units)) {

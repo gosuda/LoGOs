@@ -5,12 +5,15 @@
 package lsp
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"slices"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 func TestAdvStaleVersionIgnored(t *testing.T) {
@@ -217,5 +220,26 @@ func TestAdvDuplicateContentLengthRejected(t *testing.T) {
 	single := fmt.Sprintf("Content-Length: %d\r\n\r\n%s", len(body), body)
 	if m, err := newReader(strings.NewReader(single)).read(); err != nil || m.Method != "x" {
 		t.Errorf("single Content-Length = %+v, %v, want the message", m, err)
+	}
+}
+
+func TestAdvEnsureCancelledSkipsCompile(t *testing.T) {
+	p := newProxy(io.Discard, Options{Compiler: newFakeCompiler()})
+	p.server = &writer{w: io.Discard}
+	p.st.setDoc("file:///w/a.lgo", "/w/a.lgo", 1, newText([]byte("package a\n")))
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		p.ensure(ctx)
+	}()
+	select {
+	case <-done:
+	case <-time.After(30 * time.Second):
+		t.Fatal("ensure with a cancelled context did not return")
+	}
+	if got := len(p.opts.Compiler.(*fakeCompiler).lowerCalls()); got != 0 {
+		t.Errorf("cancelled ensure compiled %d times, want none", got)
 	}
 }
