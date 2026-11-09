@@ -1,8 +1,3 @@
-# At O3 the tier stack buffer is 4096 bytes but a function in a recursive
-# cycle keeps the 32-byte upstream buffer at every level, inlined bodies
-# included: a 33-byte variable make in the recursive frame takes the heap
-# while the same make through the inlined helper from a plain frame stays
-# on the stack. O2 repeats the contrast with its 256-byte tier buffer.
 env GOPROXY=off
 env GOTOOLCHAIN=local
 

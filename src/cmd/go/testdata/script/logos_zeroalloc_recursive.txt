@@ -1,7 +1,3 @@
-# M9-S9: //logos:zeroalloc is recursive by default. A marked function in
-# package b fails when it calls an allocating function of package a, because
-# the facts of a carry no AllocFree record for it, and stays silent for an
-# alloc-free callee. //logos:zeroalloc local checks the body only.
 env GOPROXY=off
 env GOTOOLCHAIN=local
 
@@ -11,8 +7,6 @@ stderr 'bad/b\.go:\d+:\d+: \[perf::zeroalloc_violation\] Load allocates: a\.BigA
 logos build -o $WORK/bin/sum$GOEXE ./sum
 ! stderr .
 
-# //logos:zeroalloc local checks the body only: a marked function calling
-# an allocating callee reports nothing.
 logos build -o $WORK/bin/local$GOEXE ./local
 ! stderr .
 

@@ -1,16 +1,6 @@
-# M16-S2 (SPEC Sec 12.2; #27, #78, #187): the wasm host loader.
-# logos build writes <name>.loader.mjs beside a .wasm output; go build
-# writes the same bytes only with --wasm-loader (the plain-go default is
-# off until the run.bash flip, R-U1, G3). The loader re-reads memory.buffer
-# after every call into wasm, checks the int32 errCode, and throws the
-# message that readErrorString reads from wasm memory. Without node only
-# the loader runs below are blocked (A-NODE), not passed; the help-text
-# gate above them runs everywhere.
 env GOPROXY=off
 env GOTOOLCHAIN=local
 
-# go help build stays byte-identical to the baseline: the flag has no help
-# text. Only logos help names it.
 go help build
 cmp stdout help_build.txt
 logos help build
@@ -24,8 +14,6 @@ cp $GOROOT/lib/wasm/wasm_exec.js lgo/wasm_exec.js
 cp $GOROOT/lib/wasm/wasm_exec.js gomod/wasm_exec.js
 cp $GOROOT/lib/wasm/wasm_exec.js goimpl/wasm_exec.js
 
-# A loGo/s main package: logos build writes the loader by default, and the
-# //logos: directives behave as the //go: forms.
 cd lgo
 logos build -o app.wasm .
 exists app.wasm
@@ -34,8 +22,6 @@ exec node ../check.mjs app.wasm app.loader.mjs text
 stdout '^loader-ok$'
 cp app.loader.mjs ../lgo.loader.mjs
 
-# logos build -n shows the loader write and makes none; --wasm-loader=false
-# turns the loader off.
 rm app.loader.mjs
 logos build -n -o app.wasm .
 stderr 'app\.loader\.mjs'
@@ -43,20 +29,14 @@ stderr 'app\.loader\.mjs'
 logos build --wasm-loader=false -o app.wasm .
 ! exists app.loader.mjs
 
-# A non-wasm output name writes no loader.
 logos build -o app.bin .
 ! exists app.loader.mjs
 ! exists app.bin.loader.mjs
 
-# The default output name of a wasm main package has no .wasm suffix, so a
-# build without -o writes no loader.
 logos build .
 exists wasmlgo
 ! exists wasmlgo.loader.mjs
 
-# logos eject spells the directives in their //go: forms, ships the wasm
-# helpers of logos/rt, and the ejected module builds under plain go into a
-# wasm module that the same loader drives.
 logos eject -o out
 exists out/main.go
 grep '^//go:wasmimport host add$' out/main.go
@@ -73,9 +53,6 @@ exec node ../check.mjs ejected.wasm ejected.loader.mjs text
 stdout '^loader-ok$'
 cd ..
 
-# A non-wasm target writes no loader under either command, even for a .wasm
-# output name, and adds no logos/rt import; the same build on a wasm target
-# does both.
 cd plain
 env GOOS=linux
 env GOARCH=amd64
@@ -98,9 +75,6 @@ go build -x -o app.wasm .
 ! exists app.loader.mjs
 cd ..
 
-# A Go main package with //go:wasmexport and an explicit logos/rt import:
-# plain go writes no loader by default, writes it with --wasm-loader, and
-# logos build writes it by default, with identical loader bytes.
 cd gomod
 go build -o app.wasm .
 exists app.wasm
@@ -120,10 +94,6 @@ go build --wasm-loader=false -o other.wasm .
 ! exists other.loader.mjs
 cd ..
 
-# A Go main package that never imports logos/rt still gets the helpers the
-# loader calls: the build adds the implicit import when it emits the loader,
-# and the linker keeps its wasmexports. The std action IDs stay equal, so
-# no standard-library package rebuilds when the flag is added.
 cd goimpl
 go build -debug-actiongraph=$WORK/before.json -o plain.wasm .
 ! exists plain.loader.mjs
@@ -140,8 +110,6 @@ cmp logos.loader.mjs ../lgo.loader.mjs
 exec node ../check.mjs logos.wasm logos.loader.mjs codes
 stdout '^loader-ok$'
 
-# GOOS=wasip1 gets the same loader bytes, and the same exports work in a
-# reactor module that the host initializes through WASI.
 env GOOS=wasip1
 go build -buildmode=c-shared --wasm-loader -o wasi.wasm .
 cmp wasi.loader.mjs ../lgo.loader.mjs

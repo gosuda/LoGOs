@@ -1,5 +1,3 @@
-# A reserved _logos_ import alias is rejected in .lgo, which keeps the
-# lowered helper-alias namespace collision-free (T-0.3, T-203.2).
 env GOPROXY=off
 env GOTOOLCHAIN=local
 cd m
