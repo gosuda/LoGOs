@@ -10,14 +10,6 @@ type parenElem struct {
 	typ  Expr
 }
 
-func (p *parser) logosParenOperand(keepParens bool) (Expr, bool) {
-	return p.logosParen(keepParens, false)
-}
-
-func (p *parser) logosParenType() (Expr, bool) {
-	return p.logosParen(false, true)
-}
-
 func (p *parser) logosParen(keepParens, inType bool) (Expr, bool) {
 	if p.mode&LogosMode == 0 || p.tok != _Lparen {
 		return nil, false

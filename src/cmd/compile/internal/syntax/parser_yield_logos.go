@@ -14,15 +14,11 @@ func (p *parser) logosYield(lhs Expr) Stmt {
 	}
 	switch p.tok {
 	case _Literal, _Func, _Struct, _Map, _Chan, _Interface, _Name:
-		return p.yieldStmt(name.Pos())
+		s := new(YieldStmt)
+		s.pos = name.Pos()
+		s.Value = p.exprList()
+		return s
 	default:
 		return nil
 	}
-}
-
-func (p *parser) yieldStmt(pos Pos) Stmt {
-	s := new(YieldStmt)
-	s.pos = pos
-	s.Value = p.exprList()
-	return s
 }

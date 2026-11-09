@@ -109,12 +109,8 @@ func (p *parser) peekConstWord() bool {
 		if !ok2 {
 			return true
 		}
-		return !isWordChar(c2)
+		return !isWordByte(c2)
 	}
-}
-
-func isWordChar(c byte) bool {
-	return c == '_' || 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z' || '0' <= c && c <= '9'
 }
 
 func (p *parser) logosFieldProj(x Expr, pos Pos) Expr {

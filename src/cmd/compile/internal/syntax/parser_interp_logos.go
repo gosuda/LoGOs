@@ -14,18 +14,18 @@ func (p *parser) logosInterpOperand() Expr {
 	if p.tok != _Literal || p.kind != InterpLit {
 		return nil
 	}
-	raw, pos, bad := p.lit, p.pos(), p.bad
+	raw, pos := p.lit, p.pos()
 	p.next()
-	return p.parseInterp(raw, pos, bad)
+	return p.parseInterp(raw, pos)
 }
 
-func (p *parser) parseInterp(raw string, pos Pos, bad bool) Expr {
+func (p *parser) parseInterp(raw string, pos Pos) Expr {
 	t := new(InterpExpr)
 	t.pos = pos
 	t.Raw = raw
 	inner := strings.TrimPrefix(raw, `$"`)
 	inner = strings.TrimSuffix(inner, `"`)
-	parts, exprs := p.splitInterp(inner, pos, bad)
+	parts, exprs := p.splitInterp(inner, pos)
 	t.Parts = parts
 	for _, frag := range exprs {
 		if frag.bad {
@@ -57,7 +57,7 @@ type interpFrag struct {
 	bad       bool
 }
 
-func (p *parser) splitInterp(inner string, pos Pos, bad bool) ([]string, []interpFrag) {
+func (p *parser) splitInterp(inner string, pos Pos) ([]string, []interpFrag) {
 	var parts []string
 	var exprs []interpFrag
 	var cur strings.Builder

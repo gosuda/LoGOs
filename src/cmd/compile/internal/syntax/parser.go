@@ -1039,7 +1039,7 @@ func (p *parser) operand(keep_parens bool) Expr {
 		return p.oliteral()
 
 	case _Lparen:
-		if e, ok := p.logosParenOperand(keep_parens); ok { // M6-S5 hook: shared `(` rule.
+		if e, ok := p.logosParen(keep_parens, false); ok { // M6-S5 hook: shared `(` rule.
 			return e
 		}
 		pos := p.pos()
@@ -1475,7 +1475,7 @@ func (p *parser) typeOrNil() Expr {
 		return p.qualifiedName(nil)
 
 	case _Lparen:
-		if e, ok := p.logosParenType(); ok { // M6-S5 hook: shared `(` rule.
+		if e, ok := p.logosParen(false, true); ok { // M6-S5 hook: shared `(` rule.
 			return e
 		}
 		p.next()
