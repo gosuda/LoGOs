@@ -1,0 +1,65 @@
+// errorcheck
+
+package p
+
+type U interface {
+	int | string
+}
+
+type IOnly interface {
+	int
+}
+
+func convertNonMember(x float64) {
+	_ = U(x) // ERROR "union_nonmember"
+}
+
+func assertNonMember(u U) {
+	_ = u.(float64) // ERROR "union_nonmember"
+}
+
+func compareConst(u U) {
+	if u == 1 {
+		println("one")
+	}
+	if u == 1.5 { // ERROR "mismatched types"
+		println("other")
+	}
+	_ = u
+}
+
+func missingMember(u U) string {
+	return switch u.(type) { // ERROR "nonexhaustive_switch.*misses: string, nil"
+	case int => "i"
+	}
+}
+
+func missingMemberStmt(u U) string {
+	switch u.(type) { // ERROR "nonexhaustive_switch"
+	case int:
+		return "i"
+	}
+	return "?"
+}
+
+func armMismatch(n int) string {
+	return switch n {
+	case 1 => "one"
+	case 2 => 3 // ERROR "switch_arm_mismatch"
+	default => "d"
+	}
+}
+
+func needsDefault(n int) string {
+	return switch n { // ERROR "switch_expr_needs_default"
+	case 1 => "one"
+	}
+}
+
+func subUnion(u U) string {
+	return switch u.(type) {
+	case IOnly => "i"
+	case string => "s"
+	case nil => "nil"
+	}
+}
