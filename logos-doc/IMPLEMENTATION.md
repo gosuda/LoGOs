@@ -2928,8 +2928,11 @@ per-lane records follow.
   traces, and the last-8 cap. `e8e988d11b` covers loader alias
   normalization; `6c953ff4b1` pins errdefer rollback on panic.
 - integ-cl-s2a (SPEC 432 to 560): `const_eval_limits.lgo`,
-  `escape.lgo` (`a311c2784d`, `4ca1dbce3b`), `rodata.lgo` with
-  `reloc.txt`, `rodata_reflect.lgo`, `constmap_init`.
+  `const_builtin_escape.lgo` (const-view append, close, copy, delete,
+  clear, and `const_view_escape` rejections), `rodata_dynamic.lgo`,
+  the read-only relocation fault in `logos_const_rodata_reloc.txt`,
+  `rodata_reflect.lgo`, `constmap_init.lgo` (`a311c2784d`,
+  `4ca1dbce3b`).
 - integ-cl-s2b (SPEC 565 to 768): `covariance_nonnil_element.lgo`,
   `option_errors.lgo`, `option_syntax.lgo`, `option_chain.lgo`,
   `option_nested.lgo`, `union_diagnostics.lgo`,
