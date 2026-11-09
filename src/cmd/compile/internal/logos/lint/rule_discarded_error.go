@@ -80,7 +80,7 @@ func (c *discardCheck) exprStmt(s *syntax.ExprStmt) {
 	if call == nil || benignCall(c.pass, call) {
 		return
 	}
-	if !slices.ContainsFunc(resultTypes(call), isErrorType) {
+	if !slices.ContainsFunc(elemTypes(TypeOf(call)), isErrorType) {
 		return
 	}
 	d := c.dropped(call)
@@ -116,7 +116,7 @@ func (c *discardCheck) pairedBlankCall(lhs, rhs []syntax.Expr) *syntax.CallExpr 
 		if call == nil || !isBlank(lhs[i]) || benignCall(c.pass, call) {
 			continue
 		}
-		if res := resultTypes(call); len(res) == 1 && isErrorType(res[0]) {
+		if res := elemTypes(TypeOf(call)); len(res) == 1 && isErrorType(res[0]) {
 			return call
 		}
 	}
@@ -130,7 +130,7 @@ func (c *discardCheck) tupleBlankCall(lhs []syntax.Expr, e syntax.Expr) *syntax.
 	if call == nil || benignCall(c.pass, call) {
 		return nil
 	}
-	res := resultTypes(call)
+	res := elemTypes(TypeOf(call))
 	if len(res) != len(lhs) {
 		return nil
 	}

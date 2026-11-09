@@ -94,15 +94,7 @@ func goLiteral(s *syntax.CallStmt) *syntax.FuncLit {
 	if s.Tok != syntax.Go || call == nil {
 		return nil
 	}
-	fun := call.Fun
-	for {
-		p, ok := fun.(*syntax.ParenExpr)
-		if !ok {
-			break
-		}
-		fun = p.X
-	}
-	lit, _ := fun.(*syntax.FuncLit)
+	lit, _ := syntax.Unparen(call.Fun).(*syntax.FuncLit)
 	return lit
 }
 

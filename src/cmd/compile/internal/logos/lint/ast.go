@@ -11,16 +11,8 @@ import (
 
 // callOf returns e as a call expression, looking through parentheses.
 func callOf(e syntax.Expr) *syntax.CallExpr {
-	for {
-		switch x := e.(type) {
-		case *syntax.ParenExpr:
-			e = x.X
-		case *syntax.CallExpr:
-			return x
-		default:
-			return nil
-		}
-	}
+	call, _ := syntax.Unparen(e).(*syntax.CallExpr)
+	return call
 }
 
 // exprList returns the elements of a tuple expression, or e itself.
@@ -37,34 +29,9 @@ func isBlank(e syntax.Expr) bool {
 	return ok && n.Value == "_"
 }
 
-// resultTypes returns the result types of call. A conversion or a call
-// with no checker type has none.
-func resultTypes(call *syntax.CallExpr) []types2.Type {
-	t := TypeOf(call)
-	if t == nil {
-		return nil
-	}
-	tuple, ok := t.(*types2.Tuple)
-	if !ok {
-		return []types2.Type{t}
-	}
-	out := make([]types2.Type, tuple.Len())
-	for i := range out {
-		out[i] = tuple.At(i).Type()
-	}
-	return out
-}
-
 // calleeFunc returns the function or method call invokes, or nil.
 func calleeFunc(pass *Pass, call *syntax.CallExpr) *types2.Func {
-	fun := call.Fun
-	for {
-		p, ok := fun.(*syntax.ParenExpr)
-		if !ok {
-			break
-		}
-		fun = p.X
-	}
+	fun := syntax.Unparen(call.Fun)
 	var id *syntax.Name
 	switch f := fun.(type) {
 	case *syntax.Name:
