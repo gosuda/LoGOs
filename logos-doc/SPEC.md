@@ -24,7 +24,7 @@ Plain `go` MUST select improvements through flags and `GOEXPERIMENT` and MUST re
 A flag that plain `go` gains MUST stay absent from the help text, so that text stays byte-identical to upstream [T-0.1][R-U1].
 The `logos` command MUST build Go modules with Go language semantics [T-0.1].
 The `logos` command MUST apply no loGo/s type rules to Go modules [T-0.1].
-The `logos build` command MUST run no lint on Go modules [T-0.1][R-U1].
+The `logos build` command MUST run no default lint on Go modules [T-0.1][R-U1].
 The `logos lint` command MUST lint Go packages with the language-neutral rules only [T-0.1][T-102][R-U1].
 A module MUST hold one kind only [T-0.1][R-U3].
 A loGo/s module MUST hold only `.lgo` packages [T-0.1][R-U3].
@@ -139,7 +139,7 @@ A Go package MUST get the default group severities, the `logos.toml [lints]` tab
 A language-neutral rule whose default severity is `forbid` MUST run at `deny` for a Go package [T-102][R-U1].
 `//logos:allow(<rule>)` MUST silence such a rule in a Go package [T-102][R-U1].
 A loGo/s package MUST keep the `forbid` severity of such a rule [T-102].
-`logos build` MUST run no lint on a Go package [T-102][R-U1].
+`logos build` MUST run no default lint on a Go package [T-102][R-U1].
 Third-party modules of either kind MUST get no code lints [T-102][R-U1].
 Capability checks MUST apply to every module in the build [T-102].
 `forbid` MUST NOT be lowered by configuration [T-102].
@@ -1576,7 +1576,7 @@ Configuration MAY raise max_comptime_ast_nodes and max_ctfe_steps above their de
 Validation and boundary tests MUST use the selected limits. [T-Sec8][T-102]
 `logos lint` lints Go packages with the language-neutral rules of Sec 1.2 under these severities, with the cap that the next line states. [T-102][R-U1]
 A language-neutral rule whose default severity is forbid runs at deny for Go packages, and `//logos:allow(<rule>)` silences it there. [T-102][R-U1]
-`logos build` runs no lints on Go packages. [T-102][R-U1]
+`logos build` runs no default lints on Go packages; an author `//logos:zeroalloc` directive is the Sec 17.4 exception. [T-102][R-U1]
 Third-party modules of either kind get no code lints. [T-102][R-U1]
 
 ## 9. End-to-end example
