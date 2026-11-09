@@ -108,6 +108,11 @@ func TestAdvWithlockLeak(t *testing.T) {
 			nil,
 		},
 		{
+			"addrOfFieldEscapes",
+			"func p7(l *Locked[Box]) { l.WithLock(func(b *Box) { leakedInt = &b.n }) }\n",
+			[]string{"26 correctness::withlock_leak deny"},
+		},
+		{
 			"deferredCallArgStaysClean",
 			"func p4(l *Locked[Box]) { l.WithLock(func(b *Box) { defer useBox(b) }) }\n",
 			nil,

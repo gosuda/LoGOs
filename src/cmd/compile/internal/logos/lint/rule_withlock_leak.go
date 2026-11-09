@@ -222,7 +222,9 @@ func (c *leakCheck) carriesPtr(e syntax.Expr) bool {
 			}
 			if sel, ok := p.(*syntax.SelectorExpr); ok {
 				if operand, ok := sel.X.(*syntax.Name); ok && operand == name {
-					return true
+					if !addrTaken(e, sel) {
+						return true
+					}
 				}
 			}
 		}
@@ -230,6 +232,19 @@ func (c *leakCheck) carriesPtr(e syntax.Expr) bool {
 		return false
 	})
 	return found
+}
+
+func addrTaken(e syntax.Node, sel *syntax.SelectorExpr) bool {
+	cur := syntax.Node(sel)
+	for {
+		p := leakParent(e, cur)
+		if par, ok := p.(*syntax.ParenExpr); ok {
+			cur = par
+			continue
+		}
+		op, ok := p.(*syntax.Operation)
+		return ok && op.Op == syntax.And && op.Y == nil && syntax.Unparen(op.X) == syntax.Node(sel)
+	}
 }
 
 func (c *leakCheck) captures(body syntax.Node) bool {
