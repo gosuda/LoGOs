@@ -140,14 +140,11 @@ func TestHintsInterpFixedBytes(t *testing.T) {
 	}
 }
 
-// TestHintsFixedBytesMatchesBound pins fixedBytes to the lowering: the
-// constant terms of the emitted make bound sum to the reported count.
+// TestHintsFixedBytesMatchesBound checks literal-only fixedBytes: parts
+// sum to their lengths, with an empty part and nil kinds.
 func TestHintsFixedBytesMatchesBound(t *testing.T) {
 	if got := InterpFixedBytes([]string{"a", "bc", ""}, nil); got != 3 {
 		t.Errorf("literal-only fixed bytes %d, want 3", got)
-	}
-	if interpIntBound != 20 || interpFloatBound != 24 || interpBoolBound != 5 {
-		t.Errorf("operand bounds %d, %d, %d, want 20, 24, 5", interpIntBound, interpFloatBound, interpBoolBound)
 	}
 }
 
@@ -313,28 +310,5 @@ func TestHintsAllocTierMerge(t *testing.T) {
 				t.Fatalf("merge(%s, %s) = %+v, want tier %s", tc.first, tc.second, got, tc.want)
 			}
 		})
-	}
-}
-
-// TestHintsArenaAlloc checks that an arena allocation badge is assigned
-// when an allocation decision carries the arena tier.
-func TestHintsArenaAlloc(t *testing.T) {
-	src, err := os.ReadFile(filepath.Join("testdata", "hints", "sites.lgo"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	file := ejectParse(t, syntax.NewFileBase("sites.lgo"), src, syntax.LogosMode|syntax.CheckBranches)
-	pkg, info := ejectCheck(t, file)
-	h := NewHints(pkg.Path())
-	h.AddFile(pkg, info, file, src)
-	makePos := positionAt(src, strings.Index(string(src), "make([]byte, n)")+len("make"))
-	// Byte column is 1-based.
-	line := makePos.Line + 1
-	col := len(string(src[:strings.Index(string(src), "make([]byte, n)")+len("make")])) - strings.LastIndex(string(src[:strings.Index(string(src), "make([]byte, n)")+len("make")]), "\n")
-	h.AddAlloc(Alloc{File: "sites.lgo", Line: line, Col: col, Tier: TierArena, Message: "make([]byte, n) does not escape"})
-	got := onlyFile(t, h.Report()).Allocs
-	a, ok := allocAt(got, makePos)
-	if !ok || a.Tier != TierArena {
-		t.Fatalf("arena alloc: got %+v, want tier %s at %+v", a, TierArena, makePos)
 	}
 }

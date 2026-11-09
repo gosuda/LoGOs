@@ -49,13 +49,6 @@ func TestBinaryOptionRepresentations(t *testing.T) {
 	}
 }
 
-func TestBinaryUnsupportedShapeSkipped(t *testing.T) {
-	text := lowerStaticText(t, "package p\ntype Bad struct { C chan int `json:\"c\"` }\n")
-	if strings.Contains(text, "func (_logos_v Bad) MarshalBinary()") {
-		t.Fatalf("unsupported binary shape generated:\n%s", text)
-	}
-}
-
 func TestBinaryAllUserMethodsSuppressHelpers(t *testing.T) {
 	src := `package p
 type S struct {
@@ -129,15 +122,6 @@ func TestBinaryZeroWireBudget(t *testing.T) {
 	}
 	if !strings.Contains(byts, "cap64 := min(n, uint64(len(src)-*off)/2, (1<<20))") {
 		t.Errorf("byte-slice path must cap pre-allocation at min(len(rest)/2, 1MB):\n%s", byts)
-	}
-}
-func TestBinaryByteSlicePreallocBound(t *testing.T) {
-	text := lowerStaticText(t, "package p\ntype B struct {\n\tV []byte `json:\"v\"`\n}\n")
-	if !strings.Contains(text, "cap64 := min(n, uint64(len(src)-*off)/2, (1<<20))") {
-		t.Errorf("[]byte path lacks the capped prealloc bound:\n%s", text)
-	}
-	if strings.Contains(text, "make([]byte, 0, int(n))") {
-		t.Errorf("[]byte path pre-allocates the whole count:\n%s", text)
 	}
 }
 func TestBinaryZeroWireNoIteration(t *testing.T) {

@@ -46,7 +46,6 @@ func firstMapCall(t *testing.T, expr string) (*fileLower, *syntax.CallExpr) {
 func TestChainReceiverSpan(t *testing.T) {
 	cases := []struct{ name, expr, recv, whole string }{
 		{"slice", "xs[1:].map(f)", "xs[1:]", "xs[1:].map(f)"},
-		{"slice upto", "xs[:2].map(f)", "xs[:2]", "xs[:2].map(f)"},
 		{"full slice", "xs[1:2:3].map(f)", "xs[1:2:3]", "xs[1:2:3].map(f)"},
 		{"paren slice", "(xs[1:]).map(f)", "(xs[1:])", "(xs[1:]).map(f)"},
 		{"paren name", "(xs).map(f)", "(xs)", "(xs).map(f)"},

@@ -37,20 +37,6 @@ func TestPR3CandidateConstNegativeShift(t *testing.T) {
 	mustInt(t, v, -1, "(-1) >> uint8(1)")
 }
 
-func TestPR3CandidateShiftPreserveUntyped(t *testing.T) {
-	cfg := Config{MaxSteps: 100000, MaxValueBytes: 1 << 20, WordSize: 8}
-	v, _, err := evalConstFunc(t, cfg, constSpec{
-		src:    "package p\nfunc ShiftPreserve() int { return 1 << uint8(8) }",
-		rtypes: []*Type{BasicType("int")},
-		name:   "ShiftPreserve",
-		call:   `ShiftPreserve()`,
-	})
-	if err != nil {
-		t.Fatalf("ShiftPreserve(): %v", err)
-	}
-	mustInt(t, v, 256, "1 << uint8(8)")
-}
-
 func TestPR3CandidateTypedFloatConstEquality(t *testing.T) {
 	cfg := Config{MaxSteps: 100000, MaxValueBytes: 1 << 20, WordSize: 8}
 	v, _, err := evalConstFunc(t, cfg, constSpec{

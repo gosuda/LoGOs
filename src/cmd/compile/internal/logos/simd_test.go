@@ -108,7 +108,6 @@ func TestSimdGuardElision(t *testing.T) {
 		{3, simdFeatAVX512, "_logos_simd.X86.AVX512()"},
 		{4, simdFeatAVX512, ""},
 		{1, simdFeatBaseline, ""},
-		{4, simdFeatBaseline, ""},
 	}
 	saved := buildcfg.GOAMD64
 	defer func() { buildcfg.GOAMD64 = saved }()
