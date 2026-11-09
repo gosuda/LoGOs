@@ -1,0 +1,19 @@
+// errorcheck
+
+package p
+
+func tooLarge(a [16]float64, b [16]float64) {
+	_ = a + b // ERROR "simd_array_too_large"
+}
+
+func badShape(a [3]float64, b [3]float64) {
+	_ = a + b // ERROR "simd_array_shape"
+}
+
+func tooLargeReduce(a [16]float64) {
+	_ = a.sum() // ERROR "simd_array_too_large"
+}
+
+func badShapeReduce(a [6]int32) {
+	_ = a.sum() // ERROR "simd_array_shape"
+}
