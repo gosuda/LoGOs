@@ -379,7 +379,6 @@ NaN keys MUST order deterministically. [T-104.6]
 A level MUST apply to every package of the build, Go or loGo/s [T-105][R-U1].
 Under `logos`, the default level MUST come from `logos.toml [build] opt_level` with default `O2` [T-105].
 Under plain `go`, the default level MUST be `O1` [T-105][R-U1].
-The plain `go` default level MUST be `O1` [T-105][R-U1].
 `[build] opt_level` MUST accept `O0`, `O1`, `O2`, `O3`, and `Os` only [T-105].
 A bare spelling such as `2` MUST fail validation like an unknown level [T-105].
 An invalid level MUST fail with text that lists the five accepted levels [T-105].
@@ -1348,7 +1347,7 @@ Go code MUST need no new directive and no new syntax for the fast path. [T-304][
 A C function that carries only one of the two directives, or none, MUST keep the upstream call path. [T-304]
 `//logos:cgo_fastcall` MUST be the `.lgo` spelling of the same pair and MUST mark a cgo call `noescape` and `nocallback`. [T-304]
 One fast path MUST serve Go packages and loGo/s packages: the single `runtime.logosCgocallFast` trampoline and the one cgo pipeline of this section. [T-304][R-U1]
-The fast path MUST use the syscall-style `reentersyscall`/`asmcgocall`/`exitsyscall` sequence, so it may release the P like a syscall; fast-call diagnostics stay on the original M. [T-304]
+The fast path MUST use the syscall-style `reentersyscall`/`asmcgocall`/`exitsyscall` sequence, so it may release the P like a syscall; fast-call diagnostics stay on the original M; no deterministic timing gate is provided. [T-304]
 It MUST NOT read a clock in the fast body: no per-call monotonic read takes part, because that read dominated the measured fast path and no consumer read the value. [T-304]
 The fast path MUST stay behind `GOEXPERIMENT=logosfastcgo`, which is off by default under both commands. [T-304][R-U1]
 Profiling with `SIGPROF` during fast calls MUST NOT crash. [T-304]
@@ -1357,7 +1356,6 @@ A CPU profile MUST attribute time in a fast-called C function to its Go call sit
 Go pointer arguments MUST stay valid during a fast call. [T-304]
 The original M holds diagnostics only: `m.fastCgoFrame[0]` records the DI/arg address copy; record also zero-stores slots 1 to 3 so a reused M carries no stale addresses, and clear zeroes all four. The slots are plain `uintptr`, not pins or roots. [T-304]
 The flag and the slots MUST read zero after return. [T-304]
-A fast call MUST release the P through the syscall-style reentersyscall/exitsyscall sequence like a syscall; no deterministic timing gate is provided. [T-304]
 POD and primitive-slice arguments MUST skip `_cgoCheckPointer`. [T-304]
 
 Implementation note (informative): Fast calls preserve `runtime.NumCgoCall` accounting and reset the cgo traceback buffer.
@@ -1398,11 +1396,6 @@ Selected exports recover Go panics and return status codes; this does not provid
 Concurrent reads use an immutable object.
 The caller joins all reader threads before deleting its handle.
 The fixture's `-buildvcs=false` isolates the test from VCS metadata; it is not an FFI requirement.
-The fast path MUST NOT read a clock in the fast body. [T-304]
-A fast call MUST release the P through the syscall-style reentersyscall/exitsyscall sequence like a syscall; no deterministic timing gate is provided. [T-304]
-Fast calls MUST carry noescape and nocallback marks. [T-304]
-The M diagnostics (flag and slots) MUST read zero after return without clearing the caller's argument values. [T-304]
-Profiling with SIGPROF during a fast call MUST NOT crash the process. [T-304]
 
 ## 4. Lexer, parser, and syntax
 
