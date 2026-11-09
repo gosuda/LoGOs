@@ -193,11 +193,7 @@ func (c *lockCheck) indexAliases(f *syntax.File) {
 	syntax.Inspect(f, func(n syntax.Node) bool {
 		switch x := n.(type) {
 		case *syntax.AssignStmt:
-			if x.Op == syntax.Def {
-				c.noteDefAlias(x, counts, targets)
-			} else {
-				c.noteReassignAlias(x, counts, targets)
-			}
+			c.noteAlias(x, counts, targets)
 		case *syntax.VarDecl:
 			c.noteVarAlias(x, counts, targets)
 		}
@@ -242,7 +238,7 @@ func (c *lockCheck) resolveAliasChain(k lockKey) (lockKey, bool) {
 	}
 }
 
-func (c *lockCheck) noteDefAlias(x *syntax.AssignStmt, counts map[types2.Object]int, targets map[types2.Object]syntax.Expr) {
+func (c *lockCheck) noteAlias(x *syntax.AssignStmt, counts map[types2.Object]int, targets map[types2.Object]syntax.Expr) {
 	lhs, rhs := exprList(x.Lhs), exprList(x.Rhs)
 	if len(lhs) != 1 || len(rhs) != 1 {
 		return
@@ -251,19 +247,11 @@ func (c *lockCheck) noteDefAlias(x *syntax.AssignStmt, counts map[types2.Object]
 	if !ok || isBlank(name) {
 		return
 	}
-	c.noteAliasTarget(c.pass.Info.Defs[name], rhs[0], counts, targets)
-}
-
-func (c *lockCheck) noteReassignAlias(x *syntax.AssignStmt, counts map[types2.Object]int, targets map[types2.Object]syntax.Expr) {
-	lhs, rhs := exprList(x.Lhs), exprList(x.Rhs)
-	if len(lhs) != 1 || len(rhs) != 1 {
-		return
+	obj := c.pass.Info.Uses[name]
+	if x.Op == syntax.Def {
+		obj = c.pass.Info.Defs[name]
 	}
-	name, ok := syntax.Unparen(lhs[0]).(*syntax.Name)
-	if !ok || isBlank(name) {
-		return
-	}
-	c.noteAliasTarget(c.pass.Info.Uses[name], rhs[0], counts, targets)
+	c.noteAliasTarget(obj, rhs[0], counts, targets)
 }
 
 func (c *lockCheck) noteVarAlias(x *syntax.VarDecl, counts map[types2.Object]int, targets map[types2.Object]syntax.Expr) {
@@ -305,11 +293,7 @@ func (c *lockCheck) indexStored(f *syntax.File) {
 	syntax.Inspect(f, func(n syntax.Node) bool {
 		switch x := n.(type) {
 		case *syntax.AssignStmt:
-			if x.Op == syntax.Def {
-				c.noteStoredDef(x, counts, lits)
-			} else {
-				c.noteStoredUse(x, counts, lits)
-			}
+			c.noteStored(x, counts, lits)
 		case *syntax.VarDecl:
 			c.noteStoredVar(x, counts, lits)
 		}
@@ -328,7 +312,7 @@ func (c *lockCheck) indexStored(f *syntax.File) {
 	}
 }
 
-func (c *lockCheck) noteStoredDef(x *syntax.AssignStmt, counts map[types2.Object]int, lits map[types2.Object]syntax.Node) {
+func (c *lockCheck) noteStored(x *syntax.AssignStmt, counts map[types2.Object]int, lits map[types2.Object]syntax.Node) {
 	lhs, rhs := exprList(x.Lhs), exprList(x.Rhs)
 	if len(lhs) != 1 || len(rhs) != 1 {
 		return
@@ -337,19 +321,11 @@ func (c *lockCheck) noteStoredDef(x *syntax.AssignStmt, counts map[types2.Object
 	if !ok || isBlank(name) {
 		return
 	}
-	c.noteStoredBinding(c.pass.Info.Defs[name], rhs[0], counts, lits)
-}
-
-func (c *lockCheck) noteStoredUse(x *syntax.AssignStmt, counts map[types2.Object]int, lits map[types2.Object]syntax.Node) {
-	lhs, rhs := exprList(x.Lhs), exprList(x.Rhs)
-	if len(lhs) != 1 || len(rhs) != 1 {
-		return
+	obj := c.pass.Info.Uses[name]
+	if x.Op == syntax.Def {
+		obj = c.pass.Info.Defs[name]
 	}
-	name, ok := syntax.Unparen(lhs[0]).(*syntax.Name)
-	if !ok || isBlank(name) {
-		return
-	}
-	c.noteStoredBinding(c.pass.Info.Uses[name], rhs[0], counts, lits)
+	c.noteStoredBinding(obj, rhs[0], counts, lits)
 }
 
 func (c *lockCheck) noteStoredVar(x *syntax.VarDecl, counts map[types2.Object]int, lits map[types2.Object]syntax.Node) {
@@ -916,39 +892,11 @@ func (c *lockCheck) keyStep(e syntax.Expr) (syntax.Expr, string) {
 			return x.X, x.Sel.Value
 		}
 	case *syntax.IndexExpr:
-		if idx, ok := c.indexStep(x); ok {
+		if idx, ok := lockIndexStep(c.pass.Info, &c.indexIDs, x); ok {
 			return x.X, "[" + idx + "]"
 		}
 	}
 	return nil, ""
-}
-func (c *lockCheck) indexStep(x *syntax.IndexExpr) (string, bool) {
-	switch i := syntax.Unparen(x.Index).(type) {
-	case *syntax.BasicLit:
-		if i.Bad {
-			return "", false
-		}
-		return i.Value, true
-	case *syntax.Name:
-		obj, ok := c.pass.Info.Uses[i].(*types2.Var)
-		if !ok || obj == nil {
-			return "", false
-		}
-		return c.indexID(obj), true
-	}
-	return "", false
-}
-
-func (c *lockCheck) indexID(obj types2.Object) string {
-	if c.indexIDs == nil {
-		c.indexIDs = make(map[types2.Object]string)
-	}
-	if id, ok := c.indexIDs[obj]; ok {
-		return id
-	}
-	id := strings.Repeat("#", len(c.indexIDs)+1)
-	c.indexIDs[obj] = id
-	return id
 }
 
 // flag reports call once.
