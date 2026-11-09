@@ -7,6 +7,7 @@ package testlogos
 import (
 	"bytes"
 	"context"
+	"errors"
 	"internal/goexperiment"
 	"math"
 	"os"
@@ -947,4 +948,71 @@ func BenchmarkFastcallSlow(b *testing.B) {
 		sink = callSlowNoescape(sink&((1<<30)-1), 1)
 	}
 	_ = sink
+}
+
+func TestFastcallViolationNeverHangs(t *testing.T) {
+	requireCgo(t)
+	dir := filepath.Join("testdata", "viol")
+	for _, mode := range []string{"", "plain"} {
+		bin := filepath.Join(t.TempDir(), "viol.exe")
+		if text, err := runCmd(t, dir, goBin(t), "build", "-o", bin, "."); err != nil {
+			t.Fatalf("violator build: %v\n%s", err, text)
+		}
+		ctx, cancel := context.WithTimeoutCause(t.Context(), 60*time.Second, errors.New("violator timed out"))
+		out, err := exec.CommandContext(ctx, bin, mode).CombinedOutput()
+		cancel()
+		if err != nil {
+			t.Fatalf("violator %q: %v\n%s", mode, err, out)
+		}
+		checkViolation(t, mode, string(out))
+	}
+}
+
+func TestFastcallNoClockInFastBody(t *testing.T) {
+	self := selfTestBin(t)
+	body := objdumpFunc(t, self, "runtime\\.logosCgocallFast")
+	for _, want := range []string{"nanotime", "cputicks", "clock_gettime", "monotonic"} {
+		if strings.Contains(strings.ToLower(body), want) {
+			t.Fatalf("fast body references clock %q:\n%s", want, body)
+		}
+	}
+}
+
+func TestFastcallNumCgoCallBoundary(t *testing.T) {
+	requireCgo(t)
+	before := runtime.NumCgoCall()
+	if got := callFastAdd(1, 1); got != 2 {
+		t.Fatalf("fast_add = %d, want 2", got)
+	}
+	if mid := runtime.NumCgoCall(); mid != before+1 {
+		t.Fatalf("after 1 call = %d, want %d", mid, before+1)
+	}
+	const n = 5
+	for i := range n {
+		if got := callFastAdd(int32(i), 1); got != int32(i)+1 {
+			t.Fatalf("call %d = %d, want %d", i, got, i+1)
+		}
+	}
+	if after := runtime.NumCgoCall(); after != before+1+n {
+		t.Fatalf("after %d calls = %d, want %d", 1+n, after, before+1+n)
+	}
+}
+
+func TestFastcallLockOSThreadParity(t *testing.T) {
+	requireCgo(t)
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	if got := callFastAdd(20, 22); got != 42 {
+		t.Fatalf("fast_add on locked thread = %d, want 42", got)
+	}
+	done := make(chan int32, 1)
+	go func() { done <- callFastAdd(1, 2) }()
+	select {
+	case got := <-done:
+		if got != 3 {
+			t.Fatalf("unlocked goroutine fast_add = %d, want 3", got)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("unlocked goroutine stuck while thread locked")
+	}
 }
