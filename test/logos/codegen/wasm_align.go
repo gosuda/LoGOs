@@ -28,6 +28,8 @@ var (
 	_ = [1]byte{}[unsafe.Offsetof(words{}.a)%8]
 	_ = [1]byte{}[(unsafe.Offsetof(words{}.a)+unsafe.Sizeof(int64(0)))%8]
 	_ = [1]byte{}[(unsafe.Offsetof(words{}.a)+2*unsafe.Sizeof(int64(0)))%8]
+	_ = [1]byte{}[unsafe.Sizeof((*int)(nil))-8]
+	_ = [1]byte{}[unsafe.Sizeof([]byte(nil))-24]
 )
 
 func alignInt64() uintptr {
