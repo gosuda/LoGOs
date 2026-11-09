@@ -233,6 +233,30 @@ func (m *lintImporter) ImportFrom(path, srcDir string, mode types2.ImportMode) (
 // types2 becomes a Reported finding, as in the compiler.
 func check(t testing.TB, kind Kind, name, src string) *Input {
 	t.Helper()
+	var errs []error
+	var reported []Reported
+	pkg, file, info, _ := checkPkg(t, kind, name, src, func(err error) {
+		if r, ok := ReportedOf(err); ok {
+			reported = append(reported, r)
+			return
+		}
+		errs = append(errs, err)
+	})
+	if len(errs) > 0 {
+		t.Fatalf("check %s: %v", name, errs)
+	}
+	return &Input{
+		Pkg:      pkg,
+		Info:     info,
+		Files:    []*syntax.File{file},
+		Sources:  map[*syntax.File][]byte{file: []byte(src)},
+		Kind:     kind,
+		Reported: reported,
+	}
+}
+
+func checkPkg(t testing.TB, kind Kind, name, src string, onErr func(error)) (*types2.Package, *syntax.File, *types2.Info, error) {
+	t.Helper()
 	mode := syntax.CheckBranches
 	if kind == KindLgo {
 		mode |= syntax.LogosMode
@@ -253,32 +277,14 @@ func check(t testing.TB, kind Kind, name, src string) *Input {
 		Scopes:             make(map[syntax.Node]*types2.Scope),
 		Instances:          make(map[*syntax.Name]types2.Instance),
 	}
-	var errs []error
-	var reported []Reported
 	conf := &types2.Config{
-		Importer: &lintImporter{pkgs: make(map[string]*types2.Package)},
-		Error: func(err error) {
-			if r, ok := ReportedOf(err); ok {
-				reported = append(reported, r)
-				return
-			}
-			errs = append(errs, err)
-		},
+		Importer:    &lintImporter{pkgs: make(map[string]*types2.Package)},
+		Error:       onErr,
 		Logos:       kind == KindLgo,
 		LogosUnions: kind == KindLgo,
 	}
-	pkg, _ := conf.Check("p", []*syntax.File{file}, info)
-	if len(errs) > 0 {
-		t.Fatalf("check %s: %v", name, errs)
-	}
-	return &Input{
-		Pkg:      pkg,
-		Info:     info,
-		Files:    []*syntax.File{file},
-		Sources:  map[*syntax.File][]byte{file: []byte(src)},
-		Kind:     kind,
-		Reported: reported,
-	}
+	pkg, checkErr := conf.Check("p", []*syntax.File{file}, info)
+	return pkg, file, info, checkErr
 }
 
 // summarize renders results as "line rule severity" strings.
