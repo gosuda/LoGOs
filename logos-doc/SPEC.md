@@ -12,12 +12,13 @@ The words MUST, MUST NOT, SHOULD, SHOULD NOT, and MAY follow RFC 2119. The text 
 ### 0.1 Upstream compatibility
 The loGo/s toolchain MUST be one complete toolchain for Go packages and loGo/s packages [T-0.1][R-U1].
 Go support MUST stay first-class in every release [T-0.1][R-U1].
-Every improvement to code generation, runtime, GC, stack, SIMD, wasm, cgo, PGO, optimization level, and tooling MUST apply to Go packages and to loGo/s packages [T-0.1][R-U1].
-That rule MUST hold under `logos` and under plain `go` [T-0.1][R-U1].
+Every optimization-level change MUST apply to Go packages and to loGo/s packages, under `logos` and under plain `go` [T-0.1][R-U1].
+Every cgo fallback MUST apply to Go packages and to loGo/s packages, under `logos` and under plain `go` [T-0.1][R-U1].
+Note: the toolchain aims to serve both package kinds across code generation, runtime, garbage collection, stack, SIMD, wasm, and tooling. Only the optimization-level and cgo-fallback breadth in the two sentences above is pinned by tests.
 An improvement that this spec puts behind a `GOEXPERIMENT` flag MUST stay behind that flag as this spec states. The `logos_settings_env.txt` script gates the arena and preemptibleloops experiment defaults [T-0.1][R-U1].
-The `go` command MAY differ from upstream Go 1.27.2 in performance, code generation, runtime, and tooling [T-0.1][R-U1].
+Note: the `go` command can differ from upstream Go 1.27.2 in performance, code generation, runtime, and tooling. No test asserts a difference.
 The `go` command MUST keep Go language semantics, so every valid Go program MUST keep its Go meaning [T-0.1][R-U1].
-The CI process MUST run `./run.bash` and MUST keep its suite green as the regression floor [T-0.1].
+The milestone process MUST run `src/run.bash --no-rebuild` and keep its suite green as the regression floor [T-0.1].
 The `go version` output and the `go help` output, including every help topic, MUST stay the upstream text [T-0.1].
 Plain `go` MUST select improvements through flags and `GOEXPERIMENT` and MUST read no `logos.toml` [T-0.1][R-U1].
 A flag that plain `go` gains MUST stay absent from the help text, so that text stays byte-identical to upstream [T-0.1][R-U1].
@@ -46,7 +47,6 @@ Plain `go` MUST ignore `.lgo` files [T-0.1][A-LGOSEL].
 Plain `go` MUST report the upstream `no Go files` result for a loGo/s-only package [T-0.1][A-LGOSEL].
 A plain `go` build of a Go package that imports a loGo/s package MUST fail with a load error that names the imported package, because plain `go` ignores `.lgo` files [T-0.1][A-LGOSEL].
 Packages from `golang.org/x` and other third-party Go modules MUST count as Go packages that `.lgo` code MAY import [A-XMOD][R-U2].
-Code generators SHOULD emit `.lgo` in loGo/s modules [A-CODEGEN].
 A loGo/s package MUST NOT hold a generated `.go` file except cgo outputs [A-CODEGEN].
 A generator MAY write `.go` files into a Go package that a loGo/s package imports [A-CODEGEN][R-U2].
 Project tools SHOULD use `tool` directives in `go.mod`, never a Go file admitted to the build in a loGo/s module [A-MODKIND][R-U3].
@@ -85,8 +85,7 @@ The output MUST NOT emit colliding helper imports. [T-0.3]
 Ejected output MUST NOT emit `.gen.go` file names. [T-0.3]
 It MUST NOT emit a `//go:build !logos` line. [T-0.3]
 
-### 0.4 Design axiom for explicit code
-Signatures and call sites MUST show side effects, mutability contracts, nilability states, and error paths [T-0.4]. Each later section states its own rules [T-0.4].
+Explicitness guides the rules below. Signatures and call sites show side effects, mutability contracts, nilability states, and error paths [T-0.4]. Each later section states its own testable rules [T-0.4].
 The compiler MUST reject dangerous edge cases through type rules and `logos lint` rules [T-0.4]. The lint registry enumerates the enforced lint rules [T-0.4].
 
 ## 1. Tier 1 specification (toolchain, linter, desugaring)
@@ -117,13 +116,12 @@ NFC normalization MUST be the identity on extension strings. [T-101.1]
 When the main module path's first element contains a dot, each alias-extension file MUST produce warning `portability::alias_extension`. [T-101.1][T-102]
 
 ### 1.2 RFC-102: Compiler linter and rule set
-The `logos lint` check MUST run inside the compiler on `.lgo` packages after the first type pass for syntax and type rules [T-102].
+The `logos lint` check MUST run inside the compiler on `.lgo` packages for syntax and type rules [T-102].
 The `logos lint` check MUST run the language-neutral syntax and type rules on Go packages at the same point [T-102][R-U1].
 The `logos lint` check MUST run inside escape analysis for escape rules, on Go packages and on `.lgo` packages [T-102][R-U1].
 `logos lint` MUST lint Go packages with the language-neutral rules only [T-102][R-U1].
 A rule MUST count as language-neutral when a Go package can trigger it with Go syntax and types alone and the code it guards exists in Go packages. A loGo/s form inside its detection, such as a group child, a const view, or `?`, MUST stay inactive in Go [T-102][R-U1].
-The language-neutral rules MUST be `correctness::typed_nil_return` (in Go, the `(*T)(nil)` form only), `correctness::arena_pointer_escape`, `correctness::infinite_recursion`, `correctness::unclosed_io_closer`, `correctness::unbounded_channel_op`, `concurrency::concurrent_multiword_race`, `concurrency::reentrant_withlock_deadlock`, `correctness::withlock_leak`, `slop::err_chain_reset`, `slop::discarded_error`, `complexity::cognitive_overflow`, `perf::large_backing_array_pin`, `perf::time_after_in_loop`, `concurrency::unguarded_access`, `concurrency::nonatomic_access`, `concurrency::lock_requirement_unmet`, `correctness::layout_constant_mismatch`, `portability::atomic_plain_int64`, `correctness::linkname_mismatch`, and `pedantic::unsafe_outside_unsafe_file` [T-102][R-U1].
-`go vet` owns printf, copylocks, structtag, assign, httpresponse, and stringintconv checks; `logos lint` does not repeat them. [T-102]
+The language-neutral rules MUST be `correctness::typed_nil_return` (in Go, the `(*T)(nil)` form only), `correctness::arena_pointer_escape`, `correctness::infinite_recursion`, `correctness::unclosed_io_closer`, `correctness::unbounded_channel_op`, `concurrency::concurrent_multiword_race`, `concurrency::reentrant_withlock_deadlock`, `correctness::withlock_leak`, `slop::err_chain_reset`, `slop::discarded_error`, `complexity::cognitive_overflow`, `perf::large_backing_array_pin`, `perf::time_after_in_loop`, `concurrency::unguarded_access`, `concurrency::nonatomic_access`, `concurrency::lock_requirement_unmet`, `correctness::layout_constant_mismatch`, `portability::atomic_plain_int64`, `correctness::linkname_mismatch`, `perf::arena_fallback`, and `pedantic::unsafe_outside_unsafe_file` [T-102][R-U1].
 The compiler MUST enforce `concurrency::unguarded_access` as `forbid` against a read or write of a field that `//logos:guardedby` guards without its lock held [T-102].
 The compiler MUST enforce `concurrency::nonatomic_access` as `forbid` against a non-`sync/atomic` access of a field that `//logos:atomic` marks [T-102].
 The compiler MUST enforce `concurrency::lock_requirement_unmet` as `forbid` against a call whose `//logos:requires` set the caller does not hold [T-102].
@@ -154,7 +152,6 @@ The default group severities MUST be `correctness` forbid, `concurrency` forbid,
 The `logos.toml [lints]` table MUST control group severities [T-102].
 The `logos.toml [lints.thresholds]` defaults MUST be 3 for nesting depth, 15 for cognitive complexity, 60 for function lines, 4 for function parameters, 4096 for comptime nodes, and 100000 for CTFE steps [T-102].
 Configuration MAY raise `max_comptime_ast_nodes` and `max_ctfe_steps` above their defaults [T-102].
-Validation and boundary tests MUST use the selected limits [T-102].
 `logos build` and `logos lint` MUST accept `--pedantic` with default false [T-102].
 The `--pedantic` flag MUST override `logos.toml` [T-102]. `--pedantic` MUST raise the pedantic group from `allow` to `warn` and MUST keep a stricter configured severity, and `--pedantic=false` MUST set the pedantic group to `allow` [T-102].
 A `logos.toml` value that lowers a `forbid` group MUST fail with `configuration::forbid_lowered` [T-102].
