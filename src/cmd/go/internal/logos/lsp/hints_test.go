@@ -9,12 +9,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
 	"sync"
 	"testing"
 	"time"
+
+	"cmd/go/internal/logos/hints"
 )
 
 type hintsRecorder struct {
@@ -317,4 +320,57 @@ func TestProxyDoesNotCacheHintsOfAnOlderCompile(t *testing.T) {
 	if runs != 2 {
 		t.Errorf("the runner ran %d times, want 2: the run of the old text must not be cached", runs)
 	}
+}
+func TestProxyHintsGoPackageAlloc(t *testing.T) {
+	root, tc := realWorkspace(t)
+	dir := filepath.Join(root, "gomod", "alloc")
+	if err := os.MkdirAll(dir, 0o777); err != nil {
+		t.Fatal(err)
+	}
+	src := "package alloc\n\nfunc F(v int) []int { return []int{v} }\n"
+	if err := os.WriteFile(filepath.Join(dir, "a.go"), []byte(src), 0o666); err != nil {
+		t.Fatal(err)
+	}
+	scratch := t.TempDir()
+	scriptPath := filepath.Join(scratch, "script.json")
+	scriptData, err := json.Marshal(fakeScript{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(scriptPath, scriptData, 0o666); err != nil {
+		t.Fatal(err)
+	}
+	client := startProxy(t, Options{
+		Gopls:     []string{os.Args[0], "-mode=stdio"},
+		Env:       append(os.Environ(), fakeEnv+"="+scriptPath, fakeLogEnv+"="+filepath.Join(scratch, "gopls.log")),
+		Compiler:  tc,
+		HintsJSON: tc.Hints,
+		Hints:     hints.Serve,
+	})
+	client.call("initialize", map[string]any{
+		"processId": nil,
+		"rootUri":   pathURI(root),
+		"capabilities": map[string]any{
+			"general": map[string]any{"positionEncodings": []string{"utf-8", "utf-16"}},
+		},
+	})
+	client.notify("initialized", map[string]any{})
+	uri := pathURI(filepath.Join(dir, "a.go"))
+	client.notify("textDocument/didOpen", map[string]any{
+		"textDocument": map[string]any{"uri": uri, "languageId": "go", "version": 1, "text": src},
+	})
+	res := client.call("textDocument/inlayHint", map[string]any{
+		"textDocument": map[string]any{"uri": uri},
+		"range":        Range{Start: Position{Line: 0}, End: Position{Line: 10}},
+	})
+	var items []map[string]any
+	if err := json.Unmarshal(res, &items); err != nil {
+		t.Fatalf("inlayHint result is not a list: %v (%s)", err, res)
+	}
+	for _, it := range items {
+		if label, _ := it["label"].(string); label == "[heap]" || label == "[stack]" || label == "[arena]" || label == "[rodata]" {
+			return
+		}
+	}
+	t.Errorf("no allocation badge for the Go package in %s", res)
 }
