@@ -6,8 +6,6 @@ package config
 
 import "strconv"
 
-// lintsOwner returns the table that owns a [lints] key: "lints" for a group
-// key, "lints.thresholds" for a threshold key, and "" for any other key.
 func lintsOwner(key string) string {
 	switch {
 	case isLintGroup(key):
@@ -18,8 +16,6 @@ func lintsOwner(key string) string {
 	return ""
 }
 
-// assignLintGroup validates and stores one group severity. A group that
-// defaults to forbid cannot be set to anything else.
 func (p *parser) assignLintGroup(group, s string, valStart int) error {
 	switch s {
 	case "forbid", "deny", "warn", "allow":
@@ -36,8 +32,6 @@ func (p *parser) assignLintGroup(group, s string, valStart int) error {
 	return nil
 }
 
-// parseIntValue parses the positive decimal integer of a [lints.thresholds]
-// key. The cursor is at the value.
 func (p *parser) parseIntValue(key string, valStart int) error {
 	c := p.peek()
 	if !isBareChar(c) {
@@ -58,7 +52,6 @@ func (p *parser) parseIntValue(key string, valStart int) error {
 	return nil
 }
 
-// intValueError reports a value that does not start like an integer.
 func (p *parser) intValueError(key string, valStart int, c byte) error {
 	switch c {
 	case '\n', 0, '#':

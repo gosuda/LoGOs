@@ -74,9 +74,6 @@ func writeOwnedSidecar(t *testing.T, staging, dir string, reqs ...logosowned.Req
 	}
 }
 
-// ownedTestWriteBoth writes content to the original owner dir and the
-// copied output dir so condition reads (original) and collision checks
-// (copied) see genuinely selected files.
 func ownedTestWriteBoth(t *testing.T, ownerDir, outDir, name, content string) {
 	t.Helper()
 	if err := os.MkdirAll(ownerDir, 0777); err != nil {
@@ -93,12 +90,6 @@ func ownedTestWriteBoth(t *testing.T, ownerDir, outDir, name, content string) {
 	}
 }
 
-// assertOwnedHelperCondTable requires the helper in dir declaring name
-// to build exactly under want for every assignment of tags. Conditions
-// are compared by semantics (Expr.Eval over the full truth table), never
-// by spelling, so factored and distributive renderings both pass. A
-// missing declaration fails the test; an unconditional helper holds
-// under every assignment.
 func assertOwnedHelperCondTable(t *testing.T, dir, name string, tags []string, want func(map[string]bool) bool) {
 	t.Helper()
 	matches, err := filepath.Glob(filepath.Join(dir, "logos_owned_*.go"))
@@ -161,11 +152,6 @@ func TestDedupeOwnedDeterministic(t *testing.T) {
 	if _, err := dedupeOwnedRequests([]logosowned.Request{b, clash}); err == nil {
 		t.Fatalf("dedupe accepted conflicting content for one id")
 	}
-	// Identical helpers owned by different packages are not a conflict:
-	// each lands in its own owner directory, so only the same owner with
-	// the same ID but different content is a loud conflict, never a
-	// silent overwrite. Same owner with a different ID survives to pass
-	// 2, where identical bodies differing only in build headers merge.
 	foreign := a
 	foreign.Owner = "example.com/mod/z"
 	got, err = dedupeOwnedRequests([]logosowned.Request{a, foreign})
@@ -263,7 +249,6 @@ func TestEmitOwnedHelperMainModule(t *testing.T) {
 	if strings.Contains(dst, ".gen.go") {
 		t.Fatalf("helper name must not use .gen.go")
 	}
-	// The input module is untouched: same bytes, no new files.
 	if got, err := os.ReadFile(filepath.Join(owner.Dir, "a.go")); err != nil || string(got) != orig {
 		t.Fatalf("input source mutated")
 	}
@@ -309,18 +294,12 @@ func TestEmitOwnedCollisions(t *testing.T) {
 	})
 	t.Run("generated", func(t *testing.T) {
 		plan, staging, out, req := setup(t, "package sub\nfunc Other() {}\n")
-		// Same declared identifier with a genuinely different body, so
-		// the IDs differ and the coordinator must report a conflict
-		// instead of deduplicating.
 		other := ownedTestRequest(t, "example.com/mod/sub", "sub", "package sub\nfunc Clashing() int { return 1 }\n", []logosowned.Declaration{})
 		writeOwnedSidecar(t, staging, "example.com/mod/sub", req, other)
 		if _, err := emitOwnedHelpers(plan, staging, out, map[string]string{}); err == nil {
 			t.Fatalf("emit accepted conflicting generated declarations")
 		}
 	})
-	// Copied source may itself carry a generated-looking file name: the
-	// prefix is not ownership. A declaration in it must collide with a
-	// generated helper whose output file name differs.
 	t.Run("source generated prefix", func(t *testing.T) {
 		plan, staging, out, req := setup(t, "package sub\nfunc Clashing() {}\n")
 		renamed := "logos_owned_user.go"
@@ -340,8 +319,6 @@ func TestEmitOwnedCollisions(t *testing.T) {
 			t.Fatalf("emit accepted a collision hidden by a generated-looking source file name")
 		}
 	})
-	// External test files of the owner directory live in a different
-	// package namespace and must not collide with package declarations.
 	t.Run("external test namespace", func(t *testing.T) {
 		plan, staging, out, req := setup(t, "package sub\nfunc Other() {}\n")
 		if err := os.WriteFile(filepath.Join(out, "sub", "ext_test.go"), []byte("package sub_test\n\nfunc Clashing() {}\n"), 0666); err != nil {
@@ -381,7 +358,6 @@ func TestOwnedDeclNamesDuplicates(t *testing.T) {
 	if _, err := ownedDeclNames("example.com/mod/sub", []byte("package sub\nfunc Same() {}\nfunc Same() {}\n")); err == nil {
 		t.Fatalf("collector accepted duplicate declarations in one helper")
 	}
-	// Repeated package-level init functions are legal Go.
 	got, err := ownedDeclNames("example.com/mod/sub", []byte("package sub\nfunc init() {}\nfunc init() {}\nfunc Distinct() {}\n"))
 	if err != nil {
 		t.Fatalf("collector rejected legal init functions: %v", err)
@@ -389,7 +365,6 @@ func TestOwnedDeclNamesDuplicates(t *testing.T) {
 	if len(got) != 1 || got[0] != "Distinct" {
 		t.Fatalf("collector tracked init: %#v", got)
 	}
-	// Repeated blank identifiers are legal Go.
 	if _, err := ownedDeclNames("example.com/mod/sub", []byte("package sub\nvar _ = 1\nvar _ = 2\nfunc Distinct() {}\n")); err != nil {
 		t.Fatalf("collector rejected legal blank identifiers: %v", err)
 	}
@@ -492,9 +467,6 @@ func TestEmitOwnedExplicitProvenance(t *testing.T) {
 	staging := t.TempDir()
 
 	body := "package sub\n\nfunc UsePlatform() *privateKey { p := new(privateKey); return p }\n"
-	// Same body, distinct owner file is impossible here (same owner) so
-	// distinct consumer alternatives share the body: windows vs darwin
-	// consumers both need the amd64 declaration.
 	winSrc := "//go:build windows\n\n" + body
 	darSrc := "//go:build darwin\n\n" + body
 	winReq, err := logosowned.NewRequest("example.com/mod/sub", "sub", winSrc, []logosowned.Declaration{{Owner: "example.com/mod/sub", File: "private_amd64.go"}})
@@ -508,10 +480,6 @@ func TestEmitOwnedExplicitProvenance(t *testing.T) {
 	if winReq.ID == darReq.ID {
 		t.Fatalf("different consumer headers must give different input IDs")
 	}
-	// Same input Source hash with different provenance survives dedupe:
-	// winReq and darReq differ in Source (headers) so IDs differ; the
-	// same-Source case is covered by TestDedupeKeepsDistinctProvenance.
-	// Here the same body must merge to one output with OR consumers.
 	linuxReq := ownedTestRequest(t, "example.com/mod/sub", "sub", "package sub\n\nfunc UseLinux() *linuxKey { k := new(linuxKey); return k }\n", []logosowned.Declaration{{Owner: "example.com/mod/sub", File: "tagged_linux.go"}})
 	freeReq := ownedTestRequest(t, "example.com/mod/sub", "sub", "//go:build js\n\npackage sub\n\nfunc UseFree() int { return Free() }\n", []logosowned.Declaration{{Owner: "example.com/mod/sub", File: "plain.go"}})
 
@@ -551,11 +519,6 @@ func TestEmitOwnedExplicitProvenance(t *testing.T) {
 		return ""
 	}
 
-	// Per-request consumer AND declaration, then OR across the body
-	// group: (windows && amd64) || (darwin && amd64). The rendering may
-	// factor amd64 out or leave it distributive; the truth table pins
-	// the semantics instead: build exactly when amd64 holds with at
-	// least one of windows/darwin.
 	assertOwnedHelperCondTable(t, filepath.Join(out, "sub"), "UsePlatform",
 		[]string{"windows", "darwin", "amd64"},
 		func(assign map[string]bool) bool {
@@ -564,8 +527,6 @@ func TestEmitOwnedExplicitProvenance(t *testing.T) {
 	if got := headerOf("UseLinux"); got != "linux" {
 		t.Fatalf("UseLinux condition = %q, want linux", got)
 	}
-	// Unrelated owner files do not constrain: plain.go is
-	// unconditional, so the js consumer stays js.
 	if got := headerOf("UseFree"); got != "js" {
 		t.Fatalf("UseFree condition = %q, want js", got)
 	}
@@ -586,18 +547,10 @@ func TestEmitOwnedDistinctDeclarationAlternatives(t *testing.T) {
 	ownedTestWriteBoth(t, ownerDir, outSub, "b_linux.go", "package sub\n\ntype bKey struct{ v int }\n")
 	plan := ownedTestPlan(modDir, owner)
 	staging := t.TempDir()
-	// Same body, same consumer, distinct provenance: effective
-	// conditions are amd64 vs linux, ORed to one output.
 	bodyA := "package sub\n\nfunc Alt() *aKey { return new(aKey) }\n"
 	bodyB := "package sub\n\nfunc Alt() *bKey { return new(bKey) }\n"
 	_ = bodyA
 	_ = bodyB
-	// Same stripped body with different declarations: use one body
-	// shape that can reference either file via distinct helpers? For a
-	// true same-body OR, both variants must share the body text, so use
-	// a body that type-checks against either via the declaration list:
-	// here both variants share the exact body and differ only in
-	// provenance.
 	shared := "package sub\n\nfunc Alt() int { return 1 }\n"
 	reqA := ownedTestRequest(t, "example.com/mod/sub", "sub", shared, []logosowned.Declaration{{Owner: "example.com/mod/sub", File: "a_amd64.go"}})
 	reqB := ownedTestRequest(t, "example.com/mod/sub", "sub", shared, []logosowned.Declaration{{Owner: "example.com/mod/sub", File: "b_linux.go"}})
@@ -837,8 +790,6 @@ func TestEmitOwnedLogosAliasExtension(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(ownerDir, "feat_linux.⚡"), []byte("package sub\n\ntype aliasFeat struct{ v int }\n"), 0666); err != nil {
 		t.Fatal(err)
 	}
-	// Copied output normalizes the alias to Go form; the file itself
-	// is skipped by the collision scan (not .go) which is correct.
 	plan := ownedTestPlan(modDir, owner)
 	staging := t.TempDir()
 	req := ownedTestRequest(t, "example.com/mod/sub", "sub", "package sub\n\nfunc UseAlias() *aliasFeat { return new(aliasFeat) }\n", []logosowned.Declaration{{Owner: "example.com/mod/sub", File: "feat_linux.⚡"}})
@@ -866,8 +817,6 @@ func TestEmitOwnedLogosAliasExtension(t *testing.T) {
 	if expr == nil || expr.String() != "linux" {
 		t.Fatalf("alias Logos filename must imply linux, got %v", expr)
 	}
-	// Selected-file rejection is preserved: an alias basename outside
-	// the plan is still an explicit error, not a silent skip.
 	bad := ownedTestRequest(t, "example.com/mod/sub", "sub", "package sub\n\nfunc UseBad() int { return 1 }\n", []logosowned.Declaration{{Owner: "example.com/mod/sub", File: "missing.⚡"}})
 	badDir := t.TempDir()
 	writeOwnedSidecar(t, badDir, "example.com/mod/sub", bad)
@@ -1081,7 +1030,6 @@ func TestEmitOwnedMissingUnselected(t *testing.T) {
 	}
 	emitOne := func(t *testing.T, plan *ejectPlan, out string, decl logosowned.Declaration) error {
 		req := ownedTestRequest(t, "example.com/mod/sub", "sub", "package sub\n\nfunc Use() int { return 1 }\n", []logosowned.Declaration{decl})
-		// Use a fresh staging dir per case so sidecars do not mix.
 		dir := t.TempDir()
 		writeOwnedSidecar(t, dir, "example.com/mod/sub", req)
 		_, err := emitOwnedHelpers(plan, dir, out, map[string]string{})
@@ -1165,8 +1113,6 @@ func TestEmitOwnedMissingUnselected(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		// The unconditional x.go declaration leaves one alternative
-		// unconditional, so the OR stays unconditional.
 		fset := token.NewFileSet()
 		f, err := parser.ParseFile(fset, "", data, parser.ParseComments)
 		if err != nil {
@@ -1179,11 +1125,6 @@ func TestEmitOwnedMissingUnselected(t *testing.T) {
 		if expr != nil {
 			t.Fatalf("expected unconditional merge (x unconditional OR y linux), got %q", expr.String())
 		}
-		// Output filename must hash the actual final bytes. The merged,
-		// formatted output can legitimately equal the input Source, so
-		// the output hash may coincide with the input ID: verify the
-		// name against the bytes on disk instead of requiring
-		// inequality.
 		sum := sha256.Sum256(data)
 		if want := "logos_owned_" + hex.EncodeToString(sum[:]) + ".go"; filepath.Base(matches[0]) != want {
 			t.Fatalf("output name %q must hash the final bytes, want %q", matches[0], want)
@@ -1205,8 +1146,6 @@ func TestEmitOwnedBuildCondition(t *testing.T) {
 	plan := ownedTestPlan(modDir, owner)
 	staging := t.TempDir()
 
-	// 1 & 2: Same body, different consumer headers -> OR'd consumer condition, ANDed with amd64.
-	// Single output file emitted for the body group.
 	reqPlatformWin, err := logosowned.NewRequest("example.com/mod/sub", "sub", "//go:build windows\n\npackage sub\n\nfunc UsePlatform() *privateKey { p := new(privateKey); return p }\n", []logosowned.Declaration{{Owner: "example.com/mod/sub", File: "private_amd64.go"}})
 	if err != nil {
 		t.Fatal(err)
@@ -1216,10 +1155,8 @@ func TestEmitOwnedBuildCondition(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// 3: Untagged consumer references linuxKey in tagged_linux.go -> linux.
 	reqLinux := ownedTestRequest(t, "example.com/mod/sub", "sub", "package sub\n\nfunc UseLinux() *linuxKey { k := new(linuxKey); return k }\n", []logosowned.Declaration{{Owner: "example.com/mod/sub", File: "tagged_linux.go"}})
 
-	// 4: Tagged consumer references untagged Free() -> stays js (unrelated owner files don't restrict).
 	reqFree := ownedTestRequest(t, "example.com/mod/sub", "sub", "//go:build js\n\npackage sub\n\nfunc UseFree() int { return Free() }\n", []logosowned.Declaration{{Owner: "example.com/mod/sub", File: "plain.go"}})
 
 	writeOwnedSidecar(t, staging, "example.com/mod/sub", reqPlatformWin, reqPlatformDar, reqLinux, reqFree)
@@ -1258,27 +1195,20 @@ func TestEmitOwnedBuildCondition(t *testing.T) {
 		return ""
 	}
 
-	// Request 1 and 2 merged: each consumer condition ANDed with
-	// privateKey's amd64, ORed across the body group. The rendering may
-	// factor amd64 out or leave it distributive; the truth table pins
-	// the semantics instead.
 	assertOwnedHelperCondTable(t, filepath.Join(out, "sub"), "UsePlatform",
 		[]string{"windows", "darwin", "amd64"},
 		func(assign map[string]bool) bool {
 			return assign["amd64"] && (assign["windows"] || assign["darwin"])
 		})
 
-	// Request 3: linuxKey from tagged_linux.go.
 	if got := headerOf("UseLinux"); got != "linux" {
 		t.Fatalf("UseLinux condition = %q, want linux", got)
 	}
 
-	// Request 4: Free from plain.go (unconditional) -> stays js.
 	if got := headerOf("UseFree"); got != "js" {
 		t.Fatalf("UseFree condition = %q, want js (unrelated owner declarations must not restrict)", got)
 	}
 
-	// Verify only 3 files emitted (reqPlatformWin and reqPlatformDar merged into 1).
 	matches, err := filepath.Glob(filepath.Join(out, "sub", "logos_owned_*.go"))
 	if err != nil || len(matches) != 3 {
 		t.Fatalf("expected exactly 3 helper files (variants merged), got %d: %v", len(matches), matches)
@@ -1339,7 +1269,6 @@ func TestEmitOwnedLogosHeaderCondition(t *testing.T) {
 	if err := os.MkdirAll(ownerDir, 0777); err != nil {
 		t.Fatal(err)
 	}
-	// Real calc.lgo pattern: package clause, imports, build tags, and Logos const func bodies
 	calcSource := `//go:build linux
 package sub
 
@@ -1388,7 +1317,6 @@ const func ComputeClosed(x int) int {
 		t.Fatalf("calc.lgo build tag linux not propagated, got %v", expr)
 	}
 
-	// Malformed header still fails: syntax error in package clause or comments
 	badDir := t.TempDir()
 	badOwner := ownedTestMainPackage(badDir, "example.com/mod/bad", "bad")
 	badOwner.GoFiles = []string{"bad.lgo"}

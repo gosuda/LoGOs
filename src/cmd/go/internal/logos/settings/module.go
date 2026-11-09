@@ -16,9 +16,6 @@ import (
 	"cmd/go/internal/logos/config"
 )
 
-// Module is one main module root's logos.toml plus its memoized loGo/s
-// scan. File is the parsed config and Err its verbatim
-// logos.toml:<line>:<col> error; File is nil exactly when Err != nil.
 type Module struct {
 	Root string
 	File *config.File
@@ -36,8 +33,6 @@ var moduleCache = struct {
 
 var moduleParseCount int
 
-// ModuleAt returns the memoized Module of root, parsing logos.toml once
-// per root per process. It is safe for concurrent use.
 func ModuleAt(root string) *Module {
 	moduleCache.Lock()
 	defer moduleCache.Unlock()
@@ -51,11 +46,6 @@ func ModuleAt(root string) *Module {
 	return m
 }
 
-// Logos reports whether the module tree holds a loGo/s source file, so
-// the policy can tell a loGo/s module (policy applies to every package in
-// it) from a Go module (upstream handling). The scan walks once per root,
-// skipping vendor, testdata, dot and underscore directories, and nested
-// modules carrying a regular go.mod file.
 func (m *Module) Logos() bool {
 	if m.Root == "" {
 		return false
@@ -64,18 +54,10 @@ func (m *Module) Logos() bool {
 	return m.logos
 }
 
-// ClaimError reports whether root's parse error may be attached to this
-// caller: true once per root, false once it has been reported.
 func (m *Module) ClaimError() bool {
 	return !m.reported.Swap(true)
 }
 
-// CgoOpinion reports one root's cgo decision: whether cgo is enabled and
-// whether the root says anything at all. An explicit cgo key wins over
-// cgoEnv, an explicitly set cgoEnv decides on its own, and a root with
-// neither contributes disabled in a loGo/s module and no opinion in a Go
-// module. A broken logos.toml contributes disabled with an opinion, so
-// the build fails closed.
 func (m *Module) CgoOpinion(cgoEnv string) (enabled, opinion bool) {
 	if m.Err != nil || m.File == nil {
 		return false, true
@@ -97,11 +79,6 @@ func (m *Module) CgoOpinion(cgoEnv string) (enabled, opinion bool) {
 
 const cgoDeny = "[restriction::cgo_usage] cgo is disabled"
 
-// CgoAllow reports whether importPath may use cgo under the module's
-// policy: an explicit cgo key wins over cgoEnv both ways (allow always,
-// restricted by allowlist, anything else never); otherwise an explicit
-// cgoEnv=1 allows and anything else denies with the absent-key forbid
-// default. A denial message carries [restriction::cgo_usage].
 func (m *Module) CgoAllow(cgoEnv, importPath string) (bool, string) {
 	if m.File == nil {
 		return false, cgoDeny
@@ -125,8 +102,6 @@ func (m *Module) CgoAllow(cgoEnv, importPath string) (bool, string) {
 	return false, cgoDeny
 }
 
-// Severity returns the [lints] severity of group, def on a broken file or
-// a missing key.
 func (m *Module) Severity(group, def string) string {
 	if m.Err != nil || m.File == nil {
 		return def
@@ -137,10 +112,6 @@ func (m *Module) Severity(group, def string) string {
 	return def
 }
 
-// CgoAllowlistAllows reports whether importPath matches one of the
-// cgo_allowlist globs: a trailing "/**" matches the prefix itself and
-// everything under it, a trailing "**" matches any suffix including path
-// separators, and other patterns match exactly or by path.Match.
 func CgoAllowlistAllows(allowlist []string, importPath string) bool {
 	for _, pattern := range allowlist {
 		if cgoPatternAllows(pattern, importPath) {

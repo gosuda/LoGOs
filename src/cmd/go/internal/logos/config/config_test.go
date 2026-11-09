@@ -13,10 +13,6 @@ import (
 	"testing"
 )
 
-// M0-S4 attack: table tests for valid logos.toml documents.
-// Every error reads <name>:<line>:<col>: <message> where <name> is the
-// name argument passed to Parse.
-
 var fourExts = []string{".lgo", ".📜", ".⚡", ".ʕ◔ϖ◔ʔ"}
 
 type validCase struct {
@@ -209,8 +205,6 @@ func defaultCapabilities() Capabilities {
 	}
 }
 
-// withCapDefaults fills unset severity fields with their defaults, so
-// cases that only set allowlists still expect the default severities.
 func withCapDefaults(c Capabilities) Capabilities {
 	d := defaultCapabilities()
 	if c.TransitiveReflect == "" {

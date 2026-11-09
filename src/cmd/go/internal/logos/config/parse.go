@@ -12,16 +12,10 @@ import (
 	"unicode/utf8"
 )
 
-// maxConfigSize caps logos.toml input at 1 MB; larger inputs fail parsing.
 const maxConfigSize = 1 << 20
 
-// strictFilesWant is the accepted-values suffix of the strict_files entry error.
 const strictFilesWant = `".lgo", ".📜", ".⚡", or ".ʕ◔ϖ◔ʔ"`
 
-// Parse parses data as a logos.toml document. Errors read
-// name:line:column: message with byte-based columns. Keys must appear
-// under their [project] or [build] table; keys at the file root are
-// rejected as unknown keys. Unknown tables and keys are rejected.
 func Parse(name string, data []byte) (*File, error) {
 	if len(data) > maxConfigSize {
 		return nil, fmt.Errorf("%s:1:1: file too large", name)
@@ -47,9 +41,6 @@ func Parse(name string, data []byte) (*File, error) {
 	return p.file, nil
 }
 
-// firstForbiddenControl returns the offset of the first forbidden control
-// byte: NUL and other C0 controls except tab, LF, and CR in CRLF, plus DEL
-// (0x7F), consistent with TOML. ok is false when such a byte exists.
 func firstForbiddenControl(data []byte) (off int, c byte, ok bool) {
 	for i := range data {
 		b := data[i]
@@ -69,8 +60,6 @@ func firstForbiddenControl(data []byte) (off int, c byte, ok bool) {
 	return 0, 0, true
 }
 
-// firstInvalidUTF8 returns the offset of the first byte that is not valid
-// UTF-8. ok is false when such a byte exists.
 func firstInvalidUTF8(data []byte) (off int, ok bool) {
 	for off < len(data) {
 		if data[off] < utf8.RuneSelf {
@@ -86,7 +75,6 @@ func firstInvalidUTF8(data []byte) (off int, ok bool) {
 	return 0, true
 }
 
-// lineCol maps a byte offset to 1-based line and byte-based column.
 func lineCol(data []byte, off int) (line, col int) {
 	line = 1
 	start := 0
@@ -99,25 +87,21 @@ func lineCol(data []byte, off int) (line, col int) {
 	return line, off - start + 1
 }
 
-// parser is a cursor over the raw input. Line and column numbers are derived
-// from byte offsets on demand, so the cursor only tracks its position.
 type parser struct {
 	name   string
 	src    []byte
 	pos    int
-	table  string // "", "project", or "build"
+	table  string
 	file   *File
 	tables map[string]bool
 	keys   map[[2]string]bool
 }
 
-// errorf reports an error at a byte offset.
 func (p *parser) errorf(off int, format string, args ...any) error {
 	line, col := lineCol(p.src, off)
 	return fmt.Errorf("%s:%d:%d: %s", p.name, line, col, fmt.Sprintf(format, args...))
 }
 
-// peek returns the byte under the cursor, or 0 at EOF.
 func (p *parser) peek() byte {
 	if p.pos < len(p.src) {
 		return p.src[p.pos]
@@ -125,29 +109,24 @@ func (p *parser) peek() byte {
 	return 0
 }
 
-// next consumes one byte.
 func (p *parser) next() {
 	if p.peek() != 0 {
 		p.pos++
 	}
 }
 
-// skipInlineWS skips spaces, tabs, and carriage returns (so CRLF line
-// endings work without shifting content columns).
 func (p *parser) skipInlineWS() {
 	for p.peek() == ' ' || p.peek() == '\t' || p.peek() == '\r' {
 		p.next()
 	}
 }
 
-// skipComment skips a # comment to (not including) the newline or EOF.
 func (p *parser) skipComment() {
 	for p.peek() != '\n' && p.peek() != 0 {
 		p.next()
 	}
 }
 
-// skipArraySpace skips whitespace, newlines, and comments inside arrays.
 func (p *parser) skipArraySpace() {
 	for {
 		p.skipInlineWS()
@@ -164,7 +143,6 @@ func (p *parser) skipArraySpace() {
 	}
 }
 
-// parse runs the top-level loop over lines.
 func (p *parser) parse() error {
 	for {
 		p.skipInlineWS()
@@ -190,7 +168,6 @@ func (p *parser) parse() error {
 	}
 }
 
-// parseTable parses a [table] header. The cursor is at '['.
 func (p *parser) parseTable() error {
 	start := p.pos
 	p.next()
@@ -228,9 +205,6 @@ func (p *parser) parseTable() error {
 	return nil
 }
 
-// keyOwner maps a key to its owning table. The second result is false for
-// unknown keys and for known keys outside their owning table, including
-// keys at the file root before any table header.
 func keyOwner(table, key string) (string, bool) {
 	var owner string
 	switch key {
@@ -253,7 +227,6 @@ func keyOwner(table, key string) (string, bool) {
 	return owner, true
 }
 
-// isArrayKey reports whether key takes a string array value.
 func isArrayKey(key string) bool {
 	switch key {
 	case "strict_files", "cgo_allowlist",
@@ -263,7 +236,6 @@ func isArrayKey(key string) bool {
 	return false
 }
 
-// parseKeyVal parses a key = value line. The cursor is at the key start.
 func (p *parser) parseKeyVal() error {
 	keyStart := p.pos
 	for isKeyChar(p.peek()) {
@@ -307,7 +279,6 @@ func (p *parser) parseKeyVal() error {
 	return nil
 }
 
-// parseStringValue parses a scalar value for a string key at valStart.
 func (p *parser) parseStringValue(key string, valStart int) error {
 	c := p.peek()
 	switch {
@@ -340,14 +311,11 @@ func (p *parser) parseStringValue(key string, valStart int) error {
 	}
 }
 
-// parseArrayValue parses an array value for an array key.
 func (p *parser) parseArrayValue(key string) error {
 	valStart := p.pos
 	c := p.peek()
 	switch {
 	case c == '"' || c == '\'':
-		// Parse the string first so a lexical error (such as an unterminated
-		// string) wins over the type error.
 		if _, err := p.parseString(); err != nil {
 			return err
 		}
@@ -372,7 +340,7 @@ func (p *parser) parseArrayValue(key string) error {
 		return p.errorf(p.pos, "unexpected character %q", string(rune(c)))
 	}
 	arrStart := p.pos
-	p.next() // consume '['
+	p.next()
 	out := []string{}
 	for {
 		p.skipArraySpace()
@@ -439,7 +407,6 @@ func (p *parser) parseArrayValue(key string) error {
 	}
 }
 
-// assignString validates and stores a scalar value.
 func (p *parser) assignString(key, s string, valStart int) error {
 	switch key {
 	case "cgo":
@@ -463,14 +430,11 @@ func (p *parser) assignString(key, s string, valStart int) error {
 	return nil
 }
 
-// buildEnums lists the accepted spellings of the enumerated [build] keys.
 var buildEnums = map[string][]string{
 	"opt_level":  {"O0", "O1", "O2", "O3", "Os"},
 	"target_cpu": {"deterministic", "baseline", "native"},
 }
 
-// assignBuildEnum validates one enumerated [build] value against its
-// accepted spellings and stores it.
 func (p *parser) assignBuildEnum(key, s string, valStart int) error {
 	if !slices.Contains(buildEnums[key], s) {
 		return p.errorf(valStart, "%s must be one of %s", key, strings.Join(buildEnums[key], ", "))
@@ -484,7 +448,6 @@ func (p *parser) assignBuildEnum(key, s string, valStart int) error {
 	return nil
 }
 
-// assignSeverity stores a validated capabilities severity value.
 func assignSeverity(c *Capabilities, key, s string) {
 	switch key {
 	case "transitive_reflect":
@@ -498,7 +461,6 @@ func assignSeverity(c *Capabilities, key, s string) {
 	}
 }
 
-// isCapabilitiesAllowlist reports whether key is a capabilities allowlist.
 func isCapabilitiesAllowlist(key string) bool {
 	switch key {
 	case "reflect_allowlist", "transitive_exec_allowlist", "transitive_net_allowlist", "transitive_unsafe_allowlist":
@@ -507,7 +469,6 @@ func isCapabilitiesAllowlist(key string) bool {
 	return false
 }
 
-// assignArray stores an array value.
 func (p *parser) assignArray(key string, out []string) error {
 	switch key {
 	case "strict_files":
@@ -526,13 +487,12 @@ func (p *parser) assignArray(key string, out []string) error {
 	return nil
 }
 
-// parseString parses a basic or literal string. The cursor is at the quote.
 func (p *parser) parseString() (string, error) {
 	if p.peek() == '\'' {
 		return p.parseLiteral()
 	}
 	start := p.pos
-	p.next() // consume opening quote
+	p.next()
 	var b strings.Builder
 	for {
 		c := p.peek()
@@ -600,10 +560,9 @@ func (p *parser) parseString() (string, error) {
 	}
 }
 
-// parseLiteral parses a literal string with no escapes.
 func (p *parser) parseLiteral() (string, error) {
 	start := p.pos
-	p.next() // consume opening quote
+	p.next()
 	var b strings.Builder
 	for {
 		c := p.peek()
@@ -619,7 +578,6 @@ func (p *parser) parseLiteral() (string, error) {
 	}
 }
 
-// bareKind classifies an unquoted value token.
 type bareKind int
 
 const (
@@ -630,7 +588,6 @@ const (
 	bareDate
 )
 
-// readBare reads an unquoted value token, returning it and its start offset.
 func (p *parser) readBare() (string, int) {
 	start := p.pos
 	for isBareChar(p.peek()) {
@@ -639,8 +596,6 @@ func (p *parser) readBare() (string, int) {
 	return string(p.src[start:p.pos]), start
 }
 
-// classifyBare sorts a token into booleans, dates, floats, integers, or
-// anything else (which is not a value in this subset).
 func classifyBare(tok string) bareKind {
 	if tok == "true" || tok == "false" {
 		return bareBool
@@ -657,8 +612,6 @@ func classifyBare(tok string) bareKind {
 	return bareInvalid
 }
 
-// isDatePrefix reports a TOML date or time prefix: YYYY-MM-DD or HH:MM:SS,
-// which also covers full datetimes starting that way.
 func isDatePrefix(tok string) bool {
 	if len(tok) >= 10 &&
 		isDigit(tok[0]) && isDigit(tok[1]) && isDigit(tok[2]) && isDigit(tok[3]) &&
@@ -672,8 +625,6 @@ func isDatePrefix(tok string) bool {
 		isDigit(tok[6]) && isDigit(tok[7])
 }
 
-// isFloatTok reports TOML float shapes: inf/nan, a dot between digits, or a
-// decimal exponent.
 func isFloatTok(tok string) bool {
 	s := tok
 	if s != "" && (s[0] == '+' || s[0] == '-') {
@@ -701,7 +652,6 @@ func isFloatTok(tok string) bool {
 	return false
 }
 
-// isFloatChars reports whether every character fits a float literal.
 func isFloatChars(s string) bool {
 	for i := range s {
 		c := s[i]
@@ -713,7 +663,6 @@ func isFloatChars(s string) bool {
 	return true
 }
 
-// isIntTok reports decimal and 0x/0o/0b integer shapes.
 func isIntTok(tok string) bool {
 	s := tok
 	if s != "" && (s[0] == '+' || s[0] == '-') {
@@ -734,7 +683,6 @@ func isIntTok(tok string) bool {
 	return allIn(s, func(c byte) bool { return isDigit(c) || c == '_' })
 }
 
-// allIn reports whether s is non-empty and every byte satisfies f.
 func allIn(s string, f func(byte) bool) bool {
 	if s == "" {
 		return false
@@ -747,44 +695,34 @@ func allIn(s string, f func(byte) bool) bool {
 	return true
 }
 
-// isKeyChar reports bare-key characters.
 func isKeyChar(c byte) bool {
 	return c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '_' || c == '-'
 }
 
-// isTableChar reports table-name characters, including dots for dotted names
-// (which fail as unknown tables).
 func isTableChar(c byte) bool {
 	return isKeyChar(c) || c == '.'
 }
 
-// isBareChar reports unquoted value-token characters. Delimiters (whitespace,
-// newlines, comments, commas, brackets, braces, quotes, equals) end the token.
 func isBareChar(c byte) bool {
 	return isKeyChar(c) || c == '+' || c == '.' || c == ':' || c == '/'
 }
 
-// isDigit reports ASCII digits.
 func isDigit(c byte) bool {
 	return c >= '0' && c <= '9'
 }
 
-// isHex reports hexadecimal digits.
 func isHex(c byte) bool {
 	return isDigit(c) || c >= 'a' && c <= 'f' || c >= 'A' && c <= 'F'
 }
 
-// isOct reports octal digits.
 func isOct(c byte) bool {
 	return c >= '0' && c <= '7'
 }
 
-// isBin reports binary digits.
 func isBin(c byte) bool {
 	return c == '0' || c == '1'
 }
 
-// hexVal returns a hex digit's value.
 func hexVal(c byte) int {
 	switch {
 	case isDigit(c):
