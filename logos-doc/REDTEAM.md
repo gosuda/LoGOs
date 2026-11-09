@@ -150,7 +150,7 @@ Rules: logos-doc/SPEC.md. Status values: planned, tested, satisfied upstream, bl
 | #156 | Caller reading hash before Close error check | M3 | src/internal/types/testdata/logos/error_first.lgo | tested |
 | #157 | Unconditional self-recursion in const switch branch | M7, M9 | test/logos/lint/infinite_recursion.lgo; test/logos/lint/infinite_recursion_go.go | tested |
 | #158 | Substring pinning large backing array in heap | M9 | test/logos/lint/large_backing_array_pin.lgo; test/logos/lint/large_backing_array_pin_go.go | tested |
-| #160 | Collection moves live cgo arguments | M20 | (planned; a long fast C call reads a stack-resident argument while another goroutine forces collection and stack shrinking, src/cmd/cgo/internal/testlogos) | planned |
+| #160 | Collection moves live cgo arguments | M20 | src/cmd/cgo/internal/testlogos/fastcall_test.go (TestFastcallPinUnderCollection; watch_spin in fastcall_c.c) | tested |
 | #162 | Strict lint breaking third-party module libraries | M9 | src/cmd/go/testdata/script/logos_lint_go.txt | tested |
 | #163 | Buffered channel send flagged as unbounded operation | M9 | test/logos/lint/unbounded_channel_op.lgo; test/logos/lint/unbounded_channel_op_go.go | tested |
 | #164 | Benign writer flagged as discarded error | M9 | test/logos/lint/discarded_error.lgo; test/logos/lint/discarded_error_go.go | tested |
