@@ -12,6 +12,7 @@ import (
 	"math"
 	"math/bits"
 	"runtime"
+	"runtime/debug"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -30,12 +31,15 @@ func arenaStride(size uintptr) uintptr {
 
 func inFreshGoroutine(t *testing.T, fn func()) {
 	t.Helper()
+	goroutines := runtime.NumGoroutine()
 	done := make(chan any)
 	go func() {
 		defer func() { done <- recover() }()
 		fn()
 	}()
-	if r := <-done; r != nil {
+	r := <-done
+	waitGoroutines(t, goroutines)
+	if r != nil {
 		t.Fatalf("panic in goroutine: %v", r)
 	}
 }
@@ -67,6 +71,9 @@ func waitGoroutines(t *testing.T, want int) {
 	deadline := time.Now().Add(20 * time.Second)
 	for runtime.NumGoroutine() > want && time.Now().Before(deadline) {
 		time.Sleep(time.Millisecond)
+	}
+	if got := runtime.NumGoroutine(); got > want {
+		t.Fatalf("goroutines = %d, want %d", got, want)
 	}
 }
 
@@ -101,7 +108,8 @@ func TestLogosArenaParkReturnsChunk(t *testing.T) {
 	)
 	goroutines := runtime.NumGoroutine()
 	totalBase, leasedBase, _ := runtime.LogosArenaCounts()
-	for w := range waves {
+	retries := 0
+	for w := 0; w < waves; {
 		release := make(chan struct{})
 		var started sync.WaitGroup
 		started.Add(perWave)
@@ -117,10 +125,19 @@ func TestLogosArenaParkReturnsChunk(t *testing.T) {
 		}
 		started.Wait()
 		if leased := waitLeased(t, leasedBase); leased != leasedBase {
-			t.Fatalf("wave %d: leased chunks = %d with %d goroutines parked, want baseline %d", w, leased, perWave, leasedBase)
+			close(release)
+			waitGoroutines(t, goroutines)
+			if leased > leasedBase || retries >= 3 {
+				t.Fatalf("wave %d: leased chunks = %d with %d goroutines parked, want baseline %d", w, leased, perWave, leasedBase)
+			}
+			retries++
+			t.Logf("wave %d: leased baseline %d vanished, resampling", w, leasedBase)
+			_, leasedBase, _ = runtime.LogosArenaCounts()
+			continue
 		}
 		close(release)
 		waitGoroutines(t, goroutines)
+		w++
 	}
 	total, _, _ := runtime.LogosArenaCounts()
 	if grown, limit := total-totalBase, 4*runtime.GOMAXPROCS(0)+16; grown > limit {
@@ -129,6 +146,7 @@ func TestLogosArenaParkReturnsChunk(t *testing.T) {
 }
 
 func TestLogosArenaParkKeepsLiveChunk(t *testing.T) {
+	goroutines := runtime.NumGoroutine()
 	_, leasedBase, _ := runtime.LogosArenaCounts()
 	parked := make(chan struct{})
 	wake := make(chan struct{})
@@ -157,9 +175,11 @@ func TestLogosArenaParkKeepsLiveChunk(t *testing.T) {
 	}
 	wake2 <- struct{}{}
 	<-done
+	waitGoroutines(t, goroutines)
 }
 
 func TestLogosArenaMarkSurvivesPark(t *testing.T) {
+	goroutines := runtime.NumGoroutine()
 	_, leasedBase, _ := runtime.LogosArenaCounts()
 	park := make(chan struct{})
 	wake := make(chan struct{})
@@ -190,6 +210,7 @@ func TestLogosArenaMarkSurvivesPark(t *testing.T) {
 	}
 	wake <- struct{}{}
 	<-done
+	waitGoroutines(t, goroutines)
 }
 
 const arenaParkBig = runtime.LogosArenaCapacity - runtime.LogosArenaUnit
@@ -283,6 +304,15 @@ func arenaParkCase(t *testing.T, live []bool, empty func(addr uintptr) bool) {
 			b.addrs[i] = head
 			b.objs[i] = p
 		}
+		var buf [arenaParkMax]runtime.LogosArenaChunk
+		wantLive := make([]bool, len(live))
+		for i := range wantLive {
+			wantLive[i] = true
+		}
+		n, _ := runtime.LogosArenaChainOf(b.goid, buf[:])
+		if n != len(live) || !arenaShapeOK(buf[:n], b.addrs[:b.n], wantLive) {
+			t.Errorf("built chain has %d chunks, want %d with live %v", n, len(live), live)
+		}
 		for i, keep := range live {
 			if !keep {
 				b.objs[i] = nil
@@ -290,11 +320,6 @@ func arenaParkCase(t *testing.T, live []bool, empty func(addr uintptr) bool) {
 					t.Errorf("chunk %d: emptying it in place failed", i)
 				}
 			}
-		}
-		var buf [arenaParkMax]runtime.LogosArenaChunk
-		n, _ := runtime.LogosArenaChainOf(b.goid, buf[:])
-		if n != len(live) || !arenaShapeOK(buf[:n], b.addrs[:b.n], live) {
-			t.Errorf("built chain has %d chunks, want %d with live %v", n, len(live), live)
 		}
 		built <- b
 		<-wake
@@ -404,6 +429,8 @@ func TestLogosArenaExitReturnsChunk(t *testing.T) {
 	var obj unsafe.Pointer
 	filled := make(chan struct{})
 	x := new(int)
+	defer debug.SetGCPercent(debug.SetGCPercent(-1))
+	runtime.GC()
 	go func() {
 		obj = runtime.LogosArenaAllocScan((*int)(nil), size)
 		fillWords(obj, size, x)

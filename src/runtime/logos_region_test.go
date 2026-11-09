@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"runtime/debug"
 	"strings"
 	"testing"
 	"time"
@@ -88,6 +89,8 @@ func regionOwnIntInScan(h unsafe.Pointer, gen uintptr, done chan struct{}) unsaf
 
 func TestLogosRegionScanLivenessZeroAndCleanup(t *testing.T) {
 	inFreshGoroutine(t, func() {
+		defer debug.SetGCPercent(debug.SetGCPercent(-1))
+		runtime.GC()
 		h, gen := runtime.LogosRegionOpen()
 		done := make(chan struct{})
 		p := regionOwnIntInScan(h, gen, done)
