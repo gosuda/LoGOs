@@ -46,7 +46,7 @@ grep '^//go:wasmexport checkHost$' out/main.go
 exists out/_logos_deps/rt/wasmerr.go
 exists out/_logos_deps/rt/wasmhost_wasm.go
 cd out
-go build -o ../ejected.wasm .
+go build --wasm-loader=false -o ../ejected.wasm .
 cd ..
 cp ../lgo.loader.mjs ejected.loader.mjs
 exec node ../check.mjs ejected.wasm ejected.loader.mjs text
@@ -66,19 +66,28 @@ logos build -x -o app.wasm .
 ! stderr 'packagefile logos/rt='
 env GOOS=js
 env GOARCH=wasm
-go build -x --wasm-loader -o app.wasm .
+go build -x -o app.wasm .
 stderr 'packagefile logos/rt='
 exists app.loader.mjs
 rm app.loader.mjs
-go build -x -o app.wasm .
+go build -x --wasm-loader -o app.wasm .
+stderr 'loader\.mjs'
+exists app.loader.mjs
+rm app.loader.mjs
+go build -x --wasm-loader=false -o app.wasm .
 ! stderr 'packagefile logos/rt='
 ! exists app.loader.mjs
+
 cd ..
 
 cd gomod
 go build -o app.wasm .
 exists app.wasm
-! exists app.loader.mjs
+exists app.loader.mjs
+cmp app.loader.mjs ../lgo.loader.mjs
+exec node ../check.mjs app.wasm app.loader.mjs text
+stdout '^loader-ok$'
+rm app.loader.mjs
 go build --wasm-loader -o app.wasm .
 exists app.loader.mjs
 exec node ../check.mjs app.wasm app.loader.mjs text
@@ -90,14 +99,19 @@ exists app.loader.mjs
 cmp app.loader.mjs ../lgo.loader.mjs
 exec node ../check.mjs app.wasm app.loader.mjs text
 stdout '^loader-ok$'
+rm app.loader.mjs
 go build --wasm-loader=false -o other.wasm .
 ! exists other.loader.mjs
+go build .
+exists wasmgo
+! exists wasmgo.loader.mjs
+! exists app.loader.mjs
 cd ..
 
 cd goimpl
-go build -debug-actiongraph=$WORK/before.json -o plain.wasm .
+go build --wasm-loader=false -debug-actiongraph=$WORK/before.json -o plain.wasm .
 ! exists plain.loader.mjs
-go build --wasm-loader -debug-actiongraph=$WORK/after.json -o app.wasm .
+go build -debug-actiongraph=$WORK/after.json -o app.wasm .
 exists app.loader.mjs
 cmp app.loader.mjs ../lgo.loader.mjs
 exec node ../check.mjs app.wasm app.loader.mjs codes
@@ -111,6 +125,18 @@ exec node ../check.mjs logos.wasm logos.loader.mjs codes
 stdout '^loader-ok$'
 
 env GOOS=wasip1
+go build -buildmode=c-shared -o wasi.wasm .
+exists wasi.wasm
+exists wasi.loader.mjs
+cmp wasi.loader.mjs ../lgo.loader.mjs
+exec node ../wasi.mjs wasi.wasm wasi.loader.mjs
+stdout '^wasi-ok$'
+rm wasi.loader.mjs
+go build -buildmode=c-shared --wasm-loader=false -o wasifalse.wasm .
+! exists wasifalse.loader.mjs
+go build .
+! exists wasmimpl.loader.mjs
+! exists wasi.loader.mjs
 go build -buildmode=c-shared --wasm-loader -o wasi.wasm .
 cmp wasi.loader.mjs ../lgo.loader.mjs
 exec node ../wasi.mjs wasi.wasm wasi.loader.mjs
