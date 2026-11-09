@@ -34,8 +34,9 @@ func main() {
 	var nn (int?)?
 	fmt.Println(nn == nil)
 	fmt.Println(useNested(nn, e) ?? 43)
-	var m map[string]int = map[string]int{"k": 5}
+	var m map[string]int = map[string]int{"k": 5, "z": 0}
 	fmt.Println(m["k"] ?? -1)
+	fmt.Println(m["z"] ?? -1)
 	fmt.Println(m["zzz"] ?? -1)
 	var f func() int? = nil
 	fmt.Println(f == nil)
