@@ -1,0 +1,85 @@
+# At O3 the tier stack buffer is 4096 bytes but a function in a recursive
+# cycle keeps the 32-byte upstream buffer at every level, inlined bodies
+# included: a 33-byte variable make in the recursive frame takes the heap
+# while the same make through the inlined helper from a plain frame stays
+# on the stack. O2 repeats the contrast with its 256-byte tier buffer.
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+env REC_STACKBUF=32
+env TIER_STACKBUF=4096
+logos test -count=1 -O=3 .
+stdout '^ok'
+go test -count=1 -O=3 .
+stdout '^ok'
+
+env TIER_STACKBUF=256
+logos test -count=1 -O=2 .
+stdout '^ok'
+go test -count=1 -O=2 .
+stdout '^ok'
+env REC_STACKBUF=
+env TIER_STACKBUF=
+
+-- go.mod --
+module example.com/recstackbuf
+
+go 1.27
+
+-- recstackbuf_test.go --
+package recstackbuf
+
+import (
+	"os"
+	"strconv"
+	"testing"
+)
+
+func helper(n int) byte {
+	b := make([]byte, n)
+	b[0] = 7
+	return b[n-1]
+}
+
+//go:noinline
+func recProbe(n int, depth int) byte {
+	if depth > 0 {
+		return recProbe(n, depth-1) + helper(n)
+	}
+	return helper(n)
+}
+
+func allocs(n int, depth int) float64 {
+	return testing.AllocsPerRun(10, func() { _ = recProbe(n, depth) })
+}
+
+func helperAllocs(n int) float64 {
+	return testing.AllocsPerRun(10, func() { _ = helper(n) })
+}
+
+func TestRecursiveFrame(t *testing.T) {
+	recWant, err := strconv.Atoi(os.Getenv("REC_STACKBUF"))
+	if err != nil || recWant < 2 {
+		t.Fatalf("REC_STACKBUF=%q: want a byte count of at least 2", os.Getenv("REC_STACKBUF"))
+	}
+	tierWant, err := strconv.Atoi(os.Getenv("TIER_STACKBUF"))
+	if err != nil || tierWant < 2 {
+		t.Fatalf("TIER_STACKBUF=%q: want a byte count of at least 2", os.Getenv("TIER_STACKBUF"))
+	}
+	for _, c := range []struct {
+		n     int
+		stack bool
+	}{
+		{recWant / 2, true},
+		{recWant, true},
+		{recWant + 1, false},
+		{2*recWant + 1, false},
+	} {
+		if got := allocs(c.n, 2); (got == 0) != c.stack {
+			t.Errorf("recursive make of %d bytes took %v allocations, want recursive buffer %d to decide: stack=%v", c.n, got, recWant, c.stack)
+		}
+	}
+	if got := helperAllocs(recWant + 1); got != 0 {
+		t.Errorf("direct helper make of %d bytes took %v allocations, want tier buffer %d to keep it on the stack", recWant+1, got, tierWant)
+	}
+}

@@ -1,0 +1,90 @@
+# O3 refuses recursive-cycle functions above the 80-cost budget while a
+# cheaper recursive pair and a same-size plain function still inline.
+# Raising the recursive budget admits the refused function, which pins the
+# refusal to the 80 limit rather than the 400 tier budget.
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+logos build -gcflags='-m -m' -O=3 .
+stderr 'can inline smallEven with cost'
+stderr 'can inline smallOdd with cost'
+stderr 'can inline plainBig with cost'
+stderr 'cannot inline bigEven: function too complex: cost .* exceeds budget 80'
+stderr 'cannot inline bigOdd: function too complex: cost .* exceeds budget 80'
+
+logos build -gcflags='-m -m -d=inlrecursivebudget=400' -O=3 .
+stderr 'can inline bigEven with cost'
+
+-- go.mod --
+module example.com/inlrec
+
+go 1.27
+
+-- rec.go --
+package rec
+
+func smallEven(n int) int {
+	if n <= 0 {
+		return 0
+	}
+	return smallOdd(n - 1)
+}
+
+func smallOdd(n int) int {
+	if n <= 0 {
+		return 1
+	}
+	return smallEven(n-1) + 1
+}
+
+func bigWork(x int) int {
+	a1 := x + 1
+	a2 := a1 * 2
+	a3 := a2 - 3
+	a4 := a3 + a2
+	a5 := a4 * a1
+	a6 := a5 - a4
+	a7 := a6 + 7
+	a8 := a7 * 3
+	a9 := a8 - a7
+	a10 := a9 + a8
+	a11 := a10 * 2
+	a12 := a11 - 5
+	a13 := a12 + a11
+	a14 := a13 * a12
+	a15 := a14 - a13
+	return a15 + x
+}
+
+func bigEven(n int) int {
+	if n <= 0 {
+		return bigWork(n)
+	}
+	return bigOdd(n-1) + bigWork(n)
+}
+
+func bigOdd(n int) int {
+	if n <= 0 {
+		return bigWork(n) + 1
+	}
+	return bigEven(n-1) + bigWork(n)
+}
+
+func plainBig(x int) int {
+	a1 := x + 1
+	a2 := a1 * 2
+	a3 := a2 - 3
+	a4 := a3 + a2
+	a5 := a4 * a1
+	a6 := a5 - a4
+	a7 := a6 + 7
+	a8 := a7 * 3
+	a9 := a8 - a7
+	a10 := a9 + a8
+	a11 := a10 * 2
+	a12 := a11 - 5
+	a13 := a12 + a11
+	a14 := a13 * a12
+	a15 := a14 - a13
+	return a15 + x
+}
