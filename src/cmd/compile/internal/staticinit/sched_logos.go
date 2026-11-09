@@ -4,12 +4,6 @@
 
 package staticinit
 
-// M5-S3 read-only placement backend (SPEC Sec 2.1, T-201): registered
-// package vars are marked readonly while scheduled so ggloblnod emits
-// obj.RODATA; slice backing temps inherit the mark; a registered var
-// that still needs dynamic code stops the compile, because the lowering
-// must never produce one.
-
 import (
 	"strconv"
 
@@ -21,11 +15,6 @@ import (
 	"cmd/compile/internal/types"
 )
 
-// logosBackingArray returns the array backing a slice literal of the
-// initializer for l at offset loff. Under a read-only parent the array is
-// a named, global, read-only symbol (<parent>·logos_backing<off>), so the
-// linked binary lists it with type R. Otherwise it is the usual static
-// temp, which is file-local and cannot be a global read-only symbol.
 func logosBackingArray(l *ir.Name, loff int64, t *types.Type) *ir.Name {
 	if !l.Readonly() {
 		return StaticName(t)
@@ -110,12 +99,6 @@ func logosMarkTemp(a, l *ir.Name) {
 	}
 }
 
-// logosStaticSlice statically initializes a marked three-index slice
-// over a literal backing with an explicit capacity: a read-only backing
-// array plus a slice header with separate length and cap. Only the exact
-// shape lowering emits for spare-capacity const slices qualifies; every
-// other node falls through to the generic path with its existing
-// behavior.
 func logosStaticSlice(s *Schedule, n ir.Node) bool {
 	target, _ := logosRodataTarget(n)
 	if !target {

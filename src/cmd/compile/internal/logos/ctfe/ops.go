@@ -4,11 +4,6 @@
 
 package ctfe
 
-// This file implements M5-S2 expression evaluation and value
-// operations (SPEC Sec 2.1, T-201): literals, operators with constant
-// versus variable semantics, conversions with target widths, composite
-// literals, indexing, slicing, builtins, and size accounting.
-
 import (
 	"cmd/compile/internal/syntax"
 	"fmt"
@@ -19,7 +14,6 @@ import (
 	"strings"
 )
 
-// evalExpr evaluates a single-valued expression.
 func (e *evaluator) evalExpr(fr *frame, x syntax.Expr) (Value, error) {
 	switch x := syntax.Unparen(x).(type) {
 	case *syntax.BasicLit:
@@ -57,7 +51,6 @@ func (e *evaluator) evalExpr(fr *frame, x syntax.Expr) (Value, error) {
 	return Value{}, e.fail(posOf(x), "unsupported expression %T in const evaluation", x)
 }
 
-// evalLit evaluates a basic literal.
 func (e *evaluator) evalLit(lit *syntax.BasicLit) (Value, error) {
 	pos := posOf(lit)
 	switch lit.Kind {
@@ -82,7 +75,6 @@ func (e *evaluator) evalLit(lit *syntax.BasicLit) (Value, error) {
 	case syntax.RuneLit:
 		r, _, _, err := strconv.UnquoteChar(lit.Value[1:len(lit.Value)-1], '\'')
 		if err != nil {
-			// Raw single byte.
 			if len(lit.Value) >= 3 {
 				r = rune(lit.Value[1])
 			} else {
@@ -94,9 +86,6 @@ func (e *evaluator) evalLit(lit *syntax.BasicLit) (Value, error) {
 		s := lit.Value
 		if strings.HasPrefix(s, "`") {
 			s = s[1 : len(s)-1]
-			// Go discards carriage returns in raw literals; the
-			// scanner preserves them, so normalize here. The
-			// interpreted branch keeps CRLF via Unquote.
 			s = strings.ReplaceAll(s, "\r", "")
 		} else {
 			u, err := strconv.Unquote(s)
@@ -110,7 +99,6 @@ func (e *evaluator) evalLit(lit *syntax.BasicLit) (Value, error) {
 	return Value{}, e.fail(pos, "complex constants not supported")
 }
 
-// evalName resolves an identifier: frame bindings first, then the host.
 func (e *evaluator) evalName(fr *frame, id *syntax.Name) (Value, error) {
 	if id.Value == "_" {
 		return Value{}, e.fail(posOf(id), "cannot use _ as value in const evaluation")
@@ -140,9 +128,6 @@ func (e *evaluator) evalName(fr *frame, id *syntax.Name) (Value, error) {
 	return Value{}, e.fail(posOf(id), "cannot resolve %s in const evaluation", id.Value)
 }
 
-// evalCoalesce evaluates `x ?? y`: a present map read yields its
-// value, a missing key (or any evaluated left side that is not an
-// absent read) falls back per presence.
 func (e *evaluator) evalCoalesce(fr *frame, c *syntax.CoalesceExpr) (Value, error) {
 	if ix, ok := syntax.Unparen(c.X).(*syntax.IndexExpr); ok {
 		if _, isList := syntax.Unparen(ix.Index).(*syntax.ListExpr); !isList {
@@ -173,12 +158,10 @@ func (e *evaluator) evalCoalesce(fr *frame, c *syntax.CoalesceExpr) (Value, erro
 	return v, nil
 }
 
-// evalOperation evaluates unary and binary operations.
 func (e *evaluator) evalOperation(fr *frame, o *syntax.Operation) (Value, error) {
 	if o.Y == nil {
 		return e.evalUnary(fr, o)
 	}
-	// Short-circuit logical operators.
 	if o.Op == syntax.AndAnd || o.Op == syntax.OrOr {
 		x, err := e.evalExpr(fr, o.X)
 		if err != nil {
@@ -291,8 +274,6 @@ func (e *evaluator) truth(v Value, pos syntax.Pos) (bool, error) {
 	return v.bval, nil
 }
 
-// numPair prepares two numeric operands: untyped operands convert to
-// the typed side; two typed operands must share a kind.
 func (e *evaluator) numPair(x, y Value, pos syntax.Pos) (Value, Value, *Type, error) {
 	xk, yk := kindOf(x), kindOf(y)
 	switch {
@@ -319,7 +300,6 @@ func (e *evaluator) numPair(x, y Value, pos syntax.Pos) (Value, Value, *Type, er
 	case xk == yk:
 		return x, y, x.typ, nil
 	}
-	// Named types share kinds; identical kinds convert freely.
 	if x.typ != nil && y.typ != nil && x.typ.Kind == y.typ.Kind {
 		return x, y, x.typ, nil
 	}
@@ -447,13 +427,6 @@ func (e *evaluator) shift(op syntax.Operator, x, y Value, pos syntax.Pos) (Value
 	if y.ival.Sign() < 0 {
 		return Value{}, e.fail(pos, "negative shift count in const evaluation")
 	}
-	// Shift keeps the left operand independent of the count type: Go
-	// never coerces the LHS to the count's type. A constant count
-	// (typed or not) keeps a constant shift, so an untyped LHS stays
-	// untyped and `1 << uint8(8)` is the untyped constant 256. Only a
-	// non-constant typed count defaults the LHS, to its default type
-	// (the type it would assume if the shift were replaced by the LHS
-	// alone), never to the count type.
 	xk, yk := kindOf(x), kindOf(y)
 	t := x.typ
 	if isUntyped(xk) {
@@ -469,7 +442,6 @@ func (e *evaluator) shift(op syntax.Operator, x, y Value, pos syntax.Pos) (Value
 	cst := x.constant && y.constant
 	n := y.ival
 	if !n.IsUint64() || n.Uint64() > uint64(^uint(0)) {
-		// Huge counts shift everything out; model as zero/sign-fill.
 		if op == syntax.Shl {
 			if x.ival.Sign() == 0 {
 				return e.finishInt(new(big.Int), t, cst, pos)
@@ -525,8 +497,6 @@ func (e *evaluator) shift(op syntax.Operator, x, y Value, pos syntax.Pos) (Value
 		return e.finishInt(new(big.Int).Lsh(x.ival, uint(n64)), t, cst, pos)
 	}
 	if !isUntyped(t.Kind) {
-		// A wrapped value shifted by its whole width or more leaves
-		// only the sign fill for negative signed values, else zero.
 		if w := intWidth(t.Kind, e.cfg.WordSize); w > 0 && n64 >= uint64(w) {
 			if isSigned(t.Kind) && x.ival.Sign() < 0 {
 				return e.finishInt(big.NewInt(-1), t, cst, pos)
@@ -535,15 +505,11 @@ func (e *evaluator) shift(op syntax.Operator, x, y Value, pos syntax.Pos) (Value
 		}
 	}
 	if isSigned(t.Kind) || isUntyped(t.Kind) {
-		// Arithmetic shift: big.Int.Rsh implements arithmetic right shift
-		// on both signed typed ints and untyped constants.
 		return e.finishInt(new(big.Int).Rsh(x.ival, uint(n64)), t, cst, pos)
 	}
 	return e.finishInt(new(big.Int).Rsh(unsigned(x.ival, t, e.cfg.WordSize), uint(n64)), t, cst, pos)
 }
 
-// unsigned reinterprets a wrapped value's bits as unsigned for logical
-// right shifts.
 func unsigned(n *big.Int, t *Type, word int64) *big.Int {
 	if n.Sign() >= 0 {
 		return n
@@ -566,7 +532,6 @@ func (e *evaluator) neg(x Value, pos syntax.Pos) (Value, error) {
 	return e.finishInt(new(big.Int).Neg(x.ival), x.typ, x.constant, pos)
 }
 
-// finishInt applies constant range checks or variable wrapping.
 func (e *evaluator) finishInt(n *big.Int, t *Type, cst bool, pos syntax.Pos) (Value, error) {
 	if t == nil || isUntyped(t.Kind) {
 		return intValue(n, t, cst), nil
@@ -580,7 +545,6 @@ func (e *evaluator) finishInt(n *big.Int, t *Type, cst bool, pos syntax.Pos) (Va
 	return e.wrapInt(n, t, false, pos)
 }
 
-// wrapInt reduces n modulo the type width (variable semantics).
 func (e *evaluator) wrapInt(n *big.Int, t *Type, cst bool, pos syntax.Pos) (Value, error) {
 	w := intWidth(t.Kind, e.cfg.WordSize)
 	m := new(big.Int).Lsh(big.NewInt(1), uint(w))
@@ -594,7 +558,6 @@ func (e *evaluator) wrapInt(n *big.Int, t *Type, cst bool, pos syntax.Pos) (Valu
 	return intValue(n, t, cst), nil
 }
 
-// inRange reports whether n fits in t.
 func inRange(n *big.Int, t *Type, word int64) bool {
 	w := intWidth(t.Kind, word)
 	if isSigned(t.Kind) {
@@ -605,7 +568,6 @@ func inRange(n *big.Int, t *Type, word int64) bool {
 	return n.Sign() >= 0 && n.BitLen() <= int(w)
 }
 
-// xFloat returns the exact float operand.
 func xFloat(v Value) *big.Rat {
 	if v.fval != nil {
 		return v.fval
@@ -640,7 +602,6 @@ func toFloat64(v Value, t *Type) float64 {
 	return v.f64
 }
 
-// floatOp evaluates a float binary op.
 func (e *evaluator) floatOp(op syntax.Operator, x, y Value, t *Type, cst bool, pos syntax.Pos) (Value, error) {
 	if cst {
 		var r *big.Rat
@@ -705,9 +666,6 @@ func (e *evaluator) compare(op syntax.Operator, x, y Value, pos syntax.Pos) (Val
 			c = xFloat(fx).Cmp(xFloat(fy))
 		} else {
 			ax, ay := toFloat64(fx, t), toFloat64(fy, t)
-			// Unordered (either NaN) is false for every ordered
-			// comparison; without this, c stays 0 and <=/>=
-			// wrongly report true for NaN.
 			if math.IsNaN(ax) || math.IsNaN(ay) {
 				return Value{typ: UntypedBool(), constant: false, bval: false}, nil
 			}
@@ -742,7 +700,6 @@ func cmpOp(op syntax.Operator, c int) bool {
 	return c >= 0
 }
 
-// equal implements == over const values after -0.0 canonicalization.
 func (e *evaluator) equal(x, y Value, pos syntax.Pos) (bool, error) {
 	x = e.canon(x)
 	y = e.canon(y)
@@ -756,14 +713,6 @@ func (e *evaluator) equal(x, y Value, pos syntax.Pos) (bool, error) {
 	case isInteger(kindOf(x)) && isInteger(kindOf(y)):
 		return x.ival.Cmp(y.ival) == 0, nil
 	case isNumeric(kindOf(x)) && isNumeric(kindOf(y)) && (isFloat(kindOf(x)) || isFloat(kindOf(y))):
-		// Mixed int/float equality: coerce like ordered comparisons.
-		// When exactly one side is an untyped constant, Go converts
-		// it to the typed side's type first, so float64(0.1) == 0.1
-		// compares the rounded values (true). Coercion errors
-		// propagate; there is no fallback comparison.
-		// Both-untyped constants compare as exact rationals so
-		// distinct literals (1 vs 1.000...01, 0.1 vs 0.100...01)
-		// stay unequal; variable operands use IEEE 754 (NaN != self).
 		if isUntyped(kindOf(x)) != isUntyped(kindOf(y)) {
 			cx, cy, _, err := e.numPair(x, y, pos)
 			if err != nil {
@@ -827,8 +776,6 @@ func isNilable(k Kind) bool {
 	return false
 }
 
-// canon canonicalizes -0.0 to +0.0 for key comparison (M5-S4 rule:
-// equality is Go == after canonicalization).
 func (e *evaluator) canon(v Value) Value {
 	if v.typ != nil && v.typ.Kind == KFloat64 && !v.constant && v.f64 == 0 {
 		v.f64 = 0
@@ -850,7 +797,6 @@ func (e *evaluator) canon(v Value) Value {
 	return v
 }
 
-// floatBits returns the float64 bits of a float value.
 func (v Value) floatBits() uint64 {
 	if v.fval != nil {
 		f, _ := v.fval.Float64()

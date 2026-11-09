@@ -4,36 +4,8 @@
 
 package ctfe
 
-// Spread boundary attacks (public Eval seam only).
-//
-// Independent Go truth (installed toolchain, not this package):
-//   - doc/go_spec.html:4339-4343: f invoked with no actual args for
-//     ...T binds nil (Greeting("nobody") => who == nil).
-//   - doc/go_spec.html:4365-4368: final arg assignable to []T followed
-//     by ... passes unchanged for ...T (no new slice).
-//   - doc/go_spec.html:7441-7444: "As a special case, append also
-//     accepts" []byte plus string... (append-only expansion).
-//   - src/go/types/builtins.go:94-96: "append also accepts ... string
-//     type followed by ..." (first arg assignable to []byte).
-//   - src/go/types/builtins_test.go:25: `append(s, "foo"...)` has type
-//     `func([]byte, string...) []byte` (only append, never ordinary).
-// Ordinary ...byte/...int/...rune calls with string... are therefore
-// rejections, not expansions. Typed nil []T... must bind the nil slice
-// (len 0, == nil); an untyped string literal must expand for append
-// exactly like a typed string.
-//
-// Current evalArgs (evalcall.go) rejects typed nil (v.slice == nil),
-// matches only KString (missing KUntypedString), and expands a typed
-// string for any variadic element type. Each test below pins one
-// boundary through Eval plus exported accessors; no evaluator
-// internals and no error-text assertions.
-
 import "testing"
 
-// TestSpreadTypedNilSliceBindsZeroLen attacks the nil-slice boundary:
-// a typed nil []int spread must bind len 0, not fail with "cannot
-// spread non-slice". The nil slice is built with `var s []int` inside
-// the const func, so no host Value is constructed by hand.
 func TestSpreadTypedNilSliceBindsZeroLen(t *testing.T) {
 	intT := BasicType("int")
 	sliceT := &Type{Kind: KSlice, Elem: intT}
@@ -53,11 +25,6 @@ func TestSpreadTypedNilSliceBindsZeroLen(t *testing.T) {
 	}
 }
 
-// TestSpreadNilVsEmptyIdentity attacks nil identity through spread: a
-// typed nil spread must stay == nil while an empty (non-nil) spread
-// must stay != nil. Both have len 0; only the nil bit differs. Both
-// operands are built inside const funcs (`var s []int` vs `[]int{}`),
-// matching value_edges_regress_test.go:412-428.
 func TestSpreadNilVsEmptyIdentity(t *testing.T) {
 	intT := BasicType("int")
 	sliceT := &Type{Kind: KSlice, Elem: intT}
@@ -86,9 +53,6 @@ func TestSpreadNilVsEmptyIdentity(t *testing.T) {
 	}
 }
 
-// TestAppendUntypedStringSpread attacks the untyped-string boundary:
-// append([]byte{65}, "hi"...) must expand the literal exactly like a
-// typed string, yielding [65 'h' 'i'].
 func TestAppendUntypedStringSpread(t *testing.T) {
 	intT := BasicType("int")
 
@@ -103,10 +67,6 @@ func TestAppendUntypedStringSpread(t *testing.T) {
 	}
 }
 
-// TestAppendTypedStringSpreadControl is the passing pair for the
-// KString-only gap (evalcall.go:187): a typed string already flattens
-// to bytes for append today, so this control must stay green while the
-// untyped literal above exposes the missing KUntypedString case.
 func TestAppendTypedStringSpreadControl(t *testing.T) {
 	intT := BasicType("int")
 
@@ -121,9 +81,6 @@ func TestAppendTypedStringSpreadControl(t *testing.T) {
 	}
 }
 
-// TestSpreadTypedStringToIntRuneRejected attacks false acceptance: a
-// typed string spread into ordinary ...int or ...rune (non-append)
-// must be rejected. Only append has the string... special case.
 func TestSpreadTypedStringToIntRuneRejected(t *testing.T) {
 	intT := BasicType("int")
 	int32T := BasicType("int32")
@@ -150,9 +107,6 @@ func TestSpreadTypedStringToIntRuneRejected(t *testing.T) {
 	}
 }
 
-// TestSpreadTypedStringToOrdinaryByteRejected attacks the append-only
-// boundary: even with a matching element type, an ordinary (non-append)
-// ...byte callee must reject string... Only append expands strings.
 func TestSpreadTypedStringToOrdinaryByteRejected(t *testing.T) {
 	intT := BasicType("int")
 	uint8T := BasicType("uint8")

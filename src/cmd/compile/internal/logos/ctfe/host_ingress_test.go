@@ -4,35 +4,11 @@
 
 package ctfe
 
-// Host-ingress behavioral attacks (public seam only).
-//
-// The evaluator copies every container read from the host afresh: two
-// reads of one const never alias, each distinct copied container costs
-// one MaxSteps step, backing capacity (including the tail valueSize
-// never counts) is pre-billed against MaxValueBytes, and the finished
-// copy must still fit the live value cap together with the frames.
-//
-// All host graphs below are built through the public seam: scalar
-// constructors are not needed because containers are bootstrapped with
-// Eval of literals/make under a generous budget and then installed as
-// host consts. Observations use only Eval results and the exported
-// Value accessors (Int64) plus len/cap builtins evaluated the same way,
-// never private storage.
-//
-// Limitation: a recursive host graph (a storage reaching itself) cannot
-// be wired through any public constructor or literal evaluation, which
-// only builds trees. No behavioral claim about cycles is made here;
-// that shape needs private storage to construct, so it is omitted
-// rather than echoed.
-
 import (
 	"strings"
 	"testing"
 )
 
-// bootstrapHost evaluates src under a generous budget and installs the
-// resulting value as host const name. It exercises only the public Eval
-// seam; the caller never touches private storage.
 func bootstrapHost(t *testing.T, h *fakeHost, name, src string) {
 	t.Helper()
 	v, _, err := Eval(h, Config{MaxSteps: 1 << 20, MaxValueBytes: 1 << 20, WordSize: 8}, parseExpr(t, src))
@@ -42,10 +18,6 @@ func bootstrapHost(t *testing.T, h *fakeHost, name, src string) {
 	h.vars[name] = v
 }
 
-// TestHostIngressTwoReadsIsolated attacks per-read isolation: mutating
-// one read of a host const must leave a second read in the same
-// evaluation untouched, and must leave the host's stored value pristine
-// for later reads.
 func TestHostIngressTwoReadsIsolated(t *testing.T) {
 	boot := newFakeHost(t)
 	big := Config{MaxSteps: 1 << 20, MaxValueBytes: 1 << 20, WordSize: 8}
@@ -88,7 +60,6 @@ func TwoReadsMap() int {
 		t.Fatalf("TwoReadsMap() = %d, want 1 (second read isolated)", v.Int64())
 	}
 
-	// Host storage stays pristine for later evaluations.
 	if v, _ := evalOne(t, h, cfg, parseExpr(t, `C[0]`)); v.Int64() != 1 {
 		t.Fatalf("host C[0] after mutation = %d, want 1", v.Int64())
 	}
@@ -97,9 +68,6 @@ func TwoReadsMap() int {
 	}
 }
 
-// TestHostIngressSingleReadAliasShares attacks the other side of the
-// isolation rule: aliases derived from a single ingested read must
-// observe each other's writes, matching Go reference semantics.
 func TestHostIngressSingleReadAliasShares(t *testing.T) {
 	h := newFakeHost(t)
 	bootstrapHost(t, h, "C", `[]int{1, 2, 3}`)
@@ -144,8 +112,6 @@ func SameReadMap() int {
 		t.Fatalf("SameReadMap() = %d, want 42 (single map read shares)", v.Int64())
 	}
 
-	// Two slices cut from one ingested array view the same copied
-	// storage, so a write through one is visible through the other.
 	arraySlices := parseFunc(t, `package p
 func ArraySlicesShare() int {
 	a := A
@@ -160,13 +126,6 @@ func ArraySlicesShare() int {
 	}
 }
 
-// TestHostIngressSharedBackingPreserved attacks host-internal sharing:
-// two map entries built from one slice must still alias after ingress.
-// The shared graph is built through the public seam by evaluating a
-// const func, then installed as a host const; a single read must observe
-// writes across the entries while the host stays pristine. Derived
-// aliases above never exercise this path because each is created after
-// ingress; only a shared host graph runs the copy's backing dedup.
 func TestHostIngressSharedBackingPreserved(t *testing.T) {
 	intT := BasicType("int")
 	mapT := &Type{Kind: KMap, Key: BasicType("string"), Elem: &Type{Kind: KSlice, Elem: intT}}
@@ -204,10 +163,6 @@ func CheckShared() int {
 	}
 }
 
-// TestHostIngressCapTailCountsTowardBudget attacks the capacity tail:
-// a host slice with empty visible length but spare capacity must still
-// bill its whole backing against MaxValueBytes on ingress. A len-only
-// accounting would let it through a tiny budget.
 func TestHostIngressCapTailCountsTowardBudget(t *testing.T) {
 	boot := newFakeHost(t)
 	big := Config{MaxSteps: 1 << 20, MaxValueBytes: 1 << 20, WordSize: 8}
@@ -219,8 +174,6 @@ func TestHostIngressCapTailCountsTowardBudget(t *testing.T) {
 	h := newFakeHost(t)
 	h.vars["C"] = tail
 
-	// Sanity under a generous budget: the copy preserves length and
-	// capacity through the public len/cap builtins.
 	if v, _ := evalOne(t, h, Config{}, parseExpr(t, `len(C)`)); v.Int64() != 0 {
 		t.Fatalf("len(C) = %d, want 0", v.Int64())
 	}
@@ -228,8 +181,6 @@ func TestHostIngressCapTailCountsTowardBudget(t *testing.T) {
 		t.Fatalf("cap(C) = %d, want 8", v.Int64())
 	}
 
-	// Eight backing slots cannot fit a 7-byte budget even though the
-	// visible length is zero.
 	small := Config{MaxSteps: 100000, MaxValueBytes: 7, WordSize: 8}
 	_, _, err = Eval(h, small, parseExpr(t, `C`))
 	if err == nil {
@@ -239,17 +190,11 @@ func TestHostIngressCapTailCountsTowardBudget(t *testing.T) {
 	if !ok || cerr.Code != CodeTooLarge {
 		t.Fatalf("want CodeTooLarge, got %v", err)
 	}
-	// Slots fire first and count the whole backing: with zero visible
-	// bytes this must be the slot charge, not the byte charge.
 	if !strings.Contains(cerr.Detail, "copy of 8 elements") {
 		t.Fatalf("Detail = %q, want slot charge %q", cerr.Detail, "copy of 8 elements")
 	}
 }
 
-// TestHostIngressLiveFrameCheckRetained attacks the post-copy live
-// check: a host value that fits its own budget must still fail when
-// the frames already hold enough live bytes that the finished copy
-// overflows the cap.
 func TestHostIngressLiveFrameCheckRetained(t *testing.T) {
 	h := newFakeHost(t)
 	bootstrapHost(t, h, "C", `[20]byte{}`)
@@ -263,7 +208,6 @@ func LiveCheck() int {
 }`, true, nil, []*Type{intT})
 	h.funcs[fn.Name] = fn
 
-	// Each side fits 100 bytes alone (90 and 20); together they do not.
 	tight := Config{MaxSteps: 100000, MaxValueBytes: 100, WordSize: 8}
 	_, _, err := Eval(h, tight, parseExpr(t, `LiveCheck()`))
 	if err == nil {
@@ -280,12 +224,6 @@ func LiveCheck() int {
 	}
 }
 
-// TestHostIngressContainerStepBoundaries checks the per-container step
-// charge at N-1/N/N+1. Two one-container host reads in one expression
-// cost exactly the two ingress steps; the test measures the count with
-// an unbounded run so it stays aligned with the step model, then probes
-// the boundary. MaxSteps zero means the default, so the two-container
-// shape is what lets N-1 stay a real (nonzero) limit.
 func TestHostIngressContainerStepBoundaries(t *testing.T) {
 	h := newFakeHost(t)
 	bootstrapHost(t, h, "C1", `[]int{7}`)
@@ -293,8 +231,6 @@ func TestHostIngressContainerStepBoundaries(t *testing.T) {
 
 	measure := func() int {
 		hh := newFakeHost(t)
-		// Re-bootstrap per measurement so each Eval sees fresh hosts
-		// under the same generous bytes; only MaxSteps varies below.
 		bootstrapHost(t, hh, "C1", `[]int{7}`)
 		bootstrapHost(t, hh, "C2", `[]int{8}`)
 		_, st, err := Eval(hh, Config{MaxSteps: 1 << 30, MaxValueBytes: 1 << 20, WordSize: 8}, parseExpr(t, `C1[0] + C2[0]`))
@@ -345,7 +281,6 @@ func TestHostIngressContainerStepBoundaries(t *testing.T) {
 		t.Fatalf("wide steps = %d, narrow steps = %d, want equal", got, want)
 	}
 
-	// The summed value itself is observable through the public seam.
 	v, _ := evalOne(t, h, Config{}, parseExpr(t, `C1[0] + C2[0]`))
 	if v.Int64() != 15 {
 		t.Fatalf("C1[0]+C2[0] = %d, want 15", v.Int64())

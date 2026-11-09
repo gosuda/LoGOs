@@ -4,13 +4,6 @@
 
 package ctfe
 
-// Unit tests for the M5-S2 compile-time interpreter (SPEC Sec 2.1,
-// T-201). The fake host below resolves a closed set of expression
-// shapes, so every test pins interpreter behavior without a type
-// checker: target integer widths (#102), step-limit boundaries,
-// the 1 MB value cap, -0.0 canonicalization and NaN rejection (#103),
-// and dynamic impurity reporting.
-
 import (
 	"cmd/compile/internal/syntax"
 	"math"
@@ -20,8 +13,6 @@ import (
 	"testing"
 )
 
-// fakeHost resolves basic types, untyped literals, a fixed name
-// environment, and caller-provided const funcs.
 type fakeHost struct {
 	t       *testing.T
 	vars    map[string]Value
@@ -86,10 +77,6 @@ func (h *fakeHost) TypeOf(e syntax.Expr) *Type {
 	return nil
 }
 
-// resolveTypeExpr resolves type expressions structurally, mirroring
-// the real adapter: basic names, slices, arrays (with literal lengths,
-// -1 for ...), maps, conversions by their target, and composite
-// literals by their type.
 func (h *fakeHost) resolveTypeExpr(e syntax.Expr) *Type {
 	switch e := syntax.Unparen(e).(type) {
 	case *syntax.Name:
@@ -135,7 +122,6 @@ func (h *fakeHost) resolveTypeExpr(e syntax.Expr) *Type {
 	return nil
 }
 
-// parseIntLit parses a decimal integer literal.
 func parseIntLit(s string, out *int64) (int64, error) {
 	n, err := strconv.ParseInt(s, 10, 64)
 	if err != nil {
@@ -155,8 +141,6 @@ func isBasicName(name string) bool {
 	return false
 }
 
-// parseFunc parses one `func` declaration and builds a Func with the
-// given const flag, parameter types, and result types.
 func parseFunc(t *testing.T, src string, constFunc bool, ptypes []*Type, rtypes []*Type) *Func {
 	t.Helper()
 	f, err := syntax.Parse(syntax.NewFileBase("test.lgo"), strings.NewReader(src), nil, nil, 0)
@@ -196,7 +180,6 @@ func parseFunc(t *testing.T, src string, constFunc bool, ptypes []*Type, rtypes 
 	return fn
 }
 
-// parseExpr parses one expression.
 func parseExpr(t *testing.T, src string) syntax.Expr {
 	t.Helper()
 	f, err := syntax.Parse(syntax.NewFileBase("test.lgo"), strings.NewReader("package p\nvar _ = "+src+"\n"), nil, nil, 0)
@@ -210,7 +193,6 @@ func parseExpr(t *testing.T, src string) syntax.Expr {
 	return vd.Values
 }
 
-// evalOne evaluates e and requires exactly one value.
 func evalOne(t *testing.T, h *fakeHost, cfg Config, e syntax.Expr) (Value, Stats) {
 	t.Helper()
 	r, st, err := Eval(h, cfg, e)
@@ -233,9 +215,6 @@ func evalErr(t *testing.T, h *fakeHost, cfg Config, e syntax.Expr) *Error {
 	return cerr
 }
 
-// TestWidths pins target integer widths (#102): 1<<32 converts to int
-// on 64-bit targets and overflows on 32-bit targets; int8 boundaries
-// hold; variable values wrap while constants overflow.
 func TestWidths(t *testing.T) {
 	for _, word := range []int64{4, 8} {
 		h := newFakeHost(t)
@@ -269,7 +248,6 @@ func TestWidths(t *testing.T) {
 		t.Fatalf("code = %v, want CodeEval", cerr.Code)
 	}
 
-	// A variable int8 wraps instead of overflowing: Wrap(200) is -56.
 	fn := parseFunc(t, `package p
 func Wrap(x int) int8 { return int8(x) }`, false, []*Type{BasicType("int")}, []*Type{BasicType("int8")})
 	h.funcs["Wrap"] = fn
@@ -281,11 +259,6 @@ func Wrap(x int) int8 { return int8(x) }`, false, []*Type{BasicType("int")}, []*
 	}
 }
 
-// TestWidthsComposite pins target integer widths inside const composites
-// (#180): a composite holding 1<<32 evaluates with the target width, so
-// the 64-bit target keeps the element while the 32-bit target reports a
-// compile-time overflow. The scalar TestWidths above misses an
-// element-width bug that only fires inside literals.
 func TestWidthsComposite(t *testing.T) {
 	for _, word := range []int64{4, 8} {
 		h := newFakeHost(t)
@@ -309,9 +282,6 @@ func TestWidthsComposite(t *testing.T) {
 	}
 }
 
-// TestStepBoundaries checks the step limit at N-1, N, N+1 with a small
-// limit, measuring exact step counts first so the test stays aligned
-// with the step model.
 func TestStepBoundaries(t *testing.T) {
 	h := newFakeHost(t)
 	fn := parseFunc(t, `package p
@@ -324,8 +294,6 @@ func Burn(n int) int {
 }`, true, []*Type{BasicType("int")}, []*Type{BasicType("int")})
 	h.funcs["Burn"] = fn
 
-	// Measure exact step counts with no effective limit, then check
-	// the boundary at N-1, N, N+1 around a measured count.
 	measure := func(src string) (Value, int) {
 		hh := newFakeHost(t)
 		hh.funcs["Burn"] = fn
@@ -368,8 +336,6 @@ func Burn(n int) int {
 	}
 }
 
-// TestValueSizeBoundaries checks the 1 MB cap at N-1, N, N+1 with a
-// small limit, plus the default-limit boundaries.
 func TestValueSizeBoundaries(t *testing.T) {
 	h := newFakeHost(t)
 	small := Config{MaxSteps: 100000, MaxValueBytes: 10, WordSize: 8}
@@ -397,7 +363,6 @@ func TestValueSizeBoundaries(t *testing.T) {
 	}
 }
 
-// TestFloatMapKeys checks -0.0 canonicalization and NaN rejection (#103).
 func TestFloatMapKeys(t *testing.T) {
 	h := newFakeHost(t)
 	neg := parseFunc(t, `package p
@@ -435,8 +400,6 @@ func Frac(x float64) float64 {
 	}
 }
 
-// TestAbsentMapKey checks that a missing key in a single-value const
-// map read fails instead of guessing a value.
 func TestAbsentMapKey(t *testing.T) {
 	h := newFakeHost(t)
 	mk := &Type{Kind: KMap, Key: UntypedString(), Elem: BasicType("int")}
@@ -457,9 +420,6 @@ func TestAbsentMapKey(t *testing.T) {
 	}
 }
 
-// TestDynamicImpurity checks evaluation-time impurity: imported calls
-// and recover fail, while an impurity inside a const func body aborts
-// silently (the static purity check reports it).
 func TestDynamicImpurity(t *testing.T) {
 	h := newFakeHost(t)
 	h.imports["fmt"] = true

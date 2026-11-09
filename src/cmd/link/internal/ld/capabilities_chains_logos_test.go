@@ -220,11 +220,6 @@ func TestCapGraphChainsAreSortedByDependency(t *testing.T) {
 	}
 }
 
-// capOracleChains computes the same answer by exhaustive search over
-// (symbol, last blamed dependency, wall crossed since it) states: the
-// length in symbols of the shortest walk from a root to the sink for each
-// dependency, where the walk's last blamed frame carries that dependency
-// and no wall follows it.
 func capOracleChains(roots []loader.Sym, edges []capEdge, sink loader.Sym, role func(loader.Sym) capRole) map[string]int {
 	type state struct {
 		node loader.Sym

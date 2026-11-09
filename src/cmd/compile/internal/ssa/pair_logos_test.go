@@ -9,12 +9,6 @@ import (
 	"testing"
 )
 
-// TestLogosPairARM64 pins the arm64 load/store pairing pass (SPEC 15.1,
-// row 111) at the level where it runs. Sixteen-byte vector traffic
-// cannot be coaxed out of Go source with adjacent memory arguments:
-// the ABI homes every 16-byte temporary on the stack and the spill
-// stores split the shared memory value the pass requires. These cases
-// therefore build the SSA values directly.
 func TestLogosPairARM64(t *testing.T) {
 	vec := types.TypeVec128
 	u64 := types.Types[types.TUINT64]
@@ -79,9 +73,6 @@ func TestLogosPairARM64(t *testing.T) {
 	}
 }
 
-// TestLogosPairARM64SplitMem pins that any memory operation between two
-// candidate loads keeps them separate. Calls and atomics thread memory
-// the same way; the end-to-end cases pin those spellings.
 func TestLogosPairARM64SplitMem(t *testing.T) {
 	c := testConfigARM64(t)
 	vec := types.TypeVec128
@@ -106,8 +97,6 @@ func TestLogosPairARM64SplitMem(t *testing.T) {
 	}
 }
 
-// TestLogosPairARM64JoinBlock pins that a load in a join block never
-// fuses with a load from a predecessor.
 func TestLogosPairARM64JoinBlock(t *testing.T) {
 	c := testConfigARM64(t)
 	vec := types.TypeVec128
@@ -135,8 +124,6 @@ func TestLogosPairARM64JoinBlock(t *testing.T) {
 	}
 }
 
-// TestLogosPairARM64DiffPtr pins that a load feeding the base of a later
-// load never fuses with it.
 func TestLogosPairARM64DiffPtr(t *testing.T) {
 	c := testConfigARM64(t)
 	vec := types.TypeVec128
@@ -160,7 +147,6 @@ func TestLogosPairARM64DiffPtr(t *testing.T) {
 	}
 }
 
-// TestLogosPairARM64Stores pins 16-byte store fusion and its barriers.
 func TestLogosPairARM64Stores(t *testing.T) {
 	vec := types.TypeVec128
 	u64 := types.Types[types.TUINT64]
@@ -225,8 +211,6 @@ func TestLogosPairARM64Stores(t *testing.T) {
 	}
 }
 
-// checkPair verifies that l1 and l2 became the two distinct selections
-// of one pair instruction at the expected offset.
 func checkPair(t *testing.T, fun fun, want Op, offset int64, l1, l2 *Value) {
 	t.Helper()
 	if l1.Op != OpSelect0 || l2.Op != OpSelect1 {

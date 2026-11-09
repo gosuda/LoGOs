@@ -40,12 +40,6 @@ func TestLogosCapSinks(t *testing.T) {
 	}
 }
 
-// TestLogosCapDenyDecision pins the denial decision behind the Va8U/s-G8
-// sinks without invoking emit: under a deny policy, an unallowlisted
-// third-party dep reaching syscall.Connect (CapNet) or
-// syscall.StartProcess (CapExec) is neither exempt nor allowlisted and the
-// rule verdict is deny. judge's emit call is the only remaining step,
-// shared by every sink.
 func TestLogosCapDenyDecision(t *testing.T) {
 	a := &logosCapAuditor{
 		policy: &logosCapPolicy{
@@ -120,9 +114,6 @@ func TestLogosCapSinkName(t *testing.T) {
 		{"runtime.cgocall.abi0", "runtime.cgocall"},
 		{"os.StartProcess", "os.StartProcess"},
 		{"example.com/dep.Init", "example.com/dep.Init"},
-		// Comptime copies are the same sink as their base (SPEC T-205,
-		// red-team #9): a middle-dot expansion or a source-level copy must
-		// not evade the audit, in any link mode.
 		{"syscall.Connect·logosct12", "syscall.Connect"},
 		{"syscall.Connect·logosct1.abi0", "syscall.Connect"},
 		{"example.com/dep.Foo_logosct1", "example.com/dep.Foo"},
@@ -189,13 +180,6 @@ func TestLogosCapExemptPkg(t *testing.T) {
 	}
 }
 
-// TestLogosCapExemptPkgNestedModule pins the s-HG rule: a nested module
-// (its own go.mod) under a main module path is a dependency, not
-// first-party code, so its packages stay blamed while ordinary
-// subpackages of the main module stay exempt. Ownership is longest prefix
-// wins over the module graph: a nested path that is itself a main module
-// (workspace builds), or that sits under one, stays exempt. Dep modules
-// arrive parsed from the runtime.modinfo blob, mirroring logosCapAudit.
 func TestLogosCapExemptPkgNestedModule(t *testing.T) {
 	const blob = "path\tcommand-line-arguments\n" +
 		"mod\texample.com/app\tv0.0.0\n" +
@@ -245,10 +229,6 @@ func TestLogosCapExemptPkgNestedModule(t *testing.T) {
 	}
 }
 
-// TestLogosCapModinfoDeps pins the s-HG live signal: dep module paths
-// come from the runtime.modinfo blob cmd/go ships in importcfg, so no
-// producer change is needed for the rule to fire. Only dep lines
-// contribute: mod, =>, path, build and marker bytes never do.
 func TestLogosCapModinfoDeps(t *testing.T) {
 	blob := "\x30\x77\xaf\x0c\x92\x74\x08\x02\x41\xe1\xc1\x07\xe6\xd6\x18\xe6" +
 		"path\tcommand-line-arguments\n" +
@@ -273,13 +253,6 @@ func TestLogosCapModinfoDeps(t *testing.T) {
 	}
 }
 
-// TestLogosCapTextPkg pins the ownership decision for symbols whose
-// loader metadata and whose name disagree. The generated test main is
-// compiled as package main but recorded under the test binary's import
-// path ("bufio.test"), and type-descriptor glue carries a name no linked
-// package owns. Only metadata naming a package the link actually loaded,
-// with a matching name prefix, may own the symbol; everything else falls
-// back to the name parser.
 func TestLogosCapTextPkg(t *testing.T) {
 	libs := make(map[string]*sym.Library)
 	for _, pkg := range []string{"main", "bufio.test", "net", "os/exec"} {
@@ -293,22 +266,15 @@ func TestLogosCapTextPkg(t *testing.T) {
 	tests := []struct {
 		symPkg, symName, want string
 	}{
-		// The generated test-main glue: metadata names the test binary,
-		// which does not match this symbol's name prefix, so the name's
-		// package decides.
 		{"bufio.test", "main.main", "main"},
 		{"bufio.test", "main..stmp_1", "main"},
 		{"main.test", "main.main", "main"},
-		// Linked metadata with a matching prefix still wins.
 		{"net", "net.sysSocket", "net"},
 		{"os/exec", "os/exec.(*Cmd).Start", "os/exec"},
-		// Metadata naming no loaded library falls back to the name.
 		{"type:noalg.struct { F uintptr; R reflect.NewType", "type:noalg.struct { F uintptr; R reflect.Type }", ""},
 		{"flag.test", "flag.isZeroValue", ""},
 		{"unlinked/pkg", "unlinked/pkg.Func", ""},
 		{"", "type:.eq.[2]string", ""},
-		// Metadata that names a linked package but not this symbol's name
-		// prefix falls back to the name, which names a linked package.
 		{"net", "os/exec.Command", "os/exec"},
 	}
 	for _, tc := range tests {

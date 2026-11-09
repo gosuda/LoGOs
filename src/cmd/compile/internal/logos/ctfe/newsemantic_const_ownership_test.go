@@ -9,15 +9,10 @@ import (
 	"testing"
 )
 
-// TestSemanticConstRecordedHostIsolationDirect verifies that reading a
-// compiler-owned recorded constant from the host (EntConst via Resolve)
-// isolates the evaluator from the host's stored value. A const function
-// mutating s := C must not corrupt the host's recorded slice backing.
 func TestSemanticConstRecordedHostIsolationDirect(t *testing.T) {
 	intT := BasicType("int")
 
 	h := newFakeHost(t)
-	// Recorded const C := []int{1, 2, 3}
 	cBacking := []Value{
 		intValue(big.NewInt(1), intT, true),
 		intValue(big.NewInt(2), intT, true),
@@ -39,7 +34,6 @@ func DirectMutate() int {
 		t.Fatalf("DirectMutate() = %d, want 99", got)
 	}
 
-	// Host's recorded constant must remain pristine.
 	hostC := h.vars["C"]
 	vis := hostC.sliceVisible()
 	if len(vis) != 3 {
@@ -50,9 +44,6 @@ func DirectMutate() int {
 	}
 }
 
-// TestSemanticConstRecordedHostIsolationArg controls for argument passing:
-// calling Mutate(C) passes the hosted constant as a call argument.
-// In-interpreter argument passing must not reach the host's stored constant.
 func TestSemanticConstRecordedHostIsolationArg(t *testing.T) {
 	intT := BasicType("int")
 	sliceT := &Type{Kind: KSlice, Elem: intT}
@@ -91,9 +82,6 @@ func CallMutate() int {
 	}
 }
 
-// TestSemanticConstLocalArgAliasing verifies that calling a local function
-// with a slice argument shares its backing store, adhering to Go sharing
-// semantics.
 func TestSemanticConstLocalArgAliasing(t *testing.T) {
 	intT := BasicType("int")
 	sliceT := &Type{Kind: KSlice, Elem: intT}
@@ -120,8 +108,6 @@ func LocalSlice() int {
 	}
 }
 
-// TestSemanticConstArrayCopyControl verifies that arrays copy by value
-// when passed to a function call.
 func TestSemanticConstArrayCopyControl(t *testing.T) {
 	intT := BasicType("int")
 	arrT := &Type{Kind: KArray, Len: 2, Elem: intT}
@@ -148,8 +134,6 @@ func LocalArray() int {
 	}
 }
 
-// TestSemanticConstVariadicSpread verifies that f(xs...) binds xs directly
-// without repacking into a fresh slice, preserving slice backing and capacity.
 func TestSemanticConstVariadicSpread(t *testing.T) {
 	intT := BasicType("int")
 	sliceT := &Type{Kind: KSlice, Elem: intT}

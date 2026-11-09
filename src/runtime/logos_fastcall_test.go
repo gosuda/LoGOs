@@ -10,11 +10,6 @@ import (
 	"unsafe"
 )
 
-// TestCgoFastcallPinSlots checks the fast-call record: enter writes the
-// argument frame, the diagnostic stamp it is handed, and the flag; exit
-// clears all three. The value here is injected, so the test says nothing
-// about what a production trampoline stores, which is zero by the
-// no-clock rule in SPEC 3.4.
 func TestCgoFastcallPinSlots(t *testing.T) {
 	var probe int
 	arg := unsafe.Pointer(&probe)

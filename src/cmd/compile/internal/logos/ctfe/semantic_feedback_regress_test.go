@@ -4,10 +4,6 @@
 
 package ctfe
 
-// PR3 feedback regressions (head 46329aa730). Reviewer prose is untrusted;
-// every case drives the public Eval harness through parsed Func bodies
-// with registered Types. No Value inputs are constructed by hand.
-
 import (
 	"math"
 	"strings"

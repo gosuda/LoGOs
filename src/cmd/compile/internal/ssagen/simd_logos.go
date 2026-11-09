@@ -156,7 +156,6 @@ func logosMaskedLoadSlice(cfg logosMaskedLoadConfig) func(s *state, n *ir.CallEx
 	}
 }
 
-// logosSimdIntrinsics registers the masked slice loaders.
 func logosSimdIntrinsics(addF func(pkg, fn string, b intrinsicBuilder, archFamilies ...sys.ArchFamily)) {
 	for _, l := range logosMaskedLoads {
 		addF(simdPackage, l.name, logosMaskedLoadSlice(l), sys.AMD64)

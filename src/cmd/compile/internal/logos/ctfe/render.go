@@ -4,11 +4,6 @@
 
 package ctfe
 
-// This file implements M5-S2 literal synthesis (SPEC Sec 2.1, T-201):
-// a computed value becomes composite literal syntax for lowering.
-// Opaque types (imported named types) cannot be spelled and report an
-// error so lowering keeps the original call instead.
-
 import (
 	"cmd/compile/internal/syntax"
 	"fmt"
@@ -17,11 +12,6 @@ import (
 	"strings"
 )
 
-// Expr renders v as a composite literal expression. Named same-package
-// types spell by name; slices, arrays, maps, and anonymous structs
-// spell structurally. Floats use round-trip formatting with an exact
-// -0.0 spelling. Every node takes pos, so errors and traces point into
-// the source const declaration.
 func (v Value) Expr(pos syntax.Pos) (syntax.Expr, error) {
 	r := &renderer{pos: pos}
 	x, err := r.expr(v)
@@ -108,8 +98,6 @@ func (r *renderer) floatLit(v Value) (syntax.Expr, error) {
 	return lit, nil
 }
 
-// floatText formats f for a literal: negatives split into unary minus
-// plus magnitude, with an exact -0.0 spelling (0-0.0 would read +0.0).
 func (r *renderer) floatText(f float64) (string, bool) {
 	if math.Signbit(f) {
 		if f == 0 {
@@ -147,10 +135,6 @@ func (r *renderer) sliceLit(v Value) (syntax.Expr, error) {
 	return &syntax.CompositeLit{Type: t, ElemList: elems, Rbrace: r.pos}, nil
 }
 
-// backedSliceLit spells a slice with spare capacity or a nonzero lower
-// bound as a full backing literal plus a three-index slice, preserving
-// length, capacity, and tail values. A plain literal would silently
-// truncate the capacity to the length.
 func (r *renderer) backedSliceLit(v Value, t syntax.Expr) (syntax.Expr, error) {
 	backing, lo, length, cap_, ok := v.SliceHeader()
 	if !ok || lo < 0 || length < 0 || lo > cap_ || lo+length > cap_ || cap_ > len(backing) {
@@ -181,14 +165,10 @@ func (r *renderer) arrayLit(v Value) (syntax.Expr, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Spell an explicit length: [...] would also work, but the exact
-	// length keeps the recheck independent of inference.
 	if at, ok := t.(*syntax.ArrayType); ok {
 		at.Len = &syntax.BasicLit{Value: strconv.Itoa(len(v.array)), Kind: syntax.IntLit}
 	}
 	elems := make([]syntax.Expr, 0, len(v.array))
-	// Trailing zero values stay explicit: trimming them would change
-	// nothing semantically, and explicitness keeps rendering uniform.
 	for _, el := range v.array {
 		x, err := r.expr(el)
 		if err != nil {
@@ -235,8 +215,6 @@ func (r *renderer) mapLit(v Value) (syntax.Expr, error) {
 	return &syntax.CompositeLit{Type: t, ElemList: elems, NKeys: len(elems), Rbrace: r.pos}, nil
 }
 
-// typeExpr spells a descriptor structurally. Named same-package types
-// spell by name; anything Opaque or imported errors.
 func (r *renderer) typeExpr(t *Type) (syntax.Expr, error) {
 	if t == nil {
 		return nil, fmt.Errorf("missing type in const evaluation")

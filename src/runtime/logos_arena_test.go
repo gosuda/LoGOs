@@ -93,12 +93,6 @@ func fillWords(p unsafe.Pointer, size uintptr, v *int) {
 	}
 }
 
-// M18-S1 (#4, AR4): a goroutine that allocates and then parks with empty
-// regions returns its chunk. After 100,000 goroutines parked this way, in
-// waves because the race detector allows 8128 live goroutines at most, the
-// leased count is back at baseline after every wave, and the chunks created
-// stay near the number of Ps because parked goroutines recycle through the P
-// caches.
 func TestLogosArenaParkReturnsChunk(t *testing.T) {
 	const (
 		waves   = 25
@@ -134,8 +128,6 @@ func TestLogosArenaParkReturnsChunk(t *testing.T) {
 	}
 }
 
-// M18-S1 (AR4): a goroutine that parks while arena memory is live keeps its
-// chunk, and returns it when it parks again with empty regions.
 func TestLogosArenaParkKeepsLiveChunk(t *testing.T) {
 	_, leasedBase, _ := runtime.LogosArenaCounts()
 	parked := make(chan struct{})
@@ -167,9 +159,6 @@ func TestLogosArenaParkKeepsLiveChunk(t *testing.T) {
 	<-done
 }
 
-// M18-S1: a mark taken while the arena is empty stays valid when the
-// goroutine parks, the park returns its chunk, and a later allocation leases
-// again.
 func TestLogosArenaMarkSurvivesPark(t *testing.T) {
 	_, leasedBase, _ := runtime.LogosArenaCounts()
 	park := make(chan struct{})
@@ -203,22 +192,13 @@ func TestLogosArenaMarkSurvivesPark(t *testing.T) {
 	<-done
 }
 
-// arenaParkBig is the object size that fills a chunk alone. A noscan object of
-// this size leaves too little room for a second noscan or scan object, and a
-// scan object of this size takes all the room past the header, so each chunk
-// built by arenaParkCase holds one object and the next allocation links a
-// fresh chunk.
 const arenaParkBig = runtime.LogosArenaCapacity - runtime.LogosArenaUnit
 
-// arenaEmptyMarks returns the watermarks of the chunk at addr while it is
-// empty: the noscan base and the scan base.
 func arenaEmptyMarks(addr uintptr) (noscan, scan uintptr) {
 	return addr + runtime.LogosArenaChunkBytes - runtime.LogosArenaCapacity,
 		addr + runtime.LogosArenaChunkBytes
 }
 
-// checkWords reports whether the pointer words of the size bytes at p all
-// hold v.
 func checkWords(p unsafe.Pointer, size uintptr, v *int) bool {
 	words := unsafe.Slice((**int)(p), size/unsafe.Sizeof(v))
 	for _, w := range words {
@@ -229,7 +209,6 @@ func checkWords(p unsafe.Pointer, size uintptr, v *int) bool {
 	return true
 }
 
-// arenaIndexes names each chunk address by its position in built.
 func arenaIndexes(addrs, built []uintptr) []int {
 	idx := make([]int, len(addrs))
 	for i, a := range addrs {
@@ -243,7 +222,6 @@ func arenaIndexes(addrs, built []uintptr) []int {
 	return idx
 }
 
-// sameAddrs reports whether a and b hold the same addresses in the same order.
 func sameAddrs(a, b []uintptr) bool {
 	if len(a) != len(b) {
 		return false
@@ -256,8 +234,6 @@ func sameAddrs(a, b []uintptr) bool {
 	return true
 }
 
-// arenaShapeOK reports whether chain, newest first, holds the chunks of addrs,
-// oldest first, with each chunk in use exactly when live says so.
 func arenaShapeOK(chain []runtime.LogosArenaChunk, addrs []uintptr, live []bool) bool {
 	if len(chain) != len(addrs) {
 		return false
@@ -271,13 +247,8 @@ func arenaShapeOK(chain []runtime.LogosArenaChunk, addrs []uintptr, live []bool)
 	return true
 }
 
-// arenaParkMax bounds the chunks one arenaParkCase builds. The parking
-// goroutine keeps its bookkeeping in arrays of this size, so the chain it
-// builds is never grown by append.
 const arenaParkMax = 4
 
-// arenaParkBuilt is what a parking goroutine hands the test: its id and its n
-// chunks, oldest first. objs[i] is the object chunk i keeps, nil when emptied.
 type arenaParkBuilt struct {
 	goid  uint64
 	n     int
@@ -285,12 +256,6 @@ type arenaParkBuilt struct {
 	objs  [arenaParkMax]unsafe.Pointer
 }
 
-// arenaParkCase parks a goroutine whose chain holds one chunk per entry of
-// live, oldest first. Each chunk gets one object: noscan for even entries and
-// scan for odd ones. Entries that are false are emptied in place by empty once
-// every chunk is built. After the goroutine parks, the chunks it still holds
-// must be exactly the live chunks, newest first, and the live objects must
-// keep their contents.
 func arenaParkCase(t *testing.T, live []bool, empty func(addr uintptr) bool) {
 	t.Helper()
 	if len(live) == 0 || len(live) > arenaParkMax {
@@ -391,9 +356,6 @@ func arenaParkCase(t *testing.T, live []bool, empty func(addr uintptr) bool) {
 	arenaWaitLeased(t, leasedBase)
 }
 
-// arenaWaitLeased yields until the leased count returns to want, the cleanup
-// that follows a parking case. It yields rather than sleeps, and gives up
-// after a bounded deadline.
 func arenaWaitLeased(t *testing.T, want int) {
 	t.Helper()
 	deadline := time.Now().Add(20 * time.Second)
@@ -409,9 +371,6 @@ func arenaWaitLeased(t *testing.T, want int) {
 	}
 }
 
-// M18-S1 (AR4): a goroutine that parks with an empty head over a live chunk
-// returns the head. The empty head is reached through the existing mark seam:
-// a restore to the watermark the head holds while empty.
 func TestLogosArenaParkReleasesEmptyHeadOverLiveTail(t *testing.T) {
 	arenaParkCase(t, []bool{true, false}, func(addr uintptr) bool {
 		noscan, scan := arenaEmptyMarks(addr)
@@ -420,10 +379,6 @@ func TestLogosArenaParkReleasesEmptyHeadOverLiveTail(t *testing.T) {
 	})
 }
 
-// M18-S1 (AR4): when a goroutine parks, every empty chunk returns to the P
-// cache, including empty chunks behind a live chunk, and the live chunks keep
-// their addresses and contents. Some of these states no Save, Restore, or
-// allocation reaches, so they are built with LogosArenaEmptyChunk.
 func TestLogosArenaParkReleasesEmptyChunksBehindLiveHead(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -443,9 +398,6 @@ func TestLogosArenaParkReleasesEmptyChunksBehindLiveHead(t *testing.T) {
 	}
 }
 
-// M18-S1 (AR4, AR2): a goroutine that exits without restoring its watermark,
-// as after Goexit, still returns its chunk, and the scan memory it left is
-// zero.
 func TestLogosArenaExitReturnsChunk(t *testing.T) {
 	_, leasedBase, _ := runtime.LogosArenaCounts()
 	const size = 4096
@@ -467,8 +419,6 @@ func TestLogosArenaExitReturnsChunk(t *testing.T) {
 	}
 }
 
-// M18-S1 (#106 part one): chunks are manual spans carrying the arena flag;
-// heap objects are neither.
 func TestLogosArenaChunksAreManualSpans(t *testing.T) {
 	inFreshGoroutine(t, func() {
 		m := runtime.LogosArenaSave()
@@ -495,9 +445,6 @@ func TestLogosArenaChunksAreManualSpans(t *testing.T) {
 	})
 }
 
-// M18-S1 (#106): SetFinalizer and AddCleanup on an arena object panic with
-// the SPEC text, for both regions; a heap object, including one served by
-// the mallocgc fallback, is unaffected.
 func TestLogosArenaSetFinalizerPanics(t *testing.T) {
 	type T struct{ a, b uintptr }
 	type S struct {
@@ -539,10 +486,6 @@ func TestLogosArenaSetFinalizerPanics(t *testing.T) {
 	})
 }
 
-// M18-S1 (#59): cgo pointer checks accept arena addresses. An arena address
-// is Go memory for the checks, so storing into arena memory is not a store
-// into non-Go memory, and no argument, result, or copy involving arena
-// memory panics.
 func TestLogosArenaCgoChecksAcceptArenaAddresses(t *testing.T) {
 	type holder struct{ p *int }
 	inFreshGoroutine(t, func() {
@@ -582,8 +525,6 @@ func TestLogosArenaCgoChecksAcceptArenaAddresses(t *testing.T) {
 	})
 }
 
-// M18-S1 (PLAN:547): exact fit. Two noscan objects that fill the chunk to
-// its last byte stay in one chunk with no free space left.
 func TestLogosArenaExactFit(t *testing.T) {
 	inFreshGoroutine(t, func() {
 		m := runtime.LogosArenaSave()
@@ -603,8 +544,6 @@ func TestLogosArenaExactFit(t *testing.T) {
 	})
 }
 
-// M18-S1 (PLAN:547): exact fit across both regions. A scan object takes
-// exactly the space the noscan region leaves.
 func TestLogosArenaExactFitBothRegions(t *testing.T) {
 	inFreshGoroutine(t, func() {
 		m := runtime.LogosArenaSave()
@@ -623,8 +562,6 @@ func TestLogosArenaExactFitBothRegions(t *testing.T) {
 	})
 }
 
-// M18-S1 (PLAN:547): one byte over. A noscan object one byte larger than the
-// space left links a fresh chunk, and the objects on both chunks stay valid.
 func TestLogosArenaOneByteOverflowLinksChunk(t *testing.T) {
 	inFreshGoroutine(t, func() {
 		m := runtime.LogosArenaSave()
@@ -650,7 +587,6 @@ func TestLogosArenaOneByteOverflowLinksChunk(t *testing.T) {
 	})
 }
 
-// M18-S1 (PLAN:547): the same overflow in the scan region.
 func TestLogosArenaScanOverflowLinksChunk(t *testing.T) {
 	inFreshGoroutine(t, func() {
 		m := runtime.LogosArenaSave()
@@ -676,9 +612,6 @@ func TestLogosArenaScanOverflowLinksChunk(t *testing.T) {
 	})
 }
 
-// M18-S1 (PLAN:547): when no chunk can be had, an allocation falls back to
-// mallocgc and still succeeds with zeroed, writable memory, and earlier
-// arena objects stay valid.
 func TestLogosArenaEmptyPoolFallsBackToMallocgc(t *testing.T) {
 	total, _, pooled := runtime.LogosArenaCounts()
 	old := runtime.LogosArenaSetLimit(int64(total) + 1)
@@ -716,8 +649,6 @@ func TestLogosArenaEmptyPoolFallsBackToMallocgc(t *testing.T) {
 	})
 }
 
-// M18-S1: an object that cannot fit any chunk goes to mallocgc without
-// leasing a chunk, and zero-size requests return the zero base.
 func TestLogosArenaOversizeAndZeroSize(t *testing.T) {
 	inFreshGoroutine(t, func() {
 		const over = runtime.LogosArenaCapacity + 1
@@ -739,8 +670,6 @@ func TestLogosArenaOversizeAndZeroSize(t *testing.T) {
 	})
 }
 
-// M18-S1: noscan memory is zero when handed out, even over bytes that a
-// popped frame left dirty, and the watermark is LIFO.
 func TestLogosArenaNoscanReuseIsZeroed(t *testing.T) {
 	inFreshGoroutine(t, func() {
 		m := runtime.LogosArenaSave()
@@ -759,8 +688,6 @@ func TestLogosArenaNoscanReuseIsZeroed(t *testing.T) {
 	})
 }
 
-// M18-S1 (AR2, AR3): scan objects sit densely, each behind a header holding
-// its type word and size, and a restore zeroes the popped scan memory.
 func TestLogosArenaScanLayoutAndZeroing(t *testing.T) {
 	inFreshGoroutine(t, func() {
 		m := runtime.LogosArenaSave()
@@ -800,8 +727,6 @@ func TestLogosArenaScanLayoutAndZeroing(t *testing.T) {
 	})
 }
 
-// M18-S1 (AR2): restoring a mark that precedes a chunk link pops the linked
-// chunks and zeroes their scan memory before they can be reused.
 func TestLogosArenaRestorePopsLinkedChunks(t *testing.T) {
 	inFreshGoroutine(t, func() {
 		m := runtime.LogosArenaSave()
@@ -828,9 +753,6 @@ func TestLogosArenaRestorePopsLinkedChunks(t *testing.T) {
 	})
 }
 
-// M18-S1 (#4): chunks cached in the Ps are freed at the end of a GC cycle, so
-// a burst of leases does not stay resident, and chunk bytes show up in
-// StackInuse while leased.
 func TestLogosArenaGCFreesCachedChunks(t *testing.T) {
 	const n = 512
 	goroutines := runtime.NumGoroutine()
@@ -872,8 +794,6 @@ func TestLogosArenaGCFreesCachedChunks(t *testing.T) {
 	}
 }
 
-// M18-S1: shrinking GOMAXPROCS destroys Ps, and the chunks cached in a
-// destroyed P are freed with it; every chunk stays accounted for.
 func TestLogosArenaProcResizeFreesCachedChunks(t *testing.T) {
 	procs := runtime.GOMAXPROCS(0)
 	if procs < 2 {
@@ -911,9 +831,6 @@ func TestLogosArenaProcResizeFreesCachedChunks(t *testing.T) {
 	}
 }
 
-// M18-S1 (AR2): a scan object that lands on bytes an earlier frame dirtied
-// through the noscan region still reads as zero, so no stale word reaches
-// the stack scan as a pointer.
 func TestLogosArenaScanOverNoscanDirt(t *testing.T) {
 	inFreshGoroutine(t, func() {
 		m := runtime.LogosArenaSave()
@@ -933,8 +850,6 @@ func TestLogosArenaScanOverNoscanDirt(t *testing.T) {
 	})
 }
 
-// M18-S2 (SPEC Sec 3.1): the consent token is one-shot. Taking it returns
-// what the caller set and clears it, so a later take sees no consent.
 func TestLogosArenaRetTokenIsOneShot(t *testing.T) {
 	inFreshGoroutine(t, func() {
 		if runtime.LogosArenaRetTake() {
@@ -955,9 +870,6 @@ func TestLogosArenaRetTokenIsOneShot(t *testing.T) {
 	})
 }
 
-// M18-S2: the flat word pair from LogosArenaMarkSave round-trips through
-// LogosArenaMarkRestore: allocating after the save and restoring returns
-// the watermark to exactly the saved words, for both regions.
 func TestLogosArenaMarkWordPairRoundTrip(t *testing.T) {
 	inFreshGoroutine(t, func() {
 		chunk, noscan, scan := runtime.LogosArenaMarkSave()
@@ -995,8 +907,6 @@ func TestLogosArenaMarkWordPairRoundTrip(t *testing.T) {
 	})
 }
 
-// M18-S2: an exiting goroutine clears an unconsumed token, so a goroutine
-// that reuses its g never starts with someone else's consent.
 func TestLogosArenaExitClearsToken(t *testing.T) {
 	var wg sync.WaitGroup
 	for range 64 {
@@ -1020,9 +930,6 @@ func TestLogosArenaExitClearsToken(t *testing.T) {
 	}
 }
 
-// M18-S2/S3: g.logosArena sits immediately after stackguard1, at offset
-// 4*PtrSize (stack is two words, then stackguard0, then stackguard1). The
-// compiler's inline bump (S8) hard-codes this offset; this test is its pin.
 func TestLogosArenaFieldOffset(t *testing.T) {
 	if want := 4 * unsafe.Sizeof(uintptr(0)); runtime.LogosArenaFieldOffset != want {
 		t.Errorf("unsafe.Offsetof(g{}.logosArena) = %d, want %d (4*PtrSize)", runtime.LogosArenaFieldOffset, want)
@@ -1042,9 +949,6 @@ func arenaEligibleMake(n int) uintptr {
 	return during
 }
 
-// M18-S3: an arena-eligible make of dynamic size allocates from the arena
-// bump allocator, advancing the watermark, and restores the watermark when
-// the frame exits.
 func TestLogosArenaDynamicMakeWatermark(t *testing.T) {
 	if !goexperiment.LogosArena {
 		t.Skip("skipping test: GOEXPERIMENT=logosarena not enabled")
@@ -1052,7 +956,6 @@ func TestLogosArenaDynamicMakeWatermark(t *testing.T) {
 	inFreshGoroutine(t, func() {
 		before := runtime.LogosArenaStat().NoscanUsed
 
-		// First call: dynamic make of 1024 bytes.
 		during1 := arenaEligibleMake(1024)
 		after1 := runtime.LogosArenaStat().NoscanUsed
 
@@ -1063,7 +966,6 @@ func TestLogosArenaDynamicMakeWatermark(t *testing.T) {
 			t.Errorf("call 1: watermark after frame exit = %d, want %d (watermark did not fall back)", after1, before)
 		}
 
-		// Second call: dynamic make of 2048 bytes.
 		during2 := arenaEligibleMake(2048)
 		after2 := runtime.LogosArenaStat().NoscanUsed
 
@@ -1076,9 +978,6 @@ func TestLogosArenaDynamicMakeWatermark(t *testing.T) {
 	})
 }
 
-// TestLogosArenaGCScansScanRegion tests AR3 / #46 / #81:
-// Pointer-containing arena objects keep their heap referents alive across runtime.GC().
-// After a watermark restore, popped scan memory is zeroed and no longer retains referents.
 func TestLogosArenaGCScansScanRegion(t *testing.T) {
 	if !goexperiment.LogosArena {
 		t.Skip("skipping test: GOEXPERIMENT=logosarena not enabled")
@@ -1099,7 +998,6 @@ func TestLogosArenaGCScansScanRegion(t *testing.T) {
 		holder.p = heapObj
 		heapObj = nil
 
-		// GC must not collect heapObj while holder in arena scan region references it.
 		runtime.GC()
 		runtime.GC()
 
@@ -1110,10 +1008,8 @@ func TestLogosArenaGCScansScanRegion(t *testing.T) {
 			t.Fatalf("heap referent corrupted: got %d, want 42", holder.p[0])
 		}
 
-		// Pop scan region and restore watermark.
 		runtime.LogosArenaRestore(m)
 
-		// After restore, the popped scan region is zeroed (AR2), so referent must be reclaimable.
 		for range 5 {
 			runtime.GC()
 			if w.Value() == nil {
@@ -1138,7 +1034,6 @@ func TestLogosArenaPointerSliceScanRetention(t *testing.T) {
 		obj[0] = 77
 		w := weak.Make(obj)
 
-		// Directly allocate slice backing in arena scan region via LogosArenaAllocScan.
 		sliceData := (*[16]*[64]byte)(runtime.LogosArenaAllocScan((*[64]byte)(nil), 16*unsafe.Sizeof((*[64]byte)(nil))))
 		sliceData[0] = obj
 		obj = nil
@@ -1175,9 +1070,6 @@ func arenaMakeAndPanic(n int) {
 	panic("arena panic unwind test")
 }
 
-// TestLogosArenaPanicUnwindRecovery directly attacks G3 (#63):
-// When an arena-allocating function panics and an ancestor recovers,
-// the arena watermark must be restored by the unwind, not leaked.
 func TestLogosArenaPanicUnwindRecovery(t *testing.T) {
 	if !goexperiment.LogosArena {
 		t.Skip("skipping test: GOEXPERIMENT=logosarena not enabled")
@@ -1212,10 +1104,6 @@ func arenaMakeLoop(iters, allocSize int) uintptr {
 	return lastWatermark
 }
 
-// TestLogosArenaLoopWatermarkBounded directly attacks G4 (#181):
-// An iteration-local allocation inside a loop must restore the watermark
-// on the loop back-edge, keeping arena use bounded rather than growing
-// with iteration count.
 func TestLogosArenaLoopWatermarkBounded(t *testing.T) {
 	if !goexperiment.LogosArena {
 		t.Skip("skipping test: GOEXPERIMENT=logosarena not enabled")
@@ -1229,8 +1117,6 @@ func TestLogosArenaLoopWatermarkBounded(t *testing.T) {
 		wm10 := arenaMakeLoop(10, 1024)
 		used10 := wm10 - before
 
-		// With loop back-edge restore (G4 / #181), arena use remains bounded
-		// to the per-iteration size rather than growing linearly (10x).
 		if used10 > used1*2 {
 			t.Errorf("loop arena watermark grew unboundedly: 1-iter used %d B, 10-iter used %d B (G4 loop back-edge restore missing)", used1, used10)
 		}
@@ -1260,13 +1146,6 @@ func arenaMakeSwitchBreakLoop(outerIters, allocSize int) uintptr {
 	return lastWatermark
 }
 
-// TestLogosArenaSwitchBreakWatermarkBounded attacks the labeled-switch
-// enclosing-branch exit: an inner eligible loop allocates 256 B per
-// iteration, a labeled break exits the loop by breaking the enclosing
-// switch, and execution continues in the same function for repeated outer
-// iterations. The inner loop back-edge restore alone does not cover the
-// switch-exit edge, so a missing restore accumulates one inner lifetime
-// per outer iteration.
 func TestLogosArenaSwitchBreakWatermarkBounded(t *testing.T) {
 	if !goexperiment.LogosArena {
 		t.Skip("skipping test: GOEXPERIMENT=logosarena not enabled")
@@ -1315,12 +1194,6 @@ func arenaMakeSelectBreakLoop(outerIters, allocSize int, ch chan int) uintptr {
 	return lastWatermark
 }
 
-// TestLogosArenaSelectBreakWatermarkBounded is the labeled-select analogue
-// of the switch-break attack: the inner eligible loop allocates 256 B per
-// iteration inside a ready receive case, a labeled break exits the loop by
-// breaking the enclosing select, and execution continues in the same
-// function for repeated outer iterations. The channel is pre-closed, so the
-// receive case is always ready and the attack is deterministic without timing.
 func TestLogosArenaSelectBreakWatermarkBounded(t *testing.T) {
 	if !goexperiment.LogosArena {
 		t.Skip("skipping test: GOEXPERIMENT=logosarena not enabled")
@@ -1348,18 +1221,10 @@ func TestLogosArenaSelectBreakWatermarkBounded(t *testing.T) {
 	})
 }
 
-// The make seam attacks below drive the public make([]T, len, cap) syntax
-// through sites the compiler places in the arena (non-escaping, dynamic
-// capacity), and compare every panic with the heap path's. They never touch
-// a slice an overflowing make returned: an unexpected success ends the
-// subtest at once, so a wrapped size cannot turn into an out-of-bounds write.
-
 const (
 	arenaMakeLenPanic = "runtime error: makeslice: len out of range"
 	arenaMakeCapPanic = "runtime error: makeslice: cap out of range"
 
-	// arenaMakeAllocSlack bounds the heap bytes a panicking make may
-	// allocate: the panic value and test bookkeeping, never the slice.
 	arenaMakeAllocSlack = 1 << 20
 )
 
@@ -1427,9 +1292,6 @@ func heapSeamByte(n, c int) { arenaSink = make([]byte, n, c) }
 //go:noinline
 func heapSeamUint32Wide(n, c uint64) { arenaSink = make([]uint32, n, c) }
 
-// arenaMakeMustPanic runs fn, which holds one make, and requires the panic
-// message want and no enormous allocation. It stops the subtest when fn
-// returns normally, before anything could use the slice.
 func arenaMakeMustPanic(t *testing.T, what, want string, fn func()) {
 	t.Helper()
 	var before, after runtime.MemStats
@@ -1447,15 +1309,7 @@ func arenaMakeMustPanic(t *testing.T, what, want string, fn func()) {
 	}
 }
 
-// arenaMakeOverflowCases lists len/cap pairs for elements of size bytes
-// (size >= 2) whose make must panic. The expected message follows makeslice:
-// the len message when len alone is out of range, else the cap message.
-// Every capacity comes from the runtime's own bounds, not from a literal.
-// Each pair either fails an unchecked lowering's own len/cap checks or wraps
-// the byte size to zero or a tiny value, so an unchecked lowering never
-// reaches the allocator with a huge size here.
 func arenaMakeOverflowCases(size uintptr) []arenaMakeCase {
-	// wrap is the smallest capacity whose byte size overflows uintptr.
 	wrap := int64(^uintptr(0)/size + 1)
 	minInt := int64(math.MinInt)
 	return []arenaMakeCase{
@@ -1487,11 +1341,6 @@ func arenaMakeRun(t *testing.T, size uintptr, arena, heap func(n, c int)) {
 	}
 }
 
-// TestLogosArenaMakeOverflow attacks the dynamic arena make with capacities
-// whose byte size wraps uintptr to zero or a tiny positive size. makeslice
-// panics on all of them, with the len message when len alone is out of
-// range; the arena path must panic identically instead of returning a slice
-// whose cap exceeds its storage.
 func TestLogosArenaMakeOverflow(t *testing.T) {
 	if !goexperiment.LogosArena {
 		t.Skip("skipping test: GOEXPERIMENT=logosarena not enabled")
@@ -1504,9 +1353,6 @@ func TestLogosArenaMakeOverflow(t *testing.T) {
 	})
 }
 
-// TestLogosArenaMakeOverflowWide covers unsigned 64-bit len and cap, whose
-// conversion to int must keep the makeslice64 verdicts. There is no fixed
-// expectation: the heap path is the reference for every pair.
 func TestLogosArenaMakeOverflowWide(t *testing.T) {
 	if !goexperiment.LogosArena {
 		t.Skip("skipping test: GOEXPERIMENT=logosarena not enabled")
@@ -1527,11 +1373,6 @@ func TestLogosArenaMakeOverflowWide(t *testing.T) {
 	}
 }
 
-// TestLogosArenaMakeOverflowMaxAlloc covers sizes past maxAlloc that wrap
-// uintptr to a huge value or do not wrap at all. An unchecked lowering hands
-// those to the allocator, which aborts the process, so the test first
-// proves the lowering checks sizes, with a capacity that wraps to zero, and
-// fails before any such size is attempted when it does not.
 func TestLogosArenaMakeOverflowMaxAlloc(t *testing.T) {
 	if !goexperiment.LogosArena {
 		t.Skip("skipping test: GOEXPERIMENT=logosarena not enabled")
@@ -1540,8 +1381,6 @@ func TestLogosArenaMakeOverflowMaxAlloc(t *testing.T) {
 	if _, panicked := recoverMsg(func() { arenaSeamInt64(0, wrapsToZero) }); !panicked {
 		t.Fatal("make([]int64, 0, cap) with a wrapping byte size returned without panic; refusing to attempt sizes past maxAlloc")
 	}
-	// The smallest int64 capacity past maxAlloc. The constant fits int on
-	// 32-bit and 64-bit; on 32-bit its byte size also wraps, which panics too.
 	const pastInt64 = int(runtime.LogosArenaMaxAlloc/8 + 1)
 	for _, tc := range []struct {
 		name string
@@ -1559,7 +1398,6 @@ func TestLogosArenaMakeOverflowMaxAlloc(t *testing.T) {
 		})
 	}
 	if bits.UintSize == 64 {
-		// maxAlloc fits int only on 64-bit; one byte past it needs no wrap.
 		maxAlloc := runtime.LogosArenaMaxAlloc
 		pastByte := int(maxAlloc) + 1
 		t.Run("byte/cap", func(t *testing.T) {
@@ -1573,10 +1411,6 @@ func TestLogosArenaMakeOverflowMaxAlloc(t *testing.T) {
 	}
 }
 
-// TestLogosArenaMakeSeamPlacement pins that the probe site really is placed
-// in the arena on amd64, the only architecture that lowers the make, so the
-// overflow attacks above run against the arena path, and that valid makes
-// still return zeroed, writable, correctly sized storage.
 func TestLogosArenaMakeSeamPlacement(t *testing.T) {
 	if !goexperiment.LogosArena {
 		t.Skip("skipping test: GOEXPERIMENT=logosarena not enabled")
@@ -1605,8 +1439,6 @@ func TestLogosArenaMakeSeamPlacement(t *testing.T) {
 	})
 }
 
-// TestLogosArenaMakeSliceEntry attacks the private runtime entry directly
-// with the same pairs, plus int64 values that do not fit int on 32-bit.
 func TestLogosArenaMakeSliceEntry(t *testing.T) {
 	if !goexperiment.LogosArena {
 		t.Skip("skipping test: GOEXPERIMENT=logosarena not enabled")

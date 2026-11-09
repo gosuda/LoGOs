@@ -8,8 +8,6 @@ package runtime
 
 import "internal/runtime/atomic"
 
-// LogosSlotsAcquire takes n group slots through the entry point
-// logos/rt.NewGroup uses.
 func LogosSlotsAcquire(n int) []uint32 {
 	slots := make([]uint32, n)
 	for i := range slots {
@@ -18,19 +16,12 @@ func LogosSlotsAcquire(n int) []uint32 {
 	return slots
 }
 
-// LogosSlotsRelease returns slots through the entry point
-// logos/rt.Group.Wait uses.
 func LogosSlotsRelease(slots []uint32) {
 	for _, slot := range slots {
 		logosGroupRelease(slot)
 	}
 }
 
-// LogosStaleReleaseKeepsCancel registers the calling goroutine as a
-// group waiter, retires its descriptor through the reuse purge, lets a
-// new waiter's cancel bit land on the reused descriptor, and then runs
-// the stale waiter's late release. It reports whether the new bit
-// survived.
 func LogosStaleReleaseKeepsCancel() bool {
 	pd := pollcache.alloc()
 	defer pollcache.free(pd)
@@ -51,9 +42,6 @@ func LogosStaleReleaseKeepsCancel() bool {
 	return kept
 }
 
-// LogosPurgeClearsBit sets both cancel bits on a descriptor that has no
-// registered waiter, purges it, and reports whether the bits are gone:
-// a reused descriptor starts clean even on the lock-free idle path.
 func LogosPurgeClearsBit() bool {
 	pd := pollcache.alloc()
 	defer pollcache.free(pd)
@@ -62,21 +50,14 @@ func LogosPurgeClearsBit() bool {
 	return atomic.Load(&pd.logosCancel) == 0
 }
 
-// LogosRegistryIdle reports whether the published waiter count says the
-// registry is empty.
 func LogosRegistryIdle() bool {
 	return LogosWaiterCount() == 0
 }
 
-// LogosWaiterCount returns the published number of registered group
-// waiters.
 func LogosWaiterCount() int {
 	return int(atomic.Load(&logosWaiterCount))
 }
 
-// LogosCancelFiltersByGroup registers a waiter of one group and cancels
-// first a different group, then its own. It reports the cancel bit seen
-// after each cancel.
 func LogosCancelFiltersByGroup() (otherBit, ownBit bool) {
 	pd := pollcache.alloc()
 	defer pollcache.free(pd)
@@ -95,11 +76,6 @@ func LogosCancelFiltersByGroup() (otherBit, ownBit bool) {
 	return otherBit, ownBit
 }
 
-// LogosReusedSlotStartsClean cancels a slot, returns it, lends the same
-// slot out again, and registers a waiter tagged with it. It reports
-// whether the slot was reused and the fresh registration stayed
-// unarmed: neither the release nor the retake may carry the old
-// cancellation into the next group.
 func LogosReusedSlotStartsClean() bool {
 	pd := pollcache.alloc()
 	defer pollcache.free(pd)
@@ -124,10 +100,6 @@ func LogosReusedSlotStartsClean() bool {
 	return !armed
 }
 
-// LogosReusedSlotCancel holds a waiter of one live group while the slot
-// of a second group is released and lent out again, then cancels the
-// reused slot. It reports the live group's slot, the reused slot, and
-// whether the cancel set the live waiter's bit.
 func LogosReusedSlotCancel() (live, reused uint32, liveCancelled bool) {
 	pd := pollcache.alloc()
 	defer pollcache.free(pd)

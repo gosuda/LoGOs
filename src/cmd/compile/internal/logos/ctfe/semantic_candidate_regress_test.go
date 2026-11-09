@@ -8,9 +8,6 @@ import (
 	"testing"
 )
 
-// PR3 candidate regressions: verifying edge cases in CTFE shift,
-// float constant comparison, and integer range folding.
-
 func TestPR3CandidateNonConstNegativeShift(t *testing.T) {
 	cfg := Config{MaxSteps: 100000, MaxValueBytes: 1 << 20, WordSize: 8}
 	v, _, err := evalConstFunc(t, cfg, constSpec{
@@ -81,7 +78,6 @@ func TestPR3CandidateExactUntypedDifferingDecimals(t *testing.T) {
 	}
 	mustInt(t, v, 0, "0.100...01 == 0.1")
 
-	// Control: identical literals must compare equal.
 	vCtrl, _, errCtrl := evalConstFunc(t, cfg, constSpec{
 		src:    "package p\nfunc DifferingDecimalsCtrl() int { if 0.1 == 0.1 { return 1 }; return 0 }",
 		rtypes: []*Type{BasicType("int")},
@@ -111,7 +107,6 @@ func HugeRangeBreak() int {
 		call:   `HugeRangeBreak()`,
 	})
 	if err != nil {
-		// Admitted-evaluation error is allowed according to contract.
 		return
 	}
 	if v.Int64() == 0 {

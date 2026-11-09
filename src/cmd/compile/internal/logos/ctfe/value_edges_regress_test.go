@@ -10,17 +10,6 @@ import (
 	"testing"
 )
 
-// PR3 review semantics regressions:
-// - Mixed untyped float arithmetic and ordering
-// - float32/64 ++/--
-// - Standalone nested block scope and control flow
-// - Legal backward-key slice literal []int{2:3,0:1,2}
-// - Unnamed []byte/[]rune conversions
-// - Nil slice/map rendering with nonnil-empty controls
-// - Nil append destination
-// - Zero-length make with capacity exceeding a small custom MaxValueBytes
-// - len/index of untyped string literals
-
 func TestReviewMixedUntypedFloatArithmetic(t *testing.T) {
 	cfg := Config{MaxSteps: 100000, MaxValueBytes: 1 << 20, WordSize: 8}
 	cases := []struct {
@@ -400,7 +389,6 @@ func TestReviewNonNilEmptySliceMapRenderingControl(t *testing.T) {
 	cfg := Config{MaxSteps: 100000, MaxValueBytes: 1 << 20, WordSize: 8}
 	h := newFakeHost(t)
 
-	// Control 1: empty slice literal must remain non-nil
 	vSlice, _, err := evalConstFunc(t, cfg, constSpec{
 		src:    "package p\nfunc EmptySlice() []int { return []int{} }",
 		rtypes: []*Type{&Type{Kind: KSlice, Elem: BasicType("int")}},
@@ -433,7 +421,6 @@ func TestReviewNonNilEmptySliceMapRenderingControl(t *testing.T) {
 		t.Fatalf("emptySlice == nil is true, want false")
 	}
 
-	// Control 2: empty map literal must remain non-nil
 	vMap, _, err := evalConstFunc(t, cfg, constSpec{
 		src:    "package p\nfunc EmptyMap() map[string]int { return map[string]int{} }",
 		rtypes: []*Type{&Type{Kind: KMap, Key: BasicType("string"), Elem: BasicType("int")}},
@@ -594,8 +581,6 @@ func TestReviewRenderFloatLexicalKindPreservation(t *testing.T) {
 	cfg := Config{MaxSteps: 100000, MaxValueBytes: 1 << 20, WordSize: 8}
 	h := newFakeHost(t)
 
-	// A float value like 2.0 rendered as an AST expression and serialized
-	// into source text must reparse and evaluate as a float rather than an integer.
 	v := FloatValue(2.0, BasicType("float64"))
 	rendered, err := v.Expr(syntax.Pos{})
 	if err != nil {

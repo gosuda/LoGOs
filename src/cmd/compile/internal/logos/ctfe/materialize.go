@@ -4,22 +4,8 @@
 
 package ctfe
 
-// This file exposes narrow read-only accessors over evaluated values
-// for the native materialization of imported const-function results
-// (M5-S2 cross-module support). Lowering pairs a recorded Value with
-// the checker's nominal types2 type and spells the value without
-// re-executing the call; these accessors supply exactly the shape the
-// spelling needs (nilness and slice headers) while evaluation,
-// operators, and literal rendering stay where they are. No policy
-// lives here: callers decide what is spellable.
-
-// IsNilValue reports whether v is a typed nil.
 func (v Value) IsNilValue() bool { return v.isNil }
 
-// SliceHeader exposes the backing store and window of a slice value:
-// backing is the full shared store, and the visible elements are
-// backing[lo:lo+length] with capacity cap_-lo. It reports false for
-// non-slice values or a detached backing.
 func (v Value) SliceHeader() (backing []Value, lo, length, cap_ int, ok bool) {
 	if v.slice == nil || v.slice.backing == nil {
 		return nil, 0, 0, 0, false
@@ -27,10 +13,6 @@ func (v Value) SliceHeader() (backing []Value, lo, length, cap_ int, ok bool) {
 	return *v.slice.backing, v.slice.lo, v.slice.length, v.slice.cap_, true
 }
 
-// SliceNeedsBacking reports whether a slice value cannot be spelled
-// as a plain literal: a nonzero lower bound or spare capacity beyond
-// the length. Such values spell as a full backing literal plus a
-// slice expression, preserving length, capacity, and tail values.
 func (v Value) SliceNeedsBacking() bool {
 	if v.slice == nil {
 		return false
