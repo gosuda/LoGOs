@@ -218,6 +218,21 @@ func TestAdvReentrantDeadlock(t *testing.T) {
 			[]string{"32 concurrency::reentrant_withlock_deadlock deny"},
 		},
 		{
+			"indexReceiverDeadlocks",
+			"func d4(ls []*Locked[int]) { ls[0].WithLock(func(n *int) { ls[0].WithLock(func(m *int) { *m++ }) }) }\n",
+			[]string{"32 concurrency::reentrant_withlock_deadlock deny"},
+		},
+		{
+			"indexVariableReceiverDeadlocks",
+			"func e5(ls []*Locked[int], i int) { ls[i].WithLock(func(n *int) { ls[i].WithLock(func(m *int) { *m++ }) }) }\n",
+			[]string{"32 concurrency::reentrant_withlock_deadlock deny"},
+		},
+		{
+			"differentIndexStaysClean",
+			"func e6(ls []*Locked[int]) { ls[0].WithLock(func(n *int) { ls[1].WithLock(func(m *int) { *m++ }) }) }\n",
+			nil,
+		},
+		{
 			"storedLiteralCalledDeadlocks",
 			"func d3(l *Locked[int]) { l.WithLock(func(n *int) { inner := func() { l.WithLock(func(m *int) { *m++ }) }; inner() }) }\n",
 			[]string{"32 concurrency::reentrant_withlock_deadlock deny"},
@@ -270,11 +285,6 @@ func TestAdvReentrantDeadlockLimitations(t *testing.T) {
 		body string
 		want []string
 	}{
-		{
-			"indexReceiverUnreported",
-			"func d4(ls []*Locked[int]) { ls[0].WithLock(func(n *int) { ls[0].WithLock(func(m *int) { *m++ }) }) }\n",
-			nil,
-		},
 		{
 			"unreachableBranchReported",
 			"func d11(l *Locked[int]) { l.WithLock(func(n *int) { if false { l.WithLock(func(m *int) { *m++ }) } }) }\n",

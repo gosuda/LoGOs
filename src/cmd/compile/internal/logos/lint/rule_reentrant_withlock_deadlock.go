@@ -110,6 +110,7 @@ type lockCheck struct {
 	asyncCall    map[*syntax.CallExpr]bool
 	aliases      map[types2.Object]lockKey
 	stored       map[types2.Object]syntax.Node
+	indexIDs     map[types2.Object]string
 	keyPathLimit int
 	reported     map[*syntax.CallExpr]bool
 }
@@ -914,8 +915,40 @@ func (c *lockCheck) keyStep(e syntax.Expr) (syntax.Expr, string) {
 		if sel := c.pass.Info.Selections[x]; sel != nil && sel.Kind() == types2.FieldVal {
 			return x.X, x.Sel.Value
 		}
+	case *syntax.IndexExpr:
+		if idx, ok := c.indexStep(x); ok {
+			return x.X, "[" + idx + "]"
+		}
 	}
 	return nil, ""
+}
+func (c *lockCheck) indexStep(x *syntax.IndexExpr) (string, bool) {
+	switch i := syntax.Unparen(x.Index).(type) {
+	case *syntax.BasicLit:
+		if i.Bad {
+			return "", false
+		}
+		return i.Value, true
+	case *syntax.Name:
+		obj, ok := c.pass.Info.Uses[i].(*types2.Var)
+		if !ok || obj == nil {
+			return "", false
+		}
+		return c.indexID(obj), true
+	}
+	return "", false
+}
+
+func (c *lockCheck) indexID(obj types2.Object) string {
+	if c.indexIDs == nil {
+		c.indexIDs = make(map[types2.Object]string)
+	}
+	if id, ok := c.indexIDs[obj]; ok {
+		return id
+	}
+	id := strings.Repeat("#", len(c.indexIDs)+1)
+	c.indexIDs[obj] = id
+	return id
 }
 
 // flag reports call once.
