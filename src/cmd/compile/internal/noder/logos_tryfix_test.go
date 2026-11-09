@@ -15,19 +15,16 @@ import (
 	"testing"
 )
 
-// diagSpan holds minimal byte coordinates needed to apply replacements.
 type diagSpan struct {
 	ByteOffset int `json:"byte_offset"`
 	ByteLen    int `json:"byte_len"`
 }
 
-// diagFix matches jsonFix of SPEC Sec 14.5 for source edits.
 type diagFix struct {
 	Replacement      string `json:"replacement"`
 	InsertBeforeLine int    `json:"insert_before_line"`
 }
 
-// diagRecord holds minimal diagnostic fields inspected by tryfix tests.
 type diagRecord struct {
 	RuleID            string    `json:"rule_id"`
 	Severity          string    `json:"severity"`
@@ -40,7 +37,6 @@ const (
 	severityForbid     = "forbid"
 )
 
-// logosToolPath returns the path to the logos driver binary located beside the go tool.
 func logosToolPath(t *testing.T) string {
 	t.Helper()
 	testenv.MustHaveGoBuild(t)
@@ -56,8 +52,6 @@ func logosToolPath(t *testing.T) string {
 	return p
 }
 
-// compileLgoJSON runs `go tool compile -logos.json` on a single .lgo file,
-// returning the parsed JSON diagnostic records and the process exit code.
 func compileLgoJSON(t *testing.T, src string) ([]diagRecord, int) {
 	t.Helper()
 	testenv.MustHaveGoBuild(t)
@@ -107,8 +101,6 @@ func compileLgoJSON(t *testing.T, src string) ([]diagRecord, int) {
 	return diags, exitCode
 }
 
-// applyFix applies an autofix candidate to source text according to the
-// SPEC Sec 14.5 contract.
 func applyFix(t *testing.T, src string, span diagSpan, fix diagFix) string {
 	t.Helper()
 	if fix.InsertBeforeLine > 0 {
@@ -136,8 +128,6 @@ func applyFix(t *testing.T, src string, span diagSpan, fix diagFix) string {
 	return src[:start] + fix.Replacement + src[end:]
 }
 
-// runLgoSource writes a standalone executable module with src and executes it
-// via the logos toolchain driver to observe runtime execution semantics.
 func runLgoSource(t *testing.T, src string) {
 	t.Helper()
 	testenv.MustHaveGoRun(t)
@@ -161,11 +151,6 @@ func runLgoSource(t *testing.T, src string) {
 	}
 }
 
-// TestMisplacedTryAutofix verifies the behavioral regression for SPEC Sec 1.2
-// and Sec 1.4: when an expression has a misplaced '?' whose extraction preserves
-// evaluation order, JSON diagnostics must emit correctness::misplaced_try
-// with an autofix candidate. Applying the fix must yield runnable code that
-// satisfies exactly-once evaluation and proper error propagation at runtime.
 func TestMisplacedTryAutofix(t *testing.T) {
 	const safeSrc = `package main
 
@@ -253,11 +238,6 @@ func main() {
 	}
 }
 
-// TestMisplacedTryAutofixOrdering verifies ordering semantics on expressions
-// like next() + step()?: if an autofix candidate is offered, applying and executing
-// it must preserve original left-to-right evaluation order and error propagation;
-// if no candidate is offered, conservative refusal is accepted without banning
-// safe split rewrites by text matching.
 func TestMisplacedTryAutofixOrdering(t *testing.T) {
 	const unsafeSrc = `package main
 
@@ -352,13 +332,11 @@ func main() {
 		t.Errorf("expected severity %q, got %q", severityForbid, targetDiag.Severity)
 	}
 
-	// Conservative refusal: compiler safely offered no autofix candidate.
 	if len(targetDiag.AutofixCandidates) == 0 {
 		t.Logf("conservative refusal: no autofix candidate offered for order-sensitive expression")
 		return
 	}
 
-	// If candidate(s) are offered, execution must preserve evaluation order.
 	for i, fix := range targetDiag.AutofixCandidates {
 		fixedSrc := applyFix(t, unsafeSrc, targetDiag.Span, fix)
 		runLgoSource(t, fixedSrc)
