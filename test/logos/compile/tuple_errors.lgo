@@ -1,0 +1,18 @@
+// errorcheck
+
+package p
+
+func compareSliceTuple() {
+	var t ([]int, error)
+	_ = t == t // ERROR "cannot be compared"
+}
+
+func compareMapTuple() {
+	var t (map[string]int, int)
+	_ = t == t // ERROR "cannot be compared"
+}
+
+func compareFuncTuple() {
+	var t (func(), int)
+	_ = t == t // ERROR "cannot be compared"
+}

@@ -32,3 +32,11 @@ func TestUnionNoTwoTierTag(t *testing.T) {
 		t.Fatalf("lowered output uses two-tier tag layout: %q", out)
 	}
 }
+
+func TestAssertedStructLowersToVarNil(t *testing.T) {
+	src := "package main\n\ntype I interface { M() int }\n\ntype S struct : I {\n\tX int\n}\n\nfunc (s *S) M() int { return s.X }\n"
+	out := lowerSnippetSrc(t, "assertsnip.lgo", src)
+	if !strings.Contains(out, "var _ I = (*S)(nil)") {
+		t.Errorf("assertion missing lowered var decl:\n%s", out)
+	}
+}
