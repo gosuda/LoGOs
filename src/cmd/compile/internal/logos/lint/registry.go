@@ -26,4 +26,11 @@ var registry = []Rule{
 	aliasExtension,
 	unclosedIOCloser,
 	unboundedChannelOp,
+	guardedAccess,
+	nonatomicAccess,
+	lockRequirement,
+	layoutConstant,
+	atomicPlainInt64,
+	linknameMismatch,
+	unsafeOutsideUnsafeFile,
 }

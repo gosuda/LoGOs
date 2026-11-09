@@ -57,7 +57,7 @@ func LogosAllocs() []LogosAlloc {
 // logosNotes reports whether the package marks a function, so escape
 // analysis records allocation sites.
 func logosNotes() bool {
-	return len(LogosZeroAlloc) != 0
+	return len(LogosZeroAlloc) != 0 || LogosFuncAllocs != nil
 }
 
 // logosNote adds the note of k to the hole when the reason of an allocation
@@ -90,6 +90,10 @@ func (b *batch) logosEscaped(l, dst *location, notes *note) {
 		return
 	}
 	name, ok := logosMarked(l.curfn)
+	if !ok && LogosFuncAllocs == nil {
+		return
+	}
+	logosRecordFuncAlloc(l.curfn)
 	if !ok {
 		return
 	}
@@ -106,6 +110,7 @@ func (e *escape) logosMakeChan(n *ir.MakeExpr) {
 	if !logosNotes() {
 		return
 	}
+	logosRecordFuncAlloc(e.curfn)
 	name, ok := logosMarked(e.curfn)
 	if !ok {
 		return

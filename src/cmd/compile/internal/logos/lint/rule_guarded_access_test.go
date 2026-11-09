@@ -147,7 +147,7 @@ func build() *stats {
 }
 `, nil},
 		{"published local guarded", `
-var sink *stats
+var sink = &stats{}
 
 func publish() {
 	t := &stats{}
@@ -327,6 +327,8 @@ func TestNonatomicAccess(t *testing.T) {
 
 import "sync/atomic"
 
+var keepAtomic atomic.Int32
+
 type counter struct {
 
 	//logos:atomic
@@ -360,27 +362,27 @@ func good() {
 func bad(c *counter) int64 {
 	return c.hits
 }
-`, []string{"20 concurrency::nonatomic_access forbid"}},
+`, []string{"22 concurrency::nonatomic_access forbid"}},
 		{"plain write", `
 func bad(c *counter) {
 	c.drops = 1
 }
-`, []string{"20 concurrency::nonatomic_access forbid"}},
+`, []string{"22 concurrency::nonatomic_access forbid"}},
 		{"plain increment", `
 func bad(c *counter) {
 	c.hits++
 }
-`, []string{"20 concurrency::nonatomic_access forbid"}},
+`, []string{"22 concurrency::nonatomic_access forbid"}},
 		{"address leaks", `
 func bad(c *counter) {
 	passthrough(&c.hits)
 }
-`, []string{"20 concurrency::nonatomic_access forbid"}},
+`, []string{"22 concurrency::nonatomic_access forbid"}},
 		{"plain global write", `
 func bad() {
 	gtotal = 5
 }
-`, []string{"20 concurrency::nonatomic_access forbid"}},
+`, []string{"22 concurrency::nonatomic_access forbid"}},
 		{"misplaced directive", `
 var x = 1
 
@@ -389,7 +391,7 @@ var x = 1
 func f() {
 	_ = x
 }
-`, []string{"21 concurrency::nonatomic_access forbid"}},
+`, []string{"23 concurrency::nonatomic_access forbid"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

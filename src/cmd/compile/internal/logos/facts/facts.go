@@ -180,6 +180,7 @@ type ConstFuncFact struct {
 	Object string
 	Source []byte
 }
+
 // LockFact is one locks record: a lock requirement or effect of an exported
 // function, with the effect verb and the path from the receiver or a
 // parameter to the lock field.

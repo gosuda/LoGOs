@@ -40,8 +40,13 @@ func hasLogosAssertFacts() bool {
 	return false
 }
 
+func hasLogosLintFacts() bool {
+	f := facts.Current()
+	return f != nil && (len(f.AllocFrees) != 0 || len(f.Locks) != 0)
+}
+
 func writeLogosFacts(bout *bio.Writer) {
-	if !base.Logos && !wasmyield.Active() && !hasLogosAssertFacts() {
+	if !base.Logos && !wasmyield.Active() && !hasLogosAssertFacts() && !hasLogosLintFacts() {
 		return
 	}
 	start := startArchiveEntry(bout)

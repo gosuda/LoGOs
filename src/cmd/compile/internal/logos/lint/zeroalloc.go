@@ -32,9 +32,10 @@ var zeroAllocDirective = regexp.MustCompile(`^//logos:zeroalloc(?:\s.*)?$`)
 // and the file and line of its declaration, the line of the token after
 // func, where the compiler finds the function again.
 type ZeroAllocFunc struct {
-	Name string
-	File string
-	Line uint
+	Name  string
+	File  string
+	Line  uint
+	Local bool
 }
 
 // ZeroAllocFinding is one heap allocation site that escape analysis found
@@ -94,7 +95,13 @@ func fileZeroAlloc(f *syntax.File, src []byte, mode syntax.Mode) ([]ZeroAllocFun
 			})
 			return
 		}
-		funcs = append(funcs, ZeroAllocFunc{Name: declName(decl), File: f.Pos().RelFilename(), Line: decl.Pos().Line()})
+		local := false
+		for _, word := range strings.Fields(text)[1:] {
+			if word == "local" {
+				local = true
+			}
+		}
+		funcs = append(funcs, ZeroAllocFunc{Name: declName(decl), File: f.Pos().RelFilename(), Line: decl.Pos().Line(), Local: local})
 	})
 	return funcs, misplaced
 }
@@ -123,6 +130,10 @@ func declName(d *syntax.FuncDecl) string {
 	}
 	return recv + "." + d.Name.Value
 }
+
+// DeclName is declName for other packages: the facts writer and the
+// AllocFree consumer must spell a function the same way.
+func DeclName(d *syntax.FuncDecl) string { return declName(d) }
 
 // ZeroAllocResults resolves the allocation sites of the marked functions to
 // results, ordered by line. Every result is at forbid, because the directive

@@ -103,6 +103,7 @@ type Pass struct {
 	Policy *Policy
 	in     *Input
 	diags  []Diagnostic
+	locks  *lockAudit
 }
 
 // Report records a finding of the rule being checked.

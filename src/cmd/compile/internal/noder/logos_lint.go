@@ -9,6 +9,7 @@ import (
 
 	"cmd/compile/internal/base"
 	"cmd/compile/internal/escape"
+	"cmd/compile/internal/logos/facts"
 	"cmd/compile/internal/logos/lint"
 	"cmd/compile/internal/syntax"
 	"cmd/compile/internal/types2"
@@ -19,10 +20,12 @@ import (
 // the package the first pass checked, the position map of its findings, and
 // which checks the package armed.
 type escapeLint struct {
-	in        *lint.Input
-	m         *posMap
-	pins      bool
-	zeroAlloc bool
+	in         *lint.Input
+	m          *posMap
+	pins       bool
+	zeroAlloc  bool
+	allocFacts bool
+	graph      *logosAllocGraph
 }
 
 // logosEscape is the state logosLintHook keeps for LogosLintEscape.
@@ -42,7 +45,7 @@ var logosEscape *escapeLint
 // arms escape analysis whenever the package marks a function, and a directive
 // that marks nothing fails here.
 func logosLintHook(m *posMap, files []*syntax.File, pkg *types2.Package, info *types2.Info) {
-	if !base.Logos && !base.LogosLintOnly {
+	if !base.Logos && !base.LogosLintOnly && !base.LogosAllocFacts {
 		return
 	}
 	kind := lint.KindGo
@@ -57,13 +60,14 @@ func logosLintHook(m *posMap, files []*syntax.File, pkg *types2.Package, info *t
 		Sources: sources,
 		Kind:    kind,
 	}
-	results, zeroAlloc := logosZeroAllocArm(in)
+	results, zeroAlloc, zeroAllocMarks := logosZeroAllocArm(in)
 	pins := false
 	if base.LogosCfg != "" {
 		in.Policy = logosLintPolicy()
 		in.Reported = logosTakeSoft()
 		results = append(results, lint.Run(in)...)
 		pins = lint.PinActive(in)
+		logosMergeLockFacts(in)
 	}
 	for _, r := range results {
 		base.LogosReport(logosDiag(m, r))
@@ -71,8 +75,12 @@ func logosLintHook(m *posMap, files []*syntax.File, pkg *types2.Package, info *t
 	if !base.LogosLintOnly {
 		base.ExitIfErrors()
 	}
-	if pins || zeroAlloc {
-		logosEscape = &escapeLint{in: in, m: m, pins: pins, zeroAlloc: zeroAlloc}
+	var graph *logosAllocGraph
+	if base.LogosAllocFacts || zeroAlloc {
+		graph = logosBuildAllocGraph(in, zeroAllocMarks)
+	}
+	if pins || zeroAlloc || graph != nil {
+		logosEscape = &escapeLint{in: in, m: m, pins: pins, zeroAlloc: zeroAlloc, allocFacts: base.LogosAllocFacts, graph: graph}
 		escape.LogosPinning = pins
 	}
 }
@@ -83,17 +91,37 @@ func logosLintActive() bool {
 	return base.LogosCfg != "" && (base.Logos || base.LogosLintOnly)
 }
 
+func logosMergeLockFacts(in *lint.Input) {
+	records := lint.LockFacts(in)
+	if len(records) == 0 {
+		return
+	}
+	f := facts.Current()
+	if f == nil {
+		f = &facts.Facts{GoPackage: !base.Logos}
+		facts.SetCurrent(f)
+	}
+	f.Locks = append(f.Locks, records...)
+}
+
 // logosZeroAllocArm makes escape analysis record the heap allocation sites
 // of the functions of in marked //logos:zeroalloc. It returns the results for
 // directives that mark nothing, and whether any function is marked.
-func logosZeroAllocArm(in *lint.Input) ([]lint.Result, bool) {
+func logosZeroAllocArm(in *lint.Input) ([]lint.Result, bool, []lint.ZeroAllocFunc) {
 	funcs, misplaced := lint.ZeroAllocFuncs(in)
 	marks := make(map[escape.LogosFuncKey]string, len(funcs))
+	recursive := false
 	for _, f := range funcs {
 		marks[escape.LogosFuncKey{File: f.File, Line: f.Line}] = f.Name
+		if !f.Local {
+			recursive = true
+		}
 	}
 	escape.LogosZeroAlloc = marks
-	return misplaced, len(marks) != 0
+	if recursive || base.LogosAllocFacts {
+		escape.LogosFuncAllocs = make(map[escape.LogosFuncKey]bool)
+	}
+	return misplaced, len(marks) != 0, funcs
 }
 
 // LogosLintEscape runs the checks that read escape analysis, once it has run
@@ -112,6 +140,15 @@ func LogosLintEscape() {
 	}
 	if st.zeroAlloc {
 		results = append(results, logosZeroAllocResults(st.in)...)
+	}
+	if st.graph != nil {
+		st.graph.solve()
+		if st.zeroAlloc {
+			results = append(results, lint.ZeroAllocResults(st.in, st.graph.findings())...)
+		}
+		if st.allocFacts {
+			logosMergeAllocFacts(st.graph.allocFreeObjects())
+		}
 	}
 	for _, r := range results {
 		base.LogosReport(logosDiag(st.m, r))
@@ -182,6 +219,11 @@ func logosLintInputs(files []*syntax.File) ([]*syntax.File, map[*syntax.File][]b
 	for _, f := range files {
 		if !isCgoOutput(f.Pos().RelFilename()) {
 			lintable = append(lintable, f)
+		}
+		if _, ok := stashed[f]; !ok {
+			if data, err := os.ReadFile(f.Pos().RelFilename()); err == nil {
+				stashed[f] = data
+			}
 		}
 	}
 	return lintable, stashed

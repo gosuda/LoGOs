@@ -19,7 +19,7 @@ import (
 	"cmd/internal/goobj"
 )
 
-// goRules are the 12 language-neutral rules of SPEC Sec 1.2: the rules
+// goRules are the 19 language-neutral rules of SPEC Sec 1.2: the rules
 // logos lint applies to Go packages.
 var goRules = []string{
 	"correctness::arena_pointer_escape",
@@ -34,6 +34,13 @@ var goRules = []string{
 	"complexity::cognitive_overflow",
 	"perf::large_backing_array_pin",
 	"perf::time_after_in_loop",
+	"concurrency::unguarded_access",
+	"concurrency::nonatomic_access",
+	"concurrency::lock_requirement_unmet",
+	"correctness::layout_constant_mismatch",
+	"portability::atomic_plain_int64",
+	"correctness::linkname_mismatch",
+	"pedantic::unsafe_outside_unsafe_file",
 }
 
 // lgoRules are the 8 rules that never apply to Go packages.
@@ -48,7 +55,7 @@ var lgoRules = []string{
 	"pedantic::exhaustive_union_switch",
 }
 
-// TestRuleScopes asserts that the rules with Go set are exactly the 12
+// TestRuleScopes asserts that the rules with Go set are exactly the 19
 // language-neutral rules, that every registered rule declares a scope
 // (appears in exactly one of the two SPEC lists), that each rule's Group
 // matches its ID, and that the registry has no duplicate. A SPEC rule that
@@ -138,10 +145,10 @@ func g() {
 	}
 }
 
-// TestRuleScopesSpecCounts pins the 12 and 8 of SPEC Sec 1.2.
+// TestRuleScopesSpecCounts pins the 19 and 8 of SPEC Sec 1.2.
 func TestRuleScopesSpecCounts(t *testing.T) {
-	if len(goRules) != 12 || len(lgoRules) != 8 {
-		t.Fatalf("goRules = %d, lgoRules = %d, want 12 and 8", len(goRules), len(lgoRules))
+	if len(goRules) != 19 || len(lgoRules) != 8 {
+		t.Fatalf("goRules = %d, lgoRules = %d, want 19 and 8", len(goRules), len(lgoRules))
 	}
 }
 

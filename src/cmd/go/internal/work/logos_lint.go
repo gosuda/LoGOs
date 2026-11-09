@@ -134,6 +134,9 @@ func logosCompilePolicy(a *Action) []byte {
 	if p.IsLogos() && !cfg.LogosLintCmd {
 		return p.Internal.LogosLint
 	}
+	if cfg.LogosLintCmd && LintsPackage(p) {
+		return p.Internal.LogosLint
+	}
 	return nil
 }
 
@@ -145,6 +148,9 @@ func logosLintFlags(sh *Shell, a *Action) ([]string, error) {
 	var flags []string
 	if cfg.LogosJSON {
 		flags = append(flags, "-logos.json")
+	}
+	if cfg.Logos {
+		flags = append(flags, "-logos.allocfacts")
 	}
 	policy := logosCompilePolicy(a)
 	if policy == nil {
@@ -174,6 +180,9 @@ func logosLintActionID(h io.Writer, a *Action) {
 	}
 	if cfg.LogosJSON {
 		fmt.Fprintf(h, "logos json\n")
+	}
+	if cfg.Logos {
+		fmt.Fprintf(h, "logos allocfacts\n")
 	}
 }
 

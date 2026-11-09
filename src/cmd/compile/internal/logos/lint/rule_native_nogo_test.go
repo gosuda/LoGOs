@@ -6,6 +6,7 @@ package lint
 
 import (
 	"slices"
+	"strings"
 	"testing"
 
 	"internal/testenv"
@@ -85,9 +86,14 @@ func f() {
 			}
 		})
 		t.Run(tt.name+"/go", func(t *testing.T) {
+			want := make([]string, 0, len(tt.want))
+			for _, w := range tt.want {
+				goW, _ := strings.CutSuffix(w, " forbid")
+				want = append(want, goW+" deny")
+			}
 			got := summarize(Run(checkSrc(t, KindGo, "x.go", head+tt.body)))
-			if !slices.Equal(got, tt.want) {
-				t.Errorf("results = %q, want %q", got, tt.want)
+			if !slices.Equal(got, want) {
+				t.Errorf("results = %q, want %q", got, want)
 			}
 		})
 	}
@@ -148,15 +154,15 @@ func reads() int32 {
 			}
 		})
 	}
-	t.Run("silent without pedantic", func(t *testing.T) {
+	t.Run("reports under the default policy", func(t *testing.T) {
 		in := checkSrc(t, KindGo, "x.go", head+`
 func reads() int64 {
 	return atomic.LoadInt64(&plain)
 }
 `)
 		got := summarize(Run(in))
-		if len(got) != 0 {
-			t.Errorf("results = %q, want none", got)
+		if want := []string{"5 portability::atomic_plain_int64 warn"}; !slices.Equal(got, want) {
+			t.Errorf("results = %q, want %q", got, want)
 		}
 	})
 }
@@ -184,13 +190,13 @@ func goodUnlock(m *sync.Mutex)
 func badLock(n int)
 
 var keep = sync.Mutex{}
-`, []string{"8 correctness::linkname_mismatch forbid"}},
+`, []string{"9 correctness::linkname_mismatch deny"}},
 		{"method mismatch", `
 //go:linkname badWait sync.WaitGroup.Done
 func badWait(x int)
 
 var keep = sync.Mutex{}
-`, []string{"8 correctness::linkname_mismatch forbid"}},
+`, []string{"9 correctness::linkname_mismatch deny"}},
 		{"detached directive", `
 //go:linkname detached runtime.fastrand
 

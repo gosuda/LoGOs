@@ -50,6 +50,11 @@ var LogosJSON bool
 // escape rules, and stop before SSA and the backend.
 var LogosLintOnly bool
 
+// LogosAllocFacts is the -logos.allocfacts flag, passed by logos build to
+// every compile: record per-function heap allocations so the package writes
+// AllocFree facts, and check //logos:zeroalloc recursively.
+var LogosAllocFacts bool
+
 // LogosComptimeNodes caps the expanded nodes of one comptime expansion
 // (SPEC Sec 2.5, T-205, #150). The selected-limit tests use the selected
 // value; logos.toml [lints.thresholds] max_comptime_ast_nodes wires to
@@ -61,6 +66,7 @@ func logosRegisterFlags() {
 	flag.StringVar(&LogosCfg, "logos.cfg", "", "read the lint policy from `file`")
 	flag.BoolVar(&LogosJSON, "logos.json", false, "print diagnostics as JSON lines")
 	flag.BoolVar(&LogosLintOnly, "logos.lintonly", false, "lint the package and stop after escape analysis")
+	flag.BoolVar(&LogosAllocFacts, "logos.allocfacts", false, "record per-function heap allocations and write AllocFree facts")
 	flag.StringVar(&LogosEject, "logos.eject", "", "write ejected Go sources to `directory`")
 	flag.StringVar(&LogosMode, "logos.mode", "", "run a logos helper mode (`next`, `context`, or `hints`)")
 	flag.StringVar(&LogosHintsOut, "logos.hintsout", "", "write the logos editor hints of the package to `file`")
