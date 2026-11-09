@@ -131,3 +131,37 @@ func TestBinaryZeroWireBudget(t *testing.T) {
 		t.Errorf("byte-slice path must cap pre-allocation at min(len(rest)/2, 1MB):\n%s", byts)
 	}
 }
+func TestBinaryByteSlicePreallocBound(t *testing.T) {
+	text := lowerStaticText(t, "package p\ntype B struct {\n\tV []byte `json:\"v\"`\n}\n")
+	if !strings.Contains(text, "cap64 := min(n, uint64(len(src)-*off)/2, (1<<20))") {
+		t.Errorf("[]byte path lacks the capped prealloc bound:\n%s", text)
+	}
+	if strings.Contains(text, "make([]byte, 0, int(n))") {
+		t.Errorf("[]byte path pre-allocates the whole count:\n%s", text)
+	}
+}
+func TestBinaryZeroWireNoIteration(t *testing.T) {
+	text := lowerStaticText(t, "package p\ntype Empty struct{}\ntype S struct {\n\tV []Empty `json:\"v\"`\n}\n")
+	if strings.Contains(text, "for i := uint64") {
+		t.Errorf("zero-wire decode must not iterate per element:\n%s", text)
+	}
+	if !strings.Contains(text, "*v = make([]Empty, int(n))") {
+		t.Errorf("zero-wire decode must allocate directly from the count:\n%s", text)
+	}
+}
+
+func TestBinaryUnsupportedShapes(t *testing.T) {
+	for name, decl := range map[string]string{
+		"chan":    "type S struct { C chan int `json:\"c\"` }\n",
+		"func":    "type S struct { F func() `json:\"f\"` }\n",
+		"complex": "type S struct { C complex128 `json:\"c\"` }\n",
+		"union":   "type A struct { X int `json:\"x\"` }\ntype B struct { Y int `json:\"y\"` }\ntype U interface { A | B }\ntype S struct { M U `json:\"m\"` }\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			text := lowerStaticText(t, "package p\n\n"+decl)
+			if strings.Contains(text, "func (_logos_v S) MarshalBinary()") || strings.Contains(text, "func (_logos_v *S) UnmarshalBinary(") {
+				t.Fatalf("unsupported shape %s got binary methods:\n%s", name, text)
+			}
+		})
+	}
+}
