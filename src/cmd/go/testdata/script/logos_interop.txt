@@ -36,6 +36,10 @@ cd ..
 
 cd ws
 logos build ./...
+logos vet ./...
+logos test ./...
+stdout '^ok\s+example\.com/gws'
+stdout '^ok\s+example\.com/lws'
 go build -o $WORK/bin/gohello-plain$GOEXE ./gomod
 logos build -o $WORK/bin/gohello$GOEXE ./gomod
 logos build -o $WORK/bin/lgohello$GOEXE ./lgomod
@@ -237,4 +241,26 @@ import "fmt"
 
 func main() {
 	fmt.Println("lgo-ok")
+}
+
+-- ws/gomod/main_test.go --
+package main
+
+import "testing"
+
+func TestGoHello(t *testing.T) {
+	if 1+1 != 2 {
+		t.Fatal("bad arithmetic")
+	}
+}
+
+-- ws/lgomod/main_test.lgo --
+package main
+
+import "testing"
+
+func TestLgoHello(t *testing.T) {
+	if 1+1 != 2 {
+		t.Fatalf("bad arithmetic")
+	}
 }
