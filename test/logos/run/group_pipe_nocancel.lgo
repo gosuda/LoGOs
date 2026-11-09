@@ -33,8 +33,12 @@ func run(r net.Conn, w net.Conn) error {
 		go sibling()
 		go {
 			time.Sleep(300 * time.Millisecond)
-			w.Write([]byte("x"))
-			w.Close()
+			if _, err := w.Write([]byte("x")); err != nil {
+				fmt.Println("write:", err)
+			}
+			if err := w.Close(); err != nil {
+				fmt.Println("close:", err)
+			}
 		}
 	}
 	return nil
