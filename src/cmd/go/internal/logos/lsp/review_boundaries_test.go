@@ -11,11 +11,6 @@ import (
 	"testing"
 )
 
-// TestProxyCloseUnsavedDocumentRecompilesRetainedPackage verifies PRRT_kwDOVOeymc6vYBsI:
-// When an unsaved .lgo document is closed while a sibling document in the same package
-// remains open, the proxy must mark the retained package dirty, recompile against disk,
-// update gopls with the restored disk lowering, and ensure subsequent queries from sibling
-// and dependent packages reflect the on-disk source rather than discarded in-memory edits.
 func TestProxyCloseUnsavedDocumentRecompilesRetainedPackage(t *testing.T) {
 	const doc1Disk = `package a
 
@@ -79,32 +74,24 @@ func Dependent() int {
 		},
 	})
 
-	// Open both same-package documents and the dependent unit document.
 	f.open("a/doc1.lgo", 1)
 	f.open("a/doc2.lgo", 1)
 	f.open("b/b.lgo", 1)
 
-	// Apply an unsaved edit to doc1.lgo that shifts lines downward.
-	const prefix = "\n\n\n\n\n\n\n\n\n\n" // 10 lines
+	const prefix = "\n\n\n\n\n\n\n\n\n\n"
 	unsavedDoc1 := prefix + doc1Disk
 	f.client.notify("textDocument/didChange", map[string]any{
 		"textDocument":   map[string]any{"uri": f.uri("a/doc1.lgo"), "version": 2},
 		"contentChanges": []any{map[string]any{"text": unsavedDoc1}},
 	})
 
-	// Synchronize with the proxy via an explicit request to compile the unsaved edit.
 	posUnsaved := Position{Line: posHelperDisk.Line + 10, Character: posHelperDisk.Character}
 	f.client.call("textDocument/hover", positionParams(f.uri("a/doc1.lgo"), posUnsaved))
 
-	// Close doc1.lgo without saving.
-	// Sibling doc2.lgo remains open in package a, and b.lgo remains open in package b.
 	f.client.notify("textDocument/didClose", map[string]any{
 		"textDocument": map[string]any{"uri": f.uri("a/doc1.lgo")},
 	})
 
-	// Query definition of Helper from sibling doc2.lgo.
-	// Because doc1 was closed without saving, its lowering and position mapping
-	// must reflect the on-disk source, mapping Helper to rangeHelperDisk.
 	siblingCallPos := findPos(t, doc2Disk, "Helper", 0)
 	resSibling := f.client.call("textDocument/definition", positionParams(f.uri("a/doc2.lgo"), siblingCallPos))
 	wantDef := []any{
@@ -115,13 +102,10 @@ func Dependent() int {
 	}
 	sameJSON(t, "sibling definition query reflects disk", resSibling, wantDef)
 
-	// Query definition of Helper from dependent unit b.lgo.
-	// The dependent unit must also reflect doc1 on disk.
 	depCallPos := findPos(t, depDisk, "Helper", 0)
 	resDep := f.client.call("textDocument/definition", positionParams(f.uri("b/b.lgo"), depCallPos))
 	sameJSON(t, "dependent unit definition query reflects disk", resDep, wantDef)
 
-	// Gopls must have received didChange for the virtual document restoring the disk content.
 	var lastVirtText string
 	for _, m := range f.receivedMethod("textDocument/didChange") {
 		td, _ := m["textDocument"].(map[string]any)
@@ -140,11 +124,6 @@ func Dependent() int {
 	}
 }
 
-// TestProxyFormattingRejectsLoweredGoForLogosAndPreservesGo verifies PRRT_kwDOVOeymc6vYBsT:
-// Formatting requests on .lgo documents must not emit lowered Go statements, imports,
-// or generated identifiers into source files (declining formatting with null, empty edits,
-// or an error is allowed). Meanwhile, formatting on ordinary .go documents must remain
-// supported and be forwarded to gopls unchanged.
 func TestProxyFormattingRejectsLoweredGoForLogosAndPreservesGo(t *testing.T) {
 	const origLgo = `package a
 
@@ -186,9 +165,6 @@ func Read(path string) (string, error) {
 			"options":      map[string]any{"tabSize": 8, "insertSpaces": false},
 		})
 
-		// A formatting request for a .lgo document must not emit edits containing
-		// lowered Go text (such as generated error traces, synthetic sites, or lowered Go statements).
-		// Declining formatting with an error, null result, or empty edit list is permitted.
 		if len(msg.Error) == 0 && string(msg.Result) != "null" && string(msg.Result) != "[]" {
 			var edits []struct {
 				Range   Range  `json:"range"`

@@ -2,18 +2,6 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// Package capabilities evaluates the logos.toml [capabilities] policy for
-// the loGo/s capabilities auditor (M12).
-//
-// The auditor denies transitive dependencies that import "unsafe" (this
-// package, enforced by cmd/go at load time) and transitive dependencies
-// that reach reflect, exec, net, or cgo sinks (enforced by the linker,
-// M12-S2). The standard library is exempt and the policy applies to Go and
-// loGo/s modules alike under the logos command; plain go runs no audit.
-//
-// This package stays free of cmd/go internals so its policy core is unit
-// testable: callers project their package graph onto Node values and pass
-// the parsed severities and allowlists alongside.
 package capabilities
 
 import (
@@ -23,21 +11,14 @@ import (
 	"strings"
 )
 
-// Severity names a policy severity: "deny" fails the build,
-// "warn" prints a diagnostic and continues, "allow" stays silent.
 type Severity string
 
-// Severities of the capabilities policy.
 const (
 	Deny  Severity = "deny"
 	Warn  Severity = "warn"
 	Allow Severity = "allow"
 )
 
-// Node is the auditor's view of one loaded package: its import path, the
-// resolved import paths it uses, and whether it is standard library or in
-// a main module. Main-module packages seed the import-chain search and are
-// never blamed; standard-library packages are exempt.
 type Node struct {
 	ImportPath string
 	Imports    []string
@@ -45,19 +26,11 @@ type Node struct {
 	Main       bool
 }
 
-// Violation is one transitive dependency importing "unsafe": the blamed
-// package path and the shortest import chain from a main-module package,
-// ending in "unsafe".
 type Violation struct {
 	Dep   string
 	Chain []string
 }
 
-// CheckUnsafe walks the package graph from main-module packages and
-// reports every transitive dependency that imports "unsafe" and matches
-// no allowlist glob. An "allow" severity skips the walk and reports
-// nothing. The standard library, main-module packages, and module-less
-// packages (command-line-arguments file lists) are never blamed.
 func CheckUnsafe(sev Severity, allowlist []string, all []Node) []Violation {
 	if sev == Allow {
 		return nil
@@ -105,14 +78,10 @@ func CheckUnsafe(sev Severity, allowlist []string, all []Node) []Violation {
 	return out
 }
 
-// exempt reports whether n is never blamed: standard library, main-module
-// packages (first-party code), and module-less file lists.
 func exempt(n Node) bool {
 	return n.Goroot || n.Main || n.ImportPath == "" || n.ImportPath == "unsafe"
 }
 
-// chainTo rebuilds the shortest import chain from a main-module package
-// to dep through the BFS parent map.
 func chainTo(parent map[string]string, dep string) []string {
 	var rev []string
 	for cur := dep; cur != ""; cur = parent[cur] {
@@ -122,10 +91,6 @@ func chainTo(parent map[string]string, dep string) []string {
 	return rev
 }
 
-// Allowlisted reports whether importPath matches one of the allowlist
-// globs. A trailing "/**" matches the prefix itself and everything under
-// it; a "**" anywhere else matches any suffix including path separators;
-// other patterns match by path.Match (*, ?, [...] classes).
 func Allowlisted(allowlist []string, importPath string) bool {
 	for _, pattern := range allowlist {
 		if matchGlob(pattern, importPath) {
@@ -135,10 +100,6 @@ func Allowlisted(allowlist []string, importPath string) bool {
 	return false
 }
 
-// matchGlob matches one allowlist glob against one import path. A trailing
-// "/**" matches the prefix itself and everything under it; any other "**"
-// segment spans zero or more segments; remaining segments match without
-// crossing slashes.
 func matchGlob(pattern, importPath string) bool {
 	if prefix, ok := strings.CutSuffix(pattern, "/**"); ok {
 		if importPath == prefix || strings.HasPrefix(importPath, prefix+"/") {
@@ -152,9 +113,6 @@ func matchGlob(pattern, importPath string) bool {
 	return matchSegPatterns(strings.Split(pattern, "/"), strings.Split(importPath, "/"))
 }
 
-// matchSegPatterns matches glob segments against path segments, where a
-// "**" segment spans zero or more segments and every other segment matches
-// exactly one path segment.
 func matchSegPatterns(pats, segs []string) bool {
 	if len(pats) == 0 {
 		return len(segs) == 0
@@ -177,7 +135,6 @@ func matchSegPatterns(pats, segs []string) bool {
 	return matchSegPatterns(pats[1:], segs[1:])
 }
 
-// FormatViolation renders one violation in the auditor report format.
 func FormatViolation(v Violation) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "ERROR [capabilities::unauthorized_unsafe]: Transitive dependency '%s' imports 'unsafe'\n", v.Dep)
@@ -193,7 +150,6 @@ func FormatViolation(v Violation) string {
 	return b.String()
 }
 
-// FormatWarning renders the warn-severity diagnostic for one violation.
 func FormatWarning(v Violation) string {
 	return "go: warning: " + FormatViolation(v)
 }

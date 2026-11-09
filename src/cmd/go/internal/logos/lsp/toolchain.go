@@ -22,14 +22,8 @@ import (
 	"cmd/go/internal/cfg"
 )
 
-// compiledArgs are the arguments of the one logos list run that lowers a
-// package and its closure: -compiled builds the export data, -json prints
-// the packages with the logos fields, the overlay carries the unsaved
-// buffers, and --json-diagnostics turns the compile diagnostics of the
-// build into JSON lines on stderr.
 var compiledArgs = []string{"list", "-e", "-deps", "-export", "-compiled", "-json", "--json-diagnostics"}
 
-// compiledPkg is one package of a logos list -compiled -json run.
 type compiledPkg struct {
 	Dir        string
 	Standard   bool
@@ -39,16 +33,12 @@ type compiledPkg struct {
 	LogosDiags []json.RawMessage
 }
 
-// compiledFile is the lowering of one loGo/s source file.
 type compiledFile struct {
 	File         string
 	LogosLowered string
 	LogosEditMap json.RawMessage
 }
 
-// listRun is the result of one logos list -compiled run over a version
-// set: the lowering of every package of the closure, the diagnostics of
-// the build by package directory, and the hints JSON by package directory.
 type listRun struct {
 	key   string
 	pkgs  []compiledPkg
@@ -56,14 +46,6 @@ type listRun struct {
 	hints map[string]json.RawMessage
 }
 
-// toolchain is the production Compiler. It runs the logos command, the
-// executable of the process itself, as a subprocess, so a fatal error of
-// the go command never takes the proxy down. One logos list -compiled
-// -json -overlay=<file> run lowers every loGo/s file of the closure, and
-// returns the lowered texts, the edit maps, the hints JSON, and the
-// compiler diagnostics of the build. Unsaved buffers reach the run through
-// its -overlay flag. The result of a run is kept for its version set: a
-// Lower, a Diagnose, and a Hints call on the same inputs share one run.
 type toolchain struct {
 	exe string
 
@@ -71,23 +53,15 @@ type toolchain struct {
 	last *listRun
 }
 
-// newToolchain returns a toolchain that runs exe as logos.
 func newToolchain(exe string) *toolchain {
 	return &toolchain{exe: exe}
 }
 
-// overlay is the -overlay file of one run, with the backing copies of the
-// buffers it replaces.
 type overlay struct {
 	json string
 	back map[string]string
 }
 
-// newOverlay writes the buffers to backing files and the overlay JSON
-// that maps each source path to its backing file. A backing file keeps the
-// base name of its source, so the compiler still sees a loGo/s file and
-// names its output after the source; each lives in a directory of its own
-// so equal base names cannot collide.
 func newOverlay(buffers map[string][]byte) (*overlay, error) {
 	root, err := os.MkdirTemp("", "logoslsp")
 	if err != nil {
@@ -121,13 +95,10 @@ func newOverlay(buffers map[string][]byte) (*overlay, error) {
 	return ov, nil
 }
 
-// release removes the overlay files.
 func (ov *overlay) release() error {
 	return os.RemoveAll(filepath.Dir(ov.json))
 }
 
-// source returns the source path a compiler path refers to: the path of
-// the buffer when file is one of the backing files, else file itself.
 func (ov *overlay) source(file string) string {
 	if path, ok := ov.back[file]; ok {
 		return path
@@ -135,10 +106,6 @@ func (ov *overlay) source(file string) string {
 	return file
 }
 
-// run executes the logos command with args in dir and returns what it
-// wrote to stdout and stderr. The command runs as "logos" whatever the
-// executable is named, so it keeps logos mode. A command that ran and
-// failed is not an error here: its diagnostics are the answer.
 func (t *toolchain) run(ctx context.Context, dir string, args ...string) (stdout, stderr []byte, err error) {
 	cmd := exec.CommandContext(ctx, t.exe, args...)
 	cmd.Args[0] = "logos"
@@ -152,8 +119,6 @@ func (t *toolchain) run(ctx context.Context, dir string, args ...string) (stdout
 	return so.Bytes(), se.Bytes(), err
 }
 
-// runKey identifies the inputs of one run: the package directory and the
-// unsaved buffers.
 func runKey(dir string, buffers map[string][]byte) string {
 	h := sha256.New()
 	h.Write([]byte(filepath.Clean(dir)))
@@ -167,8 +132,6 @@ func runKey(dir string, buffers map[string][]byte) string {
 	return string(h.Sum(nil))
 }
 
-// runOnce performs the one logos list run for dir over buffers, or returns
-// the result of the last run over the same inputs.
 func (t *toolchain) runOnce(ctx context.Context, dir string, buffers map[string][]byte) (*listRun, error) {
 	key := runKey(dir, buffers)
 	t.mu.Lock()
@@ -216,11 +179,6 @@ func (t *toolchain) runOnce(ctx context.Context, dir string, buffers map[string]
 	return last, nil
 }
 
-// parseCompiledDiags decodes the diagnostics of the run: the JSON lines it
-// wrote to stderr, and the LogosDiags lines of each package, which carry
-// the compile diagnostics of a package that failed to build. Each file is
-// mapped back from its overlay backing copy to the source, and the
-// diagnostics are grouped by package directory.
 func parseCompiledDiags(stderr []byte, ov *overlay, pkgs []compiledPkg) map[string][]Diagnostic {
 	diags := make(map[string][]Diagnostic)
 	add := func(line []byte) {
@@ -246,10 +204,6 @@ func parseCompiledDiags(stderr []byte, ov *overlay, pkgs []compiledPkg) map[stri
 	return diags
 }
 
-// hasDiagnostic reports whether out already holds the rule-less diagnostic
-// d: same mapped file, span, severity, and message, and no rule on either
-// side. Every lint and helper finding carries a rule, so only the native
-// type errors both compile paths emit can match here.
 func hasDiagnostic(out []Diagnostic, d Diagnostic) bool {
 	if d.RuleID != "" {
 		return false
@@ -259,10 +213,6 @@ func hasDiagnostic(out []Diagnostic, d Diagnostic) bool {
 	})
 }
 
-// Lower implements Compiler. It takes the lowering of dir and its closure
-// from the one logos list run: every loGo/s file of the closure with a
-// lowered text and an edit map is a file of the result, one whose package
-// failed to compile is missing.
 func (t *toolchain) Lower(ctx context.Context, dir string, buffers map[string][]byte) (*Lowering, error) {
 	last, err := t.runOnce(ctx, dir, buffers)
 	if err != nil {
@@ -299,9 +249,6 @@ func (t *toolchain) Lower(ctx context.Context, dir string, buffers map[string][]
 	return low, nil
 }
 
-// compiledLoweredFile assembles the LoweredFile of one compiled file. The
-// source text is the buffer when the document is open, else the file on
-// disk.
 func compiledLoweredFile(path string, f compiledFile, buffers map[string][]byte) (LoweredFile, error) {
 	var file LoweredFile
 	var err error
@@ -317,8 +264,6 @@ func compiledLoweredFile(path string, f compiledFile, buffers map[string][]byte)
 	return file, nil
 }
 
-// sourceText returns the text of the source at path: the buffer when the
-// document is open, else the file on disk.
 func sourceText(path string, buffers map[string][]byte) ([]byte, error) {
 	if data, ok := buffers[path]; ok {
 		return data, nil
@@ -326,9 +271,6 @@ func sourceText(path string, buffers map[string][]byte) ([]byte, error) {
 	return os.ReadFile(path)
 }
 
-// Diagnose implements Compiler. The diagnostics come from the same logos
-// list run that lowered the package: --json-diagnostics turned them into
-// JSON lines on stderr.
 func (t *toolchain) Diagnose(ctx context.Context, dir string, buffers map[string][]byte) ([]Diagnostic, error) {
 	last, err := t.runOnce(ctx, dir, buffers)
 	if err != nil {
@@ -337,9 +279,6 @@ func (t *toolchain) Diagnose(ctx context.Context, dir string, buffers map[string
 	return last.diags[filepath.Clean(dir)], nil
 }
 
-// Hints returns the hints JSON of the package in dir, from the same logos
-// list run that lowered it: -compiled computed the hints of every package
-// that a client of the closure needs.
 func (t *toolchain) Hints(ctx context.Context, dir string, buffers map[string][]byte) (json.RawMessage, error) {
 	last, err := t.runOnce(ctx, dir, buffers)
 	if err != nil {

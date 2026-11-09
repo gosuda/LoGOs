@@ -2,12 +2,6 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// Package next implements logos next: it converts a whole Go module to
-// a loGo/s module with byte-span splicing. Plain next prints a unified
-// diff and changes nothing; next --fix renames every Go file to .lgo,
-// rewrites err-return checks to ?, Sprintf calls to interpolation, and
-// pure index-range append loops to map chains, and writes
-// next_tasks.json; next --ai-patch writes and prints the task plan.
 package next
 
 import (
@@ -30,7 +24,6 @@ import (
 	"cmd/go/internal/work"
 )
 
-// CmdNext implements the logos next command.
 var CmdNext = &base.Command{
 	Run:       runNext,
 	UsageLine: "logos next [--fix | --ai-patch]",
@@ -50,26 +43,20 @@ listed in next_tasks.json for AI patching.
 	`,
 }
 
-// nextFix applies rewrites and renames when set; nextAIPatch writes the
-// task plan without renaming.
 var nextFix bool
 
-// nextAIPatch writes and prints the task plan without renaming.
 var nextAIPatch bool
 
-// init defines the logos next flags.
 func init() {
 	CmdNext.Flag.BoolVar(&nextFix, "fix", false, "")
 	CmdNext.Flag.BoolVar(&nextAIPatch, "ai-patch", false, "")
 	base.AddChdirFlag(&CmdNext.Flag)
 }
 
-// Register adds the next subcommand to the logos root command.
 func Register(root *base.Command) {
 	root.Commands = append(root.Commands, CmdNext)
 }
 
-// wireEdit mirrors the compiler sidecar edit schema.
 type wireEdit struct {
 	StartLine   int    `json:"start_line"`
 	StartCol    int    `json:"start_col"`
@@ -78,7 +65,6 @@ type wireEdit struct {
 	Replacement string `json:"replacement"`
 }
 
-// wireTask mirrors the compiler sidecar task schema.
 type wireTask struct {
 	Category    string `json:"category"`
 	Rule        string `json:"rule"`
@@ -88,7 +74,6 @@ type wireTask struct {
 	Instruction string `json:"ai_instruction"`
 }
 
-// wireFile mirrors one compiler sidecar file report.
 type wireFile struct {
 	File  string     `json:"file"`
 	Sum   string     `json:"sha256"`
@@ -96,20 +81,17 @@ type wireFile struct {
 	Tasks []wireTask `json:"tasks"`
 }
 
-// wireReport mirrors one compiler sidecar line.
 type wireReport struct {
 	Version string     `json:"version"`
 	Package string     `json:"package"`
 	Files   []wireFile `json:"files"`
 }
 
-// taskSpan holds the remapped span of one task.
 type taskSpan struct {
 	Start int `json:"start_line"`
 	End   int `json:"end_line"`
 }
 
-// planTask is one next_tasks.json entry.
 type planTask struct {
 	ID        string   `json:"id"`
 	Category  string   `json:"category"`
@@ -121,13 +103,11 @@ type planTask struct {
 	VerifyCmd string   `json:"verification_cmd"`
 }
 
-// planFile is the next_tasks.json schema.
 type planFile struct {
 	Version string     `json:"version"`
 	Tasks   []planTask `json:"tasks"`
 }
 
-// fileWork groups the scan findings of one module file.
 type fileWork struct {
 	rel   string
 	data  []byte
@@ -135,7 +115,6 @@ type fileWork struct {
 	tasks []wireTask
 }
 
-// runNext implements the logos next command.
 func runNext(ctx context.Context, cmd *base.Command, args []string) {
 	if len(args) > 0 {
 		base.Fatalf("logos next: unexpected package arguments")
@@ -161,15 +140,12 @@ func runNext(ctx context.Context, cmd *base.Command, args []string) {
 	}
 }
 
-// scanState carries one logos next run from load to output.
 type scanState struct {
 	files map[string]*fileWork
 	order []string
 	tasks []planTask
 }
 
-// scanModule loads the main module, builds it with scanning armed, and
-// merges the compiler sidecars into file work.
 func scanModule(ctx context.Context, moddir string) *scanState {
 	staging, err := os.MkdirTemp("", "logosnext")
 	if err != nil {
@@ -200,7 +176,6 @@ func scanModule(ctx context.Context, moddir string) *scanState {
 	return state
 }
 
-// nextRoots returns the main-module Go packages to convert, sorted.
 func nextRoots(pkgs []*load.Package) []*load.Package {
 	var roots []*load.Package
 	for _, p := range load.PackageList(pkgs) {
@@ -213,7 +188,6 @@ func nextRoots(pkgs []*load.Package) []*load.Package {
 	return roots
 }
 
-// nextRootKeep reports whether p is a main-module convertible package.
 func nextRootKeep(p *load.Package) bool {
 	if p.Module == nil {
 		return false
@@ -236,8 +210,6 @@ func nextRootKeep(p *load.Package) bool {
 	return load.HasNextFiles(p)
 }
 
-// doBuild runs the build graph over roots. A failed build exits before
-// any output is written.
 func doBuild(b *work.Builder, moduleLoader *modload.Loader, ctx context.Context, roots []*load.Package) {
 	root := &work.Action{Mode: "go build"}
 	for _, p := range roots {
@@ -252,7 +224,6 @@ func doBuild(b *work.Builder, moduleLoader *modload.Loader, ctx context.Context,
 	}
 }
 
-// buildNextRoots compiles roots and their dependencies with ModeBuild.
 func buildNextRoots(moduleLoader *modload.Loader, ctx context.Context, roots []*load.Package) {
 	b := work.NewBuilder("", moduleLoader.VendorDirOrEmpty)
 	defer func() {
@@ -263,9 +234,6 @@ func buildNextRoots(moduleLoader *modload.Loader, ctx context.Context, roots []*
 	doBuild(b, moduleLoader, ctx, roots)
 }
 
-// buildNextTests compiles the test mains of roots so test files scan.
-// Each test main is redirected to its objdir with its generated source,
-// mirroring the go test build.
 func buildNextTests(moduleLoader *modload.Loader, ctx context.Context, opts load.PackageOpts, roots []*load.Package) {
 	b := work.NewBuilder("", moduleLoader.VendorDirOrEmpty)
 	defer func() {
@@ -288,8 +256,6 @@ func buildNextTests(moduleLoader *modload.Loader, ctx context.Context, opts load
 	doBuild(b, moduleLoader, ctx, mains)
 }
 
-// buildNextTestMain returns the staged test main of one root package,
-// or nil when the package has no test files.
 func buildNextTestMain(ctx context.Context, moduleLoader *modload.Loader, opts load.PackageOpts, p *load.Package) *load.Package {
 	if len(p.TestGoFiles) == 0 && len(p.XTestGoFiles) == 0 {
 		return nil
@@ -304,8 +270,6 @@ func buildNextTestMain(ctx context.Context, moduleLoader *modload.Loader, opts l
 	return pmain
 }
 
-// stageNextTestMain redirects one test main into its objdir with its
-// generated source, mirroring the go test build.
 func stageNextTestMain(b *work.Builder, pmain *load.Package) {
 	testDir := b.CompileAction(work.ModeBuild, work.ModeBuild, pmain).Objdir
 	if err := os.MkdirAll(testDir, 0777); err != nil {
@@ -317,8 +281,6 @@ func stageNextTestMain(b *work.Builder, pmain *load.Package) {
 	}
 }
 
-// readSidecar merges the compiler findings into file work, verifying
-// digests and rejecting overlaps before anything is written.
 func (s *scanState) readSidecar(sidecar, moddir string) {
 	known := walkGoFiles(moddir)
 	lines := readLines(sidecar)
@@ -360,9 +322,6 @@ func (s *scanState) readSidecar(sidecar, moddir string) {
 	s.assignTasks()
 }
 
-// walkGoFiles lists the convertible Go files of the module: .go files
-// outside vendor and testdata that the tool builds. Any .lgo file
-// rejects the run: next converts whole Go modules.
 func walkGoFiles(moddir string) map[string]string {
 	known := map[string]string{}
 	err := filepath.WalkDir(moddir, func(path string, d os.DirEntry, err error) error {
@@ -386,8 +345,6 @@ func walkGoFiles(moddir string) map[string]string {
 	return known
 }
 
-// walkNextSkipDir reports whether a directory stays out of the
-// conversion: vendor, testdata, and dot directories below the root.
 func walkNextSkipDir(path, moddir string) bool {
 	if path == moddir {
 		return false
@@ -402,9 +359,6 @@ func walkNextSkipDir(path, moddir string) bool {
 	return false
 }
 
-// walkNextFileOK reports whether a file converts to loGo/s: a .go file
-// whose name starts with neither underscore nor dot. Any .lgo file
-// rejects the run.
 func walkNextFileOK(path string) bool {
 	if strings.HasSuffix(path, ".lgo") {
 		base.Fatalf("logos next: module already holds loGo/s file %s", path)
@@ -419,8 +373,6 @@ func walkNextFileOK(path string) bool {
 	return true
 }
 
-// walkNextCollect records the absolute-to-relative mapping of one Go
-// file.
 func walkNextCollect(known map[string]string, moddir, path string) error {
 	abs, err := filepath.Abs(path)
 	if err != nil {
@@ -434,7 +386,6 @@ func walkNextCollect(known map[string]string, moddir, path string) error {
 	return nil
 }
 
-// readLines reads the sidecar lines, tolerating a missing file.
 func readLines(sidecar string) []string {
 	data, err := os.ReadFile(sidecar)
 	if err != nil {
@@ -452,7 +403,6 @@ func readLines(sidecar string) []string {
 	return lines
 }
 
-// dedupEdits drops exact duplicate edits from overlapping test builds.
 func dedupEdits(edits []wireEdit) []wireEdit {
 	seen := map[wireEdit]bool{}
 	var out []wireEdit
@@ -469,7 +419,6 @@ func dedupEdits(edits []wireEdit) []wireEdit {
 	return out
 }
 
-// checkOverlaps rejects overlapping edits of one file.
 func checkOverlaps(rel string, edits []wireEdit) {
 	for i := 1; i < len(edits); i++ {
 		prev := edits[i-1]
@@ -480,8 +429,6 @@ func checkOverlaps(rel string, edits []wireEdit) {
 	}
 }
 
-// assignTasks remaps task spans onto converted lines and numbers them.
-// Test builds rescan the same files, so exact duplicates collapse.
 func (s *scanState) assignTasks() {
 	seen := map[planTask]bool{}
 	n := 0
@@ -511,7 +458,6 @@ func (s *scanState) assignTasks() {
 	}
 }
 
-// remap shifts a pre-conversion line past earlier edits.
 func remap(edits []wireEdit, line int) int {
 	orig := line
 	delta := 0
@@ -523,17 +469,14 @@ func remap(edits []wireEdit, line int) int {
 	return orig + delta
 }
 
-// newLines counts the lines of replacement text.
 func newLines(s string) int {
 	return strings.Count(s, "\n") + 1
 }
 
-// lgoName renames a .go path to .lgo.
 func lgoName(rel string) string {
 	return strings.TrimSuffix(rel, ".go") + ".lgo"
 }
 
-// planData renders the task plan as indented JSON.
 func (s *scanState) planData() []byte {
 	plan := planFile{Version: "logos-next-1", Tasks: s.tasks}
 	if plan.Tasks == nil {
@@ -549,20 +492,16 @@ func (s *scanState) planData() []byte {
 	return buf.Bytes()
 }
 
-// writePlan writes next_tasks.json to the module root.
 func (s *scanState) writePlan(moddir string) {
 	if err := os.WriteFile(filepath.Join(moddir, "next_tasks.json"), s.planData(), 0666); err != nil {
 		base.Fatalf("logos next: %v", err)
 	}
 }
 
-// printPlan prints the task plan to stdout.
 func (s *scanState) printPlan() {
 	fmt.Printf("%s", s.planData())
 }
 
-// applyEdits splices replacements into data at offsets. Edits apply
-// back to front so earlier offsets stay valid.
 func applyEdits(data []byte, edits []wireEdit) []byte {
 	starts := lineStartsOf(data)
 	out := data
@@ -582,7 +521,6 @@ func applyEdits(data []byte, edits []wireEdit) []byte {
 	return out
 }
 
-// lineStartsOf returns the offset of each line start.
 func lineStartsOf(data []byte) []int {
 	starts := []int{0}
 	for i, c := range data {
@@ -593,8 +531,6 @@ func lineStartsOf(data []byte) []int {
 	return starts
 }
 
-// offsetOf converts a 1-based line and byte column to an offset,
-// or -1 when out of range.
 func offsetOf(starts []int, size, line, col int) int {
 	if line < 1 || line > len(starts) || col < 1 {
 		return -1
@@ -613,8 +549,6 @@ func offsetOf(starts []int, size, line, col int) int {
 	return off
 }
 
-// apply renames every Go file to .lgo with rewrites applied, after all
-// validation already passed.
 func (s *scanState) apply(moddir string) {
 	known := walkGoFiles(moddir)
 	rels := slices.Sorted(maps.Values(known))
@@ -645,7 +579,6 @@ func (s *scanState) apply(moddir string) {
 	fmt.Printf("logos next: converted %d files with %d rewrites; %d tasks in next_tasks.json\n", len(rels), rewrites, len(s.tasks))
 }
 
-// printDiff prints the unified diff of every rewrite.
 func (s *scanState) printDiff() {
 	shown := false
 	for _, rel := range s.order {
@@ -664,13 +597,10 @@ func (s *scanState) printDiff() {
 	}
 }
 
-// diffContext is the number of unchanged lines around every hunk.
 const diffContext = 3
 
-// lineSpan is one changed line range.
 type lineSpan struct{ s, e int }
 
-// hunks splits one file rewrite into unified hunks with context.
 func hunks(w *fileWork) []string {
 	oldLines := fileLines(w.data)
 	newLines := fileLines(applyEdits(w.data, w.edits))
@@ -703,20 +633,16 @@ func hunks(w *fileWork) []string {
 	return out
 }
 
-// fileLines splits data into lines without the final line break.
 func fileLines(data []byte) []string {
 	return strings.Split(strings.TrimSuffix(string(data), "\n"), "\n")
 }
 
-// diffOp is one unified line: shared, removed, or added.
 type diffOp struct {
 	kind byte
 	a    string
 	b    string
 }
 
-// diffOps aligns two line windows with a longest common subsequence,
-// emitting shared, removed, and added lines in order.
 func diffOps(a, b []string) []diffOp {
 	rev := diffBacktrack(a, b, diffTable(a, b))
 	out := make([]diffOp, 0, len(rev))
@@ -726,8 +652,6 @@ func diffOps(a, b []string) []diffOp {
 	return out
 }
 
-// diffTable builds the longest-common-subsequence length table of two
-// line windows.
 func diffTable(a, b []string) []int {
 	n, m := len(a), len(b)
 	width := m + 1
@@ -749,8 +673,6 @@ func diffTable(a, b []string) []int {
 	return dp
 }
 
-// diffBacktrack walks one LCS table back to shared, removed, and added
-// lines in reverse order.
 func diffBacktrack(a, b []string, dp []int) []diffOp {
 	n, m := len(a), len(b)
 	width := m + 1
@@ -781,7 +703,6 @@ func diffBacktrack(a, b []string, dp []int) []diffOp {
 	return rev
 }
 
-// deltaLines counts the net new lines of edits inside a range.
 func deltaLines(edits []wireEdit, s, e int) int {
 	d := 0
 	for _, ed := range edits {
@@ -792,8 +713,6 @@ func deltaLines(edits []wireEdit, s, e int) int {
 	return d
 }
 
-// mergeSpans merges line spans whose context windows overlap or touch,
-// so two changes at most twice the context apart share one hunk.
 func mergeSpans(spans []lineSpan) []lineSpan {
 	if len(spans) == 0 {
 		return nil
@@ -812,7 +731,6 @@ func mergeSpans(spans []lineSpan) []lineSpan {
 	return out
 }
 
-// clamp pins v into [1, hi].
 func clamp(v, hi int) int {
 	if v < 1 {
 		return 1

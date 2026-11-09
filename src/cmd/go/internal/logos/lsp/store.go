@@ -15,16 +15,12 @@ import (
 	"sync"
 )
 
-// document is an open document of the client.
 type document struct {
 	uri     string
 	version int
 	text    *text
 }
 
-// unit is the lowered snapshot of one package directory: the dependency
-// closure it was last compiled with, and what that compile produced. A
-// package holds at most one snapshot at a time.
 type unit struct {
 	dir   string
 	dirs  map[string]bool
@@ -32,28 +28,18 @@ type unit struct {
 	diags []Diagnostic
 	dirty bool
 
-	// diagVersions holds the version of each open document at the time diags
-	// was computed, so diagnostics are never shown against a newer text.
 	diagVersions map[string]int
 
-	// gen counts the changes of the unit's inputs and results, so work
-	// computed from an older state is never stored as current.
 	gen int
 
 	hints   json.RawMessage
 	hintsOK bool
 }
 
-// flight is one snapshot computation in progress. Concurrent callers wait
-// for done instead of computing again.
 type flight struct {
 	done chan struct{}
 }
 
-// store holds the documents keyed by source URI and the lowered snapshot
-// of each package. Its mutex guards the documents and the units; the
-// flights turn concurrent requests on one version set into one snapshot
-// computation.
 type store struct {
 	mu      sync.Mutex
 	docs    map[string]*document
@@ -67,15 +53,12 @@ func (s *store) init() {
 	s.flights = make(map[string]*flight)
 }
 
-// open reports whether the document at path is open.
 func (s *store) open(path string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.docs[path] != nil
 }
 
-// setDoc records an opened document and marks the packages that its
-// directory feeds for a snapshot.
 func (s *store) setDoc(uri, path string, version int, t *text) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -83,8 +66,6 @@ func (s *store) setDoc(uri, path string, version int, t *text) {
 	s.touchLocked(path)
 }
 
-// change applies the changes of one didChange to the recorded text and
-// bumps its version. It reports whether the document is open.
 func (s *store) change(path string, version int, changes []contentChange) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -98,13 +79,6 @@ func (s *store) change(path string, version int, changes []contentChange) bool {
 	return true
 }
 
-// forget removes the open document at path and its unsaved text. Closing
-// discards the client's text, so every package compiled with it is marked
-// dirty. The package of the document keeps its snapshot for a refresh
-// while the discarded text differs from the file on disk; when it does
-// not, the snapshot is already the disk result, and it is dropped when no
-// open document is left in the package. forget reports whether the
-// snapshot must be refreshed.
 func (s *store) forget(path string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -122,15 +96,11 @@ func (s *store) forget(path string) bool {
 	return false
 }
 
-// diskEqual reports whether the file at path on disk holds data.
 func diskEqual(path string, data []byte) bool {
 	disk, err := os.ReadFile(path)
 	return err == nil && bytes.Equal(disk, data)
 }
 
-// touchLocked records that the document at path changed: its package gets
-// a unit, and every unit whose closure holds that package needs a
-// snapshot. The caller holds s.mu.
 func (s *store) touchLocked(path string) {
 	dir := filepath.Dir(path)
 	if s.units[dir] == nil {
@@ -144,8 +114,6 @@ func (s *store) touchLocked(path string) {
 	}
 }
 
-// dropUnitLocked removes the unit of dir when no open document is left in
-// it. The caller holds s.mu.
 func (s *store) dropUnitLocked(dir string) {
 	for path := range s.docs {
 		if filepath.Dir(path) == dir {
@@ -155,14 +123,10 @@ func (s *store) dropUnitLocked(dir string) {
 	delete(s.units, dir)
 }
 
-// unitFor returns the unit of the package that holds path. The caller
-// holds s.mu.
 func (s *store) unitFor(path string) *unit {
 	return s.units[filepath.Dir(path)]
 }
 
-// unitNeed returns the set of lowerings the current units need. The caller
-// holds s.mu.
 func (s *store) unitNeed() map[string]bool {
 	need := make(map[string]bool)
 	for _, u := range s.units {
@@ -171,10 +135,6 @@ func (s *store) unitNeed() map[string]bool {
 	return need
 }
 
-// ensure brings every package whose inputs changed to one snapshot per
-// version set, computed on demand: a caller that finds a computation in
-// flight for a package waits for it instead of computing again. It returns
-// once nothing is dirty.
 func (p *Proxy) ensure(ctx context.Context) {
 	for {
 		p.st.mu.Lock()
@@ -211,10 +171,6 @@ func (p *Proxy) ensure(ctx context.Context) {
 	}
 }
 
-// compileUnit computes the snapshot of the package in dir and brings gopls
-// and the client up to date with the result. It does nothing once the
-// proxy is stopping, so a late computation cannot use a compiler that stop
-// is about to close.
 func (p *Proxy) compileUnit(ctx context.Context, dir string) {
 	buffers, versions := p.takeDirty(dir)
 	if buffers == nil {
@@ -226,9 +182,6 @@ func (p *Proxy) compileUnit(ctx context.Context, dir string) {
 	p.publishAll()
 }
 
-// takeDirty marks the package in dir clean and returns the texts of the
-// open documents by path, and the version of each. A nil map means a
-// stopped proxy has nothing to compute.
 func (p *Proxy) takeDirty(dir string) (map[string][]byte, map[string]int) {
 	p.st.mu.Lock()
 	defer p.st.mu.Unlock()
@@ -249,9 +202,6 @@ func (p *Proxy) takeDirty(dir string) (map[string][]byte, map[string]int) {
 	return buffers, versions
 }
 
-// compile lowers the package in dir and collects its diagnostics. A
-// failed run yields a nil lowering and no diagnostics; the log has the
-// reason.
 func (p *Proxy) compile(ctx context.Context, dir string, buffers map[string][]byte) (*Lowering, []Diagnostic) {
 	low, err := p.opts.Compiler.Lower(ctx, dir, buffers)
 	if err != nil {
@@ -265,9 +215,6 @@ func (p *Proxy) compile(ctx context.Context, dir string, buffers map[string][]by
 	return low, diags
 }
 
-// apply installs the snapshot of the package in dir. A nil lowering means
-// the run failed: the package keeps its closure, and every file of it
-// turns stale.
 func (p *Proxy) apply(dir string, low *Lowering, diags []Diagnostic, versions map[string]int) {
 	p.st.mu.Lock()
 	u := p.st.units[dir]
@@ -322,8 +269,6 @@ func (p *Proxy) apply(dir string, low *Lowering, diags []Diagnostic, versions ma
 	p.pruneLocked(need)
 }
 
-// staleLocked marks the lowering of path, if any, as no longer matching
-// the source. The caller holds p.mu.
 func (p *Proxy) staleLocked(path string) {
 	if lw := p.files[path]; lw != nil && lw.fresh {
 		stale := *lw
@@ -332,10 +277,6 @@ func (p *Proxy) staleLocked(path string) {
 	}
 }
 
-// pruneLocked drops the lowerings need does not hold any more, and
-// publishes the new tables. need is unitNeed, taken under store.mu before
-// p.mu, so no caller holds the two locks in opposite order. The caller
-// holds p.mu.
 func (p *Proxy) pruneLocked(need map[string]bool) {
 	maps.DeleteFunc(p.files, func(path string, _ *lowered) bool { return !need[path] })
 	tb := &tables{bySrc: make(map[string]*lowered, len(p.files)), byVirt: make(map[string]*lowered, len(p.files))}
@@ -346,7 +287,6 @@ func (p *Proxy) pruneLocked(need map[string]bool) {
 	p.tables.Store(tb)
 }
 
-// setOf returns the set of the elements of list.
 func setOf(list []string) map[string]bool {
 	set := make(map[string]bool, len(list))
 	for _, s := range list {
@@ -355,17 +295,12 @@ func setOf(list []string) map[string]bool {
 	return set
 }
 
-// syncGopls makes the lowered documents open in gopls match the
-// snapshots: it opens the new ones, updates the changed ones, and closes
-// the ones no unit needs.
 func (p *Proxy) syncGopls() {
 	for _, m := range p.virtualMessages() {
 		p.send(p.server, m)
 	}
 }
 
-// virtualMessages computes the messages that bring gopls in line with the
-// lowerings, and records what it will then hold.
 func (p *Proxy) virtualMessages() []*message {
 	p.st.mu.Lock()
 	p.mu.Lock()
@@ -388,9 +323,6 @@ func (p *Proxy) virtualMessages() []*message {
 	return msgs
 }
 
-// openOrChangeLocked returns the notification that gives gopls the lowered
-// text of lw, or none when it holds that text already. The caller holds
-// p.st.mu and p.mu.
 func (p *Proxy) openOrChangeLocked(lw *lowered) []*message {
 	out := lw.pm.low.data
 	vd := p.virt[lw.virt]
@@ -412,8 +344,6 @@ func (p *Proxy) openOrChangeLocked(lw *lowered) []*message {
 	})
 }
 
-// notification returns the notification message of method with params, as
-// a list of one message, or of none when the params do not encode.
 func (p *Proxy) notification(method string, params any) []*message {
 	raw, err := json.Marshal(params)
 	if err != nil {

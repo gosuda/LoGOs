@@ -18,92 +18,56 @@ import (
 	"time"
 )
 
-// stopGrace is how long a stopping proxy waits for gopls to exit before it
-// kills it.
 const stopGrace = 3 * time.Second
 
-// drainLimit is how long a proxy whose client closed its output waits for
-// the answers to the requests still in flight.
 const drainLimit = 30 * time.Second
 
-// Options configures a Proxy.
 type Options struct {
-	// Gopls is the command that runs gopls over stdio, program first.
 	Gopls []string
 
-	// Env is the environment of gopls; nil inherits the proxy's.
 	Env []string
 
-	// Stderr receives the stderr of gopls and the proxy's own log lines;
-	// nil means os.Stderr.
 	Stderr io.Writer
 
-	// Compiler lowers sources and reports compiler diagnostics.
 	Compiler Compiler
 
-	// Hints serves compiler hints for inlayHint and hover requests, and
-	// HintsJSON produces the hints JSON of one package. Both nil means the
-	// proxy serves only what gopls reports. See HintsFunc.
 	Hints     HintsFunc
 	HintsJSON HintsJSONFunc
 
-	// CodeActions adds the code actions of the compiler autofix candidates
-	// to the answer of a codeAction request. See CodeActionsFunc.
 	CodeActions CodeActionsFunc
 }
 
-// virtDoc is a lowered document open in gopls.
 type virtDoc struct {
 	lw      *lowered
 	version int
 }
 
-// serverDiags are the diagnostics gopls last published for one document,
-// with the version of the document they describe.
 type serverDiags struct {
 	version int
 	hasVer  bool
 	raw     json.RawMessage
 }
 
-// pending is a request forwarded to gopls whose response is yet to come.
-// It keeps the tables the request was mapped with, so the response maps
-// back through the same lowerings even when a recompile has replaced them.
-// A codeAction request also keeps the version of the document it was
-// asked about, so a crossed edit drops the whole codeAction answer
-// instead of mixing the old range with new diagnostics.
 type pending struct {
-	method string
-	path   string
-	lw     *lowered
-	tb     *tables
-	params json.RawMessage
-	// fixVersion is the version of the document at request time, and
-	// fixHas reports whether the document was open then. Only codeAction
-	// requests set them.
+	method     string
+	path       string
+	lw         *lowered
+	tb         *tables
+	params     json.RawMessage
 	fixVersion int
 	fixHas     bool
 }
 
-// Proxy sits between an LSP client and gopls. Positions and URIs of loGo/s
-// sources travel to gopls as the lowered Go documents the compiler produces
-// for them, and travel back as positions in the sources.
 type Proxy struct {
 	opts   Options
 	client *writer
 	server *writer
 	tables atomic.Pointer[tables]
 
-	// work serializes every sequence that compiles, updates the lowered
-	// documents of gopls, or forwards a request to it, so a request always
-	// meets the lowerings it was mapped with. It is never taken by the
-	// loop that reads gopls.
 	work sync.Mutex
 
-	// pub serializes diagnostics publication.
 	pub sync.Mutex
 
-	// tasks counts the hint merges running outside the loops.
 	tasks sync.WaitGroup
 
 	st store
@@ -123,7 +87,6 @@ type Proxy struct {
 	lastLogErr error
 }
 
-// newProxy returns a proxy writing client messages to out.
 func newProxy(out io.Writer, opts Options) *Proxy {
 	if opts.Stderr == nil {
 		opts.Stderr = os.Stderr
@@ -143,7 +106,6 @@ func newProxy(out io.Writer, opts Options) *Proxy {
 	return p
 }
 
-// logf writes one line to the proxy's log.
 func (p *Proxy) logf(format string, args ...any) {
 	if _, err := fmt.Fprintf(p.opts.Stderr, "logos lsp: "+format+"\n", args...); err != nil {
 		p.mu.Lock()
@@ -152,26 +114,12 @@ func (p *Proxy) logf(format string, args ...any) {
 	}
 }
 
-// server is the running gopls process. done closes when the loop that
-// reads its output has ended, and err then holds why. reap alone waits for
-// cmd, and kills it when it ignores the closed input; exec.CommandContext
-// also kills it when the context given to start ends.
 type server struct {
 	cmd  *exec.Cmd
 	done chan struct{}
 	err  error
 }
 
-// reap waits for gopls to end after its input is closed, kills it when it
-// outlives stopGrace, and collects the process. Whatever it returns, gopls
-// is waited for. ctx is the context given to start.
-//
-// It returns how gopls ended only when a clean exit or a signal sent on
-// purpose does not explain it: reap's own kill, or the kill that the
-// cancellation of ctx delivers. A kill that finds gopls already gone is no
-// error. A kill that fails is returned together with the wait error; reap
-// still waits for the process then, because returning without Wait would
-// leave the child unreaped, and a canceled ctx may still end it.
 func (s *server) reap(ctx context.Context) error {
 	var errs []error
 	killed := false
@@ -195,11 +143,6 @@ func (s *server) reap(ctx context.Context) error {
 	return errors.Join(errs...)
 }
 
-// Serve runs a proxy that reads client messages from in and writes
-// responses and notifications to out, until the client sends exit, closes
-// in, or gopls dies. When the client closes in, the proxy first answers the
-// requests still in flight. It starts gopls itself, and stops it, and its
-// own background work, before it returns.
 func Serve(ctx context.Context, in io.Reader, out io.Writer, opts Options) error {
 	if len(opts.Gopls) == 0 || opts.Compiler == nil {
 		return errors.New("logos lsp: no gopls command or compiler")
@@ -240,10 +183,6 @@ func Serve(ctx context.Context, in io.Reader, out io.Writer, opts Options) error
 	return errors.Join(err, logErr)
 }
 
-// closeInput closes the client's input, when it can be closed, to end the
-// loop that reads it, and waits for that loop, but not for long: a reader
-// that closing cannot interrupt, a terminal, may keep it for the life of
-// the process.
 func (p *Proxy) closeInput(in io.Reader, loopDone <-chan struct{}) {
 	if c, ok := in.(io.Closer); ok {
 		if err := c.Close(); err != nil {
@@ -256,8 +195,6 @@ func (p *Proxy) closeInput(in io.Reader, loopDone <-chan struct{}) {
 	}
 }
 
-// start launches gopls and the loop that forwards its messages. Canceling
-// ctx kills gopls; workCtx is the context of the proxy's own work.
 func (p *Proxy) start(ctx, workCtx context.Context) (*server, error) {
 	cmd := exec.CommandContext(ctx, p.opts.Gopls[0], p.opts.Gopls[1:]...)
 	cmd.Env = p.opts.Env
@@ -282,8 +219,6 @@ func (p *Proxy) start(ctx, workCtx context.Context) (*server, error) {
 	return srv, nil
 }
 
-// drain waits until no request is in flight, gopls is gone, or the limit
-// passes.
 func (p *Proxy) drain(gopls <-chan struct{}) {
 	limit := time.After(drainLimit)
 	for {
@@ -303,13 +238,6 @@ func (p *Proxy) drain(gopls <-chan struct{}) {
 	}
 }
 
-// stop ends the background work, closes gopls's input, and waits for it,
-// killing it when it ignores the closed input, then releases the compiler.
-// No background work starts after stop marks the proxy stopped, and a
-// compile already running is canceled with cancelWork and awaited. An end
-// of gopls that the shutdown does not explain (see server.reap) goes to the
-// log; it does not change what Serve returns. ctx is the context given to
-// start.
 func (p *Proxy) stop(ctx context.Context, srv *server, cancelWork context.CancelFunc) {
 	p.st.mu.Lock()
 	p.stopped = true
@@ -333,8 +261,6 @@ func (p *Proxy) stop(ctx context.Context, srv *server, cancelWork context.Cancel
 	}
 }
 
-// clientLoop handles client messages until the client exits. It returns
-// nil at the end of input, and an error for an exit without a shutdown.
 func (p *Proxy) clientLoop(ctx context.Context, rd *reader) error {
 	for {
 		m, err := rd.read()
@@ -354,8 +280,6 @@ func (p *Proxy) clientLoop(ctx context.Context, rd *reader) error {
 	}
 }
 
-// exit forwards the exit notification and reports whether the client shut
-// the server down first.
 func (p *Proxy) exit(m *message) error {
 	p.mu.Lock()
 	endedErr := p.endedErr
@@ -368,7 +292,6 @@ func (p *Proxy) exit(m *message) error {
 	return endedErr
 }
 
-// serverLoop handles gopls messages until its output ends.
 func (p *Proxy) serverLoop(ctx context.Context, rd *reader) error {
 	for {
 		m, err := rd.read()
@@ -382,22 +305,18 @@ func (p *Proxy) serverLoop(ctx context.Context, rd *reader) error {
 	}
 }
 
-// send writes m to w and logs a failure. A failed write means the peer is
-// gone; the read loops notice that on their own.
 func (p *Proxy) send(w *writer, m *message) {
 	if err := w.write(m); err != nil {
 		p.logf("write: %v", err)
 	}
 }
 
-// addPending records the request id as awaiting its response.
 func (p *Proxy) addPending(id json.RawMessage, pend pending) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.pending[string(id)] = pend
 }
 
-// finish removes the request id from the pending set, and wakes a drain.
 func (p *Proxy) finish(id json.RawMessage) {
 	p.mu.Lock()
 	delete(p.pending, string(id))

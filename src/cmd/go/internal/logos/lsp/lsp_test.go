@@ -23,38 +23,21 @@ import (
 	"time"
 )
 
-// The tests of the proxy run it against a fake gopls: this test binary,
-// started again with fakeEnv set, answers LSP requests from a script of
-// canned results and records every message it receives. The compiler is a
-// fakeCompiler (lowering_test.go), so the tests pin the proxy's mapping and
-// ordering without a toolchain; toolchain_test.go covers the real one.
-
 const (
-	// fakeEnv names the script file of the fake gopls; its presence in the
-	// environment turns the test binary into the fake.
 	fakeEnv = "LOGOS_LSP_FAKE_GOPLS"
 
-	// fakeLogEnv names the file the fake gopls appends every message to.
 	fakeLogEnv = "LOGOS_LSP_FAKE_LOG"
 
-	// waitLimit bounds every wait of a test on the proxy.
 	waitLimit = 30 * time.Second
 )
 
-// fakeScript is what the fake gopls answers.
 type fakeScript struct {
-	// Responses maps a request method to its result.
 	Responses map[string]json.RawMessage `json:"responses"`
 
-	// Diagnostics maps a document URI to the diagnostics array the fake
-	// publishes on every didOpen and didChange of that document.
 	Diagnostics map[string]json.RawMessage `json:"diagnostics"`
 
-	// DelayMillis delays each response to a request.
 	DelayMillis int `json:"delayMillis"`
 
-	// CrashOn names a request method that makes the fake exit instead of
-	// answering.
 	CrashOn string `json:"crashOn"`
 
 	HoldMethod string `json:"holdMethod"`
@@ -64,7 +47,6 @@ type fakeScript struct {
 	held bool
 }
 
-// TestMain turns the test binary into the fake gopls when asked to.
 func TestMain(m *testing.M) {
 	if os.Getenv(fakeEnv) != "" {
 		os.Exit(runFakeGopls())
@@ -72,8 +54,6 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-// runFakeGopls is the fake gopls: it answers requests from its script and
-// logs what it receives. It returns the exit status.
 func runFakeGopls() int {
 	var script fakeScript
 	data, err := os.ReadFile(os.Getenv(fakeEnv))
@@ -114,8 +94,6 @@ func runFakeGopls() int {
 	}
 }
 
-// fakeHandle answers one message of the proxy. It returns the error of
-// writing the answer.
 func fakeHandle(wr *writer, script *fakeScript, m *message) error {
 	switch {
 	case m.isRequest():
@@ -165,7 +143,6 @@ func holdForRelease(addr string) (err error) {
 	return err
 }
 
-// fakeResult returns the scripted result of method.
 func fakeResult(script *fakeScript, method string) json.RawMessage {
 	switch method {
 	case "initialize":
@@ -179,33 +156,28 @@ func fakeResult(script *fakeScript, method string) json.RawMessage {
 	return nullResult
 }
 
-// syncBuffer is a bytes.Buffer safe for concurrent writes.
 type syncBuffer struct {
 	mu sync.Mutex
 	b  bytes.Buffer
 }
 
-// Write implements io.Writer.
 func (s *syncBuffer) Write(p []byte) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.b.Write(p)
 }
 
-// String returns what was written.
 func (s *syncBuffer) String() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.b.String()
 }
 
-// testClient is an LSP client of a proxy running in the test.
 type testClient struct {
 	t      *testing.T
 	w      *writer
 	closeW func()
 
-	// done closes when Serve has returned, and err is then its result.
 	done chan struct{}
 	err  error
 
@@ -216,8 +188,6 @@ type testClient struct {
 	expired bool
 }
 
-// startProxy serves a new client with opts and returns it. The test
-// cleanup ends the session.
 func startProxy(t *testing.T, opts Options) *testClient {
 	t.Helper()
 	inR, inW := io.Pipe()
@@ -258,7 +228,6 @@ func startProxy(t *testing.T, opts Options) *testClient {
 	return c
 }
 
-// wait returns what Serve returned, waiting for it to return.
 func (c *testClient) wait() error {
 	c.t.Helper()
 	select {
@@ -270,7 +239,6 @@ func (c *testClient) wait() error {
 	}
 }
 
-// readLoop collects the proxy's output.
 func (c *testClient) readLoop(rd *reader) {
 	for {
 		m, err := rd.read()
@@ -288,8 +256,6 @@ func (c *testClient) readLoop(rd *reader) {
 	}
 }
 
-// waitFor returns the first message of the proxy's output that match
-// accepts, waiting for it up to waitLimit.
 func (c *testClient) waitFor(what string, match func(*message) bool) *message {
 	c.t.Helper()
 	timer := time.AfterFunc(waitLimit, func() {
@@ -314,8 +280,6 @@ func (c *testClient) waitFor(what string, match func(*message) bool) *message {
 	}
 }
 
-// call sends a request and returns its result, failing on an error
-// response.
 func (c *testClient) call(method string, params any) json.RawMessage {
 	c.t.Helper()
 	m := c.callMessage(method, params)
@@ -325,14 +289,11 @@ func (c *testClient) call(method string, params any) json.RawMessage {
 	return m.Result
 }
 
-// callMessage sends a request and returns its whole response.
 func (c *testClient) callMessage(method string, params any) *message {
 	c.t.Helper()
 	return c.await(method, c.request(method, params))
 }
 
-// request sends a request and returns its id, for a test that does other
-// work before it waits for the response.
 func (c *testClient) request(method string, params any) json.RawMessage {
 	c.t.Helper()
 	c.mu.Lock()
@@ -349,7 +310,6 @@ func (c *testClient) request(method string, params any) json.RawMessage {
 	return id
 }
 
-// await returns the response to the request id.
 func (c *testClient) await(method string, id json.RawMessage) *message {
 	c.t.Helper()
 	return c.waitFor("response to "+method, func(m *message) bool {
@@ -357,7 +317,6 @@ func (c *testClient) await(method string, id json.RawMessage) *message {
 	})
 }
 
-// notify sends a notification.
 func (c *testClient) notify(method string, params any) {
 	c.t.Helper()
 	if err := c.w.notify(method, params); err != nil {
@@ -365,8 +324,6 @@ func (c *testClient) notify(method string, params any) {
 	}
 }
 
-// notification waits for a publishDiagnostics notification whose decoded
-// params satisfy accept, and returns them.
 func (c *testClient) notification(accept func(map[string]any) bool) map[string]any {
 	c.t.Helper()
 	var found map[string]any
@@ -385,7 +342,6 @@ func (c *testClient) notification(accept func(map[string]any) bool) map[string]a
 	return found
 }
 
-// shutdown ends the session cleanly and returns what Serve returned.
 func (c *testClient) shutdown() error {
 	c.t.Helper()
 	c.call("shutdown", nil)
@@ -393,8 +349,6 @@ func (c *testClient) shutdown() error {
 	return c.wait()
 }
 
-// fixture is a workspace on disk served by a proxy with a fake gopls and a
-// fake compiler.
 type fixture struct {
 	t      *testing.T
 	root   string
@@ -403,18 +357,12 @@ type fixture struct {
 	client *testClient
 }
 
-// fixtureOptions tunes newFixture.
 type fixtureOptions struct {
-	// Script builds the script of the fake gopls for the workspace root.
 	Script func(root string) fakeScript
 
-	// Tune changes the proxy options before the proxy starts.
 	Tune func(f *fixture, o *Options)
 }
 
-// newFixture writes files (a map from relative path to content) under a
-// fresh workspace, starts a proxy over it, and runs the initialize
-// handshake.
 func newFixture(t *testing.T, files map[string]string, fo fixtureOptions) *fixture {
 	t.Helper()
 	root, err := filepath.EvalSymlinks(t.TempDir())
@@ -457,8 +405,6 @@ func newFixture(t *testing.T, files map[string]string, fo fixtureOptions) *fixtu
 	return f
 }
 
-// initialize runs the handshake. The client advertises position encodings,
-// which the proxy must not pass on.
 func (f *fixture) initialize() {
 	f.t.Helper()
 	f.client.call("initialize", map[string]any{
@@ -471,16 +417,12 @@ func (f *fixture) initialize() {
 	f.client.notify("initialized", map[string]any{})
 }
 
-// path returns the absolute path of a workspace file.
 func (f *fixture) path(rel string) string { return filepath.Join(f.root, filepath.FromSlash(rel)) }
 
-// uri returns the URI of a workspace file.
 func (f *fixture) uri(rel string) string { return pathURI(f.path(rel)) }
 
-// virtURI returns the URI of the lowered document of a loGo/s source.
 func (f *fixture) virtURI(rel string) string { return pathURI(virtualPath(f.path(rel))) }
 
-// open opens a workspace file in the client with its on-disk text.
 func (f *fixture) open(rel string, version int) {
 	f.t.Helper()
 	data, err := os.ReadFile(f.path(rel))
@@ -490,7 +432,6 @@ func (f *fixture) open(rel string, version int) {
 	f.openText(rel, version, string(data))
 }
 
-// openText opens a workspace file in the client with the given text.
 func (f *fixture) openText(rel string, version int, text string) {
 	f.t.Helper()
 	f.client.notify("textDocument/didOpen", map[string]any{
@@ -498,15 +439,11 @@ func (f *fixture) openText(rel string, version int, text string) {
 	})
 }
 
-// sync waits until gopls has handled everything the proxy sent it so far:
-// a request on no document goes to gopls after the earlier notifications,
-// and its answer comes back after gopls logged them.
 func (f *fixture) sync() {
 	f.t.Helper()
 	f.client.call("test/sync", map[string]any{})
 }
 
-// received returns the messages the fake gopls got, in order.
 func (f *fixture) received() []*message {
 	f.t.Helper()
 	data, err := os.ReadFile(f.log)
@@ -527,8 +464,6 @@ func (f *fixture) received() []*message {
 	return msgs
 }
 
-// receivedMethod returns the params of the messages of one method the fake
-// gopls got, in order.
 func (f *fixture) receivedMethod(method string) []map[string]any {
 	f.t.Helper()
 	var out []map[string]any
@@ -546,8 +481,6 @@ func (f *fixture) receivedMethod(method string) []map[string]any {
 	return out
 }
 
-// workspaceFiles lists every file under the workspace root, relative and
-// sorted.
 func (f *fixture) workspaceFiles() []string {
 	f.t.Helper()
 	var files []string
@@ -565,7 +498,6 @@ func (f *fixture) workspaceFiles() []string {
 	return files
 }
 
-// toJSON encodes v as raw JSON.
 func toJSON(t *testing.T, v any) json.RawMessage {
 	t.Helper()
 	raw, err := json.Marshal(v)
@@ -575,7 +507,6 @@ func toJSON(t *testing.T, v any) json.RawMessage {
 	return raw
 }
 
-// sameJSON fails the test unless got and want are the same JSON value.
 func sameJSON(t *testing.T, what string, got json.RawMessage, want any) {
 	t.Helper()
 	g, err := decode(got)
@@ -591,13 +522,10 @@ func sameJSON(t *testing.T, what string, got json.RawMessage, want any) {
 	}
 }
 
-// positionParams builds the params of a position request on a document.
 func positionParams(uri string, p Position) map[string]any {
 	return map[string]any{"textDocument": map[string]any{"uri": uri}, "position": p}
 }
 
-// forwardedPosition returns the position of the nth request of method the
-// fake gopls got, and the URI of its document.
 func forwardedPosition(t *testing.T, f *fixture, method string, nth int) (string, Position) {
 	t.Helper()
 	reqs := f.receivedMethod(method)
@@ -613,12 +541,6 @@ func forwardedPosition(t *testing.T, f *fixture, method string, nth int) (string
 	return uri, pos
 }
 
-// TestProxyMapsRequestsAndResponses is the main attack test of M21-S1:
-// hover, definition, references, completion, codeAction, inlayHint, and
-// documentHighlight requests on a .lgo document reach gopls as requests on
-// the lowered document with their positions mapped, including positions
-// inside the three lines a ? statement expands to, and the answers come
-// back with URIs and ranges mapped to the .lgo source.
 func TestProxyMapsRequestsAndResponses(t *testing.T) {
 	low, _, _ := lowerQuestion([]byte(aLgo))
 	lowText := string(low)
@@ -794,10 +716,6 @@ func TestProxyMapsRequestsAndResponses(t *testing.T) {
 	}
 }
 
-// TestProxyHandshakeShapesCapabilities checks the two rewrites of the
-// handshake: position encodings are not offered to gopls, so it answers in
-// UTF-16, and diagnosticProvider is dropped from the result, so clients
-// take diagnostics through publishDiagnostics, where the merge happens.
 func TestProxyHandshakeShapesCapabilities(t *testing.T) {
 	f := newFixture(t, nil, fixtureOptions{})
 	inits := f.receivedMethod("initialize")
@@ -824,11 +742,6 @@ func TestProxyHandshakeShapesCapabilities(t *testing.T) {
 	}
 }
 
-// TestProxyEditsUpdateOverlay checks that an edit of an open .lgo document
-// reaches the overlay before the next request: the proxy recompiles with
-// the unsaved text, sends the new lowered text to gopls ahead of the
-// request, and maps the request through the new lowering. Incremental
-// changes splice in UTF-16 positions.
 func TestProxyEditsUpdateOverlay(t *testing.T) {
 	f := newFixture(t, map[string]string{"a/a.lgo": aLgo}, fixtureOptions{})
 	f.open("a/a.lgo", 1)
@@ -881,10 +794,6 @@ func TestProxyEditsUpdateOverlay(t *testing.T) {
 	}
 }
 
-// TestProxyStaleLoweringAnswersNull checks the stale-lowering rule: while
-// the document does not lower at the client's text, position requests get
-// null, never a position computed from an older text, and the proxy
-// recovers when the text compiles again.
 func TestProxyStaleLoweringAnswersNull(t *testing.T) {
 	f := newFixture(t, map[string]string{"a/a.lgo": aLgo}, fixtureOptions{
 		Script: func(root string) fakeScript {
@@ -919,10 +828,6 @@ func TestProxyStaleLoweringAnswersNull(t *testing.T) {
 	}
 }
 
-// TestProxyMergesDiagnostics checks publishDiagnostics: what gopls
-// reports on the lowered document, mapped to the source, plus the compiler
-// diagnostics of the package, with a duplicate reported once, under the
-// version of the client's document.
 func TestProxyMergesDiagnostics(t *testing.T) {
 	var lowCall Range
 	f := newFixture(t, map[string]string{"a/a.lgo": aLgo}, fixtureOptions{
@@ -986,9 +891,6 @@ func TestProxyMergesDiagnostics(t *testing.T) {
 	}
 }
 
-// TestProxyDiagnosticsFollowEdits checks that compiler diagnostics are
-// never shown against a text they were not computed for: after an edit
-// they disappear until the recompile replaces them.
 func TestProxyDiagnosticsFollowEdits(t *testing.T) {
 	f := newFixture(t, map[string]string{"a/a.lgo": aLgo}, fixtureOptions{})
 	aPath := f.path("a/a.lgo")
@@ -1013,11 +915,6 @@ func TestProxyDiagnosticsFollowEdits(t *testing.T) {
 	})
 }
 
-// TestProxyMixedWorkspaceDefinition checks the cross-kind rule of R-U2 for
-// a Go package that imports a loGo/s package: definition on the loGo/s
-// symbol imported by the .go file answers with its position in the .lgo
-// file. The lowered document of the imported package is open in gopls,
-// the Go document is forwarded unchanged, and the workspace gains no file.
 func TestProxyMixedWorkspaceDefinition(t *testing.T) {
 	const libLgo = "package lib\n\nfunc Hello() string {\n\treturn \"hi\"\n}\n"
 	const appGo = "package app\n\nimport \"example.com/m/lib\"\n\nvar Greeting = lib.Hello()\n"
@@ -1071,9 +968,6 @@ func TestProxyMixedWorkspaceDefinition(t *testing.T) {
 	}
 }
 
-// TestProxyGoDefinitionFromLogosFile checks the other cross-kind
-// direction: a definition that gopls resolves in a real .go file reaches
-// the client with the position of that file, untouched by any mapping.
 func TestProxyGoDefinitionFromLogosFile(t *testing.T) {
 	const app2Lgo = "package app2\n\nimport \"example.com/m/golib\"\n\nvar N = golib.Thing()\n"
 	const goLib = "package golib\n\nfunc Thing() int { return 1 }\n"
@@ -1109,9 +1003,6 @@ func TestProxyGoDefinitionFromLogosFile(t *testing.T) {
 	}
 }
 
-// TestProxyClosesLoweredDocuments checks that closing the last document of
-// a package takes its lowered documents out of gopls, and clears the
-// diagnostics published for it.
 func TestProxyClosesLoweredDocuments(t *testing.T) {
 	f := newFixture(t, map[string]string{"a/a.lgo": aLgo}, fixtureOptions{})
 	aPath := f.path("a/a.lgo")
@@ -1138,9 +1029,6 @@ func TestProxyClosesLoweredDocuments(t *testing.T) {
 	})
 }
 
-// TestProxyAnswersRequestsInFlightWhenClientCloses checks the drain: a
-// client that sends a request and closes its output still gets the answer
-// before the proxy stops, and Serve returns nil.
 func TestProxyAnswersRequestsInFlightWhenClientCloses(t *testing.T) {
 	f := newFixture(t, map[string]string{"a/a.lgo": aLgo}, fixtureOptions{
 		Script: func(string) fakeScript {
@@ -1168,8 +1056,6 @@ func TestProxyAnswersRequestsInFlightWhenClientCloses(t *testing.T) {
 	}
 }
 
-// TestServeExitWithoutShutdown checks the exit code rule of the protocol:
-// exit before shutdown is an error.
 func TestServeExitWithoutShutdown(t *testing.T) {
 	f := newFixture(t, nil, fixtureOptions{})
 	f.client.notify("exit", nil)
@@ -1178,8 +1064,6 @@ func TestServeExitWithoutShutdown(t *testing.T) {
 	}
 }
 
-// TestServeReportsGoplsDeath checks that a dying gopls ends the session
-// with an error instead of hanging the client.
 func TestServeReportsGoplsDeath(t *testing.T) {
 	f := newFixture(t, map[string]string{"a/a.lgo": aLgo}, fixtureOptions{
 		Script: func(string) fakeScript { return fakeScript{CrashOn: "textDocument/hover"} },
@@ -1217,7 +1101,6 @@ func TestServePrefersClientCloseOverGoplsExit(t *testing.T) {
 	})
 }
 
-// TestServeRejectsMissingParts checks the guard of Serve itself.
 func TestServeRejectsMissingParts(t *testing.T) {
 	err := Serve(context.Background(), strings.NewReader(""), io.Discard, Options{})
 	if err == nil {
@@ -1231,8 +1114,6 @@ func TestServeRejectsMissingParts(t *testing.T) {
 	}
 }
 
-// TestGoplsMissing checks the message of SPEC Sec 16.1 when gopls is not
-// on PATH, and that a gopls on PATH is the one that runs.
 func TestGoplsMissing(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 	_, err := goplsCommand()
@@ -1254,8 +1135,6 @@ func TestGoplsMissing(t *testing.T) {
 	}
 }
 
-// TestGoplsEnvPutsToolchainFirst checks that the go command gopls runs is
-// the one of the toolchain that lowers the sources.
 func TestGoplsEnvPutsToolchainFirst(t *testing.T) {
 	sep := string(os.PathListSeparator)
 	got := goplsEnv([]string{"HOME=/h", "PATH=/usr/bin" + sep + "/bin", "X=1"}, "/goroot/bin")
@@ -1268,8 +1147,6 @@ func TestGoplsEnvPutsToolchainFirst(t *testing.T) {
 	}
 }
 
-// TestFraming checks the JSON-RPC framing: a round trip, header case and
-// extra headers, a missing length, a corrupt length, and a truncated body.
 func TestFraming(t *testing.T) {
 	var buf bytes.Buffer
 	w := &writer{w: &buf}
@@ -1311,9 +1188,6 @@ func TestFraming(t *testing.T) {
 	}
 }
 
-// TestRewriterLeavesForeignJSONAlone checks the rewriter on values it must
-// not touch: ranges outside any file, other files' ranges, and objects
-// that only look like positions.
 func TestRewriterLeavesForeignJSONAlone(t *testing.T) {
 	_, _, pm := questionMap(t)
 	lw := &lowered{src: "/w/a.lgo", virt: "/w/a.go", pm: pm, fresh: true}
@@ -1338,10 +1212,6 @@ func TestRewriterLeavesForeignJSONAlone(t *testing.T) {
 	})
 }
 
-// TestProxyMergesDiagnosticsOfGoDocuments checks that the merge covers Go
-// documents too: gopls's diagnostics pass through as they are, the
-// compiler's are added, and a compiler diagnostic that gopls reported at
-// the same place with the same text is shown once.
 func TestProxyMergesDiagnosticsOfGoDocuments(t *testing.T) {
 	const src = "package p\n\nvar x int = \"s\"\n"
 	f := newFixture(t, map[string]string{"p/p.go": src}, fixtureOptions{
@@ -1380,8 +1250,6 @@ func TestProxyMergesDiagnosticsOfGoDocuments(t *testing.T) {
 	}
 }
 
-// TestWriterRespondsWithNullForNoResult checks the bytes of a response with
-// no result: JSON-RPC wants a result member, so it is null, never absent.
 func TestWriterRespondsWithNullForNoResult(t *testing.T) {
 	var buf bytes.Buffer
 	if err := (&writer{w: &buf}).respond(json.RawMessage("3"), nil); err != nil {
@@ -1393,8 +1261,6 @@ func TestWriterRespondsWithNullForNoResult(t *testing.T) {
 	}
 }
 
-// TestContentLengthLimit tests the cap on a message body at its edges: one
-// below, at, and one above the limit, and the lengths that are no length.
 func TestContentLengthLimit(t *testing.T) {
 	for _, c := range []struct {
 		in string
@@ -1419,12 +1285,6 @@ func TestContentLengthLimit(t *testing.T) {
 	}
 }
 
-// TestProxyCodeActionWithoutLoweringUsesCompiler is the regression for the
-// live M21 path: a source the compiler denies (slop::discarded_error on a
-// bare call) has no lowering, yet textDocument/codeAction still answers
-// the compiler autofix "add ? to propagate the error" from the real
-// toolchain, without asking gopls. After the edit that removes the denied
-// call, the old fix must not cross the edit.
 func TestProxyCodeActionWithoutLoweringUsesCompiler(t *testing.T) {
 	root, tc := realWorkspace(t)
 	aPath := filepath.Join(root, filepath.FromSlash("lmod/a/a.lgo"))

@@ -17,8 +17,6 @@ import (
 	"time"
 )
 
-// hintsRecorder is a HintsFunc and HintsJSONFunc pair that records its
-// calls, standing in for M21-S2's package.
 type hintsRecorder struct {
 	mu       sync.Mutex
 	runs     int
@@ -27,14 +25,12 @@ type hintsRecorder struct {
 	failWith error
 }
 
-// hintCall is one call of the hints hook.
 type hintCall struct {
 	method string
 	params json.RawMessage
 	hints  json.RawMessage
 }
 
-// run is the HintsJSON hook: it returns a document that numbers the runs.
 func (h *hintsRecorder) run(ctx context.Context, dir string, buffers map[string][]byte) (json.RawMessage, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -43,7 +39,6 @@ func (h *hintsRecorder) run(ctx context.Context, dir string, buffers map[string]
 	return json.RawMessage(`{"run":` + strconv.Itoa(h.runs) + `}`), nil
 }
 
-// serve is the Hints hook.
 func (h *hintsRecorder) serve(method string, params, hints json.RawMessage) (json.RawMessage, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -57,15 +52,12 @@ func (h *hintsRecorder) serve(method string, params, hints json.RawMessage) (jso
 	return json.RawMessage(`{"contents":{"kind":"markdown","value":"Fixed: 12B + dynamic"}}`), nil
 }
 
-// snapshot returns the recorded runs and calls.
 func (h *hintsRecorder) snapshot() (int, []hintCall) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return h.runs, slices.Clone(h.calls)
 }
 
-// hintsFixture serves aLgo with a fake gopls that answers hover and
-// inlayHint, and the recorder wired as the hints hooks.
 func hintsFixture(t *testing.T, rec *hintsRecorder) *fixture {
 	t.Helper()
 	low, _, _ := lowerQuestion([]byte(aLgo))
@@ -90,11 +82,6 @@ func hintsFixture(t *testing.T, rec *hintsRecorder) *fixture {
 	return f
 }
 
-// TestProxyHintsHook checks the M21-S2 hook: for inlayHint and hover the
-// proxy calls the hints function with the method, the client's own params,
-// and the package's hints JSON, appends its hints to gopls's, joins its
-// hover text under gopls's, runs the hints runner once per compile, and
-// keeps the answer of gopls when the hook fails.
 func TestProxyHintsHook(t *testing.T) {
 	rec := new(hintsRecorder)
 	f := hintsFixture(t, rec)
@@ -154,9 +141,6 @@ func TestProxyHintsHook(t *testing.T) {
 	sameJSON(t, "inlay hints when the hook fails", res, []any{map[string]any{"position": origData, "label": ": []byte"}})
 }
 
-// TestProxyHintsOnGoDocuments checks that hints reach Go documents too:
-// the request goes to gopls unchanged, and the hook's hints join its
-// answer.
 func TestProxyHintsOnGoDocuments(t *testing.T) {
 	rec := new(hintsRecorder)
 	f := newFixture(t, map[string]string{"p/p.go": "package p\n\nvar x = 1\n"}, fixtureOptions{
@@ -181,8 +165,6 @@ func TestProxyHintsOnGoDocuments(t *testing.T) {
 	})
 }
 
-// TestProxyWithoutHintsHookServesGopls checks that the hook is optional:
-// with none set, inlay hints are what gopls answered.
 func TestProxyWithoutHintsHookServesGopls(t *testing.T) {
 	low, _, _ := lowerQuestion([]byte(aLgo))
 	lowData := shift(findPos(t, string(low), "data", 0), len("data"))
@@ -203,9 +185,6 @@ func TestProxyWithoutHintsHookServesGopls(t *testing.T) {
 	})
 }
 
-// TestProxyCodeActionsHook checks the autofix hook: it gets the compiler
-// diagnostic lines of the document, its URI and text, and the request
-// range as the client sent it, and its actions follow gopls's.
 func TestProxyCodeActionsHook(t *testing.T) {
 	type call struct {
 		diags [][]byte
@@ -264,9 +243,6 @@ func TestProxyCodeActionsHook(t *testing.T) {
 	sameJSON(t, "range given to the hook", c.rng, rng)
 }
 
-// TestProxyHintsCacheKeepsEmptyAnswer checks the cache keys on a hit flag,
-// not on the content: a runner whose answer is JSON null is not run again
-// for the next request.
 func TestProxyHintsCacheKeepsEmptyAnswer(t *testing.T) {
 	var mu sync.Mutex
 	runs := 0
@@ -296,9 +272,6 @@ func TestProxyHintsCacheKeepsEmptyAnswer(t *testing.T) {
 	}
 }
 
-// TestProxyDoesNotCacheHintsOfAnOlderCompile checks the generation guard: a
-// hints run that finishes after the package was edited and compiled again
-// is not kept, so the next request runs the runner on the new text.
 func TestProxyDoesNotCacheHintsOfAnOlderCompile(t *testing.T) {
 	started, release := make(chan struct{}), make(chan struct{})
 	var mu sync.Mutex

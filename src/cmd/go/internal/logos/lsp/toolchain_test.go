@@ -14,14 +14,6 @@ import (
 	"testing"
 )
 
-// realWorkspace writes a workspace of a loGo/s module (package a) and a Go
-// module (packages b and plain, b importing a), the shape SPEC Sec 0.1
-// allows, and returns the toolchain the tests drive: the go binary of the
-// toolchain under test, run as logos, as logos lsp runs it.
-
-// workspaceA is the loGo/s source realWorkspace writes for package a: aLgo
-// under a package comment, one line down, so fixtures derived from it keep
-// exact coordinates.
 const workspaceA = "// Package a reads files.\n" + aLgo
 
 func realWorkspace(t *testing.T) (root string, tc *toolchain) {
@@ -55,11 +47,6 @@ func realWorkspace(t *testing.T) (root string, tc *toolchain) {
 	return root, tc
 }
 
-// TestToolchainLowersImportedLogosPackage runs the production compiler
-// path over a Go package that imports a loGo/s package: the lowering holds
-// the loGo/s file with an edit map that fits its texts, the ? statement's
-// operand maps exactly, nothing lands in the workspace, and an unsaved
-// buffer replaces the file on disk.
 func TestToolchainLowersImportedLogosPackage(t *testing.T) {
 	root, tc := realWorkspace(t)
 	ctx := t.Context()
@@ -125,10 +112,6 @@ func TestToolchainLowersImportedLogosPackage(t *testing.T) {
 	}
 }
 
-// TestToolchainWritesNoBinaryForMainPackage checks that lowering a main
-// package leaves the workspace as it was: a build of one main package
-// writes its executable into the current directory unless told otherwise,
-// and the current directory here is the user's package directory.
 func TestToolchainWritesNoBinaryForMainPackage(t *testing.T) {
 	root, tc := realWorkspace(t)
 	appDir := filepath.Join(root, "lmod", "app")
@@ -145,7 +128,6 @@ func TestToolchainWritesNoBinaryForMainPackage(t *testing.T) {
 	}
 }
 
-// listDir returns the sorted names in dir.
 func listDir(t *testing.T, dir string) []string {
 	t.Helper()
 	entries, err := os.ReadDir(dir)
@@ -160,10 +142,6 @@ func listDir(t *testing.T, dir string) []string {
 	return names
 }
 
-// TestToolchainReportsBrokenSourceAsMissing checks that a package that
-// does not compile yields no lowered file for its sources, and that
-// Diagnose names the error under the source's own path, not under the
-// scratch copy of an unsaved buffer.
 func TestToolchainReportsBrokenSourceAsMissing(t *testing.T) {
 	root, tc := realWorkspace(t)
 	ctx := t.Context()
@@ -197,9 +175,6 @@ func TestToolchainReportsBrokenSourceAsMissing(t *testing.T) {
 	}
 }
 
-// TestToolchainDiagnosesGoPackages checks that the same path serves a Go
-// package: logos lint reports its errors as JSON diagnostics of the .go
-// file.
 func TestToolchainDiagnosesGoPackages(t *testing.T) {
 	root, tc := realWorkspace(t)
 	pDir := filepath.Join(root, "gomod", "plain")
@@ -215,9 +190,6 @@ func TestToolchainDiagnosesGoPackages(t *testing.T) {
 	}
 }
 
-// TestToolchainHints runs the hints runner over a loGo/s package importing os
-// across default and explicit GOEXPERIMENT settings (logosfastcgo, nologosfastcgo,
-// none), verifying that the compiler and list exports align and emit valid hints.
 func TestToolchainHints(t *testing.T) {
 	root, tc := realWorkspace(t)
 	pkgDir := filepath.Join(root, "lmod", "a")

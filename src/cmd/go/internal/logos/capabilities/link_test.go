@@ -212,17 +212,6 @@ func TestSnapshotRecordsCgoAllowed(t *testing.T) {
 	}
 }
 
-// TestPolicyForLinkSharedPluginInternal pins the linker policy inputs
-// for the three link root shapes the linker audits (seedRoots in
-// cmd/link/internal/ld): shared libraries, plugins, and ordinary
-// entry-symbol binaries. PolicyForLink itself takes no build mode, so
-// these cases pin that mode-shaped inputs (workspace multi-main, single
-// main with nested dep, cgo-allowed dep) produce identical,
-// round-tripping wire output. Delivery is separate: ordinary and plugin
-// links receive the policy through AppendLinkCapFlag, while
-// -buildmode=shared links currently do not (ldShared in work/gc.go never
-// appends the flag; out of scope, reported as a gap), so this test proves
-// policy construction, not that every mode is audited.
 func TestPolicyForLinkSharedPluginInternal(t *testing.T) {
 	buildModulesSet.Lock()
 	savedBuilds := maps.Clone(buildModulesSet.byPath)
@@ -314,10 +303,6 @@ func TestPolicyForLinkSharedPluginInternal(t *testing.T) {
 	}
 }
 
-// TestLinkPolicyPlainGoUnchanged pins the plain-go byte-identical
-// guarantee: outside logos mode the snapshotted policy never reaches the
-// link action ID hash and no -logos.cap flag is appended, even when a
-// snapshot is set. Plain go keeps its upstream link behavior.
 func TestLinkPolicyPlainGoUnchanged(t *testing.T) {
 	old := cfg.Logos
 	cfg.Logos = false

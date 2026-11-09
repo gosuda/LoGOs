@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// Package lintcmd implements logos lint: it runs the compiler lints over
-// the packages of the main module without building binaries.
 package lintcmd
 
 import (
@@ -16,7 +14,6 @@ import (
 	"cmd/go/internal/work"
 )
 
-// CmdLint implements the logos lint command.
 var CmdLint = &base.Command{
 	UsageLine: "logos lint [build flags] [--pedantic] [--json-diagnostics] [packages]",
 	Short:     "report compiler lints without building binaries",
@@ -47,15 +44,12 @@ See also: logos build.
 	`,
 }
 
-// Register adds the lint subcommand to the logos root command.
 func Register(root *base.Command) {
 	CmdLint.Run = runLint
 	work.AddBuildFlags(CmdLint, work.OmitVFlag|work.OmitBuildOnlyFlags)
 	root.Commands = append(root.Commands, CmdLint)
 }
 
-// runLint loads the packages and runs one lint action for each package of
-// a main module.
 func runLint(ctx context.Context, cmd *base.Command, args []string) {
 	settings.CommandLine.LintCmd = true
 	moduleLoader := modload.NewLoader()

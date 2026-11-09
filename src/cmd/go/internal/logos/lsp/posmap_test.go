@@ -16,8 +16,6 @@ import (
 	"cmd/internal/logos/editmap"
 )
 
-// questionMap lowers aLgo with the fake lowering and returns the texts and
-// the position map between them.
 func questionMap(t *testing.T) (src, out string, pm *posMap) {
 	t.Helper()
 	lowered, m, ok := lowerQuestion([]byte(aLgo))
@@ -32,16 +30,11 @@ func questionMap(t *testing.T) (src, out string, pm *posMap) {
 	return aLgo, string(lowered), pm
 }
 
-// segBuilder builds the Segments of one lowered text in order: copy
-// appends n lowered bytes copied from the original offset orig, gen
-// appends n generated lowered bytes, and adjacent runs of one kind merge,
-// so a deletion (which appends nothing) fuses the copies around it.
 type segBuilder struct {
 	pos  int
 	segs []editmap.Segment
 }
 
-// copy appends a run of n lowered bytes copied from the original offset orig.
 func (b *segBuilder) copy(orig, n int) {
 	if n <= 0 {
 		return
@@ -57,7 +50,6 @@ func (b *segBuilder) copy(orig, n int) {
 	b.pos += n
 }
 
-// gen appends n generated lowered bytes.
 func (b *segBuilder) gen(n int) {
 	if n <= 0 {
 		return
@@ -73,16 +65,10 @@ func (b *segBuilder) gen(n int) {
 	b.pos += n
 }
 
-// done returns the built segments.
 func (b *segBuilder) done() []editmap.Segment {
 	return b.segs
 }
 
-// spanSegs builds v2 segments for a lowering described by edit spans
-// alone: the bytes between edits are copied at identical offsets, and each
-// edit is one generated run of its replacement length. An insertion
-// (including an EOF trailer) becomes a generated run; a deletion appends
-// nothing and fuses the copies around it.
 func spanSegs(srcLen int, edits []editmap.EditSpan) []editmap.Segment {
 	var b segBuilder
 	prev := 0
@@ -95,10 +81,6 @@ func spanSegs(srcLen int, edits []editmap.EditSpan) []editmap.Segment {
 	return b.done()
 }
 
-// TestPosMapKeepsOperandOfQuestionStatement checks that the operand a ?
-// statement copies into its expansion maps exactly, both ways, so
-// hover and go-to-definition on `os.ReadFile(path)` hit the same tokens
-// in the source and in the lowered text.
 func TestPosMapKeepsOperandOfQuestionStatement(t *testing.T) {
 	src, out, pm := questionMap(t)
 	srcLine := lineOf(src, 5)
@@ -114,10 +96,6 @@ func TestPosMapKeepsOperandOfQuestionStatement(t *testing.T) {
 	}
 }
 
-// TestPosMapGeneratedLinesMapToQuestionStatement checks that every
-// position inside the three lines the ? statement expands to maps back
-// into the statement of the source: the first line to its text, the
-// generated lines to the ? token that produced them.
 func TestPosMapGeneratedLinesMapToQuestionStatement(t *testing.T) {
 	src, out, pm := questionMap(t)
 	srcLine := lineOf(src, 5)
@@ -149,9 +127,6 @@ func TestPosMapGeneratedLinesMapToQuestionStatement(t *testing.T) {
 	}
 }
 
-// TestPosMapRangeToLoweredCoversQuestionStatement checks that a source
-// range over the whole statement maps to a range that covers the lowered
-// statement, the call first.
 func TestPosMapRangeToLoweredCoversQuestionStatement(t *testing.T) {
 	src, out, pm := questionMap(t)
 	srcLine := lineOf(src, 5)
@@ -165,9 +140,6 @@ func TestPosMapRangeToLoweredCoversQuestionStatement(t *testing.T) {
 	}
 }
 
-// TestPosMapInsertionAtEndOfFile checks the edge of text the lowering
-// appends: the end of the source maps before the appended text on the
-// trailing edge and after it on the leading edge.
 func TestPosMapInsertionAtEndOfFile(t *testing.T) {
 	_, out, pm := questionMap(t)
 	end := len(aLgo)
@@ -182,7 +154,6 @@ func TestPosMapInsertionAtEndOfFile(t *testing.T) {
 	}
 }
 
-// TestPosMapDeletion checks both edges at the seam of deleted text.
 func TestPosMapDeletion(t *testing.T) {
 	const deleted = "import \"comptime\"\n"
 	src := []byte(deleted + "x := 1\n")
@@ -206,8 +177,6 @@ func TestPosMapDeletion(t *testing.T) {
 	}
 }
 
-// TestNewPosMapRejectsBadMaps checks that a map that cannot describe its
-// texts is refused, so a stale or corrupt sidecar never maps positions.
 func TestNewPosMapRejectsBadMaps(t *testing.T) {
 	src, out := []byte("abc"), []byte("aXXc")
 	goodSegs := spanSegs(len(src), []editmap.EditSpan{{Start: 1, End: 2, Len: 2}})
@@ -260,12 +229,6 @@ func TestNewPosMapRejectsBadMaps(t *testing.T) {
 	}
 }
 
-// TestPosMapSegmentsMapCopiedRunsExactly checks that every lowered byte a
-// segment marks as copied — the variable name and the operand the fake
-// lowering reuses inside a replaced ? statement — maps exactly in both
-// directions. The leading edge is exact on every copied byte; the trailing
-// edge is exact except at the very start of a run, where it still sits
-// before text the lowering inserted there.
 func TestPosMapSegmentsMapCopiedRunsExactly(t *testing.T) {
 	_, _, pm := questionMap(t)
 	copied := 0
@@ -293,11 +256,6 @@ func TestPosMapSegmentsMapCopiedRunsExactly(t *testing.T) {
 	}
 }
 
-// TestPosMapLargeReplacementMapsBySegments checks that a replaced span far
-// beyond the old refinement table bound still maps exactly: segments carry
-// the origin, so there is no table to overflow and no cell limit. Deleted
-// original bytes carry no exact origin, and generated bytes anchor to the
-// copies around them.
 func TestPosMapLargeReplacementMapsBySegments(t *testing.T) {
 	src := []byte("w" + strings.Repeat("(", 2048))
 	mid := src[512:1536]
@@ -335,9 +293,6 @@ func TestPosMapLargeReplacementMapsBySegments(t *testing.T) {
 	}
 }
 
-// assertSpansConsistent checks that spans describe the transformation from
-// src to out: ordered, disjoint, inside src, source bytes between them
-// unchanged in out, and sizes adding up.
 func assertSpansConsistent(t *testing.T, src, out []byte, spans []editmap.EditSpan) {
 	t.Helper()
 	prev, pos := 0, 0
@@ -357,8 +312,6 @@ func assertSpansConsistent(t *testing.T, src, out []byte, spans []editmap.EditSp
 	}
 }
 
-// randomText returns n tokens of source-like text: words, punctuation,
-// spaces, and newlines.
 func randomText(rng *rand.Rand, n int) string {
 	pieces := []string{"a", "bc", "data", "os", "path", "x1", ".", "(", ")", ":=", ",", " ", " ", "\n", "\t", "é", "𝒳"}
 	var b strings.Builder
@@ -368,9 +321,6 @@ func randomText(rng *rand.Rand, n int) string {
 	return b.String()
 }
 
-// randomLowering applies random non-overlapping edits to src. The
-// replacement text mixes generated pieces and bytes copied from the
-// replaced text; the segments mark the copied bytes.
 func randomLowering(rng *rand.Rand, src string) ([]byte, editmap.EditMap) {
 	var cuts []int
 	for range 1 + rng.IntN(5) {
@@ -408,10 +358,6 @@ func randomLowering(rng *rand.Rand, src string) ([]byte, editmap.EditMap) {
 	return []byte(out.String()), editmap.EditMap{Version: editmap.Version, Source: "r.lgo", Size: len(src), Out: out.Len(), Edits: spans, Segments: segs.done()}
 }
 
-// TestPosMapProperties is the invariant test of the position map: for
-// random sources and random lowerings, every lowered byte a segment marks
-// as copied maps exactly to its own original byte, and every copied run's
-// lowered span maps back to its own original span.
 func TestPosMapProperties(t *testing.T) {
 	rng := rand.New(rand.NewPCG(1, 2))
 	for iter := range 400 {
@@ -426,13 +372,6 @@ func TestPosMapProperties(t *testing.T) {
 	}
 }
 
-// checkProperties checks the exact-origin invariants of one lowering:
-// every lowered byte a segment marks as copied equals its original byte
-// and maps exactly to its own original byte, and every copied run's
-// lowered span maps back to its own original span. It does not require
-// global monotonicity: a lowering may move or duplicate exact chunks, so
-// lowered order need not follow original order and one original offset may
-// have several lowered copies.
 func checkProperties(t *testing.T, iter int, src, out []byte, pm *posMap) {
 	t.Helper()
 	for _, s := range pm.Segments {
@@ -495,11 +434,6 @@ func checkProperties(t *testing.T, iter int, src, out []byte, pm *posMap) {
 	}
 }
 
-// TestPosMapMovedDuplicatedExactChunks checks the legitimate shapes the
-// old monotonicity property forbade: a lowering may move exact chunks out
-// of original order and may duplicate one original chunk in two lowered
-// places. Every lowered copy still maps exactly to its own origin, and
-// every run's span maps back to that origin.
 func TestPosMapMovedDuplicatedExactChunks(t *testing.T) {
 	src := []byte("ABCDE FGHIJ")
 	movedOut := append(append([]byte("FGHIJ "), []byte("ABCDE")...), []byte("!")...)
@@ -536,10 +470,6 @@ func TestPosMapMovedDuplicatedExactChunks(t *testing.T) {
 	checkProperties(t, 1, []byte("AB"), dupOut, dpm)
 }
 
-// TestTextOffsetsUseUTF16 checks the conversion between byte offsets and
-// UTF-16 positions: multi-byte characters count one unit, characters
-// beyond the basic plane count two, and a character past a line's end
-// clamps to it.
 func TestTextOffsetsUseUTF16(t *testing.T) {
 	const doc = "a𝒳é\nxyz\r\nlast"
 	tx := newText([]byte(doc))
@@ -577,9 +507,6 @@ func TestTextOffsetsUseUTF16(t *testing.T) {
 	}
 }
 
-// TestApplyChangesIncremental checks didChange handling: a range change
-// splices UTF-16 positions, a whole-text change replaces the text, and
-// changes apply in order.
 func TestApplyChangesIncremental(t *testing.T) {
 	tx := newText([]byte("héllo\nworld\n"))
 	tx = applyChanges(tx, []contentChange{
@@ -595,8 +522,6 @@ func TestApplyChangesIncremental(t *testing.T) {
 	}
 }
 
-// mustPosMap builds the position map of src and out through m, failing
-// the test when the map does not fit its texts.
 func mustPosMap(t *testing.T, src, out string, m editmap.EditMap) *posMap {
 	t.Helper()
 	pm, err := newPosMap([]byte(src), []byte(out), m)
@@ -606,11 +531,6 @@ func mustPosMap(t *testing.T, src, out string, m editmap.EditMap) *posMap {
 	return pm
 }
 
-// TestPosMapGeneratedPrefixAtZeroAndEmptySource checks the two insertion
-// edges the map spells out in code: a generated prefix is an insertion at
-// offset zero, so the trailing edge stays before it while the leading
-// edge goes after it, and an empty source with generated output is one
-// insertion at offset zero the same way.
 func TestPosMapGeneratedPrefixAtZeroAndEmptySource(t *testing.T) {
 	prefix := mustPosMap(t, "ab\n", "PRE\nab\n", editmap.EditMap{
 		Version: editmap.Version, Source: "p.lgo", Size: 3, Out: 7,
@@ -652,10 +572,6 @@ func TestPosMapGeneratedPrefixAtZeroAndEmptySource(t *testing.T) {
 	}
 }
 
-// TestPosMapMidTextInsertionSeams checks a pure insertion inside the
-// text: the leading edge goes after the inserted bytes and the trailing
-// edge stays before them, a range over only the inserted bytes collapses
-// to its insertion point, and interior bytes anchor to that point.
 func TestPosMapMidTextInsertionSeams(t *testing.T) {
 	edits := []editmap.EditSpan{{Start: 1, End: 1, Len: 3}}
 	pm := mustPosMap(t, "ab", "aXYZb", editmap.EditMap{
@@ -676,11 +592,6 @@ func TestPosMapMidTextInsertionSeams(t *testing.T) {
 	}
 }
 
-// TestPosMapMidAndEndTextDeletionNeighbors checks the neighbors of
-// deleted text: a position inside it maps to the start of what replaced
-// it, the leading edge at the seam sits after it, and a range across it
-// widens to its original coordinates. The end-of-file deletion is the
-// mirror of the covered end-of-file insertion.
 func TestPosMapMidAndEndTextDeletionNeighbors(t *testing.T) {
 	mid := mustPosMap(t, "one\ndropped\ntwo\n", "one\ntwo\n", editmap.EditMap{
 		Version: editmap.Version, Source: "d.lgo", Size: 16, Out: 8,
@@ -716,12 +627,6 @@ func TestPosMapMidAndEndTextDeletionNeighbors(t *testing.T) {
 	}
 }
 
-// TestNewPosMapRejectsDegenerateSegments checks the segment faults the
-// table test does not name: a zero-length run, an origin below the
-// generated mark, a first run that does not start the lowered text, and
-// a run past the lowered text are all refused, so a corrupt sidecar
-// never maps. TestNewPosMapRejectsBadMaps covers the overlapping,
-// short, out-of-source, and differing-bytes faults.
 func TestNewPosMapRejectsDegenerateSegments(t *testing.T) {
 	src, out := []byte("abc"), []byte("aXXc")
 	edits := []editmap.EditSpan{{Start: 1, End: 2, Len: 2}}
@@ -751,9 +656,6 @@ func TestNewPosMapRejectsDegenerateSegments(t *testing.T) {
 	}
 }
 
-// rewrittenLgo exercises the three shapes the real compiler rewrites: a
-// ? statement, chain calls with expression and block lambdas, and a ?
-// lambda body.
 const rewrittenLgo = `package z
 
 import (
@@ -782,12 +684,6 @@ func First(xs []int) (string, error) {
 }
 `
 
-// TestPosMapRealLoweringKeepsRewrittenCoordinates lowers real loGo/s
-// through the production compiler and checks the mapping the proxy will
-// use: every user token the test names maps into lowered text starting
-// with the same token and round-trips to the identity, the invariants
-// hold, generated runs anchor inside the source, and every invented
-// _logos_ identifier sits strictly inside generated text.
 func TestPosMapRealLoweringKeepsRewrittenCoordinates(t *testing.T) {
 	root, tc := realWorkspace(t)
 	zdir := filepath.Join(root, "lmod", "z")
