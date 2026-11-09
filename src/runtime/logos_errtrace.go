@@ -26,9 +26,6 @@ func logosTraceRecord(site unsafe.Pointer, errData uintptr) {
 func logosTraceRead(buf []unsafe.Pointer) int {
 	gp := getg()
 	n := gp.logosErrLen
-	if n > uint8(len(gp.logosErrSite)) {
-		n = uint8(len(gp.logosErrSite))
-	}
 	copy(buf, gp.logosErrSite[:n])
 	return int(n)
 }
