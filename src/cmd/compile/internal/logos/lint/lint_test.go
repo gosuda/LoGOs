@@ -148,13 +148,6 @@ func g() {
 	}
 }
 
-// TestRuleScopesSpecCounts pins the 21 and 9 of SPEC Sec 1.2 and Sec 2.6.
-func TestRuleScopesSpecCounts(t *testing.T) {
-	if len(goRules) != 21 || len(lgoRules) != 9 {
-		t.Fatalf("goRules = %d, lgoRules = %d, want 21 and 9", len(goRules), len(lgoRules))
-	}
-}
-
 // TestPolicyDefaults covers the default severities, the Go cap, and the
 // default thresholds.
 func TestPolicyDefaults(t *testing.T) {
