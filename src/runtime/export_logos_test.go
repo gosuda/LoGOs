@@ -17,6 +17,17 @@ func LogosExitFastCallForTest() (slots [4]uintptr, stamp int64, flag bool) {
 	logosClearFastCall(mp)
 	return mp.fastCgoFrame, mp.fastCallEnterNano, mp.inFastCall
 }
+func LogosFastCallStateForTest() (slots [4]uintptr, stamp int64, flag bool) {
+	mp := getg().m
+	return mp.fastCgoFrame, mp.fastCallEnterNano, mp.inFastCall
+}
+
+func LogosDirtyFastCallSlotsForTest(slots [4]uintptr, stamp int64, flag bool) {
+	mp := getg().m
+	mp.fastCgoFrame = slots
+	mp.fastCallEnterNano = stamp
+	mp.inFastCall = flag
+}
 
 func LogosGrowsliceBufForTest(elem any, buf unsafe.Pointer, bufLen, newLen, num int) (array unsafe.Pointer, length, capacity int) {
 	s := growsliceBuf(buf, newLen, bufLen, num, efaceOf(&elem)._type, buf, bufLen)
