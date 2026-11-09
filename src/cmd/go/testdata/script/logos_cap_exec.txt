@@ -661,10 +661,3 @@ import "C"
 func Answer() int {
 	return int(C.fortytwo())
 }
-
--- l/dep/extra.lgo --
-package dep
-
-func Extra() string {
-	return "extra"
-}
