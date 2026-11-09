@@ -91,6 +91,8 @@ Proven by `src/cmd/go/testdata/script/logos_lint_config.txt`, `src/cmd/go/testda
 
 27. Lints: code adheres to deny and forbid lint rules across correctness, concurrency, slop, complexity, perf, suspicious, and portability groups. Suppressions require explicit `//logos:allow(<rule>)` directives on the statement or declaration. Findings: `slop::err_chain_reset`, `slop::discarded_error`, `complexity::cognitive_overflow`, `perf::large_backing_array_pin`, `perf::time_after_in_loop`, `correctness::arena_pointer_escape`, `correctness::infinite_recursion`, `correctness::typed_nil_return`, `correctness::unclosed_io_closer`, `correctness::unbounded_channel_op`, `correctness::defer_erases_errdefer_state`, `correctness::allow_forbidden_rule`, `suspicious::side_effect_before_sort`, `portability::serialized_unsized_int`, `pedantic::exhaustive_union_switch`.
 
+Native rules also cover locks, layouts, and unsafe use: `concurrency::unguarded_access`, `concurrency::nonatomic_access`, `concurrency::lock_requirement_unmet`, `correctness::layout_constant_mismatch`, `portability::atomic_plain_int64`, `correctness::linkname_mismatch`, `pedantic::unsafe_outside_unsafe_file`, `correctness::withlock_leak`.
+
 ## Checklist (M7)
 
 Proven by `test/logos/run/const_if_nested.lgo`, `test/logos/codegen/const_if_dead.lgo`, `test/logos/run/const_for_const_if.lgo`, `test/logos/run/const_switch_order.lgo`, `test/logos/run/const_for_lines.lgo`, `src/internal/types/testdata/logos/const_if.lgo`, `src/internal/types/testdata/logos/const_switch.lgo`, `src/internal/types/testdata/logos/viewas.lgo`, and `src/cmd/go/testdata/script/logos_eject_const_for.txt`.

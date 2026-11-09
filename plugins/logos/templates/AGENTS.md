@@ -7,7 +7,7 @@ This repository holds loGo/s code (`.lgo` files) built with the `logos` toolchai
 - One kind per module: all `.go` or all `.lgo`. A workspace may hold both kinds.
 - Imports cross kinds in both directions: a `.lgo` package may import any Go package, and a Go package may import any loGo/s package.
 - Build with `logos`; plain `go` ignores `.lgo` files.
-- `logos.toml` sits at the module root; unknown tables or keys are errors.
+- `logos.toml` sits next to `go.mod` in the main module; unknown tables or keys are errors. Plain `go` reads no `logos.toml`; command-line `-O` and `--pedantic` override the file.
 
 Rule IDs the compiler reports:
 
@@ -24,7 +24,7 @@ Rule IDs the compiler reports:
 - `logos lint ./...`: lint code and reports findings.
 - `logos next`: preview Go to loGo/s migration diff; `--fix` applies it.
 - `logos context <pkg>#<symbol>`: print symbol signatures without bodies.
-- `logos lsp`: start the language server proxy for editor integration.
+- `logos lsp`: start the language server proxy for editor integration. It serves over stdio through `gopls`, keeps lowered sources in memory, and merges compiler diagnostics.
 - `logos eject -o DIR`: plain-Go copy in DIR; then `go build ./...` and `go test ./...` in DIR.
 
 ## Error propagation (M1)

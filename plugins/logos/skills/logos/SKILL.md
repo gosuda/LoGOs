@@ -12,7 +12,7 @@ metadata:
 
 loGo/s is Go with checked error propagation. You write `.lgo` files. The `logos` command checks them, lowers them to plain Go, and builds them with the Go 1.27 backend.
 
-Coverage: M1 error propagation, M2 closed unions, M3 options and nil flow, M4 interface properties, M5 const composites with CTFE, read-only placement, const views, zero-copy conversions, const maps and `logos/rt.Freeze`, M6 interpolation, address-of, defaults, spread, tuples, lambdas, chains, leading-dot, yield and scope defer, M7 comptime (`const if`, `const for`, `const switch T`, `comptime.ViewAs`), M8 structured concurrency, M9 lints, M10 migration tooling, M11 static JSON, M12 capabilities, M13 optimization tiers (`-O`), M21 language server (`logos lsp`).
+Coverage: M1 error propagation, M2 closed unions, M3 options and nil flow, M4 interface properties, M5 const composites with CTFE, read-only placement, const views, zero-copy conversions, const maps and `logos/rt.Freeze`, M6 interpolation, address-of, defaults, spread, tuples, lambdas, chains, leading-dot, yield and scope defer, M7 comptime (`const if`, `const for`, `const switch T`, `comptime.ViewAs`), M8 structured concurrency, M9 lints, M10 migration tooling, M11 static JSON, M12 capabilities, M13 optimization tiers (`-O`), M14 fixed-array SIMD, M16 WASM profile, M17 stack sizing, M18 arena allocation, M20 fast cgo, M21 language server (`logos lsp`), M22 zero-allocation enforcement.
 
 ## Procedure
 

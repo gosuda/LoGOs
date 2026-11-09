@@ -34,7 +34,7 @@ The `-O` build flag is accepted by both `logos build` and `go build`. In `logos.
 Rules:
 
 * `logos.toml [build] opt_level` defaults to `"O2"`. Command-line `-O` overrides the file setting (`src/cmd/go/testdata/script/logos_opt_levels.txt`).
-* `target_cpu` in `logos.toml [build]` accepts `"deterministic"` (`GOAMD64=v3`, `GOARM64=v8.2`) or `"native"` (selects host architecture features from `internal/cpu`).
+* `target_cpu` in `logos.toml [build]` accepts `"deterministic"` (`GOAMD64=v3`, `GOARM64=v8.2`), `"baseline"` (`GOAMD64=v1`, `GOARM64=v8.0`), or `"native"` (selects host architecture features from `internal/cpu`).
 * Improvements apply to Go packages built under `logos` and under plain `go` with `-O`.
 
 ## Fixed-array SIMD (M14)
@@ -83,7 +83,7 @@ Goroutine-local arena allocation is controlled by `GOEXPERIMENT=logosarena` and 
 
 Rules:
 
-* Non-escaping allocations exceeding stack buffer thresholds allocate into goroutine arena chunks instead of the heap when arena mode is active (`src/runtime/logos_arena_test.go`, `src/cmd/go/internal/cfg/logos_arena_test.go`).
+* Non-escaping allocations exceeding stack buffer thresholds allocate into goroutine arena chunks instead of the heap when arena mode is active (`src/runtime/logos_arena_test.go`, `src/cmd/go/internal/cfg/logos_experiment_test.go`).
 * Small noscan objects up to 512 bytes use an inline bump-allocation path marked as an async preemption unsafe point (`src/runtime/logos_arena_test.go`).
 * Watermarks follow LIFO ordering and are restored at function returns and loop back-edges.
 * Memory holding pointers is scanned by the garbage collector during stack scanning.
