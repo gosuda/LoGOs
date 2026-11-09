@@ -190,12 +190,12 @@ func seqEscapeCaller() {
 }
 
 func goCallSite() {
-	var a, b node // ERROR "moved to heap: a" "moved to heap: b"
+	var a, b node   // ERROR "moved to heap: a" "moved to heap: b"
 	go link(&a, &b) // ERROR "can inline goCallSite.gowrap1"
 }
 
 func deferCallSite() {
-	var a, b node // ERROR "moved to heap: b"
+	var a, b node      // ERROR "moved to heap: b"
 	defer link(&a, &b) // ERROR "can inline deferCallSite.deferwrap1"
 }
 
@@ -221,7 +221,7 @@ func storeVariadic(o *node, ps ...*node) { // ERROR "o does not escape" "leaking
 }
 
 func storeVariadicCaller() { // ERROR "can inline storeVariadicCaller"
-	var a, b node // ERROR "moved to heap: b"
+	var a, b node         // ERROR "moved to heap: b"
 	storeVariadic(&a, &b) // ERROR "... argument does not escape"
 	_, _ = a, b
 }
