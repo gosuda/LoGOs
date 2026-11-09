@@ -62,12 +62,7 @@ func TestLogosRuntimeNoNewPadding(t *testing.T) {
 	}
 	var wantMTail, wantGTail, wantGMid, wantPTail uintptr
 	switch runtime.GOARCH {
-	case "amd64", "arm64":
-		wantMTail = 4*ptr + 8
-		wantGTail = 10 * ptr
-		wantGMid = 4 * ptr
-		wantPTail = 3 * ptr
-	case "wasm":
+	case "amd64", "arm64", "wasm":
 		wantMTail = 4*ptr + 8
 		wantGTail = 10 * ptr
 		wantGMid = 4 * ptr
