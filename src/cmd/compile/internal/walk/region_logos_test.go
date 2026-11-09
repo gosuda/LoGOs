@@ -434,3 +434,69 @@ func TestLogosRegionUnplacedAppendStays(t *testing.T) {
 		t.Fatalf("unplaced append rewritten to %v", appendAs.Y.Op())
 	}
 }
+
+func TestLogosRegionOpenNoTupleTemp(t *testing.T) {
+	enableLogosRegion(t)
+	fn := regionTestFn()
+	posBase := src.NewFileBase("region_test.go", "region_test.go")
+	callPos := base.Ctxt.PosTable.XPos(src.MakePos(posBase, 10, 1))
+	bogusPos := base.Ctxt.PosTable.XPos(src.MakePos(posBase, 99, 1))
+	openCall, openAs, _ := regionTestOpen(fn)
+	openCall.SetPos(callPos)
+	openAs.SetPos(callPos)
+	ir.LogosRegions.Live(openCall)
+	fn.Body = ir.Nodes{regionTestBlock(openAs)}
+	old := base.Pos
+	base.Pos = bogusPos
+	logosRegionLower(fn)
+	base.Pos = old
+	if len(openAs.Init()) == 0 {
+		t.Fatal("open init is empty")
+	}
+	found := false
+	for _, st := range openAs.Init() {
+		as, ok := st.(*ir.AssignListStmt)
+		if !ok {
+			continue
+		}
+		if len(as.Rhs) != 1 {
+			continue
+		}
+		rc, ok := as.Rhs[0].(*ir.CallExpr)
+		if !ok {
+			continue
+		}
+		if regionCallName(rc) != "logosRegionOpen" {
+			continue
+		}
+		found = true
+		if as.Op() != ir.OAS2FUNC {
+			t.Fatalf("open tuple call uses %v, want OAS2FUNC", as.Op())
+		}
+		if len(as.Lhs) != 2 {
+			t.Fatalf("open tuple assign has %d results, want 2", len(as.Lhs))
+		}
+		fields := rc.Type().Fields()
+		if len(fields) != 2 {
+			t.Fatalf("open call has %d results, want 2", len(fields))
+		}
+		for i := range 2 {
+			got := as.Lhs[i].Type()
+			if got.IsFuncArgStruct() {
+				t.Fatalf("open temp %d has tuple type", i)
+			}
+			if !types.Identical(got, fields[i].Type) {
+				t.Fatalf("open temp %d type mismatch", i)
+			}
+		}
+		if rc.Pos() != callPos {
+			t.Fatalf("open call pos mismatch")
+		}
+		if rc.Pos() == bogusPos {
+			t.Fatalf("open call carries stale position")
+		}
+	}
+	if !found {
+		t.Fatal("logosRegionOpen call not found in open init")
+	}
+}

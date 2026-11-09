@@ -467,14 +467,20 @@ func (o *logosRegionOwner) ownCloses(p *logosRegionLowering) []ir.Node {
 
 func (p *logosRegionLowering) closeCall(name *ir.Name, pos src.XPos) ir.Node {
 	var init ir.Nodes
-	h := p.regionDot(name, 0)
-	g := p.regionDot(name, 1)
-	return mkcall1(typecheck.LookupRuntime("logosRegionClose"), nil, &init, h, g)
+	h := p.regionDot(name, 0, pos)
+	g := p.regionDot(name, 1, pos)
+	old := base.Pos
+	base.Pos = pos
+	call := mkcall1(typecheck.LookupRuntime("logosRegionClose"), nil, &init, h, g)
+	base.Pos = old
+	call.SetPos(pos)
+	return call
 }
 
-func (p *logosRegionLowering) regionDot(name *ir.Name, idx int) ir.Node {
+func (p *logosRegionLowering) regionDot(name *ir.Name, idx int, pos src.XPos) ir.Node {
 	f := name.Type().Field(idx)
-	d := ir.NewSelectorExpr(base.Pos, ir.ODOT, name, f.Sym)
+	d := ir.NewSelectorExpr(pos, ir.ODOT, name, f.Sym)
+	d.Selection = f
 	d.SetType(f.Type)
 	d.SetTypecheck(1)
 	return d
@@ -509,29 +515,33 @@ func (p *logosRegionLowering) lowerOpenBare(call *ir.CallExpr) ir.Node {
 	p.names[call] = tmp
 	return ir.NewBlockStmt(call.Pos(), init)
 }
-
 func (p *logosRegionLowering) openLit(call *ir.CallExpr, init *ir.Nodes) ir.Node {
-	tmpH := typecheck.TempAt(call.Pos(), p.fn, types.Types[types.TUNSAFEPTR])
-	tmpG := typecheck.TempAt(call.Pos(), p.fn, types.Types[types.TUINTPTR])
+	pos := call.Pos()
+	tmpH := typecheck.TempAt(pos, p.fn, types.Types[types.TUNSAFEPTR])
+	tmpG := typecheck.TempAt(pos, p.fn, types.Types[types.TUINTPTR])
 	var callInit ir.Nodes
 	openFn := typecheck.LookupRuntime("logosRegionOpen")
+	old := base.Pos
+	base.Pos = pos
 	openCall := mkcall1(openFn, openFn.Type().ResultsTuple(), &callInit)
+	base.Pos = old
+	openCall.SetPos(pos)
 	init.Append(callInit...)
-	oas2 := ir.NewAssignListStmt(call.Pos(), ir.OAS2, []ir.Node{tmpH, tmpG}, []ir.Node{openCall})
+	oas2 := ir.NewAssignListStmt(pos, ir.OAS2FUNC, []ir.Node{tmpH, tmpG}, []ir.Node{openCall})
 	oas2.SetTypecheck(1)
 	init.Append(oas2)
 	t := call.Type()
-	lit := ir.NewCompLitExpr(call.Pos(), ir.OSTRUCTLIT, t, []ir.Node{
-		p.fieldExpr(t, 0, tmpH),
-		p.fieldExpr(t, 1, tmpG),
+	lit := ir.NewCompLitExpr(pos, ir.OSTRUCTLIT, t, []ir.Node{
+		p.fieldExpr(t, 0, tmpH, pos),
+		p.fieldExpr(t, 1, tmpG, pos),
 	})
 	lit.SetTypecheck(1)
 	return lit
 }
 
-func (p *logosRegionLowering) fieldExpr(t *types.Type, idx int, v ir.Node) ir.Node {
+func (p *logosRegionLowering) fieldExpr(t *types.Type, idx int, v ir.Node, pos src.XPos) ir.Node {
 	f := t.Field(idx)
-	e := ir.NewStructKeyExpr(base.Pos, f, v)
+	e := ir.NewStructKeyExpr(pos, f, v)
 	e.SetType(f.Type)
 	e.SetTypecheck(1)
 	return e
@@ -548,8 +558,9 @@ func (p *logosRegionLowering) lowerSite(call *ir.CallExpr, op ir.LogosRegionOp) 
 	if r == nil {
 		return call
 	}
-	h := p.regionDot(r, 0)
-	g := p.regionDot(r, 1)
+	pos := call.Pos()
+	h := p.regionDot(r, 0, pos)
+	g := p.regionDot(r, 1, pos)
 	switch op {
 	case ir.LogosRegionNew:
 		return p.lowerSiteNew(call, h, g)
@@ -560,7 +571,6 @@ func (p *logosRegionLowering) lowerSite(call *ir.CallExpr, op ir.LogosRegionOp) 
 	}
 	return call
 }
-
 func (p *logosRegionLowering) lowerSiteNew(call *ir.CallExpr, h, g ir.Node) ir.Node {
 	elem := ir.LogosRegionElem(call)
 	if elem == nil {
@@ -573,29 +583,43 @@ func (p *logosRegionLowering) lowerSiteNew(call *ir.CallExpr, h, g ir.Node) ir.N
 	if !elem.HasPointers() && size > 0 && size <= ssagen.LogosArenaBumpMaxBytes && buildcfg.GOARCH == "amd64" && !base.Flag.Race {
 		return p.lowerSiteBumpNew(call, elem, size, h, g)
 	}
+	old := base.Pos
+	base.Pos = pos
+	var out ir.Node
 	if elem.HasPointers() {
 		fn := typecheck.LookupRuntime("logosRegionAllocScan")
-		return typecheck.Conv(mkcall1(fn, types.Types[types.TUNSAFEPTR], init, h, g, reflectdata.TypePtrAt(pos, elem), ir.NewInt(pos, size)), call.Type())
+		made := mkcall1(fn, types.Types[types.TUNSAFEPTR], init, h, g, reflectdata.TypePtrAt(pos, elem), ir.NewInt(pos, size))
+		made.SetPos(pos)
+		out = typecheck.Conv(made, call.Type())
+	} else {
+		fn := typecheck.LookupRuntime("logosRegionAllocNoscan")
+		align := ir.NewInt(pos, elem.Alignment())
+		made := mkcall1(fn, types.Types[types.TUNSAFEPTR], init, h, g, ir.NewInt(pos, size), align)
+		made.SetPos(pos)
+		out = typecheck.Conv(made, call.Type())
 	}
-	fn := typecheck.LookupRuntime("logosRegionAllocNoscan")
-	align := ir.NewInt(pos, elem.Alignment())
-	return typecheck.Conv(mkcall1(fn, types.Types[types.TUNSAFEPTR], init, h, g, ir.NewInt(pos, size), align), call.Type())
+	base.Pos = old
+	return out
 }
 
 func (p *logosRegionLowering) lowerSiteBumpNew(call *ir.CallExpr, elem *types.Type, size int64, h, g ir.Node) ir.Node {
 	pos := call.Pos()
 	init := p.init
 	pt := typecheck.TempAt(pos, p.fn, types.Types[types.TUNSAFEPTR])
+	old := base.Pos
+	base.Pos = pos
 	callBump := mkcall1(typecheck.LookupRuntime("logosRegionBump"), types.Types[types.TUNSAFEPTR], init, h, g, ir.NewInt(pos, size))
+	callBump.SetPos(pos)
 	p.appendInit(init, ir.NewAssignStmt(pos, pt, callBump))
-
 	var slow ir.Nodes
 	callAlloc := mkcall1(typecheck.LookupRuntime("logosRegionAllocNoscan"), types.Types[types.TUNSAFEPTR], &slow, h, g, ir.NewInt(pos, size), ir.NewInt(pos, elem.Alignment()))
+	callAlloc.SetPos(pos)
 	p.appendInit(&slow, ir.NewAssignStmt(pos, pt, callAlloc))
-
 	var clr ir.Nodes
-	p.appendInit(&clr, mkcall("memclrNoHeapPointers", nil, &clr, pt, ir.NewInt(pos, size)))
-
+	clrCall := mkcall("memclrNoHeapPointers", nil, &clr, pt, ir.NewInt(pos, size))
+	clrCall.SetPos(pos)
+	p.appendInit(&clr, clrCall)
+	base.Pos = old
 	nif := ir.NewIfStmt(pos, ir.NewBinaryExpr(pos, ir.OEQ, pt, typecheck.NodNil()), slow, clr)
 	p.appendInit(init, nif)
 	return typecheck.Conv(pt, call.Type())
@@ -611,7 +635,11 @@ func (p *logosRegionLowering) lowerSiteMake(call *ir.CallExpr, h, g ir.Node) ir.
 	rtyp := reflectdata.TypePtrAt(pos, call.Type().Elem())
 	pt := typecheck.TempAt(pos, p.fn, types.Types[types.TUNSAFEPTR])
 	len64 := typecheck.Conv(lenNode, types.Types[types.TINT64])
+	old := base.Pos
+	base.Pos = pos
 	callMake := mkcall1(typecheck.LookupRuntime("logosRegionMakeSlice"), types.Types[types.TUNSAFEPTR], init, h, g, rtyp, len64, len64)
+	callMake.SetPos(pos)
+	base.Pos = old
 	p.appendInit(init, ir.NewAssignStmt(pos, pt, callMake))
 
 	slice := typecheck.TempAt(pos, p.fn, call.Type())
@@ -684,7 +712,13 @@ func logosRegionGrowslice(g logosRegionGrow) *ir.CallExpr {
 		info := v.(ssagen.LogosRegionGrowInfo)
 		elem := g.slice.Type().Elem()
 		fn := typecheck.LookupRuntime("logosRegionGrowSlice")
-		return mkcall1(fn, g.slice.Type(), g.init, info.H, info.G, g.oldPtr, g.newLen, g.oldCap, g.num, reflectdata.TypePtrAt(base.Pos, elem))
+		pos := g.app.Pos()
+		old := base.Pos
+		base.Pos = pos
+		made := mkcall1(fn, g.slice.Type(), g.init, info.H, info.G, g.oldPtr, g.newLen, g.oldCap, g.num, reflectdata.TypePtrAt(pos, elem))
+		base.Pos = old
+		made.SetPos(pos)
+		return made
 	}
 	return walkGrowslice(g.slice, g.init, g.oldPtr, g.newLen, g.oldCap, g.num)
 }
