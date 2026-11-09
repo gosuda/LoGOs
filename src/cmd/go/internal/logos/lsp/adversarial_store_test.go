@@ -9,6 +9,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -241,5 +243,40 @@ func TestAdvEnsureCancelledSkipsCompile(t *testing.T) {
 	}
 	if got := len(p.opts.Compiler.(*fakeCompiler).lowerCalls()); got != 0 {
 		t.Errorf("cancelled ensure compiled %d times, want none", got)
+	}
+}
+
+func TestAdvUTF16AstralBoundary(t *testing.T) {
+	const src = "package a\n\nvar s = \"\U0001F600\"\n"
+	tx := newText([]byte(src))
+	emojiOff := strings.Index(src, "\U0001F600")
+	prefix := tx.position(emojiOff)
+	for _, ch := range []int{1, 2} {
+		if got := tx.offset(Position{Line: prefix.Line, Character: prefix.Character + ch}); got != emojiOff+4 {
+			t.Errorf("offset past astral char %+1d = %d, want the rune end %d", ch, got, emojiOff+4)
+		}
+	}
+	if got := tx.position(emojiOff + 4); got.Character != prefix.Character+2 {
+		t.Errorf("position after astral char = %v, want character %d", got, prefix.Character+2)
+	}
+}
+
+func TestAdvOverlayReleasedAfterRun(t *testing.T) {
+	ov, err := newOverlay(map[string][]byte{"/w/a.lgo": []byte("package a\n")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Dir(ov.json)
+	if _, err := os.Stat(dir); err != nil {
+		t.Fatalf("overlay dir missing before release: %v", err)
+	}
+	if err := ov.release(); err != nil {
+		t.Fatalf("release = %v", err)
+	}
+	if err := ov.release(); err != nil {
+		t.Errorf("second release = %v, want nil", err)
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Errorf("overlay dir still present after release: %v", err)
 	}
 }
