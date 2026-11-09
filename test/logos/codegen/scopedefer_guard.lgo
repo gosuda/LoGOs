@@ -3,6 +3,8 @@
 package main
 
 //go:noinline
+	// amd64:"FUNCDATA.*opendefer\\(SB\\)"
+	// arm64:"FUNCDATA.*opendefer\\(SB\\)"
 func loopCleanup(n int) int {
 	total := 0
 	for i := 0; i < n; i++ {
