@@ -61,6 +61,13 @@ func sumInt(xs []int) int {
 	return xs.sum()
 }
 
+//go:noinline
+func sumFiltered(xs []int32) int32 {
+	// amd64:-"VPMASKMOV" -"VMOVDQU" -"SliceMasked" -"CALL simd/archsimd" -"CALL runtime\\.makeslice"
+	// arm64:-"VPMASKMOV" -"CALL simd/archsimd" -"CALL runtime\\.makeslice"
+	return xs.filter(x => x > 0).sum()
+}
+
 func main() {
 	var a []int32
 	var b []uint64

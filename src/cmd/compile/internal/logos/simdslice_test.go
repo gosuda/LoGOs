@@ -225,6 +225,35 @@ func TestSimdSliceSumNoPadding(t *testing.T) {
 	}
 }
 
+func TestSimdSliceSumNoStagingElsewhere(t *testing.T) {
+	simdSliceTarget(t, "amd64", 1)
+	for _, c := range []struct {
+		name   string
+		params string
+		result string
+		body   string
+		makes  int
+	}{
+		{"fused", "xs []int32", "int32", "return xs.filter(x => x > 0).sum()", 0},
+		{"count", "xs []int32", "int", "return xs.count()", 0},
+		{"loop", "xs []int32", "int32", "var t int32\n\tfor _, v := range xs {\n\t\tt += v\n\t}\n\treturn t", 0},
+		{"explicit", "n int", "int", "out := make([]int32, n)\n\treturn len(out)", 1},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			src := "package main\n\ntype f32 = float32\n\nfunc f(" + c.params + ") " + c.result + " {\n\t" + c.body + "\n}\n\nfunc trig(xs []int32) int {\n\treturn xs.count()\n}\n"
+			out := lowerSnippetSrc(t, "slicesum.lgo", src)
+			for _, bad := range []string{"_logos_simd", "SliceMasked", "_mt", "archsimd"} {
+				if strings.Contains(out, bad) {
+					t.Errorf("%s: vector staging %q outside a bare vector sum:\n%s", c.name, bad, out)
+				}
+			}
+			if n := strings.Count(out, "make("); n != c.makes {
+				t.Errorf("%s: %d makes, want %d (only the source):\n%s", c.name, n, c.makes, out)
+			}
+		})
+	}
+}
+
 func ejectTarget(t *testing.T) {
 	t.Helper()
 	saved := base.LogosEject
