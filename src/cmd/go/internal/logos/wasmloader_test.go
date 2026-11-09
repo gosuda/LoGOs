@@ -20,12 +20,6 @@ func BenchmarkWasmLoaderSize(b *testing.B) {
 		n = len(cfg.WasmLoader)
 	}
 	b.ReportMetric(float64(n), "bytes")
-	if n == 0 {
-		b.Fatal("cfg.WasmLoader is empty: the loader is not registered")
-	}
-	if n > wasmLoaderBudget {
-		b.Fatalf("loader is %d bytes, want at most %d", n, wasmLoaderBudget)
-	}
 }
 
 func TestWasmLoaderWithinBudget(t *testing.T) {
