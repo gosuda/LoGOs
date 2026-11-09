@@ -98,6 +98,16 @@ func TestAdvWithlockLeak(t *testing.T) {
 			nil,
 		},
 		{
+			"derefStoreEscapes",
+			"func p5(l *Locked[Box]) { l.WithLock(func(b *Box) { *pslot = b }) }\n",
+			[]string{"26 correctness::withlock_leak deny"},
+		},
+		{
+			"localDerefStoreStaysClean",
+			"func p11(l *Locked[Box]) { l.WithLock(func(b *Box) { var tmp *Box; ptmp := &tmp; *ptmp = b }) }\n",
+			nil,
+		},
+		{
 			"deferredCallArgStaysClean",
 			"func p4(l *Locked[Box]) { l.WithLock(func(b *Box) { defer useBox(b) }) }\n",
 			nil,

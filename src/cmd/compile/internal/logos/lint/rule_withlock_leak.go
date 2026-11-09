@@ -273,6 +273,8 @@ func (c *leakCheck) operandEscapes(e syntax.Expr) bool {
 		return !c.locals[obj]
 	case *syntax.SelectorExpr, *syntax.IndexExpr:
 		return true
+	case *syntax.Operation:
+		return c.operandEscapes(syntax.Unparen(x.X))
 	case *syntax.ListExpr:
 		for _, el := range x.ElemList {
 			if c.lhsEscapes(el) {
