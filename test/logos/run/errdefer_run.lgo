@@ -45,6 +45,29 @@ func recoverIt() (s string) {
 	return "no-panic"
 }
 
+var errRollback = errors.New("rollback")
+
+func rollbackFails() error { return errRollback }
+
+func boomVal() int { panic("value-boom") }
+
+func returnEvalPanic() (v int, err error) {
+	errdefer note("return-eval-panic")
+	return boomVal(), nil
+}
+
+func primaryAndRollback() (err error) {
+	errdefer rollbackFails()?
+	return errPrimary
+}
+
+//logos:allow(slop::discarded_error)
+func evalPanicDriver() (r any) {
+	defer func() { r = recover() }()
+	_, _ = returnEvalPanic()
+	return nil
+}
+
 func laterDeferFails() (err error) {
 	errdefer note("late-errdefer")
 	defer failErr()?
@@ -111,6 +134,10 @@ func run() error {
 		fmt.Println("goexit:", msg)
 	case <-time.After(2 * time.Second):
 		fmt.Println("goexit: timeout")
+	}
+	fmt.Println("evalpanic:", evalPanicDriver())
+	if err := primaryAndRollback(); err != nil {
+		fmt.Println("join-primary:", errors.Is(err, errPrimary), "join-rollback:", errors.Is(err, errRollback))
 	}
 	fmt.Println("order:", strings.Join(order, ","))
 	return nil

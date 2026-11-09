@@ -1,4 +1,6 @@
 panic: boom
 late-err: primary
 goexit: goexit-ran
-order: on-error,on-panic,late-errdefer,typed-nil,L-defer,L-defertry,L-errdefer,before
+evalpanic: value-boom
+join-primary: true join-rollback: true
+order: on-error,on-panic,late-errdefer,typed-nil,L-defer,L-defertry,L-errdefer,before,return-eval-panic
