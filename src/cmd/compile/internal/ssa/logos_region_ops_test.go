@@ -56,6 +56,9 @@ func TestLogosRegionOffsets(t *testing.T) {
 	if LogosRegionGenOffset != goarch.PtrSize {
 		t.Fatalf("LogosRegionGenOffset = %d, want %d", LogosRegionGenOffset, goarch.PtrSize)
 	}
+	if LogosRegionOwnerOffset != 3*goarch.PtrSize {
+		t.Fatalf("LogosRegionOwnerOffset = %d, want %d", LogosRegionOwnerOffset, 3*goarch.PtrSize)
+	}
 	if LogosRegionNoscanCurOffset != 2*goarch.PtrSize {
 		t.Fatalf("LogosRegionNoscanCurOffset = %d, want %d", LogosRegionNoscanCurOffset, 2*goarch.PtrSize)
 	}

@@ -14,6 +14,8 @@ const (
 	logosRegionGenOffset   = goarch.PtrSize
 	LogosRegionChunkOffset = logosRegionChunkOffset
 	LogosRegionGenOffset   = logosRegionGenOffset
+	logosRegionOwnerOffset = 3 * goarch.PtrSize
+	LogosRegionOwnerOffset = logosRegionOwnerOffset
 
 	logosRegionNoscanCurOffset = 2 * goarch.PtrSize
 	logosRegionScanCurOffset   = 3 * goarch.PtrSize
