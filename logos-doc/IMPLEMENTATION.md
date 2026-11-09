@@ -450,6 +450,38 @@ Anchor: Tony Hoare, Dieter Rams
 - Build: `cmd/go/internal/logos` defines bool flag `--pedantic` (default false) for `logos build` here. It overrides `logos.toml`. Wiring lives in `cmd/go/internal/cfg/logos.go`.
 - Gate: `go test cmd/go -run 'Script/^logos_pedantic$'`.
 
+### M0-A-S1 Assert module and toolchain class rules
+Anchor: David Parnas, J.R.R. Tolkien, John Carmack
+- Attack: `src/cmd/go/testdata/script/logos_interop.txt` case 5: one Go module builds under plain `go` and `logos` with one output oracle, and the fixture carries a reserved `_logos_` identifier and an `errdefer` variable. `logos_interop_xmod.txt`: a local `golang.org/x` module path replaces in, and a `.lgo` main imports and runs it.
+- Build: none (test-only).
+- Gate: `go test -count=1 cmd/go -run 'Script/^logos_interop$|Script/^logos_interop_xmod$'`.
+- Red-team rows: none.
+- Docs: none.
+
+### M0-A-S2 Assert extension normalization and zip rejection
+Anchor: David Parnas, J.R.R. Tolkien, John Carmack
+- Attack: `src/cmd/go/internal/modindex/logos_scan_test.go` (`TestLogosExtensionsNFC`): NFC is the identity on all four extensions and the loader runs no normalizer. `logos_extension_normalization.txt`: the compatibility-folded gopher extension is rejected and the exact spelling accepted. `logos_module_zip_alias.txt`: alias extensions are rejected as non-letter paths.
+- Build: none (test-only).
+- Gate: `go test -count=1 cmd/go/internal/modindex -run TestLogosExtensionsNFC`; `go test -count=1 cmd/go -run Script/^logos_extension_normalization$`; `go test -count=1 cmd/go -run Script/^logos_module_zip_alias$`.
+- Red-team rows: none.
+- Docs: none.
+
+### M0-A-S3 Assert cgo defaults and zig targets
+Anchor: David Parnas, J.R.R. Tolkien, John Carmack
+- Attack: `logos_cgo_zig.txt`: a cross-target zig invocation carries no non-Linux musl suffix. `logos_cgo_purego_paths.txt`: with cgo off, net and os/user in the standard library use their pure-Go paths. `logos_plain_go_cgo_default.txt`: plain `go` keeps the upstream CGO_ENABLED default.
+- Build: none (test-only).
+- Gate: `go test -count=1 cmd/go -run Script/^logos_cgo_zig$`; `go test -count=1 cmd/go -run Script/^logos_cgo_purego_paths$`; `go test -count=1 cmd/go -run Script/^logos_plain_go_cgo_default$`.
+- Red-team rows: none.
+- Docs: none.
+
+### M0-A-S4 Cover every alias in module zip rejection
+Anchor: David Parnas, J.R.R. Tolkien, John Carmack
+- Attack: `src/cmd/go/testdata/script/logos_module_zip_alias.txt`: the scroll, lightning, and gopher alias extensions are all rejected at publication; the `rsc.io/badlogos` fixture carries all three spellings.
+- Build: none (test-only).
+- Gate: `go test -count=1 cmd/go -run Script/^logos_module_zip_alias$`.
+- Red-team rows: none.
+- Docs: none.
+
 ## M1. `?`, `defer f()?`, `errdefer`, error traces, eject
 
 Anchor: Tony Hoare, Christopher Alexander, Edsger W. Dijkstra
@@ -538,6 +570,46 @@ Anchor: Christopher Alexander, Kenya Hara
   - Register `eject` in `logos.ConfigureCommand` (M0-S1).
 - Gate: `go test cmd/go -run 'Script/^logos_eject(_interop)?$'`; `go test -short cmd/compile/internal/logos -run Eject`.
 - Milestone gate: G2 milestone gate; then P1 and P2.
+
+### M1-A-S1 Assert eject support import rules
+Anchor: Tony Hoare, Christopher Alexander, Edsger W. Dijkstra
+- Attack: `src/cmd/go/testdata/script/logos_eject.txt`: ejected trees hold no logos import paths and no errors helper, and lowered files keep the reserved runtime alias. `logos_reserved_import.txt`: a user `_logos_` import alias fails with `correctness::reserved_identifier`.
+- Build: none (test-only).
+- Gate: `go test -count=1 cmd/go -run 'Script/^logos_eject$|Script/^logos_reserved_import$'`.
+- Red-team rows: none.
+- Docs: none.
+
+### M1-A-S2 Assert parser position and scanner rules
+Anchor: Tony Hoare, Christopher Alexander, Edsger W. Dijkstra
+- Attack: `parser_constpositions_logos_test.go` and `scanner_interp_arrow_logos_test.go`: `const` gains no new positions, `=>` scans as one unit only when `=` joins `>` with no gap, and interpolated strings scan as one unit only when joined. `testdata/logos` fixtures cover readonly methods, const prefixes, named open-union values, and the property/method split.
+- Build: none (test-only).
+- Gate: `go test -count=1 cmd/compile/internal/syntax -run 'TestLogosErrors|TestPlainGoRejectsConstPositions|TestLogosFatArrowScan|TestLogosInterpScan'`; `go test -count=1 cmd/compile/internal/types2 -run '^TestLogos$'`.
+- Red-team rows: none.
+- Docs: none.
+
+### M1-A-S3 Assert lambda and coalesce parsing rules
+Anchor: Tony Hoare, Christopher Alexander, Edsger W. Dijkstra
+- Attack: `src/cmd/compile/internal/syntax/testdata/logos/option_parse.lgo` and `src/internal/types/testdata/logos/coalesce_precedence.lgo`: a lambda list takes plain names only, a lone `(e)` is a parenthesized expression, `??` binds less tightly than `||`, and chained `??` groups right. `test/logos/run/interp.lgo`: `{{` and `}}` mean literal braces.
+- Build: none (test-only).
+- Gate: `go test cmd/compile/internal/syntax -run '^TestLogosErrors$' -count=1`; `go test cmd/compile/internal/types2 -run '^TestLogos$' -count=1`; `logos run test/logos/run/interp.lgo`.
+- Red-team rows: none.
+- Docs: none.
+
+### M1-A-S4 Find gofmt like go fmt and bound eject gofmt argument lists
+Anchor: Tony Hoare, Christopher Alexander, Edsger W. Dijkstra
+- Attack: `src/cmd/go/internal/logos/eject/gofmt_test.go`: `gofmtBinary` builds the tool-suffixed name and looks in GOBIN, GOROOT/bin, then PATH, and batches flush so each gofmt invocation stays below `sys.ExecArgLengthLimit`.
+- Build: `gofmtBinary` resolution and the argument-length batch flush in `eject/eject.go`.
+- Gate: `go test -count=1 -short cmd/go/internal/logos/eject -run 'TestGofmtBinaryUsesToolExeSuffix|TestRunEjectGofmtBatchesUnderArgLimit'`.
+- Red-team rows: none.
+- Docs: none.
+
+### M1-A-S5 Format owned helper output before naming it
+Anchor: Tony Hoare, Christopher Alexander, Edsger W. Dijkstra
+- Attack: `src/cmd/go/internal/logos/eject/owned_test.go` (`TestOwnedHelperNameHashesFormattedOutput`): the hash in `logos_owned_<hash>.go` equals the sha256 of the on-disk bytes, and the same input yields the same name and bytes across runs.
+- Build: `owned.go` runs the helper bytes through `gofmtSource` before the hash is taken.
+- Gate: `go test -count=1 -short cmd/go/internal/logos/eject`.
+- Red-team rows: none.
+- Docs: none.
 
 ## P1. Official agent skills plugin (R-SKILLS)
 
@@ -1362,6 +1434,14 @@ Anchor: Christopher Alexander, Richard Feynman
 - Docs: P1-S3 and P2 updates (version 0.2.0; tagline adds "and closed variants").
 - Milestone gate: G2.
 
+### M2-A Assert closed unions and inline assertions
+Anchor: Tony Hoare, Claude Shannon, Edsger W. Dijkstra
+- Attack: `src/internal/types/testdata/logos/union_members.lgo` and `struct_assert.lgo`: closed unions sit in value positions, method membership checks, constant comparisons convert to the default member type, and non-struct assertion lists are errors. `src/cmd/compile/internal/syntax/testdata/logos/union_parse.lgo`: interface method bodies are parser errors. `logos_eject_union.txt`: ejected assertions and switch lowering match the native output.
+- Build: none (test-only).
+- Gate: `go test -count=1 cmd/compile/internal/types2 -run '^TestLogos$'`; `go test -count=1 cmd/compile/internal/syntax -run '^TestLogosErrors$'`; `go test -count=1 cmd/go -run 'Script/^logos_eject_union$'`.
+- Red-team rows: none.
+- Docs: none.
+
 ## M3. Facts sidecar, non-nil pointers, `T?`, `?.`, `??`, platform pointers
 
 Anchor: Tony Hoare, Claude Shannon, John Carmack
@@ -1436,6 +1516,30 @@ Anchor: David Parnas, Christopher Alexander
 - Docs: P1-S3 (0.3.0) and P2.
 - Milestone gate: G2.
 
+### M3-A Assert option representations
+Anchor: Tony Hoare, Claude Shannon, John Carmack
+- Attack: `test/logos/run/option_receiver_once.lgo`: `?.` evaluates its receiver once. `src/cmd/go/testdata/script/logos_eject_option.txt`: ejected signatures use plain pointers and `Option[T]`, keep explicit presence when nil is a valid payload, and importers see the same types. `logos_interop_nil.txt`: the Go importer sees the lowered types.
+- Build: none (test-only).
+- Gate: `go test -count=1 cmd/go -run 'Script/^logos_eject_option$'`; `go test -count=1 cmd/go -run 'Script/^logos_interop_nil$'`; `go test -count=1 cmd/internal/testdir -run 'Test/logos/run/option_receiver_once\.lgo$'`.
+- Red-team rows: none.
+- Docs: none.
+
+### M3-A-S3 Reject facts object names with an invalid tag
+Anchor: Tony Hoare, Claude Shannon, John Carmack
+- Attack: `src/cmd/compile/internal/logos/facts/facts_test.go`: `validObject` rejects `Foo@junk!`, `Foo@`, and `Foo@1x`, and `TestTaggedObjectRoundTrip` rejects a malformed tag on decode.
+- Build: the tag in an object name must be an identifier in `facts/facts.go` `validObject`.
+- Gate: `go test -count=1 cmd/compile/internal/logos/facts`.
+- Red-team rows: none.
+- Docs: none.
+
+### M3-A-S4 Assert the const switch assertion mask reaches the facts
+Anchor: Tony Hoare, Claude Shannon, John Carmack
+- Attack: `src/cmd/go/testdata/script/logos_facts_assert_phase.txt`: a const switch over a type parameter carries the wire record `fn F AssertTP=1,AssertRTP=0` in `__.LOGOS`, derived by hand from the wire grammar.
+- Build: none (test-only).
+- Gate: `go test -count=1 cmd/go -run 'Script/^logos_facts_assert_phase$'`.
+- Red-team rows: none.
+- Docs: none.
+
 ## M4. Interface properties
 
 Anchor: Tony Hoare, David Parnas, J.R.R. Tolkien
@@ -1463,6 +1567,14 @@ Anchor: Edsger W. Dijkstra, John Carmack
 - Red-team rows: #116, #117, #118, #120, #127, #131, #132, #141, #145.
 - Docs: P1-S3, P2.
 - Milestone gate: G2.
+
+### M4-A Assert property accessor receiver kinds
+Anchor: Tony Hoare, David Parnas, J.R.R. Tolkien
+- Attack: `test/logos/run/properties.lgo`: a field getter uses a value receiver, a field setter uses a pointer receiver, and method-sourced accessors keep their forwarded receiver kinds.
+- Build: none (test-only).
+- Gate: `go test -count=1 cmd/internal/testdir -run 'Test/logos/run/properties'`.
+- Red-team rows: none.
+- Docs: none.
 
 ## M5. Const composites, CTFE, const views, const maps
 
@@ -1516,6 +1628,22 @@ Anchor: Tony Hoare
 - Red-team rows: #2, #3, #16 (`s = s[:0]` buffer reuse on ordinary slices is unaffected: only const views have the `len` bound), #24, #41, #47, #50, #51, #54, #62, #70, #73, #83, #93, #98, #102, #103, #110, #140, #152, #180.
 - Docs: P1-S3, P2.
 - Milestone gate: G2.
+
+### M5-A Assert const composite boundaries
+Anchor: Tony Hoare, Claude Shannon, Dieter Rams
+- Attack: `logos_const_rodata_reloc.txt`: a pointer-bearing unsafe store into constant data faults at run time and constant data with pointers lands in read-only-after-relocation memory. `logos_const_method_no_property.txt`: a const interface method emits no accessor property. `test/logos/run/const_view_bound.lgo`: non-constant bounds trap at run time. `src/logos/rt/freeze_test.go` (`TestFreezeMapKeysAndSliceCapacity`): reachability covers map keys, values, and slice capacity tails.
+- Build: none (test-only).
+- Gate: `go test -count=1 cmd/go -run 'Script/^logos_const_rodata_reloc$'`; `go test -count=1 cmd/go -run 'Script/^logos_const_method_no_property$'`; `go test -count=1 cmd/internal/testdir -run 'Test/logos/run/const_view_bound\.lgo$'`; `go test -count=1 logos/rt -run '^TestFreezeMapKeysAndSliceCapacity$'`.
+- Red-team rows: none.
+- Docs: none.
+
+### M5-A-S1 Assert const map contract rules
+Anchor: Tony Hoare, Claude Shannon, Dieter Rams
+- Attack: `src/internal/types/testdata/logos/const_map_key_types.lgo`: an unsupported key type fails with `comptime::constmap_key_type`. `test/logos/compile/const_map_mutate.lgo`: the materialized map is a copy and the mutation guards fire. `test/logos/run/const_map_keys.lgo`: string, number, bool, struct, and array keys pass, `-0.0` canonicalizes, and stdlib or non-const-func callees reject the argument.
+- Build: a pre-CTFE key guard in `types2/ctfe_logos.go` so unsupported keys report `constmap_key_type`.
+- Gate: `go test cmd/compile/internal/types2 -run '^TestLogos$' -count=1`; `go test cmd/internal/testdir -run '^Test$/logos/compile/const_map_mutate.lgo$' -count=1`; `go test cmd/internal/testdir -run '^Test$/logos/run/const_map_keys.lgo$' -count=1`.
+- Red-team rows: none.
+- Docs: none.
 
 ## M6. Sugar: interpolation, `&expr`, defaults, spread, tuples, lambdas, chains, `yield`, `scope defer`
 
@@ -1585,6 +1713,14 @@ Anchor: Edsger W. Dijkstra, John Carmack
 - Docs: P1-S3, P2.
 - Milestone gate: G2.
 
+### M6-A Enforce generator returns and ejected traces
+Anchor: Italo Calvino, Edsger W. Dijkstra, Otl Aicher
+- Attack: `test/logos/run/yield_return.lgo`: a return with values inside a generator acts as a bare return. `src/cmd/go/testdata/script/logos_eject_errtrace.txt`: an ejected error trace returns one mutated site.
+- Build: types2 rejects a valued generator return in `types2/stmt.go` and `yield_logos.go`.
+- Gate: `logos run ../test/logos/run/yield_return.lgo`; `go test -count=1 cmd/go -run 'Script/^logos_eject_errtrace$'`.
+- Red-team rows: none.
+- Docs: none.
+
 ## M7. Comptime
 
 Anchor: Tony Hoare, David Parnas, Edsger W. Dijkstra
@@ -1629,6 +1765,30 @@ Anchor: Tony Hoare, John Carmack
 - Red-team rows: #19, #37, #45, #57, #65, #72, #76, #86, #91, #108, #114, #128, #129, #130, #150, #157, #174.
 - Docs: P1-S3, P2.
 - Milestone gate: G2.
+
+### M7-A Assert comptime field type mismatches
+Anchor: Tony Hoare, David Parnas, Edsger W. Dijkstra
+- Attack: `test/logos/compile/comptime_mapto_error.lgo`: a MapTo field-type mismatch fails as an ordinary type mismatch instead of compiling.
+- Build: none (test-only).
+- Gate: `go test -count=1 cmd/internal/testdir -run 'Test/logos/compile/comptime_mapto_error'`.
+- Red-team rows: none.
+- Docs: none.
+
+### M7-A-S1 Pin the comptime node limit from logos.toml
+Anchor: Tony Hoare, David Parnas, Edsger W. Dijkstra
+- Attack: `src/cmd/go/testdata/script/logos_comptime_nodes.txt`: a raised `max_comptime_ast_nodes` value from logos.toml drives the limit, and the 24-node expansion fails at 23 and builds at 24.
+- Build: none (test-only).
+- Gate: `go test -count=1 cmd/go -run 'Script/^logos_comptime_nodes$'`.
+- Red-team rows: none.
+- Docs: none.
+
+### M7-A-S2 Copy ViewAs input on riscv64
+Anchor: Tony Hoare, David Parnas, Edsger W. Dijkstra
+- Attack: `src/cmd/compile/internal/logos/viewas_arch_test.go` (`TestViewAsCopiesOnTargetsWithoutUnalignedLoads`): a target whose `Alignment` is not 1 takes the copy path, and exactly one of the direct or copy files carries each target.
+- Build: riscv64 moves from the direct-view build tags to the copy path in `logos/rt/viewas_copy.go` and `viewas_direct.go`.
+- Gate: `go test -count=1 cmd/compile/internal/logos -run TestViewAsCopiesOnTargetsWithoutUnalignedLoads`; `go test logos/rt`.
+- Red-team rows: none.
+- Docs: none.
 
 ## M8. `go group` and `logos/sync`
 
@@ -1687,6 +1847,14 @@ Anchor: Dieter Rams, John Carmack
 - Spec must (red-team #21): The build MUST use standard netpoll with no per-connection pinned buffer. [T-206]
 - Spec must (red-team #21): Ten thousand idle connections MUST grow the heap by less than 1 KB each. [T-206]
 - Spec must (red-team #143): Go 1.27 already clears the received slot, and the test MUST pin that a received pointer becomes collectable. [T-206]
+
+### M8-A Assert Hot values remain GC managed
+Anchor: Tony Hoare, Edsger W. Dijkstra, John Carmack
+- Attack: `src/logos/sync/sync_test.go` (`TestHotKeepsValueReachable`): a value held by a `logos/sync` Hot cell stays reachable while stored; a `Store(nil)` mutation makes the finalizer run early and fails the test.
+- Build: none (test-only).
+- Gate: `go test -count=1 ./logos/sync -run '^TestHotKeepsValueReachable$'`.
+- Red-team rows: none.
+- Docs: none.
 
 ## M9. Lints and JSON diagnostics
 
@@ -1764,6 +1932,14 @@ Anchor: Claude Shannon, Dieter Rams
 - Docs: P1-S3 (add `next` and `context`), P2.
 - Milestone gate: G2.
 
+### M10-A Assert no command rewrites sources
+Anchor: Christopher Alexander, Kenya Hara
+- Attack: `src/cmd/go/testdata/script/logos_no_source_rewrite.txt`: build, lint, context, and eject leave the source bytes identical.
+- Build: none (test-only).
+- Gate: `go test -count=1 cmd/go -run Script/^logos_no_source_rewrite$`.
+- Red-team rows: none.
+- Docs: none.
+
 ## M11. Static JSON
 
 Anchor: Tony Hoare, Richard Feynman
@@ -1791,6 +1967,14 @@ Anchor: Tony Hoare, John Carmack
 Anchor: Tony Hoare, Edsger W. Dijkstra
 - Attack: `test/logos/run/json_union_test.lgo`: a closed-union value marshals to its member's static bytes (output equals the member's `MarshalJSON`); unmarshal decodes each member in declaration order into a fresh scratch value, counts successes, and assigns the target only on a single success; it returns the single success, returns an ambiguity error naming the union and both members when two members accept the same JSON, else returns an error naming the union; overlapping shapes (two members accepting `{"id":1}`) cover the ambiguity path and failed trials leave the target untouched; a member with an unmodeled field still round-trips through that field's fallback. `test/logos/run/json_generic_test.lgo`: a comptime generic function instantiated over two structs emits one static helper per instantiation (symbols `<f>·logosct1`, `<f>·logosct2` visible to `go tool nm`) with matching outputs. `test/logos/run/json_callsite_test.lgo`: the fork baseline is `goexperiment.jsonv2` enabled; in that default build, `json.Marshal(v)` is `jsonv2.Marshal` (`encoding/json/v2_encode.go:185-186`) and on an eligible `.lgo` value with a value-receiver `MarshalJSON` returns bytes equal to `v.MarshalJSON()` by interface dispatch (compacts, validates, and re-escapes HTML); equality holds because the generated output is already compact valid HTML-escaped JSON; no source rewrite occurs. Parity is verified under both `goexperiment.jsonv2` true and false where claimed.
 - Build: closed-union marshal dispatches on the dynamic member type to that member's generated helper; closed-union unmarshal tries members in declaration order into scratch values with single-success plus ambiguity rules above; comptime generics expand once per instantiation with per-instantiation static JSON helpers; call sites are not rewritten.
+
+### M11-A Assert static serializer semantics
+Anchor: Tony Hoare, Richard Feynman
+- Attack: `src/cmd/go/testdata/script/logos_json_edges.txt`: null, unknown, duplicate, escaping, nonfinite, binary layout, and malformed diagnostics match `encoding/json` and the binary format rules, including sorted maps, nested fields, and options.
+- Build: none (test-only).
+- Gate: `go test -count=1 cmd/go -run 'Script/^logos_json_edges$'`.
+- Red-team rows: none.
+- Docs: none.
 
 ## M12. Capabilities auditor
 
@@ -1828,6 +2012,22 @@ Anchor: John Carmack, Herbert Simon
 - Gate: script test `logos_opt_levels.txt` plus codegen `inline_levels.lgo` and its Go twin `inline_levels.go`, `property_inline.lgo` at -O=2, `interp_stack.lgo` at -O=3, `recursive_stack.lgo` and its Go twin `recursive_stack.go` at -O=3, and `go test -short -O=3 encoding/asn1`.
 - Gate, mode assertions: `src/cmd/go/testdata/script/logos_opt_levels.txt` owns the level-size pairs. Its embedded `stackbuf` fixture runs under plain `go`, `-O=1`, `-O=2` and `-O=3` with `WANT_STACKBUF` of 32, 32, 256 and 4096 bytes and MUST fail when the compiled buffer differs, or when appends inside the buffer take a heap allocation, capacity is below the buffer, one byte past the buffer does not allocate, or data is lost across the move to the heap. Standard-library packages and their external test packages never receive `variablemakethreshold` (`src/cmd/go/internal/work/logos_stdlib_gate.go` decides provenance by package and by `ForTest` path), so `std` tests keep their upstream bodies at every level and the buffer is never measured inside them.
 
+### M13-A-S1 Assert optimization tier scope
+Anchor: John Carmack, Herbert Simon, Dieter Rams
+- Attack: `src/cmd/go/testdata/script/logos_opt_scope.txt`: a standard-library-provenance package keeps the default 32-byte variable-make buffer, and O3 adds no escape-analysis or prove-pass work budget.
+- Build: none (test-only).
+- Gate: `go test -count=1 cmd/go -run Script/^logos_opt_scope$`.
+- Red-team rows: none.
+- Docs: none.
+
+### M13-A-S2 Pin the standard-library variable-make strip
+Anchor: John Carmack, Herbert Simon, Dieter Rams
+- Attack: `src/cmd/go/internal/work/logos_stdlib_gate_test.go` (`TestLogosStandardProvenance`, `TestLogosDropVariableMake`): standard and standard external-test shapes lose only the `variablemakethreshold` key; user shapes keep 256 at O2 and 4096 at O3, and the flag-value rewrite is pinned.
+- Build: none (test-only).
+- Gate: `go test -count=1 cmd/go/internal/work -run 'TestLogosStandardProvenance|TestLogosDropVariableMake'`.
+- Red-team rows: none.
+- Docs: none.
+
 ## M14. Fixed-array SIMD
 
 Anchor: John Carmack, Claude Shannon
@@ -1840,6 +2040,14 @@ Anchor: John Carmack, Tony Hoare
 - Build: types2 allows the operators on qualifying array types in Logos mode (`simd_logos.go`); lowering emits `simd/archsimd` calls when the build has `GOEXPERIMENT=simd` and GOARCH is amd64 or arm64 (API names from `src/simd/archsimd`, for example `Float32x8` load from `*[8]float32`, `Add`, store; confirm each name in that directory before use), else unrolled scalar statements; reductions on slices (`.sum()` over `[]float32`) use the vector form with masked tail loads (M15-S2). The operators and the `.sum() .min() .max() .dot()` family are loGo/s syntax and type rules, because Go gives `[N]T + [N]T` no meaning (R-U1); M14 adds no Go-package syntax. Go packages keep `simd/archsimd` (upstream, `GOEXPERIMENT=simd`) as their SIMD surface, and the backend gains of M15 reach them.
 - Gate: types2, testdir, codegen tests (codegen with `GOEXPERIMENT=simd`).
 - Docs: P1-S3, P2.
+
+### M14-A Assert tuple and SIMD interop
+Anchor: John Carmack, Claude Shannon
+- Attack: `logos_tuples_go_import.txt`: a Go importer sees a tuple as its lowered struct. `logos_simd_go.txt`: a Go package gets no array operator or reduction method from fixed-array SIMD. `src/internal/types/testdata/logos/tuples_noncomparable.lgo`: a tuple with map or func elements is not comparable. `test/logos/run/union_equal.lgo`: a closed union uses upstream interface equality.
+- Build: none (test-only).
+- Gate: `go test -count=1 cmd/go -run 'Script/^logos_(tuples_go_import|simd_go)$'`; `go test -count=1 cmd/internal/testdir -run 'Test/logos/compile/tuples_noncomparable'`; `logos run ../test/logos/run/union_equal.lgo`.
+- Red-team rows: none.
+- Docs: none.
 
 ## M15. Backend peepholes and long-loop preemption
 
@@ -1887,6 +2095,14 @@ Anchor: Kenya Hara, Tony Hoare
 - Spec correction recorded by P0 (T-Sec12): Go's wasm port uses 8-byte pointers.
 - Red-team rows: #27, #78, #187.
 - Docs: P1-S3, P2.
+
+### M16-A Assert wasm yield call barriers
+Anchor: John Carmack, Dieter Rams
+- Attack: `src/cmd/compile/internal/logos/wasmyield/wasmyield_test.go`: deferreturn, missing, indirect, and direct call sources keep or drop the `MayYield` dispatch as the rules require.
+- Build: none (test-only).
+- Gate: `go test -vet=off -count=1 ./cmd/compile/internal/logos/wasmyield -run 'Test(AddCallYieldSources|ImportYields|ImportedYieldReadsFacts)$'`.
+- Red-team rows: none.
+- Docs: none.
 
 ## M17. Smart stack
 
@@ -2000,6 +2216,30 @@ Anchor: Tony Hoare, John Carmack, Edsger W. Dijkstra
 - Gate: lands only after `GOEXPERIMENT=logosarena go test -count=1 -short std` and `./run.bash --no-rebuild` pass.
 - Red-team rows: none.
 - Docs: P1-S3, P2.
+
+### M18-A-S1 Add comptime layout intrinsics
+Anchor: John Carmack, Tony Hoare, Edsger W. Dijkstra
+- Attack: `test/logos/run/comptime_layout.lgo` and `.out`: `comptime.SizeOf`, `AlignOf`, and `HasPointers` fold to literal values in comptime copies and const-if conditions, `[comptime.SizeOf[T]()]byte` type-checks before any copy, and a cross-package recursive named type prints `24 true`. `src/internal/types/testdata/logos/comptime_layout.lgo`: shell and copy behavior. `logos_eject_comptime_layout.txt`: the ejected module matches.
+- Build: the intrinsics in `logos/comptime_layout.go`, the virtual surface in `types2/comptime_layout_logos.go`, and folding in `comptimeif.go`, `constfor.go`, `comptime_logos.go`, and `comptimecall_logos.go`.
+- Gate: `go test -count=1 cmd/compile/internal/types2 -run TestLogos/comptime_layout`; `go test -count=1 cmd/internal/testdir -run Test/logos/run/comptime_layout`.
+- Red-team rows: none.
+- Docs: none.
+
+### M18-A-S2 Record pointee-only parameter leaks in escape analysis
+Anchor: John Carmack, Tony Hoare, Edsger W. Dijkstra
+- Attack: `test/escape_logos_pointee.go`: `link(&a, &b)` keeps the pointee stack allocated, stores through interface methods, closures, slice elements, and two-level field paths stay conservative, and `storeReassignedTarget` catches a dropped sink guard.
+- Build: `escp:i` parameter tags in `escape/pointee_logos.go` with hooks in `assign.go`, `call.go`, and `escape.go`, exported only with the pointee analysis active, under `GOEXPERIMENT=logosescape` for Go packages.
+- Gate: the commit body states the pass through `test/escape_logos_pointee.go` and names no literal command.
+- Red-team rows: none.
+- Docs: none.
+
+### M18-A-S3 Record const view declarations for group capture checks
+Anchor: John Carmack, Tony Hoare, Edsger W. Dijkstra
+- Attack: `src/cmd/compile/internal/logos/group_constview_test.go` (`TestGroupConstViewDecls`): const view declarations and capture temporaries record absolute file, line, and column that survive lowering and export data; the attack drains the shared side table before its own run.
+- Build: lowering records const view declaration positions in `logos/const.go` and `logos/group.go`, and the noder publishes them through `escape.LogosConstViewDecl` in `noder/logos_lower.go` and `escape/constview_logos.go`.
+- Gate: `go test -count=1 ./cmd/compile/internal/logos`.
+- Red-team rows: none.
+- Docs: none.
 
 
 ## M20. CGo in loGo/s packages and Fast-CGo for Go and loGo/s
@@ -2157,7 +2397,7 @@ Prerequisites: `cd /home/alpha/compiler/loGos/src && ./make.bash`; `export PATH=
 
 Anchor: Tony Hoare
 
-Written to `tasks/autoplan-ledger.jsonl` by P0-S6. IDs: phase prefix plus a sequence in plan order. The original 103 rows are preserved verbatim; P0-S6 appends exactly the 5 remaining rows for M0-S7, P1-S3, M11-S3, M11-S4, and M18-S4 (listed at the end of the block); the M19 rows are pruned. The 2026-10-19 direction appended one more row after those, `DX-20` for the follow-up slice M0-S8; no other row changed (the descriptions of rows such as `ENG-26` name the slice as first written, and `CEO-02` names the original 182 REDTEAM rows; rows #183 to #189 were added later by the same direction).
+Written to `tasks/autoplan-ledger.jsonl` by P0-S6. IDs: phase prefix plus a sequence in plan order. The original 103 rows are preserved verbatim; P0-S6 appends exactly the 5 remaining rows for M0-S7, P1-S3, M11-S3, M11-S4, and M18-S4 (listed at the end of the block); the M19 rows are pruned. The 2026-10-19 direction appended one more row after those, `DX-20` for the follow-up slice M0-S8; no other row changed (the descriptions of rows such as `ENG-26` name the slice as first written, and `CEO-02` names the original 182 REDTEAM rows; rows #183 to #189 were added later by the same direction). The audit direction appended rows `AUD-01` to `AUD-30` after those, one per recorded audit slice in commit order. The ledger holds 141 rows.
 
 ```jsonl
 {"id": "CEO-01", "description": "P0-S1 Rename logos-doc/PLAN.md to logos-doc/SPEC.md (pure rename) and P0-S2 rewrite SPEC.md as the tailored spec (tables T, N, Section 18)", "phase": "CEO"}
@@ -2271,4 +2511,34 @@ Written to `tasks/autoplan-ledger.jsonl` by P0-S6. IDs: phase prefix plus a sequ
 {"id": "ENG-47", "description": "M23-S2 Shared edit map package", "phase": "ENG"}
 {"id": "ENG-48", "description": "M23-S3 One eject printer", "phase": "ENG"}
 {"id": "ENG-49", "description": "M23-S4 One cmd/go settings path", "phase": "ENG"}
+{"id": "AUD-01", "description": "M3-A-S3 Reject facts object names with an invalid tag", "phase": "AUD"}
+{"id": "AUD-02", "description": "M8-A Assert Hot values remain GC managed", "phase": "AUD"}
+{"id": "AUD-03", "description": "M6-A Enforce generator returns and ejected traces", "phase": "AUD"}
+{"id": "AUD-04", "description": "M14-A Assert tuple and SIMD interop", "phase": "AUD"}
+{"id": "AUD-05", "description": "M0-A-S1 Assert module and toolchain class rules", "phase": "AUD"}
+{"id": "AUD-06", "description": "M1-A-S2 Assert parser position and scanner rules", "phase": "AUD"}
+{"id": "AUD-07", "description": "M1-A-S1 Assert eject support import rules", "phase": "AUD"}
+{"id": "AUD-08", "description": "M0-A-S2 Assert extension normalization and zip rejection", "phase": "AUD"}
+{"id": "AUD-09", "description": "M0-A-S3 Assert cgo defaults and zig targets", "phase": "AUD"}
+{"id": "AUD-10", "description": "M10-A Assert no command rewrites sources", "phase": "AUD"}
+{"id": "AUD-11", "description": "M13-A-S1 Assert optimization tier scope", "phase": "AUD"}
+{"id": "AUD-12", "description": "M0-A-S4 Cover every alias in module zip rejection", "phase": "AUD"}
+{"id": "AUD-13", "description": "M5-A Assert const composite boundaries", "phase": "AUD"}
+{"id": "AUD-14", "description": "M3-A Assert option representations", "phase": "AUD"}
+{"id": "AUD-15", "description": "M2-A Assert closed unions and inline assertions", "phase": "AUD"}
+{"id": "AUD-16", "description": "M4-A Assert property accessor receiver kinds", "phase": "AUD"}
+{"id": "AUD-17", "description": "M7-A Assert comptime field type mismatches", "phase": "AUD"}
+{"id": "AUD-18", "description": "M11-A Assert static serializer semantics", "phase": "AUD"}
+{"id": "AUD-19", "description": "M16-A Assert wasm yield call barriers", "phase": "AUD"}
+{"id": "AUD-20", "description": "M18-A-S1 Add comptime layout intrinsics", "phase": "AUD"}
+{"id": "AUD-21", "description": "M1-A-S4 Find gofmt like go fmt and bound eject gofmt argument lists", "phase": "AUD"}
+{"id": "AUD-22", "description": "M1-A-S5 Format owned helper output before naming it", "phase": "AUD"}
+{"id": "AUD-23", "description": "M13-A-S2 Pin the standard-library variable-make strip", "phase": "AUD"}
+{"id": "AUD-24", "description": "M7-A-S1 Pin the comptime node limit from logos.toml", "phase": "AUD"}
+{"id": "AUD-25", "description": "M7-A-S2 Copy ViewAs input on riscv64", "phase": "AUD"}
+{"id": "AUD-26", "description": "M18-A-S2 Record pointee-only parameter leaks in escape analysis", "phase": "AUD"}
+{"id": "AUD-27", "description": "M1-A-S3 Assert lambda and coalesce parsing rules", "phase": "AUD"}
+{"id": "AUD-28", "description": "M5-A-S1 Assert const map contract rules", "phase": "AUD"}
+{"id": "AUD-29", "description": "M18-A-S3 Record const view declarations for group capture checks", "phase": "AUD"}
+{"id": "AUD-30", "description": "M3-A-S4 Assert the const switch assertion mask reaches the facts", "phase": "AUD"}
 ```

@@ -109,3 +109,33 @@
 {"id": "ENG-47", "description": "M23-S2 Shared edit map package", "phase": "ENG"}
 {"id": "ENG-48", "description": "M23-S3 One eject printer", "phase": "ENG"}
 {"id": "ENG-49", "description": "M23-S4 One cmd/go settings path", "phase": "ENG"}
+{"id": "AUD-01", "description": "M3-A-S3 Reject facts object names with an invalid tag", "phase": "AUD"}
+{"id": "AUD-02", "description": "M8-A Assert Hot values remain GC managed", "phase": "AUD"}
+{"id": "AUD-03", "description": "M6-A Enforce generator returns and ejected traces", "phase": "AUD"}
+{"id": "AUD-04", "description": "M14-A Assert tuple and SIMD interop", "phase": "AUD"}
+{"id": "AUD-05", "description": "M0-A-S1 Assert module and toolchain class rules", "phase": "AUD"}
+{"id": "AUD-06", "description": "M1-A-S2 Assert parser position and scanner rules", "phase": "AUD"}
+{"id": "AUD-07", "description": "M1-A-S1 Assert eject support import rules", "phase": "AUD"}
+{"id": "AUD-08", "description": "M0-A-S2 Assert extension normalization and zip rejection", "phase": "AUD"}
+{"id": "AUD-09", "description": "M0-A-S3 Assert cgo defaults and zig targets", "phase": "AUD"}
+{"id": "AUD-10", "description": "M10-A Assert no command rewrites sources", "phase": "AUD"}
+{"id": "AUD-11", "description": "M13-A-S1 Assert optimization tier scope", "phase": "AUD"}
+{"id": "AUD-12", "description": "M0-A-S4 Cover every alias in module zip rejection", "phase": "AUD"}
+{"id": "AUD-13", "description": "M5-A Assert const composite boundaries", "phase": "AUD"}
+{"id": "AUD-14", "description": "M3-A Assert option representations", "phase": "AUD"}
+{"id": "AUD-15", "description": "M2-A Assert closed unions and inline assertions", "phase": "AUD"}
+{"id": "AUD-16", "description": "M4-A Assert property accessor receiver kinds", "phase": "AUD"}
+{"id": "AUD-17", "description": "M7-A Assert comptime field type mismatches", "phase": "AUD"}
+{"id": "AUD-18", "description": "M11-A Assert static serializer semantics", "phase": "AUD"}
+{"id": "AUD-19", "description": "M16-A Assert wasm yield call barriers", "phase": "AUD"}
+{"id": "AUD-20", "description": "M18-A-S1 Add comptime layout intrinsics", "phase": "AUD"}
+{"id": "AUD-21", "description": "M1-A-S4 Find gofmt like go fmt and bound eject gofmt argument lists", "phase": "AUD"}
+{"id": "AUD-22", "description": "M1-A-S5 Format owned helper output before naming it", "phase": "AUD"}
+{"id": "AUD-23", "description": "M13-A-S2 Pin the standard-library variable-make strip", "phase": "AUD"}
+{"id": "AUD-24", "description": "M7-A-S1 Pin the comptime node limit from logos.toml", "phase": "AUD"}
+{"id": "AUD-25", "description": "M7-A-S2 Copy ViewAs input on riscv64", "phase": "AUD"}
+{"id": "AUD-26", "description": "M18-A-S2 Record pointee-only parameter leaks in escape analysis", "phase": "AUD"}
+{"id": "AUD-27", "description": "M1-A-S3 Assert lambda and coalesce parsing rules", "phase": "AUD"}
+{"id": "AUD-28", "description": "M5-A-S1 Assert const map contract rules", "phase": "AUD"}
+{"id": "AUD-29", "description": "M18-A-S3 Record const view declarations for group capture checks", "phase": "AUD"}
+{"id": "AUD-30", "description": "M3-A-S4 Assert the const switch assertion mask reaches the facts", "phase": "AUD"}
