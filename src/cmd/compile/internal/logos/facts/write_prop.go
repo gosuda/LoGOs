@@ -6,23 +6,8 @@ package facts
 
 import "cmd/compile/internal/types2"
 
-// This file carries the M4-S2 property facts (SPEC Sec 2.3, T-203.2,
-// Sec 5, T-Sec5). For each exported property interface it emits one
-// prop record naming the interface and the accessor prefix; the property
-// set itself travels in the lowered Logos_GetF/Logos_SetF methods of the
-// export data, which .lgo importers read back through the same accessor
-// shapes the checker uses. For each exported struct with a `: I`
-// declaration it emits one conforms record per asserted interface, named
-// as the interface's package path and type name, so an importer in
-// another package can match its own spelling of the same interface and
-// type-check the conformance without seeing the declaration.
-
-// propAccessorPrefix is the accessor prefix every generated method
-// carries (types2 logosGetterName/logosSetterName).
 const propAccessorPrefix = "Logos_"
 
-// writeProps adds the prop and conforms records of pkg to f.
-// Only exported names are recorded: importers cannot name anything else.
 func writeProps(pkg *types2.Package, info *types2.Info, f *Facts) {
 	if pkg == nil || pkg.Scope() == nil || info == nil {
 		return
@@ -58,9 +43,6 @@ func writeProps(pkg *types2.Package, info *types2.Info, f *Facts) {
 	}
 }
 
-// propIfaceKey names iface as its origin package path and type name,
-// following aliases to the named interface type. It reports false for
-// types with no such name.
 func propIfaceKey(iface types2.Type) (string, string, bool) {
 	named, ok := types2.Unalias(iface).(*types2.Named)
 	if !ok {
@@ -73,11 +55,6 @@ func propIfaceKey(iface types2.Type) (string, string, bool) {
 	return obj.Pkg().Path(), obj.Name(), true
 }
 
-// ifaceScopeLookup reports the type name iname of the package at path as
-// seen from pkg: the package's own scope for a self reference, or the
-// scope of the directly imported package otherwise. It returns nil when
-// the name does not resolve, in which case the conformance is unusable
-// to importers and the caller skips it.
 func ifaceScopeLookup(pkg *types2.Package, path, iname string) *types2.TypeName {
 	var scope *types2.Scope
 	if path == pkg.Path() {

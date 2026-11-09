@@ -11,11 +11,6 @@ import (
 	"cmd/compile/internal/types2"
 )
 
-// writeOpts records one opt record per option position in the exported
-// declarations of pkg into f. Objects are func names, type names, and
-// T.M or (*T).M methods; paths are R<i>, P<i>, F<name>, E, K, D, M<name>
-// steps. A nested option extends its parent with E, so (T?)? yields R0
-// and R0.E.
 func writeOpts(pkg *types2.Package, f *Facts) {
 	if pkg == nil || pkg.Scope() == nil {
 		return
@@ -95,13 +90,6 @@ func walkNamedQuals(name string, named *types2.Named, emitOpt, emitConst func(st
 	}
 }
 
-// walkQualType is the one traversal owner for qualifier facts: it visits
-// every qualifier position once, invoking emitOpt at option positions
-// and emitConst at const-view positions. A nil emitter still descends
-// through that qualifier, so an option nested in a const view (and the
-// reverse) records its own fact instead of vanishing at the foreign
-// layer. Cycle protection stays on named types only, with path-scoped
-// release so diamonds revisit.
 func walkQualType(t types2.Type, path []string, object string, emitOpt, emitConst func(string, string), seen map[types2.Type]bool) {
 	if t == nil {
 		return

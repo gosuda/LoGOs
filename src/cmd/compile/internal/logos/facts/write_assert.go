@@ -6,19 +6,6 @@ package facts
 
 import "cmd/compile/internal/types2"
 
-// writeAsserts records generic assertion-effect masks for pkg into f.
-// For every exported generic package-level function it records the
-// function's own type-parameter and receiver type-parameter masks; for
-// every method, including unexported ones reachable through dynamic
-// dispatch, of every exported non-alias generic named type it records
-// the method origin's receiver mask with an empty function mask. Objects
-// use the T.M / (*T).M method spelling shared with the opt and const
-// records. Masks render through types2.LogosAssertMaskHex (empty is "0");
-// every record sets HasAssert because local analysis is complete at
-// emission. Unexported functions and non-generic declarations record
-// nothing; effects that report unknown are skipped so the consumer fails
-// closed. Existing FnFact entries for the same object are merged, never
-// replaced.
 func writeAsserts(pkg *types2.Package, f *Facts) {
 	scope := pkg.Scope()
 	if scope == nil {
@@ -53,9 +40,6 @@ func writeAsserts(pkg *types2.Package, f *Facts) {
 			if !ok {
 				continue
 			}
-			// Unexported generic types are emitted too: an exported wrapper
-			// of an unexported clean container must stay exactly clean for
-			// importers, which recompute type aggregates from these records.
 			for i := range named.NumMethods() {
 				m := named.Method(i)
 				if m == nil {

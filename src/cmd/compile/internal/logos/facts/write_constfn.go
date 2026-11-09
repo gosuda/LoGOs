@@ -17,21 +17,6 @@ import (
 	"cmd/compile/internal/types2"
 )
 
-// writeConstFuncs adds one constfn record per exported receiverless
-// non-generic const function of pkg to f. Each record's Source is one
-// parseable Logos file: a package clause, explicit imports, and the
-// complete same-package declaration closure of the function — every
-// same-package exported or private constant, type, and helper function
-// its body names, transitively, with grouped const blocks kept whole so
-// implicit values and iota ordinals survive. Calls into other packages
-// are not inlined: the record keeps the import spelled with the canonical
-// alias of the payload and rewrites every resolved PkgName use to that
-// alias, and the consumer resolves those callees through their own package
-// facts. Mutable package names stay out of the record: their initializers
-// must never evaluate in the consumer, and a closure needing one is impure
-// and fails at admission. A broken closure is a producer defect and reports
-// through the ordinary error channel rather than publishing a partial
-// record.
 func writeConstFuncs(pkg *types2.Package, info *types2.Info, files []*syntax.File, src map[*syntax.File][]byte, f *Facts) {
 	if pkg == nil || pkg.Scope() == nil || info == nil {
 		return
@@ -268,9 +253,6 @@ func (s *constFnSrc) indexAll() {
 		for _, decl := range file.DeclList {
 			switch decl := decl.(type) {
 			case *syntax.FuncDecl:
-				// Methods never enter a closure: collection only follows
-				// package-scope objects, so indexing one would only shadow
-				// the type or function sharing its name.
 				if decl.Name != nil && decl.Recv == nil {
 					s.decls[decl.Name.Value] = &constFnDecl{name: decl.Name.Value, decl: decl, file: file}
 				}
@@ -496,9 +478,6 @@ func (s *constFnSrc) collectNamedTypes(t types2.Type, seen map[types2.Object]boo
 		return nil
 	}
 	if a, ok := t.(*types2.Alias); ok {
-		// Keep the alias itself: unaliasing first would drop Alias.Obj,
-		// so an exported alias over a private target would vanish from
-		// the closure even though the emitted source spells it.
 		if a.Obj() != nil {
 			if opkg := a.Obj().Pkg(); opkg != nil && opkg != s.pkg {
 				if err := s.recordImport(opkg.Path(), opkg.Name()); err != nil {
@@ -988,12 +967,6 @@ func (s *constFnSrc) declEndOfExpr(e syntax.Expr) int {
 	return s.off(syntax.EndPos(e))
 }
 
-// typeExprEnd returns the end offset of one type expression, scanning a
-// braced struct or interface past its field list to the true closing
-// brace, whose EndPos stops at the last field, and a func type past its
-// parameter and result lists, whose EndPos stops at the `func` keyword
-// when both lists are empty. Map and channel types end at their element
-// type, recursing for func-typed elements.
 func (s *constFnSrc) typeExprEnd(e syntax.Expr) int {
 	switch e := e.(type) {
 	case *syntax.StructType, *syntax.InterfaceType:
@@ -1008,11 +981,6 @@ func (s *constFnSrc) typeExprEnd(e syntax.Expr) int {
 	return s.declEndOfExpr(e)
 }
 
-// scanFuncTypeEnd returns the end of the func type ft: past
-// parenthesized results, past a single result type, or past the
-// parameter list when there are no results. A negative return fails the
-// span bounds check that follows, failing the closure closed instead of
-// truncating it.
 func (s *constFnSrc) scanFuncTypeEnd(ft *syntax.FuncType) int {
 	if ft == nil {
 		return -1
@@ -1039,10 +1007,6 @@ func (s *constFnSrc) scanFuncTypeEnd(ft *syntax.FuncType) int {
 	return s.typeExprEnd(last.Type)
 }
 
-// skipBalanced returns the offset just past the group closing the
-// bracket opener at start (one of "([{")), or -1 when none closes it.
-// Strings, rune literals, and comments cannot hold brackets, and valid
-// source balances every opener, so counting the target pair is exact.
 func (s *constFnSrc) skipBalanced(start int) int {
 	if start >= len(s.orig) {
 		return -1
@@ -1082,8 +1046,6 @@ func (s *constFnSrc) skipBalanced(start int) int {
 	return -1
 }
 
-// skipString returns the offset just past the string or rune literal
-// opening at off.
 func (s *constFnSrc) skipString(off int) int {
 	q := s.orig[off]
 	if q == '`' {
@@ -1104,9 +1066,6 @@ func (s *constFnSrc) skipString(off int) int {
 func (s *constFnSrc) exprEnd(e syntax.Expr) int {
 	off := s.off(syntax.EndPos(e))
 	if _, ok := e.(*syntax.CallExpr); ok {
-		// EndPos of a nullary call stops at its function, so consume
-		// the empty parens: the sibling closer first, then the same
-		// shape through trivia for comments between the parens.
 		if close, ok := nullaryCallEnd(s.orig, off); ok {
 			return close
 		}
@@ -1125,9 +1084,6 @@ func (s *constFnSrc) exprEnd(e syntax.Expr) int {
 	return off
 }
 
-// skipTriviaFwd advances past whitespace and comments. Callers index the
-// result only after a bounds check, so an overrun at EOF just ends the
-// skip.
 func (s *constFnSrc) skipTriviaFwd(off int) int {
 	for off < len(s.orig) {
 		c := s.orig[off]
@@ -1159,7 +1115,6 @@ func (s *constFnSrc) skipTriviaFwd(off int) int {
 	return off
 }
 
-// skipTriviaBack moves past whitespace and comments.
 func (s *constFnSrc) skipTriviaBack(i int) int {
 	for i > 0 {
 		c := s.orig[i-1]
@@ -1184,10 +1139,6 @@ func (s *constFnSrc) skipTriviaBack(i int) int {
 	return i
 }
 
-// blockCommentStart returns the start of the block comment ending at i
-// (exclusive), or -1 when none opens it. Comments do not nest, so the
-// nearest opener with no intervening closer is the match; anything else
-// fails the keyword check that follows, exactly as before.
 func (s *constFnSrc) blockCommentStart(i int) int {
 	for j := i - 2; j >= 1; j-- {
 		if s.orig[j-1] == '/' && s.orig[j] == '*' {

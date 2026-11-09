@@ -14,23 +14,6 @@ import (
 	"cmd/compile/internal/types2"
 )
 
-// This file carries the M5-S1 const facts (SPEC Sec 2.1, T-201 and
-// Sec 5, T-Sec5). writeConsts records one const line per const
-// view position in the exported declarations of pkg, plus
-// ReceiverMutated and ParamMutated flags computed by a syntax pass
-// over each function body: a parameter counts as mutated when the body
-// writes through it, appends to it, passes it (or a value derived
-// from it) to a mutating parameter, or stores it anywhere outside the
-// frame (globals, fields, returns, sends, closures, addresses). The
-// writer calls it from Write beside writeOpts; this
-// file stays independent of the lowering passes.
-
-// writeConsts adds const view positions and receiver/parameter
-// mutation flags for pkg to f. Objects are func names, type names,
-// and T.M or (*T).M methods; paths are R<i>, P<i>, F<name>, E, K, D,
-// M<name> steps, mirroring the opt records. The mutation mask sets bit
-// i for Pi, formatted as normalized lowercase hex. Generic functions
-// are skipped: their bodies check per instantiation.
 func writeConsts(pkg *types2.Package, info *types2.Info, files []*syntax.File, f *Facts) {
 	if pkg == nil || pkg.Scope() == nil {
 		return
@@ -51,7 +34,6 @@ func emitConstDecls(pkg *types2.Package, f *Facts) {
 	})
 }
 
-// constFuncDecl pairs a declared function with its syntax and type.
 type constFuncDecl struct {
 	obj  *types2.Func
 	decl *syntax.FuncDecl
@@ -59,10 +41,6 @@ type constFuncDecl struct {
 	name string
 }
 
-// emitConstMutations computes ReceiverMutated and ParamMutated flags by
-// a syntax pass over every package-level function body and merges them
-// into f. Masks propagate between same-package callees to a fixpoint;
-// imported callees consult the recorded facts.
 func emitConstMutations(pkg *types2.Package, info *types2.Info, files []*syntax.File, f *Facts) {
 	decls := collectConstFuncDecls(pkg, info, files)
 	recvMut := make(map[*types2.Func]bool, len(decls))
@@ -125,11 +103,6 @@ func emitReadonlyFacts(pkg *types2.Package, f *Facts, decls []constFuncDecl, rec
 		fn := findOrCreateFnFact(f, d.name)
 		fn.Readonly = true
 		if fn.ParamMutated == "" {
-			// The mutation analysis ran over this body and proved it
-			// clean; record the explicit zero so the consumer rule does
-			// not read this readonly-only record as unknown mutation.
-			// Abstract I.M records below carry no body and stay without
-			// ParamMutated: unknown, which is correct.
 			fn.ParamMutated = "0"
 		}
 	}
@@ -371,10 +344,6 @@ func orHexMask(have string, add []byte) string {
 	return maskHex(orMask(hb, add))
 }
 
-// parseHexMask decodes a normalized hex mutation mask into big-endian
-// bytes. It reports false for malformed input. The empty string never
-// parses: absence of a verdict means unknown, while proven zero is
-// spelled "0" (which decodes to a non-nil empty mask, exact-clean).
 func parseHexMask(s string) ([]byte, bool) {
 	if s == "" {
 		return nil, false
@@ -393,9 +362,6 @@ func parseHexMask(s string) ([]byte, bool) {
 	return b, true
 }
 
-// maskBit reports whether bit i is set in the big-endian mask b. Bits
-// past the end read clear. A nil (unknown) mask never reaches here:
-// callers treat unknown as all-mutated before testing bits.
 func maskBit(b []byte, i int) bool {
 	if i < 0 || i/8 >= len(b) {
 		return false
@@ -403,8 +369,6 @@ func maskBit(b []byte, i int) bool {
 	return b[len(b)-1-i/8]>>(uint(i)%8)&1 != 0
 }
 
-// setMaskBit sets bit i in the big-endian mask b, growing it as needed,
-// and returns the result.
 func setMaskBit(b []byte, i int) []byte {
 	if i < 0 {
 		return b
@@ -416,7 +380,6 @@ func setMaskBit(b []byte, i int) []byte {
 	return b
 }
 
-// orMask returns the bitwise OR of big-endian a and b in a fresh slice.
 func orMask(a, b []byte) []byte {
 	n := len(a)
 	if len(b) > n {
@@ -430,7 +393,6 @@ func orMask(a, b []byte) []byte {
 	return out
 }
 
-// maskHex renders a big-endian mask as normalized lowercase hex.
 func maskHex(b []byte) string {
 	if s := hex.EncodeToString(bytes.TrimLeft(b, "\x00")); s != "" {
 		if len(s) > 1 && s[0] == '0' {
@@ -441,8 +403,6 @@ func maskHex(b []byte) string {
 	return "0"
 }
 
-// collectConstFuncDecls matches every package-level function body with
-// its declared object. Generic functions are skipped.
 func collectConstFuncDecls(pkg *types2.Package, info *types2.Info, files []*syntax.File) []constFuncDecl {
 	var decls []constFuncDecl
 	for _, file := range files {
@@ -479,8 +439,6 @@ func lookupConstFunc(info *types2.Info, fd *syntax.FuncDecl, pkg *types2.Package
 	return obj, true
 }
 
-// constRecvBase strips pointer and const view layers from a receiver
-// type to its named base.
 func constRecvBase(t types2.Type) types2.Type {
 	t = types2.Unalias(t)
 	if c, ok := t.(*types2.ConstView); ok {
@@ -495,8 +453,6 @@ func constRecvBase(t types2.Type) types2.Type {
 	return t
 }
 
-// constFuncName renders the facts object name: the func name, or
-// T.M / (*T).M for methods.
 func constFuncName(pkg *types2.Package, obj *types2.Func, sig *types2.Signature) string {
 	if sig.Recv() == nil {
 		return obj.Name()
@@ -507,9 +463,6 @@ func constFuncName(pkg *types2.Package, obj *types2.Func, sig *types2.Signature)
 	return obj.Name()
 }
 
-// constBodyScan holds the state for scanning one function body.
-// tainted maps an object derived from a parameter to its origin
-// parameter; mut records confirmed-mutated origin parameters.
 type constBodyScan struct {
 	pkg       *types2.Package
 	info      *types2.Info
@@ -519,8 +472,6 @@ type constBodyScan struct {
 	mut       map[*types2.Var]bool
 }
 
-// funcMutations returns the receiver-mutated flag and the parameter
-// mutation mask for one function.
 func (s *constBodyScan) funcMutations(d constFuncDecl) (bool, []byte) {
 	s.tainted = make(map[types2.Object]*types2.Var)
 	s.mut = make(map[*types2.Var]bool)
@@ -554,8 +505,6 @@ func (s *constBodyScan) funcMutations(d constFuncDecl) (bool, []byte) {
 	return recv != nil && s.mut[recv], mask
 }
 
-// resolve maps a name to its declared object through definitions first,
-// then uses.
 func (s *constBodyScan) resolve(name *syntax.Name) types2.Object {
 	if name == nil || s.info == nil {
 		return nil
@@ -566,7 +515,6 @@ func (s *constBodyScan) resolve(name *syntax.Name) types2.Object {
 	return s.info.Uses[name]
 }
 
-// isPackageVar reports whether obj is a package-level variable.
 func (s *constBodyScan) isPackageVar(obj types2.Object) bool {
 	v, ok := obj.(*types2.Var)
 	if !ok || v == nil || s.pkg == nil {
@@ -575,7 +523,6 @@ func (s *constBodyScan) isPackageVar(obj types2.Object) bool {
 	return s.pkg.Scope().Lookup(v.Name()) == types2.Object(v)
 }
 
-// originOf returns the origin parameter of a tainted object, if any.
 func (s *constBodyScan) originOf(obj types2.Object) *types2.Var {
 	if obj == nil {
 		return nil
@@ -583,17 +530,6 @@ func (s *constBodyScan) originOf(obj types2.Object) *types2.Var {
 	return s.tainted[obj]
 }
 
-// mark records the origin parameter of obj as mutated for escape/copy
-// propagation (return, send, store of a copy, closure capture, escaping
-// call). A reference-free origin (string, int, plain struct such as Good)
-// cannot alias shared memory, so copying it never mutates the caller;
-// only a reference-bearing origin marks. This mirrors the seal's
-// reference-free cut (types2.LogosReferenceFree) so a pure getter
-// returning a string does not suppress its sealed Readonly fact.
-// Unknown or untyped origins fail closed. Direct writes through a
-// reference must use markWrite, which never applies this cut: writing
-// m.S[0]=1 mutates shared memory even though the stored int is
-// reference-free.
 func (s *constBodyScan) mark(obj types2.Object) {
 	if o := s.originOf(obj); o != nil {
 		if t := o.Type(); t != nil && types2.LogosReferenceFree(t) {
@@ -603,13 +539,6 @@ func (s *constBodyScan) mark(obj types2.Object) {
 	}
 }
 
-// markWrite records a direct write through obj without the
-// reference-free cut. Stores, index/slice writes, pointer writes, and
-// calls to mutating positions mutate shared memory reachable from the
-// origin even when the written field or element type itself is scalar
-// reference-free (e.g. m.S[0]=1 writes an int through a slice). Only
-// untainted objects skip; reference-free origins still mark here because
-// the write crosses a reference indirection off the origin.
 func (s *constBodyScan) markWrite(obj types2.Object) {
 	if o := s.originOf(obj); o != nil {
 		s.mut[o] = true
@@ -657,8 +586,6 @@ func (s *constBodyScan) writeCrossesRef(e syntax.Expr) bool {
 	}
 }
 
-// markMentionWrite marks direct-write targets: every tainted origin
-// mentioned in e marks without the reference-free cut.
 func (s *constBodyScan) markMentionWrite(e syntax.Node) {
 	syntax.Inspect(e, func(n syntax.Node) bool {
 		if idx, ok := n.(*syntax.IndexExpr); ok {
@@ -691,7 +618,6 @@ func (s *constBodyScan) markMentionWrite(e syntax.Node) {
 	})
 }
 
-// taintedMention returns the origin parameter mentioned in e, if any.
 func (s *constBodyScan) taintedMention(e syntax.Expr) *types2.Var {
 	var found *types2.Var
 	syntax.Inspect(e, func(n syntax.Node) bool {
@@ -708,14 +634,12 @@ func (s *constBodyScan) taintedMention(e syntax.Expr) *types2.Var {
 	return found
 }
 
-// block scans a statement list.
 func (s *constBodyScan) block(list []syntax.Stmt) {
 	for _, st := range list {
 		s.stmt(st)
 	}
 }
 
-// stmt scans one statement, recursing into nested bodies.
 func (s *constBodyScan) stmt(st syntax.Stmt) {
 	switch st := st.(type) {
 	case *syntax.AssignStmt:
@@ -783,7 +707,6 @@ func (s *constBodyScan) stmt(st syntax.Stmt) {
 	}
 }
 
-// blockStmt scans a block-shaped child: a block or a statement.
 func (s *constBodyScan) blockStmt(n syntax.Node) {
 	switch n := n.(type) {
 	case *syntax.BlockStmt:
@@ -793,8 +716,6 @@ func (s *constBodyScan) blockStmt(n syntax.Node) {
 	}
 }
 
-// assign scans an assignment: writes through tainted values, global
-// stores of tainted values, and taint propagation into locals.
 func (s *constBodyScan) assign(st *syntax.AssignStmt) {
 	if st.Rhs == nil {
 		if ex, ok := syntax.Unparen(st.Lhs).(syntax.Expr); ok && s.writeCrossesRef(ex) {
@@ -845,7 +766,6 @@ func (s *constBodyScan) assign(st *syntax.AssignStmt) {
 	}
 }
 
-// mentionsPackage reports whether e mentions a package-level variable.
 func (s *constBodyScan) mentionsPackage(e syntax.Expr) bool {
 	found := false
 	syntax.Inspect(e, func(n syntax.Node) bool {
@@ -860,7 +780,6 @@ func (s *constBodyScan) mentionsPackage(e syntax.Expr) bool {
 	return found
 }
 
-// varDecl propagates taint into var declarations with initializers.
 func (s *constBodyScan) varDecl(vd *syntax.VarDecl) {
 	if vd.Values == nil {
 		return
@@ -884,8 +803,6 @@ func (s *constBodyScan) varDecl(vd *syntax.VarDecl) {
 	}
 }
 
-// suspended scans go and defer statements: a go statement escapes its
-// arguments into a new frame, while defer runs in the frame.
 func (s *constBodyScan) suspended(st *syntax.CallStmt) {
 	if st.Tok == syntax.Go {
 		s.markMention(st.Call)
@@ -894,8 +811,6 @@ func (s *constBodyScan) suspended(st *syntax.CallStmt) {
 	s.scanReads(st.Call)
 }
 
-// markMention marks the origin of every tainted value mentioned in e:
-// the whole expression escapes, so even pure-position arguments mark.
 func (s *constBodyScan) markMention(e syntax.Node) {
 	syntax.Inspect(e, func(n syntax.Node) bool {
 		if name, ok := n.(*syntax.Name); ok {
@@ -914,8 +829,6 @@ func (s *constBodyScan) markMention(e syntax.Node) {
 	})
 }
 
-// scanReads analyzes e for call effects and captured closures,
-// ignoring bare reads.
 func (s *constBodyScan) scanReads(e syntax.Node) {
 	syntax.Inspect(e, func(n syntax.Node) bool {
 		if call, ok := n.(*syntax.CallExpr); ok {
@@ -930,8 +843,6 @@ func (s *constBodyScan) scanReads(e syntax.Node) {
 	})
 }
 
-// markClosure marks every tainted value captured by a function
-// literal body.
 func (s *constBodyScan) markClosure(body *syntax.BlockStmt) {
 	if body == nil {
 		return
@@ -948,20 +859,14 @@ func (s *constBodyScan) markClosure(body *syntax.BlockStmt) {
 	})
 }
 
-// callInFrame scans a call whose result stays in the frame; only
-// mutating positions mark.
 func (s *constBodyScan) callInFrame(call *syntax.CallExpr) {
 	s.doCall(call, false)
 }
 
-// callEscaping scans a call whose result escapes; even pure-position
-// arguments mark, since the result may alias them.
 func (s *constBodyScan) callEscaping(call *syntax.CallExpr) {
 	s.doCall(call, true)
 }
 
-// doCall scans a call: arguments against the callee parameter facts,
-// the receiver against the receiver fact, and builtins by position.
 func (s *constBodyScan) doCall(call *syntax.CallExpr, escaping bool) {
 	if name, ok := call.Fun.(*syntax.Name); ok {
 		if obj := s.resolve(name); obj != nil {
@@ -992,9 +897,6 @@ func (s *constBodyScan) doCall(call *syntax.CallExpr, escaping bool) {
 	s.markArgs(call.ArgList)
 }
 
-// funcCall checks arguments against a callee: same-package functions
-// use the fixpoint masks, imported ones the recorded facts, and
-// bodies without facts fail closed.
 func (s *constBodyScan) doFuncCall(fn *types2.Func, recv syntax.Expr, args []syntax.Expr, escaping bool) {
 	sig, ok := fn.Type().(*types2.Signature)
 	if !ok {
@@ -1032,15 +934,6 @@ func (s *constBodyScan) doFuncCall(fn *types2.Func, recv syntax.Expr, args []syn
 	}
 }
 
-// calleeFacts returns the receiver flag and parameter mask for a
-// callee: the fixpoint state for the current package, recorded facts
-// for imports, and fail-closed for unknown bodies. A nil mask means
-// unknown mutation (every parameter mutated); a non-nil mask is exact,
-// with unset bits clean. A record that exists for non-mutation reasons
-// (readonly-only, assert-only, or a record without ParamMutated)
-// therefore never certifies zero; only an explicit "ParamMutated=0" (or
-// any parseable mask) is exact. A universe method such as error.Error
-// has no package and no recorded facts.
 func (s *constBodyScan) calleeFacts(fn *types2.Func) (bool, []byte) {
 	if fn.Pkg() == nil {
 		return true, nil
@@ -1076,7 +969,6 @@ func (s *constBodyScan) calleeFacts(fn *types2.Func) (bool, []byte) {
 	return true, nil
 }
 
-// constMethodName renders T.M or (*T).M for a method.
 func constMethodName(fn *types2.Func) string {
 	sig, ok := fn.Type().(*types2.Signature)
 	if !ok || sig.Recv() == nil {
@@ -1088,9 +980,6 @@ func constMethodName(fn *types2.Func) string {
 	return fn.Name()
 }
 
-// builtinCall scans built-in calls by position: append and copy mutate
-// their destination, delete and clear mutate their map, panic escapes
-// its argument, and every other built-in reads.
 func (s *constBodyScan) builtinCall(name string, call *syntax.CallExpr) {
 	switch name {
 	case "append", "copy":
@@ -1112,7 +1001,6 @@ func (s *constBodyScan) builtinCall(name string, call *syntax.CallExpr) {
 	}
 }
 
-// markArgs marks tainted mentions across call arguments.
 func (s *constBodyScan) markArgs(args []syntax.Expr) {
 	for _, arg := range args {
 		s.markMention(arg)

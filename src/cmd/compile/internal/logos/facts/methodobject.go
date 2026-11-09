@@ -6,7 +6,6 @@ package facts
 
 import "cmd/compile/internal/types2"
 
-// MethodObject spells a method record object: T.M or (*T).M.
 func MethodObject(typeName string, recv *types2.Var, method string) string {
 	if recv == nil {
 		return typeName + "." + method

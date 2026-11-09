@@ -12,8 +12,6 @@ import (
 	"cmd/compile/internal/types2"
 )
 
-// Write returns the source-phase records of pkg: every record derived
-// from the first, unlowered check. It never returns nil.
 func Write(pkg *types2.Package, info *types2.Info, files []*syntax.File, src map[*syntax.File][]byte) *Facts {
 	f := &Facts{}
 	if pkg == nil || pkg.Scope() == nil {
@@ -27,9 +25,6 @@ func Write(pkg *types2.Package, info *types2.Info, files []*syntax.File, src map
 	return f
 }
 
-// WriteChecked folds the checked-phase records of the final (rechecked)
-// pkg into f and returns f. When f is nil and nothing is recorded it
-// returns nil, so a plain-Go package without records gains no member.
 func WriteChecked(pkg *types2.Package, info *types2.Info, files []*syntax.File, f *Facts) *Facts {
 	if pkg == nil || pkg.Scope() == nil {
 		return f

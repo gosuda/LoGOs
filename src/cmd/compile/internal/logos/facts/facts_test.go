@@ -425,9 +425,6 @@ func writeArchive(t *testing.T, data []byte) *os.File {
 	return f
 }
 
-// TestConformsRoundTrip covers the M4-S2 conforms records: each type's
-// declared conformances encode canonically, decode back, and sort with
-// the other records; vacuous records are skipped like every other kind.
 func TestConformsRoundTrip(t *testing.T) {
 	fp := goobj.FingerprintType{2}
 	in := &facts.Facts{
@@ -512,7 +509,7 @@ func TestAssertEffectsWire(t *testing.T) {
 		Readonly:  true,
 		HasAssert: true,
 		AssertTP:  "0",
-		AssertRTP: "800000000000000000", // bit 71: no 64-param limit
+		AssertRTP: "800000000000000000",
 	}}}
 	out := string(facts.Encode(fp, in))
 	if !strings.Contains(out, "fn F Readonly,AssertTP=0,AssertRTP=800000000000000000\n") {
@@ -529,8 +526,6 @@ func TestAssertEffectsWire(t *testing.T) {
 	if !fn.MayYieldOnly() && fn.HasMayYield {
 		t.Fatal("unexpected MayYield")
 	}
-	// Assert flags are not mutation facts: a yield record carrying only
-	// assert flags stays mutation-unanalyzed.
 	ay := facts.FnFact{Object: "G", MayYield: true, HasMayYield: true, HasAssert: true, AssertTP: "0", AssertRTP: "0"}
 	if !ay.MayYieldOnly() {
 		t.Fatal("assert-only record must stay MayYieldOnly (mutation unknown)")

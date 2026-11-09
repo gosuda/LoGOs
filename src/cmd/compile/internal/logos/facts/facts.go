@@ -2,64 +2,6 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// Package facts implements the __.LOGOS facts sidecar (M3-S1).
-//
-// Facts travel in the __.LOGOS archive member beside __.PKGDEF: a text
-// header of the package's exported declarations in loGo/s syntax
-// (nilability, const, unions, tuples, property interfaces), per-function
-// facts, and comptime generic sources, bound to the __.PKGDEF fingerprint
-// (T-Sec5). S1 defines the format and the transport; Write and
-// WriteChecked populate the records through SetCurrent, with backend
-// merges beside them. Until then every compiler-object archive
-// carries a header-only member so the binding itself is testable end to
-// end.
-//
-// Wire format (record lines sorted byte-wise; comptime bodies
-// length-delimited):
-//
-//	logos-facts 3
-//	fingerprint <hex of the __.PKGDEF linker fingerprint>
-//	opt <object> <path>
-//	const <object> <path>
-//	fn <object> <flag>[,<flag>...]
-//	readonly <object> <path>
-//	prop <interface> <accessor-function-prefix>
-//	conforms <struct> <interface-package-path> <interface>
-//	comptime <object> <byte length>
-//	<source bytes>
-//	constfn <object> <byte length>
-//	<source bytes>
-//	default <type> <field> <byte length>
-//	<default expression source text>
-//
-// <object> is Name, Type.Field, (*Type).Method, or Type.Method; <path> is
-// dot-separated steps R<i> result, P<i> parameter, F<name> field, E element,
-// D dereference of one pointer or channel container, K map key, M<name>
-// interface method, T<i> tuple element, G<i> type-parameter constraint,
-// H<i> receiver type-parameter constraint. Flags:
-// ReturnsNonNil, AlwaysNilError, PureConst, ReceiverMutated, Readonly,
-// AssertTP=<hex mask>, AssertRTP=<hex mask>,
-// ParamMutated=<hex mask>, MayYield=0|1.
-// A fn Readonly record carries a readonly requirement (interface I.M
-// obligation) or a proven readonly capability (concrete T.M / (*T).M).
-// Owner-qualified keys are stable: I.M for interfaces, methodObject-style
-// T.M / (*T).M for concrete methods. A readonly record carries the same
-// obligation for a nested or generic-constrained method addressed by
-// object-root structural path. Version 2 added the Readonly fn flag
-// for semantic method obligations; version 3 is a clean cutover adding
-// the AssertTP and AssertRTP fn flags for generic assertion effects;
-// version and fingerprint checks reject mismatched members with no
-// compat shim.
-// AssertTP records which function type parameters feed a type-assertion
-// or type-switch target of the declaration; AssertRTP records the same
-// for receiver type parameters. Each mask is an arbitrary-arity
-// big-endian bit number in canonical lowercase hex (bit i set = type
-// parameter i flows into an assertion target); there is no 64-bit
-// limit. Known semantics: flag present = analyzed, flag absent =
-// unknown, and consumers fail closed on unknown. AssertTP=0,AssertRTP=0
-// means analyzed with proven absence of such flows. Assert flags say
-// nothing about mutation: an assertion-only record must never certify
-// mutation purity (ParamMutated stays absent = unknown mutation).
 package facts
 
 import (
@@ -81,43 +23,27 @@ import (
 )
 
 const (
-	// Version is the facts format version written by Encode.
-	Version = 3
-	// MemberName is the archive member carrying facts, beside __.PKGDEF.
+	Version    = 3
 	MemberName = "__.LOGOS"
 
 	arHeaderSize = 60
 	arMagic      = "!<arch>\n"
 
-	// maxMemberBytes bounds the __.LOGOS member FindMember will read.
 	maxMemberBytes = 64 << 20
 )
 
 var versionLine = "logos-facts " + strconv.Itoa(Version)
 
-// PathFact is one opt or const record: the object position carrying an
-// option or const fact, and the dot-separated path to it. Each step
-// descends one position: R<i> result, P<i> parameter, F<name> field, E
-// option or view element (the ? qualifier), K map key, D one pointer or
-// channel container, M<name> interface method, T<i> tuple element,
-// G<i> type-parameter constraint, H<i> receiver type-parameter constraint.
 type PathFact struct {
 	Object string
 	Path   string
 }
 
-// ReadonlyFact is one readonly record: the exported root object and the
-// structural path to a nested or generic-constrained interface method
-// carrying the readonly obligation. Object uses the same grammar as opt
-// and const records; Path uses the same steps extended with G<i> and H<i>
-// for type-parameter constraints. At least one M<name> step selects the
-// target method; G<i>/H<i> selects a type-parameter constraint.
 type ReadonlyFact struct {
 	Object string
 	Path   string
 }
 
-// FnFact is one fn record: per-function facts for the named object.
 type FnFact struct {
 	Object          string
 	ReturnsNonNil   bool
@@ -125,79 +51,49 @@ type FnFact struct {
 	PureConst       bool
 	ReceiverMutated bool
 	Readonly        bool
-	// AssertTP is the normalized lowercase hex mask of function type
-	// parameters feeding an assertion/type-switch target; "" when absent.
-	AssertTP string
-	// AssertRTP is the normalized lowercase hex mask of receiver type
-	// parameters feeding an assertion/type-switch target; "" when absent.
-	AssertRTP string
-	// HasAssert is the Known bit: true when the assertion effects were
-	// analyzed (flags present on the wire, "0" when proven-zero).
-	HasAssert bool
-	// ParamMutated is the normalized lowercase hex mutation mask; "" is absent.
-	ParamMutated string
-	MayYield     bool
-	HasMayYield  bool
+	AssertTP        string
+	AssertRTP       string
+	HasAssert       bool
+	ParamMutated    string
+	MayYield        bool
+	HasMayYield     bool
 }
 
-// MayYieldOnly reports whether MayYield is the only mutation-relevant fact
-// of fn. Assertion-effect flags (AssertTP/AssertRTP) are not mutation
-// facts, so a record carrying only assert flags plus MayYield still
-// reports true. Such a record says nothing about mutation, nilability,
-// or purity of values, so a consumer of those facts must treat the
-// function as unanalyzed.
 func (fn FnFact) MayYieldOnly() bool {
 	return fn.HasMayYield && !fn.ReturnsNonNil && !fn.AlwaysNilError && !fn.PureConst && !fn.ReceiverMutated && !fn.Readonly && fn.ParamMutated == ""
 }
 
-// PropFact is one prop record: an interface and its accessor-function prefix.
 type PropFact struct {
 	Interface string
 	Prefix    string
 }
 
-// ConformsFact is one conforms record: a struct type of this package and
-// one property interface it declares conformance to, named as the
-// interface's package path and type name so an importer in another
-// package can match its own spelling of the same interface.
 type ConformsFact struct {
 	Type      string
 	IfacePath string
 	Iface     string
 }
 
-// ComptimeFact is one comptime record: the source of an exported comptime
-// generic and the declarations it references.
 type ComptimeFact struct {
 	Object string
 	Source []byte
 }
 
-// ConstFuncFact is one constfn record: the closed source of an exported
-// receiverless non-generic const function. The source is a single
-// parseable Logos file carrying the function's same-package declaration
-// closure; a validated root `const func` body is the capability record.
 type ConstFuncFact struct {
 	Object string
 	Source []byte
 }
 
-// LockFact is one locks record: a lock requirement or effect of an exported
-// function, with the effect verb and the path from the receiver or a
-// parameter to the lock field.
 type LockFact struct {
 	Object string
 	Effect string
 	Path   string
 }
 
-// AllocFreeFact is one allocfree record: an exported function whose body and
-// callees allocate nothing on the heap.
 type AllocFreeFact struct {
 	Object string
 }
 
-// Facts is the decoded content of one __.LOGOS member.
 type Facts struct {
 	Fingerprint goobj.FingerprintType
 	Opts        []PathFact
@@ -211,13 +107,9 @@ type Facts struct {
 	Defaults    []DefaultFact
 	Locks       []LockFact
 	AllocFrees  []AllocFreeFact
-	// GoPackage marks a package compiled from .go sources. Such a package
-	// carries per-function backend facts such as MayYield and nothing
-	// that makes it a loGo/s package, so importers must not read it as one.
-	GoPackage bool
+	GoPackage   bool
 }
 
-// empty reports whether f carries no record; extend with every new record field.
 func (f *Facts) empty() bool {
 	return len(f.Opts) == 0 && len(f.Consts) == 0 && len(f.Fns) == 0 &&
 		len(f.Readonlys) == 0 && len(f.Props) == 0 && len(f.Conforms) == 0 &&
@@ -225,26 +117,18 @@ func (f *Facts) empty() bool {
 		len(f.Locks) == 0 && len(f.AllocFrees) == 0 && !f.GoPackage
 }
 
-// DefaultFact is one default record: a defaulted field of an exported
-// struct type and its default expression source text.
 type DefaultFact struct {
 	Type  string
 	Field string
 	Text  string
 }
 
-// Encode renders the facts in canonical form: header, fingerprint, then
-// record lines sorted byte-wise. A nil f emits a header-only member, which
-// is what the writer produces until S2-S7 populate records.
 func Encode(fp goobj.FingerprintType, f *Facts) []byte {
 	type record struct {
 		line string
-		body []byte // set only for comptime records
+		body []byte
 	}
 	var recs []record
-	// Encode emits only records Decode accepts. Vacuous records assert
-	// nothing and are skipped, so output always round-trips while Decode
-	// stays strict enough to catch producer bugs on the read path.
 	if f != nil {
 		for _, o := range f.Opts {
 			if o.Object != "" && o.Path != "" {
@@ -320,7 +204,6 @@ func Encode(fp goobj.FingerprintType, f *Facts) []byte {
 	return b.Bytes()
 }
 
-// flags renders the flag set in canonical order.
 func (fn FnFact) flags() string {
 	var b strings.Builder
 	add := func(s string) {
@@ -344,10 +227,6 @@ func (fn FnFact) flags() string {
 	if fn.Readonly {
 		add("Readonly")
 	}
-	// Both masks or neither: a producer defect that sets HasAssert with a
-	// missing mask must not manufacture a complete "0" pair through
-	// normHex's empty-to-"0" mapping; the record stays unknown instead
-	// and Decode rejects genuinely partial pairs on the wire.
 	if fn.HasAssert && fn.AssertTP != "" && fn.AssertRTP != "" {
 		add("AssertTP=" + normHex(fn.AssertTP))
 		add("AssertRTP=" + normHex(fn.AssertRTP))
@@ -365,7 +244,6 @@ func (fn FnFact) flags() string {
 	return b.String()
 }
 
-// parseFlag sets one flag on fn.
 func (fn *FnFact) parseFlag(flag string) error {
 	switch flag {
 	case "ReturnsNonNil":
@@ -415,10 +293,6 @@ func (fn *FnFact) parseFlag(flag string) error {
 	return nil
 }
 
-// HighestAssertBit returns the index of the highest set bit of a hex
-// mask string and whether s is a valid mask. Consumers reject summaries
-// whose highest bit lies outside the declaration's real parameter arity
-// instead of silently ignoring the excess bits.
 func HighestAssertBit(s string) (int, bool) {
 	if s == "" {
 		return 0, false
@@ -428,7 +302,7 @@ func HighestAssertBit(s string) (int, bool) {
 	}
 	trimmed := strings.TrimLeft(s, "0")
 	if trimmed == "" {
-		return -1, true // proven zero: no bit set
+		return -1, true
 	}
 	top := 4*(len(trimmed)-1) + bits.Len8(uint8(nibbleValue(trimmed[0]))) - 1
 	return top, true
@@ -441,13 +315,10 @@ func nibbleValue(c byte) int {
 	return int(c - '0')
 }
 
-// isHexMask reports whether s is a non-empty run of hex digits. A mask
-// has any digit count: normHex strips leading zeros, so "1" is valid.
 func isHexMask(s string) bool {
 	return s != "" && strings.Trim(s, "0123456789abcdefABCDEF") == ""
 }
 
-// normHex lowercases a hex mask and strips leading zeros.
 func normHex(s string) string {
 	s = strings.ToLower(s)
 	s = strings.TrimLeft(s, "0")
@@ -463,7 +334,6 @@ type decoder struct {
 	line int
 }
 
-// header consumes one '\n'-terminated line, reporting its line number.
 func (d *decoder) header() (ln int, s string, err error) {
 	ln = d.line
 	i := bytes.IndexByte(d.data[d.off:], '\n')
@@ -476,7 +346,6 @@ func (d *decoder) header() (ln int, s string, err error) {
 	return ln, s, nil
 }
 
-// Decode parses one __.LOGOS member. Every error names the line number.
 func Decode(data []byte) (*Facts, error) {
 	d := &decoder{data: data, line: 1}
 	f := &Facts{}
@@ -579,9 +448,6 @@ func Decode(data []byte) (*Facts, error) {
 					return nil, fmt.Errorf("logos facts line %d: %v", ln, ferr)
 				}
 			}
-			// Trust boundary: an assertion-effect record carries both
-			// masks or neither. A partial pair must not certify the
-			// missing side as proven zero; neither flag stays unknown.
 			if (fn.AssertTP == "") != (fn.AssertRTP == "") {
 				return nil, fmt.Errorf("logos facts line %d: incomplete assertion-effect pair on %q (want both AssertTP and AssertRTP or neither)", ln, fn.Object)
 			}
@@ -719,8 +585,6 @@ func isIdent(s string) bool {
 	return true
 }
 
-// ValidObject reports whether s names a record object in the grammar
-// Decode accepts, so a producer can skip names it cannot spell.
 func ValidObject(s string) bool { return validObject(s) }
 
 func validObject(s string) bool {
@@ -759,8 +623,6 @@ func isDigits(s string) bool {
 	return true
 }
 
-// validStep reports whether s is one path step: R<i>, P<i>, F<name>, E, D,
-// K, M<name>, T<i>, G<i>, or H<i>.
 func validStep(s string) bool {
 	if s == "" {
 		return false
@@ -776,7 +638,6 @@ func validStep(s string) bool {
 	return false
 }
 
-// validPath reports whether s is a dot-separated path of valid steps.
 func validPath(s string) bool {
 	if s == "" {
 		return false
@@ -789,9 +650,6 @@ func validPath(s string) bool {
 	return true
 }
 
-// validLockPath reports whether s is a dot-separated path of identifiers,
-// the path a locks record names from its receiver or parameter to the lock
-// field.
 func validLockPath(s string) bool {
 	if s == "" {
 		return false
@@ -823,27 +681,18 @@ var (
 	imported   = make(map[string]*Facts)
 )
 
-// Current returns the facts collected for the package being compiled, or
-// nil when no producer has run. S2-S7 producers install it through
-// SetCurrent before the object dump.
 func Current() *Facts {
 	currentMu.RLock()
 	defer currentMu.RUnlock()
 	return currentFacts
 }
 
-// SetCurrent installs the facts for the package being compiled. Later
-// slices call it during lowering, before dumpobj1 writes the archive.
 func SetCurrent(f *Facts) {
 	currentMu.Lock()
 	defer currentMu.Unlock()
 	currentFacts = f
 }
 
-// Import verifies a __.LOGOS member against the __.PKGDEF export data,
-// decodes it, and records it under path for the importer overlay (S2-S7).
-// A fingerprint mismatch means the archive mixes export data and facts
-// from different builds of the package.
 func Import(path, exportData string, member []byte) (*Facts, error) {
 	f, err := Decode(member)
 	if err != nil {
@@ -863,7 +712,6 @@ func Import(path, exportData string, member []byte) (*Facts, error) {
 	return f, nil
 }
 
-// Lookup returns the facts Import recorded for path.
 func Lookup(path string) (*Facts, bool) {
 	importedMu.RLock()
 	defer importedMu.RUnlock()
@@ -871,9 +719,6 @@ func Lookup(path string) (*Facts, bool) {
 	return f, ok
 }
 
-// FindMember returns the raw __.LOGOS member of the archive f, or nil when
-// the archive predates the sidecar. It seeks, so the caller's file offset
-// is not preserved.
 func FindMember(f *os.File) ([]byte, error) {
 	if _, err := f.Seek(0, io.SeekStart); err != nil {
 		return nil, fmt.Errorf("logos: cannot seek facts archive: %v", err)
