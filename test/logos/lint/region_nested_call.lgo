@@ -54,3 +54,15 @@ func NestDirect() {
 	}
 	_ = po
 }
+
+func NestReverse() {
+	rOut := arena.Open()
+	po := arena.New[node](rOut)
+	{
+		rIn := arena.Open()
+		pi := arena.New[node](rIn)
+		link(pi, po)
+		_, _ = po, pi
+	}
+	_ = po
+}
