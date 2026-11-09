@@ -31,9 +31,21 @@ func tryCap(w, h int) (out string) {
 	return out
 }
 
+func negativePanics(w, h int) (panicked bool) {
+	defer func() {
+		if recover() != nil {
+			panicked = true
+		}
+	}()
+	buf := make([]Pixel, w*h)
+	_ = buf
+	return false
+}
+
 func main() {
-	fmt.Println(tryLen(1<<32, 1<<32))
+	fmt.Println(tryLen(1 << 32, 1 << 32))
 	fmt.Println(tryLen(3, 4))
-	fmt.Println(tryCap(1<<32, 1<<32))
-	fmt.Println(tryLen(0, 1<<32))
+	fmt.Println(tryCap(1 << 32, 1 << 32))
+	fmt.Println(tryLen(0, 1 << 32))
+	fmt.Println(negativePanics(-3, 4))
 }
