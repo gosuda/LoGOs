@@ -191,6 +191,19 @@ func outerScope(up *User?) {
 	_ = up.Name
 }
 
+func shadowBlock(up *User?) {
+	if up == nil {
+		return
+	}
+	_ = up.Name
+	{
+		var up *User? = nil
+		_ = up.Name /* ERROR "[correctness::nil_deref_unproven] cannot access field Name of *User? without proving != nil" */
+		_ = up
+	}
+	_ = up.Name
+}
+
 // Plain selections, derefs, and stores without a guard still fail.
 func noGuard(up *User?) {
 	_ = up.Name /* ERROR "[correctness::nil_deref_unproven] cannot access field Name of *User? without proving != nil" */
