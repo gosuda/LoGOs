@@ -75,7 +75,7 @@ The output MUST carry a `replace` line for the shared module [T-0.3].
 The tool MUST remove `import "comptime"` during eject [T-0.3].
 The output MUST NOT include a `//go:build !logos` line [T-0.3][R-U3].
 The output MUST NOT emit `.gen.go` file names [T-0.3].
-The output MUST carry the reserved `_logos_` import aliases that lowering writes, such as `_logos_strconv "strconv"` [T-0.3].
+The output MUST carry the reserved `_logos_` import aliases that lowering writes, such as `_logos_unsafe "unsafe"` [T-0.3].
 The output MUST NOT emit `_logos_errors` imports [T-0.3].
 Among support imports, lowered files MUST import only `_logos_rt "logos/rt"`, `_logos_json "logos/rt/json"`, plus `_logos_unsafe "unsafe"` where needed, in addition to standard library imports under reserved `_logos_` aliases [T-0.3].
 The tool MUST NOT write ejected files into the source tree [T-0.3].
@@ -123,7 +123,7 @@ The `logos lint` check MUST run the language-neutral syntax and type rules on Go
 The `logos lint` check MUST run inside escape analysis for escape rules, on Go packages and on `.lgo` packages [T-102][R-U1].
 `logos lint` MUST lint Go packages with the language-neutral rules only [T-102][R-U1].
 A rule MUST count as language-neutral when a Go package can trigger it with Go syntax and types alone and the code it guards exists in Go packages. A loGo/s form inside its detection, such as a group child, a const view, or `?`, MUST stay inactive in Go [T-102][R-U1].
-The language-neutral rules MUST be `correctness::typed_nil_return` (in Go, the `(*T)(nil)` form only), `correctness::arena_pointer_escape`, `correctness::infinite_recursion`, `correctness::unclosed_io_closer`, `correctness::unbounded_channel_op`, `concurrency::concurrent_multiword_race`, `concurrency::reentrant_withlock_deadlock`, `slop::err_chain_reset`, `slop::discarded_error`, `complexity::cognitive_overflow`, `perf::large_backing_array_pin`, `perf::time_after_in_loop`, `concurrency::unguarded_access`, `concurrency::nonatomic_access`, `concurrency::lock_requirement_unmet`, `correctness::layout_constant_mismatch`, `portability::atomic_plain_int64`, `correctness::linkname_mismatch`, and `pedantic::unsafe_outside_unsafe_file` [T-102][R-U1].
+The language-neutral rules MUST be `correctness::typed_nil_return` (in Go, the `(*T)(nil)` form only), `correctness::arena_pointer_escape`, `correctness::infinite_recursion`, `correctness::unclosed_io_closer`, `correctness::unbounded_channel_op`, `concurrency::concurrent_multiword_race`, `concurrency::reentrant_withlock_deadlock`, `correctness::withlock_leak`, `slop::err_chain_reset`, `slop::discarded_error`, `complexity::cognitive_overflow`, `perf::large_backing_array_pin`, `perf::time_after_in_loop`, `concurrency::unguarded_access`, `concurrency::nonatomic_access`, `concurrency::lock_requirement_unmet`, `correctness::layout_constant_mismatch`, `portability::atomic_plain_int64`, `correctness::linkname_mismatch`, and `pedantic::unsafe_outside_unsafe_file` [T-102][R-U1].
 `go vet` owns printf, copylocks, structtag, assign, httpresponse, and stringintconv checks; `logos lint` does not repeat them. [T-102]
 The compiler MUST enforce `concurrency::unguarded_access` as `forbid` against a read or write of a field that `//logos:guardedby` guards without its lock held [T-102].
 The compiler MUST enforce `concurrency::nonatomic_access` as `forbid` against a non-`sync/atomic` access of a field that `//logos:atomic` marks [T-102].
@@ -170,6 +170,7 @@ The compiler MUST enforce `correctness::defer_erases_errdefer_state` as `forbid`
 The compiler MUST enforce `correctness::infinite_recursion` as `forbid` against a function whose every path from entry calls itself with identical arguments before any return [T-102].
 The compiler MUST enforce `concurrency::concurrent_multiword_race` as `forbid` against sharing of a mutable multi-word value with a child block plus a write on either side, unless the value is a const view or a `logos/sync` type [T-102].
 The compiler MUST enforce `concurrency::reentrant_withlock_deadlock` as `forbid` against a `WithLock` call on the same receiver inside its own closure call graph [T-102].
+The compiler MUST enforce `correctness::withlock_leak` as `deny` against a `WithLock` lambda that returns or stores its argument, sends it on a channel, or passes it to a goroutine [T-102].
 The compiler MUST enforce `concurrency::unsupervised_goroutine` as `forbid` against a `go` statement in `.lgo` outside a `go group` block [T-102].
 The compiler MUST enforce `slop::err_chain_reset` as `deny` against formatting of an `error` operand with a verb other than `%w` or against passing of `err.Error()` [T-102].
 The compiler MUST enforce `slop::discarded_error` as `deny` against dropping of an `error` result, except callees with an always-nil-error fact, `fmt.Print*` calls, `fmt.Fprint*` calls to `os.Stdout` or `os.Stderr`, and `bytes.Buffer.Write*` and `strings.Builder.Write*` calls [T-102].
@@ -1623,7 +1624,7 @@ No size threshold and no caller buffer apply. [T-Sec10]
 The fast path calls no reflect. [T-Sec10]
 Only unmodeled fields fall back to reflective json.Marshal per field. [T-Sec10]
 Each string field is read once into a local. [T-Sec10]
-Concurrent mutation during marshal stays a data race. [T-Sec10]
+Concurrent mutation during marshal is a data race under Go's memory model; the generated body adds no synchronization. [T-Sec10]
 Escaping and float formatting MUST follow encoding/json under the active `goexperiment.jsonv2` setting with portable Go and no SIMD requirement. [T-Sec10]
 Supported tag options are name, omitempty, omitzero, string, and -. [T-Sec10]
 HTML characters, U+2028, U+2029, invalid UTF-8, and float exponents encode per encoding/json. [T-Sec10]
@@ -1665,7 +1666,7 @@ Slice and array encode as uvarint count plus elements. [T-Sec10.1]
 Maps with string keys encode as uvarint count plus entries sorted by key. [T-Sec10.1]
 Nested structs encode inline. [T-Sec10.1]
 Optional values MUST encode as 0x00 when absent or 0x01 plus payload when present. [T-Sec10.1]
-A field of type int or uint warns portability::serialized_unsized_int. [T-Sec10.1]
+A field of type int or uint in a struct with a JSON-tagged field warns portability::serialized_unsized_int in .lgo packages. [T-Sec10.1]
 Sized kinds are preferred. [T-Sec10.1]
 A tag `-` excludes the field from binary output; other tag options change nothing. [T-Sec10.1]
 UnmarshalBinary rejects truncation, bad presence bytes, version mismatch, and trailing bytes with errors naming field and offset. [T-Sec10.1]
@@ -1684,7 +1685,7 @@ The audit MUST run only in `logos` builds and MUST cover modules of both kinds. 
 The audit follows relocations. [T-Sec11]
 It adds synthetic edges for interface calls and reflective method lookups. [T-Sec11]
 Protected sinks are reflect.ValueOf, reflect.TypeOf, reflect.New, syscall.Exec, syscall.ForkExec, syscall.StartProcess, os.StartProcess, os.startProcess, net.sysSocket, syscall.Socket, syscall.Connect, runtime.cgocall, and runtime.logosCgocallFast. [T-Sec11]
-Packages that import unsafe are found through a compiler fact on the package graph. [T-Sec11]
+Packages that import unsafe are found by walking the cmd/go load graph. [T-Sec11]
 The standard library, first-party packages under a main module, and the program's own packages are exempt. [T-Sec11]
 A dependency is not the standard library because its module path has no dot. [T-Sec11]
 A dependency that imports a sink package but never calls it passes as dead code. [T-Sec11]
@@ -1709,8 +1710,8 @@ The tailored cgo sink is the per-call-site `pkg._Cfunc_*` wrapper, reported as `
 
 ### 12.1 Selective resume points
 
-The WASM profile MUST activate automatically for GOOS=js GOARCH=wasm and GOOS=wasip1 GOARCH=wasm. [T-Sec12]
-It MUST apply to Go packages and to loGo/s packages, under `logos` and under plain `go`. [T-Sec12][R-U1]
+The WASM profile MUST activate automatically for GOOS=js GOARCH=wasm and GOOS=wasip1 GOARCH=wasm under `logos`. [T-Sec12]
+It MUST apply to Go packages and to loGo/s packages; under plain `go` it needs the explicit `--wasm-features` flag. [T-Sec12][R-U1]
 It uses the installed toolchain with no external tool. [T-Sec12]
 A MayYield=0 function with straight-line code compiles without resume-point dispatch; one with inter-block jumps keeps the entry-loop dispatch that addresses those jumps. [T-Sec12]
 A function keeps MayYield=0 only with no defer, no indirect call, no call to MayYield=1 or unknown callees, no transitive runtime.gopark, no channel, select, time.Sleep, Gosched, or blocking wasmimport call, no nil check, and no prologue stack check, because stack growth and preemption unwind through runtime.morestack. [T-Sec12]
@@ -1738,7 +1739,7 @@ The loader MUST work under `GOOS=js` and, in a reactor module that the host init
 `logos/rt` MUST export the wasm helpers `_logos_scratch_alloc`, `_logos_scratch_reset`, `_logos_errmsg_ptr`, and `_logos_errmsg_len` for the loader. [T-Sec12]
 The loader exports instantiateLogos(wasmBytes, imports). [T-Sec12]
 The loader re-reads memory.buffer after every call into wasm. [T-Sec12]
-Exported functions MUST return an int32 errCode. The host wrapper throws on any nonzero (truthy) return. [T-Sec12]
+The loader MUST treat the result as an int32 errCode; the compiler accepts int32 and int64 results. The host wrapper throws on any nonzero (truthy) return. [T-Sec12]
 String results are invalid. [T-Sec12]
 On nonzero errCode the wrapper throws the message read from wasm memory. [T-Sec12]
 `logos/rt.WasmError(err)` MUST return 0 for a nil error, and for a non-nil error it MUST record `err.Error()` as the last error message and return 1; the loader reads that message through `_logos_errmsg_ptr` and `_logos_errmsg_len`. [T-Sec12]
@@ -1752,7 +1753,7 @@ Accepted wire bytes MUST stay unchanged. [T-Sec12][T-Sec10.1]
 
 ## 13. Backend peephole and SIMD passes
 
-- Every pass in this section MUST apply to Go packages and to loGo/s packages, under `logos` and under plain `go`, except a rule about a loGo/s language construct: array operators, reduction methods, and `make` length checks. [T-303][R-U1]
+- Every pass in this section MUST apply to Go packages and to loGo/s packages, under `logos` and under plain `go`, except a rule about a loGo/s language construct (array operators, reduction methods, and `make` length checks) and except the wasm loop-stride default, which applies under `logos` only. [T-303][R-U1]
 
 ### 13.1 Arm64 load and store pairing
 
@@ -1798,7 +1799,7 @@ buf := make([]Pixel, w * h)
 
 ### 13.3 Long-loop preemption on wasm
 
-- Back-edge checks MUST fire every 4096 iterations only where async preemption is absent (GOARCH=wasm). [T-303]
+- Back-edge checks MUST fire every 4096 iterations in `logos` builds only where async preemption is absent (GOARCH=wasm). [T-303]
 - A call-free loop MUST NOT starve its peers. [T-303]
 
 ## 14. JSON diagnostics schema
@@ -1858,12 +1859,13 @@ No separate unwind table exists for scope defer. [T-206][T-104.7]
     work()
 }
 ```
-Pairs MUST keep distinct destinations with encodable offsets only. [T-303]
-Go 1.27 already enforces this and the test MUST pin it. [T-303]
+Paired accesses MUST keep distinct destinations with encodable offsets only; calls and atomics end a candidate chain, 16-byte pairs outside -1024..1008 multiples of 16 stay separate, and 4- and 8-byte pairs outside their ranges rely on the assembler fixup. [T-303]
+The `arm64_pair` fixtures MUST pin this behavior; no in-tree test asserts upstream enforcement of these ranges. [T-303]
 
 ### 15.2 Locked WithLock
 
 For `WithLock` locking and unlock-after-panic, see Sec 2.6. [T-206]
+A `WithLock` lambda MUST NOT return or store its argument. [T-206]
 
 This example imports `logos/sync` with the package name `sync`.
 
@@ -1874,9 +1876,9 @@ m.WithLock(func(c *Config) {
     c.Port = 8080
 })
 ```
-Slice reductions MUST use fault-suppressing masked loads for tails. [T-303]
+In amd64 native builds, slice reductions MUST use fault-suppressing masked loads for tails; on arm64 the tail MUST load only the elements present. [T-303]
 The build MUST add no guard padding elsewhere. [T-303]
-In .lgo a * inside a make length or capacity MUST lower to logos/rt.MulLen. [T-303]
+A non-constant integer product in a `make` length or capacity MUST lower to `logos/rt.MulLen`. Constant products stay constant. [T-303]
 
 ## 16. IDE protocol
 
@@ -1887,7 +1889,7 @@ In .lgo a * inside a make length or capacity MUST lower to logos/rt.MulLen. [T-3
 - The proxy MUST NOT recompile without a request or a `didSave`. [T-Sec16]
 - The lowering MUST come from one `logos list -compiled -json -overlay=<file>` run that returns, per `.lgo` file, the lowered text, the edit map, the hints JSON, and the compiler diagnostics. [T-Sec16]
 - Position translation MUST use the shared edit map package. [T-Sec16]
-- Position translation MUST rest on the compiler-written origin segments of the eject map: a lowered offset inside a copied segment maps to its exact original offset, and offsets inside compiler-generated runs have no `.lgo` position of their own; no heuristic or size-capped textual matching takes part. [T-Sec16]
+- Position translation MUST rest on the compiler-written origin segments of the eject map: a lowered offset inside a copied segment maps to its exact original offset, and an offset inside a compiler-generated run maps to the anchor position of that run; no heuristic or size-capped textual matching takes part. [T-Sec16]
 - Closing an unsaved `.lgo` document MUST discard its unsaved overlay and MUST refresh the retained package's compiler results. [T-Sec16]
 - A `textDocument/formatting` request for a `.lgo` document MUST be refused instead of returning edits to lowered Go. Formatting requests for Go documents MUST pass through to `gopls`. [T-Sec16][R-U1]
 - It MUST merge compiler JSON diagnostics into `publishDiagnostics`. [T-Sec16]
