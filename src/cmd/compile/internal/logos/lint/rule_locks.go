@@ -552,10 +552,10 @@ func (v *lockFlow) walkLhs(lhs syntax.Expr) {
 	for _, e := range exprList(lhs) {
 		switch x := syntax.Unparen(e).(type) {
 		case *syntax.SelectorExpr:
-			v.checkWrite(x)
+			v.checkSelector(x, selWrite)
 			v.walkExpr(x.X)
 		case *syntax.Name:
-			v.checkNameWrite(x)
+			v.checkName(x, selWrite)
 		default:
 			v.walkExpr(e)
 		}
@@ -616,10 +616,10 @@ func (v *lockFlow) walkExpr(e syntax.Expr) {
 	case *syntax.CallExpr:
 		v.walkCall(e)
 	case *syntax.SelectorExpr:
-		v.checkRead(e)
+		v.checkSelector(e, selRead)
 		v.walkExpr(e.X)
 	case *syntax.Name:
-		v.checkNameRead(e)
+		v.checkName(e, selRead)
 	case *syntax.Operation:
 		if e.Y == nil && e.Op == syntax.And {
 			if sel, ok := syntax.Unparen(e.X).(*syntax.SelectorExpr); ok {
@@ -932,7 +932,7 @@ func (c *lockAudit) callLockKey(fn *types2.Func, call *syntax.CallExpr, path gua
 	root := path.steps[0]
 	rest := strings.Join(path.steps[1:], ".")
 	if recvOperand, ok := c.receiverOperand(call); ok {
-		if sig, ok := fn.Type().(*types2.Signature); ok && sig.Recv() != nil && recvOperandName(sig, root) {
+		if sig, ok := fn.Type().(*types2.Signature); ok && sig.Recv() != nil && sig.Recv().Name() == root {
 			k, kok := c.keyOf(recvOperand)
 			return joinContractKey(k, kok, rest)
 		}
@@ -942,7 +942,7 @@ func (c *lockAudit) callLockKey(fn *types2.Func, call *syntax.CallExpr, path gua
 		return heldLock{}, false
 	}
 	params := sig.Params()
-	args := callOperands(call, sig)
+	args := call.ArgList
 	for i := 0; i < params.Len() && i < len(args); i++ {
 		if params.At(i).Name() != root {
 			continue
@@ -977,19 +977,6 @@ func (c *lockAudit) receiverOperand(call *syntax.CallExpr) (syntax.Expr, bool) {
 	return sel.X, true
 }
 
-func recvOperandName(sig *types2.Signature, root string) bool {
-	return sig.Recv() != nil && sig.Recv().Name() == root
-}
-
-// callOperands returns the source operands of call, including a spread
-// argument's slice.
-func callOperands(call *syntax.CallExpr, sig *types2.Signature) []syntax.Expr {
-	if sig.Variadic() && len(call.ArgList) > 0 {
-		return call.ArgList
-	}
-	return call.ArgList
-}
-
 type selAccess uint8
 
 const (
@@ -998,8 +985,6 @@ const (
 	selAddress
 )
 
-func (v *lockFlow) checkRead(sel *syntax.SelectorExpr)    { v.checkSelector(sel, selRead) }
-func (v *lockFlow) checkWrite(sel *syntax.SelectorExpr)   { v.checkSelector(sel, selWrite) }
 func (v *lockFlow) checkAddress(sel *syntax.SelectorExpr) { v.checkSelector(sel, selAddress) }
 
 func (v *lockFlow) checkSelector(sel *syntax.SelectorExpr, access selAccess) {
@@ -1035,9 +1020,6 @@ func (v *lockFlow) checkSelector(sel *syntax.SelectorExpr, access selAccess) {
 		}
 	}
 }
-
-func (v *lockFlow) checkNameRead(name *syntax.Name)  { v.checkName(name, selRead) }
-func (v *lockFlow) checkNameWrite(name *syntax.Name) { v.checkName(name, selWrite) }
 
 func (v *lockFlow) checkName(name *syntax.Name, access selAccess) {
 	obj := v.c.in.useObject(name)
@@ -1357,7 +1339,7 @@ func (c *lockAudit) pathSteps(e syntax.Expr) ([]string, syntax.Expr, bool) {
 			steps = append(steps, x.Sel.Value)
 			e = x.X
 		case *syntax.IndexExpr:
-			step, ok := c.indexStep(x)
+			step, ok := lockIndexStep(c.in.Info, &c.indexIDs, x)
 			if !ok {
 				return nil, nil, false
 			}
@@ -1369,8 +1351,20 @@ func (c *lockAudit) pathSteps(e syntax.Expr) ([]string, syntax.Expr, bool) {
 	}
 }
 
-func (c *lockAudit) indexStep(x *syntax.IndexExpr) (string, bool) {
-	if c.in.Info == nil || c.in.Info.Uses == nil {
+func lockIndexID(ids *map[types2.Object]string, obj types2.Object) string {
+	if *ids == nil {
+		*ids = make(map[types2.Object]string)
+	}
+	if id, ok := (*ids)[obj]; ok {
+		return id
+	}
+	id := strings.Repeat("#", len(*ids)+1)
+	(*ids)[obj] = id
+	return id
+}
+
+func lockIndexStep(info *types2.Info, ids *map[types2.Object]string, x *syntax.IndexExpr) (string, bool) {
+	if info == nil || info.Uses == nil {
 		return "", false
 	}
 	switch i := syntax.Unparen(x.Index).(type) {
@@ -1380,25 +1374,13 @@ func (c *lockAudit) indexStep(x *syntax.IndexExpr) (string, bool) {
 		}
 		return i.Value, true
 	case *syntax.Name:
-		obj, ok := c.in.Info.Uses[i].(*types2.Var)
+		obj, ok := info.Uses[i].(*types2.Var)
 		if !ok || obj == nil {
 			return "", false
 		}
-		return c.indexID(obj), true
+		return lockIndexID(ids, obj), true
 	}
 	return "", false
-}
-
-func (c *lockAudit) indexID(obj types2.Object) string {
-	if c.indexIDs == nil {
-		c.indexIDs = make(map[types2.Object]string)
-	}
-	if id, ok := c.indexIDs[obj]; ok {
-		return id
-	}
-	id := strings.Repeat("#", len(c.indexIDs)+1)
-	c.indexIDs[obj] = id
-	return id
 }
 
 // applyContractEffects applies a same-package contract to st at a body or
