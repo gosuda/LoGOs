@@ -1,0 +1,67 @@
+# Plain go reads no logos.toml: every documented key is hostile here,
+# yet the plain build succeeds with default behavior.
+
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+[cgo] ! logos build -o $WORK/logos$GOEXE ./sub
+[cgo] stderr 'restriction::cgo_usage'
+[cgo] go build -o $WORK/plain$GOEXE ./sub
+[cgo] exec $WORK/plain$GOEXE
+[cgo] stdout '^42$'
+
+-- go.mod --
+module example.com/plain
+
+go 1.27
+
+-- logos.toml --
+[project]
+strict_files = [".lgo"]
+[build]
+cgo = "forbid"
+cgo_allowlist = []
+opt_level = "O0"
+target_cpu = "native"
+arena = false
+[capabilities]
+transitive_reflect = "deny"
+transitive_exec = "deny"
+transitive_net = "deny"
+transitive_unsafe = "deny"
+reflect_allowlist = []
+transitive_exec_allowlist = []
+transitive_net_allowlist = []
+transitive_unsafe_allowlist = []
+[lints]
+correctness = "forbid"
+concurrency = "forbid"
+slop = "deny"
+complexity = "deny"
+perf = "deny"
+style = "deny"
+suspicious = "deny"
+portability = "deny"
+pedantic = "deny"
+[lints.thresholds]
+max_nesting_depth = 30
+max_cognitive_complexity = 150
+max_function_lines = 600
+max_function_params = 40
+max_comptime_ast_nodes = 40960
+max_ctfe_steps = 1000000
+
+-- marker.lgo --
+package marker
+
+-- sub/main.go --
+package main
+
+/*
+static int answer() { return 42; }
+*/
+import "C"
+
+import "fmt"
+
+func main() { fmt.Println(int(C.answer())) }
