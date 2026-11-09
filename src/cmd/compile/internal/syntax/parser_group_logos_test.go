@@ -56,6 +56,16 @@ func TestGroupParsesCtxAndBody(t *testing.T) {
 	if len(c.Body.List) != 1 {
 		t.Fatalf("child body holds %d statements; want 1", len(c.Body.List))
 	}
+	var walked bool
+	Inspect(list[0], func(n Node) bool {
+		if _, ok := n.(*GroupChild); ok {
+			walked = true
+		}
+		return true
+	})
+	if !walked {
+		t.Fatal("Inspect found no *GroupChild under the group statement")
+	}
 }
 
 func TestGroupParsesLimit(t *testing.T) {
@@ -85,20 +95,6 @@ func TestGroupCallWithoutBlockStaysCall(t *testing.T) {
 	}
 	if name, ok := call.Fun.(*Name); !ok || name.Value != "group" {
 		t.Fatalf("go call fun is %v; want group", call.Fun)
-	}
-}
-
-func TestGroupChildParses(t *testing.T) {
-	f := parseGroup(t, "package p\nfunc f(ctx int) { go group (ctx) { go { g() } } }\n")
-	var found *GroupChild
-	Inspect(f, func(n Node) bool {
-		if c, ok := n.(*GroupChild); ok {
-			found = c
-		}
-		return true
-	})
-	if found == nil {
-		t.Fatal("no *GroupChild in tree")
 	}
 }
 
