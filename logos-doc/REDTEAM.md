@@ -175,10 +175,10 @@ Rules: logos-doc/SPEC.md. Status values: planned, tested, satisfied upstream, bl
 | #187 | Wasm loader missing for a Go main package | M16 | src/cmd/go/testdata/script/logos_wasm_loader.txt | tested |
 | #188 | nocallback C function calling into Go on the fast path | M20 | src/cmd/cgo/internal/testlogos/fastcall_test.go | tested |
 | #189 | CPU profile losing fast-called C time | M20 | src/cmd/cgo/internal/testlogos/fastcall_test.go | tested |
-| #191 | region handle smuggled through a closure | M18 | (planned; region handle smuggled through a closure) | planned |
-| #192 | group child writes a parent-region object | M18 | (planned; group child writes a parent-region object) | planned |
-| #193 | region pointer stored into an older region object across a call | M18 | (planned; region pointer stored into an older region object across a call) | planned |
-| #194 | ejected region program changes output | M18 | (planned; ejected region program changes output) | planned |
+| #191 | region handle smuggled through a closure | M18 | test/logos/lint/region_closure_smuggle.lgo; test/logos/run/region_closure_fallback.lgo | tested |
+| #192 | group child writes a parent-region object | M18 | test/logos/escape_logos_region_group.lgo; test/logos/run/region_group.lgo; src/cmd/go/testdata/script/logos_region_group.txt | tested |
+| #193 | region pointer stored into an older region object across a call | M18 | test/logos/lint/region_nested_call.lgo; test/logos/run/region_nested_call.lgo | tested |
+| #194 | ejected region program changes output | M18 | src/cmd/go/testdata/script/logos_region_eject_parity.txt | tested |
 | #195 | unguarded field read after deferred unlock moved | M9 | src/cmd/compile/internal/logos/lint/rule_adv_nogo_test.go (TestAdvGuardedAccess/unlockDeferredInEarlyClosureReports; fixture unlockDeferredInEarlyClosure in test/logos/lint/unguarded_access.lgo and unguarded_access_go.go; executed 2026-11-09: `go test -count=1 -run 'TestAdvGuardedAccess/unlockDeferredInEarlyClosureReports' cmd/compile/internal/logos/lint` passes) | tested |
 | #196 | facts object name with junk tag accepted | M3 | src/cmd/compile/internal/logos/facts/facts_test.go (TestValidObjectTag, TestTaggedObjectRoundTrip) | tested |
 | #197 | stale LSP snapshot served after a newer edit | M21 | src/cmd/go/internal/logos/lsp/lsp_test.go (TestProxyStaleLoweringAnswersNull, TestProxyOneRunForTwoEditsBeforeHover, TestProxyConcurrentHoversShareOneRun) | tested |
