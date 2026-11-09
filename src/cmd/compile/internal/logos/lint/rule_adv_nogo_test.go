@@ -93,6 +93,16 @@ func TestAdvWithlockLeak(t *testing.T) {
 		want []string
 	}{
 		{
+			"namedCallbackStoresParam",
+			"func leakNamed(b *Box) { leaked = b }\nfunc p1(l *Locked[Box]) { l.WithLock(leakNamed) }\n",
+			[]string{"26 correctness::withlock_leak deny"},
+		},
+		{
+			"methodValueStoresParam",
+			"func (r *Box) store(x *Box) { leaked = x }\nfunc p8(l *Locked[Box], v *Box) { l.WithLock(v.store) }\n",
+			[]string{"26 correctness::withlock_leak deny"},
+		},
+		{
 			"shadowedParamNameStaysClean",
 			"func p3(l *Locked[Box]) { l.WithLock(func(b *Box) { func() { b := &Box{}; leaked = b }() }) }\n",
 			nil,

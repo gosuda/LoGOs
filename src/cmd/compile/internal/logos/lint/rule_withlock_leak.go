@@ -41,6 +41,7 @@ type leakCheck struct {
 }
 
 func checkWithlockLeak(pass *Pass) {
+	seen := make(map[*syntax.FuncDecl]bool)
 	for _, f := range pass.Files {
 		syntax.Inspect(f, func(n syntax.Node) bool {
 			call, ok := n.(*syntax.CallExpr)
@@ -52,20 +53,12 @@ func checkWithlockLeak(pass *Pass) {
 				return true
 			}
 			arg := syntax.Unparen(call.ArgList[0])
-			var body syntax.Node
-			switch a := arg.(type) {
-			case *syntax.FuncLit:
-				body = a.Body
-			case *syntax.LambdaExpr:
-				body = a.Body
-			default:
-				return true
-			}
-			if body == nil {
-				return true
-			}
 			name, objs := leakParam(pass, arg)
 			if name == "" || len(objs) == 0 {
+				return true
+			}
+			body := leakCallbackBody(pass, arg, seen)
+			if body == nil {
 				return true
 			}
 			c := &leakCheck{pass: pass, paramName: name, paramObjs: objs, locals: make(map[types2.Object]bool), aliases: make(map[types2.Object]bool)}
@@ -83,6 +76,53 @@ func checkWithlockLeak(pass *Pass) {
 	}
 }
 
+func leakCallbackBody(pass *Pass, arg syntax.Expr, seen map[*syntax.FuncDecl]bool) syntax.Node {
+	switch a := arg.(type) {
+	case *syntax.FuncLit:
+		return a.Body
+	case *syntax.LambdaExpr:
+		return a.Body
+	case *syntax.Name, *syntax.SelectorExpr:
+		decl, _ := namedCallback(pass, arg)
+		if decl == nil || decl.Body == nil || seen[decl] {
+			return nil
+		}
+		seen[decl] = true
+		return decl.Body
+	}
+	return nil
+}
+
+func namedCallback(pass *Pass, arg syntax.Expr) (*syntax.FuncDecl, *syntax.Field) {
+	var fn *types2.Func
+	switch a := arg.(type) {
+	case *syntax.Name:
+		fn, _ = pass.Info.Uses[a].(*types2.Func)
+	case *syntax.SelectorExpr:
+		fn, _ = pass.Info.Uses[a.Sel].(*types2.Func)
+	}
+	if fn == nil || fn.Pkg() == nil || fn.Pkg() != pass.Pkg {
+		return nil, nil
+	}
+	for _, f := range pass.Files {
+		for _, d := range f.DeclList {
+			decl, ok := d.(*syntax.FuncDecl)
+			if !ok || decl.Body == nil {
+				continue
+			}
+			if obj, ok := pass.Info.Defs[decl.Name].(*types2.Func); !ok || obj != origin(fn) {
+				continue
+			}
+			params := decl.Type.ParamList
+			if len(params) == 0 || params[0].Name == nil {
+				return nil, nil
+			}
+			return decl, params[0]
+		}
+	}
+	return nil, nil
+}
+
 func leakParam(pass *Pass, arg syntax.Expr) (string, []types2.Object) {
 	var name string
 	var decls []*syntax.Name
@@ -97,6 +137,10 @@ func leakParam(pass *Pass, arg syntax.Expr) (string, []types2.Object) {
 		}
 	case *syntax.LambdaExpr:
 		decls = append(decls, a.Params...)
+	case *syntax.Name, *syntax.SelectorExpr:
+		if _, param := namedCallback(pass, arg); param != nil && param.Name != nil {
+			decls = append(decls, param.Name)
+		}
 	}
 	if len(decls) == 0 {
 		return "", nil
