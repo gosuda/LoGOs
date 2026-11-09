@@ -71,6 +71,81 @@ func logosRegionTypeOf(t *types.Type) bool {
 	return t.Sym().Pkg.Path == "logos/arena" && t.Sym().Name == "Region"
 }
 
+func logosRegionTransparentValue(call *ir.CallExpr) (ir.Node, bool) {
+	if call == nil || call.Fun == nil {
+		return nil, false
+	}
+	callee := ir.StaticCalleeName(call.Fun)
+	if callee == nil {
+		return nil, false
+	}
+	sym := callee.Sym()
+	if sym == nil || sym.Pkg == nil || sym.Pkg.Path != "logos/rt" {
+		return nil, false
+	}
+	name := sym.Name
+	if i := strings.IndexByte(name, '['); i >= 0 {
+		name = name[:i]
+	}
+	if name != "MustNonNil" {
+		return nil, false
+	}
+	idx := ir.LogosRegionArgBase(call)
+	if idx < 0 || idx >= len(call.Args) {
+		return nil, false
+	}
+	return call.Args[idx], true
+}
+
+func logosRegionProvName(n ir.Node) (*ir.Name, bool) {
+	for {
+		if name, ok := n.(*ir.Name); ok {
+			return name, true
+		}
+		if p, ok := n.(*ir.ParenExpr); ok {
+			n = p.X
+			continue
+		}
+		call, ok := n.(*ir.CallExpr)
+		if !ok {
+			return nil, false
+		}
+		value, ok := logosRegionTransparentValue(call)
+		if !ok {
+			return nil, false
+		}
+		n = value
+	}
+}
+
+func logosRegionSinkName(n ir.Node) (*ir.Name, bool) {
+	for {
+		if name, ok := n.(*ir.Name); ok {
+			return name, true
+		}
+		if addr, ok := n.(*ir.AddrExpr); ok {
+			name, isName := addr.X.(*ir.Name)
+			if !isName {
+				return nil, false
+			}
+			return name, true
+		}
+		if p, ok := n.(*ir.ParenExpr); ok {
+			n = p.X
+			continue
+		}
+		call, ok := n.(*ir.CallExpr)
+		if !ok {
+			return nil, false
+		}
+		value, ok := logosRegionTransparentValue(call)
+		if !ok {
+			return nil, false
+		}
+		n = value
+	}
+}
+
 func (b *batch) logosRegionInit() {
 	if b.logosRegion.regions != nil {
 		return
@@ -326,6 +401,9 @@ func (b *batch) logosRegionRhs(rhs ir.Node, prov map[*ir.Name]*logosRegion, pend
 	case *ir.Name:
 		return b.logosRegionProvOf(n, prov, pending)
 	case *ir.CallExpr:
+		if value, ok := logosRegionTransparentValue(n); ok {
+			return b.logosRegionProvOf(value, prov, pending)
+		}
 		switch ir.LogosRegionCallOp(n) {
 		case ir.LogosRegionOpen:
 			r := b.logosRegion.regions[n]
@@ -341,10 +419,10 @@ func (b *batch) logosRegionRhs(rhs ir.Node, prov map[*ir.Name]*logosRegion, pend
 			if st != logosRhsOK {
 				return nil, st
 			}
-			switch s := n.Args[base+1].(type) {
-			case *ir.NilExpr:
+			if _, ok := n.Args[base+1].(*ir.NilExpr); ok {
 				return r, logosRhsOK
-			case *ir.Name:
+			}
+			if s, ok := logosRegionProvName(n.Args[base+1]); ok {
 				if prov[s.Canonical()] == r {
 					return r, logosRhsOK
 				}
@@ -359,20 +437,22 @@ func (b *batch) logosRegionRhs(rhs ir.Node, prov map[*ir.Name]*logosRegion, pend
 }
 
 func (b *batch) logosRegionProvOf(n ir.Node, prov map[*ir.Name]*logosRegion, pending map[*ir.Name]bool) (*logosRegion, logosRhsState) {
-	name, ok := n.(*ir.Name)
-	if !ok {
-		if call, ok := n.(*ir.CallExpr); ok && ir.LogosRegionCallOp(call) == ir.LogosRegionOpen {
-			if r := b.logosRegion.regions[call]; r != nil {
-				return r, logosRhsOK
-			}
+	for n.Op() == ir.OPAREN {
+		n = n.(*ir.ParenExpr).X
+	}
+	if name, ok := logosRegionProvName(n); ok {
+		if r, ok := prov[name.Canonical()]; ok {
+			return r, logosRhsOK
+		}
+		if pending[name.Canonical()] {
+			return nil, logosRhsPending
 		}
 		return nil, logosRhsBad
 	}
-	if r, ok := prov[name.Canonical()]; ok {
-		return r, logosRhsOK
-	}
-	if pending[name.Canonical()] {
-		return nil, logosRhsPending
+	if call, ok := n.(*ir.CallExpr); ok && ir.LogosRegionCallOp(call) == ir.LogosRegionOpen {
+		if r := b.logosRegion.regions[call]; r != nil {
+			return r, logosRhsOK
+		}
 	}
 	return nil, logosRhsBad
 }
@@ -417,7 +497,8 @@ func (e *escape) logosRegionCall(ks []hole, call *ir.CallExpr) {
 		}
 		if op == ir.LogosRegionAppend {
 			if _, ok := call.Args[argBase+1].(*ir.NilExpr); !ok {
-				if name, isName := call.Args[argBase+1].(*ir.Name); !isName || prov.prov[name.Canonical()] != r {
+				name, ok := logosRegionProvName(call.Args[argBase+1])
+				if !ok || prov.prov[name.Canonical()] != r {
 					return
 				}
 			}
@@ -432,6 +513,8 @@ func (e *escape) logosRegionCall(ks []hole, call *ir.CallExpr) {
 		}
 	}
 }
+
+// refused_by: modify_delete_guard · collision: none (no common ancestor text)
 
 func (b *batch) logosRegionSeed(enqueue func(*location)) {
 	if !ir.LogosRegionsEnabled() {
@@ -456,8 +539,11 @@ func (b *batch) logosRegionOutlives(l, other *location) (bool, bool) {
 }
 
 func (b *batch) logosRegionRootOutlives(root *location, site *logosCand) bool {
-	if root == &b.heapLoc || root == &b.foreignLoc {
+	if root == &b.heapLoc {
 		return true
+	}
+	if root == &b.foreignLoc {
+		return false
 	}
 	if root.hasAttr(attrEscapes) {
 		return true
@@ -608,7 +694,7 @@ func (e *escape) logosRegionRecordArg(arg ir.Node, fnName *ir.Name) {
 	if !ir.LogosRegionsEnabled() || fnName == nil {
 		return
 	}
-	name, ok := arg.(*ir.Name)
+	name, ok := logosRegionSinkName(arg)
 	if !ok || name.Canonical().Opt == nil {
 		return
 	}
@@ -662,14 +748,8 @@ func (e *escape) logosRegionArgHole(base ir.Node) (hole, bool) {
 	if !ir.LogosRegionsEnabled() {
 		return hole{}, false
 	}
-	var name *ir.Name
-	switch a := base.(type) {
-	case *ir.Name:
-		name = a
-	case *ir.AddrExpr:
-		name, _ = a.X.(*ir.Name)
-	}
-	if name == nil {
+	name, ok := logosRegionSinkName(base)
+	if !ok {
 		return hole{}, false
 	}
 	reg := e.logosRegionProv(e.curfn).prov[name.Canonical()]
