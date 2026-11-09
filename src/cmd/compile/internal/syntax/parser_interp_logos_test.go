@@ -9,17 +9,9 @@ import (
 	"testing"
 )
 
-// M6-S1 parser attacks for InterpExpr{Parts []string; Exprs []Expr}
-// (SPEC Sec 1.4, T-104.4; logos-doc/IMPLEMENTATION.md).
-//
-// Offensive-first TDD: each attack below fails before the M6-S1
-// implementation (missing diagnostics, missing nodes) and passes after.
-
 func parseInterpLogos(t *testing.T, src string) (*File, []string) {
 	t.Helper()
 	var msgs []string
-	// Unlike parseLogos, this helper tolerates a first error return:
-	// error-attack inputs report through msgs, which the caller asserts.
 	f, _ := Parse(nil, strings.NewReader(src), func(err error) {
 		msgs = append(msgs, err.Error())
 	}, nil, CheckBranches|LogosMode)
@@ -60,8 +52,6 @@ func TestLogosInterpParts(t *testing.T) {
 	if len(e.Opens) != 2 || len(e.Closes) != 2 {
 		t.Fatalf("got %d opens %d closes; want 2 and 2", len(e.Opens), len(e.Closes))
 	}
-	// `$"User {name} has {n} items"` starts at 3:9: `{name}` opens at
-	// 3:16 and closes at 3:21; `{n}` opens at 3:27 and closes at 3:29.
 	checkPos(t, "Opens[0]", e.Opens[0], 3, 16)
 	checkPos(t, "Closes[0]", e.Closes[0], 3, 21)
 	checkPos(t, "Opens[1]", e.Opens[1], 3, 27)
@@ -97,14 +87,10 @@ func TestLogosInterpNestedQuotes(t *testing.T) {
 }
 
 func TestLogosInterpUnterminated(t *testing.T) {
-	// The `{` never closes: the scanner completes the token silently at
-	// EOF and the parser reports exactly one error at the brace.
 	_, msgs := parseInterpLogos(t, "package p\nvar _ = $\"a {x")
 	if len(msgs) != 1 {
 		t.Fatalf("got %d errors %q; want 1", len(msgs), msgs)
 	}
-	// With a nil file base the position prints as <unknown position>;
-	// the bracketed absolute position and the message carry the check.
 	want := "[:2:13]: syntax error: unterminated interpolation"
 	if !strings.HasSuffix(msgs[0], want) {
 		t.Fatalf("got %q; want suffix %q", msgs[0], want)

@@ -9,12 +9,6 @@ import (
 	"testing"
 )
 
-// M8-S2 parser attacks for GroupStmt{Ctx, Limit, Body} and
-// GroupChild{Body} (logos-doc/IMPLEMENTATION.md): `go group (ctx)`
-// and `go group (ctx, limit = N)` parse as groups, `go { }` as a child,
-// and `go group(x)` without a block stays an ordinary go call, all in
-// LogosMode only; plain mode keeps the go-call meaning everywhere.
-
 func parseGroup(t *testing.T, src string) *File {
 	t.Helper()
 	var msgs []string

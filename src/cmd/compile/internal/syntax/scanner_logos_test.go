@@ -9,14 +9,8 @@ import (
 	"testing"
 )
 
-// logosScannerMode is the scanner.init mode bit that selects loGo/s
-// lexing (M1-S1). The plan states the scanner receives the mode through
-// scanner.init's mode uint field and gates '?' on s.mode&LogosMode, so
-// these attacks drive the scanner directly with uint(LogosMode).
 const logosScannerMode = uint(LogosMode)
 
-// TestLogosQuestionAfterName checks that in LogosMode `x?` scans as
-// _Name followed by _Question (M1-S1 Attack, contract C1-C2).
 func TestLogosQuestionAfterName(t *testing.T) {
 	var errs []string
 	var s scanner
@@ -32,7 +26,6 @@ func TestLogosQuestionAfterName(t *testing.T) {
 	if s.tok != _Question {
 		t.Fatalf("got %s; want _Question", s.tok)
 	}
-	// `?` sets nlsemi, so trailing EOF translates to ';' first.
 	s.next()
 	if s.tok != _Semi || s.lit != "EOF" {
 		t.Fatalf("got %s %q; want _Semi %q", s.tok, s.lit, "EOF")
@@ -46,8 +39,6 @@ func TestLogosQuestionAfterName(t *testing.T) {
 	}
 }
 
-// TestLogosQuestionNlsemi checks that in LogosMode `?` sets nlsemi like
-// an operand end: `f()?\n` inserts `;` after `?` (M1-S1 Attack).
 func TestLogosQuestionNlsemi(t *testing.T) {
 	for _, test := range []struct {
 		src    string
@@ -77,15 +68,11 @@ func TestLogosQuestionNlsemi(t *testing.T) {
 	}
 }
 
-// TestPlainQuestionRejected pins plain-mode behavior: `?` still reports
-// exactly `invalid character U+003F '?'` at the position of `?`
-// (M1-S1 Attack; scanner.go default case). Regression pin: must keep
-// passing after the M1-S1 build.
 func TestPlainQuestionRejected(t *testing.T) {
 	const want = "invalid character U+003F '?'"
 	for _, test := range []struct {
 		src       string
-		line, col uint // 0-based, relative to linebase/colbase
+		line, col uint
 	}{
 		{"?", 0, 0},
 		{"x?", 0, 1},
@@ -120,17 +107,12 @@ func TestPlainQuestionRejected(t *testing.T) {
 	}
 }
 
-// TestQuestionString checks that _Question String() is "?" (M1-S1 Build:
-// token_string.go regeneration appends `?` for the `// ?` linecomment).
 func TestQuestionString(t *testing.T) {
 	if got := _Question.String(); got != "?" {
 		t.Errorf("got _Question.String() = %q; want %q", got, "?")
 	}
 }
 
-// TestKeywordRangeUnchanged spot-checks that the keyword range
-// _Break.._Var is unchanged: `break` and `var` still scan as keywords
-// in plain and Logos modes (M1-S1 Build: _Question appends after _Var).
 func TestKeywordRangeUnchanged(t *testing.T) {
 	for _, mode := range []uint{0, logosScannerMode} {
 		for _, test := range []struct {
@@ -161,17 +143,12 @@ func TestKeywordRangeUnchanged(t *testing.T) {
 	}
 }
 
-// TestTokenCountUnder64 checks the total token count stays under 64 so
-// tokens still fit in the uint64 set (M1-S1 Build: tokens.go assert).
 func TestTokenCountUnder64(t *testing.T) {
 	if tokenCount > 64 {
 		t.Errorf("got tokenCount = %d; want <= 64", tokenCount)
 	}
 }
 
-// TestLogosCoalesceScan checks that in LogosMode `??` with no gap scans
-// as one _Coalesce token, while a gap keeps two _Question tokens
-// (M3-S2 Attack, SPEC Sec 4.1, T-104.3).
 func TestLogosCoalesceScan(t *testing.T) {
 	for _, test := range []struct {
 		src    string
@@ -194,8 +171,6 @@ func TestLogosCoalesceScan(t *testing.T) {
 			if s.tok != want {
 				t.Errorf("%q token %d: got %s; want %s", test.src, i, s.tok, want)
 			}
-			// A `;` mid-stream comes from an operand-final token before a
-			// real newline; only the trailing `;` at EOF is literal "EOF".
 			if want == _Semi && i == len(test.tokens)-2 && s.lit != "EOF" {
 				t.Errorf("%q token %d: got semi %q; want %q", test.src, i, s.lit, "EOF")
 			}
@@ -206,9 +181,6 @@ func TestLogosCoalesceScan(t *testing.T) {
 	}
 }
 
-// TestLogosQuestionDotScan checks that in LogosMode `?.` with no gap
-// scans as one _QuestionDot token, a gap keeps _Question plus _Dot, and
-// `?.5` stays _Question plus a number (M3-S2 Attack, SPEC Sec 4.1).
 func TestLogosQuestionDotScan(t *testing.T) {
 	for _, test := range []struct {
 		src    string
@@ -232,8 +204,6 @@ func TestLogosQuestionDotScan(t *testing.T) {
 			if s.tok != want {
 				t.Errorf("%q token %d: got %s; want %s", test.src, i, s.tok, want)
 			}
-			// Only the trailing `;` at EOF is literal "EOF"; a `;` mid-
-			// stream after a newline-final operand stays literal "newline".
 			if want == _Semi && i == len(test.tokens)-2 && s.lit != "EOF" {
 				t.Errorf("%q token %d: got semi %q; want %q", test.src, i, s.lit, "EOF")
 			}
@@ -244,9 +214,6 @@ func TestLogosQuestionDotScan(t *testing.T) {
 	}
 }
 
-// TestLogosOptionNlsemi checks that neither `?.` nor `??` ends an
-// operand: `a?.\n b` and `a ??\n b` scan with no `;`, while `x?\n y`
-// keeps the M1-S1 `;` after `?` (M3-S2 Attack, nlsemi contract).
 func TestLogosOptionNlsemi(t *testing.T) {
 	for _, test := range []struct {
 		src    string
@@ -267,9 +234,6 @@ func TestLogosOptionNlsemi(t *testing.T) {
 			if s.tok != want {
 				t.Errorf("%q token %d: got %s; want %s", test.src, i, s.tok, want)
 			}
-			// A mid-input `;` comes from a newline; the trailing
-			// one (second to last, before EOF) comes from EOF.
-			// Either way no `;` follows `?.` or `??` itself.
 			if want == _Semi {
 				wantLit := "newline"
 				if i == len(test.tokens)-2 {
@@ -286,9 +250,6 @@ func TestLogosOptionNlsemi(t *testing.T) {
 	}
 }
 
-// TestOptionTokenStrings checks that _QuestionDot String() is "?." and
-// _Coalesce String() is "??" (M3-S2 Build: token_string.go regeneration
-// appends `?.` and `??` for the `// ?.` and `// ??` linecomments).
 func TestOptionTokenStrings(t *testing.T) {
 	if got := _QuestionDot.String(); got != "?." {
 		t.Errorf("got _QuestionDot.String() = %q; want %q", got, "?.")
@@ -298,14 +259,11 @@ func TestOptionTokenStrings(t *testing.T) {
 	}
 }
 
-// TestPlainOptionTailsRejected pins plain-mode behavior: `?.` and `??`
-// still report exactly `invalid character U+003F '?'` at the position of
-// the first `?`, like a lone `?` (M3-S2 Build; scanner.go default case).
 func TestPlainOptionTailsRejected(t *testing.T) {
 	const want = "invalid character U+003F '?'"
 	for _, test := range []struct {
 		src       string
-		line, col uint // 0-based, relative to linebase/colbase
+		line, col uint
 	}{
 		{"a?.b", 0, 1},
 		{"a??b", 0, 1},

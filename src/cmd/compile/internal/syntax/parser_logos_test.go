@@ -13,13 +13,6 @@ import (
 
 var dumpPos = regexp.MustCompile(`(?m) @ .*$`)
 
-// M1-S2 parser attacks for TryExpr{X Expr} and ErrdeferStmt{Call Expr}
-// (logos-doc/IMPLEMENTATION.md).
-//
-// Offensive-first TDD: each attack below fails against e53ef53619 for its
-// documented defect (missing, extra, or mismatched diagnostics; redundant
-// printer output) and passes after the fix.
-
 func parseLogos(t *testing.T, src string) *File {
 	t.Helper()
 	var msgs []string
@@ -38,8 +31,6 @@ func parseLogos(t *testing.T, src string) *File {
 func printFull(t *testing.T, n Node) string {
 	t.Helper()
 	var buf strings.Builder
-	// Form 0 is the default full form: unlike String (ShortForm), it
-	// keeps function bodies instead of printing them as `{…}`.
 	if _, err := Fprint(&buf, n, 0); err != nil {
 		t.Fatalf("print: %v", err)
 	}
@@ -68,7 +59,6 @@ func funcBodyStmts(t *testing.T, f *File, name string) []Stmt {
 }
 
 func TestLogosTryExprPositions(t *testing.T) {
-	// Columns of "func f() { g()? }": g at 2:12, ? at 2:15.
 	f := parseLogos(t, "package p\nfunc f() { g()? }\n")
 	var tries []*TryExpr
 	Inspect(f, func(n Node) bool {
@@ -81,9 +71,6 @@ func TestLogosTryExprPositions(t *testing.T) {
 		t.Fatalf("want 1 *TryExpr, found %d", len(tries))
 	}
 	try := tries[0]
-	// Postfix house style (SelectorExpr `a@.b`, CallExpr `f@()` in
-	// nodes_test.go): each node takes its operator position, so the
-	// TryExpr sits at `?` (2:15) and its CallExpr operand at `(` (2:13).
 	checkPos(t, "TryExpr.Pos", try.Pos(), 2, 15)
 	x, ok := try.X.(*CallExpr)
 	if !ok {
@@ -92,13 +79,10 @@ func TestLogosTryExprPositions(t *testing.T) {
 	checkPos(t, "TryExpr.X.Pos", x.Pos(), 2, 13)
 	checkPos(t, "StartPos(TryExpr)", StartPos(try), 2, 12)
 	checkPos(t, "EndPos(TryExpr.X)", EndPos(try.X), 2, 13)
-	// One past the last token: `?` is at 2:15, mirroring the Name
-	// `p.Col()+uint(len(n.Value))` precedent in EndPos.
 	checkPos(t, "EndPos(TryExpr)", EndPos(try), 2, 16)
 }
 
 func TestLogosErrdeferStmtPositions(t *testing.T) {
-	// Columns of "func f() { errdefer g() }": errdefer at 2:12, g at 2:21.
 	f := parseLogos(t, "package p\nfunc f() { errdefer g() }\n")
 	stmts := funcBodyStmts(t, f, "f")
 	if len(stmts) != 1 {
@@ -117,7 +101,6 @@ func TestLogosErrdeferStmtPositions(t *testing.T) {
 	checkPos(t, "StartPos(ErrdeferStmt)", StartPos(es), 2, 12)
 	checkPos(t, "EndPos(ErrdeferStmt)", EndPos(es), 2, 22)
 
-	// Columns of "func f() { errdefer g()? }": ? at 2:24.
 	f2 := parseLogos(t, "package p\nfunc f() { errdefer g()? }\n")
 	stmts2 := funcBodyStmts(t, f2, "f")
 	if len(stmts2) != 1 {
@@ -157,9 +140,6 @@ func TestLogosPrinterRoundTrip(t *testing.T) {
 	if out2 := printFull(t, again); out2 != out {
 		t.Errorf("printer not idempotent:\nfirst:  %q\nsecond: %q", out, out2)
 	}
-	// M5: the round trip must preserve the tree, not only the text.
-	// The reparse has new line numbers, so mask both addresses and Name
-	// positions before comparing (snapshot isolation on structure).
 	var dump1, dump2 bytes.Buffer
 	if err := Fdump(&dump1, f); err != nil {
 		t.Fatalf("Fdump: %v", err)
@@ -175,8 +155,6 @@ func TestLogosPrinterRoundTrip(t *testing.T) {
 }
 
 func TestLogosPrinterNoSemiAfterTry(t *testing.T) {
-	// M3 (Tufte: no redundant ink): `?` implies a semicolon, so the
-	// printer must not emit an explicit `;` after `?` between statements.
 	const src = "package p\ntype T struct{}\nfunc f() (int, error) {\nx := T{}?\n_ = x\nreturn 0, nil\n}\n"
 	f := parseLogos(t, src)
 	out := printFull(t, f)
@@ -186,8 +164,6 @@ func TestLogosPrinterNoSemiAfterTry(t *testing.T) {
 }
 
 func TestLogosGoTryAccepted(t *testing.T) {
-	// P1 (SPEC §1.4): misplaced `?` is a type error (misplaced_try), so
-	// the parser accepts `go f()?` and leaves it for types2.
 	f := parseLogos(t, "package p\nfunc f() { go g()? }\n")
 	stmts := funcBodyStmts(t, f, "f")
 	if len(stmts) != 1 {
@@ -215,9 +191,6 @@ func parseErrs(t *testing.T, src string, mode Mode) []string {
 }
 
 func TestLogosErrdeferNonCallSingleError(t *testing.T) {
-	// I1 (Hoare: accept exactly the precondition): only an identifier or
-	// `func` may follow `errdefer`. struct/map/interface-led composite
-	// operands are syntax errors, each exactly one diagnostic.
 	srcs := []string{
 		"package p\nfunc f() { errdefer struct{ f func() }{g}.f() }\n",
 		"package p\nfunc f() { errdefer map[int]func(){0: g}[0]() }\n",
@@ -237,9 +210,6 @@ func TestLogosErrdeferNonCallSingleError(t *testing.T) {
 }
 
 func TestLogosErrdeferKeywordOperandSingleError(t *testing.T) {
-	// M1: a keyword cannot start an errdefer operand. The parser must
-	// report exactly one error, matching the plain-mode count (the ERROR
-	// harness cannot count, so the count is asserted here).
 	srcs := []string{
 		"package p\nfunc f(x bool) { errdefer if x {} }\n",
 		"package p\nfunc f() { errdefer go f() }\n",
@@ -544,9 +514,6 @@ func TestLogosErrdeferKeepsGoMeaning(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			f := parseLogos(t, test.src)
-			// Every keep-Go-meaning form must parse with zero errors in
-			// plain mode too, and produce the same tree (snapshot
-			// isolation: both parses observe the identical AST snapshot).
 			var plainMsgs []string
 			plainFile, err := Parse(nil, strings.NewReader(test.src), func(err error) {
 				plainMsgs = append(plainMsgs, err.Error())

@@ -4,13 +4,6 @@
 
 package syntax
 
-// logosConstBranches lets checkBranches see the labels and gotos inside
-// the blocks of a `const if` (M7-S1) or `const switch` (M7-S4) statement,
-// so a label used only there counts as used. The blocks keep the break
-// and continue targets of the enclosing statement: whether an unlabeled
-// break or continue may appear in them is a types2 rule, so the parser
-// reports nothing for it here. innerBlock is the closure of blockBranches
-// that walks one nested block.
 func logosConstBranches(stmt Stmt, ctxt targets, innerBlock func(targets, Pos, []Stmt)) {
 	inner := targets{ctxt.breaks, ctxt.continues, -1}
 	switch s := stmt.(type) {
