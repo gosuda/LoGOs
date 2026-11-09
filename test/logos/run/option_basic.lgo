@@ -12,6 +12,11 @@ func optResult(x int?) int? { return x }
 func optNil() int? { return nil }
 
 func optConst() int? { return 42 }
+var lazyCalls int
+func lazyFallback() int {
+	lazyCalls++
+	return 99
+}
 
 func main() {
 	var a int?
@@ -31,4 +36,10 @@ func main() {
 	fmt.Println(t ?? "fallback")
 	t = s ?? "fallback"
 	fmt.Println(t ?? "fallback")
+	var some2 int? = 5
+	fmt.Println(some2 ?? lazyFallback())
+	fmt.Println(lazyCalls)
+	var none2 int?
+	fmt.Println(none2 ?? lazyFallback())
+	fmt.Println(lazyCalls)
 }
