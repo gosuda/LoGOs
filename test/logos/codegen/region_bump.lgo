@@ -16,7 +16,7 @@ var regionSink int
 
 var globalPtr *int = new(int)
 
-var globalScan *int
+var globalScan *int?
 
 type regionPad511 [511]byte
 
