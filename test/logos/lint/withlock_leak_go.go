@@ -103,3 +103,29 @@ func callArg(l *sync.Locked[Box]) {
 		useBox(b)
 	})
 }
+
+func reassignAlias(l *sync.Locked[Box]) {
+	l.WithLock(func(b *Box) {
+		c := b
+		c = &Box{}
+		leaked = c
+	})
+}
+
+func useBeforeReassign(l *sync.Locked[Box]) {
+	l.WithLock(func(b *Box) {
+		c := b
+		leaked = c // ERROR "\[correctness::withlock_leak\]"
+		c = &Box{}
+	})
+}
+
+func reassignInOtherBlock(l *sync.Locked[Box]) {
+	l.WithLock(func(b *Box) {
+		c := b
+		if b.n > 0 {
+			c = &Box{}
+		}
+		leaked = c // ERROR "\[correctness::withlock_leak\]"
+	})
+}

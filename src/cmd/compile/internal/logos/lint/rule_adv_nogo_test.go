@@ -118,8 +118,18 @@ func TestAdvWithlockLeak(t *testing.T) {
 			[]string{"26 correctness::withlock_leak deny"},
 		},
 		{
-			"reassignedAliasReported",
+			"reassignedAliasStaysClean",
 			"func p12(l *Locked[Box]) { l.WithLock(func(b *Box) { c := b; c = &Box{}; leaked = c }) }\n",
+			nil,
+		},
+		{
+			"useBeforeReassignReported",
+			"func p13(l *Locked[Box]) { l.WithLock(func(b *Box) { c := b; leaked = c; c = &Box{} }) }\n",
+			[]string{"26 correctness::withlock_leak deny"},
+		},
+		{
+			"reassignInOtherBlockReported",
+			"func p14(l *Locked[Box]) { l.WithLock(func(b *Box) { c := b; if b.n > 0 { c = &Box{} }; leaked = c }) }\n",
 			[]string{"26 correctness::withlock_leak deny"},
 		},
 		{

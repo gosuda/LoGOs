@@ -119,3 +119,29 @@ func lambdaStore(l *sync.Locked[Box]) {
 		leaked = b // ERROR "\[correctness::withlock_leak\]"
 	})
 }
+
+func reassignAlias(l *sync.Locked[Box]) {
+	l.WithLock(func(b *Box) {
+		c := b
+		c = &Box{}
+		leaked = c
+	})
+}
+
+func useBeforeReassign(l *sync.Locked[Box]) {
+	l.WithLock(func(b *Box) {
+		c := b
+		leaked = c // ERROR "\[correctness::withlock_leak\]"
+		c = &Box{}
+	})
+}
+
+func reassignInOtherBlock(l *sync.Locked[Box]) {
+	l.WithLock(func(b *Box) {
+		c := b
+		if b.n > 0 {
+			c = &Box{}
+		}
+		leaked = c // ERROR "\[correctness::withlock_leak\]"
+	})
+}

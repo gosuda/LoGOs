@@ -31,13 +31,15 @@ type leakReturn struct {
 }
 
 type leakCheck struct {
-	pass      *Pass
-	paramName string
-	paramObjs []types2.Object
-	locals    map[types2.Object]bool
-	aliases   map[types2.Object]bool
-	closures  []*leakClosure
-	returns   []leakReturn
+	pass       *Pass
+	paramName  string
+	paramObjs  []types2.Object
+	locals     map[types2.Object]bool
+	aliases    map[types2.Object]bool
+	aliasKills map[types2.Object][]*syntax.AssignStmt
+	body       syntax.Node
+	closures   []*leakClosure
+	returns    []leakReturn
 }
 
 func checkWithlockLeak(pass *Pass) {
@@ -61,9 +63,10 @@ func checkWithlockLeak(pass *Pass) {
 			if body == nil {
 				return true
 			}
-			c := &leakCheck{pass: pass, paramName: name, paramObjs: objs, locals: make(map[types2.Object]bool), aliases: make(map[types2.Object]bool)}
+			c := &leakCheck{pass: pass, paramName: name, paramObjs: objs, locals: make(map[types2.Object]bool), aliases: make(map[types2.Object]bool), body: body}
 			c.indexLocals(body)
 			c.buildAliases(body)
+			c.recordAliasKills(body)
 			c.scanUnit(body, nil)
 			c.markEscapes(body)
 			for _, r := range c.returns {
@@ -242,6 +245,75 @@ func (c *leakCheck) aliasFromAssign(x *syntax.AssignStmt) bool {
 	}
 	return grew
 }
+func (c *leakCheck) recordAliasKills(body syntax.Node) {
+	c.aliasKills = make(map[types2.Object][]*syntax.AssignStmt)
+	syntax.Inspect(body, func(n syntax.Node) bool {
+		x, ok := n.(*syntax.AssignStmt)
+		if !ok || x.Rhs == nil {
+			return true
+		}
+		lhs, rhs := exprList(x.Lhs), exprList(x.Rhs)
+		for i, el := range lhs {
+			if i >= len(rhs) {
+				break
+			}
+			name, ok := syntax.Unparen(el).(*syntax.Name)
+			if !ok || isBlank(name) {
+				continue
+			}
+			obj := cmp.Or(c.pass.Info.Defs[name], c.pass.Info.Uses[name])
+			if obj == nil || !c.aliases[obj] {
+				continue
+			}
+			if c.carriesPtr(rhs[i]) || c.isDerefCopy(rhs[i]) {
+				continue
+			}
+			c.aliasKills[obj] = append(c.aliasKills[obj], x)
+		}
+		return true
+	})
+}
+
+func (c *leakCheck) aliasKilled(rhs syntax.Expr, site *syntax.AssignStmt) bool {
+	killed, active := false, false
+	syntax.Inspect(rhs, func(n syntax.Node) bool {
+		name, ok := n.(*syntax.Name)
+		if !ok {
+			return true
+		}
+		obj := c.pass.Info.Uses[name]
+		if obj == nil {
+			return true
+		}
+		if c.isParamObj(obj) {
+			active = true
+			return true
+		}
+		if !c.aliases[obj] {
+			return true
+		}
+		if c.killedBefore(obj, site) {
+			killed = true
+		} else {
+			active = true
+		}
+		return true
+	})
+	return killed && !active
+}
+
+func (c *leakCheck) killedBefore(obj types2.Object, site *syntax.AssignStmt) bool {
+	for _, k := range c.aliasKills[obj] {
+		if k == site || k.Pos().Cmp(site.Pos()) >= 0 {
+			continue
+		}
+		if leakParent(c.body, k) == leakParent(c.body, site) {
+			return true
+		}
+	}
+	return false
+}
+
 func (c *leakCheck) scanUnit(body syntax.Node, cl *leakClosure) {
 	syntax.Inspect(body, func(n syntax.Node) bool {
 		switch x := n.(type) {
@@ -260,7 +332,7 @@ func (c *leakCheck) scanUnit(body syntax.Node, cl *leakClosure) {
 				c.returns = append(c.returns, leakReturn{stmt: x, closure: cl})
 			}
 		case *syntax.AssignStmt:
-			if x.Rhs != nil && c.carriesPtr(x.Rhs) && c.lhsEscapes(x.Lhs) {
+			if x.Rhs != nil && c.carriesPtr(x.Rhs) && c.lhsEscapes(x.Lhs) && !c.aliasKilled(x.Rhs, x) {
 				c.pass.Reportf(x, "WithLock argument must not be stored outside the callback")
 			}
 		case *syntax.SendStmt:
