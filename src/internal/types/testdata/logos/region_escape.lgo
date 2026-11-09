@@ -50,6 +50,22 @@ func goCapture(ctx context.Context) error {
 	return nil
 }
 
+func groupChildLit(ctx context.Context) error {
+	r := arena.Open()
+	go group (ctx) {
+		go func /* ERROR "correctness::region_escape" */ () {
+			_ = r
+		}()
+	}
+	return nil
+}
+
+func reservedGroupPrefix(ctx context.Context) error {
+	var _logos_g0 /* ERROR "correctness::reserved_identifier" */ = 1
+	_ = _logos_g0
+	return nil
+}
+
 func closureGlobal() {
 	r := arena.Open()
 	fvar /* ERROR "correctness::region_escape" */ = func() {
