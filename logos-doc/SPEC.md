@@ -1717,7 +1717,7 @@ A function keeps MayYield=0 only with no defer, no indirect call, no call to May
 Pure imports keep MayYield=0. [T-Sec12]
 Unknown wasmimport targets default to MayYield=1. [T-Sec12]
 A wrong MayYield=0 MUST trap instead of hanging. [T-Sec12]
-A function keeps resume-point dispatch if and only if it has a call that keeps a resume point. MayYield=1 alone, through a prologue stack check or a nil check, needs none. Under --wasm-features=stack-switching, continuation calls replace dispatch, kept only for deferreturn, runtime and mcall-caller frames. [T-Sec12]
+A function with a call that keeps a resume point keeps resume-point dispatch. Without such a call it keeps dispatch only for inter-block jumps. MayYield=1 alone, through a prologue stack check or a nil check, needs none. Under --wasm-features=stack-switching, continuation calls replace dispatch, kept only for deferreturn, runtime and mcall-caller frames besides the entry-loop dispatch. [T-Sec12]
 A caller of runtime.mcall MUST keep resume-point dispatch even when it is not in the runtime: the goroutine switch back re-enters that frame, which inlining (Gosched) can place in user code. [T-Sec12]
 With `--wasm-features=stack-switching` on `logos build` or `go build` they MUST use stack switching instead. [T-Sec12][R-U1]
 Pointers are 8 bytes and slice headers are 24 bytes. [T-Sec12]
