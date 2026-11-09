@@ -243,3 +243,86 @@ func checkPair(t *testing.T, fun fun, want Op, offset int64, l1, l2 *Value) {
 		t.Errorf("pair offset is %d, want %d", p.AuxInt, offset)
 	}
 }
+
+func TestLogosPairARM64SinglePredChain(t *testing.T) {
+	c := testConfigARM64(t)
+	vec := types.TypeVec128
+	u64 := types.Types[types.TUINT64]
+	fun := c.Fun("entry",
+		Bloc("entry",
+			Valu("mem", OpInitMem, types.TypeMem, 0, nil),
+			Valu("p", OpARM64MOVDconst, u64, 0, nil),
+			Valu("l1", OpARM64FMOVQload, vec, 0, nil, "p", "mem"),
+			Goto("next")),
+		Bloc("next",
+			Valu("l2", OpARM64FMOVQload, vec, 16, nil, "p", "mem"),
+			Goto("exit")),
+		Bloc("exit",
+			Exit("mem")),
+	)
+	CheckFunc(fun.f)
+	pair(fun.f)
+	CheckFunc(fun.f)
+	l1 := fun.values["l1"]
+	l2 := fun.values["l2"]
+	if l1.Op != OpSelect0 {
+		t.Fatalf("chain loads did not fuse: l1=%v l2=%v", l1.Op, l2.Op)
+	}
+	p := l1.Args[0]
+	if p.Op != OpARM64FLDPQ || p.AuxInt != 0 {
+		t.Fatalf("chain pair is %v at %d, want FLDPQ at 0", p.Op, p.AuxInt)
+	}
+	if l2.Op != OpCopy {
+		t.Fatalf("chain successor is %v, want Copy", l2.Op)
+	}
+	sel := l2.Args[0]
+	if sel.Op != OpSelect1 || len(sel.Args) != 1 || sel.Args[0] != p {
+		t.Fatalf("chain successor selects no pair value: l2=%v", l2)
+	}
+}
+
+func TestLogosPairARM64DistinctRegs(t *testing.T) {
+	c := testConfigARM64(t)
+	vec := types.TypeVec128
+	fun := c.Fun("entry",
+		Bloc("entry",
+			Valu("mem", OpInitMem, types.TypeMem, 0, nil),
+			Valu("p", OpArg, c.config.Types.Int64.PtrTo(), 0, c.Temp(c.config.Types.Int64.PtrTo())),
+			Valu("l1", OpARM64FMOVQload, vec, 0, nil, "p", "mem"),
+			Valu("l2", OpARM64FMOVQload, vec, 16, nil, "p", "mem"),
+			Valu("s1", OpARM64FMOVQstore, types.TypeMem, 32, nil, "p", "l1", "mem"),
+			Valu("s2", OpARM64FMOVQstore, types.TypeMem, 48, nil, "p", "l2", "s1"),
+			Goto("exit")),
+		Bloc("exit",
+			Exit("s2")),
+	)
+	CheckFunc(fun.f)
+	pair(fun.f)
+	CheckFunc(fun.f)
+	var ldp *Value
+	for _, b := range fun.f.Blocks {
+		for _, v := range b.Values {
+			if v.Op == OpARM64FLDPQ {
+				ldp = v
+			}
+		}
+	}
+	if ldp == nil {
+		t.Fatalf("no FLDPQ formed")
+	}
+	schedule(fun.f)
+	regalloc(fun.f)
+	checkFunc(fun.f)
+	loc, ok := fun.f.RegAlloc[ldp.ID].(LocPair)
+	if !ok {
+		t.Fatalf("pair home is %T, want LocPair", fun.f.RegAlloc[ldp.ID])
+	}
+	r0, ok0 := loc[0].(*Register)
+	r1, ok1 := loc[1].(*Register)
+	if !ok0 || !ok1 {
+		t.Fatalf("pair outputs are %v and %v, want registers", loc[0], loc[1])
+	}
+	if r0 == r1 {
+		t.Errorf("pair destinations share register %v", r0)
+	}
+}
