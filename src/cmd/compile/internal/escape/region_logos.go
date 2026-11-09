@@ -758,6 +758,56 @@ func (e *escape) logosRegionArgHole(base ir.Node) (hole, bool) {
 	}
 	return e.logosRegionContents(reg).asHole(), true
 }
+func logosGroupSplit(call *ir.CallExpr, recvArg ir.Node, args ir.Nodes) (*ir.Name, *ir.ClosureExpr, bool) {
+	var recvN ir.Node
+	var litN ir.Node
+	if recvArg != nil {
+		if len(args) != 1 {
+			return nil, nil, false
+		}
+		recvN, litN = recvArg, args[0]
+	} else {
+		if len(args) != 2 {
+			return nil, nil, false
+		}
+		recvN, litN = args[0], args[1]
+	}
+	recv, ok := recvN.(*ir.Name)
+	if !ok || recv.Sym() == nil || !strings.HasPrefix(recv.Sym().Name, "_logos_g") {
+		return nil, nil, false
+	}
+	lit, ok := litN.(*ir.ClosureExpr)
+	if !ok {
+		return nil, nil, false
+	}
+	return recv, lit, true
+}
+
+func (e *escape) logosGroupGo(call *ir.CallExpr, recvArg ir.Node, args ir.Nodes) bool {
+	if !ir.LogosRegionsEnabled() || !base.Logos || call.Op() != ir.OCALLFUNC {
+		return false
+	}
+	sel, ok := call.Fun.(*ir.SelectorExpr)
+	if !ok || sel.Sel == nil || sel.Sel.Name != "Go" {
+		return false
+	}
+	recv, _, ok := logosGroupSplit(call, recvArg, args)
+	if !ok {
+		return false
+	}
+	if recv.Curfn != e.curfn {
+		return false
+	}
+	t := recv.Type()
+	if t == nil || !t.IsPtr() {
+		return false
+	}
+	sym := t.Elem().Sym()
+	if sym == nil || sym.Name != "Group" || sym.Pkg == nil || sym.Pkg.Path != "logos/rt" {
+		return false
+	}
+	return true
+}
 
 func (b *batch) logosRegionMark(fns []*ir.Func) {
 	if !ir.LogosRegionsEnabled() {

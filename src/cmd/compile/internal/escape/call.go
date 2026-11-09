@@ -119,6 +119,8 @@ func (e *escape) call(ks []hole, call ir.Node) {
 			for _, arg := range args {
 				argument(k, arg)
 			}
+		} else if e.logosGroupGo(call, recvArg, args) {
+			e.logosGroupGoArgs(call, recvArg, args, argument)
 		} else {
 			if recvArg != nil {
 				e.rewriteArgument(recvArg, call, fns)
