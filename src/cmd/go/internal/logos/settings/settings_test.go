@@ -537,3 +537,35 @@ func TestLoadRoots(t *testing.T) {
 		})
 	}
 }
+func TestLoadBuildTablesApplyToGoModule(t *testing.T) {
+	root := logosModule(t, "[build]\narena = true\ncgo = \"allow\"\ntarget_cpu = \"baseline\"\nopt_level = \"O3\"\n[lints]\nslop = \"warn\"\n")
+	s, err := Load(root, Flags{Logos: true})
+	if err != nil {
+		t.Fatalf("Load error = %v", err)
+	}
+	if s.OptLevel != "3" {
+		t.Errorf("OptLevel = %q, want %q for a Go module root", s.OptLevel, "3")
+	}
+	if s.GOAMD64 != "v1" || s.GOARM64 != "v8.0" {
+		t.Errorf("arch levels = (%q, %q), want (v1, v8.0) for a Go module root", s.GOAMD64, s.GOARM64)
+	}
+	if !s.Arena || s.Experiment != "logosarena" {
+		t.Errorf("Arena = %v Experiment = %q, want true logosarena for a Go module root", s.Arena, s.Experiment)
+	}
+	if s.Cgo.Opinion {
+		t.Errorf("Cgo.Opinion = true, want no cgo opinion in a Go module")
+	}
+	policy := s.LintPolicy(s.Module)
+	if policy == nil {
+		t.Fatal("LintPolicy = nil, want the lints table for a Go module root")
+	}
+	var got struct {
+		Groups map[string]string `json:"groups"`
+	}
+	if err := json.Unmarshal(policy, &got); err != nil {
+		t.Fatalf("unmarshal policy %q: %v", policy, err)
+	}
+	if got.Groups["slop"] != "warn" {
+		t.Errorf("policy slop = %q, want warn for a Go module root", got.Groups["slop"])
+	}
+}
