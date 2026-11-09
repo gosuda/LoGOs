@@ -12,3 +12,9 @@ func Store(b *box) {
 	r := arena.Open()
 	b.r = r // ERROR "\[correctness::region_escape\]"
 }
+
+func GoCapture() {
+	r := arena.Open()
+	go func() { _ = r }() // ERROR "\[correctness::region_escape\]" // ERROR "unsupervised_goroutine"
+	_ = r
+}

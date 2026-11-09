@@ -113,6 +113,7 @@ func (check *Checker) logosGroupGo(s *syntax.CallStmt) bool {
 	if _, ok := check.logosGroupTop(); !ok {
 		check.error(s, InvalidGo, logosGroupUnsupervised)
 		check.use(s.Call)
+		check.logosRegionSuspended("go", s.Call)
 		return true
 	}
 	check.suspendedCall("go", s.Call)
