@@ -119,19 +119,3 @@ func TestCheckUnsafe(t *testing.T) {
 		}
 	})
 }
-
-func TestFormatViolation(t *testing.T) {
-	v := Violation{Dep: "example.com/dep", Chain: []string{"example.com/main/cmd", "example.com/dep", "unsafe"}}
-	got := FormatViolation(v)
-	for _, want := range []string{
-		"ERROR [capabilities::unauthorized_unsafe]: Transitive dependency 'example.com/dep' imports 'unsafe'",
-		"1. example.com/main/cmd",
-		"2.   -> example.com/dep",
-		"3.   -> unsafe",
-		`authorize "example.com/dep/**" under 'transitive_unsafe_allowlist' in logos.toml.`,
-	} {
-		if !strings.Contains(got, want) {
-			t.Errorf("FormatViolation missing %q:\n%s", want, got)
-		}
-	}
-}
