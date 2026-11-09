@@ -33,7 +33,7 @@ cd forbid
 [cgo] logos -C sub env CGO_ENABLED
 [cgo] stdout '^1$'
 logos env GOEXPERIMENT
-! stdout 'logosarena'
+stdout '^logosarena$'
 cd ..
 
 # A workspace decides once for all members: wa carries arena = true and wb
