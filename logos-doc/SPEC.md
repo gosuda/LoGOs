@@ -1715,12 +1715,9 @@ Deadcode removes unreachable functions, but type and method tables remain so ref
 ### 12.2 Host interface and loader
 
 `logos build` MUST emit <name>.loader.mjs beside the wasm file when the output is a `.wasm` file, for a Go main package and for a loGo/s main package. [T-Sec12][R-U1]
-`go build` MUST emit the same loader for such an output when `--wasm-loader` is passed. [T-Sec12][R-U1]
-The `--wasm-loader` flag on `go build` MUST stay absent from the help text, as Sec 0.1 states for flags that plain `go` gains. [T-Sec12][T-0.1]
-Plain `go` MUST NOT emit the loader by default until `./run.bash` passes with it, as the flip rule of Sec 0.1 states. [T-Sec12][T-0.1]
-After that flip, plain `go` MUST emit the loader by default, and `--wasm-loader=false` MUST turn it off. [T-Sec12][R-U1]
+Plain `go` MUST emit the same loader by default for such an output, and `--wasm-loader=false` MUST turn it off. The flag MUST stay absent from the `go help build` text, as Sec 0.1 states for flags that plain `go` gains. [T-Sec12][R-U1]
 The loader MUST have identical bytes under both commands. [T-Sec12][R-U1]
-Both commands MUST add the implicit `logos/rt` import for the loader helpers when they emit the loader for a `-o` output that names a `.wasm` file. [T-Sec12][R-U1]
+Both commands MUST add the implicit `logos/rt` import for the loader helpers when they emit the loader for a `-o` output that names a `.wasm` file, unless the module graph already provides the helpers. [T-Sec12][R-U1]
 A build with no `-o` writes no loader, because the default output name of a wasm main package carries no `.wasm` suffix. [T-Sec12]
 The loader MUST work under `GOOS=js` and, in a reactor module that the host initializes through WASI, under `GOOS=wasip1`. [T-Sec12]
 `logos/rt` MUST export the wasm helpers `_logos_scratch_alloc`, `_logos_scratch_reset`, `_logos_errmsg_ptr`, and `_logos_errmsg_len` for the loader. [T-Sec12]
@@ -1810,7 +1807,7 @@ Wasm MUST align 64-bit types on 8 bytes. [T-Sec14]
 - Field `autofix_candidates` is an array of fix objects. [T-Sec14]
 The loader MUST re-read memory.buffer after every wasm call. [T-Sec14]
 Calls after growth MUST see current memory. [T-Sec14]
-`logos build` MUST emit the loader for a Go main package with a `.wasm` output, and `go build` MUST emit the same loader when `--wasm-loader` is passed. [T-Sec14]
+`logos build` MUST emit the loader for a Go main package with a `.wasm` output, and plain `go build` MUST emit the same loader by default. [T-Sec14]
 
 ### 14.3 Span object
 

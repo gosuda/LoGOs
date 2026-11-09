@@ -60,7 +60,7 @@ Rules:
 * Pure non-yielding functions (`MayYield=0`) skip resume-point `br_table` dispatch in the function prologue and use native WASM calls with `local.get` and `local.set` (`test/logos/codegen/wasm_noyield.lgo`).
 * Functions with `defer`, channel operations, select, or transitive calls to `runtime.gopark` retain `MayYield=1` and keep resume dispatch.
 * The `--wasm-features=stack-switching` build flag compiles `MayYield=1` functions to `cont.new` and `resume` instructions.
-* The `--wasm-loader` flag emits `app.loader.mjs` alongside the WASM binary. `logos build` enables this by default; plain `go` requires the explicit flag (`logos_wasm_loader.txt`).
+* The loader `app.loader.mjs` is emitted beside the WASM binary by default under both `logos build` and plain `go build` when `-o` names a `.wasm` file; `--wasm-loader=false` turns it off (`logos_wasm_loader.txt`).
 * Directives `//logos:wasmexport` and `//logos:wasmimport` lower to `//go:wasmexport` and `//go:wasmimport`.
 * 64-bit integer and floating-point fields maintain natural 8-byte alignment in structs (`test/logos/codegen/wasm_align.lgo`).
 
