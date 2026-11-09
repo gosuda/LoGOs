@@ -151,10 +151,7 @@ func (c *raceCheck) inPlaceOperand(e syntax.Expr) syntax.Expr {
 
 // isArray reports whether t is an array type.
 func (c *raceCheck) isArray(t types2.Type) bool {
-	if t == nil {
-		return false
-	}
-	_, ok := t.Underlying().(*types2.Array)
+	_, ok := underOrNil(t).(*types2.Array)
 	return ok
 }
 

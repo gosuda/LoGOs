@@ -127,23 +127,10 @@ func declarationTypes(pass *Pass) map[types2.Object]syntax.Expr {
 // returns the wrapper type that replaces a plain value and the function
 // spelling.
 func atomic64Call(pass *Pass, call *syntax.CallExpr) (string, string, bool) {
-	sel, ok := syntax.Unparen(call.Fun).(*syntax.SelectorExpr)
-	if !ok {
+	if !atomicQualifiedCall(pass, call) {
 		return "", "", false
 	}
-	if pass.in.Info != nil {
-		if pass.in.Info.Selections[sel] != nil {
-			return "", "", false
-		}
-	}
-	name, ok := syntax.Unparen(sel.X).(*syntax.Name)
-	if !ok || pass.in.Info == nil {
-		return "", "", false
-	}
-	pkgName, ok := pass.in.Info.Uses[name].(*types2.PkgName)
-	if !ok || pkgName.Imported() == nil || pkgName.Imported().Path() != atomicPath {
-		return "", "", false
-	}
+	sel := syntax.Unparen(call.Fun).(*syntax.SelectorExpr)
 	wrapper, ok := atomic64Funcs[sel.Sel.Value]
 	if !ok {
 		return "", "", false
@@ -177,9 +164,5 @@ func plainInt64Address(pass *Pass, arg syntax.Expr) types2.Object {
 }
 
 func isPlainInt64(t types2.Type) bool {
-	basic, ok := t.Underlying().(*types2.Basic)
-	if !ok {
-		return false
-	}
-	return basic.Kind() == types2.Int64 || basic.Kind() == types2.Uint64
+	return hasBasicKind(t, types2.Int64) || hasBasicKind(t, types2.Uint64)
 }
