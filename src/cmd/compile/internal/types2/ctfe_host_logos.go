@@ -138,7 +138,7 @@ func (h *ctfeHost) ResolveSel(sel *syntax.SelectorExpr) ctfe.Entity {
 	if !ok {
 		return ctfe.Entity{}
 	}
-	pkgName := h.pkgNameOf(x)
+	pkgName := logosPkgName(h.check, x)
 	if pkgName == nil {
 		return ctfe.Entity{}
 	}
@@ -176,8 +176,7 @@ func (h *ctfeHost) ResolveSel(sel *syntax.SelectorExpr) ctfe.Entity {
 	return ctfe.Entity{}
 }
 
-func (h *ctfeHost) pkgNameOf(x *syntax.Name) *PkgName {
-	check := h.check
+func logosPkgName(check *Checker, x *syntax.Name) *PkgName {
 	if obj, ok := check.Info.Uses[x].(*PkgName); ok {
 		return obj
 	}

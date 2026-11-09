@@ -299,7 +299,7 @@ func (s *logosPurity) visitStore(lhs syntax.Expr) bool {
 			walk(e.X)
 		}
 	}
-	for _, le := range unpackLogosList(lhs) {
+	for _, le := range syntax.UnpackListExpr(lhs) {
 		walk(le)
 	}
 	return found || s.done
@@ -392,7 +392,7 @@ func (s *logosPurity) visitCall(c *syntax.CallExpr) bool {
 		}
 	case *syntax.SelectorExpr:
 		if x, ok := syntax.Unparen(fun.X).(*syntax.Name); ok {
-			if pn, ok := s.pkgName(x); ok {
+			if pn := logosPkgName(s.check, x); pn != nil {
 				path := ""
 				if imp := pn.Imported(); imp != nil {
 					path = imp.Path()
@@ -429,21 +429,6 @@ func (s *logosPurity) visitCall(c *syntax.CallExpr) bool {
 		return false
 	}
 	return true
-}
-
-func (s *logosPurity) pkgName(x *syntax.Name) (*PkgName, bool) {
-	check := s.check
-	if obj, ok := check.Info.Uses[x].(*PkgName); ok {
-		return obj, true
-	}
-	if obj, ok := check.pkg.scope.Lookup(x.Value).(*PkgName); ok {
-		return obj, true
-	}
-	return nil, false
-}
-
-func unpackLogosList(e syntax.Expr) []syntax.Expr {
-	return syntax.UnpackListExpr(e)
 }
 
 func selText(sel *syntax.SelectorExpr) string {

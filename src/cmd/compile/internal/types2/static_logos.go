@@ -216,10 +216,6 @@ func logosStaticTrigger(info *Info, st *Struct) bool {
 	return false
 }
 
-func logosStaticNameClash(st *Struct) bool {
-	return logosFamilyNameClash(st, "JSON")
-}
-
 func logosFamilyNameClash(st *Struct, family string) bool {
 	keys := make(map[string]bool)
 	for i := range st.NumFields() {
@@ -316,7 +312,7 @@ func LogosStaticStruct(info *Info, named *Named, rhs syntax.Expr) ([]*Var, bool)
 		}
 		fields[i] = fld
 	}
-	if logosStaticNameClash(st) || !logosStaticTrigger(info, st) {
+	if logosFamilyNameClash(st, "JSON") || !logosStaticTrigger(info, st) {
 		return nil, false
 	}
 	return fields, true

@@ -112,10 +112,6 @@ func (check *Checker) logosAssertReadonlyError(e syntax.Expr, x *operand, T Type
 	return true
 }
 
-func (check *Checker) logosConcreteReadonlySatisfied(V Type, f, m *Func) bool {
-	return check.logosConcreteReadonlySatisfiedAt(V, f, m, nopos)
-}
-
 func (check *Checker) logosConcreteReadonlySatisfiedAt(V Type, f, m *Func, pos syntax.Pos) bool {
 	if !logosReadonlyObligation(m) {
 		return true

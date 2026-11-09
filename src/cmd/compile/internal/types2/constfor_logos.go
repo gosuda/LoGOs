@@ -181,7 +181,7 @@ func (check *Checker) logosConstForRange(s *syntax.ConstForStmt, info *LogosCons
 		return bad(s.Range.Pos(), "const for range must be comptime.Fields[T]()")
 	}
 	targExpr := targs[0]
-	sel, fname, ok := check.logosComptimeRangeFun(call)
+	sel, fname, ok := check.logosComptimeQualifier(call)
 	if !ok || fname != "Fields" {
 		return bad(s.Range.Pos(), "const for range must be comptime.Fields[T]()")
 	}
@@ -214,27 +214,6 @@ func (check *Checker) logosConstForRange(s *syntax.ConstForStmt, info *LogosCons
 	info.Target = targ
 	info.Struct = st
 	return true
-}
-
-func (check *Checker) logosComptimeRangeFun(call *syntax.CallExpr) (*syntax.SelectorExpr, string, bool) {
-	fun := call.Fun
-	if idx, ok := fun.(*syntax.IndexExpr); ok {
-		fun = idx.X
-	}
-	sel, ok := fun.(*syntax.SelectorExpr)
-	if !ok {
-		return nil, "", false
-	}
-	name, ok := sel.X.(*syntax.Name)
-	if !ok {
-		return nil, "", false
-	}
-	_, obj := check.lookupScope(name.Value)
-	pn, ok := obj.(*PkgName)
-	if !ok || pn.Imported() != logosComptimePkg {
-		return nil, "", false
-	}
-	return sel, sel.Sel.Value, true
 }
 
 func (check *Checker) logosComptimeObj(name string) Object {

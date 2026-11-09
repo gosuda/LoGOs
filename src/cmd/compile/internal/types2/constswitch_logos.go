@@ -321,7 +321,7 @@ func (check *Checker) logosShadowConstTarget(tpar *TypeParam, info *logosCaseInf
 			if !ok {
 				continue
 			}
-			sub := logosSubstOne(check, pos, v.Type(), tpar, info.typ)
+			sub := check.subst(pos, v.Type(), makeSubstMap([]*TypeParam{tpar}, []Type{info.typ}), nil, check.context())
 			if sub == v.Type() {
 				continue
 			}
