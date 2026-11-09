@@ -1,0 +1,49 @@
+// errorcheck
+
+package p
+
+import "strconv"
+
+func load() (string, error) {
+	return "v", nil
+}
+
+func readBeforeCheck() {
+	v, err := load()
+	_ = v // ERROR "result_before_error_check"
+	_ = err
+}
+
+func readAfterCheck() {
+	v, err := load()
+	if err != nil {
+		return
+	}
+	_ = v
+}
+
+func goCalleeKeepsContract() {
+	n, aerr := strconv.Atoi("7")
+	_ = n
+	_ = aerr
+}
+
+func notOptionSelect(x int) {
+	_ = x?.Foo // ERROR "not_an_option"
+}
+
+func notOptionCoalesce(y int) {
+	_ = y ?? 5 // ERROR "not_an_option"
+}
+
+func rejectOptionToValue(o int?) {
+	var _ int = o // ERROR "cannot use o .+ as int value"
+}
+
+func mapRead(m map[string]int) {
+	var single int? = m["k"]
+	_ = single
+	v, ok := m["k"]
+	var _ int = v
+	var _ bool = ok
+}
