@@ -200,6 +200,7 @@ func (check *Checker) suspendedCall(keyword string, call syntax.Expr) {
 		msg = "discards result of"
 		code = UnusedResults
 	case statement:
+		check.logosRegionSuspended(keyword, call)
 		return
 	default:
 		panic("unreachable")
@@ -488,6 +489,7 @@ func (check *Checker) stmt(ctxt stmtContext, s syntax.Stmt) {
 		}
 		if elem := check.chanElem(s, &ch, false); elem != nil {
 			check.assignment(&val, elem, "send")
+			check.logosRegionSend(&val)
 		}
 
 	case *syntax.AssignStmt:
@@ -600,6 +602,7 @@ func (check *Checker) stmt(ctxt stmtContext, s syntax.Stmt) {
 				lhs = res.vars
 			}
 			check.initVars(lhs, results, s)
+			check.logosRegionResults(results)
 		}
 
 	case *syntax.BranchStmt:

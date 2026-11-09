@@ -1,0 +1,77 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package p
+
+import "context"
+
+import "logos/arena"
+
+var global arena.Region
+
+var fvar func()
+
+var ch chan arena.Region = make(chan arena.Region)
+
+type box struct {
+	r arena.Region
+}
+
+func use(r arena.Region) {
+	_ = r
+}
+
+func globalStore() {
+	r := arena.Open()
+	global = r /* ERROR "correctness::region_escape" */
+}
+
+func ptrFieldStore(p *box) {
+	r := arena.Open()
+	p.r = r /* ERROR "correctness::region_escape" */
+}
+
+func send() {
+	r := arena.Open()
+	ch <- r /* ERROR "correctness::region_escape" */
+}
+
+func ret() arena.Region {
+	r := arena.Open()
+	return r /* ERROR "correctness::region_escape" */
+}
+
+func goCapture(ctx context.Context) error {
+	r := arena.Open()
+	go group (ctx) {
+		go use(r /* ERROR "correctness::region_escape" */)
+	}
+	return nil
+}
+
+func closureGlobal() {
+	r := arena.Open()
+	fvar /* ERROR "correctness::region_escape" */ = func() {
+		_ = r
+	}
+}
+
+func argPass() {
+	r := arena.Open()
+	use(r)
+}
+
+func localFieldStore() {
+	r := arena.Open()
+	var b box
+	b.r = r
+	_ = b
+}
+
+func immediateClosure() {
+	r := arena.Open()
+	func() {
+		_ = r
+	}()
+}

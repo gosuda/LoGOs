@@ -33,5 +33,6 @@ var registry = []Rule{
 	layoutConstant,
 	atomicPlainInt64,
 	linknameMismatch,
+	regionEscape,
 	unsafeOutsideUnsafeFile,
 }

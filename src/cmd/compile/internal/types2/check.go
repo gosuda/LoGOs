@@ -176,6 +176,8 @@ type Checker struct {
 	logosCSwitch     []logosIfaceCase                // logos M7-S4 hook: active interface-case stack for `const switch`.
 	logosGroup       []logosGroupFrame               // logos M8-S2 hook: lexical go-group nesting per function.
 	logosFieldVars   map[*Var]*LogosConstFor         // logos M7-S2 hook: const-for field variables.
+	logosRegionLit   map[*syntax.FuncLit]bool        // logos M18-S7 hook: literals capturing a region value.
+	logosRegionVar   map[*Var]bool                   // logos M18-S7 hook: locals holding such literals.
 	logosFieldPend   map[*syntax.Name]*Var           // logos M7-S2 hook: bare field-variable uses awaiting consumption.
 	logosFieldBind   *logosFieldBinding              // logos M7-S2 hook: per-iteration field meaning over concrete structs.
 	logosPred        logosPredState                  // logos M7-S3 hook: `const if` condition context for comptime predicates.

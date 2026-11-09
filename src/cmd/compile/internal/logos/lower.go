@@ -491,9 +491,10 @@ func (fl *fileLower) newSite(pos syntax.Pos, line uint) string {
 
 // lowerFile lowers every function body of one file.
 func (fl *fileLower) lowerFile() {
-	fl.collectInterpKinds()  // M6-S1 hook: interpolation operand kinds before any rewrite.
-	fl.lowerComptime()       // M7-S2/S3 hook: comptime generic copies, then const for unrolling, before any rewrite.
-	fl.scanRodataMarkers()   // M5-S3 hook: hand-written //logos:rodata lines.
+	fl.collectInterpKinds() // M6-S1 hook: interpolation operand kinds before any rewrite.
+	fl.lowerComptime()      // M7-S2/S3 hook: comptime generic copies, then const for unrolling, before any rewrite.
+	fl.scanRodataMarkers()  // M5-S3 hook: hand-written //logos:rodata lines.
+	fl.lowerArenaEject()
 	fl.lowerZeroCopy()       // M5-S5 hook: zero-copy string/bytes conversions.
 	fl.lowerCTFE()           // M5-S2 hook: const composite literals and const func erasure.
 	fl.lowerConstMapRanges() // M5-S4 hook: range over a const map reads its sorted entries.

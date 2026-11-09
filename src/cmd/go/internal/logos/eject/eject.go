@@ -352,7 +352,7 @@ func (plan *ejectPlan) addPackage(p *load.Package) {
 func resortEjectPlan(plan *ejectPlan) {
 	plan.deps = nil
 	for _, m := range plan.depByPath {
-		if moduleHasLogos(m) {
+		if moduleHasLogos(m) || moduleImportsLogos(m) {
 			plan.deps = append(plan.deps, m)
 		}
 	}
@@ -384,6 +384,20 @@ func moduleHasLogos(m *ejectModule) bool {
 	for _, p := range m.pkgs {
 		if ejectOwnsLogos(p) {
 			return true
+		}
+	}
+	return false
+}
+
+// moduleImportsLogos reports whether any package of the module imports a
+// logos support path: the module must vendor beside the support module or
+// the ejected tree does not build under plain go.
+func moduleImportsLogos(m *ejectModule) bool {
+	for _, p := range m.pkgs {
+		for _, q := range p.Internal.Imports {
+			if q != nil && strings.HasPrefix(q.ImportPath, "logos/") {
+				return true
+			}
 		}
 	}
 	return false
@@ -1587,6 +1601,9 @@ func writeSupportModule(out, goVer string) {
 	goroot := cfg.GOROOT
 	rtDst := filepath.Join(out, "_logos_deps", "rt")
 	copySupportDir(filepath.Join(goroot, "src", "logos", "rt"), rtDst)
+	if st, err := os.Stat(filepath.Join(goroot, "src", "logos", "arena")); err == nil && st.IsDir() {
+		copySupportDir(filepath.Join(goroot, "src", "logos", "arena"), filepath.Join(rtDst, "arena"))
+	}
 	if st, err := os.Stat(filepath.Join(goroot, "src", "logos", "sync")); err == nil && st.IsDir() {
 		copySupportDir(filepath.Join(goroot, "src", "logos", "sync"), filepath.Join(rtDst, "sync"))
 	}

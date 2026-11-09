@@ -1089,6 +1089,9 @@ func (check *Checker) exprInternal(T *target, x *operand, e syntax.Expr, hint Ty
 
 	case *syntax.FuncLit:
 		check.funcLit(x, e)
+		if sig, _ := x.typ().(*Signature); sig != nil {
+			check.logosRegionLitMark(e, sig)
+		}
 		if !x.isValid() {
 			goto Error
 		}

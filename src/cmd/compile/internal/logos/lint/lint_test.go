@@ -44,10 +44,11 @@ var goRules = []string{
 	"pedantic::unsafe_outside_unsafe_file",
 }
 
-// lgoRules are the 8 rules that never apply to Go packages.
+// lgoRules are the 9 rules that never apply to Go packages.
 var lgoRules = []string{
 	"correctness::nil_deref_unproven",
 	"correctness::defer_erases_errdefer_state",
+	"correctness::region_escape",
 	"concurrency::unsupervised_goroutine",
 	"suspicious::unapplied_struct_default",
 	"suspicious::side_effect_before_sort",
@@ -146,10 +147,10 @@ func g() {
 	}
 }
 
-// TestRuleScopesSpecCounts pins the 20 and 8 of SPEC Sec 1.2 and Sec 2.6.
+// TestRuleScopesSpecCounts pins the 20 and 9 of SPEC Sec 1.2 and Sec 2.6.
 func TestRuleScopesSpecCounts(t *testing.T) {
-	if len(goRules) != 20 || len(lgoRules) != 8 {
-		t.Fatalf("goRules = %d, lgoRules = %d, want 20 and 8", len(goRules), len(lgoRules))
+	if len(goRules) != 20 || len(lgoRules) != 9 {
+		t.Fatalf("goRules = %d, lgoRules = %d, want 20 and 9", len(goRules), len(lgoRules))
 	}
 }
 

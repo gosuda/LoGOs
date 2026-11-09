@@ -196,13 +196,14 @@ func (check *Checker) initVar(lhs *Var, x *operand, context string) {
 			typ = Default(typ)
 		}
 		lhs.typ = typ
-		check.logosConstInferVar(lhs) // logos M5-S1 hook: inferred locals copy out of views.
+		check.logosConstInferVar(lhs)           // logos M5-S1 hook: inferred locals copy out of views.
 		if check.logosInheritPlatform(lhs, x) { // logos M3-S5 hook.
 			return
 		}
 	}
 
 	check.assignment(x, lhs.typ, context)
+	check.logosRegionDecl(lhs, x)
 }
 
 // lhsVar checks a lhs variable in an assignment and returns its type.
@@ -312,6 +313,7 @@ func (check *Checker) assignVar(lhs, rhs syntax.Expr, x *operand, context string
 		return
 	}
 	check.logosPushGoStore(lhs) // logos M3-S5 hook.
+	check.logosRegionAssign(lhs, x)
 	check.assignment(x, T, context)
 	check.logosPopGoStore()    // logos M3-S5 hook.
 	check.logosKillNarrow(lhs) // logos M3-S4 hook: `x = other` ends narrowing.
