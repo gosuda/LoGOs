@@ -46,9 +46,10 @@ grep '^//go:wasmexport checkHost$' out/main.go
 exists out/_logos_deps/rt/wasmerr.go
 exists out/_logos_deps/rt/wasmhost_wasm.go
 cd out
-go build --wasm-loader=false -o ../ejected.wasm .
+go build -o ../ejected.wasm .
+exists ../ejected.loader.mjs
 cd ..
-cp ../lgo.loader.mjs ejected.loader.mjs
+cmp ejected.loader.mjs ../lgo.loader.mjs
 exec node ../check.mjs ejected.wasm ejected.loader.mjs text
 stdout '^loader-ok$'
 cd ..

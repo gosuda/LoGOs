@@ -1944,6 +1944,7 @@ func (p *Package) load(ld *modload.Loader, ctx context.Context, opts PackageOpts
 	// Build augmented import list to add implicit dependencies.
 	// Be careful not to add imports twice, just to avoid confusion.
 	importPaths := p.Imports
+	addedLogosRT := false
 	addImport := func(path string, forCompiler bool) {
 		for _, p := range importPaths {
 			if path == p {
@@ -1978,7 +1979,9 @@ func (p *Package) load(ld *modload.Loader, ctx context.Context, opts PackageOpts
 		// Every logos package implicitly imports the support package,
 		// so lowered code can call into it without naming it.
 		if needsLogosRT(p) {
+			n := len(importPaths)
 			addImport("logos/rt", true)
+			addedLogosRT = len(importPaths) > n && !p.IsLogos()
 		}
 
 		// Fixed-array SIMD lowers through simd/archsimd when
@@ -2142,6 +2145,9 @@ func (p *Package) load(ld *modload.Loader, ctx context.Context, opts PackageOpts
 		}
 	}
 	p.Internal.Imports = imports
+	if addedLogosRT {
+		pruneRedundantLogosRT(p)
+	}
 	addLogosRTForGoImporter(ld, ctx, opts, p)
 	checkLogosConfig(ld, p)
 	checkLogosAliases(ld, p)

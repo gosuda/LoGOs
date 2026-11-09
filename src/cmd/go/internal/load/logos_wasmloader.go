@@ -5,6 +5,9 @@
 package load
 
 import (
+	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"cmd/go/internal/cfg"
@@ -52,4 +55,80 @@ func WasmLoaderFor(p *Package) (string, bool) {
 		return "", false
 	}
 	return strings.TrimSuffix(p.Target, wasmOutputSuffix) + wasmLoaderSuffix, true
+}
+
+var loaderHelperDirectives = []string{
+	"//go:wasmexport _logos_scratch_alloc",
+	"//go:wasmexport _logos_scratch_reset",
+	"//go:wasmexport _logos_errmsg_ptr",
+	"//go:wasmexport _logos_errmsg_len",
+}
+
+func pruneRedundantLogosRT(p *Package) {
+	if !graphProvidesLoaderHelpers(p) {
+		return
+	}
+	p.Internal.Imports = dropLogosRTImport(p.Internal.Imports)
+	p.Internal.CompiledImports = dropLogosRTCompiledImport(p.Internal.CompiledImports)
+}
+
+func graphProvidesLoaderHelpers(p *Package) bool {
+	seen := make(map[*Package]bool)
+	stack := append([]*Package{p}, p.Internal.Imports...)
+	for len(stack) > 0 {
+		q := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		if q == nil || seen[q] {
+			continue
+		}
+		seen[q] = true
+		if q.ImportPath == LogosRTPkg || q.Standard {
+			continue
+		}
+		if packageWasmExportsLoaderHelpers(q) {
+			return true
+		}
+		stack = append(stack, q.Internal.Imports...)
+	}
+	return false
+}
+
+func packageWasmExportsLoaderHelpers(q *Package) bool {
+	for _, f := range q.GoFiles {
+		data, err := os.ReadFile(filepath.Join(q.Dir, f))
+		if err != nil {
+			continue
+		}
+		for line := range bytes.SplitSeq(data, []byte("\n")) {
+			t := bytes.TrimLeft(line, " \t")
+			for _, d := range loaderHelperDirectives {
+				if bytes.HasPrefix(t, []byte(d)) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+func dropLogosRTImport(pkgs []*Package) []*Package {
+	kept := make([]*Package, 0, len(pkgs))
+	for _, q := range pkgs {
+		if q == nil || q.ImportPath == LogosRTPkg {
+			continue
+		}
+		kept = append(kept, q)
+	}
+	return kept
+}
+
+func dropLogosRTCompiledImport(paths []string) []string {
+	kept := make([]string, 0, len(paths))
+	for _, s := range paths {
+		if s == LogosRTPkg {
+			continue
+		}
+		kept = append(kept, s)
+	}
+	return kept
 }
