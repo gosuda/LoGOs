@@ -13,6 +13,9 @@ import (
 	"os/exec"
 	"testing"
 	"time"
+
+	"cmd/go/internal/cfg"
+	"cmd/go/internal/modinfo"
 )
 
 const offendingSource = `package jsonmarshal
@@ -99,5 +102,31 @@ func TestLogosScanProgressBounded(t *testing.T) {
 			t.Fatalf("scanLogosTestFile livelocked: child process timed out and was killed: %v", err)
 		}
 		t.Fatalf("child helper failed: %v\n%s", err, out)
+	}
+}
+func TestLogosLintMarkSkipsNonMainModules(t *testing.T) {
+	old := cfg.Logos
+	cfg.Logos = true
+	t.Cleanup(func() { cfg.Logos = old })
+	std := &Package{Standard: true}
+	if std.Internal.LogosLint != nil {
+		t.Errorf("standard package LogosLint = %q, want nil", std.Internal.LogosLint)
+	}
+	dep := &Package{Module: &modinfo.ModulePublic{Path: "example.com/dep", Main: false}}
+	logosLintMark(nil, dep)
+	if dep.Internal.LogosLint != nil {
+		t.Errorf("third-party module LogosLint = %q, want nil", dep.Internal.LogosLint)
+	}
+	bare := &Package{}
+	logosLintMark(nil, bare)
+	if bare.Internal.LogosLint != nil {
+		t.Errorf("module-less package LogosLint = %q, want nil", bare.Internal.LogosLint)
+	}
+	main := []byte("package main\n")
+	testmain := &Package{Module: &modinfo.ModulePublic{Path: "example.com/m", Main: true}}
+	testmain.Internal.TestmainGo = &main
+	logosLintMark(nil, testmain)
+	if testmain.Internal.LogosLint != nil {
+		t.Errorf("testmain package LogosLint = %q, want nil", testmain.Internal.LogosLint)
 	}
 }
