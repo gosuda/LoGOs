@@ -25,6 +25,7 @@ int read_int(int *p);
 int sum_bytes(unsigned char *p, int n);
 unsigned long long busy_spin(unsigned long long iters);
 unsigned long long plain_spin(unsigned long long iters);
+int watch_spin(unsigned char *p, unsigned char want, int micros);
 extern int GoCallback(int v);
 int cb_fire(void);
 int plain_cb_fire(void);
@@ -47,6 +48,9 @@ int plain_cb_fire(void);
 
 #cgo noescape busy_spin
 #cgo nocallback busy_spin
+
+#cgo noescape watch_spin
+#cgo nocallback watch_spin
 
 #cgo noescape cb_fire
 #cgo nocallback cb_fire
@@ -91,6 +95,13 @@ func callFastSlice(b []byte) int32 {
 
 // callFastBusy burns CPU in C on the fast path.
 func callFastBusy(iters uint64) uint64 { return uint64(C.busy_spin(C.ulonglong(iters))) }
+
+// callFastWatch spins in C on the fast path, reading through p for the
+// requested duration and verifying the pointee value stays want and the
+// pointer identity holds: 0 ok, 1 value changed, 2 pointer changed.
+func callFastWatch(p *byte, want byte, micros int32) int32 {
+	return int32(C.watch_spin((*C.uchar)(unsafe.Pointer(p)), C.uchar(want), C.int(micros)))
+}
 
 // callPlainBusy burns CPU in C on the plain path.
 func callPlainBusy(iters uint64) uint64 { return uint64(C.plain_spin(C.ulonglong(iters))) }

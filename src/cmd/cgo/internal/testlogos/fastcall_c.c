@@ -90,6 +90,51 @@ cb_fire(void)
 	return GoCallback(41);
 }
 
+/* watch_spin reads through p for about micros microseconds (capped by
+   the caller) and reports whether the argument stayed put.  The reads
+   go through a volatile pointer saved at entry so the compiler cannot
+   fold them away: 0 means every read saw want and the pointer is the
+   entry pointer, 1 means the pointee value changed (the memory moved
+   or was reused), 2 means the pointer identity changed. */
+enum {
+	watch_ok = 0,
+	watch_value = 1,
+	watch_pointer = 2
+};
+
+int
+watch_spin(unsigned char *p, unsigned char want, int micros)
+{
+	struct timespec ts;
+	volatile unsigned char *vp = (volatile unsigned char *)p;
+	volatile unsigned char *entry = vp;
+	unsigned long long n = 0;
+	long start, limit, now;
+
+	if (micros > 300000) {
+		micros = 300000;
+	}
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	start = ts.tv_sec * 1000000000L + ts.tv_nsec;
+	limit = (long)micros * 1000L;
+	for (;;) {
+		if (*vp != want) {
+			return watch_value;
+		}
+		if (vp != entry) {
+			return watch_pointer;
+		}
+		if ((n & 1023) == 0) {
+			clock_gettime(CLOCK_MONOTONIC, &ts);
+			now = ts.tv_sec * 1000000000L + ts.tv_nsec - start;
+			if (now >= limit) {
+				return watch_ok;
+			}
+		}
+		n++;
+	}
+}
+
 int
 plain_cb_fire(void)
 {

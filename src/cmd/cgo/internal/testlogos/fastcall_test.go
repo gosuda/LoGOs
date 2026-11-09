@@ -809,6 +809,112 @@ func TestFastcallGoPointerValid(t *testing.T) {
 	}
 }
 
+// growStack recursion depth times, then unwinds: the goroutine's stack
+// grows deep and is later mostly unused, so GC scan may shrink it.
+func growStack(depth int) byte {
+	if depth == 0 {
+		return 0
+	}
+	var pad [96]byte
+	pad[0] = byte(depth)
+	pad[95] = growStack(depth - 1)
+	return pad[0] + pad[95]
+}
+
+// runChurners runs n goroutines that force collections and grow and
+// abandon stacks until stop closes. Ownership and teardown stay with
+// the caller's test: closing stop cancels the loops and the wait joins
+// them, both registered as cleanups.
+func runChurners(t *testing.T, n int, stop chan struct{}) {
+	t.Helper()
+	var wg sync.WaitGroup
+	for i := range n {
+		wg.Go(func() {
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				if i%2 == 0 {
+					runtime.GC()
+				} else {
+					debug.FreeOSMemory()
+				}
+				growStack(2000)
+			}
+		})
+	}
+	t.Cleanup(func() {
+		close(stop)
+		wg.Wait()
+	})
+}
+
+// gcCycles returns the count of completed GC cycles (wraps at 256), so
+// a caller can require that collections progressed during a window.
+func gcCycles() uint32 {
+	var ms runtime.MemStats
+	runtime.ReadMemStats(&ms)
+	return ms.NumGC
+}
+
+// TestFastcallPinUnderCollection ATTACK (#160): an argument handed to a
+// long fast call stays valid and unmoved for the whole call while other
+// goroutines force collections and stack churn. The stack leg calls
+// from a goroutine whose stack grew deep and unwound, so the stack is
+// shrinkable and the argument is stack-resident; the heap leg passes a
+// pointer into a large []byte. A fast call that blocked collection
+// forever would also fail: the harness requires at least two new GC
+// cycles during the call and the call to return within 10 seconds.
+func TestFastcallPinUnderCollection(t *testing.T) {
+	requireCgo(t)
+	if testUnderRace {
+		t.Skip("collection churn is timing-gated; skipped under race")
+	}
+	cases := []struct {
+		name string
+		call func() int32
+	}{
+		{
+			name: "stack",
+			call: func() int32 {
+				growStack(4000)
+				var buf [8192]byte
+				buf[0] = 42
+				return callFastWatch(&buf[0], 42, 250000)
+			},
+		},
+		{
+			name: "heap",
+			call: func() int32 {
+				b := make([]byte, 256<<10)
+				b[0] = 42
+				return callFastWatch(&b[0], 42, 250000)
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			runChurners(t, 3, make(chan struct{}))
+			gcBefore := gcCycles()
+			res := make(chan int32, 1)
+			go func() { res <- tc.call() }()
+			select {
+			case code := <-res:
+				if code != 0 {
+					t.Fatalf("watch_spin = %d, want 0 (1: pointee changed, 2: pointer moved)", code)
+				}
+			case <-time.After(10 * time.Second):
+				t.Fatalf("fast call did not return within 10s")
+			}
+			if got := gcCycles() - gcBefore; got < 2 {
+				t.Fatalf("only %d GC cycles ran during the call, want at least 2", got)
+			}
+		})
+	}
+}
+
 // fixtureBin builds the fixture module with logos and returns the binary.
 func fixtureBin(t *testing.T, module string) string {
 	t.Helper()
