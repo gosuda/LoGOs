@@ -1,0 +1,27 @@
+# M16-S2 (SPEC Sec 12.2): string results are invalid for wasm exports.
+# A //go:wasmexport function returning a string fails the build with
+# unsupported result type, so no errCode convention can cover it. The
+# //logos: spelling lowers to this form (rows for both spellings are
+# DONE), so the Go form pins the shared check.
+
+env GOPROXY=off
+env GOTOOLCHAIN=local
+env GOOS=js
+env GOARCH=wasm
+
+# A string result cannot serve as the int32 errCode: the build fails.
+! go build -o app.wasm .
+stderr 'unsupported result type string'
+
+-- go.mod --
+module example.com/wasmstrexport
+
+go 1.27
+
+-- main.go --
+package main
+
+//go:wasmexport bad
+func bad() string { return "nope" }
+
+func main() {}
