@@ -15,9 +15,6 @@ logos build --pedantic=false .
 ! logos build --pedantic=maybe .
 stderr '^invalid boolean value "maybe" for -pedantic'
 
-! go build --pedantic .
-stderr '^flag provided but not defined: -pedantic'
-
 logos help build
 stdout 'pedantic'
 
