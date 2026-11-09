@@ -11,18 +11,6 @@ import (
 	"unicode"
 )
 
-// LoGo/s M11 static serializer type rules (SPEC Sec 10). The lowering
-// generates the methods of logosStaticMethods for each eligible struct,
-// but user code in the same package calls those methods before any
-// lowering runs, so the checker declares them up front.
-// LogosStaticStruct is the one eligibility predicate; the checker hook and
-// the lowering both call it, so the two sides cannot disagree. The
-// upstream file calls in through one hook line: resolver.go
-// (packageObjects, after the type declarations).
-
-// LogosJSONField is the encoding/json view of one struct field: its key,
-// whether the key came from the tag, and the tag options the static
-// serializer models.
 type LogosJSONField struct {
 	Name      string
 	Tagged    bool
@@ -31,29 +19,20 @@ type LogosJSONField struct {
 	StringOpt bool
 }
 
-// logosMethodShape is the signature of one synthesized method.
 type logosMethodShape int
 
 const (
-	logosShapeMarshal   logosMethodShape = iota // () ([]byte, error)
-	logosShapeUnmarshal                         // (data []byte) error
-	logosShapeAppend                            // (dst []byte) ([]byte, error)
+	logosShapeMarshal logosMethodShape = iota
+	logosShapeUnmarshal
+	logosShapeAppend
 )
 
-// logosStaticMethod is one method the hook declares on every eligible
-// struct and the lowering generates the body of.
 type logosStaticMethod struct {
 	name    string
 	pointer bool
 	shape   logosMethodShape
 }
 
-// logosStaticMethods lists every synthesized method. A field named like
-// one of them clashes, because Go forbids a field and a method of one
-// name. The json family gates LogosStaticStruct; the binary family is
-// enforced by the binary generator's own eligibility, so a
-// binary-method-named field removes binary generation without touching
-// json eligibility.
 var logosStaticMethods = []logosStaticMethod{
 	{"MarshalJSON", false, logosShapeMarshal},
 	{"UnmarshalJSON", true, logosShapeUnmarshal},
@@ -62,17 +41,12 @@ var logosStaticMethods = []logosStaticMethod{
 	{"AppendBinary", false, logosShapeAppend},
 }
 
-// logosBinaryMethods names the synthesized binary family.
 var logosBinaryMethods = []string{"MarshalBinary", "UnmarshalBinary", "AppendBinary"}
 
-// LogosBinaryMethodNames exposes the synthesized binary family names so
-// the binary generator can enforce its own field-name clash rule.
 func LogosBinaryMethodNames() []string {
 	return logosBinaryMethods
 }
 
-// logosTagKey splits one `name:"value"` pair off the front of a struct
-// tag: the name, and the text starting at the opening quote of the value.
 func logosTagKey(tag string) (name, rest string, ok bool) {
 	tag = strings.TrimLeft(tag, " ")
 	i := 0
@@ -85,7 +59,6 @@ func logosTagKey(tag string) (name, rest string, ok bool) {
 	return tag[:i], tag[i+1:], true
 }
 
-// logosTagQuoted splits the quoted string at the start of s from the rest.
 func logosTagQuoted(s string) (quoted, rest string, ok bool) {
 	i := 1
 	for i < len(s) && s[i] != '"' {
@@ -100,8 +73,6 @@ func logosTagQuoted(s string) (quoted, rest string, ok bool) {
 	return s[:i+1], s[i+1:], true
 }
 
-// logosTagLookup returns the value of key in a struct tag, with the
-// conventions of reflect.StructTag.Lookup.
 func logosTagLookup(tag, key string) (string, bool) {
 	for {
 		name, rest, ok := logosTagKey(tag)
@@ -120,8 +91,6 @@ func logosTagLookup(tag, key string) (string, bool) {
 	}
 }
 
-// logosValidTagName reports whether s is a usable encoding/json key: the
-// rule of encoding/json isValidTag.
 func logosValidTagName(s string) bool {
 	if s == "" {
 		return false
@@ -136,7 +105,6 @@ func logosValidTagName(s string) bool {
 	return true
 }
 
-// logosTagOption reports whether the comma-separated options contain name.
 func logosTagOption(opts, name string) bool {
 	for opts != "" {
 		var cur string
@@ -148,10 +116,6 @@ func logosTagOption(opts, name string) bool {
 	return false
 }
 
-// logosTagOptionsSupported reports whether every option is one the static
-// serializer models, each at most once: omitempty, omitzero, or string. Any
-// other option, an empty option, or a repeated one is read differently by
-// the encoding/json modes, so such a struct keeps the reflective path.
 func logosTagOptionsSupported(opts string) bool {
 	seen := make(map[string]bool)
 	for opts != "" {
@@ -165,10 +129,6 @@ func logosTagOptionsSupported(opts string) bool {
 	return true
 }
 
-// logosJSONTagSupported reports whether field i of st has a json tag that
-// both encoding/json modes read the same way: no tag, `-`, or a name valid
-// under the v1 rule with supported options. An unexported field may carry
-// no json tag but `-`.
 func logosJSONTagSupported(st *Struct, i int) bool {
 	tag, has := logosTagLookup(st.Tag(i), "json")
 	if !has || tag == "-" {
@@ -184,9 +144,6 @@ func logosJSONTagSupported(st *Struct, i int) bool {
 	return logosTagOptionsSupported(opts)
 }
 
-// LogosJSONFieldOf returns the encoding/json view of field i of st, and
-// false for a field encoding/json skips: an unexported field or a field
-// whose json tag is exactly "-".
 func LogosJSONFieldOf(st *Struct, i int) (LogosJSONField, bool) {
 	fld := st.Field(i)
 	if !fld.Exported() {
@@ -213,8 +170,6 @@ func LogosJSONFieldOf(st *Struct, i int) (LogosJSONField, bool) {
 	return out, true
 }
 
-// logosStaticUnwrap strips options and const views from a field type: both
-// lower to their element.
 func logosStaticUnwrap(t Type) Type {
 	for {
 		if o := logosAsOption(t); o != nil {
@@ -229,9 +184,6 @@ func logosStaticUnwrap(t Type) Type {
 	}
 }
 
-// logosStaticKindOK reports whether a field of type t may appear in a
-// statically serialized struct. SPEC Sec 10.1 skips generation for
-// interfaces (except closed unions) and for maps with non-string keys.
 func logosStaticKindOK(t Type) bool {
 	u := logosStaticUnwrap(t)
 	switch iface := u.Underlying().(type) {
@@ -244,8 +196,6 @@ func logosStaticKindOK(t Type) bool {
 	return true
 }
 
-// logosIsNonNilPointer reports whether a field type is a bare pointer,
-// possibly under a const view: a required non-nil field.
 func logosIsNonNilPointer(t Type) bool {
 	if cv, ok := t.Underlying().(*ConstView); ok {
 		t = cv.Elem
@@ -254,8 +204,6 @@ func logosIsNonNilPointer(t Type) bool {
 	return ok
 }
 
-// logosStaticTrigger reports whether the struct has json tags, recorded
-// defaults, or non-nil pointer fields.
 func logosStaticTrigger(info *Info, st *Struct) bool {
 	if info != nil && len(info.LogosFieldDefaults[st]) > 0 {
 		return true
@@ -268,8 +216,6 @@ func logosStaticTrigger(info *Info, st *Struct) bool {
 	return false
 }
 
-// logosStaticNameClash reports a method-named field or two fields that
-// encoding/json would give the same key.
 func logosStaticNameClash(st *Struct) bool {
 	return logosFamilyNameClash(st, "JSON")
 }
@@ -297,9 +243,6 @@ func logosFamilyNameClash(st *Struct, family string) bool {
 	return false
 }
 
-// logosContainsLock reports whether t is or transitively contains a sync lock.
-// Generated value-receiver methods must never copy a lock, so such structs keep
-// reflective encoding.
 func logosContainsLock(t Type) bool {
 	return logosContainsLockSeen(t, make(map[Type]bool))
 }
@@ -347,17 +290,6 @@ func logosContainsLockSeen(t Type, seen map[Type]bool) bool {
 	return false
 }
 
-// LogosStaticStruct reports whether named is eligible for the static
-// serializer (SPEC Sec 10.1) and returns its fields in declaration order.
-// A package-level, non-generic, non-alias type declared with a struct
-// literal (`type T struct{...}`) qualifies when it has no embedded field,
-// no interface field, no map field with a non-string key, no field named
-// like a generated method, and no json tag the encoding/json modes read
-// differently, and when it has json tags, recorded field defaults, or
-// non-nil pointer fields. A copy declaration (`type M T`) has the
-// underlying struct of T but no methods, which keeps it a reflective twin
-// of T. rhs is the type expression of the declaration and info supplies
-// the recorded defaults (it may be nil).
 func LogosStaticStruct(info *Info, named *Named, rhs syntax.Expr) ([]*Var, bool) {
 	if _, ok := syntax.Unparen(rhs).(*syntax.StructType); !ok {
 		return nil, false
@@ -390,9 +322,6 @@ func LogosStaticStruct(info *Info, named *Named, rhs syntax.Expr) ([]*Var, bool)
 	return fields, true
 }
 
-// LogosBinaryStruct applies the existing structural, tag, and trigger rules,
-// but reserves only binary-family method names. Keeping this entry separate
-// preserves the established JSON eligibility predicate.
 func LogosBinaryStruct(info *Info, named *Named, rhs syntax.Expr) ([]*Var, bool) {
 	if _, ok := syntax.Unparen(rhs).(*syntax.StructType); !ok {
 		return nil, false
@@ -425,9 +354,6 @@ func LogosBinaryStruct(info *Info, named *Named, rhs syntax.Expr) ([]*Var, bool)
 	return fields, true
 }
 
-// LogosBinaryTypeOK reports whether every serialized field has a binary
-// representation. Visiting a type twice closes a recursive shape; another
-// unsupported branch still rejects the enclosing shape.
 func LogosBinaryTypeOK(t Type) bool {
 	return logosBinaryTypeOK(t, make(map[Type]bool))
 }
@@ -473,10 +399,6 @@ func logosBinaryFieldsOK(st *Struct, seen map[Type]bool) bool {
 	return true
 }
 
-// logosSynthStaticMethods declares the generated serializer methods on
-// every eligible struct of the package, except a method the user already
-// declares. The synthesized objects carry no position, which tells the
-// lowering that no source declaration exists for them.
 func (check *Checker) logosSynthStaticMethods() {
 	if !check.conf.Logos {
 		return
@@ -501,8 +423,6 @@ func (check *Checker) logosSynthStaticMethods() {
 	}
 }
 
-// logosAddStaticFamilyMethods adds one eligible method family to named,
-// except methods the user already declares.
 func (check *Checker) logosAddStaticFamilyMethods(named *Named, family string) {
 	for _, m := range logosStaticMethods {
 		if !strings.HasSuffix(m.name, family) {
@@ -514,7 +434,6 @@ func (check *Checker) logosAddStaticFamilyMethods(named *Named, family string) {
 	}
 }
 
-// logosHasMethod reports whether named already has a method of that name.
 func logosHasMethod(named *Named, name string) bool {
 	for i := range named.NumMethods() {
 		if named.Method(i).Name() == name {
@@ -524,7 +443,6 @@ func logosHasMethod(named *Named, name string) bool {
 	return false
 }
 
-// logosStaticFunc builds the method object of m on named.
 func (check *Checker) logosStaticFunc(named *Named, m logosStaticMethod) *Func {
 	var recvType Type = named
 	if m.pointer {

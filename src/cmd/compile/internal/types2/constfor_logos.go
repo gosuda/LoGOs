@@ -10,18 +10,6 @@ import (
 	"slices"
 )
 
-// LoGo/s M7-S2 `const for` checking (SPEC Sec 2.5, T-205). stmt.go calls
-// in through one hook line; lowering lives in logos/constfor.go.
-//
-// A `const for` unrolls once per field of its struct type in declaration
-// order. Over a concrete struct the body is checked once per field with
-// the field binding installed, so every unrolled body is fully verified
-// (#76): f.Name is a constant, f.Type is the exact field type, and
-// val.[f] carries the exact field type. Over a type parameter (M7-S3)
-// the body is checked once with the field type approximated as any; the
-// per-instantiation copies are verified by the recheck pass (#128).
-
-// LogosConstFor is the recorded meaning of one checked ConstForStmt.
 type LogosConstFor struct {
 	Target    Type
 	Struct    *Struct
@@ -31,20 +19,6 @@ type LogosConstFor struct {
 	GoVersion string
 }
 
-// LogosCopyContext carries the enclosing function state one copy check
-// runs under: the scope that holds the copied code, the enclosing
-// signature (statement copies only), the language version, the
-// narrowing-disqualified sets the main check recorded for the enclosing
-// body, so copies narrow exactly like the source body, the
-// comptime-generic copies emitted so far, which later copies may call,
-// and the file's synthesized package aliases (the `_logos_tN` qualifiers
-// that spell a type of a package the file does not import), each bound to
-// the package object it names, the importer and canonical context
-// the main check recorded, so copied const evaluation opens the same
-// packages and shares instance identity instead of failing closed,
-// and the same-package const-func bodies plus the declared-const proof
-// the main check recorded, so copies resolve their callees without a
-// package-level global. Explicit entries win over the Info proof.
 type LogosCopyContext struct {
 	Scope      *Scope
 	Sig        *Signature
@@ -58,11 +32,6 @@ type LogosCopyContext struct {
 	ConstFuncs map[string]LogosConstFunc
 }
 
-// logosCopyChecker builds the throwaway checker one copy check runs on.
-// It appends every hard diagnostic to *errs, or drops it when errs is
-// nil. Soft diagnostics (unused variables and labels, warn-only rules)
-// never block a fact, and the recheck of the lowered tree reports them.
-// The parser already checked the copy's branches and labels.
 func (ctx LogosCopyContext) logosCopyChecker(pkg *Package, info *Info, errs *[]Error) *Checker {
 	imp := ctx.Importer
 	if imp == nil && info != nil {
@@ -106,11 +75,6 @@ func (ctx LogosCopyContext) logosCopyChecker(pkg *Package, info *Info, errs *[]E
 	return mc
 }
 
-// logosSeedConstFuncs fills a copy checker's CTFE body maps from the
-// first check's Info proof plus explicit context entries, so
-// same-package const-func calls from lowered copies resolve their
-// callees. The Info proof fills only entries the fresh checker lacks;
-// explicit entries overwrite.
 func (check *Checker) logosSeedConstFuncs(info *Info, explicit map[string]LogosConstFunc) {
 	if len(explicit) == 0 && (info == nil || len(info.LogosConstFuncs) == 0) {
 		return
@@ -143,23 +107,12 @@ func (check *Checker) logosSeedConstFuncs(info *Info, explicit map[string]LogosC
 	}
 }
 
-// logosCopyFinish runs the checker's delayed work and records the
-// untyped expressions of one copy check.
 func (check *Checker) logosCopyFinish() {
 	check.processDelayed(0)
 	check.cleanup()
 	check.recordUntyped()
 }
 
-// LogosCheckCopy checks copied statements under ctx, recording types,
-// uses, definitions, selections, instances, and scopes into info for
-// the lowering of one const for unrolling. It reports no diagnostic: the
-// statements copy the body of a concrete const for, whose body the main
-// check already verified once per field (#76), so a copy cannot hold a
-// new defect. The checker here lacks the enclosing function's flow state
-// (active nil narrowings, unchecked error results), so a diagnostic it
-// raised would be provisional, and the recheck of the lowered tree
-// reports the defects that remain.
 func LogosCheckCopy(pkg *Package, info *Info, ctx LogosCopyContext, blocks []*syntax.BlockStmt) {
 	if ctx.Scope == nil || ctx.Sig == nil {
 		return
@@ -171,15 +124,6 @@ func LogosCheckCopy(pkg *Package, info *Info, ctx LogosCopyContext, blocks []*sy
 	mc.logosCopyFinish()
 }
 
-// LogosCheckCopyFunc checks one copied function declaration (an
-// instantiation of a comptime generic) under ctx, recording its types
-// into info, and returns the function object so later copies can call
-// it, with the hard diagnostics of the check. The definition checked
-// with its type parameters approximated, so the copy is the first check
-// of the instantiated body, and it checks as a whole function: no state
-// of an enclosing function is missing, so every hard diagnostic is
-// real. It returns nil when the declaration has no body or ctx holds no
-// scope.
 func LogosCheckCopyFunc(pkg *Package, info *Info, ctx LogosCopyContext, fn *syntax.FuncDecl) (*Func, []Error) {
 	if ctx.Scope == nil || fn.Body == nil {
 		return nil, nil
@@ -196,8 +140,6 @@ func LogosCheckCopyFunc(pkg *Package, info *Info, ctx LogosCopyContext, fn *synt
 	return obj, errs
 }
 
-// logosFieldBinding is the per-iteration field meaning installed while
-// checking one unrolled body over a concrete struct.
 type logosFieldBinding struct {
 	info  *LogosConstFor
 	index int
@@ -207,7 +149,6 @@ type logosFieldBinding struct {
 
 var logosFieldValueSels = []string{"Name", "Index", "Tag", "Exported"}
 
-// logosConstFor checks a const for statement.
 func (check *Checker) logosConstFor(s *syntax.ConstForStmt, ctxt stmtContext) {
 	info := &LogosConstFor{GoVersion: check.conf.GoVersion}
 	if check.logosConstForRange(s, info) {
@@ -219,8 +160,6 @@ func (check *Checker) logosConstFor(s *syntax.ConstForStmt, ctxt stmtContext) {
 	check.Info.LogosConstFor[s] = info
 }
 
-// logosConstForRange resolves the range operand. It reports false after
-// an error, with info left unusable.
 func (check *Checker) logosConstForRange(s *syntax.ConstForStmt, info *LogosConstFor) bool {
 	bad := func(pos syntax.Pos, format string, args ...any) bool {
 		check.errorf(pos, InvalidRangeExpr, "[comptime::const_for_fields] "+format, args...)
@@ -277,8 +216,6 @@ func (check *Checker) logosConstForRange(s *syntax.ConstForStmt, info *LogosCons
 	return true
 }
 
-// logosComptimeRangeFun unwraps a range call's selector when it names a
-// virtual comptime function.
 func (check *Checker) logosComptimeRangeFun(call *syntax.CallExpr) (*syntax.SelectorExpr, string, bool) {
 	fun := call.Fun
 	if idx, ok := fun.(*syntax.IndexExpr); ok {
@@ -300,12 +237,10 @@ func (check *Checker) logosComptimeRangeFun(call *syntax.CallExpr) (*syntax.Sele
 	return sel, sel.Sel.Value, true
 }
 
-// logosComptimeObj returns the synthetic object with the given name.
 func (check *Checker) logosComptimeObj(name string) Object {
 	return logosComptimePackage().Scope().Lookup(name)
 }
 
-// logosConstForBody declares the loop variables and checks the body.
 func (check *Checker) logosConstForBody(s *syntax.ConstForStmt, info *LogosConstFor, ctxt stmtContext) {
 	check.openScope(s, "const for")
 	defer check.closeScope()
@@ -336,11 +271,6 @@ func (check *Checker) logosConstForBody(s *syntax.ConstForStmt, info *LogosConst
 	check.logosFieldDrain(s, info)
 }
 
-// logosConstForConcrete checks the body once per field with the binding
-// installed (#76: every unrolled body passes the full checks). One
-// defect that every iteration reproduces is reported once: an identical
-// diagnostic of a later iteration is dropped, a diagnostic that differs
-// per field is reported.
 func (check *Checker) logosConstForConcrete(s *syntax.ConstForStmt, info *LogosConstFor, inner stmtContext) {
 	saved := check.conf.Error
 	seen := make(map[string]bool)
@@ -372,9 +302,6 @@ func (check *Checker) logosConstForConcrete(s *syntax.ConstForStmt, info *LogosC
 	}
 }
 
-// logosFieldDrain reports bare field-variable uses left pending after
-// the body check. A `_ = f` blank assignment carries no value and is
-// exempt.
 func (check *Checker) logosFieldDrain(s *syntax.ConstForStmt, info *LogosConstFor) {
 	exempt := make(map[*syntax.Name]bool)
 	syntax.Inspect(s.Body, func(n syntax.Node) bool {
@@ -406,8 +333,6 @@ func (check *Checker) logosFieldDrain(s *syntax.ConstForStmt, info *LogosConstFo
 	}
 }
 
-// logosFieldVarNote records a bare use of a field variable for the
-// drain. Supported shapes remove their nodes when they check.
 func (check *Checker) logosFieldVarNote(e *syntax.Name, obj Object) {
 	v, ok := obj.(*Var)
 	if !ok || check.logosFieldVars[v] == nil {
@@ -419,8 +344,6 @@ func (check *Checker) logosFieldVarNote(e *syntax.Name, obj Object) {
 	check.logosFieldPend[e] = v
 }
 
-// logosFieldVarSelMark consumes supported value selections on a field
-// variable. It reports whether Sel is a compile-time field name.
 func (check *Checker) logosFieldVarSelMark(x *operand, e *syntax.SelectorExpr) {
 	name, ok := e.X.(*syntax.Name)
 	if !ok {
@@ -442,9 +365,6 @@ func (check *Checker) logosFieldVarSelMark(x *operand, e *syntax.SelectorExpr) {
 	}
 }
 
-// logosFieldTypeType substitutes f.Type in type position: the exact
-// field type with a binding installed, any over a bare type parameter.
-// It reports false for any other selector.
 func (check *Checker) logosFieldTypeType(e *syntax.SelectorExpr, x *operand) bool {
 	name, ok := e.X.(*syntax.Name)
 	if !ok || e.Sel.Value != "Type" {
@@ -469,7 +389,6 @@ func (check *Checker) logosFieldTypeType(e *syntax.SelectorExpr, x *operand) boo
 	return true
 }
 
-// logosFieldProjExpr checks a val.[f] projection.
 func (check *Checker) logosFieldProjExpr(x *operand, e *syntax.FieldProjExpr) {
 	x.invalidate()
 	x.expr = e
@@ -519,8 +438,6 @@ func (check *Checker) logosFieldProjExpr(x *operand, e *syntax.FieldProjExpr) {
 	x.typ_ = check.logosFieldProjType(info)
 }
 
-// logosFieldProjType is the first-check result type of a projection over
-// a concrete struct: the shared field type, or any when fields differ.
 func (check *Checker) logosFieldProjType(info *LogosConstFor) Type {
 	var shared Type
 	for i := range info.Struct.NumFields() {

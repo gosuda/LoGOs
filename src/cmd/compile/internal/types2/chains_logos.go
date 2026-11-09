@@ -9,22 +9,10 @@ import (
 	. "internal/types/errors"
 )
 
-// LoGo/s M6-S7 type rules for collection chains (SPEC Sec 1.4,
-// T-104.6). Upstream files call in through hook lines only: call.go
-// (chain calls). Every rule below applies only to a package of .lgo
-// files (Config.Logos).
-//
-// Chain methods live on slice types: filter, map, find, any, all,
-// sortBy, first, last, get, take, drop, sum, and count. Lambdas take
-// const-view parameters; mutating the receiver or a parameter fails;
-// `?` in an expression-lambda body propagates from the enclosing
-// function. Lowering lives in logos/chains.go.
-
 const logosChainMutation = "[correctness::const_view_mutation]"
 
 const logosSideEffectBeforeSort = "[suspicious::side_effect_before_sort]"
 
-// logosChainMethods is the set of chain method names.
 var logosChainMethods = map[string]bool{
 	"filter": true,
 	"map":    true,
@@ -41,9 +29,6 @@ var logosChainMethods = map[string]bool{
 	"count":  true,
 }
 
-// logosChainCall checks a chain method call on a slice. It reports true
-// when handled, even on failure; otherwise it reports false and the
-// caller runs the upstream path.
 func (check *Checker) logosChainCall(x *operand, call *syntax.CallExpr) bool {
 	if !check.conf.Logos {
 		return false
@@ -63,9 +48,6 @@ func (check *Checker) logosChainCall(x *operand, call *syntax.CallExpr) bool {
 		x.typ_ = Typ[Invalid]
 		return true
 	}
-	// A chain only reads its receiver, so a const slice view (SPEC T-201)
-	// chains like the plain slice; the qualifier is erased before code
-	// generation. Mutating uses stay rejected inside the lambdas.
 	rt := rx.typ()
 	if c := logosAsConstView(rt); c != nil {
 		rt = c.Elem
@@ -81,8 +63,6 @@ func (check *Checker) logosChainCall(x *operand, call *syntax.CallExpr) bool {
 	return true
 }
 
-// logosChainRoots reports the assignable roots of a receiver: its
-// leftmost name, if any.
 func logosChainRoots(e syntax.Expr) map[string]bool {
 	roots := make(map[string]bool)
 	cur := syntax.Unparen(e)
@@ -103,7 +83,6 @@ func logosChainRoots(e syntax.Expr) map[string]bool {
 	}
 }
 
-// logosChainMethod checks one chain method with element type elem.
 func (check *Checker) logosChainMethod(x *operand, call *syntax.CallExpr, sel *syntax.SelectorExpr, elem Type) {
 	method := sel.Sel.Value
 	roots := logosChainRoots(sel.X)
@@ -216,7 +195,6 @@ func (check *Checker) logosChainMethod(x *operand, call *syntax.CallExpr, sel *s
 	}
 }
 
-// logosChainArity validates the argument count of a chain call.
 func (check *Checker) logosChainArity(call *syntax.CallExpr, args []syntax.Expr, want int) bool {
 	if hasDots(call) {
 		check.errorf(call, InvalidDotDotDot, "invalid use of ... in chain call to %s", call.Fun)
@@ -229,7 +207,6 @@ func (check *Checker) logosChainArity(call *syntax.CallExpr, args []syntax.Expr,
 	return true
 }
 
-// logosChainIntArg checks an integer index argument.
 func (check *Checker) logosChainIntArg(arg syntax.Expr, method string) bool {
 	var op operand
 	check.expr(nil, &op, arg)
@@ -243,8 +220,6 @@ func (check *Checker) logosChainIntArg(arg syntax.Expr, method string) bool {
 	return true
 }
 
-// logosChainPred checks a predicate lambda or function value against
-// func(elem) bool. It returns the result type for callers that need it.
 func (check *Checker) logosChainPred(arg syntax.Expr, elem Type, method string, roots map[string]bool) (Type, bool, bool) {
 	if lam, ok := syntax.Unparen(arg).(*syntax.LambdaExpr); ok {
 		return check.logosChainLambda(lam, elem, logosPredKind, roots)
@@ -252,7 +227,6 @@ func (check *Checker) logosChainPred(arg syntax.Expr, elem Type, method string, 
 	return check.logosChainFuncArg(arg, elem, Typ[Bool], method)
 }
 
-// logosChainMapArg checks a mapper, inferring the element type.
 func (check *Checker) logosChainMapArg(arg syntax.Expr, elem Type, roots map[string]bool) (Type, bool, bool) {
 	if lam, ok := syntax.Unparen(arg).(*syntax.LambdaExpr); ok {
 		return check.logosChainLambda(lam, elem, logosMapKind, roots)
@@ -260,7 +234,6 @@ func (check *Checker) logosChainMapArg(arg syntax.Expr, elem Type, roots map[str
 	return check.logosChainFuncInfer(arg, elem)
 }
 
-// logosChainKeyArg checks a sort key, inferring the ordered key type.
 func (check *Checker) logosChainKeyArg(arg syntax.Expr, elem Type, roots map[string]bool) (Type, bool, bool) {
 	if lam, ok := syntax.Unparen(arg).(*syntax.LambdaExpr); ok {
 		return check.logosChainLambda(lam, elem, logosKeyKind, roots)
@@ -276,7 +249,6 @@ func (check *Checker) logosChainKeyArg(arg syntax.Expr, elem Type, roots map[str
 	return u, isTry, true
 }
 
-// logosPredKind, logosMapKind, logosKeyKind select the chain lambda result rule.
 type logosChainKind int
 
 const (
@@ -285,9 +257,6 @@ const (
 	logosKeyKind
 )
 
-// logosIsTryChain reports whether call is a chain call with a `?`
-// expression-lambda argument: lowering it needs an error hoist in the
-// enclosing function. It returns the offending `?` for diagnostics.
 func logosIsTryChain(call *syntax.CallExpr) *syntax.TryExpr {
 	sel, ok := syntax.Unparen(call.Fun).(*syntax.SelectorExpr)
 	if !ok || sel.Sel == nil || !logosChainMethods[sel.Sel.Value] {
@@ -307,10 +276,6 @@ func logosIsTryChain(call *syntax.CallExpr) *syntax.TryExpr {
 	return nil
 }
 
-// logosChainNestedTry rejects a `?`-chain nested in a lambda body
-// outside a nested function literal: lowering hoists `?`-chains to the
-// enclosing function, which would lift the nested chain out of the
-// per-element closure and unbind its captured parameters.
 func (check *Checker) logosChainNestedTry(body syntax.Node) {
 	syntax.Inspect(body, func(n syntax.Node) bool {
 		if _, ok := n.(*syntax.FuncLit); ok {
@@ -326,12 +291,6 @@ func (check *Checker) logosChainNestedTry(body syntax.Node) {
 	})
 }
 
-// logosRejectTryChainUnder rejects a `?`-chain in a conditional option
-// position (a `??` fallback) outside a nested function literal: the
-// wrapper evaluates it only when the option is absent, so hoisting it
-// to the enclosing function would run it eagerly and propagate an
-// error the source never raises. Left operands and `?.` receivers
-// evaluate unconditionally and lower through transparent wrappers.
 func (check *Checker) logosRejectTryChainUnder(e syntax.Expr) {
 	syntax.Inspect(e, func(n syntax.Node) bool {
 		if _, ok := n.(*syntax.FuncLit); ok {
@@ -347,10 +306,6 @@ func (check *Checker) logosRejectTryChainUnder(e syntax.Expr) {
 	})
 }
 
-// logosChainLambda checks a chain lambda with element type elem. The
-// single parameter is a const view; `?` in an expression body
-// propagates from the enclosing function. It returns the produced type
-// and whether the body ends in `?`.
 func (check *Checker) logosChainLambda(lam *syntax.LambdaExpr, elem Type, kind logosChainKind, roots map[string]bool) (Type, bool, bool) {
 	if len(lam.Params) != 1 {
 		check.errorf(lam.Arrow, IncompatibleAssign, "chain lambda takes exactly one parameter, have %d", len(lam.Params))
@@ -431,17 +386,11 @@ func (check *Checker) logosChainLambda(lam *syntax.LambdaExpr, elem Type, kind l
 	return u, false, true
 }
 
-// logosOrderedKey reports whether u is ordered for sortBy.
 func logosOrderedKey(u Type) bool {
 	b, ok := Unalias(u).(*Basic)
 	return ok && b.Info()&IsOrdered != 0
 }
 
-// logosChainBlock checks a block chain lambda with an already built
-// scope holding the parameter. Blocks lower through an immediately
-// invoked function, so any `?` fails here with misplaced_try: it can
-// never propagate from a boundary. Predicates validate against bool;
-// mappers and keys infer from top-level returns checked once below.
 func (check *Checker) logosChainBlock(lam *syntax.LambdaExpr, roots map[string]bool, scope *Scope, elem Type, kind logosChainKind, block *syntax.BlockStmt) (Type, bool, bool) {
 	check.logosChainNoMutate(roots, block)
 	syntax.Inspect(block, func(n syntax.Node) bool {
@@ -527,8 +476,6 @@ func (check *Checker) logosChainBlock(lam *syntax.LambdaExpr, roots map[string]b
 	return types[0], false, true
 }
 
-// logosChainNoMutate rejects assignments to const-view roots (the
-// receiver and the lambda parameters) inside a chain lambda body.
 func (check *Checker) logosChainNoMutate(roots map[string]bool, body syntax.Node) {
 	syntax.Inspect(body, func(n syntax.Node) bool {
 		as, ok := n.(*syntax.AssignStmt)
@@ -547,8 +494,6 @@ func (check *Checker) logosChainNoMutate(roots map[string]bool, body syntax.Node
 	})
 }
 
-// logosChainMutates reports whether an assignment target mutates a
-// const-view root: the name itself, or a selection or index through it.
 func logosChainMutates(e syntax.Expr, roots map[string]bool) bool {
 	cur := syntax.Unparen(e)
 	for {
@@ -567,8 +512,6 @@ func logosChainMutates(e syntax.Expr, roots map[string]bool) bool {
 	}
 }
 
-// logosChainFuncArg checks a non-lambda chain argument against
-// func(elem) want.
 func (check *Checker) logosChainFuncArg(arg syntax.Expr, elem, want Type, method string) (Type, bool, bool) {
 	var op operand
 	check.expr(nil, &op, arg)
@@ -585,14 +528,6 @@ func (check *Checker) logosChainFuncArg(arg syntax.Expr, elem, want Type, method
 	return want, false, true
 }
 
-// logosWarnSideEffectBeforeSort warns against a chain lambda with a
-// call of unknown purity before `.sortBy()` (SPEC Sec 1.4, T-102): the
-// fused prefix may run its effects an unexpected number of times once
-// sorting materializes the run. Only the lambdas of the chain prefix
-// (the sortBy receiver, transitively) are scanned; the sortBy key
-// lambda itself and the receiver base expression are out of scope. The
-// diagnostic is warn-severity like unapplied_struct_default: it reports
-// through softErrorf and LogosWarnOnly keeps it out of firstErr.
 func (check *Checker) logosWarnSideEffectBeforeSort(sel *syntax.SelectorExpr, recv syntax.Expr) {
 	for _, lam := range logosPrefixLambdas(recv) {
 		if logosLambdaHasImpureCall(check, lam) {
@@ -602,9 +537,6 @@ func (check *Checker) logosWarnSideEffectBeforeSort(sel *syntax.SelectorExpr, re
 	}
 }
 
-// logosPrefixLambdas collects the lambda arguments of the chain calls
-// forming the receiver prefix, outermost first. The walk follows
-// selector calls over known chain methods; anything else ends it.
 func logosPrefixLambdas(recv syntax.Expr) []*syntax.LambdaExpr {
 	var lams []*syntax.LambdaExpr
 	for {
@@ -625,12 +557,6 @@ func logosPrefixLambdas(recv syntax.Expr) []*syntax.LambdaExpr {
 	}
 }
 
-// logosLambdaHasImpureCall reports whether a chain lambda body holds a
-// call of unknown purity. Known-pure calls are conversions (the callee
-// names a type) and builtins without observable effects; every other
-// call, including method and package-qualified calls, counts as unknown.
-// Nested function literals are pruned: their calls run only when the
-// literal is invoked, not per element.
 func logosLambdaHasImpureCall(check *Checker, lam *syntax.LambdaExpr) bool {
 	found := false
 	syntax.Inspect(lam.Body, func(n syntax.Node) bool {
@@ -653,10 +579,6 @@ func logosLambdaHasImpureCall(check *Checker, lam *syntax.LambdaExpr) bool {
 	return found
 }
 
-// logosKnownPureCall reports whether a call is known pure: a conversion
-// or an effect-free builtin. Copy, clear, delete, and append mutate
-// their arguments; panic, recover, print, and println have observable
-// effects; all of those count as unknown.
 func logosKnownPureCall(check *Checker, call *syntax.CallExpr) bool {
 	name, ok := syntax.Unparen(call.Fun).(*syntax.Name)
 	if !ok {
@@ -679,8 +601,6 @@ func logosKnownPureCall(check *Checker, call *syntax.CallExpr) bool {
 	return false
 }
 
-// logosChainFuncInfer checks a non-lambda mapper, inferring the element
-// type from its single result.
 func (check *Checker) logosChainFuncInfer(arg syntax.Expr, elem Type) (Type, bool, bool) {
 	var op operand
 	check.expr(nil, &op, arg)

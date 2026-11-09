@@ -9,47 +9,10 @@ import (
 	. "internal/types/errors"
 )
 
-// Readonly receiver effects for const views (SPEC Sec 2.1, T-201).
-//
-// A value-receiver method called through a const view copies its receiver
-// shallowly, so the copy still aliases the caller's maps, slices, pointers,
-// channels, and closures. The selector therefore admits such a call only
-// when the callee is provably readonly: it must neither mutate nor leak
-// (return, store to a global, send, publish to another goroutine, or hand
-// to an unknown callee) any reference reachable from the receiver. The
-// proof is transitive: same-package callees are summarized on demand with
-// the same rule, keyed by (function, parameter). Anything unprovable fails
-// closed: missing or unchecked bodies, generic instantiations, and
-// recursive cycles are all refused. Interface-dynamic calls are gated in
-// logosConstSelect on the enforced readonly obligation (Func.LogosReadonly,
-// populated by the core owner from syntax.Field.Const); this file owns
-// only the concrete body proof. Imported concrete methods are admitted
-// only on a verified imported Readonly fact; local concrete methods are
-// always proven by scanning local bodies and never short-circuited from
-// the LogosReadonly bit, so a speculative obligation bit cannot admit
-// mutation.
-//
-// The analysis is syntactic taint over checked bodies, so it runs after
-// the callee body was type-checked and reads Info.Defs/Uses/Selections
-// plus TypeOf for the reference-free cut. Package-end deferred checks (see
-// logosDeferReadonlyCheck) run at cleanup, after all bodies are checked,
-// so declaration order cannot change legality. A tainted value whose type
-// is reference-free (ints, strings, plain structs) is harmless and never
-// marks; only reference-bearing taint marks. Fresh-copy imprecision is
-// accepted (a returned fresh slice or a capturing-but-clean closure still
-// fails) rather than admitted unsafely.
-
 func LogosProvenKey(fn *Func) (string, bool) {
 	return logosProofKey(fn)
 }
 
-// LogosReferenceFree reports whether a value of type t can hold no
-// reference, mirroring the producer seal's reference-free cut. It is the
-// exported view of logosReferenceFree for the facts emitter, so the
-// mutation scan can avoid conflating a returned or stored copy of a
-// reference-free value (string, int, plain struct) with a mutation or
-// leak of shared memory. Type parameters and unsafe pointers report
-// false (fail closed).
 func LogosReferenceFree(t Type) bool {
 	if t == nil {
 		return false
@@ -68,15 +31,6 @@ func logosProvenInConf(conf *Config, fn *Func) bool {
 	return conf.LogosProvenReadonly[k]
 }
 
-// LogosStampProvenReadonly reseals THAT invocation's sealed proofs onto the
-// fresh SECOND-check package before the Writer. It iterates the second
-// package scope and sets the concrete capability only for qualified keys
-// present in proven (same pkgPath-qualified, nongeneric sealed proofs from
-// THAT first check). Methods absent from proven - including every actual
-// mutation miss from the first body proof - stay unset. No body scan
-// happens here and no global name cache is consulted; authority is the
-// caller-passed invocation map only. Unqueried methods keep their facts
-// so the Writer never loses a verified proof.
 func LogosStampProvenReadonly(pkg *Package, proven map[string]bool) {
 	if pkg == nil || len(proven) == 0 || pkg.Scope() == nil {
 		return
@@ -157,23 +111,6 @@ func logosProofObject(fn *Func) (string, bool) {
 	return fn.Name(), true
 }
 
-// LogosSealExportedReadonly proves every exported nongeneric concrete
-// value/pointer method of pkg from its checked body and seals the
-// capability bit, so the producer exports a trusted FnFact.Readonly
-// even when the producer never used the method in a qualified
-// assignment. It runs after the first check, before Lower emits facts
-// and before the invocation handoff is collected: newly sealed bits
-// therefore enter both the facts sidecar and the recheck carry.
-//
-// The proof is the same body scan as consumer queries
-// (logosReceiverReadonly on a synthetic checker wired to the finished
-// Info and the file bodies); mutating or unprovable methods fail closed
-// and gain no bit. Generic functions, generic methods, methods on
-// generic types, const-view receivers, and imported methods are skipped,
-// so no generic origin gains a false pure bit. Reference-free and const
-// fast paths count as proven and are sealed explicitly. No global, no
-// name cache, no package clone: bits are set in place on the canonical
-// first-check Funcs.
 func LogosSealExportedReadonly(pkg *Package, info *Info, files []*syntax.File) {
 	if pkg == nil || pkg.Scope() == nil || info == nil || len(files) == 0 {
 		return
@@ -254,9 +191,6 @@ func LogosSealExportedReadonly(pkg *Package, info *Info, files []*syntax.File) {
 			if _, ok := bodies[fn]; !ok {
 				continue
 			}
-			// Fast-path pure receivers (reference-free) report true
-			// without the body-scan marker; sealing here carries
-			// every proven capability into facts and handoff.
 			if synth.logosReceiverReadonly(fn) && !fn.LogosReadonly() {
 				logosMarkReadonlyCapability(fn)
 			}
@@ -328,45 +262,19 @@ func (check *Checker) logosReceiverReadonly(obj *Func) bool {
 			return false
 		}
 	}
-	// Imported concrete (including overlay clones): verified Readonly
-	// fact only, fail closed otherwise. Routes nonlocal origins through
-	// trusted facts before local clone rejection.
 	if decl.Pkg() != check.pkg {
 		return check.logosImportedReadonly(decl)
 	}
 	if decl != obj {
-		// Local instantiation: the recorded body is generic and
-		// type-parameter reference content is unknown.
 		return false
 	}
 	rt := sig.Recv().Type()
-	// An explicit const receiver is already checked under the const rules
-	// inside its body, so the call is admitted by the existing policy.
 	if logosAsConstView(rt) != nil {
 		return true
 	}
-	// Plain pointer receivers are rejected by direct const-view selection
-	// (logosConstSelect) before any scan; only an explicit const receiver
-	// is admitted directly. The interface-satisfaction policy defers
-	// pointer bodies here and scans them, so pure pointer getters satisfy.
-	// A reference-free copy cannot alias caller memory.
 	if logosReferenceFree(rt) {
 		return true
 	}
-	// Local concrete: never short-circuit from the LogosReadonly bit.
-	// Invocation-owned handoff (check.conf.LogosProvenReadonly holds THAT
-	// first check's sealed proofs for THIS package invocation only) is
-	// honored below solely for unavailable/skipped bodies. Any available
-	// second-check body is scanned first, so a lowered-body mutation
-	// cannot pass through a stale positive; only a missing body or an
-	// IgnoreFuncBodies skip falls back to the handoff. The package-wide
-	// after-check stamp (LogosStampProvenReadonly, called from irgen
-	// after the second conf.Check) reseals every handoff key onto its
-	// fresh SECOND-check Func so unqueried methods keep their facts for
-	// the Writer; it copies only first-check hits, never a miss.
-	// The bit is a checked capability the core owner sets only after an
-	// actual proof; the proof here always scans bodies first so a
-	// speculative obligation bit cannot admit mutation.
 	di, ok := check.objMap[decl]
 	if !ok || di == nil || di.fdecl == nil || di.fdecl.Body == nil {
 		if logosProvenInConfForCheck(check, decl) {
@@ -394,17 +302,11 @@ func (check *Checker) logosReceiverReadonly(obj *Func) bool {
 	return ok
 }
 
-// logosRecvKey names one callee summary: arg -1 is the receiver,
-// otherwise it is a parameter index into the callee signature.
 type logosRecvKey struct {
 	fn  *Func
 	arg int
 }
 
-// logosRecvScan holds the state of one top-level receiver proof. memo
-// caches finished callee summaries and active guards recursive cycles;
-// the remaining fields are the per-summary frame, saved and restored
-// around nested summary queries.
 type logosRecvScan struct {
 	check  *Checker
 	memo   map[logosRecvKey]bool
@@ -417,10 +319,6 @@ type logosRecvScan struct {
 	changed bool
 }
 
-// summarize reports whether parameter arg of fn may mutate or leak a
-// reference derived from that parameter. Reference-free parameters are
-// trivially clean. Callees without a checkable body in this package fail
-// closed, as do recursive cycles.
 func (s *logosRecvScan) summarize(fn *Func, arg int) bool {
 	key := logosRecvKey{fn: fn, arg: arg}
 	if done, ok := s.memo[key]; ok {
@@ -539,8 +437,6 @@ func (s *logosRecvScan) taintVar(obj Object) {
 	}
 }
 
-// varLeaks reports whether obj is a tainted variable holding a
-// reference-bearing value.
 func (s *logosRecvScan) varLeaks(obj Object) bool {
 	v, ok := obj.(*Var)
 	if !ok || v == nil || v.Name() == "_" || !s.tainted[Object(v)] {
@@ -564,8 +460,6 @@ func (s *logosRecvScan) varTypeBearing(v *Var) bool {
 	return !logosReferenceFree(t)
 }
 
-// mentionsTaintedRef reports whether n mentions a tainted
-// reference-bearing variable, failing closed on unresolvable names.
 func (s *logosRecvScan) mentionsTaintedRef(n syntax.Node) bool {
 	found := false
 	syntax.Inspect(n, func(x syntax.Node) bool {
@@ -594,8 +488,6 @@ func (s *logosRecvScan) mentionsTaintedRef(n syntax.Node) bool {
 	return found
 }
 
-// refBearing reports whether e has a reference-bearing type, failing
-// closed when the type was not recorded.
 func (s *logosRecvScan) refBearing(e syntax.Expr) bool {
 	t := s.check.Info.TypeOf(e)
 	if t == nil {
@@ -604,8 +496,6 @@ func (s *logosRecvScan) refBearing(e syntax.Expr) bool {
 	return !logosReferenceFree(t)
 }
 
-// taintedRef reports whether e may hold a reference into memory
-// reachable from the summary root.
 func (s *logosRecvScan) taintedRef(e syntax.Expr) bool {
 	if e == nil {
 		return false
@@ -668,7 +558,6 @@ func (s *logosRecvScan) taintedRef(e syntax.Expr) bool {
 	}
 }
 
-// addrTainted reports whether &x may point into root-reachable memory.
 func (s *logosRecvScan) addrTainted(x syntax.Expr) bool {
 	switch n := syntax.Unparen(x).(type) {
 	case *syntax.CompositeLit:
@@ -690,8 +579,6 @@ func (s *logosRecvScan) addrTainted(x syntax.Expr) bool {
 	}
 }
 
-// rootVarOf resolves the root variable holding e, following field,
-// index, slice, and pointer projections.
 func (s *logosRecvScan) rootVarOf(e syntax.Expr) *Var {
 	switch n := syntax.Unparen(e).(type) {
 	case *syntax.Name:
@@ -715,8 +602,6 @@ func (s *logosRecvScan) rootVarOf(e syntax.Expr) *Var {
 	}
 }
 
-// capturesTainted reports whether a function literal captures a tainted
-// reference-bearing variable.
 func (s *logosRecvScan) capturesTainted(body *syntax.BlockStmt) bool {
 	if body == nil {
 		return false
@@ -744,9 +629,6 @@ func (s *logosRecvScan) capturesTainted(body *syntax.BlockStmt) bool {
 	return found
 }
 
-// splitCall unwraps a call target into the function expression, an
-// explicit receiver for method calls, and the argument list. A generic
-// instantiation f[T] resolves through the same path as f.
 func (s *logosRecvScan) splitCall(call *syntax.CallExpr) (fun syntax.Expr, recv syntax.Expr, args []syntax.Expr) {
 	args = call.ArgList
 	fun = syntax.Unparen(call.Fun)
@@ -789,8 +671,6 @@ func (s *logosRecvScan) resolvesToFunc(e syntax.Expr) bool {
 	return false
 }
 
-// callResultTainted reports whether a call result may alias a
-// receiver-derived reference. Reference-free results never do.
 func (s *logosRecvScan) callResultTainted(call *syntax.CallExpr) bool {
 	if !s.refBearing(call) {
 		return false
@@ -806,7 +686,6 @@ func (s *logosRecvScan) callResultTainted(call *syntax.CallExpr) bool {
 		case *Builtin:
 			return s.builtinResultTainted(obj.Name(), call)
 		case *Func:
-			// Direct call: only the inputs below matter.
 		case *Var:
 			if s.tainted[obj] {
 				return true
@@ -856,7 +735,6 @@ func (s *logosRecvScan) anyTainted(args []syntax.Expr) bool {
 	return false
 }
 
-// callEffects checks one call for receiver-derived mutation or escape.
 func (s *logosRecvScan) callEffects(call *syntax.CallExpr) {
 	fun, recv, args := s.splitCall(call)
 	for _, a := range args {
@@ -873,12 +751,7 @@ func (s *logosRecvScan) callEffects(call *syntax.CallExpr) {
 		case *Func:
 			s.directCall(nil, o, args)
 		case *TypeName:
-			// Conversion: no effects.
 		case *Var:
-			// A receiver-derived function value has an unknown
-			// body, so calling it leaks. A clean closure was
-			// scanned where its literal was created, so only
-			// its arguments can leak here.
 			if s.taintedRef(f) || s.anyTainted(args) {
 				s.markRoot()
 			}
@@ -898,8 +771,6 @@ func (s *logosRecvScan) callEffects(call *syntax.CallExpr) {
 				s.directCall(recv, fn, args)
 				return
 			}
-			// A field holding a func value: the body is unknown,
-			// so a receiver-derived function or argument leaks.
 			s.exprEffects(f.X)
 			if s.taintedRef(f.X) || s.anyTainted(args) {
 				s.markRoot()
@@ -931,9 +802,6 @@ func (s *logosRecvScan) callEffects(call *syntax.CallExpr) {
 	}
 }
 
-// directCall checks a statically resolved same-package or imported
-// callee. Imported callees have no visible body and fail closed on
-// tainted inputs; same-package callees use their computed summary.
 func (s *logosRecvScan) directCall(recv syntax.Expr, fn *Func, args []syntax.Expr) {
 	sig, ok := fn.Type().(*Signature)
 	if !ok {
@@ -988,8 +856,6 @@ func (s *logosRecvScan) builtinEffects(name string, call *syntax.CallExpr) {
 	}
 }
 
-// closureCall scans an immediately invoked function literal, binding
-// tainted arguments to its parameters first.
 func (s *logosRecvScan) closureCall(lit *syntax.FuncLit, args []syntax.Expr) {
 	if lit == nil {
 		if s.anyTainted(args) {
@@ -1025,9 +891,6 @@ func (s *logosRecvScan) closureCall(lit *syntax.FuncLit, args []syntax.Expr) {
 	}
 }
 
-// closureEffects scans a function literal where it is created. Its
-// parameters start clean; a later call with tainted arguments marks
-// through the unknown-callee rule instead.
 func (s *logosRecvScan) closureEffects(lit *syntax.FuncLit) {
 	if lit == nil || lit.Body == nil {
 		return
@@ -1035,8 +898,6 @@ func (s *logosRecvScan) closureEffects(lit *syntax.FuncLit) {
 	s.block(lit.Body.List)
 }
 
-// exprEffects checks an expression for calls, receives, and closures,
-// descending into everything else. Bare reads never mark.
 func (s *logosRecvScan) exprEffects(e syntax.Expr) {
 	if e == nil {
 		return
@@ -1180,8 +1041,6 @@ func (s *logosRecvScan) stmt(st syntax.Stmt) {
 			s.block(st.Body.List)
 		}
 	default:
-		// Logos control forms (const if/switch/for) and anything new:
-		// fail closed on receiver-derived references.
 		if s.mentionsTaintedRef(st) {
 			s.markRoot()
 		}
@@ -1277,9 +1136,6 @@ func (s *logosRecvScan) bindName(name *syntax.Name, t bool) {
 	s.taintVar(obj)
 }
 
-// assign checks an assignment: nested call effects, then the write
-// itself, which mutates shared memory when it crosses a reference
-// indirection off a tainted base and aliases taint into its root.
 func (s *logosRecvScan) assign(st *syntax.AssignStmt) {
 	s.exprEffects(st.Lhs)
 	if st.Rhs == nil {
@@ -1315,7 +1171,6 @@ func (s *logosRecvScan) assign(st *syntax.AssignStmt) {
 	}
 }
 
-// store records a write to lhs carrying rhsTainted.
 func (s *logosRecvScan) store(lhs syntax.Expr, rhsTainted bool) {
 	root, base, ok := s.storeTarget(lhs)
 	if !ok {
@@ -1353,10 +1208,6 @@ func (s *logosRecvScan) store(lhs syntax.Expr, rhsTainted bool) {
 	}
 }
 
-// storeTarget resolves the root variable holding a written location.
-// base is non-nil when the write crosses a reference indirection
-// (pointer, map, or slice) off base; ok is false when the location
-// cannot be analyzed.
 func (s *logosRecvScan) storeTarget(lhs syntax.Expr) (root *Var, base syntax.Expr, ok bool) {
 	switch n := syntax.Unparen(lhs).(type) {
 	case *syntax.Name:
@@ -1457,12 +1308,6 @@ func (s *logosRecvScan) typeSwitch(st *syntax.SwitchStmt, g *syntax.TypeSwitchGu
 	}
 }
 
-// logosIfaceMethodReadonly reports whether an interface abstract method
-// carries the enforced readonly obligation. The core owner populates
-// Func.LogosReadonly from syntax.Field.Const; qualification survives
-// cloning/substitution via Origin, so both the instantiated method and
-// its origin are honored. Concrete methods must not use this helper to
-// bypass body proof (see logosReceiverReadonly).
 func logosIfaceMethodReadonly(fn *Func) bool {
 	if fn == nil {
 		return false
@@ -1476,10 +1321,6 @@ func logosIfaceMethodReadonly(fn *Func) bool {
 	return false
 }
 
-// logosMarkReadonlyCapability records a proven local concrete capability
-// via the core setter. It is called only after an actual body proof
-// succeeds, never on request. No other caller records the concrete
-// capability.
 func logosMarkReadonlyCapability(fn *Func) {
 	if fn == nil {
 		return
@@ -1487,13 +1328,6 @@ func logosMarkReadonlyCapability(fn *Func) {
 	fn.SetLogosReadonly(true)
 }
 
-// logosConcreteReadonlySatisfiedNil reports whether an already-proven readonly
-// capability satisfies the obligation without a checker. Writer-only
-// AssignableTo runs with a nil checker after the package-end proof sealed the
-// bit; it must honor that bit instead of failing closed, otherwise the
-// accepted first-check proof is lost and the writer ICEs. Unproven methods
-// (no bit on either the method or its origin) still fail closed; no body
-// scan happens here, so no method is ever marked pure on request.
 func logosConcreteReadonlySatisfiedNil(f, m *Func) bool {
 	if !logosIfaceMethodReadonly(m) {
 		return true
@@ -1507,10 +1341,6 @@ func logosConcreteReadonlySatisfiedNil(f, m *Func) bool {
 	return false
 }
 
-// logosImportedReadonly reports whether an imported concrete method has a
-// verified checked Readonly fact via the core importer overlay
-// (populated from fingerprint-checked facts). Absent or old facts fail
-// closed; this helper runs only for imported methods.
 func (check *Checker) logosImportedReadonly(fn *Func) bool {
 	if fn == nil {
 		return false
@@ -1524,9 +1354,6 @@ func (check *Checker) logosImportedReadonly(fn *Func) bool {
 	return false
 }
 
-// logosCallReadonlyDeferred is one package-end const-view call check. It is
-// registered via check.needsCleanup so cleanup runs it after all bodies
-// are checked, making legality source-order independent.
 type logosCallReadonlyDeferred struct {
 	check    *Checker
 	fn       *Func
@@ -1544,11 +1371,6 @@ func (d *logosCallReadonlyDeferred) cleanup() {
 	}
 }
 
-// logosDeferReadonlyCheck registers a package-end proof for a local
-// concrete value-receiver call through a const view. The selector has
-// already unwrapped the base and tentatively admitted the call; the
-// deferred check reports const_view_mutation at cleanup when the body
-// proof fails.
 func (check *Checker) logosDeferReadonlyCheck(fn *Func, pos syntax.Pos, baseExpr syntax.Expr, name string) {
 	if check == nil || fn == nil {
 		return

@@ -11,70 +11,25 @@ import (
 	"strings"
 )
 
-// LoGo/s M5-S1 type rules for const views `const T` (SPEC Sec 2.1,
-// T-201). A const view is a compile-time-only qualifier, erased by
-// lowering: reading through one yields a const view of the element
-// (transitive), a plain value converts into its view, and a view
-// converts back only as a reference-free copy. Every mutating use
-// reports [correctness::const_view_mutation], and a
-// reference-carrying assignment out of a view reports
-// [correctness::const_view_escape].
-//
-// Upstream files call in through hook lines only: typexpr.go (const
-// view types), typestring.go (printing), predicates.go (identity and
-// nil), subst.go and unify.go (generics), resolver.go (const pointer
-// receivers), call.go (selectors and argument passing), expr.go
-// (index, slice, dereference, and binary reads), range.go (const
-// elements), stmt.go (numeric unwrapping for ++), assignments.go
-// (stores and conversions back), and builtins.go (append, copy,
-// delete, clear, close, panic, len, cap). The parser only produces
-// *syntax.ConstType in LogosMode, so the checker hooks are unreachable
-// in plain Go. Imported callees fail closed: without a visible
-// ParamMutated=0 fact the checker refuses a reference-carrying view,
-// and a fact-0 parameter will read as a const parameter once the const
-// overlay reader lands.
-//
-// Chain lambdas (M6, #41) reuse the declared-type machinery below: a
-// lambda parameter declared with a const view type is const inside its
-// body, exactly like a named function parameter, so no separate chain
-// rule is needed here.
-
 const (
 	logosConstMutation = "[correctness::const_view_mutation]"
 	logosConstEscape   = "[correctness::const_view_escape]"
 )
 
-// ConstView is the types2 representation of a loGo/s const view
-// `const T` (SPEC T-201). Elem is the viewed type T. Underlying is
-// itself so no upstream type switch mistakes a view for its element.
-// Lowering erases views to their Go-facing form.
 type ConstView struct {
-	Elem Type
-	// ConstMap marks the view of a const map declaration (M5-S4, SPEC
-	// T-Sec7). Its plain uses materialize one regular map, so it converts
-	// to map[K]V and passes to standard-library parameters that do not mutate
-	// their map argument; every store fails as for any const view.
+	Elem     Type
 	ConstMap bool
 }
 
 func (c *ConstView) Underlying() Type { return c }
 
-// String prints the view through the qualified writer (like Pointer),
-// so package qualification has one owner in typestring.go.
 func (c *ConstView) String() string { return TypeString(c, nil) }
 
-// logosAsConstView returns the *ConstView denoted by T, looking through
-// aliases, or nil when T is not a const view.
 func logosAsConstView(T Type) *ConstView {
 	t, _ := Unalias(T).(*ConstView)
 	return t
 }
 
-// logosReferenceFree reports whether a value of type t can hold no
-// reference: no pointers, slices, maps, channels, functions, or
-// interfaces inside (SPEC T-201). Only a reference-free copy may leave
-// a const view. Type parameters and unsafe pointers are conservatively
-// not free.
 func logosReferenceFree(t Type) bool {
 	switch t := t.Underlying().(type) {
 	case *Basic:
@@ -92,10 +47,6 @@ func logosReferenceFree(t Type) bool {
 	return false
 }
 
-// logosConstType type-checks a *syntax.ConstType node (`const T`). The
-// element is an ordinary type in the scope of the declaration, so
-// parameter, receiver, result, variable, and field positions all work
-// through the one hook. A doubled `const const T` flattens to one view.
 func (check *Checker) logosConstType(e *syntax.ConstType, def *TypeName) Type {
 	typ := check.varType(e.Elem)
 	if !isValid(typ) {
@@ -107,12 +58,6 @@ func (check *Checker) logosConstType(e *syntax.ConstType, def *TypeName) Type {
 	return &ConstView{Elem: typ}
 }
 
-// logosConstAssign checks an assignment whose source or target involves
-// a const view (SPEC T-201): plain values and nil convert into a view,
-// a view converts back only as a reference-free copy, and anything else
-// leaving a view escapes. It reports true when it handled the
-// assignment (even on failure); otherwise it reports false and the
-// caller runs the upstream path.
 func (check *Checker) logosConstAssign(x *operand, T Type, context string) bool {
 	if !check.conf.Logos {
 		return false
@@ -167,8 +112,6 @@ func (check *Checker) logosConstAssign(x *operand, T Type, context string) bool 
 	return true
 }
 
-// logosConstInferVar unwraps a const-map or reference-free view only
-// when a short variable declaration chose its type from that view.
 func (check *Checker) logosConstInferVar(lhs *Var) {
 	if !check.conf.Logos {
 		return
@@ -180,9 +123,6 @@ func (check *Checker) logosConstInferVar(lhs *Var) {
 	}
 }
 
-// logosConstWrap checks a plain value wrapping into a const view: the
-// value must convert to the element type. Untyped constants convert
-// through the element; anything else escapes.
 func (check *Checker) logosConstWrap(x *operand, csrc *ConstView, cdst *ConstView, T Type, context string) bool {
 	if csrc != nil {
 		return Identical(x.typ(), T)
@@ -229,11 +169,6 @@ func (check *Checker) logosConstCovariant(x *operand, cdst *ConstView, context s
 	return true
 }
 
-// logosCovariantTarget returns the interface I when a []C source converts
-// to a `const []I` target element by the covariance rule (SPEC T-203.4):
-// C implements I and C differs from I. The source may be a defined or
-// alias slice type, found through its underlying type; the target must be
-// an unnamed slice (or alias of one), since a named target is refused.
 func logosCovariantTarget(src, dst Type) Type {
 	if logosAsConstView(src) != nil {
 		return nil
@@ -362,17 +297,11 @@ func (check *Checker) logosCovSliceCall(call *syntax.CallExpr, args []*operand) 
 	}
 }
 
-// constWrapError reports a failed wrap into a const view.
 func (check *Checker) constWrapError(x *operand, T Type, context string) {
 	check.errorf(x, IncompatibleAssign, "%s cannot use %s as %s value in %s", logosConstEscape, x, T, context)
 	x.invalidate()
 }
 
-// logosConstStore reports a store through a const view: any proper
-// subexpression of the assignment target with a const view type means
-// the store reads through the view (index, field, and pointer stores).
-// A bare name rebinds the view itself and stays allowed. It reports
-// true on a violation.
 func (check *Checker) logosConstStore(lhs syntax.Expr) bool {
 	if !check.conf.Logos {
 		return false
@@ -399,9 +328,6 @@ func (check *Checker) logosConstStore(lhs syntax.Expr) bool {
 	return true
 }
 
-// logosConstStoreBase returns the innermost proper subexpression of an
-// assignment target with a const view type, or nil when the store reads
-// through no view.
 func (check *Checker) logosConstStoreBase(lhs syntax.Expr) syntax.Expr {
 	switch e := syntax.Unparen(lhs).(type) {
 	case *syntax.IndexExpr:
@@ -432,11 +358,6 @@ func (check *Checker) logosConstStoreBase(lhs syntax.Expr) syntax.Expr {
 	return nil
 }
 
-// logosConstSelect type-checks selections on a const view base (SPEC
-// T-201): fields read through to a const view of the field type, while
-// methods follow the receiver rule (a plain pointer receiver is
-// refused; value and const receivers unwrap and continue upstream). It
-// reports true when it handled the selection.
 func (check *Checker) logosConstSelect(x *operand, e *syntax.SelectorExpr, sel string) bool {
 	if !check.conf.Logos || x.mode() == typexpr {
 		return false
@@ -472,11 +393,6 @@ func (check *Checker) logosConstSelect(x *operand, e *syntax.SelectorExpr, sel s
 			return true
 		}
 		if _, isIface := Unalias(base.Elem).Underlying().(*Interface); isIface {
-			// Interface-dynamic through a const view: admitted only when
-			// the selected method carries the enforced readonly
-			// obligation (core owner populates Func.LogosReadonly from
-			// syntax.Field.Const). Ordinary unknown interface methods
-			// stay rejected fail-closed.
 			if logosIfaceMethodReadonly(obj) {
 				x.typ_ = base.Elem
 				return false
@@ -485,13 +401,6 @@ func (check *Checker) logosConstSelect(x *operand, e *syntax.SelectorExpr, sel s
 			x.invalidate()
 			return true
 		}
-		// Concrete value receiver: explicit const receivers and
-		// reference-free copies are order-independent and admitted
-		// synchronously. Imported concrete methods are decided
-		// synchronously on the verified Readonly fact (fail closed).
-		// Local concrete methods needing a body proof are tentatively
-		// admitted with a package-end deferred check (cleanup, after all
-		// bodies), so declaration order cannot change legality.
 		rt := sig.Recv().Type()
 		if logosAsConstView(rt) != nil {
 			x.typ_ = base.Elem
@@ -523,9 +432,6 @@ func (check *Checker) logosConstSelect(x *operand, e *syntax.SelectorExpr, sel s
 	return false
 }
 
-// logosConstUnwrapBase unwraps a const view base for index, slice, and
-// dereference checking, so the upstream kind switches see the element
-// type. Results wrap again through logosConstWrapBase below.
 func (check *Checker) logosConstUnwrapBase(x *operand) {
 	if !check.conf.Logos || !x.isValid() {
 		return
@@ -535,10 +441,6 @@ func (check *Checker) logosConstUnwrapBase(x *operand) {
 	}
 }
 
-// logosConstWrapBase wraps a fresh index, slice, or dereference result
-// in a const view when its base reads through a view (transitive
-// reads, SPEC T-201). Map-index results keep their M3-S6 option form
-// for the comma-ok positions.
 func (check *Checker) logosConstWrapBase(x *operand, base syntax.Expr) {
 	if !check.conf.Logos || !x.isValid() || x.mode() == mapindex {
 		return
@@ -549,10 +451,6 @@ func (check *Checker) logosConstWrapBase(x *operand, base syntax.Expr) {
 	x.typ_ = &ConstView{Elem: x.typ()}
 }
 
-// logosConstNumeric unwraps a reference-free const operand for the
-// numeric checks behind ++ and numeric operators, so `total += v` and
-// `v++` on a const int read the value. Stores still fail through the
-// syntax-based store check.
 func (check *Checker) logosConstNumeric(x *operand) {
 	if !check.conf.Logos || !x.isValid() {
 		return
@@ -563,18 +461,11 @@ func (check *Checker) logosConstNumeric(x *operand) {
 	}
 }
 
-// logosConstBinary unwraps reference-free const operands of a binary
-// expression. Non-reference-free views keep their type and fail in the
-// operator checks.
 func (check *Checker) logosConstBinary(x, y *operand) {
 	check.logosConstNumeric(x)
 	check.logosConstNumeric(y)
 }
 
-// logosConstConvert checks an explicit conversion out of a const view
-// (SPEC T-201): string and []byte convert in both directions
-// (zero-copy provenance is a lowering decision), reference-free
-// targets copy out, and anything else escapes.
 func (check *Checker) logosConstConvert(x *operand, T Type) bool {
 	if !check.conf.Logos || !x.isValid() {
 		return false
@@ -600,11 +491,6 @@ func (check *Checker) logosConstConvert(x *operand, T Type) bool {
 	return true
 }
 
-// logosConstBuiltin checks built-in calls with const view arguments
-// (SPEC T-201): append to, copy into, delete from, clear of, and close of
-// a view are refused with const_view_mutation; panic passes to any so
-// reference-carrying views escape with const_view_escape (checked via
-// assignment); read-only built-ins (len, cap, etc.) unwrap their operands.
 func (check *Checker) logosConstBuiltin(x *operand, call *syntax.CallExpr, id builtinId, args []*operand) bool {
 	if !check.conf.Logos {
 		return false
@@ -655,10 +541,6 @@ func (check *Checker) logosConstBuiltin(x *operand, call *syntax.CallExpr, id bu
 			return true
 		}
 	case _Panic:
-		// panic passes its argument to any (recoverable).
-		// Reference-carrying views must not unwrap: check.assignment
-		// will report const_view_escape via logosConstAssign, while
-		// reference-free views (scalars) are safely unwrapped there.
 		return false
 	default:
 		for _, a := range args {
@@ -673,11 +555,6 @@ func (check *Checker) logosConstBuiltin(x *operand, call *syntax.CallExpr, id bu
 	return false
 }
 
-// logosConstArgs checks const view call arguments against the callee
-// parameters (SPEC T-201): const and type-parameter parameters wrap the
-// argument, reference-free elements copy out, and anything else fails.
-// Callees outside the current package fail closed: without a visible
-// ParamMutated=0 fact the checker refuses a reference-carrying view.
 func (check *Checker) logosConstArgs(call *syntax.CallExpr, sigParams *Tuple, args []*operand) {
 	if !check.conf.Logos {
 		return
@@ -720,9 +597,6 @@ func (check *Checker) logosConstArgs(call *syntax.CallExpr, sigParams *Tuple, ar
 	}
 }
 
-// logosConstRecvVar returns a copy of a method receiver variable with a
-// const view receiver unwrapped for validation, so `func (r const *T)`
-// validates as `*T` while the body keeps the declared view.
 func (check *Checker) logosConstRecvVar(recv *Var) *Var {
 	if !check.conf.Logos {
 		return recv
@@ -735,9 +609,6 @@ func (check *Checker) logosConstRecvVar(recv *Var) *Var {
 	return recv
 }
 
-// logosUnpackConstRecv strips one `const` layer from a method receiver
-// type expression, so `func (r const *T) M()` collects on T like `*T`
-// while the declared receiver type stays a view (SPEC T-201).
 func (check *Checker) logosUnpackConstRecv(rtyp syntax.Expr) syntax.Expr {
 	if !check.conf.Logos {
 		return rtyp
@@ -748,9 +619,6 @@ func (check *Checker) logosUnpackConstRecv(rtyp syntax.Expr) syntax.Expr {
 	return rtyp
 }
 
-// logosConstRange unwraps a const range expression to its element type
-// for the iteration checks. The original view stays recorded on the
-// range expression for the value wrap below.
 func (check *Checker) logosConstRange(x *operand) {
 	if !check.conf.Logos || !x.isValid() {
 		return
@@ -760,10 +628,6 @@ func (check *Checker) logosConstRange(x *operand) {
 	}
 }
 
-// logosConstRangeVal wraps a range value in a const view when the range
-// expression reads through a view (SPEC T-201: range over a const
-// slice yields const elements). It is a bare call so the go/types
-// mirror drops it.
 func (check *Checker) logosConstRangeVal(rangeVar syntax.Expr, valp *Type) {
 	if !check.conf.Logos || !isValid(*valp) {
 		return
@@ -774,14 +638,6 @@ func (check *Checker) logosConstRangeVal(rangeVar syntax.Expr, valp *Type) {
 	*valp = &ConstView{Elem: *valp}
 }
 
-// logosConstSliceBound checks the high and max bounds of a slice
-// expression over a const view base (SPEC T-201). `b[:cap(b)]` fails:
-// slicing to the capacity is legal Go but reads past the const length.
-// Constant bounds past an array length stay with the upstream
-// out-of-bounds error, which already rejects what Go rejects. Every
-// other present bound (a `len` call over the same base is provably
-// fine) is recorded in Info.LogosConstSlices for the lowering-time
-// runtime check.
 func (check *Checker) logosConstSliceBound(x *operand, e *syntax.SliceExpr) {
 	if !check.conf.Logos || !x.isValid() {
 		return
@@ -819,8 +675,6 @@ func (check *Checker) logosConstSliceBound(x *operand, e *syntax.SliceExpr) {
 	}
 }
 
-// logosIsCapOf reports whether bound is a `cap(base)` call over the
-// same variable as base.
 func (check *Checker) logosIsCapOf(bound, base syntax.Expr) bool {
 	call, _ := syntax.Unparen(bound).(*syntax.CallExpr)
 	if call == nil || len(call.ArgList) != 1 {
@@ -844,8 +698,6 @@ func (check *Checker) logosIsCapOf(bound, base syntax.Expr) bool {
 	return bOk && aOk && bObj == aObj
 }
 
-// logosIsLenOf reports whether bound is a `len(base)` call over the
-// same variable as base. Slicing to the length is provably fine.
 func (check *Checker) logosIsLenOf(bound, base syntax.Expr) bool {
 	call, _ := syntax.Unparen(bound).(*syntax.CallExpr)
 	if call == nil || len(call.ArgList) != 1 {
@@ -869,7 +721,6 @@ func (check *Checker) logosIsLenOf(bound, base syntax.Expr) bool {
 	return bOk && aOk && bObj == aObj
 }
 
-// constBoundValue returns the constant value of a slice bound.
 func (check *Checker) constBoundValue(bound syntax.Expr) (int64, bool) {
 	un := syntax.Unparen(bound)
 	if tv, ok := check.Info.Types[un]; ok && tv.Value != nil {

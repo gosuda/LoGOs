@@ -11,37 +11,8 @@ import (
 	"slices"
 )
 
-// LoGo/s M3-S4 nil narrowing and the error-first guard (SPEC Sec 2.2,
-// T-202). Upstream files call in through hook lines only: stmt.go
-// (funcBody pre-pass, stmtList early-exit stack, IfStmt branch scopes),
-// typexpr.go (ident resolution), expr.go (`&&` chains), assignments.go
-// (LHS suppression, kill on reassign, tuple tracking), and
-// option_logos.go (`?.` and `??` on narrowed receivers). Every rule below
-// applies only to a package of .lgo files (Config.Logos), so plain Go
-// keeps its types exactly as upstream. All state lives on the Checker,
-// alongside logosConforms and logosPropSel.
-//
-// An `if x != nil` test narrows an option-typed local or parameter x to
-// its element inside the guarded block, through `&&` chains, and after
-// an early exit on `x == nil` (return, panic, break, or continue). A
-// later assignment to x ends narrowing. Narrowing never applies to
-// fields (only plain names narrow), to variables whose address is taken,
-// or to variables assigned inside a closure or a loop body; a syntactic
-// pre-pass per function body collects those disqualified names.
-//
-// The error-first guard tracks `n, err := f()` for callees declared in
-// .lgo whose second result is error: reading n before the `err == nil`
-// proof fails with result_before_error_check. The proof is the
-// fall-through of `if err != nil { exit }` or the inside of
-// `if err == nil {}`. Callees from other packages (the standard library
-// and every other Go package) keep their own contracts.
-
 const logosResultBeforeErr = "[correctness::result_before_error_check]"
 
-// logosEnterFunc runs the M3-S4 pre-pass for one function body: it walks
-// body for address-taken names and for names assigned inside closures or
-// loop bodies, pushes the disqualified set, and ensures the per-function
-// maps exist. Hooked from funcBody; logosExitFunc pops the set.
 func (check *Checker) logosEnterFunc(body *syntax.BlockStmt) {
 	if !check.conf.Logos {
 		return
@@ -73,7 +44,6 @@ func (check *Checker) logosEnterFunc(body *syntax.BlockStmt) {
 	}
 }
 
-// logosExitFunc pops the disqualified set pushed by logosEnterFunc.
 func (check *Checker) logosExitFunc() {
 	if !check.conf.Logos {
 		return
@@ -83,12 +53,6 @@ func (check *Checker) logosExitFunc() {
 	}
 }
 
-// logosDisqualWalk is a syntax.Visitor collecting M3-S4 disqualified
-// names in one walk: every `&name` (any depth), and every plain-name
-// assignment target under a loop or closure. Short declarations with
-// `:=` declare fresh names (shadowing is not an assignment to the outer
-// variable), so only `=` forms disqualify. Walk calls Visit(nil) after
-// each node's children, which pops the node stack.
 type logosDisqualWalk struct {
 	stack  []syntax.Node
 	loop   int
@@ -146,7 +110,6 @@ func (w *logosDisqualWalk) Visit(node syntax.Node) syntax.Visitor {
 	return w
 }
 
-// logosAssignNames returns the plain names written by an assignment lhs.
 func logosAssignNames(lhs syntax.Expr) []string {
 	var names []string
 	for _, e := range syntax.UnpackListExpr(lhs) {
@@ -157,8 +120,6 @@ func logosAssignNames(lhs syntax.Expr) []string {
 	return names
 }
 
-// logosDisqualified reports whether name may never narrow in the current
-// function: its address was taken or it is assigned in a loop or closure.
 func (check *Checker) logosDisqualified(name string) bool {
 	for _, set := range check.logosDisqual {
 		if set[name] {
@@ -168,10 +129,6 @@ func (check *Checker) logosDisqualified(name string) bool {
 	return false
 }
 
-// logosNarrowable reports whether v can carry narrowing: a same-package
-// option-typed variable of local or parameter kind (local, receiver,
-// parameter, or result) that is not disqualified. Package-level
-// variables are excluded.
 func (check *Checker) logosNarrowable(v *Var) bool {
 	if v == nil || v.pkg != check.pkg || v.typ == nil {
 		return false
@@ -187,10 +144,6 @@ func (check *Checker) logosNarrowable(v *Var) bool {
 	return !check.logosDisqualified(v.name)
 }
 
-// logosNilTestOf matches `name != nil` or `name == nil` (either operand
-// order, through parentheses) for a plain name. It returns the resolved
-// variable and whether the operator is `!=`. Selectors and other
-// expressions never match: fields do not narrow.
 func (check *Checker) logosNilTestOf(cond syntax.Expr) (v *Var, isNeq bool, ok bool) {
 	op, ok := syntax.Unparen(cond).(*syntax.Operation)
 	if !ok || (op.Op != syntax.Eql && op.Op != syntax.Neq) || op.Y == nil {
@@ -215,9 +168,6 @@ func (check *Checker) logosNilTestOf(cond syntax.Expr) (v *Var, isNeq bool, ok b
 	return w, op.Op == syntax.Neq, true
 }
 
-// logosCollectNeNil gathers every variable tested `!= nil` along the
-// `&&` spine of cond: `x != nil && rest` narrows x for rest and, through
-// the whole chain, for the guarded block.
 func (check *Checker) logosCollectNeNil(cond syntax.Expr) []*Var {
 	op, ok := syntax.Unparen(cond).(*syntax.Operation)
 	if !ok || op.Y == nil {
@@ -238,9 +188,6 @@ func (check *Checker) logosCollectNeNil(cond syntax.Expr) []*Var {
 	return []*Var{v}
 }
 
-// logosPushNarrow pushes one narrowing frame for the narrowable vars in
-// vars and reports whether a frame was pushed. Pair every true return
-// with logosPopNarrow.
 func (check *Checker) logosPushNarrow(vars []*Var) bool {
 	if !check.conf.Logos {
 		return false
@@ -264,7 +211,6 @@ func (check *Checker) logosPushNarrow(vars []*Var) bool {
 	return true
 }
 
-// logosPopNarrow pops one frame pushed by logosPushNarrow.
 func (check *Checker) logosPopNarrow() {
 	frames := check.logosNarrowStack
 	frame := frames[len(frames)-1]
@@ -278,28 +224,20 @@ func (check *Checker) logosPopNarrow() {
 	}
 }
 
-// logosNarrowBase records the narrowing stack height for stmtList; the
-// matching logosPopToNarrow drops every frame pushed for later
-// statements in the list (early-exit narrowing).
 func (check *Checker) logosNarrowBase() int {
 	return len(check.logosNarrowStack)
 }
 
-// logosPopToNarrow drops narrowing frames down to base.
 func (check *Checker) logosPopToNarrow(base int) {
 	for len(check.logosNarrowStack) > base {
 		check.logosPopNarrow()
 	}
 }
 
-// logosPushIfThen pushes narrowing for the `!= nil` spine of an if
-// condition, for the Then block.
 func (check *Checker) logosPushIfThen(cond syntax.Expr) bool {
 	return check.logosPushNarrow(check.logosCollectNeNil(cond))
 }
 
-// logosPushAndCond pushes narrowing for the `!= nil` tests in the left
-// side of an `&&` before the right side is checked.
 func (check *Checker) logosPushAndCond(op syntax.Operator, lhs syntax.Expr) bool {
 	if !check.conf.Logos || op != syntax.AndAnd {
 		return false
@@ -307,11 +245,6 @@ func (check *Checker) logosPushAndCond(op syntax.Operator, lhs syntax.Expr) bool
 	return check.logosPushNarrow(check.logosCollectNeNil(lhs))
 }
 
-// logosAfterStmt applies early-exit rules for the rest of a statement
-// list: `if x == nil { return|panic|break|continue }` (with no
-// fall-through else) narrows the option x afterwards, and any exiting
-// nil test on err discharges the error-first guard for results bound to
-// err. Hooked from stmtList after each statement.
 func (check *Checker) logosAfterStmt(s syntax.Stmt) {
 	if !check.conf.Logos {
 		return
@@ -336,11 +269,6 @@ func (check *Checker) logosAfterStmt(s syntax.Stmt) {
 	check.logosDischargeErr(v)
 }
 
-// logosExits reports whether s never falls through: a return, a panic
-// call, a break, continue, or goto, a block or if whose every path
-// exits, or an infinite loop. Break and continue count as exits (unlike
-// isTerminating) because the fall-through after the if still proves the
-// nil test.
 func (check *Checker) logosExits(s syntax.Stmt) bool {
 	switch s := s.(type) {
 	case *syntax.ReturnStmt:
@@ -394,8 +322,6 @@ func (check *Checker) logosExits(s syntax.Stmt) bool {
 	}
 }
 
-// logosElseAssigns reports whether the else branch may assign v, voiding
-// the early-exit proof after the if. The scan is syntactic (by name).
 func (check *Checker) logosElseAssigns(els syntax.Stmt, v *Var) bool {
 	assigns := false
 	syntax.Inspect(els, func(n syntax.Node) bool {
@@ -427,8 +353,6 @@ func (check *Checker) logosElseAssigns(els syntax.Stmt, v *Var) bool {
 	return assigns
 }
 
-// logosPushIfElse pushes narrowing for the else block of an `x == nil`
-// condition: the else branch proves `x != nil`.
 func (check *Checker) logosPushIfElse(cond syntax.Expr) bool {
 	v, isNeq, ok := check.logosNilTestOf(cond)
 	if !ok || isNeq {
@@ -437,12 +361,6 @@ func (check *Checker) logosPushIfElse(cond syntax.Expr) bool {
 	return check.logosPushNarrow([]*Var{v})
 }
 
-// logosNarrowIdent is the ident hook: a value read of a narrowed option
-// variable takes its element type, so field and method selection,
-// indirection, and stores into non-nil slots check against the narrowed
-// type. A read of an unchecked error-first result reports
-// result_before_error_check. Assignment targets resolve through
-// logosLHSPush and skip both rules. Hooked from ident.
 func (check *Checker) logosNarrowIdent(x *operand, obj Object) {
 	if !check.conf.Logos {
 		return
@@ -467,24 +385,16 @@ func (check *Checker) logosNarrowIdent(x *operand, obj Object) {
 	}
 }
 
-// logosStmtEnter records the innermost enclosing statement for the
-// joint-use scan; logosStmtExit restores the outer one. Hooked from
-// stmtList around each statement.
 func (check *Checker) logosStmtEnter(s syntax.Stmt) syntax.Stmt {
 	prev := check.logosCurStmt
 	check.logosCurStmt = s
 	return prev
 }
 
-// logosStmtExit restores the statement saved by logosStmtEnter.
 func (check *Checker) logosStmtExit(prev syntax.Stmt) {
 	check.logosCurStmt = prev
 }
 
-// logosStmtReadsErr reports whether the innermost enclosing statement
-// also reads the error name: `fmt.Println(v, err)` and `return v, err`
-// observe both together, so the result use is error-aware and exempt.
-// The scan is syntactic (by name); shadowing across scopes is ignored.
 func (check *Checker) logosStmtReadsErr(name string) bool {
 	if name == "" || name == "_" || check.logosCurStmt == nil {
 		return false
@@ -494,8 +404,6 @@ func (check *Checker) logosStmtReadsErr(name string) bool {
 	return found
 }
 
-// logosNameFinder is a syntax.Visitor marking found when a plain name
-// with the target value occurs.
 type logosNameFinder struct {
 	name  string
 	found *bool
@@ -512,9 +420,6 @@ func (w logosNameFinder) Visit(node syntax.Node) syntax.Visitor {
 	return w
 }
 
-// logosLHSPush marks the assignment target of lhs so ident skips the
-// read rules for the write itself (sub-expression reads still check).
-// Hooked from lhsVar around the lhs evaluation; logosLHSPop clears it.
 func (check *Checker) logosLHSPush(lhs syntax.Expr) {
 	if !check.conf.Logos {
 		return
@@ -526,7 +431,6 @@ func (check *Checker) logosLHSPush(lhs syntax.Expr) {
 	check.logosLHS = append(check.logosLHS, v)
 }
 
-// logosLHSPop clears the mark pushed by logosLHSPush.
 func (check *Checker) logosLHSPop() {
 	if !check.conf.Logos {
 		return
@@ -536,10 +440,6 @@ func (check *Checker) logosLHSPop() {
 	}
 }
 
-// logosKillNarrow ends narrowing and error-first tracking for the plain
-// variable written by lhs: `x = other` kills narrowing until the next
-// re-narrow. Reassigning a result kills its guard; reassigning an error
-// voids every result bound to it. Hooked from assignVar.
 func (check *Checker) logosKillNarrow(lhs syntax.Expr) {
 	if !check.conf.Logos {
 		return
@@ -556,9 +456,6 @@ func (check *Checker) logosKillNarrow(lhs syntax.Expr) {
 	check.logosKillVar(v)
 }
 
-// logosShortDecl kills narrowing for redeclared `:=` targets and tracks
-// `n, err := f()` tuples for the error-first guard. Hooked from
-// shortVarDecl after the initializers run.
 func (check *Checker) logosShortDecl(lhs, rhs []syntax.Expr, lhsVars []*Var) {
 	if !check.conf.Logos {
 		return
@@ -586,9 +483,6 @@ func (check *Checker) logosShortDecl(lhs, rhs []syntax.Expr, lhsVars []*Var) {
 	check.logosTrackTuple(n, errV, call)
 }
 
-// logosTrackCallAssign tracks `n, err = f()` tuples for plain
-// assignments. Hooked from assignVars on the single-call path, after the
-// per-variable kills in assignVar.
 func (check *Checker) logosTrackCallAssign(lhs []syntax.Expr, rhs syntax.Expr) {
 	if !check.conf.Logos || len(lhs) != 2 {
 		return
@@ -608,7 +502,6 @@ func (check *Checker) logosTrackCallAssign(lhs []syntax.Expr, rhs syntax.Expr) {
 	check.logosTrackTuple(n, errV, call)
 }
 
-// logosLhsVar resolves a plain assignment lhs to its variable.
 func (check *Checker) logosLhsVar(e syntax.Expr) (*Var, bool) {
 	id, ok := syntax.Unparen(e).(*syntax.Name)
 	if !ok || id.Value == "_" {
@@ -621,7 +514,6 @@ func (check *Checker) logosLhsVar(e syntax.Expr) (*Var, bool) {
 	return v, true
 }
 
-// logosKillVar ends narrowing and guard tracking for one variable.
 func (check *Checker) logosKillVar(v *Var) {
 	if v == nil || v.pkg != check.pkg {
 		return
@@ -640,7 +532,6 @@ func (check *Checker) logosKillVar(v *Var) {
 	})
 }
 
-// logosNoteDead marks a result skipped by err-frame restore after a kill.
 func (check *Checker) logosNoteDead(v *Var) {
 	if check.logosErrDead == nil {
 		check.logosErrDead = make(map[*Var]bool)
@@ -648,10 +539,6 @@ func (check *Checker) logosNoteDead(v *Var) {
 	check.logosErrDead[v] = true
 }
 
-// logosTrackTuple starts error-first tracking for one `n, err := f()`
-// binding: n must be used only after err is checked. Only callees
-// declared in .lgo (same package) arm the guard, and only when the
-// second result is error. Rebinding err voids previous guards.
 func (check *Checker) logosTrackTuple(n, errV *Var, call *syntax.CallExpr) {
 	if n.pkg != check.pkg || errV.pkg != check.pkg {
 		return
@@ -676,9 +563,6 @@ func (check *Checker) logosTrackTuple(n, errV *Var, call *syntax.CallExpr) {
 	check.logosErrUncheck[n] = errV
 }
 
-// logosIsLgoCall reports whether call targets a function declared in
-// .lgo (the current package). Package-qualified calls into other
-// packages and methods declared outside keep their own contracts.
 func (check *Checker) logosIsLgoCall(call *syntax.CallExpr) bool {
 	switch fun := syntax.Unparen(call.Fun).(type) {
 	case *syntax.Name:
@@ -705,8 +589,6 @@ func (check *Checker) logosIsLgoCall(call *syntax.CallExpr) bool {
 	}
 }
 
-// logosDischargeErr permanently discharges every result bound to err:
-// the fall-through of `if err != nil { exit }` proves err is nil.
 func (check *Checker) logosDischargeErr(errV *Var) {
 	if errV == nil {
 		return
@@ -716,10 +598,6 @@ func (check *Checker) logosDischargeErr(errV *Var) {
 	})
 }
 
-// logosPushChecked temporarily discharges the results bound to the `err`
-// of an `if err == nil` or `if err != nil` condition for the Then block:
-// both branches read err under scrutiny, so the error-branch use in
-// try_chain.lgo stays legal. Pair every true return with logosPopChecked.
 func (check *Checker) logosPushChecked(cond syntax.Expr) bool {
 	if !check.conf.Logos {
 		return false
@@ -747,8 +625,6 @@ func (check *Checker) logosPushChecked(cond syntax.Expr) bool {
 	return true
 }
 
-// logosPopChecked restores one frame pushed by logosPushChecked, except
-// results killed inside the block.
 func (check *Checker) logosPopChecked() {
 	frames := check.logosErrStack
 	frame := frames[len(frames)-1]
@@ -763,22 +639,16 @@ func (check *Checker) logosPopChecked() {
 	}
 }
 
-// logosErrBase records the err-frame height for stmtList; the matching
-// logosPopToErr restores every frame pushed for later statements.
 func (check *Checker) logosErrBase() int {
 	return len(check.logosErrStack)
 }
 
-// logosPopToErr drops err frames down to base.
 func (check *Checker) logosPopToErr(base int) {
 	for len(check.logosErrStack) > base {
 		check.logosPopChecked()
 	}
 }
 
-// logosUnnarrowOperand restores the declared option type of a narrowed
-// receiver for `?.` and `??`, which require an option operand. Hooked
-// from logosOptSelect and logosCoalesce.
 func (check *Checker) logosUnnarrowOperand(x *operand) {
 	if !check.conf.Logos || !x.isValid() {
 		return

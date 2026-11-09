@@ -9,22 +9,8 @@ import (
 	. "internal/types/errors"
 )
 
-// LoGo/s M6-S6 type rules for lambdas (SPEC Sec 1.4, T-104.6).
-// Upstream files call in through hook lines only: expr.go,
-// assignments.go, call.go, stmt.go. Every rule below applies only to a
-// package of .lgo files (Config.Logos).
-//
-// A lambda takes its parameter types from its target function type. The
-// generic expression case below rejects targetless lambdas; targeted
-// positions (assignments, arguments, results) check the lambda against
-// the target signature. Lowering lives in logos/lambda.go.
-
 const logosLambdaNeedsTarget = "[correctness::lambda_needs_target] lambda needs a target function type"
 
-// logosLambdaPrechecked reports whether e was already checked as a
-// lambda argument, filling x from the recorded type. Call arguments
-// check targetlessly in genericExprList, so lambdas pre-check against
-// the parameter types in callExpr and skip the second check here.
 func (check *Checker) logosLambdaPrechecked(x *operand, e syntax.Expr) bool {
 	if !check.conf.Logos {
 		return false
@@ -40,9 +26,6 @@ func (check *Checker) logosLambdaPrechecked(x *operand, e syntax.Expr) bool {
 	return true
 }
 
-// logosLambdaCallArgs pre-checks lambda arguments of a non-generic
-// call against the parameter types, recording each for the skip in
-// genericExprList. Generic callees keep the targetless error below.
 func (check *Checker) logosLambdaCallArgs(call *syntax.CallExpr, sig *Signature) {
 	if !check.conf.Logos || sig.TypeParams().Len() > 0 {
 		return
@@ -67,8 +50,6 @@ func (check *Checker) logosLambdaCallArgs(call *syntax.CallExpr, sig *Signature)
 	}
 }
 
-// lambdaArgTargets maps each call argument to its parameter type,
-// mirroring the callTargets shapes for plain signatures.
 func (check *Checker) lambdaArgTargets(call *syntax.CallExpr, sig *Signature) []Type {
 	n := len(call.ArgList)
 	targets := make([]Type, n)
@@ -80,7 +61,6 @@ func (check *Checker) lambdaArgTargets(call *syntax.CallExpr, sig *Signature) []
 	return targets
 }
 
-// lambdaParamTarget reports the parameter type for argument i.
 func lambdaParamTarget(params *Tuple, variadic, dots bool, nargs, i int) Type {
 	if params == nil {
 		return nil
@@ -108,11 +88,6 @@ func lambdaParamTarget(params *Tuple, variadic, dots bool, nargs, i int) Type {
 	return nil
 }
 
-// logosLambdaTargeted checks a lambda against its target function
-// type: parameter names bind the target parameter types, an expression
-// body returns into the target results, and a block body checks as a
-// function body (returns validated, missing returns reported). The
-// target signature also serves as the enclosing function for `?`.
 func (check *Checker) logosLambdaTargeted(x *operand, sig *Signature, e *syntax.LambdaExpr) exprKind {
 	fail := func() exprKind {
 		x.mode_ = invalid
@@ -183,9 +158,6 @@ func (check *Checker) logosLambdaTargeted(x *operand, sig *Signature, e *syntax.
 	return expression
 }
 
-// logosLambda checks a *syntax.LambdaExpr reached without a target
-// type. A lambda only means something against a known function type,
-// so this position always fails.
 func (check *Checker) logosLambda(x *operand, t *target, e *syntax.LambdaExpr) exprKind {
 	fail := func() exprKind {
 		x.mode_ = invalid

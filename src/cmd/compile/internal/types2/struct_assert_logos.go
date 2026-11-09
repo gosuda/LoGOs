@@ -11,20 +11,10 @@ import (
 	"slices"
 )
 
-// LoGo/s M2-S6 rule for inline interface assertions (SPEC Sec 2.3,
-// T-203.3): `type S struct : I, J { ... }` asserts at the declaration
-// that *S implements I and J. typInternal calls in through one hook
-// line. Lowering emits `var _ I = (*S)(nil)` for each assertion, so the
-// backend sees ordinary Go.
-
-// logosAssertedStruct type-checks the struct of the declaration def and
-// schedules the implements check of every asserted interface. The
-// interface types resolve now, in the scope of the declaration; the
-// check runs after every method of the package is collected.
 func (check *Checker) logosAssertedStruct(e *syntax.AssertedStruct, def *TypeName) Type {
 	typ := new(Struct)
 	check.structType(typ, e.Struct)
-	check.logosStructDefaults(e.Struct, typ) // logos M6-S3 hook: `F T = const` defaults of asserted structs.
+	check.logosStructDefaults(e.Struct, typ)
 	check.recordTypeAndValue(e.Struct, typexpr, typ, nil)
 
 	if !check.conf.Logos {
@@ -49,13 +39,6 @@ func (check *Checker) logosAssertedStruct(e *syntax.AssertedStruct, def *TypeNam
 	return typ
 }
 
-// logosCheckAsserts reports assertion_failed for every asserted type of
-// e that is not an interface or that *def does not implement, with the
-// cause upstream gives for the missing method. Asserted property
-// interfaces (M4-S1) take the conformance path instead: their properties
-// merge across the assert list (conflicts report property_conflict),
-// then each merged property needs a field or method source on *def and
-// each ordinary method must be implemented.
 func (check *Checker) logosCheckAsserts(e *syntax.AssertedStruct, def *TypeName, asserts []Type) {
 	ptr := NewPointer(def.Type())
 	var merged map[string]logosMergedProp

@@ -11,19 +11,6 @@ import (
 	"strings"
 )
 
-// LoGo/s M2-S5 type rules for switch expressions (SPEC Sec 2.3, T-203.1).
-// exprInternal calls in through one hook line.
-//
-// A switch expression takes the header of a switch statement. Its arms
-// carry expressions instead of statement lists, and its result type is
-// the common type of the arms: the identical type of the typed arms, the
-// default type of untyped constants, or the pointer, map, slice, or
-// interface type of the other arms when the remaining arms are nil. A
-// value switch needs a default arm; a type switch needs a default arm or
-// full coverage of a closed union and nil. The checker mirrors
-// switchStmt and typeSwitchStmt of stmt.go, which stay untouched.
-
-// logosSwitchExpr type-checks the switch expression e into x.
 func (check *Checker) logosSwitchExpr(x *operand, e *syntax.SwitchExpr) exprKind {
 	x.invalidate()
 	x.typ_ = Typ[Invalid]
@@ -36,13 +23,6 @@ func (check *Checker) logosSwitchExpr(x *operand, e *syntax.SwitchExpr) exprKind
 	check.openScope(e, "switch")
 	defer check.closeScope()
 
-	// A `?` as the init's direct operand would be accepted by the
-	// assignment hooks below, but lowering moves the init inside the
-	// `func() T` literal, which has no error result to propagate to.
-	// Report it and handle the init without the hooks (so the `?` is
-	// claimed exactly once), then check tag and arms normally so their
-	// references resolve and are marked used. A nested `?` is left to
-	// the expression fallback, which reports it exactly once.
 	if t := logosInitTryDirect(e.Init); t != nil {
 		check.logosTryMisplaced(t)
 		check.logosInitVarsInvalid(e.Init)
@@ -75,11 +55,6 @@ func (check *Checker) logosSwitchExpr(x *operand, e *syntax.SwitchExpr) exprKind
 	return expression
 }
 
-// logosInitTryDirect returns the `?` when the switch-expression init is a
-// statement shape whose hooks would claim it: x := f()?, x = f()?, or
-// f()?, with the `?` as the single outermost right-hand side or the
-// statement itself. A nested `?` such as g(f()?) is left to the
-// expression fallback, which reports it exactly once.
 func logosInitTryDirect(init syntax.SimpleStmt) *syntax.TryExpr {
 	switch s := init.(type) {
 	case *syntax.AssignStmt:
@@ -99,11 +74,6 @@ func logosInitTryDirect(init syntax.SimpleStmt) *syntax.TryExpr {
 	return nil
 }
 
-// logosInitVarsInvalid handles the left-hand side of a rejected
-// switch-expression init without the assignment hooks: `:=` names are
-// declared with invalid type and marked used, so tag and arm references
-// to them resolve silently; `=` targets are marked used. Anything else is
-// broken beyond the reported misplaced `?` and needs nothing.
 func (check *Checker) logosInitVarsInvalid(init syntax.SimpleStmt) {
 	s, ok := init.(*syntax.AssignStmt)
 	if !ok {
@@ -127,7 +97,6 @@ func (check *Checker) logosInitVarsInvalid(init syntax.SimpleStmt) {
 	}
 }
 
-// logosHasDefault reports whether one of arms is a default arm.
 func logosHasDefault(arms []*syntax.ArmClause) bool {
 	for _, arm := range arms {
 		if arm.Cases == nil {
@@ -137,7 +106,6 @@ func logosHasDefault(arms []*syntax.ArmClause) bool {
 	return false
 }
 
-// logosMultipleArmDefaults reports every default arm after the first.
 func (check *Checker) logosMultipleArmDefaults(arms []*syntax.ArmClause) {
 	var first *syntax.ArmClause
 	for _, arm := range arms {
@@ -152,16 +120,12 @@ func (check *Checker) logosMultipleArmDefaults(arms []*syntax.ArmClause) {
 	}
 }
 
-// logosArmResult type-checks the result expression of arm and returns its
-// operand. The caller opens the arm scope.
 func (check *Checker) logosArmResult(arm *syntax.ArmClause) *operand {
 	var v operand
 	check.expr(nil, &v, arm.Body)
 	return &v
 }
 
-// logosValueArms checks the tag, the case values, and the result of every
-// arm of a value switch expression.
 func (check *Checker) logosValueArms(e *syntax.SwitchExpr) []*operand {
 	var tag operand
 	if e.Tag != nil {
@@ -193,8 +157,6 @@ func (check *Checker) logosValueArms(e *syntax.SwitchExpr) []*operand {
 	return results
 }
 
-// logosTypeArms checks the guard, the case types, and the result of every
-// arm of a type switch expression, then its coverage.
 func (check *Checker) logosTypeArms(e *syntax.SwitchExpr, guard *syntax.TypeSwitchGuard) []*operand {
 	lhs := guard.Lhs
 	if lhs != nil {
@@ -256,11 +218,6 @@ func (check *Checker) logosTypeArms(e *syntax.SwitchExpr, guard *syntax.TypeSwit
 	return results
 }
 
-// logosCoverage reports nonexhaustive_switch when the cases of a type
-// switch expression without default miss a member of the closed union
-// operand sx, or nil. A switch on any other interface type has no finite
-// member set, so only a default arm covers it. Misses list members in
-// declaration order, then nil.
 func (check *Checker) logosCoverage(e *syntax.SwitchExpr, sx *operand, seen map[Type]syntax.Expr) {
 	var misses []string
 	if tset := logosClosedUnion(sx.typ()); tset != nil {
@@ -281,9 +238,6 @@ func (check *Checker) logosCoverage(e *syntax.SwitchExpr, sx *operand, seen map[
 	check.errorf(e, InvalidTypeSwitch, "%s switch on %s misses: %s", logosNonExhaust, sx.typ(), strings.Join(misses, ", "))
 }
 
-// logosCovers reports whether some case type in seen matches the member
-// type member: the identical type, or an interface that member implements
-// (a sub-union covers its members, any covers every member).
 func (check *Checker) logosCovers(member Type, seen map[Type]syntax.Expr) bool {
 	for c := range seen {
 		if c == nil {
@@ -299,14 +253,6 @@ func (check *Checker) logosCovers(member Type, seen map[Type]syntax.Expr) bool {
 	return false
 }
 
-// logosArmType computes the common type of the arm operands and converts
-// every arm to it. It returns nil when an arm is invalid or the arms do
-// not agree, after reporting the cause.
-//
-// A typed arm fixes the common type: every other arm must be assignable
-// to it (an untyped constant by representability, nil iff the type is
-// nilable), so untyped arms are never folded with maxType first. Only
-// when no typed arm exists are the untyped arms folded and defaulted.
 func (check *Checker) logosArmType(e *syntax.SwitchExpr, arms []*operand) Type {
 	for _, v := range arms {
 		if !v.isValid() {
@@ -360,10 +306,6 @@ func (check *Checker) logosArmType(e *syntax.SwitchExpr, arms []*operand) Type {
 		common = Default(untyped)
 	}
 	for _, v := range arms {
-		// Pre-validate, so a failing arm reports only the tagged
-		// mismatch below and never the untagged assignment message.
-		// This covers typed and defaulted common types alike: a nil
-		// arm fails iff the common type is not nilable.
 		if !check.logosArmAssignable(v, common) {
 			agree = false
 			continue
@@ -379,11 +321,6 @@ func (check *Checker) logosArmType(e *syntax.SwitchExpr, arms []*operand) Type {
 	return common
 }
 
-// logosArmAssignable reports whether the arm v converts to the common
-// type (a typed arm's type, or the defaulted type when every arm is
-// untyped): an untyped constant by representability, nil iff the type is
-// nilable. On failure it reports switch_arm_mismatch and the caller skips
-// the assignment, so each arm yields at most the one tagged error.
 func (check *Checker) logosArmAssignable(v *operand, common Type) bool {
 	if ok, _ := v.assignableTo(check, common, nil); !ok {
 		check.errorf(v, MismatchedTypes, "%s arms have types %s and %s", logosArmMismatch, common, v.typ())
