@@ -113,6 +113,11 @@ func TestAdvWithlockLeak(t *testing.T) {
 			[]string{"26 correctness::withlock_leak deny"},
 		},
 		{
+			"interiorPointerReturnEscapes",
+			"func p6(l *Locked[Box]) *int { var out *int; l.WithLock(func(b *Box) { v := *b; out = v.p }); return out }\n",
+			[]string{"26 correctness::withlock_leak deny"},
+		},
+		{
 			"reassignedAliasReported",
 			"func p12(l *Locked[Box]) { l.WithLock(func(b *Box) { c := b; c = &Box{}; leaked = c }) }\n",
 			[]string{"26 correctness::withlock_leak deny"},
@@ -155,15 +160,6 @@ func TestAdvWithlockLeak(t *testing.T) {
 				t.Errorf("results = %q, want %q", got, tt.want)
 			}
 		})
-	}
-}
-
-func TestAdvWithlockLeakInteriorPointer(t *testing.T) {
-	testenv.MustHaveGoBuild(t)
-	body := "func p6(l *Locked[Box]) *int { var out *int; l.WithLock(func(b *Box) { v := *b; out = v.p }); return out }\n"
-	got := summarize(Run(checkSyncPath(t, "x.go", advLeakHead+body)))
-	if len(got) != 0 {
-		t.Errorf("results = %q, want no findings", got)
 	}
 }
 

@@ -235,7 +235,7 @@ func (c *leakCheck) aliasFromAssign(x *syntax.AssignStmt) bool {
 		if obj == nil || c.isParamObj(obj) || c.aliases[obj] {
 			continue
 		}
-		if c.carriesPtr(rhs[i]) {
+		if c.carriesPtr(rhs[i]) || c.isDerefCopy(rhs[i]) {
 			c.aliases[obj] = true
 			grew = true
 		}
@@ -312,7 +312,7 @@ func (c *leakCheck) carriesPtr(e syntax.Expr) bool {
 			}
 			if sel, ok := p.(*syntax.SelectorExpr); ok {
 				if operand, ok := sel.X.(*syntax.Name); ok && operand == name {
-					if !addrTaken(e, sel) {
+					if !addrTaken(e, sel) && !c.fieldLeaks(sel) {
 						return true
 					}
 				}
@@ -335,6 +335,41 @@ func addrTaken(e syntax.Node, sel *syntax.SelectorExpr) bool {
 		op, ok := p.(*syntax.Operation)
 		return ok && op.Op == syntax.And && op.Y == nil && syntax.Unparen(op.X) == syntax.Node(sel)
 	}
+}
+
+func (c *leakCheck) isDerefCopy(e syntax.Expr) bool {
+	op, ok := syntax.Unparen(e).(*syntax.Operation)
+	if !ok || op.Op != syntax.Mul || op.Y != nil {
+		return false
+	}
+	name, ok := syntax.Unparen(op.X).(*syntax.Name)
+	if !ok {
+		return false
+	}
+	return c.isParamUse(name) || c.isAliasUse(name)
+}
+
+func (c *leakCheck) fieldLeaks(sel *syntax.SelectorExpr) bool {
+	s := c.pass.Info.Selections[sel]
+	if s == nil || s.Kind() != types2.FieldVal {
+		return false
+	}
+	obj, ok := s.Obj().(*types2.Var)
+	if !ok || obj.Type() == nil {
+		return false
+	}
+	return isReferenceType(obj.Type())
+}
+
+func isReferenceType(t types2.Type) bool {
+	switch types2.Unalias(t).Underlying().(type) {
+	case *types2.Pointer, *types2.Slice, *types2.Map, *types2.Chan, *types2.Signature, *types2.Interface:
+		return true
+	}
+	if b, ok := types2.Unalias(t).Underlying().(*types2.Basic); ok && b.Kind() == types2.UnsafePointer {
+		return true
+	}
+	return false
 }
 
 func (c *leakCheck) captures(body syntax.Node) bool {
