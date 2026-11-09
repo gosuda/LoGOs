@@ -1,0 +1,41 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package runtime
+
+import "unsafe"
+
+var (
+	LogosMFrameSize   = unsafe.Sizeof(m{}.fastCgoFrame)
+	LogosMStampSize   = unsafe.Sizeof(m{}.fastCallEnterNano)
+	LogosMFlagSize    = unsafe.Sizeof(m{}.inFastCall)
+	LogosMFrameOff    = unsafe.Offsetof(m{}.fastCgoFrame)
+	LogosMStampOff    = unsafe.Offsetof(m{}.fastCallEnterNano)
+	LogosMSize        = unsafe.Sizeof(m{})
+	LogosGArenaSize   = unsafe.Sizeof(g{}.logosArena)
+	LogosGRetOKSize   = unsafe.Sizeof(g{}.logosArenaRetOK)
+	LogosGRegionsSize = unsafe.Sizeof(g{}.logosRegions)
+	LogosGFreeSize    = unsafe.Sizeof(g{}.logosRegionFree)
+	LogosGSiteSize    = unsafe.Sizeof(g{}.logosErrSite)
+	LogosGGroupSize   = unsafe.Sizeof(g{}.logosGroup)
+	LogosGLastSize    = unsafe.Sizeof(g{}.logosErrLast)
+	LogosGArenaOff    = unsafe.Offsetof(g{}.logosArena)
+	LogosGRetOKOff    = unsafe.Offsetof(g{}.logosArenaRetOK)
+	LogosGRegionsOff  = unsafe.Offsetof(g{}.logosRegions)
+	LogosGFreeOff     = unsafe.Offsetof(g{}.logosRegionFree)
+	LogosGSiteOff     = unsafe.Offsetof(g{}.logosErrSite)
+	LogosGGroupOff    = unsafe.Offsetof(g{}.logosGroup)
+	LogosGLastOff     = unsafe.Offsetof(g{}.logosErrLast)
+	LogosGSize        = unsafe.Sizeof(g{})
+	LogosPPoolSize    = unsafe.Sizeof(p{}.logosArenaPool)
+	LogosPNSize       = unsafe.Sizeof(p{}.logosArenaPoolN)
+	LogosPRegionSize  = unsafe.Sizeof(p{}.logosRegionPool)
+	LogosPPoolOff     = unsafe.Offsetof(p{}.logosArenaPool)
+	LogosPNOff        = unsafe.Offsetof(p{}.logosArenaPoolN)
+	LogosPRegionOff   = unsafe.Offsetof(p{}.logosRegionPool)
+	LogosPSize        = unsafe.Sizeof(p{})
+	LogosGAlign       = unsafe.Alignof(g{})
+	LogosMAlign       = unsafe.Alignof(m{})
+	LogosPAlign       = unsafe.Alignof(p{})
+)
