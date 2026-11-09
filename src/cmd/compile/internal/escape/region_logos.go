@@ -334,9 +334,9 @@ func (b *batch) logosRegionRhs(rhs ir.Node, prov map[*ir.Name]*logosRegion, pend
 			}
 			return r, logosRhsOK
 		case ir.LogosRegionNew, ir.LogosRegionMake:
-			return b.logosRegionProvOf(n.Args[logosRegionArgBase(n)], prov, pending)
+			return b.logosRegionProvOf(n.Args[ir.LogosRegionArgBase(n)], prov, pending)
 		case ir.LogosRegionAppend:
-			base := logosRegionArgBase(n)
+			base := ir.LogosRegionArgBase(n)
 			r, st := b.logosRegionProvOf(n.Args[base], prov, pending)
 			if st != logosRhsOK {
 				return nil, st
@@ -410,7 +410,7 @@ func (e *escape) logosRegionCall(ks []hole, call *ir.CallExpr) {
 			return
 		}
 		prov := e.logosRegionProv(e.curfn)
-		argBase := logosRegionArgBase(call)
+		argBase := ir.LogosRegionArgBase(call)
 		r := e.logosRegionOf(call.Args[argBase], prov.prov)
 		if r == nil {
 			return
@@ -431,17 +431,6 @@ func (e *escape) logosRegionCall(ks []hole, call *ir.CallExpr) {
 			e.exprSkipInit(e.logosRegionContents(r).asHole().note(call, "region append"), call.Args[argBase+2])
 		}
 	}
-}
-
-func logosRegionArgBase(call *ir.CallExpr) int {
-	callee := ir.StaticCalleeName(call.Fun)
-	if callee == nil {
-		return 0
-	}
-	if strings.IndexByte(callee.Sym().Name, '[') >= 0 {
-		return 1
-	}
-	return 0
 }
 
 func (b *batch) logosRegionSeed(enqueue func(*location)) {
@@ -777,7 +766,7 @@ func (b *batch) logosRegionSiteReason(site *logosCand) string {
 			return "size exceeds region chunk"
 		}
 	case ir.LogosRegionMake:
-		if n, ok := constInt(site.call.Args[logosRegionArgBase(site.call)+1]); ok && n >= 0 && int64(elem.Size())*n > LogosArenaMaxBytes {
+		if n, ok := constInt(site.call.Args[ir.LogosRegionArgBase(site.call)+1]); ok && n >= 0 && int64(elem.Size())*n > LogosArenaMaxBytes {
 			return "size exceeds region chunk"
 		}
 	}

@@ -64,6 +64,16 @@ func LogosRegionCallOp(call *CallExpr) LogosRegionOp {
 	return LogosRegionNone
 }
 
+func LogosRegionArgBase(call *CallExpr) int {
+	callee := StaticCalleeName(call.Fun)
+	if callee == nil {
+		return 0
+	}
+	if strings.IndexByte(callee.Sym().Name, '[') >= 0 {
+		return 1
+	}
+	return 0
+}
 func LogosRegionElem(call *CallExpr) *types.Type {
 	if call == nil {
 		return nil

@@ -626,12 +626,13 @@ func (p *logosRegionLowering) lowerSiteBumpNew(call *ir.CallExpr, elem *types.Ty
 }
 
 func (p *logosRegionLowering) lowerSiteMake(call *ir.CallExpr, h, g ir.Node) ir.Node {
-	if len(call.Args) != 2 {
+	argBase := ir.LogosRegionArgBase(call)
+	if len(call.Args) != argBase+2 {
 		return call
 	}
 	pos := call.Pos()
 	init := p.init
-	lenNode := safeExpr(call.Args[1], init)
+	lenNode := safeExpr(call.Args[argBase+1], init)
 	rtyp := reflectdata.TypePtrAt(pos, call.Type().Elem())
 	pt := typecheck.TempAt(pos, p.fn, types.Types[types.TUNSAFEPTR])
 	len64 := typecheck.Conv(lenNode, types.Types[types.TINT64])
@@ -650,10 +651,12 @@ func (p *logosRegionLowering) lowerSiteMake(call *ir.CallExpr, h, g ir.Node) ir.
 }
 
 func (p *logosRegionLowering) lowerSiteAppend(call *ir.CallExpr, h, g ir.Node) ir.Node {
-	if len(call.Args) < 2 {
+	argBase := ir.LogosRegionArgBase(call)
+	if len(call.Args) < argBase+2 {
 		return call
 	}
-	app := ir.NewCallExpr(call.Pos(), ir.OAPPEND, nil, []ir.Node(call.Args[1:]))
+	app := ir.NewCallExpr(call.Pos(), ir.OAPPEND, nil, []ir.Node(call.Args[argBase+1:]))
+	app.IsDDD = call.IsDDD
 	app.SetType(call.Type())
 	app.SetTypecheck(1)
 	p.appends = append(p.appends, logosRegionAppendEntry{app, h, g})
@@ -663,9 +666,12 @@ func (p *logosRegionLowering) lowerSiteAppend(call *ir.CallExpr, h, g ir.Node) i
 func (p *logosRegionLowering) appendInit(init *ir.Nodes, stmt ir.Node) {
 	appendWalkStmt(init, stmt)
 }
-
 func (p *logosRegionLowering) regionName(call *ir.CallExpr) *ir.Name {
-	r := call.Args[0]
+	argBase := ir.LogosRegionArgBase(call)
+	if len(call.Args) <= argBase {
+		return nil
+	}
+	r := call.Args[argBase]
 	for range 16 {
 		name, ok := r.(*ir.Name)
 		if !ok {
@@ -711,7 +717,7 @@ func logosRegionGrowslice(g logosRegionGrow) *ir.CallExpr {
 	if v, ok := ssagen.LogosRegionAppends.Load(g.app); ok {
 		info := v.(ssagen.LogosRegionGrowInfo)
 		elem := g.slice.Type().Elem()
-		fn := typecheck.LookupRuntime("logosRegionGrowSlice")
+		fn := typecheck.LookupRuntime("logosRegionGrowSlice", elem, elem)
 		pos := g.app.Pos()
 		old := base.Pos
 		base.Pos = pos

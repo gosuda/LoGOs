@@ -500,3 +500,123 @@ func TestLogosRegionOpenNoTupleTemp(t *testing.T) {
 		t.Fatal("logosRegionOpen call not found in open init")
 	}
 }
+
+func TestLogosRegionDictFirstLowers(t *testing.T) {
+	enableLogosRegion(t)
+	fn := regionTestFn()
+	openCall, openAs, r := regionTestOpen(fn)
+	elem := types.Types[types.TINT]
+	dict := typecheck.TempAt(src.NoXPos, fn, types.Types[types.TUNSAFEPTR])
+	newFun := ir.NewNameAt(src.NoXPos, regionTestPkg.Lookup("New[go.shape.int]"), types.NewSignature(nil, nil, nil))
+	newFun.Class = ir.PFUNC
+	call := ir.NewCallExpr(src.NoXPos, ir.OCALLFUNC, newFun, []ir.Node{dict, r})
+	call.SetType(types.NewPtr(elem))
+	call.SetTypecheck(1)
+	ir.LogosRegions.Place(call)
+	ir.LogosRegions.Live(openCall)
+	p := typecheck.TempAt(src.NoXPos, fn, types.NewPtr(elem))
+	as := ir.NewAssignStmt(src.NoXPos, p, call)
+	as.SetTypecheck(1)
+	p.Defn = as
+	fn.Body = ir.Nodes{regionTestBlock(openAs, as)}
+	logosRegionLower(fn)
+	if as.Y == ir.Node(call) {
+		t.Fatal("dict-first placed new not lowered")
+	}
+	ir.Visit(as, func(n ir.Node) {
+		if n == ir.Node(dict) {
+			t.Fatal("lowered init keeps the dictionary argument")
+		}
+	})
+}
+
+func TestLogosRegionDictFirstMake(t *testing.T) {
+	enableLogosRegion(t)
+	fn := regionTestFn()
+	openCall, openAs, r := regionTestOpen(fn)
+	ir.LogosRegions.Live(openCall)
+	elem := types.NewSlice(types.Types[types.TINT])
+	dict := typecheck.TempAt(src.NoXPos, fn, types.Types[types.TUNSAFEPTR])
+	n := typecheck.TempAt(src.NoXPos, fn, types.Types[types.TINT])
+	makeFun := ir.NewNameAt(src.NoXPos, regionTestPkg.Lookup("Make[go.shape.int]"), types.NewSignature(nil, nil, nil))
+	makeFun.Class = ir.PFUNC
+	makeCall := ir.NewCallExpr(src.NoXPos, ir.OCALLFUNC, makeFun, []ir.Node{dict, r, n})
+	makeCall.SetType(elem)
+	makeCall.SetTypecheck(1)
+	ir.LogosRegions.Place(makeCall)
+	slice := typecheck.TempAt(src.NoXPos, fn, elem)
+	makeAs := ir.NewAssignStmt(src.NoXPos, slice, makeCall)
+	makeAs.SetTypecheck(1)
+	fn.Body = ir.Nodes{regionTestBlock(openAs, makeAs)}
+	logosRegionLower(fn)
+	if makeAs.Y == ir.Node(makeCall) {
+		t.Fatal("dict-first placed make not lowered")
+	}
+	ir.Visit(makeAs, func(x ir.Node) {
+		if x == ir.Node(dict) {
+			t.Fatal("lowered make keeps the dictionary argument")
+		}
+	})
+}
+
+func TestLogosRegionDictFirstAppend(t *testing.T) {
+	enableLogosRegion(t)
+	fn := regionTestFn()
+	openCall, openAs, r := regionTestOpen(fn)
+	ir.LogosRegions.Live(openCall)
+	elem := types.NewSlice(types.Types[types.TINT])
+	dict := typecheck.TempAt(src.NoXPos, fn, types.Types[types.TUNSAFEPTR])
+	s := typecheck.TempAt(src.NoXPos, fn, elem)
+	v := typecheck.TempAt(src.NoXPos, fn, types.Types[types.TINT])
+	appendFun := ir.NewNameAt(src.NoXPos, regionTestPkg.Lookup("Append[go.shape.int]"), types.NewSignature(nil, nil, nil))
+	appendFun.Class = ir.PFUNC
+	appendCall := ir.NewCallExpr(src.NoXPos, ir.OCALLFUNC, appendFun, []ir.Node{dict, r, s, v})
+	appendCall.SetType(elem)
+	appendCall.SetTypecheck(1)
+	ir.LogosRegions.Place(appendCall)
+	appendAs := ir.NewAssignStmt(src.NoXPos, s, appendCall)
+	appendAs.SetTypecheck(1)
+	fn.Body = ir.Nodes{regionTestBlock(openAs, appendAs)}
+	logosRegionLower(fn)
+	app, ok := appendAs.Y.(*ir.CallExpr)
+	if !ok || app.Op() != ir.OAPPEND {
+		t.Fatalf("dict-first placed append not transformed to OAPPEND: %v", appendAs.Y.Op())
+	}
+	if len(app.Args) != 2 || app.Args[0] != ir.Node(s) {
+		t.Fatal("dict-first append keeps the region or dictionary argument")
+	}
+}
+
+func TestLogosRegionGrowCallConcrete(t *testing.T) {
+	enableLogosRegion(t)
+	fn := regionTestFn()
+	openCall, openAs, r := regionTestOpen(fn)
+	ir.LogosRegions.Live(openCall)
+	elem := types.NewSlice(types.Types[types.TINT])
+	s := typecheck.TempAt(src.NoXPos, fn, elem)
+	v := typecheck.TempAt(src.NoXPos, fn, types.Types[types.TINT])
+	appendCall := regionTestCall("Append", elem, r, s, v)
+	ir.LogosRegions.Place(appendCall)
+	appendAs := ir.NewAssignStmt(src.NoXPos, s, appendCall)
+	appendAs.SetTypecheck(1)
+	fn.Body = ir.Nodes{regionTestBlock(openAs, appendAs)}
+	logosRegionLower(fn)
+	app, _ := appendAs.Y.(*ir.CallExpr)
+	if app == nil || app.Op() != ir.OAPPEND {
+		t.Fatalf("placed append not transformed to OAPPEND: %v", appendAs.Y.Op())
+	}
+	if _, ok := ssagen.LogosRegionAppends.Load(app); !ok {
+		t.Fatal("append grow region not registered for ssagen")
+	}
+	var init ir.Nodes
+	oldPtr := ir.NewUnaryExpr(src.NoXPos, ir.OSPTR, s)
+	oldPtr.SetType(types.Types[types.TUNSAFEPTR])
+	oldPtr.SetTypecheck(1)
+	newLen := ir.NewInt(src.NoXPos, 3)
+	oldCap := ir.NewInt(src.NoXPos, 4)
+	num := ir.NewInt(src.NoXPos, 1)
+	made := logosRegionGrowslice(logosRegionGrow{app, s, &init, oldPtr, newLen, oldCap, num})
+	if made.Type() == nil || !types.Identical(made.Type().Elem(), types.Types[types.TINT]) {
+		t.Fatal("grow call does not carry the concrete element type")
+	}
+}
