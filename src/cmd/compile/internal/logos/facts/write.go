@@ -56,38 +56,93 @@ func findOrCreateFnFact(f *Facts, object string) *FnFact {
 	return &f.Fns[len(f.Fns)-1]
 }
 
-func constView(t types2.Type) *types2.ConstView {
-	if t == nil {
-		return nil
+func unaliasAs[T types2.Type](t types2.Type) (T, bool) {
+	var zero T
+	if v, ok := types2.Unalias(t).(T); ok {
+		return v, true
 	}
-	if c, ok := types2.Unalias(t).(*types2.ConstView); ok {
-		return c
-	}
-	if n, ok := types2.Unalias(t).(*types2.Named); ok {
-		if u := n.Underlying(); u != nil {
-			if c, ok := u.(*types2.ConstView); ok {
-				return c
-			}
+	if n, ok := types2.Unalias(t).(*types2.Named); ok && n.Underlying() != nil {
+		if v, ok := n.Underlying().(T); ok {
+			return v, true
 		}
 	}
-	return nil
+	return zero, false
 }
 
-func optionOf(t types2.Type) *types2.Option {
-	if t == nil {
-		return nil
+func eachExportedSig(pkg *types2.Package, yield func(object string, sig *types2.Signature)) {
+	scope := pkg.Scope()
+	if scope == nil {
+		return
 	}
-	if o, ok := types2.Unalias(t).(*types2.Option); ok {
-		return o
-	}
-	if n, ok := types2.Unalias(t).(*types2.Named); ok {
-		if u := n.Underlying(); u != nil {
-			if o, ok := u.(*types2.Option); ok {
-				return o
+	for _, name := range scope.Names() {
+		obj := scope.Lookup(name)
+		if obj == nil || !obj.Exported() {
+			continue
+		}
+		switch obj := obj.(type) {
+		case *types2.Func:
+			sig, ok := obj.Type().(*types2.Signature)
+			if !ok || sig.Recv() != nil {
+				continue
+			}
+			if tp := sig.TypeParams(); tp != nil && tp.Len() > 0 {
+				continue
+			}
+			yield(name, sig)
+		case *types2.TypeName:
+			if obj.IsAlias() {
+				continue
+			}
+			named, ok := obj.Type().(*types2.Named)
+			if !ok {
+				continue
+			}
+			for i := range named.NumMethods() {
+				m := named.Method(i)
+				if m == nil || !m.Exported() {
+					continue
+				}
+				sig, ok := m.Type().(*types2.Signature)
+				if !ok {
+					continue
+				}
+				if tp := sig.TypeParams(); tp != nil && tp.Len() > 0 {
+					continue
+				}
+				yield(MethodObject(name, sig.Recv(), m.Name()), sig)
 			}
 		}
 	}
-	return nil
+}
+
+func eachExportedNamed(pkg *types2.Package, yield func(name string, named *types2.Named)) {
+	scope := pkg.Scope()
+	if scope == nil {
+		return
+	}
+	for _, name := range scope.Names() {
+		obj, ok := scope.Lookup(name).(*types2.TypeName)
+		if !ok || obj == nil || !obj.Exported() || obj.IsAlias() {
+			continue
+		}
+		named, ok := obj.Type().(*types2.Named)
+		if !ok {
+			continue
+		}
+		if tp := named.TypeParams(); tp != nil && tp.Len() > 0 {
+			continue
+		}
+		yield(name, named)
+	}
+}
+
+func appendUnique[E comparable](s []E, e E) []E {
+	for _, have := range s {
+		if have == e {
+			return s
+		}
+	}
+	return append(s, e)
 }
 
 func joinPath(path []string) string {

@@ -23,62 +23,22 @@ func writeOpts(pkg *types2.Package, f *Facts) {
 	emit := func(object, path string) {
 		f.Opts = append(f.Opts, PathFact{Object: object, Path: path})
 	}
-	scope := pkg.Scope()
-	for _, name := range scope.Names() {
-		obj := scope.Lookup(name)
-		if obj == nil || !obj.Exported() {
-			continue
-		}
-		switch obj := obj.(type) {
-		case *types2.Func:
-			sig, ok := obj.Type().(*types2.Signature)
-			if !ok || sig.Recv() != nil {
-				continue
-			}
-			if tp := sig.TypeParams(); tp != nil && tp.Len() > 0 {
-				continue
-			}
-			emitFuncOpts(name, sig, emit)
-		case *types2.TypeName:
-			if !obj.IsAlias() {
-				emitTypeOpts(name, obj.Type(), emit)
-			}
-		}
-	}
-	for _, name := range scope.Names() {
-		obj, ok := scope.Lookup(name).(*types2.TypeName)
-		if !ok || obj == nil || !obj.Exported() || obj.IsAlias() {
-			continue
-		}
-		named, ok := obj.Type().(*types2.Named)
-		if !ok {
-			continue
-		}
-		for i := range named.NumMethods() {
-			m := named.Method(i)
-			if m == nil || !m.Exported() {
-				continue
-			}
-			sig, ok := m.Type().(*types2.Signature)
-			if !ok {
-				continue
-			}
-			if tp := sig.TypeParams(); tp != nil && tp.Len() > 0 {
-				continue
-			}
-			emitFuncOpts(MethodObject(name, sig.Recv(), m.Name()), sig, emit)
-		}
-	}
+	eachExportedSig(pkg, func(object string, sig *types2.Signature) {
+		walkSigQuals(sig, object, emit, nil)
+	})
+	eachExportedNamed(pkg, func(name string, named *types2.Named) {
+		walkNamedQuals(name, named, emit, nil)
+	})
 }
 
-func emitFuncOpts(object string, sig *types2.Signature, emit func(string, string)) {
+func walkSigQuals(sig *types2.Signature, object string, emitOpt, emitConst func(string, string)) {
 	if params := sig.Params(); params != nil {
 		for i := range params.Len() {
 			v := params.At(i)
 			if v == nil {
 				continue
 			}
-			walkOptType(v.Type(), []string{fmt.Sprintf("P%d", i)}, object, emit, make(map[types2.Type]bool))
+			walkQualType(v.Type(), []string{fmt.Sprintf("P%d", i)}, object, emitOpt, emitConst, make(map[types2.Type]bool))
 		}
 	}
 	if results := sig.Results(); results != nil {
@@ -87,27 +47,20 @@ func emitFuncOpts(object string, sig *types2.Signature, emit func(string, string
 			if v == nil {
 				continue
 			}
-			walkOptType(v.Type(), []string{fmt.Sprintf("R%d", i)}, object, emit, make(map[types2.Type]bool))
+			walkQualType(v.Type(), []string{fmt.Sprintf("R%d", i)}, object, emitOpt, emitConst, make(map[types2.Type]bool))
 		}
 	}
 }
 
-func emitTypeOpts(name string, t types2.Type, emit func(string, string)) {
-	u, ok := types2.Unalias(t).(*types2.Named)
-	if !ok {
-		return
-	}
-	if tp := u.TypeParams(); tp != nil && tp.Len() > 0 {
-		return
-	}
-	switch u := u.Underlying().(type) {
+func walkNamedQuals(name string, named *types2.Named, emitOpt, emitConst func(string, string)) {
+	switch u := named.Underlying().(type) {
 	case *types2.Struct:
 		for i := range u.NumFields() {
 			f := u.Field(i)
 			if f == nil || !f.Exported() {
 				continue
 			}
-			walkOptType(f.Type(), []string{"F" + f.Name()}, name, emit, make(map[types2.Type]bool))
+			walkQualType(f.Type(), []string{"F" + f.Name()}, name, emitOpt, emitConst, make(map[types2.Type]bool))
 		}
 	case *types2.Interface:
 		for i := range u.NumExplicitMethods() {
@@ -126,7 +79,7 @@ func emitTypeOpts(name string, t types2.Type, emit func(string, string)) {
 					if v == nil {
 						continue
 					}
-					walkOptType(v.Type(), append(slices.Clone(base), fmt.Sprintf("P%d", j)), name, emit, make(map[types2.Type]bool))
+					walkQualType(v.Type(), append(slices.Clone(base), fmt.Sprintf("P%d", j)), name, emitOpt, emitConst, make(map[types2.Type]bool))
 				}
 			}
 			if results := sig.Results(); results != nil {
@@ -135,15 +88,11 @@ func emitTypeOpts(name string, t types2.Type, emit func(string, string)) {
 					if v == nil {
 						continue
 					}
-					walkOptType(v.Type(), append(slices.Clone(base), fmt.Sprintf("R%d", j)), name, emit, make(map[types2.Type]bool))
+					walkQualType(v.Type(), append(slices.Clone(base), fmt.Sprintf("R%d", j)), name, emitOpt, emitConst, make(map[types2.Type]bool))
 				}
 			}
 		}
 	}
-}
-
-func walkOptType(t types2.Type, path []string, object string, emit func(string, string), seen map[types2.Type]bool) {
-	walkQualType(t, path, object, emit, nil, seen)
 }
 
 // walkQualType is the one traversal owner for qualifier facts: it visits
@@ -157,14 +106,14 @@ func walkQualType(t types2.Type, path []string, object string, emitOpt, emitCons
 	if t == nil {
 		return
 	}
-	if opt := optionOf(t); opt != nil {
+	if opt, ok := unaliasAs[*types2.Option](t); ok {
 		if emitOpt != nil {
 			emitOpt(object, joinPath(path))
 		}
 		walkQualType(opt.Elem, append(slices.Clone(path), "E"), object, emitOpt, emitConst, seen)
 		return
 	}
-	if c := constView(t); c != nil {
+	if c, ok := unaliasAs[*types2.ConstView](t); ok {
 		if emitConst != nil {
 			emitConst(object, joinPath(path))
 		}

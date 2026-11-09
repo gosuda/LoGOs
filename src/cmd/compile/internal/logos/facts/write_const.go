@@ -41,134 +41,14 @@ func writeConsts(pkg *types2.Package, info *types2.Info, files []*syntax.File, f
 
 func emitConstDecls(pkg *types2.Package, f *Facts) {
 	emit := func(object, path string) {
-		for _, c := range f.Consts {
-			if c.Object == object && c.Path == path {
-				return
-			}
-		}
-		f.Consts = append(f.Consts, PathFact{Object: object, Path: path})
+		f.Consts = appendUnique(f.Consts, PathFact{Object: object, Path: path})
 	}
-	scope := pkg.Scope()
-	for _, name := range scope.Names() {
-		obj := scope.Lookup(name)
-		if obj == nil || !obj.Exported() {
-			continue
-		}
-		switch obj := obj.(type) {
-		case *types2.Func:
-			sig, ok := obj.Type().(*types2.Signature)
-			if !ok || sig.Recv() != nil {
-				continue
-			}
-			if tp := sig.TypeParams(); tp != nil && tp.Len() > 0 {
-				continue
-			}
-			emitFuncConsts(name, sig, emit)
-		case *types2.TypeName:
-			if !obj.IsAlias() {
-				emitTypeConsts(name, obj.Type(), emit)
-			}
-		}
-	}
-	for _, name := range scope.Names() {
-		obj, ok := scope.Lookup(name).(*types2.TypeName)
-		if !ok || obj == nil || !obj.Exported() || obj.IsAlias() {
-			continue
-		}
-		named, ok := obj.Type().(*types2.Named)
-		if !ok {
-			continue
-		}
-		for i := range named.NumMethods() {
-			m := named.Method(i)
-			if m == nil || !m.Exported() {
-				continue
-			}
-			sig, ok := m.Type().(*types2.Signature)
-			if !ok {
-				continue
-			}
-			if tp := sig.TypeParams(); tp != nil && tp.Len() > 0 {
-				continue
-			}
-			emitFuncConsts(MethodObject(name, sig.Recv(), m.Name()), sig, emit)
-		}
-	}
-}
-
-func emitFuncConsts(object string, sig *types2.Signature, emit func(string, string)) {
-	if params := sig.Params(); params != nil {
-		for i := range params.Len() {
-			v := params.At(i)
-			if v == nil {
-				continue
-			}
-			walkConstType(v.Type(), []string{fmt.Sprintf("P%d", i)}, object, emit, make(map[types2.Type]bool))
-		}
-	}
-	if results := sig.Results(); results != nil {
-		for i := range results.Len() {
-			v := results.At(i)
-			if v == nil {
-				continue
-			}
-			walkConstType(v.Type(), []string{fmt.Sprintf("R%d", i)}, object, emit, make(map[types2.Type]bool))
-		}
-	}
-}
-
-func emitTypeConsts(name string, t types2.Type, emit func(string, string)) {
-	u, ok := types2.Unalias(t).(*types2.Named)
-	if !ok {
-		return
-	}
-	if tp := u.TypeParams(); tp != nil && tp.Len() > 0 {
-		return
-	}
-	switch u := u.Underlying().(type) {
-	case *types2.Struct:
-		for i := range u.NumFields() {
-			f := u.Field(i)
-			if f == nil || !f.Exported() {
-				continue
-			}
-			walkConstType(f.Type(), []string{"F" + f.Name()}, name, emit, make(map[types2.Type]bool))
-		}
-	case *types2.Interface:
-		for i := range u.NumExplicitMethods() {
-			m := u.ExplicitMethod(i)
-			if m == nil || !m.Exported() {
-				continue
-			}
-			sig, ok := m.Type().(*types2.Signature)
-			if !ok {
-				continue
-			}
-			base := []string{"M" + m.Name()}
-			if params := sig.Params(); params != nil {
-				for j := range params.Len() {
-					v := params.At(j)
-					if v == nil {
-						continue
-					}
-					walkConstType(v.Type(), append(slices.Clone(base), fmt.Sprintf("P%d", j)), name, emit, make(map[types2.Type]bool))
-				}
-			}
-			if results := sig.Results(); results != nil {
-				for j := range results.Len() {
-					v := results.At(j)
-					if v == nil {
-						continue
-					}
-					walkConstType(v.Type(), append(slices.Clone(base), fmt.Sprintf("R%d", j)), name, emit, make(map[types2.Type]bool))
-				}
-			}
-		}
-	}
-}
-
-func walkConstType(t types2.Type, path []string, object string, emit func(string, string), seen map[types2.Type]bool) {
-	walkQualType(t, path, object, nil, emit, seen)
+	eachExportedSig(pkg, func(object string, sig *types2.Signature) {
+		walkSigQuals(sig, object, nil, emit)
+	})
+	eachExportedNamed(pkg, func(name string, named *types2.Named) {
+		walkNamedQuals(name, named, nil, emit)
+	})
 }
 
 // constFuncDecl pairs a declared function with its syntax and type.
@@ -286,12 +166,7 @@ func emitReadonlyFacts(pkg *types2.Package, f *Facts, decls []constFuncDecl, rec
 
 func emitReadonlyNestedFacts(pkg *types2.Package, f *Facts) {
 	emit := func(object, path string) {
-		for _, r := range f.Readonlys {
-			if r.Object == object && r.Path == path {
-				return
-			}
-		}
-		f.Readonlys = append(f.Readonlys, ReadonlyFact{Object: object, Path: path})
+		f.Readonlys = appendUnique(f.Readonlys, ReadonlyFact{Object: object, Path: path})
 	}
 	scope := pkg.Scope()
 	if scope == nil {
@@ -395,11 +270,11 @@ func walkReadonlyType(t types2.Type, path []string, object string, emit func(str
 		walkReadonlyType(a.Rhs(), path, object, emit, seen)
 		return
 	}
-	if opt := optionOf(t); opt != nil {
+	if opt, ok := unaliasAs[*types2.Option](t); ok {
 		walkReadonlyType(opt.Elem, append(slices.Clone(path), "E"), object, emit, seen)
 		return
 	}
-	if c := constView(t); c != nil {
+	if c, ok := unaliasAs[*types2.ConstView](t); ok {
 		walkReadonlyType(c.Elem, append(slices.Clone(path), "E"), object, emit, seen)
 		return
 	}
