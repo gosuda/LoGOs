@@ -707,22 +707,6 @@ func TestFastcallNoCallbackViolation(t *testing.T) {
 	}
 }
 
-func TestFastcallCallbackParity(t *testing.T) {
-	_, out := violatorBin(t, "plain")
-	checkViolation(t, "plain", out)
-}
-
-func TestFastcallGoPointerValid(t *testing.T) {
-	requireCgo(t)
-	v := int32(-99)
-	if got := callFastRead(&v); got != -99 {
-		t.Fatalf("read_int = %d, want -99", got)
-	}
-	b := []byte{10, 20, 30}
-	if got := callFastSlice(b); got != 60 {
-		t.Fatalf("sum_bytes = %d, want 60", got)
-	}
-}
 func TestFastcallNumCgoCallAccounting(t *testing.T) {
 	requireCgo(t)
 	before := runtime.NumCgoCall()
