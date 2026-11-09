@@ -1,9 +1,6 @@
-# PR2 T_ZQ: nested eject must rebase relative replaces of Go-only deps.
-# Sibling eject keeps working; nested eject is the RED case.
 env GOPROXY=off
 env GOTOOLCHAIN=local
 
-# Case: nested output inside the main module.
 cd lapp
 logos run .
 stdout '^go-help-ok$'
@@ -11,7 +8,6 @@ cp stdout $WORK/a-stdout.txt
 logos eject -o out
 exists out/main.go
 exists out/go.mod
-# The kept local replace must still resolve from the nested output.
 cd out
 go build ./...
 go run .

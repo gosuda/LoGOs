@@ -1,8 +1,3 @@
-# M7-S4: a const switch runs natively and ejected with identical output.
-# The m module covers an exact case, an interface case, a tilde case,
-# and a no-match return; the ejected tree builds with plain go and
-# prints the same output (#37, #108).
-
 env GOPROXY=off
 env GOTOOLCHAIN=local
 

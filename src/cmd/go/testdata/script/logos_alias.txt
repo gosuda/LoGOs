@@ -1,10 +1,8 @@
-# M0-S2: alias extensions build and run; duplicate stems fail; dotted module warns.
 env GOPROXY=off
 env GOTOOLCHAIN=local
 
 mkdir $WORK/bin
 
-# Each alias extension builds and runs.
 logos build -o $WORK/bin/scroll$GOEXE ./scroll
 stderr -count=1 'portability::alias_extension'
 exists $WORK/bin/scroll$GOEXE
@@ -29,7 +27,6 @@ logos run ./gopher
 stdout '^gopher ok$'
 stderr -count=1 'portability::alias_extension'
 
-# Trailing U+FE0F is stripped before matching.
 logos build -o $WORK/bin/vs$GOEXE ./vs
 stderr -count=1 'portability::alias_extension'
 exists $WORK/bin/vs$GOEXE
@@ -38,7 +35,6 @@ logos run ./vs
 stdout '^vs ok$'
 stderr -count=1 'portability::alias_extension'
 
-# Two alias files in one package warn once per file, not once per package.
 logos build -o $WORK/bin/multi$GOEXE ./multi
 stderr -count=2 'portability::alias_extension'
 exists $WORK/bin/multi$GOEXE
@@ -47,11 +43,9 @@ logos run ./multi
 stdout '^multi ok$'
 stderr -count=2 'portability::alias_extension'
 
-# Single scroll file builds, so the duplicate below is not vacuous.
 logos build ./dupok
 stderr -count=1 'portability::alias_extension'
 
-# x.lgo beside the scroll alias with stem x fails.
 ! logos build ./dup
 stderr 'correctness::duplicate_stem_filename'
 
