@@ -725,6 +725,7 @@ func (v *lockFlow) walkInlineCall(call *syntax.CallExpr, body syntax.Node) {
 	switch b := body.(type) {
 	case *syntax.BlockStmt:
 		inner.walkStmts(b.List)
+		inner.checkDefers(b.List)
 	case syntax.Expr:
 		inner.walkExpr(b)
 	}
@@ -1241,6 +1242,8 @@ func (v *lockFlow) checkDefers(list []syntax.Stmt) {
 			sub.applyCallContract(d.call, ct)
 		}
 	}
+	clear(v.st.held)
+	maps.Copy(v.st.held, exit)
 }
 
 // exitHeld returns the held set at function exit: the walk's final set,

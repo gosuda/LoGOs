@@ -253,3 +253,11 @@ L2:
 		goto L2
 	}
 }
+
+func unlockDeferredInEarlyClosure(s *stats) {
+	s.mu.Lock()
+	func() {
+		defer s.mu.Unlock()
+	}()
+	_ = s.total // ERROR "\[concurrency::unguarded_access\]"
+}

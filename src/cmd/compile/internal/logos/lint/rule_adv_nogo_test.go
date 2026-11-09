@@ -444,6 +444,11 @@ func TestAdvGuardedAccess(t *testing.T) {
 			"func b2(s *stats, again bool) {\n s.mu.Lock()\nL:\n _ = s.total\n s.mu.Unlock()\n if again {\n  s.mu.Lock()\n  goto L\n }\n}\n",
 			nil,
 		},
+		{
+			"unlockDeferredInEarlyClosureReports",
+			"func m1(s *stats) {\n s.mu.Lock()\n func() {\n  defer s.mu.Unlock()\n }()\n _ = s.total\n}\n",
+			[]string{"34 concurrency::unguarded_access forbid"},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name+"/lgo", func(t *testing.T) {
