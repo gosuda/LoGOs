@@ -1,4 +1,4 @@
-// asmcheck
+// asmcheck -logos.wasmassume=logostest.trapYield
 
 package codegen
 
@@ -45,4 +45,19 @@ func parks() { // js/wasm/:"BrTable" wasip1/wasm/:"BrTable"
 func transitive() { // js/wasm/:"BrTable" wasip1/wasm/:"BrTable"
 	// js/wasm/:"Call \\S+\\.parks" "BrIf" wasip1/wasm/:"Call \\S+\\.parks" "BrIf"
 	parks()
+}
+
+//go:noinline
+func trapYield() int { // js/wasm/:"BrTable" wasip1/wasm/:"BrTable"
+	c := make(chan int, 1)
+	c <- 1
+	// js/wasm/:"Call runtime\\.chanrecv1" "BrIf" wasip1/wasm/:"Call runtime\\.chanrecv1" "BrIf"
+	return <-c
+}
+
+//go:noinline
+func trapCaller() int { // js/wasm/:-"BrTable" wasip1/wasm/:-"BrTable"
+	// js/wasm/:"Call \\S+\\.trapYield" "UNDEF" -"BrIf" wasip1/wasm/:"Call \\S+\\.trapYield" "UNDEF" -"BrIf"
+	trapYield()
+	return 7
 }
