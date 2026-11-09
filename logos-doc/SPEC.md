@@ -1273,6 +1273,7 @@ Under `logos` with `[build] arena` true, each call MUST resolve at compile time,
 Constant-size noscan objects of at most 512 bytes MUST use the inline bump sequence on amd64 in non-race builds; other targets call the region slow path. [T-301.2]
 `Open` MUST make a region owned by the innermost enclosing block. [T-301.2]
 Exit from that block MUST release the region's objects, and inside a loop body each iteration MUST release them. [T-301.2]
+An `Open` in an `if`, `switch`, or `for` init clause MUST belong to the whole statement, and its close MUST run after the statement. [T-301.2]
 The compiler MUST place an object in `r` only when escape analysis proves that no pointer to it outlives the owner block of `r`. [T-301.2]
 Otherwise the object MUST go on the heap, with `perf::arena_fallback` naming the call and the escaping flow. [T-301.2]
 A store of a region pointer into a region object whose owner block is the same as, or nested inside, the owner block of the stored pointer's region MUST NOT count as an escape. A store into an object of an enclosing region MUST count as an escape. [T-301.2]
