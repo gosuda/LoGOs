@@ -91,7 +91,6 @@ These rules apply to both Go and `.lgo` lint targets, and diagnostics report ori
 | `concurrency::reentrant_withlock_deadlock` | Do not call WithLock on the same Locked receiver inside its callback. |
 | `slop::err_chain_reset` | Wrap errors with %w instead of formatting with %v or err.Error(). |
 | `slop::discarded_error` | Check or return error instead of ignoring it, or use ? in functions returning error. |
-| `slop::todo_placeholder` | Implement functionality or remove placeholder comments and panic stubs. |
 | `complexity::cognitive_overflow` | Decompose complex functions to stay within threshold limits. |
 | `perf::large_backing_array_pin` | Copy needed elements instead of slicing large backing arrays. |
 | `perf::time_after_in_loop` | Move timer outside loop or use time.NewTimer with proper reset and drain. |

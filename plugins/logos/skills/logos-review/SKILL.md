@@ -89,7 +89,7 @@ Proven by `test/logos/run/group.lgo`, `test/logos/run/group_chan.lgo`, `test/log
 
 Proven by `src/cmd/go/testdata/script/logos_lint_config.txt`, `src/cmd/go/testdata/script/logos_lint_go.txt`, and `test/logos/lint/*.lgo`.
 
-27. Lints: code adheres to deny and forbid lint rules across correctness, concurrency, slop, complexity, perf, suspicious, and portability groups. Suppressions require explicit `//logos:allow(<rule>)` directives on the statement or declaration. Findings: `slop::err_chain_reset`, `slop::discarded_error`, `slop::todo_placeholder`, `complexity::cognitive_overflow`, `perf::large_backing_array_pin`, `perf::time_after_in_loop`, `correctness::arena_pointer_escape`, `correctness::infinite_recursion`, `correctness::typed_nil_return`, `correctness::unclosed_io_closer`, `correctness::unbounded_channel_op`, `correctness::defer_erases_errdefer_state`, `correctness::allow_forbidden_rule`, `suspicious::side_effect_before_sort`, `portability::serialized_unsized_int`, `pedantic::exhaustive_union_switch`.
+27. Lints: code adheres to deny and forbid lint rules across correctness, concurrency, slop, complexity, perf, suspicious, and portability groups. Suppressions require explicit `//logos:allow(<rule>)` directives on the statement or declaration. Findings: `slop::err_chain_reset`, `slop::discarded_error`, `complexity::cognitive_overflow`, `perf::large_backing_array_pin`, `perf::time_after_in_loop`, `correctness::arena_pointer_escape`, `correctness::infinite_recursion`, `correctness::typed_nil_return`, `correctness::unclosed_io_closer`, `correctness::unbounded_channel_op`, `correctness::defer_erases_errdefer_state`, `correctness::allow_forbidden_rule`, `suspicious::side_effect_before_sort`, `portability::serialized_unsized_int`, `pedantic::exhaustive_union_switch`.
 
 ## Checklist (M7)
 
@@ -177,7 +177,6 @@ Proven by `test/logos/run/json_marshal_test.lgo`, `test/logos/run/json_binary_te
 | `correctness::allow_forbidden_rule` | Do not attach an allow directive to a forbidden rule. |
 | `slop::err_chain_reset` | Wrap errors with %w instead of formatting with %v or err.Error(). |
 | `slop::discarded_error` | Check or return error instead of ignoring it, or use ? in functions returning error. |
-| `slop::todo_placeholder` | Implement functionality or remove placeholder comments and panic stubs. |
 | `complexity::cognitive_overflow` | Decompose complex functions to stay within threshold limits. |
 | `perf::large_backing_array_pin` | Copy needed elements instead of slicing large backing arrays. |
 | `perf::time_after_in_loop` | Move timer outside loop or use time.NewTimer with proper reset and drain. |

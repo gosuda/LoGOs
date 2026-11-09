@@ -550,14 +550,10 @@ logos lint [build flags] [--pedantic] [--json-diagnostics] [packages]
   - In standard `.go` packages, the compiler runs language-neutral rules only.
 - **Directives**:
   - `//logos:allow(<rule>)`: Placed directly above a declaration or statement to suppress a `deny` or `warn` diagnostic. In Go packages, `forbid` rules run at `deny` severity and can be silenced by this directive; in `.lgo` packages, `forbid` rules cannot be silenced.
-  - `//logos:zeroalloc`: Placed above a function declaration as a static escape-analysis site contract requiring the compiler to reject local heap allocations at that site (see [logos-doc/LINT-RULES.md](logos-doc/LINT-RULES.md)).
+  - `//logos:zeroalloc`: Placed above a function declaration as a static escape-analysis site contract requiring the compiler to reject local heap allocations at that site (see [logos-doc/SPEC.md](logos-doc/SPEC.md)).
 - **Flags**:
   - `--pedantic`: Enables pedantic diagnostics overriding module configuration.
   - `--json-diagnostics`: Emits one JSON object per diagnostic line on standard error.
-
-For the normative rule set design and individual rule definitions, see:
-- [logos-doc/LINT-RULESET.md](logos-doc/LINT-RULESET.md): Proposed normative lint design for Go and loGo/s.
-- [logos-doc/LINT-RULES.md](logos-doc/LINT-RULES.md): Detailed reference catalog of in-compiler rules.
 
 ## Language
 

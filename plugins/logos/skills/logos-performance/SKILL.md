@@ -1,6 +1,6 @@
 ---
 name: logos-performance
-description: Optimize build and run-time performance with the logos toolchain, for .lgo code and for Go code built by it. Use when a logos.toml exists, the files are .lgo, or the user names the logos command, and the user says optimize, speed up, -O levels, PGO, binary size, allocation, arena, GC mode, SIMD, or zero-alloc.
+description: Optimize build and run-time performance with the logos toolchain, for .lgo code and for Go code built by it. Use when a logos.toml exists, the files are .lgo, or the user names the logos command, and the user says optimize, speed up, -O levels, binary size, allocation, arena, SIMD, or zero-alloc.
 license: BSD-3-Clause
 compatibility: Needs the logos command from github.com/gosuda/loGos on PATH.
 metadata:
@@ -23,22 +23,18 @@ The logos toolchain provides build-time and run-time optimization controls for .
 
 The `-O` build flag is accepted by both `logos build` and `go build`. In `logos.toml`, `[build] opt_level` sets the default for `logos` builds. Plain `go` reads no `logos.toml` and requires the explicit `-O` flag.
 
-| Level | Inlining budget | Stack buffer threshold | Specialization | Flags emitted |
-|---|---|---|---|---|
-| `O0` | none | none | off | `-N -l` |
-| `O1` | upstream default | 32 B | off | upstream compiler defaults |
-| `O2` | 120 | 256 B | on (cost <= 200) | `-d=inlbudget=120,variablemakethreshold=256` |
-| `O3` | 400 | 4096 B | on (unlimited) | `-d=inlbudget=400,inlrecursivebudget=80,variablemakethreshold=4096,logosspecialize=1` |
-| `Os` | 15 | 32 B | off | `-d=inlbudget=15`, `-logos.icf` |
-| `Oz` | 15 | 32 B | off | `-d=inlbudget=15`, `-logos.icf` |
+| Level | Inlining budget | Stack buffer threshold | Flags emitted |
+|---|---|---|---|
+| `O0` | none | none | `-N -l` |
+| `O1` | upstream default | 32 B | upstream compiler defaults |
+| `O2` | 120 | 256 B | `-d=inlbudget=120,variablemakethreshold=256` |
+| `O3` | 400 | 4096 B | `-d=inlbudget=400,inlrecursivebudget=80,variablemakethreshold=4096` |
+| `Os` | 15 | 32 B | `-d=inlbudget=15` |
 
 Rules:
 
 * `logos.toml [build] opt_level` defaults to `"O2"`. Command-line `-O` overrides the file setting (`src/cmd/go/testdata/script/logos_opt_levels.txt`).
-* `synthetic_pgo` in `logos.toml [build]` controls branch likelihood hints. Modes are `off`, `standard`, and `aggressive`. O2 defaults to `standard` (marks `?` error blocks and `os.Exit` calls cold). O3 defaults to `aggressive` (also marks explicit `panic` calls cold).
 * `target_cpu` in `logos.toml [build]` accepts `"deterministic"` (`GOAMD64=v3`, `GOARM64=v8.2`) or `"native"` (selects host architecture features from `internal/cpu`).
-* Clone specialization generates static copies (`·logosspec<N>`) for concrete types at call sites when `-d=logosspecialize=1` is set (`src/cmd/go/testdata/script/logos_opt_levels.txt`). Pclntab strips the suffix so stack traces display the original function name.
-* Identical code folding at `Os` and `Oz` (`-logos.icf`) deduplicates text symbols with matching machine code, relocation targets, and metadata (`src/cmd/link/internal/ld/logos_icf_test.go`).
 * Improvements apply to Go packages built under `logos` and under plain `go` with `-O`.
 
 ## Fixed-array SIMD (M14)
@@ -93,25 +89,6 @@ Rules:
 * Memory holding pointers is scanned by the garbage collector during stack scanning.
 * Calling `runtime.SetFinalizer` on an arena object panics (`src/runtime/logos_arena_test.go`).
 
-## GC modes (M19)
-
-Collector selection is controlled by `-gc=MODE` or `logos.toml [build] gc`. Proven by `src/cmd/go/testdata/script/logos_gc_mode.txt` and `src/runtime/logos_gcmode_test.go`.
-
-| Mode | Collector behavior |
-|---|---|
-| `greentea` | Default under `logos` on native architectures. Elastic worker pacing based on heap utilization; elastic pacing is also the default for an empty production-controller mode. Generational cards use GOEXPERIMENT=logosgen on amd64; their stable-default migration remains blocked. Span deck is default on except on wasm; `nologosspandeck` retains the FIFO comparison path. |
-| `batch` | Stops the world for collections; triggers collection at 90% of `GOMEMLIMIT`. Packages compile with `-wb=false`. |
-| `epsilon` | No automatic collection. Only explicit `runtime.GC()` collects. |
-| `wasm` | Default under `logos` on `GOARCH=wasm`. Runs incremental mark work during browser idle periods. |
-| `immix` | Mark-region moving collector requiring `GOEXPERIMENT=logosgcmoving` phase 1. |
-| `zgc` | Concurrent colored-pointer collector requiring `GOEXPERIMENT=logosgcmoving` phase 2. |
-
-Rules:
-
-* Plain `go` without `-gc` keeps the upstream Go collector; an empty production-controller mode still uses elastic pacing.
-* `batch` and `epsilon` ignore environment `GOGC` settings and disable write barriers outside package `runtime`.
-* Generational collection uses GOEXPERIMENT=logosgen on amd64: card-table tracking (1 byte per 512 bytes of heap arena) with mature span skips. Its stable-default migration remains blocked.
-
 ## Fast cgo (M20)
 
 Fast-cgo bypasses standard cgo trampoline overhead for eligible non-blocking C functions.
@@ -124,7 +101,7 @@ Fast-cgo bypasses standard cgo trampoline overhead for eligible non-blocking C f
 Rules:
 
 * The fast path requires both `noescape` and `nocallback`. A function with only one directive stays on the plain cgo path (`src/cmd/cgo/internal/testlogos/fastcall_test.go`).
-* `logos` enables `GOEXPERIMENT=logosfastcgo` by default; plain `go` requires explicit opt-in.
+* The fast path requires `GOEXPERIMENT=logosfastcgo`, which is off by default under both `logos` and `go`.
 * If a `nocallback` function calls back into Go, the runtime panics immediately instead of deadlocking (`TestFastcallNoCallbackViolation`).
 * CPU profile samples during fast C calls attribute to the calling Go site (`TestFastcallProfileAttribution`).
 * Measured performance status (measured 2026-10-24): BenchmarkFastcall with timestamp records 114.700 ns/op (sd 1.975) versus plain cgo 85.455 ns/op (re-measured 86.360), yielding ratio 0.745. The performance gate requires at least 1.05 and is currently FAIL. Dominant overhead is the per-call `nanotime()` entry timestamp (~36 ns). Do not claim a speedup. Blocking parity, callback parity, and profile attribution pass.
