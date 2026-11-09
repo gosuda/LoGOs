@@ -1899,7 +1899,7 @@ A non-constant integer product in a `make` length or capacity MUST lower to `log
 ### 17.1 Upstream regression gate
 
 - `logos test -O=1 std cmd`, `logos test -O=2 std cmd`, and `logos test -O=3 std cmd` MUST pass in the release gate; no in-tree test asserts the full unmodified suites. [T-Sec17]
-- The upstream test suite that `./run.bash` runs MUST pass under plain `go` as the regression floor for Go semantics. [T-Sec17][T-0.1]
+- The upstream suite that `./run.bash` runs MUST pass in the release gate under plain `go`; no in-tree test asserts it. [T-Sec17][T-0.1]
 
 ### 17.3 Red-team completeness
 
