@@ -923,20 +923,11 @@ func (v *lockFlow) recordDefer(call *syntax.CallExpr) {
 
 // walkDeferArgs walks the operands a defer statement evaluates now.
 func (v *lockFlow) walkDeferArgs(call *syntax.CallExpr) {
-	if lit, ok := syntax.Unparen(call.Fun).(*syntax.FuncLit); ok {
-		for _, arg := range call.ArgList {
-			v.walkExpr(arg)
-		}
-		_ = lit
-		return
+	if _, ok := syntax.Unparen(call.Fun).(*syntax.FuncLit); !ok {
+		v.walkExpr(call.Fun)
 	}
-	v.walkExpr(call.Fun)
 	for _, arg := range call.ArgList {
 		v.walkExpr(arg)
-	}
-	if key, mode, ok := v.builtinLockOp(call); ok {
-		_ = key
-		_ = mode
 	}
 }
 
