@@ -477,14 +477,25 @@ func TestCognitiveOverflowThresholds(t *testing.T) {
 			}
 			in := check(t, kind, name, src)
 			in.Policy = p
-			n := 0
+			n, line := 0, 0
 			for _, r := range Run(in) {
 				if r.Rule == "complexity::cognitive_overflow" {
 					n++
+					line = int(r.Pos.Line())
 				}
 			}
 			if n != 1 {
 				t.Errorf("%s limit %s=%d (%s): %d findings, want one", tc.measure, tc.key, tc.limit, name, n)
+				continue
+			}
+			want := 0
+			for i, l := range strings.Split(src, "\n") {
+				if strings.HasPrefix(l, "func f2(") {
+					want = i + 1
+				}
+			}
+			if line != want {
+				t.Errorf("%s limit %s=%d (%s): finding on line %d, want f2 on line %d", tc.measure, tc.key, tc.limit, name, line, want)
 			}
 		}
 	}
