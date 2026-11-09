@@ -537,6 +537,14 @@ Anchor: David Parnas, J.R.R. Tolkien, John Carmack
 - Red-team rows: none.
 - Docs: none.
 
+### M0-A-S11 Assert cmd/go plain-go parity, help hiding, and generator rules
+Anchor: David Parnas, J.R.R. Tolkien, John Carmack
+- Attack: `src/cmd/go/testdata/script/logos_opt_go_package.txt` (O1/O2 inline budgets match under `logos` and plain `go`), `logos_plain_help_hides_flags.txt` (added flags absent from help), `logos_generator_tool_mixed.txt` (tool directive runs; a generated `.go` in a `.lgo` package fails), `logos_preemptible_loops_amd64.txt` (the wasm control token stays observable only where allowed).
+- Build: none (test-only).
+- Gate: `go test -count=1 cmd/go -run 'Script/^logos_(opt_go_package|plain_help_hides_flags|generator_tool_mixed|preemptible_loops_amd64)'` (the slice body cites a `w5_` pattern that names no file; the gate above names the four added scripts).
+- Red-team rows: none.
+- Docs: none (SPEC 0.1 already carries the parity, flag, generator, and tool rules).
+
 ## M1. `?`, `defer f()?`, `errdefer`, error traces, eject
 
 Anchor: Tony Hoare, Christopher Alexander, Edsger W. Dijkstra
@@ -1967,6 +1975,22 @@ Anchor: Tony Hoare, Edsger W. Dijkstra, John Carmack
 - Red-team rows: none.
 - Docs: none.
 
+### M8-A-S2 Assert scope defer open-coded funcdata
+Anchor: Tony Hoare, Edsger W. Dijkstra, John Carmack
+- Attack: `test/logos/codegen/scopedefer_guard.lgo`: an inverted loop test puts the guard in the loop (deferproc, no opendefer); the fix emits one guard per scope defer plus inline exit stanzas.
+- Build: none (test-only).
+- Gate: testdir `Test/logos/codegen/scopedefer_guard` ok.
+- Red-team rows: none.
+- Docs: none (SPEC 15.1 already states no separate unwind table exists).
+
+### M8-A-S3 Assert no vector staging outside bare sums
+Anchor: Tony Hoare, Edsger W. Dijkstra, John Carmack
+- Attack: `src/cmd/compile/internal/logos/simdslice_test.go` (`TestSimdSliceSumNoStagingElsewhere`) and `test/logos/codegen/simd_slice.lgo:85`: a fused filter+sum and a fused chain stay scalar outside bare sums.
+- Build: none (test-only).
+- Gate: `logos TestSimdSliceSumNoStagingElsewhere` ok; testdir `Test/logos/codegen/simd_slice` ok.
+- Red-team rows: none.
+- Docs: none (SPEC 15.2 already caps guard padding).
+
 ## M9. Lints and JSON diagnostics
 
 Anchor: Tony Hoare, Edward Tufte, Kenya Hara
@@ -2573,6 +2597,14 @@ Anchor: Tony Hoare, John Carmack
 - Red-team rows: none.
 - Docs: none.
 
+### M20-A-S3 Add fast-path soak, blocking, and platform coverage tests
+Anchor: Tony Hoare, John Carmack
+- Attack: `src/cmd/cgo/internal/testlogos/fastcall_stress_test.go`: mixed-shape workers check every call result under GC churn, profiling, preemption, and GOMAXPROCS 1, 2, 4, NumCPU; a blocking test keeps a counter goroutine running across fast sleeps; a platform matrix builds, vets, and links a linkname probe on 21 targets.
+- Build: none (test-only; `fastcall_stress.go` and `fastcall_stress_c.c` are test helpers).
+- Gate: soak and blocking pass with the experiment on and off, under race, asan, msan, cgocheck2, asyncpreemptoff=1, and GOGC=1.
+- Red-team rows: none.
+- Docs: none.
+
 ## M21. `logos lsp`
 
 Anchor: Kenya Hara, Edward Tufte
@@ -2616,6 +2648,46 @@ Anchor: Kenya Hara, David Parnas
 - Red-team rows: none.
 - Docs: none.
 
+### M21-A-S3 Enforce lsp hints snapshot versions
+Anchor: Kenya Hara, David Parnas
+- Attack: `src/cmd/go/internal/logos/lsp/hints_test.go` (`TestProxyHintsSupersededBufferAreDropped`, `TestProxyHintsEditBeforeResponseRecomputes`); probes flip `hints.go:54` and `store.go:113`.
+- Build: hints and store enforce snapshot versions equal to the current client versions (`hints.go`, `store.go`).
+- Gate: lsp `TestProxyHints`, `TestProxyCodeAction`, one-run suites ok.
+- Red-team rows: none.
+- Docs: none (SPEC 16.1 already states the snapshot rule).
+
+### M21-A-S4 Reject stale document changes and stop forwarding them
+Anchor: Kenya Hara, David Parnas
+- Attack: `src/cmd/go/internal/logos/lsp/adversarial_store_test.go` (`TestAdvStaleVersionIgnored`, `TestAdvStaleGoChangeNotForwarded`): a stale version 3 must not overwrite version 6, and a rejected Go change must not reach gopls.
+- Build: the store keeps the newest version and logs the ignored change; the proxy drops it (`store.go`, `sync.go`).
+- Gate: `go test -count=1 -race -run TestAdv` passes.
+- Red-team rows: none.
+- Docs: SPEC 16.1 (the newest-version sentence landed in the SPEC commit).
+
+### M21-A-S5 Reject duplicate Content-Length headers
+Anchor: Kenya Hara, David Parnas
+- Attack: `src/cmd/go/internal/logos/lsp/adversarial_store_test.go` (`TestAdvDuplicateContentLengthRejected`): a second Content-Length must fail the frame.
+- Build: the reader fails the frame with a descriptive error (`jsonrpc.go`).
+- Gate: `go test -count=1 -race -run TestAdv` passes.
+- Red-team rows: none.
+- Docs: SPEC 16.1 (the duplicate-header sentence landed in the SPEC commit).
+
+### M21-A-S6 Skip compilation when the request context is cancelled
+Anchor: Kenya Hara, David Parnas
+- Attack: `src/cmd/go/internal/logos/lsp/adversarial_store_test.go` (`TestAdvEnsureCancelledSkipsCompile`): a cancelled ensure compiles nothing.
+- Build: the ensure loop returns on a done caller context before picking up work (`store.go`).
+- Gate: `go test -count=1 -race -run TestAdv` passes.
+- Red-team rows: none.
+- Docs: none.
+
+### M21-A-S7 Pin UTF-16 astral mapping and overlay release
+Anchor: Kenya Hara, David Parnas
+- Attack: `src/cmd/go/internal/logos/lsp/adversarial_store_test.go`: the astral-plane rune-end clamp for surrogate pairs and the idempotent removal of the overlay directory.
+- Build: none (held tests).
+- Gate: `go test -count=1 -race -run TestAdv` passes.
+- Red-team rows: none.
+- Docs: none.
+
 ## M22. Verification suites and the end-to-end example
 
 Anchor: Edsger W. Dijkstra, Richard Feynman, Edward Tufte
@@ -2633,6 +2705,13 @@ Notes (m22): the `//logos:zeroalloc` directive does not change allocation behavi
   Anchor: Richard Feynman, Tony Hoare
 - M22-S6 End-to-end example (Sec 9, tailored per T-Sec9): `test/logos/example/order_service.lgo` with a fake database implementation and a `main` that runs `ProcessBatch`; expected output file; `logos_eject_example.txt` ejects and runs it with the same output.
   Anchor: Christopher Alexander, Richard Feynman
+- M22-A-S1 Enforce zeroalloc conversion exclusion (Sec 17.4): the check reports heap allocations but not operations that fall back to the heap at run time.
+  Anchor: Edsger W. Dijkstra, Richard Feynman
+- Attack: `test/logos/lint/zeroalloc_go.go`: a dynamic `bytesLen` call stays reported while the conversion path is excluded; `src/cmd/compile/internal/noder/logos_allocfacts.go:153` is the probe site.
+- Build: the allocfacts guard excludes run-time fallback conversions (`logos_allocfacts.go`).
+- Gate: testdir `Test/logos/lint/zeroalloc_go` ok; convOnly still reports, indirect still reported.
+- Red-team rows: none.
+- Docs: none.
 - Milestone gate: all of the above, then `./run.bash --no-rebuild`.
 
 ## M23. Architecture collapses
@@ -2740,7 +2819,7 @@ Prerequisites: `cd /home/alpha/compiler/loGos/src && ./make.bash`; `export PATH=
 
 Anchor: Tony Hoare
 
-Written to `tasks/autoplan-ledger.jsonl` by P0-S6. IDs: phase prefix plus a sequence in plan order. The original 103 rows are preserved verbatim; P0-S6 appends exactly the 5 remaining rows for M0-S7, P1-S3, M11-S3, M11-S4, and M18-S4 (listed at the end of the block); the M19 rows are pruned. The 2026-10-19 direction appended one more row after those, `DX-20` for the follow-up slice M0-S8; no other row changed (the descriptions of rows such as `ENG-26` name the slice as first written, and `CEO-02` names the original 182 REDTEAM rows; rows #183 to #189 were added later by the same direction). The audit direction appended rows `AUD-01` to `AUD-72` after those, one per recorded audit slice in commit order. The ledger holds 183 rows.
+Written to `tasks/autoplan-ledger.jsonl` by P0-S6. IDs: phase prefix plus a sequence in plan order. The original 103 rows are preserved verbatim; P0-S6 appends exactly the 5 remaining rows for M0-S7, P1-S3, M11-S3, M11-S4, and M18-S4 (listed at the end of the block); the M19 rows are pruned. The 2026-10-19 direction appended one more row after those, `DX-20` for the follow-up slice M0-S8; no other row changed (the descriptions of rows such as `ENG-26` name the slice as first written, and `CEO-02` names the original 182 REDTEAM rows; rows #183 to #189 were added later by the same direction). The audit direction appended rows `AUD-01` to `AUD-82` after those, one per recorded audit slice in commit order. The ledger holds 193 rows.
 
 ```jsonl
 {"id": "CEO-01", "description": "P0-S1 Rename logos-doc/PLAN.md to logos-doc/SPEC.md (pure rename) and P0-S2 rewrite SPEC.md as the tailored spec (tables T, N, Section 18)", "phase": "CEO"}
@@ -2926,4 +3005,14 @@ Written to `tasks/autoplan-ledger.jsonl` by P0-S6. IDs: phase prefix plus a sequ
 {"id": "AUD-70", "description": "M15-A-S2 Assert arm64 pair shapes execute identically", "phase": "AUD"}
 {"id": "AUD-71", "description": "M16-A-S3 Assert wasm profile size and reflect retention", "phase": "AUD"}
 {"id": "AUD-72", "description": "M16-A-S4 Document wasm export int64 acceptance", "phase": "AUD"}
+{"id": "AUD-73", "description": "M8-A-S2 Assert scope defer open-coded funcdata", "phase": "AUD"}
+{"id": "AUD-74", "description": "M8-A-S3 Assert no vector staging outside bare sums", "phase": "AUD"}
+{"id": "AUD-75", "description": "M21-A-S3 Enforce lsp hints snapshot versions", "phase": "AUD"}
+{"id": "AUD-76", "description": "M22-A-S1 Enforce zeroalloc conversion exclusion", "phase": "AUD"}
+{"id": "AUD-77", "description": "M20-A-S3 Add fast-path soak, blocking, and platform coverage tests", "phase": "AUD"}
+{"id": "AUD-78", "description": "M21-A-S4 Reject stale document changes and stop forwarding them", "phase": "AUD"}
+{"id": "AUD-79", "description": "M21-A-S5 Reject duplicate Content-Length headers", "phase": "AUD"}
+{"id": "AUD-80", "description": "M21-A-S6 Skip compilation when the request context is cancelled", "phase": "AUD"}
+{"id": "AUD-81", "description": "M21-A-S7 Pin UTF-16 astral mapping and overlay release", "phase": "AUD"}
+{"id": "AUD-82", "description": "M0-A-S11 Assert cmd/go plain-go parity, help hiding, and generator rules", "phase": "AUD"}
 ```

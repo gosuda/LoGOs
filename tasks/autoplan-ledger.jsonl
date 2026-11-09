@@ -181,3 +181,13 @@
 {"id": "AUD-70", "description": "M15-A-S2 Assert arm64 pair shapes execute identically", "phase": "AUD"}
 {"id": "AUD-71", "description": "M16-A-S3 Assert wasm profile size and reflect retention", "phase": "AUD"}
 {"id": "AUD-72", "description": "M16-A-S4 Document wasm export int64 acceptance", "phase": "AUD"}
+{"id": "AUD-73", "description": "M8-A-S2 Assert scope defer open-coded funcdata", "phase": "AUD"}
+{"id": "AUD-74", "description": "M8-A-S3 Assert no vector staging outside bare sums", "phase": "AUD"}
+{"id": "AUD-75", "description": "M21-A-S3 Enforce lsp hints snapshot versions", "phase": "AUD"}
+{"id": "AUD-76", "description": "M22-A-S1 Enforce zeroalloc conversion exclusion", "phase": "AUD"}
+{"id": "AUD-77", "description": "M20-A-S3 Add fast-path soak, blocking, and platform coverage tests", "phase": "AUD"}
+{"id": "AUD-78", "description": "M21-A-S4 Reject stale document changes and stop forwarding them", "phase": "AUD"}
+{"id": "AUD-79", "description": "M21-A-S5 Reject duplicate Content-Length headers", "phase": "AUD"}
+{"id": "AUD-80", "description": "M21-A-S6 Skip compilation when the request context is cancelled", "phase": "AUD"}
+{"id": "AUD-81", "description": "M21-A-S7 Pin UTF-16 astral mapping and overlay release", "phase": "AUD"}
+{"id": "AUD-82", "description": "M0-A-S11 Assert cmd/go plain-go parity, help hiding, and generator rules", "phase": "AUD"}
