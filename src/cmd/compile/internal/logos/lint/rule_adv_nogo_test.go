@@ -213,6 +213,11 @@ func TestAdvReentrantDeadlock(t *testing.T) {
 			[]string{"32 concurrency::reentrant_withlock_deadlock deny"},
 		},
 		{
+			"storedLiteralCalledDeadlocks",
+			"func d3(l *Locked[int]) { l.WithLock(func(n *int) { inner := func() { l.WithLock(func(m *int) { *m++ }) }; inner() }) }\n",
+			[]string{"32 concurrency::reentrant_withlock_deadlock deny"},
+		},
+		{
 			"genericHelperDeadlocks",
 			"func relock[T any](l *Locked[T]) { l.WithLock(func(n *T) {}) }\nfunc d5(l *Locked[int]) { l.WithLock(func(n *int) { relock(l) }) }\n",
 			[]string{"33 concurrency::reentrant_withlock_deadlock deny"},

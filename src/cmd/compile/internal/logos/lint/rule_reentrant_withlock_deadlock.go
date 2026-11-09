@@ -109,6 +109,7 @@ type lockCheck struct {
 	fileOf       map[*syntax.CallExpr]*syntax.File
 	asyncCall    map[*syntax.CallExpr]bool
 	aliases      map[types2.Object]lockKey
+	stored       map[types2.Object]syntax.Node
 	keyPathLimit int
 	reported     map[*syntax.CallExpr]bool
 }
@@ -132,6 +133,7 @@ func checkReentrantWithLock(pass *Pass) {
 		c.markAsync(f)
 		c.index(f)
 		c.indexAliases(f)
+		c.indexStored(f)
 	}
 	for _, f := range pass.Files {
 		c.indexCalls(f)
@@ -288,6 +290,79 @@ func (c *lockCheck) aliasTarget(rhs syntax.Expr) syntax.Expr {
 	return nil
 }
 
+func (c *lockCheck) indexStored(f *syntax.File) {
+	counts := make(map[types2.Object]int)
+	lits := make(map[types2.Object]syntax.Node)
+	syntax.Inspect(f, func(n syntax.Node) bool {
+		switch x := n.(type) {
+		case *syntax.AssignStmt:
+			if x.Op == syntax.Def {
+				c.noteStoredDef(x, counts, lits)
+			} else {
+				c.noteStoredUse(x, counts, lits)
+			}
+		case *syntax.VarDecl:
+			c.noteStoredVar(x, counts, lits)
+		}
+		return true
+	})
+	if c.stored == nil {
+		c.stored = make(map[types2.Object]syntax.Node)
+	}
+	for obj, n := range counts {
+		if n != 1 {
+			continue
+		}
+		if lit, ok := lits[obj]; ok {
+			c.stored[obj] = lit
+		}
+	}
+}
+
+func (c *lockCheck) noteStoredDef(x *syntax.AssignStmt, counts map[types2.Object]int, lits map[types2.Object]syntax.Node) {
+	lhs, rhs := exprList(x.Lhs), exprList(x.Rhs)
+	if len(lhs) != 1 || len(rhs) != 1 {
+		return
+	}
+	name, ok := syntax.Unparen(lhs[0]).(*syntax.Name)
+	if !ok || isBlank(name) {
+		return
+	}
+	c.noteStoredBinding(c.pass.Info.Defs[name], rhs[0], counts, lits)
+}
+
+func (c *lockCheck) noteStoredUse(x *syntax.AssignStmt, counts map[types2.Object]int, lits map[types2.Object]syntax.Node) {
+	lhs, rhs := exprList(x.Lhs), exprList(x.Rhs)
+	if len(lhs) != 1 || len(rhs) != 1 {
+		return
+	}
+	name, ok := syntax.Unparen(lhs[0]).(*syntax.Name)
+	if !ok || isBlank(name) {
+		return
+	}
+	c.noteStoredBinding(c.pass.Info.Uses[name], rhs[0], counts, lits)
+}
+
+func (c *lockCheck) noteStoredVar(x *syntax.VarDecl, counts map[types2.Object]int, lits map[types2.Object]syntax.Node) {
+	vals := exprList(x.Values)
+	for i, nm := range x.NameList {
+		if i >= len(vals) {
+			break
+		}
+		c.noteStoredBinding(c.pass.Info.Defs[nm], vals[i], counts, lits)
+	}
+}
+
+func (c *lockCheck) noteStoredBinding(obj types2.Object, rhs syntax.Expr, counts map[types2.Object]int, lits map[types2.Object]syntax.Node) {
+	if obj == nil {
+		return
+	}
+	counts[obj]++
+	if lit := immediateLiteral(rhs); lit != nil {
+		lits[obj] = lit
+	}
+}
+
 // indexCalls records the synchronous WithLock calls of f. Calls in
 // asynchronous or stored bodies are excluded, so they are never indexed
 // and never queried.
@@ -411,6 +486,7 @@ type syncVisitor struct {
 	c      *lockCheck
 	file   *syntax.File
 	funLit map[syntax.Node]bool
+	active map[syntax.Node]bool
 	onCall func(*syntax.CallExpr)
 }
 
@@ -451,6 +527,7 @@ func (v *syncVisitor) Visit(n syntax.Node) syntax.Visitor {
 		if lit := immediateLiteral(n.Fun); lit != nil {
 			v.funLit[lit] = true
 		}
+		v.walkStoredCall(n)
 		if v.onCall != nil {
 			v.onCall(n)
 		}
@@ -469,6 +546,37 @@ func (v *syncVisitor) visitAsyncOperands(call *syntax.CallExpr) {
 	}
 	for _, a := range call.ArgList {
 		syntax.Walk(a, v)
+	}
+}
+
+func (v *syncVisitor) walkStoredCall(call *syntax.CallExpr) {
+	if immediateLiteral(call.Fun) != nil {
+		return
+	}
+	name, ok := syntax.Unparen(call.Fun).(*syntax.Name)
+	if !ok {
+		return
+	}
+	obj, ok := v.c.pass.Info.Uses[name]
+	if !ok {
+		return
+	}
+	body, ok := v.c.stored[obj]
+	if !ok {
+		return
+	}
+	if v.active == nil {
+		v.active = make(map[syntax.Node]bool)
+	}
+	if v.active[body] {
+		return
+	}
+	v.active[body] = true
+	switch b := body.(type) {
+	case *syntax.FuncLit:
+		syntax.Walk(b.Body, v)
+	case *syntax.LambdaExpr:
+		syntax.Walk(b.Body, v)
 	}
 }
 
