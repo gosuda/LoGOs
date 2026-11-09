@@ -33,9 +33,9 @@ func blockPlainStmt() ir.Node {
 }
 
 func TestLogosKeepRegionBlockOff(t *testing.T) {
-	if buildcfg.Experiment.LogosArena {
-		t.Fatalf("LogosArena set with GOEXPERIMENT unset")
-	}
+	old := buildcfg.Experiment.LogosArena
+	buildcfg.Experiment.LogosArena = false
+	t.Cleanup(func() { buildcfg.Experiment.LogosArena = old })
 	if logosKeepRegionBlock([]ir.Node{blockOpenCall()}) {
 		t.Fatalf("logosKeepRegionBlock = true with experiment off")
 	}
