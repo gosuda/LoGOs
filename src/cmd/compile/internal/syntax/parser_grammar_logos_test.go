@@ -4,7 +4,10 @@
 
 package syntax
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 type grammarProbe struct {
 	prod  string
@@ -137,5 +140,119 @@ func TestGrammarProductionsHaveFixtures(t *testing.T) {
 		if !g.found(f) {
 			t.Errorf("%s: no witness node in %q", g.prod, g.src)
 		}
+	}
+}
+
+func TestGrammarConstFuncPositive(t *testing.T) {
+	f := parseLogos(t, "package p\nconst func F() {}\n")
+	if !hasNode[*ConstFuncDecl](f) {
+		t.Fatalf("const func: no *ConstFuncDecl")
+	}
+	g := parseLogos(t, "package p\nfunc f() { const if true {} }\n")
+	if !hasNode[*ConstIfStmt](g) {
+		t.Fatalf("const if: no *ConstIfStmt")
+	}
+	h := parseLogos(t, "package p\nfunc f() { const for i := range x {} }\n")
+	if !hasNode[*ConstForStmt](h) {
+		t.Fatalf("const for: no *ConstForStmt")
+	}
+}
+
+func TestGrammarOptionRejectsAndNests(t *testing.T) {
+	var msgs []string
+	bad, _ := Parse(nil, strings.NewReader("package p\ntype A T??\n"), func(err error) {
+		msgs = append(msgs, err.Error())
+	}, nil, CheckBranches|LogosMode)
+	if len(msgs) == 0 {
+		t.Fatalf("T??: parsed without error, want a syntax error")
+	}
+	found := false
+	Inspect(bad, func(n Node) bool {
+		if opt, ok := n.(*OptionType); ok {
+			if _, ok := Unparen(opt.Elem).(*OptionType); ok {
+				found = true
+				return false
+			}
+		}
+		return true
+	})
+	if !found {
+		t.Fatalf("T??: no doubly-nested *OptionType recovery in %q", msgs)
+	}
+	f := parseLogos(t, "package p\nfunc f(x (int?)?) {}\n")
+	decl, ok := f.DeclList[0].(*FuncDecl)
+	if !ok {
+		t.Fatalf("decl 0 is %T, want *FuncDecl", f.DeclList[0])
+	}
+	if len(decl.Type.ParamList) != 1 {
+		t.Fatalf("got %d params, want 1", len(decl.Type.ParamList))
+	}
+	outer, ok := decl.Type.ParamList[0].Type.(*OptionType)
+	if !ok {
+		t.Fatalf("param type is %T, want *OptionType", decl.Type.ParamList[0].Type)
+	}
+	if _, ok := Unparen(outer.Elem).(*OptionType); !ok {
+		t.Fatalf("outer elem is %T, want nested *OptionType", outer.Elem)
+	}
+}
+func TestGrammarReadonlyDistinct(t *testing.T) {
+	f := parseLogos(t, "package p\ntype I interface { const M() string }\n")
+	decl, ok := f.DeclList[0].(*TypeDecl)
+	if !ok {
+		t.Fatalf("decl 0 is %T, want *TypeDecl", f.DeclList[0])
+	}
+	it, ok := decl.Type.(*InterfaceType)
+	if !ok || len(it.MethodList) != 1 {
+		t.Fatalf("interface methods: %+v", decl.Type)
+	}
+	fld := it.MethodList[0]
+	if !fld.Const {
+		t.Fatalf("readonly method: Const flag not set")
+	}
+	if _, ok := fld.Type.(*FuncType); !ok {
+		t.Fatalf("readonly method type is %T, want *FuncType", fld.Type)
+	}
+	g := parseLogos(t, "package p\ntype C interface { const Name string }\n")
+	gdecl, ok := g.DeclList[0].(*TypeDecl)
+	if !ok {
+		t.Fatalf("decl 0 is %T, want *TypeDecl", g.DeclList[0])
+	}
+	git, ok := gdecl.Type.(*InterfaceType)
+	if !ok || len(git.MethodList) != 1 {
+		t.Fatalf("property methods: %+v", gdecl.Type)
+	}
+	prop, ok := git.MethodList[0].Type.(*PropertyType)
+	if !ok || !prop.Const {
+		t.Fatalf("property elem is %T, want *PropertyType const", git.MethodList[0].Type)
+	}
+}
+
+func TestGrammarCoalesceShapes(t *testing.T) {
+	f := parseLogos(t, "package p\nfunc f(a, b, c int) { _ = a || b ?? c }\n")
+	stmts := funcBodyStmts(t, f, "f")
+	as, ok := stmts[0].(*AssignStmt)
+	if !ok {
+		t.Fatalf("first statement is %T, want *AssignStmt", stmts[0])
+	}
+	top, ok := as.Rhs.(*CoalesceExpr)
+	if !ok {
+		t.Fatalf("a || b ?? c rhs is %T, want *CoalesceExpr", as.Rhs)
+	}
+	op, ok := Unparen(top.X).(*Operation)
+	if !ok || op.Op != OrOr {
+		t.Fatalf("coalesce left is %T, want || operation", top.X)
+	}
+	g := parseLogos(t, "package p\nfunc f(a, b, c int) { _ = a ?? b ?? c }\n")
+	gstmts := funcBodyStmts(t, g, "f")
+	gas, ok := gstmts[0].(*AssignStmt)
+	if !ok {
+		t.Fatalf("first statement is %T, want *AssignStmt", gstmts[0])
+	}
+	gtop, ok := gas.Rhs.(*CoalesceExpr)
+	if !ok {
+		t.Fatalf("a ?? b ?? c rhs is %T, want *CoalesceExpr", gas.Rhs)
+	}
+	if _, ok := Unparen(gtop.Y).(*CoalesceExpr); !ok {
+		t.Fatalf("chained ?? right is %T, want right-nested *CoalesceExpr", gtop.Y)
 	}
 }
