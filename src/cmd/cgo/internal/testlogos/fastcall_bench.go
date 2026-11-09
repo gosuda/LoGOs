@@ -13,8 +13,8 @@ void bench_void_slow(void) {}
 int bench_one_fast(int a) { return a + 1; }
 int bench_one_slow(int a) { return a + 1; }
 
-int bench_three_fast(int a, int b, int c) { return a + b + c; }
-int bench_three_slow(int a, int b, int c) { return a + b + c; }
+__attribute__((noinline)) int bench_three_fast(int a, int b, int c) { return a + b + c; }
+__attribute__((noinline)) int bench_three_slow(int a, int b, int c) { return a + b + c; }
 
 int bench_read2_fast(int *a, int *b) { return *a + *b; }
 int bench_read2_slow(int *a, int *b) { return *a + *b; }
@@ -82,7 +82,7 @@ int bench_burn_slow(int n) {
 long long bench_floor_empty(long long iters) {
 	long long s = 0;
 	for (long long i = 0; i < iters; i++) {
-		s += i & 7;
+		s += (s & 7) + 3;
 	}
 	return s;
 }
