@@ -77,22 +77,11 @@ func isExec(p string) bool {
 
 func runCmd(t *testing.T, dir, name string, args ...string) (string, error) {
 	t.Helper()
-	return runCmdEnv(t, dir, nil, name, args...)
-}
-
-// runCmdEnv runs a command with extra environment entries appended. It
-// exists so a child build can be told the experiment this test binary was
-// built with: the child is the plain go command, which never applies the
-// managed default, so an inherited environment alone would build the other
-// personality and the structure assertions would compare unlike bodies.
-func runCmdEnv(t *testing.T, dir string, extraEnv []string, name string, args ...string) (string, error) {
-	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "GOPROXY=off", "GOTOOLCHAIN=local")
-	cmd.Env = append(cmd.Env, extraEnv...)
 	var buf bytes.Buffer
 	cmd.Stdout = &buf
 	cmd.Stderr = &buf
@@ -394,22 +383,12 @@ func TestFastcallLayout(t *testing.T) {
 // selfTestBin builds an unstripped test binary for inspection. Plain
 // `go test` links run-mode binaries with -s -w, so os.Executable()
 // carries no symbol section; `go test -c` preserves it.
-//
-// The inner build is told the experiment this test binary was compiled
-// with. The child is the plain go command, which never applies a managed
-// default, so relying on the inherited environment would build the other
-// personality under `logos test` and the structure assertion would
-// compare unlike bodies.
 func selfTestBin(t *testing.T) string {
 	t.Helper()
 	requireCgo(t)
 	bin := filepath.Join(t.TempDir(), "testlogos.test")
 	srcCmd := filepath.Join(runtime.GOROOT(), "src", "cmd")
-	exp := "GOEXPERIMENT=nologosfastcgo"
-	if goexperiment.LogosFastCgo {
-		exp = "GOEXPERIMENT=logosfastcgo"
-	}
-	out, err := runCmdEnv(t, srcCmd, []string{exp}, goBin(t), "test", "-c", "-o", bin, "cmd/cgo/internal/testlogos")
+	out, err := runCmd(t, srcCmd, goBin(t), "test", "-c", "-o", bin, "cmd/cgo/internal/testlogos")
 	if err != nil {
 		t.Fatalf("self build: %v\n%s", err, out)
 	}
