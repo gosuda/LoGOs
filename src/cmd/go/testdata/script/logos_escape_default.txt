@@ -1,0 +1,5 @@
+# The pointee-leak precision stays behind GOEXPERIMENT=logosescape:
+# a default toolchain does not carry the experiment.
+
+go env GOEXPERIMENT
+! stdout logosescape
