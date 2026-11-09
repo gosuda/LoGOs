@@ -42,6 +42,10 @@ func Autowire[T any](c *Container) *T {
 	}
 	return &v
 }
+func TypeKind[T any]() string {
+	_ = comptime.TypeOf[T]()
+	return "type"
+}
 
 func main() {
 	c := &Container{Port: 8080, Host: "db"}
@@ -51,4 +55,6 @@ func main() {
 	fmt.Println(b.Host, b.Port)
 	a2 := Autowire[ServiceA](c)
 	fmt.Println(a2.Port, a2.Host)
+	fmt.Println(TypeKind[int]())
+	fmt.Println(TypeKind[string]())
 }

@@ -50,15 +50,12 @@ func (check *Checker) logosComptimeCall(x *operand, call *syntax.CallExpr) bool 
 		}
 	}
 	switch {
-	// Invariant (predicate fold): an IsStruct call in a `const if`
-	// condition position is answered here, never falls through.
 	case fname == "IsStruct" && check.logosPred.depth > 0 && check.logosIsStruct(x, call):
 		return true
 	case isLogosLayoutName(fname) && check.logosLayoutCall(x, call, fname):
 		return true
-	// Invariant (compile-time only): value-returning comptime calls
-	// outside their compile-time positions fail closed here; the
-	// normal check still types arguments and results.
+	case fname == "TypeOf" && check.logosTypeOfCall(x, call):
+		return true
 	case fname == "Fields", fname == "IsStruct", fname == "TypeOf",
 		fname == "SizeOf", fname == "AlignOf", fname == "HasPointers":
 		check.errorf(syntax.StartPos(call), InvalidPkgUse, "[comptime::runtime_use] comptime.%s is compile-time only", fname)
@@ -104,6 +101,33 @@ func (check *Checker) logosIsStruct(x *operand, call *syntax.CallExpr) bool {
 		x.typ_ = Typ[UntypedBool]
 		x.val = constant.MakeBool(isStruct)
 	}
+	return true
+}
+func (check *Checker) logosTypeOfCall(x *operand, call *syntax.CallExpr) bool {
+	if !check.logosComptimeInGeneric() {
+		return false
+	}
+	idx, ok := call.Fun.(*syntax.IndexExpr)
+	if !ok || len(call.ArgList) != 0 {
+		return false
+	}
+	targs := syntax.UnpackListExpr(idx.Index)
+	if len(targs) != 1 {
+		return false
+	}
+	targ := check.varType(targs[0])
+	x.expr = call
+	if !isValid(targ) {
+		x.invalidate()
+		return true
+	}
+	obj := check.logosComptimeObj("Type")
+	tn, ok := obj.(*TypeName)
+	if !ok || tn.Type() == nil {
+		return false
+	}
+	x.mode_ = value
+	x.typ_ = tn.Type()
 	return true
 }
 

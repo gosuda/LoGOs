@@ -44,6 +44,9 @@ func cfRuntimeFields() {
 func cfRuntimeIsStruct() bool {
 	return comptime /* ERROR "comptime::runtime_use" */ .IsStruct[CFWidget]()
 }
+func cfRuntimeTypeOf() {
+	_ = comptime /* ERROR "comptime::runtime_use" */ .TypeOf[int]()
+}
 
 func cfErrorLive() {
 	comptime.Error("live fire" /* ERROR "live fire" */)

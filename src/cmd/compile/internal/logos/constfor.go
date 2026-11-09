@@ -1199,6 +1199,11 @@ func (fl *fileLower) cfLeafSubs(root syntax.Node, active cfChain, covered []cfSp
 				add(s, e, keepComments(ctx.buf.b, s, e, logosLayoutText(v)))
 				return false
 			}
+			if fl.cfFoldTypeOf(n, sites) {
+				s, e := cfCallSpan(ctx, n)
+				add(s, e, keepComments(ctx.buf.b, s, e, "struct{}{}"))
+				return false
+			}
 			if sites != nil && sites.comptimeName != "" {
 				fl.cfCheckError(n, sites)
 			}
@@ -1317,6 +1322,24 @@ func (fl *fileLower) cfFoldTagGet(call *syntax.CallExpr, active cfChain, parents
 	}
 	s, e := at(call)
 	add(s, e, strconv.Quote(reflect.StructTag(a.field.tag).Get(key)))
+	return true
+}
+func (fl *fileLower) cfFoldTypeOf(call *syntax.CallExpr, sites *cfSites) bool {
+	if sites == nil || sites.comptimeName == "" {
+		return false
+	}
+	idx, ok := call.Fun.(*syntax.IndexExpr)
+	if !ok || len(call.ArgList) != 0 {
+		return false
+	}
+	sel, ok := idx.X.(*syntax.SelectorExpr)
+	if !ok || sel.Sel.Value != "TypeOf" {
+		return false
+	}
+	qn, ok := sel.X.(*syntax.Name)
+	if !ok || qn.Value != sites.comptimeName {
+		return false
+	}
 	return true
 }
 
