@@ -110,6 +110,7 @@ func (s *store) touchLocked(path string) {
 		if u.dir == dir || u.dirs[dir] {
 			u.dirty = true
 			u.gen++
+			u.hintsOK = false
 		}
 	}
 }

@@ -36,7 +36,7 @@ func (p *Proxy) spawnHints(ctx context.Context, id json.RawMessage, pend pending
 }
 
 func (p *Proxy) mergeHints(ctx context.Context, pend pending, result any) any {
-	hints, err := p.packageHints(ctx, pend.path)
+	hints, st, err := p.packageHints(ctx, pend.path)
 	if err != nil {
 		p.logf("hints for %s: %v", pend.path, err)
 		return result
@@ -51,37 +51,41 @@ func (p *Proxy) mergeHints(ctx context.Context, pend pending, result any) any {
 		p.logf("hints for %s: %v", pend.path, err)
 		return result
 	}
+	if !p.hintsFresh(st) {
+		return result
+	}
 	if pend.method == "textDocument/inlayHint" {
 		return appendList(result, extra)
 	}
 	return mergeHover(result, extra)
 }
 
-func (p *Proxy) packageHints(ctx context.Context, path string) (json.RawMessage, error) {
+func (p *Proxy) packageHints(ctx context.Context, path string) (json.RawMessage, hintsSnapshot, error) {
 	if p.opts.HintsJSON == nil {
-		return nil, errors.New("no hints runner")
+		return nil, hintsSnapshot{}, errors.New("no hints runner")
 	}
 	st := p.hintsState(path)
 	if st.unit == nil {
-		return nil, fmt.Errorf("no open package for %s", path)
+		return nil, st, fmt.Errorf("no open package for %s", path)
 	}
 	if st.hit {
-		return st.hints, nil
+		return st.hints, st, nil
 	}
 	hints, err := p.opts.HintsJSON(ctx, st.unit.dir, st.buffers)
 	if err != nil {
-		return nil, err
+		return nil, st, err
 	}
 	p.storeHints(st, hints)
-	return hints, nil
+	return hints, st, nil
 }
 
 type hintsSnapshot struct {
-	unit    *unit
-	gen     int
-	hit     bool
-	hints   json.RawMessage
-	buffers map[string][]byte
+	unit     *unit
+	gen      int
+	hit      bool
+	hints    json.RawMessage
+	buffers  map[string][]byte
+	versions map[string]int
 }
 
 func (p *Proxy) hintsState(path string) hintsSnapshot {
@@ -91,22 +95,50 @@ func (p *Proxy) hintsState(path string) hintsSnapshot {
 	if u == nil {
 		return hintsSnapshot{}
 	}
-	if u.hintsOK {
-		return hintsSnapshot{unit: u, gen: u.gen, hit: true, hints: u.hints}
-	}
 	buffers := make(map[string][]byte, len(p.st.docs))
+	versions := make(map[string]int, len(p.st.docs))
 	for path, doc := range p.st.docs {
 		buffers[path] = doc.text.data
+		versions[path] = doc.version
 	}
-	return hintsSnapshot{unit: u, gen: u.gen, buffers: buffers}
+	if u.hintsOK {
+		return hintsSnapshot{unit: u, gen: u.gen, hit: true, hints: u.hints, buffers: buffers, versions: versions}
+	}
+	return hintsSnapshot{unit: u, gen: u.gen, buffers: buffers, versions: versions}
+}
+
+func (p *Proxy) hintsFresh(st hintsSnapshot) bool {
+	p.st.mu.Lock()
+	defer p.st.mu.Unlock()
+	if st.unit == nil || p.st.units[st.unit.dir] != st.unit || st.unit.gen != st.gen {
+		return false
+	}
+	return versionsEqualLocked(p.st.docs, st.versions)
+}
+
+func versionsEqualLocked(docs map[string]*document, versions map[string]int) bool {
+	if len(versions) != len(docs) {
+		return false
+	}
+	for path, version := range versions {
+		doc := docs[path]
+		if doc == nil || doc.version != version {
+			return false
+		}
+	}
+	return true
 }
 
 func (p *Proxy) storeHints(st hintsSnapshot, hints json.RawMessage) {
 	p.st.mu.Lock()
 	defer p.st.mu.Unlock()
-	if p.st.units[st.unit.dir] == st.unit && st.unit.gen == st.gen {
-		st.unit.hints, st.unit.hintsOK = hints, true
+	if st.unit == nil || p.st.units[st.unit.dir] != st.unit || st.unit.gen != st.gen {
+		return
 	}
+	if !versionsEqualLocked(p.st.docs, st.versions) {
+		return
+	}
+	st.unit.hints, st.unit.hintsOK = hints, true
 }
 
 func appendList(base, extra any) any {

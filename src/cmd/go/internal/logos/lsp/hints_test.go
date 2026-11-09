@@ -321,6 +321,101 @@ func TestProxyDoesNotCacheHintsOfAnOlderCompile(t *testing.T) {
 		t.Errorf("the runner ran %d times, want 2: the run of the old text must not be cached", runs)
 	}
 }
+
+func TestProxyHintsSupersededBufferAreDropped(t *testing.T) {
+	low, _, _ := lowerQuestion([]byte(aLgo))
+	lowData := shift(findPos(t, string(low), "data", 0), len("data"))
+	started, release := make(chan struct{}), make(chan struct{})
+	var mu sync.Mutex
+	runs := 0
+	f := newFixture(t, map[string]string{"a/a.lgo": aLgo}, fixtureOptions{
+		Script: func(string) fakeScript {
+			return fakeScript{Responses: map[string]json.RawMessage{
+				"textDocument/inlayHint": toJSON(t, []any{map[string]any{"position": lowData, "label": ": []byte"}}),
+			}}
+		},
+		Tune: func(f *fixture, o *Options) {
+			o.Hints = func(string, json.RawMessage, json.RawMessage) (json.RawMessage, error) {
+				return json.RawMessage(`[{"position":{"line":5,"character":5},"label":"/* stale */"}]`), nil
+			}
+			o.HintsJSON = func(context.Context, string, map[string][]byte) (json.RawMessage, error) {
+				mu.Lock()
+				runs++
+				first := runs == 1
+				mu.Unlock()
+				if first {
+					close(started)
+					<-release
+				}
+				return json.RawMessage(`{"run":1}`), nil
+			}
+		},
+	})
+	f.open("a/a.lgo", 1)
+	params := map[string]any{
+		"textDocument": map[string]any{"uri": f.uri("a/a.lgo")},
+		"range":        Range{Start: Position{Line: 0}, End: Position{Line: 8}},
+	}
+	id := f.client.request("textDocument/inlayHint", params)
+	select {
+	case <-started:
+	case <-time.After(waitLimit):
+		t.Fatal("the hints runner never started")
+	}
+	f.client.notify("textDocument/didChange", map[string]any{
+		"textDocument":   map[string]any{"uri": f.uri("a/a.lgo"), "version": 2},
+		"contentChanges": []any{map[string]any{"text": aLgo + "\n"}},
+	})
+	f.sync()
+	close(release)
+	m := f.client.await("textDocument/inlayHint", id)
+	sameJSON(t, "hints from a superseded buffer", m.Result, []any{
+		map[string]any{"position": lowData, "label": ": []byte"},
+	})
+}
+
+func TestProxyHintsEditBeforeResponseRecomputes(t *testing.T) {
+	rec := new(hintsRecorder)
+	f := newFixture(t, map[string]string{"a/a.lgo": aLgo}, fixtureOptions{
+		Script: func(string) fakeScript {
+			return fakeScript{
+				DelayMillis: 200,
+				Responses: map[string]json.RawMessage{
+					"textDocument/inlayHint": toJSON(t, []any{}),
+				},
+			}
+		},
+		Tune: func(f *fixture, o *Options) {
+			o.Hints = rec.serve
+			o.HintsJSON = rec.run
+		},
+	})
+	f.open("a/a.lgo", 1)
+	params := map[string]any{
+		"textDocument": map[string]any{"uri": f.uri("a/a.lgo")},
+		"range":        Range{Start: Position{Line: 0}, End: Position{Line: 8}},
+	}
+	f.client.call("textDocument/inlayHint", params)
+	if runs, _ := rec.snapshot(); runs != 1 {
+		t.Fatalf("the hints runner ran %d times for one request, want once", runs)
+	}
+	id := f.client.request("textDocument/inlayHint", params)
+	f.client.notify("textDocument/didChange", map[string]any{
+		"textDocument":   map[string]any{"uri": f.uri("a/a.lgo"), "version": 2},
+		"contentChanges": []any{map[string]any{"text": aLgo + "\n"}},
+	})
+	f.client.await("textDocument/inlayHint", id)
+	if runs, _ := rec.snapshot(); runs != 2 {
+		t.Errorf("the hints runner ran %d times across an edit, want 2: cached hints of the older buffer must not be reused", runs)
+	}
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	last := rec.buffers[len(rec.buffers)-1]
+	if !bytes.Equal(last[f.path("a/a.lgo")], []byte(aLgo+"\n")) {
+		t.Errorf("the recompute used %q, want the edited text", last[f.path("a/a.lgo")])
+	}
+}
+
 func TestProxyHintsGoPackageAlloc(t *testing.T) {
 	root, tc := realWorkspace(t)
 	dir := filepath.Join(root, "gomod", "alloc")
