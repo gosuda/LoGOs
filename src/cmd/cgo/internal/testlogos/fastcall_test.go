@@ -808,6 +808,22 @@ func TestFastcallGoPointerValid(t *testing.T) {
 		t.Fatalf("sum_bytes = %d, want 60", got)
 	}
 }
+func TestFastcallNumCgoCallAccounting(t *testing.T) {
+	requireCgo(t)
+	before := runtime.NumCgoCall()
+	if got := callFastAdd(40, 2); got != 42 {
+		t.Fatalf("fast_add = %d, want 42", got)
+	}
+	if mid := runtime.NumCgoCall(); mid != before+1 {
+		t.Fatalf("NumCgoCall after fast call = %d, want %d", mid, before+1)
+	}
+	if got := callSlowNoescape(40, 2); got != 42 {
+		t.Fatalf("slow_noescape = %d, want 42", got)
+	}
+	if after := runtime.NumCgoCall(); after != before+2 {
+		t.Fatalf("NumCgoCall after slow call = %d, want %d", after, before+2)
+	}
+}
 
 // growStack recursion depth times, then unwinds: the goroutine's stack
 // grows deep and is later mostly unused, so GC scan may shrink it.
