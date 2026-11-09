@@ -14,33 +14,6 @@ import (
 	"cmd/compile/internal/types2"
 )
 
-// This file lowers M8-S2 `go group` statements and `go { }` children
-// (SPEC Sec 2.6, T-206) to logos/rt.Group: the head opens the group,
-// each child becomes a Go call with an error closure, and the tail
-// waits with the `?` exit shape, so the group error propagates like `?`.
-//
-// One frame stack on funcLower tracks the group under lowering: every
-// frame belongs to the current run, so nested function literals (fresh
-// runs with empty stacks) never inherit membership. A group statement
-// in a group body wraps as a child of that group; anywhere else it
-// lowers inline. Every closure the group builds lowers eagerly through
-// a child funcLower (which owns the single-error specs `?` needs) and
-// is marked done, so the later literal scan prunes the finished subtree.
-//
-// Splice discipline: bodies and calls keep their source in place and
-// compose through insertions and keyword deletions, so later passes
-// (tuples, lambdas, interpolation) keep splicing inside them. Only the
-// group head covers a span, and only the `go group (ctx, limit)`
-// keywords: the context and limit are almost always a name and a
-// literal, and they drain through textOf exactly like every call
-// template. A tuple, lambda, or interpolation inside a group context
-// or limit would overlap that head; keep them in child bodies.
-
-// groupFrame is one group-body or child-body scope under lowering: g,
-// gctx, and j spell the group, context, and joined-flag temporaries,
-// child tells a child body (where the M8-S3 cancel rewrites apply)
-// from a group body, and body is the inline body a branch-leaving check
-// tests against (nil for child frames, whose exits never leave).
 type groupFrame struct {
 	g     string
 	gctx  string
@@ -49,22 +22,12 @@ type groupFrame struct {
 	body  *syntax.BlockStmt
 }
 
-// groupExprEnd returns the offset just past the expression starting at
-// start: tokens scan with bracket depth, stopping before a closer,
-// comma, or semicolon at depth zero that belongs to the enclosing
-// syntax. EndPos alone stops at the last argument of a call, and the
-// paren skipper overshoots into enclosing lists, so neither fits a
-// context, limit, or call span on its own.
 func groupExprEnd(src []byte, start int) int {
 	e := exprScan{end: start}
 	scanSegment(src, start, len(src), e.step)
 	return e.end
 }
 
-// exprScan is the token state of groupExprEnd: end is the offset past
-// the last token taken, depth counts open brackets, opened records that
-// any bracket opened, and pending marks a just-closed call or index
-// list, which only a postfix token may continue.
 type exprScan struct {
 	end     int
 	depth   int
@@ -72,7 +35,6 @@ type exprScan struct {
 	pending bool
 }
 
-// step takes one token and reports whether the expression continues.
 func (e *exprScan) step(t tok) bool {
 	if t.auto && e.depth == 0 {
 		return false
@@ -93,14 +55,10 @@ func (e *exprScan) step(t tok) bool {
 	return true
 }
 
-// groupPostfix reports whether a token of kind k continues an
-// expression after a closed call: a call, an index, or a selector.
 func groupPostfix(k token.Token) bool {
 	return k == token.LPAREN || k == token.LBRACK || k == token.PERIOD
 }
 
-// bracket tracks the bracket depth for a token of kind k and reports
-// false at a closer, comma, or semicolon of the enclosing syntax.
 func (e *exprScan) bracket(k token.Token) bool {
 	switch k {
 	case token.LPAREN, token.LBRACK, token.LBRACE:
@@ -118,7 +76,6 @@ func (e *exprScan) bracket(k token.Token) bool {
 	return true
 }
 
-// groupTop reports the innermost group frame under lowering.
 func (fc *funcLower) groupTop() (groupFrame, bool) {
 	if n := len(fc.groupStack); n > 0 {
 		return fc.groupStack[n-1], true
@@ -126,11 +83,6 @@ func (fc *funcLower) groupTop() (groupFrame, bool) {
 	return groupFrame{}, false
 }
 
-// lowerGroupHook is the one entry statement lowering takes into group
-// lowering. It routes the statements a group frame rewrites (group
-// statements, child blocks, child calls, exits from a group body, and
-// communication in a child) and reports false for every other
-// statement, which keeps its ordinary lowering.
 func (fc *funcLower) lowerGroupHook(s syntax.Stmt) ([]syntax.Stmt, bool) {
 	switch s := s.(type) {
 	case *syntax.GroupStmt:
@@ -147,7 +99,6 @@ func (fc *funcLower) lowerGroupHook(s syntax.Stmt) ([]syntax.Stmt, bool) {
 	return fc.groupChanStmt(s)
 }
 
-// groupCallStmt turns a `go` call in a group body into a child.
 func (fc *funcLower) groupCallStmt(s *syntax.CallStmt) ([]syntax.Stmt, bool) {
 	if s.Tok != syntax.Go {
 		return nil, false
@@ -158,7 +109,6 @@ func (fc *funcLower) groupCallStmt(s *syntax.CallStmt) ([]syntax.Stmt, bool) {
 	return fc.lowerGroupGo(s), true
 }
 
-// groupReturnStmt joins the group before a return leaves its body.
 func (fc *funcLower) groupReturnStmt(s *syntax.ReturnStmt) ([]syntax.Stmt, bool) {
 	if top, ok := fc.groupTop(); ok && !top.child {
 		return fc.lowerGroupReturn(s, top), true
@@ -166,7 +116,6 @@ func (fc *funcLower) groupReturnStmt(s *syntax.ReturnStmt) ([]syntax.Stmt, bool)
 	return nil, false
 }
 
-// groupBranchStmt joins the group before a branch leaves its body.
 func (fc *funcLower) groupBranchStmt(s *syntax.BranchStmt) ([]syntax.Stmt, bool) {
 	if top, ok := fc.groupTop(); ok && !top.child && fc.groupBranchLeaves(top, s) {
 		return fc.lowerGroupBranch(s, top), true
@@ -174,22 +123,16 @@ func (fc *funcLower) groupBranchStmt(s *syntax.BranchStmt) ([]syntax.Stmt, bool)
 	return nil, false
 }
 
-// scopeGroupStmt binds the scope defers of a group body inline.
 func (fc *funcLower) scopeGroupStmt(s *syntax.GroupStmt, active []*scopeDeferCtx, stack []scopeFrame) []syntax.Stmt {
 	s.Body.List = fc.scopeBlockList(s.Body.List, s.Body, fc.fl.off(s.Body.Rbrace), active, stack)
 	return []syntax.Stmt{s}
 }
 
-// yieldGroupStmt keeps yields synchronous inside a group body.
 func (fc *funcLower) yieldGroupStmt(s *syntax.GroupStmt) syntax.Stmt {
 	s.Body.List = fc.rewriteYieldList(s.Body.List)
 	return s
 }
 
-// groupChildFuncType builds the error-closure type of a group child:
-// `func(gctx _logos_rt.Context) (cr error)`. The context parameter
-// shadows the group variable with the same value, so cancel references
-// resolve inside; the named error result keeps ensureNamed silent.
 func groupChildFuncType(pos syntax.Pos, gctx, cr string) *syntax.FuncType {
 	return at(&syntax.FuncType{
 		ParamList: []*syntax.Field{
@@ -207,8 +150,6 @@ func groupChildFuncType(pos syntax.Pos, gctx, cr string) *syntax.FuncType {
 	}, pos)
 }
 
-// groupMarkDone records a finished group closure so the later literal
-// scan prunes its subtree instead of lowering it twice.
 func (fc *funcLower) groupMarkDone(lit *syntax.FuncLit) {
 	if fc.fl.groupDone == nil {
 		fc.fl.groupDone = make(map[*syntax.FuncLit]bool)
@@ -216,8 +157,6 @@ func (fc *funcLower) groupMarkDone(lit *syntax.FuncLit) {
 	fc.fl.groupDone[lit] = true
 }
 
-// lowerGroupStmt lowers a group statement: wrapped as a child when the
-// statement itself sits in a group body, inline otherwise.
 func (fc *funcLower) lowerGroupStmt(s *syntax.GroupStmt) []syntax.Stmt {
 	if top, ok := fc.groupTop(); ok && !top.child {
 		return fc.lowerGroupWrap(s, s.Pos(), top)
@@ -225,8 +164,6 @@ func (fc *funcLower) lowerGroupStmt(s *syntax.GroupStmt) []syntax.Stmt {
 	return fc.lowerGroupInline(s)
 }
 
-// lowerGroupChild lowers a child block by wrapping it as a child of the
-// owning group.
 func (fc *funcLower) lowerGroupChild(s *syntax.GroupChild) []syntax.Stmt {
 	top, ok := fc.groupTop()
 	if !ok {
@@ -235,12 +172,6 @@ func (fc *funcLower) lowerGroupChild(s *syntax.GroupChild) []syntax.Stmt {
 	return fc.lowerGroupWrap(s, s.Pos(), top)
 }
 
-// lowerGroupWrap wraps a group statement or a child block as a child of
-// top. A child body lowers in place between brace keyword splices; a
-// nested group statement lowers into a synthetic container between
-// zero-width edge insertions, which never overlap its inline splices.
-// Either way the closure body ends with `return nil`, since success
-// falls through to a nil error.
 func (fc *funcLower) lowerGroupWrap(s syntax.Stmt, pos syntax.Pos, top groupFrame) []syntax.Stmt {
 	fl := fc.fl
 	cr := fmt.Sprintf("_logos_cr%d", fc.groupSeq)
@@ -275,9 +206,6 @@ func (fc *funcLower) lowerGroupWrap(s syntax.Stmt, pos syntax.Pos, top groupFram
 	return []syntax.Stmt{native}
 }
 
-// groupChildFunc starts a child funcLower under a child frame with the
-// temp counters carried across; groupTakeChild carries the progress
-// back when the child run finishes.
 func (fc *funcLower) groupChildFunc(top groupFrame, body *syntax.BlockStmt, ft *syntax.FuncType) *funcLower {
 	cfc := newFuncLower(fc.fl, ft, body)
 	cfc.errSeq, cfc.funSeq, cfc.argSeq = fc.errSeq, fc.funSeq, fc.argSeq
@@ -287,16 +215,11 @@ func (fc *funcLower) groupChildFunc(top groupFrame, body *syntax.BlockStmt, ft *
 	return cfc
 }
 
-// groupTakeChild carries child temp progress back to the parent.
 func (fc *funcLower) groupTakeChild(cfc *funcLower) {
 	fc.errSeq, fc.funSeq, fc.argSeq = cfc.errSeq, cfc.funSeq, cfc.argSeq
 	fc.tmpSeq, fc.scopeSeq, fc.groupSeq = cfc.tmpSeq, cfc.scopeSeq, cfc.groupSeq
 }
 
-// groupJoinCheck builds the join-once block shared by the group tail
-// and every exit from a group body: on first arrival it marks joined
-// and waits, propagating a group failure exactly like `?`. Later
-// arrivals (a second return, the tail, the panic guard) skip it.
 func (fc *funcLower) groupJoinCheck(pos syntax.Pos, top groupFrame) (native, text []syntax.Stmt, subs []textSub) {
 	fl := fc.fl
 	errSpelling := fc.nextErr()
@@ -317,12 +240,6 @@ func (fc *funcLower) groupJoinCheck(pos syntax.Pos, top groupFrame) (native, tex
 	return native, text, subs
 }
 
-// lowerGroupInline lowers a group statement in place: the head becomes
-// the NewGroup binding with a joined flag and a panic guard, the body
-// lowers through the plain list path, and the tail waits with the `?`
-// exit shape. The child context stays referenced through a blank use
-// even when no child selects on it, so a group of pure call children
-// still compiles.
 func (fc *funcLower) lowerGroupInline(s *syntax.GroupStmt) []syntax.Stmt {
 	fl := fc.fl
 	n := fc.groupSeq
@@ -391,19 +308,12 @@ func (fc *funcLower) lowerGroupInline(s *syntax.GroupStmt) []syntax.Stmt {
 	return append(out, joinNative...)
 }
 
-// groupPrefixJoin emits the join-once block as a zero-width insertion
-// at off and returns its native prefix: exits in group bodies (returns,
-// branches, `?`) join the children first through one shared shape,
-// keeping their own splices untouched in separate records.
 func (fc *funcLower) groupPrefixJoin(pos syntax.Pos, top groupFrame, off int) []syntax.Stmt {
 	joinNative, joinText, joinSubs := fc.groupJoinCheck(pos, top)
 	fc.fl.addT(off, off, renderText(joinText, joinSubs))
 	return joinNative
 }
 
-// groupPrependJoin prefixes native with the join-once block when the
-// `?` under lowering sits in a group body, joining the children before
-// the error path can leave.
 func (fc *funcLower) groupPrependJoin(pos syntax.Pos, spanStart int, native []syntax.Stmt) []syntax.Stmt {
 	if top, ok := fc.groupTop(); ok && !top.child {
 		return append(fc.groupPrefixJoin(pos, top, spanStart), native...)
@@ -411,9 +321,6 @@ func (fc *funcLower) groupPrependJoin(pos syntax.Pos, spanStart int, native []sy
 	return native
 }
 
-// lowerGroupReturn prefixes a return from a group body with the
-// join-once block: children join before the function leaves, and a
-// group failure propagates like `?` instead of the written results.
 func (fc *funcLower) lowerGroupReturn(s *syntax.ReturnStmt, top groupFrame) []syntax.Stmt {
 	fl := fc.fl
 	pos := s.Pos()
@@ -428,9 +335,6 @@ func (fc *funcLower) lowerGroupReturn(s *syntax.ReturnStmt, top groupFrame) []sy
 	return append(prefix, rest...)
 }
 
-// groupBranchTarget resolves the target of a leaving branch: the
-// innermost loop, switch, select, or matching label, or nil when the
-// walk leaves the function (invalid code, which never lowers).
 func (fc *funcLower) groupBranchTarget(s *syntax.BranchStmt) syntax.Node {
 	node := syntax.Node(s)
 	for {
@@ -445,10 +349,6 @@ func (fc *funcLower) groupBranchTarget(s *syntax.BranchStmt) syntax.Node {
 	}
 }
 
-// groupBranchHits reports whether p is the statement the branch s
-// names: the innermost loop for an unlabeled break or continue, the
-// innermost switch or select for an unlabeled break, or the matching
-// label.
 func groupBranchHits(p syntax.Node, s *syntax.BranchStmt) bool {
 	switch t := p.(type) {
 	case *syntax.ForStmt:
@@ -461,9 +361,6 @@ func groupBranchHits(p syntax.Node, s *syntax.BranchStmt) bool {
 	return false
 }
 
-// groupBranchPasses reports whether the walk toward a branch target
-// continues through p: statements and clauses nest, anything else ends
-// the search.
 func groupBranchPasses(p syntax.Node) bool {
 	switch p.(type) {
 	case *syntax.ForStmt, *syntax.SwitchStmt, *syntax.SelectStmt, *syntax.LabeledStmt,
@@ -473,9 +370,6 @@ func groupBranchPasses(p syntax.Node) bool {
 	return false
 }
 
-// groupBranchLeaves reports whether a break, continue, or goto leaves
-// the group body under lowering: its target sits outside the body. Any
-// other branch stays.
 func (fc *funcLower) groupBranchLeaves(top groupFrame, s *syntax.BranchStmt) bool {
 	switch s.Tok {
 	case syntax.Break, syntax.Continue, syntax.Goto:
@@ -502,9 +396,6 @@ func (fc *funcLower) groupBranchLeaves(top groupFrame, s *syntax.BranchStmt) boo
 	return !fc.scopeContains(top.body, target)
 }
 
-// lowerGroupBranch prefixes a branch leaving a group body with the
-// join-once block, so the jump only runs after the children join (and a
-// group failure propagates instead of jumping).
 func (fc *funcLower) lowerGroupBranch(s *syntax.BranchStmt, top groupFrame) []syntax.Stmt {
 	fl := fc.fl
 	pos := s.Pos()
@@ -512,18 +403,6 @@ func (fc *funcLower) lowerGroupBranch(s *syntax.BranchStmt, top groupFrame) []sy
 	return append(prefix, s)
 }
 
-// lowerGroupGo lowers a `go f(args)` child: the callee or receiver and
-// every argument bind in the calling goroutine, in source order, before
-// Group.Go (groupCapture), and the child closure calls the bound
-// temporaries. The bindings and Group.Go share one block, so labels,
-// gotos, and the temporaries' scope see a single statement, as they
-// saw the go statement. The call keeps its source in place between a Go-closure
-// prefix and an error-check suffix, while the native tree carries the
-// same call node, so argument splices land in the uncovered span on
-// both sides. The text wrapper renders with a reserved dummy name where
-// the call sits and splits there; the dummy spelling cannot collide
-// with user code, since `_logos_` names are rejected in .lgo, so the
-// split lands exactly around the call span.
 func (fc *funcLower) lowerGroupGo(s *syntax.CallStmt) []syntax.Stmt {
 	top, ok := fc.groupTop()
 	if !ok {

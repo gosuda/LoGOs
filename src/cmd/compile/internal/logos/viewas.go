@@ -11,16 +11,6 @@ import (
 	"cmd/compile/internal/types2"
 )
 
-// This file lowers the M7-S5 comptime.ViewAs calls (SPEC Sec 2.5,
-// T-205). The checker proves the type argument is a POD struct, so
-// lowering only redirects the call: `comptime.ViewAs[T](b)` becomes
-// `_logos_rt.ViewAs[T](b)`, sharing the needRT import with every other
-// pass. The arch-specific reinterpretation lives in logos/rt
-// (viewas_direct.go, viewas_copy.go), selected by build tags. The
-// comptime import spec drops when no comptime-qualified selector
-// remains, so the plain recheck never resolves the virtual package.
-
-// lowerViewAs rewrites every comptime.ViewAs selector of one file.
 func (fl *fileLower) lowerViewAs() {
 	var sels []*syntax.SelectorExpr
 	syntax.Inspect(fl.file, func(n syntax.Node) bool {
@@ -45,9 +35,6 @@ func (fl *fileLower) lowerViewAs() {
 	fl.dropComptimeImport(done)
 }
 
-// logosComptimeViewAs reports whether sel names the virtual ViewAs:
-// a package-qualified selector whose qualifier and name both resolve
-// to the synthesized comptime package.
 func logosComptimeViewAs(info *types2.Info, sel *syntax.SelectorExpr) bool {
 	qn, ok := sel.X.(*syntax.Name)
 	if !ok || sel.Sel.Value != "ViewAs" {
@@ -61,12 +48,6 @@ func logosComptimeViewAs(info *types2.Info, sel *syntax.SelectorExpr) bool {
 	return ok && fn.Name() == "ViewAs" && fn.Pkg() != nil && fn.Pkg().Path() == "comptime"
 }
 
-// dropComptimeImport removes the comptime import spec when no
-// comptime-qualified selector remains. Names this pass rewrote are in
-// done; anything else (a later M7 provider's selectors) keeps the
-// import. Removal takes the whole spec line through swallowSep, so a
-// trailing comment survives on its own line; an ungrouped import takes
-// its import keyword too.
 func (fl *fileLower) dropComptimeImport(done map[*syntax.Name]bool) {
 	keep := false
 	syntax.Inspect(fl.file, func(n syntax.Node) bool {
@@ -118,18 +99,10 @@ func (fl *fileLower) dropComptimeImport(done map[*syntax.Name]bool) {
 	}
 }
 
-// isComptimePath reports whether v spells the comptime import path in
-// interpreted or raw quotes.
 func isComptimePath(v string) bool {
 	return v == `"comptime"` || v == "`comptime`"
 }
 
-// importKeywordStart scans back from an ungrouped spec over spaces and
-// tabs for the `import` keyword. The spec starts at its rename when one
-// is present, else at its path, so only whitespace intervenes. Grouped
-// specs fail the scan (a paren or newline intervenes) and keep the
-// blank-line move instead. An ungrouped ImportDecl starts after its
-// keyword, so without this the deletion leaves a bare `import` behind.
 func importKeywordStart(src []byte, specOff int) (int, bool) {
 	off := specOff
 	for off > 0 && (src[off-1] == ' ' || src[off-1] == '\t') {

@@ -16,9 +16,6 @@ import (
 	"cmd/compile/internal/types2"
 )
 
-// lowerSnippetSrc parses, checks, and lowers one inline .lgo source,
-// returning the ejected text. It mirrors lowerSpreadSrc for the M6
-// red-team gap probes below.
 func lowerSnippetSrc(t *testing.T, name, src string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -94,11 +91,6 @@ func TestScopeDeferOpenCoded(t *testing.T) {
 	}
 }
 
-// TestScopeReturnMultiResultEject pins the eject twin of a multi-result
-// return under a scope defer: each result mark spans the whole source
-// expression, so `return pair()` keeps its call parentheses in the
-// ejected text (`a, b = pair()`) and stays valid Go, matching the tree
-// the native lowering prints.
 func TestScopeReturnMultiResultEject(t *testing.T) {
 	src := "package main\n\nimport \"log/slog\"\n\nfunc note(s string) { slog.Info(s) }\n\nfunc pair() (int, int) { return 1, 2 }\n\nfunc f() (a, b int) {\n\t{\n\t\tscope defer note(\"cleanup\")\n\t\treturn pair()\n\t}\n\treturn\n}\n"
 	out := lowerSnippetSrc(t, "scopemultiret.lgo", src)
@@ -107,25 +99,13 @@ func TestScopeReturnMultiResultEject(t *testing.T) {
 	}
 }
 
-// TestChainSumPairwise proves SPEC #67 (M6 half): the sum terminal
-// lowers to a fixed pairwise recursion over halves, with no multiply
-// operator anywhere, so no implicit FMA contraction can apply. The
-// run fixture (crafted 1e16/-1e16/1.0 input) pins the bit-exact result.
-// The test reads the scalar lowering, so it pins a build without the
-// simd experiment: the vector form of a float slice sum stages the
-// elements through array-pointer conversions and keeps this recursion
-// (TestSimdSliceSumFloatKeepsTree).
 func TestChainSumPairwise(t *testing.T) {
 	scalarSliceTarget(t)
 	src := "package main\n\nfunc f(xs []float64) float64 {\n\treturn xs.sum()\n}\n"
 	out := lowerSnippetSrc(t, "sumsnip.lgo", src)
-	// Halving split of a recursive helper.
 	if !strings.Contains(out, "/ 2") {
 		t.Errorf("pairwise halving split missing:\n%s", out)
 	}
-	// Fixed order: both halves call the same helper (two recursive
-	// calls plus the top-level invocation), left half text before
-	// right half text, joined by one plus.
 	if n := strings.Count(out, "_sum("); n != 3 {
 		t.Errorf("got %d helper calls, want 3 (top-level plus left and right halves)", n)
 	}
@@ -137,7 +117,6 @@ func TestChainSumPairwise(t *testing.T) {
 	if !strings.Contains(out, ") + ") {
 		t.Errorf("halves not joined by plus:\n%s", out)
 	}
-	// No multiply, hence no FMA contraction surface.
 	if strings.Contains(out, "*") {
 		t.Errorf("multiply operator in sum lowering (FMA surface):\n%s", out)
 	}
@@ -146,9 +125,6 @@ func TestChainSumPairwise(t *testing.T) {
 	}
 }
 
-// TestChainFuseOneLoop proves SPEC #84: consecutive filter/map/take
-// calls fuse into exactly one loop, with the receiver bound once
-// before it.
 func TestChainFuseOneLoop(t *testing.T) {
 	src := "package main\n\nfunc bump(x int) int { return 2 * x }\n\nfunc f(xs []int) []int {\n\treturn xs.filter(x => x > 2).map(x => bump(x)).take(5)\n}\n"
 	out := lowerSnippetSrc(t, "fusesnip.lgo", src)
@@ -163,10 +139,6 @@ func TestChainFuseOneLoop(t *testing.T) {
 	}
 }
 
-// TestChainDelimSpans pins the delimiter-span family: a composite
-// literal lambda body and an index-expression take argument keep their
-// closing delimiter in the lowered text instead of truncating it (which
-// left an unparseable fragment and an internal compiler error).
 func TestChainDelimSpans(t *testing.T) {
 	bodySrc := "package main\n\ntype Point struct{ X int }\n\nfunc f(xs []int) []Point {\n\treturn xs.map(x => Point{X: x})\n}\n"
 	out := lowerSnippetSrc(t, "bodysnip.lgo", bodySrc)
@@ -180,9 +152,6 @@ func TestChainDelimSpans(t *testing.T) {
 	}
 }
 
-// TestInterpBindBeforeSizing proves SPEC #126: each `{expr}` binds to a
-// local left to right before the buffer is sized, so sizing and
-// appending share one evaluation.
 func TestInterpBindBeforeSizing(t *testing.T) {
 	src := "package main\n\nimport \"fmt\"\n\nfunc f(name string, n int) {\n\tfmt.Println($\"User {name} has {n} items\")\n}\n"
 	out := lowerSnippetSrc(t, "interpsnip.lgo", src)

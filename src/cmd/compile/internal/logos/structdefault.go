@@ -14,15 +14,6 @@ import (
 	"cmd/compile/internal/types2"
 )
 
-// M6-S3 lowering of struct field defaults (SPEC T-104.5): the `= const`
-// of a field declaration is stripped, and every composite literal of a
-// defaulted struct gains its missing fields. Same-package defaults come
-// from check info; cross-package defaults come from the facts sidecar.
-// `var x T` and `new(T)` stay zero by construction: only literals grow.
-
-// lowerStructDefaults strips field defaults and fills composite
-// literals. It runs before the `&expr` pass, whose operand splices
-// absorb these inserts.
 func (fl *fileLower) lowerStructDefaults() {
 	stripped := make(map[*syntax.FieldDefault]bool)
 	syntax.Inspect(fl.file, func(n syntax.Node) bool {
@@ -36,9 +27,6 @@ func (fl *fileLower) lowerStructDefaults() {
 	})
 }
 
-// stripFieldDefaults replaces each defaulted field type with its
-// declared type and deletes the `= const` source. Shared declarations
-// delete once per wrapper.
 func (fl *fileLower) stripFieldDefaults(st *syntax.StructType, stripped map[*syntax.FieldDefault]bool) {
 	for _, f := range st.FieldList {
 		fd, ok := f.Type.(*syntax.FieldDefault)
@@ -54,15 +42,11 @@ func (fl *fileLower) stripFieldDefaults(st *syntax.StructType, stripped map[*syn
 	}
 }
 
-// structDefault is one missing field and its default source text.
 type structDefault struct {
 	field string
 	text  string
 }
 
-// fillStructDefaults prepends the missing defaulted fields of one
-// composite literal, in declaration order, to the native tree and the
-// eject text.
 func (fl *fileLower) fillStructDefaults(lit *syntax.CompositeLit) {
 	missing := fl.missingDefaults(lit)
 	if len(missing) == 0 {
@@ -84,9 +68,6 @@ func (fl *fileLower) fillStructDefaults(lit *syntax.CompositeLit) {
 	fl.add(brace+1, brace+1, text.String())
 }
 
-// missingDefaults returns the defaulted fields absent from lit, in
-// declaration order. Positional literals and literals of types without
-// defaults return none.
 func (fl *fileLower) missingDefaults(lit *syntax.CompositeLit) []structDefault {
 	t := fl.pkg.info.TypeOf(lit)
 	if t == nil {
@@ -115,10 +96,6 @@ func (fl *fileLower) missingDefaults(lit *syntax.CompositeLit) []structDefault {
 	return out
 }
 
-// structDefaultsFor returns the defaulted field names of t with their
-// default source texts: from check info for local types, from facts for
-// imported loGo/s types. A Go importer never runs this pass, which is
-// the documented hole.
 func (fl *fileLower) structDefaultsFor(t types2.Type) ([]string, []string) {
 	u := types2.Unalias(t)
 	st, _ := u.(*types2.Struct)
@@ -163,8 +140,6 @@ func (fl *fileLower) structDefaultsFor(t types2.Type) ([]string, []string) {
 	return names, texts
 }
 
-// literalBrace returns the offset of the `{` opening lit: the literal
-// position for elided types, else the first brace past the type end.
 func (fl *fileLower) literalBrace(lit *syntax.CompositeLit) int {
 	if lit.Type == nil {
 		return fl.off(lit.Pos())
@@ -186,8 +161,6 @@ func (fl *fileLower) literalBrace(lit *syntax.CompositeLit) int {
 	return brace
 }
 
-// reparseDefault parses a default expression text into a fresh node
-// positioned at pos, mirroring reparseType.
 func (fl *fileLower) reparseDefault(text string, pos syntax.Pos) syntax.Expr {
 	file, err := syntax.Parse(syntax.NewFileBase("logos-default"), strings.NewReader("package logosdefault\nvar _ = "+text), nil, nil, 0)
 	if err != nil || file == nil || len(file.DeclList) != 1 {

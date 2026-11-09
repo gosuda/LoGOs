@@ -14,9 +14,6 @@ import (
 
 var tupleTempName = regexp.MustCompile(`_logos_tup[0-9]+_[0-9]+_0`)
 
-// requirePlainGo fails the test unless the ejected text parses as plain
-// Go: a parenthesized comma list or a dangling `)` left behind by a
-// lowering edit is a syntax error there.
 func requirePlainGo(t *testing.T, ejected string) {
 	t.Helper()
 	var errs []error
@@ -26,11 +23,6 @@ func requirePlainGo(t *testing.T, ejected string) {
 	}
 }
 
-// TestTupleUnpackParenOperand pins the spelled-out unpack of a
-// parenthesized tuple operand: every redundant pair around the source
-// goes with it, so `u, v := ((t))` lowers to `u, v := t.T_0, t.T_1` and
-// never leaves a parenthesized comma list behind (invalid Go, and a
-// *TupleLit when re-parsed).
 func TestTupleUnpackParenOperand(t *testing.T) {
 	cases := []struct {
 		name string
@@ -58,9 +50,6 @@ func TestTupleUnpackParenOperand(t *testing.T) {
 	}
 }
 
-// TestTupleUnpackParenSelector pins the same rule when the operand is
-// not a bare name: the source is bound once, and the wrapping pairs go
-// with the replaced span instead of leaving a dangling `)`.
 func TestTupleUnpackParenSelector(t *testing.T) {
 	cases := []struct {
 		name string
@@ -88,8 +77,6 @@ func TestTupleUnpackParenSelector(t *testing.T) {
 	}
 }
 
-// TestTupleReturnParenOperand pins the same rule for `return ((t))`,
-// which spells its reads through the same paren-pair extension.
 func TestTupleReturnParenOperand(t *testing.T) {
 	for _, operand := range []string{"t", "(t)", "((t))", "( ( t ) )"} {
 		t.Run(operand, func(t *testing.T) {
@@ -103,8 +90,6 @@ func TestTupleReturnParenOperand(t *testing.T) {
 	}
 }
 
-// TestTupleReturnParenSelector pins `return (s.t)`: the source is bound
-// once and the wrapping pairs leave with the reads.
 func TestTupleReturnParenSelector(t *testing.T) {
 	for _, operand := range []string{"s.t", "(s.t)", "((s.t))"} {
 		t.Run(operand, func(t *testing.T) {

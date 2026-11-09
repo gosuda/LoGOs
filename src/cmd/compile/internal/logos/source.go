@@ -10,17 +10,8 @@ import (
 	"go/token"
 )
 
-// This file finds exact token boundaries in original source text. The
-// syntax package records start positions and the position of a call's
-// opening parenthesis, but no end positions, and the eject text must splice
-// user-written pieces (comments included) at exact offsets. Go's own
-// scanner tokenizes the text; the loGo/s "?" scans as an illegal token,
-// which is harmless here because only bracket depth and separators matter.
-
-// span is a half-open byte range of the original source.
 type span struct{ start, end int }
 
-// tok is one token of the scanned source, in offsets of the whole text.
 type tok struct {
 	span
 	kind    token.Token
@@ -28,7 +19,6 @@ type tok struct {
 	auto    bool
 }
 
-// tokenEnd returns the end offset of the token that starts at off.
 func tokenEnd(seg []byte, off int, kind token.Token, lit string) int {
 	switch {
 	case kind == token.COMMENT && bytes.HasPrefix(seg[off:], []byte("//")):
@@ -53,9 +43,6 @@ func tokenEnd(seg []byte, off int, kind token.Token, lit string) int {
 	}
 }
 
-// scanSegment tokenizes src[from:to] and calls visit for each token,
-// comments included, until visit returns false. Automatic semicolons are
-// reported with auto set and an empty span at their offset.
 func scanSegment(src []byte, from, to int, visit func(tok) bool) {
 	seg := src[from:to]
 	fset := token.NewFileSet()
@@ -81,7 +68,6 @@ func scanSegment(src []byte, from, to int, visit func(tok) bool) {
 	}
 }
 
-// commentsIn returns the comment spans inside src[from:to].
 func commentsIn(src []byte, from, to int) []span {
 	var out []span
 	scanSegment(src, from, to, func(t tok) bool {
@@ -93,9 +79,6 @@ func commentsIn(src []byte, from, to int) []span {
 	return out
 }
 
-// keepComments appends the verbatim comments inside src[from:to] to
-// text: folding consumes the folded region, and the ejected text has
-// to carry every comment of the original.
 func keepComments(src []byte, from, to int, text string) string {
 	for _, c := range commentsIn(src, from, to) {
 		text += " " + string(src[c.start:c.end])
@@ -103,9 +86,6 @@ func keepComments(src []byte, from, to int, text string) string {
 	return text
 }
 
-// lastTokenEnd returns the end of the last token inside src[from:to] that
-// is neither a comment nor an automatic semicolon, or from when there is
-// none.
 func lastTokenEnd(src []byte, from, to int) int {
 	end := from
 	scanSegment(src, from, to, func(t tok) bool {
@@ -117,15 +97,11 @@ func lastTokenEnd(src []byte, from, to int) int {
 	return end
 }
 
-// callSplit is the layout of one call's argument list.
 type callSplit struct {
-	args []span // one span per argument, comments excluded
-	end  int    // offset just past the closing parenthesis
+	args []span
+	end  int
 }
 
-// splitCall splits the argument list whose opening parenthesis is at
-// lparen. Commas and "..." at the call's own nesting depth separate
-// arguments; brackets of any kind nest.
 func splitCall(src []byte, lparen int) (callSplit, bool) {
 	var out callSplit
 	depth := 0
@@ -170,7 +146,6 @@ func splitCall(src []byte, lparen int) (callSplit, bool) {
 	return out, done
 }
 
-// extend grows cur to cover t.
 func extend(cur, t span) span {
 	if cur.start < 0 {
 		return t
@@ -178,8 +153,6 @@ func extend(cur, t span) span {
 	return span{cur.start, t.end}
 }
 
-// stmtEnd returns the end of the statement that starts at from: the end of
-// its last token before the terminating semicolon or closing brace.
 func stmtEnd(src []byte, from int) int {
 	end := from
 	depth := 0
@@ -210,11 +183,6 @@ func stmtEnd(src []byte, from int) int {
 	return end
 }
 
-// spanStartBack extends off backward past white space, comments, and open
-// parentheses the parser dropped. A parenthesis before a statement start
-// can only wrap that statement in checked code, so consuming it only ever
-// removes a dropped wrapper. A line comment counts only when it opens its
-// line, which keeps string contents out of reach.
 func spanStartBack(src []byte, off int) int {
 	start := off
 	for {
@@ -232,7 +200,6 @@ func spanStartBack(src []byte, off int) int {
 	}
 }
 
-// skipSpaceBack skips ASCII white space before off.
 func skipSpaceBack(src []byte, off int) int {
 	for off > 0 && isSpace(src[off-1]) {
 		off--
@@ -240,7 +207,6 @@ func skipSpaceBack(src []byte, off int) int {
 	return off
 }
 
-// commentStartBack returns the start of the comment ending at j.
 func commentStartBack(src []byte, j int) (int, bool) {
 	if j >= 2 && src[j-2] == '*' && src[j-1] == '/' {
 		if k := bytes.LastIndex(src[:j-2], []byte("/*")); k >= 0 {
@@ -262,7 +228,6 @@ func commentStartBack(src []byte, j int) (int, bool) {
 	return 0, false
 }
 
-// trimSpan shrinks s to exclude leading and trailing ASCII white space.
 func trimSpan(src []byte, s span) span {
 	for s.start < s.end && isSpace(src[s.start]) {
 		s.start++

@@ -15,70 +15,20 @@ import (
 	"cmd/compile/internal/types2"
 )
 
-// This file lowers M6-S1 interpolated strings (SPEC Sec 1.4, T-104.4).
-// After this pass no *syntax.InterpExpr remains: each one becomes an
-// immediately invoked `func() string` literal, so the backend only ever
-// sees plain Go.
-//
-// An interpolation with operands lowers to
-//
-//	func() string {
-//		_logos_v0 := <op0>
-//		...
-//		_logos_s1 := _logos_v1.Error() // error/Stringer operands only
-//		_logos_b := make([]byte, 0, <bound>)
-//		_logos_b = append(_logos_b, "lit0"...)
-//		_logos_b = strconv.AppendInt(_logos_b, int64(_logos_v0), 10)
-//		...
-//		return unsafe.String(unsafe.SliceData(_logos_b), len(_logos_b))
-//	}()
-//
-// Every operand binds to a temporary once, left to right (#64, #126), so
-// sizing and appending share one evaluation. Error and fmt.Stringer
-// operands convert to strings before sizing, and the bound counts those
-// strings: literal bytes plus len of each string/byte operand plus 20
-// per integer, 24 per float, and 5 per bool (#34). One make means one
-// allocation, never a regrow. Operand text is data, never a format
-// string (#177). A literal without operands becomes its plain string.
-//
-// The pass runs last in lowerFile, after every other splice producer, so
-// each operand's source comes from textOf, which drains the already
-// recorded inner splices into the generated text. The span runs brace to
-// brace, so zero-width boundary inserts of option and switch wrappers
-// sitting exactly at an operand edge land strictly inside and are
-// absorbed rather than left overlapping the whole-span replacement. The
-// native tree reuses the live operand nodes, which earlier passes
-// already lowered in place.
-
 const (
-	// interpConvPkg and interpUnsafePkg are the synthesized import
-	// qualifiers for the strconv and unsafe packages. The reserved
-	// prefix keeps them clear of every user identifier, so generated
-	// code resolves regardless of file-level shadowing.
 	interpConvPkg   = "_logos_strconv"
 	interpUnsafePkg = "_logos_unsafe"
-	// interpBuf is the buffer temporary; interpVal and interpStr are
-	// the per-operand value and converted-string prefixes. Each
-	// interpolation is its own function literal scope, so the names
-	// restart every time.
-	interpBuf = "_logos_b"
-	interpVal = "_logos_v%d"
-	interpStr = "_logos_s%d"
+	interpBuf       = "_logos_b"
+	interpVal       = "_logos_v%d"
+	interpStr       = "_logos_s%d"
 )
 
-// Bytes the buffer bound adds for each operand whose text has a fixed
-// worst-case width: SPEC T-104.4 counts 20 per integer, 24 per float, and 5
-// per bool. Every other operand adds its own len, known only at run time.
 const (
 	interpIntBound   = 20
 	interpFloatBound = 24
 	interpBoolBound  = 5
 )
 
-// InterpFixedBytes returns the part of the buffer bound of an interpolation
-// that no run-time length changes: the literal bytes of parts plus the fixed
-// width of each integer, float, and bool operand in kinds. The editor hover
-// renders it as `Fixed: <n>B + dynamic`.
 func InterpFixedBytes(parts []string, kinds []types2.LogosInterpKind) int {
 	n := 0
 	for _, part := range parts {
@@ -90,8 +40,6 @@ func InterpFixedBytes(parts []string, kinds []types2.LogosInterpKind) int {
 	return n
 }
 
-// interpFixedWidth returns the fixed width the bound adds for an operand of
-// kind k, and 0 for a kind that adds its run-time length.
 func interpFixedWidth(k types2.LogosInterpKind) int {
 	switch k {
 	case types2.LogosInterpInt, types2.LogosInterpUint:
@@ -104,24 +52,8 @@ func interpFixedWidth(k types2.LogosInterpKind) int {
 	return 0
 }
 
-// interpKinds holds the pre-lowering operand kinds per interpolation,
-// keyed by node. collectInterpKinds fills it at the top of lowerFile
-// while every operand node is still the checked original: later passes
-// (notably lowerOptions) swap wrappers into operand slots whose fresh
-// nodes carry no recorded type. It runs a second time when lowerConstFor
-// returns, after every comptime copy exists and before any pass rewrites
-// an operand slot: the generic copies and the unrolled const for
-// iterations are fresh nodes that the copy checks typed.
 var interpKinds = make(map[*syntax.InterpExpr][]types2.LogosInterpKind)
 
-// collectInterpKinds records every interpolation's operand kinds while
-// the tree still holds exactly what the checker saw. An operand without
-// a recorded type, or of a type no interpolation accepts, is an internal
-// error: the main check rejects both in the source, and the copy checks
-// bind every alias to a complete package, and the function copy checks
-// report their diagnostics before the copy joins the tree. While any
-// diagnostic is pending the fact may be missing by construction, so the
-// interpolation is skipped and Lower exits on the diagnostic.
 func (fl *fileLower) collectInterpKinds() {
 	syntax.Inspect(fl.file, func(n syntax.Node) bool {
 		e, ok := n.(*syntax.InterpExpr)
@@ -137,7 +69,7 @@ func (fl *fileLower) collectInterpKinds() {
 			k, ok := types2.LogosInterpKindOf(t)
 			if !ok {
 				if base.Errors() > 0 {
-					return true // A reported diagnostic explains the missing fact, and Lower exits on it before survivors are rejected.
+					return true
 				}
 				base.Fatalf("logos: interpolation operand at %s has unexpected type %s", op.Pos().String(), t)
 			}
@@ -162,21 +94,13 @@ func interpLitsUnder(root syntax.Node) []*syntax.InterpExpr {
 	return lits
 }
 
-// lowerInterp lowers every interpolated string of one file, innermost
-// first: an outer whole-span replacement would otherwise overlap the
-// splices of any inner interpolation it contains. Kinds come from the
-// collectInterpKinds pre-pass; operand texts drain through textOf, which
-// absorbs the inner whole-span splice of any nested literal.
 func (fl *fileLower) lowerInterp() {
-	// Scoped capture pre-lowering (D4, D7) credits its import needs
-	// here, so the flush below still runs once even when every
-	// interpolation was pre-lowered.
 	needConv, needUnsafe := fl.interpNeedConv, fl.interpNeedUnsafe
 	for _, e := range interpLitsUnder(fl.file) {
 		kinds := interpKinds[e]
 		delete(interpKinds, e)
 		if kinds == nil && len(e.Exprs) > 0 && base.Errors() > 0 {
-			continue // collectInterpKinds skipped it under a reported diagnostic.
+			continue
 		}
 		need, _ := fl.lowerInterpExpr(e, kinds)
 		needConv = needConv || need
@@ -230,12 +154,6 @@ func anyInterfaceFields(t reflect.Type) bool {
 	return true
 }
 
-// lowerInterpExpr lowers one interpolation, returning whether it needed
-// a strconv import and the generated function literal text. The whole
-// `$"..."` source span becomes one splice holding that text, and the
-// node is replaced in the tree by the matching native call. kinds holds
-// the pre-lowering operand kinds; operand texts drain from the live
-// tree, absorbing whatever inner splices earlier passes recorded.
 func (fl *fileLower) lowerInterpExpr(e *syntax.InterpExpr, kinds []types2.LogosInterpKind) (bool, otext) {
 	pos := e.Pos()
 	start := fl.off(pos)
@@ -268,9 +186,6 @@ func (fl *fileLower) lowerInterpExpr(e *syntax.InterpExpr, kinds []types2.LogosI
 	var stmts []syntax.Stmt
 	var lines []otext
 	for i := range e.Exprs {
-		// The node comes from the live tree (earlier passes may have
-		// rewritten it, and an inner literal already swapped its
-		// native form in); kinds and texts were fixed up front.
 		op := e.Exprs[i]
 		v := valName(i)
 		stmts = append(stmts, defineOf(pos, []syntax.Expr{nameOf(pos, v)}, []syntax.Expr{op}))
@@ -407,9 +322,6 @@ func (fl *fileLower) lowerInterpExpr(e *syntax.InterpExpr, kinds []types2.LogosI
 	lit := at(&syntax.FuncLit{Type: signature, Body: blockOf(pos, stmts)}, pos)
 	native := callOf(pos, lit, nil)
 	fl.replaceInterpLit(e, native)
-	// D4: an interpolation is always string-typed, but the replacement
-	// is synthetic; stash the type for chain prodType over capture
-	// bodies.
 	if fl.optBodyType == nil {
 		fl.optBodyType = make(map[syntax.Expr]types2.Type)
 	}
@@ -428,9 +340,6 @@ func (fl *fileLower) lowerInterpExpr(e *syntax.InterpExpr, kinds []types2.LogosI
 	return needConv, text
 }
 
-// replaceInterpLit swaps one interpolation for its lowered native form
-// wherever it sits in the file: replaceFieldExprs only sees direct
-// children, so this walks the whole tree like lowerUnions does.
 func (fl *fileLower) replaceInterpLit(e *syntax.InterpExpr, native syntax.Expr) {
 	syntax.Inspect(fl.file, func(n syntax.Node) bool {
 		if n == nil {
@@ -446,25 +355,11 @@ func (fl *fileLower) replaceInterpLit(e *syntax.InterpExpr, native syntax.Expr) 
 	})
 }
 
-// interpOperandText spells one `{...}` operand's lowered source,
-// draining the inner splices earlier passes recorded. The span runs
-// from the opening brace to one past the closing brace, so it needs no
-// node positions at all: later passes may have rewritten the operand
-// nodes (notably lowerOptions), but the braces never move. Zero-width
-// boundary inserts sitting exactly at an operand edge land strictly
-// inside and are absorbed.
 func (fl *fileLower) interpOperandText(open, close syntax.Pos) otext {
 	text := fl.textOf(span{fl.off(open), fl.off(close) + 1})
 	return text.slice(1, len(text.s)-1)
 }
 
-// flushInterpImports prepends the synthesized strconv and unsafe imports
-// the lowered interpolations need, with matching eject-text edits. The
-// text replaces the package-name span (re-emitting the name) rather
-// than joining the shared header offset: same-offset inserts keep input
-// order, so anything recorded earlier (rt header, type imports) would
-// print ahead of the native prepend, while the name span sorts strictly
-// before those splices, keeping both orders [mine, ...] together.
 func (fl *fileLower) flushInterpImports(needConv, needUnsafe bool) {
 	if !needConv && !needUnsafe {
 		return

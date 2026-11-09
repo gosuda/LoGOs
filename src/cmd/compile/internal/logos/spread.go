@@ -12,20 +12,6 @@ import (
 	"cmd/compile/internal/types2"
 )
 
-// This file lowers the M6-S4 spread elements `..src` of struct
-// composite literals (SPEC T-104.5). After this pass the backend sees
-// no *syntax.SpreadExpr: every spread literal becomes either one tuple
-// assignment (the self-update form) or an immediately invoked function
-// literal that binds each source once and fills the copied fields.
-//
-// The pass runs after lowerOptions, so the eject text built here
-// through textOf already holds every inner lowering. Every rewrite
-// builds the native tree and the eject twin together through the twin
-// markers of rewrite.go, so the two agree by construction (A2). The
-// walk is bottom-up: nested spreads inside explicit values and sources
-// lower before the enclosing literal reads their text.
-
-// lowerSpreads rewrites every spread composite literal of one file.
 func (fl *fileLower) lowerSpreads() {
 	for _, decl := range fl.file.DeclList {
 		switch d := decl.(type) {
@@ -45,14 +31,10 @@ func (fl *fileLower) lowerSpreads() {
 	}
 }
 
-// hasSpread reports whether c is a spread composite literal the checker
-// recorded field copies for.
 func (fl *fileLower) hasSpread(c *syntax.CompositeLit) bool {
 	return len(fl.pkg.info.LogosSpreads[c]) > 0
 }
 
-// lowerSpreadList lowers a statement list, splaying self-update tuple
-// assignments.
 func (fl *fileLower) lowerSpreadList(list []syntax.Stmt) []syntax.Stmt {
 	var out []syntax.Stmt
 	for _, s := range list {
@@ -61,9 +43,6 @@ func (fl *fileLower) lowerSpreadList(list []syntax.Stmt) []syntax.Stmt {
 	return out
 }
 
-// lowerSpreadStmt lowers one statement. An assignment matched by the
-// self-update rule becomes one tuple assignment; every other statement
-// keeps its shape with spreads lowered inside.
 func (fl *fileLower) lowerSpreadStmt(s syntax.Stmt) []syntax.Stmt {
 	if as, ok := s.(*syntax.AssignStmt); ok {
 		if tup, ok := fl.spreadSelfUpdate(as); ok {
@@ -130,7 +109,6 @@ func (fl *fileLower) lowerSpreadStmt(s syntax.Stmt) []syntax.Stmt {
 	return []syntax.Stmt{s}
 }
 
-// lowerSpreadElse lowers the else branch of an if statement.
 func (fl *fileLower) lowerSpreadElse(s *syntax.IfStmt) {
 	switch els := s.Else.(type) {
 	case nil:
@@ -141,16 +119,12 @@ func (fl *fileLower) lowerSpreadElse(s *syntax.IfStmt) {
 	}
 }
 
-// spreadSimple lowers a simple statement: assignments lower their
-// sides, anything else lowers its expressions in place.
 func (fl *fileLower) spreadSimple(s syntax.SimpleStmt) syntax.SimpleStmt {
 	if s == nil {
 		return nil
 	}
 	switch s := s.(type) {
 	case *syntax.AssignStmt:
-		// An if/for init holding a self-update keeps tuple form: the
-		// single replacement carries the same meaning.
 		if tup, ok := fl.spreadSelfUpdate(s); ok {
 			return tup
 		}
@@ -167,11 +141,6 @@ func (fl *fileLower) spreadSimple(s syntax.SimpleStmt) syntax.SimpleStmt {
 	return s
 }
 
-// spreadValue rewrites the spreads of e bottom-up: children first
-// through reflection, then a spread composite itself. A function
-// literal body lowers as a statement list. A spread composite directly
-// under `&` takes the address path, which returns a pointer and drops
-// the `&`; every other position takes the value path.
 func (fl *fileLower) spreadValue(e syntax.Expr) syntax.Expr {
 	if e == nil {
 		return nil
@@ -195,10 +164,6 @@ func (fl *fileLower) spreadValue(e syntax.Expr) syntax.Expr {
 	return e
 }
 
-// spreadBuilder carries one spread literal lowering: the file state,
-// the literal, its position, the result temporary spelling, the
-// checked field copies, the twin markers, and the native and text
-// bodies built so far.
 type spreadBuilder struct {
 	fl        *fileLower
 	c         *syntax.CompositeLit
@@ -210,14 +175,10 @@ type spreadBuilder struct {
 	text      []syntax.Stmt
 }
 
-// spreadValueComposite lowers `T{..src}` to an immediately invoked
-// function literal returning T.
 func (fl *fileLower) spreadValueComposite(c *syntax.CompositeLit) syntax.Expr {
 	return fl.spreadComposite(c, false)
 }
 
-// spreadAddrComposite lowers a spread composite directly under `&` to
-// an immediately invoked function literal returning *T.
 func (fl *fileLower) spreadAddrComposite(c *syntax.CompositeLit) syntax.Expr {
 	return fl.spreadComposite(c, true)
 }
@@ -253,24 +214,14 @@ func (fl *fileLower) spreadComposite(c *syntax.CompositeLit, addr bool) syntax.E
 	return native
 }
 
-// spreadAddrOp lowers `&T{..src}` to the pointer function literal,
-// dropping the `&`: the span covers the operator so no stray `&`
-// survives in the ejected text.
 func (fl *fileLower) spreadAddrOp(op *syntax.Operation, c *syntax.CompositeLit) syntax.Expr {
 	start := fl.off(op.Pos())
 	native := fl.spreadAddrComposite(c)
-	// spreadAddrComposite spliced the composite span; widen it to the
-	// operator, dropping the `&` itself: the IIFE already returns *T,
-	// so keeping the operator would take the address of a pointer.
-	// The drained span starts just after the operator, so a comment in
-	// that gap stays while only the `&` itself is dropped.
 	inner := fl.textOf(span{start: start + len("&"), end: fl.off(c.Rbrace) + 1})
 	fl.addT(start, skipCloseParens(fl.src, fl.off(c.Rbrace)+1), inner)
 	return native
 }
 
-// spreadOpen numbers one spread literal and snapshots its checked
-// field copies.
 func (fl *fileLower) spreadOpen(c *syntax.CompositeLit) *spreadBuilder {
 	vSpelling := fmt.Sprintf("_logos_v%d", fl.spreadSeq)
 	fl.spreadSeq++
@@ -284,9 +235,6 @@ func (fl *fileLower) spreadOpen(c *syntax.CompositeLit) *spreadBuilder {
 	}
 }
 
-// typeText spells the literal type for the eject text, substituting
-// every inner lowering. A type elided in source (`[]T{{..s}}`
-// elements) spells from the checked type.
 func (b *spreadBuilder) typeText() otext {
 	c := b.c
 	if c.Type == nil {
@@ -299,9 +247,6 @@ func (b *spreadBuilder) typeText() otext {
 	return b.fl.textOf(span{start: b.fl.off(syntax.StartPos(c.Type)), end: b.fl.exprEndOf(c.Type)})
 }
 
-// nativeType spells the literal type for the native tree: the original
-// type node moves into `_v := T{}`, so the result clones it. A type
-// elided in source re-parses the spelled text.
 func (b *spreadBuilder) nativeType() syntax.Expr {
 	c := b.c
 	if c.Type == nil {
@@ -324,8 +269,6 @@ func (b *spreadBuilder) nativeType() syntax.Expr {
 	return cloneType(c.Type, b.pos)
 }
 
-// body builds `_v := T{}` followed by one assignment per explicit field
-// and per spread-copied field, in source order.
 func (b *spreadBuilder) body() {
 	c := b.c
 	pos := b.pos
@@ -359,10 +302,6 @@ func (b *spreadBuilder) body() {
 	}
 }
 
-// copy binds one spread source to a fresh temporary and fills its
-// copied fields from it. With no copied fields the source still
-// evaluates once (SPEC T-104.5), so it assigns to the blank instead of
-// an unread temporary, which the compiler would reject as unused.
 func (b *spreadBuilder) copy(se *syntax.SpreadExpr) {
 	var fields []string
 	for _, info := range b.infos {
@@ -400,12 +339,6 @@ func (b *spreadBuilder) copy(se *syntax.SpreadExpr) {
 	}
 }
 
-// spreadSelfUpdate matches `x = T{f: e, ..x}` where every spread source
-// is the assigned variable itself: the update lowers to one tuple
-// assignment of the explicit fields (SPEC T-104.5), so a swap like
-// `s = State{A: s.B, B: s.A, ..s}` reads every right-hand side before
-// writing. The target is a plain name; anything else takes the general
-// path, which stays correct through a temporary.
 func (fl *fileLower) spreadSelfUpdate(s *syntax.AssignStmt) (*syntax.AssignStmt, bool) {
 	if s.Op != 0 {
 		return nil, false
@@ -473,16 +406,10 @@ func (fl *fileLower) spreadSelfUpdate(s *syntax.AssignStmt) (*syntax.AssignStmt,
 	return native, true
 }
 
-// stmtSpanStart returns the eject offset where the statement holding
-// lhs begins, extended backward past parentheses the parser dropped.
 func (fl *fileLower) stmtSpanStart(s *syntax.AssignStmt, lhs syntax.Expr) int {
 	return spanStartBack(fl.src, fl.off(leftmostOf(lhs)))
 }
 
-// spreadStartOf returns the eject offset where the source text of e
-// begins: the type of a composite literal (a bare brace position would
-// drop it), the operand of any other expression, extended backward
-// past parentheses the parser dropped.
 func (fl *fileLower) spreadStartOf(e syntax.Expr) int {
 	if c, ok := syntax.Unparen(e).(*syntax.CompositeLit); ok && c.Type != nil {
 		return spanStartBack(fl.src, fl.off(syntax.StartPos(c)))
@@ -490,8 +417,6 @@ func (fl *fileLower) spreadStartOf(e syntax.Expr) int {
 	return spanStartBack(fl.src, fl.off(leftmostOf(e)))
 }
 
-// spanEndOf returns the eject offset just past e, extended past
-// parentheses the parser dropped.
 func (fl *fileLower) spanEndOf(e syntax.Expr) int {
 	if c, ok := syntax.Unparen(e).(*syntax.CompositeLit); ok {
 		return skipCloseParens(fl.src, fl.off(c.Rbrace)+1)
@@ -499,9 +424,6 @@ func (fl *fileLower) spanEndOf(e syntax.Expr) int {
 	return fl.exprEndOf(e)
 }
 
-// exprEndOf returns the eject offset just past the expression e: the
-// end of a composite literal is its closing brace, anything else ends
-// where the generic expression scanner stops.
 func (fl *fileLower) exprEndOf(e syntax.Expr) int {
 	if c, ok := syntax.Unparen(e).(*syntax.CompositeLit); ok {
 		return skipCloseParens(fl.src, fl.off(c.Rbrace)+1)

@@ -12,8 +12,6 @@ import (
 	"cmd/compile/internal/types2"
 )
 
-// sprintfFile rewrites fmt.Sprintf calls with interpolation-compatible
-// verbs to $"...". Calls inside recorded edit spans stay as written.
 func (s *nextScan) sprintfFile(f *syntax.File) {
 	syntax.Inspect(f, func(n syntax.Node) bool {
 		call, ok := n.(*syntax.CallExpr)
@@ -43,7 +41,6 @@ func (s *nextScan) sprintfFile(f *syntax.File) {
 	})
 }
 
-// sprintf converts one Sprintf call to interpolation.
 func (s *nextScan) sprintf(call *syntax.CallExpr) (string, bool) {
 	if !s.sprintfCallee(call) {
 		return "", false
@@ -63,7 +60,6 @@ func (s *nextScan) sprintf(call *syntax.CallExpr) (string, bool) {
 	return buildInterp(items, srcs), true
 }
 
-// sprintfCallee reports whether call targets fmt.Sprintf.
 func (s *nextScan) sprintfCallee(call *syntax.CallExpr) bool {
 	fun, ok := call.Fun.(*syntax.SelectorExpr)
 	if !ok {
@@ -83,7 +79,6 @@ func (s *nextScan) sprintfCallee(call *syntax.CallExpr) bool {
 	return pkg.Imported().Path() == "fmt"
 }
 
-// sprintfCooked unquotes the format literal of a Sprintf call.
 func sprintfCooked(call *syntax.CallExpr) (string, bool) {
 	if call.HasDots {
 		return "", false
@@ -108,7 +103,6 @@ func sprintfCooked(call *syntax.CallExpr) (string, bool) {
 	return cooked, true
 }
 
-// sprintfOperands pairs each verb chunk with its argument source text.
 func (s *nextScan) sprintfOperands(items []verbItem, args []syntax.Expr) ([]string, bool) {
 	nverbs := 0
 	for _, it := range items {
@@ -135,8 +129,6 @@ func (s *nextScan) sprintfOperands(items []verbItem, args []syntax.Expr) ([]stri
 	return srcs, true
 }
 
-// sprintfOperand checks one verb argument against its verb and returns
-// its source text.
 func (s *nextScan) sprintfOperand(arg syntax.Expr, verb byte) (string, bool) {
 	t := arg.GetTypeInfo().Type
 	if t == nil {
@@ -163,14 +155,11 @@ func (s *nextScan) sprintfOperand(arg syntax.Expr, verb byte) (string, bool) {
 	return string(s.src[start:end]), true
 }
 
-// verbItem is one format chunk: literal text plus an optional verb.
 type verbItem struct {
 	lit  string
 	verb byte
 }
 
-// parseVerbs splits a format string into literal and verb chunks. Only
-// s, d, and v verbs qualify; anything else rejects the call.
 func parseVerbs(cooked string) ([]verbItem, bool) {
 	var items []verbItem
 	var lit strings.Builder
@@ -205,8 +194,6 @@ func parseVerbs(cooked string) ([]verbItem, bool) {
 	return items, true
 }
 
-// verbKind reports whether a verb renders a kind identically under
-// fmt and interpolation.
 func verbKind(verb byte, kind types2.LogosInterpKind) bool {
 	switch verb {
 	case 's':
@@ -246,8 +233,6 @@ func implementsFormatter(t types2.Type) bool {
 	return pkg != nil && pkg.Path() == "fmt"
 }
 
-// buildInterp assembles the interpolated string from chunks and
-// argument sources.
 func buildInterp(items []verbItem, srcs []string) string {
 	var out strings.Builder
 	out.WriteString(`$"`)
@@ -265,8 +250,6 @@ func buildInterp(items []verbItem, srcs []string) string {
 	return out.String()
 }
 
-// quoteChunk escapes one literal chunk for an interpreted string:
-// braces double, then standard quoting without its quotes.
 func quoteChunk(chunk string) string {
 	doubled := strings.ReplaceAll(strings.ReplaceAll(chunk, "{", "{{"), "}", "}}")
 	quoted := strconv.Quote(doubled)

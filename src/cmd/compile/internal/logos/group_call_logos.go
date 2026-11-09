@@ -12,32 +12,13 @@ import (
 	"cmd/compile/internal/types2"
 )
 
-// This file binds the operands of a group `go f(args)` child in the
-// calling goroutine, as the Go spec orders for a go statement (SPEC
-// Sec 2.6; Go spec, "Go statements"): the callee or receiver and every
-// argument evaluate in source order before Group.Go, and the child
-// closure calls the bound values. The call keeps its source in place;
-// each bound operand moves to a short declaration ahead of Group.Go and
-// leaves a temporary name where it stood, so the comma, ellipsis, and
-// comment layout of the call stays untouched. moveRegion carries the
-// edits that earlier passes recorded inside an operand, and the edits
-// later passes record there, to the copy in the declaration.
-
-// groupOperand is one callee or argument of a group go call. A callee
-// or argument bound in the parent carries names, one fresh temporary per
-// value; an operand that stays in the child call carries none.
 type groupOperand struct {
 	expr  syntax.Expr
 	span  span
 	names []string
-	decl  types2.Type // declared type of the single temporary, nil for a short declaration
+	decl  types2.Type
 }
 
-// groupCapture binds the operands of call in the parent. It returns the
-// native declarations and the eject text that precede Group.Go, and it
-// rewrites call in place so the child closure calls the temporaries.
-// Temporaries are allocated here, before the child lowering carries the
-// temp counters across.
 func (fc *funcLower) groupCapture(pos syntax.Pos, call *syntax.CallExpr) ([]syntax.Stmt, string) {
 	fl := fc.fl
 	fun, args := fc.groupOperands(call)
@@ -59,8 +40,6 @@ func (fc *funcLower) groupCapture(pos syntax.Pos, call *syntax.CallExpr) ([]synt
 	return native, text.String()
 }
 
-// groupUses returns what the child call spells for op: the operand
-// itself when it stays, else one temporary name per value it binds.
 func groupUses(op groupOperand) []syntax.Expr {
 	if len(op.names) == 0 {
 		return []syntax.Expr{op.expr}
@@ -72,8 +51,6 @@ func groupUses(op groupOperand) []syntax.Expr {
 	return uses
 }
 
-// groupOperands maps the callee and arguments of call to their source
-// spans and decides which ones bind in the parent.
 func (fc *funcLower) groupOperands(call *syntax.CallExpr) (groupOperand, []groupOperand) {
 	fl := fc.fl
 	src := fl.src
@@ -103,12 +80,6 @@ func (fc *funcLower) groupOperands(call *syntax.CallExpr) (groupOperand, []group
 	return fun, args
 }
 
-// groupStaticFunc reports whether e names a declared function: a bare
-// or package-qualified function, with or without explicit type
-// arguments. Such a name has no evaluation effect and cannot change
-// between the go statement and the call, and a generic function without
-// type arguments has no value of its own to bind, so it stays in the
-// child call where inference sees the bound arguments.
 func (fc *funcLower) groupStaticFunc(e syntax.Expr) bool {
 	info := fc.fl.pkg.info
 	switch n := syntax.Unparen(e).(type) {
@@ -127,12 +98,6 @@ func (fc *funcLower) groupStaticFunc(e syntax.Expr) bool {
 	return false
 }
 
-// groupDeclaredType returns the type a bound argument must declare
-// when a short declaration would drop it: an untyped non-constant
-// operand (a comparison, a logical combination, or a shift of a
-// constant) takes its type from the parameter it feeds, which a short
-// declaration would replace by the default type. Every other operand is
-// already typed, so the short declaration keeps it exactly.
 func (fc *funcLower) groupDeclaredType(raw syntax.Expr) types2.Type {
 	info := fc.fl.pkg.info
 	typ := info.TypeOf(raw)
@@ -165,8 +130,6 @@ func (fc *funcLower) groupDeclaredType(raw syntax.Expr) types2.Type {
 	return typ
 }
 
-// groupBind builds the declaration of one bound operand: native and
-// eject text. mark stands for the operand text, which moved here.
 func (fc *funcLower) groupBind(pos syntax.Pos, op groupOperand, mark string) ([]syntax.Stmt, string) {
 	list := strings.Join(op.names, ", ")
 	lhs := make([]syntax.Expr, len(op.names))

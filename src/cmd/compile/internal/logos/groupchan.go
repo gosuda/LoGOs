@@ -14,26 +14,6 @@ import (
 	"cmd/compile/internal/types2"
 )
 
-// This file lowers M8-S3 channel operations in group children (SPEC Sec
-// 2.6, T-206): a plain send, receive, or range directly in a child
-// selects on the group context, so a failing sibling wakes blocked
-// peers, and a user `select` without `default` gains the same arm. A
-// user `select` with `default` stays unchanged.
-//
-// Scope: statement-level operations only (`v := <-ch`, `var v = <-ch`,
-// `ch <- v`, `for v := range ch`, bare `<-ch`, user selects). A call or
-// receive inside an assignment target evaluates after the right-hand
-// side here, where Go evaluates it before: keep side effects out of
-// targets of a receiving assignment. A receive in a grouped
-// `var ( ... )` declaration, or nested in
-// a larger expression keeps blocking; bind it first. Statement spans
-// are covered like every call template (with a literal scan first, so
-// function literals inside lower before the cover drains their
-// splices); tuples, lambdas, and interpolations inside a rewritten
-// statement would overlap that cover, so keep them in child bodies.
-
-// groupChanTop reports the child frame when lowering inside a child
-// body: only there do channel operations select on cancellation.
 func (fc *funcLower) groupChanTop() (groupFrame, bool) {
 	if top, ok := fc.groupTop(); ok && top.child {
 		return top, true
@@ -41,13 +21,10 @@ func (fc *funcLower) groupChanTop() (groupFrame, bool) {
 	return groupFrame{}, false
 }
 
-// groupDoneText spells the cancel arm shared by rewritten
-// communication: `case <-gctx.Done(): return gctx.Err()`.
 func groupDoneText(gctx string) string {
 	return "case <-" + gctx + ".Done(): return " + gctx + ".Err()"
 }
 
-// groupDoneClause builds the same arm as a syntax node.
 func groupDoneClause(pos syntax.Pos, gctx string) *syntax.CommClause {
 	done := callOf(pos, selOf(pos, nameOf(pos, gctx), "Done"), nil)
 	recv := at(&syntax.Operation{Op: syntax.Recv, X: done}, pos)
@@ -57,9 +34,6 @@ func groupDoneClause(pos syntax.Pos, gctx string) *syntax.CommClause {
 	return at(&syntax.CommClause{Comm: exprStmtOf(pos, recv), Body: []syntax.Stmt{ret}}, pos)
 }
 
-// groupRecvOp matches a bare channel receive serving as a whole
-// right-hand element: `<-ch`, without the comma-ok form (which the
-// assignment shape supplies).
 func groupRecvOp(e syntax.Expr) (*syntax.Operation, bool) {
 	op, ok := syntax.Unparen(e).(*syntax.Operation)
 	if !ok || op.Op != syntax.Recv || op.Y != nil {
@@ -68,9 +42,6 @@ func groupRecvOp(e syntax.Expr) (*syntax.Operation, bool) {
 	return op, true
 }
 
-// groupChanElem returns the element type of the channel type t. A
-// comma-ok receive records a tuple on the operation, so the element type
-// always comes from the channel operand.
 func groupChanElem(t types2.Type) types2.Type {
 	ch, ok := t.Underlying().(*types2.Chan)
 	if !ok {
@@ -79,8 +50,6 @@ func groupChanElem(t types2.Type) types2.Type {
 	return ch.Elem()
 }
 
-// groupHasRecv reports whether an assignment holds a direct receive on
-// its right-hand side, the shape the M8-S3 rewrite covers.
 func groupHasRecv(s *syntax.AssignStmt) bool {
 	if s.Rhs == nil {
 		return false
@@ -93,8 +62,6 @@ func groupHasRecv(s *syntax.AssignStmt) bool {
 	return false
 }
 
-// groupSpellType respells the runtime type t for eject text, qualifying
-// outside packages the way the file denotes them.
 func (fc *funcLower) groupSpellType(t types2.Type, pos syntax.Pos) syntax.Expr {
 	text := types2.TypeString(t, fc.yieldQualifier)
 	texpr, ok := reparseType(text)
@@ -110,9 +77,6 @@ func (fc *funcLower) groupSpellType(t types2.Type, pos syntax.Pos) syntax.Expr {
 	return texpr
 }
 
-// groupRecvElem is one right-hand element of a receiving statement:
-// recv is set for a direct receive, vals counts the values it supplies,
-// and tmp and otmp name the value and ok temporaries of a receive.
 type groupRecvElem struct {
 	recv *syntax.Operation
 	vals int
@@ -120,10 +84,6 @@ type groupRecvElem struct {
 	otmp string
 }
 
-// groupRecvLayout classifies the right-hand elements of a statement with
-// lhsN targets. It reports false when no element receives or the
-// elements do not cover the targets one for one, so the statement keeps
-// its original form.
 func (fc *funcLower) groupRecvLayout(lhsN int, rhs []syntax.Expr) ([]groupRecvElem, bool) {
 	elems := make([]groupRecvElem, len(rhs))
 	total, recvCount := 0, 0
@@ -145,15 +105,12 @@ func (fc *funcLower) groupRecvLayout(lhsN int, rhs []syntax.Expr) ([]groupRecvEl
 	return elems, recvCount > 0 && total == lhsN
 }
 
-// groupTempName spells the next temporary with the given prefix.
 func (fc *funcLower) groupTempName(prefix string) string {
 	nm := fmt.Sprintf("_logos_%s%d", prefix, fc.tmpSeq)
 	fc.tmpSeq++
 	return nm
 }
 
-// groupPlainTemps binds a non-receiving right-hand element to vals
-// temporaries, keeping its source text, so evaluation order is kept.
 func (fc *funcLower) groupPlainTemps(pos syntax.Pos, r syntax.Expr, vals int) (syntax.Stmt, otext, []string) {
 	fl := fc.fl
 	start := fl.off(leftmostOf(r))
@@ -165,9 +122,6 @@ func (fc *funcLower) groupPlainTemps(pos syntax.Pos, r syntax.Expr, vals int) (s
 	return defineOf(pos, tempNodes(pos, names), []syntax.Expr{r}), cat(gen(strings.Join(names, ", ")+" := "), elemText), names
 }
 
-// groupRecvSelect declares the temporaries of a receiving element and
-// receives into them through a select with the cancel arm. It returns
-// the native statements, the text lines, and the temporary spellings.
 func (fc *funcLower) groupRecvSelect(pos syntax.Pos, top groupFrame, e *groupRecvElem) ([]syntax.Stmt, []otext, []string) {
 	fl := fc.fl
 	ch := e.recv.X
@@ -194,10 +148,6 @@ func (fc *funcLower) groupRecvSelect(pos syntax.Pos, top groupFrame, e *groupRec
 	return native, text, names
 }
 
-// groupRecvTemps evaluates every right-hand element into temporaries
-// in source order: receives go through a cancel select, everything else
-// binds plainly. It returns the native statements, the text lines, and
-// the temporary spellings in target order.
 func (fc *funcLower) groupRecvTemps(pos syntax.Pos, top groupFrame, rhs []syntax.Expr, elems []groupRecvElem) ([]syntax.Stmt, []otext, []string) {
 	var native []syntax.Stmt
 	var text []otext
@@ -214,8 +164,6 @@ func (fc *funcLower) groupRecvTemps(pos syntax.Pos, top groupFrame, rhs []syntax
 	return native, text, temps
 }
 
-// groupAssignFinal builds the statement that moves the temporaries into
-// the original targets, with the operator text it spells.
 func groupAssignFinal(s *syntax.AssignStmt, lhs, temps []syntax.Expr) (syntax.Stmt, string) {
 	pos := s.Pos()
 	switch s.Op {
@@ -227,9 +175,6 @@ func groupAssignFinal(s *syntax.AssignStmt, lhs, temps []syntax.Expr) (syntax.St
 	return at(&syntax.AssignStmt{Op: s.Op, Lhs: listOf(pos, lhs), Rhs: listOf(pos, temps)}, pos), " " + s.Op.String() + " "
 }
 
-// lowerGroupRecv rewrites an assignment that receives directly: every
-// right-hand element evaluates into a temporary (receives through a
-// cancel select), then the original assignment moves the temporaries.
 func (fc *funcLower) lowerGroupRecv(s *syntax.AssignStmt, top groupFrame) []syntax.Stmt {
 	fl := fc.fl
 	scanForLiterals(fl, s)
@@ -248,8 +193,6 @@ func (fc *funcLower) lowerGroupRecv(s *syntax.AssignStmt, top groupFrame) []synt
 	return append(native, finalN)
 }
 
-// groupRecvDecl matches `var v = <-ch` and its typed and comma-ok
-// forms: a single ungrouped variable declaration with values.
 func groupRecvDecl(s *syntax.DeclStmt) (*syntax.VarDecl, bool) {
 	if len(s.DeclList) != 1 {
 		return nil, false
@@ -266,9 +209,6 @@ func groupRecvDecl(s *syntax.DeclStmt) (*syntax.VarDecl, bool) {
 	return nil, false
 }
 
-// groupAssignOffset returns the offset of the first `=` token at or
-// after start, which separates the names and type of a declaration from
-// its values.
 func groupAssignOffset(src []byte, start int) int {
 	off := start
 	scanSegment(src, start, len(src), func(t tok) bool {
@@ -284,9 +224,6 @@ func groupAssignOffset(src []byte, start int) int {
 	return off
 }
 
-// lowerGroupVarRecv rewrites a declaration that receives directly the
-// way lowerGroupRecv rewrites an assignment: temporaries first, then the
-// original declaration over the temporaries.
 func (fc *funcLower) lowerGroupVarRecv(s *syntax.DeclStmt, d *syntax.VarDecl, top groupFrame) []syntax.Stmt {
 	fl := fc.fl
 	scanForLiterals(fl, s)
@@ -305,10 +242,6 @@ func (fc *funcLower) lowerGroupVarRecv(s *syntax.DeclStmt, d *syntax.VarDecl, to
 	return append(native, at(&syntax.DeclStmt{DeclList: []syntax.Decl{nd}}, pos))
 }
 
-// groupChanStmt rewrites the statements that communicate directly in a
-// child body: receiving assignments and declarations, bare receives,
-// sends, and ranges over channels. It reports false for every other
-// statement, and outside child bodies.
 func (fc *funcLower) groupChanStmt(s syntax.Stmt) ([]syntax.Stmt, bool) {
 	top, ok := fc.groupChanTop()
 	if !ok {
@@ -329,7 +262,6 @@ func (fc *funcLower) groupChanStmt(s syntax.Stmt) ([]syntax.Stmt, bool) {
 	return nil, false
 }
 
-// groupChanAssign rewrites an assignment with a direct receive.
 func (fc *funcLower) groupChanAssign(s *syntax.AssignStmt, top groupFrame) ([]syntax.Stmt, bool) {
 	if !groupHasRecv(s) {
 		return nil, false
@@ -337,7 +269,6 @@ func (fc *funcLower) groupChanAssign(s *syntax.AssignStmt, top groupFrame) ([]sy
 	return fc.lowerGroupRecv(s, top), true
 }
 
-// groupChanDecl rewrites a variable declaration with a direct receive.
 func (fc *funcLower) groupChanDecl(s *syntax.DeclStmt, top groupFrame) ([]syntax.Stmt, bool) {
 	d, ok := groupRecvDecl(s)
 	if !ok {
@@ -346,7 +277,6 @@ func (fc *funcLower) groupChanDecl(s *syntax.DeclStmt, top groupFrame) ([]syntax
 	return fc.lowerGroupVarRecv(s, d, top), true
 }
 
-// groupChanExpr rewrites a bare receive statement.
 func (fc *funcLower) groupChanExpr(s *syntax.ExprStmt, top groupFrame) ([]syntax.Stmt, bool) {
 	op, ok := groupRecvOp(s.X)
 	if !ok {
@@ -355,7 +285,6 @@ func (fc *funcLower) groupChanExpr(s *syntax.ExprStmt, top groupFrame) ([]syntax
 	return fc.lowerGroupRecvExpr(s, op, top), true
 }
 
-// groupChanFor rewrites a range over a channel.
 func (fc *funcLower) groupChanFor(s *syntax.ForStmt, top groupFrame) ([]syntax.Stmt, bool) {
 	rc, ok := s.Init.(*syntax.RangeClause)
 	if !ok || !fc.groupRangeOverChan(rc) {
@@ -364,8 +293,6 @@ func (fc *funcLower) groupChanFor(s *syntax.ForStmt, top groupFrame) ([]syntax.S
 	return fc.lowerGroupRange(s, rc, top), true
 }
 
-// lowerGroupRecvExpr rewrites a bare `<-ch` in a child: a select that
-// either receives or returns the context error.
 func (fc *funcLower) lowerGroupRecvExpr(s *syntax.ExprStmt, op *syntax.Operation, top groupFrame) []syntax.Stmt {
 	fl := fc.fl
 	pos := s.Pos()
@@ -383,8 +310,6 @@ func (fc *funcLower) lowerGroupRecvExpr(s *syntax.ExprStmt, op *syntax.Operation
 	return []syntax.Stmt{native}
 }
 
-// lowerGroupSend rewrites `ch <- v` in a child: a select that either
-// sends or returns the context error.
 func (fc *funcLower) lowerGroupSend(s *syntax.SendStmt, top groupFrame) []syntax.Stmt {
 	fl := fc.fl
 	pos := s.Pos()
@@ -406,8 +331,6 @@ func (fc *funcLower) lowerGroupSend(s *syntax.SendStmt, top groupFrame) []syntax
 	return []syntax.Stmt{native}
 }
 
-// groupRangeOverChan reports whether a range clause ranges over a
-// channel: only those iterate through the cancel adapter.
 func (fc *funcLower) groupRangeOverChan(rc *syntax.RangeClause) bool {
 	t := fc.fl.pkg.info.TypeOf(syntax.Unparen(rc.X))
 	if t == nil {
@@ -417,10 +340,6 @@ func (fc *funcLower) groupRangeOverChan(rc *syntax.RangeClause) bool {
 	return ok
 }
 
-// lowerGroupRange rewrites `for v := range ch` in a child through the
-// channel adapter, with a post-loop check that reports cancellation:
-// a closed channel ends the range silently, a cancelled context ends
-// it with the context error.
 func (fc *funcLower) lowerGroupRange(s *syntax.ForStmt, rc *syntax.RangeClause, top groupFrame) []syntax.Stmt {
 	fl := fc.fl
 	pos := s.Pos()
@@ -448,10 +367,6 @@ func (fc *funcLower) lowerGroupRange(s *syntax.ForStmt, rc *syntax.RangeClause, 
 	headStart := fl.off(pos)
 	braceOff := fl.off(s.Body.Pos())
 	fl.addT(headStart, braceOff, cat(gen("for "), lhsPart, gen("range "+rtAlias+".Chan("+top.gctx+", "), chText, gen(") ")))
-	// The post-loop check is emitted after the loop, so it carries the
-	// loop body's closing position, not the loop's head position: scope
-	// marks are recorded in emission order and the head position would
-	// move them backwards past the loop body's close.
 	checkPos := s.Body.Rbrace
 	checkN := ifOf(checkPos, nil,
 		at(&syntax.Operation{
@@ -469,7 +384,6 @@ func (fc *funcLower) lowerGroupRange(s *syntax.ForStmt, rc *syntax.RangeClause, 
 	return []syntax.Stmt{s, checkN}
 }
 
-// groupSelectHasDefault reports whether a select already defaults.
 func groupSelectHasDefault(s *syntax.SelectStmt) bool {
 	for _, c := range s.Body {
 		if c.Comm == nil {
@@ -479,19 +393,11 @@ func groupSelectHasDefault(s *syntax.SelectStmt) bool {
 	return false
 }
 
-// groupAugmentSelect adds the cancel arm to a user select without
-// `default` in a child body: it fires only when no other case is ready
-// and the group is done. A select with `default` never blocks, so it
-// stays exactly as written, and a select outside a child is untouched.
 func (fc *funcLower) groupAugmentSelect(s *syntax.SelectStmt) {
 	top, ok := fc.groupChanTop()
 	if !ok || groupSelectHasDefault(s) {
 		return
 	}
-	// The cancel arm is appended after every written clause, so it
-	// carries the select's closing position, not its head position:
-	// clause scope marks are recorded in emission order and the head
-	// position would move them backwards past the written clauses.
 	s.Body = append(s.Body, groupDoneClause(s.Rbrace, top.gctx))
 	rbraceOff := fc.fl.off(s.Rbrace)
 	fc.fl.add(rbraceOff, rbraceOff, "\n"+groupDoneText(top.gctx)+"\n")

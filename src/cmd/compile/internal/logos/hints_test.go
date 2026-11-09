@@ -15,9 +15,6 @@ import (
 	"cmd/compile/internal/syntax"
 )
 
-// hintsFixture parses, checks, collects hints from, and lowers one fixture
-// of testdata/hints, in the order the compiler runs them: facts of the
-// unlowered tree first, then the lowering edits.
 func hintsFixture(t *testing.T, name string) (*HintsReport, []byte) {
 	t.Helper()
 	src, err := os.ReadFile(filepath.Join("testdata", "hints", name))
@@ -35,7 +32,6 @@ func hintsFixture(t *testing.T, name string) (*HintsReport, []byte) {
 	return h.Report(), src
 }
 
-// onlyFile returns the single file of the report.
 func onlyFile(t *testing.T, r *HintsReport) FileHints {
 	t.Helper()
 	if len(r.Files) != 1 {
@@ -44,15 +40,12 @@ func onlyFile(t *testing.T, r *HintsReport) FileHints {
 	return r.Files[0]
 }
 
-// positionAt converts a byte offset of src to an LSP position (0-based line,
-// UTF-16 character), independently of the implementation under test.
 func positionAt(src []byte, off int) HintPos {
 	before := string(src[:off])
 	text := before[strings.LastIndex(before, "\n")+1:]
 	return HintPos{Line: strings.Count(before, "\n"), Character: len(utf16.Encode([]rune(text)))}
 }
 
-// startOf returns the position of the first occurrence of needle in src.
 func startOf(t *testing.T, src []byte, needle string) HintPos {
 	t.Helper()
 	i := strings.Index(string(src), needle)
@@ -62,7 +55,6 @@ func startOf(t *testing.T, src []byte, needle string) HintPos {
 	return positionAt(src, i)
 }
 
-// endOf returns the position just after the first occurrence of needle.
 func endOf(t *testing.T, src []byte, needle string) HintPos {
 	t.Helper()
 	i := strings.Index(string(src), needle)
@@ -72,9 +64,6 @@ func endOf(t *testing.T, src []byte, needle string) HintPos {
 	return positionAt(src, i+len(needle))
 }
 
-// TestHintsNarrowedUses checks that every use of an option variable that the
-// checker narrows carries the narrowed type, that unnarrowed uses carry none,
-// and that columns count UTF-16 code units (SPEC Sec 16.2).
 func TestHintsNarrowedUses(t *testing.T) {
 	r, src := hintsFixture(t, "sites.lgo")
 	got := onlyFile(t, r).Narrowed
@@ -87,8 +76,6 @@ func TestHintsNarrowedUses(t *testing.T) {
 	}
 }
 
-// TestHintsUnionMembers checks the member list at a type switch over a closed
-// union, anchored just before the `.(type)` guard (SPEC Sec 16.2).
 func TestHintsUnionMembers(t *testing.T) {
 	r, src := hintsFixture(t, "sites.lgo")
 	got := onlyFile(t, r).Unions
@@ -101,9 +88,6 @@ func TestHintsUnionMembers(t *testing.T) {
 	}
 }
 
-// TestHintsInterpFixedBytes checks fixedBytes per interpolation site: the
-// literal bytes plus 20 per integer, 24 per float, and 5 per bool; operands
-// that carry their own length add nothing (SPEC T-104.4, SPEC Sec 16.3).
 func TestHintsInterpFixedBytes(t *testing.T) {
 	r, src := hintsFixture(t, "interp.lgo")
 	var sites []SiteHint
@@ -140,16 +124,12 @@ func TestHintsInterpFixedBytes(t *testing.T) {
 	}
 }
 
-// TestHintsFixedBytesMatchesBound checks literal-only fixedBytes: parts
-// sum to their lengths, with an empty part and nil kinds.
 func TestHintsFixedBytesMatchesBound(t *testing.T) {
 	if got := InterpFixedBytes([]string{"a", "bc", ""}, nil); got != 3 {
 		t.Errorf("literal-only fixed bytes %d, want 3", got)
 	}
 }
 
-// TestHintsLoweredTry checks the hover site of a `?`: the range is the `?`
-// token and the lowered text is the statement the lowering emitted.
 func TestHintsLoweredTry(t *testing.T) {
 	r, src := hintsFixture(t, "sites.lgo")
 	var tries []SiteHint
@@ -175,9 +155,6 @@ func TestHintsLoweredTry(t *testing.T) {
 	}
 }
 
-// TestHintsLoweredConstSwitch checks the hover site of `const switch T`: the
-// range is the two keywords and the lowered text is the switch that replaced
-// the statement.
 func TestHintsLoweredConstSwitch(t *testing.T) {
 	r, src := hintsFixture(t, "sites.lgo")
 	var got []SiteHint
@@ -198,9 +175,6 @@ func TestHintsLoweredConstSwitch(t *testing.T) {
 	}
 }
 
-// TestHintsLoweredConstFor checks the hover site of `const for`: the range is
-// the two keywords and the lowered text is the unrolled loop that replaced the
-// statement.
 func TestHintsLoweredConstFor(t *testing.T) {
 	r, src := hintsFixture(t, "sites.lgo")
 	var got []SiteHint
@@ -221,8 +195,6 @@ func TestHintsLoweredConstFor(t *testing.T) {
 	}
 }
 
-// TestHintsSiteWithoutEditIsDropped checks that a site no lowering edit
-// covers produces no hover: a hover without lowered code would be wrong.
 func TestHintsSiteWithoutEditIsDropped(t *testing.T) {
 	src, err := os.ReadFile(filepath.Join("testdata", "hints", "sites.lgo"))
 	if err != nil {
@@ -238,8 +210,6 @@ func TestHintsSiteWithoutEditIsDropped(t *testing.T) {
 	}
 }
 
-// TestHintsRodata checks that a package-level const composite that lowering
-// places in read-only data carries the rodata tier at its name.
 func TestHintsRodata(t *testing.T) {
 	r, src := hintsFixture(t, "sites.lgo")
 	var got []AllocHint
@@ -253,9 +223,6 @@ func TestHintsRodata(t *testing.T) {
 	}
 }
 
-// TestHintsAllocWorstTierWins checks that an allocation analyzed in several
-// contexts reports its worst tier, and that a decision in a file outside the
-// package is dropped.
 func TestHintsAllocWorstTierWins(t *testing.T) {
 	src := []byte("package p\n\nvar x = 1\n")
 	file := ejectParse(t, syntax.NewFileBase("a.go"), src, syntax.CheckBranches)
@@ -271,24 +238,17 @@ func TestHintsAllocWorstTierWins(t *testing.T) {
 	}
 }
 
-// TestHintsAllocTierMerge checks pairwise tier precedence at one source
-// position: heap beats both arena and stack, arena beats stack when both are
-// possible, and all three beat rodata, regardless of arrival order.
 func TestHintsAllocTierMerge(t *testing.T) {
 	tests := []struct {
 		first, second string
 		want          string
 	}{
-		// Arena vs Stack: arena beats stack both ways.
 		{TierStack, TierArena, TierArena},
 		{TierArena, TierStack, TierArena},
-		// Heap vs Arena: heap beats arena both ways.
 		{TierArena, TierHeap, TierHeap},
 		{TierHeap, TierArena, TierHeap},
-		// Heap vs Stack: heap beats stack both ways.
 		{TierStack, TierHeap, TierHeap},
 		{TierHeap, TierStack, TierHeap},
-		// Rodata vs others: others beat rodata.
 		{TierRodata, TierArena, TierArena},
 		{TierArena, TierRodata, TierArena},
 		{TierRodata, TierStack, TierStack},

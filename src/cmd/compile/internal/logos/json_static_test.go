@@ -16,8 +16,6 @@ import (
 	"cmd/compile/internal/types2"
 )
 
-// lowerStaticText type-checks and lowers one .lgo source and returns the
-// ejected text, which carries every generated declaration.
 func lowerStaticText(t *testing.T, src string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "x.lgo")
@@ -61,8 +59,6 @@ func lowerStaticText(t *testing.T, src string) string {
 	return string(out)
 }
 
-// methodBody returns the text of one generated function, from its func
-// line to its closing brace line, or fails the test.
 func methodBody(t *testing.T, text, head string) string {
 	t.Helper()
 	start := strings.Index(text, head)
@@ -81,10 +77,6 @@ const userSource = "package p\n\ntype User struct {\n" +
 	"\tName string   `json:\"name\"`\n" +
 	"\tRole *string? `json:\"role,omitempty\"`\n}\n"
 
-// TestUserFixedBytes pins the literals the generator emits for the spec
-// User shape: {"id": (6 bytes), ,"name":" (9) plus " (1), optional
-// ,"role":" (9) plus " (1), and } (1): 17 fixed bytes without the
-// optional field and 27 with it.
 func TestUserFixedBytes(t *testing.T) {
 	text := lowerStaticText(t, userSource)
 	body := methodBody(t, text, "func (_logos_v User) MarshalJSON() ([]byte, error) {")
@@ -111,8 +103,6 @@ func TestUserFixedBytes(t *testing.T) {
 	}
 }
 
-// TestCopyDeclarationKeepsReflectivePath checks that `type M T` has no
-// generated methods, so a test can compare T with its reflective twin.
 func TestCopyDeclarationKeepsReflectivePath(t *testing.T) {
 	text := lowerStaticText(t, userSource+"\ntype mirror User\n")
 	if strings.Contains(text, "func (_logos_v mirror)") || strings.Contains(text, "func (_logos_v *mirror)") {
@@ -123,8 +113,6 @@ func TestCopyDeclarationKeepsReflectivePath(t *testing.T) {
 	}
 }
 
-// TestUnsupportedKindsSkipGeneration covers the three skips of SPEC Sec
-// 12.1: interface fields, maps with non-string keys, embedded structs.
 func TestUnsupportedKindsSkipGeneration(t *testing.T) {
 	cases := map[string]string{
 		"interface": "type S struct {\n\tA any `json:\"a\"`\n}\n",
@@ -141,7 +129,6 @@ func TestUnsupportedKindsSkipGeneration(t *testing.T) {
 	}
 }
 
-// requiredStruct declares a struct of n required non-nil pointer fields.
 func requiredStruct(n int) string {
 	var b strings.Builder
 	b.WriteString("package p\n\ntype R struct {\n")
@@ -152,8 +139,6 @@ func requiredStruct(n int) string {
 	return b.String()
 }
 
-// TestSeenMask checks the mask sizing and the per-key bit set of the
-// generated decoder: one word for up to 64 required fields, two for 65.
 func TestSeenMask(t *testing.T) {
 	for _, tc := range []struct {
 		n     int
@@ -183,7 +168,6 @@ func TestSeenMask(t *testing.T) {
 	}
 }
 
-// keyedStruct declares a struct of n tagged scalar fields.
 func keyedStruct(n int) string {
 	var b strings.Builder
 	b.WriteString("package p\n\ntype K struct {\n")
@@ -194,8 +178,6 @@ func keyedStruct(n int) string {
 	return b.String()
 }
 
-// TestKeyDispatch checks that keys bind without reflection or validate
-// tags: up to 8 keys dispatch by a switch, more by the perfect-hash table.
 func TestKeyDispatch(t *testing.T) {
 	small := lowerStaticText(t, keyedStruct(8))
 	if body := methodBody(t, small, "func _logos_jsonkey_K(k string) int {"); !strings.Contains(body, "switch k {") {
@@ -219,8 +201,6 @@ func TestKeyDispatch(t *testing.T) {
 	}
 }
 
-// TestFloatSliceSizeHasNoLoop checks that a float slice is sized by its
-// fixed per-element bound, so no size loop leaves an element unused.
 func TestFloatSliceSizeHasNoLoop(t *testing.T) {
 	text := lowerStaticText(t, "package p\n\ntype F struct {\n\tV []float64 `json:\"v\"`\n}\n")
 	body := methodBody(t, text, "func (_logos_v F) MarshalJSON() ([]byte, error) {")
@@ -232,10 +212,6 @@ func TestFloatSliceSizeHasNoLoop(t *testing.T) {
 	}
 }
 
-// TestTagSupportRules checks that a json tag the two encoding/json modes
-// read differently keeps the whole struct on the reflective path: a name
-// invalid under the v1 rule, an option other than omitempty, omitzero, and
-// string, a repeated or empty option, and a tag on an unexported field.
 func TestTagSupportRules(t *testing.T) {
 	cases := []struct {
 		name string
@@ -268,9 +244,6 @@ func TestTagSupportRules(t *testing.T) {
 	}
 }
 
-// TestGeneratedNamesAreReserved checks that every generated receiver,
-// parameter, and local carries the reserved prefix, so a type named like
-// a generated local still compiles.
 func TestGeneratedNamesAreReserved(t *testing.T) {
 	text := lowerStaticText(t, "package p\n\ntype data struct {\n\tN int `json:\"n\"`\n}\n")
 	for _, want := range []string{
@@ -284,8 +257,6 @@ func TestGeneratedNamesAreReserved(t *testing.T) {
 	}
 }
 
-// TestConstPointerFieldTriggers checks that a `const *T` field counts as a
-// non-nil pointer field, like the lowering does.
 func TestConstPointerFieldTriggers(t *testing.T) {
 	text := lowerStaticText(t, "package p\n\ntype C struct {\n\tP const *int\n}\n")
 	if !strings.Contains(text, "func (_logos_v *C) UnmarshalJSON(") {
@@ -293,8 +264,6 @@ func TestConstPointerFieldTriggers(t *testing.T) {
 	}
 }
 
-// TestUnionClassification checks that closed unions are admitted for static JSON
-// and classify as shapeUnion, while open interfaces and ~-term unions are rejected.
 func TestUnionClassification(t *testing.T) {
 	checkStruct := func(t *testing.T, src, typeName string) (bool, jsonShape) {
 		t.Helper()
@@ -508,9 +477,6 @@ type Container struct {
 	})
 }
 
-// TestUnionUnmarshalGenerated verifies that a struct holding a closed union
-// generates an UnmarshalJSON with trials in declaration order, scratch values
-// per trial, and an ambiguity error reference (SPEC Sec 10.2, T-Sec10, T-203.1).
 func TestUnionUnmarshalGenerated(t *testing.T) {
 	src := `package p
 
@@ -554,13 +520,10 @@ type Container struct {
 	if !strings.Contains(body, "_logos_jsonkey_Circle") || !strings.Contains(body, "_logos_jsonkey_Square") {
 		t.Fatalf("UnmarshalJSON must check modeled field presence via key helpers:\n%s", body)
 	}
-	// A key modeled by a sibling member but not this one disqualifies the trial:
-	// Circle's trial must consult _logos_jsonkey_Square and vice versa.
 	if !strings.Contains(body, "_logos_jsonkey_Square(_logos_chk.Key())") ||
 		!strings.Contains(body, "_logos_jsonkey_Circle(_logos_chk.Key())") {
 		t.Fatalf("UnmarshalJSON must disqualify on sibling-modeled keys:\n%s", body)
 	}
-	// JSON null must clear an optional union field, not leave the prior value.
 	if !strings.Contains(body, "_logos_v.Sh = nil") {
 		t.Fatalf("UnmarshalJSON must clear union field on null:\n%s", body)
 	}
@@ -607,11 +570,6 @@ type Container struct {
 	}
 }
 
-// TestFallbackStringQuoting is the red repro for finding (2): fallback-classified
-// scalars with `,string` must preserve tag-aware quoting in both directions.
-// Unmarshal-only types have no marshal methods so the encoder must quote;
-// marshal-only types have no unmarshal methods so the decoder must use the
-// quoted reader; exact json.Number must wrap the number literal in quotes.
 func TestFallbackStringQuoting(t *testing.T) {
 	text := lowerStaticText(t, "package p\ntype MyInt int\nfunc (m *MyInt) UnmarshalJSON(b []byte) error { return nil }\ntype S struct {\n\tV MyInt `json:\"v,string\"`\n}\n")
 	mbody := methodBody(t, text, "func (_logos_v S) MarshalJSON() ([]byte, error) {")

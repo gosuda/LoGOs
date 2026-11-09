@@ -12,7 +12,6 @@ import (
 	"cmd/compile/internal/types2"
 )
 
-// scanSnippet parses, checks, and scans one Go source snippet.
 func scanSnippet(t *testing.T, imp *testImporter, src string) ([]NextEdit, []NextTask) {
 	t.Helper()
 	var perrs []error
@@ -49,7 +48,6 @@ func scanSnippet(t *testing.T, imp *testImporter, src string) ([]NextEdit, []Nex
 	return reps[0].Edits, reps[0].Tasks
 }
 
-// TestNextScan covers the rewrite shapes and their negative cases.
 func TestNextScan(t *testing.T) {
 	imp := newTestImporter(t)
 	call := `
@@ -188,7 +186,6 @@ func errNew() error { return nil }
 	}
 }
 
-// TestNextSprintf covers interpolation rewrites and verb rejections.
 func TestNextSprintf(t *testing.T) {
 	imp := newTestImporter(t)
 	cases := []struct {

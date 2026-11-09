@@ -15,17 +15,8 @@ import (
 	"cmd/compile/internal/types2"
 )
 
-// This file spells the generated UnmarshalJSON (SPEC Sec 10.2): defaults
-// first, a seen mask over the required non-nil fields, key dispatch by a
-// switch (up to jsonKeySwitchMax keys) or a perfect-hash table, unknown
-// keys skipped, and a per-field reflective fallback for unmodeled kinds.
-
-// jsonKeySwitchMax is the largest key count dispatched by a switch.
 const jsonKeySwitchMax = constMapSwitchMax
 
-// foldJSONKey returns the case-folded form of a key: the encoding/json
-// foldName rule, where every rune maps to the smallest rune of its
-// unicode.SimpleFold orbit and ASCII letters map to upper case.
 func foldJSONKey(k string) string {
 	var b strings.Builder
 	for i := 0; i < len(k); {
@@ -45,7 +36,6 @@ func foldJSONKey(k string) string {
 	return b.String()
 }
 
-// foldJSONRune returns the smallest rune of the fold orbit of r.
 func foldJSONRune(r rune) rune {
 	for {
 		r2 := unicode.SimpleFold(r)
@@ -56,12 +46,10 @@ func foldJSONRune(r rune) rune {
 	}
 }
 
-// seenWords returns the number of seen-mask words for n required fields.
 func seenWords(n int) int {
 	return (n + 63) / 64
 }
 
-// unmarshalText writes UnmarshalJSON and its helper declarations to b.
 func (js *jsonStruct) unmarshalText(b *strings.Builder) {
 	var body []string
 	body = append(body, fmt.Sprintf("_logos_s := %s.NewScanner(_logos_data, (*%s)(nil))", jsonAlias, js.name))
@@ -84,7 +72,6 @@ func (js *jsonStruct) unmarshalText(b *strings.Builder) {
 	js.missingFunc(b)
 }
 
-// loopLines spells the member loop: key lookup, then one case per field.
 func (js *jsonStruct) loopLines() []string {
 	body := []string{
 		fmt.Sprintf("_logos_i := _logos_jsonkey_%s(_logos_s.Key())", js.name),
@@ -101,7 +88,6 @@ func (js *jsonStruct) loopLines() []string {
 	return blockLines("for _logos_s.Next()", body)
 }
 
-// decodeLines spells the case body of one field.
 func (js *jsonStruct) decodeLines(f *jsonField) []string {
 	var lines []string
 	if f.required >= 0 {
@@ -113,7 +99,6 @@ func (js *jsonStruct) decodeLines(f *jsonField) []string {
 	return append(lines, js.valueLines(f)...)
 }
 
-// valueLines spells the statements decoding the current value into f.
 func (js *jsonStruct) valueLines(f *jsonField) []string {
 	field := jsonRecv + "." + f.goName
 	switch f.shape.kind {
@@ -141,11 +126,6 @@ func (js *jsonStruct) valueLines(f *jsonField) []string {
 	}
 }
 
-// fallbackQuotedValueLines spells the decoding of a fallback scalar carrying
-// the `string` option when the type has no unmarshal-side JSON methods: the
-// quoted scalar reader (IntQ, UintQ, FloatQ, BoolQ, StringQ) for its
-// underlying kind. Method types keep the reflective Fallback, which the
-// encoder already handles with method-wins precedence.
 func (js *jsonStruct) fallbackQuotedValueLines(f *jsonField, field string, kind scalarKind) []string {
 	u := types2.Unalias(f.typ)
 	if cv, ok := u.(*types2.ConstView); ok {
@@ -170,10 +150,6 @@ func (js *jsonStruct) fallbackQuotedValueLines(f *jsonField, field string, kind 
 	return []string{fmt.Sprintf("%s(&_logos_s, &%s)", tmp.codec().decodeFn(), field)}
 }
 
-// unionLines spells the decoding of a closed union: trials in declaration order
-// into scratch values with isolated scanners over Scanner.Value(), assigning
-// target only on a single success, returning UnionTrialError on zero successes
-// or multiple successes (SPEC Sec 10.2, T-Sec10, T-203.1).
 func (js *jsonStruct) unionLines(f *jsonField, field string) []string {
 	members, ok := unionTerms(f.typ)
 	if !ok || len(members) == 0 {
@@ -195,9 +171,6 @@ func (js *jsonStruct) unionLines(f *jsonField, field string) []string {
 		memberQuotes[i] = strconv.Quote(types2.TypeString(m, qual))
 	}
 	membersList := strings.Join(memberQuotes, ", ")
-	// Collect the union keyspace: bare names of members with emitted key helpers.
-	// A key in _logos_raw modeled by any member but not this member disqualifies
-	// this member's trial; keys no member models are ignored (SPEC Sec 10.2).
 	type memberKeys struct {
 		bareName string
 		usable   bool
@@ -249,8 +222,6 @@ func (js *jsonStruct) unionLines(f *jsonField, field string) []string {
 			trials = append(trials, fmt.Sprintf("\t\t\t\tif _logos_jsonkey_%s(_logos_chk.Key()) >= 0 || _logos_jsonfold_%s(_logos_chk.FoldKey()) >= 0 {", s.bareName, s.bareName))
 			trials = append(trials, "\t\t\t\t\t_logos_keys++")
 			trials = append(trials, "\t\t\t\t} else {")
-			// A key modeled by any sibling member but not this one disqualifies
-			// this trial; a key no member models is ignored.
 			for j, sib := range memberList {
 				if j == i || !sib.usable {
 					continue
@@ -295,8 +266,6 @@ func (js *jsonStruct) unionLines(f *jsonField, field string) []string {
 	return append(out, "}")
 }
 
-// pointerLines spells the decoding of a pointer to a scalar: null clears an
-// optional pointer, anything else decodes into the existing or a new pointee.
 func (f *jsonField) pointerLines(field string) []string {
 	fill := fmt.Sprintf("%s(&_logos_s, %s.Alloc(&%s))", f.codec().decodeFn(), jsonAlias, field)
 	if f.required >= 0 {
@@ -305,7 +274,6 @@ func (f *jsonField) pointerLines(field string) []string {
 	return ifElseLines("_logos_s.Null()", []string{field + " = nil"}, []string{fill})
 }
 
-// requiredCheck spells the mask test at the closing brace.
 func (js *jsonStruct) requiredCheck() []string {
 	n := len(js.required)
 	var lines, conds []string
@@ -320,7 +288,6 @@ func (js *jsonStruct) requiredCheck() []string {
 	return append(lines, ifLines(strings.Join(conds, " || "), []string{ret})...)
 }
 
-// missingFunc writes the function naming the first missing required field.
 func (js *jsonStruct) missingFunc(b *strings.Builder) {
 	if len(js.required) == 0 {
 		return
@@ -334,13 +301,11 @@ func (js *jsonStruct) missingFunc(b *strings.Builder) {
 	b.WriteString("\t\tif seen[i/64]>>(i%64)&1 == 0 {\n\t\t\treturn name\n\t\t}\n\t}\n\treturn \"\"\n}\n")
 }
 
-// keyEntry is one key of a lookup function and the field index it yields.
 type keyEntry struct {
 	key string
 	idx int
 }
 
-// keyFuncs writes the exact and the case-folded key lookup functions.
 func (js *jsonStruct) keyFuncs(b *strings.Builder) {
 	var exact, folded []keyEntry
 	seen := make(map[string]bool)
@@ -356,9 +321,6 @@ func (js *jsonStruct) keyFuncs(b *strings.Builder) {
 	writeKeyFunc(b, js.name, "jsonfold", folded)
 }
 
-// writeKeyFunc writes one lookup function _logos_<kind>_<name>(k string)
-// int returning the field index of k or -1: a switch for few keys, a
-// perfect-hash table (SPEC Sec 7) for more.
 func writeKeyFunc(b *strings.Builder, name, kind string, keys []keyEntry) {
 	if len(keys) <= jsonKeySwitchMax {
 		fmt.Fprintf(b, "\nfunc _logos_%s_%s(k string) int {\n\tswitch k {\n", kind, name)
@@ -371,8 +333,6 @@ func writeKeyFunc(b *strings.Builder, name, kind string, keys []keyEntry) {
 	writeKeyTable(b, name, kind, keys)
 }
 
-// writeKeyTable writes a read-only perfect-hash table over keys and the
-// lookup function that probes it.
 func writeKeyTable(b *strings.Builder, name, kind string, keys []keyEntry) {
 	entries := make([]constMapKey, len(keys))
 	for i, e := range keys {

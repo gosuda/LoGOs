@@ -131,11 +131,6 @@ func ownedAliasFor(factoryPath, factoryName string, path []types2.LogosOwnedStep
 	return "LogosOwned_" + hex.EncodeToString(sum[:])
 }
 
-// ownedValueAliasFor derives a helper name from factory identity plus the
-// computed value text, so two const initializers calling one factory with
-// different arguments never share a declaration while identical
-// computations stay byte-identical and deduplicate. The empty-value
-// digest matches ownedAliasFor, keeping type-only helpers stable.
 func ownedValueAliasFor(factoryPath, factoryName string, path []types2.LogosOwnedStep, kind, value string) string {
 	h := sha256.New()
 	h.Write([]byte(factoryPath))
@@ -747,8 +742,6 @@ func ownedFactorySig(info *types2.Info, fp, fn string, call *syntax.CallExpr) (*
 				return sig, true
 			}
 		}
-		// TypeOf also reads syntax-attached types when the compiler leaves
-		// Info.Types nil; the full callee retains explicit instantiation.
 		if sig, ok := info.TypeOf(call.Fun).(*types2.Signature); ok {
 			return sig, true
 		}
@@ -1003,9 +996,6 @@ func (fl *fileLower) ownedCompositeBridge(obj *types2.Const, v ctfe.Value, init 
 	if !dok {
 		return zero, false
 	}
-	// The shared alias is its own byte-stable request so every value of
-	// one factory deduplicates it instead of repeating it per helper.
-	// Idempotent consumers: identical alias sources collapse to one file.
 	aliasSrc := fmt.Sprintf("package %s\ntype %s = %s\n", defPkg, typeAlias, defType)
 	if !fl.emitOwnedRequest(defPath, defPkg, aliasSrc, decls) {
 		return zero, false
@@ -1088,9 +1078,6 @@ func (fl *fileLower) ownedValueSource(v ctfe.Value, t types2.Type, ownerPath str
 		if bare == "" {
 			return "", false
 		}
-		// Positional fields in checked order, every slot present: a blank
-		// field cannot be named in a keyed literal, so skipping it both
-		// shifts the remaining fields and loses the recorded zero.
 		fields := v.Fields()
 		if len(fields) != u.NumFields() {
 			return "", false
@@ -1208,10 +1195,6 @@ func (fl *fileLower) constMapOwnedTexts(g *constMapGen, pos syntax.Pos) (string,
 	if !ok {
 		return "", "", false
 	}
-	// A spellable name is not a writable literal: exported types with
-	// unexported fields (mixed-owner keys/values) still need the owned
-	// bridge. Route by consumer-side materializability, not name
-	// spelling, so no private-field representation is lost.
 	if spellableMatType(mt.Key(), fl.pkg.tpkg) && spellableMatType(mt.Elem(), fl.pkg.tpkg) && spellableMatType(elem, fl.pkg.tpkg) {
 		return "", "", false
 	}
@@ -1393,9 +1376,6 @@ type ownedMapSpec struct {
 }
 
 func (fl *fileLower) ownedEjectCompositeTexts(t types2.Type, fp, fn string, path []types2.LogosOwnedStep, pos syntax.Pos) (eject, local, owner, pkg, qual string, ok bool) {
-	// As above: a spellable type name with a private representation
-	// (unexported fields of another package) still needs per-owner
-	// value constructors, so it must not take the ownerless path.
 	if s, ok := fl.spellLowered(t); ok && matFieldsAssignable(t, fl.pkg.tpkg) {
 		return s, s, "", "", "", true
 	}
@@ -1712,11 +1692,6 @@ func (fl *fileLower) ownedNativeMapValueRec(v ctfe.Value, t types2.Type, parent 
 	placeholder := phName
 	switch u := ut.(type) {
 	case *types2.Struct:
-		// Positional fields in checked order: the exporter resolves each
-		// element by index, so a private field name never reaches a
-		// consumer-package lookup. Blank fields keep their slot (their
-		// zero value is what the evaluator recorded) because omitting
-		// them would shift every following field.
 		fields := v.Fields()
 		if len(fields) != u.NumFields() {
 			return "", false

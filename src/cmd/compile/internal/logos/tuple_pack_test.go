@@ -9,11 +9,6 @@ import (
 	"testing"
 )
 
-// TestTuplePackParenCall pins the pack of a parenthesized multi-value
-// call: the wrapping pairs leave with the call, so `t = (pair())`
-// lowers to the temporaries plus the composite and never keeps the
-// closing `)` of the dropped grouping behind (a syntax error in plain
-// Go).
 func TestTuplePackParenCall(t *testing.T) {
 	cases := []struct {
 		name string

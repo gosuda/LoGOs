@@ -8,13 +8,6 @@ import (
 	"testing"
 )
 
-// TestNextLoopEscapedReceiverHeaderStaysUnedited pins the regression where
-// receiverIsPackage assumes a local receiver xs cannot be rebound by a
-// top-level function. If &xs escaped to a package variable prior to the loop,
-// a top-level function d invoked inside the loop can rebind or clear the
-// slice header through the pointer, causing the original loop over len(xs) to
-// terminate early. Auto-editing to a captured-header map changes semantics
-// and must not occur.
 func TestNextLoopEscapedReceiverHeaderStaysUnedited(t *testing.T) {
 	imp := newTestImporter(t)
 	src := `package p
@@ -41,11 +34,6 @@ func g(xs []int) []int {
 	}
 }
 
-// TestNextLoopEscapedCapturingClosureStaysUnedited pins the regression where
-// a closure capturing local receiver xs escapes to a package function variable
-// prior to the loop. When top-level function d invokes that stored closure,
-// it mutates the local receiver during iteration. The scanner must not treat
-// top-level call d as safe simply because xs is a local variable.
 func TestNextLoopEscapedCapturingClosureStaysUnedited(t *testing.T) {
 	imp := newTestImporter(t)
 	src := `package p

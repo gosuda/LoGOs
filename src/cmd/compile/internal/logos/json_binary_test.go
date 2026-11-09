@@ -27,8 +27,6 @@ func TestBinaryMethodsGenerated(t *testing.T) {
 	}
 }
 
-// Bare pointer options must not use the wrapper fields that scalar options
-// need. Exercise both representations in one generated struct.
 func TestBinaryOptionRepresentations(t *testing.T) {
 	text := lowerStaticText(t, "package p\ntype S struct { P *string? `json:\"p\"`; N int? `json:\"n\"` }\n")
 	start := strings.Index(text, "func _logos_bin_S_")
@@ -87,11 +85,6 @@ func (s S) MarshalBinary() ([]byte, error) { return nil, nil }
 	}
 }
 
-// TestBinaryZeroWireBudget covers finding (3) per SPEC Sec 10.3: nonzero-wire
-// counts pre-allocate at most min(len(rest)/2, 1MB/elem) with no total-budget
-// rejection so lawful >1MiB payloads with all bytes present decode; zero-wire
-// counts (no lawful input bound) are capped at 1<<20 with count-out-of-range,
-// encoder symmetric, constant-time without per-element iteration.
 func TestBinaryZeroWireBudget(t *testing.T) {
 	text := lowerStaticText(t, "package p\ntype Empty struct{}\ntype S struct {\n\tV []Empty `json:\"v\"`\n}\n")
 	if !strings.Contains(text, "if n > (1 << 20)") {

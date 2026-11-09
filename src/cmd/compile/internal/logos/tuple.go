@@ -15,25 +15,10 @@ import (
 	"cmd/compile/internal/types2"
 )
 
-// This file lowers the M6-S5 tuple nodes (SPEC Sec 2.4, T-204.1):
-// TupleType becomes the struct with exported `T_` fields, TupleLit
-// becomes a composite literal of that struct, `t.x` selections become
-// `t.T_x`, and pack/unpack assignments bind calls and tuple values
-// through field accesses. Every rewrite builds the native tree and the
-// eject text together, through small splices over exact token spans.
-//
-// The pass runs after the statement lowering, so `?` and `errdefer`
-// templates never see tuple forms. Replacement spans never contain a
-// later splice: selectors and right-hand sides splice exact tokens,
-// struct spellings compose earlier splices through textOf, and generated
-// statements hold no logos nodes.
-
-// tupleTempKey builds a per-site temporary name from a position.
 func tupleTempKey(pos syntax.Pos, i int) string {
 	return fmt.Sprintf("_logos_tup%d_%d_%d", pos.Line(), pos.Col(), i)
 }
 
-// joinO concatenates parts with sep between them, rebasing origins.
 func joinO(parts []otext, sep string) otext {
 	var out otext
 	for i, p := range parts {
@@ -45,7 +30,6 @@ func joinO(parts []otext, sep string) otext {
 	return out
 }
 
-// genList spells each string of list as generated text.
 func genList(list []string) []otext {
 	out := make([]otext, len(list))
 	for i, s := range list {
@@ -54,15 +38,12 @@ func genList(list []string) []otext {
 	return out
 }
 
-// tupleCallSpan reports the source span of a call, including its
-// argument parentheses (the node end sits at the function).
 func (fl *fileLower) tupleCallSpan(call *syntax.CallExpr) span {
 	start := fl.off(leftmostOf(call))
 	_, rparen := fl.findCallParens(fl.off(syntax.EndPos(syntax.Unparen(call.Fun))))
 	return span{start, rparen + 1}
 }
 
-// lowerTuples rewrites every tuple form of one file.
 func (fl *fileLower) lowerTuples() {
 	fl.lowerTupleTypes()
 	syntax.Inspect(fl.file, func(n syntax.Node) bool {
@@ -75,8 +56,6 @@ func (fl *fileLower) lowerTuples() {
 	fl.flushTypeImports()
 }
 
-// lowerTupleDeclList lowers tuple forms in declarations, splicing
-// pack hoists in place.
 func (fl *fileLower) lowerTupleDeclList(decls []syntax.Decl) []syntax.Decl {
 	var out []syntax.Decl
 	for _, decl := range decls {
@@ -95,8 +74,6 @@ func (fl *fileLower) lowerTupleDeclList(decls []syntax.Decl) []syntax.Decl {
 	return out
 }
 
-// lowerTuplePackDecl lowers pack shapes in one var declaration,
-// returning the replacement declarations.
 func (fl *fileLower) lowerTuplePackDecl(decl *syntax.VarDecl) []syntax.Decl {
 	if decl.Values != nil {
 		vals := syntax.UnpackListExpr(decl.Values)
@@ -112,8 +89,6 @@ func (fl *fileLower) lowerTuplePackDecl(decl *syntax.VarDecl) []syntax.Decl {
 	return []syntax.Decl{decl}
 }
 
-// lowerTuplePackValues lowers `var t T = f()` and `var t = f()` over a
-// multi-value call into a temporary declaration plus the composite.
 func (fl *fileLower) lowerTuplePackValues(decl *syntax.VarDecl, call *syntax.CallExpr) []syntax.Decl {
 	tup, ok := fl.pkg.info.TypeOf(call).(*types2.Tuple)
 	if !ok || tup.Len() < 2 || len(decl.NameList) != 1 {
@@ -146,8 +121,6 @@ func (fl *fileLower) lowerTuplePackValues(decl *syntax.VarDecl, call *syntax.Cal
 	return []syntax.Decl{hoist, decl}
 }
 
-// packDeclTypes reports the lowered names and element types for a var
-// pack target: the declared type, else the call result names and types.
 func (fl *fileLower) packDeclTypes(decl *syntax.VarDecl, tup *types2.Tuple) ([]string, []types2.Type) {
 	if decl.Type != nil {
 		if obj, ok := fl.pkg.info.Defs[decl.NameList[0]]; ok {
@@ -173,8 +146,6 @@ func (fl *fileLower) packDeclTypes(decl *syntax.VarDecl, tup *types2.Tuple) ([]s
 	return names, types
 }
 
-// lowerTupleTypes rewrites every TupleType to its struct, innermost
-// first so each eject splice composes the ones inside it through textOf.
 func (fl *fileLower) lowerTupleTypes() {
 	var types []*syntax.TupleType
 	syntax.Inspect(fl.file, func(n syntax.Node) bool {
@@ -189,9 +160,6 @@ func (fl *fileLower) lowerTupleTypes() {
 	}
 }
 
-// lowerTupleList lowers tuple statements in list, splicing replacement
-// statement lists in place, then recurses into child bodies including
-// function literals (temporary names are file-unique).
 func (fl *fileLower) lowerTupleList(list []syntax.Stmt) []syntax.Stmt {
 	var out []syntax.Stmt
 	for _, s := range list {
@@ -214,7 +182,6 @@ func (fl *fileLower) lowerTupleList(list []syntax.Stmt) []syntax.Stmt {
 	return out
 }
 
-// tupleChildLists reports the statement lists nested directly under s.
 func tupleChildLists(s syntax.Stmt) []*[]syntax.Stmt {
 	switch s := s.(type) {
 	case *syntax.BlockStmt:
@@ -245,8 +212,6 @@ func tupleChildLists(s syntax.Stmt) []*[]syntax.Stmt {
 	return nil
 }
 
-// lowerTupleNested lowers tuple expressions under s: call arguments,
-// composite elements, stray literals, and local declarations.
 func (fl *fileLower) lowerTupleNested(s syntax.Stmt) {
 	syntax.Inspect(s, func(n syntax.Node) bool {
 		switch n := n.(type) {
@@ -266,8 +231,6 @@ func (fl *fileLower) lowerTupleNested(s syntax.Stmt) {
 	})
 }
 
-// lowerTupleStmt lowers tuple shapes in one statement, returning the
-// replacement list or nil to keep the statement.
 func (fl *fileLower) lowerTupleStmt(s syntax.Stmt) []syntax.Stmt {
 	switch s := s.(type) {
 	case *syntax.AssignStmt:
@@ -278,8 +241,6 @@ func (fl *fileLower) lowerTupleStmt(s syntax.Stmt) []syntax.Stmt {
 	return nil
 }
 
-// lowerTupleVarValues lowers TupleLit values of one declaration,
-// through the declared type or the literal's own type.
 func (fl *fileLower) lowerTupleVarValues(decl *syntax.VarDecl) {
 	if decl.Values == nil {
 		return
@@ -298,9 +259,6 @@ func (fl *fileLower) lowerTupleVarValues(decl *syntax.VarDecl) {
 	}
 }
 
-// tupleDeclTarget reports the declared tuple target of a var
-// declaration as lowered field names and element types, through the
-// declared variable object.
 func (fl *fileLower) tupleDeclTarget(decl *syntax.VarDecl) ([]string, []types2.Type) {
 	if decl.Type == nil || len(decl.NameList) == 0 {
 		return nil, nil
@@ -313,8 +271,6 @@ func (fl *fileLower) tupleDeclTarget(decl *syntax.VarDecl) ([]string, []types2.T
 	return nil, nil
 }
 
-// tupleTargetOfType maps a checked type to lowered tuple field names
-// and element types, or nil when it is not a tuple.
 func (fl *fileLower) tupleTargetOfType(t types2.Type) ([]string, []types2.Type) {
 	if t == nil {
 		return nil, nil
@@ -340,7 +296,6 @@ func (fl *fileLower) tupleTargetOfType(t types2.Type) ([]string, []types2.Type) 
 	return nil, nil
 }
 
-// tupleLoweredName spells the lowered field of a source element name.
 func tupleLoweredName(name string, i int) string {
 	if name == "" {
 		return fmt.Sprintf("T_%d", i)
@@ -348,7 +303,6 @@ func tupleLoweredName(name string, i int) string {
 	return "T_" + name
 }
 
-// tupleStructShaped reports whether st is the lowered tuple shape.
 func tupleStructShaped(st *types2.Struct) bool {
 	if st.NumFields() < 2 {
 		return false
@@ -362,9 +316,6 @@ func tupleStructShaped(st *types2.Struct) bool {
 	return true
 }
 
-// lowerTupleType rewrites one TupleType to its struct. Field types move
-// into the struct, keeping their checked identity; the eject text
-// composes earlier splices inside them.
 func (fl *fileLower) lowerTupleType(t *syntax.TupleType) {
 	pos := t.Pos()
 	st := &syntax.StructType{}
@@ -390,8 +341,6 @@ func (fl *fileLower) lowerTupleType(t *syntax.TupleType) {
 	replaceTupleExpr(fl.file, t, st)
 }
 
-// extendPastComma extends end past a trailing comma, its trivia, and
-// the closing paren of the tuple form.
 func extendPastComma(src []byte, end int) int {
 	i := end
 	for i < len(src) {
@@ -430,8 +379,6 @@ func extendPastComma(src []byte, end int) int {
 	return end
 }
 
-// extendParens extends [start, end) past every level of directly
-// adjacent redundant parentheses left behind by dropped groupings.
 func extendParens(src []byte, start, end int) (int, int) {
 	for {
 		s, e, ok := wrapParenPair(src, start, end)
@@ -442,9 +389,6 @@ func extendParens(src []byte, start, end int) (int, int) {
 	}
 }
 
-// wrapParenPair widens [start, end) by one directly adjacent `(` ... `)`
-// pair, blanks allowed between each paren and the span, and reports
-// whether such a pair exists.
 func wrapParenPair(src []byte, start, end int) (int, int, bool) {
 	i := start
 	for i > 0 {
@@ -473,7 +417,6 @@ func wrapParenPair(src []byte, start, end int) (int, int, bool) {
 	return i - 1, j + 1, true
 }
 
-// skipComment skips a comment at i, or reports -1.
 func skipComment(src []byte, i int) int {
 	if i+1 < len(src) && src[i+1] == '/' {
 		for i < len(src) && src[i] != '\n' {
@@ -491,18 +434,10 @@ func skipComment(src []byte, i int) int {
 	return -1
 }
 
-// replaceTupleExpr swaps the tuple node old for repl wherever the file
-// holds it directly.
 func replaceTupleExpr(root syntax.Node, old, repl syntax.Expr) {
 	replaceTupleField(reflect.ValueOf(root), reflect.ValueOf(old), reflect.ValueOf(repl))
 }
 
-// replaceTupleField swaps old for repl in interfaces, slices, and child
-// nodes reachable through f. A branch statement is a leaf: its Target
-// points to the enclosing loop, switch, or select, or to a labeled
-// statement elsewhere in the tree, so following it walks a cycle from
-// every `break` and `continue`, as syntax.Inspect notes. It holds no
-// expression, so no replacement is lost.
 func replaceTupleField(f, old, repl reflect.Value) bool {
 	switch f.Kind() {
 	case reflect.Interface:
@@ -558,7 +493,6 @@ func replaceTupleField(f, old, repl reflect.Value) bool {
 	return false
 }
 
-// lowerTupleSelect rewrites `t.x` over a tuple to `t.T_x`.
 func (fl *fileLower) lowerTupleSelect(e *syntax.SelectorExpr) {
 	base := fl.pkg.info.TypeOf(e.X)
 	if base == nil {
@@ -590,7 +524,6 @@ func (fl *fileLower) lowerTupleSelect(e *syntax.SelectorExpr) {
 	}
 }
 
-// renameTupleSel renames the selector to the lowered field.
 func (fl *fileLower) renameTupleSel(e *syntax.SelectorExpr, want string) {
 	if e.Sel.Value == want {
 		return
@@ -600,8 +533,6 @@ func (fl *fileLower) renameTupleSel(e *syntax.SelectorExpr, want string) {
 	e.Sel.Value = want
 }
 
-// lowerTupleAssignStmt lowers tuple shapes in one assignment,
-// returning the replacement list or nil to keep the statement.
 func (fl *fileLower) lowerTupleAssignStmt(s *syntax.AssignStmt) []syntax.Stmt {
 	if s.Op != syntax.Def && s.Op != 0 {
 		return nil
@@ -625,9 +556,6 @@ func (fl *fileLower) lowerTupleAssignStmt(s *syntax.AssignStmt) []syntax.Stmt {
 	return fl.lowerTupleUnpackStmt(s, lhs, r)
 }
 
-// tupleAssignTarget reports the lowered names and types for a
-// single-target tuple literal: the declared variable type, else the
-// literal's own type.
 func (fl *fileLower) tupleAssignTarget(lhs syntax.Expr, lit *syntax.TupleLit) ([]string, []types2.Type) {
 	if nm, ok := syntax.Unparen(lhs).(*syntax.Name); ok {
 		if obj, ok := fl.pkg.info.Uses[nm]; ok {
@@ -652,8 +580,6 @@ func (fl *fileLower) tupleAssignTarget(lhs syntax.Expr, lit *syntax.TupleLit) ([
 	return fl.tupleTargetOfType(fl.pkg.info.TypeOf(lit))
 }
 
-// lowerTuplePackStmt lowers `t := f()` and `t = f()` over a
-// multi-value call into temporaries plus a composite.
 func (fl *fileLower) lowerTuplePackStmt(s *syntax.AssignStmt, lhs []syntax.Expr, call *syntax.CallExpr) []syntax.Stmt {
 	tup, ok := fl.pkg.info.TypeOf(call).(*types2.Tuple)
 	if !ok || tup.Len() < 2 || len(lhs) != 1 {
@@ -692,9 +618,6 @@ func (fl *fileLower) lowerTuplePackStmt(s *syntax.AssignStmt, lhs []syntax.Expr,
 	return []syntax.Stmt{hoist, s}
 }
 
-// packTargetTypes reports the lowered names and element types for a
-// pack target: the declared variable type, else the call result names
-// and types. The blank identifier stays an upstream mismatch.
 func (fl *fileLower) packTargetTypes(lhs syntax.Expr, tup *types2.Tuple) ([]string, []types2.Type) {
 	if nm, ok := syntax.Unparen(lhs).(*syntax.Name); ok {
 		if nm.Value == "_" {
@@ -726,9 +649,6 @@ func (fl *fileLower) packTargetTypes(lhs syntax.Expr, tup *types2.Tuple) ([]stri
 	return names, types
 }
 
-// lowerTupleUnpackStmt lowers `a, b := t` and `a, b = t` over a single
-// tuple value into field accesses, binding non-trivial sources once. A
-// literal unpacks to its elements directly.
 func (fl *fileLower) lowerTupleUnpackStmt(s *syntax.AssignStmt, lhs []syntax.Expr, r syntax.Expr) []syntax.Stmt {
 	if lit, ok := r.(*syntax.TupleLit); ok {
 		if len(lit.Elems) != len(lhs) {
@@ -788,9 +708,6 @@ func (fl *fileLower) lowerTupleUnpackStmt(s *syntax.AssignStmt, lhs []syntax.Exp
 	return []syntax.Stmt{hoist, s}
 }
 
-// lowerTupleReturnStmt lowers `return t` and `return (1, 2)` over a
-// single tuple into field reads, hoisting non-trivial sources. A
-// literal returns its elements directly.
 func (fl *fileLower) lowerTupleReturnStmt(s *syntax.ReturnStmt) []syntax.Stmt {
 	results := syntax.UnpackListExpr(s.Results)
 	if len(results) != 1 {
@@ -845,7 +762,6 @@ func (fl *fileLower) lowerTupleReturnStmt(s *syntax.ReturnStmt) []syntax.Stmt {
 	return []syntax.Stmt{hoist, s}
 }
 
-// lowerTupleCallArgs lowers TupleLit arguments through parameter types.
 func (fl *fileLower) lowerTupleCallArgs(call *syntax.CallExpr) {
 	var targets []types2.Type
 	if sig := fl.callSig(call); sig != nil {
@@ -865,8 +781,6 @@ func (fl *fileLower) lowerTupleCallArgs(call *syntax.CallExpr) {
 	}
 }
 
-// lowerTupleCompositeElems lowers TupleLit elements through the
-// composite element, key, or field types.
 func (fl *fileLower) lowerTupleCompositeElems(comp *syntax.CompositeLit) {
 	ct := fl.pkg.info.TypeOf(comp)
 	lower := func(e syntax.Expr, names []string, types []types2.Type) {
@@ -927,7 +841,6 @@ func (fl *fileLower) lowerTupleCompositeElems(comp *syntax.CompositeLit) {
 	}
 }
 
-// bareTupleValue unwraps a key-value element to its value.
 func bareTupleValue(e syntax.Expr) syntax.Expr {
 	if kv, ok := e.(*syntax.KeyValueExpr); ok {
 		return kv.Value
@@ -935,7 +848,6 @@ func bareTupleValue(e syntax.Expr) syntax.Expr {
 	return e
 }
 
-// tupleStructField reports the type of the struct field name.
 func tupleStructField(st *types2.Struct, name string) types2.Type {
 	for i := range st.NumFields() {
 		if st.Field(i).Name() == name {
@@ -945,14 +857,11 @@ func tupleStructField(st *types2.Struct, name string) types2.Type {
 	return nil
 }
 
-// lowerTupleLitOwn lowers a TupleLit through its own type.
 func (fl *fileLower) lowerTupleLitOwn(lit *syntax.TupleLit) {
 	names, types := fl.tupleTargetOfType(fl.pkg.info.TypeOf(lit))
 	fl.lowerTupleLitTargeted(lit, names, types)
 }
 
-// lowerTupleLitTargeted lowers lit to a composite of the struct spelled
-// by names and types, defaulting to the literal's own type.
 func (fl *fileLower) lowerTupleLitTargeted(lit *syntax.TupleLit, names []string, types []types2.Type) {
 	if names == nil {
 		names, types = fl.tupleTargetOfType(fl.pkg.info.TypeOf(lit))
@@ -980,8 +889,6 @@ func (fl *fileLower) lowerTupleLitTargeted(lit *syntax.TupleLit, names []string,
 	replaceTupleExpr(fl.file, lit, comp)
 }
 
-// lowerTupleNestedExprTargeted lowers tuple forms under e, spelling
-// nested literals through their element targets.
 func (fl *fileLower) lowerTupleNestedExprTargeted(e syntax.Expr, names []string, types []types2.Type) {
 	switch e := syntax.Unparen(e).(type) {
 	case *syntax.TupleLit:
@@ -993,8 +900,6 @@ func (fl *fileLower) lowerTupleNestedExprTargeted(e syntax.Expr, names []string,
 	}
 }
 
-// tupleComposite builds the composite literal and its text for names
-// and types over vals with precomputed texts.
 func (fl *fileLower) tupleComposite(pos syntax.Pos, names []string, types []types2.Type, vals []syntax.Expr, texts []otext) (*syntax.CompositeLit, otext) {
 	st, structText := fl.spellTupleStruct(pos, names, types)
 	comp := &syntax.CompositeLit{Type: st, Rbrace: pos}
@@ -1003,9 +908,6 @@ func (fl *fileLower) tupleComposite(pos syntax.Pos, names []string, types []type
 	return comp, cat(gen(structText+"{"), joinO(texts, ", "), gen("}"))
 }
 
-// spellTupleStruct spells `struct{ T0 ...; ... }` for names and types
-// and parses it back. It stops the compiler when a type has no Go
-// spelling, like the neighboring spell helpers.
 func (fl *fileLower) spellTupleStruct(pos syntax.Pos, names []string, types []types2.Type) (syntax.Expr, string) {
 	var text strings.Builder
 	text.WriteString("struct{ ")

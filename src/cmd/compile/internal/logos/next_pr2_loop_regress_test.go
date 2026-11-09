@@ -8,9 +8,6 @@ import (
 	"testing"
 )
 
-// TestNextLoopEmptyAndReceiverStayTasks pins PR2 VV2n (non-nil empty
-// must not become a nil-yielding map) and PR2 YBr_ (a call that can
-// rebind the receiver must not migrate). Local pure calls still edit.
 func TestNextLoopEmptyAndReceiverStayTasks(t *testing.T) {
 	imp := newTestImporter(t)
 	scan := func(t *testing.T, body string) (int, int) {

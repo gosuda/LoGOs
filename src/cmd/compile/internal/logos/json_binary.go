@@ -12,8 +12,6 @@ import (
 	"cmd/compile/internal/types2"
 )
 
-// lowerStaticBinary emits binary methods only when every JSON-visible field
-// has a representation defined by M11-S3.
 func (fl *fileLower) lowerStaticBinary(_ *syntax.TypeDecl, named *types2.Named, js *jsonStruct, out *strings.Builder) {
 	if !types2.LogosBinaryTypeOK(named) {
 		return
@@ -144,18 +142,7 @@ func (g *binaryGenerator) codec(t types2.Type) (int, bool) {
 				d("n, used := _logos_bbinary.Uvarint(src[*off:]); if used <= 0 { %s }; *off += used; if n > uint64(len(src)-*off) { %s }; cap64 := min(n, uint64(len(src)-*off)/2, (1<<20)); *v = append(make(%s, 0, int(cap64)), src[*off:*off+int(n)]...); *off += int(n)", fail, fail, name)
 				break
 			}
-		if g.isZeroWire(x.Elem()) {
-				// Zero-wire elements encode zero bytes, so remaining input
-				// gives no lawful bound (SPEC Sec 10.3). Cap the count itself
-				// at the 1 MiB prealloc bound (unit 1) and additionally cap
-				// the single-allocation byte total (count times element size)
-				// at 64 MiB, so a tiny header cannot drive an arbitrarily large
-				// make through fat ignored-field storage while a 1M ZeroPad
-				// (8 MiB) stays lawful; each field is checked on its own, so
-				// sums across fields are never rejected. Reject beyond either
-				// cap with a count-out-of-range error, encoder symmetric, in
-				// constant time without per-element iteration. Accepted wire
-				// bytes are unchanged.
+			if g.isZeroWire(x.Elem()) {
 				elemType, ok := g.fl.spellLowered(x.Elem())
 				if !ok {
 					return 0, false
@@ -217,12 +204,6 @@ func (g *binaryGenerator) codec(t types2.Type) (int, bool) {
 	return id, true
 }
 
-// isZeroWire reports whether values of t encode to zero wire bytes under
-// the actual binary format: basics, pointers, options, slices, maps, and
-// arrays are nonzero because each carries at least a presence bit, count
-// header, or scalar payload; a struct is zero-wire only when every
-// JSON-visible field is itself zero-wire, which includes the vacuously
-// empty ignored-only struct.
 func (g *binaryGenerator) isZeroWire(t types2.Type) bool {
 	return g.zeroWire(types2.Unalias(t), make(map[types2.Type]bool))
 }
@@ -273,8 +254,6 @@ func (g *binaryGenerator) zeroWire(t types2.Type, seen map[types2.Type]bool) boo
 	}
 }
 
-// binaryImportTable lists the marker, alias, and path of every package the
-// generated binary helpers can reference.
 var binaryImportTable = []struct{ marker, alias, path string }{
 	{"_logos_bfmt.", "_logos_bfmt", "fmt"},
 	{"_logos_bbinary.", "_logos_bbinary", "encoding/binary"},
@@ -283,7 +262,6 @@ var binaryImportTable = []struct{ marker, alias, path string }{
 	{"_logos_bslices.", "_logos_bslices", "slices"},
 }
 
-// binaryImports supplies just the packages referenced by generated helpers.
 func (fl *fileLower) binaryImports(pos syntax.Pos) []*syntax.ImportDecl {
 	var out []*syntax.ImportDecl
 	for _, item := range binaryImportTable {

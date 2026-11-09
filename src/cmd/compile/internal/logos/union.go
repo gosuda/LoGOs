@@ -16,27 +16,6 @@ import (
 	"cmd/compile/internal/types2"
 )
 
-// This file lowers the M2 nodes (SPEC Sec 2.3, T-203.1 and T-203.3):
-//
-//   - a switch expression becomes an immediately invoked function
-//     literal whose switch statement returns the chosen arm, and
-//   - the inline assertions of `type S struct : I, J { ... }` become one
-//     `var _ I = (*S)(nil)` declaration each after the type declaration.
-//
-// A closed union itself needs no lowering: it is an interface whose type
-// set the unified IR reader folds, so the run-time representation is the
-// upstream interface. The recheck of the lowered tree accepts the unions
-// that remain in value positions through Config.LogosUnions.
-//
-// Every rewrite builds the native tree and the eject text together. The
-// eject text uses small splices (an insertion before `switch`, one
-// replacement per `=>`, an insertion after the closing brace) instead of
-// one replacement of the whole expression, so the splices of nested
-// constructs inside an arm stay valid beside them.
-
-// lowerUnions rewrites every switch expression and asserted struct of the
-// file. It runs before the statement lowering, which then sees ordinary Go
-// where these nodes stood.
 func (fl *fileLower) lowerUnions() {
 	syntax.Inspect(fl.file, func(n syntax.Node) bool {
 		switch n := n.(type) {
@@ -53,10 +32,6 @@ func (fl *fileLower) lowerUnions() {
 	fl.lowerUnionMembers()
 }
 
-// replaceSwitchExprs replaces each *syntax.SwitchExpr that n holds
-// directly, as a field or as an element of a list field, with repl of it.
-// The caller walks n's children after the call, so it reaches the
-// replacement and everything the replacement carries.
 func replaceSwitchExprs(n syntax.Node, repl func(*syntax.SwitchExpr) syntax.Expr) {
 	v := reflect.ValueOf(n)
 	if v.Kind() != reflect.Pointer || v.IsNil() {
@@ -74,8 +49,6 @@ func replaceSwitchExprs(n syntax.Node, repl func(*syntax.SwitchExpr) syntax.Expr
 	}
 }
 
-// replaceSwitchField replaces a *syntax.SwitchExpr held by the interface
-// value f, or by an element of the slice or array f.
 func replaceSwitchField(f reflect.Value, repl func(*syntax.SwitchExpr) syntax.Expr) {
 	switch f.Kind() {
 	case reflect.Interface:
@@ -92,14 +65,6 @@ func replaceSwitchField(f reflect.Value, repl func(*syntax.SwitchExpr) syntax.Ex
 	}
 }
 
-// lowerSwitchExpr lowers one switch expression to
-//
-//	func() T { switch ... { case ...: return arm; ... }; panic(...) }()
-//
-// where T is the checked common type of the arms. The panic follows the
-// switch only when no default arm ends it: a type switch expression may
-// be exhaustive over a union and nil without one, and run-time stores
-// that bypass the type system can still reach the end.
 func (fl *fileLower) lowerSwitchExpr(e *syntax.SwitchExpr) syntax.Expr {
 	pos := e.Pos()
 	typ := fl.pkg.info.TypeOf(e)
@@ -128,9 +93,6 @@ func (fl *fileLower) lowerSwitchExpr(e *syntax.SwitchExpr) syntax.Expr {
 		}, arm.Pos()))
 	}
 	body := []syntax.Stmt{
-		// Init is guaranteed try-free: the checker rejects `?` in a
-		// switch-expression init, since this literal has no error
-		// result to propagate to.
 		at(&syntax.SwitchStmt{Init: e.Init, Tag: e.Tag, Body: clauses, Rbrace: e.Rbrace}, pos),
 	}
 	unreachable := fmt.Sprintf("%q", fmt.Sprintf("logos: switch expression at %s:%d matched no arm", fl.baseName, pos.Line()))
@@ -150,7 +112,6 @@ func (fl *fileLower) lowerSwitchExpr(e *syntax.SwitchExpr) syntax.Expr {
 	return callOf(pos, lit, nil)
 }
 
-// hasDefaultArm reports whether e has a default arm.
 func hasDefaultArm(e *syntax.SwitchExpr) bool {
 	for _, arm := range e.Arms {
 		if arm.Cases == nil {
@@ -160,16 +121,6 @@ func hasDefaultArm(e *syntax.SwitchExpr) bool {
 	return false
 }
 
-// spliceSwitchExpr records the eject edits of one switch expression: the
-// `switch` keyword gains the function literal head, each `=>` becomes
-// `: return` (the span up to the result when a line break separates
-// them, because `return` ends its line), and the final brace gains the
-// closing of the literal. Every edit replaces a token instead of
-// inserting beside one, so an enclosing edit that spans the whole
-// expression absorbs all of them, also when it starts at `switch` or ends
-// at the brace. A bound arm opens its block at `=>` and closes it before
-// the next arm, or before the final brace when it is the last arm. A
-// dropped arm is deleted, from its `case` to the next arm or the brace.
 func (fl *fileLower) spliceSwitchExpr(e *syntax.SwitchExpr, text, unreachable string, results []siteResult) {
 	head := fl.off(e.Pos())
 	fl.add(head, head+len("switch"), "func() "+text+" { switch")
@@ -216,8 +167,6 @@ func (fl *fileLower) spliceSwitchExpr(e *syntax.SwitchExpr, text, unreachable st
 	fl.add(brace, brace+1, closing)
 }
 
-// firstTokenStart returns the offset of the first token at or after from
-// that is neither a comment nor an automatic semicolon, or the end of src.
 func firstTokenStart(src []byte, from int) int {
 	start := len(src)
 	scanSegment(src, from, len(src), func(t tok) bool {
@@ -230,9 +179,6 @@ func firstTokenStart(src []byte, from int) int {
 	return start
 }
 
-// importNames maps each package the file imports to the name that denotes
-// it in the file; a dot import maps to the empty name. Blank imports
-// denote nothing and stay out.
 func (fl *fileLower) importNames() map[*types2.Package]string {
 	if fl.names != nil {
 		return fl.names
@@ -263,14 +209,6 @@ func (fl *fileLower) importNames() map[*types2.Package]string {
 	return fl.names
 }
 
-// spellType renders typ as Go source in this file: names of the package
-// itself stand bare, and names from other packages always use a
-// synthesized import (see synthQualifier) recorded for flushTypeImports.
-// The qualifier is always fresh because the file's own import name may be
-// shadowed by a local at the switch site (or be a dot import with no name
-// at all), while a reserved qualifier resolves everywhere. It reports
-// false only when typ mentions an unexported name of another package,
-// which no import can spell.
 func (fl *fileLower) spellType(typ types2.Type) (string, bool) {
 	ok := spellableType(typ, fl.pkg.tpkg)
 	qualify := func(p *types2.Package) string {
@@ -278,23 +216,14 @@ func (fl *fileLower) spellType(typ types2.Type) (string, bool) {
 			return ""
 		}
 		if !ok {
-			// Unspellable types never reach the native tree, so their
-			// packages keep the plain name without recording an import
-			// flushTypeImports would otherwise emit unused.
 			return p.Name()
 		}
-		// packagePrefix never calls the qualifier with a nil package,
-		// so p is always a real package here.
 		return fl.synthQualifier(p)
 	}
 	text := types2.TypeString(typ, qualify)
 	return text, ok
 }
 
-// synthQualifier returns the qualifier spelling package p in this file,
-// recording a synthesized import on first use. The qualifier is a fresh
-// reserved name, so it collides with neither user identifiers (which
-// cannot use the reserved prefix) nor the file's imports.
 func (fl *fileLower) synthQualifier(p *types2.Package) string {
 	reg := fl.getGenImports()
 	reg.pkgs[p.Path()] = p
@@ -366,9 +295,6 @@ func isIdentChar(b byte) bool {
 	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9') || b == '_'
 }
 
-// flushTypeImports prepends one import declaration per synthesized package
-// and records the matching eject-text header edit. It runs once at the end of
-// lowerFile, filtering by liveness across native AST and eject text.
 func (fl *fileLower) flushTypeImports() {
 	reg := fl.genImps
 	if reg == nil || len(reg.order) == 0 {
@@ -438,39 +364,10 @@ func (fl *fileLower) flushTypeImports() {
 	}
 }
 
-// ownedTypeBridge delegates private-type spelling to UnifiedMapAdapters
-// (logos/ownedconstant.go). It is nil until that file registers. On a hit
-// it returns the ready-built native type node and the eject spelling for
-// t: native is a syntax node over exact compiler-owned registrations
-// (fresh recheck types, never a private name in package Scope and never
-// a reparsed text), eject names the copied-output alias. Callers use the
-// native node directly in the native tree and eject for add() text, in
-// the single source-order walk; no second map pass or skip flags. The
-// bridge records its own native/eject imports and sidecar requests; this
-// file records no synthQualifier on a bridge hit. A nil bridge or a miss
-// falls back to the historical spell paths, preserving generics and
-// aliases. Exact-node registration and sidecar transport live in
-// ownedconstant.go, not here.
 var ownedTypeBridge func(fl *fileLower, t types2.Type, pos syntax.Pos) (native syntax.Expr, eject string, ok bool)
 
-// ownedFieldBridge builds compiler-owned private field access for the
-// exact node e. Only exactly registered nodes pass; source-spelling
-// prefix match is not authority. Callers must pass the original
-// *syntax.OptSelectExpr, never a synthetic rebuild, plus the caller's
-// default native access and eject suffix for its receiver shape. On a hit
-// it returns the ready-built native access expression (exact registered
-// nodes the fresh recheck accepts) and the eject suffix spelling
-// (copied-output alias) separately: the native tree must never use source
-// spelling for a private member, or recheck rejects it. Nil until
-// ownedconstant.go registers; a nil bridge or a miss means no private
-// access.
 var ownedFieldBridge func(fl *fileLower, e *syntax.OptSelectExpr, defNative syntax.Expr, defEject string) (nativeAcc syntax.Expr, ejectSuffix string, ok bool)
 
-// spellTypeBoth spells typ for the two roots. A bridge hit returns the
-// adapter's native node plus eject spelling; otherwise native is the
-// historical spelling reparsed at pos and eject is that same spelling.
-// Callers must use native directly in the native tree and eject for
-// splice text (ejected source).
 func (fl *fileLower) spellTypeBoth(typ types2.Type, pos syntax.Pos) (native syntax.Expr, eject string, ok bool) {
 	if ownedTypeBridge != nil {
 		if n, e, ok := ownedTypeBridge(fl, typ, pos); ok {
@@ -488,11 +385,6 @@ func (fl *fileLower) spellTypeBoth(typ types2.Type, pos syntax.Pos) (native synt
 	return n, s, true
 }
 
-// spellableType reports whether typ can be spelled in generated source:
-// every package-level name it mentions is either declared in self
-// (spelled bare) or exported (spelled through an import, synthesized if
-// needed). Basic keywords cannot be shadowed in a type position, and type
-// parameters spell bare.
 func spellableType(typ types2.Type, self *types2.Package) bool {
 	seen := make(map[types2.Type]bool)
 	var walk func(t types2.Type) bool
@@ -513,8 +405,6 @@ func spellableType(typ types2.Type, self *types2.Package) bool {
 		case *types2.Basic, *types2.TypeParam:
 			return true
 		case *types2.Alias:
-			// The alias name and its arguments are what the text spells;
-			// the expansion never appears, so only they matter.
 			if obj := t.Obj(); obj != nil && !spellableObject(obj, self) {
 				return false
 			}
@@ -578,16 +468,11 @@ func spellableType(typ types2.Type, self *types2.Package) bool {
 	return walk(typ)
 }
 
-// spellableObject reports whether the package-level name obj can be
-// spelled in generated source: universe and own-package names stand bare,
-// other packages' names need an export.
 func spellableObject(obj *types2.TypeName, self *types2.Package) bool {
 	pkg := obj.Pkg()
 	return pkg == nil || pkg == self || obj.Exported()
 }
 
-// typeExprAt parses text as a type and moves every node of the result to
-// pos. It reports false when text is not a type.
 func typeExprAt(text string, pos syntax.Pos) (syntax.Expr, bool) {
 	typ, ok := reparseType(text)
 	if !ok {
@@ -602,9 +487,6 @@ func typeExprAt(text string, pos syntax.Pos) (syntax.Expr, bool) {
 	return typ, true
 }
 
-// lowerAssertedDecls unwraps every asserted struct of list and adds the
-// assertion declarations after the type declaration, or after its group.
-// It returns the declarations to use in place of list.
 func (fl *fileLower) lowerAssertedDecls(list []syntax.Decl) []syntax.Decl {
 	out := make([]syntax.Decl, 0, len(list))
 	for _, decl := range list {
@@ -623,9 +505,6 @@ func (fl *fileLower) lowerAssertedDecls(list []syntax.Decl) []syntax.Decl {
 	return out
 }
 
-// lowerAsserts builds `var _ I = (*S)(nil)` for each assertion of the
-// declaration td and records the eject edits: the assertion list leaves
-// the struct header, and the declarations follow the type declaration.
 func (fl *fileLower) lowerAsserts(td *syntax.TypeDecl, asserted *syntax.AssertedStruct) []syntax.Decl {
 	pos := td.Pos()
 	name := td.Name.Value
@@ -650,8 +529,6 @@ func (fl *fileLower) lowerAsserts(td *syntax.TypeDecl, asserted *syntax.Asserted
 	return decls
 }
 
-// groupEnd returns the offset just past the parenthesis that closes the
-// declaration group which holds the declaration starting at from.
 func groupEnd(src []byte, from int) int {
 	end := len(src)
 	depth := 0
@@ -676,60 +553,31 @@ func groupEnd(src []byte, from int) int {
 	return end
 }
 
-// M2-S4: lowering of assertions to unions (SPEC Sec 2.3, T-203.1).
-//
-// A union value is an upstream interface at run time, so a plain type
-// switch or assertion against a methodless union would match or succeed
-// for every dynamic type. The lowering restores membership checking:
-//
-//   - per union used in an assertion or case position, one helper triple:
-//     func _logos_is_U(v any) bool,
-//     func _logos_assert_U(x any) U, and
-//     func _logos_assert2_U(x any) (U, bool);
-//   - x.(U) becomes _logos_assert_U(x),
-//     v, ok := x.(U) becomes v, ok := _logos_assert2_U(x), and
-//   - case U: becomes case <members>: with v := v.(U) first in the clause.
-//
-// The helpers are emitted once per package: Lower visits the files of a
-// package in order, and the first file that names a union carries its
-// declarations. Every rewrite builds the native tree and the eject text
-// together, like the switch-expression lowering above.
-
-// unionUse is one closed union named in an assertion or case position.
 type unionUse struct {
-	suffix  string        // helper-name suffix, unique per package
-	union   string        // Union field: "<pkg>.<name>"
-	members []types2.Type // direct members in declaration order
-	texts   []string      // eject spellings of members, aligned with members
-	utext   string        // eject spelling of the union type
-	nnodes  []syntax.Expr // native member type nodes, aligned with members
-	nnode   syntax.Expr   // native union type node
+	suffix  string
+	union   string
+	members []types2.Type
+	texts   []string
+	utext   string
+	nnodes  []syntax.Expr
+	nnode   syntax.Expr
 }
 
-// isName returns the membership-test helper name of u.
 func (u *unionUse) isName() string     { return "_logos_is_" + u.suffix }
 func (u *unionUse) assertName() string { return "_logos_assert_" + u.suffix }
 func (u *unionUse) assert2Name() string {
 	return "_logos_assert2_" + u.suffix
 }
 
-// unionPkgState tracks the unions one package already emitted helpers for.
 type unionPkgState struct {
 	byKey map[string]*unionUse
 	names map[string]bool
 }
 
-// logosUnionPkgs records the helper suffixes emitted per package under
-// lowering.
 var logosUnionPkgs = make(map[*types2.Package]*unionPkgState)
 
-// logosUnionUses holds, per file under lowering, the unions first named
-// there; the file emits their helpers. lowerUnionMembers drains it.
 var logosUnionUses = make(map[*syntax.File][]*unionUse)
 
-// lowerUnionMembers lowers union assertions and union case types of one
-// file, then emits the helpers of the unions the file introduced. Helpers
-// come last, so no walk ever visits generated declarations.
 func (fl *fileLower) lowerUnionMembers() {
 	fl.lowerUnionAsserts()
 	fl.lowerUnionCases()
@@ -740,10 +588,6 @@ func (fl *fileLower) lowerUnionMembers() {
 	}
 }
 
-// unionTerms returns the direct members of t in declaration order when t
-// is a union of non-~ terms, and reports false otherwise. Members that
-// are themselves unions stay whole: a plain case naming them matches
-// their members at run time.
 func unionTerms(t types2.Type) ([]types2.Type, bool) {
 	if t == nil {
 		return nil, false
@@ -772,8 +616,6 @@ func unionTerms(t types2.Type) ([]types2.Type, bool) {
 	return out, true
 }
 
-// mentionsTypeParam reports whether t mentions a type parameter. The
-// package-level helpers cannot name one, so such unions are not lowered.
 func mentionsTypeParam(t types2.Type) bool {
 	seen := make(map[types2.Type]bool)
 	var walk func(t types2.Type) bool
@@ -861,7 +703,6 @@ func mentionsTypeParam(t types2.Type) bool {
 	return walk(t)
 }
 
-// sanitizeUnionName maps arbitrary text to a helper-name suffix.
 func sanitizeUnionName(text string) string {
 	var b strings.Builder
 	for _, r := range text {
@@ -877,8 +718,6 @@ func sanitizeUnionName(text string) string {
 	return b.String()
 }
 
-// useOf returns the unionUse for t, registering it for helper emission.
-// It returns nil when t is not a lowerable closed union.
 func (fl *fileLower) useOf(t types2.Type, pos syntax.Pos) *unionUse {
 	if t == nil {
 		return nil
@@ -944,9 +783,6 @@ func (fl *fileLower) useOf(t types2.Type, pos syntax.Pos) *unionUse {
 	return u
 }
 
-// mustTypeExprAt parses text as a type at pos, stopping compilation on
-// failure. Eject alias spellings always parse; a failure is a diagnostic,
-// never a guessed type.
 func mustTypeExprAt(fl *fileLower, text string, pos syntax.Pos) syntax.Expr {
 	e, ok := typeExprAt(text, pos)
 	if !ok {
@@ -955,7 +791,6 @@ func mustTypeExprAt(fl *fileLower, text string, pos syntax.Pos) syntax.Expr {
 	return e
 }
 
-// mustTypeExprsAt parses each spelling of texts as a type at pos.
 func mustTypeExprsAt(fl *fileLower, texts []string, pos syntax.Pos) []syntax.Expr {
 	out := make([]syntax.Expr, len(texts))
 	for i, text := range texts {
@@ -964,19 +799,9 @@ func mustTypeExprsAt(fl *fileLower, texts []string, pos syntax.Pos) []syntax.Exp
 	return out
 }
 
-// emitHelpers appends the helper triple of u to the file, in the native
-// tree and the eject text.
 func (fl *fileLower) emitHelpers(u *unionUse) {
 	pos := fl.file.Pos()
-	fl.needRT = true // _logos_assert_U panics with _logos_rt.UnionAssertionError
-	// Native and eject decls stay paired per helper: native decls carry
-	// the adapter's exact registered type nodes (fresh recheck types,
-	// never a reparsed private spelling), eject decls name the
-	// copied-output aliases. Both are built inline in this single pass;
-	// nothing is deferred to a later flush. Consistency across the two
-	// roots is snapshot isolation: each root renders the same helper
-	// shape from its own type nodes, and both are idempotent on revisit
-	// (helpers emit once per package).
+	fl.needRT = true
 	anyField := func(name string) *syntax.Field {
 		return at(&syntax.Field{Name: nameOf(pos, name), Type: nameOf(pos, "any")}, pos)
 	}
@@ -995,10 +820,6 @@ func (fl *fileLower) emitHelpers(u *unionUse) {
 			return at(&syntax.AssertExpr{X: x, Type: utype}, pos)
 		}
 
-		// func _logos_is_U(v any) bool {
-		//   switch v.(type) { case <members>: return true }
-		//   return false
-		// }
 		isBody := []syntax.Stmt{
 			at(&syntax.SwitchStmt{
 				Tag: at(&syntax.TypeSwitchGuard{X: nameOf(pos, "v")}, pos),
@@ -1014,12 +835,6 @@ func (fl *fileLower) emitHelpers(u *unionUse) {
 		isFn := decl(u.isName(), []*syntax.Field{anyField("v")},
 			[]*syntax.Field{at(&syntax.Field{Type: nameOf(pos, "bool")}, pos)}, isBody)
 
-		// func _logos_assert_U(x any) U {
-		//   if !_logos_is_U(x) {
-		//     panic(&_logos_rt.UnionAssertionError{Value: x, Union: "<pkg>.U"})
-		//   }
-		//   return x.(U)
-		// }
 		errLit := at(&syntax.CompositeLit{
 			Type: rtSel(pos, "UnionAssertionError"),
 			ElemList: []syntax.Expr{
@@ -1039,11 +854,6 @@ func (fl *fileLower) emitHelpers(u *unionUse) {
 			[]*syntax.Field{at(&syntax.Field{Type: utype}, pos)},
 			[]syntax.Stmt{check, returnOf(pos, []syntax.Expr{unionAssert(nameOf(pos, "x"))})})
 
-		// func _logos_assert2_U(x any) (U, bool) {
-		//   if _logos_is_U(x) { return x.(U), true }
-		//   var z U
-		//   return z, false
-		// }
 		hit := returnOf(pos, []syntax.Expr{unionAssert(nameOf(pos, "x")), nameOf(pos, "true")})
 		miss := []syntax.Stmt{
 			typedVarDecl(pos, nameOf(pos, "z"), utype),
@@ -1057,11 +867,6 @@ func (fl *fileLower) emitHelpers(u *unionUse) {
 			[]syntax.Stmt{ifOf(pos, nil, isCall(nameOf(pos, "x")), []syntax.Stmt{hit}), miss[0], miss[1]})
 		return []syntax.Decl{isFn, assertFn, assert2Fn}
 	}
-	// Linearizability across roots: one inline build per root from its
-	// own type nodes; the eject parse below is local and infallible for
-	// bridge aliases (a Fatalf on failure keeps the diagnostic, never a
-	// guessed type). No outbox or saga: both roots derive from the same
-	// in-memory helper, not from cross-service events.
 	nativeDecls := build(u.nnode, u.nnodes)
 	ejectDecls := build(mustTypeExprAt(fl, u.utext, pos), mustTypeExprsAt(fl, u.texts, pos))
 	fl.file.DeclList = append(fl.file.DeclList, nativeDecls...)
@@ -1076,7 +881,6 @@ func (fl *fileLower) emitHelpers(u *unionUse) {
 	fl.add(fl.orig, fl.orig, text.String())
 }
 
-// lowerUnionAsserts rewrites x.(U) and v, ok := x.(U) for closed unions.
 func (fl *fileLower) lowerUnionAsserts() {
 	syntax.Inspect(fl.file, func(n syntax.Node) bool {
 		switch n := n.(type) {
@@ -1090,7 +894,6 @@ func (fl *fileLower) lowerUnionAsserts() {
 	})
 }
 
-// unparenAssert unwraps parentheses around an assertion operand.
 func unparenAssert(e syntax.Expr) (*syntax.AssertExpr, bool) {
 	for {
 		p, ok := e.(*syntax.ParenExpr)
@@ -1103,8 +906,6 @@ func unparenAssert(e syntax.Expr) (*syntax.AssertExpr, bool) {
 	return a, ok
 }
 
-// commaOkTarget returns the assertion and union of value when value is a
-// single x.(U) naming a lowerable closed union.
 func (fl *fileLower) commaOkTarget(value syntax.Expr) (*syntax.AssertExpr, *unionUse) {
 	a, ok := unparenAssert(value)
 	if !ok {
@@ -1117,7 +918,6 @@ func (fl *fileLower) commaOkTarget(value syntax.Expr) (*syntax.AssertExpr, *unio
 	return a, u
 }
 
-// lowerCommaOkAssign rewrites v, ok := x.(U) to v, ok := _logos_assert2_U(x).
 func (fl *fileLower) lowerCommaOkAssign(s *syntax.AssignStmt) {
 	if s.Rhs == nil {
 		return
@@ -1130,7 +930,6 @@ func (fl *fileLower) lowerCommaOkAssign(s *syntax.AssignStmt) {
 	}
 }
 
-// lowerCommaOkVar rewrites var v, ok = x.(U) to var v, ok = _logos_assert2_U(x).
 func (fl *fileLower) lowerCommaOkVar(d *syntax.VarDecl) {
 	if len(d.NameList) != 2 || d.Values == nil {
 		return
@@ -1140,8 +939,6 @@ func (fl *fileLower) lowerCommaOkVar(d *syntax.VarDecl) {
 	}
 }
 
-// lowerSingleAssert rewrites x.(U) to _logos_assert_U(x), or returns nil
-// when the assertion does not target a lowerable closed union.
 func (fl *fileLower) lowerSingleAssert(a *syntax.AssertExpr) syntax.Expr {
 	u := fl.useOf(fl.pkg.info.TypeOf(a.Type), a.Pos())
 	if u == nil {
@@ -1150,8 +947,6 @@ func (fl *fileLower) lowerSingleAssert(a *syntax.AssertExpr) syntax.Expr {
 	return fl.assertCall(a, u.assertName())
 }
 
-// assertCall builds name(x) and records the eject splices turning the
-// source x.(U) into that call: the operand text stays verbatim.
 func (fl *fileLower) assertCall(a *syntax.AssertExpr, name string) syntax.Expr {
 	pos := a.Pos()
 	xStart := fl.off(a.X.Pos())
@@ -1164,9 +959,6 @@ func (fl *fileLower) assertCall(a *syntax.AssertExpr, name string) syntax.Expr {
 	return callOf(pos, nameOf(pos, name), []syntax.Expr{a.X})
 }
 
-// splitAssert locates the `.(T)` of the assertion whose operand starts at
-// xStart: the dot starting it and the end of the type. A chained
-// assertion x.(A).(B) reports the outer span. Brackets of any kind nest.
 func splitAssert(src []byte, xStart int) (dot, end int, ok bool) {
 	var toks []tok
 	scanSegment(src, xStart, len(src), func(t tok) bool {
@@ -1193,9 +985,6 @@ func splitAssert(src []byte, xStart int) (dot, end int, ok bool) {
 			}
 			dot, end = d, e
 			i = next
-			// A chained assertion follows the close with `.(`
-			// and nothing between; anything else ends the span.
-			// Step back so the loop lands on the period again.
 			if i+1 < len(toks) && toks[i].kind == token.PERIOD && toks[i+1].kind == token.LPAREN {
 				i--
 				continue
@@ -1206,9 +995,6 @@ func splitAssert(src []byte, xStart int) (dot, end int, ok bool) {
 	return 0, 0, false
 }
 
-// matchAssertParen matches the parenthesis opened by the assertion dot at
-// toks[i].(toks[i+1], returning the dot, the end of the close, and the
-// index after it.
 func matchAssertParen(toks []tok, i int) (dot, end, next int, ok bool) {
 	depth := 0
 	for j := i + 1; j < len(toks); j++ {
@@ -1225,9 +1011,6 @@ func matchAssertParen(toks []tok, i int) (dot, end, next int, ok bool) {
 	return 0, 0, 0, false
 }
 
-// replaceUnionAssertExprs replaces each *syntax.AssertExpr that n holds
-// directly, as a field or as an element of a list field, with repl of it.
-// A nil result leaves the assertion in place.
 func replaceUnionAssertExprs(n syntax.Node, repl func(*syntax.AssertExpr) syntax.Expr) {
 	v := reflect.ValueOf(n)
 	if v.Kind() != reflect.Pointer || v.IsNil() {
@@ -1245,8 +1028,6 @@ func replaceUnionAssertExprs(n syntax.Node, repl func(*syntax.AssertExpr) syntax
 	}
 }
 
-// replaceUnionAssertField replaces a *syntax.AssertExpr held by the
-// interface value f, or by an element of the slice or array f.
 func replaceUnionAssertField(f reflect.Value, repl func(*syntax.AssertExpr) syntax.Expr) {
 	switch f.Kind() {
 	case reflect.Interface:
@@ -1265,24 +1046,15 @@ func replaceUnionAssertField(f reflect.Value, repl func(*syntax.AssertExpr) synt
 	}
 }
 
-// unionBind binds a type-switch guard variable to a closed union inside
-// one clause or arm. The guard already declares name in the clause scope,
-// so the rebind opens a nested block; a := in the clause itself would
-// declare nothing.
 type unionBind struct {
 	name string
 	use  *unionUse
 }
 
-// open returns the text that opens the block of the binding. The block
-// starts with the rebind and a read of the variable, so the unused-variable
-// check never fires on it.
 func (b *unionBind) open() string {
 	return "{ " + b.name + " := " + b.use.assertName() + "(" + b.name + "); _ = " + b.name + ";"
 }
 
-// stmts returns the native statements of the binding at pos, in the order
-// open spells them.
 func (b *unionBind) stmts(pos syntax.Pos) []syntax.Stmt {
 	call := callOf(pos, nameOf(pos, b.use.assertName()), []syntax.Expr{nameOf(pos, b.name)})
 	return []syntax.Stmt{
@@ -1291,15 +1063,11 @@ func (b *unionBind) stmts(pos syntax.Pos) []syntax.Stmt {
 	}
 }
 
-// caseSite is one case list of a type switch: the list of a clause or of
-// an arm, with the token that ends it. cases is nil for a default.
 type caseSite struct {
 	cases syntax.Expr
 	colon syntax.Pos
 }
 
-// lowerUnionCases expands the union case lists of type switch statements.
-// Switch expressions are expanded when they are lowered, in expandArmCases.
 func (fl *fileLower) lowerUnionCases() {
 	syntax.Inspect(fl.file, func(n syntax.Node) bool {
 		sw, ok := n.(*syntax.SwitchStmt)
@@ -1315,10 +1083,6 @@ func (fl *fileLower) lowerUnionCases() {
 	})
 }
 
-// expandSwitchStmt expands the union clauses of one type switch statement.
-// A clause whose entries are all matched by earlier clauses is deleted. A
-// clause that binds the guard runs its body in a block that closes before
-// the next clause keyword, or before the closing brace of the switch.
 func (fl *fileLower) expandSwitchStmt(sw *syntax.SwitchStmt, guard *syntax.TypeSwitchGuard) {
 	sites := make([]caseSite, len(sw.Body))
 	for i, cc := range sw.Body {
@@ -1347,9 +1111,6 @@ func (fl *fileLower) expandSwitchStmt(sw *syntax.SwitchStmt, guard *syntax.TypeS
 	sw.Body = kept
 }
 
-// wrapClause moves the body of cc into a block that opens with the binding
-// b and closes at end, the offset of the next clause keyword or of the
-// switch's closing brace.
 func (fl *fileLower) wrapClause(cc *syntax.CaseClause, b *unionBind, end int) {
 	stmts := append(b.stmts(cc.Colon), cc.Body...)
 	cc.Body = []syntax.Stmt{blockOf(cc.Colon, stmts)}
@@ -1358,9 +1119,6 @@ func (fl *fileLower) wrapClause(cc *syntax.CaseClause, b *unionBind, end int) {
 	fl.add(end, end, "}\n")
 }
 
-// expandArmCases expands the union arms of a type switch expression before
-// the arms are lowered. It rewrites each arm's case list in place and
-// returns the decision for each arm; a value switch expression has none.
 func (fl *fileLower) expandArmCases(e *syntax.SwitchExpr) []siteResult {
 	guard, ok := e.Tag.(*syntax.TypeSwitchGuard)
 	if !ok {
@@ -1379,27 +1137,17 @@ func (fl *fileLower) expandArmCases(e *syntax.SwitchExpr) []siteResult {
 	return results
 }
 
-// siteResult is the decision for one case list of a type switch.
 type siteResult struct {
-	cases syntax.Expr // the expanded list; nil when the list keeps its text
-	bind  *unionBind  // the union the guard binds in this site; nil when none
-	drop  bool        // every entry is matched earlier: the site is deleted
+	cases syntax.Expr
+	bind  *unionBind
+	drop  bool
 }
 
-// dropSpan deletes the source text of s. Splices inside s describe text
-// that is removed, so they are discarded; zero-width splices on the
-// boundary stay, so an insertion beside the span keeps its place.
 func (fl *fileLower) dropSpan(s span) {
 	_ = fl.dropInner(s)
 	fl.add(s.start, s.end, "")
 }
 
-// expandCaseSites rewrites the case lists of one type switch, in order, and
-// returns the decision for each site. A union entry expands to its members
-// not named by an earlier site. A plain entry named by an earlier site is
-// dropped: first match wins, and a repeated case does not compile. A site
-// left with no entries is deleted. A kept `case U:` would match non-members
-// through the run-time interface, so no union entry survives as written.
 func (fl *fileLower) expandCaseSites(guard *syntax.TypeSwitchGuard, sites []caseSite) []siteResult {
 	var seen []types2.Type
 	results := make([]siteResult, len(sites))
@@ -1412,10 +1160,6 @@ func (fl *fileLower) expandCaseSites(guard *syntax.TypeSwitchGuard, sites []case
 	return results
 }
 
-// expandCaseList decides one case list; see expandCaseSites. seen collects
-// the types named so far. The binding of the guard variable exists only
-// when the list names exactly one union and no kept entry that a member
-// test cannot cover.
 func (fl *fileLower) expandCaseList(guard *syntax.TypeSwitchGuard, site caseSite, elems []syntax.Expr, seen *[]types2.Type) siteResult {
 	changed := false
 	for _, e := range elems {
@@ -1450,7 +1194,6 @@ func (fl *fileLower) expandCaseList(guard *syntax.TypeSwitchGuard, site caseSite
 		if members, ok := unionTerms(t); ok {
 			u := fl.useOf(t, e.Pos())
 			if u == nil {
-				// Not lowerable (type parameters): keep verbatim.
 				out = append(out, e)
 				texts = append(texts, text)
 				insertOK = false
@@ -1491,9 +1234,6 @@ func (fl *fileLower) expandCaseList(guard *syntax.TypeSwitchGuard, site caseSite
 		}
 	}
 	if len(out) == 0 {
-		// Every entry is matched earlier, so the site can never be the
-		// first match. Delete it rather than keep a case that could match
-		// non-members.
 		return siteResult{drop: true}
 	}
 	fl.addT(spans[0].start, spans[len(spans)-1].end, joinO(texts, ", "))
@@ -1504,7 +1244,6 @@ func (fl *fileLower) expandCaseList(guard *syntax.TypeSwitchGuard, site caseSite
 	return siteResult{cases: listOf(site.cases.Pos(), out), bind: bind}
 }
 
-// seenIn reports whether t is identical to one of the types in seen.
 func seenIn(seen []types2.Type, t types2.Type) bool {
 	for _, s := range seen {
 		if types2.Identical(s, t) {
@@ -1514,7 +1253,6 @@ func seenIn(seen []types2.Type, t types2.Type) bool {
 	return false
 }
 
-// caseElems unwraps a case list to its elements.
 func caseElems(c syntax.Expr) []syntax.Expr {
 	if l, ok := syntax.Unparen(c).(*syntax.ListExpr); ok {
 		return l.ElemList
@@ -1522,7 +1260,6 @@ func caseElems(c syntax.Expr) []syntax.Expr {
 	return []syntax.Expr{c}
 }
 
-// memberCovered reports whether t denotes a member of u.
 func memberCovered(u *unionUse, t types2.Type) bool {
 	if t == nil {
 		return false
@@ -1535,8 +1272,6 @@ func memberCovered(u *unionUse, t types2.Type) bool {
 	return false
 }
 
-// caseElemSpans splits the case list ending at colonOff into one span per
-// element, trimmed of surrounding white space.
 func caseElemSpans(src []byte, firstStart, colonOff int) []span {
 	var spans []span
 	depth := 0
