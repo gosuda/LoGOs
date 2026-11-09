@@ -21,7 +21,6 @@ The CI process MUST run `./run.bash` and MUST keep its suite green as the regres
 The `go version` output and the `go help` output, including every help topic, MUST stay the upstream text [T-0.1].
 Plain `go` MUST select improvements through flags and `GOEXPERIMENT` and MUST read no `logos.toml` [T-0.1][R-U1].
 A flag that plain `go` gains MUST stay absent from the help text, so that text stays byte-identical to upstream [T-0.1][R-U1].
-A default under plain `go` that differs from upstream MUST become the default only after `./run.bash` passes with it [T-0.1][R-U1].
 The `logos` command MUST build Go modules with Go language semantics [T-0.1].
 The `logos` command MUST apply no loGo/s type rules to Go modules [T-0.1].
 The `logos build` command MUST run no lint on Go modules [T-0.1][R-U1].
@@ -50,7 +49,7 @@ Packages from `golang.org/x` and other third-party Go modules MUST count as Go p
 Code generators SHOULD emit `.lgo` in loGo/s modules [A-CODEGEN].
 A loGo/s package MUST NOT hold a generated `.go` file except cgo outputs [A-CODEGEN].
 A generator MAY write `.go` files into a Go package that a loGo/s package imports [A-CODEGEN][R-U2].
-Project tools SHOULD use `tool` directives in `go.mod`, never a Go file in a loGo/s module [A-MODKIND][R-U3].
+Project tools SHOULD use `tool` directives in `go.mod`, never a Go file admitted to the build in a loGo/s module [A-MODKIND][R-U3].
 
 ### 0.2 No new global keywords
 The language MUST add no new global keywords [T-0.2].
@@ -1886,6 +1885,8 @@ A non-constant integer product in a `make` length or capacity MUST lower to `log
 
 - `logos lsp` MUST keep one document store keyed by source URI that holds the text, the client version, and at most one lowered snapshot per package. [T-Sec16]
 - A request on a `.lgo` document MUST use a snapshot whose versions equal the current client versions of every document of the package; the proxy MUST compute it on demand, once per version set, and concurrent requests MUST share one computation. [T-Sec16]
+- The store MUST keep the newest client version of each open document; a change that carries an older version MUST be dropped and MUST NOT reach `gopls`. [T-Sec16]
+- A frame that carries a duplicate Content-Length header MUST fail with a descriptive error. [T-Sec16]
 - The proxy MUST NOT recompile without a request or a `didSave`. [T-Sec16]
 - The lowering MUST come from one `logos list -compiled -json -overlay=<file>` run that returns, per `.lgo` file, the lowered text, the edit map, the hints JSON, and the compiler diagnostics. [T-Sec16]
 - Position translation MUST use the shared edit map package. [T-Sec16]
