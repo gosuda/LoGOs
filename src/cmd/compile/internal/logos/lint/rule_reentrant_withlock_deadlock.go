@@ -217,19 +217,27 @@ func (c *lockCheck) indexAliases(f *syntax.File) {
 			c.aliases[obj] = k
 		}
 	}
-	for changed := true; changed; {
-		changed = false
-		for obj, k := range c.aliases {
-			a, ok := c.aliases[k.root]
-			if !ok {
-				continue
-			}
-			nk := lockKey{root: a.root, path: a.path + k.path}
-			if nk != k {
-				c.aliases[obj] = nk
-				changed = true
-			}
+	for obj, k := range c.aliases {
+		if r, ok := c.resolveAliasChain(k); ok {
+			c.aliases[obj] = r
+		} else {
+			delete(c.aliases, obj)
 		}
+	}
+}
+
+func (c *lockCheck) resolveAliasChain(k lockKey) (lockKey, bool) {
+	seen := make(map[types2.Object]bool)
+	for {
+		a, ok := c.aliases[k.root]
+		if !ok {
+			return k, true
+		}
+		if seen[k.root] {
+			return lockKey{}, false
+		}
+		seen[k.root] = true
+		k = lockKey{root: a.root, path: a.path + k.path}
 	}
 }
 

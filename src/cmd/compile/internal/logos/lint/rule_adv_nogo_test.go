@@ -113,6 +113,11 @@ func TestAdvWithlockLeak(t *testing.T) {
 			[]string{"26 correctness::withlock_leak deny"},
 		},
 		{
+			"reassignedAliasReported",
+			"func p12(l *Locked[Box]) { l.WithLock(func(b *Box) { c := b; c = &Box{}; leaked = c }) }\n",
+			[]string{"26 correctness::withlock_leak deny"},
+		},
+		{
 			"derefStoreEscapes",
 			"func p5(l *Locked[Box]) { l.WithLock(func(b *Box) { *pslot = b }) }\n",
 			[]string{"26 correctness::withlock_leak deny"},
@@ -278,6 +283,11 @@ func TestAdvReentrantDeadlockLimitations(t *testing.T) {
 		{
 			"goSpawnedRelockUnreported",
 			"func d14(l *Locked[int]) { l.WithLock(func(n *int) { go func() { l.WithLock(func(m *int) { *m++ }) }() }) }\n",
+			nil,
+		},
+		{
+			"selfReferentialAliasTerminates",
+			"type Box2 struct { next *Box2 }\nfunc cyc(p **Box2, l *Locked[int]) { p = &(*p).next; l.WithLock(func(n *int) { *n++ }) }\n",
 			nil,
 		},
 	}
