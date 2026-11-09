@@ -144,6 +144,20 @@ func tildeComposite[T any](v T) {
 	}
 }
 
+func caseList[T any](v T) {
+	_ = v
+	const switch T {
+	case int, /* ERROR "const switch case takes a single type, not a list" */ string :
+	}
+}
+
+func caseDefault[T any](v T) {
+	_ = v
+	const switch T {
+	default /* ERROR "expected case or }" */ :
+	}
+}
+
 func breakInCase[T any](v T) {
 	_ = v
 	for {
