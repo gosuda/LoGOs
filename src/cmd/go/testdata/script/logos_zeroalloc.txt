@@ -48,13 +48,14 @@ cd misplaced
 stderr 'main\.lgo:3:\d+: \[perf::zeroalloc_violation\] //logos:zeroalloc must be on its own line directly above a function declaration'
 cd ..
 
-# A Go package: logos lint reports the allocation and writes no binary;
-# logos build and go build ignore the directive.
+# A Go package: logos lint and logos build report the allocation and write
+# no binary; go build, the upstream entry point, ignores the directive. The
+# build checks the directive since M9-S9 made the mark recursive under logos.
 cd gopkg
 ! logos lint ./...
 stderr 'main\.go:5:\d+: \[perf::zeroalloc_violation\] pack allocates: \[\]int\{\.\.\.\} escapes to heap: flows to result ~r0 \(return\)'
-logos build ./...
-! stderr .
+! logos build ./...
+stderr 'main\.go:5:\d+: \[perf::zeroalloc_violation\] pack allocates:'
 go build ./...
 ! stderr .
 cd ..

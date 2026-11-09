@@ -22,6 +22,7 @@ func badLock(n int) // ERROR "\[correctness::linkname_mismatch\]"
 func badWait(x int) // ERROR "\[correctness::linkname_mismatch\]"
 
 //go:linkname detached runtime.fastrand
+func detached() uint32
 
 //go:linkname notImported os.Getppid
 func notImported()

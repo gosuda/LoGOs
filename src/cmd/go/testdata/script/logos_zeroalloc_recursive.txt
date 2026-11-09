@@ -28,6 +28,7 @@ func Sum(xs []int) int {
 	return n
 }
 
+//go:noinline
 func BigAlloc(n int) []byte {
 	buf := make([]byte, n)
 	buf[0] = 1

@@ -174,7 +174,11 @@ func unmarked(v int) []int {
 
 // The recursive default (M9-S9): a marked function that calls a same-package
 // function that allocates fails, naming the callee chain, whether or not the
-// callee inlines. bigAlloc stays above the inlining budget.
+// callee inlines. viaInlined shows the inlined form: the site is attributed
+// to the call. bigAlloc is kept out of the inliner so viaBig exercises the
+// chain form: the reason names the callee that allocates.
+//
+//go:noinline
 func bigAlloc(n int) []byte {
 	buf := make([]byte, n)
 	buf[0] = 1
@@ -220,5 +224,35 @@ func viaIface(f flusher) { // ERROR "\[perf::zeroalloc_violation\] viaIface allo
 //logos:zeroalloc
 func viaValue() int { // ERROR "\[perf::zeroalloc_violation\] viaValue allocates: dynamic call may allocate"
 	return sinkFn()
+}
+
+// A call through a parameter may reach any caller, so the recursive
+// mark fails on it.
+//logos:zeroalloc
+func viaParam(f func() []int) []int { // ERROR "\[perf::zeroalloc_violation\] viaParam allocates: dynamic call may allocate"
+	return f()
+}
+
+// A local function value keeps its literal proof only until something
+// reassigns it.
+//logos:zeroalloc
+func viaReassigned() int { // ERROR "\[perf::zeroalloc_violation\] viaReassigned allocates: dynamic call may allocate"
+	f := func() int { return 7 }
+	if sinkFn != nil {
+		f = sinkFn
+	}
+	return f()
+}
+
+// The callee is declared after its caller: the call graph is built
+// before any call edge is added.
+//logos:zeroalloc
+func viaLaterCallee(n int) []int { // ERROR "\[perf::zeroalloc_violation\] viaLaterCallee allocates: laterAlloc allocates"
+	return laterAlloc(n)
+}
+
+//go:noinline
+func laterAlloc(n int) []int {
+	return make([]int, n)
 }
 
