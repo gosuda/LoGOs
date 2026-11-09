@@ -341,6 +341,9 @@ func TestLogosRegionInitClauseCloses(t *testing.T) {
 	fn.Body = ir.Nodes{ifStmt}
 	logosRegionLower(fn)
 	list := []ir.Node(fn.Body)
+	if len(ifStmt.Init()) != 1 {
+		t.Fatalf("clause close leaked into the init list: %v", ifStmt.Init())
+	}
 	if len(list) != 2 || regionCallName(list[1]) != "logosRegionClose" {
 		t.Fatalf("init clause close missing after the statement: %v", list)
 	}

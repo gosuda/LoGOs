@@ -221,7 +221,7 @@ func (p *logosRegionLowering) lowerOwned(list *ir.Nodes, own *logosRegionOwner) 
 			p.lowerPlain(st)
 		}
 	}
-	if !logosRegionListTerminates(*list) {
+	if !own.clause && !logosRegionListTerminates(*list) {
 		list.Append(own.ownCloses(p)...)
 	}
 }
@@ -432,9 +432,6 @@ func (p *logosRegionLowering) loopExitCloses(own *logosRegionOwner, mayBindCase 
 	for o := own; o != nil; o = o.parent {
 		out = append(out, o.ownCloses(p)...)
 		if o.loop || (mayBindCase && o.caseOwner) {
-			if par := o.parent; par != nil && par.clause && par.stmt == o.stmt {
-				out = append(out, par.ownCloses(p)...)
-			}
 			return out
 		}
 	}

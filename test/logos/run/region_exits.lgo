@@ -110,6 +110,28 @@ func exitInitOwner() {
 	}
 }
 
+func exitSwitchInitOwner() {
+	switch r := arena.Open(); 1 {
+	case 1:
+		p := arena.New[int](r)
+		*p = 17
+		regionExitsSink += *p
+		regionInside()
+	default:
+		panic("unreachable switch tag")
+	}
+}
+
+func exitForInitOwner() {
+	for r := arena.Open(); regionExitsSink >= 0; {
+		p := arena.New[int](r)
+		*p = 19
+		regionExitsSink += *p
+		regionInside()
+		break
+	}
+}
+
 func regionIter(yield func(int) bool) {
 	for i := 1; i <= 3; i++ {
 		if !yield(i) {
@@ -166,6 +188,10 @@ func main() {
 	fmt.Println("exit fallthrough:", rt.RegionBytes())
 	exitInitOwner()
 	fmt.Println("exit init owner:", rt.RegionBytes())
+	exitSwitchInitOwner()
+	fmt.Println("exit switch init owner:", rt.RegionBytes())
+	exitForInitOwner()
+	fmt.Println("exit for init owner:", rt.RegionBytes())
 	exitRangeFuncBreak()
 	fmt.Println("exit range-func break:", rt.RegionBytes())
 	regionRecoverPanic()
