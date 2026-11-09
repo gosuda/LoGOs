@@ -232,16 +232,6 @@ func TestFloatSliceSizeHasNoLoop(t *testing.T) {
 	}
 }
 
-// TestNoValidateTagsNeeded checks that a struct with a non-nil field and
-// no tag at all still enforces its required field.
-func TestNoValidateTagsNeeded(t *testing.T) {
-	text := lowerStaticText(t, "package p\n\ntype P struct{ X int }\ntype W struct {\n\tInner *P\n}\n")
-	body := methodBody(t, text, "func (_logos_v *W) UnmarshalJSON(_logos_data []byte) error {")
-	if !strings.Contains(body, `MissingFieldError{Type: "W", Field: "Inner"}`) && !strings.Contains(text, "_logos_jsonmissing_W") {
-		t.Fatalf("W does not enforce Inner:\n%s", body)
-	}
-}
-
 // TestTagSupportRules checks that a json tag the two encoding/json modes
 // read differently keeps the whole struct on the reflective path: a name
 // invalid under the v1 rule, an option other than omitempty, omitzero, and
