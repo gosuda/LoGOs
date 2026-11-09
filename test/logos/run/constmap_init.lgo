@@ -19,6 +19,14 @@ import (
 const initSlice = []int{2, 3, 5, 7, 11, 13, 17, 19}
 const initArray = [8]int{1, 2, 3, 4, 5, 6, 7, 8}
 
+var initAlloc uint64
+
+func init() {
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	runtime.ReadMemStats(&m)
+	initAlloc = m.HeapAlloc
+}
 // probeSrc builds the nm probe: a const array and a 1,000-key const map,
 // which lowers to a perfect-hash table (more than 8 keys).
 func probeSrc() string {
@@ -37,6 +45,10 @@ func main() {
 	runtime.ReadMemStats(&m)
 	runtime.ReadMemStats(&m)
 	before := m.HeapAlloc
+	if before != initAlloc {
+		fmt.Printf("FAIL init heap grew: %d vs %d\n", initAlloc, before)
+		os.Exit(1)
+	}
 	sum := 0
 	for _, v := range initSlice {
 		sum += v

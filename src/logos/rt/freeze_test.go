@@ -163,16 +163,20 @@ func TestFreezeConcurrent(t *testing.T) {
 func TestFreezeMapKeysAndSliceCapacity(t *testing.T) {
 	key := &freezeChild{n: 4, note: "key"}
 	raw := []int{1, 2, 3}
+	payload := &freezeChild{n: 6, note: "iface"}
 	src := &struct {
-		keys map[*freezeChild]string
-		s    []int
+		keys  map[*freezeChild]string
+		s     []int
+		iface any
 	}{
-		keys: map[*freezeChild]string{key: "value"},
-		s:    raw[:2],
+		keys:  map[*freezeChild]string{key: "value"},
+		s:     raw[:2],
+		iface: payload,
 	}
 	got := rt.Freeze(src)
 	key.n = 9
 	raw[2] = 8
+	payload.n = 9
 	if len(got.keys) != 1 {
 		t.Fatalf("frozen map length = %d, want 1", len(got.keys))
 	}
@@ -184,5 +188,8 @@ func TestFreezeMapKeysAndSliceCapacity(t *testing.T) {
 	tail := got.s[:cap(got.s)]
 	if tail[2] != 3 {
 		t.Fatalf("frozen slice capacity tail = %d, want 3", tail[2])
+	}
+	if got.iface.(*freezeChild).n != 6 {
+		t.Fatalf("frozen iface payload = %d, want 6", got.iface.(*freezeChild).n)
 	}
 }

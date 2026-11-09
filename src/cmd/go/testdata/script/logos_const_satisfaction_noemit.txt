@@ -1,0 +1,56 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+cd m
+! logos build -o $WORK/out$GOEXE ./cmd
+stderr 'const_view_mutation'
+! exists $WORK/out$GOEXE
+! logos build ./...
+stderr 'const_view_mutation'
+! exists $WORK/out$GOEXE
+cd ..
+
+-- m/go.mod --
+module example.com/noemit
+
+go 1.27
+
+-- m/c/c.lgo --
+package c
+
+type Namer interface {
+	const Name() string
+}
+
+-- m/u/u.lgo --
+package u
+
+import "example.com/noemit/c"
+
+type Bad struct {
+	N int
+}
+
+func (m *Bad) Name() string {
+	m.N++
+	return "bad"
+}
+
+var _ c.Namer = &Bad{}
+
+func Msg() string {
+	return "hi"
+}
+
+-- m/cmd/main.lgo --
+package main
+
+import (
+	"fmt"
+
+	"example.com/noemit/u"
+)
+
+func main() {
+	fmt.Println(u.Msg())
+}
