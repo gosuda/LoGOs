@@ -326,3 +326,30 @@ func TestLogosPairARM64DistinctRegs(t *testing.T) {
 		t.Errorf("pair destinations share register %v", r0)
 	}
 }
+
+func TestLogosPairARM64NoCrossBranchHoist(t *testing.T) {
+	c := testConfigARM64(t)
+	vec := types.TypeVec128
+	u64 := types.Types[types.TUINT64]
+	fun := c.Fun("entry",
+		Bloc("entry",
+			Valu("mem", OpInitMem, types.TypeMem, 0, nil),
+			Valu("p", OpARM64MOVDconst, u64, 0, nil),
+			Valu("l1", OpARM64FMOVQload, vec, 0, nil, "p", "mem"),
+			Valu("c", OpConstBool, c.config.Types.Bool, 1, nil),
+			If("c", "left", "right")),
+		Bloc("left",
+			Valu("l2", OpARM64FMOVQload, vec, 16, nil, "p", "mem"),
+			Goto("exit")),
+		Bloc("right",
+			Goto("exit")),
+		Bloc("exit",
+			Exit("mem")),
+	)
+	CheckFunc(fun.f)
+	pair(fun.f)
+	CheckFunc(fun.f)
+	if fun.values["l1"].Op != OpARM64FMOVQload || fun.values["l2"].Op != OpARM64FMOVQload {
+		t.Fatalf("branch loads fused: l1=%v l2=%v", fun.values["l1"].Op, fun.values["l2"].Op)
+	}
+}
