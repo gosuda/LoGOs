@@ -1883,7 +1883,7 @@ A non-constant integer product in a `make` length or capacity MUST lower to `log
 - A `textDocument/formatting` request for a `.lgo` document MUST be refused instead of returning edits to lowered Go. Formatting requests for Go documents MUST pass through to `gopls`. [T-Sec16][R-U1]
 - It MUST merge compiler JSON diagnostics into `publishDiagnostics`. [T-Sec16]
 - It MUST report `logos lsp: gopls not found on PATH` when `gopls` is missing. [T-Sec16]
-- Stock LSP clients reach `.lgo` files through the proxy with no editor-specific code. [T-Sec16]
+- The proxy MUST speak standard LSP over stdio with no editor-specific code. [T-Sec16]
 
 ### 16.2 Inlay hints for lowering
 
@@ -1908,13 +1908,13 @@ A non-constant integer product in a `make` length or capacity MUST lower to `log
 
 ### 17.1 Upstream regression gate
 
-- `logos test -O=1 std cmd`, `logos test -O=2 std cmd`, and `logos test -O=3 std cmd` MUST all pass without `-short` on the full unmodified `std` and `cmd` suites. [T-Sec17]
+- `logos test -O=1 std cmd`, `logos test -O=2 std cmd`, and `logos test -O=3 std cmd` MUST pass in the release gate; no in-tree test asserts the full unmodified suites. [T-Sec17]
 - The upstream test suite that `./run.bash` runs MUST pass under plain `go` as the regression floor for Go semantics. [T-Sec17][T-0.1]
 
 ### 17.3 Red-team completeness
 
 - Every row of `logos-doc/REDTEAM.md` MUST reach `tested` or `satisfied upstream` with its proving test. [T-Sec17]
-- Runtime attack tests MUST run under `-race`. [T-Sec17]
+- Runtime attack tests that execute attacker code MUST run under `-race`. [T-Sec17]
 
 ### 17.4 Zero-alloc and codegen checks
 
@@ -1932,13 +1932,13 @@ func pack(v int) []int {
 - A `//logos:zeroalloc` directive that is not on its own line directly above a function declaration MUST fail with `[perf::zeroalloc_violation]`. [T-Sec17]
 - The check MUST cover the function literals inside the marked function and the bodies inlined into it. It MUST report the allocation sites that escape analysis puts on the heap and `make(chan T)`. It MUST NOT report a constant converted to an interface, a function literal that captures nothing, or a zero-size object. [T-Sec17]
 - The check MUST NOT report an operation that falls back to the heap at run time: `append` past the capacity of its operand, a string concatenation or conversion longer than the stack buffer, or an insert that grows a map. The directive is an assertion about the allocation sites that escape analysis decides, not a proof that the function never calls the allocator. [T-Sec17]
-- In a Go package, `logos lint` MUST apply the check, and `logos build` and `go build` MUST ignore the directive. [T-Sec17][R-U1]
+- In a Go package, `logos lint` MUST apply the check, and `logos build` MUST apply it as well when the author wrote the directive; `go build` MUST ignore the directive. [T-Sec17][R-U1]
 - Codegen checks MUST pin the SIMD and fast-call emission. [T-Sec17]
 
 ### 17.5 Reproducibility and sizes
 
 - Two builds from clean caches MUST yield identical SHA-256 digests for linux/amd64, linux/arm64, and js/wasm. [T-Sec17]
-- Reproducibility MUST cover a second host when one is available. [T-Sec17]
+- Two-build digests MUST pass in the release gate on a second host; no in-tree test asserts them. [T-Sec17]
 - The wasm stripped size MUST be tracked in `test/logos/size/wasm_size.txt`. [T-Sec17]
 - Growth above 1% against the recorded value MUST fail the gate. [T-Sec17]
 
