@@ -66,6 +66,9 @@ func (rd *reader) contentLength() (int, error) {
 			break
 		}
 		if v, ok := headerValue(line, "Content-Length"); ok {
+			if n >= 0 {
+				return 0, errors.New("message header has duplicate Content-Length")
+			}
 			if n, err = parseLength(v); err != nil {
 				return 0, err
 			}

@@ -207,3 +207,15 @@ func TestAdvDidSaveUnopenedSkipsCompile(t *testing.T) {
 		t.Errorf("didSave on an unopened document compiled %d times, want none", got)
 	}
 }
+
+func TestAdvDuplicateContentLengthRejected(t *testing.T) {
+	body := `{"jsonrpc":"2.0","method":"x"}`
+	in := fmt.Sprintf("Content-Length: %d\r\nContent-Length: %d\r\n\r\n%s", len(body), len(body), body)
+	if _, err := newReader(strings.NewReader(in)).read(); err == nil || !strings.Contains(err.Error(), "duplicate Content-Length") {
+		t.Errorf("duplicate Content-Length read = %v, want a duplicate Content-Length error", err)
+	}
+	single := fmt.Sprintf("Content-Length: %d\r\n\r\n%s", len(body), body)
+	if m, err := newReader(strings.NewReader(single)).read(); err != nil || m.Method != "x" {
+		t.Errorf("single Content-Length = %+v, %v, want the message", m, err)
+	}
+}
