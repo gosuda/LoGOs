@@ -1,14 +1,7 @@
-# M12-S2 net: direct syscall.Socket is a CapNet sink (PR3 PRRT_kwDOVOeymc6vVa8U).
-# An unallowlisted third-party package that calls syscall.Socket without
-# importing net or unsafe must fail under default transitive_net=deny.
-# RED: capabilitySinks lacks syscall.Socket, so the build succeeds and the
-# `!` expectation fails. No ambient network: the sink is linked, never run.
-
 env GOPROXY=off
 env GOTOOLCHAIN=local
 mkdir $WORK/bin
 
-# Case A: dep reaches syscall.Socket -> deny.
 cd neta/main
 ! logos build -o $WORK/bin/netsock$GOEXE ./cmd
 stderr 'ERROR \[capabilities::unauthorized_net\]: Transitive dependency ''example\.com/ndep'' reaches ''syscall\.Socket'''
@@ -16,14 +9,12 @@ stderr 'example\.com/ndep\.Init\(\)'
 stderr 'transitive_net_allowlist'
 cd ../..
 
-# Case B: dep imports syscall but never calls Socket (deadcode) -> passes.
 cd netb/main
 logos build -o $WORK/bin/netsockb$GOEXE ./cmd
 exec $WORK/bin/netsockb$GOEXE
 stdout '^dead-ok$'
 cd ../..
 
-# Case C: allowlisted dep reaches syscall.Socket -> passes and runs.
 cd netc/main
 logos build -o $WORK/bin/netsockc$GOEXE ./cmd
 exec $WORK/bin/netsockc$GOEXE

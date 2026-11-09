@@ -1,15 +1,7 @@
-# M12-S1: transitive unsafe imports fail under logos, pass allowlisted/warn/allow.
-# Plain go runs no audit. Each case uses its own fixture with a
-# replace-based dependency so the dep is not a main module.
-# RED expectation: cases A, C, F fail red because no audit exists yet,
-# so `! logos build` sees a successful build; case E fails red because
-# no warning is printed.
-
 env GOPROXY=off
 env GOTOOLCHAIN=local
 mkdir $WORK/bin
 
-# Case A: loGo/s main, Go dep importing unsafe, explicit deny -> fail with chain.
 cd a/main
 ! logos build ./...
 stderr 'ERROR \[capabilities::unauthorized_unsafe\]: Transitive dependency ''example\.com/dep'' imports ''unsafe'''
@@ -19,38 +11,32 @@ stderr '-> unsafe'
 stderr 'transitive_unsafe_allowlist'
 cd ../..
 
-# Case B: same shape, dep allowlisted -> build passes and runs.
 cd b/main
 logos build -o $WORK/bin/b$GOEXE ./cmd
 exec $WORK/bin/b$GOEXE
 stdout '^42$'
 cd ../..
 
-# Case C: Go main, Go dep importing unsafe, explicit deny -> fail with chain.
 cd c/main
 ! logos build ./...
 stderr 'ERROR \[capabilities::unauthorized_unsafe\]: Transitive dependency ''example\.com/cdep'' imports ''unsafe'''
 stderr '-> unsafe'
 cd ../..
 
-# Case D: plain go runs no audit on the same fixture -> passes.
 cd c/main
 go build -o $WORK/bin/d$GOEXE ./cmd
 cd ../..
 
-# Case E: warn severity -> build passes but prints the warning.
 cd e/main
 logos build -o $WORK/bin/e$GOEXE ./cmd
 stderr '\[capabilities::unauthorized_unsafe\].*example\.com/edep'
 cd ../..
 
-# Case F: no logos.toml at all -> deny default -> fail with chain.
 cd f/main
 ! logos build ./...
 stderr 'ERROR \[capabilities::unauthorized_unsafe\]: Transitive dependency ''example\.com/fdep'' imports ''unsafe'''
 cd ../..
 
-# Case G: explicit allow -> build passes silently.
 cd g/main
 logos build -o $WORK/bin/g$GOEXE ./cmd
 ! stderr '\[capabilities::unauthorized_unsafe\]'
