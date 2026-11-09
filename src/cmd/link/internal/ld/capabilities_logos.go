@@ -123,7 +123,9 @@ func logosCapAudit(ctxt *Link, d *deadcodePass) {
 	a.collectImpls(d)
 	a.seedRoots(d)
 	a.flood(d)
-	a.report()
+	for _, f := range a.findings() {
+		a.judge(f)
+	}
 }
 
 func (a *logosCapAuditor) collectImpls(d *deadcodePass) {
@@ -421,18 +423,14 @@ func (a *logosCapAuditor) findings() []capFinding {
 	var out []capFinding
 	index := make(map[string]int)
 	for _, hit := range a.hits {
-		for _, b := range a.blamedChains(hit) {
+		if hit.kind == CapCgo && a.role(hit.sink).dep == "" {
+			continue
+		}
+		for _, b := range a.graph.blamedChains(hit.sink, a.role) {
 			out = addFinding(out, index, capFinding{kind: hit.kind, sink: hit.name, dep: b.dep, chain: b.chain})
 		}
 	}
 	return out
-}
-
-func (a *logosCapAuditor) blamedChains(hit logosCapHit) []capBlame {
-	if hit.kind == CapCgo && a.role(hit.sink).dep == "" {
-		return nil
-	}
-	return a.graph.blamedChains(hit.sink, a.role)
 }
 
 func addFinding(out []capFinding, index map[string]int, f capFinding) []capFinding {
