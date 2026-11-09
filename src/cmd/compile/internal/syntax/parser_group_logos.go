@@ -11,7 +11,10 @@ func (p *parser) logosGoStmt() Stmt {
 	goPos := p.pos()
 	p.next()
 	if p.tok == _Lbrace {
-		return p.groupChildStmt(goPos)
+		s := new(GroupChild)
+		s.pos = goPos
+		s.Body = p.blockStmt("")
+		return s
 	}
 	if p.tok == _Name && p.lit == "group" {
 		gname := p.name()
@@ -21,13 +24,6 @@ func (p *parser) logosGoStmt() Stmt {
 		return p.ordinaryGoStmt(goPos, gname)
 	}
 	return p.ordinaryGoStmt(goPos, nil)
-}
-
-func (p *parser) groupChildStmt(goPos Pos) Stmt {
-	s := new(GroupChild)
-	s.pos = goPos
-	s.Body = p.blockStmt("")
-	return s
 }
 
 func (p *parser) groupList(plains *[]Expr) (limit Expr) {
