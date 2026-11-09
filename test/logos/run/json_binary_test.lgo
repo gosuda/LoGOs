@@ -76,8 +76,10 @@ func check(ok bool, message string) error {
 func roundTrip(v BinaryRecord) error {
 	encoded, err := v.MarshalBinary()
 	if err != nil { return err }
+	before := append([]byte(nil), encoded...)
 	var got BinaryRecord
 	if err := got.UnmarshalBinary(encoded); err != nil { return err }
+	if !bytes.Equal(encoded, before) { return fmt.Errorf("binary decode mutated its input") }
 	if !reflect.DeepEqual(got, v) { return fmt.Errorf("binary round trip changed value: %#v != %#v", got, v) }
 	return nil
 }
@@ -89,8 +91,10 @@ func ptrInt64(v int64) *int64 { return &v }
 func roundTripEvery(v BinaryEvery) error {
 	encoded, err := v.MarshalBinary()
 	if err != nil { return err }
+	before := append([]byte(nil), encoded...)
 	got := BinaryEvery{Req: &BinaryInner{}}
 	if err := got.UnmarshalBinary(encoded); err != nil { return err }
+	if !bytes.Equal(encoded, before) { return fmt.Errorf("every-field decode mutated its input") }
 	if !reflect.DeepEqual(got, v) { return fmt.Errorf("every-field round trip changed value") }
 	return nil
 }
@@ -172,8 +176,10 @@ func allocationBomb() error {
 func roundTripSized(v BinarySized) error {
 	encoded, err := v.MarshalBinary()
 	if err != nil { return err }
+	before := append([]byte(nil), encoded...)
 	var got BinarySized
 	if err := got.UnmarshalBinary(encoded); err != nil { return err }
+	if !bytes.Equal(encoded, before) { return fmt.Errorf("sized decode mutated its input") }
 	if !reflect.DeepEqual(got, v) { return fmt.Errorf("sized slice round trip changed value") }
 	return nil
 }
