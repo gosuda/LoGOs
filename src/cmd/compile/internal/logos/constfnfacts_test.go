@@ -141,11 +141,11 @@ func wantScopeConstUint(t *testing.T, scope *types2.Scope, rec, name string, wan
 	}
 }
 
-// TestEmitConstFnFactsPayloadParses closes one const function over every
+// TestWriteConstFnFactsPayloadParses closes one const function over every
 // repaired span boundary and requires each exported const function to
 // have a record whose closed source reparses, rechecks, and evaluates
 // probe consts to the source-defined values.
-func TestEmitConstFnFactsPayloadParses(t *testing.T) {
+func TestWriteConstFnFactsPayloadParses(t *testing.T) {
 	const src = `package constfntest
 
 const func Total() int {
@@ -186,8 +186,7 @@ const /*c*/ Flag = 2
 `
 	pkg, info, file := checkConstFnFixture(t, src)
 	srcBytes := []byte(src)
-	var f *facts.Facts
-	f = EmitConstFnFacts(pkg, info, []*syntax.File{file}, map[*syntax.File][]byte{file: srcBytes}, f)
+	f := facts.Write(pkg, info, []*syntax.File{file}, map[*syntax.File][]byte{file: srcBytes})
 	probe := map[string]string{
 		"Total":   "const total = Total()\nconst frac = K + 0.5\nconst big = K << 63",
 		"Double":  "const doubled = Double(4)",
@@ -233,47 +232,5 @@ const /*c*/ Flag = 2
 		if !seen[name] {
 			t.Errorf("missing constfn record %q", name)
 		}
-	}
-}
-
-// TestConstFnRenderVarStructType renders an explicit struct-typed var
-// through its closing brace and requires the declaration to parse.
-func TestConstFnRenderVarStructType(t *testing.T) {
-	const src = `package constfntest
-
-var V struct {
-	X int
-	Y int /* } */
-}
-
-const func Total() int {
-	return 1
-}
-`
-	pkg, info, file := checkConstFnFixture(t, src)
-	s := newConstFnSrc(pkg, info, []*syntax.File{file}, map[*syntax.File][]byte{file: []byte(src)})
-	s.indexAll()
-	if !s.at(file) {
-		t.Fatal("cannot load fixture file")
-	}
-	var vd *syntax.VarDecl
-	for _, d := range file.DeclList {
-		if v, ok := d.(*syntax.VarDecl); ok {
-			vd = v
-		}
-	}
-	if vd == nil {
-		t.Fatal("no var declaration in fixture")
-	}
-	text, err := s.renderVar(file, vd, "V")
-	if err != nil {
-		t.Fatalf("renderVar: %v", err)
-	}
-	var errs []string
-	_, first := syntax.Parse(syntax.NewFileBase("constfnvar.lgo"), strings.NewReader("package constfntest\n"+text+"\n"), func(err error) {
-		errs = append(errs, err.Error())
-	}, nil, syntax.CheckBranches|syntax.LogosMode)
-	if first != nil || len(errs) > 0 {
-		t.Fatalf("rendered var does not parse: %v %q\n%s", first, errs, text)
 	}
 }

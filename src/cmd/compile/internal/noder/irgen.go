@@ -255,7 +255,7 @@ recheck:
 
 	writeLogosEject(files)
 	logosNextHook(pkg, info, files)
-	logosEmitAssertFacts(pkg)
+	logosWriteCheckedFacts(pkg, info, files)
 
 	return pkg, info, rangeInfo
 }

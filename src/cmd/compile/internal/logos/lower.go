@@ -56,18 +56,7 @@ func siteDisplay(pos syntax.Pos, base string, line uint) (string, uint) {
 func Lower(pkg *types2.Package, info *types2.Info, files []*syntax.File, src map[*syntax.File][]byte) (bool, map[*syntax.File][]Edit) {
 	clearRodataPackage(pkg.Path()) // M5-S3: fresh read-only marks per compile.
 	clearOwnedConstants()
-	if f := EmitOptionFacts(pkg, info); f != nil {
-		facts.SetCurrent(f)
-	}
-	if f := EmitConstFacts(pkg, info, files, facts.Current()); f != nil { // M5-S1: const lines and mutation masks.
-		facts.SetCurrent(f)
-	}
-	if f := EmitDefaultFacts(pkg, info, facts.Current()); f != nil { // M6-S3: struct field defaults.
-		facts.SetCurrent(f)
-	}
-	if f := EmitConstFnFacts(pkg, info, files, src, facts.Current()); f != nil { // constfn: closed sources before const markers erase.
-		facts.SetCurrent(f)
-	}
+	facts.SetCurrent(facts.Write(pkg, info, files, src)) // M23-S1: every source-phase record, before any file lowers.
 	shared := &packageLower{info: info, tpkg: pkg, constMaps: collectConstMaps(files, info)}
 	shared.ctExp = newCfExpander(shared, files, src) // M7-S3 hook: comptime generics of every file, registered before any file lowers.
 	edits := make(map[*syntax.File][]Edit)

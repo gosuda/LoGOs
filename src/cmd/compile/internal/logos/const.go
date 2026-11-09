@@ -54,6 +54,23 @@ import (
 // same checkFiles invocation.
 var erasedAnonReadonly []*syntax.Field
 
+func constAsView(t types2.Type) *types2.ConstView {
+	if t == nil {
+		return nil
+	}
+	if c, ok := types2.Unalias(t).(*types2.ConstView); ok {
+		return c
+	}
+	if n, ok := types2.Unalias(t).(*types2.Named); ok {
+		if u := n.Underlying(); u != nil {
+			if c, ok := u.(*types2.ConstView); ok {
+				return c
+			}
+		}
+	}
+	return nil
+}
+
 var constViewDecls []syntax.Pos
 
 func (fl *fileLower) recordConstViewDecl(pos syntax.Pos) {

@@ -8,8 +8,9 @@
 // header of the package's exported declarations in loGo/s syntax
 // (nilability, const, unions, tuples, property interfaces), per-function
 // facts, and comptime generic sources, bound to the __.PKGDEF fingerprint
-// (T-Sec5). S1 defines the format and the transport; S2-S7 populate the
-// records through SetCurrent. Until then every compiler-object archive
+// (T-Sec5). S1 defines the format and the transport; Write and
+// WriteChecked populate the records through SetCurrent, with backend
+// merges beside them. Until then every compiler-object archive
 // carries a header-only member so the binding itself is testable end to
 // end.
 //
@@ -214,6 +215,14 @@ type Facts struct {
 	// carries per-function backend facts such as MayYield and nothing
 	// that makes it a loGo/s package, so importers must not read it as one.
 	GoPackage bool
+}
+
+// empty reports whether f carries no record; extend with every new record field.
+func (f *Facts) empty() bool {
+	return len(f.Opts) == 0 && len(f.Consts) == 0 && len(f.Fns) == 0 &&
+		len(f.Readonlys) == 0 && len(f.Props) == 0 && len(f.Conforms) == 0 &&
+		len(f.Comptimes) == 0 && len(f.ConstFuncs) == 0 && len(f.Defaults) == 0 &&
+		len(f.Locks) == 0 && len(f.AllocFrees) == 0 && !f.GoPackage
 }
 
 // DefaultFact is one default record: a defaulted field of an exported

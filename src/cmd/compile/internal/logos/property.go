@@ -69,7 +69,6 @@ func (fl *fileLower) lowerProperties() {
 		}
 	}
 	fl.flushTypeImports()
-	MergePropFacts(fl.pkg.tpkg, fl.pkg.info)
 }
 
 // lowerPropertyInterfaces rewrites every property element of every

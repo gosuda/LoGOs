@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package logos
+package facts
 
 import (
 	"cmp"
@@ -13,29 +13,28 @@ import (
 	"strings"
 
 	"cmd/compile/internal/base"
-	"cmd/compile/internal/logos/facts"
 	"cmd/compile/internal/syntax"
 	"cmd/compile/internal/types2"
 )
 
-// EmitConstFnFacts adds one constfn record per exported receiverless
-// non-generic const function of pkg to f (allocating it when nil) and
-// returns f. Each record's Source is one parseable Logos file: a package
-// clause, explicit imports, and the complete same-package declaration
-// closure of the function — every same-package exported or private
-// constant, type, and helper function its body names, transitively, with
-// grouped const blocks kept whole so implicit values and iota ordinals
-// survive. Calls into other packages are not inlined: the record keeps
-// the import spelled with the canonical alias of the payload and splices
-// every resolved PkgName use to that alias, and the consumer resolves
-// those callees through their own package facts. Mutable package names
-// stay out of the record: their initializers must never evaluate in the
-// consumer, and a closure needing one is impure and fails at admission.
-// A broken closure is a producer defect and reports through the ordinary
-// error channel rather than publishing a partial record.
-func EmitConstFnFacts(pkg *types2.Package, info *types2.Info, files []*syntax.File, src map[*syntax.File][]byte, f *facts.Facts) *facts.Facts {
+// writeConstFuncs adds one constfn record per exported receiverless
+// non-generic const function of pkg to f. Each record's Source is one
+// parseable Logos file: a package clause, explicit imports, and the
+// complete same-package declaration closure of the function — every
+// same-package exported or private constant, type, and helper function
+// its body names, transitively, with grouped const blocks kept whole so
+// implicit values and iota ordinals survive. Calls into other packages
+// are not inlined: the record keeps the import spelled with the canonical
+// alias of the payload and rewrites every resolved PkgName use to that
+// alias, and the consumer resolves those callees through their own package
+// facts. Mutable package names stay out of the record: their initializers
+// must never evaluate in the consumer, and a closure needing one is impure
+// and fails at admission. A broken closure is a producer defect and reports
+// through the ordinary error channel rather than publishing a partial
+// record.
+func writeConstFuncs(pkg *types2.Package, info *types2.Info, files []*syntax.File, src map[*syntax.File][]byte, f *Facts) {
 	if pkg == nil || pkg.Scope() == nil || info == nil {
-		return f
+		return
 	}
 	var roots []*syntax.ConstFuncDecl
 	for _, file := range files {
@@ -62,20 +61,16 @@ func EmitConstFnFacts(pkg *types2.Package, info *types2.Info, files []*syntax.Fi
 		}
 	}
 	if len(roots) == 0 {
-		return f
+		return
 	}
 	for _, cfd := range roots {
-		if f == nil {
-			f = &facts.Facts{}
-		}
 		payload, err := constFnClosure(pkg, info, files, src, cfd)
 		if err != nil {
 			base.Errorf("%s: logos: cannot close const function %s: %v", cfd.Func.Pos().String(), cfd.Func.Name.Value, err)
 			continue
 		}
-		f.ConstFuncs = append(f.ConstFuncs, facts.ConstFuncFact{Object: cfd.Func.Name.Value, Source: payload})
+		f.ConstFuncs = append(f.ConstFuncs, ConstFuncFact{Object: cfd.Func.Name.Value, Source: payload})
 	}
-	return f
 }
 
 func constFnClosure(pkg *types2.Package, info *types2.Info, files []*syntax.File, src map[*syntax.File][]byte, cfd *syntax.ConstFuncDecl) ([]byte, error) {
@@ -172,7 +167,7 @@ func constFnClosure(pkg *types2.Package, info *types2.Info, files []*syntax.File
 	b.WriteString("package " + rootFile.PkgName.Value + "\n\n")
 
 	imps := slices.Clone(s.imports)
-	slices.SortFunc(imps, func(a, b cfImport) int { return strings.Compare(a.path, b.path) })
+	slices.SortFunc(imps, func(a, b constFnImport) int { return strings.Compare(a.path, b.path) })
 	for _, imp := range imps {
 		b.WriteString("import " + imp.name + " " + strconv.Quote(imp.path) + "\n")
 	}
@@ -239,7 +234,7 @@ type constFnSrc struct {
 	starts          map[*syntax.File][]int
 	decls           map[string]*constFnDecl
 	rawImports      map[string]string
-	imports         []cfImport
+	imports         []constFnImport
 	pkgUses         []pkgUse
 	closedNames     map[string]bool
 	collectedFuncs  []*constFnDecl
@@ -631,7 +626,7 @@ func (s *constFnSrc) finalizeImports() {
 				}
 			}
 		}
-		s.imports = append(s.imports, cfImport{name: name, path: path})
+		s.imports = append(s.imports, constFnImport{name: name, path: path})
 	}
 }
 
@@ -780,7 +775,7 @@ func (s *constFnSrc) renderVar(file *syntax.File, vd *syntax.VarDecl, name strin
 
 func (s *constFnSrc) spliceRange(file *syntax.File, start, end int) (string, error) {
 	raw := s.orig[start:end]
-	var subs []splice
+	var subs []textEdit
 	for _, u := range s.pkgUses {
 		if u.file != file {
 			continue
@@ -790,7 +785,7 @@ func (s *constFnSrc) spliceRange(file *syntax.File, start, end int) (string, err
 		if uOff >= start && uEnd <= end {
 			alias := s.aliasFor(u.path)
 			if alias != "" && alias != string(s.orig[uOff:uEnd]) {
-				subs = append(subs, splice{
+				subs = append(subs, textEdit{
 					start: uOff - start,
 					end:   uEnd - start,
 					text:  alias,
@@ -801,7 +796,7 @@ func (s *constFnSrc) spliceRange(file *syntax.File, start, end int) (string, err
 	if len(subs) == 0 {
 		return string(raw), nil
 	}
-	out, err := applySplices(raw, subs)
+	out, err := applyTextEdits(raw, subs)
 	if err != nil {
 		return "", err
 	}
@@ -1214,4 +1209,74 @@ func fileOf(files []*syntax.File, pos syntax.Pos) *syntax.File {
 		}
 	}
 	return nil
+}
+
+func cfFuncStart(src []byte, off int) int {
+	i := off
+	for i > 0 && (src[i-1] == ' ' || src[i-1] == '\t' || src[i-1] == '\n' || src[i-1] == '\r') {
+		i--
+	}
+	if i >= 4 && string(src[i-4:i]) == "func" {
+		return i - 4
+	}
+	return off
+}
+
+func nullaryCallEnd(src []byte, end int) (int, bool) {
+	off := end
+	for off < len(src) && (src[off] == ' ' || src[off] == '\t' || src[off] == '\n') {
+		off++
+	}
+	if off >= len(src) || src[off] != '(' {
+		return 0, false
+	}
+	off++
+	for off < len(src) && (src[off] == ' ' || src[off] == '\t' || src[off] == '\n') {
+		off++
+	}
+	if off >= len(src) || src[off] != ')' {
+		return 0, false
+	}
+	return off + 1, true
+}
+
+type constFnImport struct {
+	name string
+	path string
+}
+
+func lineStarts(src []byte) []int {
+	starts := []int{0}
+	for i, c := range src {
+		if c == '\n' {
+			starts = append(starts, i+1)
+		}
+	}
+	return starts
+}
+
+type textEdit struct {
+	start, end int
+	text       string
+}
+
+func applyTextEdits(src []byte, edits []textEdit) ([]byte, error) {
+	slices.SortStableFunc(edits, func(a, b textEdit) int {
+		return cmp.Or(cmp.Compare(a.start, b.start), cmp.Compare(a.end, b.end))
+	})
+	var sb strings.Builder
+	prev := 0
+	for _, e := range edits {
+		if e.start < prev {
+			return nil, fmt.Errorf("overlapping edits at byte offset %d", e.start)
+		}
+		sb.WriteString(string(src[prev:e.start]))
+		sb.WriteString(e.text)
+		prev = e.end
+	}
+	sb.WriteString(string(src[prev:]))
+	if sb.Len() == 0 {
+		return []byte{}, nil
+	}
+	return []byte(sb.String()), nil
 }

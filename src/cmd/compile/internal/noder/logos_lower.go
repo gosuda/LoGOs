@@ -168,20 +168,20 @@ func logosStampProvenReadonly(pkg *types2.Package, proven map[string]bool) {
 	}
 }
 
-// logosEmitAssertFacts records the package's generic assertion effects into
-// the facts sidecar. It runs for Go and loGo/s packages alike at every -O
-// level, after types2 checking completes: Lower has already merged its
-// opt/const records into facts.Current, so EmitAssertEffects folds the
-// assert masks into the same FnFact entries. A plain-Go package gains a
-// __.LOGOS member only when assert records exist (see
-// gc.writeLogosFacts), and that member carries `lang go` like the
-// wasmyield backend marks Go packages, so importers never read it as
-// loGo/s.
-func logosEmitAssertFacts(pkg *types2.Package) {
+// logosWriteCheckedFacts records the package's generic assertion effects
+// and lock contracts into the facts sidecar. It runs for Go and loGo/s
+// packages alike at every -O level, after types2 checking completes:
+// WriteChecked folds the assert masks and the lock records into the same
+// FnFact and Locks entries Lower installed as the source-phase records.
+// A plain-Go package gains a __.LOGOS member only when checked-phase
+// records exist (see gc.writeLogosFacts), and that member carries
+// `lang go` like the wasmyield backend marks Go packages, so importers
+// never read it as loGo/s.
+func logosWriteCheckedFacts(pkg *types2.Package, info *types2.Info, files []*syntax.File) {
 	if pkg == nil {
 		return
 	}
-	f := logos.EmitAssertEffects(pkg, facts.Current())
+	f := facts.WriteChecked(pkg, info, files, facts.Current())
 	if f == nil {
 		return
 	}

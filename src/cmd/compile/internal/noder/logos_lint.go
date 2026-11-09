@@ -31,6 +31,25 @@ type escapeLint struct {
 // logosEscape is the state logosLintHook keeps for LogosLintEscape.
 var logosEscape *escapeLint
 
+func init() {
+	facts.LogosLockFacts = writeLogosLockFacts
+}
+
+// writeLogosLockFacts computes the locks records of the final checked
+// package for facts.WriteChecked. It runs only when the go command
+// passed a lint policy, matching the compiles the lint layer arms.
+func writeLogosLockFacts(pkg *types2.Package, info *types2.Info, files []*syntax.File) []facts.LockFact {
+	if base.LogosCfg == "" {
+		return nil
+	}
+	kind := lint.KindGo
+	if base.Logos {
+		kind = lint.KindLgo
+	}
+	lintable, sources := logosLintInputs(files)
+	return lint.LockFacts(&lint.Input{Pkg: pkg, Info: info, Files: lintable, Sources: sources, Kind: kind})
+}
+
 // logosLintHook runs the lints of the checked package (SPEC Sec 1.2, M9). It
 // runs once after the first successful check, before lowering, so the rules
 // see loGo/s syntax and types. A loGo/s package lints on every compile that
@@ -67,7 +86,6 @@ func logosLintHook(m *posMap, files []*syntax.File, pkg *types2.Package, info *t
 		in.Reported = logosTakeSoft()
 		results = append(results, lint.Run(in)...)
 		pins = lint.PinActive(in)
-		logosMergeLockFacts(in)
 	}
 	for _, r := range results {
 		base.LogosReport(logosDiag(m, r))
@@ -89,19 +107,6 @@ func logosLintHook(m *posMap, files []*syntax.File, pkg *types2.Package, info *t
 // named, and the package is loGo/s or logos lint asks for a lint compile.
 func logosLintActive() bool {
 	return base.LogosCfg != "" && (base.Logos || base.LogosLintOnly)
-}
-
-func logosMergeLockFacts(in *lint.Input) {
-	records := lint.LockFacts(in)
-	if len(records) == 0 {
-		return
-	}
-	f := facts.Current()
-	if f == nil {
-		f = &facts.Facts{GoPackage: !base.Logos}
-		facts.SetCurrent(f)
-	}
-	f.Locks = append(f.Locks, records...)
 }
 
 // logosZeroAllocArm makes escape analysis record the heap allocation sites

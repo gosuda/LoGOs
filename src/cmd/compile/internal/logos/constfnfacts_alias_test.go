@@ -15,11 +15,11 @@ import (
 	"cmd/compile/internal/types2"
 )
 
-// TestEmitConstFnFactsAliasClosure closes const functions over an exported
+// TestWriteConstFnFactsAliasClosure closes const functions over an exported
 // alias while a same-named method is also present. It requires each record
 // to reparse, recheck, preserve alias identity, and evaluate probe consts
 // through the payload's own declarations.
-func TestEmitConstFnFactsAliasClosure(t *testing.T) {
+func TestWriteConstFnFactsAliasClosure(t *testing.T) {
 	const src = `package constfntest
 
 type tally int
@@ -71,8 +71,7 @@ const seededVal = Seeded()
 `
 	pkg, info, file := checkConstFnFixture(t, src)
 	srcBytes := []byte(src)
-	var f *facts.Facts
-	f = EmitConstFnFacts(pkg, info, []*syntax.File{file}, map[*syntax.File][]byte{file: srcBytes}, f)
+	f := facts.Write(pkg, info, []*syntax.File{file}, map[*syntax.File][]byte{file: srcBytes})
 	probe := map[string]string{
 		"MakeVal":   "const tallyOf = Tally(7)\nconst made = MakeVal(3, \"n\", 4)",
 		"WeightOf":  "const tallyOf = Tally(7)\nconst v3 = Val{weight: 3, note: \"n\", tally: 4}\nconst vWeight = WeightOf(v3)",

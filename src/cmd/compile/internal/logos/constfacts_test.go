@@ -13,14 +13,12 @@ import (
 	"cmd/compile/internal/logos/facts"
 	"cmd/compile/internal/syntax"
 	"cmd/compile/internal/types2"
-	"cmd/internal/goobj"
 )
 
-// TestEmitConstFacts checks a small .lgo package, calls EmitConstFacts
+// TestWriteConstFacts checks a small .lgo package, calls Write
 // directly, and asserts the const lines plus the ReceiverMutated and
-// ParamMutated flags, including propagation to a wrapper and merging
-// with pre-existing facts.
-func TestEmitConstFacts(t *testing.T) {
+// ParamMutated flags, including propagation to a wrapper.
+func TestWriteConstFacts(t *testing.T) {
 	const src = `package factstest
 
 type Box struct {
@@ -79,11 +77,7 @@ func (b *Box) Count() int {
 		t.Fatalf("check: %v", err)
 	}
 
-	seed := &facts.Facts{Fns: []facts.FnFact{{Object: "AppendIt", ReturnsNonNil: true}}}
-	got := EmitConstFacts(pkg, info, []*syntax.File{file}, seed)
-	if got != seed {
-		t.Fatal("EmitConstFacts did not return the passed facts")
-	}
+	got := facts.Write(pkg, info, []*syntax.File{file}, nil)
 
 	consts := make(map[string]bool)
 	for _, c := range got.Consts {
@@ -124,85 +118,9 @@ func (b *Box) Count() int {
 	checkFn("(*Box).Rename", "", true)
 	checkFn("Sum", "", false)
 	checkFn("(*Box).Count", "", false)
-	if fn := fns["AppendIt"]; !fn.ReturnsNonNil {
-		t.Error("AppendIt lost its seeded ReturnsNonNil flag")
-	}
 }
 
-func TestWideMutationMaskHelpers(t *testing.T) {
-	var m []byte
-	for _, bit := range []int{0, 5, 63, 64, 70} {
-		m = setMaskBit(m, bit)
-	}
-	for _, bit := range []int{0, 5, 63, 64, 70} {
-		if !maskBit(m, bit) {
-			t.Errorf("maskBit(%d) = false, want set", bit)
-		}
-	}
-	for _, bit := range []int{1, 62, 65, 71, 1000} {
-		if maskBit(m, bit) {
-			t.Errorf("maskBit(%d) = true, want clear", bit)
-		}
-	}
-	// tri-state: "" never parses (unknown), "0" parses to exact-clean.
-	if b, ok := parseHexMask(""); ok || b != nil {
-		t.Errorf(`parseHexMask("") = %v, %v; want nil, false`, b, ok)
-	}
-	if b, ok := parseHexMask("0"); !ok || b == nil || len(b) != 0 {
-		t.Errorf(`parseHexMask("0") = %v, %v; want non-nil empty, true`, b, ok)
-	}
-	if b, ok := parseHexMask("ab"); !ok || len(b) != 1 || b[0] != 0xab {
-		t.Errorf(`parseHexMask("ab") = %v, %v`, b, ok)
-	}
-	// explicit zero survives an empty merge and gains bits from a real one.
-	if got := orHexMask("0", nil); got != "0" {
-		t.Errorf(`orHexMask("0", nil) = %q, want "0"`, got)
-	}
-	if got := orHexMask("0", setMaskBit(nil, 70)); got != "400000000000000000" {
-		t.Errorf(`orHexMask("0", bit70) = %q, want 400000000000000000`, got)
-	}
-}
-
-func TestCalleeFactsMutationTriState(t *testing.T) {
-	fp := goobj.FingerprintType{1, 2, 3, 4, 5, 6, 7, 8}
-	const path = "example.com/m/trie"
-	reg := func(f *facts.Facts) {
-		t.Helper()
-		member := facts.Encode(fp, f)
-		if _, err := facts.Import(path, "export-bytes"+string(fp[:]), member); err != nil {
-			t.Fatalf("Import: %v", err)
-		}
-	}
-	pkg := types2.NewPackage("local/pkg", "pkg")
-	dep := types2.NewPackage(path, "m")
-	fn := types2.NewFunc(syntax.Pos{}, dep, "F", nil)
-	s := &constBodyScan{pkg: pkg}
-
-	// Record without ParamMutated: unknown mutation, never zero.
-	reg(&facts.Facts{Fns: []facts.FnFact{{Object: "F", Readonly: true}}})
-	if _, mask := s.calleeFacts(fn); mask != nil {
-		t.Fatalf("readonly-only record: mask = %v, want nil (unknown)", mask)
-	}
-	// Explicit proven zero.
-	reg(&facts.Facts{Fns: []facts.FnFact{{Object: "F", HasAssert: true, AssertTP: "0", AssertRTP: "0", ParamMutated: "0"}}})
-	_, mask := s.calleeFacts(fn)
-	if mask == nil || len(mask) != 0 {
-		t.Fatalf("ParamMutated=0: mask = %v, want exact empty", mask)
-	}
-	// Exact wide mask: bit 70 set, bit 0 clear.
-	reg(&facts.Facts{Fns: []facts.FnFact{{Object: "F", ParamMutated: "400000000000000000"}}})
-	_, mask = s.calleeFacts(fn)
-	if mask == nil || !maskBit(mask, 70) || maskBit(mask, 0) {
-		t.Fatalf("wide mask: mask = %v, want bit 70 only", mask)
-	}
-	// MayYield-only record: still unknown.
-	reg(&facts.Facts{Fns: []facts.FnFact{{Object: "F", MayYield: true, HasMayYield: true}}})
-	if _, mask = s.calleeFacts(fn); mask != nil {
-		t.Fatalf("MayYield-only record: mask = %v, want nil (unknown)", mask)
-	}
-}
-
-func TestEmitAssertEffects(t *testing.T) {
+func TestWriteCheckedAssertEffects(t *testing.T) {
 	const src = `package asserttest
 
 type Qual interface {
@@ -255,9 +173,10 @@ func (Plain) As[U any](x any) U { return x.(U) }
 		t.Fatalf("check (definitions must stay valid): %v", err)
 	}
 
-	got := EmitAssertEffects(pkg, &facts.Facts{})
-	if got == nil {
-		t.Fatal("EmitAssertEffects returned nil")
+	seed := &facts.Facts{Fns: []facts.FnFact{{Object: "As", ParamMutated: "1", ReturnsNonNil: true}}}
+	got := facts.WriteChecked(pkg, info, []*syntax.File{file}, seed)
+	if got != seed {
+		t.Fatal("WriteChecked did not return the passed facts")
 	}
 	fns := make(map[string]facts.FnFact)
 	for _, fn := range got.Fns {
@@ -281,6 +200,45 @@ func (Plain) As[U any](x any) U { return x.(U) }
 	check("Store.Project", "1", "0")
 	check("Plain.Identity", "0", "0")
 	check("Plain.As", "1", "0")
+	if fn := fns["As"]; !fn.ReturnsNonNil || fn.ParamMutated != "1" {
+		t.Errorf("As lost seeded flags: %+v", fn)
+	}
+	if out := facts.WriteChecked(pkg, info, []*syntax.File{file}, nil); out == nil {
+		t.Fatal("WriteChecked returned nil for a generic package")
+	}
+	nogen := `package nogen
+
+func F() int { return 1 }
+`
+	ndir := t.TempDir()
+	npath := filepath.Join(ndir, "nogen.lgo")
+	if err := os.WriteFile(npath, []byte(nogen), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	nfile, err := syntax.ParseFile(npath, func(err error) { t.Fatalf("parse: %v", err) }, nil, syntax.LogosMode)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ninfo := &types2.Info{
+		Types:      make(map[syntax.Expr]types2.TypeAndValue),
+		Defs:       make(map[*syntax.Name]types2.Object),
+		Uses:       make(map[*syntax.Name]types2.Object),
+		Selections: make(map[*syntax.SelectorExpr]*types2.Selection),
+		Instances:  make(map[*syntax.Name]types2.Instance),
+	}
+	var nerrs []error
+	nconf := types2.Config{
+		Importer: imp,
+		Error:    func(err error) { nerrs = append(nerrs, err) },
+		Logos:    true,
+	}
+	npkg, _ := nconf.Check("nogen", []*syntax.File{nfile}, ninfo)
+	if err := errors.Join(nerrs...); err != nil {
+		t.Fatalf("check: %v", err)
+	}
+	if out := facts.WriteChecked(npkg, ninfo, []*syntax.File{nfile}, nil); out != nil {
+		t.Fatalf("WriteChecked on a package with no generic declaration = %+v, want nil", out)
+	}
 }
 
 func TestApplyFuncFactsReachablePrivateOrigin(t *testing.T) {

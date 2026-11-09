@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package logos
+package facts
 
 import (
 	"bytes"
@@ -10,66 +10,43 @@ import (
 	"fmt"
 	"slices"
 
-	"cmd/compile/internal/logos/facts"
 	"cmd/compile/internal/syntax"
 	"cmd/compile/internal/types2"
 )
 
 // This file carries the M5-S1 const facts (SPEC Sec 2.1, T-201 and
-// Sec 5, T-Sec5). EmitConstFacts records one const line per const
+// Sec 5, T-Sec5). writeConsts records one const line per const
 // view position in the exported declarations of pkg, plus
 // ReceiverMutated and ParamMutated flags computed by a syntax pass
 // over each function body: a parameter counts as mutated when the body
 // writes through it, appends to it, passes it (or a value derived
 // from it) to a mutating parameter, or stores it anywhere outside the
 // frame (globals, fields, returns, sends, closures, addresses). The
-// parent wires the call into lower.go beside EmitOptionFacts; this
+// writer calls it from Write beside writeOpts; this
 // file stays independent of the lowering passes.
 
-func constAsView(t types2.Type) *types2.ConstView {
-	if t == nil {
-		return nil
-	}
-	if c, ok := types2.Unalias(t).(*types2.ConstView); ok {
-		return c
-	}
-	if n, ok := types2.Unalias(t).(*types2.Named); ok {
-		if u := n.Underlying(); u != nil {
-			if c, ok := u.(*types2.ConstView); ok {
-				return c
-			}
-		}
-	}
-	return nil
-}
-
-// EmitConstFacts adds const view positions and receiver/parameter
-// mutation flags for pkg to f (allocating it when nil) and returns f.
-// Objects are func names, type names, and T.M or (*T).M methods;
-// paths are R<i>, P<i>, F<name>, E, K, D, M<name> steps, mirroring the opt
-// records. The mutation mask sets bit i for Pi, formatted as
-// normalized lowercase hex. Generic functions are skipped: their
-// bodies check per instantiation.
-func EmitConstFacts(pkg *types2.Package, info *types2.Info, files []*syntax.File, f *facts.Facts) *facts.Facts {
+// writeConsts adds const view positions and receiver/parameter
+// mutation flags for pkg to f. Objects are func names, type names,
+// and T.M or (*T).M methods; paths are R<i>, P<i>, F<name>, E, K, D,
+// M<name> steps, mirroring the opt records. The mutation mask sets bit
+// i for Pi, formatted as normalized lowercase hex. Generic functions
+// are skipped: their bodies check per instantiation.
+func writeConsts(pkg *types2.Package, info *types2.Info, files []*syntax.File, f *Facts) {
 	if pkg == nil || pkg.Scope() == nil {
-		return f
-	}
-	if f == nil {
-		f = &facts.Facts{}
+		return
 	}
 	emitConstDecls(pkg, f)
 	emitConstMutations(pkg, info, files, f)
-	return f
 }
 
-func emitConstDecls(pkg *types2.Package, f *facts.Facts) {
+func emitConstDecls(pkg *types2.Package, f *Facts) {
 	emit := func(object, path string) {
 		for _, c := range f.Consts {
 			if c.Object == object && c.Path == path {
 				return
 			}
 		}
-		f.Consts = append(f.Consts, facts.PathFact{Object: object, Path: path})
+		f.Consts = append(f.Consts, PathFact{Object: object, Path: path})
 	}
 	scope := pkg.Scope()
 	for _, name := range scope.Names() {
@@ -114,7 +91,7 @@ func emitConstDecls(pkg *types2.Package, f *facts.Facts) {
 			if tp := sig.TypeParams(); tp != nil && tp.Len() > 0 {
 				continue
 			}
-			emitFuncConsts(methodObject(name, sig.Recv(), m.Name()), sig, emit)
+			emitFuncConsts(MethodObject(name, sig.Recv(), m.Name()), sig, emit)
 		}
 	}
 }
@@ -206,7 +183,7 @@ type constFuncDecl struct {
 // a syntax pass over every package-level function body and merges them
 // into f. Masks propagate between same-package callees to a fixpoint;
 // imported callees consult the recorded facts.
-func emitConstMutations(pkg *types2.Package, info *types2.Info, files []*syntax.File, f *facts.Facts) {
+func emitConstMutations(pkg *types2.Package, info *types2.Info, files []*syntax.File, f *Facts) {
 	decls := collectConstFuncDecls(pkg, info, files)
 	recvMut := make(map[*types2.Func]bool, len(decls))
 	paramMask := make(map[*types2.Func][]byte, len(decls))
@@ -242,17 +219,7 @@ func emitConstMutations(pkg *types2.Package, info *types2.Info, files []*syntax.
 	emitReadonlyFacts(pkg, f, decls, recvMut, paramMask)
 }
 
-func findOrCreateFnFact(f *facts.Facts, object string) *facts.FnFact {
-	for i := range f.Fns {
-		if f.Fns[i].Object == object {
-			return &f.Fns[i]
-		}
-	}
-	f.Fns = append(f.Fns, facts.FnFact{Object: object})
-	return &f.Fns[len(f.Fns)-1]
-}
-
-func emitReadonlyFacts(pkg *types2.Package, f *facts.Facts, decls []constFuncDecl, recvMut map[*types2.Func]bool, paramMask map[*types2.Func][]byte) {
+func emitReadonlyFacts(pkg *types2.Package, f *Facts, decls []constFuncDecl, recvMut map[*types2.Func]bool, paramMask map[*types2.Func][]byte) {
 	for _, d := range decls {
 		if d.obj == nil || !d.obj.LogosReadonly() {
 			continue
@@ -317,109 +284,14 @@ func emitReadonlyFacts(pkg *types2.Package, f *facts.Facts, decls []constFuncDec
 	emitReadonlyNestedFacts(pkg, f)
 }
 
-// EmitAssertEffects records generic assertion-effect masks for pkg into f
-// (allocating it when nil) and returns f. For every exported generic
-// package-level function it records the function's own type-parameter and
-// receiver type-parameter masks; for every method, including unexported
-// ones reachable through dynamic dispatch, of every exported non-alias
-// generic named type it records the method origin's receiver mask with an
-// empty function mask. Objects use the T.M / (*T).M method spelling shared
-// with the opt and const records. Masks render through
-// types2.LogosAssertMaskHex (empty is "0"); every record sets HasAssert
-// because local analysis is complete at emission. Unexported functions and
-// non-generic declarations record nothing; effects that report unknown are
-// skipped so the consumer fails closed. Existing FnFact entries for the
-// same object are merged, never replaced.
-func EmitAssertEffects(pkg *types2.Package, f *facts.Facts) *facts.Facts {
-	if pkg == nil || pkg.Scope() == nil {
-		return f
-	}
-	if f == nil {
-		tmp := &facts.Facts{}
-		emitAssertEffects(pkg, tmp)
-		if len(tmp.Fns) == 0 {
-			return nil
-		}
-		return tmp
-	}
-	emitAssertEffects(pkg, f)
-	return f
-}
-
-func emitAssertEffects(pkg *types2.Package, f *facts.Facts) {
-	scope := pkg.Scope()
-	if scope == nil {
-		return
-	}
-	for _, name := range scope.Names() {
-		obj, ok := scope.Lookup(name).(*types2.Func)
-		if !ok || obj == nil || !obj.Exported() {
-			continue
-		}
-		sig, ok := obj.Type().(*types2.Signature)
-		if !ok || sig.Recv() != nil {
-			continue
-		}
-		if tp := sig.TypeParams(); tp == nil || tp.Len() == 0 {
-			continue
-		}
-		tpMask, rtpMask, known := obj.LogosAssertEffects()
-		if !known {
-			continue
-		}
-		fn := findOrCreateFnFact(f, name)
-		fn.AssertTP = types2.LogosAssertMaskHex(tpMask)
-		fn.AssertRTP = types2.LogosAssertMaskHex(rtpMask)
-		fn.HasAssert = true
-	}
-	for _, name := range scope.Names() {
-		tn, ok := scope.Lookup(name).(*types2.TypeName)
-		if !ok || tn == nil || tn.IsAlias() {
-			continue
-		}
-		named, ok := tn.Type().(*types2.Named)
-		if !ok {
-			continue
-		}
-		// Unexported generic types are emitted too: an exported wrapper
-		// of an unexported clean container must stay exactly clean for
-		// importers, which recompute type aggregates from these records.
-		for i := range named.NumMethods() {
-			m := named.Method(i)
-			if m == nil {
-				continue
-			}
-			sig, ok := m.Type().(*types2.Signature)
-			if !ok {
-				continue
-			}
-			om := m.Origin()
-			if om == nil {
-				continue
-			}
-			if sig.TypeParams().Len() == 0 && sig.RecvTypeParams().Len() == 0 {
-				continue
-			}
-			tpMask, rtpMask, known := om.LogosAssertEffects()
-			if !known {
-				continue
-			}
-			fn := findOrCreateFnFact(f, methodObject(name, sig.Recv(), m.Name()))
-			fn.AssertTP = types2.LogosAssertMaskHex(tpMask)
-			fn.AssertRTP = types2.LogosAssertMaskHex(rtpMask)
-			fn.HasAssert = true
-		}
-	}
-}
-
-func emitReadonlyNestedFacts(pkg *types2.Package, f *facts.Facts) {
+func emitReadonlyNestedFacts(pkg *types2.Package, f *Facts) {
 	emit := func(object, path string) {
 		for _, r := range f.Readonlys {
 			if r.Object == object && r.Path == path {
 				return
 			}
 		}
-		f.Readonlys = append(f.Readonlys, facts.ReadonlyFact{Object: object, Path: path})
+		f.Readonlys = append(f.Readonlys, ReadonlyFact{Object: object, Path: path})
 	}
 	scope := pkg.Scope()
 	if scope == nil {
@@ -459,7 +331,7 @@ func emitReadonlyNestedFacts(pkg *types2.Package, f *facts.Facts) {
 			if !ok {
 				continue
 			}
-			walkReadonlySig(sig, nil, methodObject(name, sig.Recv(), m.Name()), emit, make(map[types2.Type]bool))
+			walkReadonlySig(sig, nil, MethodObject(name, sig.Recv(), m.Name()), emit, make(map[types2.Type]bool))
 		}
 	}
 }
@@ -523,11 +395,11 @@ func walkReadonlyType(t types2.Type, path []string, object string, emit func(str
 		walkReadonlyType(a.Rhs(), path, object, emit, seen)
 		return
 	}
-	if opt := optAsOption(t); opt != nil {
+	if opt := optionOf(t); opt != nil {
 		walkReadonlyType(opt.Elem, append(slices.Clone(path), "E"), object, emit, seen)
 		return
 	}
-	if c := constAsView(t); c != nil {
+	if c := constView(t); c != nil {
 		walkReadonlyType(c.Elem, append(slices.Clone(path), "E"), object, emit, seen)
 		return
 	}
@@ -755,7 +627,7 @@ func constFuncName(pkg *types2.Package, obj *types2.Func, sig *types2.Signature)
 		return obj.Name()
 	}
 	if named, ok := constRecvBase(sig.Recv().Type()).(*types2.Named); ok && named.Obj().Pkg() == pkg {
-		return methodObject(named.Obj().Name(), sig.Recv(), obj.Name())
+		return MethodObject(named.Obj().Name(), sig.Recv(), obj.Name())
 	}
 	return obj.Name()
 }
@@ -1307,7 +1179,7 @@ func (s *constBodyScan) calleeFacts(fn *types2.Func) (bool, []byte) {
 		}
 		return true, nil
 	}
-	if f, ok := facts.Lookup(fn.Pkg().Path()); ok && f != nil {
+	if f, ok := Lookup(fn.Pkg().Path()); ok && f != nil {
 		for i := range f.Fns {
 			entry := &f.Fns[i]
 			if entry.Object != fn.Name() && entry.Object != constMethodName(fn) {
@@ -1336,7 +1208,7 @@ func constMethodName(fn *types2.Func) string {
 		return fn.Name()
 	}
 	if named, ok := constRecvBase(sig.Recv().Type()).(*types2.Named); ok {
-		return methodObject(named.Obj().Name(), sig.Recv(), fn.Name())
+		return MethodObject(named.Obj().Name(), sig.Recv(), fn.Name())
 	}
 	return fn.Name()
 }

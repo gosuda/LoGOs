@@ -584,8 +584,8 @@ func checkLoweredForOverlay(t *testing.T, src string) (*types2.Package, []facts.
 	if err := errors.Join(cerrs...); err != nil {
 		t.Fatalf("check: %v", err)
 	}
-	f := EmitOptionFacts(pkg, info)
-	if f = EmitConstFacts(pkg, info, files, f); f == nil {
+	f := facts.Write(pkg, info, files, map[*syntax.File][]byte{file: []byte(src)})
+	if len(f.Opts)+len(f.Consts) == 0 {
 		t.Fatal("no facts emitted")
 	}
 	changed, edits := Lower(pkg, info, files, map[*syntax.File][]byte{file: []byte(src)})
