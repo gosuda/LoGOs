@@ -19,6 +19,55 @@ func rejectCloseChan(c const chan int) {
 	close(c) // ERROR "const_view_mutation"
 }
 
+func rejectAppend(v const []byte) {
+	_ = append(v, 1) // ERROR "const_view_mutation"
+}
+
+func rejectCopy(dst const []byte, src []byte) {
+	_ = copy(dst, src) // ERROR "const_view_mutation"
+}
+
+func rejectDelete(m const map[string]int) {
+	delete(m, "a") // ERROR "const_view_mutation"
+}
+
+func rejectClearMap(m const map[string]int) {
+	clear(m) // ERROR "const_view_mutation"
+}
+
+func rejectClearSlice(s const []int) {
+	clear(s) // ERROR "const_view_mutation"
+}
+
+func rejectCapBound(v const []byte) {
+	_ = v[:cap(v)] // ERROR "const_view_mutation"
+}
+
+type RangeBox struct {
+	S []int
+}
+
+func rejectRangeStore(xs const []RangeBox) {
+	for _, v := range xs {
+		v.S[0] = 1 // ERROR "const_view_mutation"
+	}
+}
+
+func rejectEscapePtrSlice(v const []*Stream) {
+	var plain []*Stream = v // ERROR "const_view_escape"
+	_ = plain
+}
+type RefPoint struct {
+	X int
+	Y int
+}
+
+func acceptRefFree(v const RefPoint) {
+	var p RefPoint = v
+	_ = p
+}
+
+
 func validControls(v const []byte, s const *Stream) {
 	_ = len(v)
 	_ = cap(v)
