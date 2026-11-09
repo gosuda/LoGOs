@@ -42,14 +42,6 @@ func logosDepVerifiedFacts(dep string) (*facts.Facts, error) {
 	return rec, nil
 }
 
-func logosDepWillStructurallyClone(dep string) (bool, error) {
-	rec, err := logosDepVerifiedFacts(dep)
-	if err != nil || rec == nil {
-		return false, err
-	}
-	return len(rec.Opts) != 0 || len(rec.Consts) != 0, nil
-}
-
 func logosDepResolvable(dep string) bool {
 	if base.Flag.Cfg.PackageFile == nil {
 		return true

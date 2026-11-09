@@ -120,16 +120,6 @@ func logosProvenReadonlyMap(pkg *types2.Package) map[string]bool {
 	return handoff
 }
 
-func logosSealProvenCarry(conf *types2.Config) map[string]bool {
-	return conf.LogosProvenReadonly
-}
-
-func logosStampProvenReadonly(pkg *types2.Package, proven map[string]bool) {
-	if len(proven) > 0 {
-		types2.LogosStampProvenReadonly(pkg, proven)
-	}
-}
-
 func logosWriteCheckedFacts(pkg *types2.Package, info *types2.Info, files []*syntax.File) {
 	if pkg == nil {
 		return
@@ -229,18 +219,8 @@ func lowerLogosHook(pkg *types2.Package, info *types2.Info, files []*syntax.File
 	return true
 }
 
-func logosConfigureOwnedConstantsFirst(conf *types2.Config) {
-	logosConfigureOwnedConstantsImpl(conf, false)
-}
-
 func logosConfigureOwnedConstantsLowered(conf *types2.Config) {
-	logosConfigureOwnedConstantsImpl(conf, true)
-}
-
-func logosConfigureOwnedConstantsImpl(conf *types2.Config, lowered bool) {
-	if lowered {
-		conf.LogosOwnedTypes = logos.OwnedTypeNodes()
-	}
+	conf.LogosOwnedTypes = logos.OwnedTypeNodes()
 }
 
 func writeLogosEject(files []*syntax.File) {

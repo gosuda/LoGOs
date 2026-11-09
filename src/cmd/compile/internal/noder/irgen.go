@@ -50,7 +50,7 @@ func checkFiles(m posMap, noders []*noder) (*types2.Package, *types2.Info, map[*
 
 	didMidway := false
 	didLogos := false
-	var logosProvenCarry map[string]bool // logos: invocation-local proof carry; see logosSealProvenCarry.
+	var logosProvenCarry map[string]bool // logos: invocation-local proof carry.
 
 recheck:
 	provenForThisCheck := logosProvenCarry
@@ -89,8 +89,6 @@ recheck:
 	logosConfigureComptime(&conf, info) // logos M5-S2 hook: configure comptime step and node limits.
 	if didLogos {
 		logosConfigureOwnedConstantsLowered(&conf) // generated nodes alone receive fresh private-type references.
-	} else {
-		logosConfigureOwnedConstantsFirst(&conf) // first check: no generated-node registrations.
 	}
 	conf.Error = func(err error) {
 		terr := err.(types2.Error)
@@ -210,11 +208,11 @@ recheck:
 		didLogos = true
 		logosLintHook(&m, files, pkg, info) // logos M9 hook: lints see the unlowered tree.
 		if logosRecheckHook(&conf, pkg, info, files) {
-			logosProvenCarry = logosSealProvenCarry(&conf)
+			logosProvenCarry = conf.LogosProvenReadonly
 			goto recheck
 		}
 	}
-	logosStampProvenReadonly(pkg, provenForThisCheck)
+	types2.LogosStampProvenReadonly(pkg, provenForThisCheck)
 
 	if buildcfg.Experiment.SIMD && !didMidway {
 		didMidway = true
