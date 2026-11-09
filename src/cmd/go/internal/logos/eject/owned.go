@@ -197,11 +197,11 @@ func ownedRequestsEqual(a, b logosowned.Request) bool {
 	return true
 }
 
-func findOwnedOwner(plan *ejectPlan, owner string) *load.Package {
+func selectOwnedPackage(pkgs []*load.Package, owner string) *load.Package {
 	var fallback *load.Package
-	consider := func(p *load.Package) *load.Package {
+	for _, p := range pkgs {
 		if p.ImportPath != owner {
-			return nil
+			continue
 		}
 		if p.ForTest == "" && p.Internal.TestmainGo == nil {
 			return p
@@ -209,40 +209,23 @@ func findOwnedOwner(plan *ejectPlan, owner string) *load.Package {
 		if fallback == nil {
 			fallback = p
 		}
-		return nil
-	}
-	for _, p := range plan.main.pkgs {
-		if hit := consider(p); hit != nil {
-			return hit
-		}
-	}
-	for _, path := range slices.Sorted(maps.Keys(plan.depByPath)) {
-		for _, p := range plan.depByPath[path].pkgs {
-			if hit := consider(p); hit != nil {
-				return hit
-			}
-		}
 	}
 	return fallback
+}
+
+func findOwnedOwner(plan *ejectPlan, owner string) *load.Package {
+	all := slices.Clone(plan.main.pkgs)
+	for _, path := range slices.Sorted(maps.Keys(plan.depByPath)) {
+		all = append(all, plan.depByPath[path].pkgs...)
+	}
+	return selectOwnedPackage(all, owner)
 }
 
 func ownedFindDeclPackage(plan *ejectPlan, owner string) *load.Package {
 	if plan != nil && plan.provenance != nil {
 		if pkgs, ok := plan.provenance[owner]; ok && len(pkgs) > 0 {
-			var fallback *load.Package
-			for _, p := range pkgs {
-				if p.ImportPath != owner {
-					continue
-				}
-				if p.ForTest == "" && p.Internal.TestmainGo == nil {
-					return p
-				}
-				if fallback == nil {
-					fallback = p
-				}
-			}
-			if fallback != nil {
-				return fallback
+			if hit := selectOwnedPackage(pkgs, owner); hit != nil {
+				return hit
 			}
 		}
 	}
@@ -450,7 +433,7 @@ func ownedResolveGroup(plan *ejectPlan, dir string, dests []*ownedDest) ([]*owne
 			if !ok {
 				return fmt.Errorf("helper %s does not parse after condition merge", rep.req.ID)
 			}
-			fixed = gofmtSource(fixed)
+			fixed = gofmtRun([]string{gofmtBinary()}, fixed)
 			sum := sha256.Sum256(fixed)
 			hash := hex.EncodeToString(sum[:])
 			if test {
@@ -486,7 +469,7 @@ func ownedResolveGroup(plan *ejectPlan, dir string, dests []*ownedDest) ([]*owne
 			continue
 		}
 		notProd := &constraint.NotExpr{X: prodCond}
-		testCond := ownedAndExprs([]constraint.Expr{testOr, notProd})
+		testCond := ownedCombineAnd([]constraint.Expr{testOr, notProd})
 		if err := emitOne(testDests[0], testCond, true); err != nil {
 			return nil, err
 		}
@@ -514,7 +497,7 @@ func ownedEffectiveCondition(plan *ejectPlan, req *logosowned.Request) (constrai
 			isTest = true
 		}
 	}
-	return ownedAndExprs(conds), isTest, nil
+	return ownedCombineAnd(conds), isTest, nil
 }
 
 func ownedDeclarationCondition(plan *ejectPlan, declOwner, declFile string) (constraint.Expr, bool, error) {
@@ -657,7 +640,7 @@ func ownedFileCondition(name string, f *ast.File) (constraint.Expr, error) {
 	if ownedHasCgo(f) {
 		parts = append(parts, &constraint.TagExpr{Tag: "cgo"})
 	}
-	return ownedAndExprs(parts), nil
+	return ownedCombineAnd(parts), nil
 }
 
 func ownedHeaderExpr(f *ast.File) (constraint.Expr, error) {
@@ -727,10 +710,6 @@ func ownedHasCgo(f *ast.File) bool {
 		}
 	}
 	return false
-}
-
-func ownedAndExprs(conds []constraint.Expr) constraint.Expr {
-	return ownedCombineAnd(conds)
 }
 
 func ownedOrExprs(conds []constraint.Expr) constraint.Expr {

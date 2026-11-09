@@ -242,10 +242,6 @@ func gofmtRun(args []string, stdin []byte) []byte {
 	return out
 }
 
-func gofmtSource(data []byte) []byte {
-	return gofmtRun([]string{gofmtBinary()}, data)
-}
-
 func gofmtBinary() string {
 	gofmt := "gofmt" + ejectToolExeSuffix
 	p := filepath.Join(cfg.GOBIN, gofmt)
@@ -587,10 +583,6 @@ func writeEjectedTree(plan *ejectPlan, staging, out string) {
 	if err != nil {
 		base.Fatalf("logos eject: %s: %v", out, err)
 	}
-	// Support use comes from every Go source the tree writes: copied
-	// plain Go files in the main module and the ejected dependency
-	// modules, and compiler-emitted loGo/s files. Support emission and the
-	// go.mod rewriting below read this one flag.
 	emitOne := emitPackageGoFiles
 	if isEjectVariant() {
 		emitOne = emitPackageGoFilesVariant
@@ -614,8 +606,6 @@ func writeEjectedTree(plan *ejectPlan, staging, out string) {
 			}
 		}
 	}
-	// Owned helpers land after package copy, so generated files only ever
-	// appear in the output tree, and before go.mod rewriting, so modules
 	// pulled in only by an owned helper still get their require lines.
 	if usesOwned, err := emitOwnedHelpers(plan, staging, out, ejected); err != nil {
 		base.Fatalf("logos eject: %v", err)
@@ -679,10 +669,44 @@ func writeLoweredFile(dstRoot, rel, stem, name string, raw []byte) bool {
 // owned file is present, so a miss is a build failure, never a silent
 // omission or raw fallback.
 func emitPackageGoFiles(p *load.Package, plan *ejectPlan, staging, dstRoot, modRoot string) bool {
+	return emitLoweredGoFiles(p, plan, emitDest{staging: staging, dstRoot: dstRoot, modRoot: modRoot}, emitStrictMissing)
+}
+
+func emitPackageGoFilesVariant(p *load.Package, plan *ejectPlan, staging, dstRoot, modRoot string) bool {
+	return emitLoweredGoFiles(p, plan, emitDest{staging: staging, dstRoot: dstRoot, modRoot: modRoot}, emitSkipMissing)
+}
+
+type emitDest struct {
+	staging string
+	dstRoot string
+	modRoot string
+}
+
+type emitMissingFunc func(p *load.Package, name string, ignoredSet map[string]bool, err error) bool
+
+func emitStrictMissing(p *load.Package, name string, ignoredSet map[string]bool, err error) bool {
+	if os.IsNotExist(err) && ignoredSet[name] {
+		srcData, readErr := os.ReadFile(filepath.Join(p.Dir, name))
+		if readErr != nil {
+			base.Fatalf("logos eject: missing ejected output for %s: %v", filepath.Join(p.Dir, name), readErr)
+		}
+		if isBuildIgnored(srcData) {
+			return true
+		}
+	}
+	base.Fatalf("logos eject: missing ejected output for %s: %v", filepath.Join(p.Dir, name), err)
+	return true
+}
+
+func emitSkipMissing(p *load.Package, name string, ignoredSet map[string]bool, err error) bool {
+	return true
+}
+
+func emitLoweredGoFiles(p *load.Package, plan *ejectPlan, dest emitDest, onMissing emitMissingFunc) bool {
 	if !ejectOwnsLogos(p) {
 		return false
 	}
-	rel, err := filepath.Rel(modRoot, p.Dir)
+	rel, err := filepath.Rel(dest.modRoot, p.Dir)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		base.Fatalf("logos eject: package %s outside module", p.ImportPath)
 	}
@@ -695,52 +719,13 @@ func emitPackageGoFiles(p *load.Package, plan *ejectPlan, staging, dstRoot, modR
 		}
 		seen[name] = true
 		stem := logosStem(name)
-		raw, err := os.ReadFile(filepath.Join(staging, filepath.FromSlash(p.ImportPath), stem+".go"))
+		raw, err := os.ReadFile(filepath.Join(dest.staging, filepath.FromSlash(p.ImportPath), stem+".go"))
 		if err != nil {
-			if os.IsNotExist(err) && ignoredSet[name] {
-				srcData, readErr := os.ReadFile(filepath.Join(p.Dir, name))
-				if readErr != nil {
-					base.Fatalf("logos eject: missing ejected output for %s: %v", filepath.Join(p.Dir, name), readErr)
-				}
-				if isBuildIgnored(srcData) {
-					continue
-				}
+			if onMissing(p, name, ignoredSet, err) {
+				continue
 			}
-			base.Fatalf("logos eject: missing ejected output for %s: %v", filepath.Join(p.Dir, name), err)
 		}
-		if writeLoweredFile(dstRoot, rel, stem, name, raw) {
-			used = true
-		}
-	}
-	return used
-}
-
-// emitPackageGoFilesVariant emits only the files its own GOOS/tags
-// context selected. Other inactive variants are absent in this context
-// by design, so it skips every missing file; the main eject merges
-// every helper tree and fails loudly if anything is still missing.
-func emitPackageGoFilesVariant(p *load.Package, plan *ejectPlan, staging, dstRoot, modRoot string) bool {
-	if !ejectOwnsLogos(p) {
-		return false
-	}
-	rel, err := filepath.Rel(modRoot, p.Dir)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		base.Fatalf("logos eject: package %s outside module", p.ImportPath)
-	}
-	names, _ := ejectPackageNames(p, plan)
-	used := false
-	seen := make(map[string]bool, len(names))
-	for _, name := range names {
-		if seen[name] || !cfg.IsLogosFile(name) {
-			continue
-		}
-		seen[name] = true
-		stem := logosStem(name)
-		raw, err := os.ReadFile(filepath.Join(staging, filepath.FromSlash(p.ImportPath), stem+".go"))
-		if err != nil {
-			continue
-		}
-		if writeLoweredFile(dstRoot, rel, stem, name, raw) {
+		if writeLoweredFile(dest.dstRoot, rel, stem, name, raw) {
 			used = true
 		}
 	}
@@ -939,14 +924,10 @@ func matchVariantTags(pkgDir, name, goos, goarch string, hostTags, customUniq []
 	return nil, false
 }
 
-func validEjectPlatform(goos, goarch string) bool {
-	return work.CheckGOOSARCHPair(goos, goarch) == nil
-}
-
 func searchVariantContext(pkgDir, name string, goosCands, goarchCands, hostTags, customUniq []string) (string, string, []string, bool) {
 	for _, goos := range goosCands {
 		for _, goarch := range goarchCands {
-			if !validEjectPlatform(goos, goarch) {
+			if work.CheckGOOSARCHPair(goos, goarch) != nil {
 				continue
 			}
 			if tags, ok := matchVariantTags(pkgDir, name, goos, goarch, hostTags, customUniq); ok {
@@ -1395,7 +1376,7 @@ func sanitizeSiteStem(s string) string {
 	b.Grow(len(s))
 	prevUnderscore := false
 	for _, r := range s {
-		if r >= 'A' && r <= 'Z' || r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '_' {
+		if isSiteWordRune(r) {
 			b.WriteRune(r)
 			prevUnderscore = false
 			continue
@@ -1410,6 +1391,10 @@ func sanitizeSiteStem(s string) string {
 		return "file"
 	}
 	return out
+}
+
+func isSiteWordRune(r rune) bool {
+	return r >= 'A' && r <= 'Z' || r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '_'
 }
 
 // siteNamespace namespaces per-compilation site symbols by file stem
