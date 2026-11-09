@@ -196,16 +196,13 @@ func (p *Proxy) mergeCodeActions(pend pending, result any) any {
 	if p.opts.CodeActions == nil {
 		return result
 	}
-	var lines [][]byte
-	var src []byte
-	if pend.fixHas {
-		var moved bool
-		lines, src, moved = p.autofixSince(pend.path, pend.fixVersion)
-		if moved {
-			return []any{}
-		}
-	} else {
-		lines, src = p.autofixCurrent(pend.path)
+	st := p.autofixObserve(pend.path)
+	if pend.fixHas && (!st.open || st.version != pend.fixVersion) {
+		return []any{}
+	}
+	lines, src := st.lines, st.src
+	if !st.current {
+		lines, src = nil, nil
 	}
 	if src == nil {
 		return result
@@ -273,32 +270,4 @@ func (p *Proxy) autofixObserve(path string) autofixState {
 	}
 	st.src, st.current = doc.text.data, true
 	return st
-}
-
-// autofixCurrent returns the compiler diagnostic lines and text for an
-// answer computed without gopls, or nothing when the document is not
-// open with current diagnostics.
-func (p *Proxy) autofixCurrent(path string) ([][]byte, []byte) {
-	st := p.autofixObserve(path)
-	if !st.current {
-		return nil, nil
-	}
-	return st.lines, st.src
-}
-
-// autofixSince returns the compiler diagnostic lines and text for a
-// request that saw version. It reports moved when the document has since
-// changed or closed: the whole codeAction answer must be dropped, since
-// neither the old range nor the old coordinates apply. A document that is
-// merely behind on diagnostics is not a move: there is nothing
-// compiler-side to add, and the gopls answer, if any, stands.
-func (p *Proxy) autofixSince(path string, version int) (lines [][]byte, src []byte, moved bool) {
-	st := p.autofixObserve(path)
-	if !st.open || st.version != version {
-		return nil, nil, true
-	}
-	if !st.current {
-		return nil, nil, false
-	}
-	return st.lines, st.src, false
 }
