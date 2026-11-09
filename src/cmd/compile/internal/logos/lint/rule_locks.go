@@ -194,7 +194,7 @@ func (c *lockAudit) checkFunc(pass *Pass, decl *syntax.FuncDecl, f *syntax.File)
 			}
 		}
 	}
-	v := &lockFlow{c: c, pass: pass, decl: decl, file: f, st: &st, local: make(map[types2.Object]bool), published: make(map[types2.Object]bool)}
+	v := &lockFlow{c: c, pass: pass, decl: decl, file: f, st: &st, local: make(map[types2.Object]bool), published: make(map[types2.Object]bool), methods: make(map[types2.Object]methodLock)}
 	v.walkStmts(decl.Body.List)
 	v.checkDefers(decl.Body.List)
 }
@@ -209,6 +209,12 @@ type lockFlow struct {
 	local     map[types2.Object]bool
 	published map[types2.Object]bool
 	gotos     map[string]heldSet
+	methods   map[types2.Object]methodLock
+}
+
+type methodLock struct {
+	key heldLock
+	op  string
 }
 
 func (v *lockFlow) walkStmts(list []syntax.Stmt) {
@@ -360,7 +366,7 @@ func (v *lockFlow) walkCallStmt(s *syntax.CallStmt) {
 		v.recordDefer(call)
 		v.walkDeferArgs(call)
 	case "go":
-		spawned := &lockFlow{c: v.c, pass: v.pass, decl: v.decl, file: v.file, st: &lockState{held: heldSet{}}, local: v.local, published: v.published}
+		spawned := &lockFlow{c: v.c, pass: v.pass, decl: v.decl, file: v.file, st: &lockState{held: heldSet{}}, local: v.local, published: v.published, methods: v.methods}
 		spawned.walkExpr(call)
 	default:
 		v.walkExpr(call)
@@ -376,6 +382,7 @@ func (v *lockFlow) walkAssign(s *syntax.AssignStmt) {
 	if s.Op == syntax.Def {
 		v.noteDefAllocs(s)
 	}
+	v.noteMethodValue(s)
 	for _, lhs := range exprList(s.Lhs) {
 		v.publishFrom(lhs, s.Rhs)
 	}
@@ -397,6 +404,78 @@ func (v *lockFlow) noteDefAllocs(s *syntax.AssignStmt) {
 		}
 	}
 }
+
+func (v *lockFlow) noteMethodValue(s *syntax.AssignStmt) {
+	lhs, rhs := exprList(s.Lhs), exprList(s.Rhs)
+	if len(lhs) != 1 || len(rhs) != 1 {
+		for _, el := range lhs {
+			if name, ok := syntax.Unparen(el).(*syntax.Name); ok {
+				if obj := v.methodObj(s, name); obj != nil {
+					delete(v.methods, obj)
+				}
+			}
+		}
+		return
+	}
+	name, ok := syntax.Unparen(lhs[0]).(*syntax.Name)
+	if !ok || isBlank(name) {
+		return
+	}
+	obj := v.methodObj(s, name)
+	if obj == nil {
+		return
+	}
+	if m, ok := v.methodLockOf(rhs[0]); ok {
+		v.methods[obj] = m
+		return
+	}
+	delete(v.methods, obj)
+}
+
+func (v *lockFlow) methodObj(s *syntax.AssignStmt, name *syntax.Name) types2.Object {
+	if s.Op == syntax.Def {
+		return v.c.in.defObject(name)
+	}
+	return v.c.in.useObject(name)
+}
+
+func (v *lockFlow) methodLockOf(rhs syntax.Expr) (methodLock, bool) {
+	sel, ok := syntax.Unparen(rhs).(*syntax.SelectorExpr)
+	if !ok {
+		return methodLock{}, false
+	}
+	selObj := v.c.selectionOf(sel)
+	if selObj == nil || selObj.Kind() != types2.MethodVal {
+		return methodLock{}, false
+	}
+	key, ok := v.c.keyOf(sel.X)
+	if !ok {
+		return methodLock{}, false
+	}
+	if !isMutexType(selObj.Recv()) {
+		path, ok := v.c.promotedMutexPath(selObj, sel.X)
+		if !ok {
+			return methodLock{}, false
+		}
+		key, _ = joinContractKey(key, true, path)
+	}
+	switch sel.Sel.Value {
+	case "Lock", "RLock", "Unlock", "RUnlock", "TryLock":
+		return methodLock{key: key, op: sel.Sel.Value}, true
+	}
+	return methodLock{}, false
+}
+
+func (v *lockFlow) applyMethodLock(m methodLock) {
+	switch m.op {
+	case "Lock":
+		v.st.held.hold(m.key, holdWrite)
+	case "RLock":
+		v.st.held.hold(m.key, holdRead)
+	default:
+		v.st.held.hold(m.key, holdNone)
+	}
+}
 func (v *lockFlow) walkLhs(lhs syntax.Expr) {
 	for _, e := range exprList(lhs) {
 		switch x := syntax.Unparen(e).(type) {
@@ -416,7 +495,26 @@ func (v *lockFlow) walkDecls(decls []syntax.Decl) {
 		if vd, ok := d.(*syntax.VarDecl); ok && vd.Values != nil {
 			v.walkExpr(vd.Values)
 			v.noteLocalAllocs(vd)
+			v.noteMethodVar(vd)
 		}
+	}
+}
+
+func (v *lockFlow) noteMethodVar(vd *syntax.VarDecl) {
+	vals := exprList(vd.Values)
+	for i, nm := range vd.NameList {
+		if i >= len(vals) {
+			break
+		}
+		obj := v.c.in.defObject(nm)
+		if obj == nil {
+			continue
+		}
+		if m, ok := v.methodLockOf(vals[i]); ok {
+			v.methods[obj] = m
+			continue
+		}
+		delete(v.methods, obj)
 	}
 }
 
@@ -477,11 +575,11 @@ func (v *lockFlow) walkExpr(e syntax.Expr) {
 		v.walkExpr(e.X)
 	case *syntax.FuncLit:
 		v.noteClosureCapture(e.Body)
-		inner := &lockFlow{c: v.c, pass: v.pass, decl: v.decl, file: v.file, st: &lockState{held: heldSet{}}, local: v.local, published: v.published}
+		inner := &lockFlow{c: v.c, pass: v.pass, decl: v.decl, file: v.file, st: &lockState{held: heldSet{}}, local: v.local, published: v.published, methods: v.methods}
 		inner.walkStmts(e.Body.List)
 	case *syntax.LambdaExpr:
 		v.noteClosureCapture(e.Body)
-		inner := &lockFlow{c: v.c, pass: v.pass, decl: v.decl, file: v.file, st: &lockState{held: heldSet{}}, local: v.local, published: v.published}
+		inner := &lockFlow{c: v.c, pass: v.pass, decl: v.decl, file: v.file, st: &lockState{held: heldSet{}}, local: v.local, published: v.published, methods: v.methods}
 		switch b := e.Body.(type) {
 		case *syntax.BlockStmt:
 			inner.walkStmts(b.List)
@@ -504,6 +602,14 @@ func (v *lockFlow) walkExpr(e syntax.Expr) {
 
 // walkCall applies the lock effects of call and walks its operands.
 func (v *lockFlow) walkCall(call *syntax.CallExpr) {
+	if name, ok := syntax.Unparen(call.Fun).(*syntax.Name); ok && len(call.ArgList) == 0 {
+		if obj := v.c.in.useObject(name); obj != nil {
+			if m, ok := v.methods[obj]; ok {
+				v.applyMethodLock(m)
+				return
+			}
+		}
+	}
 	if lit, ok := syntax.Unparen(call.Fun).(*syntax.FuncLit); ok {
 		v.walkInlineCall(call, lit.Body)
 		return
@@ -543,7 +649,7 @@ func (v *lockFlow) walkInlineCall(call *syntax.CallExpr, body syntax.Node) {
 		v.walkExpr(arg)
 	}
 	v.noteClosureCapture(body)
-	inner := &lockFlow{c: v.c, pass: v.pass, decl: v.decl, file: v.file, st: &lockState{held: v.st.held}, local: v.local, published: v.published}
+	inner := &lockFlow{c: v.c, pass: v.pass, decl: v.decl, file: v.file, st: &lockState{held: v.st.held}, local: v.local, published: v.published, methods: v.methods}
 	switch b := body.(type) {
 	case *syntax.BlockStmt:
 		inner.walkStmts(b.List)
@@ -1033,7 +1139,7 @@ func (v *lockFlow) checkDefers(list []syntax.Stmt) {
 	for i := len(defers) - 1; i >= 0; i-- {
 		d := defers[i]
 		if d.fnBody != nil {
-			inner := &lockFlow{c: v.c, pass: v.pass, decl: v.decl, file: d.file, st: &lockState{held: exit.clone()}, local: v.local, published: v.published}
+			inner := &lockFlow{c: v.c, pass: v.pass, decl: v.decl, file: d.file, st: &lockState{held: exit.clone()}, local: v.local, published: v.published, methods: v.methods}
 			switch b := d.fnBody.(type) {
 			case *syntax.BlockStmt:
 				inner.walkStmts(b.List)
@@ -1047,7 +1153,7 @@ func (v *lockFlow) checkDefers(list []syntax.Stmt) {
 			continue
 		}
 		if ct := v.callContract(d.call); ct != nil {
-			sub := &lockFlow{c: v.c, pass: v.pass, decl: v.decl, file: d.file, st: &lockState{held: exit}, local: v.local, published: v.published}
+			sub := &lockFlow{c: v.c, pass: v.pass, decl: v.decl, file: d.file, st: &lockState{held: exit}, local: v.local, published: v.published, methods: v.methods}
 			sub.applyCallContract(d.call, ct)
 		}
 	}
