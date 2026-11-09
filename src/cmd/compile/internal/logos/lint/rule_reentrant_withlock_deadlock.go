@@ -5,6 +5,8 @@
 package lint
 
 import (
+	"strings"
+
 	"cmd/compile/internal/syntax"
 	"cmd/compile/internal/types2"
 )
@@ -306,6 +308,7 @@ func (c *lockCheck) noteLockCall(call *syntax.CallExpr, f *syntax.File) {
 		return
 	}
 	key := c.keyOf(sel.X)
+	key.path += c.promotedPath(sel, sel.X)
 	if key.root == nil {
 		return
 	}
@@ -336,6 +339,24 @@ func (c *lockCheck) noteLockCall(call *syntax.CallExpr, f *syntax.File) {
 		}
 	}
 	c.calls[call] = lc
+}
+
+func (c *lockCheck) promotedPath(sel *syntax.SelectorExpr, recv syntax.Expr) string {
+	s := c.pass.Info.Selections[sel]
+	if s == nil || len(s.Index()) < 2 {
+		return ""
+	}
+	t := TypeOf(recv)
+	var sb strings.Builder
+	for _, idx := range s.Index()[:len(s.Index())-1] {
+		st, ok := structOf(t)
+		if !ok || idx < 0 || idx >= st.NumFields() {
+			return ""
+		}
+		sb.WriteString("." + st.Field(idx).Name())
+		t = st.Field(idx).Type()
+	}
+	return sb.String()
 }
 
 // callbackTarget resolves a WithLock callback argument that is a plain
