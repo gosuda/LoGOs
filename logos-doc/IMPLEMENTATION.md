@@ -76,7 +76,7 @@ Production Go scope: retain upstream cmd/go command registration, compiler APIs,
 ### G3. Upstream diff rule (rebase economics, PLAN Sec 18)
 
 - In upstream files, add hook lines only: a call into a `*_logos.go` file or a new package, guarded by a logos condition (language behavior) or by the improvement's own flag or experiment (backend, runtime, cgo, tooling). All logic lives in new files: `*_logos.go` beside the hook, or new packages `cmd/compile/internal/logos/...`, `cmd/go/internal/logos/...`, `src/logos/...`, `runtime/*_logos.go`.
-- Plain `go` keeps Go language semantics and its upstream command text (`go version`, `go help`); improvements are allowed behind hooks (R-U1). Language behavior (`.lgo` recognition, loGo/s syntax and type rules, loGo/s lints) is selected by the `logos` command (argv[0] mode) or by a `logos` condition. Backend, runtime, cgo, and tooling improvements carry no `logos` guard: they apply to Go packages under `go` and `logos`, and experimental ones stay behind GOEXPERIMENT. Plain `go` reads no `logos.toml` and registers its improvement flags (`-O`, `-gc`, `--wasm-features`) without help text, so `go help` stays upstream. A default that changes under plain `go` flips only after `run.bash` passes with it.
+- Plain `go` keeps Go language semantics and its upstream command text (`go version`, `go help`); improvements are allowed behind hooks (R-U1). Language behavior (`.lgo` recognition, loGo/s syntax and type rules, loGo/s lints) is selected by the `logos` command (argv[0] mode) or by a `logos` condition. Backend, runtime, cgo, and tooling improvements carry no `logos` guard: they apply to Go packages under `go` and `logos`, and experimental ones stay behind GOEXPERIMENT. Plain `go` reads no `logos.toml` and registers its improvement flags (`-O`, `-gc`, `--wasm-features`) without help text, so `go help` stays upstream. A default that changes under plain `go` flips only after `run.bash` passes with it. The slice that moves a plain-`go` default records its blessing `run.bash` pass (command, date, result) in its commit body.
 
 ### G4. Lexicon (one name per thing)
 
@@ -366,7 +366,6 @@ PLAN.md names internal compiler and runtime entities (AST nodes, parser helpers,
 | `types/size.go` | `none: StdSizes MaxAlign verification` | M16-S2 |
 | cancelChan | none: logos/rt.Group cancellation channel | M18-S4 |
 | fastCgoFrame / m_fastCgoFrame | fastCgoFrame | M20-S1 |
-| fastCallEnterNano / m_fastCallEnterNano | fastCallEnterNano | M20-S1 |
 | inFastCall / m_inFastCall | inFastCall | M20-S1 |
 
 ## M0. `logos` command, `.lgo` packages, config, harnesses
@@ -681,6 +680,22 @@ Anchor: Tony Hoare, Christopher Alexander, Edsger W. Dijkstra
 - Gate: `go test -vet=off -count=1 -run 'Script/^logos_eject_interp_lambda$' cmd/go`.
 - Red-team rows: none.
 - Docs: none.
+
+### M1-A-S7 Assert every grammar production has a positive fixture
+Anchor: Tony Hoare, Christopher Alexander, Edsger W. Dijkstra
+- Attack: `src/cmd/compile/internal/syntax/parser_grammar_logos_test.go` (`TestGrammarProductionsHaveFixtures`): every loGo/s grammar production resolves to a witness node in its inline probe source; a production with no witness node fails the test (a swapped `Coalesce` constructor was caught).
+- Build: none (test-only).
+- Gate: `go test -count=1 -short cmd/compile/internal/syntax`.
+- Red-team rows: none.
+- Docs: none (SPEC 4.2 carries the grammar).
+
+### M1-A-S8 Assert paren-once branches
+Anchor: Tony Hoare, Christopher Alexander, Edsger W. Dijkstra
+- Attack: `src/cmd/compile/internal/syntax/parser_tuple_logos_test.go` (`TestLogosParenOnceBranches`): an opening `(` parses its element list once and then branches on the next token; named and named-pair forms fail when the colon branch is skipped.
+- Build: none (test-only).
+- Gate: `go test -count=1 -short -run TestLogosParenOnceBranches cmd/compile/internal/syntax`.
+- Red-team rows: none.
+- Docs: none (SPEC 4.3 carries the rule).
 
 ## P1. Official agent skills plugin (R-SKILLS)
 
@@ -1521,6 +1536,14 @@ Anchor: Tony Hoare, Claude Shannon, Edsger W. Dijkstra
 - Red-team rows: none.
 - Docs: none.
 
+### M2-A-S2 Assert union representation and positions
+Anchor: Tony Hoare, Claude Shannon, Edsger W. Dijkstra
+- Attack: `src/cmd/compile/internal/logos/union_test.go` (`TestUnionNoTwoTierTag`): a closed union keeps the upstream interface layout with a zero-sized tag, and the term list keeps the empty member; `test/logos/run/union_assert.lgo`: assertions and unions stay legal in value positions (a two-tier tag layout and a dropped empty term were both caught).
+- Build: none (test-only).
+- Gate: `go test -count=1 cmd/compile/internal/logos -run TestUnionNoTwoTierTag`; `go test -count=1 cmd/internal/testdir -run 'Test/logos/run/union_assert'`; `go test -count=1 cmd/compile/internal/types2 -run TestLogos`.
+- Red-team rows: none.
+- Docs: none (SPEC 2.3 carries the layout and position rules).
+
 ## M3. Facts sidecar, non-nil pointers, `T?`, `?.`, `??`, platform pointers
 
 Anchor: Tony Hoare, Claude Shannon, John Carmack
@@ -1651,6 +1674,38 @@ Anchor: Tony Hoare, Claude Shannon, John Carmack
 - Red-team rows: none.
 - Docs: none (SPEC 5 already carries the rule and the hole).
 
+### M3-A-S9 Assert ?? laziness with counting fallback
+Anchor: Tony Hoare, Claude Shannon, John Carmack
+- Attack: `test/logos/run/option_basic.lgo`: the `??` right side runs only when the left side is empty, and the fallback counter records exactly the taken fallbacks (a taken fallback evaluated eagerly was caught).
+- Build: none (test-only).
+- Gate: `go test -count=1 cmd/internal/testdir -run 'Test/logos/run/option_basic'`.
+- Red-team rows: none.
+- Docs: none (SPEC 2.2 carries the laziness rule).
+
+### M3-A-S10 Assert Go declarations are platform pointers
+Anchor: Tony Hoare, Claude Shannon, John Carmack
+- Attack: `src/cmd/go/testdata/script/logos_interop_platform.txt`: the store, call, field, and method rows of a Go pointer read through a loGo/s module report `logos: nil from Go value`, never a runtime nil dereference (an early return in `logosPlatformStore` and a dropped `logosCalleeIsGo` result were both caught).
+- Build: none (test-only).
+- Gate: `go test -count=1 -run 'Script/^logos_interop_platform$' cmd/go`.
+- Red-team rows: none.
+- Docs: none (SPEC 0.1 carries the platform rule).
+
+### M3-A-S11 Assert Go-facing signatures and facts emission
+Anchor: Tony Hoare, Claude Shannon, John Carmack
+- Attack: `src/cmd/go/testdata/script/logos_interop_nil.txt`: a Go package importing a loGo/s package ejects with the erased const views in place (a skipped `eraseConstViews` was caught); `src/cmd/go/testdata/script/logos_facts_wire_a3.txt`: the ejected facts carry the `lang go` record and the per-function fact lines (a `GoPackage` flip was caught).
+- Build: none (test-only).
+- Gate: `go test -count=1 -run 'Script/^(logos_interop_nil|logos_facts_wire_a3)$' cmd/go`.
+- Red-team rows: none.
+- Docs: none (SPEC 0.3 and 5 carry the rules).
+
+### M3-A-S12 Assert Go package facts match across GOARCH
+Anchor: Tony Hoare, Claude Shannon, John Carmack
+- Attack: `src/cmd/compile/internal/logos/facts_arch_diff_test.go` (`TestGoPackageFactLinesMatchAcrossGOARCH`): one Go package built for linux/amd64 and for js/wasm yields the same decoded `__.LOGOS` lines against an allowlist; the wasm member only adds the `MayYield` flag for its one yielding function (an unconditional `Active()` was caught as a spurious amd64 yield line).
+- Build: none (test-only).
+- Gate: `go test -count=1 cmd/compile/internal/logos -run TestGoPackageFactLinesMatchAcrossGOARCH`.
+- Red-team rows: none.
+- Docs: none (SPEC 5 carries the GOARCH condition).
+
 ## M4. Interface properties
 
 Anchor: Tony Hoare, David Parnas, J.R.R. Tolkien
@@ -1694,6 +1749,14 @@ Anchor: Tony Hoare, David Parnas, J.R.R. Tolkien
 - Gate: `go test -count=1 cmd/compile/internal/syntax`.
 - Red-team rows: none.
 - Docs: none.
+
+### M4-A-S2 Pin readonly property eject signature
+Anchor: Tony Hoare, David Parnas, J.R.R. Tolkien
+- Attack: `src/cmd/go/testdata/script/logos_eject_readonly_accessors.txt`: a readonly property ejects a getter only (`Logos_GetNick`, no `Logos_SetNick`) and a mutable property still ejects its setter (`Logos_SetHP`); dropping the `Const` guard in `logos/property.go` ejects the wrong signatures and logos build fails before the assertion runs.
+- Build: none (test-only).
+- Gate: `go test -count=1 -run 'Script/^logos_eject_readonly_accessors$' cmd/go`.
+- Red-team rows: none.
+- Docs: none (SPEC 0.4 carries the signature rule).
 
 ## M5. Const composites, CTFE, const views, const maps
 
@@ -1763,6 +1826,14 @@ Anchor: Tony Hoare, Claude Shannon, Dieter Rams
 - Gate: `go test cmd/compile/internal/types2 -run '^TestLogos$' -count=1`; `go test cmd/internal/testdir -run '^Test$/logos/compile/const_map_mutate.lgo$' -count=1`; `go test cmd/internal/testdir -run '^Test$/logos/run/const_map_keys.lgo$' -count=1`.
 - Red-team rows: none.
 - Docs: none.
+
+### M5-A-S2 Pin const satisfaction across declaration orders
+Anchor: Tony Hoare, Claude Shannon, Dieter Rams
+- Attack: `src/cmd/go/testdata/script/logos_const_satisfaction_order.txt`: an assertion-first module and a body-first module reach the same readonly verdicts, and the compiler emits no code before the final satisfaction errors (a deferral swapped for the cached readonly bit was caught).
+- Build: none (test-only).
+- Gate: `go test -count=1 -run 'Script/^logos_const_satisfaction_order$' cmd/go`.
+- Red-team rows: none.
+- Docs: none (SPEC 2.1 carries the order rule).
 
 ## M6. Sugar: interpolation, `&expr`, defaults, spread, tuples, lambdas, chains, `yield`, `scope defer`
 
@@ -1916,6 +1987,14 @@ Anchor: Tony Hoare, David Parnas, Edsger W. Dijkstra
 - Gate: `go test -count=1 cmd/compile/internal/logos -run TestViewAsCopiesOnTargetsWithoutUnalignedLoads`; `go test logos/rt`.
 - Red-team rows: none.
 - Docs: none.
+
+### M7-A-S3 Enforce comptime TypeOf compile-time-only
+Anchor: Tony Hoare, David Parnas, Edsger W. Dijkstra
+- Attack: `test/logos/run/comptime_generic.lgo`: run-time use of `comptime.TypeOf` fails with `runtime_use`, and a generic using it becomes a comptime generic (a constant-fold bypass in `constfor.go` was caught); `src/internal/types/testdata/logos/const_for.lgo`: the `const for` fold keeps its guard.
+- Build: `types2/comptimecall_logos.go` rejects run-time `comptime.TypeOf` calls and marks the enclosing generic as comptime; `constfor.go` keeps the fold guard.
+- Gate: `go test -count=1 cmd/compile/internal/types2 -run TestLogos`; `go test -count=1 cmd/internal/testdir -run 'Test/logos/run/comptime_generic'`.
+- Red-team rows: none.
+- Docs: none (SPEC 2.5 carries the compile-time-only rule).
 
 ## M8. `go group` and `logos/sync`
 
@@ -2133,6 +2212,62 @@ Anchor: Tony Hoare, Edward Tufte, Kenya Hara
 - Gate: `go test -run TestAdvWithlockLeak|TestAdvReentrantDeadlock|TestAdvGuardedAccess|TestAdvLockRequirement|TestAdvLambdaArgReadsGuarded cmd/compile/internal/logos/lint`.
 - Red-team rows: none.
 - Docs: none (SPEC 1.2 carries the rule and the go-spawn exclusion).
+
+### M9-A-S10 Pin diagnostics by rule ID in zeroalloc and nil fixtures
+Anchor: Tony Hoare, Edward Tufte, Kenya Hara
+- Attack: `test/logos/codegen/zeroalloc.lgo` and `test/logos/codegen/zeroalloc_sites.lgo` name `perf::zeroalloc_violation` on every pattern; `test/logos/compile/sync_hot_const.lgo` names `const_view_mutation`; `test/logos/lint/nil_deref_unproven.lgo` names `correctness::nil_deref_unproven`. 52 patterns, each silenced in turn, failed with the missing error on the exact rewritten line.
+- Build: none (test-only).
+- Gate: `go test -count=1 cmd/internal/testdir -run 'Test/logos/(codegen/zeroalloc|codegen/zeroalloc_sites|compile/sync_hot_const|lint/nil_deref_unproven)'`.
+- Red-team rows: none.
+- Docs: none.
+
+### M9-A-S11 Assert every lint rule has a positive fixture
+Anchor: Tony Hoare, Edward Tufte, Kenya Hara
+- Attack: `src/cmd/compile/internal/logos/lint_fixture_logos_test.go` (`TestEveryLintRuleHasFixture`): every rule ID has a fixture whose ERROR markers or lint scripts name it (a moved `withlock_leak.lgo` and a dropped `alias_extension` marker were both caught).
+- Build: none (test-only).
+- Gate: `go test -count=1 -short -run TestEveryLintRuleHasFixture cmd/compile/internal/logos`.
+- Red-team rows: none.
+- Docs: none.
+
+### M9-A-S12 Hold TryLock in the taken branch of if
+Anchor: Tony Hoare, Edward Tufte, Kenya Hara
+- Attack: `src/cmd/compile/internal/logos/lint/rule_adv_nogo_test.go` (`TestAdvGuardedAccess/tryLockSuccessBranchStaysClean`, `tryLockNegatedElseStaysClean`): a `TryLock` holds its lock in the taken branch, and only in the negated condition's else branch (walking the condition held nothing before the fix); a stored or ignored `TryLock` result still reports.
+- Build: the if walk in `src/cmd/compile/internal/logos/lint/rule_locks.go` applies `TryLock`'s effect to the taken branch only.
+- Gate: `go test -count=1 -race cmd/compile/internal/logos/lint`; `go test -count=1 cmd/internal/testdir -run 'Test/logos/lint/'`.
+- Red-team rows: none.
+- Docs: none (SPEC 1.2 carries the rule).
+
+### M9-A-S13 Match guarded paths through indexes
+Anchor: Tony Hoare, Edward Tufte, Kenya Hara
+- Attack: `rule_adv_nogo_test.go` (`TestAdvGuardedAccess/indexLockStaysClean`, `indexLockVarStaysClean`, `indexLockOtherElementReported`, `indexLockOtherVarReported`): `arr[0].mu` and `arr[i].mu` guard accesses to the same indexed element, and a different index still reports (the guard path stopped at the index expression before the fix).
+- Build: the guard path in `rule_locks.go` steps through index expressions and keys the element by its index.
+- Gate: `go test -count=1 -race cmd/compile/internal/logos/lint`; `go test -count=1 cmd/internal/testdir -run 'Test/logos/lint/'`.
+- Red-team rows: none.
+- Docs: none (SPEC 1.2 carries the rule).
+
+### M9-A-S14 Drop aliases reassigned off the WithLock argument
+Anchor: Tony Hoare, Edward Tufte, Kenya Hara
+- Attack: `rule_adv_nogo_test.go` (`TestAdvWithlockLeak/reassignedAliasStaysClean`): an alias reassigned to a fresh value before the store no longer reports, while a store before the reassignment and a reassignment inside a nested block still report (every assignment kept the alias forever before the fix).
+- Build: the leak scan in `src/cmd/compile/internal/logos/lint/rule_withlock_leak.go` kills an alias at its reassignment within the straight-line block.
+- Gate: `go test -count=1 -race cmd/compile/internal/logos/lint`; `go test -count=1 cmd/internal/testdir -run 'Test/logos/lint/'`.
+- Red-team rows: none.
+- Docs: none (SPEC 1.2 carries the rule).
+
+### M9-A-S15 Refine backward goto label lock sets
+Anchor: Tony Hoare, Edward Tufte, Kenya Hara
+- Attack: `rule_adv_nogo_test.go` (`TestAdvGuardedAccess/backwardGotoReentryReports`, `backwardGotoRelockedStaysClean`): a backward `goto` re-enters the label with the locks held after the intervening unlock, so the re-entered read reports, and relocking before the backward `goto` stays clean (the label kept its pre-unlock set before the fix).
+- Build: the label sets in `rule_locks.go` recompute from the goto sources on each pass.
+- Gate: `go test -count=1 -race cmd/compile/internal/logos/lint`; `go test -count=1 cmd/internal/testdir -run 'Test/logos/lint/'`.
+- Red-team rows: none.
+- Docs: none (SPEC 1.2 carries the rule; a backward `goto` inside a closure stays a documented limitation).
+
+### M9-A-S16 Apply defers of directly invoked closures at the call
+Anchor: Tony Hoare, Edward Tufte, Kenya Hara
+- Attack: `rule_adv_nogo_test.go` (`TestAdvGuardedAccess/unlockDeferredInEarlyClosureReports`): an unlock deferred inside a directly invoked literal releases the lock when the literal returns, so the guard read after the call reports (the inline walk dropped the literal's defer list before the fix); defers of stored or never invoked literals stay unchecked at the call site, and function exit still walks its own defers.
+- Build: the inline walk in `rule_locks.go` applies the directly invoked literal's defers at the call.
+- Gate: `go test -count=1 -race cmd/compile/internal/logos/lint`; `go test -count=1 cmd/internal/testdir -run 'Test/logos/lint/'`.
+- Red-team rows: #195 (unguarded field read after deferred unlock moved; the named subtest is the proof).
+- Docs: none (SPEC 1.2 carries the rule).
 
 ## M10. `logos next` and `logos context`
 
@@ -2599,12 +2734,12 @@ Anchor: David Parnas, Tony Hoare
 
 ### M20-S1 Fast-CGo for Go and loGo/s packages (`#cgo noescape` plus `#cgo nocallback`, `//logos:cgo_fastcall`, `GOEXPERIMENT=logosfastcgo`)
 Anchor: John Carmack, Tony Hoare
-- Attack: `src/cmd/cgo/internal/testlogos/` (cgo test package): `BenchmarkFastcall` built with and without the experiment, calling the same empty C function (reported; target from PLAN "~2 ns"); blocking parity (#5, #88): a C function that sleeps 100 microseconds under `GOMAXPROCS=1` delays a ready goroutine no measurably longer on the fast path than on a plain cgo call; the test measures the ready-goroutine delay on both paths with the same C function and `N`, reports both medians, and passes when the fast median is at most 1.05 times the plain median with a standard deviation of at most 20% of each median; when the noise limit fails, the check is blocked, not passed (sysmon retakes the P from a fast call under the upstream `retake` rule and threshold, `proc.go:6691-6749`, with no longer grace); `SIGPROF` profiling during fast calls does not crash (#165, #173); Go pointer validity stays a gate requirement (#160), not a claimed pass (see foreign contract below); `-race` clean. `test/logos/codegen/fastcall.lgo` references the single `runtime.logosCgocallFast` trampoline (build-only link check); the M-field record/clear behavior (`m.inFastCall`, `m.fastCgoFrame[0]` holding the DI/arg copy as a diagnostic, `m.fastCallEnterNano` held at zero because no consumer read it and the clock read dominated the fast path, cleared to zero on return) is covered by `src/runtime/export_logos_test.go` reading `mp.fastCgoFrame`, `mp.fastCallEnterNano`, `mp.inFastCall` from `getg().m` (PLAN:207, PLAN:571, PLAN:576, PLAN:580, PLAN:586, PLAN:592, PLAN:593, PLAN:594). The slots are plain `uintptr` diagnostics on the original M: the argument frame stays valid through the ordinary goroutine stack scan, nothing in the tree reads the slots, and they are not pins or roots. Only the top-level foreign word is canonicalized on this path (`logosZgcForeignArg`) with a `logosZgcForeignHoldEnter`/`Exit` bracket around the call; the nested typed graph is canonicalized at the generated call site (W2 emission), not here. Objects pinned by `runtime.Pinner`, conservatively scanned frames, and pointer-keyed map keys are excluded from moving by the separate pin pass, not by the slots. POD and primitive-slice args emit no `_cgoCheckPointer` call; the test runs with `GODEBUG=cgocheck=1` to pin that absence. `BenchmarkFastcall` reports pin cost; the 0.3ns label is tracked, never a pass condition (PLAN:576).
+- Attack: `src/cmd/cgo/internal/testlogos/` (cgo test package): `BenchmarkFastcall` built with and without the experiment, calling the same empty C function (reported; target from PLAN "~2 ns"); blocking parity (#5, #88): a C function that sleeps 100 microseconds under `GOMAXPROCS=1` delays a ready goroutine no measurably longer on the fast path than on a plain cgo call; the test measures the ready-goroutine delay on both paths with the same C function and `N`, reports both medians, and passes when the fast median is at most 1.05 times the plain median with a standard deviation of at most 20% of each median; when the noise limit fails, the check is blocked, not passed (sysmon retakes the P from a fast call under the upstream `retake` rule and threshold, `proc.go:6691-6749`, with no longer grace); `SIGPROF` profiling during fast calls does not crash (#165, #173); Go pointer validity stays a gate requirement (#160), not a claimed pass (see foreign contract below); `-race` clean. `test/logos/codegen/fastcall.lgo` references the single `runtime.logosCgocallFast` trampoline (build-only link check); the M-field record/clear behavior (`m.inFastCall`, `m.fastCgoFrame[0]` holding the DI/arg copy as a diagnostic, cleared to zero on return; the clock slot is gone, M20-A-S5) is covered by `src/runtime/export_logos_test.go` reading `mp.fastCgoFrame`, `mp.inFastCall` from `getg().m` (PLAN:207, PLAN:571, PLAN:576, PLAN:580, PLAN:586, PLAN:592, PLAN:593, PLAN:594). The slots are plain `uintptr` diagnostics on the original M: the argument frame stays valid through the ordinary goroutine stack scan, nothing in the tree reads the slots, and they are not pins or roots. Only the top-level foreign word is canonicalized on this path (`logosZgcForeignArg`) with a `logosZgcForeignHoldEnter`/`Exit` bracket around the call; the nested typed graph is canonicalized at the generated call site (W2 emission), not here. Objects pinned by `runtime.Pinner`, conservatively scanned frames, and pointer-keyed map keys are excluded from moving by the separate pin pass, not by the slots. POD and primitive-slice args emit no `_cgoCheckPointer` call; the test runs with `GODEBUG=cgocheck=1` to pin that absence. `BenchmarkFastcall` reports pin cost; the 0.3ns label is tracked, never a pass condition (PLAN:576).
 - Attack (Go packages, one trampoline): `src/cmd/cgo/internal/testlogos/` also holds a `.go` cgo package whose C function `fast_add` carries both `#cgo noescape fast_add` and `#cgo nocallback fast_add`, a twin `slow_noescape` with only `noescape`, and a twin `slow_nocallback` with only `nocallback`; under `go test` and `logos test` with `GOEXPERIMENT=logosfastcgo`, `go tool objdump` of the test binary shows `runtime.logosCgocallFast` called from the `fast_add` wrapper and `runtime.cgocall` called from both twin wrappers; a binary that holds that Go cgo package and a loGo/s package using `//logos:cgo_fastcall` lists exactly one `logosCgocallFast` entry in `go tool nm` (no second cgo path); the generated cgo file names for the Go package equal the baseline set (no layout change); `BenchmarkFastcall` runs on the Go package, and the same benchmark built with `GOEXPERIMENT=nologosfastcgo` is the plain baseline.
 - Attack (nocallback violation): a C function that carries the pair and calls back into a Go export panics on the fast path with `runtime: function marked with #cgo nocallback called back into Go` (`runtime/cgocall.go:359`); the test finishes within its deadline (it never hangs), and later cgo calls and goroutines still run (no corrupted state); the same function through `//logos:cgo_fastcall` in an `.lgo` package panics the same way, and the Go package built with `GOEXPERIMENT=nologosfastcgo` panics with the same message (callback parity).
 - Attack (profile attribution): a CPU profile (`runtime/pprof`) of a loop that calls a busy C function (about 50 ms of C work per call) on the fast path attributes the C time to the Go function that holds the call site: that function is the top entry of `go tool pprof -top`, and its cumulative share is within 5 percentage points of its share on the plain cgo path; the same assertion holds for the `.lgo` spelling.
 - Foreign contract (`src/runtime/logos_foreign_types.go`, `src/runtime/logos_zgc_cgo.go`, `src/runtime/logos_zgc_foreign_registry.go`, `src/runtime/logos_zgc_pinner.go`): descriptors are consumed synchronously during admission; the runtime retains no descriptor, slot, or backing-array pointer after return, so generated code may reuse or free the array once `Begin` returns. Token protocol: the invalid token (`Frame == nil`, `Gen == 0`) is the disabled-mode sentinel only (cycle disabled or off-experiment); `End`/`Extend` on it are no-ops with no pairing required. In the configured cycle `Begin` returns a valid token even for an empty closure, because a callback may still `Extend` it (for example a returned `Pinner`-pinned pointer); every configured `Begin` pairs with exactly one `End`, and skipping `End` leaks the pin while duplicating it throws. Per-kind `Type` contract: `Value` roots one variable (`Type` nil means exactly one pointer-sized word, otherwise walk the value's GC bitmap with `Size == 0`); `Whole` pins a multi-word extent (`Type` non-nil element type tiled over `Size` bytes, `Size` an exact multiple of element size, never inferred from `Type`); `Unknown` roots one pointer-sized word of unavailable layout (`Type == nil`, `Size == 0`). Prepared masks for the restricted nested path (`BeginNoSplit`) require an earlier preemptible `Begin`/`Extend` that built the type's on-demand mask; a `NoSplit` descriptor for an undeclared type throws. Callback scope: a callback inside a Go-to-C call extends the innermost real outer frame (the outer `End` releases it); a callback with no outer opens a self-bounded empty-closure frame retired by its deferred `End`. Explicit `Pinner` pins survive their frame's `End` by their own protocol; the fixed-cap legacy hold consumers stay until the cgo typed plus raw-syscall producers are both live and parent-gated. No producer is wired yet, so this is a settled clean-cutover contract, not a passing claim.
-- Build: a C function that carries the directive pair `#cgo noescape F` and `#cgo nocallback F` (Go code) or `//logos:cgo_fastcall` (the `.lgo` spelling, which cmd/cgo maps to the same pair) takes the fast path, and cmd/cgo emits a call to `runtime.logosCgocallFast` instead of `runtime.cgocall` (the cgo call seam; cf. `out.go:1715`, `cgocall.go:136`). The fast path is the PLAN Sec 8.5 trampoline with trace bookkeeping skipped. It keeps the profiling state: it saves the Go `pc` and `sp` in `gp.syscallpc` and `gp.syscallsp` and keeps `m.ncgo` raised, so `sigprof` (`proc.go:5844`) attributes a signal that lands in C to the Go call site. It performs the status change sysmon needs to retake the P (the essential part of `entersyscall`, `proc.go:4776-4782`), so `retake` treats the P of a fast call like the P of a syscall, with the same rule and threshold, switches stacks like `asmcgocall` (`asm_amd64.s:919`), and on return uses the `exitsyscall` fast path (`proc.go:4922`, `:5072`). The `m` struct gains `inFastCall` beside `incgo` (`runtime2.go:699`), plus `fastCgoFrame [4]uintptr` and `fastCallEnterNano` (`runtime2.go:777-778`): diagnostics on the original M, plain `uintptr` copies, not pins or roots. The trampoline records the DI/arg copy in slot 0, writes zero to the timestamp slot, swaps TLS and R14 to g0, sets the flag to 1, calls with System V args in place, then clears the flag, the timestamp, and the slots to 0 and restores TLS R14 and SP. The timestamp slot is a diagnostic that must stay zero: no consumer read it, and the clock read alone cost about 30 ns of the 49 ns measured per fast call, so recording a start time would only slow the path. Only slot 0 is written; slots 1-3 stay zero. Like `asmcgocall` it saves g and the stack depth across the C call (cf. `asm_amd64.s:969-972`) because C clobbers caller-saved registers. No new elision code runs in cmd/cgo `rewriteCall` (`gcc.go:857`): pointer-free POD and primitive slices already skip `_cgoCheckPointer` through `needsPointerCheck`/`hasPointer`; the runtime keeps the no-pointer early return in `cgoCheckArg` (`cgocall.go:642`).
+- Build: a C function that carries the directive pair `#cgo noescape F` and `#cgo nocallback F` (Go code) or `//logos:cgo_fastcall` (the `.lgo` spelling, which cmd/cgo maps to the same pair) takes the fast path, and cmd/cgo emits a call to `runtime.logosCgocallFast` instead of `runtime.cgocall` (the cgo call seam; cf. `out.go:1715`, `cgocall.go:136`). The fast path is the PLAN Sec 8.5 trampoline with trace bookkeeping skipped. It keeps the profiling state: it saves the Go `pc` and `sp` in `gp.syscallpc` and `gp.syscallsp` and keeps `m.ncgo` raised, so `sigprof` (`proc.go:5844`) attributes a signal that lands in C to the Go call site. It performs the status change sysmon needs to retake the P (the essential part of `entersyscall`, `proc.go:4776-4782`), so `retake` treats the P of a fast call like the P of a syscall, with the same rule and threshold, switches stacks like `asmcgocall` (`asm_amd64.s:919`), and on return uses the `exitsyscall` fast path (`proc.go:4922`, `:5072`). The `m` struct gains `inFastCall` beside `incgo` (`runtime2.go:684`) and `fastCgoFrame [4]uintptr` (`runtime2.go:758`): diagnostics on the original M; the flag is a bool and the slots are plain `uintptr` copies, not pins or roots. The Go trampoline `logosCgocallFast` (`logos_fastcall.go`) records the DI/arg copy in slot 0, zeroes slots 1-3, sets the flag, and calls `asmcgocall` with System V args in place; on return it clears the flag and the slots to 0. The timestamp slot from the first cut is gone (M20-A-S5): no consumer read it, and the clock read alone cost about 30 ns of the 49 ns measured per fast call. Only slot 0 carries the DI/arg copy; slots 1-3 stay zero. Like `asmcgocall` it saves g and the stack depth across the C call (cf. `asm_amd64.s:969-972`) because C clobbers caller-saved registers. No new elision code runs in cmd/cgo `rewriteCall` (`gcc.go:857`): pointer-free POD and primitive slices already skip `_cgoCheckPointer` through `needsPointerCheck`/`hasPointer`; the runtime keeps the no-pointer early return in `cgoCheckArg` (`cgocall.go:642`).
 - Acceptance: every attack above, `-race`, and blocking parity remain required. Record failed delays without relabeling them as passes. [Tony Hoare, Richard Feynman]
 - Gate: cgo tests with the experiment on, under `go` and `logos`; the nocallback, profile attribution, and blocking-parity attacks; `-race` on `cmd/cgo/internal/testlogos`. [Tony Hoare, Richard Feynman]
 - Red-team rows: #5, #88, #144, #160, #165, #173, #188 (a `nocallback` C function that calls into Go panics on the fast path and never hangs), #189 (CPU time in a fast-called C function is attributed to its Go call site).
@@ -2760,6 +2895,13 @@ Notes (m22): the `//logos:zeroalloc` directive does not change allocation behavi
 - Gate: testdir `Test/logos/lint/zeroalloc_go` ok; convOnly still reports, indirect still reported.
 - Red-team rows: none.
 - Docs: none.
+- M22-A-S2 Assert zeroalloc ignores heap fallback (Sec 17.4): a function whose only allocation is a run-time heap fallback stays silent.
+  Anchor: Edsger W. Dijkstra, Richard Feynman, Edward Tufte
+- Attack: `test/logos/lint/zeroalloc_heap_fallback_go.go`: a string conversion longer than the stack buffer into a local slice is the only allocation and reports nothing (a dropped free exemption in `noder/logos_allocfacts.go` was caught).
+- Build: none (test-only).
+- Gate: testdir `Test/logos/lint/zeroalloc_heap_fallback` ok.
+- Red-team rows: none.
+- Docs: none (SPEC 17.4 carries the fallback rule).
 - Milestone gate: all of the above, then `./run.bash --no-rebuild`.
 
 ## M23. Architecture collapses
@@ -2867,7 +3009,7 @@ Prerequisites: `cd /home/alpha/compiler/loGos/src && ./make.bash`; `export PATH=
 
 Anchor: Tony Hoare
 
-Written to `tasks/autoplan-ledger.jsonl` by P0-S6. IDs: phase prefix plus a sequence in plan order. The original 103 rows are preserved verbatim; P0-S6 appends exactly the 5 remaining rows for M0-S7, P1-S3, M11-S3, M11-S4, and M18-S4 (listed at the end of the block); the M19 rows are pruned. The 2026-10-19 direction appended one more row after those, `DX-20` for the follow-up slice M0-S8; no other row changed (the descriptions of rows such as `ENG-26` name the slice as first written, and `CEO-02` names the original 182 REDTEAM rows; rows #183 to #189 were added later by the same direction). The audit direction appended rows `AUD-01` to `AUD-88` after those, one per recorded audit slice in commit order. The ledger holds 199 rows.
+Written to `tasks/autoplan-ledger.jsonl` by P0-S6. IDs: phase prefix plus a sequence in plan order. The original 103 rows are preserved verbatim; P0-S6 appends exactly the 5 remaining rows for M0-S7, P1-S3, M11-S3, M11-S4, and M18-S4 (listed at the end of the block); the M19 rows are pruned. The 2026-10-19 direction appended one more row after those, `DX-20` for the follow-up slice M0-S8; no other row changed (the descriptions of rows such as `ENG-26` name the slice as first written, and `CEO-02` names the original 182 REDTEAM rows; rows #183 to #189 were added later by the same direction). The audit direction appended rows `AUD-01` to `AUD-106` after those, one per recorded audit slice in commit order. The ledger holds 217 rows.
 
 ```jsonl
 {"id": "CEO-01", "description": "P0-S1 Rename logos-doc/PLAN.md to logos-doc/SPEC.md (pure rename) and P0-S2 rewrite SPEC.md as the tailored spec (tables T, N, Section 18)", "phase": "CEO"}
@@ -3069,4 +3211,22 @@ Written to `tasks/autoplan-ledger.jsonl` by P0-S6. IDs: phase prefix plus a sequ
 {"id": "AUD-86", "description": "M20-A-S4 Fold fast-cgo nocallback guards into the trampoline", "phase": "AUD"}
 {"id": "AUD-87", "description": "M20-A-S5 Drop dead fastCallEnterNano stores and field", "phase": "AUD"}
 {"id": "AUD-88", "description": "M9-A-S9 Harden WithLock leak, deadlock, and lock-flow analysis", "phase": "AUD"}
+{"id": "AUD-89", "description": "M3-A-S9 Assert ?? laziness with counting fallback", "phase": "AUD"}
+{"id": "AUD-90", "description": "M2-A-S2 Assert union representation and positions", "phase": "AUD"}
+{"id": "AUD-91", "description": "M7-A-S3 Enforce comptime TypeOf compile-time-only", "phase": "AUD"}
+{"id": "AUD-92", "description": "M9-A-S10 Pin diagnostics by rule ID in zeroalloc and nil fixtures", "phase": "AUD"}
+{"id": "AUD-93", "description": "M9-A-S11 Assert every lint rule has a positive fixture", "phase": "AUD"}
+{"id": "AUD-94", "description": "M1-A-S7 Assert every grammar production has a positive fixture", "phase": "AUD"}
+{"id": "AUD-95", "description": "M3-A-S10 Assert Go declarations are platform pointers", "phase": "AUD"}
+{"id": "AUD-96", "description": "M3-A-S11 Assert Go-facing signatures and facts emission", "phase": "AUD"}
+{"id": "AUD-97", "description": "M1-A-S8 Assert paren-once branches", "phase": "AUD"}
+{"id": "AUD-98", "description": "M5-A-S2 Pin const satisfaction across declaration orders", "phase": "AUD"}
+{"id": "AUD-99", "description": "M4-A-S2 Pin readonly property eject signature", "phase": "AUD"}
+{"id": "AUD-100", "description": "M9-A-S12 Hold TryLock in the taken branch of if", "phase": "AUD"}
+{"id": "AUD-101", "description": "M9-A-S13 Match guarded paths through indexes", "phase": "AUD"}
+{"id": "AUD-102", "description": "M9-A-S14 Drop aliases reassigned off the WithLock argument", "phase": "AUD"}
+{"id": "AUD-103", "description": "M9-A-S15 Refine backward goto label lock sets", "phase": "AUD"}
+{"id": "AUD-104", "description": "M9-A-S16 Apply defers of directly invoked closures at the call", "phase": "AUD"}
+{"id": "AUD-105", "description": "M3-A-S12 Assert Go package facts match across GOARCH", "phase": "AUD"}
+{"id": "AUD-106", "description": "M22-A-S2 Assert zeroalloc ignores heap fallback", "phase": "AUD"}
 ```
