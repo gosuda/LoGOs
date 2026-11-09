@@ -98,12 +98,12 @@ func logosRegionReleaseChunks(rec *logosRegion) {
 }
 
 func logosRegionBump(h unsafe.Pointer, gen uintptr, size uintptr) unsafe.Pointer {
-	if h == nil || raceenabled {
+	if raceenabled || !logosRegionValid(h, gen) {
 		return nil
 	}
 	rec := (*logosRegion)(h)
 	c := rec.chunk
-	if c == nil || rec.gen != gen {
+	if c == nil {
 		return nil
 	}
 	cur := alignUp(c.noscanCur, logosArenaUnit/2)
