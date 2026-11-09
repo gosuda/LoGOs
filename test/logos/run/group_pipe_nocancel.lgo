@@ -1,0 +1,52 @@
+// run
+
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net"
+	"time"
+)
+
+var errBoom = errors.New("boom")
+
+func readChild(r net.Conn) error {
+	_, err := r.Read(make([]byte, 1))
+	if err != nil {
+		fmt.Println("child:", err)
+		return err
+	}
+	fmt.Println("child: ok")
+	return nil
+}
+
+func sibling() error {
+	time.Sleep(50 * time.Millisecond)
+	return errBoom
+}
+
+func run(r net.Conn, w net.Conn) error {
+	go group (context.Background()) {
+		go readChild(r)
+		go sibling()
+		go {
+			time.Sleep(300 * time.Millisecond)
+			w.Write([]byte("x"))
+			w.Close()
+		}
+	}
+	return nil
+}
+
+func main() {
+	r, w := net.Pipe()
+	start := time.Now()
+	err := run(r, w)
+	took := time.Since(start)
+	fmt.Println("group:", err)
+	if took < 200*time.Millisecond {
+		fmt.Println("early:", took)
+	}
+}
