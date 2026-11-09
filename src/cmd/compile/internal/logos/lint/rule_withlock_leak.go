@@ -49,7 +49,7 @@ func checkWithlockLeak(pass *Pass) {
 			if fn == nil || fn.Name() != "WithLock" || fn.Pkg() == nil || fn.Pkg().Path() != logosSyncPath {
 				return true
 			}
-			arg := unparenExpr(call.ArgList[0])
+			arg := syntax.Unparen(call.ArgList[0])
 			var body syntax.Node
 			switch a := arg.(type) {
 			case *syntax.FuncLit:
@@ -201,10 +201,10 @@ func (c *leakCheck) scanUnit(body syntax.Node, cl *leakClosure) {
 						break
 					}
 				}
-				if fun, ok := unparenExpr(call.Fun).(*syntax.FuncLit); ok && c.captures(fun.Body) {
+				if fun, ok := syntax.Unparen(call.Fun).(*syntax.FuncLit); ok && c.captures(fun.Body) {
 					c.pass.Reportf(x, "WithLock argument must not be passed to a goroutine")
 				}
-				if fun, ok := unparenExpr(call.Fun).(*syntax.LambdaExpr); ok && c.captures(fun.Body) {
+				if fun, ok := syntax.Unparen(call.Fun).(*syntax.LambdaExpr); ok && c.captures(fun.Body) {
 					c.pass.Reportf(x, "WithLock argument must not be passed to a goroutine")
 				}
 			}
@@ -265,7 +265,7 @@ func (c *leakCheck) captures(body syntax.Node) bool {
 
 func (c *leakCheck) lhsEscapes(e syntax.Expr) bool {
 	for _, el := range exprList(e) {
-		if c.operandEscapes(unparenExpr(el)) {
+		if c.operandEscapes(syntax.Unparen(el)) {
 			return true
 		}
 	}
@@ -331,7 +331,7 @@ func (c *leakCheck) markEscapes(body syntax.Node) {
 			return true
 		}
 		for _, el := range exprList(x.Lhs) {
-			name, ok := unparenExpr(el).(*syntax.Name)
+			name, ok := syntax.Unparen(el).(*syntax.Name)
 			if !ok || isBlank(name) {
 				continue
 			}

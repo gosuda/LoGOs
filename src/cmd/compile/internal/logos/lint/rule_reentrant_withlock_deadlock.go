@@ -195,7 +195,7 @@ func (c *lockCheck) indexCalls(f *syntax.File) {
 // with a receiver expression the rule can match.
 func (c *lockCheck) noteLockCall(call *syntax.CallExpr, f *syntax.File) {
 	fn := calleeFunc(c.pass, call)
-	sel, ok := unparenExpr(call.Fun).(*syntax.SelectorExpr)
+	sel, ok := syntax.Unparen(call.Fun).(*syntax.SelectorExpr)
 	if fn == nil || !ok || fn.Name() != "WithLock" || fn.Pkg() == nil || fn.Pkg().Path() != logosSyncPath {
 		return
 	}
@@ -209,7 +209,7 @@ func (c *lockCheck) noteLockCall(call *syntax.CallExpr, f *syntax.File) {
 		arg := call.ArgList[0]
 		if body := callbackBody(arg); body != nil {
 			lc.body = body
-			c.callbacks[unparenExpr(arg)] = true
+			c.callbacks[syntax.Unparen(arg)] = true
 		} else if target, recv := c.callbackTarget(arg); target != nil {
 			if decl, ok := c.decls[origin(target)]; ok && decl.Body != nil {
 				lc.body = decl.Body
@@ -237,7 +237,7 @@ func (c *lockCheck) noteLockCall(call *syntax.CallExpr, f *syntax.File) {
 // value receiver for the latter and nil for the former. It returns nil
 // when the argument has no resolvable same-package body.
 func (c *lockCheck) callbackTarget(arg syntax.Expr) (*types2.Func, syntax.Expr) {
-	switch x := unparenExpr(arg).(type) {
+	switch x := syntax.Unparen(arg).(type) {
 	case *syntax.Name:
 		if fn, ok := c.pass.Info.Uses[x].(*types2.Func); ok {
 			return fn, nil
@@ -252,7 +252,7 @@ func (c *lockCheck) callbackTarget(arg syntax.Expr) (*types2.Func, syntax.Expr) 
 
 // callbackBody returns the body of a function literal or a lambda, or nil.
 func callbackBody(e syntax.Expr) syntax.Node {
-	switch f := unparenExpr(e).(type) {
+	switch f := syntax.Unparen(e).(type) {
 	case *syntax.FuncLit:
 		return f.Body
 	case *syntax.LambdaExpr:
@@ -264,24 +264,13 @@ func callbackBody(e syntax.Expr) syntax.Node {
 // immediateLiteral returns e when it is a directly invoked function
 // literal or lambda, or nil.
 func immediateLiteral(e syntax.Expr) syntax.Node {
-	switch f := unparenExpr(e).(type) {
+	switch f := syntax.Unparen(e).(type) {
 	case *syntax.FuncLit:
 		return f
 	case *syntax.LambdaExpr:
 		return f
 	}
 	return nil
-}
-
-// unparenExpr returns e without enclosing parentheses.
-func unparenExpr(e syntax.Expr) syntax.Expr {
-	for {
-		p, ok := e.(*syntax.ParenExpr)
-		if !ok {
-			return e
-		}
-		e = p.X
-	}
 }
 
 // syncVisitor walks one synchronous flow: a declaration body while
@@ -615,7 +604,7 @@ func (c *lockCheck) isValueParam(obj types2.Object, decl *syntax.FuncDecl) bool 
 // parameter of decl that root names, or nil when root is neither.
 func (c *lockCheck) operandFor(root types2.Object, call *syntax.CallExpr, decl *syntax.FuncDecl) syntax.Expr {
 	if decl.Recv != nil && c.definedBy(decl.Recv) == root {
-		if sel, ok := unparenExpr(call.Fun).(*syntax.SelectorExpr); ok {
+		if sel, ok := syntax.Unparen(call.Fun).(*syntax.SelectorExpr); ok {
 			return sel.X
 		}
 		return nil

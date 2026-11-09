@@ -363,7 +363,7 @@ func (v *lockFlow) noteDefAllocs(s *syntax.AssignStmt) {
 		if i >= len(allocs) || !allocs[i] {
 			continue
 		}
-		name, ok := unparenExpr(e).(*syntax.Name)
+		name, ok := syntax.Unparen(e).(*syntax.Name)
 		if !ok {
 			continue
 		}
@@ -374,7 +374,7 @@ func (v *lockFlow) noteDefAllocs(s *syntax.AssignStmt) {
 }
 func (v *lockFlow) walkLhs(lhs syntax.Expr) {
 	for _, e := range exprList(lhs) {
-		switch x := unparenExpr(e).(type) {
+		switch x := syntax.Unparen(e).(type) {
 		case *syntax.SelectorExpr:
 			v.checkWrite(x)
 			v.walkExpr(x.X)
@@ -427,7 +427,7 @@ func (v *lockFlow) walkExpr(e syntax.Expr) {
 		v.checkNameRead(e)
 	case *syntax.Operation:
 		if e.Y == nil && e.Op == syntax.And {
-			if sel, ok := unparenExpr(e.X).(*syntax.SelectorExpr); ok {
+			if sel, ok := syntax.Unparen(e.X).(*syntax.SelectorExpr); ok {
 				v.checkAddress(sel)
 				v.walkExpr(sel.X)
 				v.checkAddressOf(sel)
@@ -494,7 +494,7 @@ func (v *lockFlow) walkCall(call *syntax.CallExpr) {
 		v.applyCallContract(call, ct)
 	}
 	for _, arg := range call.ArgList {
-		if name, ok := unparenExpr(arg).(*syntax.Name); ok {
+		if name, ok := syntax.Unparen(arg).(*syntax.Name); ok {
 			if obj := v.c.in.useObject(name); obj != nil {
 				v.published[obj] = true
 			}
@@ -503,12 +503,12 @@ func (v *lockFlow) walkCall(call *syntax.CallExpr) {
 }
 
 func (v *lockFlow) walkAtomicArg(arg syntax.Expr) {
-	op, ok := unparenExpr(arg).(*syntax.Operation)
+	op, ok := syntax.Unparen(arg).(*syntax.Operation)
 	if !ok || op.Op != syntax.And || op.Y != nil {
 		v.walkExpr(arg)
 		return
 	}
-	switch x := unparenExpr(op.X).(type) {
+	switch x := syntax.Unparen(op.X).(type) {
 	case *syntax.SelectorExpr:
 		v.checkAddress(x)
 		v.walkExpr(x.X)
@@ -519,14 +519,14 @@ func (v *lockFlow) walkAtomicArg(arg syntax.Expr) {
 }
 
 func atomicQualifiedCall(pass *Pass, call *syntax.CallExpr) bool {
-	sel, ok := unparenExpr(call.Fun).(*syntax.SelectorExpr)
+	sel, ok := syntax.Unparen(call.Fun).(*syntax.SelectorExpr)
 	if !ok {
 		return false
 	}
 	if pass.in.Info != nil && pass.in.Info.Selections[sel] != nil {
 		return false
 	}
-	name, ok := unparenExpr(sel.X).(*syntax.Name)
+	name, ok := syntax.Unparen(sel.X).(*syntax.Name)
 	if !ok || pass.in.Info == nil {
 		return false
 	}
@@ -537,7 +537,7 @@ func atomicQualifiedCall(pass *Pass, call *syntax.CallExpr) bool {
 // builtinLockOp recognizes Lock, Unlock, RLock, RUnlock, and TryLock on a
 // sync.Mutex or sync.RWMutex value.
 func (v *lockFlow) builtinLockOp(call *syntax.CallExpr) (heldLock, holdMode, bool) {
-	sel, ok := unparenExpr(call.Fun).(*syntax.SelectorExpr)
+	sel, ok := syntax.Unparen(call.Fun).(*syntax.SelectorExpr)
 	if !ok {
 		return heldLock{}, holdNone, false
 	}
@@ -568,7 +568,7 @@ func (v *lockFlow) builtinLockOp(call *syntax.CallExpr) (heldLock, holdMode, boo
 // callContract returns the declared contract of the function call invokes,
 // from the package directives or the imported facts.
 func (v *lockFlow) callContract(call *syntax.CallExpr) *funcContract {
-	sel, ok := unparenExpr(call.Fun).(*syntax.SelectorExpr)
+	sel, ok := syntax.Unparen(call.Fun).(*syntax.SelectorExpr)
 	if ok {
 		selObj := v.c.selectionOf(sel)
 		if selObj == nil || selObj.Kind() != types2.MethodVal {
@@ -580,7 +580,7 @@ func (v *lockFlow) callContract(call *syntax.CallExpr) *funcContract {
 		}
 		return v.c.contractFor(fn)
 	}
-	name, ok := unparenExpr(call.Fun).(*syntax.Name)
+	name, ok := syntax.Unparen(call.Fun).(*syntax.Name)
 	if !ok {
 		return nil
 	}
@@ -646,13 +646,13 @@ func (v *lockFlow) applyCallContract(call *syntax.CallExpr, ct *funcContract) {
 
 // calledFunc returns the function call invokes, or nil.
 func (v *lockFlow) calledFunc(call *syntax.CallExpr) *types2.Func {
-	if sel, ok := unparenExpr(call.Fun).(*syntax.SelectorExpr); ok {
+	if sel, ok := syntax.Unparen(call.Fun).(*syntax.SelectorExpr); ok {
 		if selObj := v.c.selectionOf(sel); selObj != nil {
 			fn, _ := selObj.Obj().(*types2.Func)
 			return fn
 		}
 	}
-	if name, ok := unparenExpr(call.Fun).(*syntax.Name); ok {
+	if name, ok := syntax.Unparen(call.Fun).(*syntax.Name); ok {
 		fn, _ := v.c.in.useObject(name).(*types2.Func)
 		return fn
 	}
@@ -703,7 +703,7 @@ func joinContractKey(k heldLock, ok bool, rest string) (heldLock, bool) {
 
 // receiverOperand returns the receiver expression of a method call.
 func (c *lockAudit) receiverOperand(call *syntax.CallExpr) (syntax.Expr, bool) {
-	sel, ok := unparenExpr(call.Fun).(*syntax.SelectorExpr)
+	sel, ok := syntax.Unparen(call.Fun).(*syntax.SelectorExpr)
 	if !ok {
 		return nil, false
 	}
@@ -819,7 +819,7 @@ func (v *lockFlow) exempt(obj types2.Object, root syntax.Expr) bool {
 }
 
 func (v *lockFlow) rootObject(e syntax.Expr) types2.Object {
-	switch e := unparenExpr(e).(type) {
+	switch e := syntax.Unparen(e).(type) {
 	case *syntax.Name:
 		return v.c.in.useObject(e)
 	case *syntax.SelectorExpr:
@@ -863,12 +863,12 @@ func allocValues(values syntax.Expr) []bool {
 // isFreshAlloc reports whether e builds a new object: &T{}, new(T), or a
 // composite literal whose type is a pointer.
 func isFreshAlloc(e syntax.Expr) bool {
-	switch e := unparenExpr(e).(type) {
+	switch e := syntax.Unparen(e).(type) {
 	case *syntax.Operation:
 		if e.Op != syntax.And || e.Y != nil {
 			return false
 		}
-		_, ok := unparenExpr(e.X).(*syntax.CompositeLit)
+		_, ok := syntax.Unparen(e.X).(*syntax.CompositeLit)
 		return ok
 	case *syntax.CallExpr:
 		return false
@@ -915,7 +915,7 @@ func (v *lockFlow) noteClosureCapture(lit *syntax.FuncLit) {
 // recordDefer registers one defer statement.
 func (v *lockFlow) recordDefer(call *syntax.CallExpr) {
 	d := deferredCall{call: call, file: v.file}
-	if lit, ok := unparenExpr(call.Fun).(*syntax.FuncLit); ok {
+	if lit, ok := syntax.Unparen(call.Fun).(*syntax.FuncLit); ok {
 		d.fnLit = lit
 	}
 	v.st.defers = append(v.st.defers, d)
@@ -923,7 +923,7 @@ func (v *lockFlow) recordDefer(call *syntax.CallExpr) {
 
 // walkDeferArgs walks the operands a defer statement evaluates now.
 func (v *lockFlow) walkDeferArgs(call *syntax.CallExpr) {
-	if lit, ok := unparenExpr(call.Fun).(*syntax.FuncLit); ok {
+	if lit, ok := syntax.Unparen(call.Fun).(*syntax.FuncLit); ok {
 		for _, arg := range call.ArgList {
 			v.walkExpr(arg)
 		}
@@ -978,7 +978,7 @@ func (v *lockFlow) deferredInOrder(list []syntax.Stmt) []deferredCall {
 			case *syntax.CallStmt:
 				if call, ok := s.Call.(*syntax.CallExpr); ok && s.Tok.String() == "defer" {
 					d := deferredCall{call: call, file: v.file}
-					if lit, ok := unparenExpr(call.Fun).(*syntax.FuncLit); ok {
+					if lit, ok := syntax.Unparen(call.Fun).(*syntax.FuncLit); ok {
 						d.fnLit = lit
 					}
 					out = append(out, d)
@@ -1065,7 +1065,7 @@ func (c *lockAudit) contractLockKey(decl *syntax.FuncDecl, path guardPath) (held
 func (c *lockAudit) pathSteps(e syntax.Expr) ([]string, syntax.Expr, bool) {
 	var steps []string
 	for {
-		switch x := unparenExpr(e).(type) {
+		switch x := syntax.Unparen(e).(type) {
 		case *syntax.Name:
 			slices.Reverse(steps)
 			return steps, x, true

@@ -127,7 +127,7 @@ func declarationTypes(pass *Pass) map[types2.Object]syntax.Expr {
 // returns the wrapper type that replaces a plain value and the function
 // spelling.
 func atomic64Call(pass *Pass, call *syntax.CallExpr) (string, string, bool) {
-	sel, ok := unparenExpr(call.Fun).(*syntax.SelectorExpr)
+	sel, ok := syntax.Unparen(call.Fun).(*syntax.SelectorExpr)
 	if !ok {
 		return "", "", false
 	}
@@ -136,7 +136,7 @@ func atomic64Call(pass *Pass, call *syntax.CallExpr) (string, string, bool) {
 			return "", "", false
 		}
 	}
-	name, ok := unparenExpr(sel.X).(*syntax.Name)
+	name, ok := syntax.Unparen(sel.X).(*syntax.Name)
 	if !ok || pass.in.Info == nil {
 		return "", "", false
 	}
@@ -153,12 +153,12 @@ func atomic64Call(pass *Pass, call *syntax.CallExpr) (string, string, bool) {
 
 // plainInt64Address returns the variable whose address arg takes.
 func plainInt64Address(pass *Pass, arg syntax.Expr) types2.Object {
-	op, ok := unparenExpr(arg).(*syntax.Operation)
+	op, ok := syntax.Unparen(arg).(*syntax.Operation)
 	if !ok || op.Op != syntax.And || op.Y != nil {
 		return nil
 	}
 	var obj types2.Object
-	switch x := unparenExpr(op.X).(type) {
+	switch x := syntax.Unparen(op.X).(type) {
 	case *syntax.Name:
 		obj = pass.in.useObject(x)
 	case *syntax.SelectorExpr:

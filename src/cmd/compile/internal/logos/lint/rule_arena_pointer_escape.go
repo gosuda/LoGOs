@@ -187,7 +187,7 @@ func (s *frameScan) noteDecl(d *syntax.VarDecl) {
 // value, or after any other assignment, the variable holds something else.
 func (s *frameScan) noteTargets(targets, values []syntax.Expr) {
 	for i, t := range targets {
-		id, ok := bareExpr(t).(*syntax.Name)
+		id, ok := syntax.Unparen(t).(*syntax.Name)
 		if !ok {
 			continue
 		}
@@ -316,7 +316,7 @@ func (s *frameScan) report(kind addrKind, call *syntax.CallExpr) {
 // does so. A local that every assignment sets through unsafe.Pointer of a
 // frame address carries that conversion past its declaration.
 func (s *frameScan) carry(x syntax.Expr) (addrKind, *syntax.CallExpr) {
-	switch x := bareExpr(x).(type) {
+	switch x := syntax.Unparen(x).(type) {
 	case *syntax.Name:
 		if v := localVar(s.pass, x); v != nil && s.pointers[v] == pointerFrame {
 			if call := s.addrs[v]; call != nil {
@@ -400,7 +400,7 @@ func (s *frameScan) frameAddr(x syntax.Expr) bool {
 	if s.directAddr(x) {
 		return true
 	}
-	id, ok := bareExpr(x).(*syntax.Name)
+	id, ok := syntax.Unparen(x).(*syntax.Name)
 	if !ok {
 		return false
 	}
@@ -411,12 +411,12 @@ func (s *frameScan) frameAddr(x syntax.Expr) bool {
 // directAddr reports whether x is &y for frame storage y, &T{...}, or a
 // call of new.
 func (s *frameScan) directAddr(x syntax.Expr) bool {
-	switch x := bareExpr(x).(type) {
+	switch x := syntax.Unparen(x).(type) {
 	case *syntax.Operation:
 		if x.Y != nil || x.Op != syntax.And {
 			return false
 		}
-		if _, ok := bareExpr(x.X).(*syntax.CompositeLit); ok {
+		if _, ok := syntax.Unparen(x.X).(*syntax.CompositeLit); ok {
 			return true
 		}
 		return s.frameRoot(x.X) != nil
@@ -430,7 +430,7 @@ func (s *frameScan) directAddr(x syntax.Expr) bool {
 // variable, a field of it through no pointer, or an element of it that is an
 // array. It returns nil for any other expression.
 func (s *frameScan) frameRoot(x syntax.Expr) *types2.Var {
-	switch x := bareExpr(x).(type) {
+	switch x := syntax.Unparen(x).(type) {
 	case *syntax.Name:
 		return localVar(s.pass, x)
 	case *syntax.SelectorExpr:

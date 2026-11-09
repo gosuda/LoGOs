@@ -195,7 +195,7 @@ func closerValue(rhs []syntax.Expr, n, i int) (syntax.Expr, types2.Type) {
 // closerCall returns the call that value is, looking through parentheses and
 // a loGo/s ?.
 func closerCall(value syntax.Expr) *syntax.CallExpr {
-	if try, ok := bareExpr(value).(*syntax.TryExpr); ok {
+	if try, ok := syntax.Unparen(value).(*syntax.TryExpr); ok {
 		value = try.X
 	}
 	return callOf(value)
@@ -203,7 +203,7 @@ func closerCall(value syntax.Expr) *syntax.CallExpr {
 
 // hold records target as held when value is a call that returns a closer.
 func (c *closerScan) hold(target, value syntax.Expr, t types2.Type) {
-	id, ok := bareExpr(target).(*syntax.Name)
+	id, ok := syntax.Unparen(target).(*syntax.Name)
 	if !ok || isBlank(id) || value == nil || t == nil {
 		return
 	}
@@ -258,7 +258,7 @@ func (c *closerScan) discard(n syntax.Node) bool {
 		return true
 	}
 	for _, l := range lhs {
-		if !isBlank(bareExpr(l)) {
+		if !isBlank(syntax.Unparen(l)) {
 			return true
 		}
 	}
@@ -277,7 +277,7 @@ func (c *closerScan) markTargets(a *syntax.AssignStmt) {
 
 // markReceiver marks the receiver of a method call.
 func (c *closerScan) markReceiver(call *syntax.CallExpr) {
-	sel, ok := bareExpr(call.Fun).(*syntax.SelectorExpr)
+	sel, ok := syntax.Unparen(call.Fun).(*syntax.SelectorExpr)
 	if !ok {
 		return
 	}
@@ -304,7 +304,7 @@ func (c *closerScan) markCompare(op *syntax.Operation) {
 
 // markName marks e when it is a plain name.
 func (c *closerScan) markName(e syntax.Expr) {
-	if id, ok := bareExpr(e).(*syntax.Name); ok {
+	if id, ok := syntax.Unparen(e).(*syntax.Name); ok {
 		c.plain[id] = true
 	}
 }
@@ -316,7 +316,7 @@ func (c *closerScan) deferred(x syntax.Expr) {
 	if call == nil {
 		return
 	}
-	lit, ok := bareExpr(call.Fun).(*syntax.FuncLit)
+	lit, ok := syntax.Unparen(call.Fun).(*syntax.FuncLit)
 	if !ok {
 		c.closes(call)
 		return
@@ -331,11 +331,11 @@ func (c *closerScan) deferred(x syntax.Expr) {
 
 // closes records the variable that call closes, when call is x.Close().
 func (c *closerScan) closes(call *syntax.CallExpr) {
-	sel, ok := bareExpr(call.Fun).(*syntax.SelectorExpr)
+	sel, ok := syntax.Unparen(call.Fun).(*syntax.SelectorExpr)
 	if !ok || sel.Sel.Value != "Close" || len(call.ArgList) != 0 {
 		return
 	}
-	id, ok := bareExpr(sel.X).(*syntax.Name)
+	id, ok := syntax.Unparen(sel.X).(*syntax.Name)
 	if !ok {
 		return
 	}

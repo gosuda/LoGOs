@@ -146,7 +146,7 @@ func (u *chanUnit) collect(n syntax.Node) bool {
 // channel the matching value makes.
 func (u *chanUnit) note(lhs, rhs []syntax.Expr) {
 	for i, l := range lhs {
-		id, ok := bareExpr(l).(*syntax.Name)
+		id, ok := syntax.Unparen(l).(*syntax.Name)
 		if !ok {
 			continue
 		}
@@ -373,7 +373,7 @@ func (u *chanUnit) exprEnd(x syntax.Expr) syntax.Pos {
 
 // chanVar returns the local variable x names, or nil.
 func (u *chanUnit) chanVar(x syntax.Expr) *types2.Var {
-	id, ok := bareExpr(x).(*syntax.Name)
+	id, ok := syntax.Unparen(x).(*syntax.Name)
 	if !ok {
 		return nil
 	}
@@ -382,7 +382,7 @@ func (u *chanUnit) chanVar(x syntax.Expr) *types2.Var {
 
 // recvOf returns x as a receive operation, or nil.
 func recvOf(x syntax.Expr) *syntax.Operation {
-	op, ok := bareExpr(x).(*syntax.Operation)
+	op, ok := syntax.Unparen(x).(*syntax.Operation)
 	if !ok || op.Op != syntax.Recv || op.Y != nil {
 		return nil
 	}
@@ -420,11 +420,11 @@ func commOperation(st syntax.SimpleStmt) *syntax.Operation {
 
 // isDoneCall reports whether x is a call x.Done() that returns a channel.
 func isDoneCall(x syntax.Expr) bool {
-	call, ok := bareExpr(x).(*syntax.CallExpr)
+	call, ok := syntax.Unparen(x).(*syntax.CallExpr)
 	if !ok || len(call.ArgList) != 0 {
 		return false
 	}
-	sel, ok := bareExpr(call.Fun).(*syntax.SelectorExpr)
+	sel, ok := syntax.Unparen(call.Fun).(*syntax.SelectorExpr)
 	if !ok || sel.Sel.Value != "Done" {
 		return false
 	}
