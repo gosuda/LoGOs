@@ -1,0 +1,11 @@
+exit fall-off: 0
+return value: 21
+exit return: 0
+exit break: 0
+exit continue: 0
+exit labeled break: 0
+exit fallthrough: 0
+exit init owner: 0
+exit range-func break: 0
+exit panic: 0
+sink: 71

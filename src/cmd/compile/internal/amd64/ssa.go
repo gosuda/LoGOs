@@ -1432,6 +1432,78 @@ func ssaGenValue(s *ssagen.State, v *ssa.Value) {
 		opregreg(s, x86.AXORL, res, res)
 		done.To.SetTarget(s.Pc())
 
+	case ssa.OpAMD64LoweredLogosRegionBump:
+		h := v.Args[0].Reg()
+		gen := v.Args[1].Reg()
+		res := v.Reg0()
+		tmp := v.RegTmp()
+		p := s.Prog(x86.AMOVQ)
+		p.From.Type = obj.TYPE_MEM
+		p.From.Reg = h
+		p.From.Offset = ssa.LogosRegionChunkOffset
+		p.To.Type = obj.TYPE_REG
+		p.To.Reg = tmp
+		opregreg(s, x86.ATESTQ, tmp, tmp)
+		fail := s.Prog(x86.AJEQ)
+		fail.To.Type = obj.TYPE_BRANCH
+		p = s.Prog(x86.ACMPQ)
+		p.From.Type = obj.TYPE_REG
+		p.From.Reg = gen
+		p.To.Type = obj.TYPE_MEM
+		p.To.Reg = h
+		p.To.Offset = ssa.LogosRegionGenOffset
+		stale := s.Prog(x86.AJNE)
+		stale.To.Type = obj.TYPE_BRANCH
+		p = s.Prog(x86.AMOVQ)
+		p.From.Type = obj.TYPE_MEM
+		p.From.Reg = tmp
+		p.From.Offset = ssa.LogosRegionNoscanCurOffset
+		p.To.Type = obj.TYPE_REG
+		p.To.Reg = h
+		p = s.Prog(x86.ALEAQ)
+		p.From.Type = obj.TYPE_MEM
+		p.From.Reg = h
+		p.From.Offset = 7
+		p.To.Type = obj.TYPE_REG
+		p.To.Reg = h
+		p = s.Prog(x86.AANDQ)
+		p.From.Type = obj.TYPE_CONST
+		p.From.Offset = -8
+		p.To.Type = obj.TYPE_REG
+		p.To.Reg = h
+		p = s.Prog(x86.AMOVQ)
+		p.From.Type = obj.TYPE_REG
+		p.From.Reg = h
+		p.To.Type = obj.TYPE_REG
+		p.To.Reg = res
+		p = s.Prog(x86.ALEAQ)
+		p.From.Type = obj.TYPE_MEM
+		p.From.Reg = h
+		p.From.Offset = v.AuxInt
+		p.To.Type = obj.TYPE_REG
+		p.To.Reg = gen
+		p = s.Prog(x86.ACMPQ)
+		p.From.Type = obj.TYPE_REG
+		p.From.Reg = gen
+		p.To.Type = obj.TYPE_MEM
+		p.To.Reg = tmp
+		p.To.Offset = ssa.LogosRegionScanCurOffset
+		over := s.Prog(x86.AJHI)
+		over.To.Type = obj.TYPE_BRANCH
+		p = s.Prog(x86.AMOVQ)
+		p.From.Type = obj.TYPE_REG
+		p.From.Reg = gen
+		p.To.Type = obj.TYPE_MEM
+		p.To.Reg = tmp
+		p.To.Offset = ssa.LogosRegionNoscanCurOffset
+		done := s.Prog(obj.AJMP)
+		done.To.Type = obj.TYPE_BRANCH
+		fail.To.SetTarget(s.Pc())
+		stale.To.SetTarget(s.Pc())
+		over.To.SetTarget(s.Pc())
+		opregreg(s, x86.AXORL, res, res)
+		done.To.SetTarget(s.Pc())
+
 	case ssa.OpAMD64LoweredPanicBoundsRR, ssa.OpAMD64LoweredPanicBoundsRC, ssa.OpAMD64LoweredPanicBoundsCR, ssa.OpAMD64LoweredPanicBoundsCC:
 		// Compute the constant we put in the PCData entry for this call.
 		code, signed := ssa.BoundsKind(v.AuxInt).Code()

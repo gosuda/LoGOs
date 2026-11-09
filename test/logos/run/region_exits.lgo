@@ -1,0 +1,174 @@
+// run -goexperiment logosarena
+
+package main
+
+import (
+	"fmt"
+	"logos/arena"
+	"logos/rt"
+)
+
+// REDTEAM placement-region exits (M18-S7 unit B): every exit kind out of an
+// owner block must release the region, so rt.RegionBytes() reads zero after
+// each exit. The allocations only make RegionBytes nonzero when escape
+// analysis (unit C) places them, so this fixture stays red until unit C
+// lands; the predicted red before the lowering is "bytes stay 0".
+
+var regionExitsSink int
+
+func regionInside() {
+	if rt.RegionBytes() == 0 {
+		panic("region bytes are zero inside an open region")
+	}
+}
+
+func exitFallOff() {
+	{
+		r := arena.Open()
+		p := arena.New[int](r)
+		*p = 3
+		regionExitsSink += *p
+		regionInside()
+	}
+}
+
+func exitReturn() int {
+	{
+		r := arena.Open()
+		p := arena.New[int](r)
+		*p = 21
+		return *p
+	}
+}
+
+func exitBreak() {
+	for i := 0; i < 2; i++ {
+		{
+			r := arena.Open()
+			p := arena.New[int](r)
+			*p = 5 + i
+			regionExitsSink += *p
+			regionInside()
+			if i == 1 {
+				break
+			}
+		}
+	}
+}
+
+func exitContinue() {
+	for i := 0; i < 3; i++ {
+		{
+			r := arena.Open()
+			p := arena.New[int](r)
+			*p = 2
+			regionExitsSink += *p
+			regionInside()
+			if i != 2 {
+				continue
+			}
+		}
+	}
+}
+
+func exitLabeledBreak() {
+outer:
+	for i := 0; i < 5; i++ {
+		{
+			r := arena.Open()
+			p := arena.New[int](r)
+			*p = 9 + i
+			regionExitsSink += *p
+			regionInside()
+			if i >= 1 {
+				break outer
+			}
+		}
+	}
+}
+
+func exitFallthrough() {
+	switch regionExitsSink / 1000 {
+	case 0:
+		r := arena.Open()
+		p := arena.New[int](r)
+		*p = 7
+		regionExitsSink += *p
+		regionInside()
+		fallthrough
+	case 1:
+		regionExitsSink++
+	}
+}
+
+func exitInitOwner() {
+	if r := arena.Open(); regionExitsSink >= 0 {
+		p := arena.New[int](r)
+		*p = 11
+		regionExitsSink += *p
+		regionInside()
+	}
+}
+
+func regionIter(yield func(int) bool) {
+	for i := 1; i <= 3; i++ {
+		if !yield(i) {
+			return
+		}
+	}
+}
+
+func exitRangeFuncBreak() {
+	for v := range regionIter {
+		r := arena.Open()
+		p := arena.New[int](r)
+		*p = v
+		regionExitsSink += *p
+		regionInside()
+		if v >= 2 {
+			break
+		}
+	}
+}
+
+func exitPanic() {
+	{
+		r := arena.Open()
+		p := arena.New[int](r)
+		*p = 13
+		regionExitsSink += *p
+		regionInside()
+		panic("region exits")
+	}
+}
+
+func regionRecoverPanic() {
+	defer func() {
+		if recover() == nil {
+			panic("expected a panic")
+		}
+	}()
+	exitPanic()
+}
+
+func main() {
+	exitFallOff()
+	fmt.Println("exit fall-off:", rt.RegionBytes())
+	fmt.Println("return value:", exitReturn())
+	fmt.Println("exit return:", rt.RegionBytes())
+	exitBreak()
+	fmt.Println("exit break:", rt.RegionBytes())
+	exitContinue()
+	fmt.Println("exit continue:", rt.RegionBytes())
+	exitLabeledBreak()
+	fmt.Println("exit labeled break:", rt.RegionBytes())
+	exitFallthrough()
+	fmt.Println("exit fallthrough:", rt.RegionBytes())
+	exitInitOwner()
+	fmt.Println("exit init owner:", rt.RegionBytes())
+	exitRangeFuncBreak()
+	fmt.Println("exit range-func break:", rt.RegionBytes())
+	regionRecoverPanic()
+	fmt.Println("exit panic:", rt.RegionBytes())
+	fmt.Println("sink:", regionExitsSink)
+}

@@ -4032,7 +4032,7 @@ func (s *state) append(n *ir.CallExpr, inplace bool) *ssa.Value {
 	// TODO: handle ... append case? Currently we handle only
 	// a fixed number of appended elements.
 	var info *backingStoreInfo
-	if !inplace {
+	if !inplace && s.logosRegionAppendSlice(n) == nil {
 		info = s.getBackingStoreInfoForAppend(n)
 	}
 
@@ -4126,7 +4126,9 @@ func (s *state) append(n *ir.CallExpr, inplace bool) *ssa.Value {
 	s.startBlock(grow)
 	taddr := s.expr(n.Fun)
 	var r []*ssa.Value
-	if info != nil && n.UseBuf {
+	if f, h, g := s.logosRegionGrowCall(n); f != nil {
+		r = s.rtcall(f, true, []*types.Type{n.Type()}, h, g, p, l, c, nargs, taddr)
+	} else if info != nil && n.UseBuf {
 		// Use stack-allocated buffer as backing store, if we can.
 		if et.HasPointers() && !info.usedStatic {
 			// Initialize in the function header. Not the best place,

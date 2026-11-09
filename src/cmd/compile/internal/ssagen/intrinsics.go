@@ -132,6 +132,7 @@ func initIntrinsics(cfg *intrinsicBuildConfig) {
 		intrinsics.alias(pkg, fn, pkg2, fn2, archs...)
 	}
 	logosRegisterArena(add)
+	logosRegisterRegion(add)
 
 	/******** runtime ********/
 	if !cfg.instrumenting {

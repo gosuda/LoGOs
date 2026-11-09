@@ -105,11 +105,11 @@ func walkAppend(n *ir.CallExpr, init *ir.Nodes, dst ir.Node) ir.Node {
 
 	// else { s = growslice(s.ptr, n, s.cap, a, T) }
 	nif.Else = []ir.Node{
-		ir.NewAssignStmt(base.Pos, s, walkGrowslice(s, nif.PtrInit(),
+		ir.NewAssignStmt(base.Pos, s, logosRegionGrowslice(logosRegionGrow{n, s, nif.PtrInit(),
 			ir.NewUnaryExpr(base.Pos, ir.OSPTR, s),
 			newLen,
 			ir.NewUnaryExpr(base.Pos, ir.OCAP, s),
-			num)),
+			num})),
 	}
 
 	l = append(l, nif)

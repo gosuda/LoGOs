@@ -6,4 +6,5 @@ package ssagen
 
 func init() {
 	wantIntrinsics[testIntrinsicKey{"amd64", "runtime", "logosArenaBump"}] = struct{}{}
+	wantIntrinsics[testIntrinsicKey{"amd64", "runtime", "logosRegionBump"}] = struct{}{}
 }

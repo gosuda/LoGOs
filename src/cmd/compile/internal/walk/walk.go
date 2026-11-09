@@ -23,6 +23,7 @@ const tmpstringbufsize = 32
 func Walk(fn *ir.Func) {
 	ir.CurFunc = fn
 	installLogosArenaFrame(fn)
+	logosRegionLower(fn)
 	// The entry token lives only for this Walk: RetMake lowering and Chain
 	// consent read it while walking fn's body. Drop it on return so stale
 	// entries never accumulate across functions.
