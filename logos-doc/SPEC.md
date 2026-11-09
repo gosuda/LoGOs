@@ -85,6 +85,7 @@ The output MUST NOT emit colliding helper imports. [T-0.3]
 Ejected output MUST NOT emit `.gen.go` file names. [T-0.3]
 It MUST NOT emit a `//go:build !logos` line. [T-0.3]
 
+### 0.4 Design axiom for explicit code
 Explicitness guides the rules below. Signatures and call sites show side effects, mutability contracts, nilability states, and error paths [T-0.4]. Each later section states its own testable rules [T-0.4].
 The compiler MUST reject dangerous edge cases through type rules and `logos lint` rules [T-0.4]. The lint registry enumerates the enforced lint rules [T-0.4].
 
