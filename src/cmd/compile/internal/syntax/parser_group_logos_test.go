@@ -125,3 +125,22 @@ func TestGroupPlainModeKeepsGoCall(t *testing.T) {
 		t.Fatalf("plain stmt 0 is %T; want *CallStmt", decl.Body.List[0])
 	}
 }
+
+func TestGroupBlockNeedsGo(t *testing.T) {
+	f := parseGroup(t, "package p\nfunc f(ctx int) { go group (ctx) { g() } }\nfunc g() {}\n")
+	decl := f.DeclList[0].(*FuncDecl)
+	if _, ok := decl.Body.List[0].(*GroupStmt); !ok {
+		t.Fatalf("go group stmt is %T; want *GroupStmt", decl.Body.List[0])
+	}
+	src := "package p\nfunc f(ctx int) { group (ctx) { g() } }\nfunc g() {}\n"
+	var msgs []string
+	_, err := Parse(nil, strings.NewReader(src), func(err error) {
+		msgs = append(msgs, err.Error())
+	}, nil, CheckBranches|LogosMode)
+	if err == nil && len(msgs) == 0 {
+		t.Fatal("misplaced group block parsed without error")
+	}
+	if len(msgs) == 0 || !strings.Contains(msgs[0], "unexpected { at end of statement") {
+		t.Fatalf("misplaced group first error is %q; want unexpected { at end of statement", msgs)
+	}
+}

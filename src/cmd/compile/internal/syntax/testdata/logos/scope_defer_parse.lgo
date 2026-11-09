@@ -36,6 +36,15 @@ func badMissingCall() {
 	scope defer // ERROR syntax error: scope defer requires a function call
 }
 
+func badScopePosition() {
+	scope work() // ERROR syntax error: unexpected name work at end of statement
+}
+
+func keepScopeNewline() {
+	scope
+	defer work()
+}
+
 func keepDefine() {
 	scope := 1
 	_ = scope

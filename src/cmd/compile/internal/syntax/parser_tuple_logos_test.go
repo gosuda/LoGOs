@@ -204,3 +204,32 @@ func TestLogosParenMatchesGo(t *testing.T) {
 		}
 	}
 }
+
+func TestLogosParenColonMeansNamedType(t *testing.T) {
+	f := parseLogos(t, "package p\nvar v (x: int, y: string)\n")
+	decl, ok := f.DeclList[0].(*VarDecl)
+	if !ok {
+		t.Fatalf("decl 0 is %T; want *VarDecl", f.DeclList[0])
+	}
+	if decl.Values != nil {
+		t.Fatalf("var decl has values %v; want none", decl.Values)
+	}
+	tt, ok := decl.Type.(*TupleType)
+	if !ok {
+		t.Fatalf("(x: int, y: string) is %T; want *TupleType", decl.Type)
+	}
+	if len(tt.Fields) != 2 || tt.Fields[0].Name == nil || tt.Fields[0].Name.Value != "x" || tt.Fields[1].Name == nil || tt.Fields[1].Name.Value != "y" {
+		t.Fatalf("colon fields carry no names: %+v", tt.Fields)
+	}
+	src := "package p\nfunc f(a int) int {\nx := (a: 1)\nreturn x\n}\n"
+	var msgs []string
+	_, err := Parse(nil, strings.NewReader(src), func(err error) {
+		msgs = append(msgs, err.Error())
+	}, nil, CheckBranches|LogosMode)
+	if err == nil && len(msgs) == 0 {
+		t.Fatal("colon in value position parsed without error")
+	}
+	if len(msgs) == 0 || !strings.Contains(msgs[0], "expected )") {
+		t.Fatalf("colon value first error is %q; want expected )", msgs)
+	}
+}
