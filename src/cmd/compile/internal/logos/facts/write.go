@@ -5,7 +5,6 @@
 package facts
 
 import (
-	"bytes"
 	"strings"
 
 	"cmd/compile/internal/syntax"
@@ -142,10 +141,4 @@ func appendUnique[E comparable](s []E, e E) []E {
 
 func joinPath(path []string) string {
 	return strings.Join(path, ".")
-}
-
-func renderExpr(e syntax.Expr) string {
-	var buf bytes.Buffer
-	_, _ = syntax.Fprint(&buf, e, syntax.LineForm)
-	return buf.String()
 }

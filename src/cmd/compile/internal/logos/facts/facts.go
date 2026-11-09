@@ -346,6 +346,35 @@ func (d *decoder) header() (ln int, s string, err error) {
 	return ln, s, nil
 }
 
+func (d *decoder) takeBody(ln int, kind, object string, n int) ([]byte, error) {
+	return d.body(ln, kind, object, n, false)
+}
+
+func (d *decoder) requireBody(ln int, kind, object string, n int) ([]byte, error) {
+	return d.body(ln, kind, object, n, true)
+}
+
+func (d *decoder) body(ln int, kind, object string, n int, strictNL bool) ([]byte, error) {
+	if len(d.data)-d.off < n {
+		return nil, fmt.Errorf("logos facts line %d: truncated %s body for %q (want %d bytes, have %d)", ln, kind, object, n, len(d.data)-d.off)
+	}
+	src := bytes.Clone(d.data[d.off : d.off+n])
+	d.off += n
+	d.line += bytes.Count(src, []byte{'\n'})
+	atEOF := d.off >= len(d.data)
+	if strictNL && atEOF {
+		return nil, fmt.Errorf("logos facts line %d: want newline after %s body", ln, kind)
+	}
+	if !atEOF {
+		if d.data[d.off] != '\n' {
+			return nil, fmt.Errorf("logos facts line %d: want newline after %s body", ln, kind)
+		}
+		d.off++
+		d.line++
+	}
+	return src, nil
+}
+
 func Decode(data []byte) (*Facts, error) {
 	d := &decoder{data: data, line: 1}
 	f := &Facts{}
@@ -394,7 +423,7 @@ func Decode(data []byte) (*Facts, error) {
 			if len(fields) != 3 {
 				return nil, fmt.Errorf("logos facts line %d: bad %s record %q (want %q)", ln, fields[0], line, fields[0]+" <object> <path>")
 			}
-			if !validObject(fields[1]) {
+			if !ValidObject(fields[1]) {
 				return nil, fmt.Errorf("logos facts line %d: bad object %q", ln, fields[1])
 			}
 			if !validPath(fields[2]) {
@@ -414,7 +443,7 @@ func Decode(data []byte) (*Facts, error) {
 			if len(fields) != 4 {
 				return nil, fmt.Errorf(`logos facts line %d: bad locks record %q (want "locks <object> <requires|acquires|releases> <path>")`, ln, line)
 			}
-			if !validObject(fields[1]) {
+			if !ValidObject(fields[1]) {
 				return nil, fmt.Errorf("logos facts line %d: bad object %q", ln, fields[1])
 			}
 			switch fields[2] {
@@ -430,7 +459,7 @@ func Decode(data []byte) (*Facts, error) {
 			if len(fields) != 2 {
 				return nil, fmt.Errorf(`logos facts line %d: bad allocfree record %q (want "allocfree <object>")`, ln, line)
 			}
-			if !validObject(fields[1]) {
+			if !ValidObject(fields[1]) {
 				return nil, fmt.Errorf("logos facts line %d: bad object %q", ln, fields[1])
 			}
 			f.AllocFrees = append(f.AllocFrees, AllocFreeFact{Object: fields[1]})
@@ -440,7 +469,7 @@ func Decode(data []byte) (*Facts, error) {
 			}
 			var fn FnFact
 			fn.Object = fields[1]
-			if !validObject(fn.Object) {
+			if !ValidObject(fn.Object) {
 				return nil, fmt.Errorf("logos facts line %d: bad object %q", ln, fn.Object)
 			}
 			for _, flag := range strings.Split(fields[2], ",") {
@@ -456,7 +485,7 @@ func Decode(data []byte) (*Facts, error) {
 			if len(fields) != 3 {
 				return nil, fmt.Errorf(`logos facts line %d: bad prop record %q (want "prop <interface> <prefix>")`, ln, line)
 			}
-			if !validObject(fields[1]) {
+			if !ValidObject(fields[1]) {
 				return nil, fmt.Errorf("logos facts line %d: bad interface %q", ln, fields[1])
 			}
 			if !validPrefix(fields[2]) {
@@ -467,7 +496,7 @@ func Decode(data []byte) (*Facts, error) {
 			if len(fields) != 4 {
 				return nil, fmt.Errorf(`logos facts line %d: bad conforms record %q (want "conforms <struct> <package> <interface>")`, ln, line)
 			}
-			if !validObject(fields[1]) {
+			if !ValidObject(fields[1]) {
 				return nil, fmt.Errorf("logos facts line %d: bad struct %q", ln, fields[1])
 			}
 			if fields[2] == "" {
@@ -481,7 +510,7 @@ func Decode(data []byte) (*Facts, error) {
 			if len(fields) != 4 {
 				return nil, fmt.Errorf(`logos facts line %d: bad default record %q (want "default <type> <field> <length>")`, ln, line)
 			}
-			if !validObject(fields[1]) {
+			if !ValidObject(fields[1]) {
 				return nil, fmt.Errorf("logos facts line %d: bad type %q", ln, fields[1])
 			}
 			if !isIdent(fields[2]) {
@@ -491,67 +520,42 @@ func Decode(data []byte) (*Facts, error) {
 			if aerr != nil || n < 0 {
 				return nil, fmt.Errorf("logos facts line %d: bad default length %q", ln, fields[3])
 			}
-			if len(d.data)-d.off < n {
-				return nil, fmt.Errorf("logos facts line %d: truncated default body for %q (want %d bytes, have %d)", ln, fields[1], n, len(d.data)-d.off)
+			text, err := d.takeBody(ln, "default", fields[1], n)
+			if err != nil {
+				return nil, err
 			}
-			text := string(bytes.Clone(d.data[d.off : d.off+n]))
-			d.off += n
-			d.line += bytes.Count([]byte(text), []byte{'\n'})
-			if d.off < len(d.data) {
-				if d.data[d.off] != '\n' {
-					return nil, fmt.Errorf("logos facts line %d: want newline after default body", ln)
-				}
-				d.off++
-				d.line++
-			}
-			f.Defaults = append(f.Defaults, DefaultFact{Type: fields[1], Field: fields[2], Text: text})
+			f.Defaults = append(f.Defaults, DefaultFact{Type: fields[1], Field: fields[2], Text: string(text)})
 		case strings.HasPrefix(line, "comptime "):
 			if len(fields) != 3 {
 				return nil, fmt.Errorf(`logos facts line %d: bad comptime record %q (want "comptime <object> <length>")`, ln, line)
 			}
-			if !validObject(fields[1]) {
+			if !ValidObject(fields[1]) {
 				return nil, fmt.Errorf("logos facts line %d: bad object %q", ln, fields[1])
 			}
 			n, aerr := strconv.Atoi(fields[2])
 			if aerr != nil || n < 0 {
 				return nil, fmt.Errorf("logos facts line %d: bad comptime length %q", ln, fields[2])
 			}
-			if len(d.data)-d.off < n {
-				return nil, fmt.Errorf("logos facts line %d: truncated comptime body for %q (want %d bytes, have %d)", ln, fields[1], n, len(d.data)-d.off)
-			}
-			src := bytes.Clone(d.data[d.off : d.off+n])
-			d.off += n
-			d.line += bytes.Count(src, []byte{'\n'})
-			if d.off < len(d.data) {
-				if d.data[d.off] != '\n' {
-					return nil, fmt.Errorf("logos facts line %d: want newline after comptime body", ln)
-				}
-				d.off++
-				d.line++
+			src, err := d.takeBody(ln, "comptime", fields[1], n)
+			if err != nil {
+				return nil, err
 			}
 			f.Comptimes = append(f.Comptimes, ComptimeFact{Object: fields[1], Source: src})
 		case strings.HasPrefix(line, "constfn "):
 			if len(fields) != 3 {
 				return nil, fmt.Errorf(`logos facts line %d: bad constfn record %q (want "constfn <object> <length>")`, ln, line)
 			}
-			if !validObject(fields[1]) {
+			if !ValidObject(fields[1]) {
 				return nil, fmt.Errorf("logos facts line %d: bad object %q", ln, fields[1])
 			}
 			n, aerr := strconv.Atoi(fields[2])
 			if aerr != nil || n <= 0 {
 				return nil, fmt.Errorf("logos facts line %d: bad constfn length %q", ln, fields[2])
 			}
-			if len(d.data)-d.off < n {
-				return nil, fmt.Errorf("logos facts line %d: truncated constfn body for %q (want %d bytes, have %d)", ln, fields[1], n, len(d.data)-d.off)
+			src, err := d.requireBody(ln, "constfn", fields[1], n)
+			if err != nil {
+				return nil, err
 			}
-			src := bytes.Clone(d.data[d.off : d.off+n])
-			d.off += n
-			d.line += bytes.Count(src, []byte{'\n'})
-			if d.off >= len(d.data) || d.data[d.off] != '\n' {
-				return nil, fmt.Errorf("logos facts line %d: want newline after constfn body", ln)
-			}
-			d.off++
-			d.line++
 			for _, c := range f.ConstFuncs {
 				if c.Object == fields[1] {
 					return nil, fmt.Errorf("logos facts line %d: duplicate constfn object %q", ln, fields[1])
@@ -560,8 +564,8 @@ func Decode(data []byte) (*Facts, error) {
 			f.ConstFuncs = append(f.ConstFuncs, ConstFuncFact{Object: fields[1], Source: src})
 		default:
 			kind := line
-			if k := strings.Fields(line); len(k) > 0 {
-				kind = k[0]
+			if len(fields) > 0 {
+				kind = fields[0]
 			}
 			return nil, fmt.Errorf("logos facts line %d: unknown record %q", ln, kind)
 		}
@@ -585,9 +589,7 @@ func isIdent(s string) bool {
 	return true
 }
 
-func ValidObject(s string) bool { return validObject(s) }
-
-func validObject(s string) bool {
+func ValidObject(s string) bool {
 	recv, tag, hasTag := strings.Cut(s, "@")
 	if hasTag && !isIdent(tag) {
 		return false

@@ -4,7 +4,12 @@
 
 package facts
 
-import "cmd/compile/internal/types2"
+import (
+	"bytes"
+
+	"cmd/compile/internal/syntax"
+	"cmd/compile/internal/types2"
+)
 
 func writeDefaults(pkg *types2.Package, info *types2.Info, f *Facts) {
 	if pkg == nil || pkg.Scope() == nil || info == nil || len(info.LogosFieldDefaults) == 0 {
@@ -27,7 +32,9 @@ func writeDefaults(pkg *types2.Package, info *types2.Info, f *Facts) {
 			continue
 		}
 		for _, d := range info.LogosFieldDefaults[st] {
-			add(DefaultFact{Type: name, Field: d.Field, Text: renderExpr(d.Default)})
+			var buf bytes.Buffer
+			_, _ = syntax.Fprint(&buf, d.Default, syntax.LineForm)
+			add(DefaultFact{Type: name, Field: d.Field, Text: buf.String()})
 		}
 	}
 }
