@@ -6,26 +6,25 @@ package runtime
 
 import "unsafe"
 
-func LogosEnterFastCallForTest(arg unsafe.Pointer, now int64) (slots [4]uintptr, stamp int64, flag bool) {
+func LogosEnterFastCallForTest(arg unsafe.Pointer) (slots [4]uintptr, flag bool) {
 	mp := getg().m
-	logosRecordFastCall(mp, arg, now)
-	return mp.fastCgoFrame, mp.fastCallEnterNano, mp.inFastCall
+	logosRecordFastCall(mp, arg)
+	return mp.fastCgoFrame, mp.inFastCall
 }
 
-func LogosExitFastCallForTest() (slots [4]uintptr, stamp int64, flag bool) {
+func LogosExitFastCallForTest() (slots [4]uintptr, flag bool) {
 	mp := getg().m
 	logosClearFastCall(mp)
-	return mp.fastCgoFrame, mp.fastCallEnterNano, mp.inFastCall
+	return mp.fastCgoFrame, mp.inFastCall
 }
-func LogosFastCallStateForTest() (slots [4]uintptr, stamp int64, flag bool) {
+func LogosFastCallStateForTest() (slots [4]uintptr, flag bool) {
 	mp := getg().m
-	return mp.fastCgoFrame, mp.fastCallEnterNano, mp.inFastCall
+	return mp.fastCgoFrame, mp.inFastCall
 }
 
-func LogosDirtyFastCallSlotsForTest(slots [4]uintptr, stamp int64, flag bool) {
+func LogosDirtyFastCallSlotsForTest(slots [4]uintptr, flag bool) {
 	mp := getg().m
 	mp.fastCgoFrame = slots
-	mp.fastCallEnterNano = stamp
 	mp.inFastCall = flag
 }
 

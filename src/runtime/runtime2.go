@@ -755,8 +755,7 @@ type m struct {
 	self mWeakPointer
 
 	// Fast-cgo diagnostics belong to the original M across _Gsyscall.
-	fastCgoFrame      [4]uintptr
-	fastCallEnterNano int64
+	fastCgoFrame [4]uintptr
 }
 
 const mRedZoneSize = (16 << 3) * asanenabledBit // redZoneSize(2048)

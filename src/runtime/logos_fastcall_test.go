@@ -13,33 +13,27 @@ import (
 func TestCgoFastcallPinSlots(t *testing.T) {
 	var probe int
 	arg := unsafe.Pointer(&probe)
-	slots, stamp, flag := runtime.LogosEnterFastCallForTest(arg, 12345)
+	slots, flag := runtime.LogosEnterFastCallForTest(arg)
 	if !flag {
 		t.Fatal("inFastCall not set by enter")
 	}
 	if want := [4]uintptr{uintptr(arg), 0, 0, 0}; slots != want {
 		t.Fatalf("slots = %v, want %v", slots, want)
 	}
-	if stamp != 12345 {
-		t.Fatalf("fastCallEnterNano = %d, want 12345", stamp)
-	}
 
-	slots, stamp, flag = runtime.LogosExitFastCallForTest()
+	slots, flag = runtime.LogosExitFastCallForTest()
 	if flag {
 		t.Fatal("inFastCall still set after exit")
 	}
 	if slots != [4]uintptr{} {
 		t.Fatalf("slots = %v after exit, want zeros", slots)
 	}
-	if stamp != 0 {
-		t.Fatalf("fastCallEnterNano = %d after exit, want 0", stamp)
-	}
 }
 func TestLogosFastCallRecordZeroesIdleSlots(t *testing.T) {
-	runtime.LogosDirtyFastCallSlotsForTest([4]uintptr{11, 22, 33, 44}, 77, false)
+	runtime.LogosDirtyFastCallSlotsForTest([4]uintptr{11, 22, 33, 44}, false)
 	var probe int
 	arg := unsafe.Pointer(&probe)
-	slots, _, _ := runtime.LogosEnterFastCallForTest(arg, 0)
+	slots, _ := runtime.LogosEnterFastCallForTest(arg)
 	defer runtime.LogosExitFastCallForTest()
 	if want := [4]uintptr{uintptr(arg), 0, 0, 0}; slots != want {
 		t.Fatalf("slots = %v, want %v", slots, want)
@@ -47,24 +41,21 @@ func TestLogosFastCallRecordZeroesIdleSlots(t *testing.T) {
 }
 
 func TestLogosFastCallClearsAllSlots(t *testing.T) {
-	runtime.LogosDirtyFastCallSlotsForTest([4]uintptr{11, 22, 33, 44}, 77, true)
-	slots, stamp, flag := runtime.LogosExitFastCallForTest()
+	runtime.LogosDirtyFastCallSlotsForTest([4]uintptr{11, 22, 33, 44}, true)
+	slots, flag := runtime.LogosExitFastCallForTest()
 	if flag {
 		t.Fatal("inFastCall still set after exit")
 	}
 	if slots != [4]uintptr{} {
 		t.Fatalf("slots = %v after exit, want zeros", slots)
 	}
-	if stamp != 0 {
-		t.Fatalf("fastCallEnterNano = %d after exit, want 0", stamp)
-	}
 }
 
 func TestLogosFastCallPreservesCallerArgs(t *testing.T) {
 	v := 12345
 	arg := unsafe.Pointer(&v)
-	runtime.LogosEnterFastCallForTest(arg, 0)
-	slots, _, _ := runtime.LogosFastCallStateForTest()
+	runtime.LogosEnterFastCallForTest(arg)
+	slots, _ := runtime.LogosFastCallStateForTest()
 	if slots[0] != uintptr(arg) {
 		runtime.LogosExitFastCallForTest()
 		t.Fatalf("slot0 = %x, want %x", slots[0], uintptr(arg))
@@ -73,9 +64,9 @@ func TestLogosFastCallPreservesCallerArgs(t *testing.T) {
 		runtime.LogosExitFastCallForTest()
 		t.Fatalf("caller value = %d, want 12345", v)
 	}
-	slots, stamp, flag := runtime.LogosExitFastCallForTest()
-	if flag || stamp != 0 || slots != [4]uintptr{} {
-		t.Fatalf("after exit = %v %d %v, want zeros", slots, stamp, flag)
+	slots, flag := runtime.LogosExitFastCallForTest()
+	if flag || slots != [4]uintptr{} {
+		t.Fatalf("after exit = %v %v, want zeros", slots, flag)
 	}
 	if v != 12345 {
 		t.Fatalf("caller value after exit = %d, want 12345", v)

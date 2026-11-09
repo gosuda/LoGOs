@@ -37,7 +37,7 @@ func logosCgocallFast(fn, arg unsafe.Pointer) int32 {
 	if mp.cgoCallers != nil {
 		mp.cgoCallers[0] = 0
 	}
-	logosRecordFastCall(mp, arg, 0)
+	logosRecordFastCall(mp, arg)
 
 	fp := getcallerfp()
 	reentersyscall(sys.GetCallerPC(), sys.GetCallerSP(), fp)
@@ -83,19 +83,17 @@ func logosCgocallFast(fn, arg unsafe.Pointer) int32 {
 }
 
 //go:nosplit
-func logosRecordFastCall(mp *m, arg unsafe.Pointer, now int64) {
+func logosRecordFastCall(mp *m, arg unsafe.Pointer) {
 	mp.fastCgoFrame[0] = uintptr(arg)
 	mp.fastCgoFrame[1] = 0
 	mp.fastCgoFrame[2] = 0
 	mp.fastCgoFrame[3] = 0
-	mp.fastCallEnterNano = now
 	mp.inFastCall = true
 }
 
 //go:nosplit
 func logosClearFastCall(mp *m) {
 	mp.inFastCall = false
-	mp.fastCallEnterNano = 0
 	mp.fastCgoFrame[0] = 0
 	mp.fastCgoFrame[1] = 0
 	mp.fastCgoFrame[2] = 0

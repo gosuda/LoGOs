@@ -15,9 +15,6 @@ func TestLogosRuntimeNoNewPadding(t *testing.T) {
 	if runtime.LogosMFrameSize != 4*ptr {
 		t.Fatalf("fastCgoFrame = %d, want %d", runtime.LogosMFrameSize, 4*ptr)
 	}
-	if runtime.LogosMStampSize != 8 {
-		t.Fatalf("fastCallEnterNano = %d, want 8", runtime.LogosMStampSize)
-	}
 	if runtime.LogosMFlagSize != 1 {
 		t.Fatalf("inFastCall = %d, want 1", runtime.LogosMFlagSize)
 	}
@@ -63,15 +60,12 @@ func TestLogosRuntimeNoNewPadding(t *testing.T) {
 	var wantMTail, wantGTail, wantGMid, wantPTail uintptr
 	switch runtime.GOARCH {
 	case "amd64", "arm64", "wasm":
-		wantMTail = 4*ptr + 8
+		wantMTail = 4 * ptr
 		wantGTail = 10 * ptr
 		wantGMid = 4 * ptr
 		wantPTail = 3 * ptr
 	default:
 		t.Skipf("unsupported arch %s", runtime.GOARCH)
-	}
-	if d := runtime.LogosMStampOff - runtime.LogosMFrameOff; d != 4*ptr {
-		t.Fatalf("m stamp-frame gap = %d, want %d", d, 4*ptr)
 	}
 	if tail := runtime.LogosMSize - runtime.LogosMFrameOff; tail != wantMTail {
 		t.Fatalf("m tail = %d, want %d", tail, wantMTail)

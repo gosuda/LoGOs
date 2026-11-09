@@ -8,10 +8,8 @@ import "unsafe"
 
 var (
 	LogosMFrameSize   = unsafe.Sizeof(m{}.fastCgoFrame)
-	LogosMStampSize   = unsafe.Sizeof(m{}.fastCallEnterNano)
 	LogosMFlagSize    = unsafe.Sizeof(m{}.inFastCall)
 	LogosMFrameOff    = unsafe.Offsetof(m{}.fastCgoFrame)
-	LogosMStampOff    = unsafe.Offsetof(m{}.fastCallEnterNano)
 	LogosMSize        = unsafe.Sizeof(m{})
 	LogosGArenaSize   = unsafe.Sizeof(g{}.logosArena)
 	LogosGRetOKSize   = unsafe.Sizeof(g{}.logosArenaRetOK)
