@@ -76,3 +76,43 @@ func emptySlice() []int {
 func zeroBox() any {
 	return struct{}{}
 }
+
+var sinkZeroPtr = new(struct{})
+
+//logos:zeroalloc
+func zeroEscape() {
+	var z struct{}
+	sinkZeroPtr = &z
+}
+
+//logos:zeroalloc
+func growNil() []int {
+	var dst []int
+	return append(dst, 1)
+}
+
+//logos:zeroalloc
+func makeZero() []int {
+	return make([]int, 0)
+}
+
+//logos:zeroalloc
+func makeZeroCap() []int {
+	return make([]int, 0, 0)
+}
+
+//logos:zeroalloc
+func makeZeroLenCap() []int {
+	return make([]int, 0, 8) // ERROR "\[perf::zeroalloc_violation\] makeZeroLenCap allocates: make\(\[\]int, 0, 8\) escapes to heap: flows to result ~r0 \(return\)"
+}
+
+//logos:zeroalloc
+func mapInsert(m map[string]int, k string, v int) {
+	m[k] = v
+}
+
+//logos:zeroalloc
+func concatLen(a, b string) int {
+	s := a + b
+	return len(s)
+}

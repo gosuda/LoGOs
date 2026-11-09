@@ -6,6 +6,7 @@ package escape
 
 import (
 	"fmt"
+	"go/constant"
 
 	"cmd/compile/internal/base"
 	"cmd/compile/internal/ir"
@@ -192,7 +193,7 @@ func logosTail(n *note) *note {
 func logosAllocates(n ir.Node) bool {
 	switch n.Op() {
 	case ir.ONAME:
-		return !ir.IsBlank(n)
+		return !ir.IsBlank(n) && n.Type().Size() != 0
 	case ir.OPTRLIT, ir.ONEW:
 		return n.Type().Elem().Size() != 0
 	case ir.OSLICELIT:
@@ -201,11 +202,34 @@ func logosAllocates(n ir.Node) bool {
 		return len(n.(*ir.ClosureExpr).Func.ClosureVars) != 0
 	case ir.OCONVIFACE:
 		return !logosStaticIface(n.(*ir.ConvExpr))
-	case ir.OMAKESLICE, ir.OMAKEMAP, ir.OMAPLIT, ir.OMETHVALUE, ir.OADDSTR,
+	case ir.OMAKESLICE:
+		return !logosZeroSlice(n.(*ir.MakeExpr))
+	case ir.OMAKEMAP, ir.OMAPLIT, ir.OMETHVALUE, ir.OADDSTR,
 		ir.OSTR2BYTES, ir.OBYTES2STR, ir.ORUNES2STR, ir.OSTR2RUNES, ir.ORUNESTR:
 		return true
 	}
 	return false
+}
+
+func logosZeroSlice(n *ir.MakeExpr) bool {
+	bound, ok := logosSliceBound(n.Len)
+	if !ok || bound != 0 {
+		return false
+	}
+	if n.Cap == nil {
+		return true
+	}
+	bound, ok = logosSliceBound(n.Cap)
+	return ok && bound == 0
+}
+
+func logosSliceBound(n ir.Node) (int64, bool) {
+	lit, ok := n.(*ir.BasicLit)
+	if !ok || lit.Op() != ir.OLITERAL {
+		return 0, false
+	}
+	bound, ok := constant.Int64Val(lit.Val())
+	return bound, ok
 }
 
 // logosStaticIface reports whether the interface conversion n needs no
