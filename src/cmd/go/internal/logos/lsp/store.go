@@ -73,6 +73,9 @@ func (s *store) change(path string, version int, changes []contentChange) bool {
 	if doc == nil {
 		return false
 	}
+	if version <= doc.version {
+		return false
+	}
 	doc.text = applyChanges(doc.text, changes)
 	doc.version = version
 	s.touchLocked(path)

@@ -117,7 +117,10 @@ func (p *Proxy) didChange(ctx context.Context, m *message) {
 		return
 	}
 	path := docPath(params.TextDocument.URI)
-	p.st.change(path, params.TextDocument.Version, params.ContentChanges)
+	if path != "" && !p.st.change(path, params.TextDocument.Version, params.ContentChanges) {
+		p.logf("didChange: ignoring change for %s version %d", path, params.TextDocument.Version)
+		return
+	}
 	p.forwardUnlessLogos(m, path)
 }
 
