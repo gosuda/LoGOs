@@ -1,0 +1,73 @@
+// run
+
+package main
+
+import (
+	"fmt"
+	"sync/atomic"
+)
+
+type two struct {
+	a int64
+	b int64
+}
+
+func straight(p *two) int64 {
+	return p.a + 10*p.b
+}
+
+func diamond(p *two, c bool) int64 {
+	x := p.a
+	if c {
+		return x + p.b
+	}
+	return x - p.b
+}
+
+func joinLoop(p *two, n int) int64 {
+	x := p.a
+	for i := range n {
+		x += int64(i)
+	}
+	return x + p.b
+}
+
+func callSink(v int64) int64 {
+	return v + 1
+}
+
+func callBarrier(p *two) int64 {
+	x := p.a
+	y := callSink(x)
+	return y + p.b
+}
+
+func staleCheck(p *two) int64 {
+	a := p.a
+	p.b = 100
+	b := p.b
+	p.b = 5
+	return a + b
+}
+
+var atomicCell atomic.Int64
+
+func atomicBarrier(p *two) int64 {
+	x := p.a
+	atomicCell.Add(1)
+	return x + p.b
+}
+
+func main() {
+	p := &two{a: 3, b: 5}
+	fmt.Println(straight(p))
+	fmt.Println(diamond(p, true))
+	fmt.Println(diamond(p, false))
+	fmt.Println(joinLoop(p, 4))
+	fmt.Println(callBarrier(p))
+	fmt.Println(staleCheck(p))
+	fmt.Println(atomicBarrier(p))
+	fmt.Println(atomicCell.Load())
+	fmt.Println(p.a)
+	fmt.Println(p.b)
+}
