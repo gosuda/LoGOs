@@ -34,7 +34,6 @@ func regionUse(p *int) int {
 func regionBump8() int {
 	{
 		r := arena.Open()
-		p := arena.New[int](r)
 		// amd64:"TESTQ"
 		// amd64:"LEAQ 7\\("
 		// amd64:"ANDQ \\$-8,"
@@ -52,6 +51,7 @@ func regionBump8() int {
 		// arm64:1"CALL.*logosRegionAllocNoscan"
 		// arm64:-"CALL.*logosRegionBump"
 		// arm64:-"ANDQ \\$-8,"
+		p := arena.New[int](r)
 		return regionUse(p)
 	}
 }
@@ -60,7 +60,6 @@ func regionBump8() int {
 func regionBump511() int {
 	{
 		r := arena.Open()
-		p := arena.New[regionPad511](r)
 		// amd64:"LEAQ 7\\("
 		// amd64:"ANDQ \\$-8,"
 		// amd64:"LEAQ 512\\("
@@ -70,6 +69,7 @@ func regionBump511() int {
 		// amd64:"PCDATA \\$0, \\$-1"
 		// amd64:1"CALL.*logosRegionAllocNoscan"
 		// arm64:1"CALL.*logosRegionAllocNoscan"
+		p := arena.New[regionPad511](r)
 		p[0] = 1
 		return int(p[510])
 	}
@@ -79,14 +79,25 @@ func regionBump511() int {
 func regionBump512() int {
 	{
 		r := arena.Open()
-		p := arena.New[regionPad512](r)
+		// amd64:"TESTQ"
+		// amd64:"CMPQ .*8\\("
+		// amd64:"MOVQ 16\\("
+		// amd64:"LEAQ 7\\("
+		// amd64:"ANDQ \\$-8,"
 		// amd64:"LEAQ 512\\("
 		// amd64:"CMPQ .*24\\("
 		// amd64:"JHI"
+		// amd64:"MOVQ .*, 16\\("
 		// amd64:"PCDATA \\$0, \\$-2"
 		// amd64:"PCDATA \\$0, \\$-1"
 		// amd64:1"CALL.*logosRegionAllocNoscan"
+		// amd64:-"CALL.*logosRegionBump"
+		// amd64:-"CALL.*logosRegionMakeSlice"
+		// amd64:-"CALL.*makeslice"
 		// arm64:1"CALL.*logosRegionAllocNoscan"
+		// arm64:-"CALL.*logosRegionBump"
+		// arm64:-"ANDQ \\$-8,"
+		p := arena.New[regionPad512](r)
 		p[0] = 1
 		return int(p[511])
 	}
@@ -96,11 +107,11 @@ func regionBump512() int {
 func regionSlow513() int {
 	{
 		r := arena.Open()
-		p := arena.New[regionPad513](r)
 		// amd64:1"CALL.*logosRegionAllocNoscan"
 		// amd64:-"ANDQ \\$-8,"
 		// amd64:-"PCDATA \\$0, \\$-2"
 		// arm64:1"CALL.*logosRegionAllocNoscan"
+		p := arena.New[regionPad513](r)
 		p[0] = 1
 		return int(p[512])
 	}
@@ -110,10 +121,10 @@ func regionSlow513() int {
 func regionScanNew() int {
 	{
 		r := arena.Open()
-		p := arena.New[*int](r)
 		// amd64:1"CALL.*logosRegionAllocScan"
 		// amd64:-"CALL.*logosRegionAllocNoscan"
 		// arm64:1"CALL.*logosRegionAllocScan"
+		p := arena.New[*int](r)
 		globalScan = *p
 		if globalScan == nil {
 			return 1
