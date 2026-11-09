@@ -19,9 +19,10 @@ import (
 	"cmd/internal/goobj"
 )
 
-// goRules are the 19 language-neutral rules of SPEC Sec 1.2: the rules
-// logos lint applies to Go packages.
+// goRules are the 20 language-neutral rules of SPEC Sec 1.2 and Sec 2.6: the
+// rules logos lint applies to Go packages.
 var goRules = []string{
+	"correctness::withlock_leak",
 	"correctness::arena_pointer_escape",
 	"correctness::infinite_recursion",
 	"correctness::typed_nil_return",
@@ -55,7 +56,7 @@ var lgoRules = []string{
 	"pedantic::exhaustive_union_switch",
 }
 
-// TestRuleScopes asserts that the rules with Go set are exactly the 19
+// TestRuleScopes asserts that the rules with Go set are exactly the 20
 // language-neutral rules, that every registered rule declares a scope
 // (appears in exactly one of the two SPEC lists), that each rule's Group
 // matches its ID, and that the registry has no duplicate. A SPEC rule that
@@ -145,10 +146,10 @@ func g() {
 	}
 }
 
-// TestRuleScopesSpecCounts pins the 19 and 8 of SPEC Sec 1.2.
+// TestRuleScopesSpecCounts pins the 20 and 8 of SPEC Sec 1.2 and Sec 2.6.
 func TestRuleScopesSpecCounts(t *testing.T) {
-	if len(goRules) != 19 || len(lgoRules) != 8 {
-		t.Fatalf("goRules = %d, lgoRules = %d, want 19 and 8", len(goRules), len(lgoRules))
+	if len(goRules) != 20 || len(lgoRules) != 8 {
+		t.Fatalf("goRules = %d, lgoRules = %d, want 20 and 8", len(goRules), len(lgoRules))
 	}
 }
 

@@ -15,6 +15,7 @@ var registry = []Rule{
 	errChainReset,
 	nilDerefUnproven,
 	reentrantWithLockDeadlock,
+	withlockLeak,
 	timeAfterInLoop,
 	largeBackingArrayPin,
 	cognitiveOverflow,
