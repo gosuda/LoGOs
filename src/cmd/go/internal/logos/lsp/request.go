@@ -13,12 +13,6 @@ var nullResult = json.RawMessage("null")
 
 const codeRequestFailed = -32803
 
-var formattingMethods = map[string]bool{
-	"textDocument/formatting":       true,
-	"textDocument/rangeFormatting":  true,
-	"textDocument/onTypeFormatting": true,
-}
-
 func (p *Proxy) clientRequest(ctx context.Context, m *message) {
 	switch m.Method {
 	case "initialize":
@@ -83,9 +77,12 @@ func (p *Proxy) request(ctx context.Context, m *message) {
 		return
 	}
 	path := requestPath(params)
-	if formattingMethods[m.Method] && isLogosPath(path) {
-		p.declineFormatting(m)
-		return
+	switch m.Method {
+	case "textDocument/formatting", "textDocument/rangeFormatting", "textDocument/onTypeFormatting":
+		if isLogosPath(path) {
+			p.declineFormatting(m)
+			return
+		}
 	}
 	p.ensure(ctx)
 	p.work.Lock()

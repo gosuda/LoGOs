@@ -36,21 +36,17 @@ type unit struct {
 	hintsOK bool
 }
 
-type flight struct {
-	done chan struct{}
-}
-
 type store struct {
 	mu      sync.Mutex
 	docs    map[string]*document
 	units   map[string]*unit
-	flights map[string]*flight
+	flights map[string]chan struct{}
 }
 
 func (s *store) init() {
 	s.docs = make(map[string]*document)
 	s.units = make(map[string]*unit)
-	s.flights = make(map[string]*flight)
+	s.flights = make(map[string]chan struct{})
 }
 
 func (s *store) open(path string) bool {
@@ -159,17 +155,17 @@ func (p *Proxy) ensure(ctx context.Context) {
 			p.st.mu.Unlock()
 			return
 		}
-		if fl, ok := p.st.flights[dir]; ok {
+		if done, ok := p.st.flights[dir]; ok {
 			p.st.mu.Unlock()
 			select {
-			case <-fl.done:
+			case <-done:
 			case <-ctx.Done():
 				return
 			}
 			continue
 		}
-		fl := &flight{done: make(chan struct{})}
-		p.st.flights[dir] = fl
+		done := make(chan struct{})
+		p.st.flights[dir] = done
 		p.st.mu.Unlock()
 
 		p.compileUnit(ctx, dir)
@@ -177,7 +173,7 @@ func (p *Proxy) ensure(ctx context.Context) {
 		p.st.mu.Lock()
 		delete(p.st.flights, dir)
 		p.st.mu.Unlock()
-		close(fl.done)
+		close(done)
 	}
 }
 
@@ -235,7 +231,10 @@ func (p *Proxy) apply(dir string, low *Lowering, diags []Diagnostic, versions ma
 	if low == nil {
 		low = &Lowering{Dirs: slices.Collect(maps.Keys(u.dirs)), Missing: slices.Collect(maps.Keys(u.paths))}
 	}
-	u.dirs = setOf(low.Dirs)
+	u.dirs = make(map[string]bool, len(low.Dirs))
+	for _, d := range low.Dirs {
+		u.dirs[d] = true
+	}
 	u.diags = diags
 	u.diagVersions = versions
 	u.hintsOK = false
@@ -295,14 +294,6 @@ func (p *Proxy) pruneLocked(need map[string]bool) {
 		tb.byVirt[lw.virt] = lw
 	}
 	p.tables.Store(tb)
-}
-
-func setOf(list []string) map[string]bool {
-	set := make(map[string]bool, len(list))
-	for _, s := range list {
-		set[s] = true
-	}
-	return set
 }
 
 func (p *Proxy) syncGopls() {

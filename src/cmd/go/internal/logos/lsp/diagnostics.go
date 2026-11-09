@@ -45,7 +45,7 @@ func (p *Proxy) publish(uri string) {
 	p.mu.Lock()
 	prev, seen := p.sent[uri]
 	same := prev == string(raw) || (count == 0 && !seen)
-	if count == 0 && !p.st.open(uriPathOrEmpty(uri)) {
+	if count == 0 && !p.st.open(docPath(uri)) {
 		delete(p.sent, uri)
 	} else {
 		p.sent[uri] = string(raw)
@@ -56,52 +56,38 @@ func (p *Proxy) publish(uri string) {
 	}
 }
 
-func uriPathOrEmpty(uri string) string {
-	path, err := uriPath(uri)
-	if err != nil {
-		return ""
-	}
-	return path
-}
-
 func (p *Proxy) diagnosticsParams(uri string) (map[string]any, int) {
-	path := uriPathOrEmpty(uri)
+	path := docPath(uri)
 	p.st.mu.Lock()
 	doc := p.st.docs[path]
 	u := p.st.unitFor(path)
 	extra := p.compilerItems(path, doc, u)
-	docState := documentState{open: doc != nil, version: docStateVersion(doc)}
+	open, version := doc != nil, 0
+	if doc != nil {
+		version = doc.version
+	}
 	p.st.mu.Unlock()
 	tb := p.tables.Load()
 	p.mu.Lock()
 	lw := tb.bySrc[path]
-	items := p.serverItems(tb, uri, path, lw, docState)
+	var items []any
+	if open || !isLogosPath(path) {
+		items = p.serverItems(tb, uri, path, lw)
+	}
 	p.mu.Unlock()
 	items = mergeDiagnostics(items, extra)
 	params := map[string]any{"uri": uri, "diagnostics": items}
-	if doc != nil {
-		params["version"] = docState.version
+	if open {
+		params["version"] = version
 	}
 	return params, len(items)
 }
 
-type documentState struct {
-	open    bool
-	version int
-}
-
-func docStateVersion(doc *document) int {
-	if doc == nil {
-		return 0
-	}
-	return doc.version
-}
-
-func (p *Proxy) serverItems(tb *tables, uri, path string, lw *lowered, doc documentState) []any {
+func (p *Proxy) serverItems(tb *tables, uri, path string, lw *lowered) []any {
 	if !isLogosPath(path) {
 		return decodeItems(p.srvDiags[uri].raw, tb, nil)
 	}
-	if !doc.open || lw == nil || !lw.fresh {
+	if lw == nil || !lw.fresh {
 		return nil
 	}
 	sd := p.srvDiags[lw.virtURI()]

@@ -76,10 +76,16 @@ func (w *rewriter) rewrite(v any, ctx *lowered) any {
 
 func (w *rewriter) object(m map[string]any, ctx *lowered) any {
 	if r, ok := asRange(m); ok {
-		return w.rangeValue(m, r, ctx)
+		if ctx == nil {
+			return m
+		}
+		return rangeJSON(w.rng(ctx, r))
 	}
 	if p, ok := asPosition(m); ok {
-		return w.positionValue(m, p, ctx)
+		if ctx == nil {
+			return m
+		}
+		return positionJSON(w.pos(ctx, p))
 	}
 	own := w.owner(m, ctx)
 	w.renameURIs(m)
@@ -87,20 +93,6 @@ func (w *rewriter) object(m map[string]any, ctx *lowered) any {
 		m[key] = w.child(key, v, own, ctx)
 	}
 	return m
-}
-
-func (w *rewriter) rangeValue(m map[string]any, r Range, ctx *lowered) any {
-	if ctx == nil {
-		return m
-	}
-	return rangeJSON(w.rng(ctx, r))
-}
-
-func (w *rewriter) positionValue(m map[string]any, p Position, ctx *lowered) any {
-	if ctx == nil {
-		return m
-	}
-	return positionJSON(w.pos(ctx, p))
 }
 
 func (w *rewriter) owner(m map[string]any, ctx *lowered) *lowered {

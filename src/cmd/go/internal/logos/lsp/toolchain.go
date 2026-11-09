@@ -22,8 +22,6 @@ import (
 	"cmd/go/internal/cfg"
 )
 
-var compiledArgs = []string{"list", "-e", "-deps", "-export", "-compiled", "-json", "--json-diagnostics"}
-
 type compiledPkg struct {
 	Dir        string
 	Standard   bool
@@ -149,7 +147,7 @@ func (t *toolchain) runOnce(ctx context.Context, dir string, buffers map[string]
 			err = rerr
 		}
 	}()
-	stdout, stderr, err := t.run(ctx, dir, append(compiledArgs, "-overlay="+ov.json, ".")...)
+	stdout, stderr, err := t.run(ctx, dir, "list", "-e", "-deps", "-export", "-compiled", "-json", "--json-diagnostics", "-overlay="+ov.json, ".")
 	if err != nil {
 		return nil, err
 	}

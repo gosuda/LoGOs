@@ -150,8 +150,6 @@ func appendList(base, extra any) any {
 	return append(b, e...)
 }
 
-const hoverSeparator = "\n\n---\n\n"
-
 func mergeHover(base, extra any) any {
 	b, _ := base.(map[string]any)
 	e, _ := extra.(map[string]any)
@@ -170,7 +168,7 @@ func mergeHover(base, extra any) any {
 	if bk == "" || bk != ek || !ok1 || !ok2 {
 		return base
 	}
-	bc["value"] = strings.Join([]string{bv, ev}, hoverSeparator)
+	bc["value"] = strings.Join([]string{bv, ev}, "\n\n---\n\n")
 	return base
 }
 

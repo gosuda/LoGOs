@@ -39,18 +39,14 @@ func dropGeneratedHints(result any, lw *lowered) any {
 	}
 	kept := make([]any, 0, len(list))
 	for _, item := range list {
-		if !hintInsideGenerated(item, lw) {
+		m, _ := item.(map[string]any)
+		pos, _ := m["position"].(map[string]any)
+		p, ok := asPosition(pos)
+		if !ok || !lw.pm.insideGenerated(lw.pm.low.offset(p)) {
 			kept = append(kept, item)
 		}
 	}
 	return kept
-}
-
-func hintInsideGenerated(item any, lw *lowered) bool {
-	m, _ := item.(map[string]any)
-	pos, _ := m["position"].(map[string]any)
-	p, ok := asPosition(pos)
-	return ok && lw.pm.insideGenerated(lw.pm.low.offset(p))
 }
 
 func dropReservedCompletions(result any) any {
