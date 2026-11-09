@@ -547,3 +547,81 @@ func TestLogosErrdeferKeepsGoMeaning(t *testing.T) {
 		})
 	}
 }
+
+func TestLogosContextualWordsKeepGoMeaning(t *testing.T) {
+	for _, src := range []string{
+		"package p\nfunc f() {\nyield := 1\n_ = yield\n}\n",
+		"package p\nfunc f() {\nscope := 1\n_ = scope\n}\n",
+		"package p\nfunc f() {\ngroup := 1\n_ = group\n}\n",
+	} {
+		stmts := funcBodyStmts(t, parseLogos(t, src), "f")
+		if len(stmts) != 2 {
+			t.Fatalf("%q: got %d statements, want 2", src, len(stmts))
+		}
+		if _, ok := stmts[0].(*AssignStmt); !ok {
+			t.Fatalf("%q: first statement is %T, want *AssignStmt", src, stmts[0])
+		}
+	}
+	f := parseLogos(t, "package p\nfunc f() { scope defer g() }\nfunc g() {}\n")
+	foundScope := false
+	Inspect(f, func(n Node) bool {
+		if _, ok := n.(*ScopeDeferStmt); ok {
+			foundScope = true
+			return false
+		}
+		return true
+	})
+	if !foundScope {
+		t.Fatalf("scope defer: no *ScopeDeferStmt")
+	}
+	g := parseLogos(t, "package p\nfunc f(ctx int) { go group (ctx) { go { h() } } }\nfunc h() {}\n")
+	foundGroup := false
+	Inspect(g, func(n Node) bool {
+		if _, ok := n.(*GroupStmt); ok {
+			foundGroup = true
+			return false
+		}
+		return true
+	})
+	if !foundGroup {
+		t.Fatalf("go group: no *GroupStmt")
+	}
+	y := parseLogos(t, "package p\nfunc f() { yield 1 }\n")
+	foundYield := false
+	Inspect(y, func(n Node) bool {
+		if _, ok := n.(*YieldStmt); ok {
+			foundYield = true
+			return false
+		}
+		return true
+	})
+	if !foundYield {
+		t.Fatalf("yield 1: no *YieldStmt")
+	}
+	for _, tc := range []struct {
+		name string
+		src  string
+	}{
+		{"yield", "package p\nfunc f() {\nyield := 1\n_ = yield\n}\n"},
+		{"scope", "package p\nfunc f() {\nscope := 1\n_ = scope\n}\n"},
+		{"group", "package p\nfunc f() {\ngroup := 1\n_ = group\n}\n"},
+		{"gocall", "package p\nfunc f(ctx int) { go group(ctx) }\nfunc group(x int) {}\n"},
+	} {
+		plain, err := Parse(nil, strings.NewReader(tc.src), nil, nil, CheckBranches)
+		if err != nil {
+			t.Fatalf("%s: plain parse failed: %v", tc.name, err)
+		}
+		leaked := false
+		Inspect(plain, func(n Node) bool {
+			switch n.(type) {
+			case *YieldStmt, *ScopeDeferStmt, *GroupStmt:
+				leaked = true
+				return false
+			}
+			return true
+		})
+		if leaked {
+			t.Fatalf("%s: plain Go produced a logos node, want ordinary meaning", tc.name)
+		}
+	}
+}
