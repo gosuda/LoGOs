@@ -124,6 +124,17 @@ func (b *box) record(vs []int) {
 }
 
 //logos:zeroalloc
+func concatLen(a, b string) int {
+	return len(a + b)
+}
+
+//logos:zeroalloc
+func growCount(m map[string]int, k string, v int) int {
+	m[k] = v
+	return len(m)
+}
+
+//logos:zeroalloc
 func (b *box) clone() *box {
 	return &box{v: b.v} // ERROR "\[perf::zeroalloc_violation\]"
 }
