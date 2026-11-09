@@ -497,6 +497,46 @@ Anchor: David Parnas, J.R.R. Tolkien, John Carmack
 - Red-team rows: none.
 - Docs: none.
 
+### M0-A-S6 Assert plain-go upstream CGO default
+Anchor: David Parnas, J.R.R. Tolkien, John Carmack
+- Attack: `src/cmd/go/testdata/script/logos_cgo_default.txt`: an unset `CGO_ENABLED` with no C compiler keeps the upstream cgo-off default under plain `go`.
+- Build: none (test-only).
+- Gate: `go test -vet=off -count=1 -run TestScript/logos_cgo_default cmd/go`.
+- Red-team rows: none.
+- Docs: none.
+
+### M0-A-S7 Assert plain go version and help stay upstream
+Anchor: David Parnas, J.R.R. Tolkien, John Carmack
+- Attack: `src/cmd/go/testdata/script/logos_plain_go_help_version.txt`: plain-`go` version and help output stay byte-identical to the upstream text and added flags stay absent from the help text.
+- Build: none (test-only).
+- Gate: `go test -vet=off -count=1 -run TestScript/logos_plain_go_help_version cmd/go`.
+- Red-team rows: none.
+- Docs: none.
+
+### M0-A-S8 Assert workspace vet and test over both module kinds
+Anchor: David Parnas, J.R.R. Tolkien, John Carmack
+- Attack: `src/cmd/go/testdata/script/logos_interop.txt`: `logos vet` and `logos test` cover Go and loGo/s packages in one workspace run.
+- Build: none (test-only).
+- Gate: `go test -vet=off -count=1 -run 'Script/^logos_interop$' cmd/go`.
+- Red-team rows: none.
+- Docs: none.
+
+### M0-A-S9 Assert plain-go help stays upstream across topics
+Anchor: David Parnas, J.R.R. Tolkien, John Carmack
+- Attack: `src/cmd/go/testdata/script/logos_plain_go_help_version.txt` extended across topics: every help topic keeps the upstream text under plain `go`.
+- Build: none (test-only).
+- Gate: `go test -vet=off -count=1 -run TestScript/logos_plain_go_help_version cmd/go`.
+- Red-team rows: none.
+- Docs: none.
+
+### M0-A-S10 Assert experiment defaults stay scoped
+Anchor: David Parnas, J.R.R. Tolkien, John Carmack
+- Attack: `src/cmd/go/testdata/script/logos_settings_env.txt`: experiment defaults stay scoped under plain `go` and take effect under `logos` only where the setting allows.
+- Build: none (test-only).
+- Gate: `go test -vet=off -count=1 -run 'Script/^logos_settings_env$' cmd/go`.
+- Red-team rows: none.
+- Docs: none.
+
 ## M1. `?`, `defer f()?`, `errdefer`, error traces, eject
 
 Anchor: Tony Hoare, Christopher Alexander, Edsger W. Dijkstra
@@ -623,6 +663,14 @@ Anchor: Tony Hoare, Christopher Alexander, Edsger W. Dijkstra
 - Attack: `src/cmd/go/internal/logos/eject/owned_test.go` (`TestOwnedHelperNameHashesFormattedOutput`): the hash in `logos_owned_<hash>.go` equals the sha256 of the on-disk bytes, and the same input yields the same name and bytes across runs.
 - Build: `owned.go` runs the helper bytes through `gofmtSource` before the hash is taken.
 - Gate: `go test -count=1 -short cmd/go/internal/logos/eject`.
+- Red-team rows: none.
+- Docs: none.
+
+### M1-A-S6 Assert ejected files carry the unsafe alias
+Anchor: Tony Hoare, Christopher Alexander, Edsger W. Dijkstra
+- Attack: `src/cmd/go/testdata/script/logos_eject_interp_lambda.txt`: the lowered lambda file carries the `_logos_unsafe` alias the interpreter needs.
+- Build: none (test-only).
+- Gate: `go test -vet=off -count=1 -run 'Script/^logos_eject_interp_lambda$' cmd/go`.
 - Red-team rows: none.
 - Docs: none.
 
@@ -1457,6 +1505,14 @@ Anchor: Tony Hoare, Claude Shannon, Edsger W. Dijkstra
 - Red-team rows: none.
 - Docs: none.
 
+### M2-A-S1 Assert union constant comparison and non-struct rejection
+Anchor: Tony Hoare, Claude Shannon, Edsger W. Dijkstra
+- Attack: `src/internal/types/testdata/logos/union_members.lgo`: a comparison between a union and a constant converts to the default member type; `src/internal/types/testdata/logos/property_iface.lgo`: a non-struct type does not satisfy a property interface.
+- Build: none (test-only).
+- Gate: `go test -count=1 cmd/compile/internal/types2 -run TestLogos/union_members,property_iface`.
+- Red-team rows: none.
+- Docs: none.
+
 ## M3. Facts sidecar, non-nil pointers, `T?`, `?.`, `??`, platform pointers
 
 Anchor: Tony Hoare, Claude Shannon, John Carmack
@@ -1563,6 +1619,14 @@ Anchor: Tony Hoare, Claude Shannon, John Carmack
 - Red-team rows: none.
 - Docs: none.
 
+### M3-A-S6 Assert Readonly survives the facts round trip
+Anchor: Tony Hoare, Claude Shannon, John Carmack
+- Attack: `src/cmd/compile/internal/logos/constfacts_test.go`: Encode writes Readonly and Decode reads it back; `src/cmd/compile/internal/logos/facts/facts_test.go`: the facts round trip preserves the flag.
+- Build: none (test-only).
+- Gate: `go test -count=1 cmd/compile/internal/logos/facts`; `go test -count=1 cmd/compile/internal/logos`.
+- Red-team rows: none.
+- Docs: none.
+
 ## M4. Interface properties
 
 Anchor: Tony Hoare, David Parnas, J.R.R. Tolkien
@@ -1596,6 +1660,14 @@ Anchor: Tony Hoare, David Parnas, J.R.R. Tolkien
 - Attack: `test/logos/run/properties.lgo`: a field getter uses a value receiver, a field setter uses a pointer receiver, and method-sourced accessors keep their forwarded receiver kinds.
 - Build: none (test-only).
 - Gate: `go test -count=1 cmd/internal/testdir -run 'Test/logos/run/properties'`.
+- Red-team rows: none.
+- Docs: none.
+
+### M4-A-S1 Assert contextual word and colon rejection rules
+Anchor: Tony Hoare, David Parnas, J.R.R. Tolkien
+- Attack: `src/cmd/compile/internal/syntax/testdata/logos/scope_defer_parse.lgo`: `scope` appears only directly before `defer`; `go` appears only directly after as `group`; a colon after the first tuple element means a named type.
+- Build: none (test-only).
+- Gate: `go test -count=1 cmd/compile/internal/syntax`.
 - Red-team rows: none.
 - Docs: none.
 
@@ -1744,6 +1816,14 @@ Anchor: Italo Calvino, Edsger W. Dijkstra, Otl Aicher
 - Red-team rows: none.
 - Docs: none.
 
+### M6-A-S1 Assert cross-architecture chain sum bit identity
+Anchor: Italo Calvino, Edsger W. Dijkstra, Otl Aicher
+- Attack: `src/cmd/compile/internal/logos/m6gaps_test.go` (`TestChainSumPairwise`): the pairwise halving split is present; `test/logos/run/chain_sum_crossarch.lgo`: float sums print identical bits natively and under qemu-aarch64.
+- Build: none (test-only).
+- Gate: `go test -count=1 cmd/compile/internal/logos -run TestChainSumPairwise`; `go test -count=1 cmd/internal/testdir -run Test/logos/run/chain_sum_crossarch`.
+- Red-team rows: none.
+- Docs: none.
+
 ## M7. Comptime
 
 Anchor: Tony Hoare, David Parnas, Edsger W. Dijkstra
@@ -1879,6 +1959,14 @@ Anchor: Tony Hoare, Edsger W. Dijkstra, John Carmack
 - Red-team rows: none.
 - Docs: none.
 
+### M8-A-S1 Assert group cancel spares files and cgo calls
+Anchor: Tony Hoare, Edsger W. Dijkstra, John Carmack
+- Attack: `test/logos/run/group_cgo_nocancel.go`: the four-line oracle prints and the binary exits 0; regular files and cgo calls wake no group waiter on cancel.
+- Build: none (test-only).
+- Gate: `go test -count=1 cmd/internal/testdir -run Test/logos/run/group_cgo_nocancel`.
+- Red-team rows: none.
+- Docs: none.
+
 ## M9. Lints and JSON diagnostics
 
 Anchor: Tony Hoare, Edward Tufte, Kenya Hara
@@ -1974,6 +2062,30 @@ Anchor: Tony Hoare, Edward Tufte, Kenya Hara
 
 - Milestone gate: G2.
 
+### M9-A-S6 Enforce correctness::withlock_leak
+Anchor: Tony Hoare, Edward Tufte, Kenya Hara
+- Attack: `test/logos/lint/withlock_leak.lgo` (8 findings) and `withlock_leak_go.go`: a `WithLock` lambda that returns or stores its argument, sends it on a channel, or passes it to a goroutine fails; `rule_withlock_leak_test.go` pins the registry entry, the deny default, and the Go scope.
+- Build: `src/cmd/compile/internal/logos/lint/rule_withlock_leak.go` (new deny language-neutral rule) plus one registry line; fixtures for both package kinds.
+- Gate: `go test -run Test/logos/lint/withlock_leak cmd/internal/testdir`; `go test -run TestWithlockLeakRegistered cmd/compile/internal/logos/lint`.
+- Red-team rows: none.
+- Docs: none.
+
+### M9-A-S7 Assert portability autofix and tag gate
+Anchor: Tony Hoare, Edward Tufte, Kenya Hara
+- Attack: `rule_atomic_plain_int64` tests: the wrapper autofix rewrites to `atomic.Int64` or `atomic.Uint64`; `rule_serialized_unsized_int` tests: only an `int` or `uint` field in a struct with a JSON-tagged field warns.
+- Build: none (test-only).
+- Gate: `go test -run TestAtomicPlainInt64|TestSerializedUnsizedInt cmd/compile/internal/logos/lint`.
+- Red-team rows: none.
+- Docs: none.
+
+### M9-A-S8 Assert perf no-hoist and zeroalloc local
+Anchor: Tony Hoare, Edward Tufte, Kenya Hara
+- Attack: `test/logos/run/time_after_no_hoist.lgo`: timers stay in the loop body; `src/cmd/go/testdata/script/logos_zeroalloc_recursive.txt`: `//logos:zeroalloc local` checks the body only.
+- Build: none (test-only).
+- Gate: `go test -run TestTimeAfter cmd/compile/internal/logos/lint`; `go test -count=1 cmd/internal/testdir -run Test/logos/run/time_after_no_hoist`; `go test -vet=off -count=1 -run 'Script/^logos_zeroalloc_recursive$' cmd/go`.
+- Red-team rows: none.
+- Docs: none.
+
 ## M10. `logos next` and `logos context`
 
 Anchor: Christopher Alexander, Kenya Hara
@@ -2056,6 +2168,14 @@ Anchor: Tony Hoare, Richard Feynman
 - Red-team rows: none.
 - Docs: none.
 
+### M11-A-S3 Assert union marshal uses member static helper
+Anchor: Tony Hoare, Richard Feynman
+- Attack: `src/cmd/compile/internal/logos/json_static_test.go` (`TestUnionMarshalGenerated`): a closed-union value marshals through its member static helper, not the reflective path.
+- Build: none (test-only).
+- Gate: `go test -count=1 cmd/compile/internal/logos -run TestUnionMarshalGenerated,TestUnionUnmarshalGenerated`.
+- Red-team rows: none.
+- Docs: none.
+
 ## M12. Capabilities auditor
 
 Anchor: Tony Hoare, Edward Tufte
@@ -2108,6 +2228,14 @@ Anchor: John Carmack, Herbert Simon, Dieter Rams
 - Red-team rows: none.
 - Docs: none.
 
+### M13-A-S3 Assert recursive inline budget and frame
+Anchor: John Carmack, Herbert Simon, Dieter Rams
+- Attack: `src/cmd/go/testdata/script/logos_inline_recursive.txt`: functions in a recursive call-graph cycle keep the tier inline budget for recursive marks; `src/cmd/go/testdata/script/logos_recursive_stackbuf.txt`: the same cycle keeps the upstream 32-byte variable-make frame.
+- Build: none (test-only).
+- Gate: `go test -vet=off -count=1 -run TestScript/logos_inline_recursive,logos_recursive_stackbuf cmd/go`.
+- Red-team rows: none.
+- Docs: none.
+
 ## M14. Fixed-array SIMD
 
 Anchor: John Carmack, Claude Shannon
@@ -2155,6 +2283,22 @@ Anchor: John Carmack, Edsger W. Dijkstra
 - Red-team rows: #22, #100, #111, #137, #149, #169.
 - Docs: P1-S3, P2.
 
+### M15-A-S1 Assert default ARM64 target level
+Anchor: John Carmack, Edsger W. Dijkstra
+- Attack: `src/cmd/go/internal/logos/config/targetcpu_test.go` (`TestArchLevelsDefaultUsesV82`): the default target_cpu keeps GOARM64=v8.2 so LSE atomics stay available.
+- Build: none (test-only).
+- Gate: `go test -count=1 cmd/go/internal/logos/config -run TestArchLevelsDefaultUsesV82`.
+- Red-team rows: none.
+- Docs: none.
+
+### M15-A-S2 Assert arm64 pair shapes execute identically
+Anchor: John Carmack, Edsger W. Dijkstra
+- Attack: `test/logos/run/pair_hoist_exec.lgo`: loads and stores hoisted across the pairing barriers stay split and execute identical results natively and under qemu-aarch64; `test/logos/codegen/arm64_pair` fixtures pin the call, atomic, offset-range, and fixup behavior.
+- Build: none (test-only).
+- Gate: `go test -count=1 cmd/compile/internal/ssa -run TestLogosPair`; `go test -count=1 cmd/internal/testdir -run Test/logos/run/pair_hoist_exec`; `go test -count=1 cmd/internal/testdir -run Test/logos/codegen/arm64_pair -all_codegen`.
+- Red-team rows: none.
+- Docs: none.
+
 ## M16. WASM profile
 
 Anchor: John Carmack, Dieter Rams
@@ -2197,6 +2341,22 @@ Anchor: John Carmack, Dieter Rams
 - Attack: `src/cmd/compile/internal/logos/wasmyield/wasmyield_test.go` `TestSummarizeNilCheckYields`: a nil check that can panic is a yield source while a resumeless call to a known symbol is not; `TestSummarizeStackCheckYields`: a prologue stack check that unwinds through morestack is a yield source while a small call-free leaf and a frameless function stay pure.
 - Build: none (test-only).
 - Gate: `go test -count=1 cmd/compile/internal/logos/wasmyield`.
+- Red-team rows: none.
+- Docs: none.
+
+### M16-A-S3 Assert wasm profile size and reflect retention
+Anchor: John Carmack, Dieter Rams
+- Attack: `src/cmd/go/testdata/script/logos_wasm_deadreflect.txt`: deadcode keeps type and method tables so reflect resolves; `test/logos/codegen/wasm_align.lgo` and `wasm_align.go`: 8-byte pointers and 24-byte slice headers with naturally aligned 64-bit atomics.
+- Build: none (test-only).
+- Gate: `go test -count=1 cmd/go -run TestScript/logos_wasm_deadreflect`; `go test -count=1 cmd/internal/testdir -run wasm_align -all_codegen`.
+- Red-team rows: none.
+- Docs: none.
+
+### M16-A-S4 Document wasm export int64 acceptance
+Anchor: John Carmack, Dieter Rams
+- Attack: `src/cmd/go/testdata/script/logos_wasm_export_invalid.txt`: string results stay rejected while int64 results build.
+- Build: none (test-only).
+- Gate: `go test -count=1 cmd/go -run TestScript/logos_wasm_export_invalid`.
 - Red-team rows: none.
 - Docs: none.
 
@@ -2361,6 +2521,13 @@ Anchor: John Carmack, Tony Hoare, Edsger W. Dijkstra
 - Red-team rows: none.
 - Docs: none.
 
+### M18-A-S7 Assert pointee precision scope and default
+Anchor: John Carmack, Tony Hoare, Edsger W. Dijkstra
+- Attack: `src/cmd/compile/internal/escape/pointee_active_logos_test.go`: the precision analysis runs on `.lgo` packages without a flag; `src/cmd/go/testdata/script/logos_escape_default.txt`: Go packages join it only under `GOEXPERIMENT=logosescape`, off by default.
+- Build: none (test-only).
+- Gate: `go test -count=1 cmd/compile/internal/escape -run TestLogosPointee`; `go test -count=1 cmd/go -run Script/logos_escape_default`.
+- Red-team rows: none.
+- Docs: none.
 
 ## M20. CGo in loGo/s packages and Fast-CGo for Go and loGo/s
 
@@ -2438,6 +2605,14 @@ Anchor: Kenya Hara, David Parnas
 - Attack: `src/cmd/go/internal/logos/lsp/lsp_test.go` `TestServePrefersClientCloseOverGoplsExit`: under load the verdict was `gopls exited unexpectedly` instead of nil; `TestProxyMapsRequestsAndResponses` shares the 600/600 pass.
 - Build: reorder the Serve shutdown verdict so a simultaneous client close wins over the gopls exit.
 - Gate: `go test -count=1 ./cmd/go/internal/logos/lsp`.
+- Red-team rows: none.
+- Docs: none.
+
+### M21-A-S2 Assert allocation badges for Go packages
+Anchor: Kenya Hara, David Parnas
+- Attack: `src/cmd/go/internal/logos/lsp/hints_test.go` (`TestProxyHintsGoPackageAlloc`): a Go package through the proxy shows its allocation badge instead of none.
+- Build: none (test-only).
+- Gate: `go test -count=1 -v cmd/go/internal/logos/lsp -run TestProxyHintsGoPackageAlloc`.
 - Red-team rows: none.
 - Docs: none.
 
@@ -2565,7 +2740,7 @@ Prerequisites: `cd /home/alpha/compiler/loGos/src && ./make.bash`; `export PATH=
 
 Anchor: Tony Hoare
 
-Written to `tasks/autoplan-ledger.jsonl` by P0-S6. IDs: phase prefix plus a sequence in plan order. The original 103 rows are preserved verbatim; P0-S6 appends exactly the 5 remaining rows for M0-S7, P1-S3, M11-S3, M11-S4, and M18-S4 (listed at the end of the block); the M19 rows are pruned. The 2026-10-19 direction appended one more row after those, `DX-20` for the follow-up slice M0-S8; no other row changed (the descriptions of rows such as `ENG-26` name the slice as first written, and `CEO-02` names the original 182 REDTEAM rows; rows #183 to #189 were added later by the same direction). The audit direction appended rows `AUD-01` to `AUD-50` after those, one per recorded audit slice in commit order. The ledger holds 161 rows.
+Written to `tasks/autoplan-ledger.jsonl` by P0-S6. IDs: phase prefix plus a sequence in plan order. The original 103 rows are preserved verbatim; P0-S6 appends exactly the 5 remaining rows for M0-S7, P1-S3, M11-S3, M11-S4, and M18-S4 (listed at the end of the block); the M19 rows are pruned. The 2026-10-19 direction appended one more row after those, `DX-20` for the follow-up slice M0-S8; no other row changed (the descriptions of rows such as `ENG-26` name the slice as first written, and `CEO-02` names the original 182 REDTEAM rows; rows #183 to #189 were added later by the same direction). The audit direction appended rows `AUD-01` to `AUD-72` after those, one per recorded audit slice in commit order. The ledger holds 183 rows.
 
 ```jsonl
 {"id": "CEO-01", "description": "P0-S1 Rename logos-doc/PLAN.md to logos-doc/SPEC.md (pure rename) and P0-S2 rewrite SPEC.md as the tailored spec (tables T, N, Section 18)", "phase": "CEO"}
@@ -2729,4 +2904,26 @@ Written to `tasks/autoplan-ledger.jsonl` by P0-S6. IDs: phase prefix plus a sequ
 {"id": "AUD-48", "description": "M20-A-S2 Assert runtime structs carry no new padding", "phase": "AUD"}
 {"id": "AUD-49", "description": "M3-A-S5 Assert readonly erasure and const-view hole", "phase": "AUD"}
 {"id": "AUD-50", "description": "M0-A-S5 Assert plain go reads no logos.toml", "phase": "AUD"}
+{"id": "AUD-51", "description": "M2-A-S1 Assert union constant comparison and non-struct rejection", "phase": "AUD"}
+{"id": "AUD-52", "description": "M11-A-S3 Assert union marshal uses member static helper", "phase": "AUD"}
+{"id": "AUD-53", "description": "M0-A-S6 Assert plain-go upstream CGO default", "phase": "AUD"}
+{"id": "AUD-54", "description": "M13-A-S3 Assert recursive inline budget and frame", "phase": "AUD"}
+{"id": "AUD-55", "description": "M15-A-S1 Assert default ARM64 target level", "phase": "AUD"}
+{"id": "AUD-56", "description": "M18-A-S7 Assert pointee precision scope and default", "phase": "AUD"}
+{"id": "AUD-57", "description": "M8-A-S1 Assert group cancel spares files and cgo calls", "phase": "AUD"}
+{"id": "AUD-58", "description": "M9-A-S6 Enforce correctness::withlock_leak", "phase": "AUD"}
+{"id": "AUD-59", "description": "M9-A-S7 Assert portability autofix and tag gate", "phase": "AUD"}
+{"id": "AUD-60", "description": "M9-A-S8 Assert perf no-hoist and zeroalloc local", "phase": "AUD"}
+{"id": "AUD-61", "description": "M4-A-S1 Assert contextual word and colon rejection rules", "phase": "AUD"}
+{"id": "AUD-62", "description": "M3-A-S6 Assert Readonly survives the facts round trip", "phase": "AUD"}
+{"id": "AUD-63", "description": "M0-A-S7 Assert plain go version and help stay upstream", "phase": "AUD"}
+{"id": "AUD-64", "description": "M21-A-S2 Assert allocation badges for Go packages", "phase": "AUD"}
+{"id": "AUD-65", "description": "M0-A-S8 Assert workspace vet and test over both module kinds", "phase": "AUD"}
+{"id": "AUD-66", "description": "M0-A-S9 Assert plain-go help stays upstream across topics", "phase": "AUD"}
+{"id": "AUD-67", "description": "M0-A-S10 Assert experiment defaults stay scoped", "phase": "AUD"}
+{"id": "AUD-68", "description": "M1-A-S6 Assert ejected files carry the unsafe alias", "phase": "AUD"}
+{"id": "AUD-69", "description": "M6-A-S1 Assert cross-architecture chain sum bit identity", "phase": "AUD"}
+{"id": "AUD-70", "description": "M15-A-S2 Assert arm64 pair shapes execute identically", "phase": "AUD"}
+{"id": "AUD-71", "description": "M16-A-S3 Assert wasm profile size and reflect retention", "phase": "AUD"}
+{"id": "AUD-72", "description": "M16-A-S4 Document wasm export int64 acceptance", "phase": "AUD"}
 ```

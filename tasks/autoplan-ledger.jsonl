@@ -159,3 +159,25 @@
 {"id": "AUD-48", "description": "M20-A-S2 Assert runtime structs carry no new padding", "phase": "AUD"}
 {"id": "AUD-49", "description": "M3-A-S5 Assert readonly erasure and const-view hole", "phase": "AUD"}
 {"id": "AUD-50", "description": "M0-A-S5 Assert plain go reads no logos.toml", "phase": "AUD"}
+{"id": "AUD-51", "description": "M2-A-S1 Assert union constant comparison and non-struct rejection", "phase": "AUD"}
+{"id": "AUD-52", "description": "M11-A-S3 Assert union marshal uses member static helper", "phase": "AUD"}
+{"id": "AUD-53", "description": "M0-A-S6 Assert plain-go upstream CGO default", "phase": "AUD"}
+{"id": "AUD-54", "description": "M13-A-S3 Assert recursive inline budget and frame", "phase": "AUD"}
+{"id": "AUD-55", "description": "M15-A-S1 Assert default ARM64 target level", "phase": "AUD"}
+{"id": "AUD-56", "description": "M18-A-S7 Assert pointee precision scope and default", "phase": "AUD"}
+{"id": "AUD-57", "description": "M8-A-S1 Assert group cancel spares files and cgo calls", "phase": "AUD"}
+{"id": "AUD-58", "description": "M9-A-S6 Enforce correctness::withlock_leak", "phase": "AUD"}
+{"id": "AUD-59", "description": "M9-A-S7 Assert portability autofix and tag gate", "phase": "AUD"}
+{"id": "AUD-60", "description": "M9-A-S8 Assert perf no-hoist and zeroalloc local", "phase": "AUD"}
+{"id": "AUD-61", "description": "M4-A-S1 Assert contextual word and colon rejection rules", "phase": "AUD"}
+{"id": "AUD-62", "description": "M3-A-S6 Assert Readonly survives the facts round trip", "phase": "AUD"}
+{"id": "AUD-63", "description": "M0-A-S7 Assert plain go version and help stay upstream", "phase": "AUD"}
+{"id": "AUD-64", "description": "M21-A-S2 Assert allocation badges for Go packages", "phase": "AUD"}
+{"id": "AUD-65", "description": "M0-A-S8 Assert workspace vet and test over both module kinds", "phase": "AUD"}
+{"id": "AUD-66", "description": "M0-A-S9 Assert plain-go help stays upstream across topics", "phase": "AUD"}
+{"id": "AUD-67", "description": "M0-A-S10 Assert experiment defaults stay scoped", "phase": "AUD"}
+{"id": "AUD-68", "description": "M1-A-S6 Assert ejected files carry the unsafe alias", "phase": "AUD"}
+{"id": "AUD-69", "description": "M6-A-S1 Assert cross-architecture chain sum bit identity", "phase": "AUD"}
+{"id": "AUD-70", "description": "M15-A-S2 Assert arm64 pair shapes execute identically", "phase": "AUD"}
+{"id": "AUD-71", "description": "M16-A-S3 Assert wasm profile size and reflect retention", "phase": "AUD"}
+{"id": "AUD-72", "description": "M16-A-S4 Document wasm export int64 acceptance", "phase": "AUD"}
