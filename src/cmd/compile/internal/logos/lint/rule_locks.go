@@ -6,6 +6,7 @@ package lint
 
 import (
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 
@@ -183,34 +184,67 @@ func (c *lockAudit) checkFile(pass *Pass, f *syntax.File) {
 // checkFunc walks one function body with the entry state its contract
 // declares.
 func (c *lockAudit) checkFunc(pass *Pass, decl *syntax.FuncDecl, f *syntax.File) {
-	st := lockState{held: heldSet{}}
-	if ct := c.contracts[decl]; ct != nil {
-		c.applyContractEffects(pass, decl, f, ct, &st, syntax.Pos{})
-		for _, eff := range ct.Effects {
-			if eff.Effect != "requires" {
-				continue
-			}
-			if k, ok := c.contractLockKey(decl, eff.Path); ok {
-				st.held.hold(k, holdWrite)
+	v := &lockFlow{c: c, pass: pass, decl: decl, file: f, methods: make(map[types2.Object]methodLock), gotos: make(map[string]heldSet)}
+	if bodyHasGoto(decl.Body) {
+		for i := range 3 {
+			v.restart(pass, decl, f)
+			v.probe = true
+			v.walkStmts(decl.Body.List)
+			if len(v.gotos) == 0 || (i > 0 && !v.labelChanged) {
+				break
 			}
 		}
 	}
-	v := &lockFlow{c: c, pass: pass, decl: decl, file: f, st: &st, local: make(map[types2.Object]bool), published: make(map[types2.Object]bool), methods: make(map[types2.Object]methodLock)}
+	v.restart(pass, decl, f)
 	v.walkStmts(decl.Body.List)
 	v.checkDefers(decl.Body.List)
 }
 
+func (v *lockFlow) restart(pass *Pass, decl *syntax.FuncDecl, f *syntax.File) {
+	st := lockState{held: heldSet{}}
+	if ct := v.c.contracts[decl]; ct != nil {
+		v.c.applyContractEffects(pass, decl, f, ct, &st, syntax.Pos{})
+		for _, eff := range ct.Effects {
+			if eff.Effect != "requires" {
+				continue
+			}
+			if k, ok := v.c.contractLockKey(decl, eff.Path); ok {
+				st.held.hold(k, holdWrite)
+			}
+		}
+	}
+	v.st = &st
+	v.local = make(map[types2.Object]bool)
+	v.published = make(map[types2.Object]bool)
+	v.labelChanged = false
+	v.probe = false
+}
+
+func bodyHasGoto(body *syntax.BlockStmt) bool {
+	found := false
+	syntax.Inspect(body, func(n syntax.Node) bool {
+		if b, ok := n.(*syntax.BranchStmt); ok && b.Tok == syntax.Goto && b.Label != nil {
+			found = true
+			return false
+		}
+		return true
+	})
+	return found
+}
+
 // lockFlow walks one function body.
 type lockFlow struct {
-	c         *lockAudit
-	pass      *Pass
-	decl      *syntax.FuncDecl
-	file      *syntax.File
-	st        *lockState
-	local     map[types2.Object]bool
-	published map[types2.Object]bool
-	gotos     map[string]heldSet
-	methods   map[types2.Object]methodLock
+	c            *lockAudit
+	pass         *Pass
+	decl         *syntax.FuncDecl
+	file         *syntax.File
+	st           *lockState
+	local        map[types2.Object]bool
+	published    map[types2.Object]bool
+	gotos        map[string]heldSet
+	methods      map[types2.Object]methodLock
+	probe        bool
+	labelChanged bool
 }
 
 type methodLock struct {
@@ -280,8 +314,14 @@ func (v *lockFlow) mergeGoto(label string) {
 	if v.gotos == nil {
 		return
 	}
-	if g, ok := v.gotos[label]; ok {
-		v.st.held.merge(g)
+	g, ok := v.gotos[label]
+	if !ok {
+		return
+	}
+	before := v.st.held.clone()
+	v.st.held.merge(g)
+	if !maps.Equal(before, v.st.held) {
+		v.labelChanged = true
 	}
 }
 
@@ -398,7 +438,7 @@ func (v *lockFlow) walkCallStmt(s *syntax.CallStmt) {
 		v.recordDefer(call)
 		v.walkDeferArgs(call)
 	case "go":
-		spawned := &lockFlow{c: v.c, pass: v.pass, decl: v.decl, file: v.file, st: &lockState{held: heldSet{}}, local: v.local, published: v.published, methods: v.methods}
+		spawned := &lockFlow{c: v.c, pass: v.pass, decl: v.decl, file: v.file, st: &lockState{held: heldSet{}}, local: v.local, published: v.published, methods: v.methods, probe: v.probe}
 		spawned.walkExpr(call)
 	default:
 		v.walkExpr(call)
@@ -607,11 +647,11 @@ func (v *lockFlow) walkExpr(e syntax.Expr) {
 		v.walkExpr(e.X)
 	case *syntax.FuncLit:
 		v.noteClosureCapture(e.Body)
-		inner := &lockFlow{c: v.c, pass: v.pass, decl: v.decl, file: v.file, st: &lockState{held: heldSet{}}, local: v.local, published: v.published, methods: v.methods}
+		inner := &lockFlow{c: v.c, pass: v.pass, decl: v.decl, file: v.file, st: &lockState{held: heldSet{}}, local: v.local, published: v.published, methods: v.methods, probe: v.probe}
 		inner.walkStmts(e.Body.List)
 	case *syntax.LambdaExpr:
 		v.noteClosureCapture(e.Body)
-		inner := &lockFlow{c: v.c, pass: v.pass, decl: v.decl, file: v.file, st: &lockState{held: heldSet{}}, local: v.local, published: v.published, methods: v.methods}
+		inner := &lockFlow{c: v.c, pass: v.pass, decl: v.decl, file: v.file, st: &lockState{held: heldSet{}}, local: v.local, published: v.published, methods: v.methods, probe: v.probe}
 		switch b := e.Body.(type) {
 		case *syntax.BlockStmt:
 			inner.walkStmts(b.List)
@@ -681,7 +721,7 @@ func (v *lockFlow) walkInlineCall(call *syntax.CallExpr, body syntax.Node) {
 		v.walkExpr(arg)
 	}
 	v.noteClosureCapture(body)
-	inner := &lockFlow{c: v.c, pass: v.pass, decl: v.decl, file: v.file, st: &lockState{held: v.st.held}, local: v.local, published: v.published, methods: v.methods}
+	inner := &lockFlow{c: v.c, pass: v.pass, decl: v.decl, file: v.file, st: &lockState{held: v.st.held}, local: v.local, published: v.published, methods: v.methods, probe: v.probe}
 	switch b := body.(type) {
 	case *syntax.BlockStmt:
 		inner.walkStmts(b.List)
@@ -856,7 +896,7 @@ func (v *lockFlow) applyCallContract(call *syntax.CallExpr, ct *funcContract) {
 		}
 		switch eff.Effect {
 		case "requires":
-			if v.st.held[key] == holdNone {
+			if v.st.held[key] == holdNone && !v.probe {
 				v.c.reportUnmet(v.decl, fn, eff.Path, call.Pos())
 			}
 		case "acquires":
@@ -968,7 +1008,9 @@ func (v *lockFlow) checkSelector(sel *syntax.SelectorExpr, access selAccess) {
 	}
 	obj := selObj.Obj()
 	if v.c.atomics[obj] && access != selAddress {
-		v.c.reportNonatomic(v.decl, sel.Pos())
+		if !v.probe {
+			v.c.reportNonatomic(v.decl, sel.Pos())
+		}
 		return
 	}
 	guard, ok := v.c.guards[obj]
@@ -980,12 +1022,16 @@ func (v *lockFlow) checkSelector(sel *syntax.SelectorExpr, access selAccess) {
 	}
 	key, ok := v.c.keyOfRootedGuard(sel.X, guard)
 	if !ok {
-		v.c.reportUnguarded(v.decl, sel.Pos())
+		if !v.probe {
+			v.c.reportUnguarded(v.decl, sel.Pos())
+		}
 		return
 	}
 	held := v.st.held[key]
 	if held == holdNone || access == selWrite && held == holdRead {
-		v.c.reportUnguarded(v.decl, sel.Pos())
+		if !v.probe {
+			v.c.reportUnguarded(v.decl, sel.Pos())
+		}
 	}
 }
 
@@ -998,7 +1044,9 @@ func (v *lockFlow) checkName(name *syntax.Name, access selAccess) {
 		return
 	}
 	if v.c.atomics[obj] && access != selAddress {
-		v.c.reportNonatomic(v.decl, name.Pos())
+		if !v.probe {
+			v.c.reportNonatomic(v.decl, name.Pos())
+		}
 		return
 	}
 	guard, ok := v.c.guards[obj]
@@ -1010,12 +1058,16 @@ func (v *lockFlow) checkName(name *syntax.Name, access selAccess) {
 	}
 	key, ok := v.c.keyOfRootedGuard(name, guard)
 	if !ok {
-		v.c.reportUnguarded(v.decl, name.Pos())
+		if !v.probe {
+			v.c.reportUnguarded(v.decl, name.Pos())
+		}
 		return
 	}
 	held := v.st.held[key]
 	if held == holdNone || access == selWrite && held == holdRead {
-		v.c.reportUnguarded(v.decl, name.Pos())
+		if !v.probe {
+			v.c.reportUnguarded(v.decl, name.Pos())
+		}
 	}
 }
 
@@ -1026,7 +1078,7 @@ func (v *lockFlow) checkAddressOf(sel *syntax.SelectorExpr) {
 	if selObj == nil || selObj.Kind() != types2.FieldVal {
 		return
 	}
-	if v.c.atomics[selObj.Obj()] {
+	if v.c.atomics[selObj.Obj()] && !v.probe {
 		v.c.reportNonatomic(v.decl, sel.Pos())
 	}
 }

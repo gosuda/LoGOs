@@ -434,6 +434,16 @@ func TestAdvGuardedAccess(t *testing.T) {
 			"func i4(i, j int) {\n arr[i].mu.Lock()\n arr[j].n = 3\n}\n",
 			[]string{"31 concurrency::unguarded_access forbid"},
 		},
+		{
+			"backwardGotoReentryReports",
+			"func b1(s *stats, again bool) {\n s.mu.Lock()\nL:\n _ = s.total\n s.mu.Unlock()\n if again {\n  goto L\n }\n}\n",
+			[]string{"32 concurrency::unguarded_access forbid"},
+		},
+		{
+			"backwardGotoRelockedStaysClean",
+			"func b2(s *stats, again bool) {\n s.mu.Lock()\nL:\n _ = s.total\n s.mu.Unlock()\n if again {\n  s.mu.Lock()\n  goto L\n }\n}\n",
+			nil,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name+"/lgo", func(t *testing.T) {
@@ -467,6 +477,11 @@ func TestAdvGuardedAccessLimitations(t *testing.T) {
 			"storedClosureReported",
 			"func h2(s *stats) int {\n s.mu.Lock()\n defer s.mu.Unlock()\n f := func() int { return s.total }\n return f()\n}\n",
 			[]string{"32 concurrency::unguarded_access deny"},
+		},
+		{
+			"backwardGotoInClosureUnreported",
+			"func b3(s *stats) {\n s.mu.Lock()\n func() {\nL:\n  _ = s.total\n  s.mu.Unlock()\n  goto L\n }()\n}\n",
+			nil,
 		},
 	}
 	for _, tt := range tests {

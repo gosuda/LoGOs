@@ -232,3 +232,24 @@ func indexLockOtherVar(i, j int) {
 	arr[i].mu.Lock()
 	arr[j].n = 3 // ERROR "\[concurrency::unguarded_access\]"
 }
+
+func backwardGotoReentry(s *stats, again bool) {
+	s.mu.Lock()
+L:
+	_ = s.total // ERROR "\[concurrency::unguarded_access\]"
+	s.mu.Unlock()
+	if again {
+		goto L
+	}
+}
+
+func backwardGotoRelocked(s *stats, again bool) {
+	s.mu.Lock()
+L2:
+	_ = s.total
+	s.mu.Unlock()
+	if again {
+		s.mu.Lock()
+		goto L2
+	}
+}
