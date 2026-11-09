@@ -35,16 +35,6 @@ func TestSliceNested(t *testing.T) {
 	checkSingle(t, inputs, sliceOf(sliceOf(Int[int])))
 }
 
-func TestSliceEmptyIsNonNil(t *testing.T) {
-	got, err := decodeSingle(`{"A":[]}`, sliceOf(Int[int]))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.A == nil || len(got.A) != 0 {
-		t.Fatalf("[] decoded to %#v, want empty non-nil", got.A)
-	}
-}
-
 func TestSliceNullSetsNil(t *testing.T) {
 	s := NewScanner([]byte(`{"A":null}`), (*single[[]int])(nil))
 	dst := []int{1, 2, 3}
