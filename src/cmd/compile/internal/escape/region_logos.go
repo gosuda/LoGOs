@@ -37,21 +37,21 @@ type logosKill struct {
 }
 
 type logosRegionBatch struct {
-	regions      map[*ir.CallExpr]*logosRegion
-	sites        map[*ir.CallExpr]*logosCand
-	candLocs     map[*location]*logosCand
-	locs         map[*location]*logosRegion
-	kills        map[*location]*logosKill
-	flowDesc     map[*location]string
-	contentsAll  []*location
-	ensured      map[*ir.Func]bool
-	facts        map[*ir.Func]*logosProvFacts
-	groups       map[*location]*logosGroup
-	groupOf      map[*ir.Name]*logosGroup
-	groupMembers map[*location]*logosGroup
+	regions       map[*ir.CallExpr]*logosRegion
+	sites         map[*ir.CallExpr]*logosCand
+	candLocs      map[*location]*logosCand
+	locs          map[*location]*logosRegion
+	kills         map[*location]*logosKill
+	flowDesc      map[*location]string
+	contentsAll   []*location
+	ensured       map[*ir.Func]bool
+	facts         map[*ir.Func]*logosProvFacts
+	groups        map[*location]*logosGroup
+	groupOf       map[*ir.Name]*logosGroup
+	groupMembers  map[*location]*logosGroup
 	groupClosures map[*ir.ClosureExpr]bool
-	groupConstOK map[*ir.ClosureExpr]bool
-	groupDead    map[*logosRegion]bool
+	groupConstOK  map[*ir.ClosureExpr]bool
+	groupDead     map[*logosRegion]bool
 }
 
 type logosGroup struct {
@@ -678,9 +678,11 @@ func (b *batch) logosRegionChainClosure(l, root *location) bool {
 	}
 	return false
 }
-
 func (e *escape) logosRegionRecordStores(dsts, srcs []ir.Node, ks []hole) {
 	e.logosRegionEnsure(e.curfn)
+	if len(e.logosRegion.regions) == 0 && len(e.logosRegion.sites) == 0 {
+		return
+	}
 	for i := range dsts {
 		if i >= len(srcs) {
 			return
@@ -1202,7 +1204,6 @@ func (b *batch) logosRegionGroupLoc(l *location) *logosGroup {
 	}
 	return b.logosRegion.groupMembers[l]
 }
-
 
 func (b *batch) logosRegionGroupOutlives(g *logosGroup, site *logosCand) bool {
 	reg := site.region
