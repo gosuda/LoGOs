@@ -12,9 +12,6 @@ import (
 	"time"
 )
 
-// M8-S4: a child blocked in conn.Read with no data returns within 100 ms
-// after a sibling fails, with an error satisfying os.IsTimeout (#151).
-// The group error propagates like `?`.
 
 var errBoom = errors.New("boom")
 

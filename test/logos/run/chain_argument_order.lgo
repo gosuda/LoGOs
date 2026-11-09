@@ -46,24 +46,18 @@ func logTake(v int) int {
 func main() {
 	xs := []int{10, 20, 30}
 
-	// Pure controls: baseline behavior without mutation or side effects.
 	fmt.Println(xs.take(1).map(x => x))
 	fmt.Println(xs.drop(1).map(x => x))
 	fmt.Println(xs.drop(1).map(x => x).take(1))
 
-	// Take before callable: makeMapper sets n = 0, but take(n) must evaluate
-	// n before map's callable argument executes. Result retains 1 element.
 	n = 1
 	fmt.Println(xs.take(n).map(makeMapper()))
 	fmt.Println(n)
 
-	// Drop before callable: makeDropMapper sets m = 0, but drop(m) must evaluate
-	// m before map's callable argument executes. Result drops 1 element.
 	m = 1
 	fmt.Println(xs.drop(m).map(makeDropMapper()))
 	fmt.Println(m)
 
-	// Call order and single evaluation: arguments evaluate once in source order.
 	orderLog = nil
 	takeCalls = 0
 	mapCalls = 0

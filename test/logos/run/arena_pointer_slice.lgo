@@ -2,25 +2,6 @@
 
 package main
 
-// M18 pointer-slice attack (SPEC Sec 3.1): a runtime-sized nonescaping
-// []*Node local large enough to exceed the stack buffer must allocate its
-// backing in the arena scan region, keeping heap referents alive across
-// runtime.GC(). Escape LogosArenaLocalShape allows any elem with Size>0
-// and Align<=8 (pointers included), and runtime
-// TestLogosArenaPointerSliceScanRetention proves scan-region pointer
-// slices retain referents via direct LogosArenaAllocScan. Walk
-// walkLogosArenaMake still refuses HasPointers, so this fixture is
-// intentionally RED until that refusal lifts: alloc-ptr/alloc-mixed read
-// 1 on heap today, 0 when placed. Mixed structs with pointer fields ride
-// the same shape gate, so []Mixed is covered too. GC stability uses only
-// runtime.GC + KeepAlive (viewas.lgo pattern): no finalizer/cleanup, no
-// sleep. Alloc-measurement Nodes are preallocated outside every measured
-// closure, so AllocsPerRun counts only the slice backing; each GC helper
-// builds its own heap referents so the tested slice is their sole root.
-// Globals/channels are the
-// heap-escape controls and stay 1. No nil is ever stored into []*Node:
-// len-0/cap-n makes avoid nonnil zero values, then every slot is
-// appended with a live pointer before any read.
 
 import (
 	"context"

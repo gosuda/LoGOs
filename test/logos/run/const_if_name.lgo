@@ -4,9 +4,6 @@ package main
 
 import "fmt"
 
-// M7-S1 const if header (SPEC Sec 2.5, T-205): a named boolean constant
-// or `true` directly before the block is the condition, as in an `if`
-// header; the block is not read as a composite literal.
 
 const (
 	debugOn = true

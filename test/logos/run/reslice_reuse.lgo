@@ -2,10 +2,6 @@
 
 package main
 
-// M5-S1 const views (SPEC Sec 2.1, T-201, #16): ordinary reslicing on
-// plain slices stays allowed. Only const views enforce the len bound.
-// The buffer-reuse loop below resets with s = s[:0] every iteration,
-// and b = b[:cap(b)] stretches a plain slice to its capacity.
 
 import "fmt"
 

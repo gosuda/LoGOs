@@ -6,4 +6,4 @@ chosen: two
 7
 0
 s
-recovered: logos: switch expression at switch_expr.lgo:50 matched no arm
+recovered: logos: switch expression at switch_expr.lgo:45 matched no arm

@@ -2,11 +2,6 @@
 
 package main
 
-// M7-S5 comptime.ViewAs (SPEC T-205, #19, #72): an ungrouped
-// `import "comptime"` drops with its import keyword once no
-// comptime-qualified selector remains, so the ejected file has no
-// bare `import` line and the plain recheck never resolves the
-// virtual package.
 
 import "comptime"
 import "fmt"

@@ -1,9 +1,5 @@
 // run
 
-// M7-S2 const for with inner lowering (SPEC Sec 2.5, T-205; #76): a `?`
-// call, a `$"..."` interpolation, and a chain call inside a const for
-// body lower once per unrolled copy, and the ejected text matches the
-// native lowering.
 
 package main
 

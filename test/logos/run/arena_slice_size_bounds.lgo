@@ -2,9 +2,6 @@
 
 package main
 
-// The arena and native heap paths must agree on checked makeslice bounds for a
-// pointer-free 16-byte element. Success cases also exercise the backing store;
-// this fixture is silent unless an assertion fails.
 
 import "fmt"
 
@@ -129,9 +126,6 @@ func main() {
 	negOne := runtimeInt(-1)
 	wrap := runtimeInt(1 << 60)
 
-	// For 16-byte elements, cap=1<<60 wraps the byte-size multiplication.
-	// Keep this zero-length case first: a broken guard must not reach a huge
-	// allocation before reporting the cap error.
 	checkPair("zero/wrap cap", zero, wrap, capPanic)
 	checkPair("wrap/wrap len", wrap, wrap, lenPanic)
 	checkPair("one/wrap cap", one, wrap, capPanic)
@@ -139,7 +133,6 @@ func main() {
 	checkPair("negative cap", one, negOne, capPanic)
 	checkPair("len greater than cap", two, one, capPanic)
 
-	// Small neighbors must be fully usable on both allocation paths.
 	checkValid("one/one", one, one)
 	checkValid("three/five", three, five)
 	_ = sink

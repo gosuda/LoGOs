@@ -2,22 +2,6 @@
 
 package jsonunion
 
-// M11-S4 union JSON fixture (SPEC Sec 10.1, Sec 10.2, T-Sec10, T-203.1).
-// Anchor: Tony Hoare, Edsger W. Dijkstra
-//
-// Closed union marshaling and unmarshaling:
-// 1. A closed-union value marshals to its dynamic member's static bytes.
-// 2. Unmarshal tries members in declaration order into fresh scratch values.
-// 3. Exactly one success assigns the target.
-// 4. Ambiguity returns an error naming the union and all member names; it is
-//    neither MissingFieldError nor a Scanner syntax error.
-// 5. Failed trials (both 0-match and ambiguous >1-match) leave the target
-//    untouched, preserving pre-existing values.
-// 6. Pointer members allocate fresh scratch per trial, never corrupting target
-//    pointees on trial failure.
-// 7. A member with an unmodeled field round-trips through its per-field
-//    reflective fallback.
-// 8. JSON null leaves the union field absent (nil).
 
 import (
 	"bytes"
@@ -30,7 +14,6 @@ import (
 	"logos/rt"
 )
 
-// Closed union over two tagged struct members.
 type Shape interface {
 	Circle | Square
 }
@@ -43,8 +26,6 @@ type Square struct {
 	S int64 `json:"s"`
 }
 
-// Method-less mirror types for reflective oracle comparison.
-// An open interface field (NoGen any) disqualifies the type from static methods.
 type CircleMirror struct {
 	R     int64 `json:"r"`
 	NoGen any   `json:"-"`
@@ -64,7 +45,6 @@ type ShapeHolderMirror struct {
 	NoGen any `json:"-"`
 }
 
-// Overlapping union: both Alpha and Beta accept {"id":1}.
 type OverlapUnion interface {
 	Alpha | Beta
 }
@@ -81,8 +61,6 @@ type OverlapHolder struct {
 	Item OverlapUnion `json:"item"`
 }
 
-// Pointer-term closed union (*Circle | *Square): proves scratch allocation
-// freshness for pointer members.
 type PtrShape interface {
 	*Circle | *Square
 }
@@ -91,7 +69,6 @@ type PtrShapeHolder struct {
 	Item PtrShape `json:"item"`
 }
 
-// Pointer field union: verifies scratch allocation isolation for struct fields.
 type PtrMemberA struct {
 	Val *int64 `json:"val"`
 	Tag string `json:"tag"`
@@ -110,7 +87,6 @@ type PtrHolder struct {
 	Item PtrUnion `json:"item"`
 }
 
-// Union member with an unmodeled field (map[string]string falls back to reflection).
 type FallbackMember struct {
 	Name string            `json:"name"`
 	Data map[string]string `json:"data"`
@@ -140,8 +116,6 @@ func mustUnmarshal(t *testing.T, data []byte, dst any) {
 	}
 }
 
-// TestUnionMarshal verifies S1: a closed-union value marshals to its dynamic
-// member's static bytes, matching both the member's MarshalJSON and reflective oracle.
 func TestUnionMarshal(t *testing.T) {
 	var v Shape = Circle{R: 3}
 	gotTop := mustMarshal(t, v)
@@ -176,8 +150,6 @@ func TestUnionMarshal(t *testing.T) {
 	}
 }
 
-// TestUnionTrialOrder verifies S4: unmarshal tries members in declaration order,
-// and a document accepted by exactly one member is assigned.
 func TestUnionTrialOrder(t *testing.T) {
 	var hSquare ShapeHolder
 	mustUnmarshal(t, []byte(`{"item":{"s":7}}`), &hSquare)
@@ -198,8 +170,6 @@ func TestUnionTrialOrder(t *testing.T) {
 	if ci.R != 11 {
 		t.Fatalf("expected Circle.R = 11, got %d", ci.R)
 	}
-	// SPEC sec 12.2: unknown fields are ignored. An extra unknown key must not
-	// reject the otherwise-matching member — {"s":7,"extra":true} is Square.
 	var hSquareExtra ShapeHolder
 	mustUnmarshal(t, []byte(`{"item":{"s":7,"extra":true}}`), &hSquareExtra)
 	sqX, ok := hSquareExtra.Item.(Square)
@@ -211,8 +181,6 @@ func TestUnionTrialOrder(t *testing.T) {
 	}
 }
 
-// TestUnionAmbiguityError verifies S6: overlapping documents accepted by multiple
-// members return an ambiguity error naming the union and member names.
 func TestUnionAmbiguityError(t *testing.T) {
 	var oh OverlapHolder
 	err := json.Unmarshal([]byte(`{"item":{"id":1}}`), &oh)
@@ -247,8 +215,6 @@ func TestUnionAmbiguityError(t *testing.T) {
 	}
 }
 
-// TestUnionFailedTrialsLeaveTargetUntouched verifies S5 and S7: pre-filled
-// destinations remain byte-identical after failed trials (ambiguous or 0-match).
 func TestUnionFailedTrialsLeaveTargetUntouched(t *testing.T) {
 	oh := OverlapHolder{Item: Alpha{ID: 42}}
 	err := json.Unmarshal([]byte(`{"item":{"id":1}}`), &oh)
@@ -275,9 +241,6 @@ func TestUnionFailedTrialsLeaveTargetUntouched(t *testing.T) {
 	}
 }
 
-// TestUnionPointerMembersFresh verifies S5/S7 for pointer-term members:
-// failed trials leave pre-filled pointer target untouched, and successful
-// trials allocate fresh pointer members.
 func TestUnionPointerMembersFresh(t *testing.T) {
 	cOrig := Circle{R: 50}
 	psh := PtrShapeHolder{Item: &cOrig}
@@ -304,8 +267,6 @@ func TestUnionPointerMembersFresh(t *testing.T) {
 	}
 }
 
-// TestUnionPointerFieldsFresh verifies S5/S7 for struct members with pointer fields:
-// failed trials do not mutate pointees, and successful trials allocate fresh pointers.
 func TestUnionPointerFieldsFresh(t *testing.T) {
 	var origVal int64 = 100
 	ph := PtrHolder{Item: PtrMemberA{Val: &origVal, Tag: "orig"}}
@@ -341,8 +302,6 @@ func TestUnionPointerFieldsFresh(t *testing.T) {
 	}
 }
 
-// TestUnionFallbackMemberRoundTrip verifies that a union member with an
-// unmodeled field round-trips through its per-field reflective fallback.
 func TestUnionFallbackMemberRoundTrip(t *testing.T) {
 	fh := FallbackHolder{
 		Item: FallbackMember{
@@ -358,7 +317,6 @@ func TestUnionFallbackMemberRoundTrip(t *testing.T) {
 	}
 }
 
-// TestUnionNullLeavesFieldAbsent verifies that JSON null leaves a union field absent (nil).
 func TestUnionNullLeavesFieldAbsent(t *testing.T) {
 	sh := ShapeHolder{Item: Circle{R: 12}}
 	mustUnmarshal(t, []byte(`{"item":null}`), &sh)

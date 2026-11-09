@@ -4,10 +4,6 @@ package main
 
 import "fmt"
 
-// Adjacent option nil comparisons (seed 12 root class): the eject splices
-// of one comparison must not overlap the next. Forward (`x != nil`) and
-// reverse (`nil == x`) orders mix in one chain and one expression list,
-// with name, call, and map-index operands.
 
 func fwd(x int?, y int?) bool { return x != nil && y != nil }
 

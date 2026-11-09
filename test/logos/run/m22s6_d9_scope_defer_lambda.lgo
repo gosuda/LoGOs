@@ -4,17 +4,11 @@ package main
 
 import "fmt"
 
-// M22-S6 defect D9 (SPEC T-104.2 / Sec 15 RFC-206): `scope defer` inside a
-// lambda body is lowered like the same statement inside a `func` literal:
-// it runs at lambda block exit. `logos eject` output matches.
 
 func call(g func(int)) { g(1) }
 
 func callv(g func(int) int) int { return g(1) }
 
-// A result-bearing outer function holding a lambda scope defer: the outer
-// flag fires spuriously but its scope pass is a no-op, and the lambda body
-// gets its own lowering.
 func outerv(n int) int {
 	call(x => {
 		scope defer fmt.Println("s")

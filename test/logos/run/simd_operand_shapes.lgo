@@ -4,9 +4,6 @@ package main
 
 import "fmt"
 
-// M14-S1 shapes (SPEC Sec 2.4, T-204.2): every simd operand span keeps
-// its closing delimiters: index brackets, composite-literal braces,
-// call parentheses, and the parentheses around a nested operator.
 
 func shapeIndex() {
 	a := [2]int{1, 2}

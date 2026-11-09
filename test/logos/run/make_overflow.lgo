@@ -2,11 +2,6 @@
 
 package main
 
-// M15-S2 (SPEC Sec 13.2, T-303; #169): `*` inside a make length or
-// capacity lowers to _logos_rt.MulLen, which panics with
-// `logos: make length overflow: w * h` on overflow instead of
-// allocating a wrapped small buffer. Small products keep their length,
-// and a zero factor stays zero without panicking.
 
 import "fmt"
 

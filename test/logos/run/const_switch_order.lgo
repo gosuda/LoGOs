@@ -8,10 +8,6 @@ import (
 	"io"
 )
 
-// M7-S4 const switch case order in the run-time form (SPEC Sec 2.5, T-205):
-// cases evaluate top-down in first-match order whatever mix of exact,
-// tilde, and interface cases appears. A case body that does not return
-// still ends the switch: no later case runs after a match (#57, #91).
 
 type UserID int
 

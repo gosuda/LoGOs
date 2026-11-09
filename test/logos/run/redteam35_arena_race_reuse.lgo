@@ -2,19 +2,6 @@
 
 package main
 
-// REDTEAM #35 (SPEC Sec 3.1, T-301.1; IMPLEMENTATION.md M18-S3): arena
-// reuse under -race must report no false race, and watermark moves must
-// stay visible to the race detector (racemalloc on alloc, racefree on
-// restore; the inline bump is off under -race, so this exercises the
-// slow-path hooks). The -race flag on the directive builds the staged
-// module instrumented, so a missing hook fails the run with a detector
-// report instead of passing silently. Rapid iteration-local dynamic
-// allocations restore the watermark at each loop back-edge and hand the
-// same memory to the next iteration; every round fills and checksums its
-// buffer against an allocation-free oracle, so a stale or aliased reuse
-// fails loudly. The instrumented build needs cgo: run the gate with
-// CGO_ENABLED=1. Companion gate: GOEXPERIMENT=logosarena go test -short
-// -race runtime -run LogosArena (M18-S1).
 
 import "fmt"
 

@@ -4,10 +4,6 @@ package main
 
 import "unsafe"
 
-// M3 union options (SPEC T-202, #49): an option over a declared union
-// with no nil-capable member keeps the bare interface, with nil as none;
-// a union with a nil-capable member uses rt.Option, so a present nil
-// payload stays distinct from none.
 
 type NumOrStr interface {
 	int | string

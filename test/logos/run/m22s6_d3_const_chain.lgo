@@ -4,10 +4,6 @@ package main
 
 import "fmt"
 
-// M22-S6 defect D3 (SPEC T-104.6, T-201): the compiler rejected chain
-// methods on a `const []T` receiver, although chains only read it. The
-// Sec 9 example declares `ProcessBatch(ctx, batch const
-// []CreateOrderReq)` and chains on batch.
 
 func double(xs const []int) []int {
 	return xs.map(x => x * 2)

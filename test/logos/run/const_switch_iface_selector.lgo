@@ -4,8 +4,6 @@ package main
 
 import "fmt"
 
-// M7-S4 const switch interface case over an indexed receiver
-// (SPEC Sec 2.5, T-205): the assertion splice covers the full receiver.
 
 type Word struct{ S string }
 

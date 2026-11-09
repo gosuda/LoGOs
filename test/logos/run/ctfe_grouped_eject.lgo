@@ -2,9 +2,6 @@
 
 package main
 
-// Grouped non-static composite consts move after their group when
-// ejected; the moved vars must land outside the group and outside
-// the following type group.
 
 const (
 	rows = []map[string]int{{"a": 1}}

@@ -4,8 +4,6 @@ package main
 
 import "fmt"
 
-// M7-S1 const if with a bare boolean condition (SPEC Sec 2.5, T-205):
-// a literal condition is a constant boolean like any comparison.
 
 func main() {
 	const if true {

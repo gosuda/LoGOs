@@ -2,24 +2,6 @@
 
 package main
 
-// M5-S3 read-only-after-relocation placement (SPEC Sec 2.1, T-201,
-// #54): constant data with pointers (a string slice, and structs with
-// string fields) lives in read-only-after-relocation memory. On the
-// default non-PIE internal link the linker keeps such symbols in the
-// .rodata section (UseRelro is false for a default exe, so no
-// promotion happens; under internal-link PIE or shared builds the
-// same symbols go to Go-emitted `.data.rel.ro` sections in the
-// relro segment, while with external linking Go keeps them in the
-// rodata segment and leaves rel.ro formation to the external
-// linker), so `go tool nm` reports type R and the
-// debug/elf section of each backing symbol is .rodata. A write to the
-// data through unsafe must fault. The staged test binary itself is
-// stripped, so the program builds a probe module (like
-// test/logos/codegen/rodata.lgo does) and runs it with inherited
-// output: the probe re-executes itself as "child" for the fault
-// checks, then asserts the nm type and ELF section of both pointer
-// backings.
-
 import (
 	"fmt"
 	"os"

@@ -1,9 +1,5 @@
 // run
 
-// M7-S2 const for inside const if (SPEC Sec 2.5, T-205): a const for in
-// the live branch of a const if unrolls; a const for in the dead branch
-// (including a live comptime.Error there) is pruned with its branch and
-// never reaches lowering. Both branches still type-check.
 
 package main
 

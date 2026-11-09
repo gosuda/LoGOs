@@ -7,15 +7,6 @@ import (
 	"math"
 )
 
-// M15-S2 attack (SPEC Sec 13.2 and 2.4, T-303, T-204.2): `.sum()` on a
-// bare slice matches a scalar oracle for every element kind at every
-// length from empty through two vectors plus one of the widest lane
-// count and beyond, so each tail size runs. Integer sums wrap like the
-// oracle's left-to-right loop. Float sums equal an explicit pairwise
-// recursion over halves bit for bit, the fixed order the scalar form
-// uses. The printed digest of every sum's bits is the same with and
-// without GOEXPERIMENT=simd, so the vector form and the scalar form
-// agree.
 
 type intKind interface {
 	~int | ~uint | ~int8 | ~uint8 | ~int16 | ~uint16 | ~int32 | ~uint32 | ~int64 | ~uint64
@@ -56,8 +47,6 @@ func mixInt(i int) int {
 	return (i*2654435761 + 12345) >> 3
 }
 
-// mixFloat varies the magnitude with the index, so a different
-// association order changes the rounded result.
 func mixFloat(i int) float64 {
 	return math.Ldexp(float64(mixInt(i)%2001-1000), (i*7)%13-6)
 }
@@ -148,6 +137,5 @@ func main() {
 	checkFloat32("float32", func(s []float32) float32 { return s.sum() })
 	checkFloat32("f32", func(s []f32) f32 { return s.sum() })
 	checkFloat64("float64", func(s []float64) float64 { return s.sum() })
-	// The pinned order (#67): left-to-right gives 1, the split gives 0.
 	fmt.Println([]float64{1e16, -1e16, 1.0}.sum())
 }

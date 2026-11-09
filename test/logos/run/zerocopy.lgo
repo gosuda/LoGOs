@@ -7,12 +7,6 @@ import (
 	"testing"
 )
 
-// M5-S5 zero-copy conversions (SPEC T-201): string to const []byte and
-// back allocate nothing when provenance is a string or a const
-// composite; any other provenance copies to the Go heap (#152: the
-// copy allocates at least once, and the string survives later
-// mutation of the source). A plain []byte conversion stays a copy
-// even when its source is a string.
 
 var zbSinkB const []byte
 var zbSinkS string

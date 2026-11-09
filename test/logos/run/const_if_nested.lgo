@@ -4,9 +4,6 @@ package main
 
 import "fmt"
 
-// M7-S1 const if in nested positions (SPEC Sec 2.5, T-205): a const if
-// prunes inside range and for bodies, switch and select clauses, function
-// literals, labeled statements, and the live branch of another const if.
 
 func inRange(xs []int) string {
 	out := ""

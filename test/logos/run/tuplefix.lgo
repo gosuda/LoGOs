@@ -10,8 +10,6 @@ func g(m, n int) {
 
 func main() {
 	a, b, c, d := 1, 2, 3, 4
-	// A parenthesized expression without a top-level comma stays a
-	// parenthesized expression, exactly as in Go (SPEC Sec 4.2).
 	x := ((a+b) + (c+d))
 	fmt.Println(x)
 	y := ((a+b) * (c+d))
@@ -24,7 +22,6 @@ func main() {
 	fmt.Println(inc(41))
 	var add func(int, int) int = (a, b) => a + b
 	fmt.Println(add(20, 22))
-	// A tuple literal needs a comma at its top level.
 	p, q := (a+b, c+d)
 	fmt.Println(p, q)
 }

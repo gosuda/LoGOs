@@ -8,22 +8,6 @@ import (
 	"strings"
 )
 
-// M14-S2 attack (SPEC Sec 2.4, T-204.2): on amd64 the vector form sits
-// behind an archsimd CPU feature guard, so a runtime with the feature
-// disabled via GODEBUG takes the scalar branch and every operator and
-// reduction still matches the scalar oracle. The guard is elided only
-// when the build's GOAMD64 level guarantees the feature (v3: AVX and
-// AVX2; v4: AVX512), so the directive pins GOAMD64=v1, because the logos
-// default target is v3 (M13-S1, SPEC #107). The
-// directive above turns all three features off; checkSeam proves it
-// reached this process, and simd_cpu_seam.go proves the runtime then
-// reports each feature as absent, so the vector branch cannot run
-// unnoticed. This file stays free of simd/archsimd so the unit tests
-// that lower every run fixture without the experiment still check it.
-// The scalar branch is forced only at GOAMD64 v1 or v2: from v3 the
-// compiler drops the AVX and AVX2 checks and the cpu.avx and cpu.avx2
-// knobs no longer exist, so a v3 run takes the vector path and says
-// nothing about the guard.
 
 func checkSeam() {
 	for _, off := range []string{"cpu.avx=off", "cpu.avx2=off", "cpu.avx512f=off"} {

@@ -4,9 +4,6 @@ package main
 
 import "fmt"
 
-// M3-S6 method expression with option arguments (SPEC Sec 2.2, T-202):
-// the receiver counts as the first parameter target, so each argument
-// wraps to its own parameter type.
 
 type Box struct{ V int }
 

@@ -40,8 +40,6 @@ func main() {
 	direct()
 }
 
-// direct multi-assignment unpacks a tuple-returning call (#17): the
-// call stays a native multi-value assignment, never a packed tuple.
 func direct() {
 	x, y := pair()
 	fmt.Println(x, y)

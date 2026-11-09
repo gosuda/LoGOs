@@ -1,8 +1,5 @@
 // run
 
-// M7-S3 field copies through f.Type (SPEC Sec 2.5, T-205, #130): MapTo
-// copies every field of the destination from the source by name; the
-// expansion compares the compile-time types per field.
 
 package main
 

@@ -2,13 +2,6 @@
 
 package jsonunmarshal
 
-// M11-S2 attack (SPEC Sec 10.2, T-Sec10; rows #7, #123, #139): the generated
-// UnmarshalJSON fills defaults first, enforces required non-nil fields
-// through a seen mask, dispatches keys by switch or perfect-hash table,
-// skips unknown keys, keeps the last duplicate, grows arrays as elements
-// arrive, and is the method encoding/json reaches for both json.Unmarshal
-// and json.NewDecoder. JSON has no length header, so a hostile array claim
-// is only as large as the bytes that arrive.
 
 import (
 	"bytes"
@@ -215,8 +208,6 @@ func missing(typ, field string) error {
 	return rt.MissingFieldError{Type: typ, Field: field}
 }
 
-// TestMissingRequiredField is red-team row #7: a required non-nil field
-// that is absent fails with MissingFieldError naming type and field.
 func TestMissingRequiredField(t *testing.T) {
 	_, err := decode[User](`{"id":1,"name":"a"}`)
 	if err != missing("User", "Profile") {
@@ -239,8 +230,6 @@ func TestNullForNonNilFieldIsMissing(t *testing.T) {
 	}
 }
 
-// TestDefaultsAppliedFirst is red-team row #123: defaults go in before
-// the document is read, so an explicit false overrides a true default.
 func TestDefaultsAppliedFirst(t *testing.T) {
 	cases := []struct {
 		doc  string
@@ -293,8 +282,6 @@ func TestSyntaxErrorsMatchEncodingJSON(t *testing.T) {
 
 type userMirror User
 
-// TestDecoderUsesTheSameMethod covers json.NewDecoder: Decode reads one
-// value and reaches UnmarshalJSON through the Unmarshaler interface.
 func TestDecoderUsesTheSameMethod(t *testing.T) {
 	dec := json.NewDecoder(strings.NewReader(`{"id":1,"name":"a","profile":{"bio":"x"}} {"id":2,"name":"b"} {"id":3,"name":"c","profile":{"bio":"z"}}`))
 	first := User{Profile: &Profile{}}
@@ -349,9 +336,6 @@ func decodeReq(typ string, doc string) error {
 	return err
 }
 
-// TestSeenMask drives the one-word (64 required fields) and two-word (65)
-// masks: each required key missing alone, keys in reverse order, duplicate
-// keys, unknown keys, and null.
 func TestSeenMask(t *testing.T) {
 	for _, tc := range []struct {
 		typ string
@@ -403,9 +387,6 @@ func allocated() uint64 {
 	return m.TotalAlloc
 }
 
-// TestHostileArrayCostsOnArrival is red-team row #139 for JSON: no
-// pre-allocation cap exists, because JSON carries no length header; an
-// array costs memory as its elements arrive and not before.
 func TestHostileArrayCostsOnArrival(t *testing.T) {
 	prefix := `{"items":[` + strings.Repeat("0,", 9)
 	before := allocated()
@@ -480,11 +461,6 @@ type Quoted struct {
 
 type quotedMirror Quoted
 
-// TestQuotedOptionMatchesEncodingJSON covers the `string` tag option on
-// decode. The generated decoder follows the v1 rule that the quoted
-// content must be a valid literal, so inputs only the jsonv2 legacy mode
-// tolerates (`"+1"`, `"01"`) are left out; every other case must agree on
-// success and on the decoded value.
 func TestQuotedOptionMatchesEncodingJSON(t *testing.T) {
 	for _, doc := range []string{
 		`{"qi":"12","qf":"1.5","qb":"true","qs":"\"x\""}`, `{"qi":"-9223372036854775808"}`, `{"qf":"1e300"}`,
@@ -521,10 +497,6 @@ func samePlain(t *testing.T, doc []byte) {
 	}
 }
 
-// TestTypeErrorsKeepDecoding checks that a type mismatch is saved and the
-// rest of the object still decodes, like the reflective path, for fields
-// without a nested Unmarshaler (whose errors encoding/json v1 treats as
-// fatal and the jsonv2 legacy mode does not).
 func TestTypeErrorsKeepDecoding(t *testing.T) {
 	for _, doc := range []string{
 		`{"i8":"x","s":"kept","i64":5}`, `{"u16":-1,"strs":["a"],"f64":2.5}`, `{"b":1,"fls":[1,2],"s":"z"}`,
@@ -589,8 +561,6 @@ type data struct {
 	N int32 `json:"n"`
 }
 
-// TestTypeNamedLikeAGeneratedLocal checks that every generated name carries
-// the reserved prefix: a type named data compiles and decodes.
 func TestTypeNamedLikeAGeneratedLocal(t *testing.T) {
 	if got := decodeOK[data](`{"n":4}`); got.N != 4 {
 		t.Fatalf("got %+v", got)
@@ -602,9 +572,6 @@ func prefilled() Plain {
 	return Plain{Strs: []string{"a", "b", "c"}, Ints: []int16{7, 8, 9}, Fls: []float64{1, 2}, PS: &s, In: Profile{Bio: "keep"}}
 }
 
-// TestPrefilledTargetMatchesEncodingJSON checks decoding into a target that
-// already holds values: array elements decode into the existing elements,
-// null and absent keys leave values alone, and pointers keep their pointee.
 func TestPrefilledTargetMatchesEncodingJSON(t *testing.T) {
 	for _, doc := range []string{
 		`{"ints":[null,5]}`, `{"strs":[null,"z"],"fls":[null]}`, `{"ps":"new"}`, `{"ps":null}`,
@@ -623,10 +590,6 @@ func TestPrefilledTargetMatchesEncodingJSON(t *testing.T) {
 	}
 }
 
-// PRRT_kwDOVOeymc6wGfHR (r4373037368) on decode: a named int carrying
-// only IsZero() bool keeps the string option, and the quoted token is
-// read by the typed quoted reader with the exact value instead of the
-// reflective fallback.
 type ZInt int64
 
 func (z ZInt) IsZero() bool { return z == 42 }

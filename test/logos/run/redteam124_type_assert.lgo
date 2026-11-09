@@ -8,14 +8,6 @@ import (
 	"net/http"
 )
 
-// REDTEAM #124 (SPEC Sec 2.3, T-203.4; IMPLEMENTATION.md M13-S3): a dynamic
-// assertion inside a specialized clone must give the same result as the
-// unspecialized call, and function values must keep working. r124Emit
-// specializes per concrete writer type with the http.Flusher assertion
-// folded per type, while a call through an io.Writer value keeps the
-// original with its dynamic assertion. Distinct from
-// test/logos/run/specialize_assert.lgo, which pins the same property with
-// different types and counts; this fixture is the #124 close-out probe.
 
 type r124Plain struct{ n int }
 

@@ -7,10 +7,6 @@ import (
 	"unsafe"
 )
 
-// Closed union under test (SPEC Sec 2.3, T-203.1): the operand evaluates
-// once, only the chosen arm evaluates, the common type flows to the use
-// site, and an exhaustive switch with no default panics when a smuggled
-// non-member matches no case.
 
 type U interface {
 	int | string
@@ -34,7 +30,6 @@ func arm2() string {
 	return "two"
 }
 
-// Common type U from a typed union arm plus untyped member arms.
 func pick(n int, u U) U {
 	return switch n {
 	case 1 => u

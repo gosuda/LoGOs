@@ -8,9 +8,6 @@ import (
 	"logos/rt"
 )
 
-// M5-S6 inline-only rt.Freeze (SPEC T-201): a Freeze result that is
-// never bound to a variable still forces the plain recheck, so no
-// const view reaches the backend.
 
 type Config struct {
 	Name string

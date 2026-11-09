@@ -4,17 +4,6 @@ package main
 
 import "fmt"
 
-// PRRT_kwDOVOeymc6vs9fj (SPEC Sec 2.1, T-201): readonly receiver-effect
-// runtime controls. Companion to the frozen
-// test/logos/compile/const_view_receiver_refs.lgo, which stays rejected.
-// Every method below has a value receiver whose type carries a reference
-// field, yet each body is transitively pure: scalar/string field reads,
-// len, index and range reads, map reads, pointer loads, and calls to
-// local pure helpers only. No imported method, closure invocation,
-// channel operation, append/copy/delete/clear, or store through a
-// reference appears. The scalar-copy bump writes a scalar field of the
-// receiver copy only, crossing no reference indirection. Each printed
-// line is a hand-computed literal.
 
 type Item struct {
 	Name string

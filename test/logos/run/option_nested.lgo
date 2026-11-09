@@ -4,10 +4,6 @@ package main
 
 import "fmt"
 
-// M3 wrapped options (SPEC Sec 2.2, T-202): payloads that admit nil as
-// a valid value (slices, funcs, chans, interfaces) use
-// presence-bearing `rt.Option[T]`, so present-nil stays distinct from
-// absent. `(T?)?` nests. Nil tests narrow wrapped options.
 
 func presentNil() []int? {
 	var s []int = nil

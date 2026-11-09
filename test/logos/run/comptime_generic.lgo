@@ -1,9 +1,5 @@
 // run
 
-// M7-S3 comptime generics (SPEC Sec 2.5, T-205): Autowire[T] expands
-// once per instantiation into a non-generic copy in this package;
-// Resolve[f.Type](c) resolves per field (#128); two instantiations over
-// different types coexist, and a repeated instantiation reuses its copy.
 
 package main
 

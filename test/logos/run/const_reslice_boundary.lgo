@@ -2,13 +2,6 @@
 
 package main
 
-// PRRT_kwDOVOeymc6vd39t (SPEC Sec 2.1, T-201): const slice bounds cannot
-// exceed len(view), even when the backing storage has spare capacity.
-// Simple 2-index, 3-index, and compound-call base reslices beyond len must
-// panic without disclosing bytes from the backing storage secret tail.
-// Exact-len and full-slice legal cases succeed, compound bases evaluate
-// exactly once, and bounds evaluation order (base -> low -> high -> max)
-// is preserved.
 
 import (
 	"fmt"
@@ -47,8 +40,6 @@ func testLegal(name string, f func()) {
 	f()
 }
 
-// makeSecretView returns a const view over backing storage whose secret tail
-// is out of scope and nonvisible to callers.
 func makeSecretView() const []byte {
 	storage := []byte("PUBLICSECRET")
 	return storage[:6]
@@ -57,17 +48,14 @@ func makeSecretView() const []byte {
 func testBounds(v const []byte) {
 	hi := 10
 
-	// 1. Simple 2-index bound beyond len must panic.
 	testTrap("simple 2-index beyond len", func() {
 		_ = v[:hi]
 	})
 
-	// 2. 3-index bound beyond len must panic.
 	testTrap("3-index beyond len", func() {
 		_ = v[:hi:hi]
 	})
 
-	// 3. Compound-call base beyond len must panic, evaluating base exactly once.
 	compoundCalls := 0
 	getConstView := func() const []byte {
 		compoundCalls++
@@ -85,7 +73,6 @@ func testBounds(v const []byte) {
 }
 
 func testLegalCases(v const []byte) {
-	// 4. Exact-len and full-slice legal cases succeed.
 	testLegal("full-slice legal", func() {
 		s := v[:]
 		if len(s) != 6 {
@@ -127,7 +114,6 @@ func testLegalCases(v const []byte) {
 }
 
 func testEvaluationOrder(v const []byte) {
-	// 5. Preserve bounds evaluation order: base -> low -> high -> max.
 	var evalOrder []string
 
 	orderItem := func(tag string, val int) int {
@@ -140,24 +126,20 @@ func testEvaluationOrder(v const []byte) {
 		return v
 	}
 
-	// Legal 2-index evaluation order: base -> low -> high
 	evalOrder = nil
 	_ = orderBase()[orderItem("low", 1):orderItem("high", 4)]
 	fmt.Println("2-index eval order:", strings.Join(evalOrder, " -> "))
 
-	// Legal 3-index evaluation order: base -> low -> high -> max
 	evalOrder = nil
 	_ = orderBase()[orderItem("low", 1):orderItem("high", 4):orderItem("max", 6)]
 	fmt.Println("3-index eval order:", strings.Join(evalOrder, " -> "))
 
-	// Panicking 2-index evaluation order: all operands evaluate before panic
 	evalOrder = nil
 	testTrap("eval order on 2-index panic", func() {
 		_ = orderBase()[orderItem("low", 1):orderItem("high", 10)]
 	})
 	fmt.Println("2-index panic eval order:", strings.Join(evalOrder, " -> "))
 
-	// Panicking 3-index evaluation order: all operands evaluate before panic
 	evalOrder = nil
 	testTrap("eval order on 3-index panic", func() {
 		_ = orderBase()[orderItem("low", 1):orderItem("high", 4):orderItem("max", 10)]
@@ -166,8 +148,6 @@ func testEvaluationOrder(v const []byte) {
 }
 
 func testCallerScope(v const []byte) {
-	// 6. Bounds evaluate in the caller frame: recover() inside a directly
-	// deferred function keeps its active panic value.
 	testLegal("recover bound in caller frame", func() {
 		defer func() {
 			if got := len(v[0:len(fmt.Sprint(recover())):6]); got != 4 {

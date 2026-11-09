@@ -7,8 +7,6 @@ import (
 	"reflect"
 )
 
-// M5 const composites in read-only data (SPEC T-201, #50, #98):
-// reflect.DeepEqual and fmt.Println accept them like any other value.
 
 type Point struct {
 	X, Y int

@@ -2,10 +2,7 @@
 
 package main
 
-// CTFE semantic parity (T-201): every result below must be computed at
 // compile time by the const evaluator with Go semantics. The constants
-// are the compile-time witnesses; main only prints and asserts them.
-// A constant array bound (probe) only compiles if folding succeeded.
 
 const func DblShift() int {
 	return 1 << uint8(8)
@@ -222,8 +219,6 @@ const func RangeInts() int {
 	if count == 2 {
 		w += 1
 	}
-	// Above MaxInt64: folding the range count through int64 would
-	// truncate the iteration space.
 	var large uint64 = 10000000000000000000
 	steps := 0
 	for i := range large {

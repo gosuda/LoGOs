@@ -2,18 +2,6 @@
 
 package main
 
-// M18 caller-region attack (SPEC Sec 3.1): a noinline producer returning a
-// runtime-sized noscan slice must allocate in the caller's region when the
-// caller keeps the result locally (Local consent, always) or returns it
-// through a static chain (Chain consent). This fixture is intentionally RED
-// until walk lowers LogosArenaRetMake with the RetSet/RetTake token: escape
-// records retSites/live/candidate/consent, but walk/arena_logos.go lowers
-// only ConstMake/Make (EscNone), so every returned make still takes the
-// heap path. Allocation attacks below expect 0 for caller-owned cases
-// (currently 1, retain 2) and 1 for false-consent/global-escape controls.
-// Correctness checksums are separate lines so the red is alloc-driven, not
-// value-driven. Defer/panic preservation is correctness-only: a user defer
-// vetoes placement per LogosArenaPlaceable, so it stays heap by rule.
 
 import (
 	"fmt"
@@ -87,8 +75,6 @@ func retainOverwrite(n int) (int, int) {
 	a := produce(n)
 	_ = sumBytes(a)
 	b := produceB(n)
-	// Re-sum a after b: a premature callee restore would let b reuse a's
-	// region and clobber a from 3s to 7s, turning 192 into 448.
 	sa := sumBytes(a)
 	sb := sumBytes(b)
 	return sa, sb

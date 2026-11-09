@@ -4,16 +4,6 @@ package main
 
 import "fmt"
 
-// Runtime companion to
-// test/logos/compile/const_interface_generic_assert.lgo. Only the
-// allowed generic half runs here: ordinary generic declarations stay
-// legal and only Qualified instantiations from any/ordinary forge (the
-// latter never run). Identity has no assertion so Identity[Qualified]
-// over an already-proven Good stays allowed; GenericAs[int]/[Good] are
-// ordinary instantiations; storage-only StoreBox only stores and returns
-// T; concrete `any` to Good is runtime-checkable, then assignment to
-// Qualified is proved by the direct Good body scan. Each printed line is
-// a hand-computed literal with a W prefix.
 
 type Qualified interface {
 	const Name() string

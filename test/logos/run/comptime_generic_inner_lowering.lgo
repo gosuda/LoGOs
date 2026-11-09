@@ -1,11 +1,5 @@
 // run
 
-// M7-S3 comptime generic with inner lowering (SPEC Sec 2.5, T-205; #76,
-// #128): a `?` call, a `$"..."` interpolation, and a chain call sit in
-// the const for body of a comptime generic, singly and nested. Each
-// instantiation expands into its own copy and each unrolled iteration of
-// a copy lowers on its own; the ejected text matches the native
-// lowering.
 
 package main
 

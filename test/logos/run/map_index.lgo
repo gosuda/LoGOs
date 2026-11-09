@@ -4,11 +4,6 @@ package main
 
 import "fmt"
 
-// M3-S6 single-value map index yields `V?` (SPEC Sec 1.4, T-104.3; Sec
-// 2.2, T-202): an absent key reads as none, a present zero value reads as
-// some, and a present nil slice payload reads as some with a nil payload,
-// distinct from none. `v, ok := m[k]`, stores, `++`, and `delete` keep Go
-// meaning. Pointer elements keep the plain `m[k]` read with nil as none.
 
 type User struct {
 	Name string

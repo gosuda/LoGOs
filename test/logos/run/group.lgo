@@ -9,9 +9,6 @@ import (
 	"time"
 )
 
-// M8-S2: the PLAN Sec 11 batch loop runs with 8-way concurrency. A group
-// with limit = 8 squares every item; the peak concurrency never exceeds
-// the limit. A failing item fails the group with the first error.
 
 var live, peak atomic.Int32
 

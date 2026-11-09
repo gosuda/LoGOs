@@ -21,10 +21,6 @@ var boomErr = errors.New("boom")
 
 var heyShout = shout("hey")
 
-// bigBox renders a 300-byte string with no allocation of its own, so
-// the interpolation's single allocation is the buffer alone (#34): 300
-// exceeds every fixed operand estimate (20/24/5), so a bound that did
-// not count the Stringer string would regrow.
 type bigBox struct{ s string }
 
 func (b bigBox) String() string { return b.s }
@@ -64,13 +60,10 @@ func main() {
 	m := map[string]int{"a": 1}
 	fmt.Println($"v={m["a"] ?? -1} w={m["zz"] ?? -1}")
 
-	// Operand text is data, never a format string (#177).
 	fmt.Println($"{"%d %s %!v (x)"}")
 	pct := "%s-%d"
 	fmt.Println($"v={pct}")
 
-	// Exactly one allocation per interpolation (the buffer; Error on a
-	// package-level error value allocates nothing).
 	if allocs := testing.AllocsPerRun(100, func() {
 		sink = $"User {name} has {n} items err={boomErr}"
 	}); allocs != 1 {

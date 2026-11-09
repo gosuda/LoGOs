@@ -2,11 +2,6 @@
 
 package jsonmarshal
 
-// M11-S1 attack (SPEC Sec 10.1, T-Sec10): the generated MarshalJSON is
-// byte-identical to the reflective encoding/json output, compact, exact in
-// length for the User shape, and one allocation for a struct of scalars.
-// `mirror` is a method-less copy of the type, so it takes the reflective
-// path; json.Marshal(v) reaches the generated method by interface dispatch.
 
 import (
 	"bytes"
@@ -425,8 +420,6 @@ func usersOfLen(n int) []User {
 	return out
 }
 
-// TestUserExactLen asserts len(buf) == cap(buf) == 17 + IntLen(id) +
-// EscapedLen(name) + (role present ? 10 + EscapedLen(*role) : 0).
 func TestUserExactLen(t *testing.T) {
 	for _, n := range lengths {
 		for _, u := range usersOfLen(n) {
@@ -482,13 +475,6 @@ func TestOutputIsCompact(t *testing.T) {
 	}
 }
 
-// PRRT_kwDOVOeymc6wGfHR (r4373037368) end to end: a named int carrying
-// only IsZero() bool still classifies as a plain scalar, so the string
-// option quotes it and omitzero consults IsZero: IsZero() { z == 42 }
-// overrides the default zero, so only 42 omits and the naive zero 0
-// stays. Custom-marshal
-// precedence (MarshalJSON, MarshalText, json.Number) stays covered by
-// the Every matrix above.
 type ZInt int64
 
 func (z ZInt) IsZero() bool { return z == 42 }

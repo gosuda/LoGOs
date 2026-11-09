@@ -9,10 +9,6 @@ import (
 	"strconv"
 )
 
-// M7-S4 const switch (SPEC Sec 2.5, T-205): the PLAN Sec 7.2 example.
-// An exact case rebinds the Items through unsafe, an interface case
-// asserts on the value, and the same output comes back natively and
-// ejected (logos_eject_const_switch.txt, #37, #108).
 
 func EncodeSlice[T any](buf []byte, items []T) ([]byte, error) {
 	const switch T {
@@ -22,7 +18,6 @@ func EncodeSlice[T any](buf []byte, items []T) ([]byte, error) {
 		}
 		return buf, nil
 	case io.WriterTo:
-		// Constraint intersection: T keeps concrete layout, gains WriteTo.
 		var b bytes.Buffer
 		for _, v := range items {
 			v.WriteTo(&b)?

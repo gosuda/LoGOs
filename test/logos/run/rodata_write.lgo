@@ -2,11 +2,6 @@
 
 package main
 
-// M5-S3 read-only placement (SPEC Sec 2.1, T-201): a write to a const
-// composite through unsafe must fault. The parent re-executes itself
-// as "child"; the child stores through the backing array and must die
-// with a fault (nonzero exit, "fault" in stderr). If the store ever
-// succeeds the test fails red.
 
 import (
 	"bytes"

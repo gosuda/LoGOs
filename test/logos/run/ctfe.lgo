@@ -2,8 +2,6 @@
 
 package main
 
-// M5-S2 const composites and const func (SPEC T-201): values computed
-// at compile time are usable at run time.
 
 const func Fib(n int) int {
 	a, b := 0, 1

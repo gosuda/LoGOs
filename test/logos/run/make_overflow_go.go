@@ -2,10 +2,6 @@
 
 package main
 
-// M15-S2 (SPEC Sec 13.2, T-303; #169, R-U1): the same expression in a Go
-// package keeps the wrapped upstream length and does not panic. The
-// overflow check is a loGo/s language rule and stays in .lgo.
-
 import "fmt"
 
 func main() {

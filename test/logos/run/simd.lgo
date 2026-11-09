@@ -7,11 +7,6 @@ import (
 	"math"
 )
 
-// M14-S1 attack (SPEC Sec 2.4, T-204.2): every operator and reduction
-// matches a scalar loop oracle written in this file. Float sums and
-// dots also match an explicit pairwise tree, pinning the fixed pairwise
-// order in both lowerings: the printed bit patterns are identical with
-// and without GOEXPERIMENT=simd.
 
 func oracleAdd4(a, b [4]float64) [4]float64 {
 	var r [4]float64
@@ -227,9 +222,6 @@ func checkNamed() {
 
 type simdLane float64
 
-// Word kinds (int, uint, uintptr) and named element types have the same
-// size as a fixed-width lane but are distinct types, so the vector form
-// must not hand their pointers to archsimd (SPEC T-204.2 lowering).
 func checkWordKinds() {
 	var ia, ib [4]int
 	var ua, ub [4]uint
@@ -288,9 +280,6 @@ func checkWordKinds() {
 
 type simdF32 = float32
 
-// A type alias names its target, so an alias of a fixed-width kind takes
-// the same form as float32. Every value is a quarter-multiple below 2^24,
-// so each partial sum is exact and the sum does not depend on order.
 func checkAlias() {
 	var x, y [8]simdF32
 	for i := range x {

@@ -4,8 +4,6 @@ package main
 
 import "fmt"
 
-// M7-S4 const switch with literal case types (SPEC Sec 2.5, T-205):
-// empty-interface, func, and struct spellings keep their closers.
 
 func kind[T any]() string {
 	const switch T {

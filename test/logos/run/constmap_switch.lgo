@@ -2,12 +2,6 @@
 
 package main
 
-// M5-S4 const maps (SPEC T-Sec7, #3): up to 8 keys lower to a switch
-// lookup (no table symbol), and more keys lower to the static
-// perfect-hash table in read-only data. The program builds a probe
-// module holding an 8-key and a 9-key const map, runs it, then
-// inspects it with `go tool nm`: no symbol for the 8-key map may end
-// in `_tab`, while the 9-key map must own a `_tab` symbol of type R.
 
 import (
 	"fmt"

@@ -4,18 +4,6 @@ package main
 
 import "fmt"
 
-// M13-S3 row #121 (SPEC T-203.4), the checker and copy side. In a call, a
-// []C whose elements implement Creature passes to a `const []Creature`
-// parameter. Go has no such slice conversion, so every call converts the
-// argument through rt.CovSlice, a real element-wise copy; at -O=1 nothing
-// specializes it away. The copy keeps a nil slice nil and gives an empty
-// slice an empty result, evaluates the argument expression once, shares
-// the pointed-to elements with the source, and owns its backing array, so
-// replacing a source slot afterwards does not reach a view the callee
-// returned. A slice that already has the parameter's element type is not
-// converted and stays shared. There is no Go twin: const views are loGo/s
-// syntax. The rejected shapes live in
-// src/internal/types/testdata/logos/const_slice_cov.lgo.
 
 type Creature interface {
 	const Name() string

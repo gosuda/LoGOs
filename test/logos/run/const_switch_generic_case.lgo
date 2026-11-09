@@ -4,8 +4,6 @@ package main
 
 import "fmt"
 
-// M7-S4 const switch with a generic-instance case (SPEC Sec 2.5, T-205):
-// the case type spells past the index bracket.
 
 type List[T any] struct {
 	head T

@@ -10,11 +10,6 @@ import (
 	"time"
 )
 
-// M8-S3: a sibling fails while peers block on `<-ch`, `ch <- v`, and
-// `for v := range ch`. Cancellation reaches every blocked peer, the
-// group returns the first error, and every child exits (#136). A user
-// `select` gains a `<-gctx.Done()` case only when it has no `default`.
-// A select with `default` never blocks, so its child always runs.
 
 var errSib = errors.New("sibling failed")
 

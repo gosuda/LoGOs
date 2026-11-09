@@ -2,9 +2,6 @@
 
 package main
 
-// M5-S1 const views (SPEC T-201): a const view reads through, ranges,
-// and passes to const parameters; lowering erases the view, so the
-// program runs with the plain types.
 
 type Point struct {
 	X, Y int

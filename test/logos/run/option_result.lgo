@@ -2,9 +2,6 @@
 
 package main
 
-// M3 nested option results (SPEC T-202): `(T?)?` parses as a result
-// type, `(T)?` equals `T?`, and a `T?` value wraps into `(T?)?`, so a
-// present-but-none inner option stays distinct from an absent outer one.
 
 func none() (int?)? {
 	return nil

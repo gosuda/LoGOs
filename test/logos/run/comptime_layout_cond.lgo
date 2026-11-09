@@ -1,10 +1,5 @@
 // run
 
-// Comptime layout calls as constant `const if` leaves: a call taking no
-// arguments has an EndPos short of its argument list, so the folded
-// literal must splice past the closing parenthesis of every such leaf,
-// alone, negated, over a concrete type argument, and as the last leaf
-// of a conjunction whose earlier leaf waits for the instantiation.
 
 package main
 

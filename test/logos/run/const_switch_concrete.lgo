@@ -8,11 +8,6 @@ import (
 	"strings"
 )
 
-// M7-S4 const switch over a concrete type (SPEC Sec 2.5, T-205): the
-// switch folds to its first matching case in source order, a tilde case
-// matches the underlying type, an interface case matches an implementer,
-// and a tag that matches no case removes the statement so the code after
-// it runs (#57, #91, #86).
 
 type UserID int
 

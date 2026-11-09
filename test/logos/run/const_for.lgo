@@ -1,9 +1,5 @@
 // run
 
-// M7-S2 const for over concrete types (SPEC Sec 2.5, T-205): fields
-// visit in declaration order (#114); val.[f] reads and writes the named
-// field; f.Name and f.Tag.Get("json") fold to constants; unexported
-// fields of the current package are included (#65).
 
 package main
 

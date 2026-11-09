@@ -9,10 +9,6 @@ import (
 	"logos/rt"
 )
 
-// M5-S6 logos/rt.Freeze (SPEC T-201, #110): Freeze deep-copies its
-// argument and returns a const view. Later writes to the source, and
-// to a child object it points to, do not change the frozen view, and
-// each call performs one deep copy rather than aliasing.
 
 type Child struct {
 	N    int

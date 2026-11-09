@@ -2,18 +2,6 @@
 
 package main
 
-// M18 loop-edge attack (SPEC Sec 3.1, Sec 3.1): iteration-local dynamic
-// makes must restore the watermark on every loop back-edge, while live
-// allocations survive and escaping makes stay on the heap. This fixture
-// covers ordinary and range loops with continue/break, labeled outer
-// continue/break, nested loops with inner-only break, switch-local break
-// (which must not restore the loop), and sibling loops at the same depth
-// with split eligibility (loop A iteration-local, loop B escaping via a
-// returned slice). Value checks only: runtime.LogosArenaStat lives in
-// export_logos_arena_test.go (a _test.go seam, unavailable to normal
-// builds), so no allocation counter is asserted here; boundedness stays
-// covered by runtime TestLogosArenaLoopWatermarkBounded. All loops and
-// sizes are small and fixed, so runtime is bounded with no timing.
 
 import "fmt"
 

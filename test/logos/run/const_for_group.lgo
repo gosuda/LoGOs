@@ -1,9 +1,5 @@
 // run
 
-// M7-S2 const for inside a go group child block (SPEC Sec 2.5, T-205,
-// Sec 2.6): the const for unrolls before the child lowers, the child
-// wraps the unrolled statements, and the ejected text agrees with the
-// native tree.
 
 package main
 

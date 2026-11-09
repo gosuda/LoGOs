@@ -1,8 +1,5 @@
 // run
 
-// M7-S5 comptime.ViewAs (SPEC T-205, #19, #72): a view over bytes reads
-// struct fields, an odd offset reads correctly, a short input panics
-// with need/have sizes, and the view keeps its backing alive across GC.
 
 package main
 

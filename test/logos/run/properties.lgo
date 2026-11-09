@@ -7,11 +7,6 @@ import (
 	"reflect"
 )
 
-// M4-S2 interface properties (SPEC Sec 2.3, T-203.2): reads and writes
-// through a property interface reach the struct through the generated
-// Logos_GetF/Logos_SetF accessors; compound updates pin the receiver
-// once; method calls on a struct-typed property write back (#132, #141);
-// only declaring types gain accessors (#120).
 
 type Creature interface {
 	const Name string
@@ -26,15 +21,11 @@ type Monster struct : Creature {
 
 func (m Monster) Start() error { return nil }
 
-// A struct with no `: I` list gains no accessors (#120).
-
 type Plain struct {
 	X int
 }
 
 func (p Plain) Foo() string { return "foo" }
-
-// A method with no backing field sources a read-only property.
 
 type Named interface {
 	const Title string
@@ -52,7 +43,6 @@ type PointerGhost struct : PointerNamed {
 }
 
 func (*PointerGhost) Title() string { return "pointer" }
-// Methods source a read-write property: Secret() plus SetSecret.
 
 type Vault interface {
 	Secret int
@@ -65,8 +55,6 @@ type Safe struct : Vault {
 func (s Safe) Secret() int { return s.hidden }
 
 func (s *Safe) SetSecret(v int) { s.hidden = v }
-
-// A struct-typed property for method-call write-back (#141).
 
 type Vec struct {
 	X int
@@ -93,8 +81,6 @@ type Carrier interface {
 type Bot struct : Carrier {
 	Pos Vec
 }
-
-// An embedded struct field sources a property by Go selector depth.
 
 type Base struct {
 	HP int

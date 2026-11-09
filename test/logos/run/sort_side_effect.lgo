@@ -4,9 +4,6 @@ package main
 
 import "fmt"
 
-// A chain lambda with a call of unknown purity before sortBy warns
-// suspicious::side_effect_before_sort (#31) but still runs: the warning
-// is soft, so the build succeeds and the program output follows it.
 
 var effCalls int
 

@@ -9,17 +9,6 @@ import (
 	"unsafe"
 )
 
-// M15-S2 attack (SPEC Sec 13.2, T-303; PLAN #22): a slice reduction
-// never reads past the last element. Each slice here ends at the last
-// byte of a page whose successor is PROT_NONE, so a vector load that
-// touches one byte past len(s) faults the process. Every length from 1
-// through 2*lanes+1 of the widest vector the lowering uses (64 byte
-// lanes for 8-bit elements, so 129) runs, which hits every tail size
-// of every element kind on amd64 (256-bit and 512-bit vectors) and on
-// arm64 (128-bit vectors). The reductions compare with a scalar oracle:
-// wrapping integer loops, and for floats an explicit pairwise recursion
-// over halves, the fixed order of the scalar form.
-
 const maxLen = 2*64 + 1
 
 type intKind interface {
@@ -30,8 +19,6 @@ type floatKind interface {
 	~float32 | ~float64
 }
 
-// pageEnd returns n elements of T ending at the last byte of a mapped
-// page, and a function that unmaps both pages.
 func pageEnd[T any](n int) ([]T, func()) {
 	page := syscall.Getpagesize()
 	mem, err := syscall.Mmap(-1, 0, 2*page, syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_ANON|syscall.MAP_PRIVATE)
