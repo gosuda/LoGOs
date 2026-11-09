@@ -83,8 +83,8 @@ func (p *Proxy) diagnosticsParams(uri string) (map[string]any, int) {
 	doc := p.st.docs[path]
 	u := p.st.unitFor(path)
 	extra := p.compilerItems(path, doc, u)
+	docState := documentState{open: doc != nil, version: docStateVersion(doc)}
 	p.st.mu.Unlock()
-	docState := documentState{open: doc != nil, version: docStateVersion(doc), text: docText(doc)}
 	tb := p.tables.Load()
 	p.mu.Lock()
 	lw := tb.bySrc[path]
@@ -102,7 +102,6 @@ func (p *Proxy) diagnosticsParams(uri string) (map[string]any, int) {
 type documentState struct {
 	open    bool
 	version int
-	text    *text
 }
 
 // docStateVersion returns the version of doc, or zero for none.
@@ -111,14 +110,6 @@ func docStateVersion(doc *document) int {
 		return 0
 	}
 	return doc.version
-}
-
-// docText returns the text of doc, or nil for none.
-func docText(doc *document) *text {
-	if doc == nil {
-		return nil
-	}
-	return doc.text
 }
 
 // serverItems returns the diagnostics gopls published for the document, in
