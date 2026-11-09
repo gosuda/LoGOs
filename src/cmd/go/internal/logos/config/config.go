@@ -58,9 +58,9 @@ type Build struct {
 	OptLevel string
 	// TargetCPU is one of "deterministic", "baseline", or "native". It defaults to "deterministic".
 	TargetCPU string
-	// Arena enables the tier-0 arena experiment (GOEXPERIMENT=logosarena)
-	// for the build. It defaults to false.
-	Arena bool
+	// Arena enables the arena experiment (GOEXPERIMENT=logosarena)
+	// for the build. Nil means the default, which is true.
+	Arena *bool
 }
 
 // Capabilities holds the [capabilities] table (M12): severity keys, each one
@@ -93,7 +93,8 @@ var strictFileExts = []string{".lgo", ".📜", ".⚡", ".ʕ◔ϖ◔ʔ"}
 
 // defaultFile returns the File used when logos.toml (or a table or key) is
 // absent: all four extensions enabled, cgo "forbid" with the
-// key marked absent, opt_level "O2", and target_cpu "deterministic".
+// key marked absent, opt_level "O2", target_cpu "deterministic",
+// and arena unset (default true).
 func defaultFile() *File {
 	return &File{
 		Project: Project{StrictFiles: slices.Clone(strictFileExts)},
@@ -167,8 +168,12 @@ func (f *File) Format() []byte {
 		appendQuoted(&b, f.Build.TargetCPU)
 		b.WriteByte('\n')
 	}
-	if f.Build.Arena {
-		b.WriteString("arena = true\n")
+	if f.Build.Arena != nil {
+		if *f.Build.Arena {
+			b.WriteString("arena = true\n")
+		} else {
+			b.WriteString("arena = false\n")
+		}
 	}
 	writeCapabilities(&b, f.Capabilities)
 	return []byte(b.String())

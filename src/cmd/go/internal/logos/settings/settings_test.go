@@ -62,31 +62,36 @@ func TestLoadPrecedence(t *testing.T) {
 			name: "flagBeatsFile", modRoot: o3,
 			flags: Flags{Logos: true, Opt: "2"}, optLevel: "2",
 			gcflags: []string{"-d=inlbudget=120,variablemakethreshold=256"},
-			amd64:   "v3", arm: "v8.2", module: true,
+			amd64:   "v3", arm: "v8.2",
+			experiment: "logosarena", arena: true, module: true,
 		},
 		{
 			name: "fileLevel", modRoot: o3,
 			flags: Flags{Logos: true}, optLevel: "3",
 			gcflags: []string{"-d=inlbudget=400,inlrecursivebudget=80,variablemakethreshold=4096"},
-			amd64:   "v3", arm: "v8.2", module: true,
+			amd64:   "v3", arm: "v8.2",
+			experiment: "logosarena", arena: true, module: true,
 		},
 		{
 			name: "fileLevelS", modRoot: os2,
 			flags: Flags{Logos: true}, optLevel: "s",
 			gcflags: []string{"-d=inlbudget=15"},
-			amd64:   "v3", arm: "v8.2", module: true,
+			amd64:   "v3", arm: "v8.2",
+			experiment: "logosarena", arena: true, module: true,
 		},
 		{
 			name: "flagSBeatsFile", modRoot: o3,
 			flags: Flags{Logos: true, Opt: "s"}, optLevel: "s",
 			gcflags: []string{"-d=inlbudget=15"},
-			amd64:   "v3", arm: "v8.2", module: true,
+			amd64:   "v3", arm: "v8.2",
+			experiment: "logosarena", arena: true, module: true,
 		},
 		{
 			name: "defaultO2", modRoot: empty,
 			flags: Flags{Logos: true}, optLevel: "2",
 			gcflags: []string{"-d=inlbudget=120,variablemakethreshold=256"},
-			amd64:   "v3", arm: "v8.2", module: true,
+			amd64:   "v3", arm: "v8.2",
+			experiment: "logosarena", arena: true, module: true,
 		},
 		{
 			name: "plainGoDefault", modRoot: empty,
@@ -105,19 +110,22 @@ func TestLoadPrecedence(t *testing.T) {
 			name: "envBeatsFileAMD64", modRoot: baseline,
 			flags: Flags{Logos: true, Env: Env{GOAMD64: "v2"}}, optLevel: "2",
 			gcflags: []string{"-d=inlbudget=120,variablemakethreshold=256"},
-			amd64:   "", arm: "v8.0", module: true,
+			amd64:   "", arm: "v8.0",
+			experiment: "logosarena", arena: true, module: true,
 		},
 		{
 			name: "envBeatsFileARM64", modRoot: baseline,
 			flags: Flags{Logos: true, Env: Env{GOARM64: "v8.3"}}, optLevel: "2",
 			gcflags: []string{"-d=inlbudget=120,variablemakethreshold=256"},
-			amd64:   "v1", arm: "", module: true,
+			amd64:   "v1", arm: "",
+			experiment: "logosarena", arena: true, module: true,
 		},
 		{
 			name: "fileLevelsWinWhenEnvEmpty", modRoot: baseline,
 			flags: Flags{Logos: true}, optLevel: "2",
 			gcflags: []string{"-d=inlbudget=120,variablemakethreshold=256"},
-			amd64:   "v1", arm: "v8.0", module: true,
+			amd64:   "v1", arm: "v8.0",
+			experiment: "logosarena", arena: true, module: true,
 		},
 		{
 			name: "brokenFileFallbacks", modRoot: broken,
@@ -129,7 +137,8 @@ func TestLoadPrecedence(t *testing.T) {
 			name: "invalidOptText", modRoot: empty,
 			flags: Flags{Logos: true, Opt: "bad"}, optLevel: "2",
 			gcflags: []string{"-d=inlbudget=120,variablemakethreshold=256"},
-			amd64:   "v3", arm: "v8.2", module: true,
+			amd64:   "v3", arm: "v8.2",
+			experiment: "logosarena", arena: true, module: true,
 			wantErr: `logos build: invalid -O level "bad" (want 0, 1, 2, 3, s)`,
 		},
 		{
@@ -149,7 +158,7 @@ func TestLoadPrecedence(t *testing.T) {
 			flags: Flags{Logos: true, Env: Env{GOEXPERIMENT: "jsonv2"}}, optLevel: "2",
 			gcflags: []string{"-d=inlbudget=120,variablemakethreshold=256"},
 			amd64:   "v3", arm: "v8.2",
-			experiment: "jsonv2", module: true,
+			experiment: "jsonv2,logosarena", arena: true, module: true,
 		},
 		{
 			name: "arenaWithEmptyEnv", modRoot: arenaOnFile,
@@ -164,6 +173,7 @@ func TestLoadPrecedence(t *testing.T) {
 			optLevel: "2",
 			gcflags:  []string{"-d=inlbudget=120,variablemakethreshold=256"},
 			amd64:    "v3", arm: "v8.2",
+			experiment: "logosarena", arena: true,
 			pedantic: config.PedanticOn, module: true,
 		},
 		{
@@ -172,14 +182,16 @@ func TestLoadPrecedence(t *testing.T) {
 			optLevel: "2",
 			gcflags:  []string{"-d=inlbudget=120,variablemakethreshold=256"},
 			amd64:    "v3", arm: "v8.2",
+			experiment: "logosarena", arena: true,
 			pedantic: config.PedanticOff, module: true,
 		},
 		{
 			name: "pedanticUnset", modRoot: empty,
-			flags:    Flags{Logos: true},
-			optLevel: "2",
-			gcflags:  []string{"-d=inlbudget=120,variablemakethreshold=256"},
-			amd64:    "v3", arm: "v8.2",
+			flags:      Flags{Logos: true},
+			optLevel:   "2",
+			gcflags:    []string{"-d=inlbudget=120,variablemakethreshold=256"},
+			experiment: "logosarena", arena: true,
+			amd64: "v3", arm: "v8.2",
 			pedantic: config.PedanticDefault, module: true,
 		},
 		{
@@ -187,7 +199,8 @@ func TestLoadPrecedence(t *testing.T) {
 			flags:    Flags{Logos: true, JSON: true, WasmLoader: true, LintCmd: true, WasmFeatures: "stack-switching"},
 			optLevel: "2",
 			gcflags:  []string{"-d=inlbudget=120,variablemakethreshold=256"},
-			amd64:    "v3", arm: "v8.2", module: true,
+			amd64:    "v3", arm: "v8.2",
+			experiment: "logosarena", arena: true, module: true,
 		},
 	}
 
@@ -462,29 +475,36 @@ func TestLoadRoots(t *testing.T) {
 		{
 			name: "cgoAllowBeatsEnv", modRoot: allowA, env: Env{CGO_ENABLED: "0"},
 			enabled: true, opinion: true, changed: true,
+			arena: true,
 		},
 		{
 			name: "cgoForbidFailClosed", modRoot: forbidA,
 			opinion: true,
+			arena:   true,
 		},
 		{
 			name: "noKeyEnvOnDecides", modRoot: allowA, env: Env{CGO_ENABLED: "1"},
 			enabled: true, opinion: true, changed: true,
+			arena: true,
 		},
 		{
 			name: "noKeyEnvOffDecides", modRoot: forbidA, env: Env{CGO_ENABLED: "0"},
 			opinion: true, changed: true,
+			arena: true,
 		},
 		{
 			name: "noKeyNoEnvLogosModuleDisables", modRoot: logosNoToml,
 			opinion: true,
+			arena:   true,
 		},
 		{
 			name: "goModuleNoOpinion", modRoot: "", roots: []string{goModule},
+			arena: true,
 		},
 		{
 			name: "cgoOresAcrossRoots", modRoot: forbidA, roots: []string{forbidA, allowA},
 			enabled: true, opinion: true,
+			arena: true,
 		},
 		{
 			name: "arenaWhenAnyRootHasIt", modRoot: arenaOffDir, roots: []string{arenaOffDir, arenaOnDir},
@@ -497,7 +517,8 @@ func TestLoadRoots(t *testing.T) {
 			name: "rootsOverrideModRoot", modRoot: arenaOnDir, roots: []string{arenaOffDir},
 		},
 		{
-			name: "noRootsNoModule",
+			name:  "noRootsNoModule",
+			arena: true,
 		},
 	}
 

@@ -42,9 +42,8 @@ func (p *parser) boolValueError(key string, valStart int, c byte) error {
 	return p.errorf(valStart, "unexpected character %q", string(rune(c)))
 }
 
-// assignBool stores a boolean key's value.
 func (p *parser) assignBool(key string, v bool) {
 	if key == "arena" {
-		p.file.Build.Arena = v
+		p.file.Build.Arena = &v
 	}
 }

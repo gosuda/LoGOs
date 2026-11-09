@@ -37,7 +37,7 @@ logos env GOEXPERIMENT
 cd ..
 
 # A workspace decides once for all members: wa carries arena = true and wb
-# does not, yet both members compile the experiment-on goexperiment file.
+# carries no key, yet both members compile the experiment-on goexperiment file.
 cd w
 logos build -a -x -o $WORK/out/wa.bin example.com/wa
 stderr 'exp_logosarena_on\.go'
@@ -51,12 +51,12 @@ cd wasm
 env GOOS=js
 env GOARCH=wasm
 logos env GOEXPERIMENT
-stdout '^preemptibleloops$'
+stdout '^logosarena,preemptibleloops$'
 go env GOEXPERIMENT
 ! stdout 'preemptibleloops'
 env GOEXPERIMENT=nopreemptibleloops
 logos env GOEXPERIMENT
-stdout '^nopreemptibleloops$'
+stdout '^nopreemptibleloops,logosarena$'
 env GOEXPERIMENT=
 env GOOS=
 env GOARCH=

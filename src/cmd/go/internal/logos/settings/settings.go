@@ -262,6 +262,9 @@ func cgoDecision(roots []string, cgoEnv string) (c Cgo) {
 }
 
 func anyRootArena(roots []string) bool {
+	if len(roots) == 0 {
+		return true
+	}
 	for _, root := range roots {
 		m := ModuleAt(root)
 		if m.Err == nil && arenaOn(m.File) {
@@ -272,7 +275,7 @@ func anyRootArena(roots []string) bool {
 }
 
 func arenaOn(f *config.File) bool {
-	return f != nil && f.Build.Arena
+	return f == nil || f.Build.Arena == nil || *f.Build.Arena
 }
 
 func pickOptLevel(level, fallback string) string {
