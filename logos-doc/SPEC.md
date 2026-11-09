@@ -1280,7 +1280,6 @@ The eject MUST append `_ = r` after each local Region declaration. [T-301.2]
 The toolchain MUST NOT ship the `arena` package, `reflect.ArenaNew`, or `GOEXPERIMENT=arenas`. [T-301.2]
 
 Comptime and escape analysis:
-`comptime.SizeOf[T]()`, `comptime.AlignOf[T]()`, and `comptime.HasPointers[T]()` MUST be compile-time-only untyped constants in each expansion. [T-205]
 Escape analysis MUST record a parameter that leaks only into the pointee of another parameter. [T-301.2][R-U1]
 This precision MUST apply to `.lgo` packages, and to Go packages under `GOEXPERIMENT=logosescape`, which is off by default. [T-301.2][R-U1]
 
