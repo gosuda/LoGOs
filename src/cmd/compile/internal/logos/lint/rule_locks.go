@@ -581,12 +581,16 @@ func (v *lockFlow) builtinLockOp(call *syntax.CallExpr) (heldLock, holdMode, boo
 	if selObj == nil || selObj.Kind() != types2.MethodVal {
 		return heldLock{}, holdNone, false
 	}
-	if !isMutexType(selObj.Recv()) {
-		return heldLock{}, holdNone, false
-	}
 	key, ok := v.c.keyOf(sel.X)
 	if !ok {
 		return heldLock{}, holdNone, false
+	}
+	if !isMutexType(selObj.Recv()) {
+		path, ok := v.c.promotedMutexPath(selObj, sel.X)
+		if !ok {
+			return heldLock{}, holdNone, false
+		}
+		key, _ = joinContractKey(key, true, path)
 	}
 	switch sel.Sel.Value {
 	case "Lock":
@@ -599,6 +603,26 @@ func (v *lockFlow) builtinLockOp(call *syntax.CallExpr) (heldLock, holdMode, boo
 		return key, holdNone, true
 	}
 	return heldLock{}, holdNone, false
+}
+
+func (c *lockAudit) promotedMutexPath(sel *types2.Selection, recv syntax.Expr) (string, bool) {
+	if sel == nil || len(sel.Index()) < 2 {
+		return "", false
+	}
+	t := TypeOf(recv)
+	var steps []string
+	for _, idx := range sel.Index()[:len(sel.Index())-1] {
+		st, ok := structOf(t)
+		if !ok || idx < 0 || idx >= st.NumFields() {
+			return "", false
+		}
+		steps = append(steps, st.Field(idx).Name())
+		t = st.Field(idx).Type()
+	}
+	if !isMutexType(t) {
+		return "", false
+	}
+	return strings.Join(steps, "."), true
 }
 
 // callContract returns the declared contract of the function call invokes,

@@ -334,6 +334,11 @@ func TestAdvGuardedAccess(t *testing.T) {
 			nil,
 		},
 		{
+			"promotedMethodHoldsLock",
+			"func g5(e *emb) int {\n e.Lock()\n defer e.Unlock()\n return e.n\n}\n",
+			nil,
+		},
+		{
 			"lockUnlockSequenceStaysClean",
 			"func h0(s *stats) int {\n s.mu.Lock()\n defer s.mu.Unlock()\n return s.total\n}\n",
 			nil,
