@@ -18,7 +18,6 @@ import (
 // document is an open document of the client.
 type document struct {
 	uri     string
-	path    string
 	version int
 	text    *text
 }
@@ -68,13 +67,6 @@ func (s *store) init() {
 	s.flights = make(map[string]*flight)
 }
 
-// doc returns the open document at path.
-func (s *store) doc(path string) *document {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.docs[path]
-}
-
 // open reports whether the document at path is open.
 func (s *store) open(path string) bool {
 	s.mu.Lock()
@@ -87,7 +79,7 @@ func (s *store) open(path string) bool {
 func (s *store) setDoc(uri, path string, version int, t *text) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.docs[path] = &document{uri: uri, path: path, version: version, text: t}
+	s.docs[path] = &document{uri: uri, version: version, text: t}
 	s.touchLocked(path)
 }
 
@@ -104,28 +96,6 @@ func (s *store) change(path string, version int, changes []contentChange) bool {
 	doc.version = version
 	s.touchLocked(path)
 	return true
-}
-
-// buffers returns the texts of the open documents by path.
-func (s *store) buffers() map[string][]byte {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	buffers := make(map[string][]byte, len(s.docs))
-	for path, doc := range s.docs {
-		buffers[path] = doc.text.data
-	}
-	return buffers
-}
-
-// versions returns the version of each open document.
-func (s *store) versions() map[string]int {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	versions := make(map[string]int, len(s.docs))
-	for path, doc := range s.docs {
-		versions[path] = doc.version
-	}
-	return versions
 }
 
 // forget removes the open document at path and its unsaved text. Closing
