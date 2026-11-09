@@ -1351,11 +1351,12 @@ The fast path MUST use the syscall-style `reentersyscall`/`asmcgocall`/`exitsysc
 It MUST NOT read a clock in the fast body: no per-call monotonic read takes part, because that read dominated the measured fast path and no consumer read the value. [T-304]
 The fast path MUST stay behind `GOEXPERIMENT=logosfastcgo`, which is off by default under both commands. [T-304][R-U1]
 Profiling with `SIGPROF` during fast calls MUST NOT crash. [T-304]
+Fast calls MUST carry noescape and nocallback marks. [T-304]
 A C function marked `nocallback` that calls into Go MUST still panic on the fast path. It MUST NOT hang and MUST NOT corrupt state. [T-304][R-U1]
 A CPU profile MUST attribute time in a fast-called C function to its Go call site. [T-304][R-U1]
 Go pointer arguments MUST stay valid during a fast call. [T-304]
 The original M holds diagnostics only: `m.fastCgoFrame[0]` records the DI/arg address copy; record also zero-stores slots 1 to 3 so a reused M carries no stale addresses, and clear zeroes all four. The slots are plain `uintptr`, not pins or roots. [T-304]
-The flag and the slots MUST read zero after return. [T-304]
+The flag and the slots MUST read zero after return without clearing the caller's argument values. [T-304]
 POD and primitive-slice arguments MUST skip `_cgoCheckPointer`. [T-304]
 
 Implementation note (informative): Fast calls preserve `runtime.NumCgoCall` accounting and reset the cgo traceback buffer.
