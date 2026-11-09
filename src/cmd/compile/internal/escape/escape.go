@@ -271,6 +271,7 @@ func (b *batch) flowClosure(k hole, clo *ir.ClosureExpr) {
 		if !loc.captured {
 			base.FatalfAt(cv.Pos(), "closure variable never captured: %v", cv)
 		}
+		skip := b.logosRegionSkipGroupCapture(clo, cv)
 
 		// Capture by value for variables <= 128 bytes that are never reassigned.
 		n.SetByval(!loc.addrtaken && !loc.reassigned && n.Type().Size() <= 128)
@@ -293,6 +294,9 @@ func (b *batch) flowClosure(k hole, clo *ir.ClosureExpr) {
 		k := k
 		if !cv.Byval() {
 			k = k.addr(cv, "reference")
+		}
+		if skip {
+			continue
 		}
 		b.flow(k.note(cv, "captured by a closure"), loc)
 	}

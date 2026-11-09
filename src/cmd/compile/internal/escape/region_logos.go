@@ -50,6 +50,7 @@ type logosRegionBatch struct {
 	groupOf      map[*ir.Name]*logosGroup
 	groupMembers map[*location]*logosGroup
 	groupClosures map[*ir.ClosureExpr]bool
+	groupConstOK map[*ir.ClosureExpr]bool
 	groupDead    map[*logosRegion]bool
 }
 
@@ -173,6 +174,7 @@ func (b *batch) logosRegionInit() {
 	b.logosRegion.groupOf = make(map[*ir.Name]*logosGroup)
 	b.logosRegion.groupMembers = make(map[*location]*logosGroup)
 	b.logosRegion.groupClosures = make(map[*ir.ClosureExpr]bool)
+	b.logosRegion.groupConstOK = make(map[*ir.ClosureExpr]bool)
 	b.logosRegion.groupDead = make(map[*logosRegion]bool)
 }
 
@@ -589,6 +591,9 @@ func (b *batch) logosRegionRootOutlives(root *location, site *logosCand) bool {
 			return name.Curfn != site.fn
 		}
 		if name.Curfn != reg.fn {
+			if name.Curfn != nil && b.logosGroupConstParam(name) {
+				return false
+			}
 			return true
 		}
 		declOwner := ir.LogosRegionDeclOwner(name.Curfn)[name]
@@ -610,6 +615,14 @@ func (b *batch) logosRegionRootOutlives(root *location, site *logosCand) bool {
 		return true
 	}
 	return false
+}
+
+func (b *batch) logosGroupConstParam(name *ir.Name) bool {
+	if LogosConstViewDecl == nil || !LogosConstViewDecl(name.Canonical().Pos()) {
+		return false
+	}
+	clo := name.Curfn.OClosure
+	return clo != nil && b.logosRegion.groupConstOK[clo]
 }
 
 func logosRegionLocName(l *location) *ir.Name {
@@ -869,13 +882,14 @@ func (e *escape) logosGroupGoArgs(call *ir.CallExpr, recvArg ir.Node, args ir.No
 		if reg := e.logosRegionProv(e.curfn).prov[vc]; reg != nil {
 			e.logosRegion.groupDead[reg] = true
 		}
-		if LogosConstViewDecl != nil && LogosConstViewDecl(vc.Pos()) {
+		if e.logosGroupConstRead(e.curfn, lit, vc) {
+			e.logosRegion.groupConstOK[lit] = true
 			continue
 		}
 		loc := e.oldLoc(vc)
 		e.flow(e.heapHole().note(call, "group child"), loc)
 		e.logosRegion.flowDesc[loc] = "group child"
-		if src := e.logosGroupTempSource(vc); src != nil {
+		if src := logosGroupTempSource(vc); src != nil {
 			if opt, ok := src.Canonical().Opt.(*location); ok {
 				e.logosRegion.flowDesc[opt] = "group child"
 			}
@@ -883,14 +897,203 @@ func (e *escape) logosGroupGoArgs(call *ir.CallExpr, recvArg ir.Node, args ir.No
 	}
 }
 
-func (e *escape) logosGroupTempSource(temp *ir.Name) *ir.Name {
+func (b *batch) logosGroupConstRead(fn *ir.Func, lit *ir.ClosureExpr, vc *ir.Name) bool {
+	if LogosConstViewDecl == nil || !LogosConstViewDecl(vc.Pos()) {
+		return false
+	}
+	if sym := vc.Sym(); sym != nil && strings.HasPrefix(sym.Name, "_logos_") {
+		if !b.logosGroupConstCopy(lit, vc) {
+			return false
+		}
+	}
+	return b.logosGroupConstLifetimeOK(fn, vc)
+}
+
+func (b *batch) logosGroupConstCopy(lit *ir.ClosureExpr, vc *ir.Name) bool {
+	found := false
+	ir.VisitList(lit.Func.Body, func(n ir.Node) {
+		if found {
+			return
+		}
+		switch n := n.(type) {
+		case *ir.AssignStmt:
+			if n.Op() != ir.OAS || n.Y == nil {
+				return
+			}
+			x, ok := n.X.(*ir.Name)
+			if !ok || logosGroupTempSource(x.Canonical()) != vc {
+				return
+			}
+			if LogosConstViewDecl != nil && LogosConstViewDecl(x.Canonical().Pos()) {
+				found = true
+			}
+		case *ir.AssignListStmt:
+			if n.Op() != ir.OAS2 {
+				return
+			}
+			for i, lhs := range n.Lhs {
+				x, ok := lhs.(*ir.Name)
+				if !ok || i >= len(n.Rhs) {
+					continue
+				}
+				if logosGroupTempSource(x.Canonical()) != vc {
+					continue
+				}
+				if LogosConstViewDecl != nil && LogosConstViewDecl(x.Canonical().Pos()) {
+					found = true
+					return
+				}
+			}
+		case *ir.CallExpr:
+			if n.Op() != ir.OCALLFUNC && n.Op() != ir.OCALLINTER {
+				return
+			}
+			ft := n.Fun.Type()
+			if ft == nil || ft.Recv() != nil {
+				return
+			}
+			params := ft.Params()
+			for i, arg := range n.Args {
+				if i >= len(params) {
+					break
+				}
+				y, ok := logosRegionProvName(arg)
+				if !ok || y.Canonical() != vc {
+					continue
+				}
+				if name, ok := params[i].Nname.(*ir.Name); ok && LogosConstViewDecl != nil && LogosConstViewDecl(name.Pos()) {
+					found = true
+					return
+				}
+			}
+		}
+	})
+	return found
+}
+
+func (b *batch) logosGroupConstLifetimeOK(fn *ir.Func, vc *ir.Name) bool {
+	reg := b.logosGroupTempRegion(fn, vc)
+	if reg == nil || reg.fn != fn || reg.owner == nil {
+		return false
+	}
+	useOwner := ir.LogosRegionDeclOwner(fn)[vc]
+	if useOwner == nil && vc.Canonical() != vc {
+		useOwner = ir.LogosRegionDeclOwner(fn)[vc.Canonical()]
+	}
+	if useOwner == nil {
+		return reg.owner.Parent == nil && reg.owner.List != nil && reg.owner.List == &reg.fn.Body
+	}
+	return reg.owner.Encloses(useOwner)
+}
+
+func (b *batch) logosGroupTempRegion(fn *ir.Func, vc *ir.Name) *logosRegion {
+	seen := make(map[*ir.Name]bool)
+	src := vc
+	for {
+		if seen[src] {
+			return nil
+		}
+		seen[src] = true
+		if reg := b.logosRegionProv(fn).prov[src]; reg != nil {
+			return reg
+		}
+		rhs := logosGroupBoundValue(src)
+		if rhs == nil {
+			return nil
+		}
+		if name, ok := logosRegionProvName(rhs); ok && name.Canonical() != src {
+			src = name.Canonical()
+			continue
+		}
+		if cl, ok := rhs.(*ir.CompLitExpr); ok {
+			return b.logosGroupCompositeRegion(fn, cl)
+		}
+		base, ok := logosGroupElemName(rhs)
+		if !ok || base == src || seen[base] {
+			return nil
+		}
+		src = base
+	}
+}
+
+func logosGroupBoundValue(src *ir.Name) ir.Node {
+	switch d := src.Defn.(type) {
+	case *ir.AssignStmt:
+		if d.Op() != ir.OAS || d.Y == nil {
+			return nil
+		}
+		if x, ok := d.X.(*ir.Name); !ok || x.Canonical() != src {
+			return nil
+		}
+		return d.Y
+	case *ir.AssignListStmt:
+		if d.Op() != ir.OAS2 {
+			return nil
+		}
+		for i, lhs := range d.Lhs {
+			if n, ok := lhs.(*ir.Name); ok && n.Canonical() == src && i < len(d.Rhs) {
+				return d.Rhs[i]
+			}
+		}
+	}
+	return nil
+}
+
+func (b *batch) logosGroupCompositeRegion(fn *ir.Func, cl *ir.CompLitExpr) *logosRegion {
+	var reg *logosRegion
+	for _, elem := range cl.List {
+		val := elem
+		if kv, ok := val.(*ir.KeyExpr); ok {
+			val = kv.Value
+		}
+		name, ok := logosGroupElemName(val)
+		if !ok {
+			return nil
+		}
+		r := b.logosRegionProv(fn).prov[name]
+		if r == nil {
+			return nil
+		}
+		if reg == nil {
+			reg = r
+		} else if reg != r {
+			return nil
+		}
+	}
+	return reg
+}
+
+func logosGroupElemName(n ir.Node) (*ir.Name, bool) {
+	for {
+		switch v := n.(type) {
+		case *ir.ParenExpr:
+			n = v.X
+		case *ir.AddrExpr:
+			n = v.X
+		case *ir.IndexExpr:
+			n = v.X
+		case *ir.Name:
+			return v.Canonical(), true
+		case *ir.CallExpr:
+			value, ok := logosRegionTransparentValue(v)
+			if !ok {
+				return nil, false
+			}
+			n = value
+		default:
+			return nil, false
+		}
+	}
+}
+
+func logosGroupTempSource(temp *ir.Name) *ir.Name {
 	switch d := temp.Defn.(type) {
 	case *ir.AssignStmt:
 		if d.Op() != ir.OAS || d.Y == nil {
 			return nil
 		}
 		if x, ok := d.X.(*ir.Name); ok && x.Canonical() == temp {
-			if y, ok := d.Y.(*ir.Name); ok {
+			if y, ok := logosRegionProvName(d.Y); ok {
 				return y.Canonical()
 			}
 		}
@@ -900,13 +1103,24 @@ func (e *escape) logosGroupTempSource(temp *ir.Name) *ir.Name {
 		}
 		for i, lhs := range d.Lhs {
 			if n, ok := lhs.(*ir.Name); ok && n.Canonical() == temp && i < len(d.Rhs) {
-				if y, ok := d.Rhs[i].(*ir.Name); ok {
+				if y, ok := logosRegionProvName(d.Rhs[i]); ok {
 					return y.Canonical()
 				}
 			}
 		}
 	}
 	return nil
+}
+func (b *batch) logosRegionSkipGroupCapture(clo *ir.ClosureExpr, cv *ir.Name) bool {
+	if !ir.LogosRegionsEnabled() || !base.Logos || !b.logosRegion.groupConstOK[clo] {
+		return false
+	}
+	vc := cv.Canonical()
+	fn := vc.Curfn
+	if fn == nil {
+		return false
+	}
+	return b.logosGroupConstRead(fn, clo, vc)
 }
 
 func (b *batch) logosRegionVeto(fn *ir.Func) string {
@@ -982,7 +1196,6 @@ func (b *batch) logosRegionGuardDefer(d *ir.GoDeferStmt) bool {
 	scan(d)
 	return found
 }
-
 func (b *batch) logosRegionGroupLoc(l *location) *logosGroup {
 	if g := b.logosRegion.groups[l]; g != nil {
 		return g
@@ -990,12 +1203,6 @@ func (b *batch) logosRegionGroupLoc(l *location) *logosGroup {
 	return b.logosRegion.groupMembers[l]
 }
 
-func (b *batch) logosRegionSkipGroupCapture(clo *ir.ClosureExpr, cv *ir.Name) bool {
-	if !ir.LogosRegionsEnabled() || !base.Logos || !b.logosRegion.groupClosures[clo] {
-		return false
-	}
-	return LogosConstViewDecl != nil && LogosConstViewDecl(cv.Canonical().Pos())
-}
 
 func (b *batch) logosRegionGroupOutlives(g *logosGroup, site *logosCand) bool {
 	reg := site.region
