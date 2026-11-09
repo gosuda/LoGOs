@@ -133,9 +133,45 @@ func testEncoderAddsOnlyTrailingNewline() {
 	}
 }
 
+type RichV1 struct {
+	Name  string   `json:"name"`
+	Esc   string   `json:"esc"`
+	Omit  string   `json:"omit,omitempty"`
+	F     float64  `json:"f"`
+	E     float64  `json:"e"`
+	N     int64    `json:"n"`
+	Inner User     `json:"inner"`
+	Nums  []int64  `json:"nums"`
+	Raw   []byte   `json:"raw"`
+}
+
+type RichV1Mirror RichV1
+
+func testRichParityUnderNoJSONv2() {
+	vals := []RichV1{
+		{Name: "plain", Esc: "x", Omit: "", F: 1.5, E: 1e21, N: 0, Inner: User{ID: 1, Name: "n"}, Nums: nil, Raw: nil},
+		{Name: "Ada <Lovelace> & \"friends\"", Esc: "\xff\xfe\u2028end", Omit: "shown", F: 1e-7, E: -2.5, N: -12, Inner: User{ID: 2, Name: "a&b", Email: "e@x.y"}, Nums: []int64{-1, 0, 9}, Raw: []byte{0, 1, 255}},
+		{Name: "", Esc: "", Omit: "x", F: 5e-324, E: 123456789.0, N: 42, Inner: User{}, Nums: []int64{}, Raw: []byte{}},
+	}
+	for _, v := range vals {
+		direct, err := v.MarshalJSON()
+		if err != nil {
+			panic(err)
+		}
+		via, err := json.Marshal(RichV1Mirror(v))
+		if err != nil {
+			panic(err)
+		}
+		if !bytes.Equal(direct, via) {
+			panic(fmt.Sprintf("nojsonv2 RichV1(%+v):\n got %s\nwant %s", v, direct, via))
+		}
+	}
+}
+
 func main() {
 	testCallSiteParityWithMarshalJSON()
 	testPointerAndInterfaceFormsAgree()
 	testEncoderAddsOnlyTrailingNewline()
+	testRichParityUnderNoJSONv2()
 	fmt.Println("callsite nojsonv2 ok")
 }

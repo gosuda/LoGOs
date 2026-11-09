@@ -634,3 +634,74 @@ func TestFallbackStringQuoting(t *testing.T) {
 		t.Errorf("number decoder lacks FallbackQ unwrapping for ,string:\n%s", ubody3)
 	}
 }
+func TestDefaultsOnlyTrigger(t *testing.T) {
+	text := lowerStaticText(t, "package p\n\ntype D struct {\n\tPort int = 8080\n}\n")
+	if !strings.Contains(text, "func (_logos_v D) MarshalJSON() ([]byte, error)") {
+		t.Fatalf("a defaults-only struct must trigger generation:\n%s", text)
+	}
+	if !strings.Contains(text, "func (_logos_v *D) UnmarshalJSON(") {
+		t.Fatalf("a defaults-only struct must decode its defaults:\n%s", text)
+	}
+}
+
+func TestMarshalSingleMakeNoThreshold(t *testing.T) {
+	text := lowerStaticText(t, "package p\n\ntype W struct {\n\tName string `json:\"name\"`\n\tVals []int64 `json:\"vals\"`\n\tNote *string? `json:\"note,omitempty\"`\n}\n")
+	body := methodBody(t, text, "func (_logos_v W) MarshalJSON() ([]byte, error) {")
+	if got := strings.Count(body, ":= make([]byte, 0, "); got != 1 {
+		t.Errorf("MarshalJSON must fill one buffer from a single make, got %d:\n%s", got, body)
+	}
+	if !strings.Contains(body, "_logos_buf := make([]byte, 0, _logos_n)") {
+		t.Errorf("the single make must size the computed bound:\n%s", body)
+	}
+}
+
+func TestStringFieldsReadOnce(t *testing.T) {
+	text := lowerStaticText(t, "package p\n\ntype S struct {\n\tA string `json:\"a\"`\n\tB string `json:\"b\"`\n\tN int64 `json:\"n\"`\n}\n")
+	body := methodBody(t, text, "func (_logos_v S) MarshalJSON() ([]byte, error) {")
+	for _, f := range []string{"A", "B"} {
+		if got := strings.Count(body, "_logos_v."+f); got != 1 {
+			t.Errorf("_logos_v.%s is read %d times, want exactly one pin:\n%s", f, got, body)
+		}
+	}
+}
+
+func TestKeyLiteralEscapes(t *testing.T) {
+	for k, want := range map[string]string{
+		"a<b":      "\"a\\u003cb\":",
+		"c>d":      "\"c\\u003ed\":",
+		"e&f":      "\"e\\u0026f\":",
+		"g\u2028h": "\"g\\u2028h\":",
+		"i\u2029j": "\"i\\u2029j\":",
+		"plain":    "\"plain\":",
+	} {
+		if got := keyLiteral(k); got != want {
+			t.Errorf("keyLiteral(%q) = %s, want %s", k, got, want)
+		}
+	}
+}
+
+func TestKeyDispatchSingleProbe(t *testing.T) {
+	body := methodBody(t, lowerStaticText(t, keyedStruct(9)), "func _logos_jsonkey_K(k string) int {")
+	if got := strings.Count(body, ".Get("); got != 1 {
+		t.Errorf("table dispatch must probe exactly once, got %d:\n%s", got, body)
+	}
+	fold := methodBody(t, lowerStaticText(t, keyedStruct(9)), "func _logos_jsonfold_K(k string) int {")
+	if got := strings.Count(fold, ".Get("); got != 1 {
+		t.Errorf("folded table dispatch must probe exactly once, got %d:\n%s", got, fold)
+	}
+}
+
+func TestUnionImportedMemberSkipsKeyRequirement(t *testing.T) {
+	src := "package p\n\nimport \"time\"\n\ntype Circle struct {\n\tR int `json:\"r\"`\n}\n\ntype U interface {\n\tCircle | time.Time\n}\n\ntype H struct {\n\tItem U `json:\"item\"`\n}\n"
+	text := lowerStaticText(t, src)
+	body := methodBody(t, text, "func (_logos_v *H) UnmarshalJSON(_logos_data []byte) error {")
+	if !strings.Contains(body, "_logos_jsonkey_Circle") {
+		t.Errorf("local member must keep its key requirement:\n%s", body)
+	}
+	if strings.Contains(body, "_logos_jsonkey_Time") || strings.Contains(body, "_logos_jsonfold_Time") {
+		t.Errorf("imported member has no key helpers in this package:\n%s", body)
+	}
+	if !strings.Contains(body, "time.Time") {
+		t.Errorf("imported member trial is missing:\n%s", body)
+	}
+}

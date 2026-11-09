@@ -521,3 +521,35 @@ func TestNamedIntIsZeroQuotedAndOmitZero(t *testing.T) {
 		}
 	}
 }
+
+type KeyEscapes struct {
+	LT  string `json:"a<b"`
+	GT  string `json:"c>d"`
+	AMP string `json:"e&f"`
+}
+
+type keyEscapesMirror KeyEscapes
+
+func TestKeyNamesEscapePerEncodingJSON(t *testing.T) {
+	v := KeyEscapes{LT: "x", GT: "y", AMP: "z"}
+	got := must(v.MarshalJSON())
+	want := must(json.Marshal(keyEscapesMirror(v)))
+	if !bytes.Equal(got, want) {
+		t.Fatalf("key escapes differ\n got %s\nwant %s", got, want)
+	}
+	for _, literal := range []string{`"a\u003cb":"x"`, `"c\u003ed":"y"`, `"e\u0026f":"z"`} {
+		if !bytes.Contains(got, []byte(literal)) {
+			t.Fatalf("output %s lacks hand-written key literal %s", got, literal)
+		}
+	}
+}
+
+func TestDefaultBuildUsesJSONv2(t *testing.T) {
+	got := must(Inner{N: 1, S: "\xff"}.MarshalJSON())
+	if !bytes.Contains(got, []byte("�")) {
+		t.Fatalf("default build does not emit the v2 replacement character: %q", got)
+	}
+	if bytes.Contains(got, []byte(`\ufffd`)) {
+		t.Fatalf("default build emits the v1 escape sequence: %q", got)
+	}
+}
