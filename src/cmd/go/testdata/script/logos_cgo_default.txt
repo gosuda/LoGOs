@@ -9,6 +9,11 @@ env CGO_ENABLED=
 
 [cgo] ! logos build .
 [cgo] stderr '\[restriction::cgo_usage\] cgo is disabled'
+[cgo] ! logos build ./sub
+[cgo] stderr '\[restriction::cgo_usage\] cgo is disabled'
+[cgo] go build -o $WORK/plainsub$GOEXE ./sub
+[cgo] exec $WORK/plainsub$GOEXE
+[cgo] stdout '^sub: 42$'
 
 -- go.mod --
 module example.com/cgodefault
@@ -26,3 +31,15 @@ import "C"
 import "fmt"
 
 func main() { fmt.Println("default:", C.answer()) }
+
+-- sub/main.go --
+package main
+
+/*
+int answer() { return 42; }
+*/
+import "C"
+
+import "fmt"
+
+func main() { fmt.Println("sub:", C.answer()) }
