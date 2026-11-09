@@ -356,6 +356,8 @@ func logosRegionExit(gp *g) {
 	for rec != nil {
 		next := rec.prev
 		logosRegionReleaseChunks(rec)
+		rec.gen++
+		rec.owner = nil
 		rec.prev = nil
 		rec = next
 	}
