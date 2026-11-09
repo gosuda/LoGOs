@@ -1,0 +1,28 @@
+// run -goexperiment logosarena,logosescape -race
+
+package main
+
+import (
+	"fmt"
+	"logos/arena"
+	"logos/rt"
+)
+
+func main() {
+	sum := 0
+	inside := false
+	{
+		r := arena.Open()
+		s := arena.Make[int](r, 4)
+		for i := range s {
+			s[i] = i * i
+		}
+		for _, v := range s {
+			sum += v
+		}
+		inside = rt.RegionBytes() > 0
+	}
+	fmt.Println(sum)
+	fmt.Println("rt.RegionBytes() > 0:", inside)
+	fmt.Println("region bytes after exit:", rt.RegionBytes())
+}

@@ -463,12 +463,11 @@ func (o *logosRegionOwner) ownCloses(p *logosRegionLowering) []ir.Node {
 }
 
 func (p *logosRegionLowering) closeCall(name *ir.Name, pos src.XPos) ir.Node {
-	var init ir.Nodes
 	h := p.regionDot(name, 0, pos)
 	g := p.regionDot(name, 1, pos)
 	old := base.Pos
 	base.Pos = pos
-	call := mkcall1(typecheck.LookupRuntime("logosRegionClose"), nil, &init, h, g)
+	call := typecheck.Call(pos, typecheck.LookupRuntime("logosRegionClose"), []ir.Node{h, g}, false).(*ir.CallExpr)
 	base.Pos = old
 	call.SetPos(pos)
 	return call
