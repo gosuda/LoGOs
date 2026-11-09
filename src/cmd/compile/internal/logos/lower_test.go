@@ -230,3 +230,16 @@ func reparseLowered(t *testing.T, path string, out []byte) *syntax.File {
 	}
 	return g
 }
+
+func TestTryLoweringShape(t *testing.T) {
+	src := "package main\n\nfunc parse(s string) (int, error) { return len(s), nil }\n\nfunc get(s string) (int, error) {\n\tv := parse(s)?\n\treturn v, nil\n}\n"
+	out := lowerSnippetSrc(t, "tryshape.lgo", src)
+	for _, want := range []string{"_logos_e0", "TraceErr(_logos_e0", "_logos_site"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("lowered ? lacks %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "?") {
+		t.Errorf("lowered ? keeps the operator:\n%s", out)
+	}
+}
