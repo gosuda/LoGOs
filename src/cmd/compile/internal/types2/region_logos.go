@@ -213,14 +213,21 @@ func (check *Checker) logosRegionAssign(lhs syntax.Expr, x *operand) {
 // logosRegionDecl marks a declared local that holds a literal capturing
 // a region value.
 func (check *Checker) logosRegionDecl(lhs *Var, x *operand) {
-	if !check.conf.Logos || x == nil || !x.isValid() || check.logosRegionLocal(lhs) == nil {
+	if !check.conf.Logos || x == nil || !x.isValid() {
 		return
+	}
+	local := check.logosRegionLocal(lhs)
+	if local == nil {
+		if lhs == nil || lhs.pkg != check.pkg || lhs.Name() == "_" || check.scope == check.pkg.scope {
+			return
+		}
+		local = lhs
 	}
 	check.logosRegionInitMap()
 	e := x.expr
 	check.later(func() {
 		if check.logosRegionMarkedExpr(e) {
-			check.logosRegionVar[lhs] = true
+			check.logosRegionVar[local] = true
 		}
 	})
 }

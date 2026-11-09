@@ -1,0 +1,28 @@
+// run
+// run -goexperiment logosarena
+
+package main
+
+import (
+	"fmt"
+	"logos/arena"
+	"runtime"
+)
+
+type node struct {
+	v int
+}
+
+var sink func() int
+
+func main() {
+	{
+		r := arena.Open()
+		p := arena.New[node](r)
+		p.v = 41
+		sink = func() int { return p.v + 1 }
+		_ = p
+	}
+	runtime.GC()
+	fmt.Println(sink())
+}
