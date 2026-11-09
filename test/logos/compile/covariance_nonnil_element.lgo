@@ -15,3 +15,41 @@ func nilElementAmongValid() {
 func validElements() {
 	_ = []*Monster{{name: "orc"}, {name: "imp"}}
 }
+
+type Den struct {
+	Alpha string
+	Pet   *Monster
+}
+
+func zeroPointer() {
+	var p *Monster // ERROR "nonnil_uninitialized"
+	_ = p
+}
+
+func zeroArray() {
+	var arr [3]*Monster // ERROR "nonnil_uninitialized"
+	_ = arr
+}
+
+func zeroMake(n int) {
+	_ = make([]*Monster, 2) // ERROR "nonnil_uninitialized"
+	_ = make([]*Monster, n) // ERROR "nonnil_uninitialized"
+	_ = make([]*Monster, 0, n)
+}
+
+func zeroStruct() {
+	var s Den // ERROR "nonnil_uninitialized.*Den.Pet"
+	_ = s
+	_ = Den{Alpha: "a"} // ERROR "nonnil_uninitialized.*Den.Pet"
+	_ = Den{} // ERROR "nonnil_uninitialized.*Den.Pet"
+	_ = new(Den) // ERROR "nonnil_uninitialized.*Den.Pet"
+}
+
+func zeroClear(q *Den) {
+	*q = Den{} // ERROR "nonnil_uninitialized.*Den.Pet"
+}
+
+func genericZero[T any]() T {
+	var t T
+	return t
+}
