@@ -329,6 +329,11 @@ func TestAdvGuardedAccess(t *testing.T) {
 		want []string
 	}{
 		{
+			"immediateLiteralReadsHeldLock",
+			"func g2(s *stats) int {\n s.mu.Lock()\n defer s.mu.Unlock()\n return func() int { return s.total }()\n}\n",
+			nil,
+		},
+		{
 			"lockUnlockSequenceStaysClean",
 			"func h0(s *stats) int {\n s.mu.Lock()\n defer s.mu.Unlock()\n return s.total\n}\n",
 			nil,
@@ -453,5 +458,28 @@ func TestAdvLockRequirement(t *testing.T) {
 				t.Errorf("results = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestAdvLambdaArgReadsGuarded(t *testing.T) {
+	testenv.MustHaveGoBuild(t)
+	const head = `package p
+
+import "sync"
+
+type stats struct {
+	mu sync.Mutex
+
+	//logos:guardedby mu
+	total int
+}
+
+func apply2(f func(int) int) int { return f(1) }
+`
+	body := "func hl(s *stats) int {\n s.mu.Lock()\n defer s.mu.Unlock()\n return apply2(v => v + s.total)\n}\n"
+	got := summarize(Run(checkSrc(t, KindLgo, "x.lgo", head+body)))
+	want := []string{"16 concurrency::unguarded_access forbid"}
+	if !slices.Equal(got, want) {
+		t.Errorf("results = %q, want %q", got, want)
 	}
 }

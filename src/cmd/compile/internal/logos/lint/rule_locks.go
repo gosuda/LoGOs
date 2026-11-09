@@ -83,9 +83,9 @@ type lockState struct {
 // deferredCall is one defer statement: an unlock, a contract call, or a
 // closure body, checked at function exit in LIFO order.
 type deferredCall struct {
-	call  *syntax.CallExpr
-	fnLit *syntax.FuncLit
-	file  *syntax.File
+	call   *syntax.CallExpr
+	fnBody syntax.Node
+	file   *syntax.File
 }
 
 // lockAudit is the per-package lock analysis.
@@ -451,9 +451,18 @@ func (v *lockFlow) walkExpr(e syntax.Expr) {
 	case *syntax.AssertExpr:
 		v.walkExpr(e.X)
 	case *syntax.FuncLit:
-		v.noteClosureCapture(e)
+		v.noteClosureCapture(e.Body)
 		inner := &lockFlow{c: v.c, pass: v.pass, decl: v.decl, file: v.file, st: &lockState{held: heldSet{}}, local: v.local, published: v.published}
 		inner.walkStmts(e.Body.List)
+	case *syntax.LambdaExpr:
+		v.noteClosureCapture(e.Body)
+		inner := &lockFlow{c: v.c, pass: v.pass, decl: v.decl, file: v.file, st: &lockState{held: heldSet{}}, local: v.local, published: v.published}
+		switch b := e.Body.(type) {
+		case *syntax.BlockStmt:
+			inner.walkStmts(b.List)
+		case syntax.Expr:
+			inner.walkExpr(b)
+		}
 	case *syntax.CompositeLit:
 		for _, el := range e.ElemList {
 			v.walkExpr(el)
@@ -470,6 +479,14 @@ func (v *lockFlow) walkExpr(e syntax.Expr) {
 
 // walkCall applies the lock effects of call and walks its operands.
 func (v *lockFlow) walkCall(call *syntax.CallExpr) {
+	if lit, ok := syntax.Unparen(call.Fun).(*syntax.FuncLit); ok {
+		v.walkInlineCall(call, lit.Body)
+		return
+	}
+	if lam, ok := syntax.Unparen(call.Fun).(*syntax.LambdaExpr); ok {
+		v.walkInlineCall(call, lam.Body)
+		return
+	}
 	v.walkExpr(call.Fun)
 	atomic := atomicQualifiedCall(v.pass, call)
 	for _, arg := range call.ArgList {
@@ -493,6 +510,25 @@ func (v *lockFlow) walkCall(call *syntax.CallExpr) {
 	if ct := v.callContract(call); ct != nil {
 		v.applyCallContract(call, ct)
 	}
+	v.publishCallArgs(call)
+}
+
+func (v *lockFlow) walkInlineCall(call *syntax.CallExpr, body syntax.Node) {
+	for _, arg := range call.ArgList {
+		v.walkExpr(arg)
+	}
+	v.noteClosureCapture(body)
+	inner := &lockFlow{c: v.c, pass: v.pass, decl: v.decl, file: v.file, st: &lockState{held: v.st.held}, local: v.local, published: v.published}
+	switch b := body.(type) {
+	case *syntax.BlockStmt:
+		inner.walkStmts(b.List)
+	case syntax.Expr:
+		inner.walkExpr(b)
+	}
+	v.publishCallArgs(call)
+}
+
+func (v *lockFlow) publishCallArgs(call *syntax.CallExpr) {
 	for _, arg := range call.ArgList {
 		if name, ok := syntax.Unparen(arg).(*syntax.Name); ok {
 			if obj := v.c.in.useObject(name); obj != nil {
@@ -893,10 +929,8 @@ func (v *lockFlow) publishFrom(lhs, rhs syntax.Expr) {
 	}
 }
 
-// noteClosureCapture marks every local root the literal body mentions as
-// published.
-func (v *lockFlow) noteClosureCapture(lit *syntax.FuncLit) {
-	syntax.Inspect(lit.Body, func(n syntax.Node) bool {
+func (v *lockFlow) noteClosureCapture(body syntax.Node) {
+	syntax.Inspect(body, func(n syntax.Node) bool {
 		name, ok := n.(*syntax.Name)
 		if !ok {
 			return true
@@ -912,18 +946,27 @@ func (v *lockFlow) noteClosureCapture(lit *syntax.FuncLit) {
 	})
 }
 
+func deferBody(call *syntax.CallExpr) syntax.Node {
+	switch f := syntax.Unparen(call.Fun).(type) {
+	case *syntax.FuncLit:
+		return f.Body
+	case *syntax.LambdaExpr:
+		return f.Body
+	}
+	return nil
+}
+
 // recordDefer registers one defer statement.
 func (v *lockFlow) recordDefer(call *syntax.CallExpr) {
-	d := deferredCall{call: call, file: v.file}
-	if lit, ok := syntax.Unparen(call.Fun).(*syntax.FuncLit); ok {
-		d.fnLit = lit
-	}
+	d := deferredCall{call: call, file: v.file, fnBody: deferBody(call)}
 	v.st.defers = append(v.st.defers, d)
 }
 
 // walkDeferArgs walks the operands a defer statement evaluates now.
 func (v *lockFlow) walkDeferArgs(call *syntax.CallExpr) {
-	if _, ok := syntax.Unparen(call.Fun).(*syntax.FuncLit); !ok {
+	switch syntax.Unparen(call.Fun).(type) {
+	case *syntax.FuncLit, *syntax.LambdaExpr:
+	default:
 		v.walkExpr(call.Fun)
 	}
 	for _, arg := range call.ArgList {
@@ -940,9 +983,14 @@ func (v *lockFlow) checkDefers(list []syntax.Stmt) {
 	defers := v.deferredInOrder(list)
 	for i := len(defers) - 1; i >= 0; i-- {
 		d := defers[i]
-		if d.fnLit != nil {
+		if d.fnBody != nil {
 			inner := &lockFlow{c: v.c, pass: v.pass, decl: v.decl, file: d.file, st: &lockState{held: exit.clone()}, local: v.local, published: v.published}
-			inner.walkStmts(d.fnLit.Body.List)
+			switch b := d.fnBody.(type) {
+			case *syntax.BlockStmt:
+				inner.walkStmts(b.List)
+			case syntax.Expr:
+				inner.walkExpr(b)
+			}
 			continue
 		}
 		if key, mode, ok := v.builtinLockOp(d.call); ok {
@@ -968,10 +1016,7 @@ func (v *lockFlow) deferredInOrder(list []syntax.Stmt) []deferredCall {
 			switch s := s.(type) {
 			case *syntax.CallStmt:
 				if call, ok := s.Call.(*syntax.CallExpr); ok && s.Tok.String() == "defer" {
-					d := deferredCall{call: call, file: v.file}
-					if lit, ok := syntax.Unparen(call.Fun).(*syntax.FuncLit); ok {
-						d.fnLit = lit
-					}
+					d := deferredCall{call: call, file: v.file, fnBody: deferBody(call)}
 					out = append(out, d)
 				}
 			case *syntax.BlockStmt:
