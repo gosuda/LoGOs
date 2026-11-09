@@ -150,6 +150,9 @@ func (g *logosAllocGraph) addCall(in *lint.Input, k escape.LogosFuncKey, call *s
 	if tv, ok := in.Info.Types[call.Fun]; ok && tv.IsType() {
 		return
 	}
+	if logosTypeExpr(in, stripParens(call.Fun)) {
+		return
+	}
 	switch fun := stripParens(call.Fun).(type) {
 	case *syntax.Name:
 		switch obj := in.Info.Uses[fun].(type) {
@@ -372,4 +375,27 @@ func stripParens(e syntax.Expr) syntax.Expr {
 		}
 		e = p.X
 	}
+}
+
+func logosTypeExpr(in *lint.Input, e syntax.Expr) bool {
+	switch e := e.(type) {
+	case *syntax.ArrayType, *syntax.SliceType, *syntax.StructType, *syntax.InterfaceType, *syntax.FuncType, *syntax.MapType, *syntax.ChanType:
+		return true
+	case *syntax.Operation:
+		if e.Op != syntax.Mul || e.Y != nil {
+			return false
+		}
+		x := stripParens(e.X)
+		if nm, ok := x.(*syntax.Name); ok {
+			_, ok := in.Info.Uses[nm].(*types2.TypeName)
+			return ok
+		}
+		if sel, ok := x.(*syntax.SelectorExpr); ok {
+			_, ok := in.Info.Uses[sel.Sel].(*types2.TypeName)
+			return ok
+		}
+		tv, ok := in.Info.Types[x]
+		return ok && tv.IsType()
+	}
+	return false
 }

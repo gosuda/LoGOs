@@ -31,6 +31,19 @@ func constantPanic(i int, xs []int) int {
 	return xs[i]
 }
 
+//logos:zeroalloc
+func bytesLen(s string) int {
+	b := []byte(s)
+	return len(b)
+}
+
+//logos:zeroalloc
+func starLen(s *string) int {
+	t := (*string)(s)
+	return len(*t)
+}
+
+// unmarked allocates freely: only marked functions are checked.
 func unmarked(v int) []int {
 	return []int{v}
 }
