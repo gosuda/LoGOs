@@ -745,9 +745,17 @@ func TestLogosArenaRestorePopsLinkedChunks(t *testing.T) {
 		if st := runtime.LogosArenaStat(); st.Chunks != 1 || st.ScanUsed != 0 || st.NoscanUsed != 0 {
 			t.Errorf("after restore: %+v, want one empty chunk", st)
 		}
-		for i, p := range objs {
-			if !checkBytes(p, size, 0) {
-				t.Errorf("scan object %d memory is not zero after restore", i)
+		var qs []unsafe.Pointer
+		for range 4 {
+			q := runtime.LogosArenaAllocScan((*int)(nil), size)
+			qs = append(qs, q)
+		}
+		if qs[0] != objs[0] {
+			t.Errorf("reused scan address = %p, want first object %p", qs[0], objs[0])
+		}
+		for i, q := range qs {
+			if !checkBytes(q, size, 0) {
+				t.Errorf("reused scan object %d memory is not zero after restore", i)
 			}
 		}
 	})
