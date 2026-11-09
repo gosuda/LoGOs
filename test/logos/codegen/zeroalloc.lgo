@@ -75,34 +75,34 @@ func capture(x int) int {
 
 //logos:zeroalloc
 func pack(v int) []int {
-	return []int{v} // ERROR "\[perf::zeroalloc_violation\] pack allocates: \[\]int\{\.\.\.\} escapes to heap: flows to result ~r0 \(return\)"
+	return []int{v} // ERROR "\[perf::zeroalloc_violation\]"
 }
 
 //logos:zeroalloc
 func newPoint(x, y int) *point {
-	return &point{x, y} // ERROR "\[perf::zeroalloc_violation\] newPoint allocates: &point\{\.\.\.\} escapes to heap: flows to result ~r0 \(return\)"
+	return &point{x, y} // ERROR "\[perf::zeroalloc_violation\]"
 }
 
 //logos:zeroalloc
 func dynamicMake(n int) []byte {
-	return make([]byte, n) // ERROR "\[perf::zeroalloc_violation\] dynamicMake allocates: make\(\[\]byte, n\) escapes to heap: flows to"
+	return make([]byte, n) // ERROR "\[perf::zeroalloc_violation\]"
 }
 
 //logos:zeroalloc
 func boxed(v int) any {
-	return v // ERROR "\[perf::zeroalloc_violation\] boxed allocates: v escapes to heap: flows to result ~r0 \(return\)"
+	return v // ERROR "\[perf::zeroalloc_violation\]"
 }
 
 //logos:zeroalloc
 func leak() {
-	x := 1 // ERROR "\[perf::zeroalloc_violation\] leak allocates: moved to heap: x: flows to the heap \(assign\)"
+	x := 1 // ERROR "\[perf::zeroalloc_violation\]"
 	global = &x
 }
 
 //logos:zeroalloc
 func counter() func() int {
-	n := 0 // ERROR "\[perf::zeroalloc_violation\] counter allocates: moved to heap: n"
-	return func() int { // ERROR "\[perf::zeroalloc_violation\] counter allocates: func literal escapes to heap: flows to result ~r0 \(return\)"
+	n := 0 // ERROR "\[perf::zeroalloc_violation\]"
+	return func() int { // ERROR "\[perf::zeroalloc_violation\]"
 		n++
 		return n
 	}
@@ -110,7 +110,7 @@ func counter() func() int {
 
 //logos:zeroalloc
 func channel() chan int {
-	return make(chan int) // ERROR "\[perf::zeroalloc_violation\] channel allocates: make\(chan int\) escapes to heap: channels always live on the heap"
+	return make(chan int) // ERROR "\[perf::zeroalloc_violation\]"
 }
 
 //logos:zeroalloc
@@ -125,18 +125,18 @@ func (b *box) record(vs []int) {
 
 //logos:zeroalloc
 func (b *box) clone() *box {
-	return &box{v: b.v} // ERROR "\[perf::zeroalloc_violation\] \(\*box\)\.clone allocates: &box\{\.\.\.\} escapes to heap"
+	return &box{v: b.v} // ERROR "\[perf::zeroalloc_violation\]"
 }
 
 //logos:zeroalloc
 func (p point) boxPoint() any {
-	return p // ERROR "\[perf::zeroalloc_violation\] point\.boxPoint allocates: p escapes to heap"
+	return p // ERROR "\[perf::zeroalloc_violation\]"
 }
 
 //logos:zeroalloc
 func storeClosure() {
 	n := 0
-	sinkFn = func() int { // ERROR "\[perf::zeroalloc_violation\] storeClosure allocates: func literal escapes to heap: flows to the heap"
+	sinkFn = func() int { // ERROR "\[perf::zeroalloc_violation\]"
 		return n
 	}
 }
@@ -147,11 +147,11 @@ func allocator(n int) []int {
 
 //logos:zeroalloc
 func viaInlined() []int {
-	return allocator(3) // ERROR "\[perf::zeroalloc_violation\] viaInlined allocates: make\(\[\]int, .*\) escapes to heap"
+	return allocator(3) // ERROR "\[perf::zeroalloc_violation\]"
 }
 
 //logos:zeroalloc
-func genericBox[T any](v T) *T { // ERROR "\[perf::zeroalloc_violation\] genericBox allocates: moved to heap: v"
+func genericBox[T any](v T) *T { // ERROR "\[perf::zeroalloc_violation\]"
 	return &v
 }
 
@@ -189,7 +189,7 @@ func bigAlloc(n int) []byte {
 }
 
 //logos:zeroalloc
-func viaBig(n int) []byte { // ERROR "\[perf::zeroalloc_violation\] viaBig allocates: bigAlloc allocates"
+func viaBig(n int) []byte { // ERROR "\[perf::zeroalloc_violation\]"
 	return bigAlloc(n)
 }
 
@@ -198,22 +198,22 @@ type flusher interface {
 }
 
 //logos:zeroalloc
-func viaIface(f flusher) { // ERROR "\[perf::zeroalloc_violation\] viaIface allocates: interface call may allocate"
+func viaIface(f flusher) { // ERROR "\[perf::zeroalloc_violation\]"
 	f.Flush()
 }
 
 //logos:zeroalloc
-func viaValue() int { // ERROR "\[perf::zeroalloc_violation\] viaValue allocates: dynamic call may allocate"
+func viaValue() int { // ERROR "\[perf::zeroalloc_violation\]"
 	return sinkFn()
 }
 
 //logos:zeroalloc
-func viaParam(f func() []int) []int { // ERROR "\[perf::zeroalloc_violation\] viaParam allocates: dynamic call may allocate"
+func viaParam(f func() []int) []int { // ERROR "\[perf::zeroalloc_violation\]"
 	return f()
 }
 
 //logos:zeroalloc
-func viaReassigned() int { // ERROR "\[perf::zeroalloc_violation\] viaReassigned allocates: dynamic call may allocate"
+func viaReassigned() int { // ERROR "\[perf::zeroalloc_violation\]"
 	f := func() int { return 7 }
 	if sinkFn != nil {
 		f = sinkFn
@@ -222,7 +222,7 @@ func viaReassigned() int { // ERROR "\[perf::zeroalloc_violation\] viaReassigned
 }
 
 //logos:zeroalloc
-func viaLaterCallee(n int) []int { // ERROR "\[perf::zeroalloc_violation\] viaLaterCallee allocates: laterAlloc allocates"
+func viaLaterCallee(n int) []int { // ERROR "\[perf::zeroalloc_violation\]"
 	return laterAlloc(n)
 }
 

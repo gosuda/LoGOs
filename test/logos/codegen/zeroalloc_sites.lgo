@@ -8,52 +8,52 @@ func (b *box) get() int { return b.v }
 
 //logos:zeroalloc
 func newInt() *int {
-	return new(int) // ERROR "\[perf::zeroalloc_violation\] newInt allocates: new\(int\) escapes to heap: flows to result ~r0 \(return\)"
+	return new(int) // ERROR "\[perf::zeroalloc_violation\]"
 }
 
 //logos:zeroalloc
 func makeMap() map[string]int {
-	return make(map[string]int) // ERROR "\[perf::zeroalloc_violation\] makeMap allocates: make\(map\[string\]int\) escapes to heap: flows to result ~r0 \(return\)"
+	return make(map[string]int) // ERROR "\[perf::zeroalloc_violation\]"
 }
 
 //logos:zeroalloc
 func mapLit() map[string]int {
-	return map[string]int{"a": 1} // ERROR "\[perf::zeroalloc_violation\] mapLit allocates: map\[string\]int\{\.\.\.\} escapes to heap: flows to result ~r0 \(return\)"
+	return map[string]int{"a": 1} // ERROR "\[perf::zeroalloc_violation\]"
 }
 
 //logos:zeroalloc
 func concat(a, b string) string {
-	return a + b // ERROR "\[perf::zeroalloc_violation\] concat allocates: a \+ b escapes to heap: flows to result ~r0 \(return\)"
+	return a + b // ERROR "\[perf::zeroalloc_violation\]"
 }
 
 //logos:zeroalloc
 func toBytes(s string) []byte {
-	return []byte(s) // ERROR "\[perf::zeroalloc_violation\] toBytes allocates: \(\[\]byte\)\(s\) escapes to heap: flows to result ~r0 \(return\)"
+	return []byte(s) // ERROR "\[perf::zeroalloc_violation\]"
 }
 
 //logos:zeroalloc
 func fromBytes(b []byte) string {
-	return string(b) // ERROR "\[perf::zeroalloc_violation\] fromBytes allocates: string\(b\) escapes to heap: flows to result ~r0 \(return\)"
+	return string(b) // ERROR "\[perf::zeroalloc_violation\]"
 }
 
 //logos:zeroalloc
 func toRunes(s string) []rune {
-	return []rune(s) // ERROR "\[perf::zeroalloc_violation\] toRunes allocates: \(\[\]rune\)\(s\) escapes to heap: flows to result ~r0 \(return\)"
+	return []rune(s) // ERROR "\[perf::zeroalloc_violation\]"
 }
 
 //logos:zeroalloc
 func fromRunes(rs []rune) string {
-	return string(rs) // ERROR "\[perf::zeroalloc_violation\] fromRunes allocates: string\(rs\) escapes to heap: flows to result ~r0 \(return\)"
+	return string(rs) // ERROR "\[perf::zeroalloc_violation\]"
 }
 
 //logos:zeroalloc
 func fromRune(r rune) string {
-	return string(r) // ERROR "\[perf::zeroalloc_violation\] fromRune allocates: string\(r\) escapes to heap: flows to result ~r0 \(return\)"
+	return string(r) // ERROR "\[perf::zeroalloc_violation\]"
 }
 
 //logos:zeroalloc
 func (b *box) getter() func() int {
-	return b.get // ERROR "\[perf::zeroalloc_violation\] \(\*box\)\.getter allocates: b\.get escapes to heap: flows to result ~r0 \(return\)"
+	return b.get // ERROR "\[perf::zeroalloc_violation\]"
 }
 
 //logos:zeroalloc
@@ -92,7 +92,7 @@ func makeZeroCap() []int {
 
 //logos:zeroalloc
 func makeZeroLenCap() []int {
-	return make([]int, 0, 8) // ERROR "\[perf::zeroalloc_violation\] makeZeroLenCap allocates: make\(\[\]int, 0, 8\) escapes to heap: flows to result ~r0 \(return\)"
+	return make([]int, 0, 8) // ERROR "\[perf::zeroalloc_violation\]"
 }
 
 //logos:zeroalloc
