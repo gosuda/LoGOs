@@ -6,12 +6,132 @@ package cfg
 
 import (
 	"go/build"
+	"internal/buildcfg"
 	"os"
 	"runtime"
 	"slices"
 	"strings"
 	"testing"
+
+	"cmd/go/internal/logos/settings"
 )
+
+func arenaTagCount() int {
+	n := 0
+	for _, tag := range BuildContext.ToolTags {
+		if tag == "goexperiment.logosarena" {
+			n++
+		}
+	}
+	return n
+}
+
+func withArenaState(t *testing.T, logos bool, userExperiment string) {
+	t.Helper()
+	oldLogos, oldRaw, oldInit := Logos, RawGOEXPERIMENT, logosInitGOEXPERIMENT
+	oldChanged := CGOChanged
+	oldTags := slices.Clone(BuildContext.ToolTags)
+	t.Setenv("GOEXPERIMENT", userExperiment)
+	t.Cleanup(func() {
+		Logos, RawGOEXPERIMENT, logosInitGOEXPERIMENT = oldLogos, oldRaw, oldInit
+		CGOChanged = oldChanged
+		BuildContext.ToolTags = oldTags
+		recomputeExperiment()
+	})
+	Logos = logos
+	RawGOEXPERIMENT = userExperiment
+	logosInitGOEXPERIMENT = userExperiment
+	recomputeExperiment()
+}
+
+func TestApplyLogosEnvArena(t *testing.T) {
+	withArenaState(t, true, "")
+	ApplyLogosEnv(&settings.Settings{Logos: true, Experiment: "logosarena"})
+	if !Experiment.LogosArena || CleanGOEXPERIMENT == "" {
+		t.Fatalf("after apply: LogosArena=%v Raw=%q Clean=%q, want the experiment on", Experiment.LogosArena, RawGOEXPERIMENT, CleanGOEXPERIMENT)
+	}
+	if n := arenaTagCount(); n != 1 {
+		t.Fatalf("goexperiment.logosarena tool tag appears %d times, want once", n)
+	}
+	publishedExp, err := buildcfg.ParseGOEXPERIMENT(Goos, Goarch, os.Getenv("GOEXPERIMENT"))
+	if err != nil {
+		t.Fatalf("parse process GOEXPERIMENT %q: %v", os.Getenv("GOEXPERIMENT"), err)
+	}
+	if !publishedExp.LogosArena {
+		t.Fatalf("process GOEXPERIMENT = %q, want logosarena enabled", os.Getenv("GOEXPERIMENT"))
+	}
+}
+
+func TestApplyLogosEnvArenaOff(t *testing.T) {
+	withArenaState(t, true, "")
+	ApplyLogosEnv(&settings.Settings{Logos: true, Experiment: "logosarena"})
+	ApplyLogosEnv(&settings.Settings{Logos: true, Experiment: ""})
+	if Experiment.LogosArena || arenaTagCount() != 0 {
+		t.Errorf("after apply off: LogosArena=%v tags=%d, want the startup experiment back", Experiment.LogosArena, arenaTagCount())
+	}
+	publishedExp, err := buildcfg.ParseGOEXPERIMENT(Goos, Goarch, os.Getenv("GOEXPERIMENT"))
+	if err != nil {
+		t.Fatalf("parse process GOEXPERIMENT %q: %v", os.Getenv("GOEXPERIMENT"), err)
+	}
+	if publishedExp.LogosArena {
+		t.Errorf("process GOEXPERIMENT = %q, want logosarena disabled", os.Getenv("GOEXPERIMENT"))
+	}
+}
+
+func TestApplyLogosEnvKeepsOtherExperiments(t *testing.T) {
+	withArenaState(t, true, "nojsonv2")
+	if Experiment.JSONv2 {
+		t.Fatal("nojsonv2 left jsonv2 on")
+	}
+	ApplyLogosEnv(&settings.Settings{Logos: true, Experiment: "nojsonv2,logosarena"})
+	if !Experiment.LogosArena || Experiment.JSONv2 {
+		t.Errorf("LogosArena=%v JSONv2=%v Raw=%q, want the arena added to the user's nojsonv2", Experiment.LogosArena, Experiment.JSONv2, RawGOEXPERIMENT)
+	}
+	publishedExp, err := buildcfg.ParseGOEXPERIMENT(Goos, Goarch, os.Getenv("GOEXPERIMENT"))
+	if err != nil {
+		t.Fatalf("parse process GOEXPERIMENT %q: %v", os.Getenv("GOEXPERIMENT"), err)
+	}
+	if !publishedExp.LogosArena || publishedExp.JSONv2 {
+		t.Errorf("published GOEXPERIMENT=%q: LogosArena=%v JSONv2=%v, want arena enabled and jsonv2 disabled",
+			os.Getenv("GOEXPERIMENT"), publishedExp.LogosArena, publishedExp.JSONv2)
+	}
+}
+
+func TestApplyLogosEnvIgnoresPlainGo(t *testing.T) {
+	withArenaState(t, false, "")
+	ApplyLogosEnv(&settings.Settings{Logos: false, Experiment: "logosarena"})
+	if Experiment.LogosArena || RawGOEXPERIMENT != "" || arenaTagCount() != 0 {
+		t.Errorf("plain go applied settings: LogosArena=%v Raw=%q", Experiment.LogosArena, RawGOEXPERIMENT)
+	}
+}
+
+func TestApplyLogosEnvCgoOpinion(t *testing.T) {
+	withArenaState(t, true, "")
+	oldCgo := BuildContext.CgoEnabled
+	t.Cleanup(func() { BuildContext.CgoEnabled = oldCgo })
+	ApplyLogosEnv(&settings.Settings{Logos: true, Experiment: RawGOEXPERIMENT, Cgo: settings.Cgo{Enabled: true, Opinion: true, Changed: true}})
+	if !BuildContext.CgoEnabled || !CGOChanged {
+		t.Errorf("after opinionated apply: CgoEnabled=%v CGOChanged=%v, want true true", BuildContext.CgoEnabled, CGOChanged)
+	}
+	BuildContext.CgoEnabled = oldCgo
+	ApplyLogosEnv(&settings.Settings{Logos: true, Experiment: RawGOEXPERIMENT})
+	if BuildContext.CgoEnabled != oldCgo || CGOChanged {
+		t.Errorf("after silent apply: CgoEnabled=%v CGOChanged=%v, want %v false", BuildContext.CgoEnabled, CGOChanged, oldCgo)
+	}
+}
+
+func TestApplyLogosEnvWasmDefault(t *testing.T) {
+	withArenaState(t, true, "")
+	oldGoarch := Goarch
+	Goarch = "wasm"
+	t.Cleanup(func() { Goarch = oldGoarch; recomputeExperiment() })
+	recomputeExperiment()
+	ApplyLogosEnv(&settings.Settings{Logos: true})
+	if !Experiment.PreemptibleLoops || preemptibleTagCount() != 1 {
+		t.Fatalf("after apply: PreemptibleLoops=%v Raw=%q tags=%d, want the wasm default on",
+			Experiment.PreemptibleLoops, RawGOEXPERIMENT, preemptibleTagCount())
+	}
+}
 
 func withPreemptibleState(t *testing.T, logos bool, goarch, userExperiment string) {
 	t.Helper()
@@ -40,28 +160,6 @@ func preemptibleTagCount() int {
 		}
 	}
 	return n
-}
-
-func TestLogosPreemptibleUserState(t *testing.T) {
-	for _, tc := range []struct {
-		raw               string
-		mentioned, enable bool
-	}{
-		{"", false, false},
-		{"nojsonv2", false, false},
-		{"preemptibleloops", true, true},
-		{"nopreemptibleloops", true, false},
-		{"none", true, false},
-		{"none,preemptibleloops", true, true},
-		{"preemptibleloops,none", true, false},
-		{"nojsonv2,nopreemptibleloops", true, false},
-	} {
-		mentioned, enabled := logosPreemptibleUserState(tc.raw)
-		if mentioned != tc.mentioned || enabled != tc.enable {
-			t.Errorf("logosPreemptibleUserState(%q) = (%v, %v), want (%v, %v)",
-				tc.raw, mentioned, enabled, tc.mentioned, tc.enable)
-		}
-	}
 }
 
 func TestRefreshLogosPreemptibleDefaultsOnWasm(t *testing.T) {
@@ -161,9 +259,6 @@ func TestRefreshLogosPreemptibleStripsOnRetarget(t *testing.T) {
 	}
 }
 
-// withForceHostGlobals snapshots every global ForceHost rewrites, so a
-// host-retarget test restores the suite state exactly. Both ForceHost
-// tests share it instead of each listing a subset that can drift.
 func withForceHostGlobals(t *testing.T) {
 	t.Helper()
 	oldGoos, oldGoarch, oldExe := Goos, Goarch, ExeSuffix

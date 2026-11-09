@@ -7,23 +7,26 @@ package cfg
 import (
 	"os"
 	"strings"
+
+	"cmd/go/internal/logos/settings"
 )
 
-// appendExperiment appends an experiment to a GOEXPERIMENT value. One
-// path handles the empty and non-empty base, so the arena and
-// preemptible refreshes share it instead of each branching on "".
-func appendExperiment(raw, exp string) string {
-	if raw == "" {
-		return exp
+func recomputeExperiment() {
+	kept := BuildContext.ToolTags[:0:0]
+	for _, tag := range BuildContext.ToolTags {
+		if !strings.HasPrefix(tag, "goexperiment.") {
+			kept = append(kept, tag)
+		}
 	}
-	return raw + "," + exp
+	BuildContext.ToolTags = kept
+	computeExperiment()
 }
 
 // logosApplyRawExperiment installs raw as the effective GOEXPERIMENT,
 // recomputes the experiment tags and the clean cache-key value, and
-// publishes the value to the process and tool environments. It mirrors
-// the tail of RefreshLogosArena so both refreshes propagate to the
-// compiler subprocesses.
+// publishes the value to the process and tool environments. Both the arena
+// composition and the preemptible refresh propagate to the compiler
+// subprocesses through it.
 func logosApplyRawExperiment(raw string) {
 	if raw == RawGOEXPERIMENT {
 		return
@@ -54,12 +57,15 @@ func logosApplyRawExperiment(raw string) {
 	}
 }
 
-func DropLogosExperiments() {
-	var kept []string
-	for f := range strings.SplitSeq(os.Getenv("GOEXPERIMENT"), ",") {
-		if f != "" && !strings.HasPrefix(f, "logos") && !strings.HasPrefix(f, "nologos") {
-			kept = append(kept, f)
-		}
+func RefreshLogosPreemptible() {
+	if ExperimentErr != nil {
+		return
 	}
-	os.Setenv("GOEXPERIMENT", strings.Join(kept, ","))
+	if raw, ok := settings.PreemptibleDefault(RawGOEXPERIMENT, logosInitGOEXPERIMENT, Experiment.PreemptibleLoops, Logos, Goarch); ok {
+		logosApplyRawExperiment(raw)
+	}
+}
+
+func DropLogosExperiments() {
+	os.Setenv("GOEXPERIMENT", settings.DropLogosExperiments(os.Getenv("GOEXPERIMENT")))
 }

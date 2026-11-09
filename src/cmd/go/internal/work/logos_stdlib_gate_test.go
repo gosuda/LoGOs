@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"cmd/go/internal/load"
+	"cmd/go/internal/logos/settings"
 )
 
 func variableMakeKeys(flags []string) []string {
@@ -40,7 +41,11 @@ func TestLogosStandardProvenanceKeepsDefaultVariableMake(t *testing.T) {
 		{"2", "variablemakethreshold=256"},
 		{"3", "variablemakethreshold=4096"},
 	} {
-		forcedGcflags = logosFlagsFor(tc.level)
+		s, err := settings.Load("", settings.Flags{Opt: tc.level})
+		if err != nil {
+			t.Fatalf("Load(Opt=%q) = %v, want no error", tc.level, err)
+		}
+		forcedGcflags = s.Gcflags
 
 		for name, p := range map[string]*load.Package{"std": standard, "std external test": standardExternalTest} {
 			got := logosForcedGcflags(p)

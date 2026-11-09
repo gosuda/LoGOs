@@ -5,15 +5,11 @@
 package cfg
 
 import (
-	"fmt"
-	"io/fs"
 	"os"
-	"path"
 	"path/filepath"
 	"strings"
-	"sync"
 
-	"cmd/go/internal/logos/config"
+	"cmd/go/internal/logos/settings"
 	"cmd/internal/pathcache"
 )
 
@@ -79,12 +75,20 @@ var logosInitCXX = Getenv("CXX")
 // of the live environment; see StartupCgoEnabled.
 var logosInitCGOEnabled = Getenv("CGO_ENABLED")
 
-// logosModuleKindCache memoizes module-kind results by module root for the
-// life of the process, so repeated policy refreshes never re-walk a root.
-var logosModuleKindCache = struct {
-	sync.Mutex
-	byRoot map[string]bool
-}{byRoot: make(map[string]bool)}
+var logosInitGOEXPERIMENT = RawGOEXPERIMENT
+
+var logosInitGOAMD64 = Getenv("GOAMD64")
+
+var logosInitGOARM64 = Getenv("GOARM64")
+
+func LogosStartupEnv() settings.Env {
+	return settings.Env{
+		GOEXPERIMENT: logosInitGOEXPERIMENT,
+		CGO_ENABLED:  logosInitCGOEnabled,
+		GOAMD64:      logosInitGOAMD64,
+		GOARM64:      logosInitGOARM64,
+	}
+}
 
 // logosToolTags returns tags plus the "logos" tool tag in logos mode.
 // defaultContext calls it, so every rebuilt BuildContext keeps the tag.
@@ -169,167 +173,16 @@ func StartupCgoEnabled() string {
 	return logosInitCGOEnabled
 }
 
-// RefreshLogosCgoPolicy recomputes the global cgo switch from the
-// logos.toml policy of each main module root after -C handling and module
-// loading. Callers pass every main module root (all workspace members in
-// workspace mode); with no roots the module above the working directory
-// decides, and with no module the upstream default stands. A root with an
-// explicit cgo key contributes its policy in a loGo/s module and nothing
-// in a Go module; without the key an explicitly set CGO_ENABLED decides
-// and otherwise a loGo/s module contributes disabled while a Go module
-// contributes nothing. Any enabling root turns the build on, so mixed
-// workspaces build the allowing modules while per-package checks still
-// deny the forbidding ones. A broken logos.toml contributes disabled, so
-// the build fails closed. CGOChanged tracks only an explicit user
-// CGO_ENABLED, never the file policy. Plain go returns immediately with
-// upstream handling untouched. Callers: envcmd MkEnv runs it after the -C
-// chdir and before MkEnv bakes CGO_ENABLED into the process environment;
-// work BuildInit re-runs it after flag parsing and modload init, where the
-// full workspace member list is known.
-func RefreshLogosCgoPolicy(mainRoots []string) {
+func ApplyLogosEnv(s *settings.Settings) {
 	if !Logos {
 		return
 	}
-	roots := mainRoots
-	if len(roots) == 0 {
-		if root := cwdModuleRoot(); root != "" {
-			roots = []string{root}
-		}
+	if s.Cgo.Opinion {
+		BuildContext.CgoEnabled = s.Cgo.Enabled
 	}
-	enabled := false
-	opinion := false
-	for _, root := range roots {
-		on, ok := logosRootCgo(root)
-		if ok {
-			opinion = true
-			enabled = enabled || on
-		}
-	}
-	if opinion {
-		BuildContext.CgoEnabled = enabled
-	}
-	if logosInitCGOEnabled == "0" || logosInitCGOEnabled == "1" {
-		CGOChanged = true
-	} else {
-		CGOChanged = false
-	}
-}
-
-// logosRootCgo reports one main module root's cgo opinion: whether cgo is
-// enabled and whether the root says anything at all. Go main modules never
-// have an opinion, so they keep the upstream default under logos.
-func logosRootCgo(root string) (bool, bool) {
-	cf, err := config.Load(root)
-	if err != nil || cf == nil {
-		return false, true
-	}
-	if cf.Build.CgoSet {
-		if !isLogosModule(root) {
-			return false, false
-		}
-		return cf.Build.Cgo == "allow" || cf.Build.Cgo == "restricted", true
-	}
-	if logosInitCGOEnabled == "0" || logosInitCGOEnabled == "1" {
-		return logosInitCGOEnabled == "1", true
-	}
-	if !isLogosModule(root) {
-		return false, false
-	}
-	return false, true
-}
-
-// LogosCWDModuleRoot reports the module root above the working directory
-// by walking up to the nearest go.mod, or "" when there is none. The -O
-// level reader uses it to find logos.toml.
-func LogosCWDModuleRoot() string {
-	return cwdModuleRoot()
-}
-
-// cwdModuleRoot returns the module root above the working directory by
-// walking up to the nearest go.mod, or "" when there is none. It runs
-// after the -C chdir, so -C targets resolve to the target module.
-func cwdModuleRoot() string {
-	wd, err := os.Getwd()
-	if err != nil {
-		return ""
-	}
-	dir := wd
-	for {
-		if info, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil && !info.IsDir() {
-			return dir
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return ""
-		}
-		dir = parent
-	}
-}
-
-// isLogosModule reports whether the module rooted at root holds any loGo/s
-// source file, so the policy can tell a loGo/s main module (policy
-// applies) from a Go main module (upstream handling, cgo key ignored).
-// Nested modules decide for themselves: directories holding their own
-// go.mod are never descended into. Results are memoized by root.
-func isLogosModule(root string) bool {
-	if root == "" {
-		return false
-	}
-	logosModuleKindCache.Lock()
-	kind, ok := logosModuleKindCache.byRoot[root]
-	logosModuleKindCache.Unlock()
-	if ok {
-		return kind
-	}
-	kind = logosModuleHasFiles(root)
-	logosModuleKindCache.Lock()
-	logosModuleKindCache.byRoot[root] = kind
-	logosModuleKindCache.Unlock()
-	return kind
-}
-
-// logosModuleHasFiles walks root for the first loGo/s source file,
-// skipping directories that never hold built packages and stopping at
-// nested module boundaries.
-func logosModuleHasFiles(root string) bool {
-	found := false
-	filepath.WalkDir(root, func(dir string, d fs.DirEntry, err error) error {
-		if found {
-			return filepath.SkipAll
-		}
-		if err != nil {
-			return nil
-		}
-		if !d.IsDir() {
-			if IsLogosFile(d.Name()) {
-				found = true
-				return filepath.SkipAll
-			}
-			return nil
-		}
-		if dir == root {
-			return nil
-		}
-		if logosSkippedDir(dir, d) {
-			return filepath.SkipDir
-		}
-		return nil
-	})
-	return found
-}
-
-// logosSkippedDir reports whether dir holds no built packages of root's
-// module: dot and underscore prefixes, vendor, testdata, and nested
-// modules carrying their own go.mod.
-func logosSkippedDir(dir string, d fs.DirEntry) bool {
-	name := d.Name()
-	if strings.HasPrefix(name, ".") || strings.HasPrefix(name, "_") || name == "vendor" || name == "testdata" {
-		return true
-	}
-	if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
-		return true
-	}
-	return false
+	CGOChanged = s.Cgo.Changed
+	logosApplyRawExperiment(s.Experiment)
+	RefreshLogosPreemptible()
 }
 
 // zigCompiler resolves one C-family compiler command for a cgo build given
@@ -376,9 +229,6 @@ func compilerOnPath(cmd string) bool {
 	if !filepath.IsAbs(cmd) {
 		return true
 	}
-	// An absolute default resolves without PATH, so ask whether the same
-	// file is what PATH names for this compiler. Compare file identity, not
-	// directory strings: /bin and /usr/bin are often one directory.
 	viaPath, err := pathcache.LookPath(filepath.Base(cmd))
 	if err != nil {
 		return false
@@ -391,69 +241,10 @@ func compilerOnPath(cmd string) bool {
 	return os.SameFile(want, got)
 }
 
-// ZigCC resolves the C compiler for a cgo build given the current CC
-// value; see zigCompiler. It runs under both go and logos.
 func ZigCC(cc string) string {
 	return zigCompiler(cc, logosInitCC, "cc")
 }
 
-// ZigCXX resolves the C++ compiler for a cgo build given the current CXX
-// value; see zigCompiler. It runs under both go and logos.
 func ZigCXX(cxx string) string {
 	return zigCompiler(cxx, logosInitCXX, "c++")
-}
-
-// CgoPolicyAllow reports whether a package may use cgo under the parsed
-// logos.toml policy, sharing RefreshLogosCgoPolicy's precedence per
-// package: an explicit cgo key wins over CGO_ENABLED both ways (allow
-// always, restricted by allowlist, forbid and anything unknown never);
-// otherwise an explicit CGO_ENABLED=1 allows and anything else denies
-// with the absent-key forbid default. The denial message carries
-// [restriction::cgo_usage]; the allowlist message pins the plan's text.
-func CgoPolicyAllow(cf *config.File, cgoEnv, importPath string) (bool, string) {
-	const deny = "[restriction::cgo_usage] cgo is disabled"
-	if cf.Build.CgoSet {
-		switch cf.Build.Cgo {
-		case "allow":
-			return true, ""
-		case "restricted":
-			if CgoAllowlistAllows(cf.Build.CgoAllowlist, importPath) {
-				return true, ""
-			}
-			return false, fmt.Sprintf("[restriction::cgo_usage] package %s uses cgo and is not in cgo_allowlist", importPath)
-		default:
-			return false, deny
-		}
-	}
-	if cgoEnv == "1" {
-		return true, ""
-	}
-	return false, deny
-}
-
-// CgoAllowlistAllows reports whether importPath matches one of the
-// cgo_allowlist globs. A trailing "/**" matches the prefix itself and
-// everything under it; a trailing "**" anywhere else matches any suffix
-// including path separators; other patterns match exactly or by
-// path.Match (*, ?, [...] classes, no recursive wildcard).
-func CgoAllowlistAllows(allowlist []string, importPath string) bool {
-	for _, pattern := range allowlist {
-		if cgoPatternAllows(pattern, importPath) {
-			return true
-		}
-	}
-	return false
-}
-
-// cgoPatternAllows matches one allowlist glob against one import path per
-// SPEC 10.3: a double star matches any suffix.
-func cgoPatternAllows(pattern, importPath string) bool {
-	if prefix, ok := strings.CutSuffix(pattern, "/**"); ok {
-		return importPath == prefix || strings.HasPrefix(importPath, prefix+"/")
-	}
-	if prefix, ok := strings.CutSuffix(pattern, "**"); ok {
-		return strings.HasPrefix(importPath, prefix)
-	}
-	ok, _ := path.Match(pattern, importPath)
-	return ok
 }
