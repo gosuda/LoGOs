@@ -591,6 +591,38 @@ type Container struct {
 	}
 }
 
+func TestUnionMarshalGenerated(t *testing.T) {
+	src := `package p
+
+type Circle struct {
+	R int ` + "`" + `json:"r"` + "`" + `
+}
+
+type Square struct {
+	S int ` + "`" + `json:"s"` + "`" + `
+}
+
+type Shape interface {
+	Circle | Square
+}
+
+type Container struct {
+	Sh Shape ` + "`" + `json:"sh"` + "`" + `
+}
+`
+	text := lowerStaticText(t, src)
+	body := methodBody(t, text, "func (_logos_v Container) MarshalJSON() ([]byte, error) {")
+	if !strings.Contains(body, "switch _logos_m :=") {
+		t.Fatalf("union field lacks static type switch:\n%s", body)
+	}
+	if !strings.Contains(body, "case Circle:") || !strings.Contains(body, "case Square:") {
+		t.Fatalf("union switch lacks per-member cases:\n%s", body)
+	}
+	if !strings.Contains(body, "_logos_m.MarshalJSON()") {
+		t.Fatalf("union value lacks member static call:\n%s", body)
+	}
+}
+
 // TestFallbackStringQuoting is the red repro for finding (2): fallback-classified
 // scalars with `,string` must preserve tag-aware quoting in both directions.
 // Unmarshal-only types have no marshal methods so the encoder must quote;
