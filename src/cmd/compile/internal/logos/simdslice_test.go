@@ -96,6 +96,9 @@ func TestSimdSliceSumMatrix(t *testing.T) {
 			if want := "_i+" + strconv.Itoa(c.lanes) + " <= len("; !strings.Contains(out, want) {
 				t.Errorf("full-vector loop step %d missing:\n%s", c.lanes, out)
 			}
+			if c.elem != "float32" && c.elem != "float64" && !strings.Contains(out, "_acc.Add(") {
+				t.Errorf("integer sum does not accumulate in vector lanes:\n%s", out)
+			}
 			guard := "_logos_simd.X86." + feats[c.vec] + "()"
 			if feats[c.vec] == "" || !strings.Contains(out, "if "+guard+" {") {
 				t.Errorf("guard is not %q (loader requires %q):\n%s", guard, feats[c.vec], out)
