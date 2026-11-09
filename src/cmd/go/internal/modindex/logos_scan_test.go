@@ -28,12 +28,6 @@ func TestLogosExtensionsNFC(t *testing.T) {
 	}
 }
 
-// setLogosMode runs the test with the logos process mode enabled and
-// setPlainGoMode with it disabled; both restore the previous value
-// afterward. cfg.Logos is the process-wide mode signal that IsGoDir and
-// IndexPackage.ScanDir read live, so tests that flip it must run
-// sequentially (no t.Parallel anywhere in this file) to avoid racing
-// other reads of the global.
 func setLogosMode(t *testing.T) { applyLogosMode(t, true) }
 
 func setPlainGoMode(t *testing.T) { applyLogosMode(t, false) }
@@ -45,11 +39,6 @@ func applyLogosMode(t *testing.T, logos bool) {
 	t.Cleanup(func() { cfg.Logos = old })
 }
 
-// indexPackageForDir builds a real IndexPackage for the package directory
-// modroot/reldir by running the repo-native index round trip: importRaw
-// collects the raw package exactly as indexPackage does, and
-// encodePackageBytes + packageFromBytes decode it exactly as
-// openIndexPackage reads a stored index back. No selected list is mocked.
 func indexPackageForDir(t *testing.T, modroot, reldir string) *IndexPackage {
 	t.Helper()
 	raw := importRaw(modroot, reldir)
@@ -70,10 +59,7 @@ func TestScanDirLogosIndexed(t *testing.T) {
 		t.Fatal(err)
 	}
 	files := []struct{ name, src string }{
-		// Ordinary Go file: discovery must survive in both modes.
 		{"a.go", "package p\n\nimport _ \"goimport\"\n"},
-		// Canonical and alias logos files, including one carrying a
-		// trailing U+FE0F variation selector on the extension.
 		{"a.lgo", "package p\n\nimport _ \"logosimport\"\n"},
 		{"a_test.lgo", "package p_test\n\nimport _ \"logostestimport\"\n"},
 		{"alias.\u26a1", "package p\n\nimport _ \"logosaliasimport\"\n"},
@@ -113,11 +99,6 @@ func TestScanDirLogosIndexed(t *testing.T) {
 		}
 	})
 
-	// Plain go must exclude every logos file even though the requested
-	// tag set advertises logos (via the wildcard or explicitly): the
-	// mode signal is cfg.Logos, not the tags. Each case builds a fresh
-	// tag map because imports.AnyTags returns a shared map that must
-	// never be mutated.
 	plainTagSets := map[string]map[string]bool{
 		"plainAnyTags":          {"*": true},
 		"plainExplicitLogosTag": {"*": true, "logos": true},
@@ -139,8 +120,6 @@ func TestScanDirLogosIndexed(t *testing.T) {
 	}
 }
 
-// TestScanDirLogosOnlyIndexed checks that a package holding only logos
-// sources yields ErrNoGo for plain go while logos finds its imports.
 func TestScanDirLogosOnlyIndexed(t *testing.T) {
 	modroot := t.TempDir()
 	pkgdir := filepath.Join(modroot, "only")
@@ -169,10 +148,6 @@ func TestScanDirLogosOnlyIndexed(t *testing.T) {
 	}
 }
 
-// TestScanDirLogosGetPackage exercises the full openIndexPackage path:
-// GetPackage on a fresh directory hashes, indexes, and reads back the
-// package. dirHash rejects files younger than modTimeCutoff, so the
-// fixtures are aged deterministically with Chtimes instead of waiting.
 func TestScanDirLogosGetPackage(t *testing.T) {
 	modroot := t.TempDir()
 	pkgdir := filepath.Join(modroot, "gp")

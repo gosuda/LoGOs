@@ -22,11 +22,6 @@ func recomputeExperiment() {
 	computeExperiment()
 }
 
-// logosApplyRawExperiment installs raw as the effective GOEXPERIMENT,
-// recomputes the experiment tags and the clean cache-key value, and
-// publishes the value to the process and tool environments. Both the arena
-// composition and the preemptible refresh propagate to the compiler
-// subprocesses through it.
 func logosApplyRawExperiment(raw string) {
 	if raw == RawGOEXPERIMENT {
 		return
@@ -39,11 +34,6 @@ func logosApplyRawExperiment(raw string) {
 			CmdEnv[i].Value = RawGOEXPERIMENT
 		}
 	}
-	// Mirror into OrigEnv: main.invoke snapshots OrigEnv before MkEnv
-	// publishes the managed defaults, and user binaries (go test, go run)
-	// execute with OrigEnv, not CmdEnv. Without this, test-spawned child
-	// builds never see the default: the outer test binary compiles with
-	// the default on while an inner plain-go build compiles the fallback.
 	mirrored := false
 	for i := range OrigEnv {
 		if strings.HasPrefix(OrigEnv[i], "GOEXPERIMENT=") {

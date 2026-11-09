@@ -21,21 +21,8 @@ import (
 	"cmd/go/internal/str"
 )
 
-// This file holds the lint half of the build (M9): the lint action that
-// logos lint runs for each main-module package, the -logos.cfg and -logos.json
-// compiler flags, and the cache key of the lint policy. Plain go never
-// reaches any of it: no package carries a policy and JSON stays
-// false.
-
-// lintActor compiles one package with -logos.lintonly: the compiler
-// type-checks the sources against the export data of the imports, lints
-// them through escape analysis, and stops before SSA, so no object is
-// written. Go and loGo/s packages take the same path.
 type lintActor struct{}
 
-// LintAction returns the action that lints package p. It depends on the
-// ordinary compile of each import, for export data, and never on a compile
-// of p itself.
 func (b *Builder) LintAction(p *load.Package) *Action {
 	return b.cacheAction("logos lint", p, func() *Action {
 		a := &Action{
@@ -51,15 +38,11 @@ func (b *Builder) LintAction(p *load.Package) *Action {
 	})
 }
 
-// LintsPackage reports whether logos lint covers p: a package of a main
-// module with its Go or loGo/s sources and no cgo, which the lint compile
-// cannot reproduce without the generated files.
 func LintsPackage(p *load.Package) bool {
 	return p.Internal.LogosLint != nil && len(p.GoFiles) > 0 && !p.UsesCgo() && !p.UsesSwig() &&
 		p.Internal.TestmainGo == nil
 }
 
-// Act implements Actor.
 func (lintActor) Act(b *Builder, ctx context.Context, a *Action) error {
 	p := a.Package
 	sh := b.Shell(a)
@@ -75,9 +58,6 @@ func (lintActor) Act(b *Builder, ctx context.Context, a *Action) error {
 	return sh.reportCmd("", "", out, err)
 }
 
-// lintImportConfig returns the import config of the lint compile: the
-// import maps of p and the export data of every dependency, as build does,
-// plus the transitive packages a loGo/s package may synthesize imports of.
 func lintImportConfig(a *Action) []byte {
 	p := a.Package
 	var icfg bytes.Buffer
@@ -98,8 +78,6 @@ func lintImportConfig(a *Action) []byte {
 	return icfg.Bytes()
 }
 
-// lintEmbedConfig returns the embed config of p, or nil when p embeds
-// nothing.
 func lintEmbedConfig(p *load.Package) ([]byte, error) {
 	if len(p.Internal.Embed) == 0 {
 		return nil, nil
@@ -120,10 +98,6 @@ func lintEmbedConfig(p *load.Package) ([]byte, error) {
 	return js, nil
 }
 
-// logosCompilePolicy returns the lint policy action a passes to the compiler,
-// or nil. The lint action always passes it. An ordinary compile passes it
-// for a loGo/s package, whose lints run on every compile, except during
-// logos lint, where the lint action covers the package.
 func logosCompilePolicy(a *Action) []byte {
 	p := a.Package
 	if p == nil || p.Internal.LogosLint == nil {
@@ -141,10 +115,6 @@ func logosCompilePolicy(a *Action) []byte {
 	return nil
 }
 
-// logosLintFlags returns the loGo/s lint flags of the compile of action a:
-// -logos.json under --json-diagnostics, and for a linted package the
-// policy file, written into the action work directory, and -logos.lintonly
-// for the lint action. It is the hook line in (gcToolchain).gc.
 func logosLintFlags(sh *Shell, a *Action) ([]string, error) {
 	var flags []string
 	if settings.Current().JSON {
@@ -168,13 +138,6 @@ func logosLintFlags(sh *Shell, a *Action) ([]string, error) {
 	return flags, nil
 }
 
-// logosLintActionID adds the lint policy and the diagnostic format of a
-// build action to its action ID. A change of logos.toml or of --pedantic
-// recompiles a loGo/s package, and so does a switch to or from
-// --json-diagnostics for a package of either kind, because -logos.json
-// reaches every compile: the go command caches the compile output of a
-// package and replays it on a cache hit, so text cached by one format must
-// not answer a build in the other. It is the hook line in buildActionID.
 func logosLintActionID(h io.Writer, a *Action) {
 	if policy := logosCompilePolicy(a); policy != nil {
 		fmt.Fprintf(h, "logos lint %x\n", sha256.Sum256(policy))
@@ -187,9 +150,6 @@ func logosLintActionID(h io.Writer, a *Action) {
 	}
 }
 
-// logosJSONLines reports whether text is nothing but JSON diagnostic lines
-// under --json-diagnostics. Such output prints without the "# package"
-// header line, so every line of stderr is one JSON object.
 func logosJSONLines(text string) bool {
 	if !settings.Current().JSON || strings.TrimSpace(text) == "" {
 		return false

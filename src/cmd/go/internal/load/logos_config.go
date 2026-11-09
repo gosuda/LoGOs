@@ -23,15 +23,6 @@ import (
 	"golang.org/x/mod/module"
 )
 
-// checkLogosConfig applies logos.toml to one loaded package in logos mode.
-// Plain go never reaches it. Only packages in a main module are checked,
-// using that module's own root and its own logos.toml; dependency modules
-// keep defaults and are never checked. Parse and validation failures become
-// a package error carrying the exact config message on the first package of
-// that module only, and a loGo/s source file whose extension is not in that
-// module's strict_files fails with [correctness::extension_not_enabled].
-// The generated test main and the standard library stay out of the census,
-// mirroring checkLogosModules.
 func checkLogosConfig(ld *modload.Loader, p *Package) {
 	if !cfg.Logos || p.Internal.TestmainGo != nil || p.Standard {
 		return
@@ -76,19 +67,11 @@ func checkLogosConfig(ld *modload.Loader, p *Package) {
 	}
 }
 
-// logosConfig loads the logos.toml of the main module containing the current
-// directory, or defaults when there is no such module.
 func logosConfig(ld *modload.Loader) (*config.File, error) {
 	m := settings.ModuleAt(logosConfigRoot(ld))
 	return m.File, m.Err
 }
 
-// MainModuleLinkPolicy resolves the linker capabilities inputs for one
-// build: the logos.toml of the main module containing the current
-// directory (the same config the load-phase audit enforces, never the
-// linked dependency's own file) and the sorted paths of every modload
-// main module. A config load failure returns the error; the load phase
-// already reports it before linking.
 func MainModuleLinkPolicy(ld *modload.Loader) (*config.File, []string, error) {
 	cf, err := logosConfig(ld)
 	if err != nil {
@@ -104,9 +87,6 @@ func MainModuleLinkPolicy(ld *modload.Loader) (*config.File, []string, error) {
 	return cf, mains, nil
 }
 
-// logosConfigRootForPackage resolves the module root whose logos.toml
-// governs p: the ModRoot of p's own main module. It falls back to the
-// module Dir recorded on the package and then to the CWD-based root.
 func logosConfigRootForPackage(ld *modload.Loader, p *Package) string {
 	if p.Module != nil {
 		if ld != nil && ld.MainModules != nil {
@@ -121,12 +101,6 @@ func logosConfigRootForPackage(ld *modload.Loader, p *Package) string {
 	return logosConfigRoot(ld)
 }
 
-// logosConfigRoot resolves the module root whose logos.toml governs this
-// build: the root of the main module containing the current directory
-// (which covers workspace mode with several main modules). With no main
-// module, in GOPATH mode, or for command-line-arguments builds the root is
-// empty and defaults apply. Before modload.Init the go.mod is located from
-// the working directory instead.
 func logosConfigRoot(ld *modload.Loader) string {
 	if ld != nil && ld.MainModules != nil && ld.MainModules.Len() > 0 {
 		return ld.MainModules.ModRoot(ld.MainModules.ModContainingCWD())
@@ -139,22 +113,6 @@ func logosConfigRoot(ld *modload.Loader) string {
 	return ""
 }
 
-// checkLogosCgo enforces the logos.toml [build] cgo policy for one loaded
-// package in logos mode (M0-S5). It runs in (*Package).load after imports
-// resolve, beside checkLogosConfig (p.Module must be set, so it cannot run
-// at the earlier UsesCgo site). Plain go never reaches past the logos guard.
-// The policy follows the package's module: a main-module package answers to
-// its own logos.toml, while a dependency answers to the governing main
-// module's, so a restricted allowlist covers every package that imports "C"
-// in the build, Go-syntax packages included; the standard library stays
-// exempt. Cgo use is the compiled file set (UsesCgo): a bare cgo build tag
-// without import "C" never counts, while a cgo-only package hidden by
-// disabled cgo is still caught through its ignored files importing "C".
-// A denied package fails with [restriction::cgo_usage] instead of the
-// upstream "build constraints" text: an enabled denial lands directly, and
-// a disabled denial replaces NoGoError. Any other pre-existing error keeps
-// priority and is never overwritten. Config load failures are left to
-// checkLogosConfig.
 func checkLogosCgo(ld *modload.Loader, p *Package) {
 	if !cfg.Logos || p.Internal.TestmainGo != nil || p.Standard {
 		return
@@ -181,9 +139,6 @@ func checkLogosCgo(ld *modload.Loader, p *Package) {
 	logosDenyCgo(p, msg)
 }
 
-// nothing compiled, but an ignored file imports "C". It runs only when the
-// package failed with NoGoError, so builds that selected a non-cgo variant
-// never scan. A bare cgo build tag without import "C" never counts.
 func logosCgoHidden(p *Package) bool {
 	if p.UsesCgo() || p.Internal.Build == nil {
 		return false
@@ -205,9 +160,6 @@ func logosCgoHidden(p *Package) bool {
 	return false
 }
 
-// logosFileImportsC reports whether the file imports "C", parsed
-// imports-only. Files that fail to parse never count: a cgo file must use
-// Go syntax, so an unparseable file cannot be one.
 func logosFileImportsC(dir, name string) bool {
 	parsed, err := parser.ParseFile(token.NewFileSet(), filepath.Join(dir, name), nil, parser.ImportsOnly)
 	if err != nil || parsed == nil {
@@ -221,9 +173,6 @@ func logosFileImportsC(dir, name string) bool {
 	return false
 }
 
-// logosDenyCgo fails p with the policy denial, replacing NoGoError so the
-// scripts see [restriction::cgo_usage] instead of the upstream text. Any
-// other pre-existing error keeps priority and is never overwritten.
 func logosDenyCgo(p *Package, msg string) {
 	if p.Error != nil {
 		if _, ok := errors.AsType[*NoGoError](p.Error.Err); !ok {
@@ -234,9 +183,6 @@ func logosDenyCgo(p *Package, msg string) {
 	p.Incomplete = true
 }
 
-// logosConfigExt returns the loGo/s extension of a source file name,
-// stripping trailing variation selectors U+FE0E and U+FE0F the same way
-// cfg.IsLogosFile does.
 func logosConfigExt(name string) string {
 	trimmed := strings.TrimRight(name, "\uFE0E\uFE0F")
 	if i := strings.LastIndexByte(trimmed, '.'); i >= 0 {

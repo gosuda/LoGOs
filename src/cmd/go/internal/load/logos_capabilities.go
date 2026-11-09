@@ -15,20 +15,12 @@ import (
 	"cmd/go/internal/modload"
 )
 
-// checkLogosLoaded runs the whole load-census hook for logos mode: module
-// purity (checkLogosModules) and the capabilities audit below. Both exits
-// of PackagesAndErrors call it, so file-argument and pattern builds are
-// policed identically.
 func checkLogosLoaded(ld *modload.Loader, all []*Package) {
 	checkLogosModules(all)
 	checkLogosCapabilities(ld, all)
 	noteLogosBuildModules(all)
 }
 
-// noteLogosBuildModules records the build-module census feeding the
-// link-time capabilities policy (M12-S2): every loaded module path is
-// recorded for capabilities.PolicyForLink, which filters the set to nested
-// roots. Standard-library and module-less packages contribute nothing.
 func noteLogosBuildModules(all []*Package) {
 	if !cfg.Logos {
 		return
@@ -40,19 +32,6 @@ func noteLogosBuildModules(all []*Package) {
 	}
 }
 
-// checkLogosCapabilities enforces the logos.toml [capabilities]
-// transitive_unsafe policy over the loaded package graph (M12-S1). It runs
-// after imports resolve, beside checkLogosModules, so the check sees every
-// module in the build. Plain go never reaches past the logos guard.
-//
-// A non-standard, non-main-module package that imports "unsafe" and matches
-// no transitive_unsafe_allowlist glob is a violation with the shortest
-// import chain from a main-module package. Severity deny attaches one error
-// carrying every violation to the first error-free main-module package;
-// warn prints each violation and lets the build continue; allow skips the
-// walk. Config parse failures are left to checkLogosConfig, which already
-// reported them; an unreadable policy fails closed with deny and no
-// allowlists.
 func checkLogosCapabilities(ld *modload.Loader, all []*Package) {
 	if !cfg.Logos {
 		return
@@ -99,11 +78,6 @@ func checkLogosCapabilities(ld *modload.Loader, all []*Package) {
 	}
 }
 
-// capIsMain reports whether p is first-party for the audit: a main-module
-// package or the module-less command-line-arguments file list. Workspace
-// members count as main modules, so a workspace member importing "unsafe"
-// answers to its own module instead; use a replace-based dependency to
-// police a transitive import.
 func capIsMain(p *Package) bool {
 	if p.ImportPath == "command-line-arguments" {
 		return true
@@ -111,10 +85,6 @@ func capIsMain(p *Package) bool {
 	return p.Module != nil && p.Module.Main
 }
 
-// firstMainPackage returns the lexicographically first error-free
-// main-module package, or nil when every such package already has an
-// error. The capabilities diagnostic lands there so it never overwrites a
-// more specific error.
 func firstMainPackage(all []*Package) *Package {
 	var mains []*Package
 	for _, p := range all {
