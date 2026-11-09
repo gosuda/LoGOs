@@ -3,18 +3,11 @@
 # writes the same bytes only with --wasm-loader (the plain-go default is
 # off until the run.bash flip, R-U1, G3). The loader re-reads memory.buffer
 # after every call into wasm, checks the int32 errCode, and throws the
-# message that readErrorString reads from wasm memory. Without node the
-# whole gate is blocked (A-NODE), not passed.
-[!exec:node] skip 'A-NODE: node is required to run the loader'
-
+# message that readErrorString reads from wasm memory. Without node only
+# the loader runs below are blocked (A-NODE), not passed; the help-text
+# gate above them runs everywhere.
 env GOPROXY=off
 env GOTOOLCHAIN=local
-env GOOS=js
-env GOARCH=wasm
-
-cp $GOROOT/lib/wasm/wasm_exec.js lgo/wasm_exec.js
-cp $GOROOT/lib/wasm/wasm_exec.js gomod/wasm_exec.js
-cp $GOROOT/lib/wasm/wasm_exec.js goimpl/wasm_exec.js
 
 # go help build stays byte-identical to the baseline: the flag has no help
 # text. Only logos help names it.
@@ -22,6 +15,14 @@ go help build
 cmp stdout help_build.txt
 logos help build
 stdout '-wasm-loader'
+
+[!exec:node] skip 'A-NODE: node is required to run the loader'
+
+env GOOS=js
+env GOARCH=wasm
+cp $GOROOT/lib/wasm/wasm_exec.js lgo/wasm_exec.js
+cp $GOROOT/lib/wasm/wasm_exec.js gomod/wasm_exec.js
+cp $GOROOT/lib/wasm/wasm_exec.js goimpl/wasm_exec.js
 
 # A loGo/s main package: logos build writes the loader by default, and the
 # //logos: directives behave as the //go: forms.
