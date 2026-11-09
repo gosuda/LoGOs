@@ -134,7 +134,7 @@ func runNext(ctx context.Context, cmd *base.Command, args []string) {
 		work.apply(moddir)
 	case nextAIPatch:
 		work.writePlan(moddir)
-		work.printPlan()
+		fmt.Printf("%s", work.planData())
 	default:
 		work.printDiff()
 	}
@@ -496,10 +496,6 @@ func (s *scanState) writePlan(moddir string) {
 	if err := os.WriteFile(filepath.Join(moddir, "next_tasks.json"), s.planData(), 0666); err != nil {
 		base.Fatalf("logos next: %v", err)
 	}
-}
-
-func (s *scanState) printPlan() {
-	fmt.Printf("%s", s.planData())
 }
 
 func applyEdits(data []byte, edits []wireEdit) []byte {
