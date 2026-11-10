@@ -5,15 +5,70 @@ env GOTOOLCHAIN=local
 env GOEXPERIMENT=logosarena
 
 cd m
+logos lint .
+stderr 'main\.go:13:21: warning: \[perf::arena_fallback\] arena\.New\[int\].*falls back to the heap: value reaches global'
+! stderr 'region_escape'
+logos lint --json-diagnostics .
+stderr '"rule_id":"perf::arena_fallback"'
+stderr '"severity":"warn"'
+stderr 'value reaches global'
+logos build .
+stderr 'main\.go:13:21: warning: \[perf::arena_fallback\] arena\.New\[int\].*value reaches global'
+! stderr 'region_escape'
 logos build -gcflags=-m .
 stderr 'main\.go:.*region fallback: value reaches global'
+stderr 'perf::arena_fallback'
 ! stderr 'region_escape'
 go build -gcflags=-m .
 stderr 'main\.go:.*region fallback: value reaches global'
+! stderr 'perf::arena_fallback'
 ! stderr 'region_escape'
+logos vet .
+go vet .
 logos run .
 stdout '^42$'
 go run .
+
+# A returned region object falls back with the call position and flow.
+cd ../ret
+logos lint .
+stderr 'main\.go:10:21: warning: \[perf::arena_fallback\] arena\.New\[int\].*falls back to the heap: value reaches'
+! stderr 'region_escape'
+logos build .
+stderr 'perf::arena_fallback'
+! stderr 'region_escape'
+go build -gcflags=-m .
+stderr 'main\.go:.*region fallback: value reaches'
+! stderr 'perf::arena_fallback'
+! stderr 'region_escape'
+
+# A region object sent on a channel falls back with the call position.
+cd ../chan
+logos lint .
+stderr 'main\.go:11:21: warning: \[perf::arena_fallback\] arena\.New\[int\].*falls back to the heap: value reaches'
+! stderr 'region_escape'
+logos build .
+stderr 'perf::arena_fallback'
+! stderr 'region_escape'
+go build -gcflags=-m .
+stderr 'main\.go:.*region fallback: value reaches'
+! stderr 'perf::arena_fallback'
+! stderr 'region_escape'
+
+# A local region object stays silent: lint reports nothing, the build
+# places it in the region with no fallback diagnostic.
+cd ../non
+logos lint .
+! stderr 'arena_fallback'
+! stderr 'region_escape'
+logos build -gcflags=-m .
+stderr 'main\.go:.*placed in region'
+! stderr 'arena_fallback'
+! stderr 'region fallback: value reaches'
+go build -gcflags=-m .
+stderr 'main\.go:.*placed in region'
+! stderr 'arena_fallback'
+
 # Placement stays off without the experiment. The off directory holds
 # a non-escaping use: with the experiment plain go places it in the
 # region, without it both commands keep it on the heap with no
@@ -57,6 +112,79 @@ func main() {
 	*p = 42
 	saved = p
 	fmt.Println(*saved)
+	_ = r
+}
+
+-- ret/go.mod --
+module example.com/arenagofallbackret
+
+go 1.27
+
+-- ret/main.go --
+package main
+
+import (
+	"fmt"
+
+	"logos/arena"
+)
+
+func makePtr(r arena.Region) *int {
+	p := arena.New[int](r)
+	*p = 7
+	return p
+}
+
+func main() {
+	r := arena.Open()
+	q := makePtr(r)
+	fmt.Println(*q)
+	_ = r
+}
+
+-- chan/go.mod --
+module example.com/arenagofallbackchan
+
+go 1.27
+
+-- chan/main.go --
+package main
+
+import (
+	"fmt"
+
+	"logos/arena"
+)
+
+func main() {
+	r := arena.Open()
+	p := arena.New[int](r)
+	*p = 9
+	ch := make(chan *int, 1)
+	ch <- p
+	fmt.Println(*<-ch)
+	_ = r
+}
+
+-- non/go.mod --
+module example.com/arenagofallbacknon
+
+go 1.27
+
+-- non/main.go --
+package main
+
+import (
+	"fmt"
+
+	"logos/arena"
+)
+
+func main() {
+	r := arena.Open()
+	p := arena.New[int](r)
+	*p = 41
+	fmt.Println(*p + 1)
 	_ = r
 }
 
