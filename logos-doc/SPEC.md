@@ -1693,9 +1693,6 @@ On nonzero errCode the wrapper throws the message read from wasm memory. [T-Sec1
 //logos:wasmimport m f MUST behave as //go:wasmimport m f. [T-Sec12]
 Decoding MUST fill defaults first, then parse. [T-Sec12]
 JSON decoders MUST grow arrays incrementally with no pre-allocation cap. [T-Sec12][T-Sec10.1]
-Binary counts for elements with nonzero wire payload MUST pre-allocate at most `min(len(rest)/2, 1 MB / sizeof(elem))` and grow only as bytes arrive, charging nothing on the count header; lawful large payloads with all bytes present MUST decode. [T-Sec12][T-Sec10.1]
-Zero-wire slice counts MUST NOT exceed 1,048,576, rejected with count-out-of-range, encoder symmetric, constant-time without per-element iteration. One count MUST NOT allocate more than 64 MiB of element storage in a single allocation. [T-Sec12][T-Sec10.1]
-Accepted wire bytes MUST stay unchanged. [T-Sec12][T-Sec10.1]
 
 ## 13. Backend peephole and SIMD passes
 
@@ -1832,7 +1829,6 @@ A non-constant integer product in a `make` length or capacity MUST lower to `log
 - A frame that carries a duplicate Content-Length header MUST fail with a descriptive error. [T-Sec16]
 - The proxy MUST NOT recompile without a request, a `didSave`, or the `didClose` of an unsaved `.lgo` document. [T-Sec16]
 - The lowering MUST come from one `logos list` run with compiled JSON output and the overlay that returns, per `.lgo` file, the lowered text and the edit map; per package, the hints JSON and the compiler diagnostics. [T-Sec16]
-- Position translation MUST use the shared edit map package. [T-Sec16]
 - Position translation MUST rest on the compiler-written origin segments of the eject map: a lowered offset inside a copied segment maps to its exact original offset, and an offset inside a compiler-generated run maps to the anchor position of that run; no heuristic or size-capped textual matching takes part. [T-Sec16]
 - Closing an unsaved `.lgo` document MUST discard its unsaved overlay and MUST refresh the retained package's compiler results. [T-Sec16]
 - A `textDocument/formatting` request for a `.lgo` document MUST be refused instead of returning edits to lowered Go. Formatting requests for Go documents MUST pass through to `gopls`. [T-Sec16][R-U1]
