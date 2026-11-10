@@ -94,6 +94,15 @@ func groupNoCall(ctx context.Context) error {
 	return nil
 }
 
+func groupFuncLitParams(ctx context.Context) error {
+	go group (ctx) {
+		go func /* ERROR "expression in go must be function call" */ (x int) {
+			_ = x
+		}
+	}
+	return nil
+}
+
 func groupNoErr(ctx context.Context) {
 	go group (ctx /* ERROR "group_needs_error_result" */) {
 		go {
