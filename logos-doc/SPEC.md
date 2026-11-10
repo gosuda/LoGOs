@@ -255,8 +255,8 @@ The form `v, ok := m[k]` MUST keep Go meaning [T-104.3].
 `??` MUST group to the right [T-104.3].
 See Sec 2.2 for `?.` evaluation and option operand checks.
 ```go
-func greet(u *User?) (string, error) {
-	return u?.Name ?? "Guest", nil
+func greet(u *User?) string {
+	return u?.Name ?? "anon"
 }
 ```
 `$"..."` MUST accept operands of type string, any integer, bool, float32, float64, `[]byte`, `error`, or `fmt.Stringer` [T-104.4].
