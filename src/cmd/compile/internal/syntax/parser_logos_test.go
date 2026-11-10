@@ -625,3 +625,68 @@ func TestLogosContextualWordsKeepGoMeaning(t *testing.T) {
 		}
 	}
 }
+
+func TestLogosContextualWordsPlainModeReject(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		src  string
+	}{
+		{"scope", "package p\nfunc f() { scope defer g() }\nfunc g() {}\n"},
+		{"errdefer", "package p\nfunc f() { errdefer g() }\nfunc g() {}\n"},
+		{"yield", "package p\nfunc f() { yield 1 }\n"},
+	} {
+		f, err := Parse(nil, strings.NewReader(tc.src), nil, nil, 0)
+		if err == nil {
+			leaked := false
+			Inspect(f, func(n Node) bool {
+				switch n.(type) {
+				case *YieldStmt, *ScopeDeferStmt, *ErrdeferStmt:
+					leaked = true
+					return false
+				}
+				return true
+			})
+			if leaked {
+				t.Fatalf("%s: plain mode produced a logos node, want a syntax error", tc.name)
+			}
+			t.Fatalf("%s: plain mode parsed without error, want a syntax error", tc.name)
+		}
+	}
+	f, err := Parse(nil, strings.NewReader("package p\nfunc f() { errdefer(g()) }\nfunc g() {}\n"), nil, nil, 0)
+	if err != nil {
+		t.Fatalf("errdefer call: plain mode failed, want an ordinary call: %v", err)
+	}
+	stmts := funcBodyStmts(t, f, "f")
+	if len(stmts) != 1 {
+		t.Fatalf("errdefer call: got %d statements, want 1", len(stmts))
+	}
+	es, ok := stmts[0].(*ExprStmt)
+	if !ok {
+		t.Fatalf("errdefer call: statement is %T, want *ExprStmt", stmts[0])
+	}
+	if _, ok := Unparen(es.X).(*CallExpr); !ok {
+		t.Fatalf("errdefer call: expression is %T, want *CallExpr", es.X)
+	}
+	leaked := false
+	Inspect(f, func(n Node) bool {
+		if _, ok := n.(*ErrdeferStmt); ok {
+			leaked = true
+			return false
+		}
+		return true
+	})
+	if leaked {
+		t.Fatal("errdefer call: plain mode produced *ErrdeferStmt, want an ordinary call")
+	}
+	g, err := Parse(nil, strings.NewReader("package p\nfunc f() {\nerrdefer := 1\n_ = errdefer\n}\n"), nil, nil, 0)
+	if err != nil {
+		t.Fatalf("errdefer define: plain mode failed, want an assignment: %v", err)
+	}
+	assigns := funcBodyStmts(t, g, "f")
+	if len(assigns) != 2 {
+		t.Fatalf("errdefer define: got %d statements, want 2", len(assigns))
+	}
+	if _, ok := assigns[0].(*AssignStmt); !ok {
+		t.Fatalf("errdefer define: statement is %T, want *AssignStmt", assigns[0])
+	}
+}
