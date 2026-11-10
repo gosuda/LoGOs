@@ -125,6 +125,9 @@ func logosWriteCheckedFacts(pkg *types2.Package, info *types2.Info, files []*syn
 		return
 	}
 	f := facts.WriteChecked(pkg, info, files, facts.Current())
+	if base.LogosGoFacts && !base.Logos {
+		f = facts.EmitGoMutations(pkg, info, files, f)
+	}
 	if f == nil {
 		return
 	}

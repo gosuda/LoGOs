@@ -27,6 +27,8 @@ var LogosJSON bool
 var LogosLintOnly bool
 
 var LogosAllocFacts bool
+var LogosGoFacts bool
+
 var LogosComptimeNodes = 4096
 
 var logosCtClones = map[string]bool{}
@@ -50,6 +52,7 @@ func logosRegisterFlags() {
 	flag.BoolVar(&LogosJSON, "logos.json", false, "print diagnostics as JSON lines")
 	flag.BoolVar(&LogosLintOnly, "logos.lintonly", false, "lint the package and stop after escape analysis")
 	flag.BoolVar(&LogosAllocFacts, "logos.allocfacts", false, "record per-function heap allocations and write AllocFree facts")
+	flag.BoolVar(&LogosGoFacts, "logos.gofacts", false, "record per-parameter mutation facts for Go packages")
 	flag.StringVar(&LogosEject, "logos.eject", "", "write ejected Go sources to `directory`")
 	flag.StringVar(&LogosMode, "logos.mode", "", "run a logos helper mode (`next`, `context`, or `hints`)")
 	flag.StringVar(&LogosHintsOut, "logos.hintsout", "", "write the logos editor hints of the package to `file`")

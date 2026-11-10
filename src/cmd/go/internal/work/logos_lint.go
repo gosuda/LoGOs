@@ -138,6 +138,16 @@ func logosLintFlags(sh *Shell, a *Action) ([]string, error) {
 	return flags, nil
 }
 
+func logosGoFactsFlags(p *load.Package) []string {
+	if p == nil {
+		return nil
+	}
+	if cfg.Logos && !p.IsLogos() && !logosStandardProvenance(p) {
+		return []string{"-logos.gofacts"}
+	}
+	return nil
+}
+
 func logosLintActionID(h io.Writer, a *Action) {
 	if policy := logosCompilePolicy(a); policy != nil {
 		fmt.Fprintf(h, "logos lint %x\n", sha256.Sum256(policy))
@@ -147,6 +157,9 @@ func logosLintActionID(h io.Writer, a *Action) {
 	}
 	if cfg.Logos {
 		fmt.Fprintf(h, "logos allocfacts\n")
+	}
+	if len(logosGoFactsFlags(a.Package)) > 0 {
+		fmt.Fprintf(h, "logos gofacts\n")
 	}
 }
 

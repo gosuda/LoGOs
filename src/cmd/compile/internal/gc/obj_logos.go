@@ -40,8 +40,21 @@ func hasLogosLintFacts() bool {
 	return false
 }
 
+func hasLogosConstFacts() bool {
+	f := facts.Current()
+	if f == nil {
+		return false
+	}
+	for i := range f.Fns {
+		if f.Fns[i].ParamMutated != "" {
+			return true
+		}
+	}
+	return false
+}
+
 func writeLogosFacts(bout *bio.Writer) {
-	if !base.Logos && !wasmyield.Active() && !hasLogosAssertFacts() && !hasLogosLintFacts() {
+	if !base.Logos && !wasmyield.Active() && !hasLogosAssertFacts() && !hasLogosLintFacts() && !hasLogosConstFacts() {
 		return
 	}
 	start := startArchiveEntry(bout)

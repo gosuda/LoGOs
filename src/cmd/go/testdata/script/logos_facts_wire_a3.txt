@@ -21,6 +21,8 @@ cd ..
 go tool pack p $WORK/go.a __.LOGOS
 cp stdout $WORK/go.facts
 grep '^fn GoAssert AssertTP=1,AssertRTP=0$' $WORK/go.facts
+grep '^fn ReadAll ParamMutated=0$' $WORK/go.facts
+grep '^fn WriteAt ParamMutated=1$' $WORK/go.facts
 grep '^lang go$' $WORK/go.facts
 ! grep 'ReceiverMutated' $WORK/go.facts
 ! grep '^constfn' $WORK/go.facts
@@ -40,6 +42,8 @@ cd ..
 go tool pack p $WORK/go-wasm.a __.LOGOS
 stdout '^logos-facts 3$'
 stdout '^fn GoAssert AssertTP=1,AssertRTP=0$'
+stdout '^fn ReadAll ParamMutated=0,MayYield=1$'
+stdout '^fn WriteAt ParamMutated=1,MayYield=1$'
 stdout '^lang go$'
 env GOOS=
 env GOARCH=
@@ -49,6 +53,8 @@ cd ..
 go tool pack p $WORK/go-o0.a __.LOGOS
 stdout '^logos-facts 3$'
 stdout '^fn GoAssert AssertTP=1,AssertRTP=0$'
+stdout '^fn ReadAll ParamMutated=0$'
+stdout '^fn WriteAt ParamMutated=1$'
 stdout '^lang go$'
 cd go
 go tool compile -p example.com/go -o $WORK/go-go.a wire.go
@@ -57,6 +63,14 @@ go tool pack p $WORK/go-go.a __.LOGOS
 stdout '^logos-facts 3$'
 stdout '^fn GoAssert AssertTP=1,AssertRTP=0$'
 stdout '^lang go$'
+! stdout 'ParamMutated'
+cd go
+go tool compile -logos.gofacts -p example.com/go -o $WORK/go-flagged.a wire.go
+cd ..
+go tool pack p $WORK/go-flagged.a __.LOGOS
+stdout '^logos-facts 3$'
+stdout '^fn ReadAll ParamMutated=0$'
+stdout '^fn WriteAt ParamMutated=1$'
 cd mut
 logos build -o $WORK/mut.a .
 cd ..
@@ -129,6 +143,18 @@ func GoAssert[T any](x any) T {
 
 func GetItems() []int {
 	return []int{1, 2, 3}
+}
+
+func ReadAll(b []byte) int {
+	n := 0
+	for _, v := range b {
+		n += int(v)
+	}
+	return n
+}
+
+func WriteAt(b []byte, v byte) {
+	b[0] = v
 }
 
 type Counter struct {

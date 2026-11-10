@@ -42,6 +42,19 @@ type constFuncDecl struct {
 }
 
 func emitConstMutations(pkg *types2.Package, info *types2.Info, files []*syntax.File, f *Facts) {
+	decls, recvMut, paramMask := analyzeConstMutations(pkg, info, files)
+	for _, d := range decls {
+		if !recvMut[d.obj] && len(paramMask[d.obj]) == 0 {
+			continue
+		}
+		fn := findOrCreateFnFact(f, d.name)
+		fn.ReceiverMutated = fn.ReceiverMutated || recvMut[d.obj]
+		fn.ParamMutated = orHexMask(fn.ParamMutated, paramMask[d.obj])
+	}
+	emitReadonlyFacts(pkg, f, decls, recvMut, paramMask)
+}
+
+func analyzeConstMutations(pkg *types2.Package, info *types2.Info, files []*syntax.File) ([]constFuncDecl, map[*types2.Func]bool, map[*types2.Func][]byte) {
 	decls := collectConstFuncDecls(pkg, info, files)
 	recvMut := make(map[*types2.Func]bool, len(decls))
 	paramMask := make(map[*types2.Func][]byte, len(decls))
@@ -66,15 +79,32 @@ func emitConstMutations(pkg *types2.Package, info *types2.Info, files []*syntax.
 			break
 		}
 	}
+	return decls, recvMut, paramMask
+}
+
+func EmitGoMutations(pkg *types2.Package, info *types2.Info, files []*syntax.File, f *Facts) *Facts {
+	if pkg == nil || pkg.Scope() == nil {
+		return f
+	}
+	decls, _, paramMask := analyzeConstMutations(pkg, info, files)
 	for _, d := range decls {
-		if !recvMut[d.obj] && len(paramMask[d.obj]) == 0 {
+		if d.obj == nil || !d.obj.Exported() {
 			continue
 		}
+		if d.sig == nil || d.sig.Params() == nil || d.sig.Params().Len() == 0 {
+			continue
+		}
+		mask := paramMask[d.obj]
+		if f == nil {
+			f = &Facts{}
+		}
 		fn := findOrCreateFnFact(f, d.name)
-		fn.ReceiverMutated = fn.ReceiverMutated || recvMut[d.obj]
-		fn.ParamMutated = orHexMask(fn.ParamMutated, paramMask[d.obj])
+		fn.ParamMutated = orHexMask(fn.ParamMutated, mask)
+		if fn.ParamMutated == "" {
+			fn.ParamMutated = "0"
+		}
 	}
-	emitReadonlyFacts(pkg, f, decls, recvMut, paramMask)
+	return f
 }
 
 func emitReadonlyFacts(pkg *types2.Package, f *Facts, decls []constFuncDecl, recvMut map[*types2.Func]bool, paramMask map[*types2.Func][]byte) {

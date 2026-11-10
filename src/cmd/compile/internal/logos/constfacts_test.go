@@ -13,6 +13,7 @@ import (
 	"cmd/compile/internal/logos/facts"
 	"cmd/compile/internal/syntax"
 	"cmd/compile/internal/types2"
+	"cmd/internal/goobj"
 )
 
 func TestWriteConstFacts(t *testing.T) {
@@ -324,4 +325,134 @@ func TestCopyFuncReadonlyPropagatesBit(t *testing.T) {
 	}
 	copyFuncReadonly(nil, src)
 	copyFuncReadonly(dst, nil)
+}
+
+func TestEmitGoParamMutatedFacts(t *testing.T) {
+	const src = `package gopkg
+
+func ReadAll(b []byte) int {
+	n := 0
+	for _, v := range b {
+		n += int(v)
+	}
+	return n
+}
+
+func WriteAt(b []byte, v byte) {
+	b[0] = v
+}
+
+func fill(b []byte) {
+	b[0] = 0
+}
+
+func CopyInto(dst []byte) {
+	fill(dst)
+}
+
+func Id[T any](x T) T {
+	return x
+}
+
+func Ext(b []byte)
+
+func GetItems() []int {
+	return []int{1, 2, 3}
+}
+
+type Counter struct {
+	N int
+}
+
+func (c Counter) Total(xs []int) int {
+	n := c.N
+	for _, v := range xs {
+		n += v
+	}
+	return n
+}
+
+func (c *Counter) Fill(xs []byte, v byte) {
+	for i := range xs {
+		xs[i] = v
+	}
+}
+
+func (c *Counter) Bump() {
+	c.N++
+}
+`
+	dir := t.TempDir()
+	path := filepath.Join(dir, "facts.go")
+	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	file, err := syntax.ParseFile(path, func(err error) { t.Fatalf("parse: %v", err) }, nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	imp := newTestImporter(t)
+	var checkErrs []error
+	conf := types2.Config{
+		Importer: imp,
+		Error:    func(err error) { checkErrs = append(checkErrs, err) },
+	}
+	info := &types2.Info{
+		Types:      make(map[syntax.Expr]types2.TypeAndValue),
+		Defs:       make(map[*syntax.Name]types2.Object),
+		Uses:       make(map[*syntax.Name]types2.Object),
+		Selections: make(map[*syntax.SelectorExpr]*types2.Selection),
+	}
+	pkg, _ := conf.Check("gopkg", []*syntax.File{file}, info)
+	if err := errors.Join(checkErrs...); err != nil {
+		t.Fatalf("check: %v", err)
+	}
+	got := facts.EmitGoMutations(pkg, info, []*syntax.File{file}, nil)
+	if got == nil {
+		t.Fatal("EmitGoMutations returned nil")
+	}
+	if got.GoPackage {
+		t.Error("emitter sets the lang go record; the importer hook owns it")
+	}
+	for _, kind := range []int{
+		len(got.Opts), len(got.Consts), len(got.Readonlys), len(got.Props),
+		len(got.Conforms), len(got.Comptimes), len(got.ConstFuncs),
+		len(got.Defaults), len(got.Locks), len(got.AllocFrees),
+	} {
+		if kind != 0 {
+			t.Fatalf("Go member carries declaration-header records: %+v", got)
+		}
+	}
+	masks := make(map[string]string)
+	for _, fn := range got.Fns {
+		masks[fn.Object] = fn.ParamMutated
+	}
+	want := map[string]string{
+		"ReadAll":         "0",
+		"WriteAt":         "1",
+		"CopyInto":        "1",
+		"Counter.Total":   "0",
+		"(*Counter).Fill": "1",
+	}
+	if len(masks) != len(want) {
+		t.Fatalf("fn entries = %v, want %v", masks, want)
+	}
+	for object, mask := range want {
+		if masks[object] != mask {
+			t.Errorf("%s ParamMutated = %q, want %q (have %v)", object, masks[object], mask, masks)
+		}
+	}
+	fp := goobj.FingerprintType{1, 2, 3, 4, 5, 6, 7, 8}
+	back, err := facts.Decode(facts.Encode(fp, got))
+	if err != nil {
+		t.Fatalf("Decode failed: %v", err)
+	}
+	if len(back.Fns) != len(want) {
+		t.Fatalf("round trip fn entries = %v, want %v", back.Fns, want)
+	}
+	for _, fn := range back.Fns {
+		if want[fn.Object] != fn.ParamMutated {
+			t.Errorf("round trip %s ParamMutated = %q, want %q", fn.Object, fn.ParamMutated, want[fn.Object])
+		}
+	}
 }
