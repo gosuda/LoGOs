@@ -14,6 +14,25 @@ stderr 'main\.go:.*region fallback: value reaches global'
 logos run .
 stdout '^42$'
 go run .
+# Placement stays off without the experiment. The off directory holds
+# a non-escaping use: with the experiment plain go places it in the
+# region, without it both commands keep it on the heap with no
+# placement diagnostic and identical output.
+cd ../off
+env GOEXPERIMENT=logosarena
+go build -gcflags=-m .
+stderr 'main\.go:.*placed in region'
+! stderr 'region_escape'
+env GOEXPERIMENT=
+logos build -gcflags=-m .
+! stderr 'placed in region'
+! stderr 'region_escape'
+logos run .
+stdout '^42$'
+go build -gcflags=-m .
+! stderr 'placed in region'
+! stderr 'region_escape'
+go run .
 stdout '^42$'
 
 -- m/go.mod --
@@ -38,5 +57,31 @@ func main() {
 	*p = 42
 	saved = p
 	fmt.Println(*saved)
+	_ = r
+}
+
+-- off/go.mod --
+module example.com/arenagooff
+
+go 1.27
+
+-- off/logos.toml --
+[build]
+arena = false
+
+-- off/main.go --
+package main
+
+import (
+	"fmt"
+
+	"logos/arena"
+)
+
+func main() {
+	r := arena.Open()
+	p := arena.New[int](r)
+	*p = 41
+	fmt.Println(*p + 1)
 	_ = r
 }
