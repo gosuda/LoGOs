@@ -450,7 +450,7 @@ func (check *Checker) logosImplementsProperty(V, T Type, Ti *Interface, cause *s
 	switch {
 	case declared && kind == logosPropOK:
 		return true
-	case declared && kind == logosPropFailNeedsPtr:
+	case kind == logosPropFailNeedsPtr:
 		return fail("%s %s has mutable property %s; use *%s", logosPropNeedsPtr, V, name, base)
 	case declared && kind == logosPropAmbig:
 		return fail("ambiguous selector %s.%s", V, name)

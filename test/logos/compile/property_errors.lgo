@@ -90,3 +90,15 @@ type NeedM interface {
 
 type BadImpl struct : NeedM { // ERROR "assertion_failed"
 }
+
+type RWOnly interface {
+	ID int
+}
+
+type RWValue struct {
+	ID int
+}
+
+func needPointerUndeclared(v RWValue) {
+	var _ RWOnly = v // ERROR "property_needs_pointer"
+}
