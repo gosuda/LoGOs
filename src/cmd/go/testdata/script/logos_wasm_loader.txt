@@ -37,6 +37,32 @@ logos build .
 exists wasmlgo
 ! exists wasmlgo.loader.mjs
 
+cd ..
+
+cd provided
+env GOOS=js
+env GOARCH=wasm
+cp $GOROOT/lib/wasm/wasm_exec.js wasm_exec.js
+# The module graph already provides the loader helpers through the
+# helper package, so the implicit logos/rt import is pruned: the -x
+# output carries no packagefile line, but the loader is still emitted
+# and still runs. The plain section below is the control that keeps
+# the packagefile line when no provider is present.
+go build -x -o app.wasm .
+! stderr 'packagefile logos/rt='
+exists app.wasm
+exists app.loader.mjs
+exec node ../runok.mjs app.wasm app.loader.mjs
+stdout '^provided-ok$'
+logos build -x -o logos.wasm .
+! stderr 'packagefile logos/rt='
+exists logos.wasm
+exists logos.loader.mjs
+exec node ../runok.mjs logos.wasm logos.loader.mjs
+stdout '^provided-ok$'
+
+cd ..
+cd lgo
 logos eject -o out
 exists out/main.go
 grep '^//go:wasmimport host add$' out/main.go
@@ -78,7 +104,6 @@ rm app.loader.mjs
 go build -x --wasm-loader=false -o app.wasm .
 ! stderr 'packagefile logos/rt='
 ! exists app.loader.mjs
-
 cd ..
 
 cd gomod
@@ -545,6 +570,97 @@ func align() int32 {
 func main() {
 	select {}
 }
+
+-- provided/go.mod --
+module example.com/provided
+
+go 1.27
+
+-- provided/main.go --
+package main
+
+import (
+	_ "example.com/provided/helper"
+	"unsafe"
+)
+
+//go:wasmimport host add
+func hostAdd(a, b int32) int32
+
+//go:wasmexport incr
+func incr(p unsafe.Pointer, n int32) int32 {
+	b := unsafe.Slice((*byte)(p), n)
+	for i := range b {
+		b[i]++
+	}
+	return 0
+}
+
+//go:wasmexport checkHost
+func checkHost(a, b, want int32) int32 {
+	if hostAdd(a, b) != want {
+		return 1
+	}
+	return 0
+}
+
+func main() {
+	select {}
+}
+
+-- provided/helper/helper.go --
+package helper
+
+import "unsafe"
+
+var scratch = map[int32][]byte{}
+
+var errmsg = []byte("helper errmsg")
+
+func address(b []byte) int32 {
+	return int32(uintptr(unsafe.Pointer(unsafe.SliceData(b))))
+}
+
+//go:wasmexport _logos_scratch_alloc
+func scratchAlloc(n int32) int32 {
+	b := make([]byte, n)
+	p := address(b)
+	scratch[p] = b
+	return p
+}
+
+//go:wasmexport _logos_scratch_reset
+func scratchReset(p int32) {
+	delete(scratch, p)
+}
+
+//go:wasmexport _logos_errmsg_ptr
+func errmsgPtr() int32 {
+	return address(errmsg)
+}
+
+//go:wasmexport _logos_errmsg_len
+func errmsgLen() int32 {
+	return int32(len(errmsg))
+}
+
+-- runok.mjs --
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
+import assert from "node:assert/strict";
+
+const [wasmPath, loaderPath] = process.argv.slice(2);
+const loader = await import(pathToFileURL(resolve(loaderPath)).href);
+assert.equal(typeof loader.instantiateLogos, "function");
+const { exports } = await loader.instantiateLogos(readFileSync(wasmPath), {
+	host: { add: (a, b) => a + b },
+});
+const input = new Uint8Array([1, 2, 3]);
+exports.incr(input);
+assert.deepEqual(input, new Uint8Array([2, 3, 4]));
+exports.checkHost(2, 3, 5);
+console.log("provided-ok");
 
 -- help_build.txt --
 usage: go build [-o output] [build flags] [packages]
