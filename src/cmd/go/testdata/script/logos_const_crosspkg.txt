@@ -1,0 +1,130 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+mkdir $WORK/bin
+
+cd cross
+logos build ./...
+logos build -o $WORK/bin/cross$GOEXE ./cmd
+exec $WORK/bin/cross$GOEXE
+stdout '^crosspkg-ok$'
+logos run ./cmd
+stdout '^crosspkg-ok$'
+cd ..
+
+-- cross/go.mod --
+module example.com/cross
+
+go 1.27
+
+-- cross/lib/lib.lgo --
+package lib
+
+func SliceFn(xs const []int) int {
+	n := 0
+	for _, v := range xs {
+		n += v
+	}
+	return n
+}
+
+func MapFn(m const map[string]int, k string) int {
+	return m[k] ?? 0
+}
+
+func ArrayFn(a const [3]int) int {
+	return a[0] + a[1] + a[2]
+}
+
+type Config struct {
+	N    int
+	Name string
+}
+
+func PtrFn(p const *Config) int {
+	return p.N
+}
+
+func VariadicFn(xs ...const []int) int {
+	n := 0
+	for _, s := range xs {
+		for _, v := range s {
+			n += v
+		}
+	}
+	return n
+}
+
+type Getter interface {
+	Get(xs const []int) int
+}
+
+func Use(g Getter, xs const []int) int {
+	return g.Get(xs)
+}
+
+type C struct {
+	V int
+}
+
+func (c const *C) Get() int {
+	return c.V
+}
+
+-- cross/cmd/main.lgo --
+package main
+
+import (
+	"fmt"
+
+	"example.com/cross/lib"
+)
+
+type Impl struct{}
+
+func (Impl) Get(xs const []int) int {
+	n := 0
+	for _, v := range xs {
+		n += v
+	}
+	return n
+}
+
+func main() {
+	xs := []int{1, 2, 3}
+	if got := lib.SliceFn(xs); got != 6 {
+		fmt.Println("slice-bad")
+		return
+	}
+	m := map[string]int{"a": 2}
+	if got := lib.MapFn(m, "a"); got != 2 {
+		fmt.Println("map-bad")
+		return
+	}
+	a := [3]int{1, 2, 3}
+	if got := lib.ArrayFn(a); got != 6 {
+		fmt.Println("array-bad")
+		return
+	}
+	c := &lib.Config{N: 7, Name: "s"}
+	if got := lib.PtrFn(c); got != 7 {
+		fmt.Println("ptr-bad")
+		return
+	}
+	av := []int{1}
+	bv := []int{2}
+	if got := lib.VariadicFn(av, bv); got != 3 {
+		fmt.Println("variadic-bad")
+		return
+	}
+	var g lib.Getter = Impl{}
+	if got := lib.Use(g, []int{1, 2}); got != 3 {
+		fmt.Println("iface-bad")
+		return
+	}
+	rc := &lib.C{V: 5}
+	if got := rc.Get(); got != 5 {
+		fmt.Println("recv-bad")
+		return
+	}
+	fmt.Println("crosspkg-ok")
+}
