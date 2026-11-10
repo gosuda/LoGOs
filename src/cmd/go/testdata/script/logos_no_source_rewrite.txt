@@ -9,6 +9,10 @@ logos build .
 logos lint .
 logos context 'example.com/readonly#Main'
 logos eject -o out
+logos test ./...
+logos vet ./...
+logos list ./...
+logos run .
 
 cmp main.lgo $WORK/orig/main.lgo
 cmp go.mod $WORK/orig/go.mod
