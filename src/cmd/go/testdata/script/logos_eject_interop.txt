@@ -11,8 +11,7 @@ logos eject -o bout
 exists bout/main.go
 exists bout/go.mod
 exists bout/_logos_deps/example.com/lp@v1.2.3/p/p.go
-grep 'example\.com/lp' bout/go.mod
-grep 'require' bout/go.mod
+grep -count=1 'example\.com/lp v1\.2\.3$' bout/go.mod
 grep 'func Code\(\) \(string, error\)' bout/_logos_deps/example.com/lp@v1.2.3/p/p.go
 grep 'Option\[int\]' bout/_logos_deps/example.com/lp@v1.2.3/p/p.go
 grep 'replace' bout/go.mod
@@ -30,8 +29,7 @@ cp stdout $WORK/a-stdout.txt
 logos eject -o ../aout
 exists ../aout/main.go
 exists ../aout/go.mod
-grep 'example\.com/gohelp' ../aout/go.mod
-grep 'require' ../aout/go.mod
+grep -count=1 'example\.com/gohelp v1\.0\.0$' ../aout/go.mod
 grep 'replace' ../aout/go.mod
 cd ../aout
 go build ./...
