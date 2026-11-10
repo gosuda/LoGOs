@@ -5,6 +5,9 @@ logos build -a -x -O=3 unicode/utf8
 stderr 'inlbudget=400,inlrecursivebudget=80'
 ! stderr 'variablemakethreshold'
 ! stderr '\-d=[^ ]*(escape|prove)'
+logos build -a -x -O=2 unicode/utf8
+stderr 'inlbudget=120'
+! stderr 'variablemakethreshold'
 
 logos build -a -x -O=3 .
 stderr 'variablemakethreshold=4096'
