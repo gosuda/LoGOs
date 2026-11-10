@@ -523,12 +523,12 @@ Element-wise math is supported on arrays only, not slices, and requires a power-
 
 The language also provides these concise extensions defined in [logos-doc/SPEC.md](logos-doc/SPEC.md):
 
-- **Error propagation** (`n := f()?` or `f()?`): unwraps values or returns early on non-nil error from functions returning `(T, error)` ([logos-doc/SPEC.md](logos-doc/SPEC.md) Sec 6).
-- **Error cleanup** (`errdefer f()`): registers deferred cleanup executed only when the enclosing function exits with an error, a panic, or Goexit ([logos-doc/SPEC.md](logos-doc/SPEC.md) Sec 6).
-- **String interpolation** (`$"user {name}: {count}"`): embeds formatted expressions directly within string literals ([logos-doc/SPEC.md](logos-doc/SPEC.md) Sec 2).
-- **Iterator chains** (`xs.filter(...).map(...).take(n)`): runs functional slice transformations with predicate and mapping closures ([logos-doc/SPEC.md](logos-doc/SPEC.md) Sec 2).
-- **Literal addressing** (`&100`, `&f()`): takes the address of scalar literals and function call returns without temporary variables ([logos-doc/SPEC.md](logos-doc/SPEC.md) Sec 2).
-- **Struct field defaults** (`type Config struct { Port int = 8080 }`): evaluates default field values when struct literals omit fields ([logos-doc/SPEC.md](logos-doc/SPEC.md) Sec 2).
+- **Error propagation** (`n := f()?` or `f()?`): unwraps values or returns early on non-nil error from functions returning `(T, error)` ([logos-doc/SPEC.md](logos-doc/SPEC.md) Sec 1.4).
+- **Error cleanup** (`errdefer f()`): registers deferred cleanup executed only when the enclosing function exits with an error, a panic, or Goexit ([logos-doc/SPEC.md](logos-doc/SPEC.md) Sec 1.4).
+- **String interpolation** (`$"user {name}: {count}"`): embeds formatted expressions directly within string literals ([logos-doc/SPEC.md](logos-doc/SPEC.md) Sec 1.4).
+- **Iterator chains** (`xs.filter(...).map(...).take(n)`): runs functional slice transformations with predicate and mapping closures ([logos-doc/SPEC.md](logos-doc/SPEC.md) Sec 1.4).
+- **Literal addressing** (`&100`, `&f()`): takes the address of scalar literals and function call returns without temporary variables ([logos-doc/SPEC.md](logos-doc/SPEC.md) Sec 1.4).
+- **Struct field defaults** (`type Config struct { Port int = 8080 }`): evaluates default field values when struct literals omit fields ([logos-doc/SPEC.md](logos-doc/SPEC.md) Sec 1.4).
 
 ## Usage
 
@@ -570,12 +570,12 @@ One row per shipped form, with milestone IDs from [logos-doc/IMPLEMENTATION.md](
 | M11 | Generated `MarshalJSON` / `UnmarshalJSON` | Static JSON methods on tagged structs with `encoding/json`-matching output. |
 | M13 | `-O` | Optimization levels from `-O=0` to `-O=3` plus `Os`, with inline budgets, variable-make stack buffers, and `target_cpu`. Every backend, runtime, and tooling improvement that ships applies to Go packages as well as loGo/s packages under `logos` and plain `go`. |
 | M14 | Fixed-array SIMD | Element-wise operators and reductions on small fixed-size arrays behind `GOEXPERIMENT=simd`. |
-| M16 | WASM profile | Flag or directive only: `--wasm-features=stack-switching`, `--wasm-loader`, and the `//logos:wasmimport` / `//logos:wasmexport` directives. |
+| M16 | WASM profile | Automatic for GOOS=js and GOOS=wasip1 under `logos`; `--wasm-features=stack-switching`, `--wasm-loader`, and the `//logos:wasmimport` / `//logos:wasmexport` directives select options. |
 | M17 | Smart stack | Flag only: `GOEXPERIMENT=logosstack` starts goroutines at per-call-site sizes. |
-| M18 | Arena and bump allocation | Flag only: `GOEXPERIMENT=logosarena`, or `[build] arena = true` in `logos.toml`. |
+| M18 | Arena and bump allocation | On by default under `logos` (`[build] arena = true`); `GOEXPERIMENT=logosarena` under plain `go`. |
 | M20 | Fast-CGo | Directive and flag only: `//logos:cgo_fastcall` (or `#cgo noescape` with `#cgo nocallback`) behind `GOEXPERIMENT=logosfastcgo`. |
 | M21 | `logos lsp` | Editor setup: gopls proxy mapping `.lgo` positions, with inlay hints, hover, and code actions. |
-| M22 | Verification suites | Directive only: `//logos:zeroalloc` rejects any heap allocation in the marked function. |
+| M22 | Verification suites | Directive only: `//logos:zeroalloc` rejects escape-analysis heap sites in the marked function, not run-time heap fallbacks. |
 
 ## Agent skills
 
@@ -584,7 +584,7 @@ The [plugins/logos/](plugins/logos/) directory packages skills for coding assist
 - [`logos`](plugins/logos/skills/logos/SKILL.md): Author, build, test, and eject loGo/s modules.
 - [`logos-review`](plugins/logos/skills/logos-review/SKILL.md): Review `.lgo` code against compiler rules, diagnostics, and language invariants.
 - [`logos-from-go`](plugins/logos/skills/logos-from-go/SKILL.md): Guide migration of existing plain Go packages to loGo/s syntax.
-- [`logos-performance`](plugins/logos/skills/logos-performance/SKILL.md): Assist with zero-copy views and cgo entry points.
+- [`logos-performance`](plugins/logos/skills/logos-performance/SKILL.md): Assist with -O tiers, SIMD, WASM, stack, arena, fast cgo, and zero-alloc.
 
 To provide coding agents with project conventions and compiler constraints, copy [plugins/logos/templates/AGENTS.md](plugins/logos/templates/AGENTS.md) into the target repository root. See [plugins/logos/](plugins/logos/) for plugin structure and usage documentation.
 
