@@ -5,5 +5,5 @@ package p
 import "slices"
 
 func cloneConst(xs const []int) []int {
-	return slices.Clone(xs) // ERROR "does not satisfy"
+	return slices.Clone(xs) // ERROR "correctness::const_view_mutation"
 }
