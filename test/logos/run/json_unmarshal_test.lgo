@@ -626,3 +626,24 @@ func TestQuotedNamedIntWithIsZero(t *testing.T) {
 		}
 	}
 }
+
+type MaybeRec struct {
+	Maybe int64? `json:"maybe"`
+}
+
+func TestAbsentOptionalReadsNone(t *testing.T) {
+	u := decodeOK[MaybeRec](`{}`)
+	if u.Maybe != nil {
+		t.Fatalf("{}: Maybe = %+v, want none", u.Maybe)
+	}
+	if (u.Maybe ?? -1) != -1 {
+		t.Fatalf("{}: Maybe ?? -1 = %d, want -1", u.Maybe ?? -1)
+	}
+	v := decodeOK[MaybeRec](`{"maybe":{"Value":0,"Present":true}}`)
+	if v.Maybe == nil {
+		t.Fatalf(`{"maybe":{"Value":0,"Present":true}}: got none, want some 0`)
+	}
+	if (v.Maybe ?? -1) != 0 {
+		t.Fatalf(`{"maybe":{"Value":0,"Present":true}}: Maybe ?? -1 = %d, want 0`, v.Maybe ?? -1)
+	}
+}
