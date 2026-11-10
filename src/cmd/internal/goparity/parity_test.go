@@ -366,11 +366,8 @@ func stageCorpus(tc toolchain, dst, cacheDir string, progs []string) error {
 			return fmt.Errorf("staging %s: %w", p, err)
 		}
 		if _, err := os.Stat(filepath.Join(srcDir, "gen.go")); err == nil {
-			cmd := exec.Command(tc.bin, "run", "gen.go")
-			cmd.Dir = filepath.Join(dst, p)
-			cmd.Env = baseEnv(cacheDir)
-			if out, err := cmd.CombinedOutput(); err != nil {
-				return fmt.Errorf("generator for %s failed: %v\n%s", p, err, clip(string(out)))
+			if err := runGenerator(tc.bin, p, filepath.Join(dst, p), baseEnv(cacheDir), generatorBudget); err != nil {
+				return err
 			}
 		}
 	}
@@ -386,8 +383,38 @@ func goBuild(bin, dir string, args, env []string, budget time.Duration) (string,
 	cmd := exec.CommandContext(ctx, bin, args...)
 	cmd.Dir = dir
 	cmd.Env = env
+	cmd.WaitDelay = pipeWaitDelay
 	out, err := cmd.CombinedOutput()
 	return string(out), err
+}
+
+const generatorBudget = 5 * time.Minute
+
+const pipeWaitDelay = 10 * time.Second
+
+func runGenerator(bin, prog, dir string, env []string, budget time.Duration) error {
+	ctx, cancel := context.WithTimeoutCause(context.Background(), budget, errors.New("goparity generator timeout"))
+	defer cancel()
+	cmd := exec.CommandContext(ctx, bin, "run", "gen.go")
+	cmd.Dir = dir
+	cmd.Env = env
+	cmd.WaitDelay = pipeWaitDelay
+	setNewProcessGroup(cmd)
+	cmd.Cancel = func() error {
+		killProcessGroup(cmd)
+		return nil
+	}
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		if ctx.Err() != nil {
+			if cmd.ProcessState == nil || !cmd.ProcessState.Exited() {
+				killProcessGroup(cmd)
+			}
+			return fmt.Errorf("generator for %s timed out: %w", prog, context.Cause(ctx))
+		}
+		return fmt.Errorf("generator for %s failed: %v\n%s", prog, err, clip(string(out)))
+	}
+	return nil
 }
 
 const moduleBuildBudget = 15 * time.Minute
@@ -564,6 +591,12 @@ func runBinaryTimeout(path, maxProcs string, budget time.Duration) (observation,
 		"GODEBUG=",
 		"GOTRACEBACK=single",
 	}
+	cmd.WaitDelay = pipeWaitDelay
+	setNewProcessGroup(cmd)
+	cmd.Cancel = func() error {
+		killProcessGroup(cmd)
+		return nil
+	}
 	var out, errb bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &errb
@@ -573,7 +606,14 @@ func runBinaryTimeout(path, maxProcs string, budget time.Duration) (observation,
 		obs.exit = 0
 		return obs, nil
 	}
+	if errors.Is(runErr, exec.ErrWaitDelay) && cmd.ProcessState != nil && cmd.ProcessState.Exited() {
+		obs.exit = cmd.ProcessState.ExitCode()
+		return obs, nil
+	}
 	if ctx.Err() != nil {
+		if cmd.ProcessState == nil || !cmd.ProcessState.Exited() {
+			killProcessGroup(cmd)
+		}
 		return obs, fmt.Errorf("running %s: %w", path, context.Cause(ctx))
 	}
 	if ee, ok := errors.AsType[*exec.ExitError](runErr); ok {
@@ -581,6 +621,124 @@ func runBinaryTimeout(path, maxProcs string, budget time.Duration) (observation,
 		return obs, nil
 	}
 	return obs, fmt.Errorf("running %s: %w", path, runErr)
+}
+
+func TestRunBinaryTimeoutKillsSleeper(t *testing.T) {
+	fork := forkTool(t)
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "marker")
+	src := fmt.Sprintf(`package main
+
+import (
+	"os"
+	"time"
+)
+
+func main() {
+	time.Sleep(8 * time.Second)
+	_ = os.WriteFile(%q, []byte("alive"), 0o644)
+}
+`, marker)
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module sleeper\n\ngo 1.27\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	bin := filepath.Join(dir, "sleeper")
+	if out, err := goBuild(fork.bin, dir, []string{"build", "-o", bin, "."}, baseEnv(forkCache()), 5*time.Minute); err != nil {
+		t.Fatalf("building sleeper: %v\n%s", err, clip(out))
+	}
+	start := time.Now()
+	_, err := runBinaryTimeout(bin, "4", 2*time.Second)
+	elapsed := time.Since(start)
+	if err == nil || !strings.Contains(err.Error(), "goparity run timeout") {
+		t.Fatalf("sleeper run = %v, want the goparity run timeout error", err)
+	}
+	if elapsed > 30*time.Second {
+		t.Fatalf("sleeper kill took %s, want within the bound", elapsed)
+	}
+	time.Sleep(time.Until(start.Add(11 * time.Second)))
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatal("sleeper wrote its marker after the deadline: child survived the kill")
+	}
+}
+
+func TestRunBinaryTimeoutReleasesGrandchildPipe(t *testing.T) {
+	fork := forkTool(t)
+	dir := t.TempDir()
+	src := `package main
+
+import (
+	"fmt"
+	"os"
+	"os/exec"
+)
+
+func main() {
+	fmt.Println("done")
+	c := exec.Command("/bin/sleep", "30")
+	c.Stdout = os.Stdout
+	c.Stderr = os.Stderr
+	_ = c.Start()
+}
+`
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module daemon\n\ngo 1.27\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	bin := filepath.Join(dir, "daemon")
+	if out, err := goBuild(fork.bin, dir, []string{"build", "-o", bin, "."}, baseEnv(forkCache()), 5*time.Minute); err != nil {
+		t.Fatalf("building daemon: %v\n%s", err, clip(out))
+	}
+	start := time.Now()
+	obs, err := runBinaryTimeout(bin, "4", 15*time.Second)
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatalf("daemon run = %v, want the exited parent observation", err)
+	}
+	if obs.exit != 0 {
+		t.Fatalf("daemon exit = %d, want 0", obs.exit)
+	}
+	if elapsed > 20*time.Second {
+		t.Fatalf("grandchild pipe held the run for %s, want within the bound", elapsed)
+	}
+}
+
+func TestRunGeneratorTimeoutKillsSleeper(t *testing.T) {
+	fork := forkTool(t)
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "marker")
+	src := fmt.Sprintf(`package main
+
+import (
+	"os"
+	"time"
+)
+
+func main() {
+	time.Sleep(10 * time.Second)
+	_ = os.WriteFile(%q, []byte("alive"), 0o644)
+}
+`, marker)
+	if err := os.WriteFile(filepath.Join(dir, "gen.go"), []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	err := runGenerator(fork.bin, "sleepgen", dir, baseEnv(forkCache()), 2*time.Second)
+	elapsed := time.Since(start)
+	if err == nil || !strings.Contains(err.Error(), "timed out") {
+		t.Fatalf("sleeping generator = %v, want a timeout error", err)
+	}
+	if elapsed > 60*time.Second {
+		t.Fatalf("generator kill took %s, want within the bound", elapsed)
+	}
+	time.Sleep(time.Until(start.Add(13 * time.Second)))
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatal("generator wrote its marker after the deadline: child survived the kill")
+	}
 }
 
 func obsEqual(a, b observation) bool {
