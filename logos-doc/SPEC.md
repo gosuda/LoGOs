@@ -1680,7 +1680,6 @@ Cleanup on panic MUST use open-coded defers. [T-206][T-104.7]
 ### 15.2 Locked WithLock
 
 For `WithLock` locking and unlock-after-panic, see Sec 2.6. [T-206]
-A `WithLock` lambda MUST NOT return or store its argument. [T-206]
 
 This example imports `logos/sync` with the package name `sync`.
 
