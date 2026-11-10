@@ -122,7 +122,6 @@ cd r/main
 ! logos build -a -gcflags=example.com/rdep=-m -o $WORK/bin/cr$GOEXE ./cmd
 stderr 'inlining call to helper'
 stderr 'inlining call to reflect\.ValueOf'
-stderr 'inlining call to reflect\.Value\.Method'
 stderr 'ERROR \[capabilities::unauthorized_reflect\]: Transitive dependency ''example\.com/rdep'' reaches ''reflect\.ValueOf'''
 stderr 'example\.com/rdep\.Init\(\) +at [^ ]+\.go:\d+'
 stderr 'reflect\.ValueOf\(\)'
