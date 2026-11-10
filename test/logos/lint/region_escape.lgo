@@ -18,3 +18,20 @@ func GoCapture() {
 	go func() { _ = r }() // ERROR "\[correctness::region_escape\]" // ERROR "unsupervised_goroutine"
 	_ = r
 }
+
+func Ret() arena.Region {
+	r := arena.Open()
+	return r // ERROR "\[correctness::region_escape\]"
+}
+
+func Send(ch chan arena.Region) {
+	r := arena.Open()
+	ch <- r // ERROR "\[correctness::region_escape\]"
+}
+
+var gRegion arena.Region
+
+func StoreGlobal() {
+	r := arena.Open()
+	gRegion = r // ERROR "\[correctness::region_escape\]"
+}
