@@ -1598,7 +1598,7 @@ func TestProxyMergesDiagnosticsOfGoDocuments(t *testing.T) {
 func TestProxyCodeActionWithoutLoweringUsesCompiler(t *testing.T) {
 	root, tc := realWorkspace(t)
 	aPath := filepath.Join(root, filepath.FromSlash("lmod/a/a.lgo"))
-	const denied = "package a\n\nfunc get() (int, error) { return 1, nil }\n\nfunc run() error {\n\tget()\n\treturn nil\n}\n"
+	const denied = "package a\n\nimport \"errors\"\n\nvar errGet = errors.New(\"get\")\n\nvar failGet = false\n\nfunc get() (int, error) {\n\tif failGet {\n\t\treturn 0, errGet\n\t}\n\treturn 1, nil\n}\n\nfunc run() error {\n\tget()\n\treturn nil\n}\n"
 	scratch := t.TempDir()
 	scriptPath := filepath.Join(scratch, "script.json")
 	scriptData, err := json.Marshal(fakeScript{})

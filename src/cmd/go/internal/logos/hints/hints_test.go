@@ -400,7 +400,7 @@ func TestCodeActionsAddTry(t *testing.T) {
 	if len(actions) != 1 || actions[0].Title != "add ? to propagate the error" {
 		t.Fatalf("actions %+v", actions)
 	}
-	want := "package p\n\nfunc f() error { return nil }\n\nfunc g() error {\n\tf()?\n\treturn nil\n}\n"
+	want := "package p\n\nimport \"errors\"\n\nvar errDiscard = errors.New(\"discard\")\n\nvar failDiscard = false\n\nfunc f() error {\n\tif failDiscard {\n\t\treturn errDiscard\n\t}\n\treturn nil\n}\n\nfunc g() error {\n\tf()?\n\treturn nil\n}\n"
 	if got := applyEdits(t, f.src, actions[0].Edit.Changes[uri]); got != want {
 		t.Errorf("got %q\nwant %q", got, want)
 	}
