@@ -298,6 +298,75 @@ func checkAlias() {
 	fmt.Println("alias", s, x.sum())
 }
 
+func checkIntSubDiv() {
+	var sa, sb [8]int32
+	for i := range sa {
+		sa[i] = int32(i*7 - 11)
+		sb[i] = int32(i*3 + 1)
+	}
+	sd := sa - sb
+	for i := range sd {
+		if sd[i] != sa[i]-sb[i] {
+			panic("int32 sub mismatch")
+		}
+	}
+	var da, db [8]uint8
+	for i := range da {
+		da[i] = uint8(i*13 + 5)
+		db[i] = uint8(i*7 + 1)
+	}
+	dq := da / db
+	for i := range dq {
+		if dq[i] != da[i]/db[i] {
+			panic("uint8 div mismatch")
+		}
+	}
+	var ua, ub [4]uint32
+	for i := range ua {
+		ua[i] = uint32(i*11 + 9)
+		ub[i] = uint32(i*5 + 2)
+	}
+	uq := ua / ub
+	for i := range uq {
+		if uq[i] != ua[i]/ub[i] {
+			panic("uint32 div mismatch")
+		}
+	}
+	fmt.Println("intsubdiv", sd, dq, uq)
+}
+
+func checkFloatXor() {
+	fa := [4]float32{1.5, -2.25, 3.75, -0.5}
+	fb := [4]float32{4.25, 1.5, -2.5, 8.0}
+	fx := fa ^ fb
+	for i := range fx {
+		if math.Float32bits(fx[i]) != math.Float32bits(fa[i])^math.Float32bits(fb[i]) {
+			panic("float32 xor mismatch")
+		}
+	}
+	ga := [2]float64{1.5, -2.25}
+	gb := [2]float64{4.25, 1.5}
+	gx := ga ^ gb
+	for i := range gx {
+		if math.Float64bits(gx[i]) != math.Float64bits(ga[i])^math.Float64bits(gb[i]) {
+			panic("float64 xor mismatch")
+		}
+	}
+	fmt.Println("floatxor", fx, gx)
+}
+
+func checkSmallMinMax() {
+	m32 := [4]float32{3.5, -1.25, 7.0, 2.0}
+	if m32.min() != -1.25 || m32.max() != 7.0 {
+		panic("float32 minmax mismatch")
+	}
+	mi32 := [4]int32{3, -11, 7, -2}
+	if mi32.min() != -11 || mi32.max() != 7 {
+		panic("int32 minmax mismatch")
+	}
+	fmt.Println("smallminmax", m32.min(), m32.max(), mi32.min(), mi32.max())
+}
+
 func main() {
 	checkAdd4()
 	checkMul8()
@@ -308,5 +377,8 @@ func main() {
 	checkNamed()
 	checkWordKinds()
 	checkAlias()
+	checkIntSubDiv()
+	checkFloatXor()
+	checkSmallMinMax()
 	fmt.Println("simd ok")
 }
