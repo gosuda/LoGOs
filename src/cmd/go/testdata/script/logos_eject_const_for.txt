@@ -10,6 +10,7 @@ stdout '^Ok=15$'
 stdout '^15 <nil>$'
 stdout '^0 bad z$'
 stdout '^27$'
+stdout '^\[nm ct\]$'
 cp stdout $WORK/native.txt
 
 mkdir $WORK/orig
@@ -19,7 +20,9 @@ logos eject -o out
 exists out/main.go
 
 ! grep '"comptime"' out/main.go
-! grep '^import$' out/main.go
+grep '"nm"' out/main.go
+grep '"ct"' out/main.go
+! grep 'Tag\.Get' out/main.go
 
 cd out
 go run .
@@ -78,8 +81,22 @@ func summed() int {
 	return s
 }
 
+type Tagged struct {
+	Name  string `json:"nm"`
+	Count int    `json:"ct"`
+}
+
+func tags() []string {
+	var out []string
+	const for _, f := range comptime.Fields[Tagged]() {
+		out = append(out, f.Tag.Get("json"))
+	}
+	return out
+}
+
 func main() {
 	fmt.Println(total("5"))
 	fmt.Println(total("z"))
 	fmt.Println(summed())
+	fmt.Println(tags())
 }
