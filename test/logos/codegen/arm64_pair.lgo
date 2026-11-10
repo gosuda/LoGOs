@@ -197,6 +197,23 @@ func vecMisaligned24(src, dst *pairVecPad8) {
 	b.StoreArray(&dst.B)
 }
 
+type pairVecMis1000 struct {
+	Pad [1000]byte
+	A   [16]byte
+	B   [16]byte
+}
+
+func vecMisaligned1008(src, dst *pairVecMis1000) {
+	// arm64:-"FLDPQ" "FMOVQ 1000\\(R[0-9]+\\), F[0-9]+"
+	a := archsimd.LoadUint8x16Array(&src.A)
+	// arm64:-"FLDPQ" "FMOVQ 1016\\(R[0-9]+\\), F[0-9]+"
+	b := archsimd.LoadUint8x16Array(&src.B)
+	// arm64:-"FSTPQ" "FMOVQ F[0-9]+, 1000\\(R[0-9]+\\)"
+	a.StoreArray(&dst.A)
+	// arm64:-"FSTPQ" "FMOVQ F[0-9]+, 1016\\(R[0-9]+\\)"
+	b.StoreArray(&dst.B)
+}
+
 func vecLoadCallBarrier(src *pairVec016, dst *[16]byte) {
 	// arm64:-"FLDPQ" "FMOVQ \\(R[0-9]+\\), F[0-9]+"
 	a := archsimd.LoadUint8x16Array(&src.A)
