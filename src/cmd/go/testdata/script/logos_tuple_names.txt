@@ -4,6 +4,8 @@ env GOTOOLCHAIN=local
 ! logos build ./...
 stderr 'cannot use'
 
+logos build -o $WORK/ok$GOEXE ./okmain
+
 -- go.mod --
 module example.com/tuplenames
 
@@ -23,5 +25,15 @@ import "example.com/tuplenames/p"
 
 func main() {
 	var v (id int64, err error) = (1, nil)
+	println(p.Show(v))
+}
+
+-- okmain/main.lgo --
+package main
+
+import "example.com/tuplenames/p"
+
+func main() {
+	var v (x int64, err error) = (1, nil)
 	println(p.Show(v))
 }
