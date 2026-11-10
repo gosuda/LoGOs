@@ -36,6 +36,9 @@ func logosSrc(t *testing.T, dir string) {
 }
 
 func TestLoadPrecedence(t *testing.T) {
+	o0 := logosModule(t, "[build]\nopt_level = \"O0\"\n")
+	o1 := logosModule(t, "[build]\nopt_level = \"O1\"\n")
+	o2 := logosModule(t, "[build]\nopt_level = \"O2\"\n")
 	o3 := logosModule(t, "[build]\nopt_level = \"O3\"\n")
 	os2 := logosModule(t, "[build]\nopt_level = \"Os\"\n")
 	empty := logosModule(t, "")
@@ -69,6 +72,26 @@ func TestLoadPrecedence(t *testing.T) {
 			name: "fileLevel", modRoot: o3,
 			flags: Flags{Logos: true}, optLevel: "3",
 			gcflags: []string{"-d=inlbudget=400,inlrecursivebudget=80,variablemakethreshold=4096"},
+			amd64:   "v3", arm: "v8.2",
+			experiment: "logosarena", arena: true, module: true,
+		},
+		{
+			name: "fileLevelO0", modRoot: o0,
+			flags: Flags{Logos: true}, optLevel: "0",
+			gcflags: []string{"-N", "-l"},
+			amd64:   "v3", arm: "v8.2",
+			experiment: "logosarena", arena: true, module: true,
+		},
+		{
+			name: "fileLevelO1", modRoot: o1,
+			flags: Flags{Logos: true}, optLevel: "1",
+			amd64: "v3", arm: "v8.2",
+			experiment: "logosarena", arena: true, module: true,
+		},
+		{
+			name: "fileLevelO2", modRoot: o2,
+			flags: Flags{Logos: true}, optLevel: "2",
+			gcflags: []string{"-d=inlbudget=120,variablemakethreshold=256"},
 			amd64:   "v3", arm: "v8.2",
 			experiment: "logosarena", arena: true, module: true,
 		},
