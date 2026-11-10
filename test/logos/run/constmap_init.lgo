@@ -23,13 +23,18 @@ func init() {
 	runtime.ReadMemStats(&m)
 	initAlloc = m.HeapAlloc
 }
+
+func depSrc() string {
+	return "package dep\n\nimport (\n\t\"runtime\"\n\n\t_ \"logos/rt\"\n)\n\nvar AtInit uint64\n\nfunc init() {\n\tvar m runtime.MemStats\n\truntime.ReadMemStats(&m)\n\truntime.ReadMemStats(&m)\n\tAtInit = m.HeapAlloc\n}\n"
+}
+
 func probeSrc() string {
 	var b strings.Builder
-	b.WriteString("package main\n\nimport (\n\t\"fmt\"\n\t\"os\"\n\t\"runtime\"\n)\n\nconst initArray = [8]int{1, 2, 3, 4, 5, 6, 7, 8}\n\nconst squares = map[int]int{")
+	b.WriteString("package main\n\nimport (\n\t\"fmt\"\n\t\"os\"\n\t\"runtime\"\n\n\t\"probe/dep\"\n)\n\nconst initArray = [8]int{1, 2, 3, 4, 5, 6, 7, 8}\n\nconst flat = [8]int{1, 2, 3, 4, 5, 6, 7, 8}\n\nconst sl = []int{1, 2, 3, 4, 5, 6, 7, 8}\n\nconst squares = map[int]int{")
 	for k := range 1000 {
 		b.WriteString(fmt.Sprintf("%d: %d, ", k, k*k))
 	}
-	b.WriteString("}\n\nvar probeInitAlloc uint64\n\nfunc init() {\n\tvar m runtime.MemStats\n\truntime.ReadMemStats(&m)\n\truntime.ReadMemStats(&m)\n\tprobeInitAlloc = m.HeapAlloc\n}\n\nfunc main() {\n\tvar m runtime.MemStats\n\truntime.ReadMemStats(&m)\n\truntime.ReadMemStats(&m)\n\tif m.HeapAlloc != probeInitAlloc {\n\t\tfmt.Printf(\"FAIL probe init heap grew: %d vs %d\\n\", probeInitAlloc, m.HeapAlloc)\n\t\tos.Exit(1)\n\t}\n\tn := 0\n\tfor range squares {\n\t\tn++\n\t}\n\tfmt.Println(initArray, squares[31] ?? -1, n)\n\tfmt.Println(\"probe init OK\")\n}\n")
+	b.WriteString("}\n\nvar mainInitRan = false\n\nfunc init() {\n\tmainInitRan = true\n}\n\nfunc checkFlat() bool {\n\tif mainInitRan {\n\t\treturn false\n\t}\n\tif flat != [8]int{1, 2, 3, 4, 5, 6, 7, 8} {\n\t\treturn false\n\t}\n\tsum := 0\n\tfor _, v := range sl {\n\t\tsum += v\n\t}\n\treturn sum == 36\n}\n\nvar earlyFlatOK = checkFlat()\n\nfunc recordHeap() uint64 {\n\tvar m runtime.MemStats\n\truntime.ReadMemStats(&m)\n\truntime.ReadMemStats(&m)\n\treturn m.HeapAlloc\n}\n\nvar heapAfterTables = recordHeap()\n\nfunc main() {\n\tif !earlyFlatOK {\n\t\tfmt.Println(\"FAIL flat not ready before init\")\n\t\tos.Exit(1)\n\t}\n\tvar m runtime.MemStats\n\truntime.ReadMemStats(&m)\n\truntime.ReadMemStats(&m)\n\tif m.HeapAlloc != dep.AtInit {\n\t\tfmt.Printf(\"FAIL probe init heap grew: %d vs %d\\n\", dep.AtInit, m.HeapAlloc)\n\t\tos.Exit(1)\n\t}\n\tn := 0\n\tfor range squares {\n\t\tn++\n\t}\n\tfmt.Println(initArray, flat, sl, squares[31] ?? -1, n)\n\tfmt.Println(\"probe init OK\")\n}\n")
 	return b.String()
 }
 
@@ -41,17 +46,6 @@ func main() {
 	before := m.HeapAlloc
 	if before != initAlloc {
 		fmt.Printf("FAIL init heap grew: %d vs %d\n", initAlloc, before)
-		os.Exit(1)
-	}
-	sum := 0
-	for _, v := range initSlice {
-		sum += v
-	}
-	for _, v := range initArray {
-		sum += v
-	}
-	if sum != 113 {
-		fmt.Printf("FAIL sum=%d\n", sum)
 		os.Exit(1)
 	}
 	runtime.ReadMemStats(&m)
@@ -81,10 +75,27 @@ func main() {
 		fmt.Printf("FAIL source: %v\n", err)
 		os.Exit(1)
 	}
+	if err := os.MkdirAll(filepath.Join(dir, "dep"), 0755); err != nil {
+		fmt.Printf("FAIL depdir: %v\n", err)
+		os.Exit(1)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "dep", "dep.lgo"), []byte(depSrc()), 0644); err != nil {
+		fmt.Printf("FAIL depsource: %v\n", err)
+		os.Exit(1)
+	}
 	cmd := exec.Command(logosBin, "build", "-o", "probe.exe", ".")
 	cmd.Dir = dir
 	if out, err := cmd.CombinedOutput(); err != nil {
 		fmt.Printf("FAIL probe build: %v\n%s", err, out)
+		os.Exit(1)
+	}
+	probeOut, err := exec.Command(filepath.Join(dir, "probe.exe")).CombinedOutput()
+	if err != nil {
+		fmt.Printf("FAIL probe run: %v\n%s", err, probeOut)
+		os.Exit(1)
+	}
+	if !strings.Contains(string(probeOut), "probe init OK") {
+		fmt.Printf("FAIL probe:\n%s", probeOut)
 		os.Exit(1)
 	}
 	nmOut, err := exec.Command(goBin, "tool", "nm", filepath.Join(dir, "probe.exe")).CombinedOutput()
@@ -98,7 +109,7 @@ func main() {
 			symType[f[len(f)-1]] = f[1]
 		}
 	}
-	for _, sym := range []string{"main.initArray", "main._logos_cm0_squares_sorted", "main._logos_cm0_squares_tab"} {
+	for _, sym := range []string{"main.initArray", "main.flat", "main._logos_cm0_squares_sorted", "main._logos_cm0_squares_tab"} {
 		kind := symType[sym] ?? ""
 		fmt.Printf("%s=%s\n", sym, kind)
 		if kind != "R" {
@@ -106,13 +117,15 @@ func main() {
 			os.Exit(1)
 		}
 	}
-	probeOut, err := exec.Command(filepath.Join(dir, "probe.exe")).CombinedOutput()
-	if err != nil {
-		fmt.Printf("FAIL probe run: %v\n%s", err, probeOut)
-		os.Exit(1)
+	sum := 0
+	for _, v := range initSlice {
+		sum += v
 	}
-	if !strings.Contains(string(probeOut), "probe init OK") {
-		fmt.Printf("FAIL probe init heap grew:\n%s", probeOut)
+	for _, v := range initArray {
+		sum += v
+	}
+	if sum != 113 {
+		fmt.Printf("FAIL sum=%d\n", sum)
 		os.Exit(1)
 	}
 
