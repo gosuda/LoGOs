@@ -1520,6 +1520,98 @@ func TestLogosLspGoplsDiscovery(t *testing.T) {
 	})
 }
 
+func TestLogosLspStdioWiring(t *testing.T) {
+	testenv.MustHaveGoBuild(t)
+	t.Setenv("GOFLAGS", "")
+	t.Setenv("GOTOOLCHAIN", "local")
+	t.Setenv("GOPROXY", "off")
+	logosBin := filepath.Join(filepath.Dir(testenv.GoToolPath(t)), "logos")
+	if _, err := os.Stat(logosBin); err != nil {
+		t.Fatalf("logos binary not present: build the tree first: %v", err)
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	fakeDir := t.TempDir()
+	scriptPath := filepath.Join(t.TempDir(), "script.json")
+	if err := os.WriteFile(scriptPath, []byte(`{}`), 0o666); err != nil {
+		t.Fatal(err)
+	}
+	wrapper := "#!/bin/sh\nexec \"" + exe + "\" \"$@\"\n"
+	if err := os.WriteFile(filepath.Join(fakeDir, "gopls"), []byte(wrapper), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(logosBin, "lsp")
+	cmd.Env = append(os.Environ(),
+		"PATH="+fakeDir+string(os.PathListSeparator)+os.Getenv("PATH"),
+		fakeEnv+"="+scriptPath,
+		fakeLogEnv+"="+filepath.Join(t.TempDir(), "gopls.log"))
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	replies := make(chan *message, 16)
+	go func() {
+		rd := newReader(stdout)
+		defer close(replies)
+		for {
+			m, err := rd.read()
+			if err != nil {
+				return
+			}
+			select {
+			case replies <- m:
+			default:
+			}
+		}
+	}()
+	w := &writer{w: stdin}
+	if err := w.write(&message{ID: json.RawMessage("1"), Method: "initialize", Params: json.RawMessage(`{"capabilities":{}}`)}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case m, ok := <-replies:
+		if !ok {
+			t.Fatal("logos lsp closed stdout without an initialize reply")
+		}
+		if !m.isResponse() || string(m.ID) != "1" {
+			t.Fatalf("initialize reply = %+v, want the response with id 1", m)
+		}
+		v, err := decode(m.Result)
+		if err != nil {
+			t.Fatal(err)
+		}
+		caps, _ := v.(map[string]any)["capabilities"].(map[string]any)
+		if _, ok := caps["hoverProvider"]; !ok {
+			t.Errorf("initialize reply capabilities = %v, want hoverProvider", caps)
+		}
+	case <-time.After(waitLimit):
+		t.Fatal("logos lsp sent no initialize reply on stdout")
+	}
+	if err := w.write(&message{ID: json.RawMessage("2"), Method: "shutdown", Params: json.RawMessage("null")}); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.notify("exit", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := stdin.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Wait(); err != nil {
+		t.Fatalf("logos lsp = %v, stderr %q", err, stderr.String())
+	}
+}
+
 func TestServeRejectsBadFrames(t *testing.T) {
 	frame := func(body string) string {
 		return fmt.Sprintf("Content-Length: %d\r\n\r\n%s", len(body), body)
