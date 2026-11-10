@@ -11,9 +11,15 @@ stderr 'inlbudget=120'
 logos test -a -x -O=3 unicode/utf8
 stdout '^ok'
 stderr -count=1 'variablemakethreshold'
+stderr '-p main.*variablemakethreshold=4096'
+! stderr '-p unicode/utf8.*variablemakethreshold'
+! stderr '-p unicode/utf8_test.*variablemakethreshold'
 logos test -a -x -O=2 unicode/utf8
 stdout '^ok'
 stderr -count=1 'variablemakethreshold'
+stderr '-p main.*variablemakethreshold=256'
+! stderr '-p unicode/utf8.*variablemakethreshold'
+! stderr '-p unicode/utf8_test.*variablemakethreshold'
 logos build -a -gcflags=unicode/utf8=-m -O=3 unicode/utf8
 stderr 'inlining call to encodeRuneNonASCII'
 logos build -a -gcflags=unicode/utf8=-m -O=2 unicode/utf8
