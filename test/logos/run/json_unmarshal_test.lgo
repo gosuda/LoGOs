@@ -647,3 +647,78 @@ func TestAbsentOptionalReadsNone(t *testing.T) {
 		t.Fatalf(`{"maybe":{"Value":0,"Present":true}}: Maybe ?? -1 = %d, want 0`, v.Maybe ?? -1)
 	}
 }
+
+type Keyed8 struct {
+	A1  int64 `json:"a1"`
+	A10 int64 `json:"a10"`
+	B   int64 `json:"b"`
+	C   int64 `json:"c"`
+	D   int64 `json:"d"`
+	E   int64 `json:"e"`
+	G   int64 `json:"g"`
+	H   int64 `json:"h"`
+}
+
+type Keyed9 struct {
+	A1  int64 `json:"a1"`
+	A10 int64 `json:"a10"`
+	A11 int64 `json:"a11"`
+	B   int64 `json:"b"`
+	C   int64 `json:"c"`
+	D   int64 `json:"d"`
+	E   int64 `json:"e"`
+	G   int64 `json:"g"`
+	H   int64 `json:"h"`
+}
+
+type keyed8Mirror struct {
+	A1    int64 `json:"a1"`
+	A10   int64 `json:"a10"`
+	B     int64 `json:"b"`
+	C     int64 `json:"c"`
+	D     int64 `json:"d"`
+	E     int64 `json:"e"`
+	G     int64 `json:"g"`
+	H     int64 `json:"h"`
+	NoGen any   `json:"-"`
+}
+
+type keyed9Mirror struct {
+	A1    int64 `json:"a1"`
+	A10   int64 `json:"a10"`
+	A11   int64 `json:"a11"`
+	B     int64 `json:"b"`
+	C     int64 `json:"c"`
+	D     int64 `json:"d"`
+	E     int64 `json:"e"`
+	G     int64 `json:"g"`
+	H     int64 `json:"h"`
+	NoGen any   `json:"-"`
+}
+
+func TestKeyDispatchAtTheSwitchTableBoundary(t *testing.T) {
+	doc8 := `{"h":8,"g":7,"e":6,"d":5,"c":4,"b":3,"a10":10,"a1":1}`
+	doc9 := `{"h":8,"a11":11,"g":7,"e":6,"d":5,"c":4,"b":3,"a10":10,"a1":1}`
+	got8 := decodeOK[Keyed8](doc8)
+	var want8 keyed8Mirror
+	if err8m := json.Unmarshal([]byte(doc8), &want8); err8m != nil {
+		t.Fatal(err8m)
+	}
+	if got8.A1 != want8.A1 || got8.A10 != want8.A10 || got8.B != want8.B || got8.C != want8.C || got8.D != want8.D || got8.E != want8.E || got8.G != want8.G || got8.H != want8.H {
+		t.Fatalf("8-key dispatch: got %+v, want %+v", *got8, want8)
+	}
+	if got8.A1 != 1 || got8.A10 != 10 {
+		t.Fatalf("prefix keys crossed: a1=%d a10=%d, want 1 and 10", got8.A1, got8.A10)
+	}
+	got9 := decodeOK[Keyed9](doc9)
+	var want9 keyed9Mirror
+	if err9m := json.Unmarshal([]byte(doc9), &want9); err9m != nil {
+		t.Fatal(err9m)
+	}
+	if got9.A1 != want9.A1 || got9.A10 != want9.A10 || got9.A11 != want9.A11 || got9.B != want9.B || got9.C != want9.C || got9.D != want9.D || got9.E != want9.E || got9.G != want9.G || got9.H != want9.H {
+		t.Fatalf("9-key dispatch: got %+v, want %+v", *got9, want9)
+	}
+	if got9.A1 != 1 || got9.A10 != 10 || got9.A11 != 11 {
+		t.Fatalf("table probe lost full-key validation: a1=%d a10=%d a11=%d, want 1, 10 and 11", got9.A1, got9.A10, got9.A11)
+	}
+}
