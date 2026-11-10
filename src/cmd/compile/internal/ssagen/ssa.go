@@ -3876,10 +3876,7 @@ func (s *state) getBackingStoreInfo(n ir.Node) *backingStoreInfo {
 	if et.Size() == 0 || et.Size() > maxStackSize {
 		return nil
 	}
-	if base.Flag.N != 0 && base.Debug.VariableMakeUnderN == 0 {
-		return nil
-	}
-	if !base.VariableMakeHash.MatchPos(n.Pos(), nil) {
+	if !base.VariableMakeEnabled(n.Pos()) {
 		return nil
 	}
 	i := s.backingStores[n]
