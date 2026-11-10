@@ -11,6 +11,16 @@ type CFWidget struct {
 	Count int
 }
 
+type CFOther struct {
+	Name string
+}
+
+func cfOtherStructVal(v CFOther) {
+	const for _, f := range comptime.Fields[CFWidget]() {
+		_ = v./* ERROR "comptime::const_for_projection" */[f]
+	}
+}
+
 func cfNonStruct() {
 	const for _, f := range comptime.Fields[int /* ERROR "comptime::const_for_fields" */]() {
 		_ = f
