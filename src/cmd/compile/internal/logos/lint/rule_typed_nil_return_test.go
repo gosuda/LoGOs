@@ -181,6 +181,32 @@ func TestTypedNilReturn(t *testing.T) {
 	expect(t, KindGo, nil, testSource{"x.go", typedNilGoSrc}, finding{"correctness::typed_nil_return", Deny})
 }
 
+const typedNilCgoSrc = `package p
+
+import (
+	"io"
+	"os"
+)
+
+func _Cfunc_make_handle() *os.File
+
+func cgoPlatform() io.Closer {
+	return _Cfunc_make_handle() // want
+}
+
+func cgoPlatformProved() io.Closer {
+	h := _Cfunc_make_handle()
+	if h == nil {
+		return nil
+	}
+	return h
+}
+`
+
+func TestTypedNilReturnCgoPlatform(t *testing.T) {
+	expect(t, KindLgo, nil, testSource{"x.lgo", typedNilCgoSrc}, finding{"correctness::typed_nil_return", Forbid})
+}
+
 // TestTypedNilReturnSpan checks the span of each form: the returned
 // expression, through the closing parenthesis of a call.
 func TestTypedNilReturnSpan(t *testing.T) {
