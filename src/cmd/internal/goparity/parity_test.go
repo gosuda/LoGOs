@@ -624,6 +624,9 @@ func runBinaryTimeout(path, maxProcs string, budget time.Duration) (observation,
 }
 
 func TestRunBinaryTimeoutKillsSleeper(t *testing.T) {
+	if !processGroupKillSupported() {
+		skipUnsupportedProcessGroupKill(t)
+	}
 	fork := forkTool(t)
 	dir := t.TempDir()
 	marker := filepath.Join(dir, "marker")
@@ -665,6 +668,9 @@ func main() {
 }
 
 func TestRunBinaryTimeoutReleasesGrandchildPipe(t *testing.T) {
+	if !processGroupKillSupported() {
+		skipUnsupportedProcessGroupKill(t)
+	}
 	fork := forkTool(t)
 	dir := t.TempDir()
 	src := `package main
@@ -708,6 +714,9 @@ func main() {
 }
 
 func TestRunGeneratorTimeoutKillsSleeper(t *testing.T) {
+	if !processGroupKillSupported() {
+		skipUnsupportedProcessGroupKill(t)
+	}
 	fork := forkTool(t)
 	dir := t.TempDir()
 	marker := filepath.Join(dir, "marker")

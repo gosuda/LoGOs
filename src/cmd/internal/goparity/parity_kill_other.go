@@ -8,10 +8,17 @@ package goparity
 
 import (
 	"os/exec"
+	"runtime"
+	"testing"
 )
 
-func setNewProcessGroup(cmd *exec.Cmd) {
+func processGroupKillSupported() bool { return false }
+
+func skipUnsupportedProcessGroupKill(t *testing.T) {
+	t.Skipf("process-group kill is unsupported on %s; a timed-out parity run could leave grandchildren alive", runtime.GOOS)
 }
+
+func setNewProcessGroup(cmd *exec.Cmd) {}
 
 func killProcessGroup(cmd *exec.Cmd) {
 	if cmd.Process == nil {
