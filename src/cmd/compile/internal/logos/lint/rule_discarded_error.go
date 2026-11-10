@@ -17,7 +17,9 @@ import (
 // expression statement or a blank assignment that drops an error result.
 // Calls that cannot fail in practice are exempt: callees whose package facts
 // carry AlwaysNilError, fmt.Print*, fmt.Fprint* to os.Stdout or os.Stderr,
-// and the Write* methods of *bytes.Buffer and *strings.Builder. No producer
+// fmt.Fprint* and io.WriteString directed at a *bytes.Buffer or
+// *strings.Builder, the Write* methods of *bytes.Buffer and *strings.Builder,
+// and Write on a receiver that implements hash.Hash. No producer
 // of the AlwaysNilError fact exists yet, so that exemption applies only to
 // facts the importer has recorded.
 var discardedError = Rule{
@@ -176,12 +178,107 @@ func benignCall(pass *Pass, call *syntax.CallExpr) bool {
 	case "fmt.Print", "fmt.Printf", "fmt.Println":
 		return true
 	case "fmt.Fprint", "fmt.Fprintf", "fmt.Fprintln":
-		return len(call.ArgList) > 0 && isStdoutOrStderr(pass, call.ArgList[0])
+		return len(call.ArgList) > 0 && (isStdoutOrStderr(pass, call.ArgList[0]) || isBufferOrBuilderArg(call.ArgList[0]))
+	case "io.WriteString":
+		return len(call.ArgList) > 0 && isBufferOrBuilderArg(call.ArgList[0])
 	default:
 		return strings.HasPrefix(name, "(*bytes.Buffer).Write") ||
 			strings.HasPrefix(name, "(*strings.Builder).Write") ||
+			isHashWrite(pass, call) ||
 			alwaysNilError(fn)
 	}
+}
+
+// isBufferOrBuilderArg reports whether e has static type *bytes.Buffer or
+// *strings.Builder. Writes through those types cannot fail, so the wrappers
+// that direct output at them cannot fail either.
+func isBufferOrBuilderArg(e syntax.Expr) bool {
+	ptr, ok := types2.Unalias(TypeOf(e)).(*types2.Pointer)
+	if !ok {
+		return false
+	}
+	named, ok := types2.Unalias(ptr.Elem()).(*types2.Named)
+	if !ok {
+		return false
+	}
+	obj := named.Obj()
+	if obj == nil || obj.Pkg() == nil {
+		return false
+	}
+	return (obj.Pkg().Path() == "bytes" && obj.Name() == "Buffer") ||
+		(obj.Pkg().Path() == "strings" && obj.Name() == "Builder")
+}
+
+// isHashWrite reports whether call writes on a receiver that implements
+// hash.Hash. Such a Write never returns an error.
+func isHashWrite(pass *Pass, call *syntax.CallExpr) bool {
+	fun := call.Fun
+	for {
+		p, ok := fun.(*syntax.ParenExpr)
+		if !ok {
+			break
+		}
+		fun = p.X
+	}
+	sel, ok := fun.(*syntax.SelectorExpr)
+	if !ok || sel.Sel.Value != "Write" {
+		return false
+	}
+	hash := hashInterface(pass.Pkg)
+	if hash == nil {
+		return false
+	}
+	recv := TypeOf(sel.X)
+	if recv == nil {
+		return false
+	}
+	if types2.Implements(recv, hash) {
+		return true
+	}
+	_, isPtr := types2.Unalias(recv).Underlying().(*types2.Pointer)
+	return !isPtr && types2.Implements(types2.NewPointer(recv), hash)
+}
+
+// hashInterface returns the hash.Hash interface visible from pkg over its
+// transitive imports, or nil when no import chain reaches it.
+func hashInterface(pkg *types2.Package) *types2.Interface {
+	if pkg == nil {
+		return nil
+	}
+	hash := findPackage(pkg, "hash")
+	if hash == nil {
+		return nil
+	}
+	obj, ok := hash.Scope().Lookup("Hash").(*types2.TypeName)
+	if !ok {
+		return nil
+	}
+	iface, ok := obj.Type().Underlying().(*types2.Interface)
+	if !ok {
+		return nil
+	}
+	return iface
+}
+
+// findPackage returns the transitively imported package with the given path,
+// or nil.
+func findPackage(root *types2.Package, path string) *types2.Package {
+	seen := map[*types2.Package]bool{root: true}
+	queue := []*types2.Package{root}
+	for len(queue) > 0 {
+		pkg := queue[0]
+		queue = queue[1:]
+		if pkg.Path() == path {
+			return pkg
+		}
+		for _, imp := range pkg.Imports() {
+			if !seen[imp] {
+				seen[imp] = true
+				queue = append(queue, imp)
+			}
+		}
+	}
+	return nil
 }
 
 // alwaysNilError reports whether the facts recorded for the package of fn
