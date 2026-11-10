@@ -103,6 +103,24 @@ func TestPerFieldFallbackMatchesEncodingJSON(t *testing.T) {
 	}
 }
 
+func hasGeneratedMethods(v any) bool {
+	if _, ok := v.(json.Marshaler); ok {
+		return true
+	}
+	if _, ok := v.(json.Unmarshaler); ok {
+		return true
+	}
+	return false
+}
+
+func TestMixedStructsKeepGeneratedMethods(t *testing.T) {
+	for _, v := range []any{Mix{}, NumberMix{}, &Mix{}, &NumberMix{}} {
+		if !hasGeneratedMethods(v) {
+			t.Fatalf("mixed struct %T lost its generated methods", v)
+		}
+	}
+}
+
 func TestUnmarshalFallbackDeliversTheSameMethodInput(t *testing.T) {
 	doc := []byte(`{"a":1,"b":"x","m":123,"v":"3","u":"7","w":"45"}`)
 	var v Mix
