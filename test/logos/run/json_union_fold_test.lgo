@@ -157,3 +157,41 @@ func TestFoldVariantKeySelectsMember(t *testing.T) {
 		t.Fatalf("expected FoldE{A:7}, got %T(%v)", h.Item, h.Item)
 	}
 }
+
+type ShareA struct {
+	Kind string `json:"kind"`
+	V    int64  `json:"v"`
+}
+
+type ShareB struct {
+	Kind string `json:"kind"`
+	V    string `json:"v"`
+}
+
+type ShareUnion interface {
+	ShareA | ShareB
+}
+
+type ShareHolder struct {
+	Item ShareUnion `json:"item"`
+}
+
+func TestSharedKeyPartialFailureSelectsSurvivor(t *testing.T) {
+	const data = `{"item":{"kind":"x","v":1}}`
+	var a ShareA
+	if err := json.Unmarshal([]byte(`{"kind":"x","v":1}`), &a); err != nil {
+		t.Fatalf("encoding/json rejects ShareA: %v", err)
+	}
+	var b ShareB
+	if err := json.Unmarshal([]byte(`{"kind":"x","v":1}`), &b); err == nil {
+		t.Fatalf("encoding/json accepts ShareB, want type error")
+	}
+	var h ShareHolder
+	if err := json.Unmarshal([]byte(data), &h); err != nil {
+		t.Fatalf("decode failure must not veto the survivor, got error: %v", err)
+	}
+	sel, ok := h.Item.(ShareA)
+	if !ok || sel.Kind != "x" || sel.V != 1 {
+		t.Fatalf("expected ShareA{x 1}, got %T(%v)", h.Item, h.Item)
+	}
+}
