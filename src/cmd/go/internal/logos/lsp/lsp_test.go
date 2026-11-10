@@ -1946,6 +1946,26 @@ func TestProxyOneRunForTwoEditsBeforeHover(t *testing.T) {
 	}
 }
 
+func TestProxyDidChangeAloneDoesNotLower(t *testing.T) {
+	edited := aLgo + "// v2\n"
+	f := newFixture(t, map[string]string{"a/a.lgo": aLgo}, fixtureOptions{})
+	f.open("a/a.lgo", 1)
+	aURI := f.uri("a/a.lgo")
+	f.client.notify("textDocument/didChange", map[string]any{
+		"textDocument":   map[string]any{"uri": aURI, "version": 2},
+		"contentChanges": []any{map[string]any{"text": edited}},
+	})
+	f.client.call("initialize", map[string]any{"capabilities": map[string]any{}})
+	if calls := f.comp.lowerCalls(); len(calls) != 0 {
+		t.Fatalf("the proxy compiled %d times for an edit with no request, want none: %v", len(calls), calls)
+	}
+	operand := shift(findPos(t, edited, "ReadFile(path)?", 0), len("ReadFile("))
+	f.client.call("textDocument/hover", positionParams(aURI, operand))
+	if calls := f.comp.lowerCalls(); len(calls) != 1 {
+		t.Fatalf("the proxy compiled %d times for one edit and one hover, want the single hover run: %v", len(calls), calls)
+	}
+}
+
 func TestProxyConcurrentHoversShareOneRun(t *testing.T) {
 	f := newFixture(t, map[string]string{"a/a.lgo": aLgo}, fixtureOptions{
 		Script: func(string) fakeScript {
