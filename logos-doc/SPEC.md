@@ -1564,7 +1564,7 @@ A function with a call that keeps a resume point keeps resume-point dispatch. Wi
 A caller of runtime.mcall MUST keep resume-point dispatch even when it is not in the runtime: the goroutine switch back re-enters that frame, which inlining (Gosched) can place in user code. [T-Sec12]
 With `--wasm-features=stack-switching` on `logos build` or `go build` they MUST use stack switching instead. [T-Sec12][R-U1]
 Pointers are 8 bytes and slice headers are 24 bytes. [T-Sec12]
-alignof of int64, uint64, and float64 equals 8, so 64-bit atomics stay naturally aligned with no forcing code. [T-Sec12]
+alignof of int64, uint64, and float64 MUST equal 8, so 64-bit atomics stay naturally aligned with no forcing code. [T-Sec12]
 Deadcode removes unreachable functions, but type and method tables remain so reflect and encoding/json keep resolving. [T-Sec12]
 
 ### 12.2 Host interface and loader
@@ -1577,7 +1577,8 @@ A build with no `-o` writes no loader, because the default output name of a wasm
 The loader MUST work under `GOOS=js` and, in a reactor module that the host initializes through WASI, under `GOOS=wasip1`. [T-Sec12]
 `logos/rt` MUST export the wasm helpers `_logos_scratch_alloc`, `_logos_scratch_reset`, `_logos_errmsg_ptr`, and `_logos_errmsg_len` for the loader. [T-Sec12]
 The loader exports instantiateLogos(wasmBytes, imports). [T-Sec12]
-The loader re-reads memory.buffer after every call into wasm. [T-Sec12]
+The loader MUST re-read memory.buffer after every call into wasm. [T-Sec12]
+Calls after growth MUST see current memory. [T-Sec12]
 The loader MUST accept an errCode of int32 or int64 width; the compiler accepts int32 and int64 results. The host wrapper throws on any nonzero (truthy) return. [T-Sec12]
 String results are invalid. [T-Sec12]
 On nonzero errCode the wrapper throws the message read from wasm memory. [T-Sec12]
