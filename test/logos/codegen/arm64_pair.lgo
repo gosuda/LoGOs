@@ -89,6 +89,15 @@ func storeAtomicBarrier(p *pairLoad08, x, y int64) {
 	p.B = y
 }
 
+func loadAtomicBarrier(p *pairLoad08) (int64, int64) {
+	// arm64:-"LDP" "MOVD"
+	// arm64/v8.1:-"LDP" "MOVD"
+	a := p.A
+	atomicCell.Add(1)
+	b := p.B
+	return a, b
+}
+
 type pairVec016 struct {
 	A [16]byte
 	B [16]byte
