@@ -8,6 +8,12 @@ stderr 'inlbudget=400,inlrecursivebudget=80'
 logos build -a -x -O=2 unicode/utf8
 stderr 'inlbudget=120'
 ! stderr 'variablemakethreshold'
+logos test -a -x -O=3 unicode/utf8
+stdout '^ok'
+stderr -count=1 'variablemakethreshold'
+logos test -a -x -O=2 unicode/utf8
+stdout '^ok'
+stderr -count=1 'variablemakethreshold'
 logos build -a -gcflags=unicode/utf8=-m -O=3 unicode/utf8
 stderr 'inlining call to encodeRuneNonASCII'
 logos build -a -gcflags=unicode/utf8=-m -O=2 unicode/utf8
