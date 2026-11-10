@@ -124,7 +124,7 @@ Rules: logos-doc/SPEC.md. Status values: planned, tested, satisfied upstream, bl
 | #130 | MapTo failing on same-named distinct field types | M7 | test/logos/compile/comptime_mapto.lgo; test/logos/run/comptime_mapto.lgo | tested |
 | #131 | Embedding read-only and read-write same property | M4 | src/internal/types/testdata/logos/property_iface.lgo | tested |
 | #132 | Compound property update evaluating receiver twice | M4 | test/logos/run/properties.lgo | tested |
-| #133 | Non-ASCII module paths rejected by proxy | M0 | test/logos/lint/alias_extension.lgo; src/cmd/go/testdata/script/logos_lint_alias_extension.txt | tested |
+| #133 | Non-ASCII module paths rejected by proxy | M0 | test/logos/lint/alias_extension.lgo; src/cmd/go/testdata/script/logos_lint_alias_extension.txt (dotted main.📜 warns, plain silent) | tested |
 | #134 | O3 inlining inflating recursive stack frames | M13 | test/logos/codegen/recursive_stack.lgo; test/logos/codegen/recursive_stack.go; test/logos/codegen/inline_levels.lgo; src/cmd/compile/internal/inline/stackbuf_logos_test.go (TestLogosVariableMakeThreshold) | tested |
 | #135 | defer Close violating LIFO order | M1 | test/logos/redteam/attack_135_lifo_order | tested |
 | #136 | go group sibling hanging on channel receive | M8 | test/logos/run/group_chan.lgo | tested |
