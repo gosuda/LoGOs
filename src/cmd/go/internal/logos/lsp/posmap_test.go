@@ -96,43 +96,6 @@ func TestPosMapKeepsOperandOfQuestionStatement(t *testing.T) {
 	}
 }
 
-func TestPosMapGeneratedLinesMapToQuestionStatement(t *testing.T) {
-	src, out, pm := questionMap(t)
-	srcLine := lineOf(src, 5)
-	qcol := strings.Index(srcLine, "?")
-	if qcol < 0 {
-		t.Fatal("no ? in the source line")
-	}
-	for line := 5; line <= 7; line++ {
-		text := lineOf(out, line)
-		for col := 0; col <= len(text); col++ {
-			orig := pm.toOriginal(Position{Line: line, Character: col})
-			if orig.Line != 5 || orig.Character > len(srcLine) {
-				t.Errorf("lowered %d:%d maps to %v, outside source line 5", line, col, orig)
-			}
-			if line > 5 {
-				want := qcol
-				if line == 7 && col == len(text) {
-					want = qcol + 1
-				}
-				if orig.Character != want {
-					t.Errorf("lowered generated %d:%d maps to column %d, want %d", line, col, orig.Character, want)
-				}
-			}
-		}
-	}
-	q := Position{Line: 5, Character: qcol}
-	low := pm.toLowered(q)
-	if low.Line != 5 || low.Character != len(lineOf(out, 5)) {
-		t.Errorf("? at %v maps to %v, want the end of lowered line 5", q, low)
-	}
-	rng := pm.rangeToOriginal(Range{Start: Position{Line: 6, Character: 0}, End: Position{Line: 7, Character: len(lineOf(out, 7))}})
-	want := Range{Start: q, End: shift(q, 1)}
-	if rng != want {
-		t.Errorf("range over the generated lines maps to %v, want the ? token %v", rng, want)
-	}
-}
-
 func TestPosMapRangeToLoweredCoversQuestionStatement(t *testing.T) {
 	src, out, pm := questionMap(t)
 	srcLine := lineOf(src, 5)

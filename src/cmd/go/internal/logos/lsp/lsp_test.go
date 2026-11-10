@@ -841,6 +841,10 @@ func TestProxyMergesDiagnostics(t *testing.T) {
 					"range":    Range{Start: Position{Line: 6, Character: 1}, End: Position{Line: 6, Character: 5}},
 					"severity": 2, "message": "gopls: inside the expansion",
 				},
+				map[string]any{
+					"range":    Range{Start: Position{Line: 6, Character: 0}, End: Position{Line: 7, Character: len(lineOf(string(low), 7))}},
+					"severity": 2, "message": "gopls: across the expansion",
+				},
 			})}}
 		},
 	})
@@ -859,7 +863,7 @@ func TestProxyMergesDiagnostics(t *testing.T) {
 
 	params := f.client.notification(func(m map[string]any) bool {
 		items, _ := m["diagnostics"].([]any)
-		return m["uri"] == f.uri("a/a.lgo") && len(items) == 4
+		return m["uri"] == f.uri("a/a.lgo") && len(items) == 5
 	})
 	if v, _ := number(params["version"]); v != 7 {
 		t.Errorf("diagnostics published for version %v, want the client's version 7", params["version"])
@@ -883,6 +887,7 @@ func TestProxyMergesDiagnostics(t *testing.T) {
 	want := map[string]diag{
 		"gopls: bad call":             {1, origCall.Start, origCall.End, ""},
 		"gopls: inside the expansion": {2, origQ, shift(origQ, 1), ""},
+		"gopls: across the expansion": {2, origQ, shift(origQ, 1), ""},
 		"compiler: unproven":          {1, origCall.Start, origCall.End, "correctness::example"},
 		"compiler: warning":           {2, Position{Line: 2, Character: 0}, Position{Line: 2, Character: 6}, "style::note"},
 	}
