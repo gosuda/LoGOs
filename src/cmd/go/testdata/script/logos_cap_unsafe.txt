@@ -50,6 +50,15 @@ stderr '-> unsafe'
 ! stderr 'hlong'
 ! stderr 'hmid'
 cd ../..
+cd q/main
+! logos build ./...
+stderr 'ERROR \[capabilities::unauthorized_unsafe\]: Transitive dependency ''example\.com/qdep'' imports ''unsafe'''
+stderr '-> example\.com/anear'
+stderr '-> example\.com/qdep'
+stderr '-> unsafe'
+! stderr 'zfar'
+! stderr 'zmid'
+cd ../..
 
 -- a/main/go.mod --
 module example.com/main
@@ -372,3 +381,91 @@ replace example.com/hshort => ../short
 package hmid
 
 import _ "example.com/hshort"
+
+-- q/main/go.mod --
+module example.com/qmain
+
+go 1.27
+
+require (
+example.com/anear v0.0.0
+example.com/zfar v0.0.0
+example.com/qmid v0.0.0
+example.com/qdep v0.0.0
+)
+
+replace example.com/anear => ../anear
+
+replace example.com/zfar => ../zfar
+
+replace example.com/qmid => ../qmid
+
+replace example.com/qdep => ../qdep
+
+-- q/main/logos.toml --
+[capabilities]
+transitive_unsafe = "deny"
+
+-- q/main/cmd/main.go --
+package main
+
+import (
+_ "example.com/anear"
+_ "example.com/zfar"
+)
+
+func main() {}
+
+-- q/anear/go.mod --
+module example.com/anear
+
+go 1.27
+
+require example.com/qdep v0.0.0
+
+replace example.com/qdep => ../qdep
+
+-- q/anear/anear.go --
+package anear
+
+import _ "example.com/qdep"
+
+-- q/zfar/go.mod --
+module example.com/zfar
+
+go 1.27
+
+require example.com/qmid v0.0.0
+
+replace example.com/qmid => ../qmid
+
+-- q/zfar/zfar.go --
+package zfar
+
+import _ "example.com/qmid"
+
+-- q/qmid/go.mod --
+module example.com/qmid
+
+go 1.27
+
+require example.com/qdep v0.0.0
+
+replace example.com/qdep => ../qdep
+
+-- q/qmid/qmid.go --
+package qmid
+
+import _ "example.com/qdep"
+
+-- q/qdep/go.mod --
+module example.com/qdep
+
+go 1.27
+
+-- q/qdep/qdep.go --
+package qdep
+
+import "unsafe"
+
+var _ = unsafe.Sizeof(0)
