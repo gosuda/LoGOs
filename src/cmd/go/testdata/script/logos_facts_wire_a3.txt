@@ -26,6 +26,13 @@ grep '^lang go$' $WORK/go.facts
 ! grep 'ReceiverMutated' $WORK/go.facts
 ! grep '^constfn' $WORK/go.facts
 ! grep 'Readonly' $WORK/go.facts
+! grep '^opt ' $WORK/go.facts
+! grep '^prop ' $WORK/go.facts
+! grep '^const ' $WORK/go.facts
+! grep '^comptime' $WORK/go.facts
+! grep '^default ' $WORK/go.facts
+! grep '^conforms ' $WORK/go.facts
+! grep '^readonly ' $WORK/go.facts
 env GOOS=js
 env GOARCH=wasm
 cd go
