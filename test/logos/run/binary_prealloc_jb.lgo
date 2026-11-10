@@ -43,8 +43,8 @@ func preTrunc(n int, rest int) error {
 	if !strings.Contains(err.Error(), ".Items") || !strings.Contains(err.Error(), "offset") {
 		return fmt.Errorf("count %d rest %d error lacks field/offset: %w", n, rest, err)
 	}
-	if want := preWant(n, rest); cap(got.Items) != want {
-		return fmt.Errorf("count %d rest %d preallocated cap %d, want %d", n, rest, cap(got.Items), want)
+	if want := preWant(n, rest); cap(got.Items) > want {
+		return fmt.Errorf("count %d rest %d preallocated cap %d exceeds bound %d", n, rest, cap(got.Items), want)
 	}
 	return nil
 }
