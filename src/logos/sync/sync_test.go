@@ -361,6 +361,9 @@ func TestHotNoMemoryGrowth(t *testing.T) {
 
 func TestHotLayout(t *testing.T) {
 	var h logosync.Hot[hotPoint]
+	if ft := reflect.TypeOf(&h).Elem().Field(0); ft.Type != reflect.TypeOf(atomic.Pointer[hotPoint]{}) {
+		t.Fatalf("Hot field 0 type = %v, want %v (the value must live in an atomic.Pointer, not a bare word)", ft.Type, reflect.TypeOf(atomic.Pointer[hotPoint]{}))
+	}
 	if n := reflect.TypeOf(&h).Elem().NumField(); n != 1 {
 		t.Fatalf("Hot has %d fields, want 1 (the atomic pointer; no retire list)", n)
 	}
