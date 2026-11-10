@@ -2920,6 +2920,8 @@ The following Go-semantics parity risks MUST stay gated by the release `-O` matr
 - Pointee escape under `GOEXPERIMENT=logosescape` MUST stay gated by the release `-O` matrix under that experiment, because the design mutant changes only the callee `-m` summary while each direct call site re-derives the hole from the target so placement and program output stay identical.
 - GC span initialization under pointer-heavy churn MUST stay gated by the release `-O` matrix under that churn, because malloc sets heap bits per object so span initialization is unobservable to any program.
 - Arena loop restore and returned-make consent MUST stay gated by the release `-O` matrix under the arena configuration, because the design mutations and the replacement are no-ops on this fork since the mutated paths never reclaim memory a caller still reads.
+- Contextual words in Go files MUST stay gated by the release `-O` matrix under the matching configuration, because every hook falls back to the ordinary Go parse for valid programs so no single gate fault changes program output.
+- Nil-argument wrapping in calls to pure Go packages MUST stay gated by the release `-O` matrix under the matching configuration, because any gate-dropping fault breaks the build through the unresolvable `logos/rt` import while any firing-preserving fault finds no engaging call.
 
 ### M22-C Closure re-audit of SPEC sections 0 to 18
 
