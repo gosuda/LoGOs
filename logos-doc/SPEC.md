@@ -409,8 +409,6 @@ A `const func` that breaks a purity rule MUST fail with `[correctness::const_fun
 
 A compile-time evaluation that overflows the target width, inserts a NaN or duplicate map key, executes a panic, or reaches a form the interpreter does not support MUST fail with `[correctness::const_eval]` naming the cause. [T-201]
 
-Pointer-free constant data MUST live in read-only memory. [T-201]
-
 Constant data with pointers MUST live in read-only memory, so a write to it faults. [T-201]
 
 A write to a constant composite through `unsafe` MUST fault at run time. [T-201]
@@ -520,7 +518,7 @@ A later write to the source or its child MUST NOT change the view. [T-201]
 Nil leaves MUST copy as nil. [T-201]
 `const []byte` to `string` MUST be zero-copy only from string or const-composite provenance. [T-201]
 Any other provenance MUST copy to the Go heap. [T-201]
-Pointer-free data MUST live in read-only memory before any init runs. [T-201]
+Pointer-free constant data MUST live in read-only memory before any init runs. [T-201]
 Ordinary generic assertion definitions MUST remain legal. [T-201][T-Sec5]
 Function and receiver-type instantiations, including wrappers and cross-package uses, MUST require verified effects before manufacturing qualified targets; unsafe instantiations MUST fail with `correctness::const_view_mutation`. [T-201][T-Sec5]
 Unknown effects MUST NOT count as proven zero. [T-201][T-Sec5]
