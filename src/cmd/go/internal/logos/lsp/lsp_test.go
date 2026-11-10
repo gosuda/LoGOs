@@ -2287,6 +2287,41 @@ func TestProxyDidChangeAloneDoesNotLower(t *testing.T) {
 	}
 }
 
+func TestProxyReversedChangeLeavesBuffer(t *testing.T) {
+	f := newFixture(t, map[string]string{"a/a.lgo": aLgo}, fixtureOptions{})
+	f.open("a/a.lgo", 1)
+	aURI, aPath := f.uri("a/a.lgo"), f.path("a/a.lgo")
+	operand := shift(findPos(t, aLgo, "ReadFile(path)?", 0), len("ReadFile("))
+	f.client.notify("textDocument/didChange", map[string]any{
+		"textDocument": map[string]any{"uri": aURI, "version": 2},
+		"contentChanges": []any{map[string]any{
+			"range": map[string]any{
+				"start": Position{Line: 5, Character: 10},
+				"end":   Position{Line: 5, Character: 3},
+			},
+			"text": "XXX",
+		}},
+	})
+	f.client.call("textDocument/hover", positionParams(aURI, operand))
+	buffers := f.comp.bufferCalls()
+	if len(buffers) == 0 {
+		t.Fatal("hover lowered nothing after the reversed change")
+	}
+	if last := buffers[len(buffers)-1]; string(last[aPath]) != aLgo {
+		t.Errorf("a reversed change corrupted the overlay: %q", last[aPath])
+	}
+	edited := aLgo + "// v3\n"
+	f.client.notify("textDocument/didChange", map[string]any{
+		"textDocument":   map[string]any{"uri": aURI, "version": 3},
+		"contentChanges": []any{map[string]any{"text": edited}},
+	})
+	f.client.call("textDocument/hover", positionParams(aURI, shift(findPos(t, edited, "ReadFile(path)?", 0), len("ReadFile("))))
+	buffers = f.comp.bufferCalls()
+	if last := buffers[len(buffers)-1]; string(last[aPath]) != edited {
+		t.Errorf("the valid change after a reversed one lowered %q, want the version 3 text", last[aPath])
+	}
+}
+
 func TestProxyConcurrentHoversShareOneRun(t *testing.T) {
 	f := newFixture(t, map[string]string{"a/a.lgo": aLgo}, fixtureOptions{
 		Script: func(string) fakeScript {

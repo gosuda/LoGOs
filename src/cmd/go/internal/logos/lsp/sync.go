@@ -130,7 +130,11 @@ func applyChanges(t *text, changes []contentChange) *text {
 			t = newText([]byte(c.Text))
 			continue
 		}
-		t = t.replace(t.offset(c.Range.Start), t.offset(c.Range.End), c.Text)
+		start, end := t.offset(c.Range.Start), t.offset(c.Range.End)
+		if start > end {
+			continue
+		}
+		t = t.replace(start, end, c.Text)
 	}
 	return t
 }
