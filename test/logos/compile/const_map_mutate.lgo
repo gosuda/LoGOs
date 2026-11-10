@@ -2,6 +2,7 @@
 
 package p
 
+import "encoding/json"
 import "maps"
 
 const cm = map[string]int{"a": 1, "b": 2}
@@ -16,6 +17,9 @@ func cmStore() {
 
 func cmRead() {
 	_ = maps.Clone(cm)
+}
+func cmOtherImported() {
+	_, _ = json.Marshal(cm) // ERROR "const_view_mutation"
 }
 
 const func cmConst(m map[string]int) int {
