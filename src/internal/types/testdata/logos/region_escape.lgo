@@ -62,7 +62,7 @@ func groupChildLit(ctx context.Context) error {
 
 func reservedGroupPrefix(ctx context.Context) error {
 	var _logos_g0 /* ERROR "correctness::reserved_identifier" */ = 1
-	_ = _logos_g0
+	_ = _logos_g0 /* ERROR "correctness::reserved_identifier" */
 	return nil
 }
 
