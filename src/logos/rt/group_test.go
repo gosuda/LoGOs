@@ -40,6 +40,24 @@ func TestGroupFirstErrorWins(t *testing.T) {
 	})
 }
 
+// M8-S1 attack: the first failure in completion order wins. childA is
+// spawned first but blocks on the child context; childB is spawned
+// second and fails at once. Wait must report childB error even though
+// childA has the lower spawn index.
+func TestGroupFirstCompletionWins(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		g, _ := NewGroup(t.Context(), 0)
+		g.Go(func(ctx context.Context) error {
+			<-ctx.Done()
+			return errGroupFirst
+		})
+		g.Go(func(ctx context.Context) error { return errGroupSecond })
+		if err := g.Wait(); !errors.Is(err, errGroupSecond) {
+			t.Fatalf("Wait = %v, want %v", err, errGroupSecond)
+		}
+	})
+}
+
 // M8-S1 attack: cancellation reaches a sibling blocked on the child
 // context. childB waits on Done; childA fails. Wait must report childA's
 // error and childB must have observed Done.
