@@ -22,6 +22,10 @@ exists out/wire/wire.go
 ! grep '_logos_ctimp' out/main.go
 ! grep '_logos_tparam' out/main.go
 ! grep '_logos_ctcomptime' out/main.go
+grep 'Total_logosct' out/main.go
+! grep 'logosct' out/wire/wire.go
+grep 'Weights_logosct2' out/main.go
+! grep 'Weights_logosct4' out/main.go
 
 cd out
 go run .
@@ -33,7 +37,6 @@ cd ..
 
 cmp main.lgo $WORK/orig/main.lgo
 cmp wire/wire.lgo $WORK/orig/wire.lgo
-
 -- want.txt --
 A=3
 B=6
@@ -46,6 +49,7 @@ A.B=2
 B.A=3
 B.B=4
 4 <nil>
+15
 -- m/go.mod --
 module example.com/ejectcross
 
@@ -127,4 +131,5 @@ func main() {
 	fmt.Println(wire.Total[wire.Row]("3"))
 	fmt.Println(wire.Weights[Local]())
 	fmt.Println(wire.Grid[Local]("1"))
+	fmt.Println(wire.Weights[Local]())
 }
