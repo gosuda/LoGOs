@@ -10,14 +10,12 @@ import (
 	"errors"
 	"github.com/google/pprof/profile"
 	"internal/goexperiment"
-	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"runtime/debug"
 	"runtime/pprof"
-	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -495,79 +493,71 @@ func TestFastcallStructure(t *testing.T) {
 	}
 }
 
-func delayStats(ds []float64) (median, stddev float64) {
-	cp := slices.Clone(ds)
-	slices.Sort(cp)
-	median = cp[len(cp)/2]
-	var sum, sq float64
-	for _, d := range cp {
-		sum += d
-		sq += d * d
-	}
-	mean := sum / float64(len(cp))
-	v := sq/float64(len(cp)) - mean*mean
-	if v < 0 {
-		v = 0
-	}
-	return median, math.Sqrt(v)
-}
-
-func oneDelay(sleepFn func(micros int32) int32) float64 {
-	ready := make(chan struct{})
-	aDone := make(chan struct{})
-	bDelay := make(chan time.Duration, 1)
-	var t0 time.Time
-	var wg sync.WaitGroup
-	wg.Go(func() {
-		<-ready
-		bDelay <- time.Since(t0)
-	})
-	wg.Go(func() {
-		defer close(aDone)
-		t0 = time.Now()
-		close(ready)
-		sleepFn(100)
-	})
-	d := float64((<-bDelay).Microseconds())
-	<-aDone
-	wg.Wait()
-	return d
-}
-
-func readyDelays(t *testing.T, n int) (fast, plain []float64) {
-	t.Helper()
-	oldMax := runtime.GOMAXPROCS(1)
-	defer runtime.GOMAXPROCS(oldMax)
-	oldGC := debug.SetGCPercent(-1)
-	defer debug.SetGCPercent(oldGC)
-	fast = make([]float64, 0, n)
-	plain = make([]float64, 0, n)
-	for range n {
-		fast = append(fast, oneDelay(callFastSleep))
-		plain = append(plain, oneDelay(callPlainSleep))
-	}
-	return fast, plain
-}
-
 func TestFastcallBlockingParity(t *testing.T) {
 	requireCgo(t)
-	if testUnderRace {
-		t.Skip("timing gates need quiet scheduling; the race detector perturbs " +
-			"us-scale delays past the 20% noise band. Entry and exit still run " +
-			"under race in the other tests.")
+	oldMax := runtime.GOMAXPROCS(1)
+	defer runtime.GOMAXPROCS(oldMax)
+	readyR, readyW, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
 	}
-	const n = 200
-	fast, plain := readyDelays(t, 200)
-	fmed, fsd := delayStats(fast)
-	pmed, psd := delayStats(plain)
-	t.Logf("ready delay: fast median %.1fus (sd %.1f), plain median %.1fus (sd %.1f)",
-		fmed, fsd, pmed, psd)
-	if fsd > 0.2*fmed || psd > 0.2*pmed {
-		t.Skipf("noise limit exceeded, check blocked: fast sd %.1f med %.1f, plain sd %.1f med %.1f",
-			fsd, fmed, psd, pmed)
+	defer readyR.Close()
+	defer readyW.Close()
+	gateR, gateW, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
 	}
-	if fmed > 1.05*pmed {
-		t.Fatalf("fast median %.1fus exceeds 1.05x plain median %.1fus", fmed, pmed)
+	defer gateR.Close()
+	defer gateW.Close()
+	done := make(chan int32, 1)
+	go func() {
+		done <- callFastGateWait(int32(readyW.Fd()), int32(gateR.Fd()))
+	}()
+	type readyRes struct {
+		n    int
+		rerr error
+	}
+	readyCh := make(chan readyRes, 1)
+	go func() {
+		var b [1]byte
+		n, rerr := readyR.Read(b[:])
+		readyCh <- readyRes{n, rerr}
+	}()
+	select {
+	case rr := <-readyCh:
+		if rr.n != 1 || rr.rerr != nil {
+			t.Fatalf("ready read = %d, %v, want 1 byte", rr.n, rr.rerr)
+		}
+	case code := <-done:
+		t.Fatalf("gate_wait = %d before ready signal", code)
+	}
+	prog := make(chan struct{})
+	go func() {
+		close(prog)
+	}()
+	select {
+	case <-prog:
+	case code := <-done:
+		t.Fatalf("gate_wait = %d while waiting for progress, P was not released", code)
+	}
+	select {
+	case code := <-done:
+		if code == 2 {
+			t.Fatal("fast call timed out waiting for gate release, P was not released")
+		}
+		t.Fatalf("fast call returned %d before gate release", code)
+	default:
+	}
+	if _, werr := gateW.Write([]byte{0}); werr != nil {
+		t.Fatal(werr)
+	}
+	select {
+	case code := <-done:
+		if code != 0 {
+			t.Fatalf("gate_wait = %d, want 0", code)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("fast call did not return within 30s of gate release")
 	}
 }
 

@@ -3,7 +3,9 @@
 // license that can be found in the LICENSE file.
 
 #include <time.h>
-
+#include <errno.h>
+#include <poll.h>
+#include <unistd.h>
 #include "_cgo_export.h"
 
 int
@@ -133,4 +135,66 @@ int
 plain_cb_fire(void)
 {
 	return GoCallback(7);
+}
+int
+gate_wait(int ready_fd, int gate_fd)
+{
+	char c = 0;
+	ssize_t n;
+	do {
+		n = write(ready_fd, &c, 1);
+	} while (n < 0 && errno == EINTR);
+	if (n != 1) {
+		return 1;
+	}
+	struct pollfd pfd;
+	pfd.fd = gate_fd;
+	pfd.events = POLLIN;
+	int r;
+	do {
+		r = poll(&pfd, 1, 30000);
+	} while (r < 0 && errno == EINTR);
+	if (r <= 0) {
+		return 2;
+	}
+	do {
+		n = read(gate_fd, &c, 1);
+	} while (n < 0 && errno == EINTR);
+	if (n != 1) {
+		return 3;
+	}
+	return 0;
+}
+
+int
+gate_watch(int ready_fd, int gate_fd, unsigned char *p, unsigned char want)
+{
+	char c = 0;
+	ssize_t n;
+	do {
+		n = write(ready_fd, &c, 1);
+	} while (n < 0 && errno == EINTR);
+	if (n != 1) {
+		return 1;
+	}
+	struct pollfd pfd;
+	pfd.fd = gate_fd;
+	pfd.events = POLLIN;
+	int r;
+	do {
+		r = poll(&pfd, 1, 30000);
+	} while (r < 0 && errno == EINTR);
+	if (r <= 0) {
+		return 2;
+	}
+	do {
+		n = read(gate_fd, &c, 1);
+	} while (n < 0 && errno == EINTR);
+	if (n != 1) {
+		return 3;
+	}
+	if (*p != want) {
+		return 4;
+	}
+	return 0;
 }

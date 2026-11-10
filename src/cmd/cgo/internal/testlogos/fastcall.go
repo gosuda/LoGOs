@@ -21,6 +21,8 @@ int sum_bytes(unsigned char *p, int n);
 unsigned long long busy_spin(unsigned long long iters);
 unsigned long long plain_spin(unsigned long long iters);
 int watch_spin(unsigned char *p, unsigned char want, int micros);
+int gate_wait(int ready_fd, int gate_fd);
+int gate_watch(int ready_fd, int gate_fd, unsigned char *p, unsigned char want);
 extern int GoCallback(int v);
 int cb_fire(void);
 int plain_cb_fire(void);
@@ -43,9 +45,14 @@ int plain_cb_fire(void);
 
 #cgo noescape busy_spin
 #cgo nocallback busy_spin
-
 #cgo noescape watch_spin
 #cgo nocallback watch_spin
+
+#cgo noescape gate_wait
+#cgo nocallback gate_wait
+
+#cgo noescape gate_watch
+#cgo nocallback gate_watch
 
 #cgo noescape cb_fire
 #cgo nocallback cb_fire
@@ -91,3 +98,10 @@ func callPlainBusy(iters uint64) uint64 { return uint64(C.plain_spin(C.ulonglong
 func callFastCallback() int32 { return int32(C.cb_fire()) }
 
 func callPlainCallback() int32 { return int32(C.plain_cb_fire()) }
+func callFastGateWait(readyFD, gateFD int32) int32 {
+	return int32(C.gate_wait(C.int(readyFD), C.int(gateFD)))
+}
+
+func callFastGateWatch(readyFD, gateFD int32, p *byte, want byte) int32 {
+	return int32(C.gate_watch(C.int(readyFD), C.int(gateFD), (*C.uchar)(unsafe.Pointer(p)), C.uchar(want)))
+}
