@@ -131,7 +131,7 @@ Rules: logos-doc/SPEC.md. Status values: planned, tested, satisfied upstream, bl
 | #137 | Call-free loop starving scheduler blocking GC | M15 | test/logos/run/wasm_loop_preempt.lgo | tested |
 | #138 | Arena pointer stored into sync Pool | M18 | test/logos/run/redteam138_sync_pool.lgo; test/logos/codegen/redteam138_pool_heap.lgo | tested |
 | #139 | Malicious JSON array triggering huge preallocation | M11 | test/logos/run/json_unmarshal_test.lgo (TestHostileArrayCostsOnArrival, TestLargeArrayDecodesIncrementally) | tested |
-| #140 | Known hash seed enabling hash-flooding DoS | M5 | src/cmd/compile/internal/logos/constmap_test.go (TestConstmapBudgetIsOneMillion, TestConstmapProbeIsSingleProbe); src/logos/rt/constmap_proof_test.go (TestConstTableGetSingleProbe) | tested |
+| #140 | Known hash seed enabling hash-flooding DoS | M5 | src/cmd/compile/internal/logos/constmap_test.go (TestConstmapProbeFindsEveryKey, TestConstmapSeedExhausted, TestConstmapProbeIsSingleProbe) | tested |
 | #141 | Method call on property value losing mutation | M4 | test/logos/run/properties.lgo | tested |
 | #142 | Chain map leaking file descriptors on failure | M6 | test/logos/run/chains.lgo (at-return closes) | tested |
 | #143 | Buffered channel retaining dead pointer after receive | M8 | src/logos/sync/chanslot_logos_test.go | satisfied upstream |
