@@ -102,11 +102,11 @@ func (o Opaque) Name() string {
 	return "sort"
 }
 
-var _ Qualified = Opaque{items: []int{3, 1, 2}} // ERROR "\[correctness::const_view_mutation\]"
+var _ Qualified = Opaque{items: []int{3, 1, 2}} // ERROR "\[correctness::const_view_mutation\].*does not implement readonly method Name"
 
-var _ Qualified = &os.File{} // ERROR "\[correctness::const_view_mutation\]"
+var _ Qualified = &os.File{} // ERROR "\[correctness::const_view_mutation\].*\(method Name is not readonly\)"
 
-var _ Qualified = LateDecl{tag: "x"} // ERROR "\[correctness::const_view_mutation\]"
+var _ Qualified = LateDecl{tag: "x"} // ERROR "\[correctness::const_view_mutation\].*does not implement readonly method Name"
 
 type LateDecl struct {
 	tag   string
