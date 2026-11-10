@@ -1,0 +1,36 @@
+// run
+
+package main
+
+import (
+	"fmt"
+	"os"
+	"unsafe"
+)
+
+type pairFaultAdjacent struct {
+	a, b int64
+}
+
+var pairFaultSeen int64
+
+func main() {
+	pairFaultSeen = 1
+	p := (*pairFaultAdjacent)(unsafe.Pointer(nil))
+	func() {
+		defer func() {
+			if recover() == nil {
+				fmt.Println("want panic from nil base")
+				os.Exit(1)
+			}
+			if pairFaultSeen != 1 {
+				fmt.Println("prior store lost:", pairFaultSeen)
+				os.Exit(1)
+			}
+		}()
+		a := p.a
+		_ = a
+		_ = p.b
+	}()
+	fmt.Println("pair fault ok")
+}
