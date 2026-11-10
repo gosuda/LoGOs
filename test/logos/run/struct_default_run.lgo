@@ -2,7 +2,10 @@
 
 package main
 
-import "fmt"
+import (
+	"fmt"
+	"os"
+)
 
 type Cfg struct {
 	Port int = 8080
@@ -11,9 +14,11 @@ type Cfg struct {
 
 func main() {
 	a := Cfg{}
-	fmt.Println(a.Port, a.Host)
 	b := &Cfg{}
-	fmt.Println(b.Port, b.Host)
 	c := Cfg{Host: "x"}
-	fmt.Println(c.Port, c.Host)
+	if a.Port != 8080 || a.Host != "localhost" || b.Port != 8080 || b.Host != "localhost" || c.Port != 8080 || c.Host != "x" {
+		fmt.Println("struct defaults: FAIL")
+		os.Exit(1)
+	}
+	fmt.Println("struct defaults: PASS")
 }
