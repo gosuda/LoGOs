@@ -6,6 +6,11 @@ env GOTOOLCHAIN=local
 [cgo] ! logos build -o $WORK/logos$GOEXE ./sub
 [cgo] stderr '\[restriction::cgo_usage\]'
 
+# Unset observes the upstream default (1 where cgo is available).
+env CGO_ENABLED=
+[cgo] go env CGO_ENABLED
+[cgo] stdout '^1$'
+
 -- go.mod --
 module example.com/plaincgo
 

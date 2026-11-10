@@ -33,6 +33,10 @@ cd nokey
 [cgo] ! logos build .
 [cgo] stderr '\[restriction::cgo_usage\]'
 cd ..
+cd nokey
+[cgo] env CGO_ENABLED=1
+[cgo] logos build .
+cd ..
 
 cd gom
 [cgo] env CGO_ENABLED=1
