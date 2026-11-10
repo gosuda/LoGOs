@@ -1,0 +1,30 @@
+# Leak-to-pointee precision applies to Go packages only under
+# GOEXPERIMENT=logosescape, which is off by default.
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+cd m
+go build -gcflags=-m .
+stderr 'p\.go:.*leaking param: q'
+env GOEXPERIMENT=logosescape
+go build -gcflags=-m .
+stderr 'p\.go:.*q does not escape'
+! stderr 'leaking param: q'
+
+-- m/go.mod --
+module example.com/pointeego
+
+go 1.27
+
+-- m/p.go --
+package p
+
+type node struct {
+	next *node
+	v    int
+}
+
+//go:noinline
+func linkThrough(p, q *node) {
+	p.next = q
+}
