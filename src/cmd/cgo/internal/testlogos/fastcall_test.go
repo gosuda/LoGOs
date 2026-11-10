@@ -276,6 +276,15 @@ func Add(a, b int32) int32 { return int32(C.ladd(C.int(a), C.int(b))) }
 	if got := countCallLines(gotypes, "_cgo_runtime_cgocall"); got != 0 {
 		t.Fatalf("plain calls = %d, want 0", got)
 	}
+	if got := countCallLines(gotypes, "_Cgo_keepalive"); got != 2 {
+		t.Fatalf("keepalive uses = %d, want 2", got)
+	}
+	if got := countCallLines(gotypes, "_Cgo_use"); got != 0 {
+		t.Fatalf("escape uses = %d, want 0", got)
+	}
+	if got := countCallLines(gotypes, "_Cgo_no_callback"); got != 0 {
+		t.Fatalf("callback guards = %d, want 0", got)
+	}
 }
 
 func TestFastcallUnmatched(t *testing.T) {
