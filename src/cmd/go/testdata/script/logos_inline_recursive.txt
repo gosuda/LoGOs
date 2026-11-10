@@ -16,12 +16,14 @@ stderr 'cannot inline hugeOdd'
 
 logos build -gcflags='-m -m' -O=2 .
 stderr 'can inline tiny'
+stderr 'can inline smallPlain'
 stderr 'can inline plainBig'
 stderr 'cannot inline midBig'
 stderr 'cannot inline bigEven'
 
 logos build -gcflags='-m -m' -O=s .
 stderr 'can inline tiny'
+stderr 'can inline smallPlain'
 stderr 'can inline smallEven'
 stderr 'cannot inline plainBig'
 stderr 'cannot inline midBig'
@@ -266,4 +268,17 @@ m24 := m23 - m22
 m25 := m24 + m23
 m26 := m25 * 2
 return m26 + x
+}
+
+func smallPlain(x int) int {
+p1 := x + 1
+p2 := p1 * 2
+p3 := p2 - 3
+p4 := p3 + p2
+p5 := p4 * p1
+p6 := p5 - p4
+p7 := p6 + 7
+p8 := p7 * 3
+p9 := p8 - p7
+return p9 + x
 }
