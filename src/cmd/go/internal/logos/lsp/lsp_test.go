@@ -1636,3 +1636,66 @@ func TestProxyLargeFileMapsExactly(t *testing.T) {
 		t.Errorf("hover at %v reached gopls as %s %v, want the exact position with no size cap", at, uri, pos)
 	}
 }
+
+func TestProxyDefinitionWritesNoBytes(t *testing.T) {
+	const libLgo = "package lib\n\nfunc Hello() string {\n\treturn \"hi\"\n}\n"
+	const appGo = "package app\n\nimport \"example.com/m/lib\"\n\nvar Greeting = lib.Hello()\n"
+	const app2Lgo = "package app2\n\nimport \"example.com/m/golib\"\n\nvar N = golib.Thing()\n"
+	const goLib = "package golib\n\nfunc Thing() int { return 1 }\n"
+	thing := Range{Start: Position{Line: 2, Character: 5}, End: Position{Line: 2, Character: 10}}
+	libLow, _, _ := lowerQuestion([]byte(libLgo))
+	helloLow := span(findPos(t, string(libLow), "Hello", 0), len("Hello"))
+	f := newFixture(t, map[string]string{
+		"go.mod":        "module example.com/m\n\ngo 1.27\n",
+		"lib/lib.lgo":   libLgo,
+		"app/app.go":    appGo,
+		"golib/g.go":    goLib,
+		"app2/app2.lgo": app2Lgo,
+	}, fixtureOptions{
+		Script: func(root string) fakeScript {
+			return fakeScript{Responses: map[string]json.RawMessage{
+				"textDocument/definition": toJSON(t, []any{
+					map[string]any{"uri": pathURI(filepath.Join(root, "lib", "lib.go")), "range": helloLow},
+					map[string]any{"uri": pathURI(filepath.Join(root, "golib", "g.go")), "range": thing},
+				}),
+			}}
+		},
+		Tune: func(f *fixture, o *Options) {
+			f.comp.setClosure(f.path("app"), f.path("lib"))
+			f.comp.setClosure(f.path("app2"), f.path("golib"))
+		},
+	})
+	f.open("app/app.go", 1)
+	f.open("app2/app2.lgo", 1)
+	f.sync()
+	snap := func() (map[string][]byte, map[string]int64) {
+		data := map[string][]byte{}
+		mtime := map[string]int64{}
+		for _, rel := range f.workspaceFiles() {
+			path := filepath.Join(f.root, filepath.FromSlash(rel))
+			content, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			st, err := os.Stat(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			data[rel] = content
+			mtime[rel] = st.ModTime().UnixNano()
+		}
+		return data, mtime
+	}
+	before, beforeTime := snap()
+	appCall := shift(findPos(t, appGo, "lib.Hello", 0), len("lib."))
+	f.client.call("textDocument/definition", positionParams(f.uri("app/app.go"), appCall))
+	thingCall := shift(findPos(t, app2Lgo, "golib.Thing", 0), len("golib."))
+	f.client.call("textDocument/definition", positionParams(f.uri("app2/app2.lgo"), thingCall))
+	after, afterTime := snap()
+	if !reflect.DeepEqual(after, before) {
+		t.Errorf("definition changed workspace bytes")
+	}
+	if !reflect.DeepEqual(afterTime, beforeTime) {
+		t.Errorf("definition touched workspace mtimes")
+	}
+}
