@@ -26,6 +26,14 @@ type JbFatHolder struct {
 	Items []JbFat `json:"items"`
 }
 
+type JbWord struct {
+	Pad [8]byte `json:"-"`
+}
+
+type JbWordHolder struct {
+	Items []JbWord `json:"items"`
+}
+
 func jbZeroCap() int {
 	return 1048576
 }
@@ -162,22 +170,22 @@ func jbFatOver() error {
 	return nil
 }
 
-func jbFatAtZeroCapOver() error {
+func jbWordAtZeroCapOver() error {
 	c := jbZeroCap() + 1
 	var before, after runtime.MemStats
 	runtime.GC()
 	runtime.ReadMemStats(&before)
-	var got JbFatHolder
+	var got JbWordHolder
 	err := got.UnmarshalBinary(jbWire(uint64(c)))
 	runtime.ReadMemStats(&after)
-	if err := jbNeedRange(err, "fat at zero cap over UnmarshalBinary", uint64(c)); err != nil {
+	if err := jbNeedRange(err, "word at zero cap over UnmarshalBinary", uint64(c)); err != nil {
 		return err
 	}
-	if err := jbNeedFieldOffset(err, "fat at zero cap over UnmarshalBinary", ".Items"); err != nil {
+	if err := jbNeedFieldOffset(err, "word at zero cap over UnmarshalBinary", ".Items"); err != nil {
 		return err
 	}
 	if delta := after.TotalAlloc - before.TotalAlloc; delta >= 1<<20 {
-		return fmt.Errorf("fat at zero cap over: rejected count %d only after allocating %d bytes", c, delta)
+		return fmt.Errorf("word at zero cap over: rejected count %d only after allocating %d bytes", c, delta)
 	}
 	return nil
 }
@@ -185,6 +193,9 @@ func jbFatAtZeroCapOver() error {
 func run() error {
 	if int(unsafe.Sizeof(JbFat{})) != 4096 {
 		return fmt.Errorf("JbFat size %d, want 4096", int(unsafe.Sizeof(JbFat{})))
+	}
+	if int(unsafe.Sizeof(JbWord{})) != 8 {
+		return fmt.Errorf("JbWord size %d, want 8", int(unsafe.Sizeof(JbWord{})))
 	}
 	if err := jbCountAccepted(); err != nil {
 		return err
@@ -195,7 +206,7 @@ func run() error {
 	if err := jbFatAccepted(); err != nil {
 		return err
 	}
-	if err := jbFatAtZeroCapOver(); err != nil {
+	if err := jbWordAtZeroCapOver(); err != nil {
 		return err
 	}
 	return jbFatOver()
