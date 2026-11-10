@@ -136,6 +136,54 @@ func sumFiltered(xs []int32) int32 {
 	return xs.filter(x => x > 0).sum()
 }
 
+type loopVecF32 []float32
+
+//go:noinline
+func (v loopVecF32) sum() float32 {
+	// amd64:-"VPMASKMOV"
+	// arm64:-"VPMASKMOV"
+	var s float32
+	for i := 0; i < len(v); i++ {
+		s += v[i]
+	}
+	return s
+}
+
+type loopVecI32 []int32
+
+//go:noinline
+func (v loopVecI32) sum() int32 {
+	// amd64:-"VPMASKMOV"
+	// arm64:-"VPMASKMOV"
+	var s int32
+	for _, x := range v {
+		s += x
+	}
+	return s
+}
+
+//go:noinline
+func sumLoopF32(xs []float32) float32 {
+	// amd64:-"VPMASKMOV"
+	// arm64:-"VPMASKMOV"
+	var s float32
+	for i := 0; i < len(xs); i++ {
+		s += xs[i]
+	}
+	return s
+}
+
+//go:noinline
+func sumRangeI32(xs []int32) int32 {
+	// amd64:-"VPMASKMOV"
+	// arm64:-"VPMASKMOV"
+	var s int32
+	for _, x := range xs {
+		s += x
+	}
+	return s
+}
+
 func main() {
 	var a []int32
 	var b []uint64
@@ -154,4 +202,7 @@ func main() {
 	var r []rune
 	println(sumI32(a), sumU64(b), sumU16(c), sumU8(d), sumF32(e), sumF64(f), sumInt(g), sumUint(u), sumUintptr(p), sumAlias(w))
 	println(sumI8(h), sumI16(i), sumI64(j), sumU32(k), sumRune(r))
+	var lf loopVecF32
+	var li loopVecI32
+	println(lf.sum(), li.sum(), sumLoopF32(e), sumRangeI32(a))
 }
