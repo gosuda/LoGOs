@@ -22,6 +22,8 @@ const stopGrace = 3 * time.Second
 
 const drainLimit = 30 * time.Second
 
+const maxHintTasks = 4
+
 type Options struct {
 	Gopls []string
 
@@ -68,9 +70,9 @@ type Proxy struct {
 
 	pub sync.Mutex
 
-	tasks sync.WaitGroup
-
-	st store
+	tasks   sync.WaitGroup
+	hintSem chan struct{}
+	st      store
 
 	mu       sync.Mutex
 	files    map[string]*lowered
@@ -100,6 +102,7 @@ func newProxy(out io.Writer, opts Options) *Proxy {
 		pending:  make(map[string]pending),
 		srvDiags: make(map[string]serverDiags),
 		sent:     make(map[string]string),
+		hintSem:  make(chan struct{}, maxHintTasks),
 		settled:  make(chan struct{}, 1),
 	}
 	p.st.init()

@@ -28,7 +28,13 @@ func (p *Proxy) spawnHints(ctx context.Context, id json.RawMessage, pend pending
 	if p.stopped {
 		return false
 	}
+	select {
+	case p.hintSem <- struct{}{}:
+	default:
+		return false
+	}
 	p.tasks.Go(func() {
+		defer func() { <-p.hintSem }()
 		p.respond(id, p.mergeHints(ctx, pend, result))
 		p.finish(id)
 	})

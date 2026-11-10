@@ -380,6 +380,72 @@ func TestProxyShutdownDuringHintsStress(t *testing.T) {
 	}
 }
 
+type hintLoad struct {
+	mu       sync.Mutex
+	cur, max int
+	calls    int
+}
+
+func (h *hintLoad) run(ctx context.Context, dir string, buffers map[string][]byte) (json.RawMessage, error) {
+	h.mu.Lock()
+	h.cur++
+	if h.cur > h.max {
+		h.max = h.cur
+	}
+	h.mu.Unlock()
+	select {
+	case <-time.After(200 * time.Millisecond):
+	case <-ctx.Done():
+	}
+	h.mu.Lock()
+	h.cur--
+	h.calls++
+	h.mu.Unlock()
+	return json.RawMessage(`{}`), nil
+}
+
+func (h *hintLoad) snapshot() (int, int) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.max, h.calls
+}
+
+func TestProxyHintComputationsStayBounded(t *testing.T) {
+	var load hintLoad
+	low, _, _ := lowerQuestion([]byte(aLgo))
+	lowCall := span(findPos(t, string(low), "os.ReadFile", 0), len("os.ReadFile"))
+	f := newFixture(t, map[string]string{"a/a.lgo": aLgo}, fixtureOptions{
+		Script: func(string) fakeScript {
+			return fakeScript{Responses: map[string]json.RawMessage{
+				"textDocument/hover": toJSON(t, map[string]any{
+					"contents": map[string]any{"kind": "markdown", "value": "gopls hover"},
+					"range":    lowCall,
+				}),
+			}}
+		},
+		Tune: func(f *fixture, o *Options) {
+			o.Hints = func(string, json.RawMessage, json.RawMessage) (json.RawMessage, error) {
+				return json.RawMessage("null"), nil
+			}
+			o.HintsJSON = load.run
+		},
+	})
+	f.open("a/a.lgo", 1)
+	aURI := f.uri("a/a.lgo")
+	operand := shift(findPos(t, aLgo, "ReadFile(path)?", 0), len("ReadFile("))
+	const rapid = 12
+	ids := make([]json.RawMessage, 0, rapid)
+	for range rapid {
+		ids = append(ids, f.client.request("textDocument/hover", positionParams(aURI, operand)))
+	}
+	for _, id := range ids {
+		f.client.await("textDocument/hover", id)
+	}
+	if max, _ := load.snapshot(); max > maxHintTasks {
+		t.Errorf("hint computations peaked at %d concurrent subprocesses, want at most %d", max, maxHintTasks)
+	}
+}
+
 func (c *testClient) wait() error {
 	c.t.Helper()
 	select {
