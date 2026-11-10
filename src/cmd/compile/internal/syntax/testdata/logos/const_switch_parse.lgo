@@ -21,3 +21,11 @@ func constSwitchTypeList[T any](v T) {
 		return
 	}
 }
+
+func constSwitchEmptyCase[T any](v T) {
+	_ = v
+	const switch T {
+	case : // ERROR expected type
+		return
+	}
+}
