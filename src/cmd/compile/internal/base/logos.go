@@ -6,6 +6,8 @@ package base
 
 import (
 	"flag"
+	"maps"
+	"strings"
 )
 
 var LogosEject string
@@ -25,8 +27,23 @@ var LogosJSON bool
 var LogosLintOnly bool
 
 var LogosAllocFacts bool
-
 var LogosComptimeNodes = 4096
+
+var logosCtClones = map[string]bool{}
+
+func RegisterLogosCtClone(pkgPath, name string) {
+	logosCtClones[pkgPath+"\x00"+name] = true
+}
+
+func IsLogosCtClone(pkgPath, name string) bool {
+	return logosCtClones[pkgPath+"\x00"+name]
+}
+
+func ClearLogosCtClones(pkgPath string) {
+	maps.DeleteFunc(logosCtClones, func(k string, _ bool) bool {
+		return strings.HasPrefix(k, pkgPath+"\x00")
+	})
+}
 
 func logosRegisterFlags() {
 	flag.StringVar(&LogosCfg, "logos.cfg", "", "read the lint policy from `file`")

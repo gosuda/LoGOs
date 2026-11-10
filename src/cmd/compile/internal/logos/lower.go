@@ -58,6 +58,7 @@ func Lower(pkg *types2.Package, info *types2.Info, files []*syntax.File, src map
 	clearOwnedConstants()
 	facts.SetCurrent(facts.Write(pkg, info, files, src)) // M23-S1: every source-phase record, before any file lowers.
 	shared := &packageLower{info: info, tpkg: pkg, constMaps: collectConstMaps(files, info)}
+	base.ClearLogosCtClones(pkg.Path())
 	shared.ctExp = newCfExpander(shared, files, src) // M7-S3 hook: comptime generics of every file, registered before any file lowers.
 	edits := make(map[*syntax.File][]Edit)
 	changed := false
@@ -88,9 +89,12 @@ func Lower(pkg *types2.Package, info *types2.Info, files []*syntax.File, src map
 	if !changed {
 		changed = infoHasConstView(info, files) || hasSynthStaticMethods(pkg) // M5-S6: pure-info consts (rt.Freeze results) need a plain recheck.
 	}
-	base.ExitIfErrors() // M7-S3 hook: comptime diagnostics end lowering before survivors are rejected.
+	base.ExitIfErrors()
 	for _, file := range files {
 		rejectSurvivors(file)
+	}
+	for _, name := range shared.ctExp.memo {
+		base.RegisterLogosCtClone(pkg.Path(), name)
 	}
 	return changed, edits
 }

@@ -7,6 +7,9 @@ package ld
 import (
 	"internal/abi"
 	"strings"
+
+	"cmd/internal/goobj"
+	"cmd/link/internal/loader"
 )
 
 var logosCloneInfixes = []string{
@@ -41,4 +44,12 @@ func logosCloneBaseName(name string) string {
 		}
 		name = base
 	}
+}
+
+func logosDisplayName(ldr *loader.Loader, s loader.Sym) string {
+	name := ldr.SymName(s)
+	if ldr.SymAttr(s)&goobj.SymFlagLogosCtClone != 0 {
+		return logosCloneBaseName(name)
+	}
+	return name
 }
