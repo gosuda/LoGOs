@@ -3,10 +3,14 @@ env GOTOOLCHAIN=local
 
 cd m
 
+logos run .
+stderr '^9 16$'
 logos eject -o out
 exists out/main.go
-
-grep -count=1 'MulLen\(' out/main.go
+cd out
+go run .
+stderr '^9 16$'
+cd ..
 
 -- m/go.mod --
 module example.com/ejectmakeconst
