@@ -493,7 +493,7 @@ A `const []I`, `const *I`, or `const map[K]I` where `I` is an interface MUST rem
 
 Passing a constant view to a non-constant parameter of an `.lgo` function MUST fail with the same diagnostic. [T-201]
 
-A constant view that reaches a Go-mode parameter (the standard library or any Go package) is checked per the reference-free rule above and the caller-side `correctness::const_view_mutation` diagnostic; the compiler stores no per-parameter `ParamMutated` gate for Go-mode parameters. [T-201][R-U2]
+A constant view that reaches a Go-mode parameter (the standard library or any Go package) is checked by the caller-side `correctness::const_view_mutation` diagnostic; the compiler stores no per-parameter `ParamMutated` gate for Go-mode parameters. [T-201][R-U2]
 
 Assigning `const []*T` to `[]*T` MUST fail with `[correctness::const_view_escape]`. [T-201]
 
@@ -779,6 +779,8 @@ func f(u U) int {
 }
 ```
 
+A property interface is an interface with at least one `const F T` or `F T` element.
+
 A struct MUST satisfy a property interface only through an explicit `: I` declaration in any package. [T-203.2][R-U4]
 
 For each property the declaring package MUST generate `Logos_GetF() T` from an exported field or from a method `F() T`. [T-203.2]
@@ -978,6 +980,8 @@ The condition MUST end at the `{` that opens the branch, so a name or `true` bef
 `comptime.IsStruct[T]()` MUST be a constant `const if` condition, true when the underlying type of `T` is a struct. [T-205]
 
 Inside a comptime generic its value MUST be taken per instantiation, and a condition built from it with `!`, `&&`, `||`, `==`, `!=` and constants MUST NOT fail `[comptime::not_constant]`. [T-205]
+
+`comptime.SizeOf[T]()`, `comptime.AlignOf[T]()`, and `comptime.HasPointers[T]()` are compile-time constants describing the size, alignment, and pointer-containing status of `T`.
 
 A `const if` inside a comptime generic or a `const for` body MUST evaluate per instantiation or per field over `true`, `false`, constants, `comptime.IsStruct[X]()` with `X` a type argument, a type parameter or `f.Type`, and the connectives `!`, `&&`, `||`, `==`, `!=`. [T-205]
 
@@ -1238,6 +1242,7 @@ Region placement MUST NOT change program meaning: every program MUST print the s
 Implicit placement [T-301.1][R-U1]:
 With implicit placement on, an object that escape analysis proves does not outlive its frame, but that cannot live on the stack, MUST allocate in the frame's region. [T-301.1]
 Frame exit MUST release that region. [T-301.1]
+A value that the caller keeps is placed in the caller's region.
 A loop back-edge MUST release iteration-local objects. [T-301.1]
 Implicit placement MUST stay off unless the build sets `GOEXPERIMENT=logosarena`. [T-301.1]
 Under `logos`, `[build] arena` MUST set that experiment, and its default MUST be true. [T-301.1][R-U1]
@@ -1278,7 +1283,6 @@ It MUST retain every live chunk and preserve all live-object addresses. [T-301.1
 With no live chunks, it MUST retain no arena capacity; its ordinary stack and runtime metadata still exist. [T-301.1]
 The arena MUST hold a bottom-up noscan region and a top-down scan region. [T-301.1]
 The collector MUST scan scan-region objects with the goroutine stack. [T-301.1]
-It MUST live until the caller exits. [T-301.1]
 Cgo pointer checks MUST accept arena addresses without panic. [T-301.1]
 Frame exit, including exit by panic, MUST restore the watermark. [T-301.1]
 The restore MUST run as an emitted defer during unwinding. [T-301.1]
@@ -1339,7 +1343,7 @@ A C function marked `nocallback` that calls into Go MUST still panic on the fast
 A CPU profile MUST attribute time in a fast-called C function to its Go call site. [T-304][R-U1]
 Go pointer arguments MUST stay valid during a fast call. [T-304]
 The original M holds diagnostics only: `m.fastCgoFrame[0]` records the DI/arg address copy; record also zero-stores slots 1 to 3 so a reused M carries no stale addresses, and clear zeroes all four. The slots are plain `uintptr`, not pins or roots. [T-304]
-The flag and the slots MUST read zero after return without clearing the caller's argument values. [T-304]
+The fast-call state MUST read zero after return without clearing the caller's argument values. [T-304]
 POD and primitive-slice arguments MUST skip `_cgoCheckPointer`. [T-304]
 
 Implementation note (informative): Fast calls preserve `runtime.NumCgoCall` accounting and reset the cgo traceback buffer.
@@ -1424,7 +1428,7 @@ SpreadElem   ::= ".." Expr
 DefaultField ::= Field Name Type "=" ConstExpr [Tag]
 ```
 
-The type `T??` MUST remain a syntax error [T-202]. The type `(T?)?` MUST nest as an option of an option [T-202]. The union in `UnionDecl` MUST list a finite set of terms; a `~` term follows the same rule as the surrounding Go constraint [T-203.1]. A struct MUST satisfy a property interface only through an explicit `: I` list [T-203.2][R-U4]. A `ReadonlyMethod` MUST appear only as an interface method; `const Name() string` MUST be a readonly method obligation and MUST stay distinct from property `const Name string` [T-201][T-203.2]. Outside the listed positions, `const` keeps its ordinary Go meaning, and other positions remain syntax errors as in plain Go [T-201]. Operands inside `$"..."` are checked by `LogosInterpKindOf`; values outside its accepted kinds fail with `correctness::interp_type` [T-104.4]. The texts `{{` and `}}` MUST mean literal braces [T-104.4].
+The type `T??` MUST remain a syntax error [T-202]. The type `(T?)?` MUST nest as an option of an option [T-202]. The union in `UnionDecl` MUST list a finite set of terms with no `~` term when used as a value type; with a `~` term it is a constraint only [T-203.1]. A struct MUST satisfy a property interface only through an explicit `: I` list [T-203.2][R-U4]. A `ReadonlyMethod` MUST appear only as an interface method; `const Name() string` MUST be a readonly method obligation and MUST stay distinct from property `const Name string` [T-201][T-203.2]. Outside the listed positions, `const` keeps its ordinary Go meaning, and other positions remain syntax errors as in plain Go [T-201]. Operands inside `$"..."` are checked by `LogosInterpKindOf`; values outside its accepted kinds fail with `correctness::interp_type` [T-104.4]. The texts `{{` and `}}` MUST mean literal braces [T-104.4].
 
 ```lgo
 v := parse(s)?
@@ -1560,7 +1564,7 @@ Configuration MAY raise max_comptime_ast_nodes and max_ctfe_steps above their de
 Validation and boundary tests MUST use the selected limits. [T-Sec8][T-102]
 `logos lint` lints Go packages with the language-neutral rules of Sec 1.2 under these severities, with the cap that the next line states. [T-102][R-U1]
 A language-neutral rule whose default severity is forbid runs at deny for Go packages, and `//logos:allow(<rule>)` silences it there. [T-102][R-U1]
-`logos build` runs no default lints on Go packages; an author `//logos:zeroalloc` directive is the Sec 17.4 exception. [T-102][R-U1]
+`logos build` runs no default lints on Go packages; an author `//logos:zeroalloc` directive is the Sec 17.2 exception. [T-102][R-U1]
 Third-party modules of either kind get no code lints. [T-102][R-U1]
 
 ## 9. End-to-end example
@@ -1880,14 +1884,12 @@ A non-constant integer product in a `make` length or capacity MUST lower to `log
 
 ## 17. Verification suite
 
-### 17.1 Upstream regression gate
-
-### 17.3 Red-team completeness
+### 17.1 Red-team completeness
 
 - Every row of `logos-doc/REDTEAM.md` MUST reach `tested` or `satisfied upstream` with its proving test. [T-Sec17]
 - Runtime attack tests that execute attacker code MUST run under `-race`. [T-Sec17]
 
-### 17.4 Zero-alloc and codegen checks
+### 17.2 Zero-alloc and codegen checks
 
 - A function marked `//logos:zeroalloc` that performs a heap allocation MUST fail with `[perf::zeroalloc_violation]` naming the function and the escape-analysis reason. [T-Sec17]
 - The function below MUST fail with `[perf::zeroalloc_violation]`. [T-Sec17]
@@ -1906,18 +1908,18 @@ func pack(v int) []int {
 - In a Go package, `logos lint` MUST apply the check, and `logos build` MUST apply it as well when the author wrote the directive; `go build` MUST ignore the directive. [T-Sec17][R-U1]
 - Codegen checks MUST pin the SIMD and fast-call emission. [T-Sec17]
 
-### 17.5 Reproducibility and sizes
+### 17.3 Reproducibility and sizes
 
 - Two builds from clean caches MUST yield identical SHA-256 digests for linux/amd64, linux/arm64, and js/wasm. [T-Sec17]
 - The wasm stripped size MUST be tracked in `test/logos/size/wasm_size.txt`. [T-Sec17]
 - Growth above 1% against the recorded value MUST fail the gate. [T-Sec17]
 
-### 17.6 End-to-end example exercise
+### 17.4 End-to-end example exercise
 
 - The suite MUST exercise `test/logos/example/order_service.lgo`. [T-Sec17]
 - Ejected output MUST match native output for the example. [T-Sec17]
 
-### 17.7 Interop suite
+### 17.5 Interop suite
 
 - The script `src/cmd/go/testdata/script/logos_interop.txt` MUST hold five cases, each with its own fixture. [T-Sec17][R-U2]
 - Case 1: a loGo/s package that imports a Go package from another workspace module MUST build and run. [T-Sec17][R-U2]
