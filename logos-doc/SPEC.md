@@ -13,7 +13,7 @@ The words MUST, MUST NOT, SHOULD, SHOULD NOT, and MAY follow RFC 2119. The text 
 Every improvement to code generation, runtime, stack, SIMD, wasm, cgo, optimization level, and tooling MUST apply to Go packages and to loGo/s packages [T-0.1][R-U1].
 That rule MUST hold under `logos` and under plain `go` [T-0.1][R-U1].
 The following are by design outside those two sentences: fixed-array operators and reduction methods, which Sec 2.4 withholds from Go packages; the `make` length overflow lowering, which Sec 3.3 and Sec 13.2 define for `.lgo` files; the slice-sum vector form, which needs the `.sum()` chain call of Sec 1.4 and has no Go spelling; the wasm loop-stride default, which Sec 13 applies under `logos` only while Sec 12.1 needs the explicit `--wasm-features` flag under plain `go`; `target_cpu`, which Sec 1.5 applies to `logos` builds while plain `go` keeps the upstream `GOAMD64` and `GOARM64` defaults; the capabilities auditor, which Sec 11.1 runs in `logos` builds only; the `//logos:zeroalloc` directive, which `go build` MUST ignore in Go packages per Sec 17.2 while `logos lint` and `logos build` apply it; tooling delivered as `logos` subcommands (`lint`, `eject`, `lsp`, `context`, `next`), which have no plain-`go` counterpart, while plain-`go` tooling breadth is the shared flags and diagnostics of Sec 0.1, Sec 12, and Sec 14; alternate GC modes and synthetic PGO, which carry no rules after the withdrawal; loGo/s syntax-gated lowering (options, unions, tuples, const views and composites, comptime, `go group`, static JSON and binary forms), which has no Go spelling while Go importers see the Go-facing forms of Sec 0.3 and Sec 5; and eject, which converts loGo/s to Go one way per Sec 0.3.
-An improvement that this spec puts behind a named `GOEXPERIMENT` flag MUST stay behind that flag as this spec states. The `logos_settings_env.txt` script gates the arena and preemptibleloops experiment defaults [T-0.1][R-U1].
+An improvement that this spec puts behind a named `GOEXPERIMENT` flag MUST stay behind that flag. The `logos_settings_env.txt` script gates the arena and preemptibleloops experiment defaults [T-0.1][R-U1].
 Note: the `go` command can differ from upstream Go 1.27.2 in performance, code generation, runtime, and tooling. No test asserts a difference.
 The `go` command MUST keep Go language semantics, so every valid Go program MUST keep its Go meaning [T-0.1][R-U1].
 The `go version` output and the `go help` output, including every help topic, MUST stay the upstream text [T-0.1].
@@ -130,8 +130,8 @@ The compiler MUST enforce `correctness::region_escape` as `forbid` against a `lo
 The compiler MUST report `perf::arena_fallback` when a `logos/arena` call escapes to the heap [T-102].
 The directive grammar for these checks is `//logos:guardedby <mu>`, `//logos:atomic`, `//logos:requires <p.mu>`, `//logos:acquires <p.mu>`, `//logos:releases <p.mu>`, `//logos:zeroalloc [local]`, `//logos:sizeof T`, `//logos:offsetof T.f`, and `//logos:alignof T` [T-102]
 The rules `correctness::nil_deref_unproven`, `correctness::defer_erases_errdefer_state`, `concurrency::unsupervised_goroutine`, `suspicious::unapplied_struct_default`, `suspicious::side_effect_before_sort`, `portability::serialized_unsized_int`, `portability::alias_extension`, and `pedantic::exhaustive_union_switch` MUST NOT apply to Go packages, because each depends on loGo/s syntax, types, or generated code [T-102][R-U1].
-The rule `portability::serialized_unsized_int` guards the generated binary layout of Sec 10.3, which Go packages do not get [T-102][R-U1].
-A Go package MUST get the default group severities, the `logos.toml [lints]` table, and the `//logos:allow(<rule>)` directive of this section, with the cap that the next line states [T-102][R-U1].
+The rule `portability::serialized_unsized_int` guards the generated binary layout of Sec 10.1, which Go packages do not get [T-102][R-U1].
+A Go package MUST get the default group severities, the `logos.toml [lints]` table, and the `//logos:allow(<rule>)` directive of this section [T-102][R-U1].
 A language-neutral rule whose default severity is `forbid` MUST run at `deny` for a Go package [T-102][R-U1].
 `//logos:allow(<rule>)` MUST silence such a rule in a Go package [T-102][R-U1].
 A loGo/s package MUST keep the `forbid` severity of such a rule [T-102].
@@ -1027,8 +1027,6 @@ An expansion above the selected `max_comptime_ast_nodes` limit with default 4,09
 
 Configuration MAY raise `max_comptime_ast_nodes` above its default. [T-102]
 
-Validation and boundary tests MUST use the selected limit. [T-102]
-
 A stack trace MUST print the base name without the `_logosct<N>` suffix. [T-205]
 
 A shadowed `const switch` case MUST fail with `[comptime::unreachable_case]`. [T-205]
@@ -1192,7 +1190,7 @@ c.WithLock(p => { p.Port = 8080 })
 
 ## 3. Tier 3 specification
 
-A rule that sits behind a `GOEXPERIMENT` flag MUST stay behind it as this section states [T-0.1][R-U1].
+A rule that sits behind a `GOEXPERIMENT` flag MUST stay behind it [T-0.1][R-U1].
 
 ### 3.1 RFC-301: Tier-0 arena and placement regions
 
@@ -1278,7 +1276,7 @@ A peer goroutine MUST observe one quantum at 4096 iterations and two at 8192 ite
 `clear(b)` MUST reach a runtime memory clear. [T-303]
 Dead-store elimination MUST NOT remove that clear. [T-303]
 The rest of the WASM profile is defined in SPEC Sec 12. [T-Sec12]
-Go 1.27 lowering already keeps `clear(b)` as a runtime memory clear; the test MUST pin its survival before return. [T-303]
+Go 1.27 lowering already keeps `clear(b)` as a runtime memory clear. [T-303]
 
 ### 3.4 RFC-304: Fast-CGo engine
 
@@ -1293,7 +1291,7 @@ Go code MUST need no new directive and no new syntax for the fast path. [T-304][
 A C function that carries only one of the two directives, or none, MUST keep the upstream call path. [T-304]
 `//logos:cgo_fastcall` MUST be the `.lgo` spelling of the same pair and MUST mark a cgo call `noescape` and `nocallback`. [T-304]
 One fast path MUST serve Go packages and loGo/s packages: the single `runtime.logosCgocallFast` trampoline and the one cgo pipeline of this section. [T-304][R-U1]
-The fast path MUST use the syscall-style `reentersyscall`/`asmcgocall`/`exitsyscall` sequence, so it may release the P like a syscall; fast-call diagnostics stay on the original M; no deterministic timing gate is provided. [T-304]
+The fast path MUST use the syscall-style `reentersyscall`/`asmcgocall`/`exitsyscall` sequence, so it may release the P like a syscall; fast-call diagnostics stay on the original M. [T-304]
 It MUST NOT read a clock in the fast body: no per-call monotonic read takes part, because that read dominated the measured fast path and no consumer read the value. [T-304]
 The fast path MUST stay behind `GOEXPERIMENT=logosfastcgo`, which is off by default under both commands. [T-304][R-U1]
 Profiling with `SIGPROF` during fast calls MUST NOT crash. [T-304]
@@ -1432,7 +1430,7 @@ func Transfer(db *DB, from int64, to int64, amt int64) (int64, error) {
 
 ### 7.1 Const map semantics
 
-A const map with up to 8 keys MUST lower to a `switch` lookup [T-Sec7]. A const map with more keys MUST lower to a static perfect-hash table in read-only data plus a generated lookup function [T-Sec7]. A lookup MUST perform constant-time auxiliary metadata reads plus exactly one final key/value-slot probe with full-key validation [T-Sec7]. Construction MUST use at most 1,000,000 seed-candidate trials in total per const map [T-Sec7]. Exhaustion MUST fail with `comptime::constmap_seed_not_found` [T-Sec7]. A logarithmic fallback MUST NOT satisfy the contract [T-Sec7]. The 1, 8, 9, and 10,000-key cases in `test/logos/run/const_map.lgo` MUST be the acceptance check [T-Sec7]. That check MUST NOT promise success for every key set [T-Sec7]. A lookup of an absent key MUST return none [T-Sec7]. Iteration with `range` MUST visit keys in sorted order [T-Sec7]. The function `len` on a const map MUST be constant [T-Sec7]. Use of a const map as a `map[K]V` value MUST materialize a regular map once [T-Sec7]. The materialized map is a copy; writes to it do not change the const map's reads [T-Sec7]. A const map key MUST be a string, number, bool, or a struct or array of those; any other key type fails with `comptime::constmap_key_type` [T-Sec7]. A const map passes to a standard-library parameter only when that parameter is read-only: the compiler reads the ParamMutated mask from a fixed table of standard-library functions, because standard-library packages carry no facts, and any other imported function rejects the argument with `correctness::const_view_mutation` [T-201][T-Sec7]. A const map passes to a parameter of a function of the same package only when that function is a const func, which evaluates on copies of its arguments; any other function of the package rejects the argument with `correctness::const_view_mutation` [T-201][T-Sec7]. A `-0.0` float key MUST canonicalize, and a `NaN` key MUST fail compilation [T-201][T-Sec7]. The table symbol MUST sit in read-only data and package init MUST add no heap bytes [T-Sec7].
+A const map with up to 8 keys MUST lower to a `switch` lookup [T-Sec7]. A const map with more keys MUST lower to a static perfect-hash table in read-only data plus a generated lookup function [T-Sec7]. A lookup MUST perform constant-time auxiliary metadata reads plus exactly one final key/value-slot probe with full-key validation [T-Sec7]. Construction MUST use at most 1,000,000 seed-candidate trials in total per const map [T-Sec7]. Exhaustion MUST fail with `comptime::constmap_seed_not_found` [T-Sec7]. A logarithmic fallback MUST NOT satisfy the contract [T-Sec7]. A lookup of an absent key MUST return none [T-Sec7]. Iteration with `range` MUST visit keys in sorted order [T-Sec7]. The function `len` on a const map MUST be constant [T-Sec7]. Use of a const map as a `map[K]V` value MUST materialize a regular map once [T-Sec7]. The materialized map is a copy; writes to it do not change the const map's reads [T-Sec7]. A const map key MUST be a string, number, bool, or a struct or array of those; any other key type fails with `comptime::constmap_key_type` [T-Sec7]. A const map passes to a standard-library parameter only when that parameter is read-only: the compiler reads the ParamMutated mask from a fixed table of standard-library functions, because standard-library packages carry no facts, and any other imported function rejects the argument with `correctness::const_view_mutation` [T-201][T-Sec7]. A const map passes to a parameter of a function of the same package only when that function is a const func, which evaluates on copies of its arguments; any other function of the package rejects the argument with `correctness::const_view_mutation` [T-201][T-Sec7]. A `-0.0` float key MUST canonicalize, and a `NaN` key MUST fail compilation [T-201][T-Sec7]. The table symbol MUST sit in read-only data and package init MUST add no heap bytes [T-Sec7].
 
 ```lgo
 const mimeMap = map[string]string{
@@ -1519,8 +1517,7 @@ The --pedantic flag overrides the pedantic key for logos build and logos lint, b
 The lints.thresholds table holds six integer keys. [T-Sec8]
 Defaults are 3 for max_nesting_depth, 15 for max_cognitive_complexity, 60 for max_function_lines, 4 for max_function_params, 4096 for max_comptime_ast_nodes, and 100000 for max_ctfe_steps. [T-Sec8]
 Configuration MAY raise max_comptime_ast_nodes and max_ctfe_steps above their defaults. [T-Sec8][T-102]
-Validation and boundary tests MUST use the selected limits. [T-Sec8][T-102]
-`logos lint` lints Go packages with the language-neutral rules of Sec 1.2 under these severities, with the cap that the next line states. [T-102][R-U1]
+`logos lint` lints Go packages with the language-neutral rules of Sec 1.2 under these severities. [T-102][R-U1]
 A language-neutral rule whose default severity is forbid runs at deny for Go packages, and `//logos:allow(<rule>)` silences it there. [T-102][R-U1]
 `logos build` runs no default lints on Go packages; an author `//logos:zeroalloc` directive is the Sec 17.2 exception. [T-102][R-U1]
 Third-party modules of either kind get no code lints. [T-102][R-U1]
@@ -1684,7 +1681,7 @@ On nonzero errCode the wrapper throws the message read from wasm memory. [T-Sec1
 - Adjacent 16-byte vector stores MUST pair into FSTPQ under the same conditions. [T-303]
 - A 16-byte pair offset outside -1024..1008 or not a multiple of 16 MUST stay separate loads or stores. [T-303]
 - With the default target_cpu the ARM64 target MUST use GOARM64=v8.2, so LSE atomics stay available. [T-303][T-105]
-- The `arm64_pair` fixtures MUST pin the pairing rules of this list. [T-303]
+- Pairing MUST follow the rules above. [T-303]
 
 ### 13.2 Amd64 masked tails, rotates, and checked lengths
 
@@ -1845,17 +1842,14 @@ func pack(v int) []int {
 - The check MUST cover the function literals inside the marked function and the bodies inlined into it. It MUST report the allocation sites that escape analysis puts on the heap and `make(chan T)`. It MUST NOT report a constant converted to an interface, a function literal that captures nothing, or a zero-size object. [T-Sec17]
 - The check MUST NOT report an operation that falls back to the heap at run time: `append` past the capacity of its operand, a string concatenation or conversion longer than the stack buffer, or an insert that grows a map. The directive is an assertion about the allocation sites that escape analysis decides, not a proof that the function never calls the allocator. [T-Sec17]
 - In a Go package, `logos lint` MUST apply the check, and `logos build` MUST apply it as well when the author wrote the directive; `go build` MUST ignore the directive. [T-Sec17][R-U1]
-- Codegen checks MUST pin the SIMD and fast-call emission. [T-Sec17]
 
 ### 17.3 Reproducibility and sizes
 
 - Two builds from clean caches MUST yield identical SHA-256 digests for linux/amd64, linux/arm64, and js/wasm. [T-Sec17]
 - The stripped js/wasm size of the `repro` module built with `-trimpath -buildvcs=false -ldflags='-s -w'` MUST be tracked in `test/logos/size/wasm_size.txt`. [T-Sec17]
-- Growth above 1% against the recorded value MUST fail the gate. [T-Sec17]
 
 ### 17.4 End-to-end example exercise
 
-- The suite MUST exercise `test/logos/example/order_service.lgo`. [T-Sec17]
 - Ejected output MUST match native output for the example. [T-Sec17]
 
 ### 17.5 Interop suite
