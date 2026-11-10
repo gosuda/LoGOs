@@ -3,6 +3,7 @@ env GOTOOLCHAIN=local
 
 logos build -a -x -O=0 .
 stderr '\-N \-l'
+stderr 'variablemakeundern=1'
 
 logos build -a -x .
 stderr '\-d=inlbudget=120,variablemakethreshold=256'
@@ -52,6 +53,10 @@ go build -a -gcflags=example.com/optlevels/go=-m -O=s .
 ! stderr 'inlining call to mid'
 go build -a -gcflags=example.com/optlevels/go=-m .
 stderr 'inlining call to mid'
+go build -a -gcflags=example.com/optlevels/go=-m -O=0 .
+! stderr 'inlining call to mid'
+logos build -a -gcflags=example.com/optlevels/go=-m -O=0 .
+! stderr 'inlining call to mid'
 cd ..
 
 cd o3
@@ -118,6 +123,12 @@ go test -count=1 -O=1 .
 stdout '^ok'
 logos test -count=1 -O=1 .
 stdout '^ok'
+go test -count=1 -run TestCompiledStackBuffer -O=0 .
+stdout '^ok'
+logos test -count=1 -run TestCompiledStackBuffer -O=0 .
+stdout '^ok'
+! go test -count=1 -gcflags=all='-N -l' .
+stdout 'FAIL'
 env WANT_STACKBUF=256
 go test -count=1 -O=2 .
 stdout '^ok'

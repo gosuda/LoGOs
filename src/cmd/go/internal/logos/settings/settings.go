@@ -296,7 +296,7 @@ func validOptLevel(level string) bool {
 func flagsFor(level string) []string {
 	switch level {
 	case "0":
-		return []string{"-N", "-l"}
+		return []string{"-N", "-l", "-d=variablemakethreshold=32,variablemakeundern=1"}
 	case "2":
 		return []string{"-d=inlbudget=120,variablemakethreshold=256"}
 	case "3":

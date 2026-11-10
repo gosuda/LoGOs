@@ -469,7 +469,7 @@ func walkMakeSlice(n *ir.MakeExpr, init *ir.Nodes) ir.Node {
 			return walkExpr(typecheck.Expr(typecheck.Conv(s, n.Type())), init)
 		}
 		// Check that this optimization is enabled in general and for this node.
-		tryStack = base.Flag.N == 0 && base.VariableMakeHash.MatchPos(n.Pos(), nil)
+		tryStack = (base.Flag.N == 0 || base.Debug.VariableMakeUnderN != 0) && base.VariableMakeHash.MatchPos(n.Pos(), nil)
 	}
 
 	// The final result is assigned to this variable.
