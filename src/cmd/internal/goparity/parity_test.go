@@ -171,7 +171,7 @@ var upConfigs = []upConfig{
 	{id: "U1N", args: []string{"-gcflags=all=-N -l"}, level: "v1", noopt: true},
 	{id: "U3", env: []string{"GOAMD64=v3"}, level: "v3"},
 	{id: "U3N", args: []string{"-gcflags=all=-N -l"}, env: []string{"GOAMD64=v3"}, level: "v3", noopt: true},
-	{id: "U3R", env: []string{"GOAMD64=v3", "CGO_ENABLED=1"}, race: true, level: "v3"},
+	{id: "U3R", args: []string{"-race"}, env: []string{"GOAMD64=v3", "CGO_ENABLED=1"}, race: true, level: "v3"},
 }
 
 type toolchain struct {
@@ -546,7 +546,15 @@ func normErr(s string) string {
 }
 
 func runBinary(path, maxProcs string) (observation, error) {
-	ctx, cancel := context.WithTimeoutCause(context.Background(), 10*time.Second, errors.New("goparity run timeout"))
+	return runBinaryTimeout(path, maxProcs, 10*time.Second)
+}
+
+func runSweepBinary(path string) (observation, error) {
+	return runBinaryTimeout(path, "4", 60*time.Second)
+}
+
+func runBinaryTimeout(path, maxProcs string, budget time.Duration) (observation, error) {
+	ctx, cancel := context.WithTimeoutCause(context.Background(), budget, errors.New("goparity run timeout"))
 	defer cancel()
 	cmd := exec.CommandContext(ctx, path)
 	cmd.Env = []string{
@@ -1500,8 +1508,6 @@ func (uo *upOnceBuild) build(t *testing.T, uID string) (buildResult, error) {
 	return b, b.err
 }
 
-const sweepSampleN = 120
-
 func sweepEligible(t *testing.T, goroot string) []string {
 	t.Helper()
 	var out []string
@@ -1521,15 +1527,7 @@ func sweepEligible(t *testing.T, goroot string) []string {
 		}
 	}
 	slices.Sort(out)
-	if len(out) <= sweepSampleN {
-		return out
-	}
-	step := float64(len(out)) / float64(sweepSampleN)
-	sample := make([]string, 0, sweepSampleN)
-	for i := range sweepSampleN {
-		sample = append(sample, out[int(float64(i)*step)])
-	}
-	return sample
+	return out
 }
 
 func hasBareRun(data []byte) bool {
@@ -1549,19 +1547,20 @@ func hasBareRun(data []byte) bool {
 	return bare
 }
 
-type sweepRow struct {
-	forkBin string
-	forkID  string
-	upID    string
-	upEnv   []string
+const sweepExclusionFrac = 0.10
+
+type sweepFile struct {
+	pkg   string
+	fname string
+	data  []byte
 }
 
 type sweepJob struct {
-	fork  toolchain
-	up    toolchain
-	base  string
-	stage string
-	rows  []sweepRow
+	fork toolchain
+	up   toolchain
+	base string
+	cfgs []config
+	ups  []upConfig
 }
 
 func maskBin(o observation, bin string) observation {
@@ -1570,69 +1569,133 @@ func maskBin(o observation, bin string) observation {
 	return o
 }
 
-func (j sweepJob) check(pkg string) (excluded, failed string) {
-	type rowObs struct {
-		row     sweepRow
-		forkBin string
-		upBin   string
-		fork    observation
-		up      observation
+var sweepPanicHead = regexp.MustCompile(`^(panic: |fatal error: |\[recovered\]|\s+panic: |\s*\[signal SIG)`)
+
+func sweepObs(o observation, bin string) observation {
+	o = maskBin(o, bin)
+	var kept []string
+	for ln := range strings.SplitSeq(o.stderr, "\n") {
+		if sweepPanicHead.MatchString(ln) {
+			kept = append(kept, ln)
+		}
 	}
-	var obs []rowObs
+	o.stderr = strings.Join(kept, "\n")
+	return o
+}
+
+func stageSweepPkg(dir, pkg string, data []byte, fname, toml string) error {
+	if err := os.MkdirAll(filepath.Join(dir, pkg), 0o777); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module sweep\n\ngo 1.27\n"), 0o644); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(dir, pkg, fname), data, 0o644); err != nil {
+		return err
+	}
+	if toml != "" {
+		if err := os.WriteFile(filepath.Join(dir, "logos.toml"), []byte(toml), 0o644); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (j sweepJob) buildRow(bin, stage, outDir string, args, env []string, pkg string) (string, error) {
+	sb := stagedBuild{bin: bin, stage: stage, outDir: outDir, args: args, env: env, progs: []string{pkg}, wantCgo: true}
+	_, out, err := sb.build()
+	return out, err
+}
+
+type sweepPlaced struct {
+	bin string
+	obs observation
+}
+
+func (j sweepJob) compareRow(c config, fbin string, fobs observation, upObs map[string]sweepPlaced) string {
+	uo := upObs[c.upstream]
+	if obsEqual(fobs, uo.obs) {
+		return ""
+	}
+	fo2, err := runSweepBinary(fbin)
+	if err != nil {
+		return fmt.Sprintf("fork %s rerun failed: %v", c.id, err)
+	}
+	uo2, err := runSweepBinary(uo.bin)
+	if err != nil {
+		return fmt.Sprintf("upstream %s rerun failed: %v", c.upstream, err)
+	}
+	if obsEqual(sweepObs(fo2, fbin), sweepObs(uo2, uo.bin)) {
+		return ""
+	}
+	d := cmp.Or(firstDiff(fobs.stdout, uo.obs.stdout), firstDiff(fobs.stderr, uo.obs.stderr), fmt.Sprintf("exit %d vs %d", fobs.exit, uo.obs.exit))
+	return fmt.Sprintf("%s vs %s: %s (%s vs %s)", c.id, c.upstream, d, obsDesc(fobs), obsDesc(uo.obs))
+}
+
+func (j sweepJob) check(f sweepFile) (excluded, failed string) {
 	var dirs []string
 	defer func() {
 		for _, d := range dirs {
 			os.RemoveAll(d)
 		}
 	}()
-	for _, r := range j.rows {
-		fOut := filepath.Join(j.base, "out-"+pkg+"-"+r.forkID)
-		_, fout, ferr := stagedBuild{bin: r.forkBin, stage: j.stage, outDir: fOut, env: baseEnv(forkCache()), progs: []string{pkg}}.build()
-		uOut := filepath.Join(j.base, "out-"+pkg+"-"+r.upID)
-		_, uout, uerr := stagedBuild{bin: j.up.bin, stage: j.stage, outDir: uOut, env: appendEnv(baseEnv(upCache()), r.upEnv...), progs: []string{pkg}}.build()
-		if ferr != nil || uerr != nil {
-			dirs = append(dirs, fOut, uOut)
-			if uerr != nil {
-				return "upstream build failed: " + clip(uerr.Error()+" "+uout), ""
-			}
-			return "", fmt.Sprintf("fork %s build failed where upstream builds: %v\n%s", r.forkID, ferr, clip(fout))
+	upObs := make(map[string]sweepPlaced, len(j.ups))
+	for _, u := range j.ups {
+		st := filepath.Join(j.base, "st-"+f.pkg+"-"+u.id)
+		if err := stageSweepPkg(st, f.pkg, f.data, f.fname, ""); err != nil {
+			return fmt.Sprintf("staging failed: %v", err), ""
 		}
-		fBin := filepath.Join(fOut, pkg)
-		uBin := filepath.Join(uOut, pkg)
-		fo, err := runBinary(fBin, "4")
+		dirs = append(dirs, st)
+		outDir := filepath.Join(j.base, "out-"+f.pkg+"-"+u.id)
+		dirs = append(dirs, outDir)
+		env := baseEnv(upCache())
+		if u.race {
+			env = appendEnv(env, "CGO_ENABLED=1")
+		}
+		env = appendEnv(env, u.env...)
+		out, err := j.buildRow(j.up.bin, st, outDir, u.args, env, f.pkg)
 		if err != nil {
-			return "", fmt.Sprintf("fork %s run failed: %v", r.forkID, err)
+			return "upstream build failed: " + clip(err.Error()+" "+out), ""
 		}
-		uo, err := runBinary(uBin, "4")
+		bin := filepath.Join(outDir, f.pkg)
+		o, err := runSweepBinary(bin)
 		if err != nil {
-			return "", fmt.Sprintf("upstream %s run failed: %v", r.upID, err)
+			return "", fmt.Sprintf("upstream %s run failed: %v", u.id, err)
 		}
-		obs = append(obs, rowObs{r, fBin, uBin, maskBin(fo, fBin), maskBin(uo, uBin)})
+		upObs[u.id] = sweepPlaced{bin, sweepObs(o, bin)}
 	}
-	byUp := map[string]observation{}
-	for _, o := range obs {
-		byUp[o.row.upID] = o.up
-	}
-	if len(byUp) == len(j.rows) && !obsEqual(byUp["U1"], byUp["U3"]) {
-		return "upstream rows differ (no stable oracle)", ""
-	}
-	for _, o := range obs {
-		if obsEqual(o.fork, o.up) {
+	for _, u := range j.ups {
+		if u.race {
 			continue
 		}
-		fo2, err := runBinary(o.forkBin, "4")
+		if !obsEqual(upObs[u.id].obs, upObs[j.ups[0].id].obs) {
+			return "upstream rows differ (no stable oracle)", ""
+		}
+	}
+	for _, c := range j.cfgs {
+		st := filepath.Join(j.base, "st-"+f.pkg+"-"+c.id)
+		if err := stageSweepPkg(st, f.pkg, f.data, f.fname, c.toml); err != nil {
+			return fmt.Sprintf("staging failed: %v", err), ""
+		}
+		dirs = append(dirs, st)
+		outDir := filepath.Join(j.base, "out-"+f.pkg+"-"+c.id)
+		dirs = append(dirs, outDir)
+		bin := j.fork.bin
+		if c.logos {
+			bin = j.fork.logos
+		}
+		out, err := j.buildRow(bin, st, outDir, c.args, appendEnv(baseEnv(forkCache()), c.env...), f.pkg)
 		if err != nil {
-			return "", fmt.Sprintf("fork %s rerun failed: %v", o.row.forkID, err)
+			return "", fmt.Sprintf("fork %s build failed where upstream builds: %v\n%s", c.id, err, clip(out))
 		}
-		uo2, err := runBinary(o.upBin, "4")
+		fbin := filepath.Join(outDir, f.pkg)
+		fo, err := runSweepBinary(fbin)
 		if err != nil {
-			return "", fmt.Sprintf("upstream %s rerun failed: %v", o.row.upID, err)
+			return "", fmt.Sprintf("fork %s run failed: %v", c.id, err)
 		}
-		if obsEqual(maskBin(fo2, o.forkBin), maskBin(uo2, o.upBin)) {
-			continue
+		if failed := j.compareRow(c, fbin, sweepObs(fo, fbin), upObs); failed != "" {
+			return "", failed
 		}
-		d := cmp.Or(firstDiff(o.fork.stdout, o.up.stdout), firstDiff(o.fork.stderr, o.up.stderr), fmt.Sprintf("exit %d vs %d", o.fork.exit, o.up.exit))
-		return "", fmt.Sprintf("%s vs %s: %s (%s vs %s)", o.row.forkID, o.row.upID, d, obsDesc(o.fork), obsDesc(o.up))
 	}
 	return "", ""
 }
@@ -1641,6 +1704,7 @@ func TestParityUpstreamSweep(t *testing.T) {
 	if !*releaseFlag {
 		t.Skip("release tier only; pass -goparity.release")
 	}
+	start := time.Now()
 	fork := forkTool(t)
 	up, upOn := upstreamTool(t)
 	if !upOn {
@@ -1650,47 +1714,29 @@ func TestParityUpstreamSweep(t *testing.T) {
 	if len(files) == 0 {
 		t.Fatal("no sweep-eligible files under upstream test/")
 	}
-	base := t.TempDir()
-	stage := filepath.Join(base, "sweep")
-	if err := os.MkdirAll(stage, 0o777); err != nil {
-		t.Fatalf("creating sweep stage: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(stage, "go.mod"), []byte("module sweep\n\ngo 1.27\n"), 0o644); err != nil {
-		t.Fatalf("writing sweep go.mod: %v", err)
-	}
-	pkgs := make([]string, 0, len(files))
+	sfiles := make([]sweepFile, 0, len(files))
 	for i, f := range files {
-		pkg := fmt.Sprintf("f%03d", i)
-		dir := filepath.Join(stage, pkg)
-		if err := os.MkdirAll(dir, 0o777); err != nil {
-			t.Fatalf("creating sweep pkg %s: %v", pkg, err)
-		}
 		data, err := os.ReadFile(f)
 		if err != nil {
 			t.Fatalf("reading sweep file %s: %v", f, err)
 		}
-		if err := os.WriteFile(filepath.Join(dir, filepath.Base(f)), data, 0o644); err != nil {
-			t.Fatalf("staging sweep file %s: %v", f, err)
-		}
-		pkgs = append(pkgs, pkg)
+		sfiles = append(sfiles, sweepFile{pkg: fmt.Sprintf("f%03d", i), fname: filepath.Base(f), data: data})
 	}
-	rows := []sweepRow{
-		{fork.bin, "K1", "U1", nil},
-		{fork.logos, "K5", "U3", []string{"GOAMD64=v3"}},
-	}
+	ups := activeUpConfigs(forkConfigs)
+	base := t.TempDir()
 	type outcome struct {
 		excluded string
 		failed   string
 	}
 	outcomes := make([]outcome, len(files))
 	var wg sync.WaitGroup
-	sem := make(chan struct{}, runtime.NumCPU())
-	job := sweepJob{fork: fork, up: up, base: base, stage: stage, rows: rows}
+	sem := make(chan struct{}, runtime.GOMAXPROCS(0))
+	job := sweepJob{fork: fork, up: up, base: base, cfgs: forkConfigs, ups: ups}
 	for i := range files {
 		wg.Go(func() {
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			ex, fa := job.check(pkgs[i])
+			ex, fa := job.check(sfiles[i])
 			outcomes[i] = outcome{ex, fa}
 		})
 	}
@@ -1709,5 +1755,11 @@ func TestParityUpstreamSweep(t *testing.T) {
 		}
 		ran++
 	}
-	t.Logf("sweep: %d files compared, %d excluded, wall sample covers K1 K5", ran, skipped)
+	if ran == 0 {
+		t.Errorf("sweep: no files compared")
+	}
+	if budget := int(sweepExclusionFrac * float64(len(files))); skipped > budget {
+		t.Errorf("sweep: %d exclusions exceed budget %d (%d files)", skipped, budget, len(files))
+	}
+	t.Logf("sweep: %d files compared, %d excluded, %d fork configs, %d upstream rows, wall %s", ran, skipped, len(forkConfigs), len(ups), time.Since(start))
 }
