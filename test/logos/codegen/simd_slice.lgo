@@ -119,8 +119,8 @@ func sumAlias(xs []watt) float64 {
 
 //go:noinline
 func sumFiltered(xs []int32) int32 {
-	// amd64:-"VPMASKMOV" -"VMOVDQU"
-	// arm64:-"VPMASKMOV"
+	// amd64:-"VPMASKMOV" -"VMOVDQU" -"CALL runtime\\.makeslice"
+	// arm64:-"VPMASKMOV" -"CALL runtime\\.makeslice"
 	return xs.filter(x => x > 0).sum()
 }
 
