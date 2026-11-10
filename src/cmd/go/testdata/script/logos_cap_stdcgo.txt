@@ -14,8 +14,18 @@ stdout '^ok$'
 
 ! logos build -o $WORK/bin/stdcgoevil$GOEXE ./cmdevil
 stderr 'ERROR \[capabilities::unauthorized_cgo\]: Transitive dependency ''example\.com/evil'' reaches ''runtime\.cgocall'''
-stderr 'example\.com/evil\.Ping\(\)'
-! stderr 'example\.com/ndep'
+stderr 'example\.com/evil\._Cfunc_fortytwo\(\)'
+stderr 'example\.com/evil\.Ping\(\) +at [^ ]+\.go:\d+'
+cd ../fmain
+! logos build -o $WORK/bin/stdcgoevilfast$GOEXE ./cmdfast
+stderr 'ERROR \[capabilities::unauthorized_cgo\]: Transitive dependency ''example\.com/fastevil'' reaches ''runtime\.cgocall'''
+stderr 'example\.com/fastevil\.Ping\(\)'
+cd ..
+cd fmainok
+logos build -o $WORK/bin/stdcgookfast$GOEXE ./cmdfast
+go tool nm $WORK/bin/stdcgookfast$GOEXE
+stdout 'runtime\.logosCgocallFast'
+cd ..
 
 -- main/go.mod --
 module example.com/nmain
@@ -105,4 +115,82 @@ import "C"
 //go:noinline
 func Ping() int {
 	return int(C.fortytwo())
+}
+
+-- fmain/go.mod --
+module example.com/fmain
+
+go 1.27
+
+require example.com/fastevil v0.0.0
+
+replace example.com/fastevil => ../fastevil
+
+-- fmain/logos.toml --
+[capabilities]
+transitive_net = "allow"
+transitive_reflect = "allow"
+transitive_unsafe_allowlist = ["example.com/fastevil/**"]
+
+-- fmain/cmdfast/main.go --
+package main
+
+import (
+	"fmt"
+
+	"example.com/fastevil"
+)
+
+func main() {
+	fmt.Println(fastevil.Ping())
+}
+
+-- fastevil/go.mod --
+module example.com/fastevil
+
+go 1.27
+
+-- fastevil/bridge.lgo --
+package fastevil
+
+/*
+//logos:cgo_fastcall fortytwo
+int fortytwo() { return 42; }
+*/
+import "C"
+
+//go:noinline
+func Ping() int {
+	return int(C.fortytwo())
+}
+
+-- fmainok/go.mod --
+module example.com/fmainok
+
+go 1.27
+
+require example.com/fastevil v0.0.0
+
+replace example.com/fastevil => ../fastevil
+
+-- fmainok/logos.toml --
+[build]
+cgo = "allow"
+
+[capabilities]
+transitive_net = "allow"
+transitive_reflect = "allow"
+transitive_unsafe_allowlist = ["example.com/fastevil/**"]
+
+-- fmainok/cmdfast/main.lgo --
+package main
+
+import (
+	"fmt"
+
+	"example.com/fastevil"
+)
+
+func main() {
+	fmt.Println(fastevil.Ping())
 }
