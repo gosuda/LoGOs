@@ -69,6 +69,7 @@ type nilErrDecl struct {
 	named   map[*types2.Var]bool
 	returns []*syntax.ReturnStmt
 	assigns []*syntax.AssignStmt
+	risky   bool
 }
 
 type nilErrScope struct {
@@ -143,7 +144,55 @@ func (s *nilErrScope) add(fd *syntax.FuncDecl) {
 		}
 		return true
 	})
+	if len(d.named) > 0 {
+		d.risky = scanNilErrRisk(s.info, fd.Body, d.named)
+	}
 	s.decls[fn] = d
+}
+
+func scanNilErrRisk(info *types2.Info, body *syntax.BlockStmt, named map[*types2.Var]bool) bool {
+	risk := false
+	syntax.Inspect(body, func(n syntax.Node) bool {
+		switch n := n.(type) {
+		case *syntax.CallStmt:
+			risk = risk || n.Tok == syntax.Defer
+		case *syntax.FuncLit:
+			risk = risk || capturesNamed(info, n, named)
+		case *syntax.Operation:
+			risk = risk || takesNamedAddr(info, n, named)
+		case *syntax.RangeClause:
+			risk = risk || rangeHitsNamed(info, n, named)
+		}
+		return true
+	})
+	return risk
+}
+
+func capturesNamed(info *types2.Info, lit *syntax.FuncLit, named map[*types2.Var]bool) bool {
+	hit := false
+	syntax.Inspect(lit, func(n syntax.Node) bool {
+		if nm, ok := n.(*syntax.Name); ok && nilErrTargetsNamed(info, nm, named) {
+			hit = true
+			return false
+		}
+		return true
+	})
+	return hit
+}
+
+func takesNamedAddr(info *types2.Info, op *syntax.Operation, named map[*types2.Var]bool) bool {
+	if op.Op != syntax.And || op.Y != nil {
+		return false
+	}
+	nm, ok := syntax.Unparen(op.X).(*syntax.Name)
+	return ok && nilErrTargetsNamed(info, nm, named)
+}
+
+func rangeHitsNamed(info *types2.Info, r *syntax.RangeClause, named map[*types2.Var]bool) bool {
+	if r.Def || r.Lhs == nil {
+		return false
+	}
+	return nilErrHitsNamed(info, nilErrExprList(r.Lhs), named)
 }
 
 func nilErrGeneric(sig *types2.Signature) bool {
@@ -170,6 +219,9 @@ func nilErrGeneric(sig *types2.Signature) bool {
 }
 
 func (s *nilErrScope) holds(d *nilErrDecl) bool {
+	if d.risky {
+		return false
+	}
 	for _, st := range d.assigns {
 		if !s.assignHolds(st, d.named) {
 			return false
