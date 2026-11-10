@@ -25,6 +25,21 @@ func addInt(a, b [4]int) [4]int {
 	return a + b
 }
 
+//go:noinline
+func addUint(a, b [4]uint) [4]uint {
+	// amd64:"ADDQ" -"VPADD" -"JMP" -"CALL simd/archsimd"
+	// arm64:-"VADD" -"CALL simd/archsimd"
+	return a + b
+}
+
+//go:noinline
+func addUintptr(a, b [2]uintptr) [2]uintptr {
+	// amd64:"ADDQ" -"VPADD" -"JMP" -"CALL simd/archsimd"
+	// arm64:-"VADD" -"CALL simd/archsimd"
+	return a + b
+}
+
+
 type lane float64
 
 //go:noinline
@@ -40,4 +55,7 @@ func main() {
 	var e, f [4]int
 	var g, h [4]lane
 	println(addAlias(a, b)[0], addByte(c, d)[0], addInt(e, f)[0], addLane(g, h)[0])
+	var u1, u2 [4]uint
+	var p1, p2 [2]uintptr
+	println(addUint(u1, u2)[0], addUintptr(p1, p2)[0])
 }
