@@ -6,6 +6,7 @@ package syntax
 
 import (
 	"bytes"
+	"cmp"
 	"internal/testenv"
 	"os"
 	"path/filepath"
@@ -694,12 +695,8 @@ func TestLogosContextualWordsPlainModeReject(t *testing.T) {
 	}
 }
 
-func TestLogosExampleValidSyntaxForms(t *testing.T) {
-	path := filepath.Join(testenv.GOROOT(t), "test", "logos", "example", "order_service.lgo")
-	src, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read example: %v", err)
-	}
+func countExampleForms(t *testing.T, src []byte) (dotChain, blockLambda, ptrAssert int) {
+	t.Helper()
 	var msgs []string
 	f, err := Parse(nil, bytes.NewReader(src), func(err error) {
 		msgs = append(msgs, err.Error())
@@ -710,12 +707,11 @@ func TestLogosExampleValidSyntaxForms(t *testing.T) {
 	if len(msgs) != 0 {
 		t.Fatalf("parse example: unexpected errors: %q", msgs)
 	}
-	var dotMap, blockLambda, ptrAssert int
 	Inspect(f, func(n Node) bool {
 		switch n := n.(type) {
-		case *SelectorExpr:
-			if n.Sel.Value == "map" {
-				dotMap++
+		case *CallExpr:
+			if sel, ok := n.Fun.(*SelectorExpr); ok && containsSelectorCall(sel.X) {
+				dotChain++
 			}
 		case *LambdaExpr:
 			if _, ok := n.Body.(*BlockStmt); ok {
@@ -728,7 +724,31 @@ func TestLogosExampleValidSyntaxForms(t *testing.T) {
 		}
 		return true
 	})
-	if dotMap == 0 {
+	return dotChain, blockLambda, ptrAssert
+}
+
+func containsSelectorCall(x Expr) bool {
+	found := false
+	Inspect(x, func(n Node) bool {
+		if c, ok := n.(*CallExpr); ok {
+			if _, ok := c.Fun.(*SelectorExpr); ok {
+				found = true
+				return false
+			}
+		}
+		return true
+	})
+	return found
+}
+
+func TestLogosExampleValidSyntaxForms(t *testing.T) {
+	path := cmp.Or(os.Getenv("LOGOS_EXAMPLE_PATH"), filepath.Join(testenv.GOROOT(t), "test", "logos", "example", "order_service.lgo"))
+	src, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read example: %v", err)
+	}
+	dotChain, blockLambda, ptrAssert := countExampleForms(t, src)
+	if dotChain == 0 {
 		t.Errorf("example has no leading-dot chain continuation")
 	}
 	if blockLambda == 0 {
