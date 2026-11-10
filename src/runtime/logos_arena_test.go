@@ -589,6 +589,27 @@ func TestLogosArenaExactFitBothRegions(t *testing.T) {
 	})
 }
 
+func TestLogosArenaNoscanGrowsUp(t *testing.T) {
+	inFreshGoroutine(t, func() {
+		m := runtime.LogosArenaSave()
+		defer runtime.LogosArenaRestore(m)
+		var prev uintptr
+		for i, size := range []uintptr{8, 24, 40, 128} {
+			p := runtime.LogosArenaAlloc(byte(0), size)
+			if p == nil {
+				t.Fatalf("noscan alloc %d of %d bytes returned nil", i, size)
+			}
+			if addr := uintptr(p); i == 0 {
+				prev = addr
+			} else if addr <= prev {
+				t.Errorf("noscan object %d at %#x, want above %#x", i, addr, prev)
+			} else {
+				prev = addr
+			}
+		}
+	})
+}
+
 func TestLogosArenaOneByteOverflowLinksChunk(t *testing.T) {
 	inFreshGoroutine(t, func() {
 		m := runtime.LogosArenaSave()
