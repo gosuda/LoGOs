@@ -358,7 +358,11 @@ func TestStockClientThroughRealProxy(t *testing.T) {
 	if err := stdin.Close(); err != nil {
 		t.Errorf("closing the proxy input: %v", err)
 	}
-	<-c.done
+	select {
+	case <-c.done:
+	case <-time.After(waitLimit):
+		t.Fatal("the proxy did not close the stock exchange")
+	}
 	if err := cmd.Wait(); err != nil {
 		t.Errorf("proxy exit = %v, want nil", err)
 	}
