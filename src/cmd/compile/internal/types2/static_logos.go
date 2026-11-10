@@ -424,10 +424,12 @@ func (check *Checker) logosSynthStaticMethods() {
 			check.logosAddStaticFamilyMethods(named, "Binary")
 		}
 	}
-	check.logosCheckUnionJSONMembers()
 }
 
 func (check *Checker) logosCheckUnionJSONMembers() {
+	if !check.conf.Logos {
+		return
+	}
 	for _, obj := range check.objList {
 		tname, ok := obj.(*TypeName)
 		if !ok || tname.typ == nil || check.objMap[tname].tdecl.Alias {
@@ -487,7 +489,18 @@ func logosUnionMemberHasJSON(m Type, pkg *Package) bool {
 		return false
 	}
 	obj, _, _ := LookupFieldOrMethod(NewPointer(named), false, pkg, "UnmarshalJSON")
-	return obj != nil
+	fn, ok := obj.(*Func)
+	if !ok {
+		return false
+	}
+	sig, ok := fn.Type().(*Signature)
+	if !ok || sig.Params().Len() != 1 || sig.Results().Len() != 1 {
+		return false
+	}
+	if !Identical(Unalias(sig.Params().At(0).Type()), NewSlice(universeByte)) {
+		return false
+	}
+	return Identical(Unalias(sig.Results().At(0).Type()), universeError)
 }
 
 func (check *Checker) logosAddStaticFamilyMethods(named *Named, family string) {
