@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"unsafe"
 )
 
 type viewasHeader struct {
@@ -64,6 +65,37 @@ func TestViewAsCopyPath(t *testing.T) {
 	if h.Magic != 84148994 {
 		t.Fatalf("copy-path view aliases source: %+v", *h)
 	}
+}
+
+// SAFETY: the unsafe pointers below are read-only address probes. They are
+// converted to uintptr and compared immediately; no pointer is retained,
+// dereferenced, or used after the backing slice is dropped.
+func TestViewAsCopyAlignedIndependent(t *testing.T) {
+	b := make([]byte, 19)
+	for i := range b {
+		b[i] = byte(i + 1)
+	}
+	off := b[1:]
+	h := viewAsCopy[viewasHeader](off)
+	if uintptr(unsafe.Pointer(h))%unsafe.Alignof(viewasHeader{}) != 0 {
+		t.Fatalf("copy-path ViewAs misaligned: %p", h)
+	}
+	start := uintptr(unsafe.Pointer(&off[0]))
+	end := start + uintptr(len(off))
+	p := uintptr(unsafe.Pointer(h))
+	if p >= start && p < end+uintptr(unsafe.Sizeof(viewasHeader{})) {
+		t.Fatalf("copy-path ViewAs aliases its input: view %p inside [%x, %x)", h, start, end)
+	}
+	if d := ViewAs[viewasHeader](off); *h != *d {
+		t.Fatalf("copy-path ViewAs = %+v, direct path = %+v", *h, *d)
+	}
+	off = nil
+	b = nil
+	runtime.GC()
+	if h.Magic != 84148994 || h.Version != 151521030 || h.Size != 1229499251294997258 {
+		t.Fatalf("copy-path ViewAs invalid after input dropped: %+v", *h)
+	}
+	runtime.KeepAlive(h)
 }
 
 func TestViewAsKeepsAlive(t *testing.T) {

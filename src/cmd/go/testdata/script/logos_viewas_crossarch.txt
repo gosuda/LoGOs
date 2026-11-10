@@ -1,0 +1,71 @@
+# ViewAs on a strict-alignment target takes the aligned copy path
+# (viewas_copy.go); the native and cross-compiled binaries must agree.
+# The riscv64 build leg always runs (compile-only proof of selection);
+# the run leg needs qemu-riscv64.
+
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+cd m
+logos build -o $WORK/viewas-native$GOEXE .
+exec $WORK/viewas-native$GOEXE
+cp stdout $WORK/native.txt
+
+env GOARCH=riscv64
+env GOOS=linux
+logos build -o $WORK/viewas-riscv64$GOEXE .
+
+[!exec:qemu-riscv64] skip 'qemu-riscv64 is required for the riscv64 run leg'
+exec qemu-riscv64 $WORK/viewas-riscv64$GOEXE
+cmp stdout $WORK/native.txt
+
+-- m/go.mod --
+module example.com/viewascross
+
+go 1.27
+
+-- m/main.lgo --
+package main
+
+import (
+	"comptime"
+	"fmt"
+)
+
+type Header struct {
+	Magic   uint32
+	Version uint32
+	Size    uint64
+}
+
+func showBasic() {
+	b := []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
+	h := comptime.ViewAs[Header](b)
+	fmt.Println(h.Magic, h.Version, h.Size)
+}
+
+func showOdd() {
+	b := make([]byte, 17)
+	for i := range b {
+		b[i] = byte(i + 1)
+	}
+	h := comptime.ViewAs[Header](b[1:])
+	fmt.Println(h.Magic, h.Version, h.Size)
+}
+
+func showShort() (msg string) {
+	defer func() {
+		if r := recover(); r != nil {
+			msg = fmt.Sprint(r)
+		}
+	}()
+	b := []byte{1, 2, 3, 4, 5, 6, 7, 8}
+	_ = comptime.ViewAs[Header](b)
+	return "no panic"
+}
+
+func main() {
+	showBasic()
+	showOdd()
+	fmt.Println(showShort())
+}
