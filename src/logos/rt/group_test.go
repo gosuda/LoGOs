@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"reflect"
 	"regexp"
 	"runtime"
 	"strings"
@@ -448,6 +449,35 @@ func TestPanicErrorCarriesValue(t *testing.T) {
 			t.Errorf("PanicError(%#v).Error() = %q, lacks %q", v, pe.Error(), want)
 		}
 	}
+}
+
+func TestPanicErrorValueRecoverable(t *testing.T) {
+	inner := errors.New("inner")
+	values := []any{7, "boom", inner, nil, 2.5}
+	for _, v := range values {
+		var err error = &PanicError{Value: v}
+		pe, ok := errors.AsType[*PanicError](err)
+		if !ok {
+			t.Fatalf("AsType(%T) ok=%v, want *PanicError", err, ok)
+		}
+		if !reflect.DeepEqual(pe.Value, v) {
+			t.Errorf("PanicError value = %#v, want %#v", pe.Value, v)
+		}
+		if pe.Error() == fmt.Sprint(v) {
+			t.Errorf("PanicError(%#v).Error() = %q, names no origin beyond the value", v, pe.Error())
+		}
+	}
+	synctest.Test(t, func(t *testing.T) {
+		g, _ := NewGroup(t.Context(), 0)
+		g.Go(func(ctx context.Context) error { panic(inner) })
+		pe, ok := errors.AsType[*PanicError](g.Wait())
+		if !ok {
+			t.Fatal("Wait did not return *PanicError")
+		}
+		if !reflect.DeepEqual(pe.Value, any(inner)) {
+			t.Errorf("recovered value = %#v, want %#v", pe.Value, any(inner))
+		}
+	})
 }
 
 func deepPanic(n int) {
