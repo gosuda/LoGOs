@@ -1312,7 +1312,7 @@ A file that imports `C` MUST use Go syntax only. [T-304][A-CODEGEN]
 LoGo/s syntax in such a file MUST fail with `[correctness::cgo_file_logos_syntax] files that import "C" must use Go syntax only`. [T-304][A-CODEGEN]
 Pointers that C returns are platform pointers when they come from a declared platform declaration; the typed-nil-return rule covers that form. [T-202]
 When the fast path is on, a C function that carries both `#cgo noescape` and `#cgo nocallback` MUST take the fast call path. [T-304][R-U1]
-This rule MUST hold in Go packages and in loGo/s packages, under `logos` and under plain `go`. [T-304][R-U1]
+This rule MUST hold in Go packages under `logos` and under plain `go`, and in loGo/s packages under `logos`. [T-304][R-U1]
 Go code MUST need no new directive and no new syntax for the fast path. [T-304][R-U1]
 A C function that carries only one of the two directives, or none, MUST keep the upstream call path. [T-304]
 `//logos:cgo_fastcall` MUST be the `.lgo` spelling of the same pair and MUST mark a cgo call `noescape` and `nocallback`. [T-304]
@@ -1699,7 +1699,7 @@ Accepted wire bytes MUST stay unchanged. [T-Sec12][T-Sec10.1]
 
 ## 13. Backend peephole and SIMD passes
 
-- Every pass in this section MUST apply to Go packages and to loGo/s packages, under `logos` and under plain `go`, except a rule about a loGo/s language construct (array operators, reduction methods, and `make` length checks) and except the wasm loop-stride default, which applies under `logos` only. [T-303][R-U1]
+- Every pass in this section MUST apply to Go packages under `logos` and under plain `go`, and to loGo/s packages under `logos`, except a rule about a loGo/s language construct (array operators, reduction methods, and `make` length checks) and except the wasm loop-stride default, which applies under `logos` only. [T-303][R-U1]
 
 ### 13.1 Arm64 load and store pairing
 
