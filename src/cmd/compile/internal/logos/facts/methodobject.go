@@ -15,3 +15,24 @@ func MethodObject(typeName string, recv *types2.Var, method string) string {
 	}
 	return typeName + "." + method
 }
+
+func ObjectName(fn *types2.Func) string {
+	sig, ok := fn.Type().(*types2.Signature)
+	if !ok || sig.Recv() == nil {
+		return fn.Name()
+	}
+	recv := types2.Unalias(sig.Recv().Type())
+	isPtr := false
+	if p, ok := recv.(*types2.Pointer); ok {
+		isPtr = true
+		recv = types2.Unalias(p.Elem())
+	}
+	named, ok := recv.(*types2.Named)
+	if !ok || named.Obj().Name() == "" {
+		return ""
+	}
+	if isPtr {
+		return "(*" + named.Obj().Name() + ")." + fn.Name()
+	}
+	return named.Obj().Name() + "." + fn.Name()
+}

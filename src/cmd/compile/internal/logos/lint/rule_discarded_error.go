@@ -188,39 +188,7 @@ func (c *discardCheck) alwaysNil(fn *types2.Func) bool {
 	if fn.Pkg() == nil || fn.Pkg() == c.pass.Pkg {
 		return false
 	}
-	obj := factObject(fn)
-	f, ok := facts.Lookup(fn.Pkg().Path())
-	if !ok || f == nil {
-		return false
-	}
-	for _, rec := range f.Fns {
-		if rec.Object == obj && rec.AlwaysNilError {
-			return true
-		}
-	}
-	return false
-}
-
-// factObject returns the name of fn in a facts file: Name, Type.Method, or
-// (*Type).Method.
-func factObject(fn *types2.Func) string {
-	sig, ok := fn.Type().(*types2.Signature)
-	if !ok || sig.Recv() == nil {
-		return fn.Name()
-	}
-	recv := types2.Unalias(sig.Recv().Type())
-	ptr, isPtr := recv.(*types2.Pointer)
-	if isPtr {
-		recv = types2.Unalias(ptr.Elem())
-	}
-	named, ok := recv.(*types2.Named)
-	if !ok {
-		return fn.Name()
-	}
-	if isPtr {
-		return "(*" + named.Obj().Name() + ")." + fn.Name()
-	}
-	return named.Obj().Name() + "." + fn.Name()
+	return facts.AlwaysNilCallee(fn)
 }
 
 // isStdoutOrStderr reports whether w is os.Stdout or os.Stderr.

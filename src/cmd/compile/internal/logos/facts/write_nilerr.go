@@ -323,20 +323,7 @@ func (s *nilErrScope) provenCall(call *syntax.CallExpr) bool {
 	if fn.Pkg() == s.pkg {
 		return s.proven[fn]
 	}
-	obj := nilErrObject(fn)
-	if obj == "" {
-		return false
-	}
-	f, ok := Lookup(fn.Pkg().Path())
-	if !ok || f == nil {
-		return false
-	}
-	for _, rec := range f.Fns {
-		if rec.Object == obj && rec.AlwaysNilError {
-			return true
-		}
-	}
-	return false
+	return AlwaysNilCallee(fn)
 }
 
 func resolveNilErrCallee(info *types2.Info, call *syntax.CallExpr) *types2.Func {
@@ -358,25 +345,24 @@ func resolveNilErrCallee(info *types2.Info, call *syntax.CallExpr) *types2.Func 
 	return nil
 }
 
-func nilErrObject(fn *types2.Func) string {
-	sig, ok := fn.Type().(*types2.Signature)
-	if !ok || sig.Recv() == nil {
-		return fn.Name()
+func AlwaysNilCallee(fn *types2.Func) bool {
+	if fn == nil || fn.Pkg() == nil {
+		return false
 	}
-	recv := types2.Unalias(sig.Recv().Type())
-	isPtr := false
-	if p, ok := recv.(*types2.Pointer); ok {
-		isPtr = true
-		recv = types2.Unalias(p.Elem())
+	obj := ObjectName(fn)
+	if obj == "" {
+		return false
 	}
-	named, ok := recv.(*types2.Named)
-	if !ok || named.Obj().Name() == "" {
-		return ""
+	f, ok := Lookup(fn.Pkg().Path())
+	if !ok || f == nil {
+		return false
 	}
-	if isPtr {
-		return "(*" + named.Obj().Name() + ")." + fn.Name()
+	for _, rec := range f.Fns {
+		if rec.Object == obj && rec.AlwaysNilError {
+			return true
+		}
 	}
-	return named.Obj().Name() + "." + fn.Name()
+	return false
 }
 
 func nilErrExprList(e syntax.Expr) []syntax.Expr {

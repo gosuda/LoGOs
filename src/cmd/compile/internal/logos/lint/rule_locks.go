@@ -115,7 +115,7 @@ func LockFacts(in *Input) []facts.LockFact {
 		if !ok {
 			continue
 		}
-		name := factObject(obj)
+		name := facts.ObjectName(obj)
 		if !facts.ValidObject(name) {
 			continue
 		}
@@ -861,7 +861,7 @@ func (c *lockAudit) contractFor(fn *types2.Func) *funcContract {
 	if ct := c.byObject[fn]; ct != nil {
 		return ct
 	}
-	obj := factObject(fn)
+	obj := facts.ObjectName(fn)
 	if obj == "" || fn.Pkg() == nil {
 		return nil
 	}
@@ -1419,7 +1419,7 @@ func (c *lockAudit) reportNonatomic(decl *syntax.FuncDecl, pos syntax.Pos) {
 func (c *lockAudit) reportUnmet(decl *syntax.FuncDecl, callee *types2.Func, path guardPath, pos syntax.Pos) {
 	name := "call"
 	if callee != nil {
-		name = factObject(callee)
+		name = facts.ObjectName(callee)
 		if callee.Pkg() != nil && c.in.Pkg != nil && callee.Pkg() != c.in.Pkg {
 			pkg := callee.Pkg().Name()
 			if strings.HasPrefix(name, "(*") {
