@@ -56,7 +56,7 @@ func selectNoDone(a, b chan int) int {
 
 func selectDefault(a chan int) {
 	select {
-	case a <- 1: // ERROR "unbounded_channel_op"
+	case a <- 1:
 	default:
 	}
 }
@@ -217,7 +217,7 @@ func selectCounts() {
 	ch := make(chan int, 1)
 	ch <- 1 // ERROR "unbounded_channel_op"
 	select {
-	case ch <- 2: // ERROR "unbounded_channel_op"
+	case ch <- 2:
 	default:
 	}
 }
@@ -261,15 +261,51 @@ func timerRecv() {
 
 func timerSelect(in chan int) int {
 	select {
-	case v := <-in: // ERROR "unbounded_channel_op"
+	case v := <-in:
 		return v
-	case <-time.After(time.Second): // ERROR "unbounded_channel_op"
+	case <-time.After(time.Second):
 		return 0
 	}
 }
 
 func tickRecv() {
 	<-time.Tick(time.Second) // ERROR "unbounded_channel_op"
+}
+
+func waitTimeout(ch chan int, d time.Duration) (int, bool) {
+	select {
+	case v := <-ch:
+		return v, true
+	case <-time.After(d):
+		return 0, false
+	}
+}
+
+func tryRecv(ch chan int) (int, bool) {
+	select {
+	case v := <-ch:
+		return v, true
+	default:
+		return 0, false
+	}
+}
+
+func timerFieldBound(in chan int, t *time.Timer) int {
+	select {
+	case v := <-in:
+		return v
+	case <-t.C:
+		return 0
+	}
+}
+
+func tickerFieldBound(in chan int, t *time.Ticker) int {
+	select {
+	case v := <-in:
+		return v
+	case <-t.C:
+		return 0
+	}
 }
 
 func groupChild(ctx context.Context, in, out chan int) error {

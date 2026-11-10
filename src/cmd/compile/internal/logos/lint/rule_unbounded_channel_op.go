@@ -18,7 +18,11 @@ import (
 //
 //   - it is a case of a select statement that has a <-x.Done() case, where
 //     x is any expression and the call returns a channel; a receive of
-//     x.Done() on its own is the wait for cancellation itself;
+//     x.Done() on its own is the wait for cancellation itself. A select with
+//     a default case never blocks, and a select with a case receiving from
+//     time.After or from the C field of a *time.Timer or *time.Ticker is
+//     bounded by its timeout; such a timer receive is itself a bound, so it
+//     is not reported either;
 //   - its channel is a local variable made once, in the function, by
 //     make(chan T, k) with a constant capacity k, and the function sends on
 //     the channel at most k times in total, never inside a loop.
@@ -29,12 +33,11 @@ import (
 // properties of the channel: when the sends exceed k, or any send sits in a
 // loop, every operation on that channel is reported, including the
 // receives. A receive is bounded by the same conditions as the sends. The
-// statement bodies of a done select are ordinary code. A range over a
-// channel, close, and len are not operations of this rule. A select with a
-// default case but no done case is not exempt. In loGo/s, a plain channel
-// operation directly inside a go group child block is bounded too, because
-// lowering turns it into a select on the group context's Done channel; a
-// function literal inside the block is not covered.
+// statement bodies of a bound select are ordinary code. A range over a
+// channel, close, and len are not operations of this rule. In loGo/s, a plain
+// channel operation directly inside a go group child block is bounded too,
+// because lowering turns it into a select on the group context's Done
+// channel; a function literal inside the block is not covered.
 var unboundedChannelOp = Rule{
 	ID:      "correctness::unbounded_channel_op",
 	Group:   Correctness,
@@ -256,10 +259,10 @@ func (u *chanUnit) child(g *syntax.GroupChild) {
 }
 
 // selectStmt walks a select statement: the operations of its cases are
-// covered when the select has a done case, and the bodies are ordinary code.
+// covered when the select is bounded, and the bodies are ordinary code.
 func (u *chanUnit) selectStmt(s *syntax.SelectStmt) {
 	outer := u.free
-	covered := outer || selectHasDone(s)
+	covered := outer || u.selectCovered(s)
 	for _, cc := range s.Body {
 		u.free = covered
 		operands := u.comm(cc.Comm)
@@ -397,12 +400,44 @@ func commRecv(a *syntax.AssignStmt) *syntax.Operation {
 	return recvOf(a.Rhs)
 }
 
-// selectHasDone reports whether a case of s receives from x.Done().
-func selectHasDone(s *syntax.SelectStmt) bool {
+// selectCovered reports whether every communication of s is bounded: the
+// select has a case receiving from x.Done(), a default case, or a case
+// receiving from a timer. A default case never blocks and a timer case ends
+// the wait, so the other cases are bounded too; the timer receive is itself
+// a bound and is not reported either.
+func (u *chanUnit) selectCovered(s *syntax.SelectStmt) bool {
 	for _, cc := range s.Body {
-		if op := commOperation(cc.Comm); op != nil && isDoneCall(op.X) {
+		if cc.Comm == nil {
 			return true
 		}
+		if op := commOperation(cc.Comm); op != nil && (isDoneCall(op.X) || u.isTimeoutRecv(op.X)) {
+			return true
+		}
+	}
+	return false
+}
+
+// isTimeoutRecv reports whether x is a receive from a timer: a call of
+// time.After, or the C field of a *time.Timer or *time.Ticker.
+func (u *chanUnit) isTimeoutRecv(x syntax.Expr) bool {
+	if call, ok := bareExpr(x).(*syntax.CallExpr); ok {
+		return isTimeAfter(u.pass, call)
+	}
+	sel, ok := bareExpr(x).(*syntax.SelectorExpr)
+	if !ok || sel.Sel.Value != "C" {
+		return false
+	}
+	t := TypeOf(sel.X)
+	if ptr, ok := t.(*types2.Pointer); ok {
+		t = ptr.Elem()
+	}
+	named, ok := t.(*types2.Named)
+	if !ok || named.Obj().Pkg() == nil || named.Obj().Pkg().Path() != "time" {
+		return false
+	}
+	switch named.Obj().Name() {
+	case "Timer", "Ticker":
+		return true
 	}
 	return false
 }
