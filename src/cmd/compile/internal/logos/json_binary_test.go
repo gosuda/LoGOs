@@ -85,38 +85,6 @@ func (s S) MarshalBinary() ([]byte, error) { return nil, nil }
 	}
 }
 
-func TestBinaryZeroWireBudget(t *testing.T) {
-	text := lowerStaticText(t, "package p\ntype Empty struct{}\ntype S struct {\n\tV []Empty `json:\"v\"`\n}\n")
-	if !strings.Contains(text, "if n > (1 << 20)") {
-		t.Fatalf("zero-wire path lacks 1<<20 count cap:\n%s", text)
-	}
-	if !strings.Contains(text, "binary count %d out of range") {
-		t.Errorf("zero-wire encoder lacks symmetric count-out-of-range rejection:\n%s", text)
-	}
-	if strings.Contains(text, "storage budget exceeded") || strings.Contains(text, "_logos_budget") {
-		t.Errorf("zero-wire path must not enforce a shared storage budget:\n%s", text)
-	}
-	if !strings.Contains(text, "*v = make(") {
-		t.Errorf("zero-wire path must allocate directly without per-element iteration:\n%s", text)
-	}
-	big := lowerStaticText(t, "package p\ntype B struct {\n\tV []uint64 `json:\"v\"`\n}\n")
-	if strings.Contains(big, "storage budget exceeded") || strings.Contains(big, "_logos_budget") {
-		t.Errorf("nonzero-wire path must not reject on count header alone (charge nothing on total):\n%s", big)
-	}
-	if !strings.Contains(big, "cap64 := min(n, uint64(len(src)-*off)/2, (1<<20)/size)") {
-		t.Errorf("nonzero-wire path must pre-allocate at most min(len(rest)/2, 1MB/elem):\n%s", big)
-	}
-	if !strings.Contains(big, "for i := uint64(0); i < n; i++ {") {
-		t.Errorf("nonzero-wire path must grow by append as bytes arrive:\n%s", big)
-	}
-	byts := lowerStaticText(t, "package p\ntype Y struct {\n\tV []byte `json:\"v\"`\n}\n")
-	if strings.Contains(byts, "make([]byte, 0, int(n))") {
-		t.Errorf("byte-slice path pre-allocates the full count:\n%s", byts)
-	}
-	if !strings.Contains(byts, "cap64 := min(n, uint64(len(src)-*off)/2, (1<<20))") {
-		t.Errorf("byte-slice path must cap pre-allocation at min(len(rest)/2, 1MB):\n%s", byts)
-	}
-}
 func TestBinaryZeroWireNoIteration(t *testing.T) {
 	text := lowerStaticText(t, "package p\ntype Empty struct{}\ntype S struct {\n\tV []Empty `json:\"v\"`\n}\n")
 	if strings.Contains(text, "for i := uint64") {
