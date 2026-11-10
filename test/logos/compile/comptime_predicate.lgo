@@ -73,3 +73,7 @@ func nonConstantErrorVar() {
 	msg := "dynamic message"
 	comptime.Error(msg) // ERROR "comptime::error_not_constant"
 }
+
+func nonStringConstantError() {
+	comptime.Error(42) // ERROR "cannot use 42"
+}
