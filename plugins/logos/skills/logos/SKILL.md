@@ -130,7 +130,7 @@ Proven by `test/logos/run/ctfe.lgo`, `test/logos/run/const_init_read.lgo`, `test
 | loGo/s | Plain Go |
 |---|---|
 | `const func Fib(n int) int { ... }` then `const fib20 = Fib(20)` | evaluated at compile time; the result is a real constant |
-| `const primes = []int{2, 3, 5}` | package-level `var` in read-only data (Sec 2.1) |
+| `const primes = []int{2, 3, 5}` | package-level `var` with `//logos:rodata`, in read-only data (Sec 2.1) |
 | `const scores = map[string]int{"a": 1}` | generated lookup: `switch` up to 8 keys, perfect-hash table above |
 | `scores["a"] ?? -1` | probing lookup that returns an option; absent keys read as none |
 | `func sum(xs const []int) int` | function over the plain type; the view is erased |
