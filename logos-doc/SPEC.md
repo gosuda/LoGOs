@@ -775,7 +775,6 @@ Unions MUST use the upstream interface representation. [T-203.1]
 A closed union MUST use the upstream interface representation, including upstream handling of zero-sized members. [T-203.1]
 Ejected value unions MUST keep methods with a member comment. [T-203.1]
 A union with `~` terms MUST fail with `correctness::open_union_value`. [T-203.1]
-Union values MUST use the upstream interface representation. [T-203.1]
 
 Method bodies inside interfaces MUST fail compilation. [T-203.2]
 The write MUST reach the struct. [T-203.2]
@@ -840,13 +839,8 @@ var a, b [4]float64
 c := a + b
 _ = c.sum()
 ```
-Direct calls in multi-assignments MUST unpack. [T-204.1]
-Single-variable bindings MUST pack into tuple values. [T-204.1]
-A direct multi-value call in call position MUST unpack. [T-204.1]
-A tuple-typed variable MUST pack the values. [T-204.1]
 A tuple with slice, map, or func elements MUST fail as non-comparable. [T-204.1][T-203.1]
 A closed union MUST use upstream interface equality. [T-204.1][T-203.1]
-Element-wise operators MUST allow at most 64 bytes. [T-204.2]
 
 ### 2.5 RFC-205: Comptime
 
