@@ -1568,6 +1568,13 @@ A keyed member trial MUST count a success only when at least one key in the obje
 It assigns the target only on a single success. [T-Sec10][T-203.1]
 Ambiguity returns an error naming the union and the members. [T-Sec10][T-203.1]
 Failed trials leave the target untouched. [T-Sec10][T-203.1]
+Only top-level keys of the object MUST count as occurring. [T-Sec10][T-203.1]
+Two keyed members sharing a key MUST both claim input with that key. [T-Sec10][T-203.1]
+Non-object input MUST match only keyless members. [T-Sec10][T-203.1]
+JSON null for a union field MUST leave the field nil with no trial. [T-Sec10][T-203.1]
+Key matching MUST fold case as the default v1 encoding/json does. [T-Sec10][T-203.1]
+A member with no visible keys MUST be tried only when no keyed key occurs. [T-Sec10][T-203.1]
+UnionTrialError MUST name the union, the members in order, and the counts. [T-Sec10][T-203.1]
 
 ### 10.3 Binary encoding
 
