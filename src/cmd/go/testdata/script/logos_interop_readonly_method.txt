@@ -21,6 +21,11 @@ grep ' Sum\(xs \[\]int\) int' bout/r/r.go
 ! grep -E 'Logos_Get|Logos_Set' bout/r/r.go
 cd bout
 go build ./...
+# SPEC 0.3: ejected output builds with upstream go1.27.2 from $UPROOT1272.
+exists $UPROOT1272/bin/go
+exec $UPROOT1272/bin/go version
+stdout '^go version go1\.27\.2 '
+exec env -u GOROOT $UPROOT1272/bin/go build ./...
 cd ..
 cd ../..
 

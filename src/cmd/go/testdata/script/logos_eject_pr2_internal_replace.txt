@@ -21,6 +21,11 @@ cd $WORK/out
 go build ./...
 go run .
 cmp stdout $WORK/want-stdout.txt
+# SPEC 0.3: ejected output builds with upstream go1.27.2 from $UPROOT1272.
+exists $UPROOT1272/bin/go
+exec $UPROOT1272/bin/go version
+stdout '^go version go1\.27\.2 '
+exec env -u GOROOT $UPROOT1272/bin/go build ./...
 
 -- lapp/go.mod --
 module example.com/lapp
