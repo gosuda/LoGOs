@@ -165,6 +165,25 @@ func Read(path string) (string, error) {
 			"options":      map[string]any{"tabSize": 8, "insertSpaces": false},
 		})
 
+		if len(msg.Error) == 0 {
+			t.Fatalf("formatting on .lgo succeeded with result %s, want request failure -32803", msg.Result)
+		}
+		var rerr struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+		}
+		if err := json.Unmarshal(msg.Error, &rerr); err != nil {
+			t.Fatalf("unmarshaling formatting error: %v", err)
+		}
+		if rerr.Code != -32803 {
+			t.Errorf("formatting error code = %d, want -32803", rerr.Code)
+		}
+		if !strings.Contains(rerr.Message, "lowered Go") {
+			t.Errorf("formatting error message = %q, want mention of lowered Go", rerr.Message)
+		}
+		if reqs := f.receivedMethod("textDocument/formatting"); len(reqs) != 0 {
+			t.Errorf("gopls got %d formatting requests for .lgo, want none refused before forwarding", len(reqs))
+		}
 		if len(msg.Error) == 0 && string(msg.Result) != "null" && string(msg.Result) != "[]" {
 			var edits []struct {
 				Range   Range  `json:"range"`
