@@ -25,6 +25,7 @@ cd ../..
 
 cd c/main
 go build -o $WORK/bin/d$GOEXE ./cmd
+! stderr 'capabilities::'
 cd ../..
 
 cd e/main
