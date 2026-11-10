@@ -6,8 +6,10 @@ package json
 
 import (
 	stdjson "encoding/json"
+	"errors"
 	"reflect"
 	"strconv"
+	"strings"
 	"unicode"
 	"unicode/utf8"
 	"unsafe"
@@ -20,13 +22,7 @@ const (
 	stateDone
 )
 
-type rejectedError struct{}
-
-func (*rejectedError) Error() string {
-	return "logos/rt/json: input rejected by the scanner but accepted by encoding/json"
-}
-
-var errRejected error = &rejectedError{}
+var errRejected = errors.New("logos/rt/json: input rejected by the scanner but accepted by encoding/json")
 
 // A Scanner is a cursor over one complete JSON value held in memory. It
 // validates every byte it consumes, so after Next returns false the whole
@@ -130,7 +126,7 @@ func (s *Scanner) typeError(value string, typ reflect.Type) *stdjson.UnmarshalTy
 }
 
 func detach(key string) string {
-	return string(append([]byte(nil), key...))
+	return strings.Clone(key)
 }
 
 func (s *Scanner) rejectKind(typ reflect.Type) {
@@ -147,16 +143,10 @@ func (s *Scanner) rejectNumber(lit string, typ reflect.Type) {
 
 func (s *Scanner) indexNewError(before error, i int) {
 	if indexedFieldPaths && before == nil && s.saved != nil {
-		s.indexSaved(i)
+		if ute, ok := s.saved.(*stdjson.UnmarshalTypeError); ok && len(ute.Field) >= len(s.key) && ute.Field[:len(s.key)] == s.key {
+			ute.Field = s.key + "." + strconv.Itoa(i) + ute.Field[len(s.key):]
+		}
 	}
-}
-
-func (s *Scanner) indexSaved(i int) {
-	ute, ok := s.saved.(*stdjson.UnmarshalTypeError)
-	if !ok || len(ute.Field) < len(s.key) || ute.Field[:len(s.key)] != s.key {
-		return
-	}
-	ute.Field = s.key + "." + strconv.Itoa(i) + ute.Field[len(s.key):]
 }
 
 func (s *Scanner) scalar() byte {
@@ -232,14 +222,13 @@ func (s *Scanner) rejectObject() {
 	})
 }
 
-func (s *Scanner) closeObject(i int) bool {
+func (s *Scanner) closeObject(i int) {
 	s.pos = skipSpace(s.data, i)
 	if s.pos != len(s.data) {
 		s.fail()
-		return false
+		return
 	}
 	s.state = stateDone
-	return false
 }
 
 func (s *Scanner) setKey(start, end, flags int) {
@@ -290,7 +279,8 @@ func (s *Scanner) Next() bool {
 	}
 	c := s.data[i]
 	if c == '}' {
-		return s.closeObject(i + 1)
+		s.closeObject(i + 1)
+		return false
 	}
 	if s.state == stateMember {
 		if c != ',' {
