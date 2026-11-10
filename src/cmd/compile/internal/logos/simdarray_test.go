@@ -120,6 +120,11 @@ func TestSimdArrayOpGuardElision(t *testing.T) {
 		{"[8]uint32", "*", 1, "_logos_simd.X86.AVX2()", true},
 		{"[8]uint32", "*", 3, "", false},
 		{"[8]uint32", "*", 4, "", false},
+		{"[4]float32", "&", 1, "_logos_simd.X86.AVX()", true},
+		{"[8]float32", "&", 1, "_logos_simd.X86.AVX2()", true},
+		{"[8]float32", "&", 3, "", false},
+		{"[4]float64", "^", 1, "_logos_simd.X86.AVX2()", true},
+		{"[2]float64", "|", 1, "_logos_simd.X86.AVX()", true},
 	}
 	for _, c := range cases {
 		t.Run(c.arr+"/"+c.op+"/v"+strconv.Itoa(c.level), func(t *testing.T) {

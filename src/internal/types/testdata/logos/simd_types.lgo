@@ -105,10 +105,31 @@ func simdBadElem(s4 [4]string, t4 [4]string, c4 [4]complex128, d4 [4]complex128,
 	_ = bl4 /* ERROR "operator + not defined" */ + bl42
 }
 
-func simdBadOp(a4 [4]float64, b4 [4]float64, a16 [16]uint8, b16 [16]uint8) {
-	_ = a4 /* ERROR "operator & not defined" */ & b4
-	_ = a4 /* ERROR "operator | not defined" */ | b4
-	_ = a4 /* ERROR "operator ^ not defined" */ ^ b4
+func simdFloatBitwise(a2 [2]float32, b2 [2]float32, a4 [4]float32, b4 [4]float32, a8 [8]float32, b8 [8]float32, c2 [2]float64, d2 [2]float64, c4 [4]float64, d4 [4]float64, c8 [8]float64, d8 [8]float64) {
+	_ = a2 & b2
+	_ = a2 | b2
+	_ = a2 ^ b2
+	_ = a4 & b4
+	_ = a4 | b4
+	_ = a4 ^ b4
+	_ = a8 & b8
+	_ = a8 | b8
+	_ = a8 ^ b8
+	_ = c2 & d2
+	_ = c2 | d2
+	_ = c2 ^ d2
+	_ = c4 & d4
+	_ = c4 | d4
+	_ = c4 ^ d4
+	_ = c8 & d8
+	_ = c8 | d8
+	_ = c8 ^ d8
+}
+
+func simdBadOp(a4 [4]float64, b4 [4]float64, a16 [16]uint8, b16 [16]uint8, c4 [4]complex128, d4 [4]complex128, f, g float64) {
+	_ = c4 /* ERROR "operator & not defined" */ & d4
+	_ = c4 /* ERROR "operator | not defined" */ | d4
+	_ = f /* ERROR "operator & not defined" */ & g
 	_ = a16 /* ERROR "operator % not defined" */ % b16
 	_ = a4 /* ERROR "mismatched" */ + b16
 }

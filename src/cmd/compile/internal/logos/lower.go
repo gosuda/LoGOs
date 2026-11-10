@@ -143,25 +143,26 @@ type packageLower struct {
 
 // fileLower carries the state of lowering one file.
 type fileLower struct {
-	pkg         *packageLower
-	file        *syntax.File
-	src         []byte
-	srcMap      srcBuf
-	orig        int
-	start       []int
-	base        *syntax.PosBase
-	baseName    string
-	splices     []splice
-	regions     []*cfRegion
-	hosts       []*cfHost
-	moves       []*chainMove
-	changed     bool
-	needRT      bool
-	needSimd    bool
-	needJSON    bool
-	needBinary  bool
-	needReflect bool
-	siteDecls   []*syntax.VarDecl
+	pkg          *packageLower
+	file         *syntax.File
+	src          []byte
+	srcMap       srcBuf
+	orig         int
+	start        []int
+	base         *syntax.PosBase
+	baseName     string
+	splices      []splice
+	regions      []*cfRegion
+	hosts        []*cfHost
+	moves        []*chainMove
+	changed      bool
+	needRT       bool
+	needSimd     bool
+	needSimdMath bool
+	needJSON     bool
+	needBinary   bool
+	needReflect  bool
+	siteDecls    []*syntax.VarDecl
 	// constDecls and constText hold the M5-S4 generated declarations of
 	// this file, as parsed nodes and as eject text.
 	constDecls []syntax.Decl
@@ -527,7 +528,7 @@ func (fl *fileLower) lowerFile() {
 
 	fl.lowerStaticJSON() // M11-S1/S2 hook: generated MarshalJSON and UnmarshalJSON; sets needRT and needJSON before the imports.
 	fl.flushTypeImports()
-	if fl.needRT || fl.needSimd || fl.needJSON || fl.needReflect || fl.needBinary {
+	if fl.needRT || fl.needSimd || fl.needSimdMath || fl.needJSON || fl.needReflect || fl.needBinary {
 		var imps []syntax.Decl
 		if fl.needRT {
 			imps = append(imps, rtImport(fl.file.Pos()))
@@ -545,6 +546,9 @@ func (fl *fileLower) lowerFile() {
 		}
 		if fl.needSimd {
 			imps = append(imps, simdImport(fl.file.Pos()))
+		}
+		if fl.needSimdMath {
+			imps = append(imps, simdMathImport(fl.file.Pos()))
 		}
 		fl.file.DeclList = append(imps, fl.file.DeclList...)
 		fl.addHeaderSplice()
@@ -578,12 +582,13 @@ func (fl *fileLower) getGenImports() *genImports {
 		return fl.genImps
 	}
 	used := map[string]bool{
-		rtAlias:         true,
-		jsonAlias:       true,
-		logosSimdAlias:  true,
-		reflectAlias:    true,
-		interpConvPkg:   true,
-		interpUnsafePkg: true,
+		rtAlias:            true,
+		jsonAlias:          true,
+		logosSimdAlias:     true,
+		logosSimdMathAlias: true,
+		reflectAlias:       true,
+		interpConvPkg:      true,
+		interpUnsafePkg:    true,
 	}
 	for _, name := range fl.importNames() {
 		if name != "" {
@@ -638,6 +643,9 @@ func (fl *fileLower) addHeaderSplice() {
 	}
 	if fl.needSimd {
 		fl.add(ins, ins, "\n\nimport "+logosSimdAlias+" "+fmt.Sprintf("%q", logosSimdPath))
+	}
+	if fl.needSimdMath {
+		fl.add(ins, ins, "\n\nimport "+logosSimdMathAlias+" "+fmt.Sprintf("%q", logosSimdMathPath))
 	}
 	if len(fl.siteDecls) > 0 {
 		text := "\n\n"

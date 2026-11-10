@@ -69,10 +69,8 @@ func (check *Checker) logosSimdSize(sh logosSimdShape) int64 {
 func logosSimdOpPair(op syntax.Operator, k BasicKind) bool {
 	info := Typ[k].Info()
 	switch op {
-	case syntax.Add, syntax.Sub, syntax.Mul, syntax.Div:
+	case syntax.Add, syntax.Sub, syntax.Mul, syntax.Div, syntax.And, syntax.Or, syntax.Xor:
 		return info&(IsInteger|IsFloat) != 0
-	case syntax.And, syntax.Or, syntax.Xor:
-		return info&IsInteger != 0
 	}
 	return false
 }

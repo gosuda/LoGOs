@@ -17,6 +17,8 @@ import (
 
 const logosSimdAlias = "_logos_simd"
 const logosSimdPath = "simd/archsimd"
+const logosSimdMathAlias = "_logos_math"
+const logosSimdMathPath = "math"
 
 var logosSimdMethodNames = map[string]bool{
 	"sum": true,
@@ -174,7 +176,7 @@ func amd64Feature(total int64, lane simdLane, op syntax.Operator) simdFeature {
 	switch {
 	case total == 64, op == syntax.Mul && lane.width == 8 && !lane.isFloat:
 		return simdFeatAVX512
-	case total == 32 && !lane.isFloat:
+	case total == 32 && (!lane.isFloat || op == syntax.And || op == syntax.Or || op == syntax.Xor):
 		return simdFeatAVX2
 	}
 	return simdFeatAVX
@@ -222,12 +224,44 @@ func (fl *fileLower) simdGuardCond(feat simdFeature) string {
 	return logosSimdAlias + ".X86." + feat.check + "()"
 }
 
-func simdScalarBody(sh *simdShape, op syntax.Operator) string {
+func simdFloatBitwiseOp(op syntax.Operator) bool {
+	return op == syntax.And || op == syntax.Or || op == syntax.Xor
+}
+
+func simdFloatBitsTo(sh *simdShape) string {
+	if sh.lane.width == 4 {
+		return "BitsToFloat32"
+	}
+	return "BitsToFloat64"
+}
+
+func (fl *fileLower) simdScalarBody(sh *simdShape, op syntax.Operator) string {
+	if sh.lane.isFloat && simdFloatBitwiseOp(op) {
+		fl.needSimdMath = true
+		bits := "Float64bits"
+		from := "Float64frombits"
+		if sh.lane.width == 4 {
+			bits = "Float32bits"
+			from = "Float32frombits"
+		}
+		var lanes []string
+		for i := int64(0); i < sh.len; i++ {
+			lanes = append(lanes, fmt.Sprintf("%s.%s(%s.%s(_logos_a[%d]) %s %s.%s(_logos_b[%d]))", logosSimdMathAlias, from, logosSimdMathAlias, bits, i, simdOpText(op), logosSimdMathAlias, bits, i))
+		}
+		return "return " + sh.spell + "{" + strings.Join(lanes, ", ") + "}"
+	}
 	var lanes []string
 	for i := int64(0); i < sh.len; i++ {
 		lanes = append(lanes, fmt.Sprintf("_logos_a[%d] %s _logos_b[%d]", i, simdOpText(op), i))
 	}
 	return "return " + sh.spell + "{" + strings.Join(lanes, ", ") + "}"
+}
+
+func simdVecSuffix(sh *simdShape, op syntax.Operator) (string, string) {
+	if sh.lane.isFloat && simdFloatBitwiseOp(op) {
+		return ".ToBits()", "." + simdFloatBitsTo(sh) + "().StoreArray"
+	}
+	return "", ".StoreArray"
 }
 
 type simdSite struct {
@@ -510,27 +544,28 @@ func (fl *fileLower) simdElemwiseText(sh *simdShape, op syntax.Operator, aText, 
 	if vec, chunks, feat, ok := simdVecForm(sh, op); ok {
 		load := logosSimdAlias + ".Load" + vec + "Array"
 		method := simdOpMethod(op)
+		tis, store := simdVecSuffix(sh, op)
 		var stmts []string
 		stmts = append(stmts, "var _logos_r "+sh.spell)
 		if chunks == 1 {
-			stmts = append(stmts, load+"("+simdAddr(sh, "_logos_a")+")."+method+"("+load+"("+simdAddr(sh, "_logos_b")+")).StoreArray("+simdAddr(sh, "_logos_r")+")")
+			stmts = append(stmts, load+"("+simdAddr(sh, "_logos_a")+")"+tis+"."+method+"("+load+"("+simdAddr(sh, "_logos_b")+")"+tis+")"+store+"("+simdAddr(sh, "_logos_r")+")")
 		} else {
 			k := sh.len / chunks
 			chunkVec := fmt.Sprintf("%sx%d", sh.lane.name, 16/sh.lane.width)
 			chunkLoad := logosSimdAlias + ".Load" + chunkVec + "Array"
 			for c := int64(0); c < chunks; c++ {
-				stmts = append(stmts, chunkLoad+"("+simdChunkAddr(sh, "_logos_a", c, k)+")."+method+"("+chunkLoad+"("+simdChunkAddr(sh, "_logos_b", c, k)+")).StoreArray("+simdChunkAddr(sh, "_logos_r", c, k)+")")
+				stmts = append(stmts, chunkLoad+"("+simdChunkAddr(sh, "_logos_a", c, k)+")"+tis+"."+method+"("+chunkLoad+"("+simdChunkAddr(sh, "_logos_b", c, k)+")"+tis+")"+store+"("+simdChunkAddr(sh, "_logos_r", c, k)+")")
 			}
 		}
 		stmts = append(stmts, "return _logos_r")
 		fl.needSimd = true
 		vecBody := strings.Join(stmts, "; ")
 		if cond := fl.simdGuardCond(feat); cond != "" {
-			return cat(gen("func("+params+") "+sh.spell+" { if "+cond+" { "+vecBody+" } else { "+simdScalarBody(sh, op)+" } }("), aText, gen(", "), bText, gen(")"))
+			return cat(gen("func("+params+") "+sh.spell+" { if "+cond+" { "+vecBody+" } else { "+fl.simdScalarBody(sh, op)+" } }("), aText, gen(", "), bText, gen(")"))
 		}
 		return cat(gen("func("+params+") "+sh.spell+" { "+vecBody+" }("), aText, gen(", "), bText, gen(")"))
 	}
-	return cat(gen("func("+params+") "+sh.spell+" { "+simdScalarBody(sh, op)+" }("), aText, gen(", "), bText, gen(")"))
+	return cat(gen("func("+params+") "+sh.spell+" { "+fl.simdScalarBody(sh, op)+" }("), aText, gen(", "), bText, gen(")"))
 }
 
 func simdReduceBody(v string, n int64, combine func(a, b string) string) string {
@@ -642,5 +677,12 @@ func simdImport(pos syntax.Pos) *syntax.ImportDecl {
 	return at(&syntax.ImportDecl{
 		LocalPkgName: nameOf(pos, logosSimdAlias),
 		Path:         litOf(pos, fmt.Sprintf("%q", logosSimdPath), syntax.StringLit),
+	}, pos)
+}
+
+func simdMathImport(pos syntax.Pos) *syntax.ImportDecl {
+	return at(&syntax.ImportDecl{
+		LocalPkgName: nameOf(pos, logosSimdMathAlias),
+		Path:         litOf(pos, fmt.Sprintf("%q", logosSimdMathPath), syntax.StringLit),
 	}, pos)
 }
