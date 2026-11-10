@@ -566,7 +566,7 @@ The spelling `T??` MUST be a syntax error reporting `T?? is not allowed; use (T?
 
 `??` with a non-option left side MUST fail with the same diagnostic. [T-104.3]
 
-A method call on an unnarrowed `T?` MUST fail with `[correctness::nil_deref_unproven]`. [T-202]
+An ordinary method call on an unnarrowed `T?` MUST fail with `[correctness::nil_deref_unproven]`; a `?.` call is not an ordinary call. [T-202]
 
 `??` MUST evaluate its right side only when the left side is none. [T-104.3]
 
