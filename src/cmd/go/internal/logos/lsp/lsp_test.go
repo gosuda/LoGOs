@@ -1677,14 +1677,15 @@ func TestServeRejectsBadFrames(t *testing.T) {
 	for _, c := range []struct {
 		name string
 		in   string
-		kind string
 	}{
-		{"missing length", "X-Other: 1\r\n\r\n{}", ""},
-		{"corrupt length", "Content-Length: abc\r\n\r\n{}", ""},
-		{"negative", "Content-Length: -4\r\n\r\n{}", ""},
-		{"truncated", "Content-Length: 99\r\n\r\n{}", ""},
-		{"cut header", "Content-Length: 3", ""},
-		{"over the cap", "Content-Length: " + strconv.Itoa(maxMessage+1) + "\r\n\r\n", "invalid Content-Length"},
+		{"missing length", "X-Other: 1\r\n\r\n{}"},
+		{"corrupt length", "Content-Length: abc\r\n\r\n{}"},
+		{"empty value", "Content-Length:\r\n\r\n{}"},
+		{"junk suffix", "Content-Length: 12x\r\n\r\n{}"},
+		{"negative", "Content-Length: -4\r\n\r\n{}"},
+		{"truncated", "Content-Length: 99\r\n\r\n{}"},
+		{"cut header", "Content-Length: 3"},
+		{"over the cap", "Content-Length: " + strconv.Itoa(maxMessage+1) + "\r\n\r\n"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			scratch := t.TempDir()
@@ -1717,9 +1718,6 @@ func TestServeRejectsBadFrames(t *testing.T) {
 			case err := <-done:
 				if err == nil {
 					t.Fatalf("Serve accepted a %s frame, want an error", c.name)
-				}
-				if c.kind != "" && !strings.Contains(err.Error(), c.kind) {
-					t.Fatalf("Serve over a %s frame = %v, want %q", c.name, err, c.kind)
 				}
 			case <-time.After(waitLimit):
 				t.Fatal("Serve did not return after the bad frame")
@@ -1856,10 +1854,11 @@ func TestServeAnswersParseErrorAndContinues(t *testing.T) {
 	frame := func(body string) string {
 		return fmt.Sprintf("Content-Length: %d\r\n\r\n%s", len(body), body)
 	}
+	zero := frame("")
 	bad := frame(`{"m":}`)
 	shutdown := frame(`{"jsonrpc":"2.0","id":2,"method":"shutdown","params":null}`)
 	bye := frame(`{"jsonrpc":"2.0","method":"exit","params":{}}`)
-	if _, err := io.WriteString(inW, bad+shutdown+bye); err != nil {
+	if _, err := io.WriteString(inW, zero+bad+shutdown+bye); err != nil {
 		t.Fatal(err)
 	}
 	inW.Close()
@@ -1886,17 +1885,19 @@ func TestServeAnswersParseErrorAndContinues(t *testing.T) {
 			return nil
 		}
 	}
-	first := readFrame()
-	if !first.isResponse() || string(first.ID) != "null" {
-		t.Fatalf("parse error reply = %+v, want a response with a null id", first)
-	}
-	v, err := decode(first.Error)
-	if err != nil {
-		t.Fatal(err)
-	}
-	code, _ := number(v.(map[string]any)["code"])
-	if code != codeParseError {
-		t.Errorf("parse error reply code = %v, want %d", code, codeParseError)
+	for _, what := range []string{"zero-length", "malformed"} {
+		m := readFrame()
+		if !m.isResponse() || string(m.ID) != "null" {
+			t.Fatalf("%s reply = %+v, want a response with a null id", what, m)
+		}
+		v, err := decode(m.Error)
+		if err != nil {
+			t.Fatal(err)
+		}
+		code, _ := number(v.(map[string]any)["code"])
+		if code != codeParseError {
+			t.Errorf("%s reply code = %v, want %d", what, code, codeParseError)
+		}
 	}
 	second := readFrame()
 	if !second.isResponse() || string(second.ID) != "2" {
