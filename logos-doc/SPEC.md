@@ -1487,7 +1487,7 @@ UnionTrialError MUST name the union, the members in order, and the counts. [T-Se
 
 For each JSON-eligible struct whose every JSON-visible field has a binary representation, the lowering generates MarshalBinary, UnmarshalBinary, and AppendBinary. [T-Sec10.1]
 They implement encoding.BinaryMarshaler, encoding.BinaryUnmarshaler, and encoding.BinaryAppender. [T-Sec10.1]
-Output starts with version byte 0x01, then fields in declaration order. [T-Sec10.1]
+Output MUST start with version byte 0x01, then fields in declaration order. [T-Sec10.1]
 All integer kinds encode as 8 bytes little-endian of the 64-bit value. [T-Sec10.1]
 float32 encodes as 4 bytes little-endian of Float32bits. [T-Sec10.1]
 float64 encodes as 8 bytes little-endian of Float64bits. [T-Sec10.1]
