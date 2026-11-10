@@ -73,6 +73,7 @@ func (g *binaryGenerator) codec(t types2.Type) (int, bool) {
 			return false
 		}
 		e("dst, err = %s_e%d(dst, %s); if err != nil { return dst, err }", g.prefix, c, value)
+		d("if depth+1 > 10000 { return _logos_bfmt.Errorf(\"binary field %%s at offset %%d: nesting depth exceeds 10000\", %s, *off) }", field)
 		d("if err := %s_d%d(src, off, %s, %s, depth+1); err != nil { return err }", g.prefix, c, target, field)
 		return true
 	}
@@ -200,7 +201,7 @@ func (g *binaryGenerator) codec(t types2.Type) (int, bool) {
 		}
 	}
 	fmt.Fprintf(&g.text, "func %s_e%d(dst []byte, v %s) ([]byte, error) { var err error; _ = err\n%sreturn dst, nil\n}\n", g.prefix, id, name, enc.String())
-	fmt.Fprintf(&g.text, "func %s_d%d(src []byte, off *int, v *%s, field string, depth int) error {\nif depth > 10000 { return _logos_bfmt.Errorf(\"binary field %%s at offset %%d: nesting depth exceeds 10000\", field, *off) }\n%sreturn nil\n}\n", g.prefix, id, name, dec.String())
+	fmt.Fprintf(&g.text, "func %s_d%d(src []byte, off *int, v *%s, field string, depth int) error {\n%sreturn nil\n}\n", g.prefix, id, name, dec.String())
 	return id, true
 }
 
