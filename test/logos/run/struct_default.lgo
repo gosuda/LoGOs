@@ -16,6 +16,8 @@ func main() {
 	fmt.Println(b.Port, b.Host)
 	c := Cfg{Host: "x"}
 	fmt.Println(c.Port, c.Host)
+	d := &Cfg{Host: "x"}
+	fmt.Println(d.Port, d.Host)
 	var z Cfg // ERROR "warning: \[suspicious::unapplied_struct_default\] zero declaration of Cfg with field defaults"
 	fmt.Println(z.Port, z.Host)
 	n := new(Cfg) // ERROR "warning: \[suspicious::unapplied_struct_default\] zero declaration of Cfg with field defaults"
