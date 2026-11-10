@@ -9,7 +9,7 @@ stdout '^const WidePure P64$'
 
 logos build -o $WORK/ok.a ./okcall
 ! logos build -o $WORK/bad.a ./badcall
-stderr 'const_view_mutation.*cannot pass argument through const view'
+stderr 'const_view_mutation.*cannot pass const view'
 
 -- w/go.mod --
 module example.com/wideparams
