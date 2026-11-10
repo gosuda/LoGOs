@@ -1872,8 +1872,6 @@ A non-constant integer product in a `make` length or capacity MUST lower to `log
 
 ### 17.1 Red-team completeness
 
-- Every row of `logos-doc/REDTEAM.md` MUST reach `tested` or `satisfied upstream` with its proving test. [T-Sec17]
-
 ### 17.2 Zero-alloc and codegen checks
 
 - A function marked `//logos:zeroalloc` that performs a heap allocation MUST fail with `[perf::zeroalloc_violation]` naming the function and the escape-analysis reason. [T-Sec17]

@@ -2912,6 +2912,7 @@ The release gate runs the checks that no in-tree test asserts:
 - The upstream suite that `./run.bash` runs passes under plain `go`.
 - Two-build digests reproduce on a second host.
 - Runtime attack tests that execute attacker code run under `-race`.
+- Every row of `logos-doc/REDTEAM.md` reaches `tested` or `satisfied upstream` with its proving test.
 
 ### M22-C Closure re-audit of SPEC sections 0 to 18
 
