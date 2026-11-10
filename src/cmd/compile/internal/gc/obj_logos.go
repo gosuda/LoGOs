@@ -26,7 +26,18 @@ func hasLogosAssertFacts() bool {
 
 func hasLogosLintFacts() bool {
 	f := facts.Current()
-	return f != nil && (len(f.AllocFrees) != 0 || len(f.Locks) != 0)
+	if f == nil {
+		return false
+	}
+	if len(f.AllocFrees) != 0 || len(f.Locks) != 0 {
+		return true
+	}
+	for i := range f.Fns {
+		if f.Fns[i].AlwaysNilError {
+			return true
+		}
+	}
+	return false
 }
 
 func writeLogosFacts(bout *bio.Writer) {

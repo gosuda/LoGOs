@@ -46,6 +46,7 @@ type ReadonlyFact struct {
 
 type FnFact struct {
 	Object          string
+	AlwaysNilError  bool
 	ReceiverMutated bool
 	Readonly        bool
 	AssertTP        string
@@ -209,6 +210,9 @@ func (fn FnFact) flags() string {
 		}
 		b.WriteString(s)
 	}
+	if fn.AlwaysNilError {
+		add("AlwaysNilError")
+	}
 	if fn.ReceiverMutated {
 		add("ReceiverMutated")
 	}
@@ -234,6 +238,8 @@ func (fn FnFact) flags() string {
 
 func (fn *FnFact) parseFlag(flag string) error {
 	switch flag {
+	case "AlwaysNilError":
+		fn.AlwaysNilError = true
 	case "ReceiverMutated":
 		fn.ReceiverMutated = true
 	case "Readonly":

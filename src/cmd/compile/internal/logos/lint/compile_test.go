@@ -52,7 +52,20 @@ func compileFile(t *testing.T, name, src string, flags ...string) compileResult 
 
 const compileSrc = `package p
 
-func f() error { return nil }
+type errString string
+
+func (e errString) Error() string { return string(e) }
+
+var errSentinel = errString("boom")
+
+var fail = false
+
+func f() error {
+	if fail {
+		return errSentinel
+	}
+	return nil
+}
 
 func g() {
 	f()
@@ -94,7 +107,7 @@ func TestGoPackageNeedsLintOnly(t *testing.T) {
 // ordinary compile, and writes no object on failure.
 func TestLgoPackageLintsEveryCompile(t *testing.T) {
 	res := compileFile(t, "x.lgo", compileSrc)
-	if res.exitCode != 2 || !strings.Contains(res.output, "x.lgo:6:2: [slop::discarded_error]") || res.objectOK {
+	if res.exitCode != 2 || !strings.Contains(res.output, "x.lgo:19:2: [slop::discarded_error]") || res.objectOK {
 		t.Errorf("lgo compile: exit %d, output %q, object %v", res.exitCode, res.output, res.objectOK)
 	}
 }

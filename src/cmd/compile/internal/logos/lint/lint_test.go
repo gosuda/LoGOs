@@ -331,13 +331,29 @@ const discardedSrc = `package p
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
 )
 
-func f() error        { return nil }
-func g() (int, error) { return 0, nil }
+var errSentinel = errors.New("boom")
+
+var fail = false
+
+func f() error {
+	if fail {
+		return errSentinel
+	}
+	return nil
+}
+
+func g() (int, error) {
+	if fail {
+		return 0, errSentinel
+	}
+	return 0, nil
+}
 
 func a() {
 	f() // want
@@ -404,7 +420,17 @@ func TestDiscardedError(t *testing.T) {
 
 const spanSrc = `package p
 
-func f(...any) error { return nil }
+import "errors"
+
+var errSpan = errors.New("span")
+
+func f(...any) error {
+	if errSpan == nil {
+		return nil
+	}
+	return errSpan
+}
+
 func g(int) int      { return 0 }
 
 func a() {
@@ -461,7 +487,16 @@ func TestDiscardedErrorSpanInterpolation(t *testing.T) {
 	testenv.MustHaveGoBuild(t)
 	const src = `package p
 
-func h(string) error { return nil }
+import "errors"
+
+var errH = errors.New("h")
+
+func h(string) error {
+	if errH == nil {
+		return nil
+	}
+	return errH
+}
 
 func a() {
 	x := "s"
@@ -892,7 +927,16 @@ func TestInfiniteRecursionGenericConstSwitch(t *testing.T) {
 func TestDirective(t *testing.T) {
 	const src = `package p
 
-func f() error { return nil }
+import "errors"
+
+var errTest = errors.New("test")
+
+func f() error {
+	if errTest == nil {
+		return nil
+	}
+	return errTest
+}
 
 func a() {
 	//logos:allow(slop::discarded_error)
@@ -944,7 +988,16 @@ func TestDirectiveWarn(t *testing.T) {
 	testenv.MustHaveGoBuild(t)
 	const src = `package p
 
-func f() error { return nil }
+import "errors"
+
+var errTest = errors.New("test")
+
+func f() error {
+	if errTest == nil {
+		return nil
+	}
+	return errTest
+}
 
 func a() {
 	//logos:allow(slop::discarded_error)
@@ -959,7 +1012,7 @@ func a() {
 	in := check(t, KindLgo, "x.lgo", src)
 	in.Policy = p
 	got := summarize(Run(in))
-	if want := []string{"8 slop::discarded_error warn"}; !slices.Equal(got, want) {
+	if want := []string{"17 slop::discarded_error warn"}; !slices.Equal(got, want) {
 		t.Errorf("results = %q, want %q", got, want)
 	}
 }
@@ -992,7 +1045,16 @@ func TestForbidDirectiveConfig(t *testing.T) {
 	testenv.MustHaveGoBuild(t)
 	const src = `package p
 
-func f() error { return nil }
+import "errors"
+
+var errTest = errors.New("test")
+
+func f() error {
+	if errTest == nil {
+		return nil
+	}
+	return errTest
+}
 
 func a() {
 	//logos:allow(slop::discarded_error)
@@ -1007,8 +1069,8 @@ func a() {
 	in.Policy = p
 	got := summarize(Run(in))
 	want := []string{
-		"6 correctness::allow_forbidden_rule forbid",
-		"7 slop::discarded_error forbid",
+		"15 correctness::allow_forbidden_rule forbid",
+		"16 slop::discarded_error forbid",
 	}
 	if !slices.Equal(got, want) {
 		t.Errorf("lgo results = %q, want %q", got, want)

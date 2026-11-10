@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 
+	"cmd/compile/internal/logos/facts"
 	"cmd/compile/internal/syntax"
 	"cmd/compile/internal/types2"
 )
@@ -23,8 +24,9 @@ var discardedError = Rule{
 
 // discardCheck walks one file and reports dropped error results.
 type discardCheck struct {
-	pass *Pass
-	file *syntax.File
+	pass   *Pass
+	file   *syntax.File
+	nilErr map[*types2.Func]bool
 	// returnsError tells whether the function being walked returns error
 	// as its last result.
 	returnsError bool
@@ -32,8 +34,9 @@ type discardCheck struct {
 
 // checkDiscardedError is the Check of discardedError.
 func checkDiscardedError(pass *Pass) {
+	nilErr := facts.AlwaysNilErrorSet(pass.Pkg, pass.Info, pass.Files)
 	for _, f := range pass.Files {
-		c := &discardCheck{pass: pass, file: f}
+		c := &discardCheck{pass: pass, file: f, nilErr: nilErr}
 		c.walk(f)
 	}
 }
@@ -68,10 +71,9 @@ func (c *discardCheck) walkFunc(body *syntax.BlockStmt, sig *syntax.FuncType) {
 	c.returnsError = outer
 }
 
-// exprStmt reports a call statement that drops an error result.
 func (c *discardCheck) exprStmt(s *syntax.ExprStmt) {
 	call := callOf(s.X)
-	if call == nil || benignCall(c.pass, call) {
+	if call == nil || c.benignCall(call) {
 		return
 	}
 	if !slices.ContainsFunc(elemTypes(TypeOf(call)), isErrorType) {
@@ -107,7 +109,7 @@ func (c *discardCheck) assignStmt(s *syntax.AssignStmt) {
 func (c *discardCheck) pairedBlankCall(lhs, rhs []syntax.Expr) *syntax.CallExpr {
 	for i := range lhs {
 		call := callOf(rhs[i])
-		if call == nil || !isBlank(lhs[i]) || benignCall(c.pass, call) {
+		if call == nil || !isBlank(lhs[i]) || c.benignCall(call) {
 			continue
 		}
 		if res := elemTypes(TypeOf(call)); len(res) == 1 && isErrorType(res[0]) {
@@ -121,7 +123,7 @@ func (c *discardCheck) pairedBlankCall(lhs, rhs []syntax.Expr) *syntax.CallExpr 
 // at the position of a blank identifier.
 func (c *discardCheck) tupleBlankCall(lhs []syntax.Expr, e syntax.Expr) *syntax.CallExpr {
 	call := callOf(e)
-	if call == nil || benignCall(c.pass, call) {
+	if call == nil || c.benignCall(call) {
 		return nil
 	}
 	res := elemTypes(TypeOf(call))
@@ -160,9 +162,8 @@ func lastResultIsError(sig *syntax.FuncType) bool {
 	return isErrorType(TypeOf(sig.ResultList[len(sig.ResultList)-1].Type))
 }
 
-// benignCall reports whether call is one of the exempt callees.
-func benignCall(pass *Pass, call *syntax.CallExpr) bool {
-	fn := calleeFunc(pass, call)
+func (c *discardCheck) benignCall(call *syntax.CallExpr) bool {
+	fn := calleeFunc(c.pass, call)
 	if fn == nil {
 		return false
 	}
@@ -170,11 +171,34 @@ func benignCall(pass *Pass, call *syntax.CallExpr) bool {
 	case "fmt.Print", "fmt.Printf", "fmt.Println":
 		return true
 	case "fmt.Fprint", "fmt.Fprintf", "fmt.Fprintln":
-		return len(call.ArgList) > 0 && isStdoutOrStderr(pass, call.ArgList[0])
+		return len(call.ArgList) > 0 && isStdoutOrStderr(c.pass, call.ArgList[0])
 	default:
-		return strings.HasPrefix(name, "(*bytes.Buffer).Write") ||
-			strings.HasPrefix(name, "(*strings.Builder).Write")
+		if strings.HasPrefix(name, "(*bytes.Buffer).Write") ||
+			strings.HasPrefix(name, "(*strings.Builder).Write") {
+			return true
+		}
 	}
+	return c.alwaysNil(fn)
+}
+
+func (c *discardCheck) alwaysNil(fn *types2.Func) bool {
+	if c.nilErr[fn] {
+		return true
+	}
+	if fn.Pkg() == nil || fn.Pkg() == c.pass.Pkg {
+		return false
+	}
+	obj := factObject(fn)
+	f, ok := facts.Lookup(fn.Pkg().Path())
+	if !ok || f == nil {
+		return false
+	}
+	for _, rec := range f.Fns {
+		if rec.Object == obj && rec.AlwaysNilError {
+			return true
+		}
+	}
+	return false
 }
 
 // factObject returns the name of fn in a facts file: Name, Type.Method, or

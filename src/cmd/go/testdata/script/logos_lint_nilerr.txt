@@ -1,0 +1,50 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+cd m
+logos build ./...
+! stderr 'discarded_error'
+cd ..
+
+cp bad.txt m/a/a.lgo
+cd m
+! logos build ./...
+stderr 'slop::discarded_error'
+cd ..
+
+-- m/go.mod --
+module example.com/m
+
+go 1.27
+
+-- m/a/a.lgo --
+package a
+
+func AlwaysNil() error {
+	return nil
+}
+
+-- m/b/b.lgo --
+package b
+
+import "example.com/m/a"
+
+func Use() {
+	a.AlwaysNil()
+}
+
+-- bad.txt --
+package a
+
+import "errors"
+
+var errBad = errors.New("bad")
+
+var fail = true
+
+func AlwaysNil() error {
+	if fail {
+		return errBad
+	}
+	return nil
+}
