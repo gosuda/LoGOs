@@ -2,7 +2,10 @@
 
 package main
 
-import "fmt"
+import (
+	"fmt"
+	"testing"
+)
 
 var mapCalls int
 var recvCalls int
@@ -17,10 +20,20 @@ func getXS() []int {
 	return []int{3, 1, 4, 1, 5, 9, 2, 6}
 }
 
+func fused() []int {
+	return getXS().filter(x => x > 2).map(x => bump(x)).take(2)
+}
+
 func main() {
 	mapCalls = 0
 	recvCalls = 0
-	r := getXS().filter(x => x > 2).map(x => bump(x)).take(2)
+	r := fused()
+	allocs := testing.AllocsPerRun(20, func() {
+		mapCalls = 0
+		recvCalls = 0
+		_ = fused()
+	})
 	ok := len(r) == 2 && r[0] == 6 && r[1] == 8 && mapCalls == 2 && recvCalls == 1
-	fmt.Println("fuse-ok:", ok)
+	fusedOK := allocs <= 2
+	fmt.Println("fuse-ok:", ok && fusedOK)
 }
