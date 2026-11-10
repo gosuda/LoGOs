@@ -5,6 +5,7 @@
 package settings
 
 import (
+	"cmp"
 	"flag"
 	"fmt"
 	"os"
@@ -88,20 +89,24 @@ func Load(modRoot string, flags Flags) (*Settings, error) {
 			err = fmt.Errorf("%s build: invalid -O level %q (want 0, 1, 2, 3, s)", prog, flags.Opt)
 		}
 	}
+	fallback := "1"
+	var m *Module
+	var f *config.File
+	if flags.Logos {
+		m = ModuleAt(modRoot)
+		f = m.File
+		if f == nil {
+			f = ModuleAt("").File
+		}
+		fallback = strings.TrimPrefix(f.Build.OptLevel, "O")
+	}
+	s.OptLevel = pickOptLevel(level, fallback)
+	s.Gcflags = flagsFor(s.OptLevel)
 	if !flags.Logos {
-		s.OptLevel = pickOptLevel(level, "1")
-		s.Gcflags = flagsFor(s.OptLevel)
 		s.Experiment = flags.Env.GOEXPERIMENT
 		return s, err
 	}
-	m := ModuleAt(modRoot)
 	s.Module = m
-	f := m.File
-	if f == nil {
-		f = ModuleAt("").File
-	}
-	s.OptLevel = pickOptLevel(level, strings.TrimPrefix(f.Build.OptLevel, "O"))
-	s.Gcflags = flagsFor(s.OptLevel)
 	s.GOAMD64, s.GOARM64 = archLevels(f, flags.Env)
 	roots := flags.Roots
 	if len(roots) == 0 && modRoot != "" {
@@ -279,30 +284,22 @@ func anyRootArena(roots []string) bool {
 }
 
 func pickOptLevel(level, fallback string) string {
-	if level != "" {
-		return level
-	}
-	return fallback
+	return cmp.Or(level, fallback)
+}
+
+var optLevelFlags = map[string][]string{
+	"0": {"-N", "-l", "-d=variablemakethreshold=32,variablemakeundern=1"},
+	"1": nil,
+	"2": {"-d=inlbudget=120,variablemakethreshold=256"},
+	"3": {"-d=inlbudget=400,inlrecursivebudget=80,variablemakethreshold=4096"},
+	"s": {"-d=inlbudget=15"},
 }
 
 func validOptLevel(level string) bool {
-	switch level {
-	case "0", "1", "2", "3", "s":
-		return true
-	}
-	return false
+	_, ok := optLevelFlags[level]
+	return ok
 }
 
 func flagsFor(level string) []string {
-	switch level {
-	case "0":
-		return []string{"-N", "-l", "-d=variablemakethreshold=32,variablemakeundern=1"}
-	case "2":
-		return []string{"-d=inlbudget=120,variablemakethreshold=256"}
-	case "3":
-		return []string{"-d=inlbudget=400,inlrecursivebudget=80,variablemakethreshold=4096"}
-	case "s":
-		return []string{"-d=inlbudget=15"}
-	}
-	return nil
+	return optLevelFlags[level]
 }
