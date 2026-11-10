@@ -8,17 +8,86 @@ stderr 'inlbudget=400,inlrecursivebudget=80'
 logos build -a -x -O=2 unicode/utf8
 stderr 'inlbudget=120'
 ! stderr 'variablemakethreshold'
+logos build -a -gcflags=unicode/utf8=-m -O=3 unicode/utf8
+stderr 'inlining call to encodeRuneNonASCII'
+logos build -a -gcflags=unicode/utf8=-m -O=2 unicode/utf8
+! stderr 'inlining call to encodeRuneNonASCII'
 
 logos build -a -x -O=3 .
 stderr 'variablemakethreshold=4096'
 ! stderr '\-d=[^ ]*(escape|prove)'
+logos build -a -gcflags=example.com/optscope=-m -O=3 .
+stderr 'inlining call to big'
+logos build -a -gcflags=example.com/optscope=-m -O=2 .
+! stderr 'inlining call to big'
 
 -- go.mod --
 module example.com/optscope
 
 go 1.27
-
 -- main.lgo --
 package main
 
-func main() {}
+func mid(x int) int {
+	y := x + 11
+	y = y*3 - x
+	y ^= (x + 5) << 2
+	y += y * x
+	y -= (x ^ y) & 127
+	y *= 3
+	y += x * (y + 1)
+	return y - (x * 7)
+}
+
+func big(x int) int {
+	y := x + 11
+	y = y*3 - x
+	y ^= (x + 5) << 2
+	y += y * x
+	y -= (x ^ y) & 127
+	y *= 3
+	y += x * (y + 1)
+	y ^= x << 4
+	y -= x * 7
+	y = y*5 + x
+	y ^= (x + 9) << 1
+	y += y * (x + 2)
+	y -= (x ^ y) & 255
+	y *= 5
+	y += x * (y + 3)
+	y ^= x << 3
+	y -= x * 11
+	y += y + (x * 13)
+	y = y*7 - x
+	y ^= (x + 17) << 2
+	y += y * (x + 4)
+	y -= (x ^ y) & 63
+	y *= 7
+	y += x * (y + 5)
+	y ^= x << 5
+	y -= x * 19
+	y += y + (x * 23)
+	y = y*9 - x
+	y ^= (x + 29) << 1
+	y += y * (x + 6)
+	y -= (x ^ y) & 31
+	y *= 9
+	y += x * (y + 7)
+	y ^= x << 2
+	y -= x * 31
+	y += y + (x * 37)
+	y = y*11 + x
+	y ^= (x + 41) << 3
+	y += y * (x + 8)
+	y -= (x ^ y) & 15
+	y *= 11
+	y += x * (y + 9)
+	y ^= x << 1
+	y -= x * 43
+	return y + (x * 47)
+}
+
+func main() {
+	_ = mid(3)
+	_ = big(3)
+}
