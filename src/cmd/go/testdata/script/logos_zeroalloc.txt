@@ -43,6 +43,15 @@ go build ./...
 ! stderr .
 cd ..
 
+cd goclean
+logos build -o $WORK/bin/goclean$GOEXE .
+! stderr .
+exec $WORK/bin/goclean$GOEXE
+stdout 'total=6'
+go build -o $WORK/bin/goclean-go$GOEXE .
+! stderr .
+cd ..
+
 -- clean/go.mod --
 module example.com/clean
 
@@ -145,4 +154,27 @@ func pack(v int) []int {
 
 func main() {
 	println(len(pack(1)))
+}
+
+-- goclean/go.mod --
+module example.com/goclean
+
+go 1.27
+
+-- goclean/main.go --
+package main
+
+import "fmt"
+
+//logos:zeroalloc
+func total(xs []int) int {
+	n := 0
+	for _, x := range xs {
+		n += x
+	}
+	return n
+}
+
+func main() {
+	fmt.Printf("total=%d\n", total([]int{1, 2, 3}))
 }
