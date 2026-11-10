@@ -29,7 +29,7 @@ The `logos` command MUST apply no loGo/s type rules to Go modules [T-0.1].
 The `logos build` command MUST run no default lint on Go modules [T-0.1][R-U1].
 The `logos lint` command MUST lint Go packages with the language-neutral rules only [T-0.1][T-102][R-U1].
 A module MUST hold one kind only [T-0.1][R-U3].
-A loGo/s module MUST hold only `.lgo` packages [T-0.1][R-U3].
+A loGo/s module MUST hold only loGo/s packages [T-0.1][R-U3].
 A Go module MUST hold only `.go` packages [T-0.1][R-U3].
 A workspace MAY hold Go modules and loGo/s modules side by side [T-0.1][R-U3].
 A package MUST NOT mix user-authored `.go` files and `.lgo` files. Compiler-generated cgo `.go` outputs are the only exception. [T-0.1][A-CODEGEN]
@@ -70,7 +70,7 @@ Each non-standard loGo/s dependency module MUST be ejected too [T-0.3].
 Each ejected dependency MUST land in `DIR/_logos_deps/<module path>@<version>/` [T-0.3].
 The output `go.mod` MUST carry a `replace` line for each ejected module [T-0.3].
 A Go dependency module MUST stay a `require` entry of the output `go.mod` [T-0.3][R-U2].
-The support sources MUST become one shared module `github.com/gosuda/loGos/rt` [T-0.3].
+The support sources MUST become one shared support module `github.com/gosuda/loGos/rt` [T-0.3].
 The shared module MUST land in `DIR/_logos_deps/rt` [T-0.3].
 The output MUST carry a `replace` line for the shared module [T-0.3].
 The tool MUST remove `import "comptime"` during eject [T-0.3].
@@ -80,7 +80,7 @@ The output MUST carry the reserved `_logos_` import aliases that lowering writes
 The output MUST NOT emit `_logos_errors` imports [T-0.3].
 Among support imports, lowered files before eject MUST import only `_logos_rt "logos/rt"`, `_logos_json "logos/rt/json"`, plus `_logos_unsafe "unsafe"` where needed, in addition to standard library imports under reserved `_logos_` aliases. Ejected files MUST spell those support imports as `_logos_rt "github.com/gosuda/loGos/rt"` and `_logos_json "github.com/gosuda/loGos/rt/json"` (the eject rewrite in `src/cmd/go/internal/logos/eject/eject.go:supportPathEdit`).
 The tool MUST NOT write ejected files into the source tree [T-0.3].
-Ejected code MUST build with an upstream Go 1.27 toolchain [T-0.3].
+Ejected code MUST build with an upstream Go 1.27.2 toolchain [T-0.3].
 A Go package that imports a loGo/s package MUST see each exported declaration with the Go-facing signature that `logos eject` emits for it [T-0.3][R-U2].
 The output MUST NOT emit colliding helper imports. [T-0.3]
 
@@ -113,9 +113,9 @@ With cgo off, `net` and `os/user` in the standard library MUST use their pure-Go
 When the main module path's first element contains a dot, each alias-extension file MUST produce warning `portability::alias_extension`. [T-101.1][T-102]
 
 ### 1.2 RFC-102: Compiler linter and rule set
-The `logos lint` check MUST run inside the compiler on `.lgo` packages for syntax and type rules [T-102].
+The `logos lint` check MUST run inside the compiler on loGo/s packages for syntax and type rules [T-102].
 The `logos lint` check MUST run the language-neutral syntax and type rules on Go packages at the same point [T-102][R-U1].
-The `logos lint` check MUST run inside escape analysis for escape rules, on Go packages and on `.lgo` packages [T-102][R-U1].
+The `logos lint` check MUST run inside escape analysis for escape rules, on Go packages and on loGo/s packages [T-102][R-U1].
 `logos lint` MUST lint Go packages with the language-neutral rules only [T-102][R-U1].
 A rule MUST count as language-neutral when a Go package can trigger it with Go syntax and types alone and the code it guards exists in Go packages. A loGo/s form inside its detection, such as a group child, a const view, or `?`, MUST stay inactive in Go [T-102][R-U1]. The only exception is a `go` statement inside a `WithLock` callback that spawns a relock, which MUST NOT report under `concurrency::reentrant_withlock_deadlock` [T-102][R-U1].
 The language-neutral rules MUST be `correctness::typed_nil_return` (in Go, the `(*T)(nil)` form only), `correctness::arena_pointer_escape`, `correctness::infinite_recursion`, `correctness::unclosed_io_closer`, `correctness::unbounded_channel_op`, `concurrency::concurrent_multiword_race`, `concurrency::reentrant_withlock_deadlock`, `correctness::withlock_leak`, `slop::err_chain_reset`, `slop::discarded_error`, `complexity::cognitive_overflow`, `perf::large_backing_array_pin`, `perf::time_after_in_loop`, `concurrency::unguarded_access`, `concurrency::nonatomic_access`, `concurrency::lock_requirement_unmet`, `correctness::layout_constant_mismatch`, `portability::atomic_plain_int64`, `correctness::linkname_mismatch`, `perf::arena_fallback`, and `pedantic::unsafe_outside_unsafe_file` [T-102][R-U1].
@@ -126,7 +126,7 @@ The compiler MUST enforce `correctness::layout_constant_mismatch` as `forbid` ag
 The compiler MUST enforce `portability::atomic_plain_int64` as `warn` against a 64-bit `sync/atomic` call on the address of a plain `int64` or `uint64`, with an autofix to `atomic.Int64` or `atomic.Uint64` [T-102].
 The compiler MUST enforce `correctness::linkname_mismatch` as `forbid` against a `//go:linkname local pkg.name` whose imported signature differs from the local one, when `pkg` is in the import graph [T-102].
 The compiler MUST enforce `pedantic::unsafe_outside_unsafe_file` as `allow` against `import "unsafe"` in a file whose name does not end in `_unsafe.go` or `_test.go` [T-102].
-The compiler MUST enforce `correctness::region_escape` as `forbid` against a `logos/arena.Region` value that leaves its local scope in a `.lgo` package [T-102].
+The compiler MUST enforce `correctness::region_escape` as `forbid` against a `logos/arena.Region` value that leaves its local scope in a loGo/s package [T-102].
 The compiler MUST report `perf::arena_fallback` when a `logos/arena` call escapes to the heap [T-102].
 The directive grammar for these checks is `//logos:guardedby <mu>`, `//logos:atomic`, `//logos:requires <p.mu>`, `//logos:acquires <p.mu>`, `//logos:releases <p.mu>`, `//logos:zeroalloc [local]`, `//logos:sizeof T`, `//logos:offsetof T.f`, and `//logos:alignof T` [T-102]
 The rules `correctness::nil_deref_unproven`, `correctness::defer_erases_errdefer_state`, `concurrency::unsupervised_goroutine`, `suspicious::unapplied_struct_default`, `suspicious::side_effect_before_sort`, `portability::serialized_unsized_int`, `portability::alias_extension`, and `pedantic::exhaustive_union_switch` MUST NOT apply to Go packages, because each depends on loGo/s syntax, types, or generated code [T-102][R-U1].
@@ -629,7 +629,7 @@ A present zero value MUST read as some. [T-104.3]
 
 A present nil slice payload MUST read as some with nil payload, distinct from none. [T-104.3][T-202]
 
-Ejected and Go-facing signatures MUST use plain pointers and `rt.Option[T]` from the support module. [T-202][T-Sec5][R-U2]
+Ejected and Go-facing signatures MUST use plain pointers and `rt.Option[T]` from the shared support module. [T-202][T-Sec5][R-U2]
 
 A Go importer MUST see a non-nil `*T` and a `*T?` as `*T`, and MUST see every other `T?` as the lowered type of the rules above. [T-202][T-Sec5][R-U2]
 
@@ -714,7 +714,7 @@ Its result type MUST be the common type of the arms (identical types, the defaul
 
 Mismatched arms MUST fail with `[correctness::switch_arm_mismatch]`. [T-203.1]
 
-A type switch expression without full coverage MUST fail with `nonexhaustive_switch`. [T-203.1]
+A type switch expression without full coverage MUST fail with `[correctness::nonexhaustive_switch]`. [T-203.1]
 
 A value switch expression without `default` MUST fail with `[correctness::switch_expr_needs_default]`. [T-203.1]
 
@@ -1227,19 +1227,19 @@ An `Open` in an `if`, `switch`, or `for` init clause MUST belong to the whole st
 The compiler MUST place an object in `r` only when escape analysis proves that no pointer to it outlives the owner block of `r`. [T-301.2]
 Otherwise the object MUST go on the heap, with `perf::arena_fallback` naming the call and the escaping flow. [T-301.2]
 A store of a region pointer into a region object whose owner block is the same as, or nested inside, the owner block of the stored pointer's region MUST NOT count as an escape. A store into an object of an enclosing region MUST count as an escape. [T-301.2]
-In a `.lgo` package, a `Region` that is stored outside a local variable, returned, sent on a channel, captured by a `go` statement, or captured by an escaping closure MUST fail with `correctness::region_escape`. [T-301.2]
-In a Go package, passing an `r` to a callee is allowed. With `GOEXPERIMENT=logosarena` placement through that region follows the same escape rule as in a `.lgo` package: the compiler places the object in the region only when escape analysis proves no pointer to it outlives the owner block of `r`, otherwise the object goes on the heap; a use that would fail with `correctness::region_escape` in a `.lgo` package falls back to the heap instead. Under the `logos` driver that fallback is reported as `perf::arena_fallback`, naming the call and the escaping flow; plain `go` reports no rule ID. Without the experiment every `logos/arena` call behaves as its heap equivalent. [T-301.2][R-U1]
+In a loGo/s package, a `Region` that is stored outside a local variable, returned, sent on a channel, captured by a `go` statement, or captured by an escaping closure MUST fail with `correctness::region_escape`. [T-301.2]
+In a Go package, passing an `r` to a callee is allowed. With `GOEXPERIMENT=logosarena` placement through that region follows the same escape rule as in a loGo/s package: the compiler places the object in the region only when escape analysis proves no pointer to it outlives the owner block of `r`, otherwise the object goes on the heap; a use that would fail with `correctness::region_escape` in a loGo/s package falls back to the heap instead. Under the `logos` driver that fallback is reported as `perf::arena_fallback`, naming the call and the escaping flow; plain `go` reports no rule ID. Without the experiment every `logos/arena` call behaves as its heap equivalent. [T-301.2][R-U1]
 A `go group` child MAY read a parent-region object through a const view. [T-301.2]
 A non-const capture MUST count as an escape of that object. [T-301.2]
 `logos eject` MUST lower `arena.Open()` to `_logos_rt.Region{}`, `arena.New[T](r)` to `new(T)`, `arena.Make[T](r, n)` to `make([]T, n)`, and `arena.Append[T](r, s, v...)` to `append(s, v...)`. [T-301.2]
 `logos/rt` MUST provide `type Region = arena.Region`. [T-301.2]
-The eject support module MUST carry the `arena` package. [T-301.2]
+The shared support module MUST carry the `arena` package. [T-301.2]
 The eject MUST append `_ = r` after each local Region declaration. [T-301.2]
 The toolchain MUST NOT ship the upstream `arena` package, `reflect.ArenaNew`, or `GOEXPERIMENT=arenas`. [T-301.2]
 
 Comptime and escape analysis:
 Escape analysis MUST record a parameter that leaks only into the pointee of another parameter. [T-301.2][R-U1]
-This precision MUST apply to `.lgo` packages, and to Go packages under `GOEXPERIMENT=logosescape`, which is off by default. [T-301.2][R-U1]
+This precision MUST apply to loGo/s packages, and to Go packages under `GOEXPERIMENT=logosescape`, which is off by default. [T-301.2][R-U1]
 
 
 [T-301.1] Recursion MUST return arena-allocated results to the caller intact.
@@ -1404,7 +1404,7 @@ An opening `(` MUST branch on the next token after its element list [T-104.6]. A
 
 ## 5. Cross-package facts
 
-Cross-package facts MUST travel in the archive member `__.LOGOS` [T-Sec5]. Exported declaration signatures remain in `__.PKGDEF`; `__.LOGOS` carries fingerprint-bound typed fact records and no declaration header. [T-Sec5][T-201] The member MUST hold one fact line per function for `ReceiverMutated`, the `ParamMutated` mask, `FnFact.Readonly`, `MayYield`, `AlwaysNilError`, and generic assertion effects `AssertTP` and `AssertRTP` [T-Sec5][T-201]. A function carrying the `AlwaysNilError` flag MUST return a nil error on every return path [T-Sec5][T-102]. Facts MUST use format version 3; older members MUST be rejected rather than read through a compatibility path [T-Sec5][T-201]. Presence of assertion-effect flags MUST distinguish analyzed effects from unknown effects; explicit `AssertTP=0,AssertRTP=0` MUST denote proven-zero effects [T-Sec5][T-201]. Assertion and mutation masks MUST use arbitrary-arity hexadecimal masks without a 64-parameter limit [T-Sec5][T-201]. Encode and decode MUST preserve `FnFact.Readonly` [T-201][T-Sec5]. The facts MUST bind to the `__.PKGDEF` fingerprint, and a stale fingerprint MUST fail the dependent build [T-Sec5]. A Go importer of a loGo/s package MUST see the signatures that `logos eject` emits: a closed union value type as its methods-only interface with the terms dropped, `*T?` as the bare pointer, a non-nil `*T` as a plain `*T`, a property interface as its `Logos_GetF` and `Logos_SetF` accessor methods, a readonly interface method as its plain method, and a const view as its plain type [T-Sec5][R-U2][T-201]. Lowering and eject MUST erase only the `const` keyword of a readonly method for emitted Go, keeping source positions and qualification facts for loGo/s importers [T-201][T-0.3][T-Sec5]. A Go package's member MUST carry one `lang go` record and no declaration header [T-Sec5][R-U1][T-201]. An importer MUST NOT read a package that carries the `lang go` record as a loGo/s package: no non-nil pointer check, no const-view mutation fact, and no overlay applies to it [T-Sec5][R-U1]. Assertion effects are emitted for Go and `.lgo` packages without an opt-level or GOARCH gate in the facts writer; command coverage stays as tested [T-Sec5][T-201]. A Go package with assertion effects writes `__.LOGOS` under the emission condition its writer tests pin for Go-package facts [T-Sec5][T-201]. Importers MUST consume assertion effects from `lang go` members [T-Sec5][R-U1]. Any written Go-package member carries one `lang go` record; whether a member is written follows the writer gate [T-Sec5][T-Sec12]. When this toolchain compiles a Go package that calls a loGo/s function or method, the compiler MUST insert a `logos/rt.MustNonNil` check for each non-nil pointer parameter of the callee in a direct call, in a `go` statement, and in a `defer` statement, using the callee facts from `__.LOGOS` [T-Sec5][R-U2]. A call through a function value, a method value, or an interface has no such check; this is a documented hole [T-Sec5][R-U2][A-GOBOUNDARY]. A nil receiver that a Go caller passes to a method with a non-nil pointer receiver has no such check either; this is a documented hole [T-Sec5][R-U2][A-GOBOUNDARY]. Code that an upstream toolchain builds from eject output has no such check either; this is a documented hole, like reflection and `unsafe` [T-Sec5][R-U2][A-GOBOUNDARY]. A Go mutation through a const view and a Go store of a non-member into a closed union are documented holes, and the compiler does not check them [T-Sec5][R-U2][A-GOBOUNDARY].
+Cross-package facts MUST travel in the archive member `__.LOGOS` [T-Sec5]. Exported declaration signatures remain in `__.PKGDEF`; `__.LOGOS` carries fingerprint-bound typed fact records and no declaration header. [T-Sec5][T-201] The member MUST hold one fact line per function for `ReceiverMutated`, the `ParamMutated` mask, `FnFact.Readonly`, `MayYield`, `AlwaysNilError`, and generic assertion effects `AssertTP` and `AssertRTP` [T-Sec5][T-201]. A function carrying the `AlwaysNilError` flag MUST return a nil error on every return path [T-Sec5][T-102]. Facts MUST use format version 3; older members MUST be rejected rather than read through a compatibility path [T-Sec5][T-201]. Presence of assertion-effect flags MUST distinguish analyzed effects from unknown effects; explicit `AssertTP=0,AssertRTP=0` MUST denote proven-zero effects [T-Sec5][T-201]. Assertion and mutation masks MUST use arbitrary-arity hexadecimal masks without a 64-parameter limit [T-Sec5][T-201]. Encode and decode MUST preserve `FnFact.Readonly` [T-201][T-Sec5]. The facts MUST bind to the `__.PKGDEF` fingerprint, and a stale fingerprint MUST fail the dependent build [T-Sec5]. A Go importer of a loGo/s package MUST see the signatures that `logos eject` emits: a closed union value type as its methods-only interface with the terms dropped, `*T?` as the bare pointer, a non-nil `*T` as a plain `*T`, a property interface as its `Logos_GetF` and `Logos_SetF` accessor methods, a readonly interface method as its plain method, and a const view as its plain type [T-Sec5][R-U2][T-201]. Lowering and eject MUST erase only the `const` keyword of a readonly method for emitted Go, keeping source positions and qualification facts for loGo/s importers [T-201][T-0.3][T-Sec5]. A Go package's member MUST carry one `lang go` record and no declaration header [T-Sec5][R-U1][T-201]. An importer MUST NOT read a package that carries the `lang go` record as a loGo/s package: no non-nil pointer check, no const-view mutation fact, and no overlay applies to it [T-Sec5][R-U1]. Assertion effects are emitted for Go and loGo/s packages without an opt-level or GOARCH gate in the facts writer; command coverage stays as tested [T-Sec5][T-201]. A Go package with assertion effects writes `__.LOGOS` under the emission condition its writer tests pin for Go-package facts [T-Sec5][T-201]. Importers MUST consume assertion effects from `lang go` members [T-Sec5][R-U1]. Any written Go-package member carries one `lang go` record; whether a member is written follows the writer gate [T-Sec5][T-Sec12]. When this toolchain compiles a Go package that calls a loGo/s function or method, the compiler MUST insert a `logos/rt.MustNonNil` check for each non-nil pointer parameter of the callee in a direct call, in a `go` statement, and in a `defer` statement, using the callee facts from `__.LOGOS` [T-Sec5][R-U2]. A call through a function value, a method value, or an interface has no such check; this is a documented hole [T-Sec5][R-U2][A-GOBOUNDARY]. A nil receiver that a Go caller passes to a method with a non-nil pointer receiver has no such check either; this is a documented hole [T-Sec5][R-U2][A-GOBOUNDARY]. Code that an upstream toolchain builds from eject output has no such check either; this is a documented hole, like reflection and `unsafe` [T-Sec5][R-U2][A-GOBOUNDARY]. A Go mutation through a const view and a Go store of a non-member into a closed union are documented holes, and the compiler does not check them [T-Sec5][R-U2][A-GOBOUNDARY].
 Cross-package facts MUST travel in `__.LOGOS` with a fingerprint. [T-Sec5]
 When this toolchain compiles the Go caller, it MUST insert `logos/rt.MustNonNil` and MUST panic with the call position. [T-Sec5]
 
@@ -1588,11 +1588,11 @@ Slice and array encode as uvarint count plus elements. [T-Sec10.1]
 Maps with string keys encode as uvarint count plus entries sorted by key. [T-Sec10.1]
 Nested structs encode inline. [T-Sec10.1]
 Optional values MUST encode as 0x00 when absent or 0x01 plus payload when present. [T-Sec10.1]
-A field of type int or uint in a struct with a JSON-tagged field warns portability::serialized_unsized_int in .lgo packages. [T-Sec10.1]
+A field of type int or uint in a struct with a JSON-tagged field warns portability::serialized_unsized_int in loGo/s packages. [T-Sec10.1]
 Sized kinds are preferred. [T-Sec10.1]
 A tag `-` excludes the field from binary output; other tag options change nothing. [T-Sec10.1]
 UnmarshalBinary rejects truncation, bad presence bytes, version mismatch, and trailing bytes with errors naming field and offset. [T-Sec10.1]
-For elements with a nonzero wire payload, a count header MUST pre-allocate at most min(len(rest)/2, 1 MB / sizeof(elem)) elements and MUST grow past that only as input bytes arrive. [T-Sec10.1]
+For elements with a nonzero wire payload, a count header MUST pre-allocate at most min(len(rest)/2, 1 MiB / sizeof(elem)) elements and MUST grow past that only as input bytes arrive. [T-Sec10.1]
 Charge nothing against a total budget on the count header; a count whose element bytes are all present in the input is lawful and MUST decode, even when the total exceeds 1 MiB. [T-Sec10.1]
 For slices whose elements have zero wire payload, the count itself MUST NOT exceed 1,048,576 (the 1 MiB prealloc bound at unit 1); larger counts MUST be rejected with a count-out-of-range error, encoder symmetric, checked before allocation or element iteration. One count MUST NOT allocate more than 64 MiB of element storage in a single allocation. [T-Sec10.1]
 Zero-wire slices MUST be handled in constant time with respect to count, without per-element iteration. [T-Sec10.1]
@@ -1866,12 +1866,12 @@ func pack(v int) []int {
 ### 18.1 Objective
 
 loGo/s is a complete toolchain for Go and for the loGo/s language, which adds checked error propagation to Go. The command `logos eject` writes the pure-Go form of a loGo/s module.
-Writers write `.lgo` files, the `logos` command checks and lowers them, and the Go 1.27 backend builds them.
+Writers write `.lgo` files, the `logos` command checks and lowers them, and the Go 1.27.2 backend builds them.
 The toolchain is one complete toolchain for Go and loGo/s: Go packages and loGo/s packages share one backend and one runtime, and each improvement serves both.
 
 ### 18.2 Compiler-made names
 
-Compiler-made names use the `_logos_` prefix; comptime copies use the `_logosct` infix.
+Compiler-made names use the `_logos_` prefix; comptime copies use the `_logosct` suffix.
 For example, the lowering of `v := parse(s)?` reads as follows (temporary names and site indices vary by position).
 
 ```go
