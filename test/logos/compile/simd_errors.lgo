@@ -7,7 +7,7 @@ func tooLarge(a [16]float64, b [16]float64) {
 }
 
 func badShape(a [3]float64, b [3]float64) {
-	_ = a + b // ERROR "simd_array_shape"
+	_ = a + b // ERROR "correctness::simd_array_shape"
 }
 
 func tooLargeReduce(a [16]float64) {
@@ -15,7 +15,7 @@ func tooLargeReduce(a [16]float64) {
 }
 
 func badShapeReduce(a [6]int32) {
-	_ = a.sum() // ERROR "simd_array_shape"
+	_ = a.sum() // ERROR "correctness::simd_array_shape"
 }
 
 func tooLargeWord(a [16]int, b [16]int) {

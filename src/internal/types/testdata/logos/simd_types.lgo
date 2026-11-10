@@ -93,10 +93,10 @@ func simdTooLarge(big1024 [1024]float64, big16 [16]float64, big128 [128]byte) {
 }
 
 func simdBadLen(a3 [3]float64, b3 [3]float64, a6 [6]float32, b6 [6]float32, a0 [0]float64, b0 [0]float64) {
-	_ = a3 /* ERROR "simd_array_shape" */ + b3
-	_ = a6 /* ERROR "simd_array_shape" */ + b6
-	_ = a0 /* ERROR "simd_array_shape" */ + b0
-	_ = a3.sum /* ERROR "simd_array_shape" */ ()
+	_ = a3 /* ERROR "correctness::simd_array_shape" */ + b3
+	_ = a6 /* ERROR "correctness::simd_array_shape" */ + b6
+	_ = a0 /* ERROR "correctness::simd_array_shape" */ + b0
+	_ = a3.sum /* ERROR "correctness::simd_array_shape" */ ()
 }
 
 func simdBadElem(s4 [4]string, t4 [4]string, c4 [4]complex128, d4 [4]complex128, bl4 [4]bool, bl42 [4]bool) {
