@@ -16,6 +16,7 @@ cd neg
 ! logos build ./...
 stderr '\[correctness::const_view_mutation\] cannot call Name through const view'
 ! logos build -o $WORK/negbin$GOEXE ./cmd
+stderr 'const_view_mutation'
 ! exists $WORK/negbin$GOEXE
 cd ..
 

@@ -15,6 +15,13 @@ logos list ./...
 logos run .
 ! logos lsp unexpected-arg
 stderr 'unexpected argument'
+mkdir $WORK/fixorig
+cp fixable/main.lgo $WORK/fixorig/main.lgo
+cd fixable
+! logos lint .
+stderr '\[slop::discarded_error\]'
+cmp main.lgo $WORK/fixorig/main.lgo
+cd ..
 
 mkdir $WORK/origgo
 cp goapp/main.go $WORK/origgo/main.go
@@ -63,3 +70,17 @@ import "fmt"
 func Main() string { return "unchanged" }
 
 func main() { fmt.Println(Main()) }
+
+-- fixable/go.mod --
+module example.com/fixable
+
+go 1.27
+
+-- fixable/main.lgo --
+package main
+
+import "os"
+
+func main() {
+	os.Remove("missing")
+}
