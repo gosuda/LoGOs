@@ -52,6 +52,8 @@ cd godeny
 ! logos lint ./...
 stderr 'main\.go:5:\d+: \[perf::large_backing_array_pin\]'
 ! stderr 'warning:'
+! logos lint --json-diagnostics ./...
+stderr '"severity":"deny","rule_id":"perf::large_backing_array_pin","file":"[^"]*main\.go","span":\{"start_line":5,'
 cd ..
 
 cd godenytime
