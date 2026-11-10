@@ -200,6 +200,120 @@ exec env GOROOT=/home/linuxbrew/.linuxbrew/Cellar/go/1.27.3/libexec /home/linuxb
 cp stdout $WORK/up-goproxy.txt
 cmp $WORK/our-goproxy.txt $WORK/up-goproxy.txt
 
+go help bug
+cp stdout $WORK/our-bug.txt
+exec env GOROOT=/home/linuxbrew/.linuxbrew/Cellar/go/1.27.3/libexec /home/linuxbrew/.linuxbrew/Cellar/go/1.27.3/libexec/bin/go help bug
+cp stdout $WORK/up-bug.txt
+cmp $WORK/our-bug.txt $WORK/up-bug.txt
+
+go help build
+cp stdout $WORK/our-build.txt
+exec env GOROOT=/home/linuxbrew/.linuxbrew/Cellar/go/1.27.3/libexec /home/linuxbrew/.linuxbrew/Cellar/go/1.27.3/libexec/bin/go help build
+cp stdout $WORK/up-build.txt
+cmp $WORK/our-build.txt $WORK/up-build.txt
+
+go help clean
+cp stdout $WORK/our-clean.txt
+exec env GOROOT=/home/linuxbrew/.linuxbrew/Cellar/go/1.27.3/libexec /home/linuxbrew/.linuxbrew/Cellar/go/1.27.3/libexec/bin/go help clean
+cp stdout $WORK/up-clean.txt
+cmp $WORK/our-clean.txt $WORK/up-clean.txt
+
+go help doc
+cp stdout $WORK/our-doc.txt
+exec env GOROOT=/home/linuxbrew/.linuxbrew/Cellar/go/1.27.3/libexec /home/linuxbrew/.linuxbrew/Cellar/go/1.27.3/libexec/bin/go help doc
+cp stdout $WORK/up-doc.txt
+cmp $WORK/our-doc.txt $WORK/up-doc.txt
+
+go help env
+cp stdout $WORK/our-env.txt
+exec env GOROOT=/home/linuxbrew/.linuxbrew/Cellar/go/1.27.3/libexec /home/linuxbrew/.linuxbrew/Cellar/go/1.27.3/libexec/bin/go help env
+cp stdout $WORK/up-env.txt
+cmp $WORK/our-env.txt $WORK/up-env.txt
+
+go help fix
+cp stdout $WORK/our-fix.txt
+exec env GOROOT=/home/linuxbrew/.linuxbrew/Cellar/go/1.27.3/libexec /home/linuxbrew/.linuxbrew/Cellar/go/1.27.3/libexec/bin/go help fix
+cp stdout $WORK/up-fix.txt
+cmp $WORK/our-fix.txt $WORK/up-fix.txt
+
+go help fmt
+cp stdout $WORK/our-fmt.txt
+exec env GOROOT=/home/linuxbrew/.linuxbrew/Cellar/go/1.27.3/libexec /home/linuxbrew/.linuxbrew/Cellar/go/1.27.3/libexec/bin/go help fmt
+cp stdout $WORK/up-fmt.txt
+cmp $WORK/our-fmt.txt $WORK/up-fmt.txt
+
+go help generate
+cp stdout $WORK/our-generate.txt
+exec env GOROOT=/home/linuxbrew/.linuxbrew/Cellar/go/1.27.3/libexec /home/linuxbrew/.linuxbrew/Cellar/go/1.27.3/libexec/bin/go help generate
+cp stdout $WORK/up-generate.txt
+cmp $WORK/our-generate.txt $WORK/up-generate.txt
+
+go help get
+cp stdout $WORK/our-get.txt
+exec env GOROOT=/home/linuxbrew/.linuxbrew/Cellar/go/1.27.3/libexec /home/linuxbrew/.linuxbrew/Cellar/go/1.27.3/libexec/bin/go help get
+cp stdout $WORK/up-get.txt
+cmp $WORK/our-get.txt $WORK/up-get.txt
+
+go help install
+cp stdout $WORK/our-install.txt
+exec env GOROOT=/home/linuxbrew/.linuxbrew/Cellar/go/1.27.3/libexec /home/linuxbrew/.linuxbrew/Cellar/go/1.27.3/libexec/bin/go help install
+cp stdout $WORK/up-install.txt
+cmp $WORK/our-install.txt $WORK/up-install.txt
+
+go help list
+cp stdout $WORK/our-list.txt
+exec env GOROOT=/home/linuxbrew/.linuxbrew/Cellar/go/1.27.3/libexec /home/linuxbrew/.linuxbrew/Cellar/go/1.27.3/libexec/bin/go help list
+cp stdout $WORK/up-list.txt
+cmp $WORK/our-list.txt $WORK/up-list.txt
+
+go help mod
+cp stdout $WORK/our-mod.txt
+exec env GOROOT=/home/linuxbrew/.linuxbrew/Cellar/go/1.27.3/libexec /home/linuxbrew/.linuxbrew/Cellar/go/1.27.3/libexec/bin/go help mod
+cp stdout $WORK/up-mod.txt
+cmp $WORK/our-mod.txt $WORK/up-mod.txt
+
+go help run
+cp stdout $WORK/our-run.txt
+exec env GOROOT=/home/linuxbrew/.linuxbrew/Cellar/go/1.27.3/libexec /home/linuxbrew/.linuxbrew/Cellar/go/1.27.3/libexec/bin/go help run
+cp stdout $WORK/up-run.txt
+cmp $WORK/our-run.txt $WORK/up-run.txt
+
+go help telemetry
+cp stdout $WORK/our-telemetry.txt
+exec env GOROOT=/home/linuxbrew/.linuxbrew/Cellar/go/1.27.3/libexec /home/linuxbrew/.linuxbrew/Cellar/go/1.27.3/libexec/bin/go help telemetry
+cp stdout $WORK/up-telemetry.txt
+cmp $WORK/our-telemetry.txt $WORK/up-telemetry.txt
+
+go help test
+cp stdout $WORK/our-test.txt
+exec env GOROOT=/home/linuxbrew/.linuxbrew/Cellar/go/1.27.3/libexec /home/linuxbrew/.linuxbrew/Cellar/go/1.27.3/libexec/bin/go help test
+cp stdout $WORK/up-test.txt
+cmp $WORK/our-test.txt $WORK/up-test.txt
+
+go help tool
+cp stdout $WORK/our-tool.txt
+exec env GOROOT=/home/linuxbrew/.linuxbrew/Cellar/go/1.27.3/libexec /home/linuxbrew/.linuxbrew/Cellar/go/1.27.3/libexec/bin/go help tool
+cp stdout $WORK/up-tool.txt
+cmp $WORK/our-tool.txt $WORK/up-tool.txt
+
+go help version
+cp stdout $WORK/our-version-cmd.txt
+exec env GOROOT=/home/linuxbrew/.linuxbrew/Cellar/go/1.27.3/libexec /home/linuxbrew/.linuxbrew/Cellar/go/1.27.3/libexec/bin/go help version
+cp stdout $WORK/up-version-cmd.txt
+cmp $WORK/our-version-cmd.txt $WORK/up-version-cmd.txt
+
+go help vet
+cp stdout $WORK/our-vet.txt
+exec env GOROOT=/home/linuxbrew/.linuxbrew/Cellar/go/1.27.3/libexec /home/linuxbrew/.linuxbrew/Cellar/go/1.27.3/libexec/bin/go help vet
+cp stdout $WORK/up-vet.txt
+cmp $WORK/our-vet.txt $WORK/up-vet.txt
+
+go help work
+cp stdout $WORK/our-work.txt
+exec env GOROOT=/home/linuxbrew/.linuxbrew/Cellar/go/1.27.3/libexec /home/linuxbrew/.linuxbrew/Cellar/go/1.27.3/libexec/bin/go help work
+cp stdout $WORK/up-work.txt
+cmp $WORK/our-work.txt $WORK/up-work.txt
+
 -- check_version.sh --
 #!/bin/sh
 set -e
