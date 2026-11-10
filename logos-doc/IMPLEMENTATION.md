@@ -2997,7 +2997,7 @@ per-lane records follow.
   Zeroalloc in Go packages: `logos lint` and `logos build` apply the
   check, `go build` ignores it (`logos_zeroalloc_recursive.txt`).
 - integ-cl-confirm (SPEC confirmation round, lanes front, eject,
-  interop, units, runtime, backend, lsp): front:
+  interop, units, runtime, backend, lsp, driver): front:
   `src/internal/types/testdata/logos/ctfe.lgo`,
   `test/logos/compile/const_eval_limits.lgo`,
   `src/internal/types/testdata/logos/const_views.lgo`,
@@ -3031,6 +3031,22 @@ per-lane records follow.
   `src/cmd/compile/internal/logos/wasmyield/wasmyield_test.go`,
   `src/cmd/compile/internal/logos/m6gaps_test.go`,
   `src/cmd/compile/internal/logos/wasm_test.go`; lsp: no new tests.
+  driver: `src/cmd/go/testdata/script/logos_alias.txt`,
+  `src/cmd/go/testdata/script/logos_cgo_env_policy.txt`,
+  `src/cmd/go/testdata/script/logos_lint_config.txt`,
+  `src/cmd/go/testdata/script/logos_lint_go.txt`,
+  `src/cmd/go/testdata/script/logos_opt_levels.txt`,
+  `src/cmd/go/testdata/script/logos_plain_go_cgo_default.txt`,
+  `src/cmd/go/testdata/script/logos_plain_go_help_version.txt`.
+- integ-cl-confirm2 (SPEC confirmation round 2, lanes front, simd,
+  runtime, json): front: `src/internal/types/testdata/logos/ctfe.lgo`,
+  `test/logos/compile/comptime_predicate.lgo`,
+  `src/cmd/compile/internal/logos/comptime_test.go`; simd:
+  `test/logos/compile/simd_errors.lgo`,
+  `src/cmd/compile/internal/logos/simdarray_test.go`; runtime:
+  `src/runtime/logos_region_test.go`,
+  `src/cmd/go/testdata/script/logos_fastcall_seq.txt`; json:
+  `src/cmd/compile/internal/logos/json_static_test.go`.
 
 ## M23. Architecture collapses
 
