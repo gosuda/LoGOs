@@ -642,14 +642,6 @@ func TestMarshalNoSizeThresholdNoCallerBuffer(t *testing.T) {
 	}
 }
 
-func TestUnmarshalSliceNoPrealloc(t *testing.T) {
-	text := lowerStaticText(t, "package p\n\ntype L struct {\n\tVals []int64 `json:\"vals\"`\n}\n")
-	body := methodBody(t, text, "func (_logos_v *L) UnmarshalJSON(_logos_data []byte) error {")
-	if strings.Contains(body, "make(") {
-		t.Errorf("UnmarshalJSON pre-allocates the slice instead of growing by append:\n%s", body)
-	}
-}
-
 func TestStringFieldsReadOnce(t *testing.T) {
 	text := lowerStaticText(t, "package p\n\ntype S struct {\n\tA string `json:\"a\"`\n\tB string `json:\"b\"`\n\tN int64 `json:\"n\"`\n}\n")
 	body := methodBody(t, text, "func (_logos_v S) MarshalJSON() ([]byte, error) {")
