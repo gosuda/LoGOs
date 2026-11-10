@@ -170,12 +170,13 @@ func (check *Checker) infer(pos syntax.Pos, tparams []*TypeParam, targs []Type, 
 			continue
 		}
 		par := params.At(i)
-		if isParameterized(tparams, par.typ) || isParameterized(tparams, arg.typ()) {
+		parTyp, argTyp := logosInferOperands(par.typ, arg.typ())
+		if isParameterized(tparams, parTyp) || isParameterized(tparams, argTyp) {
 			// Function parameters are always typed. Arguments may be untyped.
 			// Collect the indices of untyped arguments and handle them later.
-			if isTyped(arg.typ()) {
-				if !u.unify(par.typ, arg.typ(), assign) {
-					errorf(par.typ, arg.typ(), arg)
+			if isTyped(argTyp) {
+				if !u.unify(parTyp, argTyp, assign) {
+					errorf(parTyp, argTyp, arg)
 					return nil
 				}
 			} else if _, ok := par.typ.(*TypeParam); ok && !arg.isNil() {
@@ -584,6 +585,9 @@ func (w *tpWalker) isParameterized(typ Type) (res bool) {
 	case *Pointer:
 		return w.isParameterized(t.base)
 
+	case *ConstView:
+		return w.isParameterized(t.Elem)
+
 	case *Tuple:
 		// This case does not occur from within isParameterized
 		// because tuples only appear in signatures where they
@@ -739,6 +743,9 @@ func (w *cycleFinder) typ(typ Type) {
 
 	case *Pointer:
 		w.typ(t.base)
+
+	case *ConstView:
+		w.typ(t.Elem)
 
 	// case *Tuple:
 	//      This case should not occur because tuples only appear

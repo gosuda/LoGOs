@@ -14,6 +14,12 @@ cd neg
 stderr 'const_view_mutation'
 cd ..
 
+cd view/imp
+! logos build ./...
+stderr 'const_view_mutation'
+cd ../..
+
+
 -- w/go.work --
 go 1.27
 
@@ -89,4 +95,40 @@ package neg
 
 func Bad(xs const []int) {
 	xs[0] = 1
+}
+
+-- view/go/go.mod --
+module example.com/viewgo
+
+go 1.27
+
+-- view/go/take.go --
+package viewgo
+
+func Take[T any](v T) T {
+	var a any = v
+	return a.(T)
+}
+
+-- view/imp/go.mod --
+module example.com/viewimp
+
+go 1.27
+
+require example.com/viewgo v1.0.0
+
+replace example.com/viewgo => ../go
+
+-- view/imp/main.lgo --
+package main
+
+import (
+	"example.com/viewgo"
+)
+
+func main() {
+	s := []int{1, 2, 3}
+	var view const []int = s
+	_ = viewgo.Take(view)
+	_ = viewgo.Take[[]int](view)
 }

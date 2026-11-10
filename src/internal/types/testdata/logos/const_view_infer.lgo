@@ -1,0 +1,33 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package p
+
+func inferTake[T any](v T) T { return v }
+
+func inferSlice(xs const []int) {
+	_ = inferTake(xs /* ERROR "[correctness::const_view_mutation] cannot pass argument through const view" */)
+}
+
+func inferSliceExplicit(xs const []int) {
+	_ = inferTake[[]int](xs /* ERROR "[correctness::const_view_mutation] cannot pass argument through const view" */)
+}
+
+func inferMap(xm const map[string]int) {
+	_ = inferTake(xm /* ERROR "[correctness::const_view_mutation] cannot pass argument through const view" */)
+}
+
+type inferItem struct {
+	Name string
+}
+
+func inferPtr(xp const *inferItem) {
+	_ = inferTake(xp /* ERROR "[correctness::const_view_mutation] cannot pass argument through const view" */)
+}
+
+func inferConstParam[T any](v const []T) int { return len(v) }
+
+func inferConstParamCall(xs const []int) int {
+	return inferConstParam(xs)
+}

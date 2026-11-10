@@ -555,6 +555,16 @@ func (check *Checker) logosConstBuiltin(x *operand, call *syntax.CallExpr, id bu
 	return false
 }
 
+func logosInferOperands(par, arg Type) (Type, Type) {
+	if c := logosAsConstView(par); c != nil {
+		par = c.Elem
+	}
+	if c := logosAsConstView(arg); c != nil {
+		arg = c.Elem
+	}
+	return par, arg
+}
+
 func (check *Checker) logosConstArgs(call *syntax.CallExpr, sigParams *Tuple, args []*operand) {
 	if !check.conf.Logos {
 		return
