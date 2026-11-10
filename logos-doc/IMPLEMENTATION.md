@@ -393,7 +393,7 @@ Anchor: David Parnas, Christopher Alexander
 - Attack (script tests):
   - `logos_package.txt`: module with `main.lgo` (plain Go syntax, prints `hello`) -> `logos run .` prints `hello`; `logos build` succeeds; `go build .` fails with the upstream `no Go files` message.
   - `logos_nomix.txt`: `a.go` and `b.lgo` in one package -> `logos build` fails with stderr matching `\[correctness::mixed_package\] cannot mix \.go files \(a\.go\) and \.lgo files \(b\.lgo\) in one package`.
-  - `logos_no_interop.txt` (landed as f92d53e38b under the no-interop rule, which R-U2 replaced): the cross-kind import cases and the edge checks behind them are replaced by M0-S8, which renames this script to `logos_interop.txt`. The `fmt` and `context` case (the `logos/rt` import case is owned by M1-S4, which ships `logos/rt`; M0-S2 must not assume it), the `mixed_module` case, and the workspace case carry over unchanged into M0-S8.
+  - `logos_interop.txt`: the cross-kind import cases and the edge checks behind them live in M0-S8. The `fmt` and `context` case (the `logos/rt` import case is owned by M1-S4, which ships `logos/rt`; M0-S2 MUST not assume it), the `mixed_module` case, and the workspace case carry over unchanged into M0-S8.
   - `logos_alias.txt`: files with each alias extension build and run; an alias written with trailing U+FE0F builds; `x.lgo` beside the scroll alias with stem `x` fails with `\[correctness::duplicate_stem_filename\]`; a module path `example.com/m` prints warning `\[portability::alias_extension\]` per alias file.
   - `logos_test_files.txt`: `p.lgo` plus `p_test.lgo` -> `logos test` runs the test; `p_test.go` beside `p.lgo` fails with `mixed_package`.
   - `logos_cmdline_files.txt`: `logos run main.lgo` works; `logos run a.go b.lgo` fails with `mixed_package`.
@@ -408,7 +408,7 @@ Anchor: David Parnas, Christopher Alexander
 ### M0-S8 Go and loGo/s interop (follow-up to M0-S2; runs after M0-S2 and before M0-S3)
 Anchor: David Parnas, Christopher Alexander
 - Context: M0-S2 landed as f92d53e38b with the import-edge rejection that R-U2 now removes. This slice changes only that rejection. Module purity (`mixed_module`), package purity (`mixed_package`), the alias warning, and `checkLogosModules` stay as landed (R-U3).
-- Attack (script test): `git mv src/cmd/go/testdata/script/logos_no_interop.txt src/cmd/go/testdata/script/logos_interop.txt` keeps the history, then the script holds five cases, each with its own fixture so an earlier diagnostic cannot mask a later one. Run the renamed script against f92d53e38b before any code change (G1 rule 1; the old rejection text is gone from the script, so cases 1 and 2 fail red because the old `logos_imports_go` and `go_imports_logos` errors still fire; cases 3 to 5 already pass at f92d53e38b and stay as regression pins; the commit body records `RED` lines for cases 1 and 2 only):
+- Attack (script test): `src/cmd/go/testdata/script/logos_interop.txt` holds five cases, each with its own fixture so an earlier diagnostic cannot mask a later one. Run the renamed script against f92d53e38b before any code change (G1 rule 1; the old rejection text is gone from the script, so cases 1 and 2 fail red because the old `logos_imports_go` and `go_imports_logos` errors still fire; cases 3 to 5 already pass at f92d53e38b and stay as regression pins; the commit body records `RED` lines for cases 1 and 2 only):
   1. A loGo/s package imports a Go package from another workspace module: `logos build ./...` succeeds and the binary runs and prints a string from the Go package; `logos test ./...` runs a `_test.lgo` that imports the same Go package.
   2. A Go package imports a loGo/s package from another workspace module: `logos build ./...` succeeds and the binary runs and prints a string from the loGo/s package; `logos test ./...` runs a `_test.go` that imports the loGo/s package; plain `go build ./...` of that Go module fails with stderr matching `no required module provides package example\.com/l/p` (observed with the installed `go` in a scratch `go.work`), because plain `go` ignores `.lgo` files (A-LGOSEL).
   3. A loGo/s package imports `fmt` and `context` and runs.
@@ -422,7 +422,7 @@ Anchor: David Parnas, Christopher Alexander
 ### M0-S3 Compiler accepts `.lgo` files
 Anchor: David Parnas, Tony Hoare
 - Attack: `src/cmd/compile/internal/syntax/logos_test.go` `TestLogosModeParsesGo`: every `.go` file in `syntax/testdata` parses to an identical `Fdump` under `LogosMode` and plain mode. `test/logos/compile/plain.lgo` (`// run`, plain Go syntax, prints `ok`) is defined here; its testdir execution is owned by M0-S6, which ships the `test/logos` harness (prerequisite: M0-S6).
-- Build: `syntax/syntax.go:18`: add `LogosMode` (`1 << 1`). `noder/noder.go:58`: pass `syntax.CheckBranches | logosMode(filename)` where `logosMode` (new `noder/logos.go`) returns `syntax.LogosMode` for logos extensions; `noder.LoadPackage` fails with `[correctness::mixed_package]` if files of both classes arrive (`base.ErrorfAt`), except cgo outputs (names starting with `_cgo_` or ending in `.cgo1.go`), which M20-S0 compiles beside `.lgo` files. `irgen.go:59` config gets `Logos: allLogos(noders)`; `types2.Config` (`types2/api.go:117-221`) gains field `Logos bool // package sources are .lgo files`.
+- Build: `syntax/syntax.go LogosMode`: add `LogosMode` (`1 << 1`). `noder/noder.go:58`: pass `syntax.CheckBranches | logosMode(filename)` where `logosMode` (new `noder/logos.go`) returns `syntax.LogosMode` for logos extensions; `noder.LoadPackage` fails with `[correctness::mixed_package]` if files of both classes arrive (`base.ErrorfAt`), except cgo outputs (names starting with `_cgo_` or ending in `.cgo1.go`), which M20-S0 compiles beside `.lgo` files. `irgen.go:59` config gets `Logos: allLogos(noders)`; `types2.Config` (`types2/api.go:117-221`) gains field `Logos bool // package sources are .lgo files`.
 - Gate: `go test -short cmd/compile/internal/syntax cmd/compile/internal/types2` (testdir execution of `test/logos/compile` is gated in M0-S6).
 
 ### M0-S4 `logos.toml`
@@ -565,16 +565,16 @@ Anchor: Tony Hoare, J.R.R. Tolkien
 Anchor: David Parnas, J.R.R. Tolkien
 - Attack: `syntax/testdata/logos/try_parse.lgo` with ERROR comments: valid `x := f()?`, `f()?`, `defer f()?`, `errdefer f()`, `errdefer tx.Rollback()?`, `errdefer func() { g() }()`; Go meaning kept for `errdefer := 1`, `errdefer = 2`, `errdefer(x)`, `errdefer.f()`; `errdefer 1` -> `syntax error: errdefer requires a function call`; `go f()?` parses as a go statement whose call is a `TryExpr` (types2 rejects it with `misplaced_try`, SPEC §1.4).
 - Build: new `syntax/nodes_logos.go`: `TryExpr struct { X Expr; expr }` and `ErrdeferStmt struct { Call Expr; stmt }` (`Call` is `*CallExpr` or `*TryExpr` wrapping one). Parser hooks (each a one-line call into `syntax/parser_logos.go`):
-  - `pexpr` (`parser.go:1132`) postfix loop: in LogosMode, `case _Question:` wraps the current operand in `TryExpr` and continues.
-  - `stmtOrNil` (`parser.go:2683`): after `lhs := p.exprList()` in the `_Name` branch, if LogosMode, `lhs` is `*Name` with value `errdefer`, and `p.tok` is `_Name` or `_Func`, return `p.errdeferStmt(lhs.Pos())`, which parses `p.pexpr(nil, false)` and requires a call or a `TryExpr` of a call.
-  - `callStmt` (`parser.go:1000`): in LogosMode, when `s.Tok == _Go`, check parenthesized operands behind `?` and keep the `TryExpr` in the go statement; types2 reports `misplaced_try` for `go f()?` (SPEC §1.4).
+  - `pexpr` (`parser.go pexpr`) postfix loop: in LogosMode, `case _Question:` wraps the current operand in `TryExpr` and continues.
+  - `stmtOrNil` (`parser.go stmtOrNil`): after `lhs := p.exprList()` in the `_Name` branch, if LogosMode, `lhs` is `*Name` with value `errdefer`, and `p.tok` is `_Name` or `_Func`, return `p.errdeferStmt(lhs.Pos())`, which parses `p.pexpr(nil, false)` and requires a call or a `TryExpr` of a call.
+  - `callStmt` (`parser.go callStmt`): in LogosMode, when `s.Tok == _Go`, check parenthesized operands behind `?` and keep the `TryExpr` in the go statement; types2 reports `misplaced_try` for `go f()?` (SPEC §1.4).
   - `walk.go` (`node` switch at `:55`), `positions.go` (`StartPos` `:10`, `EndPos` `:124`), `printer.go` (before the default panic at `:723`): hook lines calling `walkLogos`, `startPosLogos`, `endPosLogos`, `printLogos` in `*_logos.go` files; printer prints `X?` and `errdefer <call>`.
 - Gate: `go test -short cmd/compile/internal/syntax -run 'Logos'`.
 
 ### M1-S3 Type checking
 Anchor: Tony Hoare, Edsger W. Dijkstra
 - Attack: `src/internal/types/testdata/logos/try.lgo` with `/* ERROR */` comments covering C1-C6: operand not a call; last result `int`; last result a named type whose underlying is `error` (rejected: identical-to-`error` rule); enclosing function without error result; `?` inside `a + f()?`, inside `g(f()?)`, inside `return f()?`, inside `go f()?`; `x := f()?` where `f` returns only `error`; `x := f()?` where `x` already exists in the scope (no new variables); `errdefer` in a function returning `int`; `_logos_x := 1`; `x, y := f()?` with three results plus error (count mismatch text). Valid cases type the result as the call results minus the error.
-- Build: new `types2/logos_try.go`: `func (check *Checker) logosTryOperand(x *operand, e *syntax.TryExpr)` (types the call, strips the error, records the type of `e` as the remaining result or tuple); `stmt.go`: hooks in the statement switch (`:410`) for `*syntax.ErrdeferStmt` and before `suspendedCall` (`:166-176`) to unwrap a `TryExpr` around the call in `defer`; `expr.go` `exprInternal` (`:1060`): hook `case *syntax.TryExpr` that errors with `misplaced_try` unless the enclosing statement registered `e` in `check.logosTryOK` (a set filled by the statement hooks for the allowed shapes C2); identifier hook for C6 in `declare`. All new behavior runs only when `check.conf.Logos`.
+- Build: new `types2/logos_try.go`: `func (check *Checker) logosTryOperand(x *operand, e *syntax.TryExpr)` (types the call, strips the error, records the type of `e` as the remaining result or tuple); `stmt.go`: hooks in the statement switch for `*syntax.ErrdeferStmt` and before `suspendedCall` to unwrap a `TryExpr` around the call in `defer`; `expr.go` `exprInternal`: hook `case *syntax.TryExpr` that errors with `misplaced_try` unless the enclosing statement registered `e` in `check.logosTryOK` (a set filled by the statement hooks for the allowed shapes C2); identifier hook for C6 in `declare`. All new behavior runs only when `check.conf.Logos`.
 - Gate: `go test -short cmd/compile/internal/types2 -run 'TestLogos'`.
 
 ### M1-S4 Support package `logos/rt` and runtime error traces
@@ -1483,19 +1483,19 @@ Contract (UnionValue state machine; T-203.1, T-203.3): closed union `U` = interf
 ### M2-S1 Union values in value positions
 Anchor: Tony Hoare, David Parnas
 - Attack: `src/internal/types/testdata/logos/union_members.lgo`: closed unions allowed as variable, parameter, result, field, element, map key and value, `make` and `new` operand types; `interface{ ~int | string }` and `interface{ comparable }` stay errors with `[correctness::open_union_value] U has ~ terms or an unbounded type set`; conversion `U(x)` allowed when `x`'s type is a member or a closed union whose members are all members of `U`, else `[correctness::union_nonmember] float64 is not a member of U`; the same files compile as errors in plain Go mode (`.go` testdata copy) to prove `.go` is unchanged.
-- Build: `types2/union_logos.go`: `func isClosedUnion(t Type) bool` (from `_TypeSet` `typeset.go:26-30`: `hasTerms()` and no term with `tilde`); hook in `validVarType` (`typexpr.go:155-176`) returning early for closed unions when `check.conf.Logos`; hook in the conversion gate (`call.go:213-216`) with the membership rule.
+- Build: `types2/union_logos.go`: `func isClosedUnion(t Type) bool` (from `_TypeSet` `typeset.go` `hasTerms` and no term with `tilde`); hook in `validVarType` (`typexpr.go validVarType`) returning early for closed unions when `check.conf.Logos`; hook in the conversion gate (`call.go:213-216`) with the membership rule.
 - Gate: `go test -short cmd/compile/internal/types2 -run TestLogos`.
 
 ### M2-S2 Membership in comparisons, assertions, cases
 Anchor: Tony Hoare, Claude Shannon
 - Attack: `testdata/logos/union_members.lgo`: `u == 1` allowed when `int` is a member (constant converted to its default type), error otherwise; `u == "a"` likewise; `u == nil` allowed; `u.(float64)` and `case float64:` on `U = interface{int | string}` -> `union_nonmember`; `u.(int)` allowed; type switch case that is itself a union of members allowed.
-- Build: hooks in `expr.go` `matchTypes` path (`:811`, `:900-901`, `:907-908`) and `implicitTypeAndValue` (`:413`, `:483-484`) under `check.conf.Logos`: for a closed-union operand and an untyped constant, convert the constant to its default type and require membership; hooks in `typeAssertion` (`expr.go:1296-1305`) and `caseTypes` (`stmt.go:306-354`) checking membership when the operand is a closed union.
+- Build: hooks in `expr.go` `matchTypes` path and `implicitTypeAndValue` under `check.conf.Logos`: for a closed-union operand and an untyped constant, convert the constant to its default type and require membership; hooks in `typeAssertion` (`expr.go typeAssertion`) and `caseTypes` (`stmt.go caseTypes`) checking membership when the operand is a closed union.
 - Gate: as S1.
 
 ### M2-S3 Exhaustive type switches
 Anchor: Edsger W. Dijkstra, Tony Hoare
 - Attack: `testdata/logos/union_exhaustive.lgo`: missing member -> `[correctness::nonexhaustive_switch] switch on U misses: B` (members listed in declaration order); missing nil -> `misses: nil`; `default` satisfies; a case naming a sub-union covers its members; duplicate case reported by the existing duplicate check.
-- Build: hook after the clause loop in `typeSwitchStmt` (after `stmt.go:823`, before `:826`) using the `seen` map (`:802`).
+- Build: hook after the clause loop in `typeSwitchStmt` using the `seen` map.
 - Gate: as S1.
 
 ### M2-S4 Lowering of assertions to unions
@@ -1507,13 +1507,13 @@ Anchor: Tony Hoare, John Carmack
 ### M2-S5 Switch expressions
 Anchor: Edsger W. Dijkstra, J.R.R. Tolkien
 - Attack: `syntax/testdata/logos/switch_expr.lgo` (parse): `r := switch x.(type) { case A => 1; case B => 2; case nil => 0 }`, value form `switch n { case 1 => "one"; default => "many" }`, arms on separate lines; `=>` in plain mode stays `=` followed by `>`. `testdata/logos/switch_expr_types.lgo`: arm types identical -> that type; untyped constants -> default type; `*T` and `nil` arms -> `*T`; `int` and `string` arms -> `[correctness::switch_arm_mismatch] arms have types int and string`; non-exhaustive type switch expression -> `nonexhaustive_switch`; value switch expression without `default` -> `[correctness::switch_expr_needs_default]`. `test/logos/run/switch_expr.lgo`: evaluation order (operand evaluated once, arms evaluated only when chosen).
-- Build: token `_FatArrow // =>` (scanner: `=` followed by `>` in LogosMode; procedure of M1-S1); node `SwitchExpr { Init SimpleStmt; Tag Expr; Arms []*ArmClause }`, `ArmClause { Cases Expr; Body Expr }` in `nodes_logos.go`; parser hook in `operand` (`parser.go:1010`) for `_Switch` in LogosMode; types2 `switchExpr` in `types2/logos.go`; lowering to `func() T { switch <tag> { case ...: return <body> }; panic(_logos_rt.Unreachable("<file>:<line>")) }()`.
+- Build: token `_FatArrow // =>` (scanner: `=` followed by `>` in LogosMode; procedure of M1-S1); node `SwitchExpr { Init SimpleStmt; Tag Expr; Arms []*ArmClause }`, `ArmClause { Cases Expr; Body Expr }` in `nodes_logos.go`; parser hook in `operand` (`parser.go operand`) for `_Switch` in LogosMode; types2 `logosSwitchExpr` in `types2/switch_logos.go`; lowering to `func() T { switch <tag> { case ...: return <body> }; panic(_logos_rt.Unreachable("<file>:<line>")) }()`.
 - Gate: syntax, types2, testdir tests.
 
 ### M2-S6 Inline interface assertions
 Anchor: Tony Hoare, Dieter Rams
 - Attack: `testdata/logos/struct_assert.lgo`: `type S struct : io.Reader { ... }` with pointer-receiver `Read` passes; missing method -> `[correctness::assertion_failed] *S does not implement io.Reader (missing method Read)`; assertion list on a non-struct type -> syntax error.
-- Build: parser hook in `structType` (`parser.go:1542`): in LogosMode, after `struct`, `:` starts a type list ended by `{`; node `AssertedStruct { Asserts []Expr; Struct *StructType }` used as the `TypeDecl` type; types2 checks `*S` implements each; lowering emits the `StructType` and one `var _ I = (*S)(nil)` per assertion.
+- Build: parser hook in `structType` (`parser.go structType`): in LogosMode, after `struct`, `:` starts a type list ended by `{`; node `AssertedStruct { Asserts []Expr; Struct *StructType }` used as the `TypeDecl` type; types2 checks `*S` implements each; lowering emits the `StructType` and one `var _ I = (*S)(nil)` per assertion.
 - Gate: types2 and testdir tests.
 
 ### M2-S7 Eject for unions
@@ -1582,7 +1582,7 @@ Anchor: David Parnas, Tony Hoare
 Anchor: Claude Shannon, J.R.R. Tolkien
 - Attack (eject spans): `test/logos/run/option_func_type.lgo` covers optional function types with comments between `func` and the parameter list. `test/logos/run/option_nilcmp_adjacent.lgo` covers parenthesized nil operands and adjacent boolean expressions. Native and ejected execution MUST match their expected output.
 - Attack: syntax `testdata/logos/option_parse.lgo`: `*User?`, `[]int?` (option of slice), `[]int?` vs `[](int?)` (parenthesized form required for an element option), `T??` -> `syntax error: T?? is not allowed; use (T?)?`, `a ?? b ?? c` right-associative, `a || b ?? c` parses as `(a || b) ?? c`, `x?.y?.z`. types2 `testdata/logos/option_types.lgo`: assignability table above; `?.` on a non-option -> `[correctness::not_an_option]`; `??` left side non-option -> same; `?.` result type flattens `F?` when the field is already an option; method call on `T?` without narrowing -> `[correctness::nil_deref_unproven] cannot call method on *User? without proving != nil` (#99). Plain calls on optional function locals or parameters, including parenthesized callees, MUST report `nil_deref_unproven` before narrowing. The same fixture accepts guarded calls, early-exit guards, and parenthesized optional method calls. `test/logos/run/option_*.lgo`; `test/logos/run/option_size.lgo`: `unsafe.Sizeof` of a `*User?` value equals `unsafe.Sizeof` of a `*User` value (no overhead for pointer-like options, PLAN:127): `??` evaluates its right side only when the left is none; `?.` evaluates the receiver once (count calls).
-- Build: tokens `_QuestionDot // ?.` and `_Coalesce // ??` (scanner, LogosMode: `?` then `.` not followed by a digit, and `?` then `?`); precedence table (`tokens.go` end): insert `precCoalesce = 1`, shifting `precOrOr` and the rest up by one; parser: postfix `?` in type context (`typeOrNil`, `parser.go:1352`) builds `OptionType{Elem Expr}`; binary `??` in `binaryExpr` (`:873`); `?.` in the `pexpr` loop. Lowering per T-202: `*T?` where `*T` is non-nil stays the bare pointer (zero-overhead); an option whose payload admits nil as a valid value, other than an interface-backed union option with no nil-capable member (which stays the bare interface with nil as none per the T-202 exception), uses presence-bearing `_logos_rt.Option[T]` (`type Option[T any] struct{ Value T; Present bool }` in `logos/rt`) so present-nil stays distinguishable from absent; every other `T` -> `_logos_rt.Option[T]`; `a ?? b` -> `func() T { if v := a; <present v> { return <value v> }; return b }()`; `a?.f` -> `func() F? { if v := a; <present v> { return <wrap> v.f }; return <none> }()`.
+- Build: tokens `_QuestionDot // ?.` and `_Coalesce // ??` (scanner, LogosMode: `?` then `.` not followed by a digit, and `?` then `?`); precedence table (`tokens.go` end): insert `precCoalesce = 1`, shifting `precOrOr` and the rest up by one; parser: postfix `?` in type context (`typeOrNil`, `parser.go typeOrNil`) builds `OptionType{Elem Expr}`; binary `??` in `binaryExpr`; `?.` in the `pexpr` loop. Lowering per T-202: `*T?` where `*T` is non-nil stays the bare pointer (zero-overhead); an option whose payload admits nil as a valid value, other than an interface-backed union option with no nil-capable member (which stays the bare interface with nil as none per the T-202 exception), uses presence-bearing `_logos_rt.Option[T]` (`type Option[T any] struct{ Value T; Present bool }` in `logos/rt`) so present-nil stays distinguishable from absent; every other `T` -> `_logos_rt.Option[T]`; `a ?? b` -> `func() T { if v := a; <present v> { return <value v> }; return b }()`; `a?.f` -> `func() F? { if v := a; <present v> { return <wrap> v.f }; return <none> }()`.
 - Attack (nlsemi): `src/cmd/compile/internal/syntax/scanner_logos_test.go` asserts `a?.\n b` scans with no `;` after `?.`. `x?\n y` scans with `;` after `?`.
 - Build (nlsemi): this Logos rule is implemented in `src/cmd/compile/internal/syntax/scanner.go` and pinned by `TestLogosQuestionDotScan` in `src/cmd/compile/internal/syntax/scanner_logos_test.go`. `src/cmd/compile/internal/syntax/scanner.go` leaves `s.nlsemi` false after `_QuestionDot`, like `_Dot`. `_Question` sets `s.nlsemi` true, like `)` (M1-S1). A newline becomes `_Semi` only when the prior token set `nlsemi`. This differs from M6-S8, which skips `;` before `.` when `nlsemi` stays true.
 - Gate: syntax, types2, testdir tests.
@@ -1885,7 +1885,7 @@ Anchor: Dieter Rams
 ### M6-S3 Struct field defaults
 Anchor: Tony Hoare, Kenya Hara
 - Attack: syntax `Port int = 8080 \`json:"port"\`` (default before tag); types2: non-constant default -> `[correctness::default_not_constant]`; run: `Cfg{}`, `&Cfg{}`, `Cfg{Host: "x"}` get the default; `var c Cfg` and `new(Cfg)` stay zero; a struct literal `p.Cfg{}` written in a Go package of another module gets the zero value (documented hole: defaults apply only in loGo/s composite literals).
-- Build: parser hook in `fieldDecl` (`parser.go:1629`) wrapping the type in `FieldDefault`; types2 records defaults per checked `*Struct`, validates constness in `later`, and warns `suspicious::unapplied_struct_default` (soft, warning-only in builds) on zero declarations and `new(T)`; lowering strips `= const` from declarations and inserts missing defaulted fields into composite literals of the type (including in other packages through facts `default <Type> <Field> <len>` records carrying the default expression source text).
+- Build: parser hook in `fieldDecl` (`parser.go fieldDecl`) wrapping the type in `FieldDefault`; types2 records defaults per checked `*Struct`, validates constness in `later`, and warns `suspicious::unapplied_struct_default` (soft, warning-only in builds) on zero declarations and `new(T)`; lowering strips `= const` from declarations and inserts missing defaulted fields into composite literals of the type (including in other packages through facts `default <Type> <Field> <len>` records carrying the default expression source text).
 - Gate: syntax, types2, testdir tests.
 
 ### M6-S4 Spread
@@ -2066,7 +2066,7 @@ Anchor: Tony Hoare, Edsger W. Dijkstra
 ### M8-S2 `go group` syntax and lowering
 Anchor: Dieter Rams, Edsger W. Dijkstra
 - Attack: syntax: `go group (ctx) { go { ... } }`, `go group (ctx, limit = 8) { ... }`, `go group(x)` with no block keeps Go meaning (a call of a function named `group`); types2: `?` in a child block returns to the group; `return` in a child block -> `[correctness::return_in_group_child]`; inside a group body, `go f(args)` is a child (if `f` returns `error` last, that error goes to the group); `go f()` outside any group body -> `[concurrency::unsupervised_goroutine]` (the check lands here; M9 lists it); run: the PLAN Sec 11 batch loop runs with 8-way concurrency.
-- Build: parser hook in `callStmt` (`parser.go:985`), LogosMode only: after `go`, if the token is `{`, parse `GroupChild{Body}` (the checker reports `[correctness::child_outside_group]` outside a group body); if the token is the name `group` followed by `(`, parse the parenthesized list with a routine that accepts expressions and one `limit = <expr>` element; then, if the next token is `{`, build `GroupStmt{Ctx Expr; Limit Expr; Body *BlockStmt}`; otherwise build `CallExpr{Fun: group, ArgList: <list>}` (a `limit =` element there is a syntax error), continue with `p.pexpr(call, false)` for postfix operators, and finish as an ordinary `go` statement; lowering: `_logos_g, _logos_gctx := _logos_rt.NewGroup(ctx, limit)`; each child -> `_logos_g.Go(func(_logos_gctx context.Context) error { <body>; return nil })`; after the body, `if _logos_eN := _logos_g.Wait(); _logos_eN != nil { <exit> }` with `<exit>` exactly as for `?` (M1-S5), so the group's error propagates like `?` (PLAN Sec 11 relies on this); a `go group` statement in a function whose last result is not `error` -> `[correctness::group_needs_error_result]`.
+- Build: parser hook in `callStmt` (`parser.go callStmt`), LogosMode only: after `go`, if the token is `{`, parse `GroupChild{Body}` (the checker reports `[correctness::child_outside_group]` outside a group body); if the token is the name `group` followed by `(`, parse the parenthesized list with a routine that accepts expressions and one `limit = <expr>` element; then, if the next token is `{`, build `GroupStmt{Ctx Expr; Limit Expr; Body *BlockStmt}`; otherwise build `CallExpr{Fun: group, ArgList: <list>}` (a `limit =` element there is a syntax error), continue with `p.pexpr(call, false)` for postfix operators, and finish as an ordinary `go` statement; lowering: `_logos_g, _logos_gctx := _logos_rt.NewGroup(ctx, limit)`; each child -> `_logos_g.Go(func(_logos_gctx context.Context) error { <body>; return nil })`; after the body, `if _logos_eN := _logos_g.Wait(); _logos_eN != nil { <exit> }` with `<exit>` exactly as for `?` (M1-S5), so the group's error propagates like `?` (PLAN Sec 11 relies on this); a `go group` statement in a function whose last result is not `error` -> `[correctness::group_needs_error_result]`.
 - Gate: syntax, types2, testdir tests.
 
 ### M8-S3 Cancellation of channel operations in children
@@ -2376,7 +2376,7 @@ Anchor: Tony Hoare, Richard Feynman
 
 ### M11-A-S1 Enforce binary slice prealloc bound
 Anchor: Tony Hoare, Richard Feynman
-- Attack: `src/cmd/compile/internal/logos/json_binary_test.go` `TestBinaryZeroWireBudget` (`byts` block): the `[]byte` path caps pre-allocation at `min(len(rest)/2, 1MB)` instead of making the whole count at once; `TestBinaryZeroWireNoIteration`, `largeLawful`, and `hostileByteCount` pin the nonzero-wire and zero-wire guards; `test/logos/run/json_binary_test.lgo` pins the wire layout.
+- Attack: `src/cmd/compile/internal/logos/json_binary_test.go` caps the `[]byte` path at `min(len(rest)/2, 1MB)` instead of making the whole count at once; `test/logos/run/binary_zero_wire_budget.lgo` and `test/logos/run/binary_zero_granular_jb.lgo` pin the nonzero-wire and zero-wire guards with behavior and allocation deltas; `test/logos/run/json_binary_test.lgo` pins the wire layout.
 - Build: `json_binary.go` caps the `[]byte` preallocation and the zero-wire single-allocation byte total at 64 MiB.
 - Gate: `go test -count=1 cmd/compile/internal/logos`; `go test -count=1 cmd/internal/testdir` for the json fixtures.
 - Red-team rows: none.
@@ -2384,7 +2384,7 @@ Anchor: Tony Hoare, Richard Feynman
 
 ### M11-A-S2 Assert static JSON marshal and unmarshal rules
 Anchor: Tony Hoare, Richard Feynman
-- Attack: `src/cmd/compile/internal/logos/json_static_test.go`: defaults-only trigger, single-make no-threshold, string read-once, key-literal escapes, single-probe dispatch, imported-member key skip, and the jsonv2 default build; `test/logos/run/json_marshal_test.lgo`, `json_union_test.lgo`, and `json_callsite_jsonv1.lgo` pin the run behavior.
+- Attack: `src/cmd/compile/internal/logos/json_static_test.go`: defaults-only trigger, single-make no-threshold, key-literal escapes, single-probe dispatch, imported-member key skip, and the jsonv2 default build; `test/logos/run/json_marshal_test.lgo`, `json_union_test.lgo`, and `json_callsite_jsonv1.lgo` pin the run behavior.
 - Build: none (test-only).
 - Gate: `go test -count=1 cmd/compile/internal/logos`; `go test -count=1 cmd/internal/testdir` for the json fixtures.
 - Red-team rows: none.
@@ -3010,7 +3010,7 @@ Notes (m22): the `//logos:zeroalloc` directive does not change allocation behavi
 Anchor: Edward Tufte, Tony Hoare
 - Attack: `src/cmd/internal/goparity/testdata/run` MUST match fork against oracle. `src/cmd/internal/goparity/testdata/fail` MUST reject identically. `src/cmd/internal/goparity/testdata/mutants` MUST turn red in release tier.
 - Build: `src/cmd/internal/goparity/parity_test.go` MUST compare fast tier by default. Oracle off mode MUST run metamorphic tier only. Release tier MUST add extra configs and mutant probes. Missing oracle MUST fail unless oracle off.
-- Gate: `go test cmd/internal/goparity` MUST pass. Release tier MUST pass with flag. Oracle off MUST skip fail corpus.
+- Gate: `go test cmd/internal/goparity` MUST pass fast tier. `go test cmd/internal/goparity -goparity.release` MUST pass release tier. `go test cmd/internal/goparity -goparity.upstream=off` MUST run metamorphic tier only and skip fail corpus.
 - Red-team rows: none.
 - Docs: none.
 
@@ -3101,7 +3101,7 @@ per-lane records follow.
   `5f0577d`, `e0fd516`), 10 SPEC-CUT recorded above.
 - integ-cl-s78 (SPEC 7 and 8): `TestConstmapEmissionRodataNoInit`,
   `logos_constmap_keytype.txt`, `TestLoadBuildTablesApplyToGoModule`,
-  `TestArchLevelsNativeUsesHostLevel`,
+  `src/cmd/go/testdata/script/logos_target_cpu_native.txt`,
   `TestLogosLintMarkSkipsNonMainModules` (`e7a15eeefb`).
 - integ-cl-s1012 (SPEC 10.1 to 12.2): 39 DONE-CITED, 5 DONE-NEW: JSON
   parity under nojsonv2 and per-instantiation comptime JSON helpers
