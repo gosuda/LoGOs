@@ -2059,7 +2059,7 @@ func TestProxyDuplicateTokenMapsToOwnSegment(t *testing.T) {
 }
 
 func TestProxyDefinitionWritesNoBytes(t *testing.T) {
-	const libLgo = "package lib\n\nfunc Hello() string {\n\treturn \"hi\"\n}\n"
+	const libLgo = "package lib\n\nimport \"os\"\n\nfunc load(path string) string {\n\tdata := os.ReadFile(path)?\n\treturn string(data)\n}\n\nfunc Hello() string {\n\treturn \"hi\"\n}\n"
 	const appGo = "package app\n\nimport \"example.com/m/lib\"\n\nvar Greeting = lib.Hello()\n"
 	const app2Lgo = "package app2\n\nimport \"example.com/m/golib\"\n\nvar N = golib.Thing()\n"
 	const goLib = "package golib\n\nfunc Thing() int { return 1 }\n"
@@ -2088,6 +2088,19 @@ func TestProxyDefinitionWritesNoBytes(t *testing.T) {
 	f.open("app/app.go", 1)
 	f.open("app2/app2.lgo", 1)
 	f.sync()
+	var libFwd string
+	for _, o := range f.receivedMethod("textDocument/didOpen") {
+		td, _ := o["textDocument"].(map[string]any)
+		if td["uri"] == f.virtURI("lib/lib.lgo") {
+			libFwd, _ = td["text"].(string)
+		}
+	}
+	if libFwd == "" {
+		t.Fatal("gopls got no lowered didOpen for lib/lib.lgo")
+	}
+	if !strings.Contains(libFwd, "os.ReadFile(path)") || strings.Contains(libFwd, "ReadFile(path)?") {
+		t.Errorf("gopls got the lowered dependency text %q, want the lowered call without the ? marker", libFwd)
+	}
 	snap := func() (map[string][]byte, map[string]int64) {
 		data := map[string][]byte{}
 		mtime := map[string]int64{}
