@@ -601,11 +601,9 @@ Pointers from Go-mode declarations and from type parameters instantiated with no
 A single-value map read `m[k]` MUST type as `V?`, while `v, ok := m[k]` MUST keep Go meaning [T-104.3].
 Zero values of non-nil pointers MUST fail with correctness::nonnil_uninitialized. [T-202][T-Sec12]
 Absent map and JSON values MUST check through V? and MissingFieldError. [T-202][T-Sec12]
-Pointers from Go declarations, in the standard library and in every other Go package, MUST act as platform pointers. [T-202][R-U2]
 Stores into non-nil locations MUST panic with `logos: nil from Go value stored into non-nil *T at <file>:<line>`. [T-202][R-U2]
 Block scoping MUST stay standard Go. [T-202]
 Outer variables MUST narrow after if x == nil return guards. [T-202]
-A literal MUST initialize every non-nil field. [T-202]
 
 ### 2.3 RFC-203: Closed unions, property interfaces, and inline assertions
 
@@ -769,12 +767,9 @@ A missing method MUST fail with `[correctness::assertion_failed]` naming the met
 Each assertion MUST emit a compile-time check that `*S` implements each listed interface. [T-203.3]
 
 An assertion list on a non-struct type MUST be a syntax error. [T-203.3]
-An exhaustive `switch x.(type)` MUST cover every member and `nil` or hold `default` [T-203.1].
 A readonly method `const M() T` MUST NOT count as a property element and MUST NOT satisfy a property requirement [T-201][T-203.2].
 Unions MUST use the upstream interface representation. [T-203.1]
 A closed union MUST use the upstream interface representation, including upstream handling of zero-sized members. [T-203.1]
-Ejected value unions MUST keep methods with a member comment. [T-203.1]
-A union with `~` terms MUST fail with `correctness::open_union_value`. [T-203.1]
 
 Method bodies inside interfaces MUST fail compilation. [T-203.2]
 The write MUST reach the struct. [T-203.2]
