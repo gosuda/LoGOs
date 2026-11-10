@@ -79,7 +79,7 @@ func (check *Checker) logosCheckAsserts(e *syntax.AssertedStruct, def *TypeName,
 		if iface == nil {
 			continue
 		}
-		if name := check.logosMissingOrdinary(ptr, iface); name != "" {
+		if name := check.logosMissingOrdinary(ptr, iface, e.Asserts[i].Pos()); name != "" {
 			check.errorf(e.Asserts[i], InvalidIfaceAssign, "%s %s does not implement %s (missing method %s)", logosAssertFail, ptr, T, name)
 			return
 		}

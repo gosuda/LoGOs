@@ -309,7 +309,7 @@ func (check *Checker) logosPropertySource(V Type, name string, want Type) (gette
 	return getter, false, false
 }
 
-func (check *Checker) logosCheckPropertySources(V Type, iface *Interface) (logosPropFailKind, string) {
+func (check *Checker) logosCheckPropertySources(V Type, iface *Interface, pos syntax.Pos) (logosPropFailKind, string) {
 	for _, pr := range logosProperties(iface) {
 		getter, setter, ambig := check.logosPropertySource(V, pr.name, pr.typ)
 		switch {
@@ -321,7 +321,7 @@ func (check *Checker) logosCheckPropertySources(V Type, iface *Interface) (logos
 			return logosPropNoSetter, pr.name
 		}
 	}
-	if name := check.logosMissingOrdinary(V, iface); name != "" {
+	if name := check.logosMissingOrdinary(V, iface, pos); name != "" {
 		return logosPropOrdinary, name
 	}
 	_, isPtr := deref(V)
@@ -335,7 +335,7 @@ func (check *Checker) logosCheckPropertySources(V Type, iface *Interface) (logos
 	return logosPropOK, ""
 }
 
-func (check *Checker) logosMissingOrdinary(V Type, iface *Interface) string {
+func (check *Checker) logosMissingOrdinary(V Type, iface *Interface, pos syntax.Pos) string {
 	for _, m := range iface.typeSet().methods {
 		if logosIsAccessor(m.name) {
 			continue
@@ -348,6 +348,11 @@ func (check *Checker) logosMissingOrdinary(V Type, iface *Interface) string {
 		check.objDecl(f)
 		if f.nointerface || !Identical(f.typ, m.typ) {
 			return m.name
+		}
+		if m.LogosReadonly() {
+			if !check.logosConcreteReadonlySatisfiedAt(V, f, m, pos) {
+				return m.name
+			}
 		}
 	}
 	return ""
@@ -410,7 +415,7 @@ func (check *Checker) logosPropGate(Ti *Interface, Vu Type, constraint bool) boo
 	return logosPropertyInterface(Ti) != nil
 }
 
-func (check *Checker) logosImplementsProperty(V, T Type, Ti *Interface, cause *string) bool {
+func (check *Checker) logosImplementsProperty(V, T Type, Ti *Interface, cause *string, pos syntax.Pos) bool {
 	fail := func(format string, args ...any) bool {
 		if cause != nil {
 			*cause = check.sprintf(format, args...)
@@ -429,7 +434,7 @@ func (check *Checker) logosImplementsProperty(V, T Type, Ti *Interface, cause *s
 			return fail("%s does not implement %s (missing method %s)", V, Ti, getter)
 		}
 	}
-	kind, name := check.logosCheckPropertySources(V, Ti)
+	kind, name := check.logosCheckPropertySources(V, Ti, pos)
 	declared := named != nil && check.logosDeclaredConforms(named, T, Ti)
 	switch {
 	case declared && kind == logosPropOK:

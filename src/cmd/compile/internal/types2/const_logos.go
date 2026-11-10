@@ -67,8 +67,8 @@ func (check *Checker) logosConstAssign(x *operand, T Type, context string) bool 
 			if Vu := Unalias(x.typ()); Vu != nil && !isTypeParam(Vu) {
 				var cause string
 				ok := false
-				if logosPropertyInterface(T) != nil {
-					ok = check.implements(Vu, T, false, &cause)
+				if Ti := logosPropertyInterface(T); Ti != nil {
+					ok = check.logosImplementsProperty(Vu, T, Ti, &cause, x.Pos())
 				} else {
 					ok = check.hasAllMethodsAt(Vu, T, true, Identical, &cause, x.Pos())
 				}
