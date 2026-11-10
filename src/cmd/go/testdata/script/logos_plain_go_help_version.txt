@@ -2,7 +2,9 @@ env GOPROXY=off
 env GOTOOLCHAIN=local
 
 go version
-stdout '^go version go1\.27\.2(-X:[a-z0-9,]+)? [a-z0-9]+/[a-z0-9]+$'
+stdout '^go version go'
+cp stdout $WORK/version.txt
+exec sh check_version.sh
 
 go help
 ! stdout 'logos'
@@ -197,3 +199,9 @@ cp stdout $WORK/our-goproxy.txt
 exec env GOROOT=/home/linuxbrew/.linuxbrew/Cellar/go/1.27.3/libexec /home/linuxbrew/.linuxbrew/Cellar/go/1.27.3/libexec/bin/go help goproxy
 cp stdout $WORK/up-goproxy.txt
 cmp $WORK/our-goproxy.txt $WORK/up-goproxy.txt
+
+-- check_version.sh --
+#!/bin/sh
+set -e
+want="$("$GOROOT/bin/go" env GOOS)/$("$GOROOT/bin/go" env GOARCH)"
+grep -q "${want}$" "$WORK/version.txt"
