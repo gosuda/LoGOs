@@ -22,6 +22,23 @@ func add(p *int, v int) {
 	*p += v
 }
 
+//go:noinline
+	// amd64:"FUNCDATA.*opendefer\\(SB\\)"
+	// arm64:"FUNCDATA.*opendefer\\(SB\\)"
+func panicCleanup(n int) (total int) {
+	{
+		// amd64:-"CALL runtime\\.deferproc"
+		// arm64:-"CALL runtime\\.deferproc"
+		scope defer add(&total, n)
+		if n > 0 {
+			panic("boom")
+		}
+		total++
+	}
+	return total
+}
+
 func main() {
 	loopCleanup(3)
+	panicCleanup(0)
 }
