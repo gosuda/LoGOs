@@ -291,7 +291,7 @@ Each `&expr` evaluation MUST yield a fresh variable [T-104.5].
 A struct field default MUST have form `F T = constExpr` before the tag [T-104.5].
 Defaults MUST apply in composite literals of the type, including address forms and partial literals [T-104.5].
 A Go struct literal of an exported loGo/s struct MUST get zero values and MUST NOT get the field defaults; this is a documented hole [T-104.5][R-U2][A-GOBOUNDARY].
-`var x T` and `new(T)` MUST stay zero and MUST trigger `suspicious::unapplied_struct_default` [T-104.5].
+`var x T` and `new(T)` MUST trigger `suspicious::unapplied_struct_default` [T-104.5].
 A non-constant default MUST fail with `correctness::default_not_constant` [T-104.5].
 Spread `T{..src}` MUST copy fields with identical names and identical types [T-104.5].
 The same name with a different type MUST fail with `correctness::spread_type_mismatch` [T-104.5].
