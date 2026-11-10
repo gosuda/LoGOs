@@ -445,3 +445,54 @@ func Bad() int {
 		t.Fatalf("code = %v, want CodeSilent", cerr.Code)
 	}
 }
+
+func TestEvalDefaultStepBudgetBoundary(t *testing.T) {
+	fn := parseFunc(t, `package p
+func Burn1(n int) int {
+	total := 0
+	for i := 0; i < n; i++ {
+		total++
+	}
+	total++
+	return total
+}`, true, []*Type{BasicType("int")}, []*Type{BasicType("int")})
+	measure := func(n int) (int64, int) {
+		h := newFakeHost(t)
+		h.funcs["Burn1"] = fn
+		v, st, err := Eval(h, Config{MaxSteps: 1 << 30, MaxValueBytes: 1 << 20, WordSize: 8}, parseExpr(t, `Burn1(`+strconv.Itoa(n)+`)`))
+		if err != nil {
+			t.Fatalf("measure Burn1(%d): %v", n, err)
+		}
+		return v.Int64(), st.Steps
+	}
+	_, base := measure(0)
+	_, one := measure(1)
+	_, two := measure(2)
+	cost := one - base
+	if cost <= 0 || two != base+2*cost {
+		t.Fatalf("non-linear step cost %d, %d, %d", base, one, two)
+	}
+	n := (100000 - base) / cost
+	if n < 0 || (100000-base)%cost != 0 {
+		t.Fatalf("budget 100000 unreachable from base %d cost %d", base, cost)
+	}
+	h := newFakeHost(t)
+	h.funcs["Burn1"] = fn
+	v, st, err := Eval(h, Config{}, parseExpr(t, `Burn1(`+strconv.Itoa(n)+`)`))
+	if err != nil {
+		t.Fatalf("Burn1(%d) with zero Config: %v", n, err)
+	}
+	if v.Int64() != int64(n)+1 {
+		t.Fatalf("Burn1(%d) = %v, want %d", n, v.Int64(), n+1)
+	}
+	if st.Steps != 100000 {
+		t.Fatalf("Burn1(%d) steps = %d, want exactly 100000", n, st.Steps)
+	}
+	over := newFakeHost(t)
+	over.funcs["Burn1"] = fn
+	_, _, err = Eval(over, Config{}, parseExpr(t, `Burn1(`+strconv.Itoa(n+1)+`)`))
+	cerr, ok := err.(*Error)
+	if !ok || cerr.Code != CodeStepLimit {
+		t.Fatalf("Burn1(%d) with zero Config err = %v, want step limit", n+1, err)
+	}
+}
