@@ -36,6 +36,8 @@ type fakeScript struct {
 
 	Diagnostics map[string]json.RawMessage `json:"diagnostics"`
 
+	Echo bool `json:"echo"`
+
 	DelayMillis int `json:"delayMillis"`
 
 	CrashOn string `json:"crashOn"`
@@ -45,6 +47,8 @@ type fakeScript struct {
 	HoldAddr string `json:"holdAddr"`
 
 	held bool
+
+	docs map[string]string
 }
 
 func TestMain(m *testing.M) {
@@ -93,8 +97,121 @@ func runFakeGopls() int {
 		}
 	}
 }
+func echoRespond(wr *writer, id json.RawMessage, v any) error {
+	raw, err := encode(v)
+	if err != nil {
+		return err
+	}
+	return wr.respond(id, raw)
+}
 
+func echoWordByte(c byte) bool {
+	return c == '_' || '0' <= c && c <= '9' || 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z'
+}
+
+func echoWord(doc string, p Position) Range {
+	t := newText([]byte(doc))
+	off := t.offset(p)
+	start, end := off, off
+	for start > 0 && echoWordByte(doc[start-1]) {
+		start--
+	}
+	for end < len(doc) && echoWordByte(doc[end]) {
+		end++
+	}
+	return Range{Start: t.position(start), End: t.position(end)}
+}
+
+func echoDiags(doc string) []any {
+	i := strings.Index(doc, "ReadFile")
+	if i < 0 {
+		return []any{}
+	}
+	t := newText([]byte(doc))
+	return []any{map[string]any{
+		"range":    Range{Start: t.position(i), End: t.position(i + len("ReadFile"))},
+		"severity": 1,
+		"message":  stockDiagMessage,
+		"source":   "stock",
+	}}
+}
+
+func echoText(script *fakeScript, m *message) (string, int, string) {
+	v, err := decode(m.Params)
+	root, _ := v.(map[string]any)
+	if err != nil || root == nil {
+		return "", 0, ""
+	}
+	td, _ := root["textDocument"].(map[string]any)
+	uri, _ := td["uri"].(string)
+	version, _ := number(td["version"])
+	if m.Method == "textDocument/didOpen" {
+		text, _ := td["text"].(string)
+		script.docs[uri] = text
+		return uri, version, text
+	}
+	text := script.docs[uri]
+	changes, _ := root["contentChanges"].([]any)
+	for _, c := range changes {
+		if full, ok := c.(map[string]any)["text"].(string); ok {
+			text = full
+		}
+	}
+	script.docs[uri] = text
+	return uri, version, text
+}
+
+func echoAnswer(wr *writer, script *fakeScript, m *message) error {
+	v, err := decode(m.Params)
+	root, _ := v.(map[string]any)
+	if err != nil || root == nil {
+		return wr.respond(m.ID, nullResult)
+	}
+	td, _ := root["textDocument"].(map[string]any)
+	uri, _ := td["uri"].(string)
+	pos, ok := asPosition(root["position"].(map[string]any))
+	if !ok {
+		return wr.respond(m.ID, nullResult)
+	}
+	span := echoWord(script.docs[uri], pos)
+	switch m.Method {
+	case "textDocument/hover":
+		return echoRespond(wr, m.ID, map[string]any{"contents": map[string]any{"kind": "plaintext", "value": "stock hover"}, "range": span})
+	case "textDocument/definition":
+		return echoRespond(wr, m.ID, []any{map[string]any{"uri": uri, "range": span}})
+	default:
+		return echoRespond(wr, m.ID, map[string]any{"isIncomplete": false, "items": []any{map[string]any{"label": "ReadFile", "textEdit": map[string]any{"range": span, "newText": "ReadFile"}}}})
+	}
+}
+
+func echoHandle(wr *writer, script *fakeScript, m *message) error {
+	if script.docs == nil {
+		script.docs = map[string]string{}
+	}
+	if m.isRequest() {
+		switch m.Method {
+		case "initialize":
+			return echoRespond(wr, m.ID, map[string]any{"capabilities": map[string]any{"hoverProvider": true, "definitionProvider": true, "completionProvider": map[string]any{}}})
+		case "shutdown":
+			return wr.respond(m.ID, nullResult)
+		case "textDocument/hover", "textDocument/definition", "textDocument/completion":
+			return echoAnswer(wr, script, m)
+		default:
+			return wr.respond(m.ID, nullResult)
+		}
+	}
+	switch m.Method {
+	case "textDocument/didOpen", "textDocument/didChange":
+		uri, version, text := echoText(script, m)
+		return wr.notify("textDocument/publishDiagnostics", map[string]any{"uri": uri, "version": version, "diagnostics": echoDiags(text)})
+	}
+	return nil
+
+}
 func fakeHandle(wr *writer, script *fakeScript, m *message) error {
+	if script.Echo {
+		return echoHandle(wr, script, m)
+	}
 	switch {
 	case m.isRequest():
 		if m.Method == script.HoldMethod && script.HoldAddr != "" && !script.held {
