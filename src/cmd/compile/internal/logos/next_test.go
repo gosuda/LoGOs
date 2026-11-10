@@ -133,8 +133,9 @@ func errNew() error { return nil }
 			tasks: 1,
 		},
 		{
-			name: "loopGap",
-			body: "func d(x int) int { return x * 2 }\nfunc g(xs []int) ([]int, int) {\n\tvar ys []int\n\tsize := len(xs)\n\tfor i := 0; i < len(xs); i++ {\n\t\tys = append(ys, d(xs[i]))\n\t}\n\treturn ys, size\n}",
+			name:  "loopGap",
+			body:  "func d(x int) int { return x * 2 }\nfunc g(xs []int) ([]int, int) {\n\tvar ys []int\n\tsize := len(xs)\n\tfor i := 0; i < len(xs); i++ {\n\t\tys = append(ys, d(xs[i]))\n\t}\n\treturn ys, size\n}",
+			tasks: 1,
 		},
 		{
 			name:  "loopContinue",
