@@ -1703,7 +1703,7 @@ JSON decoders MUST grow arrays incrementally with no pre-allocation cap. [T-Sec1
 - A float slice sum MUST run the fixed pairwise halving tree of Sec 1.4 over the loaded elements, so its bits equal the scalar form with and without `GOEXPERIMENT=simd`. [T-303][T-104.6]
 - A slice sum with a fused operation, or over an `int`, `uint`, or `uintptr` element, MUST take the scalar form. [T-303]
 - Eject output of slice reductions MUST use the scalar form, so it builds with an upstream toolchain. [T-303][T-0.3]
-- At GOAMD64=v3/v4 an immediate 32/64-bit constant-count rotate MAY use RORXQ or RORXL besides SARX, SHLX, and SHRX. [T-303]
+- At GOAMD64=v3/v4 an immediate 32/64-bit constant-count rotate MUST use RORXQ or RORXL besides SARX, SHLX, and SHRX. [T-303]
 - Variable-count rotates MUST stay on the existing path. [T-303]
 - A ternary-shaped branch at GOAMD64=v3 MAY compile to a conditional move. [T-303]
 - In `.lgo` files a non-constant integer product in a `make` length or capacity MUST lower to `logos/rt.MulLen`; constant products stay constant. [T-303]
