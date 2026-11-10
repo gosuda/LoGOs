@@ -8,14 +8,36 @@ type User struct {
 	Name string
 }
 
+type Team struct {
+	Lead *User?
+}
+
 var calls int
+var teamCalls int
 
 func receiver() *User? {
 	calls++
 	return &User{Name: "ok"}
 }
 
+func receiverNil() *User? {
+	calls++
+	return nil
+}
+
+func teamReceiver() *Team? {
+	teamCalls++
+	return nil
+}
+
 func main() {
 	name := receiver()?.Name ?? "none"
-	fmt.Println(name, calls)
+	someOK := name == "ok" && calls == 1
+	calls = 0
+	name2 := receiverNil()?.Name ?? "none"
+	noneOK := name2 == "none" && calls == 1
+	teamCalls = 0
+	name3 := teamReceiver()?.Lead?.Name ?? "none"
+	chainOK := name3 == "none" && teamCalls == 1
+	fmt.Println("ok receiver-once:", someOK && noneOK && chainOK)
 }
