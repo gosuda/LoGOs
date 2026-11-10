@@ -440,7 +440,7 @@ func (check *Checker) logosImplementsProperty(V, T Type, Ti *Interface, cause *s
 	declared := named != nil && check.logosDeclaredConforms(named, T, Ti)
 	if named == nil {
 		if _, ok := base.Underlying().(*Struct); !ok {
-			return fail("%s does not implement %s (missing method %s)", V, Ti, name)
+			return fail("%s %s does not implement %s (missing method %s)", logosAssertFail, V, Ti, name)
 		}
 	}
 	switch {
@@ -463,7 +463,7 @@ func (check *Checker) logosImplementsProperty(V, T Type, Ti *Interface, cause *s
 		}
 		return fail("%s %s has the fields of %s but does not declare it; write type %s struct : %s { ... }", logosPropRequires, V, Ti, sname, Ti)
 	default:
-		return fail("%s does not implement %s (missing method %s)", V, Ti, name)
+		return fail("%s %s does not implement %s (missing method %s)", logosAssertFail, V, Ti, name)
 	}
 }
 

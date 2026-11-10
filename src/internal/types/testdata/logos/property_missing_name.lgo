@@ -15,7 +15,7 @@ type A struct {
 
 var a = A{ID: 1}
 
-var _ RO3 = a /* ERROR "(missing method Name)" */
+var _ RO3 = a /* ERRORx "correctness::assertion_failed.*missing method Name" */
 
 type B struct {
 	ID   int
@@ -24,4 +24,4 @@ type B struct {
 
 var b = B{ID: 1, Name: "x"}
 
-var _ RO3 = b /* ERROR "(missing method Start)" */
+var _ RO3 = b /* ERRORx "correctness::assertion_failed.*missing method Start" */
