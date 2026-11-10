@@ -2,7 +2,10 @@
 
 package main
 
-import "fmt"
+import (
+	"fmt"
+	"math"
+)
 
 func checkPairwiseVec() {
 	t := [8]float64{1e16, 1, 1, 1, 1, 1, 1, -1e16}
@@ -12,6 +15,7 @@ func checkPairwiseVec() {
 	if s != lo+hi {
 		panic(fmt.Sprintf("pairwise f64: got %v want %v", s, lo+hi))
 	}
+	fmt.Println("pairwise64", math.Float64bits(s))
 	u := [8]float32{1e7, 1, 1, 1, 1, 1, 1, -1e7}
 	su := u.sum()
 	lou := (u[0] + u[1]) + (u[2] + u[3])
@@ -19,6 +23,7 @@ func checkPairwiseVec() {
 	if su != lou+hiu {
 		panic(fmt.Sprintf("pairwise f32: got %v want %v", su, lou+hiu))
 	}
+	fmt.Println("pairwise32", math.Float32bits(su))
 	a := [4]float64{1e16, 1, -1e16, 2}
 	b := [4]float64{1, 1, 1, 1}
 	d := a.dot(b)
@@ -26,6 +31,7 @@ func checkPairwiseVec() {
 	if d != lod {
 		panic(fmt.Sprintf("pairwise dot: got %v want %v", d, lod))
 	}
+	fmt.Println("pairwisedot", math.Float64bits(d))
 }
 
 func oracleVecAdd4(a, b [4]float64) [4]float64 {
