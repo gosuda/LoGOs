@@ -1,0 +1,37 @@
+// run
+
+package main
+
+import (
+	"context"
+	"fmt"
+)
+
+var plainCh = make(chan int, 1)
+
+//logos:allow(correctness::unbounded_channel_op)
+func group(n int) {
+	plainCh <- n + 41
+}
+
+func runPlain(ctx context.Context, input int) error {
+	go group (ctx) {
+		go group(input)
+	}
+	return nil
+}
+//logos:allow(correctness::unbounded_channel_op)
+func main() {
+	ctx := context.Background()
+	input := 1
+	if err := runPlain(ctx, input); err != nil {
+		fmt.Println("bad err")
+		return
+	}
+	v := <-plainCh
+	if v-41 == input {
+		fmt.Println("ok")
+	} else {
+		fmt.Println("bad")
+	}
+}
