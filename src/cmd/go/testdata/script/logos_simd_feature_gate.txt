@@ -1,0 +1,84 @@
+# slice sums take the scalar loop when the archsimd feature check is off
+[!GOARCH:amd64] skip 'simd feature gate needs amd64'
+
+env GOPROXY=off
+env GOTOOLCHAIN=local
+env GOEXPERIMENT=simd
+env GOAMD64=v1
+
+cd m
+logos run .
+stdout '^avx2 true$'
+stdout '^avx512 true$'
+stdout '^sums ok$'
+cp stdout $WORK/on.txt
+
+env GODEBUG=cpu.avx2=off
+logos run .
+stdout '^avx2 false$'
+stdout '^avx512 true$'
+stdout '^sums ok$'
+cp stdout $WORK/off-avx2.txt
+
+env GODEBUG=cpu.avx512f=off
+logos run .
+stdout '^avx2 true$'
+stdout '^avx512 false$'
+stdout '^sums ok$'
+cp stdout $WORK/off-avx512.txt
+
+env GODEBUG=
+logos run .
+cmp stdout $WORK/on.txt
+
+-- m/go.mod --
+module example.com/featuregate
+
+go 1.27
+
+-- m/main.lgo --
+package main
+
+import (
+	"fmt"
+
+	"simd/archsimd"
+)
+
+func sumI32(xs []int32) int32 { return xs.sum() }
+
+func sumU8(xs []uint8) uint8 { return xs.sum() }
+
+func oracleI32(xs []int32) int32 {
+	t := int32(0)
+	for _, v := range xs {
+		t += v
+	}
+	return t
+}
+
+func oracleU8(xs []uint8) uint8 {
+	t := uint8(0)
+	for _, v := range xs {
+		t += v
+	}
+	return t
+}
+
+func main() {
+	fmt.Println("avx2", archsimd.X86.AVX2())
+	fmt.Println("avx512", archsimd.X86.AVX512())
+	xs := make([]int32, 70)
+	us := make([]uint8, 70)
+	for i := range xs {
+		xs[i] = int32(i*7 - 100)
+		us[i] = uint8(i * 3)
+	}
+	if sumI32(xs) != oracleI32(xs) {
+		panic("int32 sum mismatch")
+	}
+	if sumU8(us) != oracleU8(us) {
+		panic("uint8 sum mismatch")
+	}
+	fmt.Println("sums ok")
+}
