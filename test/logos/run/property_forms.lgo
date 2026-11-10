@@ -25,21 +25,36 @@ func show[T RO](x T) T { return x }
 
 func get() RO { return Gadget{ID: 3} }
 
+func check(name string, got, want int) {
+	if got != want {
+		fmt.Println("FAIL", name, got, want)
+		return
+	}
+	fmt.Println("ok", name)
+}
+
 func main() {
-	var r RO = Gadget{ID: 1}
-	r = Gadget{ID: 2}
-	fmt.Println(r.ID)
-	fmt.Println(get().ID)
+	g1 := Gadget{ID: 1}
+	var r RO = g1
+	check("assign", r.ID, g1.ID)
+	g2 := Gadget{ID: 2}
+	r = g2
+	check("reassign", r.ID, g2.ID)
+	check("return", get().ID, 3)
 	rs := []RO{Gadget{ID: 5}}
-	fmt.Println(rs[0].ID)
+	check("slice", rs[0].ID, 5)
 	m := map[string]RO{"a": Gadget{ID: 6}}
 	if mv, ok := m["a"]; ok {
-		fmt.Println(mv.ID)
+		check("map", mv.ID, 6)
+	} else {
+		fmt.Println("FAIL map missing")
 	}
 	ch := make(chan RO, 1)
 	ch <- Gadget{ID: 7}
-	fmt.Println((<-ch).ID)
-	fmt.Println(show(Gadget{ID: 8}).ID)
+	check("chan", (<-ch).ID, 7)
+	check("generic", show(Gadget{ID: 8}).ID, 8)
 	var p RO = &Probe{ID: 9}
-	fmt.Println(p.ID)
+	check("ptr", p.ID, 9)
+	var r2 RO = r
+	check("iface", r2.ID, r.ID)
 }
