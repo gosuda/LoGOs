@@ -129,6 +129,11 @@ func concatLen(a, b string) int {
 }
 
 //logos:zeroalloc
+func convLen(s string) int {
+	return len([]byte(s))
+}
+
+//logos:zeroalloc
 func growCount(m map[string]int, k string, v int) int {
 	m[k] = v
 	return len(m)
