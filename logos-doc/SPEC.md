@@ -1570,7 +1570,6 @@ On nonzero errCode the wrapper throws the message read from wasm memory. [T-Sec1
 - Adjacent 16-byte vector stores MUST pair into FSTPQ under the same conditions. [T-303]
 - A 16-byte pair offset outside -1024..1008 or not a multiple of 16 MUST stay separate loads or stores. [T-303]
 - With the default target_cpu the ARM64 target MUST use GOARM64=v8.2, so LSE atomics stay available. [T-303][T-105]
-- Pairing MUST follow the rules above. [T-303]
 
 ### 13.2 Amd64 masked tails, rotates, and checked lengths
 
@@ -1598,6 +1597,8 @@ buf := make([]Pixel, w * h)
 ```
 
 ### 13.3 Long-loop preemption on wasm
+
+The long-loop preemption rules are stated in Sec 3.3 (RFC-303: Hardware backend optimizations).
 
 ## 14. JSON diagnostics schema
 
