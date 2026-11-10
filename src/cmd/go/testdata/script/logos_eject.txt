@@ -40,6 +40,10 @@ grep 'flush state' out/main.go
 grep 'join cleanup errors' out/main.go
 grep 'undo partial work' out/main.go
 grep 'runs on error only' out/main.go
+grep 'Package greet helps' out/_logos_deps/example.com/dep@v0.0.0/greet/greet.go
+grep 'Clean trims surrounding spaces' out/_logos_deps/example.com/dep@v0.0.0/greet/greet.go
+grep 'Close flushes greet state' out/_logos_deps/example.com/dep@v0.0.0/greet/greet.go
+grep 'Rollback undoes partial greet work' out/_logos_deps/example.com/dep@v0.0.0/greet/greet.go
 
 cd out
 go vet ./...
@@ -49,6 +53,8 @@ cd ..
 
 grep -count=3 'example\.com/dep' out/go.mod
 grep -count=2 'gosuda/loGos/rt' out/go.mod
+grep '^replace example\.com/dep ' out/go.mod
+grep '^replace github\.com/gosuda/loGos/rt ' out/go.mod
 grep 'module github\.com/gosuda/loGos/rt' out/_logos_deps/rt/go.mod
 
 ! exec grep -rnE '"logos/[a-z/]+"' out
