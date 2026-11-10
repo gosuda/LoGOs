@@ -6,6 +6,7 @@ package types2
 
 import (
 	"cmd/compile/internal/syntax"
+	. "internal/types/errors"
 	"strconv"
 	"strings"
 	"unicode"
@@ -42,6 +43,8 @@ var logosStaticMethods = []logosStaticMethod{
 }
 
 var logosBinaryMethods = []string{"MarshalBinary", "UnmarshalBinary", "AppendBinary"}
+
+const logosNoUnionJSON = "[correctness::union_member_no_json]"
 
 func LogosBinaryMethodNames() []string {
 	return logosBinaryMethods
@@ -417,6 +420,63 @@ func (check *Checker) logosSynthStaticMethods() {
 			check.logosAddStaticFamilyMethods(named, "Binary")
 		}
 	}
+	check.logosCheckUnionJSONMembers()
+}
+
+func (check *Checker) logosCheckUnionJSONMembers() {
+	for _, obj := range check.objList {
+		tname, ok := obj.(*TypeName)
+		if !ok || tname.typ == nil || check.objMap[tname].tdecl.Alias {
+			continue
+		}
+		named, ok := tname.typ.(*Named)
+		if !ok {
+			continue
+		}
+		fields, jsonOK := LogosStaticStruct(check.Info, named, check.objMap[tname].tdecl.Type)
+		if !jsonOK {
+			continue
+		}
+		for _, fld := range fields {
+			check.logosCheckUnionFieldJSON(fld)
+		}
+	}
+}
+
+func (check *Checker) logosCheckUnionFieldJSON(fld *Var) {
+	t := fld.Type()
+	if cv, ok := Unalias(t).(*ConstView); ok {
+		t = cv.Elem
+	}
+	tset := logosClosedUnion(t)
+	if tset == nil || !logosIsClosed(tset) {
+		return
+	}
+	for _, term := range tset.terms {
+		if term.tilde || logosUnionMemberHasJSON(term.typ, check.pkg) {
+			continue
+		}
+		check.errorf(fld, BadDecl, "%s union member %s has no UnmarshalJSON method", logosNoUnionJSON, term.typ)
+	}
+}
+
+func logosUnionMemberHasJSON(m Type, pkg *Package) bool {
+	u := Unalias(m)
+	if cv, ok := u.(*ConstView); ok {
+		u = Unalias(cv.Elem)
+	}
+	if ptr, ok := u.(*Pointer); ok {
+		u = Unalias(ptr.Elem())
+		if cv, ok := u.(*ConstView); ok {
+			u = Unalias(cv.Elem)
+		}
+	}
+	named, ok := u.(*Named)
+	if !ok || named.Obj() == nil {
+		return false
+	}
+	obj, _, _ := LookupFieldOrMethod(NewPointer(named), false, pkg, "UnmarshalJSON")
+	return obj != nil
 }
 
 func (check *Checker) logosAddStaticFamilyMethods(named *Named, family string) {
