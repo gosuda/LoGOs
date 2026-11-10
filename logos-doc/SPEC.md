@@ -1624,7 +1624,7 @@ Policy comes from logos.toml capabilities. [T-Sec8][T-Sec11]
 
 ### 11.2 Reachability report
 
-A violation aborts linking with ERROR capabilities::unauthorized_exec naming the dependency and the sink. [T-Sec11]
+A violation at severity `deny` aborts linking with ERROR capabilities::unauthorized_exec naming the dependency and the sink. A `warn` violation prints a warning. An `allow` violation stays silent. [T-Sec11]
 The report lists the shortest call chain with file and line per frame. [T-Sec11]
 For the allowlist keys that authorize each sink, see Sec 8.4. [T-Sec8][T-Sec11]
 Unsafe violations use capabilities::unauthorized_unsafe with the shortest import chain. [T-Sec11]
