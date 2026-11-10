@@ -22,6 +22,56 @@ stderr 'parameter xs'
 ! logos build -o $WORK/bin/var2$GOEXE ./vartail
 stderr 'const_view_mutation'
 stderr 'parameter xs'
+! logos build -o $WORK/bin/refl$GOEXE ./reflectread
+stderr 'const_view_mutation'
+stderr 'parameter b'
+! logos build -o $WORK/bin/unsafea$GOEXE ./unsafeaddr
+stderr 'const_view_mutation'
+stderr 'parameter b'
+! logos build -o $WORK/bin/asm$GOEXE ./asmcall
+stderr 'const_view_mutation'
+stderr 'parameter b'
+! logos build -o $WORK/bin/lnk$GOEXE ./lnkcall
+stderr 'const_view_mutation'
+stderr 'parameter b'
+! logos build -o $WORK/bin/lnkw$GOEXE ./lnkwrap
+stderr 'const_view_mutation'
+stderr 'parameter b'
+! logos build -o $WORK/bin/cgoc$GOEXE ./cgocall
+stderr 'const_view_mutation'
+stderr 'parameter b'
+! logos build -o $WORK/bin/tra$GOEXE ./tratouch
+stderr 'const_view_mutation'
+stderr 'parameter b'
+! logos build -o $WORK/bin/gen$GOEXE ./gencall
+stderr 'const_view_mutation'
+stderr 'parameter b'
+! logos build -o $WORK/bin/gend$GOEXE ./gendirect
+stderr 'const_view_mutation'
+stderr 'parameter b'
+! logos build -o $WORK/bin/costgo$GOEXE ./costgo
+stderr 'const_view_mutation'
+! logos build -o $WORK/bin/costgoto$GOEXE ./costgoto
+stderr 'const_view_mutation'
+! logos build -o $WORK/bin/costfall$GOEXE ./costfall
+stderr 'const_view_mutation'
+! logos build -o $WORK/bin/costcopy$GOEXE ./costcopy
+stderr 'const_view_mutation'
+logos build -o $WORK/bin/possum$GOEXE ./possum
+exec $WORK/bin/possum$GOEXE
+stderr '^6$'
+stderr '^1$'
+logos build -o $WORK/bin/posptr$GOEXE ./posptr
+exec $WORK/bin/posptr$GOEXE
+stderr '^3$'
+stderr '^1$'
+logos build -o $WORK/bin/poseq$GOEXE ./poseq
+exec $WORK/bin/poseq$GOEXE
+stderr '^true$'
+logos build -o $WORK/bin/postrav$GOEXE ./postrav
+exec $WORK/bin/postrav$GOEXE
+stderr '^6$'
+stderr '^1$'
 cd ..
 
 -- dep/go.mod --
@@ -96,6 +146,97 @@ func FallIt(b []byte, k int) {
 	}
 }
 func CpyAsSrc(dst []byte, src []byte) { copy(dst, src) }
+
+func ZeroAt[T any](b []T)  { var z T; b[0] = z }
+func WrapGeneric(b []byte) { ZeroAt[byte](b) }
+
+-- dep/g2asm/asm.go --
+package g2asm
+
+func Sum(b []byte) int
+
+-- dep/g2asm/sum_amd64.s --
+#include "textflag.h"
+
+// func Sum(b []byte) int
+TEXT ·Sum(SB),NOSPLIT,$0-32
+	MOVQ b_base+0(FP), AX
+	MOVB $0x5b, (AX)
+	MOVQ b_len+8(FP), CX
+	MOVQ CX, ret+24(FP)
+	RET
+
+-- dep/g2lnk/lnk.go --
+package g2lnk
+
+import (
+	_ "unsafe"
+)
+
+//go:linkname Sum example.com/g2dep/g2asm.Sum
+func Sum(b []byte) int
+
+-- dep/g2lnk2/lnk2.go --
+package g2lnk2
+
+import (
+	_ "unsafe"
+)
+
+//go:linkname asmSum example.com/g2dep/g2asm.Sum
+func asmSum(b []byte) int
+
+func SumWrap(b []byte) int { return asmSum(b) }
+
+-- dep/g2cgo/cgo.go --
+package g2cgo
+
+/*
+#include <string.h>
+static void touch(char *p) { p[0] = (char)0x5d; }
+*/
+import "C"
+import "unsafe"
+
+// SAFETY: the pointer aliases the caller's slice for the C callee.
+func Touch(b []byte) {
+	C.touch((*C.char)(unsafe.Pointer(&b[0])))
+}
+
+-- dep/tra/leaf/leaf.go --
+package g2leaf
+
+func LeafLen(b []byte) int {
+	n := 0
+	for _, v := range b {
+		n += int(v)
+	}
+	return n
+}
+func LeafTouch(b []byte) { b[0] = 91 }
+
+type LeafHost struct {
+	Data []byte
+}
+
+func NewLeafHost(b []byte) *LeafHost { return &LeafHost{Data: b} }
+
+func (h *LeafHost) Take(n int) int {
+	return n + len(h.Data)
+}
+
+-- dep/tra/mid/mid.go --
+package g2mid
+
+import "example.com/g2dep/tra/leaf"
+
+func MidSum(b []byte) int  { return g2leaf.LeafLen(b) }
+func MidTouch(b []byte)    { g2leaf.LeafTouch(b) }
+func MidVoid(b []byte)     { g2leaf.LeafLen(b) }
+func MidTake(h *g2leaf.LeafHost, n int) int {
+	x := h.Take(n)
+	return x
+}
 
 -- imp/go.mod --
 module example.com/g2imp
@@ -184,4 +325,215 @@ func main() {
 	var view const []byte = buf
 	g2d.Tagged(other, view)
 	println(buf[0])
+}
+
+-- imp/reflectread/main.lgo --
+package main
+
+import "example.com/g2dep/g2d"
+
+func main() {
+	buf := []byte{1}
+	var view const []byte = buf
+	println(g2d.ReflectRead(view))
+	println(buf[0])
+}
+
+-- imp/unsafeaddr/main.lgo --
+package main
+
+import "example.com/g2dep/g2d"
+
+func main() {
+	buf := []byte{1}
+	var view const []byte = buf
+	println(g2d.UnsafeAddr(view))
+}
+
+-- imp/asmcall/main.lgo --
+package main
+
+import "example.com/g2dep/g2asm"
+
+func main() {
+	buf := []byte{1}
+	var view const []byte = buf
+	println(g2asm.Sum(view))
+	println(buf[0])
+}
+
+-- imp/lnkcall/main.lgo --
+package main
+
+import "example.com/g2dep/g2lnk"
+
+func main() {
+	buf := []byte{1}
+	var view const []byte = buf
+	println(g2lnk.Sum(view))
+	println(buf[0])
+}
+
+-- imp/lnkwrap/main.lgo --
+package main
+
+import "example.com/g2dep/g2lnk2"
+
+func main() {
+	buf := []byte{1}
+	var view const []byte = buf
+	println(g2lnk2.SumWrap(view))
+	println(buf[0])
+}
+
+-- imp/cgocall/main.lgo --
+package main
+
+import "example.com/g2dep/g2cgo"
+
+func main() {
+	buf := []byte{1}
+	var view const []byte = buf
+	g2cgo.Touch(view)
+	println(buf[0])
+}
+
+-- imp/tratouch/main.lgo --
+package main
+
+import "example.com/g2dep/tra/mid"
+
+func main() {
+	buf := []byte{1}
+	var view const []byte = buf
+	g2mid.MidTouch(view)
+	println(buf[0])
+}
+
+-- imp/gencall/main.lgo --
+package main
+
+import "example.com/g2dep/g2d"
+
+func main() {
+	buf := []byte{1}
+	var view const []byte = buf
+	g2d.WrapGeneric(view)
+	println(buf[0])
+}
+
+-- imp/gendirect/main.lgo --
+package main
+
+import "example.com/g2dep/g2d"
+
+func main() {
+	buf := []byte{1}
+	var view const []byte = buf
+	g2d.ZeroAt[byte](view)
+	println(buf[0])
+}
+
+-- imp/costgo/main.lgo --
+package main
+
+import "example.com/g2dep/g2d"
+
+func main() {
+	buf := []byte{1}
+	var view const []byte = buf
+	g2d.GoLen(view)
+	println(buf[0])
+}
+
+-- imp/costgoto/main.lgo --
+package main
+
+import "example.com/g2dep/g2d"
+
+func main() {
+	buf := []byte{1}
+	var view const []byte = buf
+	g2d.GotoSkip(view)
+	println(buf[0])
+}
+
+-- imp/costfall/main.lgo --
+package main
+
+import "example.com/g2dep/g2d"
+
+func main() {
+	buf := make([]byte, 2)
+	buf[0] = 1
+	var view const []byte = buf
+	g2d.FallIt(view, 1)
+	println(buf[0])
+}
+
+-- imp/costcopy/main.lgo --
+package main
+
+import "example.com/g2dep/g2d"
+
+func main() {
+	dst := []byte{8}
+	buf := []byte{1}
+	var view const []byte = buf
+	g2d.CpyAsSrc(dst, view)
+	println(dst[0], buf[0])
+}
+
+-- imp/possum/main.lgo --
+package main
+
+import "example.com/g2dep/g2d"
+
+func main() {
+	buf := []byte{1, 2, 3}
+	var view const []byte = buf
+	println(g2d.SumOnly(view))
+	println(buf[0])
+}
+
+-- imp/posptr/main.lgo --
+package main
+
+import "example.com/g2dep/g2d"
+
+func main() {
+	buf := []byte{1, 2, 3}
+	h := &g2d.Host{Data: buf}
+	var view const *g2d.Host = h
+	println(g2d.ReadPtr(view))
+	println(buf[0])
+}
+
+-- imp/poseq/main.lgo --
+package main
+
+import "bytes"
+
+func main() {
+	buf := []byte{1, 2, 3}
+	var view const []byte = buf
+	println(bytes.Equal(view, buf))
+}
+
+-- imp/postrav/main.lgo --
+package main
+
+import (
+	"example.com/g2dep/g2d"
+	g2leaf "example.com/g2dep/tra/leaf"
+	g2mid "example.com/g2dep/tra/mid"
+)
+
+func main() {
+	buf := []byte{1, 2, 3}
+	h := g2leaf.NewLeafHost(buf)
+	var cv const *g2leaf.LeafHost = h
+	println(g2mid.MidTake(cv, 3))
+	println(buf[0])
+	println(g2d.SumOnly(buf))
 }
