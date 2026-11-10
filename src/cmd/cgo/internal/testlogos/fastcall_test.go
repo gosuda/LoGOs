@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"github.com/google/pprof/profile"
 	"internal/goexperiment"
 	"os"
@@ -668,6 +669,7 @@ func collectBusyProfile(t *testing.T, prof string, count int, fn func(uint64) ui
 }
 
 const fastcallProfileFloorSamples = 200
+const fastcallAttributionFloorSamples = 100
 const fastcallProfileCap = 300 * time.Second
 
 func profileCallerSamples(t *testing.T, prof string, want string) (found, total int) {
@@ -704,7 +706,7 @@ func profileCallerSamples(t *testing.T, prof string, want string) (found, total 
 	return found, total
 }
 
-func profileCallerAboveLeaf(t *testing.T, prof, caller, leaf string) bool {
+func profileCallerAboveLeafSamples(t *testing.T, prof, caller, leaf string) (above, total int) {
 	t.Helper()
 	f, err := os.Open(prof)
 	if err != nil {
@@ -716,11 +718,16 @@ func profileCallerAboveLeaf(t *testing.T, prof, caller, leaf string) bool {
 		t.Fatalf("parse profile %s: %v", prof, err)
 	}
 	for _, s := range p.Sample {
+		n := 1
+		if len(s.Value) > 0 {
+			n = int(s.Value[0])
+		}
+		total += n
 		if sampleCallerAboveLeaf(s, caller, leaf) {
-			return true
+			above += n
 		}
 	}
-	return false
+	return above, total
 }
 
 func sampleCallerAboveLeaf(s *profile.Sample, caller, leaf string) bool {
@@ -790,6 +797,9 @@ func TestFastcallProfileAttribution(t *testing.T) {
 		}
 	}
 	if !met {
+		if fastTotal == 0 && plainTotal == 0 {
+			t.Skipf("CPU profiler yielded no samples in %v of collection; cannot attribute fast-call frames", fastcallProfileCap)
+		}
 		t.Fatalf("profile floor unmet: fast caller %d of %d samples, plain caller %d of %d samples (floor %d)",
 			fastN, fastTotal, plainN, plainTotal, fastcallProfileFloorSamples)
 	}
@@ -801,8 +811,37 @@ func TestFastcallProfileAttribution(t *testing.T) {
 	if !topIn(topPlain, plainWants) {
 		t.Fatalf("plain top entry = %q, want the call site", topPlain)
 	}
-	if !profileCallerAboveLeaf(t, fastProf, "callFastBusy", "busy_spin") {
-		t.Fatal("no profile sample holds the Go call site above the fast C frame")
+	above, aboveTotal := profileCallerAboveLeafSamples(t, fastProf, "callFastBusy", "busy_spin")
+	if above < fastcallAttributionFloorSamples {
+		t.Fatalf("%d of %d fast samples hold the Go call site above the fast C frame, want at least %d",
+			above, aboveTotal, fastcallAttributionFloorSamples)
+	}
+}
+
+func TestFastcallMarkerCallPath(t *testing.T) {
+	requireCgo(t)
+	bin := fixtureBin(t, "markers")
+	for _, c := range []struct {
+		pkg  string
+		fn   string
+		fast bool
+	}{
+		{"ok", "ladd_ok", true},
+		{"arity", "ladd_arity", false},
+		{"nonpre", "ladd_nonpre", false},
+	} {
+		body := objdumpFunc(t, bin, fmt.Sprintf(`example\.com/markers/%s\._Cfunc_%s`, c.pkg, c.fn))
+		fast := strings.Contains(body, "runtime.logosCgocallFast")
+		slow := strings.Contains(body, "runtime.cgocall")
+		if c.fast && !fast {
+			t.Fatalf("%s marker did not call the fast trampoline:\n%s", c.pkg, body)
+		}
+		if !c.fast && fast {
+			t.Fatalf("%s marker with a malformed preamble still called the fast trampoline:\n%s", c.pkg, body)
+		}
+		if !c.fast && !slow {
+			t.Fatalf("%s marker called neither trampoline:\n%s", c.pkg, body)
+		}
 	}
 }
 
@@ -1138,6 +1177,9 @@ func TestFastcallLogosProfileParity(t *testing.T) {
 		}
 	}
 	if !met {
+		if lgoTotal == 0 && plainTotal == 0 {
+			t.Skipf("CPU profiler yielded no samples in %v of collection; cannot attribute fast-call frames", fastcallProfileCap)
+		}
 		t.Fatalf("profile floor unmet: lgo caller %d of %d samples, plain caller %d of %d samples (floor %d)",
 			lgoN, lgoTotal, plainN, plainTotal, fastcallProfileFloorSamples)
 	}
@@ -1149,8 +1191,10 @@ func TestFastcallLogosProfileParity(t *testing.T) {
 	if !topIn(top, lgoWants) {
 		t.Fatalf("lgo top entry = %q, want the call site", top)
 	}
-	if !profileCallerAboveLeaf(t, prof, "main.main", "cbusyf") {
-		t.Fatal("no profile sample holds the lgo call site above the fast C frame")
+	above, aboveTotal := profileCallerAboveLeafSamples(t, prof, "main.main", "cbusyf")
+	if above < fastcallAttributionFloorSamples {
+		t.Fatalf("%d of %d lgo samples hold the lgo call site above the fast C frame, want at least %d",
+			above, aboveTotal, fastcallAttributionFloorSamples)
 	}
 }
 

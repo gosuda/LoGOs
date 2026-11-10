@@ -4,63 +4,84 @@ env GOPROXY=off
 env GOTOOLCHAIN=local
 env CGO_ENABLED=1
 
-# Accept: the .lgo spelling maps the call to the fast path.
-mkdir $WORK/obj-ok
-go tool cgo -objdir $WORK/obj-ok -importpath example.com/fast ok/f.lgo
-grep '^\t_cgo_runtime_cgocall_fast\(' $WORK/obj-ok/_cgo_gotypes.go
-
-# Reject: a marker with an extra field stays on the plain path.
-mkdir $WORK/obj-arity
-go tool cgo -objdir $WORK/obj-arity -importpath example.com/fast arity/f.lgo
-! grep '^\t_cgo_runtime_cgocall_fast\(' $WORK/obj-arity/_cgo_gotypes.go
-grep '^\t_cgo_runtime_cgocall\(' $WORK/obj-arity/_cgo_gotypes.go
-
-# Reject: a marker outside the preamble is an inert comment.
-mkdir $WORK/obj-nonpre
-go tool cgo -objdir $WORK/obj-nonpre -importpath example.com/fast nonpre/f.lgo
-! grep '^\t_cgo_runtime_cgocall_fast\(' $WORK/obj-nonpre/_cgo_gotypes.go
-grep '^\t_cgo_runtime_cgocall\(' $WORK/obj-nonpre/_cgo_gotypes.go
+# Accept: the .lgo marker serves the fast path and the call computes;
+# malformed markers (extra field, outside the preamble) stay inert
+# without corrupting the call. The trampoline each shape reaches is
+# asserted in cmd/cgo/internal/testlogos TestFastcallMarkerCallPath.
+cd fastlgo
+logos build -o $WORK/fastlgo$GOEXE .
+exec $WORK/fastlgo$GOEXE
+stdout '^ok fast-call-markers$'
+cd ..
 
 # Reject: a marker with no matched C function fails.
 mkdir $WORK/obj-ghost
 ! go tool cgo -objdir $WORK/obj-ghost -importpath example.com/fast ghost/f.lgo
 stderr 'no matched C function'
 
--- ok/f.lgo --
-package fast
+-- fastlgo/go.mod --
+module example.com/fastlgo
+
+go 1.27
+
+-- fastlgo/logos.toml --
+[build]
+cgo = "allow"
+
+-- fastlgo/main.lgo --
+package main
+
+import (
+	"fmt"
+
+	arityp "example.com/fastlgo/arity"
+	nonprep "example.com/fastlgo/nonpre"
+	okp "example.com/fastlgo/ok"
+)
+
+func main() {
+	if okp.Add(1, 2) != 3 || arityp.Add(1, 2) != 3 || nonprep.Add(1, 2) != 3 {
+		fmt.Println("FAIL fast-call-markers")
+		return
+	}
+	fmt.Println("ok fast-call-markers")
+}
+
+-- fastlgo/ok/f.lgo --
+package ok
 
 /*
 #include <stdint.h>
-//logos:cgo_fastcall ladd
-int ladd(int a, int b) { return a + b; }
+//logos:cgo_fastcall ladd_ok
+int ladd_ok(int a, int b) { return a + b; }
 */
 import "C"
 
-func Add(a, b int32) int32 { return int32(C.ladd(C.int(a), C.int(b))) }
+func Add(a, b int32) int32 { return int32(C.ladd_ok(C.int(a), C.int(b))) }
 
--- arity/f.lgo --
-package fast
+-- fastlgo/arity/f.lgo --
+package arity
 
 /*
 #include <stdint.h>
-//logos:cgo_fastcall ladd extra
-int ladd(int a, int b) { return a + b; }
+//logos:cgo_fastcall ladd_arity extra
+int ladd_arity(int a, int b) { return a + b; }
 */
 import "C"
 
-func Add(a, b int32) int32 { return int32(C.ladd(C.int(a), C.int(b))) }
+func Add(a, b int32) int32 { return int32(C.ladd_arity(C.int(a), C.int(b))) }
 
--- nonpre/f.lgo --
-package fast
+-- fastlgo/nonpre/f.lgo --
+package nonpre
 
 /*
 #include <stdint.h>
-int ladd(int a, int b) { return a + b; }
+int ladd_nonpre(int a, int b) { return a + b; }
 */
 import "C"
-//logos:cgo_fastcall ladd
+//logos:cgo_fastcall ladd_nonpre
 
-func Add(a, b int32) int32 { return int32(C.ladd(C.int(a), C.int(b))) }
+func Add(a, b int32) int32 { return int32(C.ladd_nonpre(C.int(a), C.int(b))) }
 
 -- ghost/f.lgo --
 package fast
