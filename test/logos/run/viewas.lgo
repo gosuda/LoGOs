@@ -6,7 +6,6 @@ package main
 import (
 	"comptime"
 	"fmt"
-	"runtime"
 )
 
 type Header struct {
@@ -41,26 +40,8 @@ func showShort() (msg string) {
 	return "no panic"
 }
 
-func freshView() const *Header {
-	b := []byte{17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32}
-	return comptime.ViewAs[Header](b)
-}
-
-func showGC() {
-	v := freshView()
-	runtime.GC()
-	g := make([]byte, 1<<20)
-	for i := range g {
-		g[i] = 0xFF
-	}
-	runtime.GC()
-	runtime.KeepAlive(g)
-	fmt.Println(v.Magic, v.Version, v.Size)
-}
-
 func main() {
 	showBasic()
 	showOdd()
 	fmt.Println(showShort())
-	showGC()
 }
