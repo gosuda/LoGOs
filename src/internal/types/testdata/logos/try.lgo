@@ -101,6 +101,15 @@ func errdeferNoError() int {
 	return 0
 }
 
+func errdeferErrorNotLast() (error, int) {
+	errdefer /* ERROR "correctness::errdefer_needs_error_result" */ cleanup()
+	return nil, 0
+}
+
+func errdeferNoResults() {
+	errdefer /* ERROR "correctness::errdefer_needs_error_result" */ cleanup()
+}
+
 var _logos_x /* ERROR "correctness::reserved_identifier" */ = 1
 
 func Logos_y /* ERROR "correctness::reserved_identifier" */ () {}
