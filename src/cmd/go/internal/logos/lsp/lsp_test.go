@@ -1100,7 +1100,7 @@ func TestProxyDiagnosticsFollowEdits(t *testing.T) {
 }
 
 func TestProxyMixedWorkspaceDefinition(t *testing.T) {
-	const libLgo = "package lib\n\nfunc Hello() string {\n\treturn \"hi\"\n}\n"
+	const libLgo = "package lib\n\nimport \"os\"\n\nfunc load(path string) string {\n\tdata := os.ReadFile(path)?\n\treturn string(data)\n}\n\nfunc Hello() string {\n\treturn \"hi\"\n}\n"
 	const appGo = "package app\n\nimport \"example.com/m/lib\"\n\nvar Greeting = lib.Hello()\n"
 	files := map[string]string{
 		"go.mod":      "module example.com/m\n\ngo 1.27\n",
@@ -1108,12 +1108,17 @@ func TestProxyMixedWorkspaceDefinition(t *testing.T) {
 		"app/app.go":  appGo,
 	}
 	helloOrig := span(findPos(t, libLgo, "Hello", 0), len("Hello"))
+	libLow, _, ok := lowerQuestion([]byte(libLgo))
+	if !ok {
+		t.Fatal("lib fixture does not lower")
+	}
+	helloLow := span(findPos(t, string(libLow), "Hello", 0), len("Hello"))
 
 	f := newFixture(t, files, fixtureOptions{
 		Script: func(root string) fakeScript {
 			return fakeScript{Responses: map[string]json.RawMessage{
 				"textDocument/definition": toJSON(t, []any{
-					map[string]any{"uri": pathURI(filepath.Join(root, "lib", "lib.go")), "range": helloOrig},
+					map[string]any{"uri": pathURI(filepath.Join(root, "lib", "lib.go")), "range": helloLow},
 				}),
 			}}
 		},
@@ -2065,6 +2070,11 @@ func TestProxyDefinitionWritesNoBytes(t *testing.T) {
 	const goLib = "package golib\n\nfunc Thing() int { return 1 }\n"
 	thing := Range{Start: Position{Line: 2, Character: 5}, End: Position{Line: 2, Character: 10}}
 	hello := span(findPos(t, libLgo, "Hello", 0), len("Hello"))
+	libLow, _, ok := lowerQuestion([]byte(libLgo))
+	if !ok {
+		t.Fatal("lib fixture does not lower")
+	}
+	helloLow := span(findPos(t, string(libLow), "Hello", 0), len("Hello"))
 	f := newFixture(t, map[string]string{
 		"go.mod":        "module example.com/m\n\ngo 1.27\n",
 		"lib/lib.lgo":   libLgo,
@@ -2075,7 +2085,7 @@ func TestProxyDefinitionWritesNoBytes(t *testing.T) {
 		Script: func(root string) fakeScript {
 			return fakeScript{Responses: map[string]json.RawMessage{
 				"textDocument/definition": toJSON(t, []any{
-					map[string]any{"uri": pathURI(filepath.Join(root, "lib", "lib.go")), "range": hello},
+					map[string]any{"uri": pathURI(filepath.Join(root, "lib", "lib.go")), "range": helloLow},
 					map[string]any{"uri": pathURI(filepath.Join(root, "golib", "g.go")), "range": thing},
 				}),
 			}}
@@ -2121,9 +2131,17 @@ func TestProxyDefinitionWritesNoBytes(t *testing.T) {
 	}
 	before, beforeTime := snap()
 	appCall := shift(findPos(t, appGo, "lib.Hello", 0), len("lib."))
-	f.client.call("textDocument/definition", positionParams(f.uri("app/app.go"), appCall))
+	resLib := f.client.call("textDocument/definition", positionParams(f.uri("app/app.go"), appCall))
+	sameJSON(t, "definition of a lowered dependency symbol", resLib, []any{
+		map[string]any{"uri": f.uri("lib/lib.lgo"), "range": hello},
+		map[string]any{"uri": f.uri("golib/g.go"), "range": thing},
+	})
 	thingCall := shift(findPos(t, app2Lgo, "golib.Thing", 0), len("golib."))
-	f.client.call("textDocument/definition", positionParams(f.uri("app2/app2.lgo"), thingCall))
+	resGo := f.client.call("textDocument/definition", positionParams(f.uri("app2/app2.lgo"), thingCall))
+	sameJSON(t, "definition of a plain Go symbol", resGo, []any{
+		map[string]any{"uri": f.uri("lib/lib.lgo"), "range": hello},
+		map[string]any{"uri": f.uri("golib/g.go"), "range": thing},
+	})
 	after, afterTime := snap()
 	if !reflect.DeepEqual(after, before) {
 		t.Errorf("definition changed workspace bytes")
