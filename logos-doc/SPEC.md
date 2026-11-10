@@ -856,7 +856,7 @@ The `const Start` method obligation MUST stay distinct from the `const Name` pro
 
 A missing method MUST fail with `[correctness::assertion_failed]` naming the method. [T-203.3]
 
-Each assertion MUST lower to `var _ I = (*S)(nil)`. [T-203.3]
+Each assertion MUST emit a compile-time check that `*S` implements each listed interface. [T-203.3]
 
 An assertion list on a non-struct type MUST be a syntax error. [T-203.3]
 A closed union MUST be an interface whose type set is a finite union of non-`~` terms, and it MAY declare methods that every member implements [T-203.1].
