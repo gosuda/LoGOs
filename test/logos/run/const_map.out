@@ -9,4 +9,5 @@ none
 10000 true
 10000 10000 9 1
 9 {c true} true
+{x true} {c true}
 9
