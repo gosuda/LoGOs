@@ -7,11 +7,6 @@ import (
 	"math"
 )
 
-// A defined float element type keeps the scalar form under the simd
-// experiment (SPEC 823); [N]float64 takes the vector form on amd64 and
-// arm64. Both forms must use the same fixed pairwise order with
-// bit-identical results (SPEC 833).
-
 type lane float64
 
 func pairwiseSum(t [8]float64) float64 {

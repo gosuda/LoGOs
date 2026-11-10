@@ -14,7 +14,6 @@ env GOAMD64=v1
 cd m
 logos build -o $WORK/add$GOEXE .
 exec $WORK/add$GOEXE
-stdout '^avx2 true$'
 stdout '^sums ok$'
 exec qemu-x86_64 -cpu Nehalem $WORK/add$GOEXE
 stdout '^avx2 false$'

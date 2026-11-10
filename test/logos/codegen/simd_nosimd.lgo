@@ -2,10 +2,6 @@
 
 package main
 
-// No -goexperiment flag on the header: with the simd experiment off,
-// array operators must lower to unrolled scalar code with no
-// simd/archsimd call (SPEC 825).
-
 //go:noinline
 func addPlainF64(a, b [4]float64) [4]float64 {
 	// amd64:"ADDSD" -"VADDPD" -"CALL simd/archsimd"
