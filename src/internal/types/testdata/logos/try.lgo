@@ -73,6 +73,17 @@ func tryOnlyError() (int, error) {
 	return 0, nil
 }
 
+func tryOnlyErrorBlank() (int, error) {
+	_ = justError()? /* ERROR "? provides no values to assign" */
+	return 0, nil
+}
+
+func tryOnlyErrorAssign() (int, error) {
+	x := 0
+	x = justError()? /* ERROR "? provides no values to assign" */
+	return x, nil
+}
+
 func tryRedeclare() (int, error) {
 	x := 0
 	x /* ERROR "no new variables on left side of :=" */ := twoResults()?
