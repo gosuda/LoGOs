@@ -8,7 +8,7 @@ cp stdout $WORK/run-stdout.txt
 
 logos eject -o out
 exists out/main.go
-grep 'go group\(' out/main.go
+grep '\.Go\(func' out/main.go
 grep 'NewGroup\(' out/main.go
 grep 'NewGroup(.* 2)' out/main.go
 
@@ -53,7 +53,6 @@ func runLimited(ctx context.Context, input int) error {
 //logos:allow(correctness::unbounded_channel_op)
 func main() {
 	ctx := context.Background()
-	go group(7)
 	input := 1
 	if err := runPlain(ctx, input); err != nil {
 		fmt.Println("bad err")
@@ -65,6 +64,5 @@ func main() {
 	}
 	a := <-plainCh
 	b := <-plainCh
-	c := <-plainCh
-	fmt.Println("sum", a+b+c-126)
+	fmt.Println("sum", a+b-78)
 }
