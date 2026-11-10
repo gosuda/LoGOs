@@ -33,8 +33,10 @@ exists out/_logos_deps/rt/arena/arena.go
 # opened region reads _logos_rt.Region{}, and the side-effecting region
 # arguments evaluate inside the closure form.
 ! grep 'arena\.New\|arena\.Make\|arena\.Append\|arena\.Open' out/main.go
+grep 'return new\(node\)' out/main.go
+grep 'return make\(\[\]node' out/main.go
+grep -count=1 '_ = r' out/main.go
 grep '_logos_rt\.Region{}' out/main.go
-grep '_ = r' out/main.go
 grep -count=3 'func\(_ _logos_rt\.Region' out/main.go
 grep -count=3 'regs\[bump\(\)\]' out/main.go
 grep -count=1 '_logos_e1 \.\.\.node' out/main.go
