@@ -13,6 +13,16 @@ logos eject -o out
 cd out
 go run .
 cmp stdout $WORK/native-stdout.txt
+cd ../..
+cd m2
+logos run .
+stdout '^5200 18 55$'
+cp stdout $WORK/native2-stdout.txt
+env GOEXPERIMENT=
+logos eject -o out
+cd out
+go run .
+cmp stdout $WORK/native2-stdout.txt
 
 -- m/go.mod --
 module example.com/regionparity
@@ -46,4 +56,52 @@ func main() {
 		sum += v
 	}
 	fmt.Println(p.v, p.v*6, sum)
+}
+-- m2/go.mod --
+module example.com/regionparity2
+
+go 1.27
+
+-- m2/main.lgo --
+package main
+
+import (
+	"fmt"
+
+	"logos/arena"
+)
+
+func fibR(r arena.Region, n int) int {
+	t := arena.New[int](r)
+	*t = n
+	if n < 2 {
+		return *t
+	}
+	a := fibR(r, n - 1)
+	b := fibR(r, n - 2)
+	*t = a + b
+	return *t
+}
+
+func main() {
+	r := arena.Open()
+	total := 0
+	for i := range 50 {
+		s := arena.Make[int](r, 4)
+		for j := range s {
+			s[j] = i + j
+		}
+		for _, v := range s {
+			total += v
+		}
+	}
+	inner := 0
+	{
+		rIn := arena.Open()
+		t := arena.Append[int](rIn, nil, 5, 6, 7)
+		for _, v := range t {
+			inner += v
+		}
+	}
+	fmt.Println(total, inner, fibR(r, 10))
 }
