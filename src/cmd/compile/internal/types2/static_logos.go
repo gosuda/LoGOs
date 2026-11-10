@@ -437,7 +437,14 @@ func (check *Checker) logosCheckUnionJSONMembers() {
 		if !jsonOK {
 			continue
 		}
-		for _, fld := range fields {
+		st, ok := named.Underlying().(*Struct)
+		if !ok {
+			continue
+		}
+		for i, fld := range fields {
+			if _, ok := LogosJSONFieldOf(st, i); !ok {
+				continue
+			}
 			check.logosCheckUnionFieldJSON(fld)
 		}
 	}
