@@ -110,6 +110,80 @@ type Child struct : Creature {
 
 func (c Child) Start() error { return nil }
 
+type Rogue struct {
+	Name string
+	HP   int
+}
+
+func (r Rogue) Foo() string { return "foo" }
+
+type ShallowBase struct {
+	HP int
+}
+
+type ShallowOuter struct : Creature {
+	ShallowBase
+	HP   int
+	Name string
+}
+
+func (s ShallowOuter) Start() error { return nil }
+
+type DeepInner struct {
+	HP int
+}
+
+type DeepMid struct {
+	DeepInner
+	HP int
+}
+
+type DeepOuter struct : Creature {
+	DeepMid
+	Name string
+}
+
+func (d DeepOuter) Start() error { return nil }
+
+func checkUndeclaredAndDepth() {
+	rogueValue := reflect.TypeOf(Rogue{})
+	roguePointer := reflect.TypeOf(&Rogue{})
+	if rogueValue.NumMethod() != reflect.TypeOf(Plain{}).NumMethod() {
+		panic("rogue method set changed")
+	}
+	if roguePointer.NumMethod() != reflect.TypeOf(&Plain{}).NumMethod() {
+		panic("rogue pointer method set changed")
+	}
+	forbidAccessorMethod(rogueValue, "Logos_GetName")
+	forbidAccessorMethod(rogueValue, "Logos_GetHP")
+	forbidAccessorMethod(roguePointer, "Logos_GetName")
+	forbidAccessorMethod(roguePointer, "Logos_SetHP")
+	var so ShallowOuter
+	so.HP = 5
+	so.ShallowBase.HP = 9
+	so.Name = "shallow"
+	var sc Creature = &so
+	if sc.HP != 5 {
+		panic("outer field must shadow embedded field")
+	}
+	sc.HP = 6
+	if so.HP != 6 || so.ShallowBase.HP != 9 {
+		panic("write must reach the outer field")
+	}
+	var dp DeepOuter
+	dp.DeepMid.HP = 7
+	dp.DeepMid.DeepInner.HP = 11
+	dp.Name = "deep"
+	var dc Creature = &dp
+	if dc.HP != 7 {
+		panic("depth-1 field must shadow depth-2 field")
+	}
+	dc.HP = 8
+	if dp.DeepMid.HP != 8 || dp.DeepMid.DeepInner.HP != 11 {
+		panic("write must reach the depth-1 field")
+	}
+}
+
 var nextCalls int
 
 func next() int {
@@ -151,6 +225,7 @@ func checkPropertyAccessorReceivers() {
 func main() {
 	checkPropertyAccessorReceivers()
 	checkBothMerge()
+	checkUndeclaredAndDepth()
 	var m Monster
 	m.Name = "gorg"
 	m.HP = 100
