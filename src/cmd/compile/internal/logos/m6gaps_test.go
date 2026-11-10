@@ -39,6 +39,7 @@ func lowerSnippetSrc(t *testing.T, name, src string) string {
 		Types:      make(map[syntax.Expr]types2.TypeAndValue),
 		Selections: make(map[*syntax.SelectorExpr]*types2.Selection),
 		Scopes:     make(map[syntax.Node]*types2.Scope),
+		Instances:  make(map[*syntax.Name]types2.Instance),
 	}
 	var cerrs []error
 	conf := types2.Config{
