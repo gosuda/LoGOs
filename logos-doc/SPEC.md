@@ -1438,7 +1438,7 @@ The build steps are in IMPLEMENTATION.md, milestone M22. [T-Sec9]
 ### 10.1 Static marshaling
 
 For each .lgo struct type with json tags, defaults, or non-nil pointer fields and no embedded fields, the lowering MUST generate a value-receiver MarshalJSON method. [T-Sec10]
-Field kinds without static support skip generation for that type. [T-Sec10]
+Field kinds without static support MUST skip generation for that type. [T-Sec10]
 These kinds are interfaces, maps with non-string keys, and embedded structs. [T-Sec10]
 Generated output MUST be byte-identical to encoding/json for the same value under both `goexperiment.jsonv2` and `!goexperiment.jsonv2`; `json.Marshal` on an eligible value MUST return the same bytes as the generated method. [T-Sec10]
 The default build MUST use the fork baseline with `goexperiment.jsonv2` on. [T-Sec10]
