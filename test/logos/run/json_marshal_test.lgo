@@ -653,3 +653,23 @@ func TestGeneratedMarshalerBuildsEverywhere(t *testing.T) {
 		checkPortableArch(t, dir, arch)
 	}
 }
+
+type DefaultsOnly struct {
+	Port int32  = 8080
+	Host string = "localhost"
+}
+
+type defaultsOnlyMirror struct {
+	Port  int32
+	Host  string
+	NoGen any `json:"-"`
+}
+
+func TestDefaultsOnlyTriggersMarshalJSON(t *testing.T) {
+	v := DefaultsOnly{Port: 8080, Host: "localhost"}
+	got := must(v.MarshalJSON())
+	want := must(json.Marshal(defaultsOnlyMirror{Port: v.Port, Host: v.Host}))
+	if !bytes.Equal(got, want) {
+		t.Fatalf("defaults-only MarshalJSON\n got %s\nwant %s", got, want)
+	}
+}
