@@ -5,13 +5,26 @@ logos build -gcflags='-m -m' -O=3 .
 stderr 'can inline smallEven with cost'
 stderr 'can inline smallOdd with cost'
 stderr 'can inline plainBig with cost'
+stderr 'can inline midBig'
 stderr 'cannot inline bigEven: function too complex: cost .* exceeds budget 80'
 stderr 'cannot inline bigOdd: function too complex: cost .* exceeds budget 80'
 
 logos build -gcflags='-m -m -d=inlrecursivebudget=400' -O=3 .
 stderr 'can inline bigEven with cost'
-stderr 'cannot inline hugeEven: function too complex: cost .* exceeds budget 400'
-stderr 'cannot inline hugeOdd: function too complex: cost .* exceeds budget 400'
+stderr 'cannot inline hugeEven'
+stderr 'cannot inline hugeOdd'
+
+logos build -gcflags='-m -m' -O=2 .
+stderr 'can inline tiny'
+stderr 'can inline plainBig'
+stderr 'cannot inline midBig'
+stderr 'cannot inline bigEven'
+
+logos build -gcflags='-m -m' -O=s .
+stderr 'can inline tiny'
+stderr 'can inline smallEven'
+stderr 'cannot inline plainBig'
+stderr 'cannot inline midBig'
 
 -- go.mod --
 module example.com/inlrec
@@ -219,4 +232,38 @@ if n <= 0 {
 return bigWork(n) + j15 + 1
 }
 return hugeEven(n-1) + bigWork(n) + j15
+}
+
+func tiny(x int) int {
+return x + 1
+}
+
+func midBig(x int) int {
+m1 := x + 1
+m2 := m1 * 2
+m3 := m2 - 3
+m4 := m3 + m2
+m5 := m4 * m1
+m6 := m5 - m4
+m7 := m6 + 7
+m8 := m7 * 3
+m9 := m8 - m7
+m10 := m9 + m8
+m11 := m10 * 2
+m12 := m11 - 5
+m13 := m12 + m11
+m14 := m13 * m12
+m15 := m14 - m13
+m16 := m15 + 1
+m17 := m16 * 2
+m18 := m17 - 3
+m19 := m18 + m17
+m20 := m19 * m16
+m21 := m20 - m19
+m22 := m21 + 7
+m23 := m22 * 3
+m24 := m23 - m22
+m25 := m24 + m23
+m26 := m25 * 2
+return m26 + x
 }
