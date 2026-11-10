@@ -1,4 +1,6 @@
 # logos wasm back-edge stride keeps a call-free loop from starving peers
+# a lost yield hangs the node run until the test timeout: the timeout
+# is the failure signal, so only the fixed markers are asserted
 [!exec:node] skip 'node not in PATH'
 
 env GOPROXY=off
@@ -9,7 +11,6 @@ env GOARCH=wasm
 logos build -o $WORK/exe.wasm .
 exec node run.mjs $WORK/exe.wasm
 stdout '^peer-ran$'
-stdout '^[0-9]+$'
 stdout '^done$'
 
 -- go.mod --

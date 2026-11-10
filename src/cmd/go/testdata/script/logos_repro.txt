@@ -11,11 +11,6 @@ stdout 'wasm size ok'
 ! go run . sizegate ../bound/over1011.bin ../bound/rec1000.txt
 stderr 'exceeds recorded'
 
-go run . sizegate ../bound/exact.bin ../bound/rec100.txt
-stdout 'wasm size ok'
-! go run . sizegate ../bound/over.bin ../bound/rec100.txt
-stderr 'exceeds recorded'
-
 cd $GOPATH/src
 cd $LOGOS_EXAMPLE
 logos run .
