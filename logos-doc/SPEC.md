@@ -1735,8 +1735,7 @@ func pack(v int) []int {
 ### 17.3 Reproducibility and sizes
 
 - Two builds from clean caches MUST yield identical SHA-256 digests for linux/amd64, linux/arm64, and js/wasm. [T-Sec17]
-- The stripped js/wasm size of the `repro` module built with `-trimpath -buildvcs=false -ldflags='-s -w'` MUST be tracked in `test/logos/size/wasm_size.txt`. [T-Sec17]
-- Growth above 1% against the recorded value MUST fail the gate. [T-Sec17]
+- The stripped js/wasm size of the `repro` module built with `-trimpath -buildvcs=false -ldflags='-s -w'` MUST be tracked in `test/logos/size/wasm_size.txt`. Growth above 1% against the recorded value MUST fail, and a record more than 1% above the measured size MUST fail as stale. [T-Sec17]
 
 ### 17.4 End-to-end example exercise
 

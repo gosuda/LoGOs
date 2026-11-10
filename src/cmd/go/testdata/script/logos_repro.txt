@@ -99,6 +99,16 @@ env GOARCH=
 ! go run . sizegate $WORK/example.wasm ../bound/tiny.txt
 stderr 'exceeds recorded'
 
+# A record far above the real size fails as stale: the record must
+# track the size within 1% in both directions.
+! go run . sizegate $WORK/example.wasm ../bound/huge.txt
+stderr 'above actual'
+stderr 'update the record'
+
+# A missing record fails instead of passing silently.
+! go run . sizegate $WORK/example.wasm ../bound/missing.txt
+stderr 'no such file'
+
 -- repro/go.mod --
 module example.com/repro
 
@@ -209,7 +219,9 @@ func equal(args []string) error {
 	return nil
 }
 
-// sizegate fails when wasm grew over 1% past the recorded size.
+// sizegate fails when the measured wasm size leaves the 1% band around
+// the recorded size in either direction, and when the record is
+// missing or unparsable.
 func sizegate(args []string) error {
 	if len(args) != 2 {
 		return errUsage
@@ -227,10 +239,13 @@ func sizegate(args []string) error {
 		return err
 	}
 	actual := info.Size()
-	fmt.Printf("wasm size ok: %d bytes (recorded %d)\n", actual, recorded)
 	if actual*100 > recorded*101 {
-		return fmt.Errorf("wasm size %d exceeds recorded %d by over 1%%", actual, recorded)
+		return fmt.Errorf("wasm size %d exceeds recorded %d by over 1%%; update the record at %s", actual, recorded, args[1])
 	}
+	if recorded*100 > actual*101 {
+		return fmt.Errorf("recorded size %d is over 1%% above actual wasm size %d; update the record at %s", recorded, actual, args[1])
+	}
+	fmt.Printf("wasm size ok: %d bytes (recorded %d)\n", actual, recorded)
 	return nil
 }
 
@@ -244,6 +259,9 @@ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 100
 -- bound/rec1000.txt --
 1000
+-- bound/huge.txt --
+999999999
+
 -- bound/exact1010.bin --
 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 -- bound/over1011.bin --
