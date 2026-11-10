@@ -431,6 +431,7 @@ func main() {
 `
 
 const wasmYieldFreeWant = "41 84\n"
+
 func TestWasmYieldFreeSourcesRunUnderNode(t *testing.T) {
 	testenv.MustHaveGoBuild(t)
 	wasmNode(t)
