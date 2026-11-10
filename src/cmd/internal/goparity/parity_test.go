@@ -68,11 +68,11 @@
 // / -- new -- pair with the exact replaced text; a later control starts at
 // the next column-zero kind line. file is GOROOT-relative; old must occur
 // exactly once in the target or the mutant is invalid and the test fails
-// loudly, so stale mutants are never silent. kinds compiler, linker, and cgo
-// build the named tool through an overlay and swap it into fork builds only
-// via -toolexec with the shim in testdata/toolexec (env
-// GOPARITY_MUTANT_TOOL=name=path); kinds runtime, std, and rules pass the
-// overlay to the fork build directly. kind cmdgo is not supported here.
+// loudly, so stale mutants are never silent. kinds compiler, linker, cgo,
+// and rules build the named tool through an overlay and swap it into fork
+// builds only via -toolexec with the shim in testdata/toolexec (env
+// GOPARITY_MUTANT_TOOL=name=path); kinds runtime and std pass the overlay
+// to the fork build directly. kind cmdgo is not supported here.
 // Mutants never touch the tree and never reach upstream builds.
 // TestParityMutants (release tier, flag -goparity.release) applies each
 // mutant, requires the build to succeed, and requires the program named
@@ -1150,7 +1150,7 @@ func configIndex() map[string]config {
 	return out
 }
 
-var mutantToolNames = map[string]string{"compiler": "compile", "linker": "link", "cgo": "cgo"}
+var mutantToolNames = map[string]string{"compiler": "compile", "linker": "link", "cgo": "cgo", "rules": "compile"}
 
 type mutBuild struct {
 	fork        toolchain
@@ -1184,6 +1184,18 @@ func (mb *mutBuild) corpus(t *testing.T, progs []string) {
 			t.Fatalf("writing logos.toml: %v", err)
 		}
 	}
+	for _, s := range corpusFails(t) {
+		data, err := os.ReadFile(filepath.Join("testdata", "fail", s+".go"))
+		if err != nil {
+			t.Fatalf("reading fail corpus %s: %v", s, err)
+		}
+		if err := os.MkdirAll(filepath.Join(mb.stage, s), 0o777); err != nil {
+			t.Fatalf("creating fail stage %s: %v", s, err)
+		}
+		if err := os.WriteFile(filepath.Join(mb.stage, s, "main.go"), data, 0o644); err != nil {
+			t.Fatalf("writing fail stage %s: %v", s, err)
+		}
+	}
 	mb.env = appendEnv(baseEnv(forkCache()), mb.cfg.env...)
 	mb.args = slices.Clone(mb.cfg.args)
 	mb.outDir = filepath.Join(mb.scratch, "out")
@@ -1197,7 +1209,7 @@ func (mb *mutBuild) corpus(t *testing.T, progs []string) {
 func (mb *mutBuild) apply(t *testing.T, m mutant) {
 	t.Helper()
 	switch m.kind {
-	case "compiler", "linker", "cgo":
+	case "compiler", "linker", "cgo", "rules":
 		toolName := mutantToolNames[m.kind]
 		toolBin, err := mb.buildTool(t, toolName)
 		if err != nil {
@@ -1208,7 +1220,7 @@ func (mb *mutBuild) apply(t *testing.T, m mutant) {
 		os.MkdirAll(cache+"-path", 0o777)
 		mb.env = appendEnv(mb.env, "GOPARITY_MUTANT_TOOL="+toolName+"="+toolBin, "GOCACHE="+cache, "GOPATH="+cache+"-path")
 		mb.args = append(mb.args, "-toolexec="+mb.shim)
-	case "runtime", "std", "rules":
+	case "runtime", "std":
 		mb.args = append(mb.args, "-overlay="+mb.overlayPath)
 	default:
 		t.Fatalf("mutant %s: unsupported kind %q", m.id, m.kind)
@@ -1271,8 +1283,8 @@ func TestParityMutants(t *testing.T) {
 	for _, m := range ms {
 		if _, ok := mutantToolNames[m.kind]; ok {
 			needShim = true
-		} else if m.kind != "runtime" && m.kind != "std" && m.kind != "rules" {
-			t.Errorf("mutant %s: unsupported kind %q (the harness applies compiler, linker, cgo, runtime, std, rules)", m.id, m.kind)
+		} else if m.kind != "runtime" && m.kind != "std" {
+			t.Errorf("mutant %s: unsupported kind %q (the harness applies compiler, linker, cgo, rules, runtime, std)", m.id, m.kind)
 		}
 	}
 	if needShim {
