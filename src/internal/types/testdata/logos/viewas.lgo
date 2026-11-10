@@ -118,7 +118,7 @@ func viewTrailing(b []byte) {
 }
 
 func viewInt(b []byte) {
-	_ = comptime.ViewAs[int /* ERROR "[comptime::viewas_not_pod] int is not a struct" */](b)
+	_ = comptime.ViewAs[int /* ERROR "[comptime::viewas_not_pod] int is not a struct at offset 0" */](b)
 }
 
 func viewValue(b []byte) {

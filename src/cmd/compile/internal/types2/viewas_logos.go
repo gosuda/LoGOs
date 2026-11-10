@@ -51,7 +51,7 @@ func (check *Checker) logosViewAsInstCheck(expr syntax.Expr, targs []Type) {
 		name = named.Obj().Name()
 	}
 	if _, ok := Unalias(t).Underlying().(*Struct); !ok {
-		check.errorf(at, InvalidTypeArg, "%s %s is not a struct", logosViewAsNotPOD, name)
+		check.errorf(at, InvalidTypeArg, "%s %s is not a struct at offset 0", logosViewAsNotPOD, name)
 		return
 	}
 	if off := logosViewasScan(check, t); off != nil {
