@@ -170,7 +170,8 @@ func (check *Checker) infer(pos syntax.Pos, tparams []*TypeParam, targs []Type, 
 			continue
 		}
 		par := params.At(i)
-		parTyp, argTyp := logosInferOperands(par.typ, arg.typ())
+		parTyp, argTyp := par.typ, arg.typ()
+		check.logosInferOperands(&parTyp, &argTyp)
 		if isParameterized(tparams, parTyp) || isParameterized(tparams, argTyp) {
 			// Function parameters are always typed. Arguments may be untyped.
 			// Collect the indices of untyped arguments and handle them later.
