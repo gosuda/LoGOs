@@ -37,13 +37,13 @@ go help build
 ! stdout ' -O[= ]'
 
 logos build -a -x -O=s .
-stderr '\-d=inlbudget=15'
+stderr '\-d=inlbudget=15[ ,]'
 logos run -O=s .
 stdout '^hello$'
 
 cd gomod
 go build -a -x -O=s .
-stderr '\-d=inlbudget=15'
+stderr '\-d=inlbudget=15[ ,]'
 cd ..
 
 cd o3
