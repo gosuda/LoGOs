@@ -13,10 +13,42 @@ logos test ./...
 logos vet ./...
 logos list ./...
 logos run .
+! logos lsp unexpected-arg
+stderr 'unexpected argument'
+
+mkdir $WORK/origgo
+cp goapp/main.go $WORK/origgo/main.go
+cd goapp
+logos next
+cmp main.go $WORK/origgo/main.go
+! exists next_tasks.json
+cd ..
 
 cmp main.lgo $WORK/orig/main.lgo
 cmp go.mod $WORK/orig/go.mod
 exists out/main.go
+
+-- goapp/go.mod --
+module example.com/goapp
+
+go 1.27
+
+-- goapp/main.go --
+package main
+
+import "fmt"
+
+func double(xs []int) []int {
+	var ys []int
+	for i := range xs {
+		ys = append(ys, 2*xs[i])
+	}
+	return ys
+}
+
+func main() {
+	fmt.Println(double([]int{1, 2, 3}))
+}
 
 -- go.mod --
 module example.com/readonly
