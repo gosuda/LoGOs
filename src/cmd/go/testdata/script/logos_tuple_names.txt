@@ -1,6 +1,8 @@
 env GOPROXY=off
 env GOTOOLCHAIN=local
 
+logos run ./ok
+stdout '^ok$'
 ! logos build ./...
 stderr 'cannot use'
 
@@ -36,4 +38,18 @@ import "example.com/tuplenames/p"
 func main() {
 	var v (x int64, err error) = (1, nil)
 	println(p.Show(v))
+}
+
+-- ok/main.lgo --
+package main
+
+import (
+	"fmt"
+
+	"example.com/tuplenames/p"
+)
+
+func main() {
+	var w (x int64, err error) = (3, nil)
+	fmt.Println(p.Show(w))
 }
