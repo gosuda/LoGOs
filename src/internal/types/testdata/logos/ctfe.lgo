@@ -200,8 +200,26 @@ const func BadMapRange(m map[string]int) int {
 }
 
 const func BadPointer(x int) int {
-	p := & /* ERROR "correctness::const_func_impure" */ x
+	p := & /* ERRORx "const_func_impure.*address-of" */ x
 	return *p
+}
+
+const func BadNew() int {
+	p := new /* ERRORx "const_func_impure.*pointer allocation" */ (int)
+	return *p
+}
+
+const func BadDeref(x int) int {
+	return * /* ERRORx "const_func_impure.*pointer dereference" */ &x
+}
+
+const func BadPtrParam(p * /* ERRORx "const_func_impure.*pointer type" */ int) int {
+	return 1
+}
+
+const func BadPtrResult(x int) * /* ERRORx "const_func_impure.*pointer type" */ int {
+	p := &x
+	return p
 }
 
 const func BadDefer() int {
