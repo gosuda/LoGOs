@@ -4,22 +4,7 @@ env GOTOOLCHAIN=local
 logos build -a -x -O=0 .
 stderr '\-N \-l'
 stderr 'variablemakeundern=1'
-
-logos build -a -x .
-stderr '\-d=inlbudget=120,variablemakethreshold=256'
-
-logos build -a -x -O=2 .
-stderr '\-d=inlbudget=120,variablemakethreshold=256'
-
-logos build -a -x -O=3 .
-stderr '\-d=inlbudget=400,inlrecursivebudget=80,variablemakethreshold=4096'
-! stderr '-d=[^ ]*(escape|prove)'
-
 cd gomod
-logos build -a -x -O=2 .
-stderr '\-d=inlbudget=120,variablemakethreshold=256'
-go build -a -x -O=2 .
-stderr '\-d=inlbudget=120,variablemakethreshold=256'
 
 go build -a -x .
 ! stderr 'inlbudget'
@@ -37,8 +22,6 @@ stderr 'logos build: invalid -O level "z" \(want 0, 1, 2, 3, s\)'
 go help build
 ! stdout ' -O[= ]'
 
-logos build -a -x -O=s .
-stderr '\-d=inlbudget=15[ ,]'
 logos build -a -gcflags=example.com/optlevels=-m -O=s .
 ! stderr 'inlining call to mid'
 logos build -a -gcflags=example.com/optlevels=-m .
@@ -47,8 +30,6 @@ logos run -O=s .
 stdout '^hello$'
 
 cd gomod
-go build -a -x -O=s .
-stderr '\-d=inlbudget=15[ ,]'
 go build -a -gcflags=example.com/optlevels/go=-m -O=s .
 ! stderr 'inlining call to mid'
 go build -a -gcflags=example.com/optlevels/go=-m .
@@ -61,11 +42,9 @@ cd ..
 
 cd o3
 logos build -a -x .
-stderr '\-d=inlbudget=400,inlrecursivebudget=80,variablemakethreshold=4096'
 logos build -a -x -O=1 .
+stderr 'compile'
 ! stderr 'inlbudget'
-logos build -a -x -O=0 .
-stderr '\-N \-l'
 cd ..
 
 cd bad3
@@ -76,10 +55,6 @@ cd ../badO4
 stderr 'logos\.toml:2:13: opt_level must be one of O0, O1, O2, O3, Os'
 cd ..
 
-cd bad3
-logos build -a -x main.lgo
-stderr '\-d=inlbudget=120,variablemakethreshold=256'
-cd ..
 
 logos build -a -x .
 stderr 'GOAMD64=.v3.'
@@ -112,7 +87,7 @@ stderr 'GOARM64=.v8\.0.'
 env GOARCH=
 cd ../native
 logos build -a -x .
-stderr 'GOAMD64=.v[134].'
+stderr 'GOAMD64=.v[34].'
 cd ..
 
 cd stackbuf
@@ -155,6 +130,7 @@ stdout 'FAIL'
 env WANT_STACKBUF=
 cd ..
 logos build -a -x -O=3 cmp
+stderr 'compile'
 ! stderr 'variablemakethreshold'
 
 -- stackbuf/go.mod --

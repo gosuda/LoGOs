@@ -6,6 +6,11 @@ env GOEXPERIMENT=simd
 
 logos build -o $WORK/pair-native$GOEXE .
 exec $WORK/pair-native$GOEXE
+stdout '^1 2$'
+stdout '^10 20$'
+stdout '^3 99$'
+stdout '^\[0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15\]$'
+stdout '^\[16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31\]$'
 cp stdout $WORK/native.txt
 
 env GOARCH=arm64
@@ -13,8 +18,12 @@ logos build -o $WORK/pair-arm64$GOEXE .
 env GOARCH=
 
 exec qemu-aarch64 $WORK/pair-arm64$GOEXE
+stdout '^1 2$'
+stdout '^10 20$'
+stdout '^3 99$'
+stdout '^\[0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15\]$'
+stdout '^\[16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31\]$'
 cp stdout $WORK/arm64.txt
-
 cmp $WORK/native.txt $WORK/arm64.txt
 
 -- go.mod --
