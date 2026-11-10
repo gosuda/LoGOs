@@ -5,6 +5,7 @@
 package types2
 
 import (
+	"cmd/compile/internal/logos/ctfe"
 	"cmd/compile/internal/syntax"
 	"go/constant"
 	. "internal/types/errors"
@@ -515,6 +516,22 @@ func (check *Checker) logosConstBuiltin(x *operand, call *syntax.CallExpr, id bu
 		return logosAsConstView(a.typ()) != nil
 	}
 	switch id {
+	case _Len:
+		for _, a := range args {
+			unwrap(a)
+		}
+		if c := logosAsConstView(x.typ()); c != nil {
+			x.typ_ = c.Elem
+		}
+		if len(args) > 0 {
+			if n, ok := check.logosConstMapLen(args[0]); ok {
+				x.mode_ = constant_
+				x.typ_ = Typ[Int]
+				x.val = constant.MakeInt64(n)
+				return true
+			}
+		}
+		return false
 	case _Append:
 		if len(args) > 0 {
 			if constView(args[0]) {
@@ -563,6 +580,26 @@ func (check *Checker) logosConstBuiltin(x *operand, call *syntax.CallExpr, id bu
 		}
 	}
 	return false
+}
+
+func (check *Checker) logosConstMapLen(a *operand) (int64, bool) {
+	if !a.isValid() || a.expr == nil {
+		return 0, false
+	}
+	name, ok := syntax.Unparen(a.expr).(*syntax.Name)
+	if !ok {
+		return 0, false
+	}
+	obj, ok := check.lookup(name.Value).(*Const)
+	if !ok {
+		return 0, false
+	}
+	v, ok := check.logosRecorded(obj)
+	if !ok || !v.IsValid() || v.Type() == nil || v.Type().Kind != ctfe.KMap {
+		return 0, false
+	}
+	keys, _ := v.MapEntries()
+	return int64(len(keys)), true
 }
 
 func (check *Checker) logosInferOperands(par, arg *Type) {

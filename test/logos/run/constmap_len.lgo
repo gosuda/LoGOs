@@ -1,0 +1,59 @@
+// run
+
+package main
+
+import "fmt"
+
+const m = map[int]string{1: "a", 2: "b", 3: "c"}
+
+var _ [len(m)]int
+
+var _ = [len(m)]int{1, 2, 3}
+
+func take(a [len(m)]int) [len(m)]int {
+	return a
+}
+
+type strct struct {
+	f [len(m)]int
+}
+
+type arr [len(m)]int
+
+type box[T any] struct {
+	v T
+}
+
+var _ box[[len(m)]int]
+
+var _ [len(m)*2 + 1]int
+
+const sh = 1 << len(m)
+
+func check(cond bool, name string) {
+	if cond {
+		fmt.Println("ok " + name)
+	} else {
+		fmt.Println("FAIL " + name)
+	}
+}
+
+func main() {
+	a := take([len(m)]int{1, 2, 3})
+	check(len(a) == 3, "len-sig")
+	s := strct{f: [len(m)]int{1, 2, 3}}
+	check(len(s.f) == 3, "len-field")
+	var r arr
+	check(len(r) == 3, "len-type")
+	b := box[[len(m)]int]{v: [len(m)]int{1, 2, 3}}
+	check(len(b.v) == 3, "len-generic")
+	var big [len(m)*2 + 1]int
+	check(len(big) == 7, "len-expr")
+	check(sh == 8, "len-shift")
+	switch len(m) {
+	case len(m):
+		fmt.Println("ok len-case")
+	default:
+		fmt.Println("FAIL len-case")
+	}
+}
