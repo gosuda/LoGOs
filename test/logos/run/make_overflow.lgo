@@ -53,6 +53,17 @@ func negativeSinglePanics(n int) (panicked bool) {
 	return false
 }
 
+func tryLenNested(n int) (out string) {
+	defer func() {
+		if r := recover(); r != nil {
+			out = fmt.Sprint(r)
+		}
+	}()
+	buf := make([]Pixel, n*(n*2))
+	out = fmt.Sprintf("len=%d", len(buf))
+	return out
+}
+
 func main() {
 	fmt.Println(tryLen(1 << 32, 1 << 32))
 	fmt.Println(tryLen(3, 4))
@@ -60,4 +71,6 @@ func main() {
 	fmt.Println(tryLen(0, 1 << 32))
 	fmt.Println(negativePanics(-3, 4))
 	fmt.Println(negativeSinglePanics(-7))
+	fmt.Println(tryLenNested(1 << 32))
+	fmt.Println(tryLenNested(3))
 }
