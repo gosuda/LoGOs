@@ -133,7 +133,7 @@ const func Frac(x float64) float64 {
 	return z / z
 }
 
-const fmapNaN /* ERROR "NaN" */ = map[float64]string{Frac(1.0): "nan"}
+const fmapNaN /* ERRORx "[[]correctness::const_eval[]].*NaN" */ = map[float64]string{Frac(1.0): "nan"}
 
 const func Get(m map[string]int, k string) int {
 	v, ok := m[k]
