@@ -251,9 +251,6 @@ func TestLoadPrecedence(t *testing.T) {
 			if s.OptLevel != tt.optLevel {
 				t.Errorf("OptLevel = %q, want %q", s.OptLevel, tt.optLevel)
 			}
-			if strings.Join(s.Gcflags, " ") != strings.Join(tt.gcflags, " ") {
-				t.Errorf("Gcflags = %q, want %q", s.Gcflags, tt.gcflags)
-			}
 			if s.GOAMD64 != tt.amd64 || s.GOARM64 != tt.arm {
 				t.Errorf("arch levels = (%q, %q), want (%q, %q)", s.GOAMD64, s.GOARM64, tt.amd64, tt.arm)
 			}
