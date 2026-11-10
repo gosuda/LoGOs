@@ -35,6 +35,12 @@ func main() {
 	fmt.Println(ms["zzz"] ?? dflt)
 	fmt.Println(ms["n"])
 	fmt.Println(ms["zzz"])
+	vn, okn := ms["n"]
+	payloadNil := vn == nil && okn
+	coalNil := (ms["n"] ?? dflt) == nil
+	o := ms["n"]
+	someOK := o != nil && (o ?? dflt) == nil
+	fmt.Println("nil-payload-ok:", payloadNil && coalNil && someOK)
 	fmt.Println(len(ms["e"] ?? dflt))
 
 	mu := map[string]*User{"u": &User{Name: "ann"}}

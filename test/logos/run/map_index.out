@@ -12,6 +12,7 @@
 [9]
 {[] true}
 {[] false}
+nil-payload-ok: true
 2
 ann
 guest
