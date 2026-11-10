@@ -4,4 +4,6 @@ pair: 7 seven
 err: boom
 seen: 99
 err: boom
+identical: true
+sametext: false
 pair: 99 payload

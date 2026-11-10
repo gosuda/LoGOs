@@ -37,7 +37,10 @@ func usePair(fail bool) error {
 	pairA, pairB = getPair(fail)?
 	return nil
 }
-
+func fetchFail() error {
+	_ = getVal(true, 7)?
+	return nil
+}
 func run() error {
 	v := getVal(false, 7)?
 	fmt.Println("ok:", v)
@@ -55,6 +58,10 @@ func run() error {
 	fmt.Println("seen:", seen)
 	if err := usePair(true); err != nil {
 		fmt.Println("err:", err)
+	}
+	if err := fetchFail(); err != nil {
+		fmt.Println("identical:", err == errBoom)
+		fmt.Println("sametext:", err == errors.New("boom"))
 	}
 	fmt.Println("pair:", pairA, pairB)
 	return nil

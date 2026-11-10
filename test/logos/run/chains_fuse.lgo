@@ -1,0 +1,26 @@
+// run
+
+package main
+
+import "fmt"
+
+var mapCalls int
+var recvCalls int
+
+func bump(x int) int {
+	mapCalls++
+	return 2 * x
+}
+
+func getXS() []int {
+	recvCalls++
+	return []int{3, 1, 4, 1, 5, 9, 2, 6}
+}
+
+func main() {
+	mapCalls = 0
+	recvCalls = 0
+	r := getXS().filter(x => x > 2).map(x => bump(x)).take(2)
+	ok := len(r) == 2 && r[0] == 6 && r[1] == 8 && mapCalls == 2 && recvCalls == 1
+	fmt.Println("fuse-ok:", ok)
+}
