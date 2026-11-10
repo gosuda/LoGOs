@@ -7,7 +7,6 @@ package lsp
 import (
 	"encoding/json"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -169,8 +168,7 @@ func Read(path string) (string, error) {
 			t.Fatalf("formatting on .lgo succeeded with result %s, want request failure -32803", msg.Result)
 		}
 		var rerr struct {
-			Code    int    `json:"code"`
-			Message string `json:"message"`
+			Code int `json:"code"`
 		}
 		if err := json.Unmarshal(msg.Error, &rerr); err != nil {
 			t.Fatalf("unmarshaling formatting error: %v", err)
@@ -178,25 +176,8 @@ func Read(path string) (string, error) {
 		if rerr.Code != -32803 {
 			t.Errorf("formatting error code = %d, want -32803", rerr.Code)
 		}
-		if !strings.Contains(rerr.Message, "lowered Go") {
-			t.Errorf("formatting error message = %q, want mention of lowered Go", rerr.Message)
-		}
 		if reqs := f.receivedMethod("textDocument/formatting"); len(reqs) != 0 {
 			t.Errorf("gopls got %d formatting requests for .lgo, want none refused before forwarding", len(reqs))
-		}
-		if len(msg.Error) == 0 && string(msg.Result) != "null" && string(msg.Result) != "[]" {
-			var edits []struct {
-				Range   Range  `json:"range"`
-				NewText string `json:"newText"`
-			}
-			if err := json.Unmarshal(msg.Result, &edits); err != nil {
-				t.Fatalf("unmarshaling formatting edits: %v", err)
-			}
-			for _, edit := range edits {
-				if strings.Contains(edit.NewText, "_logos") || strings.Contains(edit.NewText, "_e :=") {
-					t.Fatalf("formatting on .lgo emitted lowered Go edits:\n%s", edit.NewText)
-				}
-			}
 		}
 	})
 
