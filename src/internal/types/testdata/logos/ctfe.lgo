@@ -151,6 +151,19 @@ const func CFrac(x complex128) complex128 {
 
 const cmapNaN /* ERROR "NaN" */ = map[complex128]string{CFrac(complex(1, 1)): "nan"}
 
+const cmapDupRe /* ERROR "duplicate" */ = map[complex128]string{complex(0, 0): "a", complex /* ERROR "duplicate" */ (-0.0, 0): "b"}
+
+const cmapDupIm /* ERROR "duplicate" */ = map[complex128]string{complex(0, 0): "a", complex /* ERROR "duplicate" */ (0, -0.0): "b"}
+
+const func CNanParts(x float64) float64 {
+	z := x - x
+	return z / z
+}
+
+const cmapNaNRe /* ERROR "NaN" */ = map[complex128]string{complex(CNanParts(1.0), 1): "nan"}
+
+const cmapNaNIm /* ERROR "NaN" */ = map[complex128]string{complex(1, CNanParts(1.0)): "nan"}
+
 const func Get(m map[string]int, k string) int {
 	v, ok := m[k]
 	if ok {

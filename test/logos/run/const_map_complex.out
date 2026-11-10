@@ -1,12 +1,16 @@
-12 true 12 true
-34 true 34 true
-56 true 56 true
-0 true 0 true
-0 false 0 false
-a true a true
-b true b true
- false  false
-(0+0i) 0
-(1+2i) 12
-(3-4i) 34
-(5+6i) 56
+ok c128-hit
+ok c128-negzero
+ok c128-nan
+ok c128-len
+ok c64-hit
+ok c64-negzero-miss
+ok c64-len
+ok t128-hit
+ok t128-negzero
+ok t128-nan
+ok t128-len
+ok t64-hit
+ok t64-len
+ok c128-order
+ok t128-order
+ok t64-order
