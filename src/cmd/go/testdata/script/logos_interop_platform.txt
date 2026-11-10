@@ -16,6 +16,10 @@ stdout '^field-store: gadget$'
 stdout '^method-store: gadget$'
 stdout '^panic-field: logos: nil from Go value stored into non-nil \*item\.Item at main\.lgo:[0-9]+$'
 stdout '^panic-method: logos: nil from Go value stored into non-nil \*item\.Item at main\.lgo:[0-9]+$'
+stdout '^stdlib-parse: true example\.com$'
+stdout '^stdlib-nil$'
+stdout '^stdlib-store: example\.com$'
+stdout '^panic-stdlib: logos: nil from Go value stored into non-nil \*url\.URL at main\.lgo:[0-9]+$'
 cd ..
 
 -- w/go.work --
@@ -78,6 +82,7 @@ package main
 
 import (
 	"fmt"
+	"net/url"
 
 	"example.com/g/item"
 )
@@ -129,6 +134,19 @@ func tryMethod() (msg string) {
 	empty := item.NewBox("missing")
 	return useItem(empty.Get())
 }
+func tryStdlibStore() (msg string) {
+	defer func() {
+		if r := recover(); r != nil {
+			msg = fmt.Sprint(r)
+		}
+	}()
+	bad, berr := url.Parse("://bad-url")
+	if berr == nil {
+		return "unexpected-no-error"
+	}
+	var keep *url.URL = bad
+	return "no-panic:" + keep.Host
+}
 
 func main() {
 	it, err := item.Find("x")
@@ -158,4 +176,20 @@ func main() {
 	fmt.Println("panic-call:", tryCall())
 	fmt.Println("panic-field:", tryField())
 	fmt.Println("panic-method:", tryMethod())
+	parsed, perr := url.Parse("https://example.com/gadget")
+	if perr != nil {
+		fmt.Println("stdlib-err:", perr)
+		return
+	}
+	fmt.Println("stdlib-parse:", parsed != nil, parsed.Host)
+	badProbe, badErr := url.Parse("://bad-url")
+	if badErr == nil {
+		fmt.Println("unexpected-no-error")
+	}
+	if badProbe == nil {
+		fmt.Println("stdlib-nil")
+	}
+	var keepStd *url.URL = parsed
+	fmt.Println("stdlib-store:", keepStd.Host)
+	fmt.Println("panic-stdlib:", tryStdlibStore())
 }
