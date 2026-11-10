@@ -21,6 +21,12 @@ exec $WORK/bin/netsockc$GOEXE
 stdout '^net-ok$'
 cd ../..
 
+cd netd/main
+! logos build -o $WORK/bin/netsockd$GOEXE ./cmd
+stderr 'ERROR \[capabilities::unauthorized_net\]: Transitive dependency ''example\.com/ndep'' reaches ''net\.sysSocket'''
+stderr 'example\.com/ndep\.Init\(\)'
+cd ../..
+
 -- neta/main/go.mod --
 module example.com/nmain
 
@@ -135,4 +141,42 @@ func Hello() string {
 		syscall.Close(fd)
 	}
 	return "net-ok"
+}
+
+-- netd/main/go.mod --
+module example.com/ndmain
+
+go 1.27
+
+require example.com/ndep v0.0.0
+
+replace example.com/ndep => ../ndep
+
+-- netd/main/logos.toml --
+[capabilities]
+transitive_net = "deny"
+
+-- netd/main/cmd/main.go --
+package main
+
+import "example.com/ndep"
+
+func main() { ndep.Init() }
+
+-- netd/ndep/go.mod --
+module example.com/ndep
+
+go 1.27
+
+-- netd/ndep/ndep.go --
+package ndep
+
+import "net"
+
+//go:noinline
+func Init() {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err == nil {
+		_ = ln.Close()
+	}
 }
