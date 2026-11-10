@@ -13,3 +13,5 @@ env GOEXPERIMENT=
 go list std
 ! stdout '^arena$'
 go list logos/arena
+! go doc reflect.ArenaNew
+stderr 'no symbol ArenaNew'
