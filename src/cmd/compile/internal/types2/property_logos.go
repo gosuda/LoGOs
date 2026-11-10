@@ -432,6 +432,9 @@ func (check *Checker) logosImplementsProperty(V, T Type, Ti *Interface, cause *s
 		return false
 	}
 	base, _ := deref(V)
+	if _, ok := base.Underlying().(*Interface); ok {
+		return check.hasAllMethodsAt(V, Ti, true, Identical, cause, pos)
+	}
 	named := asNamed(base)
 	kind, name := check.logosCheckPropertySources(V, Ti, pos)
 	declared := named != nil && check.logosDeclaredConforms(named, T, Ti)
