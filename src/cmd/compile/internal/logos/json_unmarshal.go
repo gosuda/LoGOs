@@ -213,7 +213,7 @@ func (js *jsonStruct) unionLines(f *jsonField, field string) []string {
 		}
 	}
 	needsClaim := hasCustom && hasKeyed
-	if needsClaim {
+	if hasKeyed {
 		firstKeyed := ""
 		for _, s := range memberList {
 			if s.keyed {
@@ -221,27 +221,59 @@ func (js *jsonStruct) unionLines(f *jsonField, field string) []string {
 				break
 			}
 		}
-		var conds []string
-		for _, s := range memberList {
+		for i, s := range memberList {
 			if !s.keyed {
 				continue
 			}
-			conds = append(conds, fmt.Sprintf("%s(_logos_claim.Key()) >= 0 || %s(_logos_claim.FoldKey()) >= 0", s.keyFunc, unionFoldFunc(s.keyFunc)))
+			trials = append(trials, fmt.Sprintf("var _logos_keys_%d int", i))
+			trials = append(trials, fmt.Sprintf("_logos_matched_%d := false", i))
 		}
-		trials = append(trials, "var _logos_claimed bool")
 		trials = append(trials, "{")
-		trials = append(trials, fmt.Sprintf("\t_logos_claim := %s.NewScanner(_logos_raw, (*%s)(nil))", jsonAlias, firstKeyed))
-		trials = append(trials, "\tif _logos_claim.Object() {")
-		trials = append(trials, "\t\tfor _logos_claim.Next() {")
-		trials = append(trials, fmt.Sprintf("\t\t\tif %s {", strings.Join(conds, " || ")))
-		trials = append(trials, "\t\t\t\t_logos_claimed = true")
-		trials = append(trials, "\t\t\t}")
-		trials = append(trials, "\t\t\t_logos_claim.Skip()")
+		if needsClaim {
+			trials = append(trials, "var _logos_claimed bool")
+		}
+		trials = append(trials, fmt.Sprintf("\t_logos_scan := %s.NewScanner(_logos_raw, (*%s)(nil))", jsonAlias, firstKeyed))
+		trials = append(trials, "\tif _logos_scan.Object() {")
+		for i, s := range memberList {
+			if s.keyed {
+				trials = append(trials, fmt.Sprintf("\t\t_logos_matched_%d = true", i))
+			}
+		}
+		trials = append(trials, "\t\tfor _logos_scan.Next() {")
+		if needsClaim {
+			var conds []string
+			for _, s := range memberList {
+				if !s.keyed {
+					continue
+				}
+				conds = append(conds, fmt.Sprintf("%s(_logos_scan.Key()) >= 0 || %s(_logos_scan.FoldKey()) >= 0", s.keyFunc, unionFoldFunc(s.keyFunc)))
+			}
+			trials = append(trials, fmt.Sprintf("\t\t\tif %s {", strings.Join(conds, " || ")))
+			trials = append(trials, "\t\t\t\t_logos_claimed = true")
+			trials = append(trials, "\t\t\t}")
+		}
+		for i, s := range memberList {
+			if !s.keyed {
+				continue
+			}
+			trials = append(trials, fmt.Sprintf("\t\t\tif %s(_logos_scan.Key()) >= 0 || %s(_logos_scan.FoldKey()) >= 0 {", s.keyFunc, unionFoldFunc(s.keyFunc)))
+			trials = append(trials, fmt.Sprintf("\t\t\t\t_logos_keys_%d++", i))
+			trials = append(trials, "\t\t\t} else {")
+			for j, sib := range memberList {
+				if j == i || !sib.keyed {
+					continue
+				}
+				trials = append(trials, fmt.Sprintf("\t\t\t\tif %s(_logos_scan.Key()) >= 0 || %s(_logos_scan.FoldKey()) >= 0 {", sib.keyFunc, unionFoldFunc(sib.keyFunc)))
+				trials = append(trials, fmt.Sprintf("\t\t\t\t\t_logos_matched_%d = false", i))
+				trials = append(trials, "\t\t\t\t}")
+			}
+			trials = append(trials, "\t\t\t}")
+		}
+		trials = append(trials, "\t\t\t_logos_scan.Skip()")
 		trials = append(trials, "\t\t}")
 		trials = append(trials, "\t}")
 		trials = append(trials, "}")
 	}
-
 	for i := range members {
 		scratch := fmt.Sprintf("_logos_scratch%d", i)
 		s := memberList[i]
@@ -254,31 +286,10 @@ func (js *jsonStruct) unionLines(f *jsonField, field string) []string {
 			trials = append(trials, fmt.Sprintf("\tvar %s %s", scratch, s.spell))
 		}
 		if hasKeyHelper {
-			trials = append(trials, "\t_logos_matched := false")
-			trials = append(trials, fmt.Sprintf("\t_logos_chk := %s.NewScanner(_logos_raw, (*%s)(nil))", jsonAlias, s.sample))
-			trials = append(trials, "\tif _logos_chk.Object() {")
-			trials = append(trials, "\t\t_logos_matched = true")
-			trials = append(trials, "\t\t_logos_keys := 0")
-			trials = append(trials, "\t\tfor _logos_chk.Next() {")
-			trials = append(trials, fmt.Sprintf("\t\t\tif %s(_logos_chk.Key()) >= 0 || %s(_logos_chk.FoldKey()) >= 0 {", s.keyFunc, unionFoldFunc(s.keyFunc)))
-			trials = append(trials, "\t\t\t\t_logos_keys++")
-			trials = append(trials, "\t\t\t} else {")
-			for j, sib := range memberList {
-				if j == i || !sib.keyed {
-					continue
-				}
-				trials = append(trials, fmt.Sprintf("\t\t\t\t\tif %s(_logos_chk.Key()) >= 0 || %s(_logos_chk.FoldKey()) >= 0 {", sib.keyFunc, unionFoldFunc(sib.keyFunc)))
-				trials = append(trials, "\t\t\t\t\t\t_logos_matched = false")
-				trials = append(trials, "\t\t\t\t\t}")
-			}
-			trials = append(trials, "\t\t\t}")
-			trials = append(trials, "\t\t\t_logos_chk.Skip()")
-			trials = append(trials, "\t\t}")
-			trials = append(trials, "\t\tif _logos_keys == 0 {")
-			trials = append(trials, "\t\t\t_logos_matched = false")
-			trials = append(trials, "\t\t}")
+			trials = append(trials, fmt.Sprintf("\tif _logos_keys_%d == 0 {", i))
+			trials = append(trials, fmt.Sprintf("\t\t_logos_matched_%d = false", i))
 			trials = append(trials, "\t}")
-			trials = append(trials, "\tif _logos_matched {")
+			trials = append(trials, fmt.Sprintf("\tif _logos_matched_%d {", i))
 			trials = append(trials, fmt.Sprintf("\t\tif %s.UnmarshalJSON(_logos_raw) == nil {", scratch))
 			trials = append(trials, "\t\t\t_logos_match++")
 			trials = append(trials, fmt.Sprintf("\t\t\t_logos_target = %s", scratch))
