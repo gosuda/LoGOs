@@ -104,8 +104,11 @@ func (fl *fileLower) lowerStaticJSONType(td *syntax.TypeDecl) {
 			js.marshalText(&b)
 		}
 	}
-	if jsonOK && !userDeclaresMethod(named, "UnmarshalJSON") {
-		js.unmarshalText(&b)
+	if jsonOK {
+		if !userDeclaresMethod(named, "UnmarshalJSON") {
+			js.unmarshalText(&b)
+		}
+		js.unmarshalKeys(&b)
 	}
 	if binaryOK {
 		fl.lowerStaticBinary(td, named, js, &b)

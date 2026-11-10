@@ -68,6 +68,9 @@ func (js *jsonStruct) unmarshalText(b *strings.Builder) {
 		b.WriteByte('\n')
 	}
 	b.WriteString("}\n")
+}
+
+func (js *jsonStruct) unmarshalKeys(b *strings.Builder) {
 	js.keyFuncs(b)
 	js.missingFunc(b)
 }
