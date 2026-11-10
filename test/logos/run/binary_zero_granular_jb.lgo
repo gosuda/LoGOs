@@ -162,6 +162,26 @@ func jbFatOver() error {
 	return nil
 }
 
+func jbFatAtZeroCapOver() error {
+	c := jbZeroCap() + 1
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	var got JbFatHolder
+	err := got.UnmarshalBinary(jbWire(uint64(c)))
+	runtime.ReadMemStats(&after)
+	if err := jbNeedRange(err, "fat at zero cap over UnmarshalBinary", uint64(c)); err != nil {
+		return err
+	}
+	if err := jbNeedFieldOffset(err, "fat at zero cap over UnmarshalBinary", ".Items"); err != nil {
+		return err
+	}
+	if delta := after.TotalAlloc - before.TotalAlloc; delta >= 1<<20 {
+		return fmt.Errorf("fat at zero cap over: rejected count %d only after allocating %d bytes", c, delta)
+	}
+	return nil
+}
+
 func run() error {
 	if int(unsafe.Sizeof(JbFat{})) != 4096 {
 		return fmt.Errorf("JbFat size %d, want 4096", int(unsafe.Sizeof(JbFat{})))
@@ -173,6 +193,9 @@ func run() error {
 		return err
 	}
 	if err := jbFatAccepted(); err != nil {
+		return err
+	}
+	if err := jbFatAtZeroCapOver(); err != nil {
 		return err
 	}
 	return jbFatOver()
