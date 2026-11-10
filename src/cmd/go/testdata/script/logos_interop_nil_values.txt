@@ -1,7 +1,7 @@
 # Direct Go calls to loGo/s methods with non-nil pointer parameters
-# carry the nil check, but method values and interface calls do not:
-# this is the documented hole, and the unchecked calls panic with
-# the plain runtime error instead of the logos message.
+# carry the logos nil check [T-Sec5][R-U2]; method values and
+# interface calls are the documented hole: they crash with the plain
+# runtime error and no logos prefix.
 env GOPROXY=off
 env GOTOOLCHAIN=local
 mkdir $WORK/bin
@@ -9,12 +9,17 @@ mkdir $WORK/bin
 cd w
 logos build ./...
 logos build -o $WORK/bin/nilvalues$GOEXE ./g2/cmd
-exec $WORK/bin/nilvalues$GOEXE
-stdout 'method-direct: logos: nil from Go value'
-stdout 'method-value: runtime error: invalid memory address or nil pointer dereference'
-stdout 'iface: runtime error: invalid memory address or nil pointer dereference'
-! stdout 'method-value: logos'
-! stdout 'iface: logos'
+
+! exec $WORK/bin/nilvalues$GOEXE direct
+stderr 'logos: nil from Go value'
+
+! exec $WORK/bin/nilvalues$GOEXE value
+stderr 'nil pointer dereference'
+! stderr 'logos: nil from Go value'
+
+! exec $WORK/bin/nilvalues$GOEXE iface
+stderr 'nil pointer dereference'
+! stderr 'logos: nil from Go value'
 cd ..
 
 -- w/go.work --
@@ -56,54 +61,32 @@ go 1.27
 package q
 
 import (
-	"fmt"
-
 	"example.com/l2/b"
 )
 
-func Run() string {
-	out := ""
-	func() {
-		defer func() {
-			if r := recover(); r != nil {
-				out += "method-direct: " + fmt.Sprint(r) + "\n"
-			}
-		}()
-		bb := &b.Box{}
+func Run(which string) {
+	bb := &b.Box{}
+	switch which {
+	case "direct":
 		_ = bb.Set(nil)
-		out += "method-direct: no-panic\n"
-	}()
-	func() {
-		defer func() {
-			if r := recover(); r != nil {
-				out += "method-value: " + fmt.Sprint(r) + "\n"
-			}
-		}()
-		bb := &b.Box{}
+	case "value":
 		m := bb.Set
 		_ = m(nil)
-		out += "method-value: no-panic\n"
-	}()
-	func() {
-		defer func() {
-			if r := recover(); r != nil {
-				out += "iface: " + fmt.Sprint(r) + "\n"
-			}
-		}()
+	case "iface":
 		var s b.Setter = &b.Box{}
 		_ = s.Set(nil)
-		out += "iface: no-panic\n"
-	}()
-	return out
+	}
 }
 
 -- w/g2/cmd/main.go --
 package main
 
 import (
-	"fmt"
+	"os"
 
 	"example.com/g2/q"
 )
 
-func main() { fmt.Print(q.Run()) }
+func main() {
+	q.Run(os.Args[1])
+}
