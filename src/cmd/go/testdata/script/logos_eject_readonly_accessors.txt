@@ -20,6 +20,7 @@ grep 'Logos_SetHP' bout/p/p.go
 grep ' Name\(\) string' bout/r/r.go
 grep ' Total\(\) int' bout/r/r.go
 ! grep 'Logos_Set' bout/r/r.go
+! grep 'Logos_Get' bout/r/r.go
 ! grep 'const Name' bout/r/r.go
 cd bout
 go build ./...
