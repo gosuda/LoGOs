@@ -7,3 +7,9 @@ type I interface {
 }
 
 type N int : I // ERROR "after top level declaration"
+
+type PropC interface {
+	const Name string
+}
+
+type NumProp int : PropC // ERROR "after top level declaration"
