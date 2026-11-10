@@ -1662,7 +1662,7 @@ The loader MUST work under `GOOS=js` and, in a reactor module that the host init
 `logos/rt` MUST export the wasm helpers `_logos_scratch_alloc`, `_logos_scratch_reset`, `_logos_errmsg_ptr`, and `_logos_errmsg_len` for the loader. [T-Sec12]
 The loader exports instantiateLogos(wasmBytes, imports). [T-Sec12]
 The loader re-reads memory.buffer after every call into wasm. [T-Sec12]
-The loader MUST treat the result as an int32 errCode; the compiler accepts int32 and int64 results. The host wrapper throws on any nonzero (truthy) return. [T-Sec12]
+The loader MUST accept an errCode of int32 or int64 width; the compiler accepts int32 and int64 results. The host wrapper throws on any nonzero (truthy) return. [T-Sec12]
 String results are invalid. [T-Sec12]
 On nonzero errCode the wrapper throws the message read from wasm memory. [T-Sec12]
 `logos/rt.WasmError(err)` MUST return 0 for a nil error, and for a non-nil error it MUST record `err.Error()` as the last error message and return 1; the loader reads that message through `_logos_errmsg_ptr` and `_logos_errmsg_len`. [T-Sec12]
