@@ -29,6 +29,20 @@ func Wrap[T any]() []string {
 	return Describe[T]() // ERROR "comptime::generic_targ"
 }
 
+func Show[T any](v T) []string {
+	var out []string
+	const for _, f := range comptime.Fields[T]() {
+		out = append(out, f.Name)
+	}
+	return out
+}
+
+func callWithoutExplicitArgs() {
+	const for _, f := range comptime.Fields[Point]() {
+		_ = Show(f.Name) // ERROR "comptime::generic_targ"
+	}
+}
+
 type Box[T any] struct {
 	v T
 }
