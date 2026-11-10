@@ -585,19 +585,6 @@ func TestCallSitesKeepJSONMarshal(t *testing.T) {
 	}
 }
 
-func TestGeneratedBodiesAddNoSync(t *testing.T) {
-	text := lowerStaticText(t, "package p\n\ntype S struct {\n\tA string `json:\"a\"`\n\tN int64 `json:\"n\"`\n}\n")
-	for _, head := range []string{"func (_logos_v S) MarshalJSON() ([]byte, error) {", "func (_logos_v *S) UnmarshalJSON(_logos_data []byte) error {"} {
-		body := methodBody(t, text, head)
-		if strings.Contains(body, "sync.") || strings.Contains(body, "atomic.") {
-			t.Errorf("generated %q adds synchronization:\n%s", head, body)
-		}
-	}
-	if strings.Contains(text, "\"sync\"") || strings.Contains(text, "\"sync/atomic\"") {
-		t.Errorf("generated file imports sync:\n%s", text)
-	}
-}
-
 func TestKeyLiteralEscapes(t *testing.T) {
 	for k, want := range map[string]string{
 		"a<b":      "\"a\\u003cb\":",

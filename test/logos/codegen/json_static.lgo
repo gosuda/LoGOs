@@ -19,3 +19,8 @@ func (s Scalars) MarshalBinary() ([]byte, error) { return nil, nil }
 func (s Scalars) AppendBinary(b []byte) ([]byte, error) { return b, nil }
 
 func (s *Scalars) UnmarshalBinary(data []byte) error { return nil }
+
+type SyncProbe struct { // amd64:-"CALL.*sync[/.]" -"CALL.*atomic\\." -"CALL.*Mutex" -"CALL.*Lock" arm64:-"CALL.*sync[/.]" -"CALL.*atomic\\." -"CALL.*Mutex" -"CALL.*Lock"
+	A string `json:"a"`
+	N int64  `json:"n"`
+}
