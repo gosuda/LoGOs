@@ -65,9 +65,14 @@ cd ..
 
 cd o3
 logos build -a -x .
+stderr 'inlbudget=400'
+! stderr '\-N \-l'
 logos build -a -x -O=1 .
 stderr 'compile'
 ! stderr 'inlbudget'
+logos build -a -x -O=0 .
+stderr '\-N \-l'
+! stderr 'inlbudget=400'
 cd ..
 
 cd bad3
