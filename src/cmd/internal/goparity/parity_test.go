@@ -565,13 +565,11 @@ func runBinary(path, maxProcs string) (observation, error) {
 		obs.exit = 0
 		return obs, nil
 	}
+	if ctx.Err() != nil {
+		return obs, fmt.Errorf("running %s: %w", path, context.Cause(ctx))
+	}
 	if ee, ok := errors.AsType[*exec.ExitError](runErr); ok {
 		obs.exit = ee.ExitCode()
-		return obs, nil
-	}
-	if ctx.Err() != nil {
-		obs.exit = 124
-		obs.stderr += "\nTIMEOUT"
 		return obs, nil
 	}
 	return obs, fmt.Errorf("running %s: %w", path, runErr)
@@ -733,16 +731,15 @@ func TestParity(t *testing.T) {
 			t.Errorf("fork build %s failed: %v\n%s", c.id, r.err, clip(r.output))
 		}
 	}
-	if !upOn {
-		checkFailCorpus(t, fork, up, upOn, base, ks)
-		t.Logf("parity: %d programs, %d fork configs, upstream off, wall %s", len(progs), len(ks), time.Since(start))
-		return
-	}
-	ups := activeUpConfigs(ks)
-	upBuilds := buildAllUpstream(t, up, base, progs, ups)
-	for _, u := range ups {
-		if r := upBuilds[u.id]; r.err != nil {
-			t.Errorf("upstream build %s failed: %v\n%s", u.id, r.err, clip(r.output))
+	var ups []upConfig
+	var upBuilds map[string]buildResult
+	if upOn {
+		ups = activeUpConfigs(ks)
+		upBuilds = buildAllUpstream(t, up, base, progs, ups)
+		for _, u := range ups {
+			if r := upBuilds[u.id]; r.err != nil {
+				t.Errorf("upstream build %s failed: %v\n%s", u.id, r.err, clip(r.output))
+			}
 		}
 	}
 	forkObs := map[string]map[string]observation{}
@@ -766,27 +763,31 @@ func TestParity(t *testing.T) {
 			mu.Unlock()
 		})
 	}
-	for _, u := range ups {
-		if upBuilds[u.id].err != nil {
-			continue
-		}
-		wg.Go(func() {
-			o, err := runAll(upBuilds[u.id], "4")
-			mu.Lock()
-			if err != nil {
-				upRunErrs[u.id] = err
-			} else {
-				upObs[u.id] = o
+	if upOn {
+		for _, u := range ups {
+			if upBuilds[u.id].err != nil {
+				continue
 			}
-			mu.Unlock()
-		})
+			wg.Go(func() {
+				o, err := runAll(upBuilds[u.id], "4")
+				mu.Lock()
+				if err != nil {
+					upRunErrs[u.id] = err
+				} else {
+					upObs[u.id] = o
+				}
+				mu.Unlock()
+			})
+		}
 	}
 	wg.Wait()
 	for id, err := range forkRunErrs {
 		t.Errorf("fork runs %s failed: %v", id, err)
 	}
-	for id, err := range upRunErrs {
-		t.Errorf("upstream runs %s failed: %v", id, err)
+	if upOn {
+		for id, err := range upRunErrs {
+			t.Errorf("upstream runs %s failed: %v", id, err)
+		}
 	}
 	for _, c := range ks {
 		for _, p := range progs {
@@ -795,18 +796,28 @@ func TestParity(t *testing.T) {
 			}
 		}
 	}
-	for _, u := range ups {
-		for _, p := range progs {
-			if o, ok := upObs[u.id][p]; ok && (o.exit != 0 || strings.Contains(o.stdout, "LAW")) {
-				t.Errorf("corpus defect: program %s failed under upstream %s: %s\n%s", p, u.id, obsDesc(o), clip(o.stdout))
+	if upOn {
+		for _, u := range ups {
+			for _, p := range progs {
+				if o, ok := upObs[u.id][p]; ok && (o.exit != 0 || strings.Contains(o.stdout, "LAW")) {
+					t.Errorf("corpus defect: program %s failed under upstream %s: %s\n%s", p, u.id, obsDesc(o), clip(o.stdout))
+				}
 			}
 		}
 	}
 	stability := map[string]observation{}
-	if upBuilds["U1"].err == nil {
+	if upOn && upBuilds["U1"].err == nil {
 		stab, stabErr := runAll(upBuilds["U1"], "1")
 		if stabErr != nil {
 			t.Errorf("upstream stability runs failed: %v", stabErr)
+		} else {
+			stability = stab
+		}
+	}
+	if !upOn && forkBuilds["K1"].err == nil {
+		stab, stabErr := runAll(forkBuilds["K1"], "1")
+		if stabErr != nil {
+			t.Errorf("fork stability runs failed: %v", stabErr)
 		} else {
 			stability = stab
 		}
@@ -817,6 +828,13 @@ func TestParity(t *testing.T) {
 	}
 	for _, p := range progs {
 		prefs := levelPrefixes(p)
+		if len(prefs) > 0 && len(ups) > 0 {
+			if o, ok := upObs[ups[0].id][p]; ok {
+				if gs, _ := splitLevel(o.stdout, prefs); strings.TrimSpace(gs) == "" {
+					t.Errorf("program %s: level-dependent prefixes mark every line, no compared lines", p)
+				}
+			}
+		}
 		var gref *observation
 		lrefs := map[upKey]string{}
 		for _, u := range ups {
@@ -839,11 +857,21 @@ func TestParity(t *testing.T) {
 				lrefs[k] = lv
 			}
 		}
-		if o, ok := stability[p]; ok && gref != nil {
+		if o, ok := stability[p]; ok {
 			gs, _ := splitLevel(o.stdout, prefs)
 			og := observation{exit: o.exit, stdout: gs, stderr: o.stderr}
-			if !obsEqual(*gref, og) {
-				t.Errorf("stability gate: program %s differs under upstream U1 at GOMAXPROCS=1 vs 4: %s vs %s (%s)", p, obsDesc(*gref), obsDesc(og), firstDiff(gref.stdout, og.stdout))
+			if gref != nil {
+				if !obsEqual(*gref, og) {
+					t.Errorf("stability gate: program %s differs under upstream U1 at GOMAXPROCS=1 vs 4: %s vs %s (%s)", p, obsDesc(*gref), obsDesc(og), firstDiff(gref.stdout, og.stdout))
+				}
+			} else if !upOn {
+				if o4, ok4 := forkObs["K1"][p]; ok4 {
+					gs4, _ := splitLevel(o4.stdout, prefs)
+					og4 := observation{exit: o4.exit, stdout: gs4, stderr: o4.stderr}
+					if !obsEqual(og4, og) {
+						t.Errorf("stability gate: program %s differs under fork K1 at GOMAXPROCS=1 vs 4: %s vs %s (%s)", p, obsDesc(og4), obsDesc(og), firstDiff(og4.stdout, og.stdout))
+					}
+				}
 			}
 		}
 	}
@@ -913,6 +941,9 @@ func checkFailCorpus(t *testing.T, fork, up toolchain, upOn bool, base string, k
 	t.Helper()
 	stems := corpusFails(t)
 	if len(stems) == 0 {
+		if upOn {
+			t.Fatal("no fail corpus files under testdata/fail")
+		}
 		return
 	}
 	if !upOn {
@@ -939,7 +970,7 @@ func checkFailCorpus(t *testing.T, fork, up toolchain, upOn bool, base string, k
 			t.Fatalf("writing %s: %v", s, err)
 		}
 	}
-	posPat := regexp.MustCompile(`(?m)^(\S+\.go):(\d+):(\d+): `)
+	posPat := regexp.MustCompile(`(?m)(?:^|vet: )(\S+\.go):(\d+):(\d+): `)
 	positions := func(s string) []string {
 		var out []string
 		for _, m := range posPat.FindAllStringSubmatch(s, -1) {
@@ -958,6 +989,10 @@ func checkFailCorpus(t *testing.T, fork, up toolchain, upOn bool, base string, k
 			t.Errorf("fail corpus %s: upstream wrote a binary for a rejected program", s)
 		}
 		refPos := positions(upOut)
+		if len(refPos) == 0 {
+			t.Errorf("fail corpus %s: upstream reported no file:line:col, corpus defect", s)
+			continue
+		}
 		refVetPos, vetErr := func() ([]string, error) {
 			out, err := goBuild(up.bin, stage, []string{"vet", "./" + s}, baseEnv(upCache()), 5*time.Minute)
 			if err == nil {
@@ -967,6 +1002,10 @@ func checkFailCorpus(t *testing.T, fork, up toolchain, upOn bool, base string, k
 		}()
 		if vetErr != nil {
 			t.Errorf("fail corpus %s: %v, corpus defect", s, vetErr)
+			continue
+		}
+		if len(refVetPos) == 0 {
+			t.Errorf("fail corpus %s: upstream vet reported no file:line:col, corpus defect", s)
 			continue
 		}
 		for _, c := range ks {
@@ -985,7 +1024,9 @@ func checkFailCorpus(t *testing.T, fork, up toolchain, upOn bool, base string, k
 			if _, err := os.Stat(filepath.Join(base, "failbin-fork-"+c.id+"-"+s)); err == nil {
 				t.Errorf("fail corpus %s: fork %s wrote a binary for a rejected program", s, c.id)
 			}
-			if got := positions(fout); !slices.Equal(got, refPos) {
+			if got := positions(fout); len(got) == 0 {
+				t.Errorf("fail corpus %s: fork %s reported no file:line:col", s, c.id)
+			} else if !slices.Equal(got, refPos) {
 				t.Errorf("fail corpus %s: fork %s positions %v differ from upstream %v", s, c.id, got, refPos)
 			}
 			if c.id != "K1" {
@@ -996,7 +1037,9 @@ func checkFailCorpus(t *testing.T, fork, up toolchain, upOn bool, base string, k
 				t.Errorf("fail corpus %s: fork vet accepted invalid Go", s)
 				continue
 			}
-			if got := positions(vout); !slices.Equal(got, refVetPos) {
+			if got := positions(vout); len(got) == 0 {
+				t.Errorf("fail corpus %s: fork vet reported no file:line:col", s)
+			} else if !slices.Equal(got, refVetPos) {
 				t.Errorf("fail corpus %s: fork vet positions %v differ from upstream %v", s, got, refVetPos)
 			}
 		}
@@ -1265,6 +1308,29 @@ func (mb *mutBuild) buildFile(t *testing.T, stem string) error {
 	return err
 }
 
+func (mb *mutBuild) cleanExpect(t *testing.T, prog string) (observation, error) {
+	t.Helper()
+	outDir := filepath.Join(mb.scratch, "out-clean")
+	env := appendEnv(baseEnv(forkCache()), mb.cfg.env...)
+	sb := stagedBuild{bin: mb.driverBin(), stage: mb.stage, outDir: outDir, args: slices.Clone(mb.cfg.args), env: env, progs: []string{prog}, wantCgo: true}
+	if _, out, err := sb.build(); err != nil {
+		return observation{}, fmt.Errorf("clean build failed: %v\n%s", err, clip(out))
+	}
+	return runBinary(filepath.Join(outDir, prog), "4")
+}
+
+func (mb *mutBuild) cleanFile(t *testing.T, stem string) error {
+	t.Helper()
+	env := appendEnv(baseEnv(forkCache()), mb.cfg.env...)
+	args := append([]string{"build"}, append(slices.Clone(mb.cfg.args), "-o", filepath.Join(mb.scratch, "failbin-clean-"+stem), "./"+stem)...)
+	ctx, cancel := context.WithTimeoutCause(context.Background(), 5*time.Minute, errors.New("goparity fail build timeout"))
+	defer cancel()
+	cmd := exec.CommandContext(ctx, mb.driverBin(), args...)
+	cmd.Dir = mb.stage
+	cmd.Env = env
+	return cmd.Run()
+}
+
 func TestParityMutants(t *testing.T) {
 	if !*releaseFlag {
 		t.Skip("release tier only; pass -goparity.release")
@@ -1335,6 +1401,10 @@ func TestParityMutants(t *testing.T) {
 			mb.apply(t, m)
 			failStem := strings.TrimSuffix(m.expect, ".go")
 			if slices.Contains(fails, failStem) {
+				if cerr := mb.cleanFile(t, failStem); cerr == nil {
+					t.Errorf("mutant %s unevaluable: fail corpus file %s already builds under %s without the mutant", m.id, m.expect, m.cfg)
+					return
+				}
 				if err := mb.buildFile(t, failStem); err != nil {
 					t.Errorf("mutant %s survived: fail corpus file %s is still rejected under %s", m.id, m.expect, m.cfg)
 					return
@@ -1362,6 +1432,14 @@ func TestParityMutants(t *testing.T) {
 				uobs, uerr := runBinary(filepath.Join(ub.outDir, m.expect), "4")
 				if uerr != nil {
 					t.Fatalf("mutant %s: upstream run: %v", m.id, uerr)
+				}
+				clean, cerr := mb.cleanExpect(t, m.expect)
+				if cerr != nil {
+					t.Fatalf("mutant %s: clean baseline: %v", m.id, cerr)
+				}
+				if !obsEqual(clean, uobs) {
+					t.Errorf("mutant %s unevaluable: %s already red under %s without the mutant (clean %s vs upstream %s)", m.id, m.expect, m.cfg, obsDesc(clean), obsDesc(uobs))
+					return
 				}
 				if !obsEqual(fobs, uobs) {
 					red = true
