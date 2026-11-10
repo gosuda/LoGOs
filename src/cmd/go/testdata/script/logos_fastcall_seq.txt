@@ -1,0 +1,43 @@
+[!cgo] skip
+[!GOARCH:amd64] [!GOARCH:arm64] skip
+
+env GOPROXY=off
+env GOTOOLCHAIN=local
+env CGO_ENABLED=1
+
+env GOEXPERIMENT=logosfastcgo
+go build -o app$GOEXE .
+exec ./app$GOEXE
+stdout '^sum42$'
+
+go tool objdump -s 'runtime\.logosCgocallFast' app$GOEXE
+stdout 'reentersyscall'
+stdout 'asmcgocall'
+stdout 'exitsyscall'
+! stdout 'nanotime'
+! stdout 'cputicks'
+! stdout 'clock_gettime'
+! stdout 'monotonic'
+
+-- go.mod --
+module example.com/fastcallseq
+
+go 1.27
+
+-- main.go --
+package main
+
+/*
+#cgo noescape add
+#cgo nocallback add
+int add(int a, int b) {
+	return a + b;
+}
+*/
+import "C"
+
+import "fmt"
+
+func main() {
+	fmt.Printf("sum%d\n", int(C.add(40, 2)))
+}
