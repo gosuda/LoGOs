@@ -180,7 +180,7 @@ func (check *Checker) infer(pos syntax.Pos, tparams []*TypeParam, targs []Type, 
 					errorf(parTyp, argTyp, arg)
 					return nil
 				}
-			} else if _, ok := par.typ.(*TypeParam); ok && !arg.isNil() {
+			} else if _, ok := parTyp.(*TypeParam); ok && !arg.isNil() {
 				// Since default types are all basic (i.e., non-composite) types, an
 				// untyped argument will never match a composite parameter type; the
 				// only parameter type it can possibly match against is a *TypeParam.
@@ -331,7 +331,9 @@ func (check *Checker) infer(pos syntax.Pos, tparams []*TypeParam, targs []Type, 
 	// maximum untyped type for each of those parameters, if possible.
 	var maxUntyped map[*TypeParam]Type // lazily allocated (we may not need it)
 	for _, index := range untyped {
-		tpar := params.At(index).typ.(*TypeParam) // is type parameter (no alias) by construction of untyped
+		parTyp, argTyp := params.At(index).typ, args[index].typ()
+		check.logosInferOperands(&parTyp, &argTyp)
+		tpar := parTyp.(*TypeParam) // is type parameter (no alias) by construction of untyped
 		if u.at(tpar) == nil {
 			arg := args[index] // arg corresponding to tpar
 			if maxUntyped == nil {
@@ -339,11 +341,11 @@ func (check *Checker) infer(pos syntax.Pos, tparams []*TypeParam, targs []Type, 
 			}
 			max := maxUntyped[tpar]
 			if max == nil {
-				max = arg.typ()
+				max = argTyp
 			} else {
-				m := maxType(max, arg.typ())
+				m := maxType(max, argTyp)
 				if m == nil {
-					err.addf(arg, "mismatched types %s and %s (cannot infer %s)", max, arg.typ(), tpar)
+					err.addf(arg, "mismatched types %s and %s (cannot infer %s)", max, argTyp, tpar)
 					return nil
 				}
 				max = m

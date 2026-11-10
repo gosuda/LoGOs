@@ -27,3 +27,36 @@ func inferConstParam[T any](v const []T) int { return len(v) }
 func inferConstParamCall(xs const []int) int {
 	return inferConstParam(xs)
 }
+func inferBareConst[T any](v const T) T { var zero T; return zero }
+
+func inferBareConstTyped(i int, s string) {
+	var _ int = inferBareConst(i)
+	var _ string = inferBareConst(s)
+	var _ int = inferBareConst(1)
+	var _ float64 = inferBareConst(1.5)
+	var _ string = inferBareConst("hi")
+}
+
+func inferBareConstNil() {
+	_ = inferBareConst(/* ERROR "cannot infer T" */ nil)
+}
+
+func inferConstSliceUntyped() {
+	_ = inferConstParam(/* ERROR "cannot infer T" */ 1)
+	_ = inferConstParam(/* ERROR "cannot infer T" */ 1.5)
+	_ = inferConstParam(/* ERROR "cannot infer T" */ "hi")
+	_ = inferConstParam(/* ERROR "cannot infer T" */ nil)
+}
+
+func inferVariadicConst[T any](vs ...const T) T { var zero T; return zero }
+
+func inferVariadicConstTyped(i int) {
+	var _ int = inferVariadicConst(1)
+	var _ float64 = inferVariadicConst(1.5)
+	var _ string = inferVariadicConst("hi")
+	var _ int = inferVariadicConst(i, 2)
+}
+
+func inferVariadicConstNil() {
+	_ = inferVariadicConst(/* ERROR "cannot infer T" */ nil)
+}
