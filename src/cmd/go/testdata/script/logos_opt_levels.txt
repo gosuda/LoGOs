@@ -38,12 +38,20 @@ go help build
 
 logos build -a -x -O=s .
 stderr '\-d=inlbudget=15[ ,]'
+logos build -a -gcflags=example.com/optlevels=-m -O=s .
+! stderr 'inlining call to mid'
+logos build -a -gcflags=example.com/optlevels=-m .
+stderr 'inlining call to mid'
 logos run -O=s .
 stdout '^hello$'
 
 cd gomod
 go build -a -x -O=s .
 stderr '\-d=inlbudget=15[ ,]'
+go build -a -gcflags=example.com/optlevels/go=-m -O=s .
+! stderr 'inlining call to mid'
+go build -a -gcflags=example.com/optlevels/go=-m .
+stderr 'inlining call to mid'
 cd ..
 
 cd o3
@@ -242,7 +250,19 @@ package main
 
 import "fmt"
 
+func mid(x int) int {
+	y := x + 11
+	y = y*3 - x
+	y ^= (x + 5) << 2
+	y += y * x
+	y -= (x ^ y) & 127
+	y *= 3
+	y += x * (y + 1)
+	return y - (x * 7)
+}
+
 func main() {
+	_ = mid(3)
 	fmt.Println("hello")
 }
 
@@ -256,7 +276,19 @@ package main
 
 import "fmt"
 
+func mid(x int) int {
+	y := x + 11
+	y = y*3 - x
+	y ^= (x + 5) << 2
+	y += y * x
+	y -= (x ^ y) & 127
+	y *= 3
+	y += x * (y + 1)
+	return y - (x * 7)
+}
+
 func main() {
+	_ = mid(3)
 	fmt.Println("hello")
 }
 
