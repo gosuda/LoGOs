@@ -110,6 +110,15 @@ func sumUintptr(xs []uintptr) uintptr {
 	return xs.sum()
 }
 
+//go:noinline
+func sumRune(xs []rune) rune {
+	// amd64/v1:"VPMASKMOVD\\s+\\(" "VPADDD\\s+\\(" "CALL simd/archsimd\\.X86Features\\.AVX2\\(SB\\)" -"CALL simd/archsimd\\.Load"
+	// amd64/v2:"VPMASKMOVD\\s+\\(" "VPADDD" "CALL simd/archsimd\\.X86Features\\.AVX2\\(SB\\)" -"CALL simd/archsimd\\.Load"
+	// amd64/v3:"VPMASKMOVD\\s+\\(" "VPADDD" -"CALL simd/archsimd\\." -"CMPB internal/cpu\\.X86"
+	// amd64/v4:"VPMASKMOVD\\s+\\(" "VPADDD" -"CALL simd/archsimd\\." -"CMPB internal/cpu\\.X86"
+	// arm64:"CALL simd/archsimd\\.LoadInt32x4Part\\(SB\\)" "VADD V[0-9]+\\.S4" -"CALL simd/archsimd\\.X86Features"
+	return xs.sum()
+}
 type watt = float64
 
 //go:noinline
@@ -142,6 +151,7 @@ func main() {
 	var i []int16
 	var j []int64
 	var k []uint32
+	var r []rune
 	println(sumI32(a), sumU64(b), sumU16(c), sumU8(d), sumF32(e), sumF64(f), sumInt(g), sumUint(u), sumUintptr(p), sumAlias(w))
-	println(sumI8(h), sumI16(i), sumI64(j), sumU32(k))
+	println(sumI8(h), sumI16(i), sumI64(j), sumU32(k), sumRune(r))
 }
