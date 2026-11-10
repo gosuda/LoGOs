@@ -110,6 +110,11 @@ func (check *Checker) logosGroupGo(s *syntax.CallStmt) bool {
 	if !check.conf.Logos || s.Tok != syntax.Go {
 		return false
 	}
+	if call, ok := syntax.Unparen(s.Call).(*syntax.CallExpr); ok {
+		if name, ok := syntax.Unparen(call.Fun).(*syntax.Name); ok && name.Value == "group" {
+			return false
+		}
+	}
 	if _, ok := check.logosGroupTop(); !ok {
 		check.error(s, InvalidGo, logosGroupUnsupervised)
 		check.use(s.Call)

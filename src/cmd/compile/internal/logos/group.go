@@ -103,6 +103,11 @@ func (fc *funcLower) groupCallStmt(s *syntax.CallStmt) ([]syntax.Stmt, bool) {
 	if s.Tok != syntax.Go {
 		return nil, false
 	}
+	if call, ok := syntax.Unparen(s.Call).(*syntax.CallExpr); ok {
+		if name, ok := syntax.Unparen(call.Fun).(*syntax.Name); ok && name.Value == "group" {
+			return nil, false
+		}
+	}
 	if _, ok := fc.groupTop(); !ok {
 		return nil, false
 	}
