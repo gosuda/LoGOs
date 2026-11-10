@@ -562,31 +562,31 @@ func TestFastcallBlockingParity(t *testing.T) {
 func TestFastcallSigprofSurvives(t *testing.T) {
 	requireCgo(t)
 	prof := filepath.Join(t.TempDir(), "cpu.prof")
-	f, err := os.Create(prof)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := pprof.StartCPUProfile(f); err != nil {
-		f.Close()
-		t.Fatal(err)
-	}
-	deadline := time.Now().Add(500 * time.Millisecond)
-	var sink int32
-	for time.Now().Before(deadline) {
-		for i := range int32(100) {
-			sink += callFastAdd(i, i)
+	const floor = 50
+	deadline := time.Now().Add(120 * time.Second)
+	var n, total int
+	for {
+		collectBusyProfile(t, prof, 10, callFastBusy, 100000000)
+		n, total = profileCallerSamples(t, prof, "callFastBusy")
+		t.Logf("fast caller %d of %d samples", n, total)
+		if n == 0 && total >= floor {
+			t.Fatalf("fast-call frames missing from profile: fast caller %d of %d samples (floor %d)",
+				n, total, floor)
+		}
+		if n >= floor {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("sigprof floor unmet: fast caller %d of %d samples (floor %d)",
+				n, total, floor)
 		}
 	}
-	pprof.StopCPUProfile()
-	f.Close()
-	fi, err := os.Stat(prof)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if fi.Size() == 0 {
+	if total == 0 {
 		t.Fatal("empty cpu profile")
 	}
-	_ = sink
+	if fi, serr := os.Stat(prof); serr != nil || fi.Size() == 0 {
+		t.Fatal("empty cpu profile")
+	}
 }
 
 func pprofNodes(t *testing.T, binary, prof string) (top string, topShare float64, shares map[string]float64) {
