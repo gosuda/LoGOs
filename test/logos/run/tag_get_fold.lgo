@@ -6,6 +6,7 @@ import (
 	"comptime"
 	"fmt"
 	"net/http"
+	"os"
 	"reflect"
 )
 
@@ -68,6 +69,14 @@ func foldMissing() []string {
 	return out
 }
 
+func foldRuntime(key string) []string {
+	var out []string
+	const for _, f := range comptime.Fields[FoldRecord]() {
+		out = append(out, f.Tag.Get(key))
+	}
+	return out
+}
+
 func want(key string) []string {
 	var out []string
 	rt := reflect.TypeOf(FoldRecord{})
@@ -93,4 +102,9 @@ func main() {
 	check("concat", "x"+"ml", foldConcat())
 	check("imported", http.MethodGet, foldImported())
 	check("missing", "nope", foldMissing())
+	key := os.Getenv("TAG_GET_FOLD_KEY")
+	if key == "" {
+		key = "json"
+	}
+	check("runtime", key, foldRuntime(key))
 }

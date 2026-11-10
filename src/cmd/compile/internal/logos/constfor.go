@@ -1195,6 +1195,7 @@ func (fl *fileLower) cfLeafSubs(root syntax.Node, active cfChain, covered []cfSp
 			if fl.cfFoldTagGet(n, active, parents, at, add) {
 				return false
 			}
+// refused_by: statement_fold · collision: none (1 contested hunk(s), neither side deleted the other's lines)
 			if fl.cfRuntimeTagGet(n, active, parents, at, add) {
 				return false
 			}
@@ -1322,6 +1323,7 @@ func (fl *fileLower) cfFoldTagGet(call *syntax.CallExpr, active cfChain, parents
 	add(s, e, strconv.Quote(reflect.StructTag(a.field.tag).Get(key)))
 	return true
 }
+
 func (fl *fileLower) cfRuntimeTagGet(call *syntax.CallExpr, active cfChain, parents map[syntax.Node]syntax.Node, at func(syntax.Node) (int, int), add func(int, int, string)) bool {
 	sel, ok := call.Fun.(*syntax.SelectorExpr)
 	if !ok || sel.Sel.Value != "Get" || len(call.ArgList) != 1 {
