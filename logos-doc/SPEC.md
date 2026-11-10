@@ -1513,8 +1513,8 @@ These resource bounds MUST NOT change the wire bytes of accepted values. [T-Sec1
 
 After deadcode, the linker MUST run a reachability audit from main.main and init functions. [T-Sec11]
 The audit MUST run only in `logos` builds and MUST cover modules of both kinds. [T-Sec11][R-U1]
-The audit follows relocations. [T-Sec11]
-It adds synthetic edges for interface calls and reflective method lookups. [T-Sec11]
+The audit MUST follow relocations. [T-Sec11]
+It MUST add synthetic edges for interface calls and reflective method lookups. [T-Sec11]
 Protected sinks are reflect.ValueOf, reflect.TypeOf, reflect.New, syscall.Exec, syscall.ForkExec, syscall.StartProcess, os.StartProcess, os.startProcess, net.sysSocket, syscall.Socket, syscall.Connect, runtime.cgocall, and runtime.logosCgocallFast. [T-Sec11]
 Packages that import unsafe are found by walking the cmd/go load graph. [T-Sec11]
 The standard library, first-party packages under a main module, and the program's own packages are exempt. [T-Sec11]
