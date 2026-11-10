@@ -906,6 +906,74 @@ func TestFastcallPinUnderCollection(t *testing.T) {
 	}
 }
 
+func TestFastcallPinStackUnderCollection(t *testing.T) {
+	requireCgo(t)
+	readyR, readyW, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer readyR.Close()
+	defer readyW.Close()
+	gateR, gateW, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer gateR.Close()
+	defer gateW.Close()
+	done := make(chan int32, 1)
+	go func(readyFD, gateFD int32) {
+		growStack(4000)
+		var buf [8192]byte
+		buf[0] = 42
+		done <- callFastGateWatch(readyFD, gateFD, &buf[0], 42)
+	}(int32(readyW.Fd()), int32(gateR.Fd()))
+	type readyRes struct {
+		n    int
+		rerr error
+	}
+	readyCh := make(chan readyRes, 1)
+	go func() {
+		var b [1]byte
+		n, rerr := readyR.Read(b[:])
+		readyCh <- readyRes{n, rerr}
+	}()
+	select {
+	case rr := <-readyCh:
+		if rr.n != 1 || rr.rerr != nil {
+			t.Fatalf("ready read = %d, %v, want 1 byte", rr.n, rr.rerr)
+		}
+	case code := <-done:
+		t.Fatalf("gate_watch = %d before ready signal", code)
+	}
+	for range 5 {
+		runtime.GC()
+	}
+	for range 8 {
+		q := make([]byte, 256<<10)
+		for j := range q {
+			q[j] = 0xFF
+		}
+		runtime.KeepAlive(q)
+		runtime.GC()
+	}
+	select {
+	case code := <-done:
+		t.Fatalf("gate_watch returned %d before gate release", code)
+	default:
+	}
+	if _, werr := gateW.Write([]byte{0}); werr != nil {
+		t.Fatal(werr)
+	}
+	select {
+	case code := <-done:
+		if code != 0 {
+			t.Fatalf("gate_watch = %d, want 0", code)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("fast call did not return within 30s of gate release")
+	}
+}
+
 func fixtureBin(t *testing.T, module string) string {
 	t.Helper()
 	dir := filepath.Join("testdata", module)

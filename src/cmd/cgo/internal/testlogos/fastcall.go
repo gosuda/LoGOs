@@ -20,7 +20,6 @@ int read_int(int *p);
 int sum_bytes(unsigned char *p, int n);
 unsigned long long busy_spin(unsigned long long iters);
 unsigned long long plain_spin(unsigned long long iters);
-int watch_spin(unsigned char *p, unsigned char want, int micros);
 int gate_wait(int ready_fd, int gate_fd);
 int gate_watch(int ready_fd, int gate_fd, unsigned char *p, unsigned char want);
 extern int GoCallback(int v);
@@ -45,8 +44,6 @@ int plain_cb_fire(void);
 
 #cgo noescape busy_spin
 #cgo nocallback busy_spin
-#cgo noescape watch_spin
-#cgo nocallback watch_spin
 
 #cgo noescape gate_wait
 #cgo nocallback gate_wait
@@ -88,10 +85,6 @@ func callFastSlice(b []byte) int32 {
 }
 
 func callFastBusy(iters uint64) uint64 { return uint64(C.busy_spin(C.ulonglong(iters))) }
-
-func callFastWatch(p *byte, want byte, micros int32) int32 {
-	return int32(C.watch_spin((*C.uchar)(unsafe.Pointer(p)), C.uchar(want), C.int(micros)))
-}
 
 func callPlainBusy(iters uint64) uint64 { return uint64(C.plain_spin(C.ulonglong(iters))) }
 
