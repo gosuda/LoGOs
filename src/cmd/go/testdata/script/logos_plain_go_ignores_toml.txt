@@ -6,6 +6,12 @@ env GOTOOLCHAIN=local
 [cgo] go build -o $WORK/plain$GOEXE ./sub
 [cgo] exec $WORK/plain$GOEXE
 [cgo] stdout '^42$'
+[cgo] go build -a -x -o $WORK/plainx$GOEXE ./sub
+[cgo] ! stderr 'inlbudget'
+[cgo] ! stderr 'variablemakethreshold'
+[cgo] stderr 'GOAMD64='
+[cgo] ! stderr 'GOAMD64=v[234]'
+[cgo] ! stderr 'GOEXPERIMENT=[^ ]*logosarena'
 
 -- go.mod --
 module example.com/plain
@@ -18,9 +24,9 @@ strict_files = [".lgo"]
 [build]
 cgo = "forbid"
 cgo_allowlist = []
-opt_level = "O0"
+opt_level = "O3"
 target_cpu = "native"
-arena = false
+arena = true
 [capabilities]
 transitive_reflect = "deny"
 transitive_exec = "deny"
