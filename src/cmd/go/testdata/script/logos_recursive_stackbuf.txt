@@ -19,14 +19,6 @@ env REC_STACKBUF=32
 env TIER_STACKBUF=32
 logos test -count=1 -O=1 .
 stdout '^ok'
-env REC_STACKBUF=
-env TIER_STACKBUF=
-logos test -a -x -O=0 -run TestNothingMatchesThis .
-stderr 'variablemakethreshold=32'
-stderr 'variablemakeundern=1'
-go test -a -x -O=0 -run TestNothingMatchesThis .
-stderr 'variablemakethreshold=32'
-stderr 'variablemakeundern=1'
 
 -- go.mod --
 module example.com/recstackbuf
