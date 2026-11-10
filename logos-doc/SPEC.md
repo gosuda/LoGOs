@@ -5,7 +5,7 @@
 - Original: `logos-docs/PLAN.md` at commit 57475ed (`git show 57475ed:logos-docs/PLAN.md`)
 - Source files: `.lgo` (canonical); aliases U+1F4DC (scroll), U+26A1 (lightning), and U+0295 U+25D4 U+03D6 U+25D4 U+0294 (gopher); `.go` files stay Go source files with Go language semantics.
 
-The words MUST, MUST NOT, SHOULD, SHOULD NOT, and MAY follow RFC 2119. The text follows ASD-STE100.
+The words MUST, MUST NOT, SHOULD, SHOULD NOT, and MAY follow RFC 2119. The text follows ASD-STE100. Bracketed tags trace each rule to rows in IMPLEMENTATION.md.
 
 ## 0. Architectural axioms and transpilation contract
 
@@ -523,8 +523,8 @@ String to const byte views MUST allocate nothing. [T-201]
 Views of other provenance to string MUST copy. [T-201]
 Ordinary reslicing such as s = s[:0] MUST stay allowed. [T-201]
 Only const views MUST enforce the len bound. [T-201]
-Dynamic map iteration in const funcs MUST fail compilation. [T-201][T-Sec9]
-Const map range MUST visit keys in sorted order. [T-201][T-Sec9]
+Dynamic map iteration in const funcs MUST fail compilation. [T-201][T-Sec7]
+Const map range MUST visit keys in sorted order. [T-201][T-Sec7]
 A violation MUST fail with correctness::const_func_impure naming the reason. [T-201]
 reflect.DeepEqual and fmt.Println MUST accept constant composites. [T-201]
 Compile-time evaluation MUST stop after the selected `max_ctfe_steps` limit with default 100,000 steps with `comptime::ctfe_step_limit`. [T-201][T-102]
@@ -1298,7 +1298,7 @@ Without history for a PC, it MUST keep the current stack size. [T-302]
 
 ### 3.3 RFC-303: Hardware backend optimizations
 
-Fault-suppressing masked tails MUST appear only in loops that M14 reductions over slices produce. [T-303]
+Fault-suppressing masked tails MUST appear only in loops that the slice reductions of Sec 13 produce. [T-303]
 Other code MUST carry no tail padding. [T-303]
 BMI2 and `CMOV` code MUST come from existing `GOAMD64=v3` rules. [T-303]
 Constant-count rotates MUST use BMI2 rotates at `GOAMD64=v3`. [T-303]
@@ -1728,11 +1728,14 @@ Accepted wire bytes MUST stay unchanged. [T-Sec12][T-Sec10.1]
 - Adjacent 16-byte vector stores MUST pair into FSTPQ under the same conditions. [T-303]
 - A 16-byte pair offset outside -1024..1008 or not a multiple of 16 MUST stay separate loads or stores. [T-303]
 - With the default target_cpu the ARM64 target MUST use GOARM64=v8.2, so LSE atomics stay available. [T-303][T-105]
+Paired accesses MUST keep distinct destinations with encodable offsets only; calls and atomics end a candidate chain, 16-byte pairs outside -1024..1008 multiples of 16 stay separate, and 4- and 8-byte pairs outside their ranges rely on the assembler fixup. [T-303]
+The `arm64_pair` fixtures MUST pin this behavior; no in-tree test asserts upstream enforcement of these ranges. [T-303]
 
 ### 13.2 Amd64 masked tails, rotates, and checked lengths
 
 - In a native build, reductions over slices MUST use fault-suppressing masked loads for tail elements. [T-303]
 - Masked tails MUST NOT read past the end of the slice. [T-303]
+The build MUST add no guard padding elsewhere. [T-303]
 - The build MUST NOT add guard padding for vector tails. [T-303]
 - In a native build with `GOEXPERIMENT=simd` on amd64 or arm64, `.sum()` on a bare slice of a fixed-width numeric element kind or an alias of one MUST load full vectors for the body and load the tail once through a masked load that enables only the remaining elements. [T-303]
 - On amd64 that masked load MUST be VPMASKMOVD or VPMASKMOVQ for 32 and 64-bit elements, which need AVX2, and the zeroing K-masked VMOVDQU8 or VMOVDQU16 for 8 and 16-bit elements, which need AVX512. [T-303]
@@ -1819,8 +1822,6 @@ No separate unwind table exists for scope defer. [T-206][T-104.7]
     work()
 }
 ```
-Paired accesses MUST keep distinct destinations with encodable offsets only; calls and atomics end a candidate chain, 16-byte pairs outside -1024..1008 multiples of 16 stay separate, and 4- and 8-byte pairs outside their ranges rely on the assembler fixup. [T-303]
-The `arm64_pair` fixtures MUST pin this behavior; no in-tree test asserts upstream enforcement of these ranges. [T-303]
 
 ### 15.2 Locked WithLock
 
@@ -1837,7 +1838,6 @@ m.WithLock(func(c *Config) {
 })
 ```
 In amd64 native builds, slice reductions MUST use fault-suppressing masked loads for tails; on arm64 the tail MUST load only the elements present. [T-303]
-The build MUST add no guard padding elsewhere. [T-303]
 A non-constant integer product in a `make` length or capacity MUST lower to `logos/rt.MulLen`. Constant products stay constant. [T-303]
 
 ## 16. IDE protocol
