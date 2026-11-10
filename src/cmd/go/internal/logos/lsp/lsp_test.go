@@ -2363,6 +2363,10 @@ func TestProxyHoverAfterCloseSeesDiskText(t *testing.T) {
 			t.Errorf("a lowering used the discarded unsaved text")
 		}
 	}
+	disk, err := os.ReadFile(aPath)
+	if err != nil {
+		t.Fatal(err)
+	}
 	opened := f.receivedMethod("textDocument/didOpen")
 	if len(opened) != 1 {
 		t.Fatalf("gopls got %d lowered didOpen messages, want the one of the disk text", len(opened))
@@ -2371,6 +2375,13 @@ func TestProxyHoverAfterCloseSeesDiskText(t *testing.T) {
 	fwdText, _ := doc["text"].(string)
 	if strings.Contains(fwdText, "// unsaved") {
 		t.Errorf("gopls holds a lowering of the discarded unsaved text")
+	}
+	lowDisk, _, ok := lowerQuestion(disk)
+	if !ok {
+		t.Fatal("the disk text does not lower")
+	}
+	if fwdText != string(lowDisk) {
+		t.Errorf("gopls holds %q, want the lowering of the disk text", fwdText)
 	}
 	_, pos := forwardedPosition(t, f, "textDocument/hover", 0)
 	lines := strings.Split(fwdText, "\n")
