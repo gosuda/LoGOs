@@ -49,6 +49,11 @@ func yieldSeq2Arity1() iter.Seq2[int, string] {
 	return nil
 }
 
+func yieldSeqArity2() iter.Seq[int] {
+	yield /* ERROR "yield requires 1 value" */ 1, 2
+	return nil
+}
+
 func yieldSeq2Arity3() iter.Seq2[int, string] {
 	yield /* ERROR "yield requires 2 values" */ 1, "s", 3
 	return nil
