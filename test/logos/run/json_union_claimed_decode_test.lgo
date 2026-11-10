@@ -64,7 +64,7 @@ func TestNonObjectInputIsZeroMatch(t *testing.T) {
 	}
 }
 
-func TestKeyedSiblingWinsOverPermissive(t *testing.T) {
+func TestKeyedSiblingSelectsSquare(t *testing.T) {
 	var h ClaimHolder
 	if err := json.Unmarshal([]byte(`{"s":{"side":2}}`), &h); err != nil {
 		t.Fatalf("keyed sibling must win, got error: %v", err)

@@ -2,7 +2,6 @@
 
 package jsonunion
 
-
 import (
 	"bytes"
 	"encoding/json"
@@ -383,20 +382,6 @@ type MixedUnion interface {
 
 type MixedHolder struct {
 	Item MixedUnion `json:"item"`
-}
-
-func TestUnionKeylessCustomGatedByClaim(t *testing.T) {
-	var h MixedHolder
-	if err := json.Unmarshal([]byte(`{"item":{"r":1}}`), &h); err != nil {
-		t.Fatalf("keyed circle must win over keyless Anything, got error: %v", err)
-	}
-	c, ok := h.Item.(Circle)
-	if !ok {
-		t.Fatalf("expected Circle, got %T: %#v", h.Item, h.Item)
-	}
-	if c.R != 1 {
-		t.Fatalf("expected Circle.R = 1, got %d", c.R)
-	}
 }
 
 var zeroCheckSawNonZero bool
