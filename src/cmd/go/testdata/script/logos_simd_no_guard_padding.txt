@@ -1,0 +1,82 @@
+# Vector-tail staging must not add guard padding: a float slice sum
+# allocates exactly what a padding-free make of the same length
+# allocates. Both per-call costs are measured in-program with GC off;
+# the bare make is the padding-free oracle for the staging slice.
+[!GOARCH:amd64] skip 'no-guard-padding probe needs amd64'
+
+env GOPROXY=off
+env GOTOOLCHAIN=local
+env GOEXPERIMENT=simd
+env GOGC=off
+
+cd m
+logos run .
+stdout '^pad32 0$'
+stdout '^pad64 0$'
+
+-- m/go.mod --
+module example.com/noguardpadding
+
+go 1.27
+
+-- m/main.lgo --
+package main
+
+import (
+	"fmt"
+	"runtime"
+)
+
+var sinkF float32
+var sinkD float64
+var sinkS32 []float32
+var sinkS64 []float64
+
+func totalAlloc() uint64 {
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	return m.TotalAlloc
+}
+
+//go:noinline
+func sumF32(xs []float32) float32 { return xs.sum() }
+
+//go:noinline
+func sumF64(xs []float64) float64 { return xs.sum() }
+
+func main() {
+	const K = 2000
+	xs := make([]float32, 70)
+	for i := range xs {
+		xs[i] = float32(i)
+	}
+	xd := make([]float64, 70)
+	for i := range xd {
+		xd[i] = float64(i)
+	}
+	n := len(xs)
+	a0 := totalAlloc()
+	for i := 0; i < K; i++ {
+		sinkF += sumF32(xs)
+	}
+	a1 := totalAlloc()
+	b0 := totalAlloc()
+	for i := 0; i < K; i++ {
+		sinkS32 = make([]float32, n)
+		sinkF += sinkS32[0] + sinkS32[n-1]
+	}
+	b1 := totalAlloc()
+	c0 := totalAlloc()
+	for i := 0; i < K; i++ {
+		sinkD += sumF64(xd)
+	}
+	c1 := totalAlloc()
+	d0 := totalAlloc()
+	for i := 0; i < K; i++ {
+		sinkS64 = make([]float64, n)
+		sinkD += sinkS64[0] + sinkS64[n-1]
+	}
+	d1 := totalAlloc()
+	fmt.Println("pad32", int64((a1-a0)/K)-int64((b1-b0)/K))
+	fmt.Println("pad64", int64((c1-c0)/K)-int64((d1-d0)/K))
+}
