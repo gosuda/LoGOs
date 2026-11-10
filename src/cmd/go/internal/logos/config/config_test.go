@@ -292,10 +292,6 @@ func TestParseViolations(t *testing.T) {
 		{"build key in capabilities table", "[capabilities]\ncgo = \"allow\"\n", `logos.toml:2:1: unknown key "cgo"`},
 		{"build gc key rejected", "[build]\ngc = \"greentea\"\n", `logos.toml:2:1: unknown key "gc"`},
 		{"invalid capabilities allowlist pattern", "[capabilities]\ntransitive_unsafe_allowlist = [\"[\"]\n", `logos.toml:2:32: [configuration::invalid_capabilities_allowlist] transitive_unsafe_allowlist pattern "[": syntax error in pattern`},
-		{"reflect_allowlist scalar rejected", "[capabilities]\nreflect_allowlist = \"x\"\n", `logos.toml:2:21: want string array for key "reflect_allowlist"`},
-		{"transitive_exec_allowlist scalar rejected", "[capabilities]\ntransitive_exec_allowlist = \"x\"\n", `logos.toml:2:29: want string array for key "transitive_exec_allowlist"`},
-		{"transitive_net_allowlist scalar rejected", "[capabilities]\ntransitive_net_allowlist = \"x\"\n", `logos.toml:2:28: want string array for key "transitive_net_allowlist"`},
-		{"transitive_unsafe_allowlist scalar rejected", "[capabilities]\ntransitive_unsafe_allowlist = \"x\"\n", `logos.toml:2:31: want string array for key "transitive_unsafe_allowlist"`},
 		{"strict_files scalar rejected", "[project]\nstrict_files = \".lgo\"\n", `logos.toml:2:16: want string array for key "strict_files"`},
 		{"invalid strict_files entry", "[project]\nstrict_files = [\".go\"]\n", `logos.toml:2:17: invalid strict_files entry ".go" (want ".lgo", ".📜", ".⚡", or ".ʕ◔ϖ◔ʔ")`},
 		{"bare opt level rejected", "[build]\nopt_level = \"3\"\n", `logos.toml:2:13: opt_level must be one of O0, O1, O2, O3, Os`},
@@ -310,6 +306,31 @@ func TestParseViolations(t *testing.T) {
 			}
 			if err.Error() != tc.wantErr {
 				t.Errorf("Parse(%q) error = %q, want %q", tc.data, err.Error(), tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestParseAllowlistScalarsReportPositionAndKey(t *testing.T) {
+	tests := []struct {
+		name    string
+		data    string
+		wantPos string
+		wantKey string
+	}{
+		{"reflect_allowlist", "[capabilities]\nreflect_allowlist = \"x\"\n", "logos.toml:2:21", `"reflect_allowlist"`},
+		{"transitive_exec_allowlist", "[capabilities]\ntransitive_exec_allowlist = \"x\"\n", "logos.toml:2:29", `"transitive_exec_allowlist"`},
+		{"transitive_net_allowlist", "[capabilities]\ntransitive_net_allowlist = \"x\"\n", "logos.toml:2:28", `"transitive_net_allowlist"`},
+		{"transitive_unsafe_allowlist", "[capabilities]\ntransitive_unsafe_allowlist = \"x\"\n", "logos.toml:2:31", `"transitive_unsafe_allowlist"`},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := Parse("logos.toml", []byte(tc.data))
+			if err == nil {
+				t.Fatalf("Parse(%q) succeeded, want an error (got %+v)", tc.data, got)
+			}
+			if !strings.Contains(err.Error(), tc.wantPos) || !strings.Contains(err.Error(), tc.wantKey) {
+				t.Errorf("Parse(%q) error = %q, want position %s and key %s", tc.data, err.Error(), tc.wantPos, tc.wantKey)
 			}
 		})
 	}
