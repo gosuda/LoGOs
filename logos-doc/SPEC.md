@@ -1904,7 +1904,6 @@ func pack(v int) []int {
 
 ### 17.5 Interop suite
 
-- The script `src/cmd/go/testdata/script/logos_interop.txt` MUST hold five cases, each with its own fixture. [T-Sec17][R-U2]
 - Case 1: a loGo/s package that imports a Go package from another workspace module MUST build and run. [T-Sec17][R-U2]
 - Case 2: a Go package that imports a loGo/s package from another workspace module MUST build and run under `logos`. [T-Sec17][R-U2][A-LGOSEL]
 - In case 2, a plain `go build ./...` of that Go module MUST fail with a load error that names the imported package. [T-Sec17][A-LGOSEL]
