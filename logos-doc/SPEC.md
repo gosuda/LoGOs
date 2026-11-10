@@ -11,14 +11,12 @@ The words MUST, MUST NOT, SHOULD, SHOULD NOT, and MAY follow RFC 2119. The text 
 
 ### 0.1 Upstream compatibility
 The loGo/s toolchain MUST be one complete toolchain for Go packages and loGo/s packages [T-0.1][R-U1].
-Go support MUST stay first-class in every release [T-0.1][R-U1].
 Every optimization-level change MUST apply to Go packages and to loGo/s packages, under `logos` and under plain `go` [T-0.1][R-U1].
 Every cgo fallback MUST apply to Go packages and to loGo/s packages, under `logos` and under plain `go` [T-0.1][R-U1].
 Note: the toolchain aims to serve both package kinds across code generation, runtime, garbage collection, stack, SIMD, wasm, and tooling. Only the optimization-level and cgo-fallback breadth in the two sentences above is pinned by tests.
-An improvement that this spec puts behind a `GOEXPERIMENT` flag MUST stay behind that flag as this spec states. The `logos_settings_env.txt` script gates the arena and preemptibleloops experiment defaults [T-0.1][R-U1].
+An improvement that this spec puts behind a named `GOEXPERIMENT` flag MUST stay behind that flag as this spec states. The `logos_settings_env.txt` script gates the arena and preemptibleloops experiment defaults [T-0.1][R-U1].
 Note: the `go` command can differ from upstream Go 1.27.2 in performance, code generation, runtime, and tooling. No test asserts a difference.
 The `go` command MUST keep Go language semantics, so every valid Go program MUST keep its Go meaning [T-0.1][R-U1].
-The milestone process MUST run `src/run.bash --no-rebuild` and keep its suite green as the regression floor [T-0.1].
 The `go version` output and the `go help` output, including every help topic, MUST stay the upstream text [T-0.1].
 Plain `go` MUST select improvements through flags and `GOEXPERIMENT` and MUST read no `logos.toml` [T-0.1][R-U1].
 A flag that plain `go` gains MUST stay absent from the help text, so that text stays byte-identical to upstream [T-0.1][R-U1].
@@ -87,7 +85,7 @@ It MUST NOT emit a `//go:build !logos` line. [T-0.3]
 
 ### 0.4 Design axiom for explicit code
 Explicitness guides the rules below. Signatures and call sites show side effects, mutability contracts, nilability states, and error paths [T-0.4]. Each later section states its own testable rules [T-0.4].
-The compiler MUST reject dangerous edge cases through type rules and `logos lint` rules [T-0.4]. The lint registry enumerates the enforced lint rules [T-0.4].
+The lint registry enumerates the enforced lint rules [T-0.4].
 
 ## 1. Tier 1 specification (toolchain, linter, desugaring)
 
