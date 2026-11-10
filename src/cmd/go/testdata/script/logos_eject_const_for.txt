@@ -20,8 +20,8 @@ logos eject -o out
 exists out/main.go
 
 ! grep '"comptime"' out/main.go
-grep '"nm"' out/main.go
-grep '"ct"' out/main.go
+grep 'append\(out, "nm"\)' out/main.go
+grep 'append\(out, "ct"\)' out/main.go
 ! grep 'Tag\.Get' out/main.go
 
 cd out
