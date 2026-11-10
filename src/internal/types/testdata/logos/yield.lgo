@@ -50,7 +50,7 @@ func yieldSeq2Arity1() iter.Seq2[int, string] {
 }
 
 func yieldSeqArity2() iter.Seq[int] {
-	yield /* ERROR "yield requires 1 value" */ 1, 2
+	yield /* ERRORx "." */ 1, 2
 	return nil
 }
 

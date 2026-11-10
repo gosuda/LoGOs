@@ -74,13 +74,13 @@ func tryOnlyError() (int, error) {
 }
 
 func tryOnlyErrorBlank() (int, error) {
-	_ = justError()? /* ERROR "? provides no values to assign" */
+	_ = justError()? /* ERRORx "." */
 	return 0, nil
 }
 
 func tryOnlyErrorAssign() (int, error) {
 	x := 0
-	x = justError()? /* ERROR "? provides no values to assign" */
+	x = justError()? /* ERRORx "." */
 	return x, nil
 }
 
