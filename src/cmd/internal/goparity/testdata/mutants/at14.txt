@@ -9,7 +9,7 @@ config: K5
 
 kind: compiler
 file: src/cmd/compile/internal/syntax/scanner.go
-expect: at14_question_postfix.go
+expect: at14_question_dot.go
 config: K5
 -- old --
 			break

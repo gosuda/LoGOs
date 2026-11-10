@@ -1,14 +1,13 @@
 kind: runtime
 file: src/runtime/logos_fastcall.go
 expect: at17m_both_plain_seq
-config: K1
+config: K20
 -- old --
-	errno := cgocall(fn, arg)
+	errno := asmcgocall(fn, arg)
+
 	gp.nocgocallback = false
-	return errno
 -- new --
-	errno := cgocall(fn, arg)
-	return errno
+	errno := asmcgocall(fn, arg)
 
 kind: cgo
 file: src/cmd/cgo/out.go
