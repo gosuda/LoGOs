@@ -106,7 +106,7 @@ Rules: logos-doc/SPEC.md. Status values: planned, tested, satisfied upstream, bl
 | #110 | Frozen view sharing mutable heap child | M5 | test/logos/run/freeze.lgo | tested |
 | #111 | Unsafe ARM64 load store pair fusion | M15 | test/logos/codegen/arm64_pair.lgo; test/logos/codegen/arm64_pair.go; src/cmd/compile/internal/ssa/pair_logos_test.go (TestLogosPairARM64) | tested |
 | #112 | Generated files clashing with source files | M1 | src/cmd/go/testdata/script/logos_eject.txt | tested |
-| #113 | Inlined defer leaking resources in loops | M6 | src/cmd/compile/internal/logos/m6gaps_test.go (TestScopeDeferOpenCoded) | tested |
+| #113 | Inlined defer leaking resources in loops | M6 | test/logos/run/scope_defer.lgo | tested |
 | #114 | Field reordering breaking serialized field order | M7 | test/logos/run/const_for.lgo | tested |
 | #115 | Typed nil inside union interface value | M3 | src/internal/types/testdata/logos/union_exhaustive.lgo | tested |
 | #116 | Mutating value-boxed struct through interface | M4 | src/internal/types/testdata/logos/property_iface.lgo | tested |
