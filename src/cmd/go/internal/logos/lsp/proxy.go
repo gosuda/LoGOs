@@ -268,6 +268,12 @@ func (p *Proxy) stop(ctx context.Context, srv *server, cancelWork context.Cancel
 func (p *Proxy) clientLoop(ctx context.Context, rd *reader) error {
 	for {
 		m, err := rd.read()
+		if _, ok := errors.AsType[*parseError](err); ok {
+			if ferr := p.client.fail(json.RawMessage("null"), codeParseError, "parse error"); ferr != nil {
+				p.logf("answering a parse error: %v", ferr)
+			}
+			continue
+		}
 		if errors.Is(err, io.EOF) {
 			p.mu.Lock()
 			p.ended = true

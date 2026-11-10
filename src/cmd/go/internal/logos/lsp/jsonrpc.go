@@ -27,6 +27,14 @@ type message struct {
 	Error   json.RawMessage `json:"error,omitempty"`
 }
 
+const codeParseError = -32700
+
+type parseError struct{ err error }
+
+func (e *parseError) Error() string { return e.err.Error() }
+
+func (e *parseError) Unwrap() error { return e.err }
+
 func (m *message) isResponse() bool { return m.Method == "" }
 
 func (m *message) isRequest() bool { return m.Method != "" && len(m.ID) > 0 }
@@ -46,7 +54,7 @@ func (rd *reader) read() (*message, error) {
 	}
 	m := new(message)
 	if err := json.Unmarshal(body, m); err != nil {
-		return nil, fmt.Errorf("decoding message: %w", err)
+		return nil, &parseError{err: fmt.Errorf("decoding message: %w", err)}
 	}
 	return m, nil
 }

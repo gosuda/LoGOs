@@ -1683,7 +1683,6 @@ func TestServeRejectsBadFrames(t *testing.T) {
 		{"corrupt length", "Content-Length: abc\r\n\r\n{}", ""},
 		{"negative", "Content-Length: -4\r\n\r\n{}", ""},
 		{"truncated", "Content-Length: 99\r\n\r\n{}", ""},
-		{"not json", "Content-Length: 3\r\n\r\nabc", ""},
 		{"cut header", "Content-Length: 3", ""},
 		{"over the cap", "Content-Length: " + strconv.Itoa(maxMessage+1) + "\r\n\r\n", "invalid Content-Length"},
 	} {
@@ -1829,6 +1828,90 @@ func TestServeAcceptsNonCanonicalHeaders(t *testing.T) {
 			outR.Close()
 		})
 	}
+}
+
+func TestServeAnswersParseErrorAndContinues(t *testing.T) {
+	scratch := t.TempDir()
+	scriptPath := filepath.Join(scratch, "script.json")
+	if err := os.WriteFile(scriptPath, []byte(`{}`), 0o666); err != nil {
+		t.Fatal(err)
+	}
+	opts := Options{
+		Gopls:    []string{os.Args[0], "-mode=stdio"},
+		Env:      append(os.Environ(), fakeEnv+"="+scriptPath, fakeLogEnv+"="+filepath.Join(scratch, "gopls.log")),
+		Compiler: newFakeCompiler(),
+		Stderr:   new(syncBuffer),
+	}
+	inR, inW, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	outR, outW, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	ctx := t.Context()
+	go func() { done <- Serve(ctx, inR, outW, opts) }()
+	frame := func(body string) string {
+		return fmt.Sprintf("Content-Length: %d\r\n\r\n%s", len(body), body)
+	}
+	bad := frame(`{"m":}`)
+	shutdown := frame(`{"jsonrpc":"2.0","id":2,"method":"shutdown","params":null}`)
+	bye := frame(`{"jsonrpc":"2.0","method":"exit","params":{}}`)
+	if _, err := io.WriteString(inW, bad+shutdown+bye); err != nil {
+		t.Fatal(err)
+	}
+	inW.Close()
+	rd := newReader(outR)
+	readFrame := func() *message {
+		t.Helper()
+		type result struct {
+			m   *message
+			err error
+		}
+		ch := make(chan result, 1)
+		go func() {
+			m, err := rd.read()
+			ch <- result{m, err}
+		}()
+		select {
+		case r := <-ch:
+			if r.err != nil {
+				t.Fatalf("reading the proxy reply: %v", r.err)
+			}
+			return r.m
+		case <-time.After(waitLimit):
+			t.Fatal("the proxy sent no reply frame")
+			return nil
+		}
+	}
+	first := readFrame()
+	if !first.isResponse() || string(first.ID) != "null" {
+		t.Fatalf("parse error reply = %+v, want a response with a null id", first)
+	}
+	v, err := decode(first.Error)
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, _ := number(v.(map[string]any)["code"])
+	if code != codeParseError {
+		t.Errorf("parse error reply code = %v, want %d", code, codeParseError)
+	}
+	second := readFrame()
+	if !second.isResponse() || string(second.ID) != "2" {
+		t.Fatalf("shutdown reply = %+v, want the response with id 2", second)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Serve after a parse error = %v, want nil", err)
+		}
+	case <-time.After(waitLimit):
+		t.Fatal("Serve did not return after the parse error and shutdown")
+	}
+	outW.Close()
+	outR.Close()
 }
 
 func TestProxyLeavesForeignJSONAlone(t *testing.T) {
