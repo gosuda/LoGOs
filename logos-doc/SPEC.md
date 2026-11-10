@@ -184,22 +184,8 @@ JSON output MUST offer autofix candidates for optional chaining with default, ea
 JSON output for a Go package MUST offer only the verb fix to `%w` among the previous sentence's candidates, because the other candidates name loGo/s syntax; it MAY also offer the `portability::atomic_plain_int64` wrapper fix. [T-102][R-U1]
 A default over a closed union MUST report pedantic::exhaustive_union_switch when the pedantic group is enabled; that rule defaults to allow and is silent otherwise. [T-102]
 Exhaustive switches MUST still list every member or default. [T-102]
-Unlocked sharing of a mutable multiword value with a child block plus a write on either side MUST fail with concurrency::concurrent_multiword_race. [T-102]
-Const views and logos/sync types MUST pass. [T-102]
-A plain deferred literal MUST NOT assign nil to the error result with errdefer present. [T-102]
-The compiler MUST reject such code with `correctness::defer_erases_errdefer_state`. [T-102]
-Sharing a mutable multi-word value with a child plus a write MUST fail with `concurrency::concurrent_multiword_race`. [T-102]
-Const views and `logos/sync` types MUST stay allowed. [T-102]
-The compiler MUST fail a function whose every path calls itself with identical arguments before return with [correctness::infinite_recursion]. [T-102]
-Escape analysis MUST warn with [perf::large_backing_array_pin] when a subslice or substring of a backing array above 64 KB escapes. [T-102]
-The compiler MUST allow a channel operation outside a select with a done case only for a locally made channel with constant capacity and send count within capacity. [T-102]
-Other operations MUST fail with [correctness::unbounded_channel_op]. [T-102]
 The compiler MUST allow always-nil-error callees and benign writers to standard output, standard error, byte buffers, and string builders. [T-102]
-Other dropped errors MUST fail with [slop::discarded_error]. [T-102]
-The compiler MUST warn with [perf::time_after_in_loop] against time.After inside a loop body. [T-102]
 It MUST NOT hoist timers across iterations. [T-102]
-It MUST NOT hoist timers, so no drain bug can occur. [T-102]
-The compiler MUST warn with [portability::serialized_unsized_int] on an int or uint field in a struct with JSON tags. [T-102]
 
 ### 1.3 RFC-103: Context and next tools
 The command `logos context <pkg>#<Symbol>` MUST print the declaration plus one level of mentioned signatures with no function bodies [T-103].
