@@ -20,6 +20,14 @@ func constIfDeadChecked() int {
 	}
 }
 
+func constIfDeadElseChecked() int {
+	const if 1 == 1 {
+		return 1
+	} else {
+		return undefinedInDeadElse // ERROR "undefined: undefinedInDeadElse"
+	}
+}
+
 func constIfNeedsConstant(n int) int {
 	const if n /* ERROR "comptime::not_constant" */ > 0 {
 		return 1
