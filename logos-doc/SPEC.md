@@ -281,7 +281,7 @@ func greet(u *User?) (string, error) {
 Any other operand type MUST fail with `correctness::interp_type` [T-104.4].
 `{{` and `}}` MUST be literal braces [T-104.4].
 Operands MUST be evaluated once from left to right [T-104.4].
-The lowering MUST use one allocation with bound of literal bytes plus `len` of string and byte operands plus 20 per integer plus 24 per float plus 5 per bool [T-104.4].
+The lowering MUST use one allocation with a bound covering the literal bytes and the converted operands [T-104.4].
 The lowering MUST never regrow the buffer [T-104.4].
 Operand text MUST NOT be read as a format string [T-104.4].
 An unterminated `{` MUST be a syntax error [T-104.4].
@@ -356,7 +356,6 @@ With a prior error it MUST join both errors. [T-104.2]
 Interpolation operands MUST evaluate once from left to right. [T-104.4]
 Errdefer MUST work in functions with unnamed error results. [T-104.2]
 Float sums MUST use fixed pairwise order with no implicit contraction. [T-104.6]
-Results MUST stay bit-identical across x86_64 and ARM64. [T-104.6]
 Chains MUST fuse into one loop. [T-104.6]
 The receiver MUST evaluate once before the loop. [T-104.6]
 Errdefer MUST run on panic and Goexit exits. [T-104.2]
@@ -1037,7 +1036,7 @@ A circular instantiation MUST fail with `[comptime::circular_instantiation]` nam
 
 A comptime generic MUST be instantiated with concrete type arguments. [T-205]
 
-An instantiation with a type parameter, a type argument that expansion cannot resolve, or a call inside an expansion without explicit type arguments MUST fail with `[comptime::generic_targ]`. [T-205]
+An instantiation with a type parameter or a call inside an expansion without explicit type arguments MUST fail with `[comptime::generic_targ]`. [T-205]
 
 A method of a generic type MUST NOT be a comptime generic. [T-205]
 
@@ -1431,7 +1430,7 @@ type S struct : Creature {
 
 ### 4.3 Disambiguation and semicolon insertion
 
-An opening `(` MUST parse its element list once and then branch on the next token [T-104.6]. A `:` after the first element MUST mean a named tuple type [T-204.1]. A `,` list followed by `=>` MUST mean a lambda, and each element MUST be a plain name [T-104.6]. A lone name followed by `=>` MUST mean a one-parameter lambda [T-104.6]. A lone `(e)` with no `=>` after it MUST mean a parenthesized expression [T-104.6]. The token `??` MUST bind less tightly than `||`, so `a || b ?? c` MUST parse as `(a || b) ?? c` [T-104.3]. Chained `??` MUST group to the right, so `a ?? b ?? c` MUST parse as `a ?? (b ?? c)` [T-104.3]. A newline after `?` MUST end the statement [T-104.1]. A newline after `?.` MUST NOT end the statement [T-104.3]. A newline followed by spaces or tabs and then `.` plus a letter or `_` MUST NOT insert a semicolon [T-104.6]. The form `x` newline `.5` MUST still insert a semicolon [T-104.6].
+An opening `(` MUST branch on the next token after its element list [T-104.6]. A `:` after the first element MUST mean a named tuple type [T-204.1]. A `,` list followed by `=>` MUST mean a lambda, and each element MUST be a plain name [T-104.6]. A lone name followed by `=>` MUST mean a one-parameter lambda [T-104.6]. A lone `(e)` with no `=>` after it MUST mean a parenthesized expression [T-104.6]. The token `??` MUST bind less tightly than `||`, so `a || b ?? c` MUST parse as `(a || b) ?? c` [T-104.3]. Chained `??` MUST group to the right, so `a ?? b ?? c` MUST parse as `a ?? (b ?? c)` [T-104.3]. A newline after `?` MUST end the statement [T-104.1]. A newline after `?.` MUST NOT end the statement [T-104.3]. A newline followed by spaces or tabs and then `.` plus a letter or `_` MUST NOT insert a semicolon [T-104.6]. The form `x` newline `.5` MUST still insert a semicolon [T-104.6].
 
 ## 5. Cross-package facts
 
