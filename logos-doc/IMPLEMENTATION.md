@@ -2986,6 +2986,41 @@ per-lane records follow.
   LSP rows cite the `src/cmd/go/internal/logos/lsp` unit tests.
   Zeroalloc in Go packages: `logos lint` and `logos build` apply the
   check, `go build` ignores it (`logos_zeroalloc_recursive.txt`).
+- integ-cl-confirm (SPEC confirmation round, lanes front, eject,
+  interop, units, runtime, backend, lsp): front:
+  `src/internal/types/testdata/logos/ctfe.lgo`,
+  `test/logos/compile/const_eval_limits.lgo`,
+  `src/internal/types/testdata/logos/const_views.lgo`,
+  `src/cmd/go/testdata/script/logos_eject_const_for.txt`,
+  `test/logos/lint/arena_fallback.lgo`,
+  `test/logos/lint/region_escape.lgo`, `test/logos/codegen/zeroalloc.lgo`;
+  eject: `src/cmd/go/testdata/script/logos_eject.txt`,
+  `src/cmd/go/testdata/script/logos_eject_interop.txt`,
+  `src/cmd/go/testdata/script/logos_eject_union.txt`,
+  `src/cmd/go/testdata/script/logos_arena_eject.txt`,
+  `src/cmd/go/testdata/script/logos_arena_absent.txt`; interop:
+  `src/cmd/go/testdata/script/logos_interop_prop.txt`,
+  `src/cmd/go/testdata/script/logos_const_method_no_property.txt`,
+  `src/cmd/go/testdata/script/logos_facts_wire_a3.txt`; units:
+  `src/cmd/compile/internal/logos/ctfe/ctfe_test.go`,
+  `src/cmd/compile/internal/logos/constfor_limit_test.go`,
+  `src/cmd/go/testdata/script/logos_comptime_nodes.txt`,
+  `src/cmd/compile/internal/logos/lint/rule_typed_nil_return_test.go`,
+  `src/cmd/compile/internal/logos/json_binary_test.go`,
+  `src/cmd/compile/internal/logos/simdslice_test.go`; runtime:
+  `src/logos/sync/hot_pointer_internal_test.go`,
+  `src/runtime/logos_fastcall_test.go`,
+  `src/cmd/cgo/internal/testlogos/fastcall_test.go`,
+  `test/logos/run/json_unmarshal_test.lgo`,
+  `test/logos/run/json_union_test.lgo`, `test/logos/run/pair_fault.lgo`,
+  `src/cmd/go/testdata/script/logos_redteam_144.txt`; backend:
+  `test/logos/codegen/region_bump.lgo`,
+  `src/cmd/compile/internal/walk/region_logos_test.go`,
+  `test/logos/codegen/wasm_noyield.lgo`,
+  `src/cmd/go/testdata/script/logos_wasm_stackswitch.txt`,
+  `src/cmd/compile/internal/logos/wasmyield/wasmyield_test.go`,
+  `src/cmd/compile/internal/logos/m6gaps_test.go`,
+  `src/cmd/compile/internal/logos/wasm_test.go`; lsp: no new tests.
 
 ## M23. Architecture collapses
 
