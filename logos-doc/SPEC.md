@@ -84,8 +84,6 @@ The tool MUST NOT write ejected files into the source tree [T-0.3].
 Ejected code MUST build with an upstream Go 1.27 toolchain [T-0.3].
 A Go package that imports a loGo/s package MUST see each exported declaration with the Go-facing signature that `logos eject` emits for it [T-0.3][R-U2].
 The output MUST NOT emit colliding helper imports. [T-0.3]
-Ejected output MUST NOT emit `.gen.go` file names. [T-0.3]
-It MUST NOT emit a `//go:build !logos` line. [T-0.3]
 
 ### 0.4 Design axiom for explicit code
 Explicitness guides the rules below. Signatures and call sites show side effects, mutability contracts, nilability states, and error paths [T-0.4]. Each later section states its own testable rules [T-0.4].
@@ -497,7 +495,7 @@ A `const []I`, `const *I`, or `const map[K]I` where `I` is an interface MUST rem
 
 Passing a constant view to a non-constant parameter of an `.lgo` function MUST fail with the same diagnostic. [T-201]
 
-A constant view that reaches a Go-mode parameter (the standard library or any Go package) is checked by the caller-side `correctness::const_view_mutation` diagnostic; the compiler stores no per-parameter `ParamMutated` gate for Go-mode parameters. [T-201][R-U2]
+A constant view that reaches a Go-mode parameter (the standard library or any Go package) is checked by the caller-side `correctness::const_view_mutation` diagnostic; the compiler stores no per-parameter `ParamMutated` gate for Go-mode parameters outside the standard-library table of Sec 7. [T-201][R-U2]
 
 Assigning `const []*T` to `[]*T` MUST fail with `[correctness::const_view_escape]`. [T-201]
 
@@ -944,7 +942,7 @@ With `GOEXPERIMENT=simd` on amd64 or arm64 the lowering MUST call `simd/archsimd
 
 Otherwise it MUST emit unrolled scalar code. [T-204.2]
 
-On amd64 each array-operator vector form MUST run only when the `simd/archsimd` CPU feature check its methods need is true (`X86.AVX()` for 128-bit shapes and 256-bit float shapes, `X86.AVX2()` for 256-bit integer shapes, `X86.AVX512()` for 512-bit shapes and for 64-bit integer `*`) and MUST take the scalar form when it is false; the check MUST be omitted when the build's `GOAMD64` level guarantees the feature (`v3` for AVX and AVX2, `v4` for AVX512), and arm64 needs no check because its forms are baseline NEON. Slice reductions use 256-bit vectors for 32-bit and 64-bit lanes and 512-bit vectors for 8-bit and 16-bit lanes, guarded by `X86.AVX2()` and `X86.AVX512()` respectively for their masked tails, elided at `v3` for the AVX2 forms and `v4` for the AVX512 forms. [T-204.2]
+On amd64 each array-operator vector form MUST run only when the `simd/archsimd` CPU feature check its methods need is true (`X86.AVX()` for 128-bit shapes and 256-bit float shapes, `X86.AVX2()` for 256-bit integer shapes, `X86.AVX512()` for 512-bit shapes and for 64-bit integer `*`) and MUST take the scalar form when it is false; the check MUST be omitted when the build's `GOAMD64` level guarantees the feature (`v3` for AVX and AVX2, `v4` for AVX512), and arm64 needs no check because its forms are baseline NEON. [T-204.2]
 
 Direct ISA lowering is replaced by this two-form rule. [T-204.2]
 
@@ -1102,7 +1100,6 @@ const if comptime.IsStruct[T]() {
     }
 }
 ```
-Traces MUST print base names without the `_logosct<N>` suffix. [T-205]
 ViewAs MUST accept only POD structs with no padding, no bool, no pointers, interfaces, slices, maps, or strings, and MUST keep the source alive. [T-205]
 Short inputs MUST panic with logos: ViewAs need-have sizes. [T-205]
 An exact `const switch` case MUST lower to a run-time type switch with rebinding. [T-205]
@@ -1243,7 +1240,7 @@ Region placement MUST NOT change program meaning: every program MUST print the s
 Implicit placement [T-301.1][R-U1]:
 With implicit placement on, an object that escape analysis proves does not outlive its frame, but that cannot live on the stack, MUST allocate in the frame's region. [T-301.1]
 Frame exit MUST release that region. [T-301.1]
-A value that the caller keeps is placed in the caller's region.
+A returned value that the caller keeps MUST allocate in the caller's region only when escape analysis proves no pointer to it outlives the caller. [T-301.1]
 A loop back-edge MUST release iteration-local objects. [T-301.1]
 Implicit placement MUST stay off unless the build sets `GOEXPERIMENT=logosarena`. [T-301.1]
 Under `logos`, `[build] arena` MUST set that experiment, and its default MUST be true. [T-301.1][R-U1]
@@ -1261,14 +1258,14 @@ The compiler MUST place an object in `r` only when escape analysis proves that n
 Otherwise the object MUST go on the heap, with `perf::arena_fallback` naming the call and the escaping flow. [T-301.2]
 A store of a region pointer into a region object whose owner block is the same as, or nested inside, the owner block of the stored pointer's region MUST NOT count as an escape. A store into an object of an enclosing region MUST count as an escape. [T-301.2]
 In a `.lgo` package, a `Region` that is stored outside a local variable, returned, sent on a channel, captured by a `go` statement, or captured by an escaping closure MUST fail with `correctness::region_escape`. [T-301.2]
-In a Go package that use is allowed. With `GOEXPERIMENT=logosarena` placement through that region follows the same escape rule as in a `.lgo` package: the compiler places the object in the region only when escape analysis proves no pointer to it outlives the owner block of `r`, otherwise the object goes on the heap with `perf::arena_fallback` naming the call and the escaping flow; a use that would fail with `correctness::region_escape` in a `.lgo` package falls back to the heap instead. Without the experiment every `logos/arena` call behaves as its heap equivalent. [T-301.2][R-U1]
+In a Go package, passing an `r` to a callee is allowed. With `GOEXPERIMENT=logosarena` placement through that region follows the same escape rule as in a `.lgo` package: the compiler places the object in the region only when escape analysis proves no pointer to it outlives the owner block of `r`, otherwise the object goes on the heap with `perf::arena_fallback` naming the call and the escaping flow; a use that would fail with `correctness::region_escape` in a `.lgo` package falls back to the heap instead. Without the experiment every `logos/arena` call behaves as its heap equivalent. [T-301.2][R-U1]
 A `go group` child MAY read a parent-region object through a const view. [T-301.2]
 A non-const capture MUST count as an escape of that object. [T-301.2]
 `logos eject` MUST lower `arena.Open()` to `_logos_rt.Region{}`, `arena.New[T](r)` to `new(T)`, `arena.Make[T](r, n)` to `make([]T, n)`, and `arena.Append[T](r, s, v...)` to `append(s, v...)`. [T-301.2]
 `logos/rt` MUST provide `type Region = arena.Region`. [T-301.2]
 The eject support module MUST carry the `arena` package. [T-301.2]
 The eject MUST append `_ = r` after each local Region declaration. [T-301.2]
-The toolchain MUST NOT ship the `arena` package, `reflect.ArenaNew`, or `GOEXPERIMENT=arenas`. [T-301.2]
+The toolchain MUST NOT ship the upstream `arena` package, `reflect.ArenaNew`, or `GOEXPERIMENT=arenas`. [T-301.2]
 
 Comptime and escape analysis:
 Escape analysis MUST record a parameter that leaks only into the pointee of another parameter. [T-301.2][R-U1]
@@ -1278,23 +1275,16 @@ This precision MUST apply to `.lgo` packages, and to Go packages under `GOEXPERI
 [T-301.1] Recursion MUST return arena-allocated results to the caller intact.
 [T-301.1] When a goroutine parks, it MUST release every chunk whose noscan and scan regions are both empty, including empty chunks behind a live chunk.
 [T-301.1] Idle parked goroutines MUST consume 0 bytes of arena memory.
-On park, a goroutine MUST release every empty arena chunk, including empty chunks behind a live chunk. [T-301.1]
 It MUST retain every live chunk and preserve all live-object addresses. [T-301.1]
 With no live chunks, it MUST retain no arena capacity; its ordinary stack and runtime metadata still exist. [T-301.1]
-The collector MUST scan scan-region objects with the goroutine stack. [T-301.1]
 Cgo pointer checks MUST accept arena addresses without panic. [T-301.1]
 Frame exit, including exit by panic, MUST restore the watermark. [T-301.1]
-The runtime MUST zero popped regions before reuse. [T-301.1]
-Collection after exit MUST find no stale pointers in popped scan memory. [T-301.1]
 A loop back-edge MUST restore the watermark for iteration-local objects. [T-301.1]
 A loop with only iteration-local allocation MUST NOT grow arena use across iterations. [T-301.1]
 
 ### 3.2 RFC-302: Smart stack engine
 
-The variable-size `make` stack buffer is 32 bytes under plain `go` and under `logos` at O0 and O1. At O2 it is 256 bytes and at O3 it is 4096 bytes for non-standard packages; a plain `logos build` with no `-O` flag runs O2. Standard-library-provenance packages and functions in a recursive call-graph cycle keep the 32-byte buffer at every opt level. [T-302]
-At O2 it MUST be 256 bytes for non-standard packages. [T-302]
-At O3 it MUST be 4096 bytes for non-standard packages. [T-302]
-A standard-library-provenance package MUST keep the default 32-byte variable-make buffer at every opt level [T-105][T-302].
+The variable-size `make` stack buffer is 32 bytes at O0 and O1, and under plain `go` without `-O`. At O2 it is 256 bytes and at O3 it is 4096 bytes for non-standard packages; a `logos build` with no `-O` flag uses `logos.toml [build] opt_level`, which defaults to O2. Standard-library-provenance packages and functions in a recursive call-graph cycle keep the 32-byte buffer at every opt level. [T-302]
 A slice `make` with variable effective capacity that flows into a cgo call argument or an `unsafe.Pointer` conversion MUST NOT use the stack buffer and MUST allocate its backing storage on the heap. Effective capacity is the explicit capacity when present, otherwise the length; it is fixed only when the compiler proves it constant with `ir.IsSmallIntConst` after literal rewriting. Fixed-effective-capacity makes MUST retain ordinary escape and size behavior, not a guarantee of stack allocation. [T-302]
 Under `GOEXPERIMENT=logosstack`, the runtime MUST choose the initial goroutine stack size from the per-PC exponential moving average of final stack sizes. [T-302]
 Without history for a PC, it MUST keep the current stack size. [T-302]
@@ -1345,7 +1335,7 @@ The fast-call state MUST read zero after return without clearing the caller's ar
 POD and primitive-slice arguments MUST skip `_cgoCheckPointer`. [T-304]
 
 Implementation note (informative): Fast calls preserve `runtime.NumCgoCall` accounting and reset the cgo traceback buffer.
-The original M owns the diagnostic slots, which stay zero under the no-clock rule above, even when sysmon retakes its P.
+The original M owns the diagnostic slots, which read zero after return, as the fast-call state rule above states, even when sysmon retakes its P.
 Normal return and rejected callbacks clear this record before leaving syscall state.
 The slots contain address copies, not GC roots or pins.
 The ordinary cgo pointer-lifetime rules still apply.
@@ -1387,7 +1377,7 @@ The fixture's `-buildvcs=false` isolates the test from VCS metadata; it is not a
 
 ### 4.1 Tokens and contextual words
 
-The language MUST add no new global keywords [T-0.2]. The words `errdefer`, `yield`, `scope`, and `group` MUST act as contextual words valid only in `.lgo` files [T-0.2]. The word `errdefer` MUST start a statement only when an identifier or `func` follows it [T-0.2][T-104.2]. Inside a function whose results are `iter.Seq` or `iter.Seq2`, `yield` MUST start a statement; elsewhere `yield e` still parses as a statement and the type checker rejects it with `correctness::yield_outside_generator` [T-0.2]. The word `scope` MUST appear only directly before `defer` [T-0.2]. The word `group` MUST appear only directly after `go` [T-0.2]. The word `const` MUST gain new positions before `for`, `if`, `switch`, and `func`, and those positions MUST remain syntax errors in plain Go [T-0.2]. The word `const` MUST also appear before an interface method declaration to mark a readonly obligation, and only there outside the listed positions; that method position MUST remain a syntax error in plain Go [T-0.2][T-201]. Code MUST NOT declare `errdefer`, `yield`, `scope`, or `group` as ordinary names in those positions [T-0.2]. Outside those positions each word MUST keep its ordinary identifier meaning, so `errdefer := 1` MUST parse as an assignment [T-0.2][T-104.2]. The form `?` MUST scan as a postfix operator only in `.lgo` files [T-104.1]. The form `?.` MUST scan as one unit only when `?` joins `.` with no gap [T-104.3]. The form `??` MUST scan as one binary operator only when two `?` marks join with no gap [T-104.3]. The form `=>` MUST scan as one unit only when `=` joins `>` with no gap in `.lgo` files [T-104.6]. The form `$"..."` MUST scan as an interpolated string only when `$` joins an opening quote with no gap in `.lgo` files [T-104.4].
+The language MUST add no new global keywords [T-0.2]. The words `errdefer`, `yield`, `scope`, and `group` MUST act as contextual words valid only in `.lgo` files [T-0.2]. The word `errdefer` MUST start a statement only when an identifier or `func` follows it [T-0.2][T-104.2]. Inside a function whose results are `iter.Seq` or `iter.Seq2`, `yield` MUST start a statement; elsewhere `yield e` still parses as a statement and the type checker rejects it with `correctness::yield_outside_generator` [T-0.2]. The word `scope` MUST appear only directly before `defer` [T-0.2]. The word `group` MUST appear only directly after `go` [T-0.2]. The word `const` MUST gain new positions before `for`, `if`, `switch`, and `func`, and those positions MUST remain syntax errors in plain Go [T-0.2]. The word `const` MUST also appear before an interface method declaration to mark a readonly obligation, and only there outside the listed positions; that method position MUST remain a syntax error in plain Go [T-0.2][T-201]. Code MUST NOT declare `errdefer`, `yield`, `scope`, or `group` as ordinary names in those positions [T-0.2]. Outside those positions and outside `yield e` statements, each word MUST keep its ordinary identifier meaning, so `errdefer := 1` MUST parse as an assignment [T-0.2][T-104.2]. The form `?` MUST scan as a postfix operator only in `.lgo` files [T-104.1]. The form `?.` MUST scan as one unit only when `?` joins `.` with no gap [T-104.3]. The form `??` MUST scan as one binary operator only when two `?` marks join with no gap [T-104.3]. The form `=>` MUST scan as one unit only when `=` joins `>` with no gap in `.lgo` files [T-104.6]. The form `$"..."` MUST scan as an interpolated string only when `$` joins an opening quote with no gap in `.lgo` files [T-104.4].
 
 ### 4.2 Grammar
 
@@ -1445,7 +1435,7 @@ An opening `(` MUST parse its element list once and then branch on the next toke
 
 ## 5. Cross-package facts
 
-Cross-package facts MUST travel in the archive member `__.LOGOS` [T-Sec5]. Exported declaration signatures remain in `__.PKGDEF`; `__.LOGOS` carries fingerprint-bound typed fact records and no declaration header. [T-Sec5][T-201] The member MUST hold one fact line per function for `ReturnsNonNil`, `AlwaysNilError`, `PureConst`, `ReceiverMutated`, the `ParamMutated` mask, `FnFact.Readonly`, `MayYield`, and generic assertion effects `AssertTP` and `AssertRTP` [T-Sec5][T-201]. Facts MUST use format version 3; older members MUST be rejected rather than read through a compatibility path [T-Sec5][T-201]. Presence of assertion-effect flags MUST distinguish analyzed effects from unknown effects; explicit `AssertTP=0,AssertRTP=0` MUST denote proven-zero effects [T-Sec5][T-201]. Assertion and mutation masks MUST use arbitrary-arity hexadecimal masks without a 64-parameter limit [T-Sec5][T-201]. Encode and decode MUST preserve `FnFact.Readonly` [T-201][T-Sec5]. The member MAY hold comptime generic sources as comptime records [T-Sec5]. The facts MUST bind to the `__.PKGDEF` fingerprint, and a stale fingerprint MUST fail the dependent build [T-Sec5]. A Go importer of a loGo/s package MUST see the signatures that `logos eject` emits: a closed union value type as its methods-only interface with the terms dropped, `*T?` as the bare pointer, a non-nil `*T` as a plain `*T`, a property interface as its `Logos_GetF` and `Logos_SetF` accessor methods, a readonly interface method as its plain method, and a const view as its plain type [T-Sec5][R-U2][T-201]. Lowering and eject MUST erase only the `const` keyword of a readonly method for emitted Go, keeping source positions and qualification facts for loGo/s importers [T-201][T-0.3][T-Sec5]. A Go package's member MUST carry one `lang go` record and no declaration header [T-Sec5][R-U1][T-201]. An importer MUST NOT read a package that carries the `lang go` record as a loGo/s package: no non-nil pointer check, no const-view mutation fact, and no overlay applies to it [T-Sec5][R-U1]. Assertion effects are emitted for Go and `.lgo` packages without an opt-level or GOARCH gate in the facts writer; command coverage stays as tested [T-Sec5][T-201]. A Go package with assertion effects writes `__.LOGOS` under the same emission condition as the other Go-package facts [T-Sec5][T-201]. Importers MUST consume these effects from `lang go` members [T-Sec5][R-U1]. Only the `lang go` record has pinned unconditional emission; other Go-package facts keep whatever emission condition their writer tests pin [T-Sec5][T-Sec12]. When this toolchain compiles a Go package that calls a loGo/s function or method, the compiler MUST insert a `logos/rt.MustNonNil` check for each non-nil pointer parameter of the callee in a direct call, in a `go` statement, and in a `defer` statement, using the callee facts from `__.LOGOS` [T-Sec5][R-U2]. A call through a function value, a method value, or an interface has no such check; this is a documented hole [T-Sec5][R-U2][A-GOBOUNDARY]. A nil receiver that a Go caller passes to a method with a non-nil pointer receiver has no such check either; this is a documented hole [T-Sec5][R-U2][A-GOBOUNDARY]. Code that an upstream toolchain builds from eject output has no such check either; this is a documented hole, like reflection and `unsafe` [T-Sec5][R-U2][A-GOBOUNDARY]. A Go mutation through a const view and a Go store of a non-member into a closed union are documented holes, and the compiler does not check them [T-Sec5][R-U2][A-GOBOUNDARY].
+Cross-package facts MUST travel in the archive member `__.LOGOS` [T-Sec5]. Exported declaration signatures remain in `__.PKGDEF`; `__.LOGOS` carries fingerprint-bound typed fact records and no declaration header. [T-Sec5][T-201] The member MUST hold one fact line per function for `ReturnsNonNil`, `AlwaysNilError`, `PureConst`, `ReceiverMutated`, the `ParamMutated` mask, `FnFact.Readonly`, `MayYield`, and generic assertion effects `AssertTP` and `AssertRTP` [T-Sec5][T-201]. Facts MUST use format version 3; older members MUST be rejected rather than read through a compatibility path [T-Sec5][T-201]. Presence of assertion-effect flags MUST distinguish analyzed effects from unknown effects; explicit `AssertTP=0,AssertRTP=0` MUST denote proven-zero effects [T-Sec5][T-201]. Assertion and mutation masks MUST use arbitrary-arity hexadecimal masks without a 64-parameter limit [T-Sec5][T-201]. Encode and decode MUST preserve `FnFact.Readonly` [T-201][T-Sec5]. The member MAY hold comptime generic sources as comptime records [T-Sec5]. The facts MUST bind to the `__.PKGDEF` fingerprint, and a stale fingerprint MUST fail the dependent build [T-Sec5]. A Go importer of a loGo/s package MUST see the signatures that `logos eject` emits: a closed union value type as its methods-only interface with the terms dropped, `*T?` as the bare pointer, a non-nil `*T` as a plain `*T`, a property interface as its `Logos_GetF` and `Logos_SetF` accessor methods, a readonly interface method as its plain method, and a const view as its plain type [T-Sec5][R-U2][T-201]. Lowering and eject MUST erase only the `const` keyword of a readonly method for emitted Go, keeping source positions and qualification facts for loGo/s importers [T-201][T-0.3][T-Sec5]. A Go package's member MUST carry one `lang go` record and no declaration header [T-Sec5][R-U1][T-201]. An importer MUST NOT read a package that carries the `lang go` record as a loGo/s package: no non-nil pointer check, no const-view mutation fact, and no overlay applies to it [T-Sec5][R-U1]. Assertion effects are emitted for Go and `.lgo` packages without an opt-level or GOARCH gate in the facts writer; command coverage stays as tested [T-Sec5][T-201]. A Go package with assertion effects writes `__.LOGOS` under the emission condition its writer tests pin for Go-package facts [T-Sec5][T-201]. Importers MUST consume assertion effects from `lang go` members [T-Sec5][R-U1]. Only the `lang go` record has pinned unconditional emission; Go-package facts for other effects keep whatever emission condition their writer tests pin [T-Sec5][T-Sec12]. When this toolchain compiles a Go package that calls a loGo/s function or method, the compiler MUST insert a `logos/rt.MustNonNil` check for each non-nil pointer parameter of the callee in a direct call, in a `go` statement, and in a `defer` statement, using the callee facts from `__.LOGOS` [T-Sec5][R-U2]. A call through a function value, a method value, or an interface has no such check; this is a documented hole [T-Sec5][R-U2][A-GOBOUNDARY]. A nil receiver that a Go caller passes to a method with a non-nil pointer receiver has no such check either; this is a documented hole [T-Sec5][R-U2][A-GOBOUNDARY]. Code that an upstream toolchain builds from eject output has no such check either; this is a documented hole, like reflection and `unsafe` [T-Sec5][R-U2][A-GOBOUNDARY]. A Go mutation through a const view and a Go store of a non-member into a closed union are documented holes, and the compiler does not check them [T-Sec5][R-U2][A-GOBOUNDARY].
 Cross-package facts MUST travel in `__.LOGOS` with a fingerprint. [T-Sec5]
 When this toolchain compiles the Go caller, it MUST insert `logos/rt.MustNonNil` and MUST panic with the call position. [T-Sec5]
 
@@ -1731,14 +1721,12 @@ Accepted wire bytes MUST stay unchanged. [T-Sec12][T-Sec10.1]
 - Adjacent 16-byte vector stores MUST pair into FSTPQ under the same conditions. [T-303]
 - A 16-byte pair offset outside -1024..1008 or not a multiple of 16 MUST stay separate loads or stores. [T-303]
 - With the default target_cpu the ARM64 target MUST use GOARM64=v8.2, so LSE atomics stay available. [T-303][T-105]
-Paired accesses MUST keep distinct destinations with encodable offsets only; calls and atomics end a candidate chain, 16-byte pairs outside -1024..1008 multiples of 16 stay separate, and 4- and 8-byte pairs outside their ranges rely on the assembler fixup. [T-303]
-The `arm64_pair` fixtures MUST pin this behavior; no in-tree test asserts upstream enforcement of these ranges. [T-303]
+- The `arm64_pair` fixtures MUST pin the pairing rules of this list. [T-303]
 
 ### 13.2 Amd64 masked tails, rotates, and checked lengths
 
 - In a native build, reductions over slices MUST use fault-suppressing masked loads for tail elements. [T-303]
 - Masked tails MUST NOT read past the end of the slice. [T-303]
-The build MUST add no guard padding elsewhere. [T-303]
 - The build MUST NOT add guard padding for vector tails. [T-303]
 - In a native build with `GOEXPERIMENT=simd` on amd64 or arm64, `.sum()` on a bare slice of a fixed-width numeric element kind or an alias of one MUST load full vectors for the body and load the tail once through a masked load that enables only the remaining elements. [T-303]
 - On amd64 that masked load MUST be VPMASKMOVD or VPMASKMOVQ for 32 and 64-bit elements, which need AVX2, and the zeroing K-masked VMOVDQU8 or VMOVDQU16 for 8 and 16-bit elements, which need AVX512. [T-303]
