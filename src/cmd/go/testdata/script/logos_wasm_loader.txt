@@ -60,8 +60,28 @@ exists logos.wasm
 exists logos.loader.mjs
 exec node ../runok.mjs logos.wasm logos.loader.mjs
 stdout '^provided-ok$'
-
 cd ..
+cd noprov
+env GOOS=js
+env GOARCH=wasm
+cp $GOROOT/lib/wasm/wasm_exec.js wasm_exec.js
+# A non-standard import that exports none of the loader helpers does not
+# satisfy the unless clause: the implicit logos/rt import stays, and the
+# loader still runs. Pruning on any non-standard package drops this line.
+go build -x -o app.wasm .
+stderr 'packagefile logos/rt='
+exists app.wasm
+exists app.loader.mjs
+exec node ../runok.mjs app.wasm app.loader.mjs
+stdout '^provided-ok$'
+logos build -x -o logos.wasm .
+stderr 'packagefile logos/rt='
+exists logos.wasm
+exists logos.loader.mjs
+exec node ../runok.mjs logos.wasm logos.loader.mjs
+stdout '^provided-ok$'
+cd ..
+
 cd lgo
 logos eject -o out
 exists out/main.go
@@ -644,6 +664,50 @@ func errmsgLen() int32 {
 	return int32(len(errmsg))
 }
 
+
+-- noprov/go.mod --
+module example.com/noprov
+
+go 1.27
+
+-- noprov/main.go --
+package main
+
+import (
+	_ "example.com/noprov/helper"
+	"unsafe"
+)
+
+//go:wasmimport host add
+func hostAdd(a, b int32) int32
+
+//go:wasmexport incr
+func incr(p unsafe.Pointer, n int32) int32 {
+	b := unsafe.Slice((*byte)(p), n)
+	for i := range b {
+		b[i]++
+	}
+	return 0
+}
+
+//go:wasmexport checkHost
+func checkHost(a, b, want int32) int32 {
+	if hostAdd(a, b) != want {
+		return 1
+	}
+	return 0
+}
+
+func main() {
+	select {}
+}
+
+-- noprov/helper/helper.go --
+package helper
+
+func Answer() int {
+	return 42
+}
 -- runok.mjs --
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
