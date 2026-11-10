@@ -13,6 +13,9 @@ env GOTOOLCHAIN=local
 [cgo] go build -a -trimpath -o $WORK/without$GOEXE ./sub
 [cgo] exec cmp $WORK/with$GOEXE $WORK/without$GOEXE
 [cgo] mv $WORK/logos.toml.bak logos.toml
+[cgo] go build -o $WORK/plain_cpu$GOEXE ./sub
+[cgo] exec go version -m $WORK/plain_cpu$GOEXE
+[cgo] stdout 'GOAMD64=v1'
 
 -- go.mod --
 module example.com/plain
