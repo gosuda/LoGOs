@@ -1,5 +1,6 @@
 # slice sums take the scalar loop when the archsimd feature check is off
 [!GOARCH:amd64] skip 'simd feature gate needs amd64'
+[!GOOS:linux] skip 'host cpu probe reads /proc/cpuinfo'
 
 env GOPROXY=off
 env GOTOOLCHAIN=local
@@ -8,10 +9,10 @@ env GOAMD64=v1
 
 cd m
 logos run .
-stdout '^avx2 true$'
-stdout '^avx512 true$'
 stdout '^sums ok$'
 cp stdout $WORK/on.txt
+exec go run ./hostprobe $WORK/on.txt baseline
+stdout 'host probe ok baseline'
 # The feature check dominates the vector loads in the binary: the
 # AVX2 call precedes the masked tail load in sumI32.
 logos build -o $WORK/exe .
@@ -21,21 +22,17 @@ stdout 'VPMASKMOVD'
 
 env GODEBUG=cpu.avx2=off
 logos run .
-stdout '^avx2 false$'
-stdout '^avx512 true$'
 stdout '^sums ok$'
 cp stdout $WORK/off-avx2.txt
+exec go run ./hostprobe $WORK/off-avx2.txt avx2off
+stdout 'host probe ok avx2off'
 
 env GODEBUG=cpu.avx512f=off
 logos run .
-stdout '^avx2 true$'
-stdout '^avx512 false$'
 stdout '^sums ok$'
 cp stdout $WORK/off-avx512.txt
-
-env GODEBUG=
-logos run .
-cmp stdout $WORK/on.txt
+exec go run ./hostprobe $WORK/off-avx512.txt avx512off
+stdout 'host probe ok avx512off'
 
 # GOAMD64=v3 guarantees AVX2: the check is omitted and only the
 # vector form remains, so correct sums prove the vector ran.
@@ -96,4 +93,88 @@ func main() {
 		panic("uint8 sum mismatch")
 	}
 	fmt.Println("sums ok")
+}
+
+-- m/hostprobe/main.go --
+package main
+
+import (
+	"fmt"
+	"os"
+	"strings"
+)
+
+func main() {
+	if len(os.Args) != 3 {
+		fmt.Fprintln(os.Stderr, "usage: hostprobe <output> <mode>")
+		os.Exit(2)
+	}
+	data, err := os.ReadFile("/proc/cpuinfo")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "read cpuinfo:", err)
+		os.Exit(2)
+	}
+	set := map[string]bool{}
+	for _, line := range strings.Split(string(data), "\n") {
+		if !strings.HasPrefix(line, "flags") {
+			continue
+		}
+		parts := strings.SplitN(line, ":", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		for _, f := range strings.Fields(parts[1]) {
+			set[f] = true
+		}
+		break
+	}
+	hostAvx2 := set["avx2"]
+	hostAvx512 := set["avx512f"] && set["avx512bw"] && set["avx512cd"] && set["avx512dq"] && set["avx512vl"]
+	out, err := os.ReadFile(os.Args[1])
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "read output:", err)
+		os.Exit(2)
+	}
+	got := map[string]string{}
+	sums := false
+	for _, line := range strings.Split(string(out), "\n") {
+		f := strings.Fields(line)
+		if len(f) == 2 && (f[0] == "avx2" || f[0] == "avx512") {
+			got[f[0]] = f[1]
+		}
+		if strings.TrimSpace(line) == "sums ok" {
+			sums = true
+		}
+	}
+	if !sums {
+		fmt.Fprintln(os.Stderr, "missing sums ok")
+		os.Exit(1)
+	}
+	want := map[string]bool{"avx2": hostAvx2, "avx512": hostAvx512}
+	switch os.Args[2] {
+	case "baseline":
+	case "avx2off":
+		want["avx2"] = false
+	case "avx512off":
+		want["avx512"] = false
+	default:
+		fmt.Fprintln(os.Stderr, "unknown mode:", os.Args[2])
+		os.Exit(2)
+	}
+	for k, w := range want {
+		g, ok := got[k]
+		if !ok {
+			fmt.Fprintln(os.Stderr, "missing", k)
+			os.Exit(1)
+		}
+		ws := "false"
+		if w {
+			ws = "true"
+		}
+		if g != ws {
+			fmt.Fprintf(os.Stderr, "%s = %s, cpuinfo wants %s\n", k, g, ws)
+			os.Exit(1)
+		}
+	}
+	fmt.Printf("host probe ok %s\n", os.Args[2])
 }
