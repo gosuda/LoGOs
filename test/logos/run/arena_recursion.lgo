@@ -1,0 +1,67 @@
+// run -goexperiment logosarena
+
+package main
+
+import (
+	"fmt"
+	"os"
+
+	"logos/arena"
+	"logos/rt"
+)
+
+func fibFill(r arena.Region, out []int, n int) int {
+	t := arena.New[int](r)
+	*t = n
+	if n < 2 {
+		out[n] = *t
+		return *t
+	}
+	a := fibFill(r, out, n-1)
+	b := fibFill(r, out, n-2)
+	*t = a + b
+	out[n] = *t
+	return *t
+}
+
+func fibPtr(r arena.Region, n int) *int {
+	if n < 2 {
+		p := arena.New[int](r)
+		*p = n
+		return p
+	}
+	a := fibPtr(r, n-1)
+	b := fibPtr(r, n-2)
+	p := arena.New[int](r)
+	*p = *a + *b
+	return p
+}
+
+func fibHeap(n int) int {
+	if n < 2 {
+		return n
+	}
+	return fibHeap(n-1) + fibHeap(n-2)
+}
+
+func main() {
+	r := arena.Open()
+	out := arena.Make[int](r, 11)
+	got := fibFill(r, out, 10)
+	ptr := fibPtr(r, 10)
+	want := fibHeap(10)
+	ok := got == 55 && want == 55 && *ptr == 55
+	for i := range out {
+		if out[i] != fibHeap(i) {
+			ok = false
+		}
+	}
+	if rt.RegionBytes() == 0 {
+		ok = false
+	}
+	if !ok {
+		fmt.Println("arena:", got, "heap:", want, "ptr:", *ptr, "bytes:", rt.RegionBytes())
+		os.Exit(1)
+	}
+	fmt.Println("ok")
+}
