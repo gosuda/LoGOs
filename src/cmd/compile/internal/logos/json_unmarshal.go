@@ -218,6 +218,9 @@ func (js *jsonStruct) unionLines(f *jsonField, field string) []string {
 
 	var trials []string
 	trials = append(trials, "_logos_raw := _logos_s.Value()")
+	trials = append(trials, "if _logos_value_err := _logos_s.Err(); _logos_value_err != nil {")
+	trials = append(trials, "\treturn _logos_value_err")
+	trials = append(trials, "}")
 	trials = append(trials, "var _logos_match int")
 	trials = append(trials, fmt.Sprintf("var _logos_target %s", unionName))
 	hasCustom := false
