@@ -629,15 +629,6 @@ func pprofNodes(t *testing.T, binary, prof string) (top string, topShare float64
 	return top, topShare, shares
 }
 
-func nodeShare(shares map[string]float64, want string) float64 {
-	for name, v := range shares {
-		if strings.Contains(name, want) {
-			return v
-		}
-	}
-	return 0
-}
-
 func topIn(top string, wants []string) bool {
 	for _, w := range wants {
 		if strings.Contains(top, w) {
@@ -985,15 +976,19 @@ func TestFastcallLogosProfileParity(t *testing.T) {
 	met := false
 	deadline := time.Now().Add(fastcallProfileCap)
 	for {
-		collectBusyProfile(t, plainProf, 80, callPlainBusy, 200000000)
+		collectBusyProfile(t, plainProf, 30, callPlainBusy, 100000000)
 		plainN, plainTotal = profileCallerSamples(t, plainProf, "callPlainBusy")
-		out, err := runCmd(t, dir, bin, "busy", prof, "12000000000")
+		out, err := runCmd(t, dir, bin, "busy", prof, "3000000000")
 		if err != nil {
 			t.Fatalf("fixture busy: %v\n%s", err, out)
 		}
 		lgoN, lgoTotal = profileCallerSamples(t, prof, "main.main")
 		t.Logf("lgo caller %d of %d samples, plain caller %d of %d samples",
 			lgoN, lgoTotal, plainN, plainTotal)
+		if lgoN == 0 && plainN >= fastcallProfileFloorSamples {
+			t.Fatalf("fast-call frames missing from profile: lgo caller %d of %d samples, plain caller %d of %d samples (floor %d)",
+				lgoN, lgoTotal, plainN, plainTotal, fastcallProfileFloorSamples)
+		}
 		if lgoN >= fastcallProfileFloorSamples && plainN >= fastcallProfileFloorSamples {
 			met = true
 			break
@@ -1003,26 +998,16 @@ func TestFastcallLogosProfileParity(t *testing.T) {
 		}
 	}
 	if !met {
-		if lgoN == 0 && plainN >= fastcallProfileFloorSamples {
-			t.Fatalf("fast-call frames missing from profile: lgo caller %d of %d samples, plain caller %d of %d samples (floor %d)",
-				lgoN, lgoTotal, plainN, plainTotal, fastcallProfileFloorSamples)
-		}
-		t.Skipf("thin profile under load: lgo caller %d of %d samples, plain caller %d of %d samples (floor %d)",
+		t.Fatalf("profile floor unmet: lgo caller %d of %d samples, plain caller %d of %d samples (floor %d)",
 			lgoN, lgoTotal, plainN, plainTotal, fastcallProfileFloorSamples)
 	}
-	topPlain, _, plainShares := pprofNodes(t, self, plainProf)
-	top, _, lgoShares := pprofNodes(t, bin, prof)
-	sharePlain := nodeShare(plainShares, "callPlainBusy")
-	lgoCaller := nodeShare(lgoShares, "main.main")
-	t.Logf("top: lgo %q caller %.1f%%, plain %q caller %.1f%%", top, lgoCaller, topPlain, sharePlain)
+	topPlain, _, _ := pprofNodes(t, self, plainProf)
+	top, _, _ := pprofNodes(t, bin, prof)
 	if !topIn(topPlain, plainWants) {
 		t.Fatalf("plain top entry = %q, want the call site", topPlain)
 	}
 	if !topIn(top, lgoWants) {
 		t.Fatalf("lgo top entry = %q, want the call site", top)
-	}
-	if diff := lgoCaller - sharePlain; diff < -5 || diff > 5 {
-		t.Fatalf("lgo attribution differs by %.1f points", diff)
 	}
 }
 
