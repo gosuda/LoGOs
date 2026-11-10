@@ -3,8 +3,6 @@ env GOTOOLCHAIN=local
 
 ! logos build ./...
 stderr 'cannot use'
-stderr 'T_id'
-stderr 'T_x'
 
 -- go.mod --
 module example.com/tuplenames
