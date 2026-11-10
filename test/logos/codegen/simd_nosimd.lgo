@@ -1,0 +1,29 @@
+// asmcheck
+
+package main
+
+// No -goexperiment flag on the header: with the simd experiment off,
+// array operators must lower to unrolled scalar code with no
+// simd/archsimd call (SPEC 825).
+
+//go:noinline
+func addPlainF64(a, b [4]float64) [4]float64 {
+	// amd64:"ADDSD" -"VADDPD" -"CALL simd/archsimd"
+	// arm64:"FADDD" -"CALL simd/archsimd"
+	// riscv64:-"CALL simd/archsimd"
+	return a + b
+}
+
+//go:noinline
+func addPlainI32(a, b [4]int32) [4]int32 {
+	// amd64:"ADDL" -"VPADDD" -"CALL simd/archsimd"
+	// arm64:"ADD" -"CALL simd/archsimd"
+	// riscv64:-"CALL simd/archsimd"
+	return a + b
+}
+
+func main() {
+	var a, b [4]float64
+	var c, d [4]int32
+	println(addPlainF64(a, b)[0], addPlainI32(c, d)[0])
+}
