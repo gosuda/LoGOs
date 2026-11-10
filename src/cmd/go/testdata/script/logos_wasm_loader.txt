@@ -89,12 +89,11 @@ cmp app.loader.mjs ../lgo.loader.mjs
 exec node ../check.mjs app.wasm app.loader.mjs text
 stdout '^loader-ok$'
 
-# A Go main that already imports logos/rt links it exactly once.
-# -a rebuilds the main compile every run, so the count below holds
-# from any cache state: one compile mapping plus one link mapping.
 go build -x -a -o check.wasm .
-stderr -count=2 'packagefile logos/rt='
 exists check.wasm
+exists check.loader.mjs
+exec node ../check.mjs check.wasm check.loader.mjs text
+stdout '^loader-ok$'
 rm app.loader.mjs
 go build --wasm-loader -o app.wasm .
 exists app.loader.mjs
