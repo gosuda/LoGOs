@@ -110,8 +110,14 @@ func TestPosMapGeneratedLinesMapToQuestionStatement(t *testing.T) {
 			if orig.Line != 5 || orig.Character > len(srcLine) {
 				t.Errorf("lowered %d:%d maps to %v, outside source line 5", line, col, orig)
 			}
-			if line > 5 && orig.Character != qcol && orig.Character != qcol+1 {
-				t.Errorf("lowered generated %d:%d maps to column %d, want the ? at %d", line, col, orig.Character, qcol)
+			if line > 5 {
+				want := qcol
+				if line == 7 && col == len(text) {
+					want = qcol + 1
+				}
+				if orig.Character != want {
+					t.Errorf("lowered generated %d:%d maps to column %d, want %d", line, col, orig.Character, want)
+				}
 			}
 		}
 	}
