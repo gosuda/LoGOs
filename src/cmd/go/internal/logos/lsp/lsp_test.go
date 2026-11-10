@@ -1590,6 +1590,8 @@ func TestProxyLeavesForeignJSONAlone(t *testing.T) {
 				"textDocument/definition": toJSON(t, []any{
 					map[string]any{"uri": virt, "range": lowRead},
 					foreign,
+					virt,
+					map[string]any{"line": 5, "character": 1, "extra": true},
 				}),
 				"textDocument/hover": toJSON(t, map[string]any{
 					"contents": map[string]any{"kind": "plaintext", "value": "known"},
@@ -1604,10 +1606,13 @@ func TestProxyLeavesForeignJSONAlone(t *testing.T) {
 	aURI := f.uri("a/a.lgo")
 	origOperand := shift(findPos(t, aLgo, "ReadFile(path)?", 0), len("ReadFile("))
 	origRead := span(findPos(t, aLgo, "Read(", 0), len("Read"))
+	virt := f.virtURI("a/a.lgo")
 	res := f.client.call("textDocument/definition", positionParams(aURI, origOperand))
 	sameJSON(t, "definition keeps the foreign location", res, []any{
 		map[string]any{"uri": aURI, "range": origRead},
 		foreign,
+		virt,
+		map[string]any{"line": 5, "character": 1, "extra": true},
 	})
 	hres := f.client.call("textDocument/hover", positionParams(aURI, origOperand))
 	sameJSON(t, "hover keeps the foreign field", hres, map[string]any{
