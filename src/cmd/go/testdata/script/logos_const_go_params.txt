@@ -22,6 +22,7 @@ stdout '^show: shown$'
 stdout '^sum: 6$'
 stdout '^total: 13$'
 stdout '^add: 14$'
+stdout '^equal: true$'
 cd ..
 
 cd imp
@@ -262,6 +263,7 @@ replace example.com/gopdep => ../dep
 package main
 
 import (
+	"bytes"
 	"fmt"
 
 	"example.com/gopdep"
@@ -273,6 +275,7 @@ func main() {
 	fmt.Println("read:", dep.Read(view))
 	fmt.Println("show:", dep.Show(view))
 	fmt.Println("sum:", dep.SumBytes(view...))
+	fmt.Println("equal:", bytes.Equal(view, b))
 	is := []int{1, 2}
 	var iview const []int = is
 	js := []int{4}

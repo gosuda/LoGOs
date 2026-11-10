@@ -1,0 +1,13 @@
+// run
+
+package main
+
+import "bytes"
+
+func main() {
+	a := []byte{1, 2, 3}
+	var va const []byte = a
+	b := []byte{1, 2, 3}
+	println(bytes.Equal(va, b))
+	println(bytes.Equal(va, []byte{9}))
+}
