@@ -467,6 +467,7 @@ Converting `string` to `const []byte` MUST be zero-copy. [T-201]
 Converting `const []byte` to `string` MUST be zero-copy when provenance is a string or a constant composite. [T-201]
 
 The same conversion MUST copy for any other provenance. [T-201]
+Any other provenance MUST copy to the Go heap. [T-201]
 
 `logos/rt.Freeze` MUST deep-copy its argument and return a `const` view. [T-201]
 
@@ -477,34 +478,13 @@ A later write to the source (or to a child object it points to) MUST NOT change 
 A nil `func`, `chan`, or `unsafe.Pointer` MUST remain valid and copy as nil. [T-201]
 
 Reachability MUST include map keys and values, interface payloads, and slice capacity tails. [T-201]
-String to const byte views MUST allocate nothing. [T-201]
-Views of other provenance to string MUST copy. [T-201]
 Ordinary reslicing such as s = s[:0] MUST stay allowed. [T-201]
 Only const views MUST enforce the len bound. [T-201]
 Dynamic map iteration in const funcs MUST fail compilation. [T-201][T-Sec7]
 Const map range MUST visit keys in sorted order. [T-201][T-Sec7]
 A violation MUST fail with correctness::const_func_impure naming the reason. [T-201]
-reflect.DeepEqual and fmt.Println MUST accept constant composites. [T-201]
-Compile-time evaluation MUST stop after the selected `max_ctfe_steps` limit with default 100,000 steps with `comptime::ctfe_step_limit`. [T-201][T-102]
-A value above 1 MB MUST fail with `comptime::const_too_large`. [T-201][T-102]
-A call through a const view to a pointer-receiver method that lacks const MUST fail with correctness::const_view_mutation. [T-201]
-A method with a const pointer receiver MUST allow the call. [T-201]
-Zero-copy to string MUST apply only with string or const composite provenance. [T-201]
-All other provenances MUST copy. [T-201]
-A bound above len MUST fail with `correctness::const_view_mutation`. [T-201]
-Non-constant bounds MUST trap at run time. [T-201]
-`reflect.DeepEqual` MUST accept constant composites. [T-201]
-The compiler MUST evaluate CTFE integers with target widths. [T-201]
-A later write to the source or its child MUST NOT change the view. [T-201]
 Nil leaves MUST copy as nil. [T-201]
-`const []byte` to `string` MUST be zero-copy only from string or const-composite provenance. [T-201]
-Any other provenance MUST copy to the Go heap. [T-201]
 Pointer-free constant data MUST live in read-only memory before any init runs. [T-201]
-Ordinary generic assertion definitions MUST remain legal. [T-201][T-Sec5]
-Function and receiver-type instantiations, including wrappers and cross-package uses, MUST require verified effects before manufacturing qualified targets; unsafe instantiations MUST fail with `correctness::const_view_mutation`. [T-201][T-Sec5]
-Unknown effects MUST NOT count as proven zero. [T-201][T-Sec5]
-Concrete named arguments and known-zero identity/storage containers MUST remain legal. [T-201][T-Sec5]
-Assertion and mutation masks MUST NOT truncate parameter positions at or above 64, and receiver-readonly MUST NOT prove parameter purity. [T-201][T-Sec5]
 
 ### 2.2 RFC-202: Non-nil pointers, option types, and nil flow
 
@@ -615,22 +595,9 @@ func greet(u *User?) string {
     return u?.Name ?? "anon"
 }
 ```
-The pointer type `*T` in `.lgo` code MUST mean non-nil [T-202].
-The type `*T?` MUST mean an optional pointer [T-202].
 A value of type `T` MUST convert to `T?`, and `nil` MUST convert to every `T?` [T-202].
 A value of type `T?` MUST NOT convert to `T` without a check [T-202].
-For `*T?` where `*T` is non-nil, the ejected Go type MUST be `*T` with `nil` as none [T-202][T-0.3].
-An interface-backed union option with no nil-capable member MUST use the interface nil value for absence in ejected code [T-202][T-0.3].
-For every other `T?` outside those two cases, the ejected Go type MUST be `logos/rt.Option[T]` [T-202][T-0.3].
-When nil is a valid payload, the ejected form MUST carry explicit presence separate from payload nil [T-202][T-0.3].
-A present nil payload MUST stay distinguishable from none in ejected code [T-202][T-0.3].
-Ejected signatures MUST use plain pointers and `Option[T]` from the shared support module [T-202][T-0.3].
-A Go importer MUST see the same Go types [T-202][T-Sec5][R-U2].
 Zero values of non-nil pointers MUST fail compilation, including `var p *T`, arrays of non-nil pointers, `make` of a non-nil pointer slice with length above zero or with non-constant length, and composite literals that leave a non-nil field empty [T-202].
-Stores of `nil` into non-nil locations MUST fail compilation [T-202].
-Narrowing after `x != nil`, after an early exit on `x == nil`, and through `&&` chains MUST apply to locals and parameters until their next assignment [T-202].
-Narrowing MUST NOT apply to fields, to variables whose address escapes, or to variables that a closure assigns [T-202].
-The error-first guard MUST apply only to callees declared in `.lgo` files, so standard-library and Go-package calls such as `io.Reader.Read` MUST keep their own contracts [T-202][A-STD][R-U2].
 Pointers from Go-mode declarations and from type parameters instantiated with non-nil pointers MUST act as platform pointers: dereference and nil comparison MUST compile, and a store into a non-nil location MUST check at run time and panic with the `.lgo` file and line on nil [T-202][A-STD].
 The operators `?.` and `??` MUST operate only on option types [T-104.3].
 A single-value map read `m[k]` MUST type as `V?`, while `v, ok := m[k]` MUST keep Go meaning [T-104.3].
@@ -641,17 +608,10 @@ Pointers from Go declarations, in the standard library and in every other Go pac
 Stores into non-nil locations MUST panic with `logos: nil from Go value stored into non-nil *T at <file>:<line>`. [T-202][R-U2]
 Block scoping MUST stay standard Go. [T-202]
 Outer variables MUST narrow after if x == nil return guards. [T-202]
-Reads of .lgo results before err == nil proof MUST fail with correctness::result_before_error_check. [T-202]
-Standard library callees MUST keep their own contracts. [T-202]
-An option whose payload can be nil MUST carry explicit presence as specified in Sec 2.2. [T-202]
-Non-nilable value options and nested options MUST use `logos/rt.Option[T]` as specified in Sec 2.2. [T-202]
-Zero-clearing through `*p = S{}` MUST fail with `correctness::nonnil_uninitialized`. [T-202]
 A literal MUST initialize every non-nil field. [T-202]
 The spelling `T??` MUST fail as a syntax error. [T-202]
 `(T?)?` MUST lower to `Option[T?]`. [T-202]
 An ordinary method call on an option without a non-nil proof MUST fail with `[correctness::nil_deref_unproven]`. [T-202]
-For callees declared in .lgo the compiler MUST fail reads before the err proof with [correctness::result_before_error_check]. [T-202]
-Standard-library callees MUST keep their own contract, so use of n first stays allowed. [T-202]
 
 ### 2.3 RFC-203: Closed unions, property interfaces, and inline assertions
 
@@ -816,42 +776,15 @@ A missing method MUST fail with `[correctness::assertion_failed]` naming the met
 Each assertion MUST emit a compile-time check that `*S` implements each listed interface. [T-203.3]
 
 An assertion list on a non-struct type MUST be a syntax error. [T-203.3]
-A closed union MUST be an interface whose type set is a finite union of non-`~` terms, and it MAY declare methods that every member implements [T-203.1].
-Closed unions MUST be allowed in value positions in `.lgo` code [T-203.1].
-Membership MUST be checked for assignments, conversions, comparisons with constants, assertions, and case types [T-203.1].
-The forms `x.(U)` and `case U:` MUST check membership at run time [T-203.1].
 An exhaustive `switch x.(type)` MUST cover every member and `nil` or hold `default` [T-203.1].
-A switch expression MUST evaluate its operand once and only its chosen arm [T-203.1].
-The result type of a switch expression MUST be the common type of its arms [T-203.1].
-Ejected code for a value-used union MUST be a plain method-only interface plus a comment that names the member set [T-203.1][T-0.3].
-A Go importer MUST see the same interface [T-203.1][T-Sec5][R-U2].
-Reflection MAY store a non-member in a closed union, and the compiler MUST NOT check that path [T-203.1].
 A readonly method `const M() T` MUST NOT count as a property element and MUST NOT satisfy a property requirement [T-201][T-203.2].
-Satisfaction MUST be explicit: only a struct whose declaration lists `: I` MUST satisfy property interface `I`, in any package [T-203.2][R-U4].
-For each property `F`, the declaring package MUST generate `Logos_GetF() T` and, for read-write properties, `Logos_SetF(T)` [T-203.2].
-An exported field MUST source its accessors with a value-receiver getter and a pointer-receiver setter, and `F() T` or `SetF(T)` methods MUST source them by forwarding with the same receiver kind [T-203.2].
-Property elements MUST lower to those interface methods, so dynamic assertions such as `any(x).(I)` MUST work [T-203.2].
-A Go importer MUST see a property interface as the interface of those accessor methods [T-203.2][T-Sec5][R-U2].
-Identifiers that start with `Logos_` or `_logos_` MUST remain reserved in `.lgo` code [T-203.2].
-Read-write properties MUST need a pointer type [T-203.2].
-The form `&c.HP` MUST fail compilation [T-203.2].
-Compound updates through a property MUST evaluate the receiver once and write the result back [T-203.2].
-Only types with a `: I` list MUST gain accessor methods, and `reflect` MUST count exactly those methods; types without the list MUST gain none [T-203.2][R-U4].
-Non-struct types MUST NOT satisfy a property interface [T-203.2][R-U4].
-The assertion `type S struct : I, J` MUST require `*S` to implement `I` and `J` at the declaration [T-203.3].
 Unions MUST use the upstream interface representation. [T-203.1]
-Ejected value unions MUST keep methods with a member comment. [T-203.1]
-A union with `~` terms MUST fail with `correctness::open_union_value`. [T-203.1]
 A closed union MUST use the upstream interface representation. [T-203.1]
 A closed union MUST use the upstream interface representation, including upstream handling of zero-sized members. [T-203.1]
-Switch results MUST take the common type of the arms. [T-203.1]
 Union values MUST use the upstream interface representation. [T-203.1]
-A `nil` union value MUST go to `case nil`. [T-203.1]
+
 Method bodies inside interfaces MUST fail compilation. [T-203.2]
-Structs MUST satisfy property interfaces only through an explicit `: I` declaration. [T-203.2]
-The package MUST generate both getter and setter for it. [T-203.2]
 The write MUST reach the struct. [T-203.2]
-An equal-depth match MUST fail as an ambiguous selector. [T-203.2]
 
 ### 2.4 RFC-204: Tuples and fixed-array SIMD
 
