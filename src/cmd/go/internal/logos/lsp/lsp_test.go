@@ -1162,6 +1162,78 @@ func TestProxyCloseFreesDiagnosticCaches(t *testing.T) {
 	}
 }
 
+func TestProxySnapshotCountsCarriesDiagCache(t *testing.T) {
+	const goSrc = "package p\n\nvar _ = 1\n"
+	names := []string{"k0.go", "k1.go", "k2.go"}
+	files := make(map[string]string, len(names))
+	for _, n := range names {
+		files[n] = goSrc
+	}
+	f := newFixture(t, files, fixtureOptions{
+		Script: func(root string) fakeScript {
+			diags := make(map[string]json.RawMessage, len(names))
+			for _, n := range names {
+				diags[pathURI(filepath.Join(root, n))] = toJSON(t, []any{
+					map[string]any{"range": span(Position{Line: 1, Character: 0}, 1), "severity": 1, "message": "gopls: bad"},
+				})
+			}
+			return fakeScript{Diagnostics: diags, PublishEmptyOnClose: true}
+		},
+	})
+	counts := func() (snapshotCountsResult, json.RawMessage) {
+		t.Helper()
+		raw := f.client.call("logos/snapshotCounts", map[string]any{})
+		var got snapshotCountsResult
+		if err := json.Unmarshal(raw, &got); err != nil {
+			t.Fatal(err)
+		}
+		return got, raw
+	}
+	for _, n := range names {
+		uri := f.uri(n)
+		f.client.notify("textDocument/didOpen", map[string]any{
+			"textDocument": map[string]any{"uri": uri, "languageId": "go", "version": 1, "text": goSrc},
+		})
+		f.client.notification(func(m map[string]any) bool {
+			items, _ := m["diagnostics"].([]any)
+			return m["uri"] == uri && len(items) == 1
+		})
+	}
+	got, raw := counts()
+	if got.DiagCache != len(names) {
+		t.Fatalf("diagCache = %d, want %d with open diagnostics", got.DiagCache, len(names))
+	}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := m["diagCache"]; !ok {
+		t.Fatalf("snapshotCounts reply omits diagCache key: %s", string(raw))
+	}
+	f.client.notify("textDocument/didClose", map[string]any{"textDocument": map[string]any{"uri": f.uri(names[0])}})
+	f.client.notification(func(m map[string]any) bool {
+		items, _ := m["diagnostics"].([]any)
+		return m["uri"] == f.uri(names[0]) && len(items) == 0
+	})
+	got, _ = counts()
+	if got.DiagCache != len(names)-1 {
+		t.Fatalf("diagCache after one close = %d, want %d", got.DiagCache, len(names)-1)
+	}
+	for _, n := range names[1:] {
+		f.client.notify("textDocument/didClose", map[string]any{"textDocument": map[string]any{"uri": f.uri(n)}})
+	}
+	got, raw = counts()
+	if got.DiagCache != 0 {
+		t.Fatalf("diagCache after every close = %d, want 0", got.DiagCache)
+	}
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := m["diagCache"]; !ok {
+		t.Fatalf("snapshotCounts reply omits diagCache key at zero: %s", string(raw))
+	}
+}
+
 func TestProxyMergesDiagnostics(t *testing.T) {
 	var lowCall Range
 	f := newFixture(t, map[string]string{"a/a.lgo": aLgo}, fixtureOptions{
