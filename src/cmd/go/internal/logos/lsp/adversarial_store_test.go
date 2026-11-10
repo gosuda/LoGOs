@@ -280,3 +280,50 @@ func TestAdvOverlayReleasedAfterRun(t *testing.T) {
 		t.Errorf("overlay dir still present after release: %v", err)
 	}
 }
+
+func TestAdvStaleLgoChangeNotForwarded(t *testing.T) {
+	f := newFixture(t, map[string]string{"a/a.lgo": aLgo}, fixtureOptions{})
+	aURI := f.uri("a/a.lgo")
+	v2 := aLgo + "// v2\n"
+	stale := aLgo + "// stale\n"
+	f.open("a/a.lgo", 1)
+	f.client.call("textDocument/hover", positionParams(aURI, Position{Line: 5, Character: 3}))
+	lowV2, _, ok := lowerQuestion([]byte(v2))
+	if !ok {
+		t.Fatal("v2 does not lower")
+	}
+	lowStale, _, ok := lowerQuestion([]byte(stale))
+	if !ok {
+		t.Fatal("stale does not lower")
+	}
+	f.client.notify("textDocument/didChange", map[string]any{
+		"textDocument":   map[string]any{"uri": aURI, "version": 2},
+		"contentChanges": []any{map[string]any{"text": v2}},
+	})
+	f.client.notify("textDocument/didChange", map[string]any{
+		"textDocument":   map[string]any{"uri": aURI, "version": 1},
+		"contentChanges": []any{map[string]any{"text": stale}},
+	})
+	f.client.call("textDocument/hover", positionParams(aURI, Position{Line: 5, Character: 3}))
+	var changed []string
+	for _, m := range f.receivedMethod("textDocument/didChange") {
+		td, _ := m["textDocument"].(map[string]any)
+		uri, _ := td["uri"].(string)
+		if uri != f.virtURI("a/a.lgo") {
+			continue
+		}
+		changes, _ := m["contentChanges"].([]any)
+		for _, c := range changes {
+			text, _ := c.(map[string]any)["text"].(string)
+			changed = append(changed, text)
+		}
+	}
+	if len(changed) != 1 || changed[0] != string(lowV2) {
+		t.Errorf("gopls saw %d virtual changes, want the one lowering of version 2", len(changed))
+	}
+	for _, text := range changed {
+		if text == string(lowStale) {
+			t.Errorf("the stale version 1 text reached gopls after version 2")
+		}
+	}
+}
