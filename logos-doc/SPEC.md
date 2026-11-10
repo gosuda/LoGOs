@@ -150,7 +150,7 @@ The `logos.toml [lints]` table MUST control group severities [T-102].
 The `logos.toml [lints.thresholds]` defaults MUST be 3 for nesting depth, 15 for cognitive complexity, 60 for function lines, 4 for function parameters, 4096 for comptime nodes, and 100000 for CTFE steps [T-102].
 Configuration MAY raise `max_comptime_ast_nodes` and `max_ctfe_steps` above their defaults [T-102].
 `logos build` and `logos lint` MUST accept `--pedantic` with default false [T-102].
-The `--pedantic` flag MUST override `logos.toml` [T-102]. `--pedantic` MUST raise the pedantic group from `allow` to `warn` and MUST keep a stricter configured severity, and `--pedantic=false` MUST set the pedantic group to `allow` [T-102].
+The `--pedantic` flag MUST NOT lower a stricter `logos.toml` severity [T-102]. `--pedantic` MUST raise the pedantic group from `allow` to `warn` and MUST keep a stricter configured severity, and `--pedantic=false` MUST set the pedantic group to `allow` [T-102].
 A `logos.toml` value that lowers a `forbid` group MUST fail with `configuration::forbid_lowered` [T-102].
 A Go package MUST NOT run any rule at `forbid`: a group configured `forbid` runs at `deny` there [T-102][R-U1].
 A default build MUST stay silent for the pedantic group [T-102].
@@ -1517,7 +1517,7 @@ forbid cannot be lowered and ignores allow directives in a loGo/s package. [T-10
 deny fails the build unless a logos allow directive for the rule precedes the statement or declaration. [T-102]
 warn prints a diagnostic. [T-102]
 allow stays silent. [T-102]
-The --pedantic flag overrides the pedantic key for logos build and logos lint. [T-Sec8]
+The --pedantic flag overrides the pedantic key for logos build and logos lint, but it MUST NOT lower a stricter configured severity. [T-Sec8]
 The lints.thresholds table holds six integer keys. [T-Sec8]
 Defaults are 3 for max_nesting_depth, 15 for max_cognitive_complexity, 60 for max_function_lines, 4 for max_function_params, 4096 for max_comptime_ast_nodes, and 100000 for max_ctfe_steps. [T-Sec8]
 Configuration MAY raise max_comptime_ast_nodes and max_ctfe_steps above their defaults. [T-Sec8][T-102]
