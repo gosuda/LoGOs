@@ -379,7 +379,7 @@ Under plain `go`, the default level MUST be `O1` [T-105][R-U1].
 `[build] opt_level` MUST accept `O0`, `O1`, `O2`, `O3`, and `Os` only [T-105].
 A bare spelling such as `2` MUST fail validation like an unknown level [T-105].
 An invalid level MUST fail with text that lists the five accepted levels [T-105].
-O0 MUST pass debug flags for no inline and no debug-info loss protection [T-105].
+O0 MUST pass `-N -l` for no inline and no debug-info loss protection [T-105].
 O1 MUST be the upstream baseline [T-105].
 O2 MUST set inline budget 120 and variable-make stack buffer 256 bytes for non-standard packages [T-105].
 O3 MUST set inline budget 400 with 80 inside recursive cycles, and variable-make stack buffer 4096 bytes for non-standard packages [T-105].
@@ -1887,7 +1887,6 @@ A non-constant integer product in a `make` length or capacity MUST lower to `log
 ### 17.1 Red-team completeness
 
 - Every row of `logos-doc/REDTEAM.md` MUST reach `tested` or `satisfied upstream` with its proving test. [T-Sec17]
-- Runtime attack tests that execute attacker code MUST run under `-race`. [T-Sec17]
 
 ### 17.2 Zero-alloc and codegen checks
 

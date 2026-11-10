@@ -2912,6 +2912,7 @@ The release gate runs the checks that no in-tree test asserts:
 - `logos test -O=1 std cmd`, `logos test -O=2 std cmd`, and `logos test -O=3 std cmd` pass on the release candidate.
 - The upstream suite that `./run.bash` runs passes under plain `go`.
 - Two-build digests reproduce on a second host.
+- Runtime attack tests that execute attacker code run under `-race`.
 
 ### M22-C Closure re-audit of SPEC sections 0 to 18
 
