@@ -21,6 +21,10 @@ var logosSimdMethods = map[string]bool{
 	"dot": true,
 }
 
+func LogosSimdMethod(name string) bool {
+	return logosSimdMethods[name]
+}
+
 type logosSimdShape struct {
 	elem *Basic
 	typ  Type

@@ -20,61 +20,19 @@ const logosSimdPath = "simd/archsimd"
 const logosSimdMathAlias = "_logos_math"
 const logosSimdMathPath = "math"
 
-var logosSimdMethodNames = map[string]bool{
-	"sum": true,
-	"min": true,
-	"max": true,
-	"dot": true,
+type simdOp struct {
+	text   string
+	method string
 }
 
-var logosSimdBinOps = map[syntax.Operator]bool{
-	syntax.Add: true,
-	syntax.Sub: true,
-	syntax.Mul: true,
-	syntax.Div: true,
-	syntax.And: true,
-	syntax.Or:  true,
-	syntax.Xor: true,
-}
-
-func simdOpText(op syntax.Operator) string {
-	switch op {
-	case syntax.Add:
-		return "+"
-	case syntax.Sub:
-		return "-"
-	case syntax.Mul:
-		return "*"
-	case syntax.Div:
-		return "/"
-	case syntax.And:
-		return "&"
-	case syntax.Or:
-		return "|"
-	case syntax.Xor:
-		return "^"
-	}
-	return ""
-}
-
-func simdOpMethod(op syntax.Operator) string {
-	switch op {
-	case syntax.Add:
-		return "Add"
-	case syntax.Sub:
-		return "Sub"
-	case syntax.Mul:
-		return "Mul"
-	case syntax.Div:
-		return "Div"
-	case syntax.And:
-		return "And"
-	case syntax.Or:
-		return "Or"
-	case syntax.Xor:
-		return "Xor"
-	}
-	return ""
+var simdOps = map[syntax.Operator]simdOp{
+	syntax.Add: {"+", "Add"},
+	syntax.Sub: {"-", "Sub"},
+	syntax.Mul: {"*", "Mul"},
+	syntax.Div: {"/", "Div"},
+	syntax.And: {"&", "And"},
+	syntax.Or:  {"|", "Or"},
+	syntax.Xor: {"^", "Xor"},
 }
 
 type simdLane struct {
@@ -156,6 +114,17 @@ func (fl *fileLower) simdShapeOf(at *types2.Array, typ types2.Type) *simdShape {
 	return &simdShape{arr: at, lane: lane, len: n, spell: spell, under: under, named: spell != under, elem: elem, elemSpell: elemSpell, exact: exact}
 }
 
+func (fl *fileLower) simdArrayShape(t types2.Type) *simdShape {
+	if t == nil {
+		return nil
+	}
+	at, ok := t.Underlying().(*types2.Array)
+	if !ok {
+		return nil
+	}
+	return fl.simdShapeOf(at, t)
+}
+
 func simdVectorEnabled() bool {
 	return buildcfg.Experiment.SIMD && (buildcfg.GOARCH == "amd64" || buildcfg.GOARCH == "arm64")
 }
@@ -176,7 +145,7 @@ func amd64Feature(total int64, lane simdLane, op syntax.Operator) simdFeature {
 	switch {
 	case total == 64, op == syntax.Mul && lane.width == 8 && !lane.isFloat:
 		return simdFeatAVX512
-	case total == 32 && (!lane.isFloat || op == syntax.And || op == syntax.Or || op == syntax.Xor):
+	case total == 32 && (!lane.isFloat || simdFloatBitwiseOp(op)):
 		return simdFeatAVX2
 	}
 	return simdFeatAVX
@@ -236,6 +205,9 @@ func simdFloatBitsTo(sh *simdShape) string {
 }
 
 func (fl *fileLower) simdScalarBody(sh *simdShape, op syntax.Operator) string {
+	laneText := func(i int64) string {
+		return fmt.Sprintf("_logos_a[%d] %s _logos_b[%d]", i, simdOps[op].text, i)
+	}
 	if sh.lane.isFloat && simdFloatBitwiseOp(op) {
 		fl.needSimdMath = true
 		bits := "Float64bits"
@@ -244,15 +216,13 @@ func (fl *fileLower) simdScalarBody(sh *simdShape, op syntax.Operator) string {
 			bits = "Float32bits"
 			from = "Float32frombits"
 		}
-		var lanes []string
-		for i := int64(0); i < sh.len; i++ {
-			lanes = append(lanes, fmt.Sprintf("%s.%s(%s.%s(_logos_a[%d]) %s %s.%s(_logos_b[%d]))", logosSimdMathAlias, from, logosSimdMathAlias, bits, i, simdOpText(op), logosSimdMathAlias, bits, i))
+		laneText = func(i int64) string {
+			return fmt.Sprintf("%s.%s(%s.%s(_logos_a[%d]) %s %s.%s(_logos_b[%d]))", logosSimdMathAlias, from, logosSimdMathAlias, bits, i, simdOps[op].text, logosSimdMathAlias, bits, i)
 		}
-		return "return " + sh.spell + "{" + strings.Join(lanes, ", ") + "}"
 	}
 	var lanes []string
 	for i := int64(0); i < sh.len; i++ {
-		lanes = append(lanes, fmt.Sprintf("_logos_a[%d] %s _logos_b[%d]", i, simdOpText(op), i))
+		lanes = append(lanes, laneText(i))
 	}
 	return "return " + sh.spell + "{" + strings.Join(lanes, ", ") + "}"
 }
@@ -490,31 +460,19 @@ func (fl *fileLower) simdAssertEnd(a *syntax.AssertExpr) int {
 }
 
 func (fl *fileLower) isSimdBinary(e *syntax.Operation) bool {
-	if !logosSimdBinOps[e.Op] || e.Y == nil {
+	if _, ok := simdOps[e.Op]; !ok || e.Y == nil {
 		return false
 	}
-	t := fl.pkg.info.TypeOf(e)
-	if t == nil {
-		return false
-	}
-	at, ok := t.Underlying().(*types2.Array)
-	if !ok {
-		return false
-	}
-	return fl.simdShapeOf(at, t) != nil
+	return fl.simdArrayShape(fl.pkg.info.TypeOf(e)) != nil
 }
 
 func (fl *fileLower) isSimdCall(c *syntax.CallExpr) bool {
 	sel, ok := syntax.Unparen(c.Fun).(*syntax.SelectorExpr)
-	if !ok || sel.Sel == nil || !logosSimdMethodNames[sel.Sel.Value] {
+	if !ok || sel.Sel == nil || !types2.LogosSimdMethod(sel.Sel.Value) {
 		return false
 	}
 	t := fl.pkg.info.TypeOf(sel.X)
-	if t == nil {
-		return false
-	}
-	at, ok := t.Underlying().(*types2.Array)
-	if !ok || fl.simdShapeOf(at, t) == nil {
+	if fl.simdArrayShape(t) == nil {
 		return false
 	}
 	if fl.pkg.info.Selections != nil {
@@ -539,11 +497,15 @@ func simdChunkAddr(sh *simdShape, v string, c, k int64) string {
 	return fmt.Sprintf("(*[%d]%s)(%s[%d:%d])", k, sh.elem, v, lo, hi)
 }
 
-func (fl *fileLower) simdElemwiseText(sh *simdShape, op syntax.Operator, aText, bText otext) otext {
+func simdCallText(sh *simdShape, body string, aText, bText otext) otext {
 	params := "_logos_a, _logos_b " + sh.spell
+	return cat(gen("func("+params+") "+sh.spell+" { "+body+" }("), aText, gen(", "), bText, gen(")"))
+}
+
+func (fl *fileLower) simdElemwiseText(sh *simdShape, op syntax.Operator, aText, bText otext) otext {
 	if vec, chunks, feat, ok := simdVecForm(sh, op); ok {
 		load := logosSimdAlias + ".Load" + vec + "Array"
-		method := simdOpMethod(op)
+		method := simdOps[op].method
 		tis, store := simdVecSuffix(sh, op)
 		var stmts []string
 		stmts = append(stmts, "var _logos_r "+sh.spell)
@@ -561,11 +523,11 @@ func (fl *fileLower) simdElemwiseText(sh *simdShape, op syntax.Operator, aText, 
 		fl.needSimd = true
 		vecBody := strings.Join(stmts, "; ")
 		if cond := fl.simdGuardCond(feat); cond != "" {
-			return cat(gen("func("+params+") "+sh.spell+" { if "+cond+" { "+vecBody+" } else { "+fl.simdScalarBody(sh, op)+" } }("), aText, gen(", "), bText, gen(")"))
+			return simdCallText(sh, "if "+cond+" { "+vecBody+" } else { "+fl.simdScalarBody(sh, op)+" }", aText, bText)
 		}
-		return cat(gen("func("+params+") "+sh.spell+" { "+vecBody+" }("), aText, gen(", "), bText, gen(")"))
+		return simdCallText(sh, vecBody, aText, bText)
 	}
-	return cat(gen("func("+params+") "+sh.spell+" { "+fl.simdScalarBody(sh, op)+" }("), aText, gen(", "), bText, gen(")"))
+	return simdCallText(sh, fl.simdScalarBody(sh, op), aText, bText)
 }
 
 func simdReduceBody(v string, n int64, combine func(a, b string) string) string {
@@ -591,20 +553,8 @@ func simdSumBody(v string, n int64) string {
 	return simdReduceBody(v, n, func(a, b string) string { return a + " + " + b })
 }
 
-func simdMinMaxBody(v string, n int64, method string) string {
-	return simdReduceBody(v, n, func(a, b string) string { return method + "(" + a + ", " + b + ")" })
-}
-
 func (fl *fileLower) lowerSimdBinary(e *syntax.Operation, s simdSite) {
-	t := fl.pkg.info.TypeOf(e)
-	if t == nil {
-		return
-	}
-	at, ok := t.Underlying().(*types2.Array)
-	if !ok {
-		return
-	}
-	sh := fl.simdShapeOf(at, t)
+	sh := fl.simdArrayShape(fl.pkg.info.TypeOf(e))
 	if sh == nil {
 		return
 	}
@@ -616,15 +566,7 @@ func (fl *fileLower) lowerSimdBinary(e *syntax.Operation, s simdSite) {
 
 func (fl *fileLower) lowerSimdCall(c *syntax.CallExpr, s simdSite) {
 	sel := syntax.Unparen(c.Fun).(*syntax.SelectorExpr)
-	t := fl.pkg.info.TypeOf(sel.X)
-	if t == nil {
-		return
-	}
-	at, ok := t.Underlying().(*types2.Array)
-	if !ok {
-		return
-	}
-	sh := fl.simdShapeOf(at, t)
+	sh := fl.simdArrayShape(fl.pkg.info.TypeOf(sel.X))
 	if sh == nil {
 		return
 	}
@@ -635,7 +577,7 @@ func (fl *fileLower) lowerSimdCall(c *syntax.CallExpr, s simdSite) {
 	case "sum":
 		text = cat(gen("func(_logos_a "+sh.spell+") "+sh.elemSpell+" { "+simdSumBody("_logos_a", sh.len)+" }("), recvText, gen(")"))
 	case "min", "max":
-		text = cat(gen("func(_logos_a "+sh.spell+") "+sh.elemSpell+" { "+simdMinMaxBody("_logos_a", sh.len, method)+" }("), recvText, gen(")"))
+		text = cat(gen("func(_logos_a "+sh.spell+") "+sh.elemSpell+" { "+simdReduceBody("_logos_a", sh.len, func(a, b string) string { return method + "(" + a + ", " + b + ")" })+" }("), recvText, gen(")"))
 	case "dot":
 		if len(c.ArgList) != 1 {
 			return
