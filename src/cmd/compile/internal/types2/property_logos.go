@@ -406,11 +406,20 @@ func (check *Checker) logosCheckMergedProp(sname string, V Type, mp logosMergedP
 	return false
 }
 
-func (check *Checker) logosPropGate(Ti *Interface, Vu Type, constraint bool) bool {
-	if check == nil || constraint || !check.conf.Logos {
+func (check *Checker) logosPropGate(Ti *Interface, Vu Type) bool {
+	return check.logosPropGateFor(Ti, Vu, false)
+}
+func (check *Checker) logosPropGateConstraint(Ti *Interface, Vu Type) bool {
+	return check.logosPropGateFor(Ti, Vu, true)
+}
+func (check *Checker) logosPropGateFor(Ti *Interface, Vu Type, constraint bool) bool {
+	if check == nil || !check.conf.Logos {
 		return false
 	}
 	if _, ok := Vu.(*Interface); ok {
+		return false
+	}
+	if constraint && isTypeParam(Vu) {
 		return false
 	}
 	return logosPropertyInterface(Ti) != nil

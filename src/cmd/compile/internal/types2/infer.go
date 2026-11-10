@@ -301,6 +301,14 @@ func (check *Checker) infer(pos syntax.Pos, tparams []*TypeParam, targs []Type, 
 				//           Eventually, unify should return an error with cause.
 				var cause string
 				constraint := tpar.iface()
+				if check.logosPropGateConstraint(constraint, tx) {
+					var propCause string
+					if !check.logosImplementsProperty(tx, constraint, constraint, &propCause, pos) {
+						err.addf(pos, "%s (type %s) does not satisfy %s %s", tpar, tx, tpar.Constraint(), propCause)
+						return nil
+					}
+					continue
+				}
 				if !check.hasAllMethods(tx, constraint, true, func(x, y Type) bool { return u.unify(x, y, exact) }, &cause) {
 					// TODO(gri) better error message (see TODO above)
 					err.addf(pos, "%s (type %s) does not satisfy %s %s", tpar, tx, tpar.Constraint(), cause)
