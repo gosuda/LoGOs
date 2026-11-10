@@ -227,6 +227,33 @@ func TestGrammarReadonlyDistinct(t *testing.T) {
 	}
 }
 
+func TestGrammarReadonlyMethodOnlyInterface(t *testing.T) {
+	tests := []struct {
+		name string
+		src  string
+		pos  string
+	}{
+		{"receiver method", "package p\ntype T struct{}\nfunc (r T) const M() {}\n", ":3:12"},
+		{"method expression", "package p\ntype T struct{}\nfunc (r T) M() {}\nvar _ = T.const M\n", ":4:11"},
+		{"function literal", "package p\nfunc f() {\n\tg := const func() {}\n}\n", ":3:20"},
+	}
+	for _, test := range tests {
+		logos := parseErrs(t, test.src, CheckBranches|LogosMode)
+		if len(logos) == 0 {
+			t.Errorf("%s: logos mode parsed without error; want a syntax error at %s", test.name, test.pos)
+			continue
+		}
+		if !strings.Contains(logos[0], "syntax error") || !strings.Contains(logos[0], test.pos) {
+			t.Errorf("%s: logos error %q names no syntax error at %s", test.name, logos[0], test.pos)
+		}
+		plain := parseErrs(t, test.src, CheckBranches)
+		if len(plain) == 0 {
+			t.Errorf("%s: plain mode parsed without error; want a syntax error as in plain Go", test.name)
+		}
+	}
+	parseLogos(t, "package p\ntype T struct{}\nfunc (r const *T) M() {}\n")
+}
+
 func TestGrammarCoalesceShapes(t *testing.T) {
 	f := parseLogos(t, "package p\nfunc f(a, b, c int) { _ = a || b ?? c }\n")
 	stmts := funcBodyStmts(t, f, "f")
