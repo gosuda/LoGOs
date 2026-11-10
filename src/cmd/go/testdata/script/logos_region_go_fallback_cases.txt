@@ -13,7 +13,102 @@ stderr 'p\.go:28:.*region fallback'
 stderr 'p\.go:35:.*region fallback'
 stderr 'p\.go:46:.*region fallback'
 ! stderr 'region_escape'
+! stderr 'perf::'
+! stderr 'correctness::'
+! stderr '\[[a-z]+::'
 
+cd ../run
+go run -gcflags=-m .
+stderr 'main\.go:14:.*placed in region'
+stderr 'main\.go:28:.*region fallback'
+stderr 'main\.go:36:.*region fallback'
+stderr 'main\.go:44:.*region fallback'
+stderr 'main\.go:54:.*region fallback'
+! stderr 'region_escape'
+! stderr 'perf::'
+! stderr 'correctness::'
+! stderr '\[[a-z]+::'
+stdout '^1$'
+stdout '^9$'
+stdout '^5$'
+-- run/go.mod --
+module example.com/regiongocasesrun
+
+go 1.27
+
+-- run/main.go --
+package main
+
+import (
+	"fmt"
+
+	"logos/arena"
+)
+
+var saved *int
+var savedFn func()
+
+//go:noinline
+func use(r arena.Region) int {
+	p := arena.New[int](r)
+	*p = 1
+	return *p
+}
+
+func callCallee() int {
+	r := arena.Open()
+	n := use(r)
+	_ = r
+	return n
+}
+
+func returnIt() *int {
+	r := arena.Open()
+	p := arena.New[int](r)
+	*p = 9
+	_ = r
+	return p
+}
+
+func sendIt(ch chan *int) {
+	r := arena.Open()
+	p := arena.New[int](r)
+	*p = 5
+	ch <- p
+	_ = r
+}
+
+func goIt(done chan int) {
+	r := arena.Open()
+	p := arena.New[int](r)
+	*p = 7
+	go func() {
+		_ = *p
+		done <- 1
+	}()
+	_ = r
+}
+
+func cloHandle() {
+	r := arena.Open()
+	f := func() { _ = r }
+	savedFn = f
+	_ = r
+}
+
+func main() {
+	fmt.Println(callCallee())
+	saved = returnIt()
+	fmt.Println(*saved)
+	ch := make(chan *int, 1)
+	sendIt(ch)
+	fmt.Println(*<-ch)
+	done := make(chan int, 1)
+	goIt(done)
+	<-done
+	cloHandle()
+	savedFn()
+}
 -- m/go.mod --
 module example.com/regiongocases
 
