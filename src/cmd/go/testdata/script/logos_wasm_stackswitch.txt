@@ -31,8 +31,22 @@ logos build -wasm-features=stack-switching -gcflags=-S=2 -o $WORK/switch.wasm .
 ! stderr '(?s)main\.waits<1> STEXT[^\n]*\n(\t[^\n]*\n)*\t[^\n]*\tBrTable'
 ! stderr '(?s)main\.pureLeaf<1> STEXT[^\n]*\n(\t[^\n]*\n)*\t[^\n]*\t(BrTable|ContNew|Resume)'
 ! stderr '(?s)main\.pureSum<1> STEXT[^\n]*\n(\t[^\n]*\n)*\t[^\n]*\t(BrTable|ContNew|Resume)'
-stderr '(?s)main\.main<1> STEXT[^\n]*\n(\t[^\n]*\n)*\t[^\n]*\tBrTable'
+stderr 'main\.main<1> STEXT[^\n]*\n(\t[^\n]*\n)*\t[^\n]*\tBrTable'
 stderr '(?s)main\.pureCond<1> STEXT[^\n]*\n(\t[^\n]*\n)*\t[^\n]*\tBrTable'
+
+go build -wasm-features=stack-switching -gcflags=-S=2 -o $WORK/gobuild-asm.wasm .
+! stderr '(?s)main\.waits<1> STEXT[^\n]*\n(\t[^\n]*\n)*\t[^\n]*\tBrTable'
+! stderr '(?s)main\.pureLeaf<1> STEXT[^\n]*\n(\t[^\n]*\n)*\t[^\n]*\t(BrTable|ContNew|Resume)'
+! stderr '(?s)main\.pureSum<1> STEXT[^\n]*\n(\t[^\n]*\n)*\t[^\n]*\t(BrTable|ContNew|Resume)'
+stderr 'main\.main<1> STEXT[^\n]*\n(\t[^\n]*\n)*\t[^\n]*\tBrTable'
+stderr '(?s)main\.pureCond<1> STEXT[^\n]*\n(\t[^\n]*\n)*\t[^\n]*\tBrTable'
+
+go build -gcflags=-S=2 -o $WORK/gobuild-plain.wasm .
+stderr '(?s)main\.waits<1> STEXT[^\n]*\n(\t[^\n]*\n)*\t[^\n]*\tBrTable'
+stderr '(?s)main\.pureLeaf<1> STEXT[^\n]*\n(\t[^\n]*\n)*\t[^\n]*\tBrTable'
+stderr '(?s)main\.pureSum<1> STEXT[^\n]*\n(\t[^\n]*\n)*\t[^\n]*\tBrTable'
+! stderr 'ContNew'
+! stderr '\tResume\t'
 
 go build -wasm-features=stack-switching -o $WORK/gobuild.wasm .
 
