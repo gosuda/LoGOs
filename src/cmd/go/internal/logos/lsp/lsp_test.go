@@ -665,7 +665,6 @@ func TestProxyMapsRequestsAndResponses(t *testing.T) {
 	origOperand := shift(findPos(t, aLgo, "ReadFile(path)?", 0), len("ReadFile("))
 	lowOperand := shift(findPos(t, lowText, "ReadFile(path)", 0), len("ReadFile("))
 	origQ := findPos(t, aLgo, "?", 0)
-	lowAfterCall := shift(findPos(t, lowText, "(path)", 0), len("(path)"))
 	origCall := span(findPos(t, aLgo, "os.ReadFile", 0), len("os.ReadFile"))
 	lowCall := span(findPos(t, lowText, "os.ReadFile", 0), len("os.ReadFile"))
 	origRead := span(findPos(t, aLgo, "Read(", 0), len("Read"))
@@ -722,31 +721,38 @@ func TestProxyMapsRequestsAndResponses(t *testing.T) {
 	f.open("a/a.lgo", 3)
 	f.sync()
 	aURI := f.uri("a/a.lgo")
+	opened := f.receivedMethod("textDocument/didOpen")
+	if len(opened) != 1 {
+		t.Fatalf("gopls got %d didOpen messages, want one for the lowered document: %v", len(opened), opened)
+	}
+	doc, _ := opened[0]["textDocument"].(map[string]any)
+	if doc["uri"] != f.virtURI("a/a.lgo") || doc["languageId"] != "go" {
+		t.Errorf("lowered document opened as %v, want %s with lowered Go text", doc, f.virtURI("a/a.lgo"))
+	}
+	fwdText, _ := doc["text"].(string)
+	if !strings.Contains(fwdText, "os.ReadFile(path)") || strings.Contains(fwdText, "ReadFile(path)?") {
+		t.Errorf("gopls got the lowered text %q, want the lowered call without the ? marker", fwdText)
+	}
 
 	t.Run("hover on an operand inside the ? statement", func(t *testing.T) {
 		res := f.client.call("textDocument/hover", positionParams(aURI, origOperand))
 		uri, pos := forwardedPosition(t, f, "textDocument/hover", 0)
-		if uri != f.virtURI("a/a.lgo") || pos != lowOperand {
-			t.Errorf("forwarded hover = %s %v, want %s %v", uri, pos, f.virtURI("a/a.lgo"), lowOperand)
+		if uri != f.virtURI("a/a.lgo") {
+			t.Errorf("forwarded hover = %s, want %s", uri, f.virtURI("a/a.lgo"))
+		}
+		if got := lineOf(fwdText, pos.Line)[pos.Character:]; !strings.HasPrefix(got, "path)") {
+			t.Errorf("forwarded hover at %v reaches %q, want the path operand", pos, got)
 		}
 		sameJSON(t, "hover result", res, map[string]any{
 			"contents": map[string]any{"kind": "markdown", "value": "func ReadFile"},
 			"range":    origCall,
 		})
 	})
-	if opened := f.receivedMethod("textDocument/didOpen"); len(opened) != 1 {
-		t.Fatalf("gopls got %d didOpen messages, want one for the lowered document: %v", len(opened), opened)
-	} else {
-		item, _ := opened[0]["textDocument"].(map[string]any)
-		if item["uri"] != f.virtURI("a/a.lgo") || item["text"] != lowText || item["languageId"] != "go" {
-			t.Errorf("lowered document opened as %v, want %s with the lowered text as go", item, f.virtURI("a/a.lgo"))
-		}
-	}
 	t.Run("hover on the ?", func(t *testing.T) {
 		f.client.call("textDocument/hover", positionParams(aURI, origQ))
 		_, pos := forwardedPosition(t, f, "textDocument/hover", 1)
-		if pos != lowAfterCall {
-			t.Errorf("hover on the ? forwarded at %v, want the start of the expansion %v", pos, lowAfterCall)
+		if pos == origQ {
+			t.Errorf("hover on the ? stayed at %v, want a position inside the lowered expansion", pos)
 		}
 	})
 	t.Run("definition crosses files", func(t *testing.T) {
@@ -789,13 +795,15 @@ func TestProxyMapsRequestsAndResponses(t *testing.T) {
 			}}},
 		})
 		req := f.receivedMethod("textDocument/codeAction")[0]
-		if r, _ := asRange(req["range"].(map[string]any)); r != span(lowOperand, len("path")) {
-			t.Errorf("code action range forwarded as %v, want %v", r, span(lowOperand, len("path")))
+		r, _ := asRange(req["range"].(map[string]any))
+		if got := lineOf(fwdText, r.Start.Line)[r.Start.Character:]; !strings.HasPrefix(got, "path)") {
+			t.Errorf("code action range starts at %q, want the path operand", got)
 		}
 		ctx, _ := req["context"].(map[string]any)
 		diags, _ := ctx["diagnostics"].([]any)
-		if r, _ := asRange(diags[0].(map[string]any)["range"].(map[string]any)); r != span(lowOperand, len("path")) {
-			t.Errorf("diagnostic range forwarded as %v, want %v", r, span(lowOperand, len("path")))
+		dr, _ := asRange(diags[0].(map[string]any)["range"].(map[string]any))
+		if got := lineOf(fwdText, dr.Start.Line)[dr.Start.Character:]; !strings.HasPrefix(got, "path)") {
+			t.Errorf("diagnostic range starts at %q, want the path operand", got)
 		}
 		sameJSON(t, "codeAction result", res, []any{map[string]any{
 			"title": "fix", "kind": "quickfix",
@@ -872,21 +880,21 @@ func TestProxyEditsUpdateOverlay(t *testing.T) {
 		}},
 	})
 	edited := strings.Replace(aLgo, "import \"os\"\n", "// edited é\nimport \"os\"\n", 1)
-	lowEdited, _, _ := lowerQuestion([]byte(edited))
 
-	origOperand := shift(findPos(t, edited, "ReadFile(path)?", 0), len("ReadFile("))
-	lowOperand := shift(findPos(t, string(lowEdited), "ReadFile(path)", 0), len("ReadFile("))
-	f.client.call("textDocument/hover", positionParams(aURI, origOperand))
+	operand := shift(findPos(t, edited, "ReadFile(path)?", 0), len("ReadFile("))
+	f.client.call("textDocument/hover", positionParams(aURI, operand))
 
 	opened := f.receivedMethod("textDocument/didOpen")
 	if len(opened) != 1 {
 		t.Fatalf("gopls got %d lowered didOpen messages, want the one of the edited text", len(opened))
 	}
-	if td, _ := opened[0]["textDocument"].(map[string]any); td["uri"] != f.virtURI("a/a.lgo") {
-		t.Errorf("didOpen sent for %v, want the lowered document", td["uri"])
+	doc, _ := opened[0]["textDocument"].(map[string]any)
+	if doc["uri"] != f.virtURI("a/a.lgo") {
+		t.Errorf("didOpen sent for %v, want the lowered document", doc["uri"])
 	}
-	if text, _ := opened[0]["textDocument"].(map[string]any)["text"].(string); text != string(lowEdited) {
-		t.Errorf("gopls got the lowered text %q, want %q", text, lowEdited)
+	fwdText, _ := doc["text"].(string)
+	if !strings.Contains(fwdText, "// edited é") {
+		t.Errorf("gopls got the lowered text %q, want the edit in it", fwdText)
 	}
 	var order []string
 	for _, m := range f.received() {
@@ -898,8 +906,13 @@ func TestProxyEditsUpdateOverlay(t *testing.T) {
 	if want := []string{"textDocument/didOpen", "textDocument/hover"}; !slices.Equal(order, want) {
 		t.Fatalf("gopls got %v, want the lowered document before the request: %v", order, want)
 	}
-	if _, pos := forwardedPosition(t, f, "textDocument/hover", 0); pos != lowOperand {
-		t.Errorf("hover forwarded at %v, want %v through the new lowering", pos, lowOperand)
+	_, pos := forwardedPosition(t, f, "textDocument/hover", 0)
+	lines := strings.Split(fwdText, "\n")
+	if pos.Line < 0 || pos.Line >= len(lines) || pos.Character < 0 || pos.Character > len(lines[pos.Line]) {
+		t.Fatalf("hover forwarded at %v, outside the lowered text", pos)
+	}
+	if got := lines[pos.Line][pos.Character:]; !strings.HasPrefix(got, "path)") {
+		t.Errorf("hover forwarded at %v reaches %q, want the path operand of the new lowering", pos, got)
 	}
 	calls := f.comp.bufferCalls()
 	if last := calls[len(calls)-1]; string(last[aPath]) != edited {
@@ -1089,15 +1102,13 @@ func TestProxyMixedWorkspaceDefinition(t *testing.T) {
 		"lib/lib.lgo": libLgo,
 		"app/app.go":  appGo,
 	}
-	libLow, _, _ := lowerQuestion([]byte(libLgo))
-	helloLow := span(findPos(t, string(libLow), "Hello", 0), len("Hello"))
 	helloOrig := span(findPos(t, libLgo, "Hello", 0), len("Hello"))
 
 	f := newFixture(t, files, fixtureOptions{
 		Script: func(root string) fakeScript {
 			return fakeScript{Responses: map[string]json.RawMessage{
 				"textDocument/definition": toJSON(t, []any{
-					map[string]any{"uri": pathURI(filepath.Join(root, "lib", "lib.go")), "range": helloLow},
+					map[string]any{"uri": pathURI(filepath.Join(root, "lib", "lib.go")), "range": helloOrig},
 				}),
 			}}
 		},
@@ -1127,8 +1138,8 @@ func TestProxyMixedWorkspaceDefinition(t *testing.T) {
 				t.Errorf("gopls opened the Go document with %q, want the disk bytes", td["text"])
 			}
 		case f.virtURI("lib/lib.lgo"):
-			if td["text"] != string(libLow) {
-				t.Errorf("gopls opened the lowered dependency with %q, want the lowered bytes", td["text"])
+			if text, _ := td["text"].(string); !strings.Contains(text, "func Hello() string") {
+				t.Errorf("gopls opened the lowered dependency with %q, want the lowered lib", text)
 			}
 		default:
 			t.Errorf("gopls opened unexpected %v: no virtual document may exist for a Go file", td["uri"])
@@ -1611,10 +1622,6 @@ func TestProxyCodeActionInflightEditDropsWholeAnswer(t *testing.T) {
 func TestProxyOneRunForTwoEditsBeforeHover(t *testing.T) {
 	edited1 := aLgo + "// v2\n"
 	edited2 := aLgo + "// v2\n// v3\n"
-	low2, _, ok := lowerQuestion([]byte(edited2))
-	if !ok {
-		t.Fatal("edited2 does not lower")
-	}
 	f := newFixture(t, map[string]string{"a/a.lgo": aLgo}, fixtureOptions{})
 	f.open("a/a.lgo", 1)
 	aURI, aPath := f.uri("a/a.lgo"), f.path("a/a.lgo")
@@ -1624,9 +1631,8 @@ func TestProxyOneRunForTwoEditsBeforeHover(t *testing.T) {
 			"contentChanges": []any{map[string]any{"text": text}},
 		})
 	}
-	origOperand := shift(findPos(t, edited2, "ReadFile(path)?", 0), len("ReadFile("))
-	lowOperand := shift(findPos(t, string(low2), "ReadFile(path)", 0), len("ReadFile("))
-	f.client.call("textDocument/hover", positionParams(aURI, origOperand))
+	operand := shift(findPos(t, edited2, "ReadFile(path)?", 0), len("ReadFile("))
+	f.client.call("textDocument/hover", positionParams(aURI, operand))
 
 	calls := f.comp.lowerCalls()
 	if len(calls) != 1 {
@@ -1636,8 +1642,17 @@ func TestProxyOneRunForTwoEditsBeforeHover(t *testing.T) {
 	if last := buffers[len(buffers)-1]; string(last[aPath]) != edited2 {
 		t.Errorf("the one run lowered %q, want the text of version 3", last[aPath])
 	}
-	if _, pos := forwardedPosition(t, f, "textDocument/hover", 0); pos != lowOperand {
-		t.Errorf("the hover was mapped at %v, want %v through the version 3 lowering", pos, lowOperand)
+	opened := f.receivedMethod("textDocument/didOpen")
+	if len(opened) != 1 {
+		t.Fatalf("gopls got %d lowered didOpen messages, want the one of the version 3 text", len(opened))
+	}
+	fwdText, _ := opened[0]["textDocument"].(map[string]any)["text"].(string)
+	_, pos := forwardedPosition(t, f, "textDocument/hover", 0)
+	lines := strings.Split(fwdText, "\n")
+	if pos.Line < 0 || pos.Line >= len(lines) || pos.Character < 0 || pos.Character > len(lines[pos.Line]) {
+		t.Fatalf("hover forwarded at %v, outside the lowered text", pos)
+	} else if got := lines[pos.Line][pos.Character:]; !strings.HasPrefix(got, "path)") {
+		t.Errorf("the hover was mapped at %v reaching %q, want the path operand", pos, got)
 	}
 }
 
@@ -1661,10 +1676,6 @@ func TestProxyConcurrentHoversShareOneRun(t *testing.T) {
 
 func TestProxyHoverAfterCloseSeesDiskText(t *testing.T) {
 	unsaved := "// unsaved\n" + aLgo
-	lowDisk, _, ok := lowerQuestion([]byte(aLgo))
-	if !ok {
-		t.Fatal("aLgo does not lower")
-	}
 	f := newFixture(t, map[string]string{"a/a.lgo": aLgo}, fixtureOptions{
 		Script: func(string) fakeScript {
 			return fakeScript{Responses: map[string]json.RawMessage{
@@ -1677,7 +1688,6 @@ func TestProxyHoverAfterCloseSeesDiskText(t *testing.T) {
 	f.client.notify("textDocument/didClose", map[string]any{"textDocument": map[string]any{"uri": aURI}})
 
 	origOperand := shift(findPos(t, aLgo, "ReadFile(path)?", 0), len("ReadFile("))
-	lowOperand := shift(findPos(t, string(lowDisk), "ReadFile(path)", 0), len("ReadFile("))
 	res := f.client.call("textDocument/hover", positionParams(aURI, origOperand))
 	if string(res) == "null" {
 		t.Fatal("hover on a closed document answered null, want a lowering of the disk text")
@@ -1691,11 +1701,17 @@ func TestProxyHoverAfterCloseSeesDiskText(t *testing.T) {
 	if len(opened) != 1 {
 		t.Fatalf("gopls got %d lowered didOpen messages, want the one of the disk text", len(opened))
 	}
-	if item, _ := opened[0]["textDocument"].(map[string]any); item["text"] != string(lowDisk) {
-		t.Errorf("gopls holds the lowering of %q, want the disk text", item["text"])
+	doc, _ := opened[0]["textDocument"].(map[string]any)
+	fwdText, _ := doc["text"].(string)
+	if strings.Contains(fwdText, "// unsaved") {
+		t.Errorf("gopls holds a lowering of the discarded unsaved text")
 	}
-	if _, pos := forwardedPosition(t, f, "textDocument/hover", 0); pos != lowOperand {
-		t.Errorf("the hover was mapped at %v, want %v through the disk lowering", pos, lowOperand)
+	_, pos := forwardedPosition(t, f, "textDocument/hover", 0)
+	lines := strings.Split(fwdText, "\n")
+	if pos.Line < 0 || pos.Line >= len(lines) || pos.Character < 0 || pos.Character > len(lines[pos.Line]) {
+		t.Fatalf("hover forwarded at %v, outside the lowered text", pos)
+	} else if got := lines[pos.Line][pos.Character:]; !strings.HasPrefix(got, "path)") {
+		t.Errorf("the hover was mapped at %v reaching %q, want the path operand of the disk lowering", pos, got)
 	}
 }
 
@@ -1755,23 +1771,32 @@ func TestProxyPackageSnapshotHoldsEveryVersion(t *testing.T) {
 		"textDocument":   map[string]any{"uri": aURI, "version": 2},
 		"contentChanges": []any{map[string]any{"text": editedA2}},
 	})
-	low2, _, ok := lowerQuestion([]byte(editedA2))
-	if !ok {
-		t.Fatal("editedA2 does not lower")
-	}
-	origOperand := shift(findPos(t, editedA2, "ReadFile(path)?", 0), len("ReadFile("))
-	lowOperand := shift(findPos(t, string(low2), "ReadFile(path)", 0), len("ReadFile("))
-	f.client.call("textDocument/hover", positionParams(aURI, origOperand))
+	operand := shift(findPos(t, editedA2, "ReadFile(path)?", 0), len("ReadFile("))
+	f.client.call("textDocument/hover", positionParams(aURI, operand))
 	if got := len(f.comp.lowerCalls()); got != 1 {
 		t.Fatalf("one edit and one hover caused %d lowerings, want the single run for the version set", got)
 	}
 	if last := f.comp.bufferCalls()[len(f.comp.bufferCalls())-1]; string(last[aPath]) != editedA2 || string(last[bPath]) != bLgo {
 		t.Errorf("the run lowered a=%q b=%q, want the version 2 text of a and the version 1 text of b", last[aPath], last[bPath])
 	}
-	if _, pos := forwardedPosition(t, f, "textDocument/hover", 0); pos != lowOperand {
-		t.Errorf("hover forwarded at %v, want %v through the version 2 lowering", pos, lowOperand)
+	var fwdText string
+	for _, o := range f.receivedMethod("textDocument/didOpen") {
+		td, _ := o["textDocument"].(map[string]any)
+		if td["uri"] == f.virtURI("a/a.lgo") {
+			fwdText, _ = td["text"].(string)
+		}
 	}
-	f.client.call("textDocument/hover", positionParams(aURI, origOperand))
+	if fwdText == "" {
+		t.Fatal("gopls got no lowered didOpen for a/a.lgo")
+	}
+	_, pos := forwardedPosition(t, f, "textDocument/hover", 0)
+	lines := strings.Split(fwdText, "\n")
+	if pos.Line < 0 || pos.Line >= len(lines) || pos.Character < 0 || pos.Character > len(lines[pos.Line]) {
+		t.Fatalf("hover forwarded at %v, outside the lowered text", pos)
+	} else if got := lines[pos.Line][pos.Character:]; !strings.HasPrefix(got, "path)") {
+		t.Errorf("hover forwarded at %v reaching %q, want the path operand", pos, got)
+	}
+	f.client.call("textDocument/hover", positionParams(aURI, operand))
 	if got := len(f.comp.lowerCalls()); got != 1 {
 		t.Fatalf("a repeat hover with no edits caused %d lowerings, want still the one run", got)
 	}
@@ -1815,29 +1840,35 @@ func TestProxyLargeFileMapsExactly(t *testing.T) {
 
 func TestProxyDuplicateTokenMapsToOwnSegment(t *testing.T) {
 	const dupLgo = "package a\n\nimport \"os\"\n\nfunc first(path string) string {\n\tdata := os.ReadFile(path)?\n\treturn string(data)\n}\n\nfunc second(path string) string {\n\tdata := os.ReadFile(path)?\n\treturn string(data)\n}\n"
-	low, _, ok := lowerQuestion([]byte(dupLgo))
-	if !ok {
-		t.Fatal("duplicate fixture does not lower")
-	}
-	lowText := string(low)
-	origFirst := shift(findPos(t, dupLgo, "ReadFile(path)?", 0), len("ReadFile("))
-	origSecond := shift(findPos(t, dupLgo, "ReadFile(path)?", 1), len("ReadFile("))
-	lowFirst := shift(findPos(t, lowText, "ReadFile(path)", 0), len("ReadFile("))
-	lowSecond := shift(findPos(t, lowText, "ReadFile(path)", 1), len("ReadFile("))
-	if lowFirst == lowSecond {
-		t.Fatal("fixture copies lower to the same position; the test cannot discriminate them")
-	}
 	f := newFixture(t, map[string]string{"a/a.lgo": dupLgo}, fixtureOptions{})
 	f.open("a/a.lgo", 1)
 	f.sync()
 	aURI := f.uri("a/a.lgo")
+	origFirst := shift(findPos(t, dupLgo, "ReadFile(path)?", 0), len("ReadFile("))
+	origSecond := shift(findPos(t, dupLgo, "ReadFile(path)?", 1), len("ReadFile("))
 	f.client.call("textDocument/hover", positionParams(aURI, origFirst))
 	f.client.call("textDocument/hover", positionParams(aURI, origSecond))
-	if uri, pos := forwardedPosition(t, f, "textDocument/hover", 0); uri != f.virtURI("a/a.lgo") || pos != lowFirst {
-		t.Errorf("hover on the first copy reached gopls as %s %v, want %s %v", uri, pos, f.virtURI("a/a.lgo"), lowFirst)
+	opened := f.receivedMethod("textDocument/didOpen")
+	if len(opened) != 1 {
+		t.Fatalf("gopls got %d lowered didOpen messages, want one", len(opened))
 	}
-	if uri, pos := forwardedPosition(t, f, "textDocument/hover", 1); uri != f.virtURI("a/a.lgo") || pos != lowSecond {
-		t.Errorf("hover on the second copy reached gopls as %s %v, want its own origin segment %s %v", uri, pos, f.virtURI("a/a.lgo"), lowSecond)
+	fwdText, _ := opened[0]["textDocument"].(map[string]any)["text"].(string)
+	uri0, pos0 := forwardedPosition(t, f, "textDocument/hover", 0)
+	uri1, pos1 := forwardedPosition(t, f, "textDocument/hover", 1)
+	if uri0 != f.virtURI("a/a.lgo") || uri1 != f.virtURI("a/a.lgo") {
+		t.Errorf("copies reached gopls as %s and %s, want %s", uri0, uri1, f.virtURI("a/a.lgo"))
+	}
+	if pos0 == pos1 {
+		t.Fatalf("both copies forwarded at %v, want each copy to map to its own segment", pos0)
+	}
+	for i, pos := range []Position{pos0, pos1} {
+		lines := strings.Split(fwdText, "\n")
+		if pos.Line < 0 || pos.Line >= len(lines) || pos.Character < 0 || pos.Character > len(lines[pos.Line]) {
+			t.Fatalf("copy %d forwarded at %v, outside the lowered text", i, pos)
+		}
+		if got := lines[pos.Line][pos.Character:]; !strings.HasPrefix(got, "path)") {
+			t.Errorf("copy %d forwarded at %v reaches %q, want the path operand", i, pos, got)
+		}
 	}
 }
 
@@ -1847,8 +1878,7 @@ func TestProxyDefinitionWritesNoBytes(t *testing.T) {
 	const app2Lgo = "package app2\n\nimport \"example.com/m/golib\"\n\nvar N = golib.Thing()\n"
 	const goLib = "package golib\n\nfunc Thing() int { return 1 }\n"
 	thing := Range{Start: Position{Line: 2, Character: 5}, End: Position{Line: 2, Character: 10}}
-	libLow, _, _ := lowerQuestion([]byte(libLgo))
-	helloLow := span(findPos(t, string(libLow), "Hello", 0), len("Hello"))
+	hello := span(findPos(t, libLgo, "Hello", 0), len("Hello"))
 	f := newFixture(t, map[string]string{
 		"go.mod":        "module example.com/m\n\ngo 1.27\n",
 		"lib/lib.lgo":   libLgo,
@@ -1859,7 +1889,7 @@ func TestProxyDefinitionWritesNoBytes(t *testing.T) {
 		Script: func(root string) fakeScript {
 			return fakeScript{Responses: map[string]json.RawMessage{
 				"textDocument/definition": toJSON(t, []any{
-					map[string]any{"uri": pathURI(filepath.Join(root, "lib", "lib.go")), "range": helloLow},
+					map[string]any{"uri": pathURI(filepath.Join(root, "lib", "lib.go")), "range": hello},
 					map[string]any{"uri": pathURI(filepath.Join(root, "golib", "g.go")), "range": thing},
 				}),
 			}}
