@@ -16,3 +16,5 @@ v=%s-%d
 allocs: 1
 allocs: 1
 302
+allocs: 1
+bound-ok

@@ -5,6 +5,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"testing"
 )
@@ -81,4 +82,17 @@ func main() {
 		fmt.Println("allocs: 1")
 	}
 	fmt.Println(len(sink))
+	negMax := -math.MaxFloat64
+	if allocs := testing.AllocsPerRun(100, func() {
+		sink = $"{math.MinInt64}{negMax}{false}"
+	}); allocs != 1 {
+		fmt.Println("allocs:", allocs)
+	} else {
+		fmt.Println("allocs: 1")
+	}
+	if sink != "-9223372036854775808-1.7976931348623157e+308false" {
+		fmt.Println("bound-bad:", sink)
+	} else {
+		fmt.Println("bound-ok")
+	}
 }
