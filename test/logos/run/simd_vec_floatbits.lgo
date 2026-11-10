@@ -45,7 +45,6 @@ func check32(tag string, got []float32, xb, yb []uint32) {
 			panic(tag + " mismatch")
 		}
 	}
-	fmt.Println(tag, math.Float32bits(got[0]), math.Float32bits(got[len(got)-1]))
 }
 
 func check64(tag string, got []float64, xb, yb []uint64) {
@@ -55,7 +54,6 @@ func check64(tag string, got []float64, xb, yb []uint64) {
 			panic(tag + " mismatch")
 		}
 	}
-	fmt.Println(tag, math.Float64bits(got[0]), math.Float64bits(got[len(got)-1]))
 }
 
 func checkF32x2() {
@@ -173,7 +171,6 @@ func checkF32Copysign() {
 			panic("f32copysign sign mismatch")
 		}
 	}
-	fmt.Println("f32copysign", math.Float32bits(got[0]), math.Float32bits(got[3]))
 }
 
 func checkF64Copysign() {
@@ -188,7 +185,6 @@ func checkF64Copysign() {
 			panic("f64copysign mismatch")
 		}
 	}
-	fmt.Println("f64copysign", math.Float64bits(got[0]), math.Float64bits(got[1]))
 }
 
 func main() {
