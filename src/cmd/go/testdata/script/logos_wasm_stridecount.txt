@@ -1,7 +1,9 @@
-# logos wasm back-edge stride fires every 4096 iterations: over exactly
-# 40960 loop iterations the latch edge is traversed 40960 times, so the
-# counter fires 10 times and a peer counting scheduler wakeups observes
-# exactly 10.
+# logos wasm back-edge stride fires every 4096 latch traversals: over
+# exactly 40960 loop iterations the latch is traversed 40960 times, so
+# the counter fires 10 times, including the exit-edge traversal before
+# the loop condition fails. A peer counting scheduler wakeups observes
+# exactly 10 under the strictly alternating cooperative schedule, and
+# a lost stride collapses its count.
 [!exec:node] skip 'node not in PATH'
 
 env GOPROXY=off
