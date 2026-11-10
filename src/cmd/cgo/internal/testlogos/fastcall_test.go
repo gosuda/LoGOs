@@ -19,6 +19,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"weak"
 )
 
 func requireCgo(t testing.TB) {
@@ -835,10 +836,14 @@ func growStack(depth int) byte {
 	return pad[0] + pad[95]
 }
 
-func gateWatchByte() *byte {
-	b := make([]byte, 256<<10)
-	b[0] = 42
-	return &b[0]
+func gateWatchHeap() (*byte, *watchHeap) {
+	w := &watchHeap{}
+	w.b[0] = 42
+	return &w.b[0], w
+}
+
+type watchHeap struct {
+	b [256 << 10]byte
 }
 
 func TestFastcallPinUnderCollection(t *testing.T) {
@@ -856,9 +861,13 @@ func TestFastcallPinUnderCollection(t *testing.T) {
 	defer gateR.Close()
 	defer gateW.Close()
 	done := make(chan int32, 1)
+	pinnedCh := make(chan weak.Pointer[watchHeap], 1)
 	go func(readyFD, gateFD int32) {
-		done <- callFastGateWatch(readyFD, gateFD, gateWatchByte(), 42)
+		watchPtr, watchOwner := gateWatchHeap()
+		pinnedCh <- weak.Make(watchOwner)
+		done <- callFastGateWatch(readyFD, gateFD, watchPtr, 42)
 	}(int32(readyW.Fd()), int32(gateR.Fd()))
+	pinned := <-pinnedCh
 	type readyRes struct {
 		n    int
 		rerr error
@@ -887,6 +896,9 @@ func TestFastcallPinUnderCollection(t *testing.T) {
 		}
 		runtime.KeepAlive(q)
 		runtime.GC()
+	}
+	if pinned.Value() == nil {
+		t.Fatal("heap buffer collected while fast call holds it")
 	}
 	select {
 	case code := <-done:
