@@ -32,11 +32,59 @@ func TestSimdArrayVectorScalarForms(t *testing.T) {
 			t.Errorf("alias array misses the vector form:\n%s", out)
 		}
 	})
+	t.Run("byte takes vector form amd64", func(t *testing.T) {
+		simdSliceTarget(t, "amd64", 1)
+		out := lowerArrayOp(t, "", "[16]byte", "+")
+		if !strings.Contains(out, "archsimd") {
+			t.Errorf("byte array misses the vector form:\n%s", out)
+		}
+	})
+	t.Run("byte takes vector form arm64", func(t *testing.T) {
+		simdSliceTarget(t, "arm64", 1)
+		out := lowerArrayOp(t, "", "[16]byte", "+")
+		if !strings.Contains(out, "archsimd") {
+			t.Errorf("byte array misses the vector form on arm64:\n%s", out)
+		}
+		if strings.Contains(out, "X86") {
+			t.Errorf("arm64 byte array carries an X86 guard:\n%s", out)
+		}
+	})
+	t.Run("rune takes vector form amd64", func(t *testing.T) {
+		simdSliceTarget(t, "amd64", 1)
+		out := lowerArrayOp(t, "", "[8]rune", "+")
+		if !strings.Contains(out, "archsimd") {
+			t.Errorf("rune array misses the vector form:\n%s", out)
+		}
+	})
+	t.Run("rune takes vector form arm64", func(t *testing.T) {
+		simdSliceTarget(t, "arm64", 1)
+		out := lowerArrayOp(t, "", "[8]rune", "+")
+		if !strings.Contains(out, "archsimd") {
+			t.Errorf("rune array misses the vector form on arm64:\n%s", out)
+		}
+		if strings.Contains(out, "X86") {
+			t.Errorf("arm64 rune array carries an X86 guard:\n%s", out)
+		}
+	})
 	t.Run("int stays scalar", func(t *testing.T) {
 		simdSliceTarget(t, "amd64", 1)
 		out := lowerArrayOp(t, "", "["+n+"]int", "+")
 		if strings.Contains(out, "archsimd") || strings.Contains(out, "_logos_simd") {
 			t.Errorf("int array takes the vector form:\n%s", out)
+		}
+	})
+	t.Run("uint stays scalar", func(t *testing.T) {
+		simdSliceTarget(t, "amd64", 1)
+		out := lowerArrayOp(t, "", "[4]uint", "+")
+		if strings.Contains(out, "archsimd") || strings.Contains(out, "_logos_simd") {
+			t.Errorf("uint array takes the vector form:\n%s", out)
+		}
+	})
+	t.Run("uintptr stays scalar", func(t *testing.T) {
+		simdSliceTarget(t, "amd64", 1)
+		out := lowerArrayOp(t, "", "[2]uintptr", "+")
+		if strings.Contains(out, "archsimd") || strings.Contains(out, "_logos_simd") {
+			t.Errorf("uintptr array takes the vector form:\n%s", out)
 		}
 	})
 	t.Run("defined type stays scalar", func(t *testing.T) {
