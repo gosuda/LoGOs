@@ -701,3 +701,46 @@ func TestLogosRegionChainsArePrivate(t *testing.T) {
 		}
 	})
 }
+
+func TestLogosRegionParkRetainsStackAndMetadata(t *testing.T) {
+	inFreshGoroutine(t, func() {
+		canary := 0x5A5A5A5A
+		before := runtime.LogosArenaGoid()
+		h1, g1 := runtime.LogosRegionOpen()
+		h2, g2 := runtime.LogosRegionOpen()
+		release := make(chan struct{})
+		go func() {
+			time.Sleep(50 * time.Millisecond)
+			close(release)
+		}()
+		canary += 1
+		<-release
+		if canary != 0x5A5A5A5B {
+			t.Fatalf("stack canary = %#x, want %#x after park", canary, 0x5A5A5A5B)
+		}
+		if got := runtime.LogosArenaGoid(); got != before {
+			t.Fatalf("goid = %d, want %d after park", got, before)
+		}
+		if n := len(runtime.LogosRegionChunks()); n != 0 {
+			t.Fatalf("empty regions hold %d chunks, want 0 after park", n)
+		}
+		if got := runtime.LogosRegionBytes(); got != 0 {
+			t.Fatalf("RegionBytes = %d, want 0 after park", got)
+		}
+		runtime.LogosRegionClose(h2, g2)
+		runtime.LogosRegionClose(h1, g1)
+		h3, g3 := runtime.LogosRegionOpen()
+		p := runtime.LogosRegionAllocNoscan(h3, g3, 32, 8)
+		fillBytes(p, 32, 0xA5)
+		if !checkBytes(p, 32, 0xA5) {
+			t.Fatal("region object damaged after park and reopen")
+		}
+		if !runtime.LogosArenaInChunk(p) {
+			t.Fatal("reopened region no longer places after park")
+		}
+		runtime.LogosRegionClose(h3, g3)
+		if n := len(runtime.LogosRegionChunks()); n != 0 {
+			t.Fatalf("chunks after Close = %d, want 0", n)
+		}
+	})
+}
