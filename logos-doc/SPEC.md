@@ -199,7 +199,7 @@ The command `logos next --fix` MUST convert a whole Go module to a loGo/s module
 `logos next` MUST leave complex refactors unchanged and MUST list them in `next_tasks.json` [T-103].
 `logos next` MUST rewrite an index-range append loop with a pure body to a map chain [T-103].
 `logos next` MUST leave a loop with jump control or side effects unchanged and MUST list it in `next_tasks.json` [T-103].
-No `logos fmt` command exists [T-103].
+The toolchain MUST NOT add a `logos fmt` rewriting command. [T-103]
 No command except `logos next` MUST rewrite `.lgo` files [T-103].
 
 ### 1.4 RFC-104: Syntactic sugar and desugaring
@@ -289,7 +289,7 @@ Slices MUST offer `filter`, `map`, `find`, `any`, `all`, `sortBy`, `first`, `las
 `sortBy` MUST be a stable sort by `cmp.Compare` of keys over ordered key types [T-104.6].
 Float `.sum()` MUST use fixed pairwise order with no FMA contraction [T-104.6].
 Float `.sum()` MUST be bit-identical across x86_64 and ARM64 builds [T-104.6].
-Chained calls MUST fuse into one loop with the receiver evaluated once [T-104.6].
+Chained calls MUST fuse into one loop with the receiver evaluated once before the loop [T-104.6].
 Lambda parameters in chains MUST be const views [T-104.6].
 Mutation of the receiver inside a chain lambda MUST fail compilation [T-104.6].
 `?` in an expression-lambda body MUST propagate from the enclosing function [T-104.6].
@@ -358,7 +358,7 @@ O3 MUST add no escape-analysis or prove-pass work budget [T-105].
 Plain `go` MUST read no `target_cpu` and MUST keep the upstream `GOAMD64` and `GOARM64` defaults [T-105][R-U1].
 `deterministic` MUST set GOAMD64 v3 and GOARM64 v8.2 unless the environment already sets them [T-105].
 `baseline` MUST set GOAMD64 v1 and GOARM64 v8.0 [T-105].
-`native` MUST pick the host level [T-105].
+Host-specific selection MUST require `target_cpu = "native"`; `native` MUST pick the host level [T-105].
 The default binary MUST NOT run on x86 CPUs older than v3 [T-105].
 Self-aliased calls such as arr = Reverse(arr) MUST return correct results. [T-105]
 Recursive functions MUST NOT inline above that budget. [T-105][T-302]
