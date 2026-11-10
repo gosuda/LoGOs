@@ -49,25 +49,33 @@
 // K18 logosescape, K19 logosstack, K20 logosfastcgo, K21 preemptibleloops
 // on plain go (owner answer Q4). Fork rows compare against the matched
 // upstream row (U1 v1, U1N v1 with -gcflags=all=-N -l, U3 v3, U3N v3 with
-// -N -l, U3R v3 with -race). Gates before comparison: every program must
-// give equal observations under all upstream rows present (invariance gate)
-// and under upstream U1 at GOMAXPROCS=1 and 4 (stability gate); a violation
-// is a corpus defect, never a silent skip.
+// -N -l, U3R v3 with -race). Programs importing "C" build with CGO_ENABLED=1
+// as an explicit package list; in the fast tier they run under K1, K5, U1,
+// and U3 only, in release under every active configuration. A program may
+// declare level-dependent stdout lines (currently the unconverted float
+// sums that upstream itself fuses at v3) in level-dependent.txt, one line
+// prefix per line; those lines compare fork-vs-matched-upstream as usual
+// but the invariance and metamorphic gates hold them only within the same
+// GOAMD64 level and optimization setting. Gates before comparison: every
+// program must give equal observations under all upstream rows present
+// (invariance gate) and under upstream U1 at GOMAXPROCS=1 and 4 (stability
+// gate); a violation is a corpus defect, never a silent skip.
 //
 // # Mutants
 //
-// testdata/mutants/<id>.txt holds one negative control per attack in txtar
-// form: header lines kind, file, expect, config in the comment section, then
-// one -- old -- / -- new -- pair with the exact replaced text. file is
-// GOROOT-relative; old must occur exactly once in the target or the mutant
-// is invalid and the test fails loudly, so stale mutants are never silent.
-// kinds compiler, linker, and cgo build the named tool through an overlay
-// and swap it into fork builds only via -toolexec with the shim in
-// testdata/toolexec (env GOPARITY_MUTANT_TOOL=name=path); kinds runtime,
-// std, and rules pass the overlay to the fork build directly. kind cmdgo is
-// not supported here. Mutants never touch the tree and never reach upstream
-// builds. TestParityMutants (release tier, flag -goparity.release) applies
-// each mutant, requires the build to succeed, and requires the program named
+// testdata/mutants/<id>.txt holds one or more negative controls per attack
+// in txtar form: header lines kind, file, expect, config, then one -- old --
+// / -- new -- pair with the exact replaced text; a later control starts at
+// the next column-zero kind line. file is GOROOT-relative; old must occur
+// exactly once in the target or the mutant is invalid and the test fails
+// loudly, so stale mutants are never silent. kinds compiler, linker, and cgo
+// build the named tool through an overlay and swap it into fork builds only
+// via -toolexec with the shim in testdata/toolexec (env
+// GOPARITY_MUTANT_TOOL=name=path); kinds runtime, std, and rules pass the
+// overlay to the fork build directly. kind cmdgo is not supported here.
+// Mutants never touch the tree and never reach upstream builds.
+// TestParityMutants (release tier, flag -goparity.release) applies each
+// mutant, requires the build to succeed, and requires the program named
 // by expect to turn red in the named configuration: nonzero exit, a LAW
 // line, or a difference from the matched upstream row; an expect naming a
 // fail-corpus file turns red when the fork build stops rejecting it.
@@ -126,10 +134,12 @@ type config struct {
 }
 
 type upConfig struct {
-	id   string
-	args []string
-	env  []string
-	race bool
+	id    string
+	args  []string
+	env   []string
+	race  bool
+	level string
+	noopt bool
 }
 
 var forkConfigs = []config{
@@ -156,11 +166,11 @@ var forkConfigs = []config{
 }
 
 var upConfigs = []upConfig{
-	{id: "U1"},
-	{id: "U1N", args: []string{"-gcflags=all=-N -l"}},
-	{id: "U3", env: []string{"GOAMD64=v3"}},
-	{id: "U3N", args: []string{"-gcflags=all=-N -l"}, env: []string{"GOAMD64=v3"}},
-	{id: "U3R", env: []string{"GOAMD64=v3", "CGO_ENABLED=1"}, race: true},
+	{id: "U1", level: "v1"},
+	{id: "U1N", args: []string{"-gcflags=all=-N -l"}, level: "v1", noopt: true},
+	{id: "U3", env: []string{"GOAMD64=v3"}, level: "v3"},
+	{id: "U3N", args: []string{"-gcflags=all=-N -l"}, env: []string{"GOAMD64=v3"}, level: "v3", noopt: true},
+	{id: "U3R", env: []string{"GOAMD64=v3", "CGO_ENABLED=1"}, race: true, level: "v3"},
 }
 
 type toolchain struct {
@@ -179,6 +189,7 @@ type buildResult struct {
 	outDir string
 	output string
 	err    error
+	progs  []string
 }
 
 func goVersion(t *testing.T, goroot string) string {
@@ -378,12 +389,143 @@ func goBuild(bin, dir string, args, env []string, budget time.Duration) (string,
 	return string(out), err
 }
 
-func buildCorpus(bin, moduleDir, outDir string, args, env []string) (string, error) {
-	if err := os.MkdirAll(outDir, 0o777); err != nil {
-		return "", err
+const moduleBuildBudget = 15 * time.Minute
+
+type stagedBuild struct {
+	bin     string
+	stage   string
+	outDir  string
+	args    []string
+	env     []string
+	progs   []string
+	wantCgo bool
+}
+
+func (b stagedBuild) build() (built []string, output string, err error) {
+	build := func(pkgs, env []string) (string, error) {
+		if err := os.MkdirAll(b.outDir, 0o777); err != nil {
+			return "", err
+		}
+		full := append([]string{"build", "-o", b.outDir}, b.args...)
+		full = append(full, pkgs...)
+		return goBuild(b.bin, b.stage, full, env, moduleBuildBudget)
 	}
-	full := append([]string{"build", "-o", outDir}, args...)
-	return goBuild(bin, moduleDir, append(full, "./..."), env, 15*time.Minute)
+	plain, cgo, err := splitStaged(b.stage, b.progs)
+	if err != nil {
+		return nil, "", err
+	}
+	type buildList struct {
+		names []string
+		env   []string
+	}
+	lists := []buildList{{plain, b.env}}
+	if b.wantCgo {
+		lists = append(lists, buildList{cgo, appendEnv(b.env, "CGO_ENABLED=1")})
+	}
+	for _, l := range lists {
+		if len(l.names) == 0 {
+			continue
+		}
+		out, err := build(pkgArgs(l.names), l.env)
+		output += out
+		if err != nil {
+			return built, output, err
+		}
+		built = append(built, l.names...)
+	}
+	if len(built) == 0 && err == nil {
+		return built, output, errors.New("no programs built")
+	}
+	return built, output, nil
+}
+
+func splitStaged(stage string, progs []string) (plain, cgo []string, err error) {
+	for _, p := range progs {
+		isCgo, err := cgoProgram(filepath.Join(stage, p))
+		if err != nil {
+			return nil, nil, err
+		}
+		if isCgo {
+			cgo = append(cgo, p)
+		} else {
+			plain = append(plain, p)
+		}
+	}
+	return plain, cgo, nil
+}
+
+func cgoProgram(dir string) (bool, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false, err
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".go") {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		if err != nil {
+			return false, err
+		}
+		for ln := range strings.SplitSeq(string(data), "\n") {
+			before, _, _ := strings.Cut(strings.TrimSpace(ln), "//")
+			if t := strings.TrimSpace(before); t == `import "C"` || t == `"C"` {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
+func pkgArgs(progs []string) []string {
+	out := make([]string, 0, len(progs))
+	for _, p := range progs {
+		out = append(out, "./"+p)
+	}
+	return out
+}
+
+type upKey struct {
+	level string
+	noopt bool
+}
+
+func (c config) optOff() bool { return slices.Contains(c.args, "-O=0") }
+
+func levelPrefixes(prog string) []string {
+	data, err := os.ReadFile(filepath.Join("testdata", "run", prog, "level-dependent.txt"))
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for ln := range strings.SplitSeq(string(data), "\n") {
+		if t := strings.TrimSpace(ln); t != "" {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+func splitLevel(stdout string, prefixes []string) (global, level string) {
+	if len(prefixes) == 0 {
+		return stdout, ""
+	}
+	var g, l []string
+	for ln := range strings.SplitSeq(stdout, "\n") {
+		isLevel := false
+		for _, p := range prefixes {
+			if ln == p || strings.HasPrefix(ln, p+" ") {
+				isLevel = true
+				break
+			}
+		}
+		if isLevel {
+			l = append(l, ln)
+		} else {
+			g = append(g, ln)
+		}
+	}
+	return strings.Join(g, "\n"), strings.Join(l, "\n")
 }
 
 var hexMask = regexp.MustCompile(`0[xX][0-9a-fA-F]{6,}`)
@@ -467,12 +609,12 @@ func obsDesc(o observation) string {
 	return fmt.Sprintf("exit %d stdout %d bytes stderr %d bytes", o.exit, len(o.stdout), len(o.stderr))
 }
 
-func runAll(r buildResult, progs []string, maxProcs string) (map[string]observation, error) {
-	out := make(map[string]observation, len(progs))
+func runAll(r buildResult, maxProcs string) (map[string]observation, error) {
+	out := make(map[string]observation, len(r.progs))
 	var firstErr error
 	var mu sync.Mutex
 	var wg sync.WaitGroup
-	for _, p := range progs {
+	for _, p := range r.progs {
 		wg.Go(func() {
 			o, err := runBinary(filepath.Join(r.outDir, p), maxProcs)
 			mu.Lock()
@@ -531,9 +673,11 @@ func buildAllFork(t *testing.T, fork toolchain, base string, progs []string, ks 
 				bin = fork.logos
 			}
 			outDir := filepath.Join(base, "out-fork-"+c.id)
-			out, err := buildCorpus(bin, stage, outDir, c.args, env)
+			wantCgo := *releaseFlag || c.id == "K1" || c.id == "K5"
+			sb := stagedBuild{bin: bin, stage: stage, outDir: outDir, args: c.args, env: env, progs: progs, wantCgo: wantCgo}
+			built, out, err := sb.build()
 			mu.Lock()
-			results[c.id] = buildResult{outDir: outDir, output: out, err: err}
+			results[c.id] = buildResult{outDir: outDir, output: out, err: err, progs: built}
 			mu.Unlock()
 		})
 	}
@@ -559,9 +703,11 @@ func buildAllUpstream(t *testing.T, up toolchain, base string, progs []string, u
 			}
 			env = appendEnv(env, u.env...)
 			outDir := filepath.Join(base, "out-up-"+u.id)
-			out, err := buildCorpus(up.bin, stage, outDir, u.args, env)
+			wantCgo := *releaseFlag || u.id == "U1" || u.id == "U3"
+			sb := stagedBuild{bin: up.bin, stage: stage, outDir: outDir, args: u.args, env: env, progs: progs, wantCgo: wantCgo}
+			built, out, err := sb.build()
 			mu.Lock()
-			results[u.id] = buildResult{outDir: outDir, output: out, err: err}
+			results[u.id] = buildResult{outDir: outDir, output: out, err: err, progs: built}
 			mu.Unlock()
 		})
 	}
@@ -609,7 +755,7 @@ func TestParity(t *testing.T) {
 			continue
 		}
 		wg.Go(func() {
-			o, err := runAll(forkBuilds[c.id], progs, "4")
+			o, err := runAll(forkBuilds[c.id], "4")
 			mu.Lock()
 			if err != nil {
 				forkRunErrs[c.id] = err
@@ -624,7 +770,7 @@ func TestParity(t *testing.T) {
 			continue
 		}
 		wg.Go(func() {
-			o, err := runAll(upBuilds[u.id], progs, "4")
+			o, err := runAll(upBuilds[u.id], "4")
 			mu.Lock()
 			if err != nil {
 				upRunErrs[u.id] = err
@@ -657,31 +803,47 @@ func TestParity(t *testing.T) {
 	}
 	stability := map[string]observation{}
 	if upBuilds["U1"].err == nil {
-		stab, stabErr := runAll(upBuilds["U1"], progs, "1")
+		stab, stabErr := runAll(upBuilds["U1"], "1")
 		if stabErr != nil {
 			t.Errorf("upstream stability runs failed: %v", stabErr)
 		} else {
 			stability = stab
 		}
 	}
+	upByID := make(map[string]upConfig, len(ups))
+	for _, u := range ups {
+		upByID[u.id] = u
+	}
 	for _, p := range progs {
-		var ref *observation
+		prefs := levelPrefixes(p)
+		var gref *observation
+		lrefs := map[upKey]string{}
 		for _, u := range ups {
 			o, ok := upObs[u.id][p]
 			if !ok {
 				continue
 			}
-			if ref == nil {
-				cp := o
-				ref = &cp
-				continue
+			gs, lv := splitLevel(o.stdout, prefs)
+			og := observation{exit: o.exit, stdout: gs, stderr: o.stderr}
+			if gref == nil {
+				cp := og
+				gref = &cp
+			} else if !obsEqual(*gref, og) {
+				t.Errorf("invariance gate: program %s differs between upstream rows: %s vs %s (%s)", p, obsDesc(*gref), obsDesc(og), firstDiff(gref.stdout, og.stdout))
 			}
-			if !obsEqual(*ref, o) {
-				t.Errorf("invariance gate: program %s differs between upstream rows: %s vs %s (%s)", p, obsDesc(*ref), obsDesc(o), firstDiff(ref.stdout, o.stdout))
+			k := upKey{level: upByID[u.id].level, noopt: upByID[u.id].noopt}
+			if prev, ok := lrefs[k]; ok && prev != lv {
+				t.Errorf("invariance gate: program %s level-dependent lines differ within upstream %s,noopt=%v rows: %s", p, k.level, k.noopt, firstDiff(prev, lv))
+			} else if !ok {
+				lrefs[k] = lv
 			}
 		}
-		if o, ok := stability[p]; ok && ref != nil && !obsEqual(*ref, o) {
-			t.Errorf("stability gate: program %s differs under upstream U1 at GOMAXPROCS=1 vs 4: %s vs %s (%s)", p, obsDesc(*ref), obsDesc(o), firstDiff(ref.stdout, o.stdout))
+		if o, ok := stability[p]; ok && gref != nil {
+			gs, _ := splitLevel(o.stdout, prefs)
+			og := observation{exit: o.exit, stdout: gs, stderr: o.stderr}
+			if !obsEqual(*gref, og) {
+				t.Errorf("stability gate: program %s differs under upstream U1 at GOMAXPROCS=1 vs 4: %s vs %s (%s)", p, obsDesc(*gref), obsDesc(og), firstDiff(gref.stdout, og.stdout))
+			}
 		}
 	}
 	for _, c := range ks {
@@ -718,19 +880,26 @@ func TestParity(t *testing.T) {
 			}
 		}
 		for _, p := range progs {
-			var ref *observation
+			prefs := levelPrefixes(p)
+			var gref *observation
+			lrefs := map[bool]string{}
 			for _, m := range members {
 				o, ok := forkObs[m.id][p]
 				if !ok {
 					continue
 				}
-				if ref == nil {
-					cp := o
-					ref = &cp
-					continue
+				gs, lv := splitLevel(o.stdout, prefs)
+				og := observation{exit: o.exit, stdout: gs, stderr: o.stderr}
+				if gref == nil {
+					cp := og
+					gref = &cp
+				} else if !obsEqual(*gref, og) {
+					t.Errorf("metamorphic: program %s differs between %s and %s (%s group): %s", p, members[0].id, m.id, group, firstDiff(gref.stdout, og.stdout))
 				}
-				if !obsEqual(*ref, o) {
-					t.Errorf("metamorphic: program %s differs between %s and %s (%s group): %s", p, members[0].id, m.id, group, firstDiff(ref.stdout, o.stdout))
+				if prev, ok := lrefs[m.optOff()]; ok && prev != lv {
+					t.Errorf("metamorphic: program %s level-dependent lines differ between %s and %s (%s group, optOff=%v): %s", p, members[0].id, m.id, group, m.optOff(), firstDiff(prev, lv))
+				} else if !ok {
+					lrefs[m.optOff()] = lv
 				}
 			}
 		}
@@ -856,14 +1025,62 @@ func loadMutants(t *testing.T) []mutant {
 		if err != nil {
 			t.Fatalf("reading %s: %v", path, err)
 		}
-		m, err := parseMutant(string(data))
+		ms, err := parseMutants(string(data))
 		if err != nil {
 			t.Fatalf("mutant %s: %v", path, err)
 		}
-		m.id = strings.TrimSuffix(filepath.Base(path), ".txt")
-		out = append(out, m)
+		stem := strings.TrimSuffix(filepath.Base(path), ".txt")
+		for i := range ms {
+			ms[i].id = stem
+			if len(ms) > 1 {
+				ms[i].id = fmt.Sprintf("%s-%d", stem, i+1)
+			}
+			out = append(out, ms[i])
+		}
 	}
 	return out
+}
+
+func parseMutants(data string) ([]mutant, error) {
+	var chunks [][]string
+	var cur []string
+	seenNew := false
+	for ln := range strings.SplitSeq(data, "\n") {
+		if ln == "-- new --" {
+			seenNew = true
+		}
+		if seenNew && isMutantHeader(ln) {
+			chunks = append(chunks, cur)
+			cur = nil
+			seenNew = false
+		}
+		cur = append(cur, ln)
+	}
+	chunks = append(chunks, cur)
+	out := make([]mutant, 0, len(chunks))
+	for _, c := range chunks {
+		m, err := parseMutant(strings.Join(c, "\n"))
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, m)
+	}
+	return out, nil
+}
+
+func isMutantHeader(ln string) bool {
+	if strings.HasPrefix(ln, " ") || strings.HasPrefix(ln, "\t") {
+		return false
+	}
+	k, _, ok := strings.Cut(ln, ":")
+	if !ok {
+		return false
+	}
+	switch k {
+	case "kind", "file", "expect", "config":
+		return true
+	}
+	return false
 }
 
 func parseMutant(data string) (mutant, error) {
@@ -945,6 +1162,8 @@ type mutBuild struct {
 	env         []string
 	args        []string
 	outDir      string
+	plain       []string
+	cgoProg     []string
 }
 
 func (mb *mutBuild) driverBin() string {
@@ -968,6 +1187,11 @@ func (mb *mutBuild) corpus(t *testing.T, progs []string) {
 	mb.env = appendEnv(baseEnv(forkCache()), mb.cfg.env...)
 	mb.args = slices.Clone(mb.cfg.args)
 	mb.outDir = filepath.Join(mb.scratch, "out")
+	plain, cgoProg, err := splitStaged(mb.stage, progs)
+	if err != nil {
+		t.Fatalf("classifying corpus: %v", err)
+	}
+	mb.plain, mb.cgoProg = plain, cgoProg
 }
 
 func (mb *mutBuild) apply(t *testing.T, m mutant) {
@@ -1008,12 +1232,14 @@ func (mb *mutBuild) buildTool(t *testing.T, toolName string) (string, error) {
 
 func (mb *mutBuild) run(t *testing.T) (string, error) {
 	t.Helper()
-	return buildCorpus(mb.driverBin(), mb.stage, mb.outDir, mb.args, mb.env)
+	sb := stagedBuild{bin: mb.driverBin(), stage: mb.stage, outDir: mb.outDir, args: mb.args, env: mb.env, progs: slices.Concat(mb.plain, mb.cgoProg), wantCgo: true}
+	_, out, err := sb.build()
+	return out, err
 }
 
 func (mb *mutBuild) buildFile(t *testing.T, stem string) error {
 	t.Helper()
-	args := append(slices.Clone(mb.args), "build", "-o", filepath.Join(mb.scratch, "failbin-"+stem), "./"+stem)
+	args := append([]string{"build"}, append(slices.Clone(mb.args), "-o", filepath.Join(mb.scratch, "failbin-"+stem), "./"+stem)...)
 	ctx, cancel := context.WithTimeoutCause(context.Background(), 5*time.Minute, errors.New("goparity fail build timeout"))
 	defer cancel()
 	cmd := exec.CommandContext(ctx, mb.driverBin(), args...)
@@ -1094,8 +1320,9 @@ func TestParityMutants(t *testing.T) {
 			mb := &mutBuild{fork: fork, cfg: cfg, stage: filepath.Join(scratch, "src"), scratch: scratch, shim: shim, overlayPath: overlayPath}
 			mb.corpus(t, progs)
 			mb.apply(t, m)
-			if slices.Contains(fails, m.expect) {
-				if err := mb.buildFile(t, m.expect); err != nil {
+			failStem := strings.TrimSuffix(m.expect, ".go")
+			if slices.Contains(fails, failStem) {
+				if err := mb.buildFile(t, failStem); err != nil {
 					t.Errorf("mutant %s survived: fail corpus file %s is still rejected under %s", m.id, m.expect, m.cfg)
 					return
 				}
@@ -1175,8 +1402,9 @@ func (uo *upOnceBuild) build(t *testing.T, uID string) (buildResult, error) {
 	}
 	env = appendEnv(env, u.env...)
 	outDir := filepath.Join(uo.base, "mut-out-up-"+u.id)
-	out, err := buildCorpus(uo.up.bin, stage, outDir, u.args, env)
-	b := buildResult{outDir: outDir, output: out, err: err}
+	sb := stagedBuild{bin: uo.up.bin, stage: stage, outDir: outDir, args: u.args, env: env, progs: uo.progs, wantCgo: true}
+	built, out, err := sb.build()
+	b := buildResult{outDir: outDir, output: out, err: err, progs: built}
 	uo.done[u.id] = b
 	return b, b.err
 }
