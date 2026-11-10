@@ -744,3 +744,29 @@ func TestLogosRegionParkRetainsStackAndMetadata(t *testing.T) {
 		}
 	})
 }
+
+func TestLogosRegionOwnerEnforcedCrossGoroutine(t *testing.T) {
+	inFreshGoroutine(t, func() {
+		h, gen := runtime.LogosRegionOpen()
+		p := runtime.LogosRegionAllocNoscan(h, gen, 32, 8)
+		if p == nil || !runtime.LogosArenaInChunk(p) {
+			t.Fatal("owner region did not place")
+		}
+		if q := runtime.LogosRegionBump(h, gen, 8); q == nil {
+			t.Fatal("owner bump failed")
+		}
+		bumpCh := make(chan unsafe.Pointer, 1)
+		allocCh := make(chan unsafe.Pointer, 1)
+		go func() {
+			bumpCh <- runtime.LogosRegionBump(h, gen, 8)
+			allocCh <- runtime.LogosRegionAllocNoscan(h, gen, 32, 8)
+		}()
+		if r := <-bumpCh; r != nil {
+			t.Fatalf("foreign bump = %v, want nil", r)
+		}
+		if r := <-allocCh; r == nil || runtime.LogosArenaInChunk(r) {
+			t.Fatalf("foreign alloc = %v, want heap fallback", r)
+		}
+		runtime.LogosRegionClose(h, gen)
+	})
+}
