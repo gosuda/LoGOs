@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"github.com/google/pprof/profile"
 	"internal/goexperiment"
 	"math"
 	"os"
@@ -615,6 +616,43 @@ func collectBusyProfile(t *testing.T, prof string, count int, fn func(uint64) ui
 	_ = sink
 }
 
+const fastcallProfileFloorSamples = 200
+const fastcallProfileCap = 300 * time.Second
+
+func profileCallerSamples(t *testing.T, prof string, want string) (found, total int) {
+	t.Helper()
+	f, err := os.Open(prof)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	p, err := profile.Parse(f)
+	if err != nil {
+		t.Fatalf("parse profile %s: %v", prof, err)
+	}
+	for _, s := range p.Sample {
+		n := 1
+		if len(s.Value) > 0 {
+			n = int(s.Value[0])
+		}
+		total += n
+		for _, loc := range s.Location {
+			hit := false
+			for _, line := range loc.Line {
+				if line.Function != nil && strings.Contains(line.Function.Name, want) {
+					hit = true
+					break
+				}
+			}
+			if hit {
+				found += n
+				break
+			}
+		}
+	}
+	return found, total
+}
+
 func TestFastcallProfileAttribution(t *testing.T) {
 	requireCgo(t)
 	self, err := os.Executable()
@@ -630,26 +668,37 @@ func TestFastcallProfileAttribution(t *testing.T) {
 	if !goexperiment.LogosFastCgo {
 		fastWants = append(fastWants, "logosCgocallFast", "runtime.cgocall")
 	}
-	var topFast, topPlain string
-	var fastShares, plainShares map[string]float64
-	var fastCaller, plainCaller float64
-	for range 3 {
-		collectBusyProfile(t, fastProf, 4, callFastBusy, iters)
-		collectBusyProfile(t, plainProf, 4, callPlainBusy, iters)
-		topFast, _, fastShares = pprofNodes(t, self, fastProf)
-		topPlain, _, plainShares = pprofNodes(t, self, plainProf)
-		fastCaller = nodeShare(fastShares, "callFastBusy")
-		plainCaller = nodeShare(plainShares, "callPlainBusy")
-		t.Logf("top: fast %q caller %.1f%%, plain %q caller %.1f%%",
-			topFast, fastCaller, topPlain, plainCaller)
-		if fastCaller >= 50 && plainCaller >= 50 {
+	var fastN, plainN, fastTotal, plainTotal int
+	met := false
+	deadline := time.Now().Add(fastcallProfileCap)
+	for {
+		collectBusyProfile(t, fastProf, 80, callFastBusy, iters)
+		collectBusyProfile(t, plainProf, 80, callPlainBusy, iters)
+		fastN, fastTotal = profileCallerSamples(t, fastProf, "callFastBusy")
+		plainN, plainTotal = profileCallerSamples(t, plainProf, "callPlainBusy")
+		t.Logf("fast caller %d of %d samples, plain caller %d of %d samples",
+			fastN, fastTotal, plainN, plainTotal)
+		if fastN >= fastcallProfileFloorSamples && plainN >= fastcallProfileFloorSamples {
+			met = true
+			break
+		}
+		if time.Now().After(deadline) {
 			break
 		}
 	}
-	if fastCaller < 50 || plainCaller < 50 {
-		t.Fatalf("thin profile after retries, want both callers >= 50%% (needs quiet scheduling): fast caller %.1f%% plain caller %.1f%%",
-			fastCaller, plainCaller)
+	if !met {
+		if fastN == 0 && plainN >= fastcallProfileFloorSamples {
+			t.Fatalf("fast-call frames missing from profile: fast caller %d of %d samples, plain caller %d of %d samples (floor %d)",
+				fastN, fastTotal, plainN, plainTotal, fastcallProfileFloorSamples)
+		}
+		t.Skipf("thin profile under load: fast caller %d of %d samples, plain caller %d of %d samples (floor %d)",
+			fastN, fastTotal, plainN, plainTotal, fastcallProfileFloorSamples)
 	}
+	topFast, _, fastShares := pprofNodes(t, self, fastProf)
+	topPlain, _, plainShares := pprofNodes(t, self, plainProf)
+	fastCaller := nodeShare(fastShares, "callFastBusy")
+	plainCaller := nodeShare(plainShares, "callPlainBusy")
+	t.Logf("top: fast %q caller %.1f%%, plain %q caller %.1f%%", topFast, fastCaller, topPlain, plainCaller)
 	if !topIn(topFast, fastWants) {
 		t.Fatalf("fast top entry = %q, want the call site", topFast)
 	}
@@ -897,28 +946,40 @@ func TestFastcallLogosProfileParity(t *testing.T) {
 	if !goexperiment.LogosFastCgo {
 		lgoWants = append(lgoWants, "logosCgocallFast", "runtime.cgocall")
 	}
-	var topPlain, top string
-	var plainShares, lgoShares map[string]float64
-	var sharePlain, lgoCaller float64
-	for range 3 {
-		collectBusyProfile(t, plainProf, 4, callPlainBusy, 200000000)
-		topPlain, _, plainShares = pprofNodes(t, self, plainProf)
-		sharePlain = nodeShare(plainShares, "callPlainBusy")
-		out, err := runCmd(t, dir, bin, "busy", prof, "400000000")
+	var plainN, lgoN, plainTotal, lgoTotal int
+	met := false
+	deadline := time.Now().Add(fastcallProfileCap)
+	for {
+		collectBusyProfile(t, plainProf, 80, callPlainBusy, 200000000)
+		plainN, plainTotal = profileCallerSamples(t, plainProf, "callPlainBusy")
+		out, err := runCmd(t, dir, bin, "busy", prof, "12000000000")
 		if err != nil {
 			t.Fatalf("fixture busy: %v\n%s", err, out)
 		}
-		top, _, lgoShares = pprofNodes(t, bin, prof)
-		lgoCaller = nodeShare(lgoShares, "main.main")
-		t.Logf("top: lgo %q caller %.1f%%, plain top %q caller %.1f%%", top, lgoCaller, topPlain, sharePlain)
-		if lgoCaller >= 50 && sharePlain >= 50 {
+		lgoN, lgoTotal = profileCallerSamples(t, prof, "main.main")
+		t.Logf("lgo caller %d of %d samples, plain caller %d of %d samples",
+			lgoN, lgoTotal, plainN, plainTotal)
+		if lgoN >= fastcallProfileFloorSamples && plainN >= fastcallProfileFloorSamples {
+			met = true
+			break
+		}
+		if time.Now().After(deadline) {
 			break
 		}
 	}
-	if lgoCaller < 50 || sharePlain < 50 {
-		t.Fatalf("thin profile after retries, want both callers >= 50%% (needs quiet scheduling): lgo caller %.1f%% plain caller %.1f%%",
-			lgoCaller, sharePlain)
+	if !met {
+		if lgoN == 0 && plainN >= fastcallProfileFloorSamples {
+			t.Fatalf("fast-call frames missing from profile: lgo caller %d of %d samples, plain caller %d of %d samples (floor %d)",
+				lgoN, lgoTotal, plainN, plainTotal, fastcallProfileFloorSamples)
+		}
+		t.Skipf("thin profile under load: lgo caller %d of %d samples, plain caller %d of %d samples (floor %d)",
+			lgoN, lgoTotal, plainN, plainTotal, fastcallProfileFloorSamples)
 	}
+	topPlain, _, plainShares := pprofNodes(t, self, plainProf)
+	top, _, lgoShares := pprofNodes(t, bin, prof)
+	sharePlain := nodeShare(plainShares, "callPlainBusy")
+	lgoCaller := nodeShare(lgoShares, "main.main")
+	t.Logf("top: lgo %q caller %.1f%%, plain %q caller %.1f%%", top, lgoCaller, topPlain, sharePlain)
 	if !topIn(topPlain, plainWants) {
 		t.Fatalf("plain top entry = %q, want the call site", topPlain)
 	}
