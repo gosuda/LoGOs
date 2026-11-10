@@ -1,0 +1,27 @@
+// run
+
+package main
+
+import "fmt"
+
+type RO interface {
+	const ID int
+	const Start() error
+}
+
+type Gadget struct : RO {
+	ID int
+}
+
+func (m Gadget) Start() error {
+	return nil
+}
+
+func useROs(xs const []RO) int {
+	return len(xs)
+}
+
+func main() {
+	gs := []Gadget{{ID: 1}, {ID: 2}}
+	fmt.Println(useROs(gs))
+}

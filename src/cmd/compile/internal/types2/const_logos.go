@@ -233,6 +233,9 @@ func (check *Checker) logosElemImplementsChecked(c, i Type, pos syntax.Pos) bool
 	if target == nil {
 		return false
 	}
+	if logosPropertyInterface(i) != nil {
+		return check.logosImplementsProperty(c, i, target, nil, pos)
+	}
 	return check.hasAllMethodsAt(c, target, true, Identical, nil, pos)
 }
 
