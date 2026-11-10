@@ -1126,7 +1126,7 @@ Implicit placement [T-301.1][R-U1]:
 With implicit placement on, an object that escape analysis proves does not outlive its frame, but that cannot live on the stack, MUST allocate in the frame's region. [T-301.1]
 Frame exit MUST release that region. [T-301.1]
 A returned value that the caller keeps MUST allocate in the caller's region only when escape analysis proves no pointer to it outlives the caller. [T-301.1]
-A loop back-edge MUST release iteration-local objects. [T-301.1]
+A loop back-edge MUST release iteration-local objects by restoring the watermark. [T-301.1]
 Implicit placement MUST stay off unless the build sets `GOEXPERIMENT=logosarena`. [T-301.1]
 Under `logos`, `[build] arena` MUST set that experiment, and its default MUST be true. [T-301.1][R-U1]
 Under plain `go`, only `GOEXPERIMENT=logosarena` MUST enable it. [T-301.1][R-U1]
