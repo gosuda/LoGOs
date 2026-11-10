@@ -37,6 +37,41 @@ func sumU8(xs []uint8) uint8 {
 	// arm64:"CALL simd/archsimd\\.LoadUint8x16Part\\(SB\\)" "VADD V[0-9]+\\.B16" -"CALL simd/archsimd\\.X86Features"
 	return xs.sum()
 }
+//go:noinline
+func sumI8(xs []int8) int8 {
+	// amd64/v1:"VMOVDQU8\\.Z\\s+\\(" "VMOVDQU64\\s+\\(" "VPADDB" "CALL simd/archsimd\\.X86Features\\.AVX512\\(SB\\)"
+	// amd64/v3:"VMOVDQU8\\.Z\\s+\\(" "VMOVDQU64\\s+\\(" "VPADDB" "CALL simd/archsimd\\.X86Features\\.AVX512\\(SB\\)"
+	// amd64/v4:"VMOVDQU8\\.Z\\s+\\(" "VPADDB" -"CALL simd/archsimd\\." -"CMPB internal/cpu\\.X86"
+	// arm64:"CALL simd/archsimd\\.LoadInt8x16Part\\(SB\\)" "VADD V[0-9]+\\.B16" -"CALL simd/archsimd\\.X86Features"
+	return xs.sum()
+}
+
+//go:noinline
+func sumI16(xs []int16) int16 {
+	// amd64/v1:"VMOVDQU16\\.Z\\s+\\(" "VMOVDQU64\\s+\\(" "VPADDW" "CALL simd/archsimd\\.X86Features\\.AVX512\\(SB\\)"
+	// amd64/v3:"VMOVDQU16\\.Z\\s+\\(" "VMOVDQU64\\s+\\(" "VPADDW" "CALL simd/archsimd\\.X86Features\\.AVX512\\(SB\\)"
+	// amd64/v4:"VMOVDQU16\\.Z\\s+\\(" "VPADDW" -"CALL simd/archsimd\\." -"CMPB internal/cpu\\.X86"
+	// arm64:"CALL simd/archsimd\\.LoadInt16x8Part\\(SB\\)" "VADD V[0-9]+\\.H8" -"CALL simd/archsimd\\.X86Features"
+	return xs.sum()
+}
+
+//go:noinline
+func sumI64(xs []int64) int64 {
+	// amd64/v1:"VPMASKMOVQ\\s+\\(" "VPADDQ" "CALL simd/archsimd\\.X86Features\\.AVX2\\(SB\\)"
+	// amd64/v3:"VPMASKMOVQ\\s+\\(" "VPADDQ" -"CALL simd/archsimd\\." -"CMPB internal/cpu\\.X86"
+	// arm64:"CALL simd/archsimd\\.LoadInt64x2Part\\(SB\\)" "VADD V[0-9]+\\.D2" -"CALL simd/archsimd\\.X86Features"
+	return xs.sum()
+}
+
+//go:noinline
+func sumU32(xs []uint32) uint32 {
+	// amd64/v1:"VPMASKMOVD\\s+\\(" "VPADDD\\s+\\(" "CALL simd/archsimd\\.X86Features\\.AVX2\\(SB\\)" -"CALL simd/archsimd\\.Load"
+	// amd64/v2:"VPMASKMOVD\\s+\\(" "VPADDD" "CALL simd/archsimd\\.X86Features\\.AVX2\\(SB\\)" -"CALL simd/archsimd\\.Load"
+	// amd64/v3:"VPMASKMOVD\\s+\\(" "VPADDD" -"CALL simd/archsimd\\." -"CMPB internal/cpu\\.X86"
+	// amd64/v4:"VPMASKMOVD\\s+\\(" "VPADDD" -"CALL simd/archsimd\\." -"CMPB internal/cpu\\.X86"
+	// arm64:"CALL simd/archsimd\\.LoadUint32x4Part\\(SB\\)" "VADD V[0-9]+\\.S4" -"CALL simd/archsimd\\.X86Features"
+	return xs.sum()
+}
 
 //go:noinline
 func sumF32(xs []float32) float32 {
@@ -103,5 +138,10 @@ func main() {
 	var u []uint
 	var p []uintptr
 	var w []watt
+	var h []int8
+	var i []int16
+	var j []int64
+	var k []uint32
 	println(sumI32(a), sumU64(b), sumU16(c), sumU8(d), sumF32(e), sumF64(f), sumInt(g), sumUint(u), sumUintptr(p), sumAlias(w))
+	println(sumI8(h), sumI16(i), sumI64(j), sumU32(k))
 }
