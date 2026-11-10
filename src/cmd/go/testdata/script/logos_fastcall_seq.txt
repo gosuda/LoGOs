@@ -27,6 +27,10 @@ go tool objdump -s 'runtime\.logosCgocallFast' logosapp$GOEXE
 stdout 'reentersyscall'
 stdout 'asmcgocall'
 stdout 'exitsyscall'
+! stdout 'nanotime'
+! stdout 'cputicks'
+! stdout 'clock_gettime'
+! stdout 'monotonic'
 
 -- go.mod --
 module example.com/fastcallseq
