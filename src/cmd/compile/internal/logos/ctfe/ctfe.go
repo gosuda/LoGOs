@@ -84,6 +84,9 @@ const (
 	KUntypedString
 	KUntypedBool
 	KUntypedNil
+	KComplex64
+	KComplex128
+	KUntypedComplex
 )
 
 type Type struct {
@@ -107,6 +110,8 @@ type Field struct {
 func UntypedInt() *Type { return &Type{Kind: KUntypedInt} }
 
 func UntypedFloat() *Type { return &Type{Kind: KUntypedFloat} }
+
+func UntypedComplex() *Type { return &Type{Kind: KUntypedComplex} }
 
 func UntypedRune() *Type { return &Type{Kind: KUntypedRune} }
 
@@ -144,6 +149,10 @@ func BasicType(name string) *Type {
 		return &Type{Kind: KFloat32}
 	case "float64":
 		return &Type{Kind: KFloat64}
+	case "complex64":
+		return &Type{Kind: KComplex64}
+	case "complex128":
+		return &Type{Kind: KComplex128}
 	case "string":
 		return &Type{Kind: KString}
 	}
@@ -158,8 +167,10 @@ func intWidth(k Kind, word int64) int64 {
 		return 16
 	case KInt32, KUint32, KFloat32:
 		return 32
-	case KInt64, KUint64, KFloat64:
+	case KInt64, KUint64, KFloat64, KComplex64:
 		return 64
+	case KComplex128:
+		return 128
 	case KInt, KUint, KUintptr:
 		return word * 8
 	}
@@ -188,9 +199,13 @@ func isFloat(k Kind) bool {
 	return k == KFloat32 || k == KFloat64 || k == KUntypedFloat
 }
 
+func isComplex(k Kind) bool {
+	return k == KComplex64 || k == KComplex128 || k == KUntypedComplex
+}
+
 func isUntyped(k Kind) bool {
 	switch k {
-	case KUntypedInt, KUntypedFloat, KUntypedRune, KUntypedString, KUntypedBool:
+	case KUntypedInt, KUntypedFloat, KUntypedComplex, KUntypedRune, KUntypedString, KUntypedBool:
 		return true
 	}
 	return false
@@ -201,7 +216,7 @@ func isStringLike(k Kind) bool {
 }
 
 func isNumeric(k Kind) bool {
-	return isInteger(k) || isFloat(k)
+	return isInteger(k) || isFloat(k) || isComplex(k)
 }
 
 func defaultType(k Kind) *Type {
@@ -210,6 +225,8 @@ func defaultType(k Kind) *Type {
 		return &Type{Kind: KInt}
 	case KUntypedFloat:
 		return &Type{Kind: KFloat64}
+	case KUntypedComplex:
+		return &Type{Kind: KComplex128}
 	case KUntypedRune:
 		return &Type{Kind: KInt32}
 	case KUntypedString:
@@ -238,6 +255,7 @@ type Value struct {
 	ival     *big.Int
 	fval     *big.Rat
 	f64      float64
+	cval     complex128
 	sval     string
 	bval     bool
 	slice    *sliceVal
@@ -267,6 +285,8 @@ func (v Value) Float64() float64 {
 	}
 	return v.f64
 }
+
+func (v Value) Complex() complex128 { return v.cval }
 
 func (v Value) mapLen() int {
 	if v.mval == nil {

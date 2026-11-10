@@ -72,6 +72,13 @@ func (e *evaluator) evalLit(lit *syntax.BasicLit) (Value, error) {
 			r = new(big.Rat).SetFloat64(f)
 		}
 		return Value{typ: UntypedFloat(), constant: true, fval: r}, nil
+	case syntax.ImagLit:
+		s := strings.TrimSuffix(strings.ReplaceAll(lit.Value, "_", ""), "i")
+		f, err := strconv.ParseFloat(s, 64)
+		if err != nil {
+			return Value{}, e.fail(pos, "bad imaginary literal in const evaluation")
+		}
+		return Value{typ: UntypedComplex(), constant: true, cval: complex(0, f)}, nil
 	case syntax.RuneLit:
 		r, _, _, err := strconv.UnquoteChar(lit.Value[1:len(lit.Value)-1], '\'')
 		if err != nil {
@@ -278,6 +285,9 @@ func (e *evaluator) numPair(x, y Value, pos syntax.Pos) (Value, Value, *Type, er
 	xk, yk := kindOf(x), kindOf(y)
 	switch {
 	case isUntyped(xk) && isUntyped(yk):
+		if isComplex(xk) || isComplex(yk) {
+			return x, y, UntypedComplex(), nil
+		}
 		if isFloat(xk) || isFloat(yk) {
 			return x, y, UntypedFloat(), nil
 		}
@@ -313,6 +323,30 @@ func kindOf(v Value) Kind {
 	return v.typ.Kind
 }
 
+func (e *evaluator) complexOp(op syntax.Operator, x, y Value, t *Type, cst bool, pos syntax.Pos) (Value, error) {
+	xc, yc := toComplex(x), toComplex(y)
+	if op == syntax.Div && yc == 0 && cst {
+		return Value{}, e.fail(pos, "division by zero in const evaluation")
+	}
+	var r complex128
+	switch op {
+	case syntax.Add:
+		r = xc + yc
+	case syntax.Sub:
+		r = xc - yc
+	case syntax.Mul:
+		r = xc * yc
+	case syntax.Div:
+		r = xc / yc
+	default:
+		return Value{}, e.fail(pos, "unsupported complex operator in const evaluation")
+	}
+	if cst {
+		return complexConst(t, r), nil
+	}
+	return complexDyn(t, r), nil
+}
+
 func (e *evaluator) add(x, y Value, pos syntax.Pos) (Value, error) {
 	if isStringLike(kindOf(x)) || isStringLike(kindOf(y)) {
 		if !isStringLike(kindOf(x)) || !isStringLike(kindOf(y)) {
@@ -325,6 +359,9 @@ func (e *evaluator) add(x, y Value, pos syntax.Pos) (Value, error) {
 		return Value{}, err
 	}
 	cst := x.constant && y.constant
+	if isComplex(t.Kind) {
+		return e.complexOp(syntax.Add, x, y, t, cst, pos)
+	}
 	if isFloat(t.Kind) {
 		return e.floatOp(syntax.Add, x, y, t, cst, pos)
 	}
@@ -338,6 +375,9 @@ func (e *evaluator) sub(x, y Value, pos syntax.Pos) (Value, error) {
 		return Value{}, err
 	}
 	cst := x.constant && y.constant
+	if isComplex(t.Kind) {
+		return e.complexOp(syntax.Sub, x, y, t, cst, pos)
+	}
 	if isFloat(t.Kind) {
 		return e.floatOp(syntax.Sub, x, y, t, cst, pos)
 	}
@@ -351,6 +391,9 @@ func (e *evaluator) mul(x, y Value, pos syntax.Pos) (Value, error) {
 		return Value{}, err
 	}
 	cst := x.constant && y.constant
+	if isComplex(t.Kind) {
+		return e.complexOp(syntax.Mul, x, y, t, cst, pos)
+	}
 	if isFloat(t.Kind) {
 		return e.floatOp(syntax.Mul, x, y, t, cst, pos)
 	}
@@ -364,6 +407,9 @@ func (e *evaluator) quo(x, y Value, pos syntax.Pos) (Value, error) {
 		return Value{}, err
 	}
 	cst := x.constant && y.constant
+	if isComplex(t.Kind) {
+		return e.complexOp(syntax.Div, x, y, t, cst, pos)
+	}
 	if isFloat(t.Kind) {
 		if y.constant {
 			if xFloat(y).Sign() == 0 {
@@ -526,6 +572,13 @@ func (e *evaluator) neg(x Value, pos syntax.Pos) (Value, error) {
 		}
 		return floatResult(x.typ, -toFloat64(x, x.typ), false, pos)
 	}
+	if isComplex(kindOf(x)) {
+		c := x.Complex()
+		if x.constant {
+			return complexConst(x.typ, complex(-real(c), -imag(c))), nil
+		}
+		return complexDyn(x.typ, complex(-real(c), -imag(c))), nil
+	}
 	if !isInteger(kindOf(x)) {
 		return Value{}, e.fail(pos, "negation of non-number in const evaluation")
 	}
@@ -602,6 +655,17 @@ func toFloat64(v Value, t *Type) float64 {
 	return v.f64
 }
 
+func toComplex(v Value) complex128 {
+	if isComplex(kindOf(v)) {
+		return v.Complex()
+	}
+	if isFloat(kindOf(v)) {
+		return complex(v.Float64(), 0)
+	}
+	f, _ := new(big.Rat).SetInt(v.ival).Float64()
+	return complex(f, 0)
+}
+
 func (e *evaluator) floatOp(op syntax.Operator, x, y Value, t *Type, cst bool, pos syntax.Pos) (Value, error) {
 	if cst {
 		var r *big.Rat
@@ -655,7 +719,21 @@ func floatResult(t *Type, f float64, cst bool, pos syntax.Pos) (Value, error) {
 	return Value{typ: t, constant: cst, f64: f}, nil
 }
 
+func complexResult(t *Type, c complex128, cst bool) Value {
+	if t.Kind == KComplex64 {
+		c = complex(float64(float32(real(c))), float64(float32(imag(c))))
+	}
+	return Value{typ: t, constant: cst, cval: c}
+}
+
+func complexConst(t *Type, c complex128) Value { return complexResult(t, c, true) }
+
+func complexDyn(t *Type, c complex128) Value { return complexResult(t, c, false) }
+
 func (e *evaluator) compare(op syntax.Operator, x, y Value, pos syntax.Pos) (Value, error) {
+	if isComplex(kindOf(x)) || isComplex(kindOf(y)) {
+		return Value{}, e.fail(pos, "ordered comparison of complex in const evaluation")
+	}
 	if isNumeric(kindOf(x)) && isNumeric(kindOf(y)) && (isFloat(kindOf(x)) || isFloat(kindOf(y))) {
 		fx, fy, t, err := e.numPair(x, y, pos)
 		if err != nil {
@@ -710,6 +788,11 @@ func (e *evaluator) equal(x, y Value, pos syntax.Pos) (bool, error) {
 		return x.isNil && y.isNil, nil
 	}
 	switch {
+	case isComplex(kindOf(x)) || isComplex(kindOf(y)):
+		if !isNumeric(kindOf(x)) || !isNumeric(kindOf(y)) {
+			return false, e.fail(pos, "values not comparable in const evaluation")
+		}
+		return toComplex(x) == toComplex(y), nil
 	case isInteger(kindOf(x)) && isInteger(kindOf(y)):
 		return x.ival.Cmp(y.ival) == 0, nil
 	case isNumeric(kindOf(x)) && isNumeric(kindOf(y)) && (isFloat(kindOf(x)) || isFloat(kindOf(y))):
@@ -780,6 +863,14 @@ func (e *evaluator) canon(v Value) Value {
 	if v.typ != nil && v.typ.Kind == KFloat64 && !v.constant && v.f64 == 0 {
 		v.f64 = 0
 	}
+	if v.typ != nil && isComplex(v.typ.Kind) {
+		if real(v.cval) == 0 {
+			v.cval = complex(0, imag(v.cval))
+		}
+		if imag(v.cval) == 0 {
+			v.cval = complex(real(v.cval), 0)
+		}
+	}
 	if v.typ != nil && v.typ.Kind == KStruct {
 		out := slices.Clone(v.strct)
 		for i := range out {
@@ -841,6 +932,10 @@ func typeName(t *Type) string {
 		return "float32"
 	case KFloat64:
 		return "float64"
+	case KComplex64:
+		return "complex64"
+	case KComplex128:
+		return "complex128"
 	case KString:
 		return "string"
 	case KSlice:

@@ -135,7 +135,7 @@ func isBasicName(name string) bool {
 	switch name {
 	case "bool", "string", "int", "int8", "int16", "int32", "int64",
 		"uint", "uint8", "uint16", "uint32", "uint64", "uintptr",
-		"float32", "float64", "any", "error":
+		"float32", "float64", "complex64", "complex128", "any", "error":
 		return true
 	}
 	return false
@@ -397,6 +397,45 @@ func Frac(x float64) float64 {
 	}
 	if got := v.mapKeyBits(0); got != 0 || math.Signbit(math.Float64frombits(got)) {
 		t.Fatalf("key bits = %x, want +0.0", got)
+	}
+}
+
+func TestComplexMapKeys(t *testing.T) {
+	h := newFakeHost(t)
+	neg := parseFunc(t, `package p
+func CNegZero(x complex128) complex128 {
+	z := x - x
+	return -z
+}`, true, []*Type{BasicType("complex128")}, []*Type{BasicType("complex128")})
+	h.funcs["CNegZero"] = neg
+	frac := parseFunc(t, `package p
+func CFrac(x complex128) complex128 {
+	z := x - x
+	return z / z
+}`, true, []*Type{BasicType("complex128")}, []*Type{BasicType("complex128")})
+	h.funcs["CFrac"] = frac
+	cfg := Config{}
+
+	dup := parseExpr(t, `map[complex128]string{complex(0, 0): "a", CNegZero(complex(1, 1)): "b"}`)
+	h.types[dup] = &Type{Kind: KMap, Key: BasicType("complex128"), Elem: UntypedString()}
+	if cerr := evalErr(t, h, cfg, dup); cerr.Code != CodeEval || !strings.Contains(cerr.Detail, "duplicate") {
+		t.Fatalf("dup err = %v, want duplicate CodeEval", cerr)
+	}
+	nan := parseExpr(t, `map[complex128]string{CFrac(complex(1, 1)): "nan"}`)
+	h.types[nan] = &Type{Kind: KMap, Key: BasicType("complex128"), Elem: UntypedString()}
+	if cerr := evalErr(t, h, cfg, nan); cerr.Code != CodeEval || !strings.Contains(cerr.Detail, "NaN") {
+		t.Fatalf("nan err = %v, want NaN CodeEval", cerr)
+	}
+	ok := parseExpr(t, `map[complex128]string{CNegZero(complex(1, 1)): "neg"}`)
+	h.types[ok] = &Type{Kind: KMap, Key: BasicType("complex128"), Elem: UntypedString()}
+	v, _ := evalOne(t, h, cfg, ok)
+	if v.mapLen() != 1 {
+		t.Fatalf("map len = %d, want 1", v.mapLen())
+	}
+	keys, _ := v.MapEntries()
+	c := keys[0].Complex()
+	if real(c) != 0 || imag(c) != 0 || math.Signbit(real(c)) || math.Signbit(imag(c)) {
+		t.Fatalf("key = %v, want (+0,+0)", c)
 	}
 }
 

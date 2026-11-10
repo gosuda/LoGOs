@@ -47,6 +47,8 @@ func IntValue(n *big.Int, t *Type) Value { return Value{typ: t, constant: true, 
 
 func FloatValue(f float64, t *Type) Value { return Value{typ: t, constant: true, f64: f} }
 
+func ComplexValue(c complex128, t *Type) Value { return Value{typ: t, constant: true, cval: c} }
+
 func ExactFloatValue(r *big.Rat, t *Type) Value {
 	var copyR *big.Rat
 	if r != nil {
@@ -67,14 +69,18 @@ func zeroValue(t *Type) Value {
 	switch t.Kind {
 	case KBool, KUntypedBool:
 		return Value{typ: &Type{Kind: KBool}, bval: false}
-	case KString, KUntypedString:
-		return Value{typ: &Type{Kind: KString}, sval: ""}
 	case KFloat32, KFloat64, KUntypedFloat:
 		k := t.Kind
 		if k == KUntypedFloat {
 			k = KFloat64
 		}
 		return Value{typ: &Type{Kind: k}, f64: 0}
+	case KComplex64, KComplex128, KUntypedComplex:
+		k := t.Kind
+		if k == KUntypedComplex {
+			k = KComplex128
+		}
+		return Value{typ: &Type{Kind: k}, cval: 0}
 	case KSlice, KMap:
 		return Value{typ: t, isNil: true}
 	case KArray:
@@ -465,6 +471,9 @@ func (e *evaluator) convert(v Value, t *Type, pos syntax.Pos) (Value, error) {
 	if isInteger(t.Kind) || isFloat(t.Kind) {
 		return e.convertNumber(v, t, pos)
 	}
+	if isComplex(t.Kind) {
+		return e.convertComplex(v, t, pos)
+	}
 	if t.Kind == KBool && (vk == KBool || vk == KUntypedBool) {
 		v.typ = t
 		return v, nil
@@ -543,6 +552,37 @@ func (e *evaluator) convertNumber(v Value, t *Type, pos syntax.Pos) (Value, erro
 		return floatResult(t, f, true, pos)
 	}
 	return floatResult(t, f, false, pos)
+}
+
+func (e *evaluator) convertComplex(v Value, t *Type, pos syntax.Pos) (Value, error) {
+	vk := kindOf(v)
+	var c complex128
+	switch {
+	case isComplex(vk):
+		c = v.Complex()
+	case isFloat(vk):
+		c = complex(v.Float64(), 0)
+	case isInteger(vk):
+		f, _ := new(big.Rat).SetInt(v.ival).Float64()
+		c = complex(f, 0)
+	default:
+		return Value{}, e.fail(pos, "cannot convert %s to %s in const evaluation", typeName(v.typ), typeName(t))
+	}
+	if t.Kind == KComplex64 {
+		if v.constant && ((math.IsInf(float64(float32(real(c))), 0) && !math.IsInf(real(c), 0)) || (math.IsInf(float64(float32(imag(c))), 0) && !math.IsInf(imag(c), 0))) {
+			return Value{}, e.fail(pos, "constant overflows complex64 in const evaluation")
+		}
+		c = complex(float64(float32(real(c))), float64(float32(imag(c))))
+	}
+	return Value{typ: t, constant: v.constant, cval: c}, nil
+}
+
+func toFloatParts(v Value) float64 {
+	if isFloat(kindOf(v)) {
+		return v.Float64()
+	}
+	f, _ := new(big.Rat).SetInt(v.ival).Float64()
+	return f
 }
 
 func (e *evaluator) convertToString(v Value, t *Type, pos syntax.Pos) (Value, error) {
@@ -834,6 +874,10 @@ func isNaNKey(k Value) bool {
 	if k.typ.Kind == KFloat32 || k.typ.Kind == KFloat64 {
 		return math.IsNaN(k.Float64())
 	}
+	if isComplex(k.typ.Kind) {
+		c := k.Complex()
+		return math.IsNaN(real(c)) || math.IsNaN(imag(c))
+	}
 	return false
 }
 
@@ -841,6 +885,14 @@ func (e *evaluator) canonKey(v Value) Value {
 	if v.typ != nil && (v.typ.Kind == KFloat32 || v.typ.Kind == KFloat64) && !v.constant {
 		if v.f64 == 0 {
 			v.f64 = 0
+		}
+	}
+	if v.typ != nil && isComplex(v.typ.Kind) {
+		if real(v.cval) == 0 {
+			v.cval = complex(0, imag(v.cval))
+		}
+		if imag(v.cval) == 0 {
+			v.cval = complex(real(v.cval), 0)
 		}
 	}
 	if v.typ != nil && v.typ.Kind == KStruct {
@@ -1300,7 +1352,37 @@ func (e *evaluator) evalBuiltin(fr *frame, name string, c *syntax.CallExpr) (Val
 		return Value{}, e.impurity(fr, pos, "call to recover in const func")
 	case "new":
 		return Value{}, e.impurity(fr, pos, "pointer allocation in const func")
-	case "real", "imag", "complex":
+	case "complex":
+		if len(c.ArgList) != 2 || c.HasDots {
+			return Value{}, e.fail(pos, "bad complex call in const evaluation")
+		}
+		re, err := e.evalExpr(fr, c.ArgList[0])
+		if err != nil {
+			return Value{}, err
+		}
+		im, err := e.evalExpr(fr, c.ArgList[1])
+		if err != nil {
+			return Value{}, err
+		}
+		if !isFloat(kindOf(re)) && !(isInteger(kindOf(re)) && isUntyped(kindOf(re))) {
+			return Value{}, e.fail(pos, "bad complex call in const evaluation")
+		}
+		if !isFloat(kindOf(im)) && !(isInteger(kindOf(im)) && isUntyped(kindOf(im))) {
+			return Value{}, e.fail(pos, "bad complex call in const evaluation")
+		}
+		rf, imf := toFloatParts(re), toFloatParts(im)
+		t := UntypedComplex()
+		if !isUntyped(kindOf(re)) || !isUntyped(kindOf(im)) {
+			t = &Type{Kind: KComplex128}
+			if kindOf(re) == KFloat32 || kindOf(im) == KFloat32 {
+				t = &Type{Kind: KComplex64}
+			}
+		}
+		if re.constant && im.constant {
+			return complexConst(t, complex(rf, imf)), nil
+		}
+		return complexDyn(t, complex(rf, imf)), nil
+	case "real", "imag":
 		return Value{}, e.fail(pos, "complex numbers in const func not supported")
 	}
 	return Value{}, e.fail(pos, "unsupported builtin %s in const evaluation", name)
@@ -1586,6 +1668,8 @@ func (e *evaluator) valueSize(v Value, seen map[any]bool) int64 {
 		return 16
 	case v.typ != nil && (v.typ.Kind == KFloat32 || v.typ.Kind == KFloat64):
 		return 8
+	case v.typ != nil && (v.typ.Kind == KComplex64 || v.typ.Kind == KComplex128 || v.typ.Kind == KUntypedComplex):
+		return 16
 	case v.sval != "" || (v.typ != nil && v.typ.Kind == KString):
 		return int64(len(v.sval))
 	case v.slice != nil:

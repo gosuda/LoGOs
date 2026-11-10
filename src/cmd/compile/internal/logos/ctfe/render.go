@@ -47,6 +47,8 @@ func (r *renderer) expr(v Value) (syntax.Expr, error) {
 		return r.intLit(v)
 	case v.fval != nil || (v.typ != nil && isFloat(v.typ.Kind)):
 		return r.floatLit(v)
+	case v.typ != nil && isComplex(v.typ.Kind):
+		return r.complexLit(v)
 	case v.typ != nil && (v.typ.Kind == KString || v.typ.Kind == KUntypedString):
 		return &syntax.BasicLit{Value: strconv.Quote(v.sval), Kind: syntax.StringLit}, nil
 	case v.typ != nil && (v.typ.Kind == KBool || v.typ.Kind == KUntypedBool):
@@ -96,6 +98,24 @@ func (r *renderer) floatLit(v Value) (syntax.Expr, error) {
 		return &syntax.Operation{Op: syntax.Sub, X: lit}, nil
 	}
 	return lit, nil
+}
+
+func (r *renderer) complexLit(v Value) (syntax.Expr, error) {
+	re, im := real(v.cval), imag(v.cval)
+	if v.typ != nil && v.typ.Kind == KComplex64 {
+		re = float64(float32(re))
+		im = float64(float32(im))
+	}
+	rs, rneg := r.floatText(re)
+	is, ineg := r.floatText(im)
+	var rexp, iexp syntax.Expr = &syntax.BasicLit{Value: rs, Kind: syntax.FloatLit}, &syntax.BasicLit{Value: is, Kind: syntax.FloatLit}
+	if rneg {
+		rexp = &syntax.Operation{Op: syntax.Sub, X: rexp}
+	}
+	if ineg {
+		iexp = &syntax.Operation{Op: syntax.Sub, X: iexp}
+	}
+	return &syntax.CallExpr{Fun: syntax.NewName(r.pos, "complex"), ArgList: []syntax.Expr{rexp, iexp}}, nil
 }
 
 func (r *renderer) floatText(f float64) (string, bool) {
@@ -254,6 +274,10 @@ func (r *renderer) typeExpr(t *Type) (syntax.Expr, error) {
 		return syntax.NewName(r.pos, "float32"), nil
 	case KFloat64:
 		return syntax.NewName(r.pos, "float64"), nil
+	case KComplex64:
+		return syntax.NewName(r.pos, "complex64"), nil
+	case KComplex128:
+		return syntax.NewName(r.pos, "complex128"), nil
 	case KString:
 		return syntax.NewName(r.pos, "string"), nil
 	case KSlice:
