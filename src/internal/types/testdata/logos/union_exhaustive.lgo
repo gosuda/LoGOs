@@ -6,9 +6,14 @@ package p
 
 type A int
 type B string
+type C bool
 
 type U interface {
 	A | B
+}
+
+type V3 interface {
+	A | B | C
 }
 
 type Sub interface {
@@ -26,6 +31,12 @@ func missNil(x U) {
 	switch /* ERRORx "nonexhaustive_switch.*misses: nil" */ x.(type) {
 	case A:
 	case B:
+	}
+}
+
+func missTwo(x V3) {
+	switch /* ERRORx "nonexhaustive_switch.*misses: B, C, nil" */ x.(type) {
+	case A:
 	}
 }
 

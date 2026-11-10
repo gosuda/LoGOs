@@ -36,6 +36,16 @@ func missingMember(u U) string {
 	}
 }
 
+type V3 interface {
+	int | string | bool
+}
+
+func missingTwo(u V3) string {
+	return switch u.(type) { // ERROR "nonexhaustive_switch.*misses: string, bool, nil"
+	case int => "i"
+	}
+}
+
 func missingMemberStmt(u U) string {
 	switch u.(type) { // ERROR "nonexhaustive_switch"
 	case int:
