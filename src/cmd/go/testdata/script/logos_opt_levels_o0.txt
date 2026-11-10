@@ -1,0 +1,73 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+cd o0test
+logos build -a -x .
+stderr '\-N \-l'
+stderr 'variablemakethreshold=32'
+cd ..
+cd o1test
+logos build -a -x .
+! stderr 'inlbudget'
+! stderr 'variablemakethreshold'
+! stderr '\-N \-l'
+cd ..
+cd ostest
+logos build -a -x .
+stderr '\-d=inlbudget=15'
+! stderr 'variablemakethreshold'
+cd ..
+
+-- o0test/go.mod --
+module example.com/optlevels/o0test
+
+go 1.27
+
+-- o0test/logos.toml --
+[build]
+opt_level = "O0"
+
+-- o0test/main.lgo --
+package main
+
+import "fmt"
+
+func main() {
+	fmt.Println("hello")
+}
+
+-- o1test/go.mod --
+module example.com/optlevels/o1test
+
+go 1.27
+
+-- o1test/logos.toml --
+[build]
+opt_level = "O1"
+
+-- o1test/main.lgo --
+package main
+
+import "fmt"
+
+func main() {
+	fmt.Println("hello")
+}
+
+-- ostest/go.mod --
+module example.com/optlevels/ostest
+
+go 1.27
+
+-- ostest/logos.toml --
+[build]
+opt_level = "Os"
+
+-- ostest/main.lgo --
+package main
+
+import "fmt"
+
+func main() {
+	fmt.Println("hello")
+}
