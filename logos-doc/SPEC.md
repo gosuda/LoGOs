@@ -825,7 +825,7 @@ With `GOEXPERIMENT=simd` on amd64 or arm64 the lowering MUST call `simd/archsimd
 
 Otherwise it MUST emit unrolled scalar code. [T-204.2]
 
-On amd64 each array-operator vector form MUST run only when the `simd/archsimd` CPU feature check its methods need is true (`X86.AVX()` for 128-bit shapes and 256-bit float shapes, `X86.AVX2()` for 256-bit integer shapes, `X86.AVX512()` for 512-bit shapes and for 64-bit integer `*`) and MUST take the scalar form when it is false; the check MUST be omitted when the build's `GOAMD64` level guarantees the feature (`v3` for AVX and AVX2, `v4` for AVX512), and arm64 needs no check because its forms are baseline NEON. [T-204.2]
+On amd64 each array-operator vector form MUST run only when the `simd/archsimd` CPU feature check its methods need is true (`X86.AVX()` for 128-bit shapes and 256-bit float non-bitwise shapes, `X86.AVX2()` for 256-bit integer shapes and 256-bit float bitwise shapes, `X86.AVX512()` for 512-bit shapes and for 64-bit integer `*`) and MUST take the scalar form when it is false; the check MUST be omitted when the build's `GOAMD64` level guarantees the feature (`v3` for AVX and AVX2, `v4` for AVX512), and arm64 needs no check because its forms are baseline NEON. [T-204.2]
 
 Direct ISA lowering is replaced by this two-form rule. [T-204.2]
 
