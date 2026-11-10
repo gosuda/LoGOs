@@ -68,6 +68,9 @@ cd ..
 
 logos build -a -x .
 stderr 'GOAMD64=.v3.'
+logos build -o $WORK/hello$GOEXE .
+exec go version -m $WORK/hello$GOEXE
+stdout 'GOAMD64=v3'
 # Plain go keeps the upstream default while logos defaults to v3.
 go env GOAMD64
 stdout '^v1$'
@@ -130,6 +133,8 @@ env WANT_STACKBUF=256
 stdout 'FAIL'
 env WANT_STACKBUF=
 cd ..
+logos build -a -x -O=3 cmp
+! stderr 'variablemakethreshold'
 
 -- stackbuf/go.mod --
 module example.com/optlevels/stackbuf
