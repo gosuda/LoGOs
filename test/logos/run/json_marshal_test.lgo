@@ -8,6 +8,10 @@ import (
 	"encoding/json"
 	"math"
 	"math/rand"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -559,5 +563,93 @@ func TestHugeValueHasNoSizeThreshold(t *testing.T) {
 	allocs := testing.AllocsPerRun(20, func() { sink = must(v.MarshalJSON()) })
 	if allocs != 1 {
 		t.Fatalf("marshal of a %d byte output allocates %v times, want 1", len(got), allocs)
+	}
+}
+
+const portableProbe = `package main
+
+import "encoding/json"
+
+type Scalars struct {
+	A int64  ` + "`json:\"a\"`" + `
+	B string ` + "`json:\"b\"`" + `
+	C bool   ` + "`json:\"c\"`" + `
+}
+
+func main() {
+	s := Scalars{A: -2, B: "h<i>", C: true}
+	b, err := json.Marshal(s)
+	if err != nil {
+		panic(err)
+	}
+	if len(b) == 0 {
+		panic("empty marshal output")
+	}
+}
+`
+
+func toolBin(name string) string {
+	p := filepath.Join(runtime.GOROOT(), "bin", name)
+	if _, err := os.Stat(p); err != nil {
+		if found, err := exec.LookPath(name); err == nil {
+			return found
+		}
+	}
+	return p
+}
+
+func checkPortableArch(t *testing.T, dir, arch string) {
+	t.Helper()
+	logosBin := toolBin("logos")
+	goBin := toolBin("go")
+	exe := filepath.Join(dir, "probe_"+arch)
+	cmd := exec.Command(logosBin, "build", "-o", exe, ".")
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "GOARCH="+arch, "GOOS=linux", "CGO_ENABLED=0")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("GOARCH=%s build failed: %v\n%s", arch, err, out)
+	}
+	nmOut, err := exec.Command(goBin, "tool", "nm", exe).CombinedOutput()
+	if err != nil {
+		t.Fatalf("GOARCH=%s nm failed: %v\n%s", arch, err, nmOut)
+	}
+	sawMarshal := false
+	for _, line := range strings.Split(string(nmOut), "\n") {
+		f := strings.Fields(line)
+		if len(f) < 3 || !strings.HasPrefix(f[len(f)-1], "main.") {
+			continue
+		}
+		sym := f[len(f)-1]
+		if sym == "main.Scalars.MarshalJSON" {
+			sawMarshal = true
+			continue
+		}
+		checkPortableSymbol(t, arch, sym)
+	}
+	if !sawMarshal {
+		t.Fatalf("GOARCH=%s binary has no main.Scalars.MarshalJSON symbol", arch)
+	}
+}
+
+func checkPortableSymbol(t *testing.T, arch, sym string) {
+	t.Helper()
+	low := strings.ToLower(sym)
+	for _, bad := range []string{"sse", "avx", "simd", "neon"} {
+		if strings.Contains(low, bad) {
+			t.Fatalf("GOARCH=%s: generated symbol %s is not portable Go", arch, sym)
+		}
+	}
+}
+
+func TestGeneratedMarshalerBuildsEverywhere(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module jsonportable\n\ngo 1.27\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "main.lgo"), []byte(portableProbe), 0644); err != nil {
+		t.Fatal(err)
+	}
+	for _, arch := range []string{"386", "arm64"} {
+		checkPortableArch(t, dir, arch)
 	}
 }
