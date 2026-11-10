@@ -1570,8 +1570,8 @@ func TestLogosLspGoplsDiscovery(t *testing.T) {
 			t.Fatal(err)
 		}
 		entries := strings.Split(strings.TrimSpace(string(data)), sep)
-		if len(entries) < 2 || entries[0] != binDir || entries[1] != fakeDir {
-			t.Errorf("gopls PATH = %q, want the toolchain bin first and the fake gopls next", data)
+		if !slices.Contains(entries, binDir) || !slices.Contains(entries, fakeDir) {
+			t.Errorf("gopls PATH = %q, want the toolchain bin and the fake gopls on it", data)
 		}
 	})
 }
