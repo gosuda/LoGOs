@@ -49,7 +49,7 @@ Rules: logos-doc/SPEC.md. Status values: planned, tested, satisfied upstream, bl
 | #49 | Optional union representation | M3 | test/logos/run/option_union.lgo | tested |
 | #50 | Const rodata slices rejected by reflection and print | M5 | test/logos/run/rodata_reflect.lgo | tested |
 | #51 | Infinite compile-time loop freezing the IDE | M5 | src/internal/types/testdata/logos/ctfe.lgo | tested |
-| #52 | Inlined defer inside loop exhausting stack slots | M6 | src/cmd/compile/internal/logos/m6gaps_test.go (TestScopeDeferOpenCoded) | tested |
+| #52 | Inlined defer inside loop exhausting stack slots | M6 | test/logos/codegen/scopedefer_guard.lgo | tested |
 | #53 | Recursive AST escaping local arena on return | M18 | test/logos/run/redteam53_recursive_arena_return.lgo | tested |
 | #54 | Rodata constants crashing under address relocation | M5 | test/logos/run/relro_write.lgo | tested |
 | #55 | Ignored error leaving stale trace frames | M1 | test/logos/redteam/attack_055_errtrace_reset_cap | tested |
