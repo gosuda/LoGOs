@@ -249,12 +249,6 @@ func sizegate(args []string) error {
 	return nil
 }
 
--- bound/exact.bin --
-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
--- bound/over.bin --
-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
--- bound/rec100.txt --
-100
 -- bound/tiny.txt --
 100
 -- bound/rec1000.txt --
