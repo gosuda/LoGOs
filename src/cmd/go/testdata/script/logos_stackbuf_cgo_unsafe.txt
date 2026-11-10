@@ -102,6 +102,31 @@ func unsafeFlowConstCap() byte {
 	up := unsafe.Pointer(&b[0])
 	return *(*byte)(up)
 }
+
+//go:noinline
+func controlExplicitCap(n int) byte {
+	b := make([]byte, 0, n)
+	b = b[:1]
+	b[0] = 7
+	return b[0]
+}
+
+//go:noinline
+func unsafeFlowExplicitCap(n int) byte {
+	b := make([]byte, 0, n)
+	b = b[:1]
+	b[0] = 7
+	up := unsafe.Pointer(&b[0])
+	return *(*byte)(up)
+}
+
+//go:noinline
+func cgoFlowExplicitCap(n int) byte {
+	b := make([]byte, 0, n)
+	b = b[:1]
+	b[0] = 7
+	return byte(C.firstByte((*C.uint8_t)(unsafe.Pointer(&b[0]))))
+}
 -- m/flow_test.go --
 package stackbufflows
 
@@ -141,5 +166,18 @@ func TestStackBufferFixedCapFlows(t *testing.T) {
 	}
 	if got := testing.AllocsPerRun(20, func() { _ = cgoDirectFlowConst() }); got < 1 {
 		t.Errorf("fixed-cap direct cgo make took %v allocations, want the heap (ordinary escape)", got)
+	}
+}
+
+func TestStackBufferExplicitCapFlows(t *testing.T) {
+	const n = 16
+	if got := testing.AllocsPerRun(20, func() { _ = controlExplicitCap(n) }); got != 0 {
+		t.Errorf("explicit-cap control make took %v allocations, want none (stack buffer)", got)
+	}
+	if got := testing.AllocsPerRun(20, func() { _ = unsafeFlowExplicitCap(n) }); got < 1 {
+		t.Errorf("explicit-cap unsafe.Pointer make took %v allocations, want the heap", got)
+	}
+	if got := testing.AllocsPerRun(20, func() { _ = cgoFlowExplicitCap(n) }); got < 1 {
+		t.Errorf("explicit-cap cgo make took %v allocations, want the heap", got)
 	}
 }
