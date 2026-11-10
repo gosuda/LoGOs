@@ -13,6 +13,8 @@ exists bout/go.mod
 exists bout/_logos_deps/example.com/lp@v1.2.3/p/p.go
 grep -count=1 'example\.com/lp v1\.2\.3$' bout/go.mod
 grep 'func Code\(\) \(string, error\)' bout/_logos_deps/example.com/lp@v1.2.3/p/p.go
+grep 'func Msg\(\) string' bout/_logos_deps/example.com/lp@v1.2.3/p/p.go
+grep 'func Pick\(ok bool\) _logos_rt.Option\[int\]' bout/_logos_deps/example.com/lp@v1.2.3/p/p.go
 grep 'Option\[int\]' bout/_logos_deps/example.com/lp@v1.2.3/p/p.go
 grep 'replace' bout/go.mod
 cd bout
