@@ -7,6 +7,8 @@ package syntax
 import (
 	"strings"
 	"testing"
+
+	gotoken "go/token"
 )
 
 const logosScannerMode = uint(LogosMode)
@@ -293,6 +295,72 @@ func TestPlainOptionTailsRejected(t *testing.T) {
 		}
 		if col != test.col {
 			t.Errorf("%q: got col = %d; want %d", test.src, col, test.col)
+		}
+	}
+}
+
+func TestLogosNoNewGlobalKeywords(t *testing.T) {
+	upstream := []string{
+		"break", "case", "chan", "const", "continue",
+		"default", "defer", "else", "fallthrough", "for",
+		"func", "go", "goto", "if", "import",
+		"interface", "map", "package", "range", "return",
+		"select", "struct", "switch", "type", "var",
+	}
+	for _, kw := range upstream {
+		if !gotoken.IsKeyword(kw) {
+			t.Fatalf("go/token does not list %q as a keyword", kw)
+		}
+	}
+	contextual := []string{"errdefer", "yield", "scope", "group", "limit"}
+	for _, w := range contextual {
+		if gotoken.IsKeyword(w) {
+			t.Fatalf("go/token lists %q as a keyword", w)
+		}
+	}
+	for _, mode := range []uint{0, logosScannerMode} {
+		for _, kw := range upstream {
+			var errs []string
+			var s scanner
+			s.init(strings.NewReader(kw), func(_, _ uint, msg string) {
+				errs = append(errs, msg)
+			}, mode)
+			s.next()
+			if s.tok == _Name || s.tok.String() != kw {
+				t.Errorf("mode %d: %q: got %s; want keyword %q", mode, kw, s.tok, kw)
+			}
+			if len(errs) != 0 {
+				t.Errorf("mode %d: %q: got errors %q; want none", mode, kw, errs)
+			}
+		}
+		for _, w := range contextual {
+			var errs []string
+			var s scanner
+			s.init(strings.NewReader(w), func(_, _ uint, msg string) {
+				errs = append(errs, msg)
+			}, mode)
+			s.next()
+			if s.tok != _Name || s.lit != w {
+				t.Errorf("mode %d: %q: got %s %q; want _Name %q", mode, w, s.tok, s.lit, w)
+			}
+			if len(errs) != 0 {
+				t.Errorf("mode %d: %q: got errors %q; want none", mode, w, errs)
+			}
+		}
+	}
+	for _, w := range contextual {
+		for _, mode := range []Mode{CheckBranches, CheckBranches | LogosMode} {
+			var msgs []string
+			f, _ := Parse(nil, strings.NewReader("package p\nvar v = "+w+"\n"), func(err error) {
+				msgs = append(msgs, err.Error())
+			}, nil, mode)
+			if len(msgs) != 0 {
+				t.Errorf("mode %d: var v = %s: got errors %q; want none", uint(mode), w, msgs)
+				continue
+			}
+			if got := countNodes[*YieldStmt](f) + countNodes[*ErrdeferStmt](f) + countNodes[*ScopeDeferStmt](f) + countNodes[*GroupStmt](f); got != 0 {
+				t.Errorf("mode %d: var v = %s: found %d keyword nodes, want 0", uint(mode), w, got)
+			}
 		}
 	}
 }
