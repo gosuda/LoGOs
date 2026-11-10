@@ -10,6 +10,8 @@ stderr 'cannot inline bigOdd: function too complex: cost .* exceeds budget 80'
 
 logos build -gcflags='-m -m -d=inlrecursivebudget=400' -O=3 .
 stderr 'can inline bigEven with cost'
+stderr 'cannot inline hugeEven: function too complex: cost .* exceeds budget 400'
+stderr 'cannot inline hugeOdd: function too complex: cost .* exceeds budget 400'
 
 -- go.mod --
 module example.com/inlrec
@@ -83,4 +85,138 @@ func plainBig(x int) int {
 	a14 := a13 * a12
 	a15 := a14 - a13
 	return a15 + x
+}
+
+func hugeEven(n int) int {
+c1 := n + 1
+c2 := c1 * 2
+c3 := c2 - 3
+c4 := c3 + c2
+c5 := c4 * c1
+c6 := c5 - c4
+c7 := c6 + 7
+c8 := c7 * 3
+c9 := c8 - c7
+c10 := c9 + c8
+c11 := c10 * 2
+c12 := c11 - 5
+c13 := c12 + c11
+c14 := c13 * c12
+c15 := c14 - c13
+d1 := c15 + 1
+d2 := d1 * 2
+d3 := d2 - 3
+d4 := d3 + d2
+d5 := d4 * d1
+d6 := d5 - d4
+d7 := d6 + 7
+d8 := d7 * 3
+d9 := d8 - d7
+d10 := d9 + d8
+d11 := d10 * 2
+d12 := d11 - 5
+d13 := d12 + d11
+d14 := d13 * d12
+d15 := d14 - d13
+e1 := d15 + 1
+e2 := e1 * 2
+e3 := e2 - 3
+e4 := e3 + e2
+e5 := e4 * e1
+e6 := e5 - e4
+e7 := e6 + 7
+e8 := e7 * 3
+e9 := e8 - e7
+e10 := e9 + e8
+e11 := e10 * 2
+e12 := e11 - 5
+e13 := e12 + e11
+e14 := e13 * e12
+e15 := e14 - e13
+f1 := e15 + 1
+f2 := f1 * 2
+f3 := f2 - 3
+f4 := f3 + f2
+f5 := f4 * f1
+f6 := f5 - f4
+f7 := f6 + 7
+f8 := f7 * 3
+f9 := f8 - f7
+f10 := f9 + f8
+f11 := f10 * 2
+f12 := f11 - 5
+f13 := f12 + f11
+f14 := f13 * f12
+f15 := f14 - f13
+if n <= 0 {
+return bigWork(n) + f15
+}
+return hugeOdd(n-1) + bigWork(n) + f15
+}
+
+func hugeOdd(n int) int {
+g1 := n + 1
+g2 := g1 * 2
+g3 := g2 - 3
+g4 := g3 + g2
+g5 := g4 * g1
+g6 := g5 - g4
+g7 := g6 + 7
+g8 := g7 * 3
+g9 := g8 - g7
+g10 := g9 + g8
+g11 := g10 * 2
+g12 := g11 - 5
+g13 := g12 + g11
+g14 := g13 * g12
+g15 := g14 - g13
+h1 := g15 + 1
+h2 := h1 * 2
+h3 := h2 - 3
+h4 := h3 + h2
+h5 := h4 * h1
+h6 := h5 - h4
+h7 := h6 + 7
+h8 := h7 * 3
+h9 := h8 - h7
+h10 := h9 + h8
+h11 := h10 * 2
+h12 := h11 - 5
+h13 := h12 + h11
+h14 := h13 * h12
+h15 := h14 - h13
+i1 := h15 + 1
+i2 := i1 * 2
+i3 := i2 - 3
+i4 := i3 + i2
+i5 := i4 * i1
+i6 := i5 - i4
+i7 := i6 + 7
+i8 := i7 * 3
+i9 := i8 - i7
+i10 := i9 + i8
+i11 := i10 * 2
+i12 := i11 - 5
+i13 := i12 + i11
+i14 := i13 * i12
+i15 := i14 - i13
+j1 := i15 + 1
+j2 := j1 * 2
+j3 := j2 - 3
+j4 := j3 + j2
+j5 := j4 * j1
+j6 := j5 - j4
+j7 := j6 + 7
+j8 := j7 * 3
+j9 := j8 - j7
+j10 := j9 + j8
+j11 := j10 * 2
+j12 := j11 - 5
+j13 := j12 + j11
+j14 := j13 * j12
+j15 := j14 - j13
+if n <= 0 {
+return bigWork(n) + j15 + 1
+}
+return hugeEven(n-1) + bigWork(n) + j15
 }
