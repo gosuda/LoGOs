@@ -5,24 +5,28 @@ package main
 import (
 	"errors"
 	"fmt"
+	"os"
+	"strings"
 )
 
 var errRecv = errors.New("recv")
 
+var log []string
+
 type box struct{ tag string }
 
 func (b box) Close() error {
-	fmt.Println("close:", b.tag)
+	log = append(log, "close: "+b.tag)
 	return nil
 }
 
 func (b box) Rollback() error {
-	fmt.Println("rollback:", b.tag)
+	log = append(log, "rollback: "+b.tag)
 	return nil
 }
 
 func check(s string) error {
-	fmt.Println("check:", s)
+	log = append(log, "check: "+s)
 	return nil
 }
 
@@ -48,12 +52,12 @@ func argDefer() (err error) {
 }
 
 func firstFn() error {
-	fmt.Println("call: first")
+	log = append(log, "call: first")
 	return nil
 }
 
 func secondFn() error {
-	fmt.Println("call: second")
+	log = append(log, "call: second")
 	return errRecv
 }
 
@@ -67,16 +71,22 @@ func rebindDefer() (err error) {
 
 func main() {
 	if err := recvDefer(); err != nil {
-		fmt.Println("fatal:", err)
+		log = append(log, "fatal: "+err.Error())
 	}
 	if err := argDefer(); err != nil {
-		fmt.Println("fatal:", err)
+		log = append(log, "fatal: "+err.Error())
 	}
 	fnVar = firstFn
 	if err := rebindDefer(); err != nil {
-		fmt.Println("fatal:", err)
+		log = append(log, "fatal: "+err.Error())
 	}
 	if err := recvErrdefer(); err != nil {
-		fmt.Println("err:", err)
+		log = append(log, "err: "+err.Error())
 	}
+	want := "close: old\ncheck: old\ncall: first\nrollback: old\nerr: recv"
+	if strings.Join(log, "\n") != want {
+		fmt.Println("errdefer recv: FAIL")
+		os.Exit(1)
+	}
+	fmt.Println("errdefer recv: PASS")
 }

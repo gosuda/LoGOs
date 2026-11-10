@@ -5,6 +5,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"os"
 )
 
 var errRollback = errors.New("rollback")
@@ -13,8 +14,8 @@ func rollbackFails() error { return errRollback }
 
 func nilPrimaryRollback() (err error) {
 	defer func() {
-		if r := recover(); r != nil {
-			fmt.Println("recovered:", r)
+		if recover() == nil {
+			panic("missing panic")
 		}
 	}()
 	errdefer rollbackFails()?
@@ -23,6 +24,9 @@ func nilPrimaryRollback() (err error) {
 
 func main() {
 	err := nilPrimaryRollback()
-	fmt.Println("is-rollback:", err == errRollback)
-	fmt.Println("matches:", errors.Is(err, errRollback))
+	if err != errRollback || !errors.Is(err, errRollback) {
+		fmt.Println("errdefer nil primary: FAIL")
+		os.Exit(1)
+	}
+	fmt.Println("errdefer nil primary: PASS")
 }

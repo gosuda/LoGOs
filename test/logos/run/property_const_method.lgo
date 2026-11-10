@@ -2,7 +2,10 @@
 
 package main
 
-import "fmt"
+import (
+	"fmt"
+	"os"
+)
 
 type RO interface {
 	const Name string
@@ -36,8 +39,9 @@ func fromStarter(s Starter) string {
 func main() {
 	m := Gadget{Name: "g"}
 	var r RO = m
-	fmt.Println(use(m))
-	fmt.Println(r.Name)
-	fmt.Println(fromStarter(m))
-	fmt.Println(r.Start() == nil)
+	if use(m) != "g" || r.Name != "g" || fromStarter(m) != "g" || r.Start() != nil {
+		fmt.Println("property const: FAIL")
+		os.Exit(1)
+	}
+	fmt.Println("property const: PASS")
 }

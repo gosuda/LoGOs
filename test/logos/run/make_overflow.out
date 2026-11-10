@@ -1,8 +1,1 @@
-logos: make length overflow: w * h
-len=12
-logos: make length overflow: w * h
-len=0
-true
-true
-logos: make length overflow: n * (n * 2)
-len=18
+make overflow: PASS
