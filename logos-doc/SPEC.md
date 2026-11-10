@@ -1016,7 +1016,7 @@ A `const for` index variable MUST NOT be assigned. [T-205]
 
 An assignment to it MUST fail with `[comptime::const_for_assign]`. [T-205]
 
-`f.Tag.Get(k)` MUST constant-fold. [T-205]
+`f.Tag.Get(k)` MUST constant-fold when `k` is a compile-time constant: a literal, a named constant, an imported constant, or a constant expression. A run-time `k` cannot fold and stays an ordinary call. [T-205]
 
 A live `comptime.Error(msg)` MUST fail compilation with `msg`. [T-205]
 
