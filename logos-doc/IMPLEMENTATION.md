@@ -125,7 +125,6 @@ Anchor: Richard Feynman, John Carmack
 |---|---|---|---|
 | M5-S4 | `./logos/rt` | `BenchmarkConstMapLookup` | native |
 | M11-S1 | `./logos/rt/json` | `BenchmarkJsonEscapeScan` | native |
-| M18-S3 | `runtime` | `BenchmarkLogosArenaBump` | `GOEXPERIMENT=logosarena` |
 | M15-S3 | `runtime` | `BenchmarkLogosLoopStride` | js/wasm through `../lib/wasm/go_js_wasm_exec` and Node |
 | M20-S1 | `cmd/cgo/internal/testlogos` | `BenchmarkFastcall` | native with cgo; two builds of the same benchmark: candidate with `GOEXPERIMENT=logosfastcgo`, baseline with `GOEXPERIMENT=nologosfastcgo` |
 
@@ -445,7 +444,7 @@ Anchor: Edsger W. Dijkstra, Edward Tufte
   - syntax: `syntax/logos_test.go` `TestLogosErrors` runs `testdata/logos/*.lgo` through the same ERROR-comment matcher as `error_test.go`, with `LogosMode`.
   - types2: `check_test.go` gains `TestLogos` that runs `src/internal/types/testdata/logos` with `LogosMode` parsing and `Config.Logos = true` (copy `TestLocal` at `:401`; the harness filter `:440-462` must accept `.lgo` names).
   - testdir: `src/cmd/internal/testdir` runs `test/logos/**` files ending in `.lgo` with the same directives (`// run`, `// errorcheck`, `// compile`, `// runoutput`) using `logos` (`bin/logos`) instead of `go`, and runs files ending in `.go` under `test/logos/**` with the same directives using `go` (the Go-package twins of the backend checks in M13-M20, R-U1). Directory map, stated once: `.lgo` files run with `logos`; `.go` files run with `go` except under `test/logos/lint/`, where they run with `logos lint` (M9-S2). A `.go` twin that needs an optimization tier builds through `go build -O=<level>` (a `// run -O=<level>` style directive read by the harness), never through `go tool compile`, because `-O` belongs to cmd/go; M13-S1 owns the twin whose assertion differs between `-O=1` and `-O=3`; register directory `logos` beside the existing list (confirm the list with `grep -n '"fixedbugs"' src/cmd/internal/testdir/testdir_test.go`).
-  - Directories: `test/logos/compile/`, `test/logos/run/`, `test/logos/redteam/`, `test/logos/eject/`, `test/logos/codegen/`, `test/logos/example/`.
+  - Directories: `test/logos/compile/`, `test/logos/run/`, `test/logos/redteam/`, `test/logos/codegen/`, `test/logos/example/`.
 - Attack (harness self-test): temporary intentional-red proof only, never a committed broken tree. Write `test/logos/compile/harness_selftest.lgo` once with a non-matching ERROR comment, run the harness, confirm it fails, record that output as RED in the commit body; then replace it with the matching ERROR comment before committing. The single G1 commit contains only the green harness plus the passing self-test file.
 - Gate: `go test cmd/internal/testdir -run 'Test/logos/'` (exact test-name form: confirm in testdir_test.go).
 - Red-team rows: #122, #133.
@@ -2597,7 +2596,7 @@ Anchor: Tony Hoare, David Parnas
 
 ### M18-S3 Inline noscan bump and GC scanning
 Anchor: John Carmack, Edsger W. Dijkstra
-- Attack: `test/logos/codegen/arena_bump.lgo`: the noscan fast path is an inline add-compare sequence with a slow-path call; the sequence is marked as an async-preemption unsafe point (the PCDATA marker is present); `src/runtime/logos_arena_test.go`: pointer-containing arena objects keep their heap referents alive across `runtime.GC()` (AR3); after a frame exit, a GC finds no stale pointers in popped scan memory (AR2); `-race` reports no false race on reused chunks (#35, #101). Codegen takes the inline bump path only for noscan types of size up to 512 (PLAN:531). Sizes 511, 512, and 513 check the boundary; 513 takes the slow path. `src/runtime/logos_arena_test.go` `BenchmarkLogosArenaBump` reports the cost of one inline noscan allocation plus its frame-exit restore (target 1.5 ns, recorded, never a pass condition).
+- Attack: `test/logos/codegen/arena_bump.lgo`: the noscan fast path is an inline add-compare sequence with a slow-path call; the sequence is marked as an async-preemption unsafe point (the PCDATA marker is present); `src/runtime/logos_arena_test.go`: pointer-containing arena objects keep their heap referents alive across `runtime.GC()` (AR3); after a frame exit, a GC finds no stale pointers in popped scan memory (AR2); `-race` reports no false race on reused chunks (#35, #101). Codegen takes the inline bump path only for noscan types of size up to 512 (PLAN:531). Sizes 511, 512, and 513 check the boundary; 513 takes the slow path.
 - Build: new SSA op for the bump sequence with `UnsafePoint` set (unsafe points are recorded by `liveness/plive.go:507-523` and emitted as `PCDATA_UnsafePoint`, `objw/prog.go:136-144`; `isAsyncSafePoint` rejects them, `preempt.go:443-448`), replacing PLAN's RIP-rewind scheme; `scanstack` gains a hook that scans the goroutine's scan regions using each object's type word; race builds call `racemalloc`/`racefree` on watermark moves. Gate the SSA bump op on noscan and size <= 512. Larger sizes call the arena slow path.
 - Gate: `GOEXPERIMENT=logosarena go test -short std` (the experiment's acceptance gate) and the tests above.
 - Red-team rows: #4, #11, #12, #20, #33, #35, #46, #53, #59, #63, #71, #81, #101, #106, #138, #155, #181.
