@@ -645,7 +645,7 @@ When nil is a valid payload, the ejected form MUST carry explicit presence separ
 A present nil payload MUST stay distinguishable from none in ejected code [T-202][T-0.3].
 Ejected signatures MUST use plain pointers and `Option[T]` from the shared support module [T-202][T-0.3].
 A Go importer MUST see the same Go types [T-202][T-Sec5][R-U2].
-Zero values of non-nil pointers MUST fail compilation, including `var p *T`, arrays of non-nil pointers, `make` of a non-nil pointer slice with length above zero, and composite literals that leave a non-nil field empty [T-202].
+Zero values of non-nil pointers MUST fail compilation, including `var p *T`, arrays of non-nil pointers, `make` of a non-nil pointer slice with length above zero or with non-constant length, and composite literals that leave a non-nil field empty [T-202].
 Stores of `nil` into non-nil locations MUST fail compilation [T-202].
 Narrowing after `x != nil`, after an early exit on `x == nil`, and through `&&` chains MUST apply to locals and parameters until their next assignment [T-202].
 Narrowing MUST NOT apply to fields, to variables whose address escapes, or to variables that a closure assigns [T-202].
