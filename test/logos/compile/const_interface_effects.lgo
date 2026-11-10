@@ -51,6 +51,7 @@ func (m MutPtr) Name() string {
 }
 
 var _ Qualified = Pure{}
+var _ Qualified = LateOK{tag: "y"}
 var _ Ordinary = Pure{}
 
 var _ Ordinary = MutSlice{S: []int{1}}
@@ -123,4 +124,13 @@ func attackDynamicView(xs const []Ordinary) {
 
 func dynamicViewControl(qs const []Qualified) string {
 	return qs[0].Name()
+}
+
+type LateOK struct {
+	tag   string
+	items []int
+}
+
+func (l LateOK) Name() string {
+	return "late:" + l.tag
 }

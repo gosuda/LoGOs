@@ -15,6 +15,8 @@ cd ..
 cd neg
 ! logos build ./...
 stderr '\[correctness::const_view_mutation\] cannot call Name through const view'
+! logos build -o $WORK/negbin$GOEXE ./cmd
+! exists $WORK/negbin$GOEXE
 cd ..
 
 go tool compile -p example.com/l/c -o $WORK/lc.a w/l/c/c.lgo
@@ -454,4 +456,16 @@ import (
 
 func main() {
 	fmt.Println(q.Run())
+}
+
+-- neg/cmd/main.lgo --
+package main
+
+import (
+	"example.com/neg/b"
+	"example.com/neg/c"
+)
+
+func main() {
+	var _ c.Namer = &b.Bad{}
 }
