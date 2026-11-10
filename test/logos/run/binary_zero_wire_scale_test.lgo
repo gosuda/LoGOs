@@ -1,0 +1,72 @@
+// run
+
+package main
+
+import (
+	"encoding/binary"
+	"testing"
+)
+
+type ScaleEmpty struct{}
+
+type ScaleHolder struct {
+	Items []ScaleEmpty `json:"items"`
+}
+
+func mustScaleBytes(b []byte, err error) []byte {
+	if err != nil {
+		panic(err)
+	}
+	return b
+}
+
+func scaleWireLen(n uint64) int {
+	return 1 + len(binary.AppendUvarint(nil, n))
+}
+
+func TestBinaryZeroWireScaleIndependent(t *testing.T) {
+	const smallCount = 1000
+	const bigCount = 1000000
+	small := ScaleHolder{Items: make([]ScaleEmpty, smallCount)}
+	big := ScaleHolder{Items: make([]ScaleEmpty, bigCount)}
+	encSmall := mustScaleBytes(small.MarshalBinary())
+	encBig := mustScaleBytes(big.MarshalBinary())
+	if len(encSmall) != scaleWireLen(smallCount) {
+		t.Fatalf("small encode is %d bytes, want %d", len(encSmall), scaleWireLen(smallCount))
+	}
+	if len(encBig) != scaleWireLen(bigCount) {
+		t.Fatalf("big encode is %d bytes, want %d", len(encBig), scaleWireLen(bigCount))
+	}
+	encSmallAllocs := testing.AllocsPerRun(20, func() { mustScaleBytes(small.MarshalBinary()) })
+	encBigAllocs := testing.AllocsPerRun(20, func() { mustScaleBytes(big.MarshalBinary()) })
+	if encSmallAllocs != encBigAllocs {
+		t.Fatalf("encode allocates %v at count %d and %v at count %d", encSmallAllocs, smallCount, encBigAllocs, bigCount)
+	}
+	var decSmall, decBig ScaleHolder
+	decSmallAllocs := testing.AllocsPerRun(20, func() {
+		if err := decSmall.UnmarshalBinary(encSmall); err != nil {
+			panic(err)
+		}
+	})
+	decBigAllocs := testing.AllocsPerRun(20, func() {
+		if err := decBig.UnmarshalBinary(encBig); err != nil {
+			panic(err)
+		}
+	})
+	if decSmallAllocs != decBigAllocs {
+		t.Fatalf("decode allocates %v at count %d and %v at count %d", decSmallAllocs, smallCount, decBigAllocs, bigCount)
+	}
+	if len(decSmall.Items) != smallCount || len(decBig.Items) != bigCount {
+		t.Fatalf("decoded %d and %d items, want %d and %d", len(decSmall.Items), len(decBig.Items), smallCount, bigCount)
+	}
+	huge := append([]byte{1}, binary.AppendUvarint(nil, 1000000000)...)
+	hugeAllocs := testing.AllocsPerRun(20, func() {
+		var v ScaleHolder
+		if err := v.UnmarshalBinary(huge); err == nil {
+			panic("accepted count 1000000000")
+		}
+	})
+	if hugeAllocs > decSmallAllocs+10 {
+		t.Fatalf("over-cap decode allocates %v, lawful decode %v", hugeAllocs, decSmallAllocs)
+	}
+}
