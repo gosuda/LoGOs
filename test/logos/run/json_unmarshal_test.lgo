@@ -402,13 +402,18 @@ func TestHostileArrayCostsOnArrival(t *testing.T) {
 
 func TestLargeArrayDecodesIncrementally(t *testing.T) {
 	const n = 200000
+	const elemBytes = 8
+	const growthFactor = 8
 	doc := `{"items":[` + strings.Repeat("7,", n-1) + `7]}`
 	before := allocated()
 	p := decodeOK[Items](doc)
 	if len(p.Items) != n {
 		t.Fatalf("decoded %d items", len(p.Items))
 	}
-	if grew := allocated() - before; grew > 80*n {
+	if c := cap(p.Items); c > 4*n {
+		t.Fatalf("incremental growth holds cap %d for %d elements, want at most %d", c, n, 4*n)
+	}
+	if grew := allocated() - before; grew > uint64(elemBytes*growthFactor*n) {
 		t.Fatalf("%d elements allocated %d bytes", n, grew)
 	}
 }
