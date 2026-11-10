@@ -42,6 +42,7 @@ func (p *parser) groupList(plains *[]Expr) (limit Expr) {
 }
 
 func (p *parser) groupStmt(goPos Pos, gname *Name) Stmt {
+	lparen := p.pos()
 	p.next()
 	var plains []Expr
 	var limit Expr
@@ -67,7 +68,17 @@ func (p *parser) groupStmt(goPos Pos, gname *Name) Stmt {
 		s.Body = p.blockStmt("")
 		return s
 	}
-	return p.groupCallFallback(goPos, gname, plains, limit)
+	args := make([]Expr, 0, len(plains)+1)
+	args = append(args, plains...)
+	if limit != nil {
+		p.syntaxErrorAt(limit.Pos(), "go group limit requires a block")
+		args = append(args, limit)
+	}
+	call := new(CallExpr)
+	call.pos = lparen
+	call.Fun = gname
+	call.ArgList = args
+	return p.ordinaryGoStmt(goPos, p.pexpr(call, false))
 }
 
 func (p *parser) groupContext(goPos Pos, plains []Expr) Expr {
@@ -80,20 +91,6 @@ func (p *parser) groupContext(goPos Pos, plains []Expr) Expr {
 		p.syntaxErrorAt(goPos, "go group accepts one context and one limit")
 	}
 	return p.badExpr()
-}
-
-func (p *parser) groupCallFallback(goPos Pos, gname *Name, plains []Expr, limit Expr) Stmt {
-	args := make([]Expr, 0, len(plains)+1)
-	args = append(args, plains...)
-	if limit != nil {
-		p.syntaxErrorAt(limit.Pos(), "go group limit requires a block")
-		args = append(args, limit)
-	}
-	call := new(CallExpr)
-	call.pos = gname.Pos()
-	call.Fun = gname
-	call.ArgList = args
-	return p.ordinaryGoStmt(goPos, p.pexpr(call, false))
 }
 
 func (p *parser) ordinaryGoStmt(goPos Pos, lhs Expr) Stmt {
