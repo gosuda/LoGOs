@@ -599,19 +599,14 @@ A value of type `T` MUST convert to `T?`, and `nil` MUST convert to every `T?` [
 A value of type `T?` MUST NOT convert to `T` without a check [T-202].
 Zero values of non-nil pointers MUST fail compilation, including `var p *T`, arrays of non-nil pointers, `make` of a non-nil pointer slice with length above zero or with non-constant length, and composite literals that leave a non-nil field empty [T-202].
 Pointers from Go-mode declarations and from type parameters instantiated with non-nil pointers MUST act as platform pointers: dereference and nil comparison MUST compile, and a store into a non-nil location MUST check at run time and panic with the `.lgo` file and line on nil [T-202][A-STD].
-The operators `?.` and `??` MUST operate only on option types [T-104.3].
 A single-value map read `m[k]` MUST type as `V?`, while `v, ok := m[k]` MUST keep Go meaning [T-104.3].
 Zero values of non-nil pointers MUST fail with correctness::nonnil_uninitialized. [T-202][T-Sec12]
 Absent map and JSON values MUST check through V? and MissingFieldError. [T-202][T-Sec12]
-An absent key MUST read as none while a present nil payload MUST read as some. [T-202][T-Sec12]
 Pointers from Go declarations, in the standard library and in every other Go package, MUST act as platform pointers. [T-202][R-U2]
 Stores into non-nil locations MUST panic with `logos: nil from Go value stored into non-nil *T at <file>:<line>`. [T-202][R-U2]
 Block scoping MUST stay standard Go. [T-202]
 Outer variables MUST narrow after if x == nil return guards. [T-202]
 A literal MUST initialize every non-nil field. [T-202]
-The spelling `T??` MUST fail as a syntax error. [T-202]
-`(T?)?` MUST lower to `Option[T?]`. [T-202]
-An ordinary method call on an option without a non-nil proof MUST fail with `[correctness::nil_deref_unproven]`. [T-202]
 
 ### 2.3 RFC-203: Closed unions, property interfaces, and inline assertions
 
@@ -710,8 +705,6 @@ A field-sourced getter MUST use a value receiver. [T-203.2]
 A field-sourced setter MUST use a pointer receiver. [T-203.2]
 
 A method-sourced accessor MUST keep the receiver kind of the forwarded method. [T-203.2]
-
-Property elements MUST lower to these interface methods. [T-203.2]
 
 A Go importer MUST see a property interface as the interface of its `Logos_GetF` and `Logos_SetF` accessor methods. [T-203.2][T-Sec5][R-U2]
 
