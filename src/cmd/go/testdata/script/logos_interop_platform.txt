@@ -10,6 +10,7 @@ stdout '^find-ok: true gadget$'
 stdout '^lookup-nil$'
 stdout '^lookup-store: gadget$'
 stdout '^generic: gadget false$'
+stdout '^panic-generic: logos: nil from Go value stored into non-nil \*item\.Item at main\.lgo:[0-9]+$'
 stdout '^panic-store: logos: nil from Go value stored into non-nil \*item\.Item at main\.lgo:[0-9]+$'
 stdout '^panic-call: logos: nil from Go value stored into non-nil \*item\.Item at main\.lgo:[0-9]+$'
 stdout '^field-store: gadget$'
@@ -70,6 +71,10 @@ func NewBox(name string) *Box {
 
 func (b *Box) Get() *Item {
 	return b.Inner
+}
+
+func NilSlice() []*Item {
+	return []*Item{nil}
 }
 
 -- w/l/go.mod --
@@ -147,6 +152,16 @@ func tryStdlibStore() (msg string) {
 	var keep *url.URL = bad
 	return "no-panic:" + keep.Host
 }
+func tryGenericNil() (msg string) {
+	defer func() {
+		if r := recover(); r != nil {
+			msg = fmt.Sprint(r)
+		}
+	}()
+	got := First(item.NilSlice())
+	var keep *item.Item = got
+	return "no-panic:" + keep.Name
+}
 
 func main() {
 	it, err := item.Find("x")
@@ -166,14 +181,15 @@ func main() {
 
 	got := First([]*item.Item{here})
 	fmt.Println("generic:", got.Name, got == nil)
+	fmt.Println("panic-generic:", tryGenericNil())
 
+	fmt.Println("panic-store:", tryStore())
+	fmt.Println("panic-call:", tryCall())
 	full := item.NewBox("x")
 	var kept *item.Item = full.Inner
 	fmt.Println("field-store:", kept.Name)
 	fmt.Println("method-store:", useItem(full.Get()))
 
-	fmt.Println("panic-store:", tryStore())
-	fmt.Println("panic-call:", tryCall())
 	fmt.Println("panic-field:", tryField())
 	fmt.Println("panic-method:", tryMethod())
 	parsed, perr := url.Parse("https://example.com/gadget")
