@@ -773,8 +773,9 @@ An assertion list on a non-struct type MUST be a syntax error. [T-203.3]
 An exhaustive `switch x.(type)` MUST cover every member and `nil` or hold `default` [T-203.1].
 A readonly method `const M() T` MUST NOT count as a property element and MUST NOT satisfy a property requirement [T-201][T-203.2].
 Unions MUST use the upstream interface representation. [T-203.1]
-A closed union MUST use the upstream interface representation. [T-203.1]
 A closed union MUST use the upstream interface representation, including upstream handling of zero-sized members. [T-203.1]
+Ejected value unions MUST keep methods with a member comment. [T-203.1]
+A union with `~` terms MUST fail with `correctness::open_union_value`. [T-203.1]
 Union values MUST use the upstream interface representation. [T-203.1]
 
 Method bodies inside interfaces MUST fail compilation. [T-203.2]
