@@ -23,6 +23,16 @@ logos build ./...
 logos run ./...
 stdout '^small-ok$'
 cd ..
+cd wmed
+! logos build ./...
+stderr 'comptime::node_limit'
+stderr 'expansion has 4100 nodes above the selected limit 4096'
+! logos build -gcflags=all=-logos.comptime_nodes=4099 ./...
+stderr 'expansion has 4100 nodes above the selected limit 4099'
+logos build -gcflags=all=-logos.comptime_nodes=4100 ./...
+logos run -gcflags=all=-logos.comptime_nodes=4100 ./...
+stdout '^med-ok$'
+cd ..
 
 mkdir wtoml
 cp wbig/go.mod wtoml/go.mod
@@ -134,3 +144,90 @@ max_comptime_ast_nodes = 23
 -- toml-limit-24.toml --
 [lints.thresholds]
 max_comptime_ast_nodes = 24
+
+-- wmed/go.mod --
+module example.com/mednest
+
+go 1.27
+
+-- wmed/med.lgo --
+package main
+
+import (
+	"comptime"
+	"fmt"
+)
+
+type Big struct {
+	F0 int
+	F1 int
+	F2 int
+	F3 int
+	F4 int
+	F5 int
+	F6 int
+	F7 int
+	F8 int
+	F9 int
+	F10 int
+	F11 int
+	F12 int
+	F13 int
+	F14 int
+	F15 int
+	F16 int
+	F17 int
+	F18 int
+	F19 int
+	F20 int
+	F21 int
+	F22 int
+	F23 int
+	F24 int
+	F25 int
+	F26 int
+	F27 int
+	F28 int
+	F29 int
+	F30 int
+	F31 int
+	F32 int
+	F33 int
+	F34 int
+	F35 int
+	F36 int
+	F37 int
+	F38 int
+	F39 int
+	F40 int
+	F41 int
+	F42 int
+	F43 int
+	F44 int
+	F45 int
+	F46 int
+	F47 int
+	F48 int
+	F49 int
+}
+
+type Small struct {
+	G0 int
+	G1 int
+	G2 int
+	G3 int
+}
+
+func show(v Big, w Small) int {
+	n := 0
+	const for _, f := range comptime.Fields[Big]() {
+		const for _, g := range comptime.Fields[Small]() {
+			n += v.[f] + w.[g]
+		}
+	}
+	return n
+}
+
+func main() {
+	fmt.Println("med-ok")
+}
