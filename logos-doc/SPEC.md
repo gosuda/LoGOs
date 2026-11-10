@@ -1484,7 +1484,7 @@ Charge nothing against a total budget on the count header; a count whose element
 For slices whose elements have zero wire payload, the count itself MUST NOT exceed 1,048,576 (the 1 MiB prealloc bound at unit 1), checked first, and MUST NOT exceed 8 MiB / sizeof(elem), checked next; larger counts MUST be rejected with a count-out-of-range error, encoder symmetric, checked before allocation or element iteration. One count MUST NOT allocate more than 8 MiB of element storage in a single allocation. [T-Sec10.1]
 Zero-wire slices MUST be handled in constant time with respect to count, without per-element iteration. [T-Sec10.1]
 These resource bounds MUST NOT change the wire bytes of accepted values. [T-Sec10.1]
-Binary decoding MUST reject nesting deeper than 10,000 levels with an error naming field and offset. [T-Sec10.1]
+Binary decoding MUST reject nesting deeper than 10,000 composite levels, where entering a struct, slice, array, or map counts as one level and entering a pointer or option payload adds none, with an error naming the field and the byte offset. [T-Sec10.1]
 
 ## 11. Capabilities auditor
 
