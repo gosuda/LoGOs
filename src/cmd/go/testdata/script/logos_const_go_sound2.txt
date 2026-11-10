@@ -16,6 +16,12 @@ stderr 'parameter b'
 ! logos build -o $WORK/bin/minw$GOEXE ./minwrap
 stderr 'const_view_mutation'
 stderr 'parameter b'
+! logos build -o $WORK/bin/var1$GOEXE ./varsingle
+stderr 'const_view_mutation'
+stderr 'parameter xs'
+! logos build -o $WORK/bin/var2$GOEXE ./vartail
+stderr 'const_view_mutation'
+stderr 'parameter xs'
 cd ..
 
 -- dep/go.mod --
@@ -152,5 +158,30 @@ func main() {
 	buf := []byte{1}
 	var view const []byte = buf
 	println(g2d.MinWrap(view))
+	println(buf[0])
+}
+
+-- imp/varsingle/main.lgo --
+package main
+
+import "example.com/g2dep/g2d"
+
+func main() {
+	buf := []byte{1}
+	var view const []byte = buf
+	g2d.Tagged(view)
+	println(buf[0])
+}
+
+-- imp/vartail/main.lgo --
+package main
+
+import "example.com/g2dep/g2d"
+
+func main() {
+	other := []byte{9}
+	buf := []byte{1}
+	var view const []byte = buf
+	g2d.Tagged(other, view)
 	println(buf[0])
 }

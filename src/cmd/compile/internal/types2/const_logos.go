@@ -650,6 +650,15 @@ func (check *Checker) logosGoConstGate(call *syntax.CallExpr) logosGoConstGate {
 	return g
 }
 func (check *Checker) logosGoParamSlot(g logosGoConstGate, sigParams *Tuple, index int) int {
+	if g.sig != nil {
+		npars := g.sig.Params().Len()
+		if g.variadic && index >= npars-1 {
+			return npars - 1
+		}
+		if index < npars {
+			return index
+		}
+	}
 	if g.variadic && index >= sigParams.Len()-1 {
 		return sigParams.Len() - 1
 	}
