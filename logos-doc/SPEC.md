@@ -1836,6 +1836,7 @@ A non-constant integer product in a `make` length or capacity MUST lower to `log
 - It MUST merge compiler JSON diagnostics into `publishDiagnostics`. [T-Sec16]
 - It MUST report `logos lsp: gopls not found on PATH` when `gopls` is missing. [T-Sec16]
 - The proxy MUST speak standard LSP over stdio. [T-Sec16]
+- Stock LSP clients reach `.lgo` files through the proxy with no editor-specific code. [T-Sec16]
 
 ### 16.2 Inlay hints for lowering
 
