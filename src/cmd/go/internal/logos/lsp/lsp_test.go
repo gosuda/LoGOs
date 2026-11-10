@@ -1517,6 +1517,68 @@ func TestServeRejectsBadFrames(t *testing.T) {
 	})
 }
 
+func TestServeAcceptsNonCanonicalHeaders(t *testing.T) {
+	shutdown := `{"jsonrpc":"2.0","id":1,"method":"shutdown","params":null}`
+	bye := `{"jsonrpc":"2.0","method":"exit","params":{}}`
+	for _, c := range []struct {
+		name string
+		head func(n int) string
+	}{
+		{"content type first", func(n int) string {
+			return fmt.Sprintf("Content-Type: application/vscode-jsonrpc; charset=utf-8\r\nContent-Length: %d\r\n\r\n", n)
+		}},
+		{"lowercase length", func(n int) string {
+			return fmt.Sprintf("content-length: %d\r\n\r\n", n)
+		}},
+		{"uppercase length", func(n int) string {
+			return fmt.Sprintf("CONTENT-LENGTH: %d\r\n\r\n", n)
+		}},
+		{"length after a custom header", func(n int) string {
+			return fmt.Sprintf("X-Custom: 1\r\nContent-Length: %d\r\nContent-Type: application/vscode-jsonrpc\r\n\r\n", n)
+		}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			scratch := t.TempDir()
+			scriptPath := filepath.Join(scratch, "script.json")
+			if err := os.WriteFile(scriptPath, []byte(`{}`), 0o666); err != nil {
+				t.Fatal(err)
+			}
+			opts := Options{
+				Gopls:    []string{os.Args[0], "-mode=stdio"},
+				Env:      append(os.Environ(), fakeEnv+"="+scriptPath, fakeLogEnv+"="+filepath.Join(scratch, "gopls.log")),
+				Compiler: newFakeCompiler(),
+				Stderr:   new(syncBuffer),
+			}
+			inR, inW, err := os.Pipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			outR, outW, err := os.Pipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			done := make(chan error, 1)
+			ctx := t.Context()
+			go func() { done <- Serve(ctx, inR, outW, opts) }()
+			in := c.head(len(shutdown)) + shutdown + c.head(len(bye)) + bye
+			if _, err := io.WriteString(inW, in); err != nil {
+				t.Fatal(err)
+			}
+			inW.Close()
+			select {
+			case err := <-done:
+				if err != nil {
+					t.Fatalf("Serve over %s headers = %v, want nil", c.name, err)
+				}
+			case <-time.After(waitLimit):
+				t.Fatal("Serve did not return after the non-canonical headers")
+			}
+			outW.Close()
+			outR.Close()
+		})
+	}
+}
+
 func TestProxyLeavesForeignJSONAlone(t *testing.T) {
 	low, _, _ := lowerQuestion([]byte(aLgo))
 	lowRead := span(findPos(t, string(low), "Read(", 0), len("Read"))
