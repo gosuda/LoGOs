@@ -59,6 +59,8 @@ logos build -a -x .
 stderr '\-d=inlbudget=400,inlrecursivebudget=80,variablemakethreshold=4096'
 logos build -a -x -O=1 .
 ! stderr 'inlbudget'
+logos build -a -x -O=0 .
+stderr '\-N \-l'
 cd ..
 
 cd bad3
