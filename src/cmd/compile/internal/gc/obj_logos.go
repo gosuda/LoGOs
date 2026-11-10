@@ -11,33 +11,28 @@ import (
 	"cmd/internal/bio"
 )
 
-func hasLogosAssertFacts() bool {
+func anyFnFact(pred func(*facts.FnFact) bool) bool {
 	f := facts.Current()
 	if f == nil {
 		return false
 	}
 	for i := range f.Fns {
-		if f.Fns[i].HasAssert {
+		if pred(&f.Fns[i]) {
 			return true
 		}
 	}
 	return false
 }
 
+func hasLogosAssertFacts() bool {
+	return anyFnFact(func(fn *facts.FnFact) bool { return fn.HasAssert })
+}
+
 func hasLogosLintFacts() bool {
-	f := facts.Current()
-	if f == nil {
-		return false
-	}
-	if len(f.AllocFrees) != 0 || len(f.Locks) != 0 {
+	if f := facts.Current(); f != nil && (len(f.AllocFrees) != 0 || len(f.Locks) != 0) {
 		return true
 	}
-	for i := range f.Fns {
-		if f.Fns[i].AlwaysNilError {
-			return true
-		}
-	}
-	return false
+	return anyFnFact(func(fn *facts.FnFact) bool { return fn.AlwaysNilError })
 }
 
 func hasLogosConstFacts() bool {
@@ -60,8 +55,4 @@ func writeLogosFacts(bout *bio.Writer) {
 	start := startArchiveEntry(bout)
 	bout.Write(facts.Encode(base.Ctxt.Fingerprint, facts.Current()))
 	finishArchiveEntry(bout, start, facts.MemberName)
-}
-
-func logosWasmFinish() {
-	wasmyield.Finish()
 }
