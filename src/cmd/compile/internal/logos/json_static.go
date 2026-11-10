@@ -6,6 +6,7 @@ package logos
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"cmd/compile/internal/syntax"
@@ -90,17 +91,16 @@ func (fl *fileLower) lowerStaticJSONType(td *syntax.TypeDecl) {
 	js := fl.buildJSONStruct(td.Name.Value, named.Underlying().(*types2.Struct), fields)
 	var b strings.Builder
 	if jsonOK && !userDeclaresMethod(named, "MarshalJSON") {
-		if plan := fl.planJSONWalk(js, named); plan.stateful {
-			vname := ""
+		plan := fl.planJSONWalk(js, named)
+		vname := ""
+		if plan.stateful {
 			if key := fl.ensureJSONHelper(plan, named); key != "" {
 				vname = fl.pkg.jsonHelpers[key].vname
 			}
-			if vname != "" {
-				fl.emitJSONHelpers(td.Pos(), plan)
-				js.marshalTextWalk(&b, plan, vname)
-			} else {
-				js.marshalText(&b)
-			}
+		}
+		if vname != "" {
+			fl.emitJSONHelpers(td.Pos(), plan)
+			js.marshalTextWalk(&b, plan, vname)
 		} else {
 			js.marshalText(&b)
 		}
@@ -260,10 +260,7 @@ func isByteSized(t types2.Type) bool {
 	return ok && b.Kind() == types2.Uint8
 }
 
-var jsonMethodNames = []string{
-	"MarshalJSON", "UnmarshalJSON", "MarshalJSONTo", "UnmarshalJSONFrom",
-	"MarshalText", "UnmarshalText", "AppendText",
-}
+var jsonMethodNames = append(slices.Clone(marshalMethodNames), unmarshalMethodNames...)
 
 func scalarOf(t types2.Type) (scalarKind, bool) {
 	switch c := types2.Unalias(t).(type) {
@@ -284,13 +281,7 @@ func hasJSONMethods(named *types2.Named) bool {
 	if obj.Pkg() != nil && obj.Pkg().Path() == "encoding/json" {
 		return true
 	}
-	ptr := types2.NewPointer(named)
-	for _, name := range jsonMethodNames {
-		if m, _, _ := types2.LookupFieldOrMethod(ptr, false, obj.Pkg(), name); m != nil {
-			return true
-		}
-	}
-	return false
+	return hasMethodNamed(named, jsonMethodNames)
 }
 
 var marshalMethodNames = []string{
@@ -301,65 +292,59 @@ var unmarshalMethodNames = []string{
 	"UnmarshalJSON", "UnmarshalJSONFrom", "UnmarshalText",
 }
 
-func namedOfField(t types2.Type) *types2.Named {
+func hasMethodNamed(t types2.Type, names []string) bool {
 	u := types2.Unalias(t)
 	if cv, ok := u.(*types2.ConstView); ok {
 		u = types2.Unalias(cv.Elem)
 	}
 	if _, ok := u.(*types2.Option); ok {
-		return nil
+		return false
 	}
+	var named *types2.Named
 	if p, ok := u.(*types2.Pointer); ok {
 		e := types2.Unalias(p.Elem())
 		if cv, ok := e.(*types2.ConstView); ok {
 			e = types2.Unalias(cv.Elem)
 		}
 		if _, ok := e.(*types2.Option); ok {
-			return nil
+			return false
 		}
-		if n, ok := e.(*types2.Named); ok {
-			return n
+		var ok bool
+		named, ok = e.(*types2.Named)
+		if !ok {
+			return false
 		}
-		return nil
+	} else {
+		var ok bool
+		named, ok = u.(*types2.Named)
+		if !ok {
+			return false
+		}
 	}
-	if n, ok := u.(*types2.Named); ok {
-		return n
+	if named.Obj() == nil {
+		return false
 	}
-	return nil
+	ptr := types2.NewPointer(named)
+	for _, name := range names {
+		if m, _, _ := types2.LookupFieldOrMethod(ptr, false, named.Obj().Pkg(), name); m != nil {
+			return true
+		}
+	}
+	return false
 }
 
 func hasMarshalMethods(t types2.Type) bool {
 	if isExactNumber(t) {
 		return true
 	}
-	named := namedOfField(t)
-	if named == nil || named.Obj() == nil {
-		return false
-	}
-	ptr := types2.NewPointer(named)
-	for _, name := range marshalMethodNames {
-		if m, _, _ := types2.LookupFieldOrMethod(ptr, false, named.Obj().Pkg(), name); m != nil {
-			return true
-		}
-	}
-	return false
+	return hasMethodNamed(t, marshalMethodNames)
 }
 
 func hasUnmarshalMethods(t types2.Type) bool {
 	if isExactNumber(t) {
 		return true
 	}
-	named := namedOfField(t)
-	if named == nil || named.Obj() == nil {
-		return false
-	}
-	ptr := types2.NewPointer(named)
-	for _, name := range unmarshalMethodNames {
-		if m, _, _ := types2.LookupFieldOrMethod(ptr, false, named.Obj().Pkg(), name); m != nil {
-			return true
-		}
-	}
-	return false
+	return hasMethodNamed(t, unmarshalMethodNames)
 }
 
 func isExactNumber(t types2.Type) bool {
