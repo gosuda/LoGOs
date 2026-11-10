@@ -159,3 +159,41 @@ func TestReportedNeverInGoPackage(t *testing.T) {
 		t.Errorf("Resolve reported %q for a Go package", got)
 	}
 }
+func TestLgoOnlyRulesSilentInGo(t *testing.T) {
+	testenv.MustHaveGoBuild(t)
+	const src = "package p\n\nfunc f() {}\n"
+	ids := []string{
+		"correctness::nil_deref_unproven",
+		"correctness::defer_erases_errdefer_state",
+		"suspicious::unapplied_struct_default",
+		"suspicious::side_effect_before_sort",
+		"portability::serialized_unsized_int",
+		"portability::alias_extension",
+		"pedantic::exhaustive_union_switch",
+	}
+	for _, id := range ids {
+		r, ok := Lookup(id)
+		if !ok || r.Go {
+			t.Errorf("%s: registry = %+v, %v; want loGo/s only", id, r, ok)
+			continue
+		}
+		in := check(t, KindGo, "x.go", src)
+		in.Reported = []Reported{{Rule: id, Pos: in.Files[0].Pos(), Message: "x"}}
+		if got := summarize(Run(in)); len(got) != 0 {
+			t.Errorf("%s: Run Go = %q, want none", id, got)
+		}
+		if got := summarize(Resolve(in)); len(got) != 0 {
+			t.Errorf("%s: Resolve Go = %q, want none", id, got)
+		}
+		lgo := check(t, KindLgo, "x.lgo", src)
+		lgo.Reported = []Reported{{Rule: id, Pos: lgo.Files[0].Pos(), Message: "x"}}
+		lgo.Policy = pedanticWarn()
+		kept := false
+		for _, s := range summarize(Run(lgo)) {
+			kept = kept || strings.Contains(s, id)
+		}
+		if !kept {
+			t.Errorf("%s: Run lgo drops the finding", id)
+		}
+	}
+}
