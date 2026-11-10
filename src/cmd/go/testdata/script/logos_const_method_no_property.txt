@@ -9,6 +9,10 @@ logos eject -o out
 cd out
 go build ./...
 cd ../..
+cd bad
+! logos build ./...
+stderr 'missing method Logos_GetName'
+cd ..
 
 -- m/go.mod --
 module example.com/constmethod
@@ -37,3 +41,22 @@ func use(r Readable) string {
 func main() {
 	fmt.Println(use(Thing{}))
 }
+-- bad/go.mod --
+module example.com/bad
+
+go 1.27
+
+-- bad/main.lgo --
+package main
+
+type Prop interface {
+	const Name string
+}
+
+type RO interface {
+	const Name() string
+}
+
+func asProp(r RO) Prop { return r }
+
+func main() {}

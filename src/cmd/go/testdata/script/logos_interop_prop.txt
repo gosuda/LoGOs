@@ -12,6 +12,10 @@ stdout '^orc=Orc hp=7 r=6$'
 logos test ./...
 stdout '^ok\s+example\.com/l/q\s'
 cd ..
+cd cross
+! logos build ./...
+stderr 'correctness::property_requires_conformance'
+cd ..
 
 env GOWORK=off
 cd w/l
@@ -180,3 +184,29 @@ import (
 )
 
 func main() { fmt.Println(qq.Run()) }
+-- cross/go.work --
+go 1.27
+
+use (
+	./b
+	../w/l
+)
+
+-- cross/b/go.mod --
+module example.com/b
+
+go 1.27
+
+-- cross/b/b.lgo --
+package b
+
+import "example.com/l/p"
+
+type Rogue struct {
+	Name string
+	HP   int
+}
+
+func (r *Rogue) Start() error { return nil }
+
+var _ p.Creature = &Rogue{}
