@@ -367,6 +367,15 @@ func InlineImpossible(fn *ir.Func) string {
 		reason = "no name"
 		return reason
 	}
+	if sym := fn.Nname.Sym(); sym != nil && sym.Pkg != nil && sym.Pkg.Path == "reflect" {
+		switch sym.Name {
+		case "Value.Method", "Value.MethodByName",
+			"(*rtype).Method", "(*rtype).MethodByName",
+			"(*interfaceType).Method", "(*interfaceType).MethodByName":
+			reason = "reflect method lookup must stay visible to walk.usemethod"
+			return reason
+		}
+	}
 
 	// If marked "go:noinline", don't inline.
 	if fn.Pragma&ir.Noinline != 0 {
