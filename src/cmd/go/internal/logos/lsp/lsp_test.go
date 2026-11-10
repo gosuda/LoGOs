@@ -1566,3 +1566,54 @@ func TestServeDuplicateContentLengthFails(t *testing.T) {
 	outW.Close()
 	outR.Close()
 }
+
+func TestProxyPackageSnapshotHoldsEveryVersion(t *testing.T) {
+	const bLgo = "package a\n\nfunc B() int { return 2 }\n"
+	f := newFixture(t, map[string]string{"a/a.lgo": aLgo, "a/b.lgo": bLgo}, fixtureOptions{})
+	aURI, aPath := f.uri("a/a.lgo"), f.path("a/a.lgo")
+	bURI, bPath := f.uri("a/b.lgo"), f.path("a/b.lgo")
+	f.open("a/a.lgo", 1)
+	f.open("a/b.lgo", 1)
+	editedA2 := aLgo + "// v2\n"
+	f.client.notify("textDocument/didChange", map[string]any{
+		"textDocument":   map[string]any{"uri": aURI, "version": 2},
+		"contentChanges": []any{map[string]any{"text": editedA2}},
+	})
+	low2, _, ok := lowerQuestion([]byte(editedA2))
+	if !ok {
+		t.Fatal("editedA2 does not lower")
+	}
+	origOperand := shift(findPos(t, editedA2, "ReadFile(path)?", 0), len("ReadFile("))
+	lowOperand := shift(findPos(t, string(low2), "ReadFile(path)", 0), len("ReadFile("))
+	f.client.call("textDocument/hover", positionParams(aURI, origOperand))
+	if got := len(f.comp.lowerCalls()); got != 1 {
+		t.Fatalf("one edit and one hover caused %d lowerings, want the single run for the version set", got)
+	}
+	if last := f.comp.bufferCalls()[len(f.comp.bufferCalls())-1]; string(last[aPath]) != editedA2 || string(last[bPath]) != bLgo {
+		t.Errorf("the run lowered a=%q b=%q, want the version 2 text of a and the version 1 text of b", last[aPath], last[bPath])
+	}
+	if _, pos := forwardedPosition(t, f, "textDocument/hover", 0); pos != lowOperand {
+		t.Errorf("hover forwarded at %v, want %v through the version 2 lowering", pos, lowOperand)
+	}
+	f.client.call("textDocument/hover", positionParams(aURI, origOperand))
+	if got := len(f.comp.lowerCalls()); got != 1 {
+		t.Fatalf("a repeat hover with no edits caused %d lowerings, want still the one run", got)
+	}
+	editedB2 := bLgo + "// v2\n"
+	editedA3 := editedA2 + "// v3\n"
+	f.client.notify("textDocument/didChange", map[string]any{
+		"textDocument":   map[string]any{"uri": bURI, "version": 2},
+		"contentChanges": []any{map[string]any{"text": editedB2}},
+	})
+	f.client.notify("textDocument/didChange", map[string]any{
+		"textDocument":   map[string]any{"uri": aURI, "version": 3},
+		"contentChanges": []any{map[string]any{"text": editedA3}},
+	})
+	f.client.call("textDocument/hover", positionParams(bURI, Position{Line: 2}))
+	if got := len(f.comp.lowerCalls()); got != 2 {
+		t.Fatalf("edits to both documents caused %d lowerings, want only the second run", got)
+	}
+	if last := f.comp.bufferCalls()[len(f.comp.bufferCalls())-1]; string(last[aPath]) != editedA3 || string(last[bPath]) != editedB2 {
+		t.Errorf("the rerun lowered a=%q b=%q, want the version 3 text of a and the version 2 text of b", last[aPath], last[bPath])
+	}
+}
