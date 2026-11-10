@@ -696,6 +696,14 @@ Anchor: Tony Hoare, Christopher Alexander, Edsger W. Dijkstra
 - Red-team rows: none.
 - Docs: none (SPEC 4.3 carries the rule).
 
+### M1-A-S9 Capture defer try receiver once per iteration
+Anchor: Edward Tufte, Tony Hoare
+- Attack: `test/logos/run/defer_try_loopcost.lgo` MUST match hand oracle allocs. Method order MUST match hand order. Receiver rebinding MUST match hand behavior.
+- Build: `src/cmd/compile/internal/logos/defer.go` MUST capture receiver once. It MUST call method on copy at exit. It MUST keep evaluation time and LIFO order.
+- Gate: `go test cmd/internal/testdir -run 'Test/logos/run/defer_try'` MUST pass. Eject sweep MUST pass.
+- Red-team rows: #202.
+- Docs: none.
+
 ## P1. Official agent skills plugin (R-SKILLS)
 
 Anchor: Otl Aicher, Kenya Hara, Richard Feynman
@@ -1705,6 +1713,22 @@ Anchor: Tony Hoare, Claude Shannon, John Carmack
 - Red-team rows: none.
 - Docs: none (SPEC 5 carries the GOARCH condition).
 
+### M3-A-S13 Prove always nil error callees in facts
+Anchor: Edward Tufte, Tony Hoare
+- Attack: `test/logos/lint/discarded_error.lgo` MUST allow proven callees. `test/logos/lint/discarded_error_go.go` MUST allow proven callees. `src/cmd/go/testdata/script/logos_lint_nilerr.txt` MUST allow `AlwaysNilError` callees.
+- Build: `src/cmd/compile/internal/logos/facts/facts.go` MUST carry `AlwaysNilError` flag. `src/cmd/compile/internal/logos/facts/write_nilerr.go` MUST prove literal nil and transitive calls. `src/cmd/compile/internal/logos/lint/rule_discarded_error.go` MUST accept proven callees in `.lgo` and Go packages.
+- Gate: `go test cmd/compile/internal/logos/...` MUST pass. Testdir lint MUST pass. Script MUST pass. Goparity MUST pass.
+- Red-team rows: #201.
+- Docs: none.
+
+### M3-A-S14 Pin C returned platform pointer stores
+Anchor: Edward Tufte, Tony Hoare
+- Attack: `src/cmd/go/testdata/script/logos_cgo_lgo.txt` MUST panic on argument stores. It MUST panic on field stores. It MUST panic on literal stores. It MUST panic on slice stores. Each panic MUST name `.lgo` line.
+- Build: `src/cmd/compile/internal/types2/platform_logos.go` MUST treat cgo results as platform values. Each store MUST wrap in `MustNonNil`.
+- Gate: `go test cmd/go -run 'Script/^logos_cgo_lgo$'` MUST pass.
+- Red-team rows: #209.
+- Docs: none.
+
 ## M4. Interface properties
 
 Anchor: Tony Hoare, David Parnas, J.R.R. Tolkien
@@ -1756,6 +1780,14 @@ Anchor: Tony Hoare, David Parnas, J.R.R. Tolkien
 - Gate: `go test -count=1 -run 'Script/^logos_eject_readonly_accessors$' cmd/go`.
 - Red-team rows: none.
 - Docs: none (SPEC 0.4 carries the signature rule).
+
+### M4-A-S3 Route qualified targets through conformance
+Anchor: Edward Tufte, Tony Hoare
+- Attack: `test/logos/run/property_const_method.lgo` MUST pass mixed use. Method only use MUST pass. Property only use MUST pass.
+- Build: `src/cmd/compile/internal/types2/const_logos.go` MUST compare qualified targets through conformance. Other targets MUST keep raw check.
+- Gate: `go test cmd/internal/testdir -run 'Test/logos/run/property_const_method'` MUST pass.
+- Red-team rows: #205.
+- Docs: none.
 
 ## M5. Const composites, CTFE, const views, const maps
 
@@ -1994,6 +2026,14 @@ Anchor: Tony Hoare, David Parnas, Edsger W. Dijkstra
 - Gate: `go test -count=1 cmd/compile/internal/types2 -run TestLogos`; `go test -count=1 cmd/internal/testdir -run 'Test/logos/run/comptime_generic'`.
 - Red-team rows: none.
 - Docs: none (SPEC 2.5 carries the compile-time-only rule).
+
+### M7-A-S4 Fold constant Tag Get keys
+Anchor: Edward Tufte, Tony Hoare
+- Attack: `test/logos/run/tag_get_fold.lgo` MUST match `reflect.StructTag.Get` for six forms. `src/cmd/go/testdata/script/logos_eject_const_for.txt` MUST show no `.Get` calls. Native and ejected output MUST match.
+- Build: `src/cmd/compile/internal/logos/constfor.go` MUST fold every compile time constant key. Run time keys MUST stay unfolded.
+- Gate: Testdir run MUST pass. Eject script MUST pass. Logos sweeps MUST pass.
+- Red-team rows: #199.
+- Docs: none.
 
 ## M8. `go group` and `logos/sync`
 
@@ -2358,6 +2398,22 @@ Anchor: Tony Hoare, Richard Feynman
 - Red-team rows: none.
 - Docs: none.
 
+### M11-A-S4 Route string tagged methods through raw fallback
+Anchor: Edward Tufte, Tony Hoare
+- Attack: `test/logos/run/json_string_method_input_test.lgo` MUST deliver quoted input to methods. `{"v":"3"}` MUST reach method as `"3"`.
+- Build: `src/cmd/compile/internal/logos/json_unmarshal.go` MUST route `json.Number` through `FallbackQ`. It MUST route method types through `Fallback`. `src/logos/rt/json/scan.go` MUST keep `FallbackQ` contract narrow.
+- Gate: Testdir fixture MUST pass. `logos/rt/json` MUST pass. Full run dir MUST pass. Eject output MUST match native.
+- Red-team rows: #203.
+- Docs: none.
+
+### M11-A-S5 Enforce keyed trial for closed union decode
+Anchor: Edward Tufte, Tony Hoare
+- Attack: `test/logos/run/json_union_both_custom_test.lgo` MUST select by keys. `test/logos/run/json_union_claimed_decode_test.lgo` MUST select by keys. `test/logos/run/json_union_raw_member_test.lgo` MUST follow no key rule. `test/logos/run/json_union_wire_mismatch_test.lgo` MUST reject wire mismatch. `test/logos/run/json_union_custom_member_test.lgo` MUST reject missing field key.
+- Build: `src/cmd/compile/internal/logos/json_static.go` MUST enforce keyed trial. `src/cmd/compile/internal/logos/json_unmarshal.go` MUST run custom decoders only after key match.
+- Gate: Testdir `Test/logos/run/json_union` MUST pass. Full run and compile MUST pass. Eject sweep MUST pass.
+- Red-team rows: #204.
+- Docs: none.
+
 ## M12. Capabilities auditor
 
 Anchor: Tony Hoare, Edward Tufte
@@ -2377,6 +2433,14 @@ Anchor: Edward Tufte, John Carmack
 - Build: linker flag `-logos.cap=FILE` (policy JSON from cmd/go); new `ld/capabilities_logos.go` holds `type CapabilityKind uint8` with `CapReflect`, `CapExec`, `CapNet`, `CapCgo` and `var capabilitySinks = map[string]CapabilityKind` over the sink list below. After `deadcode` (`ld/deadcode.go`), a BFS from `main.main` and init functions over relocations records `parentSym[childIdx] = callerIdx` and adds synthetic edges (each reachable interface method signature to every reachable method with that signature; each reachable `reflect` method lookup to every exported method of reachable types); sinks: `reflect.ValueOf`, `reflect.TypeOf`, `reflect.New`, `syscall.Exec`, `syscall.ForkExec`, `os.StartProcess`, `os.startProcess` (the unexported callee behind the wrapper at `os/exec.go:271`, implemented at `os/exec_posix.go:26`), `net.sysSocket`, `runtime.cgocall`, `runtime.logosCgocallFast` (the M20 fast path; the PLAN name `runtime.logosFastCgoCall` names no symbol in this tree); the dependency frame nearest the sink identifies the package checked against the policy, one report per sink and dependency, found by a reverse search from each sink over the recorded edges that stops at the nearest dependency frame and never crosses package `runtime`; standard-library and first-party frames never take blame, and a dependency's module path need not contain a dot.
 - Docs: P1-S3, P2.
 - Milestone gate: G2.
+
+### M12-A-S1 Prove wasm deadcode drops unreachable code
+Anchor: Edward Tufte, Tony Hoare
+- Attack: `src/cmd/go/testdata/script/logos_wasm_deadsize.txt` MUST require marker in reach. It MUST require absence in noreach. Reach MUST exceed noreach by at least 8000 bytes.
+- Build: Linker deadcode MUST remove unreachable functions. It MUST keep type and method tables.
+- Gate: `go test cmd/go -run 'Script/^logos_wasm_deadsize$'` MUST pass.
+- Red-team rows: #208.
+- Docs: none.
 
 ## M13. `-O` levels and CPU targets
 
@@ -2418,6 +2482,22 @@ Anchor: John Carmack, Herbert Simon, Dieter Rams
 - Red-team rows: none.
 - Docs: none.
 
+### M13-A-S4 Serve variable make buffer at O0
+Anchor: Edward Tufte, Tony Hoare
+- Attack: `src/cmd/go/testdata/script/logos_opt_levels.txt` MUST pin O0 flags and 0,0,1 counts. `src/cmd/go/testdata/script/logos_recursive_stackbuf.txt` MUST pin O0 flag value 32. Raw `-N -l` MUST heap.
+- Build: `src/cmd/go/internal/logos/settings/settings.go` MUST pass threshold at O0. `src/cmd/compile/internal/walk/builtin.go` MUST serve buffer under explicit flag. `src/cmd/compile/internal/ssagen/ssa.go` MUST serve buffer under explicit flag. Append path MUST stay N gated.
+- Gate: Script tests MUST pass. Goparity MUST pass.
+- Red-team rows: #200.
+- Docs: none.
+
+### M13-A-S5 Pin Go package breadth with three scripts
+Anchor: Edward Tufte, Tony Hoare
+- Attack: `src/cmd/go/testdata/script/logos_simd_go_use.txt` MUST show Go simd use under experiment. `src/cmd/go/testdata/script/logos_pointee_logosescape.txt` MUST show escape precision under logos. `src/cmd/go/testdata/script/logos_fastcall_seq.txt` MUST show fast path under logos.
+- Build: Backend improvements MUST apply to Go packages under both drivers. Exclusions MUST name zeroalloc and subcommand tools.
+- Gate: `go test cmd/go -run 'Script/^logos_(simd_go_use|pointee_logosescape|fastcall_seq)$'` MUST pass.
+- Red-team rows: #210, #211, #212.
+- Docs: none.
+
 ## M14. Fixed-array SIMD
 
 Anchor: John Carmack, Claude Shannon
@@ -2437,6 +2517,14 @@ Anchor: John Carmack, Claude Shannon
 - Build: none (test-only).
 - Gate: `go test -count=1 cmd/go -run 'Script/^logos_(tuples_go_import|simd_go)$'`; `go test -count=1 cmd/internal/testdir -run 'Test/logos/compile/tuples_noncomparable'`; `logos run ../test/logos/run/union_equal.lgo`.
 - Red-team rows: none.
+- Docs: none.
+
+### M14-A-S1 Allow float array bitwise operators
+Anchor: Edward Tufte, Tony Hoare
+- Attack: `test/logos/run/simd_floatbits.lgo` MUST match scalar oracle. `test/logos/run/simd_vec_floatbits.lgo` MUST match vector oracle. `test/logos/codegen/simd.lgo` MUST show integer lane reuse. `src/internal/types/testdata/logos/simd_types.lgo` MUST reject oversize.
+- Build: `src/cmd/compile/internal/types2/simd_logos.go` MUST admit float lanes for `& | ^`. `src/cmd/compile/internal/logos/simd.go` MUST spell scalar through bits. Vector form MUST reuse same width integer lane with AVX guard.
+- Gate: Types2 MUST pass. Testdir run MUST pass. Codegen MUST pass. Logos sweep MUST pass.
+- Red-team rows: #198.
 - Docs: none.
 
 ## M15. Backend peepholes and long-loop preemption
@@ -2869,6 +2957,22 @@ Anchor: Kenya Hara, David Parnas
 - Red-team rows: none.
 - Docs: none.
 
+### M21-A-S8 Report retained snapshots per package
+Anchor: Edward Tufte, Tony Hoare
+- Attack: `src/cmd/go/internal/logos/lsp/lsp_test.go` MUST report count 1 per package. Adding second file MUST keep count 1.
+- Build: `src/cmd/go/internal/logos/lsp/store.go` MUST tag entries with generation. `src/cmd/go/internal/logos/lsp/request.go` MUST answer `logos/snapshotCounts`.
+- Gate: `go test cmd/go/internal/logos/lsp` MUST pass.
+- Red-team rows: #206.
+- Docs: none.
+
+### M21-A-S9 Serve stock clients through proxy
+Anchor: Edward Tufte, Tony Hoare
+- Attack: `src/cmd/go/internal/logos/lsp/stock_client_test.go` MUST show hover through proxy. It MUST show definition through proxy. It MUST show completion through proxy. It MUST show diagnostics through proxy.
+- Build: `logos lsp` stdio surface MUST serve standard clients. Positions MUST map to `.lgo` coordinates.
+- Gate: `go test cmd/go/internal/logos/lsp` MUST pass.
+- Red-team rows: #207.
+- Docs: none.
+
 ## M22. Verification suites and the end-to-end example
 
 Anchor: Edsger W. Dijkstra, Richard Feynman, Edward Tufte
@@ -2901,6 +3005,14 @@ Notes (m22): the `//logos:zeroalloc` directive does not change allocation behavi
 - Red-team rows: none.
 - Docs: none (SPEC 17.2 carries the fallback rule).
 - Milestone gate: all of the above, then `./run.bash --no-rebuild`.
+
+### M22-A-S3 Run goparity fast oracle off and release tiers
+Anchor: Edward Tufte, Tony Hoare
+- Attack: `src/cmd/internal/goparity/testdata/run` MUST match fork against oracle. `src/cmd/internal/goparity/testdata/fail` MUST reject identically. `src/cmd/internal/goparity/testdata/mutants` MUST turn red in release tier.
+- Build: `src/cmd/internal/goparity/parity_test.go` MUST compare fast tier by default. Oracle off mode MUST run metamorphic tier only. Release tier MUST add extra configs and mutant probes. Missing oracle MUST fail unless oracle off.
+- Gate: `go test cmd/internal/goparity` MUST pass. Release tier MUST pass with flag. Oracle off MUST skip fail corpus.
+- Red-team rows: none.
+- Docs: none.
 
 ### Release gate
 
