@@ -53,7 +53,7 @@ Rules:
 
 ## WASM profile (M16)
 
-The WASM profile activates automatically for `GOOS=js GOARCH=wasm` and `GOOS=wasip1 GOARCH=wasm` in `logos` and `go`.
+The WASM profile activates automatically for `GOOS=js GOARCH=wasm` and `GOOS=wasip1 GOARCH=wasm` under `logos` only; plain `go` needs the explicit `--wasm-features` flag.
 
 Rules:
 
@@ -70,12 +70,12 @@ Smart stack allocations keep dynamic allocations on the goroutine stack when esc
 
 Rules:
 
-* Non-escaping dynamic slices created with `make([]byte, n)` use a variable-make stack buffer sized by tier: default 32 bytes (O1 / plain), 256 bytes at O2, and 4096 bytes at O3 (`base.Debug.VariableMakeThreshold`, `src/cmd/compile/internal/inline/stackbuf_logos_test.go`).
+* Non-escaping dynamic slices created with `make([]byte, n)` use a variable-make stack buffer sized by tier for non-standard packages: default 32 bytes (O1 / plain), 256 bytes at O2, and 4096 bytes at O3. Standard-library-provenance packages keep the 32-byte buffer at every level (`base.Debug.VariableMakeThreshold`, `src/cmd/compile/internal/inline/stackbuf_logos_test.go`).
 * Functions in recursive call-graph cycles keep the upstream variable-make threshold (capped at 32 bytes) at every level to prevent frame multiplication across recursion (row #134, `test/logos/codegen/recursive_stack.go`, `test/logos/codegen/recursive_stack.lgo`).
 * Dynamic slice sizes exceeding the tier threshold fall back to heap allocation on the slow branch.
 * Slices with variable effective capacity flowing into cgo calls or `unsafe.Pointer` conversions allocate backing storage on the heap (row #144, `src/cmd/cgo/internal/testlogos/fastcall_test.go`).
 * Fixed-effective-capacity makes retain ordinary escape and size behavior, not a guarantee of stack allocation, and are not forced to the heap by foreign flow (`SPEC.md` Sec 3.2).
-* Goroutine initial stack sizing with `GOEXPERIMENT=logosstack` maintains a 1024-entry exponential moving average table keyed by call-site PC to allocate right-sized stacks on spawn (`src/runtime/logos_stack_test.go`).
+* Goroutine initial stack sizing with `GOEXPERIMENT=logosstack` chooses the initial stack size from the per-PC exponential moving average of final stack sizes.
 
 ## Tier-0 arena and bump allocation (M18)
 
@@ -84,7 +84,7 @@ Goroutine-local arena allocation is controlled by `GOEXPERIMENT=logosarena` and 
 Rules:
 
 * Non-escaping allocations exceeding stack buffer thresholds allocate into goroutine arena chunks instead of the heap when arena mode is active (`src/runtime/logos_arena_test.go`, `src/cmd/go/internal/cfg/logos_experiment_test.go`).
-* Small noscan objects up to 512 bytes use an inline bump-allocation path marked as an async preemption unsafe point (`src/runtime/logos_arena_test.go`).
+* Constant-size noscan objects of at most 512 bytes use the inline bump sequence on amd64 in non-race builds; other targets call the region slow path (`src/runtime/logos_arena_test.go`).
 * Watermarks follow LIFO ordering and are restored at function returns and loop back-edges.
 * Memory holding pointers is scanned by the garbage collector during stack scanning.
 * Calling `runtime.SetFinalizer` on an arena object panics (`src/runtime/logos_arena_test.go`).
@@ -104,7 +104,7 @@ Rules:
 * The fast path requires `GOEXPERIMENT=logosfastcgo`, which is off by default under both `logos` and `go`.
 * If a `nocallback` function calls back into Go, the runtime panics immediately instead of deadlocking (`TestFastcallNoCallbackViolation`).
 * CPU profile samples during fast C calls attribute to the calling Go site (`TestFastcallProfileAttribution`).
-* Measured performance status (measured 2026-10-24): BenchmarkFastcall with timestamp records 114.700 ns/op (sd 1.975) versus plain cgo 85.455 ns/op (re-measured 86.360), yielding ratio 0.745. The performance gate requires at least 1.05 and is currently FAIL. Dominant overhead is the per-call `nanotime()` entry timestamp (~36 ns). Do not claim a speedup. Blocking parity, callback parity, and profile attribution pass.
+* No deterministic timing gate is provided. The fast body must not read a clock. Do not claim a speedup. Blocking parity, callback parity, and profile attribution pass.
 
 ## Zero-allocation enforcement (M22)
 
@@ -114,7 +114,7 @@ Rules:
 
 * Place `//logos:zeroalloc` directly above a function declaration in `.lgo` or `.go` files (`test/logos/codegen/zeroalloc.lgo`).
 * If escape analysis detects any heap allocation, the build fails with `[perf::zeroalloc_violation] <func> allocates: <reason>`.
-* Violations include escaping allocations from `new`, struct literals, map operations, slice growths, string operations, and method values (`test/logos/codegen/zeroalloc_sites.lgo`).
+* Violations are the allocation sites that escape analysis puts on the heap, including the function literals and inlined bodies it covers (`test/logos/codegen/zeroalloc_sites.lgo`). Run-time heap fallbacks (`append` past capacity, long string ops, map growth) are not reported.
 * Empty slice literals and zero-size interface values are exempt and allocate zero heap bytes.
 
 ## Diagnostics

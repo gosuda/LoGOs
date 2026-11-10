@@ -45,7 +45,7 @@ Proven by the M3 run fixtures (`test/logos/run/option_basic.lgo`, `option_chain.
 
 11. Options: `?.` and `??` apply to option types only; no plain method call, field selection, or dereference on an option without a `!= nil` narrowing proof. Findings: `correctness::not_an_option`, `correctness::nil_deref_unproven`.
 12. Non-nil pointers: no `var p *T`, no nonzero `make`, no `new` that leaves a non-nil pointer without a value, no composite literal missing a non-nil field, no zero-clearing store, no `nil` assigned to a non-nil location. Findings: `correctness::nonnil_uninitialized`, `correctness::nil_to_nonnil`.
-13. Narrowing and error-first: narrowing holds only in the guarded block, through `&&` chains, and after an early exit; assignment ends it; fields never narrow; address-taken and closure- or loop-assigned variables never narrow. Results of `.lgo` callees are read only after the error check; calls into other packages keep their own contracts. Finding: `correctness::result_before_error_check`.
+13. Narrowing and error-first: narrowing holds only in the guarded block, through `&&` chains, and after an early exit; assignment ends it; fields never narrow; address-taken and closure-assigned variables never narrow. Results of `.lgo` callees are read only after the error check; calls into other packages keep their own contracts. Finding: `correctness::result_before_error_check`.
 14. Map reads: single-value `m[k]` is `V?`, so plain selection on it needs narrowing or `??`; `v, ok := m[k]`, stores, `++`, compound assignment, and `delete` keep Go meaning.
 
 ## Checklist (M4)
@@ -60,7 +60,7 @@ Proven by `test/logos/run/properties.lgo`, `src/internal/types/testdata/logos/pr
 Proven by `test/logos/run/ctfe.lgo`, `test/logos/run/const_init_read.lgo`, `test/logos/run/rodata_write.lgo`, `test/logos/run/rodata_reflect.lgo`, `test/logos/run/rodata_named_map.lgo`, `test/logos/run/constmap_init.lgo`, `test/logos/run/const_map.lgo`, `test/logos/run/constmap_switch.lgo`, `test/logos/run/const_views.lgo`, `test/logos/run/constview_bound.lgo`, `test/logos/run/zerocopy.lgo`, `test/logos/run/freeze.lgo`, `src/internal/types/testdata/logos/ctfe.lgo`, `src/internal/types/testdata/logos/const_views.lgo`, `src/cmd/go/testdata/script/logos_interop_const.txt`.
 
 17. Const views: no index or field assignment, `append`, `copy` into the view, `delete`, `clear`, slicing past `len`, non-const method call, or passing to a non-const parameter through a `const T` view; no assignment of a reference-carrying view to a plain type. Findings: `correctness::const_view_mutation`, `correctness::const_view_escape`.
-18. CTFE: `const func` bodies hold no I/O, goroutine, package variable, `recover`, `uintptr`, map range, pointer, `defer`, `goto`, function literal, or method call; step and size limits hold; no overflow, NaN or duplicate map key, executed panic, or unsupported form. Findings: `correctness::const_func_impure`, `comptime::ctfe_step_limit`, `comptime::const_too_large`, `correctness::const_eval`.
+18. CTFE: `const func` bodies hold no I/O, goroutine spawn, mutable package-variable read, `recover`, pointer-to-`uintptr` conversion, dynamic map range, or pointer use; step and size limits hold; no overflow, NaN or duplicate map key, executed panic, or unsupported form. Findings: `correctness::const_func_impure`, `comptime::ctfe_step_limit`, `comptime::const_too_large`, `correctness::const_eval`.
 19. Read-only placement and const maps: package-level composites need no dynamic init and are never written; const map keys are strings, numbers, bools, or structs or arrays of those; `range` assumes sorted order and lookups assume one validated probe, never speed. Findings: `comptime::constmap_key_type`, `comptime::constmap_seed_not_found`.
 20. Zero-copy: `const []byte` to string conversions without an allocation need string or const-composite provenance; a view of a mutable slice converts with a copy. `rt.Freeze` results are views over a deep copy, never aliases.
 
@@ -181,7 +181,7 @@ Proven by `test/logos/run/json_marshal_test.lgo`, `test/logos/run/json_binary_te
 | `slop::discarded_error` | Check or return error instead of ignoring it, or use ? in functions returning error. |
 | `complexity::cognitive_overflow` | Decompose complex functions to stay within threshold limits. |
 | `perf::large_backing_array_pin` | Copy needed elements instead of slicing large backing arrays. |
-| `perf::time_after_in_loop` | Move timer outside loop or use time.NewTimer with proper reset and drain. |
+| `perf::time_after_in_loop` | Do not call `time.After` inside a loop body; the compiler never hoists the timer. |
 | `suspicious::side_effect_before_sort` | Avoid side-effect expressions in sort comparisons. |
 | `portability::serialized_unsized_int` | Use sized integers (int32, int64) in serialized binary layouts. |
 | `pedantic::exhaustive_union_switch` | Remove redundant default clause from exhaustive switch on closed union. |

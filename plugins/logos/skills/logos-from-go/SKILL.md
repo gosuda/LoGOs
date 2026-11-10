@@ -93,7 +93,7 @@ These rules apply to both Go and `.lgo` lint targets, and diagnostics report ori
 | `slop::discarded_error` | Check or return error instead of ignoring it, or use ? in functions returning error. |
 | `complexity::cognitive_overflow` | Decompose complex functions to stay within threshold limits. |
 | `perf::large_backing_array_pin` | Copy needed elements instead of slicing large backing arrays. |
-| `perf::time_after_in_loop` | Move timer outside loop or use time.NewTimer with proper reset and drain. |
+| `perf::time_after_in_loop` | Do not call `time.After` inside a loop body; the compiler never hoists the timer. |
 | `suspicious::side_effect_before_sort` | Avoid side-effect expressions in sort comparisons. |
 | `portability::serialized_unsized_int` | Use sized integers (int32, int64) in serialized binary layouts. |
 | `pedantic::exhaustive_union_switch` | Remove redundant default clause from exhaustive switch on closed union. |
