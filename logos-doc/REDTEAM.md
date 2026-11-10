@@ -155,7 +155,7 @@ Rules: logos-doc/SPEC.md. Status values: planned, tested, satisfied upstream, bl
 | #163 | Buffered channel send flagged as unbounded operation | M9 | test/logos/lint/unbounded_channel_op.lgo; test/logos/lint/unbounded_channel_op_go.go | tested |
 | #164 | Benign writer flagged as discarded error | M9 | test/logos/lint/discarded_error.lgo; test/logos/lint/discarded_error_go.go | tested |
 | #165 | Fastcall overflowing goroutine stack or handler crash | M20 | src/cmd/cgo/internal/testlogos/fastcall_test.go | tested |
-| #167 | Nested WithLock causing self-deadlock | M8, M9 | test/logos/lint/reentrant_withlock_deadlock.lgo; test/logos/lint/reentrant_withlock_deadlock_go.go; src/logos/sync/sync_test.go (TestLockedWithLockMutates, TestLockedWithLockUnlocksAfterPanic) | tested |
+| #167 | Nested WithLock causing self-deadlock | M8, M9 | test/logos/lint/reentrant_withlock_deadlock.lgo; test/logos/lint/reentrant_withlock_deadlock_go.go; src/cmd/compile/internal/logos/lint/rule_adv_nogo_test.go (TestAdvReentrantDeadlock) | tested |
 | #169 | Make length integer overflow allocating tiny buffer | M15 | test/logos/run/make_overflow.lgo (length and capacity); test/logos/run/make_overflow_go.go; test/logos/run/make_const.lgo; src/logos/rt/mullen_test.go | tested |
 | #170 | Time.After inside loop leaking timers | M9 | test/logos/lint/time_after_in_loop.lgo; test/logos/lint/time_after_in_loop_go.go | tested |
 | #172 | Hoisted timer firing from undrained channel | M9 | test/logos/lint/time_after_in_loop.lgo; test/logos/lint/time_after_in_loop_go.go | tested |
