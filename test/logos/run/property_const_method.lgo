@@ -5,6 +5,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"reflect"
 )
 
 type RO interface {
@@ -44,4 +45,16 @@ func main() {
 		os.Exit(1)
 	}
 	fmt.Println("property const: PASS")
+}
+func init() {
+	gt := reflect.TypeOf(Gadget{})
+	if _, ok := gt.MethodByName("Logos_GetStart"); ok {
+		panic("Logos_GetStart must not exist")
+	}
+	if _, ok := reflect.TypeOf(&Gadget{}).MethodByName("Logos_GetStart"); ok {
+		panic("Logos_GetStart must not exist on pointer")
+	}
+	if _, ok := gt.MethodByName("Logos_GetName"); !ok {
+		panic("Logos_GetName must exist")
+	}
 }
