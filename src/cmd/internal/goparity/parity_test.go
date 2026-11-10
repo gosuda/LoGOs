@@ -772,6 +772,10 @@ func firstDiff(a, b string) string {
 	return ""
 }
 
+func firstDivergence(a, b observation) string {
+	return cmp.Or(firstDiff(a.stdout, b.stdout), firstDiff(a.stderr, b.stderr), fmt.Sprintf("exit %d vs %d", a.exit, b.exit))
+}
+
 func clip(s string) string {
 	if len(s) > 120 {
 		return s[:117] + "..."
@@ -1065,13 +1069,7 @@ func TestParity(t *testing.T) {
 				continue
 			}
 			if !obsEqual(fo, uo1) {
-				d := firstDiff(fo.stdout, uo1.stdout)
-				if d == "" {
-					d = firstDiff(fo.stderr, uo1.stderr)
-				}
-				if d == "" {
-					d = fmt.Sprintf("exit %d vs %d", fo.exit, uo1.exit)
-				}
+				d := firstDivergence(fo, uo1)
 				t.Errorf("parity: program %s: %s vs %s: %s (%s vs %s)", p, c.id, c.upstream, d, obsDesc(fo), obsDesc(uo1))
 			}
 		}
@@ -1798,7 +1796,7 @@ func (j sweepJob) compareRow(c config, fbin string, fobs observation, upObs map[
 	if obsEqual(sweepObs(fo2, fbin), sweepObs(uo2, uo.bin)) {
 		return ""
 	}
-	d := cmp.Or(firstDiff(fobs.stdout, uo.obs.stdout), firstDiff(fobs.stderr, uo.obs.stderr), fmt.Sprintf("exit %d vs %d", fobs.exit, uo.obs.exit))
+	d := firstDivergence(fobs, uo.obs)
 	return fmt.Sprintf("%s vs %s: %s (%s vs %s)", c.id, c.upstream, d, obsDesc(fobs), obsDesc(uo.obs))
 }
 
