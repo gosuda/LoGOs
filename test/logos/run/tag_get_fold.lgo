@@ -77,6 +77,24 @@ func foldRuntime(key string) []string {
 	return out
 }
 
+func foldFieldKey() []string {
+	var out []string
+	const for _, f := range comptime.Fields[FoldRecord]() {
+		out = append(out, f.Tag.Get(f.Name))
+	}
+	return out
+}
+
+func wantFieldKey() []string {
+	var out []string
+	rt := reflect.TypeOf(FoldRecord{})
+	for i := 0; i < rt.NumField(); i++ {
+		sf := rt.Field(i)
+		out = append(out, reflect.StructTag(sf.Tag).Get(sf.Name))
+	}
+	return out
+}
+
 func want(key string) []string {
 	var out []string
 	rt := reflect.TypeOf(FoldRecord{})
@@ -107,4 +125,9 @@ func main() {
 		key = "json"
 	}
 	check("runtime", key, foldRuntime(key))
+	if fmt.Sprint(foldFieldKey()) != fmt.Sprint(wantFieldKey()) {
+		fmt.Println("FAIL fieldkey", foldFieldKey(), wantFieldKey())
+		return
+	}
+	fmt.Println("ok fieldkey")
 }

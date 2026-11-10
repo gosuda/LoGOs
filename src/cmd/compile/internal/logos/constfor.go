@@ -1196,7 +1196,7 @@ func (fl *fileLower) cfLeafSubs(root syntax.Node, active cfChain, covered []cfSp
 				return false
 			}
 			if fl.cfRuntimeTagGet(n, active, parents, at, add) {
-				return false
+				return true
 			}
 			if v, ok := fl.logosLayoutCallValue(n, active, sites); ok {
 				s, e := cfCallSpan(ctx, n)
