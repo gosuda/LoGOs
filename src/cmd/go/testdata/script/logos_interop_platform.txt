@@ -21,6 +21,8 @@ stdout '^stdlib-parse: true example\.com$'
 stdout '^stdlib-nil$'
 stdout '^stdlib-store: example\.com$'
 stdout '^panic-stdlib: logos: nil from Go value stored into non-nil \*url\.URL at main\.lgo:[0-9]+$'
+stdout '^pkgvar-store: gadget$'
+stdout '^panic-pkgvar: logos: nil from Go value stored into non-nil \*item\.Item at main\.lgo:[0-9]+$'
 cd ..
 
 -- w/go.work --
@@ -46,6 +48,9 @@ type Item struct {
 }
 
 var errMissing = errors.New("no such item")
+var NilItem *Item
+
+var HaveItem = &Item{Name: "gadget"}
 
 func Find(name string) (*Item, error) {
 	if name == "x" {
@@ -139,6 +144,17 @@ func tryMethod() (msg string) {
 	empty := item.NewBox("missing")
 	return useItem(empty.Get())
 }
+
+func tryPkgVar() (msg string) {
+	defer func() {
+		if r := recover(); r != nil {
+			msg = fmt.Sprint(r)
+		}
+	}()
+	var it *item.Item = item.NilItem
+	return "no-panic:" + it.Name
+}
+
 func tryStdlibStore() (msg string) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -152,6 +168,7 @@ func tryStdlibStore() (msg string) {
 	var keep *url.URL = bad
 	return "no-panic:" + keep.Host
 }
+
 func tryGenericNil() (msg string) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -208,4 +225,7 @@ func main() {
 	var keepStd *url.URL = parsed
 	fmt.Println("stdlib-store:", keepStd.Host)
 	fmt.Println("panic-stdlib:", tryStdlibStore())
+	var keptPkg *item.Item = item.HaveItem
+	fmt.Println("pkgvar-store:", keptPkg.Name)
+	fmt.Println("panic-pkgvar:", tryPkgVar())
 }
