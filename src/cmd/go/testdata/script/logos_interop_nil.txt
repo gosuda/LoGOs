@@ -82,6 +82,11 @@ func I() int? {
 	return 7
 }
 
+func N() (int?)? {
+	var i int? = 7
+	return i
+}
+
 type Speaker interface {
 	const Speak() string
 }
@@ -114,6 +119,7 @@ var _ func() *a.User = a.F
 var _ func(*a.User) string = a.G
 var _ func() rt.Option[[]int] = a.H
 var _ func() rt.Option[int] = a.I
+var _ func() rt.Option[rt.Option[int]] = a.N
 var _ *a.T = a.Box{}.P
 var _ a.Speaker = a.Person{}
 
@@ -133,6 +139,10 @@ func Run() string {
 	i := a.I()
 	if !i.Present || i.Value != 7 {
 		return "F-nil H-none I-bad"
+	}
+	n := a.N()
+	if !n.Present || !n.Value.Present || n.Value.Value != 7 {
+		return "F-nil H-none I-seven N-bad"
 	}
 	got := a.G(&a.User{Name: "gadget"})
 	out := "F-nil H-none I-seven G-ok: " + got
