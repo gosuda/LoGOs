@@ -301,6 +301,7 @@ var extraEnvKeys = []string{
 	"GO_TESTING_GOTOOLS", // for gccgo testing
 	"GCCGO",              // for gccgo testing
 	"GCCGOTOOLDIR",       // for gccgo testing
+	"UPROOT1272",
 }
 
 // updateSum runs 'go mod tidy', 'go list -mod=mod -m all', or

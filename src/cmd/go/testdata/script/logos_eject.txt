@@ -34,6 +34,11 @@ cmp stdout $WORK/eject-stdout.txt
 go list -f '{{.Imports}}' .
 stdout '^\[example\.com/dep/greet fmt github\.com/gosuda/loGos/rt\]$'
 [exec:/home/linuxbrew/.linuxbrew/Cellar/go/1.27.3/libexec/bin/go] exec env GOROOT=/home/linuxbrew/.linuxbrew/Cellar/go/1.27.3/libexec /home/linuxbrew/.linuxbrew/Cellar/go/1.27.3/libexec/bin/go build ./...
+# SPEC 0.3: ejected output builds with upstream go1.27.2 from $UPROOT1272.
+exists $UPROOT1272/bin/go
+exec $UPROOT1272/bin/go version
+stdout '^go version go1\.27\.2 '
+exec env -u GOROOT $UPROOT1272/bin/go build ./...
 cd ..
 
 grep 'Command ejectdemo' out/main.go
