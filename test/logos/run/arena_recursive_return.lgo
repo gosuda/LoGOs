@@ -1,0 +1,62 @@
+// run -goexperiment logosarena
+
+package main
+
+import (
+	"fmt"
+	"os"
+	"runtime"
+)
+
+//go:noinline
+func mk(depth int) []int {
+	if depth == 0 {
+		s := make([]int, 16)
+		for i := range s {
+			s[i] = i + 1
+		}
+		return s
+	}
+	return mk(depth - 1)
+}
+
+func heapBytes() uint64 {
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	return m.HeapAlloc
+}
+
+func sumVals(s []int) int {
+	total := 0
+	for _, v := range s {
+		total += v
+	}
+	return total
+}
+
+func main() {
+	warm := mk(8)
+	runtime.KeepAlive(warm)
+	runtime.GC()
+	runtime.GC()
+	before := heapBytes()
+	s := mk(8)
+	after := heapBytes()
+	if len(s) != 16 || sumVals(s) != 136 {
+		fmt.Println("bad return:", len(s), sumVals(s))
+		os.Exit(1)
+	}
+	runtime.GC()
+	runtime.GC()
+	if sumVals(s) != 136 {
+		fmt.Println("bad across GC:", sumVals(s))
+		os.Exit(1)
+	}
+	grew := after - before
+	if grew != 0 {
+		fmt.Println("heap grew by", grew, "want 0 (region-placed)")
+		os.Exit(1)
+	}
+	runtime.KeepAlive(s)
+	fmt.Println("ok")
+}
