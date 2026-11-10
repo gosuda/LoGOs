@@ -10,6 +10,9 @@ env GOEXPERIMENT=logosescape
 go build -gcflags=-m .
 stderr 'p\.go:.*q does not escape'
 ! stderr 'leaking param: q'
+logos build -gcflags=-m .
+stderr 'p\.go:.*q does not escape'
+! stderr 'leaking param: q'
 
 -- m/go.mod --
 module example.com/pointeego
