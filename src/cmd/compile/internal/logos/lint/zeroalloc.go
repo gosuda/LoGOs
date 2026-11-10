@@ -125,6 +125,13 @@ func declName(d *syntax.FuncDecl) string {
 		return d.Name.Value
 	}
 	recv := syntax.String(d.Recv.Type)
+	for {
+		after, ok := strings.CutPrefix(recv, "const ")
+		if !ok {
+			break
+		}
+		recv = after
+	}
 	if strings.HasPrefix(recv, "*") {
 		recv = "(" + recv + ")"
 	}

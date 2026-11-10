@@ -615,6 +615,8 @@ func (pw *pkgWriter) typIdx(typ types2.Type, dict *writerDict) typeInfo {
 		w.Code(pkgbits.TypeInterface)
 		w.interfaceType(typ)
 
+	case *types2.ConstView:
+		return pw.typIdx(typ.Elem, dict)
 	case *types2.Union:
 		w.Code(pkgbits.TypeUnion)
 		w.unionType(typ)
@@ -2238,6 +2240,15 @@ func (w *writer) expr(expr syntax.Expr) {
 func sliceElem(typ types2.Type) types2.Type {
 	return types2.CoreType(typ).(*types2.Slice).Elem()
 }
+func unconstView(t types2.Type) types2.Type {
+	for {
+		if cv, ok := types2.Unalias(t).(*types2.ConstView); ok {
+			t = cv.Elem
+			continue
+		}
+		return t
+	}
+}
 
 func (w *writer) optExpr(expr syntax.Expr) {
 	if w.Bool(expr != nil) {
@@ -2456,15 +2467,14 @@ func (w *writer) implicitConvExpr(dst types2.Type, expr syntax.Expr) {
 
 func (w *writer) convertExpr(dst types2.Type, expr syntax.Expr, implicit bool) {
 	src := w.p.typeOf(expr)
-
-	// Omit implicit no-op conversions.
-	identical := dst == nil || types2.Identical(src, dst)
+	usrc := unconstView(src)
+	udst := unconstView(dst)
+	identical := dst == nil || types2.Identical(src, dst) || (implicit && types2.Identical(usrc, udst))
 	if implicit && identical {
 		w.expr(expr)
 		return
 	}
-
-	if implicit && !types2.AssignableTo(src, dst) {
+	if implicit && !types2.AssignableTo(src, dst) && !types2.AssignableTo(usrc, udst) {
 		w.p.fatalf(expr, "%v is not assignable to %v", src, dst)
 	}
 
