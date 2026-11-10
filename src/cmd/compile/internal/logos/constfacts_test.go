@@ -361,7 +361,8 @@ func GetItems() []int {
 }
 
 type Counter struct {
-	N int
+	N     int
+	saved []byte
 }
 
 func (c Counter) Total(xs []int) int {
@@ -376,6 +377,20 @@ func (c *Counter) Fill(xs []byte, v byte) {
 	for i := range xs {
 		xs[i] = v
 	}
+}
+
+func (c *Counter) Stash(xs []byte) {
+	c.saved = xs
+}
+
+func (c *Counter) SetN(v int) {
+	c.N = v
+}
+
+func Wrap(xs []byte) [][]byte {
+	tmp := make([][]byte, 1)
+	tmp[0] = xs
+	return tmp
 }
 
 func (c *Counter) Bump() {
@@ -428,11 +443,14 @@ func (c *Counter) Bump() {
 		masks[fn.Object] = fn.ParamMutated
 	}
 	want := map[string]string{
-		"ReadAll":         "0",
-		"WriteAt":         "1",
-		"CopyInto":        "1",
-		"Counter.Total":   "0",
-		"(*Counter).Fill": "1",
+		"ReadAll":          "0",
+		"WriteAt":          "1",
+		"CopyInto":         "1",
+		"Counter.Total":    "0",
+		"(*Counter).Fill":  "1",
+		"(*Counter).Stash": "1",
+		"(*Counter).SetN":  "0",
+		"Wrap":             "1",
 	}
 	if len(masks) != len(want) {
 		t.Fatalf("fn entries = %v, want %v", masks, want)

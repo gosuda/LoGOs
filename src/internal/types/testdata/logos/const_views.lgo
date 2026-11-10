@@ -108,8 +108,8 @@ func cvPass(xs const []int) {
 }
 
 func cvPassStd(xs const []int, ci const int) {
-	sort.Ints(xs /* ERROR "[correctness::const_view_mutation] cannot pass argument through const view" */)
-	_ = fmt.Sprint(xs /* ERROR "[correctness::const_view_mutation] cannot pass argument through const view" */)
+	sort.Ints(xs /* ERROR "[correctness::const_view_mutation] cannot pass const view xs to parameter x of sort.Ints" */)
+	_ = fmt.Sprint(xs /* ERROR "[correctness::const_view_mutation] cannot pass const view xs to parameter a of fmt.Sprint" */)
 	_ = fmt.Sprint(ci)
 }
 

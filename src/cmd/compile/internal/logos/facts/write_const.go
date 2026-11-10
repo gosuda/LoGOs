@@ -55,6 +55,14 @@ func emitConstMutations(pkg *types2.Package, info *types2.Info, files []*syntax.
 }
 
 func analyzeConstMutations(pkg *types2.Package, info *types2.Info, files []*syntax.File) ([]constFuncDecl, map[*types2.Func]bool, map[*types2.Func][]byte) {
+	return analyzeMutations(pkg, info, files, false)
+}
+
+func analyzeGoMutations(pkg *types2.Package, info *types2.Info, files []*syntax.File) ([]constFuncDecl, map[*types2.Func]bool, map[*types2.Func][]byte) {
+	return analyzeMutations(pkg, info, files, true)
+}
+
+func analyzeMutations(pkg *types2.Package, info *types2.Info, files []*syntax.File, strictRetain bool) ([]constFuncDecl, map[*types2.Func]bool, map[*types2.Func][]byte) {
 	decls := collectConstFuncDecls(pkg, info, files)
 	recvMut := make(map[*types2.Func]bool, len(decls))
 	paramMask := make(map[*types2.Func][]byte, len(decls))
@@ -64,7 +72,7 @@ func analyzeConstMutations(pkg *types2.Package, info *types2.Info, files []*synt
 	for range len(decls) + 1 {
 		changed := false
 		for _, d := range decls {
-			scan := &constBodyScan{pkg: pkg, info: info, recvMut: recvMut, paramMask: paramMask}
+			scan := &constBodyScan{pkg: pkg, info: info, recvMut: recvMut, paramMask: paramMask, strictRetain: strictRetain}
 			rm, mask := scan.funcMutations(d)
 			if rm && !recvMut[d.obj] {
 				recvMut[d.obj] = true
@@ -86,7 +94,7 @@ func EmitGoMutations(pkg *types2.Package, info *types2.Info, files []*syntax.Fil
 	if pkg == nil || pkg.Scope() == nil {
 		return f
 	}
-	decls, _, paramMask := analyzeConstMutations(pkg, info, files)
+	decls, _, paramMask := analyzeGoMutations(pkg, info, files)
 	for _, d := range decls {
 		if d.obj == nil || !d.obj.Exported() {
 			continue
@@ -494,12 +502,13 @@ func constFuncName(pkg *types2.Package, obj *types2.Func, sig *types2.Signature)
 }
 
 type constBodyScan struct {
-	pkg       *types2.Package
-	info      *types2.Info
-	recvMut   map[*types2.Func]bool
-	paramMask map[*types2.Func][]byte
-	tainted   map[types2.Object]*types2.Var
-	mut       map[*types2.Var]bool
+	pkg          *types2.Package
+	info         *types2.Info
+	recvMut      map[*types2.Func]bool
+	paramMask    map[*types2.Func][]byte
+	tainted      map[types2.Object]*types2.Var
+	mut          map[*types2.Var]bool
+	strictRetain bool
 }
 
 func (s *constBodyScan) funcMutations(d constFuncDecl) (bool, []byte) {
@@ -784,6 +793,8 @@ func (s *constBodyScan) assign(st *syntax.AssignStmt) {
 		}
 		if s.mentionsPackage(st.Lhs) {
 			s.markMention(st.Rhs)
+		} else if s.strictRetain && s.retainRHS(st.Lhs, st.Rhs) {
+			s.markMention(st.Rhs)
 		} else {
 			s.scanReads(st.Rhs)
 		}
@@ -808,6 +819,55 @@ func (s *constBodyScan) mentionsPackage(e syntax.Expr) bool {
 		return !found
 	})
 	return found
+}
+
+func (s *constBodyScan) retainRHS(lhs syntax.Expr, rhs syntax.Expr) bool {
+	origin := s.taintedMention(rhs)
+	if origin == nil {
+		return false
+	}
+	if t := s.info.TypeOf(rhs); t != nil && types2.LogosReferenceFree(t) {
+		return false
+	}
+	obj, ok := s.retentionRoot(lhs)
+	if !ok {
+		return false
+	}
+	if obj == nil {
+		return true
+	}
+	if s.originOf(obj) != nil {
+		return true
+	}
+	if v, ok := obj.(*types2.Var); ok && !s.isPackageVar(v) {
+		s.tainted[v] = origin
+	}
+	return false
+}
+
+func (s *constBodyScan) retentionRoot(lhs syntax.Expr) (types2.Object, bool) {
+	e := syntax.Unparen(lhs)
+	for {
+		switch n := e.(type) {
+		case *syntax.IndexExpr:
+			e = syntax.Unparen(n.X)
+		case *syntax.SliceExpr:
+			e = syntax.Unparen(n.X)
+		case *syntax.SelectorExpr:
+			e = syntax.Unparen(n.X)
+		case *syntax.Operation:
+			if n.Op != syntax.Mul || n.Y != nil {
+				return nil, false
+			}
+			e = syntax.Unparen(n.X)
+		default:
+			name, ok := e.(*syntax.Name)
+			if !ok || name.Value == "_" {
+				return nil, false
+			}
+			return s.resolve(name), true
+		}
+	}
 }
 
 func (s *constBodyScan) varDecl(vd *syntax.VarDecl) {

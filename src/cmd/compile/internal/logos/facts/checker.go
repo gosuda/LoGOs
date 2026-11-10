@@ -8,6 +8,7 @@ import "cmd/compile/internal/types2"
 
 func init() {
 	types2.LogosImportedConstFuncSource = constFuncSource
+	types2.LogosImportedParamProvenZero = paramProvenZero
 }
 
 func constFuncSource(path, object string) []byte {
@@ -21,4 +22,26 @@ func constFuncSource(path, object string) []byte {
 		}
 	}
 	return nil
+}
+
+func paramProvenZero(path, object string, param int) bool {
+	f, ok := Lookup(path)
+	if !ok || f == nil || !f.GoPackage {
+		return false
+	}
+	for i := range f.Fns {
+		if f.Fns[i].Object != object {
+			continue
+		}
+		mask := f.Fns[i].ParamMutated
+		if mask == "" {
+			return false
+		}
+		bits, ok := parseHexMask(mask)
+		if !ok {
+			return false
+		}
+		return !maskBit(bits, param)
+	}
+	return false
 }

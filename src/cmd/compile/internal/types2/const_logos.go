@@ -8,6 +8,7 @@ import (
 	"cmd/compile/internal/syntax"
 	"go/constant"
 	. "internal/types/errors"
+	"strconv"
 	"strings"
 )
 
@@ -573,6 +574,98 @@ func (check *Checker) logosInferOperands(par, arg *Type) {
 	}
 }
 
+var LogosImportedParamProvenZero func(path, object string, param int) bool
+
+type logosGoConstGate struct {
+	active   bool
+	variadic bool
+	methodEx bool
+	fn       *Func
+	sig      *Signature
+}
+
+func (check *Checker) logosGoConstGate(call *syntax.CallExpr) logosGoConstGate {
+	var g logosGoConstGate
+	if !check.logosCalleeIsGo(call) {
+		return g
+	}
+	g.active = true
+	fn := check.logosFuncOfExpr(call.Fun)
+	if fn == nil || fn.Pkg() == nil || fn.Pkg() == check.pkg {
+		return g
+	}
+	sig, ok := fn.Type().(*Signature)
+	if !ok || sig == nil {
+		return g
+	}
+	g.fn = fn
+	g.sig = sig
+	g.variadic = sig.Variadic()
+	if sig.Recv() != nil {
+		if sel, ok := syntax.Unparen(call.Fun).(*syntax.SelectorExpr); ok {
+			if _, ok := syntax.Unparen(sel.X).(*syntax.Name); !ok {
+				if in, ok := syntax.Unparen(sel.X).(*syntax.SelectorExpr); ok {
+					if pn, ok := syntax.Unparen(in.X).(*syntax.Name); ok {
+						if _, ok := check.lookup(pn.Value).(*PkgName); ok {
+							g.methodEx = true
+						}
+					}
+				}
+			}
+		}
+	}
+	return g
+}
+func (check *Checker) logosGoParamSlot(g logosGoConstGate, sigParams *Tuple, index int) int {
+	if g.variadic && index >= sigParams.Len()-1 {
+		return sigParams.Len() - 1
+	}
+	return index
+}
+
+func (check *Checker) logosGoParamName(g logosGoConstGate, sigParams *Tuple, index int) string {
+	if v := sigParams.At(check.logosGoParamSlot(g, sigParams, index)).Name(); v != "" {
+		return v
+	}
+	return "#" + strconv.Itoa(index)
+}
+
+func logosConstMethodObject(fn *Func) string {
+	sig, ok := fn.Type().(*Signature)
+	if !ok || sig == nil || sig.Recv() == nil {
+		return fn.Name()
+	}
+	t := Unalias(sig.Recv().Type())
+	if c, ok := t.(*ConstView); ok {
+		t = Unalias(c.Elem)
+	}
+	if p, ok := t.(*Pointer); ok {
+		t = Unalias(p.Elem())
+		if c, ok := t.(*ConstView); ok {
+			t = Unalias(c.Elem)
+		}
+	}
+	n, ok := t.(*Named)
+	if !ok {
+		return fn.Name()
+	}
+	if _, ok := Unalias(sig.Recv().Type()).(*Pointer); ok {
+		return "(*" + n.Obj().Name() + ")." + fn.Name()
+	}
+	return n.Obj().Name() + "." + fn.Name()
+}
+
+func (check *Checker) logosGoParamProvenZero(g logosGoConstGate, sigParams *Tuple, index int) bool {
+	if !g.active || g.fn == nil || g.methodEx || LogosImportedParamProvenZero == nil {
+		return false
+	}
+	object := g.fn.Name()
+	if g.sig.Recv() != nil {
+		object = logosConstMethodObject(g.fn)
+	}
+	return LogosImportedParamProvenZero(g.fn.Pkg().Path(), object, check.logosGoParamSlot(g, sigParams, index))
+}
+
 func (check *Checker) logosConstArgs(call *syntax.CallExpr, sigParams *Tuple, args []*operand) {
 	if !check.conf.Logos {
 		return
@@ -583,9 +676,17 @@ func (check *Checker) logosConstArgs(call *syntax.CallExpr, sigParams *Tuple, ar
 			return
 		}
 	}
+	gate := check.logosGoConstGate(call)
 	for i, a := range args {
-		if sigParams == nil || i >= sigParams.Len() {
+		if sigParams == nil || sigParams.Len() == 0 {
 			break
+		}
+		j := i
+		if j >= sigParams.Len() {
+			if !gate.variadic {
+				break
+			}
+			j = sigParams.Len() - 1
 		}
 		if !a.isValid() {
 			continue
@@ -594,7 +695,12 @@ func (check *Checker) logosConstArgs(call *syntax.CallExpr, sigParams *Tuple, ar
 		if c == nil {
 			continue
 		}
-		pt := sigParams.At(i).Type()
+		pt := sigParams.At(j).Type()
+		if gate.variadic && i > j {
+			if s, ok := pt.(*Slice); ok {
+				pt = s.Elem()
+			}
+		}
 		if cp := logosAsConstView(pt); cp != nil && logosCovariantTarget(c.Elem, cp.Elem) != nil {
 			check.errorf(a, IncompatibleAssign, "%s cannot pass const view %s as %s in argument to %s: its elements would convert through an interface", logosConstEscape, ExprString(a.expr), pt, ExprString(call.Fun))
 			a.invalidate()
@@ -608,6 +714,16 @@ func (check *Checker) logosConstArgs(call *syntax.CallExpr, sigParams *Tuple, ar
 		if logosReferenceFree(c.Elem) {
 			a.typ_ = c.Elem
 			check.updateExprType(a.expr, c.Elem, false)
+			continue
+		}
+		if gate.active {
+			if check.logosGoParamProvenZero(gate, sigParams, i) {
+				a.typ_ = c.Elem
+				check.updateExprType(a.expr, c.Elem, false)
+				continue
+			}
+			check.errorf(a, IncompatibleAssign, "%s cannot pass const view %s to parameter %s of %s", logosConstMutation, ExprString(a.expr), check.logosGoParamName(gate, sigParams, i), ExprString(call.Fun))
+			a.invalidate()
 			continue
 		}
 		check.errorf(a, IncompatibleAssign, "%s cannot pass argument through const view %s in argument to %s", logosConstMutation, ExprString(a.expr), ExprString(call.Fun))
