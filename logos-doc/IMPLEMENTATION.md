@@ -153,7 +153,7 @@ flowchart LR
   A[".lgo files"] --> B["syntax.Parse with LogosMode"]
   B --> C["types2 Check, Config.Logos = true"]
   C --> D["logos.Lower: plain Go syntax + eject edits"]
-  D --> E["goto recheck (noder/irgen.go:52)"]
+  D --> E["goto recheck (noder/irgen.go:55)"]
   E --> F["types2 re-check of lowered tree"]
   F --> G["unified IR writer, SSA, runtime, linker (upstream)"]
   D --> H["-logos.eject: splice edits into original text"]
@@ -224,7 +224,7 @@ P0 slices are documentation-only. Each carries its named structural Check (count
   - Check: `grep -Ec 'loca[l]:/{2}' logos-doc/IMPLEMENTATION.md` prints `0`; `grep -c '/home/alpha/[.]omp/' logos-doc/IMPLEMENTATION.md` prints `0`.
 - P0-S5 Create `logos-doc/REDTEAM.md`, the test-status ledger for the 182 attacks (the 2026-10-19 direction appends rows #183 to #189 for the interop, boundary, loader, and cgo attacks it adds; their resolutions are SPEC.md Section 17.5, the interop suite). The resolutions live only in SPEC.md Section 17, so this file holds no resolution text. Content: line 1 `Rules: logos-doc/SPEC.md. Status values: planned, tested, satisfied upstream, blocked.`, line 2 empty, then a table with header `| ID | Attack | Milestone | Test | Status |` and one row per attack in ID order: `ID` is `#N`; `Milestone` lists the milestones of every slice whose `Red-team rows` line in this plan names `#N`, comma-separated in plan order (`#80` gets `M22`); `Test` starts empty; `Status` starts `planned`.
   Anchor: Tony Hoare, Edward Tufte
-  - Rule for later slices: a slice that lands a test for `#N` sets `Test` to the repository path of that test (for example `test/logos/redteam/attack_042_errdefer_panic.lgo`, or the slice test that covers the attack) and `Status` to `tested` in the same commit. A slice that only pins upstream Go behavior sets `satisfied upstream` and names the upstream test. G1 rule 7 sets `blocked`.
+  - Rule for later slices: a slice that lands a test for `#N` sets `Test` to the repository path of that test (for example `test/logos/redteam/attack_042_defer_close_join.lgo`, or the slice test that covers the attack) and `Status` to `tested` in the same commit. A slice that only pins upstream Go behavior sets `satisfied upstream` and names the upstream test. G1 rule 7 sets `blocked`.
   - Check: `grep -c '^| #' logos-doc/REDTEAM.md` counts one row per attack; `grep -c '| planned |$' logos-doc/REDTEAM.md` counts the untested rows until a slice lands a test.
 - P0-S6 Create `tasks/autoplan-ledger.jsonl` with exactly the lines in section "Autoplan ledger" of this plan.
   Anchor: Tony Hoare, Edward Tufte
@@ -379,9 +379,9 @@ Anchor: J.R.R. Tolkien, John Carmack
 - Attack: `src/cmd/go/testdata/script/logos_command.txt`: `logos version` stdout matches `^logos version go1\.27\.2`; `go version` stdout matches `^go version go1\.27\.2`; `logos help` stdout contains `logos <command> [arguments]`; `env GOTOOLCHAIN=go1.99.0` then `logos version` still prints `go1.27.2` (logos mode never switches toolchains).
 - Attack: `src/cmd/go/testdata/script/logos_toolchain.txt`: a current-version main module imports a local replacement module that requires Go 1.99. With `GOTOOLCHAIN=auto` and `GOPROXY=off`, `logos mod tidy` reports the required version without attempting a switch. Plain `go mod tidy` still attempts the upstream switch. A too-new main module alone does not exercise this dependency-loading path.
 - Build:
-  - cmd/dist: right after `goInstall(toolenv(), goBootstrap, toolsToInstall...)` (`src/cmd/dist/build.go:1645`, and the cross-build call at `:1629`), copy `$GOROOT/bin/go` to `$GOROOT/bin/logos` (same `copyfile(..., writeExec)` helper the debug path uses at `build.go:1567`/`:1594`; `.exe` suffix on Windows). Add `logos` to the allowed `$GOROOT/bin` names checked at `build.go:1673`, and to `binExes` in `src/cmd/distpack/pack.go:185-188`. A separate `cmd/logos` main package is not used: it cannot import `cmd/go` (package main), and dist's `install()` path rejects other main packages (`build.go:1164`, applied at `:826`).
+  - cmd/dist: right after `goInstall(toolenv(), goBootstrap, toolsToInstall...)` (`src/cmd/dist/build.go:1646`, and the cross-build call at `:1629`), copy `$GOROOT/bin/go` to `$GOROOT/bin/logos` (same `copyfile(..., writeExec)` helper the debug path uses at `build.go:1567`/`:1594`; `.exe` suffix on Windows). Add `logos` to the allowed `$GOROOT/bin` names checked at `build.go:1673`, and to `binExes` in `src/cmd/distpack/pack.go:185-188`. A separate `cmd/logos` main package is not used: it cannot import `cmd/go` (package main), and dist's `install()` path rejects other main packages (`build.go:1164`, applied at `:826`).
   - `src/cmd/go/internal/cfg/logos.go` (new): `var Logos bool` set in `init()` when `strings.TrimSuffix(filepath.Base(os.Args[0]), ".exe") == "logos"`.
-  - `src/cmd/go/main.go`: one hook line before `toolchain.Select()` (`main.go:106`): `if cfg.Logos { logos.ConfigureCommand(base.Go) }` where `cmd/go/internal/logos.ConfigureCommand` sets `UsageLine = "logos"` (upstream value at `base/base.go:57`), `Long` = `Logos is a tool for managing loGo/s source code.` plus the upstream list, and registers logos-only subcommands as they land (M1 `eject`, M9 `lint`, M10 `next`, `context`, M21 `lsp`).
+  - `src/cmd/go/main.go`: one hook line before `toolchain.Select()` (`main.go:110`): `if cfg.Logos { logos.ConfigureCommand(base.Go) }` where `cmd/go/internal/logos.ConfigureCommand` sets `UsageLine = "logos"` (upstream value at `base/base.go:57`), `Long` = `Logos is a tool for managing loGo/s source code.` plus the upstream list, and registers logos-only subcommands as they land (M1 `eject`, M9 `lint`, M10 `next`, `context`, M21 `lsp`).
   - Toolchain switching: `toolchain.Select` (`toolchain/select.go:98`) returns at entry when `cfg.Logos`. `toolchain.Switcher.NeedSwitch` also returns false in logos mode, so newer dependencies cannot trigger a later switch during module loading. The ordinary Go path retains both switching mechanisms.
   - Help: logos mode uses the logos verb in root and subcommand usage, help references, and unknown-command guidance. The root retains additional help topics. Plain `go` help and version output stay upstream (R-U1). Mode-specific logic lives in the new logos, base, and help files.
   - Version output: `src/cmd/go/internal/version/version.go` (output near `:91`): when `cfg.Logos`, the `version` command prints `logos version go1.27.2`; otherwise it keeps the upstream `go version go1.27.2` text. This hook owns the `logos version` expectation in the Attack above.
@@ -400,9 +400,9 @@ Anchor: David Parnas, Christopher Alexander
   - `logos_cmdline_files.txt`: `logos run main.lgo` works; `logos run a.go b.lgo` fails with `mixed_package`.
 - Build:
   - `logos` mode appends tool tag `logos` to `cfg.BuildContext.ToolTags` (in `cmd/go/internal/cfg/logos.go`, called where `cfg.go:126-134` rebuilds tool tags).
-  - go/build (`src/go/build/build.go`): in `matchFile` (`:1450`, extension gate `:1462-1465`) and `Import` dispatch (`:898-912`), when `ctxt.ToolTags` contains `logos`, treat `.lgo` and alias extensions (after stripping U+FE0E/U+FE0F) as Go-family sources: they go to `GoFiles`, `TestGoFiles`, or `XTestGoFiles` by the same rules as `.go` (test suffix `_test.lgo`), and are header-scanned by `readGoInfo` (`read.go:272`). Classification helpers live in new `src/go/build/logos.go`: `isLogosExt(name) bool`, `logosStem(name) string`. After the file loop, `Import` returns the mixed-package error (text above) when both classes exist, and the duplicate-stem error. No exported API changes.
+  - go/build (`src/go/build/build.go`): in `matchFile` (`:1461`, extension gate `:1471-1476`) and `Import` dispatch (`:898-912`), when `ctxt.ToolTags` contains `logos`, treat `.lgo` and alias extensions (after stripping U+FE0E/U+FE0F) as Go-family sources: they go to `GoFiles`, `TestGoFiles`, or `XTestGoFiles` by the same rules as `.go` (test suffix `_test.lgo`), and are header-scanned by `readGoInfo` (`read.go:272`). Classification helpers live in new `src/go/build/logos.go`: `isLogosExt(ext string) bool`, `logosStem(name) string`. After the file loop, `Import` returns the mixed-package error (text above) when both classes exist, and the duplicate-stem error. No exported API changes.
   - modindex: bump `indexVersion` to `"go index v3"` (`modindex/write.go:14`); stop returning `errNonSource` for logos files (`modindex/build.go:245`); parse their headers (`scan.go:244`); extend `.go` checks at `read.go:494`, `:712`, `:737` with the same helpers (copied into `cmd/go/internal/modindex/logos.go`, because modindex mirrors go/build).
-  - load (`cmd/go/internal/load/pkg.go`): `hasGoFiles` (`:1443`) and `PackagesAndErrors` file arguments (`:2945`) and `GoFilesPackage` (`:3285-3291`) accept logos files in logos mode; add `func (p *Package) IsLogos() bool` (true when its first GoFile has a logos extension) in new `load/logos.go`; after imports resolve, `checkLogosModules` reports `mixed_module` once per module that has packages of both kinds among the loaded packages; the alias warning is printed once per file by `checkLogosImports` (landed there together with the cross-kind import edge checks, which M0-S8 removes).
+  - load (`cmd/go/internal/load/pkg.go`): `hasGoFiles` (`:1443`) and `PackagesAndErrors` file arguments (`:2945`) and `GoFilesPackage` (`:3285-3291`) accept logos files in logos mode; add `func (p *Package) IsLogos() bool` (true when its first GoFile has a logos extension) in new `load/logos.go`; after imports resolve, `checkLogosModules` reports `mixed_module` once per module that has packages of both kinds among the loaded packages; the alias warning is printed once per file by `checkLogosAliases` (landed there together with the cross-kind import edge checks, which M0-S8 removes).
   - work: `work/exec.go:1169`, `:1237` and `work/gc.go:301` treat logos files like `.go` files (overlay and file-list paths).
 - Gate: the six scripts above; `go test -short go/build cmd/go/internal/modindex cmd/go/internal/load`.
 
@@ -443,7 +443,7 @@ Anchor: Tony Hoare, John Carmack
 Anchor: Edsger W. Dijkstra, Edward Tufte
 - Build:
   - syntax: `syntax/logos_test.go` `TestLogosErrors` runs `testdata/logos/*.lgo` through the same ERROR-comment matcher as `error_test.go`, with `LogosMode`.
-  - types2: `check_test.go` gains `TestLogos` that runs `src/internal/types/testdata/logos` with `LogosMode` parsing and `Config.Logos = true` (copy `TestLocal` at `:397`; the harness filter `:440-462` must accept `.lgo` names).
+  - types2: `check_test.go` gains `TestLogos` that runs `src/internal/types/testdata/logos` with `LogosMode` parsing and `Config.Logos = true` (copy `TestLocal` at `:401`; the harness filter `:440-462` must accept `.lgo` names).
   - testdir: `src/cmd/internal/testdir` runs `test/logos/**` files ending in `.lgo` with the same directives (`// run`, `// errorcheck`, `// compile`, `// runoutput`) using `logos` (`bin/logos`) instead of `go`, and runs files ending in `.go` under `test/logos/**` with the same directives using `go` (the Go-package twins of the backend checks in M13-M20, R-U1). Directory map, stated once: `.lgo` files run with `logos`; `.go` files run with `go` except under `test/logos/lint/`, where they run with `logos lint` (M9-S2). A `.go` twin that needs an optimization tier builds through `go build -O=<level>` (a `// run -O=<level>` style directive read by the harness), never through `go tool compile`, because `-O` belongs to cmd/go; M13-S1 owns the twin whose assertion differs between `-O=1` and `-O=3`; register directory `logos` beside the existing list (confirm the list with `grep -n '"fixedbugs"' src/cmd/internal/testdir/testdir_test.go`).
   - Directories: `test/logos/compile/`, `test/logos/run/`, `test/logos/redteam/`, `test/logos/eject/`, `test/logos/codegen/`, `test/logos/example/`.
 - Attack (harness self-test): temporary intentional-red proof only, never a committed broken tree. Write `test/logos/compile/harness_selftest.lgo` once with a non-matching ERROR comment, run the harness, confirm it fails, record that output as RED in the commit body; then replace it with the matching ERROR comment before committing. The single G1 commit contains only the green harness plus the passing self-test file.
@@ -558,7 +558,7 @@ Contract (FrameExit state machine in the review; normative text T-104.1, T-104.2
 
 ### M1-S1 Token and scanner
 Anchor: Tony Hoare, J.R.R. Tolkien
-- Attack: `syntax/scanner_logos_test.go`: in `LogosMode`, `x?` scans `_Name _Question`, `f()?\n` inserts `;` after `?`; in plain mode `?` still reports `invalid character U+003F '?'` (`scanner.go:351-354`).
+- Attack: `syntax/scanner_logos_test.go`: in `LogosMode`, `x?` scans `_Name _Question`, `f()?\n` inserts `;` after `?`; in plain mode `?` still reports `invalid character U+003F '?'` (`scanner.go:371-390`).
 - Build: `tokens.go`: append `_Question // ?` after `_Var` and before `tokenCount` (keeps keyword range `_Break.._Var` intact; total stays under 64, `tokens.go` assert). Regenerate `token_string.go` with `go run golang.org/x/tools/cmd/stringer@v0.45.1-0.20260917185718-3dd9077b8066 -type token -linecomment tokens.go` in `src/cmd/compile/internal/syntax` (the x/tools version vendored in `src/cmd/vendor/modules.txt:76`; needs network); if offline, hand-edit: add `_ = x[_Question-47]`, change `_ = x[tokenCount-47]` to `_ = x[tokenCount-48]`, append `?` to the end of `_token_name`, and change the trailing `171, 171}` of `_token_index` to `171, 172, 172}`. The same procedure (append before `tokenCount`, regenerate or hand-edit) applies to every later token (`_FatArrow`, `_QuestionDot`, `_Coalesce`). `scanner.go`: `case '?':` returns `_Question` and sets `s.nlsemi = true` only when `s.mode&LogosMode != 0`; otherwise falls to the existing error. The scanner gets the mode bit through `scanner.init` (new `mode uint` field set from the parser).
 - Gate: `go test -short cmd/compile/internal/syntax`.
 
@@ -566,16 +566,16 @@ Anchor: Tony Hoare, J.R.R. Tolkien
 Anchor: David Parnas, J.R.R. Tolkien
 - Attack: `syntax/testdata/logos/try_parse.lgo` with ERROR comments: valid `x := f()?`, `f()?`, `defer f()?`, `errdefer f()`, `errdefer tx.Rollback()?`, `errdefer func() { g() }()`; Go meaning kept for `errdefer := 1`, `errdefer = 2`, `errdefer(x)`, `errdefer.f()`; `errdefer 1` -> `syntax error: errdefer requires a function call`; `go f()?` parses as a go statement whose call is a `TryExpr` (types2 rejects it with `misplaced_try`, SPEC §1.4).
 - Build: new `syntax/nodes_logos.go`: `TryExpr struct { X Expr; expr }` and `ErrdeferStmt struct { Call Expr; stmt }` (`Call` is `*CallExpr` or `*TryExpr` wrapping one). Parser hooks (each a one-line call into `syntax/parser_logos.go`):
-  - `pexpr` (`parser.go:1104`) postfix loop: in LogosMode, `case _Question:` wraps the current operand in `TryExpr` and continues.
-  - `stmtOrNil` (`parser.go:2610`): after `lhs := p.exprList()` in the `_Name` branch, if LogosMode, `lhs` is `*Name` with value `errdefer`, and `p.tok` is `_Name` or `_Func`, return `p.errdeferStmt(lhs.Pos())`, which parses `p.pexpr(nil, false)` and requires a call or a `TryExpr` of a call.
-  - `callStmt` (`parser.go:985`): in LogosMode, when `s.Tok == _Go`, check parenthesized operands behind `?` and keep the `TryExpr` in the go statement; types2 reports `misplaced_try` for `go f()?` (SPEC §1.4).
+  - `pexpr` (`parser.go:1132`) postfix loop: in LogosMode, `case _Question:` wraps the current operand in `TryExpr` and continues.
+  - `stmtOrNil` (`parser.go:2683`): after `lhs := p.exprList()` in the `_Name` branch, if LogosMode, `lhs` is `*Name` with value `errdefer`, and `p.tok` is `_Name` or `_Func`, return `p.errdeferStmt(lhs.Pos())`, which parses `p.pexpr(nil, false)` and requires a call or a `TryExpr` of a call.
+  - `callStmt` (`parser.go:1000`): in LogosMode, when `s.Tok == _Go`, check parenthesized operands behind `?` and keep the `TryExpr` in the go statement; types2 reports `misplaced_try` for `go f()?` (SPEC §1.4).
   - `walk.go` (`node` switch at `:55`), `positions.go` (`StartPos` `:10`, `EndPos` `:124`), `printer.go` (before the default panic at `:723`): hook lines calling `walkLogos`, `startPosLogos`, `endPosLogos`, `printLogos` in `*_logos.go` files; printer prints `X?` and `errdefer <call>`.
 - Gate: `go test -short cmd/compile/internal/syntax -run 'Logos'`.
 
 ### M1-S3 Type checking
 Anchor: Tony Hoare, Edsger W. Dijkstra
 - Attack: `src/internal/types/testdata/logos/try.lgo` with `/* ERROR */` comments covering C1-C6: operand not a call; last result `int`; last result a named type whose underlying is `error` (rejected: identical-to-`error` rule); enclosing function without error result; `?` inside `a + f()?`, inside `g(f()?)`, inside `return f()?`, inside `go f()?`; `x := f()?` where `f` returns only `error`; `x := f()?` where `x` already exists in the scope (no new variables); `errdefer` in a function returning `int`; `_logos_x := 1`; `x, y := f()?` with three results plus error (count mismatch text). Valid cases type the result as the call results minus the error.
-- Build: new `types2/logos.go`: `func (check *Checker) tryExpr(x *operand, e *syntax.TryExpr)` (types the call, strips the error, records the type of `e` as the remaining result or tuple); `stmt.go`: hooks in the statement switch (`:410`) for `*syntax.ErrdeferStmt` and before `suspendedCall` (`:166-176`) to unwrap a `TryExpr` around the call in `defer`; `expr.go` `exprInternal` (`:1036`): hook `case *syntax.TryExpr` that errors with `misplaced_try` unless the enclosing statement registered `e` in `check.logosTryOK` (a set filled by the statement hooks for the allowed shapes C2); identifier hook for C6 in `declare`. All new behavior runs only when `check.conf.Logos`.
+- Build: new `types2/logos_try.go`: `func (check *Checker) logosTryOperand(x *operand, e *syntax.TryExpr)` (types the call, strips the error, records the type of `e` as the remaining result or tuple); `stmt.go`: hooks in the statement switch (`:410`) for `*syntax.ErrdeferStmt` and before `suspendedCall` (`:166-176`) to unwrap a `TryExpr` around the call in `defer`; `expr.go` `exprInternal` (`:1060`): hook `case *syntax.TryExpr` that errors with `misplaced_try` unless the enclosing statement registered `e` in `check.logosTryOK` (a set filled by the statement hooks for the allowed shapes C2); identifier hook for C6 in `declare`. All new behavior runs only when `check.conf.Logos`.
 - Gate: `go test -short cmd/compile/internal/types2 -run 'TestLogos'`.
 
 ### M1-S4 Support package `logos/rt` and runtime error traces
@@ -603,7 +603,7 @@ Anchor: Tony Hoare, Edsger W. Dijkstra, David Parnas
   - `cmd/compile/internal/logos/lower_test.go` `TestNoLogosNodesSurvive`: lowering every file in `test/logos/run` leaves no `TryExpr` or `ErrdeferStmt` (A1).
 - Build: package `cmd/compile/internal/logos`:
   - `func Lower(pkg *types2.Package, info *types2.Info, files []*syntax.File, src map[*syntax.File][]byte) (changed bool, edits map[*syntax.File][]Edit)`; `type Edit struct{ Start, End syntax.Pos; Text string }`.
-  - Hook in `noder/irgen.go` after `:178` `base.ExitIfErrors()` and before `:184` (SIMD midway): `if conf.Logos && !didLogos { didLogos = true; if changed, edits := logos.Lower(pkg, info, files, srcOf(noders)); changed { logosEdits = edits; for _, p := range types.PkgMap() { p.Direct = false }; typecheck.Target.Imports = nil; goto recheck } }` (declare `didLogos` beside `didMidway` at `:50`). The package kind at entry is retained separately as `originalPackageIsLogos` for emission and export-fact paths; the config recreated at recheck selects `conf.Logos = originalPackageIsLogos && !didLogos`, so the second pass checks generated `_logos_` names, inserted nils, and other lowered constructs as ordinary Go instead of rerunning source-only loGo/s rules.
+  - Hook in `noder/irgen.go` after `:178` `base.ExitIfErrors()` and before `:217` (SIMD midway): `if conf.Logos && !didLogos { didLogos = true; if changed, edits := logos.Lower(pkg, info, files, srcOf(noders)); changed { logosEdits = edits; for _, p := range types.PkgMap() { p.Direct = false }; typecheck.Target.Imports = nil; goto recheck } }` (declare `didLogos` beside `didMidway` at `:51`). The package kind at entry is retained separately as `originalPackageIsLogos` for emission and export-fact paths; the config recreated at recheck selects `conf.Logos = originalPackageIsLogos && !didLogos`, so the second pass checks generated `_logos_` names, inserted nils, and other lowered constructs as ordinary Go instead of rerunning source-only loGo/s rules.
   - Templates (names `_logos_eN` and `_logos_fN`/`_logos_aN` use a per-function counter; positions per A3):
     - `lhs := call?` -> `lhs..., _logos_eN := call` then `if _logos_eN != nil { <exit> }`.
     - `lhs = call?` -> `{ var _logos_eN error; lhs..., _logos_eN = call; if _logos_eN != nil { <exit> } }`.
@@ -1628,8 +1628,8 @@ Anchor: Tony Hoare, Claude Shannon, John Carmack
 
 ### M3-A-S3 Reject facts object names with an invalid tag
 Anchor: Tony Hoare, Claude Shannon, John Carmack
-- Attack: `src/cmd/compile/internal/logos/facts/facts_test.go`: `validObject` rejects `Foo@junk!`, `Foo@`, and `Foo@1x`, and `TestTaggedObjectRoundTrip` rejects a malformed tag on decode.
-- Build: the tag in an object name must be an identifier in `facts/facts.go` `validObject`.
+- Attack: `src/cmd/compile/internal/logos/facts/facts_test.go`: `ValidObject` rejects `Foo@junk!`, `Foo@`, and `Foo@1x`, and `TestTaggedObjectRoundTrip` rejects a malformed tag on decode.
+- Build: the tag in an object name must be an identifier in `facts/facts.go` `ValidObject`.
 - Gate: `go test -count=1 cmd/compile/internal/logos/facts`.
 - Red-team rows: none.
 - Docs: none.
@@ -2201,7 +2201,7 @@ Anchor: Tony Hoare, Edward Tufte, Kenya Hara
 Anchor: Tony Hoare, Edward Tufte, Kenya Hara
 - Attack: `test/logos/run/time_after_no_hoist.lgo`: timers stay in the loop body; `src/cmd/go/testdata/script/logos_zeroalloc_recursive.txt`: `//logos:zeroalloc local` checks the body only.
 - Build: none (test-only).
-- Gate: `go test -run TestTimeAfter cmd/compile/internal/logos/lint`; `go test -count=1 cmd/internal/testdir -run Test/logos/run/time_after_no_hoist`; `go test -vet=off -count=1 -run 'Script/^logos_zeroalloc_recursive$' cmd/go`.
+- Gate: `go test -run TestTimeAfterStaysInLoopBody cmd/compile/internal/logos`; `go test -count=1 cmd/internal/testdir -run Test/logos/run/time_after_no_hoist`; `go test -vet=off -count=1 -run 'Script/^logos_zeroalloc_recursive$' cmd/go`.
 - Red-team rows: none.
 - Docs: none.
 
@@ -2405,9 +2405,9 @@ Anchor: John Carmack, Herbert Simon, Dieter Rams
 
 ### M13-A-S2 Pin the standard-library variable-make strip
 Anchor: John Carmack, Herbert Simon, Dieter Rams
-- Attack: `src/cmd/go/internal/work/logos_stdlib_gate_test.go` (`TestLogosStandardProvenance`, `TestLogosDropVariableMake`): standard and standard external-test shapes lose only the `variablemakethreshold` key; user shapes keep 256 at O2 and 4096 at O3, and the flag-value rewrite is pinned.
+- Attack: `src/cmd/go/internal/work/logos_stdlib_gate_test.go` (`TestLogosStandardProvenanceKeepsDefaultVariableMake`, `TestLogosDropVariableMakeKeepsOtherKeys`): standard and standard external-test shapes lose only the `variablemakethreshold` key; user shapes keep 256 at O2 and 4096 at O3, and the flag-value rewrite is pinned.
 - Build: none (test-only).
-- Gate: `go test -count=1 cmd/go/internal/work -run 'TestLogosStandardProvenance|TestLogosDropVariableMake'`.
+- Gate: `go test -count=1 cmd/go/internal/work -run 'TestLogosStandardProvenanceKeepsDefaultVariableMake|TestLogosDropVariableMakeKeepsOtherKeys'`.
 - Red-team rows: none.
 - Docs: none.
 
@@ -2783,7 +2783,7 @@ Anchor: Tony Hoare, John Carmack
 Anchor: Tony Hoare, John Carmack
 - Attack: objdump of the fast body names no clock and no `cgoNoCallback`; the trampoline drops from 60 to 58 instructions; FastcallThree drops from 344.2M to 341.4M instructions per 1M calls.
 - Build: `src/runtime`: the `fastCallEnterNano` stores, field, helpers, and padding math are gone; `TestFastcallNoClockInFastBody` still guards the no-clock rule.
-- Gate: `GOEXPERIMENT=logosfastcgo go test -vet=off -count=1 -run TestFastcallNoClockInFastBody cmd/cgo/internal/testlogos`; `go test -vet=off -count=1 -run TestCgoFastcallPinSlots|TestLogosFastCall runtime`.
+- Gate: `GOEXPERIMENT=logosfastcgo go test -vet=off -count=1 -run TestFastcallNoClockInFastBody cmd/cgo/internal/testlogos`; `go test -vet=off -count=1 -run TestCgoFastcallPinSlots|TestLogosFastCallRecordZeroesIdleSlots|TestLogosFastCallClearsAllSlots|TestLogosFastCallPreservesCallerArgs|TestLogosFastCallStaysOnOriginalM runtime`.
 - Red-team rows: none.
 - Docs: none (SPEC 3.4 carries the no-clock and post-return rules).
 

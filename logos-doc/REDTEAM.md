@@ -64,7 +64,7 @@ Rules: logos-doc/SPEC.md. Status values: planned, tested, satisfied upstream, bl
 | #65 | comptime fields exposing private fields across packages | M7 | test/logos/run/const_for.lgo; src/cmd/go/testdata/script/logos_comptime_cross.txt | tested |
 | #66 | errdefer with unnamed returns failing in eject | M1 | test/logos/redteam/attack_066_errdefer_unnamed_results | tested |
 | #67 | FMA contraction causing x86 ARM64 sum drift | M6 | M6 half: src/cmd/compile/internal/logos/m6gaps_test.go (TestChainSumPairwise); test/logos/run/chains.lgo (sum order). Closed by test/logos/run/chain_sum_crossarch.lgo run natively and under qemu-aarch64 (-target linux/arm64 through go_linux_arm64_exec), with TestChainSumPairwise pinning the pairwise order | tested |
-| #68 | group returning early while sibling reads stack | M8 | src/logos/rt/group_test.go (FirstErrorWins, CancelReachesSibling); test/logos/run/group_exit.lgo | tested |
+| #68 | group returning early while sibling reads stack | M8 | src/logos/rt/group_test.go (TestGroupFirstErrorWins, TestGroupCancelReachesSibling); test/logos/run/group_exit.lgo | tested |
 | #69 | next stripping comments and build tags | M10 | src/cmd/go/testdata/script/logos_next.txt; src/cmd/compile/internal/logos/next_test.go | tested |
 | #70 | constant slice literal allocating on heap | M5 | test/logos/codegen/rodata.lgo | tested |
 | #71 | scan region dead pointers breaking barrier reuse | M18 | src/cmd/go/testdata/script/logos_redteam_71.txt (executed 2026-10-28: `go test cmd/go -run 'Script/^logos_redteam_71$'` passes, race leg included) | tested |
