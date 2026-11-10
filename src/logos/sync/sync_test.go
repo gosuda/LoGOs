@@ -320,9 +320,11 @@ func TestHotUpdateIncrementNoLostUpdates(t *testing.T) {
 		wg.Go(func() {
 			for range perWriter {
 				h.Update(func(old *int) *int {
-					v := new(int)
-					*v = *old + 1
-					return v
+					v := *old
+					runtime.Gosched()
+					n := new(int)
+					*n = v + 1
+					return n
 				})
 			}
 		})
