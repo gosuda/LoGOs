@@ -477,7 +477,6 @@ Ordinary reslicing such as s = s[:0] MUST stay allowed. [T-201]
 Only const views MUST enforce the len bound. [T-201]
 Dynamic map iteration in const funcs MUST fail compilation. [T-201][T-Sec7]
 Const map range MUST visit keys in sorted order. [T-201][T-Sec7]
-A violation MUST fail with correctness::const_func_impure naming the reason. [T-201]
 Nil leaves MUST copy as nil. [T-201]
 Pointer-free constant data MUST live in read-only memory before any init runs. [T-201]
 
