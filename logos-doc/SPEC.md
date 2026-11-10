@@ -1648,7 +1648,6 @@ Reflection through reflect.Value.Method counts as reachable. [T-Sec11]
 On diamond graphs the report keeps the shortest chain. [T-Sec11]
 The audit reports one chain per sink and dependency, so a chain through the standard library alone never hides another dependency's chain to the same sink. [T-Sec11]
 A chain blames the dependency frame nearest the sink, and chains of standard-library or first-party frames blame nobody. [T-Sec11]
-Edges through package runtime never carry blame, because every function reaches the runtime's stack growth and crash paths. [T-Sec11]
 Policy comes from logos.toml capabilities. [T-Sec8][T-Sec11]
 
 ### 11.2 Reachability report
@@ -1803,7 +1802,6 @@ The function, receiver, and arguments MUST evaluate at the statement. [T-104.7]
 A panic MUST run scope defers during unwinding. [T-104.7]
 A scope defer in a loop body MUST run every iteration. [T-104.7]
 Cleanup on panic MUST use open-coded defers. [T-206][T-104.7]
-No separate unwind table exists for scope defer. [T-206][T-104.7]
 
 ```lgo
 {
