@@ -12,7 +12,7 @@ The words MUST, MUST NOT, SHOULD, SHOULD NOT, and MAY follow RFC 2119. The text 
 ### 0.1 Upstream compatibility
 Every improvement to code generation, runtime, GC, stack, SIMD, wasm, cgo, PGO, optimization level, and tooling MUST apply to Go packages and to loGo/s packages [T-0.1][R-U1].
 That rule MUST hold under `logos` and under plain `go` [T-0.1][R-U1].
-The following are by design outside those two sentences: fixed-array operators and reduction methods, which Sec 2.4 withholds from Go packages; the `make` length overflow lowering, which Sec 3.3 and Sec 13.2 define for `.lgo` files, with the Sec 15.2 restatement covering the same lowering; the slice-sum vector form, which needs the `.sum()` chain call of Sec 1.4 and has no Go spelling; the wasm loop-stride default, which Sec 13 applies under `logos` only while Sec 12.1 needs the explicit `--wasm-features` flag under plain `go`; `target_cpu`, which Sec 1.5 applies to `logos` builds while plain `go` keeps the upstream `GOAMD64` and `GOARM64` defaults; the capabilities auditor, which Sec 11.1 runs in `logos` builds only; the `//logos:zeroalloc` directive, which `go build` MUST ignore in Go packages per Sec 17.2 while `logos lint` and `logos build` apply it; tooling delivered as `logos` subcommands (`lint`, `eject`, `lsp`, `context`, `next`), which have no plain-`go` counterpart, while plain-`go` tooling breadth is the shared flags and diagnostics of Sec 0.1, Sec 12, and Sec 14; alternate GC modes and synthetic PGO, which carry no rules after the withdrawal; loGo/s syntax-gated lowering (options, unions, tuples, const views and composites, comptime, `go group`, static JSON and binary forms), which has no Go spelling while Go importers see the Go-facing forms of Sec 0.3 and Sec 5; and eject, which converts loGo/s to Go one way per Sec 0.3.
+The following are by design outside those two sentences: fixed-array operators and reduction methods, which Sec 2.4 withholds from Go packages; the `make` length overflow lowering, which Sec 3.3 and Sec 13.2 define for `.lgo` files; the slice-sum vector form, which needs the `.sum()` chain call of Sec 1.4 and has no Go spelling; the wasm loop-stride default, which Sec 13 applies under `logos` only while Sec 12.1 needs the explicit `--wasm-features` flag under plain `go`; `target_cpu`, which Sec 1.5 applies to `logos` builds while plain `go` keeps the upstream `GOAMD64` and `GOARM64` defaults; the capabilities auditor, which Sec 11.1 runs in `logos` builds only; the `//logos:zeroalloc` directive, which `go build` MUST ignore in Go packages per Sec 17.2 while `logos lint` and `logos build` apply it; tooling delivered as `logos` subcommands (`lint`, `eject`, `lsp`, `context`, `next`), which have no plain-`go` counterpart, while plain-`go` tooling breadth is the shared flags and diagnostics of Sec 0.1, Sec 12, and Sec 14; alternate GC modes and synthetic PGO, which carry no rules after the withdrawal; loGo/s syntax-gated lowering (options, unions, tuples, const views and composites, comptime, `go group`, static JSON and binary forms), which has no Go spelling while Go importers see the Go-facing forms of Sec 0.3 and Sec 5; and eject, which converts loGo/s to Go one way per Sec 0.3.
 An improvement that this spec puts behind a named `GOEXPERIMENT` flag MUST stay behind that flag as this spec states. The `logos_settings_env.txt` script gates the arena and preemptibleloops experiment defaults [T-0.1][R-U1].
 Note: the `go` command can differ from upstream Go 1.27.2 in performance, code generation, runtime, and tooling. No test asserts a difference.
 The `go` command MUST keep Go language semantics, so every valid Go program MUST keep its Go meaning [T-0.1][R-U1].
@@ -1124,7 +1124,7 @@ Both const-if branches MUST type-check. [T-205]
 
 The group MUST cancel on the first child error or panic. [T-206]
 
-It MUST join all children. [T-206]
+It MUST join all children before scope exit. [T-206]
 
 It MUST bound concurrency with a semaphore when `limit` is present. [T-206]
 
@@ -1203,15 +1203,7 @@ Values MUST stay GC-managed. [T-206]
 var c Locked[Config]
 c.WithLock(p => { p.Port = 8080 })
 ```
-Concurrent Hot updates MUST NOT expose partial values. [T-206]
-The group MUST cancel on first error. [T-206]
-It MUST join all children before scope exit. [T-206]
-Cancellation MUST reach blocked siblings. [T-206]
-The group MUST cancel siblings and return it. [T-206]
-No retire list MUST exist for `Hot[T]`. [T-206]
 `Hot[T]` MUST hold its value through `atomic.Pointer[T]` only. [T-206]
-A go group with limit = N MUST bound concurrency with a semaphore. [T-206]
-A go statement outside any group body MUST fail with [concurrency::unsupervised_goroutine]. [T-206]
 
 ## 3. Tier 3 specification
 
@@ -1272,9 +1264,7 @@ This precision MUST apply to `.lgo` packages, and to Go packages under `GOEXPERI
 [T-301.1] Idle parked goroutines MUST consume 0 bytes of arena memory.
 It MUST retain every live chunk and preserve all live-object addresses. [T-301.1]
 With no live chunks, it MUST retain no arena capacity; its ordinary stack and runtime metadata still exist. [T-301.1]
-Cgo pointer checks MUST accept arena addresses without panic. [T-301.1]
 Frame exit, including exit by panic, MUST restore the watermark. [T-301.1]
-A loop back-edge MUST restore the watermark for iteration-local objects. [T-301.1]
 A loop with only iteration-local allocation MUST NOT grow arena use across iterations. [T-301.1]
 
 ### 3.2 RFC-302: Smart stack engine
@@ -1817,8 +1807,6 @@ m.WithLock(func(c *Config) {
     c.Port = 8080
 })
 ```
-In amd64 native builds, slice reductions MUST use fault-suppressing masked loads for tails; on arm64 the tail MUST load only the elements present. [T-303]
-A non-constant integer product in a `make` length or capacity MUST lower to `logos/rt.MulLen`. Constant products stay constant. [T-303]
 
 ## 16. IDE protocol
 
