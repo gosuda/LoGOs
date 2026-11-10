@@ -1,0 +1,33 @@
+# A loop defer f()? captures the error result by reference, so escape
+# analysis moves err to the heap. S3 inverts the stderr pins below.
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+logos build -gcflags=-m -o $WORK/esc$GOEXE .
+stderr 'moved to heap: err'
+stderr 'func literal escapes to heap'
+exists $WORK/esc$GOEXE
+
+-- go.mod --
+module example.com/deferesc
+
+go 1.27
+
+-- main.lgo --
+package main
+
+//go:noinline
+func closeNil() error { return nil }
+
+func Loop(n int) (err error) {
+	for i := 0; i < n; i++ {
+		defer closeNil()?
+	}
+	return nil
+}
+
+func main() {
+	if err := Loop(3); err != nil {
+		panic(err)
+	}
+}
