@@ -103,6 +103,12 @@ cd ../..
 [cgo] stdout '^42$'
 [cgo] cd ../..
 
+cd p/main
+logos build -o $WORK/bin/s2p$GOEXE ./cmd
+exec $WORK/bin/s2p$GOEXE
+stdout '^dead-ok2$'
+cd ../..
+
 -- a/main/go.mod --
 module example.com/xmain
 
@@ -807,4 +813,50 @@ func Init() {
 	attr := &syscall.ProcAttr{Files: []uintptr{0, 1, 2}}
 	pid, _ := syscall.ForkExec("/bin/true", []string{"true"}, attr)
 	_ = pid
+}
+
+-- p/main/go.mod --
+module example.com/pmain
+
+go 1.27
+
+require example.com/pdep v0.0.0
+
+replace example.com/pdep => ../dep
+
+-- p/main/logos.toml --
+[capabilities]
+transitive_exec = "deny"
+
+-- p/main/cmd/main.lgo --
+package main
+
+import (
+	"fmt"
+
+	"example.com/pdep"
+)
+
+func main() { fmt.Println(dep.Init()) }
+
+-- p/dep/go.mod --
+module example.com/pdep
+
+go 1.27
+
+-- p/dep/dep.go --
+package dep
+
+import "os/exec"
+
+//go:noinline
+func Init() string { return "dead-ok2" }
+
+//go:noinline
+func Orphan() string {
+	out, err := exec.Command("echo", "hi").CombinedOutput()
+	if err != nil {
+		return "err"
+	}
+	return string(out)
 }
