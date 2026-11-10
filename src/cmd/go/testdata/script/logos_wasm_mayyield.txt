@@ -19,7 +19,7 @@ stderr '(?s)main\.usesleepy<1> STEXT[^\n]*\n(\t[^\n]*\n)*\t[^\n]*\tBrTable'
 cd zw
 logos build -gcflags=-S=2 -o $WORK/zero.wasm .
 ! stderr '(?s)main\.ZeroHolder\.MarshalBinary<1> STEXT[^\n]*\n(\t[^\n]*\n)*\t[^\n]*\tLoop'
-! stderr '(?s)main\.ZeroHolder\.UnmarshalBinary<1> STEXT[^\n]*\n(\t[^\n]*\n)*\t[^\n]*\tLoop'
+! stderr '(?s)main\._logos_bin_ZeroHolder_d[0-9]+<1> STEXT[^\n]*\n(\t[^\n]*\n)*\t[^\n]*growslice'
 cd ..
 
 logos build -wasm-features=stack-switching -gcflags=-S=2 -o $WORK/switch.wasm .
