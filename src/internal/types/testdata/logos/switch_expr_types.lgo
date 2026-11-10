@@ -42,6 +42,15 @@ func singleUntyped(n int) int {
 	}
 }
 
+func allUntypedDefaultInt(n int) {
+	x := switch n {
+	case 1 => 1
+	default => 2
+	}
+	var s string = x // ERROR "cannot use x (variable of type int) as string value"
+	_ = s
+}
+
 func nilAlone(x U) int {
 	return switch /* ERROR "correctness::nonexhaustive_switch" */ x.(type) {
 	case nil => 0
