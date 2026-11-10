@@ -58,9 +58,9 @@ var _ Ordinary = MutSlice{S: []int{1}}
 var _ Ordinary = MutMap{M: map[string]int{"k": 1}}
 var _ Ordinary = MutPtr{P: &ptrSrc}
 
-var _ Qualified = MutSlice{S: []int{1}}                // ERROR "const_view_mutation"
-var _ Qualified = MutMap{M: map[string]int{"k": 1}}    // ERROR "const_view_mutation"
-var _ Qualified = MutPtr{P: &ptrSrc}                   // ERROR "const_view_mutation"
+var _ Qualified = MutSlice{S: []int{1}}                // ERROR "\[correctness::const_view_mutation\].*Name"
+var _ Qualified = MutMap{M: map[string]int{"k": 1}}    // ERROR "\[correctness::const_view_mutation\].*Name"
+var _ Qualified = MutPtr{P: &ptrSrc}                   // ERROR "\[correctness::const_view_mutation\].*Name"
 
 func takesQualified(q Qualified) string { return q.Name() }
 
