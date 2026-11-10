@@ -26,11 +26,34 @@ type WithEmbedded struct {
 	Y string `json:"y"`
 }
 
+type NoBinaryBase struct {
+	M map[int]string `json:"m"`
+}
+
+type WithBadEmbedded struct {
+	NoBinaryBase
+	Y string `json:"y"`
+}
+
+
 func hasGeneratedMethods(v any) bool {
 	if _, ok := v.(json.Marshaler); ok {
 		return true
 	}
 	if _, ok := v.(json.Unmarshaler); ok {
+		return true
+	}
+	return false
+}
+
+func hasGeneratedBinaryMethods(v any) bool {
+	if _, ok := v.(interface{ MarshalBinary() ([]byte, error) }); ok {
+		return true
+	}
+	if _, ok := v.(interface{ AppendBinary([]byte) ([]byte, error) }); ok {
+		return true
+	}
+	if _, ok := v.(interface{ UnmarshalBinary([]byte) error }); ok {
 		return true
 	}
 	return false
@@ -104,5 +127,21 @@ func TestEmbeddedUsesTheReflectivePath(t *testing.T) {
 	}
 	if eback.X != 3 {
 		t.Fatalf("round trip lost the promoted field: %#v", eback)
+	}
+}
+
+func TestIneligibleStructsLackBinaryMethods(t *testing.T) {
+	if !hasGeneratedBinaryMethods(Base{X: 3}) {
+		t.Fatal("eligible Base lost its generated binary methods")
+	}
+	if hasGeneratedBinaryMethods(WithAny{A: 7, B: "b"}) || hasGeneratedBinaryMethods(&WithAny{A: 7}) {
+		t.Fatal("WithAny carries generated binary methods")
+	}
+	if hasGeneratedBinaryMethods(WithIntKeyMap{M: map[int]string{1: "x"}}) || hasGeneratedBinaryMethods(&WithIntKeyMap{}) {
+		t.Fatal("WithIntKeyMap carries generated binary methods")
+	}
+	be := WithBadEmbedded{Y: "y"}
+	if hasGeneratedBinaryMethods(be) || hasGeneratedBinaryMethods(&be) {
+		t.Fatal("WithBadEmbedded carries generated binary methods")
 	}
 }
