@@ -64,7 +64,7 @@ func cvBadElem() {
 }
 
 func cvIndexAssign(xs const []int) {
-	xs /* ERROR "[correctness::const_view_mutation] cannot assign index through const view" */ [0] = 1
+	xs /* ERRORx "\\[correctness::const_view_mutation\\] cannot assign index through const view xs" */ [0] = 1
 }
 
 func cvFieldAssign(cp const *CVItem) {
