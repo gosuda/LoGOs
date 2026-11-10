@@ -640,3 +640,64 @@ func TestLogosRegionChunkGranularity64K(t *testing.T) {
 		runtime.LogosRegionClose(h, gen)
 	})
 }
+
+func TestLogosRegionChainsArePrivate(t *testing.T) {
+	inFreshGoroutine(t, func() {
+		chunkSet := func() map[uintptr]bool {
+			s := map[uintptr]bool{}
+			for _, c := range runtime.LogosRegionChunks() {
+				s[c] = true
+			}
+			return s
+		}
+		hA, gA := runtime.LogosRegionOpen()
+		pa := runtime.LogosRegionAllocNoscan(hA, gA, 32, 8)
+		fillBytes(pa, 32, 0xA5)
+		outer := chunkSet()
+		if len(outer) != 1 {
+			t.Fatalf("outer region chunks = %d, want 1", len(outer))
+		}
+		hB, gB := runtime.LogosRegionOpen()
+		capacity := uintptr(runtime.LogosArenaCapacity)
+		maxBytes := uintptr(runtime.LogosRegionMaxBytes)
+		pb := runtime.LogosRegionAllocNoscan(hB, gB, maxBytes, 8)
+		fillBytes(pb, maxBytes, 0x5A)
+		pc := runtime.LogosRegionAllocNoscan(hB, gB, capacity-maxBytes, 8)
+		fillBytes(pc, capacity-maxBytes, 0x33)
+		pd := runtime.LogosRegionAllocNoscan(hB, gB, 1024, 8)
+		fillBytes(pd, 1024, 0x77)
+		during := chunkSet()
+		for c := range outer {
+			if !during[c] {
+				t.Fatalf("outer chunk %x left its chain while the inner region allocated", c)
+			}
+		}
+		if len(during) != 3 {
+			t.Fatalf("chunks with both regions open = %d, want 3 (outer plus the inner chain)", len(during))
+		}
+		runtime.LogosRegionClose(hB, gB)
+		after := chunkSet()
+		if len(after) != len(outer) {
+			t.Fatalf("chunks after inner Close = %d, want %d (the outer chain only)", len(after), len(outer))
+		}
+		for c := range outer {
+			if !after[c] {
+				t.Fatalf("outer chunk %x missing after inner Close", c)
+			}
+		}
+		if got := runtime.LogosRegionBytes(); got != 32 {
+			t.Fatalf("RegionBytes after inner Close = %d, want 32", got)
+		}
+		if !checkBytes(pa, 32, 0xA5) {
+			t.Fatal("outer object damaged by inner Close")
+		}
+		again := runtime.LogosRegionAllocNoscan(hA, gA, 64, 8)
+		if !runtime.LogosArenaInChunk(again) {
+			t.Fatal("outer region no longer places after inner Close")
+		}
+		runtime.LogosRegionClose(hA, gA)
+		if n := len(chunkSet()); n != 0 {
+			t.Fatalf("chunks after both Closed = %d, want 0", n)
+		}
+	})
+}
