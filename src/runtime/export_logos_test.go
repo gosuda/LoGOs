@@ -43,11 +43,6 @@ func LogosFastCallPassedMCheckForTest(arg unsafe.Pointer) (touchedCurrent, recor
 	return touchedCurrent, recordOK, clearOK
 }
 
-func LogosFastCgoFrameSlotIsUintptrForTest() bool {
-	_, ok := any(m{}.fastCgoFrame[0]).(uintptr)
-	return ok
-}
-
 func LogosGrowsliceBufForTest(elem any, buf unsafe.Pointer, bufLen, newLen, num int) (array unsafe.Pointer, length, capacity int) {
 	s := growsliceBuf(buf, newLen, bufLen, num, efaceOf(&elem)._type, buf, bufLen)
 	return s.array, s.len, s.cap

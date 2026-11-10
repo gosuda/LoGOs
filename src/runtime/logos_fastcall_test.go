@@ -7,6 +7,7 @@ package runtime_test
 import (
 	"runtime"
 	"testing"
+	"time"
 	"unsafe"
 )
 
@@ -88,8 +89,28 @@ func TestLogosFastCallStaysOnOriginalM(t *testing.T) {
 	}
 }
 
-func TestLogosFastCgoFrameIsUintptr(t *testing.T) {
-	if !runtime.LogosFastCgoFrameSlotIsUintptrForTest() {
-		t.Fatal("fastCgoFrame slot is not uintptr")
+func TestLogosFastCgoFrameSlotsAreNotRoots(t *testing.T) {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	defer runtime.LogosDirtyFastCallSlotsForTest([4]uintptr{}, false)
+	done := make(chan struct{}, 1)
+	func() {
+		obj := new([64]byte)
+		runtime.AddCleanup(obj, func(ch chan struct{}) { ch <- struct{}{} }, done)
+		runtime.LogosDirtyFastCallSlotsForTest([4]uintptr{uintptr(unsafe.Pointer(obj)), 0, 0, 0}, true)
+	}()
+	for range 100 {
+		runtime.GC()
+		select {
+		case <-done:
+			return
+		default:
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	select {
+	case <-done:
+	default:
+		t.Fatal("object referenced only by fast-call slots survived GC")
 	}
 }
