@@ -416,7 +416,7 @@ A field assignment through `const *T` MUST fail with the same diagnostic. [T-201
 
 A slice expression with a bound above `len` (such as `b[:cap(b)]`) MUST fail with the same diagnostic, with a run-time check when the bound is not constant. [T-201]
 
-A call to a method with a pointer receiver that lacks `const` MUST fail with the same diagnostic. [T-201]
+A call through a constant view to a method with a pointer receiver that lacks `const` MUST fail with the same diagnostic. [T-201]
 
 A method with a `const` pointer receiver (such as `func (r const *T) M()`) MUST be allowed. [T-201]
 
@@ -442,7 +442,7 @@ The explicit `const` receiver rule and the inference for ordinary concrete value
 
 Receiver readonlyness MUST NOT imply parameter purity: a `FnFact.Readonly` fact proves only the receiver obligation, and a readonly-only or assertion-only fact MUST NOT prove that arguments are unmodified. An absent `ParamMutated` summary MUST be treated as unknown, distinct from an explicit proven-zero `ParamMutated=0` summary. [T-201][T-Sec5]
 
-Ordinary generic assertion definitions, including `func As[T any](x any) T { return x.(T) }` and assertion methods on generic receivers, MUST remain legal. The compiler MUST record their assertion and type-switch effects and validate relevant function and receiver-type instantiations, including transitive wrappers and cross-package uses, independently of declaration order. An instantiation MUST NOT manufacture a readonly obligation erased from runtime interface identity; an unsafe instantiation MUST fail with `[correctness::const_view_mutation]`. [T-201][T-Sec5]
+Ordinary generic assertion definitions, including `func As[T any](x any) T { return x.(T) }` and assertion methods on generic receivers, MUST remain legal. The compiler MUST record their assertion and type-switch effects and MUST require verified effects before manufacturing qualified targets for relevant function and receiver-type instantiations, including transitive wrappers and cross-package uses, independently of declaration order. An instantiation MUST NOT manufacture a readonly obligation erased from runtime interface identity; an unsafe instantiation MUST fail with `[correctness::const_view_mutation]`. [T-201][T-Sec5]
 
 Qualified type arguments in assertion-relevant positions MUST require verified effects. Unknown effects MUST be conservative, not proven zero; rejection MUST be limited to arguments whose assertion could manufacture an erased readonly obligation. Ordinary concrete named types and nominal nesting MUST remain legal. Known-zero generics such as `Identity[Qualified]` and storage-only containers such as `StoreBox[Qualified]` MUST remain legal; those names alone MUST NOT exempt an imported generic whose effects are unknown. [T-201][T-Sec5]
 
@@ -462,7 +462,7 @@ A plain value MUST be assignable to its constant view. [T-201]
 
 A `for _, v := range` loop over a constant slice MUST yield constant elements. [T-201]
 
-Converting `string` to `const []byte` MUST be zero-copy. [T-201]
+Converting `string` to `const []byte` MUST be zero-copy and MUST allocate nothing. [T-201]
 
 Converting `const []byte` to `string` MUST be zero-copy when provenance is a string or a constant composite. [T-201]
 
@@ -504,7 +504,7 @@ An array type with non-nil element pointers (such as `[3]*T`) MUST fail without 
 
 `new(S)`, `var s S`, and `S{}` MUST fail when `S` has a non-nil pointer field without an initializer, with `[correctness::nonnil_uninitialized]` naming the field and its type. [T-202]
 
-Zero-clearing through `*p = S{}` MUST fail with the same diagnostic. [T-202]
+Zero-clearing through `*p = S{}` MUST fail with `[correctness::nonnil_uninitialized]`. [T-202]
 
 `var t T` for a type parameter MUST be allowed. [T-202]
 
@@ -522,11 +522,11 @@ A store of a platform value into a declared non-nil location MUST wrap the store
 
 A nil value at such a store MUST panic with `logos: nil from Go value stored into non-nil *T at <file>:<line>`. [T-202]
 
-`if x != nil` MUST narrow `x` from `T?` to `T` in the guarded block. [T-202]
+`if x != nil` MUST narrow a local or parameter `x` from `T?` to `T` in the guarded block. [T-202]
 
-An early exit of the form `if x == nil { return }` (also with `panic`, `break`, or `continue`) MUST narrow `x` after the statement. [T-202]
+An early exit of the form `if x == nil { return }` (also with `panic`, `break`, or `continue`) MUST narrow a local or parameter `x` after the statement. [T-202]
 
-An `&&` chain with a nil test MUST narrow `x` in the rest of the chain. [T-202]
+An `&&` chain with a nil test MUST narrow a local or parameter `x` in the rest of the chain. [T-202]
 
 A later assignment MUST end narrowing. [T-202]
 
@@ -540,7 +540,7 @@ Code MUST copy the field to a local first. [T-202]
 
 For a callee declared in `.lgo`, reading a result before the `err == nil` proof MUST fail with `[correctness::result_before_error_check]`. [T-202]
 
-A Go-mode callee (the standard library or any Go package, such as `io.Reader.Read`) MUST keep its own contract. [T-202][R-U2]
+A Go-mode callee (the standard library or any Go package, such as `io.Reader.Read`) MUST keep its own contract, so use of n first stays allowed. [T-202][R-U2]
 
 `nil` MUST be assignable to every `T?`. [T-202]
 
@@ -549,14 +549,19 @@ A Go-mode callee (the standard library or any Go package, such as `io.Reader.Rea
 `T?` MUST NOT be assignable to `T`. [T-202]
 
 `*T?` where `*T` is non-nil MUST lower to `*T` with nil as none and no extra storage. [T-202]
+For `*T?` where `*T` is non-nil, the ejected Go type MUST be `*T` with `nil` as none [T-202][T-0.3].
 
 When nil is a valid payload of `T`, `T?` MUST carry explicit presence separate from payload nil. [T-202]
+When nil is a valid payload, the ejected form MUST carry explicit presence separate from payload nil [T-202][T-0.3].
 
 An interface-backed union option with no nil-capable member MUST use the interface nil value for absence. [T-202]
+An interface-backed union option with no nil-capable member MUST use the interface nil value for absence in ejected code [T-202][T-0.3].
 
 For every other `T` outside those two cases, `T?` MUST lower to `logos/rt.Option[T]`. [T-202]
+For every other `T?` outside those two cases, the ejected Go type MUST be `logos/rt.Option[T]` [T-202][T-0.3].
 
 A present nil payload MUST read as some with nil payload, distinct from none. [T-202]
+A present nil payload MUST stay distinguishable from none in ejected code [T-202][T-0.3].
 
 `(T?)?` MUST lower to `logos/rt.Option[T?]`. [T-202]
 
@@ -619,11 +624,12 @@ A closed union MUST be an interface whose type set is a finite union of non-`~` 
 
 It MAY also declare methods that every member implements. [T-203.1]
 
-A closed union MUST be allowed in value positions (variables, parameters, results, fields, elements, keys, and values). [T-203.1]
+A closed union MUST be allowed in value positions in `.lgo` code (variables, parameters, results, fields, elements, keys, and values). [T-203.1]
 
 A union with `~` terms or an unbounded set MUST fail with `[correctness::open_union_value]`. [T-203.1]
 
 A conversion MUST be allowed when the source type is a member or a closed union of members. [T-203.1]
+An assignment MUST require membership. [T-203.1]
 
 Any other conversion MUST fail with `[correctness::union_nonmember]` naming the type. [T-203.1]
 
@@ -663,7 +669,7 @@ The run-time representation MUST be the upstream interface. [T-203.1]
 
 A two-tier tag layout MUST NOT be used. [T-203.1]
 
-Reflection MAY store non-members. [T-203.1]
+Reflection MAY store non-members in a closed union. [T-203.1]
 
 The compiler MUST NOT check this case. [T-203.1]
 
