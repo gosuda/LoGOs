@@ -2915,6 +2915,12 @@ The release gate runs the checks that no in-tree test asserts:
 - Every row of `logos-doc/REDTEAM.md` reaches `tested` or `satisfied upstream` with its proving test.
 - The arm64 leg of `logos_sum_crossarch` must run (qemu or hardware) before a release.
 
+The following Go-semantics parity risks MUST stay gated by the release `-O` matrix under the matching configuration, because `cmd/internal/goparity` holds no mutant for them: no fault in the product code makes a program fail.
+
+- Pointee escape under `GOEXPERIMENT=logosescape` MUST stay gated by the release `-O` matrix under that experiment, because the design mutant changes only the callee `-m` summary while each direct call site re-derives the hole from the target so placement and program output stay identical.
+- GC span initialization under pointer-heavy churn MUST stay gated by the release `-O` matrix under that churn, because malloc sets heap bits per object so span initialization is unobservable to any program.
+- Arena loop restore and returned-make consent MUST stay gated by the release `-O` matrix under the arena configuration, because the design mutations and the replacement are no-ops on this fork since the mutated paths never reclaim memory a caller still reads.
+
 ### M22-C Closure re-audit of SPEC sections 0 to 18
 
 Anchor: Edward Tufte, Christopher Alexander
