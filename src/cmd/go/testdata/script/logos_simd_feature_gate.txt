@@ -12,6 +12,12 @@ stdout '^avx2 true$'
 stdout '^avx512 true$'
 stdout '^sums ok$'
 cp stdout $WORK/on.txt
+# The feature check dominates the vector loads in the binary: the
+# AVX2 call precedes the masked tail load in sumI32.
+logos build -o $WORK/exe .
+go tool objdump -s '^main\.sumI32$' $WORK/exe
+stdout 'CALL.*X86Features\.AVX2\(SB\)'
+stdout 'VPMASKMOVD'
 
 env GODEBUG=cpu.avx2=off
 logos run .
@@ -31,6 +37,13 @@ env GODEBUG=
 logos run .
 cmp stdout $WORK/on.txt
 
+# GOAMD64=v3 guarantees AVX2: the check is omitted and only the
+# vector form remains, so correct sums prove the vector ran.
+env GOAMD64=v3
+logos run .
+stdout '^avx2 true$'
+stdout '^sums ok$'
+
 -- m/go.mod --
 module example.com/featuregate
 
@@ -45,8 +58,10 @@ import (
 	"simd/archsimd"
 )
 
+//go:noinline
 func sumI32(xs []int32) int32 { return xs.sum() }
 
+//go:noinline
 func sumU8(xs []uint8) uint8 { return xs.sum() }
 
 func oracleI32(xs []int32) int32 {
