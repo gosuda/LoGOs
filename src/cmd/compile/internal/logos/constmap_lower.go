@@ -281,6 +281,10 @@ func (fl *fileLower) constMapText(g *constMapGen, pos syntax.Pos) string {
 			entries[i] = constMapKey{hash: constKeyHash(keys[i]), canon: constKeyCanon(keys[i])}
 		}
 		var err error
+		if base.Debug.LogosConstmapSeeds < 0 {
+			base.Errorf("%s: invalid -d=logosconstmapseeds value %d (want a non-negative seed cap)", pos.String(), base.Debug.LogosConstmapSeeds)
+			base.ExitIfErrors()
+		}
 		budget := defaultConstMapBudget
 		if base.Debug.LogosConstmapSeeds > 0 {
 			budget = constMapBudget{MaxSeeds: base.Debug.LogosConstmapSeeds, Rounds: defaultConstMapBudget.Rounds}
