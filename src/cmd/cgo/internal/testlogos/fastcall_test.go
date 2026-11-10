@@ -704,6 +704,54 @@ func profileCallerSamples(t *testing.T, prof string, want string) (found, total 
 	return found, total
 }
 
+func profileCallerAboveLeaf(t *testing.T, prof, caller, leaf string) bool {
+	t.Helper()
+	f, err := os.Open(prof)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	p, err := profile.Parse(f)
+	if err != nil {
+		t.Fatalf("parse profile %s: %v", prof, err)
+	}
+	for _, s := range p.Sample {
+		if sampleCallerAboveLeaf(s, caller, leaf) {
+			return true
+		}
+	}
+	return false
+}
+
+func sampleCallerAboveLeaf(s *profile.Sample, caller, leaf string) bool {
+	ci, li := -1, -1
+	for i, loc := range s.Location {
+		hasCaller, hasLeaf := locationMentions(loc, caller, leaf)
+		if hasCaller && ci < 0 {
+			ci = i
+		}
+		if hasLeaf && li < 0 {
+			li = i
+		}
+	}
+	return li >= 0 && ci > li
+}
+
+func locationMentions(loc *profile.Location, caller, leaf string) (bool, bool) {
+	if loc == nil {
+		return false, false
+	}
+	var hasCaller, hasLeaf bool
+	for _, line := range loc.Line {
+		if line.Function == nil {
+			continue
+		}
+		hasCaller = hasCaller || strings.Contains(line.Function.Name, caller)
+		hasLeaf = hasLeaf || strings.Contains(line.Function.Name, leaf)
+	}
+	return hasCaller, hasLeaf
+}
+
 func TestFastcallProfileAttribution(t *testing.T) {
 	requireCgo(t)
 	self, err := os.Executable()
@@ -752,6 +800,9 @@ func TestFastcallProfileAttribution(t *testing.T) {
 	}
 	if !topIn(topPlain, plainWants) {
 		t.Fatalf("plain top entry = %q, want the call site", topPlain)
+	}
+	if !profileCallerAboveLeaf(t, fastProf, "callFastBusy", "busy_spin") {
+		t.Fatal("no profile sample holds the Go call site above the fast C frame")
 	}
 }
 
@@ -1097,6 +1148,9 @@ func TestFastcallLogosProfileParity(t *testing.T) {
 	}
 	if !topIn(top, lgoWants) {
 		t.Fatalf("lgo top entry = %q, want the call site", top)
+	}
+	if !profileCallerAboveLeaf(t, prof, "main.main", "cbusyf") {
+		t.Fatal("no profile sample holds the lgo call site above the fast C frame")
 	}
 }
 
