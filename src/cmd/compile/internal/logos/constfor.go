@@ -1195,6 +1195,9 @@ func (fl *fileLower) cfLeafSubs(root syntax.Node, active cfChain, covered []cfSp
 			if fl.cfFoldTagGet(n, active, parents, at, add) {
 				return false
 			}
+			if fl.cfRuntimeTagGet(n, active, parents, at, add) {
+				return false
+			}
 			if v, ok := fl.logosLayoutCallValue(n, active, sites); ok {
 				s, e := cfCallSpan(ctx, n)
 				add(s, e, keepComments(ctx.buf.b, s, e, logosLayoutText(v)))
@@ -1317,6 +1320,31 @@ func (fl *fileLower) cfFoldTagGet(call *syntax.CallExpr, active cfChain, parents
 	}
 	s, e := at(call)
 	add(s, e, strconv.Quote(reflect.StructTag(a.field.tag).Get(key)))
+	return true
+}
+func (fl *fileLower) cfRuntimeTagGet(call *syntax.CallExpr, active cfChain, parents map[syntax.Node]syntax.Node, at func(syntax.Node) (int, int), add func(int, int, string)) bool {
+	sel, ok := call.Fun.(*syntax.SelectorExpr)
+	if !ok || sel.Sel.Value != "Get" || len(call.ArgList) != 1 {
+		return false
+	}
+	tx, ok := sel.X.(*syntax.SelectorExpr)
+	if !ok || tx.Sel.Value != "Tag" {
+		return false
+	}
+	xn, ok := tx.X.(*syntax.Name)
+	if !ok {
+		return false
+	}
+	a := cfBindingFor(xn, active, parents)
+	if a == nil || a.index {
+		return false
+	}
+	if _, ok := fl.cfTagGetKey(call.ArgList[0]); ok {
+		return false
+	}
+	txs, txe := at(tx)
+	add(txs, txe, reflectAlias+".StructTag("+strconv.Quote(a.field.tag)+")")
+	fl.needReflect = true
 	return true
 }
 
