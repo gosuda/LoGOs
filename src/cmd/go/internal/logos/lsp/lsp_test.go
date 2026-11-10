@@ -1525,7 +1525,8 @@ func TestLogosLspGoplsDiscovery(t *testing.T) {
 		}
 		fakeDir := t.TempDir()
 		pathLog := filepath.Join(t.TempDir(), "path.log")
-		wrapper := "#!/bin/sh\necho \"$PATH\" >> \"" + pathLog + "\"\nexec \"" + exe + "\" \"$@\"\n"
+		argsLog := filepath.Join(t.TempDir(), "args.log")
+		wrapper := "#!/bin/sh\necho \"$PATH\" >> \"" + pathLog + "\"\necho \"$@\" >> \"" + argsLog + "\"\nexec \"" + exe + "\" \"$@\"\n"
 		if err := os.WriteFile(filepath.Join(fakeDir, "gopls"), []byte(wrapper), 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -1572,6 +1573,13 @@ func TestLogosLspGoplsDiscovery(t *testing.T) {
 		entries := strings.Split(strings.TrimSpace(string(data)), sep)
 		if !slices.Contains(entries, binDir) || !slices.Contains(entries, fakeDir) {
 			t.Errorf("gopls PATH = %q, want the toolchain bin and the fake gopls on it", data)
+		}
+		args, err := os.ReadFile(argsLog)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(args), "-mode=stdio") {
+			t.Errorf("gopls argv = %q, want -mode=stdio", args)
 		}
 	})
 }
