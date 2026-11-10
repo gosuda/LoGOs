@@ -5,6 +5,7 @@
 package p
 
 import "bytes"
+import "io"
 import "strconv"
 
 func fetch() (int, error) {
@@ -78,4 +79,12 @@ func goMethodCall() {
 	}
 	useInt(n)
 	_ = buf
+}
+func goIfaceRead(r io.Reader) {
+	n, err := r.Read(make([]byte, 4))
+	useInt(n)
+	if err != nil {
+		return
+	}
+	useInt(n)
 }
