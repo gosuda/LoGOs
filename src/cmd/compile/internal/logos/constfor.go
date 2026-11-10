@@ -1195,7 +1195,6 @@ func (fl *fileLower) cfLeafSubs(root syntax.Node, active cfChain, covered []cfSp
 			if fl.cfFoldTagGet(n, active, parents, at, add) {
 				return false
 			}
-// refused_by: statement_fold · collision: none (1 contested hunk(s), neither side deleted the other's lines)
 			if fl.cfRuntimeTagGet(n, active, parents, at, add) {
 				return false
 			}
