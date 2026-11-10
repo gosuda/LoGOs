@@ -1161,7 +1161,6 @@ A loop with only iteration-local allocation MUST NOT grow arena use across itera
 
 ### 3.2 RFC-302: Smart stack engine
 
-The variable-size `make` stack buffer is 32 bytes at O0 and O1, and under plain `go` without `-O`. At O2 it is 256 bytes and at O3 it is 4096 bytes for non-standard packages; a `logos build` with no `-O` flag uses `logos.toml [build] opt_level`, which defaults to O2. Standard-library-provenance packages and functions in a recursive call-graph cycle keep the 32-byte buffer at every opt level. [T-302]
 A slice `make` with variable effective capacity that flows into a cgo call argument or an `unsafe.Pointer` conversion MUST NOT use the stack buffer and MUST allocate its backing storage on the heap. Effective capacity is the explicit capacity when present, otherwise the length; it is fixed only when the compiler proves it constant with `ir.IsSmallIntConst` after literal rewriting. Fixed-effective-capacity makes MUST retain ordinary escape and size behavior, not a guarantee of stack allocation. [T-302]
 Under `GOEXPERIMENT=logosstack`, the runtime MUST choose the initial goroutine stack size from the per-PC exponential moving average of final stack sizes. [T-302]
 Without history for a PC, it MUST keep the current stack size. [T-302]
