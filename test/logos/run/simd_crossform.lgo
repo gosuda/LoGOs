@@ -1,0 +1,76 @@
+// run -goexperiment simd
+
+package main
+
+import (
+	"fmt"
+	"math"
+)
+
+// A defined float element type keeps the scalar form under the simd
+// experiment (SPEC 823); [N]float64 takes the vector form on amd64 and
+// arm64. Both forms must use the same fixed pairwise order with
+// bit-identical results (SPEC 833).
+
+type lane float64
+
+func pairwiseSum(t [8]float64) float64 {
+	lo := (t[0] + t[1]) + (t[2] + t[3])
+	hi := (t[4] + t[5]) + (t[6] + t[7])
+	return lo + hi
+}
+
+func leftSum(t [8]float64) float64 {
+	s := 0.0
+	for _, v := range t {
+		s += v
+	}
+	return s
+}
+
+func pairwiseDot(a, b [4]float64) float64 {
+	return (a[0]*b[0] + a[1]*b[1]) + (a[2]*b[2] + a[3]*b[3])
+}
+
+func checkCrossFormSum() {
+	t := [8]float64{1e16, 1, 1, 1, 1, 1, 1, -1e16}
+	var u [8]lane
+	for i := range t {
+		u[i] = lane(t[i])
+	}
+	vec := t.sum()
+	sca := float64(u.sum())
+	if math.Float64bits(vec) != math.Float64bits(sca) {
+		panic(fmt.Sprintf("cross-form sum bits differ: %x vs %x", math.Float64bits(vec), math.Float64bits(sca)))
+	}
+	if want := pairwiseSum(t); vec != want {
+		panic(fmt.Sprintf("sum leaves the pairwise order: got %v want %v", vec, want))
+	}
+	if leftSum(t) == pairwiseSum(t) {
+		panic("inputs do not separate the pairwise order from a left fold")
+	}
+}
+
+func checkCrossFormDot() {
+	a := [4]float64{1e16, 1, -1e16, 2}
+	b := [4]float64{1, 1, 1, 1}
+	var c, d [4]lane
+	for i := range a {
+		c[i] = lane(a[i])
+		d[i] = lane(b[i])
+	}
+	vec := a.dot(b)
+	sca := float64(c.dot(d))
+	if math.Float64bits(vec) != math.Float64bits(sca) {
+		panic(fmt.Sprintf("cross-form dot bits differ: %x vs %x", math.Float64bits(vec), math.Float64bits(sca)))
+	}
+	if want := pairwiseDot(a, b); vec != want {
+		panic(fmt.Sprintf("dot leaves the pairwise order: got %v want %v", vec, want))
+	}
+}
+
+func main() {
+	checkCrossFormSum()
+	checkCrossFormDot()
+	fmt.Println("crossform ok")
+}
