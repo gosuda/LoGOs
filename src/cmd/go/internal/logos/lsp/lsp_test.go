@@ -669,6 +669,7 @@ func TestProxyMapsRequestsAndResponses(t *testing.T) {
 	origOperand := shift(findPos(t, aLgo, "ReadFile(path)?", 0), len("ReadFile("))
 	lowOperand := shift(findPos(t, lowText, "ReadFile(path)", 0), len("ReadFile("))
 	origQ := findPos(t, aLgo, "?", 0)
+	lowAfterCall := shift(findPos(t, lowText, "(path)", 0), len("(path)"))
 	origCall := span(findPos(t, aLgo, "os.ReadFile", 0), len("os.ReadFile"))
 	lowCall := span(findPos(t, lowText, "os.ReadFile", 0), len("os.ReadFile"))
 	origRead := span(findPos(t, aLgo, "Read(", 0), len("Read"))
@@ -755,8 +756,8 @@ func TestProxyMapsRequestsAndResponses(t *testing.T) {
 	t.Run("hover on the ?", func(t *testing.T) {
 		f.client.call("textDocument/hover", positionParams(aURI, origQ))
 		_, pos := forwardedPosition(t, f, "textDocument/hover", 1)
-		if pos == origQ {
-			t.Errorf("hover on the ? stayed at %v, want a position inside the lowered expansion", pos)
+		if pos != lowAfterCall {
+			t.Errorf("hover on the ? forwarded at %v, want the start of the expansion %v", pos, lowAfterCall)
 		}
 	})
 	t.Run("definition crosses files", func(t *testing.T) {
@@ -1958,35 +1959,35 @@ func TestProxyLargeFileMapsExactly(t *testing.T) {
 
 func TestProxyDuplicateTokenMapsToOwnSegment(t *testing.T) {
 	const dupLgo = "package a\n\nimport \"os\"\n\nfunc first(path string) string {\n\tdata := os.ReadFile(path)?\n\treturn string(data)\n}\n\nfunc second(path string) string {\n\tdata := os.ReadFile(path)?\n\treturn string(data)\n}\n"
+	low, _, ok := lowerQuestion([]byte(dupLgo))
+	if !ok {
+		t.Fatal("duplicate fixture does not lower")
+	}
+	lowText := string(low)
 	f := newFixture(t, map[string]string{"a/a.lgo": dupLgo}, fixtureOptions{})
 	f.open("a/a.lgo", 1)
 	f.sync()
 	aURI := f.uri("a/a.lgo")
 	origFirst := shift(findPos(t, dupLgo, "ReadFile(path)?", 0), len("ReadFile("))
 	origSecond := shift(findPos(t, dupLgo, "ReadFile(path)?", 1), len("ReadFile("))
+	lowFirst := shift(findPos(t, lowText, "ReadFile(path)", 0), len("ReadFile("))
+	lowSecond := shift(findPos(t, lowText, "ReadFile(path)", 1), len("ReadFile("))
+	if lowFirst == lowSecond {
+		t.Fatal("fixture copies lower to the same position; the test cannot discriminate them")
+	}
 	f.client.call("textDocument/hover", positionParams(aURI, origFirst))
 	f.client.call("textDocument/hover", positionParams(aURI, origSecond))
 	opened := f.receivedMethod("textDocument/didOpen")
 	if len(opened) != 1 {
 		t.Fatalf("gopls got %d lowered didOpen messages, want one", len(opened))
 	}
-	fwdText, _ := opened[0]["textDocument"].(map[string]any)["text"].(string)
 	uri0, pos0 := forwardedPosition(t, f, "textDocument/hover", 0)
 	uri1, pos1 := forwardedPosition(t, f, "textDocument/hover", 1)
-	if uri0 != f.virtURI("a/a.lgo") || uri1 != f.virtURI("a/a.lgo") {
-		t.Errorf("copies reached gopls as %s and %s, want %s", uri0, uri1, f.virtURI("a/a.lgo"))
+	if uri0 != f.virtURI("a/a.lgo") || pos0 != lowFirst {
+		t.Errorf("hover on the first copy reached gopls as %s %v, want %s %v", uri0, pos0, f.virtURI("a/a.lgo"), lowFirst)
 	}
-	if pos0 == pos1 {
-		t.Fatalf("both copies forwarded at %v, want each copy to map to its own segment", pos0)
-	}
-	for i, pos := range []Position{pos0, pos1} {
-		lines := strings.Split(fwdText, "\n")
-		if pos.Line < 0 || pos.Line >= len(lines) || pos.Character < 0 || pos.Character > len(lines[pos.Line]) {
-			t.Fatalf("copy %d forwarded at %v, outside the lowered text", i, pos)
-		}
-		if got := lines[pos.Line][pos.Character:]; !strings.HasPrefix(got, "path)") {
-			t.Errorf("copy %d forwarded at %v reaches %q, want the path operand", i, pos, got)
-		}
+	if uri1 != f.virtURI("a/a.lgo") || pos1 != lowSecond {
+		t.Errorf("hover on the second copy reached gopls as %s %v, want its own segment %s %v", uri1, pos1, f.virtURI("a/a.lgo"), lowSecond)
 	}
 }
 
