@@ -89,7 +89,7 @@ Rules: logos-doc/SPEC.md. Status values: planned, tested, satisfied upstream, bl
 | #90 | recover inside emitted errdefer corrupting frames | M1 | test/logos/redteam/attack_090_errdefer_recover_success_skip | tested |
 | #91 | const switch ambiguity on defined int types | M7 | test/logos/run/const_switch.lgo; src/internal/types/testdata/logos/const_switch.lgo | tested |
 | #93 | malicious read beyond len on const bytes | M5 | test/logos/run/constview_bound.lgo | tested |
-| #94 | Slow context extraction on large repositories | M10 | src/cmd/go/testdata/script/logos_context.txt; src/cmd/compile/internal/logos/context_test.go (TestContextLineCap); src/cmd/compile/internal/logos/context_bench_test.go (BenchmarkContext) | tested |
+| #94 | Slow context extraction on large repositories | M10 | src/cmd/go/testdata/script/logos_context.txt; src/cmd/compile/internal/logos/context_test.go (TestContextLineCap) | tested |
 | #95 | Negative or huge take and drop indices | M6 | test/logos/run/chains.lgo (take, drop, get clamps) | tested |
 | #96 | Early return skipping errdefer armed flag | M1 | test/logos/redteam/attack_096_errdefer_armed_flag | tested |
 | #97 | Stale bytes in union struct variant slot | M2 | test/logos/redteam/attack_097_struct_variant_slots | tested |
