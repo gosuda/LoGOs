@@ -503,6 +503,83 @@ func TestLogosArenaScanOverflowLinksChunk(t *testing.T) {
 	})
 }
 
+func TestLogosArenaExactFitBoundaryKeepsChunk(t *testing.T) {
+	for _, row := range []struct {
+		name string
+		side string
+	}{
+		{name: "noscan", side: "noscan"},
+		{name: "scan", side: "scan"},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			inFreshGoroutine(t, func() {
+				m := runtime.LogosArenaSave()
+				x := new(int)
+				fill := uintptr(runtime.LogosArenaCapacity)
+				exact := uintptr(0)
+				over := uintptr(0)
+				if row.side == "noscan" {
+					fill -= 8
+					exact = 8
+					over = 9
+				} else {
+					fill -= 2*uintptr(runtime.LogosArenaScanHeaderBytes) + 16
+					exact = 16
+					over = uintptr(runtime.LogosArenaScanHeaderBytes) + 16 + 1
+				}
+				var a unsafe.Pointer
+				if row.side == "noscan" {
+					a = runtime.LogosArenaAlloc(byte(0), fill)
+					fillBytes(a, fill, 0x11)
+				} else {
+					a = runtime.LogosArenaAllocScan((*int)(nil), fill)
+					fillWords(a, fill, x)
+				}
+				_ = a
+				before := runtime.LogosArenaStat().Chunks
+				var got unsafe.Pointer
+				if row.side == "noscan" {
+					got = runtime.LogosArenaAlloc(byte(0), exact)
+					fillBytes(got, exact, 0x22)
+				} else {
+					got = runtime.LogosArenaAllocScan((*int)(nil), exact)
+					fillWords(got, exact, x)
+				}
+				if got == nil {
+					t.Fatal("exact-fit allocation did not succeed")
+				}
+				if st := runtime.LogosArenaStat(); st.Chunks != before {
+					t.Errorf("exact fit linked a chunk: chunks %d, want %d", st.Chunks, before)
+				}
+				runtime.LogosArenaRestore(m)
+				m = runtime.LogosArenaSave()
+				if row.side == "noscan" {
+					a := runtime.LogosArenaAlloc(byte(0), fill)
+					fillBytes(a, fill, 0x11)
+				} else {
+					a := runtime.LogosArenaAllocScan((*int)(nil), fill)
+					fillWords(a, fill, x)
+				}
+				before = runtime.LogosArenaStat().Chunks
+				if row.side == "noscan" {
+					got = runtime.LogosArenaAlloc(byte(0), over)
+					fillBytes(got, over, 0x33)
+				} else {
+					got = runtime.LogosArenaAllocScan((*int)(nil), over)
+					fillWords(got, over, x)
+				}
+				if got == nil {
+					t.Fatal("overflow allocation did not succeed")
+				}
+				if st := runtime.LogosArenaStat(); st.Chunks != before+1 {
+					t.Errorf("one byte over the gap did not link a chunk: chunks %d, want %d", st.Chunks, before+1)
+				}
+				runtime.LogosArenaRestore(m)
+			})
+		})
+	}
+}
+
 func TestLogosArenaNoscanReuseIsZeroed(t *testing.T) {
 	inFreshGoroutine(t, func() {
 		m := runtime.LogosArenaSave()
