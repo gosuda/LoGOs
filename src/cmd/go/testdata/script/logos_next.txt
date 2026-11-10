@@ -87,7 +87,7 @@ grep '\$"hello \{msg\} \{n\} \{true\}"' main.lgo
 
 grep 'ys := xs\.map\(x => double\(x\)\)' loop.lgo
 
-! grep 'spaced' next_tasks.json
+grep 'spaced' next_tasks.json
 grep -count=1 '^\tys := \[\]int\{\}$' loop.lgo
 grep -count=1 '^\t\tys = append\(ys, double\(xs\[i\]\)\)$' loop.lgo
 grep -count=1 '^    var out \[\]int$' loop.lgo
@@ -99,15 +99,17 @@ grep 'hex %x' convert.lgo
 grep 'break' loop.lgo
 grep 'n\+\+' loop.lgo
 grep '"version": "logos-next-1"' next_tasks.json
-grep -count=5 '"category": "ai-patch"' next_tasks.json
+grep -count=6 '"category": "ai-patch"' next_tasks.json
 grep 'func fetch\(s string\) \(string, error\)' next_tasks.json
 grep 'func probe\(s string\) \(string, error\)' next_tasks.json
+grep 'func spaced\(xs \[\]int\) \(\[\]int, int\)' next_tasks.json
 grep 'func firstBig\(xs \[\]int, limit int\) \[\]int' next_tasks.json
 grep 'func countNeg\(xs \[\]int\) \(int, \[\]int\)' next_tasks.json
 grep 'func seeded\(xs \[\]int\) \[\]int' next_tasks.json
 grep '"rule": "err-return"' next_tasks.json
 grep '"rule": "loop-chain"' next_tasks.json
 grep '"file": "convert.lgo"' next_tasks.json
+grep '"file": "gap.lgo"' next_tasks.json
 grep '"file": "loop.lgo"' next_tasks.json
 grep '"verification_cmd": "logos build \./\.\.\."' next_tasks.json
 
@@ -632,6 +634,19 @@ func parse(s string) (int, error) {
     {
       "id": "next-003",
       "category": "ai-patch",
+      "file": "gap.lgo",
+      "span": {
+        "start_line": 8,
+        "end_line": 10
+      },
+      "rule": "loop-chain",
+      "function_signature": "func spaced(xs []int) ([]int, int)",
+      "ai_instruction": "an unrelated statement sits between the declaration and the loop, so the loop needs a manual rewrite",
+      "verification_cmd": "logos build ./..."
+    },
+    {
+      "id": "next-004",
+      "category": "ai-patch",
       "file": "loop.lgo",
       "span": {
         "start_line": 18,
@@ -643,7 +658,7 @@ func parse(s string) (int, error) {
       "verification_cmd": "logos build ./..."
     },
     {
-      "id": "next-004",
+      "id": "next-005",
       "category": "ai-patch",
       "file": "loop.lgo",
       "span": {
@@ -656,7 +671,7 @@ func parse(s string) (int, error) {
       "verification_cmd": "logos build ./..."
     },
     {
-      "id": "next-005",
+      "id": "next-006",
       "category": "ai-patch",
       "file": "loop.lgo",
       "span": {

@@ -68,7 +68,7 @@ func (s *nextScan) loopPair(list []syntax.Stmt, i int, m loopMatch, ctx nextCtx)
 	}
 	if declIdx != i-1 {
 		if !touchedBetween(list, declIdx, i, m.ys) {
-			return false
+			return s.taskLoop(m.loop, ctx, "an unrelated statement sits between the declaration and the loop, so the loop needs a manual rewrite")
 		}
 		return s.taskLoop(m.loop, ctx, "the target accumulates before the loop, so no single chain expresses it")
 	}
