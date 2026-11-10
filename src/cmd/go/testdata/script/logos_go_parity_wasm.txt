@@ -4,7 +4,6 @@
 # upstream build run through upstream's exec. The same holds for logos build.
 
 [!exec:node] skip 'node is required to run js/wasm binaries'
-[!exec:/home/linuxbrew/.linuxbrew/Cellar/go/1.27.3/libexec/bin/go] stop 'upstream go 1.27.3 not installed'
 
 env GOPROXY=off
 env GOTOOLCHAIN=local
