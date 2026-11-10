@@ -123,3 +123,25 @@ func (check *Checker) logosNonMemberAssert(e syntax.Expr, x *operand, T Type) bo
 	check.errorf(e, ImpossibleAssert, "%s %s is not a member of %s", logosNonMember, T, x.typ())
 	return true
 }
+func (check *Checker) logosUnionAssign(x *operand, T Type, context string) bool {
+	if !check.conf.Logos {
+		return false
+	}
+	tset := logosClosedUnion(T)
+	if tset == nil {
+		return false
+	}
+	from := x.typ()
+	if from == nil {
+		return false
+	}
+	if isUntyped(from) {
+		from = Default(from)
+	}
+	if logosMemberOf(from, tset) {
+		return false
+	}
+	check.errorf(x, IncompatibleAssign, "%s cannot use %s as %s value in %s: %s is not a member of %s", logosNonMember, x, T, context, from, T)
+	x.invalidate()
+	return true
+}

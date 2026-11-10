@@ -95,3 +95,23 @@ func memberCases(x U) int {
 func cmpNonMember(x U) bool {
 	return x == 1.5 /* ERROR "mismatched types" */
 }
+func assignVarNonMember(f float64) {
+	var u U = f // ERROR "union_nonmember"
+	_ = u
+}
+func assignFieldNonMember(f float64) {
+	var h UnionHolder
+	h.Value = f // ERROR "union_nonmember"
+}
+func returnNonMember(f float64) U {
+	return f // ERROR "union_nonmember"
+}
+func argNonMember(f float64) {
+	acceptsUnion(f /* ERROR "union_nonmember" */)
+}
+func litNonMember(f float64) {
+	_ = []U{f /* ERROR "union_nonmember" */}
+}
+func sendNonMember(ch chan U, f float64) {
+	ch <- f // ERROR "union_nonmember"
+}
