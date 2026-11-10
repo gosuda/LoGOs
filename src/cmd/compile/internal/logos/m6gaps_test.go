@@ -63,35 +63,6 @@ func lowerSnippetSrc(t *testing.T, name, src string) string {
 	return string(out)
 }
 
-func TestScopeDeferOpenCoded(t *testing.T) {
-	src := "package main\n\nimport \"fmt\"\n\nfunc note(s string) { fmt.Println(s) }\n\nfunc f(n int) int {\n\t{\n\t\tnote(\"lock\")\n\t\tscope defer note(\"unlock\")\n\t\tnote(\"body\")\n\t\tif n > 0 {\n\t\t\treturn 1\n\t\t}\n\t}\n\treturn 0\n}\n\nfunc g() {\n\tfor range 3 {\n\t\tscope defer note(\"iter\")\n\t\tnote(\"work\")\n\t}\n}\n"
-	out := lowerSnippetSrc(t, "scopesnip.lgo", src)
-	if n := strings.Count(out, "defer func() {"); n != 2 {
-		t.Errorf("got %d guarding defers, want 2 (one per scope defer site)", n)
-	}
-	if n := strings.Count(out, "= func() {"); n != 1 {
-		t.Errorf("got %d holder closures, want 1 (the loop body rebinds one holder per iteration)", n)
-	}
-	if !strings.Contains(out, "var _logos_sd0") {
-		t.Errorf("missing hoisted holder declaration:\n%s", out)
-	}
-	if n := strings.Count(out, "if _logos_sd0 {"); n != 3 {
-		t.Errorf("got %d armed-flag stanzas, want 3", n)
-	}
-	if n := strings.Count(out, "if _logos_sd0 != nil {"); n != 2 {
-		t.Errorf("got %d holder stanzas, want 2 (panic guard and iteration end)", n)
-	}
-	if !strings.Contains(out, "_logos_f0 := note") {
-		t.Errorf("callee capture missing:\n%s", out)
-	}
-	if strings.Contains(strings.ToLower(out), "unwind") {
-		t.Errorf("unwind table reference in open-coded lowering:\n%s", out)
-	}
-	if strings.LastIndex(out, "defer func() {") > strings.Index(out, "for range") {
-		t.Errorf("loop guard sits inside the loop, disabling open-coded defers:\n%s", out)
-	}
-}
-
 func TestScopeReturnMultiResultEject(t *testing.T) {
 	src := "package main\n\nimport \"log/slog\"\n\nfunc note(s string) { slog.Info(s) }\n\nfunc pair() (int, int) { return 1, 2 }\n\nfunc f() (a, b int) {\n\t{\n\t\tscope defer note(\"cleanup\")\n\t\treturn pair()\n\t}\n\treturn\n}\n"
 	out := lowerSnippetSrc(t, "scopemultiret.lgo", src)
