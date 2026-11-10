@@ -173,3 +173,9 @@ func (s Sneaky) Logos_GetHP /* ERROR "correctness::reserved_identifier" */ () in
 type Token int
 
 var _ Named = Token /* ERROR "does not implement" */ (0)
+
+type Tok2 int
+
+func (t Tok2) Name() string { return "t" }
+
+var _ Named = Tok2 /* ERRORx "correctness::property_requires_conformance" */ (0)
