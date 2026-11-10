@@ -93,6 +93,15 @@ func exactRebindsAssign[T any](v T) {
 	}
 }
 
+func exactRebindsTypeName[T any](v T) {
+	const switch T {
+	case int:
+		var z T = v
+		var n int = z
+		_, _ = n, v
+	}
+}
+
 func tildeKeepsDeclaredType(v UserID) int {
 	const switch UserID {
 	case ~int:
