@@ -73,8 +73,12 @@ func (g *binaryGenerator) codec(t types2.Type) (int, bool) {
 			return false
 		}
 		e("dst, err = %s_e%d(dst, %s); if err != nil { return dst, err }", g.prefix, c, value)
-		d("if depth+1 > 10000 { return _logos_bfmt.Errorf(\"binary field %%s at offset %%d: nesting depth exceeds 10000\", %s, *off) }", field)
-		d("if err := %s_d%d(src, off, %s, %s, depth+1); err != nil { return err }", g.prefix, c, target, field)
+		if g.isDepthComposite(et) {
+			d("if depth+1 > 10000 { return _logos_bfmt.Errorf(\"binary field %%s at offset %%d: nesting depth exceeds 10000\", %s, *off) }", field)
+			d("if err := %s_d%d(src, off, %s, %s, depth+1); err != nil { return err }", g.prefix, c, target, field)
+		} else {
+			d("if err := %s_d%d(src, off, %s, %s, depth); err != nil { return err }", g.prefix, c, target, field)
+		}
 		return true
 	}
 	fail := "return _logos_bfmt.Errorf(\"binary field %s at offset %d: truncated input\", field, *off)"
@@ -207,6 +211,25 @@ func (g *binaryGenerator) codec(t types2.Type) (int, bool) {
 
 func (g *binaryGenerator) isZeroWire(t types2.Type) bool {
 	return g.zeroWire(types2.Unalias(t), make(map[types2.Type]bool))
+}
+func (g *binaryGenerator) isDepthComposite(t types2.Type) bool {
+	t = types2.Unalias(t)
+	if g.fl.asOption(t) != nil {
+		return false
+	}
+	if cv, ok := t.(*types2.ConstView); ok {
+		t = cv.Elem
+	}
+	u := t.Underlying()
+	if cv, ok := u.(*types2.ConstView); ok {
+		u = cv.Elem
+	}
+	switch u.(type) {
+	case *types2.Struct, *types2.Slice, *types2.Array, *types2.Map:
+		return true
+	default:
+		return false
+	}
 }
 
 func (g *binaryGenerator) zeroWire(t types2.Type, seen map[types2.Type]bool) bool {

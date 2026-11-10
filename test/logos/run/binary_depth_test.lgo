@@ -13,6 +13,18 @@ type DepthNode struct {
 	Kids []DepthNode `json:"kids"`
 }
 
+type PNode struct {
+	Next *PNode? `json:"next,omitempty"`
+}
+
+type MNode struct {
+	Kids map[string]MNode `json:"kids"`
+}
+
+type QNode struct {
+	Kids []QNode? `json:"kids,omitempty"`
+}
+
 func mustDepthBytes(b []byte, err error) []byte {
 	if err != nil {
 		panic(err)
@@ -36,6 +48,116 @@ func depthOf(v DepthNode) int {
 	return n
 }
 
+func checkDepthErr(t *testing.T, err error, field string) {
+	t.Helper()
+	if err == nil {
+		t.Fatalf("deep payload decoded without a depth error")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "depth") {
+		t.Fatalf("depth error does not name depth: %v", err)
+	}
+	if !strings.Contains(msg, field) {
+		t.Fatalf("depth error %q does not name field %s", msg, field)
+	}
+	if !strings.Contains(msg, "offset") {
+		t.Fatalf("depth error %q lacks offset", msg)
+	}
+	if !strings.Contains(msg, "10000") {
+		t.Fatalf("depth error %q does not name limit 10000", msg)
+	}
+}
+
+func testSliceBoundary(t *testing.T) {
+	v := DepthNode{}
+	for i := 0; i < 4999; i++ {
+		v = DepthNode{Kids: []DepthNode{v}}
+	}
+	enc := mustDepthBytes(v.MarshalBinary())
+	var got DepthNode
+	if err := got.UnmarshalBinary(enc); err != nil {
+		t.Fatalf("4999-deep slice rejected: %v", err)
+	}
+	if !bytes.Equal(mustDepthBytes(got.MarshalBinary()), enc) {
+		t.Fatalf("4999-deep slice did not round-trip")
+	}
+	w := DepthNode{}
+	for i := 0; i < 5000; i++ {
+		w = DepthNode{Kids: []DepthNode{w}}
+	}
+	deep := mustDepthBytes(w.MarshalBinary())
+	var bad DepthNode
+	checkDepthErr(t, bad.UnmarshalBinary(deep), ".Kids")
+}
+
+func testPointerBoundary(t *testing.T) {
+	v := PNode{}
+	for i := 0; i < 10000; i++ {
+		c := v
+		v = PNode{Next: &c}
+	}
+	enc := mustDepthBytes(v.MarshalBinary())
+	var got PNode
+	if err := got.UnmarshalBinary(enc); err != nil {
+		t.Fatalf("10000-deep pointer rejected: %v", err)
+	}
+	if !bytes.Equal(mustDepthBytes(got.MarshalBinary()), enc) {
+		t.Fatalf("10000-deep pointer did not round-trip")
+	}
+	w := PNode{}
+	for i := 0; i < 10001; i++ {
+		c := w
+		w = PNode{Next: &c}
+	}
+	deep := mustDepthBytes(w.MarshalBinary())
+	var bad PNode
+	checkDepthErr(t, bad.UnmarshalBinary(deep), ".Next")
+}
+
+func testMapBoundary(t *testing.T) {
+	v := MNode{Kids: map[string]MNode{}}
+	for i := 0; i < 4999; i++ {
+		v = MNode{Kids: map[string]MNode{"k": v}}
+	}
+	enc := mustDepthBytes(v.MarshalBinary())
+	var got MNode
+	if err := got.UnmarshalBinary(enc); err != nil {
+		t.Fatalf("4999-deep map rejected: %v", err)
+	}
+	if !bytes.Equal(mustDepthBytes(got.MarshalBinary()), enc) {
+		t.Fatalf("4999-deep map did not round-trip")
+	}
+	w := MNode{Kids: map[string]MNode{}}
+	for i := 0; i < 5000; i++ {
+		w = MNode{Kids: map[string]MNode{"k": w}}
+	}
+	deep := mustDepthBytes(w.MarshalBinary())
+	var bad MNode
+	checkDepthErr(t, bad.UnmarshalBinary(deep), ".Kids")
+}
+
+func testOptionBoundary(t *testing.T) {
+	v := QNode{}
+	for i := 0; i < 5000; i++ {
+		v = QNode{Kids: []QNode{v}}
+	}
+	enc := mustDepthBytes(v.MarshalBinary())
+	var got QNode
+	if err := got.UnmarshalBinary(enc); err != nil {
+		t.Fatalf("5000-deep option rejected: %v", err)
+	}
+	if !bytes.Equal(mustDepthBytes(got.MarshalBinary()), enc) {
+		t.Fatalf("5000-deep option did not round-trip")
+	}
+	w := QNode{}
+	for i := 0; i < 5001; i++ {
+		w = QNode{Kids: []QNode{w}}
+	}
+	deep := mustDepthBytes(w.MarshalBinary())
+	var bad QNode
+	checkDepthErr(t, bad.UnmarshalBinary(deep), ".Kids")
+}
+
 func TestBinaryDepthLimit(t *testing.T) {
 	shallow := depthWire(100)
 	var s DepthNode
@@ -48,13 +170,8 @@ func TestBinaryDepthLimit(t *testing.T) {
 	if !bytes.Equal(mustDepthBytes(s.MarshalBinary()), shallow) {
 		t.Fatalf("100-deep payload did not round-trip")
 	}
-	deep := depthWire(10001)
-	var d DepthNode
-	err := d.UnmarshalBinary(deep)
-	if err == nil {
-		t.Fatal("10001-deep payload decoded without a depth error")
-	}
-	if !strings.Contains(err.Error(), "depth") {
-		t.Fatalf("depth error does not name depth: %v", err)
-	}
+	testSliceBoundary(t)
+	testPointerBoundary(t)
+	testMapBoundary(t)
+	testOptionBoundary(t)
 }
