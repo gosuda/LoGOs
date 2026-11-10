@@ -26,7 +26,7 @@ func (s *nextScan) loopAppend(list []syntax.Stmt, i int, ctx nextCtx) bool {
 	if !ok || loop.Body == nil {
 		return false
 	}
-	iv, xs, ok := s.loopHeader(loop)
+	iv, xs, val, ok := s.loopHeader(loop)
 	if !ok {
 		return false
 	}
@@ -38,7 +38,7 @@ func (s *nextScan) loopAppend(list []syntax.Stmt, i int, ctx nextCtx) bool {
 		return s.taskLoop(loop, ctx, "the loop body does more than append one element, so no single chain expresses it")
 	}
 	m := loopMatch{loop: loop, iv: iv, xs: xs, ys: ys, elem: call.ArgList[1]}
-	c := &elemCheck{scan: s, xs: xs, iv: iv, ys: ys, unsafeCalls: s.receiverUnsafe(loop, xs, ctx)}
+	c := &elemCheck{scan: s, xs: xs, iv: iv, ys: ys, val: val, unsafeCalls: s.receiverUnsafe(loop, xs, ctx)}
 	if !c.expr(m.elem) {
 		return s.taskLoop(loop, ctx, "the appended element escapes the chain form, so the loop needs a manual rewrite")
 	}
@@ -222,19 +222,56 @@ func declBoundsEmptySlice(n *syntax.AssignStmt, ys string) bool {
 	return ok
 }
 
-func (s *nextScan) loopHeader(loop *syntax.ForStmt) (string, string, bool) {
+func (s *nextScan) loopHeader(loop *syntax.ForStmt) (string, string, string, bool) {
+	if rc, ok := loop.Init.(*syntax.RangeClause); ok {
+		return s.loopHeaderRange(loop, rc)
+	}
 	iv, ok := loopHeaderIndex(loop)
 	if !ok {
-		return "", "", false
+		return "", "", "", false
 	}
 	xs, ok := s.loopHeaderBound(loop, iv)
 	if !ok {
-		return "", "", false
+		return "", "", "", false
 	}
 	if !loopHeaderPost(loop, iv) {
-		return "", "", false
+		return "", "", "", false
 	}
-	return iv, xs, true
+	return iv, xs, "", true
+}
+
+func (s *nextScan) loopHeaderRange(loop *syntax.ForStmt, rc *syntax.RangeClause) (string, string, string, bool) {
+	if !rc.Def || loop.Cond != nil || loop.Post != nil {
+		return "", "", "", false
+	}
+	xsName, ok := rc.X.(*syntax.Name)
+	if !ok || xsName.Value == "_" {
+		return "", "", "", false
+	}
+	var iv, val string
+	switch lhs := rc.Lhs.(type) {
+	case *syntax.Name:
+		iv = lhs.Value
+	case *syntax.ListExpr:
+		if len(lhs.ElemList) != 2 {
+			return "", "", "", false
+		}
+		idx, ok := lhs.ElemList[0].(*syntax.Name)
+		if !ok || idx.Value != "_" {
+			return "", "", "", false
+		}
+		v, ok := lhs.ElemList[1].(*syntax.Name)
+		if !ok {
+			return "", "", "", false
+		}
+		iv, val = "_", v.Value
+	default:
+		return "", "", "", false
+	}
+	if iv == "_" && val == "" || iv == xsName.Value || val == "_" || val == xsName.Value {
+		return "", "", "", false
+	}
+	return iv, xsName.Value, val, true
 }
 
 func loopHeaderIndex(loop *syntax.ForStmt) (string, bool) {
@@ -478,6 +515,7 @@ type elemCheck struct {
 	xs          string
 	iv          string
 	ys          string
+	val         string
 	unsafeCalls bool
 	spans       [][2]int
 }
@@ -495,12 +533,19 @@ func (s *nextScan) receiverUnsafe(loop *syntax.ForStmt, xs string, ctx nextCtx) 
 
 func (s *nextScan) loopReceiverObj(loop *syntax.ForStmt, xs string) types2.Object {
 	var found types2.Object
-	syntax.Inspect(loop.Cond, func(n syntax.Node) bool {
-		if name, ok := n.(*syntax.Name); ok && name.Value == xs && found == nil {
-			found = s.nameObj(name)
+	inspect := func(n syntax.Node) {
+		if n == nil || found != nil {
+			return
 		}
-		return found == nil
-	})
+		syntax.Inspect(n, func(n syntax.Node) bool {
+			if name, ok := n.(*syntax.Name); ok && name.Value == xs && found == nil {
+				found = s.nameObj(name)
+			}
+			return found == nil
+		})
+	}
+	inspect(loop.Cond)
+	inspect(loop.Init)
 	return found
 }
 
@@ -515,10 +560,12 @@ func isPackageVar(obj types2.Object) bool {
 	}
 	return pkg.Scope().Lookup(v.Name()) == obj
 }
-
 func (c *elemCheck) expr(e syntax.Expr) bool {
 	switch n := unwrapParen(e).(type) {
 	case *syntax.Name:
+		if c.val != "" && n.Value == c.val {
+			return c.elemRef(n)
+		}
 		return exprName(n, c.ys, c.iv)
 	case *syntax.BasicLit:
 		return true
@@ -534,6 +581,18 @@ func (c *elemCheck) expr(e syntax.Expr) bool {
 		return c.expr(n.X)
 	}
 	return false
+}
+func (c *elemCheck) elemRef(n *syntax.Name) bool {
+	start, err := offsetOf(c.scan.starts, len(c.scan.src), n.Pos())
+	if err != nil {
+		return false
+	}
+	end, ok := c.scan.endOf(n)
+	if !ok {
+		return false
+	}
+	c.spans = append(c.spans, [2]int{start, end})
+	return true
 }
 
 func exprName(n *syntax.Name, ys, iv string) bool {
