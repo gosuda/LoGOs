@@ -1,6 +1,6 @@
 # A Go importer calling a Go package that carries a `lang go` record
-# must not wrap the call: passing nil panics with the plain runtime
-# error instead of the logos message.
+# must not wrap the call: passing nil crashes with the plain runtime
+# error and no logos prefix [T-Sec5][R-U1].
 env GOPROXY=off
 env GOTOOLCHAIN=local
 mkdir $WORK/bin
@@ -14,9 +14,9 @@ stdout '^fn GoAssert AssertTP=1,AssertRTP=0$'
 stdout '^lang go$'
 
 logos build -o $WORK/bin/nilgo$GOEXE ./gc/cmd
-exec $WORK/bin/nilgo$GOEXE
-stdout '^direct-ok: runtime error: invalid memory address or nil pointer dereference$'
-! stdout 'logos: nil from Go value'
+! exec $WORK/bin/nilgo$GOEXE
+stderr 'nil pointer dereference'
+! stderr 'logos: nil from Go value'
 cd ..
 
 -- w/go.work --
@@ -60,34 +60,22 @@ replace example.com/gl => ../gl
 package q
 
 import (
-	"fmt"
-
 	"example.com/gl/lib"
 	_ "logos/rt"
 )
 
 func DirectMsg() string {
-	msg := "no-panic"
-	func() {
-		defer func() {
-			if r := recover(); r != nil {
-				msg = fmt.Sprint(r)
-			}
-		}()
-		_ = lib.Get(nil)
-	}()
-	return msg
+	_ = lib.Get(nil)
+	return "no-panic"
 }
 
 -- w/gc/cmd/main.go --
 package main
 
 import (
-	"fmt"
-
 	"example.com/gc/q"
 )
 
 func main() {
-	fmt.Println("direct-ok:", q.DirectMsg())
+	_ = q.DirectMsg()
 }
