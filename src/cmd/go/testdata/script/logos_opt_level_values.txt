@@ -1,0 +1,55 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+# SPEC 375: go build accepts -O=0 with -N -l and -O=1 with no inline budget.
+go build -a -x -O=0 .
+stderr '\-N \-l'
+
+go build -a -x -O=1 .
+! stderr 'inlbudget'
+
+logos build -a -x -O=s .
+stderr '\-d=inlbudget=15[ ,]'
+
+go build -a -x -O=s .
+stderr '\-d=inlbudget=15[ ,]'
+cd mixed
+logos build -a -x ./helper
+stderr 'GOAMD64=.*v1.*helper'
+
+logos build -a -x .
+stderr 'GOAMD64=.*v1.*-p main'
+cd ..
+
+-- go.mod --
+module example.com/optlevelvalues
+
+go 1.27
+
+-- main.go --
+package main
+
+func main() {}
+
+-- mixed/go.mod --
+module example.com/optlevelvalues/mixed
+
+go 1.27
+
+-- mixed/logos.toml --
+[build]
+target_cpu = "baseline"
+
+-- mixed/main.lgo --
+package main
+
+import "fmt"
+
+func main() {
+	fmt.Println("hello")
+}
+
+-- mixed/helper/helper.go --
+package helper
+
+func Hello() {}
