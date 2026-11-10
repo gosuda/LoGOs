@@ -37,6 +37,8 @@ stderr '\[correctness::const_view_mutation\]'
 stderr '\[correctness::const_view_mutation\]'
 ! logos build ./goimport
 stderr '\[correctness::const_view_mutation\]'
+! logos build ./identity
+stderr '\[correctness::const_view_mutation\]'
 cd ..
 
 cd gneg
@@ -267,14 +269,19 @@ module example.com/golib
 go 1.27
 
 -- golib/lib.go --
-// Go-exported ordinary generic declaration: legal as declared. The
-// forgery appears only when an lgo importer instantiates it to the
-// imported Qualified (neg/goimport) or a Go importer does (gneg).
+// Go-exported ordinary generic declarations: legal as declared. The
+// forgery appears only when an lgo importer instantiates one to the
+// imported Qualified (neg/goimport, neg/identity) or a Go importer does (gneg).
 package lib
 
 func GenericAs[T any](x any) T {
 	return x.(T)
 }
+
+func Identity[T any](x any) T {
+	return x.(T)
+}
+
 
 -- neg/go.mod --
 module example.com/neg
@@ -467,6 +474,18 @@ import (
 
 func Attack(v any) c.Qualified {
 	return golib.GenericAs[c.Qualified](v)
+}
+
+-- neg/identity/identity.lgo --
+package identity
+
+import (
+	golib "example.com/golib"
+	"example.com/neg/c"
+)
+
+func Attack(v any) c.Qualified {
+	return golib.Identity[c.Qualified](v)
 }
 
 -- gneg/go.mod --
