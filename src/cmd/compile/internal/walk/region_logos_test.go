@@ -159,6 +159,31 @@ func TestLogosRegionBumpNew(t *testing.T) {
 		t.Fatalf("owner block has %d closes, want 1", regionCloseCount(list))
 	}
 }
+func TestLogosRegionRaceDisablesBump(t *testing.T) {
+	enableLogosRegion(t)
+	old := base.Flag.Race
+	base.Flag.Race = true
+	t.Cleanup(func() { base.Flag.Race = old })
+	fn := regionTestFn()
+	openCall, openAs, r := regionTestOpen(fn)
+	newCall, newAs := regionTestNew(fn, r, types.Types[types.TINT8])
+	ir.LogosRegions.Place(newCall)
+	ir.LogosRegions.Live(openCall)
+	fn.Body = ir.Nodes{regionTestBlock(openAs, newAs)}
+	logosRegionLower(fn)
+	for _, st := range newAs.Init() {
+		if regionCallName(st) == "logosRegionBump" {
+			t.Fatal("race build uses logosRegionBump")
+		}
+	}
+	y := newAs.Y
+	if conv, ok := y.(*ir.ConvExpr); ok {
+		y = conv.X
+	}
+	if regionCallName(y) != "logosRegionAllocNoscan" {
+		t.Fatalf("race new lowers to %q, want logosRegionAllocNoscan", regionCallName(y))
+	}
+}
 
 func TestLogosRegionDeadOpen(t *testing.T) {
 	enableLogosRegion(t)
