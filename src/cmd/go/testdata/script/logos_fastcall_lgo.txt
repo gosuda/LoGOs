@@ -1,0 +1,75 @@
+[!cgo] skip
+
+env GOPROXY=off
+env GOTOOLCHAIN=local
+env CGO_ENABLED=1
+
+# Accept: the .lgo spelling maps the call to the fast path.
+mkdir $WORK/obj-ok
+go tool cgo -objdir $WORK/obj-ok -importpath example.com/fast ok/f.lgo
+grep '^\t_cgo_runtime_cgocall_fast\(' $WORK/obj-ok/_cgo_gotypes.go
+
+# Reject: a marker with an extra field stays on the plain path.
+mkdir $WORK/obj-arity
+go tool cgo -objdir $WORK/obj-arity -importpath example.com/fast arity/f.lgo
+! grep '^\t_cgo_runtime_cgocall_fast\(' $WORK/obj-arity/_cgo_gotypes.go
+grep '^\t_cgo_runtime_cgocall\(' $WORK/obj-arity/_cgo_gotypes.go
+
+# Reject: a marker outside the preamble is an inert comment.
+mkdir $WORK/obj-nonpre
+go tool cgo -objdir $WORK/obj-nonpre -importpath example.com/fast nonpre/f.lgo
+! grep '^\t_cgo_runtime_cgocall_fast\(' $WORK/obj-nonpre/_cgo_gotypes.go
+grep '^\t_cgo_runtime_cgocall\(' $WORK/obj-nonpre/_cgo_gotypes.go
+
+# Reject: a marker with no matched C function fails.
+mkdir $WORK/obj-ghost
+! go tool cgo -objdir $WORK/obj-ghost -importpath example.com/fast ghost/f.lgo
+stderr 'no matched C function'
+
+-- ok/f.lgo --
+package fast
+
+/*
+#include <stdint.h>
+//logos:cgo_fastcall ladd
+int ladd(int a, int b) { return a + b; }
+*/
+import "C"
+
+func Add(a, b int32) int32 { return int32(C.ladd(C.int(a), C.int(b))) }
+
+-- arity/f.lgo --
+package fast
+
+/*
+#include <stdint.h>
+//logos:cgo_fastcall ladd extra
+int ladd(int a, int b) { return a + b; }
+*/
+import "C"
+
+func Add(a, b int32) int32 { return int32(C.ladd(C.int(a), C.int(b))) }
+
+-- nonpre/f.lgo --
+package fast
+
+/*
+#include <stdint.h>
+int ladd(int a, int b) { return a + b; }
+*/
+import "C"
+//logos:cgo_fastcall ladd
+
+func Add(a, b int32) int32 { return int32(C.ladd(C.int(a), C.int(b))) }
+
+-- ghost/f.lgo --
+package fast
+
+/*
+#include <stdint.h>
+//logos:cgo_fastcall ghost_fn
+int ladd(int a, int b) { return a + b; }
+*/
+import "C"
+
+func Add(a, b int32) int32 { return int32(C.ladd(C.int(a), C.int(b))) }
