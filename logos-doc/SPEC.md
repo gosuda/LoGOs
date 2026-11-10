@@ -866,7 +866,6 @@ A closed union MUST use the upstream interface representation, including upstrea
 Switch results MUST take the common type of the arms. [T-203.1]
 Union values MUST use the upstream interface representation. [T-203.1]
 A `nil` union value MUST go to `case nil`. [T-203.1]
-Exhaustive switches MUST cover every member and `nil`. [T-203.1]
 Method bodies inside interfaces MUST fail compilation. [T-203.2]
 Structs MUST satisfy property interfaces only through an explicit `: I` declaration. [T-203.2]
 The package MUST generate both getter and setter for it. [T-203.2]
