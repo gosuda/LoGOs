@@ -133,3 +133,24 @@ func TestUnmarshalFallbackDeliversTheSameMethodInput(t *testing.T) {
 		t.Fatalf("a bare field must deliver its raw token: %q", staticInputs)
 	}
 }
+
+func TestModeledFieldsKeepTheFastPath(t *testing.T) {
+	m := ModeledOnly{A: -9, B: "x"}
+	one := OneFallback{A: -9, B: "x", V: 1}
+	two := TwoFallback{A: -9, B: "x", V: 1, W: 2}
+	sink = must(m.MarshalJSON())
+	sink = must(one.MarshalJSON())
+	sink = must(two.MarshalJSON())
+	modeled := testing.AllocsPerRun(100, func() { sink = must(m.MarshalJSON()) })
+	single := testing.AllocsPerRun(100, func() { sink = must(one.MarshalJSON()) })
+	pair := testing.AllocsPerRun(100, func() { sink = must(two.MarshalJSON()) })
+	if modeled != 1 {
+		t.Fatalf("modeled struct allocates %v times, want 1", modeled)
+	}
+	if pair != 2*single-modeled {
+		t.Fatalf("each unmodeled field must pay the same per-field fallback: modeled %v, one %v, two %v", modeled, single, pair)
+	}
+	if single == modeled {
+		t.Fatalf("the unmodeled field paid nothing: modeled %v, one %v", modeled, single)
+	}
+}
