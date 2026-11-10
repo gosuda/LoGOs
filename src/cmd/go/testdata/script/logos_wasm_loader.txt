@@ -186,6 +186,7 @@ if (mode === "text") {
 } else {
   assert.throws(() => exports.fail(new Uint8Array(3)), Error);
   assert.throws(() => exports.checkHost(2, 3, 6), Error);
+  assert.throws(() => exports.failneg(), Error);
 }
 exports.checkHost(2, 3, 5);
 exports.align();
@@ -500,6 +501,11 @@ func incr(p unsafe.Pointer, n int32) int32 {
 //go:wasmexport fail
 func fail(p unsafe.Pointer, n int32) int32 {
 	return 7
+}
+
+//go:wasmexport failneg
+func failneg() int32 {
+	return -1
 }
 
 //go:wasmexport checkHost
