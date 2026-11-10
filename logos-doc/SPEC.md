@@ -693,7 +693,7 @@ Any other conversion MUST fail with `[correctness::union_nonmember]` naming the 
 
 A comparison between a union and a constant MUST convert the constant to its default type and require membership. [T-203.1]
 
-An assertion or case type outside the member set MUST fail with `[correctness::union_nonmember]`. [T-203.1]
+A static assertion or case type outside the member set MUST fail with `[correctness::union_nonmember]`. [T-203.1]
 
 A comma-ok assertion on a non-member MUST yield `ok == false`. [T-203.1]
 
