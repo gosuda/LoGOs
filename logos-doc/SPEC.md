@@ -110,13 +110,11 @@ The `[build] cgo` policy (`forbid`, `restricted`, `allow`) and its `forbid` defa
 A Go main module MUST keep the upstream default for `CGO_ENABLED` under `logos`, and a `cgo` key in its `logos.toml` MUST have no effect [T-101.2][R-U1].
 Plain `go` MUST keep the upstream default for `CGO_ENABLED` [T-101.2].
 With cgo off, `net` and `os/user` in the standard library MUST use their pure-Go paths [T-101.2].
-When the main module path's first element contains a dot, each alias-extension file MUST produce warning `portability::alias_extension`. [T-101.1][T-102]
 
 ### 1.2 RFC-102: Compiler linter and rule set
 The `logos lint` check MUST run inside the compiler on loGo/s packages for syntax and type rules [T-102].
 The `logos lint` check MUST run the language-neutral syntax and type rules on Go packages at the same point [T-102][R-U1].
 The `logos lint` check MUST run inside escape analysis for escape rules, on Go packages and on loGo/s packages [T-102][R-U1].
-`logos lint` MUST lint Go packages with the language-neutral rules only [T-102][R-U1].
 A rule MUST count as language-neutral when a Go package can trigger it with Go syntax and types alone and the code it guards exists in Go packages. A loGo/s form inside its detection, such as a group child, a const view, or `?`, MUST stay inactive in Go [T-102][R-U1]. The only exception is a `go` statement inside a `WithLock` callback that spawns a relock, which MUST NOT report under `concurrency::reentrant_withlock_deadlock` [T-102][R-U1].
 The language-neutral rules MUST be `correctness::typed_nil_return` (in Go, the `(*T)(nil)` form only), `correctness::arena_pointer_escape`, `correctness::infinite_recursion`, `correctness::unclosed_io_closer`, `correctness::unbounded_channel_op`, `concurrency::concurrent_multiword_race`, `concurrency::reentrant_withlock_deadlock`, `correctness::withlock_leak`, `slop::err_chain_reset`, `slop::discarded_error`, `complexity::cognitive_overflow`, `perf::large_backing_array_pin`, `perf::time_after_in_loop`, `concurrency::unguarded_access`, `concurrency::nonatomic_access`, `concurrency::lock_requirement_unmet`, `correctness::layout_constant_mismatch`, `portability::atomic_plain_int64`, `correctness::linkname_mismatch`, `perf::arena_fallback`, and `pedantic::unsafe_outside_unsafe_file` [T-102][R-U1].
 The compiler MUST enforce `concurrency::unguarded_access` as `forbid` against a read or write of a field that `//logos:guardedby` guards without its lock held [T-102].
@@ -135,7 +133,6 @@ A Go package MUST get the default group severities, the `logos.toml [lints]` tab
 A language-neutral rule whose default severity is `forbid` MUST run at `deny` for a Go package [T-102][R-U1].
 `//logos:allow(<rule>)` MUST silence such a rule in a Go package [T-102][R-U1].
 A loGo/s package MUST keep the `forbid` severity of such a rule [T-102].
-`logos build` MUST run no default lint on a Go package [T-102][R-U1].
 Third-party modules of either kind MUST get no code lints [T-102][R-U1].
 Capability checks MUST apply to every module in the build [T-102].
 `forbid` MUST NOT be lowered by configuration [T-102].
@@ -144,7 +141,6 @@ In a loGo/s package, `forbid` MUST ignore `//logos:allow(<rule>)` [T-102].
 `warn` MUST print a warning and MUST NOT fail the build [T-102].
 `allow` MUST stay silent [T-102].
 In a loGo/s package, a `//logos:allow` directive on a `forbid` rule MUST itself be an error with `correctness::allow_forbidden_rule` [T-102].
-In a Go package, a `//logos:allow` directive on a rule that the Go cap lowers from `forbid` to `deny` MUST silence that rule [T-102][R-U1].
 The default group severities MUST be `correctness` forbid, `concurrency` forbid, `slop` deny, `complexity` deny, `perf` warn, `style` warn, `suspicious` warn, `portability` warn, `pedantic` allow [T-102].
 The `logos.toml [lints]` table MUST control group severities [T-102].
 The `logos.toml [lints.thresholds]` defaults MUST be 3 for nesting depth, 15 for cognitive complexity, 60 for function lines, 4 for function parameters, 4096 for comptime nodes, and 100000 for CTFE steps [T-102].
@@ -175,7 +171,6 @@ The compiler MUST enforce `suspicious::unapplied_struct_default` as `warn` again
 The compiler MUST enforce `suspicious::side_effect_before_sort` as `warn` against a chain lambda with a call of unknown purity before `.sortBy()` [T-102].
 The compiler MUST enforce `perf::large_backing_array_pin` as `warn` against escape of a subslice or substring of a backing array above 64 KB [T-102].
 The compiler MUST enforce `portability::serialized_unsized_int` as `warn` against an `int` or `uint` field in a struct with JSON tags [T-102].
-The compiler MUST enforce `portability::alias_extension` as `warn` for each alias-extension file per the module-path rule [T-101.1][T-102].
 The warnings of `suspicious::unapplied_struct_default`, `suspicious::side_effect_before_sort`, and `portability::alias_extension` MUST take their severity from the `logos.toml [lints]` group of the rule, and `//logos:allow(<rule>)` MUST silence each of them under `warn` and `deny` [T-102].
 A `//logos:allow(portability::alias_extension)` directive MUST silence the rule for an alias-extension file only when it sits in the comment block directly above the package clause of that file [T-102].
 The compiler MUST enforce `perf::time_after_in_loop` as `warn` against `time.After` inside a loop body [T-102].
