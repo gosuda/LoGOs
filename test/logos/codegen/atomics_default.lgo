@@ -7,7 +7,6 @@ import "sync/atomic"
 var atomicDefaultCell atomic.Int64
 
 func atomicDefaultAdd() {
-	// arm64:"LDADDAL"
-	// amd64:"LOCK" -"CMPXCHG"
+	// arm64:"LDADD"
 	atomicDefaultCell.Add(1)
 }

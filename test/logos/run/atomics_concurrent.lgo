@@ -1,0 +1,39 @@
+// run
+
+package main
+
+import (
+	"context"
+	"fmt"
+	"sync/atomic"
+)
+
+var atomicConcurrentCell atomic.Int64
+
+func atomicAddThousand() {
+	for range 1000 {
+		atomicConcurrentCell.Add(1)
+	}
+}
+
+func hammerConcurrent(ctx context.Context) error {
+	go group (ctx) {
+		for range 8 {
+			go atomicAddThousand()
+		}
+	}
+	return nil
+}
+
+func main() {
+	ctx := context.Background()
+	if err := hammerConcurrent(ctx); err != nil {
+		fmt.Println("bad err")
+		return
+	}
+	if atomicConcurrentCell.Load() == 8000 {
+		fmt.Println("ok")
+	} else {
+		fmt.Println("bad", atomicConcurrentCell.Load())
+	}
+}
