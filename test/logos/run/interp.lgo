@@ -26,6 +26,13 @@ type bigBox struct{ s string }
 
 func (b bigBox) String() string { return b.s }
 
+type countShout struct{ p *int }
+
+func (c countShout) String() string {
+	*c.p++
+	return "hey!"
+}
+
 func tag(s string, v int) int {
 	evalOrder = append(evalOrder, s)
 	return v
@@ -37,6 +44,13 @@ func nextID() int {
 	nextIDCalls++
 	return nextIDCalls
 }
+
+func convOnce() bool {
+	calls := 0
+	sink = $"v={countShout{&calls}}"
+	return calls == 1
+}
+
 
 func main() {
 	name := "ada"
@@ -95,4 +109,5 @@ func main() {
 	} else {
 		fmt.Println("bound-ok")
 	}
+	fmt.Println("conv-once:", convOnce())
 }
