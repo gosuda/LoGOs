@@ -45,6 +45,9 @@ logos lint --pedantic=false ./...
 ! stderr .
 ! logos lint --pedantic ./...
 stderr 'main\.lgo:15:2: \[pedantic::exhaustive_union_switch\]'
+logos build --pedantic=false -o $WORK/bin/strictoff$GOEXE .
+! stderr .
+exists $WORK/bin/strictoff$GOEXE
 cd ..
 
 cd gopkg
