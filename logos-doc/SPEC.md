@@ -1106,7 +1106,7 @@ Scan-region objects MUST carry a type word, and the collector MUST scan them wit
 Popped scan memory MUST be zeroed before reuse. [T-301.1]
 After a release, a collection MUST find no stale pointers. [T-301.1]
 Pointer-containing region objects MUST keep their heap referents alive across `runtime.GC()`. [T-301.1]
-A goroutine parked with empty regions MUST hold no chunk. [T-301.1]
+When a goroutine parks, it MUST release every chunk whose noscan and scan regions are both empty, including empty chunks behind a live chunk. [T-301.1]
 `runtime.SetFinalizer` and `runtime.AddCleanup` on a region object MUST panic with `runtime: <API> on loGo/s arena object`, naming the called function. [T-301.1]
 Cgo pointer checks MUST NOT panic on region addresses. [T-301.1]
 Region placement MUST NOT change program meaning: every program MUST print the same output when every region allocation is a heap allocation. [T-301.1]
@@ -1147,7 +1147,6 @@ This precision MUST apply to loGo/s packages, and to Go packages under `GOEXPERI
 
 
 [T-301.1] Recursion MUST return arena-allocated results to the caller intact.
-[T-301.1] When a goroutine parks, it MUST release every chunk whose noscan and scan regions are both empty, including empty chunks behind a live chunk.
 [T-301.1] Idle parked goroutines MUST consume 0 bytes of arena memory.
 It MUST retain every live chunk and preserve all live-object addresses. [T-301.1]
 With no live chunks, it MUST retain no arena capacity; its ordinary stack and runtime metadata still exist. [T-301.1]
