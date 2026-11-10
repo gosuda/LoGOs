@@ -34,6 +34,10 @@ logos build -wasm-features=stack-switching -gcflags=-S=2 -o $WORK/switch.wasm .
 stderr 'main\.main<1> STEXT[^\n]*\n(\t[^\n]*\n)*\t[^\n]*\tBrTable'
 stderr '(?s)main\.pureCond<1> STEXT[^\n]*\n(\t[^\n]*\n)*\t[^\n]*\tBrTable'
 stderr 'main\.goschedwrap<1> STEXT[^\n]*\n(\t[^\n]*\n)*\t[^\n]*\tBrTable'
+# A resuming runtime frame keeps resume-point dispatch under stack
+# switching. Dropping dispatch for runtime frames removes this table.
+logos build -wasm-features=stack-switching -gcflags=runtime=-S=2 -o $WORK/switchrt.wasm .
+stderr '(?s)runtime\.chanrecv<1> STEXT[^\n]*\n(\t[^\n]*\n)*\t[^\n]*\tBrTable'
 
 go build -wasm-features=stack-switching -gcflags=-S=2 -o $WORK/gobuild-asm.wasm .
 ! stderr '(?s)main\.waits<1> STEXT[^\n]*\n(\t[^\n]*\n)*\t[^\n]*\tBrTable'
@@ -43,6 +47,8 @@ stderr 'main\.main<1> STEXT[^\n]*\n(\t[^\n]*\n)*\t[^\n]*\tBrTable'
 stderr '(?s)main\.pureCond<1> STEXT[^\n]*\n(\t[^\n]*\n)*\t[^\n]*\tBrTable'
 
 stderr '(?s)main\.goschedwrap<1> STEXT[^\n]*\n(\t[^\n]*\n)*\t[^\n]*\tBrTable'
+go build -wasm-features=stack-switching -gcflags=runtime=-S=2 -o $WORK/gobuild-rt.wasm .
+stderr '(?s)runtime\.chanrecv<1> STEXT[^\n]*\n(\t[^\n]*\n)*\t[^\n]*\tBrTable'
 go build -gcflags=-S=2 -o $WORK/gobuild-plain.wasm .
 stderr '(?s)main\.waits<1> STEXT[^\n]*\n(\t[^\n]*\n)*\t[^\n]*\tBrTable'
 stderr '(?s)main\.pureLeaf<1> STEXT[^\n]*\n(\t[^\n]*\n)*\t[^\n]*\tBrTable'
