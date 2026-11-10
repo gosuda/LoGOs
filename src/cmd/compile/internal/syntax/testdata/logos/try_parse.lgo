@@ -160,3 +160,8 @@ func badGoParenTryTry() error {
 	go (g())? ? // ERROR expression in go must not be parenthesized
 	return nil
 }
+
+func badPrefixTry() (int, error) {
+	x := (?f) // ERROR syntax error: unexpected \?, expected expression
+	return x, nil
+}
