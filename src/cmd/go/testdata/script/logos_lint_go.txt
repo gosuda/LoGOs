@@ -115,7 +115,20 @@ stdout '^1$'
 logos lint ./...
 stderr 'warning: \[portability::atomic_plain_int64\]'
 logos lint --json-diagnostics ./...
-stderr '"description":"declare plain as atomic.Int64"'
+stderr '"rule_id":"portability::atomic_plain_int64"'
+stderr '"severity":"warn"'
+stderr '"start_line":8'
+stderr '"autofix_candidates":\[{"description"'
+stderr '"replacement":"atomic.Int64"'
+
+# The autofix the candidate names applies: declaring plain as
+# atomic.Int64 compiles and clears the rule.
+cp fixed-main.txt main.go
+logos lint ./...
+! stderr .
+logos build -o $WORK/bin/atomicwarn2$GOEXE .
+exec $WORK/bin/atomicwarn2$GOEXE
+stdout '^1$'
 cd ..
 cd ..
 
@@ -464,4 +477,19 @@ var plain int64
 func main() {
 	atomic.AddInt64(&plain, 1)
 	fmt.Println(plain)
+}
+
+-- atomicwarn/fixed-main.txt --
+package main
+
+import (
+	"fmt"
+	"sync/atomic"
+)
+
+var plain atomic.Int64
+
+func main() {
+	plain.Add(1)
+	fmt.Println(plain.Load())
 }
