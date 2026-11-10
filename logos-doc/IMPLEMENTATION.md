@@ -2913,6 +2913,7 @@ The release gate runs the checks that no in-tree test asserts:
 - Two-build digests reproduce on a second host.
 - Runtime attack tests that execute attacker code run under `-race`.
 - Every row of `logos-doc/REDTEAM.md` reaches `tested` or `satisfied upstream` with its proving test.
+- The arm64 leg of `logos_sum_crossarch` must run (qemu or hardware) before a release.
 
 ### M22-C Closure re-audit of SPEC sections 0 to 18
 
