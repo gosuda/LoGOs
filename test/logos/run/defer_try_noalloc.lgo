@@ -1,0 +1,37 @@
+// run
+
+package main
+
+import (
+	"fmt"
+	"os"
+	"testing"
+)
+
+func failNil() error { return nil }
+
+func guardedNil() (err error) {
+	defer failNil()?
+	return nil
+}
+
+var sinkErr error
+
+func main() {
+	failed := false
+	if err := guardedNil(); err != nil {
+		fmt.Println("FAIL error result not nil:", err)
+		failed = true
+	} else {
+		fmt.Println("nil ok")
+	}
+	n := testing.AllocsPerRun(100, func() { sinkErr = guardedNil() })
+	fmt.Println("allocs:", n)
+	if n != 0 {
+		fmt.Println("FAIL nil defer? allocates", n, "times per call")
+		failed = true
+	}
+	if failed {
+		os.Exit(1)
+	}
+}
