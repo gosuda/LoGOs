@@ -85,12 +85,30 @@ cd ws/a
 stderr 'b\.go:6:2: \[slop::discarded_error\]'
 cd ../..
 
-# A Go module may use identifiers that .lgo reserves: no loGo/s type
-# rule applies to Go modules, so the build stays silent.
+# A Go module may use identifiers that .lgo reserves, and shapes that
+# loGo/s-only rules guard: no loGo/s type rule applies to Go modules,
+# and loGo/s detectors stay inactive in Go, so the build and the lint
+# stay silent.
 cd norules
 logos build ./...
 ! stderr .
+logos lint ./...
+! stderr .
+logos lint --json-diagnostics ./...
+! stderr .
 cd ..
+cd atomicwarn
+logos build -o $WORK/bin/atomicwarn$GOEXE .
+! stderr .
+exec $WORK/bin/atomicwarn$GOEXE
+stdout '^1$'
+logos lint ./...
+stderr 'warning: \[portability::atomic_plain_int64\]'
+logos lint --json-diagnostics ./...
+stderr '"description":"declare plain as atomic.Int64"'
+cd ..
+cd ..
+
 
 -- dropped/go.mod --
 module example.com/dropped
@@ -361,8 +379,42 @@ go 1.27
 -- norules/main.go --
 package main
 
+import "fmt"
+
+const factor = 3
+
 var Logos_x = 1
 
+type record struct {
+	N int    `json:"n"`
+	S string `json:"s"`
+}
+
+func work() {}
+
 func main() {
-	println(Logos_x)
+	go work()
+	v := 7
+	a := record{N: v, S: "x"}
+	fmt.Println(Logos_x, a.N, a.S, v*factor)
+}
+
+-- atomicwarn/go.mod --
+module example.com/atomicwarn
+
+go 1.27
+
+-- atomicwarn/main.go --
+package main
+
+import (
+	"fmt"
+	"sync/atomic"
+)
+
+var plain int64
+
+func main() {
+	atomic.AddInt64(&plain, 1)
+	fmt.Println(plain)
 }
