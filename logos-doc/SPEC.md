@@ -983,7 +983,6 @@ The check MUST track the active instantiation stack. [T-205]
 Field copies MUST compare compile-time types through `f.Type`. [T-205]
 A copy whose field types differ MUST fail compilation as an ordinary type mismatch. [T-205]
 An expansion at or below the selected limit MUST compile. [T-205][T-102]
-Both const-if branches MUST type-check. [T-205]
 
 ### 2.6 RFC-206: Go group and logos/sync
 
@@ -1458,7 +1457,6 @@ Two keyed members sharing a key MUST both claim input with that key. [T-Sec10][T
 Non-object input MUST match only keyless members. [T-Sec10][T-203.1]
 JSON null for a union field MUST leave the field nil with no trial. [T-Sec10][T-203.1]
 Key matching MUST fold case as the default v1 encoding/json does. [T-Sec10][T-203.1]
-A member with no visible keys MUST be tried only when no keyed key occurs. [T-Sec10][T-203.1]
 UnionTrialError MUST name the union, the members in order, and the counts. [T-Sec10][T-203.1]
 
 ### 10.3 Binary encoding
