@@ -42,7 +42,7 @@ func (fl *fileLower) lowerStaticBinary(_ *syntax.TypeDecl, named *types2.Named, 
 		fmt.Fprintf(out, "func (_logos_v %s) AppendBinary(dst []byte) ([]byte, error) { return %s_e%d(append(dst, 1), _logos_v) }\n", js.name, g.prefix, id)
 	}
 	if needUnmarshal {
-		fmt.Fprintf(out, "func (_logos_v *%s) UnmarshalBinary(src []byte) error { off := 0; if len(src) == 0 { return _logos_bfmt.Errorf(\"binary field $version at offset 0: truncated input\") }; if src[0] != 1 { return _logos_bfmt.Errorf(\"binary field $version at offset 0: wrong version %%d\", src[0]) }; off++; if err := %s_d%d(src, &off, _logos_v, %q); err != nil { return err }; if off != len(src) { return _logos_bfmt.Errorf(\"binary field $trailing at offset %%d: trailing bytes\", off) }; return nil }\n", js.name, g.prefix, id, js.name)
+		fmt.Fprintf(out, "func (_logos_v *%s) UnmarshalBinary(src []byte) error { off := 0; if len(src) == 0 { return _logos_bfmt.Errorf(\"binary field $version at offset 0: truncated input\") }; if src[0] != 1 { return _logos_bfmt.Errorf(\"binary field $version at offset 0: wrong version %%d\", src[0]) }; off++; if err := %s_d%d(src, &off, _logos_v, %q, 0); err != nil { return err }; if off != len(src) { return _logos_bfmt.Errorf(\"binary field $trailing at offset %%d: trailing bytes\", off) }; return nil }\n", js.name, g.prefix, id, js.name)
 	}
 }
 
@@ -73,7 +73,7 @@ func (g *binaryGenerator) codec(t types2.Type) (int, bool) {
 			return false
 		}
 		e("dst, err = %s_e%d(dst, %s); if err != nil { return dst, err }", g.prefix, c, value)
-		d("if err := %s_d%d(src, off, %s, %s); err != nil { return err }", g.prefix, c, target, field)
+		d("if err := %s_d%d(src, off, %s, %s, depth+1); err != nil { return err }", g.prefix, c, target, field)
 		return true
 	}
 	fail := "return _logos_bfmt.Errorf(\"binary field %s at offset %d: truncated input\", field, *off)"
@@ -83,7 +83,7 @@ func (g *binaryGenerator) codec(t types2.Type) (int, bool) {
 			return 0, false
 		}
 		fmt.Fprintf(&g.text, "func %s_e%d(dst []byte, v %s) ([]byte, error) { return %s_e%d(dst, v) }\n", g.prefix, id, name, g.prefix, payload)
-		fmt.Fprintf(&g.text, "func %s_d%d(src []byte, off *int, v *%s, field string) error { return %s_d%d(src, off, v, field) }\n", g.prefix, id, name, g.prefix, payload)
+		fmt.Fprintf(&g.text, "func %s_d%d(src []byte, off *int, v *%s, field string, depth int) error { return %s_d%d(src, off, v, field, depth) }\n", g.prefix, id, name, g.prefix, payload)
 		return id, true
 	}
 	if opt := g.fl.asOption(t); opt != nil {
@@ -200,7 +200,7 @@ func (g *binaryGenerator) codec(t types2.Type) (int, bool) {
 		}
 	}
 	fmt.Fprintf(&g.text, "func %s_e%d(dst []byte, v %s) ([]byte, error) { var err error; _ = err\n%sreturn dst, nil\n}\n", g.prefix, id, name, enc.String())
-	fmt.Fprintf(&g.text, "func %s_d%d(src []byte, off *int, v *%s, field string) error {\n%sreturn nil\n}\n", g.prefix, id, name, dec.String())
+	fmt.Fprintf(&g.text, "func %s_d%d(src []byte, off *int, v *%s, field string, depth int) error {\nif depth > 10000 { return _logos_bfmt.Errorf(\"binary field %%s at offset %%d: nesting depth exceeds 10000\", field, *off) }\n%sreturn nil\n}\n", g.prefix, id, name, dec.String())
 	return id, true
 }
 
