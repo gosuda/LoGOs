@@ -85,6 +85,13 @@ stderr -count=1 '^\{.*\}$'
 stderr '"rule_id":""'
 cd ..
 
+cd lgotypeerr
+! logos build --json-diagnostics ./...
+! stderr '^#'
+stderr -count=1 '^\{.*\}$'
+stderr '"rule_id":""'
+cd ..
+
 cd reconfig
 logos build -o $WORK/bin/reconfig$GOEXE .
 ! stderr .
@@ -341,6 +348,18 @@ module example.com/gotypeerr
 go 1.27
 
 -- gotypeerr/main.go --
+package main
+
+func main() {
+	undefinedFn()
+}
+
+-- lgotypeerr/go.mod --
+module example.com/lgotypeerr
+
+go 1.27
+
+-- lgotypeerr/main.lgo --
 package main
 
 func main() {
