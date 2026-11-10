@@ -76,7 +76,7 @@ The output MUST NOT include a `//go:build !logos` line [T-0.3][R-U3].
 The output MUST NOT emit `.gen.go` file names [T-0.3].
 The output MUST carry the reserved `_logos_` import aliases that lowering writes, such as `_logos_unsafe "unsafe"` [T-0.3].
 The output MUST NOT emit `_logos_errors` imports [T-0.3].
-Among support imports, lowered files MUST import only `_logos_rt "logos/rt"`, `_logos_json "logos/rt/json"`, plus `_logos_unsafe "unsafe"` where needed, in addition to standard library imports under reserved `_logos_` aliases [T-0.3].
+Among support imports, lowered files before eject MUST import only `_logos_rt "logos/rt"`, `_logos_json "logos/rt/json"`, plus `_logos_unsafe "unsafe"` where needed, in addition to standard library imports under reserved `_logos_` aliases. Ejected files MUST spell those support imports as `_logos_rt "github.com/gosuda/loGos/rt"` and `_logos_json "github.com/gosuda/loGos/rt/json"` (the eject rewrite in `src/cmd/go/internal/logos/eject/eject.go:supportPathEdit`).
 The tool MUST NOT write ejected files into the source tree [T-0.3].
 Ejected code MUST build with an upstream Go 1.27 toolchain [T-0.3].
 A Go package that imports a loGo/s package MUST see each exported declaration with the Go-facing signature that `logos eject` emits for it [T-0.3][R-U2].
@@ -531,7 +531,7 @@ Only const views MUST enforce the len bound. [T-201]
 Dynamic map iteration in const funcs MUST fail compilation. [T-201][T-Sec9]
 Const map range MUST visit keys in sorted order. [T-201][T-Sec9]
 A violation MUST fail with correctness::const_func_impure naming the reason. [T-201]
-reflect.DeepEqual and fmt.Println MUST accept constant composites, and the M5 tests MUST pin that behavior. [T-201]
+reflect.DeepEqual and fmt.Println MUST accept constant composites. [T-201]
 Compile-time evaluation MUST stop after the selected `max_ctfe_steps` limit with default 100,000 steps with `comptime::ctfe_step_limit`. [T-201][T-102]
 A value above 1 MB MUST fail with `comptime::const_too_large`. [T-201][T-102]
 A call through a const view to a pointer-receiver method that lacks const MUST fail with correctness::const_view_mutation. [T-201]
@@ -541,7 +541,6 @@ All other provenances MUST copy. [T-201]
 A bound above len MUST fail with `correctness::const_view_mutation`. [T-201]
 Non-constant bounds MUST trap at run time. [T-201]
 `reflect.DeepEqual` MUST accept constant composites. [T-201]
-Go 1.27 already accepts them, so the test MUST pin that behavior. [T-201]
 The compiler MUST evaluate CTFE integers with target widths. [T-201]
 A later write to the source or its child MUST NOT change the view. [T-201]
 Nil leaves MUST copy as nil. [T-201]
@@ -751,7 +750,7 @@ The run-time representation MUST be the upstream interface. [T-203.1]
 
 A two-tier tag layout MUST NOT be used. [T-203.1]
 
-Reflection and `unsafe` MAY store non-members. [T-203.1]
+Reflection MAY store non-members. [T-203.1]
 
 The compiler MUST NOT check this case. [T-203.1]
 
@@ -783,8 +782,6 @@ func f(u U) int {
     }
 }
 ```
-
-A property interface MUST be an interface with at least one `const F T` or `F T` element. [T-203.2]
 
 A struct MUST satisfy a property interface only through an explicit `: I` declaration in any package. [T-203.2][R-U4]
 
@@ -832,9 +829,6 @@ Only a type with a `: I` list MUST gain accessor methods. [T-203.2]
 
 A type without the declaration MUST see no method change. [T-203.2]
 
-The backend chooses the instruction sequence; no exact-instruction claim holds. [T-203.2]
-
-
 Embedded fields MUST satisfy properties by Go selector depth rules. [T-203.2]
 
 An ambiguous equal-depth selector MUST fail as an ambiguous selector. [T-203.2]
@@ -876,8 +870,7 @@ A switch expression MUST evaluate its operand once and only its chosen arm [T-20
 The result type of a switch expression MUST be the common type of its arms [T-203.1].
 Ejected code for a value-used union MUST be a plain method-only interface plus a comment that names the member set [T-203.1][T-0.3].
 A Go importer MUST see the same interface [T-203.1][T-Sec5][R-U2].
-Reflection and `unsafe` MAY store a non-member in a closed union, and the compiler MUST NOT check that path [T-203.1].
-A property interface MUST hold at least one `const F T` or `F T` element [T-203.2].
+Reflection MAY store a non-member in a closed union, and the compiler MUST NOT check that path [T-203.1].
 A readonly method `const M() T` MUST NOT count as a property element and MUST NOT satisfy a property requirement [T-201][T-203.2].
 Satisfaction MUST be explicit: only a struct whose declaration lists `: I` MUST satisfy property interface `I`, in any package [T-203.2][R-U4].
 For each property `F`, the declaring package MUST generate `Logos_GetF() T` and, for read-write properties, `Logos_SetF(T)` [T-203.2].
@@ -1298,7 +1291,6 @@ Frame exit, including exit by panic, MUST restore the watermark. [T-301.1]
 The restore MUST run as an emitted defer during unwinding. [T-301.1]
 The runtime MUST zero popped regions before reuse. [T-301.1]
 Collection after exit MUST find no stale pointers in popped scan memory. [T-301.1]
-The compiler MUST keep such values out of the arena. [T-301.1]
 A loop back-edge MUST restore the watermark for iteration-local objects. [T-301.1]
 A loop with only iteration-local allocation MUST NOT grow arena use across iterations. [T-301.1]
 
@@ -1328,7 +1320,7 @@ The runtime structs MUST carry no new padding. [T-303]
 Preemption checks in long loops MUST fire every 4096 iterations, with the first check at iteration 4096, on GOARCH=wasm builds with the checks enabled. An explicit GOEXPERIMENT=preemptibleloops elsewhere yields the upstream per-backedge checks. [T-303]
 They MUST run only where async preemption is absent (`GOARCH=wasm`). [T-303]
 A call-free loop MUST NOT starve peers. [T-303]
-A second goroutine MUST print before the deadline. [T-303]
+A peer goroutine MUST observe one quantum at 4096 iterations and two at 8192 iterations. [T-303]
 `clear(b)` MUST reach a runtime memory clear. [T-303]
 Dead-store elimination MUST NOT remove that clear. [T-303]
 The rest of the WASM profile is defined in SPEC Sec 12. [T-Sec12]
@@ -1957,7 +1949,7 @@ The toolchain is one complete toolchain for Go and loGo/s: Go packages and loGo/
 
 ### 18.2 Compiler-made names
 
-Compiler-made names use the `_logos_` prefix.
+Compiler-made names use the `_logos_` prefix; comptime copies use the `_logosct` infix.
 The lowering of `v := parse(s)?` reads as follows.
 
 ```go
