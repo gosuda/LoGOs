@@ -38,7 +38,7 @@ The `correctness::mixed_package` text MUST name both file classes [T-0.1][R-U3].
 The tool MUST reject a module with both kinds with `correctness::mixed_module` [T-0.1][R-U3].
 The `correctness::mixed_module` text MUST name the Go packages and the loGo/s packages [T-0.1][R-U3].
 A loGo/s package MAY import any Go package [T-0.1][R-U2].
-A Go package MAY import any loGo/s package, except as the next sentence states [T-0.1][R-U2].
+A Go package MAY import any loGo/s package [T-0.1][R-U2].
 An import across kinds MUST NOT be an error [T-0.1][R-U2].
 Interop MUST work per import and MUST NOT need a package or a module that holds both kinds [T-0.1][R-U3].
 A Go declaration that a `.lgo` file imports MUST be a platform declaration per Sec 2.2 [T-0.1][T-202][A-STD][R-U2].
@@ -233,7 +233,7 @@ func double(s string) (int, error) {
 }
 ```
 `defer f()?` MUST join a non-nil result into the error result [T-104.2].
-The join MUST keep the existing error when nil and MUST use errors join semantics otherwise [T-104.2].
+When the deferred call's result is nil, the join MUST keep the existing error; otherwise it MUST join both errors with errors join semantics. [T-104.2]
 `errdefer` MUST be allowed only in functions whose last result is `error` [T-104.2].
 Other uses MUST fail with `correctness::errdefer_needs_error_result` [T-104.2].
 `errdefer` MUST run when the frame panics, exits through Goexit, or holds a non-nil error result at pop time [T-104.2].
@@ -404,7 +404,6 @@ The compiler MUST evaluate `const` composites and `const func` calls at compile 
 A run that exceeds the selected `max_ctfe_steps` limit MUST fail with `[comptime::ctfe_step_limit]`. [T-201][T-102]
 
 Configuration MAY raise `max_ctfe_steps` above its default. [T-102]
-
 
 A constant value above 1 MB MUST fail with `[comptime::const_too_large]`. [T-201]
 
@@ -792,7 +791,7 @@ Taking the address of a property (`&c.HP`) MUST fail with `[correctness::propert
 
 A `: I` declaration without a field or method source for a property MUST fail with `[correctness::property_unsatisfied]`. [T-203.2]
 
-The right fields without the declaration MUST fail with `[correctness::property_requires_conformance]` telling the writer to add `: I`. [T-203.2]
+A struct that has the right fields but no `: I` declaration MUST fail with `[correctness::property_requires_conformance]` telling the writer to add `: I`. [T-203.2]
 
 Conflicting property types across listed interfaces MUST fail with `[correctness::property_conflict]`. [T-203.2]
 
@@ -1152,7 +1151,7 @@ Cancellation MUST reach siblings blocked on channels. [T-206]
 
 A child blocked in netpoll-backed network I/O MUST wake within 100 ms with a timeout error satisfying `os.IsTimeout`. [T-206]
 
-A goroutine outside the group MUST stay blocked. [T-206]
+Cancellation MUST NOT wake a goroutine outside the group. [T-206]
 
 Cgo calls MUST NOT wake this way. [T-206]
 
@@ -1413,7 +1412,6 @@ When this toolchain compiles the Go caller, it MUST insert `logos/rt.MustNonNil`
 
 ## 6. Eject and error-handling semantics
 
-
 See Sec 1.4 for error propagation, cleanup, and traces.
 See Sec 0.3 for eject output, dependencies, and toolchain requirements.
 Ejected output MUST be gofmt-clean. [T-0.3]
@@ -1432,7 +1430,7 @@ func Transfer(db *DB, from int64, to int64, amt int64) (int64, error) {
 
 ## 7. Const maps
 
-### 7 Const map semantics
+### 7.1 Const map semantics
 
 A const map with up to 8 keys MUST lower to a `switch` lookup [T-Sec7]. A const map with more keys MUST lower to a static perfect-hash table in read-only data plus a generated lookup function [T-Sec7]. A lookup MUST perform constant-time auxiliary metadata reads plus exactly one final key/value-slot probe with full-key validation [T-Sec7]. Construction MUST use at most 1,000,000 seed-candidate trials in total per const map [T-Sec7]. Exhaustion MUST fail with `comptime::constmap_seed_not_found` [T-Sec7]. A logarithmic fallback MUST NOT satisfy the contract [T-Sec7]. The 1, 8, 9, and 10,000-key cases in `test/logos/run/const_map.lgo` MUST be the acceptance check [T-Sec7]. That check MUST NOT promise success for every key set [T-Sec7]. A lookup of an absent key MUST return none [T-Sec7]. Iteration with `range` MUST visit keys in sorted order [T-Sec7]. The function `len` on a const map MUST be constant [T-Sec7]. Use of a const map as a `map[K]V` value MUST materialize a regular map once [T-Sec7]. The materialized map is a copy; writes to it do not change the const map's reads [T-Sec7]. A const map key MUST be a string, number, bool, or a struct or array of those; any other key type fails with `comptime::constmap_key_type` [T-Sec7]. A const map passes to a standard-library parameter only when that parameter is read-only: the compiler reads the ParamMutated mask from a fixed table of standard-library functions, because standard-library packages carry no facts, and any other imported function rejects the argument with `correctness::const_view_mutation` [T-201][T-Sec7]. A const map passes to a parameter of a function of the same package only when that function is a const func, which evaluates on copies of its arguments; any other function of the package rejects the argument with `correctness::const_view_mutation` [T-201][T-Sec7]. A `-0.0` float key MUST canonicalize, and a `NaN` key MUST fail compilation [T-201][T-Sec7]. The table symbol MUST sit in read-only data and package init MUST add no heap bytes [T-Sec7].
 
@@ -1668,8 +1666,6 @@ On nonzero errCode the wrapper throws the message read from wasm memory. [T-Sec1
 `logos/rt.WasmError(err)` MUST return 0 for a nil error, and for a non-nil error it MUST record `err.Error()` as the last error message and return 1; the loader reads that message through `_logos_errmsg_ptr` and `_logos_errmsg_len`. [T-Sec12]
 //logos:wasmexport f MUST behave as //go:wasmexport f. [T-Sec12]
 //logos:wasmimport m f MUST behave as //go:wasmimport m f. [T-Sec12]
-Decoding MUST fill defaults first, then parse. [T-Sec12]
-JSON decoders MUST grow arrays incrementally with no pre-allocation cap. [T-Sec12][T-Sec10.1]
 
 ## 13. Backend peephole and SIMD passes
 
@@ -1728,7 +1724,6 @@ buf := make([]Pixel, w * h)
 
 - `logos lint --json-diagnostics` and `logos build --json-diagnostics` MUST write one JSON object per line to stderr for every compiler and lint diagnostic in `.lgo` files and in Go files. [T-Sec14][R-U1]
 - Each line MUST be a complete object with schema version `1.0`. [T-Sec14]
-Wasm MUST align 64-bit types on 8 bytes. [T-Sec14]
 
 ### 14.2 Top-level fields
 
@@ -1741,9 +1736,6 @@ Wasm MUST align 64-bit types on 8 bytes. [T-Sec14]
 - Field `span` is an object with the line, column, and byte range. [T-Sec14]
 - Field `provenance` is an object with the source of the inferred type. [T-Sec14]
 - Field `autofix_candidates` is an array of fix objects. [T-Sec14]
-The loader MUST re-read memory.buffer after every wasm call. [T-Sec14]
-Calls after growth MUST see current memory. [T-Sec14]
-`logos build` MUST emit the loader for a Go main package with a `.wasm` output, and plain `go build` MUST emit the same loader by default. [T-Sec14]
 
 ### 14.3 Span object
 
