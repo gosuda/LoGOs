@@ -3,7 +3,28 @@ env GOTOOLCHAIN=local
 
 logos build -a -x -O=0 .
 stderr '\-N \-l'
-stderr 'variablemakeundern=1'
+
+cd bufbin
+env WANT_STACKBUF=32
+logos build -O=0 -o $WORK/buf0$GOEXE .
+exec $WORK/buf0$GOEXE
+stdout '^buffer ok$'
+env WANT_STACKBUF=256
+exec $WORK/buf0$GOEXE
+stdout '^buffer wrong$'
+env WANT_STACKBUF=
+cd ..
+
+logos build -a -x .
+stderr '\-d=inlbudget=120,variablemakethreshold=256'
+
+logos build -a -x -O=2 .
+stderr '\-d=inlbudget=120,variablemakethreshold=256'
+
+logos build -a -x -O=3 .
+stderr '\-d=inlbudget=400,inlrecursivebudget=80,variablemakethreshold=4096'
+! stderr '-d=[^ ]*(escape|prove)'
+
 cd gomod
 
 go build -a -x .
@@ -33,6 +54,8 @@ cd gomod
 go build -a -gcflags=example.com/optlevels/go=-m -O=s .
 ! stderr 'inlining call to mid'
 go build -a -gcflags=example.com/optlevels/go=-m .
+stderr 'inlining call to mid'
+logos build -a -gcflags=example.com/optlevels/go=-m -O=2 .
 stderr 'inlining call to mid'
 go build -a -gcflags=example.com/optlevels/go=-m -O=0 .
 ! stderr 'inlining call to mid'
@@ -103,7 +126,7 @@ stdout '^ok'
 logos test -count=1 -run TestCompiledStackBuffer -O=0 .
 stdout '^ok'
 ! go test -count=1 -gcflags=all='-N -l' .
-stdout 'FAIL'
+stdout 'want the stack buffer of 32 bytes to decide'
 env WANT_STACKBUF=256
 go test -count=1 -O=2 .
 stdout '^ok'
@@ -369,4 +392,46 @@ import "fmt"
 
 func main() {
 	fmt.Println("hello")
+}
+
+-- bufbin/go.mod --
+module example.com/optlevels/bufbin
+
+go 1.27
+
+-- bufbin/logos.toml --
+[build]
+arena = false
+
+-- bufbin/main.go --
+package main
+
+import (
+	"fmt"
+	"os"
+	"strconv"
+	"testing"
+)
+
+//go:noinline
+func probe(n int) byte {
+	b := make([]byte, n)
+	b[0] = 1
+	return b[n-1]
+}
+
+func main() {
+	want, err := strconv.Atoi(os.Getenv("WANT_STACKBUF"))
+	if err != nil || want < 2 {
+		fmt.Println("buffer wrong")
+		return
+	}
+	half := testing.AllocsPerRun(10, func() { _ = probe(want / 2) })
+	at := testing.AllocsPerRun(10, func() { _ = probe(want) })
+	over := testing.AllocsPerRun(10, func() { _ = probe(want + 1) })
+	if half != 0 || at != 0 || over == 0 {
+		fmt.Println("buffer wrong")
+		return
+	}
+	fmt.Println("buffer ok")
 }
