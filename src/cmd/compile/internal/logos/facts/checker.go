@@ -30,6 +30,9 @@ func paramProvenZero(path, object string, param int) bool {
 			if f.Fns[i].Object != object {
 				continue
 			}
+			if f.Fns[i].MayYieldOnly() {
+				continue
+			}
 			return maskProvenZero(f.Fns[i].ParamMutated, param)
 		}
 	}

@@ -9,10 +9,11 @@ go tool pack p $WORK/dep.a __.LOGOS
 cp stdout $WORK/dep.facts
 grep '^fn Read ParamMutated=0$' $WORK/dep.facts
 grep '^fn Write ParamMutated=1$' $WORK/dep.facts
-grep '^fn \(\*Counter\)\.Add ParamMutated=0$' $WORK/dep.facts
-grep '^fn \(\*Counter\)\.Stash ParamMutated=1$' $WORK/dep.facts
+grep '^fn \(\*Counter\)\.Add ReceiverMutated,ParamMutated=0$' $WORK/dep.facts
+grep '^fn \(\*Counter\)\.Stash ReceiverMutated,ParamMutated=1$' $WORK/dep.facts
+grep '^fn Counter\.Total ParamMutated=0$' $WORK/dep.facts
+! grep '^fn Counter\.Total ReceiverMutated' $WORK/dep.facts
 grep '^fn Leak ParamMutated=1$' $WORK/dep.facts
-! grep 'ReceiverMutated' $WORK/dep.facts
 
 cd imp
 logos build -o $WORK/bin/ok$GOEXE ./ok

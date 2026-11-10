@@ -603,13 +603,9 @@ func (check *Checker) logosGoConstGate(call *syntax.CallExpr) logosGoConstGate {
 	g.variadic = sig.Variadic()
 	if sig.Recv() != nil {
 		if sel, ok := syntax.Unparen(call.Fun).(*syntax.SelectorExpr); ok {
-			if _, ok := syntax.Unparen(sel.X).(*syntax.Name); !ok {
-				if in, ok := syntax.Unparen(sel.X).(*syntax.SelectorExpr); ok {
-					if pn, ok := syntax.Unparen(in.X).(*syntax.Name); ok {
-						if _, ok := check.lookup(pn.Value).(*PkgName); ok {
-							g.methodEx = true
-						}
-					}
+			if check.Info != nil {
+				if s, ok := check.Selections[sel]; ok && s != nil && s.Kind() == MethodExpr {
+					g.methodEx = true
 				}
 			}
 		}

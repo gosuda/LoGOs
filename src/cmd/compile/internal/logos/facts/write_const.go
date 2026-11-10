@@ -94,7 +94,7 @@ func EmitGoMutations(pkg *types2.Package, info *types2.Info, files []*syntax.Fil
 	if pkg == nil || pkg.Scope() == nil {
 		return f
 	}
-	decls, _, paramMask := analyzeGoMutations(pkg, info, files)
+	decls, recvMut, paramMask := analyzeGoMutations(pkg, info, files)
 	for _, d := range decls {
 		if d.obj == nil || !d.obj.Exported() {
 			continue
@@ -107,6 +107,7 @@ func EmitGoMutations(pkg *types2.Package, info *types2.Info, files []*syntax.Fil
 			f = &Facts{}
 		}
 		fn := findOrCreateFnFact(f, d.name)
+		fn.ReceiverMutated = fn.ReceiverMutated || recvMut[d.obj]
 		fn.ParamMutated = orHexMask(fn.ParamMutated, mask)
 		if fn.ParamMutated == "" {
 			fn.ParamMutated = "0"
@@ -509,11 +510,13 @@ type constBodyScan struct {
 	tainted      map[types2.Object]*types2.Var
 	mut          map[*types2.Var]bool
 	strictRetain bool
+	results      []*types2.Var
 }
 
 func (s *constBodyScan) funcMutations(d constFuncDecl) (bool, []byte) {
 	s.tainted = make(map[types2.Object]*types2.Var)
 	s.mut = make(map[*types2.Var]bool)
+	s.results = nil
 	var params []*types2.Var
 	recv := d.sig.Recv()
 	if recv != nil {
@@ -527,6 +530,13 @@ func (s *constBodyScan) funcMutations(d constFuncDecl) (bool, []byte) {
 	for _, p := range params {
 		if p != nil {
 			s.tainted[p] = p
+		}
+	}
+	if rs := d.sig.Results(); rs != nil {
+		for i := range rs.Len() {
+			if v := rs.At(i); v != nil {
+				s.results = append(s.results, v)
+			}
 		}
 	}
 	s.block(d.decl.Body.List)
@@ -686,6 +696,12 @@ func (s *constBodyScan) stmt(st syntax.Stmt) {
 	case *syntax.ReturnStmt:
 		if st.Results != nil {
 			s.markMention(st.Results)
+			break
+		}
+		for _, r := range s.results {
+			if s.originOf(r) != nil {
+				s.mark(r)
+			}
 		}
 	case *syntax.SendStmt:
 		s.markMention(st.Value)
@@ -700,6 +716,9 @@ func (s *constBodyScan) stmt(st syntax.Stmt) {
 			return true
 		})
 	case *syntax.IfStmt:
+		if st.Init != nil {
+			s.stmt(st.Init)
+		}
 		if st.Cond != nil {
 			s.scanReads(st.Cond)
 		}
@@ -709,18 +728,23 @@ func (s *constBodyScan) stmt(st syntax.Stmt) {
 		}
 	case *syntax.ForStmt:
 		if st.Init != nil {
-			s.scanReads(st.Init)
+			if rc, ok := st.Init.(*syntax.RangeClause); ok {
+				s.rangeTaint(rc)
+				s.scanReads(st.Init)
+			} else {
+				s.stmt(st.Init)
+			}
 		}
 		if st.Cond != nil {
 			s.scanReads(st.Cond)
 		}
 		if st.Post != nil {
-			s.scanReads(st.Post)
+			s.stmt(st.Post)
 		}
 		s.blockStmt(st.Body)
 	case *syntax.SwitchStmt:
 		if st.Init != nil {
-			s.scanReads(st.Init)
+			s.stmt(st.Init)
 		}
 		if st.Tag != nil {
 			s.scanReads(st.Tag)
@@ -731,7 +755,7 @@ func (s *constBodyScan) stmt(st syntax.Stmt) {
 	case *syntax.SelectStmt:
 		for _, c := range st.Body {
 			if c.Comm != nil {
-				s.scanReads(c.Comm)
+				s.stmt(c.Comm)
 			}
 			s.block(c.Body)
 		}
@@ -742,7 +766,7 @@ func (s *constBodyScan) stmt(st syntax.Stmt) {
 	case *syntax.EmptyStmt, *syntax.BranchStmt, *syntax.ExprStmt:
 		s.scanReads(st)
 	default:
-		s.scanReads(st)
+		s.markAllParams()
 	}
 }
 
@@ -753,6 +777,38 @@ func (s *constBodyScan) blockStmt(n syntax.Node) {
 	case syntax.Stmt:
 		s.stmt(n)
 	}
+}
+
+func (s *constBodyScan) markAllParams() {
+	for obj := range s.tainted {
+		s.mark(obj)
+	}
+}
+
+func (s *constBodyScan) rangeTaint(rc *syntax.RangeClause) {
+	if rc == nil || rc.Lhs == nil || rc.X == nil {
+		return
+	}
+	origin := s.taintedMention(rc.X)
+	if origin == nil {
+		return
+	}
+	taint := func(e syntax.Expr) {
+		name, ok := syntax.Unparen(e).(*syntax.Name)
+		if !ok || name.Value == "_" {
+			return
+		}
+		if obj := s.resolve(name); obj != nil {
+			s.tainted[obj] = origin
+		}
+	}
+	if ll, ok := syntax.Unparen(rc.Lhs).(*syntax.ListExpr); ok {
+		for _, e := range ll.ElemList {
+			taint(e)
+		}
+		return
+	}
+	taint(rc.Lhs)
 }
 
 func (s *constBodyScan) assign(st *syntax.AssignStmt) {
@@ -775,15 +831,17 @@ func (s *constBodyScan) assign(st *syntax.AssignStmt) {
 			s.scanReads(st.Rhs)
 			if o := s.taintedMention(st.Rhs); o != nil {
 				if obj != nil {
-					s.tainted[obj] = o
+					if t := s.info.TypeOf(st.Rhs); t == nil || !types2.LogosReferenceFree(t) {
+						s.tainted[obj] = o
+					}
 				} else if lhs.Value != "_" {
 					s.markMention(st.Rhs)
 				}
-				return
 			}
-			if obj != nil {
-				delete(s.tainted, obj)
-			}
+			return
+		}
+		if ll, ok := syntax.Unparen(st.Lhs).(*syntax.ListExpr); ok {
+			s.assignList(ll, st.Rhs)
 			return
 		}
 		if ex, ok := syntax.Unparen(st.Lhs).(syntax.Expr); ok && s.writeCrossesRef(ex) {
@@ -804,6 +862,64 @@ func (s *constBodyScan) assign(st *syntax.AssignStmt) {
 		s.markMentionWrite(st.Lhs)
 	} else {
 		s.markMention(st.Lhs)
+	}
+	if st.Rhs != nil {
+		s.scanReads(st.Rhs)
+	}
+}
+
+func (s *constBodyScan) assignList(lhs *syntax.ListExpr, rhs syntax.Expr) {
+	var elems []syntax.Expr
+	if rl, ok := syntax.Unparen(rhs).(*syntax.ListExpr); ok && len(rl.ElemList) == len(lhs.ElemList) {
+		elems = rl.ElemList
+	}
+	for i, le := range lhs.ElemList {
+		var re syntax.Expr
+		if elems != nil {
+			re = elems[i]
+		} else {
+			re = rhs
+		}
+		s.assignElem(le, re)
+	}
+}
+
+func (s *constBodyScan) assignElem(le, re syntax.Expr) {
+	if name, ok := syntax.Unparen(le).(*syntax.Name); ok {
+		if name.Value == "_" {
+			return
+		}
+		obj := s.resolve(name)
+		if s.isPackageVar(obj) {
+			if re != nil {
+				s.markMention(re)
+			}
+			return
+		}
+		if re != nil {
+			s.scanReads(re)
+			if o := s.taintedMention(re); o != nil && obj != nil {
+				if t := s.info.TypeOf(re); t == nil || !types2.LogosReferenceFree(t) {
+					s.tainted[obj] = o
+				}
+			}
+		}
+		return
+	}
+	if ex, ok := syntax.Unparen(le).(syntax.Expr); ok && s.writeCrossesRef(ex) {
+		s.markMentionWrite(le)
+	} else {
+		s.markMention(le)
+	}
+	if re == nil {
+		return
+	}
+	if s.mentionsPackage(le) {
+		s.markMention(re)
+	} else if s.strictRetain && s.retainRHS(le, re) {
+		s.markMention(re)
+	} else {
+		s.scanReads(re)
 	}
 }
 
@@ -841,12 +957,15 @@ func (s *constBodyScan) retainRHS(lhs syntax.Expr, rhs syntax.Expr) bool {
 	}
 	if v, ok := obj.(*types2.Var); ok && !s.isPackageVar(v) {
 		s.tainted[v] = origin
+		s.markMention(rhs)
+		return true
 	}
 	return false
 }
 
 func (s *constBodyScan) retentionRoot(lhs syntax.Expr) (types2.Object, bool) {
 	e := syntax.Unparen(lhs)
+	deref := false
 	for {
 		switch n := e.(type) {
 		case *syntax.IndexExpr:
@@ -860,12 +979,31 @@ func (s *constBodyScan) retentionRoot(lhs syntax.Expr) (types2.Object, bool) {
 				return nil, false
 			}
 			e = syntax.Unparen(n.X)
+			deref = true
+		case *syntax.CallExpr:
+			return nil, true
 		default:
 			name, ok := e.(*syntax.Name)
 			if !ok || name.Value == "_" {
 				return nil, false
 			}
-			return s.resolve(name), true
+			obj := s.resolve(name)
+			if obj == nil {
+				return nil, true
+			}
+			if _, ok := obj.(*types2.PkgName); ok {
+				return nil, true
+			}
+			if s.originOf(obj) != nil {
+				return obj, true
+			}
+			if _, ok := obj.(*types2.Var); ok {
+				if deref {
+					return nil, true
+				}
+				return obj, true
+			}
+			return nil, true
 		}
 	}
 }
@@ -887,10 +1025,59 @@ func (s *constBodyScan) varDecl(vd *syntax.VarDecl) {
 		}
 		if origin != nil {
 			s.tainted[obj] = origin
-		} else {
-			delete(s.tainted, obj)
 		}
 	}
+}
+
+func (s *constBodyScan) doCall(call *syntax.CallExpr, escaping bool) {
+	if lit, ok := syntax.Unparen(call.Fun).(*syntax.FuncLit); ok {
+		if lit.Body != nil && !escaping {
+			s.block(lit.Body.List)
+		} else if lit.Body != nil {
+			s.markClosure(lit.Body)
+		}
+		s.markArgs(call.ArgList)
+		return
+	}
+	if name, ok := call.Fun.(*syntax.Name); ok {
+		if obj := s.resolve(name); obj != nil {
+			if b, ok := obj.(*types2.Builtin); ok {
+				s.builtinCall(b.Name(), call)
+				return
+			}
+			if fn, ok := obj.(*types2.Func); ok {
+				s.doFuncCall(fn, nil, call.ArgList, escaping)
+				return
+			}
+			if tn, ok := obj.(*types2.TypeName); ok && tn != nil {
+				if t := tn.Type(); t != nil && types2.LogosReferenceFree(t) {
+					for _, arg := range call.ArgList {
+						s.scanReads(arg)
+					}
+					return
+				}
+			}
+		}
+		s.markArgs(call.ArgList)
+		return
+	}
+	if sel, ok := call.Fun.(*syntax.SelectorExpr); ok {
+		if s.info != nil {
+			if choice, ok := s.info.Selections[sel]; ok && choice != nil {
+				if fn, ok := choice.Obj().(*types2.Func); ok {
+					recv, rargs := syntax.Expr(sel.X), call.ArgList
+					if choice.Kind() == types2.MethodExpr && len(rargs) > 0 {
+						recv, rargs = rargs[0], rargs[1:]
+					}
+					s.doFuncCall(fn, recv, rargs, escaping)
+					return
+				}
+			}
+		}
+		s.markArgs(call.ArgList)
+		return
+	}
+	s.markArgs(call.ArgList)
 }
 
 func (s *constBodyScan) suspended(st *syntax.CallStmt) {
@@ -919,20 +1106,6 @@ func (s *constBodyScan) markMention(e syntax.Node) {
 	})
 }
 
-func (s *constBodyScan) scanReads(e syntax.Node) {
-	syntax.Inspect(e, func(n syntax.Node) bool {
-		if call, ok := n.(*syntax.CallExpr); ok {
-			s.callInFrame(call)
-			return false
-		}
-		if lit, ok := n.(*syntax.FuncLit); ok {
-			s.markClosure(lit.Body)
-			return false
-		}
-		return true
-	})
-}
-
 func (s *constBodyScan) markClosure(body *syntax.BlockStmt) {
 	if body == nil {
 		return
@@ -949,42 +1122,26 @@ func (s *constBodyScan) markClosure(body *syntax.BlockStmt) {
 	})
 }
 
+func (s *constBodyScan) scanReads(e syntax.Node) {
+	syntax.Inspect(e, func(n syntax.Node) bool {
+		if call, ok := n.(*syntax.CallExpr); ok {
+			s.callInFrame(call)
+			return false
+		}
+		if lit, ok := n.(*syntax.FuncLit); ok {
+			s.markClosure(lit.Body)
+			return false
+		}
+		return true
+	})
+}
+
 func (s *constBodyScan) callInFrame(call *syntax.CallExpr) {
 	s.doCall(call, false)
 }
 
 func (s *constBodyScan) callEscaping(call *syntax.CallExpr) {
 	s.doCall(call, true)
-}
-
-func (s *constBodyScan) doCall(call *syntax.CallExpr, escaping bool) {
-	if name, ok := call.Fun.(*syntax.Name); ok {
-		if obj := s.resolve(name); obj != nil {
-			if b, ok := obj.(*types2.Builtin); ok {
-				s.builtinCall(b.Name(), call)
-				return
-			}
-			if fn, ok := obj.(*types2.Func); ok {
-				s.doFuncCall(fn, nil, call.ArgList, escaping)
-				return
-			}
-		}
-		s.markArgs(call.ArgList)
-		return
-	}
-	if sel, ok := call.Fun.(*syntax.SelectorExpr); ok {
-		if s.info != nil {
-			if choice, ok := s.info.Selections[sel]; ok && choice != nil {
-				if fn, ok := choice.Obj().(*types2.Func); ok {
-					s.doFuncCall(fn, sel.X, call.ArgList, escaping)
-					return
-				}
-			}
-		}
-		s.markArgs(call.ArgList)
-		return
-	}
-	s.markArgs(call.ArgList)
 }
 
 func (s *constBodyScan) doFuncCall(fn *types2.Func, recv syntax.Expr, args []syntax.Expr, escaping bool) {
@@ -1005,15 +1162,19 @@ func (s *constBodyScan) doFuncCall(fn *types2.Func, recv syntax.Expr, args []syn
 	}
 	if ps := sig.Params(); ps != nil {
 		for i, arg := range args {
-			if i >= ps.Len() {
+			if i >= ps.Len() && !sig.Variadic() {
 				s.scanReads(arg)
 				break
+			}
+			j := i
+			if sig.Variadic() && ps.Len() > 0 && j >= ps.Len()-1 {
+				j = ps.Len() - 1
 			}
 			if escaping {
 				s.markMention(arg)
 			} else if mask == nil {
 				s.markMention(arg)
-			} else if maskBit(mask, i) {
+			} else if maskBit(mask, j) {
 				s.markMentionWrite(arg)
 			} else {
 				s.scanReads(arg)
@@ -1038,9 +1199,13 @@ func (s *constBodyScan) calleeFacts(fn *types2.Func) (bool, []byte) {
 		return true, nil
 	}
 	if f, ok := Lookup(fn.Pkg().Path()); ok && f != nil {
+		want := fn.Name()
+		if sig, ok := fn.Type().(*types2.Signature); ok && sig != nil && sig.Recv() != nil {
+			want = constMethodName(fn)
+		}
 		for i := range f.Fns {
 			entry := &f.Fns[i]
-			if entry.Object != fn.Name() && entry.Object != constMethodName(fn) {
+			if entry.Object != want {
 				continue
 			}
 			if entry.MayYieldOnly() {
@@ -1075,6 +1240,9 @@ func (s *constBodyScan) builtinCall(name string, call *syntax.CallExpr) {
 	case "append", "copy":
 		if len(call.ArgList) > 0 {
 			s.markMentionWrite(call.ArgList[0])
+		}
+		for _, arg := range call.ArgList[1:] {
+			s.markMention(arg)
 		}
 	case "delete", "clear":
 		if len(call.ArgList) > 0 {
