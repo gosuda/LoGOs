@@ -4,6 +4,8 @@ env GOTOOLCHAIN=local
 cd gapp
 logos run .
 stdout '^logos-dep-ok$'
+stdout '^logos-code-ok$'
+stdout '^3 false$'
 cp stdout $WORK/b-stdout.txt
 logos eject -o bout
 exists bout/main.go
@@ -11,6 +13,8 @@ exists bout/go.mod
 exists bout/_logos_deps/example.com/lp@v1.2.3/p/p.go
 grep 'example\.com/lp' bout/go.mod
 grep 'require' bout/go.mod
+grep 'func Code\(\) \(string, error\)' bout/_logos_deps/example.com/lp@v1.2.3/p/p.go
+grep 'Option\[int\]' bout/_logos_deps/example.com/lp@v1.2.3/p/p.go
 grep 'replace' bout/go.mod
 cd bout
 go build ./...
@@ -90,6 +94,13 @@ import (
 
 func main() {
 	fmt.Println(p.Msg())
+	s, err := p.Code()
+	if err != nil {
+		fmt.Println("error:", err)
+		return
+	}
+	fmt.Println(s)
+	fmt.Println(p.Pick(true).Value, p.Pick(false).Present)
 }
 
 -- lp/go.mod --
@@ -103,4 +114,17 @@ package p
 // Msg reports the loGo/s helper string.
 func Msg() string {
 	return "logos-dep-ok"
+}
+
+// Code reports the helper string with an error result.
+func Code() (string, error) {
+	return "logos-code-ok", nil
+}
+
+// Pick returns an optional integer.
+func Pick(ok bool) int? {
+	if ok {
+		return 3
+	}
+	return nil
 }
