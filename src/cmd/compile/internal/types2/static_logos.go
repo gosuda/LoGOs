@@ -415,6 +415,10 @@ func (check *Checker) logosSynthStaticMethods() {
 		_, binaryOK := LogosBinaryStruct(check.Info, named, check.objMap[tname].tdecl.Type)
 		if jsonOK {
 			check.logosAddStaticFamilyMethods(named, "JSON")
+			if check.Info.LogosStaticJSON == nil {
+				check.Info.LogosStaticJSON = make(map[*Named]bool)
+			}
+			check.Info.LogosStaticJSON[named] = true
 		}
 		if binaryOK {
 			check.logosAddStaticFamilyMethods(named, "Binary")

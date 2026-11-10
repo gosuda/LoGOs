@@ -177,6 +177,7 @@ func (js *jsonStruct) unionLines(f *jsonField, field string) []string {
 	type memberKeys struct {
 		bareName string
 		usable   bool
+		custom   bool
 		spell    string
 		st       *types2.Struct
 		isStruct bool
@@ -184,23 +185,39 @@ func (js *jsonStruct) unionLines(f *jsonField, field string) []string {
 	memberList := make([]memberKeys, len(members))
 	for i, m := range members {
 		memberList[i] = memberKeys{spell: types2.TypeString(m, qual)}
+		elem := m
 		if ptr, ok := types2.Unalias(m).(*types2.Pointer); ok {
-			memberList[i].st, memberList[i].isStruct = types2.Unalias(ptr.Elem()).Underlying().(*types2.Struct)
-			if named, ok := types2.Unalias(ptr.Elem()).(*types2.Named); ok && named.Obj() != nil {
-				memberList[i].bareName = named.Obj().Name()
-				memberList[i].usable = memberList[i].isStruct && memberList[i].st.NumFields() > 0 && memberList[i].bareName != "" && localPkg != nil && named.Obj().Pkg() != nil && localPkg.Path() == named.Obj().Pkg().Path() && !userDeclaresMethod(named, "UnmarshalJSON")
-			}
-		} else if named, ok := types2.Unalias(m).(*types2.Named); ok && named.Obj() != nil {
-			memberList[i].st, memberList[i].isStruct = types2.Unalias(m).Underlying().(*types2.Struct)
-			memberList[i].bareName = named.Obj().Name()
-			memberList[i].usable = memberList[i].isStruct && memberList[i].st.NumFields() > 0 && memberList[i].bareName != "" && localPkg != nil && named.Obj().Pkg() != nil && localPkg.Path() == named.Obj().Pkg().Path() && !userDeclaresMethod(named, "UnmarshalJSON")
+			elem = ptr.Elem()
 		}
+		s := &memberList[i]
+		s.st, s.isStruct = types2.Unalias(elem).Underlying().(*types2.Struct)
+		named, ok := types2.Unalias(elem).(*types2.Named)
+		if !ok || named.Obj() == nil {
+			continue
+		}
+		s.bareName = named.Obj().Name()
+		shapeOK := s.isStruct && s.st.NumFields() > 0 && s.bareName != ""
+		shapeOK = shapeOK && localPkg != nil && named.Obj().Pkg() != nil && localPkg.Path() == named.Obj().Pkg().Path()
+		declared := userDeclaresMethod(named, "UnmarshalJSON")
+		s.usable = shapeOK && !declared && js.staticJSON[named]
+		s.custom = shapeOK && !s.usable
 	}
 
 	var trials []string
 	trials = append(trials, "_logos_raw := _logos_s.Value()")
 	trials = append(trials, "var _logos_match int")
 	trials = append(trials, fmt.Sprintf("var _logos_target %s", unionName))
+	hasCustom := false
+	for _, s := range memberList {
+		if s.custom {
+			hasCustom = true
+			break
+		}
+	}
+	if hasCustom {
+		trials = append(trials, "var _logos_custom int")
+		trials = append(trials, fmt.Sprintf("var _logos_custom_target %s", unionName))
+	}
 
 	for i, m := range members {
 		scratch := fmt.Sprintf("_logos_scratch%d", i)
@@ -244,6 +261,9 @@ func (js *jsonStruct) unionLines(f *jsonField, field string) []string {
 			trials = append(trials, "\t\t\t_logos_match++")
 			trials = append(trials, fmt.Sprintf("\t\t\t_logos_target = %s", scratch))
 			trials = append(trials, "\t\t}")
+		} else if hasCustom && s.custom {
+			trials = append(trials, "\t\t_logos_custom++")
+			trials = append(trials, fmt.Sprintf("\t\t_logos_custom_target = %s", scratch))
 		} else {
 			trials = append(trials, "\t\t_logos_match++")
 			trials = append(trials, fmt.Sprintf("\t\t_logos_target = %s", scratch))
@@ -252,14 +272,29 @@ func (js *jsonStruct) unionLines(f *jsonField, field string) []string {
 		trials = append(trials, "}")
 	}
 
-	trials = append(trials, "switch _logos_match {")
-	trials = append(trials, "case 1:")
-	trials = append(trials, fmt.Sprintf("\t%s = _logos_target", field))
-	trials = append(trials, "case 0:")
-	trials = append(trials, fmt.Sprintf("\treturn %s.UnionTrialError{Union: %q, Members: []string{%s}, Matched: 0, Total: %d}", rtAlias, unionName, membersList, len(members)))
-	trials = append(trials, "default:")
-	trials = append(trials, fmt.Sprintf("\treturn %s.UnionTrialError{Union: %q, Members: []string{%s}, Matched: _logos_match, Total: %d}", rtAlias, unionName, membersList, len(members)))
-	trials = append(trials, "}")
+	if hasCustom {
+		trials = append(trials, "switch {")
+		trials = append(trials, "case _logos_match == 1:")
+		trials = append(trials, fmt.Sprintf("\t%s = _logos_target", field))
+		trials = append(trials, "case _logos_match == 0 && _logos_custom == 1:")
+		trials = append(trials, fmt.Sprintf("\t%s = _logos_custom_target", field))
+		trials = append(trials, "case _logos_match == 0 && _logos_custom == 0:")
+		trials = append(trials, fmt.Sprintf("\treturn %s.UnionTrialError{Union: %q, Members: []string{%s}, Matched: 0, Total: %d}", rtAlias, unionName, membersList, len(members)))
+		trials = append(trials, "case _logos_match == 0:")
+		trials = append(trials, fmt.Sprintf("\treturn %s.UnionTrialError{Union: %q, Members: []string{%s}, Matched: _logos_custom, Total: %d}", rtAlias, unionName, membersList, len(members)))
+		trials = append(trials, "default:")
+		trials = append(trials, fmt.Sprintf("\treturn %s.UnionTrialError{Union: %q, Members: []string{%s}, Matched: _logos_match, Total: %d}", rtAlias, unionName, membersList, len(members)))
+		trials = append(trials, "}")
+	} else {
+		trials = append(trials, "switch _logos_match {")
+		trials = append(trials, "case 1:")
+		trials = append(trials, fmt.Sprintf("\t%s = _logos_target", field))
+		trials = append(trials, "case 0:")
+		trials = append(trials, fmt.Sprintf("\treturn %s.UnionTrialError{Union: %q, Members: []string{%s}, Matched: 0, Total: %d}", rtAlias, unionName, membersList, len(members)))
+		trials = append(trials, "default:")
+		trials = append(trials, fmt.Sprintf("\treturn %s.UnionTrialError{Union: %q, Members: []string{%s}, Matched: _logos_match, Total: %d}", rtAlias, unionName, membersList, len(members)))
+		trials = append(trials, "}")
+	}
 
 	if f.required < 0 {
 		return ifElseLines("!_logos_s.Null()", trials, []string{field + " = nil"})

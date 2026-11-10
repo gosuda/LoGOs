@@ -59,10 +59,11 @@ type jsonField struct {
 }
 
 type jsonStruct struct {
-	name     string
-	fields   []*jsonField
-	defaults []string
-	required []string
+	name       string
+	fields     []*jsonField
+	defaults   []string
+	required   []string
+	staticJSON map[*types2.Named]bool
 }
 
 func (fl *fileLower) lowerStaticJSON() {
@@ -168,9 +169,9 @@ func parseGeneratedDecls(text string, pos syntax.Pos) []syntax.Decl {
 	}
 	return decls
 }
-
 func (fl *fileLower) buildJSONStruct(name string, st *types2.Struct, fields []*types2.Var) *jsonStruct {
-	js := &jsonStruct{name: name}
+	js := &jsonStruct{name: name, staticJSON: fl.pkg.info.LogosStaticJSON}
+
 	for _, fld := range fields {
 		i := fieldIndexOf(st, fld)
 		if i < 0 {
