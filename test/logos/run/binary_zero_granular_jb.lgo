@@ -39,7 +39,7 @@ func jbZeroCap() int {
 }
 
 func jbFatCap() int {
-	return (1 << 26) / int(unsafe.Sizeof(JbFat{}))
+	return (1 << 23) / int(unsafe.Sizeof(JbFat{}))
 }
 
 func jbWire(counts ...uint64) []byte {
