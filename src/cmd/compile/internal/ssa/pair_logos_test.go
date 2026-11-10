@@ -30,6 +30,9 @@ func TestLogosPairARM64(t *testing.T) {
 		{name: "load16off1008", op: OpARM64FMOVQload, typ: vec, off: 1008, pair: OpARM64FLDPQ, fused: true, offset: 1008},
 		{name: "load16off1024", op: OpARM64FMOVQload, typ: vec, off: 1024, pair: OpARM64FLDPQ, fused: false},
 		{name: "load16misaligned", op: OpARM64FMOVQload, typ: vec, off: 8, pair: OpARM64FLDPQ, fused: false},
+		{name: "load16offUnaligned8", op: OpARM64FMOVQload, typ: vec, off: 8, pair: OpARM64FLDPQ, fused: false},
+		{name: "load16offNeg1024", op: OpARM64FMOVQload, typ: vec, off: -1024, pair: OpARM64FLDPQ, fused: true, offset: -1024},
+		{name: "load16offNeg1040", op: OpARM64FMOVQload, typ: vec, off: -1040, pair: OpARM64FLDPQ, fused: false},
 	}
 
 	for _, tc := range loadCases {
@@ -44,7 +47,7 @@ func TestLogosPairARM64(t *testing.T) {
 			if tc.name == "load16misaligned" {
 				off1 = 0
 				off2 = 8
-			} else if tc.fused || tc.name == "load16off1024" {
+			} else if tc.fused || tc.op == OpARM64FMOVQload {
 				off2 = off1 + width
 			}
 			fun := c.Fun("entry",
@@ -161,7 +164,10 @@ func TestLogosPairARM64Stores(t *testing.T) {
 		{name: "store16off0", off1: 0, off2: 16, fused: true, place: 0},
 		{name: "store16off992", off1: 992, off2: 1008, fused: true, place: 992},
 		{name: "store16off1024", off1: 1024, off2: 1040, fused: false},
+		{name: "store16offNeg1024", off1: -1024, off2: -1008, fused: true, place: -1024},
+		{name: "store16offNeg1040", off1: -1040, off2: -1024, fused: false},
 		{name: "store16misaligned", off1: 0, off2: 8, fused: false},
+		{name: "store16offUnaligned8", off1: 8, off2: 24, fused: false},
 		{name: "store16flush", off1: 0, off2: 16, flush: true, fused: false},
 	}
 	for _, tc := range cases {
