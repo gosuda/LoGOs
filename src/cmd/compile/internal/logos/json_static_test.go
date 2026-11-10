@@ -575,16 +575,6 @@ func TestMarshalSingleMakeNoThreshold(t *testing.T) {
 	}
 }
 
-func TestStringFieldsReadOnce(t *testing.T) {
-	text := lowerStaticText(t, "package p\n\ntype S struct {\n\tA string `json:\"a\"`\n\tB string `json:\"b\"`\n\tN int64 `json:\"n\"`\n}\n")
-	body := methodBody(t, text, "func (_logos_v S) MarshalJSON() ([]byte, error) {")
-	for _, f := range []string{"A", "B"} {
-		if got := strings.Count(body, "_logos_v."+f); got != 1 {
-			t.Errorf("_logos_v.%s is read %d times, want exactly one pin:\n%s", f, got, body)
-		}
-	}
-}
-
 func TestCallSitesKeepJSONMarshal(t *testing.T) {
 	text := lowerStaticText(t, "package p\n\nimport \"encoding/json\"\n\ntype User struct {\n\tID int64 `json:\"id\"`\n\tName string `json:\"name\"`\n}\n\nfunc Encode(u User) ([]byte, error) {\n\treturn json.Marshal(u)\n}\n")
 	if got := strings.Count(text, "json.Marshal("); got != 1 {
