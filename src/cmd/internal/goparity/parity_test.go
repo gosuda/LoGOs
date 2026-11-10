@@ -106,6 +106,7 @@ import (
 	"regexp"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -366,7 +367,7 @@ func stageCorpus(tc toolchain, dst, cacheDir string, progs []string) error {
 			return fmt.Errorf("staging %s: %w", p, err)
 		}
 		if _, err := os.Stat(filepath.Join(srcDir, "gen.go")); err == nil {
-			if err := runGenerator(tc.bin, p, filepath.Join(dst, p), baseEnv(cacheDir), generatorBudget); err != nil {
+			if _, err := runGenerator(tc.bin, p, filepath.Join(dst, p), baseEnv(cacheDir), generatorBudget); err != nil {
 				return err
 			}
 		}
@@ -392,7 +393,7 @@ const generatorBudget = 5 * time.Minute
 
 const pipeWaitDelay = 10 * time.Second
 
-func runGenerator(bin, prog, dir string, env []string, budget time.Duration) error {
+func runGenerator(bin, prog, dir string, env []string, budget time.Duration) (string, error) {
 	ctx, cancel := context.WithTimeoutCause(context.Background(), budget, errors.New("goparity generator timeout"))
 	defer cancel()
 	cmd := exec.CommandContext(ctx, bin, "run", "gen.go")
@@ -410,11 +411,11 @@ func runGenerator(bin, prog, dir string, env []string, budget time.Duration) err
 			if cmd.ProcessState == nil || !cmd.ProcessState.Exited() {
 				killProcessGroup(cmd)
 			}
-			return fmt.Errorf("generator for %s timed out: %w", prog, context.Cause(ctx))
+			return string(out), fmt.Errorf("generator for %s timed out: %w", prog, context.Cause(ctx))
 		}
-		return fmt.Errorf("generator for %s failed: %v\n%s", prog, err, clip(string(out)))
+		return string(out), fmt.Errorf("generator for %s failed: %v\n%s", prog, err, clip(string(out)))
 	}
-	return nil
+	return string(out), nil
 }
 
 const moduleBuildBudget = 15 * time.Minute
@@ -629,19 +630,20 @@ func TestRunBinaryTimeoutKillsSleeper(t *testing.T) {
 	}
 	fork := forkTool(t)
 	dir := t.TempDir()
-	marker := filepath.Join(dir, "marker")
+	pidFile := filepath.Join(dir, "pid")
 	src := fmt.Sprintf(`package main
 
 import (
+	"fmt"
 	"os"
 	"time"
 )
 
 func main() {
+	_ = os.WriteFile(%q, []byte(fmt.Sprint(os.Getpid())), 0o644)
 	time.Sleep(8 * time.Second)
-	_ = os.WriteFile(%q, []byte("alive"), 0o644)
 }
-`, marker)
+`, pidFile)
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module sleeper\n\ngo 1.27\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -653,17 +655,30 @@ func main() {
 		t.Fatalf("building sleeper: %v\n%s", err, clip(out))
 	}
 	start := time.Now()
-	_, err := runBinaryTimeout(bin, "4", 2*time.Second)
-	elapsed := time.Since(start)
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := runBinaryTimeout(bin, "4", 2*time.Second)
+		errCh <- err
+	}()
+	var pid int
+	for {
+		if b, rerr := os.ReadFile(pidFile); rerr == nil {
+			if p, perr := strconv.Atoi(strings.TrimSpace(string(b))); perr == nil {
+				pid = p
+				break
+			}
+		}
+		if time.Now().After(start.Add(3 * time.Second)) {
+			t.Fatalf("sleeper wrote no readable pid file within %s", time.Since(start).Round(time.Second))
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if !procGroupGone(pid, time.Until(start.Add(6*time.Second))) {
+		t.Fatalf("sleeper process group %d still alive %s after the deadline: child survived the kill", pid, time.Since(start).Round(time.Second))
+	}
+	err := <-errCh
 	if err == nil || !strings.Contains(err.Error(), "goparity run timeout") {
 		t.Fatalf("sleeper run = %v, want the goparity run timeout error", err)
-	}
-	if elapsed > 30*time.Second {
-		t.Fatalf("sleeper kill took %s, want within the bound", elapsed)
-	}
-	time.Sleep(time.Until(start.Add(11 * time.Second)))
-	if _, err := os.Stat(marker); err == nil {
-		t.Fatal("sleeper wrote its marker after the deadline: child survived the kill")
 	}
 }
 
@@ -673,7 +688,34 @@ func TestRunBinaryTimeoutReleasesGrandchildPipe(t *testing.T) {
 	}
 	fork := forkTool(t)
 	dir := t.TempDir()
-	src := `package main
+	heldFile := filepath.Join(dir, "held.marker")
+	heldDir := filepath.Join(dir, "heldmod")
+	heldSrc := fmt.Sprintf(`package main
+
+import (
+	"os"
+	"time"
+)
+
+func main() {
+	time.Sleep(25 * time.Second)
+	_ = os.WriteFile(%q, []byte("held"), 0o644)
+}
+`, heldFile)
+	if err := os.MkdirAll(heldDir, 0o777); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(heldDir, "go.mod"), []byte("module held\n\ngo 1.27\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(heldDir, "main.go"), []byte(heldSrc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	heldBin := filepath.Join(heldDir, "held")
+	if out, err := goBuild(fork.bin, heldDir, []string{"build", "-o", heldBin, "."}, baseEnv(forkCache()), 5*time.Minute); err != nil {
+		t.Fatalf("building pipe holder: %v\n%s", err, clip(out))
+	}
+	src := fmt.Sprintf(`package main
 
 import (
 	"fmt"
@@ -683,12 +725,12 @@ import (
 
 func main() {
 	fmt.Println("done")
-	c := exec.Command("/bin/sleep", "30")
+	c := exec.Command(%q)
 	c.Stdout = os.Stdout
 	c.Stderr = os.Stderr
 	_ = c.Start()
 }
-`
+`, heldBin)
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module daemon\n\ngo 1.27\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -699,17 +741,18 @@ func main() {
 	if out, err := goBuild(fork.bin, dir, []string{"build", "-o", bin, "."}, baseEnv(forkCache()), 5*time.Minute); err != nil {
 		t.Fatalf("building daemon: %v\n%s", err, clip(out))
 	}
-	start := time.Now()
 	obs, err := runBinaryTimeout(bin, "4", 15*time.Second)
-	elapsed := time.Since(start)
 	if err != nil {
 		t.Fatalf("daemon run = %v, want the exited parent observation", err)
 	}
 	if obs.exit != 0 {
 		t.Fatalf("daemon exit = %d, want 0", obs.exit)
 	}
-	if elapsed > 20*time.Second {
-		t.Fatalf("grandchild pipe held the run for %s, want within the bound", elapsed)
+	if !strings.Contains(obs.stdout, "done") {
+		t.Fatalf("daemon stdout = %q, want the parent output drained before return", obs.stdout)
+	}
+	if _, serr := os.Stat(heldFile); serr == nil {
+		t.Fatalf("pipe holder wrote its marker before the run returned: the run waited for the pipe-holding grandchild")
 	}
 }
 
@@ -719,34 +762,54 @@ func TestRunGeneratorTimeoutKillsSleeper(t *testing.T) {
 	}
 	fork := forkTool(t)
 	dir := t.TempDir()
-	marker := filepath.Join(dir, "marker")
+	pidFile := filepath.Join(dir, "pgid")
 	src := fmt.Sprintf(`package main
 
 import (
+	"fmt"
 	"os"
+	"syscall"
 	"time"
 )
 
 func main() {
+	pgid, _ := syscall.Getpgid(0)
+	_ = os.WriteFile(%q, []byte(fmt.Sprint(pgid)), 0o644)
 	time.Sleep(10 * time.Second)
-	_ = os.WriteFile(%q, []byte("alive"), 0o644)
 }
-`, marker)
+`, pidFile)
 	if err := os.WriteFile(filepath.Join(dir, "gen.go"), []byte(src), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	start := time.Now()
-	err := runGenerator(fork.bin, "sleepgen", dir, baseEnv(forkCache()), 2*time.Second)
-	elapsed := time.Since(start)
-	if err == nil || !strings.Contains(err.Error(), "timed out") {
-		t.Fatalf("sleeping generator = %v, want a timeout error", err)
+	type runRes struct {
+		out string
+		err error
 	}
-	if elapsed > 60*time.Second {
-		t.Fatalf("generator kill took %s, want within the bound", elapsed)
+	ch := make(chan runRes, 1)
+	go func() {
+		out, err := runGenerator(fork.bin, "sleepgen", dir, baseEnv(forkCache()), 2*time.Second)
+		ch <- runRes{out, err}
+	}()
+	var pgid int
+	for {
+		if b, rerr := os.ReadFile(pidFile); rerr == nil {
+			if p, perr := strconv.Atoi(strings.TrimSpace(string(b))); perr == nil {
+				pgid = p
+				break
+			}
+		}
+		if time.Now().After(start.Add(3 * time.Second)) {
+			t.Fatalf("sleeping generator wrote no readable pgid file within %s", time.Since(start).Round(time.Second))
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
-	time.Sleep(time.Until(start.Add(13 * time.Second)))
-	if _, err := os.Stat(marker); err == nil {
-		t.Fatal("generator wrote its marker after the deadline: child survived the kill")
+	if !procGroupGone(pgid, time.Until(start.Add(7*time.Second))) {
+		t.Fatalf("generator process group %d still alive %s after the deadline: child survived the kill", pgid, time.Since(start).Round(time.Second))
+	}
+	res := <-ch
+	if res.err == nil || !strings.Contains(res.err.Error(), "timed out") {
+		t.Fatalf("sleeping generator = %v, want a timeout error", res.err)
 	}
 }
 
@@ -1620,7 +1683,7 @@ func TestParityMutants(t *testing.T) {
 			}
 			if !red {
 				if !upOn {
-					t.Skipf("mutant %s unevaluable with upstream off: fork stayed green under %s", m.id, m.cfg)
+					t.Skipf("mutant %s: cannot evaluate detection with the upstream oracle off: the fork stayed green under %s, so a surviving mutant is indistinguishable from an equivalent one", m.id, m.cfg)
 				}
 				t.Errorf("mutant %s survived: %s stayed green under %s (exit %d)", m.id, m.expect, m.cfg, fobs.exit)
 			}

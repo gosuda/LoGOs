@@ -26,3 +26,7 @@ func killProcessGroup(cmd *exec.Cmd) {
 	}
 	_ = cmd.Process.Kill()
 }
+
+func procGroupGone(pgid int, wait time.Duration) bool {
+	return true
+}

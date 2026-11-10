@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"syscall"
 	"testing"
+	"time"
 )
 
 func processGroupKillSupported() bool { return true }
@@ -31,4 +32,17 @@ func killProcessGroup(cmd *exec.Cmd) {
 		return
 	}
 	_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+}
+
+func procGroupGone(pgid int, wait time.Duration) bool {
+	deadline := time.Now().Add(wait)
+	for {
+		if err := syscall.Kill(-pgid, syscall.Signal(0)); err == syscall.ESRCH {
+			return true
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 }
