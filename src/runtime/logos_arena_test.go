@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 	"unsafe"
+	"weak"
 )
 
 var arenaSink any
@@ -1117,5 +1118,44 @@ func TestLogosArenaRestoreDropsScanRoots(t *testing.T) {
 			}
 		}
 		t.Fatal("cleanup did not run within 100 GCs after restore")
+	})
+}
+
+func TestLogosArenaScanRootsKeepReferentAlive(t *testing.T) {
+	inFreshGoroutine(t, func() {
+		defer debug.SetGCPercent(debug.SetGCPercent(-1))
+		runtime.GC()
+		m := runtime.LogosArenaSave()
+		obj := new(int)
+		*obj = 42
+		done := make(chan struct{})
+		runtime.AddCleanup(obj, func(c chan struct{}) { close(c) }, done)
+		w := weak.Make(obj)
+		p := runtime.LogosArenaAllocScan((*int)(nil), 64)
+		fillBytes(p, 64, 0)
+		*(**int)(p) = obj
+		obj = nil
+		runtime.GC()
+		runtime.GC()
+		kept := w.Value()
+		if kept == nil {
+			t.Fatal("heap referent collected while arena scan region holds the only reference")
+		}
+		if *kept != 42 {
+			t.Fatalf("heap referent corrupted: got %d, want 42", *kept)
+		}
+		runtime.LogosArenaRestore(m)
+		runtime.KeepAlive(p)
+		deadline := time.After(30 * time.Second)
+		for {
+			runtime.GC()
+			select {
+			case <-done:
+				return
+			case <-deadline:
+				t.Fatal("cleanup did not run within 30s after arena restore")
+				return
+			}
+		}
 	})
 }
