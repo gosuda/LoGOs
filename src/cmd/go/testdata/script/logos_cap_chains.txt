@@ -129,6 +129,21 @@ stderr 'reflect\.ValueOf\(\)'
 ! stderr 'unauthorized_(cgo|exec|net)'
 cd ../..
 
+cd y/main
+! logos build -o $WORK/bin/cy$GOEXE ./cmd
+stderr 'ERROR \[capabilities::unauthorized_exec\]: Transitive dependency ''example\.com/ydep'' reaches ''os\.startProcess'''
+stderr 'example\.com/ydep\.Init\(\) +at [^ ]+\.go:\d+'
+stderr 'os\.startProcess\(\) +at .*os/exec_posix\.go:\d+'
+! stderr 'unauthorized_(cgo|net)'
+cd ../..
+
+cd t/main
+! logos build -o $WORK/bin/ct$GOEXE ./cmd
+stderr 'ERROR \[capabilities::unauthorized_reflect\]: Transitive dependency ''example\.com/tdep'' reaches ''reflect\.TypeOf'''
+stderr 'example\.com/tdep\.Init\(\) +at [^ ]+\.go:\d+'
+! stderr 'unauthorized_(cgo|exec|net)'
+cd ../..
+
 -- a/main/go.mod --
 module example.com/amain
 
@@ -816,4 +831,91 @@ func helper() {
 //go:noinline
 func Init() {
 	helper()
+}
+
+-- y/main/go.mod --
+module example.com/ymain
+
+go 1.27
+
+require example.com/ydep v0.0.0
+
+replace example.com/ydep => ../dep
+
+-- y/main/logos.toml --
+[capabilities]
+transitive_exec = "deny"
+
+-- y/main/cmd/main.lgo --
+package main
+
+import (
+	"fmt"
+
+	"example.com/ydep"
+)
+
+func main() {
+	dep.Init()
+	fmt.Println("done")
+}
+
+-- y/dep/go.mod --
+module example.com/ydep
+
+go 1.27
+
+-- y/dep/dep.go --
+package dep
+
+import "os/exec"
+
+var launcher = exec.Command
+
+//go:noinline
+func Init() {
+	_ = launcher("echo", "hi").Run()
+}
+
+-- t/main/go.mod --
+module example.com/tmain
+
+go 1.27
+
+require example.com/tdep v0.0.0
+
+replace example.com/tdep => ../dep
+
+-- t/main/logos.toml --
+[capabilities]
+transitive_reflect = "deny"
+
+-- t/main/cmd/main.lgo --
+package main
+
+import (
+	"fmt"
+
+	"example.com/tdep"
+)
+
+func main() {
+	dep.Init()
+	fmt.Println("done")
+}
+
+-- t/dep/go.mod --
+module example.com/tdep
+
+go 1.27
+
+-- t/dep/dep.go --
+package dep
+
+import "reflect"
+
+//go:noinline
+func Init() {
+	t := reflect.TypeOf(0)
+	_ = t.String()
 }
