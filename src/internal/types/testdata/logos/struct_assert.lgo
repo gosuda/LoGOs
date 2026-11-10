@@ -12,7 +12,7 @@ type J interface {
 	N()
 }
 
-type SNoM struct : I /* ERROR "correctness::assertion_failed" */ {
+type SNoM struct : I /* ERRORx "correctness::assertion_failed.*missing method M" */ {
 	X int
 }
 
