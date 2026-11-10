@@ -461,7 +461,9 @@ func (c *testClient) notification(accept func(map[string]any) bool) map[string]a
 
 func (c *testClient) shutdown() error {
 	c.t.Helper()
-	c.call("shutdown", nil)
+	if res := c.call("shutdown", nil); string(res) != "null" {
+		c.t.Errorf("shutdown = %s, want null", res)
+	}
 	c.notify("exit", nil)
 	return c.wait()
 }
@@ -1367,45 +1369,105 @@ func TestGoplsEnvPutsToolchainFirst(t *testing.T) {
 	}
 }
 
-func TestFraming(t *testing.T) {
-	var buf bytes.Buffer
-	w := &writer{w: &buf}
-	if err := w.notify("a/b", map[string]int{"n": 1}); err != nil {
-		t.Fatal(err)
+func TestServeRejectsBadFrames(t *testing.T) {
+	frame := func(body string) string {
+		return fmt.Sprintf("Content-Length: %d\r\n\r\n%s", len(body), body)
 	}
-	if err := w.fail(json.RawMessage("7"), -32601, "nope"); err != nil {
-		t.Fatal(err)
-	}
-	rd := newReader(&buf)
-	m, err := rd.read()
-	if err != nil || m.Method != "a/b" || m.isRequest() || m.isResponse() {
-		t.Fatalf("first message = %+v, %v", m, err)
-	}
-	m, err = rd.read()
-	if err != nil || !m.isResponse() || string(m.ID) != "7" || !strings.Contains(string(m.Error), "nope") {
-		t.Fatalf("second message = %+v, %v", m, err)
-	}
-	if _, err := rd.read(); !errors.Is(err, io.EOF) {
-		t.Errorf("read at the end = %v, want io.EOF", err)
-	}
-
-	body := `{"jsonrpc":"2.0","method":"x"}`
-	ok := fmt.Sprintf("content-type: application/vscode-jsonrpc\r\nCONTENT-LENGTH: %d\r\n\r\n%s", len(body), body)
-	if m, err := newReader(strings.NewReader(ok)).read(); err != nil || m.Method != "x" {
-		t.Errorf("framed with odd headers = %+v, %v", m, err)
-	}
-	for name, in := range map[string]string{
-		"missing length": "X-Other: 1\r\n\r\n{}",
-		"corrupt length": "Content-Length: abc\r\n\r\n{}",
-		"negative":       "Content-Length: -4\r\n\r\n{}",
-		"truncated":      "Content-Length: 99\r\n\r\n{}",
-		"not json":       "Content-Length: 3\r\n\r\nabc",
-		"cut header":     "Content-Length: 3",
+	good := frame(`{"jsonrpc":"2.0","id":1,"method":"shutdown","params":null}`) +
+		frame(`{"jsonrpc":"2.0","method":"exit","params":null}`)
+	for _, c := range []struct {
+		name string
+		in   string
+		kind string
+	}{
+		{"missing length", "X-Other: 1\r\n\r\n{}", ""},
+		{"corrupt length", "Content-Length: abc\r\n\r\n{}", ""},
+		{"negative", "Content-Length: -4\r\n\r\n{}", ""},
+		{"truncated", "Content-Length: 99\r\n\r\n{}", ""},
+		{"not json", "Content-Length: 3\r\n\r\nabc", ""},
+		{"cut header", "Content-Length: 3", ""},
+		{"over the cap", "Content-Length: " + strconv.Itoa(maxMessage+1) + "\r\n\r\n", "invalid Content-Length"},
 	} {
-		if _, err := newReader(strings.NewReader(in)).read(); err == nil || errors.Is(err, io.EOF) {
-			t.Errorf("%s: read = %v, want a framing error", name, err)
-		}
+		t.Run(c.name, func(t *testing.T) {
+			scratch := t.TempDir()
+			scriptPath := filepath.Join(scratch, "script.json")
+			if err := os.WriteFile(scriptPath, []byte(`{}`), 0o666); err != nil {
+				t.Fatal(err)
+			}
+			opts := Options{
+				Gopls:    []string{os.Args[0], "-mode=stdio"},
+				Env:      append(os.Environ(), fakeEnv+"="+scriptPath, fakeLogEnv+"="+filepath.Join(scratch, "gopls.log")),
+				Compiler: newFakeCompiler(),
+				Stderr:   new(syncBuffer),
+			}
+			inR, inW, err := os.Pipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			outR, outW, err := os.Pipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			done := make(chan error, 1)
+			ctx := t.Context()
+			go func() { done <- Serve(ctx, inR, outW, opts) }()
+			if _, err := io.WriteString(inW, c.in); err != nil {
+				t.Fatal(err)
+			}
+			inW.Close()
+			select {
+			case err := <-done:
+				if err == nil {
+					t.Fatalf("Serve accepted a %s frame, want an error", c.name)
+				}
+				if c.kind != "" && !strings.Contains(err.Error(), c.kind) {
+					t.Fatalf("Serve over a %s frame = %v, want %q", c.name, err, c.kind)
+				}
+			case <-time.After(waitLimit):
+				t.Fatal("Serve did not return after the bad frame")
+			}
+			outW.Close()
+			outR.Close()
+		})
 	}
+	t.Run("good frames", func(t *testing.T) {
+		scratch := t.TempDir()
+		scriptPath := filepath.Join(scratch, "script.json")
+		if err := os.WriteFile(scriptPath, []byte(`{}`), 0o666); err != nil {
+			t.Fatal(err)
+		}
+		opts := Options{
+			Gopls:    []string{os.Args[0], "-mode=stdio"},
+			Env:      append(os.Environ(), fakeEnv+"="+scriptPath, fakeLogEnv+"="+filepath.Join(scratch, "gopls.log")),
+			Compiler: newFakeCompiler(),
+			Stderr:   new(syncBuffer),
+		}
+		inR, inW, err := os.Pipe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		outR, outW, err := os.Pipe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		done := make(chan error, 1)
+		ctx := t.Context()
+		go func() { done <- Serve(ctx, inR, outW, opts) }()
+		if _, err := io.WriteString(inW, good); err != nil {
+			t.Fatal(err)
+		}
+		inW.Close()
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Fatalf("Serve over good frames = %v, want nil", err)
+			}
+		case <-time.After(waitLimit):
+			t.Fatal("Serve did not return after the good frames")
+		}
+		outW.Close()
+		outR.Close()
+	})
 }
 
 func TestProxyLeavesForeignJSONAlone(t *testing.T) {
@@ -1484,41 +1546,6 @@ func TestProxyMergesDiagnosticsOfGoDocuments(t *testing.T) {
 	slices.Sort(msgs)
 	if want := []string{"cannot use \"s\" as int value", "compiler: style"}; !slices.Equal(msgs, want) {
 		t.Errorf("messages = %q, want %q", msgs, want)
-	}
-}
-
-func TestWriterRespondsWithNullForNoResult(t *testing.T) {
-	var buf bytes.Buffer
-	if err := (&writer{w: &buf}).respond(json.RawMessage("3"), nil); err != nil {
-		t.Fatal(err)
-	}
-	body := `{"jsonrpc":"2.0","id":3,"result":null}`
-	if want := fmt.Sprintf("Content-Length: %d\r\n\r\n%s", len(body), body); buf.String() != want {
-		t.Errorf("response = %q, want %q", buf.String(), want)
-	}
-}
-
-func TestContentLengthLimit(t *testing.T) {
-	for _, c := range []struct {
-		in string
-		ok bool
-	}{
-		{strconv.Itoa(maxMessage - 1), true},
-		{strconv.Itoa(maxMessage), true},
-		{strconv.Itoa(maxMessage + 1), false},
-		{"0", true},
-		{"-1", false},
-		{"", false},
-		{"12x", false},
-	} {
-		n, err := parseLength(c.in)
-		if (err == nil) != c.ok {
-			t.Errorf("parseLength(%q) = %d, %v, want ok = %v", c.in, n, err, c.ok)
-		}
-	}
-	header := "Content-Length: " + strconv.Itoa(maxMessage+1) + "\r\n\r\n"
-	if _, err := newReader(strings.NewReader(header)).read(); err == nil || !strings.Contains(err.Error(), "invalid Content-Length") {
-		t.Errorf("a body over the cap = %v, want the invalid Content-Length error before any allocation", err)
 	}
 }
 
