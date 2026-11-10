@@ -130,7 +130,7 @@ The compiler MUST enforce `correctness::region_escape` as `forbid` against a `lo
 The compiler MUST report `perf::arena_fallback` when a `logos/arena` call escapes to the heap [T-102].
 The directive grammar for these checks is `//logos:guardedby <mu>`, `//logos:atomic`, `//logos:requires <p.mu>`, `//logos:acquires <p.mu>`, `//logos:releases <p.mu>`, `//logos:zeroalloc [local]`, `//logos:sizeof T`, `//logos:offsetof T.f`, and `//logos:alignof T` [T-102]
 The rules `correctness::nil_deref_unproven`, `correctness::defer_erases_errdefer_state`, `concurrency::unsupervised_goroutine`, `suspicious::unapplied_struct_default`, `suspicious::side_effect_before_sort`, `portability::serialized_unsized_int`, `portability::alias_extension`, and `pedantic::exhaustive_union_switch` MUST NOT apply to Go packages, because each depends on loGo/s syntax, types, or generated code [T-102][R-U1].
-The rule `portability::serialized_unsized_int` guards the generated binary layout of Sec 10.1, which Go packages do not get [T-102][R-U1].
+The rule `portability::serialized_unsized_int` guards the generated binary layout of Sec 10.3, which Go packages do not get [T-102][R-U1].
 A Go package MUST get the default group severities, the `logos.toml [lints]` table, and the `//logos:allow(<rule>)` directive of this section, with the cap that the next line states [T-102][R-U1].
 A language-neutral rule whose default severity is `forbid` MUST run at `deny` for a Go package [T-102][R-U1].
 `//logos:allow(<rule>)` MUST silence such a rule in a Go package [T-102][R-U1].
@@ -1700,7 +1700,7 @@ JSON decoders MUST grow arrays incrementally with no pre-allocation cap. [T-Sec1
 - The amd64 vector form MUST run only when the archsimd CPU feature check its instructions need is true and MUST take the scalar loop when it is false, and the check MUST be omitted when the build's `GOAMD64` level guarantees the feature (`v3` for AVX2, `v4` for AVX512). [T-303]
 - On arm64, which has no masked load, the tail MUST load only the elements present. [T-303]
 - An integer slice sum MUST accumulate in vector lanes. [T-303]
-- A float slice sum MUST run the fixed pairwise halving tree of Sec 1.4 over the loaded elements, so its bits equal the scalar form with and without `GOEXPERIMENT=simd`. [T-303][T-104.6]
+- A float slice sum MUST run the fixed pairwise order of Sec 1.4 over the loaded elements, so its bits equal the scalar form with and without `GOEXPERIMENT=simd`. [T-303][T-104.6]
 - A slice sum with a fused operation, or over an `int`, `uint`, or `uintptr` element, MUST take the scalar form. [T-303]
 - Eject output of slice reductions MUST use the scalar form, so it builds with an upstream toolchain. [T-303][T-0.3]
 - At GOAMD64=v3/v4 an immediate 32/64-bit constant-count rotate MUST use RORXQ or RORXL besides SARX, SHLX, and SHRX. [T-303]
