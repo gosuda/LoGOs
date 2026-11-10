@@ -2,8 +2,10 @@
 
 package main
 
-import "fmt"
-
+import (
+	"fmt"
+	"unsafe"
+)
 
 type Word struct{ S string }
 
@@ -17,8 +19,26 @@ func pick[T any](items []T, i int) string {
 	return "after"
 }
 
+type LayoutSmall struct{ X int32 }
+
+func (s LayoutSmall) M() string { return "m" }
+
+func layoutInIfaceCase(v LayoutSmall) (uintptr, string, int32) {
+	const switch LayoutSmall {
+	case interface{ M() string }:
+		return unsafe.Sizeof(v), v.M(), v.X
+	}
+	return 0, "after", -1
+}
+
 func main() {
 	ws := []Word{{S: "a"}, {S: "b"}}
 	fmt.Println(pick(ws, 1))
 	fmt.Println(pick([]int{1, 2}, 0))
+	sz, m, x := layoutInIfaceCase(LayoutSmall{X: 7})
+	if sz != unsafe.Sizeof(LayoutSmall{}) {
+		fmt.Println("FAIL layout", sz)
+		return
+	}
+	fmt.Println(sz == 4, m, x)
 }
