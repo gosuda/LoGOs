@@ -9,6 +9,7 @@ cd m
 ! logos build ./...
 stderr 'operator \+ not defined'
 ! stderr 'archsimd'
+stderr 'has no field or method sum'
 ! go build ./...
 stderr 'operator \+ not defined'
 
