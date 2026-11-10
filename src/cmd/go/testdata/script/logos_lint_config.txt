@@ -40,6 +40,8 @@ cd quiet
 logos build -o $WORK/bin/quiet$GOEXE .
 ! stderr .
 exists $WORK/bin/quiet$GOEXE
+logos build --json-diagnostics -o $WORK/bin/quiet$GOEXE .
+! stderr .
 cd ..
 
 cd lowered
@@ -80,6 +82,7 @@ cd gotypeerr
 ! logos build --json-diagnostics ./...
 ! stderr '^#'
 stderr -count=1 '^\{.*\}$'
+stderr '"rule_id":""'
 cd ..
 
 cd reconfig
