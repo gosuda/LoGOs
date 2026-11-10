@@ -65,10 +65,7 @@ func TestIntKeyMapUsesTheReflectivePath(t *testing.T) {
 	}
 	mout, merr := json.Marshal(mv)
 	if merr != nil {
-		if _, ok := merr.(*json.UnsupportedTypeError); !ok {
-			t.Fatalf("error %v (%T) is not the encoding/json UnsupportedTypeError", merr, merr)
-		}
-		return
+		t.Fatalf("encoding/json rejects map[int]string: %v", merr)
 	}
 	var mback WithIntKeyMap
 	if err := json.Unmarshal(mout, &mback); err != nil {
