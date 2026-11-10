@@ -25,11 +25,11 @@ func init() {
 }
 func probeSrc() string {
 	var b strings.Builder
-	b.WriteString("package main\n\nimport \"fmt\"\n\nconst initArray = [8]int{1, 2, 3, 4, 5, 6, 7, 8}\n\nconst squares = map[int]int{")
+	b.WriteString("package main\n\nimport (\n\t\"fmt\"\n\t\"os\"\n\t\"runtime\"\n)\n\nconst initArray = [8]int{1, 2, 3, 4, 5, 6, 7, 8}\n\nconst squares = map[int]int{")
 	for k := range 1000 {
 		b.WriteString(fmt.Sprintf("%d: %d, ", k, k*k))
 	}
-	b.WriteString("}\n\nfunc main() {\n\tn := 0\n\tfor range squares {\n\t\tn++\n\t}\n\tfmt.Println(initArray, squares[31] ?? -1, n)\n}\n")
+	b.WriteString("}\n\nvar probeInitAlloc uint64\n\nfunc init() {\n\tvar m runtime.MemStats\n\truntime.ReadMemStats(&m)\n\truntime.ReadMemStats(&m)\n\tprobeInitAlloc = m.HeapAlloc\n}\n\nfunc main() {\n\tvar m runtime.MemStats\n\truntime.ReadMemStats(&m)\n\truntime.ReadMemStats(&m)\n\tif m.HeapAlloc != probeInitAlloc {\n\t\tfmt.Printf(\"FAIL probe init heap grew: %d vs %d\\n\", probeInitAlloc, m.HeapAlloc)\n\t\tos.Exit(1)\n\t}\n\tn := 0\n\tfor range squares {\n\t\tn++\n\t}\n\tfmt.Println(initArray, squares[31] ?? -1, n)\n\tfmt.Println(\"probe init OK\")\n}\n")
 	return b.String()
 }
 
@@ -106,5 +106,15 @@ func main() {
 			os.Exit(1)
 		}
 	}
+	probeOut, err := exec.Command(filepath.Join(dir, "probe.exe")).CombinedOutput()
+	if err != nil {
+		fmt.Printf("FAIL probe run: %v\n%s", err, probeOut)
+		os.Exit(1)
+	}
+	if !strings.Contains(string(probeOut), "probe init OK") {
+		fmt.Printf("FAIL probe init heap grew:\n%s", probeOut)
+		os.Exit(1)
+	}
+
 	fmt.Println("init OK")
 }
