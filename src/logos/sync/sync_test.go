@@ -310,6 +310,29 @@ func TestHotUpdateConcurrent(t *testing.T) {
 	}
 }
 
+func TestHotUpdateIncrementNoLostUpdates(t *testing.T) {
+	const writers = 8
+	const perWriter = 2000
+	h := new(logosync.Hot[int])
+	h.Store(new(int))
+	var wg sync.WaitGroup
+	for range writers {
+		wg.Go(func() {
+			for range perWriter {
+				h.Update(func(old *int) *int {
+					v := new(int)
+					*v = *old + 1
+					return v
+				})
+			}
+		})
+	}
+	wg.Wait()
+	if got := h.Load(); got == nil || *got != writers*perWriter {
+		t.Fatalf("Load after %d increments = %v, want %d (a Load-then-Store Update loses updates)", writers*perWriter, got, writers*perWriter)
+	}
+}
+
 func TestHotNoMemoryGrowth(t *testing.T) {
 	const updates = 1000000
 	h := new(logosync.Hot[hotPoint])
