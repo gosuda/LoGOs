@@ -1,0 +1,29 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+! logos build ./...
+stderr 'cannot use'
+stderr 'T_id'
+stderr 'T_x'
+
+-- go.mod --
+module example.com/tuplenames
+
+go 1.27
+
+-- p/p.lgo --
+package p
+
+func Show(t (x int64, err error)) string {
+	return "ok"
+}
+
+-- main.lgo --
+package main
+
+import "example.com/tuplenames/p"
+
+func main() {
+	var v (id int64, err error) = (1, nil)
+	println(p.Show(v))
+}
