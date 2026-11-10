@@ -78,6 +78,17 @@ func main() {
 	vb.StoreArray(&ob)
 	fmt.Println(oa)
 	fmt.Println(ob)
+	w := &vecPair{
+		A: [16]byte{32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47},
+		B: [16]byte{48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63},
+	}
+	wa := archsimd.LoadUint8x16Array(&w.A)
+	wb := archsimd.LoadUint8x16Array(&w.B)
+	var oc, od [16]byte
+	wa.StoreArray(&oc)
+	wb.StoreArray(&od)
+	fmt.Println(oc)
+	fmt.Println(od)
 	func() {
 		defer func() {
 			if r := recover(); r != nil {
