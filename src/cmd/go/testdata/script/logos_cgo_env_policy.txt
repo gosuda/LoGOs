@@ -49,6 +49,15 @@ cd goign
 [cgo] logos build .
 cd ..
 
+# Unset CGO_ENABLED on a Go-only module: logos keeps the upstream default.
+cd godefault
+env CGO_ENABLED=
+[cgo] go env CGO_ENABLED
+[cgo] cp stdout $WORK/go-cgo-default.txt
+[cgo] logos env CGO_ENABLED
+[cgo] cmp stdout $WORK/go-cgo-default.txt
+cd ..
+
 -- forbid/go.mod --
 module example.com/cgoforbid
 
@@ -179,3 +188,15 @@ import "C"
 import "fmt"
 
 func main() { fmt.Println("goign:", C.answer()) }
+
+-- godefault/go.mod --
+module example.com/godefault
+
+go 1.27
+
+-- godefault/main.go --
+package main
+
+import "fmt"
+
+func main() { fmt.Println("godefault") }
