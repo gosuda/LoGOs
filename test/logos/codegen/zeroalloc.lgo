@@ -75,7 +75,7 @@ func capture(x int) int {
 
 //logos:zeroalloc
 func pack(v int) []int {
-	return []int{v} // ERROR "\[perf::zeroalloc_violation\]"
+	return []int{v} // ERROR "\[perf::zeroalloc_violation\].*pack allocates: .*escapes to heap"
 }
 
 //logos:zeroalloc
