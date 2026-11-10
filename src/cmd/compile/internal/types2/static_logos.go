@@ -494,7 +494,7 @@ func logosUnionMemberHasJSON(m Type, pkg *Package) bool {
 		return false
 	}
 	sig, ok := fn.Type().(*Signature)
-	if !ok || sig.Params().Len() != 1 || sig.Results().Len() != 1 {
+	if !ok || sig.Params().Len() != 1 || sig.Variadic() || sig.Results().Len() != 1 {
 		return false
 	}
 	if !Identical(Unalias(sig.Params().At(0).Type()), NewSlice(universeByte)) {
