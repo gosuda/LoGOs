@@ -85,6 +85,13 @@ cd ws/a
 stderr 'b\.go:6:2: \[slop::discarded_error\]'
 cd ../..
 
+# A Go module may use identifiers that .lgo reserves: no loGo/s type
+# rule applies to Go modules, so the build stays silent.
+cd norules
+logos build ./...
+! stderr .
+cd ..
+
 -- dropped/go.mod --
 module example.com/dropped
 
@@ -344,4 +351,18 @@ import "os"
 func Name() string {
 	os.Remove("missing")
 	return "dep"
+}
+
+-- norules/go.mod --
+module example.com/norules
+
+go 1.27
+
+-- norules/main.go --
+package main
+
+var Logos_x = 1
+
+func main() {
+	println(Logos_x)
 }
