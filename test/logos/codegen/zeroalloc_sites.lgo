@@ -101,6 +101,14 @@ func mapInsert(m map[string]int, k string, v int) {
 }
 
 //logos:zeroalloc
+func localGrow(k string, v int) int {
+	m := make(map[string]int)
+	m[k] = v
+	m["b"] = 2
+	return len(m)
+}
+
+//logos:zeroalloc
 func concatLen(a, b string) int {
 	s := a + b
 	return len(s)
