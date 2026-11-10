@@ -19,9 +19,9 @@ go tool pack p $WORK/m.a __.LOGOS
 stdout '^fn Good\.Sum Readonly,ParamMutated=0$'
 go tool pack p $WORK/vp.a __.LOGOS
 stdout '^fn .*Grab AssertTP=0,AssertRTP=0$'
-! stdout 'ParamMutated'
+stdout '^fn Box\.Eat ParamMutated=0$'
 go tool pack p $WORK/n.a __.LOGOS
-stdout '^fn U\.Go .*ParamMutated=1$'
+stdout '^fn U\.Go Readonly,ParamMutated=0$'
 stdout '^fn V\.Go .*ParamMutated=1$'
 stdout '^fn Z\.Go Readonly,ParamMutated=0$'
 
