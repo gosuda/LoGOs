@@ -35,6 +35,27 @@ func fieldCondition() {
 	}
 }
 
+func fieldIndexCondition() {
+	const for _, f := range comptime.Fields[Pair]() {
+		const if f.Index == 0 { // ERROR "comptime::not_constant"
+		}
+	}
+}
+
+func fieldExportedCondition() {
+	const for _, f := range comptime.Fields[Pair]() {
+		const if f.Exported { // ERROR "comptime::not_constant"
+		}
+	}
+}
+
+func fieldVarCondition() {
+	const for i, _ := range comptime.Fields[Pair]() {
+		const if i == 0 { // ERROR "comptime::not_constant"
+		}
+	}
+}
+
 func deadNonStruct() string {
 	const if comptime.IsStruct[int]() {
 		const for _, f := range comptime.Fields[int]() {
