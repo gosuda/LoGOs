@@ -1,6 +1,11 @@
 env GOPROXY=off
 env GOTOOLCHAIN=local
 
+# REDTEAM80_SKIP holds 31 names in two classes.
+# 30 fetch external vector modules over the network when -short is off:
+# Wycheproof, ACVP, BoGo, Ed25519 vectors, x509-limbo, mkmalloc sources.
+# TestPipeThreads opens 100 pipes then caps threads at 50
+# (src/os/os_test.go), so it hits the host thread limit.
 env REDTEAM80_SKIP='^(TestACVP|TestBogoSuite|TestCBCAESWycheproof|TestCMACWycheproof|TestChaCha20Poly1305Wycheproof|TestDSAWycheproof|TestECDSAWycheproof|TestEd25519Vectors|TestEd25519Wycheproof|TestGCMWycheproof|TestHKDFWycheproof|TestHMACWycheproof|TestKeyGenWycheproof|TestMkmalloc|TestPipeThreads|TestMLKEMDecapsWycheproof|TestMLKEMEncapsWycheproof|TestMLKEMSemiExpandedDecapsWycheproof|TestMLDSANoSeedWycheproof|TestMLDSASignSeedRandomizedWycheproof|TestRSAOAEPDecryptWycheproof|TestRSAPKCS1DecryptWycheproof|TestRSAPKCS1SignaturesWycheproof|TestRSAPSSSignaturesWycheproof|TestSecpECDHSPKIWycheproof|TestSecpECDHWycheproof|TestSignSeedWycheproof|TestVerifyWycheproof|TestWycheproof|TestX509Limbo|TestX25519ECDHWycheproof)$'
 
 mkdir /tmp/rt80-redteam80
