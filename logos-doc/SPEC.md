@@ -179,10 +179,9 @@ The compiler MUST enforce `portability::alias_extension` as `warn` for each alia
 The warnings of `suspicious::unapplied_struct_default`, `suspicious::side_effect_before_sort`, and `portability::alias_extension` MUST take their severity from the `logos.toml [lints]` group of the rule, and `//logos:allow(<rule>)` MUST silence each of them under `warn` and `deny` [T-102].
 A `//logos:allow(portability::alias_extension)` directive MUST silence the rule for an alias-extension file only when it sits in the comment block directly above the package clause of that file [T-102].
 The compiler MUST enforce `perf::time_after_in_loop` as `warn` against `time.After` inside a loop body [T-102].
-The compiler MUST enforce `pedantic::exhaustive_union_switch` as `allow` against a `default` clause in a switch over a closed union [T-102].
+A default over a closed union MUST report pedantic::exhaustive_union_switch when the pedantic group is enabled; that rule defaults to allow and is silent otherwise. [T-102]
 JSON output MUST offer autofix candidates for optional chaining with default, early-return guard, split of a misplaced `?`, verb fix to `%w`, and addition of `?` in an error-returning function [T-102].
 JSON output for a Go package MUST offer only the verb fix to `%w` among the previous sentence's candidates, because the other candidates name loGo/s syntax; it MAY also offer the `portability::atomic_plain_int64` wrapper fix. [T-102][R-U1]
-A default over a closed union MUST report pedantic::exhaustive_union_switch when the pedantic group is enabled; that rule defaults to allow and is silent otherwise. [T-102]
 Exhaustive switches MUST still list every member or default. [T-102]
 The compiler MUST allow always-nil-error callees and benign writers to standard output, standard error, byte buffers, and string builders. [T-102]
 It MUST NOT hoist timers across iterations. [T-102]
@@ -202,10 +201,6 @@ The command `logos next --fix` MUST convert a whole Go module to a loGo/s module
 `logos next` MUST leave a loop with jump control or side effects unchanged and MUST list it in `next_tasks.json` [T-103].
 No `logos fmt` command exists [T-103].
 No command except `logos next` MUST rewrite `.lgo` files [T-103].
-Conversion MUST use byte-span splicing. [T-103]
-`logos context` MUST print the declaration and one level of referenced signatures without function bodies, capped at 100 lines. [T-103]
-`logos next` MUST preserve comments and build lines outside its edits. [T-103]
-The toolchain MUST NOT add a `logos fmt` rewriting command. [T-103]
 
 ### 1.4 RFC-104: Syntactic sugar and desugaring
 Error propagation with `?` MUST be a postfix operator [T-104.1].
@@ -325,31 +320,21 @@ func Count(n int) iter.Seq[int] {
 	}
 }
 ```
-Lambdas MUST allow expression and block forms with known target types. [T-104.6]
-A ? in an expression lambda MUST propagate from the enclosing function. [T-104.6]
 A bare return that a shadowed named error result would change MUST fail as upstream Go reports it. errdefer MUST run on panic, Goexit, or non-nil error. [T-104.2]
 Fused take(5) loops MUST run map functions at most 5 times. [T-104.6][T-102]
 Side effects before sortBy MUST warn suspicious::side_effect_before_sort. [T-104.6][T-102]
 Interpolation MUST evaluate each operand once, left to right, into a local variable, and MUST convert error and fmt.Stringer operands to strings before sizing. [T-104.4]
-The bound MUST count those strings, so the lowering uses one allocation and the buffer MUST never regrow. [T-104.4]
-Chains MUST treat lambda parameters as const views. [T-104.6]
 `defer f()?` with nil result MUST leave the error result nil with no allocation. [T-104.2]
 With a prior error it MUST join both errors. [T-104.2]
 Interpolation operands MUST evaluate once from left to right. [T-104.4]
 Errdefer MUST work in functions with unnamed error results. [T-104.2]
-Float sums MUST use fixed pairwise order with no implicit contraction. [T-104.6]
-Chains MUST fuse into one loop. [T-104.6]
-The receiver MUST evaluate once before the loop. [T-104.6]
-A panic during return evaluation MUST count as failure. [T-104.2]
 Errdefer MUST stay skipped on success returns. [T-104.2]
 `errdefer` MUST run when the frame holds a non-nil error, panics, or exits through Goexit. [T-104.2]
 For `errdefer f()?`, a rollback error MUST join the primary error with errors join semantics, as `defer f()?` does. [T-104.2]
 A nil primary error MUST take the rollback error as is. [T-104.2]
 `defer f()?` MUST run in place on the standard LIFO stack. [T-104.2]
-Partial chain failure MUST close already produced `io.Closer` elements in reverse order. [T-104.6]
 The fused loop MUST run that rollback before returning. [T-104.6]
 It MUST perform no full struct copy. [T-104.5]
-User braces MUST print literally. [T-104.4]
 NaN keys MUST order deterministically. [T-104.6]
 
 ### 1.5 RFC-105: Optimization tiers
@@ -376,11 +361,7 @@ Plain `go` MUST read no `target_cpu` and MUST keep the upstream `GOAMD64` and `G
 `native` MUST pick the host level [T-105].
 The default binary MUST NOT run on x86 CPUs older than v3 [T-105].
 Self-aliased calls such as arr = Reverse(arr) MUST return correct results. [T-105]
-The deterministic target MUST select GOAMD64=v3 and GOARM64=v8.2 unless the environment overrides them. [T-105]
-Host-specific selection MUST require `target_cpu = "native"`. [T-105]
-O3 MUST set inline budget 400 with budget 80 inside recursive cycles. [T-105][T-302]
 Recursive functions MUST NOT inline above that budget. [T-105][T-302]
-A function in a recursive cycle MUST keep the upstream 32-byte variable-make buffer, so a helper inlined into it adds no tier buffer to its frame. [T-105][T-302]
 
 ## 2. Tier 2 specification
 
