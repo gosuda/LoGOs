@@ -828,6 +828,50 @@ func TestProxyStaleLoweringAnswersNull(t *testing.T) {
 	}
 }
 
+func TestProxySnapshotCountsStayAtOne(t *testing.T) {
+	const otherLgo = "package a\n\nfunc Other() int { return 1 }\n"
+	const secondLgo = "package b\n\nfunc Second() int { return 2 }\n"
+	f := newFixture(t, map[string]string{
+		"a/a.lgo": aLgo,
+		"b/c.lgo": secondLgo,
+	}, fixtureOptions{})
+	f.open("a/a.lgo", 1)
+	f.open("b/c.lgo", 1)
+	want := map[string]int{f.path("a"): 1, f.path("b"): 1}
+	counts := func() map[string]int {
+		t.Helper()
+		var got map[string]int
+		if err := json.Unmarshal(f.client.call("logos/snapshotCounts", map[string]any{}), &got); err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	if got := counts(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("snapshot counts = %v, want %v", got, want)
+	}
+	change := func(rel, text string, version int) {
+		t.Helper()
+		f.client.notify("textDocument/didChange", map[string]any{
+			"textDocument":   map[string]any{"uri": f.uri(rel), "version": version},
+			"contentChanges": []any{map[string]any{"text": text}},
+		})
+		if got := counts(); !reflect.DeepEqual(got, want) {
+			t.Fatalf("snapshot counts after %s version %d = %v, want %v", rel, version, got, want)
+		}
+	}
+	change("a/a.lgo", aLgo+"// edit one\n", 2)
+	change("a/a.lgo", aLgo+"// edit two\n", 3)
+	if err := os.WriteFile(f.path("a/b.lgo"), []byte(otherLgo), 0o666); err != nil {
+		t.Fatal(err)
+	}
+	f.open("a/b.lgo", 1)
+	if got := counts(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("snapshot counts after adding a/b.lgo = %v, want %v", got, want)
+	}
+	change("a/b.lgo", otherLgo+"// edit three\n", 2)
+	change("b/c.lgo", secondLgo+"// edit four\n", 2)
+}
+
 func TestProxyMergesDiagnostics(t *testing.T) {
 	var lowCall Range
 	f := newFixture(t, map[string]string{"a/a.lgo": aLgo}, fixtureOptions{

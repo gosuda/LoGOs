@@ -22,6 +22,8 @@ func (p *Proxy) clientRequest(ctx context.Context, m *message) {
 		p.shutdown = true
 		p.mu.Unlock()
 		p.send(p.server, m)
+	case "logos/snapshotCounts":
+		p.snapshotCounts(ctx, m)
 	default:
 		p.request(ctx, m)
 	}

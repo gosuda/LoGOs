@@ -255,6 +255,7 @@ func (p *Proxy) apply(dir string, low *Lowering, diags []Diagnostic, versions ma
 			virt:  virtualPath(f.Path),
 			pm:    pm,
 			fresh: doc == nil || bytes.Equal(doc.text.data, f.Src),
+			gen:   u.gen,
 		}
 	}
 	for _, path := range low.Missing {
@@ -278,6 +279,28 @@ func (p *Proxy) apply(dir string, low *Lowering, diags []Diagnostic, versions ma
 	p.pruneLocked(need)
 }
 
+func (p *Proxy) snapshotCounts(ctx context.Context, m *message) {
+	p.ensure(ctx)
+	p.work.Lock()
+	defer p.work.Unlock()
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	gens := make(map[string]map[int]struct{})
+	for path, lw := range p.files {
+		dir := filepath.Dir(path)
+		set := gens[dir]
+		if set == nil {
+			set = make(map[int]struct{})
+			gens[dir] = set
+		}
+		set[lw.gen] = struct{}{}
+	}
+	out := make(map[string]int, len(gens))
+	for dir, set := range gens {
+		out[dir] = len(set)
+	}
+	p.respond(m.ID, out)
+}
 func (p *Proxy) staleLocked(path string) {
 	if lw := p.files[path]; lw != nil && lw.fresh {
 		stale := *lw

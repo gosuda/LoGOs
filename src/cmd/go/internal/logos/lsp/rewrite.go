@@ -16,6 +16,7 @@ type lowered struct {
 	virt  string
 	pm    *posMap
 	fresh bool
+	gen   int
 }
 
 func (lw *lowered) srcURI() string { return pathURI(lw.src) }
