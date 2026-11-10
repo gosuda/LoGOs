@@ -15,6 +15,7 @@ go run .
 cmp stdout $WORK/native-stdout.txt
 cd ../..
 cd m2
+env GOEXPERIMENT=logosarena
 logos run .
 stdout '^5200 18 55$'
 cp stdout $WORK/native2-stdout.txt
