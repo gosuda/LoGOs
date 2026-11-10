@@ -625,21 +625,29 @@ func TestFastcallProfileAttribution(t *testing.T) {
 	fastProf := filepath.Join(dir, "fast.prof")
 	plainProf := filepath.Join(dir, "plain.prof")
 	const iters = 200000000
-	collectBusyProfile(t, fastProf, 4, callFastBusy, iters)
-	collectBusyProfile(t, plainProf, 4, callPlainBusy, iters)
 	fastWants := []string{"callFastBusy", "_Cfunc_busy_spin"}
 	plainWants := []string{"callPlainBusy", "_Cfunc_plain_spin", "runtime.cgocall"}
 	if !goexperiment.LogosFastCgo {
 		fastWants = append(fastWants, "logosCgocallFast", "runtime.cgocall")
 	}
-	topFast, _, fastShares := pprofNodes(t, self, fastProf)
-	topPlain, _, plainShares := pprofNodes(t, self, plainProf)
-	fastCaller := nodeShare(fastShares, "callFastBusy")
-	plainCaller := nodeShare(plainShares, "callPlainBusy")
-	t.Logf("top: fast %q caller %.1f%%, plain %q caller %.1f%%",
-		topFast, fastCaller, topPlain, plainCaller)
+	var topFast, topPlain string
+	var fastShares, plainShares map[string]float64
+	var fastCaller, plainCaller float64
+	for range 3 {
+		collectBusyProfile(t, fastProf, 4, callFastBusy, iters)
+		collectBusyProfile(t, plainProf, 4, callPlainBusy, iters)
+		topFast, _, fastShares = pprofNodes(t, self, fastProf)
+		topPlain, _, plainShares = pprofNodes(t, self, plainProf)
+		fastCaller = nodeShare(fastShares, "callFastBusy")
+		plainCaller = nodeShare(plainShares, "callPlainBusy")
+		t.Logf("top: fast %q caller %.1f%%, plain %q caller %.1f%%",
+			topFast, fastCaller, topPlain, plainCaller)
+		if fastCaller >= 50 && plainCaller >= 50 {
+			break
+		}
+	}
 	if fastCaller < 50 || plainCaller < 50 {
-		t.Skipf("thin profile, check blocked: fast caller %.1f%% plain caller %.1f%%",
+		t.Fatalf("thin profile after retries: fast caller %.1f%% plain caller %.1f%%",
 			fastCaller, plainCaller)
 	}
 	if !topIn(topFast, fastWants) {
@@ -892,19 +900,27 @@ func TestFastcallLogosProfileParity(t *testing.T) {
 	bin := fixtureBin(t, "logosfast")
 	dir := t.TempDir()
 	prof := filepath.Join(dir, "lgo.prof")
-	out, err := runCmd(t, dir, bin, "busy", prof, "400000000")
-	if err != nil {
-		t.Fatalf("fixture busy: %v\n%s", err, out)
-	}
 	lgoWants := []string{"main.main", "_Cfunc_cbusyf"}
 	if !goexperiment.LogosFastCgo {
 		lgoWants = append(lgoWants, "logosCgocallFast", "runtime.cgocall")
 	}
-	top, _, lgoShares := pprofNodes(t, bin, prof)
-	lgoCaller := nodeShare(lgoShares, "main.main")
-	t.Logf("top: lgo %q caller %.1f%%, plain caller %.1f%%", top, lgoCaller, sharePlain)
+	var top string
+	var lgoShares map[string]float64
+	var lgoCaller float64
+	for range 3 {
+		out, err := runCmd(t, dir, bin, "busy", prof, "400000000")
+		if err != nil {
+			t.Fatalf("fixture busy: %v\n%s", err, out)
+		}
+		top, _, lgoShares = pprofNodes(t, bin, prof)
+		lgoCaller = nodeShare(lgoShares, "main.main")
+		t.Logf("top: lgo %q caller %.1f%%, plain caller %.1f%%", top, lgoCaller, sharePlain)
+		if lgoCaller >= 50 && sharePlain >= 50 {
+			break
+		}
+	}
 	if lgoCaller < 50 || sharePlain < 50 {
-		t.Skipf("thin profile, check blocked: lgo caller %.1f%% plain caller %.1f%%",
+		t.Fatalf("thin profile after retries: lgo caller %.1f%% plain caller %.1f%%",
 			lgoCaller, sharePlain)
 	}
 	if !topIn(top, lgoWants) {
