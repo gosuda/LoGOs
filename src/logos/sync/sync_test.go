@@ -69,6 +69,58 @@ func TestLockedWithLockUnlocksAfterPanic(t *testing.T) {
 	})
 }
 
+func TestLockedWithLockHoldsLockDuringCallback(t *testing.T) {
+	var l logosync.Locked[int]
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	firstDone := make(chan struct{})
+	go func() {
+		l.WithLock(func(v *int) {
+			close(entered)
+			<-release
+			*v = 1
+		})
+		close(firstDone)
+	}()
+	select {
+	case <-entered:
+	case <-time.After(10 * time.Second):
+		t.Fatal("first WithLock callback did not start")
+	}
+	secondRan := make(chan int, 1)
+	secondDone := make(chan struct{})
+	go func() {
+		l.WithLock(func(v *int) {
+			secondRan <- *v
+		})
+		close(secondDone)
+	}()
+	select {
+	case v := <-secondRan:
+		t.Fatalf("second WithLock ran while the first callback holds the lock (saw %d)", v)
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(release)
+	select {
+	case <-secondDone:
+	case <-time.After(10 * time.Second):
+		t.Fatal("second WithLock did not run after release")
+	}
+	select {
+	case <-firstDone:
+	case <-time.After(10 * time.Second):
+		t.Fatal("first WithLock did not return")
+	}
+	select {
+	case v := <-secondRan:
+		if v != 1 {
+			t.Fatalf("second WithLock saw %d, want 1 (it must run after the first callback wrote)", v)
+		}
+	default:
+		t.Fatal("second WithLock produced no observation")
+	}
+}
+
 func TestHotStoreLoad(t *testing.T) {
 	h := new(logosync.Hot[lockConfig])
 	if got := h.Load(); got != nil {
