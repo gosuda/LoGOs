@@ -10,6 +10,7 @@ import (
 	"os"
 	"runtime"
 	"strings"
+	"testing"
 	"unsafe"
 )
 
@@ -466,6 +467,49 @@ func fatRejectBeforeAlloc() error {
 	return nil
 }
 
+func zeroWireCountIndependentAllocs() error {
+	limit := zeroCap()
+	small := ZeroSingle{Items: make([]ZeroPad, 1)}
+	big := ZeroSingle{Items: make([]ZeroPad, limit)}
+	if _, err := small.MarshalBinary(); err != nil {
+		return err
+	}
+	if _, err := big.MarshalBinary(); err != nil {
+		return err
+	}
+	if _, err := small.AppendBinary(nil); err != nil {
+		return err
+	}
+	if _, err := big.AppendBinary(nil); err != nil {
+		return err
+	}
+	wireSmall := wireOf(1)
+	wireBig := wireOf(limit)
+	var sink ZeroSingle
+	enc1 := testing.AllocsPerRun(20, func() { _, err := small.MarshalBinary(); mustZeroWireAlloc(err) })
+	encN := testing.AllocsPerRun(20, func() { _, err := big.MarshalBinary(); mustZeroWireAlloc(err) })
+	if enc1 != encN {
+		return fmt.Errorf("MarshalBinary allocates %v at count 1 and %v at count %d", enc1, encN, limit)
+	}
+	app1 := testing.AllocsPerRun(20, func() { _, err := small.AppendBinary(nil); mustZeroWireAlloc(err) })
+	appN := testing.AllocsPerRun(20, func() { _, err := big.AppendBinary(nil); mustZeroWireAlloc(err) })
+	if app1 != appN {
+		return fmt.Errorf("AppendBinary allocates %v at count 1 and %v at count %d", app1, appN, limit)
+	}
+	dec1 := testing.AllocsPerRun(20, func() { mustZeroWireAlloc(sink.UnmarshalBinary(wireSmall)) })
+	decN := testing.AllocsPerRun(20, func() { mustZeroWireAlloc(sink.UnmarshalBinary(wireBig)) })
+	if dec1 != decN {
+		return fmt.Errorf("UnmarshalBinary allocates %v at count 1 and %v at count %d", dec1, decN, limit)
+	}
+	return nil
+}
+
+func mustZeroWireAlloc(err error) {
+	if err != nil {
+		panic(err)
+	}
+}
+
 func run() error {
 	if zeroCap() != 1048576 {
 		return fmt.Errorf("zero-wire cap is not 1,048,576")
@@ -503,6 +547,9 @@ func run() error {
 	}
 	if err := fatRejectBeforeAlloc(); err != nil {
 		failures = append(failures, "fat-noalloc: "+err.Error())
+	}
+	if err := zeroWireCountIndependentAllocs(); err != nil {
+		failures = append(failures, "zero-count-allocs: "+err.Error())
 	}
 	if len(failures) != 0 {
 		return fmt.Errorf("%s", strings.Join(failures, "; "))

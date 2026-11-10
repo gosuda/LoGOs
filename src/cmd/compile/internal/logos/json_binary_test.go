@@ -85,16 +85,6 @@ func (s S) MarshalBinary() ([]byte, error) { return nil, nil }
 	}
 }
 
-func TestBinaryZeroWireNoIteration(t *testing.T) {
-	text := lowerStaticText(t, "package p\ntype Empty struct{}\ntype S struct {\n\tV []Empty `json:\"v\"`\n}\n")
-	if strings.Contains(text, "for i := uint64") {
-		t.Errorf("zero-wire decode must not iterate per element:\n%s", text)
-	}
-	if !strings.Contains(text, "*v = make([]Empty, int(n))") {
-		t.Errorf("zero-wire decode must allocate directly from the count:\n%s", text)
-	}
-}
-
 func TestBinaryUnsupportedShapes(t *testing.T) {
 	for name, decl := range map[string]string{
 		"chan":    "type S struct { C chan int `json:\"c\"` }\n",
