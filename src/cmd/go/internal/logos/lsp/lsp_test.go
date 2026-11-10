@@ -958,6 +958,21 @@ func TestProxyMixedWorkspaceDefinition(t *testing.T) {
 	if want := []string{f.uri("app/app.go"), f.virtURI("lib/lib.lgo")}; !slices.Equal(uris, want) {
 		t.Fatalf("gopls opened %v, want the Go document and the lowered loGo/s dependency %v", uris, want)
 	}
+	for _, o := range opened {
+		td, _ := o["textDocument"].(map[string]any)
+		switch td["uri"] {
+		case f.uri("app/app.go"):
+			if td["text"] != appGo {
+				t.Errorf("gopls opened the Go document with %q, want the disk bytes", td["text"])
+			}
+		case f.virtURI("lib/lib.lgo"):
+			if td["text"] != string(libLow) {
+				t.Errorf("gopls opened the lowered dependency with %q, want the lowered bytes", td["text"])
+			}
+		default:
+			t.Errorf("gopls opened unexpected %v: no virtual document may exist for a Go file", td["uri"])
+		}
+	}
 
 	appCall := shift(findPos(t, appGo, "lib.Hello", 0), len("lib."))
 	res := f.client.call("textDocument/definition", positionParams(f.uri("app/app.go"), appCall))
@@ -1634,6 +1649,34 @@ func TestProxyLargeFileMapsExactly(t *testing.T) {
 	f.client.call("textDocument/hover", positionParams(f.uri("b/b.lgo"), at))
 	if uri, pos := forwardedPosition(t, f, "textDocument/hover", 0); uri != f.virtURI("b/b.lgo") || pos != at {
 		t.Errorf("hover at %v reached gopls as %s %v, want the exact position with no size cap", at, uri, pos)
+	}
+}
+
+func TestProxyDuplicateTokenMapsToOwnSegment(t *testing.T) {
+	const dupLgo = "package a\n\nimport \"os\"\n\nfunc first(path string) string {\n\tdata := os.ReadFile(path)?\n\treturn string(data)\n}\n\nfunc second(path string) string {\n\tdata := os.ReadFile(path)?\n\treturn string(data)\n}\n"
+	low, _, ok := lowerQuestion([]byte(dupLgo))
+	if !ok {
+		t.Fatal("duplicate fixture does not lower")
+	}
+	lowText := string(low)
+	origFirst := shift(findPos(t, dupLgo, "ReadFile(path)?", 0), len("ReadFile("))
+	origSecond := shift(findPos(t, dupLgo, "ReadFile(path)?", 1), len("ReadFile("))
+	lowFirst := shift(findPos(t, lowText, "ReadFile(path)", 0), len("ReadFile("))
+	lowSecond := shift(findPos(t, lowText, "ReadFile(path)", 1), len("ReadFile("))
+	if lowFirst == lowSecond {
+		t.Fatal("fixture copies lower to the same position; the test cannot discriminate them")
+	}
+	f := newFixture(t, map[string]string{"a/a.lgo": dupLgo}, fixtureOptions{})
+	f.open("a/a.lgo", 1)
+	f.sync()
+	aURI := f.uri("a/a.lgo")
+	f.client.call("textDocument/hover", positionParams(aURI, origFirst))
+	f.client.call("textDocument/hover", positionParams(aURI, origSecond))
+	if uri, pos := forwardedPosition(t, f, "textDocument/hover", 0); uri != f.virtURI("a/a.lgo") || pos != lowFirst {
+		t.Errorf("hover on the first copy reached gopls as %s %v, want %s %v", uri, pos, f.virtURI("a/a.lgo"), lowFirst)
+	}
+	if uri, pos := forwardedPosition(t, f, "textDocument/hover", 1); uri != f.virtURI("a/a.lgo") || pos != lowSecond {
+		t.Errorf("hover on the second copy reached gopls as %s %v, want its own origin segment %s %v", uri, pos, f.virtURI("a/a.lgo"), lowSecond)
 	}
 }
 
