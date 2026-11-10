@@ -35,7 +35,7 @@ type FieldsOnly struct {
 func (FieldsOnly) Start() error { return nil }
 
 func requireDecl(f FieldsOnly) {
-	var _ Creature = &f // ERROR "property_requires_conformance"
+	var _ Creature = &f // ERROR "property_requires_conformance.*struct :"
 }
 
 type HPInt interface {
