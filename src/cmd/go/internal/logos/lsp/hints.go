@@ -23,8 +23,8 @@ func servesHints(method string) bool {
 }
 
 func (p *Proxy) spawnHints(ctx context.Context, id json.RawMessage, pend pending, result any) bool {
-	p.mu.Lock()
-	defer p.mu.Unlock()
+	p.stopMu.Lock()
+	defer p.stopMu.Unlock()
 	if p.stopped {
 		return false
 	}

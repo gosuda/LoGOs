@@ -78,6 +78,7 @@ type Proxy struct {
 	pending  map[string]pending
 	srvDiags map[string]serverDiags
 	sent     map[string]string
+	stopMu   sync.Mutex
 	stopped  bool
 	shutdown bool
 	ended    bool
@@ -239,11 +240,11 @@ func (p *Proxy) drain(gopls <-chan struct{}) {
 }
 
 func (p *Proxy) stop(ctx context.Context, srv *server, cancelWork context.CancelFunc) {
-	p.st.mu.Lock()
+	p.stopMu.Lock()
 	p.stopped = true
-	p.st.mu.Unlock()
 	cancelWork()
 	p.tasks.Wait()
+	p.stopMu.Unlock()
 	if c, ok := p.server.w.(io.Closer); ok {
 		if err := c.Close(); err != nil {
 			p.logf("closing gopls input: %v", err)

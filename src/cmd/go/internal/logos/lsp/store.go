@@ -189,11 +189,14 @@ func (p *Proxy) compileUnit(ctx context.Context, dir string) {
 }
 
 func (p *Proxy) takeDirty(dir string) (map[string][]byte, map[string]int) {
-	p.st.mu.Lock()
-	defer p.st.mu.Unlock()
-	if p.stopped {
+	p.stopMu.Lock()
+	stopped := p.stopped
+	p.stopMu.Unlock()
+	if stopped {
 		return nil, nil
 	}
+	p.st.mu.Lock()
+	defer p.st.mu.Unlock()
 	u := p.st.units[dir]
 	if u == nil || !u.dirty {
 		return nil, nil

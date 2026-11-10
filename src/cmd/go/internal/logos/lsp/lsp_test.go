@@ -344,7 +344,40 @@ func startProxy(t *testing.T, opts Options) *testClient {
 			t.Logf("proxy stderr:\n%s", stderr.String())
 		}
 	})
+
 	return c
+}
+
+func TestProxyShutdownDuringHintsStress(t *testing.T) {
+	rec := new(hintsRecorder)
+	low, _, _ := lowerQuestion([]byte(aLgo))
+	lowCall := span(findPos(t, string(low), "os.ReadFile", 0), len("os.ReadFile"))
+	f := newFixture(t, map[string]string{"a/a.lgo": aLgo}, fixtureOptions{
+		Script: func(string) fakeScript {
+			return fakeScript{
+				DelayMillis: 200,
+				Responses: map[string]json.RawMessage{
+					"textDocument/hover": toJSON(t, map[string]any{
+						"contents": map[string]any{"kind": "markdown", "value": "gopls hover"},
+						"range":    lowCall,
+					}),
+				},
+			}
+		},
+		Tune: func(f *fixture, o *Options) {
+			o.Hints = rec.serve
+			o.HintsJSON = rec.run
+		},
+	})
+	f.open("a/a.lgo", 1)
+	aURI := f.uri("a/a.lgo")
+	operand := shift(findPos(t, aLgo, "ReadFile(path)?", 0), len("ReadFile("))
+	f.client.request("textDocument/hover", positionParams(aURI, operand))
+	f.client.notify("exit", nil)
+	err := f.client.wait()
+	if err == nil || !strings.Contains(err.Error(), "exit without shutdown") {
+		t.Errorf("Serve = %v, want the exit without shutdown error", err)
+	}
 }
 
 func (c *testClient) wait() error {
