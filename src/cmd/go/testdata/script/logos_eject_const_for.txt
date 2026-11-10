@@ -11,6 +11,9 @@ stdout '^15 <nil>$'
 stdout '^0 bad z$'
 stdout '^27$'
 stdout '^\[nm ct\]$'
+stdout 'a"b\\c'
+stdout '^\[g1 g2  \]$'
+stdout '^GET$'
 cp stdout $WORK/native.txt
 
 mkdir $WORK/orig
@@ -21,6 +24,7 @@ exists out/main.go
 
 ! grep '"comptime"' out/main.go
 ! grep 'Tag\.Get' out/main.go
+! grep '\.Get(' out/main.go
 
 cd out
 go run .
@@ -44,6 +48,7 @@ import (
 	"comptime"
 	"errors"
 	"fmt"
+	"net/http"
 	"strconv"
 )
 
@@ -92,9 +97,41 @@ func tags() []string {
 	return out
 }
 
+const multiKey = "xml"
+
+type Multi struct {
+	Name  string  `json:"nm" xml:"n1" GET:"g1" custom:"a\"b\\c"`
+	Age   int64   `json:"age,omitempty" xml:"a2" GET:"g2"`
+	Skip  bool    `json:"-"`
+	Plain float64
+}
+
+func tagKeys() []string {
+	const local = "custom"
+	var out []string
+	const for _, f := range comptime.Fields[Multi]() {
+		out = append(out, f.Tag.Get(multiKey))
+		out = append(out, f.Tag.Get(local))
+		out = append(out, f.Tag.Get("x"+"ml"))
+		out = append(out, f.Tag.Get("missing"))
+	}
+	return out
+}
+
+func tagImported() []string {
+	var out []string
+	const for _, f := range comptime.Fields[Multi]() {
+		out = append(out, f.Tag.Get(http.MethodGet))
+	}
+	return out
+}
+
 func main() {
 	fmt.Println(total("5"))
 	fmt.Println(total("z"))
 	fmt.Println(summed())
 	fmt.Println(tags())
+	fmt.Println(tagKeys())
+	fmt.Println(tagImported())
+	fmt.Println(http.MethodGet)
 }

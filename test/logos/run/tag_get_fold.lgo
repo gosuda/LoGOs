@@ -1,0 +1,96 @@
+// run
+
+package main
+
+import (
+	"comptime"
+	"fmt"
+	"net/http"
+	"reflect"
+)
+
+type FoldRecord struct {
+	Name  string  `json:"nm" xml:"n1" GET:"g1" custom:"a\"b\\c"`
+	Age   int64   `json:"age,omitempty" xml:"a2" GET:"g2"`
+	Skip  bool    `json:"-"`
+	Plain float64
+}
+
+const FoldKey = "xml"
+
+func foldLit() []string {
+	var out []string
+	const for _, f := range comptime.Fields[FoldRecord]() {
+		out = append(out, f.Tag.Get("json"))
+	}
+	return out
+}
+
+func foldPkg() []string {
+	var out []string
+	const for _, f := range comptime.Fields[FoldRecord]() {
+		out = append(out, f.Tag.Get(FoldKey))
+	}
+	return out
+}
+
+func foldLocal() []string {
+	const k = "custom"
+	var out []string
+	const for _, f := range comptime.Fields[FoldRecord]() {
+		out = append(out, f.Tag.Get(k))
+	}
+	return out
+}
+
+func foldConcat() []string {
+	var out []string
+	const for _, f := range comptime.Fields[FoldRecord]() {
+		out = append(out, f.Tag.Get("x"+"ml"))
+	}
+	return out
+}
+
+func foldImported() []string {
+	var out []string
+	const for _, f := range comptime.Fields[FoldRecord]() {
+		out = append(out, f.Tag.Get(http.MethodGet))
+	}
+	return out
+}
+
+func foldMissing() []string {
+	const k = "no" + "pe"
+	var out []string
+	const for _, f := range comptime.Fields[FoldRecord]() {
+		out = append(out, f.Tag.Get(k))
+	}
+	return out
+}
+
+func want(key string) []string {
+	var out []string
+	rt := reflect.TypeOf(FoldRecord{})
+	for i := 0; i < rt.NumField(); i++ {
+		out = append(out, reflect.StructTag(rt.Field(i).Tag).Get(key))
+	}
+	return out
+}
+
+func check(name, key string, got []string) {
+	w := want(key)
+	if fmt.Sprint(got) != fmt.Sprint(w) {
+		fmt.Println("FAIL", name, got, w)
+		return
+	}
+	fmt.Println("ok", name)
+}
+
+func main() {
+	check("literal", "json", foldLit())
+	check("package", FoldKey, foldPkg())
+	check("local", "custom", foldLocal())
+	check("concat", "x"+"ml", foldConcat())
+	check("imported", http.MethodGet, foldImported())
+	check("missing", "nope", foldMissing())
+}

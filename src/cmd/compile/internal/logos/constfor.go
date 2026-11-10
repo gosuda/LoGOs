@@ -6,6 +6,7 @@ package logos
 
 import (
 	"fmt"
+	"go/constant"
 	"go/token"
 	"reflect"
 	"slices"
@@ -1293,8 +1294,6 @@ func cfWithin(node, root syntax.Node, parents map[syntax.Node]syntax.Node) bool 
 	return false
 }
 
-// cfFoldTagGet folds f.Tag.Get("k") with a literal key to the result.
-// It reports whether the call was folded.
 func (fl *fileLower) cfFoldTagGet(call *syntax.CallExpr, active cfChain, parents map[syntax.Node]syntax.Node, at func(syntax.Node) (int, int), add func(int, int, string)) bool {
 	sel, ok := call.Fun.(*syntax.SelectorExpr)
 	if !ok || sel.Sel.Value != "Get" || len(call.ArgList) != 1 {
@@ -1312,18 +1311,34 @@ func (fl *fileLower) cfFoldTagGet(call *syntax.CallExpr, active cfChain, parents
 	if a == nil || a.index {
 		return false
 	}
-	lit, ok := call.ArgList[0].(*syntax.BasicLit)
-	if !ok || lit.Kind != syntax.StringLit {
-		return false
-	}
-	key, err := strconv.Unquote(lit.Value)
-	if err != nil {
+	key, ok := fl.cfTagGetKey(call.ArgList[0])
+	if !ok {
 		return false
 	}
 	s, e := at(call)
 	add(s, e, strconv.Quote(reflect.StructTag(a.field.tag).Get(key)))
 	return true
 }
+
+func (fl *fileLower) cfTagGetKey(e syntax.Expr) (string, bool) {
+	u := syntax.Unparen(e)
+	if m := fl.pkg.info.Types; m != nil {
+		for _, n := range []syntax.Expr{e, u} {
+			if tv, ok := m[n]; ok && tv.Value != nil && tv.Value.Kind() == constant.String {
+				return constant.StringVal(tv.Value), true
+			}
+		}
+	} else if tv := u.GetTypeInfo(); tv.Value != nil && tv.Value.Kind() == constant.String {
+		return constant.StringVal(tv.Value), true
+	}
+	if lit, ok := u.(*syntax.BasicLit); ok && lit.Kind == syntax.StringLit {
+		if key, err := strconv.Unquote(lit.Value); err == nil {
+			return key, true
+		}
+	}
+	return "", false
+}
+
 func (fl *fileLower) cfFoldTypeOf(call *syntax.CallExpr, sites *cfSites) bool {
 	if sites == nil || sites.comptimeName == "" {
 		return false
