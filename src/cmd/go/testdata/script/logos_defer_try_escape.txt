@@ -1,12 +1,16 @@
-# A loop defer f()? captures the error result by reference, so escape
-# analysis moves err to the heap. S3 inverts the stderr pins below.
+# A loop defer f()? captures the error result by reference: the named
+# error moves to the heap once per call and the per-iteration cost
+# stays at the hand-written join level. defer f()? with a nil result
+# leaves the error result nil and, outside the loop form, allocates
+# nothing [T-104.2]; the -m escape prose is not part of the contract.
 env GOPROXY=off
 env GOTOOLCHAIN=local
 
-logos build -gcflags=-m -o $WORK/esc$GOEXE .
-stderr 'moved to heap: err'
-stderr 'func literal escapes to heap'
-exists $WORK/esc$GOEXE
+logos build -o $WORK/esc$GOEXE .
+exec $WORK/esc$GOEXE
+stdout '^ok err-nil$'
+stdout '^ok loop-allocs$'
+stdout '^ok single-noalloc$'
 
 -- go.mod --
 module example.com/deferesc
@@ -15,6 +19,15 @@ go 1.27
 
 -- main.lgo --
 package main
+
+import (
+	"errors"
+	"fmt"
+	"os"
+	"testing"
+)
+
+var sinkErr error
 
 //go:noinline
 func closeNil() error { return nil }
@@ -26,8 +39,43 @@ func Loop(n int) (err error) {
 	return nil
 }
 
+func LoopHand(n int) (err error) {
+	for i := 0; i < n; i++ {
+		defer func() {
+			if e := closeNil(); e != nil {
+				if err == nil {
+					err = e
+				} else {
+					err = errors.Join(err, e)
+				}
+			}
+		}()
+	}
+	return nil
+}
+
+//go:noinline
+func Single() (err error) {
+	defer closeNil()?
+	return nil
+}
+
 func main() {
 	if err := Loop(3); err != nil {
-		panic(err)
+		fmt.Println("FAIL err", err)
+		os.Exit(1)
 	}
+	fmt.Println("ok err-nil")
+	got := testing.AllocsPerRun(200, func() { sinkErr = Loop(1) })
+	hand := testing.AllocsPerRun(200, func() { sinkErr = LoopHand(1) })
+	if got > hand {
+		fmt.Println("FAIL loop-allocs", got, hand)
+		os.Exit(1)
+	}
+	fmt.Println("ok loop-allocs")
+	if s := testing.AllocsPerRun(200, func() { sinkErr = Single() }); s != 0 {
+		fmt.Println("FAIL single-noalloc", s)
+		os.Exit(1)
+	}
+	fmt.Println("ok single-noalloc")
 }
