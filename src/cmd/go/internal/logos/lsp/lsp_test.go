@@ -46,6 +46,8 @@ type fakeScript struct {
 
 	HoldMethod string `json:"holdMethod"`
 
+	PublishEmptyOnClose bool `json:"publishEmptyOnClose"`
+
 	HoldAddr string `json:"holdAddr"`
 
 	held bool
@@ -239,6 +241,18 @@ func fakeHandle(wr *writer, script *fakeScript, m *message) error {
 				"uri": p.TextDocument.URI, "version": p.TextDocument.Version, "diagnostics": diags,
 			})
 		}
+	case m.Method == "textDocument/didClose" && script.PublishEmptyOnClose:
+		var p struct {
+			TextDocument struct {
+				URI string `json:"uri"`
+			} `json:"textDocument"`
+		}
+		if json.Unmarshal(m.Params, &p) != nil {
+			return nil
+		}
+		return wr.notify("textDocument/publishDiagnostics", map[string]any{
+			"uri": p.TextDocument.URI, "diagnostics": []any{},
+		})
 	}
 	return nil
 }
@@ -1072,26 +1086,28 @@ func TestProxySnapshotCountsStayAtOne(t *testing.T) {
 	f.open("a/a.lgo", 1)
 	f.open("b/c.lgo", 1)
 	want := map[string]int{f.path("a"): 1, f.path("b"): 1}
-	counts := func() map[string]int {
+	counts := func() snapshotCountsResult {
 		t.Helper()
-		var got map[string]int
+		var got snapshotCountsResult
 		if err := json.Unmarshal(f.client.call("logos/snapshotCounts", map[string]any{}), &got); err != nil {
 			t.Fatal(err)
 		}
 		return got
 	}
-	if got := counts(); !reflect.DeepEqual(got, want) {
-		t.Fatalf("snapshot counts = %v, want %v", got, want)
+	check := func(what string, got snapshotCountsResult) {
+		t.Helper()
+		if !reflect.DeepEqual(got.Dirs, want) || got.DiagCache != 0 {
+			t.Fatalf("snapshot counts %s = %+v, want dirs %v with an empty diagnostic cache", what, got, want)
+		}
 	}
+	check("at open", counts())
 	change := func(rel, text string, version int) {
 		t.Helper()
 		f.client.notify("textDocument/didChange", map[string]any{
 			"textDocument":   map[string]any{"uri": f.uri(rel), "version": version},
 			"contentChanges": []any{map[string]any{"text": text}},
 		})
-		if got := counts(); !reflect.DeepEqual(got, want) {
-			t.Fatalf("snapshot counts after %s version %d = %v, want %v", rel, version, got, want)
-		}
+		check(fmt.Sprintf("after %s version %d", rel, version), counts())
 	}
 	change("a/a.lgo", aLgo+"// edit one\n", 2)
 	change("a/a.lgo", aLgo+"// edit two\n", 3)
@@ -1099,11 +1115,51 @@ func TestProxySnapshotCountsStayAtOne(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.open("a/b.lgo", 1)
-	if got := counts(); !reflect.DeepEqual(got, want) {
-		t.Fatalf("snapshot counts after adding a/b.lgo = %v, want %v", got, want)
-	}
+	check("after adding a/b.lgo", counts())
 	change("a/b.lgo", otherLgo+"// edit three\n", 2)
 	change("b/c.lgo", secondLgo+"// edit four\n", 2)
+}
+
+func TestProxyCloseFreesDiagnosticCaches(t *testing.T) {
+	const goSrc = "package p\n\nvar _ = 1\n"
+	names := []string{"j0.go", "j1.go", "j2.go", "j3.go", "j4.go", "j5.go", "j6.go", "j7.go"}
+	files := make(map[string]string, len(names))
+	for _, n := range names {
+		files[n] = goSrc
+	}
+	f := newFixture(t, files, fixtureOptions{
+		Script: func(root string) fakeScript {
+			diags := make(map[string]json.RawMessage, len(names))
+			for _, n := range names {
+				diags[pathURI(filepath.Join(root, n))] = toJSON(t, []any{
+					map[string]any{"range": span(Position{Line: 1, Character: 0}, 1), "severity": 1, "message": "gopls: bad"},
+				})
+			}
+			return fakeScript{Diagnostics: diags, PublishEmptyOnClose: true}
+		},
+	})
+	counts := func() snapshotCountsResult {
+		t.Helper()
+		var got snapshotCountsResult
+		if err := json.Unmarshal(f.client.call("logos/snapshotCounts", map[string]any{}), &got); err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	for _, n := range names {
+		uri := f.uri(n)
+		f.client.notify("textDocument/didOpen", map[string]any{
+			"textDocument": map[string]any{"uri": uri, "languageId": "go", "version": 1, "text": goSrc},
+		})
+		f.client.notification(func(m map[string]any) bool {
+			items, _ := m["diagnostics"].([]any)
+			return m["uri"] == uri && len(items) == 1
+		})
+		f.client.notify("textDocument/didClose", map[string]any{"textDocument": map[string]any{"uri": uri}})
+	}
+	if got := counts(); got.DiagCache != 0 {
+		t.Errorf("diagnostic cache holds %d blobs after closing every document, want none retained", got.DiagCache)
+	}
 }
 
 func TestProxyMergesDiagnostics(t *testing.T) {

@@ -1683,6 +1683,7 @@ m.WithLock(func(c *Config) {
 
 - `logos lsp` MUST keep one document store keyed by the file path derived from the source URI that holds the text, the client URI, the client version, and at most one lowered snapshot per package. [T-Sec16]
 - The proxy MUST answer `logos/snapshotCounts` with the number of retained lowered snapshots per package. [T-Sec16]
+- The `logos/snapshotCounts` answer MUST also carry `diagCache`, the number of cached downstream diagnostic payloads. [T-Sec16]
 - A request on a `.lgo` document MUST use a snapshot whose versions equal the current client versions of every document of the package; the proxy MUST compute it on demand, once per version set, and concurrent requests MUST share one computation. [T-Sec16]
 - The store MUST keep the newest client version of each open document; a change that carries an older version MUST be dropped and MUST NOT reach `gopls`. [T-Sec16]
 - A frame that carries a duplicate Content-Length header MUST fail with a descriptive error. [T-Sec16]

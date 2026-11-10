@@ -186,10 +186,20 @@ func (p *Proxy) serverDiagnostics(m *message) {
 		p.send(p.client, m)
 		return
 	}
+	list, _ := root["diagnostics"].([]any)
 	items, _ := json.Marshal(root["diagnostics"])
 	version, hasVer := number(root["version"])
+	path := docPath(uri)
+	p.st.mu.Lock()
+	_, openDoc := p.st.docs[path]
+	p.st.mu.Unlock()
+	live := openDoc || p.tables.Load().byVirt[path] != nil
 	p.mu.Lock()
-	p.srvDiags[uri] = serverDiags{version: version, hasVer: hasVer, raw: items}
+	if len(list) == 0 && !live {
+		delete(p.srvDiags, uri)
+	} else {
+		p.srvDiags[uri] = serverDiags{version: version, hasVer: hasVer, raw: items}
+	}
 	p.mu.Unlock()
 	tb := p.tables.Load()
 	if lw := tb.lookup(tb.byVirt, uri); lw != nil {

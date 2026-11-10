@@ -282,6 +282,11 @@ func (p *Proxy) apply(dir string, low *Lowering, diags []Diagnostic, versions ma
 	p.pruneLocked(need)
 }
 
+type snapshotCountsResult struct {
+	Dirs      map[string]int `json:"dirs"`
+	DiagCache int            `json:"diagCache"`
+}
+
 func (p *Proxy) snapshotCounts(ctx context.Context, m *message) {
 	p.ensure(ctx)
 	p.work.Lock()
@@ -302,7 +307,7 @@ func (p *Proxy) snapshotCounts(ctx context.Context, m *message) {
 	for dir, set := range gens {
 		out[dir] = len(set)
 	}
-	p.respond(m.ID, out)
+	p.respond(m.ID, snapshotCountsResult{Dirs: out, DiagCache: len(p.srvDiags)})
 }
 func (p *Proxy) staleLocked(path string) {
 	if lw := p.files[path]; lw != nil && lw.fresh {
