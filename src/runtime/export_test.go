@@ -2085,3 +2085,39 @@ func MallocGC(size uintptr, typ *abi.Type, needzero bool) unsafe.Pointer {
 func FuncNamePiecesForPrint(name string) (string, string, string, string, string) {
 	return funcNamePiecesForPrint(name)
 }
+
+func DeferTryPack(t unsafe.Pointer, ctype unsafe.Pointer, clo unsafe.Pointer, roff uintptr) {
+	packDeferTry((*_deferTry)(t), (*_type)(ctype), clo, roff)
+}
+
+func DeferTryRec(t unsafe.Pointer) unsafe.Pointer {
+	return unsafe.Pointer(&(*_deferTry)(t).fv)
+}
+
+func DeferTryUnpackRec(rec unsafe.Pointer, ctype unsafe.Pointer, dst unsafe.Pointer, roff uintptr) {
+	deferTryUnpack(rec, (*_type)(ctype), dst, roff)
+}
+
+func DeferTryNew() unsafe.Pointer {
+	return unsafe.Pointer(newdeferTry())
+}
+
+func DeferTryFree(t unsafe.Pointer) {
+	freeDeferTry((*_deferTry)(t))
+}
+
+func DeferTryTypeOf(v any) unsafe.Pointer {
+	return unsafe.Pointer(efaceOf(&v)._type)
+}
+
+func DeferTryOffset(p unsafe.Pointer) uintptr {
+	return getg().stack.hi - uintptr(p)
+}
+
+func DeferTryResolve(off uintptr) unsafe.Pointer {
+	return unsafe.Pointer(getg().stack.hi - off)
+}
+
+func DeferTryStackHi() uintptr {
+	return getg().stack.hi
+}

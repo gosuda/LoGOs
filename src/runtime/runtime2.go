@@ -827,6 +827,9 @@ type p struct {
 	deferpool    []*_defer // pool of available defer structs (see panic.go)
 	deferpoolbuf [32]*_defer
 
+	deferTryPool    []*_deferTry
+	deferTryPoolBuf [32]*_deferTry
+
 	// Cache of goroutine ids, amortizes accesses to runtime·sched.goidgen.
 	goidcache    uint64
 	goidcacheend uint64
@@ -1021,6 +1024,8 @@ type schedt struct {
 	deferlock mutex
 	deferpool *_defer
 
+	deferTryPool *_deferTry
+
 	// freem is the list of m's waiting to be freed when their
 	// m.exited is set. Linked through m.freelink.
 	freem *m
@@ -1189,7 +1194,8 @@ type forcegcstate struct {
 // and for heap defers, marked.
 type _defer struct {
 	heap      bool
-	rangefunc bool    // true for rangefunc list
+	rangefunc bool // true for rangefunc list
+	try       bool
 	sp        uintptr // sp at time of defer
 	pc        uintptr // pc at time of defer
 	fn        func()  // can be nil for open-coded defers
@@ -1198,6 +1204,21 @@ type _defer struct {
 	// If rangefunc is true, *head is the head of the atomic linked list
 	// during a range-over-func execution.
 	head *atomic.Pointer[_defer]
+}
+
+const (
+	deferTryPtrs  = 4
+	deferTryWords = 4
+)
+
+type _deferTry struct {
+	d       _defer
+	fv      uintptr
+	errheap *error
+	erroff  uintptr
+	ext     *_deferTry
+	ptrs    [deferTryPtrs]unsafe.Pointer
+	words   [deferTryWords]uintptr
 }
 
 // A _panic holds information about an active panic.

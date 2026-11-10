@@ -5965,6 +5965,7 @@ func (pp *p) init(id int32) {
 	pp.status = _Pgcstop
 	pp.sudogcache = pp.sudogbuf[:0]
 	pp.deferpool = pp.deferpoolbuf[:0]
+	pp.deferTryPool = pp.deferTryPoolBuf[:0]
 	pp.wbBuf.reset()
 	if pp.mcache == nil {
 		if id == 0 {
@@ -6035,6 +6036,8 @@ func (pp *p) destroy() {
 	pp.pinnerCache = nil
 	clear(pp.deferpoolbuf[:])
 	pp.deferpool = pp.deferpoolbuf[:0]
+	clear(pp.deferTryPoolBuf[:])
+	pp.deferTryPool = pp.deferTryPoolBuf[:0]
 	systemstack(func() {
 		for i := 0; i < pp.mspancache.len; i++ {
 			// Safe to call since the world is stopped.

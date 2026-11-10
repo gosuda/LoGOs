@@ -8180,7 +8180,7 @@ func callTargetLSym(callee *ir.Name) *obj.LSym {
 }
 
 // deferStructFnField is the field index of _defer.fn.
-const deferStructFnField = 4
+const deferStructFnField = 5
 
 var deferType *types.Type
 
@@ -8199,6 +8199,7 @@ func deferstruct() *types.Type {
 	fields := []*types.Field{
 		makefield("heap", types.Types[types.TBOOL]),
 		makefield("rangefunc", types.Types[types.TBOOL]),
+		makefield("try", types.Types[types.TBOOL]),
 		makefield("sp", types.Types[types.TUINTPTR]),
 		makefield("pc", types.Types[types.TUINTPTR]),
 		// Note: the types here don't really matter. Defer structures

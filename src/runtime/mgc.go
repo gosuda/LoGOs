@@ -2199,6 +2199,12 @@ func clearpools() {
 		d.link = nil
 	}
 	sched.deferpool = nil
+	for t := sched.deferTryPool; t != nil; {
+		n := t.ext
+		t.ext = nil
+		t = n
+	}
+	sched.deferTryPool = nil
 	unlock(&sched.deferlock)
 }
 
