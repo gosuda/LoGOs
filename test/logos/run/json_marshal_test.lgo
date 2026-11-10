@@ -539,3 +539,25 @@ func TestDefaultBuildUsesJSONv2(t *testing.T) {
 		t.Fatalf("default build emits the v1 escape sequence: %q", got)
 	}
 }
+
+type scalarsMirror struct {
+	A     int64   `json:"a"`
+	B     string  `json:"b"`
+	C     bool    `json:"c"`
+	D     uint8   `json:"d"`
+	E     float64 `json:"e"`
+	NoGen any     `json:"-"`
+}
+
+func TestHugeValueHasNoSizeThreshold(t *testing.T) {
+	v := Scalars{A: -7, B: strings.Repeat("<&", 400000), C: true, D: 3, E: 1.5}
+	want := must(json.Marshal(scalarsMirror{A: v.A, B: v.B, C: v.C, D: v.D, E: v.E}))
+	got := must(v.MarshalJSON())
+	if !bytes.Equal(got, want) {
+		t.Fatalf("marshal of a %d byte value differs from encoding/json\n got %.120q...\nwant %.120q...", len(got), got, want)
+	}
+	allocs := testing.AllocsPerRun(20, func() { sink = must(v.MarshalJSON()) })
+	if allocs != 1 {
+		t.Fatalf("marshal of a %d byte output allocates %v times, want 1", len(got), allocs)
+	}
+}
