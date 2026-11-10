@@ -100,4 +100,19 @@ func TestLogosRuntimeNoNewPadding(t *testing.T) {
 	if run := runtime.LogosPRegionOff + ptr - runtime.LogosPPoolOff; run != wantPTail {
 		t.Fatalf("p run = %d, want %d", run, wantPTail)
 	}
+	if runtime.LogosSpanNeedzeroSize != 1 {
+		t.Fatalf("span needzero = %d, want 1", runtime.LogosSpanNeedzeroSize)
+	}
+	if runtime.LogosSpanIsChunkSize != 1 {
+		t.Fatalf("span isLogosArenaChunk = %d, want 1", runtime.LogosSpanIsChunkSize)
+	}
+	if runtime.LogosSpanBeforeCacheSize != 2 {
+		t.Fatalf("span allocCountBeforeCache = %d, want 2", runtime.LogosSpanBeforeCacheSize)
+	}
+	if d := runtime.LogosSpanIsChunkOff - runtime.LogosSpanNeedzeroOff; d != 1 {
+		t.Fatalf("span ischunk-needzero gap = %d, want 1", d)
+	}
+	if d := runtime.LogosSpanBeforeCacheOff - runtime.LogosSpanIsChunkOff; d != 1 {
+		t.Fatalf("span beforecache-ischunk gap = %d, want 1", d)
+	}
 }
