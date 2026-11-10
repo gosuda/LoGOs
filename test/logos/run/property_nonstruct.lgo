@@ -20,9 +20,25 @@ func (n *Num) SetHP(v int) {}
 
 func (n Num) Start() error { return nil }
 
+type Monster struct : Creature {
+	Name string
+	HP int
+}
+func (m Monster) Start() error { return nil }
 func main() {
 	var n Num = 5
 	_, ok := any(n).(Creature)
 	_, ok2 := any(&n).(Creature)
 	fmt.Println("nonstruct-ok:", !ok && !ok2)
+	m := Monster{Name: "g", HP: 10}
+	c, ok3 := any(&m).(Creature)
+	fmt.Println("struct-ok:", ok3 && c.Name == "g")
+	_, ok4 := any(7).(Creature)
+	fmt.Println("reject-ok:", !ok4)
+	switch v := any(&m).(type) {
+	case Creature:
+		fmt.Println("switch-ok:", v.Name == "g")
+	default:
+		fmt.Println("switch-ok:", false)
+	}
 }

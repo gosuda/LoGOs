@@ -1,1 +1,4 @@
 nonstruct-ok: true
+struct-ok: true
+reject-ok: true
+switch-ok: true
