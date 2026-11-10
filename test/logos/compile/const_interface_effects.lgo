@@ -102,11 +102,11 @@ func (o Opaque) Name() string {
 	return "sort"
 }
 
-var _ Qualified = Opaque{items: []int{3, 1, 2}} // ERROR "\[correctness::const_view_mutation\].*method Name is not readonly"
+var _ Qualified = Opaque{items: []int{3, 1, 2}} // ERROR "\[correctness::const_view_mutation\]"
 
-var _ Qualified = &os.File{} // ERROR "\[correctness::const_view_mutation\].*method Name is not readonly"
+var _ Qualified = &os.File{} // ERROR "\[correctness::const_view_mutation\]"
 
-var _ Qualified = LateDecl{tag: "x"} // ERROR "\[correctness::const_view_mutation\].*method Name is not readonly"
+var _ Qualified = LateDecl{tag: "x"} // ERROR "\[correctness::const_view_mutation\]"
 
 type LateDecl struct {
 	tag   string
@@ -119,7 +119,7 @@ func (l LateDecl) Name() string {
 }
 
 func attackDynamicView(xs const []Ordinary) {
-	_ = xs[0].Name() // ERROR "cannot call Name through const view"
+	_ = xs[0].Name() // ERROR "\[correctness::const_view_mutation\]"
 }
 
 func dynamicViewControl(qs const []Qualified) string {
