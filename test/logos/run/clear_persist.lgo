@@ -1,0 +1,21 @@
+// run
+
+package main
+
+import "fmt"
+
+func scrub(s []byte) {
+	clear(s)
+}
+
+func main() {
+	s := []byte{1, 2, 3, 4, 5, 6, 7, 8}
+	scrub(s)
+	bad := 0
+	for _, v := range s {
+		if v != 0 {
+			bad++
+		}
+	}
+	fmt.Println("clear ok", bad)
+}
