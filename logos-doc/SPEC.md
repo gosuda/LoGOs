@@ -1113,7 +1113,7 @@ Region placement MUST NOT change program meaning: every program MUST print the s
 
 Implicit placement [T-301.1][R-U1]:
 With implicit placement on, an object that escape analysis proves does not outlive its frame, but that cannot live on the stack, MUST allocate in the frame's region. [T-301.1]
-Frame exit MUST release that region. [T-301.1]
+Frame exit, including exit by panic, MUST release that region and restore the watermark. [T-301.1]
 A returned value that the caller keeps MUST allocate in the caller's region only when escape analysis proves no pointer to it outlives the caller. [T-301.1]
 A loop back-edge MUST release iteration-local objects by restoring the watermark. [T-301.1]
 Implicit placement MUST stay off unless the build sets `GOEXPERIMENT=logosarena`. [T-301.1]
@@ -1150,7 +1150,6 @@ This precision MUST apply to loGo/s packages, and to Go packages under `GOEXPERI
 [T-301.1] Idle parked goroutines MUST consume 0 bytes of arena memory.
 It MUST retain every live chunk and preserve all live-object addresses. [T-301.1]
 With no live chunks, it MUST retain no arena capacity; its ordinary stack and runtime metadata still exist. [T-301.1]
-Frame exit, including exit by panic, MUST restore the watermark. [T-301.1]
 A loop with only iteration-local allocation MUST NOT grow arena use across iterations. [T-301.1]
 
 ### 3.2 RFC-302: Smart stack engine
