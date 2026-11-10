@@ -28,7 +28,147 @@ func checkPairwiseVec() {
 	}
 }
 
+func oracleVecAdd4(a, b [4]float64) [4]float64 {
+	var r [4]float64
+	for i := range r {
+		r[i] = a[i] + b[i]
+	}
+	return r
+}
+
+func oracleVecMul8(a, b [8]float32) [8]float32 {
+	var r [8]float32
+	for i := range r {
+		r[i] = a[i] * b[i]
+	}
+	return r
+}
+
+func oracleVecAnd16(a, b [16]uint8) [16]uint8 {
+	var r [16]uint8
+	for i := range r {
+		r[i] = a[i] & b[i]
+	}
+	return r
+}
+
+func oracleVecOr16(a, b [16]uint8) [16]uint8 {
+	var r [16]uint8
+	for i := range r {
+		r[i] = a[i] | b[i]
+	}
+	return r
+}
+
+func oracleVecXor16(a, b [16]uint8) [16]uint8 {
+	var r [16]uint8
+	for i := range r {
+		r[i] = a[i] ^ b[i]
+	}
+	return r
+}
+
+func checkVecArith() {
+	a := [4]float64{1, 2, 3, 4}
+	b := [4]float64{5, 6, 7, 8}
+	if got := a + b; got != oracleVecAdd4(a, b) {
+		panic(fmt.Sprintf("vec add4: got %v want %v", got, oracleVecAdd4(a, b)))
+	}
+	for i := range a {
+		if d := a - b; d[i] != a[i]-b[i] {
+			panic("vec sub4 mismatch")
+		}
+		if q := a / b; q[i] != a[i]/b[i] {
+			panic("vec div4 mismatch")
+		}
+	}
+	var c, d [8]float32
+	for i := range c {
+		c[i] = float32(i + 1)
+		d[i] = float32(2*i + 1)
+	}
+	if got := c * d; got != oracleVecMul8(c, d) {
+		panic(fmt.Sprintf("vec mul8: got %v want %v", got, oracleVecMul8(c, d)))
+	}
+	var e, f [16]uint8
+	for i := range e {
+		e[i] = uint8(i*17 + 3)
+		f[i] = uint8(i*11 + 5)
+	}
+	if (e & f) != oracleVecAnd16(e, f) {
+		panic("vec and16 mismatch")
+	}
+	if (e | f) != oracleVecOr16(e, f) {
+		panic("vec or16 mismatch")
+	}
+	if (e ^ f) != oracleVecXor16(e, f) {
+		panic("vec xor16 mismatch")
+	}
+	g := [4]int32{17, -19, 100, 7}
+	h := [4]int32{5, 4, -3, 2}
+	for i := range g {
+		if q := g / h; q[i] != g[i]/h[i] {
+			panic("vec intdiv mismatch")
+		}
+	}
+}
+
+func checkVecMinMax() {
+	a := [4]float64{4, 2, 8, 1}
+	wantSum := 0.0
+	wantMin := a[0]
+	wantMax := a[0]
+	for _, v := range a {
+		wantSum += v
+		if v < wantMin {
+			wantMin = v
+		}
+		if v > wantMax {
+			wantMax = v
+		}
+	}
+	if a.sum() != wantSum {
+		panic(fmt.Sprintf("vec sum4: got %v want %v", a.sum(), wantSum))
+	}
+	if a.min() != wantMin {
+		panic(fmt.Sprintf("vec min4: got %v want %v", a.min(), wantMin))
+	}
+	if a.max() != wantMax {
+		panic(fmt.Sprintf("vec max4: got %v want %v", a.max(), wantMax))
+	}
+	b := [4]float64{1, 2, 3, 4}
+	var wantDot float64
+	for i := range a {
+		wantDot += a[i] * b[i]
+	}
+	if a.dot(b) != wantDot {
+		panic("vec dot4 mismatch")
+	}
+}
+
+func checkVecU64MinMax() {
+	var u [2]uint64
+	u[0], u[1] = 7, 3
+	var wantSum, wantMin, wantMax uint64
+	wantMin = u[0]
+	for _, v := range u {
+		wantSum += v
+		if v < wantMin {
+			wantMin = v
+		}
+		if v > wantMax {
+			wantMax = v
+		}
+	}
+	if u.sum() != wantSum || u.min() != wantMin || u.max() != wantMax {
+		panic("vec u64 reduction mismatch")
+	}
+}
+
 func main() {
 	checkPairwiseVec()
+	checkVecArith()
+	checkVecMinMax()
+	checkVecU64MinMax()
 	fmt.Println("simdvec ok")
 }
