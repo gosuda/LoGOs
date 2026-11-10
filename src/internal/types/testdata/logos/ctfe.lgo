@@ -242,7 +242,13 @@ const func BadSigChan(ch chan /* ERROR "correctness::const_func_impure" */ int) 
 
 const func Gen[T any](x T) T { return x }
 
-const gen /* ERROR "const_eval" */ = Gen[int](1)
+const gen /* ERRORx "const_eval.*generic" */ = Gen[int](1)
+
+const func C100() int8 { return 100 }
+
+const func Ovf() int8 { return C100() + C100() }
+
+const ovfBad /* ERRORx "const_eval.*overflow" */ = Ovf()
 
 const func Pair() (int, int) { return 1, 2 }
 
