@@ -270,6 +270,63 @@ func TestLogosPairARM64SinglePredChain(t *testing.T) {
 		t.Fatalf("chain successor selects no pair value: l2=%v", l2)
 	}
 }
+func TestLogosPairARM64ChainPositive(t *testing.T) {
+	c := testConfigARM64(t)
+	vec := types.TypeVec128
+	u64 := types.Types[types.TUINT64]
+	cases := []struct {
+		name  string
+		off1  int64
+		off2  int64
+		fused bool
+		place int64
+	}{
+		{name: "chain16off992", off1: 992, off2: 1008, fused: true, place: 992},
+		{name: "chain16off1008", off1: 1008, off2: 1024, fused: true, place: 1008},
+		{name: "chain16off1024", off1: 1024, off2: 1040, fused: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fun := c.Fun("entry",
+				Bloc("entry",
+					Valu("mem", OpInitMem, types.TypeMem, 0, nil),
+					Valu("p", OpARM64MOVDconst, u64, 0, nil),
+					Valu("l1", OpARM64FMOVQload, vec, tc.off1, nil, "p", "mem"),
+					Goto("next")),
+				Bloc("next",
+					Valu("l2", OpARM64FMOVQload, vec, tc.off2, nil, "p", "mem"),
+					Goto("exit")),
+				Bloc("exit",
+					Exit("mem")),
+			)
+			CheckFunc(fun.f)
+			pair(fun.f)
+			CheckFunc(fun.f)
+			l1 := fun.values["l1"]
+			l2 := fun.values["l2"]
+			if !tc.fused {
+				if l1.Op != OpARM64FMOVQload || l2.Op != OpARM64FMOVQload {
+					t.Errorf("loads fused unexpectedly: l1=%v l2=%v", l1.Op, l2.Op)
+				}
+				return
+			}
+			if l1.Op != OpSelect0 {
+				t.Fatalf("chain loads did not fuse: l1=%v l2=%v", l1.Op, l2.Op)
+			}
+			p := l1.Args[0]
+			if p.Op != OpARM64FLDPQ || p.AuxInt != tc.place {
+				t.Fatalf("chain pair is %v at %d, want FLDPQ at %d", p.Op, p.AuxInt, tc.place)
+			}
+			if l2.Op != OpCopy {
+				t.Fatalf("chain successor is %v, want Copy", l2.Op)
+			}
+			sel := l2.Args[0]
+			if sel.Op != OpSelect1 || len(sel.Args) != 1 || sel.Args[0] != p {
+				t.Fatalf("chain successor selects no pair value: l2=%v", l2)
+			}
+		})
+	}
+}
 
 func TestLogosPairARM64DistinctRegs(t *testing.T) {
 	c := testConfigARM64(t)
