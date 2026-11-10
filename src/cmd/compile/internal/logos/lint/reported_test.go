@@ -119,19 +119,17 @@ func TestReportedDefaultPolicy(t *testing.T) {
 	}
 }
 
-// TestResolveReported checks Resolve, which handles only the findings of an
-// earlier phase and needs neither the package nor its type information.
 func TestResolveReported(t *testing.T) {
 	testenv.MustHaveGoBuild(t)
+	want := map[string][]string{
+		"warn":   {"10 suspicious::unapplied_struct_default warn", "12 suspicious::side_effect_before_sort warn"},
+		"deny":   {"10 suspicious::unapplied_struct_default deny", "12 suspicious::side_effect_before_sort deny"},
+		"allow":  nil,
+		"forbid": {"10 suspicious::unapplied_struct_default forbid", "12 suspicious::side_effect_before_sort forbid", "17 suspicious::unapplied_struct_default forbid", "23 suspicious::side_effect_before_sort forbid"},
+	}
 	for _, level := range []string{"warn", "deny", "allow", "forbid"} {
 		full := check(t, KindLgo, "x.lgo", reportedSrc)
 		full.Policy = reportedPolicy(t, level)
-		var want []string
-		for _, s := range summarize(Run(full)) {
-			if strings.Contains(s, " suspicious::") {
-				want = append(want, s)
-			}
-		}
 		bare := &Input{
 			Files:    full.Files,
 			Sources:  full.Sources,
@@ -139,8 +137,8 @@ func TestResolveReported(t *testing.T) {
 			Policy:   full.Policy,
 			Reported: full.Reported,
 		}
-		if got := summarize(Resolve(bare)); !slices.Equal(got, want) {
-			t.Errorf("Resolve with suspicious = %s:\n got %q\nwant %q", level, got, want)
+		if got := summarize(Resolve(bare)); !slices.Equal(got, want[level]) {
+			t.Errorf("Resolve with suspicious = %s:\n got %q\nwant %q", level, got, want[level])
 		}
 	}
 }
@@ -157,6 +155,14 @@ func TestReportedNeverInGoPackage(t *testing.T) {
 	}
 	if got := summarize(Resolve(in)); len(got) != 0 {
 		t.Errorf("Resolve reported %q for a Go package", got)
+	}
+	lgo := check(t, KindLgo, "x.lgo", "package p\n\nfunc f() {}\n")
+	lgo.Reported = []Reported{{Rule: "suspicious::unapplied_struct_default", Pos: lgo.Files[0].Pos(), Message: "x"}}
+	if got := summarize(Run(lgo)); len(got) == 0 {
+		t.Errorf("Run dropped the finding for a loGo package")
+	}
+	if got := summarize(Resolve(lgo)); len(got) == 0 {
+		t.Errorf("Resolve dropped the finding for a loGo package")
 	}
 }
 func TestLgoOnlyRulesSilentInGo(t *testing.T) {
