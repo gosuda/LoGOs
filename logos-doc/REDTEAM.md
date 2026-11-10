@@ -165,7 +165,7 @@ Rules: logos-doc/SPEC.md. Status values: planned, tested, satisfied upstream, bl
 | #177 | User input causing format injection in interpolation | M6 | test/logos/run/interp.lgo (format verbs printed literally) | tested |
 | #178 | Spawning many goroutines exhausting memory in group | M8 | src/logos/rt/group_test.go; test/logos/run/group.lgo; src/internal/types/testdata/logos/group.lgo | tested |
 | #179 | NaN breaking float sortBy ordering | M6 | test/logos/run/chains.lgo (64-item stability, NaN order) | tested |
-| #180 | Init order affecting const composite tables | M5 | src/cmd/compile/internal/logos/ctfe/ctfe_test.go (TestWidthsComposite); test/logos/run/const_init_read.lgo | tested |
+| #180 | Init order affecting const composite tables | M5 | test/logos/run/const_init_read.lgo | tested |
 | #181 | Long loop exhausting arena before return | M18 | src/cmd/go/testdata/script/logos_redteam_181.txt (executed 2026-10-28: `go test cmd/go -run 'Script/^logos_redteam_181$'` passes, race leg included) | tested |
 | #182 | Unsized int overflowing in serialized struct | M9 | test/logos/lint/serialized_unsized_int.lgo | tested |
 | #183 | loGo/s package unable to use a Go package from another module | M0 | src/cmd/go/testdata/script/logos_interop.txt (workspace w1) | tested |
