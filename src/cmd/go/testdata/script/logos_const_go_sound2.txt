@@ -10,6 +10,12 @@ stderr 'parameter c'
 ! logos build -o $WORK/bin/fc$GOEXE ./fncall
 stderr 'const_view_mutation'
 stderr 'parameter h'
+! logos build -o $WORK/bin/lenw$GOEXE ./lenwrap
+stderr 'const_view_mutation'
+stderr 'parameter b'
+! logos build -o $WORK/bin/minw$GOEXE ./minwrap
+stderr 'const_view_mutation'
+stderr 'parameter b'
 cd ..
 
 -- dep/go.mod --
@@ -122,5 +128,29 @@ func main() {
 	g2d.ArmFn(bx)
 	var cv const *g2d.Box2 = bx
 	g2d.CallFn(cv)
+	println(buf[0])
+}
+
+-- imp/lenwrap/main.lgo --
+package main
+
+import "example.com/g2dep/g2d"
+
+func main() {
+	buf := []byte{1}
+	var view const []byte = buf
+	println(g2d.LenWrap(view))
+	println(buf[0])
+}
+
+-- imp/minwrap/main.lgo --
+package main
+
+import "example.com/g2dep/g2d"
+
+func main() {
+	buf := []byte{1}
+	var view const []byte = buf
+	println(g2d.MinWrap(view))
 	println(buf[0])
 }

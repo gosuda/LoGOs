@@ -1281,6 +1281,10 @@ func (s *constBodyScan) builtinCall(name string, call *syntax.CallExpr) {
 		for _, arg := range call.ArgList {
 			s.markMention(arg)
 		}
+	default:
+		for _, arg := range call.ArgList {
+			s.scanReads(arg)
+		}
 	}
 }
 
