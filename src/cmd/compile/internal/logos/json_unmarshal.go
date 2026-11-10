@@ -228,10 +228,10 @@ func (js *jsonStruct) unionLines(f *jsonField, field string) []string {
 			trials = append(trials, fmt.Sprintf("var _logos_keys_%d int", i))
 			trials = append(trials, fmt.Sprintf("_logos_matched_%d := false", i))
 		}
-		trials = append(trials, "{")
 		if needsClaim {
 			trials = append(trials, "var _logos_claimed bool")
 		}
+		trials = append(trials, "{")
 		trials = append(trials, fmt.Sprintf("\t_logos_scan := %s.NewScanner(_logos_raw, (*%s)(nil))", jsonAlias, firstKeyed))
 		trials = append(trials, "\tif _logos_scan.Object() {")
 		for i, s := range memberList {
