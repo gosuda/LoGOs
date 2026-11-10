@@ -297,3 +297,26 @@ var slot unsafe.Pointer
 		}
 	})
 }
+func TestArenaFallbackGo(t *testing.T) {
+	testenv.MustHaveGoBuild(t)
+	const src = `package p
+
+func f() int {
+	return 1
+}
+`
+	for _, tc := range []struct {
+		kind Kind
+		name string
+	}{
+		{KindGo, "x.go"},
+		{KindLgo, "x.lgo"},
+	} {
+		in := checkSrc(t, tc.kind, tc.name, src)
+		found := []FallbackFinding{{File: tc.name, Line: 4, Col: 2, Message: "arena.New[int] falls back to the heap"}}
+		want := []string{"4 perf::arena_fallback warn"}
+		if got := summarize(RunFallback(in, found)); !slices.Equal(got, want) {
+			t.Errorf("kind %v: RunFallback = %q, want %q", tc.kind, got, want)
+		}
+	}
+}
