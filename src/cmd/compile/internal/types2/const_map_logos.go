@@ -67,7 +67,7 @@ func logosImportedCallee(check *Checker, call *syntax.CallExpr) (path, name stri
 func logosConstMapKeyOK(t Type) bool {
 	switch u := t.Underlying().(type) {
 	case *Basic:
-		return u.info&(IsString|IsBoolean|IsInteger|IsFloat) != 0
+		return u.info&(IsString|IsBoolean|IsInteger|IsFloat|IsComplex) != 0
 	case *Struct:
 		for i := range u.NumFields() {
 			if f := u.Field(i); f.Name() != "_" && !logosConstMapKeyOK(f.Type()) {

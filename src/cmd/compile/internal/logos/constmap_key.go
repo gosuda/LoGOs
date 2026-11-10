@@ -27,6 +27,10 @@ func constKeyIsFloat(k ctfe.Kind) bool {
 	return k == ctfe.KFloat32 || k == ctfe.KFloat64
 }
 
+func constKeyIsComplex(k ctfe.Kind) bool {
+	return k == ctfe.KComplex64 || k == ctfe.KComplex128
+}
+
 func constKeyBits(v ctfe.Value) uint64 {
 	return new(big.Int).And(v.BigInt(), constKeyMask).Uint64()
 }
@@ -38,6 +42,14 @@ func constKeyFloat(v ctfe.Value) float64 {
 	return v.Float64()
 }
 
+func constKeyComplex(v ctfe.Value) complex128 {
+	c := v.Complex()
+	if v.Type().Kind == ctfe.KComplex64 {
+		return complex(float64(float32(real(c))), float64(float32(imag(c))))
+	}
+	return c
+}
+
 func constKeyHash(v ctfe.Value) uint64 {
 	t := v.Type()
 	switch {
@@ -47,6 +59,9 @@ func constKeyHash(v ctfe.Value) uint64 {
 		return constHashBool(v.Bool())
 	case constKeyIsFloat(t.Kind):
 		return constHashFloat64(constKeyFloat(v))
+	case constKeyIsComplex(t.Kind):
+		c := constKeyComplex(v)
+		return constHashCombine(constHashFloat64(real(c)), constHashFloat64(imag(c)))
 	case constKeyIsInt(t.Kind):
 		return constHashUint64(constKeyBits(v))
 	case t.Kind == ctfe.KStruct:
@@ -83,6 +98,16 @@ func constKeyCanon(v ctfe.Value) string {
 			f = 0
 		}
 		return strconv.FormatUint(math.Float64bits(f), 16)
+	case constKeyIsComplex(t.Kind):
+		c := constKeyComplex(v)
+		re, im := real(c), imag(c)
+		if re == 0 {
+			re = 0
+		}
+		if im == 0 {
+			im = 0
+		}
+		return strconv.FormatUint(math.Float64bits(re), 16) + "," + strconv.FormatUint(math.Float64bits(im), 16)
 	case constKeyIsInt(t.Kind):
 		return strconv.FormatUint(constKeyBits(v), 16)
 	case t.Kind == ctfe.KStruct:
@@ -129,6 +154,19 @@ func constKeyCompare(a, b ctfe.Value) int {
 		case fa < fb:
 			return -1
 		case fa > fb:
+			return 1
+		}
+		return 0
+	case constKeyIsComplex(t.Kind):
+		ca, cb := constKeyComplex(a), constKeyComplex(b)
+		switch {
+		case real(ca) < real(cb):
+			return -1
+		case real(ca) > real(cb):
+			return 1
+		case imag(ca) < imag(cb):
+			return -1
+		case imag(ca) > imag(cb):
 			return 1
 		}
 		return 0

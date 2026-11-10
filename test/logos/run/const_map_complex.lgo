@@ -1,0 +1,63 @@
+// run
+
+package main
+
+import "fmt"
+
+const c128 = map[complex128]int{
+	1 + 2i:        12,
+	3 - 4i:        34,
+	complex(5, 6): 56,
+	0 + 0i:        0,
+}
+
+const c64 = map[complex64]string{
+	1 + 2i:          "a",
+	complex(7, -8): "b",
+}
+
+const func cnegzero(x complex128) complex128 {
+	z := x - x
+	return -z
+}
+
+func main() {
+	gm128 := map[complex128]int{1 + 2i: 12, 3 - 4i: 34, complex(5, 6): 56, 0 + 0i: 0}
+	gm64 := map[complex64]string{1 + 2i: "a", complex(7, -8): "b"}
+
+	cv, cok := c128[1+2i]
+	gv, gok := gm128[1+2i]
+	fmt.Println(cv, cok, gv, gok)
+
+	cv, cok = c128[3-4i]
+	gv, gok = gm128[3-4i]
+	fmt.Println(cv, cok, gv, gok)
+
+	cv, cok = c128[complex(5, 6)]
+	gv, gok = gm128[complex(5, 6)]
+	fmt.Println(cv, cok, gv, gok)
+
+	cv, cok = c128[cnegzero(1+1i)]
+	gv, gok = gm128[complex(0, 0)]
+	fmt.Println(cv, cok, gv, gok)
+
+	cv, cok = c128[9+9i]
+	gv, gok = gm128[9+9i]
+	fmt.Println(cv, cok, gv, gok)
+
+	cs, csok := c64[1+2i]
+	gs, gsok := gm64[1+2i]
+	fmt.Println(cs, csok, gs, gsok)
+
+	cs, csok = c64[complex(7, -8)]
+	gs, gsok = gm64[complex(7, -8)]
+	fmt.Println(cs, csok, gs, gsok)
+
+	cs, csok = c64[0+0i]
+	gs, gsok = gm64[0+0i]
+	fmt.Println(cs, csok, gs, gsok)
+
+	for k, v := range c128 {
+		fmt.Println(k, v)
+	}
+}

@@ -323,6 +323,8 @@ func (fl *fileLower) constKeyHashText(t types2.Type, x string, pos syntax.Pos) s
 			return rtAlias + ".HashUint64(uint64(" + x + "))"
 		case u.Info()&types2.IsFloat != 0:
 			return rtAlias + ".HashFloat64(float64(" + x + "))"
+		case u.Info()&types2.IsComplex != 0:
+			return rtAlias + ".HashCombine(" + rtAlias + ".HashFloat64(float64(real(" + x + "))), " + rtAlias + ".HashFloat64(float64(imag(" + x + "))))"
 		}
 	case *types2.Struct:
 		var b strings.Builder

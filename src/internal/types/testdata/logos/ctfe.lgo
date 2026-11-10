@@ -135,6 +135,22 @@ const func Frac(x float64) float64 {
 
 const fmapNaN /* ERRORx "[[]correctness::const_eval[]].*NaN" */ = map[float64]string{Frac(1.0): "nan"}
 
+const func CNegZero(x complex128) complex128 {
+	z := x - x
+	return -z
+}
+
+const cmapOK = map[complex128]string{CNegZero(complex(1, 1)): "neg"}
+
+const cmapDup /* ERROR "duplicate" */ = map[complex128]string{complex(0, 0): "a", CNegZero(complex(1, 1)): "b"}
+
+const func CFrac(x complex128) complex128 {
+	z := x - x
+	return z / z
+}
+
+const cmapNaN /* ERROR "NaN" */ = map[complex128]string{CFrac(complex(1, 1)): "nan"}
+
 const func Get(m map[string]int, k string) int {
 	v, ok := m[k]
 	if ok {

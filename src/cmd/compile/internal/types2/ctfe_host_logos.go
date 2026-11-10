@@ -238,6 +238,14 @@ func (h *ctfeHost) constToValue(c constant.Value, t *ctfe.Type) (ctfe.Value, boo
 		}
 		f, _ := constant.Float64Val(c)
 		return ctfe.FloatValue(f, typ), true
+	case constant.Complex:
+		typ := ctfe.UntypedComplex()
+		if t != nil && (t.Kind == ctfe.KComplex64 || t.Kind == ctfe.KComplex128) {
+			typ = t
+		}
+		re, _ := constant.Float64Val(constant.Real(c))
+		im, _ := constant.Float64Val(constant.Imag(c))
+		return ctfe.ComplexValue(complex(re, im), typ), true
 	}
 	return ctfe.Value{}, false
 }
@@ -411,6 +419,10 @@ func (h *ctfeHost) fromType(t Type) *ctfe.Type {
 			return &ctfe.Type{Kind: ctfe.KFloat32}
 		case Float64:
 			return &ctfe.Type{Kind: ctfe.KFloat64}
+		case Complex64:
+			return &ctfe.Type{Kind: ctfe.KComplex64}
+		case Complex128:
+			return &ctfe.Type{Kind: ctfe.KComplex128}
 		case UnsafePointer:
 			return &ctfe.Type{Impure: "pointer type in const func"}
 		case UntypedBool:
@@ -421,6 +433,8 @@ func (h *ctfeHost) fromType(t Type) *ctfe.Type {
 			return ctfe.UntypedRune()
 		case UntypedFloat:
 			return ctfe.UntypedFloat()
+		case UntypedComplex:
+			return ctfe.UntypedComplex()
 		case UntypedString:
 			return ctfe.UntypedString()
 		case UntypedNil:
