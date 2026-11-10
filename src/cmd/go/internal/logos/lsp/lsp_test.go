@@ -1522,3 +1522,47 @@ func TestProxyHoverAfterCloseSeesDiskText(t *testing.T) {
 		t.Errorf("the hover was mapped at %v, want %v through the disk lowering", pos, lowOperand)
 	}
 }
+
+func TestServeDuplicateContentLengthFails(t *testing.T) {
+	scratch := t.TempDir()
+	scriptPath := filepath.Join(scratch, "script.json")
+	if err := os.WriteFile(scriptPath, []byte(`{}`), 0o666); err != nil {
+		t.Fatal(err)
+	}
+	opts := Options{
+		Gopls:    []string{os.Args[0], "-mode=stdio"},
+		Env:      append(os.Environ(), fakeEnv+"="+scriptPath, fakeLogEnv+"="+filepath.Join(scratch, "gopls.log")),
+		Compiler: newFakeCompiler(),
+		Stderr:   new(syncBuffer),
+	}
+	inR, inW, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	outR, outW, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	ctx := t.Context()
+	go func() { done <- Serve(ctx, inR, outW, opts) }()
+	body := `{"jsonrpc":"2.0","method":"initialized","params":{}}`
+	bye := `{"jsonrpc":"2.0","method":"exit","params":{}}`
+	if _, err := fmt.Fprintf(inW, "Content-Length: %d\r\nContent-Length: %d\r\n\r\n%s", len(body), len(body), body); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fmt.Fprintf(inW, "Content-Length: %d\r\n\r\n%s", len(bye), bye); err != nil {
+		t.Fatal(err)
+	}
+	inW.Close()
+	select {
+	case err := <-done:
+		if err == nil || !strings.Contains(err.Error(), "duplicate Content-Length") {
+			t.Fatalf("Serve over a duplicate Content-Length frame = %v, want a duplicate Content-Length error", err)
+		}
+	case <-time.After(waitLimit):
+		t.Fatal("Serve did not return after the duplicate Content-Length frame")
+	}
+	outW.Close()
+	outR.Close()
+}
