@@ -6,7 +6,6 @@ package types2
 
 import (
 	"cmd/compile/internal/syntax"
-	"cmp"
 	. "internal/types/errors"
 	"slices"
 	"strings"
@@ -432,19 +431,13 @@ func (check *Checker) logosImplementsProperty(V, T Type, Ti *Interface, cause *s
 		}
 		return false
 	}
-	props := logosProperties(Ti)
-	getter := ""
-	if len(props) > 0 {
-		getter = logosGetterName(props[0].name)
-	}
 	base, _ := deref(V)
 	named := asNamed(base)
 	kind, name := check.logosCheckPropertySources(V, Ti, pos)
 	declared := named != nil && check.logosDeclaredConforms(named, T, Ti)
 	if named == nil {
 		if _, ok := base.Underlying().(*Struct); !ok {
-			missing := cmp.Or(name, getter)
-			return fail("%s does not implement %s (missing method %s)", V, Ti, missing)
+			return fail("%s does not implement %s (missing method %s)", V, Ti, name)
 		}
 	}
 	switch {
@@ -467,8 +460,7 @@ func (check *Checker) logosImplementsProperty(V, T Type, Ti *Interface, cause *s
 		}
 		return fail("%s %s has the fields of %s but does not declare it; write type %s struct : %s { ... }", logosPropRequires, V, Ti, sname, Ti)
 	default:
-		missing := cmp.Or(name, getter)
-		return fail("%s does not implement %s (missing method %s)", V, Ti, missing)
+		return fail("%s does not implement %s (missing method %s)", V, Ti, name)
 	}
 }
 
