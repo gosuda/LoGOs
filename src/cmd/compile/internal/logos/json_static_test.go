@@ -639,6 +639,16 @@ func TestStringFieldsReadOnce(t *testing.T) {
 	}
 }
 
+func TestCallSitesKeepJSONMarshal(t *testing.T) {
+	text := lowerStaticText(t, "package p\n\nimport \"encoding/json\"\n\ntype User struct {\n\tID int64 `json:\"id\"`\n\tName string `json:\"name\"`\n}\n\nfunc Encode(u User) ([]byte, error) {\n\treturn json.Marshal(u)\n}\n")
+	if got := strings.Count(text, "json.Marshal("); got != 1 {
+		t.Fatalf("call site json.Marshal rewritten or duplicated %d times:\n%s", got, text)
+	}
+	if !strings.Contains(text, "json.Marshal(u)") {
+		t.Fatalf("call site body lost:\n%s", text)
+	}
+}
+
 func TestKeyLiteralEscapes(t *testing.T) {
 	for k, want := range map[string]string{
 		"a<b":      "\"a\\u003cb\":",
