@@ -121,6 +121,38 @@ func copyValue(v Value) Value {
 	return v
 }
 
+func copyCallArg(v Value) Value {
+	v = copyValue(v)
+	cloneReachableMaps(&v)
+	return v
+}
+
+func cloneReachableMaps(v *Value) {
+	switch {
+	case v.mval != nil:
+		out := &mapVal{keys: make([]Value, len(v.mval.keys)), vals: make([]Value, len(v.mval.vals))}
+		for i, e := range v.mval.keys {
+			out.keys[i] = copyCallArg(e)
+		}
+		for i, e := range v.mval.vals {
+			out.vals[i] = copyCallArg(e)
+		}
+		v.mval = out
+	case v.array != nil:
+		for i := range v.array {
+			cloneReachableMaps(&v.array[i])
+		}
+	case v.strct != nil:
+		for i := range v.strct {
+			cloneReachableMaps(&v.strct[i])
+		}
+	case v.slice != nil && v.slice.backing != nil:
+		for i := range *v.slice.backing {
+			cloneReachableMaps(&(*v.slice.backing)[i])
+		}
+	}
+}
+
 type storeKey struct {
 	first *Value
 	n     int
