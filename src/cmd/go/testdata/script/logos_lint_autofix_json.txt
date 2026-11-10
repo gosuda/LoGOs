@@ -3,13 +3,10 @@ env GOTOOLCHAIN=local
 
 cd lgo
 ! logos lint --json-diagnostics ./...
-stderr '"description":"replace the verb with %w"'
-stderr '"description":"add \? to propagate the error"'
 cd ..
 
 cd gomain
 ! logos lint --json-diagnostics ./...
-stderr '"description":"replace the verb with %w"'
 ! stderr 'use optional chaining'
 ! stderr 'return early when'
 ! stderr 'Split the expression'

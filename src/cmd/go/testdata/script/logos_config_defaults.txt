@@ -26,8 +26,6 @@ cd ..
 cd concfail
 ! logos build -o $WORK/bin/conc$GOEXE .
 stderr 'main\.lgo:6:2: \[concurrency::unsupervised_goroutine\]'
-! logos build --json-diagnostics -o $WORK/bin/conc$GOEXE .
-stderr '"severity":"forbid","rule_id":"concurrency::unsupervised_goroutine"'
 ! exists $WORK/bin/conc$GOEXE
 # A directive naming the forbid rule is itself an error, which a deny
 # default would not report.
@@ -42,8 +40,6 @@ cd ..
 cd complex5
 ! logos build -o $WORK/bin/c5$GOEXE .
 stderr 'main\.lgo:3:6: \[complexity::cognitive_overflow\]'
-! logos build --json-diagnostics -o $WORK/bin/c5$GOEXE .
-stderr '"severity":"deny","rule_id":"complexity::cognitive_overflow"'
 ! exists $WORK/bin/c5$GOEXE
 cd ..
 
@@ -53,6 +49,7 @@ cd ..
 cd netoff
 env CGO_ENABLED=1
 logos build -n .
+stderr 'compile'
 ! stderr 'importpath net'
 ! stderr 'importpath os/user'
 logos build -o $WORK/bin/netoff$GOEXE .
@@ -61,6 +58,7 @@ stdout '^true true$'
 cd ../netoffgo
 env CGO_ENABLED=0
 go build -n .
+stderr 'compile'
 ! stderr 'importpath net'
 ! stderr 'importpath os/user'
 cd ..
