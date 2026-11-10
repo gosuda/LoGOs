@@ -111,6 +111,10 @@ func (fl *fileLower) lowerStaticJSONType(td *syntax.TypeDecl) {
 			js.unmarshalText(&b)
 		}
 		js.unmarshalKeys(&b)
+		if fl.pkg.jsonUnionKeys == nil {
+			fl.pkg.jsonUnionKeys = make(map[string]bool)
+		}
+		js.unionMemberKeys(&b, fl.pkg.jsonUnionKeys)
 	}
 	if binaryOK {
 		fl.lowerStaticBinary(td, named, js, &b)
@@ -233,6 +237,9 @@ func (fl *fileLower) classifyJSONField(t types2.Type) jsonShape {
 
 func (fl *fileLower) classifyShape(t types2.Type) jsonShape {
 	if _, ok := unionTerms(t); ok {
+		return jsonShape{kind: shapeUnion}
+	}
+	if _, ok := unionFactMembers(t); ok {
 		return jsonShape{kind: shapeUnion}
 	}
 	switch c := types2.Unalias(t).(type) {

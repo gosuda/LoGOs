@@ -61,27 +61,26 @@ func qualifierFor(holderPkg *types2.Package) func(*types2.Package) string {
 	}
 }
 
-func classifyFromFacts(holderPkg *types2.Package, typ types2.Type) ([]unionMemberClass, string, bool) {
+func unionFactMembers(typ types2.Type) ([]facts.UnionMemberFact, bool) {
 	unwrapped := types2.Unalias(typ)
 	if cv, ok := unwrapped.(*types2.ConstView); ok {
 		unwrapped = types2.Unalias(cv.Elem)
 	}
 	named, ok := unwrapped.(*types2.Named)
 	if !ok || named.Obj() == nil || named.Obj().Pkg() == nil {
-		return nil, "", false
+		return nil, false
 	}
 	if args := named.TypeArgs(); args != nil && args.Len() > 0 {
 		for i := range args.Len() {
 			if _, ok := types2.Unalias(args.At(i)).(*types2.TypeParam); ok {
-				return nil, "", false
+				return nil, false
 			}
 		}
 	}
-	unionPkg := named.Obj().Pkg()
 	unionName := named.Obj().Name()
-	rec, ok := facts.Lookup(unionPkg.Path())
+	rec, ok := facts.Lookup(named.Obj().Pkg().Path())
 	if !ok || rec == nil {
-		return nil, "", false
+		return nil, false
 	}
 	var indexed []facts.UnionMemberFact
 	for _, u := range rec.UnionMembers {
@@ -90,12 +89,20 @@ func classifyFromFacts(holderPkg *types2.Package, typ types2.Type) ([]unionMembe
 		}
 	}
 	if len(indexed) == 0 {
-		return nil, "", false
+		return nil, false
 	}
 	for i := 1; i < len(indexed); i++ {
 		for j := i; j > 0 && indexed[j].Index < indexed[j-1].Index; j-- {
 			indexed[j], indexed[j-1] = indexed[j-1], indexed[j]
 		}
+	}
+	return indexed, true
+}
+
+func classifyFromFacts(holderPkg *types2.Package, typ types2.Type) ([]unionMemberClass, string, bool) {
+	indexed, ok := unionFactMembers(typ)
+	if !ok {
+		return nil, "", false
 	}
 	qual := qualifierFor(holderPkg)
 	unionSpell := types2.TypeString(typ, qual)

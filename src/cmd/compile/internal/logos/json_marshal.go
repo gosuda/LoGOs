@@ -880,7 +880,7 @@ func (fl *fileLower) instHelperModel(core types2.Type) (string, string, *jsonStr
 		return "", "", nil
 	}
 	params := inst.origin.TypeParams()
-	js := &jsonStruct{name: inst.spell}
+	js := &jsonStruct{name: inst.spell, staticJSON: fl.pkg.info.LogosStaticJSON, holderPkg: fl.pkg.tpkg}
 	for i := range st.NumFields() {
 		sf := st.Field(i)
 		ft, ok := substJSONType(sf.Type(), params, inst.args)

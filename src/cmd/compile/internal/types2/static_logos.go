@@ -191,7 +191,14 @@ func logosStaticKindOK(t Type) bool {
 	u := logosStaticUnwrap(t)
 	switch iface := u.Underlying().(type) {
 	case *Interface:
-		return logosClosedUnion(u) != nil && !logosContainsLock(u)
+		if logosContainsLock(u) {
+			return false
+		}
+		if logosClosedUnion(u) != nil {
+			return true
+		}
+		_, ok := Unalias(u).(*Named)
+		return ok
 	case *Map:
 		b, ok := iface.Key().Underlying().(*Basic)
 		return ok && b.Info()&IsString != 0

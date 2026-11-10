@@ -139,6 +139,7 @@ type packageLower struct {
 	jsonHelpers map[string]*jsonHelperDef
 	// jsonHelperSeq mints helper and import-alias numbers.
 	jsonHelperSeq int
+	jsonUnionKeys map[string]bool
 }
 
 // fileLower carries the state of lowering one file.

@@ -157,63 +157,34 @@ func (js *jsonStruct) fallbackQuotedValueLines(f *jsonField, field string, kind 
 }
 
 func (js *jsonStruct) unionLines(f *jsonField, field string) []string {
-	members, ok := unionTerms(f.typ)
+	members, unionName, ok := classifyUnionMembers(js.holderPkg, js.staticJSON, f.typ)
 	if !ok || len(members) == 0 {
 		base.Fatalf("logos: union field %s has no union terms", f.goName)
 	}
-	var localPkg *types2.Package
-	if named, ok := types2.Unalias(f.typ).(*types2.Named); ok && named.Obj() != nil {
-		localPkg = named.Obj().Pkg()
-	}
-	qual := func(p *types2.Package) string {
-		if p == nil || (localPkg != nil && p.Path() == localPkg.Path()) {
-			return ""
-		}
-		return p.Name()
-	}
-	unionName := types2.TypeString(f.typ, qual)
 	memberQuotes := make([]string, len(members))
-	for i, m := range members {
-		memberQuotes[i] = strconv.Quote(types2.TypeString(m, qual))
+	for i, c := range members {
+		memberQuotes[i] = strconv.Quote(c.spell)
 	}
 	membersList := strings.Join(memberQuotes, ", ")
 	type memberKeys struct {
-		bareName string
-		usable   bool
-		custom   bool
-		spell    string
-		st       *types2.Struct
-		isStruct bool
+		keyed   bool
+		custom  bool
+		spell   string
+		sample  string
+		ptr     bool
+		keyFunc string
 	}
 	memberList := make([]memberKeys, len(members))
-	for i, m := range members {
-		memberList[i] = memberKeys{spell: types2.TypeString(m, qual), custom: true}
-		elem := m
-		if ptr, ok := types2.Unalias(m).(*types2.Pointer); ok {
-			elem = ptr.Elem()
+	for i, c := range members {
+		sample, isPtr := strings.CutPrefix(c.spell, "*")
+		memberList[i] = memberKeys{
+			keyed:   c.keyed,
+			custom:  !c.keyed,
+			spell:   c.spell,
+			sample:  sample,
+			ptr:     isPtr,
+			keyFunc: c.keyFunc,
 		}
-		s := &memberList[i]
-		s.st, s.isStruct = types2.Unalias(elem).Underlying().(*types2.Struct)
-		named, ok := types2.Unalias(elem).(*types2.Named)
-		if !ok || named.Obj() == nil {
-			continue
-		}
-		s.bareName = named.Obj().Name()
-		shapeOK := s.isStruct && s.st.NumFields() > 0 && s.bareName != ""
-		shapeOK = shapeOK && localPkg != nil && named.Obj().Pkg() != nil && localPkg.Path() == named.Obj().Pkg().Path()
-		s.usable = shapeOK && js.staticJSON[named]
-		if s.usable {
-			visible := 0
-			for i := range s.st.NumFields() {
-				if _, ok := types2.LogosJSONFieldOf(s.st, i); ok {
-					visible++
-				}
-			}
-			if visible == 0 {
-				s.usable = false
-			}
-		}
-		s.custom = !s.usable
 	}
 
 	var trials []string
@@ -236,7 +207,7 @@ func (js *jsonStruct) unionLines(f *jsonField, field string) []string {
 	}
 	hasKeyed := false
 	for _, s := range memberList {
-		if s.usable {
+		if s.keyed {
 			hasKeyed = true
 			break
 		}
@@ -245,17 +216,17 @@ func (js *jsonStruct) unionLines(f *jsonField, field string) []string {
 	if needsClaim {
 		firstKeyed := ""
 		for _, s := range memberList {
-			if s.usable {
-				firstKeyed = s.bareName
+			if s.keyed {
+				firstKeyed = s.sample
 				break
 			}
 		}
 		var conds []string
 		for _, s := range memberList {
-			if !s.usable {
+			if !s.keyed {
 				continue
 			}
-			conds = append(conds, fmt.Sprintf("_logos_jsonkey_%s(_logos_claim.Key()) >= 0 || _logos_jsonfold_%s(_logos_claim.FoldKey()) >= 0", s.bareName, s.bareName))
+			conds = append(conds, fmt.Sprintf("%s(_logos_claim.Key()) >= 0 || %s(_logos_claim.FoldKey()) >= 0", s.keyFunc, unionFoldFunc(s.keyFunc)))
 		}
 		trials = append(trials, "var _logos_claimed bool")
 		trials = append(trials, "{")
@@ -271,33 +242,32 @@ func (js *jsonStruct) unionLines(f *jsonField, field string) []string {
 		trials = append(trials, "}")
 	}
 
-	for i, m := range members {
+	for i := range members {
 		scratch := fmt.Sprintf("_logos_scratch%d", i)
 		s := memberList[i]
-		hasKeyHelper := s.usable
+		hasKeyHelper := s.keyed
 
 		trials = append(trials, "{")
-		if ptr, ok := types2.Unalias(m).(*types2.Pointer); ok {
-			elem := types2.TypeString(ptr.Elem(), qual)
-			trials = append(trials, fmt.Sprintf("\t%s := new(%s)", scratch, elem))
+		if s.ptr {
+			trials = append(trials, fmt.Sprintf("\t%s := new(%s)", scratch, s.sample))
 		} else {
 			trials = append(trials, fmt.Sprintf("\tvar %s %s", scratch, s.spell))
 		}
 		if hasKeyHelper {
 			trials = append(trials, "\t_logos_matched := false")
-			trials = append(trials, fmt.Sprintf("\t_logos_chk := %s.NewScanner(_logos_raw, (*%s)(nil))", jsonAlias, s.bareName))
+			trials = append(trials, fmt.Sprintf("\t_logos_chk := %s.NewScanner(_logos_raw, (*%s)(nil))", jsonAlias, s.sample))
 			trials = append(trials, "\tif _logos_chk.Object() {")
 			trials = append(trials, "\t\t_logos_matched = true")
 			trials = append(trials, "\t\t_logos_keys := 0")
 			trials = append(trials, "\t\tfor _logos_chk.Next() {")
-			trials = append(trials, fmt.Sprintf("\t\t\tif _logos_jsonkey_%s(_logos_chk.Key()) >= 0 || _logos_jsonfold_%s(_logos_chk.FoldKey()) >= 0 {", s.bareName, s.bareName))
+			trials = append(trials, fmt.Sprintf("\t\t\tif %s(_logos_chk.Key()) >= 0 || %s(_logos_chk.FoldKey()) >= 0 {", s.keyFunc, unionFoldFunc(s.keyFunc)))
 			trials = append(trials, "\t\t\t\t_logos_keys++")
 			trials = append(trials, "\t\t\t} else {")
 			for j, sib := range memberList {
-				if j == i || !sib.usable {
+				if j == i || !sib.keyed {
 					continue
 				}
-				trials = append(trials, fmt.Sprintf("\t\t\t\t\tif _logos_jsonkey_%s(_logos_chk.Key()) >= 0 || _logos_jsonfold_%s(_logos_chk.FoldKey()) >= 0 {", sib.bareName, sib.bareName))
+				trials = append(trials, fmt.Sprintf("\t\t\t\t\tif %s(_logos_chk.Key()) >= 0 || %s(_logos_chk.FoldKey()) >= 0 {", sib.keyFunc, unionFoldFunc(sib.keyFunc)))
 				trials = append(trials, "\t\t\t\t\t\t_logos_matched = false")
 				trials = append(trials, "\t\t\t\t\t}")
 			}
@@ -417,6 +387,41 @@ func (js *jsonStruct) keyFuncs(b *strings.Builder) {
 	}
 	writeKeyFunc(b, js.name, "jsonkey", exact)
 	writeKeyFunc(b, js.name, "jsonfold", folded)
+}
+
+func unionFoldFunc(keyFunc string) string {
+	return "_logos_jsonfold_" + strings.TrimPrefix(keyFunc, "_logos_jsonkey_")
+}
+
+func (js *jsonStruct) unionMemberKeys(b *strings.Builder, seen map[string]bool) {
+	for _, f := range js.fields {
+		if f.shape.kind != shapeUnion {
+			continue
+		}
+		members, _, ok := classifyUnionMembers(js.holderPkg, js.staticJSON, f.typ)
+		if !ok {
+			continue
+		}
+		for _, c := range members {
+			if !c.keyed || !c.foreign || seen[c.keyFunc] {
+				continue
+			}
+			seen[c.keyFunc] = true
+			var exact, folded []keyEntry
+			foldSeen := make(map[string]bool)
+			for i, k := range c.keys {
+				exact = append(exact, keyEntry{k, i})
+				fk := foldJSONKey(k)
+				if !foldSeen[fk] {
+					foldSeen[fk] = true
+					folded = append(folded, keyEntry{fk, i})
+				}
+			}
+			name := strings.TrimPrefix(c.keyFunc, "_logos_jsonkey_")
+			writeKeyFunc(b, name, "jsonkey", exact)
+			writeKeyFunc(b, name, "jsonfold", folded)
+		}
+	}
 }
 
 func writeKeyFunc(b *strings.Builder, name, kind string, keys []keyEntry) {
