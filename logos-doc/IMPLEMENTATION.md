@@ -407,8 +407,8 @@ Anchor: David Parnas, Christopher Alexander
 
 ### M0-S8 Go and loGo/s interop (follow-up to M0-S2; runs after M0-S2 and before M0-S3)
 Anchor: David Parnas, Christopher Alexander
-- Context: M0-S2 landed as f92d53e38b with the import-edge rejection that R-U2 now removes. This slice changes only that rejection. Module purity (`mixed_module`), package purity (`mixed_package`), the alias warning, and `checkLogosModules` stay as landed (R-U3).
-- Attack (script test): `src/cmd/go/testdata/script/logos_interop.txt` holds five cases, each with its own fixture so an earlier diagnostic cannot mask a later one. Run the renamed script against f92d53e38b before any code change (G1 rule 1; the old rejection text is gone from the script, so cases 1 and 2 fail red because the old `logos_imports_go` and `go_imports_logos` errors still fire; cases 3 to 5 already pass at f92d53e38b and stay as regression pins; the commit body records `RED` lines for cases 1 and 2 only):
+- Context: this slice keeps module purity (`mixed_module`), package purity (`mixed_package`), the alias warning, and `checkLogosModules` unchanged and changes only the import-edge rejection.
+- Attack (script test): `src/cmd/go/testdata/script/logos_interop.txt` holds five cases, each with its own fixture so an earlier diagnostic cannot mask a later one. Cases 1 and 2 cover the removed rejections; cases 3 to 5 stay as regression pins:
   1. A loGo/s package imports a Go package from another workspace module: `logos build ./...` succeeds and the binary runs and prints a string from the Go package; `logos test ./...` runs a `_test.lgo` that imports the same Go package.
   2. A Go package imports a loGo/s package from another workspace module: `logos build ./...` succeeds and the binary runs and prints a string from the loGo/s package; `logos test ./...` runs a `_test.go` that imports the loGo/s package; plain `go build ./...` of that Go module fails with stderr matching `no required module provides package example\.com/l/p` (observed with the installed `go` in a scratch `go.work`), because plain `go` ignores `.lgo` files (A-LGOSEL).
   3. A loGo/s package imports `fmt` and `context` and runs.
@@ -422,7 +422,7 @@ Anchor: David Parnas, Christopher Alexander
 ### M0-S3 Compiler accepts `.lgo` files
 Anchor: David Parnas, Tony Hoare
 - Attack: `src/cmd/compile/internal/syntax/logos_test.go` `TestLogosModeParsesGo`: every `.go` file in `syntax/testdata` parses to an identical `Fdump` under `LogosMode` and plain mode. `test/logos/compile/plain.lgo` (`// run`, plain Go syntax, prints `ok`) is defined here; its testdir execution is owned by M0-S6, which ships the `test/logos` harness (prerequisite: M0-S6).
-- Build: `syntax/syntax.go LogosMode`: add `LogosMode` (`1 << 1`). `noder/noder.go:58`: pass `syntax.CheckBranches | logosMode(filename)` where `logosMode` (new `noder/logos.go`) returns `syntax.LogosMode` for logos extensions; `noder.LoadPackage` fails with `[correctness::mixed_package]` if files of both classes arrive (`base.ErrorfAt`), except cgo outputs (names starting with `_cgo_` or ending in `.cgo1.go`), which M20-S0 compiles beside `.lgo` files. `irgen.go:59` config gets `Logos: allLogos(noders)`; `types2.Config` (`types2/api.go:117-221`) gains field `Logos bool // package sources are .lgo files`.
+- Build: `syntax/syntax.go LogosMode`: add `LogosMode` (`1 << 1`). `noder/noder.go`: pass `syntax.CheckBranches | logosMode(filename)` where `logosMode` (new `noder/logos.go`) returns `syntax.LogosMode` for logos extensions; `noder.LoadPackage` fails with `[correctness::mixed_package]` if files of both classes arrive (`base.ErrorfAt`), except cgo outputs (names starting with `_cgo_` or ending in `.cgo1.go`), which M20-S0 compiles beside `.lgo` files. `noder/irgen.go` config gets `Logos: allLogos(noders)`; `types2.Config` (`types2/api.go` `Config` struct) gains field `Logos bool // package sources are .lgo files`.
 - Gate: `go test -short cmd/compile/internal/syntax cmd/compile/internal/types2` (testdir execution of `test/logos/compile` is gated in M0-S6).
 
 ### M0-S4 `logos.toml`
@@ -574,7 +574,7 @@ Anchor: David Parnas, J.R.R. Tolkien
 ### M1-S3 Type checking
 Anchor: Tony Hoare, Edsger W. Dijkstra
 - Attack: `src/internal/types/testdata/logos/try.lgo` with `/* ERROR */` comments covering C1-C6: operand not a call; last result `int`; last result a named type whose underlying is `error` (rejected: identical-to-`error` rule); enclosing function without error result; `?` inside `a + f()?`, inside `g(f()?)`, inside `return f()?`, inside `go f()?`; `x := f()?` where `f` returns only `error`; `x := f()?` where `x` already exists in the scope (no new variables); `errdefer` in a function returning `int`; `_logos_x := 1`; `x, y := f()?` with three results plus error (count mismatch text). Valid cases type the result as the call results minus the error.
-- Build: new `types2/logos_try.go`: `func (check *Checker) logosTryOperand(x *operand, e *syntax.TryExpr)` (types the call, strips the error, records the type of `e` as the remaining result or tuple); `stmt.go`: hooks in the statement switch for `*syntax.ErrdeferStmt` and before `suspendedCall` to unwrap a `TryExpr` around the call in `defer`; `expr.go` `exprInternal`: hook `case *syntax.TryExpr` that errors with `misplaced_try` unless the enclosing statement registered `e` in `check.logosTryOK` (a set filled by the statement hooks for the allowed shapes C2); identifier hook for C6 in `declare`. All new behavior runs only when `check.conf.Logos`.
+- Build: new `types2/logos_try.go`: `func (check *Checker) logosTryOperand(x *operand, e *syntax.TryExpr)` (types the call, strips the error, records the type of `e` as the remaining result or tuple); `stmt.go`: hooks in the statement switch for `*syntax.ErrdeferStmt` and before `suspendedCall` to unwrap a `TryExpr` around the call in `defer`; `expr.go` `exprInternal`: hook `case *syntax.TryExpr` that errors with `misplaced_try` unless the enclosing statement is one of the allowed shapes C2 (the statement hooks accept the `TryExpr` there); identifier hook for C6 in `declare`. All new behavior runs only when `check.conf.Logos`.
 - Gate: `go test -short cmd/compile/internal/types2 -run 'TestLogos'`.
 
 ### M1-S4 Support package `logos/rt` and runtime error traces
@@ -1483,7 +1483,7 @@ Contract (UnionValue state machine; T-203.1, T-203.3): closed union `U` = interf
 ### M2-S1 Union values in value positions
 Anchor: Tony Hoare, David Parnas
 - Attack: `src/internal/types/testdata/logos/union_members.lgo`: closed unions allowed as variable, parameter, result, field, element, map key and value, `make` and `new` operand types; `interface{ ~int | string }` and `interface{ comparable }` stay errors with `[correctness::open_union_value] U has ~ terms or an unbounded type set`; conversion `U(x)` allowed when `x`'s type is a member or a closed union whose members are all members of `U`, else `[correctness::union_nonmember] float64 is not a member of U`; the same files compile as errors in plain Go mode (`.go` testdata copy) to prove `.go` is unchanged.
-- Build: `types2/union_logos.go`: `func isClosedUnion(t Type) bool` (from `_TypeSet` `typeset.go` `hasTerms` and no term with `tilde`); hook in `validVarType` (`typexpr.go validVarType`) returning early for closed unions when `check.conf.Logos`; hook in the conversion gate (`call.go:213-216`) with the membership rule.
+- Build: `types2/union_logos.go`: `func logosIsClosed(tset *_TypeSet) bool` (from `_TypeSet` `typeset.go` `hasTerms` and no term with `tilde`); hook in `validVarType` (`typexpr.go` `validVarType`) returning early for closed unions when `check.conf.Logos`; hook in the conversion gate (`call.go` `check.call` conversion path) with the membership rule.
 - Gate: `go test -short cmd/compile/internal/types2 -run TestLogos`.
 
 ### M2-S2 Membership in comparisons, assertions, cases
@@ -2437,8 +2437,8 @@ Anchor: Edward Tufte, John Carmack
 ### M12-A-S1 Prove wasm deadcode drops unreachable code
 Anchor: Edward Tufte, Tony Hoare
 - Attack: `src/cmd/go/testdata/script/logos_wasm_deadsize.txt` MUST require marker in reach. It MUST require absence in noreach. Reach MUST exceed noreach by at least 8000 bytes.
-- Build: Linker deadcode MUST remove unreachable functions. It MUST keep type and method tables.
-- Gate: `go test cmd/go -run 'Script/^logos_wasm_deadsize$'` MUST pass.
+- Build: Linker deadcode removes unreachable functions. Type and method tables stay so reflect keeps resolving (pinned by `src/cmd/go/testdata/script/logos_wasm_deadreflect.txt`).
+- Gate: `go test cmd/go -run 'Script/^logos_wasm_deadsize$'` MUST pass. `go test cmd/go -run 'Script/^logos_wasm_deadreflect$'` MUST pass for table retention.
 - Red-team rows: #208.
 - Docs: none.
 
@@ -2484,7 +2484,7 @@ Anchor: John Carmack, Herbert Simon, Dieter Rams
 
 ### M13-A-S4 Serve variable make buffer at O0
 Anchor: Edward Tufte, Tony Hoare
-- Attack: `src/cmd/go/testdata/script/logos_opt_levels.txt` MUST pin O0 flags and 0,0,1 counts. `src/cmd/go/testdata/script/logos_recursive_stackbuf.txt` MUST pin O0 flag value 32. Raw `-N -l` MUST heap.
+- Attack: `src/cmd/go/testdata/script/logos_opt_levels.txt` MUST pin O0 flags and the O0 32-byte buffer through `TestCompiledStackBuffer`. Raw `-N -l` MUST heap.
 - Build: `src/cmd/go/internal/logos/settings/settings.go` MUST pass threshold at O0. `src/cmd/compile/internal/walk/builtin.go` MUST serve buffer under explicit flag. `src/cmd/compile/internal/ssagen/ssa.go` MUST serve buffer under explicit flag. Append path MUST stay N gated.
 - Gate: Script tests MUST pass. Goparity MUST pass.
 - Red-team rows: #200.
@@ -2730,6 +2730,7 @@ Anchor: Tony Hoare, John Carmack, Edsger W. Dijkstra
 ### M18-S7 `logos/arena` and explicit placement
 Anchor: Tony Hoare, John Carmack, Edsger W. Dijkstra
 - Attack: `test/logos/run/region_list.lgo`: a 10,000-node list sums to 49,995,000; `logos/rt.RegionBytes()` (push-linked from the runtime) is above 0 inside the block and 0 after it. `region_loop.lgo`: `arena.Open` inside the loop body and `arena.Make[byte](r, n)` with `n == 1024` known only at run time; one million iterations peak at most 65,536. `region_fallback.lgo`: `p := arena.New[T](r); global = p` reports `perf::arena_fallback`, and `p` keeps its value after block exit and `runtime.GC()`; a Region stored into a local declared outside its owner block, or captured by a `defer` closure, makes escape analysis fall back to the heap with a hint. `region_gc.lgo`: a scan-region pointer keeps a heap object's cleanup from running until block exit. `arena.Make[int](r, n)` with `n == -1` at run time panics with the same text as `make([]int, n)`, and the constant form compiles; `runtime.SetFinalizer` and `runtime.AddCleanup` on a region object panic with the T-301.1 text naming the called API. `src/internal/types/testdata/logos/region_escape.lgo`: one `// ERROR "correctness::region_escape"` each for a global store, a return, a channel send, a `go` capture, and an escaping closure; passing `r` as an argument compiles. Scripts: `logos_arena_eject.txt` (ejected module builds with an upstream toolchain, output matches), `logos_arena_go.txt` (a Go package using `logos/arena` builds under plain `go` and `logos`, same output), `logos_arena_lint.txt` (two packages in one module; JSON diagnostics carry both rule IDs). `src/cmd/go/testdata/script/logos_region_escape.txt` pins 30 escape verdicts. `test/logos/run/region_race.lgo` proves closes hold under `-race`, `-msan`, and `-asan`. `test/logos/run/region_exits.lgo` proves init-clause owners close after their statement. `test/logos/codegen/region_bump.lgo` pins the inline bump shape on the placed `New` line. `test/logos/lint/arena_fallback.lgo` and `test/logos/lint/region_escape.lgo` give positive evidence for both lint rules. `TestLogosRegionDictFirstLowers`, `TestLogosRegionDictFirstMake`, and `TestLogosRegionDictFirstAppend` prove dictionary-first generic calls lower. `src/cmd/go/testdata/script/logos_region_eject_parity.txt` proves native and ejected output match.
+- Attack (Go fallback diagnostic): `src/cmd/go/testdata/script/logos_arena_go_fallback.txt`: in a Go package an escaping region use falls back to the heap; the `logos` driver reports `perf::arena_fallback` naming the call and flow, and plain `go` reports no rule ID.
 - Build: `src/logos/arena/arena.go` (std package, heap bodies: `New` returns `new(T)`, `Make` returns `make([]T, n)`, `Append` returns `append(s, v...)`, `Open` returns `Region{}`); compiler call recognition in `cmd/compile/internal/logos/arena.go` resolving each call at compile time, per type argument, to the noscan or scan region from `types.Type.HasPointers()`; placement in `escape/region_logos.go`, where the region-outlives test treats a flow into a `go group` child as a store into a location scoped to the group block, and a Region stored into a local declared outside its owner block or captured by a `defer` closure kills the record (zero handle, heap, hint) with the runtime generation check as backstop; runtime entries `logosRegionOpen`, `logosRegionClose`, `logosRegionBump`, `logosRegionAllocNoscan`, `logosRegionAllocScan`, `logosRegionMakeSlice`, `logosRegionGrowSlice`, and the runtime-internal `logosRegionUnwind`, `logosRegionScan`, `logosRegionPark`, `logosRegionExit`, `logosRegionBytes` in `runtime/region_logos.go`, declared in `typecheck/_builtin/runtime.go`; `logos/rt.RegionBytes() int` push-linked from `runtime.logosRegionBytes`, with the ejected copy returning 0; lint rules `rule_region_escape.go` and `rule_arena_fallback.go`; eject lowering of the four calls to `_logos_rt.Region{}`, `new(T)`, `make([]T, n)`, and `append(s, v...)`, with `logos/rt` aliasing `Region` and the support module carrying `arena`. The inline bump loads the chunk from the handle before it tests for nil; `logosRegionOpen` returns nil only off the user goroutine, where user code never runs (`src/runtime/region_logos.go`, `src/cmd/compile/internal/amd64/ssa.go`). A generic instantiation passes the dictionary first; lowering reads the region after it (`ir.LogosRegionArgBase` in `src/cmd/compile/internal/ir/region_logos.go`). The close call spills its arguments into the statement init, so SSA liveness holds under race instrumentation (`src/cmd/compile/internal/walk/region_logos.go`). Under `-race` the inline bump stays off and the runtime reports every region allocation and free to the race detector. A holder bound to a block-local name places in the region; only a flow that outlives the owner block falls back.
 - Gate: the attacks above, plus `GOEXPERIMENT=logosarena go test -short -race runtime -run LogosArena`.
 - Red-team rows: #191, #193, #194.
@@ -2960,7 +2961,7 @@ Anchor: Kenya Hara, David Parnas
 ### M21-A-S8 Report retained snapshots per package
 Anchor: Edward Tufte, Tony Hoare
 - Attack: `src/cmd/go/internal/logos/lsp/lsp_test.go` MUST report count 1 per package. Adding second file MUST keep count 1.
-- Build: `src/cmd/go/internal/logos/lsp/store.go` MUST tag entries with generation. `src/cmd/go/internal/logos/lsp/request.go` MUST answer `logos/snapshotCounts`.
+- Build: `src/cmd/go/internal/logos/lsp/store.go` MUST tag entries with `gen`. `src/cmd/go/internal/logos/lsp/request.go` MUST answer `logos/snapshotCounts`.
 - Gate: `go test cmd/go/internal/logos/lsp` MUST pass.
 - Red-team rows: #206.
 - Docs: none.
@@ -3102,7 +3103,7 @@ per-lane records follow.
 - integ-cl-s78 (SPEC 7 and 8): `TestConstmapEmissionRodataNoInit`,
   `logos_constmap_keytype.txt`, `TestLoadBuildTablesApplyToGoModule`,
   `src/cmd/go/testdata/script/logos_target_cpu_native.txt`,
-  `TestLogosLintMarkSkipsNonMainModules` (`e7a15eeefb`).
+  `TestLogosLintMarkSkipsNonMainModules`.
 - integ-cl-s1012 (SPEC 10.1 to 12.2): 39 DONE-CITED, 5 DONE-NEW: JSON
   parity under nojsonv2 and per-instantiation comptime JSON helpers
   (`json_callsite_jsonv1.lgo`, `comptime_json.lgo`; `40d45d9f0f`),
