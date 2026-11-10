@@ -1,4 +1,7 @@
-# slice sums take the scalar loop when the archsimd feature check is off
+# The amd64 slice-sum vector form runs only when the archsimd feature
+# check is true: the check dominates the masked tail load in the binary,
+# the run reports the check value the vector path consults, and a
+# check-off run still matches the scalar oracle in the program.
 [!GOARCH:amd64] skip 'simd feature gate needs amd64'
 [!GOOS:linux] skip 'host cpu probe reads /proc/cpuinfo'
 
@@ -13,12 +16,16 @@ stdout '^sums ok$'
 cp stdout $WORK/on.txt
 exec go run ./hostprobe $WORK/on.txt baseline
 stdout 'host probe ok baseline'
-# The feature check dominates the vector loads in the binary: the
-# AVX2 call precedes the masked tail load in sumI32.
+# The feature check precedes the masked tail load in sumI32 and sumU8.
 logos build -o $WORK/exe .
 go tool objdump -s '^main\.sumI32$' $WORK/exe
-stdout 'CALL.*X86Features\.AVX2\(SB\)'
-stdout 'VPMASKMOVD'
+cp stdout $WORK/sumI32.txt
+exec go run ./checkorder $WORK/sumI32.txt avx2
+stdout '^order ok avx2$'
+go tool objdump -s '^main\.sumU8$' $WORK/exe
+cp stdout $WORK/sumU8.txt
+exec go run ./checkorder $WORK/sumU8.txt avx512
+stdout '^order ok avx512$'
 
 env GODEBUG=cpu.avx2=off
 logos run .
@@ -34,12 +41,32 @@ cp stdout $WORK/off-avx512.txt
 exec go run ./hostprobe $WORK/off-avx512.txt avx512off
 stdout 'host probe ok avx512off'
 
-# GOAMD64=v3 guarantees AVX2: the check is omitted and only the
-# vector form remains, so correct sums prove the vector ran.
+# GOAMD64=v3 guarantees AVX2: sumI32 drops the check but keeps the
+# masked tail load, while sumU8 keeps its AVX512 check in order.
 env GOAMD64=v3
+env GODEBUG=
 logos run .
 stdout '^avx2 true$'
 stdout '^sums ok$'
+logos build -o $WORK/exe-v3 .
+go tool objdump -s '^main\.sumI32$' $WORK/exe-v3
+cp stdout $WORK/sumI32-v3.txt
+exec go run ./checkorder $WORK/sumI32-v3.txt noavx2
+stdout '^order ok noavx2$'
+go tool objdump -s '^main\.sumU8$' $WORK/exe-v3
+cp stdout $WORK/sumU8-v3.txt
+exec go run ./checkorder $WORK/sumU8-v3.txt avx512
+stdout '^order ok avx512$'
+
+# GOAMD64=v4 guarantees AVX512 as well: sumU8 drops its check too.
+env GOAMD64=v4
+logos build -o $WORK/exe-v4 .
+go tool objdump -s '^main\.sumU8$' $WORK/exe-v4
+cp stdout $WORK/sumU8-v4.txt
+exec go run ./checkorder $WORK/sumU8-v4.txt noavx512
+stdout '^order ok noavx512$'
+env GOAMD64=v1
+
 
 -- m/go.mod --
 module example.com/featuregate
@@ -177,4 +204,67 @@ func main() {
 		}
 	}
 	fmt.Printf("host probe ok %s\n", os.Args[2])
+}
+
+-- m/checkorder/main.go --
+package main
+
+import (
+	"fmt"
+	"os"
+	"strings"
+)
+
+func fail(msg string) {
+	fmt.Fprintln(os.Stderr, msg)
+	os.Exit(1)
+}
+
+func main() {
+	if len(os.Args) != 3 {
+		fmt.Fprintln(os.Stderr, "usage: checkorder <objdump> <mode>")
+		os.Exit(2)
+	}
+	data, err := os.ReadFile(os.Args[1])
+	if err != nil {
+		fail("read objdump: " + err.Error())
+	}
+	text := string(data)
+	checks, load := tokens(os.Args[2])
+	if load == "" {
+		fail("unknown mode: " + os.Args[2])
+	}
+	li := strings.Index(text, load)
+	if li < 0 {
+		fail("missing " + load)
+	}
+	first := -1
+	hit := ""
+	for _, c := range checks {
+		if i := strings.Index(text, c); i >= 0 && (first < 0 || i < first) {
+			first = i
+			hit = c
+		}
+	}
+	if os.Args[2] == "avx2" || os.Args[2] == "avx512" {
+		if first < 0 {
+			fail("missing check before " + load)
+		}
+		if first > li {
+			fail(hit + " follows " + load)
+		}
+	} else if first >= 0 {
+		fail("unexpected " + hit)
+	}
+	fmt.Printf("order ok %s\n", os.Args[2])
+}
+
+func tokens(mode string) ([]string, string) {
+	switch mode {
+	case "avx2", "noavx2":
+		return []string{"X86Features.AVX2", "HasAVX2"}, "VPMASKMOVD"
+	case "avx512", "noavx512":
+		return []string{"X86Features.AVX512", "HasAVX512"}, "VMOVDQU8"
+	}
+	return nil, ""
 }
