@@ -7,17 +7,23 @@
 package main
 
 /*
-#cgo noescape slots_spin
-#cgo nocallback slots_spin
+#cgo noescape slots_wait
+#cgo nocallback slots_wait
 
-int slots_spin(unsigned char *p, unsigned char want, unsigned long long iters) {
+#include <stdlib.h>
+
+int slots_wait(unsigned char *p, unsigned char want, volatile int *entered, volatile int *release) {
 	volatile unsigned char *vp = (volatile unsigned char *)p;
-	for (unsigned long long i = 0; i < iters; i++) {
+	*entered = 1;
+	for (unsigned long long i = 0; i < 4000000000ULL; i++) {
 		if (*vp != want) {
 			return 1;
 		}
+		if (*release != 0) {
+			return 0;
+		}
 	}
-	return 0;
+	return 2;
 }
 */
 import "C"
@@ -25,7 +31,7 @@ import "C"
 import (
 	"fmt"
 	"runtime"
-	"sync"
+	"sync/atomic"
 	"time"
 	"unsafe"
 )
@@ -43,43 +49,42 @@ func slotsGCs() uint32 {
 func LogosFastCgoSlotsNotRoots() {
 	done := make(chan struct{}, 1)
 	res := make(chan int32, 1)
-	stop := make(chan struct{})
-	var wg sync.WaitGroup
-	wg.Go(func() {
-		for {
-			select {
-			case <-stop:
-				return
-			default:
-			}
-			runtime.GC()
-		}
-	})
-	before := slotsGCs()
+	entered := (*int32)(C.calloc(1, C.size_t(unsafe.Sizeof(C.int(0)))))
+	release := (*int32)(C.calloc(1, C.size_t(unsafe.Sizeof(C.int(0)))))
+	defer C.free(unsafe.Pointer(entered))
+	defer C.free(unsafe.Pointer(release))
+	if entered == nil || release == nil {
+		fmt.Println("FAIL: out of memory")
+		return
+	}
 	go func() {
 		b := new([256 << 10]byte)
 		b[0] = 42
 		runtime.AddCleanup(b, func(ch chan struct{}) { ch <- struct{}{} }, done)
-		res <- int32(C.slots_spin((*C.uchar)(unsafe.Pointer(&b[0])), C.uchar(42), C.ulonglong(200000000)))
+		res <- int32(C.slots_wait((*C.uchar)(unsafe.Pointer(&b[0])), C.uchar(42), (*C.int)(unsafe.Pointer(entered)), (*C.int)(unsafe.Pointer(release))))
 	}()
+	for atomic.LoadInt32(entered) == 0 {
+		time.Sleep(time.Millisecond)
+	}
+	before := slotsGCs()
+	runtime.GC()
+	during := slotsGCs() - before
+	if during < 1 {
+		atomic.StoreInt32(release, 1)
+		<-res
+		fmt.Println("FAIL: no GC cycle completed during the fast call")
+		return
+	}
+	atomic.StoreInt32(release, 1)
 	var code int32
 	select {
 	case code = <-res:
 	case <-time.After(60 * time.Second):
 		fmt.Println("FAIL: fast call did not return within 60s")
-		close(stop)
-		wg.Wait()
 		return
 	}
-	during := slotsGCs() - before
-	close(stop)
-	wg.Wait()
 	if code != 0 {
 		fmt.Println("FAIL: fast-call argument changed during collection")
-		return
-	}
-	if during < 2 {
-		fmt.Println("FAIL: no collection ran during the fast call")
 		return
 	}
 	deadline := time.Now().Add(30 * time.Second)

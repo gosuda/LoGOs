@@ -5,6 +5,7 @@
 package runtime_test
 
 import (
+	"internal/goexperiment"
 	"internal/testenv"
 	"runtime"
 	"testing"
@@ -91,6 +92,10 @@ func TestLogosFastCallStaysOnOriginalM(t *testing.T) {
 
 func TestLogosFastCgoFrameSlotsAreNotRoots(t *testing.T) {
 	testenv.MustHaveCGO(t)
+	t.Logf("logosfastcgo = %v", goexperiment.LogosFastCgo)
+	if !goexperiment.LogosFastCgo {
+		t.Skip("fast-call slot property is vacuous with GOEXPERIMENT=logosfastcgo off")
+	}
 	got := runTestProg(t, "testprogcgo", "LogosFastCgoSlotsNotRoots")
 	want := "OK\n"
 	if got != want {
