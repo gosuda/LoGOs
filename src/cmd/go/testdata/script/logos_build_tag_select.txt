@@ -1,0 +1,33 @@
+env GOTOOLCHAIN=local
+
+logos run .
+stdout '^tagged$'
+go run .
+stdout '^plain$'
+
+-- go.mod --
+module example.com/tagdiff
+
+go 1.27
+
+-- main.go --
+//go:build !logos
+
+package main
+
+import "fmt"
+
+func main() {
+	fmt.Println("plain")
+}
+
+-- tag_logos.go --
+//go:build logos
+
+package main
+
+import "fmt"
+
+func main() {
+	fmt.Println("tagged")
+}
