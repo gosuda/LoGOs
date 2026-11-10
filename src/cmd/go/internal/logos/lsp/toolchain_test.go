@@ -6,6 +6,7 @@ package lsp
 
 import (
 	"encoding/json"
+	"fmt"
 	"internal/testenv"
 	"os"
 	"path/filepath"
@@ -246,5 +247,55 @@ func TestToolchainHints(t *testing.T) {
 				t.Errorf("report sites = %+v, want one try site", report.Files[0].Sites)
 			}
 		})
+	}
+}
+
+func TestToolchainOneRunYieldsAllOutputs(t *testing.T) {
+	root, _ := realWorkspace(t)
+	scratch := t.TempDir()
+	logPath := filepath.Join(scratch, "argv.log")
+	wrapper := filepath.Join(scratch, "wrap.sh")
+	script := fmt.Sprintf("#!/bin/bash\nprintf '%%s\\n' \"$*\" >>%q\nexec -a logos %q \"$@\"\n", logPath, testenv.GoToolPath(t))
+	if err := os.WriteFile(wrapper, []byte(script), 0o777); err != nil {
+		t.Fatal(err)
+	}
+	tc := newToolchain(wrapper)
+	ctx := t.Context()
+	pkgDir := filepath.Join(root, "lmod", "a")
+	low, err := tc.Lower(ctx, pkgDir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(low.Files) != 1 || len(low.Files[0].Out) == 0 || len(low.Files[0].Map.Segments) == 0 {
+		t.Fatalf("lowering = %+v, want the one file with lowered text and an edit map", low)
+	}
+	diags, err := tc.Diagnose(ctx, pkgDir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(diags) != 0 {
+		t.Errorf("diagnostics of the good package = %+v, want none", diags)
+	}
+	hints, err := tc.Hints(ctx, pkgDir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var report struct {
+		SchemaVersion string `json:"schemaVersion"`
+		Package       string `json:"package"`
+	}
+	if err := json.Unmarshal(hints, &report); err != nil || report.Package != "example.com/lmod/a" {
+		t.Fatalf("hints = %s, %v, want the report for example.com/lmod/a", hints, err)
+	}
+	argv, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(argv)), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("Lower, Diagnose and Hints ran %d list invocations, want one: %q", len(lines), argv)
+	}
+	if !strings.Contains(lines[0], "-compiled") || !strings.Contains(lines[0], "-json") || !strings.Contains(lines[0], "-overlay=") {
+		t.Errorf("the one run was %q, want -compiled -json -overlay", lines[0])
 	}
 }
