@@ -402,13 +402,14 @@ func (s *Scanner) Fallback(dst any) {
 	s.fatal(err)
 }
 
-// FallbackQ decodes a fallback field carrying the `string` option: the
+// FallbackQ decodes a json.Number field carrying the `string` option: the
 // value must be a JSON string whose content is itself JSON, or null.
 // It unwraps the outer string before delegating to encoding/json, matching
-// encoding/json's destring branch which passes the inner content (e.g. 7,
-// not "7") to UnmarshalJSON. A bare non-string value saves the invalid
-// use of ,string error; null decodes as null (pointer nil, value
-// unchanged) via the same path as Fallback.
+// encoding/json's destring branch for Number. A bare non-string value saves
+// the invalid use of ,string error; null decodes as null (pointer nil, value
+// unchanged) via the same path as Fallback. A field whose type declares its
+// own UnmarshalJSON or UnmarshalText method must use Fallback instead, so the
+// method receives the raw token exactly as encoding/json delivers it.
 func (s *Scanner) FallbackQ(dst any) {
 	item, st := s.readQuoted()
 	switch st {

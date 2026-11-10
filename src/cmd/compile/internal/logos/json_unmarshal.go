@@ -115,8 +115,11 @@ func (js *jsonStruct) valueLines(f *jsonField) []string {
 		return js.unionLines(f, field)
 	case shapeFallback:
 		if f.quoted {
-			if isExactNumber(f.typ) || hasUnmarshalMethods(f.typ) {
+			if isExactNumber(f.typ) {
 				return []string{fmt.Sprintf("_logos_s.FallbackQ(&%s)", field)}
+			}
+			if hasUnmarshalMethods(f.typ) {
+				return []string{fmt.Sprintf("_logos_s.Fallback(&%s)", field)}
 			}
 			if kind, ok := fallbackScalarKind(f.typ); ok {
 				return js.fallbackQuotedValueLines(f, field, kind)
