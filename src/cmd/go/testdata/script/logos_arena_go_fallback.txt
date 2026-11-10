@@ -1,0 +1,42 @@
+# An escaping region use in a Go package falls back to the heap with a
+# perf::arena_fallback diagnostic, never a correctness::region_escape error.
+env GOPROXY=off
+env GOTOOLCHAIN=local
+env GOEXPERIMENT=logosarena
+
+cd m
+logos build -gcflags=-m .
+stderr 'main\.go:.*region fallback: value reaches global'
+! stderr 'region_escape'
+go build -gcflags=-m .
+stderr 'main\.go:.*region fallback: value reaches global'
+! stderr 'region_escape'
+logos run .
+stdout '^42$'
+go run .
+stdout '^42$'
+
+-- m/go.mod --
+module example.com/arenagofallback
+
+go 1.27
+
+-- m/main.go --
+package main
+
+import (
+	"fmt"
+
+	"logos/arena"
+)
+
+var saved *int
+
+func main() {
+	r := arena.Open()
+	p := arena.New[int](r)
+	*p = 42
+	saved = p
+	fmt.Println(*saved)
+	_ = r
+}
