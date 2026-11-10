@@ -25,10 +25,13 @@ type capturePiece struct {
 }
 
 type callPlan struct {
-	fun  capturePiece
-	args []capturePiece
-	dots bool
-	end  int
+	fun      capturePiece
+	args     []capturePiece
+	dots     bool
+	end      int
+	isMethod bool
+	recv     capturePiece
+	method   string
 }
 
 func typeFlagsOf(fc *funcLower, e syntax.Expr) (builtin, isType bool) {
@@ -67,10 +70,16 @@ func (fc *funcLower) planCall(call *syntax.CallExpr) (*callPlan, bool) {
 	if _, isType := typeFlagsOf(fc, call.Fun); isType {
 		return nil, false
 	}
-	fun.capture = !isBuiltinExpr(fc, call.Fun) && !genericTarget(fc, call.Fun)
 	fun.text = fl.textOf(span{start: fun.start, end: fun.end})
-	if fun.capture {
-		fun.single = fc.nextFun()
+	if recv, method, ok := fc.methodRecv(call); ok {
+		plan.isMethod = true
+		plan.recv = recv
+		plan.method = method
+	} else {
+		fun.capture = !isBuiltinExpr(fc, call.Fun) && !genericTarget(fc, call.Fun)
+		if fun.capture {
+			fun.single = fc.nextFun()
+		}
 	}
 	plan.fun = fun
 	if len(split.args) != len(call.ArgList) {
@@ -121,6 +130,29 @@ func genericTarget(fc *funcLower, fun syntax.Expr) bool {
 		return false
 	}
 	return sig.TypeParams().Len() > 0
+}
+
+func (fc *funcLower) methodRecv(call *syntax.CallExpr) (capturePiece, string, bool) {
+	fl := fc.fl
+	sel, ok := syntax.Unparen(call.Fun).(*syntax.SelectorExpr)
+	if !ok || sel.Sel == nil {
+		return capturePiece{}, "", false
+	}
+	info := fl.pkg.info
+	if info == nil {
+		return capturePiece{}, "", false
+	}
+	s, ok := info.Selections[sel]
+	if !ok || s.Kind() != types2.MethodVal {
+		return capturePiece{}, "", false
+	}
+	rspan := fl.receiverSpan(call)
+	recv := capturePiece{expr: sel.X, capture: true}
+	recv.start = rspan.start
+	recv.end = rspan.end
+	recv.text = fl.textOf(rspan)
+	recv.single = fc.nextFun()
+	return recv, sel.Sel.Value, true
 }
 
 type argClass int
@@ -198,11 +230,17 @@ func (fc *funcLower) planUses(plan *callPlan, tw *twin) (syntax.Expr, []syntax.E
 		}
 		return nameOf(piece.expr.Pos(), piece.single)
 	}
-	funNames := pieceNames(plan.fun)
-	fun := use(plan.fun, funNames)
+	var fun syntax.Expr
 	var args, names, vals []syntax.Expr
-	names = append(names, nameList(plan.fun)...)
-	vals = append(vals, valList(plan.fun, tw)...)
+	if plan.isMethod {
+		fun = selOf(plan.fun.expr.Pos(), use(plan.recv, pieceNames(plan.recv)), plan.method)
+		names = append(names, nameList(plan.recv)...)
+		vals = append(vals, valList(plan.recv, tw)...)
+	} else {
+		fun = use(plan.fun, pieceNames(plan.fun))
+		names = append(names, nameList(plan.fun)...)
+		vals = append(vals, valList(plan.fun, tw)...)
+	}
 	for _, piece := range plan.args {
 		var argNames []string
 		if piece.capture {
