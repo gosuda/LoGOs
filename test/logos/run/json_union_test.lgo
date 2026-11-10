@@ -385,25 +385,17 @@ type MixedHolder struct {
 	Item MixedUnion `json:"item"`
 }
 
-func TestUnionNonUsableMemberSkipsKeyRequirement(t *testing.T) {
+func TestUnionKeylessCustomGatedByClaim(t *testing.T) {
 	var h MixedHolder
-	err := json.Unmarshal([]byte(`{"item":{"r":1}}`), &h)
-	if err == nil {
-		t.Fatalf("expected ambiguity, got %T(%v)", h.Item, h.Item)
+	if err := json.Unmarshal([]byte(`{"item":{"r":1}}`), &h); err != nil {
+		t.Fatalf("keyed circle must win over keyless Anything, got error: %v", err)
 	}
-	msg := err.Error()
-	if !strings.Contains(msg, "MixedUnion") || !strings.Contains(msg, "Circle") || !strings.Contains(msg, "Anything") {
-		t.Fatalf("ambiguity error %q must name the union and both members", msg)
+	c, ok := h.Item.(Circle)
+	if !ok {
+		t.Fatalf("expected Circle, got %T: %#v", h.Item, h.Item)
 	}
-	var trialErr rt.UnionTrialError
-	if !errors.As(err, &trialErr) {
-		t.Fatalf("expected rt.UnionTrialError, got %T: %v", err, err)
-	}
-	if trialErr.Matched != 2 {
-		t.Fatalf("expected 2 matches (Circle by key, Anything without keys), got %d", trialErr.Matched)
-	}
-	if h.Item != nil {
-		t.Fatalf("failed trials left the target touched: %#v", h.Item)
+	if c.R != 1 {
+		t.Fatalf("expected Circle.R = 1, got %d", c.R)
 	}
 }
 

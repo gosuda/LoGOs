@@ -187,7 +187,7 @@ func (js *jsonStruct) unionLines(f *jsonField, field string) []string {
 	}
 	memberList := make([]memberKeys, len(members))
 	for i, m := range members {
-		memberList[i] = memberKeys{spell: types2.TypeString(m, qual)}
+		memberList[i] = memberKeys{spell: types2.TypeString(m, qual), custom: true}
 		elem := m
 		if ptr, ok := types2.Unalias(m).(*types2.Pointer); ok {
 			elem = ptr.Elem()
@@ -202,7 +202,7 @@ func (js *jsonStruct) unionLines(f *jsonField, field string) []string {
 		shapeOK := s.isStruct && s.st.NumFields() > 0 && s.bareName != ""
 		shapeOK = shapeOK && localPkg != nil && named.Obj().Pkg() != nil && localPkg.Path() == named.Obj().Pkg().Path()
 		s.usable = shapeOK && js.staticJSON[named]
-		s.custom = shapeOK && !s.usable
+		s.custom = !s.usable
 	}
 
 	var trials []string
@@ -314,11 +314,6 @@ func (js *jsonStruct) unionLines(f *jsonField, field string) []string {
 				trials = append(trials, fmt.Sprintf("\t\t_logos_custom_target = %s", scratch))
 				trials = append(trials, "\t}")
 			}
-		} else {
-			trials = append(trials, fmt.Sprintf("\tif %s.UnmarshalJSON(_logos_raw) == nil {", scratch))
-			trials = append(trials, "\t\t_logos_match++")
-			trials = append(trials, fmt.Sprintf("\t\t_logos_target = %s", scratch))
-			trials = append(trials, "\t}")
 		}
 		trials = append(trials, "}")
 	}

@@ -77,3 +77,41 @@ func TestKeyedSiblingWinsOverPermissive(t *testing.T) {
 		t.Fatalf("expected Side 2, got %v", s.Side)
 	}
 }
+
+type Loose struct {
+	Y int
+}
+
+func (l *Loose) UnmarshalJSON(b []byte) error {
+	return nil
+}
+
+type Sq struct {
+	S int64 `json:"s"`
+}
+
+type LooseSqUnion interface {
+	*Loose | *Sq
+}
+
+type LooseSqHolder struct {
+	X LooseSqUnion `json:"x"`
+}
+
+func TestClaimGateSkipsKeylessCustom(t *testing.T) {
+	var h LooseSqHolder
+	err := json.Unmarshal([]byte(`{"x":{"s":"x"}}`), &h)
+	if err == nil {
+		t.Fatalf("expected trial error, got %T(%v)", h.X, h.X)
+	}
+	var trialErr rt.UnionTrialError
+	if !errors.As(err, &trialErr) {
+		t.Fatalf("expected rt.UnionTrialError, got %T: %v", err, err)
+	}
+	if trialErr.Matched != 0 {
+		t.Fatalf("expected Matched 0, got %d", trialErr.Matched)
+	}
+	if h.X != nil {
+		t.Fatalf("failed trials left the target touched: %#v", h.X)
+	}
+}

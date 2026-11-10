@@ -33,9 +33,39 @@ type RawHolder struct {
 	S RawShape `json:"s"`
 }
 
-func TestRawMemberStaysAmbiguous(t *testing.T) {
+func TestRawMemberSelectsKeyedCircle(t *testing.T) {
 	var h RawHolder
-	err := json.Unmarshal([]byte(`{"s":{"radius":2}}`), &h)
+	if err := json.Unmarshal([]byte(`{"s":{"radius":2}}`), &h); err != nil {
+		t.Fatalf("keyed circle must win over keyless RawMessage, got error: %v", err)
+	}
+	c, ok := h.S.(*RawCircle)
+	if !ok {
+		t.Fatalf("expected *RawCircle, got %T: %#v", h.S, h.S)
+	}
+	if c.Radius != 2 {
+		t.Fatalf("expected Radius 2, got %v", c.Radius)
+	}
+}
+
+type Loose struct {
+	Y int
+}
+
+func (l *Loose) UnmarshalJSON(b []byte) error {
+	return nil
+}
+
+type RawLooseUnion interface {
+	json.RawMessage | *Loose
+}
+
+type RawLooseHolder struct {
+	S RawLooseUnion `json:"s"`
+}
+
+func TestTwoKeylessMembersStayAmbiguous(t *testing.T) {
+	var h RawLooseHolder
+	err := json.Unmarshal([]byte(`{"s":{"foo":1}}`), &h)
 	if err == nil {
 		t.Fatalf("expected ambiguity, got %T(%v)", h.S, h.S)
 	}
@@ -47,8 +77,8 @@ func TestRawMemberStaysAmbiguous(t *testing.T) {
 		t.Fatalf("expected Matched 2, got %d", trialErr.Matched)
 	}
 	msg := err.Error()
-	if !strings.Contains(msg, "RawShape") {
-		t.Fatalf("trial error %q must name union RawShape", msg)
+	if !strings.Contains(msg, "RawLooseUnion") {
+		t.Fatalf("trial error %q must name union RawLooseUnion", msg)
 	}
 	if h.S != nil {
 		t.Fatalf("failed trials left the target touched: %#v", h.S)
