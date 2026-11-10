@@ -11,8 +11,10 @@ type IOnly interface {
 }
 
 func convertNonMember(x float64) {
-	_ = U(x) // ERROR "union_nonmember"
+	_ = U(x) // ERROR "union_nonmember.*float64 is not a member"
 }
+
+func widenSub(s IOnly) U { return U(s) }
 
 func assertNonMember(u U) {
 	_ = u.(float64) // ERROR "union_nonmember"
@@ -62,4 +64,11 @@ func subUnion(u U) string {
 	case string => "s"
 	case nil => "nil"
 	}
+}
+
+func unboundedComparable() {
+	var w interface { // ERROR "open_union_value"
+		comparable
+	}
+	_ = w
 }
