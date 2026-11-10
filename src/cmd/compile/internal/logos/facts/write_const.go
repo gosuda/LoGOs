@@ -1072,6 +1072,9 @@ func (s *constBodyScan) doCall(call *syntax.CallExpr, escaping bool) {
 					s.doFuncCall(fn, recv, rargs, escaping)
 					return
 				}
+				if choice.Kind() == types2.FieldVal {
+					s.markMentionWrite(sel.X)
+				}
 			}
 		}
 		s.markArgs(call.ArgList)
@@ -1102,8 +1105,25 @@ func (s *constBodyScan) markMention(e syntax.Node) {
 			s.markClosure(lit.Body)
 			return false
 		}
+		if sel, ok := n.(*syntax.SelectorExpr); ok {
+			if s.markMethodValue(sel) {
+				return false
+			}
+		}
 		return true
 	})
+}
+
+func (s *constBodyScan) markMethodValue(sel *syntax.SelectorExpr) bool {
+	if s.info == nil {
+		return false
+	}
+	choice, ok := s.info.Selections[sel]
+	if !ok || choice == nil || choice.Kind() != types2.MethodVal {
+		return false
+	}
+	s.markMentionWrite(sel.X)
+	return true
 }
 
 func (s *constBodyScan) markClosure(body *syntax.BlockStmt) {
@@ -1131,6 +1151,11 @@ func (s *constBodyScan) scanReads(e syntax.Node) {
 		if lit, ok := n.(*syntax.FuncLit); ok {
 			s.markClosure(lit.Body)
 			return false
+		}
+		if sel, ok := n.(*syntax.SelectorExpr); ok {
+			if s.markMethodValue(sel) {
+				return false
+			}
 		}
 		return true
 	})

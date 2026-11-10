@@ -1,0 +1,126 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+env CGO_ENABLED=1
+mkdir $WORK/bin
+
+cd imp
+! logos build -o $WORK/bin/mv$GOEXE ./mvcell
+stderr 'const_view_mutation'
+stderr 'parameter c'
+! logos build -o $WORK/bin/fc$GOEXE ./fncall
+stderr 'const_view_mutation'
+stderr 'parameter h'
+cd ..
+
+-- dep/go.mod --
+module example.com/g2dep
+
+go 1.27
+
+-- dep/g2d/g2d.go --
+package g2d
+
+import (
+	"reflect"
+	"unsafe"
+)
+
+type Cell struct{ N int }
+type Host struct{ Data []byte }
+
+func (c *Cell) Tap(b []byte) { b[0] = byte(c.N); c.N = 99 }
+func MethodValue(c *Cell, b []byte) {
+	f := c.Tap
+	f(b)
+}
+
+type Box2 struct {
+	Data []byte
+	Fn   func()
+}
+
+var slot *Box2
+
+func NewBox2(b []byte) *Box2 { return &Box2{Data: b} }
+func ArmFn(h *Box2)          { h.Fn = func() { h.Data[0] = 95 }; slot = h }
+func CallFn(h *Box2)         { h.Fn() }
+
+func Inside(b []byte) []byte { b[0] = 93; return []byte{1, 2, 3} }
+func LenWrap(b []byte) int   { return len(Inside(b)) }
+func MinWrap(b []byte) int   { return int(min(Inside(b)[0], 3)) }
+
+func Tagged(xs ...[]byte) { xs[1][0] = 61 }
+
+func ReflectRead(b []byte) int {
+	return len(reflect.ValueOf(b).Slice(0, 1).Interface().([]byte))
+}
+
+// SAFETY: the pointer aliases the caller's slice, which stays live for
+// the whole call; only the address is taken.
+func UnsafeAddr(b []byte) uintptr { return uintptr(unsafe.Pointer(&b[0])) }
+
+func SumOnly(b []byte) int {
+	n := 0
+	for _, v := range b {
+		n += int(v)
+	}
+	return n
+}
+func ReadPtr(h *Host) int  { return len(h.Data) }
+func LenOnly(b []byte) int { return len(b) }
+func GoLen(b []byte)       { done := make(chan bool); go func() { _ = LenOnly(b); done <- true }(); <-done }
+func GotoSkip(b []byte) {
+	goto end
+	b[0] = 81
+end:
+}
+func FallIt(b []byte, k int) {
+	switch k {
+	case 0:
+		b[0] = 82
+		fallthrough
+	case 1:
+		b[1] = 83
+	}
+}
+func CpyAsSrc(dst []byte, src []byte) { copy(dst, src) }
+
+-- imp/go.mod --
+module example.com/g2imp
+
+go 1.27
+
+require example.com/g2dep v0.0.0
+
+replace example.com/g2dep => ../dep
+
+-- imp/logos.toml --
+[capabilities]
+transitive_unsafe_allowlist = ["example.com/g2dep/**"]
+
+-- imp/mvcell/main.lgo --
+package main
+
+import "example.com/g2dep/g2d"
+
+func main() {
+	cell := g2d.Cell{N: 3}
+	buf := []byte{1}
+	var cv const *g2d.Cell = &cell
+	g2d.MethodValue(cv, buf)
+	println(buf[0], cell.N)
+}
+
+-- imp/fncall/main.lgo --
+package main
+
+import "example.com/g2dep/g2d"
+
+func main() {
+	buf := []byte{1}
+	bx := g2d.NewBox2(buf)
+	g2d.ArmFn(bx)
+	var cv const *g2d.Box2 = bx
+	g2d.CallFn(cv)
+	println(buf[0])
+}
