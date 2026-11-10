@@ -14,6 +14,7 @@ stdout '^\[nm ct\]$'
 stdout 'a"b\\c'
 stdout '^\[g1 g2  \]$'
 stdout '^GET$'
+stdout '^tags match$'
 cp stdout $WORK/native.txt
 
 mkdir $WORK/orig
@@ -24,8 +25,6 @@ exists out/main.go
 
 ! grep '"comptime"' out/main.go
 ! grep 'Tag\.Get' out/main.go
-! grep '\.Get(' out/main.go
-
 cd out
 go run .
 cmp stdout $WORK/native.txt
@@ -49,6 +48,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"reflect"
 	"strconv"
 )
 
@@ -118,6 +118,33 @@ func tagKeys() []string {
 	return out
 }
 
+func tagString(tag reflect.StructTag, key string) string {
+	return tag.Get(key)
+}
+
+func tagOracle() []string {
+	const local = "custom"
+	var out []string
+	t := reflect.TypeOf(Multi{})
+	for i := range t.NumField() {
+		tag := t.Field(i).Tag
+		out = append(out, tagString(tag, multiKey))
+		out = append(out, tagString(tag, local))
+		out = append(out, tagString(tag, "x"+"ml"))
+		out = append(out, tagString(tag, "missing"))
+	}
+	return out
+}
+
+func tagImportedOracle() []string {
+	var out []string
+	t := reflect.TypeOf(Multi{})
+	for i := range t.NumField() {
+		out = append(out, tagString(t.Field(i).Tag, http.MethodGet))
+	}
+	return out
+}
+
 func tagImported() []string {
 	var out []string
 	const for _, f := range comptime.Fields[Multi]() {
@@ -125,7 +152,6 @@ func tagImported() []string {
 	}
 	return out
 }
-
 func main() {
 	fmt.Println(total("5"))
 	fmt.Println(total("z"))
@@ -134,4 +160,10 @@ func main() {
 	fmt.Println(tagKeys())
 	fmt.Println(tagImported())
 	fmt.Println(http.MethodGet)
+	folded := append(tagKeys(), tagImported()...)
+	oracle := append(tagOracle(), tagImportedOracle()...)
+	if fmt.Sprint(folded) != fmt.Sprint(oracle) {
+		panic("tag fold mismatch")
+	}
+	fmt.Println("tags match")
 }
