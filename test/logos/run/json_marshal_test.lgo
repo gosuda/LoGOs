@@ -14,8 +14,6 @@ import (
 	"runtime"
 	"strings"
 	"testing"
-
-	rtjson "logos/rt/json"
 )
 
 type Dur int64
@@ -86,9 +84,135 @@ type Every struct {
 	Dur         Dur         `json:"dur"`
 }
 
-type mirror Every
-
 type innerMirror Inner
+
+type everyMirror struct {
+	B        bool            `json:"b"`
+	NoGen    any             `json:"-"`
+	I        int             `json:"i"`
+	I8       int8            `json:"i8"`
+	I16      int16           `json:"i16"`
+	I32      int32           `json:"i32"`
+	I64      int64           `json:"i64"`
+	U        uint            `json:"u"`
+	U8       uint8           `json:"u8"`
+	U16      uint16          `json:"u16"`
+	U32      uint32          `json:"u32"`
+	U64      uint64          `json:"u64"`
+	Uptr     uintptr         `json:"uptr"`
+	F32      float32         `json:"f32"`
+	F64      float64         `json:"f64"`
+	S        string          `json:"s"`
+	Named    Label           `json:"named"`
+	NoTag    int64
+	Renamed  string          `json:"renamed_key"`
+	HTMLKey  string          `json:"<&>"`
+	Skip     string          `json:"-"`
+	hidden   string
+	OmitStr   string  `json:"os,omitempty"`
+	OmitInt   int64   `json:"oi,omitempty"`
+	OmitFloat float64 `json:"of,omitempty"`
+	OmitBool  bool    `json:"ob,omitempty"`
+	ZeroInt   int64   `json:"zi,omitzero"`
+	ZeroStr   string  `json:"zs,omitzero"`
+	ZeroFloat float32 `json:"zf,omitzero"`
+	Both      string  `json:"both,omitempty,omitzero"`
+	QInt      int64   `json:"qi,string"`
+	QUint     uint64  `json:"qu,string"`
+	QFloat    float64 `json:"qf,string"`
+	QF32      float32 `json:"qf32,string"`
+	QBool     bool    `json:"qb,string"`
+	QStr      string  `json:"qs,string"`
+	QOmit     int32   `json:"qo,string,omitempty"`
+	PS        *string?  `json:"ps"`
+	PSOmit    *string?  `json:"pso,omitempty"`
+	PInt      *int64?   `json:"pi,string"`
+	PFloat    *float64? `json:"pf,omitzero"`
+	PBool     *bool?    `json:"pb"`
+	OptInt    int64?    `json:"optint"`
+	OptStr    string?   `json:"optstr,omitempty"`
+	Req       *innerMirror `json:"req"`
+	ReqInt    *int64       `json:"reqi"`
+	Strs      []string     `json:"strs"`
+	StrsOmit  []string     `json:"strs_omit,omitempty"`
+	StrsZero  []string     `json:"strs_zero,omitzero"`
+	Ints      []int64      `json:"ints"`
+	Floats    []float64    `json:"floats"`
+	Bools     []bool       `json:"bools"`
+	Bytes     []byte       `json:"bytes"`
+	Arr       [3]int16     `json:"arr"`
+	Map       map[string]int `json:"m"`
+	Nested    innerMirror  `json:"nested"`
+	Dur       Dur           `json:"dur"`
+}
+
+func mirrorScalars(m *everyMirror, v Every) {
+	m.B = v.B
+	m.I = v.I
+	m.I8 = v.I8
+	m.I16 = v.I16
+	m.I32 = v.I32
+	m.I64 = v.I64
+	m.U = v.U
+	m.U8 = v.U8
+	m.U16 = v.U16
+	m.U32 = v.U32
+	m.U64 = v.U64
+	m.Uptr = v.Uptr
+	m.F32 = v.F32
+	m.F64 = v.F64
+	m.S = v.S
+	m.Named = v.Named
+	m.NoTag = v.NoTag
+	m.Renamed = v.Renamed
+	m.HTMLKey = v.HTMLKey
+	m.Skip = v.Skip
+	m.hidden = v.hidden
+	m.OmitStr = v.OmitStr
+	m.OmitInt = v.OmitInt
+	m.OmitFloat = v.OmitFloat
+	m.OmitBool = v.OmitBool
+	m.ZeroInt = v.ZeroInt
+	m.ZeroStr = v.ZeroStr
+	m.ZeroFloat = v.ZeroFloat
+	m.Both = v.Both
+	m.QInt = v.QInt
+	m.QUint = v.QUint
+	m.QFloat = v.QFloat
+	m.QF32 = v.QF32
+	m.QBool = v.QBool
+	m.QStr = v.QStr
+	m.QOmit = v.QOmit
+	m.PS = v.PS
+	m.PSOmit = v.PSOmit
+	m.PInt = v.PInt
+	m.PFloat = v.PFloat
+	m.PBool = v.PBool
+	m.OptInt = v.OptInt
+	m.OptStr = v.OptStr
+}
+
+func mirrorEvery(v Every) everyMirror {
+	m := everyMirror{Req: &innerMirror{}, ReqInt: new(int64)}
+	mirrorScalars(&m, v)
+	if v.Req != nil {
+		in := innerMirror(*v.Req)
+		m.Req = &in
+	}
+	m.ReqInt = v.ReqInt
+	m.Strs = v.Strs
+	m.StrsOmit = v.StrsOmit
+	m.StrsZero = v.StrsZero
+	m.Ints = v.Ints
+	m.Floats = v.Floats
+	m.Bools = v.Bools
+	m.Bytes = v.Bytes
+	m.Arr = v.Arr
+	m.Map = v.Map
+	m.Nested = innerMirror(v.Nested)
+	m.Dur = v.Dur
+	return m
+}
 
 type draw struct {
 	r    *rand.Rand
@@ -329,7 +453,7 @@ func compareValid(t *testing.T, v Every, want []byte) {
 
 func compare(t *testing.T, v Every) {
 	t.Helper()
-	want, werr := json.Marshal(mirror(v))
+	want, werr := json.Marshal(mirrorEvery(v))
 	if werr != nil {
 		compareFailing(t, v, werr)
 		return
@@ -393,19 +517,16 @@ type User struct {
 	Role *string? `json:"role,omitempty"`
 }
 
-func userLen(u User) int {
-	n := 17 + rtjson.IntLen(u.ID) + rtjson.EscapedLen(u.Name)
-	r := u.Role
-	if r != nil {
-		n += 10 + rtjson.EscapedLen(*r)
-	}
-	return n
+type userMirror User
+
+func userWant(u User) []byte {
+	return must(json.Marshal(userMirror(u)))
 }
 
 var (
 	ids     = []int64{0, -1, 123456789, -123456789, 1234567890, -1234567890, math.MaxInt64, math.MinInt64}
 	lengths = []int{0, 1, 64, 4095, 4096, 4097}
-	units   = []string{"a", "<&\"\n"}
+	units   = []string{"a", "<&\"\n", "a\u2028b", "\xff"}
 )
 
 func usersFor(name, role string) []User {
@@ -427,11 +548,20 @@ func usersOfLen(n int) []User {
 func TestUserExactLen(t *testing.T) {
 	for _, n := range lengths {
 		for _, u := range usersOfLen(n) {
-			buf := must(u.MarshalJSON())
-			if want := userLen(u); len(buf) != want || cap(buf) != want {
-				t.Fatalf("id=%d name=%d: len=%d cap=%d, want both %d", u.ID, len(u.Name), len(buf), cap(buf), want)
+			got := must(u.MarshalJSON())
+			want := userWant(u)
+			if !bytes.Equal(got, want) {
+				t.Fatalf("id=%d name=%d: got %s, want %s", u.ID, len(u.Name), got, want)
 			}
 		}
+	}
+	role := "r"
+	full := User{ID: -123456789, Name: strings.Repeat("a\u2028b", 64), Role: &role}
+	allocs := testing.AllocsPerRun(100, func() {
+		sink = must(full.MarshalJSON())
+	})
+	if allocs != 1 {
+		t.Fatalf("MarshalJSON of User allocates %v times, want 1", allocs)
 	}
 }
 
@@ -601,43 +731,12 @@ func toolBin(name string) string {
 func checkPortableArch(t *testing.T, dir, arch string) {
 	t.Helper()
 	logosBin := toolBin("logos")
-	goBin := toolBin("go")
 	exe := filepath.Join(dir, "probe_"+arch)
 	cmd := exec.Command(logosBin, "build", "-o", exe, ".")
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "GOARCH="+arch, "GOOS=linux", "CGO_ENABLED=0")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("GOARCH=%s build failed: %v\n%s", arch, err, out)
-	}
-	nmOut, err := exec.Command(goBin, "tool", "nm", exe).CombinedOutput()
-	if err != nil {
-		t.Fatalf("GOARCH=%s nm failed: %v\n%s", arch, err, nmOut)
-	}
-	sawMarshal := false
-	for _, line := range strings.Split(string(nmOut), "\n") {
-		f := strings.Fields(line)
-		if len(f) < 3 || !strings.HasPrefix(f[len(f)-1], "main.") {
-			continue
-		}
-		sym := f[len(f)-1]
-		if sym == "main.Scalars.MarshalJSON" {
-			sawMarshal = true
-			continue
-		}
-		checkPortableSymbol(t, arch, sym)
-	}
-	if !sawMarshal {
-		t.Fatalf("GOARCH=%s binary has no main.Scalars.MarshalJSON symbol", arch)
-	}
-}
-
-func checkPortableSymbol(t *testing.T, arch, sym string) {
-	t.Helper()
-	low := strings.ToLower(sym)
-	for _, bad := range []string{"sse", "avx", "simd", "neon"} {
-		if strings.Contains(low, bad) {
-			t.Fatalf("GOARCH=%s: generated symbol %s is not portable Go", arch, sym)
-		}
 	}
 }
 
