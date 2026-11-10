@@ -406,3 +406,60 @@ func TestUnionNonUsableMemberSkipsKeyRequirement(t *testing.T) {
 		t.Fatalf("failed trials left the target touched: %#v", h.Item)
 	}
 }
+
+var zeroCheckSawNonZero bool
+
+type ZeroCheck struct {
+	N int64 `json:"n"`
+}
+
+func (z *ZeroCheck) UnmarshalJSON(b []byte) error {
+	if *z != (ZeroCheck{}) {
+		zeroCheckSawNonZero = true
+	}
+	type plain ZeroCheck
+	return json.Unmarshal(b, (*plain)(z))
+}
+
+type Rejector struct {
+	R string `json:"r"`
+}
+
+type FreshUnion interface {
+	Rejector | ZeroCheck
+}
+
+type FreshHolder struct {
+	Item FreshUnion `json:"item"`
+}
+
+func TestUnionTrialsUseFreshScratch(t *testing.T) {
+	zeroCheckSawNonZero = false
+	var h FreshHolder
+	mustUnmarshal(t, []byte(`{"item":{"n":5}}`), &h)
+	zc, ok := h.Item.(ZeroCheck)
+	if !ok {
+		t.Fatalf("expected ZeroCheck, got %T: %#v", h.Item, h.Item)
+		return
+	}
+	if zc.N != 5 {
+		t.Fatalf("expected ZeroCheck.N = 5, got %d", zc.N)
+		return
+	}
+	if zeroCheckSawNonZero {
+		t.Fatal("ZeroCheck trial started from a non-zero scratch")
+		return
+	}
+	zeroCheckSawNonZero = false
+	var h2 FreshHolder
+	mustUnmarshal(t, []byte(`{"item":{"n":6}}`), &h2)
+	zc2, ok := h2.Item.(ZeroCheck)
+	if !ok || zc2.N != 6 {
+		t.Fatalf("expected ZeroCheck{N: 6}, got %T: %#v", h2.Item, h2.Item)
+		return
+	}
+	if zeroCheckSawNonZero {
+		t.Fatal("second ZeroCheck trial reused state from the first call")
+		return
+	}
+}
