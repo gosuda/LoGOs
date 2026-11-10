@@ -6,6 +6,9 @@ package syntax
 
 import (
 	"bytes"
+	"internal/testenv"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -688,5 +691,50 @@ func TestLogosContextualWordsPlainModeReject(t *testing.T) {
 	}
 	if _, ok := assigns[0].(*AssignStmt); !ok {
 		t.Fatalf("errdefer define: statement is %T, want *AssignStmt", assigns[0])
+	}
+}
+
+func TestLogosExampleValidSyntaxForms(t *testing.T) {
+	path := filepath.Join(testenv.GOROOT(t), "test", "logos", "example", "order_service.lgo")
+	src, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read example: %v", err)
+	}
+	var msgs []string
+	f, err := Parse(nil, bytes.NewReader(src), func(err error) {
+		msgs = append(msgs, err.Error())
+	}, nil, CheckBranches|LogosMode)
+	if err != nil {
+		t.Fatalf("parse example: %v", err)
+	}
+	if len(msgs) != 0 {
+		t.Fatalf("parse example: unexpected errors: %q", msgs)
+	}
+	var dotMap, blockLambda, ptrAssert int
+	Inspect(f, func(n Node) bool {
+		switch n := n.(type) {
+		case *SelectorExpr:
+			if n.Sel.Value == "map" {
+				dotMap++
+			}
+		case *LambdaExpr:
+			if _, ok := n.Body.(*BlockStmt); ok {
+				blockLambda++
+			}
+		case *AssertExpr:
+			if op, ok := n.Type.(*Operation); ok && op.Op == Mul && op.Y == nil {
+				ptrAssert++
+			}
+		}
+		return true
+	})
+	if dotMap == 0 {
+		t.Errorf("example has no leading-dot chain continuation")
+	}
+	if blockLambda == 0 {
+		t.Errorf("example has no block lambda")
+	}
+	if ptrAssert == 0 {
+		t.Errorf("example has no pointer assertion target")
 	}
 }
