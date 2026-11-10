@@ -169,6 +169,7 @@ func parseGeneratedDecls(text string, pos syntax.Pos) []syntax.Decl {
 	}
 	return decls
 }
+
 func (fl *fileLower) buildJSONStruct(name string, st *types2.Struct, fields []*types2.Var) *jsonStruct {
 	js := &jsonStruct{name: name, staticJSON: fl.pkg.info.LogosStaticJSON}
 

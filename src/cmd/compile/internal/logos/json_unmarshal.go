@@ -198,8 +198,7 @@ func (js *jsonStruct) unionLines(f *jsonField, field string) []string {
 		s.bareName = named.Obj().Name()
 		shapeOK := s.isStruct && s.st.NumFields() > 0 && s.bareName != ""
 		shapeOK = shapeOK && localPkg != nil && named.Obj().Pkg() != nil && localPkg.Path() == named.Obj().Pkg().Path()
-		declared := userDeclaresMethod(named, "UnmarshalJSON")
-		s.usable = shapeOK && !declared && js.staticJSON[named]
+		s.usable = shapeOK && js.staticJSON[named]
 		s.custom = shapeOK && !s.usable
 	}
 
@@ -218,6 +217,42 @@ func (js *jsonStruct) unionLines(f *jsonField, field string) []string {
 		trials = append(trials, "var _logos_custom int")
 		trials = append(trials, fmt.Sprintf("var _logos_custom_target %s", unionName))
 	}
+	hasKeyed := false
+	for _, s := range memberList {
+		if s.usable {
+			hasKeyed = true
+			break
+		}
+	}
+	needsClaim := hasCustom && hasKeyed
+	if needsClaim {
+		firstKeyed := ""
+		for _, s := range memberList {
+			if s.usable {
+				firstKeyed = s.bareName
+				break
+			}
+		}
+		var conds []string
+		for _, s := range memberList {
+			if !s.usable {
+				continue
+			}
+			conds = append(conds, fmt.Sprintf("_logos_jsonkey_%s(_logos_claim.Key()) >= 0 || _logos_jsonfold_%s(_logos_claim.FoldKey()) >= 0", s.bareName, s.bareName))
+		}
+		trials = append(trials, "var _logos_claimed bool")
+		trials = append(trials, "{")
+		trials = append(trials, fmt.Sprintf("\t_logos_claim := %s.NewScanner(_logos_raw, (*%s)(nil))", jsonAlias, firstKeyed))
+		trials = append(trials, "\tif _logos_claim.Object() {")
+		trials = append(trials, "\t\tfor _logos_claim.Next() {")
+		trials = append(trials, fmt.Sprintf("\t\t\tif %s {", strings.Join(conds, " || ")))
+		trials = append(trials, "\t\t\t\t_logos_claimed = true")
+		trials = append(trials, "\t\t\t}")
+		trials = append(trials, "\t\t\t_logos_claim.Skip()")
+		trials = append(trials, "\t\t}")
+		trials = append(trials, "\t}")
+		trials = append(trials, "}")
+	}
 
 	for i, m := range members {
 		scratch := fmt.Sprintf("_logos_scratch%d", i)
@@ -231,17 +266,16 @@ func (js *jsonStruct) unionLines(f *jsonField, field string) []string {
 		} else {
 			trials = append(trials, fmt.Sprintf("\tvar %s %s", scratch, s.spell))
 		}
-		trials = append(trials, fmt.Sprintf("\tif %s.UnmarshalJSON(_logos_raw) == nil {", scratch))
 		if hasKeyHelper {
-			trials = append(trials, "\t\t_logos_matched := false")
-			trials = append(trials, fmt.Sprintf("\t\t_logos_chk := %s.NewScanner(_logos_raw, (*%s)(nil))", jsonAlias, s.bareName))
-			trials = append(trials, "\t\tif _logos_chk.Object() {")
-			trials = append(trials, "\t\t\t_logos_matched = true")
-			trials = append(trials, "\t\t\t_logos_keys := 0")
-			trials = append(trials, "\t\t\tfor _logos_chk.Next() {")
-			trials = append(trials, fmt.Sprintf("\t\t\t\tif _logos_jsonkey_%s(_logos_chk.Key()) >= 0 || _logos_jsonfold_%s(_logos_chk.FoldKey()) >= 0 {", s.bareName, s.bareName))
-			trials = append(trials, "\t\t\t\t\t_logos_keys++")
-			trials = append(trials, "\t\t\t\t} else {")
+			trials = append(trials, "\t_logos_matched := false")
+			trials = append(trials, fmt.Sprintf("\t_logos_chk := %s.NewScanner(_logos_raw, (*%s)(nil))", jsonAlias, s.bareName))
+			trials = append(trials, "\tif _logos_chk.Object() {")
+			trials = append(trials, "\t\t_logos_matched = true")
+			trials = append(trials, "\t\t_logos_keys := 0")
+			trials = append(trials, "\t\tfor _logos_chk.Next() {")
+			trials = append(trials, fmt.Sprintf("\t\t\tif _logos_jsonkey_%s(_logos_chk.Key()) >= 0 || _logos_jsonfold_%s(_logos_chk.FoldKey()) >= 0 {", s.bareName, s.bareName))
+			trials = append(trials, "\t\t\t\t_logos_keys++")
+			trials = append(trials, "\t\t\t} else {")
 			for j, sib := range memberList {
 				if j == i || !sib.usable {
 					continue
@@ -250,25 +284,39 @@ func (js *jsonStruct) unionLines(f *jsonField, field string) []string {
 				trials = append(trials, "\t\t\t\t\t\t_logos_matched = false")
 				trials = append(trials, "\t\t\t\t\t}")
 			}
-			trials = append(trials, "\t\t\t\t}")
-			trials = append(trials, "\t\t\t\t_logos_chk.Skip()")
 			trials = append(trials, "\t\t\t}")
-			trials = append(trials, "\t\t\tif _logos_keys == 0 {")
-			trials = append(trials, "\t\t\t\t_logos_matched = false")
-			trials = append(trials, "\t\t\t}")
+			trials = append(trials, "\t\t\t_logos_chk.Skip()")
 			trials = append(trials, "\t\t}")
-			trials = append(trials, "\t\tif _logos_matched {")
+			trials = append(trials, "\t\tif _logos_keys == 0 {")
+			trials = append(trials, "\t\t\t_logos_matched = false")
+			trials = append(trials, "\t\t}")
+			trials = append(trials, "\t}")
+			trials = append(trials, "\tif _logos_matched {")
+			trials = append(trials, fmt.Sprintf("\t\tif %s.UnmarshalJSON(_logos_raw) == nil {", scratch))
 			trials = append(trials, "\t\t\t_logos_match++")
 			trials = append(trials, fmt.Sprintf("\t\t\t_logos_target = %s", scratch))
 			trials = append(trials, "\t\t}")
+			trials = append(trials, "\t}")
 		} else if hasCustom && s.custom {
-			trials = append(trials, "\t\t_logos_custom++")
-			trials = append(trials, fmt.Sprintf("\t\t_logos_custom_target = %s", scratch))
+			if needsClaim {
+				trials = append(trials, "\tif !_logos_claimed {")
+				trials = append(trials, fmt.Sprintf("\t\tif %s.UnmarshalJSON(_logos_raw) == nil {", scratch))
+				trials = append(trials, "\t\t\t_logos_custom++")
+				trials = append(trials, fmt.Sprintf("\t\t\t_logos_custom_target = %s", scratch))
+				trials = append(trials, "\t\t}")
+				trials = append(trials, "\t}")
+			} else {
+				trials = append(trials, fmt.Sprintf("\tif %s.UnmarshalJSON(_logos_raw) == nil {", scratch))
+				trials = append(trials, "\t\t_logos_custom++")
+				trials = append(trials, fmt.Sprintf("\t\t_logos_custom_target = %s", scratch))
+				trials = append(trials, "\t}")
+			}
 		} else {
+			trials = append(trials, fmt.Sprintf("\tif %s.UnmarshalJSON(_logos_raw) == nil {", scratch))
 			trials = append(trials, "\t\t_logos_match++")
 			trials = append(trials, fmt.Sprintf("\t\t_logos_target = %s", scratch))
+			trials = append(trials, "\t}")
 		}
-		trials = append(trials, "\t}")
 		trials = append(trials, "}")
 	}
 
