@@ -1,0 +1,24 @@
+// run
+
+package main
+
+import (
+	"errors"
+	"fmt"
+)
+
+var errSrc = errors.New("src")
+
+func fail3() (int, string, error) {
+	return 7, "seven", errSrc
+}
+
+func get() (int, string, error) {
+	a, b := fail3()?
+	return a, b, nil
+}
+
+func main() {
+	a, b, err := get()
+	fmt.Println(a, b == "", err == errSrc)
+}

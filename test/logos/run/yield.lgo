@@ -47,6 +47,17 @@ func Tracked(n int) iter.Seq[int] {
 	steps += 1000
 }
 
+func NilSeq() iter.Seq[int] {
+	return nil
+}
+
+func ReturnSeven(n int) iter.Seq[int] {
+	for i := range n {
+		yield i
+	}
+	return 7
+}
+
 func main() {
 	sum := 0
 	for v := range Count(5) {
@@ -72,4 +83,15 @@ func main() {
 	for d := range Durs() {
 		fmt.Println("dur:", d)
 	}
+	empty := 0
+	for v := range NilSeq() {
+		_ = v
+		empty++
+	}
+	fmt.Println("empty:", empty)
+	seven := 0
+	for v := range ReturnSeven(3) {
+		seven += v
+	}
+	fmt.Println("seven:", seven)
 }

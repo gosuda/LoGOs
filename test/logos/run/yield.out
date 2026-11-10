@@ -10,3 +10,5 @@ logged: 2
 glog: [start done]
 dur: 1s
 dur: 1m0s
+empty: 0
+seven: 3

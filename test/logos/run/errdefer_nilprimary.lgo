@@ -1,0 +1,28 @@
+// run
+
+package main
+
+import (
+	"errors"
+	"fmt"
+)
+
+var errRollback = errors.New("rollback")
+
+func rollbackFails() error { return errRollback }
+
+func nilPrimaryRollback() (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Println("recovered:", r)
+		}
+	}()
+	errdefer rollbackFails()?
+	panic("boom-nil")
+}
+
+func main() {
+	err := nilPrimaryRollback()
+	fmt.Println("is-rollback:", err == errRollback)
+	fmt.Println("matches:", errors.Is(err, errRollback))
+}

@@ -1,0 +1,19 @@
+// run
+
+package main
+
+import "fmt"
+
+type Cfg struct {
+	Port int = 8080
+	Host string = "localhost"
+}
+
+func main() {
+	a := Cfg{}
+	fmt.Println(a.Port, a.Host)
+	b := &Cfg{}
+	fmt.Println(b.Port, b.Host)
+	c := Cfg{Host: "x"}
+	fmt.Println(c.Port, c.Host)
+}

@@ -47,11 +47,33 @@ func argDefer() (err error) {
 	return nil
 }
 
+func firstFn() error {
+	fmt.Println("call: first")
+	return nil
+}
+
+func secondFn() error {
+	fmt.Println("call: second")
+	return errRecv
+}
+
+var fnVar = firstFn
+
+func rebindDefer() (err error) {
+	defer fnVar()?
+	fnVar = secondFn
+	return nil
+}
+
 func main() {
 	if err := recvDefer(); err != nil {
 		fmt.Println("fatal:", err)
 	}
 	if err := argDefer(); err != nil {
+		fmt.Println("fatal:", err)
+	}
+	fnVar = firstFn
+	if err := rebindDefer(); err != nil {
 		fmt.Println("fatal:", err)
 	}
 	if err := recvErrdefer(); err != nil {

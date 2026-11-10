@@ -15,6 +15,16 @@ go test -count=1 -O=2 .
 stdout '^ok'
 env REC_STACKBUF=
 env TIER_STACKBUF=
+env REC_STACKBUF=32
+env TIER_STACKBUF=32
+logos test -count=1 -O=1 .
+stdout '^ok'
+env REC_STACKBUF=
+env TIER_STACKBUF=
+logos test -a -x -O=0 -run TestNothingMatchesThis .
+! stderr 'variablemakethreshold'
+go test -a -x -O=0 -run TestNothingMatchesThis .
+! stderr 'variablemakethreshold'
 
 -- go.mod --
 module example.com/recstackbuf
