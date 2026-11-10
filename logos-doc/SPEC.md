@@ -10,7 +10,6 @@ The words MUST, MUST NOT, SHOULD, SHOULD NOT, and MAY follow RFC 2119. The text 
 ## 0. Architectural axioms and transpilation contract
 
 ### 0.1 Upstream compatibility
-The loGo/s toolchain MUST be one complete toolchain for Go packages and loGo/s packages [T-0.1][R-U1].
 Every optimization-level change MUST apply to Go packages and to loGo/s packages, under `logos` and under plain `go` [T-0.1][R-U1].
 Every cgo fallback MUST apply to Go packages and to loGo/s packages, under `logos` and under plain `go` [T-0.1][R-U1].
 Note: the toolchain aims to serve both package kinds across code generation, runtime, garbage collection, stack, SIMD, wasm, and tooling. Only the optimization-level and cgo-fallback breadth in the two sentences above is pinned by tests.
@@ -40,7 +39,7 @@ The tool MUST reject a module with both kinds with `correctness::mixed_module` [
 The `correctness::mixed_module` text MUST name the Go packages and the loGo/s packages [T-0.1][R-U3].
 A loGo/s package MAY import any Go package [T-0.1][R-U2].
 A Go package MAY import any loGo/s package, except as the next sentence states [T-0.1][R-U2].
-An import across kinds MUST NOT be an error, except the import of a dual-use union that Sec 2.3 names [T-0.1][R-U2].
+An import across kinds MUST NOT be an error [T-0.1][R-U2].
 Interop MUST work per import and MUST NOT need a package or a module that holds both kinds [T-0.1][R-U3].
 A Go declaration that a `.lgo` file imports MUST be a platform declaration per Sec 2.2 [T-0.1][T-202][A-STD][R-U2].
 See Sec 0.3 for the Go-facing signatures that a Go importer sees.
@@ -94,8 +93,6 @@ The lint registry enumerates the enforced lint rules [T-0.4].
 ### 1.1 RFC-101: File loader, Unicode normalization, and cgo policy
 The loader MUST recognize `.lgo` and the three alias extensions only in `logos` mode [T-101.1].
 The loader MUST strip trailing U+FE0E and U+FE0F from the extension before matching [T-101.1].
-NFC normalization MUST be the identity on all four extension strings [T-101.1].
-The loader MUST run no normalizer for extensions [T-101.1].
 Two files in one package whose names differ only by alias extension MUST fail the build [T-101.1].
 The tool MUST report that failure with `correctness::duplicate_stem_filename` [T-101.1].
 Module zips MUST reject alias extensions as non-letter symbols for publication [T-101.1].
@@ -113,7 +110,6 @@ The `[build] cgo` policy (`forbid`, `restricted`, `allow`) and its `forbid` defa
 A Go main module MUST keep the upstream default for `CGO_ENABLED` under `logos`, and a `cgo` key in its `logos.toml` MUST have no effect [T-101.2][R-U1].
 Plain `go` MUST keep the upstream default for `CGO_ENABLED` [T-101.2].
 With cgo off, `net` and `os/user` in the standard library MUST use their pure-Go paths [T-101.2].
-NFC normalization MUST be the identity on extension strings. [T-101.1]
 When the main module path's first element contains a dot, each alias-extension file MUST produce warning `portability::alias_extension`. [T-101.1][T-102]
 
 ### 1.2 RFC-102: Compiler linter and rule set
@@ -1578,7 +1574,6 @@ The buffer is returned to the caller, so it escapes to the heap. [T-Sec10]
 No size threshold and no caller buffer apply. [T-Sec10]
 The fast path calls no reflect. [T-Sec10]
 Only unmodeled fields fall back to reflective json.Marshal per field. [T-Sec10]
-Each string field is read once into a local. [T-Sec10]
 Concurrent mutation during marshal is a data race under Go's memory model; the generated body adds no synchronization. [T-Sec10]
 Escaping and float formatting MUST follow encoding/json under the active `goexperiment.jsonv2` setting with portable Go and no SIMD requirement. [T-Sec10]
 Supported tag options are name, omitempty, omitzero, string, and -. [T-Sec10]
@@ -1747,7 +1742,6 @@ buf := make([]Pixel, w * h)
 ```
 
 - An explicit `clear` of a slice MUST persist before return. [T-303]
-- Cache-line spacing MUST keep the upstream per-GOARCH `CacheLinePadSize` (64 on amd64, 128 on arm64) with no added padding. [T-303]
 
 ### 13.3 Long-loop preemption on wasm
 
