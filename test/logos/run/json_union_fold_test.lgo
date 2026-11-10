@@ -1,0 +1,159 @@
+// run
+
+package jsonunion
+
+import (
+	"encoding/json"
+	"errors"
+	"testing"
+
+	"logos/rt"
+)
+
+type FoldA struct {
+	Kind string `json:"kind"`
+	A    int64  `json:"a"`
+}
+
+type FoldB struct {
+	Kind string `json:"kind"`
+	B    int64  `json:"b"`
+}
+
+type FoldUnion interface {
+	FoldA | FoldB
+}
+
+type FoldHolder struct {
+	Item FoldUnion `json:"item"`
+}
+
+func foldUnionErr(t *testing.T, data string) rt.UnionTrialError {
+	t.Helper()
+	var h FoldHolder
+	err := json.Unmarshal([]byte(data), &h)
+	if err == nil {
+		t.Fatalf("expected trial error for %s, got %T(%v)", data, h.Item, h.Item)
+	}
+	var trialErr rt.UnionTrialError
+	if !errors.As(err, &trialErr) {
+		t.Fatalf("expected rt.UnionTrialError for %s, got %T: %v", data, err, err)
+	}
+	return trialErr
+}
+
+func TestFoldSharedKeyUpperMatchesBoth(t *testing.T) {
+	const data = `{"item":{"KIND":"x"}}`
+	var a FoldA
+	if err := json.Unmarshal([]byte(`{"KIND":"x"}`), &a); err != nil {
+		t.Fatalf("encoding/json rejects FoldA: %v", err)
+	}
+	var b FoldB
+	if err := json.Unmarshal([]byte(`{"KIND":"x"}`), &b); err != nil {
+		t.Fatalf("encoding/json rejects FoldB: %v", err)
+	}
+	if got := foldUnionErr(t, data); got.Matched != 2 {
+		t.Fatalf("expected Matched 2 for %s, got %d", data, got.Matched)
+	}
+}
+
+func TestFoldSharedKeyMixedMatchesBoth(t *testing.T) {
+	const data = `{"item":{"kInD":"x"}}`
+	var a FoldA
+	if err := json.Unmarshal([]byte(`{"kInD":"x"}`), &a); err != nil {
+		t.Fatalf("encoding/json rejects FoldA: %v", err)
+	}
+	var b FoldB
+	if err := json.Unmarshal([]byte(`{"kInD":"x"}`), &b); err != nil {
+		t.Fatalf("encoding/json rejects FoldB: %v", err)
+	}
+	if got := foldUnionErr(t, data); got.Matched != 2 {
+		t.Fatalf("expected Matched 2 for %s, got %d", data, got.Matched)
+	}
+}
+
+func TestFoldDistinctKeyDisqualifiesSibling(t *testing.T) {
+	const data = `{"item":{"KIND":"x","a":1}}`
+	var h FoldHolder
+	if err := json.Unmarshal([]byte(data), &h); err != nil {
+		t.Fatalf("sibling key must disqualify FoldB, got error: %v", err)
+	}
+	sel, ok := h.Item.(FoldA)
+	if !ok || sel.A != 1 {
+		t.Fatalf("expected FoldA{A:1}, got %T(%v)", h.Item, h.Item)
+	}
+}
+
+type FoldC struct {
+	Kind string `json:"kind"`
+	C    int64  `json:"c"`
+}
+
+type FoldD struct {
+	Kind string `json:"Kind"`
+	D    int64  `json:"d"`
+}
+
+type FoldCaseUnion interface {
+	FoldC | FoldD
+}
+
+type FoldCaseHolder struct {
+	Item FoldCaseUnion `json:"item"`
+}
+
+func TestFoldExactAgainstFoldSpelling(t *testing.T) {
+	const data = `{"item":{"kind":"x"}}`
+	var c FoldC
+	if err := json.Unmarshal([]byte(`{"kind":"x"}`), &c); err != nil {
+		t.Fatalf("encoding/json rejects FoldC: %v", err)
+	}
+	var d FoldD
+	if err := json.Unmarshal([]byte(`{"kind":"x"}`), &d); err != nil {
+		t.Fatalf("encoding/json rejects FoldD: %v", err)
+	}
+	var h FoldCaseHolder
+	err := json.Unmarshal([]byte(data), &h)
+	if err == nil {
+		t.Fatalf("expected trial error for %s, got %T(%v)", data, h.Item, h.Item)
+	}
+	var trialErr rt.UnionTrialError
+	if !errors.As(err, &trialErr) {
+		t.Fatalf("expected rt.UnionTrialError for %s, got %T: %v", data, err, err)
+	}
+	if trialErr.Matched != 2 {
+		t.Fatalf("expected Matched 2 for %s, got %d", data, trialErr.Matched)
+	}
+}
+
+type FoldE struct {
+	A int64 `json:"a"`
+}
+
+type FoldF struct {
+	B int64 `json:"b"`
+}
+
+type FoldSelectUnion interface {
+	FoldE | FoldF
+}
+
+type FoldSelectHolder struct {
+	Item FoldSelectUnion `json:"item"`
+}
+
+func TestFoldVariantKeySelectsMember(t *testing.T) {
+	const data = `{"item":{"A":7}}`
+	var e FoldE
+	if err := json.Unmarshal([]byte(`{"A":7}`), &e); err != nil || e.A != 7 {
+		t.Fatalf("encoding/json rejects FoldE: %v %#v", err, e)
+	}
+	var h FoldSelectHolder
+	if err := json.Unmarshal([]byte(data), &h); err != nil {
+		t.Fatalf("fold variant must select FoldE, got error: %v", err)
+	}
+	sel, ok := h.Item.(FoldE)
+	if !ok || sel.A != 7 {
+		t.Fatalf("expected FoldE{A:7}, got %T(%v)", h.Item, h.Item)
+	}
+}
