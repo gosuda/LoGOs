@@ -1,6 +1,7 @@
-# logos wasm back-edge stride keeps a call-free loop from starving peers
-# a lost yield hangs the node run until the test timeout: the timeout
-# is the failure signal, so only the fixed markers are asserted
+# logos wasm back-edge stride keeps a call-free loop from starving
+# peers: a lost yield must fail the step instead of hanging the suite,
+# so the run goes through timeout and only the fixed markers assert
+# the schedule.
 [!exec:node] skip 'node not in PATH'
 
 env GOPROXY=off
@@ -9,7 +10,7 @@ env GOOS=wasip1
 env GOARCH=wasm
 
 logos build -o $WORK/exe.wasm .
-exec node run.mjs $WORK/exe.wasm
+exec timeout 60 node run.mjs $WORK/exe.wasm
 stdout '^peer-ran$'
 stdout '^done$'
 
