@@ -5,11 +5,19 @@
 package facts
 
 import (
+	"cmd/compile/internal/base"
 	"cmd/compile/internal/syntax"
 	"cmd/compile/internal/types2"
 )
 
+func nilErrDriven() bool {
+	return base.LogosCfg != "" || base.LogosLintOnly || base.LogosAllocFacts
+}
+
 func writeNilErrors(pkg *types2.Package, info *types2.Info, files []*syntax.File, f *Facts) {
+	if !nilErrDriven() {
+		return
+	}
 	set := AlwaysNilErrorSet(pkg, info, files)
 	if len(set) == 0 {
 		return

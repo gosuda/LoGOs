@@ -6,6 +6,26 @@ logos build ./...
 ! stderr 'discarded_error'
 cd ..
 
+cd m/a
+logos build -o $WORK/a.a .
+cd ..
+cd ..
+go tool pack p $WORK/a.a __.LOGOS
+stdout 'AlwaysNilError'
+! stdout '^lang go$'
+
+cd g
+logos build -o $WORK/g.a .
+cd ..
+go tool pack p $WORK/g.a __.LOGOS
+stdout '^fn AlwaysNil AlwaysNilError$'
+stdout '^lang go$'
+
+cd g
+go build -o $WORK/g-plain.a .
+cd ..
+! go tool pack p $WORK/g-plain.a __.LOGOS
+
 cp bad.txt m/a/a.lgo
 cd m
 ! logos build ./...
@@ -31,6 +51,18 @@ import "example.com/m/a"
 
 func Use() {
 	a.AlwaysNil()
+}
+
+-- g/go.mod --
+module example.com/g
+
+go 1.27
+
+-- g/g.go --
+package g
+
+func AlwaysNil() error {
+	return nil
 }
 
 -- bad.txt --
