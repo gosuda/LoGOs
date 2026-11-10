@@ -19,6 +19,15 @@ stdout 'exitsyscall'
 ! stdout 'clock_gettime'
 ! stdout 'monotonic'
 
+logos build -o logosapp$GOEXE .
+exec ./logosapp$GOEXE
+stdout '^sum42$'
+
+go tool objdump -s 'runtime\.logosCgocallFast' logosapp$GOEXE
+stdout 'reentersyscall'
+stdout 'asmcgocall'
+stdout 'exitsyscall'
+
 -- go.mod --
 module example.com/fastcallseq
 
