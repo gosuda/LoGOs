@@ -17,3 +17,20 @@ func tooLargeReduce(a [16]float64) {
 func badShapeReduce(a [6]int32) {
 	_ = a.sum() // ERROR "simd_array_shape"
 }
+
+func tooLargeWord(a [16]int, b [16]int) {
+	_ = a + b // ERROR "simd_array_too_large"
+}
+
+func tooLargeWordReduce(p [16]uintptr) {
+	_ = p.sum() // ERROR "simd_array_too_large"
+}
+
+func wordLaneOK(a [8]int, b [8]int) {
+	_ = a + b
+	_ = a.sum()
+}
+
+func complexExcluded(a [2]complex128, b [2]complex128) {
+	_ = a + b // ERROR "operator \+ not defined"
+}
