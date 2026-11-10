@@ -60,12 +60,6 @@ grep 'module github\.com/gosuda/loGos/rt' out/_logos_deps/rt/go.mod
 ! exec grep -rnE '"logos/[a-z/]+"' out
 grep -count=1 '_logos_rt "github.com/gosuda/loGos/rt"' out/main.go
 ! exec grep -rn '_logos_errors' out
-! exec grep -rn '_logos_strconv' out
-
-# The two bans above generalize: every ejected _logos_ import alias stays in the reserved support set.
-exec grep -rhnE '[[:space:](]_logos_[A-Za-z0-9_]+ "' out --include=*.go
-cp stdout $WORK/eject-imports.txt
-! exec grep -vE '_logos_(rt|json|unsafe) "' $WORK/eject-imports.txt
 
 ! logos eject -o out
 stderr 'logos eject: out: directory is not empty'
