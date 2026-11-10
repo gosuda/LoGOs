@@ -1,0 +1,43 @@
+// run
+
+package main
+
+import "fmt"
+
+type RO interface {
+	const Name string
+	const Start() error
+}
+
+type Gadget struct : RO {
+	Name string
+}
+
+func (m Gadget) Start() error {
+	return nil
+}
+
+var _ RO = Gadget{}
+
+func use(c RO) string {
+	return c.Name
+}
+
+type Starter interface {
+	const Start() error
+}
+
+var _ Starter = Gadget{}
+
+func fromStarter(s Starter) string {
+	return s.(RO).Name
+}
+
+func main() {
+	m := Gadget{Name: "g"}
+	var r RO = m
+	fmt.Println(use(m))
+	fmt.Println(r.Name)
+	fmt.Println(fromStarter(m))
+	fmt.Println(r.Start() == nil)
+}

@@ -66,7 +66,13 @@ func (check *Checker) logosConstAssign(x *operand, T Type, context string) bool 
 		if qiface := logosQualifiedIface(T); qiface != nil && x.isValid() && !x.isNil() && T != nil {
 			if Vu := Unalias(x.typ()); Vu != nil && !isTypeParam(Vu) {
 				var cause string
-				if !check.hasAllMethodsAt(Vu, T, true, Identical, &cause, x.Pos()) {
+				ok := false
+				if logosPropertyInterface(T) != nil {
+					ok = check.implements(Vu, T, false, &cause)
+				} else {
+					ok = check.hasAllMethodsAt(Vu, T, true, Identical, &cause, x.Pos())
+				}
+				if !ok {
 					if cause != "" {
 						check.errorf(x, InvalidIfaceAssign, "cannot use %s as %s value in %s: %s", x, T, context, cause)
 					} else {
