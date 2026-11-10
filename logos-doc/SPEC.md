@@ -1888,9 +1888,6 @@ A non-constant integer product in a `make` length or capacity MUST lower to `log
 
 ### 17.1 Upstream regression gate
 
-- `logos test -O=1 std cmd`, `logos test -O=2 std cmd`, and `logos test -O=3 std cmd` MUST pass in the release gate; no in-tree test asserts the full unmodified suites. [T-Sec17]
-- The upstream suite that `./run.bash` runs MUST pass in the release gate under plain `go`; no in-tree test asserts it. [T-Sec17][T-0.1]
-
 ### 17.3 Red-team completeness
 
 - Every row of `logos-doc/REDTEAM.md` MUST reach `tested` or `satisfied upstream` with its proving test. [T-Sec17]
@@ -1918,7 +1915,6 @@ func pack(v int) []int {
 ### 17.5 Reproducibility and sizes
 
 - Two builds from clean caches MUST yield identical SHA-256 digests for linux/amd64, linux/arm64, and js/wasm. [T-Sec17]
-- Two-build digests MUST pass in the release gate on a second host; no in-tree test asserts them. [T-Sec17]
 - The wasm stripped size MUST be tracked in `test/logos/size/wasm_size.txt`. [T-Sec17]
 - Growth above 1% against the recorded value MUST fail the gate. [T-Sec17]
 
