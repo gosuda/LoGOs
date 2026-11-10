@@ -311,6 +311,24 @@ func TestGoPackageRecord(t *testing.T) {
 	}
 }
 
+func TestGoPackageRecordSingular(t *testing.T) {
+	fp := goobj.FingerprintType{1, 2, 3, 4, 5, 6, 7, 8}
+	enc := string(facts.Encode(fp, &facts.Facts{GoPackage: true}))
+	n := 0
+	for line := range strings.SplitSeq(enc, "\n") {
+		if line == "lang go" {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("Encode holds %d lang go records, want 1:\n%s", n, enc)
+	}
+	dup := "logos-facts 3\nfingerprint 0102030405060708\nlang go\nlang go\n"
+	if _, err := facts.Decode([]byte(dup)); err == nil {
+		t.Fatalf("Decode accepted two lang go records, want rejection")
+	}
+}
+
 func TestMayYieldOnly(t *testing.T) {
 	for name, c := range map[string]struct {
 		fn   facts.FnFact
