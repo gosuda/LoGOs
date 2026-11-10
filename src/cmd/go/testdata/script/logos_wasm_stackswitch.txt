@@ -33,6 +33,7 @@ logos build -wasm-features=stack-switching -gcflags=-S=2 -o $WORK/switch.wasm .
 ! stderr '(?s)main\.pureSum<1> STEXT[^\n]*\n(\t[^\n]*\n)*\t[^\n]*\t(BrTable|ContNew|Resume)'
 stderr 'main\.main<1> STEXT[^\n]*\n(\t[^\n]*\n)*\t[^\n]*\tBrTable'
 stderr '(?s)main\.pureCond<1> STEXT[^\n]*\n(\t[^\n]*\n)*\t[^\n]*\tBrTable'
+stderr 'main\.goschedwrap<1> STEXT[^\n]*\n(\t[^\n]*\n)*\t[^\n]*\tBrTable'
 
 go build -wasm-features=stack-switching -gcflags=-S=2 -o $WORK/gobuild-asm.wasm .
 ! stderr '(?s)main\.waits<1> STEXT[^\n]*\n(\t[^\n]*\n)*\t[^\n]*\tBrTable'
@@ -41,6 +42,7 @@ go build -wasm-features=stack-switching -gcflags=-S=2 -o $WORK/gobuild-asm.wasm 
 stderr 'main\.main<1> STEXT[^\n]*\n(\t[^\n]*\n)*\t[^\n]*\tBrTable'
 stderr '(?s)main\.pureCond<1> STEXT[^\n]*\n(\t[^\n]*\n)*\t[^\n]*\tBrTable'
 
+stderr '(?s)main\.goschedwrap<1> STEXT[^\n]*\n(\t[^\n]*\n)*\t[^\n]*\tBrTable'
 go build -gcflags=-S=2 -o $WORK/gobuild-plain.wasm .
 stderr '(?s)main\.waits<1> STEXT[^\n]*\n(\t[^\n]*\n)*\t[^\n]*\tBrTable'
 stderr '(?s)main\.pureLeaf<1> STEXT[^\n]*\n(\t[^\n]*\n)*\t[^\n]*\tBrTable'
@@ -100,6 +102,11 @@ func waits() int {
 	return <-c
 }
 
+//go:noinline
+func goschedwrap() {
+	runtime.Gosched()
+}
+
 func grow(n int) int {
 	var buf [256]byte
 	buf[n%256] = byte(n)
@@ -122,6 +129,7 @@ func main() {
 	fmt.Println(grow(2000))
 	c := make(chan int, 1)
 	go func() { c <- 7 }()
+	goschedwrap()
 	switches++
 	runtime.Gosched()
 	fmt.Println(<-c)
