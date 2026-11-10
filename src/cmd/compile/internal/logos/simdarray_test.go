@@ -105,3 +105,47 @@ func TestSimdArrayVectorScalarForms(t *testing.T) {
 		}
 	})
 }
+
+func TestSimdArrayOpGuardElision(t *testing.T) {
+	cases := []struct {
+		arr    string
+		op     string
+		level  int
+		guard  string
+		scalar bool
+	}{
+		{"[4]float32", "+", 1, "_logos_simd.X86.AVX()", true},
+		{"[4]float32", "+", 3, "", false},
+		{"[4]float32", "+", 4, "", false},
+		{"[8]uint32", "*", 1, "_logos_simd.X86.AVX2()", true},
+		{"[8]uint32", "*", 3, "", false},
+		{"[8]uint32", "*", 4, "", false},
+	}
+	for _, c := range cases {
+		t.Run(c.arr+"/"+c.op+"/v"+strconv.Itoa(c.level), func(t *testing.T) {
+			simdSliceTarget(t, "amd64", c.level)
+			out := lowerArrayOp(t, "", c.arr, c.op)
+			if c.guard != "" && !strings.Contains(out, "if "+c.guard+" {") {
+				t.Errorf("guard is not %q:\n%s", c.guard, out)
+			}
+			if got := strings.Contains(out, "_logos_simd.X86."); got != (c.guard != "") {
+				t.Errorf("guard present=%v, want %v:\n%s", got, c.guard != "", out)
+			}
+			if got := strings.Contains(out, "_logos_a[0]"); got != c.scalar {
+				t.Errorf("scalar fallback present=%v, want %v:\n%s", got, c.scalar, out)
+			}
+		})
+	}
+	for _, c := range [][2]string{{"[4]float32", "+"}, {"[8]uint32", "*"}} {
+		t.Run(c[0]+"/"+c[1]+"/arm64", func(t *testing.T) {
+			simdSliceTarget(t, "arm64", 1)
+			out := lowerArrayOp(t, "", c[0], c[1])
+			if !strings.Contains(out, "archsimd") {
+				t.Errorf("arm64 array misses the vector form:\n%s", out)
+			}
+			if strings.Contains(out, "_logos_simd.X86.") {
+				t.Errorf("arm64 array carries an X86 guard:\n%s", out)
+			}
+		})
+	}
+}
