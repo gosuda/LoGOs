@@ -16,7 +16,8 @@ cd ..
 
 cd view/imp
 ! logos build ./...
-stderr 'const_view_mutation'
+stderr 'main\.lgo:10:.*const_view_mutation'
+stderr 'main\.lgo:11:.*const_view_mutation'
 cd ../..
 
 
