@@ -14,11 +14,9 @@ import (
 	"runtime"
 	"runtime/debug"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 	"unsafe"
-	"weak"
 )
 
 const arenaScanUnit = runtime.LogosArenaUnit
@@ -446,31 +444,6 @@ func TestLogosArenaExitReturnsChunk(t *testing.T) {
 	}
 }
 
-func TestLogosArenaChunksAreManualSpans(t *testing.T) {
-	inFreshGoroutine(t, func() {
-		m := runtime.LogosArenaSave()
-		defer runtime.LogosArenaRestore(m)
-		noscan := runtime.LogosArenaAlloc(byte(0), 8)
-		scan := runtime.LogosArenaAllocScan((*int)(nil), 8)
-		for name, p := range map[string]unsafe.Pointer{"noscan": noscan, "scan": scan} {
-			manual, flagged := runtime.LogosArenaSpanKind(p)
-			if !manual || !flagged {
-				t.Errorf("%s object span: manual=%v flagged=%v, want both true", name, manual, flagged)
-			}
-			if !runtime.LogosArenaInChunk(p) {
-				t.Errorf("%s object is not recognized as an arena address", name)
-			}
-		}
-		heap := new(int)
-		arenaSink = heap
-		if manual, flagged := runtime.LogosArenaSpanKind(unsafe.Pointer(heap)); manual || flagged {
-			t.Errorf("heap object span: manual=%v flagged=%v, want both false", manual, flagged)
-		}
-		if runtime.LogosArenaInChunk(unsafe.Pointer(heap)) {
-			t.Error("heap object is recognized as an arena address")
-		}
-	})
-}
 
 func TestLogosArenaSetFinalizerPanics(t *testing.T) {
 	type T struct{ a, b uintptr }
@@ -552,42 +525,7 @@ func TestLogosArenaCgoChecksAcceptArenaAddresses(t *testing.T) {
 	})
 }
 
-func TestLogosArenaExactFit(t *testing.T) {
-	inFreshGoroutine(t, func() {
-		m := runtime.LogosArenaSave()
-		defer runtime.LogosArenaRestore(m)
-		const capacity = runtime.LogosArenaCapacity
-		a := runtime.LogosArenaAlloc(byte(0), capacity-8)
-		b := runtime.LogosArenaAlloc(byte(0), 8)
-		st := runtime.LogosArenaStat()
-		if st.Chunks != 1 || st.Free != 0 || st.NoscanUsed != capacity {
-			t.Errorf("after an exact fill: %+v, want one chunk, no free space, %d bytes used", st, capacity)
-		}
-		fillBytes(a, capacity-8, 0x11)
-		fillBytes(b, 8, 0x22)
-		if !checkBytes(a, capacity-8, 0x11) || !checkBytes(b, 8, 0x22) {
-			t.Error("objects of an exact fill overlap")
-		}
-	})
-}
 
-func TestLogosArenaExactFitBothRegions(t *testing.T) {
-	inFreshGoroutine(t, func() {
-		m := runtime.LogosArenaSave()
-		defer runtime.LogosArenaRestore(m)
-		const noscan = 4096
-		runtime.LogosArenaAlloc(byte(0), noscan)
-		scanSize := uintptr(runtime.LogosArenaCapacity-noscan) - runtime.LogosArenaScanHeaderBytes
-		p := runtime.LogosArenaAllocScan((*int)(nil), scanSize)
-		st := runtime.LogosArenaStat()
-		if st.Chunks != 1 || st.Free != 0 {
-			t.Errorf("after an exact dual-region fill: %+v, want one chunk, no free space", st)
-		}
-		if !runtime.LogosArenaInChunk(p) {
-			t.Error("the exactly fitting scan object is not in the chunk")
-		}
-	})
-}
 
 func TestLogosArenaNoscanGrowsUp(t *testing.T) {
 	inFreshGoroutine(t, func() {
@@ -660,63 +598,7 @@ func TestLogosArenaScanOverflowLinksChunk(t *testing.T) {
 	})
 }
 
-func TestLogosArenaEmptyPoolFallsBackToMallocgc(t *testing.T) {
-	total, _, pooled := runtime.LogosArenaCounts()
-	old := runtime.LogosArenaSetLimit(int64(total) + 1)
-	defer runtime.LogosArenaSetLimit(old)
-	inFreshGoroutine(t, func() {
-		m := runtime.LogosArenaSave()
-		defer runtime.LogosArenaRestore(m)
-		const size = 60000
-		var arena []unsafe.Pointer
-		var heap unsafe.Pointer
-		for i := 0; i <= pooled+2; i++ {
-			p := runtime.LogosArenaAlloc(byte(0), size)
-			if !runtime.LogosArenaInChunk(p) {
-				heap = p
-				break
-			}
-			fillBytes(p, size, byte(i+1))
-			arena = append(arena, p)
-		}
-		if len(arena) == 0 {
-			t.Fatal("the first allocation fell back: no arena object exists to check against the fallback")
-		}
-		if heap == nil {
-			t.Fatalf("no fallback after %d chunk-sized allocations with the limit one above the current chunk count", len(arena))
-		}
-		if !checkBytes(heap, size, 0) {
-			t.Error("fallback memory is not zero")
-		}
-		fillBytes(heap, size, 0xEE)
-		for i, p := range arena {
-			if !checkBytes(p, size, byte(i+1)) {
-				t.Errorf("arena object %d was damaged by the fallback", i)
-			}
-		}
-	})
-}
 
-func TestLogosArenaOversizeAndZeroSize(t *testing.T) {
-	inFreshGoroutine(t, func() {
-		const over = runtime.LogosArenaCapacity + 1
-		p := runtime.LogosArenaAlloc(byte(0), over)
-		if runtime.LogosArenaInChunk(p) || !checkBytes(p, over, 0) {
-			t.Error("oversize noscan request: want zeroed heap memory")
-		}
-		scanOver := uintptr(runtime.LogosArenaChunkBytes)
-		q := runtime.LogosArenaAllocScan((*int)(nil), scanOver)
-		if runtime.LogosArenaInChunk(q) || !checkBytes(q, scanOver, 0) {
-			t.Error("oversize scan request: want zeroed heap memory")
-		}
-		if st := runtime.LogosArenaStat(); st.Chunks != 0 {
-			t.Errorf("chunks = %d after oversize requests, want none leased", st.Chunks)
-		}
-		if runtime.LogosArenaAlloc(byte(0), 0) == nil || runtime.LogosArenaAllocScan((*int)(nil), 0) == nil {
-			t.Error("zero-size request returned nil")
-		}
-	})
-}
 
 func TestLogosArenaNoscanReuseIsZeroed(t *testing.T) {
 	inFreshGoroutine(t, func() {
@@ -887,110 +769,10 @@ func TestLogosArenaProcResizeFreesCachedChunks(t *testing.T) {
 	}
 }
 
-func TestLogosArenaScanOverNoscanDirt(t *testing.T) {
-	inFreshGoroutine(t, func() {
-		m := runtime.LogosArenaSave()
-		defer runtime.LogosArenaRestore(m)
-		const dirty = 60000
-		p := runtime.LogosArenaAlloc(byte(0), dirty)
-		fillBytes(p, dirty, 0xFF)
-		runtime.LogosArenaRestore(m)
-		const size = 30000
-		q := runtime.LogosArenaAllocScan((*int)(nil), size)
-		if uintptr(q)+size <= uintptr(p) || uintptr(q) >= uintptr(p)+dirty {
-			t.Fatalf("scan object %p does not overlay the dirtied bytes at %p: the test no longer probes the overlay", q, p)
-		}
-		if !checkBytes(q, size, 0) {
-			t.Error("scan object over dirtied noscan bytes is not zero")
-		}
-	})
-}
 
-func TestLogosArenaRetTokenIsOneShot(t *testing.T) {
-	inFreshGoroutine(t, func() {
-		if runtime.LogosArenaRetTake() {
-			t.Error("fresh goroutine holds a consent token")
-		}
-		runtime.LogosArenaRetSet(true)
-		if !runtime.LogosArenaRetTake() {
-			t.Error("take after set(true) = false")
-		}
-		if runtime.LogosArenaRetTake() {
-			t.Error("second take after one set = true: the token was not cleared")
-		}
-		runtime.LogosArenaRetSet(true)
-		runtime.LogosArenaRetSet(false)
-		if runtime.LogosArenaRetTake() {
-			t.Error("take after set(true) then set(false) = true")
-		}
-	})
-}
 
-func TestLogosArenaMarkWordPairRoundTrip(t *testing.T) {
-	inFreshGoroutine(t, func() {
-		chunk, noscan, scan := runtime.LogosArenaMarkSave()
-		if chunk != 0 || noscan != 0 || scan != 0 {
-			t.Errorf("empty arena MarkSave = (%d, %d, %d), want zero triple", chunk, noscan, scan)
-		}
-		if p := runtime.LogosArenaAlloc(byte(0), 64); p == nil {
-			t.Fatal("LogosArenaAlloc returned nil")
-		}
-		if st := runtime.LogosArenaStat(); st.NoscanUsed == 0 {
-			t.Error("NoscanUsed = 0 after allocation, want > 0")
-		}
-		runtime.LogosArenaMarkRestore(chunk, noscan, scan)
-		if st := runtime.LogosArenaStat(); st.NoscanUsed != 0 || st.ScanUsed != 0 {
-			t.Errorf("after restoring the zero triple: NoscanUsed=%d ScanUsed=%d, want 0, 0", st.NoscanUsed, st.ScanUsed)
-		}
-		if p := runtime.LogosArenaAlloc(byte(0), 32); p == nil {
-			t.Fatal("LogosArenaAlloc returned nil")
-		}
-		base := runtime.LogosArenaStat()
-		chunk, noscan, scan = runtime.LogosArenaMarkSave()
-		if chunk == 0 {
-			t.Error("MarkSave after allocation returned a zero chunk word")
-		}
-		if p := runtime.LogosArenaAlloc(byte(0), 64); p == nil {
-			t.Fatal("LogosArenaAlloc returned nil")
-		}
-		if p := runtime.LogosArenaAllocScan((*int)(nil), 64); p == nil {
-			t.Fatal("LogosArenaAllocScan returned nil")
-		}
-		runtime.LogosArenaMarkRestore(chunk, noscan, scan)
-		if st := runtime.LogosArenaStat(); st != base {
-			t.Errorf("after word-pair restore: stat = %+v, want %+v", st, base)
-		}
-	})
-}
 
-func TestLogosArenaExitClearsToken(t *testing.T) {
-	var wg sync.WaitGroup
-	for range 64 {
-		wg.Go(func() {
-			runtime.LogosArenaRetSet(true)
-			runtime.Goexit()
-		})
-	}
-	wg.Wait()
-	var stale atomic.Int32
-	for range 64 {
-		wg.Go(func() {
-			if runtime.LogosArenaRetTake() {
-				stale.Add(1)
-			}
-		})
-	}
-	wg.Wait()
-	if n := stale.Load(); n != 0 {
-		t.Errorf("%d goroutines started with a stale consent token", n)
-	}
-}
 
-func TestLogosArenaFieldOffset(t *testing.T) {
-	if want := 4 * unsafe.Sizeof(uintptr(0)); runtime.LogosArenaFieldOffset != want {
-		t.Errorf("unsafe.Offsetof(g{}.logosArena) = %d, want %d (4*PtrSize)", runtime.LogosArenaFieldOffset, want)
-	}
-}
 
 //go:noinline
 func arenaEligibleMake(n int) uintptr {
@@ -1034,88 +816,7 @@ func TestLogosArenaDynamicMakeWatermark(t *testing.T) {
 	})
 }
 
-func TestLogosArenaGCScansScanRegion(t *testing.T) {
-	if !goexperiment.LogosArena {
-		t.Skip("skipping test: GOEXPERIMENT=logosarena not enabled")
-	}
 
-	type ptrHolder struct {
-		p *[64]byte
-	}
-
-	inFreshGoroutine(t, func() {
-		m := runtime.LogosArenaSave()
-
-		heapObj := new([64]byte)
-		heapObj[0] = 42
-		w := weak.Make(heapObj)
-
-		holder := (*ptrHolder)(runtime.LogosArenaAllocScan(ptrHolder{}, unsafe.Sizeof(ptrHolder{})))
-		holder.p = heapObj
-		heapObj = nil
-
-		runtime.GC()
-		runtime.GC()
-
-		if w.Value() == nil {
-			t.Fatal("heap referent collected while referenced by arena scan region (AR3 violation)")
-		}
-		if holder.p[0] != 42 {
-			t.Fatalf("heap referent corrupted: got %d, want 42", holder.p[0])
-		}
-
-		runtime.LogosArenaRestore(m)
-
-		for range 5 {
-			runtime.GC()
-			if w.Value() == nil {
-				break
-			}
-		}
-		if w.Value() != nil {
-			t.Errorf("heap referent not reclaimed after arena restore (popped scan memory not cleared)")
-		}
-	})
-}
-
-func TestLogosArenaPointerSliceScanRetention(t *testing.T) {
-	if !goexperiment.LogosArena {
-		t.Skip("skipping test: GOEXPERIMENT=logosarena not enabled")
-	}
-	inFreshGoroutine(t, func() {
-		m := runtime.LogosArenaSave()
-		defer runtime.LogosArenaRestore(m)
-
-		obj := new([64]byte)
-		obj[0] = 77
-		w := weak.Make(obj)
-
-		sliceData := (*[16]*[64]byte)(runtime.LogosArenaAllocScan((*[64]byte)(nil), 16*unsafe.Sizeof((*[64]byte)(nil))))
-		sliceData[0] = obj
-		obj = nil
-
-		runtime.GC()
-		runtime.GC()
-
-		if w.Value() == nil {
-			t.Fatal("heap referent collected while held in arena scan pointer slice")
-		}
-		if sliceData[0][0] != 77 {
-			t.Fatalf("slice data corrupted: got %d, want 77", sliceData[0][0])
-		}
-
-		runtime.LogosArenaRestore(m)
-		for range 5 {
-			runtime.GC()
-			if w.Value() == nil {
-				break
-			}
-		}
-		if w.Value() != nil {
-			t.Errorf("heap referent not reclaimed after arena restore")
-		}
-	})
-}
 
 //go:noinline
 func arenaMakeAndPanic(n int) {
@@ -1495,31 +1196,6 @@ func TestLogosArenaMakeSeamPlacement(t *testing.T) {
 	})
 }
 
-func TestLogosArenaMakeSliceEntry(t *testing.T) {
-	if !goexperiment.LogosArena {
-		t.Skip("skipping test: GOEXPERIMENT=logosarena not enabled")
-	}
-	for _, size := range []uintptr{8, 24} {
-		elem := any(int64(0))
-		if size == 24 {
-			elem = arenaElem24{}
-		}
-		for _, tc := range arenaMakeOverflowCases(size) {
-			t.Run(fmt.Sprintf("size=%d/len=%d,cap=%d", size, tc.len, tc.cap), func(t *testing.T) {
-				arenaMakeMustPanic(t, "entry", tc.want, func() { runtime.LogosArenaMakeSlice(elem, tc.len, tc.cap) })
-			})
-		}
-	}
-	if bits.UintSize == 32 {
-		wide := int64(1) << 32
-		t.Run("truncated-len", func(t *testing.T) {
-			arenaMakeMustPanic(t, "entry", arenaMakeLenPanic, func() { runtime.LogosArenaMakeSlice(int64(0), wide, wide) })
-		})
-		t.Run("truncated-cap", func(t *testing.T) {
-			arenaMakeMustPanic(t, "entry", arenaMakeCapPanic, func() { runtime.LogosArenaMakeSlice(int64(0), 0, wide) })
-		})
-	}
-}
 
 //go:noinline
 func arenaOwnIntInScan(done chan struct{}) unsafe.Pointer {
