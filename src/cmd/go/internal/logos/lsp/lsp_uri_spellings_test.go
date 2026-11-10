@@ -50,11 +50,11 @@ func TestProxyURISpellingsShareOneDocument(t *testing.T) {
 	if string(last[aPath]) != edited4 {
 		t.Errorf("hover text through the canonical spelling missed the version 4 edit through other spellings")
 	}
-	var got map[string]int
+	var got snapshotCountsResult
 	if err := jsonv2.Unmarshal(f.client.call("logos/snapshotCounts", map[string]any{}), &got); err != nil {
 		t.Fatal(err)
 	}
-	if want := map[string]int{filepath.Dir(aPath): 1}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("snapshot counts = %v, want %v", got, want)
+	if want := map[string]int{filepath.Dir(aPath): 1}; !reflect.DeepEqual(got.Dirs, want) || got.DiagCache != 0 {
+		t.Fatalf("snapshot counts = %+v, want dirs %v with an empty diagnostic cache", got, want)
 	}
 }
