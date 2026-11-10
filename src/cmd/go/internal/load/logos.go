@@ -31,6 +31,17 @@ func (p *Package) IsLogos() bool {
 	return false
 }
 
+func logosScrubGoFactsFlags(flags []string) []string {
+	kept := make([]string, 0, len(flags))
+	for _, f := range flags {
+		if f == "-logos.gofacts" || strings.HasPrefix(f, "-logos.gofacts=") {
+			continue
+		}
+		kept = append(kept, f)
+	}
+	return kept
+}
+
 // moduleKinds groups one module's loaded packages by kind, keyed by import
 // path so repeated observations of one package stay a single entry.
 type moduleKinds struct {
