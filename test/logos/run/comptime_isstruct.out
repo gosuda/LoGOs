@@ -7,6 +7,11 @@ composite plain
 debug struct debug other
 typed struct typed other
 release release
+or struct or other
+eq struct eq other
+ne struct ne other
+[ID Inner{} Tag]
+[ID Inner{} Tag]
 [ID Inner{} Tag]
 Pair is a struct
 int is not a struct

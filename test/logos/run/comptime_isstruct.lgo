@@ -77,10 +77,55 @@ func Release[T any]() string {
 	return "release"
 }
 
+func OrConn[T any]() string {
+	const if comptime.IsStruct[T]() || traceOff {
+		return "or struct"
+	}
+	return "or other"
+}
+
+func EqConn[T any]() string {
+	const if comptime.IsStruct[T]() == true {
+		return "eq struct"
+	}
+	return "eq other"
+}
+
+func NeConn[T any]() string {
+	const if comptime.IsStruct[T]() != false {
+		return "ne struct"
+	}
+	return "ne other"
+}
+
 func Shape[T any]() []string {
 	var out []string
 	const for _, f := range comptime.Fields[T]() {
 		const if comptime.IsStruct[f.Type]() {
+			out = append(out, f.Name+"{}")
+		} else {
+			out = append(out, f.Name)
+		}
+	}
+	return out
+}
+
+func ShapeOr[T any]() []string {
+	var out []string
+	const for _, f := range comptime.Fields[T]() {
+		const if comptime.IsStruct[f.Type]() || traceOff {
+			out = append(out, f.Name+"{}")
+		} else {
+			out = append(out, f.Name)
+		}
+	}
+	return out
+}
+
+func ShapeNe[T any]() []string {
+	var out []string
+	const for _, f := range comptime.Fields[T]() {
+		const if comptime.IsStruct[f.Type]() != false {
 			out = append(out, f.Name+"{}")
 		} else {
 			out = append(out, f.Name)
@@ -117,7 +162,12 @@ func main() {
 	fmt.Println(Combined[Pair](), Combined[int]())
 	fmt.Println(Typed[Pair](), Typed[int]())
 	fmt.Println(Release[Pair](), Release[int]())
+	fmt.Println(OrConn[Pair](), OrConn[int]())
+	fmt.Println(EqConn[Pair](), EqConn[int]())
+	fmt.Println(NeConn[Pair](), NeConn[int]())
 	fmt.Println(Shape[Outer]())
+	fmt.Println(ShapeOr[Outer]())
+	fmt.Println(ShapeNe[Outer]())
 	fmt.Println(concrete())
 	fmt.Println(concreteOther())
 }
