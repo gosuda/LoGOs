@@ -47,6 +47,13 @@ func cgoFlow(n int) byte {
 	return byte(C.firstByte((*C.uint8_t)(unsafe.Pointer(&b[0]))))
 }
 
+//go:noinline
+func cgoDirectFlow(n int) byte {
+	b := make([]byte, n)
+	b[0] = 7
+	return byte(C.firstByte((*C.uint8_t)(&b[0])))
+}
+
 -- m/flow_test.go --
 package stackbufflows
 
@@ -62,5 +69,8 @@ func TestStackBufferFlows(t *testing.T) {
 	}
 	if got := testing.AllocsPerRun(20, func() { _ = cgoFlow(n) }); got < 1 {
 		t.Errorf("cgo make took %v allocations, want the heap", got)
+	}
+	if got := testing.AllocsPerRun(20, func() { _ = cgoDirectFlow(n) }); got < 1 {
+		t.Errorf("direct cgo make took %v allocations, want the heap", got)
 	}
 }
