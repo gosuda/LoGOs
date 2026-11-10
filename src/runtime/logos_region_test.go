@@ -609,3 +609,34 @@ func TestLogosRegionReuseRaceClean(t *testing.T) {
 		}
 	})
 }
+
+func TestLogosRegionChunkGranularity64K(t *testing.T) {
+	inFreshGoroutine(t, func() {
+		h, gen := runtime.LogosRegionOpen()
+		for i := range 63 * 1024 / 8 {
+			p := runtime.LogosRegionAllocNoscan(h, gen, 8, 8)
+			if p == nil || !runtime.LogosArenaInChunk(p) {
+				t.Fatalf("63 KiB fill stalled at object %d", i)
+			}
+			*(*byte)(p) = byte(i)
+		}
+		if n := len(runtime.LogosRegionChunks()); n != 1 {
+			t.Fatalf("63 KiB of region noscan = %d chunks, want 1", n)
+		}
+		runtime.LogosRegionClose(h, gen)
+	})
+	inFreshGoroutine(t, func() {
+		h, gen := runtime.LogosRegionOpen()
+		for i := range 65 * 1024 / 8 {
+			p := runtime.LogosRegionAllocNoscan(h, gen, 8, 8)
+			if p == nil || !runtime.LogosArenaInChunk(p) {
+				t.Fatalf("65 KiB fill stalled at object %d", i)
+			}
+			*(*byte)(p) = byte(i)
+		}
+		if n := len(runtime.LogosRegionChunks()); n != 2 {
+			t.Fatalf("65 KiB of region noscan = %d chunks, want 2", n)
+		}
+		runtime.LogosRegionClose(h, gen)
+	})
+}
