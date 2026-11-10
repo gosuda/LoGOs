@@ -1617,3 +1617,22 @@ func TestProxyPackageSnapshotHoldsEveryVersion(t *testing.T) {
 		t.Errorf("the rerun lowered a=%q b=%q, want the version 3 text of a and the version 2 text of b", last[aPath], last[bPath])
 	}
 }
+
+func TestProxyLargeFileMapsExactly(t *testing.T) {
+	var sb strings.Builder
+	sb.WriteString("package big\n\n")
+	for i := range 300 {
+		fmt.Fprintf(&sb, "var x%d = %d\n", i, i)
+	}
+	src := sb.String()
+	if len(src) <= 2048 {
+		t.Fatalf("fixture is %d bytes, want more than 2048 so a size cap would bite", len(src))
+	}
+	f := newFixture(t, map[string]string{"b/b.lgo": src}, fixtureOptions{})
+	f.open("b/b.lgo", 1)
+	at := Position{Line: 250, Character: 4}
+	f.client.call("textDocument/hover", positionParams(f.uri("b/b.lgo"), at))
+	if uri, pos := forwardedPosition(t, f, "textDocument/hover", 0); uri != f.virtURI("b/b.lgo") || pos != at {
+		t.Errorf("hover at %v reached gopls as %s %v, want the exact position with no size cap", at, uri, pos)
+	}
+}
