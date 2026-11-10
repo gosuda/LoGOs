@@ -168,8 +168,8 @@ Rules: logos-doc/SPEC.md. Status values: planned, tested, satisfied upstream, bl
 | #180 | Init order affecting const composite tables | M5 | src/cmd/compile/internal/logos/ctfe/ctfe_test.go (TestWidthsComposite); test/logos/run/const_init_read.lgo | tested |
 | #181 | Long loop exhausting arena before return | M18 | src/cmd/go/testdata/script/logos_redteam_181.txt (executed 2026-10-28: `go test cmd/go -run 'Script/^logos_redteam_181$'` passes, race leg included) | tested |
 | #182 | Unsized int overflowing in serialized struct | M9 | test/logos/lint/serialized_unsized_int.lgo | tested |
-| #183 | loGo/s package unable to use a Go package from another module | M0 | src/cmd/go/testdata/script/logos_interop.txt (case 1) | tested |
-| #184 | Go package unable to use a loGo/s package from another module | M0 | src/cmd/go/testdata/script/logos_interop.txt (case 2) | tested |
+| #183 | loGo/s package unable to use a Go package from another module | M0 | src/cmd/go/testdata/script/logos_interop.txt (workspace w1) | tested |
+| #184 | Go package unable to use a loGo/s package from another module | M0 | src/cmd/go/testdata/script/logos_interop.txt (workspace w2) | tested |
 | #185 | Union used as constraint and value type crossing into Go | M2 | test/logos/redteam/attack_185_dual_use_union; src/cmd/go/testdata/script/logos_eject_union.txt; src/cmd/go/testdata/script/logos_interop_union.txt | tested |
 | #186 | Go caller passing nil to a non-nil pointer parameter | M3 | src/cmd/go/testdata/script/logos_interop_nil.txt | tested |
 | #187 | Wasm loader missing for a Go main package | M16 | src/cmd/go/testdata/script/logos_wasm_loader.txt | tested |
