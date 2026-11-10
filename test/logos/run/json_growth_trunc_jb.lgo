@@ -29,8 +29,8 @@ func truncPadded() error {
 	if err == nil {
 		return fmt.Errorf("padded truncated array decoded")
 	}
-	if grew >= 1<<18 {
-		return fmt.Errorf("100 arrived elements with 1 MiB of padding allocated %d bytes, want under 256 KiB", grew)
+	if grew >= 1<<15 {
+		return fmt.Errorf("100 arrived elements with 1 MiB of padding allocated %d bytes, want under 32 KiB", grew)
 	}
 	return nil
 }
