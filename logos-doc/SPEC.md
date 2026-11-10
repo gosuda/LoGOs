@@ -1622,12 +1622,7 @@ On nonzero errCode the wrapper throws the message read from wasm memory. [T-Sec1
 buf := make([]Pixel, w * h)
 ```
 
-- An explicit `clear` of a slice MUST persist before return. [T-303]
-
 ### 13.3 Long-loop preemption on wasm
-
-- Back-edge checks MUST fire every 4096 iterations in `logos` builds only where async preemption is absent (GOARCH=wasm). [T-303]
-- A call-free loop MUST NOT starve its peers. [T-303]
 
 ## 14. JSON diagnostics schema
 
