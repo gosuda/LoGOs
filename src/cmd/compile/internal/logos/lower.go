@@ -530,25 +530,24 @@ func (fl *fileLower) lowerFile() {
 	fl.flushTypeImports()
 	if fl.needRT || fl.needSimd || fl.needSimdMath || fl.needJSON || fl.needReflect || fl.needBinary {
 		var imps []syntax.Decl
-		if fl.needRT {
-			imps = append(imps, rtImport(fl.file.Pos()))
-		}
-		if fl.needJSON {
-			imps = append(imps, jsonImport(fl.file.Pos()))
-		}
-		if fl.needReflect {
-			imps = append(imps, reflectImport(fl.file.Pos()))
+		pos := fl.file.Pos()
+		specs := fl.logosImportSpecs()
+		for _, spec := range specs[:3] {
+			if !spec.need {
+				continue
+			}
+			imps = append(imps, spec.make(pos))
 		}
 		if fl.needBinary {
-			for _, imp := range fl.binaryImports(fl.file.Pos()) {
+			for _, imp := range fl.binaryImports(pos) {
 				imps = append(imps, imp)
 			}
 		}
-		if fl.needSimd {
-			imps = append(imps, simdImport(fl.file.Pos()))
-		}
-		if fl.needSimdMath {
-			imps = append(imps, simdMathImport(fl.file.Pos()))
+		for _, spec := range specs[3:] {
+			if !spec.need {
+				continue
+			}
+			imps = append(imps, spec.make(pos))
 		}
 		fl.file.DeclList = append(imps, fl.file.DeclList...)
 		fl.addHeaderSplice()
@@ -577,18 +576,33 @@ type genImports struct {
 	order []string                   // pkg paths in allocation order
 }
 
+type logosImportSpec struct {
+	need  bool
+	alias string
+	path  string
+	make  func(syntax.Pos) *syntax.ImportDecl
+}
+
+func (fl *fileLower) logosImportSpecs() []logosImportSpec {
+	return []logosImportSpec{
+		{fl.needRT, rtAlias, rtImportPath, rtImport},
+		{fl.needJSON, jsonAlias, jsonImportPath, jsonImport},
+		{fl.needReflect, reflectAlias, "reflect", reflectImport},
+		{fl.needSimd, logosSimdAlias, logosSimdPath, simdImport},
+		{fl.needSimdMath, logosSimdMathAlias, logosSimdMathPath, simdMathImport},
+	}
+}
+
 func (fl *fileLower) getGenImports() *genImports {
 	if fl.genImps != nil {
 		return fl.genImps
 	}
 	used := map[string]bool{
-		rtAlias:            true,
-		jsonAlias:          true,
-		logosSimdAlias:     true,
-		logosSimdMathAlias: true,
-		reflectAlias:       true,
-		interpConvPkg:      true,
-		interpUnsafePkg:    true,
+		interpConvPkg:   true,
+		interpUnsafePkg: true,
+	}
+	for _, spec := range fl.logosImportSpecs() {
+		used[spec.alias] = true
 	}
 	for _, name := range fl.importNames() {
 		if name != "" {
@@ -624,14 +638,12 @@ func (fl *fileLower) addHeaderSplice() {
 	if ins < 0 {
 		ins = off
 	}
-	if fl.needRT {
-		fl.add(ins, ins, "\n\nimport "+rtAlias+" "+fmt.Sprintf("%q", rtImportPath))
-	}
-	if fl.needJSON {
-		fl.add(ins, ins, "\n\nimport "+jsonAlias+" "+fmt.Sprintf("%q", jsonImportPath))
-	}
-	if fl.needReflect {
-		fl.add(ins, ins, "\n\nimport "+reflectAlias+" "+`"reflect"`)
+	specs := fl.logosImportSpecs()
+	for _, spec := range specs[:3] {
+		if !spec.need {
+			continue
+		}
+		fl.add(ins, ins, "\n\nimport "+spec.alias+" "+fmt.Sprintf("%q", spec.path))
 	}
 	if fl.needBinary {
 		for _, item := range binaryImportTable {
@@ -641,11 +653,11 @@ func (fl *fileLower) addHeaderSplice() {
 			fl.add(ins, ins, "\n\nimport "+item.alias+" "+fmt.Sprintf("%q", item.path))
 		}
 	}
-	if fl.needSimd {
-		fl.add(ins, ins, "\n\nimport "+logosSimdAlias+" "+fmt.Sprintf("%q", logosSimdPath))
-	}
-	if fl.needSimdMath {
-		fl.add(ins, ins, "\n\nimport "+logosSimdMathAlias+" "+fmt.Sprintf("%q", logosSimdMathPath))
+	for _, spec := range specs[3:] {
+		if !spec.need {
+			continue
+		}
+		fl.add(ins, ins, "\n\nimport "+spec.alias+" "+fmt.Sprintf("%q", spec.path))
 	}
 	if len(fl.siteDecls) > 0 {
 		text := "\n\n"
