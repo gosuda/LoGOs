@@ -696,3 +696,69 @@ func TestAllocFreeFactRoundTrip(t *testing.T) {
 		t.Error("Decode accepted a bad allocfree object")
 	}
 }
+
+func TestJSONFactsRoundTrip(t *testing.T) {
+	fp := goobj.FingerprintType{9, 8, 7, 6, 5, 4, 3, 2}
+	in := &facts.Facts{
+		JsonMetas: []facts.JsonMetaFact{
+			{Type: "Square", HasDecoder: true, Eligible: true},
+			{Type: "Circle", HasDecoder: true, Eligible: true},
+			{Type: "Custom", HasDecoder: true},
+		},
+		JsonKeys: []facts.JsonKeyFact{
+			{Type: "Square", Index: 1, Key: "s"},
+			{Type: "Circle", Index: 0, Key: "r"},
+			{Type: "Circle", Index: 1, Key: "extra"},
+		},
+		UnionMembers: []facts.UnionMemberFact{
+			{Type: "Shape", Index: 1, Member: "example.com/m/a.Square"},
+			{Type: "Shape", Index: 0, Member: "example.com/m/a.Circle"},
+		},
+	}
+	got := string(facts.Encode(fp, in))
+	wantOrder := []string{
+		"jsonkey Circle 0000 1\nr\n",
+		"jsonkey Circle 0001 5\nextra\n",
+		"jsonkey Square 0001 1\ns\n",
+		"jsonmeta Circle decoder,eligible\n",
+		"jsonmeta Custom decoder\n",
+		"jsonmeta Square decoder,eligible\n",
+		"unionmember Shape 0000 example.com/m/a.Circle\n",
+		"unionmember Shape 0001 example.com/m/a.Square\n",
+	}
+	prev := -1
+	for _, want := range wantOrder {
+		idx := strings.Index(got, want)
+		if idx < 0 {
+			t.Fatalf("Encode missing %q in:\n%s", want, got)
+		}
+		if idx <= prev {
+			t.Fatalf("Encode not sorted: %q after offset %d", want, prev)
+		}
+		prev = idx
+	}
+	back, err := facts.Decode([]byte(got))
+	if err != nil {
+		t.Fatalf("Decode(Encode) failed: %v", err)
+	}
+	if len(back.JsonMetas) != 3 || len(back.JsonKeys) != 3 || len(back.UnionMembers) != 2 {
+		t.Fatalf("round trip counts = %d/%d/%d, want 3/3/2", len(back.JsonMetas), len(back.JsonKeys), len(back.UnionMembers))
+	}
+	var circleKeys []string
+	for _, k := range back.JsonKeys {
+		if k.Type == "Circle" {
+			circleKeys = append(circleKeys, k.Key)
+		}
+	}
+	if len(circleKeys) != 2 || circleKeys[0] != "r" || circleKeys[1] != "extra" {
+		t.Fatalf("Circle keys = %q, want [r extra]", circleKeys)
+	}
+	goPkg := &facts.Facts{GoPackage: true, JsonMetas: []facts.JsonMetaFact{{Type: "X", HasDecoder: true, Eligible: true}}, JsonKeys: []facts.JsonKeyFact{{Type: "X", Index: 0, Key: "a"}}, UnionMembers: []facts.UnionMemberFact{{Type: "U", Index: 0, Member: "example.com/m.X"}}}
+	out := string(facts.Encode(fp, goPkg))
+	if strings.Contains(out, "jsonmeta ") || strings.Contains(out, "jsonkey ") || strings.Contains(out, "unionmember ") {
+		t.Fatalf("Go package carries JSON facts:\n%s", out)
+	}
+	if !strings.Contains(out, "lang go\n") {
+		t.Fatalf("Go package missing lang go:\n%s", out)
+	}
+}

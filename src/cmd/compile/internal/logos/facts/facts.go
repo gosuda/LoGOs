@@ -93,26 +93,30 @@ type AllocFreeFact struct {
 }
 
 type Facts struct {
-	Fingerprint goobj.FingerprintType
-	Opts        []PathFact
-	Consts      []PathFact
-	Fns         []FnFact
-	Readonlys   []ReadonlyFact
-	Props       []PropFact
-	Conforms    []ConformsFact
-	Comptimes   []ComptimeFact
-	ConstFuncs  []ConstFuncFact
-	Defaults    []DefaultFact
-	Locks       []LockFact
-	AllocFrees  []AllocFreeFact
-	GoPackage   bool
+	Fingerprint  goobj.FingerprintType
+	Opts         []PathFact
+	Consts       []PathFact
+	Fns          []FnFact
+	Readonlys    []ReadonlyFact
+	Props        []PropFact
+	Conforms     []ConformsFact
+	Comptimes    []ComptimeFact
+	ConstFuncs   []ConstFuncFact
+	Defaults     []DefaultFact
+	Locks        []LockFact
+	AllocFrees   []AllocFreeFact
+	JsonMetas    []JsonMetaFact
+	JsonKeys     []JsonKeyFact
+	UnionMembers []UnionMemberFact
+	GoPackage    bool
 }
 
 func (f *Facts) empty() bool {
 	return len(f.Opts) == 0 && len(f.Consts) == 0 && len(f.Fns) == 0 &&
 		len(f.Readonlys) == 0 && len(f.Props) == 0 && len(f.Conforms) == 0 &&
 		len(f.Comptimes) == 0 && len(f.ConstFuncs) == 0 && len(f.Defaults) == 0 &&
-		len(f.Locks) == 0 && len(f.AllocFrees) == 0 && !f.GoPackage
+		len(f.Locks) == 0 && len(f.AllocFrees) == 0 && len(f.JsonMetas) == 0 &&
+		len(f.JsonKeys) == 0 && len(f.UnionMembers) == 0 && !f.GoPackage
 }
 
 type DefaultFact struct {
@@ -121,74 +125,140 @@ type DefaultFact struct {
 	Text  string
 }
 
-func Encode(fp goobj.FingerprintType, f *Facts) []byte {
-	type record struct {
-		line string
-		body []byte
+type JsonMetaFact struct {
+	Type       string
+	HasDecoder bool
+	Eligible   bool
+}
+
+type JsonKeyFact struct {
+	Type  string
+	Index int
+	Key   string
+}
+
+type UnionMemberFact struct {
+	Type   string
+	Index  int
+	Member string
+}
+
+type factRecord struct {
+	line string
+	body []byte
+}
+
+func (f *Facts) jsonRecords() []factRecord {
+	if f == nil || f.GoPackage {
+		return nil
 	}
-	var recs []record
+	var out []factRecord
+	for _, m := range f.JsonMetas {
+		if m.Type == "" || !isIdent(m.Type) {
+			continue
+		}
+		flags := ""
+		if m.HasDecoder {
+			flags = "decoder"
+		}
+		if m.Eligible {
+			if flags != "" {
+				flags += ","
+			}
+			flags += "eligible"
+		}
+		if flags == "" {
+			continue
+		}
+		out = append(out, factRecord{line: "jsonmeta " + m.Type + " " + flags})
+	}
+	for _, k := range f.JsonKeys {
+		if k.Type == "" || !isIdent(k.Type) || k.Index < 0 || k.Index > 9999 {
+			continue
+		}
+		out = append(out, factRecord{line: "jsonkey " + k.Type + " " + paddedIndex(k.Index) + " " + strconv.Itoa(len(k.Key)), body: []byte(k.Key)})
+	}
+	for _, u := range f.UnionMembers {
+		if u.Type == "" || !isIdent(u.Type) || u.Index < 0 || u.Index > 9999 || u.Member == "" {
+			continue
+		}
+		out = append(out, factRecord{line: "unionmember " + u.Type + " " + paddedIndex(u.Index) + " " + u.Member})
+	}
+	return out
+}
+
+func paddedIndex(i int) string {
+	s := strconv.Itoa(i)
+	for len(s) < 4 {
+		s = "0" + s
+	}
+	return s
+}
+
+func Encode(fp goobj.FingerprintType, f *Facts) []byte {
+	var recs []factRecord
 	if f != nil {
 		for _, o := range f.Opts {
 			if o.Object != "" && o.Path != "" {
-				recs = append(recs, record{line: "opt " + o.Object + " " + o.Path})
+				recs = append(recs, factRecord{line: "opt " + o.Object + " " + o.Path})
 			}
 		}
 		for _, c := range f.Consts {
 			if c.Object != "" && c.Path != "" {
-				recs = append(recs, record{line: "const " + c.Object + " " + c.Path})
+				recs = append(recs, factRecord{line: "const " + c.Object + " " + c.Path})
 			}
 		}
 		for _, fn := range f.Fns {
 			if fl := fn.flags(); fn.Object != "" && fl != "" {
-				recs = append(recs, record{line: "fn " + fn.Object + " " + fl})
+				recs = append(recs, factRecord{line: "fn " + fn.Object + " " + fl})
 			}
 		}
 		for _, r := range f.Readonlys {
 			if r.Object != "" && r.Path != "" {
-				recs = append(recs, record{line: "readonly " + r.Object + " " + r.Path})
+				recs = append(recs, factRecord{line: "readonly " + r.Object + " " + r.Path})
 			}
 		}
 		for _, p := range f.Props {
 			if p.Interface != "" && p.Prefix != "" {
-				recs = append(recs, record{line: "prop " + p.Interface + " " + p.Prefix})
+				recs = append(recs, factRecord{line: "prop " + p.Interface + " " + p.Prefix})
 			}
 		}
 		for _, c := range f.Conforms {
 			if c.Type != "" && c.IfacePath != "" && c.Iface != "" {
-				recs = append(recs, record{line: "conforms " + c.Type + " " + c.IfacePath + " " + c.Iface})
+				recs = append(recs, factRecord{line: "conforms " + c.Type + " " + c.IfacePath + " " + c.Iface})
 			}
 		}
 		for _, c := range f.Comptimes {
 			if c.Object != "" && len(c.Source) > 0 {
-				recs = append(recs, record{line: "comptime " + c.Object + " " + strconv.Itoa(len(c.Source)), body: c.Source})
+				recs = append(recs, factRecord{line: "comptime " + c.Object + " " + strconv.Itoa(len(c.Source)), body: c.Source})
 			}
 		}
 		for _, c := range f.ConstFuncs {
 			if c.Object != "" && len(c.Source) > 0 {
-				recs = append(recs, record{line: "constfn " + c.Object + " " + strconv.Itoa(len(c.Source)), body: c.Source})
+				recs = append(recs, factRecord{line: "constfn " + c.Object + " " + strconv.Itoa(len(c.Source)), body: c.Source})
 			}
 		}
 		if f.GoPackage {
-			recs = append(recs, record{line: "lang go"})
+			recs = append(recs, factRecord{line: "lang go"})
 		}
 		for _, d := range f.Defaults {
 			if d.Type != "" && d.Field != "" && d.Text != "" {
-				recs = append(recs, record{line: "default " + d.Type + " " + d.Field + " " + strconv.Itoa(len(d.Text)), body: []byte(d.Text)})
+				recs = append(recs, factRecord{line: "default " + d.Type + " " + d.Field + " " + strconv.Itoa(len(d.Text)), body: []byte(d.Text)})
 			}
 		}
 		for _, l := range f.Locks {
 			if l.Object != "" && l.Effect != "" && l.Path != "" {
-				recs = append(recs, record{line: "locks " + l.Object + " " + l.Effect + " " + l.Path})
+				recs = append(recs, factRecord{line: "locks " + l.Object + " " + l.Effect + " " + l.Path})
 			}
 		}
 		for _, a := range f.AllocFrees {
 			if a.Object != "" {
-				recs = append(recs, record{line: "allocfree " + a.Object})
+				recs = append(recs, factRecord{line: "allocfree " + a.Object})
 			}
 		}
+		recs = append(recs, f.jsonRecords()...)
 	}
-	slices.SortFunc(recs, func(a, b record) int { return cmp.Compare(a.line, b.line) })
-
+	slices.SortFunc(recs, func(a, b factRecord) int { return cmp.Compare(a.line, b.line) })
 	var b bytes.Buffer
 	b.WriteString(versionLine + "\n")
 	fmt.Fprintf(&b, "fingerprint %x\n", fp[:])
@@ -362,6 +432,74 @@ func (d *decoder) body(ln int, kind, object string, n int, strictNL bool) ([]byt
 	}
 	return src, nil
 }
+func decodeJSONFact(f *Facts, d *decoder, ln int, line string) (bool, error) {
+	fields := strings.Fields(line)
+	if len(fields) == 0 {
+		return false, nil
+	}
+	switch fields[0] {
+	case "jsonmeta":
+		if len(fields) != 3 {
+			return true, fmt.Errorf(`logos facts line %d: bad jsonmeta record %q (want "jsonmeta <type> <flag>[,<flag>]")`, ln, line)
+		}
+		if !isIdent(fields[1]) {
+			return true, fmt.Errorf("logos facts line %d: bad type %q", ln, fields[1])
+		}
+		meta := JsonMetaFact{Type: fields[1]}
+		for flag := range strings.SplitSeq(fields[2], ",") {
+			if flag == "decoder" {
+				meta.HasDecoder = true
+			} else if flag == "eligible" {
+				meta.Eligible = true
+			} else {
+				return true, fmt.Errorf("logos facts line %d: bad jsonmeta flag %q", ln, flag)
+			}
+		}
+		if !meta.HasDecoder && !meta.Eligible {
+			return true, fmt.Errorf("logos facts line %d: empty jsonmeta flags %q", ln, line)
+		}
+		f.JsonMetas = append(f.JsonMetas, meta)
+		return true, nil
+	case "jsonkey":
+		if len(fields) != 4 {
+			return true, fmt.Errorf(`logos facts line %d: bad jsonkey record %q (want "jsonkey <type> <index> <length>")`, ln, line)
+		}
+		if !isIdent(fields[1]) {
+			return true, fmt.Errorf("logos facts line %d: bad type %q", ln, fields[1])
+		}
+		if !isDigits(fields[2]) {
+			return true, fmt.Errorf("logos facts line %d: bad jsonkey index %q", ln, fields[2])
+		}
+		n, aerr := strconv.Atoi(fields[3])
+		if aerr != nil || n < 0 {
+			return true, fmt.Errorf("logos facts line %d: bad jsonkey length %q", ln, fields[3])
+		}
+		index, _ := strconv.Atoi(fields[2])
+		key, err := d.takeBody(ln, "jsonkey", fields[1], n)
+		if err != nil {
+			return true, err
+		}
+		f.JsonKeys = append(f.JsonKeys, JsonKeyFact{Type: fields[1], Index: index, Key: string(key)})
+		return true, nil
+	case "unionmember":
+		if len(fields) != 4 {
+			return true, fmt.Errorf(`logos facts line %d: bad unionmember record %q (want "unionmember <type> <index> <member>")`, ln, line)
+		}
+		if !isIdent(fields[1]) {
+			return true, fmt.Errorf("logos facts line %d: bad type %q", ln, fields[1])
+		}
+		if !isDigits(fields[2]) {
+			return true, fmt.Errorf("logos facts line %d: bad unionmember index %q", ln, fields[2])
+		}
+		if fields[3] == "" {
+			return true, fmt.Errorf("logos facts line %d: bad unionmember %q", ln, fields[3])
+		}
+		index, _ := strconv.Atoi(fields[2])
+		f.UnionMembers = append(f.UnionMembers, UnionMemberFact{Type: fields[1], Index: index, Member: fields[3]})
+		return true, nil
+	}
+	return false, nil
+}
 
 func Decode(data []byte) (*Facts, error) {
 	d := &decoder{data: data, line: 1}
@@ -405,6 +543,12 @@ func Decode(data []byte) (*Facts, error) {
 			return nil, fmt.Errorf("logos facts line %d: unsorted records (%q after %q)", ln, line, prev)
 		}
 		prev = line
+		if handled, herr := decodeJSONFact(f, d, ln, line); handled {
+			if herr != nil {
+				return nil, herr
+			}
+			continue
+		}
 		fields := strings.Fields(line)
 		switch {
 		case strings.HasPrefix(line, "opt ") || strings.HasPrefix(line, "const ") || strings.HasPrefix(line, "readonly "):
