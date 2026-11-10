@@ -1914,6 +1914,96 @@ func TestServeAnswersParseErrorAndContinues(t *testing.T) {
 	outR.Close()
 }
 
+func TestServeLargeFrames(t *testing.T) {
+	serve := func(t *testing.T, in string) (chan error, *reader, func()) {
+		t.Helper()
+		scratch := t.TempDir()
+		scriptPath := filepath.Join(scratch, "script.json")
+		if err := os.WriteFile(scriptPath, []byte(`{}`), 0o666); err != nil {
+			t.Fatal(err)
+		}
+		opts := Options{
+			Gopls:    []string{os.Args[0], "-mode=stdio"},
+			Env:      append(os.Environ(), fakeEnv+"="+scriptPath, fakeLogEnv+"="+filepath.Join(scratch, "gopls.log")),
+			Compiler: newFakeCompiler(),
+			Stderr:   new(syncBuffer),
+		}
+		inR, inW, err := os.Pipe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		outR, outW, err := os.Pipe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		done := make(chan error, 1)
+		ctx := t.Context()
+		go func() { done <- Serve(ctx, inR, outW, opts) }()
+		if _, err := io.WriteString(inW, in); err != nil {
+			t.Fatal(err)
+		}
+		inW.Close()
+		return done, newReader(outR), func() { outW.Close(); outR.Close() }
+	}
+	readFrame := func(t *testing.T, rd *reader) *message {
+		t.Helper()
+		type result struct {
+			m   *message
+			err error
+		}
+		ch := make(chan result, 1)
+		go func() {
+			m, err := rd.read()
+			ch <- result{m, err}
+		}()
+		select {
+		case r := <-ch:
+			if r.err != nil {
+				t.Fatalf("reading the proxy reply: %v", r.err)
+			}
+			return r.m
+		case <-time.After(waitLimit):
+			t.Fatal("the proxy sent no reply frame")
+			return nil
+		}
+	}
+	frame := func(body string) string {
+		return fmt.Sprintf("Content-Length: %d\r\n\r\n%s", len(body), body)
+	}
+	t.Run("valid", func(t *testing.T) {
+		pad := strings.Repeat("x", 200000)
+		hover := fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"textDocument/hover","params":{"textDocument":{"uri":"file:///w/a.lgo"},"position":{"line":0,"character":0},"pad":%q}}`, pad)
+		bye := frame(`{"jsonrpc":"2.0","method":"exit","params":{}}`)
+		shutdown := frame(`{"jsonrpc":"2.0","id":2,"method":"shutdown","params":null}`)
+		done, rd, cleanup := serve(t, frame(hover)+shutdown+bye)
+		defer cleanup()
+		first := readFrame(t, rd)
+		if !first.isResponse() || string(first.ID) != "1" {
+			t.Fatalf("hover reply = %+v, want the response with id 1", first)
+		}
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Fatalf("Serve over a large valid frame = %v, want nil", err)
+			}
+		case <-time.After(waitLimit):
+			t.Fatal("Serve did not return after the large valid frame")
+		}
+	})
+	t.Run("truncated", func(t *testing.T) {
+		done, _, cleanup := serve(t, fmt.Sprintf("Content-Length: %d\r\n\r\n%s", 64<<20, "xx"))
+		defer cleanup()
+		select {
+		case err := <-done:
+			if err == nil {
+				t.Fatal("Serve accepted a truncated 64 MiB frame, want an error")
+			}
+		case <-time.After(waitLimit):
+			t.Fatal("Serve did not return after the truncated frame")
+		}
+	})
+}
+
 func TestProxyLeavesForeignJSONAlone(t *testing.T) {
 	low, _, _ := lowerQuestion([]byte(aLgo))
 	lowRead := span(findPos(t, string(low), "Read(", 0), len("Read"))

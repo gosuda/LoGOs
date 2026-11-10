@@ -48,9 +48,14 @@ func (rd *reader) read() (*message, error) {
 	if err != nil {
 		return nil, err
 	}
-	body := make([]byte, n)
-	if _, err := io.ReadFull(rd.r, body); err != nil {
-		return nil, fmt.Errorf("reading message body: %w", midMessage(err))
+	body := make([]byte, 0, min(n, 32768))
+	buf := make([]byte, 32768)
+	for len(body) < n {
+		m, err := io.ReadFull(rd.r, buf[:min(len(buf), n-len(body))])
+		body = append(body, buf[:m]...)
+		if err != nil {
+			return nil, fmt.Errorf("reading message body: %w", midMessage(err))
+		}
 	}
 	m := new(message)
 	if err := json.Unmarshal(body, m); err != nil {
