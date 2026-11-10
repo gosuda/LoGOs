@@ -28,6 +28,11 @@ exec find out -name '*.gen.go'
 cd out
 go run .
 cmp stdout $WORK/eject-stdout.txt
+# The ejected main package imports exactly the fixture's own imports
+# plus the one support import the lowering wrote: no other lowered
+# support import may hide behind the eject rewrite.
+go list -f '{{.Imports}}' .
+stdout '^\[example\.com/dep/greet fmt github\.com/gosuda/loGos/rt\]$'
 [exec:/home/linuxbrew/.linuxbrew/Cellar/go/1.27.3/libexec/bin/go] exec env GOROOT=/home/linuxbrew/.linuxbrew/Cellar/go/1.27.3/libexec /home/linuxbrew/.linuxbrew/Cellar/go/1.27.3/libexec/bin/go build ./...
 cd ..
 
