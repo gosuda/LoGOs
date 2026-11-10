@@ -171,6 +171,18 @@ func TestSimdSliceSumScalarForms(t *testing.T) {
 			t.Errorf("int takes the vector form:\n%s", out)
 		}
 	})
+	t.Run("uint", func(t *testing.T) {
+		simdSliceTarget(t, "amd64", 1)
+		if out := lowerSliceSum(t, "uint"); strings.Contains(out, "_logos_simd") {
+			t.Errorf("uint takes the vector form:\n%s", out)
+		}
+	})
+	t.Run("uintptr", func(t *testing.T) {
+		simdSliceTarget(t, "amd64", 1)
+		if out := lowerSliceSum(t, "uintptr"); strings.Contains(out, "_logos_simd") {
+			t.Errorf("uintptr takes the vector form:\n%s", out)
+		}
+	})
 	t.Run("alias element", func(t *testing.T) {
 		simdSliceTarget(t, "amd64", 1)
 		if out := lowerSliceSum(t, "f32"); !strings.Contains(out, "_logos_simd.LoadFloat32x8SliceMasked(") {
