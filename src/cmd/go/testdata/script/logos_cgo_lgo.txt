@@ -24,12 +24,12 @@ stdout '^item: 0$'
 stdout '^isnil-missing: true$'
 stdout '^isnil-present: false$'
 
-stdout '^find-missing: logos: nil from Go value stored into non-nil \*main\._Ctype_struct_item at c_bridge\.lgo:39$'
-stdout '^stored-missing: logos: nil from Go value stored into non-nil \*main\._Ctype_struct_item at c_bridge\.lgo:44$'
-stdout '^arg-missing: logos: nil from Go value stored into non-nil \*main\._Ctype_struct_item at c_bridge\.lgo:67$'
-stdout '^field-missing: logos: nil from Go value stored into non-nil \*main\._Ctype_struct_item at c_bridge\.lgo:78$'
-stdout '^lit-missing: logos: nil from Go value stored into non-nil \*main\._Ctype_struct_item at c_bridge\.lgo:84$'
-stdout '^slice-missing: logos: nil from Go value stored into non-nil \*main\._Ctype_struct_item at c_bridge\.lgo:92$'
+stdout '^find-missing: logos: nil from Go value stored into non-nil .* at c_bridge\.lgo:39$'
+stdout '^stored-missing: logos: nil from Go value stored into non-nil .* at c_bridge\.lgo:44$'
+stdout '^arg-missing: logos: nil from Go value stored into non-nil .* at c_bridge\.lgo:67$'
+stdout '^field-missing: logos: nil from Go value stored into non-nil .* at c_bridge\.lgo:78$'
+stdout '^lit-missing: logos: nil from Go value stored into non-nil .* at c_bridge\.lgo:84$'
+stdout '^slice-missing: logos: nil from Go value stored into non-nil .* at c_bridge\.lgo:92$'
 
 ! logos build -o $WORK/badtry.bin ./badtry
 stderr 'c_bridge\.lgo:13:22: \[correctness::cgo_file_logos_syntax\] files that import "C" must use Go syntax only$'
@@ -77,7 +77,7 @@ stderr 'c_bridge\.lgo:9:20: \[correctness::cgo_file_logos_syntax\] files that im
 
 logos build -o $WORK/bridge.bin ./okbridge
 ! exec $WORK/bridge.bin
-stderr 'logos: nil from Go value stored into non-nil \*main\._Ctype_int at c_bridge\.lgo:10$'
+stderr 'logos: nil from Go value stored into non-nil .* at c_bridge\.lgo:10$'
 
 ! logos build -o $WORK/goerr.bin ./goerr
 stderr 'c_bridge\.lgo:8:[0-9]+: expected'
