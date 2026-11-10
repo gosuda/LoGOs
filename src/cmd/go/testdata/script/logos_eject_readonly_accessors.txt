@@ -13,6 +13,7 @@ cd w/l
 logos eject -o bout
 exists bout/p/p.go
 exists bout/r/r.go
+grep '//line r.lgo:4' bout/r/r.go
 cd bout
 go build ./...
 cd ..
