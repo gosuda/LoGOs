@@ -84,6 +84,45 @@ type BinaryEvery struct {
 
 type BinaryNamed int32
 
+type BinaryKinds struct {
+	I   int     `json:"i"`
+	I8  int8    `json:"i8"`
+	I16 int16   `json:"i16"`
+	U   uint    `json:"u"`
+	U8  uint8   `json:"u8"`
+	U32 uint32  `json:"u32"`
+	U64 uint64  `json:"u64"`
+	Up  uintptr `json:"up"`
+}
+
+func kindsLayout() error {
+	v := BinaryKinds{I: -1, I8: -2, I16: -3, U: 4, U8: 5, U32: 6, U64: 7, Up: 8}
+	enc, err := v.MarshalBinary()
+	if err != nil {
+		return err
+	}
+	want := []byte{1}
+	want = binary.LittleEndian.AppendUint64(want, uint64(int64(v.I)))
+	want = binary.LittleEndian.AppendUint64(want, uint64(int64(v.I8)))
+	want = binary.LittleEndian.AppendUint64(want, uint64(int64(v.I16)))
+	want = binary.LittleEndian.AppendUint64(want, uint64(v.U))
+	want = binary.LittleEndian.AppendUint64(want, uint64(v.U8))
+	want = binary.LittleEndian.AppendUint64(want, uint64(v.U32))
+	want = binary.LittleEndian.AppendUint64(want, v.U64)
+	want = binary.LittleEndian.AppendUint64(want, uint64(v.Up))
+	if !bytes.Equal(enc, want) {
+		return fmt.Errorf("kinds wire %x, want %x", enc, want)
+	}
+	var back BinaryKinds
+	if err := back.UnmarshalBinary(enc); err != nil {
+		return err
+	}
+	if !reflect.DeepEqual(back, v) {
+		return fmt.Errorf("kinds round trip changed %+v to %+v", v, back)
+	}
+	return nil
+}
+
 func check(ok bool, message string) error {
 	if !ok {
 		return fmt.Errorf("%s", message)
@@ -378,6 +417,7 @@ func run() error {
 		{I: 42, F32: -3.25, F64: math.Inf(1), OK: true, Text: "hello", Raw: []byte{0, 1, 255}, Nums: []int64{-1, 0, 9}, Pair: [2]uint16{8, 13}, Labels: map[string]int32{"b": 2, "a": 1}, Inner: BinaryInner{Flag: true}, Maybe: seven},
 	}
 	if err := chainValues(values); err != nil { return err }
+	if err := kindsLayout(); err != nil { return err }
 	if err := layout(); err != nil { return err }
 	return runViolations()
 }
