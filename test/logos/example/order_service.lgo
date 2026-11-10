@@ -265,6 +265,9 @@ func run() error {
 		{ID: 104, Author: "dee", Symbol: "ACME", Qty: 2000, Tier: "GUEST"},
 		{ID: 105, Author: "eve", Symbol: "GLOBEX", Qty: 12, Tier: "PLATINUM"},
 	}
+	if _, ok := any(&first[0]).(*CreateOrderReq); !ok {
+		panic("pointer assertion failed")
+	}
 	fmt.Println(Audit(&first[0]))
 	receipts := svc.ProcessBatch(ctx, first)?
 	show("batch 1 receipts:", receipts)
