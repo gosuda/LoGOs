@@ -28,6 +28,26 @@ func LogosDirtyFastCallSlotsForTest(slots [4]uintptr, flag bool) {
 	mp.inFastCall = flag
 }
 
+func LogosFastCallPassedMCheckForTest(arg unsafe.Pointer) (touchedCurrent, recordOK, clearOK bool) {
+	cur := getg().m
+	savedSlots := cur.fastCgoFrame
+	savedFlag := cur.inFastCall
+	var fake m
+	logosRecordFastCall(&fake, arg)
+	recordOK = fake.inFastCall && fake.fastCgoFrame[0] == uintptr(arg)
+	touchedCurrent = cur.inFastCall != savedFlag || cur.fastCgoFrame != savedSlots
+	logosClearFastCall(&fake)
+	clearOK = !fake.inFastCall && fake.fastCgoFrame == [4]uintptr{}
+	cur.fastCgoFrame = savedSlots
+	cur.inFastCall = savedFlag
+	return touchedCurrent, recordOK, clearOK
+}
+
+func LogosFastCgoFrameSlotIsUintptrForTest() bool {
+	_, ok := any(m{}.fastCgoFrame[0]).(uintptr)
+	return ok
+}
+
 func LogosGrowsliceBufForTest(elem any, buf unsafe.Pointer, bufLen, newLen, num int) (array unsafe.Pointer, length, capacity int) {
 	s := growsliceBuf(buf, newLen, bufLen, num, efaceOf(&elem)._type, buf, bufLen)
 	return s.array, s.len, s.cap

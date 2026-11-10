@@ -4,16 +4,7 @@
 
 package runtime
 
-import (
-	"testing"
-	"unsafe"
-)
-
-func TestLogosFastCgoFrameIsUintptr(t *testing.T) {
-	if _, ok := any(m{}.fastCgoFrame[0]).(uintptr); !ok {
-		t.Fatal("fastCgoFrame slot is not uintptr")
-	}
-}
+import "unsafe"
 
 var (
 	LogosMFrameSize   = unsafe.Sizeof(m{}.fastCgoFrame)

@@ -72,3 +72,24 @@ func TestLogosFastCallPreservesCallerArgs(t *testing.T) {
 		t.Fatalf("caller value after exit = %d, want 12345", v)
 	}
 }
+
+func TestLogosFastCallStaysOnOriginalM(t *testing.T) {
+	var probe int
+	arg := unsafe.Pointer(&probe)
+	touched, recordOK, clearOK := runtime.LogosFastCallPassedMCheckForTest(arg)
+	if !recordOK {
+		t.Fatal("record did not set flag and slot on passed m")
+	}
+	if touched {
+		t.Fatal("record touched current m instead of passed m")
+	}
+	if !clearOK {
+		t.Fatal("clear did not zero the passed m")
+	}
+}
+
+func TestLogosFastCgoFrameIsUintptr(t *testing.T) {
+	if !runtime.LogosFastCgoFrameSlotIsUintptrForTest() {
+		t.Fatal("fastCgoFrame slot is not uintptr")
+	}
+}
