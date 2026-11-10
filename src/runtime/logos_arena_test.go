@@ -1499,3 +1499,40 @@ func TestLogosArenaMakeSliceEntry(t *testing.T) {
 		})
 	}
 }
+
+//go:noinline
+func arenaOwnIntInScan(done chan struct{}) unsafe.Pointer {
+	obj := new(int)
+	runtime.AddCleanup(obj, func(c chan struct{}) { close(c) }, done)
+	p := runtime.LogosArenaAllocScan((*int)(nil), 64)
+	for i := range 64 {
+		*(*byte)(unsafe.Pointer(uintptr(p) + uintptr(i))) = 0xAA
+	}
+	*(**int)(p) = obj
+	return p
+}
+
+func TestLogosArenaRestoreDropsScanRoots(t *testing.T) {
+	inFreshGoroutine(t, func() {
+		defer debug.SetGCPercent(debug.SetGCPercent(-1))
+		runtime.GC()
+		m := runtime.LogosArenaSave()
+		done := make(chan struct{})
+		p := arenaOwnIntInScan(done)
+		runtime.GC()
+		runtime.GC()
+		select {
+		case <-done:
+			t.Fatal("cleanup ran while the arena still held the only reference")
+		case <-time.After(200 * time.Millisecond):
+		}
+		runtime.LogosArenaRestore(m)
+		_ = p
+		runtime.GC()
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Fatal("cleanup did not run within 5s of a GC after restore")
+		}
+	})
+}
