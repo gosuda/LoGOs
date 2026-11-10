@@ -156,14 +156,14 @@ const qA = scores["a"] ?? -1
 const qZ = scores["zzz"] ?? -1
 
 const func BadIO() int {
-	fmt /* ERROR "correctness::const_func_impure" */ .Println("x")
+	fmt /* ERRORx "const_func_impure.*call to imported function fmt.Println" */ .Println("x")
 	return 1
 }
 
 var counter int
 
 const func BadVarRead() int {
-	return counter /* ERROR "correctness::const_func_impure" */
+	return counter /* ERRORx "const_func_impure.*read of package variable counter" */
 }
 
 const func BadVarWrite() int {
@@ -179,7 +179,7 @@ const func BadGo() int {
 }
 
 const func BadRecover() int {
-	_ = recover /* ERROR "correctness::const_func_impure" */ ()
+	_ = recover /* ERRORx "const_func_impure.*call to recover" */ ()
 	return 1
 }
 
