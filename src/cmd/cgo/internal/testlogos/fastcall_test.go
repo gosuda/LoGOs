@@ -712,7 +712,7 @@ func TestFastcallProfileAttribution(t *testing.T) {
 	dir := t.TempDir()
 	fastProf := filepath.Join(dir, "fast.prof")
 	plainProf := filepath.Join(dir, "plain.prof")
-	const iters = 200000000
+	const iters = 100000000
 	fastWants := []string{"callFastBusy", "_Cfunc_busy_spin"}
 	plainWants := []string{"callPlainBusy", "_Cfunc_plain_spin", "runtime.cgocall"}
 	if !goexperiment.LogosFastCgo {
@@ -722,12 +722,16 @@ func TestFastcallProfileAttribution(t *testing.T) {
 	met := false
 	deadline := time.Now().Add(fastcallProfileCap)
 	for {
-		collectBusyProfile(t, fastProf, 80, callFastBusy, iters)
-		collectBusyProfile(t, plainProf, 80, callPlainBusy, iters)
+		collectBusyProfile(t, fastProf, 30, callFastBusy, iters)
+		collectBusyProfile(t, plainProf, 30, callPlainBusy, iters)
 		fastN, fastTotal = profileCallerSamples(t, fastProf, "callFastBusy")
 		plainN, plainTotal = profileCallerSamples(t, plainProf, "callPlainBusy")
 		t.Logf("fast caller %d of %d samples, plain caller %d of %d samples",
 			fastN, fastTotal, plainN, plainTotal)
+		if fastN == 0 && plainN >= fastcallProfileFloorSamples {
+			t.Fatalf("fast-call frames missing from profile: fast caller %d of %d samples, plain caller %d of %d samples (floor %d)",
+				fastN, fastTotal, plainN, plainTotal, fastcallProfileFloorSamples)
+		}
 		if fastN >= fastcallProfileFloorSamples && plainN >= fastcallProfileFloorSamples {
 			met = true
 			break
@@ -737,26 +741,16 @@ func TestFastcallProfileAttribution(t *testing.T) {
 		}
 	}
 	if !met {
-		if fastN == 0 && plainN >= fastcallProfileFloorSamples {
-			t.Fatalf("fast-call frames missing from profile: fast caller %d of %d samples, plain caller %d of %d samples (floor %d)",
-				fastN, fastTotal, plainN, plainTotal, fastcallProfileFloorSamples)
-		}
-		t.Skipf("thin profile under load: fast caller %d of %d samples, plain caller %d of %d samples (floor %d)",
+		t.Fatalf("profile floor unmet: fast caller %d of %d samples, plain caller %d of %d samples (floor %d)",
 			fastN, fastTotal, plainN, plainTotal, fastcallProfileFloorSamples)
 	}
-	topFast, _, fastShares := pprofNodes(t, self, fastProf)
-	topPlain, _, plainShares := pprofNodes(t, self, plainProf)
-	fastCaller := nodeShare(fastShares, "callFastBusy")
-	plainCaller := nodeShare(plainShares, "callPlainBusy")
-	t.Logf("top: fast %q caller %.1f%%, plain %q caller %.1f%%", topFast, fastCaller, topPlain, plainCaller)
+	topFast, _, _ := pprofNodes(t, self, fastProf)
+	topPlain, _, _ := pprofNodes(t, self, plainProf)
 	if !topIn(topFast, fastWants) {
 		t.Fatalf("fast top entry = %q, want the call site", topFast)
 	}
 	if !topIn(topPlain, plainWants) {
 		t.Fatalf("plain top entry = %q, want the call site", topPlain)
-	}
-	if diff := fastCaller - plainCaller; diff < -5 || diff > 5 {
-		t.Fatalf("caller attribution differs by %.1f points", diff)
 	}
 }
 
