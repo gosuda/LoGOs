@@ -6,6 +6,7 @@ package noder
 
 import (
 	"encoding/json"
+	"fmt"
 	"internal/testenv"
 	"os"
 	"os/exec"
@@ -126,6 +127,47 @@ func applyFix(t *testing.T, src string, span diagSpan, fix diagFix) string {
 		t.Fatalf("invalid byte span [%d:%d] for src length %d", start, end, len(src))
 	}
 	return src[:start] + fix.Replacement + src[end:]
+}
+
+func runLgoSourceOut(t *testing.T, src string) string {
+	t.Helper()
+	testenv.MustHaveGoRun(t)
+
+	dir := t.TempDir()
+	srcPath := filepath.Join(dir, "main.lgo")
+	modPath := filepath.Join(dir, "go.mod")
+
+	if err := os.WriteFile(srcPath, []byte(src), 0o666); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(modPath, []byte("module testprog\n\ngo 1.27\n"), 0o666); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := testenv.Command(t, logosToolPath(t), "run", ".")
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("execution failed: %v\noutput:\n%s\nsource:\n%s", err, out, src)
+	}
+	return string(out)
+}
+
+func misplacedTryDiag(t *testing.T, diags []diagRecord) *diagRecord {
+	t.Helper()
+	var found *diagRecord
+	for i := range diags {
+		if diags[i].RuleID == misplacedTryRuleID {
+			if found != nil {
+				t.Fatalf("expected one %s diagnostic, got several", misplacedTryRuleID)
+			}
+			found = &diags[i]
+		}
+	}
+	if found == nil {
+		t.Fatalf("expected diagnostic with rule_id %q, got: %+v", misplacedTryRuleID, diags)
+	}
+	return found
 }
 
 func runLgoSource(t *testing.T, src string) {
@@ -341,5 +383,262 @@ func main() {
 		fixedSrc := applyFix(t, unsafeSrc, targetDiag.Span, fix)
 		runLgoSource(t, fixedSrc)
 		t.Logf("candidate %d preserved evaluation order and error behavior", i)
+	}
+}
+
+func TestMisplacedTrySplitOffered(t *testing.T) {
+	const stepHelpers = `type myErr string
+
+func (e myErr) Error() string { return string(e) }
+
+var (
+	calls int
+	fail  bool
+)
+
+func step() (int, error) {
+	calls++
+	if fail {
+		return 0, myErr("boom")
+	}
+	return 42, nil
+}
+`
+
+	const mainSrc = `func main() {
+	calls, fail = 0, false
+	v, err := compute()
+	if err != nil || v != %d {
+		println("bad")
+	} else {
+		println("ok")
+	}
+	calls, fail = 0, true
+	v, err = compute()
+	if err == nil || err.Error() != "boom" || v != 0 {
+		println("bad")
+	} else {
+		println("err")
+	}
+	if calls != 1 {
+		println("bad")
+	} else {
+		println("once")
+	}
+}
+`
+
+	tests := []struct {
+		name    string
+		decls   string
+		compute string
+		wantVal int
+	}{
+		{
+			name: "call_argument",
+			decls: `var got int
+
+func g(x int) error {
+	got = x
+	return nil
+}
+`,
+			compute: `func compute() (int, error) {
+	err := g(step()?)
+	return got, err
+}
+`,
+			wantVal: 42,
+		},
+		{
+			name: "binary_operand",
+			compute: `func compute() (int, error) {
+	a := 2 + step()?
+	return a, nil
+}
+`,
+			wantVal: 44,
+		},
+		{
+			name: "chain_argument",
+			decls: `type S struct{}
+
+var gotM int
+
+func (S) M(x int) S {
+	gotM = x
+	return S{}
+}
+
+func (S) N() int {
+	return gotM
+}
+`,
+			compute: `func compute() (int, error) {
+	v := S{}.M(step()?).N()
+	return v, nil
+}
+`,
+			wantVal: 42,
+		},
+		{
+			name: "if_condition",
+			compute: `func compute() (int, error) {
+	if step()? == 42 {
+		return 43, nil
+	}
+	return 0, nil
+}
+`,
+			wantVal: 43,
+		},
+		{
+			name: "return_value",
+			compute: `func compute() (int, error) {
+	return step()?, nil
+}
+`,
+			wantVal: 42,
+		},
+		{
+			name: "composite_literal",
+			compute: `func compute() (int, error) {
+	xs := []int{step()?, 1}
+	return xs[0] + xs[1], nil
+}
+`,
+			wantVal: 43,
+		},
+		{
+			name: "multivalue_argument",
+			decls: `var (
+	gotN int
+	gotB bool
+)
+
+func step2() (int, bool, error) {
+	calls++
+	if fail {
+		return 0, false, myErr("boom")
+	}
+	return 42, true, nil
+}
+
+func g2(n int, b bool) error {
+	gotN, gotB = n, b
+	return nil
+}
+`,
+			compute: `func compute() (int, error) {
+	err := g2(step2()?)
+	return gotN, err
+}
+`,
+			wantVal: 42,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			src := "package main\n\n" + tc.decls + "\n" + stepHelpers + tc.compute + fmt.Sprintf(mainSrc, tc.wantVal)
+			diags, exitCode := compileLgoJSON(t, src)
+			if exitCode == 0 {
+				t.Fatalf("expected compile failure on misplaced '?', got exit code 0")
+			}
+			d := misplacedTryDiag(t, diags)
+			if d.Severity != severityForbid {
+				t.Errorf("expected severity %q, got %q", severityForbid, d.Severity)
+			}
+			if len(d.AutofixCandidates) != 1 {
+				t.Fatalf("expected exactly one autofix candidate for %s position, got %d", tc.name, len(d.AutofixCandidates))
+			}
+			fix := d.AutofixCandidates[0]
+			if strings.Contains(fix.Replacement, "_logos_") || strings.Contains(fix.Replacement, "Logos_") {
+				t.Fatalf("candidate replacement uses a reserved prefix: %q", fix.Replacement)
+			}
+			fixedSrc := applyFix(t, src, d.Span, fix)
+			got := runLgoSourceOut(t, fixedSrc)
+			const wantOut = "ok\nerr\nonce\n"
+			if got != wantOut {
+				t.Fatalf("applied candidate output = %q, want %q\nfixed source:\n%s", got, wantOut, fixedSrc)
+			}
+		})
+	}
+}
+
+func TestMisplacedTrySplitRefused(t *testing.T) {
+	const stepHelpers = `type myErr string
+
+func (e myErr) Error() string { return string(e) }
+
+func step() (int, error) {
+	if fail {
+		return 0, myErr("boom")
+	}
+	return 42, nil
+}
+
+var fail bool
+
+func g() int { return 5 }
+`
+
+	tests := []struct {
+		name    string
+		compute string
+	}{
+		{
+			name: "right_of_call",
+			compute: `func compute() (int, error) {
+	a := g() + step()?
+	return a, nil
+}
+`,
+		},
+		{
+			name: "short_circuit",
+			compute: `func compute() (int, error) {
+	if fail && step()? > 0 {
+		return 43, nil
+	}
+	return 0, nil
+}
+`,
+		},
+		{
+			name: "loop_condition",
+			compute: `func compute() (int, error) {
+	for step()? > 100 {
+		break
+	}
+	return 0, nil
+}
+`,
+		},
+		{
+			name: "case_expression",
+			compute: `func compute() (int, error) {
+	switch step()? {
+	case 42:
+		return 43, nil
+	}
+	return 0, nil
+}
+`,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			src := "package main\n\n" + stepHelpers + tc.compute
+			diags, exitCode := compileLgoJSON(t, src)
+			if exitCode == 0 {
+				t.Fatalf("expected compile failure on misplaced '?', got exit code 0")
+			}
+			d := misplacedTryDiag(t, diags)
+			if len(d.AutofixCandidates) != 0 {
+				t.Fatalf("expected no autofix candidate for %s position, got %d: %+v", tc.name, len(d.AutofixCandidates), d.AutofixCandidates)
+			}
+		})
 	}
 }

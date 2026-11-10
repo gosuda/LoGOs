@@ -1,0 +1,34 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+cd lgo
+! logos lint --json-diagnostics ./...
+stderr '"rule_id":"correctness::misplaced_try"'
+stderr '"description":"Split the expression'
+! stderr '_logos_'
+cd ..
+
+-- lgo/go.mod --
+module example.com/splitfix
+
+go 1.27
+
+-- lgo/main.lgo --
+package main
+
+import "fmt"
+
+func step() (int, error) {
+	return 42, nil
+}
+
+func gate() error {
+	if step()? == 1 {
+		return fmt.Errorf("gate: %v", 1)
+	}
+	return nil
+}
+
+func main() {
+	gate()
+}
