@@ -446,7 +446,7 @@ func (check *Checker) logosImplementsProperty(V, T Type, Ti *Interface, cause *s
 	switch {
 	case declared && kind == logosPropOK:
 		return true
-	case kind == logosPropFailNeedsPtr:
+	case declared && kind == logosPropFailNeedsPtr:
 		return fail("%s %s has mutable property %s; use *%s", logosPropNeedsPtr, V, name, base)
 	case declared && kind == logosPropAmbig:
 		return fail("ambiguous selector %s.%s", V, name)
@@ -456,7 +456,7 @@ func (check *Checker) logosImplementsProperty(V, T Type, Ti *Interface, cause *s
 		return fail("%s %s declares %s but has no field or Set%s method for mutable property %s", logosPropUnsatisfied, V, Ti, name, name)
 	case declared:
 		return fail("%s %s declares %s but has no field or method for property %s", logosPropUnsatisfied, V, Ti, name)
-	case kind == logosPropOK:
+	case kind == logosPropOK || kind == logosPropFailNeedsPtr:
 		sname := V.String()
 		if named != nil {
 			sname = named.Obj().Name()

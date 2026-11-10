@@ -100,5 +100,11 @@ type RWValue struct {
 }
 
 func needPointerUndeclared(v RWValue) {
-	var _ RWOnly = v // ERROR "property_needs_pointer"
+	var _ RWOnly = v // ERROR "property_requires_conformance"
 }
+
+func hintStaysBroken(v RWValue) {
+	var _ RWOnly = &v // ERROR "property_requires_conformance"
+}
+
+var _ Creature = &Monster{Name: "g", HP: 1}
