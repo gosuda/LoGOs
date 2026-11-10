@@ -311,6 +311,68 @@ func Call() int32 { return int32(C.real_fn(1)) }
 	}
 }
 
+func TestFastcallMarksCarryBoth(t *testing.T) {
+	const head = `package fast
+
+/*
+#include <stdint.h>
+
+`
+	const tail = `
+int mark_fn(int *p) { return *p + 1; }
+*/
+import "C"
+
+import "unsafe"
+
+func Mark(p *int32) int32 { return int32(C.mark_fn((*C.int)(unsafe.Pointer(p)))) }
+`
+	cases := []struct {
+		name       string
+		directives string
+		fast       int
+		plain      int
+		keepalive  int
+		use        int
+		guards     int
+	}{
+		{"both", "#cgo noescape mark_fn\n#cgo nocallback mark_fn\n", 1, 0, 1, 0, 0},
+		{"noescape", "#cgo noescape mark_fn\n", 0, 1, 0, 1, 0},
+		{"nocallback", "#cgo nocallback mark_fn\n", 0, 1, 0, 1, 2},
+		{"none", "", 0, 1, 0, 1, 0},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			_, files := cgoOutputs(t, "mark.go", head+c.directives+tail)
+			gotypes, ok := files["_cgo_gotypes.go"]
+			if !ok {
+				t.Fatal("no _cgo_gotypes.go emitted")
+			}
+			if got := countCallLines(gotypes, "_cgo_runtime_cgocall_fast"); got != c.fast {
+				t.Errorf("fast calls = %d, want %d", got, c.fast)
+			}
+			plain := 0
+			for line := range strings.SplitSeq(gotypes, "\n") {
+				if strings.HasPrefix(line, "\t") && strings.Contains(line, "_cgo_runtime_cgocall(") && !strings.Contains(line, "_fast(") {
+					plain++
+				}
+			}
+			if plain != c.plain {
+				t.Errorf("plain calls = %d, want %d", plain, c.plain)
+			}
+			if got := countCallLines(gotypes, "_Cgo_keepalive"); got != c.keepalive {
+				t.Errorf("keepalive uses = %d, want %d", got, c.keepalive)
+			}
+			if got := countCallLines(gotypes, "_Cgo_use"); got != c.use {
+				t.Errorf("escape uses = %d, want %d", got, c.use)
+			}
+			if got := countCallLines(gotypes, "_Cgo_no_callback"); got != c.guards {
+				t.Errorf("callback guards = %d, want %d", got, c.guards)
+			}
+		})
+	}
+}
+
 func TestFastcallPointerChecks(t *testing.T) {
 	_, files := cgoOutputs(t, "fast.go", pairPreamble)
 	var cgo1 string
