@@ -1408,28 +1408,45 @@ func TestFraming(t *testing.T) {
 	}
 }
 
-func TestRewriterLeavesForeignJSONAlone(t *testing.T) {
-	_, _, pm := questionMap(t)
-	lw := &lowered{src: "/w/a.lgo", virt: "/w/a.go", pm: pm, fresh: true}
-	tb := &tables{bySrc: map[string]*lowered{lw.src: lw}, byVirt: map[string]*lowered{lw.virt: lw}}
-	in := toJSON(t, map[string]any{
-		"other":  map[string]any{"uri": "file:///w/b.go", "range": span(Position{Line: 5, Character: 5}, 3)},
-		"loose":  map[string]any{"line": 5, "character": 1, "extra": true},
-		"scalar": "file:///w/a.go",
+func TestProxyLeavesForeignJSONAlone(t *testing.T) {
+	low, _, _ := lowerQuestion([]byte(aLgo))
+	lowRead := span(findPos(t, string(low), "Read(", 0), len("Read"))
+	foreign := map[string]any{"uri": "file:///foreign/x.go", "range": span(Position{Line: 5, Character: 5}, 3), "note": "keep"}
+	f := newFixture(t, map[string]string{"a/a.lgo": aLgo}, fixtureOptions{
+		Script: func(root string) fakeScript {
+			virt := pathURI(filepath.Join(root, "a", "a.go"))
+			return fakeScript{Responses: map[string]json.RawMessage{
+				"textDocument/definition": toJSON(t, []any{
+					map[string]any{"uri": virt, "range": lowRead},
+					foreign,
+				}),
+				"textDocument/hover": toJSON(t, map[string]any{
+					"contents": map[string]any{"kind": "plaintext", "value": "known"},
+					"range":    lowRead,
+					"extra":    map[string]any{"note": "keep"},
+				}),
+			}}
+		},
 	})
-	v, err := decode(in)
-	if err != nil {
-		t.Fatal(err)
-	}
-	out, err := encode(tb.toSource().rewrite(v, nil))
-	if err != nil {
-		t.Fatal(err)
-	}
-	sameJSON(t, "rewritten", out, map[string]any{
-		"other":  map[string]any{"uri": "file:///w/b.go", "range": span(Position{Line: 5, Character: 5}, 3)},
-		"loose":  map[string]any{"line": 5, "character": 1, "extra": true},
-		"scalar": "file:///w/a.go",
+	f.open("a/a.lgo", 1)
+	f.sync()
+	aURI := f.uri("a/a.lgo")
+	origOperand := shift(findPos(t, aLgo, "ReadFile(path)?", 0), len("ReadFile("))
+	origRead := span(findPos(t, aLgo, "Read(", 0), len("Read"))
+	res := f.client.call("textDocument/definition", positionParams(aURI, origOperand))
+	sameJSON(t, "definition keeps the foreign location", res, []any{
+		map[string]any{"uri": aURI, "range": origRead},
+		foreign,
 	})
+	hres := f.client.call("textDocument/hover", positionParams(aURI, origOperand))
+	sameJSON(t, "hover keeps the foreign field", hres, map[string]any{
+		"contents": map[string]any{"kind": "plaintext", "value": "known"},
+		"range":    origRead,
+		"extra":    map[string]any{"note": "keep"},
+	})
+	if err := f.client.shutdown(); err != nil {
+		t.Errorf("Serve = %v, want nil", err)
+	}
 }
 
 func TestProxyMergesDiagnosticsOfGoDocuments(t *testing.T) {
