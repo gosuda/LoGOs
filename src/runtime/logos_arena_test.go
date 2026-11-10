@@ -453,6 +453,41 @@ func TestLogosArenaNoscanGrowsUp(t *testing.T) {
 	})
 }
 
+func TestLogosArenaScanGrowsDown(t *testing.T) {
+	inFreshGoroutine(t, func() {
+		m := runtime.LogosArenaSave()
+		defer runtime.LogosArenaRestore(m)
+		x := new(int)
+		first := runtime.LogosArenaAllocScan((*int)(nil), 128)
+		if first == nil {
+			t.Fatal("first scan alloc returned nil")
+		}
+		fillWords(first, 128, x)
+		var chunks [4]runtime.LogosArenaChunk
+		n, _ := runtime.LogosArenaChainOf(runtime.LogosArenaGoid(), chunks[:])
+		if n < 1 {
+			t.Fatal("no arena chunk holds the first scan object")
+		}
+		top := chunks[0].Addr + uintptr(runtime.LogosArenaChunkBytes)
+		if addr := uintptr(first); addr+128 != top {
+			t.Errorf("first scan object ends at %#x, want the chunk upper bound %#x", addr+128, top)
+		}
+		prev := uintptr(first)
+		for i, size := range []uintptr{64, 32, 16} {
+			p := runtime.LogosArenaAllocScan((*int)(nil), size)
+			if p == nil {
+				t.Fatalf("scan alloc %d of %d bytes returned nil", i, size)
+			}
+			fillWords(p, size, x)
+			if addr := uintptr(p); addr >= prev {
+				t.Errorf("scan object %d at %#x, want below %#x", i, addr, prev)
+			} else {
+				prev = addr
+			}
+		}
+	})
+}
+
 func TestLogosArenaOneByteOverflowLinksChunk(t *testing.T) {
 	inFreshGoroutine(t, func() {
 		m := runtime.LogosArenaSave()
