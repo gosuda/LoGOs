@@ -13,7 +13,7 @@ exists out/main.go
 exists out/go.mod
 grep 'func H.*_logos_rt\.Option' out/main.go
 grep 'func I.*_logos_rt\.Option' out/main.go
-grep 'func None' out/main.go
+grep 'func None\(\) Choice' out/main.go
 grep '_logos_rt\.Option' out/main.go
 ! grep '\*User\?' out/main.go
 ! grep '\[\]int\?' out/main.go
