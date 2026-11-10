@@ -146,3 +146,38 @@ func TestInterpBindBeforeSizing(t *testing.T) {
 		t.Errorf("bound does not count the string operand:\n%s", out)
 	}
 }
+func TestLoweredSupportImportSpellings(t *testing.T) {
+	re := regexp.MustCompile(`(_logos_[A-Za-z0-9_]+)[ \t]+"([^"]+)"`)
+	trySrc := "package main\n\nfunc parse(s string) (int, error) { return len(s), nil }\n\nfunc get(s string) (int, error) {\n\tv := parse(s)?\n\treturn v, nil\n}\n"
+	interpSrc := "package main\n\nimport \"fmt\"\n\nfunc f(name string, n int) {\n\tfmt.Println($\"User {name} has {n} items\")\n}\n"
+	jsonSrc := "package main\n\ntype Node struct {\n\tName string `json:\"name\"`\n}\n\nfunc f() string {\n\tn := &Node{Name: \"c\"}\n\tbuf, err := n.MarshalJSON()\n\tif err != nil {\n\t\treturn \"\"\n\t}\n\treturn string(buf)\n}\n"
+	cases := []struct {
+		name string
+		src  string
+		want []string
+	}{
+		{"try", trySrc, []string{`_logos_rt "logos/rt"`}},
+		{"interp", interpSrc, []string{`_logos_rt "logos/rt"`, `_logos_unsafe "unsafe"`}},
+		{"json", jsonSrc, []string{`_logos_json "logos/rt/json"`}},
+	}
+	for _, tc := range cases {
+		out := lowerSnippetSrc(t, tc.name+".lgo", tc.src)
+		for _, want := range tc.want {
+			if !strings.Contains(out, want) {
+				t.Errorf("%s: lowered text lacks %q:\n%s", tc.name, want, out)
+			}
+		}
+		if strings.Contains(out, "github.com/gosuda/loGos") {
+			t.Errorf("%s: lowered text uses the ejected spelling:\n%s", tc.name, out)
+		}
+		for _, m := range re.FindAllStringSubmatch(out, -1) {
+			switch path := m[2]; path {
+			case "logos/rt", "logos/rt/json":
+			default:
+				if strings.Contains(path, ".") {
+					t.Errorf("%s: import %s %q is not standard", tc.name, m[1], path)
+				}
+			}
+		}
+	}
+}
