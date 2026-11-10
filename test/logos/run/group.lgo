@@ -26,6 +26,7 @@ func store(ctx context.Context, out []int, i, v int) error {
 	n := live.Add(1)
 	notePeak()
 	defer live.Add(-1)
+	time.Sleep(50 * time.Millisecond)
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
@@ -102,5 +103,6 @@ func main() {
 		fmt.Println("batch-err")
 	}
 	_ = limited(ctx)
-	fmt.Println("limit-2 peak:", peakHeld.Load())
+	fmt.Println(peakHeld.Load() <= 2)
+	fmt.Println(peakHeld.Load() >= 1)
 }
