@@ -457,10 +457,19 @@ func (fl *fileLower) isChainCall(e syntax.Expr) bool {
 	switch sel.Sel.Value {
 	case "filter", "map", "find", "any", "all", "sortBy",
 		"first", "last", "get", "take", "drop", "sum", "count":
-		if t := fl.pkg.info.TypeOf(sel.X); t != nil {
-			if _, ok := t.Underlying().(*types2.Array); ok {
+		t := fl.pkg.info.TypeOf(sel.X)
+		if t == nil {
+			return true
+		}
+		if _, ok := t.Underlying().(*types2.Array); ok {
+			return false
+		}
+		if fl.pkg.info.Selections != nil {
+			if _, ok := fl.pkg.info.Selections[sel]; ok {
 				return false
 			}
+		} else if obj, _, _ := types2.LookupFieldOrMethod(t, true, fl.pkg.tpkg, sel.Sel.Value); obj != nil {
+			return false
 		}
 		return true
 	}
