@@ -391,15 +391,7 @@ func (s *Scanner) Fallback(dst any) {
 	if s.scalar() == 0 {
 		return
 	}
-	err := stdjson.Unmarshal(s.data[s.start:s.end], dst)
-	if err == nil {
-		return
-	}
-	if ute, ok := err.(*stdjson.UnmarshalTypeError); ok {
-		s.saveFallback(ute)
-		return
-	}
-	s.fatal(err)
+	s.decodeRaw(s.data[s.start:s.end], dst)
 }
 
 // FallbackQ decodes a json.Number field carrying the `string` option: the
@@ -424,43 +416,27 @@ func (s *Scanner) FallbackQ(dst any) {
 		s.save(tagUnquoted(t))
 		return
 	case quotedContent:
-		outerStart := s.start
-		err := stdjson.Unmarshal([]byte(item), dst)
-		if err == nil {
-			return
-		}
-		if ute, ok := err.(*stdjson.UnmarshalTypeError); ok {
-			ute.Offset += int64(outerStart)
-			if ute.Struct == "" {
-				ute.Struct = s.structName()
-			}
-			if ute.Field == "" {
-				ute.Field = detach(s.key)
-			} else {
-				ute.Field = s.key + "." + ute.Field
-			}
-			if s.saved == nil {
-				s.saved = ute
-			}
-			return
-		}
-		s.fatal(err)
+		s.decodeRaw([]byte(item), dst)
 		return
 	default:
 		if s.err != nil {
 			return
 		}
-		err := stdjson.Unmarshal(s.data[s.start:s.end], dst)
-		if err == nil {
-			return
-		}
-		if ute, ok := err.(*stdjson.UnmarshalTypeError); ok {
-			s.saveFallback(ute)
-			return
-		}
-		s.fatal(err)
+		s.decodeRaw(s.data[s.start:s.end], dst)
 		return
 	}
+}
+
+func (s *Scanner) decodeRaw(raw []byte, dst any) {
+	err := stdjson.Unmarshal(raw, dst)
+	if err == nil {
+		return
+	}
+	if ute, ok := err.(*stdjson.UnmarshalTypeError); ok {
+		s.saveFallback(ute)
+		return
+	}
+	s.fatal(err)
 }
 
 func (s *Scanner) saveFallback(ute *stdjson.UnmarshalTypeError) {
