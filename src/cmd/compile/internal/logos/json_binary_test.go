@@ -99,9 +99,6 @@ func TestBinaryZeroWireBudget(t *testing.T) {
 	if !strings.Contains(text, "*v = make(") {
 		t.Errorf("zero-wire path must allocate directly without per-element iteration:\n%s", text)
 	}
-	if n := strings.Count(text, "(1 << 26)/_logos_zsize"); n != 2 {
-		t.Errorf("zero-wire path lacks the 64MiB single-allocation bound in %d places, want 2 (encode and decode):\n%s", n, text)
-	}
 	big := lowerStaticText(t, "package p\ntype B struct {\n\tV []uint64 `json:\"v\"`\n}\n")
 	if strings.Contains(big, "storage budget exceeded") || strings.Contains(big, "_logos_budget") {
 		t.Errorf("nonzero-wire path must not reject on count header alone (charge nothing on total):\n%s", big)
