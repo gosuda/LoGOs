@@ -192,7 +192,7 @@ The command `logos context <pkg>#<Symbol>` MUST print the declaration plus one l
 `logos context` output MUST hold at most 100 lines [T-103].
 `logos context` MUST serve `.lgo` and `.go` packages [T-103].
 `logos context` MUST report an unknown symbol with text that names the package and the missing symbol [T-103].
-The command `logos next` MUST convert a whole Go module to a loGo/s module [T-103][R-U3].
+The command `logos next --fix` MUST convert a whole Go module to a loGo/s module [T-103][R-U3].
 `logos next` MUST use byte-span splicing and MUST keep every comment and build line byte-identical outside rewrites [T-103].
 `logos next` MUST keep each non-standard Go import of the module as an import of a Go package [T-103][R-U2].
 `logos next` MUST change nothing while it only prints a diff [T-103].
