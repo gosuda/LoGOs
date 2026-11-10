@@ -41,6 +41,16 @@ cd g/main
 logos build -o $WORK/bin/g$GOEXE ./cmd
 ! stderr '\[capabilities::unauthorized_unsafe\]'
 
+cd ../..
+cd h/main
+! logos build ./...
+stderr 'ERROR \[capabilities::unauthorized_unsafe\]: Transitive dependency ''example\.com/hshort'' imports ''unsafe'''
+stderr '-> example\.com/hshort'
+stderr '-> unsafe'
+! stderr 'hlong'
+! stderr 'hmid'
+cd ../..
+
 -- a/main/go.mod --
 module example.com/main
 
@@ -289,3 +299,76 @@ func Msg() string {
 	var x = 42
 	return strconv.Itoa(*(*int)(unsafe.Pointer(&x)))
 }
+
+-- h/main/go.mod --
+module example.com/hmain
+
+go 1.27
+
+require (
+	example.com/hshort v0.0.0
+	example.com/hlong v0.0.0
+	example.com/hmid v0.0.0
+)
+
+replace example.com/hshort => ../short
+
+replace example.com/hlong => ../long
+
+replace example.com/hmid => ../mid
+
+-- h/main/logos.toml --
+[capabilities]
+transitive_unsafe = "deny"
+
+-- h/main/cmd/main.go --
+package main
+
+import (
+	_ "example.com/hlong"
+	_ "example.com/hshort"
+)
+
+func main() {}
+
+-- h/short/go.mod --
+module example.com/hshort
+
+go 1.27
+
+-- h/short/short.go --
+package hshort
+
+import "unsafe"
+
+var _ = unsafe.Sizeof(0)
+
+-- h/long/go.mod --
+module example.com/hlong
+
+go 1.27
+
+require (
+	example.com/hmid v0.0.0
+)
+
+replace example.com/hmid => ../mid
+
+-- h/long/long.go --
+package hlong
+
+import _ "example.com/hmid"
+
+-- h/mid/go.mod --
+module example.com/hmid
+
+go 1.27
+
+require example.com/hshort v0.0.0
+
+replace example.com/hshort => ../short
+
+-- h/mid/mid.go --
+package hmid
+
+import _ "example.com/hshort"
