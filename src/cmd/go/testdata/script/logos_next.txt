@@ -90,6 +90,8 @@ grep 'ys := xs\.map\(x => double\(x\)\)' loop.lgo
 ! grep 'spaced' next_tasks.json
 grep -count=1 '^\tys := \[\]int\{\}$' loop.lgo
 grep -count=1 '^\t\tys = append\(ys, double\(xs\[i\]\)\)$' loop.lgo
+grep -count=1 '^    var out \[\]int$' loop.lgo
+grep -count=1 '^        out = append\(out, xs\[i\]\)$' loop.lgo
 
 grep 'fetch fallback for' convert.lgo
 grep 'return v, err' convert.lgo
@@ -258,14 +260,14 @@ func doubleAll(xs []int) []int {
 
 // firstBig collects elements up to the limit.
 func firstBig(xs []int, limit int) []int {
-	var out []int
-	for i := 0; i < len(xs); i++ {
-		if xs[i] > limit {
-			break
-		}
-		out = append(out, xs[i])
-	}
-	return out
+    var out []int
+    for i := 0; i < len(xs); i++ {
+        if xs[i] > limit {
+            break
+        }
+        out = append(out, xs[i])
+    }
+    return out
 }
 
 // countNeg counts and collects negative elements.
@@ -473,14 +475,14 @@ func doubleAll(xs []int) []int {
 
 // firstBig collects elements up to the limit.
 func firstBig(xs []int, limit int) []int {
-	var out []int
-	for i := 0; i < len(xs); i++ {
-		if xs[i] > limit {
-			break
-		}
-		out = append(out, xs[i])
-	}
-	return out
+    var out []int
+    for i := 0; i < len(xs); i++ {
+        if xs[i] > limit {
+            break
+        }
+        out = append(out, xs[i])
+    }
+    return out
 }
 
 // countNeg counts and collects negative elements.
