@@ -135,6 +135,49 @@ func TestLogosJSONDiagnostics(t *testing.T) {
 			t.Errorf("message = %v, want a string containing %q", m["message"], "undefined")
 		}
 	})
+	t.Run("GoLintTypeError", func(t *testing.T) {
+		dir := logosJSONFixture(t, map[string]string{
+			"go.mod":  "module example.com/golinttypeerr\n\ngo 1.27\n",
+			"main.go": "package main\n\nfunc main() {\n\tundefinedFn()\n}\n",
+		})
+		code, records := runLogosJSON(t, dir, "lint", "--json-diagnostics", "./...")
+		if code == 0 {
+			t.Errorf("logos lint exit status 0, want nonzero")
+		}
+		if len(records) != 1 {
+			t.Fatalf("got %d records, want 1: %v", len(records), records)
+		}
+		m := records[0]
+		checkLogosEnvelope(t, m, ".go")
+		checkLogosSeverity(t, m, "deny")
+		checkLogosRule(t, m, "")
+		msg, ok := m["message"].(string)
+		if !ok || !strings.Contains(msg, "undefined") {
+			t.Errorf("message = %v, want a string containing %q", m["message"], "undefined")
+		}
+	})
+
+	t.Run("LgoLintTypeError", func(t *testing.T) {
+		dir := logosJSONFixture(t, map[string]string{
+			"go.mod":   "module example.com/lgolinttypeerr\n\ngo 1.27\n",
+			"main.lgo": "package main\n\nfunc main() {\n\tundefinedFn()\n}\n",
+		})
+		code, records := runLogosJSON(t, dir, "lint", "--json-diagnostics", "./...")
+		if code == 0 {
+			t.Errorf("logos lint exit status 0, want nonzero")
+		}
+		if len(records) != 1 {
+			t.Fatalf("got %d records, want 1: %v", len(records), records)
+		}
+		m := records[0]
+		checkLogosEnvelope(t, m, ".lgo")
+		checkLogosSeverity(t, m, "deny")
+		checkLogosRule(t, m, "")
+		msg, ok := m["message"].(string)
+		if !ok || !strings.Contains(msg, "undefined") {
+			t.Errorf("message = %v, want a string containing %q", m["message"], "undefined")
+		}
+	})
 
 	t.Run("GoLint", func(t *testing.T) {
 		dir := logosJSONFixture(t, map[string]string{
