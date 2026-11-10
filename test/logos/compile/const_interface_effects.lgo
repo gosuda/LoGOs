@@ -2,6 +2,11 @@
 
 package p
 
+import (
+	"os"
+	"sort"
+)
+
 type Qualified interface {
 	const Name() string
 }
@@ -85,4 +90,37 @@ func attackCallPtr(m const *MutPtr) {
 
 func pureCallControl(p const *Pure) string {
 	return p.Name()
+}
+
+type Opaque struct {
+	items []int
+}
+
+func (o Opaque) Name() string {
+	sort.Ints(o.items)
+	return "sort"
+}
+
+var _ Qualified = Opaque{items: []int{3, 1, 2}} // ERROR "method Name is not readonly"
+
+var _ Qualified = &os.File{} // ERROR "method Name is not readonly"
+
+var _ Qualified = LateDecl{tag: "x"} // ERROR "method Name is not readonly"
+
+type LateDecl struct {
+	tag   string
+	items []int
+}
+
+func (l LateDecl) Name() string {
+	l.items[0] = 1
+	return "late:" + l.tag
+}
+
+func attackDynamicView(xs const []Ordinary) {
+	_ = xs[0].Name() // ERROR "cannot call Name through const view"
+}
+
+func dynamicViewControl(qs const []Qualified) string {
+	return qs[0].Name()
 }
