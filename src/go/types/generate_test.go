@@ -720,6 +720,47 @@ func stripLogosHooks(f *ast.File) {
 		return true
 	})
 
+	pureInit := func(s *ast.IfStmt) bool {
+		if s.Init == nil {
+			return true
+		}
+		a, _ := s.Init.(*ast.AssignStmt)
+		if a == nil || a.Tok != token.DEFINE {
+			return false
+		}
+		pure := true
+		for _, e := range a.Rhs {
+			ast.Inspect(e, func(n ast.Node) bool {
+				if _, ok := n.(*ast.CallExpr); ok {
+					pure = false
+					return false
+				}
+				return true
+			})
+		}
+		return pure
+	}
+	for changed := true; changed; {
+		changed = false
+		ast.Inspect(f, func(n ast.Node) bool {
+			b, _ := n.(*ast.BlockStmt)
+			if b == nil {
+				return true
+			}
+			for i := 0; i < len(b.List); {
+				s, _ := b.List[i].(*ast.IfStmt)
+				if s == nil || s.Else != nil || len(s.Body.List) != 0 || !pureInit(s) {
+					i++
+					continue
+				}
+				drop(s.Pos(), s.End())
+				b.List = slices.Delete(b.List, i, i+1)
+				changed = true
+			}
+			return true
+		})
+	}
+
 	ast.Inspect(f, func(n ast.Node) bool {
 		if call, _ := n.(*ast.CallExpr); call != nil && isLogosCall(call) {
 			panic("unhandled logos hook: " + logosCallName(call))

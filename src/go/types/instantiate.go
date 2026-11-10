@@ -269,11 +269,6 @@ func (check *Checker) implements(V, T Type, constraint bool, cause *string) bool
 		return false
 	}
 
-	if constraint {
-	}
-	if !constraint {
-	}
-
 	// Every type satisfies the empty interface.
 	if Ti.Empty() {
 		return true
