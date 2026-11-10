@@ -405,3 +405,44 @@ func countMayYield(f *facts.Facts) (pure, yield int) {
 	}
 	return pure, yield
 }
+
+const wasmYieldFreeProgram = `package main
+
+import "fmt"
+
+//go:noinline
+func nilderef(p *int) int { return *p }
+
+//go:noinline
+func leaf2(x int) int { return x + 1 }
+
+//go:noinline
+func bigframe(v int) int {
+	var buf [8192]byte
+	buf[0] = byte(leaf2(v))
+	buf[8191] = byte(v >> 8)
+	return int(buf[0]) + int(buf[8191]) + leaf2(v)
+}
+
+func main() {
+	x := 41
+	fmt.Println(nilderef(&x), bigframe(x))
+}
+`
+
+const wasmYieldFreeWant = "41 84\n"
+func TestWasmYieldFreeSourcesRunUnderNode(t *testing.T) {
+	testenv.MustHaveGoBuild(t)
+	wasmNode(t)
+	for name, tool := range map[string]string{
+		"plain go": testenv.GoToolPath(t),
+		"logos":    wasmLogos(t),
+	} {
+		t.Run(name, func(t *testing.T) {
+			got, err := runWasmNode(t, buildWasm(t, tool, "js", wasmYieldFreeProgram, ""))
+			if err != nil || got != wasmYieldFreeWant {
+				t.Fatalf("run: %v\ngot %q\nwant %q", err, got, wasmYieldFreeWant)
+			}
+		})
+	}
+}
