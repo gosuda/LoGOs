@@ -281,7 +281,11 @@ func (fl *fileLower) constMapText(g *constMapGen, pos syntax.Pos) string {
 			entries[i] = constMapKey{hash: constKeyHash(keys[i]), canon: constKeyCanon(keys[i])}
 		}
 		var err error
-		layout, err = buildConstMap(entries, defaultConstMapBudget)
+		budget := defaultConstMapBudget
+		if base.Debug.LogosConstmapSeeds > 0 {
+			budget = constMapBudget{MaxSeeds: base.Debug.LogosConstmapSeeds, Rounds: defaultConstMapBudget.Rounds}
+		}
+		layout, err = buildConstMap(entries, budget)
 		if err != nil {
 			base.Errorf("%s: %v", pos.String(), err)
 			base.ExitIfErrors()
