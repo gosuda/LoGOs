@@ -53,7 +53,6 @@ func TestLoadPrecedence(t *testing.T) {
 		modRoot    string
 		flags      Flags
 		optLevel   string
-		gcflags    []string
 		amd64      string
 		arm        string
 		experiment string
@@ -65,22 +64,19 @@ func TestLoadPrecedence(t *testing.T) {
 		{
 			name: "flagBeatsFile", modRoot: o3,
 			flags: Flags{Logos: true, Opt: "2"}, optLevel: "2",
-			gcflags: []string{"-d=inlbudget=120,variablemakethreshold=256"},
-			amd64:   "v3", arm: "v8.2",
+			amd64: "v3", arm: "v8.2",
 			experiment: "logosarena", arena: true, module: true,
 		},
 		{
 			name: "fileLevel", modRoot: o3,
 			flags: Flags{Logos: true}, optLevel: "3",
-			gcflags: []string{"-d=inlbudget=400,inlrecursivebudget=80,variablemakethreshold=4096"},
-			amd64:   "v3", arm: "v8.2",
+			amd64: "v3", arm: "v8.2",
 			experiment: "logosarena", arena: true, module: true,
 		},
 		{
 			name: "fileLevelO0", modRoot: o0,
 			flags: Flags{Logos: true}, optLevel: "0",
-			gcflags: []string{"-N", "-l"},
-			amd64:   "v3", arm: "v8.2",
+			amd64: "v3", arm: "v8.2",
 			experiment: "logosarena", arena: true, module: true,
 		},
 		{
@@ -92,29 +88,25 @@ func TestLoadPrecedence(t *testing.T) {
 		{
 			name: "fileLevelO2", modRoot: o2,
 			flags: Flags{Logos: true}, optLevel: "2",
-			gcflags: []string{"-d=inlbudget=120,variablemakethreshold=256"},
-			amd64:   "v3", arm: "v8.2",
+			amd64: "v3", arm: "v8.2",
 			experiment: "logosarena", arena: true, module: true,
 		},
 		{
 			name: "fileLevelS", modRoot: os2,
 			flags: Flags{Logos: true}, optLevel: "s",
-			gcflags: []string{"-d=inlbudget=15"},
-			amd64:   "v3", arm: "v8.2",
+			amd64: "v3", arm: "v8.2",
 			experiment: "logosarena", arena: true, module: true,
 		},
 		{
 			name: "flagSBeatsFile", modRoot: o3,
 			flags: Flags{Logos: true, Opt: "s"}, optLevel: "s",
-			gcflags: []string{"-d=inlbudget=15"},
-			amd64:   "v3", arm: "v8.2",
+			amd64: "v3", arm: "v8.2",
 			experiment: "logosarena", arena: true, module: true,
 		},
 		{
 			name: "defaultO2", modRoot: empty,
 			flags: Flags{Logos: true}, optLevel: "2",
-			gcflags: []string{"-d=inlbudget=120,variablemakethreshold=256"},
-			amd64:   "v3", arm: "v8.2",
+			amd64: "v3", arm: "v8.2",
 			experiment: "logosarena", arena: true, module: true,
 		},
 		{
@@ -128,47 +120,40 @@ func TestLoadPrecedence(t *testing.T) {
 		{
 			name: "plainGoOpt", modRoot: empty,
 			flags: Flags{Opt: "0"}, optLevel: "0",
-			gcflags: []string{"-N", "-l"},
 		},
 		{
 			name: "envBeatsFileAMD64", modRoot: baseline,
 			flags: Flags{Logos: true, Env: Env{GOAMD64: "v2"}}, optLevel: "2",
-			gcflags: []string{"-d=inlbudget=120,variablemakethreshold=256"},
-			amd64:   "", arm: "v8.0",
+			amd64: "", arm: "v8.0",
 			experiment: "logosarena", arena: true, module: true,
 		},
 		{
 			name: "envBeatsFileARM64", modRoot: baseline,
 			flags: Flags{Logos: true, Env: Env{GOARM64: "v8.3"}}, optLevel: "2",
-			gcflags: []string{"-d=inlbudget=120,variablemakethreshold=256"},
-			amd64:   "v1", arm: "",
+			amd64: "v1", arm: "",
 			experiment: "logosarena", arena: true, module: true,
 		},
 		{
 			name: "fileLevelsWinWhenEnvEmpty", modRoot: baseline,
 			flags: Flags{Logos: true}, optLevel: "2",
-			gcflags: []string{"-d=inlbudget=120,variablemakethreshold=256"},
-			amd64:   "v1", arm: "v8.0",
+			amd64: "v1", arm: "v8.0",
 			experiment: "logosarena", arena: true, module: true,
 		},
 		{
 			name: "envBeatsFileDeterministic", modRoot: det,
 			flags: Flags{Logos: true, Env: Env{GOAMD64: "v4"}}, optLevel: "2",
-			gcflags: []string{"-d=inlbudget=120,variablemakethreshold=256"},
-			amd64:   "", arm: "v8.2",
+			amd64: "", arm: "v8.2",
 			experiment: "logosarena", arena: true, module: true,
 		},
 		{
 			name: "brokenFileFallbacks", modRoot: broken,
 			flags: Flags{Logos: true}, optLevel: "2",
-			gcflags: []string{"-d=inlbudget=120,variablemakethreshold=256"},
-			amd64:   "v3", arm: "v8.2", arena: false, module: true,
+			amd64: "v3", arm: "v8.2", arena: false, module: true,
 		},
 		{
 			name: "invalidOptText", modRoot: empty,
 			flags: Flags{Logos: true, Opt: "bad"}, optLevel: "2",
-			gcflags: []string{"-d=inlbudget=120,variablemakethreshold=256"},
-			amd64:   "v3", arm: "v8.2",
+			amd64: "v3", arm: "v8.2",
 			experiment: "logosarena", arena: true, module: true,
 			wantErr: `logos build: invalid -O level "bad" (want 0, 1, 2, 3, s)`,
 		},
@@ -180,29 +165,25 @@ func TestLoadPrecedence(t *testing.T) {
 		{
 			name: "arenaComposesWithEnv", modRoot: arenaOnFile,
 			flags: Flags{Logos: true, Env: Env{GOEXPERIMENT: "nojsonv2"}}, optLevel: "2",
-			gcflags: []string{"-d=inlbudget=120,variablemakethreshold=256"},
-			amd64:   "v3", arm: "v8.2",
+			amd64: "v3", arm: "v8.2",
 			experiment: "nojsonv2,logosarena", arena: true, module: true,
 		},
 		{
 			name: "arenaAbsentKeepsEnv", modRoot: empty,
 			flags: Flags{Logos: true, Env: Env{GOEXPERIMENT: "jsonv2"}}, optLevel: "2",
-			gcflags: []string{"-d=inlbudget=120,variablemakethreshold=256"},
-			amd64:   "v3", arm: "v8.2",
+			amd64: "v3", arm: "v8.2",
 			experiment: "jsonv2,logosarena", arena: true, module: true,
 		},
 		{
 			name: "arenaWithEmptyEnv", modRoot: arenaOnFile,
 			flags: Flags{Logos: true}, optLevel: "2",
-			gcflags: []string{"-d=inlbudget=120,variablemakethreshold=256"},
-			amd64:   "v3", arm: "v8.2",
+			amd64: "v3", arm: "v8.2",
 			experiment: "logosarena", arena: true, module: true,
 		},
 		{
 			name: "pedanticOn", modRoot: empty,
 			flags:    Flags{Logos: true, Pedantic: true, PedanticSet: true},
 			optLevel: "2",
-			gcflags:  []string{"-d=inlbudget=120,variablemakethreshold=256"},
 			amd64:    "v3", arm: "v8.2",
 			experiment: "logosarena", arena: true,
 			pedantic: config.PedanticOn, module: true,
@@ -211,7 +192,6 @@ func TestLoadPrecedence(t *testing.T) {
 			name: "pedanticOff", modRoot: empty,
 			flags:    Flags{Logos: true, PedanticSet: true},
 			optLevel: "2",
-			gcflags:  []string{"-d=inlbudget=120,variablemakethreshold=256"},
 			amd64:    "v3", arm: "v8.2",
 			experiment: "logosarena", arena: true,
 			pedantic: config.PedanticOff, module: true,
@@ -220,7 +200,6 @@ func TestLoadPrecedence(t *testing.T) {
 			name: "pedanticUnset", modRoot: empty,
 			flags:      Flags{Logos: true},
 			optLevel:   "2",
-			gcflags:    []string{"-d=inlbudget=120,variablemakethreshold=256"},
 			experiment: "logosarena", arena: true,
 			amd64: "v3", arm: "v8.2",
 			pedantic: config.PedanticDefault, module: true,
@@ -229,7 +208,6 @@ func TestLoadPrecedence(t *testing.T) {
 			name: "flagFieldsCopied", modRoot: empty,
 			flags:    Flags{Logos: true, JSON: true, WasmLoader: true, LintCmd: true, WasmFeatures: "stack-switching"},
 			optLevel: "2",
-			gcflags:  []string{"-d=inlbudget=120,variablemakethreshold=256"},
 			amd64:    "v3", arm: "v8.2",
 			experiment: "logosarena", arena: true, module: true,
 		},
