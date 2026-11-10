@@ -414,10 +414,7 @@ func nullValHand() (point string, recovered any, err error) {
 		}
 	}()
 	b := (*box)(nil)
-	b0 := b
-	defer func() {
-		_ = b0.hCloseVal()
-	}()
+	defer b.CloseVal()
 	point = "stmt"
 	return
 }
@@ -448,12 +445,7 @@ func nullIfaceHand() (point string, recovered any, err error) {
 		}
 	}()
 	var c ifaceCloser
-	c0 := c
-	defer func() {
-		if e := c0.Close(); e != nil {
-			err = e
-		}
-	}()
+	defer c.Close()
 	point = "stmt"
 	return
 }

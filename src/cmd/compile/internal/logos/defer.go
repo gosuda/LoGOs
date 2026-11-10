@@ -15,13 +15,16 @@ import (
 )
 
 type capturePiece struct {
-	expr    syntax.Expr
-	text    otext
-	start   int
-	end     int
-	capture bool
-	single  string
-	multi   []string
+	expr      syntax.Expr
+	text      otext
+	start     int
+	end       int
+	capture   bool
+	single    string
+	multi     []string
+	takeAddr  bool
+	takeDeref bool
+	nilCheck  bool
 }
 
 type callPlan struct {
@@ -152,7 +155,72 @@ func (fc *funcLower) methodRecv(call *syntax.CallExpr) (capturePiece, string, bo
 	recv.end = rspan.end
 	recv.text = fl.textOf(rspan)
 	recv.single = fc.nextFun()
+	fc.bindRecv(&recv, s, sel.X)
+	if recv.takeAddr {
+		recv.text = cat(gen("&"), recv.text)
+	}
+	if recv.takeDeref {
+		recv.text = cat(gen("*"), recv.text)
+	}
 	return recv, sel.Sel.Value, true
+}
+
+func (fc *funcLower) bindRecv(recv *capturePiece, s *types2.Selection, x syntax.Expr) {
+	effX, effText, effT := fc.recvTarget(s, x, recv.text)
+	if effT == nil {
+		return
+	}
+	recv.expr = effX
+	recv.text = effText
+	if _, isParam := types2.Unalias(effT).(*types2.TypeParam); !isParam {
+		if _, ok := effT.Underlying().(*types2.Interface); ok {
+			recv.nilCheck = true
+			return
+		}
+	}
+	meth, ok := s.Obj().(*types2.Func)
+	if !ok {
+		return
+	}
+	sig, ok := meth.Type().(*types2.Signature)
+	if !ok || sig.Recv() == nil {
+		return
+	}
+	_, wantPtr := types2.Unalias(sig.Recv().Type()).(*types2.Pointer)
+	_, havePtr := types2.Unalias(effT).(*types2.Pointer)
+	switch {
+	case wantPtr && !havePtr:
+		recv.takeAddr = true
+	case !wantPtr && havePtr:
+		recv.takeDeref = true
+	}
+}
+
+func (fc *funcLower) recvTarget(s *types2.Selection, x syntax.Expr, text otext) (syntax.Expr, otext, types2.Type) {
+	typ := s.Recv()
+	if typ == nil {
+		return x, text, nil
+	}
+	idx := s.Index()
+	if len(idx) == 0 {
+		return x, text, typ
+	}
+	expr := x
+	for _, fi := range idx[:len(idx)-1] {
+		st := types2.Unalias(typ)
+		if ptr, ok := st.(*types2.Pointer); ok {
+			st = types2.Unalias(ptr.Elem())
+		}
+		strct, ok := st.(*types2.Struct)
+		if !ok || fi < 0 || fi >= strct.NumFields() {
+			return x, text, nil
+		}
+		fld := strct.Field(fi)
+		expr = selOf(x.Pos(), expr, fld.Name())
+		text = cat(text, gen("."+fld.Name()))
+		typ = fld.Type()
+	}
+	return expr, text, typ
 }
 
 type argClass int
@@ -253,6 +321,33 @@ func (fc *funcLower) planUses(plan *callPlan, tw *twin) (syntax.Expr, []syntax.E
 	return fun, args, names, vals
 }
 
+func wrapRecv(piece capturePiece) syntax.Expr {
+	switch {
+	case piece.takeAddr:
+		return at(&syntax.Operation{Op: syntax.And, X: piece.expr}, piece.expr.Pos())
+	case piece.takeDeref:
+		return at(&syntax.Operation{Op: syntax.Mul, X: piece.expr}, piece.expr.Pos())
+	default:
+		return piece.expr
+	}
+}
+
+func ifaceNilCheckStmt(pos syntax.Pos, recvTemp, method string) syntax.Stmt {
+	cond := at(&syntax.Operation{Op: syntax.Eql, X: nameOf(pos, recvTemp), Y: nilOf(pos)}, pos)
+	discard := assignOf(pos, []syntax.Expr{nameOf(pos, "_")}, []syntax.Expr{selOf(pos, nameOf(pos, recvTemp), method)})
+	return ifOf(pos, nil, cond, []syntax.Stmt{discard})
+}
+
+func spliceRecvCheck(stmts []syntax.Stmt, chk syntax.Stmt) []syntax.Stmt {
+	if chk == nil || len(stmts) == 0 {
+		return stmts
+	}
+	out := make([]syntax.Stmt, 0, len(stmts)+1)
+	out = append(out, stmts[:len(stmts)-1]...)
+	out = append(out, chk)
+	return append(out, stmts[len(stmts)-1])
+}
+
 func pieceNames(piece capturePiece) []string {
 	if len(piece.multi) > 0 {
 		return piece.multi
@@ -277,7 +372,7 @@ func valList(piece capturePiece, tw *twin) []syntax.Expr {
 		return nil
 	}
 	if tw == nil {
-		return []syntax.Expr{piece.expr}
+		return []syntax.Expr{wrapRecv(piece)}
 	}
 	return []syntax.Expr{tw.mark(piece.expr.Pos(), piece.text)}
 }
@@ -296,6 +391,10 @@ func (fc *funcLower) lowerDeferTry(s *syntax.CallStmt, t *syntax.TryExpr, call *
 	headN := append(slices.Clone(native[:len(native)-1]), deferOf(cpos, callOf(cpos, closureN, nil)))
 	closureT := deferClosure(cpos, []syntax.Stmt{textStmts[len(textStmts)-1]})
 	headT := append(slices.Clone(textStmts[:len(textStmts)-1]), deferOf(cpos, callOf(cpos, closureT, nil)))
+	if plan.isMethod && plan.recv.nilCheck {
+		headN = spliceRecvCheck(headN, ifaceNilCheckStmt(cpos, plan.recv.single, plan.method))
+		headT = spliceRecvCheck(headT, ifaceNilCheckStmt(cpos, plan.recv.single, plan.method))
+	}
 	prefix := leftoverComments(fl, span{start: stmtOff, end: spanEnd}, planSpans(plan))
 	fl.addT(stmtOff, spanEnd, cat(prefix, renderText(headT, tw.subs)))
 	return headN
@@ -327,7 +426,13 @@ func (fc *funcLower) lowerErrdefer(s *syntax.ErrdeferStmt) []syntax.Stmt {
 	bodyN := []syntax.Stmt{exprStmtOf(cpos, callN)}
 	bodyT := []syntax.Stmt{exprStmtOf(cpos, callT)}
 	native := fc.guardedDefer(cpos, bodyN, capNamesN, capValsN)
+	if plan.isMethod && plan.recv.nilCheck {
+		native = spliceRecvCheck(native, ifaceNilCheckStmt(cpos, plan.recv.single, plan.method))
+	}
 	text := fc.guardedDefer(cpos, bodyT, capNamesT, capValsT)
+	if plan.isMethod && plan.recv.nilCheck {
+		text = spliceRecvCheck(text, ifaceNilCheckStmt(cpos, plan.recv.single, plan.method))
+	}
 	spanEnd := skipCloseParens(fl.src, plan.end)
 	prefix := leftoverComments(fl, span{start: stmtOff, end: spanEnd}, planSpans(plan))
 	fl.addT(stmtOff, spanEnd, cat(prefix, renderText(text, tw.subs)))
@@ -350,6 +455,10 @@ func (fc *funcLower) lowerErrdeferTry(s *syntax.ErrdeferStmt, t *syntax.TryExpr,
 	bodyT := []syntax.Stmt{textStmts[len(textStmts)-1]}
 	headN := append(slices.Clone(native[:len(native)-1]), fc.guardedDefer(cpos, bodyN, nil, nil)[0])
 	headT := append(slices.Clone(textStmts[:len(textStmts)-1]), fc.guardedDefer(cpos, bodyT, nil, nil)[0])
+	if plan.isMethod && plan.recv.nilCheck {
+		headN = spliceRecvCheck(headN, ifaceNilCheckStmt(cpos, plan.recv.single, plan.method))
+		headT = spliceRecvCheck(headT, ifaceNilCheckStmt(cpos, plan.recv.single, plan.method))
+	}
 	prefix := leftoverComments(fl, span{start: stmtOff, end: spanEnd}, planSpans(plan))
 	fl.addT(stmtOff, spanEnd, cat(prefix, renderText(headT, tw.subs)))
 	return headN
