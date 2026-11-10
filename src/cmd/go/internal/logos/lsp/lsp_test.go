@@ -1222,11 +1222,24 @@ func TestProxyClosesLoweredDocuments(t *testing.T) {
 }
 
 func TestProxyAnswersRequestsInFlightWhenClientCloses(t *testing.T) {
+	ln, err := net.ListenTCP("tcp", &net.TCPAddr{IP: net.ParseIP("127.0.0.1")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := ln.Close(); err != nil {
+			t.Errorf("closing gate listener: %v", err)
+		}
+	}()
+	if err := ln.SetDeadline(time.Now().Add(waitLimit)); err != nil {
+		t.Fatalf("arming the gate accept: %v", err)
+	}
 	f := newFixture(t, map[string]string{"a/a.lgo": aLgo}, fixtureOptions{
 		Script: func(string) fakeScript {
 			return fakeScript{
-				DelayMillis: 300,
-				Responses:   map[string]json.RawMessage{"textDocument/hover": toJSON(t, map[string]any{"contents": "late"})},
+				HoldMethod: "textDocument/hover",
+				HoldAddr:   ln.Addr().String(),
+				Responses:  map[string]json.RawMessage{"textDocument/hover": toJSON(t, map[string]any{"contents": "late"})},
 			}
 		},
 	})
@@ -1235,7 +1248,22 @@ func TestProxyAnswersRequestsInFlightWhenClientCloses(t *testing.T) {
 	if err := f.client.w.write(&message{ID: json.RawMessage("99"), Method: "textDocument/hover", Params: raw}); err != nil {
 		t.Fatal(err)
 	}
+	gate, err := ln.Accept()
+	if err != nil {
+		t.Fatalf("the held backend never took the hover: %v", err)
+	}
+	defer func() {
+		if err := gate.Close(); err != nil {
+			t.Errorf("closing gate conn: %v", err)
+		}
+	}()
+	if err := gate.SetWriteDeadline(time.Now().Add(waitLimit)); err != nil {
+		t.Fatalf("arming the gate write: %v", err)
+	}
 	f.client.closeW()
+	if _, err := gate.Write([]byte{1}); err != nil {
+		t.Fatalf("releasing the held backend: %v", err)
+	}
 	m := f.client.waitFor("the late hover response", func(m *message) bool { return m.isResponse() && string(m.ID) == "99" })
 	if !strings.Contains(string(m.Result), "late") {
 		t.Errorf("hover result = %s, want the scripted answer", m.Result)
