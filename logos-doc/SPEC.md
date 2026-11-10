@@ -1181,7 +1181,7 @@ A child blocked in netpoll-backed network I/O MUST wake within 100 ms with a tim
 
 A goroutine outside the group MUST stay blocked. [T-206]
 
-Regular files and cgo calls MUST NOT wake this way. [T-206]
+Cgo calls MUST NOT wake this way. [T-206]
 
 ```lgo
 func f(ctx context.Context) error {
@@ -1861,19 +1861,19 @@ A non-constant integer product in a `make` length or capacity MUST lower to `log
 
 ### 16.1 Proxy model and position mapping
 
-- `logos lsp` MUST keep one document store keyed by source URI that holds the text, the client version, and at most one lowered snapshot per package. [T-Sec16]
+- `logos lsp` MUST keep one document store keyed by the file path derived from the source URI that holds the text, the client URI, the client version, and at most one lowered snapshot per package. [T-Sec16]
 - A request on a `.lgo` document MUST use a snapshot whose versions equal the current client versions of every document of the package; the proxy MUST compute it on demand, once per version set, and concurrent requests MUST share one computation. [T-Sec16]
 - The store MUST keep the newest client version of each open document; a change that carries an older version MUST be dropped and MUST NOT reach `gopls`. [T-Sec16]
 - A frame that carries a duplicate Content-Length header MUST fail with a descriptive error. [T-Sec16]
 - The proxy MUST NOT recompile without a request or a `didSave`. [T-Sec16]
-- The lowering MUST come from one `logos list -compiled -json -overlay=<file>` run that returns, per `.lgo` file, the lowered text, the edit map, the hints JSON, and the compiler diagnostics. [T-Sec16]
+- The lowering MUST come from one `logos list` run with compiled JSON output and the overlay that returns, per `.lgo` file, the lowered text, the edit map, the hints JSON, and the compiler diagnostics. [T-Sec16]
 - Position translation MUST use the shared edit map package. [T-Sec16]
 - Position translation MUST rest on the compiler-written origin segments of the eject map: a lowered offset inside a copied segment maps to its exact original offset, and an offset inside a compiler-generated run maps to the anchor position of that run; no heuristic or size-capped textual matching takes part. [T-Sec16]
 - Closing an unsaved `.lgo` document MUST discard its unsaved overlay and MUST refresh the retained package's compiler results. [T-Sec16]
 - A `textDocument/formatting` request for a `.lgo` document MUST be refused instead of returning edits to lowered Go. Formatting requests for Go documents MUST pass through to `gopls`. [T-Sec16][R-U1]
 - It MUST merge compiler JSON diagnostics into `publishDiagnostics`. [T-Sec16]
 - It MUST report `logos lsp: gopls not found on PATH` when `gopls` is missing. [T-Sec16]
-- The proxy MUST speak standard LSP over stdio with no editor-specific code. [T-Sec16]
+- The proxy MUST speak standard LSP over stdio. [T-Sec16]
 
 ### 16.2 Inlay hints for lowering
 
