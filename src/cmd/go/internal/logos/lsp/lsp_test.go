@@ -10,9 +10,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"internal/testenv"
 	"io"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -1336,37 +1338,81 @@ func TestServeRejectsMissingParts(t *testing.T) {
 	}
 }
 
-func TestGoplsMissing(t *testing.T) {
-	t.Setenv("PATH", t.TempDir())
-	_, err := goplsCommand()
-	if err == nil || err.Error() != "logos lsp: gopls not found on PATH" {
-		t.Errorf("goplsCommand() error = %v, want %q", err, "logos lsp: gopls not found on PATH")
+func TestLogosLspGoplsDiscovery(t *testing.T) {
+	testenv.MustHaveGoBuild(t)
+	t.Setenv("GOFLAGS", "")
+	t.Setenv("GOTOOLCHAIN", "local")
+	t.Setenv("GOPROXY", "off")
+	logosBin := filepath.Join(filepath.Dir(testenv.GoToolPath(t)), "logos")
+	if _, err := os.Stat(logosBin); err != nil {
+		t.Skipf("logos binary not present: %v", err)
 	}
-	dir := t.TempDir()
-	name := "gopls"
-	if err := os.WriteFile(filepath.Join(dir, name), []byte("#!/bin/sh\n"), 0o777); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", dir)
-	cmd, err := goplsCommand()
-	if err != nil {
-		t.Skipf("a script named gopls is not executable here: %v", err)
-	}
-	if cmd[0] != filepath.Join(dir, name) || !slices.Contains(cmd, "-mode=stdio") {
-		t.Errorf("goplsCommand() = %v, want the gopls of PATH with -mode=stdio", cmd)
-	}
-}
-
-func TestGoplsEnvPutsToolchainFirst(t *testing.T) {
-	sep := string(os.PathListSeparator)
-	got := goplsEnv([]string{"HOME=/h", "PATH=/usr/bin" + sep + "/bin", "X=1"}, "/goroot/bin")
-	want := []string{"HOME=/h", "X=1", "PATH=/goroot/bin" + sep + "/usr/bin" + sep + "/bin"}
-	if !slices.Equal(got, want) {
-		t.Errorf("goplsEnv = %v, want %v", got, want)
-	}
-	if got := goplsEnv(nil, "/goroot/bin"); !slices.Equal(got, []string{"PATH=/goroot/bin"}) {
-		t.Errorf("goplsEnv with no PATH = %v, want a PATH of the toolchain alone", got)
-	}
+	binDir := filepath.Dir(logosBin)
+	t.Run("missing", func(t *testing.T) {
+		cmd := exec.Command(logosBin, "lsp")
+		cmd.Env = append(os.Environ(), "PATH="+t.TempDir())
+		var stderr bytes.Buffer
+		cmd.Stderr = &stderr
+		if err := cmd.Run(); err == nil || !strings.Contains(stderr.String(), "gopls not found on PATH") {
+			t.Errorf("logos lsp without gopls = %v, stderr %q, want the not-found error", err, stderr.String())
+		}
+	})
+	t.Run("order", func(t *testing.T) {
+		exe, err := os.Executable()
+		if err != nil {
+			t.Fatal(err)
+		}
+		fakeDir := t.TempDir()
+		pathLog := filepath.Join(t.TempDir(), "path.log")
+		wrapper := "#!/bin/sh\necho \"$PATH\" >> \"" + pathLog + "\"\nexec \"" + exe + "\" \"$@\"\n"
+		if err := os.WriteFile(filepath.Join(fakeDir, "gopls"), []byte(wrapper), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		scriptPath := filepath.Join(t.TempDir(), "script.json")
+		if err := os.WriteFile(scriptPath, []byte(`{}`), 0o666); err != nil {
+			t.Fatal(err)
+		}
+		sep := string(os.PathListSeparator)
+		cmd := exec.Command(logosBin, "lsp")
+		cmd.Env = append(os.Environ(),
+			"PATH="+fakeDir+sep+"/usr/bin"+sep+"/bin",
+			fakeEnv+"="+scriptPath,
+			fakeLogEnv+"="+filepath.Join(t.TempDir(), "gopls.log"))
+		stdin, err := cmd.StdinPipe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		cmd.Stdout = io.Discard
+		var stderr bytes.Buffer
+		cmd.Stderr = &stderr
+		if err := cmd.Start(); err != nil {
+			t.Fatal(err)
+		}
+		send := func(body string) {
+			t.Helper()
+			if _, err := fmt.Fprintf(stdin, "Content-Length: %d\r\n\r\n%s", len(body), body); err != nil {
+				t.Fatal(err)
+			}
+		}
+		send(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}`)
+		send(`{"jsonrpc":"2.0","method":"initialized","params":{}}`)
+		send(`{"jsonrpc":"2.0","id":2,"method":"shutdown","params":null}`)
+		send(`{"jsonrpc":"2.0","method":"exit","params":{}}`)
+		if err := stdin.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if err := cmd.Wait(); err != nil {
+			t.Fatalf("logos lsp = %v, stderr %q", err, stderr.String())
+		}
+		data, err := os.ReadFile(pathLog)
+		if err != nil {
+			t.Fatal(err)
+		}
+		entries := strings.Split(strings.TrimSpace(string(data)), sep)
+		if len(entries) < 2 || entries[0] != binDir || entries[1] != fakeDir {
+			t.Errorf("gopls PATH = %q, want the toolchain bin first and the fake gopls next", data)
+		}
+	})
 }
 
 func TestServeRejectsBadFrames(t *testing.T) {
