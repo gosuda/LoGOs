@@ -13,7 +13,8 @@ stdout '^non-member$'
 cp stdout $WORK/eject-stdout.txt
 
 logos eject -o out
-grep 'return func' out/main.go
+grep 'return func\(\) string {' out/main.go
+grep -count=1 '}\(\)' out/main.go
 grep 'var _ Asserted = \(\*Checked\)\(nil\)' out/main.go
 grep 'switch' out/main.go
 exists out/go.mod
