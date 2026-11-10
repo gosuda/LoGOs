@@ -1,0 +1,55 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+cd m
+logos run .
+stdout '^6$'
+stdout '^ada$'
+stdout '^7 -1$'
+cp stdout $WORK/eject-stdout.txt
+
+logos eject -o out
+exists out/main.go
+exists out/go.mod
+cd out
+go build ./...
+exec env -u GOROOT /home/linuxbrew/.linuxbrew/Cellar/go/1.27.3/libexec/bin/go build ./...
+exec env -u GOROOT /home/linuxbrew/.linuxbrew/Cellar/go/1.27.3/libexec/bin/go run .
+cmp stdout $WORK/eject-stdout.txt
+cd ..
+
+-- m/go.mod --
+module example.com/ejectconstview
+
+go 1.27
+
+-- m/main.lgo --
+package main
+
+import "fmt"
+
+type User struct {
+	Name string
+}
+
+func showSlice(xs const []int) int {
+	total := 0
+	for _, v := range xs {
+		total += v
+	}
+	return total
+}
+
+func showPtr(p const *User) string {
+	return p.Name
+}
+
+func showMap(m const map[string]int, k string) int {
+	return m[k] ?? -1
+}
+
+func main() {
+	fmt.Println(showSlice([]int{1, 2, 3}))
+	fmt.Println(showPtr(&User{Name: "ada"}))
+	fmt.Println(showMap(map[string]int{"a": 7}, "a"), showMap(map[string]int{"a": 7}, "z"))
+}
