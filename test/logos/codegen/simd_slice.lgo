@@ -14,8 +14,8 @@ func sumI32(xs []int32) int32 {
 
 //go:noinline
 func sumU64(xs []uint64) uint64 {
-	// amd64/v1:"VPMASKMOVQ\\s+\\(" "VPADDQ" "CALL simd/archsimd\\.X86Features\\.AVX2\\(SB\\)"
-	// amd64/v3:"VPMASKMOVQ\\s+\\(" "VPADDQ" -"CALL simd/archsimd\\." -"CMPB internal/cpu\\.X86"
+// amd64/v1:"VPMASKMOVQ\\s+\\(" "VPADDQ\\s+\\(" "CALL simd/archsimd\\.X86Features\\.AVX2\\(SB\\)"
+// amd64/v3:"VPMASKMOVQ\\s+\\(" "VPADDQ\\s+\\(" -"CALL simd/archsimd\\." -"CMPB internal/cpu\\.X86"
 	// arm64:"CALL simd/archsimd\\.LoadUint64x2Part\\(SB\\)" "VADD V[0-9]+\\.D2" -"CALL simd/archsimd\\.X86Features"
 	return xs.sum()
 }
@@ -75,16 +75,16 @@ func sumU32(xs []uint32) uint32 {
 
 //go:noinline
 func sumF32(xs []float32) float32 {
-	// amd64/v1:"VPMASKMOVD\\s+\\(" "CALL simd/archsimd\\.X86Features\\.AVX2\\(SB\\)" -"CALL simd/archsimd\\.Load"
-	// amd64/v3:"VPMASKMOVD\\s+\\(" -"CALL simd/archsimd\\.X86Features" -"CMPB internal/cpu\\.X86"
+// amd64/v1:"VPMASKMOVD\\s+\\(" "VMOVDQU\\s+\\(" "CALL simd/archsimd\\.X86Features\\.AVX2\\(SB\\)" -"CALL simd/archsimd\\.Load"
+// amd64/v3:"VPMASKMOVD\\s+\\(" "VMOVDQU\\s+\\(" -"CALL simd/archsimd\\.X86Features" -"CMPB internal/cpu\\.X86"
 	// arm64:"CALL simd/archsimd\\.LoadFloat32x4Part\\(SB\\)" -"CALL simd/archsimd\\.X86Features"
 	return xs.sum()
 }
 
 //go:noinline
 func sumF64(xs []float64) float64 {
-	// amd64/v1:"VPMASKMOVQ\\s+\\(" "CALL simd/archsimd\\.X86Features\\.AVX2\\(SB\\)"
-	// amd64/v3:"VPMASKMOVQ\\s+\\(" -"CALL simd/archsimd\\.X86Features" -"CMPB internal/cpu\\.X86"
+// amd64/v1:"VPMASKMOVQ\\s+\\(" "VMOVDQU\\s+\\(" "CALL simd/archsimd\\.X86Features\\.AVX2\\(SB\\)"
+// amd64/v3:"VPMASKMOVQ\\s+\\(" "VMOVDQU\\s+\\(" -"CALL simd/archsimd\\.X86Features" -"CMPB internal/cpu\\.X86"
 	// arm64:"CALL simd/archsimd\\.LoadFloat64x2Part\\(SB\\)" -"CALL simd/archsimd\\.X86Features"
 	return xs.sum()
 }
@@ -114,8 +114,8 @@ type watt = float64
 
 //go:noinline
 func sumAlias(xs []watt) float64 {
-	// amd64/v1:"VPMASKMOVQ\\s+\\(" "CALL simd/archsimd\\.X86Features\\.AVX2\\(SB\\)" -"CALL simd/archsimd\\.Load"
-	// amd64/v3:"VPMASKMOVQ\\s+\\(" -"CALL simd/archsimd\\." -"CMPB internal/cpu\\.X86"
+// amd64/v1:"VPMASKMOVQ\\s+\\(" "VMOVDQU\\s+\\(" "CALL simd/archsimd\\.X86Features\\.AVX2\\(SB\\)" -"CALL simd/archsimd\\.Load"
+// amd64/v3:"VPMASKMOVQ\\s+\\(" "VMOVDQU\\s+\\(" -"CALL simd/archsimd\\." -"CMPB internal/cpu\\.X86"
 	// arm64:"CALL simd/archsimd\\.LoadFloat64x2Part\\(SB\\)" -"CALL simd/archsimd\\.X86Features"
 	return xs.sum()
 }
