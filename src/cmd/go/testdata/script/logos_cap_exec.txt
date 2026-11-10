@@ -78,6 +78,24 @@ stderr 'example\.com/kdep\.Init\(\)'
 stderr 'os\.startProcess\(\) +at .*os/exec_posix\.go:\d+'
 cd ../..
 
+cd m/main
+! logos build -o $WORK/bin/s2m$GOEXE ./cmd
+stderr 'ERROR \[capabilities::unauthorized_exec\]: Transitive dependency ''example\.com/m1dep'' reaches ''os\.startProcess'''
+stderr 'ERROR \[capabilities::unauthorized_exec\]: Transitive dependency ''example\.com/m2dep'' reaches ''os\.startProcess'''
+cd ../..
+
+cd n/main
+! logos build -o $WORK/bin/s2n$GOEXE ./cmd
+stderr 'ERROR \[capabilities::unauthorized_exec\]: Transitive dependency ''example\.com/ndep'' reaches ''os\.StartProcess'''
+stderr 'example\.com/ndep\.Init\(\)'
+cd ../..
+
+[!GOOS:windows] cd o/main
+[!GOOS:windows] ! logos build -o $WORK/bin/s2o$GOEXE ./cmd
+[!GOOS:windows] stderr 'ERROR \[capabilities::unauthorized_exec\]: Transitive dependency ''example\.com/odep'' reaches ''syscall\.ForkExec'''
+[!GOOS:windows] stderr 'example\.com/odep\.Init\(\)'
+[!GOOS:windows] cd ../..
+
 [cgo] cd l/main
 [cgo] logos build -o $WORK/bin/s2l$GOEXE ./cmd
 [cgo] ! stderr 'capabilities::'
@@ -638,4 +656,155 @@ import "C"
 
 func Answer() int {
 	return int(C.fortytwo())
+}
+
+-- m/main/go.mod --
+module example.com/mmain
+
+go 1.27
+
+require (
+	example.com/m1dep v0.0.0
+	example.com/m2dep v0.0.0
+)
+
+replace example.com/m1dep => ../m1dep
+
+replace example.com/m2dep => ../m2dep
+
+-- m/main/logos.toml --
+[capabilities]
+transitive_exec = "deny"
+
+-- m/main/cmd/main.lgo --
+package main
+
+import (
+	"example.com/m1dep"
+	"example.com/m2dep"
+)
+
+func main() {
+	dep1.Init()
+	dep2.Init()
+	println("done")
+}
+
+-- m/m1dep/go.mod --
+module example.com/m1dep
+
+go 1.27
+
+-- m/m1dep/dep.go --
+package dep1
+
+import "os/exec"
+
+//go:noinline
+func Init() {
+	_ = exec.Command("echo", "one").Run()
+}
+
+-- m/m2dep/go.mod --
+module example.com/m2dep
+
+go 1.27
+
+-- m/m2dep/dep.go --
+package dep2
+
+import "os/exec"
+
+//go:noinline
+func Init() {
+	_ = exec.Command("echo", "two").Run()
+}
+
+-- n/main/go.mod --
+module example.com/nmain
+
+go 1.27
+
+require example.com/ndep v0.0.0
+
+replace example.com/ndep => ../dep
+
+-- n/main/logos.toml --
+[capabilities]
+transitive_exec = "deny"
+
+-- n/main/cmd/main.lgo --
+package main
+
+import (
+	"fmt"
+
+	"example.com/ndep"
+)
+
+func main() {
+	dep.Init()
+	fmt.Println("done")
+}
+
+-- n/dep/go.mod --
+module example.com/ndep
+
+go 1.27
+
+-- n/dep/dep.go --
+package dep
+
+import "os"
+
+//go:noinline
+func Init() {
+	proc, err := os.StartProcess("/bin/true", []string{"true"}, &os.ProcAttr{})
+	if err == nil {
+		_, _ = proc.Wait()
+	}
+}
+
+-- o/main/go.mod --
+module example.com/omain
+
+go 1.27
+
+require example.com/odep v0.0.0
+
+replace example.com/odep => ../dep
+
+-- o/main/logos.toml --
+[capabilities]
+transitive_exec = "deny"
+
+-- o/main/cmd/main.lgo --
+package main
+
+import (
+	"fmt"
+
+	"example.com/odep"
+)
+
+func main() {
+	dep.Init()
+	fmt.Println("done")
+}
+
+-- o/dep/go.mod --
+module example.com/odep
+
+go 1.27
+
+-- o/dep/dep.go --
+package dep
+
+import "syscall"
+
+//go:noinline
+func Init() {
+	attr := &syscall.ProcAttr{Files: []uintptr{0, 1, 2}}
+	pid, _ := syscall.ForkExec("/bin/true", []string{"true"}, attr)
+	_ = pid
 }
