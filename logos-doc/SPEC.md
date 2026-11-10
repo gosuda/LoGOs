@@ -202,7 +202,6 @@ The compiler MUST warn with [perf::time_after_in_loop] against time.After inside
 It MUST NOT hoist timers across iterations. [T-102]
 It MUST NOT hoist timers, so no drain bug can occur. [T-102]
 The compiler MUST warn with [portability::serialized_unsized_int] on an int or uint field in a struct with JSON tags. [T-102]
-Sized kinds MUST be preferred. [T-102]
 
 ### 1.3 RFC-103: Context and next tools
 The command `logos context <pkg>#<Symbol>` MUST print the declaration plus one level of mentioned signatures with no function bodies [T-103].
@@ -395,7 +394,6 @@ Plain `go` MUST read no `target_cpu` and MUST keep the upstream `GOAMD64` and `G
 `baseline` MUST set GOAMD64 v1 and GOARM64 v8.0 [T-105].
 `native` MUST pick the host level [T-105].
 The default binary MUST NOT run on x86 CPUs older than v3 [T-105].
-Destination passing MUST NOT exist. [T-105]
 Self-aliased calls such as arr = Reverse(arr) MUST return correct results. [T-105]
 The deterministic target MUST select GOAMD64=v3 and GOARM64=v8.2 unless the environment overrides them. [T-105]
 Host-specific selection MUST require `target_cpu = "native"`. [T-105]
@@ -766,7 +764,7 @@ A Go importer MUST see a value-used union as that method-only interface. [T-203.
 
 A union used both as a constraint and as a value type MUST fail eject with `logos eject: union U is used as a type constraint and as a value type; Go cannot express both`. [T-203.1]
 
-Such a union has no Go-facing form, and a Go import of it MUST fail with the same text. [T-203.1][R-U2]
+Such a union has no Go-facing form, and a Go import of it MUST fail with `logos build: union U is used as a type constraint and as a value type; Go cannot express both`. [T-203.1][R-U2]
 
 ```lgo
 type U interface {
@@ -1198,7 +1196,6 @@ Concurrent updates MUST never expose a partial value. [T-206]
 
 
 
-Stores MUST run the hybrid write barrier. [T-206]
 
 No retire list MUST exist. [T-206]
 
@@ -1209,13 +1206,11 @@ var c Locked[Config]
 c.WithLock(p => { p.Port = 8080 })
 ```
 Concurrent Hot updates MUST NOT expose partial values. [T-206]
-Hot stores MUST run the hybrid write barrier. [T-206]
 The group MUST cancel on first error. [T-206]
 It MUST join all children before scope exit. [T-206]
 Cancellation MUST reach blocked siblings. [T-206]
 The group MUST cancel siblings and return it. [T-206]
 No retire list MUST exist for `Hot[T]`. [T-206]
-Stores MUST run the hybrid write barrier with GC-managed values. [T-206]
 `Hot[T]` MUST hold its value through `atomic.Pointer[T]` only. [T-206]
 A go group with limit = N MUST bound concurrency with a semaphore. [T-206]
 A go statement outside any group body MUST fail with [concurrency::unsupervised_goroutine]. [T-206]
@@ -1301,7 +1296,6 @@ A standard-library-provenance package MUST keep the default 32-byte variable-mak
 A slice `make` with variable effective capacity that flows into a cgo call argument or an `unsafe.Pointer` conversion MUST NOT use the stack buffer and MUST allocate its backing storage on the heap. Effective capacity is the explicit capacity when present, otherwise the length; it is fixed only when the compiler proves it constant with `ir.IsSmallIntConst` after literal rewriting. Fixed-effective-capacity makes MUST retain ordinary escape and size behavior, not a guarantee of stack allocation. [T-302]
 Under `GOEXPERIMENT=logosstack`, the runtime MUST choose the initial goroutine stack size from the per-PC exponential moving average of final stack sizes. [T-302]
 Without history for a PC, it MUST keep the current stack size. [T-302]
-The stack buffer MUST hold 256 bytes at O2 and 4096 bytes at O3. [T-302][T-301.1]
 
 ### 3.3 RFC-303: Hardware backend optimizations
 
@@ -1313,7 +1307,7 @@ Variable-count rotates MUST stay on the existing shift and rotate path. [T-303]
 In `.lgo`, `*` inside a `make` length or capacity MUST lower to `logos/rt.MulLen`. [T-303]
 On overflow, `MulLen` MUST panic with `logos: make length overflow: w * h`. [T-303]
 LSE atomics MUST come from the `GOARM64=v8.2` default. [T-303]
-Cache-line spacing MUST keep the upstream 128-byte constant. [T-303]
+Cache-line spacing MUST keep the upstream per-GOARCH `CacheLinePadSize` values (64 on amd64, 128 on arm64). [T-303]
 The runtime structs MUST carry no new padding. [T-303]
 Preemption checks in long loops MUST fire every 4096 iterations, with the first check at iteration 4096, on GOARCH=wasm builds with the checks enabled. An explicit GOEXPERIMENT=preemptibleloops elsewhere yields the upstream per-backedge checks. [T-303]
 They MUST run only where async preemption is absent (`GOARCH=wasm`). [T-303]
@@ -1449,7 +1443,7 @@ An opening `(` MUST parse its element list once and then branch on the next toke
 
 ## 5. Cross-package facts
 
-Cross-package facts MUST travel in the archive member `__.LOGOS` [T-Sec5]. Exported declaration signatures remain in `__.PKGDEF`; `__.LOGOS` carries fingerprint-bound typed fact records and no declaration header. [T-Sec5][T-201] The member MUST hold one fact line per function for `ReturnsNonNil`, `AlwaysNilError`, `PureConst`, `ReceiverMutated`, the `ParamMutated` mask, `FnFact.Readonly`, `MayYield`, and generic assertion effects `AssertTP` and `AssertRTP` [T-Sec5][T-201]. Facts MUST use format version 3; older members MUST be rejected rather than read through a compatibility path [T-Sec5][T-201]. Presence of assertion-effect flags MUST distinguish analyzed effects from unknown effects; explicit `AssertTP=0,AssertRTP=0` MUST denote proven-zero effects [T-Sec5][T-201]. Assertion and mutation masks MUST use arbitrary-arity hexadecimal masks without a 64-parameter limit [T-Sec5][T-201]. Encode and decode MUST preserve `FnFact.Readonly` [T-201][T-Sec5]. The member MAY hold comptime generic sources as comptime records [T-Sec5]. The facts MUST bind to the `__.PKGDEF` fingerprint, and a stale fingerprint MUST fail the dependent build [T-Sec5]. A Go importer of a loGo/s package MUST see the signatures that `logos eject` emits: a closed union value type as its methods-only interface with the terms dropped, `*T?` as the bare pointer when `*T` is non-nil and as `logos/rt.Option[T]` otherwise, a non-nil `*T` as a plain `*T`, a property interface as its `Logos_GetF` and `Logos_SetF` accessor methods, a readonly interface method as its plain method, and a const view as its plain type [T-Sec5][R-U2][T-201]. Lowering and eject MUST erase only the `const` keyword of a readonly method for emitted Go, keeping source positions and qualification facts for loGo/s importers [T-201][T-0.3][T-Sec5]. A Go package MUST emit per-function fact lines only, namely `MayYield`, `AlwaysNilError`, `ParamMutated`, and generic assertion effects `AssertTP` and `AssertRTP`, plus one `lang go` record, with no declaration header [T-Sec5][R-U1][T-201]. An importer MUST NOT read a package that carries the `lang go` record as a loGo/s package: no non-nil pointer check, no const-view mutation fact, and no overlay applies to it [T-Sec5][R-U1]. Assertion effects are emitted for Go and `.lgo` packages without an opt-level or GOARCH gate in the facts writer; command coverage stays as tested [T-Sec5][T-201]. A Go package with assertion effects writes `__.LOGOS` under the same emission condition as the other Go-package facts [T-Sec5][T-201]. Importers MUST consume these effects from `lang go` members without applying loGo/s declaration overlays or treating assertion effects as parameter-mutation proof [T-Sec5][R-U1][T-201]. Only the `lang go` record has pinned unconditional emission; other Go-package facts keep whatever emission condition their writer tests pin [T-Sec5][T-Sec12]. When this toolchain compiles a Go package that calls a loGo/s function or method, the compiler MUST insert a `logos/rt.MustNonNil` check for each non-nil pointer parameter of the callee in a direct call, in a `go` statement, and in a `defer` statement, using the callee facts from `__.LOGOS` [T-Sec5][R-U2]. A call through a function value, a method value, or an interface has no such check; this is a documented hole [T-Sec5][R-U2][A-GOBOUNDARY]. A nil receiver that a Go caller passes to a method with a non-nil pointer receiver has no such check either; this is a documented hole [T-Sec5][R-U2][A-GOBOUNDARY]. Code that an upstream toolchain builds from eject output has no such check either; this is a documented hole, like reflection and `unsafe` [T-Sec5][R-U2][A-GOBOUNDARY]. A Go mutation through a const view and a Go store of a non-member into a closed union are documented holes, and the compiler does not check them [T-Sec5][R-U2][A-GOBOUNDARY].
+Cross-package facts MUST travel in the archive member `__.LOGOS` [T-Sec5]. Exported declaration signatures remain in `__.PKGDEF`; `__.LOGOS` carries fingerprint-bound typed fact records and no declaration header. [T-Sec5][T-201] The member MUST hold one fact line per function for `ReturnsNonNil`, `AlwaysNilError`, `PureConst`, `ReceiverMutated`, the `ParamMutated` mask, `FnFact.Readonly`, `MayYield`, and generic assertion effects `AssertTP` and `AssertRTP` [T-Sec5][T-201]. Facts MUST use format version 3; older members MUST be rejected rather than read through a compatibility path [T-Sec5][T-201]. Presence of assertion-effect flags MUST distinguish analyzed effects from unknown effects; explicit `AssertTP=0,AssertRTP=0` MUST denote proven-zero effects [T-Sec5][T-201]. Assertion and mutation masks MUST use arbitrary-arity hexadecimal masks without a 64-parameter limit [T-Sec5][T-201]. Encode and decode MUST preserve `FnFact.Readonly` [T-201][T-Sec5]. The member MAY hold comptime generic sources as comptime records [T-Sec5]. The facts MUST bind to the `__.PKGDEF` fingerprint, and a stale fingerprint MUST fail the dependent build [T-Sec5]. A Go importer of a loGo/s package MUST see the signatures that `logos eject` emits: a closed union value type as its methods-only interface with the terms dropped, `*T?` as the bare pointer, a non-nil `*T` as a plain `*T`, a property interface as its `Logos_GetF` and `Logos_SetF` accessor methods, a readonly interface method as its plain method, and a const view as its plain type [T-Sec5][R-U2][T-201]. Lowering and eject MUST erase only the `const` keyword of a readonly method for emitted Go, keeping source positions and qualification facts for loGo/s importers [T-201][T-0.3][T-Sec5]. A Go package MUST emit per-function fact lines only, namely `MayYield`, `AlwaysNilError`, `ParamMutated`, and generic assertion effects `AssertTP` and `AssertRTP`, plus one `lang go` record, with no declaration header [T-Sec5][R-U1][T-201]. An importer MUST NOT read a package that carries the `lang go` record as a loGo/s package: no non-nil pointer check, no const-view mutation fact, and no overlay applies to it [T-Sec5][R-U1]. Assertion effects are emitted for Go and `.lgo` packages without an opt-level or GOARCH gate in the facts writer; command coverage stays as tested [T-Sec5][T-201]. A Go package with assertion effects writes `__.LOGOS` under the same emission condition as the other Go-package facts [T-Sec5][T-201]. Importers MUST consume these effects from `lang go` members without applying loGo/s declaration overlays or treating assertion effects as parameter-mutation proof [T-Sec5][R-U1][T-201]. Only the `lang go` record has pinned unconditional emission; other Go-package facts keep whatever emission condition their writer tests pin [T-Sec5][T-Sec12]. When this toolchain compiles a Go package that calls a loGo/s function or method, the compiler MUST insert a `logos/rt.MustNonNil` check for each non-nil pointer parameter of the callee in a direct call, in a `go` statement, and in a `defer` statement, using the callee facts from `__.LOGOS` [T-Sec5][R-U2]. A call through a function value, a method value, or an interface has no such check; this is a documented hole [T-Sec5][R-U2][A-GOBOUNDARY]. A nil receiver that a Go caller passes to a method with a non-nil pointer receiver has no such check either; this is a documented hole [T-Sec5][R-U2][A-GOBOUNDARY]. Code that an upstream toolchain builds from eject output has no such check either; this is a documented hole, like reflection and `unsafe` [T-Sec5][R-U2][A-GOBOUNDARY]. A Go mutation through a const view and a Go store of a non-member into a closed union are documented holes, and the compiler does not check them [T-Sec5][R-U2][A-GOBOUNDARY].
 Cross-package facts MUST travel in `__.LOGOS` with a fingerprint. [T-Sec5]
 When this toolchain compiles the Go caller, it MUST insert `logos/rt.MustNonNil` and MUST panic with the call position. [T-Sec5]
 
@@ -1762,7 +1756,7 @@ buf := make([]Pixel, w * h)
 ```
 
 - An explicit `clear` of a slice MUST persist before return. [T-303]
-- Cache-line spacing MUST keep the upstream 128-byte constant with no added padding. [T-303]
+- Cache-line spacing MUST keep the upstream per-GOARCH `CacheLinePadSize` (64 on amd64, 128 on arm64) with no added padding. [T-303]
 
 ### 13.3 Long-loop preemption on wasm
 
