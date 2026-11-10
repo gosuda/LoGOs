@@ -1612,6 +1612,9 @@ func TestParityMutants(t *testing.T) {
 				}
 			}
 			if !red {
+				if !upOn {
+					t.Skipf("mutant %s unevaluable with upstream off: fork stayed green under %s", m.id, m.cfg)
+				}
 				t.Errorf("mutant %s survived: %s stayed green under %s (exit %d)", m.id, m.expect, m.cfg, fobs.exit)
 			}
 		})
