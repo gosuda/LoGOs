@@ -252,7 +252,7 @@ func upstreamTool(t *testing.T) (toolchain, bool) {
 	}
 	goroot := filepath.Clean(filepath.Join(filepath.Dir(bin), ".."))
 	if v := goVersion(t, goroot); v != upstreamVersionPin {
-		t.Fatalf("upstream oracle version skew not audited: got %s want %s; re-run `git diff --stat %s <oracle tag> -- src test` and update the pin in parity_test.go", v, upstreamVersionPin, forkVersionPin)
+		t.Fatalf("upstream oracle version skew not audited: got %s want %s; re-run `git diff --stat %s <oracle tag> -- src test` and update the pin in parity_test.go", v, upstreamVersionPin, upstreamVersionPin)
 	}
 	return toolchain{bin: bin, goroot: goroot}, true
 }
