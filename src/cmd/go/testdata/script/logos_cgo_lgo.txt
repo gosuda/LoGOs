@@ -15,11 +15,21 @@ stdout '^num:42$'
 stdout '^str:none$'
 stdout '^find: id:7$'
 stdout '^stored: id:7$'
+stdout '^arg: id:7$'
+stdout '^field: id:7$'
+stdout '^lit: id:7$'
+stdout '^slice: id:7$'
 stdout '^next: 7$'
 stdout '^item: 0$'
+stdout '^isnil-missing: true$'
+stdout '^isnil-present: false$'
 
 stdout '^find-missing: logos: nil from Go value stored into non-nil \*main\._Ctype_struct_item at c_bridge\.lgo:39$'
 stdout '^stored-missing: logos: nil from Go value stored into non-nil \*main\._Ctype_struct_item at c_bridge\.lgo:44$'
+stdout '^arg-missing: logos: nil from Go value stored into non-nil \*main\._Ctype_struct_item at c_bridge\.lgo:67$'
+stdout '^field-missing: logos: nil from Go value stored into non-nil \*main\._Ctype_struct_item at c_bridge\.lgo:78$'
+stdout '^lit-missing: logos: nil from Go value stored into non-nil \*main\._Ctype_struct_item at c_bridge\.lgo:84$'
+stdout '^slice-missing: logos: nil from Go value stored into non-nil \*main\._Ctype_struct_item at c_bridge\.lgo:92$'
 
 ! logos build -o $WORK/badtry.bin ./badtry
 stderr 'c_bridge\.lgo:13:22: \[correctness::cgo_file_logos_syntax\] files that import "C" must use Go syntax only$'
@@ -153,6 +163,42 @@ func ZeroItem() C.struct_item {
 	return n
 }
 
+// ArgStore passes a C result directly as an argument.
+func ArgStore(id int) int {
+	return int(ID(C.c_find(C.int(id))))
+}
+
+// Holder carries a non-nil pointer field.
+type Holder struct {
+	It *C.struct_item
+}
+
+// FieldStore stores a C result into a struct field.
+func FieldStore(id int) int {
+	h := &Holder{It: C.c_find(C.int(7))}
+	h.It = C.c_find(C.int(id))
+	return int(h.It.id)
+}
+
+// LitStore stores a C result in a literal field element.
+func LitStore(id int) int {
+	h := &Holder{It: C.c_find(C.int(id))}
+	return int(h.It.id)
+}
+
+// SliceStore stores a C result into a slice element.
+func SliceStore(id int) int {
+	s := make([]*C.struct_item, 0, 1)
+	s = append(s, C.c_find(C.int(7)))
+	s[0] = C.c_find(C.int(id))
+	return int(s[0].id)
+}
+
+// IsNil compares a C result with nil.
+func IsNil(id int) bool {
+	return C.c_find(C.int(id)) == nil
+}
+
 -- ok/app.lgo --
 package main
 
@@ -215,6 +261,42 @@ func tryStored(id int) (msg string) {
 	return "id:" + strconv.Itoa(Stored(id))
 }
 
+func tryArg(id int) (msg string) {
+	defer func() {
+		if r := recover(); r != nil {
+			msg = fmt.Sprint(r)
+		}
+	}()
+	return "id:" + strconv.Itoa(ArgStore(id))
+}
+
+func tryField(id int) (msg string) {
+	defer func() {
+		if r := recover(); r != nil {
+			msg = fmt.Sprint(r)
+		}
+	}()
+	return "id:" + strconv.Itoa(FieldStore(id))
+}
+
+func tryLit(id int) (msg string) {
+	defer func() {
+		if r := recover(); r != nil {
+			msg = fmt.Sprint(r)
+		}
+	}()
+	return "id:" + strconv.Itoa(LitStore(id))
+}
+
+func trySlice(id int) (msg string) {
+	defer func() {
+		if r := recover(); r != nil {
+			msg = fmt.Sprint(r)
+		}
+	}()
+	return "id:" + strconv.Itoa(SliceStore(id))
+}
+
 func main() {
 	sum, err := total("40", "2")
 	if err != nil {
@@ -230,6 +312,16 @@ func main() {
 	fmt.Println("stored:", tryStored(7))
 	fmt.Println("find-missing:", tryFind(9))
 	fmt.Println("stored-missing:", tryStored(9))
+	fmt.Println("arg:", tryArg(7))
+	fmt.Println("field:", tryField(7))
+	fmt.Println("lit:", tryLit(7))
+	fmt.Println("slice:", trySlice(7))
+	fmt.Println("isnil-missing:", IsNil(9))
+	fmt.Println("isnil-present:", IsNil(7))
+	fmt.Println("arg-missing:", tryArg(9))
+	fmt.Println("field-missing:", tryField(9))
+	fmt.Println("lit-missing:", tryLit(9))
+	fmt.Println("slice-missing:", trySlice(9))
 	fmt.Println("next:", int(Next(Find(7)).id))
 	fmt.Println("item:", int(ZeroItem().id))
 }
