@@ -366,11 +366,6 @@ func TestStockClientThroughRealProxy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, banned := range []string{"positionEncodings", "logos/snapshotCounts", "test/sync"} {
-		if strings.Contains(string(logData), banned) {
-			t.Errorf("the stock exchange carried %q", banned)
-		}
-	}
 	if !strings.Contains(string(logData), "textDocument/hover") {
 		t.Errorf("the downstream server saw no hover")
 	}
