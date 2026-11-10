@@ -62,3 +62,12 @@ func cfFieldTypeValue(v CFWidget) {
 		_ = v.[f]
 	}
 }
+
+func cfOutsideLoop(v CFWidget) {
+	const for _, f := range comptime.Fields[CFWidget]() {
+		_ = v.[f]
+	}
+	_ = f/* ERROR "undefined: f" */.Name
+	_ = v.[f/* ERROR "comptime::const_for_projection" */]
+	_ = f/* ERROR "undefined: f" */.Tag.Get("json")
+}
