@@ -1,5 +1,6 @@
-# The wasm stride default never applies off wasm: the default
-# arm64 build carries no logosloopstride flag.
+# Per-backedge reschedule checks on arm64 follow the experiment like
+# amd64, and the wasm stride default never applies off wasm: the
+# default leaf loop carries no morestack reference and no stride flag.
 env GOPROXY=off
 env GOTOOLCHAIN=local
 env GOARCH=arm64
@@ -7,6 +8,14 @@ env GOARCH=arm64
 cd m
 logos build -a -x .
 ! stderr 'logosloopstride'
+logos build -o plain.exe .
+go tool objdump -s 'main\.spin' plain.exe
+! stdout 'morestack'
+env GOEXPERIMENT=preemptibleloops
+logos build -o preempt.exe .
+go tool objdump -s 'main\.spin' preempt.exe
+stdout 'morestack'
+env GOEXPERIMENT=
 env GOARCH=
 
 -- m/go.mod --
