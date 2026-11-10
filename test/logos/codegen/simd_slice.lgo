@@ -4,7 +4,7 @@ package main
 
 //go:noinline
 func sumI32(xs []int32) int32 {
-	// amd64/v1:"VPMASKMOVD\\s+\\(" "VPADDD" "CALL simd/archsimd\\.X86Features\\.AVX2\\(SB\\)" -"CALL simd/archsimd\\.Load"
+	// amd64/v1:"VPMASKMOVD\\s+\\(" "VPADDD\\s+\\(" "CALL simd/archsimd\\.X86Features\\.AVX2\\(SB\\)" -"CALL simd/archsimd\\.Load"
 	// amd64/v2:"VPMASKMOVD\\s+\\(" "VPADDD" "CALL simd/archsimd\\.X86Features\\.AVX2\\(SB\\)" -"CALL simd/archsimd\\.Load"
 	// amd64/v3:"VPMASKMOVD\\s+\\(" "VPADDD" -"CALL simd/archsimd\\." -"CMPB internal/cpu\\.X86"
 	// amd64/v4:"VPMASKMOVD\\s+\\(" "VPADDD" -"CALL simd/archsimd\\." -"CMPB internal/cpu\\.X86"
@@ -22,8 +22,8 @@ func sumU64(xs []uint64) uint64 {
 
 //go:noinline
 func sumU16(xs []uint16) uint16 {
-	// amd64/v1:"VMOVDQU16\\.Z\\s+\\(" "VPADDW" "CALL simd/archsimd\\.X86Features\\.AVX512\\(SB\\)"
-	// amd64/v3:"VMOVDQU16\\.Z\\s+\\(" "VPADDW" "CALL simd/archsimd\\.X86Features\\.AVX512\\(SB\\)"
+	// amd64/v1:"VMOVDQU16\\.Z\\s+\\(" "VMOVDQU64\\s+\\(" "VPADDW" "CALL simd/archsimd\\.X86Features\\.AVX512\\(SB\\)"
+	// amd64/v3:"VMOVDQU16\\.Z\\s+\\(" "VMOVDQU64\\s+\\(" "VPADDW" "CALL simd/archsimd\\.X86Features\\.AVX512\\(SB\\)"
 	// amd64/v4:"VMOVDQU16\\.Z\\s+\\(" "VPADDW" -"CALL simd/archsimd\\." -"CMPB internal/cpu\\.X86"
 	// arm64:"CALL simd/archsimd\\.LoadUint16x8Part\\(SB\\)" "VADD V[0-9]+\\.H8" -"CALL simd/archsimd\\.X86Features"
 	return xs.sum()
@@ -31,8 +31,8 @@ func sumU16(xs []uint16) uint16 {
 
 //go:noinline
 func sumU8(xs []uint8) uint8 {
-	// amd64/v1:"VMOVDQU8\\.Z\\s+\\(" "VPADDB" "CALL simd/archsimd\\.X86Features\\.AVX512\\(SB\\)"
-	// amd64/v3:"VMOVDQU8\\.Z\\s+\\(" "VPADDB" "CALL simd/archsimd\\.X86Features\\.AVX512\\(SB\\)"
+	// amd64/v1:"VMOVDQU8\\.Z\\s+\\(" "VMOVDQU64\\s+\\(" "VPADDB" "CALL simd/archsimd\\.X86Features\\.AVX512\\(SB\\)"
+	// amd64/v3:"VMOVDQU8\\.Z\\s+\\(" "VMOVDQU64\\s+\\(" "VPADDB" "CALL simd/archsimd\\.X86Features\\.AVX512\\(SB\\)"
 	// amd64/v4:"VMOVDQU8\\.Z\\s+\\(" "VPADDB" -"CALL simd/archsimd\\." -"CMPB internal/cpu\\.X86"
 	// arm64:"CALL simd/archsimd\\.LoadUint8x16Part\\(SB\\)" "VADD V[0-9]+\\.B16" -"CALL simd/archsimd\\.X86Features"
 	return xs.sum()
@@ -62,6 +62,30 @@ func sumInt(xs []int) int {
 }
 
 //go:noinline
+func sumUint(xs []uint) uint {
+	// amd64:-"VPMASKMOV" -"VPADD" -"CALL simd/archsimd"
+	// arm64:-"VADD V" -"CALL simd/archsimd"
+	return xs.sum()
+}
+
+//go:noinline
+func sumUintptr(xs []uintptr) uintptr {
+	// amd64:-"VPMASKMOV" -"VPADD" -"CALL simd/archsimd"
+	// arm64:-"VADD V" -"CALL simd/archsimd"
+	return xs.sum()
+}
+
+type watt = float64
+
+//go:noinline
+func sumAlias(xs []watt) float64 {
+	// amd64/v1:"VPMASKMOVQ\\s+\\(" "CALL simd/archsimd\\.X86Features\\.AVX2\\(SB\\)" -"CALL simd/archsimd\\.Load"
+	// amd64/v3:"VPMASKMOVQ\\s+\\(" -"CALL simd/archsimd\\." -"CMPB internal/cpu\\.X86"
+	// arm64:"CALL simd/archsimd\\.LoadFloat64x2Part\\(SB\\)" -"CALL simd/archsimd\\.X86Features"
+	return xs.sum()
+}
+
+//go:noinline
 func sumFiltered(xs []int32) int32 {
 	// amd64:-"VPMASKMOV" -"VMOVDQU" -"SliceMasked" -"CALL simd/archsimd" -"CALL runtime\\.makeslice"
 	// arm64:-"VPMASKMOV" -"CALL simd/archsimd" -"CALL runtime\\.makeslice"
@@ -76,5 +100,8 @@ func main() {
 	var e []float32
 	var f []float64
 	var g []int
-	println(sumI32(a), sumU64(b), sumU16(c), sumU8(d), sumF32(e), sumF64(f), sumInt(g))
+	var u []uint
+	var p []uintptr
+	var w []watt
+	println(sumI32(a), sumU64(b), sumU16(c), sumU8(d), sumF32(e), sumF64(f), sumInt(g), sumUint(u), sumUintptr(p), sumAlias(w))
 }
