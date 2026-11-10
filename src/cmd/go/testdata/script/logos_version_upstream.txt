@@ -1,0 +1,8 @@
+env GOTOOLCHAIN=local
+
+go version
+stdout '^go version go1\.27\.[0-9]+ [a-z0-9]+/[a-z0-9]+$'
+! stdout '-X:'
+
+go help
+! stdout 'logos|loGo|Logos|LOGOS'
