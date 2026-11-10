@@ -22,7 +22,6 @@ go tool pack p $WORK/go.a __.LOGOS
 cp stdout $WORK/go.facts
 grep '^fn GoAssert AssertTP=1,AssertRTP=0$' $WORK/go.facts
 grep '^lang go$' $WORK/go.facts
-! grep 'ReturnsNonNil' $WORK/go.facts
 ! grep 'ReceiverMutated' $WORK/go.facts
 ! grep '^constfn' $WORK/go.facts
 ! grep 'Readonly' $WORK/go.facts

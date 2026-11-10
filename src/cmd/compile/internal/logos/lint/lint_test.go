@@ -13,10 +13,8 @@ import (
 	"testing"
 
 	"cmd/compile/internal/importer"
-	"cmd/compile/internal/logos/facts"
 	"cmd/compile/internal/syntax"
 	"cmd/compile/internal/types2"
-	"cmd/internal/goobj"
 )
 
 // goRules are the 21 language-neutral rules of SPEC Sec 1.2 and Sec 2.6: the
@@ -492,30 +490,6 @@ func g() {
 	os.Remove("x")
 }
 `
-
-// TestAlwaysNilErrorFact checks the exemption of a callee whose package facts
-// carry AlwaysNilError. No producer of the fact exists yet, so the test
-// injects one for os.Chdir.
-func TestAlwaysNilErrorFact(t *testing.T) {
-	testenv.MustHaveGoBuild(t)
-	exportData := "12345678"
-	var fp goobj.FingerprintType
-	copy(fp[:], exportData)
-	member := facts.Encode(fp, &facts.Facts{Fingerprint: fp, Fns: []facts.FnFact{{Object: "Chdir", AlwaysNilError: true}}})
-	if _, err := facts.Import("os", exportData, member); err != nil {
-		t.Fatal(err)
-	}
-	const src = `package p
-
-import "os"
-
-func a() {
-	os.Chdir("x")
-	os.Setenv("k", "v") // want
-}
-`
-	expect(t, KindGo, nil, testSource{"x.go", src}, finding{"slop::discarded_error", Deny})
-}
 
 // TestDiscardedErrorFix checks the JSON provenance and the ? candidate of a
 // loGo/s file: offered only in a function that returns error.

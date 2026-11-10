@@ -29,7 +29,7 @@ func TestEncodeDecodeRoundTrip(t *testing.T) {
 		},
 		Fns: []facts.FnFact{
 			{Object: "S.Set", ReceiverMutated: true, ParamMutated: "1f", MayYield: true, HasMayYield: true},
-			{Object: "(*S).Get", ReturnsNonNil: true, PureConst: true},
+			{Object: "(*S).Get", Readonly: true},
 			{Object: "R.M", Readonly: true},
 		},
 		Props: []facts.PropFact{
@@ -45,7 +45,7 @@ func TestEncodeDecodeRoundTrip(t *testing.T) {
 		"line1\nline2\n" +
 		"\n" +
 		"const C K\n" +
-		"fn (*S).Get ReturnsNonNil,PureConst\n" +
+		"fn (*S).Get Readonly\n" +
 		"fn R.M Readonly\n" +
 		"fn S.Set ReceiverMutated,ParamMutated=1f,MayYield=1\n" +
 		"opt H P1\n" +
@@ -69,7 +69,7 @@ func TestEncodeDecodeRoundTrip(t *testing.T) {
 			{Object: "C", Path: "K"},
 		},
 		Fns: []facts.FnFact{
-			{Object: "(*S).Get", ReturnsNonNil: true, PureConst: true},
+			{Object: "(*S).Get", Readonly: true},
 			{Object: "R.M", Readonly: true},
 			{Object: "S.Set", ReceiverMutated: true, ParamMutated: "1f", MayYield: true, HasMayYield: true},
 		},
@@ -108,7 +108,7 @@ func TestTaggedObjectRoundTrip(t *testing.T) {
 	fp := goobj.FingerprintType{0, 1, 2, 3, 4, 5, 6, 7}
 	in := &facts.Facts{
 		Fingerprint: fp,
-		Fns:         []facts.FnFact{{Object: "Float32sFromArch@simd0", ReturnsNonNil: true}},
+		Fns:         []facts.FnFact{{Object: "Float32sFromArch@simd0", Readonly: true}},
 	}
 	back, err := facts.Decode(facts.Encode(fp, in))
 	if err != nil {
@@ -117,7 +117,7 @@ func TestTaggedObjectRoundTrip(t *testing.T) {
 	if !reflect.DeepEqual(back, in) {
 		t.Fatalf("round trip mismatch:\n got %+v\nwant %+v", back, in)
 	}
-	bad := "logos-facts 3\nfingerprint 0001020304050607\nfn Foo@junk! ReturnsNonNil\n"
+	bad := "logos-facts 3\nfingerprint 0001020304050607\nfn Foo@junk! Readonly\n"
 	if _, err := facts.Decode([]byte(bad)); err == nil || !strings.Contains(err.Error(), "bad object") {
 		t.Fatalf("Decode accepted a malformed tag: %v", err)
 	}
@@ -144,7 +144,7 @@ func TestEncodeSkipsVacuousRecords(t *testing.T) {
 		Fingerprint: fp,
 		Opts:        []facts.PathFact{{Object: "", Path: "P0"}, {Object: "H"}},
 		Consts:      []facts.PathFact{{Object: "C", Path: ""}},
-		Fns:         []facts.FnFact{{Object: "N"}, {Object: "", ReturnsNonNil: true}},
+		Fns:         []facts.FnFact{{Object: "N"}, {Object: "", Readonly: true}},
 		Props:       []facts.PropFact{{Interface: "I"}, {Prefix: "Get"}},
 		Comptimes:   []facts.ComptimeFact{{Object: "New"}, {Source: []byte("x")}},
 	}
@@ -188,7 +188,7 @@ func TestDecodeRejects(t *testing.T) {
 		{"bad flag ParamMutated", head + "fn S ParamMutated=zz\n", "line 3"},
 		{"bad flag ParamMutated empty", head + "fn S ParamMutated=\n", "line 3"},
 		{"fn missing flags", head + "fn S\n", "line 3"},
-		{"unsorted", head + "opt S.F R0\nfn S ReturnsNonNil\n", "line 4"},
+		{"unsorted", head + "opt S.F R0\nfn S Readonly\n", "line 4"},
 		{"duplicate", head + "opt H P1\nopt H P1\n", "line 4"},
 		{"blank line", head + "opt H P1\n\nopt S.F R0\n", "line 4"},
 		{"unterminated", head + "opt H P1", "line 3"},
@@ -318,10 +318,8 @@ func TestMayYieldOnly(t *testing.T) {
 	}{
 		"yield only":      {facts.FnFact{Object: "F", MayYield: true, HasMayYield: true}, true},
 		"pure only":       {facts.FnFact{Object: "F", HasMayYield: true}, true},
-		"with nonnil":     {facts.FnFact{Object: "F", HasMayYield: true, ReturnsNonNil: true}, false},
 		"with receiver":   {facts.FnFact{Object: "F", HasMayYield: true, ReceiverMutated: true}, false},
 		"with param mask": {facts.FnFact{Object: "F", HasMayYield: true, ParamMutated: "1"}, false},
-		"no yield fact":   {facts.FnFact{Object: "F", PureConst: true}, false},
 	} {
 		if got := c.fn.MayYieldOnly(); got != c.want {
 			t.Errorf("%s: MayYieldOnly = %v, want %v", name, got, c.want)

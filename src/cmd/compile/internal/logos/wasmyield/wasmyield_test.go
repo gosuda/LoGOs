@@ -193,7 +193,7 @@ func TestImportedYieldReadsFacts(t *testing.T) {
 }
 
 func TestMergeFnsKeepsOtherFlags(t *testing.T) {
-	cur := &facts.Facts{Fns: []facts.FnFact{{Object: "F", ReturnsNonNil: true}}}
+	cur := &facts.Facts{Fns: []facts.FnFact{{Object: "F", Readonly: true}}}
 	got := mergeFns(cur, []facts.FnFact{
 		{Object: "F", MayYield: true, HasMayYield: true},
 		{Object: "G", HasMayYield: true},
@@ -201,7 +201,7 @@ func TestMergeFnsKeepsOtherFlags(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("got %d records, want 2: %+v", len(got), got)
 	}
-	if !got[0].ReturnsNonNil || !got[0].MayYield || !got[0].HasMayYield {
+	if !got[0].Readonly || !got[0].MayYield || !got[0].HasMayYield {
 		t.Errorf("F lost a flag: %+v", got[0])
 	}
 	if got[1].Object != "G" || got[1].MayYield || !got[1].HasMayYield {

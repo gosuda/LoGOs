@@ -8,18 +8,12 @@ import (
 	"slices"
 	"strings"
 
-	"cmd/compile/internal/logos/facts"
 	"cmd/compile/internal/syntax"
 	"cmd/compile/internal/types2"
 )
 
 // discardedError is slop::discarded_error (SPEC Sec 1.2, #164): an
 // expression statement or a blank assignment that drops an error result.
-// Calls that cannot fail in practice are exempt: callees whose package facts
-// carry AlwaysNilError, fmt.Print*, fmt.Fprint* to os.Stdout or os.Stderr,
-// and the Write* methods of *bytes.Buffer and *strings.Builder. No producer
-// of the AlwaysNilError fact exists yet, so that exemption applies only to
-// facts the importer has recorded.
 var discardedError = Rule{
 	ID:    "slop::discarded_error",
 	Group: Slop,
@@ -179,25 +173,8 @@ func benignCall(pass *Pass, call *syntax.CallExpr) bool {
 		return len(call.ArgList) > 0 && isStdoutOrStderr(pass, call.ArgList[0])
 	default:
 		return strings.HasPrefix(name, "(*bytes.Buffer).Write") ||
-			strings.HasPrefix(name, "(*strings.Builder).Write") ||
-			alwaysNilError(fn)
+			strings.HasPrefix(name, "(*strings.Builder).Write")
 	}
-}
-
-// alwaysNilError reports whether the facts recorded for the package of fn
-// mark it AlwaysNilError.
-func alwaysNilError(fn *types2.Func) bool {
-	if fn.Pkg() == nil {
-		return false
-	}
-	f, ok := facts.Lookup(fn.Pkg().Path())
-	if !ok || f == nil {
-		return false
-	}
-	object := factObject(fn)
-	return slices.ContainsFunc(f.Fns, func(ff facts.FnFact) bool {
-		return ff.Object == object && ff.AlwaysNilError
-	})
 }
 
 // factObject returns the name of fn in a facts file: Name, Type.Method, or

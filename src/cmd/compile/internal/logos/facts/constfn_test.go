@@ -128,7 +128,7 @@ func TestConstFnMixedRecordsRoundTrip(t *testing.T) {
 	in := &facts.Facts{
 		Fingerprint: fp,
 		Opts:        []facts.PathFact{{Object: "H", Path: "P0"}},
-		Fns:         []facts.FnFact{{Object: "F", ReturnsNonNil: true}},
+		Fns:         []facts.FnFact{{Object: "F", Readonly: true}},
 		Comptimes:   []facts.ComptimeFact{{Object: "G", Source: []byte("func G() {}\n")}},
 		ConstFuncs:  []facts.ConstFuncFact{{Object: "F", Source: []byte(src)}},
 	}

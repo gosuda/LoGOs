@@ -170,7 +170,7 @@ func (Plain) As[U any](x any) U { return x.(U) }
 		t.Fatalf("check (definitions must stay valid): %v", err)
 	}
 
-	seed := &facts.Facts{Fns: []facts.FnFact{{Object: "As", ParamMutated: "1", ReturnsNonNil: true}}}
+	seed := &facts.Facts{Fns: []facts.FnFact{{Object: "As", ParamMutated: "1", Readonly: true}}}
 	got := facts.WriteChecked(pkg, info, []*syntax.File{file}, seed)
 	if got != seed {
 		t.Fatal("WriteChecked did not return the passed facts")
@@ -197,7 +197,7 @@ func (Plain) As[U any](x any) U { return x.(U) }
 	check("Store.Project", "1", "0")
 	check("Plain.Identity", "0", "0")
 	check("Plain.As", "1", "0")
-	if fn := fns["As"]; !fn.ReturnsNonNil || fn.ParamMutated != "1" {
+	if fn := fns["As"]; !fn.Readonly || fn.ParamMutated != "1" {
 		t.Errorf("As lost seeded flags: %+v", fn)
 	}
 	if out := facts.WriteChecked(pkg, info, []*syntax.File{file}, nil); out == nil {

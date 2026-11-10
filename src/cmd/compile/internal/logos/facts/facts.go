@@ -46,9 +46,6 @@ type ReadonlyFact struct {
 
 type FnFact struct {
 	Object          string
-	ReturnsNonNil   bool
-	AlwaysNilError  bool
-	PureConst       bool
 	ReceiverMutated bool
 	Readonly        bool
 	AssertTP        string
@@ -60,7 +57,7 @@ type FnFact struct {
 }
 
 func (fn FnFact) MayYieldOnly() bool {
-	return fn.HasMayYield && !fn.ReturnsNonNil && !fn.AlwaysNilError && !fn.PureConst && !fn.ReceiverMutated && !fn.Readonly && fn.ParamMutated == ""
+	return fn.HasMayYield && !fn.ReceiverMutated && !fn.Readonly && fn.ParamMutated == ""
 }
 
 type PropFact struct {
@@ -212,15 +209,6 @@ func (fn FnFact) flags() string {
 		}
 		b.WriteString(s)
 	}
-	if fn.ReturnsNonNil {
-		add("ReturnsNonNil")
-	}
-	if fn.AlwaysNilError {
-		add("AlwaysNilError")
-	}
-	if fn.PureConst {
-		add("PureConst")
-	}
 	if fn.ReceiverMutated {
 		add("ReceiverMutated")
 	}
@@ -246,12 +234,6 @@ func (fn FnFact) flags() string {
 
 func (fn *FnFact) parseFlag(flag string) error {
 	switch flag {
-	case "ReturnsNonNil":
-		fn.ReturnsNonNil = true
-	case "AlwaysNilError":
-		fn.AlwaysNilError = true
-	case "PureConst":
-		fn.PureConst = true
 	case "ReceiverMutated":
 		fn.ReceiverMutated = true
 	case "Readonly":
