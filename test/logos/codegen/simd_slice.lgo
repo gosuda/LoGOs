@@ -4,107 +4,109 @@ package main
 
 //go:noinline
 func sumI32(xs []int32) int32 {
-	// amd64/v1:"VPMASKMOVD\\s+\\(" "VPADDD\\s+\\("
-	// amd64/v2:"VPMASKMOVD\\s+\\(" "VPADDD"
-	// amd64/v3:"VPMASKMOVD\\s+\\(" "VPADDD"
-	// amd64/v4:"VPMASKMOVD\\s+\\(" "VPADDD"
-	// arm64:"VADD V[0-9]+\\.S4" -"VPMASKMOV"
+	// amd64/v1:"VPMASKMOVD\\s+\\(" "VPADDD\\s+\\(" "CALL simd/archsimd\\.X86Features\\.AVX2\\(SB\\)" -"CALL simd/archsimd\\.Load"
+	// amd64/v2:"VPMASKMOVD\\s+\\(" "VPADDD" "CALL simd/archsimd\\.X86Features\\.AVX2\\(SB\\)" -"CALL simd/archsimd\\.Load"
+	// amd64/v3:"VPMASKMOVD\\s+\\(" "VPADDD" -"CALL simd/archsimd\\." -"CMPB internal/cpu\\.X86"
+	// amd64/v4:"VPMASKMOVD\\s+\\(" "VPADDD" -"CALL simd/archsimd\\." -"CMPB internal/cpu\\.X86"
+	// arm64:"CALL simd/archsimd\\.LoadInt32x4Part\\(SB\\)" "VADD V[0-9]+\\.S4" -"CALL simd/archsimd\\.X86Features" -"VPMASKMOV"
 	return xs.sum()
 }
 
 //go:noinline
 func sumU64(xs []uint64) uint64 {
-// amd64/v1:"VPMASKMOVQ\\s+\\(" "VPADDQ\\s+\\("
-// amd64/v3:"VPMASKMOVQ\\s+\\(" "VPADDQ\\s+\\("
-	// arm64:"VADD V[0-9]+\\.D2"
+// amd64/v1:"VPMASKMOVQ\\s+\\(" "VPADDQ\\s+\\(" "CALL simd/archsimd\\.X86Features\\.AVX2\\(SB\\)"
+// amd64/v3:"VPMASKMOVQ\\s+\\(" "VPADDQ\\s+\\(" -"CALL simd/archsimd\\." -"CMPB internal/cpu\\.X86"
+	// arm64:"CALL simd/archsimd\\.LoadUint64x2Part\\(SB\\)" "VADD V[0-9]+\\.D2" -"CALL simd/archsimd\\.X86Features"
 	return xs.sum()
 }
 
 //go:noinline
 func sumU16(xs []uint16) uint16 {
-	// amd64/v1:"VMOVDQU16\\.Z\\s+\\(" "VMOVDQU64\\s+\\(" "VPADDW"
-	// amd64/v3:"VMOVDQU16\\.Z\\s+\\(" "VMOVDQU64\\s+\\(" "VPADDW"
-	// amd64/v4:"VMOVDQU16\\.Z\\s+\\(" "VPADDW"
-	// arm64:"VADD V[0-9]+\\.H8"
+	// amd64/v1:"VMOVDQU16\\.Z\\s+\\(" "VMOVDQU64\\s+\\(" "VPADDW" "CALL simd/archsimd\\.X86Features\\.AVX512\\(SB\\)"
+	// amd64/v3:"VMOVDQU16\\.Z\\s+\\(" "VMOVDQU64\\s+\\(" "VPADDW" "CALL simd/archsimd\\.X86Features\\.AVX512\\(SB\\)"
+	// amd64/v4:"VMOVDQU16\\.Z\\s+\\(" "VPADDW" -"CALL simd/archsimd\\." -"CMPB internal/cpu\\.X86"
+	// arm64:"CALL simd/archsimd\\.LoadUint16x8Part\\(SB\\)" "VADD V[0-9]+\\.H8" -"CALL simd/archsimd\\.X86Features"
 	return xs.sum()
 }
 
 //go:noinline
 func sumU8(xs []uint8) uint8 {
-	// amd64/v1:"VMOVDQU8\\.Z\\s+\\(" "VMOVDQU64\\s+\\(" "VPADDB"
-	// amd64/v3:"VMOVDQU8\\.Z\\s+\\(" "VMOVDQU64\\s+\\(" "VPADDB"
-	// amd64/v4:"VMOVDQU8\\.Z\\s+\\(" "VPADDB"
-	// arm64:"VADD V[0-9]+\\.B16"
+	// amd64/v1:"VMOVDQU8\\.Z\\s+\\(" "VMOVDQU64\\s+\\(" "VPADDB" "CALL simd/archsimd\\.X86Features\\.AVX512\\(SB\\)"
+	// amd64/v3:"VMOVDQU8\\.Z\\s+\\(" "VMOVDQU64\\s+\\(" "VPADDB" "CALL simd/archsimd\\.X86Features\\.AVX512\\(SB\\)"
+	// amd64/v4:"VMOVDQU8\\.Z\\s+\\(" "VPADDB" -"CALL simd/archsimd\\." -"CMPB internal/cpu\\.X86"
+	// arm64:"CALL simd/archsimd\\.LoadUint8x16Part\\(SB\\)" "VADD V[0-9]+\\.B16" -"CALL simd/archsimd\\.X86Features"
 	return xs.sum()
 }
 //go:noinline
 func sumI8(xs []int8) int8 {
-	// amd64/v1:"VMOVDQU8\\.Z\\s+\\(" "VMOVDQU64\\s+\\(" "VPADDB"
-	// amd64/v3:"VMOVDQU8\\.Z\\s+\\(" "VMOVDQU64\\s+\\(" "VPADDB"
-	// amd64/v4:"VMOVDQU8\\.Z\\s+\\(" "VPADDB"
-	// arm64:"VADD V[0-9]+\\.B16"
+	// amd64/v1:"VMOVDQU8\\.Z\\s+\\(" "VMOVDQU64\\s+\\(" "VPADDB" "CALL simd/archsimd\\.X86Features\\.AVX512\\(SB\\)"
+	// amd64/v3:"VMOVDQU8\\.Z\\s+\\(" "VMOVDQU64\\s+\\(" "VPADDB" "CALL simd/archsimd\\.X86Features\\.AVX512\\(SB\\)"
+	// amd64/v4:"VMOVDQU8\\.Z\\s+\\(" "VPADDB" -"CALL simd/archsimd\\." -"CMPB internal/cpu\\.X86"
+	// arm64:"CALL simd/archsimd\\.LoadInt8x16Part\\(SB\\)" "VADD V[0-9]+\\.B16" -"CALL simd/archsimd\\.X86Features"
 	return xs.sum()
 }
 
 //go:noinline
 func sumI16(xs []int16) int16 {
-	// amd64/v1:"VMOVDQU16\\.Z\\s+\\(" "VMOVDQU64\\s+\\(" "VPADDW"
-	// amd64/v3:"VMOVDQU16\\.Z\\s+\\(" "VMOVDQU64\\s+\\(" "VPADDW"
-	// amd64/v4:"VMOVDQU16\\.Z\\s+\\(" "VPADDW"
-	// arm64:"VADD V[0-9]+\\.H8"
+	// amd64/v1:"VMOVDQU16\\.Z\\s+\\(" "VMOVDQU64\\s+\\(" "VPADDW" "CALL simd/archsimd\\.X86Features\\.AVX512\\(SB\\)"
+	// amd64/v3:"VMOVDQU16\\.Z\\s+\\(" "VMOVDQU64\\s+\\(" "VPADDW" "CALL simd/archsimd\\.X86Features\\.AVX512\\(SB\\)"
+	// amd64/v4:"VMOVDQU16\\.Z\\s+\\(" "VPADDW" -"CALL simd/archsimd\\." -"CMPB internal/cpu\\.X86"
+	// arm64:"CALL simd/archsimd\\.LoadInt16x8Part\\(SB\\)" "VADD V[0-9]+\\.H8" -"CALL simd/archsimd\\.X86Features"
 	return xs.sum()
 }
 
 //go:noinline
 func sumI64(xs []int64) int64 {
-	// amd64/v1:"VPMASKMOVQ\\s+\\(" "VPADDQ"
-	// amd64/v3:"VPMASKMOVQ\\s+\\(" "VPADDQ"
-	// arm64:"VADD V[0-9]+\\.D2"
+	// amd64/v1:"VPMASKMOVQ\\s+\\(" "VPADDQ" "CALL simd/archsimd\\.X86Features\\.AVX2\\(SB\\)"
+	// amd64/v3:"VPMASKMOVQ\\s+\\(" "VPADDQ" -"CALL simd/archsimd\\." -"CMPB internal/cpu\\.X86"
+	// arm64:"CALL simd/archsimd\\.LoadInt64x2Part\\(SB\\)" "VADD V[0-9]+\\.D2" -"CALL simd/archsimd\\.X86Features"
 	return xs.sum()
 }
 
 //go:noinline
 func sumU32(xs []uint32) uint32 {
-	// amd64/v1:"VPMASKMOVD\\s+\\(" "VPADDD\\s+\\("
-	// amd64/v2:"VPMASKMOVD\\s+\\(" "VPADDD"
-	// amd64/v3:"VPMASKMOVD\\s+\\(" "VPADDD"
-	// amd64/v4:"VPMASKMOVD\\s+\\(" "VPADDD"
-	// arm64:"VADD V[0-9]+\\.S4"
+	// amd64/v1:"VPMASKMOVD\\s+\\(" "VPADDD\\s+\\(" "CALL simd/archsimd\\.X86Features\\.AVX2\\(SB\\)" -"CALL simd/archsimd\\.Load"
+	// amd64/v2:"VPMASKMOVD\\s+\\(" "VPADDD" "CALL simd/archsimd\\.X86Features\\.AVX2\\(SB\\)" -"CALL simd/archsimd\\.Load"
+	// amd64/v3:"VPMASKMOVD\\s+\\(" "VPADDD" -"CALL simd/archsimd\\." -"CMPB internal/cpu\\.X86"
+	// amd64/v4:"VPMASKMOVD\\s+\\(" "VPADDD" -"CALL simd/archsimd\\." -"CMPB internal/cpu\\.X86"
+	// arm64:"CALL simd/archsimd\\.LoadUint32x4Part\\(SB\\)" "VADD V[0-9]+\\.S4" -"CALL simd/archsimd\\.X86Features"
 	return xs.sum()
 }
 
 //go:noinline
 func sumF32(xs []float32) float32 {
-// amd64/v1:"VPMASKMOVD\\s+\\(" "VMOVDQU\\s+\\("
-// amd64/v3:"VPMASKMOVD\\s+\\(" "VMOVDQU\\s+\\("
+// amd64/v1:"VPMASKMOVD\\s+\\(" "VMOVDQU\\s+\\(" "CALL simd/archsimd\\.X86Features\\.AVX2\\(SB\\)" -"CALL simd/archsimd\\.Load"
+// amd64/v3:"VPMASKMOVD\\s+\\(" "VMOVDQU\\s+\\(" -"CALL simd/archsimd\\.X86Features" -"CMPB internal/cpu\\.X86"
+	// arm64:"CALL simd/archsimd\\.LoadFloat32x4Part\\(SB\\)" -"CALL simd/archsimd\\.X86Features"
 	return xs.sum()
 }
 
 //go:noinline
 func sumF64(xs []float64) float64 {
-// amd64/v1:"VPMASKMOVQ\\s+\\(" "VMOVDQU\\s+\\("
-// amd64/v3:"VPMASKMOVQ\\s+\\(" "VMOVDQU\\s+\\("
+// amd64/v1:"VPMASKMOVQ\\s+\\(" "VMOVDQU\\s+\\(" "CALL simd/archsimd\\.X86Features\\.AVX2\\(SB\\)"
+// amd64/v3:"VPMASKMOVQ\\s+\\(" "VMOVDQU\\s+\\(" -"CALL simd/archsimd\\.X86Features" -"CMPB internal/cpu\\.X86"
+	// arm64:"CALL simd/archsimd\\.LoadFloat64x2Part\\(SB\\)" -"CALL simd/archsimd\\.X86Features"
 	return xs.sum()
 }
 
 //go:noinline
 func sumInt(xs []int) int {
-	// amd64:-"VPMASKMOV" -"VPADD"
-	// arm64:-"VADD V"
+	// amd64:-"VPMASKMOV" -"VPADD" -"CALL simd/archsimd"
+	// arm64:-"VADD V" -"CALL simd/archsimd"
 	return xs.sum()
 }
 
 //go:noinline
 func sumUint(xs []uint) uint {
-	// amd64:-"VPMASKMOV" -"VPADD"
-	// arm64:-"VADD V"
+	// amd64:-"VPMASKMOV" -"VPADD" -"CALL simd/archsimd"
+	// arm64:-"VADD V" -"CALL simd/archsimd"
 	return xs.sum()
 }
 
 //go:noinline
 func sumUintptr(xs []uintptr) uintptr {
-	// amd64:-"VPMASKMOV" -"VPADD"
-	// arm64:-"VADD V"
+	// amd64:-"VPMASKMOV" -"VPADD" -"CALL simd/archsimd"
+	// arm64:-"VADD V" -"CALL simd/archsimd"
 	return xs.sum()
 }
 
@@ -112,15 +114,16 @@ type watt = float64
 
 //go:noinline
 func sumAlias(xs []watt) float64 {
-// amd64/v1:"VPMASKMOVQ\\s+\\(" "VMOVDQU\\s+\\("
-// amd64/v3:"VPMASKMOVQ\\s+\\(" "VMOVDQU\\s+\\("
+// amd64/v1:"VPMASKMOVQ\\s+\\(" "VMOVDQU\\s+\\(" "CALL simd/archsimd\\.X86Features\\.AVX2\\(SB\\)" -"CALL simd/archsimd\\.Load"
+// amd64/v3:"VPMASKMOVQ\\s+\\(" "VMOVDQU\\s+\\(" -"CALL simd/archsimd\\." -"CMPB internal/cpu\\.X86"
+	// arm64:"CALL simd/archsimd\\.LoadFloat64x2Part\\(SB\\)" -"CALL simd/archsimd\\.X86Features"
 	return xs.sum()
 }
 
 //go:noinline
 func sumFiltered(xs []int32) int32 {
-	// amd64:-"VPMASKMOV" -"VMOVDQU" -"CALL runtime\\.makeslice"
-	// arm64:-"VPMASKMOV" -"CALL runtime\\.makeslice"
+	// amd64:-"VPMASKMOV" -"VMOVDQU" -"CALL simd/archsimd" -"CALL runtime\\.makeslice"
+	// arm64:-"VPMASKMOV" -"CALL simd/archsimd" -"CALL runtime\\.makeslice"
 	return xs.filter(x => x > 0).sum()
 }
 
