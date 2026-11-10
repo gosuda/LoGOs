@@ -1,0 +1,4 @@
+probe run OK
+eight=switch nine=table-R
+fold-eight=switch fold-nine=table-R
+shape OK
