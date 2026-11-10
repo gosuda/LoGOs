@@ -25,6 +25,7 @@ exists out/main.go
 
 ! grep '"comptime"' out/main.go
 ! grep 'Tag\.Get' out/main.go
+grep -count=4 'StructTag\(' out/main.go
 cd out
 go run .
 cmp stdout $WORK/native.txt
@@ -157,6 +158,24 @@ func tagImported() []string {
 	}
 	return out
 }
+
+func tagRuntime(key string) []string {
+	var out []string
+	const for _, f := range comptime.Fields[Multi]() {
+		out = append(out, f.Tag.Get(key))
+	}
+	return out
+}
+
+func tagRuntimeOracle(key string) []string {
+	var out []string
+	t := reflect.TypeOf(Multi{})
+	for i := range t.NumField() {
+		out = append(out, tagString(t.Field(i).Tag, key))
+	}
+	return out
+}
+
 func main() {
 	fmt.Println(total("5"))
 	fmt.Println(total("z"))
@@ -169,6 +188,11 @@ func main() {
 	oracle := append(tagOracle(), tagImportedOracle()...)
 	if fmt.Sprint(folded) != fmt.Sprint(oracle) {
 		panic("tag fold mismatch")
+	}
+	rt := tagRuntime("GET")
+	ro := tagRuntimeOracle("GET")
+	if fmt.Sprint(rt) != fmt.Sprint(ro) {
+		panic("runtime tag mismatch")
 	}
 	fmt.Println("tags match")
 }
