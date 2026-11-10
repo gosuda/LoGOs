@@ -228,35 +228,14 @@ func logosTypes2FactName(fn *types2.Func) string {
 	if !ok || sig.Recv() == nil {
 		return fn.Name()
 	}
-	t := sig.Recv().Type()
-	for {
-		cv, ok := types2.Unalias(t).(*types2.ConstView)
-		if !ok {
-			break
-		}
-		t = cv.Elem
-	}
+	t := unconstView(sig.Recv().Type())
 	if p, isPtr := types2.Unalias(t).(*types2.Pointer); isPtr {
-		t = p.Elem()
-		for {
-			cv, ok := types2.Unalias(t).(*types2.ConstView)
-			if !ok {
-				break
-			}
-			t = cv.Elem
-		}
+		t = unconstView(p.Elem())
 	}
 	if named, isNamed := types2.Unalias(t).(*types2.Named); isNamed && named.TypeParams() != nil && named.TypeParams().Len() > 0 {
 		return ""
 	}
-	rt := sig.Recv().Type()
-	for {
-		cv, ok := types2.Unalias(rt).(*types2.ConstView)
-		if !ok {
-			break
-		}
-		rt = cv.Elem
-	}
+	rt := unconstView(sig.Recv().Type())
 	recv := types2.TypeString(rt, nil)
 	if strings.HasPrefix(recv, "*") {
 		recv = "(" + recv + ")"
