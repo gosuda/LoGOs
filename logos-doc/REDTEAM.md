@@ -4,7 +4,7 @@ Rules: logos-doc/SPEC.md. Status values: planned, tested, satisfied upstream, bl
 | --- | --- | --- | --- | --- |
 | #1 | Split-union pointer scalar overlap confusion | M2 | test/logos/redteam/attack_001_split_union_ptr_scalar | tested |
 | #2 | String constBytes mutated via surviving alias | M5 | test/logos/run/zerocopy.lgo | tested |
-| #3 | Rodata map breaks from runtime hash seed | M5 | test/logos/run/constmap_switch.lgo; src/cmd/compile/internal/logos/constmap_test.go (TestConstmapSwitchMax) | tested |
+| #3 | Rodata map breaks from runtime hash seed | M5 | test/logos/run/constmap_switch.lgo; src/cmd/compile/internal/logos/constmap_test.go (TestConstmapHashMatchesRuntime) | tested |
 | #4 | Side-stack arena growth across parked goroutines | M18 | src/cmd/go/testdata/script/logos_redteam_4.txt (executed 2026-10-28: `go test cmd/go -run 'Script/^logos_redteam_4$'` passes both legs, the five arena park tests plus the `-race` leg the release gate requires) | tested |
 | #5 | Cgo fastcall blocks OS thread forever | M8, M20 | src/cmd/cgo/internal/testlogos/fastcall_test.go | tested |
 | #6 | Block lambda return ambiguity inside map | M6 | test/logos/run/lambda.lgo; test/logos/run/chains.lgo (dblBlock, count with ?) | tested |
