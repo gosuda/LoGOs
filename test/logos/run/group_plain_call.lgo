@@ -23,7 +23,7 @@ func runPlain(ctx context.Context, input int) error {
 //logos:allow(correctness::unbounded_channel_op)
 func main() {
 	ctx := context.Background()
-	input := 1
+	input := 7
 	if err := runPlain(ctx, input); err != nil {
 		fmt.Println("bad err")
 		return
