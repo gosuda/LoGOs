@@ -657,7 +657,7 @@ Zero values of non-nil pointers MUST fail with correctness::nonnil_uninitialized
 Absent map and JSON values MUST check through V? and MissingFieldError. [T-202][T-Sec12]
 An absent key MUST read as none while a present nil payload MUST read as some. [T-202][T-Sec12]
 Pointers from Go declarations, in the standard library and in every other Go package, MUST act as platform pointers. [T-202][R-U2]
-Stores into non-nil locations MUST panic with logos: nil from Go value at the source line. [T-202][R-U2]
+Stores into non-nil locations MUST panic with `logos: nil from Go value stored into non-nil *T at <file>:<line>`. [T-202][R-U2]
 Block scoping MUST stay standard Go. [T-202]
 Outer variables MUST narrow after if x == nil return guards. [T-202]
 Reads of .lgo results before err == nil proof MUST fail with correctness::result_before_error_check. [T-202]
