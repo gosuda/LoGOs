@@ -94,6 +94,7 @@ package goparity
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -1419,4 +1420,216 @@ func (uo *upOnceBuild) build(t *testing.T, uID string) (buildResult, error) {
 	b := buildResult{outDir: outDir, output: out, err: err, progs: built}
 	uo.done[u.id] = b
 	return b, b.err
+}
+
+const sweepSampleN = 120
+
+func sweepEligible(t *testing.T, goroot string) []string {
+	t.Helper()
+	var out []string
+	for _, dir := range []string{".", "ken", "chan", "interface", "fixedbugs", "typeparam"} {
+		matches, err := filepath.Glob(filepath.Join(goroot, "test", dir, "*.go"))
+		if err != nil {
+			t.Fatalf("globbing sweep dir %s: %v", dir, err)
+		}
+		for _, m := range matches {
+			data, err := os.ReadFile(m)
+			if err != nil {
+				t.Fatalf("reading sweep file %s: %v", m, err)
+			}
+			if hasBareRun(data) {
+				out = append(out, m)
+			}
+		}
+	}
+	slices.Sort(out)
+	if len(out) <= sweepSampleN {
+		return out
+	}
+	step := float64(len(out)) / float64(sweepSampleN)
+	sample := make([]string, 0, sweepSampleN)
+	for i := range sweepSampleN {
+		sample = append(sample, out[int(float64(i)*step)])
+	}
+	return sample
+}
+
+func hasBareRun(data []byte) bool {
+	bare := false
+	for ln := range strings.SplitSeq(string(data), "\n") {
+		t := strings.TrimSpace(ln)
+		if t == "// run" {
+			bare = true
+			continue
+		}
+		for _, p := range []string{"// run", "// runoutput", "// rundir", "// runindir", "// buildrundir"} {
+			if t == p || strings.HasPrefix(t, p+" ") || strings.HasPrefix(t, p+"\t") {
+				return false
+			}
+		}
+	}
+	return bare
+}
+
+type sweepRow struct {
+	forkBin string
+	forkID  string
+	upID    string
+	upEnv   []string
+}
+
+type sweepJob struct {
+	fork  toolchain
+	up    toolchain
+	base  string
+	stage string
+	rows  []sweepRow
+}
+
+func maskBin(o observation, bin string) observation {
+	o.stdout = strings.ReplaceAll(o.stdout, bin, "BIN")
+	o.stderr = strings.ReplaceAll(o.stderr, bin, "BIN")
+	return o
+}
+
+func (j sweepJob) check(pkg string) (excluded, failed string) {
+	type rowObs struct {
+		row     sweepRow
+		forkBin string
+		upBin   string
+		fork    observation
+		up      observation
+	}
+	var obs []rowObs
+	var dirs []string
+	defer func() {
+		for _, d := range dirs {
+			os.RemoveAll(d)
+		}
+	}()
+	for _, r := range j.rows {
+		fOut := filepath.Join(j.base, "out-"+pkg+"-"+r.forkID)
+		_, fout, ferr := stagedBuild{bin: r.forkBin, stage: j.stage, outDir: fOut, env: baseEnv(forkCache()), progs: []string{pkg}}.build()
+		uOut := filepath.Join(j.base, "out-"+pkg+"-"+r.upID)
+		_, uout, uerr := stagedBuild{bin: j.up.bin, stage: j.stage, outDir: uOut, env: appendEnv(baseEnv(upCache()), r.upEnv...), progs: []string{pkg}}.build()
+		if ferr != nil || uerr != nil {
+			dirs = append(dirs, fOut, uOut)
+			if uerr != nil {
+				return "upstream build failed: " + clip(uerr.Error()+" "+uout), ""
+			}
+			return "", fmt.Sprintf("fork %s build failed where upstream builds: %v\n%s", r.forkID, ferr, clip(fout))
+		}
+		fBin := filepath.Join(fOut, pkg)
+		uBin := filepath.Join(uOut, pkg)
+		fo, err := runBinary(fBin, "4")
+		if err != nil {
+			return "", fmt.Sprintf("fork %s run failed: %v", r.forkID, err)
+		}
+		uo, err := runBinary(uBin, "4")
+		if err != nil {
+			return "", fmt.Sprintf("upstream %s run failed: %v", r.upID, err)
+		}
+		obs = append(obs, rowObs{r, fBin, uBin, maskBin(fo, fBin), maskBin(uo, uBin)})
+	}
+	byUp := map[string]observation{}
+	for _, o := range obs {
+		byUp[o.row.upID] = o.up
+	}
+	if len(byUp) == len(j.rows) && !obsEqual(byUp["U1"], byUp["U3"]) {
+		return "upstream rows differ (no stable oracle)", ""
+	}
+	for _, o := range obs {
+		if obsEqual(o.fork, o.up) {
+			continue
+		}
+		fo2, err := runBinary(o.forkBin, "4")
+		if err != nil {
+			return "", fmt.Sprintf("fork %s rerun failed: %v", o.row.forkID, err)
+		}
+		uo2, err := runBinary(o.upBin, "4")
+		if err != nil {
+			return "", fmt.Sprintf("upstream %s rerun failed: %v", o.row.upID, err)
+		}
+		if obsEqual(maskBin(fo2, o.forkBin), maskBin(uo2, o.upBin)) {
+			continue
+		}
+		d := cmp.Or(firstDiff(o.fork.stdout, o.up.stdout), firstDiff(o.fork.stderr, o.up.stderr), fmt.Sprintf("exit %d vs %d", o.fork.exit, o.up.exit))
+		return "", fmt.Sprintf("%s vs %s: %s (%s vs %s)", o.row.forkID, o.row.upID, d, obsDesc(o.fork), obsDesc(o.up))
+	}
+	return "", ""
+}
+
+func TestParityUpstreamSweep(t *testing.T) {
+	if !*releaseFlag {
+		t.Skip("release tier only; pass -goparity.release")
+	}
+	fork := forkTool(t)
+	up, upOn := upstreamTool(t)
+	if !upOn {
+		t.Skip("upstream oracle off: the sweep compares against live upstream output")
+	}
+	files := sweepEligible(t, up.goroot)
+	if len(files) == 0 {
+		t.Fatal("no sweep-eligible files under upstream test/")
+	}
+	base := t.TempDir()
+	stage := filepath.Join(base, "sweep")
+	if err := os.MkdirAll(stage, 0o777); err != nil {
+		t.Fatalf("creating sweep stage: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(stage, "go.mod"), []byte("module sweep\n\ngo 1.27\n"), 0o644); err != nil {
+		t.Fatalf("writing sweep go.mod: %v", err)
+	}
+	pkgs := make([]string, 0, len(files))
+	for i, f := range files {
+		pkg := fmt.Sprintf("f%03d", i)
+		dir := filepath.Join(stage, pkg)
+		if err := os.MkdirAll(dir, 0o777); err != nil {
+			t.Fatalf("creating sweep pkg %s: %v", pkg, err)
+		}
+		data, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatalf("reading sweep file %s: %v", f, err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, filepath.Base(f)), data, 0o644); err != nil {
+			t.Fatalf("staging sweep file %s: %v", f, err)
+		}
+		pkgs = append(pkgs, pkg)
+	}
+	rows := []sweepRow{
+		{fork.bin, "K1", "U1", nil},
+		{fork.logos, "K5", "U3", []string{"GOAMD64=v3"}},
+	}
+	type outcome struct {
+		excluded string
+		failed   string
+	}
+	outcomes := make([]outcome, len(files))
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, runtime.NumCPU())
+	job := sweepJob{fork: fork, up: up, base: base, stage: stage, rows: rows}
+	for i := range files {
+		wg.Go(func() {
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			ex, fa := job.check(pkgs[i])
+			outcomes[i] = outcome{ex, fa}
+		})
+	}
+	wg.Wait()
+	ran, skipped := 0, 0
+	for i, o := range outcomes {
+		rel, _ := filepath.Rel(filepath.Join(up.goroot, "test"), files[i])
+		if o.failed != "" {
+			t.Errorf("sweep: %s: %s", rel, o.failed)
+			continue
+		}
+		if o.excluded != "" {
+			t.Logf("sweep: excluded %s: %s", rel, o.excluded)
+			skipped++
+			continue
+		}
+		ran++
+	}
+	t.Logf("sweep: %d files compared, %d excluded, wall sample covers K1 K5", ran, skipped)
 }
