@@ -431,7 +431,7 @@ A compile-time evaluation that overflows the target width, inserts a NaN or dupl
 
 Pointer-free constant data MUST live in read-only memory. [T-201]
 
-Constant data with pointers MUST live in read-only-after-relocation memory. [T-201]
+Constant data with pointers MUST live in read-only memory, so a write to it faults. [T-201]
 
 A write to a constant composite through `unsafe` MUST fault at run time. [T-201]
 
