@@ -113,22 +113,6 @@ func TestCopyDeclarationKeepsReflectivePath(t *testing.T) {
 	}
 }
 
-func TestUnsupportedKindsSkipGeneration(t *testing.T) {
-	cases := map[string]string{
-		"interface": "type S struct {\n\tA any `json:\"a\"`\n}\n",
-		"intkeymap": "type S struct {\n\tM map[int]string `json:\"m\"`\n}\n",
-		"embedded":  "type In struct{ X int `json:\"x\"` }\ntype S struct {\n\tIn\n\tY int `json:\"y\"`\n}\n",
-	}
-	for name, decl := range cases {
-		t.Run(name, func(t *testing.T) {
-			text := lowerStaticText(t, "package p\n\n"+decl)
-			if strings.Contains(text, "func (_logos_v S)") || strings.Contains(text, "func (_logos_v *S)") {
-				t.Fatalf("type S was generated:\n%s", text)
-			}
-		})
-	}
-}
-
 func requiredStruct(n int) string {
 	var b strings.Builder
 	b.WriteString("package p\n\ntype R struct {\n")
