@@ -15,6 +15,21 @@ func failNil() error {
 	return nil
 }
 
+var errFirst = errors.New("first")
+var errTwo = errors.New("second")
+
+//go:noinline
+func failTwo() error {
+	sink++
+	return errTwo
+}
+
+//go:noinline
+func failArgErr(x int) error {
+	sink += x
+	return errTwo
+}
+
 //go:noinline
 func failArg(x int) error {
 	sink += x
@@ -29,6 +44,12 @@ type box struct {
 func (b *box) Close() error {
 	sink += b.v
 	return nil
+}
+
+//go:noinline
+func (b *box) CloseErr() error {
+	sink += b.v
+	return errTwo
 }
 
 //go:noinline
@@ -116,6 +137,142 @@ func loopMethodHand(bs []*box) (err error) {
 	return nil
 }
 
+func loopFnErr(n int) (err error) {
+	for i := 0; i < n; i++ {
+		defer failTwo()?
+	}
+	return nil
+}
+
+func loopFnErrHand(n int) (err error) {
+	for i := 0; i < n; i++ {
+		defer func() {
+			if e := failTwo(); e != nil {
+				if err == nil {
+					err = e
+				} else {
+					err = errors.Join(err, e)
+				}
+			}
+		}()
+	}
+	return nil
+}
+
+func loopFnJoin(n int) (err error) {
+	for i := 0; i < n; i++ {
+		defer failTwo()?
+	}
+	return errFirst
+}
+
+func loopFnJoinHand(n int) (err error) {
+	for i := 0; i < n; i++ {
+		defer func() {
+			if e := failTwo(); e != nil {
+				if err == nil {
+					err = e
+				} else {
+					err = errors.Join(err, e)
+				}
+			}
+		}()
+	}
+	return errFirst
+}
+
+func loopArgErr(n int) (err error) {
+	for i := 0; i < n; i++ {
+		defer failArgErr(i)?
+	}
+	return nil
+}
+
+func loopArgErrHand(n int) (err error) {
+	for i := 0; i < n; i++ {
+		x := i
+		defer func() {
+			if e := failArgErr(x); e != nil {
+				if err == nil {
+					err = e
+				} else {
+					err = errors.Join(err, e)
+				}
+			}
+		}()
+	}
+	return nil
+}
+
+func loopArgJoin(n int) (err error) {
+	for i := 0; i < n; i++ {
+		defer failArgErr(i)?
+	}
+	return errFirst
+}
+
+func loopArgJoinHand(n int) (err error) {
+	for i := 0; i < n; i++ {
+		x := i
+		defer func() {
+			if e := failArgErr(x); e != nil {
+				if err == nil {
+					err = e
+				} else {
+					err = errors.Join(err, e)
+				}
+			}
+		}()
+	}
+	return errFirst
+}
+
+func loopMethodErr(bs []*box) (err error) {
+	for _, b := range bs {
+		defer b.CloseErr()?
+	}
+	return nil
+}
+
+func loopMethodErrHand(bs []*box) (err error) {
+	for _, b := range bs {
+		b := b
+		defer func() {
+			if e := b.CloseErr(); e != nil {
+				if err == nil {
+					err = e
+				} else {
+					err = errors.Join(err, e)
+				}
+			}
+		}()
+	}
+	return nil
+}
+
+func loopMethodJoin(bs []*box) (err error) {
+	for _, b := range bs {
+		defer b.CloseErr()?
+	}
+	return errFirst
+}
+
+func loopMethodJoinHand(bs []*box) (err error) {
+	for _, b := range bs {
+		b := b
+		defer func() {
+			if e := b.CloseErr(); e != nil {
+				if err == nil {
+					err = e
+				} else {
+					err = errors.Join(err, e)
+				}
+			}
+		}()
+	}
+	return errFirst
+}
+
 func loopOrderLogos(n int) (err error) {
 	for i := 0; i < n; i++ {
 		defer noteArg(i)?
@@ -174,6 +331,33 @@ func sameInts(a, c []int) bool {
 	return true
 }
 
+func errCases(bs []*box) bool {
+	failed := false
+	checkErr := func(name string, err error, wantFirst, wantSecond bool) {
+		gotFirst := errors.Is(err, errFirst)
+		gotSecond := errors.Is(err, errTwo)
+		if err == nil || gotFirst != wantFirst || gotSecond != wantSecond {
+			fmt.Println("FAIL", name, "err=", err)
+			failed = true
+			return
+		}
+		fmt.Println(name, "ok")
+	}
+	checkErr("fn-err", loopFnErr(3), false, true)
+	checkErr("fn-err-hand", loopFnErrHand(3), false, true)
+	checkErr("fn-join", loopFnJoin(3), true, true)
+	checkErr("fn-join-hand", loopFnJoinHand(3), true, true)
+	checkErr("arg-err", loopArgErr(3), false, true)
+	checkErr("arg-err-hand", loopArgErrHand(3), false, true)
+	checkErr("arg-join", loopArgJoin(3), true, true)
+	checkErr("arg-join-hand", loopArgJoinHand(3), true, true)
+	checkErr("method-err", loopMethodErr(bs), false, true)
+	checkErr("method-err-hand", loopMethodErrHand(bs), false, true)
+	checkErr("method-join", loopMethodJoin(bs), true, true)
+	checkErr("method-join-hand", loopMethodJoinHand(bs), true, true)
+	return failed
+}
+
 func main() {
 	failed := false
 	check := func(name string, logos, hand float64) {
@@ -214,6 +398,9 @@ func main() {
 		failed = true
 	} else {
 		fmt.Println("recv ok")
+	}
+	if errCases(bs) {
+		failed = true
 	}
 	if failed {
 		os.Exit(1)
