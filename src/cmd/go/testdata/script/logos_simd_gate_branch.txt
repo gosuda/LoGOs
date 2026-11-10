@@ -1,23 +1,32 @@
 # The archsimd feature check must dominate the vector block through
 # a conditional branch: the AVX2 call, the test of its result, and
-# the jump to the scalar block appear in that order, and the masked
-# tail load of the vector block follows. Sums stay correct with the
-# check forced false (scalar path) and at v3 (check omitted).
+# the jump to the scalar block appear in that order, the instruction
+# after the jump is the vector prologue (so the jump targets the
+# scalar loop), and the masked tail load of the vector block follows.
+# Sums stay correct with the check forced false (scalar path) and at
+# v3 (check omitted).
 [!GOARCH:amd64] skip 'gate branch objdump needs amd64'
 
 env GOPROXY=off
 env GOTOOLCHAIN=local
 env GOEXPERIMENT=simd
 env GOAMD64=v1
-
 cd m
+
 logos build -o $WORK/exe .
 go tool objdump -s '^main\.sumI32$' $WORK/exe
 stdout '(?s)CALL simd/archsimd\.X86Features\.AVX2\(SB\).*TESTL AL, AL.*JE'
+# The instruction after the feature-false jump is the vector prologue:
+# the jump targets the scalar loop. Swapped targets keep JE and
+# VPMASKMOVD but put scalar code here.
+stdout '(?s)CALL simd/archsimd\.X86Features\.AVX2\(SB\)[^\n]*\n[^\n]*TESTL AL, AL[ \t]*\n[^\n]*JE 0x[0-9a-f]+[ \t]*\n[^\n]*VPXOR'
 stdout 'VPMASKMOVD'
 
 env GODEBUG=cpu.avx2=off
 logos run .
+# The program observes the check itself: false here proves the sums
+# below ran through the scalar loop the jump above targets.
+stdout '^avx2 false$'
 stdout '^sums ok$'
 
 env GODEBUG=
