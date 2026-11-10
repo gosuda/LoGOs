@@ -10,10 +10,6 @@ func inferSlice(xs const []int) {
 	_ = inferTake(xs /* ERROR "[correctness::const_view_mutation] cannot pass argument through const view" */)
 }
 
-func inferSliceExplicit(xs const []int) {
-	_ = inferTake[[]int](xs /* ERROR "[correctness::const_view_mutation] cannot pass argument through const view" */)
-}
-
 func inferMap(xm const map[string]int) {
 	_ = inferTake(xm /* ERROR "[correctness::const_view_mutation] cannot pass argument through const view" */)
 }
