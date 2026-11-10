@@ -202,6 +202,17 @@ func (js *jsonStruct) unionLines(f *jsonField, field string) []string {
 		shapeOK := s.isStruct && s.st.NumFields() > 0 && s.bareName != ""
 		shapeOK = shapeOK && localPkg != nil && named.Obj().Pkg() != nil && localPkg.Path() == named.Obj().Pkg().Path()
 		s.usable = shapeOK && js.staticJSON[named]
+		if s.usable {
+			visible := 0
+			for i := range s.st.NumFields() {
+				if _, ok := types2.LogosJSONFieldOf(s.st, i); ok {
+					visible++
+				}
+			}
+			if visible == 0 {
+				s.usable = false
+			}
+		}
 		s.custom = !s.usable
 	}
 
