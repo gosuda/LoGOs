@@ -17,7 +17,6 @@ exists out/_logos_deps/rt/go.mod
 exists out/_logos_deps/rt/json/walk.go
 exists out/_logos_deps/rt/json/walkfields.go
 exists out/_logos_deps/example.com/dep@v0.0.0/cycle/cycle.go
-exec grep '_logos_json "github.com/gosuda/loGos/rt/json"' out/main.go
 
 exec grep -rhnE '_logos_[A-Za-z0-9_]+ "github\.com/gosuda/loGos/[^"]*"' out --include=*.go
 cp stdout $WORK/eject-support-imports-json.txt

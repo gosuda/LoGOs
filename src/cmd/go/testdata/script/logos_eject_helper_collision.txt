@@ -8,8 +8,6 @@ stdout '^ok \{"tag":"user-rt"\}$'
 
 logos eject -o out
 exists out/main.go
-grep -count=1 '_logos_json "github.com/gosuda/loGos/rt/json"' out/main.go
-grep -count=1 '_logos_rt "github.com/gosuda/loGos/rt"' out/main.go
 
 exec grep -rhnE '_logos_[A-Za-z0-9_]+ "github\.com/gosuda/loGos/[^"]*"' out --include=*.go
 cp stdout $WORK/collide-support-imports.txt

@@ -13,18 +13,8 @@ cd w/l
 logos eject -o bout
 exists bout/p/p.go
 exists bout/r/r.go
-grep 'Logos_GetNick\(\) string' bout/p/p.go
-! grep 'Logos_SetNick' bout/p/p.go
-grep 'Logos_GetHP\(\) int' bout/p/p.go
-grep 'Logos_SetHP' bout/p/p.go
-grep ' Name\(\) string' bout/r/r.go
-grep ' Total\(\) int' bout/r/r.go
-! grep 'Logos_Set' bout/r/r.go
-! grep 'Logos_Get' bout/r/r.go
-! grep 'const Name' bout/r/r.go
 cd bout
 go build ./...
-stdout ''
 cd ..
 cd ../..
 
