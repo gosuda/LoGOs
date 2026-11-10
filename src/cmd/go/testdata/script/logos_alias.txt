@@ -35,6 +35,14 @@ logos run ./vs
 stdout '^vs ok$'
 stderr -count=1 'portability::alias_extension'
 
+logos build -o $WORK/bin/txt$GOEXE ./txt
+stderr -count=1 'portability::alias_extension'
+exists $WORK/bin/txt$GOEXE
+
+logos run ./txt
+stdout '^txt ok$'
+stderr -count=1 'portability::alias_extension'
+
 logos build -o $WORK/bin/multi$GOEXE ./multi
 stderr -count=2 'portability::alias_extension'
 exists $WORK/bin/multi$GOEXE
@@ -42,6 +50,9 @@ exists $WORK/bin/multi$GOEXE
 logos run ./multi
 stdout '^multi ok$'
 stderr -count=2 'portability::alias_extension'
+
+! go build ./scroll
+stderr 'no Go files in '
 
 logos build ./dupok
 stderr -count=1 'portability::alias_extension'
@@ -116,3 +127,12 @@ func X() int { return 1 }
 package dup
 
 func Y() int { return 2 }
+
+-- txt/main.⚡︎ --
+package main
+
+import "fmt"
+
+func main() {
+	fmt.Println("txt ok")
+}
