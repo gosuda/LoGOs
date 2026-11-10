@@ -466,14 +466,22 @@ func (check *Checker) logosCheckUnionFieldJSON(fld *Var) {
 		return
 	}
 	for _, term := range tset.terms {
-		if term.tilde || logosUnionMemberHasJSON(term.typ, check.pkg) {
+		if term.tilde {
+			continue
+		}
+		ok, hasFunc := logosUnionMemberHasJSON(term.typ, check.pkg)
+		if ok {
+			continue
+		}
+		if hasFunc {
+			check.errorf(fld, BadDecl, "%s union member %s has UnmarshalJSON with wrong signature, want func([]byte) error", logosNoUnionJSON, term.typ)
 			continue
 		}
 		check.errorf(fld, BadDecl, "%s union member %s has no UnmarshalJSON method", logosNoUnionJSON, term.typ)
 	}
 }
 
-func logosUnionMemberHasJSON(m Type, pkg *Package) bool {
+func logosUnionMemberHasJSON(m Type, pkg *Package) (bool, bool) {
 	u := Unalias(m)
 	if cv, ok := u.(*ConstView); ok {
 		u = Unalias(cv.Elem)
@@ -486,21 +494,21 @@ func logosUnionMemberHasJSON(m Type, pkg *Package) bool {
 	}
 	named, ok := u.(*Named)
 	if !ok || named.Obj() == nil {
-		return false
+		return false, false
 	}
 	obj, _, _ := LookupFieldOrMethod(NewPointer(named), false, pkg, "UnmarshalJSON")
 	fn, ok := obj.(*Func)
 	if !ok {
-		return false
+		return false, false
 	}
 	sig, ok := fn.Type().(*Signature)
 	if !ok || sig.Params().Len() != 1 || sig.Variadic() || sig.Results().Len() != 1 {
-		return false
+		return false, true
 	}
 	if !Identical(Unalias(sig.Params().At(0).Type()), NewSlice(universeByte)) {
-		return false
+		return false, true
 	}
-	return Identical(Unalias(sig.Results().At(0).Type()), universeError)
+	return Identical(Unalias(sig.Results().At(0).Type()), universeError), true
 }
 
 func (check *Checker) logosAddStaticFamilyMethods(named *Named, family string) {
@@ -513,7 +521,6 @@ func (check *Checker) logosAddStaticFamilyMethods(named *Named, family string) {
 		}
 	}
 }
-
 func logosHasMethod(named *Named, name string) bool {
 	for i := range named.NumMethods() {
 		if named.Method(i).Name() == name {
