@@ -26,7 +26,7 @@ Rules: logos-doc/SPEC.md. Status values: planned, tested, satisfied upstream, bl
 | #23 | Accessing valid res when defer close fails | M3 | src/internal/types/testdata/logos/error_first.lgo | tested |
 | #24 | Non-deterministic map iteration inside const func | M5 | src/internal/types/testdata/logos/ctfe.lgo (BadMapRange); test/logos/run/const_map.lgo (sorted range) | tested |
 | #25 | Transitive dependencies bypassing reflect ban unsafely | M12 | src/cmd/go/testdata/script/logos_cap_unsafe.txt | tested |
-| #26 | ARM64 weak ordering exposing Hot fields | M8 | src/logos/sync/sync_test.go (TestHotUpdateConcurrent, TestHotLayout) | tested |
+| #26 | ARM64 weak ordering exposing Hot fields | M8 | src/logos/sync/sync_test.go (TestHotUpdateConcurrent, TestHotUpdateIncrementNoLostUpdates, TestHotLayout) | tested |
 | #27 | WASM memory grow detaching JS views | M16 | src/cmd/go/testdata/script/logos_wasm_loader.txt | tested |
 | #28 | RVO destination aliasing corrupting input reverse | M13 | test/logos/redteam/attack_028_self_aliased_rvo.lgo | tested |
 | #31 | Stream fusion over-executing side effects take | M6 | src/internal/types/testdata/logos/chains.lgo; test/logos/run/sort_side_effect.lgo | tested |
