@@ -2,7 +2,11 @@
 
 package codegen
 
-import "unsafe"
+import (
+	"runtime"
+	"time"
+	"unsafe"
+)
 
 //go:linkname gopark runtime.gopark
 func gopark(unlockf func(unsafe.Pointer, unsafe.Pointer) bool, lock unsafe.Pointer, reason, traceReason uint8, traceskip int)
@@ -45,4 +49,26 @@ func parks() { // js/wasm/:"BrTable" wasip1/wasm/:"BrTable"
 func transitive() { // js/wasm/:"BrTable" wasip1/wasm/:"BrTable"
 	// js/wasm/:"Call \\S+\\.parks" "BrIf" wasip1/wasm/:"Call \\S+\\.parks" "BrIf"
 	parks()
+}
+
+//go:noinline
+func sleeps() { // js/wasm/:"BrTable" wasip1/wasm/:"BrTable"
+	time.Sleep(1)
+}
+
+//go:noinline
+func goscheds() { // js/wasm/:"BrTable" wasip1/wasm/:"BrTable"
+	runtime.Gosched()
+}
+
+//go:noinline
+func selects() int { // js/wasm/:"BrTable" wasip1/wasm/:"BrTable"
+	c1 := make(chan int, 1)
+	c2 := make(chan int, 1)
+	select {
+	case v := <-c1:
+		return v
+	case v := <-c2:
+		return -v
+	}
 }
