@@ -1,0 +1,109 @@
+# Direct Go calls to loGo/s methods with non-nil pointer parameters
+# carry the nil check, but method values and interface calls do not:
+# this is the documented hole, and the unchecked calls panic with
+# the plain runtime error instead of the logos message.
+env GOPROXY=off
+env GOTOOLCHAIN=local
+mkdir $WORK/bin
+
+cd w
+logos build ./...
+logos build -o $WORK/bin/nilvalues$GOEXE ./g2/cmd
+exec $WORK/bin/nilvalues$GOEXE
+stdout 'method-direct: logos: nil from Go value'
+stdout 'method-value: runtime error: invalid memory address or nil pointer dereference'
+stdout 'iface: runtime error: invalid memory address or nil pointer dereference'
+! stdout 'method-value: logos'
+! stdout 'iface: logos'
+cd ..
+
+-- w/go.work --
+go 1.27
+
+use (
+	./l2
+	./g2
+)
+
+-- w/l2/go.mod --
+module example.com/l2
+
+go 1.27
+
+-- w/l2/b/b.lgo --
+package b
+
+type User struct {
+	Name string
+}
+
+type Box struct{}
+
+func (b *Box) Set(u *User) string {
+	return u.Name
+}
+
+type Setter interface {
+	Set(u *User) string
+}
+
+-- w/g2/go.mod --
+module example.com/g2
+
+go 1.27
+
+-- w/g2/q/q.go --
+package q
+
+import (
+	"fmt"
+
+	"example.com/l2/b"
+)
+
+func Run() string {
+	out := ""
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				out += "method-direct: " + fmt.Sprint(r) + "\n"
+			}
+		}()
+		bb := &b.Box{}
+		_ = bb.Set(nil)
+		out += "method-direct: no-panic\n"
+	}()
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				out += "method-value: " + fmt.Sprint(r) + "\n"
+			}
+		}()
+		bb := &b.Box{}
+		m := bb.Set
+		_ = m(nil)
+		out += "method-value: no-panic\n"
+	}()
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				out += "iface: " + fmt.Sprint(r) + "\n"
+			}
+		}()
+		var s b.Setter = &b.Box{}
+		_ = s.Set(nil)
+		out += "iface: no-panic\n"
+	}()
+	return out
+}
+
+-- w/g2/cmd/main.go --
+package main
+
+import (
+	"fmt"
+
+	"example.com/g2/q"
+)
+
+func main() { fmt.Print(q.Run()) }
