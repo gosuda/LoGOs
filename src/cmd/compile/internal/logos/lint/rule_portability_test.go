@@ -256,4 +256,7 @@ func TestSerializedUnsizedIntSpan(t *testing.T) {
 			t.Errorf("message %q lacks %q", r.Message, part)
 		}
 	}
+	if !strings.HasSuffix(r.Message, "; use int32, int64, uint32, or uint64") {
+		t.Errorf("message %q recommends beyond the sized kinds", r.Message)
+	}
 }
