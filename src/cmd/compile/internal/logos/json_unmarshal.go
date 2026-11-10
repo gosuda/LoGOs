@@ -188,12 +188,12 @@ func (js *jsonStruct) unionLines(f *jsonField, field string) []string {
 			memberList[i].st, memberList[i].isStruct = types2.Unalias(ptr.Elem()).Underlying().(*types2.Struct)
 			if named, ok := types2.Unalias(ptr.Elem()).(*types2.Named); ok && named.Obj() != nil {
 				memberList[i].bareName = named.Obj().Name()
-				memberList[i].usable = memberList[i].isStruct && memberList[i].st.NumFields() > 0 && memberList[i].bareName != "" && localPkg != nil && named.Obj().Pkg() != nil && localPkg.Path() == named.Obj().Pkg().Path()
+				memberList[i].usable = memberList[i].isStruct && memberList[i].st.NumFields() > 0 && memberList[i].bareName != "" && localPkg != nil && named.Obj().Pkg() != nil && localPkg.Path() == named.Obj().Pkg().Path() && !userDeclaresMethod(named, "UnmarshalJSON")
 			}
 		} else if named, ok := types2.Unalias(m).(*types2.Named); ok && named.Obj() != nil {
 			memberList[i].st, memberList[i].isStruct = types2.Unalias(m).Underlying().(*types2.Struct)
 			memberList[i].bareName = named.Obj().Name()
-			memberList[i].usable = memberList[i].isStruct && memberList[i].st.NumFields() > 0 && memberList[i].bareName != "" && localPkg != nil && named.Obj().Pkg() != nil && localPkg.Path() == named.Obj().Pkg().Path()
+			memberList[i].usable = memberList[i].isStruct && memberList[i].st.NumFields() > 0 && memberList[i].bareName != "" && localPkg != nil && named.Obj().Pkg() != nil && localPkg.Path() == named.Obj().Pkg().Path() && !userDeclaresMethod(named, "UnmarshalJSON")
 		}
 	}
 
