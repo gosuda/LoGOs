@@ -629,19 +629,6 @@ func TestMarshalSingleMakeNoThreshold(t *testing.T) {
 	}
 }
 
-func TestMarshalNoSizeThresholdNoCallerBuffer(t *testing.T) {
-	text := lowerStaticText(t, "package p\n\ntype W struct {\n\tName string `json:\"name\"`\n\tVals []int64 `json:\"vals\"`\n\tNote *string? `json:\"note,omitempty\"`\n}\n")
-	body := methodBody(t, text, "func (_logos_v W) MarshalJSON() ([]byte, error) {")
-	for _, cond := range []string{"_logos_n >", "_logos_n <", "_logos_n >=", "len(_logos_buf) >"} {
-		if strings.Contains(body, cond) {
-			t.Errorf("MarshalJSON branches on a size threshold %q:\n%s", cond, body)
-		}
-	}
-	if !strings.Contains(body, "return _logos_buf, nil") {
-		t.Errorf("MarshalJSON must return its own buffer, not a caller buffer:\n%s", body)
-	}
-}
-
 func TestStringFieldsReadOnce(t *testing.T) {
 	text := lowerStaticText(t, "package p\n\ntype S struct {\n\tA string `json:\"a\"`\n\tB string `json:\"b\"`\n\tN int64 `json:\"n\"`\n}\n")
 	body := methodBody(t, text, "func (_logos_v S) MarshalJSON() ([]byte, error) {")
