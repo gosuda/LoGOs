@@ -1,0 +1,38 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+cd w
+logos eject -o bout
+exists bout/m.go
+grep '//line m.lgo:6' bout/m.go
+grep 'Name\(\) string' bout/m.go
+! grep 'const Name\(\) string' bout/m.go
+cd bout
+! go vet ./...
+stderr 'm\.lgo:12'
+cd ..
+
+-- w/go.mod --
+module example.com/ropos
+
+go 1.27
+
+-- w/m.lgo --
+package main
+
+import "fmt"
+
+type R interface {
+	const Name() string
+}
+
+type T struct{}
+
+func (T) Name() string {
+	return fmt.Sprintf("%d", "x")
+}
+
+func main() {
+	var r R = T{}
+	fmt.Println(r.Name())
+}
