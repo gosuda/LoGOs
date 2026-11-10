@@ -165,6 +165,8 @@ func (check *Checker) recordDef(id *ast.Ident, obj Object) {
 func (check *Checker) recordUse(id *ast.Ident, obj Object) {
 	assert(id != nil)
 	assert(obj != nil)
+	if _, ok := obj.(*PkgName); !ok {
+	}
 	if m := check.Uses; m != nil {
 		m[id] = obj
 	}
