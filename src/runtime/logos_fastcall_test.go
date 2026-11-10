@@ -5,9 +5,9 @@
 package runtime_test
 
 import (
+	"internal/testenv"
 	"runtime"
 	"testing"
-	"time"
 	"unsafe"
 )
 
@@ -90,27 +90,10 @@ func TestLogosFastCallStaysOnOriginalM(t *testing.T) {
 }
 
 func TestLogosFastCgoFrameSlotsAreNotRoots(t *testing.T) {
-	runtime.LockOSThread()
-	defer runtime.UnlockOSThread()
-	defer runtime.LogosDirtyFastCallSlotsForTest([4]uintptr{}, false)
-	done := make(chan struct{}, 1)
-	func() {
-		obj := new([64]byte)
-		runtime.AddCleanup(obj, func(ch chan struct{}) { ch <- struct{}{} }, done)
-		runtime.LogosDirtyFastCallSlotsForTest([4]uintptr{uintptr(unsafe.Pointer(obj)), 0, 0, 0}, true)
-	}()
-	for range 100 {
-		runtime.GC()
-		select {
-		case <-done:
-			return
-		default:
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	select {
-	case <-done:
-	default:
-		t.Fatal("object referenced only by fast-call slots survived GC")
+	testenv.MustHaveCGO(t)
+	got := runTestProg(t, "testprogcgo", "LogosFastCgoSlotsNotRoots")
+	want := "OK\n"
+	if got != want {
+		t.Fatalf("expected %q, but got:\n%s", want, got)
 	}
 }
