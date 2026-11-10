@@ -33,6 +33,31 @@ logos build -o $WORK/bin/gomod$GOEXE .
 ! stderr .
 cd ..
 
+cd denymod
+! logos build -o $WORK/bin/denymod$GOEXE .
+stderr 'portability::alias_extension'
+! exists $WORK/bin/denymod$GOEXE
+cd ..
+
+cd denyallow
+logos build -o $WORK/bin/denyallow$GOEXE .
+! stderr .
+exists $WORK/bin/denyallow$GOEXE
+exec $WORK/bin/denyallow$GOEXE
+stdout '^allow deny ok$'
+cd ..
+
+cd allowpos
+logos build -o $WORK/bin/allowpos$GOEXE .
+stderr -count=2 'portability::alias_extension'
+! stderr 'ok\.📜'
+exists $WORK/bin/allowpos$GOEXE
+exec $WORK/bin/allowpos$GOEXE
+stdout '^helped$'
+stdout '^extra$'
+stdout '^ok quiet$'
+cd ..
+
 -- dotted/go.mod --
 module example.com/dotted
 
@@ -108,4 +133,85 @@ import "fmt"
 
 func main() {
 	fmt.Println("go ok")
+}
+
+-- denymod/go.mod --
+module example.com/denymod
+
+go 1.27
+
+-- denymod/logos.toml --
+[lints]
+portability = "deny"
+
+-- denymod/main.📜 --
+package main
+
+import "fmt"
+
+func main() {
+	fmt.Println("deny ok")
+}
+
+-- denyallow/go.mod --
+module example.com/denyallow
+
+go 1.27
+
+-- denyallow/logos.toml --
+[lints]
+portability = "deny"
+
+-- denyallow/main.📜 --
+//logos:allow(portability::alias_extension)
+package main
+
+import "fmt"
+
+func main() {
+	fmt.Println("allow deny ok")
+}
+
+-- allowpos/go.mod --
+module example.com/allowpos
+
+go 1.27
+
+-- allowpos/ok.📜 --
+//logos:allow(portability::alias_extension)
+package main
+
+import "fmt"
+
+func main() {
+	fmt.Println("ok quiet")
+}
+
+-- allowpos/abovefunc.📜 --
+package main
+
+import "fmt"
+
+//logos:allow(portability::alias_extension)
+func helper() string {
+	return "helped"
+}
+
+func init() {
+	fmt.Println(helper())
+}
+
+-- allowpos/blankline.📜 --
+//logos:allow(portability::alias_extension)
+
+package main
+
+import "fmt"
+
+func extra() string {
+	return "extra"
+}
+
+func init() {
+	fmt.Println(extra())
 }
