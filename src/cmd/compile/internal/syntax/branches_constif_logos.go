@@ -13,8 +13,9 @@ func logosConstBranches(stmt Stmt, ctxt targets, innerBlock func(targets, Pos, [
 			innerBlock(inner, s.Else.Pos(), []Stmt{s.Else})
 		}
 	case *ConstSwitchStmt:
+		uncased := targets{nil, nil, -1}
 		for _, c := range s.Cases {
-			innerBlock(inner, c.Case, c.Body)
+			innerBlock(uncased, c.Case, c.Body)
 		}
 	}
 }

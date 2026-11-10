@@ -20,7 +20,7 @@ func breakInLoop[T any]() {
 	for {
 		const switch T {
 		case int:
-			break
+			break // ERROR "break is not in a loop, switch, or select"
 		}
 	}
 }
@@ -29,7 +29,7 @@ func continueInLoop[T any]() {
 	for {
 		const switch T {
 		case int:
-			continue
+			continue // ERROR "continue is not in a loop"
 		}
 	}
 }
