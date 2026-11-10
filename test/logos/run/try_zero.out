@@ -5,3 +5,4 @@ slice=[] err=zero
 map=map[] err=zero
 str="" err=zero
 gen=0 err=zero
+assign-ok

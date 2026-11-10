@@ -57,6 +57,14 @@ func takeGen[T any](v T) (T, error) {
 	return g, nil
 }
 
+var observedAssign Point
+
+func takeAssign() (Point, error) {
+	observedAssign = Point{X: 9, Y: 9}
+	observedAssign = failPoint()?
+	return observedAssign, nil
+}
+
 func main() {
 	p, errP := takePoint()
 	fmt.Printf("point=%v err=%v\n", p, errP)
@@ -72,4 +80,11 @@ func main() {
 	fmt.Printf("str=%q err=%v\n", st, errSt)
 	g, errG := takeGen(7)
 	fmt.Printf("gen=%v err=%v\n", g, errG)
+	_, errAssign := takeAssign()
+	want, wantErr := failPoint()
+	if errAssign != nil && wantErr != nil && observedAssign == want {
+		fmt.Println("assign-ok")
+	} else {
+		fmt.Println("assign-bad", observedAssign, errAssign)
+	}
 }
