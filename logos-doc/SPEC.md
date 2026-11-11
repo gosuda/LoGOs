@@ -514,7 +514,7 @@ Comparing a platform pointer with `nil` MUST be allowed. [T-202]
 
 A store of a platform value into a declared non-nil location MUST wrap the stored expression in `logos/rt.MustNonNil` with the source position. [T-202]
 
-A nil value at such a store MUST panic with `logos: nil from Go value stored into non-nil *T at <file>:<line>`. [T-202]
+A nil value at such a store MUST panic with `logos: nil from Go value stored into non-nil *T at <file>:<line>`. [T-202][R-U2]
 
 `if x != nil` MUST narrow a local or parameter `x` from `T?` to `T` in the guarded block. [T-202]
 
@@ -601,7 +601,6 @@ Pointers from Go-mode declarations and from type parameters instantiated with no
 A single-value map read `m[k]` MUST type as `V?`, while `v, ok := m[k]` MUST keep Go meaning [T-104.3].
 Zero values of non-nil pointers MUST fail with correctness::nonnil_uninitialized. [T-202][T-Sec12]
 Absent map and JSON values MUST check through V? and MissingFieldError. [T-202][T-Sec12]
-Stores into non-nil locations MUST panic with `logos: nil from Go value stored into non-nil *T at <file>:<line>`. [T-202][R-U2]
 Block scoping MUST stay standard Go. [T-202]
 Outer variables MUST narrow after if x == nil return guards. [T-202]
 
