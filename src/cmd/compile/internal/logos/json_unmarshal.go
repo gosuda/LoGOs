@@ -641,13 +641,7 @@ func unionFoldFunc(keyFunc string) string {
 
 func (js *jsonStruct) unionMemberKeys(b *strings.Builder, seen map[string]bool) {
 	for _, f := range js.fields {
-		if f.shape.kind != shapeUnion {
-			continue
-		}
-		members, _, ok := classifyUnionMembers(js.holderPkg, js.staticJSON, f.typ)
-		if !ok {
-			continue
-		}
+		members := js.foreignKeyedMembers(f)
 		for _, c := range members {
 			if !c.keyed || !c.foreign || seen[c.keyFunc] {
 				continue
@@ -668,6 +662,22 @@ func (js *jsonStruct) unionMemberKeys(b *strings.Builder, seen map[string]bool) 
 			writeKeyFunc(b, name, "jsonfold", folded)
 		}
 	}
+}
+
+func (js *jsonStruct) foreignKeyedMembers(f *jsonField) []unionMemberClass {
+	typ := f.typ
+	if f.shape.kind != shapeUnion {
+		uc, ok := unionContainerOf(f.typ)
+		if !ok {
+			return nil
+		}
+		typ = uc.union
+	}
+	members, _, ok := classifyUnionMembers(js.holderPkg, js.staticJSON, typ)
+	if !ok {
+		return nil
+	}
+	return members
 }
 
 func writeKeyFunc(b *strings.Builder, name, kind string, keys []keyEntry) {
