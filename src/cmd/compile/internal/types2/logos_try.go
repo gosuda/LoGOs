@@ -60,8 +60,12 @@ func (check *Checker) logosTryResults(t *syntax.TryExpr) (results []*operand, ok
 	case value:
 		if tup, isTup := cx.typ().(*Tuple); isTup {
 			vars := tup.vars
+			have := "no results"
+			if len(vars) > 0 {
+				have = TypeString(vars[len(vars)-1].typ, check.qualifier)
+			}
 			if len(vars) == 0 || !Identical(vars[len(vars)-1].typ, universeError) {
-				check.error(t.Pos(), InvalidCall, "? last result must be error")
+				check.errorf(t.Pos(), InvalidCall, "? last result must be error, have %s", have)
 				return fail()
 			}
 			for _, v := range vars[:len(vars)-1] {
@@ -69,7 +73,7 @@ func (check *Checker) logosTryResults(t *syntax.TryExpr) (results []*operand, ok
 			}
 		} else {
 			if !Identical(cx.typ(), universeError) {
-				check.error(t.Pos(), InvalidCall, "? last result must be error")
+				check.errorf(t.Pos(), InvalidCall, "? last result must be error, have %s", TypeString(cx.typ(), check.qualifier))
 				return fail()
 			}
 		}
