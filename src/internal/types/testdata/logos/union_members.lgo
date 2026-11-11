@@ -95,6 +95,11 @@ func memberCases(x U) int {
 func cmpNonMember(x U) bool {
 	return x == 1.5 /* ERROR "mismatched types" */
 }
+
+func cmpRuneNonMember(x U) bool {
+	return x == 'a' /* ERROR "mismatched types" */
+}
+
 func assignVarNonMember(f float64) {
 	var u U = f // ERROR "union_nonmember"
 	_ = u
