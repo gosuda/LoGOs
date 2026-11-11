@@ -251,3 +251,29 @@ func TestLogosParenOnceBranches(t *testing.T) {
 		})
 	}
 }
+
+func TestLogosLambdaTypedParamNoPartialTree(t *testing.T) {
+	for _, src := range []string{
+		"package p\nfunc f() { g := (a int) => a + 1; _ = g }\n",
+		"package p\nfunc f() { g := (a, b int) => a; _ = g }\n",
+		"package p\nfunc f() { g := (a + b) => a; _ = g }\n",
+	} {
+		var msgs []string
+		f, _ := Parse(nil, strings.NewReader(src), func(err error) {
+			msgs = append(msgs, err.Error())
+		}, nil, CheckBranches|LogosMode)
+		found := false
+		for _, m := range msgs {
+			if strings.Contains(m, "lambda parameters must be names") {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("%q: no lambda parameter error in %q", src, msgs)
+		}
+		if hasNode[*LambdaExpr](f) {
+			t.Errorf("%q: half-formed *LambdaExpr survives recovery", src)
+		}
+	}
+}

@@ -98,9 +98,6 @@ func (p *parser) logosParen(keepParens, inType bool) (Expr, bool) {
 }
 
 func (p *parser) logosParenLambda(pos Pos, elems []parenElem) Expr {
-	t := new(LambdaExpr)
-	t.pos = pos
-	t.Arrow = p.pos()
 	var names []*Name
 	for _, el := range elems {
 		if el.name != nil {
@@ -113,7 +110,13 @@ func (p *parser) logosParenLambda(pos Pos, elems []parenElem) Expr {
 	}
 	if len(names) != len(elems) {
 		p.syntaxError("lambda parameters must be names")
+		p.next()
+		p.logosLambdaBody()
+		return p.badExpr()
 	}
+	t := new(LambdaExpr)
+	t.pos = pos
+	t.Arrow = p.pos()
 	t.Params = names
 	p.next()
 	t.Body = p.logosLambdaBody()

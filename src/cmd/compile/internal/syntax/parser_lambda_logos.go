@@ -15,15 +15,17 @@ func (p *parser) logosLambdaOrExpr(x Expr) Expr {
 	if p.mode&LogosMode == 0 || p.tok != _FatArrow || p.lambdaBan > 0 {
 		return x
 	}
-	t := new(LambdaExpr)
-	t.pos = StartPos(x)
-	t.Arrow = p.pos()
 	if nm, ok := Unparen(x).(*Name); ok {
+		t := new(LambdaExpr)
+		t.pos = StartPos(x)
+		t.Arrow = p.pos()
 		t.Params = []*Name{nm}
-	} else {
-		p.syntaxError("lambda parameters must be names")
+		p.next()
+		t.Body = p.logosLambdaBody()
+		return t
 	}
+	p.syntaxError("lambda parameters must be names")
 	p.next()
-	t.Body = p.logosLambdaBody()
-	return t
+	p.logosLambdaBody()
+	return p.badExpr()
 }
