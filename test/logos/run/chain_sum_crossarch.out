@@ -1,4 +1,5 @@
-0
-4024000000000000
-3ff0000000000000
-3fc0000000000000
+ok chain-order-near-cancel
+ok chain-order-small
+ok chain-order-far-cancel
+ok chain-map-sum
+ok chain-stable
