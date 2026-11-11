@@ -20,6 +20,82 @@ stdout '^int64 ok 0$'
 stdout '^uint64 ok 0$'
 stdout '^float32 ok 0$'
 stdout '^float64 ok 0$'
+
+cd ../a
+logos run .
+! stdout 'MISMATCH'
+stdout '^pad32 0$'
+stdout '^pad64 0$'
+
+-- a/go.mod --
+module example.com/nopadalloc
+
+go 1.27
+
+-- a/main.lgo --
+package main
+
+import (
+	"fmt"
+	"runtime"
+	"runtime/debug"
+)
+
+func pad32(s []float32) int {
+	var before, after runtime.MemStats
+	best := int64(1 << 62)
+	for r := 0; r < 8; r++ {
+		runtime.ReadMemStats(&before)
+		s.sum()
+		runtime.ReadMemStats(&after)
+		d := int64(after.TotalAlloc - before.TotalAlloc)
+		if d < best {
+			best = d
+		}
+	}
+	return int(best - int64(len(s))*4)
+}
+
+func pad64(s []float64) int {
+	var before, after runtime.MemStats
+	best := int64(1 << 62)
+	for r := 0; r < 8; r++ {
+		runtime.ReadMemStats(&before)
+		s.sum()
+		runtime.ReadMemStats(&after)
+		d := int64(after.TotalAlloc - before.TotalAlloc)
+		if d < best {
+			best = d
+		}
+	}
+	return int(best - int64(len(s))*8)
+}
+
+func main() {
+	debug.SetGCPercent(-1)
+	bad32 := 0
+	bad64 := 0
+	for n := 1; n <= 129; n++ {
+		s32 := make([]float32, n)
+		for i := range s32 {
+			s32[i] = float32(i)*0.5 + 1
+		}
+		if p := pad32(s32); p > 0 {
+			bad32++
+			fmt.Println("MISMATCH pad32", n, p)
+		}
+		s64 := make([]float64, n)
+		for i := range s64 {
+			s64[i] = float64(i)*0.5 + 1
+		}
+		if p := pad64(s64); p > 0 {
+			bad64++
+			fmt.Println("MISMATCH pad64", n, p)
+		}
+	}
+	fmt.Println("pad32", bad32)
+	fmt.Println("pad64", bad64)
+}
 -- m/go.mod --
 module example.com/noguardpadding
 
