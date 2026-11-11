@@ -19,6 +19,9 @@ func TestSimdSlicePlainLoopHasNoMaskedTail(t *testing.T) {
 					t.Errorf("non-reduction code names %s:\n%s", name, out)
 				}
 			}
+			if !strings.Contains(out, "case 0: return 0") {
+				t.Errorf("scalar sum loses its empty identity:\n%s", out)
+			}
 		})
 	}
 }
