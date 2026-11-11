@@ -11,6 +11,7 @@ import (
 	"cmp"
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"slices"
 	"strconv"
@@ -132,4 +133,28 @@ func AppendFloat(b []byte, f float64, fmt byte, prec, bitSize int) []byte {
 
 func AppendBool(b []byte, x bool) []byte {
 	return strconv.AppendBool(b, x)
+}
+
+func InterpError(v error) (s string) {
+	if v == nil {
+		return "<nil>"
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			s = "%!v(PANIC=Error method: " + fmt.Sprint(r) + ")"
+		}
+	}()
+	return v.Error()
+}
+
+func InterpStringer(v fmt.Stringer) (s string) {
+	if v == nil {
+		return "<nil>"
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			s = "%!v(PANIC=String method: " + fmt.Sprint(r) + ")"
+		}
+	}()
+	return v.String()
 }

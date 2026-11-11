@@ -191,15 +191,16 @@ func (fl *fileLower) lowerInterpExpr(e *syntax.InterpExpr, kinds []types2.LogosI
 		stmts = append(stmts, defineOf(pos, []syntax.Expr{nameOf(pos, v)}, []syntax.Expr{op}))
 		lines = append(lines, cat(gen(v+" := "), opTexts[i]))
 		if kinds[i] == types2.LogosInterpError || kinds[i] == types2.LogosInterpStringer {
-			method := "Error"
+			helper := "InterpError"
 			if kinds[i] == types2.LogosInterpStringer {
-				method = "String"
+				helper = "InterpStringer"
 			}
+			needConv = true
 			s := strName(i)
 			stmts = append(stmts, defineOf(pos,
 				[]syntax.Expr{nameOf(pos, s)},
-				[]syntax.Expr{callOf(pos, selOf(pos, nameOf(pos, v), method), nil)}))
-			lines = append(lines, gen(s+" := "+v+"."+method+"()"))
+				[]syntax.Expr{callOf(pos, selOf(pos, nameOf(pos, rtAlias), helper), []syntax.Expr{nameOf(pos, v)})}))
+			lines = append(lines, gen(s+" := "+rtAlias+"."+helper+"("+v+")"))
 		}
 	}
 	static := 0

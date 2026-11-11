@@ -1,0 +1,15 @@
+ok nil-error
+ok nonnil-error
+ok nil-stringer
+ok typed-nil-stringer
+ok nonnil-ptr-stringer
+ok typed-nil-error
+ok panic-stringer
+ok panic-error
+ok nil-slice-error
+ok nil-map-stringer
+ok nil-func-stringer
+ok value-stringer
+ok value-error
+ok both-prefers-error
+ok int-control
