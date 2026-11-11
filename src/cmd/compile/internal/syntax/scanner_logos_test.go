@@ -5,6 +5,12 @@
 package syntax
 
 import (
+	goscan "go/scanner"
+	"maps"
+	"os"
+	"path/filepath"
+	"runtime"
+	"slices"
 	"strings"
 	"testing"
 
@@ -362,5 +368,107 @@ func TestLogosNoNewGlobalKeywords(t *testing.T) {
 				t.Errorf("mode %d: var v = %s: found %d keyword nodes, want 0", uint(mode), w, got)
 			}
 		}
+	}
+}
+func stdlibIdents(seen map[string]struct{}) error {
+	root := filepath.Join(runtime.GOROOT(), "src")
+	return filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() || filepath.Ext(path) != ".go" {
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		fset := gotoken.NewFileSet()
+		f := fset.AddFile(path, -1, len(data))
+		var s goscan.Scanner
+		s.Init(f, data, nil, goscan.ScanComments)
+		for {
+			_, tok, lit := s.Scan()
+			if tok == gotoken.EOF {
+				return nil
+			}
+			if tok == gotoken.IDENT {
+				seen[lit] = struct{}{}
+			}
+		}
+	})
+}
+func secondLetterWords(seen map[string]struct{}, a rune) {
+	for b := 'a'; b <= 'z'; b++ {
+		seen[string([]rune{a, b})] = struct{}{}
+	}
+}
+func thirdLetterWords(seen map[string]struct{}, a, b rune) {
+	for c := 'a'; c <= 'z'; c++ {
+		seen[string([]rune{a, b, c})] = struct{}{}
+	}
+}
+func shortWords(seen map[string]struct{}) {
+	for c := 'a'; c <= 'z'; c++ {
+		seen[string(rune(c))] = struct{}{}
+	}
+	for a := 'a'; a <= 'z'; a++ {
+		secondLetterWords(seen, a)
+	}
+	for a := 'a'; a <= 'z'; a++ {
+		for b := 'a'; b <= 'z'; b++ {
+			thirdLetterWords(seen, a, b)
+		}
+	}
+	for _, w := range []string{"async", "await", "match", "catch", "finally", "class", "extends", "public", "private", "protected", "static", "final", "throws", "enum", "assert", "lambda", "where", "with", "loop", "repeat", "when", "unless", "until", "become", "mut", "dyn", "union", "trait", "impl", "letm", "fnm"} {
+		seen[w] = struct{}{}
+	}
+}
+func scanWordKind(w string, mode uint) (token, string, []string) {
+	var errs []string
+	var s scanner
+	s.init(strings.NewReader(w), func(_, _ uint, msg string) {
+		errs = append(errs, msg)
+	}, mode)
+	s.next()
+	return s.tok, s.lit, errs
+}
+func checkWordKind(t *testing.T, w string) {
+	t.Helper()
+	plainTok, plainLit, plainErrs := scanWordKind(w, 0)
+	logosTok, logosLit, logosErrs := scanWordKind(w, logosScannerMode)
+	if len(plainErrs) != 0 || len(logosErrs) != 0 {
+		t.Errorf("%q: got errors %q %q; want none", w, plainErrs, logosErrs)
+		return
+	}
+	if plainTok != logosTok {
+		t.Errorf("%q: plain %s != logos %s", w, plainTok, logosTok)
+		return
+	}
+	if gotoken.IsKeyword(w) {
+		if plainTok == _Name || logosTok == _Name {
+			t.Errorf("%q: got _Name; want keyword", w)
+		}
+		if plainTok.String() != w || logosTok.String() != w {
+			t.Errorf("%q: got %s %s; want keyword %q", w, plainTok, logosTok, w)
+		}
+		return
+	}
+	if plainTok != _Name || logosTok != _Name {
+		t.Errorf("%q: got %s %s; want _Name", w, plainTok, logosTok)
+		return
+	}
+	if plainLit != w || logosLit != w {
+		t.Errorf("%q: got %q %q; want %q", w, plainLit, logosLit, w)
+	}
+}
+func TestLogosNoNewGlobalKeywordsProperty(t *testing.T) {
+	seen := map[string]struct{}{}
+	if err := stdlibIdents(seen); err != nil {
+		t.Fatalf("collect stdlib idents: %v", err)
+	}
+	shortWords(seen)
+	for _, w := range slices.Sorted(maps.Keys(seen)) {
+		checkWordKind(t, w)
 	}
 }
