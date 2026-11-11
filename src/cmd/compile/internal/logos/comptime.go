@@ -182,6 +182,16 @@ func cfShortKeys(targs []types2.Type) string {
 	return strings.Join(parts, ", ")
 }
 
+func cfFactObject(obj *types2.Func) string {
+	if obj == nil {
+		return ""
+	}
+	if q := facts.ObjectName(obj); q != "" {
+		return q
+	}
+	return obj.Name()
+}
+
 func (fl *fileLower) registerComptime(exp *cfExpander, f *facts.Facts) *facts.Facts {
 	for _, def := range fl.cfCollectGenerics() {
 		def.record = fl.cfRecordText(def, "")
@@ -197,7 +207,7 @@ func (fl *fileLower) registerComptime(exp *cfExpander, f *facts.Facts) *facts.Fa
 			f = &facts.Facts{}
 		}
 		rec := fl.cfRecordText(def, cfPkgMarker)
-		f.Comptimes = append(f.Comptimes, facts.ComptimeFact{Object: rec.name, Source: []byte(rec.text())})
+		f.Comptimes = append(f.Comptimes, facts.ComptimeFact{Object: cfFactObject(def.obj), Source: []byte(rec.text())})
 	}
 	return f
 }
@@ -564,7 +574,7 @@ func (fl *fileLower) cfIsGeneric(obj *types2.Func) bool {
 	if !ok {
 		return false
 	}
-	return slices.ContainsFunc(f.Comptimes, func(c facts.ComptimeFact) bool { return c.Object == obj.Name() })
+	return slices.ContainsFunc(f.Comptimes, func(c facts.ComptimeFact) bool { return c.Object == cfFactObject(obj) })
 }
 
 func (fl *fileLower) cfRecordFor(obj *types2.Func) (*cfRecord, bool) {
@@ -572,7 +582,7 @@ func (fl *fileLower) cfRecordFor(obj *types2.Func) (*cfRecord, bool) {
 	if def, ok := exp.byObj[obj]; ok {
 		return def.record, true
 	}
-	key := obj.Pkg().Path() + "\x00" + obj.Name()
+	key := obj.Pkg().Path() + "\x00" + cfFactObject(obj)
 	if rec, ok := exp.foreign[key]; ok {
 		return rec, true
 	}
@@ -581,7 +591,7 @@ func (fl *fileLower) cfRecordFor(obj *types2.Func) (*cfRecord, bool) {
 		return nil, false
 	}
 	for _, c := range f.Comptimes {
-		if c.Object != obj.Name() {
+		if c.Object != cfFactObject(obj) {
 			continue
 		}
 		rec, err := cfParseRecord(obj.Name(), string(c.Source))
@@ -608,7 +618,7 @@ func cfCopyName(obj *types2.Func, seq int) string {
 
 func (fl *fileLower) cfCopyFor(site *cfSite) string {
 	exp := fl.pkg.ctExp
-	key := cfExpKey(site.obj.Name(), site.obj.Pkg().Path(), site.targs)
+	key := cfExpKey(cfFactObject(site.obj), site.obj.Pkg().Path(), site.targs)
 	if name, ok := exp.memo[key]; ok {
 		return name
 	}
