@@ -616,6 +616,7 @@ A union with `~` terms or an unbounded set MUST fail with `[correctness::open_un
 
 A conversion MUST be allowed when the source type is a member or a closed union of members. [T-203.1]
 An assignment MUST require membership. [T-203.1]
+An assignment of a value whose type is not a member MUST fail with `[correctness::union_nonmember]`. [T-203.1]
 
 Any other conversion MUST fail with `[correctness::union_nonmember]` naming the type. [T-203.1]
 

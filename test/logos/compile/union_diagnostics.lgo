@@ -20,6 +20,10 @@ func assertNonMember(u U) {
 	_ = u.(float64) // ERROR "union_nonmember"
 }
 
+func assignNonMember(u U) {
+	u = 1.5 // ERROR "union_nonmember"
+}
+
 func compareConst(u U) {
 	if u == 1 {
 		println("one")
