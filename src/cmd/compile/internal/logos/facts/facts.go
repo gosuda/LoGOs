@@ -406,6 +406,19 @@ type decoder struct {
 	data []byte
 	off  int
 	line int
+	seen map[string]int
+}
+
+func (d *decoder) dup(ln int, kind, key, display string) error {
+	if d.seen == nil {
+		d.seen = make(map[string]int)
+	}
+	k := kind + "\x00" + key
+	if first, ok := d.seen[k]; ok {
+		return fmt.Errorf("logos facts line %d: duplicate %s record for %q (first on line %d)", ln, kind, display, first)
+	}
+	d.seen[k] = ln
+	return nil
 }
 
 func (d *decoder) header() (ln int, s string, err error) {
@@ -474,6 +487,9 @@ func decodeJSONFact(f *Facts, d *decoder, ln int, line string) (bool, error) {
 		if !meta.HasDecoder && !meta.Eligible {
 			return true, fmt.Errorf("logos facts line %d: empty jsonmeta flags %q", ln, line)
 		}
+		if err := d.dup(ln, "jsonmeta", fields[1], fields[1]); err != nil {
+			return true, err
+		}
 		f.JsonMetas = append(f.JsonMetas, meta)
 		return true, nil
 	case "jsonkey":
@@ -491,6 +507,9 @@ func decodeJSONFact(f *Facts, d *decoder, ln int, line string) (bool, error) {
 			return true, fmt.Errorf("logos facts line %d: bad jsonkey length %q", ln, fields[3])
 		}
 		index, _ := strconv.Atoi(fields[2])
+		if err := d.dup(ln, "jsonkey", fields[1]+"\x00"+strconv.Itoa(index), fields[1]+" "+fields[2]); err != nil {
+			return true, err
+		}
 		key, err := d.takeBody(ln, "jsonkey", fields[1], n)
 		if err != nil {
 			return true, err
@@ -511,6 +530,9 @@ func decodeJSONFact(f *Facts, d *decoder, ln int, line string) (bool, error) {
 			return true, fmt.Errorf("logos facts line %d: bad unionmember %q", ln, fields[3])
 		}
 		index, _ := strconv.Atoi(fields[2])
+		if err := d.dup(ln, "unionmember", fields[1]+"\x00"+strconv.Itoa(index), fields[1]+" "+fields[2]); err != nil {
+			return true, err
+		}
 		f.UnionMembers = append(f.UnionMembers, UnionMemberFact{Type: fields[1], Index: index, Member: fields[3]})
 		return true, nil
 	}
@@ -577,6 +599,9 @@ func Decode(data []byte) (*Facts, error) {
 			if !validPath(fields[2]) {
 				return nil, fmt.Errorf("logos facts line %d: bad path %q", ln, fields[2])
 			}
+			if err := d.dup(ln, fields[0], fields[1]+"\x00"+fields[2], fields[1]+" "+fields[2]); err != nil {
+				return nil, err
+			}
 			switch fields[0] {
 			case "opt":
 				f.Opts = append(f.Opts, PathFact{Object: fields[1], Path: fields[2]})
@@ -602,6 +627,9 @@ func Decode(data []byte) (*Facts, error) {
 			if !validLockPath(fields[3]) {
 				return nil, fmt.Errorf("logos facts line %d: bad lock path %q", ln, fields[3])
 			}
+			if err := d.dup(ln, "locks", fields[1]+"\x00"+fields[2]+"\x00"+fields[3], fields[1]+" "+fields[2]+" "+fields[3]); err != nil {
+				return nil, err
+			}
 			f.Locks = append(f.Locks, LockFact{Object: fields[1], Effect: fields[2], Path: fields[3]})
 		case strings.HasPrefix(line, "allocfree "):
 			if len(fields) != 2 {
@@ -609,6 +637,9 @@ func Decode(data []byte) (*Facts, error) {
 			}
 			if !ValidObject(fields[1]) {
 				return nil, fmt.Errorf("logos facts line %d: bad object %q", ln, fields[1])
+			}
+			if err := d.dup(ln, "allocfree", fields[1], fields[1]); err != nil {
+				return nil, err
 			}
 			f.AllocFrees = append(f.AllocFrees, AllocFreeFact{Object: fields[1]})
 		case strings.HasPrefix(line, "fn "):
@@ -628,6 +659,9 @@ func Decode(data []byte) (*Facts, error) {
 			if (fn.AssertTP == "") != (fn.AssertRTP == "") {
 				return nil, fmt.Errorf("logos facts line %d: incomplete assertion-effect pair on %q (want both AssertTP and AssertRTP or neither)", ln, fn.Object)
 			}
+			if err := d.dup(ln, "fn", fn.Object, fn.Object); err != nil {
+				return nil, err
+			}
 			f.Fns = append(f.Fns, fn)
 		case strings.HasPrefix(line, "prop "):
 			if len(fields) != 3 {
@@ -638,6 +672,9 @@ func Decode(data []byte) (*Facts, error) {
 			}
 			if !validPrefix(fields[2]) {
 				return nil, fmt.Errorf("logos facts line %d: bad accessor prefix %q", ln, fields[2])
+			}
+			if err := d.dup(ln, "prop", fields[1], fields[1]); err != nil {
+				return nil, err
 			}
 			f.Props = append(f.Props, PropFact{Interface: fields[1], Prefix: fields[2]})
 		case strings.HasPrefix(line, "conforms "):
@@ -653,6 +690,9 @@ func Decode(data []byte) (*Facts, error) {
 			if !isIdent(fields[3]) {
 				return nil, fmt.Errorf("logos facts line %d: bad interface %q", ln, fields[3])
 			}
+			if err := d.dup(ln, "conforms", fields[1]+"\x00"+fields[2]+"\x00"+fields[3], fields[1]+" "+fields[2]+" "+fields[3]); err != nil {
+				return nil, err
+			}
 			f.Conforms = append(f.Conforms, ConformsFact{Type: fields[1], IfacePath: fields[2], Iface: fields[3]})
 		case strings.HasPrefix(line, "default "):
 			if len(fields) != 4 {
@@ -667,6 +707,9 @@ func Decode(data []byte) (*Facts, error) {
 			n, aerr := strconv.Atoi(fields[3])
 			if aerr != nil || n < 0 {
 				return nil, fmt.Errorf("logos facts line %d: bad default length %q", ln, fields[3])
+			}
+			if err := d.dup(ln, "default", fields[1]+"\x00"+fields[2], fields[1]+" "+fields[2]); err != nil {
+				return nil, err
 			}
 			text, err := d.takeBody(ln, "default", fields[1], n)
 			if err != nil {
@@ -684,6 +727,9 @@ func Decode(data []byte) (*Facts, error) {
 			if aerr != nil || n < 0 {
 				return nil, fmt.Errorf("logos facts line %d: bad comptime length %q", ln, fields[2])
 			}
+			if err := d.dup(ln, "comptime", fields[1], fields[1]); err != nil {
+				return nil, err
+			}
 			src, err := d.takeBody(ln, "comptime", fields[1], n)
 			if err != nil {
 				return nil, err
@@ -700,14 +746,12 @@ func Decode(data []byte) (*Facts, error) {
 			if aerr != nil || n <= 0 {
 				return nil, fmt.Errorf("logos facts line %d: bad constfn length %q", ln, fields[2])
 			}
+			if err := d.dup(ln, "constfn", fields[1], fields[1]); err != nil {
+				return nil, err
+			}
 			src, err := d.requireBody(ln, "constfn", fields[1], n)
 			if err != nil {
 				return nil, err
-			}
-			for _, c := range f.ConstFuncs {
-				if c.Object == fields[1] {
-					return nil, fmt.Errorf("logos facts line %d: duplicate constfn object %q", ln, fields[1])
-				}
 			}
 			f.ConstFuncs = append(f.ConstFuncs, ConstFuncFact{Object: fields[1], Source: src})
 		case strings.HasPrefix(line, "constmap "):

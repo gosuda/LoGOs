@@ -34,7 +34,7 @@ func writeProps(pkg *types2.Package, info *types2.Info, f *Facts) {
 			if ifaceObj == nil || !ifaceObj.Exported() {
 				continue
 			}
-			f.Conforms = append(f.Conforms, ConformsFact{
+			f.Conforms = appendUnique(f.Conforms, ConformsFact{
 				Type:      decl.Def.Name(),
 				IfacePath: path,
 				Iface:     iname,

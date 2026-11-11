@@ -16,7 +16,7 @@ func writeOpts(pkg *types2.Package, f *Facts) {
 		return
 	}
 	emit := func(object, path string) {
-		f.Opts = append(f.Opts, PathFact{Object: object, Path: path})
+		f.Opts = appendUnique(f.Opts, PathFact{Object: object, Path: path})
 	}
 	eachExportedSig(pkg, func(object string, sig *types2.Signature) {
 		walkSigQuals(sig, object, emit, nil)
