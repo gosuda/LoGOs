@@ -594,9 +594,6 @@ func greet(u *User?) string {
     return u?.Name ?? "anon"
 }
 ```
-A value of type `T` MUST convert to `T?`, and `nil` MUST convert to every `T?` [T-202].
-A value of type `T?` MUST NOT convert to `T` without a check [T-202].
-Zero values of non-nil pointers MUST fail compilation, including `var p *T`, arrays of non-nil pointers, `make` of a non-nil pointer slice with length above zero or with non-constant length, and composite literals that leave a non-nil field empty [T-202].
 Pointers from Go-mode declarations and from type parameters instantiated with non-nil pointers MUST act as platform pointers: dereference and nil comparison MUST compile, and a store into a non-nil location MUST check at run time and panic with the `.lgo` file and line on nil [T-202][A-STD].
 A single-value map read `m[k]` MUST type as `V?`, while `v, ok := m[k]` MUST keep Go meaning [T-104.3].
 Zero values of non-nil pointers MUST fail with correctness::nonnil_uninitialized. [T-202][T-Sec12]
