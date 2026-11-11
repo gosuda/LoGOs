@@ -69,12 +69,12 @@ func newOverlay(buffers map[string][]byte) (*overlay, error) {
 	replace := make(map[string]string, len(buffers))
 	for i, path := range slices.Sorted(maps.Keys(buffers)) {
 		dir := filepath.Join(root, strconv.Itoa(i))
-		if err := os.MkdirAll(dir, 0o777); err != nil {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
 			os.RemoveAll(root)
 			return nil, err
 		}
 		backing := filepath.Join(dir, filepath.Base(path))
-		if err := os.WriteFile(backing, buffers[path], 0o666); err != nil {
+		if err := os.WriteFile(backing, buffers[path], 0o600); err != nil {
 			os.RemoveAll(root)
 			return nil, err
 		}
@@ -86,7 +86,7 @@ func newOverlay(buffers map[string][]byte) (*overlay, error) {
 		os.RemoveAll(root)
 		return nil, err
 	}
-	if err := os.WriteFile(ov.json, data, 0o666); err != nil {
+	if err := os.WriteFile(ov.json, data, 0o600); err != nil {
 		os.RemoveAll(root)
 		return nil, err
 	}
