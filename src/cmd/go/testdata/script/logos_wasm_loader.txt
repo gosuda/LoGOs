@@ -259,6 +259,12 @@ if (mode === "text") {
   assert.throws(() => exports.checkHost(2, 3, 6), { message: "host add mismatch" });
   assert.throws(() => exports.fail64(), { message: "fail64: refused" });
   exports.ok64();
+  const scratch = instance.exports._logos_scratch_alloc(3) >>> 0;
+  const mem = instance.exports.mem ?? instance.exports.memory;
+  new Uint8Array(mem.buffer, scratch, 3).fill(9);
+  assert.equal(instance.exports.fail(scratch, 3), 1);
+  assert.equal(instance.exports.fail64(), 1n);
+  instance.exports._logos_scratch_reset(scratch);
 } else {
   assert.throws(() => exports.fail(new Uint8Array(3)), Error);
   assert.throws(() => exports.checkHost(2, 3, 6), Error);
