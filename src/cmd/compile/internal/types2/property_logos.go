@@ -293,7 +293,9 @@ func (check *Checker) logosPropertySource(V Type, name string, want Type) (gette
 	} else if m, ok := obj.(*Func); ok {
 		check.objDecl(m)
 		if sig, ok := m.typ.(*Signature); ok && sig.params.Len() == 0 && sig.results.Len() == 1 && Identical(sig.results.At(0).typ, want) {
-			getter = true
+			if sig.Recv() == nil || logosAsConstView(sig.Recv().Type()) == nil {
+				getter = true
+			}
 		}
 	}
 	sobj, sindex, _ := lookupFieldOrMethodImpl(V, false, check.pkg, "Set"+name, false)
@@ -303,7 +305,9 @@ func (check *Checker) logosPropertySource(V Type, name string, want Type) (gette
 	if sm, ok := sobj.(*Func); ok {
 		check.objDecl(sm)
 		if sig, ok := sm.typ.(*Signature); ok && sig.params.Len() == 1 && sig.results.Len() == 0 && Identical(sig.params.At(0).typ, want) {
-			return getter, true, false
+			if sig.Recv() == nil || logosAsConstView(sig.Recv().Type()) == nil {
+				return getter, true, false
+			}
 		}
 	}
 	return getter, false, false
