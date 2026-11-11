@@ -62,6 +62,7 @@ func (ctx LogosCopyContext) logosCopyChecker(pkg *Package, info *Info, errs *[]E
 	}
 	mc := NewChecker(conf, pkg, info)
 	mc.version = asGoVersion(ctx.Version)
+	mc.logosCopy = true
 	mc.scope = NewScope(ctx.Scope, nopos, nopos, "logos copies")
 	for _, f := range ctx.Funcs {
 		mc.scope.Insert(f)

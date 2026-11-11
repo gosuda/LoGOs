@@ -7,9 +7,10 @@ stdout '^nums:123 <nil>$'
 stdout '^words:ab <nil>$'
 stdout '^exact-int$'
 stdout '^tilde-int$'
+stdout '^other$'
 stdout '^keep: <nil>$'
 stdout '^sw-nums:123 <nil>$'
-stdout '^sw-words:ab <nil>$'
+stdout '^sw-words:abS <nil>$'
 stdout '^sw-point:S <nil>$'
 stdout '^sw-keep: <nil>$'
  cp stdout $WORK/eject-stdout.txt
@@ -134,13 +135,12 @@ func EncodeSwitch[T any](buf []byte, items []T) ([]byte, error) {
 		for _, v := range items {
 			buf = strconv.AppendInt(buf, v, 10)
 		}
-		return buf, nil
 	case io.WriterTo:
 		var b bytes.Buffer
 		for _, v := range items {
 			v.WriteTo(&b)?
 		}
-		return append(buf, b.Bytes()...), nil
+		buf = append(buf, b.Bytes()...)
 	}
 	const if comptime.IsStruct[T]() {
 		buf = append(buf, 'S')

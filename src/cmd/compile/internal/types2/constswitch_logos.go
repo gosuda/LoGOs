@@ -54,12 +54,25 @@ func (check *Checker) logosConstSwitch(ctxt stmtContext, s *syntax.ConstSwitchSt
 		if info == nil {
 			continue
 		}
-		if check.logosCaseShadowed(info, seen, tag) {
+		if !check.logosCopy && check.logosCaseShadowed(info, seen, tag) {
 			continue
 		}
 		seen = append(seen, *info)
+		if check.logosDeadCopyCase(c, tag, info) {
+			continue
+		}
 		check.logosConstCaseBody(inner, c, tag, info)
 	}
+}
+
+func (check *Checker) logosDeadCopyCase(c *syntax.ConstSwitchCase, tag Type, info *logosCaseInfo) bool {
+	if !check.logosCopy {
+		return false
+	}
+	if _, ok := tag.(*TypeParam); ok {
+		return false
+	}
+	return !logosConstMatches(tag, info.typ, c)
 }
 
 func (check *Checker) logosConstTag(e syntax.Expr) Type {

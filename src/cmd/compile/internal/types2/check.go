@@ -191,6 +191,7 @@ type Checker struct {
 	// environment within which the current object is type-checked (valid only
 	// for the duration of type-checking a specific object)
 	environment
+	logosCopy bool
 
 	// debugging
 	posStack []syntax.Pos // stack of source positions seen; used for panic tracing

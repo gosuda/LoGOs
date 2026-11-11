@@ -422,6 +422,13 @@ func cfMapPositions(root syntax.Node, fn func(syntax.Pos) syntax.Pos) {
 			return true
 		}
 		n.SetPos(fn(n.Pos()))
+		if s, ok := n.(*syntax.ConstSwitchStmt); ok {
+			for _, c := range s.Cases {
+				c.Case = fn(c.Case)
+				c.Colon = fn(c.Colon)
+				c.TildePos = fn(c.TildePos)
+			}
+		}
 		v := reflect.ValueOf(n).Elem()
 		for i := range v.NumField() {
 			f := v.Field(i)
