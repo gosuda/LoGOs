@@ -6,7 +6,7 @@ package main
 func addPlainF64(a, b [4]float64) [4]float64 {
 	// amd64:"ADDSD" -"VADDPD" -"CALL simd/archsimd" -"J"
 	// arm64:"FADDD" -"CALL simd/archsimd" -"B" -"CBZ" -"CBNZ" -"TBZ" -"TBNZ"
-	// riscv64:-"CALL simd/archsimd" -"BLT" -"BGE"
+	// riscv64:-"CALL simd/archsimd" -"BLT" -"BGE" -"BEQ" -"BNE" -"JAL X0"
 	return a + b
 }
 
@@ -14,7 +14,7 @@ func addPlainF64(a, b [4]float64) [4]float64 {
 func addPlainI32(a, b [4]int32) [4]int32 {
 	// amd64:"ADDL" -"VPADDD" -"CALL simd/archsimd" -"J"
 	// arm64:"ADD" -"CALL simd/archsimd" -"B" -"CBZ" -"CBNZ" -"TBZ" -"TBNZ"
-	// riscv64:-"CALL simd/archsimd" -"BLT" -"BGE"
+	// riscv64:-"CALL simd/archsimd" -"BLT" -"BGE" -"BEQ" -"BNE" -"JAL X0"
 	return a + b
 }
 
