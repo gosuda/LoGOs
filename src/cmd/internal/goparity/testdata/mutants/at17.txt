@@ -14,6 +14,6 @@ file: src/cmd/cgo/out.go
 expect: at17m_both_plain_seq
 config: K1
 -- old --
-	noCallback := p.noCallbacks[n.C] && !logosFastCall(p, n)
+	noCallback := p.noCallbacks[n.C] && !logosStableFastCall(p, n)
 -- new --
 	noCallback := p.noCallbacks[n.C]

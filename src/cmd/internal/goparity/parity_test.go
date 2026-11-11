@@ -1581,6 +1581,38 @@ func (mb *mutBuild) cleanFile(t *testing.T, stem string) error {
 	return cmd.Run()
 }
 
+func TestParityMutantProbesDefined(t *testing.T) {
+	fork := forkTool(t)
+	progs := corpusPrograms(t)
+	fails := corpusFails(t)
+	ms := loadMutants(t)
+	if len(ms) == 0 {
+		t.Fatal("no mutants under testdata/mutants")
+	}
+	cfgs := configIndex()
+	for _, m := range ms {
+		t.Run(m.id+"-"+m.expect, func(t *testing.T) {
+			if _, ok := mutantToolNames[m.kind]; !ok && m.kind != "runtime" && m.kind != "std" {
+				t.Errorf("mutant %s: unsupported kind %q (the harness applies compiler, linker, cgo, rules, runtime, std)", m.id, m.kind)
+			}
+			if _, ok := cfgs[m.cfg]; !ok {
+				t.Errorf("mutant %s: unknown config %s", m.id, m.cfg)
+			}
+			if !slices.Contains(progs, m.expect) && !slices.Contains(fails, strings.TrimSuffix(m.expect, ".go")) {
+				t.Errorf("mutant %s: expect target %q is neither a run program nor a fail corpus file", m.id, m.expect)
+			}
+			target := filepath.Join(fork.goroot, filepath.FromSlash(m.file))
+			src, err := os.ReadFile(target)
+			if err != nil {
+				t.Fatalf("reading mutant target: %v", err)
+			}
+			if n := strings.Count(string(src), m.old); n != 1 {
+				t.Errorf("mutant %s: old text occurs %d times in %s: stale probe", m.id, n, m.file)
+			}
+		})
+	}
+}
+
 func TestParityMutants(t *testing.T) {
 	if !*releaseFlag {
 		t.Skip("release tier only; pass -goparity.release")
