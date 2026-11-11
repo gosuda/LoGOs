@@ -211,6 +211,9 @@ func (fl *fileLower) constMapUse(x syntax.Expr) (*constMapGen, bool) {
 		if e.Sel == nil {
 			return nil, false
 		}
+		if _, ok := fl.pkg.info.Selections[e]; ok {
+			return nil, false
+		}
 		if obj, ok := fl.pkg.info.Uses[e.Sel].(*types2.Var); ok {
 			return fl.importedConstMap(obj, e.Pos())
 		}
@@ -221,6 +224,9 @@ func (fl *fileLower) constMapUse(x syntax.Expr) (*constMapGen, bool) {
 func importedConstMapRecord(obj *types2.Var) (facts.ConstMapFact, bool) {
 	var zero facts.ConstMapFact
 	if obj.Pkg() == nil {
+		return zero, false
+	}
+	if scope := obj.Pkg().Scope(); scope == nil || scope.Lookup(obj.Name()) != types2.Object(obj) {
 		return zero, false
 	}
 	f, ok := facts.Lookup(obj.Pkg().Path())
@@ -265,9 +271,33 @@ func (fl *fileLower) importedConstMap(obj *types2.Var, pos syntax.Pos) (*constMa
 	if !ok {
 		return nil, false
 	}
+	mapType := constMapElem(obj.Type())
+	if why, ok := fl.unspellableImportedConstMap(obj, mapType, mt); !ok {
+		base.Errorf("%s: %s", pos.String(), why)
+		base.ExitIfErrors()
+		return nil, false
+	}
+	quals, ambiguous := fl.constMapImportQuals(mt)
+	if ambiguous != "" {
+		base.Errorf("%s: logos: imported const map %s.%s uses %s for types from different packages", pos.String(), obj.Pkg().Path(), obj.Name(), ambiguous)
+		base.ExitIfErrors()
+		return nil, false
+	}
+	keys, ok := fl.qualifyConstMapTexts(rec.Keys, quals, pos)
+	if !ok {
+		base.Errorf("%s: logos: imported const map %s.%s has a key that cannot be spelled in this package", pos.String(), obj.Pkg().Path(), obj.Name())
+		base.ExitIfErrors()
+		return nil, false
+	}
+	vals, ok := fl.qualifyConstMapTexts(rec.Vals, quals, pos)
+	if !ok {
+		base.Errorf("%s: logos: imported const map %s.%s has a value that cannot be spelled in this package", pos.String(), obj.Pkg().Path(), obj.Name())
+		base.ExitIfErrors()
+		return nil, false
+	}
 	kT := fl.mustSpell(mt.Key(), pos)
 	vT := fl.mustSpell(mt.Elem(), pos)
-	mapT := fl.mustSpell(constMapElem(obj.Type()), pos)
+	mapT := fl.mustSpell(mapType, pos)
 	name := fmt.Sprintf("_logos_icm%d_%s", fl.pkg.importedSeq, obj.Name())
 	fl.pkg.importedSeq++
 	entries := make([]constMapKey, len(rec.Keys))
@@ -276,7 +306,7 @@ func (fl *fileLower) importedConstMap(obj *types2.Var, pos syntax.Pos) (*constMa
 	}
 	pairs := make([]string, len(rec.Keys))
 	for i := range rec.Keys {
-		pairs[i] = rec.Keys[i] + ": " + rec.Vals[i]
+		pairs[i] = keys[i] + ": " + vals[i]
 	}
 	builderBody := mapT + "{" + strings.Join(pairs, ", ") + "}"
 	text := finalizeConstMapEmission(pos, constMapEmission{
@@ -284,8 +314,8 @@ func (fl *fileLower) importedConstMap(obj *types2.Var, pos syntax.Pos) (*constMa
 		kT:          kT,
 		vT:          vT,
 		mapT:        mapT,
-		keyTexts:    rec.Keys,
-		valTexts:    rec.Vals,
+		keyTexts:    keys,
+		valTexts:    vals,
 		builderBody: builderBody,
 		hashExpr:    fl.constKeyHashText(mt.Key(), "_logos_k", pos),
 		order:       rec.Order,
@@ -302,6 +332,248 @@ func (fl *fileLower) importedConstMap(obj *types2.Var, pos syntax.Pos) (*constMa
 	fl.needRT = true
 	fl.pkg.importedMaps[obj] = g
 	return g, true
+}
+
+func stripConstMapView(t types2.Type) types2.Type {
+	for {
+		cv, ok := t.(*types2.ConstView)
+		if !ok {
+			return t
+		}
+		t = cv.Elem
+	}
+}
+
+func (fl *fileLower) unspellableImportedConstMap(obj *types2.Var, mapType types2.Type, mt *types2.Map) (string, bool) {
+	what := "logos: imported const map " + obj.Pkg().Path() + "." + obj.Name()
+	if _, ok := fl.spellLowered(mt.Key()); !ok {
+		return what + " has a key type " + mt.Key().String() + " that cannot be named in this package", false
+	}
+	if _, ok := fl.spellLowered(mt.Elem()); !ok {
+		return what + " has a value type " + mt.Elem().String() + " that cannot be named in this package", false
+	}
+	if _, ok := fl.spellLowered(mapType); !ok {
+		return what + " has a map type that cannot be named in this package", false
+	}
+	if !matFieldsAssignable(stripConstMapView(mt.Key()), fl.pkg.tpkg) || !matFieldsAssignable(stripConstMapView(mt.Elem()), fl.pkg.tpkg) {
+		return what + " refers to an unexported field that cannot be named in this package", false
+	}
+	unexported := ""
+	walkConstMapTypes(mt, func(n *types2.Named) bool {
+		obj := n.Obj()
+		if obj == nil {
+			return true
+		}
+		if pkg := obj.Pkg(); pkg != nil && pkg != fl.pkg.tpkg && !obj.Exported() {
+			unexported = obj.Name()
+			return false
+		}
+		return true
+	})
+	if unexported != "" {
+		return what + " uses unexported type " + unexported + " that cannot be named in this package", false
+	}
+	return "", true
+}
+
+func walkConstMapTypes(mt *types2.Map, visit func(n *types2.Named) bool) {
+	seen := map[types2.Type]bool{}
+	var walk func(t types2.Type)
+	walk = func(t types2.Type) {
+		if t == nil || seen[t] {
+			return
+		}
+		seen[t] = true
+		if cv, ok := t.(*types2.ConstView); ok {
+			walk(cv.Elem)
+			return
+		}
+		u := types2.Unalias(t)
+		if n, ok := u.(*types2.Named); ok {
+			if !visit(n) {
+				return
+			}
+			if args := n.TypeArgs(); args != nil {
+				for i := range args.Len() {
+					walk(args.At(i))
+				}
+			}
+			u = n.Underlying()
+		}
+		switch u := u.(type) {
+		case *types2.Struct:
+			for i := range u.NumFields() {
+				walk(u.Field(i).Type())
+			}
+		case *types2.Array:
+			walk(u.Elem())
+		case *types2.Slice:
+			walk(u.Elem())
+		case *types2.Map:
+			walk(u.Key())
+			walk(u.Elem())
+		case *types2.Pointer:
+			walk(u.Elem())
+		}
+	}
+	walk(mt.Key())
+	walk(mt.Elem())
+}
+
+func (fl *fileLower) constMapImportQuals(mt *types2.Map) (map[string]*types2.Package, string) {
+	quals := map[string]*types2.Package{}
+	ambiguous := ""
+	walkConstMapTypes(mt, func(n *types2.Named) bool {
+		obj := n.Obj()
+		if obj == nil {
+			return true
+		}
+		pkg := obj.Pkg()
+		if pkg == nil || pkg == fl.pkg.tpkg {
+			return true
+		}
+		if prev, dup := quals[obj.Name()]; dup {
+			if prev != pkg {
+				ambiguous = obj.Name()
+				return false
+			}
+			return true
+		}
+		quals[obj.Name()] = pkg
+		return true
+	})
+	return quals, ambiguous
+}
+
+func (fl *fileLower) constMapImportQual(pkg *types2.Package) (string, bool) {
+	if q, ok := fl.importNames()[pkg]; ok && q == "" {
+		return "", false
+	}
+	return fl.synthQualifier(pkg), true
+}
+
+func (fl *fileLower) constMapQualName(value string, quals map[string]*types2.Package) (string, bool) {
+	pkg, ok := quals[value]
+	if !ok {
+		return "", false
+	}
+	return fl.constMapImportQual(pkg)
+}
+
+func (fl *fileLower) rewriteConstMapType(t syntax.Expr, quals map[string]*types2.Package, pos syntax.Pos) syntax.Expr {
+	switch t := t.(type) {
+	case *syntax.Name:
+		if q, ok := fl.constMapQualName(t.Value, quals); ok {
+			return selOf(pos, nameOf(pos, q), t.Value)
+		}
+		return t
+	case *syntax.SelectorExpr:
+		if _, ok := t.X.(*syntax.Name); ok {
+			if q, ok := fl.constMapQualName(t.Sel.Value, quals); ok {
+				t.X = nameOf(pos, q)
+			}
+		}
+		return t
+	case *syntax.SliceType:
+		t.Elem = fl.rewriteConstMapType(t.Elem, quals, pos)
+		return t
+	case *syntax.ArrayType:
+		t.Elem = fl.rewriteConstMapType(t.Elem, quals, pos)
+		return t
+	case *syntax.MapType:
+		t.Key = fl.rewriteConstMapType(t.Key, quals, pos)
+		t.Value = fl.rewriteConstMapType(t.Value, quals, pos)
+		return t
+	case *syntax.ParenExpr:
+		t.X = fl.rewriteConstMapType(t.X, quals, pos)
+		return t
+	case *syntax.IndexExpr:
+		t.X = fl.rewriteConstMapType(t.X, quals, pos)
+		t.Index = fl.rewriteConstMapType(t.Index, quals, pos)
+		return t
+	default:
+		return t
+	}
+}
+
+func (fl *fileLower) rewriteConstMapValue(x syntax.Expr, quals map[string]*types2.Package, pos syntax.Pos) syntax.Expr {
+	switch x := x.(type) {
+	case *syntax.CompositeLit:
+		if x.Type != nil {
+			x.Type = fl.rewriteConstMapType(x.Type, quals, pos)
+		}
+		for i, e := range x.ElemList {
+			x.ElemList[i] = fl.rewriteConstMapElem(e, quals, pos)
+		}
+		return x
+	case *syntax.CallExpr:
+		x.Fun = fl.rewriteConstMapType(x.Fun, quals, pos)
+		for i, a := range x.ArgList {
+			x.ArgList[i] = fl.rewriteConstMapValue(a, quals, pos)
+		}
+		return x
+	case *syntax.Operation:
+		x.X = fl.rewriteConstMapValue(x.X, quals, pos)
+		if x.Y != nil {
+			x.Y = fl.rewriteConstMapValue(x.Y, quals, pos)
+		}
+		return x
+	case *syntax.SliceExpr:
+		x.X = fl.rewriteConstMapValue(x.X, quals, pos)
+		for i, idx := range x.Index {
+			if idx != nil {
+				x.Index[i] = fl.rewriteConstMapValue(idx, quals, pos)
+			}
+		}
+		return x
+	case *syntax.ParenExpr:
+		x.X = fl.rewriteConstMapValue(x.X, quals, pos)
+		return x
+	default:
+		return x
+	}
+}
+
+func (fl *fileLower) rewriteConstMapElem(e syntax.Expr, quals map[string]*types2.Package, pos syntax.Pos) syntax.Expr {
+	if kv, ok := e.(*syntax.KeyValueExpr); ok {
+		if _, isName := kv.Key.(*syntax.Name); !isName {
+			kv.Key = fl.rewriteConstMapValue(kv.Key, quals, pos)
+		}
+		kv.Value = fl.rewriteConstMapValue(kv.Value, quals, pos)
+		return kv
+	}
+	return fl.rewriteConstMapValue(e, quals, pos)
+}
+
+func parseConstMapEntryExpr(text string, pos syntax.Pos) (syntax.Expr, bool) {
+	file, err := syntax.Parse(syntax.NewFileBase("logos-constmap-entry"), strings.NewReader("package p\nvar _ = "+text), nil, nil, 0)
+	if err != nil || file == nil || len(file.DeclList) != 1 {
+		return nil, false
+	}
+	vd, ok := file.DeclList[0].(*syntax.VarDecl)
+	if !ok || vd.Values == nil {
+		return nil, false
+	}
+	e := vd.Values
+	syntax.Inspect(e, func(n syntax.Node) bool {
+		if n != nil {
+			n.SetPos(pos)
+		}
+		return true
+	})
+	return e, true
+}
+
+func (fl *fileLower) qualifyConstMapTexts(texts []string, quals map[string]*types2.Package, pos syntax.Pos) ([]string, bool) {
+	out := make([]string, len(texts))
+	for i, tx := range texts {
+		e, ok := parseConstMapEntryExpr(tx, pos)
+		if !ok {
+			return nil, false
+		}
+		out[i] = renderExpr(fl.rewriteConstMapValue(e, quals, pos))
+	}
+	return out, true
 }
 
 func (g *constMapGen) constMapEntries() (keys, vals []ctfe.Value) {
@@ -429,6 +701,14 @@ func (fl *fileLower) buildConstMapParts(g *constMapGen, pos syntax.Pos) constMap
 		entries[i] = constMapKey{hash: hashes[i], canon: canons[i]}
 	}
 	bearing := constMapBearing(vals)
+	pairs := make([]string, len(keys))
+	for i := range keys {
+		pairs[i] = keyText[i] + ": " + valText[i]
+	}
+	body := mapT + "{" + strings.Join(pairs, ", ") + "}"
+	if e, err := g.val.Expr(pos); err == nil {
+		body = renderExpr(e)
+	}
 	text := finalizeConstMapEmission(pos, constMapEmission{
 		name:        g.name,
 		kT:          kT,
@@ -436,7 +716,7 @@ func (fl *fileLower) buildConstMapParts(g *constMapGen, pos syntax.Pos) constMap
 		mapT:        mapT,
 		keyTexts:    keyText,
 		valTexts:    valText,
-		builderBody: fl.mustRender(g.val, pos),
+		builderBody: body,
 		hashExpr:    fl.constKeyHashText(mt.Key(), "_logos_k", pos),
 		order:       order,
 		bearing:     bearing,
@@ -482,9 +762,9 @@ func (fl *fileLower) constKeyHashText(t types2.Type, x string, pos syntax.Pos) s
 	case *types2.Basic:
 		switch {
 		case u.Info()&types2.IsString != 0:
-			return rtAlias + ".HashString(" + x + ")"
+			return rtAlias + ".HashString(string(" + x + "))"
 		case u.Info()&types2.IsBoolean != 0:
-			return rtAlias + ".HashBool(" + x + ")"
+			return rtAlias + ".HashBool(bool(" + x + "))"
 		case u.Info()&types2.IsInteger != 0:
 			return rtAlias + ".HashUint64(uint64(" + x + "))"
 		case u.Info()&types2.IsFloat != 0:

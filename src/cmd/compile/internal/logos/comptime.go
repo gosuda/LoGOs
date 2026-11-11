@@ -389,6 +389,11 @@ func (fl *fileLower) cfDemoteErasedImports() {
 			continue
 		}
 		path, _ := strconv.Unquote(imp.Path.Value)
+		if fl.genImps != nil {
+			if _, ok := fl.genImps.qual[path]; ok {
+				continue
+			}
+		}
 		if _, ejectUsed := ownedEjectImports[fl.file][path]; !ejectUsed {
 			fl.cfBlankImportText(imp)
 		}
