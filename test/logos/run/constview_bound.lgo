@@ -2,11 +2,22 @@
 
 package main
 
-
 import (
 	"fmt"
+	"os"
 	"strings"
 )
+
+var failed bool
+
+func check(name string, cond bool, got, want any) {
+	if !cond {
+		failed = true
+		fmt.Println("FAIL", name+":", "got", got, "want", want)
+		return
+	}
+	fmt.Println("ok", name)
+}
 
 func main() {
 	b := make([]byte, 5, 64)
@@ -14,21 +25,16 @@ func main() {
 		b[i] = byte('a' + i)
 	}
 	var v const []byte = b
-	fmt.Println(len(v[:5]))
+	check("len", len(v[:5]) == 5, len(v[:5]), 5)
 	n := 32
 	func() {
 		defer func() {
 			r := recover()
-			if r == nil {
-				fmt.Println("NO-TRAP")
-				return
-			}
-			if strings.Contains(fmt.Sprint(r), "slice bounds out of range") {
-				fmt.Println("trap OK")
-				return
-			}
-			fmt.Printf("WRONG-PANIC %v\n", r)
+			check("trap", r != nil && strings.Contains(fmt.Sprint(r), "slice bounds out of range"), fmt.Sprint(r), "slice bounds out of range")
 		}()
 		_ = v[:n]
 	}()
+	if failed {
+		os.Exit(1)
+	}
 }
