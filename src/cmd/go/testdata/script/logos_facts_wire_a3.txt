@@ -86,6 +86,8 @@ logos build -o $WORK/bin/imp$GOEXE .
 exec $WORK/bin/imp$GOEXE
 stdout '^imp-mut: 14$'
 stdout '^imp-assert: 7$'
+! logos build -o $WORK/badinc$GOEXE ./badinc
+stderr 'const_view_mutation'
 cd ..
 
 -- lgo/go.mod --
@@ -208,4 +210,15 @@ func main() {
 	s[0] = 9
 	fmt.Println("imp-mut:", s[0]+s[1]+s[2])
 	fmt.Println("imp-assert:", wire.GoAssert[int](any(7)))
+}
+
+-- imp/badinc/main.lgo --
+package main
+
+import "example.com/go"
+
+func main() {
+	c := wire.NewCounter()
+	var view const *wire.Counter = c
+	view.Inc()
 }
