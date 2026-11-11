@@ -5,6 +5,7 @@ package main
 import (
 	"fmt"
 	"math"
+	"os"
 )
 
 type lane float64
@@ -36,14 +37,18 @@ func checkCrossFormSum() {
 	vec := t.sum()
 	sca := float64(u.sum())
 	if math.Float64bits(vec) != math.Float64bits(sca) {
-		panic(fmt.Sprintf("cross-form sum bits differ: %x vs %x", math.Float64bits(vec), math.Float64bits(sca)))
+		fmt.Println("FAIL sum")
+		os.Exit(1)
 	}
 	if want := pairwiseSum(t); vec != want {
-		panic(fmt.Sprintf("sum leaves the pairwise order: got %v want %v", vec, want))
+		fmt.Println("FAIL sum")
+		os.Exit(1)
 	}
 	if leftSum(t) == pairwiseSum(t) {
-		panic("inputs do not separate the pairwise order from a left fold")
+		fmt.Println("FAIL sum")
+		os.Exit(1)
 	}
+	fmt.Println("ok sum")
 }
 
 func checkCrossFormDot() {
@@ -57,15 +62,17 @@ func checkCrossFormDot() {
 	vec := a.dot(b)
 	sca := float64(c.dot(d))
 	if math.Float64bits(vec) != math.Float64bits(sca) {
-		panic(fmt.Sprintf("cross-form dot bits differ: %x vs %x", math.Float64bits(vec), math.Float64bits(sca)))
+		fmt.Println("FAIL dot")
+		os.Exit(1)
 	}
 	if want := pairwiseDot(a, b); vec != want {
-		panic(fmt.Sprintf("dot leaves the pairwise order: got %v want %v", vec, want))
+		fmt.Println("FAIL dot")
+		os.Exit(1)
 	}
+	fmt.Println("ok dot")
 }
 
 func main() {
 	checkCrossFormSum()
 	checkCrossFormDot()
-	fmt.Println("crossform ok")
 }
