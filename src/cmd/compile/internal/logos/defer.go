@@ -394,8 +394,7 @@ func (fc *funcLower) lowerDeferTry(s *syntax.CallStmt, t *syntax.TryExpr, call *
 	if plan.isMethod && plan.recv.nilCheck {
 		headT = spliceRecvCheck(headT, ifaceNilCheckStmt(cpos, plan.recv.single, plan.method))
 	}
-	prefix := leftoverComments(fl, span{start: stmtOff, end: spanEnd}, planSpans(plan))
-	fl.addT(stmtOff, spanEnd, cat(prefix, renderText(headT, tw.subs)))
+	fc.spliceCall(stmtOff, spanEnd, plan, headT, tw)
 	return headN
 }
 
@@ -433,8 +432,7 @@ func (fc *funcLower) lowerErrdefer(s *syntax.ErrdeferStmt) []syntax.Stmt {
 		text = spliceRecvCheck(text, ifaceNilCheckStmt(cpos, plan.recv.single, plan.method))
 	}
 	spanEnd := skipCloseParens(fl.src, plan.end)
-	prefix := leftoverComments(fl, span{start: stmtOff, end: spanEnd}, planSpans(plan))
-	fl.addT(stmtOff, spanEnd, cat(prefix, renderText(text, tw.subs)))
+	fc.spliceCall(stmtOff, spanEnd, plan, text, tw)
 	return native
 }
 
@@ -458,8 +456,7 @@ func (fc *funcLower) lowerErrdeferTry(s *syntax.ErrdeferStmt, t *syntax.TryExpr,
 		headN = spliceRecvCheck(headN, ifaceNilCheckStmt(cpos, plan.recv.single, plan.method))
 		headT = spliceRecvCheck(headT, ifaceNilCheckStmt(cpos, plan.recv.single, plan.method))
 	}
-	prefix := leftoverComments(fl, span{start: stmtOff, end: spanEnd}, planSpans(plan))
-	fl.addT(stmtOff, spanEnd, cat(prefix, renderText(headT, tw.subs)))
+	fc.spliceCall(stmtOff, spanEnd, plan, headT, tw)
 	return headN
 }
 
@@ -498,6 +495,11 @@ func insideAny(c span, pieces []span) bool {
 		}
 	}
 	return false
+}
+
+func (fc *funcLower) spliceCall(stmtOff, spanEnd int, plan *callPlan, text []syntax.Stmt, tw *twin) {
+	prefix := leftoverComments(fc.fl, span{start: stmtOff, end: spanEnd}, planSpans(plan))
+	fc.fl.addT(stmtOff, spanEnd, cat(prefix, renderText(text, tw.subs)))
 }
 
 func (fc *funcLower) lowerReturn(s *syntax.ReturnStmt) []syntax.Stmt {
