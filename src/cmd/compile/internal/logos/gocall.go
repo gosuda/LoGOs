@@ -141,7 +141,7 @@ func (g *goCallLower) wrapArgs(call *syntax.CallExpr, sig *types2.Signature, pos
 		if arg == nil || isMustNonNilCall(arg) {
 			continue
 		}
-		site := g.newSite(arg.Pos())
+		site := g.newSite(call.Pos())
 		fun := syntax.Expr(rtSel(arg.Pos(), "MustNonNil"))
 		if isNilLiteral(arg) {
 			if targ, ok := explicitTypeArg(params.At(i).Type(), arg.Pos()); ok {
