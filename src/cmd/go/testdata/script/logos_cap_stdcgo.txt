@@ -21,11 +21,13 @@ cd ../fmain
 stderr 'ERROR \[capabilities::unauthorized_cgo\]: Transitive dependency ''example\.com/fastevil'' reaches ''runtime\.cgocall'''
 stderr 'example\.com/fastevil\.Ping\(\)'
 cd ..
+env GOEXPERIMENT=logosfastcgo
 cd fmainok
 logos build -o $WORK/bin/stdcgookfast$GOEXE ./cmdfast
 go tool nm $WORK/bin/stdcgookfast$GOEXE
 stdout 'runtime\.logosCgocallFast'
 cd ..
+env GOEXPERIMENT=
 
 -- main/go.mod --
 module example.com/nmain
