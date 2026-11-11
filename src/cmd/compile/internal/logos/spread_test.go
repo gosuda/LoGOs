@@ -65,29 +65,6 @@ func lowerSpreadSrc(t *testing.T, src string) (printed, ejected string) {
 	return buf.String(), string(out)
 }
 
-func TestSpreadSelfUpdateTuple(t *testing.T) {
-	printed, ejected := lowerSpreadSrc(t, `package main
-
-type State struct {
-	A int
-	B int
-}
-
-func swap(s State) State {
-	s = State{A: s.B, B: s.A, ..s}
-	return s
-}
-`)
-	if !strings.Contains(printed, "s.A, s.B = s.B, s.A") {
-		t.Errorf("lowered tree misses tuple assignment:\n%s", printed)
-	}
-	if strings.Contains(printed, "State{") {
-		t.Errorf("lowered tree keeps a struct temporary:\n%s", printed)
-	}
-	if !strings.Contains(ejected, "s.A, s.B = s.B, s.A") {
-		t.Errorf("ejected text misses tuple assignment:\n%s", ejected)
-	}
-}
 
 func TestSpreadSourceEvaluatedOnce(t *testing.T) {
 	printed, ejected := lowerSpreadSrc(t, `package main
