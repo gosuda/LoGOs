@@ -121,7 +121,7 @@ func TestRtUnionTrialNamesOutcome(t *testing.T) {
 		t.Fatalf("UnionTrialError ambiguous = %q", msg)
 	}
 	solo := UnionTrialError{Union: "U", Members: []string{"A"}, Matched: 0, Total: 1}
-	if msg := solo.Error(); !strings.Contains(msg, "U") || !strings.Contains(msg, "0") {
+	if msg := solo.Error(); !strings.Contains(msg, "U") || !strings.Contains(msg, "0") || !strings.Contains(msg, "A") {
 		t.Fatalf("UnionTrialError empty = %q", msg)
 	}
 }
