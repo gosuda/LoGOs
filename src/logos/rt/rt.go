@@ -28,6 +28,9 @@ type Site struct {
 // result leaves the target alone, a nil target takes the result
 // as is, and two non-nil errors join with Join semantics.
 func DeferTry(errp *error, e error) {
+	if errp == nil {
+		panic("logos: DeferTry with nil error target")
+	}
 	if e == nil {
 		return
 	}
@@ -51,14 +54,19 @@ type Context = context.Context
 // MustNonNil checks a platform pointer stored into a declared non-nil
 // location (SPEC T-202): it returns its argument, and panics with
 // `logos: nil from Go value stored into non-nil *T at <file>:<line>`
-// when the value is nil. Only pointer-shaped values can be nil; every
-// other value passes through untouched.
+// when the value is nil. A nil site reports the position as unknown.
+// Only pointer-shaped values can be nil; every other value passes
+// through untouched.
 func MustNonNil[T any](p T, site *Site) T {
 	v := reflect.ValueOf(p)
 	switch v.Kind() {
 	case reflect.Ptr, reflect.Map, reflect.Slice, reflect.Func, reflect.Chan, reflect.Interface, reflect.UnsafePointer:
 		if v.IsNil() {
-			panic("logos: nil from Go value stored into non-nil " + reflect.TypeOf(p).String() + " at " + site.File + ":" + strconv.Itoa(site.Line))
+			at := "unknown"
+			if site != nil {
+				at = site.File + ":" + strconv.Itoa(site.Line)
+			}
+			panic("logos: nil from Go value stored into non-nil " + reflect.TypeOf(p).String() + " at " + at)
 		}
 	}
 	return p

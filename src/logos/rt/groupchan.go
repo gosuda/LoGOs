@@ -13,6 +13,10 @@ import (
 // until the channel closes or ctx is done. Either stop ends the range;
 // the lowering checks ctx afterwards to report cancellation.
 func Chan[T any](ctx context.Context, ch <-chan T) iter.Seq[T] {
+	var done <-chan struct{}
+	if ctx != nil {
+		done = ctx.Done()
+	}
 	return func(yield func(T) bool) {
 		for {
 			select {
@@ -23,7 +27,7 @@ func Chan[T any](ctx context.Context, ch <-chan T) iter.Seq[T] {
 				if !yield(v) {
 					return
 				}
-			case <-ctx.Done():
+			case <-done:
 				return
 			}
 		}

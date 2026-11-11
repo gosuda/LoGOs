@@ -127,12 +127,18 @@ type ConstTable[K comparable, V any] struct {
 // read, one slot probe, then full-key validation. An unoccupied slot answers
 // absent before any key comparison.
 func (t *ConstTable[K, V]) Get(h uint64, k K) (V, bool) {
+	var zero V
+	if t == nil || len(t.Buckets) == 0 {
+		return zero, false
+	}
 	b := &t.Buckets[ConstMix(t.Salt, h)&uint64(len(t.Buckets)-1)]
+	if b.Size == 0 {
+		return zero, false
+	}
 	s := &t.Slots[b.Off+uint32(ConstMix(b.Seed, h)&uint64(b.Size-1))]
 	if s.Occ && s.Key == k {
 		return s.Val, true
 	}
-	var zero V
 	return zero, false
 }
 
