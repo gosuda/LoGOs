@@ -113,7 +113,7 @@ func Eject(dir string, files []*syntax.File, src map[*syntax.File][]byte, edits 
 				lineEdits = append(lineEdits, Edit{
 					Start: syntax.MakePos(base, uint(no), 1),
 					End:   syntax.MakePos(base, uint(no), 1),
-					Text:  "//line " + baseName + ":" + strconv.Itoa(no) + "\n",
+					Text:  "//line " + baseName + ":" + strconv.Itoa(no) + ":1\n",
 				})
 			}
 			lowered = append(lineEdits, lowered...)
