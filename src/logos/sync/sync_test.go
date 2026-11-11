@@ -12,6 +12,7 @@ package sync_test
 
 import (
 	"reflect"
+	"runtime/debug"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -337,6 +338,7 @@ func TestHotUpdateIncrementNoLostUpdates(t *testing.T) {
 
 func TestHotNoMemoryGrowth(t *testing.T) {
 	const updates = 1000000
+	defer debug.SetGCPercent(debug.SetGCPercent(-1))
 	h := new(logosync.Hot[hotPoint])
 	h.Store(&hotPoint{x: 1, y: 1})
 	runtime.GC()

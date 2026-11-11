@@ -9,6 +9,7 @@ package sync_test
 import (
 	"net"
 	"runtime"
+	"runtime/debug"
 	"syscall"
 	"testing"
 	"time"
@@ -30,6 +31,7 @@ func TestLogosIdleConnectionsHeapGrowth(t *testing.T) {
 	if testing.Short() {
 		t.Skip("needs 10000 idle loopback TCP connections; run without -short")
 	}
+	defer debug.SetGCPercent(debug.SetGCPercent(-1))
 	ensureIdleConnFileLimit(t)
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -121,6 +123,7 @@ func collectIdleConns(t *testing.T, accepted <-chan net.Conn, acceptErr <-chan e
 }
 
 func heapAllocAfterGC() uint64 {
+	defer debug.SetGCPercent(debug.SetGCPercent(-1))
 	runtime.GC()
 	runtime.GC()
 	var m runtime.MemStats
