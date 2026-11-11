@@ -283,3 +283,61 @@ func TestGrammarCoalesceShapes(t *testing.T) {
 		t.Fatalf("chained ?? right is %T, want right-nested *CoalesceExpr", gtop.Y)
 	}
 }
+
+type grammarReject struct {
+	prod string
+	src  string
+	at   string
+}
+
+var grammarRejects = []grammarReject{
+	{"PostfixTry", "package p\nfunc f() { _ = g(?) }\n", ":2:18"},
+	{"OptionType", "package p\nfunc f(? int) {}\n", ":2:8"},
+	{"Coalesce", "package p\nfunc f() { _ = a ?? }\n", ":2:21"},
+	{"OptChain", "package p\nfunc f() { _ = a?. }\n", ":2:20"},
+	{"Interp", "package p\nvar s = $'x'\n", ":2:9"},
+	{"Lambda", "package p\nfunc f() { g := (a b) => a }\n", ":2:23"},
+	{"ChainCall", "package p\nfunc f() {\n_ = xs.filter 1\n}\n", ":3:15"},
+	{"TupleType", "package p\nvar v (, int)\n", ":2:8"},
+	{"TupleLit", "package p\nfunc f() { _ = (,a) }\n", ":2:17"},
+	{"SwitchExpr", "package p\nfunc f(v int) {\n_ = switch v { case 1 => 1; default 2 } }\n", ":3:37"},
+	{"Arm", "package p\nfunc f(v int) {\n_ = switch v { case => 1; default => 2 } }\n", ":3:21"},
+	{"UnionDecl", "package p\ntype U interface { int | }\n", ":2:26"},
+	{"UnionTerms", "package p\ntype U interface { | int }\n", ":2:20"},
+	{"AssertDecl", "package p\ntype S struct I { X int }\n", ":2:15"},
+	{"PropertyElem", "package p\ntype C interface { const 42 string }\n", ":2:26"},
+	{"ReadonlyMethod", "package p\ntype I interface { const () string }\n", ":2:26"},
+	{"ConstView", "package p\nfunc f(x const) {}\n", ":2:15"},
+	{"ConstDecl", "package p\ntype S struct{ A int }\nconst K S{A: 1}\n", ":3:10"},
+	{"ConstIf", "package p\nfunc f() { const if {} }\n", ":2:21"},
+	{"ConstFor", "package p\nfunc f() { const for i = range x {} }\n", ":2:24"},
+	{"FieldProj", "package p\nfunc f() { _ = v.[] }\n", ":2:19"},
+	{"ConstSwitch", "package p\nfunc f[T any](v T) int {\n_ = v\nconst switch {\ncase int:\nreturn 1\n}\nreturn 0\n}\n", ":4:14"},
+	{"DeferTry", "package p\nfunc f() { defer ? }\n", ":2:18"},
+	{"ErrDefer", "package p\nfunc f() { errdefer 1 }\n", ":2:21"},
+	{"ScopeDefer", "package p\nfunc f() { scope defer 42 }\n", ":2:24"},
+	{"GoGroup", "package p\nfunc f(ctx int) { go group (ctx) + { go { g() } } }\n", ":2:34"},
+	{"GroupChild", "package p\nfunc f(ctx int) { go group (ctx) { go { g( } } }\n", ":2:44"},
+	{"YieldStmt", "package p\nfunc f() { yield if x {} }\n", ":2:18"},
+	{"SpreadElem", "package p\ntype S struct{ A, B int }\nvar _ = S{A: 1, ..}\n", ":3:19"},
+	{"DefaultField", "package p\ntype S struct { Port int = }\n", ":2:28"},
+	{"ConstFunc", "package p\nconst func F {}\n", ":2:14"},
+}
+
+func TestGrammarProductionsRejectMalformed(t *testing.T) {
+	seen := make(map[string]bool, len(grammarRejects))
+	for _, g := range grammarRejects {
+		if seen[g.prod] {
+			t.Fatalf("duplicate malformed probe for %s", g.prod)
+		}
+		seen[g.prod] = true
+		msgs := parseErrs(t, g.src, CheckBranches|LogosMode)
+		if len(msgs) == 0 {
+			t.Errorf("%s: %q parsed without error, want an error at %s", g.prod, g.src, g.at)
+			continue
+		}
+		if !strings.Contains(msgs[0], g.at) {
+			t.Errorf("%s: first error %q does not report at the malformed token %s", g.prod, msgs[0], g.at)
+		}
+	}
+}

@@ -219,6 +219,9 @@ func (p *parser) constCase() *ConstSwitchCase {
 func (p *parser) constCaseRecover(c *ConstSwitchCase) *ConstSwitchCase {
 	p.syntaxError("expected case or }")
 	p.advance(_Colon, _Case, _Rbrace)
+	if p.tok != _Colon && p.tok != _Case && p.tok != _Rbrace && p.tok != _EOF {
+		p.next()
+	}
 	c.Type = p.badExpr()
 	c.Colon = p.pos()
 	if p.got(_Colon) {
