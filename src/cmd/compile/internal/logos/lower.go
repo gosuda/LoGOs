@@ -61,6 +61,7 @@ func Lower(pkg *types2.Package, info *types2.Info, files []*syntax.File, src map
 	shared.importedMaps = map[*types2.Var]*constMapGen{}
 	shared.importedDone = map[string]bool{}
 	shared.composites = map[*types2.Const]*compositeInfo{}
+	shared.importedComposites = map[*types2.Var]*importedComposite{}
 	base.ClearLogosCtClones(pkg.Path())
 	shared.ctExp = newCfExpander(shared, files, src) // M7-S3 hook: comptime generics of every file, registered before any file lowers.
 	edits := make(map[*syntax.File][]Edit)
@@ -131,19 +132,20 @@ func hasSynthStaticMethods(pkg *types2.Package) bool {
 
 // packageLower carries the state shared by every file of one package.
 type packageLower struct {
-	info          *types2.Info
-	tpkg          *types2.Package
-	siteSeq       int
-	constMaps     map[*types2.Const]*constMapGen
-	importedMaps  map[*types2.Var]*constMapGen
-	importedSeq   int
-	importedDone  map[string]bool
-	composites    map[*types2.Const]*compositeInfo
-	compositeSeq  int
-	ctExp         *cfExpander
-	jsonHelpers   map[string]*jsonHelperDef
-	jsonHelperSeq int
-	jsonUnionKeys map[string]bool
+	info               *types2.Info
+	tpkg               *types2.Package
+	siteSeq            int
+	constMaps          map[*types2.Const]*constMapGen
+	importedMaps       map[*types2.Var]*constMapGen
+	importedSeq        int
+	importedDone       map[string]bool
+	composites         map[*types2.Const]*compositeInfo
+	compositeSeq       int
+	importedComposites map[*types2.Var]*importedComposite
+	ctExp              *cfExpander
+	jsonHelpers        map[string]*jsonHelperDef
+	jsonHelperSeq      int
+	jsonUnionKeys      map[string]bool
 }
 
 // fileLower carries the state of lowering one file.
@@ -515,18 +517,19 @@ func (fl *fileLower) lowerFile() {
 	fl.lowerComptime()      // M7-S2/S3 hook: comptime generic copies, then const for unrolling, before any rewrite.
 	fl.scanRodataMarkers()  // M5-S3 hook: hand-written //logos:rodata lines.
 	fl.lowerArenaEject()
-	fl.lowerZeroCopy()       // M5-S5 hook: zero-copy string/bytes conversions.
-	fl.lowerCTFE()           // M5-S2 hook: const composite literals and const func erasure.
-	fl.lowerConstMapRanges() // M5-S4 hook: range over a const map reads its sorted entries.
-	fl.eraseConstViews()     // M5-S1 hook: erase const views and bound recorded slices; also erases readonly interface `const` qualifiers.
-	fl.lowerConstSlices()    // M13-S3 hook: []C arguments to `const []I` parameters convert through rt.CovSlice.
-	fl.lowerPlatform()       // M3-S5 hook: MustNonNil wraps for platform-pointer stores.
-	fl.hoistTryInits()       // switch-expression try inits out of IIFE closures.
-	fl.lowerUnions()         // M2 hook: switch expressions and struct assertions.
-	fl.lowerOptions()        // M3-S6 hook: single-value map reads and ?? over them.
-	fl.lowerViewAs()         // M7-S5 hook: comptime.ViewAs calls to the rt helper.
-	fl.lowerChains()         // M6-S7 hook: collection chains fused into loops.
-	fl.lowerSpreads()        // M6-S4 hook: `..src` spread elements.
+	fl.lowerZeroCopy() // M5-S5 hook: zero-copy string/bytes conversions.
+	fl.lowerCTFE()
+	fl.rejectImportedCompositeStores()
+	fl.lowerConstMapRanges()
+	fl.eraseConstViews()  // M5-S1 hook: erase const views and bound recorded slices; also erases readonly interface `const` qualifiers.
+	fl.lowerConstSlices() // M13-S3 hook: []C arguments to `const []I` parameters convert through rt.CovSlice.
+	fl.lowerPlatform()    // M3-S5 hook: MustNonNil wraps for platform-pointer stores.
+	fl.hoistTryInits()    // switch-expression try inits out of IIFE closures.
+	fl.lowerUnions()      // M2 hook: switch expressions and struct assertions.
+	fl.lowerOptions()     // M3-S6 hook: single-value map reads and ?? over them.
+	fl.lowerViewAs()      // M7-S5 hook: comptime.ViewAs calls to the rt helper.
+	fl.lowerChains()      // M6-S7 hook: collection chains fused into loops.
+	fl.lowerSpreads()     // M6-S4 hook: `..src` spread elements.
 	for _, decl := range fl.file.DeclList {
 		fn, ok := decl.(*syntax.FuncDecl)
 		if ok && fn.Body != nil {
