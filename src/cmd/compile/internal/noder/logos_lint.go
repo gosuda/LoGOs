@@ -102,7 +102,7 @@ func logosLintHook(m *posMap, files []*syntax.File, pkg *types2.Package, info *t
 		logosEscape = &escapeLint{in: in, m: m, pins: pins, zeroAlloc: zeroAlloc, allocFacts: base.LogosAllocFacts, graph: graph}
 		escape.LogosPinning = pins
 	}
-	fallback := lint.FallbackActive(in)
+	fallback := (base.Logos || base.LogosLintOnly) && lint.FallbackActive(in)
 	if fallback {
 		if logosEscape == nil {
 			logosEscape = &escapeLint{in: in, m: m}
