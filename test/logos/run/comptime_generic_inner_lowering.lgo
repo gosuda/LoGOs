@@ -1,12 +1,11 @@
 // run
-
-
 package main
 
 import (
 	"comptime"
 	"errors"
 	"fmt"
+	"os"
 	"strconv"
 )
 
@@ -21,7 +20,20 @@ type Triple struct {
 	C int
 }
 
+var failed bool
+
+func check(name, got, want string) {
+	if got != want {
+		fmt.Println("FAIL", name, "got", got, "want", want)
+		failed = true
+		return
+	}
+	fmt.Println("ok", name)
+}
+
 var calls int
+
+var lines []string
 
 func step(in string) (int, error) {
 	calls++
@@ -36,7 +48,7 @@ func Total[T any](in string) (int, error) {
 	const for _, f := range comptime.Fields[T]() {
 		n := step(in)?
 		sum += n
-		fmt.Println($"{f.Name}={sum}")
+		lines = append(lines, $"{f.Name}={sum}")
 	}
 	return sum, nil
 }
@@ -55,7 +67,7 @@ func Grid[T any](in string) (int, error) {
 		const for _, g := range comptime.Fields[T]() {
 			n := step(in)?
 			sum += n
-			fmt.Println($"{f.Name}.{g.Name}={sum}")
+			lines = append(lines, $"{f.Name}.{g.Name}={sum}")
 		}
 	}
 	return sum, nil
@@ -63,8 +75,20 @@ func Grid[T any](in string) (int, error) {
 
 func main() {
 	calls = 0
-	fmt.Println(Total[Pair]("4"))
-	fmt.Println(Total[Triple]("4"))
-	fmt.Println(Weights[Triple]())
-	fmt.Println(Grid[Pair]("1"))
+	lines = nil
+	sum, err := Total[Pair]("4")
+	check("pair-sum-and-no-error", fmt.Sprint(sum, err), "8 <nil>")
+	check("pair-copies-in-order", fmt.Sprint(lines), "[X=4 Y=8]")
+	lines = nil
+	sum, err = Total[Triple]("4")
+	check("triple-error-aborts", fmt.Sprint(sum, err), "0 stopped at step 4")
+	check("triple-partial-in-order", fmt.Sprint(lines), "[A=4]")
+	check("index-weighted-map-sum", fmt.Sprint(Weights[Triple]()), "27")
+	lines = nil
+	sum, err = Grid[Pair]("1")
+	check("nested-grid-sum", fmt.Sprint(sum, err), "4 <nil>")
+	check("nested-grid-in-order", fmt.Sprint(lines), "[X.X=1 X.Y=2 Y.X=3 Y.Y=4]")
+	if failed {
+		os.Exit(1)
+	}
 }

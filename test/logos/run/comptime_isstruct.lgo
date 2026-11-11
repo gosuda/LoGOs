@@ -1,11 +1,11 @@
 // run
-
-
 package main
 
 import (
 	"comptime"
 	"fmt"
+	"os"
+	"reflect"
 )
 
 const debugOn = true
@@ -25,6 +25,25 @@ type Outer struct {
 	Tag   string
 }
 
+var failed bool
+
+func check(name, got, want string) {
+	if got != want {
+		fmt.Println("FAIL", name, "got", got, "want", want)
+		failed = true
+		return
+	}
+	fmt.Println("ok", name)
+}
+
+func kindWant[T any]() string {
+	var v T
+	if reflect.TypeOf(v).Kind() == reflect.Struct {
+		return "struct"
+	}
+	return "scalar"
+}
+
 func Walk[T any](val T) string {
 	const if comptime.IsStruct[T]() {
 		n := 0
@@ -33,6 +52,14 @@ func Walk[T any](val T) string {
 			n++
 		}
 		return fmt.Sprintf("struct with %d fields", n)
+	}
+	return "not a struct"
+}
+
+func walkWant[T any]() string {
+	if kindWant[T]() == "struct" {
+		var v T
+		return fmt.Sprintf("struct with %d fields", reflect.TypeOf(v).NumField())
 	}
 	return "not a struct"
 }
@@ -52,6 +79,13 @@ func Negated[T any]() string {
 	return "composite"
 }
 
+func negWant[T any]() string {
+	if kindWant[T]() == "struct" {
+		return "composite"
+	}
+	return "plain"
+}
+
 func Combined[T any]() string {
 	const if debugOn && comptime.IsStruct[T]() {
 		return "debug struct"
@@ -61,8 +95,24 @@ func Combined[T any]() string {
 	return "release"
 }
 
+func combinedWant(isStruct bool) string {
+	if debugOn && isStruct {
+		return "debug struct"
+	} else if debugOn {
+		return "debug other"
+	}
+	return "release"
+}
+
 func Typed[T any]() string {
 	const if typedOn && comptime.IsStruct[T]() {
+		return "typed struct"
+	}
+	return "typed other"
+}
+
+func typedWant(isStruct bool) string {
+	if typedOn && isStruct {
 		return "typed struct"
 	}
 	return "typed other"
@@ -79,6 +129,13 @@ func Release[T any]() string {
 
 func OrConn[T any]() string {
 	const if comptime.IsStruct[T]() || traceOff {
+		return "or struct"
+	}
+	return "or other"
+}
+
+func orWant(isStruct bool) string {
+	if isStruct || traceOff {
 		return "or struct"
 	}
 	return "or other"
@@ -153,21 +210,33 @@ func concreteOther() string {
 }
 
 func main() {
-	fmt.Println(Walk[Pair](Pair{X: 1, Y: 2}))
-	fmt.Println(Walk[Outer](Outer{}))
-	fmt.Println(Walk[int](7))
-	fmt.Println(Walk[string]("s"))
-	fmt.Println(Kind[Pair](), Kind[int](), Kind[*Pair]())
-	fmt.Println(Negated[Pair](), Negated[int]())
-	fmt.Println(Combined[Pair](), Combined[int]())
-	fmt.Println(Typed[Pair](), Typed[int]())
-	fmt.Println(Release[Pair](), Release[int]())
-	fmt.Println(OrConn[Pair](), OrConn[int]())
-	fmt.Println(EqConn[Pair](), EqConn[int]())
-	fmt.Println(NeConn[Pair](), NeConn[int]())
-	fmt.Println(Shape[Outer]())
-	fmt.Println(ShapeOr[Outer]())
-	fmt.Println(ShapeNe[Outer]())
-	fmt.Println(concrete())
-	fmt.Println(concreteOther())
+	check("walk-counts-pair-fields", Walk(Pair{X: 1, Y: 2}), walkWant[Pair]())
+	check("walk-counts-outer-fields", Walk(Outer{}), walkWant[Outer]())
+	check("walk-rejects-int", Walk(7), walkWant[int]())
+	check("walk-rejects-string", Walk("s"), walkWant[string]())
+	check("kind-struct", Kind[Pair](), kindWant[Pair]())
+	check("kind-scalar", Kind[int](), kindWant[int]())
+	check("kind-pointer-scalar", Kind[*Pair](), kindWant[*Pair]())
+	check("negated-struct-composite", Negated[Pair](), negWant[Pair]())
+	check("negated-scalar-plain", Negated[int](), negWant[int]())
+	check("combined-struct", Combined[Pair](), combinedWant(true))
+	check("combined-scalar", Combined[int](), combinedWant(false))
+	check("typed-struct", Typed[Pair](), typedWant(true))
+	check("typed-scalar", Typed[int](), typedWant(false))
+	check("release-struct", Release[Pair](), "release")
+	check("release-scalar", Release[int](), "release")
+	check("or-struct", OrConn[Pair](), orWant(true))
+	check("or-scalar", OrConn[int](), orWant(false))
+	check("eq-struct", EqConn[Pair](), "eq struct")
+	check("eq-scalar", EqConn[int](), "eq other")
+	check("ne-struct", NeConn[Pair](), "ne struct")
+	check("ne-scalar", NeConn[int](), "ne other")
+	check("shape-marks-struct-fields", fmt.Sprint(Shape[Outer]()), "[ID Inner{} Tag]")
+	check("shape-or-marks-struct-fields", fmt.Sprint(ShapeOr[Outer]()), "[ID Inner{} Tag]")
+	check("shape-ne-marks-struct-fields", fmt.Sprint(ShapeNe[Outer]()), "[ID Inner{} Tag]")
+	check("concrete-type-is-struct", concrete(), "Pair is a struct")
+	check("concrete-type-not-struct", concreteOther(), "int is not a struct")
+	if failed {
+		os.Exit(1)
+	}
 }
