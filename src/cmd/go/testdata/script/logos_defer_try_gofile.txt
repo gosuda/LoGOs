@@ -7,6 +7,12 @@ env GOTOOLCHAIN=local
 logos run .
 stdout '(?m)^go-f\ngo-stmt$'
 
+# Recognition is extension-gated to loGo/s files: a built binary keeps
+# the same plain order.
+logos build -o $WORK/gofile$GOEXE .
+exec $WORK/gofile$GOEXE
+stdout '(?m)^go-f\ngo-stmt$'
+
 -- go.mod --
 module example.com/defergofile
 
