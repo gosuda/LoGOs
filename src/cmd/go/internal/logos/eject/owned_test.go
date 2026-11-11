@@ -349,8 +349,9 @@ func TestEmitOwnedOutsideModule(t *testing.T) {
 	plan := ownedTestPlan(modDir, owner)
 	staging := t.TempDir()
 	writeOwnedSidecar(t, staging, "example.com/mod/sub", ownedTestRequest(t, "example.com/mod/sub", "sub", "package sub\nfunc X() {}\n", []logosowned.Declaration{}))
-	if _, err := emitOwnedHelpers(plan, staging, t.TempDir(), map[string]string{}); err == nil {
-		t.Fatalf("emit accepted an owner outside its module")
+	_, err := emitOwnedHelpers(plan, staging, t.TempDir(), map[string]string{})
+	if err == nil || !strings.Contains(err.Error(), "outside its module") || !strings.Contains(err.Error(), "example.com/mod/sub") {
+		t.Fatalf("emit outside module must name the module boundary, got %v", err)
 	}
 }
 
@@ -1037,14 +1038,16 @@ func TestEmitOwnedMissingUnselected(t *testing.T) {
 	}
 	t.Run("missing file", func(t *testing.T) {
 		plan, out := setup(t)
-		if err := emitOne(t, plan, out, logosowned.Declaration{Owner: "example.com/mod/sub", File: "missing.go"}); err == nil {
-			t.Fatalf("missing file accepted")
+		err := emitOne(t, plan, out, logosowned.Declaration{Owner: "example.com/mod/sub", File: "missing.go"})
+		if err == nil || !strings.Contains(err.Error(), "missing.go") || !strings.Contains(err.Error(), "example.com/mod/sub") {
+			t.Fatalf("missing file must be named in the error, got %v", err)
 		}
 	})
 	t.Run("unselected file", func(t *testing.T) {
 		plan, out := setup(t)
-		if err := emitOne(t, plan, out, logosowned.Declaration{Owner: "example.com/mod/sub", File: "other.go"}); err == nil {
-			t.Fatalf("unselected file accepted")
+		err := emitOne(t, plan, out, logosowned.Declaration{Owner: "example.com/mod/sub", File: "other.go"})
+		if err == nil || !strings.Contains(err.Error(), "other.go") || !strings.Contains(err.Error(), "example.com/mod/sub") {
+			t.Fatalf("unselected file must be named in the error, got %v", err)
 		}
 	})
 	t.Run("ignored file", func(t *testing.T) {
@@ -1065,8 +1068,9 @@ func TestEmitOwnedMissingUnselected(t *testing.T) {
 	})
 	t.Run("unknown owner", func(t *testing.T) {
 		plan, out := setup(t)
-		if err := emitOne(t, plan, out, logosowned.Declaration{Owner: "example.com/mod/unknown", File: "a.go"}); err == nil {
-			t.Fatalf("unknown owner accepted")
+		err := emitOne(t, plan, out, logosowned.Declaration{Owner: "example.com/mod/unknown", File: "a.go"})
+		if err == nil || !strings.Contains(err.Error(), "example.com/mod/unknown") {
+			t.Fatalf("unknown owner must be named in the error, got %v", err)
 		}
 	})
 	t.Run("empty inventory", func(t *testing.T) {
@@ -1080,8 +1084,9 @@ func TestEmitOwnedMissingUnselected(t *testing.T) {
 			},
 		}
 		plan.provenance["example.com/empty/pkg"] = []*load.Package{empty}
-		if err := emitOne(t, plan, out, logosowned.Declaration{Owner: "example.com/empty/pkg", File: "a.go"}); err == nil {
-			t.Fatalf("empty inventory accepted (all-files scan forbidden)")
+		err := emitOne(t, plan, out, logosowned.Declaration{Owner: "example.com/empty/pkg", File: "a.go"})
+		if err == nil || !strings.Contains(err.Error(), "example.com/empty/pkg") {
+			t.Fatalf("empty inventory must name the owner, got %v", err)
 		}
 	})
 	t.Run("same hash different provenance merges", func(t *testing.T) {
