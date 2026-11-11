@@ -2170,40 +2170,25 @@ func TestProxyMergesDiagnosticsOfGoDocuments(t *testing.T) {
 }
 
 func TestProxyCodeActionWithoutLoweringUsesCompiler(t *testing.T) {
-	root, tc := realWorkspace(t)
-	aPath := filepath.Join(root, filepath.FromSlash("lmod/a/a.lgo"))
 	const denied = "package a\n\nimport \"errors\"\n\nvar errGet = errors.New(\"get\")\n\nvar failGet = false\n\nfunc get() (int, error) {\n\tif failGet {\n\t\treturn 0, errGet\n\t}\n\treturn 1, nil\n}\n\nfunc run() error {\n\tget()\n\treturn nil\n}\n"
-	scratch := t.TempDir()
-	scriptPath := filepath.Join(scratch, "script.json")
-	scriptData, err := json.Marshal(fakeScript{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(scriptPath, scriptData, 0o666); err != nil {
-		t.Fatal(err)
-	}
-	logPath := filepath.Join(scratch, "gopls.log")
-	client := startProxy(t, Options{
-		Gopls:       []string{os.Args[0], "-mode=stdio"},
-		Env:         append(os.Environ(), fakeEnv+"="+scriptPath, fakeLogEnv+"="+logPath),
-		Compiler:    tc,
-		CodeActions: codeActionsAdapter,
-	})
-	client.call("initialize", map[string]any{
-		"processId": nil,
-		"rootUri":   pathURI(root),
-		"capabilities": map[string]any{
-			"general": map[string]any{"positionEncodings": []string{"utf-8", "utf-16"}},
+	f := newFixture(t, map[string]string{"a/a.lgo": aLgo}, fixtureOptions{
+		Tune: func(f *fixture, o *Options) {
+			o.CodeActions = codeActionsAdapter
 		},
 	})
-	client.notify("initialized", map[string]any{})
-	client.notify("textDocument/didOpen", map[string]any{
-		"textDocument": map[string]any{"uri": pathURI(aPath), "languageId": "logos", "version": 1, "text": denied},
-	})
+	aPath := f.path("a/a.lgo")
+	f.comp.setMissing(aPath)
 	call := findPos(t, denied, "get()", 1)
+	line := autofixLine(t, fixDiag{Schema: "1.0", File: aPath, Start: call, Len: len("get()"), Description: "add ? to propagate the error", Replacement: "get()?"})
+	d, ok := parseDiagnostic(line)
+	if !ok {
+		t.Fatalf("parseDiagnostic rejected %s", line)
+	}
+	f.comp.setDiagnostics(filepath.Dir(aPath), d)
+	f.openText("a/a.lgo", 1, denied)
 	rng := span(call, len("get()"))
-	res := client.call("textDocument/codeAction", map[string]any{
-		"textDocument": map[string]any{"uri": pathURI(aPath)},
+	res := f.client.call("textDocument/codeAction", map[string]any{
+		"textDocument": map[string]any{"uri": f.uri("a/a.lgo")},
 		"range":        rng,
 		"context":      map[string]any{"diagnostics": []any{}},
 	})
@@ -2216,18 +2201,19 @@ func TestProxyCodeActionWithoutLoweringUsesCompiler(t *testing.T) {
 	if !strings.Contains(string(res), `get()?`) {
 		t.Errorf("codeAction lacks the ? replacement: %s", res)
 	}
-	if data, err := os.ReadFile(logPath); err != nil {
-		t.Fatal(err)
-	} else if strings.Contains(string(data), `"method":"textDocument/codeAction"`) {
-		t.Errorf("gopls got a codeAction request for a document with no lowering; the proxy must answer compiler actions directly")
+	for _, m := range f.received() {
+		if m.Method == "textDocument/codeAction" {
+			t.Errorf("gopls got a codeAction request for a document with no lowering; the proxy must answer compiler actions directly")
+		}
 	}
 	fixed := strings.Replace(denied, "\tget()\n", "", 1)
-	client.notify("textDocument/didChange", map[string]any{
-		"textDocument":   map[string]any{"uri": pathURI(aPath), "version": 2},
+	f.client.notify("textDocument/didChange", map[string]any{
+		"textDocument":   map[string]any{"uri": f.uri("a/a.lgo"), "version": 2},
 		"contentChanges": []any{map[string]any{"text": fixed}},
 	})
-	res2 := client.call("textDocument/codeAction", map[string]any{
-		"textDocument": map[string]any{"uri": pathURI(aPath)},
+	f.comp.setDiagnostics(filepath.Dir(aPath))
+	res2 := f.client.call("textDocument/codeAction", map[string]any{
+		"textDocument": map[string]any{"uri": f.uri("a/a.lgo")},
 		"range":        rng,
 		"context":      map[string]any{"diagnostics": []any{}},
 	})

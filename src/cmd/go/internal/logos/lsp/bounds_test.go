@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 var errLowerBoom = errors.New("boom")
@@ -129,5 +130,49 @@ func TestPendingCapRefusesOverflow(t *testing.T) {
 		}
 	default:
 		t.Fatal("refused request got no error reply")
+	}
+}
+
+func TestSlowFailingLoweringAnswersRequestFailed(t *testing.T) {
+	f := newFixture(t, map[string]string{"a/a.lgo": aLgo}, fixtureOptions{})
+	f.open("a/a.lgo", 1)
+	dir := f.path("a")
+	gate := f.comp.setLowerWait(dir)
+	f.comp.setLowerError(dir, errLowerBoom)
+	ch := make(chan *message, 1)
+	go func() {
+		ch <- f.client.callMessage("textDocument/hover", positionParams(f.uri("a/a.lgo"), Position{Line: 5, Character: 3}))
+	}()
+	entered := time.After(waitLimit)
+	for {
+		inside := false
+		for _, c := range f.comp.lowerCalls() {
+			if c == dir {
+				inside = true
+			}
+		}
+		if inside {
+			break
+		}
+		select {
+		case <-entered:
+			t.Fatal("the hover never reached the lowering")
+		default:
+			time.Sleep(time.Millisecond)
+		}
+	}
+	close(gate)
+	select {
+	case m := <-ch:
+		v, err := decode(m.Error)
+		if err != nil {
+			t.Fatalf("error payload = %s, want a JSON-RPC error: %v", m.Error, err)
+		}
+		code, _ := number(v.(map[string]any)["code"])
+		if code != codeRequestFailed || string(m.ID) != "2" {
+			t.Fatalf("failed lowering answered id %s code %v, want 2 and %d", m.ID, code, codeRequestFailed)
+		}
+	case <-time.After(waitLimit):
+		t.Fatal("a killed lowering never answered the request")
 	}
 }

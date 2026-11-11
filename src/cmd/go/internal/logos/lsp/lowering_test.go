@@ -96,13 +96,31 @@ type fakeCompiler struct {
 	closure map[string][]string
 	diags   map[string][]Diagnostic
 	errs    map[string]error
+	missing map[string]bool
+	waits   map[string]chan struct{}
 	lowered [][]string
 	buffers []map[string][]byte
 	closed  bool
 }
 
 func newFakeCompiler() *fakeCompiler {
-	return &fakeCompiler{closure: map[string][]string{}, diags: map[string][]Diagnostic{}, errs: map[string]error{}}
+	return &fakeCompiler{closure: map[string][]string{}, diags: map[string][]Diagnostic{}, errs: map[string]error{}, missing: map[string]bool{}, waits: map[string]chan struct{}{}}
+}
+
+func (f *fakeCompiler) setMissing(paths ...string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, path := range paths {
+		f.missing[path] = true
+	}
+}
+
+func (f *fakeCompiler) setLowerWait(dir string) chan struct{} {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	gate := make(chan struct{})
+	f.waits[dir] = gate
+	return gate
 }
 
 func (f *fakeCompiler) setLowerError(dir string, err error) {
@@ -146,9 +164,17 @@ func (f *fakeCompiler) Lower(ctx context.Context, dir string, buffers map[string
 		dirs = []string{dir}
 	}
 	lerr := f.errs[dir]
+	gate, gated := f.waits[dir]
 	f.lowered = append(f.lowered, dirs)
 	f.buffers = append(f.buffers, buffers)
 	f.mu.Unlock()
+	if gated {
+		select {
+		case <-gate:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
 	if lerr != nil {
 		return nil, lerr
 	}
@@ -168,10 +194,14 @@ func (f *fakeCompiler) Lower(ctx context.Context, dir string, buffers map[string
 }
 
 func (f *fakeCompiler) lowerFile(low *Lowering, path string, buffers map[string][]byte) {
-	src, ok := buffers[path]
-	if !ok {
-		src, _ = os.ReadFile(path)
+	f.mu.Lock()
+	missing := f.missing[path]
+	f.mu.Unlock()
+	if missing {
+		low.Missing = append(low.Missing, path)
+		return
 	}
+	src, ok := buffers[path]
 	out, m, ok := lowerQuestion(src)
 	if !ok {
 		low.Missing = append(low.Missing, path)

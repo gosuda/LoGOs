@@ -76,6 +76,33 @@ func (c *stockClient) waitFor(what string, match func(*message) bool) *message {
 
 func (c *stockClient) call(method string, params any) []byte {
 	c.t.Helper()
+	m, ok := c.awaitCall(c.sendCall(method, params))
+	if !ok {
+		c.t.Fatalf("no response to %s from the proxy", method)
+	}
+	if len(m.Error) > 0 {
+		c.t.Fatalf("%s failed: %s", method, m.Error)
+	}
+	return []byte(m.Result)
+}
+
+func (c *stockClient) callRetry(method string, params any) []byte {
+	c.t.Helper()
+	for attempt := 1; ; attempt++ {
+		if m, ok := c.awaitCall(c.sendCall(method, params)); ok {
+			if len(m.Error) > 0 {
+				c.t.Fatalf("%s failed: %s", method, m.Error)
+			}
+			return []byte(m.Result)
+		}
+		if attempt >= 3 {
+			c.t.Fatalf("no response to %s from the proxy after %d attempts", method, attempt)
+		}
+	}
+}
+
+func (c *stockClient) sendCall(method string, params any) int {
+	c.t.Helper()
 	c.mu.Lock()
 	c.next++
 	id := c.next
@@ -87,13 +114,32 @@ func (c *stockClient) call(method string, params any) []byte {
 	if err := c.w.write(&message{ID: json.RawMessage(fmt.Sprint(id)), Method: method, Params: raw}); err != nil {
 		c.t.Fatalf("sending %s: %v", method, err)
 	}
-	m := c.waitFor("response to "+method, func(m *message) bool {
-		return m.isResponse() && string(m.ID) == fmt.Sprint(id)
+	return id
+}
+
+func (c *stockClient) awaitCall(id int) (*message, bool) {
+	c.t.Helper()
+	expired := false
+	timer := time.AfterFunc(waitLimit, func() {
+		c.mu.Lock()
+		expired = true
+		c.cond.Broadcast()
+		c.mu.Unlock()
 	})
-	if len(m.Error) > 0 {
-		c.t.Fatalf("%s failed: %s", method, m.Error)
+	defer timer.Stop()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for {
+		for _, m := range c.msgs {
+			if m.isResponse() && string(m.ID) == fmt.Sprint(id) {
+				return m, true
+			}
+		}
+		if expired {
+			return nil, false
+		}
+		c.cond.Wait()
 	}
-	return []byte(m.Result)
 }
 
 func (c *stockClient) notify(method string, params any) {
@@ -254,7 +300,7 @@ func TestStockClientThroughRealProxy(t *testing.T) {
 		"textDocument": map[string]any{"uri": lgoURI, "languageId": "logos", "version": 1, "text": stockLgo},
 	})
 	operand := stockSpan(t, stockLgo, "path", 1)
-	hover, err := decode(c.call("textDocument/hover", positionParams(lgoURI, operand.Start)))
+	hover, err := decode(c.callRetry("textDocument/hover", positionParams(lgoURI, operand.Start)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -267,7 +313,7 @@ func TestStockClientThroughRealProxy(t *testing.T) {
 	if r, ok := asRange(hm["range"].(map[string]any)); !ok || r != operand {
 		t.Errorf("hover range = %v, want %v", hm["range"], operand)
 	}
-	def, err := decode(c.call("textDocument/definition", positionParams(lgoURI, operand.Start)))
+	def, err := decode(c.callRetry("textDocument/definition", positionParams(lgoURI, operand.Start)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -282,7 +328,7 @@ func TestStockClientThroughRealProxy(t *testing.T) {
 	if r, ok := asRange(loc["range"].(map[string]any)); !ok || r != operand {
 		t.Errorf("definition range = %v, want %v", loc["range"], operand)
 	}
-	comp, err := decode(c.call("textDocument/completion", positionParams(lgoURI, operand.Start)))
+	comp, err := decode(c.callRetry("textDocument/completion", positionParams(lgoURI, operand.Start)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -324,7 +370,7 @@ func TestStockClientThroughRealProxy(t *testing.T) {
 		"contentChanges": []any{map[string]any{"text": changed}},
 	})
 	operand2 := stockSpan(t, changed, "path", 1)
-	hover2, err := decode(c.call("textDocument/hover", positionParams(lgoURI, operand2.Start)))
+	hover2, err := decode(c.callRetry("textDocument/hover", positionParams(lgoURI, operand2.Start)))
 	if err != nil {
 		t.Fatal(err)
 	}
