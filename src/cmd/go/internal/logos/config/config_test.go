@@ -5,6 +5,7 @@
 package config
 
 import (
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -388,6 +389,38 @@ func TestLoadAbsentReturnsDefaults(t *testing.T) {
 		Project: Project{StrictFiles: fourExts},
 		Build:   Build{Cgo: "forbid", OptLevel: "O2", TargetCPU: "deterministic"},
 	})
+	if got.Build.Arena != nil {
+		t.Errorf("Build.Arena = %v, want nil (default true)", *got.Build.Arena)
+	}
+	if got.Build.CgoAllowlist != nil {
+		t.Errorf("Build.CgoAllowlist = %q, want nil", got.Build.CgoAllowlist)
+	}
+	checkCapabilities(t, got.Capabilities, defaultCapabilities())
+	wantGroups := map[string]string{
+		"correctness": "forbid",
+		"concurrency": "forbid",
+		"slop":        "deny",
+		"complexity":  "deny",
+		"perf":        "warn",
+		"style":       "warn",
+		"suspicious":  "warn",
+		"portability": "warn",
+		"pedantic":    "allow",
+	}
+	if !maps.Equal(got.Lints.Groups, wantGroups) {
+		t.Errorf("Lints.Groups = %v, want %v", got.Lints.Groups, wantGroups)
+	}
+	wantThresholds := map[string]int{
+		"max_nesting_depth":        3,
+		"max_cognitive_complexity": 15,
+		"max_function_lines":       60,
+		"max_function_params":      4,
+		"max_comptime_ast_nodes":   4096,
+		"max_ctfe_steps":           100000,
+	}
+	if !maps.Equal(got.Lints.Thresholds, wantThresholds) {
+		t.Errorf("Lints.Thresholds = %v, want %v", got.Lints.Thresholds, wantThresholds)
+	}
 }
 
 func TestLoadReadsFile(t *testing.T) {
