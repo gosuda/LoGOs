@@ -25,6 +25,7 @@ func dupBase() string {
 		"conforms S example.com/x I\n" +
 		"const K P0\n" +
 		"constfn N 4\nwxyz\n" +
+		"constmap M 36\nbearing 0\norder 0\nentry 1a 1 1 1\nckv\n" +
 		"default T Fld 3\nabc\n" +
 		"fn F MayYield=1\n" +
 		"jsonkey J 0000 3\nkey\n" +
@@ -54,6 +55,10 @@ func TestDecodeRoundTripEveryKind(t *testing.T) {
 		Conforms:   []facts.ConformsFact{{Type: "S", IfacePath: "example.com/x", Iface: "I"}},
 		Comptimes:  []facts.ComptimeFact{{Object: "C", Source: []byte("abcd")}},
 		ConstFuncs: []facts.ConstFuncFact{{Object: "N", Source: []byte("wxyz")}},
+		ConstMaps: []facts.ConstMapFact{{
+			Object: "M", Order: []int{0}, Hashes: []uint64{0x1a},
+			Canons: []string{"c"}, Keys: []string{"k"}, Vals: []string{"v"},
+		}},
 		Defaults:   []facts.DefaultFact{{Type: "T", Field: "Fld", Text: "abc"}},
 		Locks:      []facts.LockFact{{Object: "F", Effect: "requires", Path: "P0"}},
 		AllocFrees: []facts.AllocFreeFact{{Object: "F"}},
@@ -83,6 +88,7 @@ func TestDecodeRejectsDuplicateKey(t *testing.T) {
 		{"comptime conflicting body", dupHead() + "comptime C 3\nabc\ncomptime C 4\nabcd\n"},
 		{"constfn conflicting body", dupHead() + "constfn N 3\nabc\nconstfn N 4\nabcd\n"},
 		{"default conflicting text", dupHead() + "default T Fld 2\nab\ndefault T Fld 3\nabc\n"},
+		{"constmap conflicting body", dupHead() + "constmap M 16\nbearing 0\norder\n\nconstmap M 36\nbearing 0\norder 0\nentry 1a 1 1 1\nckv\n"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -108,6 +114,7 @@ func TestDecodeRejectsExactDuplicate(t *testing.T) {
 		{"locks same triple", dupHead() + "locks F requires P0\nlocks F requires P0\n"},
 		{"conforms same triple", dupHead() + "conforms S example.com/x I\nconforms S example.com/x I\n"},
 		{"default same field same text", dupHead() + "default T Fld 3\nabc\ndefault T Fld 3\nabc\n"},
+		{"constmap same object same body", dupHead() + "constmap M 16\nbearing 0\norder\n\nconstmap M 16\nbearing 0\norder\n\n"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -156,6 +163,9 @@ func TestDecodeAcceptsDistinctKeys(t *testing.T) {
 
 func TestDecodeTruncationNoPanic(t *testing.T) {
 	full := []byte(dupBase())
+	if _, err := facts.Decode(full); err != nil {
+		t.Fatalf("Decode(valid base) failed: %v", err)
+	}
 	for off := range len(full) {
 		func() {
 			defer func() {
@@ -182,6 +192,7 @@ func TestDecodeRejectsSwappedAdjacent(t *testing.T) {
 		"conforms S example.com/x I\n",
 		"const K P0\n",
 		"constfn N 4\nwxyz\n",
+		"constmap M 36\nbearing 0\norder 0\nentry 1a 1 1 1\nckv\n",
 		"default T Fld 3\nabc\n",
 		"fn F MayYield=1\n",
 		"jsonkey J 0000 3\nkey\n",

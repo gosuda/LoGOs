@@ -765,14 +765,12 @@ func Decode(data []byte) (*Facts, error) {
 			if aerr != nil || n <= 0 {
 				return nil, fmt.Errorf("logos facts line %d: bad constmap length %q", ln, fields[2])
 			}
+			if err := d.dup(ln, "constmap", fields[1], fields[1]); err != nil {
+				return nil, err
+			}
 			body, err := d.requireBody(ln, "constmap", fields[1], n)
 			if err != nil {
 				return nil, err
-			}
-			for _, c := range f.ConstMaps {
-				if c.Object == fields[1] {
-					return nil, fmt.Errorf("logos facts line %d: duplicate constmap object %q", ln, fields[1])
-				}
 			}
 			cm, err := decodeConstMap(fields[1], body)
 			if err != nil {
