@@ -10,6 +10,7 @@ stdout '^pick A$'
 stdout '^assert A: 1$'
 stdout '^member$'
 stdout '^non-member$'
+stdout '^2$'
 cp stdout $WORK/eject-stdout.txt
 
 logos eject -o out
@@ -126,6 +127,18 @@ type Checked struct : Asserted {
 
 func (Checked) Mark() {}
 
+type Counted interface {
+	Mark()
+	N() int
+}
+
+type Tally struct : Counted {
+	n int
+}
+
+func (t *Tally) Mark() { t.n++ }
+func (t *Tally) N() int { return t.n }
+
 type C struct {
 	Z int
 }
@@ -141,6 +154,11 @@ func main() {
 	}
 	fmt.Println(Check(A{X: 2}))
 	fmt.Println(Check(C{}))
+	t := &Tally{}
+	var c Counted = t
+	c.Mark()
+	c.Mark()
+	fmt.Println(c.N())
 }
 
 -- mdual/go.mod --
