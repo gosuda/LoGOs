@@ -72,7 +72,11 @@ func (s *store) change(path string, version int, changes []contentChange) bool {
 	if version <= doc.version {
 		return false
 	}
-	doc.text = applyChanges(doc.text, changes)
+	next := applyChanges(doc.text, changes)
+	if len(next.data) > maxDocBytes {
+		return false
+	}
+	doc.text = next
 	doc.version = version
 	s.touchLocked(path)
 	return true
@@ -182,10 +186,24 @@ func (p *Proxy) compileUnit(ctx context.Context, dir string) {
 	if buffers == nil {
 		return
 	}
-	low, diags := p.compile(ctx, dir, buffers)
+	low, diags, lerr := p.compile(ctx, dir, buffers)
+	p.recordLowering(dir, lerr)
 	p.apply(dir, low, diags, versions)
 	p.syncGopls()
 	p.publishAll()
+}
+
+func (p *Proxy) recordLowering(dir string, lerr error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if lerr != nil {
+		if len(p.lowerErr) >= maxLowerErrs {
+			clear(p.lowerErr)
+		}
+		p.lowerErr[dir] = lerr
+	} else {
+		delete(p.lowerErr, dir)
+	}
 }
 
 func (p *Proxy) takeDirty(dir string) (map[string][]byte, map[string]int) {
@@ -211,17 +229,17 @@ func (p *Proxy) takeDirty(dir string) (map[string][]byte, map[string]int) {
 	return buffers, versions
 }
 
-func (p *Proxy) compile(ctx context.Context, dir string, buffers map[string][]byte) (*Lowering, []Diagnostic) {
+func (p *Proxy) compile(ctx context.Context, dir string, buffers map[string][]byte) (*Lowering, []Diagnostic, error) {
 	low, err := p.opts.Compiler.Lower(ctx, dir, buffers)
 	if err != nil {
 		p.logf("lowering %s: %v", dir, err)
-		return nil, nil
+		return nil, nil, err
 	}
 	diags, err := p.opts.Compiler.Diagnose(ctx, dir, buffers)
 	if err != nil {
 		p.logf("diagnosing %s: %v", dir, err)
 	}
-	return low, diags
+	return low, diags, nil
 }
 
 func (p *Proxy) apply(dir string, low *Lowering, diags []Diagnostic, versions map[string]int) {

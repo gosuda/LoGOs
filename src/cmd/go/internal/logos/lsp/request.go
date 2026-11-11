@@ -7,6 +7,7 @@ package lsp
 import (
 	"context"
 	"encoding/json"
+	"path/filepath"
 )
 
 var nullResult = json.RawMessage("null")
@@ -20,6 +21,8 @@ func (p *Proxy) clientRequest(ctx context.Context, m *message) {
 	case "shutdown":
 		p.mu.Lock()
 		p.shutdown = true
+		clear(p.pending)
+		clear(p.lowerErr)
 		p.mu.Unlock()
 		p.send(p.server, m)
 	case "logos/snapshotCounts":
@@ -92,11 +95,7 @@ func (p *Proxy) request(ctx context.Context, m *message) {
 	defer p.work.Unlock()
 	lw, ok := p.target(path)
 	if !ok {
-		if m.Method == "textDocument/codeAction" && isLogosPath(path) {
-			p.respond(m.ID, p.finishResult(pending{method: m.Method, path: path, params: m.Params}, []any{}))
-			return
-		}
-		p.send(p.client, &message{ID: m.ID, Result: nullResult})
+		p.absent(m, path)
 		return
 	}
 	tb := p.tables.Load()
@@ -111,8 +110,39 @@ func (p *Proxy) request(ctx context.Context, m *message) {
 	if m.Method == "textDocument/codeAction" {
 		pend.fixVersion, pend.fixHas = p.docVersion(path)
 	}
-	p.addPending(m.ID, pend)
+	if !p.track(m.ID, pend) {
+		p.fail(m.ID, codeRequestFailed, "too many pending requests")
+		return
+	}
 	p.send(p.server, out)
+}
+
+func (p *Proxy) absent(m *message, path string) {
+	if m.Method == "textDocument/codeAction" && isLogosPath(path) {
+		p.respond(m.ID, p.finishResult(pending{method: m.Method, path: path, params: m.Params}, []any{}))
+		return
+	}
+	if isLogosPath(path) && p.lowerFailed(path) {
+		p.fail(m.ID, codeRequestFailed, "lowering failed")
+		return
+	}
+	p.send(p.client, &message{ID: m.ID, Result: nullResult})
+}
+
+func (p *Proxy) lowerFailed(path string) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.lowerErr[filepath.Dir(path)] != nil
+}
+
+func (p *Proxy) track(id json.RawMessage, pend pending) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if len(p.pending) >= maxPending {
+		return false
+	}
+	p.pending[string(id)] = pend
+	return true
 }
 
 func (p *Proxy) declineFormatting(m *message) {
@@ -199,10 +229,36 @@ func (p *Proxy) serverDiagnostics(m *message) {
 	} else {
 		p.srvDiags[uri] = serverDiags{version: version, hasVer: hasVer, raw: items}
 	}
+	over := len(p.srvDiags) > maxDiagURIs
 	p.mu.Unlock()
+	if over {
+		p.evictDiags(uri)
+	}
 	tb := p.tables.Load()
 	if lw := tb.lookup(tb.byVirt, uri); lw != nil {
 		uri = lw.srcURI()
 	}
 	p.publish(uri)
+}
+
+func (p *Proxy) evictDiags(except string) {
+	p.st.mu.Lock()
+	open := make(map[string]bool, len(p.st.docs))
+	for _, doc := range p.st.docs {
+		open[doc.uri] = true
+	}
+	p.st.mu.Unlock()
+	tb := p.tables.Load()
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for uri := range p.srvDiags {
+		if uri == except || open[uri] {
+			continue
+		}
+		if path, err := uriPath(uri); err == nil && tb.byVirt[path] != nil {
+			continue
+		}
+		delete(p.srvDiags, uri)
+		delete(p.sent, uri)
+	}
 }

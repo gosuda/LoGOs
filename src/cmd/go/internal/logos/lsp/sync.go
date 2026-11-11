@@ -75,9 +75,27 @@ func (p *Proxy) clientNotification(ctx context.Context, m *message) {
 		p.didClose(ctx, m)
 	case "workspace/didChangeWatchedFiles":
 		p.watched(ctx, m)
+	case "$/cancelRequest":
+		p.cancelPending(m)
+		p.send(p.server, m)
 	default:
 		p.send(p.server, m)
 	}
+}
+
+func (p *Proxy) cancelPending(m *message) {
+	v, err := decode(m.Params)
+	root, _ := v.(map[string]any)
+	if err != nil || root == nil {
+		return
+	}
+	raw, err := encode(root["id"])
+	if err != nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	delete(p.pending, string(raw))
 }
 
 func trackedPath(path string) bool { return isLogosPath(path) || isGoPath(path) }
@@ -145,7 +163,11 @@ func (p *Proxy) didOpen(ctx context.Context, m *message) {
 	item := params.TextDocument
 	path := p.docPath(item.URI)
 	if path != "" {
-		p.st.setDoc(item.URI, path, item.Version, newText([]byte(item.Text)))
+		if len(item.Text) > maxDocBytes {
+			p.logf("didOpen: ignoring oversized document %s", path)
+		} else {
+			p.st.setDoc(item.URI, path, item.Version, newText([]byte(item.Text)))
+		}
 	}
 	p.forwardUnlessLogos(m, path)
 }
@@ -205,6 +227,7 @@ func (p *Proxy) didClose(ctx context.Context, m *message) {
 	retained := p.st.forget(path)
 	p.mu.Lock()
 	delete(p.srvDiags, params.TextDocument.URI)
+	delete(p.sent, params.TextDocument.URI)
 	p.mu.Unlock()
 	p.forwardUnlessLogos(m, path)
 	if retained {

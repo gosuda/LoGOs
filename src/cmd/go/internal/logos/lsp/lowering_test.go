@@ -95,13 +95,20 @@ type fakeCompiler struct {
 	mu      sync.Mutex
 	closure map[string][]string
 	diags   map[string][]Diagnostic
+	errs    map[string]error
 	lowered [][]string
 	buffers []map[string][]byte
 	closed  bool
 }
 
 func newFakeCompiler() *fakeCompiler {
-	return &fakeCompiler{closure: map[string][]string{}, diags: map[string][]Diagnostic{}}
+	return &fakeCompiler{closure: map[string][]string{}, diags: map[string][]Diagnostic{}, errs: map[string]error{}}
+}
+
+func (f *fakeCompiler) setLowerError(dir string, err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.errs[dir] = err
 }
 
 func (f *fakeCompiler) setClosure(dirs ...string) {
@@ -138,9 +145,13 @@ func (f *fakeCompiler) Lower(ctx context.Context, dir string, buffers map[string
 	if dirs == nil {
 		dirs = []string{dir}
 	}
+	lerr := f.errs[dir]
 	f.lowered = append(f.lowered, dirs)
 	f.buffers = append(f.buffers, buffers)
 	f.mu.Unlock()
+	if lerr != nil {
+		return nil, lerr
+	}
 	low := &Lowering{Dirs: dirs}
 	for _, d := range dirs {
 		entries, err := os.ReadDir(d)

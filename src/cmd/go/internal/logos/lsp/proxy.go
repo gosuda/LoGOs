@@ -24,6 +24,14 @@ const drainLimit = 30 * time.Second
 
 const outboxCap = 64
 
+const maxPending = 1024
+
+const maxDiagURIs = 4096
+
+const maxDocBytes = 8 << 20
+
+const maxLowerErrs = 64
+
 const maxHintTasks = 4
 
 type Options struct {
@@ -84,6 +92,7 @@ type Proxy struct {
 	pending  map[string]pending
 	srvDiags map[string]serverDiags
 	sent     map[string]string
+	lowerErr map[string]error
 	toClient chan *message
 	toServer chan *message
 	done     chan struct{}
@@ -112,6 +121,7 @@ func newProxy(out io.Writer, opts Options) *Proxy {
 		pending:  make(map[string]pending),
 		srvDiags: make(map[string]serverDiags),
 		sent:     make(map[string]string),
+		lowerErr: make(map[string]error),
 		toClient: make(chan *message, outboxCap),
 		toServer: make(chan *message, outboxCap),
 		done:     make(chan struct{}),
