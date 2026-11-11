@@ -2,7 +2,13 @@ ok comma-false
 ok single-panic
 ok member-true
 ok single-message
+ok single-type
 ok return-message
+ok return-type
+ok xu-nonmember-message
+ok xu-nonmember-type
+ok xu-nil-message
+ok xu-nil-type
 ok case-member-int
 ok case-member-string
 ok case-nil

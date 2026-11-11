@@ -100,20 +100,26 @@ func Lookup[M ~map[K]V, K comparable, V any](m M, k K) Option[V] {
 }
 
 // UnionAssertionError is the panic value of a failed single-value
-// assertion to a closed union: x.(U) panics with
-// &UnionAssertionError{Value: x, Union: "<pkg>.U"} when the dynamic type
-// of x is not a member of U.
+// assertion to a closed union. When x.(U) fails because the dynamic type
+// of x is not a member of U, it panics with
+// &UnionAssertionError{Value: x, Union: "<pkg>.U"}. When u.(T) fails
+// because T is not a member of U, it panics with the same error plus
+// Asserted holding the spelling of T.
 type UnionAssertionError struct {
-	Value any
-	Union string
+	Value    any
+	Union    string
+	Asserted string
 }
 
 // Error formats the Go assertion message with the union in place of the
 // asserted type: `interface conversion: <T> is not a member of <pkg>.U`,
-// where <T> is the dynamic type of Value, or `nil` when Value is nil.
+// where <T> is Asserted when set, else the dynamic type of Value, or
+// `nil` when Value is nil.
 func (e *UnionAssertionError) Error() string {
 	actual := "nil"
-	if e.Value != nil {
+	if e.Asserted != "" {
+		actual = e.Asserted
+	} else if e.Value != nil {
 		actual = reflect.TypeOf(e.Value).String()
 	}
 	return "interface conversion: " + actual + " is not a member of " + e.Union

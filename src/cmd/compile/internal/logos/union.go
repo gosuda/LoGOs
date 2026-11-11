@@ -934,8 +934,8 @@ func (fl *fileLower) emitHelpers(u *unionUse) {
 	nativeDecls := build(u.nnode, u.nnodes)
 	ejectDecls := build(mustTypeExprAt(fl, u.utext, pos), mustTypeExprsAt(fl, u.texts, pos))
 	for _, f := range u.froms {
-		nativeDecls = append(nativeDecls, fl.buildFromDecls(f, pos, mustTypeExprAt(fl, f.ntext, pos))...)
-		ejectDecls = append(ejectDecls, fl.buildFromDecls(f, pos, mustTypeExprAt(fl, f.etext, pos))...)
+		nativeDecls = append(nativeDecls, fl.buildFromDecls(f, pos, f.ntext)...)
+		ejectDecls = append(ejectDecls, fl.buildFromDecls(f, pos, f.etext)...)
 	}
 	fl.file.DeclList = append(fl.file.DeclList, nativeDecls...)
 	var text strings.Builder
@@ -949,7 +949,8 @@ func (fl *fileLower) emitHelpers(u *unionUse) {
 	fl.add(fl.orig, fl.orig, text.String())
 }
 
-func (fl *fileLower) buildFromDecls(f *unionFrom, pos syntax.Pos, ttype syntax.Expr) []syntax.Decl {
+func (fl *fileLower) buildFromDecls(f *unionFrom, pos syntax.Pos, text string) []syntax.Decl {
+	ttype := mustTypeExprAt(fl, text, pos)
 	anyField := func(name string) *syntax.Field {
 		return at(&syntax.Field{Name: nameOf(pos, name), Type: nameOf(pos, "any")}, pos)
 	}
@@ -969,8 +970,9 @@ func (fl *fileLower) buildFromDecls(f *unionFrom, pos syntax.Pos, ttype syntax.E
 		ElemList: []syntax.Expr{
 			at(&syntax.KeyValueExpr{Key: nameOf(pos, "Value"), Value: nameOf(pos, "x")}, pos),
 			at(&syntax.KeyValueExpr{Key: nameOf(pos, "Union"), Value: litOf(pos, fmt.Sprintf("%q", f.union), syntax.StringLit)}, pos),
+			at(&syntax.KeyValueExpr{Key: nameOf(pos, "Asserted"), Value: litOf(pos, fmt.Sprintf("%q", text), syntax.StringLit)}, pos),
 		},
-		NKeys:  2,
+		NKeys:  3,
 		Rbrace: pos,
 	}, pos)
 	from1 := at(&syntax.FuncDecl{

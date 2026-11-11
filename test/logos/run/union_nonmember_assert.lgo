@@ -4,6 +4,7 @@ package main
 
 import (
 	"fmt"
+	"logos/rt"
 	"os"
 )
 
@@ -45,6 +46,8 @@ func checkMessages(u U) {
 			got := fmt.Sprint(r)
 			want := "interface conversion: float64 is not a member of main.U"
 			check("single-message", got == want, got, want)
+			_, typeOk := r.(*rt.UnionAssertionError)
+			check("single-type", typeOk, fmt.Sprintf("%T", r), "*rt.UnionAssertionError")
 		}()
 		_ = u.(float64)
 	}()
@@ -54,8 +57,37 @@ func checkMessages(u U) {
 			got := fmt.Sprint(r)
 			want := "interface conversion: float64 is not a member of main.U"
 			check("return-message", got == want, got, want)
+			_, typeOk := r.(*rt.UnionAssertionError)
+			check("return-type", typeOk, fmt.Sprintf("%T", r), "*rt.UnionAssertionError")
 		}()
 		_ = returnForm(u)
+	}()
+}
+
+func checkXU() {
+	func() {
+		defer func() {
+			r := recover()
+			got := fmt.Sprint(r)
+			want := "interface conversion: float64 is not a member of main.U"
+			check("xu-nonmember-message", got == want, got, want)
+			_, typeOk := r.(*rt.UnionAssertionError)
+			check("xu-nonmember-type", typeOk, fmt.Sprintf("%T", r), "*rt.UnionAssertionError")
+		}()
+		var x any = 1.5
+		_ = x.(U)
+	}()
+	func() {
+		defer func() {
+			r := recover()
+			got := fmt.Sprint(r)
+			want := "interface conversion: nil is not a member of main.U"
+			check("xu-nil-message", got == want, got, want)
+			_, typeOk := r.(*rt.UnionAssertionError)
+			check("xu-nil-type", typeOk, fmt.Sprintf("%T", r), "*rt.UnionAssertionError")
+		}()
+		var x any
+		_ = x.(U)
 	}()
 }
 
@@ -103,6 +135,7 @@ func main() {
 	}
 	fmt.Println("ok member-true")
 	checkMessages(u)
+	checkXU()
 	checkCases()
 	if failed {
 		os.Exit(1)

@@ -91,7 +91,7 @@ func checkNonmemberSingle() {
 			fmt.Println("FAIL nonmember-single-kind:", r)
 			os.Exit(1)
 		}
-		want := "interface conversion: main.Circle is not a member of main.Any"
+		want := "interface conversion: float64 is not a member of main.Any"
 		if e.Error() != want {
 			fmt.Println("FAIL nonmember-single-text: got", e.Error(), "want", want)
 			os.Exit(1)
@@ -112,7 +112,7 @@ func checkNonmemberSingleText() {
 			fmt.Println("FAIL nonmember-single-text-kind:", r)
 			os.Exit(1)
 		}
-		want := "interface conversion: main.Text is not a member of main.Any"
+		want := "interface conversion: float64 is not a member of main.Any"
 		if e.Error() != want {
 			fmt.Println("FAIL nonmember-single-text: got", e.Error(), "want", want)
 			os.Exit(1)
