@@ -20,6 +20,7 @@ func TestEqualIDsBothDirectionsStayRouted(t *testing.T) {
 	}
 	p.fromServer(t.Context(), &message{ID: json.RawMessage("1"), Method: "workspace/configuration", Params: json.RawMessage(`{}`)})
 	p.fromClient(t.Context(), &message{ID: json.RawMessage("1"), Result: json.RawMessage("null")})
+	p.flush(t)
 	if _, ok := p.pending["1"]; !ok {
 		t.Fatal("the client answer to the server request cleared the client request slot")
 	}
@@ -27,6 +28,7 @@ func TestEqualIDsBothDirectionsStayRouted(t *testing.T) {
 		t.Fatalf("the client answer never reached the server: %q", toServer.Bytes())
 	}
 	p.serverResponse(t.Context(), &message{ID: json.RawMessage("1"), Result: json.RawMessage("null")})
+	p.flush(t)
 	if _, ok := p.pending["1"]; ok {
 		t.Fatal("the server answer to the client request left a pending slot")
 	}

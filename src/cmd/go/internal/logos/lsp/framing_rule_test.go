@@ -36,6 +36,7 @@ func TestServerLegParseErrorContinues(t *testing.T) {
 	if err := <-done; err != nil {
 		t.Fatalf("serverLoop stopped on a bad body: %v", err)
 	}
+	p.flush(t)
 	if !bytes.Contains(toClient.Bytes(), []byte("showMessage")) {
 		t.Fatalf("the notification past the bad body never reached the client: %q", toClient.Bytes())
 	}
