@@ -2,7 +2,10 @@
 
 package main
 
-import "fmt"
+import (
+	"fmt"
+	"os"
+)
 
 type Creature interface {
 	const Name string
@@ -25,20 +28,33 @@ type Monster struct : Creature {
 	HP int
 }
 func (m Monster) Start() error { return nil }
+func check(cond bool, name string) {
+	failed := false
+	if cond {
+		fmt.Println("ok " + name)
+	} else {
+		fmt.Println("FAIL " + name)
+		failed = true
+	}
+	if failed {
+		os.Exit(1)
+	}
+}
 func main() {
 	var n Num = 5
 	_, ok := any(n).(Creature)
 	_, ok2 := any(&n).(Creature)
-	fmt.Println("nonstruct-ok:", !ok && !ok2)
+	check(!ok && !ok2, "nonstruct")
 	m := Monster{Name: "g", HP: 10}
 	c, ok3 := any(&m).(Creature)
-	fmt.Println("struct-ok:", ok3 && c.Name == "g")
+	check(ok3 && c.Name == "g", "struct")
 	_, ok4 := any(7).(Creature)
-	fmt.Println("reject-ok:", !ok4)
+	check(!ok4, "reject")
 	switch v := any(&m).(type) {
 	case Creature:
-		fmt.Println("switch-ok:", v.Name == "g")
+		check(v.Name == "g", "switch")
 	default:
-		fmt.Println("switch-ok:", false)
+		fmt.Println("FAIL switch")
+		os.Exit(1)
 	}
 }

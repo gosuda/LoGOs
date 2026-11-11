@@ -1,4 +1,4 @@
-nonstruct-ok: true
-struct-ok: true
-reject-ok: true
-switch-ok: true
+ok nonstruct
+ok struct
+ok reject
+ok switch
