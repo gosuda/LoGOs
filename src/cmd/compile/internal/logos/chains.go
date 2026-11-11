@@ -459,16 +459,15 @@ func (fl *fileLower) isChainCall(e syntax.Expr) bool {
 		"first", "last", "get", "take", "drop", "sum", "count":
 		t := fl.pkg.info.TypeOf(sel.X)
 		if t == nil {
-			return true
-		}
-		if _, ok := t.Underlying().(*types2.Array); ok {
 			return false
 		}
-		if fl.pkg.info.Selections != nil {
-			if _, ok := fl.pkg.info.Selections[sel]; ok {
-				return false
-			}
-		} else if obj, _, _ := types2.LookupFieldOrMethod(t, true, fl.pkg.tpkg, sel.Sel.Value); obj != nil {
+		if c := constAsView(t); c != nil {
+			t = c.Elem
+		}
+		if obj, _, _ := types2.LookupFieldOrMethod(t, true, fl.pkg.tpkg, sel.Sel.Value); obj != nil {
+			return false
+		}
+		if _, ok := types2.Unalias(t).(*types2.Slice); !ok {
 			return false
 		}
 		return true
