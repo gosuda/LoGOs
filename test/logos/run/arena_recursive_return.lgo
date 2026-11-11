@@ -1,5 +1,4 @@
 // run -goexperiment logosarena
-
 package main
 
 import (
@@ -43,20 +42,22 @@ func main() {
 	s := mk(8)
 	after := heapBytes()
 	if len(s) != 16 || sumVals(s) != 136 {
-		fmt.Println("bad return:", len(s), sumVals(s))
+		fmt.Printf("FAIL caller-owned-return-values-survive: got len %d sum %d want 16 136\n", len(s), sumVals(s))
 		os.Exit(1)
 	}
+	fmt.Println("ok caller-owned-return-values-survive")
 	runtime.GC()
 	runtime.GC()
 	if sumVals(s) != 136 {
-		fmt.Println("bad across GC:", sumVals(s))
+		fmt.Printf("FAIL caller-owned-return-survives-gc: got %d want 136\n", sumVals(s))
 		os.Exit(1)
 	}
+	fmt.Println("ok caller-owned-return-survives-gc")
 	grew := after - before
 	if grew != 0 {
-		fmt.Println("heap grew by", grew, "want 0 (region-placed)")
+		fmt.Printf("FAIL caller-owned-return-placed-in-region-not-heap: heap grew by %d want 0\n", grew)
 		os.Exit(1)
 	}
+	fmt.Println("ok caller-owned-return-placed-in-region-not-heap")
 	runtime.KeepAlive(s)
-	fmt.Println("ok")
 }

@@ -1,1 +1,4 @@
-ok
+ok recursive-fill-matches-heap-fibonacci
+ok recursive-pointer-matches-heap-fibonacci
+ok recursive-memo-table-matches-heap-oracle
+ok recursive-region-holds-bytes

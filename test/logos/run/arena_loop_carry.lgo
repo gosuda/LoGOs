@@ -5,6 +5,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"runtime"
 )
 
@@ -156,16 +157,46 @@ func carryEscape(n int) (ks, es, ksGC, esGC int) {
 	runtime.KeepAlive(escapeSink)
 	return ks, es, ksGC, esGC
 }
-
 func main() {
+	failed := false
+	eq := func(name string, got, want int) {
+		if got != want {
+			fmt.Printf("FAIL %s: got %d want %d\n", name, got, want)
+			failed = true
+			return
+		}
+		fmt.Printf("ok %s\n", name)
+	}
 	ks, kf, kl, ls, lf, ksGC, lsGC := carryBasic(1024)
-	fmt.Println("basic:", ks, kf, kl, ls, lf, ksGC, lsGC)
+	eq("basic-kept-sum-matches-fill-1-rule", ks, 1024*1)
+	eq("basic-kept-first-byte-is-1", kf, 1)
+	eq("basic-kept-last-byte-is-1", kl, 1)
+	eq("basic-last-sum-matches-fill-4-rule", ls, 1024*4)
+	eq("basic-last-first-byte-is-4", lf, 4)
+	eq("basic-gc-preserves-kept-sum", ksGC, ks)
+	eq("basic-gc-preserves-last-sum", lsGC, ls)
 	direct, via, after, viaAfter := carryClosure(1024)
-	fmt.Println("closure:", direct, via, after, viaAfter)
+	eq("closure-direct-matches-fill-20-rule", direct, 1024*20)
+	eq("closure-captured-matches-direct", via, direct)
+	eq("closure-gc-preserves-direct", after, direct)
+	eq("closure-gc-preserves-captured", viaAfter, direct)
 	total, cks, cksGC, osum, osumGC := carryCondPost(1024)
-	fmt.Println("condpost:", total, cks, cksGC, osum, osumGC)
+	eq("condpost-kept-sum-matches-fill-40-rule", cks, 1024*40)
+	eq("condpost-gc-preserves-kept-sum", cksGC, cks)
+	eq("condpost-outer-sum-matches-fill-9-rule", osum, 1024*9)
+	eq("condpost-gc-preserves-outer-sum", osumGC, osum)
+	_ = total
 	nks, nkf, ntotal, nksGC := carryNested(1024)
-	fmt.Println("nested:", nks, nkf, ntotal, nksGC)
+	eq("nested-kept-sum-matches-fill-50-rule", nks, 1024*50)
+	eq("nested-kept-first-byte-is-50", nkf, 50)
+	eq("nested-gc-preserves-kept-sum", nksGC, nks)
+	_ = ntotal
 	eks, ees, eksGC, eesGC := carryEscape(1024)
-	fmt.Println("escape:", eks, ees, eksGC, eesGC)
+	eq("escape-kept-sum-matches-fill-60-rule", eks, 1024*60)
+	eq("escape-sink-sum-matches-fill-61-rule", ees, 1024*61)
+	eq("escape-gc-preserves-kept-sum", eksGC, eks)
+	eq("escape-gc-preserves-sink-sum", eesGC, ees)
+	if failed {
+		os.Exit(1)
+	}
 }
