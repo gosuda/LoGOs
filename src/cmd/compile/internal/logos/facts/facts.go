@@ -82,6 +82,16 @@ type ConstFuncFact struct {
 	Source []byte
 }
 
+type ConstMapFact struct {
+	Object  string
+	Bearing bool
+	Order   []int
+	Hashes  []uint64
+	Canons  []string
+	Keys    []string
+	Vals    []string
+}
+
 type LockFact struct {
 	Object string
 	Effect string
@@ -102,6 +112,7 @@ type Facts struct {
 	Conforms     []ConformsFact
 	Comptimes    []ComptimeFact
 	ConstFuncs   []ConstFuncFact
+	ConstMaps    []ConstMapFact
 	Defaults     []DefaultFact
 	Locks        []LockFact
 	AllocFrees   []AllocFreeFact
@@ -116,7 +127,7 @@ func (f *Facts) empty() bool {
 		len(f.Readonlys) == 0 && len(f.Props) == 0 && len(f.Conforms) == 0 &&
 		len(f.Comptimes) == 0 && len(f.ConstFuncs) == 0 && len(f.Defaults) == 0 &&
 		len(f.Locks) == 0 && len(f.AllocFrees) == 0 && len(f.JsonMetas) == 0 &&
-		len(f.JsonKeys) == 0 && len(f.UnionMembers) == 0 && !f.GoPackage
+		len(f.JsonKeys) == 0 && len(f.UnionMembers) == 0 && len(f.ConstMaps) == 0 && !f.GoPackage
 }
 
 type DefaultFact struct {
@@ -236,6 +247,11 @@ func Encode(fp goobj.FingerprintType, f *Facts) []byte {
 		for _, c := range f.ConstFuncs {
 			if c.Object != "" && len(c.Source) > 0 {
 				recs = append(recs, factRecord{line: "constfn " + c.Object + " " + strconv.Itoa(len(c.Source)), body: c.Source})
+			}
+		}
+		for _, c := range f.ConstMaps {
+			if body, ok := encodeConstMap(c); ok {
+				recs = append(recs, factRecord{line: "constmap " + c.Object + " " + strconv.Itoa(len(body)), body: body})
 			}
 		}
 		if f.GoPackage {
@@ -694,6 +710,31 @@ func Decode(data []byte) (*Facts, error) {
 				}
 			}
 			f.ConstFuncs = append(f.ConstFuncs, ConstFuncFact{Object: fields[1], Source: src})
+		case strings.HasPrefix(line, "constmap "):
+			if len(fields) != 3 {
+				return nil, fmt.Errorf(`logos facts line %d: bad constmap record %q (want "constmap <object> <length>")`, ln, line)
+			}
+			if !ValidObject(fields[1]) {
+				return nil, fmt.Errorf("logos facts line %d: bad object %q", ln, fields[1])
+			}
+			n, aerr := strconv.Atoi(fields[2])
+			if aerr != nil || n <= 0 {
+				return nil, fmt.Errorf("logos facts line %d: bad constmap length %q", ln, fields[2])
+			}
+			body, err := d.requireBody(ln, "constmap", fields[1], n)
+			if err != nil {
+				return nil, err
+			}
+			for _, c := range f.ConstMaps {
+				if c.Object == fields[1] {
+					return nil, fmt.Errorf("logos facts line %d: duplicate constmap object %q", ln, fields[1])
+				}
+			}
+			cm, err := decodeConstMap(fields[1], body)
+			if err != nil {
+				return nil, fmt.Errorf("logos facts line %d: %v", ln, err)
+			}
+			f.ConstMaps = append(f.ConstMaps, cm)
 		default:
 			kind := line
 			if len(fields) > 0 {
