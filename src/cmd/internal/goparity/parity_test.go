@@ -1977,6 +1977,21 @@ func (j sweepJob) check(f sweepFile) (excluded, failed string) {
 	return "", ""
 }
 
+func TestParitySweepCorpusDefined(t *testing.T) {
+	up, upOn := upstreamTool(t)
+	if !upOn {
+		t.Skip("upstream oracle off: the sweep compares against live upstream output")
+	}
+	files := sweepEligible(t, up.goroot)
+	if len(files) == 0 {
+		t.Fatal("no sweep-eligible files under upstream test/")
+	}
+	if sweepExclusionFrac <= 0 || sweepExclusionFrac >= 1 {
+		t.Fatalf("sweep exclusion fraction %v outside (0, 1)", sweepExclusionFrac)
+	}
+	t.Logf("sweep corpus: %d eligible files", len(files))
+}
+
 func TestParityUpstreamSweep(t *testing.T) {
 	if !*releaseFlag {
 		t.Skip("release tier only; pass -goparity.release")
