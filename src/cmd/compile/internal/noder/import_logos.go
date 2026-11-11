@@ -50,7 +50,7 @@ func logosDepResolvable(dep string) bool {
 }
 
 func logosHasStructuralFacts(f *facts.Facts) bool {
-	return f != nil && (len(f.Opts) > 0 || len(f.Consts) > 0)
+	return f != nil && (len(f.Opts) > 0 || len(f.Consts) > 0 || len(f.ConstMaps) > 0)
 }
 
 func logosFnsNeedPreload(fns []facts.FnFact) bool {

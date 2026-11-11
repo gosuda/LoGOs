@@ -276,7 +276,7 @@ func TestApplyFuncFactsReachablePrivateOrigin(t *testing.T) {
 	if !known || types2.LogosAssertMaskHex(fp) != "0" || types2.LogosAssertMaskHex(fr) != "1" || !method.LogosReadonly() {
 		t.Fatal("reachable private method origin lost verified metadata")
 	}
-	cloned, err := CloneWithOverlaysAndReadonly(pkg, nil, nil, records, nil)
+	cloned, err := CloneWithOverlaysAndReadonly(pkg, nil, nil, records, nil, nil)
 	if err != nil || cloned != pkg {
 		t.Fatalf("declaration-only clone API replaced package: %p != %p (%v)", cloned, pkg, err)
 	}

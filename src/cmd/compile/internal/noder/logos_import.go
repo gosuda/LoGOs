@@ -36,7 +36,7 @@ func applyLogosOverlayForLgoImporter(path string, pkg *types2.Package, packages 
 		}
 		return pkg, nil
 	}
-	cloned, err := logos.CloneWithOverlaysAndReadonly(pkg, f.Opts, f.Consts, f.Fns, f.Readonlys)
+	cloned, err := logos.CloneWithOverlaysAndReadonly(pkg, f.Opts, f.Consts, f.Fns, f.Readonlys, f.ConstMaps)
 	if err != nil {
 		return nil, err
 	}

@@ -237,7 +237,7 @@ func collectNamedFuncFacts(n *types2.Named, objects map[string]*types2.Func, vis
 	}
 }
 
-func CloneWithOverlaysAndReadonly(orig *types2.Package, opts, consts []facts.PathFact, fns []facts.FnFact, readonlys []facts.ReadonlyFact) (*types2.Package, error) {
+func CloneWithOverlaysAndReadonly(orig *types2.Package, opts, consts []facts.PathFact, fns []facts.FnFact, readonlys []facts.ReadonlyFact, constMaps []facts.ConstMapFact) (*types2.Package, error) {
 	if err := ApplyFuncFacts(orig, fns); err != nil {
 		return nil, err
 	}
@@ -260,7 +260,7 @@ func CloneWithOverlaysAndReadonly(orig *types2.Package, opts, consts []facts.Pat
 			assert[fn.Object] = fn
 		}
 	}
-	if len(opts) == 0 && len(consts) == 0 {
+	if len(opts) == 0 && len(consts) == 0 && len(constMaps) == 0 {
 		if err := ApplyReadonlyFactsInPlace(orig, readonlys); err != nil {
 			return nil, err
 		}
@@ -273,10 +273,10 @@ func CloneWithOverlaysAndReadonly(orig *types2.Package, opts, consts []facts.Pat
 			byReadonly[r.Object] = append(byReadonly[r.Object], r.Path)
 		}
 	}
-	if len(byObj) == 0 && len(readonly) == 0 && len(byReadonly) == 0 && len(assert) == 0 {
+	if len(byObj) == 0 && len(readonly) == 0 && len(byReadonly) == 0 && len(assert) == 0 && len(constMaps) == 0 {
 		return orig, nil
 	}
-	return clonePackageWithOverlays(orig, byObj, readonly, byReadonly, assert)
+	return clonePackageWithOverlays(orig, byObj, readonly, byReadonly, assert, constMaps)
 }
 
 func applyReadonlyToUnderlying(pkg *types2.Package, owner string, u types2.Type, readonly map[string]bool) types2.Type {
@@ -374,7 +374,7 @@ func ownerBase(object string) string {
 }
 
 func CloneWithOverlays(orig *types2.Package, opts, consts []facts.PathFact) *types2.Package {
-	cloned, err := clonePackageWithOverlays(orig, qualByObj(opts, consts), nil, nil, nil)
+	cloned, err := clonePackageWithOverlays(orig, qualByObj(opts, consts), nil, nil, nil, nil)
 	if err != nil {
 		panic("overlay qual-only rebuild invariant violated: " + err.Error())
 	}
@@ -396,7 +396,7 @@ func qualByObj(opts, consts []facts.PathFact) map[string][]qualPath {
 	return byObj
 }
 
-func clonePackageWithOverlays(orig *types2.Package, byObj map[string][]qualPath, readonly map[string]bool, byReadonly map[string][]string, assert map[string]facts.FnFact) (*types2.Package, error) {
+func clonePackageWithOverlays(orig *types2.Package, byObj map[string][]qualPath, readonly map[string]bool, byReadonly map[string][]string, assert map[string]facts.FnFact, constMaps []facts.ConstMapFact) (*types2.Package, error) {
 	for obj := range byObj {
 		paths := byObj[obj]
 		slices.SortStableFunc(paths, func(a, b qualPath) int {
@@ -417,6 +417,7 @@ func clonePackageWithOverlays(orig *types2.Package, byObj map[string][]qualPath,
 	graph := newOverlayGraph(orig, out, byObj)
 	graph.readonly = readonly
 	graph.assert = assert
+	graph.constMaps = constMapIndex(constMaps)
 	for obj, paths := range byReadonly {
 		graph.readonlyPaths[obj] = slices.Clone(paths)
 	}
@@ -451,7 +452,7 @@ func insertOverlayDecl(out *types2.Package, graph *overlayGraph, byObj map[strin
 		out.Scope().Insert(types2.NewConst(obj.Pos(), out, obj.Name(), t, obj.Val()))
 		return nil
 	case *types2.Var:
-		t := substType(graph.sub, obj.Type())
+		t := graph.constMapView(name, substType(graph.sub, obj.Type()))
 		if t == obj.Type() {
 			out.Scope().Insert(obj)
 			return nil
@@ -549,6 +550,7 @@ type overlayGraph struct {
 	readonly      map[string]bool
 	assert        map[string]facts.FnFact
 	readonlyPaths map[string][]string
+	constMaps     map[string]facts.ConstMapFact
 	nodes         map[types2.Type]bool
 	deps          map[types2.Type]map[types2.Type]bool
 	affected      map[types2.Type]bool
@@ -2563,6 +2565,35 @@ func toConstView(t types2.Type) types2.Type {
 		return &types2.ConstView{Elem: t, ConstMap: true}
 	}
 	return &types2.ConstView{Elem: t}
+}
+func constMapIndex(recs []facts.ConstMapFact) map[string]facts.ConstMapFact {
+	if len(recs) == 0 {
+		return nil
+	}
+	out := make(map[string]facts.ConstMapFact, len(recs))
+	for _, r := range recs {
+		if r.Object != "" && len(r.Keys) == len(r.Vals) {
+			out[r.Object] = r
+		}
+	}
+	return out
+}
+
+func (g *overlayGraph) constMapView(name string, t types2.Type) types2.Type {
+	rec, ok := g.constMaps[name]
+	if !ok || t == nil {
+		return t
+	}
+	if len(rec.Keys) != len(rec.Vals) {
+		return t
+	}
+	if _, ok := types2.Unalias(t).(*types2.Map); !ok {
+		return t
+	}
+	if c := constAsView(t); c != nil {
+		return t
+	}
+	return &types2.ConstView{Elem: t, ConstMap: true}
 }
 
 func toOption(t types2.Type) types2.Type {
