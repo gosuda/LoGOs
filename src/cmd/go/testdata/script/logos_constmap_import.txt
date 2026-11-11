@@ -12,8 +12,8 @@ stdout '^ok comma-hit$'
 stdout '^ok comma-miss$'
 stdout '^ok len-const$'
 stdout '^ok small-a-1$'
-stdout '^ok big-hit$'
 stdout '^ok big-miss$'
+stdout '^ok copy-isolation$'
 cp stdout $WORK/want.txt
 logos eject -o out
 exists out/app/main.go
@@ -33,6 +33,7 @@ logos build -o $WORK/bin/importcm2$GOEXE ./app
 exec $WORK/bin/importcm2$GOEXE
 stdout '^ok small-a-100$'
 stdout '^ok range-sorted$'
+stdout '^ok copy-isolation$'
 cd ..
 
 # An unexported const map stays invisible to importers.
@@ -147,6 +148,12 @@ func main() {
 		fail("big-miss")
 	}
 	fmt.Println("ok big-miss")
+	copied := lib.Small
+	copied["a"] = 999
+	if probeSmall("a") != 1 && probeSmall("a") != 100 {
+		fail("copy-isolation")
+	}
+	fmt.Println("ok copy-isolation")
 }
 
 -- m/v2lib.lgo --
