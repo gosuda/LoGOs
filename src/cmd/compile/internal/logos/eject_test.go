@@ -645,22 +645,11 @@ func TestEjectDeferTryJoinBehavior(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ejected run: %v\n%s", err, out)
 	}
-	got := string(out)
-	for _, want := range []string{"nil ok", "second: second", "is-first: true is-second: true"} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("ejected output lacks %q:\n%s", want, got)
-		}
+	want, err := os.ReadFile(filepath.Join(dir, "defer_try.out"))
+	if err != nil {
+		t.Fatal(err)
 	}
-	i := strings.Index(got, "both:")
-	if i < 0 {
-		t.Fatalf("ejected output lacks both line:\n%s", got)
-	}
-	rest := got[i:]
-	first, second := strings.Index(rest, "first"), strings.Index(rest, "second")
-	if first < 0 || second < 0 || first > second {
-		t.Fatalf("ejected join order wrong in %q, want first before second", rest)
-	}
-	if strings.Contains(got, "fatal:") {
-		t.Fatalf("ejected run failed:\n%s", got)
+	if got := string(out); got != string(want) {
+		t.Fatalf("ejected verdicts differ:\ngot:\n%swant:\n%s", got, want)
 	}
 }
