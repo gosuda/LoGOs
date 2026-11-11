@@ -148,6 +148,9 @@ func (fl *fileLower) lowerOptExpr(e syntax.Expr) syntax.Expr {
 	case *syntax.IndexExpr:
 		return fl.lowerMapIndex(e)
 	case *syntax.SelectorExpr:
+		if g, ok := fl.constMapUse(e); ok {
+			return fl.lowerConstMapSelector(e, g)
+		}
 		e.X = fl.lowerOptExpr(e.X)
 		return e
 	case *syntax.Operation:

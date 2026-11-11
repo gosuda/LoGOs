@@ -7,9 +7,11 @@ package logos
 import (
 	"cmd/compile/internal/base"
 	"cmd/compile/internal/logos/ctfe"
+	"cmd/compile/internal/logos/facts"
 	"cmd/compile/internal/syntax"
 	"cmd/compile/internal/types2"
 	"fmt"
+	"go/token"
 	"slices"
 	"strconv"
 	"strings"
@@ -28,6 +30,8 @@ type constMapGen struct {
 	val         ctfe.Value
 	init        syntax.Expr
 	nativeDecls []syntax.Decl
+	nkeys       int
+	bearing     bool
 }
 
 func (g *constMapGen) lookupName() string { return g.name + "_lookup" }
@@ -177,30 +181,127 @@ func collectConstMaps(files []*syntax.File, info *types2.Info) map[*types2.Const
 				return true
 			}
 			init := cd.Values
-			out[obj] = &constMapGen{
+			g := &constMapGen{
 				name: fmt.Sprintf("_logos_cm%d_%s", seq, cd.NameList[0].Value),
 				obj:  obj,
 				val:  v,
 				init: init,
 			}
+			keys, vals := v.MapEntries()
+			g.nkeys = len(keys)
+			g.bearing = constMapBearing(vals)
+			out[obj] = g
 			seq++
 			return true
 		})
 	}
 	return out
 }
-
 func (fl *fileLower) constMapUse(x syntax.Expr) (*constMapGen, bool) {
-	name, ok := syntax.Unparen(x).(*syntax.Name)
+	switch e := syntax.Unparen(x).(type) {
+	case *syntax.Name:
+		if obj, ok := fl.pkg.info.Uses[e].(*types2.Const); ok {
+			g, ok := fl.pkg.constMaps[obj]
+			return g, ok
+		}
+		if obj, ok := fl.pkg.info.Uses[e].(*types2.Var); ok {
+			return fl.importedConstMap(obj, e.Pos())
+		}
+	case *syntax.SelectorExpr:
+		if e.Sel == nil {
+			return nil, false
+		}
+		if obj, ok := fl.pkg.info.Uses[e.Sel].(*types2.Var); ok {
+			return fl.importedConstMap(obj, e.Pos())
+		}
+	}
+	return nil, false
+}
+
+func importedConstMapRecord(obj *types2.Var) (facts.ConstMapFact, bool) {
+	var zero facts.ConstMapFact
+	if obj.Pkg() == nil {
+		return zero, false
+	}
+	f, ok := facts.Lookup(obj.Pkg().Path())
+	if !ok || f == nil {
+		return zero, false
+	}
+	for i := range f.ConstMaps {
+		rec := f.ConstMaps[i]
+		if rec.Object != obj.Name() {
+			continue
+		}
+		if len(rec.Keys) != len(rec.Vals) || len(rec.Order) != len(rec.Keys) {
+			return zero, false
+		}
+		return rec, true
+	}
+	return zero, false
+}
+
+func (fl *fileLower) importedConstMap(obj *types2.Var, pos syntax.Pos) (*constMapGen, bool) {
+	view := constAsView(obj.Type())
+	if view == nil || !view.ConstMap {
+		return nil, false
+	}
+	if obj.Pkg() == nil || obj.Pkg() == fl.pkg.tpkg {
+		return nil, false
+	}
+	if fl.pkg.importedMaps == nil {
+		fl.pkg.importedMaps = map[*types2.Var]*constMapGen{}
+	}
+	if fl.pkg.importedDone == nil {
+		fl.pkg.importedDone = map[string]bool{}
+	}
+	if g, ok := fl.pkg.importedMaps[obj]; ok {
+		return g, true
+	}
+	rec, ok := importedConstMapRecord(obj)
 	if !ok {
 		return nil, false
 	}
-	obj, ok := fl.pkg.info.Uses[name].(*types2.Const)
+	mt, ok := constMapElem(obj.Type()).Underlying().(*types2.Map)
 	if !ok {
 		return nil, false
 	}
-	g, ok := fl.pkg.constMaps[obj]
-	return g, ok
+	kT := fl.mustSpell(mt.Key(), pos)
+	vT := fl.mustSpell(mt.Elem(), pos)
+	mapT := fl.mustSpell(constMapElem(obj.Type()), pos)
+	name := fmt.Sprintf("_logos_icm%d_%s", fl.pkg.importedSeq, obj.Name())
+	fl.pkg.importedSeq++
+	entries := make([]constMapKey, len(rec.Keys))
+	for i := range rec.Keys {
+		entries[i] = constMapKey{hash: rec.Hashes[i], canon: rec.Canons[i]}
+	}
+	pairs := make([]string, len(rec.Keys))
+	for i := range rec.Keys {
+		pairs[i] = rec.Keys[i] + ": " + rec.Vals[i]
+	}
+	builderBody := mapT + "{" + strings.Join(pairs, ", ") + "}"
+	text := finalizeConstMapEmission(pos, constMapEmission{
+		name:        name,
+		kT:          kT,
+		vT:          vT,
+		mapT:        mapT,
+		keyTexts:    rec.Keys,
+		valTexts:    rec.Vals,
+		builderBody: builderBody,
+		hashExpr:    fl.constKeyHashText(mt.Key(), "_logos_k", pos),
+		order:       rec.Order,
+		bearing:     rec.Bearing,
+	}, entries)
+	g := &constMapGen{name: name, nkeys: len(rec.Keys), bearing: rec.Bearing}
+	if !fl.pkg.importedDone[name] {
+		fl.pkg.importedDone[name] = true
+		decls := parseConstMapDecls(text, pos)
+		fl.markConstMapTables(decls, g)
+		fl.constDecls = append(fl.constDecls, decls...)
+		fl.constText += "\n" + text
+	}
+	fl.needRT = true
+	fl.pkg.importedMaps[obj] = g
+	return g, true
 }
 
 func (g *constMapGen) constMapEntries() (keys, vals []ctfe.Value) {
@@ -213,8 +314,8 @@ func constMapElem(t types2.Type) types2.Type {
 	}
 	return t
 }
-
 func (fl *fileLower) lowerConstMapSpec(cd *syntax.ConstDecl, g *constMapGen) {
+
 	fl.needRT = true
 	if _, ejectText, ok := fl.constMapOwnedTexts(g, cd.Pos()); ok {
 		decls := g.nativeDecls
@@ -224,12 +325,39 @@ func (fl *fileLower) lowerConstMapSpec(cd *syntax.ConstDecl, g *constMapGen) {
 		fl.dropConstSpec(cd)
 		return
 	}
-	text := fl.constMapText(g, cd.Pos())
+	parts := fl.buildConstMapParts(g, cd.Pos())
+	text := parts.text
+	if name := cd.NameList[0].Value; token.IsExported(name) && fl.pkg.tpkg.Scope().Lookup(name) == g.obj {
+		text += fmt.Sprintf("\nvar %s %s = %s()\n", name, parts.mapT, g.mapName())
+		fl.recordConstMapFact(g, parts)
+	}
 	decls := parseConstMapDecls(text, cd.Pos())
 	fl.markConstMapTables(decls, g)
 	fl.constDecls = append(fl.constDecls, decls...)
 	fl.constText += "\n" + text
 	fl.dropConstSpec(cd)
+}
+
+func (fl *fileLower) recordConstMapFact(g *constMapGen, parts constMapParts) {
+	f := facts.Current()
+	if f == nil {
+		return
+	}
+	name := g.obj.Name()
+	for i := range f.ConstMaps {
+		if f.ConstMaps[i].Object == name {
+			return
+		}
+	}
+	f.ConstMaps = append(f.ConstMaps, facts.ConstMapFact{
+		Object:  name,
+		Bearing: parts.bearing,
+		Order:   parts.order,
+		Hashes:  parts.hashes,
+		Canons:  parts.canons,
+		Keys:    parts.keyTexts,
+		Vals:    parts.valTexts,
+	})
 }
 
 func (fl *fileLower) markConstMapTables(decls []syntax.Decl, g *constMapGen) {
@@ -256,7 +384,22 @@ func (fl *fileLower) dropConstSpec(cd *syntax.ConstDecl) {
 	fl.deleteSpec(cd)
 }
 
+type constMapParts struct {
+	text     string
+	mapT     string
+	keyTexts []string
+	valTexts []string
+	hashes   []uint64
+	canons   []string
+	order    []int
+	bearing  bool
+}
+
 func (fl *fileLower) constMapText(g *constMapGen, pos syntax.Pos) string {
+	return fl.buildConstMapParts(g, pos).text
+}
+
+func (fl *fileLower) buildConstMapParts(g *constMapGen, pos syntax.Pos) constMapParts {
 	elem := constMapElem(g.obj.Type())
 	mt, ok := elem.Underlying().(*types2.Map)
 	if !ok {
@@ -268,23 +411,52 @@ func (fl *fileLower) constMapText(g *constMapGen, pos syntax.Pos) string {
 	keys, vals := g.constMapEntries()
 	keyText := make([]string, len(keys))
 	valText := make([]string, len(vals))
+	hashes := make([]uint64, len(keys))
+	canons := make([]string, len(keys))
 	for i := range keys {
 		keyText[i] = fl.mustRenderWith(keys[i], mt.Key(), pos)
 		valText[i] = fl.mustRenderWith(vals[i], mt.Elem(), pos)
+		hashes[i] = constKeyHash(keys[i])
+		canons[i] = constKeyCanon(keys[i])
 	}
 	order := make([]int, len(keys))
 	for i := range order {
 		order[i] = i
 	}
 	slices.SortFunc(order, func(a, b int) int { return constKeyCompare(keys[a], keys[b]) })
+	entries := make([]constMapKey, len(keys))
+	for i := range keys {
+		entries[i] = constMapKey{hash: hashes[i], canon: canons[i]}
+	}
 	bearing := constMapBearing(vals)
-	isSwitch := len(keys) <= constMapSwitchMax
+	text := finalizeConstMapEmission(pos, constMapEmission{
+		name:        g.name,
+		kT:          kT,
+		vT:          vT,
+		mapT:        mapT,
+		keyTexts:    keyText,
+		valTexts:    valText,
+		builderBody: fl.mustRender(g.val, pos),
+		hashExpr:    fl.constKeyHashText(mt.Key(), "_logos_k", pos),
+		order:       order,
+		bearing:     bearing,
+	}, entries)
+	return constMapParts{
+		text:     text,
+		mapT:     mapT,
+		keyTexts: keyText,
+		valTexts: valText,
+		hashes:   hashes,
+		canons:   canons,
+		order:    order,
+		bearing:  bearing,
+	}
+}
+
+func finalizeConstMapEmission(pos syntax.Pos, e constMapEmission, entries []constMapKey) string {
+	isSwitch := len(entries) <= constMapSwitchMax
 	var layout *constMapLayout
 	if !isSwitch {
-		entries := make([]constMapKey, len(keys))
-		for i := range keys {
-			entries[i] = constMapKey{hash: constKeyHash(keys[i]), canon: constKeyCanon(keys[i])}
-		}
 		var err error
 		if base.Debug.LogosConstmapSeeds < 0 {
 			base.Errorf("%s: invalid -d=logosconstmapseeds value %d (want a non-negative seed cap)", pos.String(), base.Debug.LogosConstmapSeeds)
@@ -300,20 +472,9 @@ func (fl *fileLower) constMapText(g *constMapGen, pos syntax.Pos) string {
 			base.ExitIfErrors()
 		}
 	}
-	return emitConstMapDecls(constMapEmission{
-		name:        g.name,
-		kT:          kT,
-		vT:          vT,
-		mapT:        mapT,
-		keyTexts:    keyText,
-		valTexts:    valText,
-		builderBody: fl.mustRender(g.val, pos),
-		hashExpr:    fl.constKeyHashText(mt.Key(), "_logos_k", pos),
-		order:       order,
-		layout:      layout,
-		isSwitch:    isSwitch,
-		bearing:     bearing,
-	})
+	e.layout = layout
+	e.isSwitch = isSwitch
+	return emitConstMapDecls(e)
 }
 
 func (fl *fileLower) constKeyHashText(t types2.Type, x string, pos syntax.Pos) string {
@@ -419,8 +580,7 @@ func (fl *fileLower) lowerConstMapRanges() {
 		}
 		pos := rc.X.Pos()
 		start, end := fl.off(syntax.StartPos(rc.X)), fl.endOff(rc.X)
-		_, vals := g.constMapEntries()
-		if constMapBearing(vals) {
+		if g.bearing {
 			fl.add(start, end, g.allName())
 			fl.needRT = true
 			rc.X = nameOf(pos, g.allName())
@@ -442,6 +602,10 @@ func (fl *fileLower) lowerConstMapName(e *syntax.Name) (syntax.Expr, bool) {
 	fl.add(start, start+len(e.Value), g.mapName()+"()")
 	return callOf(e.Pos(), nameOf(e.Pos(), g.mapName()), nil), true
 }
+func (fl *fileLower) lowerConstMapSelector(e *syntax.SelectorExpr, g *constMapGen) syntax.Expr {
+	fl.add(fl.off(syntax.StartPos(e)), fl.endOff(e), g.mapName()+"()")
+	return callOf(e.Pos(), nameOf(e.Pos(), g.mapName()), nil)
+}
 
 func (fl *fileLower) lowerConstMapLen(e *syntax.CallExpr) (syntax.Expr, bool) {
 	fn, ok := e.Fun.(*syntax.Name)
@@ -455,8 +619,7 @@ func (fl *fileLower) lowerConstMapLen(e *syntax.CallExpr) (syntax.Expr, bool) {
 	if !ok {
 		return nil, false
 	}
-	keys, _ := g.constMapEntries()
-	n := strconv.Itoa(len(keys))
+	n := strconv.Itoa(g.nkeys)
 	fl.add(fl.off(syntax.StartPos(e)), fl.endOff(e), n)
 	return at(&syntax.BasicLit{Value: n, Kind: syntax.IntLit}, e.Pos()), true
 }
