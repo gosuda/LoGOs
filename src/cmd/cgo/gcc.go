@@ -1222,7 +1222,10 @@ func (p *Package) mangle(f *File, arg *ast.Expr, addPosition bool) (ast.Expr, bo
 //	_cgoIndexNN := &a
 //
 // and dereferences the uses of _cgoIndexNN. Taking the address avoids
-// making a copy of an array.
+// making a copy of an array. If a is a pointer dereference (*p, possibly
+// parenthesized, as in &(*p)[i]), _cgoIndexNN holds p itself and the
+// index runs through (*_cgoIndexNN)[i], so C names the caller storage
+// instead of a copied array.
 //
 // This tells _cgoCheckPointer to check the complete contents of the
 // slice or array being indexed, but no other part of the memory allocation.
@@ -1250,19 +1253,33 @@ func (p *Package) checkIndex(sb, sbCheck *bytes.Buffer, arg ast.Expr, i int) boo
 
 	addr := ""
 	deref := ""
+	indexPtrDeref := false
+	var indexPtr ast.Expr
 	if p.isVariable(index.X) {
 		addr = "&"
 		deref = "*"
+	} else if ptr, ok := unwrapParenStar(index.X); ok {
+		indexPtrDeref = true
+		indexPtr = ptr
+		deref = "*"
 	}
 
-	fmt.Fprintf(sb, "_cgoIndex%d := %s%s; ", i, addr, gofmtPos(index.X, index.X.Pos()))
-	origX := index.X
-	index.X = ast.NewIdent(fmt.Sprintf("_cgoIndex%d", i))
-	if deref == "*" {
-		index.X = &ast.StarExpr{X: index.X}
+	if indexPtrDeref {
+		fmt.Fprintf(sb, "_cgoIndex%d := %s; ", i, gofmtPos(indexPtr, indexPtr.Pos()))
+		origX := index.X
+		index.X = &ast.StarExpr{X: ast.NewIdent(fmt.Sprintf("_cgoIndex%d", i))}
+		fmt.Fprintf(sb, "_cgo%d := %s; ", i, gofmtPos(arg, arg.Pos()))
+		index.X = origX
+	} else {
+		fmt.Fprintf(sb, "_cgoIndex%d := %s%s; ", i, addr, gofmtPos(index.X, index.X.Pos()))
+		origX := index.X
+		index.X = ast.NewIdent(fmt.Sprintf("_cgoIndex%d", i))
+		if deref == "*" {
+			index.X = &ast.StarExpr{X: index.X}
+		}
+		fmt.Fprintf(sb, "_cgo%d := %s; ", i, gofmtPos(arg, arg.Pos()))
+		index.X = origX
 	}
-	fmt.Fprintf(sb, "_cgo%d := %s; ", i, gofmtPos(arg, arg.Pos()))
-	index.X = origX
 
 	fmt.Fprintf(sbCheck, "_cgoCheckPointer(_cgo%d, %s_cgoIndex%d); ", i, deref, i)
 
@@ -1443,6 +1460,21 @@ func (p *Package) isUnsafeData(x ast.Expr, onlyStringData bool) bool {
 		return true
 	}
 	return st.Sel.Name == "StringData"
+}
+
+func unwrapParenStar(e ast.Expr) (ast.Expr, bool) {
+	for {
+		par, ok := e.(*ast.ParenExpr)
+		if !ok {
+			break
+		}
+		e = par.X
+	}
+	star, ok := e.(*ast.StarExpr)
+	if !ok {
+		return nil, false
+	}
+	return star.X, true
 }
 
 // isVariable reports whether x is a variable, possibly with field references.
