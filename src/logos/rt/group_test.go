@@ -423,7 +423,18 @@ func TestPanicErrorOpaqueKinds(t *testing.T) {
 		func() {}, make(chan int), [2]int{1, 2}, complex(1, 2), complex64(1),
 	}
 	for _, v := range values {
-		got := (&PanicError{Value: v}).Error()
+		pe := &PanicError{Value: v}
+		if reflect.TypeOf(pe.Value) != reflect.TypeOf(v) {
+			t.Errorf("PanicError(%T).Value type = %T, want %T", v, pe.Value, v)
+		}
+		if _, isFunc := v.(func()); isFunc {
+			if reflect.ValueOf(pe.Value).Pointer() != reflect.ValueOf(v).Pointer() {
+				t.Errorf("PanicError func value changed: %p vs %p", pe.Value, v)
+			}
+		} else if !reflect.DeepEqual(pe.Value, v) {
+			t.Errorf("PanicError(%T).Value = %#v, want %#v", v, pe.Value, v)
+		}
+		got := pe.Error()
 		m := opaque.FindStringSubmatch(got)
 		if m == nil {
 			t.Errorf("PanicError(%T).Error() = %q, lacks `(T) 0xADDR`", v, got)
@@ -444,6 +455,9 @@ func TestPanicErrorCarriesValue(t *testing.T) {
 		pe, ok := errors.AsType[*PanicError](err)
 		if !ok {
 			t.Fatalf("AsType(%T) ok=%v, want *PanicError", err, ok)
+		}
+		if !reflect.DeepEqual(pe.Value, v) {
+			t.Errorf("PanicError(%#v).Value = %#v, want %#v", v, pe.Value, v)
 		}
 		if want := fmt.Sprint(v); !strings.Contains(pe.Error(), want) {
 			t.Errorf("PanicError(%#v).Error() = %q, lacks %q", v, pe.Error(), want)
