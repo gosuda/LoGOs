@@ -9,6 +9,20 @@ import "cmd/compile/internal/types2"
 func init() {
 	types2.LogosImportedConstFuncSource = constFuncSource
 	types2.LogosImportedParamProvenZero = paramProvenZero
+	types2.LogosImportedConstMapLen = constMapLen
+}
+
+func constMapLen(path, object string) (int, bool) {
+	f, ok := Lookup(path)
+	if !ok || f == nil {
+		return 0, false
+	}
+	for i := range f.ConstMaps {
+		if f.ConstMaps[i].Object == object {
+			return len(f.ConstMaps[i].Keys), true
+		}
+	}
+	return 0, false
 }
 
 func constFuncSource(path, object string) []byte {

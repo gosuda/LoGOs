@@ -591,14 +591,26 @@ func (check *Checker) logosConstMapLen(a *operand) (int64, bool) {
 	if !a.isValid() || a.expr == nil {
 		return 0, false
 	}
-	name, ok := syntax.Unparen(a.expr).(*syntax.Name)
-	if !ok {
-		return 0, false
+	switch e := syntax.Unparen(a.expr).(type) {
+	case *syntax.Name:
+		if obj, ok := check.Info.Uses[e].(*Const); ok {
+			return check.logosLocalConstMapLen(obj)
+		}
+		if obj, ok := check.Info.Uses[e].(*Var); ok {
+			return check.logosImportedConstMapLen(obj)
+		}
+	case *syntax.SelectorExpr:
+		if e.Sel == nil {
+			return 0, false
+		}
+		if obj, ok := check.Info.Uses[e.Sel].(*Var); ok {
+			return check.logosImportedConstMapLen(obj)
+		}
 	}
-	obj, ok := check.lookup(name.Value).(*Const)
-	if !ok {
-		return 0, false
-	}
+	return 0, false
+}
+
+func (check *Checker) logosLocalConstMapLen(obj *Const) (int64, bool) {
 	v, ok := check.logosRecorded(obj)
 	if !ok || !v.IsValid() || v.Type() == nil || v.Type().Kind != ctfe.KMap {
 		return 0, false
@@ -606,6 +618,26 @@ func (check *Checker) logosConstMapLen(a *operand) (int64, bool) {
 	keys, _ := v.MapEntries()
 	return int64(len(keys)), true
 }
+
+func (check *Checker) logosImportedConstMapLen(obj *Var) (int64, bool) {
+	if obj.Pkg() == nil || obj.Pkg() == check.pkg {
+		return 0, false
+	}
+	view := logosAsConstView(obj.Type())
+	if view == nil || !view.ConstMap {
+		return 0, false
+	}
+	if LogosImportedConstMapLen == nil {
+		return 0, false
+	}
+	n, ok := LogosImportedConstMapLen(obj.Pkg().Path(), obj.Name())
+	if !ok {
+		return 0, false
+	}
+	return int64(n), true
+}
+
+var LogosImportedConstMapLen func(path, object string) (int, bool)
 
 func (check *Checker) logosInferOperands(par, arg *Type) {
 	if c := logosAsConstView(*par); c != nil {
