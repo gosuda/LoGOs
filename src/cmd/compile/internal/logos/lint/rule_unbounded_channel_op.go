@@ -90,11 +90,13 @@ type chanUnit struct {
 	free  bool
 	loops int
 	// depth counts the function literals the walk is under, forStack holds
-	// the for statements open at the current node, and deferDepth holds
-	// the depths of the defer statements whose calls the walk is under.
+	// the for statements open at the current node, deferDepth holds the
+	// depths of the defer statements whose calls the walk is under, and
+	// deferFun is set while walking the call of a defer statement.
 	depth      int
 	forStack   []*syntax.ForStmt
 	deferDepth []int
+	deferFun   bool
 	// defs counts the assignments to each local variable; caps holds the
 	// capacity each one was made with, -1 when it is not constant.
 	defs   map[*types2.Var]int
@@ -113,7 +115,8 @@ type chanUnit struct {
 // known before the walk; the rest is collected in source order while
 // walking: defAt is the function depth, defIn and reset the innermost for
 // statement, deferred holds the depths of the defer statements that exempt
-// its Stop calls, and src is the defining variable.
+// its Stop calls, src is the defining variable, and taint marks a mention
+// outside the four allowed forms.
 type timerUse struct {
 	ctor     string
 	def      bool
@@ -124,6 +127,7 @@ type timerUse struct {
 	reset    *syntax.ForStmt
 	deferred []int
 	src      *types2.Var
+	taint    bool
 }
 
 // newChanUnit prepares the analysis of the function rooted at root, a node of
@@ -139,6 +143,7 @@ func (u *chanUnit) run() {
 	u.caps = make(map[*types2.Var]int64)
 	u.timers = make(map[*types2.Var]*timerUse)
 	syntax.Inspect(u.root, u.collect)
+	syntax.Inspect(u.root, u.taintAll)
 	syntax.Inspect(u.root, u.visit)
 	for _, op := range u.ops {
 		if op.ch != nil && u.bounded(op.ch) {
@@ -157,6 +162,23 @@ func (u *chanUnit) run() {
 func (u *chanUnit) bounded(ch *types2.Var) bool {
 	k, ok := u.caps[ch]
 	return ok && u.defs[ch] == 1 && !u.looped[ch] && int64(u.sent[ch]) <= k
+}
+
+// taintAll marks every mention of a tracked timer except its C field as
+// tainted, before the walk orders any proof: the walk clears the two
+// allowed forms, the plain deferred Stop and the top-of-loop-body Reset.
+func (u *chanUnit) taintAll(n syntax.Node) bool {
+	switch n := n.(type) {
+	case *syntax.Name:
+		u.timerUse(n)
+	case *syntax.SelectorExpr:
+		if n.Sel.Value != "C" {
+			if t := u.timerVar(n.X); t != nil {
+				t.taint = true
+			}
+		}
+	}
+	return true
 }
 
 // collect records the assignments to local variables.
@@ -254,7 +276,9 @@ func (u *chanUnit) visit(n syntax.Node) bool {
 		u.deferStmt(n)
 		return false
 	case *syntax.SelectorExpr:
-		u.timerDrain(n)
+		if u.timerField(n) {
+			return false
+		}
 	case *syntax.AssignStmt:
 		if lhs, _, ok := assignPairs(n); ok {
 			u.timerDefs(lhs)
@@ -263,8 +287,12 @@ func (u *chanUnit) visit(n syntax.Node) bool {
 		if lhs, _, ok := declPairs(n); ok {
 			u.timerDefs(lhs)
 		}
+	case *syntax.Name:
+		u.timerUse(n)
 	case *syntax.CallExpr:
-		u.timerCall(n)
+		if u.timerCall(n) {
+			return false
+		}
 	case *syntax.SendStmt:
 		u.send(n)
 	case *syntax.Operation:
@@ -329,7 +357,10 @@ func (u *chanUnit) bodyTop(f *syntax.ForStmt) {
 		if v := u.topReset(st); v != nil {
 			if t := u.timers[v]; t != nil {
 				t.reset = f
+				t.recv = false
+				t.taint = false
 			}
+			continue
 		}
 		u.walk(st)
 	}
@@ -420,14 +451,11 @@ func (u *chanUnit) count(ch *types2.Var) {
 	u.sent[ch]++
 }
 
-// recv records a receive, except the wait on x.Done(). A receive from the C
-// field of a tracked timer marks the timer as drained.
+// recv records a receive, except the wait on x.Done(); the walk of x drains
+// a tracked timer through its C field.
 func (u *chanUnit) recv(op *syntax.Operation) {
 	if isDoneCall(op.X) {
 		return
-	}
-	if sel, ok := bareExpr(op.X).(*syntax.SelectorExpr); ok && sel.Sel.Value == "C" {
-		u.timerDrain(sel)
 	}
 	u.record(op, u.exprEnd(op.X), u.chanVar(op.X), "receive from "+syntax.String(op.X))
 }
@@ -545,7 +573,7 @@ func (u *chanUnit) localTimerBound(sel *syntax.SelectorExpr) bool {
 		return false
 	}
 	t := u.timers[v]
-	if t == nil || !t.def || t.defAt != u.depth || u.defs[v] != 1 || u.defs[t.src] != 1 || t.stop {
+	if t == nil || !t.def || t.defAt != u.depth || u.defs[v] != 1 || u.defs[t.src] != 1 || t.stop || t.taint {
 		return false
 	}
 	for _, at := range t.deferred {
@@ -561,17 +589,6 @@ func (u *chanUnit) localTimerBound(sel *syntax.SelectorExpr) bool {
 	}
 	f := u.loopAt()
 	return f == nil || t.defIn == f || t.reset == f
-}
-
-// timerDrain marks the tracked timer a receive from x, a C field, drains.
-func (u *chanUnit) timerDrain(x syntax.Expr) {
-	sel, ok := bareExpr(x).(*syntax.SelectorExpr)
-	if !ok || sel.Sel.Value != "C" {
-		return
-	}
-	if t := u.timerVar(sel.X); t != nil {
-		t.recv = true
-	}
 }
 
 // timerCtor returns NewTimer or NewTicker when x is a call of that function
@@ -613,22 +630,58 @@ func (u *chanUnit) timerDefs(lhs []syntax.Expr) {
 	}
 }
 
-// timerCall records a Stop call of a tracked timer in source order,
-// except the top call of a defer statement, which runs at function exit.
-func (u *chanUnit) timerCall(n *syntax.CallExpr) {
+// timerCall records a Stop call of a tracked timer in source order, except
+// the top call of a defer statement, which runs at function exit. It
+// reports whether the call is an allowed form whose subtree needs no walk.
+func (u *chanUnit) timerCall(n *syntax.CallExpr) bool {
 	sel, ok := bareExpr(n.Fun).(*syntax.SelectorExpr)
 	if !ok || sel.Sel.Value != "Stop" {
-		return
+		return false
 	}
 	t := u.timerVar(sel.X)
 	if t == nil {
-		return
+		return false
 	}
 	if len(u.deferDepth) > 0 {
 		t.deferred = append(t.deferred, u.deferDepth[len(u.deferDepth)-1])
+	} else {
+		t.stop = true
+	}
+	return true
+}
+
+// timerField records the use of a tracked timer through a selector: a
+// receive from C drains it, a Stop or Reset mention outside its allowed
+// call form taints it, and any other field taints it. It reports whether
+// the selector is an allowed form whose receiver needs no walk.
+func (u *chanUnit) timerField(sel *syntax.SelectorExpr) bool {
+	t := u.timerVar(sel.X)
+	if t == nil {
+		return false
+	}
+	switch sel.Sel.Value {
+	case "C":
+		t.recv = true
+		return true
+	case "Stop", "Reset":
+		if !u.deferFun {
+			t.taint = true
+		}
+		return true
+	}
+	t.taint = true
+	return true
+}
+
+// timerUse taints the tracked timer the name mentions.
+func (u *chanUnit) timerUse(id *syntax.Name) {
+	v, ok := u.pass.Info.Uses[id].(*types2.Var)
+	if !ok {
 		return
 	}
-	t.stop = true
+	if t := u.timers[v]; t != nil {
+		t.taint = true
+	}
 }
 
 // deferStmt walks a deferred call: only the call itself runs at function
@@ -644,9 +697,14 @@ func (u *chanUnit) deferStmt(n *syntax.CallStmt) {
 	}
 	if v := u.stopOf(call); v != nil {
 		v.deferred = append(v.deferred, u.depth)
+		if id, ok := bareExpr(bareExpr(call.Fun).(*syntax.SelectorExpr).X).(*syntax.Name); ok && u.timerName(id) == v.src {
+			v.taint = false
+		}
 	}
 	u.deferDepth = append(u.deferDepth, u.depth)
+	u.deferFun = true
 	u.walk(call.Fun)
+	u.deferFun = false
 	u.deferDepth = u.deferDepth[:len(u.deferDepth)-1]
 	for _, a := range call.ArgList {
 		u.walk(a)

@@ -439,6 +439,83 @@ func timerResetBound(in chan int, d time.Duration) int {
 	return 0
 }
 
+type timerBox struct{ t *time.Timer }
+
+func arm(t *time.Timer) {}
+
+func timerEscapedUnproven(in chan int, d time.Duration) int {
+	t := time.NewTimer(d)
+	arm(t)
+	select {
+	case <-t.C: // ERROR "unbounded_channel_op"
+		return 1
+	case v := <-in: // ERROR "unbounded_channel_op"
+		return v
+	}
+}
+
+func timerFieldEscapeUnproven(in chan int, d time.Duration, b *timerBox) int {
+	t := time.NewTimer(d)
+	b.t = t
+	select {
+	case <-t.C: // ERROR "unbounded_channel_op"
+		return 1
+	case v := <-in: // ERROR "unbounded_channel_op"
+		return v
+	}
+}
+
+func timerSendEscapeUnproven(in chan int, d time.Duration, ts chan *time.Timer) int {
+	t := time.NewTimer(d)
+	ts <- t // ERROR "unbounded_channel_op"
+	select {
+	case <-t.C: // ERROR "unbounded_channel_op"
+		return 1
+	case v := <-in: // ERROR "unbounded_channel_op"
+		return v
+	}
+}
+
+func timerReturnEscapeUnproven(in chan int, d time.Duration) (int, *time.Timer) {
+	t := time.NewTimer(d)
+	select {
+	case <-t.C: // ERROR "unbounded_channel_op"
+		return 1, t
+	case v := <-in: // ERROR "unbounded_channel_op"
+		return v, t
+	}
+}
+
+func timerLiteralEscapeUnproven(in chan int, d time.Duration) int {
+	t := time.NewTimer(d)
+	func() { t.Reset(d) }()
+	select {
+	case <-t.C: // ERROR "unbounded_channel_op"
+		return 1
+	case v := <-in: // ERROR "unbounded_channel_op"
+		return v
+	}
+}
+
+func timerLoopResetBound(in chan int, d time.Duration) int {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-in:
+	case <-t.C:
+	}
+	for range 3 {
+		t.Reset(d)
+		select {
+		case v := <-in:
+			return v
+		case <-t.C:
+			return 0
+		}
+	}
+	return 0
+}
+
 func groupChild(ctx context.Context, in, out chan int) error {
 	go group (ctx) {
 		go {
