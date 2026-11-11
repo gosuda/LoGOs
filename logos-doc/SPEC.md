@@ -128,7 +128,7 @@ The compiler MUST enforce `correctness::region_escape` as `forbid` against a `lo
 The compiler MUST report `perf::arena_fallback` when a `logos/arena` call escapes to the heap [T-102].
 The directive grammar for these checks is `//logos:guardedby <mu>`, `//logos:atomic`, `//logos:requires <p.mu>`, `//logos:acquires <p.mu>`, `//logos:releases <p.mu>`, `//logos:zeroalloc [local]`, `//logos:sizeof T`, `//logos:offsetof T.f`, and `//logos:alignof T` [T-102]
 The rules `correctness::nil_deref_unproven`, `correctness::defer_erases_errdefer_state`, `concurrency::unsupervised_goroutine`, `suspicious::unapplied_struct_default`, `suspicious::side_effect_before_sort`, `portability::serialized_unsized_int`, `portability::alias_extension`, and `pedantic::exhaustive_union_switch` MUST NOT apply to Go packages, because each depends on loGo/s syntax, types, or generated code [T-102][R-U1].
-The rule `portability::serialized_unsized_int` guards the generated binary layout of Sec 10.1, which Go packages do not get [T-102][R-U1].
+The rule `portability::serialized_unsized_int` guards the generated binary layout of Sec 10.3, which Go packages do not get [T-102][R-U1].
 A Go package MUST get the default group severities, the `logos.toml [lints]` table, and the `//logos:allow(<rule>)` directive of this section [T-102][R-U1].
 A language-neutral rule whose default severity is `forbid` MUST run at `deny` for a Go package [T-102][R-U1].
 `//logos:allow(<rule>)` MUST silence such a rule in a Go package [T-102][R-U1].
@@ -725,7 +725,7 @@ Conflicting property types across listed interfaces MUST fail with `[correctness
 
 A non-struct type MUST NOT satisfy a property interface. [T-203.2]
 
-A compound update through an interface MUST evaluate the receiver once and write the value back. [T-203.2]
+A compound update through an interface MUST evaluate the receiver once and write the value back, and the write MUST reach the struct. [T-203.2]
 
 A method call on a property value MUST use read-call-write-back around the call. [T-203.2]
 
@@ -772,7 +772,6 @@ Unions MUST use the upstream interface representation. [T-203.1]
 A closed union MUST use the upstream interface representation, including upstream handling of zero-sized members. [T-203.1]
 
 Method bodies inside interfaces MUST fail compilation. [T-203.2]
-The write MUST reach the struct. [T-203.2]
 
 ### 2.4 RFC-204: Tuples and fixed-array SIMD
 
@@ -1125,8 +1124,8 @@ Escape analysis MUST record a parameter that leaks only into the pointee of anot
 This precision MUST apply to loGo/s packages, and to Go packages under `GOEXPERIMENT=logosescape`, which is off by default. [T-301.2][R-U1]
 
 
-[T-301.1] Recursion MUST return arena-allocated results to the caller intact.
-[T-301.1] Idle parked goroutines MUST consume 0 bytes of arena memory.
+Recursion MUST return arena-allocated results to the caller intact. [T-301.1]
+Idle parked goroutines MUST consume 0 bytes of arena memory. [T-301.1]
 It MUST retain every live chunk and preserve all live-object addresses. [T-301.1]
 With no live chunks, it MUST retain no arena capacity; its ordinary stack and runtime metadata still exist. [T-301.1]
 A loop with only iteration-local allocation MUST NOT grow arena use across iterations. [T-301.1]
