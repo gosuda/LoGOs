@@ -1,12 +1,20 @@
 // run -goexperiment logosarena,logosescape -race
-
 package main
 
 import (
 	"fmt"
 	"logos/arena"
 	"logos/rt"
+	"os"
 )
+
+func heapOracle() int {
+	sum := 0
+	for i := range 4 {
+		sum += i * i
+	}
+	return sum
+}
 
 func main() {
 	sum := 0
@@ -22,7 +30,19 @@ func main() {
 		}
 		inside = rt.RegionBytes() > 0
 	}
-	fmt.Println(sum)
-	fmt.Println("rt.RegionBytes() > 0:", inside)
-	fmt.Println("region bytes after exit:", rt.RegionBytes())
+	if sum != heapOracle() {
+		fmt.Printf("FAIL race-region-squares-match-heap-oracle: got %d want %d\n", sum, heapOracle())
+		os.Exit(1)
+	}
+	fmt.Println("ok race-region-squares-match-heap-oracle")
+	if !inside {
+		fmt.Println("FAIL race-region-holds-bytes-inside-owner-block: got false want true")
+		os.Exit(1)
+	}
+	fmt.Println("ok race-region-holds-bytes-inside-owner-block")
+	if rt.RegionBytes() != 0 {
+		fmt.Printf("FAIL race-region-released-after-owner-block: got %d want 0\n", rt.RegionBytes())
+		os.Exit(1)
+	}
+	fmt.Println("ok race-region-released-after-owner-block")
 }

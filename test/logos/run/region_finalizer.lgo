@@ -1,10 +1,10 @@
 // run -goexperiment logosarena
-
 package main
 
 import (
 	"fmt"
 	"logos/arena"
+	"os"
 	"runtime"
 	"sync/atomic"
 )
@@ -49,5 +49,9 @@ func main() {
 	atomic.StoreInt32(&ran, 0)
 	placeFinalizer()
 	wait()
-	fmt.Println("ran:", atomic.LoadInt32(&ran))
+	if atomic.LoadInt32(&ran) != 1 {
+		fmt.Printf("FAIL escaping-finalizer-runs-after-region-exit: got %d want 1\n", atomic.LoadInt32(&ran))
+		os.Exit(1)
+	}
+	fmt.Println("ok escaping-finalizer-runs-after-region-exit")
 }

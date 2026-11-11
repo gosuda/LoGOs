@@ -1,10 +1,10 @@
 // run -goexperiment logosarena
-
 package main
 
 import (
 	"fmt"
 	"logos/arena"
+	"os"
 	"runtime"
 )
 
@@ -22,5 +22,9 @@ func main() {
 		kept = p
 	}
 	runtime.GC()
-	fmt.Println("kept v after block:", kept.v)
+	if kept.v != 42 {
+		fmt.Printf("FAIL escaping-alloc-survives-region-exit: got %d want 42\n", kept.v)
+		os.Exit(1)
+	}
+	fmt.Println("ok escaping-alloc-survives-region-exit")
 }

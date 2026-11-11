@@ -1,1 +1,1 @@
-kept v after block: 42
+ok escaping-alloc-survives-region-exit

@@ -1,25 +1,56 @@
 // run -goexperiment logosarena
-
 package main
 
 import (
 	"fmt"
 	"logos/arena"
+	"os"
+	"strings"
 )
 
 func main() {
 	r := arena.Open()
-	func() {
-		defer func() {
-			fmt.Println("recovered:", recover())
+	failed := false
+	try := func(name string, fn func()) {
+		func() {
+			defer func() {
+				rec := recover()
+				if rec == nil {
+					fmt.Printf("FAIL %s: no panic want len-out-of-range\n", name)
+					failed = true
+					return
+				}
+				if !strings.Contains(fmt.Sprint(rec), "len out of range") {
+					fmt.Printf("FAIL %s: got %v want len out of range\n", name, rec)
+					failed = true
+					return
+				}
+				fmt.Printf("ok %s\n", name)
+			}()
+			n := -1
+			_ = arena.Make[int](r, n)
 		}()
-		n := -1
-		_ = arena.Make[int](r, n)
-	}()
+		_ = fn
+	}
+	try("negative-length-makeslice-panics-len-out-of-range", func() {})
 	func() {
 		defer func() {
-			fmt.Println("recovered:", recover())
+			rec := recover()
+			if rec == nil {
+				fmt.Println("FAIL negative-length-literal-panics-len-out-of-range: no panic")
+				failed = true
+				return
+			}
+			if !strings.Contains(fmt.Sprint(rec), "len out of range") {
+				fmt.Printf("FAIL negative-length-literal-panics-len-out-of-range: got %v\n", rec)
+				failed = true
+				return
+			}
+			fmt.Println("ok negative-length-literal-panics-len-out-of-range")
 		}()
 		_ = arena.Make[int](r, -1)
 	}()
+	if failed {
+		os.Exit(1)
+	}
 }

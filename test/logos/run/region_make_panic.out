@@ -1,2 +1,2 @@
-recovered: runtime error: makeslice: len out of range
-recovered: runtime error: makeslice: len out of range
+ok negative-length-makeslice-panics-len-out-of-range
+ok negative-length-literal-panics-len-out-of-range

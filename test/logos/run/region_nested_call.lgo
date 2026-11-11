@@ -1,11 +1,11 @@
 // run
 // run -goexperiment logosarena
-
 package main
 
 import (
 	"fmt"
 	"logos/arena"
+	"os"
 	"runtime"
 )
 
@@ -43,5 +43,9 @@ func main() {
 		_ = po
 	}
 	runtime.GC()
-	fmt.Println(total)
+	if total != 40+2 {
+		fmt.Printf("FAIL outer-region-pointer-survives-inner-exit-and-gc: got %d want 42\n", total)
+		os.Exit(1)
+	}
+	fmt.Println("ok outer-region-pointer-survives-inner-exit-and-gc")
 }

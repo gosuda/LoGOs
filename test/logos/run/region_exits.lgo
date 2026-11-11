@@ -1,18 +1,12 @@
 // run -goexperiment logosarena
-
 package main
 
 import (
 	"fmt"
 	"logos/arena"
 	"logos/rt"
+	"os"
 )
-
-// REDTEAM placement-region exits (M18-S7 unit B): every exit kind out of an
-// owner block must release the region, so rt.RegionBytes() reads zero after
-// each exit. The allocations only make RegionBytes nonzero when escape
-// analysis (unit C) places them, so this fixture stays red until unit C
-// lands; the predicted red before the lowering is "bytes stay 0".
 
 var regionExitsSink int
 
@@ -174,27 +168,49 @@ func regionRecoverPanic() {
 }
 
 func main() {
+	failed := false
+	released := func(name string) {
+		if rb := rt.RegionBytes(); rb != 0 {
+			fmt.Printf("FAIL %s: got %d bytes want 0\n", name, rb)
+			failed = true
+			return
+		}
+		fmt.Printf("ok %s\n", name)
+	}
 	exitFallOff()
-	fmt.Println("exit fall-off:", rt.RegionBytes())
-	fmt.Println("return value:", exitReturn())
-	fmt.Println("exit return:", rt.RegionBytes())
+	released("fall-off-edge-releases-region")
+	if got := exitReturn(); got != 21 {
+		fmt.Printf("FAIL return-edge-preserves-value: got %d want 21\n", got)
+		failed = true
+	} else {
+		fmt.Println("ok return-edge-preserves-value")
+	}
+	released("return-edge-releases-region")
 	exitBreak()
-	fmt.Println("exit break:", rt.RegionBytes())
+	released("break-edge-releases-region")
 	exitContinue()
-	fmt.Println("exit continue:", rt.RegionBytes())
+	released("continue-edge-releases-region")
 	exitLabeledBreak()
-	fmt.Println("exit labeled break:", rt.RegionBytes())
+	released("labeled-break-edge-releases-region")
 	exitFallthrough()
-	fmt.Println("exit fallthrough:", rt.RegionBytes())
+	released("fallthrough-edge-releases-region")
 	exitInitOwner()
-	fmt.Println("exit init owner:", rt.RegionBytes())
+	released("if-init-owner-releases-region")
 	exitSwitchInitOwner()
-	fmt.Println("exit switch init owner:", rt.RegionBytes())
+	released("switch-init-owner-releases-region")
 	exitForInitOwner()
-	fmt.Println("exit for init owner:", rt.RegionBytes())
+	released("for-init-owner-releases-region")
 	exitRangeFuncBreak()
-	fmt.Println("exit range-func break:", rt.RegionBytes())
+	released("range-func-break-releases-region")
 	regionRecoverPanic()
-	fmt.Println("exit panic:", rt.RegionBytes())
-	fmt.Println("sink:", regionExitsSink)
+	released("panic-edge-releases-region")
+	if regionExitsSink != 110 {
+		fmt.Printf("FAIL every-exit-ran-with-expected-values: got %d want 110\n", regionExitsSink)
+		failed = true
+	} else {
+		fmt.Println("ok every-exit-ran-with-expected-values")
+	}
+	if failed {
+		os.Exit(1)
+	}
 }

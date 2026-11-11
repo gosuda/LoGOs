@@ -1,1 +1,1 @@
-ran: 1
+ok escaping-finalizer-runs-after-region-exit

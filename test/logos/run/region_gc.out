@@ -1,2 +1,2 @@
-cleanup inside block: 0
-cleanup after exit: 1
+ok cleanup-held-alive-inside-region-block
+ok cleanup-runs-after-region-exit

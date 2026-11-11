@@ -1,11 +1,11 @@
 // run
 // run -goexperiment logosarena
-
 package main
 
 import (
 	"fmt"
 	"logos/arena"
+	"os"
 )
 
 type node struct {
@@ -50,8 +50,23 @@ func build() int {
 	return sum
 }
 
+func heapOracle() int {
+	sum := 99 * 100 / 2
+	sum += 0 + 1 + 4 + 9
+	sum += 1 + 2 + 3
+	return sum
+}
+
 func main() {
 	sum := build()
-	fmt.Println(sum)
-	fmt.Println("escaped:", escaped.v)
+	if sum != heapOracle() {
+		fmt.Printf("FAIL region-list-make-append-sum-matches-heap-oracle: got %d want %d\n", sum, heapOracle())
+		os.Exit(1)
+	}
+	fmt.Println("ok region-list-make-append-sum-matches-heap-oracle")
+	if escaped.v != 1000 {
+		fmt.Printf("FAIL escaping-region-value-survives-block: got %d want 1000\n", escaped.v)
+		os.Exit(1)
+	}
+	fmt.Println("ok escaping-region-value-survives-block")
 }

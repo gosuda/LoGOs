@@ -1,10 +1,10 @@
 // run -goexperiment logosarena
-
 package main
 
 import (
 	"fmt"
 	"logos/arena"
+	"os"
 	"runtime"
 	"sync/atomic"
 )
@@ -32,7 +32,11 @@ func allocRegion() {
 	runtime.AddCleanup(cell, func(struct{}) { atomic.StoreInt32(&ran, 1) }, struct{}{})
 	runtime.GC()
 	runtime.GC()
-	fmt.Println("cleanup inside block:", atomic.LoadInt32(&ran))
+	if atomic.LoadInt32(&ran) != 0 {
+		fmt.Printf("FAIL cleanup-held-alive-inside-region-block: got %d want 0\n", atomic.LoadInt32(&ran))
+		os.Exit(1)
+	}
+	fmt.Println("ok cleanup-held-alive-inside-region-block")
 }
 
 func main() {
@@ -53,5 +57,9 @@ func main() {
 			break
 		}
 	}
-	fmt.Println("cleanup after exit:", atomic.LoadInt32(&ran))
+	if atomic.LoadInt32(&ran) != 1 {
+		fmt.Printf("FAIL cleanup-runs-after-region-exit: got %d want 1\n", atomic.LoadInt32(&ran))
+		os.Exit(1)
+	}
+	fmt.Println("ok cleanup-runs-after-region-exit")
 }
