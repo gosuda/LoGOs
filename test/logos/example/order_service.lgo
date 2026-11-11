@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"maps"
 	"os"
@@ -13,6 +14,17 @@ import (
 
 	"logos/sync"
 )
+
+var failed bool
+
+func check(name string, cond bool, got, want any) {
+	if !cond {
+		failed = true
+		fmt.Println("FAIL", name+":", "got", got, "want", want)
+		return
+	}
+	fmt.Println("ok", name)
+}
 
 type Auditable interface {
 	const ID int64
@@ -231,29 +243,18 @@ func describe(r OrderResult) string {
 	return line
 }
 
+func newLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{}))
+}
+
 func Audit(a Auditable) string {
 	return $"order {a.ID} submitted by {a.Author}"
 }
 
-func newLogger() *slog.Logger {
-	return slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{ReplaceAttr: dropTime}))
+func receipt(id int64, author, tag string) string {
+	return fmt.Sprint("Order #", id, " by ", author, " (", tag, ")")
 }
 
-func dropTime(groups []string, a slog.Attr) slog.Attr {
-	if len(groups) == 0 && a.Key == slog.TimeKey {
-		return slog.Attr{}
-	}
-	return a
-}
-
-func show(title string, lines []string) {
-	fmt.Println(title)
-	for _, line := range lines {
-		fmt.Println("  " + line)
-	}
-}
-
-// run drives four batches. The expected output was worked out by hand
 func run() error {
 	ctx := context.Background()
 	svc := NewOrderService(NewDatabase(), newLogger())
@@ -266,44 +267,95 @@ func run() error {
 		{ID: 105, Author: "eve", Symbol: "GLOBEX", Qty: 12, Tier: "PLATINUM"},
 	}
 	if _, ok := any(&first[0]).(*CreateOrderReq); !ok {
-		panic("pointer assertion failed")
+		failNow("pointer assertion failed")
 	}
-	fmt.Println(Audit(&first[0]))
-	receipts := svc.ProcessBatch(ctx, first)?
-	show("batch 1 receipts:", receipts)
-	show("batch 1 ledger:", svc.Report())
-	fmt.Println("batch 1 trades:", svc.db.Stats().Trades)
+	gotAudit := Audit(&first[0])
+	check("audit-names-order-and-author", gotAudit == "order 101 submitted by ada", gotAudit, "order 101 submitted by ada")
+	if err := checkFirstBatch(ctx, svc, first); err != nil {
+		return err
+	}
+	if err := checkSecondBatch(ctx, svc); err != nil {
+		return err
+	}
+	if err := checkFailedBatches(ctx, svc); err != nil {
+		return err
+	}
+	stats := svc.db.Stats()
+	check("commit-rollback-close-counts", stats.Commits == 2 && stats.Rollbacks == 1 && stats.Closes == 3, fmt.Sprint(stats.Commits, stats.Rollbacks, stats.Closes), "2 1 3")
+	return nil
+}
 
+func checkFirstBatch(ctx context.Context, svc *OrderService, first []CreateOrderReq) error {
+	receipts := svc.ProcessBatch(ctx, first)?
+	check("receipts-filter-below-threshold", fmt.Sprint(receipts) == fmt.Sprint([]string{
+		receipt(101, "ada", "SPRING"),
+		receipt(103, "cyd", "NO-PROMO"),
+		receipt(104, "dee", "NO-PROMO"),
+		receipt(105, "eve", "NO-PROMO"),
+	}), fmt.Sprint(receipts), "[Order #101 by ada (SPRING) Order #103 by cyd (NO-PROMO) Order #104 by dee (NO-PROMO) Order #105 by eve (NO-PROMO)]")
+	check("ledger-records-filled-with-fee-price", fmt.Sprint(svc.Report()) == fmt.Sprint([]string{
+		"#101 filled TX-101 at 480480",
+		"#102 filled TX-102 at 170034",
+		"#103 pending review",
+		"#104 rejected: quantity 2000 above limit 1000 (code 422)",
+		"#105 filled TX-105 at 409020",
+	}), fmt.Sprint(svc.Report()), "batch1")
+	check("only-filled-orders-trade", svc.db.Stats().Trades == 3, svc.db.Stats().Trades, 3)
+	return nil
+}
+
+func checkSecondBatch(ctx context.Context, svc *OrderService) error {
 	svc.SetLimits(800, 1000)
 	second := []CreateOrderReq{
 		{ID: 103, Author: "cyd", Symbol: "INITECH", Qty: 700, Tier: "PLATINUM"},
 		{ID: 106, Author: "joy", Symbol: "ACME"},
 	}
-	receipts = svc.ProcessBatch(ctx, second)?
-	show("batch 2 receipts:", receipts)
-	show("batch 2 ledger:", svc.Report())
+	receipts := svc.ProcessBatch(ctx, second)?
+	check("receipts-cover-second-batch", fmt.Sprint(receipts) == fmt.Sprint([]string{
+		receipt(103, "cyd", "NO-PROMO"),
+	}), fmt.Sprint(receipts), "[Order #103 by cyd (NO-PROMO)]")
+	check("ledger-is-sorted-by-id", slices.IsSorted(svc.Report()), fmt.Sprint(svc.Report()), "sorted")
+	check("raised-limits-fill-previous-pending", fmt.Sprint(svc.Report()) == fmt.Sprint([]string{
+		"#101 filled TX-101 at 480480",
+		"#102 filled TX-102 at 170034",
+		"#103 filled TX-103 at 5263125",
+		"#104 rejected: quantity 2000 above limit 1000 (code 422)",
+		"#105 filled TX-105 at 409020",
+		"#106 filled TX-106 at 12012",
+	}), fmt.Sprint(svc.Report()), "batch2")
+	return nil
+}
 
+func checkFailedBatches(ctx context.Context, svc *OrderService) error {
+	before := svc.Report()
 	_, err := svc.ProcessBatch(ctx, []CreateOrderReq{
 		{ID: 201, Author: "fay", Symbol: "ACME", Qty: 10},
 		{ID: 202, Author: "gus", Symbol: "ACME", Qty: 0},
 	})
-	fmt.Println("batch 3 error:", err)
-
+	check("validation-rejects-zero-quantity", err != nil && err.Error() == "invalid quantity 0 for order 202", fmt.Sprint(err), "invalid quantity 0 for order 202")
 	_, err = svc.ProcessBatch(ctx, []CreateOrderReq{
 		{ID: 301, Author: "hal", Symbol: "ACME", Qty: 10},
 		{ID: 302, Author: "ivy", Symbol: "NOPE", Qty: 10},
 	})
-	fmt.Println("batch 4 error:", err)
-	show("final ledger:", svc.Report())
-
-	stats := svc.db.Stats()
-	fmt.Println("commits:", stats.Commits, "rollbacks:", stats.Rollbacks, "closes:", stats.Closes)
+	check("missing-quote-fails-batch", err != nil && err.Error() == "no quote for symbol NOPE", fmt.Sprint(err), "no quote for symbol NOPE")
+	check("failed-batches-leave-ledger-unchanged", fmt.Sprint(svc.Report()) == fmt.Sprint(before), fmt.Sprint(svc.Report()), fmt.Sprint(before))
 	return nil
+}
+
+func failNow(tag string) {
+	failed = true
+	fmt.Println("FAIL", tag)
+	os.Exit(1)
 }
 
 func main() {
 	if err := run(); err != nil {
-		fmt.Println("fatal:", err)
+		if !failed {
+			fmt.Println("FAIL run:", err)
+		}
+		os.Exit(1)
+	}
+	if failed {
 		os.Exit(1)
 	}
 }
