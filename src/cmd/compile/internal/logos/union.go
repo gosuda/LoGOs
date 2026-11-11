@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"fmt"
 	"go/token"
+	"hash/fnv"
 	"reflect"
 	"strings"
 
@@ -569,8 +570,7 @@ type unionFrom struct {
 	name1 string
 	ntext string
 	etext string
-	nmsg  string
-	emsg  string
+	union string
 }
 
 func (u *unionUse) isName() string     { return "_logos_is_" + u.suffix }
@@ -580,8 +580,8 @@ func (u *unionUse) assert2Name() string {
 }
 
 type unionPkgState struct {
-	byKey map[string]*unionUse
-	names map[string]bool
+	byFile map[*syntax.File]map[string]*unionUse
+	names  map[string]bool
 }
 
 var logosUnionPkgs = make(map[*types2.Package]*unionPkgState)
@@ -598,13 +598,13 @@ func (fl *fileLower) lowerUnionMembers() {
 	}
 }
 
-func unionTerms(t types2.Type) ([]types2.Type, bool) {
+func unionShape(t types2.Type) ([]types2.Type, bool, bool) {
 	if t == nil {
-		return nil, false
+		return nil, false, false
 	}
 	iface, ok := types2.Unalias(t).Underlying().(*types2.Interface)
 	if !ok {
-		return nil, false
+		return nil, false, false
 	}
 	var out []types2.Type
 	for i := range iface.NumEmbeddeds() {
@@ -615,9 +615,55 @@ func unionTerms(t types2.Type) ([]types2.Type, bool) {
 		for j := range u.Len() {
 			term := u.Term(j)
 			if term.Tilde() {
-				return nil, false
+				return nil, true, false
 			}
 			out = append(out, term.Type())
+		}
+	}
+	if len(out) == 0 {
+		return nil, false, false
+	}
+	return out, true, true
+}
+
+func unionTerms(t types2.Type) ([]types2.Type, bool) {
+	direct, isUnion, closed := unionShape(t)
+	if !isUnion || !closed {
+		return nil, false
+	}
+	var out []types2.Type
+	var expanding []types2.Type
+	var expand func(m types2.Type) bool
+	expand = func(m types2.Type) bool {
+		sub, isSub, closedSub := unionShape(m)
+		if !isSub {
+			for _, e := range out {
+				if types2.Identical(e, m) {
+					return true
+				}
+			}
+			out = append(out, m)
+			return true
+		}
+		if !closedSub {
+			return false
+		}
+		for _, e := range expanding {
+			if types2.Identical(e, m) {
+				return true
+			}
+		}
+		expanding = append(expanding, m)
+		for _, s := range sub {
+			if !expand(s) {
+				return false
+			}
+		}
+		return true
+	}
+	for _, d := range direct {
+		if !expand(d) {
+			return nil, false
 		}
 	}
 	if len(out) == 0 {
@@ -740,10 +786,18 @@ func (fl *fileLower) useOf(t types2.Type, pos syntax.Pos) *unionUse {
 	})
 	st := logosUnionPkgs[fl.pkg.tpkg]
 	if st == nil {
-		st = &unionPkgState{byKey: make(map[string]*unionUse), names: make(map[string]bool)}
+		st = &unionPkgState{byFile: make(map[*syntax.File]map[string]*unionUse), names: make(map[string]bool)}
 		logosUnionPkgs[fl.pkg.tpkg] = st
 	}
-	if u, ok := st.byKey[key]; ok {
+	if st.byFile == nil {
+		st.byFile = make(map[*syntax.File]map[string]*unionUse)
+	}
+	slot := st.byFile[fl.file]
+	if slot == nil {
+		slot = make(map[string]*unionUse)
+		st.byFile[fl.file] = slot
+	}
+	if u, ok := slot[key]; ok {
 		return u
 	}
 	members, ok := unionTerms(t)
@@ -788,7 +842,7 @@ func (fl *fileLower) useOf(t types2.Type, pos syntax.Pos) *unionUse {
 	}
 	st.names[suffix] = true
 	u := &unionUse{suffix: suffix, union: ustr, members: members, texts: texts, utext: utext, nnodes: nnodes, nnode: nnode}
-	st.byKey[key] = u
+	slot[key] = u
 	logosUnionUses[fl.file] = append(logosUnionUses[fl.file], u)
 	return u
 }
@@ -880,8 +934,8 @@ func (fl *fileLower) emitHelpers(u *unionUse) {
 	nativeDecls := build(u.nnode, u.nnodes)
 	ejectDecls := build(mustTypeExprAt(fl, u.utext, pos), mustTypeExprsAt(fl, u.texts, pos))
 	for _, f := range u.froms {
-		nativeDecls = append(nativeDecls, fl.buildFromDecls(f, pos, mustTypeExprAt(fl, f.ntext, pos), f.nmsg)...)
-		ejectDecls = append(ejectDecls, fl.buildFromDecls(f, pos, mustTypeExprAt(fl, f.etext, pos), f.emsg)...)
+		nativeDecls = append(nativeDecls, fl.buildFromDecls(f, pos, mustTypeExprAt(fl, f.ntext, pos))...)
+		ejectDecls = append(ejectDecls, fl.buildFromDecls(f, pos, mustTypeExprAt(fl, f.etext, pos))...)
 	}
 	fl.file.DeclList = append(fl.file.DeclList, nativeDecls...)
 	var text strings.Builder
@@ -895,7 +949,7 @@ func (fl *fileLower) emitHelpers(u *unionUse) {
 	fl.add(fl.orig, fl.orig, text.String())
 }
 
-func (fl *fileLower) buildFromDecls(f *unionFrom, pos syntax.Pos, ttype syntax.Expr, msg string) []syntax.Decl {
+func (fl *fileLower) buildFromDecls(f *unionFrom, pos syntax.Pos, ttype syntax.Expr) []syntax.Decl {
 	anyField := func(name string) *syntax.Field {
 		return at(&syntax.Field{Name: nameOf(pos, name), Type: nameOf(pos, "any")}, pos)
 	}
@@ -910,6 +964,15 @@ func (fl *fileLower) buildFromDecls(f *unionFrom, pos syntax.Pos, ttype syntax.E
 			returnOf(pos, []syntax.Expr{nameOf(pos, "z"), nameOf(pos, "false")}),
 		}),
 	}, pos)
+	errLit := at(&syntax.CompositeLit{
+		Type: rtSel(pos, "UnionAssertionError"),
+		ElemList: []syntax.Expr{
+			at(&syntax.KeyValueExpr{Key: nameOf(pos, "Value"), Value: nameOf(pos, "x")}, pos),
+			at(&syntax.KeyValueExpr{Key: nameOf(pos, "Union"), Value: litOf(pos, fmt.Sprintf("%q", f.union), syntax.StringLit)}, pos),
+		},
+		NKeys:  2,
+		Rbrace: pos,
+	}, pos)
 	from1 := at(&syntax.FuncDecl{
 		Name: nameOf(pos, f.name1),
 		Type: at(&syntax.FuncType{
@@ -917,7 +980,9 @@ func (fl *fileLower) buildFromDecls(f *unionFrom, pos syntax.Pos, ttype syntax.E
 			ResultList: []*syntax.Field{at(&syntax.Field{Type: ttype}, pos)},
 		}, pos),
 		Body: blockOf(pos, []syntax.Stmt{
-			exprStmtOf(pos, callOf(pos, nameOf(pos, "panic"), []syntax.Expr{litOf(pos, fmt.Sprintf("%q", msg), syntax.StringLit)})),
+			exprStmtOf(pos, callOf(pos, nameOf(pos, "panic"), []syntax.Expr{
+				at(&syntax.Operation{Op: syntax.And, X: errLit}, pos),
+			})),
 		}),
 	}, pos)
 	return []syntax.Decl{from2, from1}
@@ -1042,13 +1107,21 @@ func (fl *fileLower) useFrom(ou *unionUse, t types2.Type, pos syntax.Pos) *union
 			return f
 		}
 	}
-	stem := "_logos_assertfrom_" + ou.suffix + "_" + sanitizeUnionName(ntext)
-	name2 := stem + "2"
-	name1 := stem
+	ckey := types2.TypeString(t, func(p *types2.Package) string {
+		if p == nil {
+			return ""
+		}
+		return p.Path()
+	})
+	h := fnv.New64a()
+	_, _ = h.Write([]byte(ckey))
+	baseName := fmt.Sprintf("_logos_assertfrom_%s_%016x", ou.suffix, h.Sum64())
+	name1 := baseName
+	name2 := baseName + "2"
 	for i := 2; ; i++ {
 		clash := false
 		for _, f := range ou.froms {
-			if f.name2 == name2 || f.name1 == name1 {
+			if f.name1 == name1 || f.name2 == name1 || f.name1 == name2 || f.name2 == name2 {
 				clash = true
 				break
 			}
@@ -1056,21 +1129,19 @@ func (fl *fileLower) useFrom(ou *unionUse, t types2.Type, pos syntax.Pos) *union
 		if !clash {
 			break
 		}
-		name2 = fmt.Sprintf("%s2_%d", stem, i)
-		name1 = fmt.Sprintf("%s_%d", stem, i)
+		name1 = fmt.Sprintf("%s_%d", baseName, i)
+		name2 = fmt.Sprintf("%s_2_%d", baseName, i)
 	}
 	f := &unionFrom{
 		name2: name2,
 		name1: name1,
 		ntext: ntext,
 		etext: etext,
-		nmsg:  "interface conversion: " + ntext + " is not a member of " + ou.union,
-		emsg:  "interface conversion: " + etext + " is not a member of " + ou.union,
+		union: ou.union,
 	}
 	ou.froms = append(ou.froms, f)
 	return f
 }
-
 func (fl *fileLower) assertCall(a *syntax.AssertExpr, name string) syntax.Expr {
 	pos := a.Pos()
 	xStart := fl.off(a.X.Pos())
