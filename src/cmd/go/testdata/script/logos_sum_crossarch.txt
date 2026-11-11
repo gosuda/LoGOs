@@ -1,16 +1,18 @@
-[!exec:qemu-aarch64] skip 'qemu-aarch64 is required for the arm64 leg'
-
 env GOPROXY=off
 env GOTOOLCHAIN=local
 
 logos build -o $WORK/sum-native$GOEXE .
 exec $WORK/sum-native$GOEXE
+stdout '^0$'
+stdout '^4341c37937e08000$'
+stdout '^4b189680$'
 cp stdout $WORK/native.txt
 
 env GOARCH=arm64
 logos build -o $WORK/sum-arm64$GOEXE .
 env GOARCH=
 
+[!exec:qemu-aarch64] skip 'qemu-aarch64 is required for the arm64 leg'
 exec qemu-aarch64 $WORK/sum-arm64$GOEXE
 cp stdout $WORK/arm64.txt
 
@@ -28,7 +30,6 @@ import (
 	"fmt"
 	"math"
 )
-
 func f64v(i int) float64 {
 	switch i % 5 {
 	case 0:
