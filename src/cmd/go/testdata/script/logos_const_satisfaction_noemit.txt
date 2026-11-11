@@ -22,7 +22,8 @@ stderr 'const_view_mutation'
 stderr 'const_view_mutation'
 ! logos eject -o $WORK/ejectlate
 stderr 'const_view_mutation'
-! exists $WORK/ejectlate/go.mod
+! exists $WORK/ejectlate
+! exec grep -r LateDecl $WORK/ejectlate
 ! exec grep -r LateDecl $WORK/gocache-late
 ! exec grep -r LateDecl $WORK/tmp-late
 cd ..
