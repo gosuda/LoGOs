@@ -1573,7 +1573,7 @@ Contract (T-202, T-Sec5). Representation decisions:
   comptime <object> <byte length>
   <source bytes>
   ```
-  `<object>` is `Name`, `Type.Field`, or `(*Type).Method` / `Type.Method`; `<path>` is dot-separated steps `R<i>` result, `P<i>` parameter, `F<name>` field, `E` element, `K` map key, `M<name>` interface method, `T<i>` tuple element. Flags: `ReturnsNonNil`, `AlwaysNilError`, `PureConst`, `ReceiverMutated`, `Readonly`, `ParamMutated=<hex mask>`, `MayYield=0|1`, `AssertTP=<hex mask>`, `AssertRTP=<hex mask>`. Assertion flags distinguish analyzed effects, including explicit zero, from unknown effects; assertion and mutation masks have arbitrary arity. A receiver-readonly fact does not prove parameter purity.
+  `<object>` is `Name`, `Type.Field`, or `(*Type).Method` / `Type.Method`; `<path>` is dot-separated steps `R<i>` result, `P<i>` parameter, `F<name>` field, `E` element, `K` map key, `M<name>` interface method, `T<i>` tuple element. Flags: `AlwaysNilError`, `ReceiverMutated`, `Readonly`, `ParamMutated=<hex mask>`, `MayYield=0|1`, `AssertTP=<hex mask>`, `AssertRTP=<hex mask>`. Assertion flags distinguish analyzed effects, including explicit zero, from unknown effects; assertion and mutation masks have arbitrary arity. A receiver-readonly fact does not prove parameter purity.
 
 ### M3-S1 Facts sidecar
 Anchor: David Parnas, Tony Hoare
