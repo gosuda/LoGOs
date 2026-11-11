@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"internal/testenv"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -613,4 +614,53 @@ func (m *ejectImporter) Import(path string) (*types2.Package, error) {
 
 func (m *ejectImporter) ImportFrom(path, srcDir string, mode types2.ImportMode) (*types2.Package, error) {
 	return importer.Import(m.pkgs, path, srcDir, nil)
+}
+func TestEjectDeferTryJoinBehavior(t *testing.T) {
+	testenv.MustHaveGoBuild(t)
+	dir := filepath.Join(testenv.GOROOT(t), "test", "logos", "run")
+	const name = "defer_try.lgo"
+	src, err := os.ReadFile(filepath.Join(dir, name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := syntax.NewFileBase(filepath.Join(dir, name))
+	file := ejectParse(t, base, src, syntax.LogosMode|syntax.CheckBranches)
+	pkg, info := ejectCheck(t, file)
+	edits := ejectLower(t, pkg, info, file, src)
+	ejected, err := ApplyEdits(src, base, edits)
+	if err != nil {
+		t.Fatalf("ApplyEdits %s: %v", name, err)
+	}
+	work := t.TempDir()
+	if err := os.WriteFile(filepath.Join(work, "go.mod"), []byte("module ejectjoin\n\ngo 1.27\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(work, "main.go"), ejected, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(testenv.GoToolPath(t), "run", ".")
+	cmd.Dir = work
+	cmd.Env = append(os.Environ(), "GOPROXY=off", "GOTOOLCHAIN=local")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("ejected run: %v\n%s", err, out)
+	}
+	got := string(out)
+	for _, want := range []string{"nil ok", "second: second", "is-first: true is-second: true"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("ejected output lacks %q:\n%s", want, got)
+		}
+	}
+	i := strings.Index(got, "both:")
+	if i < 0 {
+		t.Fatalf("ejected output lacks both line:\n%s", got)
+	}
+	rest := got[i:]
+	first, second := strings.Index(rest, "first"), strings.Index(rest, "second")
+	if first < 0 || second < 0 || first > second {
+		t.Fatalf("ejected join order wrong in %q, want first before second", rest)
+	}
+	if strings.Contains(got, "fatal:") {
+		t.Fatalf("ejected run failed:\n%s", got)
+	}
 }
