@@ -597,6 +597,9 @@ func (e *evaluator) convertToString(v Value, t *Type, pos syntax.Pos) (Value, er
 	if vk == KString || vk == KUntypedString {
 		return Value{typ: t, constant: v.constant, sval: v.sval}, nil
 	}
+	if vk == KSlice {
+		return e.sliceToString(v, t, pos)
+	}
 	if !isInteger(vk) {
 		return Value{}, e.fail(pos, "cannot convert %s to string in const evaluation", typeName(v.typ))
 	}
@@ -612,6 +615,33 @@ func (e *evaluator) convertToString(v Value, t *Type, pos syntax.Pos) (Value, er
 		s = "\uFFFD"
 	}
 	return Value{typ: t, constant: v.constant, sval: s}, nil
+}
+
+func (e *evaluator) sliceToString(v Value, t *Type, pos syntax.Pos) (Value, error) {
+	if v.typ == nil || v.typ.Elem == nil || v.isNil || v.slice == nil || v.slice.backing == nil {
+		return Value{typ: t, constant: v.constant, sval: ""}, nil
+	}
+	switch v.typ.Elem.Kind {
+	case KUint8:
+		buf := make([]byte, 0, v.slice.length)
+		for _, el := range sliceElems(v) {
+			if el.ival == nil {
+				return Value{}, e.fail(pos, "cannot convert %s to string in const evaluation", typeName(v.typ))
+			}
+			buf = append(buf, byte(el.ival.Int64()))
+		}
+		return Value{typ: t, constant: v.constant, sval: string(buf)}, nil
+	case KInt32:
+		runes := make([]rune, 0, v.slice.length)
+		for _, el := range sliceElems(v) {
+			if el.ival == nil {
+				return Value{}, e.fail(pos, "cannot convert %s to string in const evaluation", typeName(v.typ))
+			}
+			runes = append(runes, rune(el.ival.Int64()))
+		}
+		return Value{typ: t, constant: v.constant, sval: string(runes)}, nil
+	}
+	return Value{}, e.fail(pos, "cannot convert %s to string in const evaluation", typeName(v.typ))
 }
 
 func (e *evaluator) stringToSlice(v Value, t *Type, pos syntax.Pos) (Value, error) {

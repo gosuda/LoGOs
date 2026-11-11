@@ -594,6 +594,9 @@ func (e *evaluator) neg(x Value, pos syntax.Pos) (Value, error) {
 
 func (e *evaluator) finishInt(n *big.Int, t *Type, cst bool, pos syntax.Pos) (Value, error) {
 	if t == nil || isUntyped(t.Kind) {
+		if cst && n.BitLen() > 512 {
+			return Value{}, e.fail(pos, "constant overflows %s in const evaluation", typeName(t))
+		}
 		return intValue(n, t, cst), nil
 	}
 	if cst {
