@@ -37,10 +37,14 @@ func newText(data []byte) *text {
 }
 
 func (t *text) lineEnd(line int) int {
+	end := len(t.data)
 	if line+1 < len(t.starts) {
-		return t.starts[line+1] - 1
+		end = t.starts[line+1] - 1
 	}
-	return len(t.data)
+	if end > t.starts[line] && t.data[end-1] == '\r' {
+		end--
+	}
+	return end
 }
 
 func (t *text) offset(p Position) int {
