@@ -6,10 +6,6 @@ package syntax
 
 import (
 	"bytes"
-	"cmp"
-	"internal/testenv"
-	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -695,66 +691,70 @@ func TestLogosContextualWordsPlainModeReject(t *testing.T) {
 	}
 }
 
-func countExampleForms(t *testing.T, src []byte) (dotChain, blockLambda, ptrAssert int) {
-	t.Helper()
-	var msgs []string
-	f, err := Parse(nil, bytes.NewReader(src), func(err error) {
-		msgs = append(msgs, err.Error())
-	}, nil, CheckBranches|LogosMode)
-	if err != nil {
-		t.Fatalf("parse example: %v", err)
-	}
-	if len(msgs) != 0 {
-		t.Fatalf("parse example: unexpected errors: %q", msgs)
-	}
-	Inspect(f, func(n Node) bool {
-		switch n := n.(type) {
-		case *CallExpr:
-			if sel, ok := n.Fun.(*SelectorExpr); ok && containsSelectorCall(sel.X) {
-				dotChain++
-			}
-		case *LambdaExpr:
-			if _, ok := n.Body.(*BlockStmt); ok {
-				blockLambda++
-			}
-		case *AssertExpr:
-			if op, ok := n.Type.(*Operation); ok && op.Op == Mul && op.Y == nil {
-				ptrAssert++
-			}
+func TestLogosValidSyntaxForms(t *testing.T) {
+	chain := parseLogos(t, "package p\n\nfunc f(batch []int) []int {\n\treturn batch\n\t\t.filter(10)\n\t\t.map(20)\n}\n")
+	var names []string
+	Inspect(chain, func(n Node) bool {
+		c, ok := n.(*CallExpr)
+		if !ok {
+			return true
+		}
+		sel, ok := c.Fun.(*SelectorExpr)
+		if !ok || sel.Sel == nil {
+			return true
+		}
+		if sel.Sel.Pos().Line() > StartPos(sel.X).Line() {
+			names = append(names, sel.Sel.Value)
 		}
 		return true
 	})
-	return dotChain, blockLambda, ptrAssert
-}
-
-func containsSelectorCall(x Expr) bool {
-	found := false
-	Inspect(x, func(n Node) bool {
+	if len(names) != 2 {
+		t.Fatalf("leading-dot continuations = %q, want 2", names)
+	}
+	for _, want := range []string{"filter", "map"} {
+		ok := false
+		for _, got := range names {
+			ok = ok || got == want
+		}
+		if !ok {
+			t.Fatalf("leading-dot continuations = %q, missing %q", names, want)
+		}
+	}
+	inline := parseLogos(t, "package p\n\nfunc f(batch []int) []int {\n\treturn batch.filter(10)\n}\n")
+	Inspect(inline, func(n Node) bool {
 		if c, ok := n.(*CallExpr); ok {
-			if _, ok := c.Fun.(*SelectorExpr); ok {
-				found = true
-				return false
+			if sel, ok := c.Fun.(*SelectorExpr); ok && sel.Sel != nil {
+				if sel.Sel.Pos().Line() > StartPos(sel.X).Line() {
+					t.Errorf("inline chain %q counted as leading-dot continuation", sel.Sel.Value)
+				}
 			}
 		}
 		return true
 	})
-	return found
-}
-
-func TestLogosExampleValidSyntaxForms(t *testing.T) {
-	path := cmp.Or(os.Getenv("LOGOS_EXAMPLE_PATH"), filepath.Join(testenv.GOROOT(t), "test", "logos", "example", "order_service.lgo"))
-	src, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read example: %v", err)
+	lambda := parseLogos(t, "package p\n\nfunc each(f func(int) int) int {\n\treturn f(1)\n}\n\nfunc g() int {\n\treturn each(x => {\n\t\treturn x\n\t})\n}\n")
+	foundBlock := false
+	Inspect(lambda, func(n Node) bool {
+		if l, ok := n.(*LambdaExpr); ok {
+			if _, ok := l.Body.(*BlockStmt); ok {
+				foundBlock = true
+			}
+		}
+		return true
+	})
+	if !foundBlock {
+		t.Errorf("block lambda parsed without a block body")
 	}
-	dotChain, blockLambda, ptrAssert := countExampleForms(t, src)
-	if dotChain == 0 {
-		t.Errorf("example has no leading-dot chain continuation")
-	}
-	if blockLambda == 0 {
-		t.Errorf("example has no block lambda")
-	}
-	if ptrAssert == 0 {
-		t.Errorf("example has no pointer assertion target")
+	asserted := parseLogos(t, "package p\n\ntype R struct{}\n\nfunc f(v any) *R {\n\treturn v.(*R)\n}\n")
+	foundPtr := false
+	Inspect(asserted, func(n Node) bool {
+		if a, ok := n.(*AssertExpr); ok {
+			if op, ok := a.Type.(*Operation); ok && op.Op == Mul && op.Y == nil {
+				foundPtr = true
+			}
+		}
+		return true
+	})
+	if !foundPtr {
+		t.Errorf("pointer assertion target missing")
 	}
 }
