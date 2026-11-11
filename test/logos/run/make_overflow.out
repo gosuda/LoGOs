@@ -1,1 +1,1 @@
-make overflow: PASS
+ok make-overflow-checked
