@@ -5,6 +5,11 @@
 package logos
 
 import (
+	"fmt"
+	"internal/testenv"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -38,9 +43,7 @@ func TestConstmapGeneratedLookupShape(t *testing.T) {
 	if got := strings.Count(lookup, "case "); got != 8 {
 		t.Fatalf("switch lookup has %d case lines, want 8", got)
 	}
-	if !strings.Contains(lookup, ", false") {
-		t.Fatalf("switch lookup lacks absent path:\n%s", lookup)
-	}
+	runConstmapLookupBehavior(t, lookup, keys)
 	if strings.Contains(lookup, "for ") || strings.Contains(lookup, ".Get(") {
 		t.Fatalf("switch lookup must not loop or delegate:\n%s", lookup)
 	}
@@ -127,5 +130,30 @@ func TestConstmapEmissionRodataNoInit(t *testing.T) {
 	}
 	if strings.Contains(sw, "func init(") {
 		t.Fatalf("switch emission declares init:\n%s", sw)
+	}
+}
+func runConstmapLookupBehavior(t *testing.T, lookup string, keys []constMapKey) {
+	t.Helper()
+	testenv.MustHaveGoBuild(t)
+	dir := t.TempDir()
+	var b strings.Builder
+	b.WriteString("package main\n\nimport (\n\t\"fmt\"\n\t\"os\"\n)\n\n")
+	b.WriteString(lookup)
+	b.WriteString("\nfunc main() {\n")
+	for i := range keys {
+		fmt.Fprintf(&b, "\tif v, ok := testsw_lookup(%q); !ok || v != %q {\n\t\tfmt.Printf(\"FAIL present %%q = %%q,%%v\\n\", %q, v, ok)\n\t\tos.Exit(1)\n\t}\n", keys[i].canon, keys[i].canon, keys[i].canon)
+	}
+	b.WriteString("\tif v, ok := testsw_lookup(\"__missing__\"); ok || v != \"\" {\n\t\tfmt.Printf(\"FAIL absent = %q,%v\\n\", v, ok)\n\t\tos.Exit(1)\n\t}\n\tfmt.Println(\"ok constmap-lookup\")\n}\n")
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module constmaplookup\n\ngo 1.27\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte(b.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(testenv.GoToolPath(t), "run", ".")
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil || strings.TrimSpace(string(out)) != "ok constmap-lookup" {
+		t.Fatalf("lookup behavior = %q, err %v, want ok constmap-lookup", out, err)
 	}
 }
