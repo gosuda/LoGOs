@@ -2992,7 +2992,7 @@ Anchor: Edsger W. Dijkstra, Richard Feynman, Edward Tufte
 
 Notes (m22): the `//logos:zeroalloc` directive does not change allocation behavior; it only reports allocations.
 
-- M22-S1 Upstream regression at each level (PLAN Sec 22.1, red-team row #80): `logos test -O=1 std cmd`, `-O=2`, `-O=3` all pass without `-short`, and `go test -O=1 std cmd`, `-O=2`, `-O=3` pass the same way under plain `go`, with the gate script pinning 31 fetch-dependent tests (`src/cmd/go/testdata/script/logos_redteam_80.txt`: one `grep -count=1` per test) under a fresh `TMPDIR` from `mktemp -d` (`logos_redteam_80.txt:7`); recorded in `logos-doc/REDTEAM.md` header.
+- M22-S1 Upstream regression at each level (PLAN Sec 22.1, red-team row #80): `logos test -O=1 std cmd`, `-O=2`, `-O=3` all pass without `-short`, and `go test -O=1 std cmd`, `-O=2`, `-O=3` pass the same way under plain `go`, with the gate script pinning 31 fetch-dependent tests (`src/cmd/go/testdata/script/logos_redteam_80.txt`: one `grep -count=1` per test). The script creates `/tmp/rt80-redteam80`, runs with `TMPDIR` set to it, and removes it afterwards; recorded in `logos-doc/REDTEAM.md` header.
   Anchor: Tony Hoare, Richard Feynman
 - M22-S3 Red-team completeness (Sec 17.1): every row of `logos-doc/REDTEAM.md` is `tested` or `satisfied upstream` (with the test that proves it); gate `grep -c '| planned |' logos-doc/REDTEAM.md` currently prints 1 and `grep -c '| blocked |' logos-doc/REDTEAM.md` currently prints 0, so the zero-planned milestone gate is not yet met. Runtime attack tests (files under `test/logos/redteam/` whose header line is `// runtime`) run under `-race`.
   Anchor: Tony Hoare, Edward Tufte
