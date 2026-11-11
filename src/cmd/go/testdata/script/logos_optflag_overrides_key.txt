@@ -1,0 +1,51 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+cd o3key
+logos build -a -x .
+stderr '\-d=inlbudget=400,inlrecursivebudget=80,variablemakethreshold=4096'
+logos build -a -x -O=0 .
+stderr '\-N \-l'
+! stderr 'inlbudget=400'
+cd ..
+
+cd o0key
+logos build -a -x .
+stderr '\-N \-l'
+! stderr 'inlbudget'
+logos build -a -x -O=3 .
+stderr '\-d=inlbudget=400,inlrecursivebudget=80,variablemakethreshold=4096'
+! stderr '\-N \-l'
+cd ..
+
+-- o3key/go.mod --
+module example.com/optflag/o3key
+
+go 1.27
+
+-- o3key/logos.toml --
+[build]
+opt_level = "O3"
+
+-- o3key/main.lgo --
+package main
+
+import "fmt"
+
+func main() { fmt.Println("hello") }
+
+-- o0key/go.mod --
+module example.com/optflag/o0key
+
+go 1.27
+
+-- o0key/logos.toml --
+[build]
+opt_level = "O0"
+
+-- o0key/main.lgo --
+package main
+
+import "fmt"
+
+func main() { fmt.Println("hello") }
