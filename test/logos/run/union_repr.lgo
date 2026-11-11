@@ -4,9 +4,21 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"reflect"
 	"unsafe"
 )
+
+var failed bool
+
+func check(name string, cond bool) {
+	if !cond {
+		failed = true
+		fmt.Println("FAIL", name)
+		return
+	}
+	fmt.Println("ok", name)
+}
 
 type U2 interface {
 	int | string
@@ -22,28 +34,23 @@ type ZU interface {
 	Empty | int
 }
 
-func check(name string, cond bool) {
-	if !cond {
-		panic(name)
-	}
-}
-
 func main() {
 	var a2 U2
 	var a5 U5
 	var ai any
 	var zi ZU
-	check("size2", unsafe.Sizeof(a2) == unsafe.Sizeof(ai))
-	check("size5", unsafe.Sizeof(a5) == unsafe.Sizeof(ai))
-	check("sizez", unsafe.Sizeof(zi) == unsafe.Sizeof(ai))
-	check("sizecount", unsafe.Sizeof(a2) == unsafe.Sizeof(a5))
+	check("two-member-union-shares-any-layout", unsafe.Sizeof(a2) == unsafe.Sizeof(ai))
+	check("five-member-union-shares-any-layout", unsafe.Sizeof(a5) == unsafe.Sizeof(ai))
+	check("empty-member-union-shares-any-layout", unsafe.Sizeof(zi) == unsafe.Sizeof(ai))
+	check("member-count-keeps-layout", unsafe.Sizeof(a2) == unsafe.Sizeof(a5))
 	var src any = 7
 	u2 := *(*U2)(unsafe.Pointer(&src))
-	check("dyntype", reflect.TypeOf(u2) == reflect.TypeOf(7))
+	check("reinterpret-keeps-dynamic-type", reflect.TypeOf(u2) == reflect.TypeOf(7))
 	back := *(*any)(unsafe.Pointer(&u2))
-	check("roundtrip", reflect.TypeOf(back) == reflect.TypeOf(7))
-	if v, ok := back.(int); !ok || v != 7 {
-		panic("roundtrip value")
+	check("roundtrip-keeps-dynamic-type", reflect.TypeOf(back) == reflect.TypeOf(7))
+	v, ok := back.(int)
+	check("roundtrip-keeps-value", ok && v == 7)
+	if failed {
+		os.Exit(1)
 	}
-	fmt.Println("repr-ok")
 }

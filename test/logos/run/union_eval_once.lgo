@@ -2,10 +2,24 @@
 
 package main
 
-import "fmt"
+import (
+	"fmt"
+	"os"
+)
+
+var failed bool
 
 var evals int
 var armRuns int
+
+func check(name string, cond bool, got, want any) {
+	if !cond {
+		failed = true
+		fmt.Println("FAIL", name+":", "got", got, "want", want)
+		return
+	}
+	fmt.Println("ok", name)
+}
 
 func taggedKind(n int) int {
 	evals++
@@ -30,6 +44,15 @@ func pick(n int) string {
 }
 
 func main() {
-	fmt.Println(pick(1), evals, armRuns)
-	fmt.Println(pick(9), evals, armRuns)
+	got := pick(1)
+	check("switch-evaluates-scrutinee-once", evals == 1, evals, 1)
+	check("switch-runs-taken-arm-once", armRuns == 1, armRuns, 1)
+	check("switch-selects-matching-arm", got == "a", got, "a")
+	got = pick(9)
+	check("switch-evaluates-second-scrutinee-once", evals == 2, evals, 2)
+	check("switch-runs-default-arm-once", armRuns == 2, armRuns, 2)
+	check("switch-selects-default-arm", got == "b", got, "b")
+	if failed {
+		os.Exit(1)
+	}
 }

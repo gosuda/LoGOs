@@ -2,7 +2,21 @@
 
 package main
 
-import "fmt"
+import (
+	"fmt"
+	"os"
+)
+
+var failed bool
+
+func check(name string, cond bool, got, want any) {
+	if !cond {
+		failed = true
+		fmt.Println("FAIL", name+":", "got", got, "want", want)
+		return
+	}
+	fmt.Println("ok", name)
+}
 
 type NumOrStr interface {
 	int | string
@@ -53,16 +67,19 @@ func (p Person) Greet() string { return "hi " + p.Name }
 
 func main() {
 	var u NumOrStr = 7
-	fmt.Println(describe(u))
+	check("type-switch-names-int-member", describe(u) == "int", describe(u), "int")
 	u = "seven"
-	fmt.Println(describe(u))
+	check("type-switch-names-string-member", describe(u) == "str", describe(u), "str")
 	var z NumOrStr
-	fmt.Println(describe(z))
-	fmt.Println(word(1))
-	fmt.Println(word(9))
+	check("type-switch-names-nil-union", describe(z) == "nil", describe(z), "nil")
+	check("expr-switch-matches-value", word(1) == "one", word(1), "one")
+	check("expr-switch-falls-to-default", word(9) == "many", word(9), "many")
 	p := Person{Name: "ada"}
 	var g Greeter = &p
-	fmt.Println(g.Greet())
+	check("union-member-dispatches-method", g.Greet() == "hi ada", g.Greet(), "hi ada")
 	var s Shape = Point{X: 3, Y: 4}
-	fmt.Println(s.Area())
+	check("shape-union-dispatches-area", s.Area() == 12, s.Area(), 12)
+	if failed {
+		os.Exit(1)
+	}
 }
