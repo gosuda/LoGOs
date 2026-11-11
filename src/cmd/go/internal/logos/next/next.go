@@ -111,6 +111,7 @@ type planFile struct {
 type fileWork struct {
 	rel   string
 	data  []byte
+	sum   string
 	edits []wireEdit
 	tasks []wireTask
 }
@@ -167,6 +168,10 @@ func scanModule(ctx context.Context, moddir string) *scanState {
 	load.CheckPackageErrors(pkgs)
 	roots := nextRoots(pkgs)
 	if len(roots) == 0 {
+		if hasLgoFiles(moddir) {
+			fmt.Println("logos next: already converted")
+			base.Exit()
+		}
 		base.Fatalf("logos next: no Go packages to convert")
 	}
 	buildNextRoots(moduleLoader, ctx, roots)
@@ -305,7 +310,7 @@ func (s *scanState) readSidecar(sidecar, moddir string) {
 				if hex.EncodeToString(sum[:]) != f.Sum {
 					base.Fatalf("logos next: %s changed during scan", rel)
 				}
-				w = &fileWork{rel: rel, data: data}
+				w = &fileWork{rel: rel, data: data, sum: f.Sum}
 				byFile[rel] = w
 			}
 			w.edits = append(w.edits, f.Edits...)
@@ -358,6 +363,27 @@ func walkNextSkipDir(path, moddir string) bool {
 	}
 	return false
 }
+func hasLgoFiles(moddir string) bool {
+	found := false
+	if err := filepath.WalkDir(moddir, func(path string, d os.DirEntry, err error) error {
+		if err != nil || found {
+			return err
+		}
+		if d.IsDir() {
+			if walkNextSkipDir(path, moddir) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if strings.HasSuffix(path, ".lgo") {
+			found = true
+		}
+		return nil
+	}); err != nil {
+		base.Fatalf("logos next: %v", err)
+	}
+	return found
+}
 
 func walkNextFileOK(path string) bool {
 	if strings.HasSuffix(path, ".lgo") {
@@ -377,6 +403,21 @@ func walkNextCollect(known map[string]string, moddir, path string) error {
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return err
+	}
+	real, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		return err
+	}
+	modReal, err := filepath.EvalSymlinks(moddir)
+	if err != nil {
+		return err
+	}
+	relReal, err := filepath.Rel(modReal, real)
+	if err != nil {
+		return err
+	}
+	if relReal == ".." || strings.HasPrefix(relReal, ".."+string(filepath.Separator)) {
+		return nil
 	}
 	rel, err := filepath.Rel(moddir, abs)
 	if err != nil {
@@ -545,6 +586,10 @@ func offsetOf(starts []int, size, line, col int) int {
 	return off
 }
 
+func applySumOk(data []byte, sum string) bool {
+	h := sha256.Sum256(data)
+	return hex.EncodeToString(h[:]) == sum
+}
 func (s *scanState) apply(moddir string) {
 	known := walkGoFiles(moddir)
 	rels := slices.Sorted(maps.Values(known))
@@ -556,6 +601,9 @@ func (s *scanState) apply(moddir string) {
 			base.Fatalf("logos next: %v", err)
 		}
 		w := s.files[rel]
+		if w != nil && !applySumOk(data, w.sum) {
+			base.Fatalf("logos next: %s changed during apply", rel)
+		}
 		target := filepath.Join(moddir, lgoName(rel))
 		if w == nil || len(w.edits) == 0 {
 			if err := os.Rename(abs, target); err != nil {
