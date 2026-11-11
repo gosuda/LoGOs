@@ -18,12 +18,13 @@ func TestSizeof(t *testing.T) {
 	const xreg = unsafe.Sizeof(runtime.XRegPerG{}) // Varies per architecture
 	const arenaWord = unsafe.Sizeof(uintptr(0))    // logos arena batch field on g
 	const regionWord = unsafe.Sizeof(uintptr(0))
+	const logosErrLastTypWord = unsafe.Sizeof(uintptr(0))
 	var tests = []struct {
 		val    any     // type as a value
 		_32bit uintptr // size on 32bit platforms
 		_64bit uintptr // size on 64bit platforms
 	}{
-		{runtime.G{}, 332 + xreg + arenaWord + 2*regionWord, 536 + xreg + arenaWord + 2*regionWord}, // g, but exported for testing; arenaWord is the logos arena batch field
+		{runtime.G{}, 332 + xreg + arenaWord + 2*regionWord + logosErrLastTypWord, 536 + xreg + arenaWord + 2*regionWord + logosErrLastTypWord},
 		{runtime.Sudog{}, 64, 104}, // sudog, but exported for testing
 	}
 
