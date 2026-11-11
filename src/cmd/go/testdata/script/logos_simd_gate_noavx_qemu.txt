@@ -2,7 +2,8 @@
 # vector form must take the scalar successor. Values cannot tell the
 # paths apart (both are exact), so this leg runs the binary under a CPU
 # without AVX: the false branch survives there, while a vector branch
-# taken by mistake dies with SIGILL.
+# taken by mistake dies with SIGILL. The float shape addF32x8 puts the
+# AVX-guarded float vector form under the same trip.
 [!exec:qemu-x86_64] skip 'qemu-x86_64 is required for the no-AVX leg'
 [!GOARCH:amd64] skip 'the no-AVX qemu leg needs an amd64 binary'
 
@@ -16,6 +17,7 @@ logos build -o $WORK/add$GOEXE .
 exec $WORK/add$GOEXE
 stdout '^sums ok$'
 exec qemu-x86_64 -cpu Nehalem $WORK/add$GOEXE
+stdout '^avx false$'
 stdout '^avx2 false$'
 stdout '^sums ok$'
 
@@ -36,6 +38,9 @@ import (
 //go:noinline
 func addI32x8(a, b [8]int32) [8]int32 { return a + b }
 
+//go:noinline
+func addF32x8(a, b [8]float32) [8]float32 { return a + b }
+
 func oracleAdd(a, b [8]int32) [8]int32 {
 	var r [8]int32
 	for i := range a {
@@ -44,7 +49,16 @@ func oracleAdd(a, b [8]int32) [8]int32 {
 	return r
 }
 
+func oracleAddF32(a, b [8]float32) [8]float32 {
+	var r [8]float32
+	for i := range a {
+		r[i] = a[i] + b[i]
+	}
+	return r
+}
+
 func main() {
+	fmt.Println("avx", archsimd.X86.AVX())
 	fmt.Println("avx2", archsimd.X86.AVX2())
 	var a, b [8]int32
 	for i := range a {
@@ -53,6 +67,14 @@ func main() {
 	}
 	if addI32x8(a, b) != oracleAdd(a, b) {
 		panic("int32 add mismatch")
+	}
+	var c, d [8]float32
+	for i := range c {
+		c[i] = float32(i*3 - 20)
+		d[i] = float32(i*2 + 1)
+	}
+	if addF32x8(c, d) != oracleAddF32(c, d) {
+		panic("float32 add mismatch")
 	}
 	fmt.Println("sums ok")
 }
