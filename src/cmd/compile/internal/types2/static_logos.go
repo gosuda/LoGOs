@@ -700,6 +700,7 @@ func (check *Checker) logosAddStaticFamilyMethods(named *Named, family string) {
 		}
 	}
 }
+
 func logosHasMethod(named *Named, name string) bool {
 	for i := range named.NumMethods() {
 		if named.Method(i).Name() == name {
