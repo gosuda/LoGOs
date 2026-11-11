@@ -6,6 +6,7 @@ logos run .
 stdout '^slice ok$'
 stdout '^map ok$'
 stdout '^ptr ok$'
+stdout '^array ok$'
 stdout '^nested ok$'
 
 -- w/go.mod --
@@ -41,6 +42,10 @@ type MapHolder struct {
   M map[string]Shape `json:"m"`
 }
 
+type ArrayHolder struct {
+  Items [2]Shape `json:"items"`
+}
+
 type PtrHolder struct {
   P *Shape `json:"p"`
 }
@@ -59,6 +64,29 @@ type Outer interface {
 
 type OuterHolder struct {
   Item Outer `json:"item"`
+}
+
+func checkArray() {
+  var ah ArrayHolder
+  err := json.Unmarshal([]byte(`{"items":[{"s":7},{"r":3}]}`), &ah)
+  if err != nil {
+    panic("array unmarshal: " + err.Error())
+  }
+  sq, ok := ah.Items[0].(Square)
+  if !ok {
+    panic(fmt.Sprintf("array want Square got %T", ah.Items[0]))
+  }
+  if sq.S != 7 {
+    panic("array want S=7")
+  }
+  c, ok := ah.Items[1].(Circle)
+  if !ok {
+    panic(fmt.Sprintf("array want Circle got %T", ah.Items[1]))
+  }
+  if c.R != 3 {
+    panic("array want R=3")
+  }
+  fmt.Println("array ok")
 }
 
 func checkSlice() {
@@ -139,5 +167,6 @@ func main() {
   checkSlice()
   checkMap()
   checkPtr()
+  checkArray()
   checkNested()
 }
