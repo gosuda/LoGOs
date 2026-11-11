@@ -38,7 +38,11 @@ func (check *Checker) funcBody(decl *declInfo, name string, sig *Signature, body
 	}
 	check.indent = 0
 
-	check.logosEnterFunc(body)  // logos M3-S4 hook: pre-pass disqualified vars.
+	if name == "<function literal>" {
+		check.logosEnterLit(body)
+	} else {
+		check.logosEnterFunc(body)
+	}
 	check.logosPushFuncSig(sig) // logos T-201 hook: enclosing generic declaration for assertion effects.
 	defer check.logosPopFuncSig()
 	defer check.logosExitFunc() // logos M3-S4 hook.

@@ -1,0 +1,5 @@
+immediate ok
+deferred ok
+nested ok
+loop ok
+method-value ok

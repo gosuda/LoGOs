@@ -195,6 +195,9 @@ type Checker struct {
 	environment
 	logosCopy bool
 
+	logosTainted map[string]bool
+	logosLitSave []map[*Var]int
+
 	// debugging
 	posStack []syntax.Pos // stack of source positions seen; used for panic tracing
 	indent   int          // indentation for tracing

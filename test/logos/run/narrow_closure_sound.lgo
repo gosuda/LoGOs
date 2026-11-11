@@ -1,0 +1,108 @@
+// run
+
+package main
+
+import (
+	"fmt"
+	"os"
+)
+
+var failed = false
+
+func check(name string, ok bool, detail string) {
+	if !ok {
+		fmt.Println("FAIL", name, detail)
+		failed = true
+		return
+	}
+	fmt.Println(name, "ok")
+}
+
+type okUser struct {
+	okName string
+}
+
+func okTake(u okUser) string {
+	return u.okName
+}
+
+func okImmediate() string {
+	var o *okUser? = &okUser{okName: "ann"}
+	if o != nil {
+		f := func() string { return okTake(*o) }
+		return f()
+	}
+	return "none"
+}
+
+func okDeferred() (out string) {
+	var o *okUser? = &okUser{okName: "ann"}
+	if o != nil {
+		defer func() { out = okTake(*o) }()
+	}
+	return
+}
+
+func okNested() string {
+	var o *okUser? = &okUser{okName: "ann"}
+	if o != nil {
+		f := func() string {
+			g := func() string { return okTake(*o) }
+			return g()
+		}
+		return f()
+	}
+	return "none"
+}
+
+func okLoop() string {
+	var users [](*okUser?)
+	users = append(users, &okUser{okName: "a"}, nil, &okUser{okName: "b"})
+	var out []string
+	for _, u := range users {
+		if u != nil {
+			f := func() string { return okTake(*u) }
+			out = append(out, f())
+		} else {
+			out = append(out, "none")
+		}
+	}
+	got := ""
+	for _, s := range out {
+		got += s + ","
+	}
+	return got
+}
+
+type okNamer interface {
+	okWho() string
+}
+
+type okA struct {
+	okN string
+}
+
+func (a okA) okWho() string {
+	return "a:" + a.okN
+}
+
+func okMethodValue() string {
+	var o okNamer? = okNamer(okA{okN: "x"})
+	var f func() string
+	if o != nil {
+		f = o.okWho
+	}
+	o = nil
+	return f()
+}
+
+func main() {
+	check("immediate", okImmediate() == "ann", okImmediate())
+	check("deferred", okDeferred() == "ann", okDeferred())
+	check("nested", okNested() == "ann", okNested())
+	check("loop", okLoop() == "a,none,b,", okLoop())
+	check("method-value", okMethodValue() == "a:x", okMethodValue())
+	if failed {
+		os.Exit(1)
+	}
+}

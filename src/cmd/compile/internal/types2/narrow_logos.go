@@ -14,13 +14,33 @@ import (
 const logosResultBeforeErr = "[correctness::result_before_error_check]"
 
 func (check *Checker) logosEnterFunc(body *syntax.BlockStmt) {
+	check.logosEnterFuncBody(body)
 	if !check.conf.Logos {
 		return
 	}
+	check.logosLitSave = append(check.logosLitSave, nil)
+}
+
+func (check *Checker) logosEnterLit(body *syntax.BlockStmt) {
+	check.logosEnterFuncBody(body)
+	if !check.conf.Logos {
+		return
+	}
+	check.logosStripTainted()
+}
+
+func (check *Checker) logosEnterFuncBody(body *syntax.BlockStmt) {
+	if !check.conf.Logos {
+		return
+	}
+	outermost := len(check.logosDisqual) == 0
 	dq := &logosDisqualWalk{
-		addr:   make(map[string]bool),
-		inLoop: make(map[string]bool),
-		inClos: make(map[string]bool),
+		addr:      make(map[string]bool),
+		inLoop:    make(map[string]bool),
+		inClos:    make(map[string]bool),
+		refInClos: make(map[string]bool),
+		assignOut: make(map[string]bool),
+		defSeen:   make(map[string]bool),
 	}
 	if body != nil {
 		syntax.Walk(body, dq)
@@ -42,24 +62,68 @@ func (check *Checker) logosEnterFunc(body *syntax.BlockStmt) {
 		}
 		check.Info.LogosDisqual[body] = slices.Clone(check.logosDisqual)
 	}
+	if outermost {
+		tainted := make(map[string]bool)
+		for name := range dq.refInClos {
+			if dq.assignOut[name] {
+				tainted[name] = true
+			}
+		}
+		check.logosTainted = tainted
+	}
+}
+
+func (check *Checker) logosStripTainted() {
+	var saved map[*Var]int
+	for name := range check.logosTainted {
+		obj := check.lookup(name)
+		v, ok := obj.(*Var)
+		if !ok || v.pkg != check.pkg {
+			continue
+		}
+		if check.logosNarrow[v] > 0 {
+			if saved == nil {
+				saved = make(map[*Var]int)
+			}
+			saved[v] = check.logosNarrow[v]
+			delete(check.logosNarrow, v)
+		}
+	}
+	check.logosLitSave = append(check.logosLitSave, saved)
+}
+
+func (check *Checker) logosRestoreTainted() {
+	n := len(check.logosLitSave)
+	if n == 0 {
+		return
+	}
+	saved := check.logosLitSave[n-1]
+	check.logosLitSave = check.logosLitSave[:n-1]
+	for v, c := range saved {
+		check.logosNarrow[v] = c
+	}
 }
 
 func (check *Checker) logosExitFunc() {
 	if !check.conf.Logos {
 		return
 	}
+	check.logosRestoreTainted()
 	if n := len(check.logosDisqual); n > 0 {
 		check.logosDisqual = check.logosDisqual[:n-1]
 	}
 }
 
 type logosDisqualWalk struct {
-	stack  []syntax.Node
-	loop   int
-	clos   int
-	addr   map[string]bool
-	inLoop map[string]bool
-	inClos map[string]bool
+	stack     []syntax.Node
+	loop      int
+	clos      int
+	addr      map[string]bool
+	inLoop    map[string]bool
+	inClos    map[string]bool
+	refInClos map[string]bool
+	assignOut map[string]bool
+	defSeen   map[string]bool
 }
 
 func (w *logosDisqualWalk) Visit(node syntax.Node) syntax.Visitor {
@@ -85,14 +149,28 @@ func (w *logosDisqualWalk) Visit(node syntax.Node) syntax.Visitor {
 				w.addr[id.Value] = true
 			}
 		}
+	case *syntax.Name:
+		if w.clos > 0 && t.Value != "_" {
+			w.refInClos[t.Value] = true
+		}
 	case *syntax.AssignStmt:
-		if t.Op != syntax.Def && t.Lhs != nil {
+		if t.Lhs != nil {
 			for _, name := range logosAssignNames(t.Lhs) {
+				if t.Op == syntax.Def {
+					if w.defSeen[name] {
+						w.assignOut[name] = true
+					} else {
+						w.defSeen[name] = true
+					}
+					continue
+				}
 				if w.loop > 0 {
 					w.inLoop[name] = true
 				}
 				if w.clos > 0 {
 					w.inClos[name] = true
+				} else {
+					w.assignOut[name] = true
 				}
 			}
 		}
@@ -102,6 +180,8 @@ func (w *logosDisqualWalk) Visit(node syntax.Node) syntax.Visitor {
 				w.inLoop[name] = true
 				if w.clos > 0 {
 					w.inClos[name] = true
+				} else {
+					w.assignOut[name] = true
 				}
 			}
 		}

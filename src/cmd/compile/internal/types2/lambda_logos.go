@@ -123,7 +123,7 @@ func (check *Checker) logosLambdaTargeted(x *operand, sig *Signature, e *syntax.
 	defer func() { check.environment = saved }()
 	switch body := e.Body.(type) {
 	case *syntax.BlockStmt:
-		check.logosEnterFunc(body)
+		check.logosEnterLit(body)
 		defer check.logosExitFunc()
 		check.stmtList(0, body.List)
 		if check.hasLabel && !check.conf.IgnoreBranchErrors {
