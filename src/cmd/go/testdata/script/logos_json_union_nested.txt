@@ -86,6 +86,32 @@ func checkArray() {
   if c.R != 3 {
     panic("array want R=3")
   }
+  reuse := ArrayHolder{Items: [2]Shape{Circle{R: 9}, Square{S: 9}}}
+  err = json.Unmarshal([]byte(`{"items":[{"r":1}]}`), &reuse)
+  if err != nil {
+    panic("array short unmarshal: " + err.Error())
+  }
+  rc, ok := reuse.Items[0].(Circle)
+  if !ok || rc.R != 1 {
+    panic(fmt.Sprintf("array short want Circle R=1 got %T", reuse.Items[0]))
+  }
+  if reuse.Items[1] != nil {
+    panic(fmt.Sprintf("array short tail not zeroed, got %T", reuse.Items[1]))
+  }
+  err = json.Unmarshal([]byte(`{"items":null}`), &reuse)
+  if err != nil {
+    panic("array null unmarshal: " + err.Error())
+  }
+  if reuse.Items[0] == nil || reuse.Items[1] != nil {
+    panic("array null must leave the array alone")
+  }
+  err = json.Unmarshal([]byte(`{"items":[]}`), &reuse)
+  if err != nil {
+    panic("array empty unmarshal: " + err.Error())
+  }
+  if reuse.Items[0] != nil || reuse.Items[1] != nil {
+    panic("array empty must zero every element")
+  }
   fmt.Println("array ok")
 }
 

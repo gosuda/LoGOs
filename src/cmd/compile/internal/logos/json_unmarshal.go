@@ -517,7 +517,12 @@ func (js *jsonStruct) unionContainerLines(f *jsonField, field string, uc unionCo
 		out = append(out, fmt.Sprintf("if %s != nil {", errName))
 		out = append(out, fmt.Sprintf("\treturn %s", errName))
 		out = append(out, "}")
-		out = append(out, fmt.Sprintf("copy(%s[:], %s)", field, tmp))
+		out = append(out, fmt.Sprintf("if %s != nil {", tmp))
+		out = append(out, fmt.Sprintf("\tcopy(%s[:], %s)", field, tmp))
+		out = append(out, fmt.Sprintf("\tif len(%s) < len(%s) {", tmp, field))
+		out = append(out, fmt.Sprintf("\t\tclear(%s[len(%s):])", field, tmp))
+		out = append(out, "\t}")
+		out = append(out, "}")
 		return out
 	case containerMap:
 		mv := fmt.Sprintf("_logos_mv_%d", f.pos)
