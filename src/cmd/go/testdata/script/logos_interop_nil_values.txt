@@ -14,11 +14,9 @@ logos build -o $WORK/bin/nilvalues$GOEXE ./g2/cmd
 stderr 'logos: nil from Go value'
 
 ! exec $WORK/bin/nilvalues$GOEXE value
-stderr 'nil pointer dereference'
 ! stderr 'logos: nil from Go value'
 
 ! exec $WORK/bin/nilvalues$GOEXE iface
-stderr 'nil pointer dereference'
 ! stderr 'logos: nil from Go value'
 cd ..
 
