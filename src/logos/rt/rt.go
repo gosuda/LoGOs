@@ -23,6 +23,20 @@ type Site struct {
 	Line int
 }
 
+// DeferTry joins a deferred call result into an error result. A nil
+// result leaves the target alone, a nil target takes the result
+// as is, and two non-nil errors join with Join semantics.
+func DeferTry(errp *error, e error) {
+	if e == nil {
+		return
+	}
+	if *errp == nil {
+		*errp = e
+		return
+	}
+	*errp = Join(*errp, e)
+}
+
 // Join combines two errors, matching errors.Join semantics. The lowering
 // keeps a nil result alone and calls Join only for two non-nil errors.
 func Join(a, b error) error {

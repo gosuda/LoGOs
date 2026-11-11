@@ -379,6 +379,7 @@ func valList(piece capturePiece, tw *twin) []syntax.Expr {
 
 func (fc *funcLower) lowerDeferTry(s *syntax.CallStmt, t *syntax.TryExpr, call *syntax.CallExpr) []syntax.Stmt {
 	fl := fc.fl
+	fc.fl.needRT = true
 	cpos := syntax.StartPos(s)
 	stmtOff := fl.off(cpos)
 	spanEnd := skipCloseParens(fl.src, fl.off(t.Pos())+1)
@@ -386,13 +387,11 @@ func (fc *funcLower) lowerDeferTry(s *syntax.CallStmt, t *syntax.TryExpr, call *
 	if !ok {
 		return []syntax.Stmt{s}
 	}
-	native, textStmts, tw := fc.checkPair(plan, cpos)
-	closureN := deferClosure(cpos, []syntax.Stmt{native[len(native)-1]})
-	headN := append(slices.Clone(native[:len(native)-1]), deferOf(cpos, callOf(cpos, closureN, nil)))
+	_, textStmts, tw := fc.checkPair(plan, cpos)
+	headN := []syntax.Stmt{deferOf(cpos, callOf(cpos, rtSel(cpos, "DeferTry"), []syntax.Expr{addrOf(cpos, nameOf(cpos, fc.errName)), call}))}
 	closureT := deferClosure(cpos, []syntax.Stmt{textStmts[len(textStmts)-1]})
 	headT := append(slices.Clone(textStmts[:len(textStmts)-1]), deferOf(cpos, callOf(cpos, closureT, nil)))
 	if plan.isMethod && plan.recv.nilCheck {
-		headN = spliceRecvCheck(headN, ifaceNilCheckStmt(cpos, plan.recv.single, plan.method))
 		headT = spliceRecvCheck(headT, ifaceNilCheckStmt(cpos, plan.recv.single, plan.method))
 	}
 	prefix := leftoverComments(fl, span{start: stmtOff, end: spanEnd}, planSpans(plan))

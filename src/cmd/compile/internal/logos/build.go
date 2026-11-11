@@ -100,6 +100,10 @@ func nilOf(pos syntax.Pos) *syntax.Name {
 	return nameOf(pos, "nil")
 }
 
+func addrOf(pos syntax.Pos, x syntax.Expr) *syntax.Operation {
+	return at(&syntax.Operation{Op: syntax.And, X: x}, pos)
+}
+
 func callOf(pos syntax.Pos, fun syntax.Expr, args []syntax.Expr) *syntax.CallExpr {
 	return at(&syntax.CallExpr{Fun: fun, ArgList: args}, pos)
 }
