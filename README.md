@@ -15,12 +15,12 @@ Why the extra syntax:
 - **Closed unions**: enforce exhaustive variant matching across sum types at compile time.
 
 * **Backend**: Go 1.27 (`src/go.mod` specifies `module std` with `go 1.27`).
-* **Bootstrap toolchain**: Go 1.24.6 or newer (`src/make.bash` requires `bootgo=1.24.6`; source build verified with upstream Go 1.27.3 on Linux/amd64).
-* **File extensions**: `.lgo` for loGo/s source packages; `.go` for plain Go packages.
+* **Bootstrap toolchain**: Go 1.24.6 or newer (`src/make.bash` requires `bootgo=1.24.6`).
+* **File extensions**: `.lgo` for loGo/s source packages, plus three alias extensions (U+1F4DC, U+26A1, and the gopher sequence) that `logos` accepts; `.go` for plain Go packages.
 * **Module boundaries**: One language per module; Go and loGo/s modules interoperate across imports.
 * **Ejection**: `logos eject [-o DIR]` emits an upstream-compatible Go 1.27 module tree.
 * **Plain Go underneath**: ejected output matches the compiler's lowering, proven by `TestEjectMatchesLowering` in [src/cmd/compile/internal/logos/eject_test.go](src/cmd/compile/internal/logos/eject_test.go).
-* **Go keeps its meaning**: plain `go` retains upstream language semantics and command text, proven by the `run.bash` regression gate ([src/run.bash](src/run.bash)).
+* **Go keeps its meaning**: plain `go` retains upstream language semantics and command text ([src/run.bash](src/run.bash) runs the regression suite).
 * **Imports cross kinds, one kind per module**: Go and loGo/s packages import each other, and a module holds one language, proven by the `logos_interop.txt` script test ([src/cmd/go/testdata/script/logos_interop.txt](src/cmd/go/testdata/script/logos_interop.txt)).
 * **Diagnostics**: `logos lint` provides in-compiler analysis for main-module packages without building binaries.
 * **License**: BSD-3-Clause (see [LICENSE](LICENSE)).
@@ -46,7 +46,7 @@ The full language definition is in [logos-doc/SPEC.md](logos-doc/SPEC.md).
 
 ## Install
 
-Building loGos from source requires Git, Bash, and a working bootstrap Go installation of version 1.24.6 or newer (see [src/make.bash](src/make.bash)).
+Building loGo/s from source requires Bash and a working bootstrap Go installation of version 1.24.6 or newer (see [src/make.bash](src/make.bash)).
 
 1. Clone the repository:
 
@@ -118,7 +118,7 @@ Output:
 
 ### Eject to standard Go
 
-The `logos eject` command converts a loGo/s module into standard Go code that builds with any upstream Go 1.27 compiler:
+The `logos eject` command converts a loGo/s module into standard Go code that builds with an upstream Go 1.27.2 or newer toolchain:
 
 ```sh
 logos eject -o ../logos-hello-go
@@ -127,11 +127,11 @@ cd ../logos-hello-go
 
 Use the same shell as the installation steps, which saved the upstream executable in `upstream_go`.
 In a new shell, set `upstream_go` to the absolute path of your upstream Go executable.
-If you used Go 1.24 through 1.26 for bootstrap, select an upstream Go 1.27 or newer installation instead.
+If you used Go 1.24 through 1.26 for bootstrap, select an upstream Go 1.27.2 or newer installation instead.
 Check its version before running the ejected module.
 
 ```sh
-: "${upstream_go:?Set upstream_go to an upstream Go 1.27+ executable}"
+: "${upstream_go:?Set upstream_go to an upstream Go 1.27.2+ executable}"
 env -u GOROOT -u GOTOOLCHAIN "$upstream_go" version
 env -u GOROOT -u GOTOOLCHAIN "$upstream_go" run .
 ```
@@ -144,7 +144,7 @@ Output:
 
 Both invocations print `42 <nil>`. The ejected module is pure Go.
 
-`logos eject [-o DIR]` requires that the target directory `DIR` either does not exist or is empty. Ejection translates `.lgo` sources into standard `.go` files, preserves source comments, places dependency modules under `DIR/_logos_deps`, and writes runtime support under `DIR/_logos_deps/rt` as module `github.com/gosuda/loGos/rt`. Upstream Go 1.27 or newer is required to compile the ejected output.
+`logos eject [-o DIR]` requires that the target directory `DIR` either does not exist or is empty. Ejection translates `.lgo` sources into standard `.go` files, preserves source comments, places dependency modules under `DIR/_logos_deps`, and writes runtime support under `DIR/_logos_deps/rt` as module `github.com/gosuda/loGos/rt`. Upstream Go 1.27.2 or newer is required to compile the ejected output.
 
 ## Features
 
@@ -338,7 +338,7 @@ Output:
 sum: 60
 ```
 
-Structured concurrency does not provide universal data-race freedom; concurrent writes to shared storage still require locks, channels, or atomic values. Cancellation unblocks plain channel operations written directly in a child and wakes netpoll-backed network I/O, but blocking operations like `time.Sleep`, regular file I/O, and cgo calls cannot be interrupted and must run until completion before the group joins.
+Structured concurrency does not provide universal data-race freedom; concurrent writes to shared storage still require locks, channels, or atomic values. Cancellation unblocks plain channel operations written directly in a child and wakes netpoll-backed network I/O, but cgo calls cannot be interrupted this way and must run until completion before the group joins.
 
 ### Generic type switches
 
@@ -429,7 +429,7 @@ Output:
 int nil gorg 90
 ```
 
-Closed unions cannot be extended outside their declaring package and use Go's standard interface representation at run time rather than a tagged-union layout. Property interfaces require pointers when writing to properties, and type switch expressions over unions must explicitly handle every member plus `nil` unless a `default` case is provided.
+Closed unions use Go's standard interface representation at run time rather than a tagged-union layout. Property interfaces require pointers when writing to properties, and type switch expressions over unions must explicitly handle every member plus `nil` unless a `default` case is provided.
 
 ### Named tuples
 
@@ -481,7 +481,7 @@ Field names are defined by the tuple type or function signature rather than in l
 
 ### Element-wise array math
 
-Small fixed-size numeric arrays support arithmetic operators (`+`, `-`, `*`, `/`, `&`, `|`, `^`) and reductions (`.sum()`, `.min()`, `.max()`, `.dot()`) directly without manual loops; the operators allocate nothing. Reductions use a language-specified pairwise evaluation order so floating-point results remain deterministic across supported vector lowerings and scalar fallback. The compiler eliminates manual vectorization loops while guaranteeing identical numeric results across amd64, arm64, and scalar lowerings.
+Small fixed-size numeric arrays support arithmetic operators (`+`, `-`, `*`, `/`, `&`, `|`, `^`) and reductions (`.sum()`, `.min()`, `.max()`, `.dot()`) directly without manual loops. Reductions use a language-specified pairwise evaluation order so floating-point results remain deterministic across supported vector lowerings and scalar fallback. The compiler eliminates manual vectorization loops while guaranteeing identical numeric results across amd64, arm64, and scalar lowerings.
 
 `main.lgo`:
 
@@ -532,7 +532,7 @@ The language also provides these concise extensions defined in [logos-doc/SPEC.m
 
 ## Usage
 
-Day to day, `logos` mirrors the `go` command: `logos run`, `logos build`, and `logos test` work on loGo/s modules the way their `go` counterparts work on Go modules. Two commands are specific to loGo/s. `logos eject [-o DIR]` writes the module as standard Go (see [Eject to standard Go](#eject-to-standard-go)). `logos lint` runs the in-compiler checks below.
+Day to day, `logos` mirrors the `go` command: `logos run`, `logos build`, and `logos test` work on loGo/s modules the way their `go` counterparts work on Go modules. Five commands are specific to loGo/s: `logos context`, `logos eject [-o DIR]`, `logos lint`, `logos lsp`, and `logos next`. `logos eject [-o DIR]` writes the module as standard Go (see [Eject to standard Go](#eject-to-standard-go)). `logos lint` runs the in-compiler checks below.
 
 ### Lint
 
@@ -552,7 +552,7 @@ logos lint [build flags] [--pedantic] [--json-diagnostics] [packages]
   - `//logos:allow(<rule>)`: Placed directly above a declaration or statement to suppress a `deny` or `warn` diagnostic. In Go packages, `forbid` rules run at `deny` severity and can be silenced by this directive; in `.lgo` packages, `forbid` rules cannot be silenced.
   - `//logos:zeroalloc`: Placed above a function declaration as a static escape-analysis site contract requiring the compiler to reject local heap allocations at that site (see [logos-doc/SPEC.md](logos-doc/SPEC.md)).
 - **Flags**:
-  - `--pedantic`: Enables pedantic diagnostics overriding module configuration.
+  - `--pedantic`: Enables the pedantic group, raising it from `allow` to `warn`. A stricter `logos.toml` severity stays in force. `--pedantic=false` turns the group off.
   - `--json-diagnostics`: Emits one JSON object per diagnostic line on standard error.
 
 ## Language
@@ -567,9 +567,9 @@ One row per shipped form, with milestone IDs from [logos-doc/IMPLEMENTATION.md](
 | M8 | `go group (ctx, limit = N)` | Structured concurrency with automatic joins, cancellation, and a concurrency cap. |
 | M9 | `logos lint`, `--json-diagnostics` | In-compiler checks that stop before code generation, with one JSON object per diagnostic. |
 | M10 | `logos next`, `logos context` | Rewrites a Go module toward loGo/s; prints the declaration and signatures for one symbol. |
-| M11 | Generated `MarshalJSON` / `UnmarshalJSON` | Static JSON methods on tagged structs with `encoding/json`-matching output. |
-| M13 | `-O` | Optimization levels from `-O=0` to `-O=3` plus `Os`, with inline budgets, variable-make stack buffers, and `target_cpu`. Every backend, runtime, and tooling improvement that ships applies to Go packages as well as loGo/s packages under `logos` and plain `go`. |
-| M14 | Fixed-array SIMD | Element-wise operators and reductions on small fixed-size arrays behind `GOEXPERIMENT=simd`. |
+| M11 | Generated `MarshalJSON` / `UnmarshalJSON` | Static `MarshalJSON` and `UnmarshalJSON` methods on structs that have JSON tags, defaults, or non-nil pointer fields and no embedded fields, with `encoding/json`-matching output. |
+| M13 | `-O` | Optimization levels `-O=0` to `-O=3` and `-O=s` on the command line, with inline budgets and variable-make stack buffers. In `logos.toml`, `opt_level` takes `O0` to `O3` or `Os` (default `O2`). Backend, runtime, and tooling improvements apply to Go and loGo/s packages under `logos` and plain `go`, except the items SPEC §0.1 lists as loGo/s-only or logos-only. `target_cpu` applies to `logos` builds only; plain `go` keeps the upstream GOAMD64 and GOARM64 defaults. |
+| M14 | Fixed-array SIMD | Element-wise operators and reductions on small fixed-size arrays. The vectorized lowering needs `GOEXPERIMENT=simd`; without it the compiler emits unrolled scalar code with the same results. |
 | M16 | WASM profile | Automatic for GOOS=js and GOOS=wasip1 under `logos`; `--wasm-features=stack-switching`, `--wasm-loader`, and the `//logos:wasmimport` / `//logos:wasmexport` directives select options. |
 | M17 | Smart stack | Flag only: `GOEXPERIMENT=logosstack` starts goroutines at per-call-site sizes. |
 | M18 | Arena and bump allocation | On by default under `logos` (`[build] arena = true`); `GOEXPERIMENT=logosarena` under plain `go`. |
@@ -585,6 +585,7 @@ The [plugins/logos/](plugins/logos/) directory packages skills for coding assist
 - [`logos-review`](plugins/logos/skills/logos-review/SKILL.md): Review `.lgo` code against compiler rules, diagnostics, and language invariants.
 - [`logos-from-go`](plugins/logos/skills/logos-from-go/SKILL.md): Guide migration of existing plain Go packages to loGo/s syntax.
 - [`logos-performance`](plugins/logos/skills/logos-performance/SKILL.md): Assist with -O tiers, SIMD, WASM, stack, arena, fast cgo, and zero-alloc.
+- [`logos-concurrency`](plugins/logos/skills/logos-concurrency/SKILL.md): Structure goroutine groups and shared state in loGo/s.
 
 To provide coding agents with project conventions and compiler constraints, copy [plugins/logos/templates/AGENTS.md](plugins/logos/templates/AGENTS.md) into the target repository root. See [plugins/logos/](plugins/logos/) for plugin structure and usage documentation.
 
