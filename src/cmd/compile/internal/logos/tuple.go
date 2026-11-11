@@ -492,6 +492,131 @@ func replaceTupleField(f, old, repl reflect.Value) bool {
 	}
 	return false
 }
+func (fl *fileLower) stageReplacement(old, repl syntax.Expr) {
+	if fl.stagedReplacements == nil {
+		fl.stagedReplacements = make(map[syntax.Expr]syntax.Expr)
+	}
+	fl.stagedReplacements[old] = repl
+}
+
+func (fl *fileLower) flushOuterFirst() {
+	fl.flushStaged(false)
+}
+
+func (fl *fileLower) flushInnerFirst() {
+	fl.flushStaged(true)
+}
+
+func (fl *fileLower) flushStaged(innerFirst bool) {
+	if len(fl.stagedReplacements) == 0 {
+		return
+	}
+	if innerFirst {
+		replaceInnerFirst(fl.file, fl.stagedReplacements)
+	} else {
+		replaceOuterFirst(fl.file, fl.stagedReplacements)
+	}
+	fl.stagedReplacements = nil
+}
+
+// replaceOuterFirst swaps each staged original in one walk, parents before
+// children. A nested original inside a swapped parent leaves with the
+// detached subtree, whose replacement text already covers it.
+func replaceOuterFirst(root syntax.Node, reps map[syntax.Expr]syntax.Expr) {
+	sweepExpr(reflect.ValueOf(root), reps, false)
+}
+
+// replaceInnerFirst swaps each staged original children before parents,
+// matching sequential inner-first replacement for nested lambdas, whose
+// replacements share nodes with the originals.
+func replaceInnerFirst(root syntax.Node, reps map[syntax.Expr]syntax.Expr) {
+	sweepExpr(reflect.ValueOf(root), reps, true)
+}
+
+func sweepExpr(f reflect.Value, reps map[syntax.Expr]syntax.Expr, innerFirst bool) {
+	switch f.Kind() {
+	case reflect.Interface:
+		sweepInterface(f, reps, innerFirst)
+	case reflect.Slice, reflect.Array:
+		for i := range f.Len() {
+			sweepExpr(f.Index(i), reps, innerFirst)
+		}
+	case reflect.Pointer:
+		sweepPointer(f, reps, innerFirst)
+	}
+}
+
+func sweepInterface(f reflect.Value, reps map[syntax.Expr]syntax.Expr, innerFirst bool) {
+	if f.IsNil() {
+		return
+	}
+	if !innerFirst && swapStaged(f, reps) {
+		return
+	}
+	descendNode(f.Elem(), reps, innerFirst)
+	if innerFirst {
+		swapStaged(f, reps)
+	}
+}
+
+func swapStaged(f reflect.Value, reps map[syntax.Expr]syntax.Expr) bool {
+	e, ok := f.Elem().Interface().(syntax.Expr)
+	if !ok {
+		return false
+	}
+	r, ok := reps[e]
+	if !ok {
+		return false
+	}
+	if f.CanSet() {
+		f.Set(reflect.ValueOf(r))
+	}
+	return true
+}
+
+func descendNode(v reflect.Value, reps map[syntax.Expr]syntax.Expr, innerFirst bool) {
+	if v.Kind() != reflect.Pointer || v.IsNil() {
+		return
+	}
+	if _, ok := v.Interface().(syntax.Node); !ok {
+		return
+	}
+	sweepExpr(v, reps, innerFirst)
+}
+
+func sweepPointer(f reflect.Value, reps map[syntax.Expr]syntax.Expr, innerFirst bool) {
+	if f.IsNil() {
+		return
+	}
+	n, ok := f.Interface().(syntax.Node)
+	if !ok || n == nil {
+		return
+	}
+	if _, leaf := n.(*syntax.BranchStmt); leaf {
+		return
+	}
+	if !innerFirst {
+		if e, ok := n.(syntax.Expr); ok {
+			if _, want := reps[e]; want {
+				return
+			}
+		}
+	}
+	sweepStructFields(f.Elem(), reps, innerFirst)
+}
+
+func sweepStructFields(v reflect.Value, reps map[syntax.Expr]syntax.Expr, innerFirst bool) {
+	if v.Kind() != reflect.Struct {
+		return
+	}
+	typ := v.Type()
+	for i := range v.NumField() {
+		if !typ.Field(i).IsExported() && !v.Field(i).CanSet() {
+			continue
+		}
+		sweepExpr(v.Field(i), reps, innerFirst)
+	}
+}
 
 func (fl *fileLower) lowerTupleSelect(e *syntax.SelectorExpr) {
 	base := fl.pkg.info.TypeOf(e.X)

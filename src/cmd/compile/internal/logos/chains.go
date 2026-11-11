@@ -50,6 +50,7 @@ func (fl *fileLower) lowerChains() {
 			fl.lowerChainPkgDecl(decl)
 		}
 	}
+	fl.flushOuterFirst()
 }
 
 func (fl *fileLower) transparentWrappers() {
@@ -1434,7 +1435,7 @@ func (cg *chainGen) emit(call *syntax.CallExpr, ops []chainOp, baseText otext, e
 	if !isTry {
 		text := cat(gen("func() "+ce.resultSpelling()+" { "), loopText, gen(" }()"))
 		native := parseChainExprFrag(fl, text.s, call.Pos())
-		replaceTupleExpr(fl.file, call, native)
+		fl.stageReplacement(call, native)
 		fl.addT(cg.whole.start, cg.whole.end, text)
 		return
 	}
@@ -1452,7 +1453,7 @@ func (cg *chainGen) emit(call *syntax.CallExpr, ops []chainOp, baseText otext, e
 	hoistNative := parseChainStmtFrag(fl, hoistText.s, call.Pos())
 	cg.hoists = append(cg.hoists, chainHoist{stmts: hoistNative, text: hoistText})
 	native := nameOf(call.Pos(), temp)
-	replaceTupleExpr(fl.file, call, native)
+	fl.stageReplacement(call, native)
 	fl.add(cg.whole.start, cg.whole.end, temp)
 }
 

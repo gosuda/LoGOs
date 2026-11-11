@@ -22,8 +22,11 @@ func (fl *fileLower) lowerLambdas() {
 		return true
 	})
 	for i := len(lams) - 1; i >= 0; i-- {
-		fl.lowerLambdaExpr(lams[i])
+		if lit := fl.lowerLambdaExpr(lams[i]); lit != nil {
+			fl.stageReplacement(lams[i], lit)
+		}
 	}
+	fl.flushInnerFirst()
 	fl.flushTypeImports()
 }
 
@@ -54,10 +57,10 @@ func lambdaBodyEnd(src []byte, from int) int {
 	return end
 }
 
-func (fl *fileLower) lowerLambdaExpr(lam *syntax.LambdaExpr) {
+func (fl *fileLower) lowerLambdaExpr(lam *syntax.LambdaExpr) *syntax.FuncLit {
 	sig, ok := fl.pkg.info.TypeOf(lam).(*types2.Signature)
 	if !ok {
-		return
+		return nil
 	}
 	pos := lam.Pos()
 	var params []otext
@@ -69,31 +72,31 @@ func (fl *fileLower) lowerLambdaExpr(lam *syntax.LambdaExpr) {
 		if !ok {
 			spelled, ok = fl.spellType(sig.Params().At(i).Type())
 			if !ok {
-				return
+				return nil
 			}
 		}
 		params = append(params, fl.srcUser(fl.off(name.Pos()), fl.off(name.Pos())+len(name.Value)), gen(" "+spelled))
 	}
 	resultsText := fl.lambdaResultSpell(pos, sig)
 	if resultsText == "" && sig.Results().Len() > 0 {
-		return
+		return nil
 	}
 	if block, ok := lam.Body.(*syntax.BlockStmt); ok {
 		var ok2 bool
 		resultsText, ok2 = fl.lowerLambdaScopeDefers(lam, pos, sig, block, cat(params...).s, resultsText)
 		if !ok2 {
-			return
+			return nil
 		}
 	}
 	body, bodyText := fl.lambdaBody(lam, sig, pos)
 	fullText := cat(gen("func("), cat(params...), gen(")"+resultsText+" { "), bodyText, gen(" }"))
 	ft, ok := typeExprAt("func("+cat(params...).s+")"+resultsText, pos)
 	if !ok {
-		return
+		return nil
 	}
 	functype, ok := ft.(*syntax.FuncType)
 	if !ok {
-		return
+		return nil
 	}
 	lit := &syntax.FuncLit{Type: functype, Body: body}
 	lit.SetPos(pos)
@@ -104,7 +107,7 @@ func (fl *fileLower) lowerLambdaExpr(lam *syntax.LambdaExpr) {
 		end = fl.lambdaCaptureSpan(lam, expr).end
 	}
 	fl.addT(fl.off(syntax.StartPos(lam)), end, fullText)
-	replaceTupleExpr(fl.file, lam, lit)
+	return lit
 }
 
 func (fl *fileLower) lambdaResultSpell(pos syntax.Pos, sig *types2.Signature) string {
@@ -167,6 +170,9 @@ func (fl *fileLower) lambdaBody(lam *syntax.LambdaExpr, sig *types2.Signature, p
 	}
 	espan := fl.lambdaCaptureSpan(lam, expr)
 	text := fl.drainBodyWrapper(expr, fl.textOf(espan))
+	if native, done := fl.stagedReplacements[expr]; done {
+		expr = native
+	}
 	return blockOf(pos, []syntax.Stmt{returnOf(pos, []syntax.Expr{expr})}), cat(gen("return "), text)
 }
 

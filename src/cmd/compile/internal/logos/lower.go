@@ -216,10 +216,15 @@ type fileLower struct {
 	// function's results.
 	loweredChains map[*syntax.CallExpr]bool
 	transparent   map[*syntax.FuncLit]bool
-	chainGrp      chainGroup               // M6-S7 hook: group-body scope for chain results.
-	chainExit     func(err string) string  // M6-S7 hook: a header closure hands a failing hoist's error to its statement; nil returns it.
-	groupDone     map[*syntax.FuncLit]bool // M8-S2 hook: finished group closures, pruned by the literal scan.
-	funcs         map[*syntax.BlockStmt]*funcLower
+	// stagedReplacements batches whole-tree expression swaps: passes
+	// record old-to-new pairs while lowering and flush them with one
+	// walk at the end of the pass, instead of rescanning the whole file
+	// per replaced node.
+	stagedReplacements map[syntax.Expr]syntax.Expr
+	chainGrp           chainGroup               // M6-S7 hook: group-body scope for chain results.
+	chainExit          func(err string) string  // M6-S7 hook: a header closure hands a failing hoist's error to its statement; nil returns it.
+	groupDone          map[*syntax.FuncLit]bool // M8-S2 hook: finished group closures, pruned by the literal scan.
+	funcs              map[*syntax.BlockStmt]*funcLower
 }
 
 // off converts a valid file position to a byte offset.
@@ -423,6 +428,7 @@ func spanInside(sp splice, s span) bool {
 }
 
 func partitionSplices(list []splice, s span) (kept, inner []splice) {
+	kept = list[:0]
 	for _, sp := range list {
 		if spanInside(sp, s) {
 			inner = append(inner, sp)
@@ -439,7 +445,8 @@ func (fl *fileLower) drainInner(s span) []splice {
 		r.splices = kept
 		return inner
 	}
-	var kept, inner []splice
+	kept := fl.splices[:0]
+	var inner []splice
 	for _, sp := range fl.splices {
 		switch {
 		case sp.host != nil && spanInside(sp, s):
@@ -471,7 +478,8 @@ func (fl *fileLower) dropInner(s span) []splice {
 		r.splices = kept
 		return inner
 	}
-	var kept, inner []splice
+	kept := fl.splices[:0]
+	var inner []splice
 	for _, sp := range fl.splices {
 		switch {
 		case sp.host != nil && spanInside(sp, s):

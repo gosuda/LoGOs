@@ -108,6 +108,7 @@ func (fl *fileLower) lowerInterp() {
 			needUnsafe = true
 		}
 	}
+	fl.flushOuterFirst()
 	fl.flushInterpImports(needConv, needUnsafe)
 }
 
@@ -184,7 +185,7 @@ func (fl *fileLower) lowerInterpExpr(e *syntax.InterpExpr, kinds []types2.LogosI
 	if len(e.Exprs) == 0 {
 		text := fmt.Sprintf("%q", e.Parts[0])
 		fl.add(start, end, text)
-		fl.replaceInterpLit(e, litOf(pos, text, syntax.StringLit))
+		fl.stageReplacement(e, litOf(pos, text, syntax.StringLit))
 		return false, gen(text)
 	}
 	if len(kinds) != len(e.Exprs) || len(e.Opens) != len(e.Exprs) || len(e.Closes) != len(e.Exprs) {
@@ -210,6 +211,9 @@ func (fl *fileLower) lowerInterpExpr(e *syntax.InterpExpr, kinds []types2.LogosI
 	var lines []otext
 	for i := range e.Exprs {
 		op := e.Exprs[i]
+		if native, ok := fl.stagedReplacements[op]; ok {
+			op = native
+		}
 		v := valName(i)
 		stmts = append(stmts, defineOf(pos, []syntax.Expr{nameOf(pos, v)}, []syntax.Expr{op}))
 		lines = append(lines, cat(gen(v+" := "), opTexts[i]))
@@ -342,7 +346,7 @@ func (fl *fileLower) lowerInterpExpr(e *syntax.InterpExpr, kinds []types2.LogosI
 	}, pos)
 	lit := at(&syntax.FuncLit{Type: signature, Body: blockOf(pos, stmts)}, pos)
 	native := callOf(pos, lit, nil)
-	fl.replaceInterpLit(e, native)
+	fl.stageReplacement(e, native)
 	if fl.optBodyType == nil {
 		fl.optBodyType = make(map[syntax.Expr]types2.Type)
 	}
@@ -359,21 +363,6 @@ func (fl *fileLower) lowerInterpExpr(e *syntax.InterpExpr, kinds []types2.LogosI
 	text := cat(parts...)
 	fl.addT(start, end, text)
 	return needConv, text
-}
-
-func (fl *fileLower) replaceInterpLit(e *syntax.InterpExpr, native syntax.Expr) {
-	syntax.Inspect(fl.file, func(n syntax.Node) bool {
-		if n == nil {
-			return true
-		}
-		replaceFieldExprs(n, anyInterfaceFields, func(x syntax.Expr) syntax.Expr {
-			if t, ok := x.(*syntax.InterpExpr); ok && t == e {
-				return native
-			}
-			return x
-		})
-		return true
-	})
 }
 
 func (fl *fileLower) interpOperandText(open, close syntax.Pos) otext {
