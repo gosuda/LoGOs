@@ -6,7 +6,6 @@ package rt
 
 import (
 	"runtime"
-	"strings"
 	"testing"
 	"unsafe"
 )
@@ -120,9 +119,15 @@ func freshViewas() *viewasHeader {
 func TestViewAsPanicMentionsSizes(t *testing.T) {
 	defer func() {
 		r := recover()
-		msg, _ := r.(string)
-		if !strings.HasPrefix(msg, "logos: ViewAs: need ") || !strings.Contains(msg, ", have ") {
-			t.Fatalf("panic message shape = %q", msg)
+		if r == nil {
+			t.Fatalf("ViewAs did not panic on nil input")
+		}
+		msg, ok := r.(string)
+		if !ok {
+			t.Fatalf("ViewAs panic type = %T, want string", r)
+		}
+		if msg != "logos: ViewAs: need 16 bytes, have 0" {
+			t.Fatalf("ViewAs panic = %q, want %q", msg, "logos: ViewAs: need 16 bytes, have 0")
 		}
 	}()
 	_ = ViewAs[viewasHeader](nil)
