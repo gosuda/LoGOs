@@ -3,12 +3,26 @@ env GOTOOLCHAIN=local
 
 cd m
 logos build -o $WORK/hello$GOEXE .
-go tool objdump -s 'main\.tz' $WORK/hello$GOEXE
-stdout 'TZCNT'
+exec $WORK/hello$GOEXE
+stdout '^128$'
+go run ./checkrorx $WORK/hello$GOEXE
+stdout '^rorx ok$'
 cd base
 logos build -o $WORK/hello-base$GOEXE .
-go tool objdump -s 'main\.tz' $WORK/hello-base$GOEXE
-! stdout 'TZCNT'
+exec $WORK/hello-base$GOEXE
+stdout '^128$'
+cd ..
+! go run ./checkrorx $WORK/hello-base$GOEXE
+stderr 'no RORX encoding'
+
+[!exec:qemu-x86_64] skip 'qemu-x86_64 is required for the pre-v3 run leg'
+[!GOARCH:amd64] skip 'the pre-v3 run leg needs an amd64 binary'
+
+! exec qemu-x86_64 -cpu Nehalem $WORK/hello$GOEXE
+stderr 'v3 microarchitecture'
+! stdout '128'
+exec qemu-x86_64 -cpu Nehalem $WORK/hello-base$GOEXE
+stdout '^128$'
 
 -- m/go.mod --
 module example.com/targetcpuisa
@@ -24,12 +38,38 @@ import (
 )
 
 //go:noinline
-func tz(x uint64) uint64 {
-	return uint64(bits.TrailingZeros64(x))
+func rol(x uint64) uint64 {
+	return bits.RotateLeft64(x, 7)
 }
 
 func main() {
-	fmt.Println(tz(8))
+	fmt.Println(rol(1))
+}
+
+-- m/checkrorx/main.go --
+package main
+
+import (
+	"bytes"
+	"fmt"
+	"os"
+)
+
+func main() {
+	if len(os.Args) != 2 {
+		fmt.Fprintln(os.Stderr, "usage: checkrorx binary")
+		os.Exit(2)
+	}
+	raw, err := os.ReadFile(os.Args[1])
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "read:", err)
+		os.Exit(1)
+	}
+	if bytes.Index(raw, []byte{0xC4, 0xE3, 0xFB, 0xF0}) < 0 {
+		fmt.Fprintln(os.Stderr, "no RORX encoding")
+		os.Exit(1)
+	}
+	fmt.Println("rorx ok")
 }
 
 -- m/base/go.mod --
@@ -50,10 +90,10 @@ import (
 )
 
 //go:noinline
-func tz(x uint64) uint64 {
-	return uint64(bits.TrailingZeros64(x))
+func rol(x uint64) uint64 {
+	return bits.RotateLeft64(x, 7)
 }
 
 func main() {
-	fmt.Println(tz(8))
+	fmt.Println(rol(1))
 }
