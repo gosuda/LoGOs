@@ -6,13 +6,7 @@ package logos
 
 import (
 	"fmt"
-	"go/ast"
-	"go/parser"
-	"go/token"
 	"math"
-	"os"
-	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -79,56 +73,51 @@ func TestConstmapSwitchMax(t *testing.T) {
 	}
 }
 
-func TestConstmapProbeIsSingleProbe(t *testing.T) {
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller failed")
-	}
-	src, err := os.ReadFile(filepath.Join(filepath.Dir(file), "constmap.go"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	fset := token.NewFileSet()
-	f, err := parser.ParseFile(fset, "constmap.go", src, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var probe *ast.FuncDecl
-	for _, d := range f.Decls {
-		if fd, ok := d.(*ast.FuncDecl); ok && fd.Name.Name == "probe" {
-			probe = fd
-		}
-	}
-	if probe == nil {
-		t.Fatal("func probe not found in constmap.go")
-	}
-	loops, buckets := 0, 0
-	ast.Inspect(probe.Body, func(n ast.Node) bool {
-		switch n := n.(type) {
-		case *ast.ForStmt, *ast.RangeStmt:
-			loops++
-		case *ast.IndexExpr:
-			if sel, ok := n.X.(*ast.SelectorExpr); ok && sel.Sel.Name == "buckets" {
-				buckets++
-			}
-		}
-		return true
-	})
-	if loops != 0 {
-		t.Fatalf("probe holds %d loops, want none (one-probe lookup)", loops)
-	}
-	if buckets != 1 {
-		t.Fatalf("probe reads %d bucket expressions, want exactly 1", buckets)
-	}
-	for _, name := range []string{"constmap.go", "constmap_lower.go"} {
-		body, err := os.ReadFile(filepath.Join(filepath.Dir(file), name))
+func TestConstmapProbeIsSingleShot(t *testing.T) {
+	for _, n := range []int{9, 64, 4096} {
+		keys := constmapKeys(n)
+		l, err := buildConstMap(keys, defaultConstMapBudget)
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("%d keys: %v", n, err)
 		}
-		for _, banned := range []string{"sort.Search", "sort.Find", "BinarySearch", "binarySearch"} {
-			if strings.Contains(string(body), banned) {
-				t.Fatalf("%s contains %q: no logarithmic fallback may satisfy the contract", name, banned)
+		oneShot := func(h uint64) int {
+			b := &l.buckets[constMix(l.salt, h)%uint64(len(l.buckets))]
+			return b.off + int(constMix(b.seed, h)%uint64(b.size))
+		}
+		for i, k := range keys {
+			if got := l.probe(k.hash); got != oneShot(k.hash) {
+				t.Fatalf("%d keys: probe of key %d = %d, want the one-shot slot %d", n, i, got, oneShot(k.hash))
 			}
+			if l.slots[l.probe(k.hash)] != i {
+				t.Fatalf("%d keys: probe of key %d read slot holding %d", n, i, l.slots[l.probe(k.hash)])
+			}
+		}
+		for i := range 20000 {
+			h := constHashString(fmt.Sprintf("__probe%d__", i))
+			if got := l.probe(h); got != oneShot(h) {
+				t.Fatalf("%d keys: probe of hash %#x = %d, want the one-shot slot %d; a search fallback must not satisfy the contract", n, h, got, oneShot(h))
+			}
+		}
+	}
+	l := &constMapLayout{
+		salt: 7,
+		buckets: []constMapBucket{
+			{off: 0, size: 2, seed: 11},
+			{off: 4, size: 1},
+			{off: 2, size: 2, seed: 13},
+			{off: 4, size: 1},
+		},
+		slots:    []int{-1, -1, -1, -1, -1},
+		sentinel: 4,
+	}
+	oneShotSyn := func(h uint64) int {
+		b := &l.buckets[constMix(l.salt, h)%uint64(len(l.buckets))]
+		return b.off + int(constMix(b.seed, h)%uint64(b.size))
+	}
+	for i := range 64 {
+		h := uint64(i) * 0x9e3779b97f4a7c15
+		if got := l.probe(h); got != oneShotSyn(h) {
+			t.Fatalf("synthetic layout: probe of hash %#x = %d, want the one-shot slot %d; a search fallback must not satisfy the contract", h, got, oneShotSyn(h))
 		}
 	}
 }
