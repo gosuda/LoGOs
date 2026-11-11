@@ -130,6 +130,8 @@ func TestSemanticStatementDiscardedCallResults(t *testing.T) {
 		stmtIntFn("package p\nfunc ZeroResult() int {\n\ts := []int{0, 0, 0}\n\tSet(s, 0, 4)\n\tSet(s, 2, 5)\n\treturn s[0]*100 + s[1]*10 + s[2]\n}"),
 		stmtIntFn("package p\nfunc MultiResult() int {\n\ts := []int{0}\n\tTick(s)\n\treturn s[0]\n}"),
 		stmtIntFn("package p\nfunc Parenthesized() int {\n\ts := []int{0}\n\t(Tick(s))\n\t((Tick(s)))\n\treturn s[0]\n}"),
+		stmtIntFn("package p\nfunc FirstResult() int {\n\ts := []int{0}\n\tx, _ := Tick(s)\n\treturn x\n}"),
+		stmtIntFn("package p\nfunc SecondResult() int {\n\ts := []int{0}\n\t_, ok := Tick(s)\n\tif ok {\n\t\treturn s[0] + 10\n\t}\n\treturn -1\n}"),
 		stmtIntFn("package p\nfunc Failing() int {\n\ts := []int{1}\n\tBoom(s)\n\treturn 1\n}"),
 	)
 
@@ -137,6 +139,8 @@ func TestSemanticStatementDiscardedCallResults(t *testing.T) {
 		{`ZeroResult()`, 405},
 		{`MultiResult()`, 1},
 		{`Parenthesized()`, 2},
+		{`FirstResult()`, 1},
+		{`SecondResult()`, 11},
 	} {
 		t.Run(p.call, func(t *testing.T) {
 			stmtWantInt(t, h, p)
