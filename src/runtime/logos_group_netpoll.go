@@ -24,8 +24,9 @@ type logosWaiter struct {
 }
 
 var (
-	logosWaiters     []logosWaiter
-	logosWaiterCount uint32
+	logosWaiters               []logosWaiter
+	logosWaiterCount           uint32
+	logosWaitAfterRegisterHook func()
 )
 
 func logosWaitersSync() {

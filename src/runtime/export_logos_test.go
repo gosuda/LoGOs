@@ -47,3 +47,7 @@ func LogosGrowsliceBufForTest(elem any, buf unsafe.Pointer, bufLen, newLen, num 
 	s := growsliceBuf(buf, newLen, bufLen, num, efaceOf(&elem)._type, buf, bufLen)
 	return s.array, s.len, s.cap
 }
+
+func SetLogosWaitAfterRegisterHookForTest(fn func()) {
+	logosWaitAfterRegisterHook = fn
+}
