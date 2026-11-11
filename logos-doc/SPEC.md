@@ -843,7 +843,7 @@ A closed union MUST use upstream interface equality. [T-204.1][T-203.1]
 
 A non-constant condition MUST fail with `[comptime::not_constant]`. [T-205]
 
-Both branches MUST type-check. [T-205]
+Both branches MUST type-check, except that a `const for` over the fields of a non-struct in a dead branch is not expanded and reports no `const_for_fields`. [T-205]
 
 Only the live branch MUST reach lowering. [T-205]
 
