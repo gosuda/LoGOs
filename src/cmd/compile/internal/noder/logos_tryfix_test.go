@@ -5,6 +5,7 @@
 package noder
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"internal/testenv"
@@ -638,6 +639,197 @@ func g() int { return 5 }
 			d := misplacedTryDiag(t, diags)
 			if len(d.AutofixCandidates) != 0 {
 				t.Fatalf("expected no autofix candidate for %s position, got %d: %+v", tc.name, len(d.AutofixCandidates), d.AutofixCandidates)
+			}
+		})
+	}
+}
+func TestMisplacedTrySplitPositions(t *testing.T) {
+	const stepHelpers = `type myErr string
+
+func (e myErr) Error() string { return string(e) }
+
+var (
+	calls int
+	fail bool
+	got int
+	gotM int
+)
+
+func step() (int, error) {
+	calls++
+	if fail {
+		return 0, myErr("boom")
+	}
+	return 42, nil
+}
+
+func step2() (int, bool, error) {
+	calls++
+	if fail {
+		return 0, false, myErr("boom")
+	}
+	return 42, true, nil
+}
+
+func g(x int) error {
+	got = x
+	return nil
+}
+
+func gInt(x int) int { return x }
+`
+	const stdMain = `func main() {
+	calls, fail = 0, false
+	v, err := compute()
+	if err != nil || v != %d {
+		println("bad")
+	} else {
+		println("ok")
+	}
+	calls, fail = 0, true
+	v, err = compute()
+	if err == nil || err.Error() != "boom" || v != 0 {
+		println("bad")
+	} else {
+		println("err")
+	}
+	if calls != 1 {
+		println("bad")
+	} else {
+		println("once")
+	}
+}
+`
+	tests := []struct {
+		name      string
+		decls     string
+		misplaced string
+		hand      string
+		mainSrc   string
+		wantVal   int
+		wantOffer bool
+	}{
+		{
+			name:      "call_argument",
+			misplaced: "func compute() (int, error) {\n\terr := g(step()?)\n\treturn got, err\n}\n",
+			hand:      "func compute() (int, error) {\n\t_v, _e := step()\n\tif _e != nil {\n\t\treturn 0, _e\n\t}\n\terr := g(_v)\n\treturn got, err\n}\n",
+			wantVal:   42,
+			wantOffer: true,
+		},
+		{
+			name:      "binary_operand",
+			misplaced: "func compute() (int, error) {\n\ta := 2 + step()?\n\treturn a, nil\n}\n",
+			hand:      "func compute() (int, error) {\n\t_v, _e := step()\n\tif _e != nil {\n\t\treturn 0, _e\n\t}\n\ta := 2 + _v\n\treturn a, nil\n}\n",
+			wantVal:   44,
+			wantOffer: true,
+		},
+		{
+			name:      "chain_argument",
+			decls:     "type S struct{}\n\nfunc (S) M(x int) S {\n\tgotM = x\n\treturn S{}\n}\n\nfunc (S) N() int {\n\treturn gotM\n}\n",
+			misplaced: "func compute() (int, error) {\n\tv := S{}.M(step()?).N()\n\treturn v, nil\n}\n",
+			hand:      "func compute() (int, error) {\n\t_v, _e := step()\n\tif _e != nil {\n\t\treturn 0, _e\n\t}\n\tv := S{}.M(_v).N()\n\treturn v, nil\n}\n",
+			wantVal:   42,
+			wantOffer: true,
+		},
+		{
+			name:      "composite_literal",
+			misplaced: "func compute() (int, error) {\n\txs := []int{step()?, 1}\n\treturn xs[0] + xs[1], nil\n}\n",
+			hand:      "func compute() (int, error) {\n\t_v, _e := step()\n\tif _e != nil {\n\t\treturn 0, _e\n\t}\n\txs := []int{_v, 1}\n\treturn xs[0] + xs[1], nil\n}\n",
+			wantVal:   43,
+			wantOffer: true,
+		},
+		{
+			name:      "if_condition",
+			misplaced: "func compute() (int, error) {\n\tif step()? == 42 {\n\t\treturn 43, nil\n\t}\n\treturn 0, nil\n}\n",
+			hand:      "func compute() (int, error) {\n\t_v, _e := step()\n\tif _e != nil {\n\t\treturn 0, _e\n\t}\n\tif _v == 42 {\n\t\treturn 43, nil\n\t}\n\treturn 0, nil\n}\n",
+			wantVal:   43,
+			wantOffer: true,
+		},
+		{
+			name:      "return_partial",
+			misplaced: "func compute() (int, error) {\n\treturn step()?, nil\n}\n",
+			hand:      "func compute() (int, error) {\n\t_v, _e := step()\n\tif _e != nil {\n\t\treturn 0, _e\n\t}\n\treturn _v, nil\n}\n",
+			wantVal:   42,
+			wantOffer: true,
+		},
+		{
+			name:      "return_all_single",
+			misplaced: "func compute() (int, error) {\n\treturn step()?\n}\n",
+			hand:      "func compute() (int, error) {\n\t_v, _e := step()\n\tif _e != nil {\n\t\treturn 0, _e\n\t}\n\treturn _v, nil\n}\n",
+			wantVal:   42,
+			wantOffer: true,
+		},
+		{
+			name:      "return_all_multi",
+			misplaced: "func compute() (int, bool, error) {\n\treturn step2()?\n}\n",
+			hand:      "func compute() (int, bool, error) {\n\t_a, _b, _e := step2()\n\tif _e != nil {\n\t\treturn 0, false, _e\n\t}\n\treturn _a, _b, nil\n}\n",
+			mainSrc:   "func main() {\n\tcalls, fail = 0, false\n\tv, b, err := compute()\n\tif err != nil || v != 42 || !b {\n\t\tprintln(\"bad\")\n\t} else {\n\t\tprintln(\"ok\")\n\t}\n\tcalls, fail = 0, true\n\tv, b, err = compute()\n\tif err == nil || err.Error() != \"boom\" || v != 0 || b {\n\t\tprintln(\"bad\")\n\t} else {\n\t\tprintln(\"err\")\n\t}\n\tif calls != 1 {\n\t\tprintln(\"bad\")\n\t} else {\n\t\tprintln(\"once\")\n\t}\n}\n",
+			wantOffer: true,
+		},
+		{
+			name:      "return_nested_single",
+			misplaced: "func compute() error {\n\treturn g(step()?)\n}\n",
+			hand:      "func compute() error {\n\t_v, _e := step()\n\tif _e != nil {\n\t\treturn _e\n\t}\n\treturn g(_v)\n}\n",
+			mainSrc:   "func main() {\n\tcalls, fail = 0, false\n\tif err := compute(); err != nil || got != 42 {\n\t\tprintln(\"bad\")\n\t} else {\n\t\tprintln(\"ok\")\n\t}\n\tcalls, fail = 0, true\n\tif err := compute(); err == nil || err.Error() != \"boom\" {\n\t\tprintln(\"bad\")\n\t} else {\n\t\tprintln(\"err\")\n\t}\n\tif calls != 1 {\n\t\tprintln(\"bad\")\n\t} else {\n\t\tprintln(\"once\")\n\t}\n}\n",
+			wantOffer: true,
+		},
+		{
+			name:      "closure",
+			misplaced: "func compute() (int, error) {\n\tf := func() (int, error) {\n\t\tv := step()? + 1\n\t\treturn v, nil\n\t}\n\treturn f()\n}\n",
+			hand:      "func compute() (int, error) {\n\tf := func() (int, error) {\n\t\t_v, _e := step()\n\t\tif _e != nil {\n\t\t\treturn 0, _e\n\t\t}\n\t\tv := _v + 1\n\t\treturn v, nil\n\t}\n\treturn f()\n}\n",
+			wantVal:   43,
+			wantOffer: true,
+		},
+		{
+			name:      "generic",
+			misplaced: "func compute[T any](x T) (int, error) {\n\tv := step()? + 1\n\t_ = x\n\treturn v, nil\n}\n",
+			hand:      "func compute[T any](x T) (int, error) {\n\t_v, _e := step()\n\tif _e != nil {\n\t\treturn 0, _e\n\t}\n\tv := _v + 1\n\t_ = x\n\treturn v, nil\n}\n",
+			mainSrc:   "func main() {\n\tcalls, fail = 0, false\n\tv, err := compute(0)\n\tif err != nil || v != 43 {\n\t\tprintln(\"bad\")\n\t} else {\n\t\tprintln(\"ok\")\n\t}\n\tcalls, fail = 0, true\n\tv, err = compute(0)\n\tif err == nil || err.Error() != \"boom\" || v != 0 {\n\t\tprintln(\"bad\")\n\t} else {\n\t\tprintln(\"err\")\n\t}\n\tif calls != 1 {\n\t\tprintln(\"bad\")\n\t} else {\n\t\tprintln(\"once\")\n\t}\n}\n",
+			wantOffer: true,
+		},
+		{
+			name:      "for_init",
+			misplaced: "func compute() (int, error) {\n\tfor i := gInt(step()?); i < 100; i++ {\n\t\treturn i, nil\n\t}\n\treturn 0, nil\n}\n",
+			wantOffer: false,
+		},
+		{
+			name:      "return_mismatch",
+			misplaced: "func compute() error {\n\treturn step()?\n}\n",
+			wantOffer: false,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			mainSrc := cmp.Or(tc.mainSrc, fmt.Sprintf(stdMain, tc.wantVal))
+			src := "package main\n\n" + stepHelpers + tc.decls + "\n" + tc.misplaced + mainSrc
+			diags, exitCode := compileLgoJSON(t, src)
+			if exitCode == 0 {
+				t.Fatalf("expected compile failure on misplaced '?', got exit code 0")
+			}
+			d := misplacedTryDiag(t, diags)
+			if !tc.wantOffer {
+				if len(d.AutofixCandidates) != 0 {
+					t.Fatalf("expected no autofix candidate for %s, got %d: %+v", tc.name, len(d.AutofixCandidates), d.AutofixCandidates)
+				}
+				return
+			}
+			if len(d.AutofixCandidates) != 1 {
+				t.Fatalf("expected exactly one autofix candidate for %s, got %d", tc.name, len(d.AutofixCandidates))
+			}
+			fix := d.AutofixCandidates[0]
+			if strings.Contains(fix.Replacement, "_logos_") || strings.Contains(fix.Replacement, "Logos_") {
+				t.Fatalf("candidate replacement uses a reserved prefix: %q", fix.Replacement)
+			}
+			fixedSrc := applyFix(t, src, d.Span, fix)
+			got := runLgoSourceOut(t, fixedSrc)
+			handSrc := "package main\n\n" + stepHelpers + tc.decls + "\n" + tc.hand + mainSrc
+			want := runLgoSourceOut(t, handSrc)
+			if got != want {
+				t.Fatalf("applied candidate output = %q, hand-written = %q\nfixed source:\n%s", got, want, fixedSrc)
+			}
+			const wantOut = "ok\nerr\nonce\n"
+			if got != wantOut {
+				t.Fatalf("applied candidate output = %q, want %q", got, wantOut)
 			}
 		})
 	}
