@@ -31,6 +31,7 @@ func (p *Proxy) clientRequest(ctx context.Context, m *message) {
 
 func (p *Proxy) initialize(m *message) {
 	if params, err := decode(m.Params); err == nil {
+		p.rememberRoots(params)
 		dropPositionEncodings(params)
 		if raw, err := encode(params); err == nil {
 			m.Params = raw
@@ -189,7 +190,7 @@ func (p *Proxy) serverDiagnostics(m *message) {
 	list, _ := root["diagnostics"].([]any)
 	items, _ := json.Marshal(root["diagnostics"])
 	version, hasVer := number(root["version"])
-	path := docPath(uri)
+	path := p.docPath(uri)
 	p.st.mu.Lock()
 	_, openDoc := p.st.docs[path]
 	p.st.mu.Unlock()

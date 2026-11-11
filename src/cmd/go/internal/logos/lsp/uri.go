@@ -22,6 +22,9 @@ func uriPath(uri string) (string, error) {
 	if u.Scheme != "file" {
 		return "", fmt.Errorf("%q is not a file URI", uri)
 	}
+	if u.Host != "" && u.Host != "localhost" {
+		return "", fmt.Errorf("%q is not a local file URI", uri)
+	}
 	p := u.Path
 	if runtime.GOOS == "windows" && len(p) >= 3 && p[0] == '/' && p[2] == ':' {
 		p = p[1:]

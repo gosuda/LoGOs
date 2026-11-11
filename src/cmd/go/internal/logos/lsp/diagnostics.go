@@ -45,7 +45,7 @@ func (p *Proxy) publish(uri string) {
 	p.mu.Lock()
 	prev, seen := p.sent[uri]
 	same := prev == string(raw) || (count == 0 && !seen)
-	if count == 0 && !p.st.open(docPath(uri)) {
+	if count == 0 && !p.st.open(p.docPath(uri)) {
 		delete(p.sent, uri)
 	} else {
 		p.sent[uri] = string(raw)
@@ -57,7 +57,7 @@ func (p *Proxy) publish(uri string) {
 }
 
 func (p *Proxy) diagnosticsParams(uri string) (map[string]any, int) {
-	path := docPath(uri)
+	path := p.docPath(uri)
 	p.st.mu.Lock()
 	doc := p.st.docs[path]
 	u := p.st.unitFor(path)

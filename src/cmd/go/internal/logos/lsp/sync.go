@@ -7,7 +7,9 @@ package lsp
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"path/filepath"
+	"strings"
 )
 
 type textDocumentItem struct {
@@ -80,12 +82,51 @@ func (p *Proxy) clientNotification(ctx context.Context, m *message) {
 
 func trackedPath(path string) bool { return isLogosPath(path) || isGoPath(path) }
 
-func docPath(uri string) string {
+func (p *Proxy) docPath(uri string) string {
 	path, err := uriPath(uri)
 	if err != nil || !trackedPath(path) {
 		return ""
 	}
-	return path
+	return p.contain(path)
+}
+
+func (p *Proxy) contain(path string) string {
+	p.rootsMu.RLock()
+	defer p.rootsMu.RUnlock()
+	if len(p.roots) == 0 {
+		return path
+	}
+	for _, root := range p.roots {
+		if path == root || strings.HasPrefix(path, root+string(os.PathSeparator)) {
+			return path
+		}
+	}
+	return ""
+}
+
+func (p *Proxy) rememberRoots(params any) {
+	root, _ := params.(map[string]any)
+	var uris []string
+	if uri, _ := root["rootUri"].(string); uri != "" {
+		uris = append(uris, uri)
+	}
+	folders, _ := root["workspaceFolders"].([]any)
+	for _, f := range folders {
+		if m, _ := f.(map[string]any); m != nil {
+			if uri, _ := m["uri"].(string); uri != "" {
+				uris = append(uris, uri)
+			}
+		}
+	}
+	var roots []string
+	for _, uri := range uris {
+		if path, err := uriPath(uri); err == nil && path != "" {
+			roots = append(roots, path)
+		}
+	}
+	p.rootsMu.Lock()
+	p.roots = roots
+	p.rootsMu.Unlock()
 }
 
 func (p *Proxy) forwardUnlessLogos(m *message, path string) {
@@ -102,7 +143,7 @@ func (p *Proxy) didOpen(ctx context.Context, m *message) {
 		return
 	}
 	item := params.TextDocument
-	path := docPath(item.URI)
+	path := p.docPath(item.URI)
 	if path != "" {
 		p.st.setDoc(item.URI, path, item.Version, newText([]byte(item.Text)))
 	}
@@ -116,7 +157,7 @@ func (p *Proxy) didChange(ctx context.Context, m *message) {
 		p.send(p.server, m)
 		return
 	}
-	path := docPath(params.TextDocument.URI)
+	path := p.docPath(params.TextDocument.URI)
 	if path != "" && !p.st.change(path, params.TextDocument.Version, params.ContentChanges) {
 		p.logf("didChange: ignoring change for %s version %d", path, params.TextDocument.Version)
 		return
@@ -146,7 +187,7 @@ func (p *Proxy) didSave(ctx context.Context, m *message) {
 		p.send(p.server, m)
 		return
 	}
-	path := docPath(params.TextDocument.URI)
+	path := p.docPath(params.TextDocument.URI)
 	if p.st.open(path) {
 		p.ensure(ctx)
 	}
@@ -160,7 +201,7 @@ func (p *Proxy) didClose(ctx context.Context, m *message) {
 		p.send(p.server, m)
 		return
 	}
-	path := docPath(params.TextDocument.URI)
+	path := p.docPath(params.TextDocument.URI)
 	retained := p.st.forget(path)
 	p.mu.Lock()
 	delete(p.srvDiags, params.TextDocument.URI)

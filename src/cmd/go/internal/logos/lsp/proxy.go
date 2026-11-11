@@ -77,6 +77,8 @@ type Proxy struct {
 	mu       sync.Mutex
 	files    map[string]*lowered
 	virt     map[string]*virtDoc
+	rootsMu  sync.RWMutex
+	roots    []string
 	pending  map[string]pending
 	srvDiags map[string]serverDiags
 	sent     map[string]string
