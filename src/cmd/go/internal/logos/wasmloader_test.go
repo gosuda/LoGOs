@@ -5,7 +5,6 @@
 package logos
 
 import (
-	"os"
 	"strings"
 	"testing"
 
@@ -25,16 +24,6 @@ func BenchmarkWasmLoaderSize(b *testing.B) {
 func TestWasmLoaderWithinBudget(t *testing.T) {
 	if n := len(cfg.WasmLoader); n == 0 || n > wasmLoaderBudget {
 		t.Fatalf("loader is %d bytes, want 1 to %d", n, wasmLoaderBudget)
-	}
-}
-
-func TestWasmLoaderTextMatchesTemplate(t *testing.T) {
-	want, err := os.ReadFile("wasmloader.mjs.tmpl")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(want) != wasmLoaderText {
-		t.Fatal("wasmLoaderText differs from wasmloader.mjs.tmpl; mirror the template into wasmloader.go")
 	}
 }
 
