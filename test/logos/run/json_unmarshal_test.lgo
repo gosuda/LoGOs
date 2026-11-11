@@ -2,10 +2,10 @@
 
 package jsonunmarshal
 
-
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"math/rand"
@@ -227,6 +227,28 @@ func TestNullForNonNilFieldIsMissing(t *testing.T) {
 	_, err = decode[User](`{"profile":null,"id":1}`)
 	if err != missing("User", "Profile") {
 		t.Fatalf("got %v, want MissingFieldError{User, Profile}", err)
+	}
+}
+
+func TestNullRequiredDefersPastLaterFields(t *testing.T) {
+	doc := `{"id":1,"name":"a","profile":null,"profile":{"bio":"b"}}`
+	if err := decodeErr[User](doc); err != nil {
+		t.Fatalf("duplicate keeps last, got error %v", err)
+	}
+	u := decodeOK[User](doc)
+	if u.Profile == nil || u.Profile.Bio != "b" {
+		t.Fatalf("duplicate keeps last, got %+v", u.Profile)
+	}
+	if err := decodeErr[User](`{"id":1,"name":"a","profile":{"bio":"b"},"profile":null}`); err != missing("User", "Profile") {
+		t.Fatalf("null last wins, got %v, want MissingFieldError{User, Profile}", err)
+	}
+	if err := decodeErr[User](`{"profile":null,"id":"boom"}`); err == nil {
+		t.Fatal("later field error must win over deferred null, got nil")
+	} else {
+		var mf rt.MissingFieldError
+		if errors.As(err, &mf) {
+			t.Fatalf("later field error must win over deferred null, got %v", err)
+		}
 	}
 }
 

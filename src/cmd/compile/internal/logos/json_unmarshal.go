@@ -56,12 +56,14 @@ func (js *jsonStruct) unmarshalText(b *strings.Builder) {
 	body = append(body, ifLines("!_logos_s.Object()", []string{"return _logos_s.End()"})...)
 	if len(js.required) > 0 {
 		body = append(body, fmt.Sprintf("var _logos_seen [%d]uint64", seenWords(len(js.required))))
+		body = append(body, "var _logos_firstnulled = -1")
 	}
 	body = append(body, js.defaults...)
 	body = append(body, js.loopLines()...)
 	body = append(body, ifLines("_logos_e := _logos_s.Err(); _logos_e != nil", []string{"return _logos_e"})...)
+	body = append(body, ifLines("_logos_v := _logos_s.Saved(); _logos_v != nil", []string{"return _logos_v"})...)
 	body = append(body, js.requiredCheck()...)
-	body = append(body, "return _logos_s.Saved()")
+	body = append(body, "return nil")
 	fmt.Fprintf(b, "\nfunc (%s *%s) UnmarshalJSON(_logos_data []byte) error {\n", jsonRecv, js.name)
 	for _, l := range indentLines(body) {
 		b.WriteString(l)
@@ -92,14 +94,19 @@ func (js *jsonStruct) loopLines() []string {
 }
 
 func (js *jsonStruct) decodeLines(f *jsonField) []string {
-	var lines []string
-	if f.required >= 0 {
-		lines = append(lines, ifLines("_logos_s.Null()", []string{
-			fmt.Sprintf("return %s.MissingFieldError{Type: %q, Field: %q}", rtAlias, js.name, f.goName),
-		})...)
-		lines = append(lines, fmt.Sprintf("_logos_seen[%d] |= 1 << %d", f.required/64, f.required%64))
+	if f.required < 0 {
+		return js.valueLines(f)
 	}
-	return append(lines, js.valueLines(f)...)
+	w, b := f.required/64, f.required%64
+	lines := []string{"if _logos_s.Null() {"}
+	lines = append(lines, fmt.Sprintf("\t_logos_seen[%d] &^= 1 << %d", w, b))
+	lines = append(lines, fmt.Sprintf("\tif _logos_firstnulled < 0 { _logos_firstnulled = %d }", f.required))
+	lines = append(lines, "} else {")
+	lines = append(lines, fmt.Sprintf("\t_logos_seen[%d] |= 1 << %d", w, b))
+	for _, l := range js.valueLines(f) {
+		lines = append(lines, "\t"+l)
+	}
+	return append(lines, "}")
 }
 
 func (js *jsonStruct) valueLines(f *jsonField) []string {
@@ -630,8 +637,14 @@ func (js *jsonStruct) requiredCheck() []string {
 	if n == 0 {
 		return nil
 	}
+	quoted := make([]string, len(js.required))
+	for i, name := range js.required {
+		quoted[i] = strconv.Quote(name)
+	}
+	nulled := fmt.Sprintf("return %s.MissingFieldError{Type: %q, Field: []string{%s}[_logos_firstnulled]}", rtAlias, js.name, strings.Join(quoted, ", "))
+	nulled = fmt.Sprintf("if _logos_firstnulled >= 0 && _logos_seen[_logos_firstnulled/64]>>(_logos_firstnulled%%64)&1 == 0 { %s }", nulled)
 	ret := fmt.Sprintf("return %s.MissingFieldError{Type: %q, Field: _logos_jsonmissing_%s(_logos_seen)}", rtAlias, js.name, js.name)
-	return append(lines, ifLines(strings.Join(conds, " || "), []string{ret})...)
+	return append(lines, ifLines(strings.Join(conds, " || "), []string{nulled, ret})...)
 }
 
 func (js *jsonStruct) missingFunc(b *strings.Builder) {
