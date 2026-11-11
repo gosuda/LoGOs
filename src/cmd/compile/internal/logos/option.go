@@ -559,6 +559,11 @@ func (fl *fileLower) spellLowered(t types2.Type) (string, bool) {
 		}
 	case *types2.Signature:
 		return fl.spellLoweredSig(c)
+	case *types2.LogosTuple:
+		if st, ok := c.Underlying().(*types2.Struct); ok {
+			return fl.spellLoweredStruct(st)
+		}
+		return "", false
 	case *types2.Struct:
 		return fl.spellLoweredStruct(c)
 	case *types2.Interface:

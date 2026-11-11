@@ -36,13 +36,13 @@ func (fl *fileLower) lowerStaticBinary(_ *syntax.TypeDecl, named *types2.Named, 
 	}
 	out.WriteString(g.text.String())
 	if needMarshal {
-		fmt.Fprintf(out, "func (_logos_v %s) MarshalBinary() ([]byte, error) { return %s_e%d([]byte{1}, _logos_v) }\n", js.name, g.prefix, id)
+		fmt.Fprintf(out, "func (_logos_v %s) MarshalBinary() ([]byte, error) { return %s_e%d([]byte{1}, _logos_v, 1) }\n", js.name, g.prefix, id)
 	}
 	if needAppend {
-		fmt.Fprintf(out, "func (_logos_v %s) AppendBinary(_logos_dst []byte) ([]byte, error) { return %s_e%d(append(_logos_dst, 1), _logos_v) }\n", js.name, g.prefix, id)
+		fmt.Fprintf(out, "func (_logos_v %s) AppendBinary(_logos_dst []byte) ([]byte, error) { return %s_e%d(append(_logos_dst, 1), _logos_v, 1) }\n", js.name, g.prefix, id)
 	}
 	if needUnmarshal {
-		fmt.Fprintf(out, "func (_logos_v *%s) UnmarshalBinary(_logos_src []byte) error { _logos_off := 0; if len(_logos_src) == 0 { return _logos_bfmt.Errorf(\"binary field $version at offset 0: truncated input\") }; if _logos_src[0] != 1 { return _logos_bfmt.Errorf(\"binary field $version at offset 0: wrong version %%d\", _logos_src[0]) }; _logos_off++; if _logos_err := %s_d%d(_logos_src, &_logos_off, _logos_v, %q, 0); _logos_err != nil { return _logos_err }; if _logos_off != len(_logos_src) { return _logos_bfmt.Errorf(\"binary field $trailing at offset %%d: trailing bytes\", _logos_off) }; return nil }\n", js.name, g.prefix, id, js.name)
+		fmt.Fprintf(out, "func (_logos_v *%s) UnmarshalBinary(_logos_src []byte) error { _logos_off := 0; if len(_logos_src) == 0 { return _logos_bfmt.Errorf(\"binary field $version at offset 0: truncated input\") }; if _logos_src[0] != 1 { return _logos_bfmt.Errorf(\"binary field $version at offset 0: wrong version %%d\", _logos_src[0]) }; _logos_off++; if _logos_err := %s_d%d(_logos_src, &_logos_off, _logos_v, %q, 1); _logos_err != nil { return _logos_err }; if _logos_off != len(_logos_src) { return _logos_bfmt.Errorf(\"binary field $trailing at offset %%d: trailing bytes\", _logos_off) }; return nil }\n", js.name, g.prefix, id, js.name)
 	}
 }
 
@@ -72,14 +72,22 @@ func (g *binaryGenerator) codec(t types2.Type) (int, bool) {
 		if !ok {
 			return false
 		}
-		e("_logos_dst, _logos_err = %s_e%d(_logos_dst, %s); if _logos_err != nil { return _logos_dst, _logos_err }", g.prefix, c, value)
 		if g.isDepthComposite(et) {
+			e("if _logos_depth+1 > 10000 { return _logos_dst, _logos_bfmt.Errorf(\"binary nesting depth exceeds 10000\") }")
+			e("_logos_dst, _logos_err = %s_e%d(_logos_dst, %s, _logos_depth+1); if _logos_err != nil { return _logos_dst, _logos_err }", g.prefix, c, value)
 			d("if _logos_depth+1 > 10000 { return _logos_bfmt.Errorf(\"binary field %%s at offset %%d: nesting depth exceeds 10000\", %s, *_logos_off) }", field)
 			d("if _logos_err := %s_d%d(_logos_src, _logos_off, %s, %s, _logos_depth+1); _logos_err != nil { return _logos_err }", g.prefix, c, target, field)
 		} else {
+			e("_logos_dst, _logos_err = %s_e%d(_logos_dst, %s, _logos_depth); if _logos_err != nil { return _logos_dst, _logos_err }", g.prefix, c, value)
 			d("if _logos_err := %s_d%d(_logos_src, _logos_off, %s, %s, _logos_depth); _logos_err != nil { return _logos_err }", g.prefix, c, target, field)
 		}
 		return true
+	}
+	var tup *types2.LogosTuple
+	if x, ok := types2.Unalias(t).(*types2.LogosTuple); ok {
+		tup = x
+	} else if x, ok := t.Underlying().(*types2.LogosTuple); ok {
+		tup = x
 	}
 	fail := "return _logos_bfmt.Errorf(\"binary field %s at offset %d: truncated input\", _logos_field, *_logos_off)"
 	if opt := g.fl.asOption(t); opt != nil && keepMapRead(opt.Elem) {
@@ -87,7 +95,7 @@ func (g *binaryGenerator) codec(t types2.Type) (int, bool) {
 		if !ok {
 			return 0, false
 		}
-		fmt.Fprintf(&g.text, "func %s_e%d(_logos_dst []byte, _logos_v %s) ([]byte, error) { return %s_e%d(_logos_dst, _logos_v) }\n", g.prefix, id, name, g.prefix, payload)
+		fmt.Fprintf(&g.text, "func %s_e%d(_logos_dst []byte, _logos_v %s, _logos_depth int) ([]byte, error) { return %s_e%d(_logos_dst, _logos_v, _logos_depth) }\n", g.prefix, id, name, g.prefix, payload)
 		fmt.Fprintf(&g.text, "func %s_d%d(_logos_src []byte, _logos_off *int, _logos_v *%s, _logos_field string, _logos_depth int) error { return %s_d%d(_logos_src, _logos_off, _logos_v, _logos_field, _logos_depth) }\n", g.prefix, id, name, g.prefix, payload)
 		return id, true
 	}
@@ -96,6 +104,14 @@ func (g *binaryGenerator) codec(t types2.Type) (int, bool) {
 		d("if *_logos_off >= len(_logos_src) { %s }; _logos_presence := _logos_src[*_logos_off]; *_logos_off++; if _logos_presence > 1 { return _logos_bfmt.Errorf(\"binary field %%s at offset %%d: bad presence byte %%d\", _logos_field, *_logos_off-1, _logos_presence) }; *_logos_v = %s{}; if _logos_presence == 0 { return nil }; _logos_v.Present = true", fail, name)
 		if !child(opt.Elem, "_logos_v.Value", "&_logos_v.Value", "_logos_field") {
 			return 0, false
+		}
+	} else if tup != nil {
+		for i := range tup.Len() {
+			fname := tupleLoweredName(tup.Name(i), i)
+			field := "_logos_field + " + fmt.Sprintf("%q", "."+fname)
+			if !child(tup.Elem(i), "_logos_v."+fname, "&_logos_v."+fname, field) {
+				return 0, false
+			}
 		}
 	} else {
 		u := t.Underlying()
@@ -204,7 +220,7 @@ func (g *binaryGenerator) codec(t types2.Type) (int, bool) {
 			return 0, false
 		}
 	}
-	fmt.Fprintf(&g.text, "func %s_e%d(_logos_dst []byte, _logos_v %s) ([]byte, error) { var _logos_err error; _ = _logos_err\n%sreturn _logos_dst, nil\n}\n", g.prefix, id, name, enc.String())
+	fmt.Fprintf(&g.text, "func %s_e%d(_logos_dst []byte, _logos_v %s, _logos_depth int) ([]byte, error) { var _logos_err error; _ = _logos_err\n%sreturn _logos_dst, nil\n}\n", g.prefix, id, name, enc.String())
 	fmt.Fprintf(&g.text, "func %s_d%d(_logos_src []byte, _logos_off *int, _logos_v *%s, _logos_field string, _logos_depth int) error {\n%sreturn nil\n}\n", g.prefix, id, name, dec.String())
 	return id, true
 }
@@ -223,6 +239,9 @@ func (g *binaryGenerator) isDepthComposite(t types2.Type) bool {
 	u := t.Underlying()
 	if cv, ok := u.(*types2.ConstView); ok {
 		u = cv.Elem
+	}
+	if lt, ok := u.(*types2.LogosTuple); ok {
+		u = lt.Underlying()
 	}
 	switch u.(type) {
 	case *types2.Struct, *types2.Slice, *types2.Array, *types2.Map:
@@ -263,6 +282,13 @@ func (g *binaryGenerator) zeroWire(t types2.Type, seen map[types2.Type]bool) boo
 		return false
 	case *types2.Map:
 		return false
+	case *types2.LogosTuple:
+		for i := range x.Len() {
+			if !g.zeroWire(x.Elem(i), seen) {
+				return false
+			}
+		}
+		return true
 	case *types2.Struct:
 		for i := range x.NumFields() {
 			if _, ok := types2.LogosJSONFieldOf(x, i); !ok {
