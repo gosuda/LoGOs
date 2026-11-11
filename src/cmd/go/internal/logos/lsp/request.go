@@ -117,9 +117,7 @@ func (p *Proxy) request(ctx context.Context, m *message) {
 
 func (p *Proxy) declineFormatting(m *message) {
 	reason := m.Method + " is not supported for loGo/s sources: gopls would format the lowered Go text, not the source"
-	if err := p.client.fail(m.ID, codeRequestFailed, reason); err != nil {
-		p.logf("write: %v", err)
-	}
+	p.fail(m.ID, codeRequestFailed, reason)
 }
 
 func (p *Proxy) fromServer(ctx context.Context, m *message) {

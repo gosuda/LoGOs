@@ -22,6 +22,8 @@ const stopGrace = 3 * time.Second
 
 const drainLimit = 30 * time.Second
 
+const outboxCap = 64
+
 const maxHintTasks = 4
 
 type Options struct {
@@ -82,6 +84,12 @@ type Proxy struct {
 	pending  map[string]pending
 	srvDiags map[string]serverDiags
 	sent     map[string]string
+	toClient chan *message
+	toServer chan *message
+	done     chan struct{}
+	cancel   context.CancelFunc
+	in       io.Reader
+	sendErr  error
 	stopMu   sync.Mutex
 	stopped  bool
 	shutdown bool
@@ -104,6 +112,9 @@ func newProxy(out io.Writer, opts Options) *Proxy {
 		pending:  make(map[string]pending),
 		srvDiags: make(map[string]serverDiags),
 		sent:     make(map[string]string),
+		toClient: make(chan *message, outboxCap),
+		toServer: make(chan *message, outboxCap),
+		done:     make(chan struct{}),
 		hintSem:  make(chan struct{}, maxHintTasks),
 		settled:  make(chan struct{}, 1),
 	}
@@ -160,6 +171,11 @@ func Serve(ctx context.Context, in io.Reader, out io.Writer, opts Options) error
 	if err != nil {
 		return err
 	}
+	p.mu.Lock()
+	p.cancel, p.in = cancelWork, in
+	p.mu.Unlock()
+	go p.pump(p.client, p.toClient)
+	go p.pump(p.server, p.toServer)
 	clientDone := make(chan struct{})
 	var clientErr error
 	go func() {
@@ -185,8 +201,9 @@ func Serve(ctx context.Context, in io.Reader, out io.Writer, opts Options) error
 	p.closeInput(in, clientDone)
 	p.mu.Lock()
 	logErr := p.lastLogErr
+	sendErr := p.sendErr
 	p.mu.Unlock()
-	return errors.Join(err, logErr)
+	return errors.Join(err, logErr, sendErr)
 }
 
 func (p *Proxy) closeInput(in io.Reader, loopDone <-chan struct{}) {
@@ -229,7 +246,7 @@ func (p *Proxy) drain(gopls <-chan struct{}) {
 	limit := time.After(drainLimit)
 	for {
 		p.mu.Lock()
-		n := len(p.pending)
+		n := len(p.pending) + len(p.toClient) + len(p.toServer)
 		p.mu.Unlock()
 		if n == 0 {
 			return
@@ -247,6 +264,7 @@ func (p *Proxy) drain(gopls <-chan struct{}) {
 func (p *Proxy) stop(ctx context.Context, srv *server, cancelWork context.CancelFunc) {
 	p.stopMu.Lock()
 	p.stopped = true
+	close(p.done)
 	cancelWork()
 	p.tasks.Wait()
 	p.stopMu.Unlock()
@@ -271,9 +289,7 @@ func (p *Proxy) clientLoop(ctx context.Context, rd *reader) error {
 	for {
 		m, err := rd.read()
 		if _, ok := errors.AsType[*parseError](err); ok {
-			if ferr := p.client.fail(json.RawMessage("null"), codeParseError, "parse error"); ferr != nil {
-				p.logf("answering a parse error: %v", ferr)
-			}
+			p.fail(json.RawMessage("null"), codeParseError, "parse error")
 			continue
 		}
 		if errors.Is(err, io.EOF) {
@@ -322,9 +338,66 @@ func (p *Proxy) serverLoop(ctx context.Context, rd *reader) error {
 }
 
 func (p *Proxy) send(w *writer, m *message) {
-	if err := w.write(m); err != nil {
-		p.logf("write: %v", err)
+	ch := p.toClient
+	if w == p.server {
+		ch = p.toServer
 	}
+	select {
+	case ch <- m:
+	case <-p.done:
+	default:
+		p.failSession(errors.New("logos lsp: outbound queue full"))
+	}
+}
+
+func (p *Proxy) pump(w *writer, ch chan *message) {
+	for {
+		select {
+		case m := <-ch:
+			if err := w.write(m); err != nil {
+				p.failSession(err)
+				return
+			}
+		case <-p.done:
+			return
+		}
+	}
+}
+
+func (p *Proxy) fail(id json.RawMessage, code int, text string) {
+	raw, err := json.Marshal(rpcError{Code: code, Message: text})
+	if err != nil {
+		p.logf("encoding an error: %v", err)
+		return
+	}
+	p.send(p.client, &message{ID: id, Error: raw})
+}
+
+func (p *Proxy) failSession(err error) {
+	p.stopMu.Lock()
+	stopped := p.stopped
+	p.stopMu.Unlock()
+	if stopped {
+		return
+	}
+	p.mu.Lock()
+	if p.sendErr == nil {
+		p.sendErr = err
+	}
+	cancel, in := p.cancel, p.in
+	p.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+	if c, ok := in.(io.Closer); ok && c != nil {
+		_ = c.Close()
+	}
+}
+
+func (p *Proxy) sendError() error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.sendErr
 }
 
 func (p *Proxy) addPending(id json.RawMessage, pend pending) {
