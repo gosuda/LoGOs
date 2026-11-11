@@ -865,37 +865,89 @@ type propSubst struct {
 	needle otext
 	repl   otext
 	len    int
+	start  int
+	end    int
 }
 
 func (fl *fileLower) propSubstitutions(needles []propNeedle) []propSubst {
 	subs := make([]propSubst, 0, len(needles))
 	for _, n := range needles {
 		if n.temp != "" {
-			subs = append(subs, propSubst{needle: fl.textOf(span{start: n.start, end: n.end}), repl: gen(n.temp), len: n.end - n.start})
+			subs = append(subs, propSubst{needle: fl.textOf(span{start: n.start, end: n.end}), repl: gen(n.temp), len: n.end - n.start, start: n.start, end: n.end})
 			continue
 		}
 		subs = append(subs, propSubst{
 			needle: fl.textOf(span{start: n.start, end: n.end}),
 			repl:   cat(fl.textOf(n.recv), gen(".Logos_Get"+n.name+"()")),
 			len:    n.end - n.start,
+			start:  n.start,
+			end:    n.end,
 		})
 	}
 	slices.SortFunc(subs, func(a, b propSubst) int {
 		if d := b.len - a.len; d != 0 {
 			return d
 		}
-		return strings.Compare(a.needle.s, b.needle.s)
+		if a.start != b.start {
+			if a.start < b.start {
+				return -1
+			}
+			return 1
+		}
+		return 0
 	})
 	return subs
 }
 
 func propSubstText(text otext, subs []propSubst) otext {
 	for _, s := range subs {
-		if s.needle.s != "" {
-			text = substNeedle(text, s.needle, s.repl)
+		if s.needle.s == "" {
+			continue
 		}
+		text = propSubstOne(text, s)
 	}
 	return text
+}
+
+func propSubstOne(t otext, s propSubst) otext {
+	needle := s.needle.s
+	for off := 0; off+len(needle) <= len(t.s); {
+		idx := strings.Index(t.s[off:], needle)
+		if idx < 0 {
+			return t
+		}
+		i := off + idx
+		j := i + len(needle)
+		if len(t.chunks) == 0 || propSliceMatches(t.slice(i, j), s.start, s.end) {
+			return cat(t.slice(0, i), s.repl, t.slice(j, len(t.s)))
+		}
+		off = i + 1
+	}
+	return t
+}
+
+func propSliceMatches(sl otext, start, end int) bool {
+	if len(sl.chunks) == 0 {
+		return false
+	}
+	if sl.chunks[0].out != 0 || sl.chunks[0].orig != start {
+		return false
+	}
+	last := sl.chunks[len(sl.chunks)-1]
+	if last.out+last.n != len(sl.s) {
+		return false
+	}
+	if last.orig+last.n != end {
+		return false
+	}
+	off := 0
+	for _, c := range sl.chunks {
+		if c.out != off {
+			return false
+		}
+		off += c.n
+	}
+	return off == len(sl.s)
 }
 
 func (fl *fileLower) lowerPropGeneric(s *syntax.AssignStmt) []syntax.Stmt {
