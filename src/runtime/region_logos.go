@@ -7,6 +7,7 @@ package runtime
 import (
 	"internal/abi"
 	"internal/goarch"
+	"internal/runtime/atomic"
 	"internal/runtime/math"
 	"internal/runtime/sys"
 	"unsafe"
@@ -19,7 +20,7 @@ type logosRegion struct {
 	chunk *sideStackChunk
 	gen   uintptr
 	prev  *logosRegion
-	owner *g
+	owner atomic.Pointer[g]
 	depth uintptr
 	next  *logosRegion
 }
@@ -29,7 +30,7 @@ func logosRegionValid(h unsafe.Pointer, gen uintptr) bool {
 		return false
 	}
 	rec := (*logosRegion)(h)
-	return rec.gen == gen && rec.owner == getg()
+	return atomic.Loaduintptr(&rec.gen) == gen && rec.owner.Load() == getg()
 }
 
 func logosRegionOpen() (h unsafe.Pointer, gen uintptr) {
@@ -53,11 +54,11 @@ func logosRegionOpen() (h unsafe.Pointer, gen uintptr) {
 	mp := acquirem()
 	sp := sys.GetCallerSP()
 	rec.chunk = nil
-	rec.owner = gp
+	rec.owner.Store(gp)
 	rec.depth = gp.stack.hi - sp
 	rec.prev = gp.logosRegions
 	gp.logosRegions = rec
-	gen = rec.gen
+	gen = atomic.Loaduintptr(&rec.gen)
 	releasem(mp)
 	return unsafe.Pointer(rec), gen
 }
@@ -71,11 +72,11 @@ func logosRegionClose(h unsafe.Pointer, gen uintptr) {
 	if gp.logosRegions != rec {
 		throw("logosRegionClose: region is not the innermost open region")
 	}
-	if rec.gen != gen {
+	if atomic.Loaduintptr(&rec.gen) != gen {
 		throw("logosRegionClose: stale region handle")
 	}
 	logosRegionReleaseChunks(rec)
-	rec.gen++
+	atomic.Xadduintptr(&rec.gen, 1)
 	gp.logosRegions = rec.prev
 	rec.prev = nil
 	rec.next = gp.logosRegionFree
@@ -310,7 +311,7 @@ func logosRegionUnwind(gp *g, sp uintptr) {
 	for rec != nil && rec.depth >= threshold {
 		top := rec
 		logosRegionReleaseChunks(top)
-		top.gen++
+		atomic.Xadduintptr(&top.gen, 1)
 		rec = top.prev
 		top.prev = nil
 		top.next = gp.logosRegionFree
@@ -357,8 +358,8 @@ func logosRegionExit(gp *g) {
 	for rec != nil {
 		next := rec.prev
 		logosRegionReleaseChunks(rec)
-		rec.gen++
-		rec.owner = nil
+		atomic.Xadduintptr(&rec.gen, 1)
+		rec.owner.Store(nil)
 		rec.prev = nil
 		rec.next = list
 		list = rec
