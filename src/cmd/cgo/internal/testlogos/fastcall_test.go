@@ -856,13 +856,14 @@ func TestFastcallProfileAttribution(t *testing.T) {
 
 func TestFastcallMarkerCallPath(t *testing.T) {
 	requireCgo(t)
+	wantFast := goexperiment.LogosFastCgo
 	bin := fixtureBin(t, "markers")
 	for _, c := range []struct {
 		pkg  string
 		fn   string
 		fast bool
 	}{
-		{"ok", "ladd_ok", true},
+		{"ok", "ladd_ok", wantFast},
 		{"arity", "ladd_arity", false},
 		{"nonpre", "ladd_nonpre", false},
 	} {
