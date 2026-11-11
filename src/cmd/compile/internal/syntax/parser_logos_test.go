@@ -720,7 +720,7 @@ func TestLogosValidSyntaxForms(t *testing.T) {
 			t.Fatalf("leading-dot continuations = %q, missing %q", names, want)
 		}
 	}
-	inline := parseLogos(t, "package p\n\nfunc f(batch []int) []int {\n\treturn batch.filter(10)\n}\n")
+	inline := parseLogos(t, "package p\n\nfunc f(batch []int) []int {\n\treturn batch.filter(10).map(20)\n}\n")
 	Inspect(inline, func(n Node) bool {
 		if c, ok := n.(*CallExpr); ok {
 			if sel, ok := c.Fun.(*SelectorExpr); ok && sel.Sel != nil {
