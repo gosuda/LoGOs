@@ -1,0 +1,6 @@
+recv-reassign ok
+arg-once ok
+loop-defers ok
+go-args ok
+nil-skip ok
+method-value ok

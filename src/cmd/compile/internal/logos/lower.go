@@ -183,14 +183,15 @@ type fileLower struct {
 	// wraps, wrapOwner maps a wrapped node to its wrapper ID for
 	// boundary-insert drains, wrapSeq mints wrapper IDs, and
 	// retResults maps each return to its function results.
-	spreadSeq  int
-	rodataVars []rodataVar
-	optMemo    map[*syntax.OptionType]syntax.Expr
-	narrowDone map[*syntax.Name]bool
-	wrapSpan   map[syntax.Expr]span
-	wrapOwner  map[syntax.Expr]int
-	wrapSeq    int
-	retResults map[*syntax.ReturnStmt][]types2.Type
+	spreadSeq      int
+	rodataVars     []rodataVar
+	optMemo        map[*syntax.OptionType]syntax.Expr
+	narrowDone     map[*syntax.Name]bool
+	optDeferGoPend map[*syntax.CallExpr]optDeferGoWork
+	wrapSpan       map[syntax.Expr]span
+	wrapOwner      map[syntax.Expr]int
+	wrapSeq        int
+	retResults     map[*syntax.ReturnStmt][]types2.Type
 	// optBodyType stashes the checked type of a replaced top-level
 	// lambda body (`??`/`?.`/property-read/interpolation): the
 	// replacement is synthetic and carries no recorded type, but chain

@@ -134,6 +134,14 @@ func (fc *funcLower) lowerList(list []syntax.Stmt) []syntax.Stmt {
 }
 
 func (fc *funcLower) lowerStmt(s syntax.Stmt) []syntax.Stmt {
+	if cs, ok := s.(*syntax.CallStmt); ok {
+		if out, ok := fc.fl.optDeferGoFinish(cs); ok {
+			if gout, ok := fc.lowerGroupHook(out[len(out)-1]); ok {
+				return append(out[:len(out)-1], gout...)
+			}
+			return out
+		}
+	}
 	if out, ok := fc.lowerGroupHook(s); ok {
 		return out
 	}
