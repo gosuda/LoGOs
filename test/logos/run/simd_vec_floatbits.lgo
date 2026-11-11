@@ -5,8 +5,13 @@ package main
 import (
 	"fmt"
 	"math"
+	"os"
 )
 
+func fail(tag string) {
+	fmt.Println("FAIL", tag)
+	os.Exit(1)
+}
 func want32(x, y uint32, op string) uint32 {
 	if op == "and" {
 		return x & y
@@ -42,7 +47,7 @@ func check32(tag string, got []float32, xb, yb []uint32) {
 	op := opOf(tag)
 	for i := range got {
 		if math.Float32bits(got[i]) != want32(xb[i], yb[i], op) {
-			panic(tag + " mismatch")
+			fail(fmt.Sprintf("%s lane %d: got %08x want %08x", tag, i, math.Float32bits(got[i]), want32(xb[i], yb[i], op)))
 		}
 	}
 }
@@ -51,7 +56,7 @@ func check64(tag string, got []float64, xb, yb []uint64) {
 	op := opOf(tag)
 	for i := range got {
 		if math.Float64bits(got[i]) != want64(xb[i], yb[i], op) {
-			panic(tag + " mismatch")
+			fail(fmt.Sprintf("%s lane %d: got %016x want %016x", tag, i, math.Float64bits(got[i]), want64(xb[i], yb[i], op)))
 		}
 	}
 }
@@ -165,12 +170,13 @@ func checkF32Copysign() {
 	for i := range got {
 		want := (yb[i] & sb[i]) | (xb[i] & mb[i])
 		if math.Float32bits(got[i]) != want {
-			panic("f32copysign mismatch")
+			fail(fmt.Sprintf("f32copysign lane %d: got %08x want %08x", i, math.Float32bits(got[i]), want))
 		}
 		if math.Float32bits(got[i])>>31 != math.Float32bits(y[i])>>31 {
-			panic("f32copysign sign mismatch")
+			fail(fmt.Sprintf("f32copysign sign lane %d", i))
 		}
 	}
+	fmt.Println("ok f32-copysign-matches-bits")
 }
 
 func checkF64Copysign() {
@@ -182,19 +188,25 @@ func checkF64Copysign() {
 	for i := range got {
 		want := (math.Float64bits(y[i]) & 0x8000000000000000) | (math.Float64bits(x[i]) & 0x7fffffffffffffff)
 		if math.Float64bits(got[i]) != want {
-			panic("f64copysign mismatch")
+			fail(fmt.Sprintf("f64copysign lane %d: got %016x want %016x", i, math.Float64bits(got[i]), want))
 		}
 	}
+	fmt.Println("ok f64-copysign-matches-bits")
 }
 
 func main() {
 	checkF32x2()
+	fmt.Println("ok f32x2-bitwise-matches-bits")
 	checkF32x4()
+	fmt.Println("ok f32x4-bitwise-matches-bits")
 	checkF32x8()
+	fmt.Println("ok f32x8-bitwise-matches-bits")
 	checkF64x2()
+	fmt.Println("ok f64x2-bitwise-matches-bits")
 	checkF64x4()
+	fmt.Println("ok f64x4-bitwise-matches-bits")
 	checkF64x8()
+	fmt.Println("ok f64x8-bitwise-matches-bits")
 	checkF32Copysign()
 	checkF64Copysign()
-	fmt.Println("floatbits ok")
 }

@@ -2,36 +2,38 @@
 
 package main
 
-import "fmt"
+import (
+	"fmt"
+	"os"
+)
+
+func fail(tag string) {
+	fmt.Println("FAIL", tag)
+	os.Exit(1)
+}
 
 func main() {
-	bad := 0
 	for _, n := range []int{1, 7, 8, 9, 16, 17, 31, 32, 33, 64, 65, 129} {
 		s := make([]int32, n)
 		if cap(s) != n {
-			bad++
-			fmt.Println("int32 cap", n, cap(s))
+			fail(fmt.Sprintf("int32 cap %d: got %d want %d", n, cap(s), n))
 		}
 		if len(s) != n {
-			bad++
-			fmt.Println("int32 len", n, len(s))
+			fail(fmt.Sprintf("int32 len %d: got %d want %d", n, len(s), n))
 		}
 		b := make([]uint8, n)
 		if cap(b) != n {
-			bad++
-			fmt.Println("uint8 cap", n, cap(b))
+			fail(fmt.Sprintf("uint8 cap %d: got %d want %d", n, cap(b), n))
 		}
 		f := make([]float64, n)
 		if cap(f) != n {
-			bad++
-			fmt.Println("float64 cap", n, cap(f))
+			fail(fmt.Sprintf("float64 cap %d: got %d want %d", n, cap(f), n))
 		}
 		w, h := 3, 11
 		p := make([]int32, w*h)
 		if cap(p) != w*h {
-			bad++
-			fmt.Println("product cap", w*h, cap(p))
+			fail(fmt.Sprintf("product cap %d: got %d want %d", w*h, cap(p), w*h))
 		}
 	}
-	fmt.Println("cap ok", bad)
+	fmt.Println("ok make-keeps-exact-cap")
 }

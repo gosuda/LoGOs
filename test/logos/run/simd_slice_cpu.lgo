@@ -5,8 +5,13 @@ package main
 import (
 	"fmt"
 	"math"
+	"os"
 )
 
+func fail(tag string) {
+	fmt.Println("FAIL", tag)
+	os.Exit(1)
+}
 
 type intKind interface {
 	~int | ~uint | ~int8 | ~uint8 | ~int16 | ~uint16 | ~int32 | ~uint32 | ~int64 | ~uint64
@@ -51,16 +56,9 @@ func mixFloat(i int) float64 {
 	return math.Ldexp(float64(mixInt(i)%2001-1000), (i*7)%13-6)
 }
 
-func digest(h uint64, bits uint64) uint64 {
-	return (h ^ bits) * 1099511628211
-}
-
 func checkInt[T intKind](name string, sum func([]T) T) {
-	h := uint64(14695981039346656037)
-	bad := 0
 	if got := sum(nil); got != 0 {
-		bad++
-		fmt.Println("MISMATCH nil", name, got)
+		fail(fmt.Sprintf("MISMATCH nil %s: got %v want 0", name, got))
 	}
 	for _, n := range lengths {
 		s := make([]T, n)
@@ -69,20 +67,15 @@ func checkInt[T intKind](name string, sum func([]T) T) {
 		}
 		got, want := sum(s), oracleInt(s)
 		if got != want {
-			bad++
-			fmt.Println("MISMATCH", name, n, got, want)
+			fail(fmt.Sprintf("MISMATCH %s %d: got %v want %v", name, n, got, want))
 		}
-		h = digest(h, uint64(got))
 	}
-	fmt.Println(name, bad, h)
+	fmt.Println("ok", name+"-matches-scalar-oracle")
 }
 
 func checkFloat32(name string, sum func([]float32) float32) {
-	h := uint64(14695981039346656037)
-	bad := 0
 	if got := sum(nil); got != 0 {
-		bad++
-		fmt.Println("MISMATCH nil", name, got)
+		fail(fmt.Sprintf("MISMATCH nil %s: got %v want 0", name, got))
 	}
 	for _, n := range lengths {
 		s := make([]float32, n)
@@ -91,20 +84,15 @@ func checkFloat32(name string, sum func([]float32) float32) {
 		}
 		got, want := sum(s), oracleFloat(s)
 		if math.Float32bits(got) != math.Float32bits(want) {
-			bad++
-			fmt.Println("MISMATCH", name, n, got, want)
+			fail(fmt.Sprintf("MISMATCH %s %d: got %v want %v", name, n, got, want))
 		}
-		h = digest(h, uint64(math.Float32bits(got)))
 	}
-	fmt.Println(name, bad, h)
+	fmt.Println("ok", name+"-matches-pairwise-oracle")
 }
 
 func checkFloat64(name string, sum func([]float64) float64) {
-	h := uint64(14695981039346656037)
-	bad := 0
 	if got := sum(nil); got != 0 {
-		bad++
-		fmt.Println("MISMATCH nil", name, got)
+		fail(fmt.Sprintf("MISMATCH nil %s: got %v want 0", name, got))
 	}
 	for _, n := range lengths {
 		s := make([]float64, n)
@@ -113,12 +101,10 @@ func checkFloat64(name string, sum func([]float64) float64) {
 		}
 		got, want := sum(s), oracleFloat(s)
 		if math.Float64bits(got) != math.Float64bits(want) {
-			bad++
-			fmt.Println("MISMATCH", name, n, got, want)
+			fail(fmt.Sprintf("MISMATCH %s %d: got %v want %v", name, n, got, want))
 		}
-		h = digest(h, math.Float64bits(got))
 	}
-	fmt.Println(name, bad, h)
+	fmt.Println("ok", name+"-matches-pairwise-oracle")
 }
 
 type f32 = float32
@@ -137,5 +123,8 @@ func main() {
 	checkFloat32("float32", func(s []float32) float32 { return s.sum() })
 	checkFloat32("f32", func(s []f32) f32 { return s.sum() })
 	checkFloat64("float64", func(s []float64) float64 { return s.sum() })
-	fmt.Println([]float64{1e16, -1e16, 1.0}.sum())
+	if got := []float64{1e16, -1e16, 1.0}.sum(); got != 0 {
+		fail(fmt.Sprintf("pairwise order: got %v want 0", got))
+	}
+	fmt.Println("ok pairwise-order-sum-is-zero")
 }

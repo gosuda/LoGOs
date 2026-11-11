@@ -4,8 +4,13 @@ package main
 
 import (
 	"fmt"
-	"math"
+	"os"
 )
+
+func fail(tag string) {
+	fmt.Println("FAIL", tag)
+	os.Exit(1)
+}
 
 func checkPairwiseVec() {
 	t := [8]float64{1e16, 1, 1, 1, 1, 1, 1, -1e16}
@@ -13,25 +18,23 @@ func checkPairwiseVec() {
 	lo := (t[0] + t[1]) + (t[2] + t[3])
 	hi := (t[4] + t[5]) + (t[6] + t[7])
 	if s != lo+hi {
-		panic(fmt.Sprintf("pairwise f64: got %v want %v", s, lo+hi))
+		fail(fmt.Sprintf("pairwise f64: got %v want %v", s, lo+hi))
 	}
-	fmt.Println("pairwise64", math.Float64bits(s))
 	u := [8]float32{1e7, 1, 1, 1, 1, 1, 1, -1e7}
 	su := u.sum()
 	lou := (u[0] + u[1]) + (u[2] + u[3])
 	hiu := (u[4] + u[5]) + (u[6] + u[7])
 	if su != lou+hiu {
-		panic(fmt.Sprintf("pairwise f32: got %v want %v", su, lou+hiu))
+		fail(fmt.Sprintf("pairwise f32: got %v want %v", su, lou+hiu))
 	}
-	fmt.Println("pairwise32", math.Float32bits(su))
 	a := [4]float64{1e16, 1, -1e16, 2}
 	b := [4]float64{1, 1, 1, 1}
 	d := a.dot(b)
 	lod := (a[0]*b[0] + a[1]*b[1]) + (a[2]*b[2] + a[3]*b[3])
 	if d != lod {
-		panic(fmt.Sprintf("pairwise dot: got %v want %v", d, lod))
+		fail(fmt.Sprintf("pairwise dot: got %v want %v", d, lod))
 	}
-	fmt.Println("pairwisedot", math.Float64bits(d))
+	fmt.Println("ok vec-pairwise-order-holds")
 }
 
 func oracleVecAdd4(a, b [4]float64) [4]float64 {
@@ -78,14 +81,14 @@ func checkVecArith() {
 	a := [4]float64{1, 2, 3, 4}
 	b := [4]float64{5, 6, 7, 8}
 	if got := a + b; got != oracleVecAdd4(a, b) {
-		panic(fmt.Sprintf("vec add4: got %v want %v", got, oracleVecAdd4(a, b)))
+		fail(fmt.Sprintf("vec add4: got %v want %v", got, oracleVecAdd4(a, b)))
 	}
 	for i := range a {
 		if d := a - b; d[i] != a[i]-b[i] {
-			panic("vec sub4 mismatch")
+			fail(fmt.Sprintf("vec sub4 lane %d: got %v want %v", i, d[i], a[i]-b[i]))
 		}
 		if q := a / b; q[i] != a[i]/b[i] {
-			panic("vec div4 mismatch")
+			fail(fmt.Sprintf("vec div4 lane %d: got %v want %v", i, q[i], a[i]/b[i]))
 		}
 	}
 	var c, d [8]float32
@@ -94,7 +97,7 @@ func checkVecArith() {
 		d[i] = float32(2*i + 1)
 	}
 	if got := c * d; got != oracleVecMul8(c, d) {
-		panic(fmt.Sprintf("vec mul8: got %v want %v", got, oracleVecMul8(c, d)))
+		fail(fmt.Sprintf("vec mul8: got %v want %v", got, oracleVecMul8(c, d)))
 	}
 	var e, f [16]uint8
 	for i := range e {
@@ -102,21 +105,22 @@ func checkVecArith() {
 		f[i] = uint8(i*11 + 5)
 	}
 	if (e & f) != oracleVecAnd16(e, f) {
-		panic("vec and16 mismatch")
+		fail(fmt.Sprintf("vec and16: got %v want %v", e&f, oracleVecAnd16(e, f)))
 	}
 	if (e | f) != oracleVecOr16(e, f) {
-		panic("vec or16 mismatch")
+		fail(fmt.Sprintf("vec or16: got %v want %v", e|f, oracleVecOr16(e, f)))
 	}
 	if (e ^ f) != oracleVecXor16(e, f) {
-		panic("vec xor16 mismatch")
+		fail(fmt.Sprintf("vec xor16: got %v want %v", e^f, oracleVecXor16(e, f)))
 	}
 	g := [4]int32{17, -19, 100, 7}
 	h := [4]int32{5, 4, -3, 2}
 	for i := range g {
 		if q := g / h; q[i] != g[i]/h[i] {
-			panic("vec intdiv mismatch")
+			fail(fmt.Sprintf("vec intdiv lane %d: got %v want %v", i, q[i], g[i]/h[i]))
 		}
 	}
+	fmt.Println("ok vec-arith-matches-scalar")
 }
 
 func checkVecMinMax() {
@@ -134,13 +138,13 @@ func checkVecMinMax() {
 		}
 	}
 	if a.sum() != wantSum {
-		panic(fmt.Sprintf("vec sum4: got %v want %v", a.sum(), wantSum))
+		fail(fmt.Sprintf("vec sum4: got %v want %v", a.sum(), wantSum))
 	}
 	if a.min() != wantMin {
-		panic(fmt.Sprintf("vec min4: got %v want %v", a.min(), wantMin))
+		fail(fmt.Sprintf("vec min4: got %v want %v", a.min(), wantMin))
 	}
 	if a.max() != wantMax {
-		panic(fmt.Sprintf("vec max4: got %v want %v", a.max(), wantMax))
+		fail(fmt.Sprintf("vec max4: got %v want %v", a.max(), wantMax))
 	}
 	b := [4]float64{1, 2, 3, 4}
 	var wantDot float64
@@ -148,8 +152,9 @@ func checkVecMinMax() {
 		wantDot += a[i] * b[i]
 	}
 	if a.dot(b) != wantDot {
-		panic("vec dot4 mismatch")
+		fail(fmt.Sprintf("vec dot4: got %v want %v", a.dot(b), wantDot))
 	}
+	fmt.Println("ok vec-minmax-matches-scalar")
 }
 
 func checkVecU64MinMax() {
@@ -167,8 +172,9 @@ func checkVecU64MinMax() {
 		}
 	}
 	if u.sum() != wantSum || u.min() != wantMin || u.max() != wantMax {
-		panic("vec u64 reduction mismatch")
+		fail(fmt.Sprintf("vec u64 reduction: got %v %v %v want %v %v %v", u.sum(), u.min(), u.max(), wantSum, wantMin, wantMax))
 	}
+	fmt.Println("ok vec-u64-matches-scalar")
 }
 
 func main() {
@@ -176,5 +182,4 @@ func main() {
 	checkVecArith()
 	checkVecMinMax()
 	checkVecU64MinMax()
-	fmt.Println("simdvec ok")
 }

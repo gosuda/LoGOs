@@ -2,7 +2,15 @@
 
 package main
 
-import "fmt"
+import (
+	"fmt"
+	"os"
+)
+
+func fail(tag string) {
+	fmt.Println("FAIL", tag)
+	os.Exit(1)
+}
 
 func checkFallbackArith() {
 	a := [4]float32{1, 2, 3, 4}
@@ -12,7 +20,7 @@ func checkFallbackArith() {
 		wantAdd[i] = a[i] + b[i]
 	}
 	if got := a + b; got != wantAdd {
-		panic("fallback f32 add")
+		fail(fmt.Sprintf("fallback f32 add: got %v want %v", got, wantAdd))
 	}
 	var c, d [8]uint32
 	for i := range c {
@@ -24,8 +32,9 @@ func checkFallbackArith() {
 		wantMul[i] = c[i] * d[i]
 	}
 	if got := c * d; got != wantMul {
-		panic("fallback u32 mul")
+		fail(fmt.Sprintf("fallback u32 mul: got %v want %v", got, wantMul))
 	}
+	fmt.Println("ok fallback-arith-matches-scalar")
 }
 
 func checkFallbackReduce() {
@@ -43,13 +52,13 @@ func checkFallbackReduce() {
 		}
 	}
 	if a.sum() != wantSum {
-		panic("fallback f32 sum")
+		fail(fmt.Sprintf("fallback f32 sum: got %v want %v", a.sum(), wantSum))
 	}
 	if a.min() != wantMin {
-		panic("fallback f32 min")
+		fail(fmt.Sprintf("fallback f32 min: got %v want %v", a.min(), wantMin))
 	}
 	if a.max() != wantMax {
-		panic("fallback f32 max")
+		fail(fmt.Sprintf("fallback f32 max: got %v want %v", a.max(), wantMax))
 	}
 	b := [4]float32{5, 6, 7, 8}
 	var wantDot float32
@@ -57,12 +66,12 @@ func checkFallbackReduce() {
 		wantDot += a[i] * b[i]
 	}
 	if a.dot(b) != wantDot {
-		panic("fallback f32 dot")
+		fail(fmt.Sprintf("fallback f32 dot: got %v want %v", a.dot(b), wantDot))
 	}
+	fmt.Println("ok fallback-reduce-matches-scalar")
 }
 
 func main() {
 	checkFallbackArith()
 	checkFallbackReduce()
-	fmt.Println("simd fallback ok")
 }
