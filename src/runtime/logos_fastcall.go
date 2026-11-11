@@ -31,6 +31,7 @@ func logosCgocallFast(fn, arg unsafe.Pointer) int32 {
 		}
 		return cgocall(fn, arg)
 	}
+	gp.nocgocallback = true
 	mp := gp.m
 	if raceenabled {
 		racereleasemerge(unsafe.Pointer(&racecgosync))
