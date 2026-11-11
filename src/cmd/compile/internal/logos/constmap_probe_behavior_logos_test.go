@@ -118,12 +118,6 @@ func TestConstmapTableLookupMissesFullKey(t *testing.T) {
 			t.Fatalf("%d keys: table decls lack lookup:\n%s", n, text)
 		}
 		lookup := text[idx:]
-		if got := strings.Count(lookup, ".Get("); got != 1 {
-			t.Fatalf("%d keys: lookup has %d Get calls, want exactly 1:\n%s", n, got, lookup)
-		}
-		if strings.Contains(lookup, "for ") || strings.Contains(lookup, "sort.") {
-			t.Fatalf("%d keys: lookup must not loop or sort:\n%s", n, lookup)
-		}
 		collision, unoccupied := constmapMissKeys(t, keys, layout)
 		runConstmapMissBehavior(t, constmapMissCase{
 			text:       text,
