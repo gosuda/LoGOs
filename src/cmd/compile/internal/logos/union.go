@@ -561,6 +561,16 @@ type unionUse struct {
 	utext   string
 	nnodes  []syntax.Expr
 	nnode   syntax.Expr
+	froms   []*unionFrom
+}
+
+type unionFrom struct {
+	name2 string
+	name1 string
+	ntext string
+	etext string
+	nmsg  string
+	emsg  string
 }
 
 func (u *unionUse) isName() string     { return "_logos_is_" + u.suffix }
@@ -869,6 +879,10 @@ func (fl *fileLower) emitHelpers(u *unionUse) {
 	}
 	nativeDecls := build(u.nnode, u.nnodes)
 	ejectDecls := build(mustTypeExprAt(fl, u.utext, pos), mustTypeExprsAt(fl, u.texts, pos))
+	for _, f := range u.froms {
+		nativeDecls = append(nativeDecls, fl.buildFromDecls(f, pos, mustTypeExprAt(fl, f.ntext, pos), f.nmsg)...)
+		ejectDecls = append(ejectDecls, fl.buildFromDecls(f, pos, mustTypeExprAt(fl, f.etext, pos), f.emsg)...)
+	}
 	fl.file.DeclList = append(fl.file.DeclList, nativeDecls...)
 	var text strings.Builder
 	for _, d := range ejectDecls {
@@ -879,6 +893,34 @@ func (fl *fileLower) emitHelpers(u *unionUse) {
 		text.WriteString("\n")
 	}
 	fl.add(fl.orig, fl.orig, text.String())
+}
+
+func (fl *fileLower) buildFromDecls(f *unionFrom, pos syntax.Pos, ttype syntax.Expr, msg string) []syntax.Decl {
+	anyField := func(name string) *syntax.Field {
+		return at(&syntax.Field{Name: nameOf(pos, name), Type: nameOf(pos, "any")}, pos)
+	}
+	from2 := at(&syntax.FuncDecl{
+		Name: nameOf(pos, f.name2),
+		Type: at(&syntax.FuncType{
+			ParamList:  []*syntax.Field{anyField("x")},
+			ResultList: []*syntax.Field{at(&syntax.Field{Type: ttype}, pos), at(&syntax.Field{Type: nameOf(pos, "bool")}, pos)},
+		}, pos),
+		Body: blockOf(pos, []syntax.Stmt{
+			typedVarDecl(pos, nameOf(pos, "z"), ttype),
+			returnOf(pos, []syntax.Expr{nameOf(pos, "z"), nameOf(pos, "false")}),
+		}),
+	}, pos)
+	from1 := at(&syntax.FuncDecl{
+		Name: nameOf(pos, f.name1),
+		Type: at(&syntax.FuncType{
+			ParamList:  []*syntax.Field{anyField("x")},
+			ResultList: []*syntax.Field{at(&syntax.Field{Type: ttype}, pos)},
+		}, pos),
+		Body: blockOf(pos, []syntax.Stmt{
+			exprStmtOf(pos, callOf(pos, nameOf(pos, "panic"), []syntax.Expr{litOf(pos, fmt.Sprintf("%q", msg), syntax.StringLit)})),
+		}),
+	}, pos)
+	return []syntax.Decl{from2, from1}
 }
 
 func (fl *fileLower) lowerUnionAsserts() {
@@ -927,6 +969,12 @@ func (fl *fileLower) lowerCommaOkAssign(s *syntax.AssignStmt) {
 	}
 	if a, u := fl.commaOkTarget(s.Rhs); a != nil {
 		s.Rhs = fl.assertCall(a, u.assert2Name())
+		return
+	}
+	if a, ok := unparenAssert(s.Rhs); ok {
+		if f := fl.fromHelper(a); f != nil {
+			s.Rhs = fl.assertCall(a, f.name2)
+		}
 	}
 }
 
@@ -936,15 +984,91 @@ func (fl *fileLower) lowerCommaOkVar(d *syntax.VarDecl) {
 	}
 	if a, u := fl.commaOkTarget(d.Values); a != nil {
 		d.Values = fl.assertCall(a, u.assert2Name())
+		return
+	}
+	if a, ok := unparenAssert(d.Values); ok {
+		if f := fl.fromHelper(a); f != nil {
+			d.Values = fl.assertCall(a, f.name2)
+		}
 	}
 }
 
 func (fl *fileLower) lowerSingleAssert(a *syntax.AssertExpr) syntax.Expr {
-	u := fl.useOf(fl.pkg.info.TypeOf(a.Type), a.Pos())
-	if u == nil {
+	if u := fl.useOf(fl.pkg.info.TypeOf(a.Type), a.Pos()); u != nil {
+		return fl.assertCall(a, u.assertName())
+	}
+	if f := fl.fromHelper(a); f != nil {
+		return fl.assertCall(a, f.name1)
+	}
+	return nil
+}
+
+func (fl *fileLower) fromHelper(a *syntax.AssertExpr) *unionFrom {
+	t := fl.pkg.info.TypeOf(a.Type)
+	if t == nil || mentionsTypeParam(t) {
 		return nil
 	}
-	return fl.assertCall(a, u.assertName())
+	if _, ok := types2.Unalias(t).Underlying().(*types2.Interface); ok {
+		return nil
+	}
+	ot := fl.pkg.info.TypeOf(a.X)
+	if ot == nil || types2.Identical(t, ot) {
+		return nil
+	}
+	members, ok := unionTerms(ot)
+	if !ok {
+		return nil
+	}
+	for _, m := range members {
+		if types2.Identical(m, t) {
+			return nil
+		}
+	}
+	ou := fl.useOf(ot, a.Pos())
+	if ou == nil {
+		return nil
+	}
+	return fl.useFrom(ou, t, a.Pos())
+}
+
+func (fl *fileLower) useFrom(ou *unionUse, t types2.Type, pos syntax.Pos) *unionFrom {
+	ntext := fl.mustSpell(t, pos)
+	_, etext, ok := fl.spellTypeBoth(t, pos)
+	if !ok {
+		base.Fatalf("logos: cannot spell assertion type at %s", pos.String())
+	}
+	for _, f := range ou.froms {
+		if f.ntext == ntext && f.etext == etext {
+			return f
+		}
+	}
+	stem := "_logos_assertfrom_" + ou.suffix + "_" + sanitizeUnionName(ntext)
+	name2 := stem + "2"
+	name1 := stem
+	for i := 2; ; i++ {
+		clash := false
+		for _, f := range ou.froms {
+			if f.name2 == name2 || f.name1 == name1 {
+				clash = true
+				break
+			}
+		}
+		if !clash {
+			break
+		}
+		name2 = fmt.Sprintf("%s2_%d", stem, i)
+		name1 = fmt.Sprintf("%s_%d", stem, i)
+	}
+	f := &unionFrom{
+		name2: name2,
+		name1: name1,
+		ntext: ntext,
+		etext: etext,
+		nmsg:  "interface conversion: " + ntext + " is not a member of " + ou.union,
+		emsg:  "interface conversion: " + etext + " is not a member of " + ou.union,
+	}
+	ou.froms = append(ou.froms, f)
+	return f
 }
 
 func (fl *fileLower) assertCall(a *syntax.AssertExpr, name string) syntax.Expr {

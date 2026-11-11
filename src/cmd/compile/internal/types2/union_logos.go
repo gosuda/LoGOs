@@ -111,6 +111,9 @@ func (check *Checker) logosNonMemberAssert(e syntax.Expr, x *operand, T Type) bo
 	if tset == nil || isTypeParam(T) || logosMemberOf(T, tset) {
 		return false
 	}
+	if _, ok := e.(*syntax.AssertExpr); ok {
+		return true
+	}
 	if IsInterface(T) {
 		if iface, ok := T.Underlying().(*Interface); ok {
 			if ttset := iface.typeSet(); ttset != nil && ttset.hasTerms() && !ttset.subsetOf(tset) {
