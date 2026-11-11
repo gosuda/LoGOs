@@ -27,12 +27,12 @@ func tryNonCall() (int, error) {
 }
 
 func tryIntLast() (int, error) {
-	_ = returnsInt()? /* ERROR "? last result must be error" */
+	_ = returnsInt()? /* ERROR "last result must be error, have int" */
 	return 0, nil
 }
 
 func tryNamedLast() (int, error) {
-	_ = returnsNamed()? /* ERROR "? last result must be error" */
+	_ = returnsNamed()? /* ERROR "last result must be error, have myError" */
 	return 0, nil
 }
 
