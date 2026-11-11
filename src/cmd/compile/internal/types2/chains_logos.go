@@ -13,6 +13,178 @@ const logosChainMutation = "[correctness::const_view_mutation]"
 
 const logosSideEffectBeforeSort = "[suspicious::side_effect_before_sort]"
 
+const logosChainJump = "[correctness::chain_jump] jump must not cross a chain lambda boundary"
+
+type logosChainLabel struct {
+	name string
+	loop bool
+	brk  bool
+}
+
+type logosChainDepth struct {
+	loop int
+	brk  int
+	sw   int
+}
+
+func (d logosChainDepth) inLoop() logosChainDepth {
+	d.loop++
+	d.brk++
+	return d
+}
+func (d logosChainDepth) inSwitch() logosChainDepth {
+	d.brk++
+	d.sw++
+	return d
+}
+func (d logosChainDepth) inTypeSwitch() logosChainDepth {
+	d.brk++
+	return d
+}
+func (d logosChainDepth) inSelect() logosChainDepth {
+	d.brk++
+	return d
+}
+
+type logosChainJumpScan struct {
+	check  *Checker
+	inside map[string]bool
+	bad    bool
+}
+
+func (check *Checker) logosChainJumps(block *syntax.BlockStmt) bool {
+	v := &logosChainJumpScan{check: check, inside: make(map[string]bool)}
+	syntax.Inspect(block, func(n syntax.Node) bool {
+		switch n.(type) {
+		case *syntax.FuncLit, *syntax.LambdaExpr:
+			return false
+		}
+		if l, ok := n.(*syntax.LabeledStmt); ok && l.Label != nil {
+			v.inside[l.Label.Value] = true
+		}
+		return true
+	})
+	v.seq(block.List, logosChainDepth{}, nil)
+	return !v.bad
+}
+
+func (v *logosChainJumpScan) seq(list []syntax.Stmt, d logosChainDepth, st []logosChainLabel) {
+	for _, s := range list {
+		v.one(s, d, st)
+	}
+}
+
+func (v *logosChainJumpScan) one(s syntax.Stmt, d logosChainDepth, st []logosChainLabel) {
+	switch s := s.(type) {
+	case *syntax.BlockStmt:
+		v.seq(s.List, d, st)
+	case *syntax.IfStmt:
+		if s.Then != nil {
+			v.one(s.Then, d, st)
+		}
+		if s.Else != nil {
+			v.one(s.Else, d, st)
+		}
+	case *syntax.ForStmt:
+		v.one(s.Body, d.inLoop(), st)
+	case *syntax.SwitchStmt:
+		dd := d.inSwitch()
+		if _, ok := s.Tag.(*syntax.TypeSwitchGuard); ok {
+			dd = d.inTypeSwitch()
+		}
+		for _, c := range s.Body {
+			v.seq(c.Body, dd, st)
+		}
+	case *syntax.SelectStmt:
+		for _, c := range s.Body {
+			v.seq(c.Body, d.inSelect(), st)
+		}
+	case *syntax.LabeledStmt:
+		v.one(s.Stmt, d, append(st, logosChainLabelOf(s)))
+	case *syntax.BranchStmt:
+		v.branch(s, d, st)
+	}
+}
+func logosChainLabelOf(s *syntax.LabeledStmt) logosChainLabel {
+	e := logosChainLabel{name: s.Label.Value}
+	inner := s.Stmt
+	for {
+		l, ok := inner.(*syntax.LabeledStmt)
+		if !ok {
+			break
+		}
+		inner = l.Stmt
+	}
+	switch inner.(type) {
+	case *syntax.ForStmt:
+		e.loop = true
+		e.brk = true
+	case *syntax.SwitchStmt, *syntax.SelectStmt:
+		e.brk = true
+	}
+	return e
+}
+
+func logosChainLookup(st []logosChainLabel, name string) (logosChainLabel, bool) {
+	for i := len(st) - 1; i >= 0; i-- {
+		if st[i].name == name {
+			return st[i], true
+		}
+	}
+	return logosChainLabel{}, false
+}
+
+func logosChainBreaks(st []logosChainLabel, name string) bool {
+	e, ok := logosChainLookup(st, name)
+	return ok && e.brk
+}
+
+func logosChainContinues(st []logosChainLabel, name string) bool {
+	e, ok := logosChainLookup(st, name)
+	return ok && e.loop
+}
+
+func (v *logosChainJumpScan) branch(s *syntax.BranchStmt, d logosChainDepth, st []logosChainLabel) {
+	switch s.Tok {
+	case syntax.Break:
+		if s.Label != nil {
+			if !logosChainBreaks(st, s.Label.Value) {
+				v.fail(s.Pos(), MisplacedLabel)
+			}
+			return
+		}
+		if d.brk == 0 {
+			v.fail(s.Pos(), MisplacedBreak)
+		}
+	case syntax.Continue:
+		if s.Label != nil {
+			if !logosChainContinues(st, s.Label.Value) {
+				v.fail(s.Pos(), MisplacedLabel)
+			}
+			return
+		}
+		if d.loop == 0 {
+			v.fail(s.Pos(), MisplacedContinue)
+		}
+	case syntax.Fallthrough:
+		if d.sw == 0 {
+			v.fail(s.Pos(), MisplacedFallthrough)
+		}
+	case syntax.Goto:
+		if s.Label == nil {
+			return
+		}
+		if !v.inside[s.Label.Value] {
+			v.fail(s.Pos(), MisplacedLabel)
+		}
+	}
+}
+
+func (v *logosChainJumpScan) fail(pos syntax.Pos, code Code) {
+	v.check.error(pos, code, logosChainJump)
+	v.bad = true
+}
+
 var logosChainMethods = map[string]bool{
 	"filter": true,
 	"map":    true,
@@ -405,7 +577,7 @@ func (check *Checker) logosChainBlock(lam *syntax.LambdaExpr, roots map[string]b
 		return true
 	})
 	var collected []*operand
-	failed := false
+	failed := !check.logosChainJumps(block)
 	for _, s := range block.List {
 		ret, isRet := s.(*syntax.ReturnStmt)
 		if !isRet {
