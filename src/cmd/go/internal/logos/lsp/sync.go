@@ -227,7 +227,6 @@ func (p *Proxy) didClose(ctx context.Context, m *message) {
 	retained := p.st.forget(path)
 	p.mu.Lock()
 	delete(p.srvDiags, params.TextDocument.URI)
-	delete(p.sent, params.TextDocument.URI)
 	p.mu.Unlock()
 	p.forwardUnlessLogos(m, path)
 	if retained {

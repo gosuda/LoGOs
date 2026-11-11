@@ -202,6 +202,9 @@ func (f *fakeCompiler) lowerFile(low *Lowering, path string, buffers map[string]
 		return
 	}
 	src, ok := buffers[path]
+	if !ok {
+		src, _ = os.ReadFile(path)
+	}
 	out, m, ok := lowerQuestion(src)
 	if !ok {
 		low.Missing = append(low.Missing, path)
