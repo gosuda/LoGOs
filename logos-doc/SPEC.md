@@ -725,9 +725,11 @@ Conflicting property types across listed interfaces MUST fail with `[correctness
 
 A non-struct type MUST NOT satisfy a property interface. [T-203.2]
 
+A write through a property interface (a plain assignment, a compound update, or a method call on a property value) MUST reach the struct. [T-203.2]
+
 A compound update through an interface MUST evaluate the receiver once and write the value back. [T-203.2]
 
-A method call on a property value MUST use read-call-write-back around the call, and the write MUST reach the struct. [T-203.2]
+A method call on a property value MUST use read-call-write-back around the call. [T-203.2]
 
 Only a type with a `: I` list MUST gain accessor methods. [T-203.2]
 
