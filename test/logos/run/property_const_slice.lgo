@@ -2,7 +2,21 @@
 
 package main
 
-import "fmt"
+import (
+	"fmt"
+	"os"
+)
+
+var failed bool
+
+func check(name string, cond bool, got, want any) {
+	if !cond {
+		failed = true
+		fmt.Println("FAIL", name+":", "got", got, "want", want)
+		return
+	}
+	fmt.Println("ok", name)
+}
 
 type RO interface {
 	const ID int
@@ -23,5 +37,9 @@ func useROs(xs const []RO) int {
 
 func main() {
 	gs := []Gadget{{ID: 1}, {ID: 2}}
-	fmt.Println(useROs(gs))
+	check("const-slice-view-keeps-length", useROs(gs) == 2, useROs(gs), 2)
+	check("empty-const-slice-view-keeps-length", useROs(nil) == 0, useROs(nil), 0)
+	if failed {
+		os.Exit(1)
+	}
 }

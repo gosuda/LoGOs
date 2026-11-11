@@ -1,1 +1,2 @@
-2
+ok const-slice-view-keeps-length
+ok empty-const-slice-view-keeps-length
