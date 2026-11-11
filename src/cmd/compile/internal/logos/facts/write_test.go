@@ -98,6 +98,10 @@ func TestCalleeFactsMutationTriState(t *testing.T) {
 	if _, mask := s.calleeFacts(fn); mask != nil {
 		t.Fatalf("readonly-only record: mask = %v, want nil (unknown)", mask)
 	}
+	reg(&Facts{Fns: []FnFact{{Object: "F", HasAssert: true, AssertTP: "0", AssertRTP: "0"}}})
+	if _, mask := s.calleeFacts(fn); mask != nil {
+		t.Fatalf("assertion-only record: mask = %v, want nil (unknown)", mask)
+	}
 	reg(&Facts{Fns: []FnFact{{Object: "F", HasAssert: true, AssertTP: "0", AssertRTP: "0", ParamMutated: "0"}}})
 	_, mask := s.calleeFacts(fn)
 	if mask == nil || len(mask) != 0 {
