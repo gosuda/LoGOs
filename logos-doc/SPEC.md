@@ -1476,7 +1476,6 @@ Maps with string keys encode as uvarint count plus entries sorted by key. [T-Sec
 Nested structs encode inline. [T-Sec10.1]
 Optional values MUST encode as 0x00 when absent or 0x01 plus payload when present. [T-Sec10.1]
 A field of type int or uint in a struct with a JSON-tagged field warns portability::serialized_unsized_int in loGo/s packages. [T-Sec10.1]
-Sized kinds MUST be preferred. [T-Sec10.1]
 A tag `-` excludes the field from binary output; other tag options change nothing. [T-Sec10.1]
 UnmarshalBinary rejects truncation, bad presence bytes, version mismatch, and trailing bytes with errors naming field and offset. [T-Sec10.1]
 For elements with a nonzero wire payload, a count header MUST pre-allocate at most min(len(rest)/2, 1 MiB / sizeof(elem)) elements and MUST grow past that only as input bytes arrive. [T-Sec10.1]
