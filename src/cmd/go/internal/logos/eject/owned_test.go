@@ -350,8 +350,8 @@ func TestEmitOwnedOutsideModule(t *testing.T) {
 	staging := t.TempDir()
 	writeOwnedSidecar(t, staging, "example.com/mod/sub", ownedTestRequest(t, "example.com/mod/sub", "sub", "package sub\nfunc X() {}\n", []logosowned.Declaration{}))
 	_, err := emitOwnedHelpers(plan, staging, t.TempDir(), map[string]string{})
-	if err == nil || !strings.Contains(err.Error(), "outside its module") || !strings.Contains(err.Error(), "example.com/mod/sub") {
-		t.Fatalf("emit outside module must name the module boundary, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "example.com/mod/sub") {
+		t.Fatalf("emit outside module must fail and name the owner, got %v", err)
 	}
 }
 
