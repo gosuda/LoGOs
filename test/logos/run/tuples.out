@@ -1,12 +1,11 @@
-3 <nil>
-{3 <nil>}
-7 seven
-10 ten
-3 <nil>
-3 <nil>
-true
-1 <nil>
-42 <nil>
-3 <nil>
-7 seven
-3 <nil>
+ok tuple-assign-keeps-values
+ok call-tuple-equals-fresh-call
+ok named-results-keep-names
+ok literal-tuple-unpacks
+ok direct-call-unpacks
+ok tuple-round-trips-channel
+ok tuple-round-trips-map
+ok named-tuple-params-unpack
+ok direct-unpack-keeps-values
+ok direct-named-unpack-keeps-values
+ok reassign-keeps-values

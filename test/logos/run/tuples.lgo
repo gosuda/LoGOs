@@ -2,7 +2,21 @@
 
 package main
 
-import "fmt"
+import (
+	"fmt"
+	"os"
+)
+
+var failed bool
+
+func check(name string, cond bool, got, want any) {
+	if !cond {
+		failed = true
+		fmt.Println("FAIL", name+":", "got", got, "want", want)
+		return
+	}
+	fmt.Println("ok", name)
+}
 
 func pair() (int, error) { return 3, nil }
 
@@ -17,35 +31,39 @@ func main() {
 	var t (int, error)
 	t = pair()
 	a, b := t
-	fmt.Println(a, b)
+	pa, pb := pair()
+	check("tuple-assign-keeps-values", a == 3 && b == nil && a == pa && b == pb, fmt.Sprint(a, b), "3 <nil>")
 	c := pair()
-	fmt.Println(c)
+	d := pair()
+	check("call-tuple-equals-fresh-call", c == d && c == t, fmt.Sprint(c), "{3 <nil>}")
 	n := nres()
-	fmt.Println(n.x, n.y)
+	check("named-results-keep-names", n.x == 7 && n.y == "seven", fmt.Sprint(n.x, n.y), "7 seven")
 	u := (10, "ten")
 	p, q := u
-	fmt.Println(p, q)
-	fmt.Println(pair())
+	check("literal-tuple-unpacks", p == 10 && q == "ten", fmt.Sprint(p, q), "10 ten")
+	sp, sq := pair()
+	check("direct-call-unpacks", sp == 3 && sq == nil, fmt.Sprint(sp, sq), "3 <nil>")
 	ch := make(chan (int, error), 1)
 	ch <- c
 	v := <-ch
-	p1, q1 := v
-	fmt.Println(p1, q1)
+	check("tuple-round-trips-channel", v == c, fmt.Sprint(v), "{3 <nil>}")
 	m := map[string](int, error){"k": (1, nil)}
 	mv, ok := m["k"]
-	fmt.Println(ok)
 	mp, mq := mv
-	fmt.Println(mp, mq)
-	fmt.Println(show((42, nil)))
+	check("tuple-round-trips-map", ok && mp == 1 && mq == nil, fmt.Sprint(ok, mp, mq), "true 1 <nil>")
+	check("named-tuple-params-unpack", show((42, nil)) == "42 <nil>", show((42, nil)), "42 <nil>")
 	direct()
+	if failed {
+		os.Exit(1)
+	}
 }
 
 func direct() {
 	x, y := pair()
-	fmt.Println(x, y)
+	check("direct-unpack-keeps-values", x == 3 && y == nil, fmt.Sprint(x, y), "3 <nil>")
 	p, q := nres()
-	fmt.Println(p, q)
+	check("direct-named-unpack-keeps-values", p == 7 && q == "seven", fmt.Sprint(p, q), "7 seven")
 	m1, m2 := pair()
 	m1, m2 = pair()
-	fmt.Println(m1, m2)
+	check("reassign-keeps-values", m1 == 3 && m2 == nil, fmt.Sprint(m1, m2), "3 <nil>")
 }
