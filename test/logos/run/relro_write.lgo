@@ -3,12 +3,25 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 )
+
+var failed bool
+
+func check(name string, cond bool, got, want any) {
+	if !cond {
+		failed = true
+		fmt.Println("FAIL", name+":", "got", got, "want", want)
+		return
+	}
+	fmt.Println("ok", name)
+}
 
 const probeSrc = `package main
 
@@ -163,10 +176,25 @@ func main() {
 		os.Exit(1)
 	}
 	run := exec.Command(filepath.Join(dir, "probe.exe"))
-	run.Stdout = os.Stdout
-	run.Stderr = os.Stderr
+	var probeBuf bytes.Buffer
+	run.Stdout = &probeBuf
+	run.Stderr = &probeBuf
 	if err := run.Run(); err != nil {
 		fmt.Printf("FAIL probe run: %v\n", err)
+		os.Exit(1)
+	}
+	lines := strings.Split(strings.TrimSpace(probeBuf.String()), "\n")
+	var l0, l1, l2, l3, l4 string
+	if len(lines) == 5 {
+		l0, l1, l2, l3, l4 = lines[0], lines[1], lines[2], lines[3], lines[4]
+	}
+	check("probe-lines", len(lines) == 5, len(lines), 5)
+	check("fault-names", l0 == "fault OK names code=2", l0, "fault OK names code=2")
+	check("fault-recs", l1 == "fault OK recs code=2", l1, "fault OK recs code=2")
+	check("names-sect", l2 == "main.names=R sect=.rodata", l2, "main.names=R sect=.rodata")
+	check("recs-sect", l3 == "main.recs=R sect=.rodata", l3, "main.recs=R sect=.rodata")
+	check("relro", l4 == "relro OK", l4, "relro OK")
+	if failed {
 		os.Exit(1)
 	}
 }

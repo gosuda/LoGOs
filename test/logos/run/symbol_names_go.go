@@ -154,5 +154,5 @@ func main() {
 		fail("generic call wrong value")
 	}
 	checkPanicTrace()
-	fmt.Println("OK")
+	fmt.Println("ok symbols")
 }

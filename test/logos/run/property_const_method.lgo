@@ -8,6 +8,18 @@ import (
 	"reflect"
 )
 
+var failed bool
+
+func check(name string, cond bool, got, want any) {
+	if !cond {
+		failed = true
+		fmt.Println("FAIL", name+":", "got", got, "want", want)
+		return
+	}
+	fmt.Println("ok", name)
+}
+
+
 type RO interface {
 	const Name string
 	const Start() error
@@ -40,11 +52,10 @@ func fromStarter(s Starter) string {
 func main() {
 	m := Gadget{Name: "g"}
 	var r RO = m
-	if use(m) != "g" || r.Name != "g" || fromStarter(m) != "g" || r.Start() != nil {
-		fmt.Println("property const: FAIL")
+	check("property-const", use(m) == "g" && r.Name == "g" && fromStarter(m) == "g" && r.Start() == nil, fmt.Sprint(use(m), r.Name, fromStarter(m), r.Start() == nil), "gggtrue")
+	if failed {
 		os.Exit(1)
 	}
-	fmt.Println("property const: PASS")
 }
 func init() {
 	gt := reflect.TypeOf(Gadget{})
