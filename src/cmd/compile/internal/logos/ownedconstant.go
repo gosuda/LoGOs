@@ -1306,7 +1306,7 @@ func (fl *fileLower) constMapOwnedTexts(g *constMapGen, pos syntax.Pos) (string,
 		keyTexts:    nativeKeyLit,
 		valTexts:    nativeValLit,
 		builderBody: ownedNativeMapLit(nativeKeyLit, nativeValLit, nativeMapT),
-		hashExpr:    ownedNativeHashCall(mt.Key(), "k"),
+		hashExpr:    ownedNativeHashCall(mt.Key(), "_logos_k"),
 		order:       order,
 		layout:      sharedLayout,
 		isSwitch:    sharedIsSwitch,
@@ -1534,19 +1534,19 @@ func (fl *fileLower) ownedEjectMapSpelling(spec ownedMapSpec) (ejectK, ejectV, e
 		}
 	}
 	if _, ok := mt.Key().Underlying().(*types2.Basic); ok {
-		ejectHash = fl.constKeyHashText(mt.Key(), "k", pos)
+		ejectHash = fl.constKeyHashText(mt.Key(), "_logos_k", pos)
 	} else {
 		if ownerK == "" {
 			return "", "", "", nil, nil, "", false
 		}
 		hname := ownedAliasFor(fp, fn, keyPath, "Hash")
-		hexpr, ok := ownedNativeHashInline(mt.Key(), "v")
+		hexpr, ok := ownedNativeHashInline(mt.Key(), "_logos_v")
 		if !ok {
 			base.Errorf("%s: logos: private const map %s key hash is not representable", pos.String(), g.obj.Name())
 			base.ExitIfErrors()
 			return "", "", "", nil, nil, "", false
 		}
-		src := "package " + pkgK + "\nimport _logos_rt \"logos/rt\"\nfunc " + hname + "(v " + localK + ") uint64 { return " + hexpr + " }\n"
+		src := "package " + pkgK + "\nimport _logos_rt \"logos/rt\"\nfunc " + hname + "(_logos_v " + localK + ") uint64 { return " + hexpr + " }\n"
 		hdecls, hdok := ownedDeclsForTypes(mt.Key())
 		if !hdok {
 			base.Errorf("%s: logos: private const map %s key hash has no declaration position", pos.String(), g.obj.Name())
@@ -1557,9 +1557,9 @@ func (fl *fileLower) ownedEjectMapSpelling(spec ownedMapSpec) (ejectK, ejectV, e
 			return "", "", "", nil, nil, "", false
 		}
 		if qualK != "" {
-			ejectHash = qualK + "." + hname + "(k)"
+			ejectHash = qualK + "." + hname + "(_logos_k)"
 		} else {
-			ejectHash = hname + "(k)"
+			ejectHash = hname + "(_logos_k)"
 		}
 	}
 	return ejectK, ejectV, ejectMapT, ejectKeys, ejectVals, ejectHash, true
