@@ -168,18 +168,19 @@ func operandsBeforeGo(ctx context.Context) error {
 
 func report(name string, err error) bool {
 	if err == nil {
+		fmt.Println("ok", name)
 		return false
 	}
-	fmt.Println("FAIL", name+":", err)
+	fmt.Println("FAIL "+name+":", err)
 	return true
 }
 
 func main() {
 	ctx := context.Background()
-	bad := report("panicUnwindsParent", panicUnwindsParent(ctx))
-	bad = report("multiValuedArgs", multiValuedArgs(ctx)) || bad
-	bad = report("receiverOnce", receiverOnce(ctx)) || bad
-	bad = report("operandsBeforeGo", operandsBeforeGo(ctx)) || bad
+	bad := report("group-parent-arg-panic-propagates", panicUnwindsParent(ctx))
+	bad = report("group-multivalue-and-spread-args", multiValuedArgs(ctx)) || bad
+	bad = report("group-receiver-and-callee-once", receiverOnce(ctx)) || bad
+	bad = report("group-args-evaluated-before-submit", operandsBeforeGo(ctx)) || bad
 	if bad {
 		os.Exit(1)
 	}

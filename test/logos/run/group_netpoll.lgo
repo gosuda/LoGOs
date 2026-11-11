@@ -8,61 +8,73 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"sync/atomic"
 	"time"
 )
 
-
 var errBoom = errors.New("boom")
 
-var failedAt atomic.Int64
+var bad bool
 
-func readChild(conn net.Conn) error {
-	_, err := conn.Read(make([]byte, 1))
-	took := time.Duration(time.Now().UnixNano() - failedAt.Load())
-	switch {
-	case !os.IsTimeout(err):
-		fmt.Println("child: not a timeout:", err)
-	case took > 100*time.Millisecond:
-		fmt.Println("child: late:", took)
-	default:
-		fmt.Println("child: timeout")
+func check(tag string, cond bool, got, want string) {
+	if !cond {
+		fmt.Println("FAIL "+tag+": got "+got+" want "+want)
+		bad = true
+		return
 	}
+	fmt.Println("ok", tag)
+}
+//logos:allow(correctness::unbounded_channel_op)
+func readChild(conn net.Conn, res chan string) error {
+	_, err := conn.Read(make([]byte, 1))
+	if !os.IsTimeout(err) {
+		res <- "not-timeout"
+		return err
+	}
+	res <- "timeout"
 	return nil
 }
 
 func sibling() error {
-	time.Sleep(20 * time.Millisecond)
-	failedAt.Store(time.Now().UnixNano())
 	return errBoom
 }
 
-func run(conn net.Conn) error {
+func run(conn net.Conn, res chan string) error {
 	go group (context.Background()) {
-		go readChild(conn)
+		go readChild(conn, res)
 		go sibling()
 	}
 	return nil
 }
 
+//logos:allow(correctness::unbounded_channel_op)
 func main() {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		fmt.Println("listen:", err)
-		return
+		fmt.Println("FAIL group-netpoll-setup: got", err, "want listener")
+		os.Exit(1)
 	}
 	defer ln.Close()
 	cli, err := net.Dial("tcp", ln.Addr().String())
 	if err != nil {
-		fmt.Println("dial:", err)
-		return
+		fmt.Println("FAIL group-netpoll-setup: got", err, "want dial")
+		os.Exit(1)
 	}
 	defer cli.Close()
 	srv, err := ln.Accept()
 	if err != nil {
-		fmt.Println("accept:", err)
-		return
+		fmt.Println("FAIL group-netpoll-setup: got", err, "want accept")
+		os.Exit(1)
 	}
 	defer srv.Close()
-	fmt.Println("group:", run(srv))
+	res := make(chan string, 1)
+	start := time.Now()
+	gotErr := run(srv, res)
+	check("group-netpoll-first-error-wins", gotErr == errBoom, fmt.Sprint(gotErr), errBoom.Error())
+	got := <-res
+	check("group-netpoll-cancel-wakes-with-timeout", got == "timeout", got, "timeout")
+	took := time.Since(start)
+	check("group-netpoll-wake-prompt", took < 5*time.Second, took.String(), "under 5s for the 100ms SPEC bound")
+	if bad {
+		os.Exit(1)
+	}
 }

@@ -6,10 +6,22 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"strings"
 
 	"logos/rt"
 )
 
+var bad bool
+
+func check(tag string, cond bool, got, want string) {
+	if !cond {
+		fmt.Println("FAIL "+tag+": got "+got+" want "+want)
+		bad = true
+		return
+	}
+	fmt.Println("ok", tag)
+}
 
 func run(ctx context.Context, ch chan int) error {
 	go group (ctx) {
@@ -26,11 +38,14 @@ func run(ctx context.Context, ch chan int) error {
 func main() {
 	err := run(context.Background(), make(chan int))
 	pe, ok := errors.AsType[*rt.PanicError](err)
+	check("group-panic-becomes-panicerror", ok, fmt.Sprintf("%T", err), "*rt.PanicError")
 	if !ok {
-		fmt.Println("not a PanicError:", err)
-		return
+		os.Exit(1)
 	}
-	fmt.Println("value:", pe.Value)
-	fmt.Println("stack:", len(pe.Stack) > 0)
-	fmt.Println("text:", pe.Error())
+	check("group-panic-value", pe.Value == "boom", fmt.Sprint(pe.Value), "boom")
+	check("group-panic-stack", len(pe.Stack) > 0, fmt.Sprint(len(pe.Stack) > 0), "non-empty")
+	check("group-panic-text", strings.Contains(pe.Error(), "boom"), pe.Error(), "text containing boom")
+	if bad {
+		os.Exit(1)
+	}
 }

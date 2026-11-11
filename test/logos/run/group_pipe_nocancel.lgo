@@ -7,50 +7,63 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"time"
+	"os"
 )
 
 var errBoom = errors.New("boom")
 
-func readChild(r net.Conn) error {
+var bad bool
+
+func check(tag string, cond bool, got, want string) {
+	if !cond {
+		fmt.Println("FAIL "+tag+": got "+got+" want "+want)
+		bad = true
+		return
+	}
+	fmt.Println("ok", tag)
+}
+
+//logos:allow(correctness::unbounded_channel_op)
+func readChild(r net.Conn, res chan string) error {
 	_, err := r.Read(make([]byte, 1))
 	if err != nil {
-		fmt.Println("child:", err)
+		res <- "fail:" + err.Error()
 		return err
 	}
-	fmt.Println("child: ok")
+	res <- "ok"
 	return nil
 }
 
 func sibling() error {
-	time.Sleep(50 * time.Millisecond)
 	return errBoom
 }
 
-func run(r net.Conn, w net.Conn) error {
+//logos:allow(correctness::unbounded_channel_op)
+func writerChild(w net.Conn) error {
+	if _, err := w.Write([]byte("x")); err != nil {
+		return err
+	}
+	return w.Close()
+}
+
+func run(r net.Conn, w net.Conn, res chan string) error {
 	go group (context.Background()) {
-		go readChild(r)
+		go readChild(r, res)
 		go sibling()
-		go {
-			time.Sleep(300 * time.Millisecond)
-			if _, err := w.Write([]byte("x")); err != nil {
-				fmt.Println("write:", err)
-			}
-			if err := w.Close(); err != nil {
-				fmt.Println("close:", err)
-			}
-		}
+		go writerChild(w)
 	}
 	return nil
 }
 
+//logos:allow(correctness::unbounded_channel_op)
 func main() {
 	r, w := net.Pipe()
-	start := time.Now()
-	err := run(r, w)
-	took := time.Since(start)
-	fmt.Println("group:", err)
-	if took < 200*time.Millisecond {
-		fmt.Println("early:", took)
+	res := make(chan string, 1)
+	err := run(r, w, res)
+	check("group-pipe-first-error-wins", err == errBoom, fmt.Sprint(err), errBoom.Error())
+	got := <-res
+	check("group-pipe-plain-io-ignores-cancel", got == "ok", got, "ok")
+	if bad {
+		os.Exit(1)
 	}
 }

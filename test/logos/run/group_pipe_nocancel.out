@@ -1,2 +1,2 @@
-child: ok
-group: boom
+ok group-pipe-first-error-wins
+ok group-pipe-plain-io-ignores-cancel

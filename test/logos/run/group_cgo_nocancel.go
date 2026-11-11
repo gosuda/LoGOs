@@ -34,54 +34,65 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"time"
+	"runtime"
 
 	"logos/rt"
 )
 
 var errBoom = errors.New("boom")
 
+var bad bool
+
+func check(tag string, cond bool, got, want string) {
+	if !cond {
+		fmt.Println("FAIL " + tag + ": got " + got + " want " + want)
+		bad = true
+		return
+	}
+	fmt.Println("ok", tag)
+}
+
 func main() {
 	if C.logosCgoMakePipe() != 0 {
-		fmt.Println("pipe: make failed")
-		return
+		fmt.Println("FAIL group-cgo-setup: got pipe make failed want pipe")
+		os.Exit(1)
 	}
 	tmp, err := os.CreateTemp("", "groupcgoreg")
 	if err != nil {
-		fmt.Println("regular:", err)
-		return
+		fmt.Println("FAIL group-cgo-setup: got", err, "want temp file")
+		os.Exit(1)
 	}
 	if _, err := tmp.WriteString("regular-ok"); err != nil {
-		fmt.Println("regular:", err)
-		return
+		fmt.Println("FAIL group-cgo-setup: got", err, "want write")
+		os.Exit(1)
 	}
 	name := tmp.Name()
 	if err := tmp.Close(); err != nil {
-		fmt.Println("regular:", err)
-		return
+		fmt.Println("FAIL group-cgo-setup: got", err, "want close")
+		os.Exit(1)
 	}
 	defer os.Remove(name)
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		fmt.Println("listen:", err)
-		return
+		fmt.Println("FAIL group-cgo-setup: got", err, "want listener")
+		os.Exit(1)
 	}
 	defer ln.Close()
 	cli, err := net.Dial("tcp", ln.Addr().String())
 	if err != nil {
-		fmt.Println("dial:", err)
-		return
+		fmt.Println("FAIL group-cgo-setup: got", err, "want dial")
+		os.Exit(1)
 	}
 	defer cli.Close()
 	srv, err := ln.Accept()
 	if err != nil {
-		fmt.Println("accept:", err)
-		return
+		fmt.Println("FAIL group-cgo-setup: got", err, "want accept")
+		os.Exit(1)
 	}
 	defer srv.Close()
+	failed := make(chan struct{})
 	var tcpErr, cgoErr, regErr error
-	var cgoTook time.Duration
-	t0 := time.Now()
+	var cgoRes C.long
 	g, _ := rt.NewGroup(context.Background(), 0)
 	g.Go(func(_ context.Context) error {
 		_, err := cli.Read(make([]byte, 1))
@@ -89,10 +100,10 @@ func main() {
 		return nil
 	})
 	g.Go(func(_ context.Context) error {
-		if C.logosCgoBlockRead() != 1 {
+		cgoRes = C.logosCgoBlockRead()
+		if cgoRes != 1 {
 			cgoErr = errors.New("cgo read disturbed")
 		}
-		cgoTook = time.Since(t0)
 		return nil
 	})
 	g.Go(func(_ context.Context) error {
@@ -107,34 +118,32 @@ func main() {
 		return nil
 	})
 	g.Go(func(_ context.Context) error {
-		time.Sleep(50 * time.Millisecond)
+		close(failed)
 		return errBoom
 	})
 	g.Go(func(_ context.Context) error {
-		time.Sleep(400 * time.Millisecond)
-		if C.logosCgoWriteByte() != 0 {
-			return errors.New("cgo write failed")
+		for {
+			select {
+			case <-failed:
+				if C.logosCgoWriteByte() != 0 {
+					return errors.New("cgo write failed")
+				}
+				return nil
+			default:
+				runtime.Gosched()
+			}
 		}
-		return nil
 	})
 	werr := g.Wait()
 	if regErr != nil {
-		fmt.Println("regular:", regErr)
+		check("group-cgo-regular-io-unaffected", false, regErr.Error(), "regular-ok")
 	} else {
-		fmt.Println("regular: ok")
+		check("group-cgo-regular-io-unaffected", true, "regular-ok", "regular-ok")
 	}
-	if !os.IsTimeout(tcpErr) {
-		fmt.Println("tcp:", tcpErr)
-	} else {
-		fmt.Println("tcp: timeout")
+	check("group-cgo-tcp-wakes-with-timeout", os.IsTimeout(tcpErr), fmt.Sprint(tcpErr), "timeout error")
+	check("group-cgo-blocked-read-undisturbed", cgoErr == nil && cgoRes == 1, fmt.Sprint(cgoRes), "1")
+	check("group-cgo-first-error-wins", werr == errBoom, fmt.Sprint(werr), errBoom.Error())
+	if bad {
+		os.Exit(1)
 	}
-	switch {
-	case cgoErr != nil:
-		fmt.Println("cgo:", cgoErr)
-	case cgoTook < 250*time.Millisecond:
-		fmt.Println("cgo: early")
-	default:
-		fmt.Println("cgo: ok")
-	}
-	fmt.Println("group:", werr)
 }

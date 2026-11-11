@@ -1,4 +1,4 @@
-regular: ok
-tcp: timeout
-cgo: ok
-group: boom
+ok group-cgo-regular-io-unaffected
+ok group-cgo-tcp-wakes-with-timeout
+ok group-cgo-blocked-read-undisturbed
+ok group-cgo-first-error-wins
