@@ -18,6 +18,7 @@ import (
 func shapesCgoErr(t *testing.T, input, src string) (string, map[string]string, string, error) {
 	t.Helper()
 	requireCgo(t)
+	t.Setenv("GOEXPERIMENT", "logosfastcgo")
 	work := t.TempDir()
 	if err := os.WriteFile(filepath.Join(work, input), []byte(src), 0644); err != nil {
 		t.Fatal(err)
@@ -58,6 +59,7 @@ func shapesCgoErr(t *testing.T, input, src string) (string, map[string]string, s
 func shapesCgoMulti(t *testing.T, inputs map[string]string) (string, map[string]string) {
 	t.Helper()
 	requireCgo(t)
+	t.Setenv("GOEXPERIMENT", "logosfastcgo")
 	work := t.TempDir()
 	args := []string{}
 	order := []string{"a.go", "b.go", "f.go", "f.lgo", "a.lgo", "b.lgo"}
@@ -112,6 +114,7 @@ func shapesCgoMulti(t *testing.T, inputs map[string]string) (string, map[string]
 func shapesCgoArgs(t *testing.T, input, src string, gccopts ...string) (string, map[string]string) {
 	t.Helper()
 	requireCgo(t)
+	t.Setenv("GOEXPERIMENT", "logosfastcgo")
 	work := t.TempDir()
 	if err := os.WriteFile(filepath.Join(work, input), []byte(src), 0644); err != nil {
 		t.Fatal(err)
@@ -873,6 +876,7 @@ func F() int32 { return int32(C.l_fast(1)) }
 func shapesBuildWith(t *testing.T, args []string, env []string) string {
 	t.Helper()
 	requireCgo(t)
+	t.Setenv("GOEXPERIMENT", "logosfastcgo")
 	dir := filepath.Join("testdata", "shapes")
 	bin := filepath.Join(t.TempDir(), "shapes.exe")
 	full := append([]string{"build"}, args...)

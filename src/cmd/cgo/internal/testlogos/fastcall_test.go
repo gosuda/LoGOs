@@ -216,6 +216,7 @@ func Sum(b []byte) int32 {
 `
 
 func TestFastcallEmission(t *testing.T) {
+	t.Setenv("GOEXPERIMENT", "logosfastcgo")
 	_, files := cgoOutputs(t, "fast.go", pairPreamble)
 	gotypes, ok := files["_cgo_gotypes.go"]
 	if !ok {
@@ -257,6 +258,7 @@ func Nocallback(a, b int32) int32 { return int32(C.slow_nocallback(C.int(a), C.i
 }
 
 func TestFastcallLogosSpelling(t *testing.T) {
+	t.Setenv("GOEXPERIMENT", "logosfastcgo")
 	const src = `package fast
 
 /*
@@ -350,31 +352,35 @@ func Mark(p *int32) int32 { return int32(C.mark_fn((*C.int)(unsafe.Pointer(p))))
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			fast, plain, keepalive, use, guards := c.fast, c.plain, c.keepalive, c.use, c.guards
+			if !goexperiment.LogosFastCgo && c.name == "both" {
+				fast, plain, keepalive, use, guards = 0, 1, 1, 0, 2
+			}
 			_, files := cgoOutputs(t, "mark.go", head+c.directives+tail)
 			gotypes, ok := files["_cgo_gotypes.go"]
 			if !ok {
 				t.Fatal("no _cgo_gotypes.go emitted")
 			}
-			if got := countCallLines(gotypes, "_cgo_runtime_cgocall_fast"); got != c.fast {
-				t.Errorf("fast calls = %d, want %d", got, c.fast)
+			if got := countCallLines(gotypes, "_cgo_runtime_cgocall_fast"); got != fast {
+				t.Errorf("fast calls = %d, want %d", got, fast)
 			}
-			plain := 0
+			plainGot := 0
 			for line := range strings.SplitSeq(gotypes, "\n") {
 				if strings.HasPrefix(line, "\t") && strings.Contains(line, "_cgo_runtime_cgocall(") && !strings.Contains(line, "_fast(") {
-					plain++
+					plainGot++
 				}
 			}
-			if plain != c.plain {
-				t.Errorf("plain calls = %d, want %d", plain, c.plain)
+			if plainGot != plain {
+				t.Errorf("plain calls = %d, want %d", plainGot, plain)
 			}
-			if got := countCallLines(gotypes, "_Cgo_keepalive"); got != c.keepalive {
-				t.Errorf("keepalive uses = %d, want %d", got, c.keepalive)
+			if got := countCallLines(gotypes, "_Cgo_keepalive"); got != keepalive {
+				t.Errorf("keepalive uses = %d, want %d", got, keepalive)
 			}
-			if got := countCallLines(gotypes, "_Cgo_use"); got != c.use {
-				t.Errorf("escape uses = %d, want %d", got, c.use)
+			if got := countCallLines(gotypes, "_Cgo_use"); got != use {
+				t.Errorf("escape uses = %d, want %d", got, use)
 			}
-			if got := countCallLines(gotypes, "_Cgo_no_callback"); got != c.guards {
-				t.Errorf("callback guards = %d, want %d", got, c.guards)
+			if got := countCallLines(gotypes, "_Cgo_no_callback"); got != guards {
+				t.Errorf("callback guards = %d, want %d", got, guards)
 			}
 		})
 	}
@@ -463,8 +469,12 @@ func TestFastcallOneTrampoline(t *testing.T) {
 			t.Fatalf("stale PLAN symbol name %s", line)
 		}
 	}
-	if defs != 1 {
-		t.Fatalf("runtime.logosCgocallFast text definitions = %d, want 1", defs)
+	wantDefs := 1
+	if !goexperiment.LogosFastCgo {
+		wantDefs = 0
+	}
+	if defs != wantDefs {
+		t.Fatalf("runtime.logosCgocallFast text definitions = %d, want %d", defs, wantDefs)
 	}
 }
 
@@ -479,26 +489,25 @@ func objdumpFunc(t *testing.T, binary, symbol string) string {
 
 func TestFastcallStructure(t *testing.T) {
 	self := selfTestBin(t)
+	if !goexperiment.LogosFastCgo {
+		for _, line := range nmLines(t, self) {
+			if strings.Contains(line, "logosCgocallFast") {
+				t.Fatalf("unflagged binary references the fast path: %s", line)
+			}
+		}
+		return
+	}
 	body := objdumpFunc(t, self, "runtime\\.logosCgocallFast")
 	if !strings.Contains(body, "logosCgocallFast") {
 		t.Fatalf("no logosCgocallFast disassembly:\n%s", body)
 	}
-	if goexperiment.LogosFastCgo {
-		for _, want := range []string{"asmcgocall", "reentersyscall", "exitsyscall"} {
-			if !strings.Contains(body, want) {
-				t.Fatalf("fast body lacks %s:\n%s", want, body)
-			}
+	for _, want := range []string{"asmcgocall", "reentersyscall", "exitsyscall"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("fast body lacks %s:\n%s", want, body)
 		}
-		if got := strings.Count(body, "CALL runtime.cgocall(SB)"); got != 0 {
-			t.Fatalf("fast body has %d plain cgocall calls, want 0 (fallback must be pruned):\n%s", got, body)
-		}
-	} else {
-		if !strings.Contains(body, "runtime.cgocall(SB)") {
-			t.Fatalf("fallback body lacks plain cgocall call:\n%s", body)
-		}
-		if strings.Contains(body, "asmcgocall") {
-			t.Fatalf("fallback body reaches asmcgocall directly:\n%s", body)
-		}
+	}
+	if got := strings.Count(body, "CALL runtime.cgocall(SB)"); got != 0 {
+		t.Fatalf("fast body has %d plain cgocall calls, want 0 (fallback must be pruned):\n%s", got, body)
 	}
 }
 
@@ -1107,8 +1116,15 @@ func TestFastcallLogosEndToEnd(t *testing.T) {
 			defs++
 		}
 	}
-	if defs != 1 {
-		t.Fatalf("fixture logosCgocallFast text definitions = %d, want 1", defs)
+	wantDefs := 1
+	if !goexperiment.LogosFastCgo {
+		wantDefs = 0
+	}
+	if defs != wantDefs {
+		t.Fatalf("fixture logosCgocallFast text definitions = %d, want %d", defs, wantDefs)
+	}
+	if !goexperiment.LogosFastCgo {
+		return
 	}
 	dump, err := runCmd(t, "", goBin(t), "tool", "objdump", bin)
 	if err != nil {
