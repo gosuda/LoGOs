@@ -46,6 +46,7 @@ func main() {
 	sp, sq := pair()
 	check("direct-call-unpacks", sp == 3 && sq == nil, fmt.Sprint(sp, sq), "3 <nil>")
 	check("call-arg-unpacks", two(pair()), two(pair()), true)
+	check("call-print-unpacks", fmt.Sprint(pair()) == "3 <nil>", fmt.Sprint(pair()), "3 <nil>")
 	ch := make(chan (int, error), 1)
 	ch <- c
 	v := <-ch
