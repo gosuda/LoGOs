@@ -150,6 +150,9 @@ func (check *Checker) unary(x *operand, e *syntax.Operation) {
 			return
 		}
 		x.mode_ = value
+		if check.logosConstAddr(x) {
+			return
+		}
 		x.typ_ = &Pointer{base: x.typ()}
 		return
 

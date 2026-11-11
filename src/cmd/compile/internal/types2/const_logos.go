@@ -462,6 +462,17 @@ func (check *Checker) logosConstWrapBase(x *operand, base syntax.Expr) {
 	x.typ_ = &ConstView{Elem: x.typ()}
 }
 
+func (check *Checker) logosConstAddr(x *operand) bool {
+	if !check.conf.Logos || !x.isValid() {
+		return false
+	}
+	if c := logosAsConstView(x.typ()); c != nil {
+		x.typ_ = &ConstView{Elem: &Pointer{base: c.Elem}}
+		return true
+	}
+	return false
+}
+
 func (check *Checker) logosConstNumeric(x *operand) {
 	if !check.conf.Logos || !x.isValid() {
 		return
