@@ -39,10 +39,10 @@ func (fl *fileLower) lowerStaticBinary(_ *syntax.TypeDecl, named *types2.Named, 
 		fmt.Fprintf(out, "func (_logos_v %s) MarshalBinary() ([]byte, error) { return %s_e%d([]byte{1}, _logos_v) }\n", js.name, g.prefix, id)
 	}
 	if needAppend {
-		fmt.Fprintf(out, "func (_logos_v %s) AppendBinary(dst []byte) ([]byte, error) { return %s_e%d(append(dst, 1), _logos_v) }\n", js.name, g.prefix, id)
+		fmt.Fprintf(out, "func (_logos_v %s) AppendBinary(_logos_dst []byte) ([]byte, error) { return %s_e%d(append(_logos_dst, 1), _logos_v) }\n", js.name, g.prefix, id)
 	}
 	if needUnmarshal {
-		fmt.Fprintf(out, "func (_logos_v *%s) UnmarshalBinary(src []byte) error { off := 0; if len(src) == 0 { return _logos_bfmt.Errorf(\"binary field $version at offset 0: truncated input\") }; if src[0] != 1 { return _logos_bfmt.Errorf(\"binary field $version at offset 0: wrong version %%d\", src[0]) }; off++; if err := %s_d%d(src, &off, _logos_v, %q, 0); err != nil { return err }; if off != len(src) { return _logos_bfmt.Errorf(\"binary field $trailing at offset %%d: trailing bytes\", off) }; return nil }\n", js.name, g.prefix, id, js.name)
+		fmt.Fprintf(out, "func (_logos_v *%s) UnmarshalBinary(_logos_src []byte) error { _logos_off := 0; if len(_logos_src) == 0 { return _logos_bfmt.Errorf(\"binary field $version at offset 0: truncated input\") }; if _logos_src[0] != 1 { return _logos_bfmt.Errorf(\"binary field $version at offset 0: wrong version %%d\", _logos_src[0]) }; _logos_off++; if _logos_err := %s_d%d(_logos_src, &_logos_off, _logos_v, %q, 0); _logos_err != nil { return _logos_err }; if _logos_off != len(_logos_src) { return _logos_bfmt.Errorf(\"binary field $trailing at offset %%d: trailing bytes\", _logos_off) }; return nil }\n", js.name, g.prefix, id, js.name)
 	}
 }
 
@@ -72,29 +72,29 @@ func (g *binaryGenerator) codec(t types2.Type) (int, bool) {
 		if !ok {
 			return false
 		}
-		e("dst, err = %s_e%d(dst, %s); if err != nil { return dst, err }", g.prefix, c, value)
+		e("_logos_dst, _logos_err = %s_e%d(_logos_dst, %s); if _logos_err != nil { return _logos_dst, _logos_err }", g.prefix, c, value)
 		if g.isDepthComposite(et) {
-			d("if depth+1 > 10000 { return _logos_bfmt.Errorf(\"binary field %%s at offset %%d: nesting depth exceeds 10000\", %s, *off) }", field)
-			d("if err := %s_d%d(src, off, %s, %s, depth+1); err != nil { return err }", g.prefix, c, target, field)
+			d("if _logos_depth+1 > 10000 { return _logos_bfmt.Errorf(\"binary field %%s at offset %%d: nesting depth exceeds 10000\", %s, *_logos_off) }", field)
+			d("if _logos_err := %s_d%d(_logos_src, _logos_off, %s, %s, _logos_depth+1); _logos_err != nil { return _logos_err }", g.prefix, c, target, field)
 		} else {
-			d("if err := %s_d%d(src, off, %s, %s, depth); err != nil { return err }", g.prefix, c, target, field)
+			d("if _logos_err := %s_d%d(_logos_src, _logos_off, %s, %s, _logos_depth); _logos_err != nil { return _logos_err }", g.prefix, c, target, field)
 		}
 		return true
 	}
-	fail := "return _logos_bfmt.Errorf(\"binary field %s at offset %d: truncated input\", field, *off)"
+	fail := "return _logos_bfmt.Errorf(\"binary field %s at offset %d: truncated input\", _logos_field, *_logos_off)"
 	if opt := g.fl.asOption(t); opt != nil && keepMapRead(opt.Elem) {
 		payload, ok := g.codec(opt.Elem)
 		if !ok {
 			return 0, false
 		}
-		fmt.Fprintf(&g.text, "func %s_e%d(dst []byte, v %s) ([]byte, error) { return %s_e%d(dst, v) }\n", g.prefix, id, name, g.prefix, payload)
-		fmt.Fprintf(&g.text, "func %s_d%d(src []byte, off *int, v *%s, field string, depth int) error { return %s_d%d(src, off, v, field, depth) }\n", g.prefix, id, name, g.prefix, payload)
+		fmt.Fprintf(&g.text, "func %s_e%d(_logos_dst []byte, _logos_v %s) ([]byte, error) { return %s_e%d(_logos_dst, _logos_v) }\n", g.prefix, id, name, g.prefix, payload)
+		fmt.Fprintf(&g.text, "func %s_d%d(_logos_src []byte, _logos_off *int, _logos_v *%s, _logos_field string, _logos_depth int) error { return %s_d%d(_logos_src, _logos_off, _logos_v, _logos_field, _logos_depth) }\n", g.prefix, id, name, g.prefix, payload)
 		return id, true
 	}
 	if opt := g.fl.asOption(t); opt != nil {
-		e("if !v.Present { return append(dst, 0), nil }; dst = append(dst, 1)")
-		d("if *off >= len(src) { %s }; presence := src[*off]; *off++; if presence > 1 { return _logos_bfmt.Errorf(\"binary field %%s at offset %%d: bad presence byte %%d\", field, *off-1, presence) }; *v = %s{}; if presence == 0 { return nil }; v.Present = true", fail, name)
-		if !child(opt.Elem, "v.Value", "&v.Value", "field") {
+		e("if !_logos_v.Present { return append(_logos_dst, 0), nil }; _logos_dst = append(_logos_dst, 1)")
+		d("if *_logos_off >= len(_logos_src) { %s }; _logos_presence := _logos_src[*_logos_off]; *_logos_off++; if _logos_presence > 1 { return _logos_bfmt.Errorf(\"binary field %%s at offset %%d: bad presence byte %%d\", _logos_field, *_logos_off-1, _logos_presence) }; *_logos_v = %s{}; if _logos_presence == 0 { return nil }; _logos_v.Present = true", fail, name)
+		if !child(opt.Elem, "_logos_v.Value", "&_logos_v.Value", "_logos_field") {
 			return 0, false
 		}
 	} else {
@@ -104,30 +104,30 @@ func (g *binaryGenerator) codec(t types2.Type) (int, bool) {
 			s, _ := basicScalar(x)
 			switch s {
 			case scalarBool:
-				e("if v { dst = append(dst, 1) } else { dst = append(dst, 0) }")
-				d("if *off >= len(src) { %s }; b := src[*off]; *off++; if b > 1 { return _logos_bfmt.Errorf(\"binary field %%s at offset %%d: bad bool byte %%d\", field, *off-1, b) }; *v = %s(b == 1)", fail, name)
+				e("if _logos_v { _logos_dst = append(_logos_dst, 1) } else { _logos_dst = append(_logos_dst, 0) }")
+				d("if *_logos_off >= len(_logos_src) { %s }; _logos_b := _logos_src[*_logos_off]; *_logos_off++; if _logos_b > 1 { return _logos_bfmt.Errorf(\"binary field %%s at offset %%d: bad bool byte %%d\", _logos_field, *_logos_off-1, _logos_b) }; *_logos_v = %s(_logos_b == 1)", fail, name)
 			case scalarString:
-				e("dst = _logos_bbinary.AppendUvarint(dst, uint64(len(v))); dst = append(dst, v...)")
-				d("n, used := _logos_bbinary.Uvarint(src[*off:]); if used <= 0 { %s }; *off += used; if n > uint64(len(src)-*off) { %s }; *v = %s(string(src[*off:*off+int(n)])); *off += int(n)", fail, fail, name)
+				e("_logos_dst = _logos_bbinary.AppendUvarint(_logos_dst, uint64(len(_logos_v))); _logos_dst = append(_logos_dst, _logos_v...)")
+				d("_logos_n, _logos_used := _logos_bbinary.Uvarint(_logos_src[*_logos_off:]); if _logos_used <= 0 { %s }; *_logos_off += _logos_used; if _logos_n > uint64(len(_logos_src)-*_logos_off) { %s }; *_logos_v = %s(string(_logos_src[*_logos_off:*_logos_off+int(_logos_n)])); *_logos_off += int(_logos_n)", fail, fail, name)
 			default:
-				width, bits, decode := 8, "uint64(v)", "n"
+				width, bits, decode := 8, "uint64(_logos_v)", "_logos_n"
 				if s == scalarFloat32 {
-					width, bits, decode = 4, "uint64(_logos_bmath.Float32bits(float32(v)))", "_logos_bmath.Float32frombits(uint32(n))"
+					width, bits, decode = 4, "uint64(_logos_bmath.Float32bits(float32(_logos_v)))", "_logos_bmath.Float32frombits(uint32(_logos_n))"
 				}
 				if s == scalarFloat64 {
-					bits, decode = "_logos_bmath.Float64bits(float64(v))", "_logos_bmath.Float64frombits(n)"
+					bits, decode = "_logos_bmath.Float64bits(float64(_logos_v))", "_logos_bmath.Float64frombits(_logos_n)"
 				}
-				e("n := %s; for i := uint(0); i < %d; i++ { dst = append(dst, byte(n >> (8*i))) }", bits, width)
-				d("if len(src)-*off < %d { %s }; var n uint64; for i := uint(0); i < %d; i++ { n |= uint64(src[*off+int(i)]) << (8*i) }; *off += %d; *v = %s(%s)", width, fail, width, width, name, decode)
+				e("_logos_n := %s; for _logos_i := uint(0); _logos_i < %d; _logos_i++ { _logos_dst = append(_logos_dst, byte(_logos_n >> (8*_logos_i))) }", bits, width)
+				d("if len(_logos_src)-*_logos_off < %d { %s }; var _logos_n uint64; for _logos_i := uint(0); _logos_i < %d; _logos_i++ { _logos_n |= uint64(_logos_src[*_logos_off+int(_logos_i)]) << (8*_logos_i) }; *_logos_off += %d; *_logos_v = %s(%s)", width, fail, width, width, name, decode)
 			}
 		case *types2.Pointer:
 			pointed, ok := g.fl.spellLowered(x.Elem())
 			if !ok {
 				return 0, false
 			}
-			e("if v == nil { return append(dst, 0), nil }; dst = append(dst, 1)")
-			d("if *off >= len(src) { %s }; p := src[*off]; *off++; if p > 1 { return _logos_bfmt.Errorf(\"binary field %%s at offset %%d: bad presence byte %%d\", field, *off-1, p) }; if p == 0 { *v = nil; return nil }; *v = new(%s)", fail, pointed)
-			if !child(x.Elem(), "*v", "*v", "field") {
+			e("if _logos_v == nil { return append(_logos_dst, 0), nil }; _logos_dst = append(_logos_dst, 1)")
+			d("if *_logos_off >= len(_logos_src) { %s }; _logos_p := _logos_src[*_logos_off]; *_logos_off++; if _logos_p > 1 { return _logos_bfmt.Errorf(\"binary field %%s at offset %%d: bad presence byte %%d\", _logos_field, *_logos_off-1, _logos_p) }; if _logos_p == 0 { *_logos_v = nil; return nil }; *_logos_v = new(%s)", fail, pointed)
+			if !child(x.Elem(), "*_logos_v", "*_logos_v", "_logos_field") {
 				return 0, false
 			}
 		case *types2.Struct:
@@ -136,15 +136,15 @@ func (g *binaryGenerator) codec(t types2.Type) (int, bool) {
 					continue
 				}
 				f := x.Field(i)
-				field := "field + " + fmt.Sprintf("%q", "."+f.Name())
-				if !child(f.Type(), "v."+f.Name(), "&v."+f.Name(), field) {
+				field := "_logos_field + " + fmt.Sprintf("%q", "."+f.Name())
+				if !child(f.Type(), "_logos_v."+f.Name(), "&_logos_v."+f.Name(), field) {
 					return 0, false
 				}
 			}
 		case *types2.Slice:
 			if b, ok := x.Elem().Underlying().(*types2.Basic); ok && b.Kind() == types2.Uint8 {
-				e("dst = _logos_bbinary.AppendUvarint(dst, uint64(len(v))); dst = append(dst, v...)")
-				d("n, used := _logos_bbinary.Uvarint(src[*off:]); if used <= 0 { %s }; *off += used; if n > uint64(len(src)-*off) { %s }; cap64 := min(n, uint64(len(src)-*off)/2, (1<<20)); *v = append(make(%s, 0, int(cap64)), src[*off:*off+int(n)]...); *off += int(n)", fail, fail, name)
+				e("_logos_dst = _logos_bbinary.AppendUvarint(_logos_dst, uint64(len(_logos_v))); _logos_dst = append(_logos_dst, _logos_v...)")
+				d("_logos_n, _logos_used := _logos_bbinary.Uvarint(_logos_src[*_logos_off:]); if _logos_used <= 0 { %s }; *_logos_off += _logos_used; if _logos_n > uint64(len(_logos_src)-*_logos_off) { %s }; _logos_cap64 := min(_logos_n, uint64(len(_logos_src)-*_logos_off)/2, (1<<20)); *_logos_v = append(make(%s, 0, int(_logos_cap64)), _logos_src[*_logos_off:*_logos_off+int(_logos_n)]...); *_logos_off += int(_logos_n)", fail, fail, name)
 				break
 			}
 			if g.isZeroWire(x.Elem()) {
@@ -152,60 +152,60 @@ func (g *binaryGenerator) codec(t types2.Type) (int, bool) {
 				if !ok {
 					return 0, false
 				}
-				e("dst = _logos_bbinary.AppendUvarint(dst, uint64(len(v)))")
-				e("if uint64(len(v)) > (1 << 20) { return dst, _logos_bfmt.Errorf(\"binary count %%d out of range\", len(v)) }")
+				e("_logos_dst = _logos_bbinary.AppendUvarint(_logos_dst, uint64(len(_logos_v)))")
+				e("if uint64(len(_logos_v)) > (1 << 20) { return _logos_dst, _logos_bfmt.Errorf(\"binary count %%d out of range\", len(_logos_v)) }")
 				e("_logos_zsize := uint64(_logos_bunsafe.Sizeof(*new(%s))); if _logos_zsize == 0 { _logos_zsize = 1 }", elemType)
-				e("if uint64(len(v)) > (1 << 23)/_logos_zsize { return dst, _logos_bfmt.Errorf(\"binary count %%d out of range\", len(v)) }")
-				d("n, used := _logos_bbinary.Uvarint(src[*off:]); if used <= 0 { %s }; *off += used", fail)
-				d("if n > uint64(int(^uint(0) >> 1)) { return _logos_bfmt.Errorf(\"binary field %%s at offset %%d: count %%d out of range\", field, *off-used, n) }")
-				d("if n > (1 << 20) { return _logos_bfmt.Errorf(\"binary field %%s at offset %%d: count %%d out of range\", field, *off-used, n) }")
+				e("if uint64(len(_logos_v)) > (1 << 23)/_logos_zsize { return _logos_dst, _logos_bfmt.Errorf(\"binary count %%d out of range\", len(_logos_v)) }")
+				d("_logos_n, _logos_used := _logos_bbinary.Uvarint(_logos_src[*_logos_off:]); if _logos_used <= 0 { %s }; *_logos_off += _logos_used", fail)
+				d("if _logos_n > uint64(int(^uint(0) >> 1)) { return _logos_bfmt.Errorf(\"binary field %%s at offset %%d: count %%d out of range\", _logos_field, *_logos_off-_logos_used, _logos_n) }")
+				d("if _logos_n > (1 << 20) { return _logos_bfmt.Errorf(\"binary field %%s at offset %%d: count %%d out of range\", _logos_field, *_logos_off-_logos_used, _logos_n) }")
 				d("_logos_zsize := uint64(_logos_bunsafe.Sizeof(*new(%s))); if _logos_zsize == 0 { _logos_zsize = 1 }", elemType)
-				d("if n > (1 << 23)/_logos_zsize { return _logos_bfmt.Errorf(\"binary field %%s at offset %%d: count %%d out of range\", field, *off-used, n) }")
-				d("*v = make(%s, int(n))", name)
+				d("if _logos_n > (1 << 23)/_logos_zsize { return _logos_bfmt.Errorf(\"binary field %%s at offset %%d: count %%d out of range\", _logos_field, *_logos_off-_logos_used, _logos_n) }")
+				d("*_logos_v = make(%s, int(_logos_n))", name)
 				break
 			}
 			elemType, ok := g.fl.spellLowered(x.Elem())
 			if !ok {
 				return 0, false
 			}
-			e("dst = _logos_bbinary.AppendUvarint(dst, uint64(len(v))); for _, elem := range v {")
-			d("n, used := _logos_bbinary.Uvarint(src[*off:]); if used <= 0 { %s }; *off += used; if n > uint64(len(src)-*off) { %s }; var elem %s; size := uint64(_logos_bunsafe.Sizeof(elem)); if size == 0 { size = 1 }; cap64 := min(n, uint64(len(src)-*off)/2, (1<<20)/size); *v = make(%s, 0, int(cap64)); for i := uint64(0); i < n; i++ {", fail, fail, elemType, name)
-			if !child(x.Elem(), "elem", "&elem", "field") {
+			e("_logos_dst = _logos_bbinary.AppendUvarint(_logos_dst, uint64(len(_logos_v))); for _, _logos_elem := range _logos_v {")
+			d("_logos_n, _logos_used := _logos_bbinary.Uvarint(_logos_src[*_logos_off:]); if _logos_used <= 0 { %s }; *_logos_off += _logos_used; if _logos_n > uint64(len(_logos_src)-*_logos_off) { %s }; var _logos_elem %s; _logos_size := uint64(_logos_bunsafe.Sizeof(_logos_elem)); if _logos_size == 0 { _logos_size = 1 }; _logos_cap64 := min(_logos_n, uint64(len(_logos_src)-*_logos_off)/2, (1<<20)/_logos_size); *_logos_v = make(%s, 0, int(_logos_cap64)); for _logos_i := uint64(0); _logos_i < _logos_n; _logos_i++ {", fail, fail, elemType, name)
+			if !child(x.Elem(), "_logos_elem", "&_logos_elem", "_logos_field") {
 				return 0, false
 			}
 			e("}")
-			d("*v = append(*v, elem) }")
+			d("*_logos_v = append(*_logos_v, _logos_elem) }")
 		case *types2.Array:
 			elemType, ok := g.fl.spellLowered(x.Elem())
 			if !ok {
 				return 0, false
 			}
-			e("dst = _logos_bbinary.AppendUvarint(dst, uint64(len(v))); for _, elem := range v {")
-			d("n, used := _logos_bbinary.Uvarint(src[*off:]); if used <= 0 { %s }; *off += used; if n != %d { return _logos_bfmt.Errorf(\"binary field %%s at offset %%d: array count %%d, want %d\", field, *off-used, n) }; for i := range *v { var elem %s", fail, x.Len(), x.Len(), elemType)
-			if !child(x.Elem(), "elem", "&elem", "field") {
+			e("_logos_dst = _logos_bbinary.AppendUvarint(_logos_dst, uint64(len(_logos_v))); for _, _logos_elem := range _logos_v {")
+			d("_logos_n, _logos_used := _logos_bbinary.Uvarint(_logos_src[*_logos_off:]); if _logos_used <= 0 { %s }; *_logos_off += _logos_used; if _logos_n != %d { return _logos_bfmt.Errorf(\"binary field %%s at offset %%d: array count %%d, want %d\", _logos_field, *_logos_off-_logos_used, _logos_n) }; for _logos_i := range *_logos_v { var _logos_elem %s", fail, x.Len(), x.Len(), elemType)
+			if !child(x.Elem(), "_logos_elem", "&_logos_elem", "_logos_field") {
 				return 0, false
 			}
 			e("}")
-			d("(*v)[i] = elem }")
+			d("(*_logos_v)[_logos_i] = _logos_elem }")
 		case *types2.Map:
 			keyType, keyOK := g.fl.spellLowered(x.Key())
 			valueType, valueOK := g.fl.spellLowered(x.Elem())
 			if !keyOK || !valueOK {
 				return 0, false
 			}
-			e("dst = _logos_bbinary.AppendUvarint(dst, uint64(len(v))); keys := make([]string, 0, len(v)); for key := range v { keys = append(keys, string(key)) }; _logos_bslices.Sort(keys); for _, raw := range keys { key := %s(raw); elem := v[key]", keyType)
-			d("n, used := _logos_bbinary.Uvarint(src[*off:]); if used <= 0 { %s }; *off += used; *v = make(%s); for i := uint64(0); i < n; i++ { var key %s; var elem %s", fail, name, keyType, valueType)
-			if !child(x.Key(), "key", "&key", "field") || !child(x.Elem(), "elem", "&elem", "field") {
+			e("_logos_dst = _logos_bbinary.AppendUvarint(_logos_dst, uint64(len(_logos_v))); _logos_keys := make([]string, 0, len(_logos_v)); for _logos_key := range _logos_v { _logos_keys = append(_logos_keys, string(_logos_key)) }; _logos_bslices.Sort(_logos_keys); for _, _logos_raw := range _logos_keys { _logos_key := %s(_logos_raw); _logos_elem := _logos_v[_logos_key]", keyType)
+			d("_logos_n, _logos_used := _logos_bbinary.Uvarint(_logos_src[*_logos_off:]); if _logos_used <= 0 { %s }; *_logos_off += _logos_used; *_logos_v = make(%s); for _logos_i := uint64(0); _logos_i < _logos_n; _logos_i++ { var _logos_key %s; var _logos_elem %s", fail, name, keyType, valueType)
+			if !child(x.Key(), "_logos_key", "&_logos_key", "_logos_field") || !child(x.Elem(), "_logos_elem", "&_logos_elem", "_logos_field") {
 				return 0, false
 			}
 			e("}")
-			d("(*v)[key] = elem }")
+			d("(*_logos_v)[_logos_key] = _logos_elem }")
 		default:
 			return 0, false
 		}
 	}
-	fmt.Fprintf(&g.text, "func %s_e%d(dst []byte, v %s) ([]byte, error) { var err error; _ = err\n%sreturn dst, nil\n}\n", g.prefix, id, name, enc.String())
-	fmt.Fprintf(&g.text, "func %s_d%d(src []byte, off *int, v *%s, field string, depth int) error {\n%sreturn nil\n}\n", g.prefix, id, name, dec.String())
+	fmt.Fprintf(&g.text, "func %s_e%d(_logos_dst []byte, _logos_v %s) ([]byte, error) { var _logos_err error; _ = _logos_err\n%sreturn _logos_dst, nil\n}\n", g.prefix, id, name, enc.String())
+	fmt.Fprintf(&g.text, "func %s_d%d(_logos_src []byte, _logos_off *int, _logos_v *%s, _logos_field string, _logos_depth int) error {\n%sreturn nil\n}\n", g.prefix, id, name, dec.String())
 	return id, true
 }
 

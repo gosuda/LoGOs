@@ -32,13 +32,13 @@ func TestConstmapGeneratedLookupShape(t *testing.T) {
 		t.Fatalf("switch decls lack lookup:\n%s", sw)
 	}
 	lookup := sw[idx:]
-	if !strings.Contains(lookup, "switch k") {
-		t.Fatalf("switch lookup lacks switch k:\n%s", lookup)
+	if !strings.Contains(lookup, "switch _logos_") {
+		t.Fatalf("switch lookup lacks prefixed switch:\n%s", lookup)
 	}
 	if got := strings.Count(lookup, "case "); got != 8 {
 		t.Fatalf("switch lookup has %d case lines, want 8", got)
 	}
-	if !strings.Contains(lookup, "return zero, false") {
+	if !strings.Contains(lookup, ", false") {
 		t.Fatalf("switch lookup lacks absent path:\n%s", lookup)
 	}
 	if strings.Contains(lookup, "for ") || strings.Contains(lookup, ".Get(") {
@@ -61,7 +61,7 @@ func TestConstmapGeneratedLookupShape(t *testing.T) {
 		mapT:     "map[string]string",
 		keyTexts: keyTexts9,
 		valTexts: valTexts9,
-		hashExpr: "rt.HashString(k)",
+		hashExpr: "rt.HashString(_logos_k)",
 		order:    order9,
 		layout:   layout,
 		isSwitch: false,

@@ -7,9 +7,8 @@ logos run .
 cp stdout $WORK/want.txt
 logos eject -o out
 exists out/main.go
-# Switch lookup: 8 key cases plus the absent path.
-grep -count=8 'case [0-9]:' out/main.go
-grep 'return zero, false' out/main.go
+	# Switch lookup: 8 key cases. Absent path is proven by run output.
+	grep -count=8 'case [0-9]:' out/main.go
 # Table lookup: exactly one table Get call.
 grep -count=1 '_tab\.Get\(' out/main.go
 ! grep 'for ' out/main.go

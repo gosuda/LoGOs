@@ -394,9 +394,9 @@ func (js *jsonStruct) missingFunc(b *strings.Builder) {
 	for i, name := range js.required {
 		quoted[i] = strconv.Quote(name)
 	}
-	fmt.Fprintf(b, "\nfunc _logos_jsonmissing_%s(seen [%d]uint64) string {\n", js.name, seenWords(len(js.required)))
-	fmt.Fprintf(b, "\tfor i, name := range [...]string{%s} {\n", strings.Join(quoted, ", "))
-	b.WriteString("\t\tif seen[i/64]>>(i%64)&1 == 0 {\n\t\t\treturn name\n\t\t}\n\t}\n\treturn \"\"\n}\n")
+	fmt.Fprintf(b, "\nfunc _logos_jsonmissing_%s(_logos_seen [%d]uint64) string {\n", js.name, seenWords(len(js.required)))
+	fmt.Fprintf(b, "\tfor _logos_i, _logos_name := range [...]string{%s} {\n", strings.Join(quoted, ", "))
+	b.WriteString("\t\tif _logos_seen[_logos_i/64]>>(_logos_i%64)&1 == 0 {\n\t\t\treturn _logos_name\n\t\t}\n\t}\n\treturn \"\"\n}\n")
 }
 
 type keyEntry struct {
@@ -421,7 +421,7 @@ func (js *jsonStruct) keyFuncs(b *strings.Builder) {
 
 func writeKeyFunc(b *strings.Builder, name, kind string, keys []keyEntry) {
 	if len(keys) <= jsonKeySwitchMax {
-		fmt.Fprintf(b, "\nfunc _logos_%s_%s(k string) int {\n\tswitch k {\n", kind, name)
+		fmt.Fprintf(b, "\nfunc _logos_%s_%s(_logos_k string) int {\n\tswitch _logos_k {\n", kind, name)
 		for _, e := range keys {
 			fmt.Fprintf(b, "\tcase %s:\n\t\treturn %d\n", strconv.Quote(e.key), e.idx)
 		}
@@ -460,5 +460,5 @@ func writeKeyTable(b *strings.Builder, name, kind string, keys []keyEntry) {
 		fmt.Fprintf(b, "{Key: %s, Val: %d, Occ: true}", strconv.Quote(keys[ki].key), keys[ki].idx)
 	}
 	b.WriteString("}}\n")
-	fmt.Fprintf(b, "func _logos_%s_%s(k string) int {\n\tif i, ok := %s.Get(%s.HashString(k), k); ok {\n\t\treturn i\n\t}\n\treturn -1\n}\n", kind, name, table, rtAlias)
+	fmt.Fprintf(b, "func _logos_%s_%s(_logos_k string) int {\n\tif _logos_i, _logos_ok := %s.Get(%s.HashString(_logos_k), _logos_k); _logos_ok {\n\t\treturn _logos_i\n\t}\n\treturn -1\n}\n", kind, name, table, rtAlias)
 }

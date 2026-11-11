@@ -84,27 +84,27 @@ func emitConstMapDecls(e constMapEmission) string {
 	fmt.Fprintf(&b, "func %s_build() %s { return %s }\n", name, e.mapT, e.builderBody)
 	fmt.Fprintf(&b, "func %s_map() %s { return %s_mat.Get(%s_build) }\n", name, e.mapT, name, name)
 	if e.bearing {
-		fmt.Fprintf(&b, "func %s_val(idx uint32) %s {\n\tswitch idx {\n", name, e.vT)
+		fmt.Fprintf(&b, "func %s_val(_logos_idx uint32) %s {\n\tswitch _logos_idx {\n", name, e.vT)
 		for i := range e.valTexts {
 			fmt.Fprintf(&b, "\tcase %d:\n\t\treturn %s\n", i, e.valTexts[i])
 		}
-		fmt.Fprintf(&b, "\t}\n\tvar zero %s\n\treturn zero\n}\n", e.vT)
-		fmt.Fprintf(&b, "func %s_all(yield func(%s, %s) bool) {\n\tfor _, e := range %s_sorted {\n\t\tif !yield(e.Key, %s_val(e.Val)) {\n\t\t\treturn\n\t\t}\n\t}\n}\n", name, e.kT, e.vT, name, name)
+		fmt.Fprintf(&b, "\t}\n\tvar _logos_zero %s\n\treturn _logos_zero\n}\n", e.vT)
+		fmt.Fprintf(&b, "func %s_all(_logos_yield func(%s, %s) bool) {\n\tfor _, _logos_e := range %s_sorted {\n\t\tif !_logos_yield(_logos_e.Key, %s_val(_logos_e.Val)) {\n\t\t\treturn\n\t\t}\n\t}\n}\n", name, e.kT, e.vT, name, name)
 	}
 	if e.isSwitch {
 		if !e.bearing {
-			fmt.Fprintf(&b, "func %s_lookup(k %s) (%s, bool) {\n\tswitch k {\n", name, e.kT, e.vT)
+			fmt.Fprintf(&b, "func %s_lookup(_logos_k %s) (%s, bool) {\n\tswitch _logos_k {\n", name, e.kT, e.vT)
 			for i := range e.keyTexts {
 				fmt.Fprintf(&b, "\tcase %s:\n\t\treturn %s, true\n", e.keyTexts[i], e.valTexts[i])
 			}
-			fmt.Fprintf(&b, "\t}\n\tvar zero %s\n\treturn zero, false\n}\n", e.vT)
+			fmt.Fprintf(&b, "\t}\n\tvar _logos_zero %s\n\treturn _logos_zero, false\n}\n", e.vT)
 			return b.String()
 		}
-		fmt.Fprintf(&b, "func %s_lookup(k %s) (%s, bool) {\n\tswitch k {\n", name, e.kT, e.vT)
+		fmt.Fprintf(&b, "func %s_lookup(_logos_k %s) (%s, bool) {\n\tswitch _logos_k {\n", name, e.kT, e.vT)
 		for i := range e.keyTexts {
 			fmt.Fprintf(&b, "\tcase %s:\n\t\treturn %s_val(%d), true\n", e.keyTexts[i], name, i)
 		}
-		fmt.Fprintf(&b, "\t}\n\tvar zero %s\n\treturn zero, false\n}\n", e.vT)
+		fmt.Fprintf(&b, "\t}\n\tvar _logos_zero %s\n\treturn _logos_zero, false\n}\n", e.vT)
 		return b.String()
 	}
 	if !e.bearing {
@@ -127,7 +127,7 @@ func emitConstMapDecls(e constMapEmission) string {
 			fmt.Fprintf(&b, "{Key: %s, Val: %s, Occ: true}", e.keyTexts[ki], e.valTexts[ki])
 		}
 		b.WriteString("}}\n")
-		fmt.Fprintf(&b, "func %s_lookup(k %s) (%s, bool) {\n\treturn %s.Get(%s, k)\n}\n", name, e.kT, e.vT, name+"_tab", e.hashExpr)
+		fmt.Fprintf(&b, "func %s_lookup(_logos_k %s) (%s, bool) {\n\treturn %s.Get(%s, _logos_k)\n}\n", name, e.kT, e.vT, name+"_tab", e.hashExpr)
 		return b.String()
 	}
 	fmt.Fprintf(&b, "%s\nvar %s = %s.ConstTable[%s, uint32]{Salt: %d, Buckets: []%s.ConstBucket{", rodataMarker, name+"_tab", rtAlias, e.kT, e.layout.salt, rtAlias)
@@ -149,7 +149,7 @@ func emitConstMapDecls(e constMapEmission) string {
 		fmt.Fprintf(&b, "{Key: %s, Val: %d, Occ: true}", e.keyTexts[ki], ki)
 	}
 	b.WriteString("}}\n")
-	fmt.Fprintf(&b, "func %s_lookup(k %s) (%s, bool) {\n\tif idx, ok := %s.Get(%s, k); ok {\n\t\treturn %s_val(idx), true\n\t}\n\tvar zero %s\n\treturn zero, false\n}\n", name, e.kT, e.vT, name+"_tab", e.hashExpr, name, e.vT)
+	fmt.Fprintf(&b, "func %s_lookup(_logos_k %s) (%s, bool) {\n\tif _logos_idx, _logos_ok := %s.Get(%s, _logos_k); _logos_ok {\n\t\treturn %s_val(_logos_idx), true\n\t}\n\tvar _logos_zero %s\n\treturn _logos_zero, false\n}\n", name, e.kT, e.vT, name+"_tab", e.hashExpr, name, e.vT)
 	return b.String()
 }
 
@@ -303,7 +303,7 @@ func (fl *fileLower) constMapText(g *constMapGen, pos syntax.Pos) string {
 		keyTexts:    keyText,
 		valTexts:    valText,
 		builderBody: fl.mustRender(g.val, pos),
-		hashExpr:    fl.constKeyHashText(mt.Key(), "k", pos),
+		hashExpr:    fl.constKeyHashText(mt.Key(), "_logos_k", pos),
 		order:       order,
 		layout:      layout,
 		isSwitch:    isSwitch,
@@ -328,19 +328,19 @@ func (fl *fileLower) constKeyHashText(t types2.Type, x string, pos syntax.Pos) s
 		}
 	case *types2.Struct:
 		var b strings.Builder
-		fmt.Fprintf(&b, "func(v %s) uint64 { h := uint64(0); ", fl.mustSpell(t, pos))
+		fmt.Fprintf(&b, "func(_logos_v %s) uint64 { _logos_h := uint64(0); ", fl.mustSpell(t, pos))
 		for i := range u.NumFields() {
 			f := u.Field(i)
 			if f.Name() == "_" {
 				continue
 			}
-			fmt.Fprintf(&b, "h = %s.HashCombine(h, %s); ", rtAlias, fl.constKeyHashText(f.Type(), "v."+f.Name(), pos))
+			fmt.Fprintf(&b, "_logos_h = %s.HashCombine(_logos_h, %s); ", rtAlias, fl.constKeyHashText(f.Type(), "_logos_v."+f.Name(), pos))
 		}
-		fmt.Fprintf(&b, "return h }(%s)", x)
+		fmt.Fprintf(&b, "return _logos_h }(%s)", x)
 		return b.String()
 	case *types2.Array:
-		return fmt.Sprintf("func(v %s) uint64 { h := uint64(0); for _, e := range v { h = %s.HashCombine(h, %s) }; return h }(%s)",
-			fl.mustSpell(t, pos), rtAlias, fl.constKeyHashText(u.Elem(), "e", pos), x)
+		return fmt.Sprintf("func(_logos_v %s) uint64 { _logos_h := uint64(0); for _, _logos_e := range _logos_v { _logos_h = %s.HashCombine(_logos_h, %s) }; return _logos_h }(%s)",
+			fl.mustSpell(t, pos), rtAlias, fl.constKeyHashText(u.Elem(), "_logos_e", pos), x)
 	}
 	base.Fatalf("logos: const map key type %s cannot be hashed at %s", t, pos.String())
 	return ""
