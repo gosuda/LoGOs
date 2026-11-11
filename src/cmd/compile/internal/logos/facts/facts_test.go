@@ -279,10 +279,15 @@ func TestDPathQualifierVsContainer(t *testing.T) {
 }
 
 func TestDecodeLineNumbersAfterComptimeBody(t *testing.T) {
-	in := "logos-facts 3\nfingerprint 0001020304050607\ncomptime New 5\nab\ncd\nopt H Q1\n"
-	_, err := facts.Decode([]byte(in))
-	if err == nil || !strings.Contains(err.Error(), "line 6") {
-		t.Fatalf("Decode error = %v, want error naming line 6", err)
+	head := "logos-facts 3\nfingerprint 0001020304050607\n"
+	for _, pad := range []int{0, 25} {
+		body := "ab\n" + strings.Repeat("x\n", pad) + "cd"
+		in := head + "comptime New " + itoa(len(body)) + "\n" + body + "\nopt H Q1\n"
+		want := 3 + strings.Count(body, "\n") + 2
+		_, err := facts.Decode([]byte(in))
+		if err == nil || !strings.Contains(err.Error(), "line "+itoa(want)) {
+			t.Errorf("pad %d: Decode error = %v, want error naming line %d", pad, err, want)
+		}
 	}
 }
 
@@ -571,8 +576,24 @@ func TestFactsVersion3Cutover(t *testing.T) {
 	for _, v := range []string{"logos-facts 1", "logos-facts 2", "logos-facts 4"} {
 		_, err := facts.Decode([]byte(v + "\nfingerprint 0001020304050607\n"))
 		if err == nil || !strings.Contains(err.Error(), "unsupported version") {
-			t.Fatalf("Decode(%q) err = %v, want unsupported version", v, err)
+			t.Errorf("Decode(%q) err = %v, want unsupported version", v, err)
 		}
+	}
+	fp := goobj.FingerprintType{7, 6, 5, 4, 3, 2, 1, 0}
+	in := &facts.Facts{
+		Fingerprint: fp,
+		Fns:         []facts.FnFact{{Object: "F", Readonly: true}},
+	}
+	enc := facts.Encode(fp, in)
+	if !strings.HasPrefix(string(enc), "logos-facts 3\n") {
+		t.Fatalf("Encode header = %q, want logos-facts 3", enc)
+	}
+	back, err := facts.Decode(enc)
+	if err != nil {
+		t.Fatalf("Decode(Encode v3) failed: %v", err)
+	}
+	if len(back.Fns) != 1 || back.Fns[0].Object != "F" || !back.Fns[0].Readonly {
+		t.Fatalf("v3 round trip lost the fn fact: %+v", back.Fns)
 	}
 }
 

@@ -99,11 +99,15 @@ func TestConstFnDecodeRejects(t *testing.T) {
 }
 
 func TestConstFnDecodeLineNumbersAfterBody(t *testing.T) {
-	body := "package p\n\nconst func F() int {\n\treturn 1\n}\n"
-	in := head() + "constfn F " + itoa(len(body)) + "\n" + body + "\nopt H Q1\n"
-	_, err := facts.Decode([]byte(in))
-	if err == nil || !strings.Contains(err.Error(), "line 10") {
-		t.Fatalf("Decode error = %v, want error naming line 10", err)
+	base := "package p\n\nconst func F() int {\n\treturn 1\n}\n"
+	for _, pad := range []int{0, 30} {
+		body := base + strings.Repeat("// pad\n", pad)
+		in := head() + "constfn F " + itoa(len(body)) + "\n" + body + "\nopt H Q1\n"
+		want := 3 + strings.Count(body, "\n") + 2
+		_, err := facts.Decode([]byte(in))
+		if err == nil || !strings.Contains(err.Error(), "line "+itoa(want)) {
+			t.Errorf("pad %d: Decode error = %v, want error naming line %d", pad, err, want)
+		}
 	}
 }
 
