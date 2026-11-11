@@ -1,0 +1,91 @@
+// run
+
+package main
+
+import (
+	"fmt"
+	"os"
+	"testing"
+	"time"
+)
+
+type Tick struct{}
+
+type TickHolder struct {
+	Items []Tick `json:"items"`
+}
+func bestPair(small, big TickHolder) (int64, int64) {
+	smallBest := int64(1 << 62)
+	bigBest := int64(1 << 62)
+	for i := 0; i < 100; i++ {
+		start := time.Now()
+		if _, err := small.MarshalBinary(); err != nil {
+			panic(err)
+		}
+		if el := time.Since(start).Nanoseconds(); el < smallBest {
+			smallBest = el
+		}
+		start = time.Now()
+		if _, err := big.MarshalBinary(); err != nil {
+			panic(err)
+		}
+		if el := time.Since(start).Nanoseconds(); el < bigBest {
+			bigBest = el
+		}
+	}
+	return smallBest, bigBest
+}
+
+func mustBytes(b []byte, err error) []byte {
+	if err != nil {
+		panic(err)
+	}
+	return b
+}
+
+func main() {
+	const smallCount = 10
+	const bigCount = 1048576
+	small := TickHolder{Items: make([]Tick, smallCount)}
+	big := TickHolder{Items: make([]Tick, bigCount)}
+	encSmall := mustBytes(small.MarshalBinary())
+	encBig := mustBytes(big.MarshalBinary())
+	if len(encSmall) == len(encBig) {
+		fmt.Println("FAIL wire length must grow with the count header")
+		os.Exit(1)
+	}
+	var dec TickHolder
+	if derr := dec.UnmarshalBinary(encBig); derr != nil {
+		panic(derr)
+	}
+	if len(dec.Items) != bigCount {
+		fmt.Printf("FAIL decoded %d items, want %d\n", len(dec.Items), bigCount)
+		os.Exit(1)
+	}
+	smallAllocs := testing.AllocsPerRun(20, func() {
+		if _, err := small.MarshalBinary(); err != nil {
+			panic(err)
+		}
+	})
+	bigAllocs := testing.AllocsPerRun(20, func() {
+		if _, err := big.MarshalBinary(); err != nil {
+			panic(err)
+		}
+	})
+	if smallAllocs != bigAllocs {
+		fmt.Printf("FAIL encode allocates %v at count %d and %v at count %d\n", smallAllocs, smallCount, bigAllocs, bigCount)
+		os.Exit(1)
+	}
+	smallBest, bigBest := bestPair(small, big)
+	if smallBest <= 0 {
+		smallBest = 1
+	}
+	if bigBest > 200*smallBest {
+		fmt.Printf("FAIL encode time grows with count: %d ns at %d vs %d ns at %d\n", bigBest, bigCount, smallBest, smallCount)
+		os.Exit(1)
+	}
+	fmt.Println("ok wire-header-grows")
+	fmt.Println("ok roundtrip-count")
+	fmt.Println("ok encode-alloc-constant")
+	fmt.Println("ok encode-time-constant")
+}
