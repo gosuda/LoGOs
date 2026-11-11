@@ -204,12 +204,10 @@ type fileLower struct {
 	// funcHeadOffs caches the offsets of `func` keywords in source
 	// order, built once per file by a single forward tokenization for
 	// the option type-head lookup.
-	funcHeadOffs []int
-	// interpNeedConv/interpNeedUnsafe carry the strconv/unsafe import
-	// needs of scoped interpolation pre-lowering (D4, D7) into the
-	// final import flush, which runs once at the end of lowerInterp.
+	funcHeadOffs     []int
 	interpNeedConv   bool
 	interpNeedUnsafe bool
+	interpNeedFmt    bool
 	// Chain lowering state (M6-S7): loweredChains pins one lowering per
 	// chain call, so traversals over replaced trees never reprocess a
 	// finished call with stale spans. transparent marks generated
@@ -620,6 +618,7 @@ func (fl *fileLower) getGenImports() *genImports {
 	used := map[string]bool{
 		interpConvPkg:   true,
 		interpUnsafePkg: true,
+		interpFmtPkg:    true,
 	}
 	for _, spec := range fl.logosImportSpecs() {
 		used[spec.alias] = true

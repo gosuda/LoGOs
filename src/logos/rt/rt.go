@@ -11,7 +11,6 @@ import (
 	"cmp"
 	"context"
 	"errors"
-	"fmt"
 	"reflect"
 	"slices"
 	"strconv"
@@ -149,43 +148,37 @@ func AppendBool(b []byte, x bool) []byte {
 	return strconv.AppendBool(b, x)
 }
 
-func InterpError(v error) (s string) {
+type PanicFormatter func(...any) string
+
+type stringer interface{ String() string }
+
+func InterpError(v error, format PanicFormatter) (s string) {
 	if v == nil {
 		return "<nil>"
 	}
+	return InterpErrorValue(v, format)
+}
+
+func InterpErrorValue[T error](v T, format PanicFormatter) (s string) {
 	defer func() {
 		if r := recover(); r != nil {
-			s = "%!v(PANIC=Error method: " + fmt.Sprint(r) + ")"
+			s = "%!v(PANIC=Error method: " + format(r) + ")"
 		}
 	}()
 	return v.Error()
 }
 
-func InterpErrorValue[T error](v T) (s string) {
-	defer func() {
-		if r := recover(); r != nil {
-			s = "%!v(PANIC=Error method: " + fmt.Sprint(r) + ")"
-		}
-	}()
-	return v.Error()
-}
-
-func InterpStringer(v fmt.Stringer) (s string) {
+func InterpStringer(v stringer, format PanicFormatter) (s string) {
 	if v == nil {
 		return "<nil>"
 	}
-	defer func() {
-		if r := recover(); r != nil {
-			s = "%!v(PANIC=String method: " + fmt.Sprint(r) + ")"
-		}
-	}()
-	return v.String()
+	return InterpStringerValue(v, format)
 }
 
-func InterpStringerValue[T fmt.Stringer](v T) (s string) {
+func InterpStringerValue[T stringer](v T, format PanicFormatter) (s string) {
 	defer func() {
 		if r := recover(); r != nil {
-			s = "%!v(PANIC=String method: " + fmt.Sprint(r) + ")"
+			s = "%!v(PANIC=String method: " + format(r) + ")"
 		}
 	}()
 	return v.String()

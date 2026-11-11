@@ -18,6 +18,7 @@ import (
 const (
 	interpConvPkg   = "_logos_strconv"
 	interpUnsafePkg = "_logos_unsafe"
+	interpFmtPkg    = "_logos_fmt"
 	interpBuf       = "_logos_b"
 	interpVal       = "_logos_v%d"
 	interpStr       = "_logos_s%d"
@@ -221,10 +222,12 @@ func (fl *fileLower) lowerInterpExpr(e *syntax.InterpExpr, kinds []types2.LogosI
 			helper := fl.interpHelper(op, kinds[i])
 			needConv = true
 			s := strName(i)
+			fl.interpNeedFmt = true
+			format := selOf(pos, nameOf(pos, interpFmtPkg), "Sprint")
 			stmts = append(stmts, defineOf(pos,
 				[]syntax.Expr{nameOf(pos, s)},
-				[]syntax.Expr{callOf(pos, selOf(pos, nameOf(pos, rtAlias), helper), []syntax.Expr{nameOf(pos, v)})}))
-			lines = append(lines, gen(s+" := "+rtAlias+"."+helper+"("+v+")"))
+				[]syntax.Expr{callOf(pos, selOf(pos, nameOf(pos, rtAlias), helper), []syntax.Expr{nameOf(pos, v), format})}))
+			lines = append(lines, gen(s+" := "+rtAlias+"."+helper+"("+v+", "+interpFmtPkg+".Sprint)"))
 		}
 	}
 	static := 0
@@ -388,6 +391,13 @@ func (fl *fileLower) flushInterpImports(needConv, needUnsafe bool) {
 			Path:         litOf(pos, `"unsafe"`, syntax.StringLit),
 		}, pos))
 		text += "\nimport " + interpUnsafePkg + ` "unsafe"`
+	}
+	if fl.interpNeedFmt {
+		decls = append(decls, at(&syntax.ImportDecl{
+			LocalPkgName: nameOf(pos, interpFmtPkg),
+			Path:         litOf(pos, `"fmt"`, syntax.StringLit),
+		}, pos))
+		text += "\nimport " + interpFmtPkg + ` "fmt"`
 	}
 	fl.file.DeclList = append(decls, fl.file.DeclList...)
 	name := fl.file.PkgName.Value
