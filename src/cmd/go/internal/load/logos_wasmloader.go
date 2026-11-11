@@ -6,6 +6,7 @@ package load
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -65,14 +66,28 @@ var loaderHelperDirectives = []string{
 }
 
 func pruneRedundantLogosRT(p *Package) {
-	if !graphProvidesLoaderHelpers(p) {
+	found := graphLoaderHelperSet(p)
+	if len(found) == 0 {
 		return
 	}
-	p.Internal.Imports = dropLogosRTImport(p.Internal.Imports)
-	p.Internal.CompiledImports = dropLogosRTCompiledImport(p.Internal.CompiledImports)
+	if len(found) == len(loaderHelperDirectives) {
+		p.Internal.Imports = dropLogosRTImport(p.Internal.Imports)
+		p.Internal.CompiledImports = dropLogosRTCompiledImport(p.Internal.CompiledImports)
+		return
+	}
+	var missing []string
+	for _, d := range loaderHelperDirectives {
+		name := strings.TrimPrefix(d, "//go:wasmexport ")
+		if !found[name] {
+			missing = append(missing, name)
+		}
+	}
+	p.Error = &PackageError{Err: fmt.Errorf("module graph provides some but not all wasm loader helpers: missing %s", strings.Join(missing, ", "))}
+	p.Incomplete = true
 }
 
-func graphProvidesLoaderHelpers(p *Package) bool {
+func graphLoaderHelperSet(p *Package) map[string]bool {
+	found := make(map[string]bool)
 	seen := make(map[*Package]bool)
 	stack := append([]*Package{p}, p.Internal.Imports...)
 	for len(stack) > 0 {
@@ -85,15 +100,16 @@ func graphProvidesLoaderHelpers(p *Package) bool {
 		if q.ImportPath == LogosRTPkg || q.Standard {
 			continue
 		}
-		if packageWasmExportsLoaderHelpers(q) {
-			return true
+		collectPackageWasmLoaderHelpers(q, found)
+		if len(found) == len(loaderHelperDirectives) {
+			break
 		}
 		stack = append(stack, q.Internal.Imports...)
 	}
-	return false
+	return found
 }
 
-func packageWasmExportsLoaderHelpers(q *Package) bool {
+func collectPackageWasmLoaderHelpers(q *Package, found map[string]bool) {
 	for _, f := range q.GoFiles {
 		data, err := os.ReadFile(filepath.Join(q.Dir, f))
 		if err != nil {
@@ -103,12 +119,11 @@ func packageWasmExportsLoaderHelpers(q *Package) bool {
 			t := bytes.TrimLeft(line, " \t")
 			for _, d := range loaderHelperDirectives {
 				if bytes.HasPrefix(t, []byte(d)) {
-					return true
+					found[strings.TrimPrefix(d, "//go:wasmexport ")] = true
 				}
 			}
 		}
 	}
-	return false
 }
 
 func dropLogosRTImport(pkgs []*Package) []*Package {
