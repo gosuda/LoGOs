@@ -439,6 +439,21 @@ func timerResetBound(in chan int, d time.Duration) int {
 	return 0
 }
 
+func timerResetArgRecv(in chan int, d time.Duration, ch chan int64) int {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	for range 3 {
+		t.Reset(time.Duration(<-ch)) // ERROR "unbounded_channel_op"
+		select {
+		case v := <-in:
+			return v
+		case <-t.C:
+			return 0
+		}
+	}
+	return 0
+}
+
 type timerBox struct{ t *time.Timer }
 
 func arm(t *time.Timer) {}

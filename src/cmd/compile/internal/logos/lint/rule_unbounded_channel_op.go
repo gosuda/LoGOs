@@ -360,6 +360,13 @@ func (u *chanUnit) bodyTop(f *syntax.ForStmt) {
 				t.recv = false
 				t.taint = false
 			}
+			if es, ok := st.(*syntax.ExprStmt); ok {
+				if call, ok := bareExpr(es.X).(*syntax.CallExpr); ok {
+					for _, a := range call.ArgList {
+						u.walk(a)
+					}
+				}
+			}
 			continue
 		}
 		u.walk(st)
