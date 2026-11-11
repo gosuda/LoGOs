@@ -7,6 +7,7 @@ package runtime
 import (
 	"internal/abi"
 	"internal/goarch"
+	"internal/goexperiment"
 	"internal/runtime/atomic"
 	"internal/runtime/math"
 	"internal/runtime/sys"
@@ -34,6 +35,9 @@ func logosRegionValid(h unsafe.Pointer, gen uintptr) bool {
 }
 
 func logosRegionOpen() (h unsafe.Pointer, gen uintptr) {
+	if !goexperiment.LogosArena {
+		return nil, 0
+	}
 	gp := getg()
 	if !logosArenaUsable(gp) {
 		return nil, 0
