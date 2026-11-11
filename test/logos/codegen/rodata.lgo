@@ -78,16 +78,20 @@ func buildProbe(logosBin string) string {
 
 func main() {
 	if !reflect.DeepEqual(roSlice, []int{2, 3, 5, 7, 11}) {
-		fmt.Println("FAIL DeepEqual slice")
+		fmt.Println("FAIL const-slice-holds-literal-values: DeepEqual mismatch")
 		os.Exit(1)
 	}
+	fmt.Println("ok const-slice-holds-literal-values")
 	if !reflect.DeepEqual(roArray, [4]string{"a", "b", "c", "d"}) {
-		fmt.Println("FAIL DeepEqual array")
+		fmt.Println("FAIL const-array-holds-literal-values: DeepEqual mismatch")
 		os.Exit(1)
 	}
-	fmt.Println(roSlice)
-	fmt.Println(roArray[0], roArray[3], len(roSlice))
-
+	fmt.Println("ok const-array-holds-literal-values")
+	if roArray[0] != "a" || roArray[3] != "d" || len(roSlice) != 5 {
+		fmt.Println("FAIL const-indexing-and-len-rules: got mismatch")
+		os.Exit(1)
+	}
+	fmt.Println("ok const-indexing-and-len-rules")
 	binDir := filepath.Join(runtime.GOROOT(), "bin")
 	goBin := filepath.Join(binDir, "go")
 	logosBin := filepath.Join(binDir, "logos")
@@ -100,14 +104,14 @@ func main() {
 	at := nmType(goBin, dir, "main.roArray")
 	gt := nmType(goBin, dir, "main.roGrouped.logos_backing0")
 	mt := nmType(goBin, dir, "main.roMutable")
-	fmt.Printf("roSlice.backing=%s roArray=%s roGrouped.backing=%s roMutable=%s\n", st, at, gt, mt)
-	if st != "R" || at != "R" || gt != "R" || mt != "D" {
-		fmt.Println("FAIL const composite not in rodata")
+	if st != "R" || at != "R" || gt != "R" {
+		fmt.Printf("FAIL const-composites-live-in-rodata: got %s %s %s want R R R\n", st, at, gt)
 		os.Exit(1)
 	}
-	if mt == "R" || mt == "r" {
-		fmt.Println("FAIL mutable var in rodata")
+	fmt.Println("ok const-composites-live-in-rodata")
+	if mt != "D" {
+		fmt.Printf("FAIL mutable-slice-stays-writable: got %s want D\n", mt)
 		os.Exit(1)
 	}
-	fmt.Println("rodata OK")
+	fmt.Println("ok mutable-slice-stays-writable")
 }
