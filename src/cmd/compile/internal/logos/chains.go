@@ -1076,6 +1076,10 @@ func (ce *chainEmit) loopO() (prelude []otext, body, epilogue []string) {
 	if ce.needOut() {
 		prelude = append(prelude, gen(ce.outDecl()))
 	}
+	if ce.deferClose() {
+		prelude = append(prelude, gen(p+"_done := false"))
+		prelude = append(prelude, gen("defer func() { if !"+p+"_done { "+ce.rollback(p)+" } }()"))
+	}
 	if ce.term.method == "count" {
 		prelude = append(prelude, gen(p+"_c := 0"))
 	}
@@ -1157,12 +1161,14 @@ func (ce *chainEmit) mapLines(p, fname, cur, mname string, i int) []string {
 }
 
 func (ce *chainEmit) failStage(p, errVar string) string {
+	if ce.deferClose() {
+		return ce.rollback(p) + "; " + p + "_done = true; " + ce.failReturn(p, errVar)
+	}
 	if ce.hasMap() {
 		return ce.rollback(p) + "; " + ce.failReturn(p, errVar)
 	}
 	return ce.failReturn(p, errVar)
 }
-
 func (ce *chainEmit) hasMap() bool {
 	for _, op := range ce.ops {
 		if op.method == "map" {
@@ -1172,6 +1178,51 @@ func (ce *chainEmit) hasMap() bool {
 	return false
 }
 
+func (ce *chainEmit) deferClose() bool {
+	return ce.hasMap() && ce.needOut() && ce.mayProduceCloser()
+}
+
+func (ce *chainEmit) mayProduceCloser() bool {
+	for _, op := range ce.ops {
+		if op.method != "map" {
+			continue
+		}
+		if logosMayBeCloser(ce.cg.prodType(op)) {
+			return true
+		}
+	}
+	return false
+}
+
+func logosMayBeCloser(t types2.Type) bool {
+	if t == nil {
+		return true
+	}
+	switch types2.Unalias(t).(type) {
+	case *types2.Interface, *types2.TypeParam, *types2.Union:
+		return true
+	}
+	obj, _, _ := types2.LookupFieldOrMethod(t, false, nil, "Close")
+	fn, ok := obj.(*types2.Func)
+	if !ok {
+		return false
+	}
+	sig, ok := types2.Unalias(fn.Type()).(*types2.Signature)
+	if !ok || sig.Params().Len() != 0 || sig.Results().Len() != 1 {
+		return false
+	}
+	errIface, ok := types2.Universe.Lookup("error").Type().(*types2.Interface)
+	if !ok {
+		return true
+	}
+	return types2.Implements(sig.Results().At(0).Type(), errIface)
+}
+func (ce *chainEmit) okReturn(p string) string {
+	if !ce.deferClose() {
+		return ""
+	}
+	return p + "_done = true; "
+}
 func (ce *chainEmit) failReturn(p, errVar string) string {
 	switch ce.term.method {
 	case "", "sortBy":
@@ -1212,7 +1263,7 @@ func (ce *chainEmit) terminalLines(p, cur string) []string {
 	case "sum":
 		return appendCur
 	case "first":
-		return keep([]string{"return " + ce.someText(p, cur) + ce.rsuf()})
+		return keep([]string{ce.okReturn(p) + "return " + ce.someText(p, cur) + ce.rsuf()})
 	case "sortBy", "last", "get":
 		return appendCur
 	}
@@ -1223,9 +1274,9 @@ func (ce *chainEmit) findLines(p, cur string) []string {
 	fname := ce.funcOf(ce.term, p+"_ft")
 	if ce.term.isTry {
 		en := p + "_fte"
-		return []string{fmt.Sprintf("if %[1]s_fv, %[2]s := %[3]s(%[4]s); %[2]s != nil { %[5]s } else if %[1]s_fv { return %[6]s%[7]s }", p, en, fname, cur, ce.failStage(p, en), ce.someText(p, cur), ce.rsuf())}
+		return []string{fmt.Sprintf("if %[1]s_fv, %[2]s := %[3]s(%[4]s); %[2]s != nil { %[5]s } else if %[1]s_fv { %[8]sreturn %[6]s%[7]s }", p, en, fname, cur, ce.failStage(p, en), ce.someText(p, cur), ce.rsuf(), ce.okReturn(p))}
 	}
-	return []string{fmt.Sprintf("if %s(%s) { return %s%s }", fname, cur, ce.someText(p, cur), ce.rsuf())}
+	return []string{fmt.Sprintf("if %s(%s) { %sreturn %s%s }", fname, cur, ce.okReturn(p), ce.someText(p, cur), ce.rsuf())}
 }
 
 func (ce *chainEmit) someText(p, cur string) string {
@@ -1243,15 +1294,15 @@ func (ce *chainEmit) anyLines(p, cur string) []string {
 	if ce.term.method == "all" {
 		if ce.term.isTry {
 			en := p + "_fte"
-			return []string{fmt.Sprintf("if %[1]s_fv, %[2]s := %[3]s(%[4]s); %[2]s != nil { %[5]s } else if !%[1]s_fv { return false%[6]s }", p, en, fname, cur, ce.failStage(p, en), ce.rsuf())}
+			return []string{fmt.Sprintf("if %[1]s_fv, %[2]s := %[3]s(%[4]s); %[2]s != nil { %[5]s } else if !%[1]s_fv { %[7]sreturn false%[6]s }", p, en, fname, cur, ce.failStage(p, en), ce.rsuf(), ce.okReturn(p))}
 		}
-		return []string{fmt.Sprintf("if !%s(%s) { return false%s }", fname, cur, ce.rsuf())}
+		return []string{fmt.Sprintf("if !%s(%s) { %sreturn false%s }", fname, cur, ce.okReturn(p), ce.rsuf())}
 	}
 	if ce.term.isTry {
 		en := p + "_fte"
-		return []string{fmt.Sprintf("if %[1]s_fv, %[2]s := %[3]s(%[4]s); %[2]s != nil { %[5]s } else if %[1]s_fv { return true%[6]s }", p, en, fname, cur, ce.failStage(p, en), ce.rsuf())}
+		return []string{fmt.Sprintf("if %[1]s_fv, %[2]s := %[3]s(%[4]s); %[2]s != nil { %[5]s } else if %[1]s_fv { %[7]sreturn true%[6]s }", p, en, fname, cur, ce.failStage(p, en), ce.rsuf(), ce.okReturn(p))}
 	}
-	return []string{fmt.Sprintf("if %s(%s) { return true%s }", fname, cur, ce.rsuf())}
+	return []string{fmt.Sprintf("if %s(%s) { %sreturn true%s }", fname, cur, ce.okReturn(p), ce.rsuf())}
 }
 
 func (ce *chainEmit) countLines(p, cur string) []string {
@@ -1276,29 +1327,29 @@ func (ce *chainEmit) epilogue(p string) []string {
 	case "sum":
 		return ce.epilogueSum(p)
 	case "first":
-		return []string{"return " + ce.noneText(p) + ce.rsuf()}
+		return []string{ce.okReturn(p) + "return " + ce.noneText(p) + ce.rsuf()}
 	case "":
-		return []string{"if len(" + p + "_out) == 0 { " + p + "_out = nil }", "return " + p + "_out" + ce.rsuf()}
+		return []string{"if len(" + p + "_out) == 0 { " + p + "_out = nil }", ce.okReturn(p) + "return " + p + "_out" + ce.rsuf()}
 	case "last", "get":
 		return ce.epilogueIndex(p)
 	case "sortBy":
 		return ce.epilogueSort(p)
 	}
-	return []string{"return " + p + "_out" + ce.rsuf()}
+	return []string{ce.okReturn(p) + "return " + p + "_out" + ce.rsuf()}
 }
 
 func (ce *chainEmit) epilogueValue(p string) []string {
 	switch ce.term.method {
 	case "find":
-		return []string{"return " + ce.noneText(p) + ce.rsuf()}
+		return []string{ce.okReturn(p) + "return " + ce.noneText(p) + ce.rsuf()}
 	case "any":
-		return []string{"return false" + ce.rsuf()}
+		return []string{ce.okReturn(p) + "return false" + ce.rsuf()}
 	case "all":
-		return []string{"return true" + ce.rsuf()}
+		return []string{ce.okReturn(p) + "return true" + ce.rsuf()}
 	case "count":
-		return []string{"return " + p + "_c" + ce.rsuf()}
+		return []string{ce.okReturn(p) + "return " + p + "_c" + ce.rsuf()}
 	}
-	return []string{"return " + p + "_out" + ce.rsuf()}
+	return []string{ce.okReturn(p) + "return " + p + "_out" + ce.rsuf()}
 }
 
 func (ce *chainEmit) epilogueSum(p string) []string {
@@ -1307,16 +1358,16 @@ func (ce *chainEmit) epilogueSum(p string) []string {
 	return []string{
 		fmt.Sprintf("var %[1]s func([]%[2]s) %[2]s", sn, t),
 		fmt.Sprintf("%[1]s = func(%[2]s_s []%[3]s) %[3]s { switch len(%[2]s_s) { case 0: return 0; case 1: return %[2]s_s[0]; default: %[2]s_m := len(%[2]s_s) / 2; return %[1]s(%[2]s_s[:%[2]s_m]) + %[1]s(%[2]s_s[%[2]s_m:]) } }", sn, p, t),
-		fmt.Sprintf("return %s(%s_out)%s", sn, p, ce.rsuf()),
+		fmt.Sprintf("%sreturn %s(%s_out)%s", ce.okReturn(p), sn, p, ce.rsuf()),
 	}
 }
 
 func (ce *chainEmit) epilogueIndex(p string) []string {
 	if ce.term.method == "last" {
-		return []string{fmt.Sprintf("if len(%[1]s_out) == 0 { return %[2]s%[3]s }; return %[4]s%[3]s", p, ce.noneText(p), ce.rsuf(), ce.someText(p, p+"_out[len("+p+"_out)-1]"))}
+		return []string{fmt.Sprintf("if len(%[1]s_out) == 0 { %[5]sreturn %[2]s%[3]s }; %[5]sreturn %[4]s%[3]s", p, ce.noneText(p), ce.rsuf(), ce.someText(p, p+"_out[len("+p+"_out)-1]"), ce.okReturn(p))}
 	}
 	return []string{
-		fmt.Sprintf("if %[1]s_i < 0 || %[1]s_i >= len(%[1]s_out) { return %[2]s%[3]s }; return %[4]s%[3]s", p, ce.noneText(p), ce.rsuf(), ce.someText(p, p+"_out["+p+"_i]")),
+		fmt.Sprintf("if %[1]s_i < 0 || %[1]s_i >= len(%[1]s_out) { %[5]sreturn %[2]s%[3]s }; %[5]sreturn %[4]s%[3]s", p, ce.noneText(p), ce.rsuf(), ce.someText(p, p+"_out["+p+"_i]"), ce.okReturn(p)),
 	}
 }
 
@@ -1328,7 +1379,7 @@ func (ce *chainEmit) epilogueSort(p string) []string {
 	if !ce.term.isTry {
 		return []string{
 			fmt.Sprintf("%[1]s.SliceStableFunc(%[2]s_out, func(%[2]s_a, %[2]s_b %[3]s) int { return %[1]s.Compare(%[4]s(%[2]s_a), %[4]s(%[2]s_b)) })", rt, p, e, fname),
-			fmt.Sprintf("return %s_out%s", p, ce.rsuf()),
+			fmt.Sprintf("%sreturn %s_out%s", ce.okReturn(p), p, ce.rsuf()),
 		}
 	}
 	k := ce.opResult(ce.term)
@@ -1341,7 +1392,7 @@ func (ce *chainEmit) epilogueSort(p string) []string {
 		fmt.Sprintf("%[1]s.SliceStableFunc(%[1]s_idx, func(%[1]s_a, %[1]s_b int) int { return %[2]s.Compare(%[1]s_keys[%[1]s_a], %[1]s_keys[%[1]s_b]) })", p, rt),
 		fmt.Sprintf("%[1]s_sorted := make([]%[2]s, len(%[1]s_out))", p, e),
 		fmt.Sprintf("for %[1]s_i, %[1]s_v := range %[1]s_idx { %[1]s_sorted[%[1]s_i] = %[1]s_out[%[1]s_v] }", p),
-		fmt.Sprintf("return %s_sorted%s", p, ce.rsuf()),
+		fmt.Sprintf("%sreturn %s_sorted%s", ce.okReturn(p), p, ce.rsuf()),
 	}
 }
 
