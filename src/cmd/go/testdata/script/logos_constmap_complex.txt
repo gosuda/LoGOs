@@ -1,3 +1,5 @@
+# Const map range visits keys in sorted order [T-201]: complex keys
+# sort by real part then imaginary part, so the orders below are exact.
 env GOPROXY=off
 env GOTOOLCHAIN=local
 
