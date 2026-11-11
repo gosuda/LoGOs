@@ -48,16 +48,20 @@ func truncFull() error {
 }
 
 func run() error {
-	if err := truncPadded(); err != nil {
-		return err
-	}
-	return truncFull()
+if err := truncPadded(); err != nil {
+return err
 }
-
+return truncFull()
+}
 func main() {
-	if err := run(); err != nil {
-		fmt.Println("json:", err)
-		os.Exit(1)
-	}
-	fmt.Println("json growth truncated: PASS")
+if err := truncPadded(); err != nil {
+fmt.Println("FAIL growth-padded:", err)
+os.Exit(1)
+}
+fmt.Println("ok growth-padded")
+if err := truncFull(); err != nil {
+fmt.Println("FAIL growth-full:", err)
+os.Exit(1)
+}
+fmt.Println("ok growth-full")
 }

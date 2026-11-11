@@ -1,1 +1,9 @@
-binary encoding: PASS
+ok binary-edge
+ok binary-kinds
+ok binary-layout
+ok binary-violations
+ok binary-count
+ok binary-bomb
+ok binary-large
+ok binary-hostile
+ok binary-run

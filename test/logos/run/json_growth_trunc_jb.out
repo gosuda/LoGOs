@@ -1,1 +1,2 @@
-json growth truncated: PASS
+ok growth-padded
+ok growth-full

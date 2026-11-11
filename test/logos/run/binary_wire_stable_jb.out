@@ -1,1 +1,2 @@
-binary wire stable: PASS
+ok wire-slices
+ok wire-bytes

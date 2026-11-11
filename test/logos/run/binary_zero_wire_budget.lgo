@@ -557,10 +557,71 @@ func run() error {
 	return nil
 }
 
+//logos:allow(complexity::cognitive_overflow)
 func main() {
-	if err := run(); err != nil {
-		fmt.Println("binary:", err)
-		os.Exit(1)
-	}
-	fmt.Println("binary zero-wire budget: PASS")
+if zeroCap() != 1048576 {
+fmt.Println("FAIL budget-cap: zero-wire cap is not 1,048,576")
+os.Exit(1)
+}
+fmt.Println("ok budget-cap")
+if err := literalSmall(); err != nil {
+fmt.Println("FAIL budget-literal:", err)
+os.Exit(1)
+}
+fmt.Println("ok budget-literal")
+if err := literalCapWire(); err != nil {
+fmt.Println("FAIL budget-capwire:", err)
+os.Exit(1)
+}
+fmt.Println("ok budget-capwire")
+if err := singleAtCap(); err != nil {
+fmt.Println("FAIL budget-single:", err)
+os.Exit(1)
+}
+fmt.Println("ok budget-single")
+if err := singleOverCap(); err != nil {
+fmt.Println("FAIL budget-single-over:", err)
+os.Exit(1)
+}
+fmt.Println("ok budget-single-over")
+if err := twoFieldsAccepted(); err != nil {
+fmt.Println("FAIL budget-two:", err)
+os.Exit(1)
+}
+fmt.Println("ok budget-two")
+if err := twoFieldsOver(); err != nil {
+fmt.Println("FAIL budget-two-over:", err)
+os.Exit(1)
+}
+fmt.Println("ok budget-two-over")
+if err := nestedIndependent(); err != nil {
+fmt.Println("FAIL budget-nested:", err)
+os.Exit(1)
+}
+fmt.Println("ok budget-nested")
+if err := nestedOver(); err != nil {
+fmt.Println("FAIL budget-nested-over:", err)
+os.Exit(1)
+}
+fmt.Println("ok budget-nested-over")
+if err := zeroSizedAtCap(); err != nil {
+fmt.Println("FAIL budget-zerosize:", err)
+os.Exit(1)
+}
+fmt.Println("ok budget-zerosize")
+if err := fatBoundary(); err != nil {
+fmt.Println("FAIL budget-fat:", err)
+os.Exit(1)
+}
+fmt.Println("ok budget-fat")
+if err := fatRejectBeforeAlloc(); err != nil {
+fmt.Println("FAIL budget-fat-noalloc:", err)
+os.Exit(1)
+}
+fmt.Println("ok budget-fat-noalloc")
+if err := zeroWireCountIndependentAllocs(); err != nil {
+fmt.Println("FAIL budget-allocs:", err)
+os.Exit(1)
+}
+fmt.Println("ok budget-allocs")
 }

@@ -191,10 +191,14 @@ func testRichV2ParityUnderNoJSONv2() {
 }
 
 func main() {
-	testCallSiteParityWithMarshalJSON()
-	testPointerAndInterfaceFormsAgree()
-	testEncoderAddsOnlyTrailingNewline()
-	testRichParityUnderNoJSONv2()
-	testRichV2ParityUnderNoJSONv2()
-	fmt.Println("callsite nojsonv2 ok")
+testCallSiteParityWithMarshalJSON()
+fmt.Println("ok callsite-marshal")
+testPointerAndInterfaceFormsAgree()
+fmt.Println("ok callsite-forms")
+testEncoderAddsOnlyTrailingNewline()
+fmt.Println("ok callsite-encoder")
+testRichParityUnderNoJSONv2()
+fmt.Println("ok callsite-richv1")
+testRichV2ParityUnderNoJSONv2()
+fmt.Println("ok callsite-richv2")
 }

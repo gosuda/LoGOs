@@ -1,1 +1,5 @@
-binary zero-wire granular: PASS
+ok granular-count
+ok granular-over
+ok granular-fat
+ok granular-word
+ok granular-fat-over

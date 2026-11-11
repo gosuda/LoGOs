@@ -97,19 +97,28 @@ func preLawful() error {
 }
 
 func run() error {
-	if err := preLenHalf(); err != nil {
-		return err
-	}
-	if err := preOneMeg(); err != nil {
-		return err
-	}
-	return preLawful()
+if err := preLenHalf(); err != nil {
+return err
 }
-
+if err := preOneMeg(); err != nil {
+return err
+}
+return preLawful()
+}
 func main() {
-	if err := run(); err != nil {
-		fmt.Println("binary:", err)
-		os.Exit(1)
-	}
-	fmt.Println("binary slice prealloc: PASS")
+if err := preLenHalf(); err != nil {
+fmt.Println("FAIL prealloc-half:", err)
+os.Exit(1)
+}
+fmt.Println("ok prealloc-half")
+if err := preOneMeg(); err != nil {
+fmt.Println("FAIL prealloc-meg:", err)
+os.Exit(1)
+}
+fmt.Println("ok prealloc-meg")
+if err := preLawful(); err != nil {
+fmt.Println("FAIL prealloc-lawful:", err)
+os.Exit(1)
+}
+fmt.Println("ok prealloc-lawful")
 }

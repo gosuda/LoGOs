@@ -447,9 +447,49 @@ func runViolations() error {
 }
 
 func main() {
-	if err := run(); err != nil {
-		fmt.Println("binary:", err)
-		os.Exit(1)
-	}
-	fmt.Println("binary encoding: PASS")
+if err := edgeBytes(); err != nil {
+fmt.Println("FAIL binary-edge:", err)
+os.Exit(1)
+}
+fmt.Println("ok binary-edge")
+if err := kindsLayout(); err != nil {
+fmt.Println("FAIL binary-kinds:", err)
+os.Exit(1)
+}
+fmt.Println("ok binary-kinds")
+if err := layout(); err != nil {
+fmt.Println("FAIL binary-layout:", err)
+os.Exit(1)
+}
+fmt.Println("ok binary-layout")
+if err := violations(); err != nil {
+fmt.Println("FAIL binary-violations:", err)
+os.Exit(1)
+}
+fmt.Println("ok binary-violations")
+if err := countBoundaries(); err != nil {
+fmt.Println("FAIL binary-count:", err)
+os.Exit(1)
+}
+fmt.Println("ok binary-count")
+if err := allocationBomb(); err != nil {
+fmt.Println("FAIL binary-bomb:", err)
+os.Exit(1)
+}
+fmt.Println("ok binary-bomb")
+if err := largeLawful(); err != nil {
+fmt.Println("FAIL binary-large:", err)
+os.Exit(1)
+}
+fmt.Println("ok binary-large")
+if err := hostileByteCount(); err != nil {
+fmt.Println("FAIL binary-hostile:", err)
+os.Exit(1)
+}
+fmt.Println("ok binary-hostile")
+if err := run(); err != nil {
+fmt.Println("FAIL binary-run:", err)
+os.Exit(1)
+}
+fmt.Println("ok binary-run")
 }

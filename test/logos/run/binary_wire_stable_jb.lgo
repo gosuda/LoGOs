@@ -95,16 +95,20 @@ func stableBytes() error {
 }
 
 func run() error {
-	if err := stableSlices(); err != nil {
-		return err
-	}
-	return stableBytes()
+if err := stableSlices(); err != nil {
+return err
 }
-
+return stableBytes()
+}
 func main() {
-	if err := run(); err != nil {
-		fmt.Println("binary:", err)
-		os.Exit(1)
-	}
-	fmt.Println("binary wire stable: PASS")
+if err := stableSlices(); err != nil {
+fmt.Println("FAIL wire-slices:", err)
+os.Exit(1)
+}
+fmt.Println("ok wire-slices")
+if err := stableBytes(); err != nil {
+fmt.Println("FAIL wire-bytes:", err)
+os.Exit(1)
+}
+fmt.Println("ok wire-bytes")
 }
