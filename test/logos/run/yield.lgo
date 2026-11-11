@@ -10,6 +10,18 @@ import (
 	tm "time"
 )
 
+var failed bool
+
+func check(name string, cond bool, got, want any) {
+	if !cond {
+		failed = true
+		fmt.Println("FAIL", name+":", "got", got, "want", want)
+		return
+	}
+	fmt.Println("ok", name)
+}
+
+
 func Durs() iter.Seq[tm.Duration] {
 	yield tm.Second
 	yield tm.Minute
@@ -85,16 +97,14 @@ func main() {
 	for v := range ReturnSeven(3) {
 		seven += v
 	}
-	ok := sum == 10 &&
-		strings.Join(pairs, ",") == "0:0,1:1,2:4,3:9" &&
-		seen == 3 && steps == 3 &&
-		len(logged) == 3 && logged[0] == 0 && logged[1] == 1 && logged[2] == 2 &&
-		strings.Join(glog, ",") == "start,done" &&
-		len(durs) == 2 && durs[0] == tm.Second && durs[1] == tm.Minute &&
-		seven == 3
-	if !ok {
-		fmt.Println("yield: FAIL")
+	check("sum", sum == 10, sum, 10)
+	check("pairs", strings.Join(pairs, ",") == "0:0,1:1,2:4,3:9", strings.Join(pairs, ","), "0:0,1:1,2:4,3:9")
+	check("early-break", seen == 3 && steps == 3, fmt.Sprint(seen, steps), "3 3")
+	check("logged", len(logged) == 3 && logged[0] == 0 && logged[1] == 1 && logged[2] == 2, fmt.Sprint(logged), "[0 1 2]")
+	check("scope-cleanup", strings.Join(glog, ",") == "start,done", strings.Join(glog, ","), "start,done")
+	check("durs", len(durs) == 2 && durs[0] == tm.Second && durs[1] == tm.Minute, fmt.Sprint(durs), "[1s 1m0s]")
+	check("return-ends", seven == 3, seven, 3)
+	if failed {
 		os.Exit(1)
 	}
-	fmt.Println("yield: PASS")
 }

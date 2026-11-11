@@ -1,1 +1,7 @@
-yield: PASS
+ok sum
+ok pairs
+ok early-break
+ok logged
+ok scope-cleanup
+ok durs
+ok return-ends

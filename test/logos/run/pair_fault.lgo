@@ -8,6 +8,17 @@ import (
 	"unsafe"
 )
 
+var failed bool
+
+func check(name string, cond bool, got, want any) {
+	if !cond {
+		failed = true
+		fmt.Println("FAIL", name+":", "got", got, "want", want)
+		return
+	}
+	fmt.Println("ok", name)
+}
+
 type pairFaultAdjacent struct {
 	a, b int64
 }
@@ -17,20 +28,18 @@ var pairFaultSeen int64
 func main() {
 	pairFaultSeen = 1
 	p := (*pairFaultAdjacent)(unsafe.Pointer(nil))
+	caught := false
 	func() {
 		defer func() {
-			if recover() == nil {
-				fmt.Println("want panic from nil base")
-				os.Exit(1)
-			}
-			if pairFaultSeen != 1 {
-				fmt.Println("prior store lost:", pairFaultSeen)
-				os.Exit(1)
-			}
+			caught = recover() != nil
 		}()
 		a := p.a
 		_ = a
 		_ = p.b
 	}()
-	fmt.Println("pair fault ok")
+	check("trap", caught, caught, true)
+	check("store", pairFaultSeen == 1, pairFaultSeen, 1)
+	if failed {
+		os.Exit(1)
+	}
 }

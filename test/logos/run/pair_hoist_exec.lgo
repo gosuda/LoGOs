@@ -4,8 +4,20 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"sync/atomic"
 )
+
+var failed bool
+
+func check(name string, cond bool, got, want any) {
+	if !cond {
+		failed = true
+		fmt.Println("FAIL", name+":", "got", got, "want", want)
+		return
+	}
+	fmt.Println("ok", name)
+}
 
 type two struct {
 	a int64
@@ -60,14 +72,24 @@ func atomicBarrier(p *two) int64 {
 
 func main() {
 	p := &two{a: 3, b: 5}
-	fmt.Println(straight(p))
-	fmt.Println(diamond(p, true))
-	fmt.Println(diamond(p, false))
-	fmt.Println(joinLoop(p, 4))
-	fmt.Println(callBarrier(p))
-	fmt.Println(staleCheck(p))
-	fmt.Println(atomicBarrier(p))
-	fmt.Println(atomicCell.Load())
-	fmt.Println(p.a)
-	fmt.Println(p.b)
+	straight := straight(p)
+	check("straight", straight == 53, straight, 53)
+	diamondT := diamond(p, true)
+	check("diamond-t", diamondT == 8, diamondT, 8)
+	diamondF := diamond(p, false)
+	check("diamond-f", diamondF == -2, diamondF, -2)
+	join := joinLoop(p, 4)
+	check("join", join == 14, join, 14)
+	barrier := callBarrier(p)
+	check("barrier", barrier == 9, barrier, 9)
+	stale := staleCheck(p)
+	check("stale", stale == 103, stale, 103)
+	atomic := atomicBarrier(p)
+	check("atomic", atomic == 8, atomic, 8)
+	check("atomic-count", atomicCell.Load() == 1, atomicCell.Load(), 1)
+	check("pa", p.a == 3, p.a, 3)
+	check("pb", p.b == 5, p.b, 5)
+	if failed {
+		os.Exit(1)
+	}
 }
