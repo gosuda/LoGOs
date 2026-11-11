@@ -297,11 +297,17 @@ func b(err error) error {
 	if err != nil {
 		t.Fatal(err)
 	}
-	in := check(t, KindGo, "x.go", src)
-	in.Policy = p
-	got := summarize(Run(in))
+	goIn := check(t, KindGo, "x.go", src)
+	goIn.Policy = p
+	goRes := Run(goIn)
+	got := summarize(goRes)
 	if want := []string{"11 slop::err_chain_reset warn"}; !slices.Equal(got, want) {
 		t.Errorf("results = %q, want %q", got, want)
+	}
+	if len(goRes) == 1 {
+		if text := spanText(src, goRes[0]); text != `fmt.Errorf("shown: %v", err)` {
+			t.Errorf("span = %q, want the shown call", text)
+		}
 	}
 	if got := summarize(Run(check(t, KindLgo, "x.lgo", src))); !slices.Equal(got, []string{"11 slop::err_chain_reset deny"}) {
 		t.Errorf("lgo results = %q", got)
