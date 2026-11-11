@@ -248,6 +248,9 @@ func TestSerializedUnsizedIntSpan(t *testing.T) {
 		t.Fatalf("results = %v, want one", rs)
 	}
 	r := rs[0]
+	if r.Rule != "portability::serialized_unsized_int" {
+		t.Errorf("rule = %q, want portability::serialized_unsized_int", r.Rule)
+	}
 	if r.Pos.Line() != 4 || r.Pos.Col() != 2 || r.End.Line() != 4 || r.End.Col() != 7 {
 		t.Errorf("span = %d:%d-%d:%d, want 4:2-4:7", r.Pos.Line(), r.Pos.Col(), r.End.Line(), r.End.Col())
 	}
@@ -256,7 +259,24 @@ func TestSerializedUnsizedIntSpan(t *testing.T) {
 			t.Errorf("message %q lacks %q", r.Message, part)
 		}
 	}
-	if !strings.HasSuffix(r.Message, "; use int32, int64, uint32, or uint64") {
-		t.Errorf("message %q recommends beyond the sized kinds", r.Message)
+	tail := r.Message
+	if _, after, ok := strings.Cut(tail, ";"); ok {
+		tail = after
+	}
+	have := map[string]bool{}
+	for _, tok := range strings.FieldsFunc(tail, func(c rune) bool {
+		return !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_')
+	}) {
+		have[tok] = true
+	}
+	for _, want := range []string{"int32", "int64", "uint32", "uint64"} {
+		if !have[want] {
+			t.Errorf("recommendation %q lacks %q", tail, want)
+		}
+	}
+	for _, tok := range []string{"int", "uint"} {
+		if have[tok] {
+			t.Errorf("recommendation %q names unsized kind %q", tail, tok)
+		}
 	}
 }
