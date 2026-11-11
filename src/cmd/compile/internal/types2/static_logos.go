@@ -7,8 +7,10 @@ package types2
 import (
 	"cmd/compile/internal/syntax"
 	. "internal/types/errors"
+	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"unicode"
 )
 
@@ -466,15 +468,16 @@ func (check *Checker) logosCheckUnionJSONMembers() {
 func (check *Checker) logosCheckUnionFieldJSON(fld *Var) {
 	for _, t := range logosNestedUnionTypes(fld.Type()) {
 		tset := logosClosedUnion(t)
-		if tset == nil || !logosIsClosed(tset) {
+		if tset != nil && logosIsClosed(tset) {
+			for _, term := range tset.terms {
+				if term.tilde {
+					continue
+				}
+				check.logosCheckUnionTermJSON(fld, term.typ)
+			}
 			continue
 		}
-		for _, term := range tset.terms {
-			if term.tilde {
-				continue
-			}
-			check.logosCheckUnionTermJSON(fld, term.typ)
-		}
+		check.logosCheckForeignUnionMembers(fld, t, make(map[string]bool))
 	}
 }
 
@@ -529,6 +532,132 @@ func (check *Checker) logosCheckUnionTermJSON(fld *Var, typ Type) {
 		return
 	}
 	check.errorf(fld, BadDecl, "%s union member %s has no UnmarshalJSON method", logosNoUnionJSON, typ)
+}
+
+type LogosImportedUnionMember struct {
+	Member string
+}
+
+var logosImportedUnionMembers = struct {
+	sync.RWMutex
+	m map[string]map[string][]LogosImportedUnionMember
+}{m: make(map[string]map[string][]LogosImportedUnionMember)}
+
+func LogosNoteImportedUnionMembers(pkgPath, typeName string, members []LogosImportedUnionMember) {
+	logosImportedUnionMembers.Lock()
+	defer logosImportedUnionMembers.Unlock()
+	byName := logosImportedUnionMembers.m[pkgPath]
+	if byName == nil {
+		byName = make(map[string][]LogosImportedUnionMember)
+		logosImportedUnionMembers.m[pkgPath] = byName
+	}
+	byName[typeName] = slices.Clone(members)
+}
+
+func logosLookupImportedUnionMembers(pkgPath, typeName string) []LogosImportedUnionMember {
+	logosImportedUnionMembers.RLock()
+	defer logosImportedUnionMembers.RUnlock()
+	return logosImportedUnionMembers.m[pkgPath][typeName]
+}
+
+func (check *Checker) logosCheckForeignUnionMembers(fld *Var, t Type, seen map[string]bool) {
+	name, ok := logosForeignUnionName(t)
+	if !ok {
+		return
+	}
+	key := name.pkgPath + "." + name.typeName
+	if seen[key] {
+		return
+	}
+	seen[key] = true
+	for _, m := range logosLookupImportedUnionMembers(name.pkgPath, name.typeName) {
+		check.logosCheckForeignUnionMember(fld, m.Member, seen)
+	}
+}
+
+func (check *Checker) logosCheckForeignUnionMember(fld *Var, member string, seen map[string]bool) {
+	mt, ok := check.logosForeignMemberType(member)
+	if !ok {
+		return
+	}
+	if subt := logosClosedUnion(mt); subt != nil && logosIsClosed(subt) {
+		check.logosCheckUnionTerms(fld, subt)
+		return
+	}
+	if _, ok := logosForeignUnionName(mt); ok {
+		check.logosCheckForeignUnionMembers(fld, mt, seen)
+		return
+	}
+	check.logosCheckUnionTermJSON(fld, mt)
+}
+
+func (check *Checker) logosCheckUnionTerms(fld *Var, tset *_TypeSet) {
+	for _, term := range tset.terms {
+		if term.tilde {
+			continue
+		}
+		check.logosCheckUnionTermJSON(fld, term.typ)
+	}
+}
+
+type logosForeignName struct {
+	pkgPath  string
+	typeName string
+}
+
+func logosForeignUnionName(t Type) (logosForeignName, bool) {
+	u := Unalias(t)
+	if cv, ok := u.(*ConstView); ok {
+		u = Unalias(cv.Elem)
+	}
+	named, ok := u.(*Named)
+	if !ok || named.Obj() == nil || named.Obj().Pkg() == nil {
+		return logosForeignName{}, false
+	}
+	pkgPath := named.Obj().Pkg().Path()
+	typeName := named.Obj().Name()
+	if len(logosLookupImportedUnionMembers(pkgPath, typeName)) == 0 {
+		return logosForeignName{}, false
+	}
+	return logosForeignName{pkgPath: pkgPath, typeName: typeName}, true
+}
+
+func (check *Checker) logosForeignMemberType(member string) (Type, bool) {
+	trimmed, isPtr := strings.CutPrefix(member, "*")
+	pkgPath, typeName, ok := strings.CutLast(trimmed, ".")
+	if !ok || pkgPath == "" || typeName == "" {
+		return nil, false
+	}
+	if strings.Contains(typeName, "/") {
+		return nil, false
+	}
+	pkg := check.logosForeignMemberPkg(pkgPath)
+	if pkg == nil {
+		return nil, false
+	}
+	obj := pkg.Scope().Lookup(typeName)
+	tname, ok := obj.(*TypeName)
+	if !ok || tname.typ == nil || tname.IsAlias() {
+		return nil, false
+	}
+	if isPtr {
+		return NewPointer(tname.typ), true
+	}
+	return tname.typ, true
+}
+
+func (check *Checker) logosForeignMemberPkg(pkgPath string) *Package {
+	if check.pkg != nil {
+		if check.pkg.Path() == pkgPath {
+			return check.pkg
+		}
+		for _, imp := range check.pkg.Imports() {
+			if imp.Path() == pkgPath {
+				return imp
+			}
+		}
+	}
+	return nil
 }
 
 func logosUnionMemberHasJSON(m Type, pkg *Package) (bool, bool) {

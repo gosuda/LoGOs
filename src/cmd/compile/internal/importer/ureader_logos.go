@@ -23,7 +23,28 @@ func logosOverlayHook(pkg *types2.Package) *types2.Package {
 	LogosOverlayEnabled = false
 	logosRegisterPropFacts(pkg)
 	logosRegisterDefaultFacts(pkg)
+	logosRegisterUnionFacts(pkg)
 	return pkg
+}
+
+func logosRegisterUnionFacts(pkg *types2.Package) {
+	if pkg == nil {
+		return
+	}
+	f, ok := facts.Lookup(pkg.Path())
+	if !ok || f == nil || len(f.UnionMembers) == 0 {
+		return
+	}
+	byType := make(map[string][]types2.LogosImportedUnionMember)
+	for _, u := range f.UnionMembers {
+		if u.Type == "" || u.Member == "" {
+			continue
+		}
+		byType[u.Type] = append(byType[u.Type], types2.LogosImportedUnionMember{Member: u.Member})
+	}
+	for typeName, members := range byType {
+		types2.LogosNoteImportedUnionMembers(pkg.Path(), typeName, members)
+	}
 }
 
 // logosRegisterDefaultFacts records the struct field defaults of an
