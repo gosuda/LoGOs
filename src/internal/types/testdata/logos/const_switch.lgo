@@ -35,6 +35,17 @@ func shadowedAfterBroader[T any](v T) string {
 	return "other"
 }
 
+func shadowedDuplicateExact[T any](v T) string {
+	_ = v
+	const switch T {
+	case int:
+		return "int"
+	case int /* ERROR "comptime::unreachable_case" */ :
+		return "again"
+	}
+	return "other"
+}
+
 type writerInt int
 
 func (w writerInt) Write(p []byte) (int, error) { return len(p), nil }
