@@ -30,6 +30,14 @@ A []F2 `json:"a"`
 type F2 struct {
 B F1 `json:"b"`
 }
+type ZW0 struct{}
+type ZW1 struct {
+	X ZW0 `json:"x"`
+}
+type ZWMix struct {
+	Kids []ZWMix `json:"kids"`
+	Tags []ZW1 `json:"tags"`
+}
 func mustDepthBytes(b []byte, err error) []byte {
 if err != nil {
 panic(err)
@@ -351,6 +359,64 @@ t.Fatalf("10001-deep empty encoded without a depth error")
 checkEncodeDepthErr(t, err)
 }
 }
+func zwMixWire(n int) []byte {
+w := []byte{1, 0, 0}
+for i := 0; i < n; i++ {
+w = append(append([]byte{1, 1}, w[1:]...), 0)
+}
+return w
+}
+func testZeroWireBoundary(t *testing.T) {
+v := ZWMix{Tags: []ZW1{{}, {}, {}}}
+enc := mustDepthBytes(v.MarshalBinary())
+if !bytes.Equal(enc, []byte{1, 0, 3}) {
+t.Fatalf("zero-wire slice did not encode as count only: %x", enc)
+}
+var got ZWMix
+if err := got.UnmarshalBinary(enc); err != nil {
+t.Fatalf("zero-wire slice rejected: %v", err)
+}
+if len(got.Tags) != 3 {
+t.Fatalf("zero-wire slice decoded to %d elements", len(got.Tags))
+}
+if !bytes.Equal(mustDepthBytes(got.MarshalBinary()), enc) {
+t.Fatalf("zero-wire slice did not round-trip")
+}
+deep := ZWMix{}
+for i := 0; i < 4999; i++ {
+deep = ZWMix{Kids: []ZWMix{deep}}
+}
+enc = mustDepthBytes(deep.MarshalBinary())
+if !bytes.Equal(zwMixWire(4999), enc) {
+t.Fatalf("mixed generator disagrees with encoder")
+}
+var back ZWMix
+if err := back.UnmarshalBinary(enc); err != nil {
+t.Fatalf("4999-deep mixed zero-wire rejected: %v", err)
+}
+if !bytes.Equal(mustDepthBytes(back.MarshalBinary()), enc) {
+t.Fatalf("4999-deep mixed zero-wire did not round-trip")
+}
+if _, err := back.AppendBinary(nil); err != nil {
+t.Fatalf("4999-deep mixed zero-wire append rejected: %v", err)
+}
+wide := ZWMix{}
+for i := 0; i < 5000; i++ {
+wide = ZWMix{Kids: []ZWMix{wide}}
+}
+if _, err := wide.MarshalBinary(); err == nil {
+t.Fatalf("5000-deep mixed zero-wire encoded without a depth error")
+} else {
+checkEncodeDepthErr(t, err)
+}
+if _, err := wide.AppendBinary(nil); err == nil {
+t.Fatalf("5000-deep mixed zero-wire appended without a depth error")
+} else {
+checkEncodeDepthErr(t, err)
+}
+var bad ZWMix
+checkDepthErr(t, bad.UnmarshalBinary(zwMixWire(5000)), ".Kids")
+}
 func TestBinaryDepthLimit(t *testing.T) {
 shallow := depthWire(100)
 var s DepthNode
@@ -370,4 +436,5 @@ testOptionBoundary(t)
 testArrayBoundary(t)
 testTupleBoundary(t)
 testEmptyAtBoundary(t)
+testZeroWireBoundary(t)
 }
