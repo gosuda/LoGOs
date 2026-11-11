@@ -147,10 +147,28 @@ func InterpError(v error) (s string) {
 	return v.Error()
 }
 
+func InterpErrorValue[T error](v T) (s string) {
+	defer func() {
+		if r := recover(); r != nil {
+			s = "%!v(PANIC=Error method: " + fmt.Sprint(r) + ")"
+		}
+	}()
+	return v.Error()
+}
+
 func InterpStringer(v fmt.Stringer) (s string) {
 	if v == nil {
 		return "<nil>"
 	}
+	defer func() {
+		if r := recover(); r != nil {
+			s = "%!v(PANIC=String method: " + fmt.Sprint(r) + ")"
+		}
+	}()
+	return v.String()
+}
+
+func InterpStringerValue[T fmt.Stringer](v T) (s string) {
 	defer func() {
 		if r := recover(); r != nil {
 			s = "%!v(PANIC=String method: " + fmt.Sprint(r) + ")"

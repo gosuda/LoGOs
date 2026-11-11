@@ -154,6 +154,29 @@ func anyInterfaceFields(t reflect.Type) bool {
 	return true
 }
 
+func (fl *fileLower) interpHelper(op syntax.Expr, kind types2.LogosInterpKind) string {
+	helper := "InterpError"
+	if kind == types2.LogosInterpStringer {
+		helper = "InterpStringer"
+	}
+	t := fl.pkg.info.TypeOf(op)
+	if t == nil {
+		return helper
+	}
+	if c := constAsView(t); c != nil {
+		t = c.Elem
+	}
+	if _, ok := types2.Unalias(t).(*types2.Interface); ok {
+		return helper
+	}
+	if n, ok := types2.Unalias(t).(*types2.Named); ok {
+		if _, ok := n.Underlying().(*types2.Interface); ok {
+			return helper
+		}
+	}
+	return helper + "Value"
+}
+
 func (fl *fileLower) lowerInterpExpr(e *syntax.InterpExpr, kinds []types2.LogosInterpKind) (bool, otext) {
 	pos := e.Pos()
 	start := fl.off(pos)
@@ -191,10 +214,7 @@ func (fl *fileLower) lowerInterpExpr(e *syntax.InterpExpr, kinds []types2.LogosI
 		stmts = append(stmts, defineOf(pos, []syntax.Expr{nameOf(pos, v)}, []syntax.Expr{op}))
 		lines = append(lines, cat(gen(v+" := "), opTexts[i]))
 		if kinds[i] == types2.LogosInterpError || kinds[i] == types2.LogosInterpStringer {
-			helper := "InterpError"
-			if kinds[i] == types2.LogosInterpStringer {
-				helper = "InterpStringer"
-			}
+			helper := fl.interpHelper(op, kinds[i])
 			needConv = true
 			s := strName(i)
 			stmts = append(stmts, defineOf(pos,
