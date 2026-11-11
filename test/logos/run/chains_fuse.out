@@ -1,2 +1,4 @@
-fuse-ok: true
-fuse-order-ok: true
+ok fuse-values
+ok fuse-calls
+ok fuse-allocs
+ok fuse-order

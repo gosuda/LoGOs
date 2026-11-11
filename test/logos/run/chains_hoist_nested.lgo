@@ -5,7 +5,17 @@ package main
 import (
 	"errors"
 	"fmt"
+	"os"
 )
+var failed bool
+func check(name string, cond bool, got, want any) {
+if !cond {
+failed = true
+fmt.Println("FAIL", name+":", "got", got, "want", want)
+return
+}
+fmt.Println("ok", name)
+}
 
 var calls int
 var errNeg = errors.New("neg")
@@ -113,39 +123,44 @@ func constIfChain(xs []int) (string, error) {
 	}
 }
 
-func show(name string, v any, err error) {
-	if err != nil {
-		fmt.Println(name, "err:", err)
-		return
-	}
-	fmt.Println(name, v)
+func show(name, want string, v any, err error) {
+var got string
+if err != nil {
+got = "err: " + err.Error()
+} else {
+got = fmt.Sprint(v)
 }
-
+check(name, got == want, got, want)
+}
 func main() {
-	s, err := ifFalse([]int{-1, 2})
-	show("if", s, err)
-	s, err = switchCase(2, []int{-1})
-	show("switch", s, err)
-	s, err = condBlock(false, []int{-1})
-	show("block", s, err)
-	s, err = flatBlock([]int{1, 2})
-	show("flat", s, err)
-	total, n, err := loopCount([]int{1, 2}, 3)
-	if err != nil {
-		fmt.Println("loop err:", err)
-		return
-	}
-	fmt.Println("loop", total, n)
-	total, err = rangeGroups([][]int{{1, 2}, {3}})
-	show("range", total, err)
-	s, err = elseIfHeader(true, []int{-1})
-	show("elseif", s, err)
-	s, err = elseIfChain(1, []int{-1})
-	show("elseifchain", s, err)
-	s, err = elseIfChain(2, []int{-1})
-	show("elseifreach", s, err)
-	s, err = elseIfChain(2, []int{1, 2})
-	show("elseifok", s, err)
-	s, err = constIfChain([]int{1, 2})
-	show("constif", s, err)
+s, err := ifFalse([]int{-1, 2})
+show("if", "none calls=0", s, err)
+s, err = switchCase(2, []int{-1})
+show("switch", "default calls=0", s, err)
+s, err = condBlock(false, []int{-1})
+show("block", "outer calls=0", s, err)
+s, err = flatBlock([]int{1, 2})
+show("flat", "[2 4] calls=2", s, err)
+total, n, err := loopCount([]int{1, 2}, 3)
+if err != nil {
+check("loop", false, err, "6 6")
+} else {
+got := fmt.Sprint(total, n)
+check("loop", got == "6 6", got, "6 6")
+}
+total, err = rangeGroups([][]int{{1, 2}, {3}})
+show("range", "3", total, err)
+s, err = elseIfHeader(true, []int{-1})
+show("elseif", "first calls=0", s, err)
+s, err = elseIfChain(1, []int{-1})
+show("elseifchain", "one calls=0", s, err)
+s, err = elseIfChain(2, []int{-1})
+show("elseifreach", "err: neg", s, err)
+s, err = elseIfChain(2, []int{1, 2})
+show("elseifok", "two calls=2", s, err)
+s, err = constIfChain([]int{1, 2})
+show("constif", "[2 4] calls=2", s, err)
+if failed {
+os.Exit(1)
+}
 }

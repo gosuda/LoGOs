@@ -6,7 +6,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 )
+var failed bool
+func check(name string, cond bool, got, want any) {
+if !cond {
+failed = true
+fmt.Println("FAIL", name+":", "got", got, "want", want)
+return
+}
+fmt.Println("ok", name)
+}
 
 var calls int
 var order string
@@ -396,154 +406,167 @@ outer:
 	return fmt.Sprintf("%s calls=%d", out, calls), nil
 }
 
-func show(name, s string, err error) {
-	if err != nil {
-		fmt.Println(name, "err:", err)
-		return
-	}
-	fmt.Println(name, s)
+func show(caseName, want string, s string, err error) {
+var got string
+if err != nil {
+got = "err: " + err.Error()
+} else {
+got = s
+}
+check(caseName, got == want, got, want)
 }
 
 func main() {
-	runOrder()
-	runLoops()
-	runSelects()
-	runShort()
-	runInit()
+runOrder()
+runLoops()
+runSelects()
+runShort()
+runInit()
+if failed {
+os.Exit(1)
+}
 }
 
 func runOrder() {
-	s, err := siblingOrder([]int{1, 2}, []int{3})
-	show("sibling", s, err)
-	for _, k := range []int{1, 2, 7} {
-		s, err = midDefault(k, []int{2, 3})
-		show(fmt.Sprintf("middefault%d", k), s, err)
-	}
-	for _, k := range []int{1, 7, 2} {
-		s, err = midFall(k, []int{2, 3})
-		show(fmt.Sprintf("midfall%d", k), s, err)
-	}
-	for _, k := range []int{1, 2, 3} {
-		s, err = fallStops(k, []int{2, 3, 4})
-		show(fmt.Sprintf("fallstops%d", k), s, err)
-	}
-	s, err = switchBreak(1, true, []int{2, 3})
-	show("switchbreak skip", s, err)
-	s, err = switchBreak(1, false, []int{2, 3})
-	show("switchbreak run", s, err)
-	s, err = switchBreak(2, false, []int{2, 3})
-	show("switchbreak guard", s, err)
-	s, err = tagless(nil, []int{2, 3})
-	show("tagless", s, err)
-	s, err = tagless([]int{1, 2, 3}, []int{2, 3})
-	show("tagless", s, err)
-	s, err = tagless([]int{1}, []int{2, 3})
-	show("tagless", s, err)
+s, err := siblingOrder([]int{1, 2}, []int{3})
+show("sibling", "3 S1S2R3", s, err)
+s, err = midDefault(1, []int{2, 3})
+show("middefault1", "one calls=0", s, err)
+s, err = midDefault(2, []int{2, 3})
+show("middefault2", "count calls=2", s, err)
+s, err = midDefault(7, []int{2, 3})
+show("middefault7", "dflt calls=2", s, err)
+s, err = midFall(1, []int{2, 3})
+show("midfall1", "a calls=0", s, err)
+s, err = midFall(7, []int{2, 3})
+show("midfall7", "dc calls=2", s, err)
+s, err = midFall(2, []int{2, 3})
+show("midfall2", "c calls=2", s, err)
+s, err = fallStops(1, []int{2, 3, 4})
+show("fallstops1", "ab calls=0", s, err)
+s, err = fallStops(2, []int{2, 3, 4})
+show("fallstops2", "b calls=0", s, err)
+s, err = fallStops(3, []int{2, 3, 4})
+show("fallstops3", "c calls=3", s, err)
+s, err = switchBreak(1, true, []int{2, 3})
+show("switchbreak-skip", "z calls=0", s, err)
+s, err = switchBreak(1, false, []int{2, 3})
+show("switchbreak-run", "xz calls=0", s, err)
+s, err = switchBreak(2, false, []int{2, 3})
+show("switchbreak-guard", "yz calls=2", s, err)
+s, err = tagless(nil, []int{2, 3})
+show("tagless-empty", "empty", s, err)
+s, err = tagless([]int{1, 2, 3}, []int{2, 3})
+show("tagless-more", "more calls=2", s, err)
+s, err = tagless([]int{1}, []int{2, 3})
+show("tagless-fewer", "fewer calls=2", s, err)
 }
 
 func runLoops() {
-	var s string
-	var err error
-	s, err = labeledBreak([]int{2, 3})
-	show("labeledbreak", s, err)
-	s, err = condCapture([]int{2, 3, 4})
-	show("condcapture", s, err)
-	s, err = postLabeled([]int{2})
-	show("postlabeled", s, err)
-	s, err = condFail([]int{1})
-	show("condfail", s, err)
-	s, err = condPost([]int{1})
-	show("condpost", s, err)
-	s, err = condRcv([]int{2, 3})
-	show("condrcv", s, err)
+var s string
+var err error
+s, err = labeledBreak([]int{2, 3})
+show("labeledbreak", "0dc calls=4", s, err)
+s, err = condCapture([]int{2, 3, 4})
+show("condcapture", "[0 1 2]", s, err)
+s, err = postLabeled([]int{2})
+show("postlabeled", "<00><02>|<10><20><22>| calls=3", s, err)
+s, err = condFail([]int{1})
+show("condfail", "err: boom", s, err)
+s, err = condPost([]int{1})
+show("condpost", ". calls=3", s, err)
+s, err = condRcv([]int{2, 3})
+show("condrcv", "2 3", s, err)
 }
-
 func runSelects() {
-	var s string
-	var err error
-	s, err = selectOrder(context.Background(), []int{1, 2}, []int{3})
-	show("selectorder", s, err)
-	s, err = selectLhs([]int{2, 3})
-	show("selectlhs", s, err)
-	s, err = selectLhsWins([]int{2, 3})
-	show("selectlhswins", s, err)
-	s, err = oneLine([]int{2})
-	show("oneline", s, err)
-	n, str, err := groupChild3(context.Background(), []int{-1})
-	fmt.Printf("group3 %d %q %v\n", n, str, err)
-	n, str, err = groupChild3(context.Background(), []int{1, 2})
-	fmt.Printf("group3 %d %q %v\n", n, str, err)
+var s string
+var err error
+s, err = selectOrder(context.Background(), []int{1, 2}, []int{3})
+show("selectorder", "recv 5 order=S1S2R3", s, err)
+s, err = selectLhs([]int{2, 3})
+show("selectlhs", "ready 7 calls=0", s, err)
+s, err = selectLhsWins([]int{2, 3})
+show("selectlhswins", "won 7 calls=2", s, err)
+s, err = oneLine([]int{2})
+show("oneline", "4 calls=5", s, err)
+n, str, err := groupChild3(context.Background(), []int{-1})
+got := fmt.Sprintf("%d %q %v", n, str, err)
+check("group3-neg", got == "0 \"\" neg", got, "0 \"\" neg")
+n, str, err = groupChild3(context.Background(), []int{1, 2})
+got = fmt.Sprintf("%d %q %v", n, str, err)
+check("group3-ok", got == "2 \"ok\" <nil>", got, "2 \"ok\" <nil>")
 }
 
 func runShort() {
-	var s string
-	var err error
-	for _, ok := range []bool{false, true} {
-		s, err = shortAnd(ok, []int{2, 3})
-		show(fmt.Sprintf("shortand %v", ok), s, err)
-	}
-	s, err = shortAnd(false, []int{-1})
-	show("shortand skip", s, err)
-	s, err = shortAnd(true, []int{-1})
-	show("shortand fail", s, err)
-	s, err = shortOr(true, []int{-1})
-	show("shortor skip", s, err)
-	s, err = shortOr(false, []int{1, 2, 3})
-	show("shortor run", s, err)
-	s, err = shortOr(false, []int{-1})
-	show("shortor fail", s, err)
-	s, err = shortOrder(false, true, []int{1, 2, 3})
-	show("shortorder no-a", s, err)
-	s, err = shortOrder(true, true, []int{1, 2, 3})
-	show("shortorder b", s, err)
-	s, err = shortOrder(true, false, []int{1, 2, 3})
-	show("shortorder chain", s, err)
-	s, err = shortOrder(true, false, []int{1})
-	show("shortorder short", s, err)
-	s, err = condShort([]int{2, 3})
-	show("condshort", s, err)
-	s, err = postCapture([]int{2, 3})
-	show("postcapture", s, err)
-	s, err = postBoom([]int{1})
-	show("postboom", s, err)
-	fmt.Println("postboom body runs", bodyRuns)
-	s, err = postShort([]int{0, 5})
-	show("postshort stops", s, err)
-	s, err = postShort([]int{2, 3})
-	show("postshort runs", s, err)
+var s string
+var err error
+s, err = shortAnd(false, []int{2, 3})
+show("shortand-false", "false calls=0", s, err)
+s, err = shortAnd(true, []int{2, 3})
+show("shortand-true", "true calls=2", s, err)
+s, err = shortAnd(false, []int{-1})
+show("shortand-skip", "false calls=0", s, err)
+s, err = shortAnd(true, []int{-1})
+show("shortand-fail", "err: neg", s, err)
+s, err = shortOr(true, []int{-1})
+show("shortor-skip", "true calls=0", s, err)
+s, err = shortOr(false, []int{1, 2, 3})
+show("shortor-run", "true calls=2", s, err)
+s, err = shortOr(false, []int{-1})
+show("shortor-fail", "err: neg", s, err)
+s, err = shortOrder(false, true, []int{1, 2, 3})
+show("shortorder-no-a", "false A", s, err)
+s, err = shortOrder(true, true, []int{1, 2, 3})
+show("shortorder-b", "true ABC", s, err)
+s, err = shortOrder(true, false, []int{1, 2, 3})
+show("shortorder-chain", "true ABR1R2R3C", s, err)
+s, err = shortOrder(true, false, []int{1})
+show("shortorder-short", "false ABR1", s, err)
+s, err = condShort([]int{2, 3})
+show("condshort", "[0 1] calls=4", s, err)
+s, err = postCapture([]int{2, 3})
+show("postcapture", "[0 2 4]", s, err)
+s, err = postBoom([]int{1})
+show("postboom", "err: boom", s, err)
+got := fmt.Sprint(bodyRuns)
+check("postboom-runs", got == "2", got, "2")
+s, err = postShort([]int{0, 5})
+show("postshort-stops", "n=4 flag=false calls=1", s, err)
+s, err = postShort([]int{2, 3})
+show("postshort-runs", "n=4 flag=true calls=8", s, err)
 }
 
 func runInit() {
-	var s string
-	var err error
-	s, err = ifInit(0, []int{1, 2})
-	show("ifinit else", s, err)
-	s, err = ifInit(1, []int{1, 2})
-	show("ifinit then", s, err)
-	s, err = ifInit(1, []int{-5})
-	show("ifinit fail", s, err)
-	s, err = elseIfInit(0, []int{1, 2})
-	show("elseif zero", s, err)
-	s, err = elseIfInit(1, []int{1, 2})
-	show("elseif many", s, err)
-	s, err = elseIfInit(1, []int{-1})
-	show("elseif few", s, err)
-	s, err = elseIfInit(1, []int{-9})
-	show("elseif fail", s, err)
-	s, err = guardShort(1, true, []int{2, 3})
-	show("guardshort one", s, err)
-	s, err = guardShort(2, false, []int{2, 3})
-	show("guardshort skip", s, err)
-	s, err = guardShort(2, true, []int{2, 3})
-	show("guardshort run", s, err)
-	s, err = guardShort(2, true, []int{-1})
-	show("guardshort fail", s, err)
-	s, err = tagInit([]int{7}, []int{1, 2})
-	show("taginit two", s, err)
-	s, err = tagInit([]int{7}, []int{1, 2, 3})
-	show("taginit other", s, err)
-	s, err = tagInit([]int{7}, []int{-5})
-	show("taginit fail", s, err)
-	s, err = loopJumps([]int{2})
-	show("loopjumps", s, err)
+var s string
+var err error
+s, err = ifInit(0, []int{1, 2})
+show("ifinit-else", "else calls=0", s, err)
+s, err = ifInit(1, []int{1, 2})
+show("ifinit-then", "then calls=2", s, err)
+s, err = ifInit(1, []int{-5})
+show("ifinit-fail", "err: neg", s, err)
+s, err = elseIfInit(0, []int{1, 2})
+show("elseif-zero", "zero", s, err)
+s, err = elseIfInit(1, []int{1, 2})
+show("elseif-many", "many calls=2", s, err)
+s, err = elseIfInit(1, []int{-1})
+show("elseif-few", "few calls=1", s, err)
+s, err = elseIfInit(1, []int{-9})
+show("elseif-fail", "err: neg", s, err)
+s, err = guardShort(1, true, []int{2, 3})
+show("guardshort-one", "one", s, err)
+s, err = guardShort(2, false, []int{2, 3})
+show("guardshort-skip", "none calls=0", s, err)
+s, err = guardShort(2, true, []int{2, 3})
+show("guardshort-run", "guard calls=2", s, err)
+s, err = guardShort(2, true, []int{-1})
+show("guardshort-fail", "err: neg", s, err)
+s, err = tagInit([]int{7}, []int{1, 2})
+show("taginit-two", "two calls=2", s, err)
+s, err = tagInit([]int{7}, []int{1, 2, 3})
+show("taginit-other", "other calls=3", s, err)
+s, err = tagInit([]int{7}, []int{-5})
+show("taginit-fail", "err: neg", s, err)
+s, err = loopJumps([]int{2})
+show("loopjumps", "12 calls=2", s, err)
 }
