@@ -679,12 +679,16 @@ func main() {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	if !procGroupGone(pid, time.Until(start.Add(6*time.Second))) {
-		t.Fatalf("sleeper process group %d still alive %s after the deadline: child survived the kill", pid, time.Since(start).Round(time.Second))
+	select {
+	case err := <-errCh:
+		if err == nil || !strings.Contains(err.Error(), "goparity run timeout") {
+			t.Fatalf("sleeper run = %v, want the goparity run timeout error", err)
+		}
+	case <-time.After(time.Until(start.Add(6 * time.Second))):
+		t.Fatal("sleeper run did not return within 6s of start: the kill did not beat the 8s sleep")
 	}
-	err := <-errCh
-	if err == nil || !strings.Contains(err.Error(), "goparity run timeout") {
-		t.Fatalf("sleeper run = %v, want the goparity run timeout error", err)
+	if !procGroupGone(pid, 4*time.Second) {
+		t.Fatalf("sleeper process group %d still alive after the run returned: child survived the kill", pid)
 	}
 }
 
@@ -810,12 +814,16 @@ func main() {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	if !procGroupGone(pgid, time.Until(start.Add(7*time.Second))) {
-		t.Fatalf("generator process group %d still alive %s after the deadline: child survived the kill", pgid, time.Since(start).Round(time.Second))
+	select {
+	case res := <-ch:
+		if res.err == nil || !strings.Contains(res.err.Error(), "timed out") {
+			t.Fatalf("sleeping generator = %v, want a timeout error", res.err)
+		}
+	case <-time.After(time.Until(start.Add(7 * time.Second))):
+		t.Fatal("sleeping generator did not return within 7s of start: the kill did not beat the 10s sleep")
 	}
-	res := <-ch
-	if res.err == nil || !strings.Contains(res.err.Error(), "timed out") {
-		t.Fatalf("sleeping generator = %v, want a timeout error", res.err)
+	if !procGroupGone(pgid, 4*time.Second) {
+		t.Fatalf("generator process group %d still alive after the generator returned: child survived the kill", pgid)
 	}
 }
 
