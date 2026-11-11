@@ -3,7 +3,7 @@
 package main
 
 
-const ( rows = []map[string]int{{"a": 1}} ); var first = rows[0]["a"] ?? -1
+const ( rows = map[string]int{"a": 1} ); var first = rows["a"] ?? -1
 
 func main() {
 	println(first, len(rows))
