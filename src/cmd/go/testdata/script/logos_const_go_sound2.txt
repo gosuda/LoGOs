@@ -10,6 +10,9 @@ stderr 'parameter c'
 ! logos build -o $WORK/bin/fc$GOEXE ./fncall
 stderr 'const_view_mutation'
 stderr 'parameter h'
+! logos build -o $WORK/bin/calll$GOEXE ./calllocal
+stderr 'const_view_mutation'
+stderr 'parameter h'
 ! logos build -o $WORK/bin/lenw$GOEXE ./lenwrap
 stderr 'const_view_mutation'
 stderr 'parameter b'
@@ -106,6 +109,10 @@ var slot *Box2
 func NewBox2(b []byte) *Box2 { return &Box2{Data: b} }
 func ArmFn(h *Box2)          { h.Fn = func() { h.Data[0] = 95 }; slot = h }
 func CallFn(h *Box2)         { h.Fn() }
+func CallLocal(h *Box2) {
+	g := h.Fn
+	g()
+}
 
 func Inside(b []byte) []byte { b[0] = 93; return []byte{1, 2, 3} }
 func LenWrap(b []byte) int   { return len(Inside(b)) }
@@ -287,6 +294,20 @@ func main() {
 	buf := []byte{1}
 	var view const []byte = buf
 	println(g2d.LenWrap(view))
+	println(buf[0])
+}
+
+-- imp/calllocal/main.lgo --
+package main
+
+import "example.com/g2dep/g2d"
+
+func main() {
+	buf := []byte{1}
+	bx := g2d.NewBox2(buf)
+	g2d.ArmFn(bx)
+	var cv const *g2d.Box2 = bx
+	g2d.CallLocal(cv)
 	println(buf[0])
 }
 

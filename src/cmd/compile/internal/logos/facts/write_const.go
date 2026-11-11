@@ -1119,8 +1119,13 @@ func (s *constBodyScan) markMethodValue(sel *syntax.SelectorExpr) bool {
 		return false
 	}
 	choice, ok := s.info.Selections[sel]
-	if !ok || choice == nil || choice.Kind() != types2.MethodVal {
+	if !ok || choice == nil {
 		return false
+	}
+	if choice.Kind() != types2.MethodVal {
+		if _, ok := choice.Obj().Type().(*types2.Signature); !ok {
+			return false
+		}
 	}
 	s.markMentionWrite(sel.X)
 	return true
