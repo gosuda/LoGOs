@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"sync"
 	"unicode"
 	"unicode/utf8"
 	"unsafe"
@@ -465,4 +466,87 @@ func (s *Scanner) End() error {
 		return s.err
 	}
 	return s.saved
+}
+
+const (
+	UnionTrialMiss = iota
+	UnionTrialSingle
+	UnionTrialAmbiguous
+	UnionTrialNoMatch
+)
+
+type UnionTrialOutcome struct {
+	Kind    int
+	Winner  int
+	Matched int
+}
+
+type unionTrialOutcome struct {
+	kind    int
+	winner  int
+	matched int
+}
+
+var unionTrialMemo struct {
+	mu    sync.Mutex
+	m     map[string]unionTrialOutcome
+	bytes int
+	depth int
+}
+
+func unionTrialMemoKey(typeID string, raw []byte) string {
+	key := make([]byte, 0, len(typeID)+1+len(raw))
+	key = append(key, typeID...)
+	key = append(key, 0)
+	key = append(key, raw...)
+	return string(key)
+}
+
+func EnterUnionTrial() {
+	unionTrialMemo.mu.Lock()
+	defer unionTrialMemo.mu.Unlock()
+	if unionTrialMemo.m == nil {
+		unionTrialMemo.m = make(map[string]unionTrialOutcome)
+	}
+	unionTrialMemo.depth++
+}
+
+func ExitUnionTrial() {
+	unionTrialMemo.mu.Lock()
+	defer unionTrialMemo.mu.Unlock()
+	if unionTrialMemo.depth > 0 {
+		unionTrialMemo.depth--
+	}
+	if unionTrialMemo.depth == 0 {
+		unionTrialMemo.m = make(map[string]unionTrialOutcome)
+		unionTrialMemo.bytes = 0
+	}
+}
+
+func LookupUnionTrial(typeID string, raw []byte) (bool, UnionTrialOutcome) {
+	key := unionTrialMemoKey(typeID, raw)
+	unionTrialMemo.mu.Lock()
+	defer unionTrialMemo.mu.Unlock()
+	out, ok := unionTrialMemo.m[key]
+	if !ok {
+		return false, UnionTrialOutcome{Kind: UnionTrialMiss, Winner: -1}
+	}
+	return true, UnionTrialOutcome{Kind: out.kind, Winner: out.winner, Matched: out.matched}
+}
+
+func StoreUnionTrial(typeID string, raw []byte, out UnionTrialOutcome) {
+	key := unionTrialMemoKey(typeID, raw)
+	unionTrialMemo.mu.Lock()
+	defer unionTrialMemo.mu.Unlock()
+	if unionTrialMemo.m == nil {
+		unionTrialMemo.m = make(map[string]unionTrialOutcome)
+	}
+	if len(unionTrialMemo.m) > 1024 || unionTrialMemo.bytes > 1<<20 {
+		unionTrialMemo.m = make(map[string]unionTrialOutcome)
+		unionTrialMemo.bytes = 0
+	}
+	if _, dup := unionTrialMemo.m[key]; !dup {
+		unionTrialMemo.bytes += len(key)
+	}
+	unionTrialMemo.m[key] = unionTrialOutcome{kind: out.Kind, winner: out.Winner, matched: out.Matched}
 }

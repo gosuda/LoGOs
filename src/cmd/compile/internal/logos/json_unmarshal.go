@@ -172,6 +172,7 @@ type jsonUnionClass struct {
 	members []trialMember
 	name    string
 	list    string
+	id      string
 }
 
 func (js *jsonStruct) unionMembersOf(utyp types2.Type) (jsonUnionClass, bool) {
@@ -183,7 +184,11 @@ func (js *jsonStruct) unionMembersOf(utyp types2.Type) (jsonUnionClass, bool) {
 	for i, c := range members {
 		memberQuotes[i] = strconv.Quote(c.spell)
 	}
-	uc := jsonUnionClass{name: unionName, list: strings.Join(memberQuotes, ", ")}
+	tid := unionName
+	if js.holderPkg != nil {
+		tid = js.holderPkg.Path() + "\x00" + unionName
+	}
+	uc := jsonUnionClass{name: unionName, list: strings.Join(memberQuotes, ", "), id: tid}
 	uc.members = make([]trialMember, len(members))
 	for i, c := range members {
 		sample, isPtr := strings.CutPrefix(c.spell, "*")
@@ -223,12 +228,19 @@ func (js *jsonStruct) unionTrial(uc jsonUnionClass, target, scanner, errVar stri
 		}
 		return []string{errVar + " = " + e, "return"}
 	}
+	store := func(kind, winner, matched string) string {
+		return fmt.Sprintf("%s.StoreUnionTrial(%s, _logos_raw, %s.UnionTrialOutcome{Kind: %s, Winner: %s, Matched: %s})", jsonAlias, strconv.Quote(uc.id), jsonAlias, kind, winner, matched)
+	}
 	var trials []string
 	trials = append(trials, "_logos_raw := "+scanner+".Value()")
 	trials = append(trials, "if _logos_value_err := "+scanner+".Err(); _logos_value_err != nil {")
 	trials = append(trials, errRet("\t_logos_value_err")...)
 	trials = append(trials, "}")
+	trials = append(trials, jsonAlias+".EnterUnionTrial()")
+	trials = append(trials, "defer "+jsonAlias+".ExitUnionTrial()")
+	trials = append(trials, fmt.Sprintf("_logos_hit, _logos_out := %s.LookupUnionTrial(%s, _logos_raw)", jsonAlias, strconv.Quote(uc.id)))
 	trials = append(trials, "var _logos_match int")
+	trials = append(trials, "var _logos_winidx int")
 	trials = append(trials, fmt.Sprintf("var _logos_target %s", uc.name))
 	hasCustom := false
 	for _, s := range uc.members {
@@ -316,59 +328,74 @@ func (js *jsonStruct) unionTrial(uc jsonUnionClass, target, scanner, errVar stri
 		hasKeyHelper := s.keyed
 
 		trials = append(trials, "{")
+		trials = append(trials, fmt.Sprintf("\tif !_logos_hit || _logos_out.Winner == %d {", i))
 		if s.ptr {
-			trials = append(trials, fmt.Sprintf("\t%s := new(%s)", scratch, s.sample))
+			trials = append(trials, fmt.Sprintf("\t\t%s := new(%s)", scratch, s.sample))
 		} else {
-			trials = append(trials, fmt.Sprintf("\tvar %s %s", scratch, s.spell))
+			trials = append(trials, fmt.Sprintf("\t\tvar %s %s", scratch, s.spell))
 		}
 		if hasKeyHelper {
-			trials = append(trials, fmt.Sprintf("\tif _logos_keys_%d == 0 {", i))
-			trials = append(trials, fmt.Sprintf("\t\t_logos_matched_%d = false", i))
-			trials = append(trials, "\t}")
-			trials = append(trials, fmt.Sprintf("\tif _logos_matched_%d {", i))
-			trials = append(trials, fmt.Sprintf("\t\tif %s.UnmarshalJSON(_logos_raw) == nil {", scratch))
-			trials = append(trials, "\t\t\t_logos_match++")
-			trials = append(trials, fmt.Sprintf("\t\t\t_logos_target = %s", scratch))
+			trials = append(trials, fmt.Sprintf("\t\tif _logos_keys_%d == 0 {", i))
+			trials = append(trials, fmt.Sprintf("\t\t\t_logos_matched_%d = false", i))
 			trials = append(trials, "\t\t}")
-			trials = append(trials, "\t}")
+			trials = append(trials, fmt.Sprintf("\t\tif _logos_matched_%d {", i))
+			trials = append(trials, fmt.Sprintf("\t\t\tif %s.UnmarshalJSON(_logos_raw) == nil {", scratch))
+			trials = append(trials, "\t\t\t\t_logos_match++")
+			trials = append(trials, fmt.Sprintf("\t\t\t\t_logos_target = %s", scratch))
+			trials = append(trials, fmt.Sprintf("\t\t\t\t_logos_winidx = %d", i))
+			trials = append(trials, "\t\t\t}")
+			trials = append(trials, "\t\t}")
 		} else if hasCustom && s.custom {
 			if needsClaim {
-				trials = append(trials, "\tif !_logos_claimed {")
+				trials = append(trials, "\t\tif !_logos_claimed {")
+				trials = append(trials, fmt.Sprintf("\t\t\tif %s.UnmarshalJSON(_logos_raw) == nil {", scratch))
+				trials = append(trials, "\t\t\t\t_logos_custom++")
+				trials = append(trials, fmt.Sprintf("\t\t\t\t_logos_custom_target = %s", scratch))
+				trials = append(trials, fmt.Sprintf("\t\t\t\t_logos_winidx = %d", i))
+				trials = append(trials, "\t\t\t}")
+				trials = append(trials, "\t\t}")
+			} else {
 				trials = append(trials, fmt.Sprintf("\t\tif %s.UnmarshalJSON(_logos_raw) == nil {", scratch))
 				trials = append(trials, "\t\t\t_logos_custom++")
 				trials = append(trials, fmt.Sprintf("\t\t\t_logos_custom_target = %s", scratch))
+				trials = append(trials, fmt.Sprintf("\t\t\t_logos_winidx = %d", i))
 				trials = append(trials, "\t\t}")
-				trials = append(trials, "\t}")
-			} else {
-				trials = append(trials, fmt.Sprintf("\tif %s.UnmarshalJSON(_logos_raw) == nil {", scratch))
-				trials = append(trials, "\t\t_logos_custom++")
-				trials = append(trials, fmt.Sprintf("\t\t_logos_custom_target = %s", scratch))
-				trials = append(trials, "\t}")
 			}
 		}
+		trials = append(trials, "\t}")
 		trials = append(trials, "}")
 	}
-
+	trials = append(trials, fmt.Sprintf("if _logos_hit && _logos_out.Kind == %s.UnionTrialAmbiguous {", jsonAlias))
+	trials = append(trials, errRet(fmt.Sprintf("\t%s.UnionTrialError{Union: %q, Members: []string{%s}, Matched: _logos_out.Matched, Total: %d}", rtAlias, uc.name, uc.list, len(uc.members)))...)
+	trials = append(trials, "}")
 	if hasCustom {
 		trials = append(trials, "switch {")
 		trials = append(trials, "case _logos_match == 1:")
+		trials = append(trials, store(jsonAlias+".UnionTrialSingle", "_logos_winidx", "0"))
 		trials = append(trials, fmt.Sprintf("\t%s = _logos_target", target))
 		trials = append(trials, "case _logos_match == 0 && _logos_custom == 1:")
+		trials = append(trials, store(jsonAlias+".UnionTrialSingle", "_logos_winidx", "0"))
 		trials = append(trials, fmt.Sprintf("\t%s = _logos_custom_target", target))
 		trials = append(trials, "case _logos_match == 0 && _logos_custom == 0:")
+		trials = append(trials, store(jsonAlias+".UnionTrialNoMatch", "-1", "0"))
 		trials = append(trials, errRet(fmt.Sprintf("\t%s.UnionTrialError{Union: %q, Members: []string{%s}, Matched: 0, Total: %d}", rtAlias, uc.name, uc.list, len(uc.members)))...)
 		trials = append(trials, "case _logos_match == 0:")
+		trials = append(trials, store(jsonAlias+".UnionTrialAmbiguous", "-1", "_logos_custom"))
 		trials = append(trials, errRet(fmt.Sprintf("\t%s.UnionTrialError{Union: %q, Members: []string{%s}, Matched: _logos_custom, Total: %d}", rtAlias, uc.name, uc.list, len(uc.members)))...)
 		trials = append(trials, "default:")
+		trials = append(trials, store(jsonAlias+".UnionTrialAmbiguous", "-1", "_logos_match"))
 		trials = append(trials, errRet(fmt.Sprintf("\t%s.UnionTrialError{Union: %q, Members: []string{%s}, Matched: _logos_match, Total: %d}", rtAlias, uc.name, uc.list, len(uc.members)))...)
 		trials = append(trials, "}")
 	} else {
 		trials = append(trials, "switch _logos_match {")
 		trials = append(trials, "case 1:")
+		trials = append(trials, store(jsonAlias+".UnionTrialSingle", "_logos_winidx", "0"))
 		trials = append(trials, fmt.Sprintf("\t%s = _logos_target", target))
 		trials = append(trials, "case 0:")
+		trials = append(trials, store(jsonAlias+".UnionTrialNoMatch", "-1", "0"))
 		trials = append(trials, errRet(fmt.Sprintf("\t%s.UnionTrialError{Union: %q, Members: []string{%s}, Matched: 0, Total: %d}", rtAlias, uc.name, uc.list, len(uc.members)))...)
 		trials = append(trials, "default:")
+		trials = append(trials, store(jsonAlias+".UnionTrialAmbiguous", "-1", "_logos_match"))
 		trials = append(trials, errRet(fmt.Sprintf("\t%s.UnionTrialError{Union: %q, Members: []string{%s}, Matched: _logos_match, Total: %d}", rtAlias, uc.name, uc.list, len(uc.members)))...)
 		trials = append(trials, "}")
 	}
