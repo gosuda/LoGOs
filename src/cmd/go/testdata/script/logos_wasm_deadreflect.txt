@@ -99,9 +99,12 @@ func main() {
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import assert from "node:assert/strict";
 const [wasmPath, loaderPath] = process.argv.slice(2);
 const loader = await import(pathToFileURL(resolve(loaderPath)).href);
-const { exports } = await loader.instantiateLogos(readFileSync(wasmPath), {});
+const { instance, exports } = await loader.instantiateLogos(readFileSync(wasmPath), {});
+assert.equal(instance.exports.checkReflect(), 0);
+assert.equal(instance.exports.checkJson(), 0);
 exports.checkReflect();
 exports.checkJson();
 console.log("reflect-ok");
