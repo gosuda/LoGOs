@@ -1,8 +1,16 @@
 env GOPROXY=off
 env GOTOOLCHAIN=local
 env GOEXPERIMENT=logosarena
-go test -count=1 -run 'TestLogosArenaSetFinalizerPanics$' runtime
-go test -race -count=1 -run 'TestLogosArenaSetFinalizerPanics$' runtime
+go test -v -count=1 -run 'TestLogosArenaSetFinalizerPanics$' runtime
+stdout '--- PASS: TestLogosArenaSetFinalizerPanics'
+stdout '^ok\s+runtime'
+! stderr 'no tests to run'
+! stdout 'no tests to run'
+go test -race -v -count=1 -run 'TestLogosArenaSetFinalizerPanics$' runtime
+stdout '--- PASS: TestLogosArenaSetFinalizerPanics'
+stdout '^ok\s+runtime'
+! stderr 'no tests to run'
+! stdout 'no tests to run'
 
 -- go.mod --
 module example.com/redteam106

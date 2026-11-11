@@ -1,8 +1,24 @@
 env GOPROXY=off
 env GOTOOLCHAIN=local
 env GOEXPERIMENT=logosarena
-go test -count=1 -run 'TestLogosArenaParkReturnsChunk|TestLogosArenaParkKeepsLiveChunk|TestLogosArenaMarkSurvivesPark|TestLogosArenaParkReleasesEmptyHeadOverLiveTail|TestLogosArenaParkReleasesEmptyChunksBehindLiveHead' runtime
-go test -race -count=1 -run 'TestLogosArenaParkReturnsChunk|TestLogosArenaParkKeepsLiveChunk|TestLogosArenaMarkSurvivesPark|TestLogosArenaParkReleasesEmptyHeadOverLiveTail|TestLogosArenaParkReleasesEmptyChunksBehindLiveHead' runtime
+go test -v -count=1 -run 'TestLogosArenaParkReturnsChunk|TestLogosArenaParkKeepsLiveChunk|TestLogosArenaMarkSurvivesPark|TestLogosArenaParkReleasesEmptyHeadOverLiveTail|TestLogosArenaParkReleasesEmptyChunksBehindLiveHead' runtime
+stdout '--- PASS: TestLogosArenaParkReturnsChunk'
+stdout '--- PASS: TestLogosArenaParkKeepsLiveChunk'
+stdout '--- PASS: TestLogosArenaMarkSurvivesPark'
+stdout '--- PASS: TestLogosArenaParkReleasesEmptyHeadOverLiveTail'
+stdout '--- PASS: TestLogosArenaParkReleasesEmptyChunksBehindLiveHead'
+stdout '^ok\s+runtime'
+! stderr 'no tests to run'
+! stdout 'no tests to run'
+go test -race -v -count=1 -run 'TestLogosArenaParkReturnsChunk|TestLogosArenaParkKeepsLiveChunk|TestLogosArenaMarkSurvivesPark|TestLogosArenaParkReleasesEmptyHeadOverLiveTail|TestLogosArenaParkReleasesEmptyChunksBehindLiveHead' runtime
+stdout '--- PASS: TestLogosArenaParkReturnsChunk'
+stdout '--- PASS: TestLogosArenaParkKeepsLiveChunk'
+stdout '--- PASS: TestLogosArenaMarkSurvivesPark'
+stdout '--- PASS: TestLogosArenaParkReleasesEmptyHeadOverLiveTail'
+stdout '--- PASS: TestLogosArenaParkReleasesEmptyChunksBehindLiveHead'
+stdout '^ok\s+runtime'
+! stderr 'no tests to run'
+! stdout 'no tests to run'
 
 -- go.mod --
 module example.com/redteam4
