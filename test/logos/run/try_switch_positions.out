@@ -1,0 +1,8 @@
+ok short-false: true
+ok loop-cond: true
+ok operand-order: true
+ok scope: true
+ok nested: true
+ok closure: true
+ok group: true
+ok if-cond: true
