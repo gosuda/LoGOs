@@ -244,6 +244,25 @@ func mutable(ms []*Monster) []Creature { return ms }
 	if len(errs) != 1 || !strings.Contains(errs[0].Error(), "cannot use ms") {
 		t.Fatalf("plain Go check errors = %v, want only the mutable assignment", errs)
 	}
+	terr, ok := errs[0].(types2.Error)
+	if !ok {
+		t.Fatalf("plain Go error has type %T, want types2.Error", errs[0])
+	}
+	if got := terr.Pos.RelFilename(); got != "plain.go" {
+		t.Errorf("plain Go error file = %q, want plain.go", got)
+	}
+	wantLine := uint(0)
+	for i, line := range strings.Split(src, "\n") {
+		if strings.Contains(line, "return ms") {
+			wantLine = uint(i + 1)
+		}
+	}
+	if terr.Pos.RelLine() != wantLine {
+		t.Errorf("plain Go error line = %d, want %d", terr.Pos.RelLine(), wantLine)
+	}
+	if strings.Contains(errs[0].Error(), "CovSlice") {
+		t.Errorf("plain Go error %q names CovSlice, want the plain assignment", errs[0])
+	}
 	if len(info.LogosConstCov) != 0 {
 		t.Errorf("plain Go recorded %d covariant arguments", len(info.LogosConstCov))
 	}
@@ -291,13 +310,40 @@ func TestCovSliceDirectCall(t *testing.T) {
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, _, _, _, errs := covSliceCheck(t, imp, imports, tc.body)
+			_, _, _, info, errs := covSliceCheck(t, imp, imports, tc.body)
+			prefix := "package covtest\n" + imports + covSliceDecls
+			wantLine := uint(strings.Count(prefix, "\n") + 1)
 			got := errors.Join(errs...)
 			switch {
 			case tc.want == "" && got != nil:
 				t.Fatalf("check rejected the call: %v", got)
 			case tc.want != "" && (got == nil || !strings.Contains(got.Error(), tc.want)):
 				t.Fatalf("errors %v lack %q", got, tc.want)
+			}
+			if tc.want == "" {
+				if len(info.LogosConstCov) != 0 {
+					t.Fatalf("accepted call recorded %d covariant arguments, want none for a direct call", len(info.LogosConstCov))
+				}
+				return
+			}
+			if len(errs) != 1 {
+				t.Fatalf("got %d errors %v, want one naming %q", len(errs), got, tc.want)
+			}
+			terr, ok := errs[0].(types2.Error)
+			if !ok {
+				t.Fatalf("error has type %T, want types2.Error", errs[0])
+			}
+			if got := terr.Pos.RelFilename(); got != "cov.lgo" {
+				t.Errorf("error file = %q, want cov.lgo", got)
+			}
+			if terr.Pos.RelLine() != wantLine {
+				t.Errorf("error line = %d, want %d", terr.Pos.RelLine(), wantLine)
+			}
+			if wantCol := uint(strings.LastIndex(tc.body, "(") + 2); terr.Pos.RelCol() != wantCol {
+				t.Errorf("error column = %d, want %d", terr.Pos.RelCol(), wantCol)
+			}
+			if len(info.LogosConstCov) != 0 {
+				t.Errorf("rejected call recorded %d covariant arguments", len(info.LogosConstCov))
 			}
 		})
 	}
