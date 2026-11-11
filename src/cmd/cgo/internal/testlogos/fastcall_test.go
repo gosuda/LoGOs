@@ -684,6 +684,14 @@ func collectBusyProfile(t *testing.T, prof string, count int, fn func(uint64) ui
 	_ = sink
 }
 
+func profileCanarySamples(t *testing.T) int {
+	t.Helper()
+	prof := filepath.Join(t.TempDir(), "canary.prof")
+	collectBusyProfile(t, prof, 10, callPlainBusy, 100000000)
+	_, total := profileCallerSamples(t, prof, "callPlainBusy")
+	return total
+}
+
 const fastcallProfileFloorSamples = 200
 const fastcallAttributionFloorSamples = 100
 const fastcallProfileCap = 300 * time.Second
@@ -814,6 +822,10 @@ func TestFastcallProfileAttribution(t *testing.T) {
 	}
 	if !met {
 		if fastTotal == 0 && plainTotal == 0 {
+			if profileCanarySamples(t) > 0 {
+				t.Fatalf("profiler works but yielded no fast/plain samples: fast caller %d of %d, plain caller %d of %d (floor %d)",
+					fastN, fastTotal, plainN, plainTotal, fastcallProfileFloorSamples)
+			}
 			t.Skipf("CPU profiler yielded no samples in %v of collection; cannot attribute fast-call frames", fastcallProfileCap)
 		}
 		t.Fatalf("profile floor unmet: fast caller %d of %d samples, plain caller %d of %d samples (floor %d)",
@@ -1212,6 +1224,10 @@ func TestFastcallLogosProfileParity(t *testing.T) {
 	}
 	if !met {
 		if lgoTotal == 0 && plainTotal == 0 {
+			if profileCanarySamples(t) > 0 {
+				t.Fatalf("profiler works but yielded no lgo/plain samples: lgo caller %d of %d, plain caller %d of %d (floor %d)",
+					lgoN, lgoTotal, plainN, plainTotal, fastcallProfileFloorSamples)
+			}
 			t.Skipf("CPU profiler yielded no samples in %v of collection; cannot attribute fast-call frames", fastcallProfileCap)
 		}
 		t.Fatalf("profile floor unmet: lgo caller %d of %d samples, plain caller %d of %d samples (floor %d)",
