@@ -2,7 +2,10 @@
 
 package main
 
-import "fmt"
+import (
+	"fmt"
+	"os"
+)
 
 type Both interface {
 	int | string
@@ -10,8 +13,31 @@ type Both interface {
 
 func first[T Both](s []T) T { return s[0] }
 
+var failed bool
+
+func check(name string, cond bool, got, want string) {
+	if !cond {
+		fmt.Printf("FAIL %s: got %s want %s\n", name, got, want)
+		failed = true
+		return
+	}
+	fmt.Printf("ok %s\n", name)
+}
+
 func main() {
 	var v Both = 42
-	fmt.Println(v)
-	fmt.Println(first([]int{7, 8}))
+	if n, ok := v.(int); ok {
+		check("dual-use-union-value", n == 42, fmt.Sprint(v), "42")
+	} else {
+		check("dual-use-union-value", false, fmt.Sprint(v), "42")
+	}
+	check("dual-use-union-constraint", first([]int{7, 8}) == 7, fmt.Sprint(first([]int{7, 8})), "7")
+	if w, ok := v.(Both); ok {
+		check("dual-use-union-assert-to-union", fmt.Sprint(w) == "42", fmt.Sprint(w), "42")
+	} else {
+		check("dual-use-union-assert-to-union", false, "not-member", "42")
+	}
+	if failed {
+		os.Exit(1)
+	}
 }

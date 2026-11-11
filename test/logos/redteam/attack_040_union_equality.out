@@ -1,1 +1,3 @@
-true false
+ok union-equality-equal-true
+ok union-equality-mismatch-false
+ok union-equality-assert-to-union

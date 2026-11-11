@@ -2,7 +2,10 @@
 
 package main
 
-import "fmt"
+import (
+	"fmt"
+	"os"
+)
 
 type S interface {
 	int | string | bool
@@ -23,11 +26,42 @@ func show(s S) string {
 	}
 }
 
+var failed bool
+
+func check(name string, cond bool, got, want string) {
+	if !cond {
+		fmt.Printf("FAIL %s: got %s want %s\n", name, got, want)
+		failed = true
+		return
+	}
+	fmt.Printf("ok %s\n", name)
+}
+
 func main() {
 	var s S = 42
-	fmt.Println(show(s))
+	if n, ok := s.(int); ok {
+		check("scalar-union-int-roundtrip", n == 42 && show(s) == "int 42", show(s), "int 42")
+	} else {
+		check("scalar-union-int-roundtrip", false, show(s), "int 42")
+	}
 	s = "hi"
-	fmt.Println(show(s))
+	if str, ok := s.(string); ok {
+		check("scalar-union-string-roundtrip", str == "hi" && show(s) == "str hi", show(s), "str hi")
+	} else {
+		check("scalar-union-string-roundtrip", false, show(s), "str hi")
+	}
 	s = true
-	fmt.Println(show(s))
+	if b, ok := s.(bool); ok {
+		check("scalar-union-bool-roundtrip", b && show(s) == "bool true", show(s), "bool true")
+	} else {
+		check("scalar-union-bool-roundtrip", false, show(s), "bool true")
+	}
+	if w, ok := s.(S); ok {
+		check("scalar-union-assert-to-union", show(w) == "bool true", show(w), "bool true")
+	} else {
+		check("scalar-union-assert-to-union", false, "not-member", "bool true")
+	}
+	if failed {
+		os.Exit(1)
+	}
 }
