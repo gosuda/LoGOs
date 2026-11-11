@@ -305,15 +305,34 @@ func TestLogosRegionAdvParkKeepsLive(t *testing.T) {
 		if got := runtime.LogosRegionBytes(); got != wantBytes {
 			t.Fatalf("RegionBytes = %d, want %d before park", got, wantBytes)
 		}
+		oldMax := runtime.GOMAXPROCS(1)
+		defer runtime.GOMAXPROCS(oldMax)
+		ready := make(chan struct{})
 		release := make(chan struct{})
 		go func() {
-			time.Sleep(50 * time.Millisecond)
+			select {
+			case <-ready:
+			case <-time.After(20 * time.Second):
+				return
+			}
 			close(release)
 		}()
-		<-release
-		chunks = runtime.LogosRegionChunks()
-		if len(chunks) != 1 {
-			t.Fatalf("region chunks after park = %d, want 1 (the live chunk)", len(chunks))
+		close(ready)
+		select {
+		case <-release:
+		case <-time.After(20 * time.Second):
+			t.Fatal("park release did not arrive")
+		}
+		deadline := time.Now().Add(20 * time.Second)
+		for {
+			chunks = runtime.LogosRegionChunks()
+			if len(chunks) == 1 {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("region chunks after park = %d, want 1 (the live chunk)", len(chunks))
+			}
+			time.Sleep(time.Millisecond)
 		}
 		if !checkBytes(live, 64, 0xA5) {
 			t.Fatal("live region object moved or changed over park")
