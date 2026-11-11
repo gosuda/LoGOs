@@ -166,6 +166,12 @@ func (u *chanUnit) bounded(ch *types2.Var) bool {
 // receive or a range; every other mention, including a read or assignment
 // of t.C, taints.
 func (u *chanUnit) taintAll(n syntax.Node) bool {
+	if body, ok := funcBody(n); ok {
+		u.depth++
+		syntax.Inspect(body, u.taintAll)
+		u.depth--
+		return false
+	}
 	switch n := n.(type) {
 	case *syntax.Name:
 		u.timerUse(n)
@@ -192,18 +198,20 @@ func (u *chanUnit) taintAll(n syntax.Node) bool {
 	case *syntax.ForStmt:
 		u.forBody(n)
 		return false
-	case *syntax.FuncLit:
-		u.depth++
-		syntax.Inspect(n.Body, u.taintAll)
-		u.depth--
-		return false
-	case *syntax.LambdaExpr:
-		u.depth++
-		syntax.Inspect(n.Body, u.taintAll)
-		u.depth--
-		return false
 	}
 	return true
+}
+
+func funcBody(n syntax.Node) (syntax.Node, bool) {
+	switch n := n.(type) {
+	case *syntax.FuncLit:
+		return n.Body, true
+	case *syntax.LambdaExpr:
+		return n.Body, true
+	case *syntax.GroupChild:
+		return n.Body, true
+	}
+	return nil, false
 }
 
 // allowRecvOperand spares the C field of a tracked timer when x is the
@@ -438,7 +446,9 @@ func (u *chanUnit) nested(body syntax.Node) {
 func (u *chanUnit) child(g *syntax.GroupChild) {
 	outer := u.free
 	u.free = true
+	u.depth++
 	u.walk(g.Body)
+	u.depth--
 	u.free = outer
 }
 

@@ -577,3 +577,32 @@ func lambdaRecv(in chan int) {
 	var f func() int = () => <-in // ERROR "unbounded_channel_op"
 	_ = f
 }
+
+func groupChildStop(ctx context.Context, in chan int, d time.Duration) error {
+	t := time.NewTimer(d)
+	go group (ctx) {
+		go {
+			defer t.Stop()
+		}
+	}
+	select {
+	case <-in: // ERROR "unbounded_channel_op"
+	case <-t.C: // ERROR "unbounded_channel_op"
+	}
+	return nil
+}
+
+func groupChildNoStop(ctx context.Context, in chan int, d time.Duration) error {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	go group (ctx) {
+		go {
+			<-in
+		}
+	}
+	select {
+	case <-in:
+	case <-t.C:
+	}
+	return nil
+}
