@@ -4,8 +4,20 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"strings"
 )
+
+var failed bool
+
+func check(name string, cond bool, got, want any) {
+	if !cond {
+		failed = true
+		fmt.Println("FAIL", name+":", "got", got, "want", want)
+		return
+	}
+	fmt.Println("ok", name)
+}
 
 func bound(xs const []int, n int) int {
 	return len(xs[:n])
@@ -13,13 +25,19 @@ func bound(xs const []int, n int) int {
 
 func main() {
 	xs := make([]int, 3, 5)
-	defer func() {
-		got := fmt.Sprint(recover())
-		if !strings.Contains(got, "slice bounds") {
-			panic("missing const-view bounds trap: " + got)
-		}
-		fmt.Println("const-view-bound-trap")
+	trapped := false
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				trapped = true
+				got := fmt.Sprint(r)
+				check("bound-trap", strings.Contains(got, "slice bounds"), got, "slice bounds")
+			}
+		}()
+		_ = bound(xs, 5)
 	}()
-	_ = bound(xs, 5)
-	panic("const-view bound did not trap")
+	check("bound-trapped", trapped, trapped, true)
+	if failed {
+		os.Exit(1)
+	}
 }
