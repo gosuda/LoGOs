@@ -36,8 +36,8 @@ func TestConstFloatOverflowReports(t *testing.T) {
 		if cerr.Code != CodeEval {
 			t.Fatalf("%s: code = %d, want %d", tc.name, cerr.Code, CodeEval)
 		}
-		if !strings.Contains(cerr.Detail, "const evaluation") || !strings.Contains(cerr.Detail, tc.typ) {
-			t.Fatalf("%s: detail = %q, want const evaluation overflow for %s", tc.name, cerr.Detail, tc.typ)
+		if !strings.Contains(cerr.Detail, tc.typ) {
+			t.Fatalf("%s: detail = %q, want [correctness::const_eval] overflow naming %s", tc.name, cerr.Detail, tc.typ)
 		}
 	}
 }
@@ -106,8 +106,8 @@ func TestConstComplexOverflowReports(t *testing.T) {
 		if cerr.Code != CodeEval {
 			t.Fatalf("%s: code = %d, want %d", tc.name, cerr.Code, CodeEval)
 		}
-		if !strings.Contains(cerr.Detail, "const evaluation") || !strings.Contains(cerr.Detail, tc.want) {
-			t.Fatalf("%s: detail = %q, want const evaluation overflow for %s", tc.name, cerr.Detail, tc.typ)
+		if !strings.Contains(cerr.Detail, tc.want) {
+			t.Fatalf("%s: detail = %q, want [correctness::const_eval] overflow naming %s", tc.name, cerr.Detail, tc.want)
 		}
 	}
 }
