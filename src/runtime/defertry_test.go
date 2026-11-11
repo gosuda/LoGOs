@@ -158,7 +158,22 @@ func TestDeferTryGC(t *testing.T) {
 	v = nil
 	runtime.GC()
 	runtime.GC()
-	time.Sleep(100 * time.Millisecond)
+	sacc := make(chan int, 1)
+	runtime.AddCleanup(new(int), func(v int) { sacc <- v }, 3)
+	deadline := time.Now().Add(30 * time.Second)
+	cycled := false
+	for !cycled {
+		runtime.GC()
+		select {
+		case <-sacc:
+			cycled = true
+		default:
+			runtime.Gosched()
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("cleanup worker did not cycle")
+		}
+	}
 	select {
 	case got := <-fin:
 		t.Fatalf("cleanup ran while record live: %d", got)
@@ -173,7 +188,7 @@ func TestDeferTryGC(t *testing.T) {
 	got.P, got.Q = nil, nil
 	dst = reflect.Value{}
 	runtime.GC()
-	deadline := time.Now().Add(30 * time.Second)
+	deadline = time.Now().Add(30 * time.Second)
 	for len(fin) != 2 {
 		if time.Now().After(deadline) {
 			t.Fatalf("want 2 cleanups after free, got %d", len(fin))
