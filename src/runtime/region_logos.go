@@ -352,6 +352,7 @@ func logosRegionPark(gp *g) {
 }
 
 func logosRegionExit(gp *g) {
+	var list *logosRegion
 	rec := gp.logosRegions
 	for rec != nil {
 		next := rec.prev
@@ -359,18 +360,20 @@ func logosRegionExit(gp *g) {
 		rec.gen++
 		rec.owner = nil
 		rec.prev = nil
+		rec.next = list
+		list = rec
 		rec = next
 	}
-	var list *logosRegion
-	if gp.logosRegions != nil {
-		list = gp.logosRegions
+	if gp.logosRegionFree != nil {
 		tail := list
-		for tail.next != nil {
-			tail = tail.next
+		if tail == nil {
+			list = gp.logosRegionFree
+		} else {
+			for tail.next != nil {
+				tail = tail.next
+			}
+			tail.next = gp.logosRegionFree
 		}
-		tail.next = gp.logosRegionFree
-	} else {
-		list = gp.logosRegionFree
 	}
 	gp.logosRegions = nil
 	gp.logosRegionFree = nil
