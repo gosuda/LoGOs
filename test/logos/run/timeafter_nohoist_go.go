@@ -4,6 +4,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"time"
 )
 
@@ -13,8 +14,8 @@ func main() {
 		chs = append(chs, time.After(time.Hour))
 	}
 	if chs[0] == chs[1] || chs[1] == chs[2] {
-		fmt.Println("shared")
-		return
+		fmt.Println("FAIL distinct")
+		os.Exit(1)
 	}
-	fmt.Println("distinct")
+	fmt.Println("ok distinct")
 }
