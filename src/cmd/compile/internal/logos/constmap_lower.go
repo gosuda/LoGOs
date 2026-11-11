@@ -900,7 +900,11 @@ func (fl *fileLower) lowerConstMapLen(e *syntax.CallExpr) (syntax.Expr, bool) {
 		return nil, false
 	}
 	n := strconv.Itoa(g.nkeys)
-	fl.add(fl.off(syntax.StartPos(e)), fl.endOff(e), n)
+	end, ok := lenCallEnd(fl.src, fl.off(syntax.StartPos(e)))
+	if !ok {
+		end = fl.endOff(e)
+	}
+	fl.add(fl.off(syntax.StartPos(e)), end, n)
 	return at(&syntax.BasicLit{Value: n, Kind: syntax.IntLit}, e.Pos()), true
 }
 

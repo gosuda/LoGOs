@@ -313,6 +313,26 @@ func (fl *fileLower) endOff(e syntax.Expr) int {
 	return end
 }
 
+func lenCallEnd(src []byte, start int) (int, bool) {
+	off := start
+	depth := 0
+	opened := false
+	for off < len(src) {
+		switch src[off] {
+		case '(':
+			depth++
+			opened = true
+		case ')':
+			depth--
+			if opened && depth == 0 {
+				return off + 1, true
+			}
+		}
+		off++
+	}
+	return 0, false
+}
+
 func nullaryCallEnd(src []byte, end int) (int, bool) {
 	off := end
 	for off < len(src) && (src[off] == ' ' || src[off] == '\t' || src[off] == '\n') {
