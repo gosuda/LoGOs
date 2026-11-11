@@ -7,6 +7,7 @@ package json
 import (
 	stdjson "encoding/json"
 	"runtime"
+	"runtime/debug"
 	"strings"
 	"testing"
 	"unsafe"
@@ -168,8 +169,10 @@ func TestSliceNoPerElementAllocation(t *testing.T) {
 }
 
 func allocatedBytes(f func()) uint64 {
-	var before, after runtime.MemStats
+	defer debug.SetGCPercent(debug.SetGCPercent(-1))
 	runtime.GC()
+	runtime.GC()
+	var before, after runtime.MemStats
 	runtime.ReadMemStats(&before)
 	f()
 	runtime.ReadMemStats(&after)
