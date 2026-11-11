@@ -24,7 +24,7 @@ var (
 //logos:zeroalloc
 //go:noinline
 func constBox() any {
-	return 42
+	return 1000
 }
 
 //logos:zeroalloc
@@ -89,11 +89,12 @@ func main() {
 	failed := false
 	for _, c := range cases {
 		n := testing.AllocsPerRun(100, c.run)
-		fmt.Printf("%s allocs=%v\n", c.name, n)
 		if n != 0 {
-			fmt.Printf("FAIL %s allocates %v times per call\n", c.name, n)
+			fmt.Printf("FAIL zeroalloc-%s: allocates %v times per call\n", c.name, n)
 			failed = true
+			continue
 		}
+		fmt.Printf("ok zeroalloc-%s\n", c.name)
 	}
 	if failed {
 		os.Exit(1)
