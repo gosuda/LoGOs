@@ -1,17 +1,23 @@
-256
--4
-1
-1101
-false
-true
-11
-1111
-11113
-120
-1111
-true
-2
-11
-110
-111
-256
+ok shift-matches-runtime
+ok shift-is-256
+ok neg-shift-matches-runtime
+ok wrapped-shift-matches-runtime
+ok float-eq-matches-runtime
+ok float-eq-excludes-int-division
+ok almost-one-eq-matches-runtime
+ok almost-one-above-matches-runtime
+ok copy-vs-alias-matches-runtime
+ok cap-overlap-matches-runtime
+ok utf8-offsets-match-runtime
+ok assign-order-matches-runtime
+ok assign-order-evaluates-left-first
+ok variadic-matches-runtime
+ok half-float-truncates-division
+ok trunc-conv-matches-runtime
+ok label-flow-matches-runtime
+ok labeled-continue-counts-3
+ok labeled-break-counts-5
+ok fallthrough-matches-runtime
+ok fallthrough-accumulates
+ok range-ints-matches-runtime
+ok probe-array-sized-by-const

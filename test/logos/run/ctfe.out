@@ -1,7 +1,9 @@
-6765
-2 3 5 3
-10
-25
-1
-x y
-9 2 2
+ok fib20-matches-runtime
+ok fib20-is-6765
+ok primes-match-hand
+ok sum-matches-runtime
+ok norm-matches-runtime
+ok const-coalesce-present
+ok const-coalesce-missing
+ok const-array-index
+ok grouped-const-block

@@ -1,7 +1,10 @@
 // run
-
 package main
 
+import (
+	"fmt"
+	"os"
+)
 
 const (
 	rows = map[string]int{"a": 1}
@@ -14,6 +17,24 @@ type (
 
 var tag Label = "rows"
 
+const rowA = rows["a"] ?? -1
+
+var failed bool
+
+func check(name, got, want string) {
+	if got != want {
+		fmt.Println("FAIL", name, "got", got, "want", want)
+		failed = true
+		return
+	}
+	fmt.Println("ok", name)
+}
+
 func main() {
-	println(tag, rows["a"] ?? -1, more["b"] ?? -1)
+	check("grouped-const-coalesce", fmt.Sprint(rowA), "1")
+	check("grouped-const-map-index", fmt.Sprint(rows["a"] ?? -1, more["b"] ?? -1), "1 2")
+	check("const-type-block-keeps-label", fmt.Sprint(tag), "rows")
+	if failed {
+		os.Exit(1)
+	}
 }

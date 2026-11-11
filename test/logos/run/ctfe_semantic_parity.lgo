@@ -1,8 +1,10 @@
 // run
-
 package main
 
-// compile time by the const evaluator with Go semantics. The constants
+import (
+	"fmt"
+	"os"
+)
 
 const func DblShift() int {
 	return 1 << uint8(8)
@@ -260,26 +262,42 @@ const rangeInts = RangeInts()
 
 var probe [shift256]byte
 
-func main() {
-	if shift256 != 256 || labelFlow != 11 || rangeInts != 111 {
-		println("ctfe-semantic-parity-broken")
+var failed bool
+
+func check(name, got, want string) {
+	if got != want {
+		fmt.Println("FAIL", name, "got", got, "want", want)
+		failed = true
 		return
 	}
-	println(shift256)
-	println(negShift)
-	println(wrappedShift)
-	println(floatEq)
-	println(almostOneIsOne)
-	println(almostOneAbove)
-	println(copyVsAlias)
-	println(capAndOverlap)
-	println(utf8Offsets)
-	println(assignOrder)
-	println(variadicChecks)
-	println(halfFloatOk)
-	println(truncConv)
-	println(labelFlow)
-	println(fallThrough)
-	println(rangeInts)
-	println(len(probe))
+	fmt.Println("ok", name)
+}
+
+func main() {
+	check("shift-matches-runtime", fmt.Sprint(DblShift()), fmt.Sprint(shift256))
+	check("shift-is-256", fmt.Sprint(shift256), "256")
+	check("neg-shift-matches-runtime", fmt.Sprint(NegShift()), fmt.Sprint(negShift))
+	check("wrapped-shift-matches-runtime", fmt.Sprint(WrappedShift()), fmt.Sprint(wrappedShift))
+	check("float-eq-matches-runtime", fmt.Sprint(FloatEq()), fmt.Sprint(floatEq))
+	check("float-eq-excludes-int-division", fmt.Sprint(floatEq), "1101")
+	check("almost-one-eq-matches-runtime", fmt.Sprint(AlmostOneEq()), fmt.Sprint(almostOneIsOne))
+	check("almost-one-above-matches-runtime", fmt.Sprint(AlmostOneAbove()), fmt.Sprint(almostOneAbove))
+	check("copy-vs-alias-matches-runtime", fmt.Sprint(CopyVsAlias()), fmt.Sprint(copyVsAlias))
+	check("cap-overlap-matches-runtime", fmt.Sprint(CapAndOverlap()), fmt.Sprint(capAndOverlap))
+	check("utf8-offsets-match-runtime", fmt.Sprint(Utf8Offsets()), fmt.Sprint(utf8Offsets))
+	check("assign-order-matches-runtime", fmt.Sprint(AssignOrder()), fmt.Sprint(assignOrder))
+	check("assign-order-evaluates-left-first", fmt.Sprint(assignOrder), "120")
+	check("variadic-matches-runtime", fmt.Sprint(VariadicChecks()), fmt.Sprint(variadicChecks))
+	check("half-float-truncates-division", fmt.Sprint(halfFloatOk), "true")
+	check("trunc-conv-matches-runtime", fmt.Sprint(TruncConv()), fmt.Sprint(truncConv))
+	check("label-flow-matches-runtime", fmt.Sprint(LabelFlow()), fmt.Sprint(labelFlow))
+	check("labeled-continue-counts-3", fmt.Sprint(LabeledContinueCount()), "3")
+	check("labeled-break-counts-5", fmt.Sprint(LabeledBreakCount()), "5")
+	check("fallthrough-matches-runtime", fmt.Sprint(FallThrough()), fmt.Sprint(fallThrough))
+	check("fallthrough-accumulates", fmt.Sprint(fallThrough), "110")
+	check("range-ints-matches-runtime", fmt.Sprint(RangeInts()), fmt.Sprint(rangeInts))
+	check("probe-array-sized-by-const", fmt.Sprint(len(probe)), "256")
+	if failed {
+		os.Exit(1)
+	}
 }
