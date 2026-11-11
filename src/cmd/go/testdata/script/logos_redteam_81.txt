@@ -2,10 +2,10 @@ env GOPROXY=off
 env GOTOOLCHAIN=local
 env GOEXPERIMENT=logosarena
 env CGO_ENABLED=1
-go test -race -v -count=1 -run 'TestLogosArenaScanLayoutAndZeroing|TestLogosArenaRestorePopsLinkedChunks|TestLogosArenaGCScansScanRegion' runtime
+go test -race -v -count=1 -run 'TestLogosArenaScanLayoutAndZeroing|TestLogosArenaRestorePopsLinkedChunks|TestLogosArenaScanRootsKeepReferentAlive' runtime
 stdout '--- PASS: TestLogosArenaScanLayoutAndZeroing'
 stdout '--- PASS: TestLogosArenaRestorePopsLinkedChunks'
-stdout '--- PASS: TestLogosArenaGCScansScanRegion'
+stdout '--- PASS: TestLogosArenaScanRootsKeepReferentAlive'
 stdout '^ok\s+runtime'
 ! stderr 'no tests to run'
 ! stdout 'no tests to run'
