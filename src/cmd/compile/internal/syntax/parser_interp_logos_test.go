@@ -5,6 +5,7 @@
 package syntax
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -106,5 +107,41 @@ func TestLogosInterpRoundTrip(t *testing.T) {
 	got := printFull(t, f)
 	if !strings.Contains(got, `$"User {name} has {{2}} items"`) {
 		t.Fatalf("round trip lost the literal:\n%s", got)
+	}
+}
+
+func TestLogosInterpManyFragPositions(t *testing.T) {
+	const n = 300
+	params := make([]string, n)
+	frags := make([]string, n)
+	wantCols := make([]int, n)
+	col := 10
+	for i := range n {
+		params[i] = "x" + strconv.Itoa(i) + " int"
+		frags[i] = "{x" + strconv.Itoa(i) + "}"
+		wantCols[i] = col + 1
+		col += len(strconv.Itoa(i)) + 4
+	}
+	body := "s := $\"v" + strings.Join(frags, "+") + "\""
+	src := "package p\nfunc f(" + strings.Join(params, ", ") + ") int {\n\t" + body + "\n\t_ = s\n\treturn 0\n}\n"
+	f, msgs := parseInterpLogos(t, src)
+	if len(msgs) != 0 {
+		t.Fatalf("unexpected errors: %q", msgs)
+	}
+	e := interpOf(t, f)
+	if len(e.Exprs) != n {
+		t.Fatalf("got %d exprs; want %d", len(e.Exprs), n)
+	}
+	for i := range n {
+		p := StartPos(e.Exprs[i])
+		if p.Line() != 3 || int(p.Col()) != wantCols[i] {
+			t.Fatalf("expr %d at %d:%d; want 3:%d", i, p.Line(), p.Col(), wantCols[i])
+		}
+		if int(e.Opens[i].Col()) != wantCols[i]-1 {
+			t.Fatalf("open %d at col %d; want %d", i, e.Opens[i].Col(), wantCols[i]-1)
+		}
+		if e.Opens[i].Line() != 3 {
+			t.Fatalf("open %d at line %d; want 3", i, e.Opens[i].Line())
+		}
 	}
 }

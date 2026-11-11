@@ -169,9 +169,8 @@ func (p *parser) scanInterpFrag(inner string, open int, line, col uint) (interpF
 }
 
 func (p *parser) parseInterpFrag(frag interpFrag) Expr {
-	pad := strings.Repeat("\n", int(frag.line)-1) + strings.Repeat(" ", int(frag.col)-1)
 	var sub parser
-	sub.init(p.file, bytes.NewBufferString(pad+frag.text), func(err error) {
+	sub.init(p.file, bytes.NewBufferString(frag.text), func(err error) {
 		if e, ok := err.(Error); ok {
 			if p.first == nil {
 				p.first = e
@@ -182,6 +181,7 @@ func (p *parser) parseInterpFrag(frag interpFrag) Expr {
 			p.errh(err)
 		}
 	}, p.pragh, p.mode)
+	sub.source.setStart(frag.line, frag.col)
 	sub.fnest = p.fnest
 	sub.next()
 	x := sub.expr()
