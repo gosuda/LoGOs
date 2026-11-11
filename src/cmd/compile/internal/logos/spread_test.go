@@ -65,7 +65,6 @@ func lowerSpreadSrc(t *testing.T, src string) (printed, ejected string) {
 	return buf.String(), string(out)
 }
 
-
 func TestSpreadSourceEvaluatedOnce(t *testing.T) {
 	printed, ejected := lowerSpreadSrc(t, `package main
 
@@ -104,5 +103,8 @@ func build(s State) State {
 `)
 	if strings.Contains(printed, "..") {
 		t.Errorf("lowered tree keeps spread syntax:\n%s", printed)
+	}
+	if !strings.Contains(printed, "= s") {
+		t.Errorf("lowered tree drops the spread source:\n%s", printed)
 	}
 }
