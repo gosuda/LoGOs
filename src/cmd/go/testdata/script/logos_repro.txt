@@ -13,9 +13,10 @@ stderr 'exceeds recorded'
 go run . gen $WORK/meas1000.bin 1000
 go run . sizegate $WORK/meas1000.bin ../bound/rec1010.txt
 stdout 'wasm size ok'
-# A record above the real size passes: the gate fires on growth only.
-go run . sizegate $WORK/meas1000.bin ../bound/rec1011.txt
-stdout 'wasm size ok'
+# A record above the real size fails as stale: the gate fires on
+# shrinkage past 1% as well as on growth.
+! go run . sizegate $WORK/meas1000.bin ../bound/rec1011.txt
+stderr 'stale'
 
 cd $GOPATH/src
 cd $LOGOS_EXAMPLE
@@ -104,11 +105,10 @@ env GOOS=
 env GOARCH=
 ! go run . sizegate $WORK/example.wasm ../bound/tiny.txt
 stderr 'exceeds recorded'
-
-# A record far above the real size passes: the gate fires on growth
-# only, so a stale record never fails a legitimate size improvement.
-go run . sizegate $WORK/example.wasm ../bound/huge.txt
-stdout 'wasm size ok'
+# A record far above the real size fails as stale: a stale record
+# must never let a size regression hide behind an old number.
+! go run . sizegate $WORK/example.wasm ../bound/huge.txt
+stderr 'stale'
 
 # A missing record fails instead of passing silently.
 ! go run . sizegate $WORK/example.wasm ../bound/missing.txt
@@ -238,8 +238,9 @@ func gen(args []string) error {
 }
 
 // sizegate fails when the measured wasm size exceeds the recorded size
-// by over 1%, and when the record is missing or unparsable. Shrinkage
-// never fails: a stale record above the real size passes.
+// by over 1%, when the record is missing or unparsable, and when the
+// record exceeds the measured size by over 1%: a stale record fails
+// instead of hiding regressions behind an old number.
 func sizegate(args []string) error {
 	if len(args) != 2 {
 		return errUsage
@@ -259,6 +260,9 @@ func sizegate(args []string) error {
 	actual := info.Size()
 	if actual*100 > recorded*101 {
 		return fmt.Errorf("wasm size %d exceeds recorded %d by over 1%%; update the record at %s", actual, recorded, args[1])
+	}
+	if recorded*100 > actual*101 {
+		return fmt.Errorf("wasm size %d is more than 1%% below recorded %d; record at %s is stale", actual, recorded, args[1])
 	}
 	fmt.Printf("wasm size ok: %d bytes (recorded %d)\n", actual, recorded)
 	return nil
