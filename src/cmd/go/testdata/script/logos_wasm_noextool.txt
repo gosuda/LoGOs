@@ -2,7 +2,6 @@
 # tool: with PATH holding only the toolchain bin directory (no C
 # compiler, linker, or wasm tool), logos build and go build still emit
 # the wasm output and its loader, and the loader still runs under node.
-[!exec:node] skip 'A-NODE: node is required to run the loader'
 
 env GOPROXY=off
 env GOTOOLCHAIN=local
@@ -20,11 +19,6 @@ go build -o $WORK/plain.wasm .
 exists $WORK/plain.wasm
 exists $WORK/plain.loader.mjs
 
-env PATH=$ORIGPATH
-exec node ../run.mjs $WORK/logos.wasm $WORK/logos.loader.mjs
-stdout '^noextool-ok$'
-exec node ../run.mjs $WORK/plain.wasm $WORK/plain.loader.mjs
-stdout '^noextool-ok$'
 # Recording fakes for common external wasm tools sit first on PATH:
 # neither build may invoke any of them, and both outputs must match
 # builds without the fakes.
@@ -36,6 +30,12 @@ go build -o $WORK/fake-plain.wasm .
 ! exists $WORK/tools-ran.log
 cmp $WORK/fake-logos.wasm $WORK/logos.wasm
 cmp $WORK/fake-plain.wasm $WORK/plain.wasm
+[!exec:node] skip 'A-NODE: node is required to run the loader'
+env PATH=$ORIGPATH
+exec node ../run.mjs $WORK/logos.wasm $WORK/logos.loader.mjs
+stdout '^noextool-ok$'
+exec node ../run.mjs $WORK/plain.wasm $WORK/plain.loader.mjs
+stdout '^noextool-ok$'
 
 -- m/go.mod --
 module example.com/noextool
