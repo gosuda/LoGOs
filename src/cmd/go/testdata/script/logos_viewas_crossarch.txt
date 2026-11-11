@@ -9,6 +9,9 @@ env GOTOOLCHAIN=local
 cd m
 logos build -o $WORK/viewas-native$GOEXE .
 exec $WORK/viewas-native$GOEXE
+stdout '^67305985 134678021 1157159078456920585$'
+stdout '^84148994 151521030 1229499251294997258$'
+stdout '^logos: ViewAs: need 16 bytes, have 8$'
 cp stdout $WORK/native.txt
 
 env GOARCH=riscv64
