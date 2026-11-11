@@ -382,6 +382,7 @@ const (
 	containerMap
 	containerPointer
 	containerOption
+	containerArray
 )
 
 type unionContainer struct {
@@ -426,7 +427,11 @@ func unionContainerOf(t types2.Type) (unionContainer, bool) {
 		elem = c.Elem()
 		kind = containerSlice
 	case *types2.Array:
-		return unionContainer{}, false
+		if kind != unionContainerKind(0) {
+			return unionContainer{}, false
+		}
+		elem = c.Elem()
+		kind = containerArray
 	case *types2.Map:
 		if kind != unionContainerKind(0) {
 			return unionContainer{}, false
@@ -490,6 +495,29 @@ func (js *jsonStruct) unionContainerLines(f *jsonField, field string, uc unionCo
 		out = append(out, fmt.Sprintf("if %s != nil {", errName))
 		out = append(out, fmt.Sprintf("\treturn %s", errName))
 		out = append(out, "}")
+		return out
+	case containerArray:
+		errName := fmt.Sprintf("_logos_uerr_%d", f.pos)
+		tmp := fmt.Sprintf("_logos_tmp_%d", f.pos)
+		var out []string
+		out = append(out, fmt.Sprintf("var %s error", errName))
+		out = append(out, fmt.Sprintf("var %s []%s", tmp, espell))
+		out = append(out, fmt.Sprintf("%s.Slice(&_logos_s, &%s, func(_logos_es *%s.Scanner, _logos_ee *%s) {", jsonAlias, tmp, jsonAlias, espell))
+		var abody []string
+		abody = append(abody, "if _logos_es.Null() {", "\t*_logos_ee = nil", "} else {")
+		if uc.ptr {
+			abody = append(abody, fmt.Sprintf("\tif *_logos_ee == nil { *_logos_ee = new(%s) }", cls.name))
+			abody = append(abody, indentLines(js.unionTrial(cls, "(**_logos_ee)", "_logos_es", errName))...)
+		} else {
+			abody = append(abody, indentLines(js.unionTrial(cls, "(*_logos_ee)", "_logos_es", errName))...)
+		}
+		abody = append(abody, "}")
+		out = append(out, indentLines(abody)...)
+		out = append(out, "})")
+		out = append(out, fmt.Sprintf("if %s != nil {", errName))
+		out = append(out, fmt.Sprintf("\treturn %s", errName))
+		out = append(out, "}")
+		out = append(out, fmt.Sprintf("copy(%s[:], %s)", field, tmp))
 		return out
 	case containerMap:
 		mv := fmt.Sprintf("_logos_mv_%d", f.pos)

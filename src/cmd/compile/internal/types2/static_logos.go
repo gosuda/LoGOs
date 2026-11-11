@@ -509,6 +509,8 @@ func logosNestedUnionTypes(t Type) []Type {
 			walk(c.Elem())
 		case *Slice:
 			walk(c.Elem())
+		case *Array:
+			walk(c.Elem())
 		case *Map:
 			walk(c.Elem())
 		}
