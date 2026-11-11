@@ -125,7 +125,7 @@ func main() {
 	groupCheck("group-squares", squaresOK, fmt.Sprint(out), "[0 1 4 9 16 25 36 49 64 81 100 121 144 169 196 225]")
 	groupCheck("group-limit", peak.Load() <= 8, fmt.Sprint(peak.Load()), "<=8")
 	berr := batchErr(ctx, items)
-	groupCheck("group-first-error", berr != nil, fmt.Sprint(berr), "bad item 3")
+	groupCheck("group-first-error", berr != nil && berr.Error() == "bad item 3", fmt.Sprint(berr), "bad item 3")
 	_ = limited(ctx)
 	groupCheck("group-held-limit", peakHeld.Load() <= 2, fmt.Sprint(peakHeld.Load()), "<=2")
 	groupCheck("group-held-progress", peakHeld.Load() >= 1, fmt.Sprint(peakHeld.Load()), ">=1")
