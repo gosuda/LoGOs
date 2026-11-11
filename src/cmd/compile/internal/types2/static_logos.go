@@ -464,28 +464,69 @@ func (check *Checker) logosCheckUnionJSONMembers() {
 }
 
 func (check *Checker) logosCheckUnionFieldJSON(fld *Var) {
-	t := fld.Type()
-	if cv, ok := Unalias(t).(*ConstView); ok {
-		t = cv.Elem
+	for _, t := range logosNestedUnionTypes(fld.Type()) {
+		tset := logosClosedUnion(t)
+		if tset == nil || !logosIsClosed(tset) {
+			continue
+		}
+		for _, term := range tset.terms {
+			if term.tilde {
+				continue
+			}
+			check.logosCheckUnionTermJSON(fld, term.typ)
+		}
 	}
-	tset := logosClosedUnion(t)
-	if tset == nil || !logosIsClosed(tset) {
+}
+
+func logosNestedUnionTypes(t Type) []Type {
+	var out []Type
+	seen := make(map[Type]bool)
+	var walk func(t Type)
+	walk = func(t Type) {
+		t = Unalias(t)
+		if t == nil {
+			return
+		}
+		if cv, ok := t.(*ConstView); ok {
+			t = Unalias(cv.Elem)
+			if t == nil {
+				return
+			}
+		}
+		if seen[t] {
+			return
+		}
+		seen[t] = true
+		out = append(out, t)
+		u := t
+		if n, ok := u.(*Named); ok {
+			u = n.Underlying()
+		}
+		switch c := u.(type) {
+		case *Option:
+			walk(c.Elem)
+		case *Pointer:
+			walk(c.Elem())
+		case *Slice:
+			walk(c.Elem())
+		case *Map:
+			walk(c.Elem())
+		}
+	}
+	walk(t)
+	return out
+}
+
+func (check *Checker) logosCheckUnionTermJSON(fld *Var, typ Type) {
+	ok, hasFunc := logosUnionMemberHasJSON(typ, check.pkg)
+	if ok {
 		return
 	}
-	for _, term := range tset.terms {
-		if term.tilde {
-			continue
-		}
-		ok, hasFunc := logosUnionMemberHasJSON(term.typ, check.pkg)
-		if ok {
-			continue
-		}
-		if hasFunc {
-			check.errorf(fld, BadDecl, "%s union member %s has UnmarshalJSON with wrong signature, want func([]byte) error", logosNoUnionJSON, term.typ)
-			continue
-		}
-		check.errorf(fld, BadDecl, "%s union member %s has no UnmarshalJSON method", logosNoUnionJSON, term.typ)
+	if hasFunc {
+		check.errorf(fld, BadDecl, "%s union member %s has UnmarshalJSON with wrong signature, want func([]byte) error", logosNoUnionJSON, typ)
+		return
 	}
+	check.errorf(fld, BadDecl, "%s union member %s has no UnmarshalJSON method", logosNoUnionJSON, typ)
 }
 
 func logosUnionMemberHasJSON(m Type, pkg *Package) (bool, bool) {
