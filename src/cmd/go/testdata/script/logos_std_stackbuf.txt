@@ -15,15 +15,25 @@ mkdir $WORK/m
 cp m/go.mod m/user_test.go m/logos.toml $WORK/m/
 cd $WORK/gopath/src/probe
 go test -count=1 -O=2 .
+stdout '^ok'
+! stdout 'no tests to run'
 go test -count=1 -O=3 .
+stdout '^ok'
+! stdout 'no tests to run'
 
 env GO111MODULE=auto
 cd $WORK/m
 env WANT_STACKBUF=256
 go test -count=1 -O=2 .
+stdout '^ok'
+! stdout 'no tests to run'
 env WANT_STACKBUF=4096
 go test -count=1 -O=3 .
+stdout '^ok'
+! stdout 'no tests to run'
 logos test -count=1 -O=3 .
+stdout '^ok'
+! stdout 'no tests to run'
 
 -- probe/probe.go --
 package probe

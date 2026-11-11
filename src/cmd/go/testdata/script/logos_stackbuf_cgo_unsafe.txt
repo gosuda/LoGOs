@@ -10,9 +10,17 @@ env CGO_ENABLED=1
 
 cd m
 go test -count=1 .
+stdout '^ok'
+! stdout 'no tests to run'
 logos test -count=1 .
+stdout '^ok'
+! stdout 'no tests to run'
 go test -count=1 -O=3 .
+stdout '^ok'
+! stdout 'no tests to run'
 logos test -count=1 -O=3 .
+stdout '^ok'
+! stdout 'no tests to run'
 
 -- m/go.mod --
 module example.com/stackbufflows
