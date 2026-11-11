@@ -180,3 +180,79 @@ func TestConstmapHashMatchesRuntime(t *testing.T) {
 		}
 	}
 }
+
+func constmapRuntimeTable[K comparable](t *testing.T, hashes []uint64, keys []K) *rt.ConstTable[K, int] {
+	t.Helper()
+	ck := make([]constMapKey, len(keys))
+	for i := range keys {
+		ck[i] = constMapKey{hash: hashes[i], canon: fmt.Sprintf("key-%d", i)}
+	}
+	l, err := buildConstMap(ck, defaultConstMapBudget)
+	if err != nil {
+		t.Fatalf("buildConstMap %d keys: %v", len(keys), err)
+	}
+	tab := &rt.ConstTable[K, int]{Salt: l.salt}
+	tab.Buckets = make([]rt.ConstBucket, len(l.buckets))
+	for i, b := range l.buckets {
+		tab.Buckets[i] = rt.ConstBucket{Off: uint32(b.off), Size: uint32(b.size), Seed: b.seed}
+	}
+	tab.Slots = make([]rt.ConstSlot[K, int], len(l.slots))
+	for s, ki := range l.slots {
+		if ki < 0 {
+			continue
+		}
+		tab.Slots[s] = rt.ConstSlot[K, int]{Key: keys[ki], Val: ki, Occ: true}
+	}
+	return tab
+}
+
+func checkConstmapRuntimeGetString(t *testing.T, n int) {
+	t.Helper()
+	keys := make([]string, n)
+	hashes := make([]uint64, n)
+	for i := range keys {
+		keys[i] = fmt.Sprintf("k%05d", i)
+		hashes[i] = constHashString(keys[i])
+	}
+	tab := constmapRuntimeTable(t, hashes, keys)
+	for i, k := range keys {
+		v, ok := tab.Get(rt.HashString(k), k)
+		if !ok || v != i {
+			t.Fatalf("size %d: Get(%q) = (%d, %v), want (%d, true)", n, k, v, ok, i)
+		}
+	}
+	for _, k := range []string{"", "zz-absent", "k99999", keys[0] + "x"} {
+		if v, ok := tab.Get(rt.HashString(k), k); ok {
+			t.Fatalf("size %d: Get(%q) = (%d, true), want absent", n, k, v)
+		}
+	}
+}
+
+func checkConstmapRuntimeGetInt(t *testing.T, n int) {
+	t.Helper()
+	keys := make([]int, n)
+	hashes := make([]uint64, n)
+	for i := range keys {
+		keys[i] = i
+		hashes[i] = constHashUint64(uint64(i))
+	}
+	tab := constmapRuntimeTable(t, hashes, keys)
+	for i, k := range keys {
+		v, ok := tab.Get(rt.HashUint64(uint64(k)), k)
+		if !ok || v != i {
+			t.Fatalf("size %d: Get(%d) = (%d, %v), want (%d, true)", n, k, v, ok, i)
+		}
+	}
+	for _, k := range []int{-1, n + 7} {
+		if v, ok := tab.Get(rt.HashUint64(uint64(k)), k); ok {
+			t.Fatalf("size %d: Get(%d) = (%d, true), want absent", n, k, v)
+		}
+	}
+}
+
+func TestConstmapRuntimeGetRoundTrip(t *testing.T) {
+	for _, n := range []int{9, 64, 4096} {
+		checkConstmapRuntimeGetString(t, n)
+		checkConstmapRuntimeGetInt(t, n)
+	}
+}

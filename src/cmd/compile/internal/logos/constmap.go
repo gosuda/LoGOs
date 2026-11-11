@@ -88,7 +88,10 @@ func buildConstMap(keys []constMapKey, budget constMapBudget) (*constMapLayout, 
 	}
 	rounds := max(budget.Rounds, 1)
 	perRound := budget.MaxSeeds / rounds
-	nb := (len(keys) + 7) / 8
+	nb := 1
+	for nb < (len(keys)+7)/8 {
+		nb *= 2
+	}
 	for r := range rounds {
 		if l, ok := placeConstMapRound(keys, nb, uint64(r), perRound); ok {
 			return l, nil
@@ -189,8 +192,8 @@ func constMapFit(keys []constMapKey, ks []int, seed uint64, size int) ([]int, bo
 }
 
 func (l *constMapLayout) probe(h uint64) int {
-	b := &l.buckets[constMix(l.salt, h)%uint64(len(l.buckets))]
-	return b.off + int(constMix(b.seed, h)%uint64(b.size))
+	b := &l.buckets[constMix(l.salt, h)&uint64(len(l.buckets)-1)]
+	return b.off + int(constMix(b.seed, h)&uint64(b.size-1))
 }
 
 func constHashString(s string) uint64 {
