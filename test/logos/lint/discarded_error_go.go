@@ -4,7 +4,9 @@ package p
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 )
@@ -13,8 +15,9 @@ import (
 // applies the rule to Go packages. An expression statement or `_ =` that
 // drops an `error` result is reported, except callees with an
 // AlwaysNilError fact, fmt.Print*, fmt.Fprint* to os.Stdout or os.Stderr,
-// and the Write* methods of *bytes.Buffer and *strings.Builder.
-// fmt.Fprint* to any other destination is reported. The rule is deny, so
+// the Write* methods of *bytes.Buffer and *strings.Builder, Write on a
+// receiver that implements hash.Hash, and fmt.Fprint* and io.WriteString
+// directed at a *bytes.Buffer or *strings.Builder. The rule is deny, so
 // the findings below fail the lint run.
 
 func f() error        { return nil }
@@ -51,9 +54,30 @@ func written() {
 
 func printedToBuffer() {
 	var b bytes.Buffer
-	fmt.Fprintf(&b, "x") // ERROR "discarded_error"
+	fmt.Fprintf(&b, "x")
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "x") // ERROR "discarded_error"
+	fmt.Fprintf(&sb, "x")
+}
+
+func hashWriteInfallible(data []byte) [32]byte {
+	h := sha256.New()
+	h.Write(data)
+	s := h.Sum(nil)
+	var out [32]byte
+	copy(out[:], s)
+	return out
+}
+
+func fprintfToBuffer() string {
+	var buf bytes.Buffer
+	fmt.Fprintf(&buf, "n=%d", 42)
+	return buf.String()
+}
+
+func writeStringToBuilder(s string) string {
+	var b strings.Builder
+	io.WriteString(&b, s)
+	return b.String()
 }
 
 func handled() {
