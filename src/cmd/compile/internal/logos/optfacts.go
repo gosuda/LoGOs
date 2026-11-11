@@ -238,9 +238,6 @@ func collectNamedFuncFacts(n *types2.Named, objects map[string]*types2.Func, vis
 }
 
 func CloneWithOverlaysAndReadonly(orig *types2.Package, opts, consts []facts.PathFact, fns []facts.FnFact, readonlys []facts.ReadonlyFact, constMaps []facts.ConstMapFact) (*types2.Package, error) {
-	if err := ApplyFuncFacts(orig, fns); err != nil {
-		return nil, err
-	}
 	var readonly map[string]bool
 	var assert map[string]facts.FnFact
 	for _, fn := range fns {
@@ -261,6 +258,9 @@ func CloneWithOverlaysAndReadonly(orig *types2.Package, opts, consts []facts.Pat
 		}
 	}
 	if len(opts) == 0 && len(consts) == 0 && len(constMaps) == 0 {
+		if err := ApplyFuncFacts(orig, fns); err != nil {
+			return nil, err
+		}
 		if err := ApplyReadonlyFactsInPlace(orig, readonlys); err != nil {
 			return nil, err
 		}
@@ -276,7 +276,14 @@ func CloneWithOverlaysAndReadonly(orig *types2.Package, opts, consts []facts.Pat
 	if len(byObj) == 0 && len(readonly) == 0 && len(byReadonly) == 0 && len(assert) == 0 && len(constMaps) == 0 {
 		return orig, nil
 	}
-	return clonePackageWithOverlays(orig, byObj, readonly, byReadonly, assert, constMaps)
+	cloned, err := clonePackageWithOverlays(orig, byObj, readonly, byReadonly, assert, constMaps)
+	if err != nil {
+		return nil, err
+	}
+	if err := ApplyFuncFacts(cloned, fns); err != nil {
+		return nil, err
+	}
+	return cloned, nil
 }
 
 func applyReadonlyToUnderlying(pkg *types2.Package, owner string, u types2.Type, readonly map[string]bool) types2.Type {
