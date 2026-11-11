@@ -246,6 +246,41 @@ func TestHotKeepsValueReachable(t *testing.T) {
 	}
 }
 
+func waitHotFinalized(t *testing.T, finalized chan struct{}, what string) {
+	t.Helper()
+	deadline := time.NewTimer(5 * time.Second)
+	defer deadline.Stop()
+	for {
+		runtime.GC()
+		select {
+		case <-finalized:
+			return
+		case <-deadline.C:
+			t.Fatalf("%s was not collectable: finalizer never ran after runtime.GC", what)
+		default:
+		}
+		runtime.Gosched()
+	}
+}
+
+func TestHotReplacedValueCollectable(t *testing.T) {
+	finalized := make(chan struct{}, 2)
+	h := new(logosync.Hot[hotPoint])
+	v1 := &hotPoint{x: 1, y: 1}
+	runtime.AddCleanup(v1, func(ch chan struct{}) { ch <- struct{}{} }, finalized)
+	h.Store(v1)
+	v1 = nil
+	v2 := &hotPoint{x: 2, y: 2}
+	runtime.AddCleanup(v2, func(ch chan struct{}) { ch <- struct{}{} }, finalized)
+	h.Store(v2)
+	v2 = nil
+	waitHotFinalized(t, finalized, "value replaced by Store")
+	h.Update(func(old *hotPoint) *hotPoint {
+		return &hotPoint{x: old.x + 1, y: old.y + 1}
+	})
+	waitHotFinalized(t, finalized, "value replaced by Update")
+}
+
 func TestHotUpdateSequential(t *testing.T) {
 	h := new(logosync.Hot[int])
 	h.Update(func(old *int) *int {
