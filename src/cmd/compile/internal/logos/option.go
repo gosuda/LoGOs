@@ -17,8 +17,8 @@ import (
 )
 
 const (
-	optTemp     = "v"
-	optOk       = "ok"
+	optTemp     = "_logos_v"
+	optOk       = "_logos_ok"
 	optWrapTemp = "_logos_w%d"
 )
 
