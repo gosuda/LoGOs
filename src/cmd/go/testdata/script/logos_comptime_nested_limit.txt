@@ -1,0 +1,51 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+# Six fields nested five deep expands 6^5 copies. The incremental
+# budget must trip before the product materializes.
+cd wnest
+! logos build ./...
+stderr 'comptime::node_limit'
+cd ..
+
+-- wnest/go.mod --
+module example.com/nestedlimit
+
+go 1.27
+
+-- wnest/main.lgo --
+package main
+
+import (
+	"comptime"
+	"fmt"
+)
+
+type S struct {
+	F0 int
+	F1 int
+	F2 int
+	F3 int
+	F4 int
+	F5 int
+}
+
+func show(v S) int {
+	n := 0
+	const for _, f0 := range comptime.Fields[S]() {
+		const for _, f1 := range comptime.Fields[S]() {
+			const for _, f2 := range comptime.Fields[S]() {
+				const for _, f3 := range comptime.Fields[S]() {
+					const for _, f4 := range comptime.Fields[S]() {
+						n += v.[f0] + v.[f1] + v.[f2] + v.[f3] + v.[f4]
+					}
+				}
+			}
+		}
+	}
+	return n
+}
+
+func main() {
+	fmt.Println(show(S{}))
+}

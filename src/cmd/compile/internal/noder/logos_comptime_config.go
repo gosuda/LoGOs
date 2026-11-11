@@ -21,6 +21,7 @@ func logosConfigureComptime(conf *types2.Config, info *types2.Info) {
 	if !logosComptimeNodesExplicit() {
 		base.LogosComptimeNodes = policy.Thresholds.MaxComptimeASTNodes
 	}
+	conf.LogosComptimeNodeLimit = base.LogosComptimeNodes
 }
 
 func logosComptimeNodesExplicit() bool {

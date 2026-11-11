@@ -27,6 +27,7 @@ type LogosCopyContext struct {
 	Funcs      []*Func
 	Aliases    map[*Package]string
 	MaxSteps   int
+	NodeLimit  int
 	Importer   Importer
 	Context    *Context
 	ConstFuncs map[string]LogosConstFunc
@@ -57,6 +58,7 @@ func (ctx LogosCopyContext) logosCopyChecker(pkg *Package, info *Info, errs *[]E
 			}
 		},
 	}
+	conf.LogosComptimeNodeLimit = ctx.NodeLimit
 	if conf.LogosCTFEMaxSteps == 0 && info != nil {
 		conf.LogosCTFEMaxSteps = info.LogosCTFEMaxSteps
 	}
@@ -152,6 +154,11 @@ var logosFieldValueSels = []string{"Name", "Index", "Tag", "Exported"}
 
 func (check *Checker) logosConstFor(s *syntax.ConstForStmt, ctxt stmtContext) {
 	info := &LogosConstFor{GoVersion: check.conf.GoVersion}
+	if check.logosConstForDepth == 0 {
+		check.logosConstForBudget = 0
+	}
+	check.logosConstForDepth++
+	defer func() { check.logosConstForDepth-- }()
 	if check.logosConstForRange(s, info) {
 		check.logosConstForBody(s, info, ctxt)
 	}
@@ -262,7 +269,11 @@ func (check *Checker) logosConstForConcrete(s *syntax.ConstForStmt, info *LogosC
 	}
 	defer func() { check.conf.Error = saved }()
 	checked := 0
+	bodyNodes := logosCountBodyNodes(s.Body)
 	for i := range info.Struct.NumFields() {
+		if !check.logosConstForCharge(s, bodyNodes) {
+			break
+		}
 		f := info.Struct.Field(i)
 		if !f.Exported() && f.Pkg() != check.pkg {
 			continue
@@ -280,6 +291,37 @@ func (check *Checker) logosConstForConcrete(s *syntax.ConstForStmt, info *LogosC
 			check.usedVars[info.IndexVar] = true
 		}
 	}
+}
+
+func (check *Checker) logosConstForCharge(s *syntax.ConstForStmt, n int) bool {
+	if check.logosConstForBudget > 8*check.logosNodeLimit() {
+		return false
+	}
+	check.logosConstForBudget += n
+	if check.logosConstForBudget > 8*check.logosNodeLimit() {
+		check.errorf(s.Pos(), InvalidRangeExpr, "[comptime::node_limit] const for has %d iterations above the selected limit %d", check.logosConstForBudget, check.logosNodeLimit())
+		return false
+	}
+	return true
+}
+
+func (check *Checker) logosNodeLimit() int {
+	if check.conf.LogosComptimeNodeLimit > 0 {
+		return check.conf.LogosComptimeNodeLimit
+	}
+	return 4096
+}
+
+func logosCountBodyNodes(root syntax.Node) int {
+	n := 0
+	syntax.Inspect(root, func(x syntax.Node) bool {
+		n++
+		return true
+	})
+	if n < 1 {
+		return 1
+	}
+	return n
 }
 
 func (check *Checker) logosFieldDrain(s *syntax.ConstForStmt, info *LogosConstFor) {

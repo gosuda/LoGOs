@@ -863,12 +863,13 @@ func (fl *fileLower) cfEmitCopy(text otext, site *cfSite) {
 func (fl *fileLower) cfCheckCopyFunc(fn *syntax.FuncDecl, pos syntax.Pos) bool {
 	exp := fl.pkg.ctExp
 	ctx := types2.LogosCopyContext{
-		Scope:    fl.pkg.info.Scopes[fl.file],
-		Funcs:    exp.copyFuncs,
-		Aliases:  fl.cfAliases(),
-		MaxSteps: fl.pkg.info.LogosCTFEMaxSteps,
-		Importer: fl.pkg.info.LogosImporter,
-		Context:  fl.pkg.info.LogosContext,
+		Scope:     fl.pkg.info.Scopes[fl.file],
+		Funcs:     exp.copyFuncs,
+		Aliases:   fl.cfAliases(),
+		MaxSteps:  fl.pkg.info.LogosCTFEMaxSteps,
+		NodeLimit: base.LogosComptimeNodes,
+		Importer:  fl.pkg.info.LogosImporter,
+		Context:   fl.pkg.info.LogosContext,
 	}
 	obj, errs := types2.LogosCheckCopyFunc(fl.pkg.tpkg, fl.pkg.info, ctx, fn)
 	if obj != nil {

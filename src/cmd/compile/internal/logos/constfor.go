@@ -273,7 +273,11 @@ func (fl *fileLower) unrollConstFor(cf *syntax.ConstForStmt, info *types2.LogosC
 	bodySrc := run.ctx.buf.sliceO(bodyOff, bodyEnd)
 	var out []syntax.Stmt
 	host := &cfHost{sep: "\n"}
+	outerNodes := cfBodyNodes(cf.Body)
 	for ord, fd := range cfFieldsOf(fl, info.Struct) {
+		if !fl.cfCharge(run, outerNodes) {
+			break
+		}
 		active := cfChain{{name: cf.Field.Value, field: fd, body: cf.Body}}
 		if cf.Index != nil && cf.Index.Value != "_" {
 			active = append(active, cfActive{name: cf.Index.Value, index: true, idx: ord, body: cf.Body})
@@ -342,13 +346,14 @@ func (fl *fileLower) reparseTopCopy(text otext, cf *syntax.ConstForStmt, fctx cf
 // the types of its own nodes.
 func (fl *fileLower) miniCheckCopies(blocks []*syntax.BlockStmt, cf *syntax.ConstForStmt, fctx cfFuncCtx) {
 	ctx := types2.LogosCopyContext{
-		Sig:      fctx.sig,
-		Disqual:  fl.pkg.info.LogosDisqual[fctx.body],
-		Funcs:    fl.pkg.ctExp.copyFuncs,
-		Aliases:  fl.cfAliases(),
-		MaxSteps: fl.pkg.info.LogosCTFEMaxSteps,
-		Importer: fl.pkg.info.LogosImporter,
-		Context:  fl.pkg.info.LogosContext,
+		Sig:       fctx.sig,
+		Disqual:   fl.pkg.info.LogosDisqual[fctx.body],
+		Funcs:     fl.pkg.ctExp.copyFuncs,
+		Aliases:   fl.cfAliases(),
+		MaxSteps:  fl.pkg.info.LogosCTFEMaxSteps,
+		NodeLimit: base.LogosComptimeNodes,
+		Importer:  fl.pkg.info.LogosImporter,
+		Context:   fl.pkg.info.LogosContext,
 	}
 	if enclosing := fl.pkg.info.Scopes[cf]; enclosing != nil {
 		ctx.Scope = enclosing.Parent()
@@ -544,6 +549,7 @@ type cfRun struct {
 	ctx      cfCtx
 	fieldsOf cfFieldsFunc
 	sites    *cfSites
+	budget   int
 }
 
 // cfRunFor builds the run of one const for of the file being lowered.
@@ -565,7 +571,11 @@ func (fl *fileLower) unrollConstForFields(cf *syntax.ConstForStmt, fields []cfFi
 	bodySrc := run.ctx.buf.sliceO(bodyOff, bodyEnd)
 	var out []syntax.Stmt
 	var parts []otext
+	outerNodes := cfBodyNodes(cf.Body)
 	for ord, fd := range fields {
+		if !fl.cfCharge(run, outerNodes) {
+			break
+		}
 		active := cfChain{{name: cf.Field.Value, field: fd, body: cf.Body}}
 		if cf.Index != nil && cf.Index.Value != "_" {
 			active = append(active, cfActive{name: cf.Index.Value, index: true, idx: ord, body: cf.Body})
@@ -677,7 +687,11 @@ func (fl *fileLower) expandLevel(body *syntax.BlockStmt, active cfChain, text ot
 		bend := offAt(ctx.starts, syntax.EndPos(inner.Body)) + 1
 		bs, be := m.mapSpan(bstart, bend)
 		var innerParts []otext
+		innerNodes := cfBodyNodes(inner.Body)
 		for ord, fd := range fields {
+			if !fl.cfCharge(run, innerNodes) {
+				return gen("")
+			}
 			sub := append(slices.Clone(active), cfActive{name: inner.Field.Value, field: fd, body: inner.Body})
 			if inner.Index != nil && inner.Index.Value != "_" {
 				sub = append(sub, cfActive{name: inner.Index.Value, index: true, idx: ord, body: inner.Body})
@@ -741,6 +755,30 @@ func (fl *fileLower) cfCountNodes(stmts []syntax.Stmt, pos syntax.Pos) {
 	if n > base.LogosComptimeNodes {
 		fl.cfError(pos, "[comptime::node_limit] expansion has %d nodes above the selected limit %d", n, base.LogosComptimeNodes)
 	}
+}
+
+func (fl *fileLower) cfCharge(run *cfRun, n int) bool {
+	if run.budget > 8*base.LogosComptimeNodes {
+		return false
+	}
+	run.budget += n
+	if run.budget > 8*base.LogosComptimeNodes {
+		fl.cfError(run.ctx.stamp, "[comptime::node_limit] expansion has %d copies above the selected limit %d", run.budget, base.LogosComptimeNodes)
+		return false
+	}
+	return true
+}
+
+func cfBodyNodes(root syntax.Node) int {
+	n := 0
+	syntax.Inspect(root, func(x syntax.Node) bool {
+		n++
+		return true
+	})
+	if n < 1 {
+		return 1
+	}
+	return n
 }
 
 // cfBareSkip reports whether a bare Name occurrence is a declaration,

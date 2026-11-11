@@ -183,6 +183,11 @@ type Config struct {
 	// MAY raise it through max_ctfe_steps.
 	LogosCTFEMaxSteps int
 
+	// LogosComptimeNodeLimit bounds const-for checking and expansion.
+	// Zero selects 4096 nodes; configuration MAY raise it through
+	// max_comptime_ast_nodes.
+	LogosComptimeNodeLimit int
+
 	// LogosOwnedTypes carries exact-node owned-type descriptors for the
 	// final recheck of native private-type support. Keys are
 	// compiler-created nodes; type nodes carry a full descriptor while
