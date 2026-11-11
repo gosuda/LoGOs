@@ -160,9 +160,9 @@ const func CNanParts(x float64) float64 {
 	return z / z
 }
 
-const cmapNaNRe /* ERROR "NaN" */ = map[complex128]string{complex(CNanParts(1.0), 1): "nan"}
+const cmapNaNRe /* ERRORx "[[]correctness::const_eval[]].*NaN" */ = map[complex128]string{complex(CNanParts(1.0), 1): "nan"}
 
-const cmapNaNIm /* ERROR "NaN" */ = map[complex128]string{complex(1, CNanParts(1.0)): "nan"}
+const cmapNaNIm /* ERRORx "[[]correctness::const_eval[]].*NaN" */ = map[complex128]string{complex(1, CNanParts(1.0)): "nan"}
 
 const func Get(m map[string]int, k string) int {
 	v, ok := m[k]
