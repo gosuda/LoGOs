@@ -286,7 +286,7 @@ func TestDeferTryFreeZeroesExt(t *testing.T) {
 			t.Fatal("free did not release ext referent")
 		}
 		runtime.GC()
-		time.Sleep(10 * time.Millisecond)
+		runtime.Gosched()
 	}
 	rv2, _ := deferTryBuild(t, fields, &stackErr, nil)
 	typ2 := rv2.Elem().Type()
