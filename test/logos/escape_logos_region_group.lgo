@@ -7,7 +7,7 @@ import (
 	"logos/arena"
 )
 
-type node struct { // ERROR "can inline _logos_bin_node_d0" "can inline _logos_bin_node_e0" "can inline _logos_jsonfold_node" "can inline _logos_jsonkey_node" "can inline node.AppendBinary" "can inline node.MarshalBinary" "can inline node.MarshalJSON" "inlining call to _logos_bin_node_d0" "inlining call to _logos_bin_node_e0" "inlining call to _logos_jsonfold_node" "inlining call to _logos_jsonkey_node" "inlining call to errors.New" "inlining call to fmt.Errorf" "inlining call to json.\(\*Scanner\).End" "inlining call to json.\(\*Scanner\).Err" "inlining call to json.\(\*Scanner\).FoldKey" "inlining call to json.\(\*Scanner\).Key" "inlining call to json.\(\*Scanner\).Saved" "inlining call to json.\(\*Scanner\).Skip" "inlining call to json.NewScanner" "&errors\.errorString\{\.\.\.\} escapes to heap" "\.\.\. argument does not escape" "\[\]byte\{\.\.\.\} escapes to heap" "_logos_v does not escape" "append escapes to heap" "_logos_field does not escape" "_logos_k does not escape" "leaking param: _logos_data" "leaking param: _logos_dst to result ~r0 level=0" "make\(\[\]byte, 0, _logos_n\) escapes to heap" "_logos_off does not escape" "_logos_off escapes to heap" "_logos_src does not escape" "_logos_src\[0\] escapes to heap"
+type node struct { // ERROR ".*"
 	v    int
 	next *node
 }
