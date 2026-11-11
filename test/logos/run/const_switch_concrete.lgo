@@ -5,10 +5,21 @@ package main
 import (
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"unsafe"
 )
 
+var failed bool
+
+func check(name string, cond bool, got, want any) {
+	if !cond {
+		failed = true
+		fmt.Println("FAIL", name+":", "got", got, "want", want)
+		return
+	}
+	fmt.Println("ok", name)
+}
 
 type UserID int
 
@@ -99,13 +110,14 @@ func ifaceLayout(w Word) {
 }
 
 func main() {
-	fmt.Println(exactFirst())
-	fmt.Println(tildeBeforeIface())
-	fmt.Println(ifaceBeforeIface())
-	fmt.Println(noMatch())
-	fmt.Println(ifaceBody(Word{"body"}))
+	check("exact", exactFirst() == "exact", exactFirst(), "exact")
+	check("tilde", tildeBeforeIface() == "tilde", tildeBeforeIface(), "tilde")
+	check("writer-to", ifaceBeforeIface() == "writer-to", ifaceBeforeIface(), "writer-to")
+	check("nomatch", noMatch() == "after", noMatch(), "after")
+	check("iface-body", ifaceBody(Word{"body"}) == "body", ifaceBody(Word{"body"}), "body")
 	ifaceLayout(Word{"body"})
-	if !ifaceLayoutRan {
-		panic("iface case did not run")
+	check("iface-layout", ifaceLayoutRan, ifaceLayoutRan, true)
+	if failed {
+		os.Exit(1)
 	}
 }

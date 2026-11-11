@@ -4,8 +4,20 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"unsafe"
 )
+
+var failed bool
+
+func check(name string, cond bool, got, want any) {
+	if !cond {
+		failed = true
+		fmt.Println("FAIL", name+":", "got", got, "want", want)
+		return
+	}
+	fmt.Println("ok", name)
+}
 
 type Word struct{ S string }
 
@@ -33,12 +45,13 @@ func layoutInIfaceCase(v LayoutSmall) (uintptr, string, int32) {
 
 func main() {
 	ws := []Word{{S: "a"}, {S: "b"}}
-	fmt.Println(pick(ws, 1))
-	fmt.Println(pick([]int{1, 2}, 0))
+	check("pick-word", pick(ws, 1) == "m:b", pick(ws, 1), "m:b")
+	check("pick-miss", pick([]int{1, 2}, 0) == "after", pick([]int{1, 2}, 0), "after")
 	sz, m, x := layoutInIfaceCase(LayoutSmall{X: 7})
-	if sz != unsafe.Sizeof(LayoutSmall{}) {
-		fmt.Println("FAIL layout", sz)
-		return
+	check("layout-size", sz == 4, sz, 4)
+	check("layout-method", m == "m", m, "m")
+	check("layout-field", x == 7, x, 7)
+	if failed {
+		os.Exit(1)
 	}
-	fmt.Println(sz == 4, m, x)
 }

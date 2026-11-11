@@ -6,9 +6,20 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"os"
 	"strconv"
 )
 
+var failed bool
+
+func check(name string, cond bool, got, want any) {
+	if !cond {
+		failed = true
+		fmt.Println("FAIL", name+":", "got", got, "want", want)
+		return
+	}
+	fmt.Println("ok", name)
+}
 
 func EncodeSlice[T any](buf []byte, items []T) ([]byte, error) {
 	const switch T {
@@ -63,14 +74,25 @@ func classify[T any](v T) string {
 
 func main() {
 	b, err := EncodeSlice([]byte("nums:"), []int64{1, 2, 3})
-	fmt.Printf("%s %v\n", b, err)
+	if err != nil {
+		check("encode-int", false, err, nil)
+	} else {
+		check("encode-int", string(b) == "nums:123", string(b), "nums:123")
+	}
 	b, err = EncodeSlice([]byte("words:"), []Word{{"a"}, {"b"}})
-	fmt.Printf("%s %v\n", b, err)
-	fmt.Println(describe(3))
-	fmt.Println(describe(UserID(3)))
-	fmt.Println(describe("s"))
-	fmt.Println(classify(1))
-	fmt.Println(classify(UserID(1)))
-	fmt.Println(classify(&bytes.Buffer{}))
-	fmt.Println(classify("s"))
+	if err != nil {
+		check("encode-iface", false, err, nil)
+	} else {
+		check("encode-iface", string(b) == "words:ab", string(b), "words:ab")
+	}
+	check("describe-int", describe(3) == "exact-int", describe(3), "exact-int")
+	check("describe-named", describe(UserID(3)) == "tilde-int", describe(UserID(3)), "tilde-int")
+	check("describe-other", describe("s") == "other", describe("s"), "other")
+	check("classify-int", classify(1) == "exact", classify(1), "exact")
+	check("classify-named", classify(UserID(1)) == "tilde", classify(UserID(1)), "tilde")
+	check("classify-writer", classify(&bytes.Buffer{}) == "writer", classify(&bytes.Buffer{}), "writer")
+	check("classify-other", classify("s") == "other", classify("s"), "other")
+	if failed {
+		os.Exit(1)
+	}
 }
