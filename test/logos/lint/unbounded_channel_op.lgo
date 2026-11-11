@@ -454,6 +454,28 @@ func timerResetArgRecv(in chan int, d time.Duration, ch chan int64) int {
 	return 0
 }
 
+func timerNoDeferBound(in chan int, d time.Duration) int {
+	t := time.NewTimer(d)
+	select {
+	case v := <-in:
+		return v
+	case <-t.C:
+		return 0
+	}
+}
+
+func tickerChanOverwriteUnproven(in chan int, d time.Duration) int {
+	t := time.NewTicker(d)
+	defer t.Stop()
+	t.C = nil
+	select {
+	case <-in: // ERROR "unbounded_channel_op"
+		return 1
+	case <-t.C: // ERROR "unbounded_channel_op"
+		return 0
+	}
+}
+
 type timerBox struct{ t *time.Timer }
 
 func arm(t *time.Timer) {}
