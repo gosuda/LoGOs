@@ -56,6 +56,9 @@ stderr 'parameter b'
 ! logos build -o $WORK/h8pkg$GOEXE ./badh8pkg
 stderr 'const_view_mutation'
 stderr 'parameter b'
+! logos build -o $WORK/h9$GOEXE ./badh9
+stderr 'const_view_mutation'
+stderr 'parameter b'
 ! logos build -o $WORK/h10cond$GOEXE ./badh10cond
 stderr 'const_view_mutation'
 stderr 'parameter b'
