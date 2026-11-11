@@ -11,6 +11,72 @@ type U interface {
 	int | string
 }
 
+var failed bool
+
+func check(name string, cond bool, got, want any) {
+	if !cond {
+		failed = true
+		fmt.Println("FAIL", name+":", "got", got, "want", want)
+		return
+	}
+	fmt.Println("ok", name)
+}
+
+func returnForm(u U) float64 {
+	return u.(float64)
+}
+
+func which(a any) string {
+	switch v := a.(type) {
+	case U:
+		var _ U = v
+		return "U"
+	case nil:
+		return "nil"
+	default:
+		return "other"
+	}
+}
+
+func checkMessages(u U) {
+	func() {
+		defer func() {
+			r := recover()
+			got := fmt.Sprint(r)
+			want := "interface conversion: float64 is not a member of main.U"
+			check("single-message", got == want, got, want)
+		}()
+		_ = u.(float64)
+	}()
+	func() {
+		defer func() {
+			r := recover()
+			got := fmt.Sprint(r)
+			want := "interface conversion: float64 is not a member of main.U"
+			check("return-message", got == want, got, want)
+		}()
+		_ = returnForm(u)
+	}()
+}
+
+func checkCases() {
+	gotInt := which(42)
+	check("case-member-int", gotInt == "U", gotInt, "U")
+	gotStr := which("s")
+	check("case-member-string", gotStr == "U", gotStr, "U")
+	gotNon := "panic"
+	func() {
+		defer func() {
+			_ = recover()
+		}()
+		gotNon = which(1.5)
+	}()
+	var z any
+	gotNil := which(z)
+	check("case-nil", gotNil == "nil", gotNil, "nil")
+	check("case-nonmember", gotNon == "other", gotNon, "other")
+}
+
 func main() {
 	var u U = 42
 	v, ok := u.(float64)
@@ -36,4 +102,9 @@ func main() {
 		os.Exit(1)
 	}
 	fmt.Println("ok member-true")
+	checkMessages(u)
+	checkCases()
+	if failed {
+		os.Exit(1)
+	}
 }

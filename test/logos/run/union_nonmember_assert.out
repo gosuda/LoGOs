@@ -1,3 +1,9 @@
 ok comma-false
 ok single-panic
 ok member-true
+ok single-message
+ok return-message
+ok case-member-int
+ok case-member-string
+ok case-nil
+ok case-nonmember
