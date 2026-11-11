@@ -14,7 +14,7 @@ type pairLoad08 struct {
 }
 
 func loadPair08(p *pairLoad08) (int64, int64) {
-	// arm64:"LDP \\(R"
+	// arm64:"LDP \\(R[0-9]+\\), \\(R0, R1\\)"
 	return p.A, p.B
 }
 
