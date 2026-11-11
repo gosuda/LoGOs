@@ -6,6 +6,7 @@ package logos
 
 import (
 	"context"
+	"errors"
 	"internal/testenv"
 	"os"
 	"os/exec"
@@ -54,28 +55,53 @@ func TestConstForNestedExpansionTripsFast(t *testing.T) {
 	dir := t.TempDir()
 	writeNestedProbe(t, dir, 10, 9)
 	logos := filepath.Join(testenv.GOROOT(t), "bin", "logos")
-	ctx, cancel := context.WithTimeout(t.Context(), 180*time.Second)
+	backstop := 180 * time.Second
+	backstopErr := errors.New("nested expansion backstop elapsed")
+	ctx, cancel := context.WithTimeoutCause(t.Context(), backstop, backstopErr)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "sh", "-c", "ulimit -v 2097152; exec /usr/bin/time -v \"$@\"", "sh", logos, "build", "./...")
+	cmd := exec.CommandContext(ctx, logos, "build", "./...")
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "GOTOOLCHAIN=local", "GOPROXY=off", "GOFLAGS=-buildvcs=false", "GOCACHE="+filepath.Join(dir, "gocache"))
+	start := time.Now()
 	out, err := cmd.CombinedOutput()
+	if cause := context.Cause(ctx); cause != nil {
+		t.Fatalf("nested expansion ran %v without tripping the node limit: %v", time.Since(start), cause)
+	}
 	if err == nil {
 		t.Fatalf("nested build succeeded, want node_limit failure")
 	}
-	if !strings.Contains(string(out), "comptime::node_limit") {
-		t.Fatalf("output lacks node_limit rule: %q", out)
+	text := string(out)
+	prefix := "comptime::node_limit] "
+	_, after, found := strings.Cut(text, prefix)
+	if !found {
+		t.Fatalf("output lacks node_limit rule: %q", text)
 	}
-	_, rest, ok := strings.Cut(string(out), "Maximum resident set size (kbytes):")
+	if _, rest, ok := strings.Cut(after, " has "); !ok {
+		t.Fatalf("malformed node_limit diagnostic: %q", text)
+	} else {
+		after = rest
+	}
+	countField, rest, ok := strings.Cut(after, " ")
 	if !ok {
-		t.Fatalf("no rss line in output: %q", out)
+		t.Fatalf("malformed node_limit diagnostic: %q", text)
 	}
-	digits, _, _ := strings.Cut(rest, "\n")
-	peak, convErr := strconv.ParseInt(strings.TrimSpace(digits), 10, 64)
+	count, convErr := strconv.ParseInt(countField, 10, 64)
 	if convErr != nil {
-		t.Fatalf("bad rss value %q: %v", digits, convErr)
+		t.Fatalf("malformed node count %q: %v", countField, convErr)
 	}
-	if peak > 1048576 {
-		t.Fatalf("peak %d kbytes over 1GB bound", peak)
+	_, limField, ok := strings.Cut(rest, "selected limit ")
+	if !ok {
+		t.Fatalf("diagnostic lacks selected limit: %q", text)
+	}
+	limField, _, _ = strings.Cut(limField, " ")
+	limit, convErr := strconv.ParseInt(strings.TrimSpace(limField), 10, 64)
+	if convErr != nil {
+		t.Fatalf("malformed selected limit %q: %v", limField, convErr)
+	}
+	if count <= limit {
+		t.Fatalf("diagnostic reports %d at limit %d; want a trip above the limit", count, limit)
+	}
+	if count > 9*limit {
+		t.Fatalf("node limit reported %d at limit %d; expansion grew past one copy charge over the budget bound before tripping", count, limit)
 	}
 }
