@@ -48,9 +48,14 @@ func misplacedTryFix(info *types2.Info, f *syntax.File, src []byte, pos syntax.P
 	if !ok || syntax.Unparen(t.X) != t.X {
 		return lint.Result{}, false
 	}
-	keep, ok := checkedCallResult(info, call)
+	tup, ok := checkedCallResult(info, call)
 	if !ok {
 		return lint.Result{}, false
+	}
+	if tup.Len() > 2 {
+		if _, ok := stack[len(stack)-2].(*syntax.CallExpr); !ok {
+			return lint.Result{}, false
+		}
 	}
 	stmt, fn, ok := enclosingSplitStmt(stack)
 	if !ok {
@@ -68,7 +73,7 @@ func misplacedTryFix(info *types2.Info, f *syntax.File, src []byte, pos syntax.P
 	if !enclosingReturnsError(info, fn) {
 		return lint.Result{}, false
 	}
-	return splitResult(fn, stmt, call, t, src, keep)
+	return splitResult(fn, stmt, call, t, src, tup)
 }
 
 func tryAt(f *syntax.File, pos syntax.Pos) (*syntax.TryExpr, []syntax.Node) {
@@ -92,26 +97,26 @@ func tryAt(f *syntax.File, pos syntax.Pos) (*syntax.TryExpr, []syntax.Node) {
 	return target, found
 }
 
-func checkedCallResult(info *types2.Info, call *syntax.CallExpr) (types2.Type, bool) {
+func checkedCallResult(info *types2.Info, call *syntax.CallExpr) (*types2.Tuple, bool) {
 	typ := info.TypeOf(call)
 	if typ == nil {
 		return nil, false
 	}
 	tup, ok := typ.(*types2.Tuple)
-	if !ok {
-		return nil, false
-	}
-	if tup.Len() != 2 {
+	if !ok || tup.Len() < 2 {
 		return nil, false
 	}
 	errType := types2.Universe.Lookup("error").Type()
-	if !types2.Identical(tup.At(1).Type(), errType) {
+	if !types2.Identical(tup.At(tup.Len()-1).Type(), errType) {
 		return nil, false
 	}
-	if tup.At(0).Type() == nil {
-		return nil, false
+	nvals := tup.Len() - 1
+	for i := range nvals {
+		if tup.At(i).Type() == nil {
+			return nil, false
+		}
 	}
-	return tup.At(0).Type(), true
+	return tup, true
 }
 
 func enclosingSplitStmt(stack []syntax.Node) (syntax.Stmt, syntax.Node, bool) {
@@ -134,6 +139,13 @@ func enclosingSplitStmt(stack []syntax.Node) (syntax.Stmt, syntax.Node, bool) {
 			}
 			stmt, stmtIdx = s, i
 		case *syntax.ExprStmt:
+			stmt, stmtIdx = s, i
+		case *syntax.IfStmt:
+			if s.Cond == nil || stack[i+1] != syntax.Node(s.Cond) {
+				return nil, nil, false
+			}
+			stmt, stmtIdx = s, i
+		case *syntax.ReturnStmt:
 			stmt, stmtIdx = s, i
 		case *syntax.FuncLit, *syntax.LambdaExpr:
 			return nil, nil, false
@@ -301,7 +313,7 @@ func enclosingReturnsError(info *types2.Info, fn syntax.Node) bool {
 	return types2.Identical(sig.Results().At(sig.Results().Len()-1).Type(), errType)
 }
 
-func splitResult(fn syntax.Node, stmt syntax.Stmt, call *syntax.CallExpr, t *syntax.TryExpr, src []byte, keep types2.Type) (lint.Result, bool) {
+func splitResult(fn syntax.Node, stmt syntax.Stmt, call *syntax.CallExpr, t *syntax.TryExpr, src []byte, tup *types2.Tuple) (lint.Result, bool) {
 	startPos := splitStmtStart(stmt)
 	start, ok1 := tryOffset(src, startPos)
 	tryStart, ok2 := tryOffset(src, syntax.StartPos(t))
@@ -318,7 +330,8 @@ func splitResult(fn syntax.Node, stmt syntax.Stmt, call *syntax.CallExpr, t *syn
 	if !(start <= callStart && callStart < callEnd && callEnd <= tryEnd) {
 		return lint.Result{}, false
 	}
-	tmp := splitTempName(fn, call)
+	names := splitTempNames(fn, call, tup.Len()-1)
+	picked := strings.Join(names, ", ")
 	indentStart := start
 	for indentStart > 0 && (src[indentStart-1] == ' ' || src[indentStart-1] == '\t') {
 		indentStart--
@@ -326,12 +339,12 @@ func splitResult(fn syntax.Node, stmt syntax.Stmt, call *syntax.CallExpr, t *syn
 	indent := string(src[indentStart:start])
 	stmtSrc := string(src[start:stmtEnd])
 	callSrc := string(src[callStart:callEnd])
-	rest := stmtSrc[:tryStart-start] + tmp + stmtSrc[tryEnd-start:]
+	rest := stmtSrc[:tryStart-start] + picked + stmtSrc[tryEnd-start:]
 	gapSrc := string(src[callEnd:tryEnd])
 	if len(gapSrc) == 0 || gapSrc[len(gapSrc)-1] != '?' {
 		return lint.Result{}, false
 	}
-	replacement := tmp + " := " + callSrc + gapSrc + "\n" + indent + rest
+	replacement := picked + " := " + callSrc + gapSrc + "\n" + indent + rest
 	endLine, endCol := offsetLineCol(src, stmtEnd)
 	return lint.Result{
 		Rule:     "correctness::misplaced_try",
@@ -342,7 +355,7 @@ func splitResult(fn syntax.Node, stmt syntax.Stmt, call *syntax.CallExpr, t *syn
 		Provenance: lint.Provenance{
 			OriginExpr:   syntax.String(call),
 			OriginLine:   int(call.Pos().Line()),
-			InferredType: types2.TypeString(keep, func(p *types2.Package) string { return p.Name() }),
+			InferredType: types2.TypeString(tup.At(0).Type(), func(p *types2.Package) string { return p.Name() }),
 		},
 		Fixes: []lint.Fix{
 			{Description: "Split the expression so `?` ends its own statement.", Replacement: replacement},
@@ -371,7 +384,7 @@ func splitStmtEnd(src []byte, s syntax.Stmt) (int, bool) {
 	return end, true
 }
 
-func splitTempName(fn syntax.Node, call *syntax.CallExpr) string {
+func splitTempNames(fn syntax.Node, call *syntax.CallExpr, n int) []string {
 	base := "tmp"
 	switch fun := syntax.Unparen(call.Fun).(type) {
 	case *syntax.Name:
@@ -390,7 +403,8 @@ func splitTempName(fn syntax.Node, call *syntax.CallExpr) string {
 		}
 		return true
 	})
-	for i := 0; ; i++ {
+	names := make([]string, 0, n)
+	for i := 0; len(names) < n; i++ {
 		suffix := ""
 		if i > 0 {
 			suffix = strconv.Itoa(i)
@@ -400,9 +414,11 @@ func splitTempName(fn syntax.Node, call *syntax.CallExpr) string {
 			cand = "_fix" + cand
 		}
 		if cand != "_" && !used[cand] {
-			return cand
+			used[cand] = true
+			names = append(names, cand)
 		}
 	}
+	return names
 }
 
 func isReservedIdent(name string) bool {
