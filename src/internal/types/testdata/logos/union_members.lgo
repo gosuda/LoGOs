@@ -84,6 +84,14 @@ func memberConvIn() U {
 	return U(7)
 }
 
+func memberConvTyped(i int) U {
+	return U(i)
+}
+
+func memberConvNamed(h HasMethod) Shape {
+	return Shape(h)
+}
+
 func memberCases(x U) int {
 	return switch x.(type) {
 	case int => 1
