@@ -495,6 +495,13 @@ func TestFastcallStructure(t *testing.T) {
 				t.Fatalf("unflagged binary references the fast path: %s", line)
 			}
 		}
+		body := objdumpFunc(t, self, "testlogos\\._Cfunc_fast_add")
+		if !strings.Contains(body, "CALL runtime.cgocall(SB)") {
+			t.Fatalf("unflagged fallback lacks the plain cgocall:\n%s", body)
+		}
+		if strings.Contains(body, "asmcgocall") || strings.Contains(body, "logosCgocallFast") {
+			t.Fatalf("unflagged fallback leaves the fast path:\n%s", body)
+		}
 		return
 	}
 	body := objdumpFunc(t, self, "runtime\\.logosCgocallFast")
@@ -1124,6 +1131,17 @@ func TestFastcallLogosEndToEnd(t *testing.T) {
 		t.Fatalf("fixture logosCgocallFast text definitions = %d, want %d", defs, wantDefs)
 	}
 	if !goexperiment.LogosFastCgo {
+		dump, err := runCmd(t, "", goBin(t), "tool", "objdump", bin)
+		if err != nil {
+			t.Fatalf("objdump fixture: %v", err)
+		}
+		if strings.Contains(dump, "runtime.logosCgocallFast") {
+			t.Fatal("unflagged fixture binary calls the fast entry")
+		}
+		wrap := objdumpFunc(t, bin, "main\\._Cfunc_caddf")
+		if !strings.Contains(wrap, "CALL runtime.cgocall(SB)") {
+			t.Fatalf("unflagged fixture lacks the plain cgocall:\n%s", wrap)
+		}
 		return
 	}
 	dump, err := runCmd(t, "", goBin(t), "tool", "objdump", bin)
