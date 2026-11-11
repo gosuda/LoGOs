@@ -23,12 +23,7 @@ func (check *Checker) logosSwitchExpr(x *operand, e *syntax.SwitchExpr) exprKind
 	check.openScope(e, "switch")
 	defer check.closeScope()
 
-	if t := logosInitTryDirect(e.Init); t != nil {
-		check.logosTryMisplaced(t)
-		check.logosInitVarsInvalid(e.Init)
-	} else {
-		check.simpleStmt(e.Init)
-	}
+	check.simpleStmt(e.Init)
 	check.logosMultipleArmDefaults(e.Arms)
 
 	var results []*operand
@@ -53,48 +48,6 @@ func (check *Checker) logosSwitchExpr(x *operand, e *syntax.SwitchExpr) exprKind
 	x.mode_ = value
 	x.typ_ = typ
 	return expression
-}
-
-func logosInitTryDirect(init syntax.SimpleStmt) *syntax.TryExpr {
-	switch s := init.(type) {
-	case *syntax.AssignStmt:
-		if s.Op != 0 && s.Op != syntax.Def {
-			return nil
-		}
-		rhs := syntax.UnpackListExpr(s.Rhs)
-		if len(rhs) != 1 {
-			return nil
-		}
-		t, _ := syntax.Unparen(rhs[0]).(*syntax.TryExpr)
-		return t
-	case *syntax.ExprStmt:
-		t, _ := syntax.Unparen(s.X).(*syntax.TryExpr)
-		return t
-	}
-	return nil
-}
-
-func (check *Checker) logosInitVarsInvalid(init syntax.SimpleStmt) {
-	s, ok := init.(*syntax.AssignStmt)
-	if !ok {
-		return
-	}
-	lhs := syntax.UnpackListExpr(s.Lhs)
-	if s.Op == syntax.Def {
-		for _, e := range lhs {
-			name, ok := syntax.Unparen(e).(*syntax.Name)
-			if !ok || name.Value == "_" {
-				continue
-			}
-			obj := newVar(LocalVar, name.Pos(), check.pkg, name.Value, Typ[Invalid])
-			check.declare(check.scope, name, obj, name.Pos())
-			check.usedVars[obj] = true
-		}
-		return
-	}
-	if s.Op == 0 {
-		check.useLHS(lhs...)
-	}
 }
 
 func logosHasDefault(arms []*syntax.ArmClause) bool {

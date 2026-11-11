@@ -36,7 +36,13 @@ func reviewConversionDefer() (int, error) {
 }
 
 func reviewForPost() (int, error) {
-	for x := twoResults()?; x < 1; x = twoResults()? /* ERROR "[correctness::misplaced_try] ? must end an assignment, expression statement, defer, or errdefer" */ {
+	for x := twoResults()?; x < 1; x = twoResults()? {
+	}
+	return 0, nil
+}
+
+func reviewForPostNested() (int, error) {
+	for x := 0; x < 1; x = 1 + twoResults()? /* ERROR "[correctness::misplaced_try] ? must end an assignment, expression statement, defer, or errdefer" */ {
 	}
 	return 0, nil
 }

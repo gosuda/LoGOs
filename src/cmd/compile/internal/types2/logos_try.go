@@ -137,37 +137,17 @@ func (check *Checker) logosForPost(post syntax.Stmt) bool {
 	if !check.conf.Logos || post == nil {
 		return false
 	}
-	var lhs []syntax.Expr
-	var t *syntax.TryExpr
 	switch s := post.(type) {
 	case *syntax.AssignStmt:
-		if s.Rhs == nil || s.Op != 0 {
+		if s.Op != 0 {
 			return false
 		}
-		rhs := syntax.UnpackListExpr(s.Rhs)
-		if len(rhs) != 1 {
-			return false
-		}
-		var ok bool
-		t, ok = syntax.Unparen(rhs[0]).(*syntax.TryExpr)
-		if !ok {
-			return false
-		}
-		lhs = syntax.UnpackListExpr(s.Lhs)
+		return check.logosTryAssignStmt(s)
 	case *syntax.ExprStmt:
-		var ok bool
-		t, ok = syntax.Unparen(s.X).(*syntax.TryExpr)
-		if !ok {
-			return false
-		}
+		return check.logosTryExprStmt(s)
 	default:
 		return false
 	}
-	check.logosTryMisplaced(t)
-	if lhs != nil {
-		check.useLHS(lhs...)
-	}
-	return true
 }
 
 func (check *Checker) logosTryCountError(t *syntax.TryExpr, nvals, nvars int) {

@@ -156,3 +156,39 @@ func tryValidLit() (int, error) {
 	v := g()?
 	return v, nil
 }
+
+func tryValidForPost() (int, error) {
+	for i := 0; i < 3; i = twoResults()? {
+		_ = i
+	}
+	return 0, nil
+}
+
+func tryForPostOp() (int, error) {
+	x := 0
+	for ; x < 3; x += twoResults()? /* ERROR "[correctness::misplaced_try] ? must end an assignment, expression statement, defer, or errdefer" */ {
+	}
+	return x, nil
+}
+
+func tryValidSwitchExprInit() (int, error) {
+	return switch n := twoResults()?; n {
+	case 0 => 1
+	default => 2
+	}, nil
+}
+
+func tryValidSwitchExprAssignInit() (int, error) {
+	slot := 0
+	return switch slot = twoResults()?; slot {
+	case 0 => 1
+	default => 2
+	}, nil
+}
+
+func tryValidSwitchExprExprInit() (int, error) {
+	return switch justError()?; 1 {
+	case 1 => 1
+	default => 2
+	}, nil
+}
