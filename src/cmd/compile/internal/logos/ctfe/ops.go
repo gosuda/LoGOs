@@ -342,6 +342,13 @@ func (e *evaluator) complexOp(op syntax.Operator, x, y Value, t *Type, cst bool,
 		return Value{}, e.fail(pos, "unsupported complex operator in const evaluation")
 	}
 	if cst {
+		if t.Kind == KComplex64 {
+			if math.IsInf(float64(float32(real(r))), 0) || math.IsInf(float64(float32(imag(r))), 0) {
+				return Value{}, e.fail(pos, "constant overflows complex64 in const evaluation")
+			}
+		} else if math.IsInf(real(r), 0) || math.IsInf(imag(r), 0) {
+			return Value{}, e.fail(pos, "constant overflows %s in const evaluation", typeName(t))
+		}
 		return complexConst(t, r), nil
 	}
 	return complexDyn(t, r), nil
@@ -936,6 +943,20 @@ func typeName(t *Type) string {
 		return "complex64"
 	case KComplex128:
 		return "complex128"
+	case KUntypedBool:
+		return "untyped bool"
+	case KUntypedInt:
+		return "untyped int"
+	case KUntypedRune:
+		return "untyped rune"
+	case KUntypedString:
+		return "untyped string"
+	case KUntypedFloat:
+		return "untyped float"
+	case KUntypedComplex:
+		return "untyped complex"
+	case KUntypedNil:
+		return "untyped nil"
 	case KString:
 		return "string"
 	case KSlice:

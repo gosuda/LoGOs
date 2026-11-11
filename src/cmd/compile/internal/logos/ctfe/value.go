@@ -538,15 +538,16 @@ func (e *evaluator) convertNumber(v Value, t *Type, pos syntax.Pos) (Value, erro
 		f, _ = r.Float64()
 	}
 	if v.constant {
-		if t.Kind == KFloat32 && math.IsInf(float64(float32(f)), 0) && !math.IsInf(f, 0) {
+		if t.Kind == KFloat32 && math.IsInf(float64(float32(f)), 0) {
 			return Value{}, e.fail(pos, "constant overflows float32 in const evaluation")
 		}
 		if t.Kind == KFloat64 && math.IsInf(f, 0) {
-			if !isFloat(vk) || !v.ival.IsInt64() {
-				return Value{}, e.fail(pos, "constant overflows float64 in const evaluation")
-			}
+			return Value{}, e.fail(pos, "constant overflows float64 in const evaluation")
 		}
 		if isUntyped(t.Kind) {
+			if math.IsInf(f, 0) {
+				return Value{}, e.fail(pos, "constant overflows %s in const evaluation", typeName(t))
+			}
 			return Value{typ: t, constant: true, fval: new(big.Rat).SetFloat64(f)}, nil
 		}
 		return floatResult(t, f, true, pos)
@@ -568,8 +569,14 @@ func (e *evaluator) convertComplex(v Value, t *Type, pos syntax.Pos) (Value, err
 	default:
 		return Value{}, e.fail(pos, "cannot convert %s to %s in const evaluation", typeName(v.typ), typeName(t))
 	}
+	if v.constant && (math.IsInf(real(c), 0) || math.IsInf(imag(c), 0)) {
+		if t.Kind == KComplex64 {
+			return Value{}, e.fail(pos, "constant overflows complex64 in const evaluation")
+		}
+		return Value{}, e.fail(pos, "constant overflows %s in const evaluation", typeName(t))
+	}
 	if t.Kind == KComplex64 {
-		if v.constant && ((math.IsInf(float64(float32(real(c))), 0) && !math.IsInf(real(c), 0)) || (math.IsInf(float64(float32(imag(c))), 0) && !math.IsInf(imag(c), 0))) {
+		if v.constant && (math.IsInf(float64(float32(real(c))), 0) || math.IsInf(float64(float32(imag(c))), 0)) {
 			return Value{}, e.fail(pos, "constant overflows complex64 in const evaluation")
 		}
 		c = complex(float64(float32(real(c))), float64(float32(imag(c))))
@@ -593,9 +600,15 @@ func (e *evaluator) convertToString(v Value, t *Type, pos syntax.Pos) (Value, er
 	if !isInteger(vk) {
 		return Value{}, e.fail(pos, "cannot convert %s to string in const evaluation", typeName(v.typ))
 	}
+	if v.ival == nil {
+		return Value{}, e.fail(pos, "cannot convert %s to string in const evaluation", typeName(v.typ))
+	}
+	if v.ival.Sign() < 0 || !v.ival.IsInt64() {
+		return Value{typ: t, constant: v.constant, sval: "\uFFFD"}, nil
+	}
 	n := v.ival.Int64()
 	s := string(rune(n))
-	if n < 0 || n > utf8.MaxRune || (n >= 0xD800 && n <= 0xDFFF) {
+	if n > utf8.MaxRune || (n >= 0xD800 && n <= 0xDFFF) {
 		s = "\uFFFD"
 	}
 	return Value{typ: t, constant: v.constant, sval: s}, nil
