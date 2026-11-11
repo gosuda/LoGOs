@@ -215,6 +215,7 @@ var diffRejectCases = []diffCase{
 	diffConst("RBoolToInt", "int", "return int(true)"),
 	diffConst("RIntToBool", "bool", "return bool(1)"),
 	diffDyn("RComplexTypedInt", "complex128", []string{"int"}, []string{"2"}, "return complex(2, p0)"),
+	diffDyn("RComplexTypedReal", "complex128", []string{"int"}, []string{"2"}, "return complex(p0, 2)"),
 }
 
 var diffGenIntTypes = []string{"int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64", "int", "uint"}

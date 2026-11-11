@@ -545,10 +545,10 @@ func (e *evaluator) convertNumber(v Value, t *Type, pos syntax.Pos) (Value, erro
 			return Value{}, e.fail(pos, "constant overflows float64 in const evaluation")
 		}
 		if isUntyped(t.Kind) {
-			if math.IsInf(f, 0) {
-				return Value{}, e.fail(pos, "constant overflows %s in const evaluation", typeName(t))
+			if xf := xFloat(v); xf != nil {
+				return Value{typ: t, constant: true, fval: new(big.Rat).Set(xf)}, nil
 			}
-			return Value{typ: t, constant: true, fval: new(big.Rat).SetFloat64(f)}, nil
+			return Value{}, e.fail(pos, "constant overflows %s in const evaluation", typeName(t))
 		}
 		return floatResult(t, f, true, pos)
 	}
