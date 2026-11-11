@@ -2,8 +2,21 @@
 
 package main
 
-import "fmt"
+import (
+	"fmt"
+	"os"
+)
 
+var failed bool
+
+func check(name string, cond bool, got, want any) {
+	if !cond {
+		failed = true
+		fmt.Println("FAIL", name+":", "got", got, "want", want)
+		return
+	}
+	fmt.Println("ok", name)
+}
 
 type State struct {
 	A int
@@ -34,40 +47,36 @@ func src() State {
 
 func main() {
 	s := State{A: 10, ..State{A: 1, B: 2}}
-	fmt.Println(s.A, s.B)
-
+	check("spread-explicit-field-wins", s == State{A: 10, B: 2}, s, State{A: 10, B: 2})
 	t := State{..State{A: 3, B: 4}, B: 40}
-	fmt.Println(t.A, t.B)
-
+	check("spread-base-fills-missing-field", t == State{A: 3, B: 40}, t, State{A: 3, B: 40})
 	evals = 0
 	u := State{B: 20, ..src()}
-	fmt.Println(u.A, u.B, evals)
-
+	check("spread-base-evaluated-once", evals == 1 && u == State{A: 1, B: 20}, fmt.Sprint(u.A, u.B, evals), "1 20 1")
 	v := State{A: 3, B: 4}
 	v = State{A: v.B, B: v.A, ..v}
-	fmt.Println(v.A, v.B)
-
+	check("spread-rhs-snapshots-before-assign", v == State{A: 4, B: 3}, v, State{A: 4, B: 3})
 	n := Named{Label: "a", ..State{A: 7, B: 8}}
-	fmt.Println(n.A, n.Label)
+	check("spread-base-matches-by-name", n == Named{A: 7, Label: "a"}, n, Named{A: 7, Label: "a"})
 	m := Named{..State{A: 9, B: 10}, Label: "b"}
-	fmt.Println(m.A, m.Label)
-
+	check("spread-base-position-independent", m == Named{A: 9, Label: "b"}, m, Named{A: 9, Label: "b"})
 	w := State{A: 11, B: 12}
 	w = State{..w}
-	fmt.Println(w.A, w.B)
-
+	check("spread-self-base-keeps-fields", w == State{A: 11, B: 12}, w, State{A: 11, B: 12})
 	evals = 0
 	z := Only{Z: 5, ..src()}
-	fmt.Println(z.Z, evals)
+	check("spread-unused-base-still-evaluated-once", evals == 1 && z == Only{Z: 5}, fmt.Sprint(z.Z, evals), "5 1")
 	evals = 0
 	_ = State{A: 1, B: 2, ..src()}
-	fmt.Println(evals)
-
+	check("spread-fully-shadowed-base-still-evaluated-once", evals == 1, evals, 1)
 	var b Big
 	b.X = 5
 	b.Y = 6
 	b.Pad[0] = 7
 	b.Pad[4079] = 8
 	b = Big{X: b.Y, ..b}
-	fmt.Println(b.X, b.Y, b.Pad[0], b.Pad[4079])
+	check("spread-self-base-preserves-padding", b.X == 6 && b.Y == 6 && b.Pad[0] == 7 && b.Pad[4079] == 8, fmt.Sprint(b.X, b.Y, b.Pad[0], b.Pad[4079]), "6 6 7 8")
+	if failed {
+		os.Exit(1)
+	}
 }
