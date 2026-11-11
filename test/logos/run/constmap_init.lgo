@@ -50,11 +50,11 @@ func main() {
 	}
 	runtime.ReadMemStats(&m)
 	after := m.HeapAlloc
-	fmt.Printf("heap delta=%d\n", after-before)
 	if after != before {
-		fmt.Println("FAIL heap grew at init")
+		fmt.Println("FAIL heap:", "got", after-before, "want", 0)
 		os.Exit(1)
 	}
+	fmt.Println("ok heap")
 	binDir := filepath.Join(runtime.GOROOT(), "bin")
 	goBin := filepath.Join(binDir, "go")
 	logosBin := filepath.Join(binDir, "logos")
@@ -111,11 +111,11 @@ func main() {
 	}
 	for _, sym := range []string{"main.initArray", "main.flat", "main._logos_cm0_squares_sorted", "main._logos_cm0_squares_tab"} {
 		kind := symType[sym] ?? ""
-		fmt.Printf("%s=%s\n", sym, kind)
 		if kind != "R" {
 			fmt.Printf("FAIL %s not in rodata\n", sym)
 			os.Exit(1)
 		}
+		fmt.Println("ok", sym)
 	}
 	sum := 0
 	for _, v := range initSlice {
@@ -128,6 +128,5 @@ func main() {
 		fmt.Printf("FAIL sum=%d\n", sum)
 		os.Exit(1)
 	}
-
-	fmt.Println("init OK")
+	fmt.Println("ok init")
 }

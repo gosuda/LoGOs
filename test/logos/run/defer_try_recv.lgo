@@ -35,34 +35,32 @@ var seen []int
 var failed = false
 
 func check(name string, want []int) {
-	if len(seen) != len(want) {
-		fmt.Println("FAIL", name, "seen=", seen, "want=", want)
-		failed = true
-		return
-	}
-	for i := range seen {
-		if seen[i] != want[i] {
-			fmt.Println("FAIL", name, "seen=", seen, "want=", want)
-			failed = true
-			return
-		}
-	}
-	fmt.Println(name, "ok")
+if len(seen) != len(want) {
+fmt.Println("FAIL", name+":", "got", seen, "want", want)
+failed = true
+return
 }
-
+for i := range seen {
+if seen[i] != want[i] {
+fmt.Println("FAIL", name+":", "got", seen, "want", want)
+failed = true
+return
+}
+}
+fmt.Println("ok", name)
+}
 type pointOut struct {
-	point     string
-	recovered any
-	err       error
+point string
+recovered any
+err error
 }
-
 func checkPoint(name string, got pointOut, wantPoint string) {
-	if got.point != wantPoint || got.recovered == nil || got.err != nil {
-		fmt.Println("FAIL", name, "point=", got.point, "recovered=", got.recovered != nil, "err=", got.err)
-		failed = true
-		return
-	}
-	fmt.Println(name, "ok")
+if got.point != wantPoint || got.recovered == nil || got.err != nil {
+fmt.Println("FAIL", name+":", "got", got.point, got.recovered != nil, got.err, "want", wantPoint)
+failed = true
+return
+}
+fmt.Println("ok", name)
 }
 
 func caseAPlain() {

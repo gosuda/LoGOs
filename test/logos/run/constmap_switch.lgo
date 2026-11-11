@@ -71,7 +71,7 @@ func main() {
 		fmt.Printf("FAIL probe output %q\n", runOut)
 		os.Exit(1)
 	}
-	fmt.Println("probe run OK")
+	fmt.Println("ok probe")
 	nmOut, err := exec.Command(goBin, "tool", "nm", filepath.Join(dir, "probe.exe")).CombinedOutput()
 	if err != nil {
 		fmt.Printf("FAIL nm: %v\n%s", err, nmOut)
@@ -89,6 +89,7 @@ func main() {
 			os.Exit(1)
 		}
 	}
+	fmt.Println("ok switch")
 	nineTab := ""
 	for sym, kind := range symType {
 		if strings.Contains(sym, "nine_tab") {
@@ -99,10 +100,9 @@ func main() {
 		fmt.Println("FAIL 9-key map owns no _tab symbol")
 		os.Exit(1)
 	}
-	fmt.Printf("eight=switch nine=table-%s\n", nineTab)
 	if nineTab != "R" {
 		fmt.Println("FAIL 9-key table not in rodata")
 		os.Exit(1)
 	}
-	fmt.Println("switch-table OK")
+	fmt.Println("ok table")
 }

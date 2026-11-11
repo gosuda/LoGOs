@@ -15,12 +15,12 @@ var sinkErr error
 var failed = false
 
 func check(name string, logos, hand float64) {
-	if logos != hand {
-		fmt.Println("FAIL", name, "logos=", logos, "hand=", hand)
-		failed = true
-		return
-	}
-	fmt.Println(name, "ok")
+if logos != hand {
+fmt.Println("FAIL", name+":", "got", logos, "want", hand)
+failed = true
+return
+}
+fmt.Println("ok", name)
 }
 
 //go:noinline

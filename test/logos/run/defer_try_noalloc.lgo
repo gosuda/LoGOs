@@ -18,20 +18,21 @@ func guardedNil() (err error) {
 var sinkErr error
 
 func main() {
-	failed := false
-	if err := guardedNil(); err != nil {
-		fmt.Println("FAIL error result not nil:", err)
-		failed = true
-	} else {
-		fmt.Println("nil ok")
-	}
-	n := testing.AllocsPerRun(100, func() { sinkErr = guardedNil() })
-	fmt.Println("allocs:", n)
-	if n != 0 {
-		fmt.Println("FAIL nil defer? allocates", n, "times per call")
-		failed = true
-	}
-	if failed {
-		os.Exit(1)
-	}
+failed := false
+if err := guardedNil(); err != nil {
+fmt.Println("FAIL nil:", "got", err, "want", nil)
+failed = true
+} else {
+fmt.Println("ok nil")
+}
+n := testing.AllocsPerRun(100, func() { sinkErr = guardedNil() })
+if n != 0 || sinkErr != nil {
+fmt.Println("FAIL allocs:", "got", n, sinkErr, "want", 0)
+failed = true
+} else {
+fmt.Println("ok allocs")
+}
+if failed {
+os.Exit(1)
+}
 }

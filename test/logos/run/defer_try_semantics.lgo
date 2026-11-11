@@ -60,12 +60,12 @@ func sameInts(a, c []int) bool {
 var failed = false
 
 func check(name string, ok bool, detail string) {
-	if !ok {
-		fmt.Println("FAIL", name, detail)
-		failed = true
-		return
-	}
-	fmt.Println(name, "ok")
+if !ok {
+fmt.Println("FAIL", name+":", "got", detail, "want", "match")
+failed = true
+return
+}
+fmt.Println("ok", name)
 }
 
 func orderCase(name string, lfunc, hfunc func() error) {

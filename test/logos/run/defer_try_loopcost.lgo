@@ -337,11 +337,11 @@ func errCases(bs []*box) bool {
 		gotFirst := errors.Is(err, errFirst)
 		gotSecond := errors.Is(err, errTwo)
 		if err == nil || gotFirst != wantFirst || gotSecond != wantSecond {
-			fmt.Println("FAIL", name, "err=", err)
+			fmt.Println("FAIL", name+":", "got", err, "want", "join")
 			failed = true
 			return
 		}
-		fmt.Println(name, "ok")
+		fmt.Println("ok", name)
 	}
 	checkErr("fn-err", loopFnErr(3), false, true)
 	checkErr("fn-err-hand", loopFnErrHand(3), false, true)
@@ -362,11 +362,11 @@ func main() {
 	failed := false
 	check := func(name string, logos, hand float64) {
 		if logos != hand {
-			fmt.Println("FAIL", name, "logos=", logos, "hand=", hand)
+			fmt.Println("FAIL", name+":", "got", logos, "want", hand)
 			failed = true
 			return
 		}
-		fmt.Println(name, "ok")
+		fmt.Println("ok", name)
 	}
 	check("fn", testing.AllocsPerRun(200, func() { sinkErr = loopFn(5) }), testing.AllocsPerRun(200, func() { sinkErr = loopFnHand(5) }))
 	check("arg", testing.AllocsPerRun(200, func() { sinkErr = loopArg(5) }), testing.AllocsPerRun(200, func() { sinkErr = loopArgHand(5) }))
@@ -383,10 +383,10 @@ func main() {
 	sinkErr = loopOrderHand(5)
 	want := []int{4, 3, 2, 1, 0}
 	if sinkErr != nil || !sameInts(logosOrder, want) || !sameInts(order, want) {
-		fmt.Println("FAIL order logos=", logosOrder, "hand=", order)
+		fmt.Println("FAIL", "order:", "got", logosOrder, order, "want", want)
 		failed = true
 	} else {
-		fmt.Println("order ok")
+		fmt.Println("ok", "order")
 	}
 	closedVs = nil
 	sinkErr = recvLogos()
@@ -394,10 +394,10 @@ func main() {
 	closedVs = nil
 	sinkErr = recvHand()
 	if sinkErr != nil || !sameInts(logosRec, []int{1}) || !sameInts(closedVs, []int{1}) {
-		fmt.Println("FAIL recv logos=", logosRec, "hand=", closedVs)
+		fmt.Println("FAIL", "recv:", "got", logosRec, closedVs, "want", []int{1})
 		failed = true
 	} else {
-		fmt.Println("recv ok")
+		fmt.Println("ok", "recv")
 	}
 	if errCases(bs) {
 		failed = true
