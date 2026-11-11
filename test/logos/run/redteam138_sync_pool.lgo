@@ -4,6 +4,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"sync"
 )
 
@@ -35,25 +36,45 @@ func r138Clobber(n int) int {
 	return r138Consume(tmp)
 }
 
+var r138Failed bool
+
+func r138Check(name string, cond bool, got, want string) {
+	if !cond {
+		fmt.Printf("FAIL %s: got %s want %s\n", name, got, want)
+		r138Failed = true
+		return
+	}
+	fmt.Printf("ok %s\n", name)
+}
+
+func r138Sum(b []byte) int {
+	s := 0
+	for _, v := range b {
+		s += int(v)
+	}
+	return s
+}
+
 func main() {
 	var p sync.Pool
 	r138Put(&p, 64)
-	if r138Clobber(64) != 64 {
-		panic("redteam138: clobber helper broken")
-	}
+	clob := r138Clobber(64)
+	r138Check("syncpool-clobber-sane", clob == 64, fmt.Sprint(clob), "64")
 	got, ok := p.Get().([]byte)
+	r138Check("syncpool-type-kept", ok, fmt.Sprint(ok), "true")
 	if !ok {
-		panic("redteam138: pool lost stored slice")
+		os.Exit(1)
 	}
-	if len(got) != 64 {
-		panic("redteam138: bad length")
+	r138Check("syncpool-len-kept", len(got) == 64, fmt.Sprint(len(got)), "64")
+	first := -1
+	if len(got) > 0 {
+		first = int(got[0])
 	}
-	sum := 0
-	for _, b := range got {
-		sum += int(b)
-	}
-	fmt.Println("pool:", len(got), sum)
-	if sum != 2080 {
-		panic("redteam138: pooled slice corrupted")
+	sum := r138Sum(got)
+	want := 64 * 65 / 2
+	r138Check("syncpool-contents-kept", sum == want, fmt.Sprint(sum), fmt.Sprint(want))
+	r138Check("syncpool-first-kept", first == 1, fmt.Sprint(first), "1")
+	if r138Failed {
+		os.Exit(1)
 	}
 }

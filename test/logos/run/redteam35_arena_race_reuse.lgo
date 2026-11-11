@@ -3,7 +3,10 @@
 package main
 
 
-import "fmt"
+import (
+	"fmt"
+	"os"
+)
 
 //go:noinline
 func r35Sum(b []byte) int {
@@ -24,25 +27,26 @@ func r35Oracle(n, r int) int {
 }
 
 //go:noinline
-func r35Work(n, rounds int) int {
+func r35Work(n, rounds int) (int, int) {
 	total := 0
+	want := 0
 	for r := 0; r < rounds; r++ {
 		b := make([]byte, n)
 		for i := range b {
 			b[i] = byte((i + r) & 0xFF)
 		}
 		got := r35Sum(b)
-		want := r35Oracle(n, r)
-		if got != want {
-			panic("redteam35: round reuse corrupted data")
+		w := r35Oracle(n, r)
+		want += w
+		if got != w {
+			return got, w
 		}
 		total += got
 	}
-	return total
+	return total, want
 }
 
-//go:noinline
-func r35Interleave(n int) int {
+func r35Interleave(n int) (int, int, int) {
 	var kept []byte
 	last := 0
 	for r := 0; r < 4; r++ {
@@ -56,17 +60,28 @@ func r35Interleave(n int) int {
 		last = r35Sum(b)
 	}
 	first := r35Sum(kept)
-	if first != n*1 {
-		panic("redteam35: carried buffer aliased by later reuse")
+	return first, last, first + last
+}
+
+var r35Failed bool
+
+func r35Check(name string, cond bool, got, want string) {
+	if !cond {
+		fmt.Printf("FAIL %s: got %s want %s\n", name, got, want)
+		r35Failed = true
+		return
 	}
-	if last != n*4 {
-		panic("redteam35: last buffer has wrong contents")
-	}
-	return first + last
+	fmt.Printf("ok %s\n", name)
 }
 
 func main() {
-	total := r35Work(1024, 200)
-	fmt.Println("reuse:", total)
-	fmt.Println("interleave:", r35Interleave(1024))
+	total, want := r35Work(1024, 200)
+	r35Check("arena-reuse-rounds", total == want, fmt.Sprint(total), fmt.Sprint(want))
+	first, last, both := r35Interleave(1024)
+	r35Check("arena-reuse-carried", first == 1024*1, fmt.Sprint(first), fmt.Sprint(1024*1))
+	r35Check("arena-reuse-last", last == 1024*4, fmt.Sprint(last), fmt.Sprint(1024*4))
+	r35Check("arena-reuse-interleave", both == 1024*5, fmt.Sprint(both), fmt.Sprint(1024*5))
+	if r35Failed {
+		os.Exit(1)
+	}
 }

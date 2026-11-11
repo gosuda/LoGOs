@@ -5,6 +5,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"runtime"
 )
 
@@ -33,10 +34,22 @@ func r20Capture(n int) int {
 	return v
 }
 
+var r20Failed bool
+
+func r20Check(name string, cond bool, got, want string) {
+	if !cond {
+		fmt.Printf("FAIL %s: got %s want %s\n", name, got, want)
+		r20Failed = true
+		return
+	}
+	fmt.Printf("ok %s\n", name)
+}
+
 func main() {
 	got := r20Capture(64)
-	fmt.Println(got)
-	if got != 13579 {
-		panic("redteam20: arena-held stack pointer invalidated")
+	want := 13579
+	r20Check("arena-stack-ref-kept", got == want, fmt.Sprint(got), fmt.Sprint(want))
+	if r20Failed {
+		os.Exit(1)
 	}
 }
