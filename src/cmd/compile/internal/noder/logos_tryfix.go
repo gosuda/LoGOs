@@ -31,12 +31,43 @@ func logosReportMisplacedTry(m *posMap, files []*syntax.File, info *types2.Info,
 	if !ok {
 		return false
 	}
-	r, ok := misplacedTryFix(info, f, src, terr.Pos)
-	if !ok {
-		return false
+	if r, ok := misplacedTryFix(info, f, src, terr.Pos); ok {
+		base.LogosReport(logosDiag(m, r))
+		return true
 	}
-	base.LogosReport(logosDiag(m, r))
-	return true
+	if r, ok := misplacedTryBare(info, f, src, terr.Pos); ok {
+		base.LogosReport(logosDiag(m, r))
+		return true
+	}
+	return false
+}
+
+func misplacedTryBare(info *types2.Info, f *syntax.File, src []byte, pos syntax.Pos) (lint.Result, bool) {
+	t, _ := tryAt(f, pos)
+	if t == nil {
+		return lint.Result{}, false
+	}
+	var origin, typ string
+	var line int
+	if call, ok := syntax.Unparen(t.X).(*syntax.CallExpr); ok {
+		origin = syntax.String(call)
+		line = int(call.Pos().Line())
+		if tup, ok := checkedCallResult(info, call); ok {
+			typ = types2.TypeString(tup.At(0).Type(), func(p *types2.Package) string { return p.Name() })
+		}
+	}
+	return lint.Result{
+		Rule:     "correctness::misplaced_try",
+		Severity: lint.Forbid,
+		Pos:      syntax.StartPos(t),
+		End:      syntax.EndPos(t),
+		Message:  "? must end an assignment, expression statement, defer, or errdefer",
+		Provenance: lint.Provenance{
+			OriginExpr:   origin,
+			OriginLine:   line,
+			InferredType: typ,
+		},
+	}, true
 }
 
 func enclosingSig(info *types2.Info, fn syntax.Node) (*types2.Signature, bool) {
@@ -74,6 +105,9 @@ func misplacedTryFix(info *types2.Info, f *syntax.File, src []byte, pos syntax.P
 	}
 	stmt, fn, ok := enclosingSplitStmt(stack)
 	if !ok {
+		return lint.Result{}, false
+	}
+	if countTryExpr(stmt) > 1 {
 		return lint.Result{}, false
 	}
 	if tup.Len() > 2 {
@@ -202,6 +236,17 @@ func enclosingSplitStmt(stack []syntax.Node) (syntax.Stmt, syntax.Node, bool) {
 		}
 	}
 	return nil, nil, false
+}
+
+func countTryExpr(stmt syntax.Stmt) int {
+	n := 0
+	syntax.Inspect(stmt, func(nd syntax.Node) bool {
+		if _, ok := nd.(*syntax.TryExpr); ok {
+			n++
+		}
+		return true
+	})
+	return n
 }
 
 func leftmostTry(stmt syntax.Stmt, t *syntax.TryExpr, src []byte) bool {
