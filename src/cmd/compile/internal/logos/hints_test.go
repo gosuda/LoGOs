@@ -208,6 +208,29 @@ func TestHintsSiteWithoutEditIsDropped(t *testing.T) {
 	if sites := onlyFile(t, h.Report()).Sites; len(sites) != 0 {
 		t.Errorf("sites without edits survive: %+v", sites)
 	}
+	surviving := NewHints(pkg.Path())
+	surviving.AddFile(pkg, info, file, src)
+	_, edits := Lower(pkg, info, []*syntax.File{file}, map[*syntax.File][]byte{file: src})
+	surviving.Lowered(file, edits[file])
+	sites := onlyFile(t, surviving.Report()).Sites
+	if len(sites) == 0 {
+		t.Fatal("no hint site survives its own lowering edit")
+	}
+	var interp *SiteHint
+	for i := range sites {
+		if sites[i].Kind == SiteInterp {
+			interp = &sites[i]
+		}
+	}
+	if interp == nil {
+		t.Fatalf("interpolation site dropped despite its lowering edit: %+v", sites)
+	}
+	if interp.Range.Start != startOf(t, src, `$"user {name}!"`) || interp.Range.End != endOf(t, src, `$"user {name}!"`) {
+		t.Errorf("interpolation range %+v, want the lowering-map span", interp.Range)
+	}
+	if interp.FixedBytes == nil || !strings.Contains(interp.Lowered, "make([]byte, 0,") {
+		t.Errorf("interpolation survivor lacks fixed bytes or lowered code: %+v", interp)
+	}
 }
 
 func TestHintsRodata(t *testing.T) {
