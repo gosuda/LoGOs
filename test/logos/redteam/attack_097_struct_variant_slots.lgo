@@ -50,10 +50,22 @@ func main() {
 	v = A{X: 3, Y: 4}
 	checkA("struct-variant-reuse-clears-stale-bytes", v, 3, 4)
 	if w, ok := v.(V); ok {
+		check("struct-variant-reuse-equality-cleared-slot", w == A{X: 3, Y: 4} && w != A{X: 3, Y: 5} && w != A{X: 2, Y: 4}, fmt.Sprint(w == A{X: 3, Y: 4}), "true")
+	} else {
+		check("struct-variant-reuse-equality-cleared-slot", false, "not-member", "true")
+	}
+	if w, ok := v.(V); ok {
 		a, ok := w.(A)
 		check("struct-variant-assert-to-union", ok && a.X == 3 && a.Y == 4, fmt.Sprint(w), fmt.Sprint(A{X: 3, Y: 4}))
 	} else {
 		check("struct-variant-assert-to-union", false, "not-member", fmt.Sprint(A{X: 3, Y: 4}))
+	}
+	v = B{Name: "tail", N: 7}
+	checkB("struct-variant-regrow-rewrites-tail", v, "tail", 7)
+	if w, ok := v.(V); ok {
+		check("struct-variant-regrow-equality", w == B{Name: "tail", N: 7} && w != B{Name: "tail", N: 9} && w != B{Name: "x", N: 7}, fmt.Sprint(w == B{Name: "tail", N: 7}), "true")
+	} else {
+		check("struct-variant-regrow-equality", false, "not-member", "true")
 	}
 	if failed {
 		os.Exit(1)
