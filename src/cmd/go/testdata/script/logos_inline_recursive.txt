@@ -27,6 +27,19 @@ stderr 'can inline smallPlain'
 stderr 'can inline smallEven'
 stderr 'cannot inline plainBig'
 stderr 'cannot inline midBig'
+logos run -O=3 ./cmd
+stdout '^42$'
+stdout '^5 6$'
+stdout '^95$'
+stdout '^415413 6902622878173$'
+stdout '^1683910 1683911$'
+cp stdout $WORK/rec-o3.txt
+logos run -O=2 ./cmd
+cp stdout $WORK/rec-o2.txt
+cmp $WORK/rec-o3.txt $WORK/rec-o2.txt
+logos run -O=s ./cmd
+cp stdout $WORK/rec-os.txt
+cmp $WORK/rec-o3.txt $WORK/rec-os.txt
 
 -- go.mod --
 module example.com/inlrec
@@ -281,4 +294,26 @@ p7 := p6 + 7
 p8 := p7 * 3
 p9 := p8 - p7
 return p9 + x
+}
+
+-- drive.go --
+package rec
+
+import "fmt"
+
+func Drive() {
+	fmt.Println(tiny(41))
+	fmt.Println(smallEven(10), smallOdd(10))
+	fmt.Println(smallPlain(3))
+	fmt.Println(plainBig(3), midBig(3))
+	fmt.Println(bigEven(4), bigOdd(4))
+}
+
+-- cmd/main.go --
+package main
+
+import rec "example.com/inlrec"
+
+func main() {
+	rec.Drive()
 }
