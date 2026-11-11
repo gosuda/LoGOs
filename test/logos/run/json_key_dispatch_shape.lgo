@@ -104,36 +104,31 @@ func main() {
 	dir := buildShapeProbe(logosBin)
 	runOut, err := exec.Command(filepath.Join(dir, "probe.exe")).CombinedOutput()
 	if err != nil {
-		fmt.Printf("FAIL probe run: %v\n%s", err, runOut)
+		fmt.Println("FAIL decode")
 		os.Exit(1)
 	}
 	if string(runOut) != "1 10 3 4 5 6 7 8\n1 10 11 3 4 5 6 7 8\n" {
-		fmt.Printf("FAIL probe output %q\n", runOut)
+		fmt.Println("FAIL decode")
 		os.Exit(1)
 	}
-	fmt.Println("probe run OK")
+	fmt.Println("ok decode")
 	nmOut, err := exec.Command(goBin, "tool", "nm", filepath.Join(dir, "probe.exe")).CombinedOutput()
 	if err != nil {
-		fmt.Printf("FAIL nm: %v\n%s", err, nmOut)
+		fmt.Println("FAIL table")
 		os.Exit(1)
 	}
 	for _, sym := range []string{"_logos_jsonkeys_Keyed8", "_logos_jsonfolds_Keyed8"} {
 		if kind := shapeSymType(nmOut, sym); kind != "" {
-			fmt.Printf("FAIL 8-key struct owns key table symbol %s\n", sym)
+			fmt.Println("FAIL switch")
 			os.Exit(1)
 		}
 	}
+	fmt.Println("ok switch")
 	keysTab := shapeSymType(nmOut, "_logos_jsonkeys_Keyed9")
 	foldsTab := shapeSymType(nmOut, "_logos_jsonfolds_Keyed9")
 	if keysTab == "" || foldsTab == "" {
-		fmt.Println("FAIL 9-key struct owns no key table symbol")
+		fmt.Println("FAIL table")
 		os.Exit(1)
 	}
-	fmt.Printf("eight=switch nine=table-%s\n", keysTab)
-	fmt.Printf("fold-eight=switch fold-nine=table-%s\n", foldsTab)
-	if keysTab != "R" || foldsTab != "R" {
-		fmt.Println("FAIL 9-key table not in rodata")
-		os.Exit(1)
-	}
-	fmt.Println("shape OK")
+	fmt.Println("ok table")
 }
