@@ -58,7 +58,8 @@ the support sources become the shared module
 github.com/gosuda/loGos/rt under DIR/_logos_deps/rt.
 
 DIR must not exist or must be empty. The ejected tree builds with an
-upstream Go 1.27 toolchain. Eject never writes into the source tree.
+upstream Go 1.27.2 or newer toolchain. Eject never writes into the
+source tree.
 	`,
 }
 

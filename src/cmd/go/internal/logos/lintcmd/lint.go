@@ -36,9 +36,10 @@ No severity lowers that diagnostic and //logos:allow does not silence it.
 In a Go package only 'logos lint' applies it.
 
 The build flags are those of 'logos build'. The -pedantic flag enables the
-pedantic group, overriding logos.toml. The -json-diagnostics flag prints
-one JSON object per diagnostic on stderr. Packages of other modules and the
-standard library are never linted.
+pedantic group, raising it from allow to warn. A stricter logos.toml
+severity stays in force, and -pedantic=false turns the group off. The
+-json-diagnostics flag prints one JSON object per diagnostic on stderr.
+Packages of other modules and the standard library are never linted.
 
 See also: logos build.
 	`,
