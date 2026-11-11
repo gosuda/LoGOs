@@ -201,12 +201,51 @@ func (check *Checker) logosRecordComposite(obj *Const, init syntax.Expr, x *oper
 		obj.typ = &ConstView{Elem: base, ConstMap: true}
 	}
 	if _, ok := base.Underlying().(*Map); (!ok || v.Type().Kind != ctfe.KMap) && logosTypeHasMap(base) {
-		check.errorf(obj, InvalidConstInit, "%s const %s holds a map and cannot live in read-only memory", logosConstEvalRule, obj.Name())
-		obj.typ = Typ[Invalid]
-		return true
+		if bad := logosBadNestedMapKey(base); bad != nil {
+			check.errorf(obj, InvalidConstInit, "[comptime::constmap_key_type] const map key type %s cannot be hashed: use a string, number, bool, or a struct or array of them", bad)
+			obj.typ = Typ[Invalid]
+			return true
+		}
 	}
 	check.logosRecord(obj, v)
 	return true
+}
+
+func logosBadNestedMapKey(t Type) Type {
+	seen := map[Type]bool{}
+	var bad Type
+	var walk func(t Type)
+	walk = func(t Type) {
+		if t == nil || seen[t] || bad != nil {
+			return
+		}
+		seen[t] = true
+		u := Unalias(t)
+		if n, ok := u.(*Named); ok {
+			u = n.Underlying()
+		}
+		switch u := u.(type) {
+		case *Map:
+			if !logosConstMapKeyOK(u.Key()) {
+				bad = u.Key()
+				return
+			}
+			walk(u.Key())
+			walk(u.Elem())
+		case *Struct:
+			for i := range u.NumFields() {
+				walk(u.Field(i).Type())
+			}
+		case *Slice:
+			walk(u.Elem())
+		case *Array:
+			walk(u.Elem())
+		case *Pointer:
+			walk(u.Elem())
+		}
+	}
+	walk(t)
+	return bad
 }
 
 func logosTypeHasMap(t Type) bool {
@@ -233,6 +272,8 @@ func logosTypeHasMap(t Type) bool {
 		case *Slice:
 			return walk(u.Elem())
 		case *Array:
+			return walk(u.Elem())
+		case *Pointer:
 			return walk(u.Elem())
 		}
 		return false

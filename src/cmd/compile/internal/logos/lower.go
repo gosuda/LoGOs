@@ -60,6 +60,7 @@ func Lower(pkg *types2.Package, info *types2.Info, files []*syntax.File, src map
 	shared := &packageLower{info: info, tpkg: pkg, constMaps: collectConstMaps(files, info)}
 	shared.importedMaps = map[*types2.Var]*constMapGen{}
 	shared.importedDone = map[string]bool{}
+	shared.composites = map[*types2.Const]*compositeInfo{}
 	base.ClearLogosCtClones(pkg.Path())
 	shared.ctExp = newCfExpander(shared, files, src) // M7-S3 hook: comptime generics of every file, registered before any file lowers.
 	edits := make(map[*syntax.File][]Edit)
@@ -130,19 +131,17 @@ func hasSynthStaticMethods(pkg *types2.Package) bool {
 
 // packageLower carries the state shared by every file of one package.
 type packageLower struct {
-	info         *types2.Info
-	tpkg         *types2.Package
-	siteSeq      int
-	constMaps    map[*types2.Const]*constMapGen // M5-S4: every const map of the package.
-	importedMaps map[*types2.Var]*constMapGen
-	importedSeq  int
-	importedDone map[string]bool
-	ctExp        *cfExpander // M7-S3: definitions, memo, and cycle stack across files.
-	// jsonHelpers pins one traversal-helper pair per spelled
-	// generated-side type (M11 R1), keyed by type spelling so files
-	// share helpers and repeated instantiations reuse one pair.
-	jsonHelpers map[string]*jsonHelperDef
-	// jsonHelperSeq mints helper and import-alias numbers.
+	info          *types2.Info
+	tpkg          *types2.Package
+	siteSeq       int
+	constMaps     map[*types2.Const]*constMapGen
+	importedMaps  map[*types2.Var]*constMapGen
+	importedSeq   int
+	importedDone  map[string]bool
+	composites    map[*types2.Const]*compositeInfo
+	compositeSeq  int
+	ctExp         *cfExpander
+	jsonHelpers   map[string]*jsonHelperDef
 	jsonHelperSeq int
 	jsonUnionKeys map[string]bool
 }

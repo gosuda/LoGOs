@@ -94,6 +94,12 @@ func (fl *fileLower) lowerCTFEFileList(gst *groupedMoveState) {
 			i--
 			continue
 		}
+		if compositeIsBearing(r.obj, r.val) {
+			fl.lowerCompositeSpec(cd, r.obj, r.val)
+			*list = slices.Delete(*list, i, i+1)
+			i--
+			continue
+		}
 		if !r.val.IsComposite() && !r.keepCall {
 			cd.Values = r.lit
 			fl.add(fl.off(syntax.StartPos(r.init)), fl.endOff(r.init), r.text)
@@ -137,6 +143,12 @@ func (fl *fileLower) lowerCTFEBlock(b *syntax.BlockStmt, gst *groupedMoveState) 
 			}
 			if g, ok := fl.pkg.constMaps[r.obj]; ok {
 				fl.lowerConstMapSpec(cd, g)
+				ds.DeclList = slices.Delete(ds.DeclList, j, j+1)
+				j--
+				continue
+			}
+			if compositeIsBearing(r.obj, r.val) {
+				fl.lowerCompositeSpec(cd, r.obj, r.val)
 				ds.DeclList = slices.Delete(ds.DeclList, j, j+1)
 				j--
 				continue

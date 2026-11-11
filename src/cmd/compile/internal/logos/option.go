@@ -131,6 +131,9 @@ func (fl *fileLower) lowerOptExpr(e syntax.Expr) syntax.Expr {
 		if out, ok := fl.lowerConstMapName(e); ok {
 			return out
 		}
+		if out, ok := fl.compositeRewriteRoot(e); ok {
+			return out
+		}
 		return fl.narrowAccess(e)
 	case *syntax.BasicLit:
 		return e
@@ -148,6 +151,9 @@ func (fl *fileLower) lowerOptExpr(e syntax.Expr) syntax.Expr {
 	case *syntax.IndexExpr:
 		return fl.lowerMapIndex(e)
 	case *syntax.SelectorExpr:
+		if out, ok := fl.compositeRewriteRoot(e); ok {
+			return out
+		}
 		if g, ok := fl.constMapUse(e); ok {
 			return fl.lowerConstMapSelector(e, g)
 		}

@@ -1,0 +1,204 @@
+// run
+
+package main
+
+import (
+	"fmt"
+	"os"
+	"reflect"
+)
+
+var failed bool
+
+func check(name string, cond bool, got any, want any) {
+	if !cond {
+		failed = true
+		fmt.Println("FAIL", name+":", "got", got, "want", want)
+		return
+	}
+	fmt.Println("ok", name)
+}
+
+type box struct {
+	M map[string]int
+	N int
+}
+
+type item struct {
+	M map[string]int
+	N int
+}
+
+type outer struct {
+	Inner box
+}
+
+type boxMaps struct {
+	M map[string]map[string]int
+}
+
+const structMap = box{M: map[string]int{"b": 2, "a": 1, "c": 3}, N: 7}
+
+const sliceStruct = []item{{M: map[string]int{"b": 2, "a": 1}, N: 1}, {M: map[string]int{"d": 4, "c": 3}, N: 2}}
+
+const arrayMap = [2]map[string]int{{"b": 2, "a": 1}, {"d": 4, "c": 3}}
+
+const nestedMap = outer{Inner: box{M: map[string]int{"b": 2, "a": 1}, N: 5}}
+
+const nilMap = box{N: 1}
+
+const mapMaps = boxMaps{M: map[string]map[string]int{"o": {"b": 2, "a": 1}, "p": {"d": 4, "c": 3}}}
+
+const bigMap = box{M: map[string]int{"k09": 9, "k00": 0, "k05": 5, "k03": 3, "k08": 8, "k01": 1, "k06": 6, "k04": 4, "k07": 7, "k02": 2}, N: 9}
+
+//logos:zeroalloc
+//go:noinline
+func viewStruct(v const *box) int {
+	return v.M["a"] ?? -1
+}
+
+//logos:zeroalloc
+//go:noinline
+func viewSlice(v const []item) int {
+	return v[0].M["a"] ?? -1
+}
+
+//logos:zeroalloc
+//go:noinline
+func viewMap(m const map[string]int) int {
+	return m["a"] ?? -1
+}
+func testStruct() {
+	check("struct-read", (structMap.M["a"] ?? -1) == 1, (structMap.M["a"] ?? -1), 1)
+	check("struct-len", len(structMap.M) == 3, len(structMap.M), 3)
+	v, ok := structMap.M["zz"]
+	check("struct-comma-miss", !ok && v == 0, v, 0)
+	keys := ""
+	for k, val := range structMap.M {
+		keys += fmt.Sprintf("%s%d;", k, val)
+	}
+	check("struct-range", keys == "a1;b2;c3;", keys, "a1;b2;c3;")
+	c1 := structMap
+	c1.M["a"] = 99
+	check("struct-copy-reread", (structMap.M["a"] ?? -1) == 1, (structMap.M["a"] ?? -1), 1)
+	c2 := structMap
+	c3 := structMap
+	c2.M["b"] = 20
+	c3.M["b"] = 30
+	check("struct-two-copies", (c2.M["b"] ?? -1) == 20 && (c3.M["b"] ?? -1) == 30 && (structMap.M["b"] ?? -1) == 2, "copies", "20 30 2")
+	check("struct-fmt", fmt.Sprint(structMap) != "", true, true)
+	check("struct-deep", reflect.DeepEqual(structMap.M, map[string]int{"a": 1, "b": 2, "c": 3}), true, true)
+}
+
+func testSlice() {
+	check("slice-read", (sliceStruct[0].M["a"] ?? -1) == 1, (sliceStruct[0].M["a"] ?? -1), 1)
+	s1 := sliceStruct
+	s1[0].M["a"] = 99
+	check("slice-copy-reread", (sliceStruct[0].M["a"] ?? -1) == 1, (sliceStruct[0].M["a"] ?? -1), 1)
+	s2 := sliceStruct
+	s3 := sliceStruct
+	s2[1].M["c"] = 30
+	s3[1].M["c"] = 40
+	check("slice-two-copies", (s2[1].M["c"] ?? -1) == 30 && (s3[1].M["c"] ?? -1) == 40, "copies", "30 40")
+	check("slice-fmt", fmt.Sprint(sliceStruct) != "", true, true)
+	check("slice-deep", reflect.DeepEqual(sliceStruct[1].M, map[string]int{"c": 3, "d": 4}), true, true)
+}
+
+func testArray() {
+	check("array-read", (arrayMap[0]["a"] ?? -1) == 1, (arrayMap[0]["a"] ?? -1), 1)
+	check("array-len", len(arrayMap[1]) == 2, len(arrayMap[1]), 2)
+	a1 := arrayMap
+	a1[0]["a"] = 99
+	check("array-copy-reread", (arrayMap[0]["a"] ?? -1) == 1, (arrayMap[0]["a"] ?? -1), 1)
+	a2 := arrayMap
+	a3 := arrayMap
+	a2[1]["c"] = 30
+	a3[1]["c"] = 40
+	check("array-two-copies", (a2[1]["c"] ?? -1) == 30 && (a3[1]["c"] ?? -1) == 40, "copies", "30 40")
+	check("array-fmt", fmt.Sprint(arrayMap) != "", true, true)
+}
+
+func testNested() {
+	check("nested-read", (nestedMap.Inner.M["a"] ?? -1) == 1, (nestedMap.Inner.M["a"] ?? -1), 1)
+	n1 := nestedMap
+	n1.Inner.M["a"] = 99
+	check("nested-copy-reread", (nestedMap.Inner.M["a"] ?? -1) == 1, (nestedMap.Inner.M["a"] ?? -1), 1)
+	check("nested-fmt", fmt.Sprint(nestedMap) != "", true, true)
+	check("nested-deep", reflect.DeepEqual(nestedMap.Inner.M, map[string]int{"a": 1, "b": 2}), true, true)
+}
+
+func testMaps() {
+	inner, ok := mapMaps.M["o"]
+	check("maps-read", ok && (inner["a"] ?? -1) == 1, ok, true)
+	check("maps-len", len(mapMaps.M) == 2, len(mapMaps.M), 2)
+	_, okMiss := mapMaps.M["zz"]
+	check("maps-comma", !okMiss, okMiss, false)
+	outerKeys := ""
+	for k := range mapMaps.M {
+		outerKeys += k + ";"
+	}
+	check("maps-range", outerKeys == "o;p;", outerKeys, "o;p;")
+	m1 := mapMaps
+	m1o, _ := m1.M["o"]
+	m1o["a"] = 99
+	inner2, _ := mapMaps.M["o"]
+	check("maps-copy-reread", (inner2["a"] ?? -1) == 1, (inner2["a"] ?? -1), 1)
+	n1 := mapMaps
+	n2 := mapMaps
+	n1o, _ := n1.M["o"]
+	n2o, _ := n2.M["o"]
+	n1o["b"] = 20
+	n2o["b"] = 30
+	check("maps-two-copies", (n1o["b"] ?? -1) == 20 && (n2o["b"] ?? -1) == 30, "copies", "20 30")
+	check("maps-fmt", fmt.Sprint(mapMaps) != "", true, true)
+}
+
+func testNil() {
+	check("nil-len", len(nilMap.M) == 0, len(nilMap.M), 0)
+	check("nil-read", (nilMap.M["a"] ?? -1) == -1, (nilMap.M["a"] ?? -1), -1)
+	nilKeys := 0
+	for range nilMap.M {
+		nilKeys++
+	}
+	check("nil-range", nilKeys == 0, nilKeys, 0)
+	cn := nilMap
+	check("nil-copy", cn.M == nil, cn.M == nil, true)
+	check("nil-fmt", fmt.Sprint(nilMap) != "", true, true)
+	check("nil-deep", reflect.DeepEqual(nilMap.M, map[string]int(nil)), true, true)
+}
+
+func testBig() {
+	check("big-read", (bigMap.M["k05"] ?? -1) == 5, (bigMap.M["k05"] ?? -1), 5)
+	check("big-len", len(bigMap.M) == 10, len(bigMap.M), 10)
+	bkeys := ""
+	for k := range bigMap.M {
+		bkeys += k + ";"
+	}
+	check("big-range", bkeys == "k00;k01;k02;k03;k04;k05;k06;k07;k08;k09;", bkeys, "k00;k01;k02;k03;k04;k05;k06;k07;k08;k09;")
+	b1 := bigMap
+	b1.M["k05"] = 99
+	check("big-copy", (bigMap.M["k05"] ?? -1) == 5, (bigMap.M["k05"] ?? -1), 5)
+}
+
+func testViews() {
+	cs := structMap
+	check("view-struct", viewStruct(&cs) == 1, viewStruct(&cs), 1)
+	ss := sliceStruct
+	check("view-slice", viewSlice(ss) == 1, viewSlice(ss), 1)
+	ms := structMap.M
+	check("view-map", viewMap(ms) == 1, viewMap(ms), 1)
+}
+
+func main() {
+	testStruct()
+	testSlice()
+	testArray()
+	testNested()
+	testMaps()
+	testNil()
+	testBig()
+	testViews()
+	if failed {
+		os.Exit(1)
+	}
+}

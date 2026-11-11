@@ -12,17 +12,17 @@ type ownedBox struct {
 	M map[string]int
 }
 
-const ownedStructMap = ownedBox{M: map[string]int{"a": 1}} // ERROR "const_eval"
+const ownedStructMap = ownedBox{M: map[string]int{"a": 1}}
 
-const ownedSliceMap = []map[string]int{{"a": 1}} // ERROR "const_eval"
+const ownedSliceMap = []map[string]int{{"a": 1}}
 
-const ownedArrayMap = [1]map[string]int{{"a": 1}} // ERROR "const_eval"
+const ownedArrayMap = [1]map[string]int{{"a": 1}}
 
 type ownedOuter struct {
 	Inner ownedBox
 }
 
-const ownedNestedMap = ownedOuter{Inner: ownedBox{M: map[string]int{"a": 1}}} // ERROR "const_eval"
+const ownedNestedMap = ownedOuter{Inner: ownedBox{M: map[string]int{"a": 1}}}
 
 func addrIndex(v const []int) {
 	p := &v[0]

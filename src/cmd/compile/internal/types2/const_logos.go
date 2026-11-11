@@ -333,6 +333,9 @@ func (check *Checker) logosConstStore(lhs syntax.Expr) bool {
 	}
 	base := check.logosConstStoreBase(lhs)
 	if base == nil {
+		base, _ = check.logosCompositeMapStore(lhs)
+	}
+	if base == nil {
 		return false
 	}
 	check.errorf(base, IncompatibleAssign, "%s cannot %s through const view %s", logosConstMutation, op, ExprString(base))
@@ -367,6 +370,76 @@ func (check *Checker) logosConstStoreBase(lhs syntax.Expr) syntax.Expr {
 		return check.logosConstStoreBase(e.X)
 	}
 	return nil
+}
+
+func (check *Checker) logosCompositeMapRootIn(e syntax.Expr) (*Const, bool) {
+	for {
+		e = syntax.Unparen(e)
+		switch n := e.(type) {
+		case *syntax.Name:
+			if obj, ok := check.Info.Defs[n].(*Const); ok && logosTypeHasMap(obj.Type()) && !check.logosIsBareMap(obj) {
+				return obj, true
+			}
+			if obj, ok := check.Info.Uses[n].(*Const); ok && logosTypeHasMap(obj.Type()) && !check.logosIsBareMap(obj) {
+				return obj, true
+			}
+			return nil, false
+		case *syntax.SelectorExpr:
+			e = n.X
+		case *syntax.IndexExpr:
+			e = n.X
+		case *syntax.Operation:
+			if n.Op == syntax.Mul && n.Y == nil {
+				e = n.X
+			} else {
+				return nil, false
+			}
+		default:
+			return nil, false
+		}
+	}
+}
+
+func (check *Checker) logosIsBareMap(obj *Const) bool {
+	v, ok := check.Info.LogosCTFE[obj]
+	if !ok || v.Type() == nil {
+		return false
+	}
+	if _, ok := obj.Type().Underlying().(*Map); !ok {
+		return false
+	}
+	return v.Type().Kind == ctfe.KMap
+}
+
+func (check *Checker) logosCompositeMapStore(lhs syntax.Expr) (syntax.Expr, bool) {
+	if _, ok := check.logosCompositeMapRootIn(lhs); !ok {
+		return nil, false
+	}
+	for e := lhs; ; {
+		e = syntax.Unparen(e)
+		if t := check.Info.TypeOf(e); t != nil {
+			if _, ok := t.Underlying().(*Map); ok {
+				return e, true
+			}
+		}
+		switch n := e.(type) {
+		case *syntax.IndexExpr:
+			e = n.X
+		case *syntax.SelectorExpr:
+			e = n.X
+		case *syntax.Operation:
+			if n.Op == syntax.Mul && n.Y == nil {
+				e = n.X
+			} else {
+				return nil, false
+			}
+		default:
+			return nil, false
+		}
+		if _, ok := check.logosCompositeMapRootIn(e); !ok {
+			return nil, false
+		}
+	}
 }
 
 func (check *Checker) logosConstSelect(x *operand, e *syntax.SelectorExpr, sel string) bool {

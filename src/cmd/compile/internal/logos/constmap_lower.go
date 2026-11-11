@@ -201,8 +201,9 @@ func (fl *fileLower) constMapUse(x syntax.Expr) (*constMapGen, bool) {
 	switch e := syntax.Unparen(x).(type) {
 	case *syntax.Name:
 		if obj, ok := fl.pkg.info.Uses[e].(*types2.Const); ok {
-			g, ok := fl.pkg.constMaps[obj]
-			return g, ok
+			if g, ok := fl.pkg.constMaps[obj]; ok {
+				return g, true
+			}
 		}
 		if obj, ok := fl.pkg.info.Uses[e].(*types2.Var); ok {
 			return fl.importedConstMap(obj, e.Pos())
@@ -211,14 +212,13 @@ func (fl *fileLower) constMapUse(x syntax.Expr) (*constMapGen, bool) {
 		if e.Sel == nil {
 			return nil, false
 		}
-		if _, ok := fl.pkg.info.Selections[e]; ok {
-			return nil, false
-		}
-		if obj, ok := fl.pkg.info.Uses[e.Sel].(*types2.Var); ok {
-			return fl.importedConstMap(obj, e.Pos())
+		if obj, ok := fl.pkg.info.Uses[e.Sel].(*types2.Var); ok && !obj.IsField() {
+			if g, ok := fl.importedConstMap(obj, e.Pos()); ok {
+				return g, true
+			}
 		}
 	}
-	return nil, false
+	return fl.compositeHiddenFor(x)
 }
 
 func importedConstMapRecord(obj *types2.Var) (facts.ConstMapFact, bool) {
