@@ -684,11 +684,19 @@ func collectBusyProfile(t *testing.T, prof string, count int, fn func(uint64) ui
 	_ = sink
 }
 
+func goSpinSink(iters uint64) uint64 {
+	x := uint64(1)
+	for i := uint64(0); i < iters; i++ {
+		x += x*6364136223846793005 + 1442695040888963407
+	}
+	return x
+}
+
 func profileCanarySamples(t *testing.T) int {
 	t.Helper()
 	prof := filepath.Join(t.TempDir(), "canary.prof")
-	collectBusyProfile(t, prof, 10, callPlainBusy, 100000000)
-	_, total := profileCallerSamples(t, prof, "callPlainBusy")
+	collectBusyProfile(t, prof, 10, goSpinSink, 100000000)
+	_, total := profileCallerSamples(t, prof, "goSpinSink")
 	return total
 }
 
