@@ -5,13 +5,13 @@
 package logos
 
 import (
-	"fmt"
-	"slices"
-	"strings"
-
 	"cmd/compile/internal/base"
 	"cmd/compile/internal/syntax"
 	"cmd/compile/internal/types2"
+	"fmt"
+	"go/constant"
+	"slices"
+	"strings"
 )
 
 type chainResult struct {
@@ -776,6 +776,8 @@ type chainEmit struct {
 	isTry    bool
 	closures []otext
 	outElem  string
+	outCap   string
+	hasCap   bool
 }
 
 func (ce *chainEmit) prepare() {
@@ -812,6 +814,62 @@ func (ce *chainEmit) prepare() {
 		ce.closures = append(ce.closures, cat(gen(fmt.Sprintf("%s_i := ", cg.prefix)), ce.argText(ce.term)))
 	}
 	ce.outElem = elem
+	ce.outCap, ce.hasCap = ce.capHint()
+}
+
+func (ce *chainEmit) capHint() (string, bool) {
+	if !ce.needOut() {
+		return "", false
+	}
+	if ce.term.method != "" {
+		return "", false
+	}
+	if ce.cg.elemT == nil {
+		return "", false
+	}
+	filtered := false
+	bounded := true
+	limit := int64(-1)
+	for _, op := range ce.ops {
+		switch op.method {
+		case "filter":
+			filtered = true
+		case "take":
+			n, ok := ce.constTake(op.arg)
+			if !ok {
+				bounded = false
+				continue
+			}
+			if limit < 0 || n < limit {
+				limit = n
+			}
+		}
+	}
+	recv := "len(" + ce.cg.prefix + "_rcv)"
+	if !bounded || limit < 0 {
+		if filtered {
+			return "", false
+		}
+		return recv, true
+	}
+	return fmt.Sprintf("min(%d, %s)", limit, recv), true
+}
+func (ce *chainEmit) constTake(e syntax.Expr) (int64, bool) {
+	if e == nil {
+		return 0, false
+	}
+	v, ok := typeConst(ce.cg.fl.pkg.info, syntax.Unparen(e))
+	if !ok || v == nil {
+		return 0, false
+	}
+	n, ok := constant.Int64Val(v)
+	if !ok {
+		return 0, false
+	}
+	if n < 0 {
+		n = 0
+	}
+	return n, true
 }
 
 func (ce *chainEmit) rsuf() string {
@@ -1003,13 +1061,21 @@ func (cg *chainGen) spellType(t types2.Type) string {
 	return "any"
 }
 
+func (ce *chainEmit) outDecl() string {
+	p := ce.cg.prefix
+	if ce.hasCap {
+		return fmt.Sprintf("%s_out := make([]%s, 0, %s)", p, ce.outElem, ce.outCap)
+	}
+	return "var " + p + "_out []" + ce.outElem
+}
+
 func (ce *chainEmit) loopO() (prelude []otext, body, epilogue []string) {
 	cg := ce.cg
 	p := cg.prefix
 	prelude = append(prelude, cat(gen(p+"_rcv := "), ce.baseText))
 	prelude = append(prelude, ce.closures...)
 	if ce.needOut() {
-		prelude = append(prelude, gen("var "+p+"_out []"+ce.outElem))
+		prelude = append(prelude, gen(ce.outDecl()))
 	}
 	if ce.term.method == "count" {
 		prelude = append(prelude, gen(p+"_c := 0"))
@@ -1206,14 +1272,14 @@ func (ce *chainEmit) countLines(p, cur string) []string {
 
 func (ce *chainEmit) epilogue(p string) []string {
 	switch ce.term.method {
-	case "":
-		return []string{"return " + p + "_out" + ce.rsuf()}
 	case "find", "any", "all", "count":
 		return ce.epilogueValue(p)
 	case "sum":
 		return ce.epilogueSum(p)
 	case "first":
 		return []string{"return " + ce.noneText(p) + ce.rsuf()}
+	case "":
+		return []string{"if len(" + p + "_out) == 0 { " + p + "_out = nil }", "return " + p + "_out" + ce.rsuf()}
 	case "last", "get":
 		return ce.epilogueIndex(p)
 	case "sortBy":

@@ -45,6 +45,11 @@ return nil
 }
 return evtLog
 }
+
+func fusedEmptyNil() bool {
+	r := getXS().filter(x => x > 100).map(x => bump(x)).take(2)
+	return r == nil
+}
 func main() {
 mapCalls = 0
 recvCalls = 0
@@ -57,6 +62,8 @@ _ = fused()
 check("fuse-values", slices.Equal(r, []int{6, 8}), r, []int{6, 8})
 check("fuse-calls", mapCalls == 2 && recvCalls == 1, fmt.Sprint(mapCalls, recvCalls), "2 1")
 check("fuse-allocs", allocs <= 2, allocs, "<=2")
+check("fuse-allocs-exact", allocs == 1, allocs, 1)
+check("fuse-empty-nil", fusedEmptyNil(), fusedEmptyNil(), true)
 want := []string{"p3", "m3", "p1", "p4", "m4"}
 got := fusedOrder()
 check("fuse-order", slices.Equal(got, want), got, want)
