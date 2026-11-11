@@ -24,6 +24,27 @@ func fused() []int {
 	return getXS().filter(x => x > 2).map(x => bump(x)).take(2)
 }
 
+var evtLog []string
+
+func logPred(x int) bool {
+	evtLog = append(evtLog, fmt.Sprintf("p%d", x))
+	return x > 2
+}
+
+func logMap(x int) int {
+	evtLog = append(evtLog, fmt.Sprintf("m%d", x))
+	return 2 * x
+}
+
+func fusedOrder() []string {
+	evtLog = nil
+	r := getXS().filter(x => logPred(x)).map(x => logMap(x)).take(2)
+	if len(r) != 2 || r[0] != 6 || r[1] != 8 {
+		return nil
+	}
+	return evtLog
+}
+
 func main() {
 	mapCalls = 0
 	recvCalls = 0
@@ -36,4 +57,14 @@ func main() {
 	ok := len(r) == 2 && r[0] == 6 && r[1] == 8 && mapCalls == 2 && recvCalls == 1
 	fusedOK := allocs <= 2
 	fmt.Println("fuse-ok:", ok && fusedOK)
+	want := []string{"p3", "m3", "p1", "p4", "m4"}
+	got := fusedOrder()
+	orderOK := len(got) == len(want)
+	for i, w := range want {
+		if !orderOK || got[i] != w {
+			orderOK = false
+			break
+		}
+	}
+	fmt.Println("fuse-order-ok:", orderOK)
 }
