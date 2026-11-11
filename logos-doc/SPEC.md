@@ -1755,7 +1755,7 @@ The toolchain is one complete toolchain for Go and loGo/s: Go packages and loGo/
 
 ### 18.2 Compiler-made names
 
-Compiler-made names use the `_logos_` prefix; comptime copies use the `_logosct` suffix.
+Compiler-made names use the `_logos_` prefix; comptime copies use the `_logosct` suffix. The property accessors `Logos_GetF` and `Logos_SetF` of Sec 2.3 are the one exception: they are exported so that Go importers can call them.
 For example, the lowering of `v := parse(s)?` reads as follows (temporary names and site indices vary by position).
 
 ```go
