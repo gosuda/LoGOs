@@ -194,7 +194,7 @@ func TestDeferTryGC(t *testing.T) {
 			t.Fatalf("want 2 cleanups after free, got %d", len(fin))
 		}
 		runtime.GC()
-		time.Sleep(10 * time.Millisecond)
+		runtime.Gosched()
 	}
 }
 
