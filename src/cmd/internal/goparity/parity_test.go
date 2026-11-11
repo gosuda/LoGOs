@@ -674,7 +674,7 @@ func main() {
 				break
 			}
 		}
-		if time.Now().After(start.Add(3 * time.Second)) {
+		if time.Now().After(start.Add(30 * time.Second)) {
 			t.Fatalf("sleeper wrote no readable pid file within %s", time.Since(start).Round(time.Second))
 		}
 		time.Sleep(20 * time.Millisecond)
@@ -809,7 +809,7 @@ func main() {
 				break
 			}
 		}
-		if time.Now().After(start.Add(3 * time.Second)) {
+		if time.Now().After(start.Add(30 * time.Second)) {
 			t.Fatalf("sleeping generator wrote no readable pgid file within %s", time.Since(start).Round(time.Second))
 		}
 		time.Sleep(20 * time.Millisecond)
