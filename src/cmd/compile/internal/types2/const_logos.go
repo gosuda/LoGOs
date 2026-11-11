@@ -583,6 +583,8 @@ func (check *Checker) logosConstBuiltin(x *operand, call *syntax.CallExpr, id bu
 			x.invalidate()
 			return true
 		}
+	case _Panic:
+		return false
 	case _SliceData:
 		return check.logosConstSliceData(x, call, args)
 	case _Slice:
