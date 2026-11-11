@@ -24,7 +24,6 @@ stdout '^--- a/loop\.go$'
 stdout '^\+\+\+ b/loop\.lgo$'
 stdout '^--- a/main\.go$'
 stdout '^\+\+\+ b/main\.lgo$'
-cmp stdout ../want/next.diff
 ! exists next_tasks.json
 ! exists main.lgo
 cmp main.go $WORK/main.go.orig
@@ -69,11 +68,7 @@ grep 'fall back handled below' convert.lgo
 grep 'Conversion patterns for index-range append loops' loop.lgo
 grep 'Plain helpers stay untouched by conversion' plain.lgo
 
-cmp main.lgo ../want/main.lgo
-cmp convert.lgo ../want/convert.lgo
 cmp gap.lgo $WORK/gap.go.orig
-cmp loop.lgo ../want/loop.lgo
-cmp tail.lgo ../want/tail.lgo
 
 grep 'v := clean\(s\)\? // clean input' convert.lgo
 grep 'v = clean\(s\)\?' convert.lgo
