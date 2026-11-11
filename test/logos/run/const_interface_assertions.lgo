@@ -2,8 +2,21 @@
 
 package main
 
-import "fmt"
+import (
+	"fmt"
+	"os"
+)
 
+var failed bool
+
+func check(name string, cond bool, got, want any) {
+	if !cond {
+		failed = true
+		fmt.Println("FAIL", name+":", "got", got, "want", want)
+		return
+	}
+	fmt.Println("ok", name)
+}
 
 type Qualified interface {
 	const Name() string
@@ -20,7 +33,7 @@ type Good struct {
 }
 
 func (g Good) Name() string { return g.name }
-func (g Good) Extra() int  { return g.extra }
+func (g Good) Extra() int   { return g.extra }
 
 type Small struct {
 	name string
@@ -62,26 +75,25 @@ func DescribePlus(q QPlus) string {
 
 func main() {
 	var v any = Good{name: "a", extra: 7}
-	fmt.Println(ViaConcrete(v))
-
+	check("concrete", ViaConcrete(v) == "a", ViaConcrete(v), "a")
 	var qp QPlus = Good{name: "b", extra: 3}
-	fmt.Println(Narrow(qp).Name())
+	check("narrow", Narrow(qp).Name() == "b", Narrow(qp).Name(), "b")
 
 	var qw Qualified = Good{name: "c", extra: 9}
-	if got, ok := qw.(QPlus); ok {
-		fmt.Println(got.Name(), got.Extra())
-	} else {
-		fmt.Println("unexpected")
+	name, extra := "", 0
+	if g, ok2 := qw.(QPlus); ok2 {
+		name, extra = g.Name(), g.Extra()
 	}
+	check("assert-values", name == "c" && extra == 9, fmt.Sprint(name, " ", extra), "c 9")
 
 	var qs Qualified = Small{name: "s"}
-	if _, ok := qs.(QPlus); ok {
-		fmt.Println("unexpected")
-	} else {
-		fmt.Println("no extra")
-	}
+	_, okMiss := qs.(QPlus)
+	check("assert-miss", !okMiss, okMiss, false)
 
-	fmt.Println(DescribeQualified(qp))
-	fmt.Println(DescribeQualified(qs))
-	fmt.Println(DescribePlus(qp))
+	check("qualified-plus", DescribeQualified(qp) == "plus:b", DescribeQualified(qp), "plus:b")
+	check("qualified-small", DescribeQualified(qs) == "qualified:s", DescribeQualified(qs), "qualified:s")
+	check("plus-good", DescribePlus(qp) == "good:b", DescribePlus(qp), "good:b")
+	if failed {
+		os.Exit(1)
+	}
 }

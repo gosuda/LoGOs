@@ -3,16 +3,35 @@
 package main
 
 
-import "fmt"
+import (
+	"fmt"
+	"os"
+)
+
+var failed bool
+
+func check(name string, cond bool, got, want any) {
+	if !cond {
+		failed = true
+		fmt.Println("FAIL", name+":", "got", got, "want", want)
+		return
+	}
+	fmt.Println("ok", name)
+}
 
 const table = []int{7, 8, 9}
 
 const wide = []int{1 << 32}
 
 func init() {
-	fmt.Println(wide[0], table[1])
+	check("init-wide", wide[0] == 4294967296, wide[0], 4294967296)
+	check("init-table", table[1] == 8, table[1], 8)
 }
 
 func main() {
-	fmt.Println(len(wide), len(table))
+	check("len-wide", len(wide) == 1, len(wide), 1)
+	check("len-table", len(table) == 3, len(table), 3)
+	if failed {
+		os.Exit(1)
+	}
 }

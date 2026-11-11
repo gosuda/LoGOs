@@ -35,12 +35,13 @@ func main() {
 	r := Rock{name: "a"}
 	var q Qualified = r
 	if got := viaPtr(&q); got != "rock:a" {
-		fmt.Println("FAIL viaPtr=" + got)
+		fmt.Println("FAIL via-ptr: got", got, "want", "rock:a")
 		os.Exit(1)
 	}
+	fmt.Println("ok via-ptr")
 	if got := viaMap(map[string]Qualified{"a": Rock{name: "a"}}); got != "rock:a" {
-		fmt.Println("FAIL viaMap=" + got)
+		fmt.Println("FAIL via-map: got", got, "want", "rock:a")
 		os.Exit(1)
 	}
-	fmt.Println("container ok")
+	fmt.Println("ok via-map")
 }
