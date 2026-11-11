@@ -5,6 +5,7 @@ ok literal-tuple-unpacks
 ok direct-call-unpacks
 ok call-arg-unpacks
 ok call-print-unpacks
+ok call-println-unpacks
 ok tuple-round-trips-channel
 ok tuple-round-trips-map
 ok named-tuple-params-unpack

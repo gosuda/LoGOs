@@ -4,6 +4,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 )
 
@@ -29,6 +30,29 @@ func show(t (id int64, err error)) string {
 
 func two(a int, b error) bool { return a == 3 && b == nil }
 
+func captureStdout(f func()) string {
+	old := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		fmt.Println("FAIL pipe:", err)
+		os.Exit(1)
+	}
+	os.Stdout = w
+	f()
+	cerr := w.Close()
+	os.Stdout = old
+	out, rerr := io.ReadAll(r)
+	if cerr != nil {
+		fmt.Println("FAIL close:", cerr)
+		os.Exit(1)
+	}
+	if rerr != nil {
+		fmt.Println("FAIL read:", rerr)
+		os.Exit(1)
+	}
+	return string(out)
+}
+
 func main() {
 	var t (int, error)
 	t = pair()
@@ -47,6 +71,8 @@ func main() {
 	check("direct-call-unpacks", sp == 3 && sq == nil, fmt.Sprint(sp, sq), "3 <nil>")
 	check("call-arg-unpacks", two(pair()), two(pair()), true)
 	check("call-print-unpacks", fmt.Sprint(pair()) == "3 <nil>", fmt.Sprint(pair()), "3 <nil>")
+	printed := captureStdout(func() { fmt.Println(pair()) })
+	check("call-println-unpacks", printed == "3 <nil>\n", fmt.Sprintf("%q", printed), "\"3 <nil>\\n\"")
 	ch := make(chan (int, error), 1)
 	ch <- c
 	v := <-ch
