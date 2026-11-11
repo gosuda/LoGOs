@@ -66,6 +66,27 @@ func TestSimdArrayVectorScalarForms(t *testing.T) {
 			t.Errorf("arm64 rune array carries an X86 guard:\n%s", out)
 		}
 	})
+	t.Run("small int kinds take vector form amd64", func(t *testing.T) {
+		simdSliceTarget(t, "amd64", 1)
+		for _, arr := range []string{"[16]int8", "[8]int16", "[8]uint16", "[4]int64"} {
+			out := lowerArrayOp(t, "", arr, "+")
+			if !strings.Contains(out, "archsimd") {
+				t.Errorf("%s array misses the vector form:\n%s", arr, out)
+			}
+		}
+	})
+	t.Run("small int kinds take vector form arm64", func(t *testing.T) {
+		simdSliceTarget(t, "arm64", 1)
+		for _, arr := range []string{"[16]int8", "[8]int16", "[8]uint16", "[4]int64"} {
+			out := lowerArrayOp(t, "", arr, "+")
+			if !strings.Contains(out, "archsimd") {
+				t.Errorf("%s array misses the vector form:\n%s", arr, out)
+			}
+			if strings.Contains(out, "X86") {
+				t.Errorf("arm64 %s array carries an X86 guard:\n%s", arr, out)
+			}
+		}
+	})
 	t.Run("int stays scalar", func(t *testing.T) {
 		simdSliceTarget(t, "amd64", 1)
 		out := lowerArrayOp(t, "", "["+n+"]int", "+")
@@ -100,8 +121,15 @@ func TestSimdArrayVectorScalarForms(t *testing.T) {
 		if strings.Contains(out, "archsimd") || strings.Contains(out, "_logos_simd") {
 			t.Errorf("experiment off takes the vector form:\n%s", out)
 		}
-		if !strings.Contains(out, "_logos_a[0] + _logos_b[0]") {
-			t.Errorf("experiment off misses unrolled scalar code:\n%s", out)
+		for _, lane := range []string{
+			"_logos_a[0] + _logos_b[0]",
+			"_logos_a[1] + _logos_b[1]",
+			"_logos_a[2] + _logos_b[2]",
+			"_logos_a[3] + _logos_b[3]",
+		} {
+			if !strings.Contains(out, lane) {
+				t.Errorf("experiment off misses unrolled lane %q:\n%s", lane, out)
+			}
 		}
 	})
 }
