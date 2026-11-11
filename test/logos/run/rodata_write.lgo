@@ -2,7 +2,6 @@
 
 package main
 
-
 import (
 	"bytes"
 	"fmt"
@@ -13,6 +12,17 @@ import (
 )
 
 const faultSlice = []int{11, 22, 33}
+
+var failed bool
+
+func check(name string, cond bool, got, want any) {
+	if !cond {
+		failed = true
+		fmt.Println("FAIL", name+":", "got", got, "want", want)
+		return
+	}
+	fmt.Println("ok", name)
+}
 
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "child" {
@@ -36,9 +46,9 @@ func main() {
 		code = ee.ExitCode()
 	}
 	out := buf.String()
-	if runErr == nil || code == 0 || !strings.Contains(out, "fault") || strings.Contains(out, "STORE-SUCCEEDED") {
-		fmt.Printf("FAIL code=%d out=%q\n", code, out)
+	check("fault-code", runErr != nil && code == 2, code, 2)
+	check("fault-output", strings.Contains(out, "fault") && !strings.Contains(out, "STORE-SUCCEEDED"), out, "fault without STORE-SUCCEEDED")
+	if failed {
 		os.Exit(1)
 	}
-	fmt.Printf("fault OK code=%d\n", code)
 }

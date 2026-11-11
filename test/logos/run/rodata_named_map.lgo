@@ -2,8 +2,21 @@
 
 package main
 
-import "fmt"
+import (
+	"fmt"
+	"os"
+)
 
+var failed bool
+
+func check(name string, cond bool, got, want any) {
+	if !cond {
+		failed = true
+		fmt.Println("FAIL", name+":", "got", got, "want", want)
+		return
+	}
+	fmt.Println("ok", name)
+}
 
 type M map[string]int
 
@@ -18,6 +31,11 @@ var s = S{X: 1, Y: M{"b": 2}}
 
 func main() {
 	v, ok := m["a"]
+	check("const-map", v == 1 && ok, fmt.Sprint(v, ok), "1 true")
 	w, ok2 := s.Y["b"]
-	fmt.Println(v, ok, w, ok2, s.X)
+	check("struct-map", w == 2 && ok2, fmt.Sprint(w, ok2), "2 true")
+	check("struct-field", s.X == 1, s.X, 1)
+	if failed {
+		os.Exit(1)
+	}
 }

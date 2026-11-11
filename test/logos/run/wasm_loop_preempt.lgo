@@ -62,7 +62,7 @@ func run() error {
 		fmt.Println("want 2 quanta at 8192, got", q)
 		os.Exit(1)
 	}
-	fmt.Println("ok")
+	fmt.Println("ok", "preempt")
 	return nil
 }
 

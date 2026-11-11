@@ -2,9 +2,20 @@
 
 package main
 
-
 import `comptime`
 import "fmt"
+import "os"
+
+var failed bool
+
+func check(name string, cond bool, got, want any) {
+	if !cond {
+		failed = true
+		fmt.Println("FAIL", name+":", "got", got, "want", want)
+		return
+	}
+	fmt.Println("ok", name)
+}
 
 type Header struct {
 	Magic   uint32
@@ -15,5 +26,8 @@ type Header struct {
 func main() {
 	b := []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
 	h := comptime.ViewAs[Header](b)
-	fmt.Println(h.Magic, h.Version, h.Size)
+	check("basic", h.Magic == 67305985 && h.Version == 134678021 && h.Size == 1157159078456920585, fmt.Sprint(h.Magic, h.Version, h.Size), "67305985 134678021 1157159078456920585")
+	if failed {
+		os.Exit(1)
+	}
 }

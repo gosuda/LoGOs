@@ -1,12 +1,23 @@
 // run
 
-
 package main
 
 import (
 	"comptime"
 	"fmt"
+	"os"
 )
+
+var failed bool
+
+func check(name string, cond bool, got, want any) {
+	if !cond {
+		failed = true
+		fmt.Println("FAIL", name+":", "got", got, "want", want)
+		return
+	}
+	fmt.Println("ok", name)
+}
 
 type Header struct {
 	Magic   uint32
@@ -17,7 +28,7 @@ type Header struct {
 func showBasic() {
 	b := []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
 	h := comptime.ViewAs[Header](b)
-	fmt.Println(h.Magic, h.Version, h.Size)
+	check("basic", h.Magic == 67305985 && h.Version == 134678021 && h.Size == 1157159078456920585, fmt.Sprint(h.Magic, h.Version, h.Size), "67305985 134678021 1157159078456920585")
 }
 
 func showOdd() {
@@ -26,22 +37,29 @@ func showOdd() {
 		b[i] = byte(i + 1)
 	}
 	h := comptime.ViewAs[Header](b[1:])
-	fmt.Println(h.Magic, h.Version, h.Size)
+	check("odd", h.Magic == 84148994 && h.Version == 151521030 && h.Size == 1229499251294997258, fmt.Sprint(h.Magic, h.Version, h.Size), "84148994 151521030 1229499251294997258")
 }
 
-func showShort() (msg string) {
-	defer func() {
-		if r := recover(); r != nil {
-			msg = fmt.Sprint(r)
-		}
+func showShort() {
+	var msg string
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				msg = fmt.Sprint(r)
+			}
+		}()
+		b := []byte{1, 2, 3, 4, 5, 6, 7, 8}
+		_ = comptime.ViewAs[Header](b)
+		msg = "no panic"
 	}()
-	b := []byte{1, 2, 3, 4, 5, 6, 7, 8}
-	_ = comptime.ViewAs[Header](b)
-	return "no panic"
+	check("short", msg == "logos: ViewAs: need 16 bytes, have 8", msg, "logos: ViewAs: need 16 bytes, have 8")
 }
 
 func main() {
 	showBasic()
 	showOdd()
-	fmt.Println(showShort())
+	showShort()
+	if failed {
+		os.Exit(1)
+	}
 }
