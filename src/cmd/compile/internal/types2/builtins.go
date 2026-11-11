@@ -81,7 +81,7 @@ func (check *Checker) builtin(x *operand, call *syntax.CallExpr, id builtinId) (
 	}
 
 	if check.logosConstBuiltin(x, call, id, args) { // logos M5-S1 hook: builtins over const views.
-		return
+		return x.isValid()
 	}
 
 	switch id {

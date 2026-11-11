@@ -536,6 +536,7 @@ func (check *Checker) logosConstBuiltin(x *operand, call *syntax.CallExpr, id bu
 		if len(args) > 0 {
 			if constView(args[0]) {
 				check.errorf(args[0], IncompatibleAssign, "%s cannot append through const view %s", logosConstMutation, ExprString(args[0].expr))
+				x.invalidate()
 				return true
 			}
 			for _, a := range args[1:] {
@@ -546,6 +547,7 @@ func (check *Checker) logosConstBuiltin(x *operand, call *syntax.CallExpr, id bu
 		if len(args) > 0 {
 			if constView(args[0]) {
 				check.errorf(args[0], IncompatibleAssign, "%s cannot copy through const view %s", logosConstMutation, ExprString(args[0].expr))
+				x.invalidate()
 				return true
 			}
 			for _, a := range args[1:] {
@@ -555,16 +557,19 @@ func (check *Checker) logosConstBuiltin(x *operand, call *syntax.CallExpr, id bu
 	case _Delete:
 		if len(args) > 0 && constView(args[0]) {
 			check.errorf(args[0], IncompatibleAssign, "%s cannot delete through const view %s", logosConstMutation, ExprString(args[0].expr))
+			x.invalidate()
 			return true
 		}
 	case _Clear:
 		if len(args) > 0 && constView(args[0]) {
 			check.errorf(args[0], IncompatibleAssign, "%s cannot clear through const view %s", logosConstMutation, ExprString(args[0].expr))
+			x.invalidate()
 			return true
 		}
 	case _Close:
 		if len(args) > 0 && constView(args[0]) {
 			check.errorf(args[0], IncompatibleAssign, "%s cannot close through const view %s", logosConstMutation, ExprString(args[0].expr))
+			x.invalidate()
 			return true
 		}
 	case _Panic:
