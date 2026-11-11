@@ -1208,9 +1208,6 @@ func (fl *fileLower) cfLeafSubs(root syntax.Node, active cfChain, covered []cfSp
 				add(s, e, keepComments(ctx.buf.b, s, e, "struct{}{}"))
 				return false
 			}
-			if sites != nil && sites.comptimeName != "" {
-				fl.cfCheckError(n, sites)
-			}
 			if s, e, text, ok := fl.cfNestedSite(n, active, run); ok {
 				add(s, e, text)
 			}
@@ -1385,44 +1382,6 @@ func (fl *fileLower) cfFoldTypeOf(call *syntax.CallExpr, sites *cfSites) bool {
 		return false
 	}
 	return true
-}
-
-// cfCheckError reports a live comptime.Error call with its message.
-func (fl *fileLower) cfCheckError(call *syntax.CallExpr, sites *cfSites) {
-	sel, ok := call.Fun.(*syntax.SelectorExpr)
-	if !ok || sel.Sel.Value != "Error" {
-		return
-	}
-	xn, ok := sel.X.(*syntax.Name)
-	if !ok || xn.Value != sites.comptimeName {
-		return
-	}
-	msg := ""
-	if len(call.ArgList) == 1 {
-		if lit, ok := call.ArgList[0].(*syntax.BasicLit); ok {
-			if u, err := strconv.Unquote(lit.Value); err == nil {
-				msg = u
-			}
-		} else if text, ok := fl.cfRecordedConst(call.ArgList[0]); ok {
-			msg = text
-		}
-	}
-	fl.cfError(sites.at(call.Pos()), "[comptime::error] %s", msg)
-}
-
-// cfRecordedConst spells the constant value the checker recorded for e,
-// from the Types map or, as in the compiler, from the syntax node.
-func (fl *fileLower) cfRecordedConst(e syntax.Expr) (string, bool) {
-	if m := fl.pkg.info.Types; m != nil {
-		if tv, ok := m[e]; ok && tv.Value != nil {
-			return tv.Value.String(), true
-		}
-		return "", false
-	}
-	if tv := e.GetTypeInfo(); tv.Value != nil {
-		return tv.Value.String(), true
-	}
-	return "", false
 }
 
 // cfBlankAssign deletes `_ = f` blank assignments over field variables.
