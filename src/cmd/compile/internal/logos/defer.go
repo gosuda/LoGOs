@@ -488,15 +488,6 @@ func leftoverComments(fl *fileLower, whole span, pieces []span) otext {
 	return cat(parts...)
 }
 
-func insideAny(c span, pieces []span) bool {
-	for _, p := range pieces {
-		if c.start >= p.start && c.end <= p.end {
-			return true
-		}
-	}
-	return false
-}
-
 func (fc *funcLower) spliceCall(stmtOff, spanEnd int, plan *callPlan, text []syntax.Stmt, tw *twin) {
 	prefix := leftoverComments(fc.fl, span{start: stmtOff, end: spanEnd}, planSpans(plan))
 	fc.fl.addT(stmtOff, spanEnd, cat(prefix, renderText(text, tw.subs)))

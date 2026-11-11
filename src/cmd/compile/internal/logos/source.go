@@ -12,6 +12,15 @@ import (
 
 type span struct{ start, end int }
 
+func insideAny(c span, pieces []span) bool {
+	for _, p := range pieces {
+		if c.start >= p.start && c.end <= p.end {
+			return true
+		}
+	}
+	return false
+}
+
 type tok struct {
 	span
 	kind    token.Token

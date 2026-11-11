@@ -674,14 +674,14 @@ func (fl *fileLower) cfCopySplices(fn *syntax.FuncDecl, copyName string, run *cf
 	ctx := run.ctx
 	nameStart := offAt(ctx.starts, fn.Name.Pos())
 	subs := []splice{{start: nameStart, end: nameStart + len(fn.Name.Value), text: copyName}}
-	var covered []cfSpan
+	var covered []span
 	for _, cf := range fl.cfInnerConstFors(fn.Body, nil, run.sites) {
 		s := offAt(ctx.starts, syntax.StartPos(cf))
 		e := offAt(ctx.starts, syntax.EndPos(cf)) + 1
 		stmts, text := fl.unrollConstForFields(cf, run.fieldsOf(cf, nil), run)
 		fl.cfCountNodes(stmts, run.sites.at(cf.Pos()))
 		subs = append(subs, splice{start: s, end: e, text: text.s, chunks: text.chunks})
-		covered = append(covered, cfSpan{s, e})
+		covered = append(covered, span{s, e})
 	}
 	for _, sub := range fl.cfLeafSubs(fn, nil, covered, run) {
 		subs = append(subs, splice{start: sub.start, end: sub.end, text: sub.text})

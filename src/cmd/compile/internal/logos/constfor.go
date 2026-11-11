@@ -612,19 +612,6 @@ func (m *cfMapper) mapSpan(s, e int) (int, int) {
 	return m.mapPos(s), m.mapPos(e)
 }
 
-// cfSpan is a base-coordinate span.
-type cfSpan struct{ start, end int }
-
-// cfInSpans reports whether [s,e) lies strictly inside any span.
-func cfInSpans(spans []cfSpan, s, e int) bool {
-	for _, sp := range spans {
-		if sp.start <= s && e <= sp.end {
-			return true
-		}
-	}
-	return false
-}
-
 // cfParents maps every node under root to its parent.
 func cfParents(root syntax.Node) map[syntax.Node]syntax.Node {
 	parents := make(map[syntax.Node]syntax.Node)
@@ -674,7 +661,7 @@ func (fl *fileLower) expandLevel(body *syntax.BlockStmt, active cfChain, text ot
 	for _, inner := range inners {
 		istart := offAt(ctx.starts, syntax.StartPos(inner))
 		iend := offAt(ctx.starts, syntax.EndPos(inner)) + 1
-		if cfInSpans(m.covered(), istart, iend) {
+		if insideAny(span{start: istart, end: iend}, m.covered()) {
 			continue
 		}
 		fields := run.fieldsOf(inner, active)
@@ -698,10 +685,10 @@ func (fl *fileLower) expandLevel(body *syntax.BlockStmt, active cfChain, text ot
 }
 
 // covered reports the covered spans of a mapper.
-func (m *cfMapper) covered() []cfSpan {
-	out := make([]cfSpan, 0, len(m.subs))
+func (m *cfMapper) covered() []span {
+	out := make([]span, 0, len(m.subs))
 	for _, s := range m.subs {
-		out = append(out, cfSpan{s.start, s.end})
+		out = append(out, span{s.start, s.end})
 	}
 	return out
 }
@@ -1121,7 +1108,7 @@ func cfHasBinderBefore(body *syntax.BlockStmt, ref syntax.Node, name string, par
 
 // cfLeafSubs collects the leaf substitutions for active bindings in
 // body. Spans are base coordinates of ctx.
-func (fl *fileLower) cfLeafSubs(root syntax.Node, active cfChain, covered []cfSpan, run *cfRun) []cfSub {
+func (fl *fileLower) cfLeafSubs(root syntax.Node, active cfChain, covered []span, run *cfRun) []cfSub {
 	var out []cfSub
 	ctx, sites := run.ctx, run.sites
 	parents := cfParents(root)
@@ -1129,7 +1116,7 @@ func (fl *fileLower) cfLeafSubs(root syntax.Node, active cfChain, covered []cfSp
 		return offAt(ctx.starts, syntax.StartPos(n)), cfExactEnd(ctx, n)
 	}
 	add := func(s, e int, text string) {
-		if e <= s || cfInSpans(covered, s, e) {
+		if e <= s || insideAny(span{start: s, end: e}, covered) {
 			return
 		}
 		for _, o := range out {
@@ -1213,7 +1200,7 @@ func (fl *fileLower) cfLeafSubs(root syntax.Node, active cfChain, covered []cfSp
 			}
 			return true
 		case *syntax.Name:
-			if s, e := at(n); cfInSpans(covered, s, e) {
+			if s, e := at(n); insideAny(span{start: s, end: e}, covered) {
 				return true
 			}
 			if cfMarkerSub(n, parents, sites, at, add) {
