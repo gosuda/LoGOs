@@ -4,6 +4,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 
 	rt "logos/rt"
 )
@@ -23,10 +24,13 @@ func guarded() (err error) {
 
 func main() {
 	if err := guarded(); err != nil {
-		fmt.Println("FAIL unexpected error:", err)
-		return
+		fmt.Println("FAIL gofile")
+		os.Exit(1)
 	}
-	for _, s := range order {
-		fmt.Println(s)
+	if len(order) == 2 && order[0] == "f" && order[1] == "after-defer-statement" {
+		fmt.Println("ok gofile")
+	} else {
+		fmt.Println("FAIL gofile")
+		os.Exit(1)
 	}
 }
