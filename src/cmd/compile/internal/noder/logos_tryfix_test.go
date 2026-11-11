@@ -37,6 +37,7 @@ type diagRecord struct {
 	RuleID            string         `json:"rule_id"`
 	Severity          string         `json:"severity"`
 	Span              diagSpan       `json:"span"`
+	Note              string         `json:"note"`
 	Provenance        diagProvenance `json:"provenance"`
 	AutofixCandidates []diagFix      `json:"autofix_candidates"`
 }
@@ -906,51 +907,64 @@ func g1(x int) (int, error) {
 		name      string
 		compute   string
 		wantDiags int
+		wantCand  int
+		wantNote  bool
 	}{
 		{
 			name:      "two_tries_binary",
 			compute:   "func compute() (int, error) {\n\tv := step()? + step()?\n\treturn v, nil\n}\n",
 			wantDiags: 2,
+			wantCand:  1,
 		},
 		{
 			name:      "three_tries_binary",
 			compute:   "func compute() (int, error) {\n\tv := step()? + step()? + step()?\n\treturn v, nil\n}\n",
 			wantDiags: 3,
+			wantCand:  1,
 		},
 		{
 			name:      "two_tries_call_args",
 			compute:   "func compute() (int, error) {\n\terr := add2(step()?, step()?)\n\treturn gotAB, err\n}\n",
 			wantDiags: 2,
+			wantCand:  1,
 		},
 		{
 			name:      "three_tries_composite",
 			compute:   "func compute() (int, error) {\n\txs := []int{step()?, step()?, step()?}\n\treturn xs[0] + xs[1] + xs[2], nil\n}\n",
 			wantDiags: 3,
+			wantCand:  1,
 		},
 		{
 			name:      "two_tries_if_cond",
 			compute:   "func compute() (int, error) {\n\tif step()? == step()? {\n\t\treturn 1, nil\n\t}\n\treturn 0, nil\n}\n",
 			wantDiags: 2,
+			wantCand:  1,
 		},
 		{
 			name:      "three_tries_return",
 			compute:   "func compute() (int, int, int, error) {\n\treturn step()?, step()?, step()?\n}\n",
 			wantDiags: 3,
+			wantCand:  1,
 		},
 		{
 			name:      "nested_try",
 			compute:   "func compute() (int, error) {\n\tv := f1(g1(step()?)?)\n\treturn v, nil\n}\n",
 			wantDiags: 2,
+			wantCand:  0,
 		},
 		{
 			name:      "and_both",
 			compute:   "func compute() (bool, error) {\n\tv := okStep()? && okStep()?\n\treturn v, nil\n}\n",
 			wantDiags: 2,
+			wantCand:  0,
+			wantNote:  true,
 		},
 		{
 			name:      "or_both",
 			compute:   "func compute() (bool, error) {\n\tv := okStep()? || okStep()?\n\treturn v, nil\n}\n",
 			wantDiags: 2,
+			wantCand:  0,
+			wantNote:  true,
 		},
 	}
 	for _, tc := range refused {
@@ -964,15 +978,24 @@ func g1(x int) (int, error) {
 			if len(got) != tc.wantDiags {
 				t.Fatalf("got %d %s diagnostics, want %d: %+v", len(got), misplacedTryRuleID, tc.wantDiags, got)
 			}
+			total := 0
 			for i := range got {
-				if len(got[i].AutofixCandidates) != 0 {
-					t.Fatalf("expected no autofix candidate for %s diag %d, got %d: %+v", tc.name, i, len(got[i].AutofixCandidates), got[i].AutofixCandidates)
-				}
+				total += len(got[i].AutofixCandidates)
 				if got[i].Span.ByteLen == 0 {
 					t.Fatalf("expected non-empty span for %s diag %d, got %+v", tc.name, i, got[i].Span)
 				}
 				if got[i].Provenance.OriginExpr == "" {
 					t.Fatalf("expected provenance for %s diag %d, got %+v", tc.name, i, got[i].Provenance)
+				}
+			}
+			if total != tc.wantCand {
+				t.Fatalf("expected %d autofix candidates for %s, got %d: %+v", tc.wantCand, tc.name, total, got)
+			}
+			if tc.wantNote {
+				for i := range got {
+					if got[i].Note == "" {
+						t.Fatalf("expected refusal note for %s diag %d", tc.name, i)
+					}
 				}
 			}
 		})
@@ -1026,5 +1049,214 @@ func g1(x int) (int, error) {
 				t.Fatalf("applied candidate output = %q, want %q", got, wantOut)
 			}
 		})
+	}
+}
+
+func TestMisplacedTrySplitMultiFix(t *testing.T) {
+	const helpers = `type myErr string
+
+func (e myErr) Error() string { return string(e) }
+
+var (
+	calls int
+	fail bool
+	gotA int
+	gotB int
+	gotAB int
+	gotS string
+)
+
+func step() (int, error) {
+	calls++
+	if fail {
+		return 0, myErr("boom")
+	}
+	return 42, nil
+}
+
+func name() (string, error) {
+	calls++
+	if fail {
+		return "", myErr("boom")
+	}
+	return "hi", nil
+}
+
+func add3(a, b, c int) error {
+	gotA, gotB = a, b
+	gotAB = a + b + c
+	return nil
+}
+
+func outer(x int) (int, error) {
+	if fail {
+		return 0, myErr("boom")
+	}
+	return x + 1, nil
+}
+
+func inner(x int) (int, error) {
+	if fail {
+		return 0, myErr("boom")
+	}
+	return x + 10, nil
+}
+`
+	const stdMain = `func main() {
+	calls, fail = 0, false
+	v, err := compute()
+	if err != nil || v != %d || calls != %d {
+		println("bad")
+	} else {
+		println("ok")
+	}
+	calls, fail = 0, true
+	v, err = compute()
+	if err == nil || err.Error() != "boom" || v != 0 || calls != 1 {
+		println("bad")
+	} else {
+		println("err")
+	}
+	println("once")
+}
+`
+	tests := []struct {
+		name      string
+		misplaced string
+		hand      string
+		mainSrc   string
+		wantVal   int
+		calls     int
+	}{
+		{
+			name:      "return_multi",
+			misplaced: "func compute() (int, int, error) {\n\treturn step()?, step()?\n}\n",
+			hand:      "func compute() (int, int, error) {\n\t_v, _e := step()\n\tif _e != nil {\n\t\treturn 0, 0, _e\n\t}\n\t_step, _e1 := step()\n\tif _e1 != nil {\n\t\treturn 0, 0, _e1\n\t}\n\treturn _v, _step, nil\n}\n",
+			mainSrc:   "func main() {\n\tcalls, fail = 0, false\n\ta, b, err := compute()\n\tif err != nil || a != 42 || b != 42 || calls != 2 {\n\t\tprintln(\"bad\")\n\t} else {\n\t\tprintln(\"ok\")\n\t}\n\tcalls, fail = 0, true\n\ta, b, err = compute()\n\tif err == nil || err.Error() != \"boom\" || a != 0 || b != 0 || calls != 1 {\n\t\tprintln(\"bad\")\n\t} else {\n\t\tprintln(\"err\")\n\t}\n\tprintln(\"once\")\n}\n",
+			wantVal:   42,
+			calls:     2,
+		},
+		{
+			name:      "two_call_args",
+			misplaced: "func compute() (int, error) {\n\terr := add3(step()?, step()?, 0)\n\treturn gotAB, err\n}\n",
+			hand:      "func compute() (int, error) {\n\t_v, _e := step()\n\tif _e != nil {\n\t\treturn 0, _e\n\t}\n\t_step, _e1 := step()\n\tif _e1 != nil {\n\t\treturn 0, _e1\n\t}\n\terr := add3(_v, _step, 0)\n\treturn gotAB, err\n}\n",
+			wantVal:   84,
+			calls:     2,
+		},
+		{
+			name:      "nested_try_wrap",
+			misplaced: "func compute() (int, error) {\n\tv := outer(inner(step()?)?)?\n\treturn v, nil\n}\n",
+			hand:      "func compute() (int, error) {\n\t_v, _e := step()\n\tif _e != nil {\n\t\treturn 0, _e\n\t}\n\t_inner, _e1 := inner(_v)\n\tif _e1 != nil {\n\t\treturn 0, _e1\n\t}\n\t_out, _e2 := outer(_inner)\n\tif _e2 != nil {\n\t\treturn 0, _e2\n\t}\n\treturn _out, nil\n}\n",
+			wantVal:   53,
+			calls:     1,
+		},
+		{
+			name:      "binary_sides",
+			misplaced: "func compute() (int, error) {\n\tv := step()? + step()?\n\treturn v, nil\n}\n",
+			hand:      "func compute() (int, error) {\n\t_v, _e := step()\n\tif _e != nil {\n\t\treturn 0, _e\n\t}\n\t_step, _e1 := step()\n\tif _e1 != nil {\n\t\treturn 0, _e1\n\t}\n\tv := _v + _step\n\treturn v, nil\n}\n",
+			wantVal:   84,
+			calls:     2,
+		},
+		{
+			name:      "three_chain",
+			misplaced: "func compute() (int, error) {\n\tv := step()? + step()? + step()?\n\treturn v, nil\n}\n",
+			hand:      "func compute() (int, error) {\n\t_v, _e := step()\n\tif _e != nil {\n\t\treturn 0, _e\n\t}\n\t_step, _e1 := step()\n\tif _e1 != nil {\n\t\treturn 0, _e1\n\t}\n\t_step1, _e2 := step()\n\tif _e2 != nil {\n\t\treturn 0, _e2\n\t}\n\tv := _v + _step + _step1\n\treturn v, nil\n}\n",
+			wantVal:   126,
+			calls:     3,
+		},
+		{
+			name:      "and_left",
+			misplaced: "func compute() (int, error) {\n\tb := name()? == \"hi\" && true\n\tif b {\n\t\treturn 1, nil\n\t}\n\treturn 0, nil\n}\n",
+			hand:      "func compute() (int, error) {\n\t_v, _e := name()\n\tif _e != nil {\n\t\treturn 0, _e\n\t}\n\tb := _v == \"hi\" && true\n\tif b {\n\t\treturn 1, nil\n\t}\n\treturn 0, nil\n}\n",
+			wantVal:   1,
+			calls:     1,
+		},
+		{
+			name:      "if_cond_both",
+			misplaced: "func compute() (int, error) {\n\tif step()? == step()? {\n\t\treturn 1, nil\n\t}\n\treturn 0, nil\n}\n",
+			hand:      "func compute() (int, error) {\n\t_v, _e := step()\n\tif _e != nil {\n\t\treturn 0, _e\n\t}\n\t_step, _e1 := step()\n\tif _e1 != nil {\n\t\treturn 0, _e1\n\t}\n\tif _v == _step {\n\t\treturn 1, nil\n\t}\n\treturn 0, nil\n}\n",
+			wantVal:   1,
+			calls:     2,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			mainSrc := cmp.Or(tc.mainSrc, fmt.Sprintf(stdMain, tc.wantVal, tc.calls))
+			src := "package main\n\n" + helpers + tc.misplaced + mainSrc
+			diags, exitCode := compileLgoJSON(t, src)
+			if exitCode == 0 {
+				t.Fatalf("expected compile failure on misplaced '?', got exit code 0")
+			}
+			var fix *diagFix
+			var span diagSpan
+			for i := range diags {
+				if diags[i].RuleID != misplacedTryRuleID {
+					continue
+				}
+				if diags[i].Span.ByteLen == 0 {
+					t.Fatalf("expected non-empty span on diag %d, got %+v", i, diags[i].Span)
+				}
+				switch n := len(diags[i].AutofixCandidates); {
+				case n == 1 && fix == nil:
+					fix = &diags[i].AutofixCandidates[0]
+					span = diags[i].Span
+				case n > 0:
+					t.Fatalf("expected at most one candidate across diagnostics, diag %d adds more", i)
+				}
+			}
+			if fix == nil {
+				t.Fatalf("expected one autofix candidate for %s, got none", tc.name)
+			}
+			if strings.Contains(fix.Replacement, "_logos_") || strings.Contains(fix.Replacement, "Logos_") {
+				t.Fatalf("candidate replacement uses a reserved prefix: %q", fix.Replacement)
+			}
+			fixedSrc := applyFix(t, src, span, *fix)
+			fixedDiags, _ := compileLgoJSON(t, fixedSrc)
+			for _, fd := range fixedDiags {
+				if fd.RuleID == misplacedTryRuleID {
+					t.Fatalf("fixed source still reports misplaced_try: %+v\nfixed source:\n%s", fd, fixedSrc)
+				}
+			}
+			got := runLgoSourceOut(t, fixedSrc)
+			handSrc := "package main\n\n" + helpers + tc.hand + mainSrc
+			want := runLgoSourceOut(t, handSrc)
+			if got != want {
+				t.Fatalf("applied candidate output = %q, hand-written = %q\nfixed source:\n%s", got, want, fixedSrc)
+			}
+			const wantOut = "ok\nerr\nonce\n"
+			if got != wantOut {
+				t.Fatalf("applied candidate output = %q, want %q", got, wantOut)
+			}
+		})
+	}
+}
+
+func TestMisplacedTryShortCircuitRefused(t *testing.T) {
+	const helpers = `type myErr string
+
+func (e myErr) Error() string { return string(e) }
+
+var (
+	calls int
+	fail bool
+	flag bool
+)
+
+func okStep() (bool, error) {
+	calls++
+	if fail {
+		return false, myErr("boom")
+	}
+	return true, nil
+}
+`
+	src := "package main\n\n" + helpers + "func compute() (bool, error) {\n\tv := flag && okStep()?\n\treturn v, nil\n}\n"
+	diags, exitCode := compileLgoJSON(t, src)
+	if exitCode == 0 {
+		t.Fatalf("expected compile failure on misplaced '?', got exit code 0")
+	}
+	d := misplacedTryDiag(t, diags)
+	if len(d.AutofixCandidates) != 0 {
+		t.Fatalf("expected no candidate for short-circuit right operand, got %+v", d.AutofixCandidates)
 	}
 }

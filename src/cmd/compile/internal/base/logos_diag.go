@@ -19,6 +19,7 @@ type LogosFix struct {
 	Description      string
 	Replacement      string
 	InsertBeforeLine int
+	Note             string
 }
 
 type LogosDiag struct {
@@ -26,6 +27,7 @@ type LogosDiag struct {
 	Severity string
 	Pos, End src.XPos
 	Message  string
+	Note     string
 
 	OriginExpr   string
 	OriginLine   int
@@ -98,6 +100,7 @@ type jsonFix struct {
 	Description      string `json:"description"`
 	Replacement      string `json:"replacement"`
 	InsertBeforeLine int    `json:"insert_before_line,omitzero"`
+	Note             string `json:"note,omitzero"`
 }
 
 type jsonRecord struct {
@@ -107,6 +110,7 @@ type jsonRecord struct {
 	File              string         `json:"file"`
 	Span              jsonSpan       `json:"span"`
 	Message           string         `json:"message"`
+	Note              string         `json:"note,omitzero"`
 	Provenance        jsonProvenance `json:"provenance"`
 	AutofixCandidates []jsonFix      `json:"autofix_candidates"`
 }
@@ -120,6 +124,7 @@ func logosRecord(m errorMsg) string {
 	}
 	if d := m.logos.diag; d != nil {
 		rec.RuleID, rec.Severity, rec.Message = d.Rule, d.Severity, m.logos.raw
+		rec.Note = d.Note
 		rec.Provenance = jsonProvenance{OriginExpr: d.OriginExpr, OriginLine: d.OriginLine, InferredType: d.InferredType}
 		for _, f := range d.Fixes {
 			rec.AutofixCandidates = append(rec.AutofixCandidates, jsonFix(f))

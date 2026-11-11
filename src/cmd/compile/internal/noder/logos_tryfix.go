@@ -6,6 +6,7 @@ package noder
 
 import (
 	"bytes"
+	"cmp"
 	"slices"
 	"strconv"
 	"strings"
@@ -18,43 +19,257 @@ import (
 
 const logosMisplacedTryTag = "[correctness::misplaced_try] "
 
-func logosReportMisplacedTry(m *posMap, files []*syntax.File, info *types2.Info, terr types2.Error) bool {
-	if !strings.HasPrefix(terr.Msg, logosMisplacedTryTag) {
-		return false
-	}
-	f := logosFileAt(files, terr.Pos)
+func logosMisplacedTryPending(terr types2.Error) bool {
+	return strings.HasPrefix(terr.Msg, logosMisplacedTryTag)
+}
+
+func logosMisplacedTryResolvable(files []*syntax.File, pos syntax.Pos) bool {
+	f := logosFileAt(files, pos)
 	if f == nil {
 		return false
 	}
 	stashed, _ := nextInputs([]*syntax.File{f})
-	src, ok := stashed[f]
-	if !ok {
-		return false
-	}
-	if r, ok := misplacedTryFix(info, f, src, terr.Pos); ok {
-		base.LogosReport(logosDiag(m, r))
-		return true
-	}
-	if r, ok := misplacedTryBare(info, f, src, terr.Pos); ok {
-		base.LogosReport(logosDiag(m, r))
-		return true
-	}
-	return false
+	_, ok := stashed[f]
+	return ok
 }
 
-func misplacedTryBare(info *types2.Info, f *syntax.File, src []byte, pos syntax.Pos) (lint.Result, bool) {
-	t, _ := tryAt(f, pos)
-	if t == nil {
+func logosFlushMisplacedTry(m *posMap, files []*syntax.File, info *types2.Info, pending []syntax.Pos) {
+	if len(pending) == 0 {
+		return
+	}
+	plans := map[syntax.Stmt]*stmtPlan{}
+	for _, pos := range pending {
+		f := logosFileAt(files, pos)
+		if f == nil {
+			continue
+		}
+		stashed, _ := nextInputs([]*syntax.File{f})
+		src, ok := stashed[f]
+		if !ok {
+			continue
+		}
+		t, stack := tryAt(f, pos)
+		if t == nil {
+			continue
+		}
+		var r lint.Result
+		var offered bool
+		if stmt, fn, good := enclosingSplitStmt(stack); good {
+			plan := planFor(info, stmt, src, plans)
+			multi := plan.ok && len(plan.tries) > 1
+			first := multi && !plan.emitted
+			residual := residualArityOK(info, stmt)
+			switch {
+			case first && residual && unconditionalAncestors(stack, stmt) && enclosingReturnsError(info, fn) &&
+				planOrderOK(stmt, plan.tries, src):
+				plan.emitted = true
+				r, offered = splitResult(splitRequest{info: info, fn: fn, stmt: stmt, src: src, tries: plan.tries})
+			case multi && plan.emitted:
+				r, offered = misplacedTryBare(info, t, "")
+			case plan.ok && len(plan.tries) == 1:
+				if residual && unconditionalAncestors(stack, stmt) && enclosingReturnsError(info, fn) {
+					r, offered = misplacedTryFix(info, fn, stmt, t, src, plan.tries[0])
+				}
+				if !offered {
+					r, offered = misplacedTryBare(info, t, plan.note)
+				}
+			default:
+				r, offered = misplacedTryBare(info, t, plan.note)
+			}
+		} else {
+			r, offered = misplacedTryBare(info, t, "")
+		}
+		if offered {
+			base.LogosReport(logosDiag(m, r))
+		}
+	}
+}
+
+func residualArityOK(info *types2.Info, stmt syntax.Stmt) bool {
+	as, ok := stmt.(*syntax.AssignStmt)
+	if !ok || as.Rhs == nil || (as.Op != 0 && as.Op != syntax.Def) {
+		return true
+	}
+	rhs := syntax.UnpackListExpr(as.Rhs)
+	if len(rhs) != 1 {
+		return true
+	}
+	t := info.TypeOf(syntax.Unparen(rhs[0]))
+	tup, isTuple := t.(*types2.Tuple)
+	if !isTuple {
+		return true
+	}
+	return tup.Len() == len(syntax.UnpackListExpr(as.Lhs))
+}
+
+type stmtPlan struct {
+	tries   []trySite
+	ok      bool
+	note    string
+	emitted bool
+}
+
+func planFor(info *types2.Info, stmt syntax.Stmt, src []byte, plans map[syntax.Stmt]*stmtPlan) *stmtPlan {
+	if p, ok := plans[stmt]; ok {
+		return p
+	}
+	p := &stmtPlan{}
+	plans[stmt] = p
+	type cand struct {
+		expr   *syntax.TryExpr
+		off    int
+		argPos bool
+	}
+	var cands []cand
+	blocked := false
+	var stack []syntax.Node
+	var scStack []bool
+	syntax.Inspect(stmt, func(n syntax.Node) bool {
+		if n == nil {
+			stack = stack[:len(stack)-1]
+			scStack = scStack[:len(scStack)-1]
+			return false
+		}
+		sc := false
+		if len(stack) > 0 {
+			inherited := scStack[len(scStack)-1]
+			switch p := stack[len(stack)-1].(type) {
+			case *syntax.Operation:
+				sc = inherited || (n == syntax.Node(p.Y) && (p.Op == syntax.AndAnd || p.Op == syntax.OrOr))
+			case *syntax.CoalesceExpr:
+				sc = inherited || n == syntax.Node(p.Y)
+			default:
+				sc = inherited
+			}
+		}
+		if t, isTry := n.(*syntax.TryExpr); isTry {
+			argPos := false
+			if len(stack) > 0 {
+				_, argPos = stack[len(stack)-1].(*syntax.CallExpr)
+			}
+			if sc {
+				blocked = true
+				p.note = shortCircuitNote
+			} else if inner, isCall := syntax.Unparen(t.X).(*syntax.CallExpr); isCall {
+				if off, has := tryOffset(src, syntax.StartPos(t)); has {
+					if _, good := checkedCallResult(info, inner); good {
+						cands = append(cands, cand{expr: t, off: off, argPos: argPos})
+					} else {
+						blocked = true
+					}
+				} else {
+					blocked = true
+				}
+			} else {
+				blocked = true
+			}
+		}
+		stack = append(stack, n)
+		scStack = append(scStack, sc)
+		return true
+	})
+	if blocked {
+		return p
+	}
+	if len(cands) == 0 {
+		return p
+	}
+	slices.SortFunc(cands, func(a, b cand) int { return cmp.Compare(a.off, b.off) })
+	p.tries = make([]trySite, len(cands))
+	for i, c := range cands {
+		call := syntax.Unparen(c.expr.X).(*syntax.CallExpr)
+		tup, _ := checkedCallResult(info, call)
+		p.tries[i] = trySite{expr: c.expr, call: call, tup: tup, argPos: c.argPos}
+	}
+	p.ok = true
+	return p
+}
+
+func planOrderOK(stmt syntax.Stmt, tries []trySite, src []byte) bool {
+	last := tries[len(tries)-1]
+	lastStart, ok1 := tryOffset(src, syntax.StartPos(last.expr))
+	if !ok1 {
+		return false
+	}
+	ok := true
+	syntax.Inspect(stmt, func(n syntax.Node) bool {
+		if !ok {
+			return false
+		}
+		switch n := n.(type) {
+		case *syntax.CallExpr:
+			s, ok1 := tryOffset(src, syntax.StartPos(n))
+			e, ok2 := callEnd(src, n)
+			if !ok1 || !ok2 {
+				ok = false
+				return false
+			}
+			for _, t := range tries {
+				ts, _ := tryOffset(src, syntax.StartPos(t.expr))
+				te, _ := tryOffset(src, syntax.EndPos(t.expr))
+				if s >= ts && e <= te {
+					return true
+				}
+			}
+			if e <= lastStart {
+				ok = false
+				return false
+			}
+		case *syntax.Operation:
+			if n.Op != syntax.Recv {
+				return true
+			}
+			s, ok1 := tryOffset(src, syntax.StartPos(n))
+			e, ok2 := tryOffset(src, syntax.EndPos(n))
+			if !ok1 || !ok2 {
+				ok = false
+				return false
+			}
+			for _, t := range tries {
+				ts, _ := tryOffset(src, syntax.StartPos(t.expr))
+				te, _ := tryOffset(src, syntax.EndPos(t.expr))
+				if s >= ts && e <= te {
+					return true
+				}
+			}
+			if e <= lastStart {
+				ok = false
+				return false
+			}
+		}
+		return true
+	})
+	return ok
+}
+
+func findTryStack(f *syntax.File, pos syntax.Pos) []syntax.Node {
+	_, stack := tryAt(f, pos)
+	return stack
+}
+
+func misplacedTryFix(info *types2.Info, fn syntax.Node, stmt syntax.Stmt, t *syntax.TryExpr, src []byte, site trySite) (lint.Result, bool) {
+	call, ok := syntax.Unparen(t.X).(*syntax.CallExpr)
+	if !ok || call != site.call {
 		return lint.Result{}, false
 	}
-	var origin, typ string
+	if site.tup.Len() > 2 && !site.argPos {
+		if _, isRet := stmt.(*syntax.ReturnStmt); !isRet {
+			return lint.Result{}, false
+		}
+	}
+	if !splitPreservesOrder(stmt, t, src) {
+		return lint.Result{}, false
+	}
+	r := splitRequest{info: info, fn: fn, stmt: stmt, src: src, tries: []trySite{site}}
+	return splitResult(r)
+}
+
+func misplacedTryBare(info *types2.Info, t *syntax.TryExpr, note string) (lint.Result, bool) {
+	var origin string
 	var line int
 	if call, ok := syntax.Unparen(t.X).(*syntax.CallExpr); ok {
 		origin = syntax.String(call)
 		line = int(call.Pos().Line())
-		if tup, ok := checkedCallResult(info, call); ok {
-			typ = types2.TypeString(tup.At(0).Type(), func(p *types2.Package) string { return p.Name() })
-		}
 	}
 	return lint.Result{
 		Rule:     "correctness::misplaced_try",
@@ -62,10 +277,10 @@ func misplacedTryBare(info *types2.Info, f *syntax.File, src []byte, pos syntax.
 		Pos:      syntax.StartPos(t),
 		End:      syntax.EndPos(t),
 		Message:  "? must end an assignment, expression statement, defer, or errdefer",
+		Note:     note,
 		Provenance: lint.Provenance{
-			OriginExpr:   origin,
-			OriginLine:   line,
-			InferredType: typ,
+			OriginExpr: origin,
+			OriginLine: line,
 		},
 	}, true
 }
@@ -88,48 +303,6 @@ func enclosingSig(info *types2.Info, fn syntax.Node) (*types2.Signature, bool) {
 	default:
 		return nil, false
 	}
-}
-
-func misplacedTryFix(info *types2.Info, f *syntax.File, src []byte, pos syntax.Pos) (lint.Result, bool) {
-	t, stack := tryAt(f, pos)
-	if t == nil {
-		return lint.Result{}, false
-	}
-	call, ok := syntax.Unparen(t.X).(*syntax.CallExpr)
-	if !ok || syntax.Unparen(t.X) != t.X {
-		return lint.Result{}, false
-	}
-	tup, ok := checkedCallResult(info, call)
-	if !ok {
-		return lint.Result{}, false
-	}
-	stmt, fn, ok := enclosingSplitStmt(stack)
-	if !ok {
-		return lint.Result{}, false
-	}
-	if countTryExpr(stmt) > 1 {
-		return lint.Result{}, false
-	}
-	if tup.Len() > 2 {
-		if _, ok := stack[len(stack)-2].(*syntax.CallExpr); !ok {
-			if _, ok := stmt.(*syntax.ReturnStmt); !ok {
-				return lint.Result{}, false
-			}
-		}
-	}
-	if !leftmostTry(stmt, t, src) {
-		return lint.Result{}, false
-	}
-	if !splitPreservesOrder(stmt, t, src) {
-		return lint.Result{}, false
-	}
-	if !unconditionalAncestors(stack, stmt) {
-		return lint.Result{}, false
-	}
-	if !enclosingReturnsError(info, fn) {
-		return lint.Result{}, false
-	}
-	return splitResult(splitRequest{info: info, fn: fn, stmt: stmt, call: call, expr: t, src: src, tup: tup})
 }
 
 func tryAt(f *syntax.File, pos syntax.Pos) (*syntax.TryExpr, []syntax.Node) {
@@ -236,17 +409,6 @@ func enclosingSplitStmt(stack []syntax.Node) (syntax.Stmt, syntax.Node, bool) {
 		}
 	}
 	return nil, nil, false
-}
-
-func countTryExpr(stmt syntax.Stmt) int {
-	n := 0
-	syntax.Inspect(stmt, func(nd syntax.Node) bool {
-		if _, ok := nd.(*syntax.TryExpr); ok {
-			n++
-		}
-		return true
-	})
-	return n
 }
 
 func leftmostTry(stmt syntax.Stmt, t *syntax.TryExpr, src []byte) bool {
@@ -364,14 +526,21 @@ func enclosingReturnsError(info *types2.Info, fn syntax.Node) bool {
 }
 
 type splitRequest struct {
-	info *types2.Info
-	fn   syntax.Node
-	stmt syntax.Stmt
-	call *syntax.CallExpr
-	expr *syntax.TryExpr
-	src  []byte
-	tup  *types2.Tuple
+	info  *types2.Info
+	fn    syntax.Node
+	stmt  syntax.Stmt
+	src   []byte
+	tries []trySite
 }
+
+type trySite struct {
+	expr   *syntax.TryExpr
+	call   *syntax.CallExpr
+	tup    *types2.Tuple
+	argPos bool
+}
+
+const shortCircuitNote = "hoisting a `?` out of a short-circuit operand would run it even when the left side decides the result, so the `?` must stay bound inside the branch and no split is offered"
 
 func returnSplitSuffix(r splitRequest) (string, bool) {
 	rs, ok := r.stmt.(*syntax.ReturnStmt)
@@ -382,33 +551,52 @@ func returnSplitSuffix(r splitRequest) (string, bool) {
 		return "", false
 	}
 	exprs := syntax.UnpackListExpr(rs.Results)
-	direct := -1
-	for i, e := range exprs {
-		if syntax.Unparen(e) == syntax.Node(r.expr) {
-			direct = i
-			break
+	tryCount := 0
+	for _, e := range exprs {
+		for _, t := range r.tries {
+			if syntax.Unparen(e) == syntax.Node(t.expr) {
+				tryCount++
+				break
+			}
 		}
 	}
-	if direct < 0 {
+	if tryCount == 0 {
 		return "", true
 	}
 	sig, ok := enclosingSig(r.info, r.fn)
 	if !ok || sig == nil || sig.Results().Len() == 0 {
 		return "", false
 	}
-	nvals := r.tup.Len() - 1
-	arity := len(exprs) - 1 + nvals
+	nvals := 0
+	for _, t := range r.tries {
+		nvals += t.tup.Len() - 1
+	}
+	arity := len(exprs) - tryCount + nvals
 	total := sig.Results().Len()
 	if arity != total && arity != total-1 {
 		return "", false
 	}
-	for i := range nvals {
-		if direct+i >= total {
-			return "", false
+	direct := -1
+	for i, e := range exprs {
+		if syntax.Unparen(e) == syntax.Node(r.tries[0].expr) {
+			direct = i
+			break
 		}
-		if !types2.AssignableTo(r.tup.At(i).Type(), sig.Results().At(direct+i).Type()) {
-			return "", false
+	}
+	if direct < 0 {
+		return "", false
+	}
+	pos := direct
+	for _, t := range r.tries {
+		for i := range t.tup.Len() - 1 {
+			if pos+i >= total {
+				return "", false
+			}
+			if !types2.AssignableTo(t.tup.At(i).Type(), sig.Results().At(pos+i).Type()) {
+				return "", false
+			}
 		}
+		pos += t.tup.Len() - 1
 	}
 	if arity == total-1 {
 		return ", nil", true
@@ -419,39 +607,137 @@ func returnSplitSuffix(r splitRequest) (string, bool) {
 func splitResult(r splitRequest) (lint.Result, bool) {
 	startPos := splitStmtStart(r.stmt)
 	start, ok1 := tryOffset(r.src, startPos)
-	tryStart, ok2 := tryOffset(r.src, syntax.StartPos(r.expr))
-	tryEnd, ok3 := tryOffset(r.src, syntax.EndPos(r.expr))
-	callStart, ok4 := tryOffset(r.src, syntax.StartPos(r.call))
-	callEnd, ok5 := callEnd(r.src, r.call)
 	stmtEnd, ok6 := splitStmtEnd(r.src, r.stmt)
-	if !ok1 || !ok2 || !ok3 || !ok4 || !ok5 || !ok6 {
+	if !ok1 || !ok6 {
 		return lint.Result{}, false
 	}
-	if !(start <= tryStart && tryStart < tryEnd && tryEnd <= stmtEnd) {
-		return lint.Result{}, false
-	}
-	if !(start <= callStart && callStart < callEnd && callEnd <= tryEnd) {
+	if !(start < stmtEnd) {
 		return lint.Result{}, false
 	}
 	suffix, ok := returnSplitSuffix(r)
 	if !ok {
 		return lint.Result{}, false
 	}
-	names := splitTempNames(r.fn, r.call, r.tup.Len()-1)
-	picked := strings.Join(names, ", ")
 	indentStart := start
 	for indentStart > 0 && (r.src[indentStart-1] == ' ' || r.src[indentStart-1] == '\t') {
 		indentStart--
 	}
 	indent := string(r.src[indentStart:start])
 	stmtSrc := string(r.src[start:stmtEnd])
-	callSrc := string(r.src[callStart:callEnd])
-	rest := stmtSrc[:tryStart-start] + picked + stmtSrc[tryEnd-start:] + suffix
-	gapSrc := string(r.src[callEnd:tryEnd])
-	if len(gapSrc) == 0 || gapSrc[len(gapSrc)-1] != '?' {
-		return lint.Result{}, false
+	type seg struct {
+		relStart, relEnd int
+		callStart        int
+		callEnd          int
+		gap              string
+		hoist            string
+		bind             string
+		names            string
+		top              bool
 	}
-	replacement := picked + " := " + callSrc + gapSrc + "\n" + indent + rest
+	var segs []seg
+	sites := slices.Clone(r.tries)
+	slices.SortFunc(sites, func(a, b trySite) int {
+		ae, _ := tryOffset(r.src, syntax.EndPos(a.expr))
+		be, _ := tryOffset(r.src, syntax.EndPos(b.expr))
+		return cmp.Compare(ae, be)
+	})
+	used := usedNames(r.fn)
+	for _, site := range sites {
+		tryStart, ok2 := tryOffset(r.src, syntax.StartPos(site.expr))
+		tryEnd, ok3 := tryOffset(r.src, syntax.EndPos(site.expr))
+		callStart, ok4 := tryOffset(r.src, syntax.StartPos(site.call))
+		callEndOff, ok5 := callEnd(r.src, site.call)
+		if !ok2 || !ok3 || !ok4 || !ok5 {
+			return lint.Result{}, false
+		}
+		if !(start <= tryStart && tryStart < tryEnd && tryEnd <= stmtEnd) {
+			return lint.Result{}, false
+		}
+		if !(start <= callStart && callStart < callEndOff && callEndOff <= tryEnd) {
+			return lint.Result{}, false
+		}
+		gapSrc := string(r.src[callEndOff:tryEnd])
+		if len(gapSrc) == 0 || gapSrc[len(gapSrc)-1] != '?' {
+			return lint.Result{}, false
+		}
+		segs = append(segs, seg{
+			relStart:  tryStart - start,
+			relEnd:    tryEnd - start,
+			callStart: callStart - start,
+			callEnd:   callEndOff - start,
+			gap:       gapSrc,
+		})
+	}
+	for i, site := range sites {
+		sg := &segs[i]
+		suffixI := ""
+		if i == len(sites)-1 {
+			suffixI = suffix
+		}
+		picked := strings.Join(freshNames(used, site.call, site.tup.Len()-1), ", ")
+		sg.bind = picked
+		sg.names = picked + suffixI
+	}
+	for i := range segs {
+		sg := &segs[i]
+		callSrc := string(r.src[start+sg.callStart : start+sg.callEnd])
+		order := make([]int, len(segs))
+		for j := range order {
+			order[j] = j
+		}
+		slices.SortFunc(order, func(a, b int) int { return cmp.Compare(segs[b].relStart, segs[a].relStart) })
+		for _, j := range order {
+			if j == i {
+				continue
+			}
+			inner := segs[j]
+			if inner.relStart < sg.callStart || inner.relEnd > sg.callEnd {
+				continue
+			}
+			direct := true
+			for _, k := range order {
+				if k == i || k == j {
+					continue
+				}
+				mid := segs[k]
+				if mid.relStart < sg.callStart || mid.relEnd > sg.callEnd {
+					continue
+				}
+				if mid.relStart <= inner.relStart && inner.relEnd <= mid.relEnd {
+					direct = false
+					break
+				}
+			}
+			if !direct {
+				continue
+			}
+			callSrc = callSrc[:inner.relStart-sg.callStart] + inner.bind + callSrc[inner.relEnd-sg.callStart:]
+		}
+		sg.hoist = sg.bind + " := " + callSrc + sg.gap + "\n" + indent
+	}
+	for i := range segs {
+		segs[i].top = true
+		for j := range segs {
+			if j != i && segs[j].relStart <= segs[i].relStart && segs[i].relEnd <= segs[j].relEnd {
+				segs[i].top = false
+				break
+			}
+		}
+	}
+	var hoist, rest strings.Builder
+	prev := 0
+	for _, sg := range segs {
+		hoist.WriteString(sg.hoist)
+		if !sg.top {
+			continue
+		}
+		rest.WriteString(stmtSrc[prev:sg.relStart])
+		rest.WriteString(sg.names)
+		prev = sg.relEnd
+	}
+	rest.WriteString(stmtSrc[prev:])
+	replacement := hoist.String() + rest.String()
+	first := r.tries[0]
 	endLine, endCol := offsetLineCol(r.src, stmtEnd)
 	return lint.Result{
 		Rule:     "correctness::misplaced_try",
@@ -460,9 +746,9 @@ func splitResult(r splitRequest) (lint.Result, bool) {
 		End:      syntax.MakePos(startPos.Base(), endLine, endCol),
 		Message:  "? must end an assignment, expression statement, defer, or errdefer",
 		Provenance: lint.Provenance{
-			OriginExpr:   syntax.String(r.call),
-			OriginLine:   int(r.call.Pos().Line()),
-			InferredType: types2.TypeString(r.tup.At(0).Type(), func(p *types2.Package) string { return p.Name() }),
+			OriginExpr:   syntax.String(first.call),
+			OriginLine:   int(first.call.Pos().Line()),
+			InferredType: types2.TypeString(first.tup.At(0).Type(), func(p *types2.Package) string { return p.Name() }),
 		},
 		Fixes: []lint.Fix{
 			{Description: "Split the expression so `?` ends its own statement.", Replacement: replacement},
@@ -491,7 +777,18 @@ func splitStmtEnd(src []byte, s syntax.Stmt) (int, bool) {
 	return end, true
 }
 
-func splitTempNames(fn syntax.Node, call *syntax.CallExpr, n int) []string {
+func usedNames(fn syntax.Node) map[string]bool {
+	used := map[string]bool{}
+	syntax.Inspect(fn, func(n syntax.Node) bool {
+		if id, ok := n.(*syntax.Name); ok {
+			used[id.Value] = true
+		}
+		return true
+	})
+	return used
+}
+
+func freshNames(used map[string]bool, call *syntax.CallExpr, n int) []string {
 	base := "tmp"
 	switch fun := syntax.Unparen(call.Fun).(type) {
 	case *syntax.Name:
@@ -503,13 +800,6 @@ func splitTempNames(fn syntax.Node, call *syntax.CallExpr, n int) []string {
 			base = fun.Sel.Value
 		}
 	}
-	used := map[string]bool{}
-	syntax.Inspect(fn, func(n syntax.Node) bool {
-		if id, ok := n.(*syntax.Name); ok {
-			used[id.Value] = true
-		}
-		return true
-	})
 	names := make([]string, 0, n)
 	for i := 0; len(names) < n; i++ {
 		suffix := ""

@@ -90,6 +90,7 @@ recheck:
 	if didLogos {
 		logosConfigureOwnedConstantsLowered(&conf) // generated nodes alone receive fresh private-type references.
 	}
+	var logosMisplaced []syntax.Pos
 	conf.Error = func(err error) {
 		terr := err.(types2.Error)
 		if logosDeferSoftWarn(terr) { // logos M6-S3 hook: warn-severity rules never fail, and the lint pass resolves them.
@@ -98,7 +99,8 @@ recheck:
 		if logosReportNilDeref(&m, files, info, terr) { // logos M9-S2 hook: nil_deref_unproven carries autofix candidates.
 			return
 		}
-		if logosReportMisplacedTry(&m, files, info, terr) { // logos tryfix hook: misplaced_try carries a split-statement autofix candidate.
+		if logosMisplacedTryPending(terr) && logosMisplacedTryResolvable(files, terr.Pos) {
+			logosMisplaced = append(logosMisplaced, terr.Pos)
 			return
 		}
 		msg := terr.Msg
@@ -121,6 +123,7 @@ recheck:
 
 	pkg, err := conf.Check(base.Ctxt.Pkgpath, files, info)
 	logosFlushSoftWarns(&m, files, err)
+	logosFlushMisplacedTry(&m, files, info, logosMisplaced)
 	base.ExitIfErrors()
 	if err != nil {
 		base.FatalfAt(src.NoXPos, "conf.Check error: %v", err)

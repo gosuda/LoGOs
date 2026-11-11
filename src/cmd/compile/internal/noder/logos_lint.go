@@ -268,6 +268,7 @@ func logosDiag(m *posMap, r lint.Result) base.LogosDiag {
 		Pos:          m.makeXPos(r.Pos),
 		End:          m.makeXPos(r.End),
 		Message:      r.Message,
+		Note:         r.Note,
 		OriginExpr:   r.Provenance.OriginExpr,
 		OriginLine:   r.Provenance.OriginLine,
 		InferredType: r.Provenance.InferredType,
