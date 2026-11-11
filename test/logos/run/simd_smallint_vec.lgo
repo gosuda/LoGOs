@@ -2,7 +2,15 @@
 
 package main
 
-import "fmt"
+import (
+	"fmt"
+	"os"
+)
+
+func fail(tag string) {
+	fmt.Println("FAIL", tag)
+	os.Exit(1)
+}
 
 func checkI8Add() {
 	var a, b [16]int8
@@ -16,18 +24,19 @@ func checkI8Add() {
 	quo := a / b
 	for i := range a {
 		if add[i] != a[i]+b[i] {
-			panic("i8 add")
+			fail(fmt.Sprintf("i8 add lane %d: got %v want %v", i, add[i], a[i]+b[i]))
 		}
 		if sub[i] != a[i]-b[i] {
-			panic("i8 sub")
+			fail(fmt.Sprintf("i8 sub lane %d: got %v want %v", i, sub[i], a[i]-b[i]))
 		}
 		if mul[i] != a[i]*b[i] {
-			panic("i8 mul")
+			fail(fmt.Sprintf("i8 mul lane %d: got %v want %v", i, mul[i], a[i]*b[i]))
 		}
 		if quo[i] != a[i]/b[i] {
-			panic("i8 div")
+			fail(fmt.Sprintf("i8 div lane %d: got %v want %v", i, quo[i], a[i]/b[i]))
 		}
 	}
+	fmt.Println("ok i8-arith-matches-scalar")
 }
 
 func checkI8Bit() {
@@ -41,15 +50,16 @@ func checkI8Bit() {
 	xor := a ^ b
 	for i := range a {
 		if and[i] != a[i]&b[i] {
-			panic("i8 and")
+			fail(fmt.Sprintf("i8 and lane %d: got %v want %v", i, and[i], a[i]&b[i]))
 		}
 		if or[i] != a[i]|b[i] {
-			panic("i8 or")
+			fail(fmt.Sprintf("i8 or lane %d: got %v want %v", i, or[i], a[i]|b[i]))
 		}
 		if xor[i] != a[i]^b[i] {
-			panic("i8 xor")
+			fail(fmt.Sprintf("i8 xor lane %d: got %v want %v", i, xor[i], a[i]^b[i]))
 		}
 	}
+	fmt.Println("ok i8-bits-match-scalar")
 }
 
 func checkI8Reduce() {
@@ -70,13 +80,13 @@ func checkI8Reduce() {
 		}
 	}
 	if a.sum() != wantSum {
-		panic("i8 sum")
+		fail(fmt.Sprintf("i8 sum: got %v want %v", a.sum(), wantSum))
 	}
 	if a.min() != wantMin {
-		panic("i8 min")
+		fail(fmt.Sprintf("i8 min: got %v want %v", a.min(), wantMin))
 	}
 	if a.max() != wantMax {
-		panic("i8 max")
+		fail(fmt.Sprintf("i8 max: got %v want %v", a.max(), wantMax))
 	}
 	var c, d [16]int8
 	for i := range c {
@@ -88,8 +98,9 @@ func checkI8Reduce() {
 		wantDot += c[i] * d[i]
 	}
 	if c.dot(d) != wantDot {
-		panic("i8 dot")
+		fail(fmt.Sprintf("i8 dot: got %v want %v", c.dot(d), wantDot))
 	}
+	fmt.Println("ok i8-reductions-match-scalar")
 }
 
 func checkI16Add() {
@@ -104,18 +115,19 @@ func checkI16Add() {
 	quo := a / b
 	for i := range a {
 		if add[i] != a[i]+b[i] {
-			panic("i16 add")
+			fail(fmt.Sprintf("i16 add lane %d: got %v want %v", i, add[i], a[i]+b[i]))
 		}
 		if sub[i] != a[i]-b[i] {
-			panic("i16 sub")
+			fail(fmt.Sprintf("i16 sub lane %d: got %v want %v", i, sub[i], a[i]-b[i]))
 		}
 		if mul[i] != a[i]*b[i] {
-			panic("i16 mul")
+			fail(fmt.Sprintf("i16 mul lane %d: got %v want %v", i, mul[i], a[i]*b[i]))
 		}
 		if quo[i] != a[i]/b[i] {
-			panic("i16 div")
+			fail(fmt.Sprintf("i16 div lane %d: got %v want %v", i, quo[i], a[i]/b[i]))
 		}
 	}
+	fmt.Println("ok i16-arith-matches-scalar")
 }
 
 func checkI16Bit() {
@@ -129,15 +141,16 @@ func checkI16Bit() {
 	xor := a ^ b
 	for i := range a {
 		if and[i] != a[i]&b[i] {
-			panic("i16 and")
+			fail(fmt.Sprintf("i16 and lane %d: got %v want %v", i, and[i], a[i]&b[i]))
 		}
 		if or[i] != a[i]|b[i] {
-			panic("i16 or")
+			fail(fmt.Sprintf("i16 or lane %d: got %v want %v", i, or[i], a[i]|b[i]))
 		}
 		if xor[i] != a[i]^b[i] {
-			panic("i16 xor")
+			fail(fmt.Sprintf("i16 xor lane %d: got %v want %v", i, xor[i], a[i]^b[i]))
 		}
 	}
+	fmt.Println("ok i16-bits-match-scalar")
 }
 
 func checkI16Reduce() {
@@ -158,13 +171,13 @@ func checkI16Reduce() {
 		}
 	}
 	if a.sum() != wantSum {
-		panic("i16 sum")
+		fail(fmt.Sprintf("i16 sum: got %v want %v", a.sum(), wantSum))
 	}
 	if a.min() != wantMin {
-		panic("i16 min")
+		fail(fmt.Sprintf("i16 min: got %v want %v", a.min(), wantMin))
 	}
 	if a.max() != wantMax {
-		panic("i16 max")
+		fail(fmt.Sprintf("i16 max: got %v want %v", a.max(), wantMax))
 	}
 	var c, d [8]int16
 	for i := range c {
@@ -176,8 +189,9 @@ func checkI16Reduce() {
 		wantDot += c[i] * d[i]
 	}
 	if c.dot(d) != wantDot {
-		panic("i16 dot")
+		fail(fmt.Sprintf("i16 dot: got %v want %v", c.dot(d), wantDot))
 	}
+	fmt.Println("ok i16-reductions-match-scalar")
 }
 
 func checkI32Add() {
@@ -192,18 +206,19 @@ func checkI32Add() {
 	quo := a / b
 	for i := range a {
 		if add[i] != a[i]+b[i] {
-			panic("i32 add")
+			fail(fmt.Sprintf("i32 add lane %d: got %v want %v", i, add[i], a[i]+b[i]))
 		}
 		if sub[i] != a[i]-b[i] {
-			panic("i32 sub")
+			fail(fmt.Sprintf("i32 sub lane %d: got %v want %v", i, sub[i], a[i]-b[i]))
 		}
 		if mul[i] != a[i]*b[i] {
-			panic("i32 mul")
+			fail(fmt.Sprintf("i32 mul lane %d: got %v want %v", i, mul[i], a[i]*b[i]))
 		}
 		if quo[i] != a[i]/b[i] {
-			panic("i32 div")
+			fail(fmt.Sprintf("i32 div lane %d: got %v want %v", i, quo[i], a[i]/b[i]))
 		}
 	}
+	fmt.Println("ok i32-arith-matches-scalar")
 }
 
 func checkI32Bit() {
@@ -217,15 +232,16 @@ func checkI32Bit() {
 	xor := a ^ b
 	for i := range a {
 		if and[i] != a[i]&b[i] {
-			panic("i32 and")
+			fail(fmt.Sprintf("i32 and lane %d: got %v want %v", i, and[i], a[i]&b[i]))
 		}
 		if or[i] != a[i]|b[i] {
-			panic("i32 or")
+			fail(fmt.Sprintf("i32 or lane %d: got %v want %v", i, or[i], a[i]|b[i]))
 		}
 		if xor[i] != a[i]^b[i] {
-			panic("i32 xor")
+			fail(fmt.Sprintf("i32 xor lane %d: got %v want %v", i, xor[i], a[i]^b[i]))
 		}
 	}
+	fmt.Println("ok i32-bits-match-scalar")
 }
 
 func checkI32Reduce() {
@@ -246,13 +262,13 @@ func checkI32Reduce() {
 		}
 	}
 	if a.sum() != wantSum {
-		panic("i32 sum")
+		fail(fmt.Sprintf("i32 sum: got %v want %v", a.sum(), wantSum))
 	}
 	if a.min() != wantMin {
-		panic("i32 min")
+		fail(fmt.Sprintf("i32 min: got %v want %v", a.min(), wantMin))
 	}
 	if a.max() != wantMax {
-		panic("i32 max")
+		fail(fmt.Sprintf("i32 max: got %v want %v", a.max(), wantMax))
 	}
 	var c, d [8]int32
 	for i := range c {
@@ -264,8 +280,9 @@ func checkI32Reduce() {
 		wantDot += c[i] * d[i]
 	}
 	if c.dot(d) != wantDot {
-		panic("i32 dot")
+		fail(fmt.Sprintf("i32 dot: got %v want %v", c.dot(d), wantDot))
 	}
+	fmt.Println("ok i32-reductions-match-scalar")
 }
 
 func checkF32Reduce() {
@@ -285,16 +302,17 @@ func checkF32Reduce() {
 		}
 	}
 	if a.min() != wantMin {
-		panic("f32 min")
+		fail(fmt.Sprintf("f32 min: got %v want %v", a.min(), wantMin))
 	}
 	if a.max() != wantMax {
-		panic("f32 max")
+		fail(fmt.Sprintf("f32 max: got %v want %v", a.max(), wantMax))
 	}
 	lo := (a[0]*b[0] + a[1]*b[1]) + (a[2]*b[2] + a[3]*b[3])
 	hi := (a[4]*b[4] + a[5]*b[5]) + (a[6]*b[6] + a[7]*b[7])
 	if a.dot(b) != lo+hi {
-		panic("f32 dot")
+		fail(fmt.Sprintf("f32 dot: got %v want %v", a.dot(b), lo+hi))
 	}
+	fmt.Println("ok f32-reduce-matches-scalar")
 }
 
 func checkF64Wider() {
@@ -309,7 +327,7 @@ func checkF64Wider() {
 	wantMax = a[0]
 	for i := range a {
 		if add[i] != a[i]+b[i] {
-			panic("f64w add")
+			fail(fmt.Sprintf("f64w add lane %d: got %v want %v", i, add[i], a[i]+b[i]))
 		}
 		wantSum += a[i]
 		if a[i] < wantMin {
@@ -320,19 +338,20 @@ func checkF64Wider() {
 		}
 	}
 	if a.sum() != wantSum {
-		panic("f64w sum")
+		fail(fmt.Sprintf("f64w sum: got %v want %v", a.sum(), wantSum))
 	}
 	if a.min() != wantMin {
-		panic("f64w min")
+		fail(fmt.Sprintf("f64w min: got %v want %v", a.min(), wantMin))
 	}
 	if a.max() != wantMax {
-		panic("f64w max")
+		fail(fmt.Sprintf("f64w max: got %v want %v", a.min(), wantMax))
 	}
 	lo := (a[0]*b[0] + a[1]*b[1]) + (a[2]*b[2] + a[3]*b[3])
 	hi := (a[4]*b[4] + a[5]*b[5]) + (a[6]*b[6] + a[7]*b[7])
 	if a.dot(b) != lo+hi {
-		panic("f64w dot")
+		fail(fmt.Sprintf("f64w dot: got %v want %v", a.dot(b), lo+hi))
 	}
+	fmt.Println("ok f64-wide-matches-scalar")
 }
 
 func main() {
@@ -347,5 +366,4 @@ func main() {
 	checkI32Reduce()
 	checkF32Reduce()
 	checkF64Wider()
-	fmt.Println("simd smallint vec ok")
 }
