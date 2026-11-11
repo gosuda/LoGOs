@@ -307,6 +307,10 @@ func (p *Proxy) exit(m *message) error {
 func (p *Proxy) serverLoop(ctx context.Context, rd *reader) error {
 	for {
 		m, err := rd.read()
+		if _, ok := errors.AsType[*parseError](err); ok {
+			p.logf("gopls sent a bad frame: %v", err)
+			continue
+		}
 		if errors.Is(err, io.EOF) {
 			return nil
 		}
