@@ -16,7 +16,11 @@ import (
 	"sync"
 )
 
-const maxMessage = 1 << 30
+const maxMessage = 16 << 20
+
+const maxHeaderBytes = 8 << 10
+
+const maxHeaderLines = 32
 
 type message struct {
 	JSONRPC string          `json:"jsonrpc"`
@@ -65,33 +69,48 @@ func (rd *reader) read() (*message, error) {
 }
 
 func (rd *reader) contentLength() (int, error) {
+	n, total := -1, 0
+	lines := 0
 	line, err := rd.r.ReadString('\n')
-	if errors.Is(err, io.EOF) && line == "" {
-		return 0, io.EOF
-	}
-	n := -1
-	for {
-		if err != nil {
-			return 0, fmt.Errorf("reading message header: %w", midMessage(err))
+	for err == nil {
+		total += len(line)
+		lines++
+		if tooBig(total, lines) {
+			return 0, errors.New("message header too large")
 		}
-		line = strings.TrimRight(line, "\r\n")
-		if line == "" {
-			break
+		trimmed := strings.TrimRight(line, "\r\n")
+		if trimmed == "" {
+			return checkedLength(n)
 		}
-		if v, ok := headerValue(line, "Content-Length"); ok {
-			if n >= 0 {
-				return 0, errors.New("message header has duplicate Content-Length")
-			}
-			if n, err = parseLength(v); err != nil {
+		if v, ok := headerValue(trimmed, "Content-Length"); ok {
+			if n, err = takeLength(n, v); err != nil {
 				return 0, err
 			}
 		}
 		line, err = rd.r.ReadString('\n')
 	}
+	if errors.Is(err, io.EOF) && line == "" && total == 0 {
+		return 0, io.EOF
+	}
+	return 0, fmt.Errorf("reading message header: %w", midMessage(err))
+}
+
+func tooBig(total, lines int) bool {
+	return total > maxHeaderBytes || lines > maxHeaderLines
+}
+
+func checkedLength(n int) (int, error) {
 	if n < 0 {
 		return 0, errors.New("message header has no Content-Length")
 	}
 	return n, nil
+}
+
+func takeLength(n int, v string) (int, error) {
+	if n >= 0 {
+		return 0, errors.New("message header has duplicate Content-Length")
+	}
+	return parseLength(v)
 }
 
 func midMessage(err error) error {
