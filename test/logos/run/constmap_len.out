@@ -5,3 +5,12 @@ ok len-generic
 ok len-expr
 ok len-shift
 ok len-case
+ok len-local
+ok len-conv
+ok len-new
+ok len-make
+ok len-nested
+ok len-closure
+ok len-typecase
+ok len-localconst
+ok len-forward
