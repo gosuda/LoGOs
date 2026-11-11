@@ -182,6 +182,7 @@ func (fc *funcLower) lowerGroupWrap(s syntax.Stmt, pos syntax.Pos, top groupFram
 	if child, ok := s.(*syntax.GroupChild); ok {
 		body = child.Body
 		cfc := fc.groupChildFunc(top, body, ft)
+		cfc.hoistSwitchExprInits()
 		cfc.run()
 		fc.groupTakeChild(cfc)
 		fl.add(fl.off(pos), fl.off(body.Pos())+1, prefix)

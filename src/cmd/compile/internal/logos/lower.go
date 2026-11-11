@@ -213,6 +213,7 @@ type fileLower struct {
 	chainGrp      chainGroup               // M6-S7 hook: group-body scope for chain results.
 	chainExit     func(err string) string  // M6-S7 hook: a header closure hands a failing hoist's error to its statement; nil returns it.
 	groupDone     map[*syntax.FuncLit]bool // M8-S2 hook: finished group closures, pruned by the literal scan.
+	funcs         map[*syntax.BlockStmt]*funcLower
 }
 
 // off converts a valid file position to a byte offset.
@@ -507,6 +508,7 @@ func (fl *fileLower) lowerFile() {
 	fl.eraseConstViews()     // M5-S1 hook: erase const views and bound recorded slices; also erases readonly interface `const` qualifiers.
 	fl.lowerConstSlices()    // M13-S3 hook: []C arguments to `const []I` parameters convert through rt.CovSlice.
 	fl.lowerPlatform()       // M3-S5 hook: MustNonNil wraps for platform-pointer stores.
+	fl.hoistTryInits()       // switch-expression try inits out of IIFE closures.
 	fl.lowerUnions()         // M2 hook: switch expressions and struct assertions.
 	fl.lowerOptions()        // M3-S6 hook: single-value map reads and ?? over them.
 	fl.lowerViewAs()         // M7-S5 hook: comptime.ViewAs calls to the rt helper.
@@ -748,7 +750,14 @@ type funcLower struct {
 
 // newFuncLower builds the lowering state of one function body.
 func newFuncLower(fl *fileLower, ft *syntax.FuncType, body *syntax.BlockStmt) *funcLower {
+	if fc, ok := fl.funcs[body]; ok {
+		return fc
+	}
 	fc := &funcLower{fl: fl, ft: ft, body: body}
+	if fl.funcs == nil {
+		fl.funcs = make(map[*syntax.BlockStmt]*funcLower)
+	}
+	fl.funcs[body] = fc
 	n := len(ft.ResultList)
 	for i, field := range ft.ResultList {
 		fc.specs = append(fc.specs, resultSpec{

@@ -1,0 +1,113 @@
+# S15 try positions: `?` in a for post clause and in a switch
+# expression init lowers out of the loop and out of the switch IIFE,
+# so an error there returns from the enclosing function before the
+# next iteration and before any arm. The ejected tree builds under
+# plain go with the same behavior.
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+cd m
+
+logos run .
+cp stdout $WORK/logos-stdout.txt
+
+logos eject -o out
+exists out/main.go
+! grep '\?' out/main.go
+! grep 'misplaced' out/main.go
+
+cd out
+go run .
+cp stdout $WORK/eject-stdout.txt
+cmp stdout $WORK/eject-stdout.txt
+cd ..
+cmp $WORK/logos-stdout.txt $WORK/eject-stdout.txt
+cmp $WORK/logos-stdout.txt want-stdout.txt
+
+exists $UPROOT1272/bin/go
+exec env -u GOROOT $UPROOT1272/bin/go build ./...
+
+-- m/go.mod --
+module example.com/trypos
+
+go 1.27
+
+-- m/main.lgo --
+package main
+
+import (
+	"errors"
+	"fmt"
+)
+
+var errStep = errors.New("step")
+
+var postCalls int
+var bodies int
+
+func next(v int) (int, error) {
+	postCalls++
+	if v == 2 {
+		return 0, errStep
+	}
+	return v + 1, nil
+}
+
+func nextOK(v int) (int, error) {
+	postCalls++
+	return v + 1, nil
+}
+
+func sumOK() (total int, err error) {
+	for i := 0; i < 3; i = nextOK(i)? {
+		bodies++
+		total += i
+	}
+	return total, nil
+}
+
+func sumFail() (total int, err error) {
+	for i := 0; i < 5; i = next(i)? {
+		bodies++
+		total += i
+	}
+	return total, nil
+}
+
+func load(fail bool) (int, error) {
+	postCalls++
+	if fail {
+		return 0, errStep
+	}
+	return 7, nil
+}
+
+func classify(fail bool) (string, error) {
+	r := switch n := load(fail)?; n {
+	case 7 => "seven"
+	default => "other"
+	}
+	return r, nil
+}
+
+func main() {
+	postCalls = 0
+	bodies = 0
+	total, err := sumOK()
+	fmt.Println("post-nil:", err == nil, total, postCalls, bodies)
+	postCalls = 0
+	bodies = 0
+	total, err = sumFail()
+	fmt.Println("post-err:", err == errStep, total, postCalls, bodies)
+	postCalls = 0
+	s, err := classify(false)
+	fmt.Println("init-nil:", err == nil, s, postCalls)
+	s, err = classify(true)
+	fmt.Println("init-err:", err == errStep, s == "", postCalls)
+}
+
+-- m/want-stdout.txt --
+post-nil: true 3 3 3
+post-err: true 0 3 3
+init-nil: true seven 1
+init-err: true true 2
