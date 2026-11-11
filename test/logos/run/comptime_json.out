@@ -1,1 +1,5 @@
-comptime json: PASS
+ok field-count-cjs1
+ok field-count-cjs2
+ok marshal-cjs1-matches-reflective
+ok marshal-cjs2-matches-reflective
+ok marshal-cjs2-escaping-matches-reflective

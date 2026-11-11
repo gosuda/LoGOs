@@ -1,16 +1,10 @@
 // run
-
-// Comptime layout calls spelled with a comment inside the argument
-// list: the closing parenthesis of such a call is found over tokens,
-// so a parenthesis inside the comment never ends the call early and
-// the lowered text stays whole, in a plain body, in a const for body,
-// and in a folded const if leaf.
-
 package main
 
 import (
 	"comptime"
 	"fmt"
+	"os"
 	"unsafe"
 )
 
@@ -22,6 +16,17 @@ type Pair struct {
 type Nest struct {
 	P Pair
 	Q int
+}
+
+var failed bool
+
+func check(name, got, want string) {
+	if got != want {
+		fmt.Println("FAIL", name, "got", got, "want", want)
+		failed = true
+		return
+	}
+	fmt.Println("ok", name)
 }
 
 func Cells[T any]() int {
@@ -45,16 +50,11 @@ func ScanMark[T any]() string {
 	return "noscan"
 }
 
-func report(name string, ok bool) {
-	if ok {
-		fmt.Println(name, "ok")
-		return
-	}
-	fmt.Println(name, "bad")
-}
-
 func main() {
-	report("direct", Cells[Pair]() == int(unsafe.Sizeof(Pair{X: new(int)})) && Cells[Nest]() == int(unsafe.Sizeof(Nest{P: Pair{X: new(int)}})))
-	report("fields", FieldCells() == int(unsafe.Sizeof(Pair{X: new(int)}))+int(unsafe.Sizeof(int(0))))
-	report("const if", ScanMark[Pair]() == "scan" && ScanMark[int]() == "scan")
+	check("comment-paren-in-sizeof", fmt.Sprint(Cells[Pair]() == int(unsafe.Sizeof(Pair{X: new(int)})) && Cells[Nest]() == int(unsafe.Sizeof(Nest{P: Pair{X: new(int)}}))), "true")
+	check("comment-paren-in-constfor-sizeof", fmt.Sprint(FieldCells() == int(unsafe.Sizeof(Pair{X: new(int)}))+int(unsafe.Sizeof(int(0)))), "true")
+	check("comment-paren-in-constif", fmt.Sprint(ScanMark[Pair]() == "scan" && ScanMark[int]() == "scan"), "true")
+	if failed {
+		os.Exit(1)
+	}
 }

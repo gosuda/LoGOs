@@ -1,13 +1,13 @@
-int8 ok
-int64 ok
-string ok
-pointer ok
-zero array ok
-mixed struct ok
-float array ok
-empty struct ok
-pointer pair ok
-buffers ok
-const if ok
-recursive pointer ok
-recursive zero array ok
+ok int8-size-align-no-scan
+ok int64-size-align-no-scan
+ok string-size-align-scans
+ok pointer-size-align-scans
+ok zero-array-size-align-no-scan
+ok mixed-struct-size-align-scans
+ok float-array-size-align-no-scan
+ok empty-struct-size-align-no-scan
+ok pointer-pair-size-align-scans
+ok buffer-uses-size
+ok const-if-on-haspointers
+ok recursive-pointer-scans
+ok recursive-zero-array-no-scan

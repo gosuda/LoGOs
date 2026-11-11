@@ -1,5 +1,4 @@
 // run
-
 package main
 
 import (
@@ -25,6 +24,17 @@ type CJS2 struct {
 
 type CJS2Mirror CJS2
 
+var failed bool
+
+func check(name, got, want string) {
+	if got != want {
+		fmt.Println("FAIL", name, "got", got, "want", want)
+		failed = true
+		return
+	}
+	fmt.Println("ok", name)
+}
+
 func FieldCount[T any]() int {
 	n := 0
 	const for _, f := range comptime.Fields[T]() {
@@ -45,65 +55,22 @@ func JMarshal[T any](v T) []byte {
 	return b
 }
 
-func checkMarshal[T any](v T, mirror any, direct, got []byte) error {
-	via, err := json.Marshal(v)
-	if err != nil {
-		return err
-	}
-	if !bytes.Equal(direct, via) {
-		return fmt.Errorf("direct %s != json.Marshal %s", direct, via)
-	}
-	want, err := json.Marshal(mirror)
-	if err != nil {
-		return err
-	}
-	if !bytes.Equal(direct, want) {
-		return fmt.Errorf("generated %s != reflective %s", direct, want)
-	}
-	if !bytes.Equal(got, want) {
-		return fmt.Errorf("comptime JMarshal %s != reflective %s", got, want)
-	}
-	return nil
-}
-
 func main() {
-	if FieldCount[CJS1]() != 2 {
-		fmt.Println("comptime: CJS1 field count wrong")
-		os.Exit(1)
-	}
-	if FieldCount[CJS2]() != 3 {
-		fmt.Println("comptime: CJS2 field count wrong")
-		os.Exit(1)
-	}
+	check("field-count-cjs1", fmt.Sprint(FieldCount[CJS1]()), "2")
+	check("field-count-cjs2", fmt.Sprint(FieldCount[CJS2]()), "3")
 	a := CJS1{A: 1, B: "x"}
-	ad, err := a.MarshalJSON()
-	if err != nil {
-		fmt.Println("comptime:", err)
-		os.Exit(1)
-	}
-	if err := checkMarshal(a, CJS1Mirror(a), ad, JMarshal(a)); err != nil {
-		fmt.Println("comptime CJS1:", err)
-		os.Exit(1)
-	}
+	ad, aerr := a.MarshalJSON()
+	awant, awerr := json.Marshal(CJS1Mirror(a))
+	check("marshal-cjs1-matches-reflective", fmt.Sprint(bytes.Equal(ad, awant), bytes.Equal(JMarshal(a), awant), aerr, awerr), "true true <nil> <nil>")
 	b := CJS2{X: 1.5, Y: "a<b", Z: 0}
-	bd, err := b.MarshalJSON()
-	if err != nil {
-		fmt.Println("comptime:", err)
-		os.Exit(1)
-	}
-	if err := checkMarshal(b, CJS2Mirror(b), bd, JMarshal(b)); err != nil {
-		fmt.Println("comptime CJS2:", err)
-		os.Exit(1)
-	}
+	bd, berr := b.MarshalJSON()
+	bwant, bwerr := json.Marshal(CJS2Mirror(b))
+	check("marshal-cjs2-matches-reflective", fmt.Sprint(bytes.Equal(bd, bwant), bytes.Equal(JMarshal(b), bwant), berr, bwerr), "true true <nil> <nil>")
 	c := CJS2{X: -2.5, Y: "\xff\xfe\u2028end", Z: 9}
-	cd, err := c.MarshalJSON()
-	if err != nil {
-		fmt.Println("comptime:", err)
+	cd, cerr := c.MarshalJSON()
+	cwant, cwerr := json.Marshal(CJS2Mirror(c))
+	check("marshal-cjs2-escaping-matches-reflective", fmt.Sprint(bytes.Equal(cd, cwant), bytes.Equal(JMarshal(c), cwant), cerr, cwerr), "true true <nil> <nil>")
+	if failed {
 		os.Exit(1)
 	}
-	if err := checkMarshal(c, CJS2Mirror(c), cd, JMarshal(c)); err != nil {
-		fmt.Println("comptime CJS2 escaping:", err)
-		os.Exit(1)
-	}
-	fmt.Println("comptime json: PASS")
 }
