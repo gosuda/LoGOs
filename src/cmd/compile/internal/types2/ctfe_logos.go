@@ -195,8 +195,44 @@ func (check *Checker) logosRecordComposite(obj *Const, init syntax.Expr, x *oper
 		}
 		obj.typ = &ConstView{Elem: base, ConstMap: true}
 	}
+	if _, ok := base.Underlying().(*Map); (!ok || v.Type().Kind != ctfe.KMap) && logosTypeHasMap(base) {
+		check.errorf(obj, InvalidConstInit, "%s const %s holds a map and cannot live in read-only memory", logosConstEvalRule, obj.Name())
+		obj.typ = Typ[Invalid]
+		return true
+	}
 	check.logosRecord(obj, v)
 	return true
+}
+
+func logosTypeHasMap(t Type) bool {
+	seen := map[Type]bool{}
+	var walk func(t Type) bool
+	walk = func(t Type) bool {
+		if t == nil || seen[t] {
+			return false
+		}
+		seen[t] = true
+		u := Unalias(t)
+		if n, ok := u.(*Named); ok {
+			u = n.Underlying()
+		}
+		switch u := u.(type) {
+		case *Map:
+			return true
+		case *Struct:
+			for i := range u.NumFields() {
+				if walk(u.Field(i).Type()) {
+					return true
+				}
+			}
+		case *Slice:
+			return walk(u.Elem())
+		case *Array:
+			return walk(u.Elem())
+		}
+		return false
+	}
+	return walk(t)
 }
 
 func (check *Checker) logosCTFEFailed(obj *Const, init syntax.Expr, err error) bool {
