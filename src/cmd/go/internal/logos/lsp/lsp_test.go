@@ -1571,6 +1571,73 @@ func TestServeRejectsMissingParts(t *testing.T) {
 	}
 }
 
+func lspHandshake(t *testing.T, stdin io.WriteCloser) {
+	t.Helper()
+	for _, body := range []string{
+		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}`,
+		`{"jsonrpc":"2.0","method":"initialized","params":{}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"shutdown","params":null}`,
+		`{"jsonrpc":"2.0","method":"exit","params":{}}`,
+	} {
+		if _, err := fmt.Fprintf(stdin, "Content-Length: %d\r\n\r\n%s", len(body), body); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := stdin.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func probeGoplsThroughLogos(t *testing.T, logosBin, fakeDir string) ([]string, string) {
+	t.Helper()
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(fakeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	pathLog := filepath.Join(t.TempDir(), "path.log")
+	argsLog := filepath.Join(t.TempDir(), "args.log")
+	wrapper := "#!/bin/sh\necho \"$PATH\" >> \"" + pathLog + "\"\necho \"$@\" >> \"" + argsLog + "\"\nexec \"" + exe + "\" \"$@\"\n"
+	if err := os.WriteFile(filepath.Join(fakeDir, "gopls"), []byte(wrapper), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	scriptPath := filepath.Join(t.TempDir(), "script.json")
+	if err := os.WriteFile(scriptPath, []byte(`{}`), 0o666); err != nil {
+		t.Fatal(err)
+	}
+	sep := string(os.PathListSeparator)
+	cmd := exec.Command(logosBin, "lsp")
+	cmd.Env = append(os.Environ(),
+		"PATH="+fakeDir+sep+"/usr/bin"+sep+"/bin",
+		fakeEnv+"="+scriptPath,
+		fakeLogEnv+"="+filepath.Join(t.TempDir(), "gopls.log"))
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd.Stdout = io.Discard
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	lspHandshake(t, stdin)
+	if err := cmd.Wait(); err != nil {
+		t.Fatalf("logos lsp = %v, stderr %q", err, stderr.String())
+	}
+	pathData, err := os.ReadFile(pathLog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	argsData, err := os.ReadFile(argsLog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return strings.Split(strings.TrimSpace(string(pathData)), sep), string(argsData)
+}
+
 func TestLogosLspGoplsDiscovery(t *testing.T) {
 	testenv.MustHaveGoBuild(t)
 	t.Setenv("GOFLAGS", "")
@@ -1578,7 +1645,7 @@ func TestLogosLspGoplsDiscovery(t *testing.T) {
 	t.Setenv("GOPROXY", "off")
 	logosBin := filepath.Join(filepath.Dir(testenv.GoToolPath(t)), "logos")
 	if _, err := os.Stat(logosBin); err != nil {
-		t.Skipf("logos binary not present: %v", err)
+		t.Fatalf("logos binary not present: build the tree first: %v", err)
 	}
 	binDir := filepath.Dir(logosBin)
 	t.Run("missing", func(t *testing.T) {
@@ -1590,28 +1657,12 @@ func TestLogosLspGoplsDiscovery(t *testing.T) {
 			t.Errorf("logos lsp without gopls = %v, stderr %q, want the not-found error", err, stderr.String())
 		}
 	})
-	t.Run("order", func(t *testing.T) {
-		exe, err := os.Executable()
-		if err != nil {
-			t.Fatal(err)
+	t.Run("found", func(t *testing.T) {
+		if _, err := exec.LookPath("gopls"); err != nil {
+			t.Skipf("real gopls not on PATH: %v", err)
 		}
-		fakeDir := t.TempDir()
-		pathLog := filepath.Join(t.TempDir(), "path.log")
-		argsLog := filepath.Join(t.TempDir(), "args.log")
-		wrapper := "#!/bin/sh\necho \"$PATH\" >> \"" + pathLog + "\"\necho \"$@\" >> \"" + argsLog + "\"\nexec \"" + exe + "\" \"$@\"\n"
-		if err := os.WriteFile(filepath.Join(fakeDir, "gopls"), []byte(wrapper), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		scriptPath := filepath.Join(t.TempDir(), "script.json")
-		if err := os.WriteFile(scriptPath, []byte(`{}`), 0o666); err != nil {
-			t.Fatal(err)
-		}
-		sep := string(os.PathListSeparator)
 		cmd := exec.Command(logosBin, "lsp")
-		cmd.Env = append(os.Environ(),
-			"PATH="+fakeDir+sep+"/usr/bin"+sep+"/bin",
-			fakeEnv+"="+scriptPath,
-			fakeLogEnv+"="+filepath.Join(t.TempDir(), "gopls.log"))
+		cmd.Env = os.Environ()
 		stdin, err := cmd.StdinPipe()
 		if err != nil {
 			t.Fatal(err)
@@ -1622,36 +1673,40 @@ func TestLogosLspGoplsDiscovery(t *testing.T) {
 		if err := cmd.Start(); err != nil {
 			t.Fatal(err)
 		}
-		send := func(body string) {
-			t.Helper()
-			if _, err := fmt.Fprintf(stdin, "Content-Length: %d\r\n\r\n%s", len(body), body); err != nil {
-				t.Fatal(err)
+		lspHandshake(t, stdin)
+		waitErr := make(chan error, 1)
+		go func() { waitErr <- cmd.Wait() }()
+		select {
+		case err := <-waitErr:
+			if err != nil {
+				t.Fatalf("logos lsp with real gopls = %v, stderr %q", err, stderr.String())
 			}
+		case <-time.After(90 * time.Second):
+			_ = cmd.Process.Kill()
+			t.Fatal("logos lsp with real gopls did not exit within 90s")
 		}
-		send(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}`)
-		send(`{"jsonrpc":"2.0","method":"initialized","params":{}}`)
-		send(`{"jsonrpc":"2.0","id":2,"method":"shutdown","params":null}`)
-		send(`{"jsonrpc":"2.0","method":"exit","params":{}}`)
-		if err := stdin.Close(); err != nil {
-			t.Fatal(err)
+		if strings.Contains(stderr.String(), "gopls not found on PATH") {
+			t.Errorf("logos lsp with real gopls on PATH reported %q", stderr.String())
 		}
-		if err := cmd.Wait(); err != nil {
-			t.Fatalf("logos lsp = %v, stderr %q", err, stderr.String())
-		}
-		data, err := os.ReadFile(pathLog)
-		if err != nil {
-			t.Fatal(err)
-		}
-		entries := strings.Split(strings.TrimSpace(string(data)), sep)
+	})
+	t.Run("order", func(t *testing.T) {
+		fakeDir := t.TempDir()
+		entries, argv := probeGoplsThroughLogos(t, logosBin, fakeDir)
 		if !slices.Contains(entries, binDir) || !slices.Contains(entries, fakeDir) {
-			t.Errorf("gopls PATH = %q, want the toolchain bin and the fake gopls on it", data)
+			t.Errorf("gopls PATH = %q, want the toolchain bin and the fake gopls on it", entries)
 		}
-		args, err := os.ReadFile(argsLog)
-		if err != nil {
-			t.Fatal(err)
+		if !strings.Contains(argv, "-mode=stdio") {
+			t.Errorf("gopls argv = %q, want -mode=stdio", argv)
 		}
-		if !strings.Contains(string(args), "-mode=stdio") {
-			t.Errorf("gopls argv = %q, want -mode=stdio", args)
+	})
+	t.Run("spaces", func(t *testing.T) {
+		fakeDir := filepath.Join(t.TempDir(), "dir with spaces")
+		entries, argv := probeGoplsThroughLogos(t, logosBin, fakeDir)
+		if !slices.Contains(entries, binDir) || !slices.Contains(entries, fakeDir) {
+			t.Errorf("gopls PATH = %q, want the toolchain bin and the spaced fake gopls dir on it", entries)
+		}
+		if !strings.Contains(argv, "-mode=stdio") {
+			t.Errorf("gopls argv = %q, want -mode=stdio", argv)
 		}
 	})
 }
