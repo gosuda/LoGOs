@@ -22,7 +22,7 @@ func uriPath(uri string) (string, error) {
 	if u.Scheme != "file" {
 		return "", fmt.Errorf("%q is not a file URI", uri)
 	}
-	if u.Host != "" && u.Host != "localhost" {
+	if u.Host != "" && !strings.EqualFold(u.Host, "localhost") {
 		return "", fmt.Errorf("%q is not a local file URI", uri)
 	}
 	p := u.Path

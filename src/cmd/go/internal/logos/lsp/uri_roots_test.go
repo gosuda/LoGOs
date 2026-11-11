@@ -18,6 +18,9 @@ func TestURIAuthorityRejected(t *testing.T) {
 	if path, err := uriPath("file://localhost/etc/x.lgo"); err != nil || path == "" {
 		t.Fatalf("uriPath rejected localhost: %q, %v", path, err)
 	}
+	if path, err := uriPath("file://LOCALHOST/etc/x.lgo"); err != nil || path == "" {
+		t.Fatalf("uriPath rejected uppercase localhost: %q, %v", path, err)
+	}
 }
 
 func initProxy(t *testing.T, root string) *Proxy {
