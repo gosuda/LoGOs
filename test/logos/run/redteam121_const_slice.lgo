@@ -2,7 +2,10 @@
 
 package main
 
-import "fmt"
+import (
+	"fmt"
+	"os"
+)
 
 
 type r121Creature interface {
@@ -30,13 +33,27 @@ type r121Ordinary interface {
 
 func r121OrdLen(cs const []r121Ordinary) int { return len(cs) }
 
+var r121Failed bool
+
+func r121Check(name string, cond bool, got, want string) {
+	if !cond {
+		fmt.Printf("FAIL %s: got %s want %s\n", name, got, want)
+		r121Failed = true
+		return
+	}
+	fmt.Printf("ok %s\n", name)
+}
+
 func main() {
 	ms := []*r121Monster{{name: "ash"}, {name: "birch"}, {name: "cedar"}}
-	fmt.Println(r121Names(ms))
-	fmt.Println(r121Names(nil))
+	r121Check("const-slice-join", r121Names(ms) == "ash,birch,cedar", r121Names(ms), "ash,birch,cedar")
+	r121Check("const-slice-nil", r121Names(nil) == "", r121Names(nil), "")
 	var none []*r121Monster
-	fmt.Println(len(r121Names(none)))
+	r121Check("const-slice-nil-len", len(r121Names(none)) == 0, fmt.Sprint(len(r121Names(none))), "0")
 	cs := []r121Creature{&r121Monster{name: "dune"}}
-	fmt.Println(r121Names(cs))
-	fmt.Println(r121OrdLen(ms))
+	r121Check("const-slice-single", r121Names(cs) == "dune", r121Names(cs), "dune")
+	r121Check("const-slice-ordinary-len", r121OrdLen(ms) == 3, fmt.Sprint(r121OrdLen(ms)), fmt.Sprint(3))
+	if r121Failed {
+		os.Exit(1)
+	}
 }
