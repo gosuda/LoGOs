@@ -2,8 +2,21 @@
 
 package main
 
-import "fmt"
+import (
+	"fmt"
+	"os"
+)
 
+var failed bool
+
+func check(name string, cond bool, got, want any) {
+	if !cond {
+		failed = true
+		fmt.Println("FAIL", name+":", "got", got, "want", want)
+		return
+	}
+	fmt.Println("ok", name)
+}
 
 func presentNil() []int? {
 	var s []int = nil
@@ -20,42 +33,55 @@ func useNested(w (int?)?, d int?) int? { return w ?? d }
 
 func main() {
 	p := presentNil()
-	fmt.Println(p == nil)
-	fmt.Println(p ?? []int{9})
+	check("present-is-none", p != nil, p != nil, true)
+	gotP := fmt.Sprint(p ?? []int{9})
+	check("present-fallback", gotP == "[]", gotP, "[]")
 	a := absentSlice()
-	fmt.Println(a == nil)
-	fmt.Println(a ?? []int{9})
+	check("absent-is-none", a == nil, a == nil, true)
+	gotA := fmt.Sprint(a ?? []int{9})
+	check("absent-fallback", gotA == "[9]", gotA, "[9]")
 	var w (int?)? = 3
-	fmt.Println(w == nil)
+	check("nested-some", w != nil, w != nil, true)
 	var e int?
-	inner := w ?? e
-	fmt.Println(inner ?? 43)
-	fmt.Println(useNested(w, e) ?? 43)
+	gotInner := (w ?? e) ?? 43
+	check("nested-inner", gotInner == 3, gotInner, 3)
+	gotUse := useNested(w, e) ?? 43
+	check("nested-use", gotUse == 3, gotUse, 3)
 	var nn (int?)?
-	fmt.Println(nn == nil)
-	fmt.Println(useNested(nn, e) ?? 43)
+	check("nested-none", nn == nil, nn == nil, true)
+	gotNN := useNested(nn, e) ?? 43
+	check("nested-none-use", gotNN == 43, gotNN, 43)
 	var m map[string]int = map[string]int{"k": 5, "z": 0}
-	fmt.Println(m["k"] ?? -1)
-	fmt.Println(m["z"] ?? -1)
-	fmt.Println(m["zzz"] ?? -1)
+	gotK := m["k"] ?? -1
+	check("map-present", gotK == 5, gotK, 5)
+	gotZ := m["z"] ?? -1
+	check("map-zero", gotZ == 0, gotZ, 0)
+	gotM := m["zzz"] ?? -1
+	check("map-missing", gotM == -1, gotM, -1)
 	var f func() int? = nil
-	fmt.Println(f == nil)
+	check("func-none", f == nil, f == nil, true)
 	f = func() int? { return 8 }
-	fmt.Println(f() ?? -1)
+	gotF := f() ?? -1
+	check("func-some", gotF == 8, gotF, 8)
 	var c chan int? = nil
-	fmt.Println(c == nil)
+	check("chan-none", c == nil, c == nil, true)
 	var v any? = nil
-	fmt.Println(v == nil)
+	check("any-none", v == nil, v == nil, true)
 	v = 6
-	fmt.Println(v ?? -1)
+	gotV := v ?? -1
+	check("any-some", gotV == 6, gotV, 6)
 	var n int?
 	if n != nil {
-		fmt.Println("some")
+		check("if-none", false, "some", "none")
 	} else {
-		fmt.Println("none")
+		check("if-none", true, "none", "none")
 	}
 	n = 5
 	if n != nil {
-		fmt.Println(n ?? -1)
+		gotN2 := n ?? -1
+		check("if-some", gotN2 == 5, gotN2, 5)
+	}
+	if failed {
+		os.Exit(1)
 	}
 }

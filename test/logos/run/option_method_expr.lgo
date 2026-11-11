@@ -2,8 +2,21 @@
 
 package main
 
-import "fmt"
+import (
+	"fmt"
+	"os"
+)
 
+var failed bool
+
+func check(name string, cond bool, got, want any) {
+	if !cond {
+		failed = true
+		fmt.Println("FAIL", name+":", "got", got, "want", want)
+		return
+	}
+	fmt.Println("ok", name)
+}
 
 type Box struct{ V int }
 
@@ -11,7 +24,12 @@ func (b Box) Add(o int?, d int) int { return b.V + (o ?? d) }
 
 func main() {
 	var o int?
-	fmt.Println(Box.Add(Box{V: 10}, o, 5))
+	gotN := Box.Add(Box{V: 10}, o, 5)
+	check("none-default", gotN == 15, gotN, 15)
 	o = 3
-	fmt.Println(Box.Add(Box{V: 10}, o, 5))
+	gotS := Box.Add(Box{V: 10}, o, 5)
+	check("some-value", gotS == 13, gotS, 13)
+	if failed {
+		os.Exit(1)
+	}
 }

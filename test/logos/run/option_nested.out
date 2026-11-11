@@ -1,19 +1,19 @@
-false
-[]
-true
-[9]
-false
-3
-3
-true
-43
-5
-0
--1
-true
-8
-true
-true
-6
-none
-5
+ok present-is-none
+ok present-fallback
+ok absent-is-none
+ok absent-fallback
+ok nested-some
+ok nested-inner
+ok nested-use
+ok nested-none
+ok nested-none-use
+ok map-present
+ok map-zero
+ok map-missing
+ok func-none
+ok func-some
+ok chan-none
+ok any-none
+ok any-some
+ok if-none
+ok if-some

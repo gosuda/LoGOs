@@ -1,3 +1,5 @@
-true
-false true
-false false
+ok iface-size
+ok present-some
+ok absent-none
+ok bytes-size
+ok bytes-none
