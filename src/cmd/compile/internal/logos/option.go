@@ -923,11 +923,86 @@ func (fl *fileLower) lowerMapIndex(e *syntax.IndexExpr) syntax.Expr {
 	id := fl.nextWrapID()
 	mStart, lbrack, rbrack := fl.lookupSpans(e)
 	fl.addOwned(id, mStart, mStart, rtAlias+".Lookup(")
+	rawIdx := e.Index
+	idxT := fl.optType(rawIdx)
 	e.X = fl.lowerOptExpr(e.X)
 	e.Index = fl.lowerOptExpr(e.Index)
+	fl.convertIndexKey(e, rawIdx, e.Index, idxT)
 	out := fl.lookupFinish(e, lbrack, rbrack, id)
 	fl.wrapOwner[out] = id
 	return out
+}
+
+func logosMapKey(t types2.Type) (types2.Type, bool) {
+	if t == nil {
+		return nil, false
+	}
+	mt, ok := t.Underlying().(*types2.Map)
+	if !ok {
+		return nil, false
+	}
+	return mt.Key(), true
+}
+
+func (fl *fileLower) convertIndexKey(ix *syntax.IndexExpr, raw, lowered syntax.Expr, idxT types2.Type) {
+	keyT, ok := logosMapKey(fl.optType(ix.X))
+	if !ok {
+		return
+	}
+	if idxT == nil || types2.Identical(idxT, keyT) || !types2.AssignableTo(idxT, keyT) {
+		return
+	}
+	kn, kt, ok := fl.spellLoweredBoth(keyT, raw.Pos())
+	if !ok {
+		base.Fatalf("logos: cannot spell map key type %s at %s", keyT, raw.Pos().String())
+	}
+	kStart := fl.off(leftmostOf(raw))
+	if cl, ok := syntax.Unparen(raw).(*syntax.CompositeLit); ok && cl.Type != nil {
+		kStart = fl.off(cl.Type.Pos())
+	}
+	ix.Index = callOf(raw.Pos(), kn, []syntax.Expr{lowered})
+	kEnd := fl.exprEndKey(kStart)
+	fl.add(kStart, kStart, kt+"(")
+	fl.add(kEnd, kEnd, ")")
+}
+
+func (fl *fileLower) exprEndKey(from int) int {
+	end := len(fl.src)
+	depth := 0
+	seen := false
+	scanSegment(fl.src, from, len(fl.src), func(t tok) bool {
+		if t.comment {
+			return true
+		}
+		if t.auto {
+			if depth == 0 && seen {
+				end = t.start
+				return false
+			}
+			return true
+		}
+		seen = true
+		switch t.kind {
+		case token.LPAREN, token.LBRACK, token.LBRACE:
+			depth++
+		case token.RPAREN, token.RBRACK, token.RBRACE:
+			if depth == 0 {
+				end = t.start
+				return false
+			}
+			depth--
+		case token.COMMA, token.SEMICOLON, token.COLON, token.ASSIGN, token.DEFINE:
+			if depth == 0 {
+				end = t.start
+				return false
+			}
+		case token.EOF:
+			end = len(fl.src)
+			return false
+		}
+		return true
+	})
+	return end
 }
 
 func (fl *fileLower) lookupSpans(e *syntax.IndexExpr) (mStart, lbrack, rbrack int) {
@@ -993,10 +1068,13 @@ func (fl *fileLower) lowerCoalesce(e *syntax.CoalesceExpr) syntax.Expr {
 		xStart := fl.off(fl.optHeadStart(e.X))
 		xEnd := rbrack + 1
 		wy := fl.wrapKnown(fl.lowerOptExpr(e.Y), fl.optType(e.Y), opt.Elem)
+		rawIdx := ux.Index
+		idxT := fl.optType(rawIdx)
+		ux.X = fl.lowerOptExpr(ux.X)
+		ux.Index = fl.lowerOptExpr(ux.Index)
+		fl.convertIndexKey(ux, rawIdx, ux.Index, idxT)
 		if keepMapRead(opt.Elem) {
 			fl.addOwned(id, xStart, xStart, "func() "+etext+" { if "+optTemp+", "+optOk+" := ")
-			ux.X = fl.lowerOptExpr(ux.X)
-			ux.Index = fl.lowerOptExpr(ux.Index)
 			init := defineOf(pos, []syntax.Expr{nameOf(pos, optTemp), nameOf(pos, optOk)}, []syntax.Expr{ux})
 			body := []syntax.Stmt{
 				ifOf(pos, init, nameOf(pos, optOk), []syntax.Stmt{returnOf(pos, []syntax.Expr{nameOf(pos, optTemp)})}),
@@ -1010,8 +1088,6 @@ func (fl *fileLower) lowerCoalesce(e *syntax.CoalesceExpr) syntax.Expr {
 			return out
 		}
 		fl.addOwned(id, xStart, xStart, "func() "+etext+" { if "+optTemp+" := "+rtAlias+".Lookup(")
-		ux.X = fl.lowerOptExpr(ux.X)
-		ux.Index = fl.lowerOptExpr(ux.Index)
 		call := fl.lookupFinish(ux, lbrack, rbrack, id)
 		init := defineOf(pos, []syntax.Expr{nameOf(pos, optTemp)}, []syntax.Expr{call})
 		cond := selOf(pos, nameOf(pos, optTemp), "Present")

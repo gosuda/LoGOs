@@ -1,0 +1,10 @@
+single-a ok
+single-b ok
+absent ok
+twovalue ok
+twovalue-absent ok
+ukey ok
+explicit ok
+iface ok
+namedconst ok
+unnamedkey ok

@@ -1,0 +1,73 @@
+// run
+
+package main
+
+import (
+	"fmt"
+	"os"
+)
+
+var failed = false
+
+func check(name string, ok bool, detail string) {
+	if !ok {
+		fmt.Println("FAIL", name, detail)
+		failed = true
+		return
+	}
+	fmt.Println(name, "ok")
+}
+
+type ukA struct {
+	ukX int
+}
+
+func (ukA) ukM() string {
+	return "a"
+}
+
+type ukB struct {
+	ukY string
+}
+
+func (ukB) ukM() string {
+	return "b"
+}
+
+type ukU interface {
+	ukA | ukB
+	ukM() string
+}
+
+type ukS string
+
+type ukP struct {
+	ukA int
+	ukB string
+}
+
+func main() {
+	m := map[ukU]string{ukA{ukX: 1}: "one", ukB{ukY: "y"}: "two"}
+	check("single-a", (m[ukA{ukX: 1}] ?? "none") == "one", fmt.Sprint(m[ukA{ukX: 1}] ?? "none"))
+	check("single-b", (m[ukB{ukY: "y"}] ?? "none") == "two", fmt.Sprint(m[ukB{ukY: "y"}] ?? "none"))
+	check("absent", (m[ukA{ukX: 2}] ?? "none") == "none", fmt.Sprint(m[ukA{ukX: 2}] ?? "none"))
+	v, ok := m[ukA{ukX: 1}]
+	check("twovalue", ok && v == "one", fmt.Sprint(v, ok))
+	v2, ok2 := m[ukA{ukX: 9}]
+	check("twovalue-absent", !ok2 && v2 == "", fmt.Sprint(v2, ok2))
+	var u ukU = ukA{ukX: 1}
+	check("ukey", (m[u] ?? "none") == "one", fmt.Sprint(m[u] ?? "none"))
+	check("explicit", (m[ukU(ukA{ukX: 1})] ?? "none") == "one", fmt.Sprint(m[ukU(ukA{ukX: 1})] ?? "none"))
+	ma := map[any]int{"s": 7}
+	check("iface", (ma["s"] ?? -1) == 7, fmt.Sprint(ma["s"] ?? -1))
+	mn := map[ukS]int{"a": 1}
+	check("namedconst", (mn["a"] ?? -1) == 1, fmt.Sprint(mn["a"] ?? -1))
+	mp := map[ukP]string{ukP{ukA: 1, ukB: "x"}: "found"}
+	check("unnamedkey", (mp[struct {
+		ukA int
+		ukB string
+	}{1, "x"}] ?? "none") == "found", "unnamed")
+	if failed {
+		os.Exit(1)
+	}
+}

@@ -11,6 +11,9 @@ stdout '^assert A: 1$'
 stdout '^member$'
 stdout '^non-member$'
 stdout '^2$'
+stdout '^key one$'
+stdout '^key two$'
+stdout '^key none$'
 cp stdout $WORK/eject-stdout.txt
 
 logos eject -o out
@@ -157,6 +160,10 @@ func main() {
 	c.Mark()
 	c.Mark()
 	fmt.Println(c.N())
+	m := map[U]string{A{X: 1}: "one", B{Y: "y"}: "two"}
+	fmt.Println("key", m[A{X: 1}] ?? "none")
+	fmt.Println("key", m[B{Y: "y"}] ?? "none")
+	fmt.Println("key", m[A{X: 9}] ?? "none")
 }
 
 -- mdual/go.mod --
