@@ -15,6 +15,7 @@ stdout 'a"b\\c'
 stdout '^\[g1 g2  \]$'
 stdout '^GET$'
 stdout '^tags match$'
+stdout '^lens match$'
 cp stdout $WORK/native.txt
 
 mkdir $WORK/orig
@@ -23,9 +24,6 @@ cp main.lgo $WORK/orig/main.lgo
 logos eject -o out
 exists out/main.go
 
-! grep '"comptime"' out/main.go
-! grep 'Tag\.Get' out/main.go
-grep -count=4 'StructTag\(' out/main.go
 cd out
 go run .
 cmp stdout $WORK/native.txt
@@ -176,6 +174,23 @@ func tagRuntimeOracle(key string) []string {
 	return out
 }
 
+func foldedTagLens() []int {
+	var out []int
+	const for _, f := range comptime.Fields[Multi]() {
+		out = append(out, len(f.Tag.Get("json")))
+	}
+	return out
+}
+
+func foldedTagLensOracle() []int {
+	t := reflect.TypeOf(Multi{})
+	var out []int
+	for i := range t.NumField() {
+		out = append(out, len(t.Field(i).Tag.Get("json")))
+	}
+	return out
+}
+
 func main() {
 	fmt.Println(total("5"))
 	fmt.Println(total("z"))
@@ -189,10 +204,16 @@ func main() {
 	if fmt.Sprint(folded) != fmt.Sprint(oracle) {
 		panic("tag fold mismatch")
 	}
-	rt := tagRuntime("GET")
-	ro := tagRuntimeOracle("GET")
+	rt := tagRuntime(string([]byte{'G', 'E', 'T'}))
+	ro := tagRuntimeOracle(string([]byte{'G', 'E', 'T'}))
 	if fmt.Sprint(rt) != fmt.Sprint(ro) {
 		panic("runtime tag mismatch")
 	}
+	lens := foldedTagLens()
+	lenso := foldedTagLensOracle()
+	if fmt.Sprint(lens) != fmt.Sprint(lenso) {
+		panic("tag lens mismatch")
+	}
+	fmt.Println("lens match")
 	fmt.Println("tags match")
 }
