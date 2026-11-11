@@ -5,6 +5,7 @@
 package logos
 
 import (
+	"cmd/compile/internal/base"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -29,6 +30,17 @@ func TestPrefixNames(t *testing.T) {
 	srcChains := "package main\nimport (\"fmt\"; \"errors\")\nfunc probePos(probeX int) (bool, error) { if probeX < 0 { return false, errors.New(\"neg\") }; return probeX > 1, nil }\nfunc probeParse(probeX int) (int, error) { if probeX < 0 { return 0, errors.New(\"neg\") }; return 2*probeX, nil }\nfunc probeCountPos(probeItems []int) (int, error) { return probeItems.count(probeX => probePos(probeX)?), nil }\nfunc probeMapTry(probeItems []int) ([]int, error) { return probeItems.map(probeX => probeParse(probeX)?), nil }\nfunc probeFilterTry(probeItems []int) ([]int, error) { return probeItems.filter(probeX => probePos(probeX)?), nil }\nfunc main() {\nprobeItems := []int{3,1,4}\nfmt.Println(probeItems.take(2))\nfmt.Println(probeItems.drop(1))\nfmt.Println(probeItems.map(probeX => probeX*2))\nfmt.Println(probeItems.filter(probeX => probeX > 1))\nfmt.Println(probeCountPos(probeItems))\nfmt.Println(probeMapTry(probeItems))\nfmt.Println(probeFilterTry(probeItems))\n}\n"
 	outChains := lowerSnippetSrc(t, "chains.lgo", srcChains)
 	prefixCheckOutput(t, srcChains, outChains)
+}
+
+func TestPrefixNamesEjectOptTemp(t *testing.T) {
+	src := "package main\nimport \"fmt\"\ntype optUser struct { optName string; optAge int }\nfunc (optRecv optUser) optGreet(optWord string) string { return optWord + optRecv.optName }\nfunc (optRecv *optUser) optLog() { fmt.Println(\"log \" + optRecv.optName) }\ntype optTeam struct { optLead *optUser? }\nfunc optField(optU *optUser?) string { return optU?.optName ?? \"anon\" }\nfunc optCall(optU *optUser?) string { return optU?.optGreet(\"hi \") ?? \"anon\" }\nfunc optVoid(optU *optUser?) { optU?.optLog() }\nfunc optChain(optT *optTeam?) string { return optT?.optLead?.optName ?? \"anon\" }\nfunc optIndex(optM map[string]*optUser) string { return optM[\"a\"]?.optName ?? \"anon\" }\nfunc main() {\nfmt.Println(optField(nil))\nfmt.Println(optCall(&optUser{optName: \"ann\", optAge: 7}))\noptVoid(&optUser{optName: \"ann\"})\nfmt.Println(optChain(&optTeam{optLead: &optUser{optName: \"ann\"}}))\nfmt.Println(optIndex(map[string]*optUser{\"a\": {optName: \"ann\"}}))\n}\n"
+	out := lowerSnippetSrc(t, "opttemp.lgo", src)
+	prefixCheckOutput(t, src, out)
+	saved := base.LogosEject
+	base.LogosEject = t.TempDir()
+	t.Cleanup(func() { base.LogosEject = saved })
+	ejectOut := lowerSnippetSrc(t, "opttempeject.lgo", src)
+	prefixCheckOutput(t, src, ejectOut)
 }
 
 func prefixSnippetWords(src string) map[string]bool {
@@ -74,6 +86,112 @@ func prefixCheckOutput(t *testing.T, src, out string) {
 	}
 	if len(bad) > 0 {
 		t.Fatalf("%d compiler-made names lack prefix: %s", len(bad), strings.Join(bad, ", "))
+	}
+	prefixCheckUses(t, src, out)
+}
+
+func prefixDeclared(f *ast.File) map[string]bool {
+	declared := map[string]bool{}
+	ast.Inspect(f, func(n ast.Node) bool {
+		switch v := n.(type) {
+		case *ast.FuncDecl:
+			declared[v.Name.Name] = true
+			prefixAddFieldNames(declared, v.Recv)
+			prefixAddFieldNames(declared, v.Type.Params)
+			prefixAddFieldNames(declared, v.Type.Results)
+			prefixAddFieldNames(declared, v.Type.TypeParams)
+		case *ast.Field:
+			for _, nm := range v.Names {
+				declared[nm.Name] = true
+			}
+		case *ast.TypeSpec:
+			declared[v.Name.Name] = true
+		case *ast.ValueSpec:
+			for _, nm := range v.Names {
+				declared[nm.Name] = true
+			}
+		case *ast.AssignStmt:
+			if v.Tok == token.DEFINE {
+				for _, e := range v.Lhs {
+					if id, ok := e.(*ast.Ident); ok {
+						declared[id.Name] = true
+					}
+				}
+			}
+		case *ast.RangeStmt:
+			prefixAddExprName(declared, v.Key)
+			prefixAddExprName(declared, v.Value)
+		case *ast.LabeledStmt:
+			declared[v.Label.Name] = true
+		case *ast.ImportSpec:
+			if v.Name != nil {
+				declared[v.Name.Name] = true
+			}
+		}
+		return true
+	})
+	return declared
+}
+
+func prefixAddFieldNames(declared map[string]bool, list *ast.FieldList) {
+	if list == nil {
+		return
+	}
+	for _, fld := range list.List {
+		for _, nm := range fld.Names {
+			declared[nm.Name] = true
+		}
+	}
+}
+
+func prefixAddExprName(declared map[string]bool, e ast.Expr) {
+	if id, ok := e.(*ast.Ident); ok {
+		declared[id.Name] = true
+	}
+}
+
+func prefixUseSkipped(stack []ast.Node, id *ast.Ident) bool {
+	if len(stack) == 0 {
+		return false
+	}
+	switch p := stack[len(stack)-1].(type) {
+	case *ast.SelectorExpr:
+		return p.Sel == id
+	case *ast.KeyValueExpr:
+		if k, ok := p.Key.(*ast.Ident); ok && k == id {
+			return true
+		}
+	}
+	return false
+}
+
+func prefixCheckUses(t *testing.T, src, out string) {
+	t.Helper()
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, "prefixuse.go", out, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	imports := prefixImports(f)
+	words := prefixSnippetWords(src)
+	declared := prefixDeclared(f)
+	var bad []string
+	var stack []ast.Node
+	ast.Inspect(f, func(n ast.Node) bool {
+		if n == nil {
+			stack = stack[:len(stack)-1]
+			return true
+		}
+		if id, ok := n.(*ast.Ident); ok {
+			if !prefixAllowed(id.Name, imports) && !words[id.Name] && !declared[id.Name] && !prefixUseSkipped(stack, id) {
+				bad = append(bad, id.Name)
+			}
+		}
+		stack = append(stack, n)
+		return true
+	})
+	if len(bad) > 0 {
+		t.Fatalf("%d undeclared names in eject output: %s", len(bad), strings.Join(bad, ", "))
 	}
 }
 

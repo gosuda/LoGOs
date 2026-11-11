@@ -1112,7 +1112,7 @@ func (fl *fileLower) lowerOptSelect(e *syntax.OptSelectExpr) syntax.Expr {
 	lit := at(&syntax.FuncLit{Type: signature, Body: blockOf(pos, body)}, pos)
 	xEnd := lastTokenEnd(fl.src, xStart, fl.off(pos))
 	selEnd := fl.off(e.Sel.Pos()) + len(e.Sel.Value)
-	fl.add(xEnd, selEnd, "; "+condT+" { return "+someHead+"v"+accSuffix+someTail+" }; return "+noneT+" }()")
+	fl.add(xEnd, selEnd, "; "+condT+" { return "+someHead+optTemp+accSuffix+someTail+" }; return "+noneT+" }()")
 	out := callOf(pos, lit, nil)
 	fl.wrapSpan[out] = span{start: xStart, end: selEnd}
 	fl.wrapOwner[out] = id
@@ -1333,7 +1333,7 @@ func (fl *fileLower) lowerOptCall(e *syntax.CallExpr, osel *syntax.OptSelectExpr
 				ifOf(pos, init, cond, []syntax.Stmt{exprStmtOf(pos, call)}),
 			}),
 		}, pos)
-		fl.addT(xEnd, rparen+1, cat(gen("; "+condT+" { v"+accSuffix), argsText, gen(" } }()")))
+		fl.addT(xEnd, rparen+1, cat(gen("; "+condT+" { "+optTemp+accSuffix), argsText, gen(" } }()")))
 		out := callOf(pos, lit, nil)
 		fl.wrapSpan[out] = span{start: xStart, end: rparen + 1}
 		fl.wrapOwner[out] = id
@@ -1360,7 +1360,7 @@ func (fl *fileLower) lowerOptCall(e *syntax.CallExpr, osel *syntax.OptSelectExpr
 		}
 		lit := at(&syntax.FuncLit{Type: signature, Body: blockOf(pos, body)}, pos)
 		fl.addT(xEnd, rparen+1, cat(
-			gen("; "+condT+" { return "+someHead+"v"+accSuffix),
+			gen("; "+condT+" { return "+someHead+optTemp+accSuffix),
 			argsText,
 			gen(someTail+" }; return "+noneT+" }()"),
 		))
@@ -1407,7 +1407,7 @@ func (fl *fileLower) lowerOptCall(e *syntax.CallExpr, osel *syntax.OptSelectExpr
 		}
 		lit := at(&syntax.FuncLit{Type: signature, Body: blockOf(pos, body)}, pos)
 		fl.addT(xEnd, rparen+1, cat(
-			gen("; "+condT+" { "+strings.Join(headNames, ", ")+" := v"+accSuffix),
+			gen("; "+condT+" { "+strings.Join(headNames, ", ")+" := "+optTemp+accSuffix),
 			argsText,
 			gen("; return "+strings.Join(retWraps, ", ")+" }; return "+strings.Join(noneList, ", ")+" }()"),
 		))

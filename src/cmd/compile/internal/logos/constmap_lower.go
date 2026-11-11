@@ -17,6 +17,11 @@ import (
 
 const constMapSwitchMax = 8
 
+const (
+	constMapHashRecv = "_logos_v"
+	constMapHashAcc  = "_logos_h"
+)
+
 type constMapGen struct {
 	name        string
 	obj         *types2.Const
@@ -328,15 +333,15 @@ func (fl *fileLower) constKeyHashText(t types2.Type, x string, pos syntax.Pos) s
 		}
 	case *types2.Struct:
 		var b strings.Builder
-		fmt.Fprintf(&b, "func(_logos_v %s) uint64 { _logos_h := uint64(0); ", fl.mustSpell(t, pos))
+		fmt.Fprintf(&b, "func("+constMapHashRecv+" %s) uint64 { "+constMapHashAcc+" := uint64(0); ", fl.mustSpell(t, pos))
 		for i := range u.NumFields() {
 			f := u.Field(i)
 			if f.Name() == "_" {
 				continue
 			}
-			fmt.Fprintf(&b, "_logos_h = %s.HashCombine(_logos_h, %s); ", rtAlias, fl.constKeyHashText(f.Type(), "_logos_v."+f.Name(), pos))
+			fmt.Fprintf(&b, constMapHashAcc+" = %s.HashCombine("+constMapHashAcc+", %s); ", rtAlias, fl.constKeyHashText(f.Type(), constMapHashRecv+"."+f.Name(), pos))
 		}
-		fmt.Fprintf(&b, "return _logos_h }(%s)", x)
+		fmt.Fprintf(&b, "return "+constMapHashAcc+" }(%s)", x)
 		return b.String()
 	case *types2.Array:
 		return fmt.Sprintf("func(_logos_v %s) uint64 { _logos_h := uint64(0); for _, _logos_e := range _logos_v { _logos_h = %s.HashCombine(_logos_h, %s) }; return _logos_h }(%s)",
