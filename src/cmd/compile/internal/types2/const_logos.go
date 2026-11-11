@@ -583,8 +583,10 @@ func (check *Checker) logosConstBuiltin(x *operand, call *syntax.CallExpr, id bu
 			x.invalidate()
 			return true
 		}
-	case _Panic:
-		return false
+	case _SliceData:
+		return check.logosConstSliceData(x, call, args)
+	case _Slice:
+		return check.logosConstUnsafeSlice(x, call, args)
 	default:
 		for _, a := range args {
 			unwrap(a)
@@ -596,6 +598,65 @@ func (check *Checker) logosConstBuiltin(x *operand, call *syntax.CallExpr, id bu
 		}
 	}
 	return false
+}
+
+func logosConstViewElem(a *operand) Type {
+	c := logosAsConstView(a.typ())
+	if c == nil || logosReferenceFree(c.Elem) {
+		return nil
+	}
+	return c.Elem
+}
+
+func (check *Checker) logosConstSliceData(x *operand, call *syntax.CallExpr, args []*operand) bool {
+	if len(args) == 0 {
+		return false
+	}
+	elem := logosConstViewElem(args[0])
+	if elem == nil {
+		return false
+	}
+	u, _ := commonUnder(elem, nil)
+	sl, _ := u.(*Slice)
+	if sl == nil {
+		return false
+	}
+	check.verifyVersionf(call.Fun, go1_20, "unsafe.SliceData")
+	args[0].typ_ = elem
+	check.updateExprType(args[0].expr, elem, false)
+	x.typ_ = &ConstView{Elem: NewPointer(sl.elem)}
+	x.mode_ = value
+	if check.recordTypes() {
+		check.recordBuiltinType(call.Fun, makeSig(x.typ(), elem))
+	}
+	return true
+}
+
+func (check *Checker) logosConstUnsafeSlice(x *operand, call *syntax.CallExpr, args []*operand) bool {
+	if len(args) < 2 {
+		return false
+	}
+	elem := logosConstViewElem(args[0])
+	if elem == nil {
+		return false
+	}
+	u, _ := commonUnder(elem, nil)
+	ptr, _ := u.(*Pointer)
+	if ptr == nil {
+		return false
+	}
+	check.verifyVersionf(call.Fun, go1_17, "unsafe.Slice")
+	args[0].typ_ = elem
+	check.updateExprType(args[0].expr, elem, false)
+	if !check.isValidIndex(args[1], InvalidUnsafeSlice, "length", false) {
+		return true
+	}
+	x.typ_ = &ConstView{Elem: NewSlice(ptr.base)}
+	x.mode_ = value
+	if check.recordTypes() {
+		check.recordBuiltinType(call.Fun, makeSig(x.typ(), elem, args[1].typ()))
+	}
+	return true
 }
 
 func (check *Checker) logosConstMapLen(a *operand) (int64, bool) {
