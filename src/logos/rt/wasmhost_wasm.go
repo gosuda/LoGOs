@@ -12,8 +12,13 @@ func address(b []byte) int32 {
 	return int32(uintptr(unsafe.Pointer(unsafe.SliceData(b))))
 }
 
+const maxScratchBytes = 256 << 20
+
 //go:wasmexport _logos_scratch_alloc
 func scratchAlloc(n int32) int32 {
+	if n < 0 || n > maxScratchBytes {
+		return 0
+	}
 	b := make([]byte, n)
 	p := address(b)
 	if scratch == nil {
