@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 )
 
 var errLoad = errors.New("load")
@@ -119,20 +120,30 @@ func ifCondOK() (bool, error) {
 }
 
 func main() {
-	ok, err := shortFalse(7)
-	fmt.Println("ok short-false:", ok && err == nil)
-	ok, err = loopCond()
-	fmt.Println("ok loop-cond:", ok && err == nil)
-	ok, err = operandOrder()
-	fmt.Println("ok operand-order:", ok && err == nil)
-	ok, err = scopeKeep()
-	fmt.Println("ok scope:", ok && err == nil)
-	ok, err = nestedOK()
-	fmt.Println("ok nested:", ok && err == nil)
-	ok, err = closureOK()
-	fmt.Println("ok closure:", ok && err == nil)
-	ok, err = groupOK()
-	fmt.Println("ok group:", ok && err == nil)
-	ok, err = ifCondOK()
-	fmt.Println("ok if-cond:", ok && err == nil)
+	cases := []struct {
+		name string
+		run  func() (bool, error)
+	}{
+		{"short-false", func() (bool, error) { return shortFalse(7) }},
+		{"loop-cond", loopCond},
+		{"operand-order", operandOrder},
+		{"scope", scopeKeep},
+		{"nested", nestedOK},
+		{"closure", closureOK},
+		{"group", groupOK},
+		{"if-cond", ifCondOK},
+	}
+	failed := false
+	for _, c := range cases {
+		ok, err := c.run()
+		if ok && err == nil {
+			fmt.Println("ok", c.name)
+			continue
+		}
+		failed = true
+		fmt.Println("FAIL", c.name+":", "got", ok, err, "want true <nil>")
+	}
+	if failed {
+		os.Exit(1)
+	}
 }
