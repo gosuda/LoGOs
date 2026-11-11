@@ -3,6 +3,7 @@
 env GOPROXY=off
 env GOTOOLCHAIN=local
 env CGO_ENABLED=1
+env GOEXPERIMENT=logosfastcgo
 
 # Accept: the .lgo marker serves the fast path and the call computes;
 # malformed markers (extra field, outside the preamble) stay inert
@@ -12,6 +13,8 @@ cd fastlgo
 logos build -o $WORK/fastlgo$GOEXE .
 exec $WORK/fastlgo$GOEXE
 stdout '^ok fast-call-markers$'
+go tool objdump -s '_Cfunc_ladd_ok' $WORK/fastlgo$GOEXE
+stdout 'logosCgocallFast'
 cd ..
 
 # Reject: a marker with no matched C function fails.
