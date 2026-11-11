@@ -88,3 +88,14 @@ func goIfaceRead(r io.Reader) {
 	}
 	useInt(n)
 }
+type lgoReader interface {
+	Read(p []byte) (int, error)
+}
+func lgoIfaceRead(r lgoReader) {
+	n, err := r.Read(make([]byte, 4))
+	useInt(n /* ERROR "[correctness::result_before_error_check]" */)
+	if err != nil {
+		return
+	}
+	useInt(n)
+}
