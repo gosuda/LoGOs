@@ -31,7 +31,7 @@
 // # Oracles
 //
 // Tier U compares each fork configuration against the pinned upstream oracle
-// (flag -goparity.upstream, default the pinned path). The fork VERSION and
+// (flag -goparity.upstream, default $UPROOT1273/bin/go). The fork VERSION and
 // the oracle VERSION are pinned exactly; any other pair fails with a re-audit
 // message. A missing oracle fails the test (owner answer Q2) unless
 // -goparity.upstream=off is passed, in which case only Tier M runs and the
@@ -116,11 +116,10 @@ import (
 const (
 	forkVersionPin     = "go1.27.2"
 	upstreamVersionPin = "go1.27.3"
-	upstreamDefault    = "/home/linuxbrew/.linuxbrew/Cellar/go/1.27.3/libexec/bin/go"
 )
 
 var (
-	upstreamFlag = flag.String("goparity.upstream", upstreamDefault, `upstream oracle go binary, or "off"`)
+	upstreamFlag = flag.String("goparity.upstream", "", `upstream oracle go binary, or "off" (default $UPROOT1273/bin/go)`)
 	releaseFlag  = flag.Bool("goparity.release", false, "add the release tier configurations and the mutation probes")
 )
 
@@ -248,6 +247,13 @@ func upstreamTool(t *testing.T) (toolchain, bool) {
 		return toolchain{}, false
 	}
 	bin := *upstreamFlag
+	if bin == "" {
+		goroot := os.Getenv("UPROOT1273")
+		if goroot == "" {
+			t.Fatalf("upstream oracle missing: $UPROOT1273 is not set (pass -goparity.upstream=off to run the metamorphic tier only)")
+		}
+		bin = filepath.Join(goroot, "bin", "go")
+	}
 	if _, err := os.Stat(bin); err != nil {
 		t.Fatalf("upstream oracle %s missing: %v (pass -goparity.upstream=off to run the metamorphic tier only)", bin, err)
 	}

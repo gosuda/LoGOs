@@ -7,7 +7,7 @@
 
 env GOPROXY=off
 env GOTOOLCHAIN=local
-env UPROOT=/home/linuxbrew/.linuxbrew/Cellar/go/1.27.3/libexec
+env UPROOT=$UPROOT1273
 
 # Q3 pin: exactly oracle go1.27.3 against fork base go1.27.2.
 exec $UPROOT/bin/go version

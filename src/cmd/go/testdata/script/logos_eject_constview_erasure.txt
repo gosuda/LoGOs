@@ -18,8 +18,11 @@ exists $UPROOT1272/bin/go
 exec $UPROOT1272/bin/go version
 stdout '^go version go1\.27\.2 '
 exec env -u GOROOT $UPROOT1272/bin/go build ./...
-exec env -u GOROOT /home/linuxbrew/.linuxbrew/Cellar/go/1.27.3/libexec/bin/go build ./...
-exec env -u GOROOT /home/linuxbrew/.linuxbrew/Cellar/go/1.27.3/libexec/bin/go run .
+exists $UPROOT1273/bin/go
+exec $UPROOT1273/bin/go version
+stdout '^go version go1\.27\.3 '
+exec env -u GOROOT $UPROOT1273/bin/go build ./...
+exec env -u GOROOT $UPROOT1273/bin/go run .
 cmp stdout $WORK/eject-stdout.txt
 cd ..
 
