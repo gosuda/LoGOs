@@ -1,8 +1,10 @@
 // run
-
 package main
 
-import "fmt"
+import (
+	"fmt"
+	"os"
+)
 
 func scrub(s []byte) {
 	clear(s)
@@ -17,5 +19,9 @@ func main() {
 			bad++
 		}
 	}
-	fmt.Println("clear ok", bad)
+	if bad != 0 {
+		fmt.Printf("FAIL clear-zeroes-every-byte: got %d nonzero want 0\n", bad)
+		os.Exit(1)
+	}
+	fmt.Println("ok clear-zeroes-every-byte")
 }
