@@ -2,18 +2,42 @@
 
 package main
 
-import "fmt"
+import (
+	"fmt"
+	"os"
+)
 
+var failed bool
+
+func check(name string, cond bool, got, want any) {
+	if !cond {
+		failed = true
+		fmt.Println("FAIL", name+":", "got", got, "want", want)
+		return
+	}
+	fmt.Println("ok", name)
+}
+
+func yes() string {
+	const if true {
+		return "yes"
+	} else {
+		return "no"
+	}
+}
+
+func good() string {
+	const if false {
+		return "bad"
+	} else {
+		return "good"
+	}
+}
 
 func main() {
-	const if true {
-		fmt.Println("yes")
-	} else {
-		fmt.Println("no")
-	}
-	const if false {
-		fmt.Println("bad")
-	} else {
-		fmt.Println("good")
+	check("literal-true", yes() == "yes", yes(), "yes")
+	check("literal-false", good() == "good", good(), "good")
+	if failed {
+		os.Exit(1)
 	}
 }
