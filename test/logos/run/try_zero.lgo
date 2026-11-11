@@ -5,7 +5,19 @@ package main
 import (
 	"errors"
 	"fmt"
+	"os"
 )
+
+var failed bool
+
+func check(name string, cond bool, got, want any) {
+	if !cond {
+		failed = true
+		fmt.Println("FAIL", name+":", "got", got, "want", want)
+		return
+	}
+	fmt.Println("ok", name)
+}
 
 var errZero = errors.New("zero")
 
@@ -67,24 +79,23 @@ func takeAssign() (Point, error) {
 
 func main() {
 	p, errP := takePoint()
-	fmt.Printf("point=%v err=%v\n", p, errP)
+	check("point", p == (Point{}) && errP == errZero, fmt.Sprint(p, errP), "{0 0} zero")
 	a, errA := takeArray()
-	fmt.Printf("array=%v err=%v\n", a, errA)
+	check("array", a == ([3]int{}) && errA == errZero, fmt.Sprint(a, errA), "[0 0 0] zero")
 	pt, errPt := takePtr()
-	fmt.Printf("ptr=%v err=%v\n", pt, errPt)
+	check("ptr", pt == nil && errPt == errZero, fmt.Sprint(pt, errPt), "<nil> zero")
 	s, errS := takeSlice()
-	fmt.Printf("slice=%v err=%v\n", s, errS)
+	check("slice", s == nil && errS == errZero, fmt.Sprint(s, errS), "[] zero")
 	m, errM := takeMap()
-	fmt.Printf("map=%v err=%v\n", m, errM)
+	check("map", len(m) == 0 && errM == errZero, fmt.Sprint(m, errM), "map[] zero")
 	st, errSt := takeString()
-	fmt.Printf("str=%q err=%v\n", st, errSt)
+	check("str", st == "" && errSt == errZero, fmt.Sprint(st, errSt), " zero")
 	g, errG := takeGen(7)
-	fmt.Printf("gen=%v err=%v\n", g, errG)
+	check("gen", g == 0 && errG == errZero, fmt.Sprint(g, errG), "0 zero")
 	_, errAssign := takeAssign()
 	want, wantErr := failPoint()
-	if errAssign != nil && wantErr != nil && observedAssign == want {
-		fmt.Println("assign-ok")
-	} else {
-		fmt.Println("assign-bad", observedAssign, errAssign)
+	check("assign", errAssign != nil && wantErr != nil && observedAssign == want, fmt.Sprint(observedAssign, errAssign), "{5 6} zero")
+	if failed {
+		os.Exit(1)
 	}
 }
