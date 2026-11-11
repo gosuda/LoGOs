@@ -506,6 +506,11 @@ func (fc *funcLower) lowerReturn(s *syntax.ReturnStmt) []syntax.Stmt {
 		return []syntax.Stmt{s}
 	}
 	end := stmtEnd(fl.src, retOff)
+	for _, sp := range fl.splices {
+		if retOff < sp.end && sp.start < end {
+			return []syntax.Stmt{s}
+		}
+	}
 	trimmed := trimSpan(fl.src, span{start: retOff + len("return"), end: end})
 	resText := fl.textOf(trimmed)
 	results := syntax.UnpackListExpr(s.Results)
