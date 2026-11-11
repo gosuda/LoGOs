@@ -28,12 +28,10 @@ func Parse(name string, data []byte) (*File, error) {
 		line, col := lineCol(data, off)
 		return nil, fmt.Errorf("%s:%d:%d: invalid utf-8", name, line, col)
 	}
-	f := defaultFile()
-	f.Lints = Lints{}
 	p := &parser{
 		name:   name,
 		src:    data,
-		file:   f,
+		file:   defaultFile(),
 		tables: make(map[string]bool),
 		keys:   make(map[[2]string]bool),
 	}

@@ -20,7 +20,6 @@ package config
 
 import (
 	"fmt"
-	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -95,8 +94,7 @@ var strictFileExts = []string{".lgo", ".📜", ".⚡", ".ʕ◔ϖ◔ʔ"}
 // defaultFile returns the File used when logos.toml (or a table or key) is
 // absent: all four extensions enabled, cgo "forbid" with the
 // key marked absent, opt_level "O2", target_cpu "deterministic",
-// arena unset (default true), and the lint severities and thresholds
-// at their defaults.
+// and arena unset (default true).
 func defaultFile() *File {
 	return &File{
 		Project: Project{StrictFiles: slices.Clone(strictFileExts)},
@@ -106,10 +104,6 @@ func defaultFile() *File {
 			TransitiveExec:    "deny",
 			TransitiveNet:     "deny",
 			TransitiveUnsafe:  "deny",
-		},
-		Lints: Lints{
-			Groups:     maps.Clone(defaultLintLevels),
-			Thresholds: maps.Clone(defaultLintThresholds),
 		},
 	}
 }

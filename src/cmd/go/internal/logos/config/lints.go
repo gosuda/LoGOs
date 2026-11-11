@@ -24,27 +24,6 @@ var lintThresholds = []string{
 
 var forbidGroups = []string{"correctness", "concurrency"}
 
-var defaultLintLevels = map[string]string{
-	"correctness": "forbid",
-	"concurrency": "forbid",
-	"slop":        "deny",
-	"complexity":  "deny",
-	"perf":        "warn",
-	"style":       "warn",
-	"suspicious":  "warn",
-	"portability": "warn",
-	"pedantic":    "allow",
-}
-
-var defaultLintThresholds = map[string]int{
-	"max_nesting_depth":        3,
-	"max_cognitive_complexity": 15,
-	"max_function_lines":       60,
-	"max_function_params":      4,
-	"max_comptime_ast_nodes":   4096,
-	"max_ctfe_steps":           100000,
-}
-
 type Lints struct {
 	Groups     map[string]string
 	Thresholds map[string]int
