@@ -12,7 +12,7 @@ config: K20
 kind: cgo
 file: src/cmd/cgo/out.go
 expect: at17m_both_plain_seq
-config: K1
+config: K20
 -- old --
 	noCallback := p.noCallbacks[n.C] && !logosStableFastCall(p, n)
 -- new --
