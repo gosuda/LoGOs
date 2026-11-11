@@ -11,3 +11,4 @@ ok generic-store
 ok panic-declared
 ok panic-call
 ok panic-generic
+ok panic-lgo-site

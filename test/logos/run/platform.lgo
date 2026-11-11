@@ -6,7 +6,10 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
+	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -68,6 +71,30 @@ func tryGenericStore() (msg string) {
 	return "no-panic"
 }
 
+func storeLine(file string) int {
+	b, err := os.ReadFile(file)
+	if err != nil {
+		return -1
+	}
+	needle := "site" + "StoreTarget"
+	for i, ln := range strings.Split(string(b), "\n") {
+		if strings.Contains(ln, needle) {
+			return i + 1
+		}
+	}
+	return -1
+}
+
+func trySiteStore() (msg string) {
+	defer func() {
+		if r := recover(); r != nil {
+			msg = fmt.Sprint(r)
+		}
+	}()
+	var siteStoreTarget *flag.Flag = flag.Lookup("missing")
+	return "no-panic:" + siteStoreTarget.Name
+}
+
 //logos:allow(correctness::unclosed_io_closer)
 //logos:allow(slop::discarded_error)
 func main() {
@@ -109,6 +136,10 @@ func main() {
 	check("panic-declared", strings.Contains(tryDeclaredStore(), "nil from Go value stored into non-nil *flag.Flag"), tryDeclaredStore(), "nil from Go value stored into non-nil *flag.Flag")
 	check("panic-call", strings.Contains(tryCallStore(), "nil from Go value stored into non-nil *flag.Flag"), tryCallStore(), "nil from Go value stored into non-nil *flag.Flag")
 	check("panic-generic", strings.Contains(tryGenericStore(), "nil from Go value stored into non-nil *flag.Flag"), tryGenericStore(), "nil from Go value stored into non-nil *flag.Flag")
+	_, siteFile, _, _ := runtime.Caller(0)
+	siteMsg := trySiteStore()
+	wantSite := "logos: nil from Go value stored into non-nil *flag.Flag at " + filepath.Base(siteFile) + ":" + strconv.Itoa(storeLine(siteFile))
+	check("panic-lgo-site", siteMsg == wantSite, siteMsg, wantSite)
 	if failed {
 		os.Exit(1)
 	}
