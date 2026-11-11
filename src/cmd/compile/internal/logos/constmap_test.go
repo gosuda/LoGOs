@@ -35,8 +35,10 @@ func TestConstmapSeedExhausted(t *testing.T) {
 	if err == nil {
 		t.Fatal("buildConstMap with 4 trials succeeded; want comptime::constmap_seed_not_found")
 	}
-	if !strings.Contains(err.Error(), "[comptime::constmap_seed_not_found]") {
-		t.Fatalf("error = %q; want [comptime::constmap_seed_not_found]", err)
+	if got := err.Error(); !strings.Contains(got, "[comptime::constmap_seed_not_found]") ||
+		!strings.Contains(got, "const map of 9 keys") ||
+		!strings.Contains(got, "within 4 seed trials over 2 salts") {
+		t.Fatalf("error = %q; want [comptime::constmap_seed_not_found] for 9 keys within 4 seed trials over 2 salts", err)
 	}
 
 	if _, err := buildConstMap(keys, defaultConstMapBudget); err != nil {
