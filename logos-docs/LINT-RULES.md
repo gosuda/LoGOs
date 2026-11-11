@@ -8,7 +8,7 @@ Two engines, one policy.
 
 - **The in-compiler lint** (`cmd/compile/internal/logos/lint`) owns depth for both language scopes. It sees lowering, escape facts, and ownership that no external tool can recover. Per scope:
   - **Go scope**, for plain Go packages. Deep in-compiler rules run only under `logos lint`, never under `logos build` or plain `go` (T-102; `src/cmd/go/internal/work/logos_lint.go:24-54` dedicated lint actor). Rule severity is capped: `forbid` in Go lowers to `deny` so `//logos:allow` can silence a false positive (`src/cmd/compile/internal/logos/lint/policy.go:158-171`).
-  - **loGo/s scope**, for `.lgo` packages. All 21 registered rules run on every compile that names a policy; findings print inline; `deny` and `forbid` stop the compile at the lint hook (`src/cmd/compile/internal/noder/logos_lint.go:80-84`, `logosLintHook`). The proposed target design specifies dedicated lint execution for both languages with no adoption performance budgets, while compiler language and type safety checks remain mandatory.
+  - **loGo/s scope**, for `.lgo` packages. All 28 registered rules run on every compile that names a policy; findings print inline; `deny` and `forbid` stop the compile at the lint hook (`src/cmd/compile/internal/noder/logos_lint.go:80-84`, `logosLintHook`). The proposed target design specifies dedicated lint execution for both languages with no adoption performance budgets, while compiler language and type safety checks remain mandatory.
 - **golangci-lint** (`logos-docs/golangci.yml`) covers repository Go tooling code only: the compiler and cmd/go packages the fork adds. It never touches `.lgo` sources or lowered compiler representations. Its severities live in its own configuration, not in `logos.toml`.
 
 Severity ladder, lowest to highest (`src/cmd/compile/internal/logos/lint/severity.go:12-31`):
@@ -73,7 +73,7 @@ Furthermore, because `correctness` is an unlowerable group (`forbidGroups`), pro
 The complexity family consumes the first four thresholds; the remaining two guard comptime compiler resources against divergent macros or infinite loops during evaluation.
 ## Existing rules (implemented inventory)
 
-Count: 21 registered rules (13 language-neutral plus 8 .lgo-only, pinned by `TestRuleScopes`, `src/cmd/compile/internal/logos/lint/lint_test.go:22-52` and `registry.go`) plus the unregistered zeroalloc diagnostic.
+Count: 28 registered rules (20 language-neutral plus 8 .lgo-only, pinned by `TestRuleScopes`, `src/cmd/compile/internal/logos/lint/lint_test.go:22-52` and `registry.go`) plus the unregistered zeroalloc diagnostic.
 
 ### correctness::arena_pointer_escape
 
@@ -378,7 +378,7 @@ Severity calibration: reserve `forbid` for violations established under explicit
 - Applicability: Go and loGo/s (`Go: true`).
 - Severity recommendation and certainty: Forbid (high certainty). Format verbs and argument types are statically checkable against format string literals.
 - Detects: calls to formatted I/O functions (`fmt.Printf`, `fmt.Sprintf`, `fmt.Fprintf`, `log.Printf`, and loGo/s `$"..."` string interpolations) where the format string is a constant and the number or types of operands do not match the format verbs.
-- Exempt / negative cases: calls where the format specifier is not a string literal or constant; custom wrapper functions not registered in format function tables; `%v`, `%+v`, `%#v`, and `%T` verbs which accept any operand type.
+- Exempt / negative cases: calls where the format specifier is not a string literal or constant; custom wrapper functions not registered in format function tables; `%v`, `%+v`, `%#v`, and `%T` verbs which accept any operand type; operands whose type implements `fmt.Formatter` (`Format(fmt.State, rune)`), which `fmt` calls for every verb.
 - Positive example:
   ```go
   fmt.Printf("user %s count %d\n", username) // Error: format specifies 2 args, 1 provided
@@ -1194,7 +1194,7 @@ Specifying `correctness = "forbid"` in `logos.toml` is not a neutral default: it
 - **Package-clause allow**: `//logos:allow(portability::alias_extension)` directly preceding the package clause silences module load-time findings.
 - **Forbid cannot be silenced**: In a loGo/s package, attempting to silence a `forbid` rule is reported as `correctness::allow_forbidden_rule`.
 - **Zeroalloc unsilenceable**: `perf::zeroalloc_violation` is an unconfigurable, unsilenceable static allocation-site assertion (`SPEC.md:2044`). It accepts no allow directives and cannot be lowered by configuration.
-- **Unused allow**: An allow directive that matches no finding is reported as `pedantic::unused_allow` under `--pedantic`.
+- **Unused allow**: An allow directive that matches no finding is not reported yet; `pedantic::unused_allow` is proposed, not registered.
 
 ## Fixture conventions
 

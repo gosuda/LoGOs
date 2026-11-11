@@ -41,3 +41,15 @@ func cleanForms(dynamic string) {
 func allowedInGo() {
 	fmt.Printf("count %d\n", 1, 2)
 }
+
+type printfAddr struct{ ip [4]byte }
+
+func (a printfAddr) Format(f fmt.State, v rune) {
+	if _, err := fmt.Fprintf(f, "%d.%d.%d.%d", a.ip[0], a.ip[1], a.ip[2], a.ip[3]); err != nil {
+		return
+	}
+}
+
+func formatterOperand() {
+	fmt.Printf("%d\n", printfAddr{})
+}
