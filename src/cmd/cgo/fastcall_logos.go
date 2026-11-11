@@ -21,7 +21,7 @@ func logosStableFastCall(p *Package, n *Name) bool {
 }
 
 func logosCgoCall(p *Package, n *Name) string {
-	if logosFastCall(p, n) {
+	if logosStableFastCall(p, n) {
 		return "_cgo_runtime_cgocall_fast"
 	}
 	return "_cgo_runtime_cgocall"
