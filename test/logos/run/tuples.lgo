@@ -27,6 +27,8 @@ func show(t (id int64, err error)) string {
 	return fmt.Sprint(a, b)
 }
 
+func two(a int, b error) bool { return a == 3 && b == nil }
+
 func main() {
 	var t (int, error)
 	t = pair()
@@ -43,6 +45,7 @@ func main() {
 	check("literal-tuple-unpacks", p == 10 && q == "ten", fmt.Sprint(p, q), "10 ten")
 	sp, sq := pair()
 	check("direct-call-unpacks", sp == 3 && sq == nil, fmt.Sprint(sp, sq), "3 <nil>")
+	check("call-arg-unpacks", two(pair()), two(pair()), true)
 	ch := make(chan (int, error), 1)
 	ch <- c
 	v := <-ch
