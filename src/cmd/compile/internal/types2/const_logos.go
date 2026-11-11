@@ -585,10 +585,8 @@ func (check *Checker) logosConstBuiltin(x *operand, call *syntax.CallExpr, id bu
 		}
 	case _Panic:
 		return false
-	case _SliceData:
-		return check.logosConstSliceData(x, call, args)
-	case _Slice:
-		return check.logosConstUnsafeSlice(x, call, args)
+	case _SliceData, _Slice, _StringData, _String, _Add:
+		return check.logosConstUnsafeDeriv(x, call, id, args)
 	default:
 		for _, a := range args {
 			unwrap(a)
@@ -602,62 +600,136 @@ func (check *Checker) logosConstBuiltin(x *operand, call *syntax.CallExpr, id bu
 	return false
 }
 
-func logosConstViewElem(a *operand) Type {
+func logosConstUnsafeData(a *operand) Type {
 	c := logosAsConstView(a.typ())
-	if c == nil || logosReferenceFree(c.Elem) {
+	if c == nil {
 		return nil
 	}
 	return c.Elem
 }
 
-func (check *Checker) logosConstSliceData(x *operand, call *syntax.CallExpr, args []*operand) bool {
-	if len(args) == 0 {
+func (check *Checker) logosConstUnsafeLen(a *operand) {
+	if c := logosAsConstView(a.typ()); c != nil && logosReferenceFree(c.Elem) {
+		a.typ_ = c.Elem
+		check.updateExprType(a.expr, c.Elem, false)
+	}
+}
+
+func (check *Checker) logosUnwrapUnsafeData(x *operand, args []*operand) Type {
+	data := logosConstUnsafeData(args[0])
+	args[0].typ_ = data
+	check.updateExprType(args[0].expr, data, false)
+	x.typ_ = data
+	return data
+}
+
+func (check *Checker) logosWrapUnsafeResult(x *operand, call *syntax.CallExpr, elem Type, params ...Type) {
+	x.typ_ = &ConstView{Elem: elem}
+	x.mode_ = value
+	if check.recordTypes() {
+		check.recordBuiltinType(call.Fun, makeSig(x.typ(), params...))
+	}
+}
+
+func (check *Checker) logosConstUnsafeDeriv(x *operand, call *syntax.CallExpr, id builtinId, args []*operand) bool {
+	nargs := 1
+	switch id {
+	case _Slice, _String, _Add:
+		nargs = 2
+	case _SliceData, _StringData:
+	default:
 		return false
 	}
-	elem := logosConstViewElem(args[0])
-	if elem == nil {
+	if len(args) < nargs {
 		return false
 	}
-	u, _ := commonUnder(elem, nil)
+	if nargs == 2 {
+		check.logosConstUnsafeLen(args[1])
+	}
+	if logosConstUnsafeData(args[0]) == nil {
+		return false
+	}
+	switch id {
+	case _SliceData:
+		return check.logosConstUnsafeSliceData(x, call, args)
+	case _Slice:
+		return check.logosConstUnsafeSlice(x, call, args)
+	case _StringData:
+		return check.logosConstUnsafeStringData(x, call, args)
+	case _String:
+		return check.logosConstUnsafeString(x, call, args)
+	case _Add:
+		return check.logosConstUnsafeAdd(x, call, args)
+	}
+	return false
+}
+
+func (check *Checker) logosConstUnsafeSliceData(x *operand, call *syntax.CallExpr, args []*operand) bool {
+	data := check.logosUnwrapUnsafeData(x, args)
+	u, _ := commonUnder(data, nil)
 	sl, _ := u.(*Slice)
 	if sl == nil {
 		return false
 	}
 	check.verifyVersionf(call.Fun, go1_20, "unsafe.SliceData")
-	args[0].typ_ = elem
-	check.updateExprType(args[0].expr, elem, false)
-	x.typ_ = &ConstView{Elem: NewPointer(sl.elem)}
-	x.mode_ = value
-	if check.recordTypes() {
-		check.recordBuiltinType(call.Fun, makeSig(x.typ(), elem))
-	}
+	check.logosWrapUnsafeResult(x, call, NewPointer(sl.elem), data)
 	return true
 }
 
 func (check *Checker) logosConstUnsafeSlice(x *operand, call *syntax.CallExpr, args []*operand) bool {
-	if len(args) < 2 {
-		return false
-	}
-	elem := logosConstViewElem(args[0])
-	if elem == nil {
-		return false
-	}
-	u, _ := commonUnder(elem, nil)
+	data := check.logosUnwrapUnsafeData(x, args)
+	u, _ := commonUnder(data, nil)
 	ptr, _ := u.(*Pointer)
 	if ptr == nil {
 		return false
 	}
 	check.verifyVersionf(call.Fun, go1_17, "unsafe.Slice")
-	args[0].typ_ = elem
-	check.updateExprType(args[0].expr, elem, false)
 	if !check.isValidIndex(args[1], InvalidUnsafeSlice, "length", false) {
+		x.invalidate()
 		return true
 	}
-	x.typ_ = &ConstView{Elem: NewSlice(ptr.base)}
-	x.mode_ = value
-	if check.recordTypes() {
-		check.recordBuiltinType(call.Fun, makeSig(x.typ(), elem, args[1].typ()))
+	check.logosWrapUnsafeResult(x, call, NewSlice(ptr.base), data, args[1].typ())
+	return true
+}
+
+func (check *Checker) logosConstUnsafeStringData(x *operand, call *syntax.CallExpr, args []*operand) bool {
+	data := check.logosUnwrapUnsafeData(x, args)
+	check.verifyVersionf(call.Fun, go1_20, "unsafe.StringData")
+	check.assignment(x, Typ[String], "argument to unsafe.StringData")
+	if !x.isValid() {
+		return true
 	}
+	check.logosWrapUnsafeResult(x, call, NewPointer(universeByte), data)
+	return true
+}
+
+func (check *Checker) logosConstUnsafeString(x *operand, call *syntax.CallExpr, args []*operand) bool {
+	check.logosUnwrapUnsafeData(x, args)
+	check.verifyVersionf(call.Fun, go1_20, "unsafe.String")
+	check.assignment(x, NewPointer(universeByte), "argument to unsafe.String")
+	if !x.isValid() {
+		return true
+	}
+	if !check.isValidIndex(args[1], InvalidUnsafeString, "length", false) {
+		x.invalidate()
+		return true
+	}
+	check.logosWrapUnsafeResult(x, call, Typ[String], NewPointer(universeByte), args[1].typ())
+	return true
+}
+
+func (check *Checker) logosConstUnsafeAdd(x *operand, call *syntax.CallExpr, args []*operand) bool {
+	check.logosUnwrapUnsafeData(x, args)
+	check.verifyVersionf(call.Fun, go1_17, "unsafe.Add")
+	check.assignment(x, Typ[UnsafePointer], "argument to unsafe.Add")
+	if !x.isValid() {
+		return true
+	}
+	if !check.isValidIndex(args[1], InvalidUnsafeAdd, "length", true) {
+		x.invalidate()
+		return true
+	}
+	check.logosWrapUnsafeResult(x, call, Typ[UnsafePointer], Typ[UnsafePointer], args[1].typ())
 	return true
 }
 
