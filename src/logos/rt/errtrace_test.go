@@ -59,6 +59,27 @@ func TestLogosTraceDifferentErrorResets(t *testing.T) {
 	checkTraceSites(t, rt.ErrorTrace(), []rt.Site{c})
 }
 
+type traceZeroA struct{}
+
+func (traceZeroA) Error() string { return "zeroA" }
+
+type traceZeroB struct{}
+
+func (traceZeroB) Error() string { return "zeroB" }
+
+func TestLogosTraceZeroSizeValuesReset(t *testing.T) {
+	a := traceZeroA{}
+	b := traceZeroB{}
+	sa := rt.Site{File: "zero_a.go", Line: 1}
+	sb := rt.Site{File: "zero_b.go", Line: 2}
+	rt.TraceErr(a, &sa)
+	rt.TraceErr(b, &sb)
+	checkTraceSites(t, rt.ErrorTrace(), []rt.Site{sb})
+	sc := rt.Site{File: "zero_b.go", Line: 3}
+	rt.TraceErr(b, &sc)
+	checkTraceSites(t, rt.ErrorTrace(), []rt.Site{sb, sc})
+}
+
 // TestLogosTraceGoroutineIndependent requires per-goroutine traces:
 // two goroutines recording concurrently must not observe each other.
 // Intentionally no t.Parallel: isolation is asserted with an explicit

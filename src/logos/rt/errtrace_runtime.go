@@ -9,7 +9,7 @@ package rt
 import "unsafe"
 
 //go:linkname logosTraceRecord runtime.logosTraceRecord
-func logosTraceRecord(site unsafe.Pointer, errData uintptr)
+func logosTraceRecord(site unsafe.Pointer, errTyp unsafe.Pointer, errData uintptr)
 
 //go:linkname logosTraceRead runtime.logosTraceRead
 //go:noescape
@@ -24,8 +24,8 @@ type errorWords struct {
 // different error value resets the trace; the trace keeps the last 8
 // sites in propagation order. It allocates nothing.
 func TraceErr(err error, s *Site) {
-	errData := (*errorWords)(unsafe.Pointer(&err)).data
-	logosTraceRecord(unsafe.Pointer(s), errData)
+	w := (*errorWords)(unsafe.Pointer(&err))
+	logosTraceRecord(unsafe.Pointer(s), w.typ, w.data)
 }
 
 // ErrorTrace returns the calling goroutine's recorded sites in

@@ -619,6 +619,9 @@ type g struct {
 	// logosErrLast is the data word of the error that filled the ring:
 	// identity only, not a reference, so the trace keeps no error alive.
 	logosErrLast uintptr
+	// logosErrLastTyp is the type word paired with logosErrLast: zero-size
+	// error values share one data word, so the pair keys the ring.
+	logosErrLastTyp unsafe.Pointer
 }
 
 // gTrackingPeriod is the number of transitions out of _Grunning between

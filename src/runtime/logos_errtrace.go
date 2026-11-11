@@ -7,10 +7,11 @@ package runtime
 import "unsafe"
 
 //go:linkname logosTraceRecord
-func logosTraceRecord(site unsafe.Pointer, errData uintptr) {
+func logosTraceRecord(site unsafe.Pointer, errTyp unsafe.Pointer, errData uintptr) {
 	gp := getg()
-	if errData != gp.logosErrLast {
+	if errTyp != gp.logosErrLastTyp || errData != gp.logosErrLast {
 		gp.logosErrLen = 0
+		gp.logosErrLastTyp = errTyp
 		gp.logosErrLast = errData
 	}
 	if gp.logosErrLen < uint8(len(gp.logosErrSite)) {
@@ -33,5 +34,6 @@ func logosTraceRead(buf []unsafe.Pointer) int {
 func logosClearErrTrace(gp *g) {
 	gp.logosErrSite = [8]unsafe.Pointer{}
 	gp.logosErrLen = 0
+	gp.logosErrLastTyp = nil
 	gp.logosErrLast = 0
 }

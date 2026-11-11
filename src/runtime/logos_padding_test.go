@@ -39,6 +39,9 @@ func TestLogosRuntimeNoNewPadding(t *testing.T) {
 	if runtime.LogosGLastSize != ptr {
 		t.Fatalf("logosErrLast = %d, want %d", runtime.LogosGLastSize, ptr)
 	}
+	if runtime.LogosGLastTypSize != ptr {
+		t.Fatalf("logosErrLastTyp = %d, want %d", runtime.LogosGLastTypSize, ptr)
+	}
 	if runtime.LogosPPoolSize != ptr {
 		t.Fatalf("logosArenaPool = %d, want %d", runtime.LogosPPoolSize, ptr)
 	}
@@ -61,7 +64,7 @@ func TestLogosRuntimeNoNewPadding(t *testing.T) {
 	switch runtime.GOARCH {
 	case "amd64", "arm64", "wasm":
 		wantMTail = 4 * ptr
-		wantGTail = 10 * ptr
+		wantGTail = 11 * ptr
 		wantGMid = 4 * ptr
 		wantPTail = 3 * ptr
 	default:
@@ -75,6 +78,9 @@ func TestLogosRuntimeNoNewPadding(t *testing.T) {
 	}
 	if d := runtime.LogosGLastOff - runtime.LogosGGroupOff; d != ptr {
 		t.Fatalf("g last-group gap = %d, want %d", d, ptr)
+	}
+	if d := runtime.LogosGLastTypOff - runtime.LogosGLastOff; d != ptr {
+		t.Fatalf("g lasttyp-last gap = %d, want %d", d, ptr)
 	}
 	if tail := runtime.LogosGSize - runtime.LogosGSiteOff; tail != wantGTail {
 		t.Fatalf("g tail = %d, want %d", tail, wantGTail)
