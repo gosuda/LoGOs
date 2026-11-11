@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"runtime"
 	"testing"
+	"time"
 )
 
 func processGroupKillSupported() bool { return false }
