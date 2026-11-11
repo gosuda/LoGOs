@@ -10,6 +10,8 @@ import (
 	"unsafe"
 )
 
+var logosFastcallOffHook func(fn, arg unsafe.Pointer) int32
+
 //go:linkname logosCgocallFast
 //go:nosplit
 func logosCgocallFast(fn, arg unsafe.Pointer) int32 {
@@ -23,11 +25,11 @@ func logosCgocallFast(fn, arg unsafe.Pointer) int32 {
 	if gp.nocgocallback {
 		panic("runtime: unexpected setting cgoNoCallback")
 	}
-	gp.nocgocallback = true
 	if !goexperiment.LogosFastCgo {
-		errno := cgocall(fn, arg)
-		gp.nocgocallback = false
-		return errno
+		if logosFastcallOffHook != nil {
+			return logosFastcallOffHook(fn, arg)
+		}
+		return cgocall(fn, arg)
 	}
 	mp := gp.m
 	if raceenabled {
