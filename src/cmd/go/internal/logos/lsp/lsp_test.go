@@ -2409,6 +2409,24 @@ func TestProxyDidChangeAloneDoesNotLower(t *testing.T) {
 	}
 }
 
+func TestProxyWatchedAloneDoesNotLower(t *testing.T) {
+	f := newFixture(t, map[string]string{"a/a.lgo": aLgo}, fixtureOptions{})
+	f.open("a/a.lgo", 1)
+	aURI := f.uri("a/a.lgo")
+	f.client.notify("workspace/didChangeWatchedFiles", map[string]any{
+		"changes": []any{map[string]any{"uri": aURI, "type": 2}},
+	})
+	f.client.call("initialize", map[string]any{"capabilities": map[string]any{}})
+	if calls := f.comp.lowerCalls(); len(calls) != 0 {
+		t.Fatalf("the proxy compiled %d times for a watched-file notification with no request, want none: %v", len(calls), calls)
+	}
+	operand := shift(findPos(t, aLgo, "ReadFile(path)?", 0), len("ReadFile("))
+	f.client.call("textDocument/hover", positionParams(aURI, operand))
+	if calls := f.comp.lowerCalls(); len(calls) != 1 {
+		t.Fatalf("the proxy compiled %d times for one watched notification and one hover, want the single hover run: %v", len(calls), calls)
+	}
+}
+
 func TestProxyReversedChangeLeavesBuffer(t *testing.T) {
 	f := newFixture(t, map[string]string{"a/a.lgo": aLgo}, fixtureOptions{})
 	f.open("a/a.lgo", 1)
