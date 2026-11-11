@@ -1,0 +1,50 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+mkdir $WORK/bin
+
+# A workspace root `logos build ./...` builds every Go module and every
+# loGo/s module: a compile error in the loGo/s module fails the build
+# even though the Go module is clean, and the clean module still builds
+# on its own.
+cd ws
+! logos build ./...
+stderr 'example\.com/wslgomod'
+stderr 'main\.lgo'
+logos build ./gomod
+cd ..
+
+-- ws/go.work --
+go 1.27
+
+use (
+	./gomod
+	./lgomod
+)
+
+-- ws/gomod/go.mod --
+module example.com/wsgomod
+
+go 1.27
+
+-- ws/gomod/main.go --
+package main
+
+import "fmt"
+
+func main() {
+	fmt.Println("go-ok")
+}
+
+-- ws/lgomod/go.mod --
+module example.com/wslgomod
+
+go 1.27
+
+-- ws/lgomod/main.lgo --
+package main
+
+import "fmt"
+
+func main() {
+	fmt.Println(undefinedSymbol)
+}
