@@ -171,10 +171,11 @@ type fileLower struct {
 	siteDecls    []*syntax.VarDecl
 	// constDecls and constText hold the M5-S4 generated declarations of
 	// this file, as parsed nodes and as eject text.
-	constDecls []syntax.Decl
-	constText  string
-	names      map[*types2.Package]string
-	genImps    *genImports
+	constDecls                 []syntax.Decl
+	constText                  string
+	names                      map[*types2.Package]string
+	genImps                    *genImports
+	importsPendingGeneratedUse []*syntax.ImportDecl
 	// Option lowering state (M3): optMemo pins one lowering per shared
 	// `T?` type node, narrowDone pins rewritten narrowed reads,
 	// wrapSpan remembers original spans of synthetic wrapper tops for
@@ -564,6 +565,7 @@ func (fl *fileLower) lowerFile() {
 		fl.file.DeclList = append(fl.file.DeclList, decl)
 	}
 	fl.file.DeclList = append(fl.file.DeclList, fl.constDecls...) // M5-S4: generated const map code.
+	fl.cfDemoteImportsUnusedByGenerated()
 	if fl.constText != "" {
 		fl.add(fl.orig, fl.orig, fl.constText)
 	}

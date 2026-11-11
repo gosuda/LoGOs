@@ -391,15 +391,33 @@ func (fl *fileLower) cfDemoteErasedImports() {
 		path, _ := strconv.Unquote(imp.Path.Value)
 		if fl.genImps != nil {
 			if _, ok := fl.genImps.qual[path]; ok {
+				fl.importsPendingGeneratedUse = append(fl.importsPendingGeneratedUse, imp)
 				continue
 			}
 		}
-		if _, ejectUsed := ownedEjectImports[fl.file][path]; !ejectUsed {
-			fl.cfBlankImportText(imp)
-		}
-		imp.LocalPkgName = nameOf(imp.Path.Pos(), "_")
-		fl.changed = true
+		fl.cfDemoteImport(imp, path)
 	}
+}
+
+func (fl *fileLower) cfDemoteImport(imp *syntax.ImportDecl, path string) {
+	if _, ejectUsed := ownedEjectImports[fl.file][path]; !ejectUsed {
+		fl.cfBlankImportText(imp)
+	}
+	imp.LocalPkgName = nameOf(imp.Path.Pos(), "_")
+	fl.changed = true
+}
+
+func (fl *fileLower) cfDemoteImportsUnusedByGenerated() {
+	used := fl.cfNamesInUse()
+	for _, imp := range fl.importsPendingGeneratedUse {
+		local, ok := fl.cfImportLocalName(imp)
+		if !ok || used[local] {
+			continue
+		}
+		path, _ := strconv.Unquote(imp.Path.Value)
+		fl.cfDemoteImport(imp, path)
+	}
+	fl.importsPendingGeneratedUse = nil
 }
 
 func (fl *fileLower) cfNamesInUse() map[string]bool {
