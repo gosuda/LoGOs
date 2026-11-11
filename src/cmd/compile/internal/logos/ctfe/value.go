@@ -340,7 +340,7 @@ func (e *evaluator) ingest(v Value, pos syntax.Pos) (Value, error) {
 	if err != nil {
 		return Value{}, err
 	}
-	if serr := e.checkSize(out); serr != nil {
+	if _, serr := e.checkSize(out); serr != nil {
 		serr.Pos = pos
 		return Value{}, serr
 	}
@@ -1465,7 +1465,7 @@ func (e *evaluator) evalAppend(fr *frame, c *syntax.CallExpr) (Value, error) {
 	if int64(need) > e.cfg.MaxValueBytes || int64(newcap) > e.cfg.MaxValueBytes {
 		return Value{}, &Error{Code: CodeTooLarge, Detail: fmt.Sprintf("append of %d elements over %d byte limit", need, e.cfg.MaxValueBytes), Pos: pos}
 	}
-	if err := e.checkSize(); err != nil {
+	if _, err := e.checkSize(); err != nil {
 		err.Pos = pos
 		return Value{}, err
 	}
@@ -1641,7 +1641,7 @@ func (e *evaluator) evalExtremum(op syntax.Operator, fr *frame, c *syntax.CallEx
 	return best, nil
 }
 
-func (e *evaluator) checkSize(extras ...Value) *Error {
+func (e *evaluator) checkSize(extras ...Value) (int64, *Error) {
 	seen := map[any]bool{}
 	var total int64
 	add := func(v Value) *Error {
@@ -1655,17 +1655,17 @@ func (e *evaluator) checkSize(extras ...Value) *Error {
 		for _, sc := range fr.scopes {
 			for _, v := range sc {
 				if err := add(v); err != nil {
-					return err
+					return total, err
 				}
 			}
 		}
 	}
 	for _, v := range extras {
 		if err := add(v); err != nil {
-			return err
+			return total, err
 		}
 	}
-	return nil
+	return total, nil
 }
 
 func (e *evaluator) valueSize(v Value, seen map[any]bool) int64 {

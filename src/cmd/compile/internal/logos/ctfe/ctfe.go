@@ -383,7 +383,7 @@ func Eval(h Host, cfg Config, e syntax.Expr) (Value, Stats, error) {
 	if err != nil {
 		return Value{}, Stats{Steps: ev.steps}, err
 	}
-	if err := ev.checkSize(v); err != nil {
+	if _, err := ev.checkSize(v); err != nil {
 		return Value{}, Stats{Steps: ev.steps}, err
 	}
 	return v, Stats{Steps: ev.steps}, nil

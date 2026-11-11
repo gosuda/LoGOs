@@ -43,9 +43,16 @@ func (e *evaluator) step(pos syntax.Pos) error {
 	if e.steps > e.cfg.MaxSteps {
 		return &Error{Code: CodeStepLimit, Pos: pos}
 	}
-	if err := e.checkSize(); err != nil {
+	total, err := e.checkSize()
+	if err != nil {
 		err.Pos = pos
 		return err
+	}
+	if q := total / 4096; q > 0 {
+		e.steps += int(q)
+		if e.steps > e.cfg.MaxSteps {
+			return &Error{Code: CodeStepLimit, Pos: pos}
+		}
 	}
 	return nil
 }
