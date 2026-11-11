@@ -2,6 +2,7 @@ env GOTOOLCHAIN=local
 
 cd m
 go get example.com/godep@v1.0.0
+env GOPROXY=off
 logos run .
 stdout '^godep: godep hello$'
 cp stdout $WORK/run-stdout.txt
