@@ -17,7 +17,7 @@ func convertNonMember(x float64) {
 func widenSub(s IOnly) U { return U(s) }
 
 func assertNonMember(u U) {
-	_ = u.(float64) // ERROR "union_nonmember"
+	_, _ = u.(float64)
 }
 
 func assignNonMember(u U) {

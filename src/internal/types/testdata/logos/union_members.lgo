@@ -43,7 +43,7 @@ func convToUnion(f float64) {
 }
 
 func assertNonMember() {
-	_ = u /* ERROR "correctness::union_nonmember" */.(float64)
+	_, _ = u.(float64)
 }
 
 func caseNonMember(x U) int {

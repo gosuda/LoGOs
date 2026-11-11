@@ -1,0 +1,39 @@
+// run
+
+package main
+
+import (
+	"fmt"
+	"os"
+)
+
+type U interface {
+	int | string
+}
+
+func main() {
+	var u U = 42
+	v, ok := u.(float64)
+	if ok || v != 0 {
+		fmt.Println("comma-ok nonmember: FAIL", v, ok)
+		os.Exit(1)
+	}
+	fmt.Println("ok comma-false")
+	func() {
+		defer func() {
+			r := recover()
+			if r == nil {
+				fmt.Println("single nonmember: FAIL no panic")
+				os.Exit(1)
+			}
+			fmt.Println("ok single-panic")
+		}()
+		_ = u.(float64)
+	}()
+	w, ok := u.(int)
+	if !ok || w != 42 {
+		fmt.Println("member: FAIL", w, ok)
+		os.Exit(1)
+	}
+	fmt.Println("ok member-true")
+}
