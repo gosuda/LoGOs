@@ -6,7 +6,19 @@ package main
 import (
 	"comptime"
 	"fmt"
+	"os"
 )
+
+var failed bool
+
+func check(name string, cond bool, got, want any) {
+	if !cond {
+		failed = true
+		fmt.Println("FAIL", name+":", "got", got, "want", want)
+		return
+	}
+	fmt.Println("ok", name)
+}
 
 type Pair struct {
 	X int
@@ -56,5 +68,10 @@ func deadOnly(v Pair) int {
 
 func main() {
 	p := Pair{X: 3, Y: 4}
-	fmt.Println(live(p), elseLive(p), deadOnly(p))
+	check("live", live(p) == 7, live(p), 7)
+	check("else-live", elseLive(p) == 14, elseLive(p), 14)
+	check("dead-only", deadOnly(p) == 0, deadOnly(p), 0)
+	if failed {
+		os.Exit(1)
+	}
 }

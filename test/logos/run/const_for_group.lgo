@@ -7,8 +7,20 @@ import (
 	"comptime"
 	"context"
 	"fmt"
+	"os"
 	"sync/atomic"
 )
+
+var failed bool
+
+func check(name string, cond bool, got, want any) {
+	if !cond {
+		failed = true
+		fmt.Println("FAIL", name+":", "got", got, "want", want)
+		return
+	}
+	fmt.Println("ok", name)
+}
 
 type Counts struct {
 	A int
@@ -36,8 +48,12 @@ func fill(ctx context.Context, c Counts) error {
 
 func main() {
 	if err := fill(context.Background(), Counts{A: 1, B: 2, C: 3}); err != nil {
-		fmt.Println("error:", err)
-		return
+		check("fill", false, err, nil)
+		os.Exit(1)
 	}
-	fmt.Println(total.Load())
+	got := total.Load()
+	check("total", got == 1406, got, 1406)
+	if failed {
+		os.Exit(1)
+	}
 }
