@@ -102,3 +102,60 @@ func allowed() {
 		t.Errorf("loGo/s package results %q, want %q", got, want)
 	}
 }
+
+func TestPrintfMisuseFormatterBoundaries(t *testing.T) {
+	const src = `package p
+
+import "fmt"
+
+type fmtAddr struct{ ip [4]byte }
+
+func (a fmtAddr) Format(f fmt.State, v rune) {
+		if _, err := fmt.Fprint(f, "x"); err != nil {
+			return
+		}
+	}
+
+type fmtPtrOnly struct{}
+
+func (p *fmtPtrOnly) Format(f fmt.State, v rune) {
+		if _, err := fmt.Fprint(f, "ptr"); err != nil {
+			return
+		}
+	}
+
+type fmtVerb rune
+
+type fmtVerbMismatch struct{}
+
+func (fmtVerbMismatch) Format(f fmt.State, v fmtVerb) {
+		if _, err := fmt.Fprint(f, "verb"); err != nil {
+			return
+		}
+	}
+
+func goodFormatter() {
+		fmt.Printf("%d\n", fmtAddr{})
+		fmt.Printf("%s\n", &fmtPtrOnly{})
+}
+
+func badP() {
+		fmt.Printf("%p\n", fmtAddr{}) // want
+}
+
+func badW() {
+		err := fmt.Errorf("wrap %w", fmtAddr{}) // want
+		fmt.Printf("%v\n", err)
+	}
+
+func badPtr() {
+		fmt.Printf("%s\n", fmtPtrOnly{}) // want
+}
+
+func badVerb() {
+		fmt.Printf("%s\n", fmtVerbMismatch{}) // want
+}
+`
+	expect(t, KindGo, nil, testSource{"x.go", src}, finding{"correctness::printf_misuse", Deny})
+	expect(t, KindLgo, nil, testSource{"x.lgo", src}, finding{"correctness::printf_misuse", Forbid})
+}

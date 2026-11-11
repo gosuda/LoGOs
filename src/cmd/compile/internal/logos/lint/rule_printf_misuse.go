@@ -334,6 +334,9 @@ func matchVerbType(pass *Pass, verb rune, arg syntax.Expr) (expected string, ok 
 	if _, isParam := types2.Unalias(typ).(*types2.TypeParam); isParam {
 		return "", true
 	}
+	if verb != 'p' && verb != 'w' && isFormatter(typ) {
+		return "", true
+	}
 
 	switch verb {
 	case 'v', 'T':
@@ -487,6 +490,26 @@ func isStringerOrError(t types2.Type) bool {
 		}
 	}
 	return false
+}
+
+func isFormatter(t types2.Type) bool {
+	if t == nil {
+		return false
+	}
+	obj, _, _ := types2.LookupFieldOrMethod(t, false, nil, "Format")
+	fn, ok := obj.(*types2.Func)
+	if !ok {
+		return false
+	}
+	sig, ok := fn.Type().(*types2.Signature)
+	if !ok || sig.Params().Len() != 2 || sig.Results().Len() != 0 {
+		return false
+	}
+	state, ok := types2.Unalias(sig.Params().At(0).Type()).(*types2.Named)
+	if !ok || state.Obj().Name() != "State" || state.Obj().Pkg() == nil || state.Obj().Pkg().Path() != "fmt" {
+		return false
+	}
+	return types2.Identical(types2.Unalias(sig.Params().At(1).Type()), types2.Typ[types2.Rune])
 }
 
 func argTypeName(arg syntax.Expr) string {
