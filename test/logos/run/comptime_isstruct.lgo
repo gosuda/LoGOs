@@ -25,6 +25,18 @@ type Outer struct {
 	Tag   string
 }
 
+type Base struct {
+	N int
+}
+
+type Defined Base
+
+type AliasBase = Base
+
+type OverInt int
+
+type AliasInt = int
+
 var failed bool
 
 func check(name, got, want string) {
@@ -236,6 +248,12 @@ func main() {
 	check("shape-ne-marks-struct-fields", fmt.Sprint(ShapeNe[Outer]()), "[ID Inner{} Tag]")
 	check("concrete-type-is-struct", concrete(), "Pair is a struct")
 	check("concrete-type-not-struct", concreteOther(), "int is not a struct")
+	check("kind-defined-over-struct", Kind[Defined](), kindWant[Defined]())
+	check("kind-alias-of-struct", Kind[AliasBase](), kindWant[AliasBase]())
+	check("kind-defined-over-int", Kind[OverInt](), kindWant[OverInt]())
+	check("kind-alias-of-int", Kind[AliasInt](), kindWant[AliasInt]())
+	check("walk-counts-defined-over-struct", Walk(Defined{N: 3}), walkWant[Defined]())
+	check("walk-counts-alias-of-struct", Walk(AliasBase{N: 4}), walkWant[AliasBase]())
 	if failed {
 		os.Exit(1)
 	}

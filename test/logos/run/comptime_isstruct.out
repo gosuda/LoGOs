@@ -24,3 +24,9 @@ ok shape-or-marks-struct-fields
 ok shape-ne-marks-struct-fields
 ok concrete-type-is-struct
 ok concrete-type-not-struct
+ok kind-defined-over-struct
+ok kind-alias-of-struct
+ok kind-defined-over-int
+ok kind-alias-of-int
+ok walk-counts-defined-over-struct
+ok walk-counts-alias-of-struct
