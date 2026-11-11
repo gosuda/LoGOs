@@ -1,1 +1,1 @@
-errdefer nil primary: PASS
+ok errdefer-nil-primary-rollback-surfaces

@@ -10,6 +10,17 @@ import (
 
 var errRollback = errors.New("rollback")
 
+var bad bool
+
+func check(tag string, cond bool, got, want string) {
+	if !cond {
+		fmt.Println("FAIL "+tag+": got "+got+" want "+want)
+		bad = true
+		return
+	}
+	fmt.Println("ok", tag)
+}
+
 func rollbackFails() error { return errRollback }
 
 func nilPrimaryRollback() (err error) {
@@ -24,9 +35,8 @@ func nilPrimaryRollback() (err error) {
 
 func main() {
 	err := nilPrimaryRollback()
-	if err != errRollback || !errors.Is(err, errRollback) {
-		fmt.Println("errdefer nil primary: FAIL")
+	check("errdefer-nil-primary-rollback-surfaces", err == errRollback && errors.Is(err, errRollback), fmt.Sprint(err), errRollback.Error())
+	if bad {
 		os.Exit(1)
 	}
-	fmt.Println("errdefer nil primary: PASS")
 }

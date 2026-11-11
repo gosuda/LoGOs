@@ -13,6 +13,17 @@ var errRecv = errors.New("recv")
 
 var log []string
 
+var bad bool
+
+func check(tag string, cond bool, got, want string) {
+	if !cond {
+		fmt.Println("FAIL "+tag+": got "+got+" want "+want)
+		bad = true
+		return
+	}
+	fmt.Println("ok", tag)
+}
+
 type box struct{ tag string }
 
 func (b box) Close() error {
@@ -25,7 +36,7 @@ func (b box) Rollback() error {
 	return nil
 }
 
-func check(s string) error {
+func markCheck(s string) error {
 	log = append(log, "check: "+s)
 	return nil
 }
@@ -46,7 +57,7 @@ func recvErrdefer() (err error) {
 
 func argDefer() (err error) {
 	v := "old"
-	defer check(v)?
+	defer markCheck(v)?
 	v = "new"
 	return nil
 }
@@ -83,10 +94,10 @@ func main() {
 	if err := recvErrdefer(); err != nil {
 		log = append(log, "err: "+err.Error())
 	}
-	want := "close: old\ncheck: old\ncall: first\nrollback: old\nerr: recv"
-	if strings.Join(log, "\n") != want {
-		fmt.Println("errdefer recv: FAIL")
+	check("errdefer-recv-defer-captures-at-statement", len(log) >= 2 && log[0] == "close: old" && log[1] == "check: old", strings.Join(log, ","), "close: old,check: old")
+	check("errdefer-recv-defer-keeps-first-bound-func", len(log) >= 3 && log[2] == "call: first", strings.Join(log, ","), "call: first at 2")
+	check("errdefer-recv-errdefer-runs-on-error", len(log) == 5 && log[3] == "rollback: old" && log[4] == "err: recv", strings.Join(log, ","), "rollback: old,err: recv")
+	if bad {
 		os.Exit(1)
 	}
-	fmt.Println("errdefer recv: PASS")
 }
