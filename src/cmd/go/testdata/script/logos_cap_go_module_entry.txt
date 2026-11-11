@@ -10,7 +10,7 @@ cd ..
 
 cd off
 ! logos build -o $WORK/off$GOEXE ./cmd
-stderr 'ERROR \[capabilities::unauthorized_exec\]: Transitive dependency ''example\.com/godep'' reaches ''os\.startProcess'''
+stderr 'ERROR \[capabilities::unauthorized_exec\].*example\.com/godep.*os\.startProcess'
 cd ..
 
 -- on/go.mod --

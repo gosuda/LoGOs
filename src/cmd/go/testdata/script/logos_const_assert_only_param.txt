@@ -5,9 +5,9 @@ mkdir $WORK/bin
 cd ao
 logos build ./g
 ! logos build -o $WORK/bin/negas$GOEXE ./negas
-stderr 'const_view_mutation'
+stderr '\[correctness::const_view_mutation\]'
 ! logos build -o $WORK/bin/neggrab$GOEXE ./neggrab
-stderr 'const_view_mutation'
+stderr '\[correctness::const_view_mutation\]'
 logos build -o $WORK/bin/pos$GOEXE ./pos
 exec $WORK/bin/pos$GOEXE
 stdout '^assert-only-ok$'

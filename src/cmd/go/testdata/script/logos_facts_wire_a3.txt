@@ -87,7 +87,7 @@ exec $WORK/bin/imp$GOEXE
 stdout '^imp-mut: 14$'
 stdout '^imp-assert: 7$'
 ! logos build -o $WORK/badinc$GOEXE ./badinc
-stderr 'const_view_mutation'
+stderr '\[correctness::const_view_mutation\]'
 cd ..
 
 -- lgo/go.mod --
