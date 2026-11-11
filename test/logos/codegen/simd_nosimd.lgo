@@ -4,17 +4,17 @@ package main
 
 //go:noinline
 func addPlainF64(a, b [4]float64) [4]float64 {
-	// amd64:"ADDSD" -"VADDPD" -"CALL simd/archsimd"
-	// arm64:"FADDD" -"CALL simd/archsimd"
-	// riscv64:-"CALL simd/archsimd"
+	// amd64:"ADDSD" -"VADDPD" -"CALL simd/archsimd" -"JMP"
+	// arm64:"FADDD" -"CALL simd/archsimd" -"JMP"
+	// riscv64:-"CALL simd/archsimd" -"BLT"
 	return a + b
 }
 
 //go:noinline
 func addPlainI32(a, b [4]int32) [4]int32 {
-	// amd64:"ADDL" -"VPADDD" -"CALL simd/archsimd"
-	// arm64:"ADD" -"CALL simd/archsimd"
-	// riscv64:-"CALL simd/archsimd"
+	// amd64:"ADDL" -"VPADDD" -"CALL simd/archsimd" -"JMP"
+	// arm64:"ADD" -"CALL simd/archsimd" -"JMP"
+	// riscv64:-"CALL simd/archsimd" -"BLT"
 	return a + b
 }
 
