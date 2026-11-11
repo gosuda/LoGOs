@@ -269,7 +269,10 @@ func TestHoverFixedBytes(t *testing.T) {
 func TestHoverFixedBytesOnlyForInterpolation(t *testing.T) {
 	f := compilerFixture(t, "sites.lgo")
 	r, _ := compileHints(t, f)
-	for _, needle := range []string{"?\n\t_ = n", "const switch"} {
+	if h := HoverAt(r, f.path, startOf(t, f.src, `$"user {name}!"`)); h == nil || !strings.Contains(h.Contents.Value, "Fixed:") {
+		t.Errorf("interpolation hover lacks fixed bytes: %+v", h)
+	}
+	for _, needle := range []string{"?\n\t_ = n", "const switch", "const for"} {
 		h := HoverAt(r, f.path, startOf(t, f.src, needle))
 		if h == nil || strings.Contains(h.Contents.Value, "Fixed:") {
 			t.Errorf("hover at %q: %+v", needle, h)
