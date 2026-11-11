@@ -2,8 +2,21 @@
 
 package main
 
-import "fmt"
+import (
+	"fmt"
+	"os"
+)
 
+var failed bool
+
+func check(name string, cond bool, got, want any) {
+	if !cond {
+		failed = true
+		fmt.Println("FAIL", name+":", "got", got, "want", want)
+		return
+	}
+	fmt.Println("ok", name)
+}
 
 type P struct {
 	N int64
@@ -16,7 +29,10 @@ func (p const *P) Show() string {
 
 func main() {
 	p := P{N: 3, S: "x"}
-	fmt.Println(p.Show())
-	n := p.N
-	fmt.Println(n)
+	got := p.Show()
+	check("interp-method-formats-fields", got == fmt.Sprint("n=", p.N, " s=", p.S) && got == "n=3 s=x", got, "n=3 s=x")
+	check("interp-method-reads-const-receiver", p.N == 3, p.N, 3)
+	if failed {
+		os.Exit(1)
+	}
 }
