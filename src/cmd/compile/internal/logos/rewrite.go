@@ -262,23 +262,189 @@ func (fc *funcLower) lowerElse(s *syntax.IfStmt) {
 }
 
 func (fc *funcLower) lowerFor(s *syntax.ForStmt) []syntax.Stmt {
+	decl := fc.wrapForPost(s)
 	switch init := s.Init.(type) {
 	case nil:
 	case *syntax.RangeClause:
 		scanForLiterals(fc.fl, init)
 	default:
 		if wrapped := fc.wrapInitStmt(s, init, "for"); wrapped != nil {
-			scanForLiterals(fc.fl, s.Cond)
-			scanForLiterals(fc.fl, s.Post)
-			s.Body.List = fc.lowerList(s.Body.List)
-			return []syntax.Stmt{wrapped}
+			fc.finishFor(s)
+			return fc.withDecl(decl, wrapped)
 		}
 		scanForLiterals(fc.fl, init)
 	}
+	fc.finishFor(s)
+	return fc.withDecl(decl, s)
+}
+
+func (fc *funcLower) withDecl(decl syntax.Stmt, s syntax.Stmt) []syntax.Stmt {
+	if decl == nil {
+		return []syntax.Stmt{s}
+	}
+	return []syntax.Stmt{decl, s}
+}
+
+func (fc *funcLower) finishFor(s *syntax.ForStmt) {
 	scanForLiterals(fc.fl, s.Cond)
 	scanForLiterals(fc.fl, s.Post)
 	s.Body.List = fc.lowerList(s.Body.List)
-	return []syntax.Stmt{s}
+}
+
+type forPost struct {
+	fc        *funcLower
+	s         *syntax.ForStmt
+	errPos    syntax.Pos
+	postPos   syntax.Pos
+	postEnd   syntax.Pos
+	errSpell  string
+	spanStart int
+	spanEnd   int
+}
+
+func (fc *funcLower) wrapForPost(s *syntax.ForStmt) syntax.Stmt {
+	post := s.Post
+	if post == nil {
+		return nil
+	}
+	var t *syntax.TryExpr
+	var call *syntax.CallExpr
+	switch p := post.(type) {
+	case *syntax.AssignStmt:
+		if p.Op != 0 {
+			return nil
+		}
+		t, call, _ = tryAssignOf(p)
+	case *syntax.ExprStmt:
+		t, call, _ = tryExprOf(p)
+	}
+	if t == nil {
+		return nil
+	}
+	p := &forPost{
+		fc:       fc,
+		s:        s,
+		errPos:   s.Pos(),
+		postPos:  post.Pos(),
+		postEnd:  syntax.EndPos(post),
+		errSpell: fc.nextErr(),
+	}
+	p.spanEnd = skipCloseParens(fc.fl.src, fc.fl.off(t.Pos())+1)
+	switch post := post.(type) {
+	case *syntax.AssignStmt:
+		p.buildPostAssign(post, t, call)
+	case *syntax.ExprStmt:
+		p.buildPostExpr(post, t, call)
+	}
+	return p.emit()
+}
+
+func (p *forPost) err() *syntax.Name {
+	return nameOf(p.errPos, p.errSpell)
+}
+
+func (p *forPost) closureExit(t *syntax.TryExpr, innerSpell string) []syntax.Stmt {
+	site := nameOf(t.Pos(), p.fc.fl.newSite(t.Pos(), t.Pos().Line()))
+	return []syntax.Stmt{
+		exprStmtOf(t.Pos(), callOf(t.Pos(), rtSel(t.Pos(), "TraceErr"), []syntax.Expr{
+			nameOf(t.Pos(), innerSpell),
+			at(&syntax.Operation{Op: syntax.And, X: site}, t.Pos()),
+		})),
+		assignOf(t.Pos(), []syntax.Expr{p.err()}, []syntax.Expr{nameOf(t.Pos(), innerSpell)}),
+		returnOf(t.Pos(), nil),
+	}
+}
+
+func (p *forPost) buildPostAssign(s *syntax.AssignStmt, t *syntax.TryExpr, call *syntax.CallExpr) {
+	fl := p.fc.fl
+	tpos := t.Pos()
+	innerErr := p.fc.nextErr()
+	exit := p.closureExit(t, innerErr)
+	lhs := syntax.UnpackListExpr(s.Lhs)
+	stmtPos := leftmostOf(lhs[0])
+	qOff := fl.off(tpos)
+	p.spanStart = fl.off(stmtPos)
+	tw := &twin{}
+	lhsMark := tw.mark(stmtPos, fl.srcUser(p.spanStart, fl.off(s.Pos())).trim())
+	callMark := tw.mark(tpos, fl.textOf(span{start: fl.off(leftmostOf(call.Fun)), end: qOff}))
+	withErr := append(slices.Clone(lhs), nameOf(stmtPos, innerErr))
+	native := []syntax.Stmt{blockOf(stmtPos, []syntax.Stmt{
+		errorVarDecl(stmtPos, nameOf(stmtPos, innerErr)),
+		assignOf(stmtPos, withErr, []syntax.Expr{call}),
+		errCheckOf(stmtPos, nameOf(stmtPos, innerErr), exit),
+	})}
+	withErrT := []syntax.Expr{lhsMark, nameOf(tpos, innerErr)}
+	text := renderText([]syntax.Stmt{blockOf(stmtPos, []syntax.Stmt{
+		errorVarDecl(stmtPos, nameOf(stmtPos, innerErr)),
+		assignOf(stmtPos, withErrT, []syntax.Expr{callMark}),
+		errCheckOf(stmtPos, nameOf(tpos, innerErr), exit),
+	})}, tw.subs)
+	p.emitText(native, text)
+}
+
+func (p *forPost) buildPostExpr(s *syntax.ExprStmt, t *syntax.TryExpr, call *syntax.CallExpr) {
+	fl := p.fc.fl
+	tpos := t.Pos()
+	innerErr := p.fc.nextErr()
+	exit := p.closureExit(t, innerErr)
+	stmtPos := leftmostOf(call.Fun)
+	qOff := fl.off(tpos)
+	p.spanStart = spanStartBack(fl.src, fl.off(stmtPos))
+	tw := &twin{}
+	callMark := tw.mark(tpos, fl.textOf(span{start: fl.off(stmtPos), end: qOff}))
+	n := p.fc.callResults(call)
+	var native []syntax.Stmt
+	var text otext
+	if n == 0 {
+		native = []syntax.Stmt{errCheckInitOf(stmtPos, nil, call, nameOf(stmtPos, innerErr), exit)}
+		text = renderText([]syntax.Stmt{errCheckInitOf(stmtPos, nil, callMark, nameOf(tpos, innerErr), exit)}, tw.subs)
+	} else {
+		native = []syntax.Stmt{
+			errDefineOf(stmtPos, blankNames(stmtPos, n), call, nameOf(stmtPos, innerErr)),
+			errCheckOf(stmtPos, nameOf(stmtPos, innerErr), exit),
+		}
+		text = renderText([]syntax.Stmt{
+			errDefineOf(stmtPos, blankNames(stmtPos, n), callMark, nameOf(tpos, innerErr)),
+			errCheckOf(stmtPos, nameOf(tpos, innerErr), exit),
+		}, tw.subs)
+	}
+	p.emitText(native, text)
+}
+
+func (p *forPost) emitText(native []syntax.Stmt, text otext) {
+	fl := p.fc.fl
+	lit := at(&syntax.FuncLit{
+		Type: at(&syntax.FuncType{}, p.postPos),
+		Body: at(&syntax.BlockStmt{List: native, Rbrace: p.postEnd}, p.postPos),
+	}, p.postPos)
+	p.s.Post = exprStmtOf(p.postPos, callOf(p.postPos, lit, nil))
+	fl.addT(p.spanStart, p.spanEnd, cat(gen("func() { "), text, gen(" }()")))
+}
+
+func (p *forPost) emit() syntax.Stmt {
+	fl := p.fc.fl
+	decl := typedVarDecl(p.errPos, p.err(), nameOf(p.errPos, "error"))
+	kwOff := fl.off(p.s.Pos())
+	fl.addT(kwOff, kwOff, cat(renderText([]syntax.Stmt{decl}, nil).trimRight("\n"), gen("; ")))
+	if p.s.Cond != nil {
+		hdr := fl.forHeaderOf(p.s)
+		fl.add(hdr.cond.start, hdr.cond.start, p.errSpell+" != nil || (")
+		fl.add(hdr.cond.end, hdr.cond.end, ")")
+		p.s.Cond = at(&syntax.Operation{
+			Op: syntax.OrOr,
+			X:  notNil(p.errPos, p.err()),
+			Y:  at(&syntax.ParenExpr{X: p.s.Cond}, p.errPos),
+		}, p.errPos)
+	}
+	checkPos := p.s.Body.Pos()
+	checkSite := fl.newSite(checkPos, checkPos.Line())
+	checkNative, checkText, _ := p.fc.exitPair(checkPos, p.errSpell, checkSite)
+	check := errCheckOf(checkPos, p.err(), checkNative)
+	checkTextOf := cat(gen("if "+p.errSpell+" != nil { "), renderText(checkText, nil), gen(" }"))
+	open := fl.off(checkPos) + 1
+	fl.addT(open, open, cat(gen(" "), checkTextOf, gen("; ")))
+	p.s.Body.List = append([]syntax.Stmt{check}, p.s.Body.List...)
+	return decl
 }
 
 func (fc *funcLower) lowerSwitch(s *syntax.SwitchStmt) []syntax.Stmt {
