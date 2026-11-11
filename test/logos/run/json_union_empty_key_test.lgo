@@ -11,10 +11,6 @@ import (
 type EmptyHidden struct {
 	Hidden int64 `json:"-"`
 }
-type EmptyHiddenMirror struct {
-	Hidden int64 `json:"-"`
-	NoGen  any   `json:"-"`
-}
 type KeyedR struct {
 	R int64 `json:"r"`
 }
@@ -44,8 +40,6 @@ func mustUnmarshalEmpty(t *testing.T, data []byte, dst any) {
 	}
 }
 func TestEmptyHiddenSelectsOnEmptyObject(t *testing.T) {
-	var m EmptyHiddenMirror
-	mustUnmarshalEmpty(t, []byte(`{}`), &m)
 	var h EmptyKeyHolder
 	mustUnmarshalEmpty(t, []byte(`{"item":{}}`), &h)
 	e, ok := h.Item.(EmptyHidden)
@@ -53,8 +47,8 @@ func TestEmptyHiddenSelectsOnEmptyObject(t *testing.T) {
 		t.Fatalf("expected EmptyHidden, got %T: %#v", h.Item, h.Item)
 		return
 	}
-	if e.Hidden != m.Hidden {
-		t.Fatalf("Hidden = %d, want oracle %d", e.Hidden, m.Hidden)
+	if e.Hidden != 0 {
+		t.Fatalf("Hidden = %d, want 0", e.Hidden)
 	}
 }
 func TestEmptyHiddenSiblingSelectsKeyed(t *testing.T) {
