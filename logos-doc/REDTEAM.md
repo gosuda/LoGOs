@@ -38,7 +38,7 @@ Rules: logos-doc/SPEC.md. Status values: planned, tested, satisfied upstream, bl
 | #37 | Emit-go failing on exported const switch functions | M7 | src/cmd/go/testdata/script/logos_eject_const_switch.txt | tested |
 | #38 | Parser backtracking explosion on lambdas versus tuples | M6 | src/cmd/compile/internal/syntax/parser_paren_logos_test.go | tested |
 | #39 | Variadic ambiguity between one tuple and two args | M6 | test/logos/run/tuples.lgo (pair call unpack, tuple var pack) | tested |
-| #40 | Comparing unions and tuples containing slices | M2 | test/logos/redteam/attack_040_union_equality | tested |
+| #40 | Comparing unions and tuples containing slices | M2 | test/logos/redteam/attack_040_union_equality; test/logos/compile/tuple_errors (compareSliceTuple) | tested |
 | #41 | Mutating source slice inside filter and map | M5, M6 | src/internal/types/testdata/logos/chains.lgo (chainMutateRecv, chainMutateParam) | tested |
 | #42 | Defer close with error allocating join slice | M1 | test/logos/redteam/attack_042_defer_close_join | tested |
 | #43 | Zero-sized union member representation | M2 | test/logos/redteam/attack_043_zero_sized_member | tested |
