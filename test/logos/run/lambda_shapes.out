@@ -1,5 +1,5 @@
-42
-[3 3]
-4
-5
-5
+ok arrow-forwards-to-named-func
+ok arrow-builds-slice-from-param
+ok arrow-branch-negates-negative
+ok arrow-branch-keeps-positive
+ok curried-arrow-applies-left-to-right
