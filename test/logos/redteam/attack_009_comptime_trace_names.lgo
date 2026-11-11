@@ -32,6 +32,17 @@ func resolve[T any](c *container) T {
 	}
 }
 
+var failed bool
+
+func check(name string, cond bool, got, want string) {
+	if !cond {
+		fmt.Printf("FAIL %s: got %s want %s\n", name, got, want)
+		failed = true
+		return
+	}
+	fmt.Printf("ok %s\n", name)
+}
+
 func assertTraceBase(tag, want string) {
 	var pcs [16]uintptr
 	n := runtime.Callers(2, pcs[:])
@@ -74,12 +85,12 @@ func assertTraceBase(tag, want string) {
 		fmt.Printf("FAIL %s base name %q missing from trace\n", tag, want)
 		os.Exit(1)
 	}
-	fmt.Printf("%s-trace: ok\n", tag)
+	check(tag+"-trace-names-stripped", true, want, want)
 }
 
 //go:noinline
 func autowire[T any](c *container) *T {
-	assertTraceBase("autowire", "main.autowire")
+	assertTraceBase("comptime", "main.autowire")
 	var v T
 	const for _, f := range comptime.Fields[T]() {
 		v.[f] = resolve[f.Type](c)
@@ -91,9 +102,8 @@ func autowire[T any](c *container) *T {
 func main() {
 	c := &container{Port: 8080, Host: "db"}
 	a := autowire[serviceA](c)
-	if a.Port != 8080 || a.Host != "db" {
-		fmt.Println("FAIL autowire values")
+	check("comptime-autowire-values", a.Port == 8080 && a.Host == "db", fmt.Sprint(a.Port, a.Host), "8080db")
+	if failed {
 		os.Exit(1)
 	}
-	fmt.Println("OK")
 }

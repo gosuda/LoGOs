@@ -1,2 +1,2 @@
-autowire-trace: ok
-OK
+ok comptime-trace-names-stripped
+ok comptime-autowire-values
