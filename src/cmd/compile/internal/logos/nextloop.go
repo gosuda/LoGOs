@@ -26,9 +26,21 @@ func (s *nextScan) loopAppend(list []syntax.Stmt, i int, ctx nextCtx) bool {
 	if !ok || loop.Body == nil {
 		return false
 	}
+	if s.rangeTwoVar(loop) {
+		return s.taskLoop(loop, ctx, "the range binds both index and value, so the loop needs a manual rewrite")
+	}
+	if s.isRangeFunc(loop) {
+		return s.taskLoop(loop, ctx, "the ranged value is a function, so the loop needs a manual rewrite")
+	}
 	iv, xs, val, ok := s.loopHeader(loop)
 	if !ok {
+		if _, ok := loop.Init.(*syntax.RangeClause); ok {
+			return s.taskLoop(loop, ctx, "the range shape needs a manual rewrite")
+		}
 		return false
+	}
+	if !s.loopSliceOk(loop, xs) {
+		return s.taskLoop(loop, ctx, "the ranged value is not a slice, so the loop needs a manual rewrite")
 	}
 	ys, call, ok := s.loopBody(loop.Body)
 	if !ok {
@@ -100,6 +112,56 @@ func (s *nextScan) taskLoop(loop syntax.Stmt, ctx nextCtx, instruction string) b
 	s.children(loop, ctx)
 	s.task(loop, ctx, nextRuleLoopChain, instruction)
 	return true
+}
+func (s *nextScan) rangeTwoVar(loop *syntax.ForStmt) bool {
+	rc, ok := loop.Init.(*syntax.RangeClause)
+	if !ok {
+		return false
+	}
+	l, ok := rc.Lhs.(*syntax.ListExpr)
+	if !ok || len(l.ElemList) != 2 {
+		return false
+	}
+	idx, ok := l.ElemList[0].(*syntax.Name)
+	if !ok {
+		return false
+	}
+	return idx.Value != "_"
+}
+func (s *nextScan) loopSliceOk(loop *syntax.ForStmt, xs string) bool {
+	obj := s.loopReceiverObj(loop, xs)
+	if obj == nil {
+		return false
+	}
+	t := obj.Type()
+	if t == nil {
+		return false
+	}
+	if _, ok := t.(*types2.TypeParam); ok {
+		return false
+	}
+	_, ok := t.(*types2.Slice)
+	return ok
+}
+func (s *nextScan) isRangeFunc(loop *syntax.ForStmt) bool {
+	rc, ok := loop.Init.(*syntax.RangeClause)
+	if !ok || s.info == nil {
+		return false
+	}
+	if t := s.info.TypeOf(rc.X); t != nil {
+		_, ok = t.Underlying().(*types2.Signature)
+		return ok
+	}
+	name, ok := rc.X.(*syntax.Name)
+	if !ok {
+		return false
+	}
+	obj := s.loopReceiverObj(loop, name.Value)
+	if obj == nil || obj.Type() == nil {
+		return true
+	}
+	_, ok = obj.Type().Underlying().(*types2.Signature)
+	return ok
 }
 
 func (s *nextScan) findDecl(list []syntax.Stmt, i int, ys string) (int, int, int) {

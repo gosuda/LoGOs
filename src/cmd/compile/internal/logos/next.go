@@ -407,7 +407,7 @@ func (s *nextScan) errAssign(list []syntax.Stmt, i int, ctx nextCtx) int {
 func (s *nextScan) errInit(stmt syntax.Stmt, ctx nextCtx) bool {
 	m, ok := s.nextErrInitShape(stmt)
 	if !ok {
-		return false
+		return s.errInitValueTask(stmt, ctx)
 	}
 	if !s.nextErrEligible(m.call, ctx) {
 		return false
@@ -519,6 +519,38 @@ func initTarget(lhs []*syntax.Name) (*syntax.Name, bool) {
 		return lhs[1], true
 	}
 	return nil, false
+}
+func (s *nextScan) errInitValueTask(stmt syntax.Stmt, ctx nextCtx) bool {
+	check, ok := stmt.(*syntax.IfStmt)
+	if !ok || check.Init == nil {
+		return false
+	}
+	assign, ok := check.Init.(*syntax.AssignStmt)
+	if !ok {
+		return false
+	}
+	lhs, call, _, ok := assignCall(assign)
+	if !ok || len(lhs) != 2 {
+		return false
+	}
+	if lhs[0].Value == "_" || lhs[1].Value == "_" {
+		return false
+	}
+	if lhs[0].Value == lhs[1].Value {
+		return false
+	}
+	if _, ok := errCond(check, lhs[1].Value); !ok {
+		return false
+	}
+	if !s.nextErrEligible(call, ctx) {
+		return false
+	}
+	if n, ok := s.callResults(call); !ok || n != len(lhs) {
+		return false
+	}
+	s.children(check, ctx)
+	s.task(check, ctx, nextRuleErrReturn, "the if-init binds a value, so the check needs a manual rewrite")
+	return true
 }
 
 func (s *nextScan) returnsFit(rets []syntax.Expr, last *syntax.Name) bool {
