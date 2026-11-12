@@ -686,6 +686,11 @@ func (fl *fileLower) chainOpOf(cur *syntax.CallExpr, method string) chainOp {
 	return op
 }
 
+type localWrites struct {
+	defined bool
+	forms   []resultForm
+}
+
 func (fl *fileLower) mapForms(op chainOp) []resultForm {
 	if op.lam == nil {
 		return []resultForm{formCall}
@@ -694,6 +699,7 @@ func (fl *fileLower) mapForms(op chainOp) []resultForm {
 	if body, ok := op.lam.Body.(syntax.Expr); ok {
 		return []resultForm{fl.resultForm(body, param)}
 	}
+	locals := fl.localForms(op.lam.Body, param)
 	var forms []resultForm
 	syntax.Inspect(op.lam.Body, func(n syntax.Node) bool {
 		switch n := n.(type) {
@@ -701,12 +707,78 @@ func (fl *fileLower) mapForms(op chainOp) []resultForm {
 			return false
 		case *syntax.ReturnStmt:
 			for _, r := range syntax.UnpackListExpr(n.Results) {
+				if name, ok := syntax.Unparen(r).(*syntax.Name); ok {
+					if written := locals[fl.pkg.info.ObjectOf(name)]; written != nil {
+						forms = append(forms, written...)
+						continue
+					}
+				}
 				forms = append(forms, fl.resultForm(r, param))
 			}
 		}
 		return true
 	})
 	return forms
+}
+
+func (fl *fileLower) localForms(body syntax.Node, param string) map[types2.Object][]resultForm {
+	writes := make(map[types2.Object]*localWrites)
+	syntax.Inspect(body, func(n syntax.Node) bool {
+		switch n := n.(type) {
+		case *syntax.AssignStmt:
+			var rhs []syntax.Expr
+			if n.Op == 0 || n.Op == syntax.Def {
+				rhs = syntax.UnpackListExpr(n.Rhs)
+			}
+			fl.recordWrites(writes, syntax.UnpackListExpr(n.Lhs), rhs, param)
+		case *syntax.VarDecl:
+			names := make([]syntax.Expr, len(n.NameList))
+			for i, name := range n.NameList {
+				names[i] = name
+			}
+			fl.recordWrites(writes, names, syntax.UnpackListExpr(n.Values), param)
+		case *syntax.RangeClause:
+			fl.recordWrites(writes, syntax.UnpackListExpr(n.Lhs), nil, param)
+		}
+		return true
+	})
+	locals := make(map[types2.Object][]resultForm)
+	for obj, w := range writes {
+		if w.defined {
+			locals[obj] = w.forms
+		}
+	}
+	return locals
+}
+
+func (fl *fileLower) recordWrites(writes map[types2.Object]*localWrites, lhs, rhs []syntax.Expr, param string) {
+	for i, l := range lhs {
+		name, ok := syntax.Unparen(l).(*syntax.Name)
+		if !ok || name.Value == "_" {
+			continue
+		}
+		obj := fl.pkg.info.ObjectOf(name)
+		if obj == nil {
+			continue
+		}
+		w := writes[obj]
+		if w == nil {
+			w = &localWrites{}
+			writes[obj] = w
+		}
+		w.defined = w.defined || fl.pkg.info.Defs[name] != nil
+		w.forms = append(w.forms, fl.writeForm(rhs, i, len(lhs), param))
+	}
+}
+
+func (fl *fileLower) writeForm(rhs []syntax.Expr, i, n int, param string) resultForm {
+	switch {
+	case len(rhs) == n:
+		return fl.resultForm(rhs[i], param)
+	case len(rhs) == 1:
+		return fl.resultForm(rhs[0], param)
+	}
+	return formBorrowed
 }
 
 func (fl *fileLower) resultForm(e syntax.Expr, param string) resultForm {

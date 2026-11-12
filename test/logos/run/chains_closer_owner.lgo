@@ -438,6 +438,158 @@ func fPanic() (hit string) {
 	return "false"
 }
 
+func tune(c *conn) {}
+
+func lCount() string {
+	return fmt.Sprint(ids3().map(x => {
+		f := mk(x)
+		tune(f)
+		return f
+	}).count())
+}
+
+func lCollect() string {
+	return fmt.Sprint(idsOf(ids3().map(x => {
+		f := mk(x)
+		tune(f)
+		return f
+	})))
+}
+
+func lFind() string {
+	return fmt.Sprint(idOf(ids3().map(x => {
+		f := mk(x)
+		tune(f)
+		return f
+	}).find(c => c.id == 2)))
+}
+
+func lLast() string {
+	return fmt.Sprint(idOf(ids3().map(x => {
+		f := mk(x)
+		tune(f)
+		return f
+	}).last()))
+}
+
+func lFilter() string {
+	return fmt.Sprint(ids3().map(x => {
+		f := mk(x)
+		tune(f)
+		return f
+	}).filter(c => c.id != 2).count())
+}
+
+//logos:allow(suspicious::side_effect_before_sort)
+func lSort() string {
+	return fmt.Sprint(idsOf(ids3().map(x => {
+		f := mk(x)
+		tune(f)
+		return f
+	}).sortBy(c => -c.id)))
+}
+
+func lVarDecl() string {
+	return fmt.Sprint(ids3().map(x => {
+		var f = mk(x)
+		tune(f)
+		return f
+	}).count())
+}
+
+func lTuple() string {
+	return fmt.Sprint(ids3().map(x => {
+		f, err := tryMk(x)
+		if err != nil {
+			tune(f)
+		}
+		return f
+	}).count())
+}
+
+func lReassignOwned() string {
+	return fmt.Sprint(ids3().map(x => {
+		f := mk(x)
+		tune(f)
+		f = mk(x + 10)
+		return f
+	}).count())
+}
+
+func lReassignBorrowed() string {
+	shared = mk(9)
+	return fmt.Sprint(ids3().map(x => {
+		f := mk(x)
+		tune(f)
+		f = shared
+		return f
+	}).count())
+}
+
+func lCaptured() string {
+	shared = mk(9)
+	return fmt.Sprint(ids3().map(x => {
+		f := shared
+		return f
+	}).count())
+}
+
+func lParam() string {
+	return fmt.Sprint(conns3().map(c => {
+		f := c
+		return f
+	}).count())
+}
+
+func mixedChain() *conn {
+	shared = mk(9)
+	ids3().map(x => {
+		if x == 2 {
+			return shared
+		}
+		return mk(x)
+	}).count()
+	return shared
+}
+
+func lMixed() string { return fmt.Sprint(mixedChain().id) }
+
+func madeChain() *conn {
+	ids3().map(x => {
+		if x == 2 {
+			return mk(20)
+		}
+		return mk(x)
+	}).count()
+	return &conn{id: 7}
+}
+
+func lTwoMade() string { return fmt.Sprint(madeChain().id) }
+
+func tryLocalFilter() (int, error) {
+	n := ids3().map(x => {
+		f := mk(x)
+		tune(f)
+		return f
+	}).filter(c => pass(c)?).count()
+	return n, nil
+}
+
+func lTryFail() string {
+	n, err := tryLocalFilter()
+	return fmt.Sprint(n, err == errBoom)
+}
+
+func lPanic() (hit string) {
+	defer func() { hit = fmt.Sprint(recover() != nil) }()
+	_ = ids3().map(x => {
+		f := mk(x)
+		tune(f)
+		return f
+	}).filter(c => boomAt(c, 3))
+	return "false"
+}
+
 type leg struct {
 	name string
 	want string
@@ -445,7 +597,7 @@ type leg struct {
 }
 
 func legs() []leg {
-	return slices.Concat(borrowLegs(), sharedLegs(), identityLegs(), madeLegs(), tryLegs(), dropLegs())
+	return slices.Concat(borrowLegs(), sharedLegs(), identityLegs(), madeLegs(), tryLegs(), dropLegs(), localLegs())
 }
 
 func borrowLegs() []leg {
@@ -550,6 +702,27 @@ func dropLegs() []leg {
 		{"drop-try-filter-fail", "0 true [1 1]", tFilterFail},
 		{"drop-try-filter-drop-fail", "0 true [1 1 1]", tFilterDropFail},
 		{"drop-filter-panic", "true [1 1 1]", fPanic},
+	}
+}
+
+func localLegs() []leg {
+	return []leg{
+		{"local-count", "3 [1 1 1]", lCount},
+		{"local-collect", "[1 2 3] [0 0 0]", lCollect},
+		{"local-find", "2 [1 0]", lFind},
+		{"local-last", "3 [1 1 0]", lLast},
+		{"local-filter", "2 [1 1 1]", lFilter},
+		{"local-sort", "[3 2 1] [0 0 0]", lSort},
+		{"local-var-decl", "3 [1 1 1]", lVarDecl},
+		{"local-tuple-call", "3 [1 1 1]", lTuple},
+		{"local-reassign-owned", "3 [0 1 0 1 0 1]", lReassignOwned},
+		{"local-reassign-borrowed", "3 [0 0 0 0]", lReassignBorrowed},
+		{"local-captured", "3 [0]", lCaptured},
+		{"local-param", "3 [0 0 0]", lParam},
+		{"local-mixed-returns", "9 [0 0 0]", lMixed},
+		{"local-two-made", "7 [1 1 1]", lTwoMade},
+		{"local-try-filter-fail", "0 true [1 1]", lTryFail},
+		{"local-filter-panic", "true [1 1 1]", lPanic},
 	}
 }
 
