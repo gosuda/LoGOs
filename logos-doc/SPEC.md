@@ -963,7 +963,7 @@ Any other shape MUST fail with `[comptime::viewas_not_pod]` naming the offset. [
 
 A short input MUST panic with a message of the form `logos: ViewAs: need <N> bytes, have <M>` naming the sizes. [T-205]
 
-The view MUST keep `b` alive. [T-205]
+The view MUST stay valid while it is reachable: on a target with unaligned loads, where it addresses `b`, it MUST keep `b` alive. [T-205]
 
 Targets without unaligned loads MUST copy to an aligned temporary. [T-205]
 
