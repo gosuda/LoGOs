@@ -175,8 +175,11 @@ The warnings of `suspicious::unapplied_struct_default`, `suspicious::side_effect
 A `//logos:allow(portability::alias_extension)` directive MUST silence the rule for an alias-extension file only when it sits in the comment block directly above the package clause of that file [T-102].
 The compiler MUST enforce `perf::time_after_in_loop` as `warn` against `time.After` inside a loop body [T-102].
 A default over a closed union MUST report pedantic::exhaustive_union_switch when the pedantic group is enabled; that rule defaults to allow and is silent otherwise. [T-102]
-JSON output MUST offer autofix candidates for optional chaining with default, early-return guard, split of a misplaced `?`, verb fix to `%w`, and addition of `?` in an error-returning function [T-102].
+JSON output MUST offer autofix candidates for optional chaining with default, early-return guard, split of a misplaced `?` where a split keeps the meaning of the statement, verb fix to `%w`, and addition of `?` in an error-returning function [T-102].
 JSON output for a Go package MUST offer only the verb fix to `%w` among the previous sentence's candidates, because the other candidates name loGo/s syntax; it MAY also offer the `portability::atomic_plain_int64` wrapper fix. [T-102][R-U1]
+A statement with several misplaced `?` MUST get one split candidate, which hoists each `?` into its own preceding statement in evaluation order. [T-102]
+A statement with a misplaced `?` under the right operand of `&&` or `||` MUST get no split candidate, because a split would run that operand when the left side decides the result; each diagnostic of that statement MUST carry a note that names this reason. [T-102]
+A statement whose remaining call would return more values than the statement binds after a split, such as `v := f1(g1(step()?)?)` with a two-result `f1`, MUST get no split candidate. [T-102]
 Exhaustive switches MUST still list every member or default. [T-102]
 The compiler MUST allow always-nil-error callees and benign writers to standard output, standard error, byte buffers, and string builders. [T-102]
 It MUST NOT hoist timers across iterations. [T-102]
