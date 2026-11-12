@@ -16,5 +16,5 @@ type VarShape interface {
 	*VarCircle | *VarSquare
 }
 type VarHolder struct {
-	Item VarShape `json:"item"` // ERROR "union_member_no_json.*VarCircle"
+	Item VarShape `json:"item"` // ERROR "\[correctness::union_member_no_json\]"
 }

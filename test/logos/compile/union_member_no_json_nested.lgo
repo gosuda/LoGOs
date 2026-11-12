@@ -15,5 +15,5 @@ type Shape interface {
 }
 
 type Holders struct {
-	Items []Shape `json:"items"` // ERROR "union_member_no_json.*bare"
+	Items []Shape `json:"items"` // ERROR "\[correctness::union_member_no_json\]"
 }

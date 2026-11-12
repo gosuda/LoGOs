@@ -15,5 +15,5 @@ type Shape interface {
 }
 
 type Holder struct {
-	Item Shape `json:"item"` // ERROR "union_member_no_json.*circle"
+	Item Shape `json:"item"` // ERROR "\[correctness::union_member_no_json\]"
 }

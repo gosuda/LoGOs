@@ -16,5 +16,5 @@ type OddShape interface {
 }
 
 type OddHolder struct {
-	Item OddShape `json:"item"` // ERROR "union_member_no_json.*Odd"
+	Item OddShape `json:"item"` // ERROR "\[correctness::union_member_no_json\]"
 }
