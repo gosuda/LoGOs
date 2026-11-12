@@ -96,6 +96,25 @@ func tryCountMismatch() (int, error) {
 	return 0, nil
 }
 
+func tryRightHandList() (int, error) {
+	x, y := twoResults()? /* ERROR "[correctness::misplaced_try] ? must end an assignment, expression statement, defer, or errdefer" */, twoResults()? /* ERROR "[correctness::misplaced_try] ? must end an assignment, expression statement, defer, or errdefer" */
+	_, _ = x, y
+	return 0, nil
+}
+
+func tryRightHandListAssign() (int, error) {
+	var x, y int
+	x, y = twoResults()? /* ERROR "[correctness::misplaced_try] ? must end an assignment, expression statement, defer, or errdefer" */, oneInt(1)
+	_, _ = x, y
+	return 0, nil
+}
+
+func tryLocalVar() (int, error) {
+	var v = twoResults()? /* ERROR "[correctness::misplaced_try] ? must end an assignment, expression statement, defer, or errdefer" */
+	_ = v
+	return 0, nil
+}
+
 func errdeferNoError() int {
 	errdefer /* ERROR "correctness::errdefer_needs_error_result" */ cleanup()
 	return 0
