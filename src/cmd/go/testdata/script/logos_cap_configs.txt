@@ -72,6 +72,11 @@ go mod tidy
 ! grep 'ghost' go.mod
 cd ../..
 
+cd k/main
+! logos build -o $WORK/bin/cfgk$GOEXE ./cmd
+stderr 'ERROR \[capabilities::unauthorized_unsafe\]: Transitive dependency ''example\.com/kdep'' imports ''unsafe'''
+cd ../..
+
 -- a/main/go.mod --
 module example.com/amain
 
@@ -511,3 +516,46 @@ import (
 var _ = unsafe.Sizeof(0)
 
 var _ = ghost.Run
+
+-- k/main/go.mod --
+module example.com/kmain
+
+go 1.27
+
+require example.com/kdep v0.0.0
+
+replace example.com/kdep => ../dep
+
+-- k/main/logos.toml --
+[capabilities]
+transitive_unsafe = "deny"
+
+-- k/main/cmd/main.go --
+package main
+
+import (
+	"fmt"
+
+	"example.com/kdep"
+)
+
+func main() { fmt.Println(kdep.Name()) }
+
+-- k/dep/go.mod --
+module example.com/kdep
+
+go 1.27
+
+-- k/dep/dep.go --
+package kdep
+
+func Name() string { return "header-only" }
+
+-- k/dep/late_plan9.go --
+package kdep
+
+import "unsafe"
+
+var _ = unsafe.Sizeof(0)
+
+func (
