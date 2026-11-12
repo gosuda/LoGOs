@@ -198,10 +198,19 @@ func closureOver() {
 
 func closureWithin() {
 	ch := make(chan int, 2)
-	ch <- 1
+	ch <- 1 // ERROR "unbounded_channel_op"
 	func() {
-		ch <- 2
+		ch <- 2 // ERROR "unbounded_channel_op"
 	}()
+}
+
+func lambdaSendTwice() {
+	ch := make(chan int, 1)
+	var f func(int) = x => {
+		ch <- x // ERROR "unbounded_channel_op"
+	}
+	f(1)
+	f(2)
 }
 
 func closureInLoop() {

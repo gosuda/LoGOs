@@ -86,7 +86,7 @@ type chanUnit struct {
 	// the cases of a done select and a go group child block.
 	free  bool
 	loops int
-	// defs counts the assignments to each local variable; caps holds the
+	lits  int
 	// capacity each one was made with, -1 when it is not constant.
 	defs   map[*types2.Var]int
 	caps   map[*types2.Var]int64
@@ -260,11 +260,14 @@ func (u *chanUnit) rangeOp(st syntax.SimpleStmt) {
 }
 
 // nested walks a function literal or lambda body, whose operations are not
-// covered by the block around it.
+// covered by the block around it; a send there runs as often as the literal
+// is called, so it cannot count toward the capacity exemption.
 func (u *chanUnit) nested(body syntax.Node) {
 	outer := u.free
 	u.free = false
+	u.lits++
 	u.walk(body)
+	u.lits--
 	u.free = outer
 }
 
@@ -358,13 +361,15 @@ func (u *chanUnit) send(s *syntax.SendStmt) {
 	u.record(s, u.exprEnd(s.Value), ch, "send on "+syntax.String(s.Chan))
 }
 
-// count adds a send to the channel's total, or marks it as sent in a loop.
+// count adds a send to the channel's total, or marks the channel unbounded
+// when the send sits in a loop or in a function literal or lambda, whose
+// number of runs the analysis cannot bound.
 func (u *chanUnit) count(ch *types2.Var) {
 	if u.sent == nil {
 		u.sent = make(map[*types2.Var]int)
 		u.looped = make(map[*types2.Var]bool)
 	}
-	if u.loops > 0 {
+	if u.loops > 0 || u.lits > 0 {
 		u.looped[ch] = true
 		return
 	}
