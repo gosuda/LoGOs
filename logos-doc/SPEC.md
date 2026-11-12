@@ -288,7 +288,7 @@ Slices MUST offer `filter`, `map`, `find`, `any`, `all`, `sortBy`, `first`, `las
 Float `.sum()` MUST use fixed pairwise order with no FMA contraction [T-104.6].
 Float `.sum()` MUST be bit-identical across x86_64 and ARM64 builds [T-104.6].
 Chained calls MUST fuse into one loop with the receiver evaluated once before the loop [T-104.6].
-Lambda parameters in chains MUST be const views [T-104.6].
+A chain lambda MUST NOT write its parameter or storage reached through it by assignment, compound assignment, increment or decrement, `copy`, `clear`, `append`, or `delete`; such a write MUST fail with `[correctness::const_view_mutation]`. This direct-write restriction does not prohibit calling methods on or passing on a chain-owned value under the ownership rules below, and does not make a borrowed receiver element owned [T-104.6].
 Mutation of the receiver inside a chain lambda MUST fail compilation [T-104.6].
 `?` in an expression-lambda body MUST propagate from the enclosing function [T-104.6].
 `errdefer` in a chain's block lambda body MUST fail with `correctness::errdefer_needs_error_result`: the block lambda is the function that holds it, and it has no error result of its own [T-104.6][T-104.2].
@@ -304,7 +304,7 @@ A `?`-chain, with the `?` inside an expression lambda body or inside a statement
 When produced elements implement `io.Closer`, partial failure MUST close already produced elements in reverse order [T-104.6].
 A fused chain MUST own only the `io.Closer` values its last `map` stage produces: a `map` produces a value when every return of its lambda, or its function value, yields a call result, a composite literal, `&T{}`, or `new(T)`, directly or through a variable local to the lambda whose every assignment is such an expression, so a call result is produced even when the callee returns one object for several elements, while a name, a field, or an index read, a captured variable, and the lambda argument returned unchanged are not produced, and a `map` whose result type is its argument type keeps the ownership its argument had [T-104.6].
 A fused chain MUST close every owned value it does not return exactly once: where a `filter` or `drop` discards it, at the terminal for each value the terminal does not return, and, on a failure by `?` or on a panic, in reverse order of production including the value a `filter` predicate was examining, and it MUST return the first error [T-104.6].
-A value that a chain passes to a later `map` lambda MUST belong to that lambda, and the chain MUST NOT close it [T-104.6].
+A chain-owned value passed to a later `map` lambda MUST belong to that lambda, which MAY call its methods and MUST close it or pass it on; the chain MUST NOT close that transferred value. Passing a borrowed receiver element or another unowned value to a lambda MUST NOT transfer ownership [T-104.6].
 The chain after a group stage MUST own the `io.Closer` values the last `map` of the segment produces, by the rules of a fused chain: `drop`, `take`, `count`, `any`, `all`, `find`, `first`, and a failure MUST close every produced value the caller does not receive [T-104.6][T-206].
 A newline followed by spaces or tabs then `.` plus a letter or `_` MUST insert no semicolon in `.lgo` [T-104.6].
 ```go
