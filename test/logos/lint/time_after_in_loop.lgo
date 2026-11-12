@@ -111,6 +111,7 @@ func headerRunsOnce(d time.Duration) {
 		<-t
 		break
 	}
+	//logos:allow(correctness::unbounded_channel_op)
 	for range time.After(d) {
 		break
 	}

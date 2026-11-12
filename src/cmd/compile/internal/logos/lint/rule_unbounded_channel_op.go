@@ -29,8 +29,9 @@ import (
 // properties of the channel: when the sends exceed k, or any send sits in a
 // loop, every operation on that channel is reported, including the
 // receives. A receive is bounded by the same conditions as the sends. The
-// statement bodies of a done select are ordinary code. A range over a
-// channel, close, and len are not operations of this rule. A select with a
+// statement bodies of a done select are ordinary code. A range over a channel
+// is one receive of this rule, because it waits on the channel until close.
+// Close and len are not operations of this rule. A select with a
 // default case but no done case is not exempt. In loGo/s, a plain channel
 // operation directly inside a go group child block, or directly inside a
 // lambda argument of a map or filter call that follows a group stage call
@@ -237,12 +238,25 @@ func (u *chanUnit) walk(n syntax.Node) {
 
 // loop walks a for statement: the initialization once, the rest in a loop.
 func (u *chanUnit) loop(f *syntax.ForStmt) {
+	u.rangeOp(f.Init)
 	u.walk(f.Init)
 	u.loops++
 	u.walk(f.Cond)
 	u.walk(f.Post)
 	u.walk(f.Body)
 	u.loops--
+}
+
+// rangeOp records a range over a channel as a receive.
+func (u *chanUnit) rangeOp(st syntax.SimpleStmt) {
+	rc, ok := st.(*syntax.RangeClause)
+	if !ok {
+		return
+	}
+	if _, isChan := underOrNil(TypeOf(rc.X)).(*types2.Chan); !isChan {
+		return
+	}
+	u.record(rc, u.exprEnd(rc.X), u.chanVar(rc.X), "range over "+syntax.String(rc.X))
 }
 
 // nested walks a function literal or lambda body, whose operations are not

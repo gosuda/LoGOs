@@ -239,6 +239,16 @@ func declNoMake() {
 
 func rangeChan(ch chan int) int {
 	n := 0
+	for v := range ch { // ERROR "unbounded_channel_op"
+		n += v
+	}
+	return n
+}
+
+func rangeLocal() int {
+	ch := make(chan int, 2)
+	ch <- 1
+	n := 0
 	for v := range ch {
 		n += v
 	}

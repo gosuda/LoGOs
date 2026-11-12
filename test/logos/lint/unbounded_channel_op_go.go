@@ -124,15 +124,15 @@ func atCap() int {
 
 func overCap() int {
 	ch := make(chan int, 2)
-	ch <- 1 // ERROR "unbounded_channel_op"
-	ch <- 2 // ERROR "unbounded_channel_op"
-	ch <- 3 // ERROR "unbounded_channel_op"
+	ch <- 1     // ERROR "unbounded_channel_op"
+	ch <- 2     // ERROR "unbounded_channel_op"
+	ch <- 3     // ERROR "unbounded_channel_op"
 	return <-ch // ERROR "unbounded_channel_op"
 }
 
 func zeroCap() int {
 	ch := make(chan int, 0)
-	ch <- 1 // ERROR "unbounded_channel_op"
+	ch <- 1     // ERROR "unbounded_channel_op"
 	return <-ch // ERROR "unbounded_channel_op"
 }
 
@@ -238,6 +238,16 @@ func declNoMake() {
 }
 
 func rangeChan(ch chan int) int {
+	n := 0
+	for v := range ch { // ERROR "unbounded_channel_op"
+		n += v
+	}
+	return n
+}
+
+func rangeLocal() int {
+	ch := make(chan int, 2)
+	ch <- 1
 	n := 0
 	for v := range ch {
 		n += v
