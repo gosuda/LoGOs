@@ -49,14 +49,14 @@ type TagOptions struct {
 }
 
 type Shared struct {
-	A, B int `json:"ab"` // ERROR "field A has type int" "field B has type int"
+	A, B int `json:"ab"` // ERROR "\[portability::serialized_unsized_int\] field A has type int" "\[portability::serialized_unsized_int\] field B has type int"
 	C, D int32 `json:"cd"`
 }
 
 type Defaults struct {
 	Port   int    = 8080 `json:"port"` // ERROR "\[portability::serialized_unsized_int\] field Port has type int"
 	Host   string = "localhost" `json:"host"`
-	Lo, Hi uint   = 3 `json:"range"` // ERROR "field Lo has type uint" "field Hi has type uint"
+	Lo, Hi uint   = 3 `json:"range"` // ERROR "\[portability::serialized_unsized_int\] field Lo has type uint" "\[portability::serialized_unsized_int\] field Hi has type uint"
 	Small  int32  = 4
 	Plain  int    = 1 // ERROR "\[portability::serialized_unsized_int\] field Plain has type int"
 }

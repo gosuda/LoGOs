@@ -17,7 +17,7 @@ type FCConfig struct {
 func fcFreeze() {
 	cfg := FCConfig{Name: "n", Tags: []string{"a"}, Child: &FCChild{N: 1}}
 	f := rt.Freeze(&cfg)
-	f.Name = "x" // ERROR "cannot assign field through const view"
-	f.Tags[0] = "x" // ERROR "cannot assign index through const view"
+	f.Name = "x" // ERROR "\[correctness::const_view_mutation\]"
+	f.Tags[0] = "x" // ERROR "\[correctness::const_view_mutation\]"
 	_ = f
 }

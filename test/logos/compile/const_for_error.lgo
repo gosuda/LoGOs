@@ -13,7 +13,7 @@ func checkPoint(v Point) Point {
 	var out Point
 	const for _, f := range comptime.Fields[Point]() {
 		out.[f] = v.[f]
-		comptime.Error("no points allowed") // ERROR "no points allowed"
+		comptime.Error("no points allowed") // ERROR "\[comptime::error\] no points allowed"
 	}
 	return out
 }
