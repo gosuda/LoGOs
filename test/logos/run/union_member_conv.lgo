@@ -29,8 +29,14 @@ type Point struct {
 
 func (p Point) Area() int { return p.X * p.Y }
 
+type Square struct {
+	Side int
+}
+
+func (s Square) Area() int { return s.Side * s.Side }
+
 type Shape interface {
-	Point | string
+	Point | Square
 	Area() int
 }
 
