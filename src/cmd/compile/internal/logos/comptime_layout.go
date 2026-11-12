@@ -111,6 +111,12 @@ func cfHasVarSize(t types2.Type, seen map[types2.Type]bool) bool {
 		return cfHasVarSize(t.Key(), seen) || cfHasVarSize(t.Elem(), seen)
 	case *types2.Chan:
 		return cfHasVarSize(t.Elem(), seen)
+	case *types2.Option:
+		return cfHasVarSize(t.Elem, seen)
+	case *types2.ConstView:
+		return cfHasVarSize(t.Elem, seen)
+	case *types2.LogosTuple:
+		return cfHasVarSize(t.Underlying(), seen)
 	case *types2.Struct:
 		for i := range t.NumFields() {
 			if cfHasVarSize(t.Field(i).Type(), seen) {

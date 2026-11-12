@@ -402,7 +402,7 @@ func unionContainerOf(t types2.Type) (unionContainer, bool) {
 		e = unaliasConstView(p.Elem())
 		ptr = true
 	}
-	if _, ok := unionTerms(e); !ok {
+	if _, ok := types2.LogosUnionTerms(e); !ok {
 		if _, ok := unionFactMembers(e); !ok {
 			return unionContainer{}, false
 		}
@@ -512,7 +512,7 @@ func (js *jsonStruct) unionContainerLines(f *jsonField, field string, uc unionCo
 		out = append(out, js.unionTrial(cls, "(*"+ap+")", "_logos_s", "")...)
 		return out
 	case containerOption:
-		if keepMapRead(uc.union) {
+		if types2.LogosOptionIsBare(uc.union) {
 			return unionFieldWrap(f, field, js.unionTrial(cls, field, "_logos_s", ""))
 		}
 		ov := fmt.Sprintf("_logos_ov_%d", f.pos)

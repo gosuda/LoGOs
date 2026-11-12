@@ -905,6 +905,8 @@ Inside a comptime generic its value MUST be taken per instantiation, and a condi
 
 `comptime.SizeOf[T]()`, `comptime.AlignOf[T]()`, and `comptime.HasPointers[T]()` are compile-time constants describing the size, alignment, and pointer-containing status of `T`.
 
+Each of them MUST equal what `unsafe.Sizeof`, `unsafe.Alignof`, and the garbage collector pointer map give for the Go type that the lowering emits for `T` on the target. That holds for every loGo/s type form: an option that the lowering keeps bare or wraps, a const view, a tuple, a closed union, and any struct, array, or option that holds them. [T-205]
+
 A `const if` inside a comptime generic or a `const for` body MUST evaluate per instantiation or per field over `true`, `false`, constants, `comptime.IsStruct[X]()` with `X` a type argument, a type parameter or `f.Type`, and the connectives `!`, `&&`, `||`, `==`, `!=`. [T-205]
 
 Any other non-constant condition MUST fail with `[comptime::not_constant]`, including a condition on `f.Name`, `f.Index`, `f.Exported` or the index variable. [T-205]

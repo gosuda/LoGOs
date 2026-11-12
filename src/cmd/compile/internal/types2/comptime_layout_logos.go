@@ -107,6 +107,10 @@ func LogosHasPointers(t Type) bool {
 		return u.kind == UnsafePointer || u.Info()&IsString != 0
 	case *Pointer, *Slice, *Map, *Chan, *Signature, *Interface:
 		return true
+	case *ConstView:
+		return LogosHasPointers(u.Elem)
+	case *Option:
+		return LogosHasPointers(u.Elem)
 	case *Array:
 		return u.Len() > 0 && LogosHasPointers(u.Elem())
 	case *Struct:

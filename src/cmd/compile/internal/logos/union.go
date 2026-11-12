@@ -650,90 +650,6 @@ func (fl *fileLower) lowerUnionMembers() {
 	}
 }
 
-func unionShape(t types2.Type) ([]types2.Type, bool, bool) {
-	if t == nil {
-		return nil, false, false
-	}
-	iface, ok := types2.Unalias(t).Underlying().(*types2.Interface)
-	if !ok {
-		return nil, false, false
-	}
-	var out []types2.Type
-	for i := range iface.NumEmbeddeds() {
-		u, ok := iface.EmbeddedType(i).(*types2.Union)
-		if !ok {
-			continue
-		}
-		for j := range u.Len() {
-			term := u.Term(j)
-			if term.Tilde() {
-				return nil, true, false
-			}
-			out = append(out, term.Type())
-		}
-	}
-	if len(out) == 0 {
-		return nil, false, false
-	}
-	return out, true, true
-}
-
-func unionTerms(t types2.Type) ([]types2.Type, bool) {
-	direct, isUnion, closed := unionShape(t)
-	if !isUnion || !closed {
-		return nil, false
-	}
-	var out []types2.Type
-	var expanding []types2.Type
-	var expand func(m types2.Type) bool
-	expand = func(m types2.Type) bool {
-		sub, isSub, closedSub := unionShape(m)
-		if !isSub {
-			for _, e := range out {
-				if types2.Identical(e, m) {
-					return true
-				}
-			}
-			out = append(out, m)
-			return true
-		}
-		if !closedSub {
-			return false
-		}
-		for _, e := range expanding {
-			if types2.Identical(e, m) {
-				return true
-			}
-		}
-		expanding = append(expanding, m)
-		for _, s := range sub {
-			if !expand(s) {
-				return false
-			}
-		}
-		return true
-	}
-	for _, d := range direct {
-		if !expand(d) {
-			return nil, false
-		}
-	}
-	if len(out) == 0 {
-		return nil, false
-	}
-	iface, _ := types2.Unalias(t).Underlying().(*types2.Interface)
-	if iface != nil {
-		var kept []types2.Type
-		for _, m := range out {
-			if types2.Implements(m, iface) {
-				kept = append(kept, m)
-			}
-		}
-		out = kept
-	}
-	return out, true
-}
-
 func mentionsTypeParam(t types2.Type) bool {
 	seen := make(map[types2.Type]bool)
 	var walk func(t types2.Type) bool
@@ -862,7 +778,7 @@ func (fl *fileLower) useOf(t types2.Type, pos syntax.Pos) *unionUse {
 	if u, ok := slot[key]; ok {
 		return u
 	}
-	members, ok := unionTerms(t)
+	members, ok := types2.LogosUnionTerms(t)
 	if !ok || mentionsTypeParam(t) {
 		return nil
 	}
@@ -1145,7 +1061,7 @@ func (fl *fileLower) fromHelper(a *syntax.AssertExpr) *unionFrom {
 	if ot == nil || types2.Identical(t, ot) {
 		return nil
 	}
-	members, ok := unionTerms(ot)
+	members, ok := types2.LogosUnionTerms(ot)
 	if !ok {
 		return nil
 	}
@@ -1424,7 +1340,7 @@ func (fl *fileLower) expandCaseList(guard *syntax.TypeSwitchGuard, site caseSite
 	changed := false
 	for _, e := range elems {
 		t := fl.pkg.info.TypeOf(e)
-		if _, ok := unionTerms(t); ok || (t != nil && seenIn(*seen, t)) {
+		if _, ok := types2.LogosUnionTerms(t); ok || (t != nil && seenIn(*seen, t)) {
 			changed = true
 			break
 		}
@@ -1451,7 +1367,7 @@ func (fl *fileLower) expandCaseList(guard *syntax.TypeSwitchGuard, site caseSite
 		} else {
 			text = gen(renderExpr(e))
 		}
-		if members, ok := unionTerms(t); ok {
+		if members, ok := types2.LogosUnionTerms(t); ok {
 			u := fl.useOf(t, e.Pos())
 			if u == nil {
 				out = append(out, e)

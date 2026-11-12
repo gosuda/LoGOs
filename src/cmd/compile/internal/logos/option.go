@@ -256,36 +256,6 @@ func (fl *fileLower) asOption(t types2.Type) *types2.Option {
 	return nil
 }
 
-func keepMapRead(V types2.Type) bool {
-	if V == nil {
-		return false
-	}
-	if _, ok := V.Underlying().(*types2.Pointer); ok {
-		return true
-	}
-	members, isUnion := unionTerms(V)
-	if !isUnion {
-		return false
-	}
-	for _, m := range members {
-		mu := types2.Unalias(m)
-		if n, ok := mu.(*types2.Named); ok {
-			mu = n.Underlying()
-		}
-		switch mu := mu.(type) {
-		case *types2.Slice, *types2.Map, *types2.Signature, *types2.Chan, *types2.Interface, *types2.Union:
-			return false
-		case *types2.Basic:
-			if mu.Kind() == types2.UnsafePointer {
-				return false
-			}
-		case *types2.TypeParam:
-			return false
-		}
-	}
-	return true
-}
-
 func (fl *fileLower) lowerOptionType(e *syntax.OptionType) syntax.Expr {
 	if prev, ok := fl.optMemo[e]; ok {
 		return cloneType(prev, e.Pos())
@@ -299,7 +269,7 @@ func (fl *fileLower) lowerOptionType(e *syntax.OptionType) syntax.Expr {
 	}
 	qoff := fl.off(pos)
 	var out syntax.Expr
-	if elemT != nil && keepMapRead(elemT) {
+	if elemT != nil && types2.LogosOptionIsBare(elemT) {
 		out = fl.lowerTypeExpr(e.Elem)
 		fl.add(qoff, qoff+1, "")
 	} else {
@@ -524,7 +494,7 @@ func (fl *fileLower) selectAccess(e *syntax.OptSelectExpr, native syntax.Expr, s
 
 func (fl *fileLower) spellLowered(t types2.Type) (string, bool) {
 	if o := fl.asOption(t); o != nil {
-		if keepMapRead(o.Elem) {
+		if types2.LogosOptionIsBare(o.Elem) {
 			return fl.spellLowered(o.Elem)
 		}
 		inner, ok := fl.spellLowered(o.Elem)
@@ -731,7 +701,7 @@ func (fl *fileLower) narrowAccess(e *syntax.Name) syntax.Expr {
 	}
 	fl.narrowDone[e] = true
 	dOpt := fl.narrowTarget(e)
-	if dOpt == nil || keepMapRead(dOpt.Elem) {
+	if dOpt == nil || types2.LogosOptionIsBare(dOpt.Elem) {
 		return e
 	}
 	pos := e.Pos()
@@ -771,12 +741,12 @@ func (fl *fileLower) needsWrap(v syntax.Expr, rec, target types2.Type) (wrap, ze
 		return false, false
 	}
 	if isNilName(v) {
-		return !keepMapRead(tOpt.Elem), !keepMapRead(tOpt.Elem)
+		return !types2.LogosOptionIsBare(tOpt.Elem), !types2.LogosOptionIsBare(tOpt.Elem)
 	}
 	if rec == nil || types2.Identical(rec, target) {
 		return false, false
 	}
-	if keepMapRead(tOpt.Elem) {
+	if types2.LogosOptionIsBare(tOpt.Elem) {
 		return false, false
 	}
 	return true, false
@@ -810,7 +780,7 @@ func (fl *fileLower) wrapKnown(v syntax.Expr, rec, target types2.Type) syntax.Ex
 			break
 		}
 		inner := fl.asOption(elem)
-		if inner == nil || keepMapRead(inner.Elem) {
+		if inner == nil || types2.LogosOptionIsBare(inner.Elem) {
 			break
 		}
 		nt, et, ok := fl.spellLoweredBoth(elem, pos)
@@ -924,7 +894,7 @@ func (fl *fileLower) lowerMapIndex(e *syntax.IndexExpr) syntax.Expr {
 		return fl.lowerConstMapRead(e, g)
 	}
 	opt := fl.asOption(fl.optType(e))
-	if opt == nil || keepMapRead(opt.Elem) {
+	if opt == nil || types2.LogosOptionIsBare(opt.Elem) {
 		e.X = fl.lowerOptExpr(e.X)
 		e.Index = fl.lowerOptExpr(e.Index)
 		return e
@@ -1082,7 +1052,7 @@ func (fl *fileLower) lowerCoalesce(e *syntax.CoalesceExpr) syntax.Expr {
 		ux.X = fl.lowerOptExpr(ux.X)
 		ux.Index = fl.lowerOptExpr(ux.Index)
 		fl.convertIndexKey(ux, rawIdx, ux.Index, idxT)
-		if keepMapRead(opt.Elem) {
+		if types2.LogosOptionIsBare(opt.Elem) {
 			fl.addOwned(id, xStart, xStart, "func() "+etext+" { if "+optTemp+", "+optOk+" := ")
 			init := defineOf(pos, []syntax.Expr{nameOf(pos, optTemp), nameOf(pos, optOk)}, []syntax.Expr{ux})
 			body := []syntax.Stmt{
@@ -1112,7 +1082,7 @@ func (fl *fileLower) lowerCoalesce(e *syntax.CoalesceExpr) syntax.Expr {
 		fl.wrapOwner[out] = id
 		return out
 	}
-	bare := keepMapRead(opt.Elem)
+	bare := types2.LogosOptionIsBare(opt.Elem)
 	xStart := fl.off(fl.optHeadStart(e.X))
 	fl.addOwned(id, xStart, xStart, "func() "+etext+" { if "+optTemp+" := ")
 	nx := fl.lowerOptReceiver(e.X)
@@ -1187,7 +1157,7 @@ func (fl *fileLower) lowerOptSelect(e *syntax.OptSelectExpr) syntax.Expr {
 	rText := ejectR
 	fl.addOwned(id, xStart, xStart, "func() "+ejectR+" { if "+optTemp+" := ")
 	nx := fl.lowerOptReceiver(e.X)
-	bareRecv := keepMapRead(ox.Elem)
+	bareRecv := types2.LogosOptionIsBare(ox.Elem)
 	accessRec := ro.Elem
 	if obj, _, _ := types2.LookupFieldOrMethod(ox.Elem, true, fl.pkg.tpkg, e.Sel.Value); obj != nil {
 		if fl.asOption(obj.Type()) != nil {
@@ -1205,7 +1175,7 @@ func (fl *fileLower) lowerOptSelect(e *syntax.OptSelectExpr) syntax.Expr {
 	some, someHead, someTail := fl.wrapParts(acc, accessRec, ro, pos)
 	var none syntax.Expr
 	var noneT string
-	if keepMapRead(ro.Elem) {
+	if types2.LogosOptionIsBare(ro.Elem) {
 		none = nilOf(pos)
 		noneT = "nil"
 	} else {
@@ -1423,7 +1393,7 @@ func (fl *fileLower) lowerOptCall(e *syntax.CallExpr, osel *syntax.OptSelectExpr
 		la := fl.lowerOptExpr(a)
 		e.ArgList[i] = fl.wrapKnown(la, fl.optType(a), fl.paramTarget(params, sig.Variadic(), e.HasDots, len(e.ArgList), i))
 	}
-	bareRecv := keepMapRead(ox.Elem)
+	bareRecv := types2.LogosOptionIsBare(ox.Elem)
 	recv := nameOf(pos, optTemp)
 	var racc syntax.Expr
 	var accSuffix string
@@ -1637,7 +1607,7 @@ func (fl *fileLower) optDeferGoFinish(s *syntax.CallStmt) ([]syntax.Stmt, bool) 
 	racc, accSuffix := fl.selectAccessBare(nameOf(pos, w.lv), w.osel)
 	var cond syntax.Expr = notNil(pos, nameOf(pos, w.lv))
 	condT := w.lv + " != nil"
-	if !keepMapRead(w.ox.Elem) {
+	if !types2.LogosOptionIsBare(w.ox.Elem) {
 		racc, accSuffix = fl.selectAccessPresent(nameOf(pos, w.lv), w.osel)
 		cond = selOf(pos, nameOf(pos, w.lv), "Present")
 		condT = w.lv + ".Present"
@@ -1738,7 +1708,7 @@ func (fl *fileLower) resultOption(r types2.Type) types2.Type {
 }
 
 func (fl *fileLower) bareResult(ro types2.Type) bool {
-	return keepMapRead(fl.asOption(ro).Elem)
+	return types2.LogosOptionIsBare(fl.asOption(ro).Elem)
 }
 
 func (fl *fileLower) lowerNilCompare(e *syntax.Operation) (syntax.Expr, bool) {
@@ -1761,7 +1731,7 @@ func (fl *fileLower) lowerNilCompare(e *syntax.Operation) (syntax.Expr, bool) {
 		xside, nilside = e.Y, lx
 	}
 	ox := fl.asOption(fl.optType(xside))
-	if ox == nil || keepMapRead(ox.Elem) {
+	if ox == nil || types2.LogosOptionIsBare(ox.Elem) {
 		return nil, false
 	}
 	pos := e.Pos()

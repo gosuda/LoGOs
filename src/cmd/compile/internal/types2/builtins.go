@@ -1071,6 +1071,13 @@ func (check *Checker) hasVarSize(t Type) bool {
 			}
 		}
 
+	case *Option:
+		return check.hasVarSize(t.Elem)
+	case *ConstView:
+		return check.hasVarSize(t.Elem)
+	case *LogosTuple:
+		return check.hasVarSize(t.Underlying())
+
 	case *TypeParam:
 		return true
 	}

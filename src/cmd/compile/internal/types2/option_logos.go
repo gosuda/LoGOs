@@ -51,6 +51,46 @@ func logosAsOptionThroughConst(T Type) *Option {
 	return logosAsOption(T)
 }
 
+func LogosOptionIsBare(elem Type) bool {
+	if elem == nil {
+		return false
+	}
+	if _, ok := elem.Underlying().(*Pointer); ok {
+		return true
+	}
+	members, isUnion := LogosUnionTerms(elem)
+	if !isUnion {
+		return false
+	}
+	for _, m := range members {
+		mu := Unalias(m)
+		if n, ok := mu.(*Named); ok {
+			mu = n.Underlying()
+		}
+		switch mu := mu.(type) {
+		case *Slice, *Map, *Signature, *Chan, *Interface, *Union:
+			return false
+		case *Basic:
+			if mu.Kind() == UnsafePointer {
+				return false
+			}
+		case *TypeParam:
+			return false
+		}
+	}
+	return true
+}
+
+func logosOptionRepr(o *Option) Type {
+	if LogosOptionIsBare(o.Elem) {
+		return o.Elem
+	}
+	return NewStruct([]*Var{
+		NewField(nopos, nil, "Value", o.Elem, false),
+		NewField(nopos, nil, "Present", Typ[Bool], false),
+	}, nil)
+}
+
 func logosWrapOption(t Type) *Option { return &Option{Elem: t} }
 
 func logosWrapOne(t Type) Type {

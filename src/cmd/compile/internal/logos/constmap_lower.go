@@ -958,7 +958,7 @@ func (fl *fileLower) lowerConstMapRead(e *syntax.IndexExpr, g *constMapGen) synt
 		return lookup
 	}
 	wrap := "Opt"
-	if keepMapRead(opt.Elem) {
+	if types2.LogosOptionIsBare(opt.Elem) {
 		wrap = "Bare"
 	}
 	fl.needRT = true

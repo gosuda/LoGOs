@@ -194,6 +194,90 @@ func (check *Checker) logosUnionAssign(x *operand, T Type, context string) bool 
 	return true
 }
 
+func logosUnionShape(t Type) ([]Type, bool, bool) {
+	if t == nil {
+		return nil, false, false
+	}
+	iface, ok := Unalias(t).Underlying().(*Interface)
+	if !ok {
+		return nil, false, false
+	}
+	var out []Type
+	for i := range iface.NumEmbeddeds() {
+		u, ok := iface.EmbeddedType(i).(*Union)
+		if !ok {
+			continue
+		}
+		for j := range u.Len() {
+			term := u.Term(j)
+			if term.Tilde() {
+				return nil, true, false
+			}
+			out = append(out, term.Type())
+		}
+	}
+	if len(out) == 0 {
+		return nil, false, false
+	}
+	return out, true, true
+}
+
+func LogosUnionTerms(t Type) ([]Type, bool) {
+	direct, isUnion, closed := logosUnionShape(t)
+	if !isUnion || !closed {
+		return nil, false
+	}
+	var out []Type
+	var expanding []Type
+	var expand func(m Type) bool
+	expand = func(m Type) bool {
+		sub, isSub, closedSub := logosUnionShape(m)
+		if !isSub {
+			for _, e := range out {
+				if Identical(e, m) {
+					return true
+				}
+			}
+			out = append(out, m)
+			return true
+		}
+		if !closedSub {
+			return false
+		}
+		for _, e := range expanding {
+			if Identical(e, m) {
+				return true
+			}
+		}
+		expanding = append(expanding, m)
+		for _, s := range sub {
+			if !expand(s) {
+				return false
+			}
+		}
+		return true
+	}
+	for _, d := range direct {
+		if !expand(d) {
+			return nil, false
+		}
+	}
+	if len(out) == 0 {
+		return nil, false
+	}
+	iface, _ := Unalias(t).Underlying().(*Interface)
+	if iface != nil {
+		var kept []Type
+		for _, m := range out {
+			if Implements(m, iface) {
+				kept = append(kept, m)
+			}
+		}
+		out = kept
+	}
+	return out, true
+}
+
 func (check *Checker) logosUnionLiteralMiss(x, y *operand) (union Type, from Type) {
 	if !check.conf.Logos {
 		return nil, nil

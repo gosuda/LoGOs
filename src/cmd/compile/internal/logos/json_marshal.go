@@ -425,13 +425,13 @@ func omitCall(f *jsonField, field string) string {
 }
 
 func flattenUnionTerms(t types2.Type) []types2.Type {
-	terms, ok := unionTerms(t)
+	terms, ok := types2.LogosUnionTerms(t)
 	if !ok {
 		return nil
 	}
 	var out []types2.Type
 	for _, term := range terms {
-		if sub, ok := unionTerms(term); ok && len(sub) > 0 {
+		if sub, ok := types2.LogosUnionTerms(term); ok && len(sub) > 0 {
 			out = append(out, flattenUnionTerms(term)...)
 		} else {
 			out = append(out, term)
@@ -447,7 +447,7 @@ func unionPackage(t types2.Type) *types2.Package {
 			return obj.Pkg()
 		}
 	}
-	if terms, ok := unionTerms(t); ok {
+	if terms, ok := types2.LogosUnionTerms(t); ok {
 		for _, m := range terms {
 			switch mu := types2.Unalias(m).(type) {
 			case *types2.Named:

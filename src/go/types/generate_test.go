@@ -141,7 +141,7 @@ var filemap = map[string]action{
 	"errors_test.go":  func(f *ast.File) { renameIdents(f, "nopos->noposn") },
 	"errsupport.go":   nil,
 	"gccgosizes.go":   nil,
-	"gcsizes.go":      func(f *ast.File) { renameIdents(f, "IsSyncAtomicAlign64->_IsSyncAtomicAlign64") },
+	"gcsizes.go":      func(f *ast.File) { stripLogosHooks(f); renameIdents(f, "IsSyncAtomicAlign64->_IsSyncAtomicAlign64") },
 	"hilbert_test.go": func(f *ast.File) { renameImportPath(f, `"cmd/compile/internal/types2"->"go/types"`) },
 	"infer.go":        func(f *ast.File) { stripLogosHooks(f); fixTokenPos(f); fixInferSig(f) },
 	"initorder.go":    nil,

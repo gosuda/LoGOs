@@ -172,7 +172,7 @@ func (fl *fileLower) zeroValue(typ types2.Type, pos syntax.Pos) syntax.Expr {
 	if c := constAsView(typ); c != nil {
 		return fl.zeroValue(c.Elem, pos)
 	}
-	if o := fl.asOption(typ); o != nil && keepMapRead(o.Elem) {
+	if o := fl.asOption(typ); o != nil && types2.LogosOptionIsBare(o.Elem) {
 		return nilOf(pos)
 	}
 	u := types2.Unalias(typ)

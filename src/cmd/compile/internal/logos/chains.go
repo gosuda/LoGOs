@@ -1717,7 +1717,7 @@ func (ce *chainEmit) findLines(p, cur string) []string {
 
 func (ce *chainEmit) bareOption() bool {
 	o := ce.cg.fl.asOptionThroughConst(ce.resultT)
-	return o != nil && keepMapRead(o.Elem)
+	return o != nil && types2.LogosOptionIsBare(o.Elem)
 }
 
 func (ce *chainEmit) someText(p, cur string) string {

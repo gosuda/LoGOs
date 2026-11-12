@@ -90,7 +90,7 @@ func (g *binaryGenerator) codec(t types2.Type) (int, bool) {
 		tup = x
 	}
 	fail := "return _logos_bfmt.Errorf(\"binary field %s at offset %d: truncated input\", _logos_field, *_logos_off)"
-	if opt := g.fl.asOption(t); opt != nil && keepMapRead(opt.Elem) {
+	if opt := g.fl.asOption(t); opt != nil && types2.LogosOptionIsBare(opt.Elem) {
 		payload, ok := g.codec(opt.Elem)
 		if !ok {
 			return 0, false
@@ -259,7 +259,7 @@ func (g *binaryGenerator) zeroWire(t types2.Type, seen map[types2.Type]bool) boo
 	seen[t] = true
 	defer delete(seen, t)
 	if opt := g.fl.asOption(t); opt != nil {
-		if keepMapRead(opt.Elem) {
+		if types2.LogosOptionIsBare(opt.Elem) {
 			return g.zeroWire(opt.Elem, seen)
 		}
 		return false
