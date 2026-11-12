@@ -4,32 +4,95 @@
 
 package syntax
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
-func TestLogosYieldStartsInGenerator(t *testing.T) {
+func firstYield(t *testing.T, f *File) *YieldStmt {
+	t.Helper()
+	var found *YieldStmt
+	Inspect(f, func(n Node) bool {
+		if y, ok := n.(*YieldStmt); ok && found == nil {
+			found = y
+		}
+		return true
+	})
+	if found == nil {
+		t.Fatal("no yield statement")
+	}
+	return found
+}
+
+func yieldShape(e Expr) string {
+	switch e := e.(type) {
+	case *Name:
+		return e.Value
+	case *BasicLit:
+		return e.Value
+	case *ParenExpr:
+		return "P(" + yieldShape(e.X) + ")"
+	case *Operation:
+		if e.Y == nil {
+			return "(" + e.Op.String() + " " + yieldShape(e.X) + ")"
+		}
+		return "(" + e.Op.String() + " " + yieldShape(e.X) + " " + yieldShape(e.Y) + ")"
+	case *ListExpr:
+		shapes := make([]string, len(e.ElemList))
+		for i, elem := range e.ElemList {
+			shapes[i] = yieldShape(elem)
+		}
+		return strings.Join(shapes, ",")
+	case *SelectorExpr:
+		return "sel(" + yieldShape(e.X) + "." + e.Sel.Value + ")"
+	case *IndexExpr:
+		return "idx(" + yieldShape(e.X) + ";" + yieldShape(e.Index) + ")"
+	case *CallExpr:
+		args := make([]string, len(e.ArgList))
+		for i, arg := range e.ArgList {
+			args[i] = yieldShape(arg)
+		}
+		return "call(" + yieldShape(e.Fun) + ";" + strings.Join(args, ",") + ")"
+	}
+	return "?"
+}
+
+func TestLogosYieldStartsAnywhere(t *testing.T) {
 	starts := []string{
 		"yield 1",
 		"yield x",
 		"yield func() {}",
-		"yield (1)",
-		"yield []int{1}[0]",
-		"yield [1]int{1}[0]",
 		"yield -x",
 		"yield +x",
 		"yield *p",
 		"yield &v",
 		"yield ^x",
 		"yield !ok",
-		"yield <-ch",
 		"yield const []byte(s)",
 		"yield switch x { default => 1 }",
 		"yield map[int]int{}[0]",
 		"yield struct{}{}",
+		"yield []int{1}[0]",
+		"yield [1]int{1}[0]",
+		"yield [...]int{1}[0]",
+		"yield [2][2]int{{1, 2}, {3, 4}}[1][0]",
+		"yield [2]*int{}[0]",
+		"yield []*int{}[0]",
 		"yield x, y",
+		"yield (1) + x",
+		"yield (a + b) * 2",
+		"yield -a + b",
+		"yield (a).f",
+		"yield (a)[0]",
+		"yield (a).(int)",
+		"yield (f)(x) + 1",
+		"yield -a, b",
+		"yield (a), b",
+		"yield *p, -b",
 	}
 	for _, stmt := range starts {
 		t.Run(stmt, func(t *testing.T) {
-			src := "package p\nimport \"iter\"\nfunc f() iter.Seq[int] {\n" + stmt + "\n}\n"
+			src := "package p\nfunc f() {\n" + stmt + "\n}\n"
 			if got := countNodes[*YieldStmt](parseLogos(t, src)); got != 1 {
 				t.Fatalf("%s: found %d yield statements, want 1", stmt, got)
 			}
@@ -37,91 +100,69 @@ func TestLogosYieldStartsInGenerator(t *testing.T) {
 	}
 }
 
-func TestLogosYieldIdentifierFormsInGenerator(t *testing.T) {
+func TestLogosYieldOperandGrouping(t *testing.T) {
+	tests := []struct {
+		stmt string
+		want string
+	}{
+		{"yield -a * 2", "(* (- a) 2)"},
+		{"yield -a + b", "(+ (- a) b)"},
+		{"yield -a * b + c", "(+ (* (- a) b) c)"},
+		{"yield (a + b) * 2", "(* P((+ a b)) 2)"},
+		{"yield *p + 1", "(+ (* p) 1)"},
+		{"yield &x == nil", "(== (& x) nil)"},
+		{"yield -(a) * 2", "(* (- P(a)) 2)"},
+		{"yield !ok", "(! ok)"},
+		{"yield (a).n", "sel(P(a).n)"},
+		{"yield (xs)[1]", "idx(P(xs);1)"},
+		{"yield (fn)(a) + 1", "(+ call(P(fn);a) 1)"},
+		{"yield (a), b", "P(a),b"},
+		{"yield -a, b", "(- a),b"},
+		{"yield *p, -b", "(* p),(- b)"},
+	}
+	for _, test := range tests {
+		t.Run(test.stmt, func(t *testing.T) {
+			src := "package p\nfunc f() {\n" + test.stmt + "\n}\n"
+			y := firstYield(t, parseLogos(t, src))
+			if got := yieldShape(y.Value); got != test.want {
+				t.Fatalf("%s: operand %s, want %s", test.stmt, got, test.want)
+			}
+		})
+	}
+}
+
+func TestLogosYieldKeepsGoStatements(t *testing.T) {
 	forms := []string{
+		"yield (1)",
+		"yield (fn)(a)",
+		"yield(2)",
+		"yield (a).f()",
+		"yield <-ch",
+		"yield <- v",
+		"yield <-ch + 1",
+		"yield[0] = 1",
+		"yield[0]++",
+		"yield[0]()",
+		"yield[T](x)",
+		"yield[int, string](x)",
+		"yield[0][1] = 2",
+		"yield.f()",
+		"yield.f = 1",
 		"yield := 1",
 		"yield = 1",
-		"yield.f()",
 		"yield++",
 		"yield--",
 		"yield += 1",
 		"yield, x = 1, 2",
 		"yield, x := 1, 2",
+		"yield",
+		"yield:\nfor {\nbreak yield\n}",
 	}
 	for _, stmt := range forms {
 		t.Run(stmt, func(t *testing.T) {
-			src := "package p\nimport \"iter\"\nfunc f() iter.Seq[int] {\n" + stmt + "\n}\n"
+			src := "package p\nfunc f() {\n" + stmt + "\n}\n"
 			if got := countNodes[*YieldStmt](parseLogos(t, src)); got != 0 {
 				t.Fatalf("%s: found %d yield statements, want 0", stmt, got)
-			}
-		})
-	}
-}
-
-func TestLogosYieldOutsideGeneratorKeepsCalls(t *testing.T) {
-	tests := []struct {
-		name string
-		src  string
-		want int
-	}{
-		{"no result", "package p\nfunc f(yield func(int) bool) {\nyield (1)\nyield(2)\n}\n", 0},
-		{"method parameter", "package p\ntype T struct{}\nfunc (T) f(yield func(int) bool) bool {\nyield (1)\nreturn yield(2)\n}\n", 0},
-		{"plain result", "package p\nfunc f(yield func(int) bool) bool {\nreturn yield (1)\n}\n", 0},
-		{"unqualified Seq", "package p\nfunc f(yield func(int) bool) Seq[int] {\nyield (1)\n}\n", 0},
-		{"other package Seq", "package p\nimport \"other\"\nfunc f(yield func(int) bool) other.Seq[int] {\nyield (1)\n}\n", 0},
-		{"two results", "package p\nimport \"iter\"\nfunc f(yield func(int) bool) (iter.Seq[int], error) {\nyield (1)\n}\n", 0},
-		{"value operand stays a statement", "package p\nfunc f() {\nyield 1\n}\n", 1},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			if got := countNodes[*YieldStmt](parseLogos(t, test.src)); got != test.want {
-				t.Fatalf("found %d yield statements, want %d", got, test.want)
-			}
-		})
-	}
-}
-
-func TestLogosYieldFollowsTheFunctionLiteral(t *testing.T) {
-	tests := []struct {
-		name string
-		body string
-		want int
-	}{
-		{"literal with a yield parameter", "yield 1\nfunc(yield func(int) bool) {\nyield (2)\nyield(3)\n}(nil)", 1},
-		{"literal that is itself a generator", "func() iter.Seq[int] {\nyield (4)\n}()", 1},
-		{"statement after the literal", "func(yield func(int) bool) {\nyield(1)\n}(nil)\nyield (2)", 1},
-		{"blocks stay in the generator", "for {\nif true {\nyield (1)\n}\nswitch {\ncase true:\nyield -1\n}\n}", 2},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			src := "package p\nimport \"iter\"\nfunc f() iter.Seq[int] {\n" + test.body + "\n}\n"
-			if got := countNodes[*YieldStmt](parseLogos(t, src)); got != test.want {
-				t.Fatalf("found %d yield statements, want %d", got, test.want)
-			}
-		})
-	}
-}
-
-func TestLogosYieldGeneratorThroughImportName(t *testing.T) {
-	tests := []struct {
-		name   string
-		header string
-		result string
-		want   int
-	}{
-		{"renamed import", "import it \"iter\"", "it.Seq[int]", 1},
-		{"renamed import for Seq2", "import it \"iter\"", "it.Seq2[int, int]", 1},
-		{"dot import", "import . \"iter\"", "Seq[int]", 1},
-		{"grouped import", "import (\n\"fmt\"\n\"iter\"\n)", "iter.Seq[int]", 1},
-		{"name of another import", "import (\n\"iter\"\nit \"other\"\n)", "it.Seq[int]", 0},
-		{"no import", "", "iter.Seq[int]", 0},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			src := "package p\n" + test.header + "\nfunc f(x int) " + test.result + " {\nyield -x\n}\n"
-			got := countNodes[*YieldStmt](parseLogos(t, src))
-			if got != test.want {
-				t.Fatalf("found %d yield statements, want %d", got, test.want)
 			}
 		})
 	}

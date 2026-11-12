@@ -17,24 +17,6 @@ func genField() iter.Seq[int] {
 	yield 1
 }
 
-func genIndexAssign() iter.Seq[int] {
-	yield := []int{1, 2}
-	yield[0] /* ERROR syntax error */ = 5
-	yield 1
-}
-
-func genIndexInc() iter.Seq[int] {
-	yield := []int{1, 2}
-	yield[0] /* ERROR syntax error */ ++
-	yield 1
-}
-
-func genIndexCall() iter.Seq[int] {
-	yield := []func(){func() {}}
-	yield[0]() // ERROR syntax error
-	yield 1
-}
-
 func plainIndex(yield []int) {
 	yield[0] = 1
 	yield[0]++

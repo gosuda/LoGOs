@@ -35,9 +35,6 @@ type parser struct {
 	indent []byte // tracing support
 
 	lambdaBan int // M6-S6: `=>` suppression depth for switch-expression arm cases.
-
-	yieldIter []string // M6-S9: local names of the "iter" import, "." for a dot import.
-	yieldGen  bool     // M6-S9: the innermost function body is a generator.
 }
 
 func (p *parser) init(file *PosBase, r io.Reader, errh ErrorHandler, pragh PragmaHandler, mode Mode) {
@@ -586,8 +583,6 @@ func (p *parser) importDecl(group *Group) Decl {
 		d.Path.Bad = true
 	}
 	// d.Path.Bad || d.Path.Kind == StringLit
-
-	p.logosNoteImport(d)
 	return d
 }
 
@@ -845,18 +840,16 @@ func (p *parser) funcDeclOrNil() *FuncDecl {
 	}
 
 	if p.tok == _Lbrace {
-		f.Body = p.funcBody(f.Type)
+		f.Body = p.funcBody()
 	}
 
 	return f
 }
 
-func (p *parser) funcBody(ftyp *FuncType) *BlockStmt {
+func (p *parser) funcBody() *BlockStmt {
 	p.fnest++
 	errcnt := p.errcnt
-	outer := p.logosEnterBody(ftyp)
 	body := p.blockStmt("")
-	p.yieldGen = outer
 	p.fnest--
 
 	// Don't check branches if there were syntax errors in the function
@@ -1088,7 +1081,7 @@ func (p *parser) operand(keep_parens bool) Expr {
 			f := new(FuncLit)
 			f.pos = pos
 			f.Type = ftyp
-			f.Body = p.funcBody(ftyp)
+			f.Body = p.funcBody()
 
 			p.xnest--
 			return f

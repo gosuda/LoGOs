@@ -4,91 +4,121 @@
 
 package syntax
 
-import "strconv"
-
-const iterImportPath = "iter"
+type yieldDim struct {
+	pos   Pos
+	len   Expr
+	slice bool
+}
 
 func (p *parser) logosYield() (Expr, Stmt) {
 	if p.mode&LogosMode == 0 || p.lit != "yield" {
 		return p.exprList(), nil
 	}
 	name := p.name()
-	if !p.yieldOperandStart() {
-		return p.exprListTail(p.logosLambdaOrExpr(p.binaryExpr(p.pexpr(name, true), 0))), nil
+	if p.yieldOperandStart() {
+		return nil, NewYieldStmt(name, p.exprList())
 	}
-	s := new(YieldStmt)
-	s.pos = name.Pos()
-	s.Value = p.exprList()
-	return nil, s
+	var head Expr = name
+	if p.tok == _Lbrack {
+		var typed bool
+		if head, typed = p.yieldBracket(name); typed {
+			return nil, NewYieldStmt(name, p.yieldTail(head))
+		}
+	}
+	return p.yieldStatement(p.yieldTail(head))
+}
+
+func (p *parser) yieldTail(head Expr) Expr {
+	return p.exprListTail(p.logosLambdaOrExpr(p.binaryExpr(p.pexpr(head, true), 0)))
 }
 
 func (p *parser) yieldOperandStart() bool {
-	if !p.yieldGen {
-		switch p.tok {
-		case _Literal, _Func, _Struct, _Map, _Chan, _Interface, _Name:
-			return true
-		}
-		return false
-	}
 	switch p.tok {
-	case _Name, _Literal, _Lparen, _Lbrack, _Func, _Struct, _Map, _Chan, _Interface, _Const, _Switch, _Star, _Arrow:
+	case _Name, _Literal, _Func, _Struct, _Map, _Chan, _Interface, _Const, _Switch:
 		return true
 	case _Operator:
-		switch p.op {
-		case Add, Sub, Not, Xor, And:
-			return true
-		}
+		return p.op == Not
 	}
 	return false
 }
 
-func (p *parser) logosNoteImport(d *ImportDecl) {
-	if p.mode&LogosMode == 0 || d.Path == nil || d.Path.Bad {
-		return
+func (p *parser) yieldTypeStart() bool {
+	switch p.tok {
+	case _Name, _Star, _Func, _Struct, _Map, _Chan, _Interface:
+		return true
 	}
-	if path, err := strconv.Unquote(d.Path.Value); err != nil || path != iterImportPath {
-		return
-	}
-	name := iterImportPath
-	if d.LocalPkgName != nil {
-		name = d.LocalPkgName.Value
-	}
-	p.yieldIter = append(p.yieldIter, name)
+	return false
 }
 
-func (p *parser) logosEnterBody(ftyp *FuncType) bool {
-	outer := p.yieldGen
-	p.yieldGen = p.mode&LogosMode != 0 && p.generatorResult(ftyp)
-	return outer
-}
-
-func (p *parser) generatorResult(ftyp *FuncType) bool {
-	if len(ftyp.ResultList) != 1 {
-		return false
+func (p *parser) yieldStatement(lhs Expr) (Expr, Stmt) {
+	switch p.tok {
+	case _AssignOp, _Assign, _Define, _IncOp, _Arrow, _Colon:
+		return lhs, nil
 	}
-	inst, ok := ftyp.ResultList[0].Type.(*IndexExpr)
+	if _, isCall := lhs.(*CallExpr); isCall {
+		return lhs, nil
+	}
+	list := UnpackListExpr(lhs)
+	value, word, ok := YieldOperand(list[0])
 	if !ok {
-		return false
+		return lhs, nil
 	}
-	switch seq := inst.X.(type) {
-	case *SelectorExpr:
-		pkg, ok := seq.X.(*Name)
-		return ok && p.iterName(pkg.Value) && isSeqName(seq.Sel.Value)
-	case *Name:
-		return p.iterName(".") && isSeqName(seq.Value)
+	if len(list) > 1 {
+		rest := *lhs.(*ListExpr)
+		rest.ElemList = append([]Expr{value}, list[1:]...)
+		value = &rest
 	}
-	return false
+	return nil, NewYieldStmt(word, value)
 }
 
-func (p *parser) iterName(name string) bool {
-	for _, imported := range p.yieldIter {
-		if imported == name {
-			return true
+func (p *parser) yieldBracket(name *Name) (head Expr, typed bool) {
+	var dims []yieldDim
+	instance := false
+	for p.tok == _Lbrack {
+		dim := yieldDim{pos: p.pos()}
+		p.next()
+		switch p.tok {
+		case _Rbrack:
+			dim.slice, typed = true, true
+		case _DotDotDot:
+			p.next()
+			typed = true
+		default:
+			var comma bool
+			dim.len, comma = p.typeList(false)
+			instance = instance || comma
 		}
+		p.want(_Rbrack)
+		dims = append(dims, dim)
 	}
-	return false
+	if !typed && (instance || !p.yieldTypeStart()) {
+		head = name
+		for _, dim := range dims {
+			index := new(IndexExpr)
+			index.pos = dim.pos
+			index.X = head
+			index.Index = dim.len
+			head = index
+		}
+		return head, false
+	}
+	head = p.logosTypeElem()
+	for i := len(dims) - 1; i >= 0; i-- {
+		head = yieldDimType(dims[i], head)
+	}
+	return head, true
 }
 
-func isSeqName(name string) bool {
-	return name == "Seq" || name == "Seq2"
+func yieldDimType(dim yieldDim, elem Expr) Expr {
+	if dim.slice {
+		t := new(SliceType)
+		t.pos = dim.pos
+		t.Elem = elem
+		return t
+	}
+	t := new(ArrayType)
+	t.pos = dim.pos
+	t.Len = dim.len
+	t.Elem = elem
+	return t
 }
