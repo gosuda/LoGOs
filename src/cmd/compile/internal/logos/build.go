@@ -168,6 +168,13 @@ func rtSel(pos syntax.Pos, sel string) *syntax.SelectorExpr {
 	return selOf(pos, nameOf(pos, rtAlias), sel)
 }
 
+func (fl *fileLower) exprSpan(e syntax.Expr) span {
+	if ws, ok := fl.wrapSpan[e]; ok {
+		return ws
+	}
+	return span{fl.exprStart(e), fl.exprEndOf(e)}
+}
+
 func (fl *fileLower) carryType(dst, src syntax.Expr) {
 	if dst == src {
 		return

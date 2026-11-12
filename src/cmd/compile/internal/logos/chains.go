@@ -1899,6 +1899,7 @@ func (cg *chainGen) emit(call *syntax.CallExpr, ops []chainOp, baseText otext, e
 		text := cat(gen("func() "+ce.resultSpelling()+" { "), loopText, gen(" }()"))
 		native := parseChainExprFrag(fl, text.s, call.Pos())
 		fl.stageReplacement(call, native)
+		fl.wrapSpan[native] = cg.whole
 		fl.addT(cg.whole.start, cg.whole.end, text)
 		return
 	}
@@ -1917,6 +1918,7 @@ func (cg *chainGen) emit(call *syntax.CallExpr, ops []chainOp, baseText otext, e
 	cg.hoists = append(cg.hoists, chainHoist{stmts: hoistNative, text: hoistText})
 	native := nameOf(call.Pos(), temp)
 	fl.stageReplacement(call, native)
+	fl.wrapSpan[native] = cg.whole
 	fl.add(cg.whole.start, cg.whole.end, temp)
 }
 

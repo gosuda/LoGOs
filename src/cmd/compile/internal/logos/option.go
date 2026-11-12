@@ -331,6 +331,11 @@ func (fl *fileLower) deleteGroupingParens(es, qoff int) {
 func (fl *fileLower) optLeftmost(e syntax.Expr) syntax.Pos {
 	for {
 		switch n := syntax.Unparen(e).(type) {
+		case *syntax.CompositeLit:
+			if n.Type == nil {
+				return e.Pos()
+			}
+			e = n.Type
 		case *syntax.OptSelectExpr:
 			e = n.X
 		case *syntax.CoalesceExpr:
@@ -363,6 +368,11 @@ func (fl *fileLower) optHeadStart(e syntax.Expr) syntax.Pos {
 		switch n := e.(type) {
 		case *syntax.ParenExpr:
 			return e.Pos()
+		case *syntax.CompositeLit:
+			if n.Type == nil {
+				return e.Pos()
+			}
+			e = n.Type
 		case *syntax.OptSelectExpr:
 			e = n.X
 		case *syntax.CoalesceExpr:
@@ -1089,7 +1099,8 @@ func (fl *fileLower) lowerCoalesce(e *syntax.CoalesceExpr) syntax.Expr {
 	}
 	bare := types2.LogosOptionIsBare(opt.Elem)
 	xStart := fl.off(fl.optHeadStart(e.X))
-	fl.addOwned(id, xStart, xStart, "func() "+etext+" { if "+optTemp+" := ")
+	openParen, closeParen := headerParens(e.X)
+	fl.addOwned(id, xStart, xStart, "func() "+etext+" { if "+optTemp+" := "+openParen)
 	nx := fl.lowerOptReceiver(e.X)
 	wy := fl.wrapKnown(fl.lowerOptExpr(e.Y), fl.optType(e.Y), opt.Elem)
 	xEnd := lastTokenEnd(fl.src, xStart, qoff)
@@ -1111,11 +1122,30 @@ func (fl *fileLower) lowerCoalesce(e *syntax.CoalesceExpr) syntax.Expr {
 		returnOf(pos, []syntax.Expr{wy}),
 	}
 	lit := at(&syntax.FuncLit{Type: signature, Body: blockOf(pos, body)}, pos)
-	fl.addOwned(id, xEnd, xEnd, mid)
+	fl.addOwned(id, xEnd, xEnd, closeParen+mid)
 	out := callOf(pos, lit, nil)
 	fl.wrapSpan[out] = span{start: xStart, end: yEnd}
 	fl.wrapOwner[out] = id
 	return out
+}
+
+func headerParens(e syntax.Expr) (string, string) {
+	found := false
+	syntax.Inspect(e, func(n syntax.Node) bool {
+		switch n := n.(type) {
+		case *syntax.FuncLit:
+			return false
+		case *syntax.CompositeLit:
+			if n.Type != nil {
+				found = true
+			}
+		}
+		return !found
+	})
+	if found {
+		return "(", ")"
+	}
+	return "", ""
 }
 
 func lastBraceOf(e syntax.Expr) (syntax.Pos, bool) {
@@ -1134,6 +1164,22 @@ func lastBraceOf(e syntax.Expr) (syntax.Pos, bool) {
 		return lastBraceOf(n.X)
 	case *syntax.CallExpr:
 		return lastBraceOf(n.Fun)
+	case *syntax.SwitchExpr:
+		return n.Rbrace, true
+	case *syntax.LambdaExpr:
+		if block, ok := n.Body.(*syntax.BlockStmt); ok {
+			return block.Rbrace, true
+		}
+		if body, ok := n.Body.(syntax.Expr); ok {
+			return lastBraceOf(body)
+		}
+	case *syntax.CoalesceExpr:
+		if pos, ok := lastBraceOf(n.Y); ok {
+			return pos, true
+		}
+		return lastBraceOf(n.X)
+	case *syntax.OptSelectExpr:
+		return lastBraceOf(n.X)
 	case *syntax.Operation:
 		if n.Y != nil {
 			if pos, ok := lastBraceOf(n.Y); ok {
@@ -1160,7 +1206,8 @@ func (fl *fileLower) lowerOptSelect(e *syntax.OptSelectExpr) syntax.Expr {
 		base.Fatalf("logos: cannot spell type %s of the ?. expression at %s", ro, pos.String())
 	}
 	rText := ejectR
-	fl.addOwned(id, xStart, xStart, "func() "+ejectR+" { if "+optTemp+" := ")
+	openParen, closeParen := headerParens(e.X)
+	fl.addOwned(id, xStart, xStart, "func() "+ejectR+" { if "+optTemp+" := "+openParen)
 	nx := fl.lowerOptReceiver(e.X)
 	bareRecv := types2.LogosOptionIsBare(ox.Elem)
 	accessRec := ro.Elem
@@ -1209,7 +1256,7 @@ func (fl *fileLower) lowerOptSelect(e *syntax.OptSelectExpr) syntax.Expr {
 	lit := at(&syntax.FuncLit{Type: signature, Body: blockOf(pos, body)}, pos)
 	xEnd := lastTokenEnd(fl.src, xStart, fl.off(pos))
 	selEnd := fl.off(e.Sel.Pos()) + len(e.Sel.Value)
-	fl.add(xEnd, selEnd, "; "+condT+" { return "+someHead+optTemp+accSuffix+someTail+" }; return "+noneT+" }()")
+	fl.add(xEnd, selEnd, closeParen+"; "+condT+" { return "+someHead+optTemp+accSuffix+someTail+" }; return "+noneT+" }()")
 	out := callOf(pos, lit, nil)
 	fl.wrapSpan[out] = span{start: xStart, end: selEnd}
 	fl.wrapOwner[out] = id

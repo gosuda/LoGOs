@@ -211,6 +211,7 @@ func (fl *fileLower) spreadComposite(c *syntax.CompositeLit, addr bool) syntax.E
 	}
 	text := cat(gen("func() "+ptr), b.typeText(), gen(" {\n"), renderText(b.text, b.tw.subs), gen("}()"))
 	fl.addT(fl.off(syntax.StartPos(c)), fl.off(c.Rbrace)+1, text)
+	fl.wrapSpan[native] = span{start: fl.off(syntax.StartPos(c)), end: fl.off(c.Rbrace) + 1}
 	return native
 }
 
@@ -218,7 +219,9 @@ func (fl *fileLower) spreadAddrOp(op *syntax.Operation, c *syntax.CompositeLit) 
 	start := fl.off(op.Pos())
 	native := fl.spreadAddrComposite(c)
 	inner := fl.textOf(span{start: start + len("&"), end: fl.off(c.Rbrace) + 1})
-	fl.addT(start, skipCloseParens(fl.src, fl.off(c.Rbrace)+1), inner)
+	end := skipCloseParens(fl.src, fl.off(c.Rbrace)+1)
+	fl.addT(start, end, inner)
+	fl.wrapSpan[native] = span{start: start, end: end}
 	return native
 }
 
@@ -294,7 +297,7 @@ func (b *spreadBuilder) body() {
 		if !ok {
 			continue
 		}
-		valText := b.fl.textOf(span{start: b.fl.spreadStartOf(kv.Value), end: b.fl.exprEndOf(kv.Value)})
+		valText := b.fl.textOf(b.fl.spreadSpan(kv.Value))
 		b.native = append(b.native, assignOf(pos,
 			[]syntax.Expr{selOf(pos, v(), key.Value)},
 			[]syntax.Expr{kv.Value}))
@@ -306,7 +309,7 @@ func (b *spreadBuilder) body() {
 
 func (b *spreadBuilder) copy(se *syntax.SpreadExpr, fields []string) {
 	pos := b.pos
-	srcText := b.fl.textOf(span{start: b.fl.spreadStartOf(se.X), end: b.fl.exprEndOf(se.X)})
+	srcText := b.fl.textOf(b.fl.spreadSpan(se.X))
 	if len(fields) == 0 {
 		b.native = append(b.native, assignOf(pos,
 			[]syntax.Expr{nameOf(pos, "_")},
@@ -380,7 +383,7 @@ func (fl *fileLower) spreadSelfUpdate(s *syntax.AssignStmt) (*syntax.AssignStmt,
 		fields = append(fields, key.Value)
 		values = append(values, val)
 		ltexts = append(ltexts, target.Value+"."+key.Value)
-		vtexts = append(vtexts, fl.textOf(span{start: fl.spreadStartOf(val), end: fl.exprEndOf(val)}))
+		vtexts = append(vtexts, fl.textOf(fl.spreadSpan(val)))
 	}
 	if len(fields) == 0 {
 		native := assignOf(pos, []syntax.Expr{nameOf(pos, target.Value)}, []syntax.Expr{nameOf(pos, target.Value)})
@@ -410,6 +413,13 @@ func (fl *fileLower) spreadStartOf(e syntax.Expr) int {
 		return spanStartBack(fl.src, fl.off(syntax.StartPos(c)))
 	}
 	return spanStartBack(fl.src, fl.off(leftmostOf(e)))
+}
+
+func (fl *fileLower) spreadSpan(e syntax.Expr) span {
+	if _, ok := syntax.Unparen(e).(*syntax.CompositeLit); ok {
+		return span{fl.spreadStartOf(e), fl.exprEndOf(e)}
+	}
+	return fl.exprSpan(e)
 }
 
 func (fl *fileLower) exprEndOf(e syntax.Expr) int {
