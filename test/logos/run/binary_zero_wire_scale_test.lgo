@@ -3,6 +3,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/binary"
 	"testing"
 )
@@ -20,8 +21,8 @@ func mustScaleBytes(b []byte, err error) []byte {
 	return b
 }
 
-func scaleWireLen(n uint64) int {
-	return 1 + len(binary.AppendUvarint(nil, n))
+func scaleWire(n uint64) []byte {
+	return binary.AppendUvarint([]byte{1}, n)
 }
 
 func TestBinaryZeroWireScaleIndependent(t *testing.T) {
@@ -31,11 +32,13 @@ func TestBinaryZeroWireScaleIndependent(t *testing.T) {
 	big := ScaleHolder{Items: make([]ScaleEmpty, bigCount)}
 	encSmall := mustScaleBytes(small.MarshalBinary())
 	encBig := mustScaleBytes(big.MarshalBinary())
-	if len(encSmall) != scaleWireLen(smallCount) {
-		t.Fatalf("small encode is %d bytes, want %d", len(encSmall), scaleWireLen(smallCount))
+	wantSmall := scaleWire(smallCount)
+	wantBig := scaleWire(bigCount)
+	if !bytes.Equal(encSmall, wantSmall) {
+		t.Fatalf("small encode is %x, want %x", encSmall, wantSmall)
 	}
-	if len(encBig) != scaleWireLen(bigCount) {
-		t.Fatalf("big encode is %d bytes, want %d", len(encBig), scaleWireLen(bigCount))
+	if !bytes.Equal(encBig, wantBig) {
+		t.Fatalf("big encode is %x, want %x", encBig, wantBig)
 	}
 	encSmallAllocs := testing.AllocsPerRun(20, func() { mustScaleBytes(small.MarshalBinary()) })
 	encBigAllocs := testing.AllocsPerRun(20, func() { mustScaleBytes(big.MarshalBinary()) })
@@ -44,12 +47,12 @@ func TestBinaryZeroWireScaleIndependent(t *testing.T) {
 	}
 	var decSmall, decBig ScaleHolder
 	decSmallAllocs := testing.AllocsPerRun(20, func() {
-		if err := decSmall.UnmarshalBinary(encSmall); err != nil {
+		if err := decSmall.UnmarshalBinary(wantSmall); err != nil {
 			panic(err)
 		}
 	})
 	decBigAllocs := testing.AllocsPerRun(20, func() {
-		if err := decBig.UnmarshalBinary(encBig); err != nil {
+		if err := decBig.UnmarshalBinary(wantBig); err != nil {
 			panic(err)
 		}
 	})
