@@ -180,6 +180,36 @@ func TestNamedInterfaceUsesTheReflectivePath(t *testing.T) {
 	}
 }
 
+type SeparatorTagged struct {
+	Odd  string `json:"a\u2028b"`
+	Even string `json:"c\u2029d"`
+}
+
+func TestInvalidTagNameUsesTheReflectivePath(t *testing.T) {
+	v := SeparatorTagged{Odd: "x", Even: "y"}
+	if hasGeneratedMethods(v) || hasGeneratedMethods(&v) {
+		t.Fatalf("SeparatorTagged carries generated methods: %#v", v)
+	}
+	got, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, werr := json.Marshal(map[string]string{"a\u2028b": "x", "c\u2029d": "y"})
+	if werr != nil {
+		t.Fatal(werr)
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("SeparatorTagged marshaled as %s, want the reflective bytes %s", got, want)
+	}
+	var back SeparatorTagged
+	if err := json.Unmarshal(got, &back); err != nil {
+		t.Fatal(err)
+	}
+	if back != v {
+		t.Fatalf("round trip changed %+v into %+v", v, back)
+	}
+}
+
 func TestIneligibleStructsLackBinaryMethods(t *testing.T) {
 	if !hasGeneratedBinaryMethods(Base{X: 3}) {
 		t.Fatal("eligible Base lost its generated binary methods")

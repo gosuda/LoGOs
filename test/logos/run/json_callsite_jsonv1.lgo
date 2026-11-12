@@ -199,6 +199,12 @@ type SeparatorTagsMirror SeparatorTags
 
 func testSeparatorTagNamesUnderNoJSONv2() {
 	v := SeparatorTags{Odd: "x", Even: "y"}
+	if _, ok := any(v).(json.Marshaler); ok {
+		panic("nojsonv2 SeparatorTags carries a generated MarshalJSON")
+	}
+	if _, ok := any(&v).(json.Unmarshaler); ok {
+		panic("nojsonv2 SeparatorTags carries a generated UnmarshalJSON")
+	}
 	want, err := json.Marshal(SeparatorTagsMirror(v))
 	if err != nil {
 		panic(err)
