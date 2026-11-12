@@ -83,5 +83,9 @@ func (check *Checker) logosCheckAsserts(e *syntax.AssertedStruct, def *TypeName,
 			check.errorf(e.Asserts[i], InvalidIfaceAssign, "%s %s does not implement %s (missing method %s)", logosAssertFail, ptr, T, name)
 			return
 		}
+		if name := check.logosMutatingGetter(ptr, iface, e.Asserts[i].Pos()); name != "" {
+			check.errorf(e.Asserts[i], InvalidIfaceAssign, "%s %s: the getter of const property %s is not proven readonly", logosConstMutation, ptr, name)
+			return
+		}
 	}
 }

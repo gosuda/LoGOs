@@ -122,6 +122,10 @@ func (check *Checker) logosConcreteReadonlySatisfiedAt(V Type, f, m *Func, pos s
 	if check == nil {
 		return logosConcreteReadonlySatisfiedNil(f, m)
 	}
+	return check.logosReadonlyProofAt(V, f, m.Name(), pos)
+}
+
+func (check *Checker) logosReadonlyProofAt(V Type, f *Func, obligation string, pos syntax.Pos) bool {
 	sig, ok := f.Type().(*Signature)
 	if !ok || sig.Recv() == nil {
 		return false
@@ -159,20 +163,21 @@ func (check *Checker) logosConcreteReadonlySatisfiedAt(V Type, f, m *Func, pos s
 		f.SetLogosReadonly(true)
 		return true
 	}
-	check.needsCleanup(&logosSatisfyReadonlyDeferred{check: check, V: V, f: f, m: m, pos: pos})
+	check.needsCleanup(&logosSatisfyReadonlyDeferred{check: check, V: V, f: f, obligation: obligation, pos: pos})
 	return true
 }
 
 type logosSatisfyReadonlyDeferred struct {
-	check *Checker
-	V     Type
-	f, m  *Func
-	pos   syntax.Pos
+	check      *Checker
+	V          Type
+	f          *Func
+	obligation string
+	pos        syntax.Pos
 }
 
 func (d *logosSatisfyReadonlyDeferred) cleanup() {
 	check := d.check
-	if check == nil || d.f == nil || d.m == nil {
+	if check == nil || d.f == nil {
 		return
 	}
 	if d.f.LogosReadonly() {
@@ -187,7 +192,7 @@ func (d *logosSatisfyReadonlyDeferred) cleanup() {
 		pos = d.f.Pos()
 	}
 	var at poser = noposer{pos: pos}
-	check.errorf(at, IncompatibleAssign, "%s %s does not implement readonly method %s (method %s is not readonly)", logosConstMutation, d.V, d.m.Name(), d.f.Name())
+	check.errorf(at, IncompatibleAssign, "%s %s does not implement readonly method %s (method %s is not readonly)", logosConstMutation, d.V, d.obligation, d.f.Name())
 }
 
 type noposer struct {

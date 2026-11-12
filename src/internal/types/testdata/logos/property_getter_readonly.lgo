@@ -1,0 +1,111 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package p
+
+type Named interface {
+	const Name string
+}
+
+type Counter interface {
+	Name string
+}
+
+type Direct struct : Named /* ERROR "const_view_mutation" */ {
+	n int
+}
+
+func (d *Direct) Name() string {
+	d.n++
+	return "direct"
+}
+
+type Inner struct {
+	n int
+}
+
+type Nested struct : Named /* ERROR "const_view_mutation" */ {
+	in Inner
+}
+
+func (s *Nested) Name() string {
+	s.in.n = 1
+	return "nested"
+}
+
+type Calls struct : Named /* ERROR "const_view_mutation" */ {
+	n int
+}
+
+func (c *Calls) bump() { c.n++ }
+
+func (c *Calls) Name() string {
+	c.bump()
+	return "calls"
+}
+
+type Through struct : Named /* ERROR "const_view_mutation" */ {
+	p *int
+}
+
+func (t Through) Name() string {
+	*t.p = 1
+	return "through"
+}
+
+type Base struct {
+	n int
+}
+
+func (b *Base) Name() string {
+	b.n++
+	return "base"
+}
+
+type Promoted struct : Named /* ERROR "const_view_mutation" */ {
+	Base
+}
+
+type Pure struct : Named {
+	n int
+}
+
+func (p *Pure) Name() string {
+	return "pure"
+}
+
+var _ Named = &Pure{}
+
+type PureValue struct : Named {
+	n int
+}
+
+func (p PureValue) Name() string {
+	return "value"
+}
+
+var _ Named = PureValue{}
+
+type Field struct : Named {
+	Name string
+}
+
+var _ Named = Field{}
+
+type Plain struct : Counter {
+	n int
+}
+
+func (p *Plain) Name() string {
+	p.n++
+	return "plain"
+}
+
+func (p *Plain) SetName(string) {}
+
+var _ Counter = &Plain{}
+
+func readPlain(c Counter) string {
+	return c.Name
+}

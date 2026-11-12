@@ -339,6 +339,24 @@ func (check *Checker) logosCheckPropertySources(V Type, iface *Interface, pos sy
 	return logosPropOK, ""
 }
 
+func (check *Checker) logosMutatingGetter(V Type, iface *Interface, pos syntax.Pos) string {
+	for _, pr := range logosProperties(iface) {
+		if !pr.readOnly {
+			continue
+		}
+		obj, _, _ := lookupFieldOrMethodImpl(V, false, check.pkg, pr.name, false)
+		f, _ := obj.(*Func)
+		if f == nil {
+			continue
+		}
+		check.objDecl(f)
+		if !check.logosReadonlyProofAt(V, f, pr.name, pos) {
+			return pr.name
+		}
+	}
+	return ""
+}
+
 func (check *Checker) logosMissingOrdinary(V Type, iface *Interface, pos syntax.Pos) string {
 	for _, m := range iface.typeSet().methods {
 		if logosIsAccessor(m.name) {

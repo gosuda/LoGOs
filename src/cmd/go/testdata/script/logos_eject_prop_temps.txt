@@ -51,7 +51,7 @@ return v.X
 }
 
 type Carrier interface {
-const Pos Vec
+Pos Vec
 }
 
 type Bot struct : Carrier {
@@ -61,6 +61,10 @@ n int
 func (b *Bot) Pos() Vec {
 b.n++
 return Vec{X: b.n}
+}
+
+func (b *Bot) SetPos(v Vec) {
+b.n = v.X
 }
 
 func add(a, b int) int {

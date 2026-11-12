@@ -758,6 +758,10 @@ The `Monster.Start` value receiver above MUST satisfy the `const Start` obligati
 
 The `const Start` method obligation MUST stay distinct from the `const Name` property element: the method MUST NOT gain accessor methods and MUST NOT count as a property. [T-201][T-203.2]
 
+A method `F() T` that sources a read-only property `const F T` MUST be proven readonly by the proof that a `const M` obligation requires, so that reading the property through a const view cannot write the receiver. [T-201][T-203.2]
+
+A getter that writes its receiver, directly, through a nested field, or by calling a method that writes it, MUST fail the `: I` declaration with `[correctness::const_view_mutation]`; a trusted imported `FnFact.Readonly` fact counts as the proof, and a getter of a read-write property `F T` carries no such obligation. [T-201][T-203.2]
+
 `type S struct : I, J { ... }` MUST assert that `*S` implements each listed interface at the declaration. [T-203.3]
 
 A missing method MUST fail with `[correctness::assertion_failed]` naming the method. [T-203.3]
