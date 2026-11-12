@@ -136,6 +136,7 @@ type logosCapAuditor struct {
 	std    map[string]bool
 	graph  *capGraph
 	roles  map[loader.Sym]capRole
+	ifaced map[loader.Sym]bool
 	queue  []loader.Sym
 	impls  []logosCapImpl
 	hits   []logosCapHit
@@ -166,7 +167,8 @@ func logosCapAudit(ctxt *Link, d *deadcodePass) {
 			parent: make(map[loader.Sym]loader.Sym),
 			preds:  make(map[loader.Sym][]loader.Sym),
 		},
-		roles: make(map[loader.Sym]capRole),
+		roles:  make(map[loader.Sym]capRole),
+		ifaced: make(map[loader.Sym]bool),
 	}
 	a.deps = parseLogosModinfoDeps(strdata["runtime.modinfo"])
 	a.collectImpls(d)
@@ -294,7 +296,7 @@ func (a *logosCapAuditor) flood(d *deadcodePass) {
 		}
 		a.followRelocs(d, s)
 		a.followAux(s)
-		a.followInlTree(s)
+		a.followInlTree(d, s)
 		if a.ldr.IsExternal(s) {
 			a.enqueue(a.ldr.OuterSym(s), s)
 			a.enqueue(a.ldr.SubSym(s), s)
@@ -329,7 +331,7 @@ func (a *logosCapAuditor) isReflectSite(s loader.Sym) bool {
 	return false
 }
 
-func (a *logosCapAuditor) followInlTree(s loader.Sym) {
+func (a *logosCapAuditor) followInlTree(d *deadcodePass, s loader.Sym) {
 	fi := a.ldr.FuncInfo(s)
 	if !fi.Valid() {
 		return
@@ -360,6 +362,7 @@ func (a *logosCapAuditor) followInlTree(s loader.Sym) {
 		} else if capIsCgoTrampoline(name) {
 			a.hits = append(a.hits, logosCapHit{sink: inlined, kind: CapCgo, name: "runtime.cgocall"})
 		}
+		a.followInlinedIface(d, inlined)
 		if capIsReflectLookupName(name) || a.ldr.IsReflectMethod(inlined) || a.callsReflectLookup(inlined) {
 			for _, impl := range a.impls {
 				if capIsExportedMethod(impl.name) {
@@ -387,6 +390,7 @@ func (a *logosCapAuditor) callsReflectLookup(s loader.Sym) bool {
 
 func (a *logosCapAuditor) followRelocs(d *deadcodePass, s loader.Sym) {
 	relocs := a.ldr.Relocs(s)
+	site := a.inlineSite(s)
 	for i := 0; i < relocs.Count(); i++ {
 		r := relocs.At(i)
 		if r.Weak() {
@@ -412,41 +416,74 @@ func (a *logosCapAuditor) followRelocs(d *deadcodePass, s loader.Sym) {
 				a.enqueue(rs, s)
 			}
 			continue
-		case objabi.R_USEIFACEMETHOD:
-			rs := r.Sym()
-			if a.ctxt.linkShared && (a.ldr.SymType(rs) == sym.SDYNIMPORT || a.ldr.SymType(rs) == sym.Sxxx) {
-				a.followExportedImpls(s)
-				continue
-			}
-			m := d.decodeIfaceMethod(a.ldr, a.ctxt.Arch, rs, r.Add())
-			a.followIfaceImpls(s, m.name, m.typ)
-			continue
-		case objabi.R_USENAMEDMETHOD:
-			a.followIfaceImpls(s, d.decodeGenericIfaceMethod(a.ldr, r.Sym()), 0)
+		case objabi.R_USEIFACEMETHOD, objabi.R_USENAMEDMETHOD:
+			a.followIface(d, s, r)
 			continue
 		}
-		a.enqueue(r.Sym(), a.callSite(s, r))
+		a.enqueue(r.Sym(), site.at(int64(r.Off())))
 	}
 }
 
-func (a *logosCapAuditor) callSite(s loader.Sym, r loader.Reloc) loader.Sym {
-	if a.role(s).dep == "" || capabilitySinks[capSinkName(a.ldr.SymName(r.Sym()))] != CapSyscall {
-		return s
+func (a *logosCapAuditor) followIface(d *deadcodePass, from loader.Sym, r loader.Reloc) {
+	rs := r.Sym()
+	if r.Type() == objabi.R_USENAMEDMETHOD {
+		a.followIfaceImpls(from, d.decodeGenericIfaceMethod(a.ldr, rs), 0)
+		return
 	}
+	if a.ctxt.linkShared && (a.ldr.SymType(rs) == sym.SDYNIMPORT || a.ldr.SymType(rs) == sym.Sxxx) {
+		a.followExportedImpls(from)
+		return
+	}
+	m := d.decodeIfaceMethod(a.ldr, a.ctxt.Arch, rs, r.Add())
+	a.followIfaceImpls(from, m.name, m.typ)
+}
+
+func (a *logosCapAuditor) followInlinedIface(d *deadcodePass, inlined loader.Sym) {
+	if a.ifaced[inlined] {
+		return
+	}
+	a.ifaced[inlined] = true
+	relocs := a.ldr.Relocs(inlined)
+	for i := range relocs.Count() {
+		if r := relocs.At(i); r.Type() == objabi.R_USEIFACEMETHOD || r.Type() == objabi.R_USENAMEDMETHOD {
+			a.followIface(d, inlined, r)
+		}
+	}
+}
+
+type capInlineSite struct {
+	owner   loader.Sym
+	fi      loader.FuncInfo
+	table   []byte
+	quantum int
+}
+
+func (a *logosCapAuditor) inlineSite(s loader.Sym) capInlineSite {
+	site := capInlineSite{owner: s, quantum: a.ctxt.Arch.MinLC}
 	fi := a.ldr.FuncInfo(s)
-	_, _, _, pcinline, _ := a.ldr.PcdataAuxs(s, nil)
-	if !fi.Valid() || pcinline == 0 {
-		return s
+	if !fi.Valid() {
+		return site
 	}
 	fi.Preload()
-	idx := capInlineAt(a.ldr.Data(pcinline), int64(r.Off()), a.ctxt.Arch.MinLC)
-	if idx < 0 || int(idx) >= int(fi.NumInlTree()) {
-		return s
+	if fi.NumInlTree() == 0 {
+		return site
 	}
-	if inlined := fi.InlTree(int(idx)).Func; inlined != 0 {
+	if _, _, _, pcinline, _ := a.ldr.PcdataAuxs(s, nil); pcinline != 0 {
+		site.fi = fi
+		site.table = a.ldr.Data(pcinline)
+	}
+	return site
+}
+
+func (c *capInlineSite) at(off int64) loader.Sym {
+	idx := capInlineAt(c.table, off, c.quantum)
+	if idx < 0 || int(idx) >= int(c.fi.NumInlTree()) {
+		return c.owner
+	}
+	if inlined := c.fi.InlTree(int(idx)).Func; inlined != 0 {
 		return inlined
 	}
-	return s
+	return c.owner
 }
 
 func capInlineAt(table []byte, off int64, quantum int) int32 {

@@ -1591,6 +1591,7 @@ Reflection through reflect.Value.Method counts as reachable. [T-Sec11]
 On diamond graphs the report MUST keep the shortest chain. [T-Sec11]
 The audit reports one chain per sink and dependency, so a chain through the standard library alone never hides another dependency's chain to the same sink. [T-Sec11]
 A chain blames the dependency frame nearest the sink, and chains of standard-library or first-party frames blame nobody. [T-Sec11]
+The call belongs to the package of the innermost inlined function that contains it, so a dependency function inlined into first-party or standard-library code is still the dependency's frame, and the interface calls and reflective lookups of an inlined function body count as the function's own. [T-Sec11]
 Policy comes from logos.toml capabilities. [T-Sec8][T-Sec11]
 
 ### 11.2 Reachability report
