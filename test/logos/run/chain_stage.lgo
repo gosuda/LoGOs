@@ -449,6 +449,36 @@ func caseTake(ctx context.Context) {
 	check("take-joins", inTime() && err == nil && slices.Equal(top, []int{1, 2}) && live.Load() == 0 && hanging.Load() >= 2, live.Load(), 0)
 }
 
+func caseFirst(ctx context.Context) {
+	reset()
+	inTime := timeLimit()
+	long := []int{1, 2, 3, 4, 5, 6, 7, 8}
+	got, err := long.group(ctx, limit = 4).map(x => {
+		defer leave()
+		defer settle()
+		if park(x) {
+			<-gate
+		}
+		return x
+	}).first()
+	check("first-joins", inTime() && err == nil && (got ?? -1) == 1 && live.Load() == 0 && hanging.Load() >= 2, live.Load(), 0)
+}
+
+func caseAll(ctx context.Context) {
+	reset()
+	inTime := timeLimit()
+	long := []int{1, 2, 3, 4, 5, 6, 7, 8}
+	every, err := long.group(ctx, limit = 4).map(x => {
+		defer leave()
+		defer settle()
+		if park(x) {
+			<-gate
+		}
+		return x
+	}).all(y => y > 5)
+	check("all-joins", inTime() && err == nil && !every && live.Load() == 0 && hanging.Load() >= 2, live.Load(), 0)
+}
+
 func caseTerminals(ctx context.Context) {
 	xs := []int{1, 2, 3, 4, 5, 6}
 	sum, err := xs.group(ctx, limit = 4).map(x => x * 2).sum()
@@ -771,6 +801,8 @@ func main() {
 	run(caseFind)
 	run(caseAny)
 	run(caseTake)
+	run(caseFirst)
+	run(caseAll)
 	run(caseTerminals)
 	run(caseUnordered)
 	run(caseLimits)

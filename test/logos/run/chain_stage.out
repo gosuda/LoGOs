@@ -19,6 +19,8 @@ ok return-joins
 ok find-joins
 ok any-joins
 ok take-joins
+ok first-joins
+ok all-joins
 ok sum
 ok count
 ok first

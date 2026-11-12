@@ -171,6 +171,29 @@ func caseEmptySources(ctx context.Context) {
 	}
 }
 
+func caseTerminalGoroutine(ctx context.Context) {
+	caller := gid()
+	var pred, key ids
+	_, err := []int{1, 2, 3, 4}.group(ctx, limit = 2).map(x => x * 2).any(y => {
+		pred.add()
+		return false
+	})
+	if err != nil {
+		check("sources-terminal-on-calling-goroutine", false, err, caller)
+		return
+	}
+	_, err = []int{1, 2, 3, 4}.group(ctx, limit = 2).map(x => x * 2).sortBy(y => {
+		key.add()
+		return y
+	})
+	if err != nil {
+		check("sources-sortby-key-on-calling-goroutine", false, err, caller)
+		return
+	}
+	check("sources-terminal-on-calling-goroutine", pred.only(caller), "other goroutine", caller)
+	check("sources-sortby-key-on-calling-goroutine", key.only(caller), "other goroutine", caller)
+}
+
 func run(f func(context.Context)) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
@@ -180,6 +203,7 @@ func run(f func(context.Context)) {
 func main() {
 	run(caseCallingGoroutine)
 	run(caseBodyGoroutine)
+	run(caseTerminalGoroutine)
 	run(caseQuietChannelDelivers)
 	run(caseEmptySources)
 	if failed {
