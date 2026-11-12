@@ -56,9 +56,12 @@ func logosBuildAllocGraph(in *lint.Input, marks []lint.ZeroAllocFunc) *logosAllo
 			k := escape.LogosFuncKey{File: f.Pos().RelFilename(), Line: fn.Pos().Line()}
 			g.names[k] = lint.DeclName(fn)
 			g.factName[k] = lint.DeclName(fn)
-			if fn.Body == nil || len(fn.TParamList) != 0 || logosGenericRecv(in, fn) {
+			if fn.Body == nil {
 				g.bodyless[k] = true
 				continue
+			}
+			if logosGenericRecv(in, fn) {
+				g.factName[k] = ""
 			}
 			g.decls = append(g.decls, k)
 			if obj := in.Info.Defs[fn.Name]; obj != nil {
@@ -153,7 +156,7 @@ func (g *logosAllocGraph) addCall(in *lint.Input, k escape.LogosFuncKey, call *s
 	if logosTypeExpr(in, stripParens(call.Fun)) {
 		return
 	}
-	switch fun := stripParens(call.Fun).(type) {
+	switch fun := logosCalleeOperand(in, stripParens(call.Fun)).(type) {
 	case *syntax.Name:
 		switch obj := in.Info.Uses[fun].(type) {
 		case *types2.Func:
@@ -186,6 +189,7 @@ func (g *logosAllocGraph) addCall(in *lint.Input, k escape.LogosFuncKey, call *s
 }
 
 func (g *logosAllocGraph) addEdge(in *lint.Input, k escape.LogosFuncKey, fn *types2.Func, byObj map[types2.Object]escape.LogosFuncKey) {
+	fn = fn.Origin()
 	if fn.Pkg() == nil {
 		return
 	}
@@ -221,6 +225,28 @@ func logosGenericRecv(in *lint.Input, fn *syntax.FuncDecl) bool {
 	}
 	named, isNamed := t.(*types2.Named)
 	return isNamed && named.TypeParams() != nil && named.TypeParams().Len() > 0
+}
+
+func logosCalleeOperand(in *lint.Input, fun syntax.Expr) syntax.Expr {
+	ix, ok := fun.(*syntax.IndexExpr)
+	if !ok {
+		return fun
+	}
+	operand := stripParens(ix.X)
+	var name *syntax.Name
+	switch operand := operand.(type) {
+	case *syntax.Name:
+		name = operand
+	case *syntax.SelectorExpr:
+		name = operand.Sel
+	}
+	if name == nil {
+		return fun
+	}
+	if _, isFunc := in.Info.Uses[name].(*types2.Func); !isFunc {
+		return fun
+	}
+	return operand
 }
 
 func logosTypes2FactName(fn *types2.Func) string {
@@ -343,7 +369,7 @@ func (g *logosAllocGraph) chainReason(k escape.LogosFuncKey, depth int) string {
 func (g *logosAllocGraph) allocFreeObjects() []string {
 	var out []string
 	for _, k := range g.decls {
-		if g.free[k] {
+		if g.free[k] && g.factName[k] != "" {
 			out = append(out, g.factName[k])
 		}
 	}

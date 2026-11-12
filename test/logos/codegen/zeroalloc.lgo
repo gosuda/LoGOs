@@ -247,3 +247,42 @@ func laterAlloc(n int) []int {
 	return make([]int, n)
 }
 
+func relay(n int) []int {
+	return laterAlloc(n)
+}
+
+//logos:zeroalloc
+func viaChain(n int) []int { // ERROR "\[perf::zeroalloc_violation\]"
+	return relay(n)
+}
+
+//go:noinline
+func genericFill[T any](n int, v T) []T {
+	s := make([]T, n)
+	s[0] = v
+	return s
+}
+
+//logos:zeroalloc
+func viaGenericInferred(n int) int { // ERROR "\[perf::zeroalloc_violation\]"
+	return len(genericFill(n, 1))
+}
+
+//logos:zeroalloc
+func viaGenericExplicit(n int) int { // ERROR "\[perf::zeroalloc_violation\]"
+	return len(genericFill[int](n, 1))
+}
+
+type gbox[T any] struct {
+	v T
+}
+
+//go:noinline
+func (b *gbox[T]) clone() *gbox[T] {
+	return &gbox[T]{b.v}
+}
+
+//logos:zeroalloc
+func viaGenericMethod(b *gbox[int]) int { // ERROR "\[perf::zeroalloc_violation\]"
+	return b.clone().v
+}

@@ -31,9 +31,11 @@ at deny, so the directive silences it there.
 
 The //logos:zeroalloc comment on the line above a function declaration
 makes the compiler fail with [perf::zeroalloc_violation] when the function,
-its function literals, or the code inlined into it allocates on the heap.
+its function literals, the code inlined into it, or a function it calls
+allocates on the heap; //logos:zeroalloc local checks the function alone.
 No severity lowers that diagnostic and //logos:allow does not silence it.
-In a Go package only 'logos lint' applies it.
+In a Go package 'logos lint' applies it, and 'logos build' applies it
+where the author wrote the directive.
 
 The build flags are those of 'logos build'. The -pedantic flag enables the
 pedantic group, raising it from allow to warn. A stricter logos.toml
