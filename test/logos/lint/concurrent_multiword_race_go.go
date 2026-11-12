@@ -458,3 +458,90 @@ func passLoopLocalGo(n int) {
 		}()
 	}
 }
+
+func thunkWrapperGoWritten() {
+	var s string
+	a := func() {
+		s = "a"
+	}
+	b := func() {
+		a()
+	}
+	go b() // ERROR "\[concurrency::concurrent_multiword_race\]"
+	println(s)
+}
+
+func thunkWrapperOfWrapperGoWritten() {
+	var s string
+	a := func() {
+		s = "a"
+	}
+	b := func() {
+		a()
+	}
+	c := func() {
+		b()
+	}
+	go c() // ERROR "\[concurrency::concurrent_multiword_race\]"
+	println(s)
+}
+
+func thunkWrapperCalledInLiteral() {
+	var s string
+	a := func() {
+		s = "a"
+	}
+	b := func() {
+		a()
+	}
+	go func() { // ERROR "\[concurrency::concurrent_multiword_race\]"
+		b()
+	}()
+	println(s)
+}
+
+func thunkMutualCycleGoWritten() {
+	var s string
+	var a, b func()
+	a = func() {
+		s = "a"
+		b()
+	}
+	b = func() {
+		a()
+	}
+	go b() // ERROR "\[concurrency::concurrent_multiword_race\]"
+	println(s)
+}
+
+func passWrapperNeverReachesWriter() {
+	var s string
+	a := func() {
+		s = "a"
+	}
+	b := func() {}
+	_ = a
+	go b()
+	println(s)
+}
+
+func passWrapperWritesOneWord() {
+	n := 0
+	a := func() {
+		n = 1
+	}
+	b := func() {
+		a()
+	}
+	go b()
+	println(n)
+}
+
+func passWrapperCallsOpaque(f func()) {
+	var s string
+	b := func() {
+		f()
+	}
+	go b()
+	println(s)
+}

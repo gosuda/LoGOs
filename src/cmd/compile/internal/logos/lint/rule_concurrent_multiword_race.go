@@ -18,8 +18,9 @@ import (
 // literal of a go statement, a loGo/s group child block, or a lambda or
 // function literal of a group stage segment, together with the function
 // literals it calls through a local variable, a slice literal, or the
-// source of its stage; a callee whose literal is not visible in the
-// declaration is not followed. A variable is
+// source of its stage, and the literals those call in turn at any depth;
+// a callee whose literal is not visible in the declaration is not
+// followed. A variable is
 // multi-word when its value spans more than one machine word: a string
 // (two), a slice (three), an interface or union (two), a complex number
 // (two), and a struct or array whose value-bearing storage, padding and
@@ -205,19 +206,7 @@ func (c *raceCheck) varOf(name *syntax.Name) *types2.Var {
 func (c *raceCheck) followThunks() {
 	for i := range c.spawns {
 		s := &c.spawns[i]
-		syntax.Inspect(s.child, func(n syntax.Node) bool {
-			call, ok := n.(*syntax.CallExpr)
-			if !ok {
-				return true
-			}
-			for _, lit := range c.litsOf(call.Fun, make(map[*types2.Var]bool)) {
-				inside := within(syntax.StartPos(lit), syntax.StartPos(s.child), syntax.EndPos(s.child))
-				if !inside && !slices.Contains(s.thunks, lit) {
-					s.thunks = append(s.thunks, lit)
-				}
-			}
-			return true
-		})
+		s.thunks = c.reachable(s.child, nil)
 	}
 	for _, g := range c.goCalls {
 		call := callOf(g.Call)
@@ -225,9 +214,39 @@ func (c *raceCheck) followThunks() {
 			continue
 		}
 		if lits := c.litsOf(call.Fun, make(map[*types2.Var]bool)); len(lits) > 0 {
-			c.spawns = append(c.spawns, spawn{node: g, child: g.Call, thunks: lits})
+			c.spawns = append(c.spawns, spawn{node: g, child: g.Call, thunks: c.reachable(nil, lits)})
 		}
 	}
+}
+
+func (c *raceCheck) reachable(root syntax.Node, seeds []*syntax.FuncLit) []*syntax.FuncLit {
+	out := slices.Clone(seeds)
+	var work []syntax.Node
+	if root != nil {
+		work = append(work, root)
+	}
+	for _, lit := range seeds {
+		work = append(work, lit)
+	}
+	for len(work) > 0 {
+		node := work[len(work)-1]
+		work = work[:len(work)-1]
+		syntax.Inspect(node, func(n syntax.Node) bool {
+			call, ok := n.(*syntax.CallExpr)
+			if !ok {
+				return true
+			}
+			for _, lit := range c.litsOf(call.Fun, make(map[*types2.Var]bool)) {
+				inside := root != nil && within(syntax.StartPos(lit), syntax.StartPos(root), syntax.EndPos(root))
+				if !inside && !slices.Contains(out, lit) {
+					out = append(out, lit)
+					work = append(work, lit)
+				}
+			}
+			return true
+		})
+	}
+	return out
 }
 
 func (c *raceCheck) litsOf(e syntax.Expr, seen map[*types2.Var]bool) []*syntax.FuncLit {

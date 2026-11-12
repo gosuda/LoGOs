@@ -940,3 +940,134 @@ func passSegmentInsideLoop(ctx context.Context, xs []int, n int) error {
 	}
 	return nil
 }
+
+func thunkWrapperGoChild(ctx context.Context) error {
+	var s string
+	a := func() error {
+		s = "a"
+		return nil
+	}
+	b := func() error {
+		return a()
+	}
+	go group (ctx) {
+		go b() // ERROR "\[concurrency::concurrent_multiword_race\]"
+	}
+	println(s)
+	return nil
+}
+
+func thunkWrapperOfWrapperGoChild(ctx context.Context) error {
+	var s string
+	a := func() error {
+		s = "a"
+		return nil
+	}
+	b := func() error {
+		return a()
+	}
+	c := func() error {
+		return b()
+	}
+	go group (ctx) {
+		go c() // ERROR "\[concurrency::concurrent_multiword_race\]"
+	}
+	println(s)
+	return nil
+}
+
+func thunkWrapperCalledInChildBlock(ctx context.Context) error {
+	var s string
+	a := func() error {
+		s = "a"
+		return nil
+	}
+	b := func() error {
+		return a()
+	}
+	go group (ctx) {
+		go { // ERROR "\[concurrency::concurrent_multiword_race\]"
+			b()?
+		}
+	}
+	println(s)
+	return nil
+}
+
+func thunkWrapperSegment(ctx context.Context) error {
+	var s string
+	w := func() (int, error) {
+		s = "a"
+		return 1, nil
+	}
+	tasks := []func() (int, error){
+		func() (int, error) {
+			return w()
+		},
+	}
+	_, err := tasks.group(ctx, limit = 8).map(t => t()?) // ERROR "\[concurrency::concurrent_multiword_race\]"
+	println(s)
+	return err
+}
+
+func thunkMutualCycleGoChild(ctx context.Context) error {
+	var s string
+	var a, b func() error
+	a = func() error {
+		s = "a"
+		return b()
+	}
+	b = func() error {
+		return a()
+	}
+	go group (ctx) {
+		go b() // ERROR "\[concurrency::concurrent_multiword_race\]"
+	}
+	println(s)
+	return nil
+}
+
+func passWrapperNeverReachesWriter(ctx context.Context) error {
+	var s string
+	a := func() error {
+		s = "a"
+		return nil
+	}
+	b := func() error {
+		return nil
+	}
+	_ = a
+	go group (ctx) {
+		go b()
+	}
+	println(s)
+	return nil
+}
+
+func passWrapperWritesOneWord(ctx context.Context) error {
+	n := 0
+	a := func() error {
+		n = 1
+		return nil
+	}
+	b := func() error {
+		return a()
+	}
+	go group (ctx) {
+		go b()
+	}
+	println(n)
+	return nil
+}
+
+func passWrapperCallsOpaque(ctx context.Context, f func() error) error {
+	var s string
+	b := func() error {
+		return f()
+	}
+	go group (ctx) {
+		go b()
+	}
+	println(s)
+	return nil
+}
