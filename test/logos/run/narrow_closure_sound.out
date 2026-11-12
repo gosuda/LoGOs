@@ -1,5 +1,8 @@
-immediate ok
-deferred ok
-nested ok
-loop ok
-method-value ok
+ok immediate
+ok deferred
+ok nested
+ok loop
+ok method-value
+ok goroutine
+ok method-in-closure
+ok inner-guard

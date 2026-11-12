@@ -2,6 +2,8 @@
 
 package p
 
+import "context"
+
 type stUser struct {
 	stName string
 }
@@ -79,6 +81,67 @@ func stAssignBefore() string {
 	q = stUser{stName: "re"}
 	if q != nil {
 		f := func() string { return stTake(q) } // ERROR "cannot use q .+ as stUser value"
+		return f()
+	}
+	return "none"
+}
+
+func stGoStmt(ctx context.Context, done chan string) error {
+	o := stUser{stName: "a"}
+	var q stUser? = o
+	if q != nil {
+		go group (ctx) {
+			go func() { done <- stTake(q) }() // ERROR "cannot use q .+ as stUser value"
+		}
+		q = nil
+	}
+	return nil
+}
+
+func stImmediateAssignAfter() string {
+	o := stUser{stName: "a"}
+	var q stUser? = o
+	if q != nil {
+		got := func() string { return stTake(q) }() // ERROR "cannot use q .+ as stUser value"
+		q = nil
+		return got
+	}
+	return "none"
+}
+
+func stLoopVarAssigned(us [](stUser?)) string {
+	out := ""
+	for _, u := range us {
+		if u != nil {
+			f := func() string { return stTake(u) } // ERROR "cannot use u .+ as stUser value"
+			u = nil
+			out += f()
+		}
+	}
+	return out
+}
+
+type stNamer interface {
+	stWho() string
+}
+
+type stImpl struct {
+	stN string
+}
+
+func (i stImpl) stWho() string {
+	return i.stN
+}
+
+func stNamerTake(n stNamer) string {
+	return n.stWho()
+}
+
+func stMethodValueInClosure() string {
+	var o stNamer? = stNamer(stImpl{stN: "x"})
+	if o != nil {
+		f := func() string { return stNamerTake(o) } // ERROR "cannot use o .+ as stNamer value"
+		o = nil
 		return f()
 	}
 	return "none"

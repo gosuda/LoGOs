@@ -3,19 +3,20 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 )
 
 var failed = false
 
-func check(name string, ok bool, detail string) {
-	if !ok {
-		fmt.Println("FAIL", name, detail)
+func check(name, got, want string) {
+	if got != want {
+		fmt.Printf("FAIL %s: got %q want %q\n", name, got, want)
 		failed = true
 		return
 	}
-	fmt.Println(name, "ok")
+	fmt.Println("ok", name)
 }
 
 type okUser struct {
@@ -96,12 +97,58 @@ func okMethodValue() string {
 	return f()
 }
 
+//logos:allow(correctness::unbounded_channel_op)
+func okSend(ch chan string, u okUser) {
+	ch <- u.okName
+}
+
+func okGoroutine() (string, error) {
+	var o *okUser? = &okUser{okName: "ann"}
+	ch := make(chan string, 1)
+	if o != nil {
+		go group (context.Background()) {
+			go okSend(ch, *o)
+		}
+		return <-ch, nil
+	}
+	return "none", nil
+}
+
+func okMethodInClosure() string {
+	var o okNamer? = okNamer(okA{okN: "y"})
+	if o != nil {
+		f := func() string { return o.okWho() }
+		return f()
+	}
+	return "none"
+}
+
+func okInnerGuard() string {
+	var o *okUser? = nil
+	f := func() string {
+		if o != nil {
+			return okTake(*o)
+		}
+		return "none"
+	}
+	before := f()
+	o = &okUser{okName: "late"}
+	return before + "/" + f()
+}
+
 func main() {
-	check("immediate", okImmediate() == "ann", okImmediate())
-	check("deferred", okDeferred() == "ann", okDeferred())
-	check("nested", okNested() == "ann", okNested())
-	check("loop", okLoop() == "a,none,b,", okLoop())
-	check("method-value", okMethodValue() == "a:x", okMethodValue())
+	check("immediate", okImmediate(), "ann")
+	check("deferred", okDeferred(), "ann")
+	check("nested", okNested(), "ann")
+	check("loop", okLoop(), "a,none,b,")
+	check("method-value", okMethodValue(), "a:x")
+	if got, err := okGoroutine(); err != nil {
+		check("goroutine", err.Error(), "ann")
+	} else {
+		check("goroutine", got, "ann")
+	}
+	check("method-in-closure", okMethodInClosure(), "a:y")
+	check("inner-guard", okInnerGuard(), "none/late")
 	if failed {
 		os.Exit(1)
 	}
