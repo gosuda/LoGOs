@@ -6,6 +6,7 @@ env GOTOOLCHAIN=local
 cd m
 logos build -o plain.exe .
 go tool objdump -s 'main\.spin' plain.exe
+stdout 'main\.spin'
 ! stdout 'morestack'
 env GOEXPERIMENT=preemptibleloops
 logos build -o preempt.exe .
