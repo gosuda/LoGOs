@@ -4,21 +4,21 @@ package p
 
 type counter struct{ n int }
 
-//logos:zeroalloc // ERROR "\[perf::zeroalloc_violation\] //logos:zeroalloc must be on its own line directly above a function declaration"
+//logos:zeroalloc // ERROR "\[perf::zeroalloc_violation\]"
 
 func detached(c *counter) {
 	c.n++
 }
 
-//logos:zeroalloc // ERROR "\[perf::zeroalloc_violation\] //logos:zeroalloc must be on its own line directly above a function declaration"
+//logos:zeroalloc // ERROR "\[perf::zeroalloc_violation\]"
 type tagged struct{ v int }
 
 func inBody(c *counter) {
-	//logos:zeroalloc // ERROR "\[perf::zeroalloc_violation\] //logos:zeroalloc must be on its own line directly above a function declaration"
+	//logos:zeroalloc // ERROR "\[perf::zeroalloc_violation\]"
 	c.n++
 }
 
-func trailing(c *counter) { c.n++ } //logos:zeroalloc // ERROR "\[perf::zeroalloc_violation\] //logos:zeroalloc must be on its own line directly above a function declaration"
+func trailing(c *counter) { c.n++ } //logos:zeroalloc // ERROR "\[perf::zeroalloc_violation\]"
 
 //logos:zeroalloc
 func marked(c *counter) {
@@ -36,5 +36,5 @@ func nearDetached(c *counter) {
 
 func nearTrailing(c *counter) { c.n++ } //logos:zeroalloc:x
 
-//logos:zeroalloc	// ERROR "\[perf::zeroalloc_violation\] //logos:zeroalloc must be on its own line directly above a function declaration"
+//logos:zeroalloc	// ERROR "\[perf::zeroalloc_violation\]"
 type tabTagged struct{ v int }

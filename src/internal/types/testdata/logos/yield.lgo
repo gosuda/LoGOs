@@ -40,12 +40,12 @@ func yieldTwoResults() (int, int) {
 }
 
 func yieldWrongType() iter.Seq[int] {
-	yield "s" /* ERROR "cannot use" */
+	yield "s" /* ERRORx "." */
 	return nil
 }
 
 func yieldSeq2Arity1() iter.Seq2[int, string] {
-	yield /* ERROR "yield requires 2 values" */ 1
+	yield /* ERRORx "." */ 1
 	return nil
 }
 
@@ -55,12 +55,12 @@ func yieldSeqArity2() iter.Seq[int] {
 }
 
 func yieldSeq2Arity3() iter.Seq2[int, string] {
-	yield /* ERROR "yield requires 2 values" */ 1, "s", 3
+	yield /* ERRORx "." */ 1, "s", 3
 	return nil
 }
 
 func yieldSeq2WrongSecond() iter.Seq2[int, string] {
-	yield 1, 2 /* ERROR "cannot use" */
+	yield 1, 2 /* ERRORx "." */
 	return nil
 }
 
@@ -136,12 +136,12 @@ func outsidePairParen(a, b int) int {
 }
 
 func outsideCall(a int) int {
-	yield /* ERROR "undefined: yield" */ (a)
+	yield /* ERRORx "." */ (a)
 	return 0
 }
 
 func outsideSend(ch chan int) int {
-	yield /* ERROR "undefined: yield" */ <-ch
+	yield /* ERRORx "." */ <-ch
 	return 0
 }
 

@@ -17,7 +17,7 @@ func opt(o U) U? { return o }
 func redeclParam(q U?) func() string {
 	var g func() string
 	if q != nil {
-		g = func() string { return take(q /* ERROR "cannot use q" */) }
+		g = func() string { return take(q /* ERROR "[correctness::nil_deref_unproven]" */) }
 	}
 	n, q := pair()
 	_, _ = n, q
@@ -28,7 +28,7 @@ func redeclVar(o U) func() string {
 	var q U? = o
 	var g func() string
 	if q != nil {
-		g = func() string { return take(q /* ERROR "cannot use q" */) }
+		g = func() string { return take(q /* ERROR "[correctness::nil_deref_unproven]" */) }
 	}
 	n, q := pair()
 	_, _ = n, q
@@ -37,7 +37,7 @@ func redeclVar(o U) func() string {
 
 func redeclResult() (q U?, g func() string) {
 	if q != nil {
-		g = func() string { return take(q /* ERROR "cannot use q" */) }
+		g = func() string { return take(q /* ERROR "[correctness::nil_deref_unproven]" */) }
 	}
 	n, q := pair()
 	_ = n
@@ -48,7 +48,7 @@ func redeclShort(o U) func() string {
 	n, q := 1, opt(o)
 	var g func() string
 	if q != nil {
-		g = func() string { return take(q /* ERROR "cannot use q" */) }
+		g = func() string { return take(q /* ERROR "[correctness::nil_deref_unproven]" */) }
 	}
 	m, q := pair()
 	_, _, _ = n, m, q
@@ -115,7 +115,7 @@ func childReadsAssignedLater(ctx context.Context, o U) error {
 	if q != nil {
 		go group (ctx) {
 			go {
-				_ = take(q /* ERROR "cannot use q" */)
+				_ = take(q /* ERROR "[correctness::nil_deref_unproven]" */)
 			}
 			q = nil
 		}
@@ -128,7 +128,7 @@ func childReadsAssignedInSibling(ctx context.Context, o U) error {
 	if q != nil {
 		go group (ctx) {
 			go {
-				_ = take(q /* ERROR "cannot use q" */)
+				_ = take(q /* ERROR "[correctness::nil_deref_unproven]" */)
 			}
 			go {
 				q = nil
@@ -141,7 +141,7 @@ func childReadsAssignedInSibling(ctx context.Context, o U) error {
 func stageLambdaAssignedInSibling(ctx context.Context, o U, xs []int) error {
 	var q U? = o
 	if q != nil {
-		_, err := xs.group(ctx, limit = 2).map(x => len(take(q /* ERROR "cannot use q" */)) + x).filter(x => {
+		_, err := xs.group(ctx, limit = 2).map(x => len(take(q /* ERROR "[correctness::nil_deref_unproven]" */)) + x).filter(x => {
 			q = nil
 			return true
 		})
@@ -200,15 +200,15 @@ func andLiteralNested(q U?) bool {
 }
 
 func andLiteralAssigned(q U?) bool {
-	ok := q != nil && func() bool { return take(q /* ERROR "cannot use q" */) != "" }()
+	ok := q != nil && func() bool { return take(q /* ERROR "[correctness::nil_deref_unproven]" */) != "" }()
 	q = nil
 	return ok
 }
 
 func andLiteralLeft(q U?) bool {
-	return func() bool { return take(q /* ERROR "cannot use q" */) != "" }() && q != nil
+	return func() bool { return take(q /* ERROR "[correctness::nil_deref_unproven]" */) != "" }() && q != nil
 }
 
 func orLiteral(q U?) bool {
-	return q == nil || func() bool { return take(q /* ERROR "cannot use q" */) != "" }()
+	return q == nil || func() bool { return take(q /* ERROR "[correctness::nil_deref_unproven]" */) != "" }()
 }

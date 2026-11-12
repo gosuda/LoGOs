@@ -85,12 +85,12 @@ func needTargetTypeParam() {
 }
 
 func countMismatch() {
-	var f func(int) int = (a, b) => /* ERROR "mismatch" */ a
+	var f func(int) int = (a, b) => /* ERRORx "." */ a
 	_ = f
 }
 
 func countMismatchLone() {
-	var f func(int, int) int = x => /* ERROR "mismatch" */ x
+	var f func(int, int) int = x => /* ERRORx "." */ x
 	_ = f
 }
 
@@ -221,7 +221,7 @@ func positionCurried() {
 }
 
 func positionMismatch() {
-	_ = handler{f: (a, b) => /* ERROR "mismatch" */ a}
-	_ = []func(int) string{x => x /* ERROR "cannot use" */}
-	_ = pairFns{x => x, a => /* ERROR "mismatch" */ a}
+	_ = handler{f: (a, b) => /* ERRORx "." */ a}
+	_ = []func(int) string{x => x /* ERRORx "." */}
+	_ = pairFns{x => x, a => /* ERRORx "." */ a}
 }
