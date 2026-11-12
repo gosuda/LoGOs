@@ -2401,9 +2401,9 @@ Anchor: Tony Hoare, Richard Feynman
 
 ### M11-A-S3 Assert union marshal uses member static helper
 Anchor: Tony Hoare, Richard Feynman
-- Attack: `src/cmd/compile/internal/logos/json_static_test.go` (`TestUnionMarshalGenerated`): a closed-union value marshals through its member static helper, not the reflective path. `test/logos/run/json_union_test.lgo` (`TestUnionMarshal`) asserts that a closed-union value marshals to the same bytes as its member's `MarshalJSON` and as the reflective oracle, at the top level and as a struct field (`{"item":{"r":3}}` and `{"item":{"s":5}}`).
+- Attack: `test/logos/run/json_union_test.lgo` (`TestUnionMarshal`) asserts that a closed-union value marshals to the same bytes as its member's `MarshalJSON` and as the reflective oracle, at the top level and as a struct field (`{"item":{"r":3}}` and `{"item":{"s":5}}`). `TestUnionMarshalEqualsMemberBytes` asserts that a struct field of a closed union holding a struct member, a pointer member, a named string member with HTML characters, U+2028, U+2029, and invalid UTF-8, a named integer member, or no value marshals to `{"item":` followed by the bytes of `json.Marshal` of the member (`null` for no value), through `json.Marshal` and through the generated `MarshalJSON`. `test/logos/run/json_callsite_jsonv1.lgo` repeats those cases under `GOEXPERIMENT=nojsonv2`. SPEC 10.1 fixes the bytes, not the code path, so no test asserts the static helper by name.
 - Build: none (test-only).
-- Gate: `go test -count=1 cmd/compile/internal/logos -run TestUnionMarshalGenerated,TestUnionUnmarshalGenerated`.
+- Gate: `go test -count=1 cmd/internal/testdir -run '^Test$/^logos$/^run$/^(json_union_test|json_callsite_jsonv1)\.lgo$'`.
 - Red-team rows: none.
 - Docs: none.
 

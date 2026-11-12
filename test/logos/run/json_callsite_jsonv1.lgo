@@ -219,6 +219,71 @@ func testSeparatorTagNamesUnderNoJSONv2() {
 	}
 }
 
+type Tag string
+
+func (v *Tag) UnmarshalJSON(b []byte) error {
+	var s string
+	if err := json.Unmarshal(b, &s); err != nil {
+		return err
+	}
+	*v = Tag(s)
+	return nil
+}
+
+type Count int64
+
+func (v *Count) UnmarshalJSON(b []byte) error {
+	var n int64
+	if err := json.Unmarshal(b, &n); err != nil {
+		return err
+	}
+	*v = Count(n)
+	return nil
+}
+
+type UnionMember interface {
+	User | *User | Tag | Count
+}
+
+type UnionHolder struct {
+	Item UnionMember `json:"item"`
+}
+
+func testUnionMarshalUnderNoJSONv2() {
+	u := &User{ID: 5, Name: "n<&>\u2028", Email: "e"}
+	tag := Tag("a<b>&\u2028\u2029\xff\"\\")
+	cases := []struct {
+		name   string
+		item   UnionMember
+		member any
+	}{
+		{"struct", *u, *u},
+		{"pointer", u, u},
+		{"string", tag, tag},
+		{"integer", Count(-7), Count(-7)},
+		{"nil", nil, nil},
+	}
+	for _, c := range cases {
+		memberBytes, err := json.Marshal(c.member)
+		if err != nil {
+			panic(err)
+		}
+		want := append(append([]byte(`{"item":`), memberBytes...), '}')
+		h := UnionHolder{Item: c.item}
+		direct, err := h.MarshalJSON()
+		if err != nil {
+			panic(err)
+		}
+		via, err := json.Marshal(h)
+		if err != nil {
+			panic(err)
+		}
+		if !bytes.Equal(direct, want) || !bytes.Equal(via, want) {
+			panic(fmt.Sprintf("nojsonv2 union %s:\n direct %s\n    via %s\n   want %s", c.name, direct, via, want))
+		}
+	}
+}
+
 func main() {
 testCallSiteParityWithMarshalJSON()
 fmt.Println("ok callsite-marshal")
@@ -232,4 +297,6 @@ testRichV2ParityUnderNoJSONv2()
 fmt.Println("ok callsite-richv2")
 testSeparatorTagNamesUnderNoJSONv2()
 fmt.Println("ok callsite-separator-tags")
+testUnionMarshalUnderNoJSONv2()
+fmt.Println("ok callsite-union")
 }

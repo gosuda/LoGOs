@@ -4,3 +4,4 @@ ok callsite-encoder
 ok callsite-richv1
 ok callsite-richv2
 ok callsite-separator-tags
+ok callsite-union

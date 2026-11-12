@@ -149,6 +149,67 @@ func TestUnionMarshal(t *testing.T) {
 	}
 }
 
+type Tagged string
+
+func (v *Tagged) UnmarshalJSON(b []byte) error {
+	var s string
+	if err := json.Unmarshal(b, &s); err != nil {
+		return err
+	}
+	*v = Tagged(s)
+	return nil
+}
+
+type Rank int64
+
+func (v *Rank) UnmarshalJSON(b []byte) error {
+	var n int64
+	if err := json.Unmarshal(b, &n); err != nil {
+		return err
+	}
+	*v = Rank(n)
+	return nil
+}
+
+type MemberKinds interface {
+	Circle | *Square | Tagged | Rank
+}
+
+type MemberKindsHolder struct {
+	Item MemberKinds `json:"item"`
+}
+
+func TestUnionMarshalEqualsMemberBytes(t *testing.T) {
+	sq := &Square{S: 4}
+	tag := Tagged("a<b>&\u2028\u2029\xff\"\\")
+	cases := []struct {
+		name   string
+		item   MemberKinds
+		member any
+	}{
+		{"struct", Circle{R: 3}, Circle{R: 3}},
+		{"pointer", sq, sq},
+		{"string", tag, tag},
+		{"integer", Rank(-7), Rank(-7)},
+		{"nil", nil, nil},
+	}
+	for _, c := range cases {
+		want := append(append([]byte(`{"item":`), mustMarshal(t, c.member)...), '}')
+		h := MemberKindsHolder{Item: c.item}
+		if got := mustMarshal(t, h); !bytes.Equal(got, want) {
+			t.Errorf("%s: json.Marshal got %s, want %s", c.name, got, want)
+		}
+		direct, err := h.MarshalJSON()
+		if err != nil {
+			t.Errorf("%s: MarshalJSON: %v", c.name, err)
+			continue
+		}
+		if !bytes.Equal(direct, want) {
+			t.Errorf("%s: MarshalJSON got %s, want %s", c.name, direct, want)
+		}
+	}
+}
+
 func TestUnionTrialOrder(t *testing.T) {
 	var hSquare ShapeHolder
 	mustUnmarshal(t, []byte(`{"item":{"s":7}}`), &hSquare)
