@@ -1,0 +1,126 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+cd prog
+logos build -o prog.exe .
+exec ./prog.exe
+stdout '^read 2s 1.000042ms March drwxr-xr-x 2 2 3ns true 3$'
+stdout '^ok slice-fault$'
+stdout '^ok months-fault$'
+stdout '^ok modes-fault$'
+stdout '^ok nested-fault$'
+stdout '^ok anon-fault$'
+stdout '^ok lists-fault$'
+! stdout 'FAIL'
+
+exec go tool nm prog.exe
+stdout ' R main\.slice$'
+stdout ' R main\.slice\.logos_backing0$'
+stdout ' R main\.array$'
+stdout ' R main\.months$'
+stdout ' R main\.months\.logos_backing0$'
+stdout ' R main\.modes$'
+stdout ' R main\.modes\.logos_backing0$'
+stdout ' R main\.nested$'
+stdout ' R main\.anon$'
+stdout ' R main\.lists$'
+stdout ' R main\.lists\.logos_backing0$'
+! stdout ' [Tt] main\.init'
+
+-- prog/go.mod --
+module example.com/rodimported
+
+go 1.27
+
+-- prog/main.lgo --
+package main
+
+import (
+	"bytes"
+	"fmt"
+	"os"
+	"os/exec"
+	"strings"
+	"time"
+	"unsafe"
+)
+
+type Lists struct {
+	L []time.Duration
+	N int
+}
+
+const slice = []time.Duration{time.Second, 2 * time.Second}
+const array = [8]time.Duration{time.Millisecond, 3, 4, 5, 6, 7, 8, 9}
+const months = []time.Month{time.March, 12}
+const modes = []os.FileMode{0o644, os.ModeDir | 0o755}
+const nested = [][]time.Duration{{1, 2}, {3}}
+const anon = []struct{ D time.Duration }{{time.Second}, {2}}
+const lists = Lists{L: []time.Duration{time.Minute, 5}, N: 3}
+
+var failed bool
+
+func check(name string, cond bool, got, want any) {
+	if !cond {
+		failed = true
+		fmt.Println("FAIL", name+":", "got", got, "want", want)
+		return
+	}
+	fmt.Println("ok", name)
+}
+
+func poke(name string) {
+	switch name {
+	case "slice":
+		*unsafe.SliceData(slice) = 0
+	case "months":
+		*unsafe.SliceData(months) = 0
+	case "modes":
+		*unsafe.SliceData(modes) = 0
+	case "nested":
+		*unsafe.SliceData(nested[0]) = 0
+	case "anon":
+		*(*time.Duration)(unsafe.Pointer(unsafe.SliceData(anon))) = 0
+	case "lists":
+		*unsafe.SliceData(lists.L) = 0
+	}
+	fmt.Println("STORE-SUCCEEDED")
+}
+
+func faults(self, name string) {
+	cmd := exec.Command(self, name)
+	var buf bytes.Buffer
+	cmd.Stdout = &buf
+	cmd.Stderr = &buf
+	runErr := cmd.Run()
+	code := -1
+	if ee, ok := runErr.(*exec.ExitError); ok {
+		code = ee.ExitCode()
+	}
+	out := buf.String()
+	check(name+"-fault", runErr != nil && code == 2 && strings.Contains(out, "fault") && !strings.Contains(out, "STORE-SUCCEEDED"), out, "fault without STORE-SUCCEEDED")
+}
+
+func main() {
+	if len(os.Args) > 1 {
+		poke(os.Args[1])
+		return
+	}
+	at := len(os.Args) - 1
+	var sum time.Duration
+	for _, d := range array {
+		sum += d
+	}
+	fmt.Println("read", slice[1], sum, months[at], modes[1], len(nested), len(nested[0]), nested[1][0], anon[at].D == time.Second, lists.N)
+	self, err := os.Executable()
+	if err != nil {
+		fmt.Println("FAIL executable:", err)
+		os.Exit(1)
+	}
+	for _, name := range []string{"slice", "months", "modes", "nested", "anon", "lists"} {
+		faults(self, name)
+	}
+	if failed {
+		os.Exit(1)
+	}
+}
