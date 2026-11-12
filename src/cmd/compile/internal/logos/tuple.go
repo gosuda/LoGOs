@@ -6,6 +6,7 @@ package logos
 
 import (
 	"fmt"
+	"go/token"
 	"reflect"
 	"slices"
 	"strings"
@@ -390,31 +391,24 @@ func extendParens(src []byte, start, end int) (int, int) {
 }
 
 func wrapParenPair(src []byte, start, end int) (int, int, bool) {
-	i := start
-	for i > 0 {
-		c := src[i-1]
-		if c == ' ' || c == '\t' || c == '\n' || c == '\r' {
-			i--
-			continue
-		}
-		break
-	}
+	i := skipBlankBack(src, start)
 	if i <= 0 || src[i-1] != '(' {
 		return start, end, false
 	}
-	j := end
-	for j < len(src) {
-		c := src[j]
-		if c == ' ' || c == '\t' || c == '\n' || c == '\r' {
-			j++
-			continue
+	closer := -1
+	scanSegment(src, end, len(src), func(t tok) bool {
+		if t.comment {
+			return true
 		}
-		break
-	}
-	if j >= len(src) || src[j] != ')' {
+		if t.kind == token.RPAREN {
+			closer = t.end
+		}
+		return false
+	})
+	if closer < 0 {
 		return start, end, false
 	}
-	return i - 1, j + 1, true
+	return i - 1, closer, true
 }
 
 func skipComment(src []byte, i int) int {

@@ -234,6 +234,20 @@ func skipSpaceBack(src []byte, off int) int {
 	return off
 }
 
+func skipBlankBack(src []byte, off int) int {
+	for {
+		off = skipSpaceBack(src, off)
+		if off < 2 || src[off-2] != '*' || src[off-1] != '/' {
+			return off
+		}
+		before, _, found := bytes.CutLast(src[:off-2], []byte("/*"))
+		if !found {
+			return off
+		}
+		off = len(before)
+	}
+}
+
 func commentStartBack(src []byte, j int) (int, bool) {
 	if j >= 2 && src[j-2] == '*' && src[j-1] == '/' {
 		if k := bytes.LastIndex(src[:j-2], []byte("/*")); k >= 0 {

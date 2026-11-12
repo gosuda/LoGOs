@@ -334,11 +334,11 @@ func funcHeadOffsets(src []byte) []int {
 
 func (fl *fileLower) deleteGroupingParens(es, qoff int) {
 	n := 0
-	for off := skipSpaceBack(fl.src, qoff); off > es && fl.src[off-1] == ')'; off = skipSpaceBack(fl.src, off-1) {
+	for off := skipBlankBack(fl.src, qoff); off > es && fl.src[off-1] == ')'; off = skipBlankBack(fl.src, off-1) {
 		fl.add(off-1, off, "")
 		n++
 	}
-	for off := skipSpaceBack(fl.src, es); n > 0 && off > 0 && fl.src[off-1] == '('; off = skipSpaceBack(fl.src, off-1) {
+	for off := skipBlankBack(fl.src, es); n > 0 && off > 0 && fl.src[off-1] == '('; off = skipBlankBack(fl.src, off-1) {
 		fl.add(off-1, off, "")
 		n--
 	}
