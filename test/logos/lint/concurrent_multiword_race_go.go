@@ -394,3 +394,47 @@ func passFieldOfPointer(p *Named) {
 	}()
 	p.Name = "b"
 }
+
+func thunkGoWritten() {
+	var s string
+	t := func() {
+		s = "a"
+	}
+	go t() // ERROR "\[concurrency::concurrent_multiword_race\]"
+	println(s)
+}
+
+func thunkRangedGoWritten() {
+	var s string
+	tasks := []func(){
+		func() {
+			s = "a"
+		},
+	}
+	for _, t := range tasks {
+		go t() // ERROR "\[concurrency::concurrent_multiword_race\]"
+	}
+	println(s)
+}
+
+func passThunkNotVisible(t func()) {
+	go t()
+}
+
+func passThunkWritesOneWord() {
+	n := 0
+	t := func() {
+		n = 1
+	}
+	go t()
+	println(n)
+}
+
+func passThunkCalledInPlace() {
+	var s string
+	t := func() {
+		s = "a"
+	}
+	t()
+	println(s)
+}

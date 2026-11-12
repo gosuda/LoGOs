@@ -54,13 +54,6 @@ func isErrorType(t types2.Type) bool {
 	return ok && named.Obj().Pkg() == nil && named.Obj().Name() == "error"
 }
 
-func segmentFuncs(pass *Pass, call *syntax.CallExpr) []syntax.Expr {
-	if stageOf(pass, call) == nil {
-		return nil
-	}
-	return funcArgs(call)
-}
-
 func chainFuncs(pass *Pass, call *syntax.CallExpr) []syntax.Expr {
 	sel, ok := syntax.Unparen(call.Fun).(*syntax.SelectorExpr)
 	if !ok || !types2.LogosChainMethod(sel.Sel.Value) || pass.Info.Selections[sel] != nil || pass.Info.Uses[sel.Sel] != nil {

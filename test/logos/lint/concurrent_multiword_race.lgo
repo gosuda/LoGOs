@@ -736,3 +736,144 @@ func passMethodNamedGroup(ctx context.Context, h chainHost) int {
 	println(s)
 	return len(ys)
 }
+
+func thunkGoChild(ctx context.Context) error {
+	var s string
+	t := func() error {
+		s = "a"
+		return nil
+	}
+	go group (ctx) {
+		go t() // ERROR "\[concurrency::concurrent_multiword_race\]"
+	}
+	println(s)
+	return nil
+}
+
+func thunkRangedGoChild(ctx context.Context) error {
+	var s string
+	tasks := []func() error{
+		func() error {
+			s = "a"
+			return nil
+		},
+	}
+	go group (ctx) {
+		for _, t := range tasks {
+			go t() // ERROR "\[concurrency::concurrent_multiword_race\]"
+		}
+	}
+	println(s)
+	return nil
+}
+
+func thunkNamedInSlice(ctx context.Context) error {
+	var s string
+	first := func() error {
+		s = "a"
+		return nil
+	}
+	tasks := []func() error{first}
+	go group (ctx) {
+		for _, t := range tasks {
+			go t() // ERROR "\[concurrency::concurrent_multiword_race\]"
+		}
+	}
+	println(s)
+	return nil
+}
+
+func thunkCalledInChildBlock(ctx context.Context) error {
+	var s string
+	t := func() error {
+		s = "a"
+		return nil
+	}
+	go group (ctx) {
+		go { // ERROR "\[concurrency::concurrent_multiword_race\]"
+			t()?
+		}
+	}
+	println(s)
+	return nil
+}
+
+func thunkSegment(ctx context.Context) error {
+	var s string
+	tasks := []func() (int, error){
+		func() (int, error) {
+			s = "a"
+			return 1, nil
+		},
+	}
+	_, err := tasks.group(ctx, limit = 8).map(t => t()?) // ERROR "\[concurrency::concurrent_multiword_race\]"
+	println(s)
+	return err
+}
+
+func thunkSegmentUnordered(ctx context.Context) error {
+	var s string
+	tasks := []func() (int, error){
+		func() (int, error) {
+			s = "a"
+			return 1, nil
+		},
+	}
+	_, err := tasks.group(ctx, limit = 8).unordered().map(t => t()?) // ERROR "\[concurrency::concurrent_multiword_race\]"
+	println(s)
+	return err
+}
+
+func passThunkNotVisible(ctx context.Context, t func() error) error {
+	go group (ctx) {
+		go t()
+	}
+	return nil
+}
+
+func passStageSourceNotVisible(ctx context.Context, tasks []func() (int, error)) error {
+	_, err := tasks.group(ctx, limit = 8).map(t => t()?)
+	return err
+}
+
+func passThunkWritesOneWord(ctx context.Context) error {
+	n := 0
+	t := func() error {
+		n = 1
+		return nil
+	}
+	go group (ctx) {
+		go t()
+	}
+	println(n)
+	return nil
+}
+
+func passThunkCalledInPlace(ctx context.Context) error {
+	var s string
+	t := func() error {
+		s = "a"
+		return nil
+	}
+	go group (ctx) {
+		go {
+			println("x")
+		}
+	}
+	t()?
+	println(s)
+	return nil
+}
+
+func passSegmentIgnoresThunk(ctx context.Context) error {
+	var s string
+	tasks := []func() (int, error){
+		func() (int, error) {
+			s = "a"
+			return 1, nil
+		},
+	}
+	_, err := tasks.group(ctx, limit = 8).map(t => 1)
+	println(s)
+	return err
+}
