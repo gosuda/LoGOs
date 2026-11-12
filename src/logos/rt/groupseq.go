@@ -43,6 +43,7 @@ type groupItem[R any] struct {
 	idx  int
 	keep bool
 	r    R
+	err  error
 }
 
 type groupJob[S any] struct {
@@ -56,6 +57,7 @@ type groupStage[S, R any] struct {
 	completion bool
 	closes     bool
 	used       atomic.Bool
+	failKnown  atomic.Bool
 
 	yield   func(R, error) bool
 	gdone   <-chan struct{}
@@ -68,6 +70,7 @@ type groupStage[S, R any] struct {
 	stopped bool
 	joined  bool
 	err     error
+	headErr error
 
 	mu     sync.Mutex
 	cond   sync.Cond
@@ -118,7 +121,7 @@ func (s *groupStage[S, R]) start(ctx context.Context, yield func(R, error) bool)
 }
 
 func (s *groupStage[S, R]) live() bool {
-	if s.stopped {
+	if s.stopped || s.headErr != nil {
 		return false
 	}
 	select {
@@ -127,6 +130,10 @@ func (s *groupStage[S, R]) live() bool {
 	default:
 		return true
 	}
+}
+
+func (s *groupStage[S, R]) pulling() bool {
+	return s.live() && !s.failKnown.Load()
 }
 
 func (s *groupStage[S, R]) fromSeq(src iter.Seq[S]) {
@@ -142,7 +149,7 @@ func (s *groupStage[S, R]) fromSeq(src iter.Seq[S]) {
 func (s *groupStage[S, R]) fromChan(src <-chan S) {
 	for {
 		s.flush()
-		if !s.live() {
+		if !s.pulling() {
 			return
 		}
 		var in <-chan S
@@ -165,7 +172,7 @@ func (s *groupStage[S, R]) fromChan(src <-chan S) {
 func (s *groupStage[S, R]) slot() bool {
 	for {
 		s.flush()
-		if !s.live() {
+		if !s.pulling() {
 			return false
 		}
 		if s.held < s.limit {
@@ -225,12 +232,25 @@ func (s *groupStage[S, R]) work(ctx context.Context) error {
 		if !ok {
 			return nil
 		}
-		r, keep, err := s.f(ctx, j.v)
-		if err != nil {
-			return err
+		it := s.call(ctx, j)
+		if it.err != nil && s.completion {
+			return it.err
 		}
-		s.finish(groupItem[R]{idx: j.idx, keep: keep, r: r})
+		s.finish(it)
 	}
+}
+
+func (s *groupStage[S, R]) call(ctx context.Context, j groupJob[S]) (it groupItem[R]) {
+	it.idx = j.idx
+	if !s.completion {
+		defer func() {
+			if p := recover(); p != nil {
+				it.err = &PanicError{Value: p, Stack: stackTrace()}
+			}
+		}()
+	}
+	it.r, it.keep, it.err = s.f(ctx, j.v)
+	return it
 }
 
 func (s *groupStage[S, R]) take() (groupJob[S], bool) {
@@ -262,6 +282,9 @@ func (s *groupStage[S, R]) stopWorkers() {
 func (s *groupStage[S, R]) finish(it groupItem[R]) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if it.err != nil {
+		s.failKnown.Store(true)
+	}
 	key := it.idx
 	if s.completion {
 		key = s.done
@@ -297,6 +320,10 @@ func (s *groupStage[S, R]) flush() {
 
 func (s *groupStage[S, R]) process(it groupItem[R]) {
 	s.held--
+	if it.err != nil {
+		s.headErr = it.err
+		return
+	}
 	if !it.keep {
 		if s.closes {
 			closeValue(it.r)
@@ -313,9 +340,7 @@ func (s *groupStage[S, R]) conclude(ctx context.Context) {
 	if s.stopped {
 		return
 	}
-	if err == nil {
-		err = ctx.Err()
-	}
+	err = cmp.Or(s.headErr, err, ctx.Err())
 	if err != nil {
 		var zero R
 		s.yield(zero, err)
@@ -336,7 +361,9 @@ func (s *groupStage[S, R]) join() error {
 func (s *groupStage[S, R]) abandon() {
 	lost := make([]groupItem[R], 0, len(s.buf))
 	for _, it := range s.buf {
-		lost = append(lost, it)
+		if it.err == nil {
+			lost = append(lost, it)
+		}
 	}
 	slices.SortFunc(lost, func(a, b groupItem[R]) int { return cmp.Compare(b.idx, a.idx) })
 	closeAll(lost)

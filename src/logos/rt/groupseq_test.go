@@ -61,6 +61,7 @@ func chanStageUnordered(ctx context.Context, limit, n int, f func(context.Contex
 var (
 	orderedStages   = map[string]stageFunc{"seq": seqStage, "chan": chanStage}
 	unorderedStages = map[string]stageFunc{"seq": seqStageUnordered, "chan": chanStageUnordered}
+	bothStages      = map[string]stageFunc{"seq": seqStage, "chan": chanStage, "seq-unordered": seqStageUnordered, "chan-unordered": chanStageUnordered}
 )
 
 func eachStage(t *testing.T, stages map[string]stageFunc, body func(t *testing.T, run stageFunc)) {
@@ -383,8 +384,8 @@ func TestGroupSeqSlowHeadFillsWindowWithoutDeadlock(t *testing.T) {
 	})
 }
 
-func TestGroupSeqFirstFailureWinsAndCancelsSiblings(t *testing.T) {
-	eachStage(t, orderedStages, func(t *testing.T, run stageFunc) {
+func TestGroupSeqUnorderedFirstFailureWinsAndCancelsSiblings(t *testing.T) {
+	eachStage(t, unorderedStages, func(t *testing.T, run stageFunc) {
 		errFirst := errors.New("first")
 		errSibling := errors.New("sibling")
 		var sawCancel atomic.Bool
@@ -407,9 +408,9 @@ func TestGroupSeqFirstFailureWinsAndCancelsSiblings(t *testing.T) {
 }
 
 func TestGroupSeqChildPanicBecomesPanicError(t *testing.T) {
-	eachStage(t, orderedStages, func(t *testing.T, run stageFunc) {
+	eachStage(t, bothStages, func(t *testing.T, run stageFunc) {
 		seq := run(t.Context(), 2, 2, func(ctx context.Context, i int) (int, bool, error) {
-			if i == 1 {
+			if i == 0 {
 				panic("kapow")
 			}
 			<-ctx.Done()
@@ -490,7 +491,7 @@ func TestGroupSeqEarlyStopDiscardsLaterFailure(t *testing.T) {
 		})
 		d := finished(t, startStage(seq, func(int) bool {
 			close(bodyEntered)
-			<-sawCancel
+			synctest.Wait()
 			return false
 		}))
 		synctest.Wait()
@@ -1019,4 +1020,240 @@ func TestGroupSeqAllocationsDoNotGrowWithElements(t *testing.T) {
 			})
 		}
 	}
+}
+
+func TestGroupSeqOrderedErrorIsLowestIndexAfterDeliveredPrefix(t *testing.T) {
+	eachStage(t, orderedStages, func(t *testing.T, run stageFunc) {
+		errA := errors.New("A: element 1")
+		errB := errors.New("B: element 2")
+		gates := [2]chan struct{}{make(chan struct{}), make(chan struct{})}
+		seq := run(t.Context(), 4, 4, func(_ context.Context, i int) (int, bool, error) {
+			switch i {
+			case 0:
+				<-gates[0]
+				return 100, true, nil
+			case 1:
+				<-gates[1]
+				return 0, false, errA
+			case 2:
+				return 0, false, errB
+			}
+			return i, true, nil
+		})
+		got := make(chan int, 4)
+		c := startStage(seq, func(r int) bool {
+			got <- r
+			return true
+		})
+		synctest.Wait()
+		if len(got) != 0 {
+			t.Fatalf("%d results delivered while the head element was pending", len(got))
+		}
+		close(gates[1])
+		synctest.Wait()
+		close(gates[0])
+		d := finished(t, c)
+		if !errors.Is(d.err, errA) || !slices.Equal(d.rs, []int{100}) {
+			t.Fatalf("rs = %v, err = %v, want [100], %v", d.rs, d.err, errA)
+		}
+	})
+}
+
+func TestGroupSeqOrderedFailureCancelsOnlyWhenItReachesTheHead(t *testing.T) {
+	eachStage(t, orderedStages, func(t *testing.T, run stageFunc) {
+		errBoom := errors.New("boom")
+		gate := make(chan struct{})
+		headSaw := make(chan error, 1)
+		tailSawCancel := make(chan struct{})
+		seq := run(t.Context(), 3, 3, func(ctx context.Context, i int) (int, bool, error) {
+			switch i {
+			case 0:
+				<-gate
+				headSaw <- ctx.Err()
+				return 0, true, nil
+			case 1:
+				return 0, false, errBoom
+			}
+			<-ctx.Done()
+			close(tailSawCancel)
+			return 0, false, ctx.Err()
+		})
+		c := startStage(seq, nil)
+		synctest.Wait()
+		select {
+		case <-tailSawCancel:
+			t.Fatal("the siblings were cancelled before the failure reached the head")
+		default:
+		}
+		close(gate)
+		d := finished(t, c)
+		if err := recv(t, headSaw); err != nil {
+			t.Fatalf("the head element saw %v, want no cancellation", err)
+		}
+		recv(t, tailSawCancel)
+		if !errors.Is(d.err, errBoom) || !slices.Equal(d.rs, []int{0}) {
+			t.Fatalf("rs = %v, err = %v, want [0], %v", d.rs, d.err, errBoom)
+		}
+	})
+}
+
+func TestGroupSeqOrderedFailureAtHeadCancelsLaterSiblings(t *testing.T) {
+	eachStage(t, orderedStages, func(t *testing.T, run stageFunc) {
+		errFirst := errors.New("first")
+		var sawCancel atomic.Int32
+		seq := run(t.Context(), 3, 3, func(ctx context.Context, i int) (int, bool, error) {
+			if i == 0 {
+				return 0, false, errFirst
+			}
+			<-ctx.Done()
+			sawCancel.Add(1)
+			return 0, false, ctx.Err()
+		})
+		d := finished(t, startStage(seq, nil))
+		synctest.Wait()
+		if !errors.Is(d.err, errFirst) || len(d.rs) != 0 || sawCancel.Load() != 2 {
+			t.Fatalf("rs = %v, err = %v, cancelled = %d, want none, %v, 2", d.rs, d.err, sawCancel.Load(), errFirst)
+		}
+	})
+}
+
+func TestGroupSeqOrderedEarlierPanicBeatsLaterError(t *testing.T) {
+	eachStage(t, orderedStages, func(t *testing.T, run stageFunc) {
+		errLater := errors.New("later")
+		gate := make(chan struct{})
+		seq := run(t.Context(), 3, 3, func(_ context.Context, i int) (int, bool, error) {
+			switch i {
+			case 1:
+				<-gate
+				panic("kapow")
+			case 2:
+				return 0, false, errLater
+			}
+			return i, true, nil
+		})
+		c := startStage(seq, nil)
+		synctest.Wait()
+		close(gate)
+		d := finished(t, c)
+		pe, ok := errors.AsType[*PanicError](d.err)
+		if !ok || pe.Value != "kapow" || len(pe.Stack) == 0 || !slices.Equal(d.rs, []int{0}) {
+			t.Fatalf("rs = %v, err = %v, want [0] and *PanicError holding kapow with a stack", d.rs, d.err)
+		}
+	})
+}
+
+func TestGroupSeqOrderedBreakBeforeFailureDiscardsIt(t *testing.T) {
+	eachStage(t, orderedStages, func(t *testing.T, run stageFunc) {
+		errLater := errors.New("later")
+		gate := make(chan struct{})
+		seq := run(t.Context(), 3, 3, func(_ context.Context, i int) (int, bool, error) {
+			switch i {
+			case 0:
+				<-gate
+				return 7, true, nil
+			case 1:
+				return 0, false, errLater
+			}
+			return i, true, nil
+		})
+		c := startStage(seq, func(int) bool { return false })
+		synctest.Wait()
+		close(gate)
+		d := finished(t, c)
+		if d.err != nil || d.pan != nil || !slices.Equal(d.rs, []int{7}) {
+			t.Fatalf("rs = %v, err = %v, panic = %v, want [7], nil, nil", d.rs, d.err, d.pan)
+		}
+	})
+}
+
+func TestGroupSeqOrderedPanicWaitsForTheHeadLikeAnError(t *testing.T) {
+	eachStage(t, orderedStages, func(t *testing.T, run stageFunc) {
+		gate := make(chan struct{})
+		seq := run(t.Context(), 2, 2, func(_ context.Context, i int) (int, bool, error) {
+			if i == 1 {
+				panic("kapow")
+			}
+			<-gate
+			return 7, true, nil
+		})
+		c := startStage(seq, nil)
+		synctest.Wait()
+		close(gate)
+		d := finished(t, c)
+		pe, ok := errors.AsType[*PanicError](d.err)
+		if !ok || pe.Value != "kapow" || len(pe.Stack) == 0 || !slices.Equal(d.rs, []int{7}) {
+			t.Fatalf("rs = %v, err = %v, want [7] and *PanicError holding kapow with a stack", d.rs, d.err)
+		}
+	})
+}
+
+func TestGroupSeqOrderedStopsPullingAfterFailure(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		errBoom := errors.New("boom")
+		var calls atomic.Int32
+		proceed := make(chan struct{})
+		gate := make(chan struct{})
+		src := func(yield func(int) bool) {
+			for i := range 3 {
+				if i == 2 {
+					<-proceed
+				}
+				if !yield(i) {
+					return
+				}
+			}
+		}
+		seq := GroupSeq(t.Context(), 4, src, func(_ context.Context, i int) (int, bool, error) {
+			calls.Add(1)
+			switch i {
+			case 0:
+				<-gate
+				return 0, true, nil
+			case 1:
+				return 0, false, errBoom
+			}
+			return i, true, nil
+		})
+		c := startStage(seq, nil)
+		synctest.Wait()
+		close(proceed)
+		synctest.Wait()
+		close(gate)
+		d := finished(t, c)
+		if n := calls.Load(); n != 2 || !errors.Is(d.err, errBoom) || !slices.Equal(d.rs, []int{0}) {
+			t.Fatalf("f ran %d times, rs = %v, err = %v, want 2, [0], %v", n, d.rs, d.err, errBoom)
+		}
+	})
+}
+
+func TestGroupChanOrderedStopsReceivingAfterFailure(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		errBoom := errors.New("boom")
+		gate := make(chan struct{})
+		ch := make(chan int)
+		seq := GroupChan(t.Context(), 4, ch, func(_ context.Context, i int) (int, bool, error) {
+			switch i {
+			case 0:
+				<-gate
+				return 0, true, nil
+			case 1:
+				return 0, false, errBoom
+			}
+			return i, true, nil
+		})
+		c := startStage(seq, nil)
+		ch <- 0
+		ch <- 1
+		synctest.Wait()
+		select {
+		case ch <- 2:
+			t.Fatal("a source element was taken after a failure was known")
+		default:
+		}
+		close(gate)
+		d := finished(t, c)
+		if !errors.Is(d.err, errBoom) || !slices.Equal(d.rs, []int{0}) {
+			t.Fatalf("rs = %v, err = %v, want [0], %v", d.rs, d.err, errBoom)
+		}
+	})
 }

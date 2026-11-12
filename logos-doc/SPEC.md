@@ -1096,7 +1096,9 @@ Children in flight plus finished results not yet consumed MUST NOT exceed `limit
 
 Each group stage MUST keep its own limit, including a stage inside a segment lambda. [T-206]
 
-A `?` in a segment lambda MUST fail the stage: the first failure in completion order MUST be the returned error and MUST cancel the siblings. [T-206]
+A `?` in a segment lambda MUST fail the stage. After `.unordered()` the first failure in completion order MUST be the returned error and MUST cancel the siblings at once. [T-206]
+
+In input order the returned error MUST be the failure of the lowest input index, every element before it MUST be delivered first and none after it, and the siblings MUST be cancelled when that failure reaches the head of the window; a panic in a segment lambda counts as the failure of its index. [T-206]
 
 A panic in a segment lambda MUST become `*logos/rt.PanicError`. [T-206]
 

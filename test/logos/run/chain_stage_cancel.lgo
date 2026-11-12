@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"iter"
 	"os"
+	"slices"
 	"sync/atomic"
 	"time"
 
@@ -54,6 +55,26 @@ func caseFirstFailureWins(ctx context.Context) {
 		enter()
 		defer leave()
 		v := x
+		if x != 0 {
+			v = <-never
+		}
+		return v
+	}).map(y => failOn(y, 0)?)
+	stop()
+	if err == nil {
+		check("cancel-first-failure-cancels-siblings", false, "no error", errFirst)
+	} else {
+		check("cancel-first-failure-cancels-siblings", errors.Is(err, errFirst) && !errors.Is(err, context.Canceled) && got == nil && live.Load() == 0, err, errFirst)
+	}
+}
+
+func caseUnorderedFirstFailureWins(ctx context.Context) {
+	never := make(chan int)
+	stop := watchdog("cancel-unordered-failure-cancels-earlier-siblings")
+	got, err := []int{0, 1, 2, 3}.group(ctx, limit = 4).unordered().map(x => {
+		enter()
+		defer leave()
+		v := x
 		if x != 2 {
 			v = <-never
 		}
@@ -61,10 +82,70 @@ func caseFirstFailureWins(ctx context.Context) {
 	}).map(y => failOn(y, 2)?)
 	stop()
 	if err == nil {
-		check("cancel-first-failure-cancels-siblings", false, "no error", errFirst)
+		check("cancel-unordered-failure-cancels-earlier-siblings", false, "no error", errFirst)
 	} else {
-		check("cancel-first-failure-cancels-siblings", errors.Is(err, errFirst) && !errors.Is(err, context.Canceled) && got == nil && live.Load() == 0, err, errFirst)
+		check("cancel-unordered-failure-cancels-earlier-siblings", errors.Is(err, errFirst) && !errors.Is(err, context.Canceled) && got == nil && live.Load() == 0, err, errFirst)
 	}
+}
+
+var errLater = errors.New("later")
+var fastFailed, slowFailed atomic.Int64
+
+func awaitCount(n *atomic.Int64, want int64) {
+	for n.Load() < want {
+		time.Sleep(time.Millisecond)
+	}
+}
+
+func plain(x int) (int, error) {
+	switch x {
+	case 0:
+		return 100, nil
+	case 1:
+		return 0, errFirst
+	}
+	return 0, errLater
+}
+
+func skewed(x int) (int, error) {
+	switch x {
+	case 0:
+		awaitCount(&slowFailed, 1)
+	case 1:
+		awaitCount(&fastFailed, 1)
+		slowFailed.Add(1)
+	default:
+		fastFailed.Add(1)
+	}
+	return plain(x)
+}
+
+func sequentialPlain(xs []int, got *[]int) error {
+	for _, x := range xs {
+		y, err := plain(x)
+		if err != nil {
+			return err
+		}
+		*got = append(*got, y)
+	}
+	return nil
+}
+
+func rangeSkewed(ctx context.Context, xs []int, got *[]int) error {
+	for y := range xs.group(ctx, limit = 3).map(x => skewed(x)?) {
+		*got = append(*got, y)
+	}
+	return nil
+}
+
+func caseOrderedErrorIsSequential(ctx context.Context) {
+	stop := watchdog("cancel-ordered-error-is-sequential")
+	xs := []int{0, 1, 2}
+	var want, got []int
+	errWant := sequentialPlain(xs, &want)
+	errGot := rangeSkewed(ctx, xs, &got)
+	stop()
+	check("cancel-ordered-error-is-sequential", errWant != nil && errors.Is(errGot, errWant) && slices.Equal(got, want) && slices.Equal(got, []int{100}), fmt.Sprint(got, errGot), fmt.Sprint(want, errWant))
 }
 
 func caseGroupPanic(ctx context.Context) {
@@ -218,6 +299,8 @@ func run(f func(context.Context)) {
 
 func main() {
 	run(caseFirstFailureWins)
+	run(caseUnorderedFirstFailureWins)
+	run(caseOrderedErrorIsSequential)
 	run(caseGroupPanic)
 	run(caseParentCancelled)
 	run(caseEarlyStopDiscardsLaterFailure)
