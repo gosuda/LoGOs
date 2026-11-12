@@ -72,6 +72,29 @@ func classify[T any](v T) string {
 	return "other"
 }
 
+func fill[T any](items []T) {
+	const switch T {
+	case int64:
+		for i := range items {
+			items[i] = 7
+		}
+	}
+}
+
+func store[T any](p *T) {
+	const switch T {
+	case int:
+		*p = 42
+	}
+}
+
+func mark[T any](m map[string]T) {
+	const switch T {
+	case int:
+		m["k"] = 5
+	}
+}
+
 func main() {
 	b, err := EncodeSlice([]byte("nums:"), []int64{1, 2, 3})
 	if err != nil {
@@ -92,6 +115,26 @@ func main() {
 	check("classify-named", classify(UserID(1)) == "tilde", classify(UserID(1)), "tilde")
 	check("classify-writer", classify(&bytes.Buffer{}) == "writer", classify(&bytes.Buffer{}), "writer")
 	check("classify-other", classify("s") == "other", classify("s"), "other")
+	ids := []int64{1, 2, 3}
+	fill(ids)
+	check("exact-slice-shared", fmt.Sprint(ids) == "[7 7 7]", ids, "[7 7 7]")
+	words := []string{"a", "b"}
+	fill(words)
+	check("exact-slice-other-type", fmt.Sprint(words) == "[a b]", words, "[a b]")
+	n := 0
+	store(&n)
+	check("exact-pointer-shared", n == 42, n, 42)
+	s := "x"
+	store(&s)
+	check("exact-pointer-other-type", s == "x", s, "x")
+	check("describe-interface-argument", describe[any](3) == "other", describe[any](3), "other")
+	m := map[string]int{}
+	mark(m)
+	got, ok := m["k"]
+	check("exact-map-shared", ok && got == 5, got, 5)
+	ms := map[string]string{}
+	mark(ms)
+	check("exact-map-other-type", len(ms) == 0, len(ms), 0)
 	if failed {
 		os.Exit(1)
 	}

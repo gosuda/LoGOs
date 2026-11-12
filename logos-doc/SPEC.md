@@ -980,7 +980,7 @@ An unlabeled `break` or `continue` directly in a `const switch` case MUST fail c
 
 Cases MUST evaluate top-down in first-match order. [T-205]
 
-Outside comptime generics a `const switch` MUST lower to a run-time type switch on `any((*T)(nil))` with `unsafe` rebinding for exact cases. [T-205]
+Outside comptime generics a `const switch` MUST pick its case at run time from the type argument `T` alone, never from the dynamic type of a value. In an exact case, a rebound slice, map, or pointer MUST still refer to the storage of the caller's value. [T-205]
 
 Interface cases in that form MUST use assertion on the value. [T-205]
 
@@ -1007,7 +1007,6 @@ const if comptime.IsStruct[T]() {
     }
 }
 ```
-An exact `const switch` case MUST lower to a run-time type switch with rebinding. [T-205]
 An interface case MUST assert on the value. [T-205]
 An exact case MUST rebind the value to the case type. [T-205]
 Expansion MUST include unexported fields only for the current package. [T-205]

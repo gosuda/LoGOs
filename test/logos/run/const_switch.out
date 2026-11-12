@@ -7,3 +7,10 @@ ok classify-int
 ok classify-named
 ok classify-writer
 ok classify-other
+ok exact-slice-shared
+ok exact-slice-other-type
+ok exact-pointer-shared
+ok exact-pointer-other-type
+ok describe-interface-argument
+ok exact-map-shared
+ok exact-map-other-type

@@ -17,9 +17,6 @@ stdout '^sw-keep: <nil>$'
 
 logos eject -o out
 exists out/main.go
-grep 'switch any\(\(\*T\)\(nil\)\)\.\(type\)' out/main.go
-grep 'case \*int64:' out/main.go
-grep 'Reinterpret\[\[\]int64\]\(&items\)' out/main.go
 grep 'any\(v\)\.\(io\.WriterTo\)\.WriteTo' out/main.go
 cd out
 go build ./...
