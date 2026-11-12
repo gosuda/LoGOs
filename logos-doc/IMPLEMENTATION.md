@@ -2676,6 +2676,14 @@ Anchor: Edward Tufte, Tony Hoare
 - Red-team rows: #210, #211, #212.
 - Docs: none.
 
+### M13-A-S6 Pin native target_cpu on a cross build
+Anchor: Tony Hoare, Claude Shannon, Dieter Rams
+- Attack: `src/cmd/go/testdata/script/logos_target_cpu_native.txt` MUST show the host level for `native` (the /proc/cpuinfo oracle), GOARM64 v8.0 for `GOARCH=arm64` on an amd64 host, and an explicit `GOAMD64=v2` or `GOARM64=v8.3` in the environment beating `native`, each through `go version -m` build settings.
+- Build: none (script only). `config.ArchLevels` reads `internal/cpu` for both architectures, and an architecture the host does not run reports no features, so it falls to its baseline; `settings.archLevels` leaves a level unset when the environment names one. SPEC 1.5 states both rules beside the `native` sentence.
+- Gate: `go test cmd/go -run 'TestScript/logos_target_cpu_native$'` MUST pass.
+- Red-team rows: none.
+- Docs: none.
+
 ### M13-A-S6 Pin the O2 inline budget between two functions
 Anchor: Edward Tufte, Tony Hoare
 - Attack: `test/logos/codegen/inline_levels_o2.lgo` and its plain Go twin `inline_levels_o2.go` hold two functions at `-O=2 -m=2`: `midCost`, cost 102, MUST inline, and `mediumCost`, cost 167, MUST NOT. They bracket the O2 budget of 120 from both sides. Before them only O1 and O3 had an inline-level fixture, so the O2 budget could move to any value with every errorcheck still passing. Raising the O2 `inlbudget` to 400, or lowering it to 80, in `src/cmd/go/internal/logos/settings/settings.go` turns the fixtures red.

@@ -369,6 +369,8 @@ Plain `go` MUST read no `target_cpu` and MUST keep the upstream `GOAMD64` and `G
 `deterministic` MUST set GOAMD64 v3 and GOARM64 v8.2 unless the environment already sets them [T-105].
 `baseline` MUST set GOAMD64 v1 and GOARM64 v8.0 [T-105].
 Host-specific selection MUST require `target_cpu = "native"`; `native` MUST pick the host level [T-105].
+For a target architecture other than the architecture of the build host, `native` MUST select that architecture's baseline level (GOAMD64 v1, GOARM64 v8.0), because the host CPU says nothing about it and a build for another architecture MUST NOT vary with the host CPU [T-105].
+An explicit GOAMD64 or GOARM64 in the environment MUST win over the level that `native` selects [T-105].
 The default binary MUST NOT run on x86 CPUs older than v3 [T-105].
 Self-aliased calls such as arr = Reverse(arr) MUST return correct results. [T-105]
 Recursive functions MUST NOT inline above that budget. [T-105][T-302]

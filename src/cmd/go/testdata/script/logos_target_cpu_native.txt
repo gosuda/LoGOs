@@ -10,6 +10,26 @@ logos build -o $WORK/native$GOEXE .
 exec go run ./cpulevel $WORK/native$GOEXE
 stdout 'native level match'
 
+env GOARCH=arm64
+logos build -o $WORK/native-arm64 .
+exec go version -m $WORK/native-arm64
+stdout 'GOARM64=v8\.0'
+env GOARCH=
+
+env GOAMD64=v2
+logos build -o $WORK/native-v2$GOEXE .
+exec go version -m $WORK/native-v2$GOEXE
+stdout 'GOAMD64=v2'
+env GOAMD64=
+
+env GOARCH=arm64
+env GOARM64=v8.3
+logos build -o $WORK/native-arm64-v83 .
+exec go version -m $WORK/native-arm64-v83
+stdout 'GOARM64=v8\.3'
+env GOARM64=
+env GOARCH=
+
 -- go.mod --
 module example.com/nativelvl
 
