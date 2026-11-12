@@ -38,6 +38,9 @@ ok cancel-wakes-pair
 ok cancel-wakes-decl
 ok cancel-wakes-select
 ok cancel-wakes-range
+ok cancel-wakes-filter-recv
+ok cancel-wakes-filter-send
+ok cancel-wakes-filter-range
 ok nested-stage
 ok try-form
 ok no-error-result

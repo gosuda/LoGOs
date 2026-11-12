@@ -635,6 +635,46 @@ func caseCancelRange(ctx context.Context) {
 	check("cancel-wakes-range", inTime() && timedOut(err), err, context.DeadlineExceeded)
 }
 
+func caseCancelFilterRecv(ctx context.Context) {
+	xs := []int{1, 2}
+	never, inTime := blocked()
+	short, cancel := shortly(ctx)
+	_, err := xs.group(short, limit = 2).filter(x => {
+		v := <-never
+		return v > x
+	})
+	cancel()
+	check("cancel-wakes-filter-recv", inTime() && timedOut(err), err, context.DeadlineExceeded)
+}
+
+func caseCancelFilterSend(ctx context.Context) {
+	xs := []int{1, 2}
+	sink := make(chan int)
+	inTime := rescued(func() { close(sink) })
+	short, cancel := shortly(ctx)
+	_, err := xs.group(short, limit = 2).filter(x => {
+		sink <- x
+		return true
+	})
+	cancel()
+	check("cancel-wakes-filter-send", inTime() && timedOut(err), err, context.DeadlineExceeded)
+}
+
+func caseCancelFilterRange(ctx context.Context) {
+	xs := []int{1, 2}
+	never, inTime := blocked()
+	short, cancel := shortly(ctx)
+	_, err := xs.group(short, limit = 2).filter(x => {
+		total := 0
+		for v := range never {
+			total += v
+		}
+		return total > x
+	})
+	cancel()
+	check("cancel-wakes-filter-range", inTime() && timedOut(err), err, context.DeadlineExceeded)
+}
+
 func total(ctx context.Context, xs, ys []int) (int, error) {
 	parts, err := xs.group(ctx, limit = 2).map(x => ys.group(ctx, limit = 3).map(y => x*y).sum()?)
 	if err != nil {
@@ -731,6 +771,9 @@ func main() {
 	run(caseCancelDecl)
 	run(caseCancelSelect)
 	run(caseCancelRange)
+	run(caseCancelFilterRecv)
+	run(caseCancelFilterSend)
+	run(caseCancelFilterRange)
 	run(caseForms)
 	if failed {
 		os.Exit(1)
