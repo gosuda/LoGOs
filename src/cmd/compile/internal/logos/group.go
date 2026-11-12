@@ -280,13 +280,14 @@ func (fc *funcLower) lowerGroupInline(s *syntax.GroupStmt) []syntax.Stmt {
 				}),
 		}), nil)),
 	}, nil)
-	fl.addT(headStart, braceOff+1, cat(
+	rebindText, rebindStmts := groupRebind(pos, s.Ctx, gctx)
+	fl.addT(headStart, braceOff, cat(
 		kept,
-		gen(g+", "+gctx+" := "+rtAlias+".NewGroup("),
+		gen("{\n"+g+", "+gctx+" := "+rtAlias+".NewGroup("),
 		ctxText,
 		gen(", "),
 		limitText,
-		gen(")\n_ = "+gctx+"\n"),
+		gen(")\n_ = "+gctx+"\n"+rebindText),
 		guardText,
 	))
 	header := defineOf(pos,
@@ -308,10 +309,32 @@ func (fc *funcLower) lowerGroupInline(s *syntax.GroupStmt) []syntax.Stmt {
 	rbrace := s.Body.Rbrace
 	joinNative, joinText, joinSubs := fc.groupJoinCheck(rbrace, top)
 	rbraceOff := fl.off(rbrace)
-	fl.addT(rbraceOff, rbraceOff, renderText(joinText, joinSubs))
-	fl.add(rbraceOff, rbraceOff+1, "")
-	out := append([]syntax.Stmt{header, blankUse, flagDef, guardDef}, s.Body.List...)
-	return append(out, joinNative...)
+	fl.addT(rbraceOff+1, rbraceOff+1, cat(gen("\n"), renderText(joinText, joinSubs), gen("}\n")))
+	out := append([]syntax.Stmt{header, blankUse}, rebindStmts...)
+	out = append(append(out, flagDef, guardDef, s.Body), joinNative...)
+	block := blockOf(pos, out)
+	block.Rbrace = rbrace
+	return []syntax.Stmt{block}
+}
+
+func groupRebind(pos syntax.Pos, ctx syntax.Expr, gctx string) (string, []syntax.Stmt) {
+	name, ok := plainContextName(ctx)
+	if !ok {
+		return "", nil
+	}
+	stmts := []syntax.Stmt{
+		defineOf(pos, []syntax.Expr{nameOf(pos, name)}, []syntax.Expr{nameOf(pos, gctx)}),
+		assignOf(pos, []syntax.Expr{nameOf(pos, "_")}, []syntax.Expr{nameOf(pos, name)}),
+	}
+	return name + " := " + gctx + "\n_ = " + name + "\n", stmts
+}
+
+func plainContextName(e syntax.Expr) (string, bool) {
+	name, ok := syntax.Unparen(e).(*syntax.Name)
+	if !ok || name.Value == "_" {
+		return "", false
+	}
+	return name.Value, true
 }
 
 func (fc *funcLower) groupPrefixJoin(pos syntax.Pos, top groupFrame, off int) []syntax.Stmt {

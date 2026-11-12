@@ -227,6 +227,9 @@ func (cg *chainGen) parChild(st *parStage) otext {
 	ps := p + "_ps"
 	rs := cg.spellType(st.resT)
 	parts := []otext{gen("func(" + parCtxName + " " + rtAlias + ".Context, " + ps + " " + cg.spellType(st.elemT) + ") (" + rs + ", bool, error) { ")}
+	if name, ok := plainContextName(st.ctx); ok {
+		parts = append(parts, gen(name+" := "+parCtxName+"; _ = "+name+"; "))
+	}
 	in := st.elemT
 	for i, op := range st.seg {
 		parts = append(parts, cg.parClosure(fmt.Sprintf("%s_c%d", p, i), op, in, st.segT[i]), gen("; "))

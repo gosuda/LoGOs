@@ -40,7 +40,9 @@ func (check *Checker) logosGroupStmt(ctxt stmtContext, s *syntax.GroupStmt) {
 		check.error(s.Ctx, WrongResultCount, logosGroupNeedsError)
 	}
 	check.logosGroup = append(check.logosGroup, logosGroupFrame{asig: check.sig})
+	check.openScope(s.Body, "group")
 	check.stmtList(ctxt, s.Body.List)
+	check.closeScope()
 	check.logosGroup = check.logosGroup[:len(check.logosGroup)-1]
 }
 

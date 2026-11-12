@@ -1061,6 +1061,8 @@ A user `select` with `default` MUST stay unchanged. [T-206]
 
 Cancellation MUST reach siblings blocked on channels. [T-206]
 
+When the context argument of a `go group` statement is a plain identifier, that identifier MUST denote the group context everywhere inside the block, in the children and in the statements between them, as if the block began with `g, ctx := rt.NewGroup(ctx, limit)`, and MUST denote the outer context again after the block; the names the block declares MUST end with the block. [T-206]
+
 When built by `logos`, a child blocked in netpoll-backed network I/O MUST wake within 100 ms with a timeout error satisfying `os.IsTimeout`. [T-206]
 
 In ejected code, cancellation MUST leave a child's blocked network I/O to complete on its own, and `Wait` MUST return once it completes. [T-206][T-0.3]
@@ -1081,6 +1083,10 @@ func f(ctx context.Context) error {
 A channel send, receive, or range directly in the `map` or `filter` lambda of a group stage segment, in any statement or expression position other than an operand of a select case, MUST wait on the cancellation of the stage like one directly in a group child, and `[correctness::unbounded_channel_op]` MUST NOT report it. [T-206]
 
 The same operation in a lambda after the segment, in a plain chain, in a function literal inside a segment lambda, in an operand of a select case, or in a lambda after a method named `group` that is not a stage MUST still be reported. [T-206]
+
+When the context argument of a group stage is a plain identifier, that identifier MUST denote the group context of the stage inside every `map` and `filter` lambda of the segment, and MUST denote the outer context in every lambda after the segment and in the rest of the function. [T-206]
+
+When the context argument of a `go group` statement or of a group stage is not a plain identifier, no name MUST be rebound: the names in the block and in the lambdas keep denoting the outer context, a call on that name is not cancelled by the group, and only the channel operations written directly in a child or segment lambda wait on the cancellation. [T-206]
 
 Results of a group stage MUST arrive in input order, and after `.unordered()` in completion order. [T-206]
 
