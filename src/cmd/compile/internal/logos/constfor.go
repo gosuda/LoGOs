@@ -1151,134 +1151,147 @@ func cfHasBinderBefore(body *syntax.BlockStmt, ref syntax.Node, name string, par
 	return false
 }
 
+type cfLeaf struct {
+	fl      *fileLower
+	run     *cfRun
+	active  cfChain
+	covered []span
+	parents map[syntax.Node]syntax.Node
+	out     []cfSub
+}
+
 // cfLeafSubs collects the leaf substitutions for active bindings in
 // body. Spans are base coordinates of ctx.
 func (fl *fileLower) cfLeafSubs(root syntax.Node, active cfChain, covered []span, run *cfRun) []cfSub {
-	var out []cfSub
-	ctx, sites := run.ctx, run.sites
-	parents := cfParents(root)
-	at := func(n syntax.Node) (int, int) {
-		return offAt(ctx.starts, syntax.StartPos(n)), cfExactEnd(ctx, n)
-	}
-	add := func(s, e int, text string) {
-		if e <= s || insideAny(span{start: s, end: e}, covered) {
-			return
-		}
-		for _, o := range out {
-			if o.start <= s && e <= o.end {
-				return
-			}
-		}
-		out = append(out, cfSub{s, e, text})
-	}
-	quoted := strconv.Quote
-	var visit func(syntax.Node) bool
-	visit = func(n syntax.Node) bool {
-		switch n := n.(type) {
-		case *syntax.ConstIfStmt:
-			if cfInConstFor(n, parents) {
-				return true
-			}
-			if live := fl.cfPruneConstIf(n, active, run, add); live != nil {
-				syntax.Inspect(live, visit)
-			}
-			return false
-		case *syntax.FieldProjExpr:
-			a := cfBindingFor(n.Field, active, parents)
-			if a == nil || a.index {
-				return true
-			}
-			_, xe := at(n.X)
-			_, e := at(n)
-			add(xe, e, "."+a.field.name)
-			return true
-		case *syntax.SelectorExpr:
-			xn, ok := n.X.(*syntax.Name)
-			if !ok {
-				return true
-			}
-			a := cfBindingFor(xn, active, parents)
-			if a == nil || a.index {
-				return true
-			}
-			s, e := at(n)
-			switch n.Sel.Value {
-			case "Name":
-				add(s, e, quoted(a.field.name))
-			case "Index":
-				add(s, e, strconv.Itoa(a.field.index))
-			case "Exported":
-				if a.field.exported {
-					add(s, e, "true")
-				} else {
-					add(s, e, "false")
-				}
-			case "Tag":
-				add(s, e, quoted(a.field.tag))
-			case "Type":
-				spelled, ok := fl.spellLowered(a.field.typ)
-				if !ok {
-					base.Fatalf("logos: cannot spell field type at %s", n.Pos().String())
-				}
-				add(s, e, spelled)
-			}
-			return true
-		case *syntax.CallExpr:
-			if fl.cfFoldTagGet(n, active, parents, at, add) {
-				return false
-			}
-			if fl.cfRuntimeTagGet(n, active, parents, at, add) {
-				return true
-			}
-			if v, ok := fl.logosLayoutCallValue(n, active, sites); ok {
-				s, e := cfCallSpan(ctx, n)
-				add(s, e, keepComments(ctx.buf.b, s, e, logosLayoutText(v)))
-				return false
-			}
-			if fl.cfFoldTypeOf(n, sites) {
-				s, e := cfCallSpan(ctx, n)
-				add(s, e, keepComments(ctx.buf.b, s, e, "struct{}{}"))
-				return false
-			}
-			if s, e, text, ok := fl.cfNestedSite(n, active, run); ok {
-				add(s, e, text)
-			}
-			return true
-		case *syntax.Name:
-			if s, e := at(n); insideAny(span{start: s, end: e}, covered) {
-				return true
-			}
-			if cfMarkerSub(n, parents, sites, at, add) {
-				return true
-			}
-			a := cfBindingFor(n, active, parents)
-			if a == nil || !a.index {
-				return true
-			}
-			p, ok := parents[n]
-			if !ok || cfBareSkip(n, p) {
-				return true
-			}
-			if cfAssignTarget(n, p) {
-				fl.cfError(sites.at(n.Pos()), "[comptime::const_for_assign] cannot assign to const for variable %s", n.Value)
-				return true
-			}
-			s, e := at(n)
-			add(s, e, strconv.Itoa(a.idx))
-			return true
-		case *syntax.AssignStmt:
-			fl.cfBlankAssign(n, active, parents, at, add)
-			return true
-		}
-		return true
-	}
-	syntax.Inspect(root, visit)
-	return out
+	c := &cfLeaf{fl: fl, run: run, active: active, covered: covered, parents: cfParents(root)}
+	syntax.Inspect(root, c.visit)
+	return c.out
 }
 
-// cfMarkerSub substitutes one marker name of a copy context by its
-// spelling and reports whether n is a marker.
-func cfMarkerSub(n *syntax.Name, parents map[syntax.Node]syntax.Node, sites *cfSites, at func(syntax.Node) (int, int), add func(int, int, string)) bool {
+func (c *cfLeaf) at(n syntax.Node) (int, int) {
+	return offAt(c.run.ctx.starts, syntax.StartPos(n)), cfExactEnd(c.run.ctx, n)
+}
+
+func (c *cfLeaf) add(s, e int, text string) {
+	if e <= s || insideAny(span{start: s, end: e}, c.covered) {
+		return
+	}
+	for _, o := range c.out {
+		if o.start <= s && e <= o.end {
+			return
+		}
+	}
+	c.out = append(c.out, cfSub{s, e, text})
+}
+
+func (c *cfLeaf) visit(n syntax.Node) bool {
+	switch n := n.(type) {
+	case *syntax.ConstIfStmt:
+		if cfInConstFor(n, c.parents) {
+			return true
+		}
+		if live := c.fl.cfPruneConstIf(n, c.active, c.run, c.add); live != nil {
+			syntax.Inspect(live, c.visit)
+		}
+		return false
+	case *syntax.FieldProjExpr:
+		c.subFieldProj(n)
+		return true
+	case *syntax.SelectorExpr:
+		c.subSelector(n)
+		return true
+	case *syntax.CallExpr:
+		return c.subCall(n)
+	case *syntax.Name:
+		c.subName(n)
+		return true
+	case *syntax.AssignStmt:
+		c.subBlankAssign(n)
+		return true
+	}
+	return true
+}
+
+func (c *cfLeaf) subFieldProj(n *syntax.FieldProjExpr) {
+	a := cfFieldBinding(n.Field, c.active, c.parents)
+	if a == nil {
+		return
+	}
+	_, xe := c.at(n.X)
+	_, e := c.at(n)
+	c.add(xe, e, "."+a.field.name)
+}
+
+func (c *cfLeaf) subSelector(n *syntax.SelectorExpr) {
+	a := cfFieldBinding(n.X, c.active, c.parents)
+	if a == nil {
+		return
+	}
+	s, e := c.at(n)
+	switch n.Sel.Value {
+	case "Name":
+		c.add(s, e, strconv.Quote(a.field.name))
+	case "Index":
+		c.add(s, e, strconv.Itoa(a.field.index))
+	case "Exported":
+		c.add(s, e, strconv.FormatBool(a.field.exported))
+	case "Tag":
+		c.add(s, e, strconv.Quote(a.field.tag))
+	case "Type":
+		spelled, ok := c.fl.spellLowered(a.field.typ)
+		if !ok {
+			base.Fatalf("logos: cannot spell field type at %s", n.Pos().String())
+		}
+		c.add(s, e, spelled)
+	}
+}
+
+func (c *cfLeaf) subCall(n *syntax.CallExpr) bool {
+	ctx, sites := c.run.ctx, c.run.sites
+	if matched, descend := c.subTagGet(n); matched {
+		return descend
+	}
+	if v, ok := c.fl.logosLayoutCallValue(n, c.active, sites); ok {
+		s, e := cfCallSpan(ctx, n)
+		c.add(s, e, keepComments(ctx.buf.b, s, e, logosLayoutText(v)))
+		return false
+	}
+	if c.fl.cfFoldTypeOf(n, sites) {
+		s, e := cfCallSpan(ctx, n)
+		c.add(s, e, keepComments(ctx.buf.b, s, e, "struct{}{}"))
+		return false
+	}
+	if s, e, text, ok := c.fl.cfNestedSite(n, c.active, c.run); ok {
+		c.add(s, e, text)
+	}
+	return true
+}
+
+func (c *cfLeaf) subName(n *syntax.Name) {
+	s, e := c.at(n)
+	if insideAny(span{start: s, end: e}, c.covered) {
+		return
+	}
+	if c.subMarker(n) {
+		return
+	}
+	a := cfBindingFor(n, c.active, c.parents)
+	if a == nil || !a.index {
+		return
+	}
+	p, ok := c.parents[n]
+	if !ok || cfBareSkip(n, p) {
+		return
+	}
+	if cfAssignTarget(n, p) {
+		c.fl.cfError(c.run.sites.at(n.Pos()), "[comptime::const_for_assign] cannot assign to const for variable %s", n.Value)
+		return
+	}
+	c.add(s, e, strconv.Itoa(a.idx))
+}
+
+func (c *cfLeaf) subMarker(n *syntax.Name) bool {
+	sites := c.run.sites
 	if sites == nil {
 		return false
 	}
@@ -1286,12 +1299,12 @@ func cfMarkerSub(n *syntax.Name, parents map[syntax.Node]syntax.Node, sites *cfS
 	if !ok {
 		return false
 	}
-	if p, ok := parents[n]; ok && cfBareSkip(n, p) {
+	if p, ok := c.parents[n]; ok && cfBareSkip(n, p) {
 		return true
 	}
 	if spelling, ok := resolve(); ok {
-		s, e := at(n)
-		add(s, e, spelling)
+		s, e := c.at(n)
+		c.add(s, e, spelling)
 	}
 	return true
 }
@@ -1316,6 +1329,18 @@ func cfBindingFor(ref *syntax.Name, active cfChain, parents map[syntax.Node]synt
 	return nil
 }
 
+func cfFieldBinding(x syntax.Expr, active cfChain, parents map[syntax.Node]syntax.Node) *cfActive {
+	xn, ok := x.(*syntax.Name)
+	if !ok {
+		return nil
+	}
+	a := cfBindingFor(xn, active, parents)
+	if a == nil || a.index {
+		return nil
+	}
+	return a
+}
+
 // cfWithin reports whether node lies under root.
 func cfWithin(node, root syntax.Node, parents map[syntax.Node]syntax.Node) bool {
 	for p := parents[node]; p != nil; p = parents[p] {
@@ -1326,56 +1351,28 @@ func cfWithin(node, root syntax.Node, parents map[syntax.Node]syntax.Node) bool 
 	return false
 }
 
-func (fl *fileLower) cfFoldTagGet(call *syntax.CallExpr, active cfChain, parents map[syntax.Node]syntax.Node, at func(syntax.Node) (int, int), add func(int, int, string)) bool {
+func (c *cfLeaf) subTagGet(call *syntax.CallExpr) (matched, descend bool) {
 	sel, ok := call.Fun.(*syntax.SelectorExpr)
 	if !ok || sel.Sel.Value != "Get" || len(call.ArgList) != 1 {
-		return false
+		return false, false
 	}
 	tx, ok := sel.X.(*syntax.SelectorExpr)
 	if !ok || tx.Sel.Value != "Tag" {
-		return false
+		return false, false
 	}
-	xn, ok := tx.X.(*syntax.Name)
-	if !ok {
-		return false
+	a := cfFieldBinding(tx.X, c.active, c.parents)
+	if a == nil {
+		return false, false
 	}
-	a := cfBindingFor(xn, active, parents)
-	if a == nil || a.index {
-		return false
+	if key, ok := c.fl.cfTagGetKey(call.ArgList[0]); ok {
+		s, e := c.at(call)
+		c.add(s, e, strconv.Quote(reflect.StructTag(a.field.tag).Get(key)))
+		return true, false
 	}
-	key, ok := fl.cfTagGetKey(call.ArgList[0])
-	if !ok {
-		return false
-	}
-	s, e := at(call)
-	add(s, e, strconv.Quote(reflect.StructTag(a.field.tag).Get(key)))
-	return true
-}
-
-func (fl *fileLower) cfRuntimeTagGet(call *syntax.CallExpr, active cfChain, parents map[syntax.Node]syntax.Node, at func(syntax.Node) (int, int), add func(int, int, string)) bool {
-	sel, ok := call.Fun.(*syntax.SelectorExpr)
-	if !ok || sel.Sel.Value != "Get" || len(call.ArgList) != 1 {
-		return false
-	}
-	tx, ok := sel.X.(*syntax.SelectorExpr)
-	if !ok || tx.Sel.Value != "Tag" {
-		return false
-	}
-	xn, ok := tx.X.(*syntax.Name)
-	if !ok {
-		return false
-	}
-	a := cfBindingFor(xn, active, parents)
-	if a == nil || a.index {
-		return false
-	}
-	if _, ok := fl.cfTagGetKey(call.ArgList[0]); ok {
-		return false
-	}
-	txs, txe := at(tx)
-	add(txs, txe, reflectAlias+".StructTag("+strconv.Quote(a.field.tag)+")")
-	fl.needReflect = true
-	return true
+	s, e := c.at(tx)
+	c.add(s, e, reflectAlias+".StructTag("+strconv.Quote(a.field.tag)+")")
+	c.fl.needReflect = true
+	return true, true
 }
 
 func (fl *fileLower) cfTagGetKey(e syntax.Expr) (string, bool) {
@@ -1416,8 +1413,7 @@ func (fl *fileLower) cfFoldTypeOf(call *syntax.CallExpr, sites *cfSites) bool {
 	return true
 }
 
-// cfBlankAssign deletes `_ = f` blank assignments over field variables.
-func (fl *fileLower) cfBlankAssign(s *syntax.AssignStmt, active cfChain, parents map[syntax.Node]syntax.Node, at func(syntax.Node) (int, int), add func(int, int, string)) {
+func (c *cfLeaf) subBlankAssign(s *syntax.AssignStmt) {
 	if s.Op != 0 {
 		return
 	}
@@ -1430,14 +1426,9 @@ func (fl *fileLower) cfBlankAssign(s *syntax.AssignStmt, active cfChain, parents
 	if !ok || ln.Value != "_" {
 		return
 	}
-	rn, ok := rhs[0].(*syntax.Name)
-	if !ok {
+	if cfFieldBinding(rhs[0], c.active, c.parents) == nil {
 		return
 	}
-	a := cfBindingFor(rn, active, parents)
-	if a == nil || a.index {
-		return
-	}
-	ss, se := at(s)
-	add(ss, se, "")
+	ss, se := c.at(s)
+	c.add(ss, se, "")
 }
