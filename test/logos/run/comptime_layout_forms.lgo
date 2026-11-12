@@ -41,8 +41,7 @@ type OptInt = int?
 type OptStr = string?
 type OptSlice = []int?
 type OptMap = (map[string]int)?
-type Callback = func()
-type OptFunc = Callback?
+type OptFunc = (func())?
 type OptNode = *Node?
 type OptShape = Shape?
 type OptMixed = Mixed?
@@ -53,11 +52,11 @@ type ViewSlice = const []int
 type ViewStr = const string
 type ViewRec = const Rec
 type ViewOpt = const int?
-type OptView = ViewSlice?
+type OptView = (const []int)?
 type Pair = (int, string)
-type PairOpt = (OptInt, OptStr)
+type PairOpt = (int?, string?)
 type DefPair (int, string)
-type DefPairOpt (OptInt, OptStr)
+type DefPairOpt (int?, string?)
 type Cells = [3]OptInt
 
 type twinOpt[T any] struct {
