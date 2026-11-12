@@ -35,6 +35,7 @@ import (
 	"net"
 	"os"
 	"runtime"
+	"time"
 
 	"logos/rt"
 )
@@ -90,6 +91,11 @@ func main() {
 		os.Exit(1)
 	}
 	defer srv.Close()
+	watch := time.AfterFunc(30*time.Second, func() {
+		fmt.Println("FAIL group-cgo-cancel-deadline: group with a blocked read did not finish within 30s")
+		os.Exit(1)
+	})
+	defer watch.Stop()
 	failed := make(chan struct{})
 	var tcpErr, cgoErr, regErr error
 	var cgoRes C.long
