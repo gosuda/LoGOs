@@ -493,14 +493,23 @@ func (fl *fileLower) spellLoweredBoth(t types2.Type, pos syntax.Pos) (native syn
 	return n, s, true
 }
 
+func (fl *fileLower) optSelectName(e *syntax.OptSelectExpr) string {
+	if o := fl.coeType(e.X); o != nil {
+		return tupleSelectionName(o.Elem, e.Sel.Value)
+	}
+	return e.Sel.Value
+}
+
 func (fl *fileLower) selectAccessBare(recv syntax.Expr, e *syntax.OptSelectExpr) (syntax.Expr, string) {
 	pos := e.Pos()
-	return fl.selectAccess(e, selOf(pos, recv, e.Sel.Value), "."+e.Sel.Value)
+	sel := fl.optSelectName(e)
+	return fl.selectAccess(e, selOf(pos, recv, sel), "."+sel)
 }
 
 func (fl *fileLower) selectAccessPresent(recv syntax.Expr, e *syntax.OptSelectExpr) (syntax.Expr, string) {
 	pos := e.Pos()
-	return fl.selectAccess(e, selOf(pos, selOf(pos, recv, "Value"), e.Sel.Value), ".Value."+e.Sel.Value)
+	sel := fl.optSelectName(e)
+	return fl.selectAccess(e, selOf(pos, selOf(pos, recv, "Value"), sel), ".Value."+sel)
 }
 
 func (fl *fileLower) selectAccess(e *syntax.OptSelectExpr, native syntax.Expr, suffix string) (syntax.Expr, string) {
@@ -1270,10 +1279,12 @@ func (fl *fileLower) lowerOptSelect(e *syntax.OptSelectExpr) syntax.Expr {
 	nx := fl.lowerOptReceiver(e.X)
 	bareRecv := types2.LogosOptionIsBare(ox.Elem)
 	accessRec := ro.Elem
-	if obj, _, _ := types2.LookupFieldOrMethod(ox.Elem, true, fl.pkg.tpkg, e.Sel.Value); obj != nil {
-		if fl.asOption(obj.Type()) != nil {
-			accessRec = ro
-		}
+	obj, _, _ := types2.LookupFieldOrMethod(ox.Elem, true, fl.pkg.tpkg, fl.optSelectName(e))
+	if obj == nil {
+		obj, _, _ = types2.LookupFieldOrMethod(tupleUnderlying(ox.Elem).Underlying(), true, fl.pkg.tpkg, fl.optSelectName(e))
+	}
+	if obj != nil && fl.asOption(obj.Type()) != nil {
+		accessRec = ro
 	}
 	recv := nameOf(pos, optTemp)
 	var acc syntax.Expr

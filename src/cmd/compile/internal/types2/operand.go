@@ -266,6 +266,8 @@ func compositeKind(typ Type) string {
 		return "chan"
 	case *Tuple:
 		return "tuple"
+	case *LogosTuple:
+		return "tuple"
 	case *Union:
 		return "union"
 	case *Option, *ConstView: // logos M3-S2, M5-S1 hook: loGo/s type kinds.

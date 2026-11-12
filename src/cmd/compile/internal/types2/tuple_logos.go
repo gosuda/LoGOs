@@ -53,6 +53,12 @@ func (t *LogosTuple) Underlying() Type { return t.under }
 func (t *LogosTuple) String() string { return TypeString(t, nil) }
 
 func logosAsTuple(T Type) *LogosTuple {
+	if T == nil {
+		return nil
+	}
+	if n, ok := Unalias(T).(*Named); ok {
+		T = n.Underlying()
+	}
 	if t, ok := Unalias(T).(*LogosTuple); ok {
 		return t
 	}
@@ -87,19 +93,8 @@ func logosTupleShaped(st *Struct) bool {
 	return true
 }
 
-func checkTupleStructIdentical(x *LogosTuple, y Type) bool {
-	st, ok := Unalias(y).(*Struct)
-	if !ok || st.NumFields() != x.Len() {
-		return false
-	}
-	under := x.Underlying().(*Struct)
-	for i := range x.Len() {
-		f, g := under.Field(i), st.Field(i)
-		if f.Name() != g.Name() || !Identical(f.Type(), g.Type()) {
-			return false
-		}
-	}
-	return true
+func (t *LogosTuple) underlyingStruct() *Struct {
+	return t.under
 }
 
 func (check *Checker) logosTupleType(e *syntax.TupleType, def *TypeName) Type {
@@ -132,8 +127,29 @@ func logosTupleFieldIndex(t *LogosTuple, sel string) int {
 	return -1
 }
 
+func logosTupleField(T Type, sel string) *Var {
+	if T == nil {
+		return nil
+	}
+	var st *Struct
+	if t := logosAsTuple(T); t != nil {
+		st = t.underlyingStruct()
+	} else {
+		st, _ = T.Underlying().(*Struct)
+		if st == nil || !logosTupleShaped(st) {
+			return nil
+		}
+	}
+	for _, f := range st.fields {
+		if f.name == "T_"+sel || f.name == sel {
+			return f
+		}
+	}
+	return nil
+}
+
 func (check *Checker) logosTupleSelect(x *operand, e *syntax.SelectorExpr) bool {
-	if !check.conf.Logos {
+	if !check.conf.Logos || x.mode() == typexpr {
 		return false
 	}
 	t := logosAsTuple(x.typ())
@@ -147,28 +163,22 @@ func (check *Checker) logosTupleSelect(x *operand, e *syntax.SelectorExpr) bool 
 		check.record(x)
 		return true
 	}
-	check.errorf(e.Sel, MissingFieldOrMethod, "undefined tuple field %s.%s", x.expr, e.Sel.Value)
-	x.invalidate()
-	return true
+	return false
 }
 
 func (check *Checker) logosImportedTupleSelect(x *operand, e *syntax.SelectorExpr) bool {
 	if !check.conf.Logos {
 		return false
 	}
-	st, ok := Unalias(x.typ()).(*Struct)
-	if !ok || !logosTupleShaped(st) {
+	if x.mode() == typexpr {
 		return false
 	}
-	want := "T_" + e.Sel.Value
-	for i := range st.NumFields() {
-		if st.Field(i).Name() == want {
-			x.mode_ = value
-			x.expr = e
-			x.typ_ = st.Field(i).Type()
-			check.record(x)
-			return true
-		}
+	if f := logosTupleField(x.typ(), e.Sel.Value); f != nil {
+		x.mode_ = value
+		x.expr = e
+		x.typ_ = f.Type()
+		check.record(x)
+		return true
 	}
 	return false
 }
@@ -220,21 +230,22 @@ func (check *Checker) logosTupleAssign(x *operand, T Type, context string) bool 
 		x.invalidate()
 		return true
 	}
-	if lit, ok := syntax.Unparen(x.expr).(*syntax.TupleLit); ok && len(lit.Elems) == len(targets) {
-		for i, elem := range lit.Elems {
-			var op operand
-			if !check.logosLambdaDefer(&op, elem) {
-				check.expr(nil, &op, elem)
-			}
-			check.assignment(&op, targets[i], context)
-		}
-		x.typ_ = T
-		check.record(x)
-		return true
+	lit, ok := syntax.Unparen(x.expr).(*syntax.TupleLit)
+	if !ok || len(lit.Elems) != len(targets) {
+		return false
 	}
-	for i := range targets {
-		op := operand{mode_: value, expr: x.expr, typ_: sources[i]}
+	valid := true
+	for i, elem := range lit.Elems {
+		var op operand
+		if !check.logosLambdaDefer(&op, elem) {
+			check.expr(nil, &op, elem)
+		}
 		check.assignment(&op, targets[i], context)
+		valid = valid && op.isValid()
+	}
+	if !valid {
+		x.invalidate()
+		return true
 	}
 	x.typ_ = T
 	check.record(x)

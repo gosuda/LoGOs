@@ -180,6 +180,13 @@ func comparableType(T Type, dynamic bool, seen map[Type]bool) *typeError {
 			}
 		}
 
+	case *LogosTuple:
+		for _, f := range t.underlyingStruct().fields {
+			if comparableType(f.typ, dynamic, seen) != nil {
+				return typeErrorf("tuple containing %s cannot be compared", f.typ)
+			}
+		}
+
 	case *Array:
 		if comparableType(t.elem, dynamic, seen) != nil {
 			return typeErrorf("%s cannot be compared", T)
@@ -290,18 +297,10 @@ func (c *comparer) identical(x, y Type, p *ifacePair) bool {
 		// and identical tags. Two embedded fields are considered to have the same
 		// name. Lower-case field names from different packages are always different.
 		if y, ok := y.(*Struct); ok {
-			if x.NumFields() == y.NumFields() {
-				for i, f := range x.fields {
-					g := y.fields[i]
-					if f.embedded != g.embedded ||
-						!c.ignoreTags && x.Tag(i) != y.Tag(i) ||
-						!f.sameId(g.pkg, g.name, false) ||
-						!c.identical(f.typ, g.typ, p) {
-						return false
-					}
-				}
-				return true
-			}
+			return c.structIdentical(x, y, p)
+		}
+		if y, ok := y.(*LogosTuple); ok {
+			return c.structIdentical(x, y.underlyingStruct(), p)
 		}
 
 	case *Pointer:
@@ -318,18 +317,10 @@ func (c *comparer) identical(x, y Type, p *ifacePair) bool {
 
 	case *LogosTuple: // logos M6-S5 hook: tuple identity is structural over names and elements.
 		if y, ok := y.(*LogosTuple); ok {
-			if x.Len() != y.Len() {
-				return false
-			}
-			for i := range x.Len() {
-				if x.Name(i) != y.Name(i) || !c.identical(x.Elem(i), y.Elem(i), p) {
-					return false
-				}
-			}
-			return true
+			return c.structIdentical(x.underlyingStruct(), y.underlyingStruct(), p)
 		}
-		if checkTupleStructIdentical(x, y) {
-			return true
+		if st, ok := y.(*Struct); ok {
+			return c.structIdentical(x.underlyingStruct(), st, p)
 		}
 
 	case *ConstView: // logos M5-S1 hook: const view identity is structural over elements.
@@ -537,6 +528,22 @@ func (c *comparer) identical(x, y Type, p *ifacePair) bool {
 func identicalOrigin(x, y *Named) bool {
 	// TODO(gri) is this correct?
 	return x.Origin().obj == y.Origin().obj
+}
+
+func (c *comparer) structIdentical(x, y *Struct, p *ifacePair) bool {
+	if x.NumFields() != y.NumFields() {
+		return false
+	}
+	for i, f := range x.fields {
+		g := y.fields[i]
+		if f.embedded != g.embedded ||
+			!c.ignoreTags && x.Tag(i) != y.Tag(i) ||
+			!f.sameId(g.pkg, g.name, false) ||
+			!c.identical(f.typ, g.typ, p) {
+			return false
+		}
+	}
+	return true
 }
 
 // identicalInstance reports if two type instantiations are identical.

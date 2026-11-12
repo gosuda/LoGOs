@@ -48,7 +48,11 @@ func walkSigQuals(sig *types2.Signature, object string, emitOpt, emitConst func(
 }
 
 func walkNamedQuals(name string, named *types2.Named, emitOpt, emitConst func(string, string)) {
-	switch u := named.Underlying().(type) {
+	u := named.Underlying()
+	if tuple, ok := u.(*types2.LogosTuple); ok {
+		u = tuple.Underlying()
+	}
+	switch u := u.(type) {
 	case *types2.Struct:
 		for i := range u.NumFields() {
 			f := u.Field(i)
@@ -109,6 +113,9 @@ func walkQualType(t types2.Type, path []string, object string, emitOpt, emitCons
 		return
 	}
 	u := types2.Unalias(t)
+	if tuple, ok := u.(*types2.LogosTuple); ok {
+		u = tuple.Underlying()
+	}
 	switch u := u.(type) {
 	case *types2.Slice:
 		walkQualType(u.Elem(), append(slices.Clone(path), "E"), object, emitOpt, emitConst, seen)

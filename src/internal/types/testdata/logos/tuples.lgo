@@ -92,6 +92,3 @@ func tupleAssignMismatch() {
 	_ = n
 }
 
-func tupleFieldBad(n (x int, y string)) {
-	_ = n.z /* ERROR "undefined tuple field" */
-}

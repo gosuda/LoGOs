@@ -121,12 +121,15 @@ func (check *Checker) logosSimdCall(x *operand, call *syntax.CallExpr) bool {
 		return false
 	}
 	var rx operand
-	check.expr(nil, &rx, sel.X)
+	check.exprOrType(&rx, sel.X, false)
 	if !rx.isValid() {
 		x.mode_ = invalid
 		x.expr = call
 		x.typ_ = Typ[Invalid]
 		return true
+	}
+	if rx.mode() == typexpr {
+		return false
 	}
 	if obj, _, _ := lookupFieldOrMethod(rx.typ(), rx.mode() == variable, check.pkg, method, false); obj != nil {
 		return false

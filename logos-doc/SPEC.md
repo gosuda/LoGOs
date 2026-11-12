@@ -865,11 +865,15 @@ Tuple types `(a A, b B)` and `(A, B)` in non-result positions MUST lower to stru
 
 Exported field names MUST keep tuple identity across packages. [T-204.1]
 
+A tuple and its lowered struct MUST have symmetric structural identity, including field names, element types, tags, and embedded-field status. A defined type over a tuple MUST follow Go's assignment and conversion rules: matching unnamed values MUST assign in both directions, while distinct defined types MUST require conversion. [T-204.1]
+
 A Go importer MUST see a tuple as that struct. [T-204.1][T-Sec5][R-U2]
 
 `var t (int, error)`, `chan (int, error)`, slices of tuples, and map values with tuple types MUST be allowed. [T-204.1]
 
 Named access such as `t.x` MUST work. [T-204.1]
+
+Named access MUST also work for defined tuple values and for `o?.x` when `o` is an option of that tuple type; optional selection MUST retain the usual option flattening rule. Positional tuple literals MUST check their elements against the target tuple type, including a defined tuple type or an option payload, without relaxing assignment between distinct defined types. [T-204.1]
 
 Index-style access such as `t.0` MUST NOT be allowed. [T-204.1]
 

@@ -221,12 +221,15 @@ func (check *Checker) logosChainCall(x *operand, call *syntax.CallExpr) bool {
 		return false
 	}
 	var rx operand
-	check.expr(nil, &rx, sel.X)
+	check.exprOrType(&rx, sel.X, false)
 	if !rx.isValid() {
 		x.mode_ = invalid
 		x.expr = call
 		x.typ_ = Typ[Invalid]
 		return true
+	}
+	if rx.mode() == typexpr {
+		return false
 	}
 	st, ok := check.logosChainSlice(&rx, sel.Sel.Value)
 	if !ok {

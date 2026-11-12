@@ -365,6 +365,7 @@ func (fl *fileLower) tupleTargetOfType(t types2.Type) ([]string, []types2.Type) 
 	if t == nil {
 		return nil, nil
 	}
+	t = tupleUnderlying(t)
 	if tup, ok := types2.Unalias(t).(*types2.LogosTuple); ok {
 		names := make([]string, tup.Len())
 		types := make([]types2.Type, tup.Len())
@@ -653,35 +654,44 @@ func sweepStructFields(v reflect.Value, reps map[syntax.Expr]syntax.Expr, innerF
 	}
 }
 
-func (fl *fileLower) lowerTupleSelect(e *syntax.SelectorExpr) {
-	base := fl.pkg.info.TypeOf(e.X)
-	if base == nil {
-		return
+func tupleUnderlying(t types2.Type) types2.Type {
+	t = types2.Unalias(t)
+	if n, ok := t.(*types2.Named); ok {
+		return n.Underlying()
 	}
-	sel := e.Sel.Value
-	if tup, ok := types2.Unalias(base).(*types2.LogosTuple); ok {
+	return t
+}
+
+func tupleSelectionName(t types2.Type, sel string) string {
+	if t == nil {
+		return sel
+	}
+	t = tupleUnderlying(t)
+	if tup, ok := t.(*types2.LogosTuple); ok {
 		for i := range tup.Len() {
 			if tup.Name(i) == sel || tupleLoweredName(tup.Name(i), i) == sel {
-				fl.renameTupleSel(e, tupleLoweredName(tup.Name(i), i))
-				return
+				return tupleLoweredName(tup.Name(i), i)
 			}
 		}
-		return
 	}
-	if st, ok := types2.Unalias(base).(*types2.Struct); ok && tupleStructShaped(st) {
+	if st, ok := t.(*types2.Struct); ok && tupleStructShaped(st) {
 		for i := range st.NumFields() {
 			if st.Field(i).Name() == sel {
-				return
+				return sel
 			}
 		}
 		want := "T_" + sel
 		for i := range st.NumFields() {
 			if st.Field(i).Name() == want {
-				fl.renameTupleSel(e, want)
-				return
+				return want
 			}
 		}
 	}
+	return sel
+}
+
+func (fl *fileLower) lowerTupleSelect(e *syntax.SelectorExpr) {
+	fl.renameTupleSel(e, tupleSelectionName(fl.pkg.info.TypeOf(e.X), e.Sel.Value))
 }
 
 func (fl *fileLower) renameTupleSel(e *syntax.SelectorExpr, want string) {
@@ -1072,7 +1082,9 @@ func (fl *fileLower) spellTupleStruct(pos syntax.Pos, names []string, types []ty
 				base.Fatalf("logos: tuple element type %s has no Go spelling", types[i].String())
 			}
 		}
-		text.WriteString(names[i] + " " + spelled)
+		text.WriteString(names[i])
+		text.WriteString(" ")
+		text.WriteString(spelled)
 	}
 	text.WriteString(" }")
 	st, ok := typeExprAt(text.String(), pos)

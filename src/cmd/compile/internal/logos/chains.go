@@ -588,6 +588,12 @@ func (fl *fileLower) isChainCall(e syntax.Expr) bool {
 	if !ok || sel.Sel == nil {
 		return false
 	}
+	if fl.pkg.info.Selections[sel] != nil {
+		return false
+	}
+	if tv, ok := fl.pkg.info.Types[sel.X]; ok && tv.IsType() {
+		return false
+	}
 	switch sel.Sel.Value {
 	case "filter", "map", "find", "any", "all", "sortBy",
 		"first", "last", "get", "take", "drop", "sum", "count":

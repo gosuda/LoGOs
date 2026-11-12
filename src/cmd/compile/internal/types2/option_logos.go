@@ -148,9 +148,14 @@ func (check *Checker) logosOptionAssign(x *operand, T Type, context string) bool
 		return true
 	}
 	if Topt != nil {
+		if _, ok := syntax.Unparen(x.expr).(*syntax.TupleLit); ok && Vopt == nil {
+			if check.logosTupleAssign(x, Topt.Elem, context) {
+				return true
+			}
+		}
 		return Identical(x.typ(), Topt.Elem) || Identical(x.typ(), T)
 	}
-	if Vopt != nil && Topt == nil && check.logosInGoCall() {
+	if Vopt != nil && check.logosInGoCall() {
 		if check.logosIsNonNilPointer(Vopt.Elem) && Identical(Vopt.Elem, T) {
 			return true
 		}
@@ -244,6 +249,11 @@ func (check *Checker) logosOptSelect(x *operand, e *syntax.OptSelectExpr) exprKi
 		return expression
 	}
 	obj, _, _ := lookupFieldOrMethod(opt.Elem, rx.mode() == variable, check.pkg, e.Sel.Value, false)
+	if obj == nil {
+		if f := logosTupleField(opt.Elem, e.Sel.Value); f != nil {
+			obj = f
+		}
+	}
 	if obj == nil {
 		alt, _, _ := lookupFieldOrMethod(opt.Elem, rx.mode() == variable, check.pkg, e.Sel.Value, true)
 		why := check.lookupError(opt.Elem, e.Sel.Value, alt, false)
