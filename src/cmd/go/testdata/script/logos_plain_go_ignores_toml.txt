@@ -17,6 +17,16 @@ env GOTOOLCHAIN=local
 [cgo] exec go version -m $WORK/plain_cpu$GOEXE
 [cgo] stdout 'GOAMD64=v1'
 
+env GOARCH=arm64
+env CGO_ENABLED=0
+cd arm
+logos build -o $WORK/arm_logos .
+go version -m $WORK/arm_logos
+stdout 'GOARM64=v8.2'
+go build -o $WORK/arm_plain .
+go version -m $WORK/arm_plain
+stdout 'GOARM64=v8.0'
+
 -- go.mod --
 module example.com/plain
 
@@ -72,3 +82,17 @@ import "C"
 import "fmt"
 
 func main() { fmt.Println(int(C.answer())) }
+
+-- arm/go.mod --
+module example.com/plainarm
+
+go 1.27
+
+-- arm/logos.toml --
+[build]
+target_cpu = "deterministic"
+
+-- arm/main.go --
+package main
+
+func main() {}
