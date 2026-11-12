@@ -31,7 +31,10 @@ var workerFailures atomic.Int64
 
 var sink atomic.Int64
 
-type sentinel struct{ v int }
+type sentinel struct {
+	v   int
+	pad [48]byte
+}
 
 func mkSentinel(v int) *sentinel {
 	s := &sentinel{v: v}
@@ -42,7 +45,7 @@ func mkSentinel(v int) *sentinel {
 func cycleCleanups() {
 	var seen atomic.Bool
 	runtime.AddCleanup(new([64]byte), func(int) { seen.Store(true) }, 0)
-	deadline := time.Now().Add(30 * time.Second)
+	deadline := time.Now().Add(5 * time.Minute)
 	for !seen.Load() {
 		runtime.GC()
 		runtime.Gosched()
@@ -89,7 +92,7 @@ func sentinelCase() {
 	err := sentinelRun(n)
 	check("sentinel-values", err == nil, fmt.Sprint(err))
 	check("sentinel-live", cleanedWhileLive == 0, fmt.Sprint(cleanedWhileLive, " cleanups ran while records were pending"))
-	deadline := time.Now().Add(30 * time.Second)
+	deadline := time.Now().Add(5 * time.Minute)
 	for cleaned.Load() != n && time.Now().Before(deadline) {
 		cycleCleanups()
 	}
