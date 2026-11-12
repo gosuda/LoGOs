@@ -54,6 +54,10 @@ type BinaryOptPlain struct {
 	Y int64  `json:"y"`
 }
 
+type BinaryManyKeys struct {
+	M map[string]int32 `json:"m"`
+}
+
 type BinaryEvery struct {
 	B bool `json:"b"`
 	I int `json:"i"`
@@ -158,6 +162,7 @@ func roundTripEvery(v BinaryEvery) error {
 }
 
 func layout() error {
+	if err := mapOrder(); err != nil { return err }
 	var six int64? = 6
 	v := BinaryRecord{I: 0x0102030405060708, F32: 1.5, F64: -2.25, OK: true, Text: "x", Raw: []byte{0xaa}, Nums: []int64{3}, Pair: [2]uint16{4, 5}, Labels: map[string]int32{"z": 9, "a": 7}, Inner: BinaryInner{Flag: true}, Maybe: six}
 	got, err := v.MarshalBinary()
@@ -178,6 +183,22 @@ func layout() error {
 	want = append(want, 1, 1)
 	want = binary.LittleEndian.AppendUint64(want, 6)
 	if !bytes.Equal(got, want) { return fmt.Errorf("layout bytes %x, want %x", got, want) }
+	return nil
+}
+
+func mapOrder() error {
+	v := BinaryManyKeys{M: map[string]int32{}}
+	for i := 15; i >= 0; i-- {
+		v.M[fmt.Sprintf("k%02d", i)] = int32(i)
+	}
+	got, err := v.MarshalBinary()
+	if err != nil { return err }
+	want := []byte{1, 16}
+	for i := range 16 {
+		want = append(want, 3, 'k', byte('0'+i/10), byte('0'+i%10))
+		want = binary.LittleEndian.AppendUint64(want, uint64(i))
+	}
+	if !bytes.Equal(got, want) { return fmt.Errorf("map entries %x, want ascending key order %x", got, want) }
 	return nil
 }
 
