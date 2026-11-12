@@ -47,6 +47,21 @@ exec sh -c 'cat $WORK/cfg.base > $WORK/cfg.bad2; echo packagefile example.com/fo
 stdout 'app/main\.lgo:10:14: .*example\.com/forge/lib\.C\.M\[0\]'
 ! stdout 'internal compiler error'
 
+mkdir $WORK/m3
+cd $WORK/m3
+go tool pack x $WORK/lib.a
+cd $SRC
+exec sed 's/^\(constmap C [0-9]* \)\.M$/\1.Missing/' $WORK/facts.orig
+rm $WORK/m3/__.LOGOS
+cp stdout $WORK/m3/__.LOGOS
+cd $WORK/m3
+go tool pack c $WORK/bad3.a __.PKGDEF __.LOGOS _go_.o
+cd $SRC
+exec sh -c 'cat $WORK/cfg.base > $WORK/cfg.bad3; echo packagefile example.com/forge/lib=$WORK/bad3.a >> $WORK/cfg.bad3'
+! go tool compile -p main -importcfg $WORK/cfg.bad3 -o $WORK/bad3.o app/main.lgo
+stdout '^app/main\.lgo:10:14: '
+! stdout 'internal compiler error'
+
 -- lib/lib.lgo --
 package lib
 
