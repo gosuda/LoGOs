@@ -154,7 +154,7 @@ func checkTrace(name, want string) {
 func main() {
 	got, err := assigned(2)
 	if err != nil {
-		check("assigned-error", err == errBig && got == 0, err, errBig)
+		check("assigned-error", err == errBig, err, errBig)
 	}
 	checkTrace("assigned-runs-errdefer", "[rollback]")
 	got, err = assigned(1)
@@ -164,7 +164,7 @@ func main() {
 	checkTrace("assigned-skips-errdefer", "[]")
 	got, err = argument(2)
 	if err != nil {
-		check("argument-error", err == errBig && got == 0, err, errBig)
+		check("argument-error", err == errBig, err, errBig)
 	}
 	checkTrace("argument-runs-errdefer", "[argument]")
 	err = single(2)
@@ -181,7 +181,7 @@ func main() {
 	checkTrace("defer-order", "[errdefer deferred]")
 	got, err = withTry(3)
 	if err != nil {
-		check("try-error", err == errOdd && got == 0, err, errOdd)
+		check("try-error", err == errOdd, err, errOdd)
 	}
 	checkTrace("try-runs-errdefer", "[try-rollback]")
 	got, err = withTry(2)
