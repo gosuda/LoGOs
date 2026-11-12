@@ -184,6 +184,9 @@ type logosFieldBinding struct {
 var logosFieldValueSels = []string{"Name", "Index", "Tag", "Exported"}
 
 func (check *Checker) logosConstForIndexValue(x *operand, obj Object) {
+	if check.logosPred.depth > 0 {
+		return
+	}
 	if n := len(check.logosLHS); n > 0 && check.logosLHS[n-1] == obj {
 		return
 	}
