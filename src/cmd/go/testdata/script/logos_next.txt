@@ -106,6 +106,10 @@ grep 'example\.com/dep/greet' main.lgo
 
 cmp plain.lgo $WORK/plain.go.orig
 cmp convert_test.lgo $WORK/convert_test.go.orig
+cmp main.lgo $GOPATH/src/want/main.lgo
+cmp convert.lgo $GOPATH/src/want/convert.lgo
+cmp loop.lgo $GOPATH/src/want/loop.lgo
+cmp tail.lgo $GOPATH/src/want/tail.lgo
 
 logos build ./...
 logos test ./...
