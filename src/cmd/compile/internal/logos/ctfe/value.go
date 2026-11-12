@@ -1109,6 +1109,9 @@ func (e *evaluator) indexPlace(fr *frame, ix *syntax.IndexExpr) (place, error) {
 			if k, err = e.convertElem(k, keyT, posOf(ix.Index)); err != nil {
 				return place{}, err
 			}
+			if isNaNKey(k) {
+				return place{}, &Error{Code: CodeEval, Detail: "NaN is not a valid const map key", Pos: posOf(ix)}
+			}
 			for i := len(fr.scopes) - 1; i >= 0; i-- {
 				if _, ok := fr.scopes[i][base.Value]; ok {
 					idx := i
@@ -1127,9 +1130,6 @@ func (e *evaluator) indexPlace(fr *frame, ix *syntax.IndexExpr) (place, error) {
 						},
 						set: func(v Value) {
 							cur := fr.scopes[idx][name]
-							if isNaNKey(k) {
-								return
-							}
 							kk := e.canonKey(k)
 							for i, ek := range cur.mval.keys {
 								if eq, _ := e.equal(ek, kk, posOf(ix)); eq {
