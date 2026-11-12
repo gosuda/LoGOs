@@ -303,6 +303,13 @@ func big(xs []int) []int {
 	return xs.filter(x => x > 0).map(x => 2 * x).take(5)
 }
 ```
+`src.group(ctx, limit = N)` MUST open a parallel segment of a chain when `src` is a slice, an array, an `iter.Seq[T]`, a receive channel, or a named type of one of those, and has no field or method named `group` [T-104.6].
+`ctx` MUST be a `context.Context`, and `limit = N` MUST follow it with `N` of type `int`; a missing limit, a positional limit, a limit of another type, or a third argument MUST fail compilation [T-104.6].
+A call argument of the form `name = value` MUST fail with `[correctness::named_argument]`, except `limit = N` in a stage call [T-104.6].
+`.unordered()` MUST be allowed only directly after `group` [T-104.6].
+The segment MUST be every `map` and `filter` call directly after `group` or `.unordered()`, and a stage with none MUST fail compilation [T-104.6].
+As a value, a stage chain MUST have type `(R, error)`, where `R` is the type the same chain has without the stage, and that form MUST be legal in a function with no error result; `?` on it MUST propagate the error as for any `?` [T-104.6].
+As the range expression of a `for` statement with at most one iteration variable, a stage chain MUST yield its results one at a time, only `map` and `filter` MAY follow the stage, and the enclosing function MUST have an error result or the statement MUST fail with `[correctness::group_needs_error_result]` [T-104.6].
 A function whose single result is `iter.Seq[T]` or `iter.Seq2[K, V]` MUST be a generator function [T-104.8].
 `yield e` MUST be a statement, allowed only directly inside a generator function [T-104.8][T-0.2].
 A `yield` elsewhere MUST fail with `correctness::yield_outside_generator` [T-104.8].
