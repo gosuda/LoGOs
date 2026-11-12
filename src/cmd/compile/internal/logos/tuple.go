@@ -738,13 +738,9 @@ func (fl *fileLower) lowerTupleUnpackStmt(s *syntax.AssignStmt, lhs []syntax.Exp
 		if len(lit.Elems) != len(lhs) {
 			return nil
 		}
-		var texts []otext
 		split := fl.tupleSplit(lit.Pos(), len(lit.Elems))
-		for i := range lit.Elems {
-			texts = append(texts, fl.lazyText(split.args[i]))
-		}
 		start, end := extendParens(fl.src, fl.off(syntax.StartPos(r)), split.end)
-		fl.addT(start, end, joinO(texts, ", "))
+		fl.cutTupleLit(start, end, split, otext{}, otext{})
 		s.Rhs = listOf(s.Pos(), append([]syntax.Expr{}, lit.Elems...))
 		return nil
 	}
@@ -810,13 +806,9 @@ func (fl *fileLower) lowerTupleReturnStmt(s *syntax.ReturnStmt) []syntax.Stmt {
 	}
 	pos := s.Pos()
 	if lit, ok := r.(*syntax.TupleLit); ok && fl.returnsArity(len(lit.Elems)) {
-		var texts []otext
 		split := fl.tupleSplit(lit.Pos(), len(lit.Elems))
-		for i := range lit.Elems {
-			texts = append(texts, fl.lazyText(split.args[i]))
-		}
 		start, end := extendParens(fl.src, fl.off(syntax.StartPos(r)), split.end)
-		fl.addT(start, end, joinO(texts, ", "))
+		fl.cutTupleLit(start, end, split, otext{}, otext{})
 		s.Results = listOf(pos, append([]syntax.Expr{}, lit.Elems...))
 		return nil
 	}
@@ -973,15 +965,9 @@ func (fl *fileLower) lowerTupleLitTargeted(lit *syntax.TupleLit, names []string,
 		fl.lowerTupleNestedExprTargeted(e, subNames, subTypes)
 	}
 	pos := lit.Pos()
-	vals := make([]syntax.Expr, len(lit.Elems))
-	texts := make([]otext, len(lit.Elems))
 	split := fl.tupleSplit(pos, len(lit.Elems))
-	for i, e := range lit.Elems {
-		vals[i] = e
-		texts[i] = fl.lazyText(split.args[i])
-	}
-	comp, compText := fl.tupleComposite(pos, names, types, vals, texts)
-	fl.addT(fl.off(syntax.StartPos(lit)), split.end, compText)
+	comp, head := fl.tupleLiteral(pos, names, types, slices.Clone(lit.Elems))
+	fl.cutTupleLit(fl.off(syntax.StartPos(lit)), split.end, split, gen(head), gen("}"))
 	replaceTupleExpr(fl.file, lit, comp)
 }
 
@@ -997,11 +983,21 @@ func (fl *fileLower) lowerTupleNestedExprTargeted(e syntax.Expr, names []string,
 }
 
 func (fl *fileLower) tupleComposite(pos syntax.Pos, names []string, types []types2.Type, vals []syntax.Expr, texts []otext) (*syntax.CompositeLit, otext) {
+	comp, head := fl.tupleLiteral(pos, names, types, vals)
+	return comp, cat(gen(head), joinO(texts, ", "), gen("}"))
+}
+
+func (fl *fileLower) tupleLiteral(pos syntax.Pos, names []string, types []types2.Type, vals []syntax.Expr) (*syntax.CompositeLit, string) {
 	st, structText := fl.spellTupleStruct(pos, names, types)
 	comp := &syntax.CompositeLit{Type: st, Rbrace: pos}
 	comp.SetPos(pos)
 	comp.ElemList = vals
-	return comp, cat(gen(structText+"{"), joinO(texts, ", "), gen("}"))
+	return comp, structText + "{"
+}
+
+func (fl *fileLower) cutTupleLit(start, end int, split callSplit, head, tail otext) {
+	fl.addT(start, split.args[0].start, head)
+	fl.addT(split.args[len(split.args)-1].end, end, tail)
 }
 
 func (fl *fileLower) spellTupleStruct(pos syntax.Pos, names []string, types []types2.Type) (syntax.Expr, string) {
