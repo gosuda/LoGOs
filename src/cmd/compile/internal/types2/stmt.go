@@ -488,7 +488,9 @@ func (check *Checker) stmt(ctxt stmtContext, s syntax.Stmt) {
 	case *syntax.SendStmt:
 		var ch, val operand
 		check.expr(nil, &ch, s.Chan)
-		check.genericExpr(&val, s.Value, nil)
+		if !check.logosLambdaDefer(&val, s.Value) {
+			check.genericExpr(&val, s.Value, nil)
+		}
 		if !ch.isValid() || !val.isValid() {
 			return
 		}

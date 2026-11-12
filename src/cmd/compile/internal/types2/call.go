@@ -331,7 +331,6 @@ func (check *Checker) callExpr(x *operand, call *syntax.CallExpr) exprKind {
 
 	// evaluate arguments
 	sig = check.logosHotUpdateSig(call, sig) // logos M8-S5 hook: sync.Hot.Update takes func(const *T) *T.
-	check.logosLambdaCallArgs(call, sig)     // logos M6-S6 hook: lambdas against parameter types.
 	args, atargs := check.genericExprList(call.ArgList)
 	sig = check.arguments(call, sig, targs, xlist, args, atargs)
 	check.logosRecordRecvMethodCall(call)
@@ -445,7 +444,7 @@ func (check *Checker) genericExprList(elist []syntax.Expr) (resList []*operand, 
 			resList = []*operand{&x}
 		} else {
 			// x is not a function instantiation (it may still be a generic function).
-			if !check.logosLambdaPrechecked(&x, e) { // logos M6-S6 hook.
+			if !check.logosLambdaDefer(&x, e) {
 				check.rawExpr(nil, &x, e, nil, true)
 				check.exclude(&x, 1<<novalue|1<<builtin|1<<typexpr)
 			}
@@ -479,7 +478,7 @@ func (check *Checker) genericExprList(elist []syntax.Expr) (resList []*operand, 
 					// use the usual expression evaluators.
 					check.record(&x)
 				}
-			} else if !check.logosLambdaPrechecked(&x, e) { // logos M6-S6 hook.
+			} else if !check.logosLambdaDefer(&x, e) {
 				// x is exactly one value (possibly invalid or uninstantiated generic function).
 				check.genericExpr(&x, e, nil)
 			}
@@ -695,6 +694,9 @@ func (check *Checker) arguments(call *syntax.CallExpr, sig *Signature, targs []T
 	// check arguments
 	if len(args) > 0 {
 		context := check.sprintf("argument to %s", call.Fun)
+		for i, a := range args {
+			check.logosLambdaResolve(a, sigParams.vars[i].typ)
+		}
 		check.logosPushGoCall(call) // logos M3-S5 hook.
 		if n > 0 {
 			check.logosPushGenericArgs(targs) // logos M3-S5 hook.

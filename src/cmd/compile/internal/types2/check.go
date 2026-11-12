@@ -169,7 +169,6 @@ type Checker struct {
 	logosFuncSigs       []*Signature                    // logos hook: enclosing function signature stack (funcBody)
 	logosDerivedVar     map[*Var]bool                   // logos M3-S5 hook: inferred vars holding Go-derived values.
 	logosDerivedExpr    map[syntax.Expr]bool            // logos M3-S5 hook: synthetic tuple dummies from Go/generic calls.
-	logosLambdaDone     map[syntax.Expr]Type            // logos M6-S6 hook: call arguments checked as lambdas, with types.
 	logosGoCall         []bool                          // logos M3-S5 hook: Go-callee argument scope stack.
 	logosGenericCall    []logosGenericScope             // logos M3-S5 hook: generic-callee argument scope stack.
 	logosGoStore        []bool                          // logos M3-S5 hook: assignment-LHS Go-location suppression stack.
@@ -182,6 +181,7 @@ type Checker struct {
 	logosFieldBind      *logosFieldBinding              // logos M7-S2 hook: per-iteration field meaning over concrete structs.
 	logosConstForBudget int
 	logosConstForDepth  int
+	logosLambdaPending  map[*syntax.LambdaExpr]bool
 	logosPred           logosPredState           // logos M7-S3 hook: `const if` condition context for comptime predicates.
 	methods             map[*TypeName][]*Func    // maps package scope type names to associated non-blank (non-interface) methods
 	untyped             map[syntax.Expr]exprInfo // map of expressions without final type

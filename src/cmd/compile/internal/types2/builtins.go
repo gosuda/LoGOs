@@ -50,7 +50,9 @@ func (check *Checker) builtin(x *operand, call *syntax.CallExpr, id builtinId) (
 	switch id {
 	default:
 		// check all arguments
-		args = check.exprList(argList)
+		if !check.logosAppendArgs(id, argList, &args) {
+			args = check.exprList(argList)
+		}
 		nargs = len(args)
 		for _, a := range args {
 			if !a.isValid() {

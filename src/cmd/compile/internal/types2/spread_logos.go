@@ -43,7 +43,9 @@ func (check *Checker) logosSpreadLiteral(x *operand, e *syntax.CompositeLit, uty
 			continue
 		}
 		key, _ := kv.Key.(*syntax.Name)
-		check.genericExpr(x, kv.Value, nil)
+		if !check.logosLambdaDefer(x, kv.Value) {
+			check.genericExpr(x, kv.Value, nil)
+		}
 		if key == nil {
 			check.errorf(kv, InvalidLitField, "invalid field name %s in struct literal", kv.Key)
 			ok = false

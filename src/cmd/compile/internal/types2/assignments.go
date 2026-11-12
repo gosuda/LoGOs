@@ -19,6 +19,7 @@ import (
 // Use T == nil to indicate assignment to an untyped blank identifier.
 // If the assignment check fails, x.mode is set to invalid.
 func (check *Checker) assignment(x *operand, T Type, context string) {
+	check.logosLambdaResolve(x, T)
 	check.singleValue(x)
 
 	switch x.mode() {

@@ -11,81 +11,72 @@ import (
 
 const logosLambdaNeedsTarget = "[correctness::lambda_needs_target] lambda needs a target function type"
 
-func (check *Checker) logosLambdaPrechecked(x *operand, e syntax.Expr) bool {
+func (check *Checker) logosLambdaDefer(x *operand, e syntax.Expr) bool {
 	if !check.conf.Logos {
 		return false
 	}
-	t, ok := check.logosLambdaDone[syntax.Unparen(e)]
+	lam, ok := syntax.Unparen(e).(*syntax.LambdaExpr)
 	if !ok {
 		return false
 	}
-	x.mode_ = value
+	x.mode_ = nilvalue
 	x.expr = e
-	x.typ_ = t
-	check.record(x)
+	x.typ_ = Typ[UntypedNil]
+	x.val = nil
+	if check.logosLambdaPending == nil {
+		check.logosLambdaPending = make(map[*syntax.LambdaExpr]bool)
+	}
+	check.logosLambdaPending[lam] = true
+	check.later(func() {
+		if check.logosLambdaPending[lam] {
+			delete(check.logosLambdaPending, lam)
+			check.logosLambdaNoTarget(lam)
+		}
+	})
 	return true
 }
 
-func (check *Checker) logosLambdaCallArgs(call *syntax.CallExpr, sig *Signature) {
-	if !check.conf.Logos || sig.TypeParams().Len() > 0 {
+func (check *Checker) logosLambdaResolve(x *operand, T Type) {
+	if x.mode_ != nilvalue {
 		return
 	}
-	targets := check.lambdaArgTargets(call, sig)
-	for i, arg := range call.ArgList {
-		lam, ok := syntax.Unparen(arg).(*syntax.LambdaExpr)
-		if !ok || i >= len(targets) || targets[i] == nil {
-			continue
-		}
-		psig, ok := targets[i].(*Signature)
-		if !ok || psig.TypeParams().Len() > 0 {
-			continue
-		}
-		var op operand
-		if check.logosLambdaTargeted(&op, psig, lam); op.isValid() {
-			if check.logosLambdaDone == nil {
-				check.logosLambdaDone = make(map[syntax.Expr]Type)
-			}
-			check.logosLambdaDone[arg] = op.typ()
-		}
+	lam, ok := syntax.Unparen(x.expr).(*syntax.LambdaExpr)
+	if !ok || !check.logosLambdaPending[lam] {
+		return
+	}
+	delete(check.logosLambdaPending, lam)
+	e := x.expr
+	t := newTarget(T, "")
+	if t == nil {
+		check.logosLambdaNoTarget(lam)
+		x.invalidate()
+		return
+	}
+	check.logosLambdaTargeted(x, t.sig, lam)
+	if x.isValid() {
+		x.expr = e
+		check.record(x)
 	}
 }
 
-func (check *Checker) lambdaArgTargets(call *syntax.CallExpr, sig *Signature) []Type {
-	n := len(call.ArgList)
-	targets := make([]Type, n)
-	params := sig.params
-	dots := hasDots(call)
-	for i := range targets {
-		targets[i] = lambdaParamTarget(params, sig.variadic, dots, n, i)
-	}
-	return targets
+func (check *Checker) logosLambdaNoTarget(lam *syntax.LambdaExpr) {
+	check.errorf(lam.Arrow, IncompatibleAssign, "%s", logosLambdaNeedsTarget)
 }
 
-func lambdaParamTarget(params *Tuple, variadic, dots bool, nargs, i int) Type {
-	if params == nil {
-		return nil
+func (check *Checker) logosAppendArgs(id builtinId, argList []syntax.Expr, args *[]*operand) bool {
+	if !check.conf.Logos || id != _Append || len(argList) < 2 {
+		return false
 	}
-	if !variadic {
-		if i < params.Len() {
-			return params.At(i).Type()
+	list := make([]*operand, len(argList))
+	for i, e := range argList {
+		var x operand
+		if !check.logosLambdaDefer(&x, e) {
+			check.expr(nil, &x, e)
 		}
-		return nil
+		list[i] = &x
 	}
-	if dots {
-		if params.Len() == 1 {
-			return params.At(0).Type()
-		}
-		return nil
-	}
-	if i < params.Len()-1 {
-		return params.At(i).Type()
-	}
-	if params.Len() > 0 {
-		if s, ok := params.At(params.Len() - 1).Type().(*Slice); ok {
-			return s.Elem()
-		}
-	}
-	return nil
+	*args = list
+	return true
 }
 
 func (check *Checker) logosLambdaTargeted(x *operand, sig *Signature, e *syntax.LambdaExpr) exprKind {
@@ -170,7 +161,7 @@ func (check *Checker) logosLambda(x *operand, t *target, e *syntax.LambdaExpr) e
 		return fail()
 	}
 	if t == nil || t.sig == nil {
-		check.errorf(e.Arrow, IncompatibleAssign, "%s", logosLambdaNeedsTarget)
+		check.logosLambdaNoTarget(e)
 		return fail()
 	}
 	return check.logosLambdaTargeted(x, t.sig, e)
