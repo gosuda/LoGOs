@@ -20,8 +20,9 @@ const logosSyncPath = "logos/sync"
 // expression, which blocks forever on the mutex the outer call holds. The
 // inner call counts when it appears directly in the callback, in the body
 // of a directly invoked or deferred function literal, in a lambda or
-// function literal argument of a chain method call or a named function,
-// method value, or stored literal passed to one (a plain chain runs it
+// function literal argument of a chain method call or a named function
+// (an explicit instantiation of a generic one included), method value, or
+// stored literal passed to one (a plain chain runs it
 // in place, and the stage of a group chain joins its children before the
 // call returns), or anywhere in the synchronous call graph of the
 // same-package functions the callback calls, at any depth. Each
@@ -426,9 +427,10 @@ func (c *lockCheck) promotedPath(sel *syntax.SelectorExpr, recv syntax.Expr) str
 }
 
 // callbackTarget resolves a WithLock callback argument that is a plain
-// function name or a method value to its function, returning the method
-// value receiver for the latter and nil for the former. It returns nil
-// when the argument has no resolvable same-package body.
+// function name, an explicit instantiation of a generic function, or a
+// method value to its function, returning the method value receiver for
+// the last and nil for the others. It returns nil when the argument has
+// no resolvable same-package body.
 func (c *lockCheck) callbackTarget(arg syntax.Expr) (*types2.Func, syntax.Expr) {
 	switch x := syntax.Unparen(arg).(type) {
 	case *syntax.Name:
@@ -439,6 +441,8 @@ func (c *lockCheck) callbackTarget(arg syntax.Expr) (*types2.Func, syntax.Expr) 
 		if fn, ok := c.pass.Info.Uses[x.Sel].(*types2.Func); ok {
 			return fn, x.X
 		}
+	case *syntax.IndexExpr:
+		return c.callbackTarget(x.X)
 	}
 	return nil, nil
 }

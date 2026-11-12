@@ -497,3 +497,35 @@ func methodCallbackTransitive() {
 		c.grabOther(&o) // ERROR "reentrant_withlock_deadlock"
 	})
 }
+
+func relockGeneric[T any](x T) T {
+	global.WithLock(func(n *int) { *n++ })
+	return x
+}
+
+func lockOtherGeneric[T any](x T) T {
+	other.WithLock(func(n *int) { *n++ })
+	return x
+}
+
+func relockCallbackGeneric[T any](n *T) {
+	byName.WithLock(func(k *int) { // ERROR "\[concurrency::reentrant_withlock_deadlock\]"
+		*k++
+	})
+}
+
+func instantiatedCallbackPositive() {
+	byName.WithLock(relockCallbackGeneric[int])
+}
+
+func directInstantiatedCallRelock() {
+	global.WithLock(func(n *int) {
+		_ = relockGeneric[int](1) // ERROR "\[concurrency::reentrant_withlock_deadlock\]"
+	})
+}
+
+func passDirectInstantiatedCallOtherLock() {
+	global.WithLock(func(n *int) {
+		_ = lockOtherGeneric[int](1)
+	})
+}

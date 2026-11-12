@@ -29,9 +29,13 @@ func isBlank(e syntax.Expr) bool {
 	return ok && n.Value == "_"
 }
 
-// calleeFunc returns the function or method call invokes, or nil.
+// calleeFunc returns the function or method call invokes, or nil. An
+// explicit instantiation f[T] names the generic function f.
 func calleeFunc(pass *Pass, call *syntax.CallExpr) *types2.Func {
 	fun := syntax.Unparen(call.Fun)
+	if inst, ok := fun.(*syntax.IndexExpr); ok {
+		fun = syntax.Unparen(inst.X)
+	}
 	var id *syntax.Name
 	switch f := fun.(type) {
 	case *syntax.Name:
