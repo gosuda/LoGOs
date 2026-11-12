@@ -827,6 +827,17 @@ func cfBareSkip(n *syntax.Name, p syntax.Node) bool {
 			}
 		}
 		return false
+	case *syntax.ConstDecl:
+		for _, name := range p.NameList {
+			if name == n {
+				return true
+			}
+		}
+		return false
+	case *syntax.TypeDecl:
+		return p.Name == n
+	case *syntax.BranchStmt:
+		return p.Label == n
 	case *syntax.TypeSwitchGuard:
 		return p.Lhs == n
 	case *syntax.RangeClause:
@@ -1166,12 +1177,8 @@ func cfStmtBinds(s syntax.Stmt, name string) bool {
 		}
 	case *syntax.DeclStmt:
 		for _, d := range s.DeclList {
-			if vd, ok := d.(*syntax.VarDecl); ok {
-				for _, n := range vd.NameList {
-					if n.Value == name {
-						return true
-					}
-				}
+			if cfDeclBinds(d, name) {
+				return true
 			}
 		}
 	case *syntax.RangeClause:
@@ -1180,6 +1187,38 @@ func cfStmtBinds(s syntax.Stmt, name string) bool {
 				if en, ok := e.(*syntax.Name); ok && en.Value == name {
 					return true
 				}
+			}
+		}
+	}
+	return false
+}
+
+func cfDeclBinds(d syntax.Decl, name string) bool {
+	switch d := d.(type) {
+	case *syntax.VarDecl:
+		return cfNamesInclude(d.NameList, name)
+	case *syntax.ConstDecl:
+		return cfNamesInclude(d.NameList, name)
+	case *syntax.TypeDecl:
+		return d.Name.Value == name
+	}
+	return false
+}
+
+func cfNamesInclude(names []*syntax.Name, name string) bool {
+	for _, n := range names {
+		if n.Value == name {
+			return true
+		}
+	}
+	return false
+}
+
+func cfLitDeclares(lit *syntax.FuncLit, name string) bool {
+	for _, fields := range [][]*syntax.Field{lit.Type.ParamList, lit.Type.ResultList} {
+		for _, f := range fields {
+			if f.Name != nil && f.Name.Value == name {
+				return true
 			}
 		}
 	}
@@ -1200,6 +1239,8 @@ func cfHeaderBinds(p, within syntax.Node, name string) bool {
 		}
 	case *syntax.CommClause:
 		header = p.Comm
+	case *syntax.TypeDecl:
+		return within != syntax.Node(p.Name) && p.Name.Value == name
 	}
 	return header != nil && within != syntax.Node(header) && cfStmtBinds(header, name)
 }
@@ -1210,12 +1251,8 @@ func cfHeaderBinds(p, within syntax.Node, name string) bool {
 func cfHasBinderBefore(body *syntax.BlockStmt, ref syntax.Node, name string, parents map[syntax.Node]syntax.Node) bool {
 	prev := ref
 	for p := parents[prev]; p != nil; prev, p = p, parents[p] {
-		if lit, ok := p.(*syntax.FuncLit); ok && prev == syntax.Node(lit.Body) {
-			for _, f := range lit.Type.ParamList {
-				if f.Name != nil && f.Name.Value == name {
-					return true
-				}
-			}
+		if lit, ok := p.(*syntax.FuncLit); ok && prev == syntax.Node(lit.Body) && cfLitDeclares(lit, name) {
+			return true
 		}
 		if cfHeaderBinds(p, prev, name) {
 			return true
