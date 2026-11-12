@@ -1573,6 +1573,7 @@ A field of type int or uint in a struct with a JSON-tagged field warns portabili
 A tag `-` excludes the field from binary output; other tag options change nothing. [T-Sec10.1]
 UnmarshalBinary rejects truncation, bad presence bytes, version mismatch, and trailing bytes with errors naming field and offset. [T-Sec10.1]
 UnmarshalBinary MUST reject an integer that its field type cannot hold, with an error naming field and offset. [T-Sec10.1]
+UnmarshalBinary MUST reject a missing value for a non-nil `*T` field of a loGo/s struct, with an error naming field and offset. [T-Sec10.1]
 For elements with a nonzero wire payload, a count header MUST pre-allocate at most min(len(rest)/2, 1 MiB / sizeof(elem)) elements and MUST grow past that only as input bytes arrive. [T-Sec10.1]
 Charge nothing against a total budget on the count header; a count whose element bytes are all present in the input is lawful and MUST decode, even when the total exceeds 1 MiB. [T-Sec10.1]
 For slices whose elements have zero wire payload, the count itself MUST NOT exceed 1,048,576 (the 1 MiB prealloc bound at unit 1), checked first, and MUST NOT exceed 8 MiB / sizeof(elem), checked next; larger counts MUST be rejected with a count-out-of-range error, encoder symmetric, checked before allocation or element iteration. One zero-wire count MUST NOT allocate more than 8 MiB of element storage in a single allocation. [T-Sec10.1]

@@ -1,0 +1,4 @@
+ok nonnil-pointer-roundtrip
+ok nonnil-pointer-absent-option-stays-none
+ok nonnil-pointer-missing-rejected
+ok nonnil-pointer-missing-offset

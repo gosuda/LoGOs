@@ -151,14 +151,29 @@ func (g *binaryGenerator) codec(t types2.Type) (int, bool) {
 				return 0, false
 			}
 		case *types2.Struct:
+			lgo := false
+			if n, ok := types2.Unalias(t).(*types2.Named); ok {
+				lgo = strings.HasSuffix(n.Obj().Pos().RelFilename(), ".lgo")
+			}
 			for i := range x.NumFields() {
 				if _, ok := types2.LogosJSONFieldOf(x, i); !ok {
 					continue
 				}
 				f := x.Field(i)
 				field := "_logos_field + " + fmt.Sprintf("%q", "."+f.Name())
+				ft := f.Type()
+				if cv, ok := types2.Unalias(ft).(*types2.ConstView); ok {
+					ft = cv.Elem
+				}
+				_, bare := types2.Unalias(ft).(*types2.Pointer)
+				if lgo && bare {
+					d("{ _logos_at := *_logos_off")
+				}
 				if !child(f.Type(), "_logos_v."+f.Name(), "&_logos_v."+f.Name(), field) {
 					return 0, false
+				}
+				if lgo && bare {
+					d("if _logos_v.%s == nil { return _logos_bfmt.Errorf(\"binary field %%s at offset %%d: missing required non-nil value\", %s, _logos_at) } }", f.Name(), field)
 				}
 			}
 		case *types2.Slice:
