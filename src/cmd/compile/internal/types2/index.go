@@ -319,6 +319,10 @@ func (check *Checker) sliceExpr(x *operand, e *syntax.SliceExpr) {
 	case *Array:
 		valid = true
 		length = u.len
+		if check.logosConstSliceArray(e) {
+			x.invalidate()
+			return
+		}
 		if x.mode() != variable {
 			check.errorf(x, NonSliceableOperand, "cannot slice unaddressable value %s", x)
 			x.invalidate()

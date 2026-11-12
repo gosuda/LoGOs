@@ -434,6 +434,10 @@ An exported const map is the one exception to the no-heap rule above: its packag
 
 A write from Go into such a variable lies outside the loGo/s contract. The Go compiler does not report it, and the write MAY fault at run time because the data can sit in read-only memory. This is a documented hole. [T-201][T-Sec5][R-U2][A-GOBOUNDARY]
 
+An `&` over a field or an array element of a const composite, local or imported, MUST yield a pointer to a fresh variable that holds a copy, and a write through that pointer MUST NOT change the constant. [T-201][T-104.5]
+
+An `&` over a slice element or a dereference inside a const composite, and a slice expression of an array inside a const composite, MUST fail with `[correctness::const_view_mutation]`. [T-201]
+
 An index assignment through a constant view MUST fail with `[correctness::const_view_mutation]` naming the operation and the expression. [T-201]
 
 A field assignment through `const *T` MUST fail with the same diagnostic. [T-201]

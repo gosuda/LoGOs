@@ -6,6 +6,7 @@ package types2
 
 import (
 	"cmd/compile/internal/syntax"
+	. "internal/types/errors"
 )
 
 func (check *Checker) logosAddrFresh(x *operand, e *syntax.Operation) bool {
@@ -15,7 +16,16 @@ func (check *Checker) logosAddrFresh(x *operand, e *syntax.Operation) bool {
 	if _, ok := syntax.Unparen(e.X).(*syntax.CompositeLit); ok {
 		return false
 	}
-	if !x.isValid() || x.isNil() || x.mode() == variable {
+	if !x.isValid() || x.isNil() {
+		return false
+	}
+	base, viaReference, constRooted := check.logosConstBase(e.X)
+	switch {
+	case constRooted && viaReference:
+		check.errorf(e, IncompatibleAssign, "%s cannot take the address of %s through const view %s", logosConstMutation, ExprString(e.X), ExprString(base))
+		x.invalidate()
+		return true
+	case !constRooted && x.mode() == variable:
 		return false
 	}
 	x.mode_ = value

@@ -380,11 +380,33 @@ func (check *Checker) logosConstStoreBase(lhs syntax.Expr) syntax.Expr {
 }
 
 func (check *Checker) logosCompositeRoot(e syntax.Expr) (syntax.Expr, bool) {
-	root := check.logosWriteBase(e)
+	root, _ := check.logosWriteBase(e)
 	if !check.logosCompositeRootNode(root) {
 		return nil, false
 	}
 	return root, true
+}
+
+func (check *Checker) logosConstBase(e syntax.Expr) (base syntax.Expr, viaReference, constRooted bool) {
+	base, viaReference = check.logosWriteBase(e)
+	if n, ok := base.(*syntax.Name); ok {
+		if _, ok := check.Info.Uses[n].(*Const); ok {
+			return base, viaReference, true
+		}
+	}
+	return base, viaReference, check.logosCompositeRootNode(base)
+}
+
+func (check *Checker) logosConstSliceArray(e *syntax.SliceExpr) bool {
+	if !check.conf.Logos {
+		return false
+	}
+	base, _, ok := check.logosConstBase(e.X)
+	if !ok {
+		return false
+	}
+	check.errorf(e, IncompatibleAssign, "%s cannot slice an array through const view %s", logosConstMutation, ExprString(base))
+	return true
 }
 
 func (check *Checker) logosCompositeRootNode(e syntax.Expr) bool {

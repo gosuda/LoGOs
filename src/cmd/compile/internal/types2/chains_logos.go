@@ -243,7 +243,8 @@ func (check *Checker) logosChainCall(x *operand, call *syntax.CallExpr) bool {
 
 func (check *Checker) logosChainRoots(e syntax.Expr) map[string]bool {
 	roots := make(map[string]bool)
-	if nm, ok := check.logosWriteBase(e).(*syntax.Name); ok {
+	base, _ := check.logosWriteBase(e)
+	if nm, ok := base.(*syntax.Name); ok {
 		roots[nm.Value] = true
 	}
 	return roots
@@ -726,7 +727,8 @@ func (check *Checker) logosChainMutatingCall(call *syntax.CallExpr, roots map[st
 }
 
 func (check *Checker) logosChainMutates(e syntax.Expr, roots map[string]bool) bool {
-	nm, ok := check.logosWriteBase(e).(*syntax.Name)
+	base, _ := check.logosWriteBase(e)
+	nm, ok := base.(*syntax.Name)
 	return ok && roots[nm.Value]
 }
 
