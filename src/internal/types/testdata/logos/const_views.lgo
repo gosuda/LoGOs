@@ -68,32 +68,32 @@ func cvIndexAssign(xs const []int) {
 }
 
 func cvFieldAssign(cp const *CVItem) {
-	cp /* ERROR "[correctness::const_view_mutation] cannot assign field through const view" */ .Name = "x"
+	cp /* ERROR "[correctness::const_view_mutation] cannot assign field through const view cp" */ .Name = "x"
 }
 
 func cvBuiltins(xs const []int, cm const map[string]int) {
-	_ = append(xs /* ERROR "[correctness::const_view_mutation] cannot append through const view" */, 1)
+	_ = append(xs /* ERROR "[correctness::const_view_mutation] cannot append through const view xs" */, 1)
 	dst := []int{0, 0}
-	_ = copy(xs /* ERROR "[correctness::const_view_mutation] cannot copy through const view" */, dst)
+	_ = copy(xs /* ERROR "[correctness::const_view_mutation] cannot copy through const view xs" */, dst)
 	_ = dst
-	delete(cm /* ERROR "[correctness::const_view_mutation] cannot delete through const view" */, "a")
-	clear(cm /* ERROR "[correctness::const_view_mutation] cannot clear through const view" */)
+	delete(cm /* ERROR "[correctness::const_view_mutation] cannot delete through const view cm" */, "a")
+	clear(cm /* ERROR "[correctness::const_view_mutation] cannot clear through const view cm" */)
 }
 
 func cvSliceExpr(xs const []int, n int) {
-	_ = xs /* ERROR "[correctness::const_view_mutation] cannot slice through const view" */ [:cap(xs)]
+	_ = xs /* ERROR "[correctness::const_view_mutation] cannot slice through const view xs" */ [:cap(xs)]
 	_ = xs[:n]
 	_ = xs[1:2]
 }
 
 func cvArrayBound(a const [4]int) {
-	_ = a /* ERROR "[correctness::const_view_mutation] cannot slice through const view" */ [:cap(a)]
-	_ = a /* ERROR "[correctness::const_view_mutation] cannot slice through const view" */ [:8 /* ERROR "out of bounds" */]
+	_ = a /* ERROR "[correctness::const_view_mutation] cannot slice through const view a" */ [:cap(a)]
+	_ = a /* ERROR "[correctness::const_view_mutation] cannot slice through const view a" */ [:8 /* ERROR "out of bounds" */]
 	_ = a[:2]
 }
 
 func cvMethods(cp const *CVItem, v CVItem) {
-	cp.Rename /* ERROR "[correctness::const_view_mutation] cannot call Rename through const view" */ ("x")
+	cp.Rename /* ERROR "[correctness::const_view_mutation] cannot call Rename through const view cp" */ ("x")
 	_ = cp.Peek()
 	_ = v.Label()
 	_ = cp.Label()
@@ -104,7 +104,7 @@ func cvTake(xs []int) {
 }
 
 func cvPass(xs const []int) {
-	cvTake(xs /* ERROR "[correctness::const_view_mutation] cannot pass argument through const view" */)
+	cvTake(xs /* ERROR "[correctness::const_view_mutation] cannot pass argument through const view xs" */)
 }
 
 func cvPassStd(xs const []int, ci const int) {
