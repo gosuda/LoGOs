@@ -159,6 +159,7 @@ type fileLower struct {
 	pkg          *packageLower
 	file         *syntax.File
 	src          []byte
+	keywords     facts.KeywordIndex
 	srcMap       srcBuf
 	orig         int
 	start        []int

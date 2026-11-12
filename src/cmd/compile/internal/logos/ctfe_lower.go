@@ -7,7 +7,6 @@ package logos
 import (
 	"cmd/compile/internal/base"
 	"cmd/compile/internal/logos/ctfe"
-	"cmd/compile/internal/logos/facts"
 	"cmd/compile/internal/syntax"
 	"cmd/compile/internal/types2"
 	"fmt"
@@ -128,7 +127,7 @@ func (fl *fileLower) lowerCTFEFileList(gst *groupedMoveState) {
 			} else {
 				fl.markRodataVar(vd, r.val)
 			}
-			if kw, ok := facts.KeywordStart(fl.src, token.CONST, fl.off(syntax.StartPos(cd))); ok {
+			if kw, ok := fl.keywords.Start(fl.src, token.CONST, fl.off(syntax.StartPos(cd))); ok {
 				fl.add(kw, kw+5, "var")
 			}
 			if !r.keepCall {
@@ -177,7 +176,7 @@ func (fl *fileLower) lowerCTFEBlock(b *syntax.BlockStmt, gst *groupedMoveState) 
 				vd := &syntax.VarDecl{NameList: cd.NameList, Type: cd.Type, Values: r.lit}
 				vd.SetPos(syntax.StartPos(cd))
 				ds.DeclList[j] = vd
-				if kw, ok := facts.KeywordStart(fl.src, token.CONST, fl.off(syntax.StartPos(cd))); ok {
+				if kw, ok := fl.keywords.Start(fl.src, token.CONST, fl.off(syntax.StartPos(cd))); ok {
 					fl.add(kw, kw+5, "var")
 				}
 				if !r.keepCall {

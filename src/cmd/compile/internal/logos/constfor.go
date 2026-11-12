@@ -405,6 +405,7 @@ func (fl *fileLower) adoptRegion(text otext, owner syntax.Pos, parsed *syntax.Po
 	fl.src = append(fl.src, text.s...)
 	r.end = len(fl.src)
 	fl.src = append(fl.src, '\n')
+	fl.keywords.Append(fl.src, r.start-1)
 	fl.srcMap.b = fl.src
 	for _, c := range text.chunks {
 		if c.n == 0 {

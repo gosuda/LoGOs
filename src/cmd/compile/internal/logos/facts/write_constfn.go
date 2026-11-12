@@ -214,6 +214,7 @@ type constFnSrc struct {
 	files           []*syntax.File
 	src             map[*syntax.File][]byte
 	starts          map[*syntax.File][]int
+	keywords        map[*syntax.File]*KeywordIndex
 	decls           map[string]*constFnDecl
 	rawImports      map[string]string
 	imports         []constFnImport
@@ -241,6 +242,7 @@ func newConstFnSrc(pkg *types2.Package, info *types2.Info, files []*syntax.File,
 		files:       files,
 		src:         src,
 		starts:      starts,
+		keywords:    make(map[*syntax.File]*KeywordIndex),
 		decls:       make(map[string]*constFnDecl),
 		rawImports:  make(map[string]string),
 		closedNames: make(map[string]bool),
@@ -684,7 +686,7 @@ func (s *constFnSrc) renderPlainFunc(file *syntax.File, fd *syntax.FuncDecl) (st
 	if !s.at(file) {
 		return "", fmt.Errorf("cannot load file for function %s", fd.Name.Value)
 	}
-	start, ok := KeywordStart(s.orig, token.FUNC, s.off(syntax.StartPos(fd)))
+	start, ok := s.keywordStart(token.FUNC, s.off(syntax.StartPos(fd)))
 	if !ok {
 		return "", fmt.Errorf("cannot find func keyword for %s", fd.Name.Value)
 	}
@@ -802,7 +804,7 @@ func (s *constFnSrc) typeStart(td *syntax.TypeDecl) (int, bool) {
 		}
 		off = s.off(specs[0].Pos())
 	}
-	return KeywordStart(s.orig, token.TYPE, off)
+	return s.keywordStart(token.TYPE, off)
 }
 
 func (s *constFnSrc) typeEnd(td *syntax.TypeDecl) int {
@@ -887,7 +889,7 @@ func (s *constFnSrc) constStart(cd *syntax.ConstDecl) (int, bool) {
 		}
 		off = s.off(specs[0].Pos())
 	}
-	return KeywordStart(s.orig, token.CONST, off)
+	return s.keywordStart(token.CONST, off)
 }
 
 func (s *constFnSrc) constEnd(cd *syntax.ConstDecl) int {
@@ -1103,20 +1105,56 @@ func fileOf(files []*syntax.File, pos syntax.Pos) *syntax.File {
 	return nil
 }
 
-func KeywordStart(src []byte, kind token.Token, off int) (int, bool) {
+// KeywordIndex indexes keyword positions in a source file.
+type KeywordIndex struct {
+	starts map[token.Token][]int
+}
+
+func (s *constFnSrc) keywordStart(kind token.Token, off int) (int, bool) {
+	idx := s.keywords[s.file]
+	if idx == nil {
+		idx = new(KeywordIndex)
+		s.keywords[s.file] = idx
+	}
+	return idx.Start(s.orig, kind, off)
+}
+
+func (idx *KeywordIndex) scan(src []byte, start int) {
 	var s scanner.Scanner
-	file := token.NewFileSet().AddFile("", -1, off)
-	s.Init(file, src[:off], nil, 0)
-	kw := -1
+	tf := token.NewFileSet().AddFile("", -1, len(src)-start)
+	s.Init(tf, src[start:], nil, 0)
 	for {
 		pos, tok, _ := s.Scan()
 		if tok == token.EOF {
-			return kw, kw >= 0
+			break
 		}
-		if tok == kind {
-			kw = file.Offset(pos)
+		if tok.IsKeyword() {
+			idx.starts[tok] = append(idx.starts[tok], start+tf.Offset(pos))
 		}
 	}
+}
+
+// Append indexes a complete parsed region appended at a newline boundary.
+// Before the first lookup, indexing remains lazy.
+func (idx *KeywordIndex) Append(src []byte, start int) {
+	if idx.starts != nil {
+		idx.scan(src, start)
+	}
+}
+
+// Start returns the last keyword of kind strictly before off in src.
+// Calls must use the same source, extended only through Append.
+func (idx *KeywordIndex) Start(src []byte, kind token.Token, off int) (int, bool) {
+	if idx.starts == nil {
+		idx.starts = make(map[token.Token][]int)
+		idx.scan(src, 0)
+	}
+	starts := idx.starts[kind]
+	i, _ := slices.BinarySearch(starts, off)
+	if i == 0 {
+		return -1, false
+	}
+	return starts[i-1], true
 }
 
 func nullaryCallEnd(src []byte, end int) (int, bool) {

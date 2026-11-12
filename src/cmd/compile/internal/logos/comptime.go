@@ -268,7 +268,7 @@ func (fl *fileLower) cfRecordText(def *cfGenericDef, qualifier string) *cfRecord
 		}
 	}
 	syntax.Inspect(def.decl, b.visit)
-	start := cfFuncStart(fl.src, fl.off(syntax.StartPos(def.decl)))
+	start := fl.cfFuncStart(fl.off(syntax.StartPos(def.decl)))
 	end := fl.off(syntax.EndPos(def.decl)) + 1
 	out, err := applyChunks(fl.srcMap.sliceO(start, end), shiftSplices(b.subs, -start))
 	if err != nil {
@@ -340,8 +340,8 @@ func (b *cfRecordBuilder) packageMarker(pn *types2.PkgName) string {
 	return cfImportMarker + strconv.Itoa(idx)
 }
 
-func cfFuncStart(src []byte, off int) int {
-	kw, ok := facts.KeywordStart(src, token.FUNC, off)
+func (fl *fileLower) cfFuncStart(off int) int {
+	kw, ok := fl.keywords.Start(fl.src, token.FUNC, off)
 	if !ok {
 		base.Fatalf("logos: no func keyword before offset %d", off)
 	}
@@ -948,7 +948,7 @@ func (fl *fileLower) cfStubDef(def *cfGenericDef) {
 
 func (fl *fileLower) cfDeleteDef(decl *syntax.FuncDecl) {
 	fl.file.DeclList = slices.DeleteFunc(fl.file.DeclList, func(d syntax.Decl) bool { return d == syntax.Decl(decl) })
-	fl.add(cfFuncStart(fl.src, fl.off(syntax.StartPos(decl))), fl.off(syntax.EndPos(decl))+1, "")
+	fl.add(fl.cfFuncStart(fl.off(syntax.StartPos(decl))), fl.off(syntax.EndPos(decl))+1, "")
 	fl.changed = true
 }
 

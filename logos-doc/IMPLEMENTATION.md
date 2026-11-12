@@ -2129,6 +2129,7 @@ Anchor: Claude Shannon, Tony Hoare
 - Gate: testdir `const_for`/`comptime` run plus compile fixtures (`go test -count=1 ./cmd/internal/testdir -run '^Test$/^logos$/^(run|compile)$/^(const_for|comptime)'`, all 18); `go test -race -count=1 cmd/go -run 'TestScript/^logos_eject_const_for$'` and `go test -race -count=1 cmd/go -run 'TestScript/^logos_eject_const_for_(cross|foreign|imports)$'`; `go vet` over `logos`, `types2`, `work`, `runtime` plus scoped `gofmt` clean.
 - Red-team rows: #266, #267.
 - Slice check (red-team #76): each unrolled body passes full assignment and call checks on its own copy (`test/logos/run/const_for.lgo`). [T-205]
+- Keyword lookup invariant: each `fileLower` owns a lazy keyword index for its source buffer; `constFnSrc` owns separate lazy indexes for each original file. Lookups select the last matching keyword strictly before the requested offset. `adoptRegion` extends an initialized index by scanning only the appended newline-delimited parsed region and rebasing its offsets; it does not rescan the existing prefix. Files with no keyword lookup do not build an index.
 - Slice check (red-team #76): pruned code stays verified; the dead branch still type-checks (`testdata/logos/const_if.lgo`). [T-205]
 
 ### M7-S3 Comptime generics
