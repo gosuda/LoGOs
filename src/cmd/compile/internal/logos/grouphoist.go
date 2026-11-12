@@ -170,7 +170,11 @@ func groupPrimary(e syntax.Expr) bool {
 }
 
 func (fc *funcLower) groupReject(pos syntax.Pos, where string) {
-	base.Errorf("%s: logos: channel receive %s cannot lower in a go group child", pos.String(), where)
+	host := "a go group child"
+	if top, ok := fc.groupTop(); ok && top.segment {
+		host = "a group stage lambda"
+	}
+	base.Errorf("%s: logos: channel receive %s cannot lower in %s", pos.String(), where, host)
 }
 
 func (fc *funcLower) groupRejectCommaRecv(pos syntax.Pos, nLhs int, rhs []syntax.Expr) bool {
@@ -381,6 +385,21 @@ func (fc *funcLower) groupHoistExprStmt(s *syntax.ExprStmt, top groupFrame) []sy
 	return append(pre, s)
 }
 
+func (fc *funcLower) groupHoistReturn(s *syntax.ReturnStmt, top groupFrame) []syntax.Stmt {
+	scanForLiterals(fc.fl, s)
+	mark := fc.hoistSubMark()
+	results, pre := fc.groupHoistList(s.Pos(), syntax.UnpackListExpr(s.Results), top)
+	if len(pre) == 0 {
+		fc.hoistSubTake(mark)
+		return []syntax.Stmt{s}
+	}
+	s.Results = listOf(s.Pos(), results)
+	start, _ := groupStmtSpan(fc, s)
+	fc.hoistSubEmit(fc.hoistSubTake(mark))
+	fc.fl.addT(start, start, renderText(pre, nil))
+	return append(pre, s)
+}
+
 func (fc *funcLower) groupHoistSend(s *syntax.SendStmt, top groupFrame) []syntax.Stmt {
 	scanForLiterals(fc.fl, s)
 	pos := s.Pos()
@@ -390,7 +409,7 @@ func (fc *funcLower) groupHoistSend(s *syntax.SendStmt, top groupFrame) []syntax
 	s.Chan, s.Value = nc, nv
 	pre := append(preC, preV...)
 	send := at(&syntax.SendStmt{Chan: s.Chan, Value: s.Value}, pos)
-	sel := at(&syntax.SelectStmt{Body: []*syntax.CommClause{at(&syntax.CommClause{Comm: send}, pos), groupDoneClause(pos, top.gctx)}}, pos)
+	sel := at(&syntax.SelectStmt{Body: []*syntax.CommClause{at(&syntax.CommClause{Comm: send}, pos), fc.groupDoneClause(pos, top)}}, pos)
 	out := append(pre, sel)
 	fc.hoistSubTake(mark)
 	start, end := groupStmtSpan(fc, s)

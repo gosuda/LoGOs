@@ -15,11 +15,13 @@ import (
 )
 
 type groupFrame struct {
-	g     string
-	gctx  string
-	j     string
-	child bool
-	body  *syntax.BlockStmt
+	g          string
+	gctx       string
+	j          string
+	child      bool
+	segment    bool
+	segmentRes types2.Type
+	body       *syntax.BlockStmt
 }
 
 func groupExprEnd(src []byte, start int) int {
@@ -84,6 +86,9 @@ func (fc *funcLower) groupTop() (groupFrame, bool) {
 }
 
 func (fc *funcLower) lowerGroupHook(s syntax.Stmt) ([]syntax.Stmt, bool) {
+	if top, ok := fc.groupTop(); ok && top.segment {
+		return fc.groupSegmentStmt(s)
+	}
 	switch s := s.(type) {
 	case *syntax.GroupStmt:
 		return fc.lowerGroupStmt(s), true

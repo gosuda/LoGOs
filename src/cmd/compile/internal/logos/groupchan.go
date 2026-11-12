@@ -21,16 +21,26 @@ func (fc *funcLower) groupChanTop() (groupFrame, bool) {
 	return groupFrame{}, false
 }
 
-func groupDoneText(gctx string) string {
-	return "case <-" + gctx + ".Done(): return " + gctx + ".Err()"
+func (fc *funcLower) groupDoneResults(pos syntax.Pos, top groupFrame) []syntax.Expr {
+	var res []syntax.Expr
+	if top.segmentRes != nil {
+		res = append(res, fc.fl.zeroValue(top.segmentRes, pos))
+	}
+	return append(res, callOf(pos, selOf(pos, nameOf(pos, top.gctx), "Err"), nil))
 }
 
-func groupDoneClause(pos syntax.Pos, gctx string) *syntax.CommClause {
-	done := callOf(pos, selOf(pos, nameOf(pos, gctx), "Done"), nil)
+func (fc *funcLower) groupDoneText(top groupFrame) string {
+	var res []string
+	for _, r := range fc.groupDoneResults(syntax.Pos{}, top) {
+		res = append(res, renderExpr(r))
+	}
+	return "case <-" + top.gctx + ".Done(): return " + strings.Join(res, ", ")
+}
+
+func (fc *funcLower) groupDoneClause(pos syntax.Pos, top groupFrame) *syntax.CommClause {
+	done := callOf(pos, selOf(pos, nameOf(pos, top.gctx), "Done"), nil)
 	recv := at(&syntax.Operation{Op: syntax.Recv, X: done}, pos)
-	ret := returnOf(pos, []syntax.Expr{
-		callOf(pos, selOf(pos, nameOf(pos, gctx), "Err"), nil),
-	})
+	ret := returnOf(pos, fc.groupDoneResults(pos, top))
 	return at(&syntax.CommClause{Comm: exprStmtOf(pos, recv), Body: []syntax.Stmt{ret}}, pos)
 }
 
@@ -142,9 +152,9 @@ func (fc *funcLower) groupRecvSelect(pos syntax.Pos, top groupFrame, e *groupRec
 	}
 	recvN := assignOf(pos, tempNodes(pos, names), []syntax.Expr{at(&syntax.Operation{Op: syntax.Recv, X: ch}, pos)})
 	native = append(native, at(&syntax.SelectStmt{
-		Body: []*syntax.CommClause{at(&syntax.CommClause{Comm: recvN}, pos), groupDoneClause(pos, top.gctx)},
+		Body: []*syntax.CommClause{at(&syntax.CommClause{Comm: recvN}, pos), fc.groupDoneClause(pos, top)},
 	}, pos))
-	text = append(text, cat(gen("select { case "+caseLHS+" = <-"), chText, gen(": "+groupDoneText(top.gctx)+" }")))
+	text = append(text, cat(gen("select { case "+caseLHS+" = <-"), chText, gen(": "+fc.groupDoneText(top)+" }")))
 	return native, text, names
 }
 
@@ -172,7 +182,7 @@ func groupAssignFinal(s *syntax.AssignStmt, lhs, temps []syntax.Expr) (syntax.St
 	case 0:
 		return assignOf(pos, lhs, temps), " = "
 	}
-	return at(&syntax.AssignStmt{Op: s.Op, Lhs: listOf(pos, lhs), Rhs: listOf(pos, temps)}, pos), " " + s.Op.String() + " "
+	return at(&syntax.AssignStmt{Op: s.Op, Lhs: listOf(pos, lhs), Rhs: listOf(pos, temps)}, pos), " " + s.Op.String() + "= "
 }
 
 func (fc *funcLower) lowerGroupRecv(s *syntax.AssignStmt, top groupFrame) []syntax.Stmt {
@@ -278,6 +288,10 @@ func (fc *funcLower) groupChanDispatch(s syntax.Stmt, top groupFrame) ([]syntax.
 		if groupStmtHasRecv(s) {
 			return fc.groupHoistExprStmt(s, top), true
 		}
+	case *syntax.ReturnStmt:
+		if groupStmtHasRecv(s) {
+			return fc.groupHoistReturn(s, top), true
+		}
 	case *syntax.SendStmt:
 		if groupStmtHasRecv(s) {
 			return fc.groupHoistSend(s, top), true
@@ -344,12 +358,12 @@ func (fc *funcLower) lowerGroupRecvExpr(s *syntax.ExprStmt, op *syntax.Operation
 	native := at(&syntax.SelectStmt{
 		Body: []*syntax.CommClause{
 			at(&syntax.CommClause{Comm: exprStmtOf(pos, op)}, pos),
-			groupDoneClause(pos, top.gctx),
+			fc.groupDoneClause(pos, top),
 		},
 	}, pos)
 	start := fl.off(leftmostOf(op))
 	end := stmtEnd(fl.src, start)
-	fl.addT(start, end, cat(gen("select { case "), recvText, gen(": "+groupDoneText(top.gctx)+" }")))
+	fl.addT(start, end, cat(gen("select { case "), recvText, gen(": "+fc.groupDoneText(top)+" }")))
 	return []syntax.Stmt{native}
 }
 
@@ -365,12 +379,12 @@ func (fc *funcLower) lowerGroupSend(s *syntax.SendStmt, top groupFrame) []syntax
 	native := at(&syntax.SelectStmt{
 		Body: []*syntax.CommClause{
 			at(&syntax.CommClause{Comm: sendN}, pos),
-			groupDoneClause(pos, top.gctx),
+			fc.groupDoneClause(pos, top),
 		},
 	}, pos)
 	start := fl.off(leftmostOf(s.Chan))
 	end := groupExprEnd(fl.src, vStart)
-	fl.addT(start, end, cat(gen("select { case "), chText, gen(" <- "), vText, gen(": "+groupDoneText(top.gctx)+" }")))
+	fl.addT(start, end, cat(gen("select { case "), chText, gen(" <- "), vText, gen(": "+fc.groupDoneText(top)+" }")))
 	return []syntax.Stmt{native}
 }
 
@@ -418,9 +432,7 @@ func (fc *funcLower) lowerGroupRange(s *syntax.ForStmt, rc *syntax.RangeClause, 
 			Y:  nilOf(checkPos),
 		}, checkPos),
 		[]syntax.Stmt{
-			returnOf(checkPos, []syntax.Expr{
-				callOf(checkPos, selOf(checkPos, nameOf(checkPos, top.gctx), "Err"), nil),
-			}),
+			returnOf(checkPos, fc.groupDoneResults(checkPos, top)),
 		})
 	end := fl.off(s.Body.Rbrace) + 1
 	fl.addT(end, end, cat(gen("\n"), renderText([]syntax.Stmt{checkN}, nil)))
@@ -441,7 +453,15 @@ func (fc *funcLower) groupAugmentSelect(s *syntax.SelectStmt) {
 	if !ok || groupSelectHasDefault(s) {
 		return
 	}
-	s.Body = append(s.Body, groupDoneClause(s.Rbrace, top.gctx))
+	s.Body = append(s.Body, fc.groupDoneClause(s.Rbrace, top))
 	rbraceOff := fc.fl.off(s.Rbrace)
-	fc.fl.add(rbraceOff, rbraceOff, "\n"+groupDoneText(top.gctx)+"\n")
+	fc.fl.add(rbraceOff, rbraceOff, "\n"+fc.groupDoneText(top)+"\n")
+}
+
+func (fc *funcLower) groupSegmentStmt(s syntax.Stmt) ([]syntax.Stmt, bool) {
+	out, handled := fc.groupChanStmt(s)
+	if ret, ok := s.(*syntax.ReturnStmt); ok {
+		fc.fl.parReturn(ret)
+	}
+	return out, handled
 }

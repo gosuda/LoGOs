@@ -36,8 +36,10 @@ import (
 // operation directly inside a go group child block, or directly inside a
 // lambda argument of a map or filter call that follows a group stage call
 // through map and filter calls only, is bounded too, because lowering turns
-// it into a select on the group context's Done channel; a function literal
-// or lambda inside the block or the lambda is not covered.
+// it into a select on the group context's Done channel in every statement
+// and expression position. A function literal or lambda inside the block or
+// the lambda is not covered, and neither is an operation inside an operand
+// of a select case, which lowering leaves as written.
 var unboundedChannelOp = Rule{
 	ID:      "correctness::unbounded_channel_op",
 	Group:   Correctness,
@@ -319,10 +321,11 @@ func (u *chanUnit) selectStmt(s *syntax.SelectStmt) {
 	for _, cc := range s.Body {
 		u.free = covered
 		operands := u.comm(cc.Comm)
-		u.free = outer
+		u.free = false
 		for _, x := range operands {
 			u.walk(x)
 		}
+		u.free = outer
 		for _, st := range cc.Body {
 			u.walk(st)
 		}

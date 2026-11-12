@@ -277,25 +277,39 @@ func (cg *chainGen) parClosure(name string, op chainOp, in, out types2.Type) ote
 	if op.lam == nil {
 		return cat(gen(name+" := "), fl.textOf(op.argSpan))
 	}
-	result, zero := "bool", "false"
+	result, zero, resT := "bool", "false", types2.Type(types2.Typ[types2.Bool])
 	if op.method == "map" {
-		result, zero = cg.spellType(out), cg.zeroText(out)
+		result, zero, resT = cg.spellType(out), cg.zeroText(out), out
 	}
 	head := name + " := func(" + op.lam.Params[0].Value + " " + cg.spellType(in) + ") (" + result + ", error) {"
+	fc := fl.parFuncLower(resT)
 	switch {
 	case op.isTry:
-		return cg.parTryClosure(head, op, zero)
+		return cg.parTryClosure(fc, head, op, zero)
 	case op.isBlk:
-		return cg.parBlockClosure(head, op, zero)
+		return cg.parBlockClosure(fc, head, op)
 	}
 	body, ok := op.savedBody.(syntax.Expr)
 	if !ok {
 		base.Fatalf("logos: group stage lambda at %s has no expression body", op.lam.Pos().String())
 	}
-	return cat(gen(head+" return "), fl.drainBodyWrapper(body, fl.textOf(op.bodySpan)), gen(", nil }"))
+	pre := fc.parHoist(body)
+	return cat(gen(head+" "), pre, gen("return "), fl.drainBodyWrapper(body, fl.textOf(op.bodySpan)), gen(", nil }"))
 }
 
-func (cg *chainGen) parTryClosure(head string, op chainOp, zero string) otext {
+func (fl *fileLower) parFuncLower(res types2.Type) *funcLower {
+	return &funcLower{fl: fl, groupStack: []groupFrame{{gctx: parCtxName, child: true, segment: true, segmentRes: res}}}
+}
+
+func (fc *funcLower) parHoist(e syntax.Expr) otext {
+	top, _ := fc.groupTop()
+	mark := fc.hoistSubMark()
+	_, pre := fc.groupHoistExpr(e, top)
+	fc.hoistSubEmit(fc.hoistSubTake(mark))
+	return renderText(pre, nil)
+}
+
+func (cg *chainGen) parTryClosure(fc *funcLower, head string, op chainOp, zero string) otext {
 	fl := cg.fl
 	body, _ := op.savedBody.(syntax.Expr)
 	try, _ := syntax.Unparen(body).(*syntax.TryExpr)
@@ -306,18 +320,19 @@ func (cg *chainGen) parTryClosure(head string, op chainOp, zero string) otext {
 	if inner == nil {
 		base.Fatalf("logos: group stage lambda at %s needs a call before ?", op.lam.Pos().String())
 	}
+	pre := fc.parHoist(inner)
 	call := fl.textOf(span{start: fl.exprStart(inner), end: fl.chainCallEnd(inner)})
 	v, e := cg.prefix+"_tv", cg.prefix+"_te"
-	return cat(gen(head+" "+v+", "+e+" := "), call, gen("; if "+e+" != nil { return "+zero+", "+e+" }; return "+v+", nil }"))
+	return cat(gen(head+" "), pre, gen(v+", "+e+" := "), call, gen("; if "+e+" != nil { return "+zero+", "+e+" }; return "+v+", nil }"))
 }
 
-func (cg *chainGen) parBlockClosure(head string, op chainOp, zero string) otext {
+func (cg *chainGen) parBlockClosure(fc *funcLower, head string, op chainOp) otext {
 	fl := cg.fl
 	block, ok := op.savedBody.(*syntax.BlockStmt)
 	if !ok {
 		base.Fatalf("logos: group stage lambda at %s has no block body", op.lam.Pos().String())
 	}
-	fl.parBlock(block.List, zero)
+	fc.lowerList(block.List)
 	text := fl.textOf(span{start: fl.off(syntax.StartPos(block)), end: fl.off(syntax.EndPos(block))})
 	if strings.HasPrefix(text.s, "{") {
 		text = text.slice(1, len(text.s))
@@ -516,170 +531,12 @@ func (fl *fileLower) parRangeHead(fs *syntax.ForStmt, rc *syntax.RangeClause, se
 	fl.addT(fl.off(fs.Pos()), fl.off(fs.Body.Pos()), cat(gen("for "), lhs, gen(", "+errName+assign+"range "), seq, gen(" ")))
 }
 
-func parDoneText(zero string) string {
-	return "case <-" + parCtxName + ".Done(): return " + zero + ", " + parCtxName + ".Err()"
-}
-
-func (fl *fileLower) parBlock(list []syntax.Stmt, zero string) {
-	for _, s := range list {
-		fl.parStmt(s, zero)
-	}
-}
-
-func (fl *fileLower) parStmt(s syntax.Stmt, zero string) {
-	switch s := s.(type) {
-	case *syntax.ReturnStmt:
-		fl.parReturn(s)
-	case *syntax.AssignStmt:
-		fl.parRecvAssign(s, zero)
-	case *syntax.DeclStmt:
-		fl.parRecvDecl(s, zero)
-	case *syntax.ExprStmt:
-		fl.parRecvExpr(s, zero)
-	case *syntax.SendStmt:
-		fl.parSend(s, zero)
-	case *syntax.BlockStmt:
-		fl.parBlock(s.List, zero)
-	case *syntax.IfStmt:
-		fl.parBlock(s.Then.List, zero)
-		if s.Else != nil {
-			fl.parStmt(s.Else, zero)
-		}
-	case *syntax.ForStmt:
-		fl.parFor(s, zero)
-	case *syntax.SwitchStmt:
-		for _, c := range s.Body {
-			fl.parBlock(c.Body, zero)
-		}
-	case *syntax.SelectStmt:
-		fl.parSelect(s, zero)
-	case *syntax.LabeledStmt:
-		fl.parStmt(s.Stmt, zero)
-	}
-}
-
 func (fl *fileLower) parReturn(s *syntax.ReturnStmt) {
 	if s.Results == nil {
 		return
 	}
 	end := stmtEnd(fl.src, fl.off(s.Pos()))
 	fl.add(end, end, ", nil")
-}
-
-func (fl *fileLower) parExprText(e syntax.Expr) otext {
-	start := fl.off(leftmostOf(e))
-	return fl.textOf(span{start: start, end: groupExprEnd(fl.src, start)})
-}
-
-func (fl *fileLower) parElemSpelling(ch syntax.Expr) string {
-	elem := groupChanElem(fl.pkg.info.TypeOf(ch))
-	spelled, ok := fl.spellType(elem)
-	if !ok {
-		base.Fatalf("logos: cannot spell channel element type %s", elem)
-	}
-	return spelled
-}
-
-func (fl *fileLower) parRecvExpr(s *syntax.ExprStmt, zero string) {
-	op, ok := groupRecvOp(s.X)
-	if !ok {
-		return
-	}
-	start := fl.off(leftmostOf(op))
-	fl.addT(start, stmtEnd(fl.src, start), cat(gen("select { case "), fl.parExprText(op), gen(": "+parDoneText(zero)+" }")))
-}
-
-func (fl *fileLower) parSend(s *syntax.SendStmt, zero string) {
-	start := fl.off(leftmostOf(s.Chan))
-	ch := fl.textOf(span{start: start, end: fl.off(s.Pos())})
-	vStart := fl.off(leftmostOf(s.Value))
-	val := fl.textOf(span{start: vStart, end: groupExprEnd(fl.src, vStart)})
-	fl.addT(start, groupExprEnd(fl.src, vStart), cat(gen("select { case "), ch, gen(" <- "), val, gen(": "+parDoneText(zero)+" }")))
-}
-
-func (fl *fileLower) parRecvAssign(s *syntax.AssignStmt, zero string) {
-	if s.Op != 0 && s.Op != syntax.Def {
-		return
-	}
-	lhs, rhs := syntax.UnpackListExpr(s.Lhs), syntax.UnpackListExpr(s.Rhs)
-	if len(rhs) != 1 || len(lhs) > 2 {
-		return
-	}
-	op, ok := groupRecvOp(rhs[0])
-	if !ok {
-		return
-	}
-	pos := s.Pos()
-	temps := []string{fmt.Sprintf("_logos_pt%d_%d_0", pos.Line(), pos.Col())}
-	decls := "var " + temps[0] + " " + fl.parElemSpelling(op.X) + "; "
-	if len(lhs) == 2 {
-		temps = append(temps, fmt.Sprintf("_logos_pt%d_%d_1", pos.Line(), pos.Col()))
-		decls += "var " + temps[1] + " bool; "
-	}
-	list := strings.Join(temps, ", ")
-	assign := " = "
-	if s.Op == syntax.Def {
-		assign = " := "
-	}
-	start := fl.off(leftmostOf(lhs[0]))
-	target := fl.textOf(span{start: start, end: fl.off(pos)}).trimRight(" \t\n")
-	sel := gen("select { case " + list + " = <-")
-	fl.addT(start, stmtEnd(fl.src, start), cat(gen(decls), sel, fl.parExprText(op.X), gen(": "+parDoneText(zero)+" }; "), target, gen(assign+list)))
-}
-
-func (fl *fileLower) parRecvDecl(s *syntax.DeclStmt, zero string) {
-	d, ok := groupRecvDecl(s)
-	if !ok || len(d.NameList) != 1 {
-		return
-	}
-	values := syntax.UnpackListExpr(d.Values)
-	op, ok := groupRecvOp(values[0])
-	if !ok || len(values) != 1 {
-		return
-	}
-	start := fl.off(s.Pos())
-	head := fl.textOf(span{start: start, end: groupAssignOffset(fl.src, start)}).trimRight(" \t\n")
-	if d.Type == nil {
-		head = cat(head, gen(" "+fl.parElemSpelling(op.X)))
-	}
-	name := d.NameList[0].Value
-	fl.addT(start, stmtEnd(fl.src, start), cat(head, gen("; select { case "+name+" = <-"), fl.parExprText(op.X), gen(": "+parDoneText(zero)+" }")))
-}
-
-func (fl *fileLower) parFor(s *syntax.ForStmt, zero string) {
-	rc, ok := s.Init.(*syntax.RangeClause)
-	if ok && (&funcLower{fl: fl}).groupRangeOverChan(rc) {
-		fl.parRangeChan(s, rc, zero)
-	}
-	fl.parBlock(s.Body.List, zero)
-}
-
-func (fl *fileLower) parRangeChan(s *syntax.ForStmt, rc *syntax.RangeClause, zero string) {
-	fl.needRT = true
-	braceOff := fl.off(s.Body.Pos())
-	ch := fl.srcUser(fl.off(leftmostOf(rc.X)), braceOff).trimRight(" \t\n")
-	var lhs otext
-	if rc.Lhs != nil {
-		assign := " = "
-		if rc.Def {
-			assign = " := "
-		}
-		lhs = cat(fl.srcUser(fl.off(leftmostOf(rc.Lhs)), fl.off(rc.Pos())).trimRight(" \t\n:="), gen(assign))
-	}
-	fl.addT(fl.off(s.Pos()), braceOff, cat(gen("for "), lhs, gen("range "+rtAlias+".Chan("+parCtxName+", "), ch, gen(") ")))
-	end := fl.off(s.Body.Rbrace) + 1
-	fl.add(end, end, "\nif "+parCtxName+".Err() != nil { return "+zero+", "+parCtxName+".Err() }")
-}
-
-func (fl *fileLower) parSelect(s *syntax.SelectStmt, zero string) {
-	for _, c := range s.Body {
-		fl.parBlock(c.Body, zero)
-	}
-	if groupSelectHasDefault(s) {
-		return
-	}
-	rbrace := fl.off(s.Rbrace)
-	fl.add(rbrace, rbrace, "\n"+parDoneText(zero)+"\n")
 }
 
 func parseStageFrag(text string, pos syntax.Pos) syntax.Expr {
