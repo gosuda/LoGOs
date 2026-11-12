@@ -8,6 +8,7 @@ import (
 	"cmp"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"slices"
 
 	"cmd/compile/internal/syntax"
@@ -127,8 +128,21 @@ func newHintFile(name string, src []byte) *hintFile {
 	}
 }
 
+func hintFileKey(name string) string {
+	if filepath.IsAbs(name) {
+		return name
+	}
+	if abs, err := filepath.Abs(name); err == nil {
+		return abs
+	}
+	return name
+}
+
 func (h *Hints) AddAlloc(a Alloc) {
 	f := h.byName[a.File]
+	if f == nil {
+		f = h.byName[hintFileKey(a.File)]
+	}
 	if f == nil {
 		return
 	}
@@ -151,8 +165,8 @@ func (f *hintFile) addAlloc(a AllocHint) {
 }
 
 func (h *Hints) Report() *HintsReport {
-	r := &HintsReport{Version: HintsVersion, Package: h.pkgPath, Files: make([]FileHints, 0, len(h.byName))}
-	for _, f := range h.byName {
+	r := &HintsReport{Version: HintsVersion, Package: h.pkgPath, Files: make([]FileHints, 0, len(h.byFile))}
+	for _, f := range h.byFile {
 		r.Files = append(r.Files, f.finish())
 	}
 	slices.SortFunc(r.Files, func(a, b FileHints) int { return cmp.Compare(a.File, b.File) })

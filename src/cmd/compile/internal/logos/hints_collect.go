@@ -28,6 +28,7 @@ func (h *Hints) AddFile(pkg *types2.Package, info *types2.Info, file *syntax.Fil
 	f := newHintFile(file.Pos().FileBase().Filename(), src)
 	h.byFile[file] = f
 	h.byName[f.hints.File] = f
+	h.byName[hintFileKey(f.hints.File)] = f
 	c := &hintCollector{info: info, file: f, qual: hintQualifier(pkg)}
 	syntax.Inspect(file, c.visit)
 }

@@ -113,6 +113,42 @@ func TestCompileHintsGoPackage(t *testing.T) {
 	}
 }
 
+func TestCompileHintsRelativeFileName(t *testing.T) {
+	testenv.MustHaveGoBuild(t)
+	dir := t.TempDir()
+	src, err := os.ReadFile(filepath.Join("testdata", "hints", "alloc.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "alloc.go"), src, 0o666); err != nil {
+		t.Fatal(err)
+	}
+	hints := filepath.Join(dir, "hints.json")
+	args := []string{"tool", "compile", "-p", "p", "-importcfg", importConfig(t, dir),
+		"-logos.mode=hints", "-logos.hintsout=" + hints, "-o", filepath.Join(dir, "out.a"), "alloc.go"}
+	cmd := exec.Command(testenv.GoToolPath(t), args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("hints compile of a relative name: %v\n%s", err, out)
+	}
+	data, err := os.ReadFile(hints)
+	if err != nil {
+		t.Fatalf("hints file unreadable: %v", err)
+	}
+	report := new(HintsReport)
+	if err := json.Unmarshal(data, report); err != nil {
+		t.Fatalf("hints file is not JSON: %v\n%s", err, data)
+	}
+	if len(report.Files) != 1 {
+		t.Fatalf("report holds %d files, want the one compiled", len(report.Files))
+	}
+	allocs := report.Files[0].Allocs
+	if a, ok := allocAt(allocs, startOf(t, src, "&T{1, 2}")); !ok || a.Tier != TierHeap {
+		t.Errorf("heap badge at &T{1, 2} after a relative-name compile: got %+v (found %v), want tier %s", a, ok, TierHeap)
+	}
+}
+
 func TestCompileHintsLgoPackage(t *testing.T) {
 	run := runHints(t, []string{"-logos.mode=hints"}, "sites.lgo")
 	if run.exit != 0 || run.report == nil {
