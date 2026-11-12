@@ -4,12 +4,17 @@
 
 package facts
 
-import "cmd/compile/internal/types2"
+import (
+	"slices"
+
+	"cmd/compile/internal/types2"
+)
 
 func init() {
 	types2.LogosImportedConstFuncSource = constFuncSource
 	types2.LogosImportedParamProvenZero = paramProvenZero
 	types2.LogosImportedConstMapLen = constMapLen
+	types2.LogosImportedConstComposite = constComposite
 }
 
 func constMapLen(path, object string) (int, bool) {
@@ -18,11 +23,16 @@ func constMapLen(path, object string) (int, bool) {
 		return 0, false
 	}
 	for i := range f.ConstMaps {
-		if f.ConstMaps[i].Object == object {
+		if f.ConstMaps[i].Object == object && f.ConstMaps[i].Path == "" {
 			return len(f.ConstMaps[i].Keys), true
 		}
 	}
 	return 0, false
+}
+
+func constComposite(path, object string) bool {
+	f, ok := Lookup(path)
+	return ok && f != nil && slices.Contains(f.ConstComps, object)
 }
 
 func constFuncSource(path, object string) []byte {

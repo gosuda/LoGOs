@@ -80,7 +80,7 @@ func Lower(pkg *types2.Package, info *types2.Info, files []*syntax.File, src map
 			base:          file.Pos().FileBase(),
 			start:         lineStarts(buf),
 			loweredChains: make(map[*syntax.CallExpr]bool),
-			compositeDone: make(map[*syntax.Name]bool),
+			compositeDone: make(map[syntax.Expr]bool),
 		}
 		fl.baseName = filepath.Base(fl.base.Filename())
 		fl.srcMap = origBuf(buf)
@@ -227,7 +227,7 @@ type fileLower struct {
 	chainExit          func(err string) string  // a header closure hands a failing hoist's error to its statement; nil returns it.
 	groupDone          map[*syntax.FuncLit]bool // finished group closures, pruned by the literal scan.
 	funcs              map[*syntax.BlockStmt]*funcLower
-	compositeDone      map[*syntax.Name]bool
+	compositeDone      map[syntax.Expr]bool
 }
 
 // off converts a valid file position to a byte offset.
@@ -527,7 +527,6 @@ func (fl *fileLower) lowerFile() {
 	fl.lowerArenaEject()
 	fl.lowerZeroCopy() // zero-copy string/bytes conversions.
 	fl.lowerCTFE()
-	fl.rejectImportedCompositeStores()
 	fl.lowerConstMapRanges()
 	fl.eraseConstViews()  // erase const views and bound recorded slices; also erases readonly interface `const` qualifiers.
 	fl.lowerConstSlices() // []C arguments to `const []I` parameters convert through rt.CovSlice.

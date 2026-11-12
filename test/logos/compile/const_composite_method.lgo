@@ -1,0 +1,34 @@
+// errorcheck
+
+package p
+
+type box struct {
+	M map[string]int
+	N int
+}
+
+type wrap struct {
+	In box
+}
+
+func (b *box) Set() { b.N = 1 }
+
+func (r const *box) Get() int { return r.N }
+
+func (b box) Total() int { return b.N }
+
+const cfg = box{M: map[string]int{"a": 1}, N: 7}
+
+const w = wrap{In: box{M: map[string]int{"a": 1}, N: 7}}
+
+func rejectPointerMethod() {
+	cfg.Set() // ERROR "const_view_mutation"
+}
+
+func rejectNestedPointerMethod() {
+	w.In.Set() // ERROR "const_view_mutation"
+}
+
+func allowReadOnlyMethods() int {
+	return cfg.Get() + cfg.Total() + w.In.Get() + w.In.Total()
+}

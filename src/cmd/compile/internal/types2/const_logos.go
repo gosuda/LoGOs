@@ -372,12 +372,11 @@ func (check *Checker) logosConstStoreBase(lhs syntax.Expr) syntax.Expr {
 
 func (check *Checker) logosCompositeRoot(e syntax.Expr) (syntax.Expr, bool) {
 	for {
-		switch n := syntax.Unparen(e).(type) {
-		case *syntax.Name:
-			if obj, ok := check.Info.Uses[n].(*Const); ok && logosTypeHasMap(obj.Type()) && !check.logosIsBareMap(obj) {
-				return n, true
-			}
-			return nil, false
+		e = syntax.Unparen(e)
+		if check.logosCompositeRootNode(e) {
+			return e, true
+		}
+		switch n := e.(type) {
 		case *syntax.SelectorExpr:
 			e = n.X
 		case *syntax.IndexExpr:
@@ -391,6 +390,53 @@ func (check *Checker) logosCompositeRoot(e syntax.Expr) (syntax.Expr, bool) {
 			return nil, false
 		}
 	}
+}
+
+func (check *Checker) logosCompositeRootNode(e syntax.Expr) bool {
+	switch n := e.(type) {
+	case *syntax.Name:
+		switch obj := check.Info.Uses[n].(type) {
+		case *Const:
+			return logosTypeHasMap(obj.Type()) && !check.logosIsBareMap(obj)
+		case *Var:
+			return check.logosImportedComposite(obj)
+		}
+	case *syntax.SelectorExpr:
+		pkg, _ := n.X.(*syntax.Name)
+		obj, _ := check.Info.Uses[n.Sel].(*Var)
+		if pkg != nil && obj != nil {
+			_, qualified := check.Info.Uses[pkg].(*PkgName)
+			return qualified && check.logosImportedComposite(obj)
+		}
+	}
+	return false
+}
+
+func (check *Checker) logosImportedComposite(obj *Var) bool {
+	return obj.Pkg() != nil && obj.Pkg() != check.pkg && !obj.IsField() &&
+		obj.Pkg().Scope().Lookup(obj.Name()) == obj &&
+		LogosImportedConstComposite != nil && LogosImportedConstComposite(obj.Pkg().Path(), obj.Name())
+}
+
+func logosPointerReceiver(fn *Func) bool {
+	sig, ok := fn.Type().(*Signature)
+	if !ok || sig.Recv() == nil {
+		return false
+	}
+	_, ptr := Unalias(sig.Recv().Type()).(*Pointer)
+	return ptr
+}
+
+func (check *Checker) logosCompositeMutatingCall(e *syntax.SelectorExpr, fn *Func) bool {
+	if fn != nil && (!logosPointerReceiver(fn) || check.logosReceiverReadonly(fn)) {
+		return false
+	}
+	root, ok := check.logosCompositeRoot(e.X)
+	if !ok {
+		return false
+	}
+	check.errorf(e.Sel, IncompatibleAssign, "%s cannot call %s through const view %s", logosConstMutation, e.Sel.Value, ExprString(root))
+	return true
 }
 
 func (check *Checker) logosIsBareMap(obj *Const) bool {
@@ -834,6 +880,8 @@ func (check *Checker) logosImportedConstMapLen(obj *Var) (int64, bool) {
 }
 
 var LogosImportedConstMapLen func(path, object string) (int, bool)
+
+var LogosImportedConstComposite func(path, object string) bool
 
 func (check *Checker) logosInferOperands(par, arg *Type) {
 	if c := logosAsConstView(*par); c != nil {

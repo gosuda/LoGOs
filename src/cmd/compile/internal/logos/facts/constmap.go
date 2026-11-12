@@ -11,7 +11,7 @@ import (
 )
 
 func encodeConstMap(c ConstMapFact) ([]byte, bool) {
-	if c.Object == "" || !ValidObject(c.Object) {
+	if c.Object == "" || !ValidObject(c.Object) || (c.Path != "" && !validCompositePath(c.Path)) {
 		return nil, false
 	}
 	if len(c.Keys) != len(c.Vals) || len(c.Keys) != len(c.Hashes) ||
@@ -106,6 +106,13 @@ func decodeConstMap(object string, body []byte) (ConstMapFact, error) {
 			return c, fmt.Errorf("bad constmap order index %d", o)
 		}
 		seen[o] = true
+	}
+	canons := make(map[string]bool, len(c.Canons))
+	for _, k := range c.Canons {
+		if canons[k] {
+			return c, fmt.Errorf("duplicate constmap key %q", k)
+		}
+		canons[k] = true
 	}
 	return c, nil
 }

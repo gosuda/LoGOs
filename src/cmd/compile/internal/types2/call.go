@@ -901,7 +901,7 @@ func (check *Checker) selector(x *operand, e *syntax.SelectorExpr, wantType bool
 		if indirect {
 			if x.mode() == typexpr {
 				check.errorf(e.Sel, InvalidMethodExpr, "invalid method expression %s.%s (needs pointer receiver (*%s).%s)", x.typ(), sel, x.typ(), sel)
-			} else {
+			} else if !check.logosCompositeMutatingCall(e, nil) {
 				check.errorf(e.Sel, InvalidMethodExpr, "cannot call pointer method %s on %s", sel, x.typ())
 			}
 			goto Error
@@ -990,6 +990,9 @@ func (check *Checker) selector(x *operand, e *syntax.SelectorExpr, wantType bool
 
 			// TODO(gri) If we needed to take into account the receiver's
 			// addressability, should we report the type &(x.typ) instead?
+			if check.logosCompositeMutatingCall(e, obj) {
+				goto Error
+			}
 			check.recordSelection(e, MethodVal, x.typ(), obj, index, indirect)
 
 			x.mode_ = value

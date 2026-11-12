@@ -235,7 +235,7 @@ func importedConstMapRecord(obj *types2.Var) (facts.ConstMapFact, bool) {
 	}
 	for i := range f.ConstMaps {
 		rec := f.ConstMaps[i]
-		if rec.Object != obj.Name() {
+		if rec.Object != obj.Name() || rec.Path != "" {
 			continue
 		}
 		if len(rec.Keys) != len(rec.Vals) || len(rec.Order) != len(rec.Keys) {
@@ -271,35 +271,51 @@ func (fl *fileLower) importedConstMap(obj *types2.Var, pos syntax.Pos) (*constMa
 	if !ok {
 		return nil, false
 	}
-	mapType := constMapElem(obj.Type())
-	if why, ok := fl.unspellableImportedConstMap(obj, mapType, mt); !ok {
+	name := fmt.Sprintf("_logos_icm%d_%s", fl.pkg.importedSeq, obj.Name())
+	fl.pkg.importedSeq++
+	g, ok := fl.emitImportedConstMap(importedMapSpec{label: obj.Pkg().Path() + "." + obj.Name(), mapType: constMapElem(obj.Type()), mt: mt, rec: rec, name: name}, pos)
+	if ok {
+		fl.pkg.importedMaps[obj] = g
+	}
+	return g, ok
+}
+
+type importedMapSpec struct {
+	label   string
+	mapType types2.Type
+	mt      *types2.Map
+	rec     facts.ConstMapFact
+	name    string
+}
+
+func (fl *fileLower) emitImportedConstMap(s importedMapSpec, pos syntax.Pos) (*constMapGen, bool) {
+	rec, mt := s.rec, s.mt
+	if why, ok := fl.unspellableImportedConstMap(s.label, s.mapType, mt); !ok {
 		base.Errorf("%s: %s", pos.String(), why)
 		base.ExitIfErrors()
 		return nil, false
 	}
 	quals, ambiguous := fl.constMapImportQuals(mt)
 	if ambiguous != "" {
-		base.Errorf("%s: logos: imported const map %s.%s uses %s for types from different packages", pos.String(), obj.Pkg().Path(), obj.Name(), ambiguous)
+		base.Errorf("%s: logos: imported const map %s uses %s for types from different packages", pos.String(), s.label, ambiguous)
 		base.ExitIfErrors()
 		return nil, false
 	}
 	keys, ok := fl.qualifyConstMapTexts(rec.Keys, quals, pos)
 	if !ok {
-		base.Errorf("%s: logos: imported const map %s.%s has a key that cannot be spelled in this package", pos.String(), obj.Pkg().Path(), obj.Name())
+		base.Errorf("%s: logos: imported const map %s has a key that cannot be spelled in this package", pos.String(), s.label)
 		base.ExitIfErrors()
 		return nil, false
 	}
 	vals, ok := fl.qualifyConstMapTexts(rec.Vals, quals, pos)
 	if !ok {
-		base.Errorf("%s: logos: imported const map %s.%s has a value that cannot be spelled in this package", pos.String(), obj.Pkg().Path(), obj.Name())
+		base.Errorf("%s: logos: imported const map %s has a value that cannot be spelled in this package", pos.String(), s.label)
 		base.ExitIfErrors()
 		return nil, false
 	}
 	kT := fl.mustSpell(mt.Key(), pos)
 	vT := fl.mustSpell(mt.Elem(), pos)
-	mapT := fl.mustSpell(mapType, pos)
-	name := fmt.Sprintf("_logos_icm%d_%s", fl.pkg.importedSeq, obj.Name())
-	fl.pkg.importedSeq++
+	mapT := fl.mustSpell(s.mapType, pos)
 	entries := make([]constMapKey, len(rec.Keys))
 	for i := range rec.Keys {
 		entries[i] = constMapKey{hash: rec.Hashes[i], canon: rec.Canons[i]}
@@ -310,7 +326,7 @@ func (fl *fileLower) importedConstMap(obj *types2.Var, pos syntax.Pos) (*constMa
 	}
 	builderBody := mapT + "{" + strings.Join(pairs, ", ") + "}"
 	text := finalizeConstMapEmission(pos, constMapEmission{
-		name:        name,
+		name:        s.name,
 		kT:          kT,
 		vT:          vT,
 		mapT:        mapT,
@@ -321,16 +337,15 @@ func (fl *fileLower) importedConstMap(obj *types2.Var, pos syntax.Pos) (*constMa
 		order:       rec.Order,
 		bearing:     rec.Bearing,
 	}, entries)
-	g := &constMapGen{name: name, nkeys: len(rec.Keys), bearing: rec.Bearing}
-	if !fl.pkg.importedDone[name] {
-		fl.pkg.importedDone[name] = true
+	g := &constMapGen{name: s.name, nkeys: len(rec.Keys), bearing: rec.Bearing}
+	if !fl.pkg.importedDone[s.name] {
+		fl.pkg.importedDone[s.name] = true
 		decls := parseConstMapDecls(text, pos)
 		fl.markConstMapTables(decls, g)
 		fl.constDecls = append(fl.constDecls, decls...)
 		fl.constText += "\n" + text
 	}
 	fl.needRT = true
-	fl.pkg.importedMaps[obj] = g
 	return g, true
 }
 
@@ -344,8 +359,8 @@ func stripConstMapView(t types2.Type) types2.Type {
 	}
 }
 
-func (fl *fileLower) unspellableImportedConstMap(obj *types2.Var, mapType types2.Type, mt *types2.Map) (string, bool) {
-	what := "logos: imported const map " + obj.Pkg().Path() + "." + obj.Name()
+func (fl *fileLower) unspellableImportedConstMap(label string, mapType types2.Type, mt *types2.Map) (string, bool) {
+	what := "logos: imported const map " + label
 	if _, ok := fl.spellLowered(mt.Key()); !ok {
 		return what + " has a key type " + mt.Key().String() + " that cannot be named in this package", false
 	}

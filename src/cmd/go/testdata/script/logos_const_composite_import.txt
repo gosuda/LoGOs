@@ -1,0 +1,224 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+mkdir $WORK/bin
+
+# An importer reads an exported const composite through tables and fresh copies.
+cd m
+logos build -o $WORK/bin/importcc$GOEXE ./app
+exec $WORK/bin/importcc$GOEXE
+cmp stdout want.txt
+logos eject -o out
+cd out
+exists $UPROOT1272/bin/go
+exec env -u GOROOT $UPROOT1272/bin/go build ./...
+exec env -u GOROOT $UPROOT1272/bin/go run ./app
+cmp stdout ../want.txt
+cd ../..
+
+# A value type the importer cannot name fails the build with a diagnostic, never a compiler crash.
+cd unnamed
+! logos build ./...
+! stderr 'internal compiler error'
+cd ..
+
+# A write into an imported const composite fails with the rule ID, whatever the member.
+cd badwrite
+! logos build ./...
+stderr -count=9 '\[correctness::const_view_mutation\]'
+cd ..
+
+-- m/go.mod --
+module example.com/ccimport
+
+go 1.27
+
+-- m/want.txt --
+ok slice-leak-copy 1 99
+ok slice-leak-reread 1
+ok root-slice-leak-copy 1 99
+ok root-slice-fresh 1
+ok underscore-field-copy 1 99
+ok underscore-field-fresh 1
+ok qualified-value 1 2
+ok promoted-range-sorted
+ok index-range-sorted
+ok array-leak-copy 1
+ok whole-copy-isolated 1 2
+-- m/lib/lib.lgo --
+package lib
+
+type Point struct{ X, Y int }
+
+type S struct {
+	M map[string]int
+	L []int
+	N int
+}
+
+type Box struct {
+	M map[string]int
+	N int
+}
+
+type U struct {
+	My_map map[string]int
+	N      int
+}
+
+type P struct {
+	P map[string]Point
+}
+
+type Base struct {
+	M map[string]int
+}
+
+type Outer struct {
+	Base
+	Tag string
+}
+
+type Arr struct {
+	M map[string]int
+	A [3]int
+}
+
+const C = S{M: map[string]int{"a": 1}, L: []int{1, 2, 3}, N: 7}
+
+const Items = []Box{{M: map[string]int{"a": 1}, N: 1}, {M: map[string]int{"a": 1, "b": 2, "c": 3, "d": 4, "e": 5, "f": 6, "g": 7, "h": 8, "i": 9, "j": 10}, N: 2}}
+
+const Under = U{My_map: map[string]int{"a": 1, "b": 2}, N: 7}
+
+const Pts = P{P: map[string]Point{"o": {1, 2}}}
+
+const O = Outer{Base: Base{M: map[string]int{"a": 1, "b": 2, "c": 3, "d": 4, "e": 5, "f": 6, "g": 7, "h": 8, "i": 9, "j": 10}}, Tag: "t"}
+
+const A = Arr{M: map[string]int{"a": 1}, A: [3]int{1, 2, 3}}
+-- m/app/main.lgo --
+package main
+
+import (
+	"fmt"
+	"os"
+
+	"example.com/ccimport/lib"
+)
+
+var failed bool
+
+func main() {
+	s := lib.C.L
+	s[0] = 99
+	fmt.Println("ok slice-leak-copy", lib.C.L[0], s[0])
+	fmt.Println("ok slice-leak-reread", lib.C.L[0])
+	x := lib.Items
+	x[0].N = 99
+	fmt.Println("ok root-slice-leak-copy", lib.Items[0].N, x[0].N)
+	y := lib.Items
+	fmt.Println("ok root-slice-fresh", y[0].N)
+	u := lib.Under
+	u.My_map["a"] = 99
+	fmt.Println("ok underscore-field-copy", lib.Under.My_map["a"] ?? -1, u.My_map["a"] ?? -1)
+	v := lib.Under
+	fmt.Println("ok underscore-field-fresh", v.My_map["a"] ?? -1)
+	pt := lib.Pts.P["o"] ?? lib.Point{}
+	fmt.Println("ok qualified-value", pt.X, pt.Y)
+	for range 64 {
+		got := ""
+		for k := range lib.O.M {
+			got += k
+		}
+		if got != "abcdefghij" {
+			fmt.Println("FAIL promoted-range", got)
+			failed = true
+			break
+		}
+	}
+	fmt.Println("ok promoted-range-sorted")
+	for range 64 {
+		got := ""
+		for k := range lib.Items[0x1].M {
+			got += k
+		}
+		if got != "abcdefghij" {
+			fmt.Println("FAIL index-range", got)
+			failed = true
+			break
+		}
+	}
+	fmt.Println("ok index-range-sorted")
+	arr := lib.A.A
+	arr[0] = 5
+	fmt.Println("ok array-leak-copy", lib.A.A[0])
+	w := lib.C
+	w.M["a"] = 50
+	z := lib.C
+	fmt.Println("ok whole-copy-isolated", z.M["a"] ?? -1, len(z.L)-1)
+	if failed {
+		os.Exit(1)
+	}
+}
+-- unnamed/go.mod --
+module example.com/ccunnamed
+
+go 1.27
+
+-- unnamed/lib/lib.lgo --
+package lib
+
+type pt struct{ X int }
+
+type S struct{ M map[string]pt }
+
+const C = S{M: map[string]pt{"a": {1}}}
+-- unnamed/app/main.lgo --
+package main
+
+import (
+	"fmt"
+
+	"example.com/ccunnamed/lib"
+)
+
+func main() {
+	v, ok := lib.C.M["a"]
+	fmt.Println(v.X, ok)
+}
+-- badwrite/go.mod --
+module example.com/ccbadwrite
+
+go 1.27
+
+-- badwrite/lib/lib.lgo --
+package lib
+
+type S struct {
+	M map[string]int
+	L []int
+	N int
+}
+
+func (s *S) Set() { s.N = 1 }
+
+const C = S{M: map[string]int{"a": 1}, L: []int{1, 2, 3}, N: 7}
+-- badwrite/app/main.lgo --
+package main
+
+import (
+	"fmt"
+
+	"example.com/ccbadwrite/lib"
+)
+
+func main() {
+	lib.C.L[0] = 9
+	lib.C.N = 9
+	lib.C.M["x"] = 1
+	copy(lib.C.L, []int{7})
+	clear(lib.C.L)
+	_ = append(lib.C.L, 4)
+	delete(lib.C.M, "a")
+	lib.C.L[0]++
+	lib.C.Set()
+	fmt.Println(lib.C.N)
+}

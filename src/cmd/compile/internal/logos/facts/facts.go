@@ -84,6 +84,7 @@ type ConstFuncFact struct {
 
 type ConstMapFact struct {
 	Object  string
+	Path    string
 	Bearing bool
 	Order   []int
 	Hashes  []uint64
@@ -113,6 +114,7 @@ type Facts struct {
 	Comptimes    []ComptimeFact
 	ConstFuncs   []ConstFuncFact
 	ConstMaps    []ConstMapFact
+	ConstComps   []string
 	Defaults     []DefaultFact
 	Locks        []LockFact
 	AllocFrees   []AllocFreeFact
@@ -127,7 +129,7 @@ func (f *Facts) empty() bool {
 		len(f.Readonlys) == 0 && len(f.Props) == 0 && len(f.Conforms) == 0 &&
 		len(f.Comptimes) == 0 && len(f.ConstFuncs) == 0 && len(f.Defaults) == 0 &&
 		len(f.Locks) == 0 && len(f.AllocFrees) == 0 && len(f.JsonMetas) == 0 &&
-		len(f.JsonKeys) == 0 && len(f.UnionMembers) == 0 && len(f.ConstMaps) == 0 && !f.GoPackage
+		len(f.JsonKeys) == 0 && len(f.UnionMembers) == 0 && len(f.ConstMaps) == 0 && len(f.ConstComps) == 0 && !f.GoPackage
 }
 
 type DefaultFact struct {
@@ -251,7 +253,12 @@ func Encode(fp goobj.FingerprintType, f *Facts) []byte {
 		}
 		for _, c := range f.ConstMaps {
 			if body, ok := encodeConstMap(c); ok {
-				recs = append(recs, factRecord{line: "constmap " + c.Object + " " + strconv.Itoa(len(body)), body: body})
+				recs = append(recs, factRecord{line: strings.TrimSpace("constmap " + c.Object + " " + strconv.Itoa(len(body)) + " " + c.Path), body: body})
+			}
+		}
+		for _, o := range f.ConstComps {
+			if ValidObject(o) {
+				recs = append(recs, factRecord{line: "constcomp " + o})
 			}
 		}
 		if f.GoPackage {
@@ -755,8 +762,8 @@ func Decode(data []byte) (*Facts, error) {
 			}
 			f.ConstFuncs = append(f.ConstFuncs, ConstFuncFact{Object: fields[1], Source: src})
 		case strings.HasPrefix(line, "constmap "):
-			if len(fields) != 3 {
-				return nil, fmt.Errorf(`logos facts line %d: bad constmap record %q (want "constmap <object> <length>")`, ln, line)
+			if len(fields) != 3 && len(fields) != 4 {
+				return nil, fmt.Errorf(`logos facts line %d: bad constmap record %q (want "constmap <object> <length> [<path>]")`, ln, line)
 			}
 			if !ValidObject(fields[1]) {
 				return nil, fmt.Errorf("logos facts line %d: bad object %q", ln, fields[1])
@@ -765,7 +772,11 @@ func Decode(data []byte) (*Facts, error) {
 			if aerr != nil || n <= 0 {
 				return nil, fmt.Errorf("logos facts line %d: bad constmap length %q", ln, fields[2])
 			}
-			if err := d.dup(ln, "constmap", fields[1], fields[1]); err != nil {
+			path := strings.Join(fields[3:], "")
+			if path != "" && !validCompositePath(path) {
+				return nil, fmt.Errorf("logos facts line %d: bad constmap path %q", ln, path)
+			}
+			if err := d.dup(ln, "constmap", fields[1]+"\x00"+path, fields[1]+path); err != nil {
 				return nil, err
 			}
 			body, err := d.requireBody(ln, "constmap", fields[1], n)
@@ -776,7 +787,16 @@ func Decode(data []byte) (*Facts, error) {
 			if err != nil {
 				return nil, fmt.Errorf("logos facts line %d: %v", ln, err)
 			}
+			cm.Path = path
 			f.ConstMaps = append(f.ConstMaps, cm)
+		case strings.HasPrefix(line, "constcomp "):
+			if len(fields) != 2 || !ValidObject(fields[1]) {
+				return nil, fmt.Errorf("logos facts line %d: bad constcomp record %q", ln, line)
+			}
+			if err := d.dup(ln, "constcomp", fields[1], fields[1]); err != nil {
+				return nil, err
+			}
+			f.ConstComps = append(f.ConstComps, fields[1])
 		default:
 			kind := line
 			if len(fields) > 0 {
@@ -861,6 +881,34 @@ func validPath(s string) bool {
 	}
 	for step := range strings.SplitSeq(s, ".") {
 		if !validStep(step) {
+			return false
+		}
+	}
+	return true
+}
+
+func validCompositePath(s string) bool {
+	if s == "" {
+		return false
+	}
+	for s != "" {
+		switch s[0] {
+		case '.':
+			end := strings.IndexAny(s[1:], ".[")
+			if end < 0 {
+				end = len(s) - 1
+			}
+			if !isIdent(s[1 : 1+end]) {
+				return false
+			}
+			s = s[1+end:]
+		case '[':
+			end := strings.IndexByte(s, ']')
+			if end < 2 || !isDigits(s[1:end]) || (end > 2 && s[1] == '0') {
+				return false
+			}
+			s = s[end+1:]
+		default:
 			return false
 		}
 	}

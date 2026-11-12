@@ -24,8 +24,10 @@ func dupBase() string {
 		"comptime C 4\nabcd\n" +
 		"conforms S example.com/x I\n" +
 		"const K P0\n" +
+		"constcomp M\n" +
 		"constfn N 4\nwxyz\n" +
 		"constmap M 36\nbearing 0\norder 0\nentry 1a 1 1 1\nckv\n" +
+		"constmap M 36 .a[0]\nbearing 0\norder 0\nentry 1a 1 1 1\nckv\n" +
 		"default T Fld 3\nabc\n" +
 		"fn F MayYield=1\n" +
 		"jsonkey J 0000 3\nkey\n" +
@@ -55,10 +57,17 @@ func TestDecodeRoundTripEveryKind(t *testing.T) {
 		Conforms:   []facts.ConformsFact{{Type: "S", IfacePath: "example.com/x", Iface: "I"}},
 		Comptimes:  []facts.ComptimeFact{{Object: "C", Source: []byte("abcd")}},
 		ConstFuncs: []facts.ConstFuncFact{{Object: "N", Source: []byte("wxyz")}},
-		ConstMaps: []facts.ConstMapFact{{
-			Object: "M", Order: []int{0}, Hashes: []uint64{0x1a},
-			Canons: []string{"c"}, Keys: []string{"k"}, Vals: []string{"v"},
-		}},
+		ConstMaps: []facts.ConstMapFact{
+			{
+				Object: "M", Order: []int{0}, Hashes: []uint64{0x1a},
+				Canons: []string{"c"}, Keys: []string{"k"}, Vals: []string{"v"},
+			},
+			{
+				Object: "M", Path: ".a[0]", Order: []int{0}, Hashes: []uint64{0x1a},
+				Canons: []string{"c"}, Keys: []string{"k"}, Vals: []string{"v"},
+			},
+		},
+		ConstComps: []string{"M"},
 		Defaults:   []facts.DefaultFact{{Type: "T", Field: "Fld", Text: "abc"}},
 		Locks:      []facts.LockFact{{Object: "F", Effect: "requires", Path: "P0"}},
 		AllocFrees: []facts.AllocFreeFact{{Object: "F"}},
@@ -115,6 +124,8 @@ func TestDecodeRejectsExactDuplicate(t *testing.T) {
 		{"conforms same triple", dupHead() + "conforms S example.com/x I\nconforms S example.com/x I\n"},
 		{"default same field same text", dupHead() + "default T Fld 3\nabc\ndefault T Fld 3\nabc\n"},
 		{"constmap same object same body", dupHead() + "constmap M 16\nbearing 0\norder\n\nconstmap M 16\nbearing 0\norder\n\n"},
+		{"constcomp same object", dupHead() + "constcomp M\nconstcomp M\n"},
+		{"constmap same object same path", dupHead() + "constmap M 16 .a\nbearing 0\norder\n\nconstmap M 16 .a\nbearing 0\norder\n\n"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -147,6 +158,10 @@ func TestDecodeAcceptsDistinctKeys(t *testing.T) {
 			func(f *facts.Facts) bool { return len(f.JsonKeys) == 2 }},
 		{"unionmember same type distinct index", dupHead() + "unionmember U 0000 example.com/x.S\nunionmember U 0001 example.com/x.T\n",
 			func(f *facts.Facts) bool { return len(f.UnionMembers) == 2 }},
+		{"constmap same object distinct paths", dupHead() + "constmap M 16 .a\nbearing 0\norder\n\nconstmap M 16 .b\nbearing 0\norder\n\n",
+			func(f *facts.Facts) bool {
+				return len(f.ConstMaps) == 2 && f.ConstMaps[0].Path == ".a" && f.ConstMaps[1].Path == ".b"
+			}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -191,8 +206,10 @@ func TestDecodeRejectsSwappedAdjacent(t *testing.T) {
 		"comptime C 4\nabcd\n",
 		"conforms S example.com/x I\n",
 		"const K P0\n",
+		"constcomp M\n",
 		"constfn N 4\nwxyz\n",
 		"constmap M 36\nbearing 0\norder 0\nentry 1a 1 1 1\nckv\n",
+		"constmap M 36 .a[0]\nbearing 0\norder 0\nentry 1a 1 1 1\nckv\n",
 		"default T Fld 3\nabc\n",
 		"fn F MayYield=1\n",
 		"jsonkey J 0000 3\nkey\n",
@@ -210,6 +227,34 @@ func TestDecodeRejectsSwappedAdjacent(t *testing.T) {
 		if _, err := facts.Decode([]byte(input)); err == nil {
 			t.Fatalf("Decode(swapped %d,%d) succeeded, want unsorted error", i, i+1)
 		}
+	}
+}
+
+func TestDecodeRejectsMalformedCompositeRecords(t *testing.T) {
+	cases := []struct{ name, input string }{
+		{"constcomp bad object", dupHead() + "constcomp 9x\n"},
+		{"constcomp extra field", dupHead() + "constcomp M N\n"},
+	}
+	for _, p := range []string{"a", ".", ".a.", ".a[", "[x]", ".1a", ".a[01]", ".a[0", "..a", ".a]0[", ".a[-1]"} {
+		cases = append(cases, struct{ name, input string }{"constmap path " + p, dupHead() + "constmap M 16 " + p + "\nbearing 0\norder\n\n"})
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got, err := facts.Decode([]byte(c.input)); err == nil {
+				t.Fatalf("Decode(%s) = %+v, want error", c.name, got)
+			}
+		})
+	}
+}
+
+func TestDecodeRejectsDuplicateMapKey(t *testing.T) {
+	fp := goobj.FingerprintType{0, 1, 2, 3, 4, 5, 6, 7}
+	in := &facts.Facts{Fingerprint: fp, ConstMaps: []facts.ConstMapFact{{
+		Object: "M", Order: []int{0, 1}, Hashes: []uint64{1, 1},
+		Canons: []string{"c", "c"}, Keys: []string{"k", "k"}, Vals: []string{"v", "w"},
+	}}}
+	if got, err := facts.Decode(facts.Encode(fp, in)); err == nil {
+		t.Fatalf("Decode(map with a repeated key) = %+v, want error", got)
 	}
 }
 
@@ -248,6 +293,27 @@ func TestImportRejectsForgedDuplicate(t *testing.T) {
 		t.Fatal("Import(forged duplicate) succeeded, want build failure")
 	} else if !strings.Contains(err.Error(), "uplicate") {
 		t.Fatalf("Import(forged duplicate) error %q does not name duplication", err)
+	}
+}
+
+func TestImportRejectsForgedCompositePath(t *testing.T) {
+	fp := goobj.FingerprintType{1, 2, 3, 4, 5, 6, 7, 8}
+	forged := "logos-facts 3\n" +
+		"fingerprint 0102030405060708\n" +
+		"constcomp M\n" +
+		"constmap M 16 .a[01]\nbearing 0\norder\n\n"
+	var ar []byte
+	ar = append(ar, []byte("!<arch>\n")...)
+	ar = append(ar, archiveMember("__.PKGDEF", []byte("abc"))...)
+	ar = append(ar, archiveMember(facts.MemberName, []byte(forged))...)
+	got, err := facts.FindMember(writeArchive(t, ar))
+	if err != nil {
+		t.Fatalf("FindMember failed: %v", err)
+	}
+	if _, err := facts.Import("example.com/m/victim", "export-bytes"+string(fp[:]), got); err == nil {
+		t.Fatal("Import(forged composite path) succeeded, want build failure")
+	} else if !strings.Contains(err.Error(), "bad facts") {
+		t.Fatalf("Import(forged composite path) error %q does not name the bad facts", err)
 	}
 }
 
