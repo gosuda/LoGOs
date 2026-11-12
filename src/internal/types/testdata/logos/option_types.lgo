@@ -41,6 +41,42 @@ func optNoOut(x int?, up *OptUser?) {
 	_, _ = i, u
 }
 
+func optTakesInt(i int) {}
+func optTakesUser(u *OptUser) {}
+func optTakesValue(u OptUser) {}
+
+func optArgs(x int?, up *OptUser?, vp OptUser?) {
+	optTakesInt(x /* ERROR "correctness::nil_deref_unproven" */)
+	optTakesUser(up /* ERROR "correctness::nil_deref_unproven" */)
+	optTakesValue(vp /* ERROR "correctness::nil_deref_unproven" */)
+}
+
+func optReturnInt(x int?) int {
+	return x /* ERROR "correctness::nil_deref_unproven" */
+}
+
+func optReturnPointer(up *OptUser?) *OptUser {
+	return up /* ERROR "correctness::nil_deref_unproven" */
+}
+
+func optReturnValue(vp OptUser?) OptUser {
+	return vp /* ERROR "correctness::nil_deref_unproven" */
+}
+
+func optReturnPair(x int?, up *OptUser?) (int, *OptUser) {
+	return x /* ERROR "correctness::nil_deref_unproven" */, up /* ERROR "correctness::nil_deref_unproven" */
+}
+
+func optReturnNarrowed(x int?, up *OptUser?) (int, *OptUser) {
+	if x == nil {
+		return 0, &OptUser{}
+	}
+	if up == nil {
+		return 0, &OptUser{}
+	}
+	return x, up
+}
+
 func optMethods(up *OptUser?) {
 	_ = up.Greet /* ERROR "[correctness::nil_deref_unproven] cannot call method on *OptUser? without proving != nil" */ ()
 	_ = up.Name /* ERROR "[correctness::nil_deref_unproven] cannot access field Name of *OptUser? without proving != nil" */
