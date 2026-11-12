@@ -1180,6 +1180,10 @@ A receive-channel source MUST deliver a finished result while the channel is qui
 
 An empty source MUST yield no result and no error. [T-206]
 
+The sequence that a group stage lowers to MUST do no work until it is ranged, and ranging it a second time MUST panic with `logos: group stage sequence ranged twice`. [T-206]
+
+After a stage stopped, it MUST ignore the elements that the source still yields, MUST NOT start a child for them, and MUST NOT call the consumer again. [T-206]
+
 A finished result that is never delivered MUST be closed when it implements `io.Closer` and the chain owns it, in reverse input order after the join. [T-206]
 
 A result dropped by a `filter` of the segment, and the value that a failed `filter` predicate examined, MUST be closed once when the chain owns it, and a delivered result MUST NOT be closed by the stage. [T-206]
