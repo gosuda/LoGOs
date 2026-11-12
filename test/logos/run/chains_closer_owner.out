@@ -88,6 +88,7 @@ ok local-reassign-owned
 ok local-reassign-borrowed
 ok local-captured
 ok local-param
+ok local-copy-of-local
 ok local-mixed-returns
 ok local-two-made
 ok local-try-filter-fail
@@ -98,3 +99,10 @@ ok flight-try-fail-owned-tail
 ok flight-panic-owned-tail
 ok flight-drop-then-fail
 ok flight-calm
+ok value-drop
+ok value-drop-collect
+ok value-try-fail
+ok value-panic
+ok value-drop-then-fail-owned-tail
+ok value-panic-owned-tail
+ok value-calm

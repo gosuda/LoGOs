@@ -20,6 +20,9 @@ stdout '^ok call-shared-count$'
 stdout '^ok local-reassign-owned$'
 stdout '^ok flight-try-fail-owned-tail$'
 stdout '^ok flight-panic-owned-tail$'
+stdout '^ok local-copy-of-local$'
+stdout '^ok value-drop-then-fail-owned-tail$'
+stdout '^ok value-panic$'
 cmp stdout ../../native.txt
 cd ../..
 
