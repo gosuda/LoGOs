@@ -772,13 +772,12 @@ func (fl *fileLower) narrowAccess(e *syntax.Name) syntax.Expr {
 }
 
 func (fl *fileLower) coeType(e syntax.Expr) *types2.Option {
-	if o := fl.asOptionThroughConst(fl.optType(e)); o != nil {
-		return o
-	}
 	if name, ok := syntax.Unparen(e).(*syntax.Name); ok {
-		return fl.narrowTarget(name)
+		if o := fl.narrowTarget(name); o != nil {
+			return o
+		}
 	}
-	return nil
+	return fl.asOptionThroughConst(fl.optType(e))
 }
 
 func (fl *fileLower) lowerOptReceiver(x syntax.Expr) syntax.Expr {
