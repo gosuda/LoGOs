@@ -8,6 +8,7 @@ import (
 	"cmd/compile/internal/logos/ctfe"
 	"cmd/compile/internal/syntax"
 	"cmd/compile/internal/types2"
+	"go/token"
 	"slices"
 )
 
@@ -314,23 +315,22 @@ func (fl *fileLower) endOff(e syntax.Expr) int {
 }
 
 func lenCallEnd(src []byte, start int) (int, bool) {
-	off := start
-	depth := 0
-	opened := false
-	for off < len(src) {
-		switch src[off] {
-		case '(':
+	depth, end := 0, -1
+	scanSegment(src, start, len(src), func(t tok) bool {
+		switch {
+		case t.comment || t.auto:
+		case t.kind == token.LPAREN:
 			depth++
-			opened = true
-		case ')':
+		case t.kind == token.RPAREN:
 			depth--
-			if opened && depth == 0 {
-				return off + 1, true
+			if depth == 0 {
+				end = t.end
+				return false
 			}
 		}
-		off++
-	}
-	return 0, false
+		return true
+	})
+	return end, end >= 0
 }
 
 func nullaryCallEnd(src []byte, end int) (int, bool) {
