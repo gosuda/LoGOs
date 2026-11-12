@@ -403,10 +403,8 @@ func unionContainerOf(t types2.Type) (unionContainer, bool) {
 		e = unaliasConstView(p.Elem())
 		ptr = true
 	}
-	if _, ok := types2.LogosUnionTerms(e); !ok {
-		if _, ok := unionFactMembers(e); !ok {
-			return unionContainer{}, false
-		}
+	if _, ok := types2.LogosUnionMembers(e); !ok {
+		return unionContainer{}, false
 	}
 	return unionContainer{kind: kind, union: e, ptr: ptr}, true
 }

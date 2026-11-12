@@ -199,7 +199,7 @@ func logosStaticKindOK(t Type) bool {
 		if logosClosedUnion(u) != nil {
 			return true
 		}
-		_, ok := logosForeignUnionName(u)
+		_, ok := LogosUnionMembers(u)
 		return ok
 	case *Map:
 		b, ok := iface.Key().Underlying().(*Basic)
@@ -467,17 +467,13 @@ func (check *Checker) logosCheckUnionJSONMembers() {
 
 func (check *Checker) logosCheckUnionFieldJSON(fld *Var) {
 	for _, t := range logosNestedUnionTypes(fld.Type()) {
-		tset := logosClosedUnion(t)
-		if tset != nil && logosIsClosed(tset) {
-			for _, term := range tset.terms {
-				if term.tilde {
-					continue
-				}
-				check.logosCheckUnionTermJSON(fld, term.typ)
-			}
+		members, ok := LogosUnionMembers(t)
+		if !ok {
 			continue
 		}
-		check.logosCheckForeignUnionMembers(fld, t, make(map[string]bool))
+		for _, m := range members {
+			check.logosCheckUnionMemberJSON(fld, m)
+		}
 	}
 }
 
@@ -583,44 +579,16 @@ func logosImportedBareUnion(t Type) bool {
 	return logosImportedBareUnions.m[n.Obj().Pkg().Path()+"."+n.Obj().Name()]
 }
 
-func (check *Checker) logosCheckForeignUnionMembers(fld *Var, t Type, seen map[string]bool) {
-	name, ok := logosForeignUnionName(t)
+func (check *Checker) logosCheckUnionMemberJSON(fld *Var, m LogosUnionMember) {
+	if m.Type != nil {
+		check.logosCheckUnionTermJSON(fld, m.Type)
+		return
+	}
+	mt, ok := check.logosForeignMemberType(m.Text())
 	if !ok {
-		return
-	}
-	key := name.pkgPath + "." + name.typeName
-	if seen[key] {
-		return
-	}
-	seen[key] = true
-	for _, m := range logosLookupImportedUnionMembers(name.pkgPath, name.typeName) {
-		check.logosCheckForeignUnionMember(fld, m.Member, seen)
-	}
-}
-
-func (check *Checker) logosCheckForeignUnionMember(fld *Var, member string, seen map[string]bool) {
-	mt, ok := check.logosForeignMemberType(member)
-	if !ok {
-		return
-	}
-	if subt := logosClosedUnion(mt); subt != nil && logosIsClosed(subt) {
-		check.logosCheckUnionTerms(fld, subt)
-		return
-	}
-	if _, ok := logosForeignUnionName(mt); ok {
-		check.logosCheckForeignUnionMembers(fld, mt, seen)
 		return
 	}
 	check.logosCheckUnionTermJSON(fld, mt)
-}
-
-func (check *Checker) logosCheckUnionTerms(fld *Var, tset *_TypeSet) {
-	for _, term := range tset.terms {
-		if term.tilde {
-			continue
-		}
-		check.logosCheckUnionTermJSON(fld, term.typ)
-	}
 }
 
 type logosForeignName struct {

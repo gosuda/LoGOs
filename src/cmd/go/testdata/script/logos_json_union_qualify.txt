@@ -19,6 +19,25 @@ logos run ./samename
 stdout '^samename a r=1$'
 stdout '^samename b s=2$'
 
+# A union that names an imported union decodes and encodes only its members,
+# whatever the position, and a union that an imported package builds from
+# another package's union does the same.
+logos run ./matrix
+! stdout 'FAIL'
+stdout '^ok n-field$'
+stdout '^ok n-slice$'
+stdout '^ok n-map$'
+stdout '^ok n-nomember$'
+stdout '^ok n-marshal$'
+stdout '^ok v-field$'
+stdout '^ok v-slice$'
+stdout '^ok v-map$'
+stdout '^ok v-nomember$'
+stdout '^ok v-marshal$'
+stdout '^ok u-field$'
+stdout '^ok u-slice$'
+stdout '^ok u-map$'
+
 -- w/go.mod --
 module example.com/jq
 
@@ -177,4 +196,159 @@ func show(input string) {
 func main() {
 	show(`{"v":{"r":1}}`)
 	show(`{"v":{"s":2}}`)
+}
+
+-- w/v/v.lgo --
+package v
+
+import "example.com/jq/u"
+
+type C struct {
+	Z int64 `json:"z"`
+}
+
+type V interface {
+	u.U | C
+}
+
+-- w/matrix/main.lgo --
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"slices"
+
+	"example.com/jq/u"
+	"example.com/jq/v"
+)
+
+type L struct {
+	Q int64 `json:"q"`
+}
+
+type N interface {
+	u.U | L
+}
+
+type HN struct {
+	F N            `json:"f"`
+	S []N          `json:"s"`
+	M map[string]N `json:"m"`
+}
+
+type HV struct {
+	F v.V            `json:"f"`
+	S []v.V          `json:"s"`
+	M map[string]v.V `json:"m"`
+}
+
+type HU struct {
+	F u.U            `json:"f"`
+	S []u.U          `json:"s"`
+	M map[string]u.U `json:"m"`
+}
+
+func nameOf(x any) string {
+	return fmt.Sprintf("%T", x)
+}
+
+func check(name string, got, want []string) {
+	if slices.Equal(got, want) {
+		fmt.Println("ok", name)
+		return
+	}
+	fmt.Println("FAIL", name, got, want)
+}
+
+func must(name string, err error) {
+	if err != nil {
+		fmt.Println("FAIL", name, err)
+		os.Exit(1)
+	}
+}
+
+func checkN() {
+	nIn := `{"f":{"x":5},"s":[{"x":1},{"y":"b"},{"q":3}],"m":{"a":{"y":"c"},"b":{"q":4}}}`
+	var hn HN
+	must("n-decode", json.Unmarshal([]byte(nIn), &hn))
+	check("n-field", []string{nameOf(hn.F)}, []string{"m.A"})
+	var ns []string
+	for _, e := range hn.S {
+		ns = append(ns, nameOf(e))
+	}
+	check("n-slice", ns, []string{"m.A", "m.B", "main.L"})
+	var nm []string
+	for k, e := range hn.M {
+		nm = append(nm, k+"="+nameOf(e))
+	}
+	slices.Sort(nm)
+	check("n-map", nm, []string{"a=m.B", "b=main.L"})
+	out, err := json.Marshal(hn)
+	if err != nil {
+		fmt.Println("FAIL n-encode", err)
+		os.Exit(1)
+	}
+	check("n-marshal", []string{string(out)}, []string{nIn})
+	var none HN
+	if err := json.Unmarshal([]byte(`{"f":{"w":1}}`), &none); err == nil {
+		fmt.Println("FAIL n-nomember", nameOf(none.F))
+	} else {
+		fmt.Println("ok n-nomember")
+	}
+}
+
+func checkV() {
+	vIn := `{"f":{"z":1},"s":[{"x":1},{"y":"b"},{"z":2}],"m":{"a":{"y":"c"},"b":{"z":4}}}`
+	var hv HV
+	must("v-decode", json.Unmarshal([]byte(vIn), &hv))
+	check("v-field", []string{nameOf(hv.F)}, []string{"v.C"})
+	var vs []string
+	for _, e := range hv.S {
+		vs = append(vs, nameOf(e))
+	}
+	check("v-slice", vs, []string{"m.A", "m.B", "v.C"})
+	var vm []string
+	for k, e := range hv.M {
+		vm = append(vm, k+"="+nameOf(e))
+	}
+	slices.Sort(vm)
+	check("v-map", vm, []string{"a=m.B", "b=v.C"})
+	out, err := json.Marshal(hv)
+	if err != nil {
+		fmt.Println("FAIL v-encode", err)
+		os.Exit(1)
+	}
+	check("v-marshal", []string{string(out)}, []string{vIn})
+	var vnone HV
+	if err := json.Unmarshal([]byte(`{"f":{"w":1}}`), &vnone); err == nil {
+		fmt.Println("FAIL v-nomember", nameOf(vnone.F))
+	} else {
+		fmt.Println("ok v-nomember")
+	}
+}
+
+func checkU() {
+	uIn := `{"f":{"x":5},"s":[{"x":1},{"y":"b"}],"m":{"a":{"y":"c"}}}`
+	var hu HU
+	must("u-decode", json.Unmarshal([]byte(uIn), &hu))
+	check("u-field", []string{nameOf(hu.F)}, []string{"m.A"})
+	var us []string
+	for _, e := range hu.S {
+		us = append(us, nameOf(e))
+	}
+	check("u-slice", us, []string{"m.A", "m.B"})
+	var um []string
+	for k, e := range hu.M {
+		um = append(um, k+"="+nameOf(e))
+	}
+	slices.Sort(um)
+	check("u-map", um, []string{"a=m.B"})
+}
+
+func main() {
+	checkN()
+	checkV()
+	checkU()
 }

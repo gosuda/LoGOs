@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"strings"
 
+	"cmd/compile/internal/base"
 	"cmd/compile/internal/syntax"
 	"cmd/compile/internal/types2"
 )
@@ -424,22 +425,6 @@ func omitCall(f *jsonField, field string) string {
 	return "!(" + strings.Join(tests, " || ") + ")"
 }
 
-func flattenUnionTerms(t types2.Type) []types2.Type {
-	terms, ok := types2.LogosUnionTerms(t)
-	if !ok {
-		return nil
-	}
-	var out []types2.Type
-	for _, term := range terms {
-		if sub, ok := types2.LogosUnionTerms(term); ok && len(sub) > 0 {
-			out = append(out, flattenUnionTerms(term)...)
-		} else {
-			out = append(out, term)
-		}
-	}
-	return out
-}
-
 func unionPackage(t types2.Type) *types2.Package {
 	switch u := types2.Unalias(t).(type) {
 	case *types2.Named:
@@ -546,13 +531,18 @@ func (g *marshalGen) unionCode(f *jsonField) fieldCode {
 	e := fmt.Sprintf("_logos_e%d", f.pos)
 	pins := []string{x + " := " + g.recv + "." + f.goName}
 
-	terms := flattenUnionTerms(f.typ)
+	members, ok := types2.LogosUnionMembers(f.typ)
+	if !ok {
+		base.Fatalf("logos: union field %s has no union terms", f.goName)
+	}
 	pkg := unionPackage(f.typ)
 
 	sw := []string{"switch _logos_m := " + x + ".(type) {"}
-	for _, m := range terms {
-		mname := types2.TypeString(m, g.js.qualify)
-		sw = append(sw, "case "+mname+":", unionMemberStaticCall(m, pkg, b, e))
+	for _, m := range members {
+		if m.Type == nil {
+			continue
+		}
+		sw = append(sw, "case "+types2.TypeString(m.Type, g.js.qualify)+":", unionMemberStaticCall(m.Type, pkg, b, e))
 	}
 	sw = append(sw, "case nil:")
 	sw = append(sw, fmt.Sprintf("\t%s = []byte(\"null\")", b))

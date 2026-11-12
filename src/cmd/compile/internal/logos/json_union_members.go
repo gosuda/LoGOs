@@ -36,27 +36,27 @@ func classifyUnionMembers(holderPkg *types2.Package, staticJSON map[*types2.Name
 		typ = cv.Elem
 	}
 	names := unionNames{display: types2.TypeString(typ, qualifierFor(holderPkg)), code: types2.TypeString(typ, codeQual)}
-	terms := flattenUnionTerms(typ)
-	if len(terms) > 0 {
-		members, ok := classifyFromTerms(holderPkg, staticJSON, terms, codeQual)
-		return members, names, ok
+	members, ok := types2.LogosUnionMembers(typ)
+	if !ok {
+		return nil, names, false
 	}
-	members, ok := classifyFromFacts(holderPkg, typ, codeQual)
-	return members, names, ok
-}
-
-func classifyFromTerms(holderPkg *types2.Package, staticJSON map[*types2.Named]bool, terms []types2.Type, codeQual func(*types2.Package) string) ([]unionMemberClass, bool) {
 	qual := qualifierFor(holderPkg)
-	out := make([]unionMemberClass, 0, len(terms))
-	for _, m := range terms {
-		c, ok := classifyOneMember(holderPkg, staticJSON, m, qual)
-		if !ok {
-			return nil, false
+	out := make([]unionMemberClass, 0, len(members))
+	for _, m := range members {
+		var c unionMemberClass
+		var classified bool
+		if m.Type != nil {
+			c, classified = classifyOneMember(holderPkg, staticJSON, m.Type, qual)
+			c.code = types2.TypeString(m.Type, codeQual)
+		} else {
+			c, classified = classifyFactMember(holderPkg, m.Text(), codeQual)
 		}
-		c.code = types2.TypeString(m, codeQual)
+		if !classified {
+			return nil, names, false
+		}
 		out = append(out, c)
 	}
-	return out, true
+	return out, names, true
 }
 
 func qualifierFor(holderPkg *types2.Package) func(*types2.Package) string {
@@ -69,57 +69,6 @@ func qualifierFor(holderPkg *types2.Package) func(*types2.Package) string {
 		}
 		return p.Name()
 	}
-}
-
-func unionFactMembers(typ types2.Type) ([]facts.UnionMemberFact, bool) {
-	unwrapped := unaliasConstView(typ)
-	named, ok := unwrapped.(*types2.Named)
-	if !ok || named.Obj() == nil || named.Obj().Pkg() == nil {
-		return nil, false
-	}
-	if args := named.TypeArgs(); args != nil && args.Len() > 0 {
-		for i := range args.Len() {
-			if _, ok := types2.Unalias(args.At(i)).(*types2.TypeParam); ok {
-				return nil, false
-			}
-		}
-	}
-	unionName := named.Obj().Name()
-	rec, ok := facts.Lookup(named.Obj().Pkg().Path())
-	if !ok || rec == nil {
-		return nil, false
-	}
-	var indexed []facts.UnionMemberFact
-	for _, u := range rec.UnionMembers {
-		if u.Type == unionName {
-			indexed = append(indexed, u)
-		}
-	}
-	if len(indexed) == 0 {
-		return nil, false
-	}
-	for i := 1; i < len(indexed); i++ {
-		for j := i; j > 0 && indexed[j].Index < indexed[j-1].Index; j-- {
-			indexed[j], indexed[j-1] = indexed[j-1], indexed[j]
-		}
-	}
-	return indexed, true
-}
-
-func classifyFromFacts(holderPkg *types2.Package, typ types2.Type, codeQual func(*types2.Package) string) ([]unionMemberClass, bool) {
-	indexed, ok := unionFactMembers(typ)
-	if !ok {
-		return nil, false
-	}
-	out := make([]unionMemberClass, 0, len(indexed))
-	for _, u := range indexed {
-		c, ok := classifyFactMember(holderPkg, u.Member, codeQual)
-		if !ok {
-			return nil, false
-		}
-		out = append(out, c)
-	}
-	return out, true
 }
 
 func classifyFactMember(holderPkg *types2.Package, member string, codeQual func(*types2.Package) string) (unionMemberClass, bool) {

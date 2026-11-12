@@ -28,8 +28,8 @@ func writeJSON(pkg *types2.Package, info *types2.Info, f *Facts) {
 			writeJSONStruct(pkg, info, f, name, named, st)
 			continue
 		}
-		if iface, ok := named.Underlying().(*types2.Interface); ok {
-			writeJSONUnion(f, name, iface)
+		if _, ok := named.Underlying().(*types2.Interface); ok {
+			writeJSONUnion(f, name, named)
 			continue
 		}
 		if hasUnmarshal(pkg, named) {
@@ -86,65 +86,26 @@ func writeJSONStruct(pkg *types2.Package, info *types2.Info, f *Facts, name stri
 	}
 }
 
-func writeJSONUnion(f *Facts, name string, iface *types2.Interface) {
-	terms, ok := jsonUnionTerms(iface)
+func writeJSONUnion(f *Facts, name string, named *types2.Named) {
+	members, ok := types2.LogosUnionMembers(named)
 	if !ok {
 		return
 	}
-	flat := flattenJSONTerms(terms)
-	if len(flat) == 0 {
-		return
-	}
-	for i, m := range flat {
-		text, ok := jsonMemberText(m)
+	texts := make([]string, len(members))
+	for i, m := range members {
+		if m.Type == nil {
+			texts[i] = m.Text()
+			continue
+		}
+		text, ok := jsonMemberText(m.Type)
 		if !ok {
 			return
 		}
+		texts[i] = text
+	}
+	for i, text := range texts {
 		f.UnionMembers = append(f.UnionMembers, UnionMemberFact{Type: name, Index: i, Member: text})
 	}
-}
-
-func jsonUnionTerms(iface *types2.Interface) ([]types2.Type, bool) {
-	var out []types2.Type
-	for i := range iface.NumEmbeddeds() {
-		u, ok := iface.EmbeddedType(i).(*types2.Union)
-		if !ok {
-			continue
-		}
-		for j := range u.Len() {
-			term := u.Term(j)
-			if term.Tilde() {
-				return nil, false
-			}
-			out = append(out, term.Type())
-		}
-	}
-	if len(out) == 0 {
-		return nil, false
-	}
-	return out, true
-}
-
-func flattenJSONTerms(terms []types2.Type) []types2.Type {
-	var out []types2.Type
-	for _, term := range terms {
-		elem := term
-		if ptr, ok := types2.Unalias(term).(*types2.Pointer); ok {
-			elem = ptr.Elem()
-		}
-		iface, ok := types2.Unalias(elem).Underlying().(*types2.Interface)
-		if !ok {
-			out = append(out, term)
-			continue
-		}
-		sub, ok := jsonUnionTerms(iface)
-		if !ok || len(sub) == 0 {
-			out = append(out, term)
-			continue
-		}
-		out = append(out, flattenJSONTerms(sub)...)
-	}
-	return out
 }
 
 func jsonMemberText(t types2.Type) (string, bool) {

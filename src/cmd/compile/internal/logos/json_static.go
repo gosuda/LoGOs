@@ -247,10 +247,7 @@ func (fl *fileLower) classifyJSONField(t types2.Type) jsonShape {
 }
 
 func (fl *fileLower) classifyShape(t types2.Type) jsonShape {
-	if _, ok := types2.LogosUnionTerms(t); ok {
-		return jsonShape{kind: shapeUnion}
-	}
-	if _, ok := unionFactMembers(t); ok {
+	if _, ok := types2.LogosUnionMembers(t); ok {
 		return jsonShape{kind: shapeUnion}
 	}
 	switch c := types2.Unalias(t).(type) {

@@ -5,6 +5,8 @@
 package types2
 
 import (
+	"strings"
+
 	"cmd/compile/internal/syntax"
 	. "internal/types/errors"
 )
@@ -269,13 +271,94 @@ func LogosUnionTerms(t Type) ([]Type, bool) {
 	if iface != nil {
 		var kept []Type
 		for _, m := range out {
-			if Implements(m, iface) {
+			if _, imported := logosForeignUnionName(m); imported || Implements(m, iface) {
 				kept = append(kept, m)
 			}
 		}
 		out = kept
 	}
 	return out, true
+}
+
+type LogosUnionMember struct {
+	Type Type
+	Pkg  string
+	Name string
+	Ptr  bool
+}
+
+func (m LogosUnionMember) Text() string {
+	text := m.Pkg + "." + m.Name
+	if m.Ptr {
+		return "*" + text
+	}
+	return text
+}
+
+func LogosUnionMembers(t Type) ([]LogosUnionMember, bool) {
+	t = Unalias(t)
+	if cv, ok := t.(*ConstView); ok {
+		t = Unalias(cv.Elem)
+	}
+	var out []LogosUnionMember
+	seen := make(map[string]bool)
+	visited := make(map[string]bool)
+	if terms, ok := LogosUnionTerms(t); ok {
+		for _, term := range terms {
+			if name, imported := logosForeignUnionName(term); imported {
+				logosAppendImportedMembers(name, &out, seen, visited)
+				continue
+			}
+			logosAppendTypeMember(term, &out, seen)
+		}
+	} else if name, imported := logosForeignUnionName(t); imported {
+		logosAppendImportedMembers(name, &out, seen, visited)
+	}
+	return out, len(out) > 0
+}
+
+func logosAppendTypeMember(term Type, out *[]LogosUnionMember, seen map[string]bool) {
+	key := TypeString(term, nil)
+	if seen[key] {
+		return
+	}
+	seen[key] = true
+	m := LogosUnionMember{Type: term}
+	elem := Unalias(term)
+	if p, ok := elem.(*Pointer); ok {
+		m.Ptr = true
+		elem = Unalias(p.Elem())
+	}
+	if named, ok := elem.(*Named); ok && named.Obj() != nil && named.Obj().Pkg() != nil {
+		m.Pkg = named.Obj().Pkg().Path()
+		m.Name = named.Obj().Name()
+	}
+	*out = append(*out, m)
+}
+
+func logosAppendImportedMembers(name logosForeignName, out *[]LogosUnionMember, seen, visited map[string]bool) {
+	key := name.pkgPath + "." + name.typeName
+	if visited[key] {
+		return
+	}
+	visited[key] = true
+	for _, member := range logosLookupImportedUnionMembers(name.pkgPath, name.typeName) {
+		trimmed, ptr := strings.CutPrefix(member.Member, "*")
+		pkgPath, typeName, ok := strings.CutLast(trimmed, ".")
+		if !ok || pkgPath == "" || typeName == "" {
+			continue
+		}
+		nested := logosForeignName{pkgPath: pkgPath, typeName: typeName}
+		if !ptr && len(logosLookupImportedUnionMembers(pkgPath, typeName)) > 0 {
+			logosAppendImportedMembers(nested, out, seen, visited)
+			continue
+		}
+		if seen[member.Member] {
+			continue
+		}
+		seen[member.Member] = true
+		*out = append(*out, LogosUnionMember{Pkg: pkgPath, Name: typeName, Ptr: ptr})
+	}
 }
 
 func (check *Checker) logosUnionLiteralMiss(x, y *operand) (lit *operand, union Type, from Type) {
