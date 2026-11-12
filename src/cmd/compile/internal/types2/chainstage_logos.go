@@ -25,21 +25,31 @@ func (check *Checker) logosNamedArgs(args []syntax.Expr) bool {
 }
 
 func (check *Checker) logosNamedArgCall(x *operand, call *syntax.CallExpr) bool {
-	if !check.logosNamedArgs(call.ArgList) {
+	if !slices.ContainsFunc(call.ArgList, func(arg syntax.Expr) bool {
+		_, named := arg.(*syntax.KeyValueExpr)
+		return named
+	}) {
 		return false
 	}
-	check.logosUseCallee(call.Fun)
+	if check.logosUseCallee(call.Fun) {
+		check.logosNamedArgs(call.ArgList)
+	} else {
+		for _, arg := range call.ArgList {
+			if kv, ok := arg.(*syntax.KeyValueExpr); ok {
+				check.use(kv.Value)
+			}
+		}
+	}
 	check.logosUsePositional(call.ArgList)
 	logosStageInvalid(x, call)
 	return true
 }
 
-func (check *Checker) logosUseCallee(fun syntax.Expr) {
+func (check *Checker) logosUseCallee(fun syntax.Expr) bool {
 	if sel, ok := syntax.Unparen(fun).(*syntax.SelectorExpr); ok && logosChainMethods[sel.Sel.Value] {
-		check.use(sel.X)
-		return
+		return check.use(sel.X)
 	}
-	check.use(fun)
+	return check.use(fun)
 }
 
 type logosStageForm int

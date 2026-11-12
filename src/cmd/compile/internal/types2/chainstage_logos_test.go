@@ -120,8 +120,12 @@ func TestLogosGroupStageRejectsReceivers(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			c := checkStageSource(t, stageProgram(tc.decls, tc.recv))
-			if !strings.Contains(strings.Join(c.errors, "\n"), "[correctness::named_argument]") {
-				t.Errorf("errors %q do not carry correctness::named_argument", c.errors)
+			joined := strings.Join(c.errors, "\n")
+			if !strings.Contains(joined, "group undefined") {
+				t.Errorf("errors %q do not carry the undefined method", c.errors)
+			}
+			if strings.Contains(joined, "[correctness::named_argument]") {
+				t.Errorf("errors %q carry correctness::named_argument for limit = N", c.errors)
 			}
 			if elem, ok := c.stage(t, "group"); ok {
 				t.Errorf("group accepted the receiver with elem %v", elem)

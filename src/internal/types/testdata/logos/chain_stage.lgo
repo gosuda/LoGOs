@@ -346,15 +346,33 @@ func unorderedOrdinaryChain(xs []int) {
 }
 
 func mapSource(ctx context.Context, m map[string]int) {
-	_ = m.group /* ERROR "undefined" */ (ctx, limit /* ERROR "named_argument" */ = 2)
+	_ = m.group /* ERROR "undefined" */ (ctx, limit = 2)
 }
 
 func sendOnlySource(ctx context.Context, ch chan<- int) {
-	_ = ch.group /* ERROR "undefined" */ (ctx, limit /* ERROR "named_argument" */ = 2).map(x => x)
+	_ = ch.group /* ERROR "undefined" */ (ctx, limit = 2).map(x => x)
 }
 
 func intSource(ctx context.Context, n int) {
-	_ = n.group /* ERROR "undefined" */ (ctx, limit /* ERROR "named_argument" */ = 2)
+	_ = n.group /* ERROR "undefined" */ (ctx, limit = 2)
+}
+
+func pointerToArraySource(ctx context.Context, p *[3]int) {
+	_ = p.group /* ERROR "undefined" */ (ctx, limit = 2).map(x => x)
+}
+
+func typeParameterSource[S ~[]int](ctx context.Context, xs S) {
+	_ = xs.group /* ERROR "undefined" */ (ctx, limit = 2).map(x => x)
+}
+
+func pairs() ([]int, error) { return nil, nil }
+
+func optionalChainSource(ctx context.Context) {
+	_ = pairs /* ERROR "multiple-value" */ ()?.group(ctx, limit = 2).map(x => x)
+}
+
+func userMethodNamedLimit(s store) {
+	_ = s.group(limit /* ERROR "named_argument" */ = 2)
 }
 
 func goMeaningStruct(s store) int {
