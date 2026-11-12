@@ -16,6 +16,7 @@ type conn struct {
 
 func (c *conn) Close() error {
 	c.closes++
+	closeLog = append(closeLog, fmt.Sprint("c", c.id))
 	return errClose
 }
 
@@ -23,6 +24,8 @@ var (
 	errClose = errors.New("close failed")
 	errBoom  = errors.New("boom")
 	reg      []*conn
+	wreg     []*wrap
+	closeLog []string
 	shared   = &conn{}
 	failed   bool
 )
@@ -57,6 +60,31 @@ func closes() string {
 	out := make([]int, len(reg))
 	for i, c := range reg {
 		out[i] = c.closes
+	}
+	return fmt.Sprint(out)
+}
+
+type wrap struct {
+	c      *conn
+	closes int
+}
+
+func (w *wrap) Close() error {
+	w.closes++
+	closeLog = append(closeLog, fmt.Sprint("w", w.c.id))
+	return errClose
+}
+
+func mkWrap(c *conn) *wrap {
+	w := &wrap{c: c}
+	wreg = append(wreg, w)
+	return w
+}
+
+func wrapCloses() string {
+	out := make([]int, len(wreg))
+	for i, w := range wreg {
+		out[i] = w.closes
 	}
 	return fmt.Sprint(out)
 }
@@ -590,6 +618,53 @@ func lPanic() (hit string) {
 	return "false"
 }
 
+func tryFlight() (int, error) {
+	n := ids3().map(mk).filter(c => pass(c)?).map(c => c.id).count()
+	return n, nil
+}
+
+func fliTryFail() string {
+	n, err := tryFlight()
+	return fmt.Sprint(n, err == errBoom)
+}
+
+func fliPanic() (hit string) {
+	defer func() { hit = fmt.Sprint(recover() != nil) }()
+	_ = ids3().map(mk).filter(c => boomAt(c, 2)).map(c => c.id).count()
+	return "false"
+}
+
+func tryFlightWrap() (int, error) {
+	n := ids3().map(mk).filter(c => pass(c)?).map(c => mkWrap(c)).count()
+	return n, nil
+}
+
+func fliTryFailWrap() string {
+	n, err := tryFlightWrap()
+	return fmt.Sprintf("%d %v %s %v", n, err == errBoom, wrapCloses(), closeLog)
+}
+
+func fliPanicWrap() (got string) {
+	defer func() { got = fmt.Sprintf("%v %s %v", recover() != nil, wrapCloses(), closeLog) }()
+	_ = ids3().map(mk).filter(c => boomAt(c, 2)).map(c => mkWrap(c)).count()
+	return "false"
+}
+
+func tryFlightDrop() (int, error) {
+	n := ids3().map(mk).filter(c => pass2(c)?).map(c => mkWrap(c)).count()
+	return n, nil
+}
+
+func fliDropFail() string {
+	n, err := tryFlightDrop()
+	return fmt.Sprintf("%d %v %s %v", n, err == errBoom, wrapCloses(), closeLog)
+}
+
+func fliCalm() string {
+	n := ids3().map(mk).filter(c => c.id != 99).map(c => mkWrap(c)).count()
+	return fmt.Sprintf("%d %s %v", n, wrapCloses(), closeLog)
+}
+
 type leg struct {
 	name string
 	want string
@@ -597,7 +672,7 @@ type leg struct {
 }
 
 func legs() []leg {
-	return slices.Concat(borrowLegs(), sharedLegs(), identityLegs(), madeLegs(), tryLegs(), dropLegs(), localLegs())
+	return slices.Concat(borrowLegs(), sharedLegs(), identityLegs(), madeLegs(), tryLegs(), dropLegs(), localLegs(), flightLegs())
 }
 
 func borrowLegs() []leg {
@@ -726,9 +801,22 @@ func localLegs() []leg {
 	}
 }
 
+func flightLegs() []leg {
+	return []leg{
+		{"flight-try-fail", "0 true [0 1]", fliTryFail},
+		{"flight-panic", "true [0 1]", fliPanic},
+		{"flight-try-fail-owned-tail", "0 true [1] [c2 w1] [0 1]", fliTryFailWrap},
+		{"flight-panic-owned-tail", "true [1] [c2 w1] [0 1]", fliPanicWrap},
+		{"flight-drop-then-fail", "0 true [1] [c1 c3 w2] [1 0 1]", fliDropFail},
+		{"flight-calm", "3 [1 1 1] [w3 w2 w1] [0 0 0]", fliCalm},
+	}
+}
+
 func main() {
 	for _, l := range legs() {
 		reg = nil
+		wreg = nil
+		closeLog = nil
 		got := l.run() + " " + closes()
 		if got != l.want {
 			failed = true

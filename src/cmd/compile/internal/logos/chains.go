@@ -1037,6 +1037,7 @@ type chainEmit struct {
 	ownBefore []bool
 	lastMap   int
 	owns      bool
+	flight    bool
 }
 
 func (ce *chainEmit) prepare() {
@@ -1337,7 +1338,10 @@ func (ce *chainEmit) loopO() (prelude []otext, body, epilogue []string) {
 	if ce.needOut() {
 		prelude = append(prelude, gen(ce.outDecl()))
 	}
-	if ce.owns {
+	if ce.flight {
+		prelude = append(prelude, gen("var "+p+"_fl any"))
+	}
+	if ce.guarded() {
 		prelude = append(prelude, gen(p+"_done := false"))
 		prelude = append(prelude, gen("defer func() { if !"+p+"_done { "+ce.rollback(p)+" } }()"))
 	}
@@ -1366,7 +1370,13 @@ func (ce *chainEmit) loopO() (prelude []otext, body, epilogue []string) {
 			body = append(body, fmt.Sprintf("if %[1]s_di%[2]d < %[1]s_d%[2]d { %[1]s_di%[2]d++; %[3]s }", p, i, ce.dropStmt(p, cur, i)))
 		case "map":
 			mname := fmt.Sprintf("%s_m%d", p, i)
+			if ce.flight && ce.ownBefore[i] {
+				body = append(body, p+"_fl = nil")
+			}
 			body = append(body, ce.mapLines(p, fname, cur, mname, i)...)
+			if ce.flight && i < ce.lastMap && ce.ownBefore[i+1] {
+				body = append(body, fmt.Sprintf("%s_fl = any(%s)", p, mname))
+			}
 			if ce.owns && i == ce.lastMap {
 				body = append(body, fmt.Sprintf("%[1]s_out = append(%[1]s_out, %[2]s)", p, mname))
 			}
@@ -1403,6 +1413,11 @@ func (ce *chainEmit) ownership() {
 		owned = logosMayBeCloser(out) && formsOwn(op.forms, same, owned)
 		in = out
 		ce.lastMap = i
+	}
+	for i, op := range ce.ops {
+		if op.method == "filter" && ce.ownBefore[i] && i < ce.lastMap {
+			ce.flight = true
+		}
 	}
 	ce.owns = owned
 }
@@ -1463,6 +1478,8 @@ func (ce *chainEmit) dropStmt(p, cur string, i int) string {
 	switch {
 	case !ce.ownBefore[i]:
 		return "continue"
+	case i < ce.lastMap && ce.flight:
+		return ce.closeOne(p, cur) + "; " + p + "_fl = nil; continue"
 	case i < ce.lastMap:
 		return ce.closeOne(p, cur) + "; continue"
 	}
@@ -1477,8 +1494,10 @@ func (ce *chainEmit) mapLines(p, fname, cur, mname string, i int) []string {
 	return []string{fmt.Sprintf("%s := %s(%s)", mname, fname, cur)}
 }
 
+func (ce *chainEmit) guarded() bool { return ce.owns || ce.flight }
+
 func (ce *chainEmit) failStage(p, errVar string) string {
-	if ce.owns {
+	if ce.guarded() {
 		return ce.rollback(p) + "; " + p + "_done = true; " + ce.failReturn(p, errVar)
 	}
 	return ce.failReturn(p, errVar)
@@ -1568,7 +1587,14 @@ func (ce *chainEmit) failReturn(p, errVar string) string {
 }
 
 func (ce *chainEmit) rollback(p string) string {
-	return ce.closeBut(p, "-1")
+	var steps []string
+	if ce.flight {
+		steps = append(steps, ce.closeOne(p, p+"_fl"))
+	}
+	if ce.owns {
+		steps = append(steps, ce.closeBut(p, "-1"))
+	}
+	return strings.Join(steps, "; ")
 }
 
 func (ce *chainEmit) terminalLines(p, cur string) []string {

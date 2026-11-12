@@ -89,3 +89,9 @@ ok local-mixed-returns
 ok local-two-made
 ok local-try-filter-fail
 ok local-filter-panic
+ok flight-try-fail
+ok flight-panic
+ok flight-try-fail-owned-tail
+ok flight-panic-owned-tail
+ok flight-drop-then-fail
+ok flight-calm
