@@ -144,6 +144,9 @@ func substNul(t otext, lookup func(mark string) (otext, bool)) otext {
 		}
 		scan = j + 1
 	}
+	if prev == 0 {
+		return t
+	}
 	flush(len(t.s))
 	res := otext{s: sb.String(), chunks: chunks}
 	if res.s == "" {
