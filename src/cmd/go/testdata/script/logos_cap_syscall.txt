@@ -85,6 +85,12 @@ stderr 'ERROR \[capabilities::unauthorized_exec\]: Transitive dependency ''examp
 ! stderr 'unauthorized_net'
 cd ../..
 
+cd m/main
+! logos build -o $WORK/bin/sysm$GOEXE ./cmd
+stderr 'ERROR \[capabilities::unauthorized_exec\]: Transitive dependency ''example\.com/mdep'' reaches ''syscall\.Syscall'''
+! stderr 'unauthorized_net'
+cd ../..
+
 -- a/main/go.mod --
 module example.com/amain
 
@@ -582,6 +588,43 @@ go 1.27
 
 -- l/dep/dep.go --
 package ldep
+
+import "syscall"
+
+//go:noinline
+func Init() {
+	syscall.Syscall(syscall.SYS_GETPID, 0, 0, 0)
+}
+
+-- m/main/go.mod --
+module example.com/mmain
+
+go 1.27
+
+require example.com/mdep v0.0.0
+
+replace example.com/mdep => ../dep
+
+-- m/main/logos.toml --
+[capabilities]
+transitive_exec = "deny"
+transitive_net = "deny"
+transitive_net_allowlist = ["example.com/mdep/**"]
+
+-- m/main/cmd/main.go --
+package main
+
+import "example.com/mdep"
+
+func main() { mdep.Init() }
+
+-- m/dep/go.mod --
+module example.com/mdep
+
+go 1.27
+
+-- m/dep/dep.go --
+package mdep
 
 import "syscall"
 
