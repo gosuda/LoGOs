@@ -618,9 +618,12 @@ func (fl *fileLower) compositeLocalRewrite(e syntax.Expr) (syntax.Expr, bool) {
 	}
 	fl.compositeDone[ref.root] = true
 	t := fl.pkg.info.TypeOf(ref.recv)
-	if t != nil && !compositeTypeReachesMap(t) {
+	switch {
+	case t != nil && !compositeTypeReachesMap(t):
 		fl.compositeRename(ref.root, ref.info.ro())
 		return e, true
+	case ref.method != nil && compositePointerReceiver(ref.method):
+		return fl.compositeBuildAddr(e, ref), true
 	}
 	return fl.compositeBuild(e, ref), true
 }
@@ -651,14 +654,40 @@ func (fl *fileLower) compositeRename(root *syntax.Name, to string) {
 	root.Value = to
 }
 
+func compositePointerReceiver(fn *types2.Func) bool {
+	sig, ok := fn.Type().(*types2.Signature)
+	if !ok || sig.Recv() == nil {
+		return false
+	}
+	t := types2.Unalias(sig.Recv().Type())
+	if cv, ok := t.(*types2.ConstView); ok {
+		t = types2.Unalias(cv.Elem)
+	}
+	_, ptr := t.(*types2.Pointer)
+	return ptr
+}
+
 func (fl *fileLower) compositeBuild(e syntax.Expr, ref compositeRef) syntax.Expr {
 	pos := ref.root.Pos()
-	start := fl.off(pos)
-	fl.add(start, start+len(ref.root.Value), ref.info.builder()+"()")
 	call := callOf(pos, nameOf(pos, ref.info.builder()), nil)
 	call.SetTypeInfo(ref.root.GetTypeInfo())
-	fl.wrapSpan[call] = span{start: start, end: start + len(ref.root.Value)}
-	return compositeReplaceRoot(e, ref.root, call)
+	return fl.compositeSwapRoot(e, ref, ref.info.builder()+"()", call)
+}
+
+func (fl *fileLower) compositeBuildAddr(e syntax.Expr, ref compositeRef) syntax.Expr {
+	pos := ref.root.Pos()
+	fresh := callOf(pos, nameOf(pos, "new"), []syntax.Expr{callOf(pos, nameOf(pos, ref.info.builder()), nil)})
+	tv := ref.root.GetTypeInfo()
+	tv.Type = types2.NewPointer(tv.Type)
+	fresh.SetTypeInfo(tv)
+	return fl.compositeSwapRoot(e, ref, "new("+ref.info.builder()+"())", fresh)
+}
+
+func (fl *fileLower) compositeSwapRoot(e syntax.Expr, ref compositeRef, text string, repl syntax.Expr) syntax.Expr {
+	start := fl.off(ref.root.Pos())
+	fl.add(start, start+len(ref.root.Value), text)
+	fl.wrapSpan[repl] = span{start: start, end: start + len(ref.root.Value)}
+	return compositeReplaceRoot(e, ref.root, repl)
 }
 
 func compositeReplaceRoot(e syntax.Expr, root *syntax.Name, repl syntax.Expr) syntax.Expr {

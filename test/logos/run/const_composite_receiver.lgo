@@ -1,0 +1,54 @@
+// run
+
+package main
+
+import (
+	"fmt"
+	"os"
+)
+
+var failed bool
+
+func check(name string, cond bool, got, want any) {
+	if !cond {
+		failed = true
+		fmt.Println("FAIL", name+":", "got", got, "want", want)
+		return
+	}
+	fmt.Println("ok", name)
+}
+
+type box struct {
+	M map[string]int
+	N int
+}
+
+type wrap struct {
+	In box
+	K  int
+}
+
+func (r const *box) Get() int { return r.N }
+
+func (r const *box) Look(k string) int { return r.M[k] ?? -1 }
+
+func (b box) Total() int { return b.N + len(b.M) }
+
+const cfg = box{M: map[string]int{"a": 1}, N: 7}
+
+const w = wrap{In: box{M: map[string]int{"z": 5}, N: 3}, K: 1}
+
+func test() {
+	check("receiver-const-pointer", cfg.Get() == 7, cfg.Get(), 7)
+	check("receiver-const-pointer-map", cfg.Look("a") == 1, cfg.Look("a"), 1)
+	check("receiver-value", cfg.Total() == 8, cfg.Total(), 8)
+	check("receiver-nested", w.In.Get() == 3, w.In.Get(), 3)
+	check("receiver-nested-map", w.In.Look("z") == 5, w.In.Look("z"), 5)
+}
+
+func main() {
+	test()
+	if failed {
+		os.Exit(1)
+	}
+}

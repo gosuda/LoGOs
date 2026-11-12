@@ -331,7 +331,7 @@ func (check *Checker) logosConstStore(lhs syntax.Expr) bool {
 	}
 	base := check.logosConstStoreBase(lhs)
 	if base == nil {
-		base, _ = check.logosCompositeMapStore(lhs)
+		base, _ = check.logosCompositeRoot(lhs)
 	}
 	if base == nil {
 		return false
@@ -370,16 +370,12 @@ func (check *Checker) logosConstStoreBase(lhs syntax.Expr) syntax.Expr {
 	return nil
 }
 
-func (check *Checker) logosCompositeMapRootIn(e syntax.Expr) (*Const, bool) {
+func (check *Checker) logosCompositeRoot(e syntax.Expr) (syntax.Expr, bool) {
 	for {
-		e = syntax.Unparen(e)
-		switch n := e.(type) {
+		switch n := syntax.Unparen(e).(type) {
 		case *syntax.Name:
-			if obj, ok := check.Info.Defs[n].(*Const); ok && logosTypeHasMap(obj.Type()) && !check.logosIsBareMap(obj) {
-				return obj, true
-			}
 			if obj, ok := check.Info.Uses[n].(*Const); ok && logosTypeHasMap(obj.Type()) && !check.logosIsBareMap(obj) {
-				return obj, true
+				return n, true
 			}
 			return nil, false
 		case *syntax.SelectorExpr:
@@ -387,11 +383,10 @@ func (check *Checker) logosCompositeMapRootIn(e syntax.Expr) (*Const, bool) {
 		case *syntax.IndexExpr:
 			e = n.X
 		case *syntax.Operation:
-			if n.Op == syntax.Mul && n.Y == nil {
-				e = n.X
-			} else {
+			if n.Op != syntax.Mul || n.Y != nil {
 				return nil, false
 			}
+			e = n.X
 		default:
 			return nil, false
 		}
@@ -409,35 +404,22 @@ func (check *Checker) logosIsBareMap(obj *Const) bool {
 	return v.Type().Kind == ctfe.KMap
 }
 
-func (check *Checker) logosCompositeMapStore(lhs syntax.Expr) (syntax.Expr, bool) {
-	if _, ok := check.logosCompositeMapRootIn(lhs); !ok {
-		return nil, false
+func (check *Checker) logosCompositeWrite(x *operand, id builtinId, args []*operand) bool {
+	switch id {
+	case _Append, _Copy, _Clear, _Delete:
+	default:
+		return false
 	}
-	for e := lhs; ; {
-		e = syntax.Unparen(e)
-		if t := check.Info.TypeOf(e); t != nil {
-			if _, ok := t.Underlying().(*Map); ok {
-				return e, true
-			}
-		}
-		switch n := e.(type) {
-		case *syntax.IndexExpr:
-			e = n.X
-		case *syntax.SelectorExpr:
-			e = n.X
-		case *syntax.Operation:
-			if n.Op == syntax.Mul && n.Y == nil {
-				e = n.X
-			} else {
-				return nil, false
-			}
-		default:
-			return nil, false
-		}
-		if _, ok := check.logosCompositeMapRootIn(e); !ok {
-			return nil, false
-		}
+	if len(args) == 0 {
+		return false
 	}
+	root, ok := check.logosCompositeRoot(args[0].expr)
+	if !ok {
+		return false
+	}
+	check.errorf(args[0], IncompatibleAssign, "%s cannot %s through const view %s", logosConstMutation, predeclaredFuncs[id].name, ExprString(root))
+	x.invalidate()
+	return true
 }
 
 func (check *Checker) logosConstSelect(x *operand, e *syntax.SelectorExpr, sel string) bool {
@@ -581,6 +563,9 @@ func (check *Checker) logosConstConvert(x *operand, T Type) bool {
 func (check *Checker) logosConstBuiltin(x *operand, call *syntax.CallExpr, id builtinId, args []*operand) bool {
 	if !check.conf.Logos {
 		return false
+	}
+	if check.logosCompositeWrite(x, id, args) {
+		return true
 	}
 	unwrap := func(a *operand) {
 		if c := logosAsConstView(a.typ()); c != nil {

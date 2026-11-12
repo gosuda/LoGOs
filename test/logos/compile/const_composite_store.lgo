@@ -1,0 +1,58 @@
+// errorcheck
+
+package p
+
+type box struct {
+	M map[string]int
+	L []int
+	A [3]int
+	N int
+}
+
+const cfg = box{M: map[string]int{"a": 1}, L: []int{1, 2, 3}, A: [3]int{1, 2, 3}, N: 7}
+
+func rejectSliceStore() {
+	cfg.L[0] = 9 // ERROR "const_view_mutation"
+}
+
+func rejectArrayStore() {
+	cfg.A[0] = 9 // ERROR "const_view_mutation"
+}
+
+func rejectFieldStore() {
+	cfg.N = 9 // ERROR "const_view_mutation"
+}
+
+func rejectMapStore() {
+	cfg.M["b"] = 2 // ERROR "const_view_mutation"
+}
+
+func rejectIncrement() {
+	cfg.L[0]++ // ERROR "const_view_mutation"
+}
+
+func rejectCopy() {
+	_ = copy(cfg.L, []int{7, 7, 7}) // ERROR "const_view_mutation"
+}
+
+func rejectClear() {
+	clear(cfg.L) // ERROR "const_view_mutation"
+}
+
+func rejectAppend() {
+	_ = append(cfg.L, 4) // ERROR "const_view_mutation"
+}
+
+func rejectDelete() {
+	delete(cfg.M, "a") // ERROR "const_view_mutation"
+}
+
+func allowReadsAndCopies() {
+	_ = cfg.L[0] + cfg.A[1] + cfg.N + len(cfg.L)
+	_ = append([]int(nil), cfg.L...)
+	_ = copy(make([]int, 3), cfg.L)
+	c := cfg
+	c.L[0] = 9
+	c.M["z"] = 1
+	delete(c.M, "a")
+}

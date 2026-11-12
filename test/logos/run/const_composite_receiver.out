@@ -1,0 +1,5 @@
+ok receiver-const-pointer
+ok receiver-const-pointer-map
+ok receiver-value
+ok receiver-nested
+ok receiver-nested-map

@@ -266,6 +266,9 @@ func (check *Checker) lhsVar(lhs syntax.Expr) Type {
 	case variable, mapindex:
 		// ok
 	default:
+		if check.logosConstStore(lhs) {
+			return Typ[Invalid]
+		}
 		if sel, ok := x.expr.(*syntax.SelectorExpr); ok {
 			var op operand
 			check.expr(nil, &op, sel.X)
