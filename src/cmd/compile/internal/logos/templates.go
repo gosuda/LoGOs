@@ -85,10 +85,6 @@ func deferClosure(pos syntax.Pos, stmts []syntax.Stmt) *syntax.FuncLit {
 	}, pos)
 }
 
-func okInit(pos syntax.Pos, ok *syntax.Name) *syntax.AssignStmt {
-	return defineOf(pos, []syntax.Expr{ok}, []syntax.Expr{nameOf(pos, "false")})
-}
-
 func siteDecl(pos syntax.Pos, site *syntax.Name, base string, line uint) *syntax.VarDecl {
 	typ := selOf(pos, nameOf(pos, rtAlias), "Site")
 	file := at(&syntax.KeyValueExpr{

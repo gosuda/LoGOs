@@ -81,15 +81,16 @@ func (fl *fileLower) lowerLambdaExpr(lam *syntax.LambdaExpr) *syntax.FuncLit {
 	if resultsText == "" && sig.Results().Len() > 0 {
 		return nil
 	}
+	var hoisted string
 	if block, ok := lam.Body.(*syntax.BlockStmt); ok {
 		var ok2 bool
-		resultsText, ok2 = fl.lowerLambdaScopeDefers(lam, pos, sig, block, cat(params...).s, resultsText)
+		resultsText, hoisted, ok2 = fl.lowerLambdaScopeDefers(lam, pos, sig, block, cat(params...).s, resultsText)
 		if !ok2 {
 			return nil
 		}
 	}
 	body, bodyText := fl.lambdaBody(lam, sig, pos)
-	fullText := cat(gen("func("), cat(params...), gen(")"+resultsText+" { "), bodyText, gen(" }"))
+	fullText := cat(gen("func("), cat(params...), gen(")"+resultsText+" {"+hoisted+" "), bodyText, gen(" }"))
 	ft, ok := typeExprAt("func("+cat(params...).s+")"+resultsText, pos)
 	if !ok {
 		return nil
@@ -225,31 +226,31 @@ func (fl *fileLower) lambdaTryBody(sig *types2.Signature, pos syntax.Pos, t *syn
 	return blockOf(pos, []syntax.Stmt{as, branch, ret}), cat(parts...)
 }
 
-func (fl *fileLower) lowerLambdaScopeDefers(lam *syntax.LambdaExpr, pos syntax.Pos, sig *types2.Signature, block *syntax.BlockStmt, paramText, resultsText string) (string, bool) {
+func (fl *fileLower) lowerLambdaScopeDefers(lam *syntax.LambdaExpr, pos syntax.Pos, sig *types2.Signature, block *syntax.BlockStmt, paramText, resultsText string) (string, string, bool) {
 	if !hasDirectScopeDefer(block) {
-		return resultsText, true
+		return resultsText, "", true
 	}
 	if sig.Results().Len() > 0 {
 		named, ok := fl.lambdaNamedResults(pos, sig)
 		if !ok {
-			return "", false
+			return "", "", false
 		}
 		resultsText = named
 	}
 	ft, ok := typeExprAt("func("+paramText+")"+resultsText, pos)
 	if !ok {
-		return "", false
+		return "", "", false
 	}
 	functype, ok := ft.(*syntax.FuncType)
 	if !ok {
-		return "", false
+		return "", "", false
 	}
 	fc := newFuncLower(fl, functype, sig, block)
 	fc.detectCleanups()
 	if fc.hasScopeDefer {
 		fc.lowerScopeDefers()
 	}
-	return resultsText, true
+	return resultsText, fc.prependHoists(), true
 }
 
 func hasDirectScopeDefer(block *syntax.BlockStmt) bool {

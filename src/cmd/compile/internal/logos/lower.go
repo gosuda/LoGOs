@@ -739,6 +739,12 @@ type resultSpec struct {
 	isErr    bool
 }
 
+type hoistedVar struct {
+	name   string
+	native syntax.Expr
+	eject  string
+}
+
 // funcLower carries the state of lowering one function body.
 type funcLower struct {
 	fl               *fileLower
@@ -762,6 +768,7 @@ type funcLower struct {
 	scopeDeferLabels map[string]int
 	scopeCtxs        []*scopeDeferCtx
 	scopeHoists      []string
+	hoisted          []hoistedVar
 }
 
 func (fl *fileLower) resultSpecs(ft *syntax.FuncType, sig *types2.Signature) []resultSpec {
@@ -803,7 +810,7 @@ func namedValue(name *syntax.Name) string {
 
 // run prepares and lowers one function body.
 func (fc *funcLower) run() {
-	fc.lowerYield() // M6-S9 hook: wrap generator bodies first.
+	fc.lowerYield()
 	fc.detectCleanups()
 	if fc.hasDeferTry || fc.hasErrdefer || fc.hasScopeDefer {
 		fc.ensureNamed()
@@ -811,9 +818,10 @@ func (fc *funcLower) run() {
 	if fc.hasErrdefer {
 		fc.armOkFlag()
 	}
-	fc.lowerScopeDefers() // M6-S10 hook: scope-defer exits before statement lowering.
-	fc.lowerConstIf()     // M7-S1 hook: prune dead `const if` branches first.
+	fc.lowerScopeDefers()
+	fc.lowerConstIf()
 	fc.body.List = fc.lowerList(fc.body.List)
+	fc.flushHoists()
 }
 
 // detectCleanups records whether the body holds a defer? or an errdefer
@@ -900,13 +908,36 @@ func openParenBefore(src []byte, off int) bool {
 	return false
 }
 
-// armOkFlag prepends _logos_ok := false to the function body.
 func (fc *funcLower) armOkFlag() {
 	fc.okName = "_logos_ok"
-	ok := nameOf(fc.body.Pos(), fc.okName)
-	fc.body.List = append([]syntax.Stmt{okInit(fc.body.Pos(), ok)}, fc.body.List...)
+	fc.hoistTemp(fc.okName, nameOf(fc.body.Pos(), "bool"), "bool")
+}
+
+func (fc *funcLower) hoistTemp(name string, native syntax.Expr, eject string) {
+	if slices.ContainsFunc(fc.hoisted, func(h hoistedVar) bool { return h.name == name }) {
+		return
+	}
+	fc.hoisted = append(fc.hoisted, hoistedVar{name: name, native: native, eject: eject})
+}
+
+func (fc *funcLower) prependHoists() string {
+	pos := fc.body.Pos()
+	decls := make([]syntax.Stmt, 0, len(fc.hoisted))
+	var text strings.Builder
+	for _, h := range fc.hoisted {
+		decls = append(decls, typedVarDecl(pos, nameOf(pos, h.name), h.native))
+		text.WriteString(" var " + h.name + " " + h.eject + ";")
+	}
+	fc.body.List = append(decls, fc.body.List...)
+	return text.String()
+}
+
+func (fc *funcLower) flushHoists() {
+	if len(fc.hoisted) == 0 {
+		return
+	}
 	braceOff := fc.fl.off(fc.body.Pos())
-	fc.fl.add(braceOff+1, braceOff+1, " "+fc.okName+" := false; ")
+	fc.fl.add(braceOff+1, braceOff+1, fc.prependHoists())
 }
 
 // rejectSurvivors reports any loGo/s node that lowering failed to remove.

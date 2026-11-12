@@ -387,6 +387,16 @@ func (fl *fileLower) spellTypeBoth(typ types2.Type, pos syntax.Pos) (native synt
 }
 
 func spellableType(typ types2.Type, self *types2.Package) bool {
+	return typeNamesAllow(typ, func(obj *types2.TypeName) bool { return spellableObject(obj, self) })
+}
+
+func hoistableType(typ types2.Type, self *types2.Package) bool {
+	return typeNamesAllow(typ, func(obj *types2.TypeName) bool {
+		return spellableObject(obj, self) && (obj.Pkg() == nil || obj.Parent() == obj.Pkg().Scope())
+	})
+}
+
+func typeNamesAllow(typ types2.Type, allow func(*types2.TypeName) bool) bool {
 	seen := make(map[types2.Type]bool)
 	var walk func(t types2.Type) bool
 	walkTuple := func(t *types2.Tuple) bool {
@@ -406,7 +416,7 @@ func spellableType(typ types2.Type, self *types2.Package) bool {
 		case *types2.Basic, *types2.TypeParam:
 			return true
 		case *types2.Alias:
-			if obj := t.Obj(); obj != nil && !spellableObject(obj, self) {
+			if obj := t.Obj(); obj != nil && !allow(obj) {
 				return false
 			}
 			if args := t.TypeArgs(); args != nil {
@@ -432,7 +442,7 @@ func spellableType(typ types2.Type, self *types2.Package) bool {
 		case *types2.Tuple:
 			return walkTuple(t)
 		case *types2.Named:
-			if obj := t.Obj(); obj != nil && !spellableObject(obj, self) {
+			if obj := t.Obj(); obj != nil && !allow(obj) {
 				return false
 			}
 			if args := t.TypeArgs(); args != nil {

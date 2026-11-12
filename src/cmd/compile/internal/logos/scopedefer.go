@@ -9,6 +9,7 @@ import (
 
 	"cmd/compile/internal/base"
 	"cmd/compile/internal/syntax"
+	"cmd/compile/internal/types2"
 )
 
 type scopeItem struct {
@@ -236,7 +237,7 @@ func (fc *funcLower) scopePrelude(sd *syntax.ScopeDeferStmt, ctx *scopeDeferCtx,
 	if !ok {
 		return []syntax.Stmt{sd}
 	}
-	plan, planned := fc.planCall(call)
+	plan, planned := fc.planScopeCall(call)
 	if !planned {
 		return []syntax.Stmt{sd}
 	}
@@ -262,22 +263,40 @@ func (fc *funcLower) scopePrelude(sd *syntax.ScopeDeferStmt, ctx *scopeDeferCtx,
 	var native []syntax.Stmt
 	var text []syntax.Stmt
 	if len(capNamesN) > 0 {
-		native = append(native, defineOf(pos, capNamesN, capValsN))
-		text = append(text, defineOf(pos, capNamesT, capValsT))
+		native = append(native, fc.bindCaptures(pos, plan, capNamesN, capValsN))
+		text = append(text, fc.bindCaptures(pos, plan, capNamesT, capValsT))
 	}
+	fc.hoistTemp(item.armed, nameOf(pos, "bool"), "bool")
 	native = append(native,
-		defineOf(pos, []syntax.Expr{nameOf(pos, item.armed)}, []syntax.Expr{nameOf(pos, "true")}),
-		deferOf(pos, callOf(pos, deferClosure(pos, []syntax.Stmt{guardN}), nil)),
+		assignOf(pos, []syntax.Expr{nameOf(pos, item.armed)}, []syntax.Expr{nameOf(pos, "true")}),
+		guardDefer(pos, capNamesN, guardN),
 	)
 	text = append(text,
-		defineOf(pos, []syntax.Expr{nameOf(pos, item.armed)}, []syntax.Expr{nameOf(pos, "true")}),
-		deferOf(pos, callOf(pos, deferClosure(pos, []syntax.Stmt{guardT}), nil)),
+		assignOf(pos, []syntax.Expr{nameOf(pos, item.armed)}, []syntax.Expr{nameOf(pos, "true")}),
+		guardDefer(pos, capNamesT, guardT),
 	)
 	spanEnd := skipCloseParens(fl.src, plan.end)
 	kept := leftoverComments(fl, span{start: stmtOff, end: spanEnd}, planSpans(plan))
 	fl.addT(stmtOff, spanEnd, cat(prefix, kept, renderText(text, tw.subs)))
 	return native
 }
+
+func guardDefer(pos syntax.Pos, caps []syntax.Expr, guard syntax.Stmt) syntax.Stmt {
+	deferStmt := deferOf(pos, callOf(pos, deferClosure(pos, []syntax.Stmt{guard}), nil))
+	if len(caps) == 0 {
+		return deferStmt
+	}
+	return blockOf(pos, []syntax.Stmt{defineOf(pos, nameExprs(pos, caps), nameExprs(pos, caps)), deferStmt})
+}
+
+func nameExprs(pos syntax.Pos, names []syntax.Expr) []syntax.Expr {
+	out := make([]syntax.Expr, len(names))
+	for i, name := range names {
+		out[i] = nameOf(pos, name.(*syntax.Name).Value)
+	}
+	return out
+}
+
 func (fc *funcLower) scopeLoopPrelude(sd *syntax.ScopeDeferStmt, labels []*syntax.Name, ctx *scopeDeferCtx) []syntax.Stmt {
 	stmtOff, prefix := fc.fl.off(sd.Pos()), gen("")
 	if len(labels) > 0 {
@@ -301,7 +320,7 @@ func (fc *funcLower) scopeHoistedPrelude(sd *syntax.ScopeDeferStmt, ctx *scopeDe
 	if !ok {
 		return []syntax.Stmt{sd}
 	}
-	plan, planned := fc.planCall(call)
+	plan, planned := fc.planScopeCall(call)
 	if !planned {
 		return []syntax.Stmt{sd}
 	}
@@ -318,8 +337,8 @@ func (fc *funcLower) scopeHoistedPrelude(sd *syntax.ScopeDeferStmt, ctx *scopeDe
 	var native []syntax.Stmt
 	var text []syntax.Stmt
 	if len(capNamesN) > 0 {
-		native = append(native, defineOf(pos, capNamesN, capValsN))
-		text = append(text, defineOf(pos, capNamesT, capValsT))
+		native = append(native, fc.bindCaptures(pos, plan, capNamesN, capValsN))
+		text = append(text, fc.bindCaptures(pos, plan, capNamesT, capValsT))
 	}
 	native = append(native, assignOf(pos, []syntax.Expr{nameOf(pos, item.armed)}, []syntax.Expr{deferClosure(pos, []syntax.Stmt{exprStmtOf(pos, callN)})}))
 	text = append(text, assignOf(pos, []syntax.Expr{nameOf(pos, item.armed)}, []syntax.Expr{deferClosure(pos, []syntax.Stmt{exprStmtOf(pos, callT)})}))
@@ -329,6 +348,77 @@ func (fc *funcLower) scopeHoistedPrelude(sd *syntax.ScopeDeferStmt, ctx *scopeDe
 	return native
 }
 
+type hoistSlot struct {
+	name string
+	typ  types2.Type
+}
+
+func (fc *funcLower) bindCaptures(pos syntax.Pos, plan *callPlan, names, vals []syntax.Expr) syntax.Stmt {
+	if fc.hoistPlan(pos, plan) {
+		return assignOf(pos, names, vals)
+	}
+	return defineOf(pos, names, vals)
+}
+
+func (fc *funcLower) hoistPlan(pos syntax.Pos, plan *callPlan) bool {
+	var vars []hoistedVar
+	for _, slot := range fc.planSlots(plan) {
+		if slot.typ == nil || !hoistableType(slot.typ, fc.fl.pkg.tpkg) {
+			return false
+		}
+		native, eject, ok := fc.fl.spellTypeBoth(slot.typ, pos)
+		if !ok {
+			return false
+		}
+		vars = append(vars, hoistedVar{name: slot.name, native: native, eject: eject})
+	}
+	for _, v := range vars {
+		fc.hoistTemp(v.name, v.native, v.eject)
+	}
+	return true
+}
+
+func (fc *funcLower) planSlots(plan *callPlan) []hoistSlot {
+	pieces := append([]capturePiece{plan.fun}, plan.args...)
+	if plan.isMethod {
+		pieces[0] = plan.recv
+	}
+	var slots []hoistSlot
+	for _, piece := range pieces {
+		slots = append(slots, fc.pieceSlots(piece)...)
+	}
+	return slots
+}
+
+func (fc *funcLower) pieceSlots(piece capturePiece) []hoistSlot {
+	if !piece.capture {
+		return nil
+	}
+	typ := fc.fl.pkg.info.TypeOf(piece.expr)
+	if len(piece.multi) > 0 {
+		tup, _ := typ.(*types2.Tuple)
+		slots := make([]hoistSlot, len(piece.multi))
+		for i, name := range piece.multi {
+			slots[i] = hoistSlot{name: name, typ: tup.At(i).Type()}
+		}
+		return slots
+	}
+	return []hoistSlot{{name: piece.single, typ: capturedType(piece, typ)}}
+}
+
+func capturedType(piece capturePiece, typ types2.Type) types2.Type {
+	if typ == nil {
+		return nil
+	}
+	if piece.takeAddr {
+		return types2.NewPointer(typ)
+	}
+	if ptr, ok := types2.Unalias(typ).(*types2.Pointer); ok && piece.takeDeref {
+		return ptr.Elem()
+	}
+	return typ
+}
+
 func scopeInLoop(stack []scopeFrame) bool {
 	for _, fr := range stack {
 		if fr.loop {
@@ -336,13 +426,6 @@ func scopeInLoop(stack []scopeFrame) bool {
 		}
 	}
 	return false
-}
-
-func scopeHolderDecl(pos syntax.Pos, armed string) *syntax.DeclStmt {
-	return at(&syntax.DeclStmt{DeclList: []syntax.Decl{at(&syntax.VarDecl{
-		NameList: []*syntax.Name{nameOf(pos, armed)},
-		Type:     at(&syntax.FuncType{ParamList: []*syntax.Field{}}, pos),
-	}, pos)}}, pos)
 }
 
 func scopeGuardDefer(pos syntax.Pos, armed, temp string) *syntax.CallStmt {
@@ -371,9 +454,8 @@ func (fc *funcLower) drainScopeHoists(pos syntax.Pos) []syntax.Stmt {
 	var text []syntax.Stmt
 	for _, armed := range fc.scopeHoists {
 		temp := fc.nextScope()
-		native = append(native, scopeHolderDecl(pos, armed))
+		fc.hoistTemp(armed, at(&syntax.FuncType{ParamList: []*syntax.Field{}}, pos), "func()")
 		native = append(native, scopeGuardDefer(pos, armed, temp))
-		text = append(text, scopeHolderDecl(pos, armed))
 		text = append(text, scopeGuardDefer(pos, armed, temp))
 	}
 	fc.scopeHoists = nil

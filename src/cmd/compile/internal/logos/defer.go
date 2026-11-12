@@ -109,22 +109,25 @@ func (fc *funcLower) planCall(call *syntax.CallExpr) (*callPlan, bool) {
 	return plan, true
 }
 
-func genericTarget(fc *funcLower, fun syntax.Expr) bool {
-	node := syntax.Unparen(fun)
-	if _, ok := node.(*syntax.IndexExpr); ok {
-		return true
-	}
+func (fc *funcLower) calleeFunc(fun syntax.Expr) (*types2.Func, bool) {
 	var name *syntax.Name
-	switch n := node.(type) {
+	switch n := syntax.Unparen(fun).(type) {
 	case *syntax.Name:
 		name = n
 	case *syntax.SelectorExpr:
 		name = n.Sel
 	default:
-		return false
+		return nil, false
 	}
-	obj := fc.fl.pkg.info.ObjectOf(name)
-	fn, ok := obj.(*types2.Func)
+	fn, ok := fc.fl.pkg.info.ObjectOf(name).(*types2.Func)
+	return fn, ok
+}
+
+func genericTarget(fc *funcLower, fun syntax.Expr) bool {
+	if _, ok := syntax.Unparen(fun).(*syntax.IndexExpr); ok {
+		return true
+	}
+	fn, ok := fc.calleeFunc(fun)
 	if !ok {
 		return false
 	}
@@ -133,6 +136,15 @@ func genericTarget(fc *funcLower, fun syntax.Expr) bool {
 		return false
 	}
 	return sig.TypeParams().Len() > 0
+}
+
+func (fc *funcLower) planScopeCall(call *syntax.CallExpr) (*callPlan, bool) {
+	plan, ok := fc.planCall(call)
+	if ok && plan.fun.capture {
+		_, static := fc.calleeFunc(plan.fun.expr)
+		plan.fun.capture = !static
+	}
+	return plan, ok
 }
 
 func (fc *funcLower) methodRecv(call *syntax.CallExpr) (capturePiece, string, bool) {
@@ -394,8 +406,8 @@ func (fc *funcLower) lowerDeferTry(s *syntax.CallStmt, t *syntax.TryExpr, call *
 	if plan.isMethod && plan.recv.nilCheck {
 		headT = spliceRecvCheck(headT, ifaceNilCheckStmt(cpos, plan.recv.single, plan.method))
 	}
-	fc.spliceCall(stmtOff, spanEnd, plan, headT, tw)
-	return headN
+	fc.spliceCall(stmtOff, spanEnd, plan, scoped(cpos, headT), tw)
+	return scoped(cpos, headN)
 }
 
 func (fc *funcLower) lowerErrdefer(s *syntax.ErrdeferStmt) []syntax.Stmt {
@@ -432,8 +444,8 @@ func (fc *funcLower) lowerErrdefer(s *syntax.ErrdeferStmt) []syntax.Stmt {
 		text = spliceRecvCheck(text, ifaceNilCheckStmt(cpos, plan.recv.single, plan.method))
 	}
 	spanEnd := skipCloseParens(fl.src, plan.end)
-	fc.spliceCall(stmtOff, spanEnd, plan, text, tw)
-	return native
+	fc.spliceCall(stmtOff, spanEnd, plan, scoped(cpos, text), tw)
+	return scoped(cpos, native)
 }
 
 func (fc *funcLower) lowerErrdeferTry(s *syntax.ErrdeferStmt, t *syntax.TryExpr, cpos syntax.Pos, stmtOff int) []syntax.Stmt {
@@ -456,8 +468,8 @@ func (fc *funcLower) lowerErrdeferTry(s *syntax.ErrdeferStmt, t *syntax.TryExpr,
 		headN = spliceRecvCheck(headN, ifaceNilCheckStmt(cpos, plan.recv.single, plan.method))
 		headT = spliceRecvCheck(headT, ifaceNilCheckStmt(cpos, plan.recv.single, plan.method))
 	}
-	fc.spliceCall(stmtOff, spanEnd, plan, headT, tw)
-	return headN
+	fc.spliceCall(stmtOff, spanEnd, plan, scoped(cpos, headT), tw)
+	return scoped(cpos, headN)
 }
 
 func (fc *funcLower) guardedDefer(cpos syntax.Pos, body []syntax.Stmt, capNames, capVals []syntax.Expr) []syntax.Stmt {
@@ -468,6 +480,10 @@ func (fc *funcLower) guardedDefer(cpos syntax.Pos, body []syntax.Stmt, capNames,
 		return []syntax.Stmt{deferStmt}
 	}
 	return []syntax.Stmt{defineOf(cpos, capNames, capVals), deferStmt}
+}
+
+func scoped(pos syntax.Pos, stmts []syntax.Stmt) []syntax.Stmt {
+	return []syntax.Stmt{blockOf(pos, stmts)}
 }
 
 func planSpans(plan *callPlan) []span {
