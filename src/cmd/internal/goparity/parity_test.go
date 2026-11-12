@@ -2208,6 +2208,43 @@ func (mb *mutBuild) cleanFile(t *testing.T, stem string) error {
 	return cmd.Run()
 }
 
+var attackID = regexp.MustCompile(`^at\d+`)
+
+func attacksWithoutMutant(entries, mutantStems []string) []string {
+	var out []string
+	for _, e := range entries {
+		id := attackID.FindString(e)
+		if id != "" && !slices.Contains(mutantStems, id) && !slices.Contains(out, id) {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+func TestAttacksWithoutMutantProbe(t *testing.T) {
+	entries := []string{"at01_a", "at17a_x", "at17b_y", "at22_z", "at14_w", "README"}
+	if got := attacksWithoutMutant(entries, []string{"at01", "at17", "at22", "at14"}); len(got) != 0 {
+		t.Errorf("covered attacks reported: %v", got)
+	}
+	if got := attacksWithoutMutant(entries, []string{"at01", "at14"}); !slices.Equal(got, []string{"at17", "at22"}) {
+		t.Errorf("uncovered attacks = %v, want [at17 at22]", got)
+	}
+}
+
+func TestParityEveryAttackHasAMutant(t *testing.T) {
+	matches, err := filepath.Glob("testdata/mutants/*.txt")
+	if err != nil {
+		t.Fatalf("globbing testdata/mutants: %v", err)
+	}
+	stems := make([]string, 0, len(matches))
+	for _, m := range matches {
+		stems = append(stems, strings.TrimSuffix(filepath.Base(m), ".txt"))
+	}
+	for _, id := range attacksWithoutMutant(slices.Concat(corpusPrograms(t), corpusFails(t)), stems) {
+		t.Errorf("attack %s has corpus entries and no testdata/mutants/%s.txt", id, id)
+	}
+}
+
 func TestParityMutantProbesDefined(t *testing.T) {
 	fork := forkTool(t)
 	progs := corpusPrograms(t)
