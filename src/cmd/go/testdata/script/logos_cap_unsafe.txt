@@ -61,6 +61,11 @@ stderr '-> unsafe'
 ! stderr 'zmid'
 cd ../..
 
+cd r/main
+! logos build ./...
+stderr 'ERROR \[capabilities::unauthorized_unsafe\]: Transitive dependency ''mylib'' imports ''unsafe'''
+cd ../..
+
 -- a/main/go.mod --
 module example.com/main
 
@@ -470,3 +475,45 @@ package qdep
 import "unsafe"
 
 var _ = unsafe.Sizeof(0)
+
+-- r/main/go.mod --
+module example.com/rmain
+
+go 1.27
+
+require mylib v0.0.0
+
+replace mylib => ../dep
+
+-- r/main/logos.toml --
+[capabilities]
+transitive_unsafe = "deny"
+
+-- r/main/cmd/main.go --
+package main
+
+import (
+	"fmt"
+
+	"mylib"
+)
+
+func main() { fmt.Println(mylib.Msg()) }
+
+-- r/dep/go.mod --
+module mylib
+
+go 1.27
+
+-- r/dep/dep.go --
+package mylib
+
+import (
+	"strconv"
+	"unsafe"
+)
+
+func Msg() string {
+	var x = 42
+	return strconv.Itoa(*(*int)(unsafe.Pointer(&x)))
+}

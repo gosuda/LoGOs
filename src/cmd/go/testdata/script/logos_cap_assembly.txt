@@ -51,6 +51,11 @@ cd g/main
 stderr 'ERROR \[capabilities::unclassified_assembly\]: Transitive dependency ''example\.com/gdep'' holds assembly files'
 cd ../..
 
+cd h/main
+! logos build -o $WORK/bin/asmh$GOEXE ./cmd
+stderr 'ERROR \[capabilities::unclassified_assembly\]: Transitive dependency ''asmlib'' holds assembly files'
+cd ../..
+
 -- a/main/go.mod --
 module example.com/amain
 
@@ -394,6 +399,55 @@ TEXT ·Zero(SB), NOSPLIT, $0-8
 	RET
 
 -- g/dep/stub_arm64.sx --
+#include "textflag.h"
+
+TEXT ·Zero(SB), NOSPLIT, $0-8
+	MOVD $0, R0
+	MOVD R0, ret+0(FP)
+	RET
+
+-- h/main/go.mod --
+module example.com/hmain
+
+go 1.27
+
+require asmlib v0.0.0
+
+replace asmlib => ../dep
+
+-- h/main/logos.toml --
+[capabilities]
+transitive_unsafe = "deny"
+
+-- h/main/cmd/main.go --
+package main
+
+import (
+	"fmt"
+
+	"asmlib"
+)
+
+func main() { fmt.Println(asmlib.Zero()) }
+
+-- h/dep/go.mod --
+module asmlib
+
+go 1.27
+
+-- h/dep/stub.go --
+package asmlib
+
+func Zero() int
+
+-- h/dep/stub_amd64.s --
+#include "textflag.h"
+
+TEXT ·Zero(SB), NOSPLIT, $0-8
+	MOVQ $0, ret+0(FP)
+	RET
+
+-- h/dep/stub_arm64.s --
 #include "textflag.h"
 
 TEXT ·Zero(SB), NOSPLIT, $0-8
