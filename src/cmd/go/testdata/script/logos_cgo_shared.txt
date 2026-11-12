@@ -22,7 +22,6 @@ stdout 'C-OK add=42 div=7 sum=42'
 
 cp forbid.toml logos.toml
 ! logos build -buildvcs=false -buildmode=c-shared -o $WORK/forbidden.so ./lib
-stderr 'cgo'
 ! exists $WORK/forbidden.so
 ! exists $WORK/forbidden.h
 

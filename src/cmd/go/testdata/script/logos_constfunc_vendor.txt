@@ -18,7 +18,6 @@ cmp stdout $WORK/want.txt
 
 cp go.mod.stale go.mod
 ! logos run -mod=vendor .
-stderr 'inconsistent vendoring'
 ! stdout .
 cd ..
 

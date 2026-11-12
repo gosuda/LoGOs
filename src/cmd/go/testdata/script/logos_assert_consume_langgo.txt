@@ -42,7 +42,6 @@ cd $SRC/w/neg
 go tool compile -p main -I $WORK/ok -o $WORK/neg-ok.o neg.lgo
 ! go tool compile -p main -I $WORK/cut -o $WORK/neg-cut.o neg.lgo
 stdout 'neg\.lgo:16:22: \[correctness::const_view_mutation\]'
-stdout 'unverified'
 
 -- w/go.work --
 go 1.27

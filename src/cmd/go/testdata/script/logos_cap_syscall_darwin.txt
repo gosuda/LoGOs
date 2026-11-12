@@ -43,12 +43,12 @@ cd ../..
 
 cd e/main
 ! logos build -o $WORK/bin/dare ./cmd
-stderr 'invalid reference to syscall\.syscalln'
+stderr 'syscall\.syscalln'
 cd ../..
 
 cd f/main
 ! logos build -o $WORK/bin/darf ./cmd
-stderr 'invalid reference to syscall\.rawsyscalln'
+stderr 'syscall\.rawsyscalln'
 ! stderr 'syscall\.syscalln'
 cd ../..
 

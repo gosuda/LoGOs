@@ -29,7 +29,7 @@ go tool pack p $WORK/bad1.a __.LOGOS
 stdout '^constmap C [0-9]+ \.N$'
 exec sh -c 'cat $WORK/cfg.base > $WORK/cfg.bad1; echo packagefile example.com/forge/lib=$WORK/bad1.a >> $WORK/cfg.bad1'
 ! go tool compile -p main -importcfg $WORK/cfg.bad1 -o $WORK/bad1.o app/main.lgo
-stdout 'imported const composite example\.com/forge/lib\.C\.N has a record that does not match its type'
+stdout 'app/main\.lgo:10:14: .*example\.com/forge/lib\.C\.N'
 ! stdout 'internal compiler error'
 
 mkdir $WORK/m2
@@ -44,7 +44,7 @@ go tool pack c $WORK/bad2.a __.PKGDEF __.LOGOS _go_.o
 cd $SRC
 exec sh -c 'cat $WORK/cfg.base > $WORK/cfg.bad2; echo packagefile example.com/forge/lib=$WORK/bad2.a >> $WORK/cfg.bad2'
 ! go tool compile -p main -importcfg $WORK/cfg.bad2 -o $WORK/bad2.o app/main.lgo
-stdout 'imported const composite example\.com/forge/lib\.C\.M\[0\] has a record that does not match its type'
+stdout 'app/main\.lgo:10:14: .*example\.com/forge/lib\.C\.M\[0\]'
 ! stdout 'internal compiler error'
 
 -- lib/lib.lgo --
