@@ -81,6 +81,11 @@ stderr 'ERROR \[capabilities::unauthorized_exec\]: Transitive dependency ''examp
 stderr 'ERROR \[capabilities::unauthorized_net\]: Transitive dependency ''example\.com/ndep'' reaches ''syscall\.Syscall6'''
 cd ../..
 
+cd o/main
+! logos build -o $WORK/bin/valo$GOEXE ./cmd
+stderr 'ERROR \[capabilities::unauthorized_cgo\]: Transitive dependency ''example\.com/odep'' reaches ''runtime\.cgocall'''
+cd ../..
+
 -- a/main/go.mod --
 module example.com/amain
 
@@ -618,4 +623,47 @@ func sys6(trap, a1, a2, a3, a4, a5, a6 uintptr) (r1, r2 uintptr, err uintptr)
 //go:noinline
 func Init() {
 	sys6(0, 0, 0, 0, 0, 0, 0)
+}
+
+-- o/main/go.mod --
+module example.com/omain
+
+go 1.27
+
+require example.com/odep v0.0.0
+
+replace example.com/odep => ../dep
+
+-- o/main/logos.toml --
+[build]
+cgo = "restricted"
+cgo_allowlist = ["example.com/odep/**"]
+
+[capabilities]
+transitive_unsafe = "allow"
+
+-- o/main/cmd/main.lgo --
+package main
+
+import "example.com/odep"
+
+func main() { odep.Init() }
+
+-- o/dep/go.mod --
+module example.com/odep
+
+go 1.27
+
+-- o/dep/empty.s --
+-- o/dep/dep.go --
+package odep
+
+import "unsafe"
+
+//go:linkname cgocall runtime.cgocall
+func cgocall(fn, arg unsafe.Pointer) int32
+
+//go:noinline
+func Init() {
+	cgocall(nil, nil)
 }
