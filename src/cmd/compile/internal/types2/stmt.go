@@ -130,7 +130,6 @@ func (check *Checker) stmtList(ctxt stmtContext, list []syntax.Stmt) {
 	inner := ctxt &^ fallthroughOk
 	list = trimTrailingEmptyStmts(list)   // trailing empty statements are "invisible" to fallthrough analysis
 	narrowBase := check.logosNarrowBase() // logos M3-S4 hook: early-exit narrowing scope.
-	errBase := check.logosErrBase()       // logos M3-S4 hook.
 	for i, s := range list {
 		s = check.logosYieldForm(s)
 		list[i] = s
@@ -144,7 +143,6 @@ func (check *Checker) stmtList(ctxt stmtContext, list []syntax.Stmt) {
 		check.logosAfterStmt(s)        // logos M3-S4 hook: early-exit narrowing for the rest of the list.
 	}
 	check.logosPopToNarrow(narrowBase) // logos M3-S4 hook.
-	check.logosPopToErr(errBase)       // logos M3-S4 hook.
 }
 
 func (check *Checker) multipleSwitchDefaults(list []*syntax.CaseClause) {
@@ -668,12 +666,8 @@ func (check *Checker) stmt(ctxt stmtContext, s syntax.Stmt) {
 		if x.isValid() && !allBoolean(x.typ()) {
 			check.error(s.Cond, InvalidCond, "non-boolean condition in if statement")
 		}
-		narrowThen := check.logosPushIfThen(s.Cond)   // logos M3-S4 hook: `x != nil` for the Then block.
-		checkedThen := check.logosPushChecked(s.Cond) // logos M3-S4 hook: err scrutiny for the Then block.
+		narrowThen := check.logosPushIfThen(s.Cond) // logos M3-S4 hook: `x != nil` for the Then block.
 		check.stmt(inner, s.Then)
-		if checkedThen {
-			check.logosPopChecked() // logos M3-S4 hook.
-		}
 		if narrowThen {
 			check.logosPopNarrow() // logos M3-S4 hook.
 		}
@@ -683,12 +677,8 @@ func (check *Checker) stmt(ctxt stmtContext, s syntax.Stmt) {
 		case nil:
 			// valid or error already reported
 		case *syntax.IfStmt, *syntax.BlockStmt:
-			narrowElse := check.logosPushIfElse(s.Cond)   // logos M3-S4 hook: `x == nil` else proves `x != nil`.
-			checkedElse := check.logosPushChecked(s.Cond) // logos M3-S4 hook: err scrutiny for the Else block.
+			narrowElse := check.logosPushIfElse(s.Cond) // logos M3-S4 hook: `x == nil` else proves `x != nil`.
 			check.stmt(inner, s.Else)
-			if checkedElse {
-				check.logosPopChecked() // logos M3-S4 hook.
-			}
 			if narrowElse {
 				check.logosPopNarrow() // logos M3-S4 hook.
 			}

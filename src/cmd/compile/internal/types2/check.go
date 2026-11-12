@@ -154,14 +154,13 @@ type Checker struct {
 	usedPkgNames  map[*PkgName]bool          // set of used package names
 	mono          monoGraph                  // graph for detecting non-monomorphizable instantiation loops
 
-	firstErr            error                           // first error encountered
-	logosConforms       map[*Named][]Type               // logos M4-S1 hook: explicit `: I` property-interface conformances per struct
-	logosPropSel        map[*syntax.SelectorExpr]bool   // logos M4-S1 hook: property selectors typed through a property interface
-	logosNarrow         map[*Var]int                    // logos M3-S4 hook: active non-nil narrowings per variable (refcount)
-	logosNarrowStack    [][]*Var                        // logos M3-S4 hook: scoped narrowing push frames
-	logosErrUncheck     map[*Var]*Var                   // logos M3-S4 hook: unchecked `n, err := f()` results (n -> err)
-	logosErrStack       []map[*Var]*Var                 // logos M3-S4 hook: err guards discharged per `if err == nil` block
-	logosErrDead        map[*Var]bool                   // logos M3-S4 hook: killed results skipped by err-frame restore
+	firstErr            error                         // first error encountered
+	logosConforms       map[*Named][]Type             // logos M4-S1 hook: explicit `: I` property-interface conformances per struct
+	logosPropSel        map[*syntax.SelectorExpr]bool // logos M4-S1 hook: property selectors typed through a property interface
+	logosNarrow         map[*Var]int                  // logos M3-S4 hook: active non-nil narrowings per variable (refcount)
+	logosNarrowStack    [][]*Var                      // logos M3-S4 hook: scoped narrowing push frames
+	logosInPlace        map[*syntax.LambdaExpr]bool
+	logosEFBody         *syntax.BlockStmt
 	logosDisqual        []map[string]bool               // logos M3-S4 hook: per-function disqualified names
 	logosLHS            []*Var                          // logos M3-S4 hook: assignment-target suppression stack
 	logosCurStmt        syntax.Stmt                     // logos M3-S4 hook: innermost enclosing statement for joint-use scan

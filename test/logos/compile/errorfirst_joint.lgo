@@ -128,7 +128,7 @@ func efChainTestFirst() bool {
 
 func efChainTestFirstFailure() bool {
 	n, err := efFetch()
-	return err != nil && n == 0
+	return err != nil && n == 0 // ERROR "result_before_error_check"
 }
 
 func efChainOrFirst() bool {

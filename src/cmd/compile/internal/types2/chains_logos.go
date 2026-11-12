@@ -485,6 +485,10 @@ func (check *Checker) logosRejectTryChainUnder(e syntax.Expr) {
 }
 
 func (check *Checker) logosChainLambda(lam *syntax.LambdaExpr, elem Type, kind logosChainKind, roots map[string]bool) (Type, bool, bool) {
+	if check.logosInPlace == nil {
+		check.logosInPlace = make(map[*syntax.LambdaExpr]bool)
+	}
+	check.logosInPlace[lam] = true
 	if len(lam.Params) != 1 {
 		check.errorf(lam.Arrow, IncompatibleAssign, "chain lambda takes exactly one parameter, have %d", len(lam.Params))
 		return nil, false, false

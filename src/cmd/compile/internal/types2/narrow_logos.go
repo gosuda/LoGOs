@@ -73,6 +73,7 @@ func (check *Checker) logosEnterFuncBody(body *syntax.BlockStmt) {
 		check.Info.LogosDisqual[body] = slices.Clone(check.logosDisqual)
 	}
 	if outermost {
+		check.logosEFBody = body
 		tainted := make(map[string]bool)
 		for name := range dq.refInClos {
 			if dq.assignOut[name] {
@@ -120,6 +121,9 @@ func (check *Checker) logosExitFunc() {
 	}
 	check.logosRestoreTainted()
 	if n := len(check.logosDisqual); n > 0 {
+		if n == 1 {
+			check.logosErrorFirst(check.logosEFBody)
+		}
 		check.logosDisqual = check.logosDisqual[:n-1]
 	}
 }
@@ -422,7 +426,6 @@ func (check *Checker) logosAfterStmt(s syntax.Stmt) {
 	if !isNeq {
 		check.logosPushNarrow([]*Var{v})
 	}
-	check.logosDischargeErr(v)
 }
 
 func (check *Checker) logosExits(s syntax.Stmt) bool {
@@ -528,90 +531,11 @@ func (check *Checker) logosNarrowIdent(x *operand, obj Object) {
 	if n := len(check.logosLHS); n > 0 && check.logosLHS[n-1] == v {
 		return
 	}
-	if errV, ok := check.logosErrUncheck[v]; ok {
-		if !check.logosResultUnobserved(x.expr, errV) {
-			check.errorf(x.expr, IncompatibleAssign, "%s read of %s before %s is checked (read %s only after %s is checked)", logosResultBeforeErr, v.name, errV.name, v.name, errV.name)
-		}
-		return
-	}
 	if check.logosNarrow[v] > 0 {
 		if opt := logosAsOption(v.typ); opt != nil {
 			x.typ_ = opt.Elem
 		}
 	}
-}
-
-func (check *Checker) logosResultUnobserved(read syntax.Expr, errV *Var) bool {
-	return check.logosErrTestedBefore(read, errV) || check.logosPassedOn(read, errV) || check.logosBlankAssigned(read)
-}
-
-func (check *Checker) logosPassedOn(read syntax.Expr, errV *Var) bool {
-	ret, ok := check.logosCurStmt.(*syntax.ReturnStmt)
-	if !ok {
-		return false
-	}
-	results := syntax.UnpackListExpr(ret.Results)
-	if len(results) != 2 || results[0] != read {
-		return false
-	}
-	id, ok := results[1].(*syntax.Name)
-	return ok && check.lookup(id.Value) == Object(errV)
-}
-
-func (check *Checker) logosBlankAssigned(read syntax.Expr) bool {
-	as, ok := check.logosCurStmt.(*syntax.AssignStmt)
-	if !ok || as.Op != 0 {
-		return false
-	}
-	lhs, rhs := syntax.UnpackListExpr(as.Lhs), syntax.UnpackListExpr(as.Rhs)
-	if len(lhs) != len(rhs) {
-		return false
-	}
-	for i := range rhs {
-		id, blank := lhs[i].(*syntax.Name)
-		if blank && id.Value == "_" && syntax.Unparen(rhs[i]) == read {
-			return true
-		}
-	}
-	return false
-}
-
-func (check *Checker) logosErrTestedBefore(read syntax.Expr, errV *Var) bool {
-	if check.logosCurStmt == nil {
-		return false
-	}
-	var stack, path []syntax.Node
-	syntax.Inspect(check.logosCurStmt, func(n syntax.Node) bool {
-		if path != nil {
-			return false
-		}
-		if n == nil {
-			stack = stack[:len(stack)-1]
-			return false
-		}
-		stack = append(stack, n)
-		if n == syntax.Node(read) {
-			path = slices.Clone(stack)
-			return false
-		}
-		return true
-	})
-	for i := len(path) - 1; i > 0; i-- {
-		op, ok := path[i-1].(*syntax.Operation)
-		if ok && op.Y != nil && op.Y == path[i] && (op.Op == syntax.AndAnd || op.Op == syntax.OrOr) && check.logosChainHasErrTest(op.X, errV) {
-			return true
-		}
-	}
-	return false
-}
-
-func (check *Checker) logosChainHasErrTest(cond syntax.Expr, errV *Var) bool {
-	cond = syntax.Unparen(cond)
-	if op, ok := cond.(*syntax.Operation); ok && op.Y != nil && (op.Op == syntax.AndAnd || op.Op == syntax.OrOr) {
-		return check.logosChainHasErrTest(op.X, errV) || check.logosChainHasErrTest(op.Y, errV)
-	}
-	v, _, ok := check.logosNilTestOf(cond)
-	return ok && v == errV
 }
 
 func (check *Checker) logosStmtEnter(s syntax.Stmt) syntax.Stmt {
@@ -660,7 +584,7 @@ func (check *Checker) logosKillNarrow(lhs syntax.Expr) {
 	check.logosKillVar(v)
 }
 
-func (check *Checker) logosShortDecl(lhs, rhs []syntax.Expr, lhsVars []*Var) {
+func (check *Checker) logosShortDecl(lhs []syntax.Expr) {
 	if !check.conf.Logos {
 		return
 	}
@@ -673,49 +597,6 @@ func (check *Checker) logosShortDecl(lhs, rhs []syntax.Expr, lhsVars []*Var) {
 			check.logosKillVar(alt)
 		}
 	}
-	if len(lhs) != 2 || len(rhs) != 1 || len(lhsVars) != 2 {
-		return
-	}
-	call, ok := syntax.Unparen(rhs[0]).(*syntax.CallExpr)
-	if !ok {
-		return
-	}
-	n, errV := lhsVars[0], lhsVars[1]
-	if n == nil || errV == nil || n.name == "_" || errV.name == "_" || n == errV {
-		return
-	}
-	check.logosTrackTuple(n, errV, call)
-}
-
-func (check *Checker) logosTrackCallAssign(lhs []syntax.Expr, rhs syntax.Expr) {
-	if !check.conf.Logos || len(lhs) != 2 {
-		return
-	}
-	call, ok := syntax.Unparen(rhs).(*syntax.CallExpr)
-	if !ok {
-		return
-	}
-	n, ok := check.logosLhsVar(lhs[0])
-	if !ok {
-		return
-	}
-	errV, ok := check.logosLhsVar(lhs[1])
-	if !ok || n == errV {
-		return
-	}
-	check.logosTrackTuple(n, errV, call)
-}
-
-func (check *Checker) logosLhsVar(e syntax.Expr) (*Var, bool) {
-	id, ok := syntax.Unparen(e).(*syntax.Name)
-	if !ok || id.Value == "_" {
-		return nil, false
-	}
-	v, ok := check.lookup(id.Value).(*Var)
-	if !ok || v.pkg != check.pkg {
-		return nil, false
-	}
-	return v, true
 }
 
 func (check *Checker) logosKillVar(v *Var) {
@@ -723,134 +604,6 @@ func (check *Checker) logosKillVar(v *Var) {
 		return
 	}
 	delete(check.logosNarrow, v)
-	if _, ok := check.logosErrUncheck[v]; ok {
-		delete(check.logosErrUncheck, v)
-		check.logosNoteDead(v)
-	}
-	maps.DeleteFunc(check.logosErrUncheck, func(m *Var, e *Var) bool {
-		if e != v {
-			return false
-		}
-		check.logosNoteDead(m)
-		return true
-	})
-}
-
-func (check *Checker) logosNoteDead(v *Var) {
-	if check.logosErrDead == nil {
-		check.logosErrDead = make(map[*Var]bool)
-	}
-	check.logosErrDead[v] = true
-}
-
-func (check *Checker) logosTrackTuple(n, errV *Var, call *syntax.CallExpr) {
-	if n.pkg != check.pkg || errV.pkg != check.pkg {
-		return
-	}
-	if errV.typ == nil || !Identical(errV.typ, universeError) {
-		return
-	}
-	if !check.logosIsLgoCall(call) {
-		return
-	}
-	maps.DeleteFunc(check.logosErrUncheck, func(m *Var, e *Var) bool {
-		if e != errV {
-			return false
-		}
-		check.logosNoteDead(m)
-		return true
-	})
-	delete(check.logosErrDead, n)
-	if check.logosErrUncheck == nil {
-		check.logosErrUncheck = make(map[*Var]*Var)
-	}
-	check.logosErrUncheck[n] = errV
-}
-
-func (check *Checker) logosIsLgoCall(call *syntax.CallExpr) bool {
-	switch fun := syntax.Unparen(call.Fun).(type) {
-	case *syntax.Name:
-		if fn, ok := check.lookup(fun.Value).(*Func); ok {
-			return fn.pkg == check.pkg
-		}
-		return true
-	case *syntax.SelectorExpr:
-		if xn, ok := syntax.Unparen(fun.X).(*syntax.Name); ok {
-			if obj := check.lookup(xn.Value); obj != nil {
-				if pn, ok := obj.(*PkgName); ok {
-					return pn.imported == check.pkg
-				}
-			}
-		}
-		if sel := check.Selections[fun]; sel != nil {
-			if fn, ok := sel.Obj().(*Func); ok && fn.pkg != nil {
-				return fn.pkg == check.pkg
-			}
-		}
-		return true
-	default:
-		return true
-	}
-}
-
-func (check *Checker) logosDischargeErr(errV *Var) {
-	if errV == nil {
-		return
-	}
-	maps.DeleteFunc(check.logosErrUncheck, func(_ *Var, e *Var) bool {
-		return e == errV
-	})
-}
-
-func (check *Checker) logosPushChecked(cond syntax.Expr) bool {
-	if !check.conf.Logos {
-		return false
-	}
-	v, _, ok := check.logosNilTestOf(cond)
-	if !ok {
-		return false
-	}
-	var frame map[*Var]*Var
-	for m, e := range check.logosErrUncheck {
-		if e == v {
-			if frame == nil {
-				frame = make(map[*Var]*Var)
-			}
-			frame[m] = e
-		}
-	}
-	if len(frame) == 0 {
-		return false
-	}
-	for m := range frame {
-		delete(check.logosErrUncheck, m)
-	}
-	check.logosErrStack = append(check.logosErrStack, frame)
-	return true
-}
-
-func (check *Checker) logosPopChecked() {
-	frames := check.logosErrStack
-	frame := frames[len(frames)-1]
-	check.logosErrStack = frames[:len(frames)-1]
-	for m, e := range frame {
-		if check.logosErrDead[m] {
-			continue
-		}
-		if _, ok := check.logosErrUncheck[m]; !ok {
-			check.logosErrUncheck[m] = e
-		}
-	}
-}
-
-func (check *Checker) logosErrBase() int {
-	return len(check.logosErrStack)
-}
-
-func (check *Checker) logosPopToErr(base int) {
-	for len(check.logosErrStack) > base {
-		check.logosPopChecked()
-	}
 }
 
 func (check *Checker) logosUnnarrowOperand(x *operand) {
@@ -871,4 +624,837 @@ func (check *Checker) logosUnnarrowOperand(x *operand) {
 	}
 	x.typ_ = v.typ
 	check.updateExprType(x.expr, v.typ, false)
+}
+
+type logosEFEntry struct {
+	err    *Var
+	name   string
+	proven bool
+}
+
+type logosEFState struct {
+	m map[*Var]logosEFEntry
+}
+
+func (s *logosEFState) set(v *Var, e logosEFEntry) *logosEFState {
+	m := maps.Clone(s.m)
+	if m == nil {
+		m = make(map[*Var]logosEFEntry, 1)
+	}
+	m[v] = e
+	return &logosEFState{m}
+}
+
+func (s *logosEFState) drop(v *Var) *logosEFState {
+	if _, ok := s.m[v]; !ok {
+		return s
+	}
+	m := maps.Clone(s.m)
+	delete(m, v)
+	return &logosEFState{m}
+}
+
+func (s *logosEFState) remap(f func(logosEFEntry) logosEFEntry) *logosEFState {
+	var out map[*Var]logosEFEntry
+	for v, e := range s.m {
+		ne := f(e)
+		if ne == e {
+			continue
+		}
+		if out == nil {
+			out = maps.Clone(s.m)
+		}
+		out[v] = ne
+	}
+	if out == nil {
+		return s
+	}
+	return &logosEFState{out}
+}
+
+func (s *logosEFState) prove(errV *Var) *logosEFState {
+	return s.remap(func(e logosEFEntry) logosEFEntry {
+		e.proven = e.proven || e.err == errV
+		return e
+	})
+}
+
+func (s *logosEFState) detach(errV *Var) *logosEFState {
+	return s.remap(func(e logosEFEntry) logosEFEntry {
+		if e.err == errV {
+			e.err = nil
+		}
+		return e
+	})
+}
+
+func (s *logosEFState) unprove() *logosEFState {
+	return s.remap(func(e logosEFEntry) logosEFEntry {
+		e.proven = false
+		return e
+	})
+}
+
+func logosEFJoin(a, b *logosEFState) *logosEFState {
+	switch {
+	case a == nil:
+		return b
+	case b == nil || a == b:
+		return a
+	}
+	m := maps.Clone(a.m)
+	if m == nil {
+		m = make(map[*Var]logosEFEntry, len(b.m))
+	}
+	for v, eb := range b.m {
+		ea, ok := m[v]
+		if !ok {
+			m[v] = eb
+			continue
+		}
+		if ea.err != eb.err {
+			ea.err = nil
+		}
+		ea.proven = ea.proven && eb.proven
+		m[v] = ea
+	}
+	return &logosEFState{m}
+}
+
+func logosEFSame(a, b *logosEFState) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return maps.Equal(a.m, b.m)
+}
+
+type logosEFFrame struct {
+	label    string
+	loop     bool
+	brk, cnt *logosEFState
+}
+
+type logosEFCtx struct {
+	labels  map[string]*logosEFState
+	frames  []*logosEFFrame
+	exit    *logosEFState
+	fall    *logosEFState
+	changed bool
+}
+
+type logosEFEffects struct {
+	inside   map[*Var]bool
+	assigned map[*Var]bool
+	created  map[*Var]string
+}
+
+type logosEFPass struct {
+	check   *Checker
+	body    *syntax.BlockStmt
+	seen    map[syntax.Pos]bool
+	ctx     *logosEFCtx
+	eff     *logosEFEffects
+	assigns map[*Var][]syntax.Expr
+	addr    map[*Var]bool
+}
+
+func (check *Checker) logosErrorFirst(body *syntax.BlockStmt) {
+	if !check.conf.Logos || body == nil || check.Uses == nil || check.Defs == nil {
+		return
+	}
+	p := &logosEFPass{check: check, body: body, seen: make(map[syntax.Pos]bool)}
+	if p.hasTuple() {
+		p.run(body, &logosEFState{})
+	}
+}
+
+func (p *logosEFPass) hasTuple() bool {
+	found := false
+	syntax.Inspect(p.body, func(n syntax.Node) bool {
+		switch n := n.(type) {
+		case *syntax.AssignStmt:
+			if n.Rhs != nil {
+				errV, _ := p.tuple(syntax.UnpackListExpr(n.Lhs), n.Rhs)
+				found = found || errV != nil
+			}
+		case *syntax.VarDecl:
+			if n.Values != nil {
+				errV, _ := p.tuple(logosEFNames(n), n.Values)
+				found = found || errV != nil
+			}
+		}
+		return !found
+	})
+	return found
+}
+
+func logosEFNames(d *syntax.VarDecl) []syntax.Expr {
+	lhs := make([]syntax.Expr, len(d.NameList))
+	for i, name := range d.NameList {
+		lhs[i] = name
+	}
+	return lhs
+}
+
+func (p *logosEFPass) run(body *syntax.BlockStmt, in *logosEFState) *logosEFState {
+	saved := p.ctx
+	ctx := &logosEFCtx{labels: make(map[string]*logosEFState)}
+	p.ctx = ctx
+	var end *logosEFState
+	for {
+		ctx.frames, ctx.exit, ctx.fall, ctx.changed = nil, nil, nil, false
+		end = p.stmt(body, in)
+		if !ctx.changed {
+			break
+		}
+	}
+	p.ctx = saved
+	return logosEFJoin(end, ctx.exit)
+}
+
+func (p *logosEFPass) varOf(e syntax.Expr) *Var {
+	id, ok := syntax.Unparen(e).(*syntax.Name)
+	if !ok || id.Value == "_" {
+		return nil
+	}
+	obj := p.check.Defs[id]
+	if obj == nil {
+		obj = p.check.Uses[id]
+	}
+	v, _ := obj.(*Var)
+	return v
+}
+
+func (p *logosEFPass) errVar(e syntax.Expr) *Var {
+	v := p.varOf(e)
+	if v == nil || v.typ == nil || !Identical(v.typ, universeError) {
+		return nil
+	}
+	return v
+}
+
+func (p *logosEFPass) isNil(e syntax.Expr) bool {
+	id, ok := e.(*syntax.Name)
+	if !ok {
+		return false
+	}
+	_, isNil := p.check.Uses[id].(*Nil)
+	return isNil
+}
+
+func (p *logosEFPass) nilTest(op *syntax.Operation) (errV *Var, isNeq bool) {
+	if op.Y == nil || (op.Op != syntax.Eql && op.Op != syntax.Neq) {
+		return nil, false
+	}
+	x, y := syntax.Unparen(op.X), syntax.Unparen(op.Y)
+	switch {
+	case p.isNil(y):
+		errV = p.errVar(x)
+	case p.isNil(x):
+		errV = p.errVar(y)
+	}
+	return errV, op.Op == syntax.Neq
+}
+
+func (p *logosEFPass) tuple(lhs []syntax.Expr, rhs syntax.Expr) (errV *Var, vars []*Var) {
+	call, ok := syntax.Unparen(rhs).(*syntax.CallExpr)
+	if !ok || len(lhs) < 2 {
+		return nil, nil
+	}
+	typ, _, ok := p.check.logosChecked(call)
+	tup, isTuple := typ.(*Tuple)
+	if !ok || !isTuple || tup.Len() != len(lhs) || !Identical(tup.At(tup.Len()-1).typ, universeError) {
+		return nil, nil
+	}
+	if !p.calleeInLgo(call.Fun) {
+		return nil, nil
+	}
+	errV = p.errVar(lhs[len(lhs)-1])
+	if errV == nil {
+		return nil, nil
+	}
+	for _, e := range lhs[:len(lhs)-1] {
+		if v := p.varOf(e); v != nil && v != errV {
+			vars = append(vars, v)
+		}
+	}
+	return errV, vars
+}
+
+func (p *logosEFPass) staticFunc(e syntax.Expr) *Func {
+	switch e := syntax.Unparen(e).(type) {
+	case *syntax.Name:
+		fn, _ := p.check.Uses[e].(*Func)
+		return fn
+	case *syntax.SelectorExpr:
+		if sel := p.check.Selections[e]; sel != nil {
+			fn, _ := sel.Obj().(*Func)
+			return fn
+		}
+		fn, _ := p.check.Uses[e.Sel].(*Func)
+		return fn
+	case *syntax.IndexExpr:
+		return p.staticFunc(e.X)
+	}
+	return nil
+}
+
+func (p *logosEFPass) calleeInLgo(fun syntax.Expr) bool {
+	if fn := p.staticFunc(fun); fn != nil {
+		return p.check.logosFuncInLgo(fn)
+	}
+	id, ok := syntax.Unparen(fun).(*syntax.Name)
+	if !ok {
+		return true
+	}
+	v, _ := p.check.Uses[id].(*Var)
+	if origin := p.sole(v); origin != nil {
+		if fn := p.staticFunc(origin); fn != nil {
+			return p.check.logosFuncInLgo(fn)
+		}
+	}
+	return true
+}
+
+func (p *logosEFPass) sole(v *Var) syntax.Expr {
+	if v == nil {
+		return nil
+	}
+	if p.assigns == nil {
+		p.collectAssigns()
+	}
+	if exprs := p.assigns[v]; len(exprs) == 1 && !p.addr[v] {
+		return exprs[0]
+	}
+	return nil
+}
+
+func (p *logosEFPass) collectAssigns() {
+	p.assigns = make(map[*Var][]syntax.Expr)
+	p.addr = make(map[*Var]bool)
+	note := func(lhs []syntax.Expr, rhs []syntax.Expr, plain bool) {
+		for i, l := range lhs {
+			var r syntax.Expr
+			if plain && len(lhs) == len(rhs) {
+				r = rhs[i]
+			}
+			if v := p.varOf(l); v != nil {
+				p.assigns[v] = append(p.assigns[v], r)
+			}
+		}
+	}
+	syntax.Inspect(p.body, func(n syntax.Node) bool {
+		switch n := n.(type) {
+		case *syntax.AssignStmt:
+			note(syntax.UnpackListExpr(n.Lhs), syntax.UnpackListExpr(n.Rhs), n.Op == 0 || n.Op == syntax.Def)
+		case *syntax.VarDecl:
+			if n.Values != nil {
+				note(logosEFNames(n), syntax.UnpackListExpr(n.Values), true)
+			}
+		case *syntax.RangeClause:
+			note(syntax.UnpackListExpr(n.Lhs), nil, false)
+		case *syntax.Operation:
+			if v := p.varOf(n.X); v != nil && n.Op == syntax.And && n.Y == nil {
+				p.addr[v] = true
+			}
+		}
+		return true
+	})
+}
+
+func (p *logosEFPass) read(n *syntax.Name, st *logosEFState) {
+	v, _ := p.check.Uses[n].(*Var)
+	if v == nil {
+		return
+	}
+	e, ok := st.m[v]
+	if !ok || e.proven || p.seen[n.Pos()] {
+		return
+	}
+	p.seen[n.Pos()] = true
+	p.check.errorf(n, IncompatibleAssign, "%s read of %s before %s is checked (read %s only after %s is checked)", logosResultBeforeErr, v.name, e.name, v.name, e.name)
+}
+
+func (p *logosEFPass) noteAssigned(v *Var) {
+	if p.eff != nil && !p.eff.inside[v] {
+		p.eff.assigned[v] = true
+	}
+}
+
+func (p *logosEFPass) noteCreated(v *Var, errName string) {
+	if p.eff != nil && !p.eff.inside[v] {
+		p.eff.created[v] = errName
+	}
+}
+
+func (p *logosEFPass) assigned(st *logosEFState, v *Var) *logosEFState {
+	p.noteAssigned(v)
+	return st.drop(v).detach(v)
+}
+
+func (p *logosEFPass) track(lhs []syntax.Expr, rhs syntax.Expr, st *logosEFState) *logosEFState {
+	errV, vars := p.tuple(lhs, rhs)
+	if errV == nil {
+		return st
+	}
+	for _, v := range vars {
+		st = st.set(v, logosEFEntry{err: errV, name: errV.name})
+		p.noteCreated(v, errV.name)
+	}
+	return st
+}
+
+func (p *logosEFPass) expr(n syntax.Node, st *logosEFState) *logosEFState {
+	if n == nil || st == nil {
+		return st
+	}
+	syntax.Inspect(n, func(x syntax.Node) bool {
+		switch x := x.(type) {
+		case *syntax.Name:
+			p.read(x, st)
+		case *syntax.Operation:
+			if x.Y == nil || (x.Op != syntax.AndAnd && x.Op != syntax.OrOr) {
+				return true
+			}
+			t, f := p.cond(x, st)
+			st = logosEFJoin(t, f)
+			return false
+		case *syntax.FuncLit:
+			st = p.later(x, x.Body, st)
+			return false
+		case *syntax.LambdaExpr:
+			st = p.lambda(x, st)
+			return false
+		}
+		return true
+	})
+	return st
+}
+
+func (p *logosEFPass) cond(e syntax.Expr, st *logosEFState) (t, f *logosEFState) {
+	if st == nil {
+		return nil, nil
+	}
+	e = syntax.Unparen(e)
+	op, ok := e.(*syntax.Operation)
+	if !ok {
+		st = p.expr(e, st)
+		return st, st
+	}
+	switch {
+	case op.Op == syntax.Not && op.Y == nil:
+		t, f = p.cond(op.X, st)
+		return f, t
+	case op.Op == syntax.AndAnd && op.Y != nil:
+		xt, xf := p.cond(op.X, st)
+		yt, yf := p.cond(op.Y, xt)
+		return yt, logosEFJoin(xf, yf)
+	case op.Op == syntax.OrOr && op.Y != nil:
+		xt, xf := p.cond(op.X, st)
+		yt, yf := p.cond(op.Y, xf)
+		return logosEFJoin(xt, yt), yf
+	}
+	st = p.expr(op, st)
+	errV, isNeq := p.nilTest(op)
+	if errV == nil {
+		return st, st
+	}
+	if isNeq {
+		return st, st.prove(errV)
+	}
+	return st.prove(errV), st
+}
+
+func (p *logosEFPass) stmts(list []syntax.Stmt, st *logosEFState) *logosEFState {
+	for _, s := range list {
+		st = p.stmt(s, st)
+	}
+	return st
+}
+
+func (p *logosEFPass) stmt(s syntax.Stmt, st *logosEFState) *logosEFState {
+	if s == nil {
+		return st
+	}
+	if ls, ok := s.(*syntax.LabeledStmt); ok {
+		return p.labeled(ls, st)
+	}
+	if st == nil {
+		return nil
+	}
+	switch s := s.(type) {
+	case *syntax.BlockStmt:
+		return p.stmts(s.List, st)
+	case *syntax.ExprStmt:
+		return p.exprStmt(s, st)
+	case *syntax.SendStmt:
+		return p.expr(s.Value, p.expr(s.Chan, st))
+	case *syntax.DeclStmt:
+		return p.decls(s, st)
+	case *syntax.AssignStmt:
+		return p.assign(s, st)
+	case *syntax.BranchStmt:
+		return p.branch(s, st)
+	case *syntax.ReturnStmt:
+		return p.ret(s, st)
+	case *syntax.IfStmt:
+		return p.ifStmt(s, st)
+	case *syntax.ForStmt:
+		return p.forStmt(s, "", st)
+	case *syntax.SwitchStmt:
+		return p.switchStmt(s, "", st)
+	case *syntax.SelectStmt:
+		return p.selectStmt(s, "", st)
+	}
+	return p.logosStmt(s, st)
+}
+
+func (p *logosEFPass) logosStmt(s syntax.Stmt, st *logosEFState) *logosEFState {
+	switch s := s.(type) {
+	case *syntax.GroupStmt:
+		return p.stmt(s.Body, p.expr(s.Limit, p.expr(s.Ctx, st)))
+	case *syntax.GroupChild:
+		return p.later(s.Body, s.Body, st)
+	case *syntax.ConstIfStmt:
+		st = p.expr(s.Cond, st)
+		return logosEFJoin(p.stmt(s.Then, st), p.stmt(s.Else, st))
+	case *syntax.ConstSwitchStmt:
+		out := st
+		for _, c := range s.Cases {
+			out = logosEFJoin(out, p.stmts(c.Body, st))
+		}
+		return out
+	case *syntax.ConstForStmt:
+		return p.loop(s.Body, nil, nil, "", p.expr(s.Range, st), nil)
+	}
+	return p.expr(s, st)
+}
+
+func (p *logosEFPass) labeled(s *syntax.LabeledStmt, st *logosEFState) *logosEFState {
+	st = logosEFJoin(st, p.ctx.labels[s.Label.Value])
+	if st == nil {
+		return nil
+	}
+	switch inner := s.Stmt.(type) {
+	case *syntax.ForStmt:
+		return p.forStmt(inner, s.Label.Value, st)
+	case *syntax.SwitchStmt:
+		return p.switchStmt(inner, s.Label.Value, st)
+	case *syntax.SelectStmt:
+		return p.selectStmt(inner, s.Label.Value, st)
+	}
+	return p.stmt(s.Stmt, st)
+}
+
+func (p *logosEFPass) exprStmt(s *syntax.ExprStmt, st *logosEFState) *logosEFState {
+	st = p.expr(s.X, st)
+	call, ok := syntax.Unparen(s.X).(*syntax.CallExpr)
+	if !ok {
+		return st
+	}
+	name, ok := syntax.Unparen(call.Fun).(*syntax.Name)
+	if !ok {
+		return st
+	}
+	if b, ok := p.check.Uses[name].(*Builtin); ok && b.Name() == "panic" {
+		return nil
+	}
+	return st
+}
+
+func (p *logosEFPass) decls(s *syntax.DeclStmt, st *logosEFState) *logosEFState {
+	for _, d := range s.DeclList {
+		vd, ok := d.(*syntax.VarDecl)
+		if !ok {
+			continue
+		}
+		st = p.expr(vd.Values, st)
+		names := logosEFNames(vd)
+		for _, name := range names {
+			if v := p.varOf(name); v != nil {
+				st = p.assigned(st, v)
+			}
+		}
+		if vd.Values != nil {
+			st = p.track(names, vd.Values, st)
+		}
+	}
+	return st
+}
+
+func (p *logosEFPass) assign(s *syntax.AssignStmt, st *logosEFState) *logosEFState {
+	lhs := syntax.UnpackListExpr(s.Lhs)
+	rhs := syntax.UnpackListExpr(s.Rhs)
+	plain := s.Op == 0 || s.Op == syntax.Def
+	for i, r := range rhs {
+		if !(s.Op == 0 && len(lhs) == len(rhs) && logosEFBlank(lhs[i]) && logosEFIsName(r)) {
+			st = p.expr(r, st)
+		}
+	}
+	for _, l := range lhs {
+		if !(plain && s.Rhs != nil && logosEFIsName(l)) {
+			st = p.expr(l, st)
+		}
+	}
+	for _, l := range lhs {
+		if v := p.varOf(l); v != nil {
+			st = p.assigned(st, v)
+		}
+	}
+	if plain && len(rhs) == 1 {
+		st = p.track(lhs, rhs[0], st)
+	}
+	return st
+}
+
+func logosEFIsName(e syntax.Expr) bool {
+	_, ok := syntax.Unparen(e).(*syntax.Name)
+	return ok
+}
+
+func logosEFBlank(e syntax.Expr) bool {
+	id, ok := syntax.Unparen(e).(*syntax.Name)
+	return ok && id.Value == "_"
+}
+
+func (p *logosEFPass) ret(s *syntax.ReturnStmt, st *logosEFState) *logosEFState {
+	results := syntax.UnpackListExpr(s.Results)
+	passed := make(map[*Var]bool, len(results))
+	for _, r := range results {
+		if v := p.varOf(r); v != nil {
+			passed[v] = true
+		}
+	}
+	for _, r := range results {
+		if e, ok := st.m[p.varOf(r)]; ok && e.err != nil && passed[e.err] {
+			continue
+		}
+		st = p.expr(r, st)
+	}
+	p.ctx.exit = logosEFJoin(p.ctx.exit, st)
+	return nil
+}
+
+func (p *logosEFPass) branch(s *syntax.BranchStmt, st *logosEFState) *logosEFState {
+	switch s.Tok {
+	case syntax.Break:
+		if f := p.frame(s.Label, false); f != nil {
+			f.brk = logosEFJoin(f.brk, st)
+		}
+	case syntax.Continue:
+		if f := p.frame(s.Label, true); f != nil {
+			f.cnt = logosEFJoin(f.cnt, st)
+		}
+	case syntax.Goto:
+		old := p.ctx.labels[s.Label.Value]
+		if joined := logosEFJoin(old, st); !logosEFSame(old, joined) {
+			p.ctx.labels[s.Label.Value] = joined
+			p.ctx.changed = true
+		}
+	case syntax.Fallthrough:
+		p.ctx.fall = logosEFJoin(p.ctx.fall, st)
+	}
+	return nil
+}
+
+func (p *logosEFPass) pushFrame(label string, loop bool) *logosEFFrame {
+	f := &logosEFFrame{label: label, loop: loop}
+	p.ctx.frames = append(p.ctx.frames, f)
+	return f
+}
+
+func (p *logosEFPass) popFrame() {
+	p.ctx.frames = p.ctx.frames[:len(p.ctx.frames)-1]
+}
+
+func (p *logosEFPass) frame(label *syntax.Name, loop bool) *logosEFFrame {
+	for i := len(p.ctx.frames) - 1; i >= 0; i-- {
+		f := p.ctx.frames[i]
+		switch {
+		case label != nil && f.label == label.Value:
+			return f
+		case label == nil && (f.loop || !loop):
+			return f
+		}
+	}
+	return nil
+}
+
+func (p *logosEFPass) ifStmt(s *syntax.IfStmt, st *logosEFState) *logosEFState {
+	st = p.stmt(s.Init, st)
+	t, f := p.cond(s.Cond, st)
+	return logosEFJoin(p.stmt(s.Then, t), p.stmt(s.Else, f))
+}
+
+func (p *logosEFPass) forStmt(s *syntax.ForStmt, label string, st *logosEFState) *logosEFState {
+	rc, isRange := s.Init.(*syntax.RangeClause)
+	if !isRange {
+		return p.loop(s.Body, s.Cond, s.Post, label, p.stmt(s.Init, st), nil)
+	}
+	return p.loop(s.Body, nil, nil, label, p.expr(rc.X, st), rc)
+}
+
+func (p *logosEFPass) loop(body *syntax.BlockStmt, cond syntax.Expr, post syntax.SimpleStmt, label string, st *logosEFState, rc *syntax.RangeClause) *logosEFState {
+	if st == nil {
+		return nil
+	}
+	head := st
+	for {
+		f := p.pushFrame(label, true)
+		in, out := head, (*logosEFState)(nil)
+		switch {
+		case rc != nil:
+			in, out = p.rangeAssign(rc, head), head
+		case cond != nil:
+			in, out = p.cond(cond, head)
+		}
+		end := p.stmt(post, logosEFJoin(p.stmt(body, in), f.cnt))
+		p.popFrame()
+		next := logosEFJoin(head, end)
+		if logosEFSame(next, head) {
+			return logosEFJoin(out, f.brk)
+		}
+		head = next
+	}
+}
+
+func (p *logosEFPass) rangeAssign(rc *syntax.RangeClause, st *logosEFState) *logosEFState {
+	if rc.Lhs == nil || rc.Def {
+		return st
+	}
+	for _, l := range syntax.UnpackListExpr(rc.Lhs) {
+		if v := p.varOf(l); v != nil {
+			st = p.assigned(st, v)
+		} else {
+			st = p.expr(l, st)
+		}
+	}
+	return st
+}
+
+func (p *logosEFPass) switchStmt(s *syntax.SwitchStmt, label string, st *logosEFState) *logosEFState {
+	st = p.stmt(s.Init, st)
+	var tagErr *Var
+	switch tag := s.Tag.(type) {
+	case *syntax.TypeSwitchGuard:
+		tagErr = p.errVar(tag.X)
+		st = p.expr(tag.X, st)
+	case nil:
+	default:
+		tagErr = p.errVar(tag)
+		st = p.expr(tag, st)
+	}
+	f := p.pushFrame(label, false)
+	enter := make([]*logosEFState, len(s.Body))
+	miss := st
+	hasDefault := false
+	for i, c := range s.Body {
+		if c.Cases == nil {
+			hasDefault = true
+			continue
+		}
+		for _, e := range syntax.UnpackListExpr(c.Cases) {
+			var hit *logosEFState
+			hit, miss = p.caseCond(s.Tag, tagErr, e, miss)
+			enter[i] = logosEFJoin(enter[i], hit)
+		}
+	}
+	var out, fall *logosEFState
+	for i, c := range s.Body {
+		if c.Cases == nil {
+			enter[i] = miss
+		}
+		p.ctx.fall = nil
+		out = logosEFJoin(out, p.stmts(c.Body, logosEFJoin(enter[i], fall)))
+		fall = p.ctx.fall
+	}
+	p.ctx.fall = nil
+	p.popFrame()
+	if !hasDefault {
+		out = logosEFJoin(out, miss)
+	}
+	return logosEFJoin(out, f.brk)
+}
+
+func (p *logosEFPass) caseCond(tag syntax.Expr, tagErr *Var, e syntax.Expr, miss *logosEFState) (hit, rest *logosEFState) {
+	switch {
+	case tag == nil:
+		return p.cond(e, miss)
+	case tagErr != nil && p.isNil(syntax.Unparen(e)):
+		return miss.prove(tagErr), miss
+	}
+	miss = p.expr(e, miss)
+	return miss, miss
+}
+
+func (p *logosEFPass) selectStmt(s *syntax.SelectStmt, label string, st *logosEFState) *logosEFState {
+	f := p.pushFrame(label, false)
+	var out *logosEFState
+	for _, c := range s.Body {
+		out = logosEFJoin(out, p.stmts(c.Body, p.stmt(c.Comm, st)))
+	}
+	p.popFrame()
+	return logosEFJoin(out, f.brk)
+}
+
+func (p *logosEFPass) defsIn(n syntax.Node) map[*Var]bool {
+	inside := make(map[*Var]bool)
+	syntax.Inspect(n, func(x syntax.Node) bool {
+		if id, ok := x.(*syntax.Name); ok {
+			if v, _ := p.check.Defs[id].(*Var); v != nil {
+				inside[v] = true
+			}
+		}
+		return true
+	})
+	return inside
+}
+
+func (p *logosEFPass) later(lit syntax.Node, body *syntax.BlockStmt, st *logosEFState) *logosEFState {
+	if body == nil {
+		return st
+	}
+	saved := p.eff
+	eff := &logosEFEffects{inside: p.defsIn(lit), assigned: make(map[*Var]bool), created: make(map[*Var]string)}
+	p.eff = eff
+	p.run(body, st.unprove())
+	p.eff = saved
+	for v := range eff.assigned {
+		st = st.detach(v)
+		p.noteAssigned(v)
+	}
+	for v, errName := range eff.created {
+		st = st.set(v, logosEFEntry{name: errName})
+		p.noteCreated(v, errName)
+	}
+	return st
+}
+
+func (p *logosEFPass) lambda(lam *syntax.LambdaExpr, st *logosEFState) *logosEFState {
+	body, isBlock := lam.Body.(*syntax.BlockStmt)
+	if p.check.logosInPlace[lam] {
+		return p.inPlace(lam, st)
+	}
+	if isBlock {
+		return p.later(lam, body, st)
+	}
+	p.expr(lam.Body, st.unprove())
+	return st
+}
+
+func (p *logosEFPass) inPlace(lam *syntax.LambdaExpr, st *logosEFState) *logosEFState {
+	in := st
+	for {
+		var end *logosEFState
+		if body, ok := lam.Body.(*syntax.BlockStmt); ok {
+			end = p.run(body, in)
+		} else {
+			end = p.expr(lam.Body, in)
+		}
+		next := logosEFJoin(st, end)
+		if logosEFSame(next, in) {
+			return in
+		}
+		in = next
+	}
 }

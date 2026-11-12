@@ -1,0 +1,60 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+logos build -o $WORK/good$GOEXE ./good
+! logos build -o $WORK/bad$GOEXE ./bad
+stderr -count=2 'correctness::result_before_error_check'
+
+-- go.mod --
+module example.com/ef
+
+go 1.27
+
+-- lib/lib.lgo --
+package lib
+
+type C struct{}
+
+func Fetch() (int, error) {
+	return 1, nil
+}
+
+func (C) Get() (int, error) {
+	return 2, nil
+}
+
+-- bad/main.lgo --
+package main
+
+import "example.com/ef/lib"
+
+func main() {
+	n, err := lib.Fetch()
+	println(n, err)
+	var c lib.C
+	m, err2 := c.Get()
+	println(m, err2)
+}
+
+-- good/main.lgo --
+package main
+
+import (
+	"strconv"
+
+	"example.com/ef/lib"
+)
+
+func main() {
+	n, err := lib.Fetch()
+	if err != nil {
+		return
+	}
+	var c lib.C
+	m, err2 := c.Get()
+	if err2 != nil {
+		return
+	}
+	k, err3 := strconv.Atoi("7")
+	println(n, m, k, err3)
+}
