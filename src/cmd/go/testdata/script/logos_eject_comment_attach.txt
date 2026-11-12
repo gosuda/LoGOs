@@ -23,6 +23,8 @@ stdout '^go version go1\.27\.2 '
 exec env -u GOROOT $UPROOT1272/bin/go build -o $WORK/upstream$GOEXE .
 exec $WORK/upstream$GOEXE
 cmp stdout $WORK/native.txt
+exec $GOROOT/bin/gofmt -l .
+! stdout .
 cd ..
 
 -- m/go.mod --
