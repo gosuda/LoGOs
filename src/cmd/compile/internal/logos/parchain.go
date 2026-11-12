@@ -389,10 +389,22 @@ func (fl *fileLower) parSignature(param string, in, res types2.Type) *types2.Sig
 }
 
 func (cg *chainGen) parPost(st *parStage, call *syntax.CallExpr) *chainEmit {
-	ce := &chainEmit{cg: cg, ops: st.post, term: st.term, elemT: st.resT, resultT: parResult(cg.fl.pkg.info.TypeOf(call)), isTry: true}
+	ce := &chainEmit{cg: cg, ops: st.post, term: st.term, elemT: st.resT, resultT: parResult(cg.fl.pkg.info.TypeOf(call)), isTry: true, ownedIn: cg.parOwned(st)}
 	ce.prepare()
 	ce.outCap, ce.hasCap = "", false
 	return ce
+}
+
+func (cg *chainGen) parOwned(st *parStage) bool {
+	in, owned := st.elemT, false
+	for i, op := range st.seg {
+		if op.method == "map" {
+			out := st.segT[i]
+			owned = logosMayBeCloser(out) && formsOwn(op.forms, in != nil && out != nil && types2.Identical(in, out), owned)
+			in = out
+		}
+	}
+	return owned
 }
 
 func parResult(t types2.Type) types2.Type {

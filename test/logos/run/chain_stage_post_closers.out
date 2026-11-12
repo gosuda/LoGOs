@@ -1,0 +1,10 @@
+ok stage-drop-count
+ok stage-count
+ok stage-any
+ok stage-all-stops
+ok stage-all-passes
+ok stage-first
+ok stage-find
+ok stage-take
+ok stage-drop
+ok stage-failure

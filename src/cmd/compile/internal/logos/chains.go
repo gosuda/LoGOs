@@ -1123,6 +1123,7 @@ type chainEmit struct {
 	lastMap   int
 	owns      bool
 	flight    bool
+	ownedIn   bool
 }
 
 func (ce *chainEmit) prepare() {
@@ -1451,6 +1452,7 @@ func (ce *chainEmit) loopO() (prelude []otext, body, epilogue []string) {
 			body = append(body, fmt.Sprintf("if %[1]s_tc%[2]d >= %[1]s_tn%[2]d { break }", p, i))
 		}
 	}
+	body = append(body, ce.ownedInLines(p)...)
 	for i, op := range ce.ops {
 		fname := ce.funcOf(op, fmt.Sprintf("%s_f%d", p, i))
 		switch op.method {
@@ -1494,7 +1496,7 @@ func (ce *chainEmit) ownership() {
 	ce.ownBefore = make([]bool, len(ce.ops))
 	ce.lastMap = -1
 	in := cg.elemT
-	owned := false
+	owned := ce.ownedIn
 	for i, op := range ce.ops {
 		ce.ownBefore[i] = owned
 		if op.method != "map" {
@@ -1537,6 +1539,9 @@ func formsOwn(forms []resultForm, same, prev bool) bool {
 }
 
 func (ce *chainEmit) needElem() bool {
+	if ce.ownedIn {
+		return true
+	}
 	if ce.term.method != "count" || ce.term.arg != nil {
 		return true
 	}
@@ -1546,6 +1551,18 @@ func (ce *chainEmit) needElem() bool {
 		}
 	}
 	return false
+}
+
+func (ce *chainEmit) ownedInLines(p string) []string {
+	switch {
+	case !ce.ownedIn:
+		return nil
+	case ce.lastMap < 0:
+		return []string{fmt.Sprintf("%[1]s_out = append(%[1]s_out, %[1]s_e)", p)}
+	case ce.flight:
+		return []string{fmt.Sprintf("%[1]s_fl = any(%[1]s_e)", p)}
+	}
+	return nil
 }
 
 func (ce *chainEmit) argText(op chainOp) otext {
