@@ -6,16 +6,20 @@ env GOTOOLCHAIN=local
 # a line comment or a line break in any gap of the header changes
 # nothing, for a function that is instantiated, one that nothing
 # instantiates, one that another package instantiates, and one that
-# calls a second generic from inside a const for. The module runs
-# natively, ejects without the dropped functions, and the ejected module
-# builds and runs with go and with go1.27.2 from $UPROOT1272 and prints
-# the same output.
+# calls a second generic from inside a const for. The same holds for the
+# types and constants that an exported const function of another
+# package needs: the keyword of each declaration is found by its tokens,
+# whatever comment or line break stands between it and the name. The
+# module runs natively, ejects without the dropped functions, and the
+# ejected module builds and runs with go and with go1.27.2 from
+# $UPROOT1272 and prints the same output.
 cd m
 logos run .
 stdout '^\[A B\] \[A B\] \[A B\] \[X Y\] \[A B\] \[X Y\]$'
 stdout '^\[A B\] \[X Y\] \[X Y\] \[Ak Bk\]$'
 stdout '^\[A B\] \[A B\] \[A B\] \[X Y\] \[A B\] \[X Y\]$'
 stdout '^\[X Y\] \[A B\] \[Xk Yk\]$'
+stdout '^81$'
 cp stdout $WORK/native.txt
 logos eject -o out
 exists out/main.go
@@ -181,11 +185,14 @@ func Gap[T any]() []string {
 	return out
 }
 
+const norm = lib.Norm(3)
+
 func main() {
 	fmt.Println(Block[S](), Line[S](), Break[S](), Name[P](), Open[S](), Close[P]())
 	fmt.Println(Multi[S, []int](), Both[P, S](), priv[P](), Gap[S]())
 	fmt.Println(lib.Block[S](), lib.Line[S](), lib.Break[S](), lib.Name[P](), lib.Open[S](), lib.Close[P]())
 	fmt.Println(lib.Multi[P, [4]int](), lib.Both[S, P](), lib.Gap[P]())
+	fmt.Println(norm)
 }
 
 -- m/lib/lib.lgo --
@@ -273,4 +280,26 @@ func Gap[T any]() []string {
 		out = append(out, f.Name+Kind /*p*/ [ /*q*/ T /*r*/ ] /*s*/ ( /*t*/ ))
 	}
 	return out
+}
+
+type // c
+Point struct{ X, Y int }
+
+const /*c*/ // d
+Scale = 3
+
+const ( // c
+	Bias = 1
+)
+
+type ( // c
+	Cell struct{ V int }
+)
+
+func helper(x int) int { return x + Bias }
+
+const func Norm(x int) int {
+	p := Point{X: x, Y: 4}
+	c := Cell{V: Bias}
+	return helper(p.X*p.X+p.Y*p.Y+c.V) * Scale
 }

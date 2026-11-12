@@ -7,6 +7,8 @@ package facts
 import (
 	"cmp"
 	"fmt"
+	"go/scanner"
+	"go/token"
 	"maps"
 	"slices"
 	"strconv"
@@ -789,15 +791,15 @@ func (s *constFnSrc) funcEnd(fd *syntax.FuncDecl) int {
 }
 
 func (s *constFnSrc) typeStart(td *syntax.TypeDecl) (int, bool) {
+	off := s.off(td.Pos())
 	if td.Group != nil {
 		specs := s.groupTypeSpecs(s.file, td.Group)
 		if len(specs) == 0 {
 			return 0, false
 		}
-		firstOff := s.off(specs[0].Pos())
-		return s.scanBackGroupKeyword(firstOff, "type")
+		off = s.off(specs[0].Pos())
 	}
-	return s.scanBackSingleKeyword(s.off(td.Pos()), "type")
+	return KeywordStart(s.orig, token.TYPE, off)
 }
 
 func (s *constFnSrc) typeEnd(td *syntax.TypeDecl) int {
@@ -874,15 +876,15 @@ func (s *constFnSrc) scanBracedTypeEnd(start int) int {
 }
 
 func (s *constFnSrc) constStart(cd *syntax.ConstDecl) (int, bool) {
+	off := s.off(cd.Pos())
 	if cd.Group != nil {
 		specs := s.groupConstSpecs(s.file, cd.Group)
 		if len(specs) == 0 {
 			return 0, false
 		}
-		firstOff := s.off(specs[0].Pos())
-		return s.scanBackGroupKeyword(firstOff, "const")
+		off = s.off(specs[0].Pos())
 	}
-	return s.scanBackSingleKeyword(s.off(cd.Pos()), "const")
+	return KeywordStart(s.orig, token.CONST, off)
 }
 
 func (s *constFnSrc) constEnd(cd *syntax.ConstDecl) int {
@@ -927,37 +929,11 @@ func (s *constFnSrc) groupTypeSpecs(file *syntax.File, g *syntax.Group) []*synta
 	return specs
 }
 
-func (s *constFnSrc) scanBackSingleKeyword(nameOff int, kw string) (int, bool) {
-	return s.matchKeyword(s.skipTriviaBack(nameOff), kw)
-}
-
-func (s *constFnSrc) scanBackGroupKeyword(firstOff int, kw string) (int, bool) {
-	i := s.skipTriviaBack(firstOff)
-	if i > 0 && s.orig[i-1] == '(' {
-		i = s.skipTriviaBack(i - 1)
-	}
-	return s.matchKeyword(i, kw)
-}
-
-func (s *constFnSrc) matchKeyword(i int, kw string) (int, bool) {
-	kLen := len(kw)
-	if i >= kLen && string(s.orig[i-kLen:i]) == kw {
-		if i == kLen || isWordBoundary(s.orig[i-kLen-1]) {
-			return i - kLen, true
-		}
-	}
-	return 0, false
-}
-
 func (s *constFnSrc) scanForwardCloseParen(afterLast int) int {
 	if off := s.skipTriviaFwd(afterLast); off < len(s.orig) && s.orig[off] == ')' {
 		return off + 1
 	}
 	return afterLast
-}
-
-func isWordBoundary(b byte) bool {
-	return b == ' ' || b == '\t' || b == '\n' || b == '\r' || b == ';' || b == '(' || b == ')'
 }
 
 func (s *constFnSrc) declEndOfExpr(e syntax.Expr) int {
@@ -1115,39 +1091,6 @@ func (s *constFnSrc) skipTriviaFwd(off int) int {
 	return off
 }
 
-func (s *constFnSrc) skipTriviaBack(i int) int {
-	for i > 0 {
-		c := s.orig[i-1]
-		if c == ' ' || c == '\t' || c == '\n' || c == '\r' {
-			i--
-			continue
-		}
-		if c == '/' && i >= 2 && s.orig[i-2] == '/' {
-			for i > 0 && s.orig[i-1] != '\n' {
-				i--
-			}
-			continue
-		}
-		if c == '/' && i >= 2 && s.orig[i-2] == '*' {
-			if start := s.blockCommentStart(i); start >= 0 {
-				i = start
-				continue
-			}
-		}
-		break
-	}
-	return i
-}
-
-func (s *constFnSrc) blockCommentStart(i int) int {
-	for j := i - 2; j >= 1; j-- {
-		if s.orig[j-1] == '/' && s.orig[j] == '*' {
-			return j - 1
-		}
-	}
-	return -1
-}
-
 func fileOf(files []*syntax.File, pos syntax.Pos) *syntax.File {
 	for _, f := range files {
 		if f != nil && f.Pos().Base() == pos.Base() {
@@ -1155,6 +1098,22 @@ func fileOf(files []*syntax.File, pos syntax.Pos) *syntax.File {
 		}
 	}
 	return nil
+}
+
+func KeywordStart(src []byte, kind token.Token, off int) (int, bool) {
+	var s scanner.Scanner
+	file := token.NewFileSet().AddFile("", -1, off)
+	s.Init(file, src[:off], nil, 0)
+	kw := -1
+	for {
+		pos, tok, _ := s.Scan()
+		if tok == token.EOF {
+			return kw, kw >= 0
+		}
+		if tok == kind {
+			kw = file.Offset(pos)
+		}
+	}
 }
 
 func cfFuncStart(src []byte, off int) int {
