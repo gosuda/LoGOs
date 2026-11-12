@@ -4,11 +4,14 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"slices"
 	"testing"
 )
 
 var closed []int
+
+var bad bool
 
 type pc struct{ id int }
 
@@ -128,16 +131,20 @@ func allocLoop() {
 
 func main() {
 	if got, want := runChain(), []int{1, 0}; !slices.Equal(got, want) {
+		fmt.Println("FAIL panic-close: got", got, "want", want)
+		bad = true
 	} else {
 		fmt.Println("ok panic-close")
 	}
 	if got, want := runLoop(), []int{1, 0}; !slices.Equal(got, want) {
 		fmt.Println("FAIL loop-oracle got", got, "want", want)
+		bad = true
 	} else {
 		fmt.Println("ok loop-oracle")
 	}
 	if got := runChain(); !slices.Equal(got, runLoop()) {
 		fmt.Println("FAIL chain-loop-parity got", got)
+		bad = true
 	} else {
 		fmt.Println("ok chain-loop-parity")
 	}
@@ -145,6 +152,7 @@ func main() {
 	calm := chainCalm()
 	if len(calm) != 3 || len(closed) != 0 {
 		fmt.Println("FAIL calm-path", len(calm), closed)
+		bad = true
 	} else {
 		fmt.Println("ok calm-path")
 	}
@@ -153,7 +161,11 @@ func main() {
 	al := testing.AllocsPerRun(100, allocLoop)
 	if ac != al {
 		fmt.Println("FAIL alloc-parity chain", ac, "loop", al)
+		bad = true
 	} else {
 		fmt.Println("ok alloc-parity")
+	}
+	if bad {
+		os.Exit(1)
 	}
 }
