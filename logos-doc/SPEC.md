@@ -1550,7 +1550,6 @@ Two keyed members sharing a key MUST both claim input with that key. [T-Sec10][T
 Non-object input MUST match only keyless members. [T-Sec10][T-203.1]
 JSON null for a union field MUST leave the field nil with no trial. [T-Sec10][T-203.1]
 Key matching MUST fold case as the default v1 encoding/json does. [T-Sec10][T-203.1]
-A keyless member MUST be tried only when no key of a keyed member occurs in the input. [T-Sec10][T-203.1]
 UnionTrialError MUST name the union, the members in order, and the counts. [T-Sec10][T-203.1]
 
 ### 10.3 Binary encoding
