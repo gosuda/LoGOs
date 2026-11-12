@@ -63,7 +63,7 @@ Rules: logos-doc/SPEC.md. Status values: planned, tested, satisfied upstream, bl
 | #64 | concurrent mutation between interpolation sizing passes | M6 | test/logos/run/interp.lgo (nextID once, tag order) | tested |
 | #65 | comptime fields exposing private fields across packages | M7 | test/logos/run/const_for.lgo; src/cmd/go/testdata/script/logos_comptime_cross.txt | tested |
 | #66 | errdefer with unnamed returns failing in eject | M1 | test/logos/redteam/attack_066_errdefer_unnamed_results | tested |
-| #67 | FMA contraction causing x86 ARM64 sum drift | M6 | M6 half: src/cmd/compile/internal/logos/m6gaps_test.go (TestChainSumPairwise); test/logos/run/chains.lgo (sum order). Closed by test/logos/run/chain_sum_crossarch.lgo run natively and under qemu-aarch64 (-target linux/arm64 through go_linux_arm64_exec), with TestChainSumPairwise pinning the pairwise order | tested |
+| #67 | FMA contraction causing x86 ARM64 sum drift | M6 | M6 half: test/logos/run/chains.lgo (sum order). Closed by test/logos/run/chain_sum_crossarch.lgo run natively and under qemu-aarch64 (-target linux/arm64 through go_linux_arm64_exec), which compares each sum bit for bit with a plain-Go pairwise oracle | tested |
 | #68 | group returning early while sibling reads stack | M8 | src/logos/rt/group_test.go (TestGroupFirstErrorWins, TestGroupCancelReachesSibling); test/logos/run/group_exit.lgo | tested |
 | #69 | next stripping comments and build tags | M10 | src/cmd/go/testdata/script/logos_next.txt; src/cmd/compile/internal/logos/next_test.go | tested |
 | #70 | constant slice literal allocating on heap | M5 | test/logos/codegen/rodata.lgo | tested |
@@ -80,7 +80,7 @@ Rules: logos-doc/SPEC.md. Status values: planned, tested, satisfied upstream, bl
 | #81 | concurrent collector racing scan zeroing | M18 | src/cmd/go/testdata/script/logos_redteam_81.txt (executed 2026-10-28: `go test cmd/go -run 'Script/^logos_redteam_81$'` passes, race leg included) | tested |
 | #82 | split union needing custom GC bitmap | M2 | test/logos/redteam/attack_082_union_gc_shape | tested |
 | #83 | escaping const byte to string zero copy mutation | M5 | test/logos/run/zerocopy.lgo | tested |
-| #84 | eject evaluating chain receiver twice | M6 | src/cmd/compile/internal/logos/m6gaps_test.go (TestChainFuseOneLoop); test/logos/run/chains_fuse.lgo | tested |
+| #84 | eject evaluating chain receiver twice | M6 | test/logos/run/chains_fuse.lgo (case fuse-calls: a fused chain evaluates its receiver once under logos run) | tested |
 | #85 | typed nil error triggering errdefer | M1 | test/logos/redteam/attack_085_typed_nil_errdefer | tested |
 | #86 | const switch losing outer constraint methods | M7 | src/internal/types/testdata/logos/const_switch.lgo; test/logos/run/const_switch.lgo | tested |
 | #87 | errdefer skipped on panic or Goexit exit | M1 | test/logos/redteam/attack_087_errdefer_panic_goexit | tested |
@@ -101,7 +101,7 @@ Rules: logos-doc/SPEC.md. Status values: planned, tested, satisfied upstream, bl
 | #103 | Negative zero and NaN float map keys | M5 | src/internal/types/testdata/logos/ctfe.lgo | tested |
 | #106 | Finalizer registered on arena allocated object | M18 | src/cmd/go/testdata/script/logos_redteam_106.txt (executed 2026-10-28: `go test cmd/go -run 'Script/^logos_redteam_106$'` passes, race leg included) | tested |
 | #107 | Native CPU settings break reproducibility | M13 | src/cmd/go/testdata/script/logos_opt_levels.txt | tested |
-| #108 | Emit-go fallback for interface switch cases | M7 | src/cmd/go/testdata/script/logos_eject_const_switch.txt; src/cmd/compile/internal/logos (TestEjectMatchesLowering) | tested |
+| #108 | Emit-go fallback for interface switch cases | M7 | src/cmd/go/testdata/script/logos_eject_const_switch.txt | tested |
 | #109 | Conversion changes unrelated source text | M10 | src/cmd/go/testdata/script/logos_next.txt (goldens, ! logos fmt) | tested |
 | #110 | Frozen view sharing mutable heap child | M5 | test/logos/run/freeze.lgo | tested |
 | #111 | Unsafe ARM64 load store pair fusion | M15 | test/logos/codegen/arm64_pair.lgo; test/logos/codegen/arm64_pair.go; src/cmd/compile/internal/ssa/pair_logos_test.go (TestLogosPairARM64) | tested |
@@ -117,7 +117,7 @@ Rules: logos-doc/SPEC.md. Status values: planned, tested, satisfied upstream, bl
 | #122 | Emoji file extensions with variation selectors | M0 | src/cmd/go/testdata/script/logos_alias.txt | tested |
 | #123 | Default value overriding explicit JSON false | M6, M11 | test/logos/run/json_unmarshal_test.lgo (TestDefaultsAppliedFirst) | tested |
 | #125 | errdefer rollback overwriting primary return error | M1 | test/logos/redteam/attack_125_errdefer_join | tested |
-| #126 | interpolation calling nextID twice in sizing | M6 | src/cmd/compile/internal/logos/m6gaps_test.go (TestInterpBindBeforeSizing) | tested |
+| #126 | interpolation calling nextID twice in sizing | M6 | test/logos/run/interp.lgo (cases id and calls: `$"id={nextID()}"` calls nextID once) | tested |
 | #127 | Interface default methods causing diamond ambiguity | M4 | src/internal/types/testdata/logos/property_iface.lgo | tested |
 | #128 | Resolve failing before const for unrolls | M7 | test/logos/run/comptime_generic.lgo; test/logos/run/comptime_generic_inner_lowering.lgo; src/cmd/go/testdata/script/logos_comptime_cross.txt; src/cmd/go/testdata/script/logos_comptime_importcfg.txt; src/cmd/go/testdata/script/logos_comptime_foreign_types.txt | tested |
 | #129 | Circular DI ServiceA ServiceB crashing compiler | M7 | test/logos/compile/comptime_cycle.lgo | tested |
@@ -131,7 +131,7 @@ Rules: logos-doc/SPEC.md. Status values: planned, tested, satisfied upstream, bl
 | #137 | Call-free loop starving scheduler blocking GC | M15 | test/logos/run/wasm_loop_preempt.lgo | tested |
 | #138 | Arena pointer stored into sync Pool | M18 | test/logos/run/redteam138_sync_pool.lgo; test/logos/codegen/redteam138_pool_heap.lgo | tested |
 | #139 | Malicious JSON array triggering huge preallocation | M11 | test/logos/run/json_unmarshal_test.lgo (TestHostileArrayCostsOnArrival, TestLargeArrayDecodesIncrementally) | tested |
-| #140 | Known hash seed enabling hash-flooding DoS | M5 | src/cmd/compile/internal/logos/constmap_test.go (TestConstmapProbeFindsEveryKey, TestConstmapSeedExhausted, TestConstmapProbeIsSingleProbe) | tested |
+| #140 | Known hash seed enabling hash-flooding DoS | M5 | src/cmd/compile/internal/logos/constmap_test.go (TestConstmapProbeFindsEveryKey, TestConstmapSeedExhausted, TestConstmapProbeIsSingleShot) | tested |
 | #141 | Method call on property value losing mutation | M4 | test/logos/run/properties.lgo | tested |
 | #142 | Chain map leaking file descriptors on failure | M6 | test/logos/run/chains.lgo (at-return closes) | tested |
 | #143 | Buffered channel retaining dead pointer after receive | M8 | src/logos/sync/chanslot_logos_test.go | satisfied upstream |
