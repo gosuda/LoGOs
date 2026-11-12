@@ -3203,7 +3203,7 @@ Anchor: Tony Hoare, John Carmack
 Anchor: Tony Hoare, John Carmack
 - Attack: objdump of the fast body names no clock and no `cgoNoCallback`; the trampoline drops from 60 to 58 instructions; FastcallThree drops from 344.2M to 341.4M instructions per 1M calls.
 - Build: `src/runtime`: the `fastCallEnterNano` stores, field, helpers, and padding math are gone; `TestFastcallNoClockInFastBody` still guards the no-clock rule.
-- Gate: `GOEXPERIMENT=logosfastcgo go test -vet=off -count=1 -run TestFastcallNoClockInFastBody cmd/cgo/internal/testlogos`; `go test -vet=off -count=1 -run TestCgoFastcallPinSlots|TestLogosFastCallRecordZeroesIdleSlots|TestLogosFastCallClearsAllSlots|TestLogosFastCallPreservesCallerArgs|TestLogosFastCallStaysOnOriginalM runtime`.
+- Gate: `GOEXPERIMENT=logosfastcgo go test -vet=off -count=1 -run TestFastcallNoClockInFastBody cmd/cgo/internal/testlogos`; `go test -vet=off -count=1 -run TestCgoFastcallPinSlots|TestLogosFastCallRecordZeroesIdleSlots|TestLogosFastCallClearsAllSlots|TestLogosFastCallPreservesCallerArgs|TestLogosFastCallStaysOnOriginalM runtime`; `go test -vet=off -count=1 -run Script/^logos_fastcall_slots_not_roots$ cmd/go` (it runs `TestLogosFastCgoFrameSlotsAreNotRoots` with `GOEXPERIMENT=logosfastcgo`, which the test needs and skips without).
 - Red-team rows: none.
 - Docs: none (SPEC 3.4 carries the no-clock and post-return rules).
 
