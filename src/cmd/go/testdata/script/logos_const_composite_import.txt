@@ -36,6 +36,12 @@ cd badwrite
 stderr -count=9 '\[correctness::const_view_mutation\]'
 cd ..
 
+# A slice expression of an imported const composite is no way around the rule.
+cd badslice
+! logos build ./...
+stderr -count=7 '\[correctness::const_view_mutation\]'
+cd ..
+
 # A readonly method of an imported const composite is callable; a mutating one fails with the rule ID.
 cd methods
 logos build -o $WORK/bin/importmeth$GOEXE ./app
@@ -277,6 +283,45 @@ func main() {
 	lib.C.L[0]++
 	lib.C.Set()
 	fmt.Println(lib.C.N)
+}
+-- badslice/go.mod --
+module example.com/ccbadslice
+
+go 1.27
+
+-- badslice/lib/lib.lgo --
+package lib
+
+type Item struct {
+	M map[string]int
+	N int
+}
+
+type S struct {
+	M map[string]int
+	L []int
+	I []Item
+}
+
+const C = S{M: map[string]int{"a": 1}, L: []int{1, 2, 3}, I: []Item{{N: 1}, {N: 2}}}
+-- badslice/app/main.lgo --
+package main
+
+import (
+	"fmt"
+
+	"example.com/ccbadslice/lib"
+)
+
+func main() {
+	lib.C.L[:][0] = 5
+	lib.C.I[1:][0].N++
+	copy(lib.C.L[1:], []int{7})
+	clear(lib.C.L[:1])
+	_ = append(lib.C.L[:0], 4)
+	copy(lib.C.I[:], []lib.Item{{N: 9}})
+	clear(lib.C.I[:1])
+	fmt.Println(lib.C.L)
 }
 -- methods/go.mod --
 module example.com/ccmethods

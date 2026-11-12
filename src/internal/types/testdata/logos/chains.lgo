@@ -318,3 +318,47 @@ func chainParamWrites(bs []*chainBox, ns []*int, rows [][]int) {
 		return true
 	})
 }
+
+func chainSliceExprWrites(xs, ys []int) {
+	_ = xs.filter(x => {
+		_ = copy(xs[ /* ERROR "[correctness::const_view_mutation]" */ 1:], ys)
+		return true
+	})
+	_ = xs.filter(x => {
+		clear(xs[ /* ERROR "[correctness::const_view_mutation]" */ :1])
+		return true
+	})
+	_ = xs.filter(x => len(append(xs[ /* ERROR "[correctness::const_view_mutation]" */ :0], x)) > 0)
+	_ = xs.filter(x => {
+		xs[ /* ERROR "[correctness::const_view_mutation]" */ 1:][0] = x
+		return true
+	})
+}
+
+func chainSliceExprReads(xs, ys []int) {
+	_ = xs.filter(x => len(append(ys[:0], x)) > 0)
+	_ = xs.filter(x => {
+		_ = copy(ys[1:], xs[1:])
+		clear(ys[:1])
+		return true
+	})
+}
+
+func chainSpelledReceivers(xs []int, p *[]int) {
+	_ = xs[1:].filter(x => {
+		xs /* ERROR "[correctness::const_view_mutation]" */ [2] = 0
+		return true
+	})
+	_ = xs[1:].filter(x => {
+		clear(xs /* ERROR "[correctness::const_view_mutation]" */)
+		return true
+	})
+	_ = (*p).filter(x => {
+		( /* ERROR "[correctness::const_view_mutation]" */ *p)[0] = 99
+		return true
+	})
+	_ = (*p).filter(x => {
+		clear((*p)[ /* ERROR "[correctness::const_view_mutation]" */ :1])
+		return true
+	})
+}

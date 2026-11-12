@@ -241,29 +241,17 @@ func (check *Checker) logosChainCall(x *operand, call *syntax.CallExpr) bool {
 	return true
 }
 
-func logosChainRoots(e syntax.Expr) map[string]bool {
+func (check *Checker) logosChainRoots(e syntax.Expr) map[string]bool {
 	roots := make(map[string]bool)
-	cur := syntax.Unparen(e)
-	for {
-		if nm, ok := cur.(*syntax.Name); ok {
-			roots[nm.Value] = true
-			return roots
-		}
-		if s, ok := cur.(*syntax.SelectorExpr); ok {
-			cur = syntax.Unparen(s.X)
-			continue
-		}
-		if ix, ok := cur.(*syntax.IndexExpr); ok {
-			cur = syntax.Unparen(ix.X)
-			continue
-		}
-		return roots
+	if nm, ok := check.logosWriteBase(e).(*syntax.Name); ok {
+		roots[nm.Value] = true
 	}
+	return roots
 }
 
 func (check *Checker) logosChainMethod(x *operand, call *syntax.CallExpr, sel *syntax.SelectorExpr, elem Type) {
 	method := sel.Sel.Value
-	roots := logosChainRoots(sel.X)
+	roots := check.logosChainRoots(sel.X)
 	fail := func() {
 		x.mode_ = invalid
 		x.expr = call
@@ -716,7 +704,7 @@ func (check *Checker) logosChainNoMutate(roots map[string]bool, body syntax.Node
 			check.logosChainMutatingCall(n, roots)
 		}
 		for _, lhs := range targets {
-			if logosChainMutates(lhs, roots) {
+			if check.logosChainMutates(lhs, roots) {
 				check.errorf(lhs, IncompatibleAssign, "%s cannot assign to chain receiver or parameter", logosChainMutation)
 			}
 		}
@@ -732,31 +720,14 @@ func (check *Checker) logosChainMutatingCall(call *syntax.CallExpr, roots map[st
 	verb, mutating := logosChainMutatingBuiltins[name.Value]
 	_, obj := check.lookupScope(name.Value)
 	_, builtin := obj.(*Builtin)
-	if mutating && builtin && logosChainMutates(call.ArgList[0], roots) {
+	if mutating && builtin && check.logosChainMutates(call.ArgList[0], roots) {
 		check.errorf(call.ArgList[0], IncompatibleAssign, "%s cannot %s chain receiver or parameter", logosChainMutation, verb)
 	}
 }
 
-func logosChainMutates(e syntax.Expr, roots map[string]bool) bool {
-	cur := syntax.Unparen(e)
-	for {
-		if nm, ok := cur.(*syntax.Name); ok {
-			return roots[nm.Value]
-		}
-		if s, ok := cur.(*syntax.SelectorExpr); ok {
-			cur = syntax.Unparen(s.X)
-			continue
-		}
-		if ix, ok := cur.(*syntax.IndexExpr); ok {
-			cur = syntax.Unparen(ix.X)
-			continue
-		}
-		if op, ok := cur.(*syntax.Operation); ok && op.Y == nil && op.Op == syntax.Mul {
-			cur = syntax.Unparen(op.X)
-			continue
-		}
-		return false
-	}
+func (check *Checker) logosChainMutates(e syntax.Expr, roots map[string]bool) bool {
+	nm, ok := check.logosWriteBase(e).(*syntax.Name)
+	return ok && roots[nm.Value]
 }
 
 func (check *Checker) logosChainFuncArg(arg syntax.Expr, elem, want Type, method string) (Type, bool, bool) {

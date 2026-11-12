@@ -380,25 +380,11 @@ func (check *Checker) logosConstStoreBase(lhs syntax.Expr) syntax.Expr {
 }
 
 func (check *Checker) logosCompositeRoot(e syntax.Expr) (syntax.Expr, bool) {
-	for {
-		e = syntax.Unparen(e)
-		if check.logosCompositeRootNode(e) {
-			return e, true
-		}
-		switch n := e.(type) {
-		case *syntax.SelectorExpr:
-			e = n.X
-		case *syntax.IndexExpr:
-			e = n.X
-		case *syntax.Operation:
-			if n.Op != syntax.Mul || n.Y != nil {
-				return nil, false
-			}
-			e = n.X
-		default:
-			return nil, false
-		}
+	root := check.logosWriteBase(e)
+	if !check.logosCompositeRootNode(root) {
+		return nil, false
 	}
+	return root, true
 }
 
 func (check *Checker) logosCompositeRootNode(e syntax.Expr) bool {
@@ -411,12 +397,8 @@ func (check *Checker) logosCompositeRootNode(e syntax.Expr) bool {
 			return check.logosImportedComposite(obj)
 		}
 	case *syntax.SelectorExpr:
-		pkg, _ := n.X.(*syntax.Name)
 		obj, _ := check.Info.Uses[n.Sel].(*Var)
-		if pkg != nil && obj != nil {
-			_, qualified := check.Info.Uses[pkg].(*PkgName)
-			return qualified && check.logosImportedComposite(obj)
-		}
+		return obj != nil && check.logosQualified(n) && check.logosImportedComposite(obj)
 	}
 	return false
 }
