@@ -88,6 +88,31 @@ func snapshots() {
 	check("snapshot-bool", got3 == "a=true b=false", got3, "a=true b=false")
 }
 
+func checkInterpolationAllocations(name string, n int) {
+allocs1 := testing.AllocsPerRun(100, func() {
+sink = $"User {name} has {n} items err={boomErr}"
+})
+check("allocs1", allocs1 == 1, allocs1, 1)
+if sink != "User ada has 3 items err=boom" {
+check("allocs1-value", false, sink, "User ada has 3 items err=boom")
+}
+big := bigBox{s: strings.Repeat("z", 300)}
+allocs2 := testing.AllocsPerRun(100, func() {
+sink = $"v={big}"
+})
+check("allocs2", allocs2 == 1, allocs2, 1)
+if sink != "v="+big.s {
+check("allocs2-value", false, sink, "v="+big.s)
+}
+check("len", len(sink) == 302, len(sink), 302)
+negMax := -math.MaxFloat64
+allocs3 := testing.AllocsPerRun(100, func() {
+sink = $"{math.MinInt64}{negMax}{false}"
+})
+check("allocs3", allocs3 == 1, allocs3, 1)
+check("bound", sink == "-9223372036854775808-1.7976931348623157e+308false", sink, "-9223372036854775808-1.7976931348623157e+308false")
+}
+
 func main() {
 name := "ada"
 n := 3
@@ -125,23 +150,9 @@ check("percent", got14 == "%d %s %!v (x)", got14, "%d %s %!v (x)")
 pct := "%s-%d"
 got15 := $"v={pct}"
 check("pct", got15 == "v=%s-%d", got15, "v=%s-%d")
-allocs1 := testing.AllocsPerRun(100, func() {
-sink = $"User {name} has {n} items err={boomErr}"
-})
-check("allocs1", allocs1 == 1, allocs1, 1)
-big := bigBox{s: strings.Repeat("z", 300)}
-allocs2 := testing.AllocsPerRun(100, func() {
-sink = $"v={big}"
-})
-check("allocs2", allocs2 == 1, allocs2, 1)
-check("len", len(sink) == 302, len(sink), 302)
-negMax := -math.MaxFloat64
-allocs3 := testing.AllocsPerRun(100, func() {
-sink = $"{math.MinInt64}{negMax}{false}"
-})
-check("allocs3", allocs3 == 1, allocs3, 1)
-check("bound", sink == "-9223372036854775808-1.7976931348623157e+308false", sink, "-9223372036854775808-1.7976931348623157e+308false")
-check("conv", convOnce() == true, convOnce(), true)
+checkInterpolationAllocations(name, n)
+convertedOnce := convOnce()
+check("conv", convertedOnce, convertedOnce, true)
 if failed {
 os.Exit(1)
 }
