@@ -19,11 +19,11 @@ cd ..
 
 env GOWORK=off
 cd w/l
-mv q/q_test.lgo $WORK/q_test.lgo
 logos eject -o bout
 exists bout/p/p.go
 exists bout/q/q.go
 exists bout/r/r.go
+exists bout/q/q_test.go
 grep 'Logos_GetName' bout/p/p.go
 grep 'Logos_GetHP' bout/p/p.go
 grep 'Logos_SetHP' bout/p/p.go
@@ -37,6 +37,8 @@ exists $UPROOT1272/bin/go
 exec $UPROOT1272/bin/go version
 stdout '^go version go1\.27\.2 '
 exec env -u GOROOT $UPROOT1272/bin/go build ./...
+exec env -u GOROOT $UPROOT1272/bin/go test -count=1 ./q
+stdout '^ok\s+example\.com/l/q\s'
 go vet ./...
 exec $GOROOT/bin/gofmt -l .
 ! stdout .

@@ -527,14 +527,14 @@ func phaseOneRoots(plan *ejectPlan) []*load.Package {
 	set := map[*load.Package]bool{}
 	var roots []*load.Package
 	for _, p := range plan.main.pkgs {
-		if p.Standard || set[p] {
+		if p.Standard || p.IsTestOnly() || set[p] {
 			continue
 		}
 		set[p] = true
 		roots = append(roots, p)
 	}
 	for _, p := range plan.logos {
-		if set[p] {
+		if p.IsTestOnly() || set[p] {
 			continue
 		}
 		set[p] = true
@@ -555,6 +555,9 @@ func buildEjectRoots(moduleLoader *modload.Loader, ctx context.Context, roots []
 	}()
 	root := &work.Action{Mode: "go build"}
 	for _, p := range roots {
+		if p.Internal.TestmainGo != nil {
+			stageTestmain(b, p)
+		}
 		root.Deps = append(root.Deps, b.AutoAction(moduleLoader, work.ModeBuild, work.ModeBuild, p))
 	}
 	b.Do(ctx, root)
@@ -563,6 +566,17 @@ func buildEjectRoots(moduleLoader *modload.Loader, ctx context.Context, roots []
 	}
 	if base.GetExitStatus() != 0 {
 		base.Exit()
+	}
+}
+
+func stageTestmain(b *work.Builder, pmain *load.Package) {
+	testDir := b.CompileAction(work.ModeBuild, work.ModeBuild, pmain).Objdir
+	if err := os.MkdirAll(testDir, 0777); err != nil {
+		base.Fatalf("logos eject: %v", err)
+	}
+	pmain.Dir = testDir
+	if err := os.WriteFile(testDir+"_testmain.go", *pmain.Internal.TestmainGo, 0666); err != nil {
+		base.Fatalf("logos eject: %v", err)
 	}
 }
 
