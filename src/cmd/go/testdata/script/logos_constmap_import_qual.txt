@@ -38,19 +38,22 @@ cd ..
 # An unexported named key type cannot be named in the importer.
 cd badunexp
 ! logos build ./...
-stderr 'cannot be named in this package'
+stderr 'app/main\.lgo:10:'
+stderr 'lib\.K'
 cd ..
 
 # An unexported field cannot be named in the importer.
 cd badfield
 ! logos build ./...
-stderr 'cannot be named in this package'
+stderr 'app/main\.lgo:10:'
+stderr 'lib\.H'
 cd ..
 
 # A nested unexported named type cannot be named in the importer.
 cd badnested
 ! logos build ./...
-stderr 'cannot be named in this package'
+stderr 'app/main\.lgo:10:'
+stderr 'lib\.O'
 cd ..
 
 -- m/go.mod --
