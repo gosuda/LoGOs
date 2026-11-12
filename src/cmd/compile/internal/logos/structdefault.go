@@ -28,7 +28,7 @@ func (fl *fileLower) lowerStructDefaults() {
 }
 
 func (fl *fileLower) stripFieldDefaults(st *syntax.StructType, stripped map[*syntax.FieldDefault]bool) {
-	for _, f := range st.FieldList {
+	for i, f := range st.FieldList {
 		fd, ok := f.Type.(*syntax.FieldDefault)
 		if !ok {
 			continue
@@ -38,8 +38,16 @@ func (fl *fileLower) stripFieldDefaults(st *syntax.StructType, stripped map[*syn
 			continue
 		}
 		stripped[fd] = true
-		fl.add(fl.off(syntax.EndPos(fd.Type)), fl.off(syntax.EndPos(fd.Default)), "")
+		typeEnd := fl.exprEndNested(fl.off(syntax.StartPos(fd.Type)))
+		fl.add(typeEnd, fl.fieldDefaultEnd(st, i, fd, typeEnd), "")
 	}
+}
+
+func (fl *fileLower) fieldDefaultEnd(st *syntax.StructType, i int, fd *syntax.FieldDefault, from int) int {
+	if i < len(st.TagList) && st.TagList[i] != nil {
+		return lastTokenEnd(fl.src, from, fl.off(st.TagList[i].Pos()))
+	}
+	return fl.exprEndOf(fd.Default)
 }
 
 type structDefault struct {
