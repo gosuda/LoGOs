@@ -92,7 +92,7 @@ func bang(p string) (string, error) { return p + "!", nil }
 
 func chainBlockTry(xs []int) (int, error) {
 	_ = xs.map(x => {
-		v := pairi(x)? /* ERROR "[correctness::misplaced_try] ? must end an assignment, expression statement, defer, or errdefer" */
+		v := pairi(x)?
 		return v
 	})
 	return 0, nil

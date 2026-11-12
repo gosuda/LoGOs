@@ -1,0 +1,29 @@
+// errorcheck
+
+package p
+
+import "errors"
+
+var errOdd = errors.New("odd")
+
+func f(x int) (int, error) {
+	if x%2 == 1 {
+		return 0, errOdd
+	}
+	return x, nil
+}
+
+func noErrorResult(xs []int) []int {
+	return xs.map(x => {
+		v := f(x)? // ERROR "requires enclosing function to return error"
+		return v
+	})
+}
+
+func deferTry(xs []int) ([]int, error) {
+	ys := xs.map(x => {
+		defer f(x)? // ERROR "misplaced_try"
+		return x
+	})
+	return ys, nil
+}

@@ -291,7 +291,7 @@ func (cg *chainGen) parClosure(name string, op chainOp, in, out types2.Type) ote
 	head := name + " := func(" + op.lam.Params[0].Value + " " + cg.spellType(in) + ") (" + result + ", error) {"
 	fc := fl.parFuncLower(resT)
 	switch {
-	case op.isTry:
+	case op.isTry && !op.isBlk:
 		return cg.parTryClosure(fc, head, op, zero)
 	case op.isBlk:
 		return cg.parBlockClosure(fc, head, op)

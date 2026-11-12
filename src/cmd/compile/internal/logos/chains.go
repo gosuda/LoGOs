@@ -685,8 +685,9 @@ func (fl *fileLower) chainOpOf(cur *syntax.CallExpr, method string) chainOp {
 					op.isTry = true
 				}
 			}
-			if _, ok := lam.Body.(*syntax.BlockStmt); ok {
+			if block, ok := lam.Body.(*syntax.BlockStmt); ok {
 				op.isBlk = true
+				op.isTry = chainBlockHasTry(block)
 			}
 		}
 	}
@@ -696,9 +697,82 @@ func (fl *fileLower) chainOpOf(cur *syntax.CallExpr, method string) chainOp {
 	return op
 }
 
+func chainBlockHasTry(root syntax.Node) bool {
+	found := false
+	syntax.Inspect(root, func(n syntax.Node) bool {
+		if found {
+			return false
+		}
+		switch n := n.(type) {
+		case *syntax.FuncLit, *syntax.LambdaExpr:
+			return false
+		case *syntax.AssignStmt:
+			if _, _, ok := tryAssignOf(n); ok {
+				found = true
+			}
+		case *syntax.ExprStmt:
+			if _, _, ok := tryExprOf(n); ok {
+				found = true
+			}
+		}
+		return !found
+	})
+	return found
+}
+
 type localWrites struct {
 	defined bool
 	forms   []resultForm
+}
+
+func (cg *chainGen) chainBlockTryFrame(block *syntax.BlockStmt, out types2.Type) {
+	pos := block.Pos()
+	errType := types2.Universe.Lookup("error").Type()
+	ft := at(&syntax.FuncType{
+		ResultList: []*syntax.Field{
+			at(&syntax.Field{Type: nameOf(pos, cg.spellType(out))}, pos),
+			at(&syntax.Field{Type: nameOf(pos, "error")}, pos),
+		},
+	}, pos)
+	sig := types2.NewSignatureType(nil, nil, nil, nil,
+		types2.NewTuple(
+			types2.NewParam(pos, nil, "", out),
+			types2.NewParam(pos, nil, "", errType),
+		), false)
+	fc := newFuncLower(cg.fl, ft, sig, block)
+	fc.run()
+}
+
+func (fl *fileLower) chainBlockReturns(list []syntax.Stmt) {
+	for _, s := range list {
+		fl.chainBlockReturnStmt(s)
+	}
+}
+
+func (fl *fileLower) chainBlockReturnStmt(s syntax.Stmt) {
+	switch s := s.(type) {
+	case *syntax.ReturnStmt:
+		fl.parReturn(s)
+	case *syntax.BlockStmt:
+		fl.chainBlockReturns(s.List)
+	case *syntax.IfStmt:
+		fl.chainBlockReturns(s.Then.List)
+		if s.Else != nil {
+			fl.chainBlockReturnStmt(s.Else)
+		}
+	case *syntax.ForStmt:
+		fl.chainBlockReturns(s.Body.List)
+	case *syntax.SwitchStmt:
+		for _, c := range s.Body {
+			fl.chainBlockReturns(c.Body)
+		}
+	case *syntax.SelectStmt:
+		for _, c := range s.Body {
+			fl.chainBlockReturns(c.Body)
+		}
+	case *syntax.LabeledStmt:
+		fl.chainBlockReturnStmt(s.Stmt)
+	}
 }
 
 func (fl *fileLower) mapForms(op chainOp) []resultForm {
@@ -1262,7 +1336,7 @@ func (cg *chainGen) blockProdType(block *syntax.BlockStmt) types2.Type {
 func (cg *chainGen) closure(name string, op chainOp, elem, result string) otext {
 	fl := cg.fl
 	pname := op.lam.Params[0].Value
-	if op.isTry {
+	if op.isTry && !op.isBlk {
 		body, ok := op.savedBody.(syntax.Expr)
 		if !ok {
 			return gen("")
@@ -1282,10 +1356,17 @@ func (cg *chainGen) closure(name string, op chainOp, elem, result string) otext 
 		return cat(gen(name+" := func("+pname+" "+elem+") ("+result+", error) { "+vn+", "+en+" := "), callText, gen("; if "+en+" != nil { return "+zero+", "+en+" }; return "+vn+", nil }"))
 	}
 	if block, ok := op.savedBody.(*syntax.BlockStmt); ok {
+		if op.isTry {
+			cg.fl.chainBlockReturns(block.List)
+			cg.chainBlockTryFrame(block, cg.inferType(op, result))
+		}
 		bt := fl.textOf(span{fl.off(syntax.StartPos(block)), fl.off(syntax.EndPos(block))})
 		inner := bt
 		if strings.HasPrefix(bt.s, "{") {
 			inner = bt.slice(1, len(bt.s))
+		}
+		if op.isTry {
+			return cat(gen(name+" := func("+pname+" "+elem+") ("+result+", error) {"), inner, gen(" }"))
 		}
 		return cat(gen(name+" := func("+pname+" "+elem+") "+result+" {"), inner, gen(" }"))
 	}

@@ -571,6 +571,7 @@ func logosOrderedKey(u Type) bool {
 
 func (check *Checker) logosChainBlock(lam *syntax.LambdaExpr, roots map[string]bool, scope *Scope, elem Type, kind logosChainKind, block *syntax.BlockStmt) (Type, bool, bool) {
 	check.logosChainNoMutate(roots, block)
+	check.logosChainBlockTryForms(block)
 	saved := check.environment.chainRets
 	st := &chainReturnState{}
 	check.environment.chainRets = st
@@ -664,6 +665,26 @@ func (check *Checker) logosChainReturn(s *syntax.ReturnStmt) bool {
 	}
 	st.ops = append(st.ops, &op)
 	return true
+}
+
+func (check *Checker) logosChainBlockTryForms(block *syntax.BlockStmt) {
+	syntax.Inspect(block, func(n syntax.Node) bool {
+		switch n := n.(type) {
+		case *syntax.FuncLit, *syntax.LambdaExpr:
+			return false
+		case *syntax.CallStmt:
+			if n.Tok == syntax.Defer {
+				if t, ok := syntax.Unparen(n.Call).(*syntax.TryExpr); ok {
+					check.logosTryMisplaced(t)
+				}
+			}
+		case *syntax.ErrdeferStmt:
+			if t, ok := syntax.Unparen(n.Call).(*syntax.TryExpr); ok {
+				check.logosTryMisplaced(t)
+			}
+		}
+		return true
+	})
 }
 
 func (check *Checker) logosChainNoMutate(roots map[string]bool, body syntax.Node) {
