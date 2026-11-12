@@ -9,6 +9,7 @@ import (
 	"cmd/compile/internal/logos/ctfe"
 	"cmd/compile/internal/syntax"
 	"cmd/compile/internal/types2"
+	"go/token"
 	"slices"
 )
 
@@ -324,28 +325,14 @@ func (fl *fileLower) endOff(e syntax.Expr) int {
 }
 
 func constKeywordStart(src []byte, nameOff int) (int, bool) {
-	off := nameOff
-	for off > 0 && (src[off-1] == ' ' || src[off-1] == '\t') {
-		off--
-	}
-	for off >= 2 && src[off-1] == '/' && src[off-2] == '*' {
-		end := off - 2
-		start := end
-		for start >= 2 && (src[start-1] != '/' || src[start-2] != '*') {
-			start--
+	kw := -1
+	scanSegment(src, 0, nameOff, func(t tok) bool {
+		if t.kind == token.CONST {
+			kw = t.start
 		}
-		if start < 2 {
-			return 0, false
-		}
-		off = start - 2
-		for off > 0 && (src[off-1] == ' ' || src[off-1] == '\t') {
-			off--
-		}
-	}
-	if off >= 5 && string(src[off-5:off]) == "const" {
-		return off - 5, true
-	}
-	return 0, false
+		return true
+	})
+	return kw, kw >= 0
 }
 
 func declNames(cd *syntax.ConstDecl) string {
