@@ -12,26 +12,26 @@ import (
 	"testing"
 )
 
-func pinnedViewasCleanup(cleaned *atomic.Bool) *viewasHeader {
+func pinnedViewasCleanup(cleaned *atomic.Bool) (*viewasHeader, viewasHeader) {
 	backing := new([64]byte)
 	for i := range backing {
 		backing[i] = byte(i + 17)
 	}
 	runtime.AddCleanup(backing, func(b *atomic.Bool) { b.Store(true) }, cleaned)
-	return ViewAs[viewasHeader](backing[:16])
+	return ViewAs[viewasHeader](backing[:16]), viewasNative(backing[:16])
 }
 
 func TestViewAsKeepsAliveCleanup(t *testing.T) {
 	cleaned := new(atomic.Bool)
-	v := pinnedViewasCleanup(cleaned)
+	v, want := pinnedViewasCleanup(cleaned)
 	for range 20 {
 		runtime.GC()
 		if cleaned.Load() {
 			t.Fatalf("cleanup ran while view live")
 		}
 	}
-	if v.Magic != 336794129 || v.Version != 404166165 || v.Size != 2314601843866147353 {
-		t.Fatalf("view after GC = %+v", *v)
+	if *v != want {
+		t.Fatalf("view after GC = %+v, want %+v", *v, want)
 	}
 	runtime.KeepAlive(v)
 	v = nil

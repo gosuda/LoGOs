@@ -12,24 +12,24 @@ import (
 	"weak"
 )
 
-func pinnedViewas() (*viewasHeader, weak.Pointer[[16]byte]) {
+func pinnedViewas() (*viewasHeader, viewasHeader, weak.Pointer[[16]byte]) {
 	backing := new([16]byte)
 	for i := range backing {
 		backing[i] = byte(i + 17)
 	}
-	return ViewAs[viewasHeader](backing[:]), weak.Make(backing)
+	return ViewAs[viewasHeader](backing[:]), viewasNative(backing[:]), weak.Make(backing)
 }
 
 func TestViewAsKeepsBackingAlive(t *testing.T) {
-	v, w := pinnedViewas()
+	v, want, w := pinnedViewas()
 	for range 20 {
 		runtime.GC()
 		if w.Value() == nil {
 			t.Fatalf("backing collected while view live")
 		}
 	}
-	if v.Magic != 336794129 || v.Version != 404166165 || v.Size != 2314601843866147353 {
-		t.Fatalf("view after GC = %+v", *v)
+	if *v != want {
+		t.Fatalf("view after GC = %+v, want %+v", *v, want)
 	}
 	runtime.KeepAlive(v)
 	v = nil

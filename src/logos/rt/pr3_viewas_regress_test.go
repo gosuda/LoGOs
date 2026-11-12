@@ -31,7 +31,7 @@ func TestPR3ViewAsRejectsSliceField(t *testing.T) {
 func TestPR3ViewAsLegitHeaderControl(t *testing.T) {
 	b := []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
 	h := ViewAs[viewasHeader](b)
-	if h.Magic != 67305985 {
-		t.Fatalf("legit header Magic = %d", h.Magic)
+	if want := viewasNative(b); *h != want {
+		t.Fatalf("legit header = %+v, want %+v", *h, want)
 	}
 }

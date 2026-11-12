@@ -5,6 +5,7 @@
 package rt
 
 import (
+	"encoding/binary"
 	"runtime"
 	"testing"
 	"unsafe"
@@ -16,11 +17,34 @@ type viewasHeader struct {
 	Size    uint64
 }
 
+func viewasNative(b []byte) viewasHeader {
+	return viewasHeader{
+		Magic:   binary.NativeEndian.Uint32(b),
+		Version: binary.NativeEndian.Uint32(b[4:]),
+		Size:    binary.NativeEndian.Uint64(b[8:]),
+	}
+}
+
+func viewasHostLittleEndian() bool {
+	return binary.NativeEndian.Uint16([]byte{1, 0}) == 1
+}
+
 func TestViewAsDirect(t *testing.T) {
 	b := []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
 	h := ViewAs[viewasHeader](b)
-	if h.Magic != 67305985 || h.Version != 134678021 || h.Size != 1157159078456920585 {
-		t.Fatalf("ViewAs = %+v, want {67305985 134678021 1157159078456920585}", *h)
+	if want := viewasNative(b); *h != want {
+		t.Fatalf("ViewAs = %+v, want %+v", *h, want)
+	}
+}
+
+func TestViewAsHostByteOrderValues(t *testing.T) {
+	b := []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
+	want := viewasHeader{Magic: 67305985, Version: 134678021, Size: 1157159078456920585}
+	if !viewasHostLittleEndian() {
+		want = viewasHeader{Magic: 16909060, Version: 84281096, Size: 651345242494996240}
+	}
+	if h := ViewAs[viewasHeader](b); *h != want {
+		t.Fatalf("ViewAs = %+v, want %+v", *h, want)
 	}
 }
 
@@ -30,8 +54,8 @@ func TestViewAsOddOffset(t *testing.T) {
 		b[i] = byte(i + 1)
 	}
 	h := ViewAs[viewasHeader](b[1:])
-	if h.Magic != 84148994 || h.Version != 151521030 || h.Size != 1229499251294997258 {
-		t.Fatalf("odd-offset ViewAs = %+v", *h)
+	if want := viewasNative(b[1:]); *h != want {
+		t.Fatalf("odd-offset ViewAs = %+v, want %+v", *h, want)
 	}
 }
 
@@ -54,14 +78,15 @@ func TestViewAsCopyPath(t *testing.T) {
 	for i := range b {
 		b[i] = byte(i + 1)
 	}
+	want := viewasNative(b[1:])
 	h := viewAsCopy[viewasHeader](b[1:])
-	if h.Magic != 84148994 || h.Version != 151521030 || h.Size != 1229499251294997258 {
-		t.Fatalf("copy-path ViewAs = %+v", *h)
+	if *h != want {
+		t.Fatalf("copy-path ViewAs = %+v, want %+v", *h, want)
 	}
 	for i := range b {
 		b[i] = 0
 	}
-	if h.Magic != 84148994 {
+	if *h != want {
 		t.Fatalf("copy-path view aliases source: %+v", *h)
 	}
 }
@@ -75,6 +100,7 @@ func TestViewAsCopyAlignedIndependent(t *testing.T) {
 		b[i] = byte(i + 1)
 	}
 	off := b[1:]
+	want := viewasNative(off)
 	h := viewAsCopy[viewasHeader](off)
 	if uintptr(unsafe.Pointer(h))%unsafe.Alignof(viewasHeader{}) != 0 {
 		t.Fatalf("copy-path ViewAs misaligned: %p", h)
@@ -91,14 +117,14 @@ func TestViewAsCopyAlignedIndependent(t *testing.T) {
 	off = nil
 	b = nil
 	runtime.GC()
-	if h.Magic != 84148994 || h.Version != 151521030 || h.Size != 1229499251294997258 {
+	if *h != want {
 		t.Fatalf("copy-path ViewAs invalid after input dropped: %+v", *h)
 	}
 	runtime.KeepAlive(h)
 }
 
 func TestViewAsKeepsAlive(t *testing.T) {
-	v := freshViewas()
+	v, want := freshViewas()
 	runtime.GC()
 	g := make([]byte, 1<<20)
 	for i := range g {
@@ -106,14 +132,14 @@ func TestViewAsKeepsAlive(t *testing.T) {
 	}
 	runtime.GC()
 	runtime.KeepAlive(g)
-	if v.Magic != 336794129 || v.Version != 404166165 || v.Size != 2314601843866147353 {
-		t.Fatalf("view after GC = %+v", *v)
+	if *v != want {
+		t.Fatalf("view after GC = %+v, want %+v", *v, want)
 	}
 }
 
-func freshViewas() *viewasHeader {
+func freshViewas() (*viewasHeader, viewasHeader) {
 	b := []byte{17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32}
-	return ViewAs[viewasHeader](b)
+	return ViewAs[viewasHeader](b), viewasNative(b)
 }
 
 func TestViewAsPanicMentionsSizes(t *testing.T) {

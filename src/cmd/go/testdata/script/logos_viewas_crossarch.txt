@@ -1,7 +1,9 @@
-# ViewAs on a strict-alignment target takes the aligned copy path
-# (viewas_copy.go); the native and cross-compiled binaries must agree.
-# The riscv64 build leg always runs (compile-only proof of selection);
-# the run leg needs qemu-riscv64.
+# ViewAs reads multi-byte fields in the byte order of the host on every
+# target: the program compares each view with encoding/binary.NativeEndian
+# over the same bytes, so the native, riscv64 (little-endian, copy path),
+# s390x (big-endian, direct path) and ppc64 (big-endian, copy path)
+# binaries must print the same lines.
+# The build legs always run; each run leg needs its qemu user binary.
 
 env GOPROXY=off
 env GOTOOLCHAIN=local
@@ -9,18 +11,26 @@ env GOTOOLCHAIN=local
 cd m
 logos build -o $WORK/viewas-native$GOEXE .
 exec $WORK/viewas-native$GOEXE
-stdout '^67305985 134678021 1157159078456920585$'
-stdout '^84148994 151521030 1229499251294997258$'
+stdout '^basic true$'
+stdout '^odd true$'
 stdout '^logos: ViewAs: need 16 bytes, have 8$'
 cp stdout $WORK/native.txt
 
-env GOARCH=riscv64
 env GOOS=linux
-logos build -o $WORK/viewas-riscv64$GOEXE .
 
-[!exec:qemu-riscv64] skip 'qemu-riscv64 is required for the riscv64 run leg'
-exec qemu-riscv64 $WORK/viewas-riscv64$GOEXE
-cmp stdout $WORK/native.txt
+env GOARCH=riscv64
+logos build -o $WORK/viewas-riscv64 .
+env GOARCH=s390x
+logos build -o $WORK/viewas-s390x .
+env GOARCH=ppc64
+logos build -o $WORK/viewas-ppc64 .
+
+[exec:qemu-riscv64] exec qemu-riscv64 $WORK/viewas-riscv64
+[exec:qemu-riscv64] cmp stdout $WORK/native.txt
+[exec:qemu-s390x] exec qemu-s390x $WORK/viewas-s390x
+[exec:qemu-s390x] cmp stdout $WORK/native.txt
+[exec:qemu-ppc64] exec qemu-ppc64 $WORK/viewas-ppc64
+[exec:qemu-ppc64] cmp stdout $WORK/native.txt
 
 -- m/go.mod --
 module example.com/viewascross
@@ -32,6 +42,7 @@ package main
 
 import (
 	"comptime"
+	"encoding/binary"
 	"fmt"
 )
 
@@ -41,10 +52,18 @@ type Header struct {
 	Size    uint64
 }
 
+func nativeHeader(b []byte) Header {
+	return Header{
+		Magic:   binary.NativeEndian.Uint32(b),
+		Version: binary.NativeEndian.Uint32(b[4:]),
+		Size:    binary.NativeEndian.Uint64(b[8:]),
+	}
+}
+
 func showBasic() {
 	b := []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
 	h := comptime.ViewAs[Header](b)
-	fmt.Println(h.Magic, h.Version, h.Size)
+	fmt.Println("basic", *h == nativeHeader(b))
 }
 
 func showOdd() {
@@ -53,7 +72,7 @@ func showOdd() {
 		b[i] = byte(i + 1)
 	}
 	h := comptime.ViewAs[Header](b[1:])
-	fmt.Println(h.Magic, h.Version, h.Size)
+	fmt.Println("odd", *h == nativeHeader(b[1:]))
 }
 
 func showShort() (msg string) {
