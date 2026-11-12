@@ -1,0 +1,12 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+go test -v -count=1 -tags logosejected -run 'TestEjectedGroupCancelLeavesNetworkReadToComplete$' logos/rt
+stdout '--- PASS: TestEjectedGroupCancelLeavesNetworkReadToComplete'
+stdout '^ok\s+logos/rt'
+! stderr 'no tests to run'
+! stdout 'no tests to run'
+
+-- go.mod --
+module example.com/groupejectednetio
+
+go 1.27
