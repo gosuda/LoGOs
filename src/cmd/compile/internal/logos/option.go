@@ -324,8 +324,13 @@ func (fl *fileLower) deleteGroupingParens(es, qoff int) {
 		case t.kind == token.RPAREN:
 			depth--
 			if depth < 0 {
+				depth = 0
+				if fl.parenClaims[t.start] {
+					return true
+				}
 				fl.add(t.start, t.end, "")
-				depth, n = 0, n+1
+				fl.parenClaims[t.start] = true
+				n++
 			}
 		}
 		return true
@@ -334,8 +339,11 @@ func (fl *fileLower) deleteGroupingParens(es, qoff int) {
 	for n > 0 && off > 0 {
 		switch {
 		case fl.src[off-1] == '(':
-			fl.add(off-1, off, "")
-			n--
+			if !fl.parenClaims[off-1] {
+				fl.add(off-1, off, "")
+				fl.parenClaims[off-1] = true
+				n--
+			}
 			off = skipBlankBack(fl.src, off-1)
 		case off >= len("const") && string(fl.src[off-len("const"):off]) == "const":
 			off = skipBlankBack(fl.src, off-len("const"))

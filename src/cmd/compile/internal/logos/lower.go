@@ -83,6 +83,7 @@ func Lower(pkg *types2.Package, info *types2.Info, files []*syntax.File, src map
 			start:         lineStarts(buf),
 			loweredChains: make(map[*syntax.CallExpr]bool),
 			compositeDone: make(map[syntax.Expr]bool),
+			parenClaims:   make(map[int]bool),
 			wrapSpan:      make(map[syntax.Expr]span),
 			wrapOwner:     make(map[syntax.Expr]int),
 		}
@@ -193,6 +194,7 @@ type fileLower struct {
 	spreadSeq      int
 	rodataVars     []rodataVar
 	optMemo        map[*syntax.OptionType]syntax.Expr
+	parenClaims    map[int]bool
 	narrowDone     map[*syntax.Name]bool
 	optDeferGoPend map[*syntax.CallExpr]optDeferGoWork
 	gotoTargets    map[*syntax.LabeledStmt]bool

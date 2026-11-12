@@ -625,13 +625,17 @@ func (fl *fileLower) jsonEdgeOf(t types2.Type) jsonEdge {
 
 func jsonEdgeCore(fl *fileLower, t types2.Type) types2.Type {
 	u := types2.Unalias(t)
-	if o := fl.asOption(u); o != nil {
-		u = o.Elem
+	for {
+		if o := fl.asOption(u); o != nil {
+			u = types2.Unalias(o.Elem)
+			continue
+		}
+		if cv, ok := u.(*types2.ConstView); ok {
+			u = types2.Unalias(cv.Elem)
+			continue
+		}
+		return u
 	}
-	if cv, ok := u.(*types2.ConstView); ok {
-		u = cv.Elem
-	}
-	return u
 }
 
 func (fl *fileLower) planJSONWalk(js *jsonStruct, rootNamed *types2.Named) *jsonWalkPlan {
@@ -785,6 +789,7 @@ func (fl *fileLower) descendNamedJSONTable(plan *jsonWalkPlan, named *types2.Nam
 	plan.descendSeen[named] = true
 	st, ok := named.Underlying().(*types2.Struct)
 	if !ok {
+		fl.descendJSONTable(plan, named.Underlying())
 		return
 	}
 	fl.descendStructJSONTable(plan, st)
@@ -1056,6 +1061,143 @@ func helperCall(name, local string) string {
 	return fmt.Sprintf("%s(%s, _logos_s)", name, local)
 }
 
+func optionJSONPath(t types2.Type, seen map[types2.Type]bool) bool {
+	wrapped := false
+	for {
+		t = unaliasConstView(t)
+		if seen[t] {
+			return false
+		}
+		seen[t] = true
+		if _, ok := types2.LogosUnionMembers(t); ok {
+			return wrapped
+		}
+		switch u := t.(type) {
+		case *types2.Option:
+			wrapped = wrapped || !types2.LogosOptionIsBare(u.Elem)
+			t = u.Elem
+		case *types2.Pointer:
+			t = u.Elem()
+		case *types2.Named:
+			if obj, _, _ := types2.LookupFieldOrMethod(u, true, u.Obj().Pkg(), "MarshalJSON"); isMarshalJSONSignature(obj) {
+				return false
+			}
+			t = u.Underlying()
+		case *types2.Slice:
+			t = u.Elem()
+		case *types2.Array:
+			t = u.Elem()
+		case *types2.Map:
+			key, ok := types2.Unalias(u.Key()).Underlying().(*types2.Basic)
+			if !ok || key.Kind() != types2.String {
+				return false
+			}
+			t = u.Elem()
+		default:
+			return false
+		}
+	}
+}
+
+func (js *jsonStruct) optionJSONCall(t types2.Type, x string) string {
+	if !optionJSONPath(t, make(map[types2.Type]bool)) {
+		return walkCall(x)
+	}
+	u := unaliasConstView(t)
+	if n, ok := u.(*types2.Named); ok {
+		u = n.Underlying()
+	}
+	var body []string
+	switch v := u.(type) {
+	case *types2.Option:
+		if types2.LogosOptionIsBare(v.Elem) {
+			return js.optionJSONCall(v.Elem, x)
+		}
+		body = []string{
+			"if !" + x + ".Present { return []byte(\"null\"), nil }",
+			"return " + js.optionJSONCall(v.Elem, x+".Value"),
+		}
+	case *types2.Pointer:
+		body = []string{
+			"if " + x + " == nil { return []byte(\"null\"), nil }",
+			"if _logos_err := _logos_s.Enter(" + x + "); _logos_err != nil { return nil, _logos_err }",
+			"defer _logos_s.Leave(" + x + ")",
+			"return " + js.optionJSONCall(v.Elem(), "(*"+x+")"),
+		}
+	default:
+		return js.optionJSONContainerCall(u, x)
+	}
+	return "func() ([]byte, error) {\n" + strings.Join(indentLines(body), "\n") + "\n}()"
+}
+
+func (js *jsonStruct) optionJSONContainerCall(u types2.Type, x string) string {
+	var body []string
+	var elem types2.Type
+	mapType, isMap := u.(*types2.Map)
+	switch c := u.(type) {
+	case *types2.Slice:
+		elem = c.Elem()
+	case *types2.Array:
+		elem = c.Elem()
+	case *types2.Map:
+		elem = c.Elem()
+	default:
+		base.Fatalf("logos: option JSON path has non-container type %s", u)
+	}
+	if _, array := u.(*types2.Array); !array {
+		body = append(body,
+			"if "+x+" == nil { return []byte(\"null\"), nil }",
+			"if _logos_err := _logos_s.Enter("+x+"); _logos_err != nil { return nil, _logos_err }",
+			"defer _logos_s.Leave("+x+")")
+	}
+	body = append(body,
+		"if _logos_err := _logos_s.EnterFrame(0); _logos_err != nil { return nil, _logos_err }",
+		"defer _logos_s.LeaveFrame()")
+	open, close := "'['", "']'"
+	loop := "for _, _logos_item := range " + x
+	var prefix []string
+	if isMap {
+		open, close = "'{'", "'}'"
+		body = append(body, sortedJSONMapKeys(x)...)
+		loop = "for _, _logos_key := range _logos_keys"
+		prefix = []string{
+			"_logos_kb, _logos_err := " + jsonAlias + ".MarshalField(_logos_key)",
+			"if _logos_err != nil { return nil, _logos_err }",
+			"_logos_buf = append(_logos_buf, _logos_kb...)",
+			"_logos_buf = append(_logos_buf, ':')",
+			"_logos_item := " + x + "[" + types2.TypeString(mapType.Key(), js.qualify) + "(_logos_key)]",
+		}
+	}
+	body = append(body, "_logos_buf := []byte{"+open+"}")
+	inner := []string{"if len(_logos_buf) > 1 { _logos_buf = append(_logos_buf, ',') }"}
+	inner = append(inner, prefix...)
+	inner = append(inner,
+		"_logos_part, _logos_err := "+js.optionJSONCall(elem, "_logos_item"),
+		"if _logos_err != nil { return nil, _logos_s.RebaseDepthError(_logos_err, int64(len(_logos_buf))) }",
+		"_logos_buf = append(_logos_buf, _logos_part...)")
+	body = append(body, blockLines(loop, inner)...)
+	body = append(body, "_logos_buf = append(_logos_buf, "+close+")", "return _logos_buf, nil")
+	return "func() ([]byte, error) {\n" + strings.Join(indentLines(body), "\n") + "\n}()"
+}
+
+func sortedJSONMapKeys(x string) []string {
+	return []string{
+		"_logos_keys := make([]string, 0, len(" + x + "))",
+		"for _logos_key := range " + x + " { _logos_keys = append(_logos_keys, string(_logos_key)) }",
+		"_logos_down := func(_logos_root, _logos_end int) {",
+		"for 2*_logos_root+1 < _logos_end {",
+		"_logos_child := 2*_logos_root+1",
+		"if _logos_child+1 < _logos_end && _logos_keys[_logos_child] < _logos_keys[_logos_child+1] { _logos_child++ }",
+		"if _logos_keys[_logos_root] >= _logos_keys[_logos_child] { break }",
+		"_logos_keys[_logos_root], _logos_keys[_logos_child] = _logos_keys[_logos_child], _logos_keys[_logos_root]",
+		"_logos_root = _logos_child",
+		"}",
+		"}",
+		"for _logos_i := len(_logos_keys)/2-1; _logos_i >= 0; _logos_i-- { _logos_down(_logos_i, len(_logos_keys)) }",
+		"for _logos_i := len(_logos_keys)-1; _logos_i > 0; _logos_i-- { _logos_keys[0], _logos_keys[_logos_i] = _logos_keys[_logos_i], _logos_keys[0]; _logos_down(0, _logos_i) }",
+	}
+}
+
 func walkCall(local string) string {
 	return fmt.Sprintf("_logos_s.Marshal(%s)", local)
 }
@@ -1063,6 +1205,9 @@ func walkCall(local string) string {
 func (g *marshalGen) edgeCode(f *jsonField, e jsonEdge) fieldCode {
 	local := f.local()
 	call := cmp.Or(helperCall(g.calls[f], local), walkCall(local))
+	if optionJSONPath(f.typ, make(map[types2.Type]bool)) {
+		call = g.js.optionJSONCall(f.typ, local)
+	}
 	b := fmt.Sprintf("_logos_b%d", f.pos)
 	ec := fmt.Sprintf("_logos_e%d", f.pos)
 	stmt := []string{fmt.Sprintf("%s, %s := %s", b, ec, call)}

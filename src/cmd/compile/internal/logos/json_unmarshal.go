@@ -52,6 +52,7 @@ func (js *jsonStruct) unmarshalText(b *strings.Builder) {
 	var body []string
 	body = append(body, fmt.Sprintf("_logos_s := %s.NewScanner(_logos_data, (*%s)(nil))", jsonAlias, js.name))
 	body = append(body, ifLines("!_logos_s.Object()", []string{"return _logos_s.End()"})...)
+	body = append(body, "var _logos_container_saved error")
 	if len(js.required) > 0 {
 		body = append(body, fmt.Sprintf("var _logos_seen [%d]uint64", seenWords(len(js.required))))
 		body = append(body, "var _logos_firstnulled = -1")
@@ -59,6 +60,7 @@ func (js *jsonStruct) unmarshalText(b *strings.Builder) {
 	body = append(body, js.defaults...)
 	body = append(body, js.loopLines()...)
 	body = append(body, ifLines("_logos_e := _logos_s.Err(); _logos_e != nil", []string{"return _logos_e"})...)
+	body = append(body, ifLines("_logos_container_saved != nil", []string{"return _logos_container_saved"})...)
 	body = append(body, ifLines("_logos_v := _logos_s.Saved(); _logos_v != nil", []string{"return _logos_v"})...)
 	body = append(body, js.requiredCheck()...)
 	body = append(body, "return nil")
@@ -115,7 +117,7 @@ func (js *jsonStruct) valueLines(f *jsonField) []string {
 		return js.unionLines(f, field)
 	case shapeFallback:
 		if uc, ok := unionContainerOf(f.typ); ok {
-			return js.unionContainerLines(f, field, uc)
+			return js.unionContainerLines(f, uc, field)
 		}
 		if f.quoted {
 			if isExactNumber(f.typ) {
@@ -227,12 +229,7 @@ func ownsKey(s trialMember) string {
 }
 
 func (js *jsonStruct) unionTrial(uc jsonUnionClass, target, scanner, errVar string) []string {
-	errRet := func(e string) []string {
-		if errVar == "" {
-			return []string{"return " + e}
-		}
-		return []string{errVar + " = " + e, "return"}
-	}
+	errRet := func(e string) []string { return unionFailure(errVar, e) }
 	var trials []string
 	trials = append(trials, "_logos_raw := "+scanner+".Value()")
 	trials = append(trials, "if _logos_value_err := "+scanner+".Err(); _logos_value_err != nil {")
@@ -335,6 +332,13 @@ func unionResultLines(uc jsonUnionClass, target string, errRet func(string) []st
 	return append(out, "}")
 }
 
+func unionFailure(errVar, err string) []string {
+	if errVar == "" {
+		return []string{"return " + err}
+	}
+	return []string{errVar + " = " + err, "return"}
+}
+
 type unionContainerKind int
 
 const (
@@ -347,181 +351,183 @@ const (
 
 type unionContainer struct {
 	kind  unionContainerKind
+	typ   types2.Type
+	key   types2.Type
+	elem  types2.Type
+	next  *unionContainer
 	union types2.Type
-	ptr   bool
+	depth int
 }
 
-func unionContainerOf(t types2.Type) (unionContainer, bool) {
-	u := unaliasConstView(t)
-	kind := unionContainerKind(0)
-	if o, ok := u.(*types2.Option); ok {
-		e := unaliasConstView(o.Elem)
-		if _, isPtr := e.(*types2.Pointer); isPtr {
-			return unionContainer{}, false
+func unionContainerOf(t types2.Type) (*unionContainer, bool) {
+	return unionContainerAt(t, 0, make(map[*types2.Named]bool))
+}
+
+func unionContainerAt(t types2.Type, depth int, seen map[*types2.Named]bool) (*unionContainer, bool) {
+	t = unaliasConstView(t)
+	under := t
+	if n, ok := t.(*types2.Named); ok {
+		if seen[n] || hasUnmarshalMethods(n) {
+			return nil, false
 		}
-		u = e
-		kind = containerOption
+		seen[n] = true
+		under = n.Underlying()
 	}
-	if p, ok := u.(*types2.Pointer); ok {
-		if kind != unionContainerKind(0) {
-			return unionContainer{}, false
-		}
-		u = unaliasConstView(p.Elem())
-		kind = containerPointer
-	}
-	elem := u
-	switch c := u.(type) {
+	uc := &unionContainer{typ: t, depth: depth}
+	switch c := under.(type) {
+	case *types2.Option:
+		uc.kind, uc.elem = containerOption, c.Elem
+	case *types2.Pointer:
+		uc.kind, uc.elem = containerPointer, c.Elem()
 	case *types2.Slice:
-		if kind != unionContainerKind(0) {
-			return unionContainer{}, false
-		}
-		elem = c.Elem()
-		kind = containerSlice
+		uc.kind, uc.elem = containerSlice, c.Elem()
 	case *types2.Array:
-		if kind != unionContainerKind(0) {
-			return unionContainer{}, false
-		}
-		elem = c.Elem()
-		kind = containerArray
+		uc.kind, uc.elem = containerArray, c.Elem()
 	case *types2.Map:
-		if kind != unionContainerKind(0) {
-			return unionContainer{}, false
-		}
 		kb, ok := types2.Unalias(c.Key()).Underlying().(*types2.Basic)
 		if !ok || kb.Kind() != types2.String {
-			return unionContainer{}, false
+			return nil, false
 		}
-		elem = c.Elem()
-		kind = containerMap
+		uc.kind, uc.key, uc.elem = containerMap, c.Key(), c.Elem()
+	default:
+		return nil, false
 	}
-	if kind == unionContainerKind(0) {
-		return unionContainer{}, false
+	if e := unaliasConstView(uc.elem); hasUnionMembers(e) {
+		uc.union = e
+		return uc, true
 	}
-	e := unaliasConstView(elem)
-	ptr := false
-	if p, ok := e.(*types2.Pointer); ok {
-		e = unaliasConstView(p.Elem())
-		ptr = true
+	next, ok := unionContainerAt(uc.elem, depth+1, seen)
+	if !ok {
+		return nil, false
 	}
-	if _, ok := types2.LogosUnionMembers(e); !ok {
-		return unionContainer{}, false
-	}
-	return unionContainer{kind: kind, union: e, ptr: ptr}, true
+	uc.next, uc.union = next, next.union
+	return uc, true
 }
 
-func (js *jsonStruct) unionContainerLines(f *jsonField, field string, uc unionContainer) []string {
+func hasUnionMembers(t types2.Type) bool {
+	_, ok := types2.LogosUnionMembers(t)
+	return ok
+}
+
+func (js *jsonStruct) unionContainerType(t types2.Type) string {
+	t = unaliasConstView(t)
+	switch u := t.(type) {
+	case *types2.Option:
+		elem := js.unionContainerType(u.Elem)
+		if types2.LogosOptionIsBare(u.Elem) {
+			return elem
+		}
+		return rtAlias + ".Option[" + elem + "]"
+	case *types2.Pointer:
+		return "*" + js.unionContainerType(u.Elem())
+	case *types2.Slice:
+		return "[]" + js.unionContainerType(u.Elem())
+	case *types2.Array:
+		return fmt.Sprintf("[%d]%s", u.Len(), js.unionContainerType(u.Elem()))
+	case *types2.Map:
+		return "map[" + js.unionContainerType(u.Key()) + "]" + js.unionContainerType(u.Elem())
+	}
+	return types2.TypeString(t, js.qualify)
+}
+
+func (js *jsonStruct) unionAddr(uc *unionContainer, target string) string {
+	if n, ok := uc.typ.(*types2.Named); ok {
+		return "(*" + js.unionContainerType(n.Underlying()) + ")(&" + target + ")"
+	}
+	return "&" + target
+}
+
+func (js *jsonStruct) unionContainerLines(f *jsonField, uc *unionContainer, field string) []string {
 	cls, ok := js.unionMembersOf(uc.union)
 	if !ok {
 		base.Fatalf("logos: union field %s has no union terms", f.goName)
 	}
-	espell := cls.name
-	if uc.ptr {
-		espell = "*" + espell
+	return js.unionLevelLines(f, cls, uc, field, "(&_logos_s)", "")
+}
+
+func (js *jsonStruct) unionLevelLines(f *jsonField, cls jsonUnionClass, uc *unionContainer, target, scanner, errVar string) []string {
+	elem := js.unionContainerType(uc.elem)
+	suffix := fmt.Sprintf("%d_%d", f.pos, uc.depth)
+	element := func(t, s, e string) []string {
+		if uc.next == nil {
+			return js.unionTrial(cls, t, s, e)
+		}
+		return js.unionLevelLines(f, cls, uc.next, t, s, e)
 	}
 	switch uc.kind {
-	case containerSlice:
-		errName := fmt.Sprintf("_logos_uerr_%d", f.pos)
-		var out []string
-		out = append(out, fmt.Sprintf("var %s error", errName))
-		out = append(out, fmt.Sprintf("%s.Slice(&_logos_s, &%s, func(_logos_es *%s.Scanner, _logos_ee *%s) {", jsonAlias, field, jsonAlias, espell))
-		var body []string
-		body = append(body, "if _logos_es.Null() {", "\t*_logos_ee = nil", "} else {")
-		if uc.ptr {
-			body = append(body, fmt.Sprintf("\tif *_logos_ee == nil { *_logos_ee = new(%s) }", cls.name))
-			body = append(body, indentLines(js.unionTrial(cls, "(**_logos_ee)", "_logos_es", errName))...)
-		} else {
-			body = append(body, indentLines(js.unionTrial(cls, "(*_logos_ee)", "_logos_es", errName))...)
+	case containerSlice, containerArray:
+		errName := "_logos_uerr_" + suffix
+		tmp := "_logos_tmp_" + suffix
+		dst := js.unionAddr(uc, target)
+		out := []string{"var " + errName + " error"}
+		if uc.kind == containerArray {
+			dst = "&" + tmp
+			out = append(out, "var "+tmp+" []"+elem)
 		}
-		body = append(body, "}")
-		out = append(out, indentLines(body)...)
+		callback := []string{"if _logos_es.Null() {", "\tvar _logos_zero " + elem, "\t*_logos_ee = _logos_zero", "} else {"}
+		callback = append(callback, indentLines(element("(*_logos_ee)", "_logos_es", errName))...)
+		callback = append(callback, "}")
+		out = append(out, fmt.Sprintf("%s.Slice(%s, %s, func(_logos_es *%s.Scanner, _logos_ee *%s) {", jsonAlias, scanner, dst, jsonAlias, elem))
+		out = append(out, indentLines(callback)...)
 		out = append(out, "})")
-		out = append(out, fmt.Sprintf("if %s != nil {", errName))
-		out = append(out, fmt.Sprintf("\treturn %s", errName))
-		out = append(out, "}")
-		return out
-	case containerArray:
-		errName := fmt.Sprintf("_logos_uerr_%d", f.pos)
-		tmp := fmt.Sprintf("_logos_tmp_%d", f.pos)
-		var out []string
-		out = append(out, fmt.Sprintf("var %s error", errName))
-		out = append(out, fmt.Sprintf("var %s []%s", tmp, espell))
-		out = append(out, fmt.Sprintf("%s.Slice(&_logos_s, &%s, func(_logos_es *%s.Scanner, _logos_ee *%s) {", jsonAlias, tmp, jsonAlias, espell))
-		var abody []string
-		abody = append(abody, "if _logos_es.Null() {", "\t*_logos_ee = nil", "} else {")
-		if uc.ptr {
-			abody = append(abody, fmt.Sprintf("\tif *_logos_ee == nil { *_logos_ee = new(%s) }", cls.name))
-			abody = append(abody, indentLines(js.unionTrial(cls, "(**_logos_ee)", "_logos_es", errName))...)
-		} else {
-			abody = append(abody, indentLines(js.unionTrial(cls, "(*_logos_ee)", "_logos_es", errName))...)
+		out = append(out, ifLines(errName+" != nil", unionFailure(errVar, errName))...)
+		if uc.kind == containerArray {
+			out = append(out, ifLines(tmp+" != nil", []string{
+				fmt.Sprintf("copy(%s[:], %s)", target, tmp),
+				fmt.Sprintf("if len(%s) < len(%s) { clear(%s[len(%s):]) }", tmp, target, target, tmp),
+			})...)
 		}
-		abody = append(abody, "}")
-		out = append(out, indentLines(abody)...)
-		out = append(out, "})")
-		out = append(out, fmt.Sprintf("if %s != nil {", errName))
-		out = append(out, fmt.Sprintf("\treturn %s", errName))
-		out = append(out, "}")
-		out = append(out, fmt.Sprintf("if %s != nil {", tmp))
-		out = append(out, fmt.Sprintf("\tcopy(%s[:], %s)", field, tmp))
-		out = append(out, fmt.Sprintf("\tif len(%s) < len(%s) {", tmp, field))
-		out = append(out, fmt.Sprintf("\t\tclear(%s[len(%s):])", field, tmp))
-		out = append(out, "\t}")
-		out = append(out, "}")
 		return out
 	case containerMap:
-		mv := fmt.Sprintf("_logos_mv_%d", f.pos)
-		mk := fmt.Sprintf("_logos_mk_%d", f.pos)
-		mm := fmt.Sprintf("_logos_m_%d", f.pos)
-		ms := fmt.Sprintf("_logos_ms_%d", f.pos)
-		rawm := fmt.Sprintf("_logos_rawm_%d", f.pos)
-		merr := fmt.Sprintf("_logos_value_err_%d", f.pos)
-		var out []string
-		out = append(out, fmt.Sprintf("%s := _logos_s.Value()", rawm))
-		out = append(out, fmt.Sprintf("if %s := _logos_s.Err(); %s != nil {", merr, merr))
-		out = append(out, fmt.Sprintf("\treturn %s", merr))
-		out = append(out, "}")
-		out = append(out, fmt.Sprintf("%s := %s.NewScanner(%s, (*map[string]%s)(nil))", ms, jsonAlias, rawm, espell))
-		out = append(out, fmt.Sprintf("if %s.Null() {", ms))
-		out = append(out, fmt.Sprintf("\t%s = nil", field))
-		out = append(out, fmt.Sprintf("} else if !%s.Object() {", ms))
-		out = append(out, fmt.Sprintf("\treturn %s.End()", ms))
-		out = append(out, "} else {")
-		out = append(out, fmt.Sprintf("\t%s := make(map[string]%s)", mm, espell))
-		out = append(out, fmt.Sprintf("\tfor %s.Next() {", ms))
-		out = append(out, fmt.Sprintf("\t\t%s := string(append([]byte(nil), %s.Key()...))", mk, ms))
-		out = append(out, fmt.Sprintf("\t\tvar %s %s", mv, espell))
-		out = append(out, fmt.Sprintf("\t\tif %s.Null() {", ms))
-		out = append(out, fmt.Sprintf("\t\t\t%s = nil", mv))
-		out = append(out, "\t\t} else {")
-		if uc.ptr {
-			out = append(out, fmt.Sprintf("\t\t\t%s = new(%s)", mv, cls.name))
-			out = append(out, indentLines(js.unionTrial(cls, "(*"+mv+")", ms, ""))...)
-		} else {
-			out = append(out, indentLines(js.unionTrial(cls, mv, ms, ""))...)
+		mv, mk, mm, ms := "_logos_mv_"+suffix, "_logos_mk_"+suffix, "_logos_m_"+suffix, "_logos_ms_"+suffix
+		raw, valueErr := "_logos_rawm_"+suffix, "_logos_value_err_"+suffix
+		key := js.unionContainerType(uc.key)
+		mapType := "map[" + key + "]" + elem
+		out := []string{
+			"if _logos_container_saved == nil { _logos_container_saved = " + scanner + ".Saved() }",
+			raw + " := " + scanner + ".Value()",
 		}
-		out = append(out, "\t\t}")
-		out = append(out, fmt.Sprintf("\t\t%s[%s] = %s", mm, mk, mv))
-		out = append(out, "\t}")
-		out = append(out, fmt.Sprintf("\t%s = %s", field, mm))
+		out = append(out, ifLines(valueErr+" := "+scanner+".Err(); "+valueErr+" != nil", unionFailure(errVar, valueErr))...)
+		out = append(out, fmt.Sprintf("%s := %s.NewScanner(%s, (*%s)(nil))", ms, jsonAlias, raw, mapType))
+		entry := []string{
+			mk + " := string(append([]byte(nil), " + ms + ".Key()...))",
+			"var " + mv + " " + elem,
+		}
+		entry = append(entry, ifLines("!"+ms+".Null()", element(mv, "(&"+ms+")", errVar))...)
+		entry = append(entry, fmt.Sprintf("%s[%s(%s)] = %s", mm, key, mk, mv))
+		object := []string{mm + " := make(" + mapType + ")"}
+		object = append(object, blockLines("for "+ms+".Next()", entry)...)
+		object = append(object, target+" = "+mm)
+		out = append(out, "if "+ms+".Null() {", "\t"+target+" = nil", "} else if "+ms+".Object() {")
+		out = append(out, indentLines(object)...)
 		out = append(out, "}")
-		return out
+		out = append(out, ifLines(valueErr+" := "+ms+".Err(); "+valueErr+" != nil", unionFailure(errVar, valueErr))...)
+		return append(out, ifLines("_logos_container_saved == nil", []string{"_logos_container_saved = " + ms + ".Saved()"})...)
 	case containerPointer:
-		ap := fmt.Sprintf("_logos_ap_%d", f.pos)
-		var out []string
-		out = append(out, fmt.Sprintf("%s := %s.Alloc(&%s)", ap, jsonAlias, field))
-		out = append(out, js.unionTrial(cls, "(*"+ap+")", "_logos_s", "")...)
-		return out
+		alloc := "_logos_ap_" + suffix
+		out := []string{fmt.Sprintf("%s := %s.Alloc(%s)", alloc, jsonAlias, js.unionAddr(uc, target))}
+		return append(out, element("(*"+alloc+")", scanner, errVar)...)
 	case containerOption:
-		if types2.LogosOptionIsBare(uc.union) {
-			return unionFieldWrap(f, field, js.unionTrial(cls, field, "_logos_s", ""))
+		bare := types2.LogosOptionIsBare(uc.elem)
+		_, named := uc.typ.(*types2.Named)
+		if bare && !named {
+			return ifElseLines("!"+scanner+".Null()", element(target, scanner, errVar), []string{target + " = nil"})
 		}
-		ov := fmt.Sprintf("_logos_ov_%d", f.pos)
-		var out []string
-		out = append(out, "if !_logos_s.Null() {")
-		out = append(out, fmt.Sprintf("\t\tvar %s %s", ov, cls.name))
-		out = append(out, indentLines(js.unionTrial(cls, ov, "_logos_s", ""))...)
-		out = append(out, fmt.Sprintf("\t\t%s = %s.Option[%s]{Value: %s, Present: true}", field, rtAlias, cls.name, ov))
-		out = append(out, "}")
-		return out
+		value := "_logos_ov_" + suffix
+		result := value
+		if !bare {
+			result = fmt.Sprintf("%s.Option[%s]{Value: %s, Present: true}", rtAlias, elem, value)
+		}
+		if named {
+			result = js.unionContainerType(uc.typ) + "(" + result + ")"
+		}
+		body := []string{"var " + value + " " + elem}
+		body = append(body, element(value, scanner, errVar)...)
+		body = append(body, target+" = "+result)
+		if bare {
+			return ifElseLines("!"+scanner+".Null()", body, []string{target + " = nil"})
+		}
+		return ifLines("!"+scanner+".Null()", body)
 	default:
 		base.Fatalf("logos: unhandled union container for %s", f.goName)
 		return nil
