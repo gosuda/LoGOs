@@ -4,13 +4,10 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"time"
 )
-
-var errSib = errors.New("sibling failed")
 
 const waitBound = 5 * time.Second
 
