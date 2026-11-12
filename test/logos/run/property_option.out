@@ -1,0 +1,11 @@
+ok pointer-option-present
+ok value-option-present
+ok pointer-option-absent
+ok value-option-absent
+ok slot-starts-absent
+ok pointer-option-write
+ok pointer-option-write-none
+ok value-option-write
+ok value-option-write-none
+ok method-sourced-option
+ok method-sourced-option-absent

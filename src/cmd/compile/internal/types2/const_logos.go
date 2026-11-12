@@ -45,6 +45,8 @@ func logosReferenceFree(t Type) bool {
 			}
 		}
 		return true
+	case *Option:
+		return logosReferenceFree(t.Elem)
 	}
 	return false
 }

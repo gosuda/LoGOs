@@ -1644,7 +1644,7 @@ func (fl *fileLower) targetOfLHS(e syntax.Expr) types2.Type {
 		if sel := fl.pkg.info.Selections[e]; sel != nil {
 			return sel.Obj().Type()
 		}
-		return nil
+		return fl.optType(e)
 	case *syntax.IndexExpr:
 		switch c := types2.Unalias(fl.optType(e.X)).(type) {
 		case *types2.Slice:
