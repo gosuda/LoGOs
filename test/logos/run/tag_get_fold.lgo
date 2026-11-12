@@ -15,6 +15,7 @@ type FoldRecord struct {
 	Name  string  `json:"nm" xml:"n1" GET:"g1" custom:"a\"b\\c"`
 	Age   int64   `json:"age,omitempty" xml:"a2" GET:"g2"`
 	Skip  bool    `json:"-"`
+	Ref   string  `Ref:"r1"`
 	Plain float64
 }
 
