@@ -1491,8 +1491,8 @@ Anchor: Tony Hoare, David Parnas
 
 ### M2-S2 Membership in comparisons, assertions, cases
 Anchor: Tony Hoare, Claude Shannon
-- Attack: `testdata/logos/union_members.lgo`: `u == 1` allowed when `int` is a member (constant converted to its default type), error otherwise; `u == "a"` likewise; `u == nil` allowed; `u.(float64)` and `case float64:` on `U = interface{int | string}` -> `union_nonmember`; `u.(int)` allowed; type switch case that is itself a union of members allowed.
-- Build: hooks in `expr.go` `matchTypes` path and `implicitTypeAndValue` under `check.conf.Logos`: for a closed-union operand and an untyped constant, convert the constant to its default type and require membership; hooks in `typeAssertion` (`expr.go typeAssertion`) and `caseTypes` (`stmt.go caseTypes`) checking membership when the operand is a closed union.
+- Attack: `testdata/logos/union_members.lgo`: `u == 1` allowed when `int` is a member (constant converted to its default type), error otherwise; `u == "a"` likewise; `u == nil` allowed; `case float64:` on `U = interface{int | string}` -> `union_nonmember`; `u.(float64)` compiles and checks membership at run time (`test/logos/run/union_nonmember_assert.lgo`); `u.(int)` allowed; type switch case that is itself a union of members allowed.
+- Build: hooks in `expr.go` `matchTypes` path and `implicitTypeAndValue` under `check.conf.Logos`: for a closed-union operand and an untyped constant, convert the constant to its default type and require membership; hooks in `typeAssertion` (`expr.go typeAssertion`) and `caseTypes` (`stmt.go caseTypes`) checking membership when the operand is a closed union, where `logosNonMemberAssert` (`types2/union_logos.go`) accepts an assertion expression and keeps the error for a case type; the lowering rewrites an assertion on a non-member to run-time checks (`logos/union.go`).
 - Gate: as S1.
 
 ### M2-S3 Exhaustive type switches
