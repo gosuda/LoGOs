@@ -684,7 +684,10 @@ func (s *constFnSrc) renderPlainFunc(file *syntax.File, fd *syntax.FuncDecl) (st
 	if !s.at(file) {
 		return "", fmt.Errorf("cannot load file for function %s", fd.Name.Value)
 	}
-	start := cfFuncStart(s.orig, s.off(syntax.StartPos(fd)))
+	start, ok := KeywordStart(s.orig, token.FUNC, s.off(syntax.StartPos(fd)))
+	if !ok {
+		return "", fmt.Errorf("cannot find func keyword for %s", fd.Name.Value)
+	}
 	end := s.funcEnd(fd)
 	if end <= start || end > len(s.orig) {
 		return "", fmt.Errorf("span out of bounds for function %s", fd.Name.Value)
@@ -1114,17 +1117,6 @@ func KeywordStart(src []byte, kind token.Token, off int) (int, bool) {
 			kw = file.Offset(pos)
 		}
 	}
-}
-
-func cfFuncStart(src []byte, off int) int {
-	i := off
-	for i > 0 && (src[i-1] == ' ' || src[i-1] == '\t' || src[i-1] == '\n' || src[i-1] == '\r') {
-		i--
-	}
-	if i >= 4 && string(src[i-4:i]) == "func" {
-		return i - 4
-	}
-	return off
 }
 
 func nullaryCallEnd(src []byte, end int) (int, bool) {

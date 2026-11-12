@@ -341,7 +341,7 @@ func (b *cfRecordBuilder) packageMarker(pn *types2.PkgName) string {
 }
 
 func cfFuncStart(src []byte, off int) int {
-	kw, ok := keywordStart(src, token.FUNC, off)
+	kw, ok := facts.KeywordStart(src, token.FUNC, off)
 	if !ok {
 		base.Fatalf("logos: no func keyword before offset %d", off)
 	}

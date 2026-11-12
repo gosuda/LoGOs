@@ -7,6 +7,7 @@ package logos
 import (
 	"cmd/compile/internal/base"
 	"cmd/compile/internal/logos/ctfe"
+	"cmd/compile/internal/logos/facts"
 	"cmd/compile/internal/syntax"
 	"cmd/compile/internal/types2"
 	"go/token"
@@ -126,7 +127,7 @@ func (fl *fileLower) lowerCTFEFileList(gst *groupedMoveState) {
 			} else {
 				fl.markRodataVar(vd, r.val)
 			}
-			if kw, ok := keywordStart(fl.src, token.CONST, fl.off(syntax.StartPos(cd))); ok {
+			if kw, ok := facts.KeywordStart(fl.src, token.CONST, fl.off(syntax.StartPos(cd))); ok {
 				fl.add(kw, kw+5, "var")
 			}
 			if !r.keepCall {
@@ -174,7 +175,7 @@ func (fl *fileLower) lowerCTFEBlock(b *syntax.BlockStmt, gst *groupedMoveState) 
 				vd := &syntax.VarDecl{NameList: cd.NameList, Type: cd.Type, Values: r.lit}
 				vd.SetPos(syntax.StartPos(cd))
 				ds.DeclList[j] = vd
-				if kw, ok := keywordStart(fl.src, token.CONST, fl.off(syntax.StartPos(cd))); ok {
+				if kw, ok := facts.KeywordStart(fl.src, token.CONST, fl.off(syntax.StartPos(cd))); ok {
 					fl.add(kw, kw+5, "var")
 				}
 				if !r.keepCall {
@@ -332,17 +333,6 @@ func (fl *fileLower) endOff(e syntax.Expr) int {
 		return fl.endOff(n.ElemList[len(n.ElemList)-1])
 	}
 	return fl.off(syntax.EndPos(e))
-}
-
-func keywordStart(src []byte, kind token.Token, nameOff int) (int, bool) {
-	kw := -1
-	scanSegment(src, 0, nameOff, func(t tok) bool {
-		if t.kind == kind {
-			kw = t.start
-		}
-		return true
-	})
-	return kw, kw >= 0
 }
 
 func declNames(cd *syntax.ConstDecl) string {

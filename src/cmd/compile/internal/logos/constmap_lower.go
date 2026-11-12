@@ -672,7 +672,7 @@ func (fl *fileLower) markConstMapTables(decls []syntax.Decl, g *constMapGen) {
 
 func (fl *fileLower) dropConstSpec(cd *syntax.ConstDecl) {
 	if cd.Group == nil {
-		if kw, ok := keywordStart(fl.src, token.CONST, fl.off(syntax.StartPos(cd))); ok {
+		if kw, ok := facts.KeywordStart(fl.src, token.CONST, fl.off(syntax.StartPos(cd))); ok {
 			fl.add(kw, swallowSep(fl.src, fl.endOff(cd.Values)), "")
 			return
 		}

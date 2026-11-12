@@ -296,7 +296,8 @@ type ( // c
 	Cell struct{ V int }
 )
 
-func helper(x int) int { return x + Bias }
+func /*c*/ // d
+helper(x int) int { return x + Bias }
 
 const func Norm(x int) int {
 	p := Point{X: x, Y: 4}
