@@ -179,25 +179,11 @@ func (h *groupHoist) moveInit(init syntax.SimpleStmt, limit int) (span, span) {
 	return sp, semi
 }
 
-func (h *groupHoist) block(mark, start, end int, s syntax.Stmt) []syntax.Stmt {
-	fc := h.fc
-	fc.hoistSubEmit(fc.hoistSubTake(mark))
-	fc.fl.addT(start, start, cat(gen("{\n"), h.render()))
-	fc.fl.add(end, end, "\n}")
-	return []syntax.Stmt{blockAround(s, append(h.native, s))}
-}
-
-func blockAround(host syntax.Stmt, list []syntax.Stmt) *syntax.BlockStmt {
-	b := blockOf(host.Pos(), list)
-	b.Rbrace = syntax.EndPos(host)
-	return b
-}
-
 func (fc *funcLower) groupHoistIf(s *syntax.IfStmt, top groupFrame) []syntax.Stmt {
 	fl := fc.fl
 	scanForLiterals(fl, s.Init)
 	scanForLiterals(fl, s.Cond)
-	start := fl.off(s.Pos())
+	start := fc.hostStart(s)
 	mark := fc.hoistSubMark()
 	h := fc.newGroupHoist(top, start)
 	h.pos = s.Pos()
@@ -217,15 +203,11 @@ func (fc *funcLower) groupHoistIf(s *syntax.IfStmt, top groupFrame) []syntax.Stm
 	if condRecv {
 		s.Cond = h.expr(s.Cond)
 	}
+	h.before(mark, start)
+	out := fc.scoped(s, h.native)
 	s.Then.List = fc.lowerList(s.Then.List)
 	fc.groupHoistElse(s, top)
-	if split {
-		return h.block(mark, start, ifEndOff(fl, s), s)
-	}
-	if !h.before(mark, start) {
-		return []syntax.Stmt{s}
-	}
-	return append(h.native, s)
+	return out
 }
 
 func (fc *funcLower) groupHoistElse(s *syntax.IfStmt, top groupFrame) {
@@ -240,12 +222,7 @@ func (fc *funcLower) groupHoistElse(s *syntax.IfStmt, top groupFrame) {
 			s.Else = fc.lowerIf(e)[0]
 			return
 		}
-		start := fc.fl.off(syntax.StartPos(e))
-		fc.fl.add(start, start, "{ ")
-		nr := fc.groupHoistIf(e, top)
-		end := fc.fl.off(syntax.EndPos(e)) + 1
-		fc.fl.add(end, end, " }")
-		s.Else = blockAround(e, nr)
+		s.Else = fc.groupHoistIf(e, top)[0]
 	}
 }
 
@@ -263,7 +240,7 @@ func (fc *funcLower) groupHoistSwitch(s *syntax.SwitchStmt, top groupFrame) []sy
 	for _, c := range s.Body {
 		scanForLiterals(fl, c.Cases)
 	}
-	start := fc.groupStmtStart(s)
+	start := fc.hostStart(s)
 	mark := fc.hoistSubMark()
 	h := fc.newGroupHoist(top, start)
 	h.pos = s.Pos()
@@ -283,16 +260,12 @@ func (fc *funcLower) groupHoistSwitch(s *syntax.SwitchStmt, top groupFrame) []sy
 	if tagRecv {
 		s.Tag = h.expr(s.Tag)
 	}
+	h.before(mark, start)
+	out := fc.scoped(s, h.native)
 	for _, c := range s.Body {
 		c.Body = fc.lowerList(c.Body)
 	}
-	if split {
-		return h.block(mark, start, fl.off(s.Rbrace)+1, s)
-	}
-	if !h.before(mark, start) {
-		return []syntax.Stmt{s}
-	}
-	return append(h.native, s)
+	return out
 }
 
 func (fc *funcLower) groupSwitchCases(s *syntax.SwitchStmt, h *groupHoist, mark, start int) []syntax.Stmt {
@@ -330,10 +303,12 @@ func (fc *funcLower) groupSwitchCases(s *syntax.SwitchStmt, h *groupHoist, mark,
 	}
 	fl.add(headStart, headEnd, " "+sel+" ")
 	s.Tag = nameOf(pos, sel)
+	h.before(mark, start)
+	out := fc.scoped(s, h.native)
 	for _, c := range s.Body {
 		c.Body = fc.lowerList(c.Body)
 	}
-	return h.block(mark, start, fl.off(s.Rbrace)+1, s)
+	return out
 }
 
 func (h *groupHoist) cacheTag(tag syntax.Expr, sp span) string {
@@ -448,10 +423,10 @@ func (fc *funcLower) groupHoistFor(s *syntax.ForStmt, top groupFrame) []syntax.S
 		topText = append(append(topText, cond.text...), cat(gen("if !("), text, gen(") {\nbreak\n}")))
 	}
 	fl.addT(open+1, open+1, cat(gen("\n"), joinO(topText, "\n"), gen("\n")))
-	h.before(mark, keyword)
-	out := fc.lowerFor(s)
+	h.before(mark, fc.hostStart(s))
+	out := fc.lowerFor(s, h.native)
 	s.Body.List = append(topNative, s.Body.List...)
-	return append(h.native, out...)
+	return out
 }
 
 func (fc *funcLower) groupLoopInit(h *groupHoist, s *syntax.ForStmt, semis []span, flag string, open int) {
@@ -483,16 +458,16 @@ func (fc *funcLower) groupLoopInit(h *groupHoist, s *syntax.ForStmt, semis []spa
 }
 
 func (fc *funcLower) groupHoistRange(s *syntax.ForStmt, rc *syntax.RangeClause, top groupFrame) []syntax.Stmt {
-	start := fc.fl.off(s.Pos())
+	start := fc.hostStart(s)
 	mark := fc.hoistSubMark()
 	h := fc.newGroupHoist(top, start)
 	h.pos = s.Pos()
 	rc.X = h.expr(rc.X)
 	h.before(mark, start)
 	if fc.groupRangeOverChan(rc) {
-		return append(h.native, fc.lowerGroupRange(s, rc, top)...)
+		return fc.lowerGroupRange(s, rc, top, h.native)
 	}
-	return append(h.native, fc.lowerFor(s)...)
+	return fc.lowerFor(s, h.native)
 }
 
 func (fc *funcLower) groupHoistCall(s *syntax.CallStmt, top groupFrame) ([]syntax.Stmt, bool) {

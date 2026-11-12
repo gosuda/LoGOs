@@ -101,8 +101,14 @@ func (fc *funcLower) groupChanStmt(s syntax.Stmt) ([]syntax.Stmt, bool) {
 	out, handled := fc.groupChanDispatch(s, top)
 	if handled && base.Errors() == before {
 		last := out[len(out)-1]
-		if b, ok := last.(*syntax.BlockStmt); ok && len(b.List) > 0 {
-			last = b.List[len(b.List)-1]
+		for {
+			if lab, ok := last.(*syntax.LabeledStmt); ok {
+				last = lab.Stmt
+			} else if b, ok := last.(*syntax.BlockStmt); ok && len(b.List) > 0 {
+				last = b.List[len(b.List)-1]
+			} else {
+				break
+			}
 		}
 		if groupStmtHasRecv(last) {
 			fc.groupReject(last.Pos(), "in an unsupported position")
@@ -155,7 +161,7 @@ func (fc *funcLower) groupChanFor(s *syntax.ForStmt, top groupFrame) ([]syntax.S
 	if !ok || !fc.groupRangeOverChan(rc) {
 		return nil, false
 	}
-	return fc.lowerGroupRange(s, rc, top), true
+	return fc.lowerGroupRange(s, rc, top, nil), true
 }
 
 func (fc *funcLower) groupRangeOverChan(rc *syntax.RangeClause) bool {
@@ -167,9 +173,10 @@ func (fc *funcLower) groupRangeOverChan(rc *syntax.RangeClause) bool {
 	return ok
 }
 
-func (fc *funcLower) lowerGroupRange(s *syntax.ForStmt, rc *syntax.RangeClause, top groupFrame) []syntax.Stmt {
+func (fc *funcLower) lowerGroupRange(s *syntax.ForStmt, rc *syntax.RangeClause, top groupFrame, prologue []syntax.Stmt) []syntax.Stmt {
 	fl := fc.fl
 	pos := s.Pos()
+	out := fc.scoped(s, prologue)
 	scanForLiterals(fl, rc.X)
 	chStart := fl.off(leftmostOf(rc.X))
 	chText := fl.textOf(trimSpan(fl.src, span{start: chStart, end: fl.off(s.Body.Pos())}))
@@ -206,7 +213,7 @@ func (fc *funcLower) lowerGroupRange(s *syntax.ForStmt, rc *syntax.RangeClause, 
 		})
 	end := fl.off(s.Body.Rbrace) + 1
 	fl.addT(end, end, cat(gen("\n"), renderText([]syntax.Stmt{checkN}, nil)))
-	return []syntax.Stmt{s, checkN}
+	return append(out, checkN)
 }
 
 func groupSelectHasDefault(s *syntax.SelectStmt) bool {

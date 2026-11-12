@@ -224,7 +224,7 @@ func (fc *funcLower) lowerCompound(s syntax.Stmt) []syntax.Stmt {
 	case *syntax.IfStmt:
 		return fc.lowerIf(s)
 	case *syntax.ForStmt:
-		return fc.lowerFor(s)
+		return fc.lowerFor(s, nil)
 	case *syntax.SwitchStmt:
 		return fc.lowerSwitch(s)
 	case *syntax.SelectStmt:
@@ -299,8 +299,7 @@ func (fc *funcLower) lowerElse(s *syntax.IfStmt) {
 	}
 }
 
-func (fc *funcLower) lowerFor(s *syntax.ForStmt) []syntax.Stmt {
-	var prologue []syntax.Stmt
+func (fc *funcLower) lowerFor(s *syntax.ForStmt, prologue []syntax.Stmt) []syntax.Stmt {
 	if decl := fc.wrapForPost(s); decl != nil {
 		prologue = append(prologue, decl)
 	}
