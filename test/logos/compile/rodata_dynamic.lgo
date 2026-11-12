@@ -2,8 +2,19 @@
 
 package main
 
+var suffix = "y"
+
 //logos:rodata
-var dyn = []int{fresh(), 1} // ERROR "needs dynamic initialization"
+var dyn = []int{fresh(), 1} // ERROR "\[correctness::rodata_dynamic_init\]"
+
+//logos:rodata
+var called = fresh() // ERROR "\[correctness::rodata_dynamic_init\]"
+
+//logos:rodata
+var mapped = map[string]int{"a": 1} // ERROR "\[correctness::rodata_dynamic_init\]"
+
+//logos:rodata
+var joined = suffix + "x" // ERROR "\[correctness::rodata_dynamic_init\]"
 
 //go:noinline
 func fresh() int {
@@ -11,5 +22,5 @@ func fresh() int {
 }
 
 func main() {
-	println(dyn[0], dyn[1])
+	println(dyn[0], dyn[1], called, len(mapped), joined)
 }

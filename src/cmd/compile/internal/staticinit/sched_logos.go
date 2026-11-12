@@ -40,7 +40,10 @@ func logosStaticInit(s *Schedule, n ir.Node) bool {
 	nOut := len(s.Out)
 	ok := s.tryStaticInit(n)
 	if target, name := logosRodataTarget(n); target && (!ok || len(s.Out) != nOut) {
-		base.FatalfAt(n.Pos(), "logos: const composite %s needs dynamic initialization", name)
+		if !logos.IsWrittenRodata(types.LocalPkg.Path, name) {
+			base.FatalfAt(n.Pos(), "logos: const composite %s needs dynamic initialization", name)
+		}
+		base.ErrorfAt(n.Pos(), 0, "[correctness::rodata_dynamic_init] variable %s marked //logos:rodata needs dynamic initialization", name)
 	}
 	return ok
 }

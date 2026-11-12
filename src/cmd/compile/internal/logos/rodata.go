@@ -15,9 +15,16 @@ import (
 
 const rodataMarker = "//logos:rodata"
 
+type rodataOrigin int
+
+const (
+	rodataGenerated rodataOrigin = iota + 1
+	rodataWritten
+)
+
 var (
 	rodataMu   sync.Mutex
-	rodataVars = map[string]bool{}
+	rodataVars = map[string]rodataOrigin{}
 )
 
 func rodataKey(pkgPath, name string) string { return pkgPath + "\x00" + name }
@@ -25,19 +32,34 @@ func rodataKey(pkgPath, name string) string { return pkgPath + "\x00" + name }
 func RegisterRodata(pkgPath, name string) {
 	rodataMu.Lock()
 	defer rodataMu.Unlock()
-	rodataVars[rodataKey(pkgPath, name)] = true
+	key := rodataKey(pkgPath, name)
+	if rodataVars[key] == 0 {
+		rodataVars[key] = rodataGenerated
+	}
+}
+
+func RegisterWrittenRodata(pkgPath, name string) {
+	rodataMu.Lock()
+	defer rodataMu.Unlock()
+	rodataVars[rodataKey(pkgPath, name)] = rodataWritten
 }
 
 func IsRodata(pkgPath, name string) bool {
 	rodataMu.Lock()
 	defer rodataMu.Unlock()
-	return rodataVars[rodataKey(pkgPath, name)]
+	return rodataVars[rodataKey(pkgPath, name)] != 0
+}
+
+func IsWrittenRodata(pkgPath, name string) bool {
+	rodataMu.Lock()
+	defer rodataMu.Unlock()
+	return rodataVars[rodataKey(pkgPath, name)] == rodataWritten
 }
 
 func clearRodataPackage(pkgPath string) {
 	rodataMu.Lock()
 	defer rodataMu.Unlock()
-	maps.DeleteFunc(rodataVars, func(k string, _ bool) bool {
+	maps.DeleteFunc(rodataVars, func(k string, _ rodataOrigin) bool {
 		return strings.HasPrefix(k, pkgPath+"\x00")
 	})
 }
@@ -95,7 +117,7 @@ func (fl *fileLower) scanRodataMarkers() {
 			continue
 		}
 		for _, name := range vd.NameList {
-			RegisterRodata(fl.pkg.tpkg.Path(), name.Value)
+			RegisterWrittenRodata(fl.pkg.tpkg.Path(), name.Value)
 		}
 	}
 }
