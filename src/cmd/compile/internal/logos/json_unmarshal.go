@@ -586,8 +586,8 @@ func (js *jsonStruct) keyFuncs(b *strings.Builder) {
 			folded = append(folded, keyEntry{fk, f.pos})
 		}
 	}
-	writeKeyFunc(b, js.name, "jsonkey", exact)
-	writeKeyFunc(b, js.name, "jsonfold", folded)
+	js.writeKeyFunc(b, js.name, "jsonkey", exact)
+	js.writeKeyFunc(b, js.name, "jsonfold", folded)
 }
 
 func unionFoldFunc(keyFunc string) string {
@@ -613,8 +613,8 @@ func (js *jsonStruct) unionMemberKeys(b *strings.Builder, seen map[string]bool) 
 				}
 			}
 			name := strings.TrimPrefix(c.keyFunc, "_logos_jsonkey_")
-			writeKeyFunc(b, name, "jsonkey", exact)
-			writeKeyFunc(b, name, "jsonfold", folded)
+			js.writeKeyFunc(b, name, "jsonkey", exact)
+			js.writeKeyFunc(b, name, "jsonfold", folded)
 		}
 	}
 }
@@ -635,7 +635,7 @@ func (js *jsonStruct) foreignKeyedMembers(f *jsonField) []unionMemberClass {
 	return members
 }
 
-func writeKeyFunc(b *strings.Builder, name, kind string, keys []keyEntry) {
+func (js *jsonStruct) writeKeyFunc(b *strings.Builder, name, kind string, keys []keyEntry) {
 	if len(keys) <= constMapSwitchMax {
 		fmt.Fprintf(b, "\nfunc _logos_%s_%s(_logos_k string) int {\n\tswitch _logos_k {\n", kind, name)
 		for _, e := range keys {
@@ -644,17 +644,18 @@ func writeKeyFunc(b *strings.Builder, name, kind string, keys []keyEntry) {
 		b.WriteString("\t}\n\treturn -1\n}\n")
 		return
 	}
-	writeKeyTable(b, name, kind, keys)
+	js.writeKeyTable(b, name, kind, keys)
 }
 
-func writeKeyTable(b *strings.Builder, name, kind string, keys []keyEntry) {
+func (js *jsonStruct) writeKeyTable(b *strings.Builder, name, kind string, keys []keyEntry) {
 	entries := make([]constMapKey, len(keys))
 	for i, e := range keys {
 		entries[i] = constMapKey{hash: constHashString(e.key), canon: e.key}
 	}
-	layout, err := buildConstMap(entries, defaultConstMapBudget)
+	layout, err := buildConstMap(entries, constMapSeedBudget(js.pos))
 	if err != nil {
-		base.Fatalf("logos: no key table for %s: %v", name, err)
+		base.Errorf("%s: %v", js.pos.String(), err)
+		base.ExitIfErrors()
 	}
 	table := fmt.Sprintf("_logos_%ss_%s", kind, name)
 	fmt.Fprintf(b, "\n%s\nvar %s = %s.ConstTable[string, int]{Salt: %d, Buckets: []%s.ConstBucket{", rodataMarker, table, rtAlias, layout.salt, rtAlias)

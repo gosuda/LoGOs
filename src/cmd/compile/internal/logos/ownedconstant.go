@@ -1287,7 +1287,7 @@ func (fl *fileLower) constMapOwnedTexts(g *constMapGen, pos syntax.Pos) (string,
 	var sharedLayout *constMapLayout
 	sharedIsSwitch := len(keys) <= constMapSwitchMax
 	if !sharedIsSwitch {
-		l, err := buildConstMap(sharedEntries, defaultConstMapBudget)
+		l, err := buildConstMap(sharedEntries, constMapSeedBudget(pos))
 		if err != nil {
 			base.Errorf("%s: %v", pos.String(), err)
 			base.ExitIfErrors()

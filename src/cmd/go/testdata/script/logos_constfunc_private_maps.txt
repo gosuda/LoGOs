@@ -40,6 +40,12 @@ exec env -u GOROOT $UPROOT1272/bin/go build ./...
 cd ../consumer
 cd ..
 
+# A seed cap of 1 exhausts the owned 12-key map search with the rule ID.
+cd consumer
+! logos build -gcflags=all=-d=logosconstmapseeds=1 .
+stderr '\[comptime::constmap_seed_not_found\]'
+cd ..
+
 -- lib/go.mod --
 module example.com/privmaplib
 

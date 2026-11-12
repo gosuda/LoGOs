@@ -66,6 +66,7 @@ type jsonStruct struct {
 	required   []string
 	staticJSON map[*types2.Named]bool
 	holderPkg  *types2.Package
+	pos        syntax.Pos
 }
 
 func (fl *fileLower) lowerStaticJSON() {
@@ -90,6 +91,7 @@ func (fl *fileLower) lowerStaticJSONType(td *syntax.TypeDecl) {
 		fields = binaryFields
 	}
 	js := fl.buildJSONStruct(td.Name.Value, named.Underlying().(*types2.Struct), fields)
+	js.pos = td.Pos()
 	var b strings.Builder
 	if jsonOK && !userDeclaresMethod(named, "MarshalJSON") {
 		plan := fl.planJSONWalk(js, named)

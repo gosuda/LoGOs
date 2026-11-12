@@ -733,20 +733,23 @@ func (fl *fileLower) buildConstMapParts(g *constMapGen, pos syntax.Pos) constMap
 	}
 }
 
+func constMapSeedBudget(pos syntax.Pos) constMapBudget {
+	if base.Debug.LogosConstmapSeeds < 0 {
+		base.Errorf("%s: invalid -d=logosconstmapseeds value %d (want a non-negative seed cap)", pos.String(), base.Debug.LogosConstmapSeeds)
+		base.ExitIfErrors()
+	}
+	if base.Debug.LogosConstmapSeeds > 0 {
+		return constMapBudget{MaxSeeds: base.Debug.LogosConstmapSeeds, Rounds: defaultConstMapBudget.Rounds}
+	}
+	return defaultConstMapBudget
+}
+
 func finalizeConstMapEmission(pos syntax.Pos, e constMapEmission, entries []constMapKey) string {
 	isSwitch := len(entries) <= constMapSwitchMax
 	var layout *constMapLayout
 	if !isSwitch {
 		var err error
-		if base.Debug.LogosConstmapSeeds < 0 {
-			base.Errorf("%s: invalid -d=logosconstmapseeds value %d (want a non-negative seed cap)", pos.String(), base.Debug.LogosConstmapSeeds)
-			base.ExitIfErrors()
-		}
-		budget := defaultConstMapBudget
-		if base.Debug.LogosConstmapSeeds > 0 {
-			budget = constMapBudget{MaxSeeds: base.Debug.LogosConstmapSeeds, Rounds: defaultConstMapBudget.Rounds}
-		}
-		layout, err = buildConstMap(entries, budget)
+		layout, err = buildConstMap(entries, constMapSeedBudget(pos))
 		if err != nil {
 			base.Errorf("%s: %v", pos.String(), err)
 			base.ExitIfErrors()
