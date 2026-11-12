@@ -1089,6 +1089,10 @@ A receive-channel source MUST deliver a finished result while the channel is qui
 
 An empty source MUST yield no result and no error. [T-206]
 
+A finished result that is never delivered MUST be closed when it implements `io.Closer`, in reverse input order after the join. [T-206]
+
+A result dropped by a `filter` of the segment MUST be closed once, and a delivered result MUST NOT be closed by the stage. [T-206]
+
 `logos/sync.Locked[T]` MUST expose `WithLock(f func(*T))`. [T-206]
 
 `WithLock` MUST hold `Lock`, defer `Unlock`, then call the function. [T-206]
