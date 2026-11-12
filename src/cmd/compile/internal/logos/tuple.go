@@ -341,24 +341,22 @@ func (fl *fileLower) lowerTupleType(t *syntax.TupleType) {
 	st := &syntax.StructType{}
 	st.SetPos(pos)
 	split := fl.tupleSplit(pos, len(t.Fields))
-	var parts []otext
-	parts = append(parts, gen("struct{ "))
+	from := fl.off(syntax.StartPos(t))
+	sep := "struct{ "
 	for i, f := range t.Fields {
 		name := ""
-		typ := f.Type
+		to := split.args[i].start
 		if f.Name != nil {
 			name = f.Name.Value
+			to += len(name)
 		}
 		lname := tupleLoweredName(name, i)
-		st.FieldList = append(st.FieldList, &syntax.Field{Name: nameOf(pos, lname), Type: typ})
-		if i > 0 {
-			parts = append(parts, gen("; "))
-		}
-		tspan := span{fl.off(syntax.StartPos(typ)), split.args[i].end}
-		parts = append(parts, gen(lname+" "), fl.textOf(tspan))
+		st.FieldList = append(st.FieldList, &syntax.Field{Name: nameOf(pos, lname), Type: f.Type})
+		fl.add(from, to, sep+lname+" ")
+		sep = "; "
+		from = split.args[i].end
 	}
-	parts = append(parts, gen(" }"))
-	fl.addT(fl.off(syntax.StartPos(t)), split.end, cat(parts...))
+	fl.add(from, split.end, " }")
 	replaceTupleExpr(fl.file, t, st)
 }
 
