@@ -292,6 +292,9 @@ func tupleChildLists(s syntax.Stmt) []*[]syntax.Stmt {
 }
 
 func (fl *fileLower) lowerTupleNested(s syntax.Stmt) {
+	saved := fl.tupleScope
+	fl.tupleScope = s
+	defer func() { fl.tupleScope = saved }()
 	syntax.Inspect(s, func(n syntax.Node) bool {
 		switch n := n.(type) {
 		case *syntax.FuncLit:
@@ -416,7 +419,7 @@ func (fl *fileLower) lowerTupleType(t *syntax.TupleType) {
 		from = split.args[i].end
 	}
 	fl.add(from, split.end, " }")
-	replaceTupleExpr(fl.file, t, st)
+	fl.replaceTuple(t, st)
 }
 
 func extendParens(src []byte, start, end int) (int, int) {
@@ -448,6 +451,14 @@ func wrapParenPair(src []byte, start, end int) (int, int, bool) {
 		return start, end, false
 	}
 	return i - 1, closer, true
+}
+
+func (fl *fileLower) replaceTuple(old, repl syntax.Expr) {
+	var root syntax.Node = fl.file
+	if fl.tupleScope != nil {
+		root = fl.tupleScope
+	}
+	replaceTupleExpr(root, old, repl)
 }
 
 func replaceTupleExpr(root syntax.Node, old, repl syntax.Expr) {
@@ -1006,7 +1017,7 @@ func (fl *fileLower) lowerTupleLitTargeted(lit *syntax.TupleLit, names []string,
 	split := fl.tupleSplit(pos, len(lit.Elems))
 	comp, head := fl.tupleLiteral(pos, names, types, slices.Clone(lit.Elems))
 	fl.cutTupleLit(fl.off(syntax.StartPos(lit)), split.end, split, gen(head), gen("}"))
-	replaceTupleExpr(fl.file, lit, comp)
+	fl.replaceTuple(lit, comp)
 }
 
 func (fl *fileLower) lowerTupleNestedExprTargeted(e syntax.Expr, names []string, types []types2.Type) {

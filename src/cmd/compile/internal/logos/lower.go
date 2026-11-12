@@ -209,6 +209,7 @@ type fileLower struct {
 	optBodySpan map[*syntax.LambdaExpr]span
 	erasedConst map[*syntax.ConstType]bool
 	tupleFn     *syntax.FuncType
+	tupleScope  syntax.Node
 	propEmitted map[int]bool
 	// funcHeadOffs caches the offsets of `func` keywords in source
 	// order, built once per file by a single forward tokenization for

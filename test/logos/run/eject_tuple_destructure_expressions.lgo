@@ -55,6 +55,25 @@ func retCall() (int, int) {
 	return mk()
 }
 
+func retCoalOpt(o (int, int)?) (int, int) {
+	return o ?? (3, 4)
+}
+
+func retCoalMap(m map[string](int, int)) (int, int) {
+	return m["k"] ?? (3, 4)
+}
+
+func retCoalSel(h *holder?) (int, int) {
+	return h?.t ?? (3, 4)
+}
+
+func retSwitch(n int) (int, int) {
+	return switch n {
+	case 1 => (1, 2)
+	default => (3, 4)
+	}
+}
+
 func plainCells() {
 	t := (1, 2)
 	h := holder{t: (1, 2)}
@@ -84,7 +103,59 @@ func callCells() {
 	cell("call__return", func() string { a, b := retCall(); return show(a, b) }, "1 2")
 }
 
+func coalCells() {
+	var none (int, int)?
+	m := map[string](int, int){"k": (7, 8)}
+	some := m["k"]
+	cell("coalopt__define", func() string { a, b := none ?? (3, 4); return show(a, b) }, "3 4")
+	cell("coalopt__assign", func() string { var a, b int; a, b = some ?? (3, 4); return show(a, b) }, "7 8")
+	cell("coalopt__var", func() string { var a, b = none ?? (3, 4); return show(a, b) }, "3 4")
+	cell("coalopt__return", func() string { a, b := retCoalOpt(some); return show(a, b) }, "7 8")
+	cell("coalmap__define", func() string { a, b := m["k"] ?? (3, 4); return show(a, b) }, "7 8")
+	cell("coalmap__assign", func() string { var a, b int; a, b = m["zz"] ?? (3, 4); return show(a, b) }, "3 4")
+	cell("coalmap__var", func() string { var a, b = m["k"] ?? (3, 4); return show(a, b) }, "7 8")
+	cell("coalmap__return", func() string { a, b := retCoalMap(m); return show(a, b) }, "7 8")
+}
+
+func selCells() {
+	var some *holder? = &holder{t: (5, 6)}
+	var none *holder?
+	cell("sel__define", func() string { a, b := some?.t ?? (3, 4); return show(a, b) }, "5 6")
+	cell("sel__assign", func() string { var a, b int; a, b = none?.t ?? (3, 4); return show(a, b) }, "3 4")
+	cell("sel__var", func() string { var a, b = some?.t ?? (3, 4); return show(a, b) }, "5 6")
+	cell("sel__return", func() string { a, b := retCoalSel(none); return show(a, b) }, "3 4")
+}
+
+func switchCells() {
+	cell("switch__define", func() string {
+		a, b := switch 1 {
+		case 1 => (1, 2)
+		default => (3, 4)
+		}
+		return show(a, b)
+	}, "1 2")
+	cell("switch__assign", func() string {
+		var a, b int
+		a, b = switch 2 {
+		case 1 => (1, 2)
+		default => (3, 4)
+		}
+		return show(a, b)
+	}, "3 4")
+	cell("switch__var", func() string {
+		var a, b = switch 1 {
+		case 1 => (1, 2)
+		default => (3, 4)
+		}
+		return show(a, b)
+	}, "1 2")
+	cell("switch__return", func() string { a, b := retSwitch(2); return show(a, b) }, "3 4")
+}
+
 func main() {
 	plainCells()
 	callCells()
+	coalCells()
+	selCells()
+	switchCells()
 }
