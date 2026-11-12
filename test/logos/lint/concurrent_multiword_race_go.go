@@ -595,3 +595,66 @@ func thunkStoredTargetWithArgument() {
 	}())
 	println(s)
 }
+
+func loopConditionWriteBeforeGo(n int) {
+	var s string
+	for i := 0; func() bool {
+		s = "a"
+		return i < n
+	}(); i++ {
+		go func() { // ERROR "\[concurrency::concurrent_multiword_race\]"
+			println(s)
+		}()
+	}
+}
+
+func loopPostWriteBeforeGo(n int) {
+	var s string
+	for i := 0; i < n; i, s = i+1, "a" {
+		go func() { // ERROR "\[concurrency::concurrent_multiword_race\]"
+			println(s)
+		}()
+	}
+}
+
+func loopConditionWriteBeforeThunkGo(n int) {
+	var s string
+	t := func() {
+		println(s)
+	}
+	for i := 0; func() bool {
+		s = "a"
+		return i < n
+	}(); i++ {
+		go t() // ERROR "\[concurrency::concurrent_multiword_race\]"
+	}
+}
+
+func passLoopInitWriteGo(n int) {
+	var s string
+	for s = "a"; n > 0; n-- {
+		go func() {
+			println(s)
+		}()
+	}
+}
+
+func passLoopInitDeclaredGo(n int) {
+	for s := "a"; n > 0; n-- {
+		go func() {
+			println(s)
+		}()
+	}
+}
+
+func passLoopConditionWritesOneWordGo(n int) {
+	count := 0
+	for i := 0; func() bool {
+		count = i
+		return i < n
+	}(); i++ {
+		go func() {
+			println(count)
+		}()
+	}
+}

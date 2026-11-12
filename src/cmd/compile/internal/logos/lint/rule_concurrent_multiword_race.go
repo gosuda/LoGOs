@@ -33,13 +33,15 @@ import (
 // innermost enclosing go group block, because the group joins its children
 // there, and otherwise with the enclosing declaration. For a variable
 // declared before a loop that encloses the spawn and ends inside the
-// window, the window starts at the first statement of each iteration
-// instead, because the next iteration writes while the previous child
-// still reads. A write by the child is inside the window. The function
-// value and the arguments of a go statement run in the calling goroutine,
-// so a variable that only they touch is not shared. The rule reads syntax
-// and checker objects only, so it holds for Go packages through the go
-// statement leg and for loGo/s packages through both legs.
+// window, the window starts at the first code of each iteration, which is
+// its condition, else its post statement, else its body, instead, because
+// the next iteration evaluates them while the previous child still reads
+// and a one-time init stays outside. A write by the child is inside the
+// window. The function value and the arguments of a go statement run in
+// the calling goroutine, so a variable that only they touch is not
+// shared. The rule reads syntax and checker objects only, so it holds for
+// Go packages through the go statement leg and for loGo/s packages
+// through both legs.
 var concurrentMultiwordRace = Rule{
 	ID:    "concurrency::concurrent_multiword_race",
 	Group: Concurrency,
@@ -469,9 +471,10 @@ func (c *raceCheck) written(s spawn, v *types2.Var) bool {
 }
 
 // windowStart returns where a write to v begins to race with the child of
-// s: the spawn, or the first statement of an iteration of the outermost
-// loop that encloses the spawn, ends inside the window, and was entered
-// after v was declared.
+// s: the spawn, or the first code of an iteration of the outermost loop
+// that encloses the spawn, ends inside the window, and was entered after v
+// was declared. The first code of an iteration is the range clause of a
+// range loop, else the condition, else the post statement, else the body.
 func (c *raceCheck) windowStart(s spawn, v *types2.Var, end syntax.Pos) syntax.Pos {
 	spawnStart := syntax.StartPos(s.node)
 	start := spawnStart
@@ -480,15 +483,25 @@ func (c *raceCheck) windowStart(s spawn, v *types2.Var, end syntax.Pos) syntax.P
 		if !within(spawnStart, loopStart, loopEnd) || loopEnd.Cmp(end) > 0 || v.Pos().Cmp(loopStart) > 0 {
 			continue
 		}
-		first := syntax.StartPos(l.Body)
-		if rc, ok := l.Init.(*syntax.RangeClause); ok {
-			first = syntax.StartPos(rc)
-		}
+		first := iterationStart(l)
 		if first.Cmp(start) < 0 {
 			start = first
 		}
 	}
 	return start
+}
+
+func iterationStart(l *syntax.ForStmt) syntax.Pos {
+	if rc, ok := l.Init.(*syntax.RangeClause); ok {
+		return syntax.StartPos(rc)
+	}
+	if l.Cond != nil {
+		return syntax.StartPos(l.Cond)
+	}
+	if l.Post != nil {
+		return syntax.StartPos(l.Post)
+	}
+	return syntax.StartPos(l.Body)
 }
 
 // window returns the end of the window in which a write races with the

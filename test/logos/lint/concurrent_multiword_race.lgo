@@ -1140,3 +1140,103 @@ func thunkGroupStoredTargetWithArgument(ctx context.Context) error {
 	println(s)
 	return nil
 }
+
+func loopConditionWriteBeforeChild(ctx context.Context, n int) error {
+	var s string
+	go group (ctx) {
+		for i := 0; func() bool {
+			s = "a"
+			return i < n
+		}(); i++ {
+			go { // ERROR "\[concurrency::concurrent_multiword_race\]"
+				println(s)
+			}
+		}
+	}
+	return nil
+}
+
+func loopPostWriteBeforeChild(ctx context.Context, n int) error {
+	var s string
+	go group (ctx) {
+		for i := 0; i < n; i, s = i+1, "a" {
+			go { // ERROR "\[concurrency::concurrent_multiword_race\]"
+				println(s)
+			}
+		}
+	}
+	return nil
+}
+
+func loopConditionWriteBeforeThunk(ctx context.Context, n int) error {
+	var s string
+	t := func() error {
+		println(s)
+		return nil
+	}
+	go group (ctx) {
+		for i := 0; func() bool {
+			s = "a"
+			return i < n
+		}(); i++ {
+			go t() // ERROR "\[concurrency::concurrent_multiword_race\]"
+		}
+	}
+	return nil
+}
+
+func passLoopInitWrite(ctx context.Context, n int) error {
+	var s string
+	go group (ctx) {
+		for s = "a"; n > 0; n-- {
+			go {
+				println(s)
+			}
+		}
+	}
+	return nil
+}
+
+func passLoopInitDeclaredVariable(ctx context.Context, n int) error {
+	go group (ctx) {
+		for s := "a"; n > 0; n-- {
+			go {
+				println(s)
+			}
+		}
+	}
+	return nil
+}
+
+func passLoopConditionWritesOneWord(ctx context.Context, n int) error {
+	count := 0
+	go group (ctx) {
+		for i := 0; func() bool {
+			count = i
+			return i < n
+		}(); i++ {
+			go {
+				println(count)
+			}
+		}
+	}
+	return nil
+}
+
+func passLoopConditionWriteAfterGroup(ctx context.Context, n int) error {
+	var s string
+	go group (ctx) {
+		for i := 0; i < n; i++ {
+			go {
+				println(s)
+			}
+		}
+	}
+	for i := 0; func() bool {
+		s = "a"
+		return i < n
+	}(); i++ {
+		println(i)
+	}
+	return nil
+}
