@@ -79,14 +79,19 @@ func (fl *fileLower) spreadValue(e syntax.Expr) syntax.Expr {
 	if op, ok := e.(*syntax.Operation); ok && op.Op == syntax.And && op.Y == nil {
 		if c, ok := syntax.Unparen(op.X).(*syntax.CompositeLit); ok && fl.hasSpread(c) {
 			fl.spreadChildren(c)
-			return fl.spreadAddrOp(op, c)
+			return fl.retyped(e, fl.spreadAddrOp(op, c))
 		}
 	}
 	fl.spreadChildren(e)
 	if c, ok := e.(*syntax.CompositeLit); ok && fl.hasSpread(c) {
-		return fl.spreadValueComposite(c)
+		return fl.retyped(e, fl.spreadValueComposite(c))
 	}
 	return e
+}
+
+func (fl *fileLower) retyped(old, native syntax.Expr) syntax.Expr {
+	fl.stashBodyType(fl.pkg.info.TypeOf(old), old, native)
+	return native
 }
 
 type spreadBuilder struct {

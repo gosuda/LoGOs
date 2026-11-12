@@ -562,8 +562,8 @@ func (fl *fileLower) lowerFile() {
 	fl.lowerUnions()      // switch expressions and struct assertions.
 	fl.lowerOptions()     // single-value map reads and ?? over them.
 	fl.lowerViewAs()      // comptime.ViewAs calls to the rt helper.
-	fl.lowerChains()      // collection chains fused into loops.
 	fl.lowerSpreads()     // `..src` spread elements.
+	fl.lowerChains()      // collection chains fused into loops.
 	for _, decl := range fl.file.DeclList {
 		fn, ok := decl.(*syntax.FuncDecl)
 		if ok && fn.Body != nil {
