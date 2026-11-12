@@ -259,20 +259,20 @@ func tryUnclosed() error {
 
 func errdeferOnly() error {
 	f := os.Open("x")? // ERROR "unclosed_io_closer"
-	errdefer f.Close()
+	errdefer f.Close() // ERROR "\[slop::discarded_error\]"
 	_ = f.Name()
 	return nil
 }
 
 func errdeferWrapped() (*wrapper, error) {
 	f := os.Open("x")?
-	errdefer f.Close()
+	errdefer f.Close() // ERROR "\[slop::discarded_error\]"
 	return &wrapper{f}, nil
 }
 
 func scopeDeferred() error {
 	f := os.Open("x")?
-	scope defer f.Close()
+	scope defer f.Close() // ERROR "\[slop::discarded_error\]"
 	_ = f.Name()
 	return nil
 }

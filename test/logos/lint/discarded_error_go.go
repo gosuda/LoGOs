@@ -141,3 +141,19 @@ func inErrorFunc() error {
 func allowed() {
 	f()
 }
+
+func droppedDeclaration() {
+	var _ = f() // ERROR "\[slop::discarded_error\]"
+	var _, _ = g() // ERROR "\[slop::discarded_error\]"
+	var _ error = f() // ERROR "\[slop::discarded_error\]"
+	var n, _ = g() // ERROR "\[slop::discarded_error\]"
+	_ = n
+}
+
+func keptDeclaration() {
+	var err = f()
+	var m, e = g()
+	var _ = alwaysNil()
+	var _, _ = alwaysNilPair()
+	_, _, _ = err, m, e
+}

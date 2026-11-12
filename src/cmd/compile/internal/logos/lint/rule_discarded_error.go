@@ -13,8 +13,10 @@ import (
 	"cmd/compile/internal/types2"
 )
 
-// discardedError is slop::discarded_error (SPEC Sec 1.2, #164): an
-// expression statement or a blank assignment that drops an error result.
+// discardedError is slop::discarded_error (SPEC Sec 1.2, #164): a
+// statement that drops an error result: an expression statement, a call
+// statement, an errdefer or scope defer statement, or a blank identifier
+// that receives the result in an assignment or a variable declaration.
 var discardedError = Rule{
 	ID:    "slop::discarded_error",
 	Group: Slop,
@@ -68,8 +70,14 @@ func (c *discardCheck) walk(n syntax.Node) {
 			c.exprStmt(m)
 		case *syntax.AssignStmt:
 			c.assignStmt(m)
+		case *syntax.VarDecl:
+			c.varDecl(m)
 		case *syntax.CallStmt:
 			c.callStmt(m)
+		case *syntax.ErrdeferStmt:
+			c.dropCall(m.Call)
+		case *syntax.ScopeDeferStmt:
+			c.dropCall(m.Call)
 		}
 		return true
 	})
@@ -107,7 +115,11 @@ func (c *discardCheck) callStmt(s *syntax.CallStmt) {
 	if s.Tok == syntax.Go && c.group > 0 {
 		return
 	}
-	call := callOf(s.Call)
+	c.dropCall(s.Call)
+}
+
+func (c *discardCheck) dropCall(e syntax.Expr) {
+	call := callOf(e)
 	if call == nil || !c.dropsError(call) {
 		return
 	}
@@ -126,7 +138,17 @@ func (c *discardCheck) assignStmt(s *syntax.AssignStmt) {
 	if s.Rhs == nil || (s.Op != 0 && s.Op != syntax.Def) {
 		return
 	}
-	lhs, rhs := exprList(s.Lhs), exprList(s.Rhs)
+	c.blankReceive(exprList(s.Lhs), exprList(s.Rhs))
+}
+
+// varDecl reports a blank identifier that receives an error result.
+func (c *discardCheck) varDecl(d *syntax.VarDecl) {
+	if lhs, rhs, ok := declPairs(d); ok {
+		c.blankReceive(lhs, rhs)
+	}
+}
+
+func (c *discardCheck) blankReceive(lhs, rhs []syntax.Expr) {
 	var call *syntax.CallExpr
 	switch {
 	case len(lhs) == len(rhs):
