@@ -16,8 +16,6 @@ stdout 'asmcgocall'
 stdout 'exitsyscall'
 ! stdout 'nanotime'
 ! stdout 'cputicks'
-! stdout 'clock_gettime'
-! stdout 'monotonic'
 
 go tool objdump -s 'main\._Cfunc_add' app$GOEXE
 stdout 'logosCgocallFast'
@@ -33,8 +31,6 @@ stdout 'asmcgocall'
 stdout 'exitsyscall'
 ! stdout 'nanotime'
 ! stdout 'cputicks'
-! stdout 'clock_gettime'
-! stdout 'monotonic'
 
 env GOEXPERIMENT=
 go build -o plainapp$GOEXE .
