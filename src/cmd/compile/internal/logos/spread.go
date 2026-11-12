@@ -389,7 +389,7 @@ func (fl *fileLower) spreadSelfUpdate(s *syntax.AssignStmt) (*syntax.AssignStmt,
 	}
 	if len(fields) == 0 {
 		native := assignOf(pos, []syntax.Expr{nameOf(pos, target.Value)}, []syntax.Expr{nameOf(pos, target.Value)})
-		fl.add(fl.stmtSpanStart(s, lhs[0]), fl.spanEndOf(rhs[0]), target.Value+" = "+target.Value)
+		fl.add(fl.stmtSpanStart(s, lhs[0]), fl.exprEndOf(rhs[0]), target.Value+" = "+target.Value)
 		return native, true
 	}
 	nativeLhs := make([]syntax.Expr, len(fields))
@@ -402,7 +402,7 @@ func (fl *fileLower) spreadSelfUpdate(s *syntax.AssignStmt) (*syntax.AssignStmt,
 	}
 	native := assignOf(pos, nativeLhs, values)
 	text := renderText([]syntax.Stmt{assignOf(pos, textLhs, textVals)}, tw.subs)
-	fl.addT(fl.stmtSpanStart(s, lhs[0]), fl.spanEndOf(rhs[0]), text)
+	fl.addT(fl.stmtSpanStart(s, lhs[0]), fl.exprEndOf(rhs[0]), text)
 	return native, true
 }
 
@@ -417,16 +417,14 @@ func (fl *fileLower) spreadStartOf(e syntax.Expr) int {
 	return spanStartBack(fl.src, fl.off(leftmostOf(e)))
 }
 
-func (fl *fileLower) spanEndOf(e syntax.Expr) int {
-	if c, ok := syntax.Unparen(e).(*syntax.CompositeLit); ok {
-		return skipCloseParens(fl.src, fl.off(c.Rbrace)+1)
-	}
-	return fl.exprEndOf(e)
-}
-
 func (fl *fileLower) exprEndOf(e syntax.Expr) int {
 	if c, ok := syntax.Unparen(e).(*syntax.CompositeLit); ok {
 		return skipCloseParens(fl.src, fl.off(c.Rbrace)+1)
 	}
-	return fl.exprEnd(fl.off(leftmostOf(e)))
+	from := fl.off(leftmostOf(e))
+	through := from
+	if rbrace, ok := lastBraceOf(e); ok {
+		through = fl.off(rbrace) + 1
+	}
+	return fl.exprEndThrough(from, through)
 }
