@@ -35,6 +35,8 @@ stdout '^boxed-types: map\[int\]nest\.boxed map\[int\]nest\.boxed$'
 logos eject -o ../eject_out
 exists ../eject_out/main.go
 cd ../eject_out
+exec $GOROOT/bin/gofmt -l .
+! stdout .
 go run .
 cmp stdout $WORK/want.txt
 # SPEC 0.3: ejected output builds with upstream go1.27.2 from $UPROOT1272.

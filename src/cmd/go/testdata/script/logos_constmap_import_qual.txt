@@ -25,6 +25,8 @@ exists out/app/main.go
 exists out/lib/lib.go
 exists out/third/third.go
 cd out
+exec $GOROOT/bin/gofmt -l .
+! stdout .
 go run ./app
 cmp stdout $WORK/want.txt
 # SPEC 0.3: ejected output builds with upstream go1.27.2 from $UPROOT1272.

@@ -17,6 +17,8 @@ grep -count=1 '_tab\.Get\(' out/main.go
 ! grep 'BinarySearch' out/main.go
 ! grep 'binarySearch' out/main.go
 cd out
+exec $GOROOT/bin/gofmt -l .
+! stdout .
 go run .
 cmp stdout $WORK/want.txt
 # SPEC 0.3: ejected output builds with upstream go1.27.2 from $UPROOT1272.

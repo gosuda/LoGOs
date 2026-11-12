@@ -16,6 +16,8 @@ stdout '^t128-order: \(-4\+5i\),\(0\+0i\),\(1\+1i\),\(1\+2i\),\(1\+3i\),\(2\+2i\
 logos eject -o ../eject_out
 exists ../eject_out/main.go
 cd ../eject_out
+exec $GOROOT/bin/gofmt -l .
+! stdout .
 go run .
 cmp stdout $WORK/want.txt
 cd ../consumer

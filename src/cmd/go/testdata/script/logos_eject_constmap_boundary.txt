@@ -18,6 +18,8 @@ cp stdout $WORK/native.txt
 logos eject -o out
 exists out/main.go
 cd out
+exec $GOROOT/bin/gofmt -l .
+! stdout .
 go build ./...
 go run .
 cmp stdout $WORK/native.txt

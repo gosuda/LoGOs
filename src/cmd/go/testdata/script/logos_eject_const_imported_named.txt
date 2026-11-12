@@ -9,6 +9,8 @@ cd a
 cp $GOROOT/test/logos/run/const_composite_imported_named.lgo main.lgo
 logos eject -o out
 cd out
+exec $GOROOT/bin/gofmt -l .
+! stdout .
 exec env -u GOROOT $UPROOT1272/bin/go run .
 cmp stdout $GOROOT/test/logos/run/const_composite_imported_named.out
 cd ..

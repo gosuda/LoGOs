@@ -8,6 +8,8 @@ logos run .
 cmp stdout want.txt
 logos eject -o out
 cd out
+exec $GOROOT/bin/gofmt -l .
+! stdout .
 exists $UPROOT1272/bin/go
 exec env -u GOROOT $UPROOT1272/bin/go run .
 cmp stdout ../want.txt

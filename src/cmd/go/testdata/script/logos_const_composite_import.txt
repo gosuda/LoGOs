@@ -9,6 +9,8 @@ exec $WORK/bin/importcc$GOEXE
 cmp stdout want.txt
 logos eject -o out
 cd out
+exec $GOROOT/bin/gofmt -l .
+! stdout .
 exists $UPROOT1272/bin/go
 exec env -u GOROOT $UPROOT1272/bin/go build ./...
 exec env -u GOROOT $UPROOT1272/bin/go run ./app
@@ -22,6 +24,8 @@ exec $WORK/bin/importunnamed$GOEXE
 cmp stdout want.txt
 logos eject -o out
 cd out
+exec $GOROOT/bin/gofmt -l .
+! stdout .
 exec env -u GOROOT $UPROOT1272/bin/go run ./app
 cmp stdout ../want.txt
 cd ../..
@@ -42,6 +46,8 @@ stderr -count=1 '\[correctness::const_view_mutation\]'
 rm badcall
 logos eject -o out
 cd out
+exec $GOROOT/bin/gofmt -l .
+! stdout .
 exec env -u GOROOT $UPROOT1272/bin/go run ./app
 cmp stdout ../want.txt
 cd ..
@@ -53,6 +59,8 @@ exec $WORK/bin/importrange$GOEXE
 cmp stdout want.txt
 logos eject -o out
 cd out
+exec $GOROOT/bin/gofmt -l .
+! stdout .
 exec env -u GOROOT $UPROOT1272/bin/go run ./app
 cmp stdout ../want.txt
 cd ..

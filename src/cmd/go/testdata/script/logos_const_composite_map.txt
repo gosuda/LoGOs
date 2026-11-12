@@ -22,6 +22,8 @@ logos eject -o out
 exists out/app/main.go
 exists out/lib/lib.go
 cd out
+exec $GOROOT/bin/gofmt -l .
+! stdout .
 go run ./app
 cmp stdout $WORK/want.txt
 exists $UPROOT1272/bin/go
