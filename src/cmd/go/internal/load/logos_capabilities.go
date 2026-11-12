@@ -6,11 +6,16 @@ package load
 
 import (
 	"fmt"
+	"io"
 	"os"
+	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 
 	"cmd/go/internal/cfg"
+	"cmd/go/internal/fsys"
+	"cmd/go/internal/imports"
 	"cmd/go/internal/logos/capabilities"
 	"cmd/go/internal/modload"
 )
@@ -74,13 +79,75 @@ func checkLogosCapabilities(ld *modload.Loader, all []*Package) {
 }
 
 func capNode(p *Package) capabilities.Node {
-	return capabilities.Node{
+	n := capabilities.Node{
 		ImportPath: p.ImportPath,
 		Imports:    p.Imports,
 		Goroot:     p.Goroot || p.Standard,
 		Main:       capIsMain(p),
-		Asm:        len(p.SFiles) > 0,
 	}
+	if n.Goroot || n.Main {
+		return n
+	}
+	n.Imports = slices.Concat(p.Imports, capExcludedImports(p))
+	n.Asm = capHoldsAssembly(p)
+	return n
+}
+
+func capExcludedImports(p *Package) []string {
+	var out []string
+	for _, name := range p.IgnoredGoFiles {
+		if !capIsTestFile(name) {
+			out = append(out, capFileImports(filepath.Join(p.Dir, name))...)
+		}
+	}
+	return out
+}
+
+func capIsTestFile(name string) bool {
+	return strings.HasSuffix(strings.TrimSuffix(name, filepath.Ext(name)), "_test")
+}
+
+func capFileImports(file string) []string {
+	f, err := fsys.Open(file)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+	var quoted []string
+	head, err := imports.ReadImports(f, false, &quoted)
+	if err != nil || !imports.ShouldBuild(head, imports.AnyTags()) {
+		return nil
+	}
+	var out []string
+	for _, q := range quoted {
+		if path, err := strconv.Unquote(q); err == nil {
+			out = append(out, path)
+		}
+	}
+	return out
+}
+
+func capHoldsAssembly(p *Package) bool {
+	if len(p.SFiles) > 0 {
+		return true
+	}
+	return slices.ContainsFunc(p.IgnoredOtherFiles, func(name string) bool {
+		return capIsAssembly(name) && capBuildsAnywhere(filepath.Join(p.Dir, name))
+	})
+}
+
+func capIsAssembly(name string) bool {
+	return slices.Contains([]string{".s", ".S", ".sx"}, filepath.Ext(name))
+}
+
+func capBuildsAnywhere(file string) bool {
+	f, err := fsys.Open(file)
+	if err != nil {
+		return true
+	}
+	defer f.Close()
+	head, err := io.ReadAll(io.LimitReader(f, 1<<16))
+	return err != nil || imports.ShouldBuild(head, imports.AnyTags())
 }
 
 func capIsMain(p *Package) bool {
