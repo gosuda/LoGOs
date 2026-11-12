@@ -904,3 +904,119 @@ func TestGroupChanEndsWithChildErrorWhileChannelIsQuiet(t *testing.T) {
 		}
 	})
 }
+
+func TestGroupSeqRunsFOnAtMostLimitWorkers(t *testing.T) {
+	for _, c := range []struct{ limit, total int }{{4, 2000}, {16384, 5}} {
+		eachStage(t, orderedStages, func(t *testing.T, run stageFunc) {
+			var mu sync.Mutex
+			var peak atomic.Int32
+			workers := map[uint64]bool{}
+			base := runtime.NumGoroutine()
+			seq := run(t.Context(), c.limit, c.total, func(_ context.Context, i int) (int, bool, error) {
+				raise(&peak, int32(runtime.NumGoroutine()))
+				mu.Lock()
+				defer mu.Unlock()
+				workers[goroutineID()] = true
+				return i, true, nil
+			})
+			d := finished(t, startStage(seq, nil))
+			if d.err != nil || len(d.rs) != c.total {
+				t.Fatalf("len(rs) = %d, err = %v, want %d, nil", len(d.rs), d.err, c.total)
+			}
+			most := min(c.limit, c.total)
+			if len(workers) < 1 || len(workers) > most {
+				t.Fatalf("f ran on %d goroutines over %d elements with limit %d, want 1 to %d", len(workers), c.total, c.limit, most)
+			}
+			if grew := int(peak.Load()) - base; grew > most+2 {
+				t.Fatalf("%d goroutines alive beyond the %d at the start with limit %d and %d elements, want at most %d", grew, base, c.limit, c.total, most+2)
+			}
+		})
+	}
+}
+
+func TestGroupSeqLeavesNoWorkerAliveAfterAnyExit(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		const limit, total = 4, 200
+		errBoom := errors.New("boom")
+		okWork := func(i int) (int, error) { return i, nil }
+		stopAfter := func(n int) func(int) bool { return func(r int) bool { return r < n } }
+		exits := map[string]struct {
+			src  iter.Seq[int]
+			work func(i int) (int, error)
+			each func(int) bool
+		}{
+			"exhaustion": {intSeq(total), okWork, nil},
+			"break":      {intSeq(total), okWork, stopAfter(20)},
+			"error": {intSeq(total), func(i int) (int, error) {
+				if i == 50 {
+					return 0, errBoom
+				}
+				return i, nil
+			}, nil},
+			"child panic": {intSeq(total), func(i int) (int, error) {
+				if i == 50 {
+					panic("kapow")
+				}
+				return i, nil
+			}, nil},
+			"body panic": {intSeq(total), okWork, func(r int) bool {
+				if r == 20 {
+					panic("body")
+				}
+				return true
+			}},
+			"source panic": {func(yield func(int) bool) {
+				for i := range 60 {
+					if !yield(i) {
+						return
+					}
+				}
+				panic("src")
+			}, okWork, nil},
+		}
+		base := runtime.NumGoroutine()
+		for name, sc := range exits {
+			var entered atomic.Int32
+			allIn := make(chan struct{})
+			seq := GroupSeq(t.Context(), limit, sc.src, func(_ context.Context, i int) (int, bool, error) {
+				if i < limit {
+					if entered.Add(1) == limit {
+						close(allIn)
+					}
+					<-allIn
+				}
+				v, err := sc.work(i)
+				return v, true, err
+			})
+			finished(t, startStage(seq, sc.each))
+			synctest.Wait()
+			if got := goroutinesAtMost(base); got > base {
+				t.Fatalf("after %s: %d goroutines, want at most %d", name, got, base)
+			}
+		}
+	})
+}
+
+func TestGroupSeqAllocationsDoNotGrowWithElements(t *testing.T) {
+	const small, large = 2000, 20000
+	keeps := map[string]func(int) bool{
+		"kept":    func(int) bool { return true },
+		"dropped": func(i int) bool { return i%2 == 0 },
+	}
+	for name, run := range orderedStages {
+		for shape, keep := range keeps {
+			t.Run(name+"/"+shape, func(t *testing.T) {
+				allocs := func(n int) float64 {
+					return testing.AllocsPerRun(5, func() {
+						for range run(t.Context(), 8, n, func(_ context.Context, i int) (int, bool, error) { return i + 1000, keep(i), nil }) {
+						}
+					})
+				}
+				low, high := allocs(small), allocs(large)
+				if per := (high - low) / (large - small); per > 0.05 {
+					t.Fatalf("%.2f allocations per additional element (%.0f at %d, %.0f at %d), want at most 0.05", per, low, small, high, large)
+				}
+			})
+		}
+	}
+}
