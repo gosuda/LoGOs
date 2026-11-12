@@ -679,9 +679,8 @@ func (check *Checker) logosChainBlockTryForms(block *syntax.BlockStmt) {
 				}
 			}
 		case *syntax.ErrdeferStmt:
-			if t, ok := syntax.Unparen(n.Call).(*syntax.TryExpr); ok {
-				check.logosTryMisplaced(t)
-			}
+			check.error(n, InvalidDefer, "[correctness::errdefer_needs_error_result] errdefer requires enclosing function to return error")
+			check.logosErrdeferUse(n.Call)
 		}
 		return true
 	})

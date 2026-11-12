@@ -5,3 +5,4 @@ ok plain-nested-err
 ok plain-filter
 ok staged
 ok staged-err
+ok around-errdefer

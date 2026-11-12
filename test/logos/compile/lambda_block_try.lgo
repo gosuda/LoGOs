@@ -27,3 +27,11 @@ func deferTry(xs []int) ([]int, error) {
 	})
 	return ys, nil
 }
+
+func errdeferInside(xs []int) ([]int, error) {
+	ys := xs.map(x => {
+		errdefer func() {}() // ERROR "errdefer_needs_error_result"
+		return x
+	})
+	return ys, nil
+}

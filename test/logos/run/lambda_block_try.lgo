@@ -20,6 +20,7 @@ func check(name string, cond bool, got, want any) {
 	fmt.Println("ok", name)
 }
 
+var trace []string
 var errOdd = errors.New("odd")
 
 func double(x int) (int, error) {
@@ -71,6 +72,18 @@ func staged(ctx context.Context, xs []int) ([]int, error) {
 	})
 }
 
+func aroundErrdefer(xs []int) (out []int, err error) {
+	errdefer func() { trace = append(trace, "rollback") }()
+	out = xs.map(x => {
+		if x == 1 {
+			return -1
+		}
+		return x
+	})
+	_, err = double(1)
+	return
+}
+
 func main() {
 	ys, err := plainTop([]int{2, 4})
 	eq("plain-top", fmt.Sprint(ys, err), "[4 8] <nil>")
@@ -86,6 +99,8 @@ func main() {
 	eq("staged", fmt.Sprint(ys, err), "[4 8] <nil>")
 	_, err = staged(context.Background(), []int{1, 2})
 	check("staged-err", err == errOdd, err, errOdd)
+	ys, err = aroundErrdefer([]int{1, 2})
+	eq("around-errdefer", fmt.Sprint(ys, err, trace), "[-1 2] odd [rollback]")
 	if failed {
 		os.Exit(1)
 	}
