@@ -192,7 +192,7 @@ func rangeHitsNamed(info *types2.Info, r *syntax.RangeClause, named map[*types2.
 	if r.Def || r.Lhs == nil {
 		return false
 	}
-	return nilErrHitsNamed(info, nilErrExprList(r.Lhs), named)
+	return nilErrHitsNamed(info, syntax.UnpackListExpr(r.Lhs), named)
 }
 
 func nilErrGeneric(sig *types2.Signature) bool {
@@ -239,8 +239,8 @@ func (s *nilErrScope) assignHolds(st *syntax.AssignStmt, named map[*types2.Var]b
 	if len(named) == 0 {
 		return true
 	}
-	lhs := nilErrExprList(st.Lhs)
-	rhs := nilErrExprList(st.Rhs)
+	lhs := syntax.UnpackListExpr(st.Lhs)
+	rhs := syntax.UnpackListExpr(st.Rhs)
 	if st.Rhs == nil {
 		return !nilErrHitsNamed(s.info, lhs, named)
 	}
@@ -294,7 +294,7 @@ func (s *nilErrScope) returnHolds(ret *syntax.ReturnStmt, d *nilErrDecl) bool {
 	if ret.Results == nil {
 		return true
 	}
-	elems := nilErrExprList(ret.Results)
+	elems := syntax.UnpackListExpr(ret.Results)
 	if len(elems) == 1 && d.count > 1 {
 		call, ok := syntax.Unparen(elems[0]).(*syntax.CallExpr)
 		return ok && s.provenCall(call)
@@ -363,16 +363,6 @@ func AlwaysNilCallee(fn *types2.Func) bool {
 		}
 	}
 	return false
-}
-
-func nilErrExprList(e syntax.Expr) []syntax.Expr {
-	if e == nil {
-		return nil
-	}
-	if l, ok := syntax.Unparen(e).(*syntax.ListExpr); ok {
-		return l.ElemList
-	}
-	return []syntax.Expr{e}
 }
 
 func isNilLiteral(e syntax.Expr) bool {

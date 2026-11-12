@@ -100,7 +100,7 @@ func Load(modRoot string, flags Flags) (*Settings, error) {
 		}
 		fallback = strings.TrimPrefix(f.Build.OptLevel, "O")
 	}
-	s.OptLevel = pickOptLevel(level, fallback)
+	s.OptLevel = cmp.Or(level, fallback)
 	s.Gcflags = flagsFor(s.OptLevel)
 	if !flags.Logos {
 		s.Experiment = flags.Env.GOEXPERIMENT
@@ -281,10 +281,6 @@ func anyRootArena(roots []string) bool {
 		}
 	}
 	return false
-}
-
-func pickOptLevel(level, fallback string) string {
-	return cmp.Or(level, fallback)
 }
 
 var optLevelFlags = map[string][]string{
