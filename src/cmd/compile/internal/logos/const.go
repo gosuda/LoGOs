@@ -255,7 +255,7 @@ func (fl *fileLower) boundConstSlice(e syntax.Expr) {
 	lenCall.SetPos(s.Pos())
 	s.Index[2] = lenCall
 	s.Full = true
-	end := fl.off(syntax.EndPos(s.Index[1]))
+	end := fl.exprEndOf(s.Index[1])
 	fl.add(end, end, ":len("+base.Value+")")
 	delete(fl.pkg.info.LogosConstSlices, e)
 }
