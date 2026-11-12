@@ -25,10 +25,14 @@ import (
 //
 // For the second case the function is the declaration or top-level literal
 // together with every literal nested in it. A literal inside a loop counts
-// as inside it, and a send in a select case counts. The two conditions are
-// properties of the channel: when the sends exceed k, or any send sits in a
-// loop, every operation on that channel is reported, including the
-// receives. A receive is bounded by the same conditions as the sends. The
+// as inside it, and a send in a select case counts. A literal invoked where
+// it is written, as the function of a call, go, or defer statement, runs
+// once and counts like the code around it; a send in any other literal or
+// lambda runs as often as it is called and makes the channel unbounded.
+// The two conditions are properties of the channel: when the sends exceed
+// k, or any send sits in a loop, every operation on that channel is
+// reported, including the receives. A receive is bounded by the same
+// conditions as the sends. The
 // statement bodies of a done select are ordinary code. A range over a channel
 // is one receive of this rule, because it waits on the channel until close.
 // Close and len are not operations of this rule. A select with a
@@ -210,6 +214,10 @@ func (u *chanUnit) visit(n syntax.Node) bool {
 			u.segmentCall(n)
 			return false
 		}
+		if body := callbackBody(n.Fun); body != nil {
+			u.invoked(n, body)
+			return false
+		}
 	case *syntax.FuncLit:
 		u.nested(n.Body)
 		return false
@@ -265,11 +273,26 @@ func (u *chanUnit) rangeOp(st syntax.SimpleStmt) {
 // covered by the block around it; a send there runs as often as the literal
 // is called, so it cannot count toward the capacity exemption.
 func (u *chanUnit) nested(body syntax.Node) {
+	u.lits++
+	u.once(body)
+	u.lits--
+}
+
+// invoked walks a call whose function is a literal or lambda written in
+// place: the arguments, and the body once.
+func (u *chanUnit) invoked(call *syntax.CallExpr, body syntax.Node) {
+	u.once(body)
+	for _, arg := range call.ArgList {
+		u.walk(arg)
+	}
+}
+
+// once walks a function literal or lambda body whose operations are not
+// covered by the block around it.
+func (u *chanUnit) once(body syntax.Node) {
 	outer := u.free
 	u.free = false
-	u.lits++
 	u.walk(body)
-	u.lits--
 	u.free = outer
 }
 

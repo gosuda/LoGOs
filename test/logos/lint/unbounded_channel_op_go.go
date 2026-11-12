@@ -197,10 +197,18 @@ func closureOver() {
 }
 
 func closureWithin() {
-	ch := make(chan int, 2)
+	ch := make(chan int, 1)
 	ch <- 1 // ERROR "unbounded_channel_op"
 	func() {
 		ch <- 2 // ERROR "unbounded_channel_op"
+	}()
+}
+
+func closureWithinFits() {
+	ch := make(chan int, 2)
+	ch <- 1
+	func() {
+		ch <- 2
 	}()
 }
 
@@ -289,4 +297,40 @@ func timerSelect(in chan int) int {
 
 func tickRecv() {
 	<-time.Tick(time.Second) // ERROR "unbounded_channel_op"
+}
+
+func resultValue() int { return 1 }
+
+func resultFromGo() int {
+	ch := make(chan int, 1)
+	go func() { ch <- resultValue() }()
+	return <-ch
+}
+
+func resultFromCall() int {
+	ch := make(chan int, 1)
+	func() { ch <- resultValue() }()
+	return <-ch
+}
+
+func resultTwoGoSends() int {
+	ch := make(chan int, 1)
+	go func() { ch <- 1 }() // ERROR "\[correctness::unbounded_channel_op\]"
+	go func() { ch <- 2 }() // ERROR "\[correctness::unbounded_channel_op\]"
+	return <-ch // ERROR "\[correctness::unbounded_channel_op\]"
+}
+
+func resultGoInLoop(n int) int {
+	ch := make(chan int, 1)
+	for i := 0; i < n; i++ {
+		go func() { ch <- i }() // ERROR "\[correctness::unbounded_channel_op\]"
+	}
+	return <-ch // ERROR "\[correctness::unbounded_channel_op\]"
+}
+
+func resultStoredLiteral() int {
+	ch := make(chan int, 1)
+	f := func() { ch <- 1 } // ERROR "\[correctness::unbounded_channel_op\]"
+	f()
+	return <-ch // ERROR "\[correctness::unbounded_channel_op\]"
 }
