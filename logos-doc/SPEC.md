@@ -233,6 +233,7 @@ Other uses MUST fail with `correctness::errdefer_needs_error_result` [T-104.2].
 `errdefer` MUST run when the frame panics, exits through Goexit, or holds a non-nil error result at pop time [T-104.2].
 A typed-nil error MUST count as non-nil for `errdefer` [T-104.2].
 The function, receiver, and arguments of a deferred call MUST be evaluated at the statement [T-104.2].
+A `?.` call with an absent receiver MUST skip the call and MUST NOT evaluate its arguments, as an ordinary call and in a `defer` or `go` statement [T-104.3][T-104.2].
 A panic while evaluating return values MUST count as failure for `errdefer` [T-104.2].
 Deferred calls MUST run in LIFO order across `defer`, `defer?`, and `errdefer` [T-104.2].
 ```go
@@ -547,6 +548,8 @@ A later assignment MUST end narrowing. [T-202]
 Taking the address of `x` MUST disable narrowing for `x`. [T-202]
 
 Assigning `x` in a closure MUST disable narrowing for `x`. [T-202]
+
+A function literal MUST NOT read `x` as narrowed when `x` is assigned anywhere besides its declaration. [T-202]
 
 A nil test on a struct field MUST NOT narrow the field. [T-202]
 

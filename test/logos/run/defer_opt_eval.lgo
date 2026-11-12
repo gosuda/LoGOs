@@ -243,6 +243,25 @@ func goNoneHand(ctx context.Context) (int, error) {
 	return dArgCalls + len(ch), nil
 }
 
+func plainNoneLogos() (int, string) {
+	dArgCalls = 0
+	var o *dUser?
+	o?.dGreet(dMkArg("a "))
+	got := o?.dGreet(dMkArg("b ")) ?? "none"
+	return dArgCalls, got
+}
+
+func plainNoneHand() (int, string) {
+	dArgCalls = 0
+	var o *dUser?
+	got := "none"
+	if o != nil {
+		o.dGreet(dMkArg("a "))
+		got = o.dGreet(dMkArg("b "))
+	}
+	return dArgCalls, got
+}
+
 type dNamer interface {
 	dNameOf() string
 }
@@ -303,6 +322,9 @@ func main() {
 	gnl, _ := goNoneLogos(context.Background())
 	gnh, _ := goNoneHand(context.Background())
 	check("go-none-args", gnl == 0 && gnh == 0, fmt.Sprint("got ", gnl, " want ", gnh))
+	pn, pv := plainNoneLogos()
+	qn, qv := plainNoneHand()
+	check("plain-none-args", pn == 0 && qn == 0 && pv == "none" && qv == "none", fmt.Sprint("got ", pn, pv, " want ", qn, qv))
 	check("method-value", valLogos() == "a:x" && valHand() == "a:x", fmt.Sprint("got ", valLogos(), " want ", valHand()))
 	if failed {
 		os.Exit(1)
