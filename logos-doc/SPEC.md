@@ -510,7 +510,6 @@ Dynamic map iteration in const funcs MUST fail compilation. [T-201][T-Sec7]
 Const map range MUST visit keys in sorted order. [T-201][T-Sec7]
 Nil leaves MUST copy as nil. [T-201]
 Pointer-free constant data MUST live in read-only memory before any init runs. [T-201]
-A package-level `var` MAY carry a `//logos:rodata` line directly above it to place its data in read-only memory; the compiler MUST then fail with `logos: const composite <name> needs dynamic initialization` when the initializer needs dynamic initialization. [T-201]
 
 ### 2.2 RFC-202: Non-nil pointers, option types, and nil flow
 
