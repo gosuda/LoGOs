@@ -9,6 +9,7 @@ stdout '^presence: true false 0 1$'
 stdout '^chain: anon hi ann ann ann$'
 stdout '^chainnil: bob anon anon anon$'
 stdout '^log ann$'
+stdout '^once: hi ann anon ann 4$'
 cp stdout $WORK/eject-stdout.txt
 
 logos eject -o out
@@ -125,6 +126,25 @@ func VoidOf(u *User?) {
 	u?.Log()
 }
 
+var recvCalls int
+
+func Recv(present bool) *User? {
+	recvCalls++
+	if present {
+		return &User{Name: "ann"}
+	}
+	return nil
+}
+
+func OnceOf() string {
+	recvCalls = 0
+	call := Recv(true)?.Greet("hi ") ?? "anon"
+	absent := Recv(false)?.Greet("hi ") ?? "anon"
+	Recv(true)?.Log()
+	field := Recv(true)?.Name ?? "anon"
+	return fmt.Sprintf("%s %s %s %d", call, absent, field, recvCalls)
+}
+
 func main() {
 	fmt.Println("eject ok: " + G(&User{Name: "gadget"}))
 	fmt.Printf("options: %t %t %d %t\n", F() != nil, len(H() ?? []int{9}) == 1, I() ?? 0, None() == nil)
@@ -132,6 +152,7 @@ func main() {
 	fmt.Printf("chain: %s %s %s %s\n", FieldOf(nil), CallOf(&User{Name: "ann"}), ChainOf(&Team{Lead: &User{Name: "ann"}}), IndexOf(map[string]*User{"a": {Name: "ann"}}))
 	fmt.Printf("chainnil: %s %s %s %s\n", FieldOf(&User{Name: "bob"}), CallOf(nil), ChainOf(nil), IndexOf(map[string]*User{}))
 	VoidOf(&User{Name: "ann"})
+	fmt.Printf("once: %s\n", OnceOf())
 }
 
 type A struct{}
