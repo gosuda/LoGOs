@@ -530,6 +530,9 @@ func (fc *funcLower) wrapInitStmt(host syntax.Stmt, init syntax.SimpleStmt, kw s
 	anchorScopes(native, host.Pos())
 	kwOff := fl.off(host.Pos())
 	semi := skipSemi(fl.src, spanEnd)
+	if kw == "for" {
+		semi--
+	}
 	clearInit(host)
 	end := blockEndOff(fl, host)
 	fl.addT(kwOff, semi, cat(gen("{ "), text, gen(kw+" ")))
