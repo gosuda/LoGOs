@@ -413,6 +413,7 @@ func (fl *fileLower) simdExprEnd(e syntax.Expr) int {
 		if n.Y != nil {
 			return fl.simdExprEnd(n.Y)
 		}
+		return simdFwdEnd(fl.src, fl.off(syntax.StartPos(n)), fl.simdExprEnd(n.X))
 	case *syntax.CallExpr:
 		return fl.chainCallEnd(e)
 	case *syntax.CompositeLit:
