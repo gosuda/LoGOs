@@ -261,6 +261,7 @@ func (fl *fileLower) asOption(t types2.Type) *types2.Option {
 	return nil
 }
 
+
 func (fl *fileLower) lowerOptionType(e *syntax.OptionType) syntax.Expr {
 	if prev, ok := fl.optMemo[e]; ok {
 		return cloneType(prev, e.Pos())
@@ -1579,15 +1580,11 @@ func (fl *fileLower) lowerOptCall(e *syntax.CallExpr, osel *syntax.OptSelectExpr
 }
 
 type optDeferGoWork struct {
-	e     *syntax.CallExpr
-	osel  *syntax.OptSelectExpr
-	ox    *types2.Option
-	sig   *types2.Signature
-	nx    syntax.Expr
-	vals  []syntax.Expr
-	names []string
-	lv    string
-	id    int
+	osel *syntax.OptSelectExpr
+	ox   *types2.Option
+	nx   syntax.Expr
+	lv   string
+	rpos syntax.Pos
 }
 
 func (fl *fileLower) markOptDeferGo(s *syntax.CallStmt) bool {
@@ -1603,62 +1600,53 @@ func (fl *fileLower) markOptDeferGo(s *syntax.CallStmt) bool {
 	if ox == nil {
 		return false
 	}
-	sig := fl.optDeferSig(osel, ox)
+	sig := fl.optCallSig(ox, osel.Sel.Value)
 	if sig == nil {
 		return false
 	}
-	id := fl.nextWrapID()
-	lv := fmt.Sprintf("_logos_d%d", id)
+	lv := fmt.Sprintf("_logos_d%d", fl.nextWrapID())
+	rpos := fl.optLeftmost(osel.X)
 	osel.X = fl.lowerOptReceiver(osel.X)
-	vals, names := fl.optDeferGoVals(e, sig, lv)
-	if vals == nil {
-		return false
+	for i, a := range e.ArgList {
+		target := fl.paramTarget(sig.Params(), sig.Variadic(), e.HasDots, len(e.ArgList), i)
+		e.ArgList[i] = fl.wrapKnown(fl.lowerOptExpr(a), fl.optType(a), target)
 	}
 	if fl.optDeferGoPend == nil {
 		fl.optDeferGoPend = make(map[*syntax.CallExpr]optDeferGoWork)
 	}
-	fl.optDeferGoPend[e] = optDeferGoWork{e: e, osel: osel, ox: ox, sig: sig, nx: osel.X, vals: vals, names: names, lv: lv, id: id}
+	fl.optDeferGoPend[e] = optDeferGoWork{osel: osel, ox: ox, nx: osel.X, lv: lv, rpos: rpos}
 	return true
 }
 
-func (fl *fileLower) optDeferSig(osel *syntax.OptSelectExpr, ox *types2.Option) *types2.Signature {
-	obj, _, _ := types2.LookupFieldOrMethod(ox.Elem, true, fl.pkg.tpkg, osel.Sel.Value)
-	fn, ok := obj.(*types2.Func)
-	if !ok {
+func (fl *fileLower) optCallSig(ox *types2.Option, name string) *types2.Signature {
+	obj, _, _ := types2.LookupFieldOrMethod(ox.Elem, true, fl.pkg.tpkg, name)
+	if obj == nil {
 		return nil
 	}
-	sig, ok := types2.Unalias(fn.Type()).(*types2.Signature)
-	if !ok {
-		return nil
-	}
+	sig, _ := obj.Type().Underlying().(*types2.Signature)
 	return sig
 }
 
-func (fl *fileLower) optDeferGoVals(e *syntax.CallExpr, sig *types2.Signature, lv string) ([]syntax.Expr, []string) {
-	params := sig.Params()
-	argc := len(e.ArgList)
-	vals := make([]syntax.Expr, argc)
-	names := make([]string, argc)
-	for i, a := range e.ArgList {
-		at := fl.optType(a)
-		if at == nil {
-			return nil, nil
-		}
-		tgt := fl.paramTarget(params, sig.Variadic(), e.HasDots, argc, i)
-		w := fl.lowerOptExpr(a)
-		if tgt != nil {
-			if wrap, _ := fl.needsWrap(w, at, tgt); wrap {
-				w = fl.wrapKnown(w, at, tgt)
-			}
-		}
-		e.ArgList[i] = w
-		vals[i] = w
-		names[i] = fmt.Sprintf("%sa%d", lv, i)
-	}
-	return vals, names
+func (fl *fileLower) lowerOptDeferGo(s *syntax.CallStmt, lowerCall func(syntax.Stmt) []syntax.Stmt) ([]syntax.Stmt, bool) {
+	return fl.lowerOptDeferGoWith(s, lowerCall, fl.moveOptReceiver)
 }
 
-func (fl *fileLower) optDeferGoFinish(s *syntax.CallStmt) ([]syntax.Stmt, bool) {
+func (fl *fileLower) lowerOptDeferGoCopied(s *syntax.CallStmt) ([]syntax.Stmt, bool) {
+	keep := func(c syntax.Stmt) []syntax.Stmt { return []syntax.Stmt{c} }
+	return fl.lowerOptDeferGoWith(s, keep, fl.copyOptReceiver)
+}
+
+func (fl *fileLower) moveOptReceiver(r span, stub string) otext {
+	return gen(fl.moveRegion(r, stub))
+}
+
+func (fl *fileLower) copyOptReceiver(r span, stub string) otext {
+	text := fl.textOf(r)
+	fl.add(r.start, r.end, stub)
+	return text
+}
+
+func (fl *fileLower) lowerOptDeferGoWith(s *syntax.CallStmt, lowerCall func(syntax.Stmt) []syntax.Stmt, captureRecv func(span, string) otext) ([]syntax.Stmt, bool) {
 	e, ok := syntax.Unparen(s.Call).(*syntax.CallExpr)
 	if !ok {
 		return nil, false
@@ -1669,105 +1657,71 @@ func (fl *fileLower) optDeferGoFinish(s *syntax.CallStmt) ([]syntax.Stmt, bool) 
 	}
 	delete(fl.optDeferGoPend, e)
 	pos := w.osel.Pos()
-	argc := len(w.vals)
-	run := w.lv + "r"
-	hoistRecv := defineOf(pos, []syntax.Expr{nameOf(pos, w.lv)}, []syntax.Expr{w.nx})
-	racc, accSuffix := fl.selectAccessBare(nameOf(pos, w.lv), w.osel)
-	var cond syntax.Expr = notNil(pos, nameOf(pos, w.lv))
-	condT := w.lv + " != nil"
-	if !types2.LogosOptionIsBare(w.ox.Elem) {
-		racc, accSuffix = fl.selectAccessPresent(nameOf(pos, w.lv), w.osel)
-		cond = selOf(pos, nameOf(pos, w.lv), "Present")
-		condT = w.lv + ".Present"
+	rpos := w.rpos
+	recvName := nameOf(rpos, w.lv)
+	var cond, callee syntax.Expr
+	var condT, accSuffix string
+	if types2.LogosOptionIsBare(w.ox.Elem) {
+		cond, condT = notNil(pos, nameOf(pos, w.lv)), w.lv+" != nil"
+		callee, accSuffix = fl.selectAccessBare(recvName, w.osel)
+	} else {
+		cond, condT = selOf(pos, nameOf(pos, w.lv), "Present"), w.lv+".Present"
+		callee, accSuffix = fl.selectAccessPresent(recvName, w.osel)
 	}
-	bodyArgs := make([]syntax.Expr, argc)
-	for i := range argc {
-		bodyArgs[i] = nameOf(pos, w.names[i])
-	}
-	bodyCall := callOf(pos, racc, bodyArgs)
-	bodyCall.HasDots = e.HasDots
-	var inner syntax.Stmt = exprStmtOf(pos, bodyCall)
-	if n := w.sig.Results().Len(); n > 1 {
-		blanks := make([]syntax.Expr, n)
-		for i := range blanks {
-			blanks[i] = nameOf(pos, "_")
-		}
-		inner = assignOf(pos, blanks, []syntax.Expr{bodyCall})
-	}
-	rpos := fl.optLeftmost(w.osel.X)
-	noop := at(&syntax.FuncLit{Type: at(&syntax.FuncType{}, pos), Body: blockOf(pos, nil)}, rpos)
-	deferred := at(&syntax.FuncLit{Type: at(&syntax.FuncType{}, pos), Body: blockOf(pos, []syntax.Stmt{inner})}, rpos)
-	then := optDeferGoThen(w, pos, run, deferred)
-	hoist := []syntax.Stmt{
-		hoistRecv,
-		defineOf(pos, []syntax.Expr{nameOf(pos, run)}, []syntax.Expr{noop}),
-		ifOf(s.Pos(), nil, cond, then),
-	}
-	s.Call = callOf(rpos, nameOf(rpos, run), nil)
-	fl.optDeferGoEmit(s, w, pos, e, condT, accSuffix)
-	for _, h := range hoist {
-		scanForLiterals(fl, h)
-	}
-	return append(hoist, s), true
-}
-
-func optDeferGoThen(w optDeferGoWork, pos syntax.Pos, run string, deferred syntax.Expr) []syntax.Stmt {
-	var then []syntax.Stmt
-	if len(w.vals) > 0 {
-		argNames := make([]syntax.Expr, len(w.vals))
-		for i := range argNames {
-			argNames[i] = nameOf(pos, w.names[i])
-		}
-		then = append(then, defineOf(pos, argNames, w.vals))
-	}
-	return append(then, assignOf(pos, []syntax.Expr{nameOf(pos, run)}, []syntax.Expr{deferred}))
-}
-
-func (fl *fileLower) optDeferGoEmit(s *syntax.CallStmt, w optDeferGoWork, pos syntax.Pos, e *syntax.CallExpr, condT, accSuffix string) {
-	osel := w.osel
-	argc := len(w.vals)
-	xStart := fl.off(fl.optLeftmost(osel.X))
-	selEnd := fl.off(osel.Sel.Pos()) + len(osel.Sel.Value)
+	xStart := fl.off(rpos)
+	xEnd := lastTokenEnd(fl.src, xStart, fl.off(pos))
+	selEnd := fl.off(w.osel.Sel.Pos()) + len(w.osel.Sel.Value)
 	_, rparen := fl.findCallParens(selEnd)
-	stmtStart := fl.off(s.Pos())
-	recvSpan := span{start: xStart, end: lastTokenEnd(fl.src, xStart, fl.off(w.osel.Pos()))}
+	recv := span{start: xStart, end: xEnd}
 	if vs, ok := fl.wrapSpan[w.nx]; ok {
-		recvSpan = vs
+		recv = vs
 	}
-	recvT := fl.textOf(recvSpan)
-	run := w.lv + "r"
-	hoist := cat(gen(w.lv+" := "), recvT, gen("; "+run+" := func() {}; if "+condT+" { "))
-	if argc > 0 {
-		hoist = cat(hoist, gen(strings.Join(w.names, ", ")+" := "))
-		for i := range argc {
-			if i > 0 {
-				hoist = cat(hoist, gen(", "))
-			}
-			hoist = cat(hoist, fl.textOf(fl.wrapSpanOf(w.vals[i])))
-		}
-		hoist = cat(hoist, gen("; "))
+	var head, tail otext
+	if id, ok := fl.wrapOwner[w.nx]; ok {
+		head, tail = fl.drainOwned(recv, id)
 	}
-	discardHead := ""
-	if n := w.sig.Results().Len(); n > 1 {
-		blanks := ""
-		for i := range n {
-			if i > 0 {
-				blanks += ", "
-			}
-			blanks += "_"
-		}
-		discardHead = blanks + " = "
-	}
-	dotsT := ""
-	if e.HasDots {
-		dotsT = "..."
-	}
-	hoist = cat(hoist, gen(run+" = func() { "+discardHead+w.lv+accSuffix+"("+strings.Join(w.names, ", ")+dotsT+") } }; "))
-	fl.addT(stmtStart, stmtStart, hoist)
-	fl.addT(xStart, rparen+1, gen(run+"()"))
-	fl.wrapSpan[e] = span{start: xStart, end: rparen + 1}
-	fl.wrapOwner[e] = w.id
+	captured := captureRecv(recv, w.lv)
+	fl.add(xEnd, selEnd, accSuffix)
+	stmtStart := fl.off(s.Pos())
+	fl.addT(stmtStart, stmtStart, cat(gen(w.lv+" := "), head, captured, tail, gen("; if "+condT+" { ")))
+	define := defineOf(pos, []syntax.Expr{nameOf(pos, w.lv)}, []syntax.Expr{w.nx})
+	e.Fun = callee
+	guarded := lowerCall(s)
+	fl.add(rparen+1, rparen+1, " }")
+	scanForLiterals(fl, define)
+	return []syntax.Stmt{define, ifOf(s.Pos(), nil, cond, guarded)}, true
 }
+
+func (fl *fileLower) lowerOptDeferGoIn(block *syntax.BlockStmt) {
+	lower := func(list []syntax.Stmt) []syntax.Stmt {
+		var out []syntax.Stmt
+		for _, st := range list {
+			if cs, ok := st.(*syntax.CallStmt); ok {
+				if lowered, ok := fl.lowerOptDeferGoCopied(cs); ok {
+					out = append(out, lowered...)
+					continue
+				}
+			}
+			out = append(out, st)
+		}
+		return out
+	}
+	syntax.Inspect(block, func(n syntax.Node) bool {
+		switch n := n.(type) {
+		case *syntax.FuncLit, *syntax.LambdaExpr:
+			return false
+		case *syntax.BlockStmt:
+			n.List = lower(n.List)
+		case *syntax.CaseClause:
+			n.Body = lower(n.Body)
+		case *syntax.CommClause:
+			n.Body = lower(n.Body)
+		}
+		return true
+	})
+}
+
+
 func (fl *fileLower) resultOption(r types2.Type) types2.Type {
 	if fl.asOption(r) != nil {
 		return r

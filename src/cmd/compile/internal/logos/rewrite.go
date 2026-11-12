@@ -159,10 +159,7 @@ func (fc *funcLower) lowerStmt(s syntax.Stmt) []syntax.Stmt {
 		return []syntax.Stmt{s}
 	}
 	if cs, ok := s.(*syntax.CallStmt); ok {
-		if out, ok := fc.fl.optDeferGoFinish(cs); ok {
-			if gout, ok := fc.lowerGroupHook(out[len(out)-1]); ok {
-				return append(out[:len(out)-1], gout...)
-			}
+		if out, ok := fc.fl.lowerOptDeferGo(cs, fc.lowerStmt); ok {
 			return out
 		}
 	}

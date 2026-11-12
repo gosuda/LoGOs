@@ -1019,6 +1019,7 @@ func (fl *fileLower) preLowerCaptureBody(lam *syntax.LambdaExpr) {
 	}
 	if block, ok := lam.Body.(*syntax.BlockStmt); ok {
 		block.List = fl.lowerPropBlock(block.List)
+		fl.lowerOptDeferGoIn(block)
 	} else if body, ok := lam.Body.(syntax.Expr); ok {
 		if t, ok := syntax.Unparen(body).(*syntax.TryExpr); ok {
 			if call, ok := syntax.Unparen(t.X).(*syntax.CallExpr); ok {
