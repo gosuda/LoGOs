@@ -982,7 +982,7 @@ Cases MUST evaluate top-down in first-match order. [T-205]
 
 Outside comptime generics a `const switch` MUST pick its case at run time from the type argument `T` alone, never from the dynamic type of a value. In an exact case, a rebound slice, map, or pointer MUST still refer to the storage of the caller's value. [T-205]
 
-Interface cases in that form MUST use assertion on the value. [T-205]
+Inside an interface case, a call of an interface method on a value of type `T` MUST run the method of that value, whether `T` is a concrete type or an interface type. [T-205]
 
 No match MUST return the input unchanged. [T-205]
 
@@ -1007,7 +1007,6 @@ const if comptime.IsStruct[T]() {
     }
 }
 ```
-An interface case MUST assert on the value. [T-205]
 An exact case MUST rebind the value to the case type. [T-205]
 Expansion MUST include unexported fields only for the current package. [T-205]
 Exact cases MUST match only the named type. [T-205]

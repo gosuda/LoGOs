@@ -17,7 +17,6 @@ stdout '^sw-keep: <nil>$'
 
 logos eject -o out
 exists out/main.go
-grep 'any\(v\)\.\(io\.WriterTo\)\.WriteTo' out/main.go
 cd out
 go build ./...
 go run .

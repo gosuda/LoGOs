@@ -95,6 +95,18 @@ func mark[T any](m map[string]T) {
 	}
 }
 
+func emit[T any](v T, s string) int {
+	const switch T {
+	case io.Writer:
+		n, err := v.Write([]byte(s))
+		if err != nil {
+			return -1
+		}
+		return n
+	}
+	return 0
+}
+
 func main() {
 	b, err := EncodeSlice([]byte("nums:"), []int64{1, 2, 3})
 	if err != nil {
@@ -135,6 +147,10 @@ func main() {
 	ms := map[string]string{}
 	mark(ms)
 	check("exact-map-other-type", len(ms) == 0, len(ms), 0)
+	buf := &bytes.Buffer{}
+	var rw io.ReadWriter = buf
+	check("iface-case-runs-value-method", emit(rw, "hey") == 3 && buf.String() == "hey", buf.String(), "hey")
+	check("iface-case-chosen-by-argument", emit[io.Reader](buf, "z") == 0 && buf.String() == "hey", buf.String(), "hey")
 	if failed {
 		os.Exit(1)
 	}
