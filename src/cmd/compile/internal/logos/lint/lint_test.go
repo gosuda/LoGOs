@@ -556,6 +556,50 @@ func TestDiscardedErrorNoFixInGo(t *testing.T) {
 	}
 }
 
+const fixSourceSrc = `package p
+
+import "errors"
+
+func run(f func(int) int) error { return errors.New("x") }
+
+func a() error {
+	run(func(x int) int { y := x + 1; return y * 2 })
+	return nil
+}
+
+func b() error {
+	run(func(x int) int {
+		return x
+	})
+	return nil
+}
+`
+
+// TestDiscardedErrorFixIsSourceText checks that the ? candidate replaces the
+// call with its exact source text and a ?, function bodies included, and that
+// the patched file compiles with one finding fewer.
+func TestDiscardedErrorFixIsSourceText(t *testing.T) {
+	testenv.MustHaveGoBuild(t)
+	rs := Run(check(t, KindLgo, "x.lgo", fixSourceSrc))
+	if len(rs) != 2 {
+		t.Fatalf("results = %q", summarize(rs))
+	}
+	for _, r := range rs {
+		if len(r.Fixes) != 1 {
+			t.Fatalf("fixes of %v = %+v", r.Pos, r.Fixes)
+		}
+		fx := r.Fixes[0]
+		if want := spanText(fixSourceSrc, r) + "?"; fx.Replacement != want {
+			t.Errorf("replacement %q, want %q", fx.Replacement, want)
+			continue
+		}
+		patched := applyFix(t, fixSourceSrc, r, fx)
+		if left := Run(check(t, KindLgo, "x.lgo", patched)); len(left) != len(rs)-1 {
+			t.Errorf("%d findings after the fix, want %d in\n%s", len(left), len(rs)-1, patched)
+		}
+	}
+}
+
 const recursionSrc = `package p
 
 import (

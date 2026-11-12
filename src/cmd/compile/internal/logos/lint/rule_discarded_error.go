@@ -100,9 +100,22 @@ func (c *discardCheck) exprStmt(s *syntax.ExprStmt) {
 	}
 	d := c.dropped(call)
 	if c.returnsError && c.pass.Kind == KindLgo {
-		d.Fixes = []Fix{{Description: "add ? to propagate the error", Replacement: syntax.String(call) + "?"}}
+		if text, ok := c.sourceText(d.Pos, d.End); ok {
+			d.Fixes = []Fix{{Description: "add ? to propagate the error", Replacement: text + "?"}}
+		}
 	}
 	c.pass.Report(d)
+}
+
+// sourceText returns the source between start and end.
+func (c *discardCheck) sourceText(start, end syntax.Pos) (string, bool) {
+	src := c.pass.Source(c.file)
+	from, okFrom := sourceOffset(src, start)
+	to, okTo := sourceOffset(src, end)
+	if !okFrom || !okTo || from > to {
+		return "", false
+	}
+	return string(src[from:to]), true
 }
 
 func (c *discardCheck) groupBody(body *syntax.BlockStmt) {
