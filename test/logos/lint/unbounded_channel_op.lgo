@@ -456,3 +456,33 @@ func resultStoredLiteral() int {
 	f()
 	return <-ch // ERROR "\[correctness::unbounded_channel_op\]"
 }
+
+func segmentSendCapacityOne(ctx context.Context, xs []int) error {
+	ch := make(chan int, 1)
+	_, err := xs.group(ctx, limit = 2).map(x => {
+		ch <- x
+		return x
+	})
+	<-ch // ERROR "\[correctness::unbounded_channel_op\]"
+	return err
+}
+
+func chainSendCapacityOne(xs []int) {
+	ch := make(chan int, 1)
+	_ = xs.map(x => {
+		ch <- x // ERROR "\[correctness::unbounded_channel_op\]"
+		return x
+	})
+	<-ch // ERROR "\[correctness::unbounded_channel_op\]"
+}
+
+func groupChildSendCapacityOne(ctx context.Context) error {
+	ch := make(chan int, 1)
+	go group (ctx) {
+		go {
+			ch <- 1
+		}
+	}
+	<-ch
+	return nil
+}

@@ -27,8 +27,9 @@ import (
 // together with every literal nested in it. A literal inside a loop counts
 // as inside it, and a send in a select case counts. A literal invoked where
 // it is written, as the function of a call, go, or defer statement, runs
-// once and counts like the code around it; a send in any other literal or
-// lambda runs as often as it is called and makes the channel unbounded.
+// once and counts like the code around it; a send in any other literal, or
+// in a lambda including that of a group stage segment, runs as often as it
+// is called and makes the channel unbounded.
 // The two conditions are properties of the channel: when the sends exceed
 // k, or any send sits in a loop, every operation on that channel is
 // reported, including the receives. A receive is bounded by the same
@@ -309,7 +310,9 @@ func (u *chanUnit) segmentCall(call *syntax.CallExpr) {
 	u.walk(call.Fun)
 	for _, arg := range call.ArgList {
 		if lam, ok := syntax.Unparen(arg).(*syntax.LambdaExpr); ok {
+			u.lits++
 			u.child(lam.Body)
+			u.lits--
 			continue
 		}
 		u.walk(arg)
