@@ -233,3 +233,12 @@
 {"id": "AUD-122", "description": "M5-A-S3 Gate const views on proven-zero Go parameters", "phase": "AUD"}
 {"id": "AUD-123", "description": "M15-A-S4 Pin 16-byte pair limits and fault equivalence", "phase": "AUD"}
 {"id": "AUD-124", "description": "M15-A-S5 Pin the masked tail loads of vector sums", "phase": "AUD"}
+{"id": "AUD-125", "description": "M6-A-S2 Hoist loop-body scope guards out of loops", "phase": "AUD"}
+{"id": "AUD-126", "description": "M8-A-S4 Run chain stages on group workers", "phase": "AUD"}
+{"id": "AUD-127", "description": "M16-A-S5 Assert the js/wasm default loader behaves as upstream", "phase": "AUD"}
+{"id": "AUD-128", "description": "M18-A-S8 Reject region-capturing closures smuggled through aliases", "phase": "AUD"}
+{"id": "AUD-129", "description": "M18-A-S9 Cover inner-region stores into outer objects across calls", "phase": "AUD"}
+{"id": "AUD-130", "description": "M18-A-S10 Close init-owned regions after their statement", "phase": "AUD"}
+{"id": "AUD-131", "description": "M18-A-S11 Exempt guard defers from the user-defer veto", "phase": "AUD"}
+{"id": "AUD-132", "description": "M18-A-S12 Lower placed region calls with dictionary arguments", "phase": "AUD"}
+{"id": "AUD-133", "description": "M18-A-S13 Attach region bump checks to the placed New line", "phase": "AUD"}

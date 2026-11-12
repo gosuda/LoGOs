@@ -1977,6 +1977,15 @@ Anchor: Italo Calvino, Edsger W. Dijkstra, Otl Aicher
 - Red-team rows: none.
 - Docs: none.
 
+### M6-A-S2 Hoist loop-body scope guards out of loops
+Anchor: Edsger W. Dijkstra, John Carmack
+- Attack: `test/logos/codegen/scopedefer_guard.lgo`: the loop body of `loopCleanup` calls no `runtime.deferproc`, and the function keeps `opendefer` funcdata and a `deferreturn` call. `test/logos/run/scope_defer.lgo`: cases `ploop:` and `nploop:` run the armed cleanups of a loop body and of nested loops in LIFO order when a panic unwinds them.
+- Build: `src/cmd/compile/internal/logos/scopedefer.go` hoists the panic guard before the outermost loop behind a per-iteration holder closure. A normal exit rebinds the holder and runs it inline, and the single guard runs the latest holder on panic. The tail gap after a compound statement starts past the last statement end, and the drain inserts before a loop label.
+- Gate: `go test -count=1 cmd/internal/testdir -run 'Test/logos/codegen/scopedefer_guard.lgo|Test/logos/run/scope_defer.lgo'`.
+- Commits: `13b887db03` Hoist loop-body scope guards out of loops.
+- Red-team rows: #52, #113.
+- Docs: none (SPEC 15.1 states the open-coded cleanup rule; M8-A-S2 records the guard emission).
+
 ## M7. Comptime
 
 Anchor: Tony Hoare, David Parnas, Edsger W. Dijkstra
@@ -2152,6 +2161,15 @@ Anchor: Tony Hoare, Edsger W. Dijkstra, John Carmack
 - Gate: `logos TestSimdSliceSumNoStagingElsewhere` ok; testdir `Test/logos/codegen/simd_slice` ok.
 - Red-team rows: none.
 - Docs: none (SPEC 13.2 caps guard padding).
+
+### M8-A-S4 Run chain stages on group workers
+Anchor: Tony Hoare, Edsger W. Dijkstra, John Carmack
+- Attack: `test/logos/run/chain_stage.lgo`: every source kind, the value form `(R, error)`, the `?` and `range` forms, the terminals, the `limit` forms, and nested stages; `break`, `return`, `find`, `any`, and `take` join every child before control leaves; a channel send, receive, `select`, or range in a segment lambda wakes on cancellation (the `cancel-wakes` cases). `chain_stage_order.lgo`: ordered results arrive in input order when the finish order is reversed, and `.unordered()` results arrive in completion order. `chain_stage_bound.lgo`: children in flight plus unconsumed results stay within `limit` for a slow head, a slow consumer, and nested stages; a limit of zero or less panics before the source is touched. `chain_stage_sources.lgo`: the source is pulled and the loop body runs on the calling goroutine, children run elsewhere, empty sources yield nothing, and a quiet channel delivers finished results. `chain_stage_cancel.lgo`: a panic in a segment lambda becomes `*logos/rt.PanicError`; the parent context error returns when no child failed; a panic in the loop body or in the source joins every child. `chain_stage_closers.lgo`: delivered results stay open and a result dropped by a `filter` is closed once. `src/logos/rt/groupseq_test.go`: `TestGroupSeqLimitMustBePositive`, `TestGroupSeqClosesUndeliveredInReverseInputOrder`, `TestGroupSeqClosesUndeliveredOnEarlyStop`, `TestGroupSeqFilterDropsAreClosedOnce`. `src/internal/types/testdata/logos/chain_stage.lgo` and `src/cmd/compile/internal/types2/chainstage_logos_test.go`: the accepted and rejected stage forms, including `[correctness::named_argument]`. `test/logos/lint/unbounded_channel_op.lgo`: the rule skips a channel operation directly in a segment lambda and still reports it elsewhere. `logos_eject_chain_stage.txt`: the ejected stage builds with upstream Go and prints the native lines. `logos_chain_stage_wasm.txt`: the order and cancel fixtures print the same lines under js/wasm.
+- Build: `src/cmd/compile/internal/types2/chainstage_logos.go` checks the receiver kinds, the `ctx` and `limit = N` arguments, the `.unordered()` position, the segment of `map` and `filter` calls, and the `(R, error)` value form. `src/cmd/compile/internal/logos/parchain.go` lowers a stage to the sequences of `src/logos/rt/groupseq.go`, which keep the window, the order, the cancellation, and the closers and run elements on reusable worker goroutines. `src/cmd/compile/internal/logos/lint/rule_unbounded_channel_op.go` exempts channel operations directly in a segment lambda.
+- Gate: `go test -count=1 cmd/internal/testdir -run 'Test/logos/run/chain_stage'`; `go test -count=1 logos/rt -run 'TestGroupSeq'`; `go test -count=1 cmd/compile/internal/types2 -run 'TestLogosGroupStage|^TestLogos$'`; `go test -count=1 cmd/compile/internal/logos/lint -run 'TestUnboundedChannelOp'`; `go test -count=1 cmd/go -run 'Script/^logos_eject_chain_stage$|Script/^logos_chain_stage_wasm$'`.
+- Commits: `9cb227eae7` Add ordered and completion-order group stage sequences; `0fea40b49f` Run group stage elements on reusable worker goroutines; `d3f298c050` Parse name = expr call arguments in loGo/s files; `80149c7bb1` Fail named call arguments with correctness::named_argument; `bf365a28b1` Check src.group(ctx, limit = N) chain stages; `bac2327694` Lower the parallel chain stage to the runtime helper; `edb2380046` Cover group stage segment lambdas in the unbounded channel rule; `b40ac62441` Test the result order of a group stage with channels; `3536f5f9fb` Test the window and the limit of a group stage; `727a00360f` Test failure, cancellation and early exit of a group stage; `40e882244a` Test the sources and the goroutine of a group stage; `11fb5052f3` Test the closers of a group stage; `ecfc811da4` Test that the ejected group stage builds with upstream Go; `c5e6fe00b0` Test the order and the cancellation of a group stage under js/wasm.
+- Red-team rows: #219, #220, #221, #222, #223, #224.
+- Docs: none (SPEC 1.4 and 2.6 carry the rules).
 
 ## M9. Lints and JSON diagnostics
 
@@ -2688,6 +2706,15 @@ Anchor: John Carmack, Dieter Rams
 - Red-team rows: none.
 - Docs: none.
 
+### M16-A-S5 Assert the js/wasm default loader behaves as upstream
+Anchor: John Carmack, Dieter Rams
+- Attack: `src/cmd/go/testdata/script/logos_go_parity_wasm.txt`: five js/wasm programs (init order over three packages, goroutine ping-pong over unbuffered channels, an unrecovered panic, `os.Exit(3)`, and `syscall/js` calls) built with `go build` and with `logos build` run through the tree's `lib/wasm/go_js_wasm_exec` and print the same stdout and exit status as the upstream go1.27.3 build run through the upstream exec; the default loader file exists and no `rt` line appears. The script fails when `UPROOT1273` or the oracle is missing.
+- Build: none (test-only).
+- Gate: `go test -count=1 cmd/go -run 'Script/^logos_go_parity_wasm$'` (needs `node` and `UPROOT1273`).
+- Commits: `cbca20cfb8` Add js/wasm parity script for go and logos builds; `4569bc5bdc` Fail the wasm parity script when upstream Go is missing; `411e0a1435` Read upstream go1.27.3 oracle from UPROOT1273.
+- Red-team rows: #213.
+- Docs: none.
+
 ## M17. Smart stack
 
 Anchor: John Carmack, Herbert Simon
@@ -2855,6 +2882,60 @@ Anchor: John Carmack, Tony Hoare, Edsger W. Dijkstra
 - Attack: `src/cmd/compile/internal/escape/pointee_active_logos_test.go`: the precision analysis runs on `.lgo` packages without a flag; `src/cmd/go/testdata/script/logos_escape_default.txt`: Go packages join it only under `GOEXPERIMENT=logosescape`, off by default.
 - Build: none (test-only).
 - Gate: `go test -count=1 cmd/compile/internal/escape -run 'TestLogosPointeeActiveInLgoWithoutFlag|TestLogosPointeeActiveUnderFlag|TestLogosPointeeInactiveByDefault'`; `go test -count=1 cmd/go -run Script/logos_escape_default`.
+- Red-team rows: none.
+- Docs: none.
+
+### M18-A-S8 Reject region-capturing closures smuggled through aliases
+Anchor: John Carmack, Tony Hoare, Edsger W. Dijkstra
+- Attack: `test/logos/lint/region_closure_smuggle.lgo`: a closure that captures the region handle and reaches an escaping store through a local alias reports `[correctness::region_escape]`. `test/logos/run/region_closure_fallback.lgo`: the program prints 42, so the fallback keeps the captured pointer on the heap past the block.
+- Build: `src/cmd/compile/internal/types2/region_logos.go` marks a function-scope variable declared with `:=` before it has a parent scope.
+- Gate: `go test -count=1 cmd/internal/testdir -run 'Test/logos/lint/region_closure_smuggle.lgo|Test/logos/run/region_closure_fallback.lgo'`.
+- Commits: `e9791f32e0` Reject region-capturing closures smuggled through aliases.
+- Red-team rows: #191.
+- Docs: none.
+
+### M18-A-S9 Cover inner-region stores into outer objects across calls
+Anchor: John Carmack, Tony Hoare, Edsger W. Dijkstra
+- Attack: `test/logos/lint/region_nested_call.lgo`: an inner-region pointer stored into an outer-region object by a direct store, a method call, or a plain function call falls back to the heap. `test/logos/run/region_nested_call.lgo`: the stored value reads back after the inner block closes and prints 42.
+- Build: none (test-only).
+- Gate: `go test -count=1 cmd/internal/testdir -run 'Test/logos/lint/region_nested_call.lgo|Test/logos/run/region_nested_call.lgo'`.
+- Commits: `987c6de1a9` Cover inner-region stores into outer objects across calls.
+- Red-team rows: #193.
+- Docs: none.
+
+### M18-A-S10 Close init-owned regions after their statement
+Anchor: John Carmack, Tony Hoare, Edsger W. Dijkstra
+- Attack: `test/logos/run/region_exits.lgo` (`exitInitOwner`): a region opened in the init clause of an `if`, `switch`, or `for` stays open while the body runs and closes once after the statement. `src/cmd/compile/internal/walk/region_logos_test.go` (`TestLogosRegionInitClauseCloses`): the close is not in the init list.
+- Build: `src/cmd/compile/internal/walk/region_logos.go` skips the end-of-list close for a clause owner, and the statement tail emits the close; the pre-break close of the same statement is dropped.
+- Gate: `go test -count=1 cmd/internal/testdir -run 'Test/logos/run/region_exits'`; `go test -count=1 cmd/compile/internal/walk -run '^TestLogosRegionInitClauseCloses$'`.
+- Commits: `37486b6248` Close init-owned regions after their statement, not in the clause.
+- Red-team rows: none.
+- Docs: none.
+
+### M18-A-S11 Exempt guard defers from the user-defer veto
+Anchor: John Carmack, Tony Hoare, Edsger W. Dijkstra
+- Attack: `test/logos/escape_logos_region_group.lgo`: a function whose only defers wait on a group it created stays placeable, and a function with a user defer falls back to the heap.
+- Build: `src/cmd/compile/internal/escape/region_logos.go` applies the veto to user defers only; the goto veto and the unknown-region fallback stay.
+- Gate: `go test -count=1 cmd/internal/testdir -run 'Test/logos/escape_logos_region_group'`.
+- Commits: `8f525d7732` Exempt guard defers from the user-defer veto.
+- Red-team rows: #192.
+- Docs: none.
+
+### M18-A-S12 Lower placed region calls with dictionary arguments
+Anchor: John Carmack, Tony Hoare, Edsger W. Dijkstra
+- Attack: `src/cmd/compile/internal/walk/region_logos_test.go` (`TestLogosRegionDictFirstLowers`): an instantiated generic placed `New` carries the dictionary first and still lowers to the region.
+- Build: `src/cmd/compile/internal/ir/region_logos.go` (`LogosRegionArgBase`), `escape/region_logos.go`, and `walk/region_logos.go` find the region after the dictionary argument for placed `New`, `Make`, and `Append`; the grow runtime lookup takes the element type twice.
+- Gate: `go test -count=1 cmd/compile/internal/walk -run '^TestLogosRegionDictFirstLowers$'`.
+- Commits: `97905c8e70` Lower placed region calls with dictionary arguments.
+- Red-team rows: none.
+- Docs: none.
+
+### M18-A-S13 Attach region bump checks to the placed New line
+Anchor: John Carmack, Tony Hoare, Edsger W. Dijkstra
+- Attack: `test/logos/codegen/region_bump.lgo`: a placed noscan `New` of constant size 8, 511, or 512 shows the inline bump shape (nil check, generation compare, align, size add, limit compare, cursor store, PCDATA markers, noscan slow path); 513 bytes and scan types call the runtime allocator; unplaced sites keep the original call. Each expectation block sits above its `New` line.
+- Build: none (test-only).
+- Gate: `go test -count=1 cmd/internal/testdir -run 'Test/logos/codegen/region_bump'`.
+- Commits: `730f0c1abf` Attach region bump checks to the placed New line.
 - Red-team rows: none.
 - Docs: none.
 
@@ -3333,7 +3414,7 @@ Prerequisites: run `./make.bash` in `src` and put the fork `bin` directory first
 
 Anchor: Tony Hoare
 
-Written to `tasks/autoplan-ledger.jsonl` by P0-S6. IDs: phase prefix plus a sequence in plan order. The original 103 rows are preserved verbatim; P0-S6 appends exactly the 5 remaining rows for M0-S7, P1-S3, M11-S3, M11-S4, and M18-S4 (listed at the end of the block); the M19 rows are pruned. The 2026-10-19 direction appended one more row after those, `DX-20` for the follow-up slice M0-S8; no other row changed (the descriptions of rows such as `ENG-26` name the slice as first written, and `CEO-02` names the original 182 REDTEAM rows; rows #183 to #189 were added later by the same direction). The audit direction appended rows `AUD-01` to `AUD-124` after those, one per recorded audit slice in commit order. The ledger holds 235 rows.
+Written to `tasks/autoplan-ledger.jsonl` by P0-S6. IDs: phase prefix plus a sequence in plan order. The original 103 rows are preserved verbatim; P0-S6 appends exactly the 5 remaining rows for M0-S7, P1-S3, M11-S3, M11-S4, and M18-S4 (listed at the end of the block); the M19 rows are pruned. The 2026-10-19 direction appended one more row after those, `DX-20` for the follow-up slice M0-S8; no other row changed (the descriptions of rows such as `ENG-26` name the slice as first written, and `CEO-02` names the original 182 REDTEAM rows; rows #183 to #189 were added later by the same direction). The audit direction appended rows `AUD-01` to `AUD-133` after those, one per recorded audit slice in commit order. The ledger holds 244 rows.
 
 ```jsonl
 {"id": "CEO-01", "description": "P0-S1 Rename logos-doc/PLAN.md to logos-doc/SPEC.md (pure rename) and P0-S2 rewrite SPEC.md as the tailored spec (tables T, N, Section 18)", "phase": "CEO"}
@@ -3571,4 +3652,13 @@ Written to `tasks/autoplan-ledger.jsonl` by P0-S6. IDs: phase prefix plus a sequ
 {"id": "AUD-122", "description": "M5-A-S3 Gate const views on proven-zero Go parameters", "phase": "AUD"}
 {"id": "AUD-123", "description": "M15-A-S4 Pin 16-byte pair limits and fault equivalence", "phase": "AUD"}
 {"id": "AUD-124", "description": "M15-A-S5 Pin the masked tail loads of vector sums", "phase": "AUD"}
+{"id": "AUD-125", "description": "M6-A-S2 Hoist loop-body scope guards out of loops", "phase": "AUD"}
+{"id": "AUD-126", "description": "M8-A-S4 Run chain stages on group workers", "phase": "AUD"}
+{"id": "AUD-127", "description": "M16-A-S5 Assert the js/wasm default loader behaves as upstream", "phase": "AUD"}
+{"id": "AUD-128", "description": "M18-A-S8 Reject region-capturing closures smuggled through aliases", "phase": "AUD"}
+{"id": "AUD-129", "description": "M18-A-S9 Cover inner-region stores into outer objects across calls", "phase": "AUD"}
+{"id": "AUD-130", "description": "M18-A-S10 Close init-owned regions after their statement", "phase": "AUD"}
+{"id": "AUD-131", "description": "M18-A-S11 Exempt guard defers from the user-defer veto", "phase": "AUD"}
+{"id": "AUD-132", "description": "M18-A-S12 Lower placed region calls with dictionary arguments", "phase": "AUD"}
+{"id": "AUD-133", "description": "M18-A-S13 Attach region bump checks to the placed New line", "phase": "AUD"}
 ```
