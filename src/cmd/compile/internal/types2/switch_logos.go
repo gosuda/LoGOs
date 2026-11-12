@@ -284,7 +284,7 @@ func (check *Checker) logosArmAssignable(v *operand, common Type) bool {
 }
 
 func (check *Checker) logosValidateSwitchTry(e *syntax.SwitchExpr) {
-	if e.Init == nil || check.logosCurStmt == nil {
+	if e.Init == nil {
 		return
 	}
 	var initTry syntax.Pos
@@ -293,271 +293,151 @@ func (check *Checker) logosValidateSwitchTry(e *syntax.SwitchExpr) {
 		if s.Rhs == nil {
 			return
 		}
-		if t, ok := syntax.Unparen(syntax.UnpackListExpr(s.Rhs)[0]).(*syntax.TryExpr); ok {
-			initTry = t.Pos()
-		} else {
+		t, ok := syntax.Unparen(syntax.UnpackListExpr(s.Rhs)[0]).(*syntax.TryExpr)
+		if !ok {
 			return
 		}
+		initTry = t.Pos()
 	case *syntax.ExprStmt:
-		if t, ok := syntax.Unparen(s.X).(*syntax.TryExpr); ok {
-			initTry = t.Pos()
-		} else {
+		t, ok := syntax.Unparen(s.X).(*syntax.TryExpr)
+		if !ok {
 			return
 		}
+		initTry = t.Pos()
 	default:
 		return
 	}
-	if check.logosSwitchTryHostOk(e) {
-		return
-	}
-	check.error(initTry, InvalidCall, logosMisplacedTry)
-}
-
-func (check *Checker) logosSwitchTryHostOk(e *syntax.SwitchExpr) bool {
-	s := check.logosCurStmt
-	found := logosLocateSwitch(s, e)
-	if !found.found {
-		return true
-	}
-	if found.underCall || found.underSelect || found.underCase || found.underSend || found.underLambda || found.underTag {
-		return false
-	}
-	switch cur := s.(type) {
-	case *syntax.AssignStmt, *syntax.ExprStmt:
-		return true
-	case *syntax.ReturnStmt:
-		return found.direct
-	case *syntax.IfStmt:
-		return found.direct
-	case *syntax.ForStmt:
-		if found.inInit && !found.direct {
-			return false
-		}
-		return true
-	case *syntax.SwitchStmt:
-		return found.direct
-	case *syntax.LabeledStmt:
-		return check.logosSwitchTryHostOkInner(cur.Stmt, e)
-	default:
-		return false
+	if !logosSwitchHostOk(check.logosCurStmt, e) {
+		check.error(initTry, InvalidCall, logosMisplacedTry)
 	}
 }
 
-func (check *Checker) logosSwitchTryHostOkInner(s syntax.Stmt, e *syntax.SwitchExpr) bool {
-	prev := check.logosCurStmt
-	check.logosCurStmt = s
-	ok := check.logosSwitchTryHostOk(e)
-	check.logosCurStmt = prev
-	return ok
+type logosSwitchWalk struct {
+	target *syntax.SwitchExpr
 }
 
-type logosSwitchLoc struct {
-	found      bool
-	direct     bool
-	inInit     bool
-	underCall  bool
-	underSelect bool
-	underCase  bool
-	underSend  bool
-	underLambda bool
-	underTag   bool
-}
-
-func logosLocateSwitch(s syntax.Stmt, e *syntax.SwitchExpr) logosSwitchLoc {
-	var loc logosSwitchLoc
-	var walkExpr func(n syntax.Node, underCall, underTag bool)
-	walkExpr = func(n syntax.Node, underCall, underTag bool) {
-		if n == nil || loc.found {
-			return
+func logosSwitchHostOk(s syntax.Stmt, e *syntax.SwitchExpr) bool {
+	w := logosSwitchWalk{target: e}
+	labeled := false
+	for {
+		lab, ok := s.(*syntax.LabeledStmt)
+		if !ok {
+			break
 		}
-		if se, ok := n.(*syntax.SwitchExpr); ok && se == e {
-			loc.found = true
-			if underCall {
-				loc.underCall = true
-			}
-			if underTag {
-				loc.underTag = true
-			}
-			return
-		}
-		switch t := n.(type) {
-		case *syntax.FuncLit:
-			return
-		case *syntax.LambdaExpr:
-			walkExpr(t.Body, underCall, underTag)
-			if loc.found {
-				loc.underLambda = true
-			}
-			return
-		case *syntax.CallExpr:
-			walkExpr(t.Fun, true, underTag)
-			for _, a := range t.ArgList {
-				walkExpr(a, true, underTag)
-			}
-			return
-		case *syntax.SwitchExpr:
-			if t.Tag != nil {
-				walkExpr(t.Tag, underCall, true)
-			}
-			for _, a := range t.Arms {
-				for _, c := range syntax.UnpackListExpr(a.Cases) {
-					walkExpr(c, underCall, underTag)
-				}
-				walkExpr(a.Body, underCall, underTag)
-			}
-			if t.Init != nil {
-				walkExpr(t.Init, underCall, underTag)
-			}
-			return
-		}
-		syntax.Inspect(n, func(m syntax.Node) bool {
-			if loc.found {
-				return false
-			}
-			if m == n {
-				return true
-			}
-			if se, ok := m.(*syntax.SwitchExpr); ok && se == e {
-				loc.found = true
-				if underCall {
-					loc.underCall = true
-				}
-				if underTag {
-					loc.underTag = true
-				}
-				return false
-			}
-			return true
-		})
+		s, labeled = lab.Stmt, true
 	}
-	switch t := s.(type) {
+	switch s := s.(type) {
 	case *syntax.AssignStmt:
-		for _, l := range syntax.UnpackListExpr(t.Lhs) {
-			if syntax.Unparen(l) == syntax.Expr(e) {
-				loc.found = true
-				return loc
-			}
-			walkExpr(l, false, false)
-		}
-		for _, r := range syntax.UnpackListExpr(t.Rhs) {
-			if syntax.Unparen(r) == syntax.Expr(e) {
-				loc.found = true
-				loc.direct = true
-				return loc
-			}
-		}
-		walkExpr(t.Rhs, false, false)
-	case *syntax.ExprStmt:
-		if syntax.Unparen(t.X) == syntax.Expr(e) {
-			loc.found = true
-			loc.direct = true
-			return loc
-		}
-		walkExpr(t.X, false, false)
+		return w.assign(s)
 	case *syntax.ReturnStmt:
-		for _, r := range syntax.UnpackListExpr(t.Results) {
-			if syntax.Unparen(r) == syntax.Expr(e) {
-				loc.found = true
-				loc.direct = true
-				return loc
-			}
-		}
-		walkExpr(t.Results, false, false)
+		return w.root(s.Results)
+	case *syntax.DeclStmt:
+		return w.declared(s)
 	case *syntax.IfStmt:
-		if t.Init != nil {
-			if a, ok := t.Init.(*syntax.AssignStmt); ok {
-				for _, r := range syntax.UnpackListExpr(a.Rhs) {
-					if syntax.Unparen(r) == syntax.Expr(e) {
-						loc.found = true
-						loc.direct = true
-						loc.inInit = true
-						return loc
-					}
-				}
-			}
-			loc.inInit = true
-			walkExpr(t.Init, false, false)
-			loc.inInit = loc.found
-			if loc.found {
-				return loc
-			}
-		}
-		if t.Cond != nil && syntax.Unparen(t.Cond) == syntax.Expr(e) {
-			loc.found = true
-			loc.direct = true
-			return loc
-		}
-		walkExpr(t.Cond, false, false)
-	case *syntax.ForStmt:
-		if t.Init != nil {
-			if a, ok := t.Init.(*syntax.AssignStmt); ok {
-				for _, r := range syntax.UnpackListExpr(a.Rhs) {
-					if syntax.Unparen(r) == syntax.Expr(e) {
-						loc.found = true
-						loc.direct = true
-						loc.inInit = true
-						return loc
-					}
-				}
-			}
-			loc.inInit = true
-			walkExpr(t.Init, false, false)
-			if loc.found {
-				return loc
-			}
-			loc.inInit = false
-		}
-		walkExpr(t.Cond, false, false)
-		if loc.found {
-			return loc
-		}
-		walkExpr(t.Post, false, false)
+		return w.ifChain(s)
 	case *syntax.SwitchStmt:
-		if t.Init != nil {
-			if a, ok := t.Init.(*syntax.AssignStmt); ok {
-				for _, r := range syntax.UnpackListExpr(a.Rhs) {
-					if syntax.Unparen(r) == syntax.Expr(e) {
-						loc.found = true
-						loc.direct = true
-						loc.inInit = true
-						return loc
-					}
-				}
-			}
-			loc.inInit = true
-			walkExpr(t.Init, false, false)
-			if loc.found {
-				return loc
-			}
-			loc.inInit = false
+		if found, ok := w.simple(s.Init); found {
+			return ok && !labeled
 		}
-		if t.Tag != nil && syntax.Unparen(t.Tag) == syntax.Expr(e) {
-			loc.found = true
-			loc.direct = true
-			return loc
+		return !labeled && w.tag(s.Tag)
+	case *syntax.ForStmt:
+		if found, ok := w.simple(s.Init); found {
+			return ok && !labeled
 		}
-		walkExpr(t.Tag, false, false)
-		for _, c := range t.Body {
-			for _, ce := range syntax.UnpackListExpr(c.Cases) {
-				walkExpr(ce, false, false)
-				if loc.found {
-					loc.underCase = true
-					return loc
-				}
-			}
-		}
-	case *syntax.SelectStmt:
-		loc.underSelect = true
-		loc.found = true
-		return loc
-	case *syntax.SendStmt:
-		loc.underSend = true
-		loc.found = true
-		return loc
-	case *syntax.LabeledStmt:
-		return logosLocateSwitch(t.Stmt, e)
-	default:
-		walkExpr(s, false, false)
+		return s.Cond != nil && w.root(s.Cond)
 	}
-	return loc
+	return false
+}
+
+func (w logosSwitchWalk) assign(s *syntax.AssignStmt) bool {
+	if found, ok := w.expr(s.Lhs); found {
+		return ok
+	}
+	return w.root(s.Rhs)
+}
+
+func (w logosSwitchWalk) declared(s *syntax.DeclStmt) bool {
+	vd, ok := s.DeclList[0].(*syntax.VarDecl)
+	return len(s.DeclList) == 1 && ok && vd.Group == nil && w.root(vd.Values)
+}
+
+func (w logosSwitchWalk) root(n syntax.Expr) bool {
+	found, ok := w.expr(n)
+	return found && ok
+}
+
+func (w logosSwitchWalk) tag(n syntax.Expr) bool {
+	_, guard := n.(*syntax.TypeSwitchGuard)
+	return !guard && w.root(n)
+}
+
+func (w logosSwitchWalk) simple(s syntax.SimpleStmt) (found, ok bool) {
+	switch s := s.(type) {
+	case nil:
+		return false, false
+	case *syntax.AssignStmt:
+		if found, ok := w.expr(s.Lhs); found {
+			return found, ok
+		}
+		return w.expr(s.Rhs)
+	}
+	return w.inside(s)
+}
+
+func (w logosSwitchWalk) ifChain(s *syntax.IfStmt) bool {
+	for link := s; link != nil; {
+		if found, ok := w.simple(link.Init); found {
+			return ok
+		}
+		if found, ok := w.expr(link.Cond); found {
+			return ok
+		}
+		link, _ = link.Else.(*syntax.IfStmt)
+	}
+	return false
+}
+
+func (w logosSwitchWalk) inside(n syntax.Node) (found, ok bool) {
+	syntax.Inspect(n, func(m syntax.Node) bool {
+		if m == syntax.Node(w.target) {
+			found = true
+		}
+		return !found
+	})
+	return found, false
+}
+
+func (w logosSwitchWalk) expr(n syntax.Node) (found, ok bool) {
+	if n == nil {
+		return false, false
+	}
+	if n == syntax.Node(w.target) {
+		return true, true
+	}
+	switch n := n.(type) {
+	case *syntax.ParenExpr:
+		return w.expr(n.X)
+	case *syntax.ListExpr:
+		return w.exprs(n.ElemList)
+	case *syntax.Operation:
+		return w.exprs([]syntax.Expr{n.X, n.Y})
+	case *syntax.IndexExpr:
+		return w.exprs([]syntax.Expr{n.X, n.Index})
+	case *syntax.SelectorExpr:
+		return w.expr(n.X)
+	case *syntax.CompositeLit:
+		return w.exprs(n.ElemList)
+	case *syntax.KeyValueExpr:
+		return w.exprs([]syntax.Expr{n.Key, n.Value})
+	}
+	return w.inside(n)
+}
+
+func (w logosSwitchWalk) exprs(list []syntax.Expr) (found, ok bool) {
+	for _, el := range list {
+		if found, ok := w.expr(el); found {
+			return found, ok
+		}
+	}
+	return false, false
 }

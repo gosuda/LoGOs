@@ -1,8 +1,0 @@
-ok short-false
-ok loop-cond
-ok operand-order
-ok scope
-ok nested
-ok closure
-ok group
-ok if-cond

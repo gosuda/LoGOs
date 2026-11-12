@@ -190,6 +190,8 @@ type fileLower struct {
 	narrowDone     map[*syntax.Name]bool
 	optDeferGoPend map[*syntax.CallExpr]optDeferGoWork
 	gotoTargets    map[*syntax.LabeledStmt]bool
+	anchorBlocks   map[*syntax.BlockStmt]bool
+	tupleKeep      map[*syntax.ReturnStmt]bool
 	wrapSpan       map[syntax.Expr]span
 	wrapOwner      map[syntax.Expr]int
 	wrapSeq        int

@@ -5,128 +5,36 @@
 package logos
 
 import (
-	"bytes"
-	"reflect"
-	"slices"
+	"fmt"
+	"go/token"
+	"strings"
 
+	"cmd/compile/internal/base"
 	"cmd/compile/internal/syntax"
 	"cmd/compile/internal/types2"
 )
 
-func (fl *fileLower) hoistTryInits() {
-	for _, decl := range fl.file.DeclList {
-		switch d := decl.(type) {
-		case *syntax.FuncDecl:
-			if d.Body != nil {
-				newFuncLower(fl, d.Type, fl.cfFuncSig(d), d.Body).hoistSwitchExprInits()
-			}
-		case *syntax.VarDecl:
-			syntax.Inspect(d, func(n syntax.Node) bool {
-				if lit, ok := n.(*syntax.FuncLit); ok {
-					newFuncLower(fl, lit.Type, fl.cfLitSig(lit), lit.Body).hoistSwitchExprInits()
-					return false
-				}
-				return true
-			})
-		}
-	}
+type tryHoist struct {
+	fl *fileLower
 }
 
-func (fc *funcLower) hoistSwitchExprInits() {
-	fc.body.List = fc.processSwitchList(fc.body.List)
+type hoistOperand struct {
+	e    syntax.Expr
+	set  func(syntax.Expr)
+	area span
 }
 
-func (fc *funcLower) processSwitchList(list []syntax.Stmt) []syntax.Stmt {
-	var out []syntax.Stmt
-	for _, s := range list {
-		out = append(out, fc.processSwitchStmt(s)...)
-	}
-	return out
+type hoistHost struct {
+	h       *tryHoist
+	pos     syntax.Pos
+	seq     int
+	pending []hoistOperand
+	native  []syntax.Stmt
+	text    []otext
 }
 
-func (fc *funcLower) processSwitchStmt(s syntax.Stmt) []syntax.Stmt {
-	fc.processLitBodies(s)
-	direct := fc.directStmtSwitches(s)
-	if len(direct) == 0 {
-		fc.recurseSwitchChildren(s)
-		return []syntax.Stmt{s}
-	}
-	if fc.stmtNeedsTemp(s, direct) {
-		return fc.tempSwitchStmt(s, direct)
-	}
-	return fc.wrapSwitchStmt(s, direct)
-}
-
-func (fc *funcLower) processLitBodies(s syntax.Stmt) {
-	syntax.Inspect(s, func(n syntax.Node) bool {
-		switch t := n.(type) {
-		case *syntax.FuncLit:
-			if t.Body != nil {
-				newFuncLower(fc.fl, t.Type, fc.fl.cfLitSig(t), t.Body).hoistSwitchExprInits()
-			}
-			return false
-		case *syntax.GroupChild:
-			if t.Body != nil {
-				ft := at(&syntax.FuncType{
-					ResultList: []*syntax.Field{at(&syntax.Field{Type: nameOf(t.Body.Pos(), "error")}, t.Body.Pos())},
-				}, t.Body.Pos())
-				newFuncLower(fc.fl, ft, nil, t.Body).hoistSwitchExprInits()
-			}
-			return false
-		case *syntax.GroupStmt:
-			return true
-		case *syntax.LambdaExpr:
-			return false
-		}
-		return true
-	})
-}
-
-func (fc *funcLower) recurseSwitchChildren(s syntax.Stmt) {
-	switch t := s.(type) {
-	case *syntax.LabeledStmt:
-		t.Stmt = fc.processSwitchSingle(t.Stmt)
-	case *syntax.BlockStmt:
-		t.List = fc.processSwitchList(t.List)
-	case *syntax.IfStmt:
-		t.Then.List = fc.processSwitchList(t.Then.List)
-		fc.recurseSwitchElse(t)
-	case *syntax.ForStmt:
-		t.Body.List = fc.processSwitchList(t.Body.List)
-	case *syntax.SwitchStmt:
-		for _, c := range t.Body {
-			c.Body = fc.processSwitchList(c.Body)
-		}
-	case *syntax.SelectStmt:
-		for _, c := range t.Body {
-			c.Body = fc.processSwitchList(c.Body)
-		}
-	}
-}
-
-func (fc *funcLower) recurseSwitchElse(s *syntax.IfStmt) {
-	switch els := s.Else.(type) {
-	case *syntax.BlockStmt:
-		els.List = fc.processSwitchList(els.List)
-	case *syntax.IfStmt:
-		els.Then.List = fc.processSwitchList(els.Then.List)
-		fc.recurseSwitchElse(els)
-	}
-}
-
-func (fc *funcLower) processSwitchSingle(s syntax.Stmt) syntax.Stmt {
-	res := fc.processSwitchStmt(s)
-	if len(res) == 1 {
-		return res[0]
-	}
-	return blockOf(s.Pos(), res)
-}
-
-func hasDirectTryInit(sx *syntax.SwitchExpr) bool {
-	if sx.Init == nil {
-		return false
-	}
-	switch s := sx.Init.(type) {
+func isTryInit(e *syntax.SwitchExpr) bool {
+	switch s := e.Init.(type) {
 	case *syntax.AssignStmt:
 		_, _, ok := tryAssignOf(s)
 		return ok
@@ -137,197 +45,490 @@ func hasDirectTryInit(sx *syntax.SwitchExpr) bool {
 	return false
 }
 
-func (fc *funcLower) collectExprSwitches(e syntax.Node, out *[]*syntax.SwitchExpr) {
-	if e == nil {
-		return
-	}
-	syntax.Inspect(e, func(n syntax.Node) bool {
-		switch t := n.(type) {
-		case *syntax.FuncLit, *syntax.LambdaExpr, *syntax.GroupStmt, *syntax.GroupChild:
-			return false
-		case *syntax.SwitchExpr:
-			if hasDirectTryInit(t) {
-				*out = append(*out, t)
+func (fl *fileLower) hoistTryInits() {
+	h := &tryHoist{fl: fl}
+	var bodies []*syntax.BlockStmt
+	syntax.Inspect(fl.file, func(n syntax.Node) bool {
+		switch n := n.(type) {
+		case *syntax.FuncDecl:
+			if n.Body != nil {
+				bodies = append(bodies, n.Body)
 			}
-			return true
+		case *syntax.FuncLit:
+			bodies = append(bodies, n.Body)
+		case *syntax.LambdaExpr:
+			if b, ok := n.Body.(*syntax.BlockStmt); ok {
+				bodies = append(bodies, b)
+			}
 		}
 		return true
 	})
+	for i := len(bodies) - 1; i >= 0; i-- {
+		bodies[i].List = h.list(bodies[i].List)
+	}
 }
 
-func (fc *funcLower) directStmtSwitches(s syntax.Stmt) []*syntax.SwitchExpr {
-	var out []*syntax.SwitchExpr
-	switch t := s.(type) {
-	case *syntax.AssignStmt:
-		fc.collectExprSwitches(t.Rhs, &out)
-	case *syntax.ExprStmt:
-		fc.collectExprSwitches(t.X, &out)
-	case *syntax.ReturnStmt:
-		fc.collectExprSwitches(t.Results, &out)
-	case *syntax.IfStmt:
-		if t.Init != nil {
-			fc.collectExprSwitches(t.Init, &out)
-		}
-		fc.collectExprSwitches(t.Cond, &out)
-	case *syntax.ForStmt:
-		if t.Init != nil {
-			fc.collectExprSwitches(t.Init, &out)
-		}
-		fc.collectExprSwitches(t.Cond, &out)
-		if t.Post != nil {
-			fc.collectExprSwitches(t.Post, &out)
-		}
-	case *syntax.SwitchStmt:
-		if t.Init != nil {
-			fc.collectExprSwitches(t.Init, &out)
-		}
-		fc.collectExprSwitches(t.Tag, &out)
-	case *syntax.LabeledStmt:
-		return fc.directStmtSwitches(t.Stmt)
+func (h *tryHoist) list(list []syntax.Stmt) []syntax.Stmt {
+	out := make([]syntax.Stmt, 0, len(list))
+	for _, s := range list {
+		out = append(out, h.stmt(s)...)
 	}
 	return out
 }
 
-func (fc *funcLower) stmtNeedsTemp(s syntax.Stmt, switches []*syntax.SwitchExpr) bool {
-	switch s.(type) {
+func (h *tryHoist) stmt(s syntax.Stmt) []syntax.Stmt {
+	switch s := s.(type) {
+	case *syntax.BlockStmt:
+		s.List = h.list(s.List)
+	case *syntax.LabeledStmt:
+		res := h.stmt(s.Stmt)
+		h.rejectLabeledWrap(s, res[0])
+		s.Stmt = res[0]
+		return append([]syntax.Stmt{s}, res[1:]...)
+	case *syntax.IfStmt:
+		s.Then.List = h.list(s.Then.List)
+		h.elseChain(s)
+		return []syntax.Stmt{h.wrapIf(s)}
 	case *syntax.ForStmt:
-		return false
-	case *syntax.AssignStmt, *syntax.ExprStmt:
-		for _, sx := range switches {
-			if fc.switchUnderShort(s, sx) {
-				return false
-			}
+		s.Body.List = h.list(s.Body.List)
+		return []syntax.Stmt{h.rewriteFor(s)}
+	case *syntax.SwitchStmt:
+		for _, c := range s.Body {
+			c.Body = h.list(c.Body)
 		}
-		for _, sx := range switches {
-			if !fc.isSingleExpr(s, sx) {
+		return []syntax.Stmt{h.rewriteSwitch(s)}
+	case *syntax.SelectStmt:
+		for _, c := range s.Body {
+			c.Body = h.list(c.Body)
+		}
+	case *syntax.GroupStmt:
+		s.Body.List = h.list(s.Body.List)
+	case *syntax.GroupChild:
+		s.Body.List = h.list(s.Body.List)
+	case *syntax.AssignStmt, *syntax.ReturnStmt, *syntax.DeclStmt:
+		return h.simple(s)
+	}
+	return []syntax.Stmt{s}
+}
+
+func (h *tryHoist) elseChain(s *syntax.IfStmt) {
+	switch els := s.Else.(type) {
+	case *syntax.BlockStmt:
+		els.List = h.list(els.List)
+	case *syntax.IfStmt:
+		els.Then.List = h.list(els.Then.List)
+		h.elseChain(els)
+		s.Else = h.wrapIf(els)
+	}
+}
+
+func (h *tryHoist) rejectLabeledWrap(label *syntax.LabeledStmt, lowered syntax.Stmt) {
+	switch label.Stmt.(type) {
+	case *syntax.ForStmt, *syntax.SwitchStmt:
+		if lowered != label.Stmt {
+			base.Fatalf("logos: switch expression with a try init in the header of a labeled statement at %s", label.Pos().String())
+		}
+	}
+}
+
+func (h *tryHoist) newHost(pos syntax.Pos) *hoistHost {
+	return &hoistHost{h: h, pos: pos}
+}
+
+func (x *hoistHost) cat() otext {
+	return cat(x.text...)
+}
+
+func (h *tryHoist) simple(s syntax.Stmt) []syntax.Stmt {
+	if !h.hasSwitch(s) {
+		return []syntax.Stmt{s}
+	}
+	fl := h.fl
+	pos := syntax.StartPos(s)
+	start := fl.off(pos)
+	end := stmtEnd(fl.src, start)
+	x := h.newHost(pos)
+	define := false
+	switch s := s.(type) {
+	case *syntax.AssignStmt:
+		opOff := fl.off(s.Pos())
+		if s.Op == syntax.Def {
+			define = true
+		} else {
+			x.lvalues(s.Lhs, fl.tokenSpan(start, opOff))
+		}
+		if s.Rhs != nil {
+			x.items(s.Rhs, func(n syntax.Expr) { s.Rhs = n }, fl.tokenSpan(h.tokenEndAt(opOff), end))
+		}
+	case *syntax.ReturnStmt:
+		x.items(s.Results, func(n syntax.Expr) { s.Results = n }, fl.tokenSpan(start+len("return"), end))
+	case *syntax.DeclStmt:
+		define = true
+		vd, ok := s.DeclList[0].(*syntax.VarDecl)
+		if !ok || len(s.DeclList) != 1 || vd.Group != nil {
+			base.Fatalf("logos: switch expression with a try init in a declaration group at %s", pos.String())
+		}
+		x.items(vd.Values, func(n syntax.Expr) { vd.Values = n }, fl.tokenSpan(h.valuesStart(start, end), end))
+	}
+	if len(x.native) == 0 {
+		base.Fatalf("logos: switch expression with a try init was not hoisted at %s", pos.String())
+	}
+	if define {
+		fl.addT(start, start, x.cat())
+		return append(x.native, s)
+	}
+	fl.addT(start, start, cat(gen("{ "), x.cat()))
+	fl.add(end, end, " }")
+	return []syntax.Stmt{blockOf(pos, append(x.native, s))}
+}
+
+func (h *tryHoist) valuesStart(from, to int) int {
+	at := -1
+	depth := 0
+	scanSegment(h.fl.src, from, to, func(t tok) bool {
+		if t.comment || t.auto {
+			return true
+		}
+		switch t.kind {
+		case token.LPAREN, token.LBRACK, token.LBRACE:
+			depth++
+		case token.RPAREN, token.RBRACK, token.RBRACE:
+			depth--
+		case token.ASSIGN:
+			if depth == 0 {
+				at = t.end
 				return false
 			}
 		}
 		return true
-	case *syntax.ReturnStmt, *syntax.IfStmt, *syntax.SwitchStmt:
-		for _, sx := range switches {
-			if !fc.isSingleExpr(s, sx) {
-				return false
-			}
+	})
+	if at < 0 {
+		base.Fatalf("logos: cannot locate the declaration values at offset %d", from)
+	}
+	return at
+}
+
+func (h *tryHoist) tokenEndAt(off int) int {
+	end := off
+	scanSegment(h.fl.src, off, len(h.fl.src), func(t tok) bool {
+		if t.comment || t.auto {
+			return true
+		}
+		end = t.end
+		return false
+	})
+	return end
+}
+
+func (h *tryHoist) wrapIf(s *syntax.IfStmt) syntax.Stmt {
+	fl := h.fl
+	initHas := s.Init != nil && h.hasSwitch(s.Init)
+	condHas := h.hasSwitch(s.Cond)
+	if !initHas && !condHas {
+		return s
+	}
+	pos := s.Pos()
+	ifOff := fl.off(pos)
+	thenOff := fl.off(s.Then.Pos())
+	semi := -1
+	if s.Init != nil {
+		semis := h.headerSemis(ifOff+len("if"), thenOff, s.Init, s.Cond)
+		if len(semis) != 1 {
+			base.Fatalf("logos: cannot locate the if header at %s", pos.String())
+		}
+		semi = semis[0]
+	}
+	var native []syntax.Stmt
+	var text []otext
+	if initHas {
+		x := h.newHost(pos)
+		x.header(s.Init, fl.tokenSpan(ifOff+len("if"), semi))
+		native, text = append(native, x.native...), append(text, x.text...)
+	}
+	extract := condHas && s.Init != nil
+	if extract {
+		native = append(native, s.Init)
+		text = append(text, gen(fl.copyRegion(span{start: ifOff + len("if"), end: semi})), gen("; "))
+		s.Init = nil
+	}
+	if condHas {
+		x := h.newHost(pos)
+		x.child(s.Cond, func(n syntax.Expr) { s.Cond = n }, fl.tokenSpan(h.condFrom(ifOff, semi), thenOff))
+		native, text = append(native, x.native...), append(text, x.text...)
+	}
+	head := cat(append([]otext{gen("{ ")}, text...)...)
+	if extract {
+		fl.addT(ifOff, semi+1, cat(head, gen("if ")))
+	} else {
+		fl.addT(ifOff, ifOff, head)
+	}
+	end := ifEndOff(fl, s)
+	fl.add(end, end, " }")
+	wrapper := blockOf(pos, append(native, s))
+	wrapper.Rbrace = hostRbrace(s)
+	return wrapper
+}
+
+func (h *tryHoist) condFrom(ifOff, semi int) int {
+	if semi >= 0 {
+		return semi + 1
+	}
+	return ifOff + len("if")
+}
+
+func (h *tryHoist) rewriteSwitch(s *syntax.SwitchStmt) syntax.Stmt {
+	fl := h.fl
+	initHas := s.Init != nil && h.hasSwitch(s.Init)
+	tagHas := s.Tag != nil && h.hasSwitch(s.Tag)
+	if !initHas && !tagHas {
+		return s
+	}
+	pos := s.Pos()
+	if _, guard := s.Tag.(*syntax.TypeSwitchGuard); guard && tagHas {
+		base.Fatalf("logos: switch expression with a try init in a type switch guard at %s", pos.String())
+	}
+	swOff := fl.off(pos)
+	hdr := h.switchHeader(s)
+	var native []syntax.Stmt
+	var text []otext
+	if initHas {
+		x := h.newHost(pos)
+		x.header(s.Init, hdr.init)
+		native, text = append(native, x.native...), append(text, x.text...)
+	}
+	extract := tagHas && s.Init != nil
+	if extract {
+		native = append(native, s.Init)
+		text = append(text, gen(fl.copyRegion(span{start: swOff + len("switch"), end: hdr.init.end})), gen("; "))
+		s.Init = nil
+	}
+	if tagHas {
+		x := h.newHost(pos)
+		x.child(s.Tag, func(n syntax.Expr) { s.Tag = n }, hdr.tag)
+		native, text = append(native, x.native...), append(text, x.text...)
+	}
+	head := cat(append([]otext{gen("{ ")}, text...)...)
+	if extract {
+		fl.addT(swOff, hdr.tag.start, cat(head, gen("switch ")))
+	} else {
+		fl.addT(swOff, swOff, head)
+	}
+	end := fl.off(s.Rbrace) + 1
+	fl.add(end, end, " }")
+	wrapper := blockOf(pos, append(native, s))
+	wrapper.Rbrace = s.Rbrace
+	return wrapper
+}
+
+func (h *tryHoist) switchHeader(s *syntax.SwitchStmt) switchHeader {
+	fl := h.fl
+	from := fl.off(s.Pos()) + len("switch")
+	first := fl.off(s.Rbrace)
+	if len(s.Body) > 0 {
+		first = fl.off(s.Body[0].Pos())
+	}
+	brace := -1
+	scanSegment(fl.src, from, first, func(t tok) bool {
+		if !t.comment && !t.auto {
+			brace = t.start
 		}
 		return true
+	})
+	if brace < 0 || fl.src[brace] != '{' {
+		base.Fatalf("logos: cannot locate the switch body at %s", s.Pos().String())
 	}
-	return false
+	var hdr switchHeader
+	semis := h.headerSemis(from, brace, s.Init, s.Tag)
+	switch len(semis) {
+	case 0:
+		hdr.tag = fl.tokenSpan(from, brace)
+	case 1:
+		hdr.init = fl.tokenSpan(from, semis[0])
+		hdr.tag = fl.tokenSpan(semis[0]+1, brace)
+	default:
+		base.Fatalf("logos: cannot locate the switch header at %s", s.Pos().String())
+	}
+	return hdr
 }
 
-func (fc *funcLower) isSingleExpr(s syntax.Stmt, sx *syntax.SwitchExpr) bool {
-	switch t := s.(type) {
-	case *syntax.AssignStmt:
-		return syntax.Unparen(t.Rhs) == syntax.Expr(sx)
-	case *syntax.ExprStmt:
-		return syntax.Unparen(t.X) == syntax.Expr(sx)
-	case *syntax.ReturnStmt:
-		for _, r := range syntax.UnpackListExpr(t.Results) {
-			if syntax.Unparen(r) == syntax.Expr(sx) {
-				return true
-			}
-		}
-		return false
-	case *syntax.IfStmt:
-		if t.Init != nil {
-			if a, ok := t.Init.(*syntax.AssignStmt); ok {
-				if syntax.Unparen(a.Rhs) == syntax.Expr(sx) {
-					return true
-				}
-			}
-		}
-		return syntax.Unparen(t.Cond) == syntax.Expr(sx)
-	case *syntax.ForStmt:
-		return false
-	case *syntax.SwitchStmt:
-		if t.Init != nil {
-			if a, ok := t.Init.(*syntax.AssignStmt); ok {
-				if syntax.Unparen(a.Rhs) == syntax.Expr(sx) {
-					return true
-				}
-			}
-		}
-		if t.Tag != nil {
-			return syntax.Unparen(t.Tag) == syntax.Expr(sx)
-		}
-		return false
-	case *syntax.LabeledStmt:
-		return fc.isSingleExpr(t.Stmt, sx)
+func (h *tryHoist) rewriteFor(s *syntax.ForStmt) syntax.Stmt {
+	fl := h.fl
+	initHas := s.Init != nil && h.hasSwitch(s.Init)
+	condHas := s.Cond != nil && h.hasSwitch(s.Cond)
+	if s.Post != nil && h.hasSwitch(s.Post) {
+		base.Fatalf("logos: switch expression with a try init in a for post statement at %s", s.Pos().String())
 	}
-	return false
+	if !initHas && !condHas {
+		return s
+	}
+	pos := s.Pos()
+	forOff := fl.off(pos)
+	parts := h.forParts(s)
+	var result syntax.Stmt = s
+	if condHas {
+		h.hoistForCond(s, parts.cond)
+	}
+	if initHas {
+		x := h.newHost(pos)
+		x.header(s.Init, parts.init)
+		fl.addT(forOff, forOff, cat(append([]otext{gen("{ ")}, x.text...)...))
+		end := fl.off(s.Body.Rbrace) + 1
+		fl.add(end, end, " }")
+		wrapper := blockOf(pos, append(x.native, s))
+		wrapper.Rbrace = s.Body.Rbrace
+		result = wrapper
+	}
+	return result
 }
 
-func (fc *funcLower) switchUnderShort(s syntax.Stmt, sx *syntax.SwitchExpr) bool {
-	fields := fc.stmtExprFields(s)
-	for _, f := range fields {
-		if exprContainsShortSwitch(f, sx) {
-			return true
-		}
+func (h *tryHoist) hoistForCond(s *syntax.ForStmt, area span) {
+	fl := h.fl
+	open := s.Body.Pos()
+	x := h.newHost(open)
+	setCond := func(n syntax.Expr) { s.Cond = n }
+	var test string
+	if bare, ok := s.Cond.(*syntax.SwitchExpr); ok {
+		x.hoistSwitch(bare, setCond, "")
+		test = s.Cond.(*syntax.Name).Value
+	} else {
+		test = fl.moveRegion(area, "")
+		x.child(s.Cond, setCond, area)
 	}
-	return false
+	cond := s.Cond
+	s.Cond = nil
+	brk := at(&syntax.BranchStmt{Tok: syntax.Break}, open)
+	negated := at(&syntax.Operation{Op: syntax.Not, X: at(&syntax.ParenExpr{X: cond}, open)}, open)
+	guard := ifOf(open, nil, negated, []syntax.Stmt{brk})
+	x.text = append(x.text, gen("if !("+test+") { break }; "))
+	bodyOff := fl.off(open) + 1
+	fl.addT(bodyOff, bodyOff, cat(append([]otext{gen(" ")}, x.text...)...))
+	s.Body.List = append(append(x.native, guard), s.Body.List...)
 }
 
-func (fc *funcLower) stmtExprFields(s syntax.Stmt) []syntax.Node {
-	switch t := s.(type) {
-	case *syntax.AssignStmt:
-		return []syntax.Node{t.Rhs}
-	case *syntax.ExprStmt:
-		return []syntax.Node{t.X}
-	case *syntax.ReturnStmt:
-		return []syntax.Node{t.Results}
-	case *syntax.IfStmt:
-		var out []syntax.Node
-		if t.Init != nil {
-			out = append(out, t.Init)
-		}
-		out = append(out, t.Cond)
-		return out
-	case *syntax.ForStmt:
-		var out []syntax.Node
-		if t.Init != nil {
-			out = append(out, t.Init)
-		}
-		if t.Cond != nil {
-			out = append(out, t.Cond)
-		}
-		if t.Post != nil {
-			out = append(out, t.Post)
-		}
-		return out
-	case *syntax.SwitchStmt:
-		var out []syntax.Node
-		if t.Init != nil {
-			out = append(out, t.Init)
-		}
-		if t.Tag != nil {
-			out = append(out, t.Tag)
-		}
-		return out
-	case *syntax.LabeledStmt:
-		return fc.stmtExprFields(t.Stmt)
-	}
-	return nil
+type forHeaderParts struct {
+	init, cond span
 }
 
-func exprContainsShortSwitch(root syntax.Node, sx *syntax.SwitchExpr) bool {
-	found := false
-	syntax.Inspect(root, func(n syntax.Node) bool {
-		if found {
-			return false
+func (h *tryHoist) forParts(s *syntax.ForStmt) forHeaderParts {
+	fl := h.fl
+	from := fl.off(s.Pos()) + len("for")
+	to := fl.off(s.Body.Pos())
+	semis := h.headerSemis(from, to, s.Init, s.Cond, s.Post)
+	switch len(semis) {
+	case 0:
+		return forHeaderParts{cond: fl.tokenSpan(from, to)}
+	case 2:
+		return forHeaderParts{
+			init: fl.tokenSpan(from, semis[0]),
+			cond: fl.tokenSpan(semis[0]+1, semis[1]),
 		}
-		op, ok := n.(*syntax.Operation)
-		if !ok || (op.Op != syntax.AndAnd && op.Op != syntax.OrOr) {
-			return true
+	}
+	base.Fatalf("logos: cannot locate the for header at %s", s.Pos().String())
+	return forHeaderParts{}
+}
+
+func (h *tryHoist) headerSemis(from, to int, parts ...syntax.Node) []int {
+	var skip []span
+	for _, part := range parts {
+		if part == nil {
+			continue
 		}
-		inside := false
-		syntax.Inspect(op, func(m syntax.Node) bool {
-			if m == syntax.Node(sx) {
-				inside = true
+		syntax.Inspect(part, func(n syntax.Node) bool {
+			switch n := n.(type) {
+			case *syntax.FuncLit, *syntax.LambdaExpr:
+				return false
+			case *syntax.SwitchExpr:
+				skip = append(skip, span{start: h.fl.off(n.Pos()), end: h.fl.off(n.Rbrace) + 1})
 				return false
 			}
 			return true
 		})
-		if inside {
+	}
+	var out []int
+	depth := 0
+	scanSegment(h.fl.src, from, to, func(t tok) bool {
+		if t.comment || t.auto || insideAny(t.span, skip) {
+			return true
+		}
+		switch t.kind {
+		case token.LPAREN, token.LBRACK, token.LBRACE:
+			depth++
+		case token.RPAREN, token.RBRACK, token.RBRACE:
+			depth--
+		case token.SEMICOLON:
+			if depth == 0 {
+				out = append(out, t.start)
+			}
+		}
+		return true
+	})
+	return out
+}
+
+func (x *hoistHost) header(init syntax.SimpleStmt, area span) {
+	fl := x.h.fl
+	as, ok := init.(*syntax.AssignStmt)
+	if !ok {
+		base.Fatalf("logos: switch expression with a try init in a %T header statement at %s", init, init.Pos().String())
+	}
+	opOff := fl.off(as.Pos())
+	if as.Op != syntax.Def {
+		x.lvalues(as.Lhs, fl.tokenSpan(area.start, opOff))
+	}
+	if as.Rhs != nil {
+		x.items(as.Rhs, func(n syntax.Expr) { as.Rhs = n }, fl.tokenSpan(x.h.tokenEndAt(opOff), area.end))
+	}
+}
+
+func (h *tryHoist) hasSwitch(n syntax.Node) bool {
+	if n == nil {
+		return false
+	}
+	found := false
+	syntax.Inspect(n, func(m syntax.Node) bool {
+		if found {
+			return false
+		}
+		switch m := m.(type) {
+		case *syntax.FuncLit, *syntax.LambdaExpr:
+			return false
+		case *syntax.SwitchExpr:
+			if isTryInit(m) {
+				found = true
+				return false
+			}
+		}
+		return true
+	})
+	return found
+}
+
+func (h *tryHoist) impure(n syntax.Node) bool {
+	info := h.fl.pkg.info
+	found := false
+	syntax.Inspect(n, func(m syntax.Node) bool {
+		if found {
+			return false
+		}
+		switch m := m.(type) {
+		case *syntax.FuncLit, *syntax.LambdaExpr:
+			return false
+		case *syntax.SwitchExpr, *syntax.TryExpr:
+			found = true
+			return false
+		case *syntax.Operation:
+			if m.Y == nil && m.Op == syntax.Recv {
+				found = true
+				return false
+			}
+		case *syntax.CallExpr:
+			tv := info.Types[m.Fun]
+			if tv.IsType() {
+				return true
+			}
+			if tv.IsBuiltin() && pureBuiltin(m.Fun) {
+				return true
+			}
 			found = true
 			return false
 		}
@@ -336,297 +537,425 @@ func exprContainsShortSwitch(root syntax.Node, sx *syntax.SwitchExpr) bool {
 	return found
 }
 
-func (fc *funcLower) tempSwitchStmt(s syntax.Stmt, switches []*syntax.SwitchExpr) []syntax.Stmt {
-	ordered := orderByOff(fc.fl, switches)
-	var out []syntax.Stmt
-	fl := fc.fl
-	hpos := stmtStartPos(s)
-	for _, sx := range ordered {
-		typ := fl.pkg.info.TypeOf(sx)
-		nativeT, _, ok := fl.spellLoweredBoth(typ, sx.Pos())
-		if !ok {
-			continue
-		}
-		_, call := fc.errorSwitchIIFE(sx, nativeT, typ)
-		tmpName := fc.nextArg()
-		errName := fc.nextErr()
-		tmp := nameOf(sx.Pos(), tmpName)
-		decl := defineOf(hpos, []syntax.Expr{nameOf(hpos, tmpName), nameOf(hpos, errName)}, []syntax.Expr{call})
-		declText := renderText([]syntax.Stmt{decl}, nil)
-		fl.addT(fl.off(sx.Pos()), fl.off(sx.Rbrace)+1, cat(gen(tmpName)))
-		fl.addT(fl.off(hpos), fl.off(hpos), cat(declText.trimRight("\n"), gen("; ")))
-		checkNative, checkText := fc.plainReturnCheck(hpos, errName)
-		fl.addT(fl.off(hpos), fl.off(hpos), cat(checkText.trimRight("\n"), gen("; ")))
-		out = append(out, decl)
-		out = append(out, checkNative...)
-		fc.replaceSwitchWith(s, sx, tmp)
-	}
-	fc.recurseSwitchChildren(s)
-	out = append(out, s)
-	return out
-}
-
-func (fc *funcLower) wrapSwitchStmt(s syntax.Stmt, switches []*syntax.SwitchExpr) []syntax.Stmt {
-	stmtErr := fc.nextErr()
-	pos := stmtStartPos(s)
-	fl := fc.fl
-	declNative := errorVarDecl(pos, nameOf(pos, stmtErr))
-	declText := renderText([]syntax.Stmt{declNative}, nil)
-	fl.addT(fl.off(pos), fl.off(pos), cat(declText.trimRight("\n"), gen("; ")))
-	outer := outermostSwitches(fl, switches)
-	inner := orderInnerFirst(fl, switches)
-	for _, sx := range inner {
-		typ := fl.pkg.info.TypeOf(sx)
-		nativeT, _, ok := fl.spellLoweredBoth(typ, sx.Pos())
-		if !ok {
-			continue
-		}
-		lit, _ := fc.errorSwitchIIFE(sx, nativeT, typ)
-		wcall := fc.wrapCallWithStmtErr(sx, lit, nativeT, typ, stmtErr)
-		if isOutermost(fl, sx, switches, outer) {
-			txt := renderExprFull(wcall)
-			fl.addT(fl.off(sx.Pos()), fl.off(sx.Rbrace)+1, cat(gen(txt)))
-		}
-		fc.replaceSwitchWith(s, sx, wcall)
-	}
-	epos := syntax.EndPos(s)
-	tailOff := stmtEnd(fl.src, fl.off(pos))
-	checkNative, checkText := fc.plainReturnCheck(epos, stmtErr)
-	if fs, ok := s.(*syntax.ForStmt); ok {
-		topNative, topText := fc.plainReturnCheck(fs.Body.Pos(), stmtErr)
-		fs.Body.List = append(topNative, fs.Body.List...)
-		fl.addT(fl.off(fs.Body.Pos())+1, fl.off(fs.Body.Pos())+1, cat(gen(" "), topText))
-	}
-	out := []syntax.Stmt{declNative, s}
-	out = append(out, checkNative...)
-	if _, isCtl := s.(*syntax.ForStmt); isCtl {
-		tailOff = blockEndOff(fl, s)
-	}
-	fl.addT(tailOff, tailOff, cat(gen("; "), checkText))
-	fc.recurseSwitchChildren(s)
-	return out
-}
-func orderByOff(fl *fileLower, switches []*syntax.SwitchExpr) []*syntax.SwitchExpr {
-	out := slices.Clone(switches)
-	for i := 1; i < len(out); i++ {
-		for j := i; j > 0 && fl.off(out[j].Pos()) < fl.off(out[j-1].Pos()); j-- {
-			out[j], out[j-1] = out[j-1], out[j]
-		}
-	}
-	return out
-}
-
-func orderInnerFirst(fl *fileLower, switches []*syntax.SwitchExpr) []*syntax.SwitchExpr {
-	out := slices.Clone(switches)
-	for i := 1; i < len(out); i++ {
-		for j := i; j > 0 && fl.off(out[j].Pos()) > fl.off(out[j-1].Pos()); j-- {
-			out[j], out[j-1] = out[j-1], out[j]
-		}
-	}
-	return out
-}
-
-func outermostSwitches(fl *fileLower, switches []*syntax.SwitchExpr) map[*syntax.SwitchExpr]bool {
-	out := make(map[*syntax.SwitchExpr]bool)
-	for _, sx := range switches {
-		contained := false
-		ss, se := fl.off(sx.Pos()), fl.off(sx.Rbrace)
-		for _, other := range switches {
-			if other == sx {
-				continue
-			}
-			os, oe := fl.off(other.Pos()), fl.off(other.Rbrace)
-			if os <= ss && se <= oe {
-				contained = true
-				break
-			}
-		}
-		if !contained {
-			out[sx] = true
-		}
-	}
-	return out
-}
-
-func isOutermost(fl *fileLower, sx *syntax.SwitchExpr, all []*syntax.SwitchExpr, outer map[*syntax.SwitchExpr]bool) bool {
-	return outer[sx]
-}
-
-func (fc *funcLower) replaceSwitchWith(s syntax.Stmt, sx *syntax.SwitchExpr, with syntax.Expr) {
-	v := reflect.ValueOf(s)
-	replaceInValue(v, sx, with)
-}
-
-func replaceInValue(v reflect.Value, sx *syntax.SwitchExpr, with syntax.Expr) bool {
-	if !v.IsValid() {
+func pureBuiltin(fun syntax.Expr) bool {
+	name, ok := syntax.Unparen(fun).(*syntax.Name)
+	if !ok {
 		return false
 	}
-	if v.Kind() == reflect.Interface && !v.IsNil() && v.CanSet() {
-		if cur, ok := v.Elem().Interface().(*syntax.SwitchExpr); ok && cur == sx {
-			v.Set(reflect.ValueOf(with))
-			return true
-		}
-	}
-	switch v.Kind() {
-	case reflect.Ptr:
-		if v.IsNil() {
-			return false
-		}
-		if sxNode, ok := v.Interface().(*syntax.SwitchExpr); ok && sxNode == sx {
-			return false
-		}
-		return replaceInValue(v.Elem(), sx, with)
-	case reflect.Struct:
-		t := v.Type()
-		for i := range v.NumField() {
-			if !t.Field(i).IsExported() {
-				continue
-			}
-			if replaceInValue(v.Field(i), sx, with) {
-				return true
-			}
-		}
-	case reflect.Slice, reflect.Array:
-		for i := range v.Len() {
-			if replaceInValue(v.Index(i), sx, with) {
-				return true
-			}
-		}
-	case reflect.Interface:
-		if v.IsNil() {
-			return false
-		}
-		if cur, ok := v.Elem().Interface().(*syntax.SwitchExpr); ok && cur == sx {
-			if v.CanSet() {
-				v.Set(reflect.ValueOf(with))
-				return true
-			}
-			return false
-		}
-		return replaceInValue(v.Elem(), sx, with)
+	switch name.Value {
+	case "len", "cap", "min", "max", "real", "imag", "complex", "new", "make":
+		return true
 	}
 	return false
 }
 
-func (fc *funcLower) errorSwitchIIFE(sx *syntax.SwitchExpr, nativeT syntax.Expr, typ types2.Type) (*syntax.FuncLit, *syntax.CallExpr) {
-	pos := sx.Pos()
-	ft := at(&syntax.FuncType{
-		ResultList: []*syntax.Field{
-			at(&syntax.Field{Type: nativeT}, pos),
-			at(&syntax.Field{Type: nameOf(pos, "error")}, pos),
-		},
-	}, pos)
-	body := fc.errorSwitchBody(sx, typ)
-	lit := at(&syntax.FuncLit{Type: ft, Body: body}, pos)
-	return lit, callOf(pos, lit, nil)
+func (h *tryHoist) scan(area span) []tok {
+	var toks []tok
+	scanSegment(h.fl.src, area.start, area.end, func(t tok) bool {
+		if !t.comment && !t.auto {
+			toks = append(toks, t)
+		}
+		return true
+	})
+	return toks
 }
 
-func (fc *funcLower) errorSwitchBody(sx *syntax.SwitchExpr, typ types2.Type) *syntax.BlockStmt {
-	pos := sx.Pos()
-	var list []syntax.Stmt
-	if sx.Init != nil {
-		switch init := sx.Init.(type) {
-		case *syntax.AssignStmt:
-			if t, call, ok := tryAssignOf(init); ok {
-				list = append(list, fc.innerTryAssign(init, t, call, typ)...)
-			} else {
-				list = append(list, init)
+func (h *tryHoist) peel(area span) span {
+	for {
+		toks := h.scan(area)
+		if len(toks) < 2 || toks[0].kind != token.LPAREN || toks[len(toks)-1].kind != token.RPAREN {
+			return area
+		}
+		depth := 0
+		for i, t := range toks {
+			switch t.kind {
+			case token.LPAREN:
+				depth++
+			case token.RPAREN:
+				depth--
+				if depth == 0 && i < len(toks)-1 {
+					return area
+				}
 			}
-		case *syntax.ExprStmt:
-			if t, call, ok := tryExprOf(init); ok {
-				list = append(list, fc.innerTryExpr(init, t, call, typ)...)
-			} else {
-				list = append(list, init)
+		}
+		area = h.fl.tokenSpan(toks[0].end, toks[len(toks)-1].start)
+	}
+}
+
+func (h *tryHoist) peelOnce(area span) span {
+	toks := h.scan(area)
+	if len(toks) < 2 || toks[0].kind != token.LPAREN || toks[len(toks)-1].kind != token.RPAREN {
+		base.Fatalf("logos: cannot locate the parenthesized expression at offset %d", area.start)
+	}
+	return h.fl.tokenSpan(toks[0].end, toks[len(toks)-1].start)
+}
+
+func (h *tryHoist) lastOpen(area span, open, closing token.Token) (openOff, closeOff int) {
+	toks := h.scan(area)
+	if len(toks) == 0 || toks[len(toks)-1].kind != closing {
+		base.Fatalf("logos: cannot locate the closing %s at offset %d", closing, area.end)
+	}
+	openOff = -1
+	depth := 0
+	for _, t := range toks {
+		switch t.kind {
+		case token.LPAREN, token.LBRACK, token.LBRACE:
+			if t.kind == open && depth == 0 {
+				openOff = t.start
+			}
+			depth++
+		case token.RPAREN, token.RBRACK, token.RBRACE:
+			depth--
+		}
+	}
+	if openOff < 0 {
+		base.Fatalf("logos: cannot locate the opening %s at offset %d", open, area.start)
+	}
+	return openOff, toks[len(toks)-1].start
+}
+
+func (h *tryHoist) commas(area span) []int {
+	var out []int
+	depth := 0
+	for _, t := range h.scan(area) {
+		switch t.kind {
+		case token.LPAREN, token.LBRACK, token.LBRACE:
+			depth++
+		case token.RPAREN, token.RBRACK, token.RBRACE:
+			depth--
+		case token.COMMA:
+			if depth == 0 {
+				out = append(out, t.start)
 			}
 		}
 	}
-	tag := sx.Tag
-	clauses := make([]*syntax.CaseClause, 0, len(sx.Arms))
-	for _, arm := range sx.Arms {
-		result := returnOf(arm.Arrow, []syntax.Expr{arm.Body, nilOf(arm.Arrow)})
-		clauses = append(clauses, at(&syntax.CaseClause{
-			Cases: arm.Cases,
-			Body:  []syntax.Stmt{result},
-			Colon: arm.Arrow,
-		}, arm.Pos()))
-	}
-	list = append(list, at(&syntax.SwitchStmt{Tag: tag, Body: clauses, Rbrace: sx.Rbrace}, pos))
-	return at(&syntax.BlockStmt{List: list, Rbrace: sx.Rbrace}, pos)
+	return out
 }
 
-func (fc *funcLower) innerTryAssign(s *syntax.AssignStmt, t *syntax.TryExpr, call *syntax.CallExpr, typ types2.Type) []syntax.Stmt {
-	pos := s.Pos()
-	errSpell := fc.nextErr()
-	err := nameOf(pos, errSpell)
-	lhs := syntax.UnpackListExpr(s.Lhs)
-	zeroT := fc.fl.zeroValue(typ, pos)
-	site := nameOf(pos, fc.fl.newSite(t.Pos(), t.Pos().Line()))
-	trace := exprStmtOf(pos, callOf(pos, rtSel(pos, "TraceErr"), []syntax.Expr{err, at(&syntax.Operation{Op: syntax.And, X: site}, pos)}))
-	exit := []syntax.Stmt{trace, returnOf(pos, []syntax.Expr{zeroT, err})}
-	if s.Op == syntax.Def {
-		return []syntax.Stmt{
-			errDefineOf(pos, lhs, call, err),
-			errCheckOf(pos, err, exit),
+func (h *tryHoist) colon(area span) int {
+	depth := 0
+	for _, t := range h.scan(area) {
+		switch t.kind {
+		case token.LPAREN, token.LBRACK, token.LBRACE:
+			depth++
+		case token.RPAREN, token.RBRACK, token.RBRACE:
+			depth--
+		case token.COLON:
+			if depth == 0 {
+				return t.start
+			}
 		}
 	}
-	return []syntax.Stmt{
-		errorVarDecl(pos, err),
-		assignOf(pos, append(slices.Clone(lhs), err), []syntax.Expr{call}),
-		errCheckOf(pos, err, exit),
+	base.Fatalf("logos: cannot locate the key colon at offset %d", area.start)
+	return 0
+}
+
+func (h *tryHoist) split(area span, n int) []span {
+	if n == 1 {
+		return []span{area}
+	}
+	commas := h.commas(area)
+	if len(commas) != n-1 {
+		base.Fatalf("logos: cannot split %d list items at offset %d", n, area.start)
+	}
+	out := make([]span, n)
+	from := area.start
+	for i := range n {
+		to := area.end
+		if i < n-1 {
+			to = commas[i]
+		}
+		out[i] = h.fl.tokenSpan(from, to)
+		if i < n-1 {
+			from = commas[i] + 1
+		}
+	}
+	return out
+}
+
+func (x *hoistHost) items(e syntax.Expr, set func(syntax.Expr), area span) {
+	l, ok := e.(*syntax.ListExpr)
+	if !ok {
+		x.child(e, set, area)
+		return
+	}
+	for i, part := range x.h.split(area, len(l.ElemList)) {
+		x.child(l.ElemList[i], func(n syntax.Expr) { l.ElemList[i] = n }, part)
 	}
 }
 
-func (fc *funcLower) innerTryExpr(s *syntax.ExprStmt, t *syntax.TryExpr, call *syntax.CallExpr, typ types2.Type) []syntax.Stmt {
-	pos := s.Pos()
-	errSpell := fc.nextErr()
-	err := nameOf(pos, errSpell)
-	zeroT := fc.fl.zeroValue(typ, pos)
-	site := nameOf(pos, fc.fl.newSite(t.Pos(), t.Pos().Line()))
-	trace := exprStmtOf(pos, callOf(pos, rtSel(pos, "TraceErr"), []syntax.Expr{err, at(&syntax.Operation{Op: syntax.And, X: site}, pos)}))
-	exit := []syntax.Stmt{trace, returnOf(pos, []syntax.Expr{zeroT, err})}
-	n := fc.callResults(call)
-	if n == 0 {
-		return []syntax.Stmt{errCheckInitOf(pos, nil, call, err, exit)}
+func (x *hoistHost) lvalues(e syntax.Expr, area span) {
+	l, ok := e.(*syntax.ListExpr)
+	if !ok {
+		x.lvalue(e, area)
+		return
 	}
-	return []syntax.Stmt{
-		errDefineOf(pos, blankNames(pos, n), call, err),
-		errCheckOf(pos, err, exit),
+	for i, part := range x.h.split(area, len(l.ElemList)) {
+		x.lvalue(l.ElemList[i], part)
 	}
 }
 
-func (fc *funcLower) plainReturnCheck(pos syntax.Pos, errName string) ([]syntax.Stmt, otext) {
-	err := nameOf(pos, errName)
-	zeros := fc.zerosAt(pos)
-	results := append(append([]syntax.Expr(nil), zeros...), err)
-	native := []syntax.Stmt{ifOf(pos, nil, notNil(pos, err), []syntax.Stmt{returnOf(pos, results)})}
-	return native, renderText(native, nil)
-}
-
-func (fc *funcLower) wrapCallWithStmtErr(sx *syntax.SwitchExpr, lit *syntax.FuncLit, nativeT syntax.Expr, typ types2.Type, stmtErr string) syntax.Expr {
-	pos := sx.Pos()
-	zeroT := fc.fl.zeroValue(typ, pos)
-	innerCall := callOf(pos, lit, nil)
-	tmpT := fc.nextArg()
-	tmpE := fc.nextErr()
-	serr := nameOf(pos, stmtErr)
-	body := []syntax.Stmt{
-		ifOf(pos, nil, notNil(pos, serr), []syntax.Stmt{returnOf(pos, []syntax.Expr{zeroT})}),
-		defineOf(pos, []syntax.Expr{nameOf(pos, tmpT), nameOf(pos, tmpE)}, []syntax.Expr{innerCall}),
-		ifOf(pos, nil, notNil(pos, nameOf(pos, tmpE)), []syntax.Stmt{
-			assignOf(pos, []syntax.Expr{serr}, []syntax.Expr{nameOf(pos, tmpE)}),
-			returnOf(pos, []syntax.Expr{zeroT}),
-		}),
-		returnOf(pos, []syntax.Expr{nameOf(pos, tmpT)}),
+func (h *tryHoist) underlying(e syntax.Expr) types2.Type {
+	if t := h.fl.pkg.info.TypeOf(e); t != nil {
+		return t.Underlying()
 	}
-	wlit := at(&syntax.FuncLit{
-		Type: at(&syntax.FuncType{ResultList: []*syntax.Field{at(&syntax.Field{Type: nativeT}, pos)}}, pos),
-		Body: at(&syntax.BlockStmt{List: body, Rbrace: pos}, pos),
-	}, pos)
-	return callOf(pos, wlit, nil)
+	return nil
 }
 
-func renderExprFull(e syntax.Expr) string {
-	var buf bytes.Buffer
-	_, _ = syntax.Fprint(&buf, e, 0)
-	return buf.String()
+func (x *hoistHost) lvalue(e syntax.Expr, area span) {
+	h := x.h
+	area = h.peel(area)
+	switch n := e.(type) {
+	case *syntax.IndexExpr:
+		lbrack, rbrack := h.lastOpen(area, token.LBRACK, token.RBRACK)
+		xArea := h.fl.tokenSpan(area.start, lbrack)
+		if _, array := h.underlying(n.X).(*types2.Array); array {
+			x.lvalue(n.X, xArea)
+		} else {
+			x.child(n.X, func(v syntax.Expr) { n.X = v }, xArea)
+		}
+		x.child(n.Index, func(v syntax.Expr) { n.Index = v }, h.fl.tokenSpan(lbrack+1, rbrack))
+	case *syntax.SelectorExpr:
+		if h.fl.pkg.info.Selections[n] == nil {
+			return
+		}
+		xArea := h.fl.tokenSpan(area.start, h.fl.off(n.Pos()))
+		if _, ptr := h.underlying(n.X).(*types2.Pointer); ptr {
+			x.child(n.X, func(v syntax.Expr) { n.X = v }, xArea)
+		} else {
+			x.lvalue(n.X, xArea)
+		}
+	case *syntax.Operation:
+		if n.Y == nil && n.Op == syntax.Mul {
+			x.child(n.X, func(v syntax.Expr) { n.X = v }, h.fl.tokenSpan(h.tokenEndAt(area.start), area.end))
+		}
+	case *syntax.ParenExpr:
+		x.lvalue(n.X, h.peelOnce(area))
+	}
+}
+
+func (x *hoistHost) child(e syntax.Expr, set func(syntax.Expr), area span) {
+	if x.h.hasSwitch(e) {
+		x.expr(e, set, area)
+		return
+	}
+	x.operand(e, set, area)
+}
+
+func (x *hoistHost) operand(e syntax.Expr, set func(syntax.Expr), area span) {
+	if !x.h.impure(e) {
+		return
+	}
+	if cl, ok := e.(*syntax.CompositeLit); ok && cl.Type == nil {
+		x.complit(cl, x.h.peel(area))
+		return
+	}
+	x.pending = append(x.pending, hoistOperand{e: e, set: set, area: area})
+}
+
+func (x *hoistHost) expr(e syntax.Expr, set func(syntax.Expr), area span) {
+	h := x.h
+	fl := h.fl
+	switch n := e.(type) {
+	case *syntax.SwitchExpr:
+		if !isTryInit(n) {
+			base.Fatalf("logos: switch expression with a try init under a switch expression at %s", n.Pos().String())
+		}
+		x.switchExpr(n, set)
+	case *syntax.ParenExpr:
+		x.child(n.X, func(v syntax.Expr) { n.X = v }, h.peelOnce(area))
+	case *syntax.Operation:
+		inner := h.peel(area)
+		if n.Y == nil {
+			x.child(n.X, func(v syntax.Expr) { n.X = v }, fl.tokenSpan(h.tokenEndAt(inner.start), inner.end))
+			return
+		}
+		opOff := fl.off(n.Pos())
+		xArea := fl.tokenSpan(inner.start, opOff)
+		x.child(n.X, func(v syntax.Expr) { n.X = v }, xArea)
+		yArea := fl.tokenSpan(h.tokenEndAt(opOff), inner.end)
+		if n.Op == syntax.AndAnd || n.Op == syntax.OrOr {
+			x.shortCircuit(n, set, shortCircuitAreas{whole: area, x: xArea, y: yArea})
+			return
+		}
+		x.child(n.Y, func(v syntax.Expr) { n.Y = v }, yArea)
+	case *syntax.IndexExpr:
+		inner := h.peel(area)
+		lbrack, rbrack := h.lastOpen(inner, token.LBRACK, token.RBRACK)
+		x.child(n.X, func(v syntax.Expr) { n.X = v }, fl.tokenSpan(inner.start, lbrack))
+		x.child(n.Index, func(v syntax.Expr) { n.Index = v }, fl.tokenSpan(lbrack+1, rbrack))
+	case *syntax.SelectorExpr:
+		inner := h.peel(area)
+		x.child(n.X, func(v syntax.Expr) { n.X = v }, fl.tokenSpan(inner.start, fl.off(n.Pos())))
+	case *syntax.CompositeLit:
+		x.complit(n, h.peel(area))
+	default:
+		base.Fatalf("logos: switch expression with a try init under %T at %s", e, e.Pos().String())
+	}
+}
+
+type shortCircuitAreas struct {
+	whole, x, y span
+}
+
+func (x *hoistHost) shortCircuit(n *syntax.Operation, set func(syntax.Expr), areas shortCircuitAreas) {
+	h := x.h
+	fl := h.fl
+	if !h.hasSwitch(n.Y) {
+		if h.impure(n.Y) {
+			x.pending = append(x.pending, hoistOperand{e: n, set: set, area: areas.whole})
+		}
+		return
+	}
+	x.flush()
+	pos := syntax.StartPos(n)
+	name := fmt.Sprintf("_logos_cc_%d_%d", pos.Line(), pos.Col())
+	xText := x.areaText(n.X, areas.x)
+	y := h.newHost(x.pos)
+	y.child(n.Y, func(v syntax.Expr) { n.Y = v }, areas.y)
+	yText := x.areaText(n.Y, areas.y)
+	fl.moveRegion(areas.whole, name)
+	var test syntax.Expr = nameOf(x.pos, name)
+	testText := name
+	if n.Op == syntax.OrOr {
+		test = at(&syntax.Operation{Op: syntax.Not, X: test}, x.pos)
+		testText = "!" + name
+	}
+	define := defineOf(x.pos, []syntax.Expr{nameOf(x.pos, name)}, []syntax.Expr{n.X})
+	assign := assignOf(x.pos, []syntax.Expr{nameOf(x.pos, name)}, []syntax.Expr{n.Y})
+	guard := ifOf(x.pos, nil, test, append(y.native, assign))
+	x.native = append(x.native, define, guard)
+	x.text = append(x.text, cat(
+		gen(name+" := "), gen(xText), gen("; if "+testText+" { "),
+		cat(y.text...),
+		gen(name+" = "), gen(yText), gen(" }; "),
+	))
+	set(x.stub(name, pos, n))
+}
+
+func (x *hoistHost) areaText(e syntax.Expr, area span) string {
+	if name, ok := e.(*syntax.Name); ok && strings.HasPrefix(name.Value, "_logos_") {
+		return name.Value
+	}
+	return x.h.fl.copyRegion(area)
+}
+
+func (x *hoistHost) complit(cl *syntax.CompositeLit, area span) {
+	h := x.h
+	lbrace, rbrace := h.lastOpen(area, token.LBRACE, token.RBRACE)
+	body := h.fl.tokenSpan(lbrace+1, rbrace)
+	if len(cl.ElemList) == 0 {
+		return
+	}
+	for i, part := range h.split(body, len(cl.ElemList)) {
+		el := cl.ElemList[i]
+		if kv, ok := el.(*syntax.KeyValueExpr); ok {
+			colon := h.colon(part)
+			x.child(kv.Key, func(v syntax.Expr) { kv.Key = v }, h.fl.tokenSpan(part.start, colon))
+			x.child(kv.Value, func(v syntax.Expr) { kv.Value = v }, h.fl.tokenSpan(colon+1, part.end))
+			continue
+		}
+		x.child(el, func(v syntax.Expr) { cl.ElemList[i] = v }, part)
+	}
+}
+
+func (x *hoistHost) stub(name string, pos syntax.Pos, like syntax.Expr) *syntax.Name {
+	n := nameOf(pos, name)
+	info := x.h.fl.pkg.info
+	if tv, ok := info.Types[like]; ok {
+		info.Types[n] = tv
+	}
+	return n
+}
+
+func (x *hoistHost) flush() {
+	if len(x.pending) == 0 {
+		return
+	}
+	fl := x.h.fl
+	var names, exprs []syntax.Expr
+	var lhs, rhs []otext
+	for _, op := range x.pending {
+		x.seq++
+		name := fmt.Sprintf("_logos_op_%d_%d_%d", x.pos.Line(), x.pos.Col(), x.seq)
+		mark := fl.moveRegion(op.area, name)
+		names = append(names, nameOf(x.pos, name))
+		exprs = append(exprs, op.e)
+		lhs = append(lhs, gen(name))
+		rhs = append(rhs, gen(mark))
+		op.set(x.stub(name, syntax.StartPos(op.e), op.e))
+	}
+	x.pending = nil
+	parts := make([]otext, 0, 2*len(lhs)+4)
+	for i := range lhs {
+		if i > 0 {
+			parts = append(parts, gen(", "))
+		}
+		parts = append(parts, lhs[i])
+	}
+	parts = append(parts, gen(" := "))
+	for i := range rhs {
+		if i > 0 {
+			parts = append(parts, gen(", "))
+		}
+		parts = append(parts, rhs[i])
+	}
+	parts = append(parts, gen("; "))
+	x.native = append(x.native, defineOf(x.pos, names, exprs))
+	x.text = append(x.text, cat(parts...))
+}
+
+func switchName(e *syntax.SwitchExpr) string {
+	pos := e.Pos()
+	return fmt.Sprintf("_logos_sw_%d_%d", pos.Line(), pos.Col())
+}
+
+func (x *hoistHost) switchExpr(e *syntax.SwitchExpr, set func(syntax.Expr)) {
+	x.hoistSwitch(e, set, switchName(e))
+}
+
+func (x *hoistHost) hoistSwitch(e *syntax.SwitchExpr, set func(syntax.Expr), hostText string) {
+	fl := x.h.fl
+	x.flush()
+	pos := e.Pos()
+	name := switchName(e)
+	typ := fl.pkg.info.TypeOf(e)
+	if typ == nil {
+		base.Fatalf("logos: switch expression at %s has no checked type", pos.String())
+	}
+	nativeT, text, ok := fl.spellLoweredBoth(typ, pos)
+	if !ok {
+		base.Fatalf("logos: switch expression at %s has type %s that cannot be spelled in this file", pos.String(), typ)
+	}
+	head := fl.off(pos)
+	bound := fl.off(e.Rbrace)
+	if len(e.Arms) > 0 {
+		bound = fl.off(e.Arms[0].Pos())
+	}
+	semis := fl.topSemis(head+len("switch"), bound)
+	if len(semis) != 1 {
+		base.Fatalf("logos: cannot locate the init of the switch expression at %s", pos.String())
+	}
+	initMark := fl.moveRegion(span{start: head + len("switch"), end: semis[0]}, "")
+	fl.add(semis[0], semis[0]+1, "")
+	swMark := fl.moveRegion(span{start: head, end: fl.off(e.Rbrace) + 1}, hostText)
+	init := e.Init
+	e.Init = nil
+	block := blockOf(x.pos, []syntax.Stmt{
+		init,
+		assignOf(x.pos, []syntax.Expr{nameOf(x.pos, name)}, []syntax.Expr{e}),
+	})
+	if fl.anchorBlocks == nil {
+		fl.anchorBlocks = make(map[*syntax.BlockStmt]bool)
+	}
+	fl.anchorBlocks[block] = true
+	x.native = append(x.native, typedVarDecl(x.pos, nameOf(x.pos, name), nativeT), block)
+	x.text = append(x.text, cat(
+		gen("var "+name+" "+text+"; { "),
+		gen(initMark),
+		gen("; "+name+" = "),
+		gen(swMark),
+		gen(" }; "),
+	))
+	set(x.stub(name, pos, e))
 }

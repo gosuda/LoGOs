@@ -67,6 +67,9 @@ func replaceSwitchField(f reflect.Value, repl func(*syntax.SwitchExpr) syntax.Ex
 }
 
 func (fl *fileLower) lowerSwitchExpr(e *syntax.SwitchExpr) syntax.Expr {
+	if isTryInit(e) {
+		base.Fatalf("logos: switch expression at %s reached lowering with a try init", e.Pos().String())
+	}
 	pos := e.Pos()
 	typ := fl.pkg.info.TypeOf(e)
 	if typ == nil {
@@ -78,12 +81,17 @@ func (fl *fileLower) lowerSwitchExpr(e *syntax.SwitchExpr) syntax.Expr {
 	}
 
 	results := fl.expandArmCases(e)
+	tupleElems, _ := fl.tupleTargetOfType(typ)
 	clauses := make([]*syntax.CaseClause, 0, len(e.Arms))
 	for i, arm := range e.Arms {
 		if results[i].drop {
 			continue
 		}
-		var result syntax.Stmt = at(&syntax.ReturnStmt{Results: arm.Body}, arm.Arrow)
+		ret := at(&syntax.ReturnStmt{Results: arm.Body}, arm.Arrow)
+		if len(tupleElems) > 0 {
+			fl.keepTupleReturn(ret)
+		}
+		var result syntax.Stmt = ret
 		if b := results[i].bind; b != nil {
 			result = blockOf(arm.Arrow, append(b.stmts(arm.Arrow), result))
 		}

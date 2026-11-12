@@ -196,6 +196,9 @@ func (fc *funcLower) lowerCompound(s syntax.Stmt) []syntax.Stmt {
 	switch s := s.(type) {
 	case *syntax.BlockStmt:
 		s.List = fc.lowerList(s.List)
+		if fc.fl.anchorBlocks[s] {
+			anchorScopes(s.List, s.Pos())
+		}
 		return []syntax.Stmt{s}
 	case *syntax.IfStmt:
 		return fc.lowerIf(s)
