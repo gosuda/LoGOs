@@ -5,3 +5,5 @@ ok logged
 ok scope-cleanup
 ok durs
 ok return-ends
+ok generator-body-waits-for-iteration
+ok generator-body-restarts-for-each-iteration

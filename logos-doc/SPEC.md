@@ -321,7 +321,7 @@ A function whose single result is `iter.Seq[T]` or `iter.Seq2[K, V]` MUST be a g
 A `yield` elsewhere MUST fail with `correctness::yield_outside_generator` [T-104.8].
 A generator MUST supply one value per `yield` for `iter.Seq[T]` and two values per `yield` for `iter.Seq2[K, V]` [T-104.8].
 Each yielded value MUST be assignable to its element type [T-104.8].
-A generator body MUST lower to returning an iterator closure with each `yield e` becoming `if !_logos_yield(e) { return }`, so an early `break` in the consumer stops the generator with no further body running [T-104.8].
+A generator body MUST NOT run until the sequence the function returns is iterated, MUST run from its first statement once for each iteration of that sequence, and MUST pass each `yield e` to the consumer; an early `break` in the consumer MUST end the body at that `yield` with no further statement of it running [T-104.8].
 A generator body MUST need no `return`: falling off the end ends the sequence [T-104.8].
 A `return` with values inside a generator MUST act as a bare `return`: the values are discarded [T-104.8].
 ```go

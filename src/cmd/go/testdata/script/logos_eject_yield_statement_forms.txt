@@ -23,7 +23,27 @@ exec $GOROOT/bin/gofmt -l .
 ! stdout .
 cd ../..
 
+cp $GOROOT/test/logos/run/yield.lgo b/main.lgo
+
+cd b
+logos run .
+cmp stdout $GOROOT/test/logos/run/yield.out
+logos eject -o out
+exists out/main.go
+! exists out/main.lgo
+cd out
+go run .
+cmp stdout $GOROOT/test/logos/run/yield.out
+exec env -u GOROOT $UPROOT1272/bin/go run .
+cmp stdout $GOROOT/test/logos/run/yield.out
+cd ../..
+
 -- a/go.mod --
 module example.com/yieldforms
+
+go 1.27
+
+-- b/go.mod --
+module example.com/yieldrun
 
 go 1.27
