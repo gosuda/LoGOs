@@ -168,6 +168,20 @@ func rtSel(pos syntax.Pos, sel string) *syntax.SelectorExpr {
 	return selOf(pos, nameOf(pos, rtAlias), sel)
 }
 
+func (fl *fileLower) carryType(dst, src syntax.Expr) {
+	if dst == src {
+		return
+	}
+	if tv, ok := fl.pkg.info.Types[src]; ok && !tv.IsType() {
+		if _, has := fl.pkg.info.Types[dst]; !has {
+			fl.pkg.info.Types[dst] = tv
+		}
+	}
+	if tv := src.GetTypeInfo(); tv.Type != nil && !tv.IsType() && dst.GetTypeInfo().Type == nil {
+		dst.SetTypeInfo(tv)
+	}
+}
+
 func (fl *fileLower) zeroValue(typ types2.Type, pos syntax.Pos) syntax.Expr {
 	if c := constAsView(typ); c != nil {
 		return fl.zeroValue(c.Elem, pos)

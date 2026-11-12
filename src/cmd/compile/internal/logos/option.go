@@ -136,7 +136,12 @@ func (fl *fileLower) lowerOptField(v reflect.Value, ft reflect.Type) {
 	}
 }
 
-func (fl *fileLower) lowerOptExpr(e syntax.Expr) syntax.Expr {
+func (fl *fileLower) lowerOptExpr(e syntax.Expr) (out syntax.Expr) {
+	defer func() {
+		if out != nil && e != nil {
+			fl.carryType(out, e)
+		}
+	}()
 	switch e := e.(type) {
 	case nil:
 		return nil

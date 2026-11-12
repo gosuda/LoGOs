@@ -115,7 +115,9 @@ func (fl *fileLower) lowerSwitchExpr(e *syntax.SwitchExpr) syntax.Expr {
 	lit := at(&syntax.FuncLit{Type: signature, Body: at(&syntax.BlockStmt{List: body, Rbrace: e.Rbrace}, pos)}, pos)
 
 	fl.spliceSwitchExpr(e, text, unreachable, results)
-	return callOf(pos, lit, nil)
+	call := callOf(pos, lit, nil)
+	fl.carryType(call, e)
+	return call
 }
 
 func hasDefaultArm(e *syntax.SwitchExpr) bool {
