@@ -479,7 +479,7 @@ func (cg *chainGen) runParTail(call *syntax.CallExpr, ops []chainOp, base syntax
 func (cg *chainGen) parReplace(call *syntax.CallExpr, ce *chainEmit, loop otext) {
 	fl := cg.fl
 	text := cat(gen("func() ("+ce.resultSpelling()+", error) { "), cat(leftoverComments(fl, cg.whole, cg.kept), loop), gen(" }()"))
-	fl.stageReplacement(call, parseStageFrag(text.s, leftmostOf(call)))
+	fl.stageReplacement(call, parseStageFrag(fl, text.s, leftmostOf(call)))
 	fl.addT(cg.whole.start, cg.whole.end, text)
 }
 
@@ -581,7 +581,7 @@ func (fl *fileLower) lowerParRange(s syntax.Stmt, enc []resultSpec) ([]syntax.St
 		rc.Def = true
 	}
 	rc.Lhs = listOf(pos, append(slices.Clone(names), nameOf(pos, errName)))
-	rc.X = parseStageFrag(seq.s, pos)
+	rc.X = parseStageFrag(fl, seq.s, pos)
 	fs.Body.List = append(check, fs.Body.List...)
 	return append(out, s), true
 }
@@ -607,7 +607,8 @@ func (fl *fileLower) parReturn(s *syntax.ReturnStmt) {
 	fl.add(end, end, ", nil")
 }
 
-func parseStageFrag(text string, pos syntax.Pos) syntax.Expr {
+func parseStageFrag(fl *fileLower, text string, pos syntax.Pos) syntax.Expr {
+	text = fl.settleMarks(gen(text)).s
 	src := "package logoschain\nvar _ = " + text + "\n"
 	f, err := syntax.Parse(syntax.NewFileBase("logos-chain"), strings.NewReader(src), nil, nil, syntax.CheckBranches)
 	if err != nil || len(f.DeclList) != 1 {

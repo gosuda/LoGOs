@@ -1980,6 +1980,7 @@ func (ce *chainEmit) resultSpelling() string {
 }
 
 func parseChainExprFrag(fl *fileLower, text string, pos syntax.Pos) syntax.Expr {
+	text = fl.settleMarks(gen(text)).s
 	f, err := syntax.Parse(syntax.NewFileBase("logos-chain"), strings.NewReader("package logoschain\nvar _ = "+text+"\n"), nil, nil, 0)
 	if err != nil || len(f.DeclList) != 1 {
 		base.Fatalf("logos: cannot parse chain fragment %q: %v", text, err)
@@ -2022,6 +2023,7 @@ func normalizeChainPos(root syntax.Node, pos syntax.Pos) {
 }
 
 func parseChainStmtFrag(fl *fileLower, text string, pos syntax.Pos) []syntax.Stmt {
+	text = fl.settleMarks(gen(text)).s
 	f, err := syntax.Parse(syntax.NewFileBase("logos-chain"), strings.NewReader("package logoschain\nfunc _() {\n"+text+"\n}\n"), nil, nil, 0)
 	if err != nil || len(f.DeclList) != 1 {
 		base.Fatalf("logos: cannot parse chain fragment %q: %v", text, err)

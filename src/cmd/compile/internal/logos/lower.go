@@ -372,6 +372,30 @@ func (fl *fileLower) lazyText(r span) otext {
 	return gen(fl.copyRegion(r))
 }
 
+func (fl *fileLower) composeMove(m *chainMove) otext {
+	r := m.region
+	adj := make([]splice, len(m.inner))
+	for j, sp := range m.inner {
+		adj[j] = splice{start: sp.start - r.start, end: sp.end - r.start, text: sp.text, chunks: sp.chunks, owner: sp.owner}
+	}
+	out, err := applyChunks(fl.srcMap.sliceO(r.start, r.end), adj)
+	if err != nil {
+		base.Fatalf("logos: %v", err)
+	}
+	return out
+}
+
+func (fl *fileLower) settleMarks(t otext) otext {
+	return substNul(t, func(mark string) (otext, bool) {
+		for _, m := range fl.moves {
+			if m.mark == mark {
+				return fl.settleMarks(fl.composeMove(m)), true
+			}
+		}
+		return otext{}, false
+	})
+}
+
 // resolveChainMoves composes the copy of every moved region, with the
 // edits of every pass inside it, into the texts that carry its mark.
 // Regions resolve in the order they were moved, which puts a region
@@ -381,15 +405,7 @@ func (fl *fileLower) lazyText(r span) otext {
 // regions with the copies inside, so this runs before it.
 func (fl *fileLower) resolveChainMoves() {
 	for i, m := range fl.moves {
-		r := m.region
-		adj := make([]splice, len(m.inner))
-		for j, sp := range m.inner {
-			adj[j] = splice{start: sp.start - r.start, end: sp.end - r.start, text: sp.text, chunks: sp.chunks, owner: sp.owner}
-		}
-		out, err := applyChunks(fl.srcMap.sliceO(r.start, r.end), adj)
-		if err != nil {
-			base.Fatalf("logos: %v", err)
-		}
+		out := fl.composeMove(m)
 		subst := func(list []splice) {
 			for j := range list {
 				t := substNul(otext{s: list[j].text, chunks: list[j].chunks}, func(mark string) (otext, bool) {
