@@ -12,6 +12,7 @@ import (
 const (
 	logosOpenUnion   = "[correctness::open_union_value]"
 	logosNonMember   = "[correctness::union_nonmember]"
+	logosMemberLacks = "[correctness::union_member_method]"
 	logosNonExhaust  = "[correctness::nonexhaustive_switch]"
 	logosArmMismatch = "[correctness::switch_arm_mismatch]"
 	logosNeedDefault = "[correctness::switch_expr_needs_default]"
@@ -56,6 +57,50 @@ func logosMemberOf(t Type, tset *_TypeSet) bool {
 
 func (check *Checker) logosUnionsOK() bool {
 	return check.conf.Logos || check.conf.LogosUnions
+}
+
+func (check *Checker) logosUnionMethods(ityp *Interface, iface *syntax.InterfaceType) {
+	if !check.logosUnionsOK() || ityp.typeSet().NumMethods() == 0 {
+		return
+	}
+	next := 0
+	for _, f := range iface.MethodList {
+		if f.Name != nil {
+			continue
+		}
+		u, _ := ityp.embeddeds[next].(*Union)
+		next++
+		if u == nil {
+			continue
+		}
+		_, tlist := flattenUnion(nil, f.Type)
+		for i, t := range u.terms {
+			if i < len(tlist) {
+				check.logosTermMethods(ityp, t, tlist[i])
+			}
+		}
+	}
+}
+
+func (check *Checker) logosTermMethods(ityp *Interface, t *Term, at syntax.Expr) {
+	if t.tilde || !isValid(t.typ) {
+		return
+	}
+	members := []Type{t.typ}
+	if nested, _ := t.typ.Underlying().(*Interface); nested != nil {
+		members = members[:0]
+		for _, term := range nested.typeSet().terms {
+			if !term.tilde {
+				members = append(members, term.typ)
+			}
+		}
+	}
+	for _, m := range members {
+		var cause string
+		if !check.hasAllMethods(m, ityp, true, Identical, &cause) {
+			check.errorf(at, InvalidUnion, "%s union member %s does not implement the methods of the union %s", logosMemberLacks, m, cause)
+		}
+	}
 }
 
 func (check *Checker) logosValueType(pos syntax.Pos, typ Type, tset *_TypeSet) bool {

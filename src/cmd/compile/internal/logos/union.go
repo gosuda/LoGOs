@@ -894,9 +894,8 @@ func (fl *fileLower) emitHelpers(u *unionUse) {
 			return at(&syntax.AssertExpr{X: x, Type: utype}, pos)
 		}
 
-		isBody := []syntax.Stmt{returnOf(pos, []syntax.Expr{nameOf(pos, "false")})}
-		if len(mtypes) > 0 {
-			memberSwitch := at(&syntax.SwitchStmt{
+		isBody := []syntax.Stmt{
+			at(&syntax.SwitchStmt{
 				Tag: at(&syntax.TypeSwitchGuard{X: nameOf(pos, "v")}, pos),
 				Body: []*syntax.CaseClause{at(&syntax.CaseClause{
 					Cases: listOf(pos, mtypes),
@@ -904,8 +903,8 @@ func (fl *fileLower) emitHelpers(u *unionUse) {
 					Colon: pos,
 				}, pos)},
 				Rbrace: pos,
-			}, pos)
-			isBody = append([]syntax.Stmt{memberSwitch}, isBody...)
+			}, pos),
+			returnOf(pos, []syntax.Expr{nameOf(pos, "false")}),
 		}
 		isFn := decl(u.isName(), []*syntax.Field{anyField("v")},
 			[]*syntax.Field{at(&syntax.Field{Type: nameOf(pos, "bool")}, pos)}, isBody)

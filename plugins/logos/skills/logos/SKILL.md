@@ -232,6 +232,7 @@ Rules:
 | `portability::alias_extension` (warning) | Rename the alias-extension file to `.lgo` before publish. |
 | `correctness::open_union_value` | Use a closed union (no `~` terms, no `comparable`) in value positions. |
 | `correctness::union_nonmember` | Use a member type in the conversion, assertion, or case. |
+| `correctness::union_member_method` | Give the member the declared method (a value member needs a value receiver), or drop the member. |
 | `correctness::nonexhaustive_switch` | Cover the listed members and `nil`, or add `default`. |
 | `correctness::switch_arm_mismatch` | Give every switch-expression arm one common type. |
 | `correctness::switch_expr_needs_default` | Add a `default` arm to the value switch. |

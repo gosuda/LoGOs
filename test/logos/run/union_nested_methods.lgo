@@ -13,29 +13,33 @@ type E struct{}
 
 func (E) Error() string { return "e" }
 
-type InnerNoMember interface{ int | string }
-type InnerMember interface{ int | E }
-type Mid interface{ InnerNoMember | float64 }
-type MidMember interface{ InnerMember | float64 }
+type F struct{}
 
-type EmptyU interface {
-	error
-	InnerNoMember | float64
-}
+func (F) Error() string { return "f" }
+
+type G struct{}
+
+func (G) Error() string { return "g" }
+
+type H struct{}
+
+func (H) Error() string { return "h" }
+
+type X struct{}
+
+func (X) Error() string { return "x" }
+
+type Inner interface{ E | F }
+type Mid interface{ Inner | G }
 
 type MemberU interface {
 	error
-	InnerMember | float64
+	Inner | G
 }
 
 type DeepU interface {
 	error
-	Mid | bool
-}
-
-type DeepMemberU interface {
-	error
-	MidMember | bool
+	Mid | H
 }
 
 var failed bool
@@ -49,171 +53,86 @@ func check(name string, got, want any) {
 	fmt.Println("ok", name)
 }
 
-func commaOk(x any, name string, want bool) {
-	var got any = "panic"
-	func() {
-		defer func() {
-			if r := recover(); r != nil {
-				got = fmt.Sprintf("panic %v (%T)", r, r)
-			}
-		}()
-		_, ok := x.(EmptyU)
-		got = ok
+func guard(f func() any) (got any) {
+	defer func() {
+		if r := recover(); r != nil {
+			got = fmt.Sprintf("panic %v (%T)", r, r)
+		}
 	}()
-	check(name, got, want)
+	return f()
 }
 
-func commaOkM(x any, name string, want bool) {
-	var got any = "panic"
-	func() {
-		defer func() {
-			if r := recover(); r != nil {
-				got = fmt.Sprintf("panic %v (%T)", r, r)
-			}
-		}()
+func inMember(x any) any {
+	return guard(func() any {
 		_, ok := x.(MemberU)
-		got = ok
-	}()
-	check(name, got, want)
+		return ok
+	})
 }
 
-func commaOkDeep(x any, name string, want bool) {
-	var got any = "panic"
-	func() {
-		defer func() {
-			if r := recover(); r != nil {
-				got = fmt.Sprintf("panic %v (%T)", r, r)
-			}
-		}()
+func inDeep(x any) any {
+	return guard(func() any {
 		_, ok := x.(DeepU)
-		got = ok
-	}()
-	check(name, got, want)
+		return ok
+	})
 }
 
-func commaOkDeepM(x any, name string, want bool) {
-	var got any = "panic"
-	func() {
+func singleMember(x any) any {
+	return guard(func() (msg any) {
 		defer func() {
-			if r := recover(); r != nil {
-				got = fmt.Sprintf("panic %v (%T)", r, r)
+			if e, ok := recover().(*rt.UnionAssertionError); ok {
+				msg = e.Error()
 			}
-		}()
-		_, ok := x.(DeepMemberU)
-		got = ok
-	}()
-	check(name, got, want)
-}
-
-func singleEmpty(x any, name, want string) {
-	got := "no panic"
-	func() {
-		defer func() {
-			r := recover()
-			e, ok := r.(*rt.UnionAssertionError)
-			if !ok {
-				got = fmt.Sprintf("panic %v (%T)", r, r)
-				return
-			}
-			got = e.Error()
-		}()
-		_ = x.(EmptyU)
-	}()
-	check(name, got, want)
-}
-
-func singleM(x any, name, want string) {
-	got := "no panic"
-	func() {
-		defer func() {
-			r := recover()
-			e, ok := r.(*rt.UnionAssertionError)
-			if !ok {
-				got = fmt.Sprintf("panic %v (%T)", r, r)
-				return
-			}
-			got = e.Error()
 		}()
 		_ = x.(MemberU)
-	}()
-	check(name, got, want)
+		return "no panic"
+	})
 }
 
-func singleMemberE(x any, name string) {
-	e, ok := x.(MemberU)
-	_, isE := any(e).(E)
-	check(name, ok && isE, true)
-}
-
-func whichEmpty(x any, name, want string) {
-	got := "panic"
-	func() {
-		defer func() {
-			if r := recover(); r != nil {
-				got = fmt.Sprintf("panic %v", r)
-			}
-		}()
-		switch x.(type) {
-		case EmptyU:
-			got = "member"
-		default:
-			got = "default"
-		}
-	}()
-	check(name, got, want)
-}
-
-func whichM(x any, name, want string) {
-	got := "panic"
-	func() {
-		defer func() {
-			if r := recover(); r != nil {
-				got = fmt.Sprintf("panic %v", r)
-			}
-		}()
+func caseMember(x any) any {
+	return guard(func() any {
 		switch v := x.(type) {
 		case MemberU:
-			_, isE := any(v).(E)
-			if isE {
-				got = "member"
-			} else {
-				got = "member-wrong"
-			}
+			return fmt.Sprintf("member %v", v)
 		default:
-			got = "default"
+			return "default"
 		}
-	}()
-	check(name, got, want)
+	})
 }
 
-func convertE() {
-	cv := MemberU(E{})
-	e, ok := any(cv).(E)
-	check("convert-member-e", ok && e.Error() == "e", true)
+func caseDeep(x any) any {
+	return guard(func() any {
+		switch x.(type) {
+		case DeepU:
+			return "member"
+		default:
+			return "default"
+		}
+	})
 }
 
 func main() {
-	commaOk(42, "empty-comma-int", false)
-	commaOk("s", "empty-comma-string", false)
-	commaOk(1.5, "empty-comma-float", false)
-	var e any = E{}
-	commaOk(e, "empty-comma-e", false)
-	commaOkM(42, "member-comma-int", false)
-	commaOkM(1.5, "member-comma-float", false)
-	commaOkM(e, "member-comma-e", true)
-	commaOkDeep(42, "deep-comma-int", false)
-	commaOkDeep(e, "deep-comma-e", false)
-	commaOkDeepM(42, "deep-member-comma-int", false)
-	commaOkDeepM(e, "deep-member-comma-e", true)
-	singleEmpty(42, "empty-single-int", "interface conversion: int is not a member of main.EmptyU")
-	singleEmpty(e, "empty-single-e", "interface conversion: main.E is not a member of main.EmptyU")
-	singleM(42, "member-single-int", "interface conversion: int is not a member of main.MemberU")
-	singleMemberE(e, "member-single-e")
-	whichEmpty(42, "empty-case-int", "default")
-	whichEmpty(e, "empty-case-e", "default")
-	whichM(42, "member-case-int", "default")
-	whichM(e, "member-case-e", "member")
-	convertE()
+	check("member-comma-e", inMember(E{}), true)
+	check("member-comma-f", inMember(F{}), true)
+	check("member-comma-g", inMember(G{}), true)
+	check("member-comma-h", inMember(H{}), false)
+	check("member-comma-x", inMember(X{}), false)
+	check("member-comma-int", inMember(42), false)
+	check("deep-comma-e", inDeep(E{}), true)
+	check("deep-comma-g", inDeep(G{}), true)
+	check("deep-comma-h", inDeep(H{}), true)
+	check("deep-comma-x", inDeep(X{}), false)
+	check("deep-comma-int", inDeep(42), false)
+	check("member-single-x", singleMember(X{}), "interface conversion: main.X is not a member of main.MemberU")
+	check("member-single-int", singleMember(42), "interface conversion: int is not a member of main.MemberU")
+	check("member-single-f", singleMember(F{}), "no panic")
+	check("member-case-f", caseMember(F{}), "member f")
+	check("member-case-x", caseMember(X{}), "default")
+	check("member-case-int", caseMember(42), "default")
+	check("deep-case-h", caseDeep(H{}), "member")
+	check("deep-case-x", caseDeep(X{}), "default")
+	cv := MemberU(F{})
+	_, isF := any(cv).(F)
+	check("convert-member-f", isF, true)
 	if failed {
 		os.Exit(1)
 	}

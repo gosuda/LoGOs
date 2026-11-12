@@ -607,7 +607,11 @@ A local or parameter declared in the block of an `if x == nil` early exit, or in
 
 A closed union MUST be an interface whose type set is a finite union of non-`~` terms. [T-203.1]
 
-It MAY also declare methods that every member implements. [T-203.1]
+It MAY also declare methods, either directly or through an embedded interface. [T-203.1]
+
+Every member, after nested unions are flattened, MUST have each declared method in its method set; a pointer-receiver method does not count for a value member, and a promoted method counts. [T-203.1]
+
+A listed member that lacks a declared method MUST fail with `[correctness::union_member_method]`, reported once per member. [T-203.1]
 
 A closed union MUST be allowed in value positions in `.lgo` code (variables, parameters, results, fields, elements, keys, and values). [T-203.1]
 

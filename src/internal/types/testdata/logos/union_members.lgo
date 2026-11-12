@@ -8,7 +8,7 @@ type U interface {
 	int | string
 }
 type Shape interface {
-	HasMethod | string
+	HasMethod | string /* ERROR "correctness::union_member_method" */
 	M() int
 }
 
@@ -19,7 +19,7 @@ func (HasMethod) M() int { return 1 }
 var _ Shape = HasMethod{}
 
 type MissingMethod interface {
-	int | string
+	int /* ERROR "correctness::union_member_method" */ | string /* ERROR "correctness::union_member_method" */
 	M() int
 }
 

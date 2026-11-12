@@ -34,7 +34,7 @@ Coverage: M1 error propagation, M2 closed unions, M3 options and nil flow, M4 in
 
 Proven by the M2 run fixtures (`test/logos/run/union_basic.lgo`, `test/logos/run/union_assert.lgo`, `test/logos/run/switch_expr.lgo`), the types fixtures (`src/internal/types/testdata/logos/union_members.lgo`, `union_exhaustive.lgo`, `switch_expr_types.lgo`, `struct_assert.lgo`), and `src/cmd/go/testdata/script/logos_interop_union.txt`.
 
-7. Unions: every union in a value position is closed (finite members, no `~` terms, no `comparable`); conversions, assertions, and case types name member types only; constants compared against a union convert to their default type first. Findings: `correctness::open_union_value`, `correctness::union_nonmember`.
+7. Unions: every union in a value position is closed (finite members, no `~` terms, no `comparable`); conversions, assertions, and case types name member types only; every member has each method the union declares; constants compared against a union convert to their default type first. Findings: `correctness::open_union_value`, `correctness::union_nonmember`, `correctness::union_member_method`.
 8. Exhaustiveness: a type switch without `default` covers every member in declaration order and `nil`; a case naming a sub-union covers its members. A value switch expression has a `default` arm. Finding: `correctness::nonexhaustive_switch`, `correctness::switch_expr_needs_default`.
 9. Switch-expression arms: all arms share one type (a typed arm fixes it; all-untyped arms fold by default type; `*T` plus `nil` gives `*T`). Finding: `correctness::switch_arm_mismatch`.
 10. Inline assertions: each `type S struct : I` list names interfaces that `*S` implements; a struct reaches a property interface only through this list. Finding: `correctness::assertion_failed`.
@@ -122,6 +122,7 @@ Proven by `test/logos/run/json_marshal_test.lgo`, `test/logos/run/json_binary_te
 | `portability::alias_extension` (warning) | Rename the alias-extension file to `.lgo` before publish. |
 | `correctness::open_union_value` | Use a closed union (no `~` terms, no `comparable`) in value positions. |
 | `correctness::union_nonmember` | Use a member type in the conversion, assertion, or case. |
+| `correctness::union_member_method` | Give the member the declared method (a value member needs a value receiver), or drop the member. |
 | `correctness::nonexhaustive_switch` | Cover the listed members and `nil`, or add `default`. |
 | `correctness::switch_arm_mismatch` | Give every switch-expression arm one common type. |
 | `correctness::switch_expr_needs_default` | Add a `default` arm to the value switch. |
