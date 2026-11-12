@@ -167,7 +167,7 @@ func (fl *fileLower) lowerChainHeadLits(n syntax.Node) {
 			savedExit := fl.chainExit
 			fl.chainGrp = chainGroup{}
 			fl.chainExit = nil
-			lit.Body.List = fl.lowerChainList(lit.Body.List, fl.chainFuncResults(lit.Type))
+			lit.Body.List = fl.lowerChainList(lit.Body.List, fl.chainFuncResults(lit.Type, fl.cfLitSig(lit)))
 			fl.chainGrp = saved
 			fl.chainExit = savedExit
 			return false

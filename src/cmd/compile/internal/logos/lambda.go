@@ -286,10 +286,19 @@ func (fl *fileLower) lambdaNamedResults(pos syntax.Pos, sig *types2.Signature) (
 }
 
 func (fl *fileLower) lambdaZero(typ types2.Type, pos syntax.Pos) syntax.Expr {
-	if b, ok := typ.(*types2.Basic); ok {
-		return zeroBasic(b, pos)
+	if c := constAsView(typ); c != nil {
+		return fl.lambdaZero(c.Elem, pos)
 	}
-	switch types2.Unalias(typ).(type) {
+	if o := fl.asOption(typ); o != nil && keepMapRead(o.Elem) {
+		return nilOf(pos)
+	}
+	u := types2.Unalias(typ)
+	if n, ok := u.(*types2.Named); ok {
+		u = n.Underlying()
+	}
+	switch u := u.(type) {
+	case *types2.Basic:
+		return zeroBasic(u, pos)
 	case *types2.Pointer, *types2.Slice, *types2.Map, *types2.Chan, *types2.Signature, *types2.Interface:
 		return nilOf(pos)
 	default:

@@ -44,7 +44,7 @@ func (fl *fileLower) lowerChains() {
 		switch decl := decl.(type) {
 		case *syntax.FuncDecl:
 			if decl.Body != nil {
-				decl.Body.List = fl.lowerChainList(decl.Body.List, fl.chainFuncResults(decl.Type))
+				decl.Body.List = fl.lowerChainList(decl.Body.List, fl.chainFuncResults(decl.Type, fl.cfFuncSig(decl)))
 			}
 		case *syntax.VarDecl:
 			fl.lowerChainPkgDecl(decl)
@@ -68,10 +68,14 @@ func (fl *fileLower) transparentWrappers() {
 	}
 }
 
-func (fl *fileLower) chainFuncResults(ft *syntax.FuncType) []chainResult {
+func (fl *fileLower) chainFuncResults(ft *syntax.FuncType, sig *types2.Signature) []chainResult {
 	out := []chainResult{}
-	for _, field := range ft.ResultList {
-		out = append(out, chainResult{typ: fl.pkg.info.TypeOf(field.Type), expr: field.Type})
+	for i, field := range ft.ResultList {
+		var typ types2.Type
+		if sig != nil {
+			typ = sig.Results().At(i).Type()
+		}
+		out = append(out, chainResult{typ: typ, expr: field.Type})
 	}
 	return out
 }
@@ -108,7 +112,7 @@ func (fl *fileLower) lowerChainChildren(s syntax.Stmt, enc []chainResult) {
 			}
 			saved := fl.chainGrp
 			fl.chainGrp = chainGroup{}
-			lit.Body.List = fl.lowerChainList(lit.Body.List, fl.chainFuncResults(lit.Type))
+			lit.Body.List = fl.lowerChainList(lit.Body.List, fl.chainFuncResults(lit.Type, fl.cfLitSig(lit)))
 			fl.chainGrp = saved
 			return false
 		}
@@ -135,7 +139,7 @@ func (fl *fileLower) chainsInDecl(decl *syntax.VarDecl) []*syntax.CallExpr {
 	var all []*syntax.CallExpr
 	syntax.Inspect(decl, func(n syntax.Node) bool {
 		if lit, ok := n.(*syntax.FuncLit); ok {
-			lit.Body.List = fl.lowerChainList(lit.Body.List, fl.chainFuncResults(lit.Type))
+			lit.Body.List = fl.lowerChainList(lit.Body.List, fl.chainFuncResults(lit.Type, fl.cfLitSig(lit)))
 			return false
 		}
 		if call, ok := n.(*syntax.CallExpr); ok && fl.isChainCall(call) {
