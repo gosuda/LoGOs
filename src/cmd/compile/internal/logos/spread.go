@@ -400,7 +400,7 @@ func (fl *fileLower) spreadSelfUpdate(s *syntax.AssignStmt) (*syntax.AssignStmt,
 		textVals[i] = tw.mark(pos, vtexts[i])
 	}
 	native := assignOf(pos, nativeLhs, values)
-	text := renderText([]syntax.Stmt{assignOf(pos, textLhs, textVals)}, tw.subs)
+	text := renderText([]syntax.Stmt{assignOf(pos, textLhs, textVals)}, tw.subs).trimRight("\n")
 	fl.addT(fl.stmtSpanStart(s, lhs[0]), fl.exprEndOf(rhs[0]), text)
 	return native, true
 }

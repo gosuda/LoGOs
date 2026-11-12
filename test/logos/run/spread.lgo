@@ -60,6 +60,32 @@ func boomInt() int {
 	panic("boom")
 }
 
+func headerSelfUpdates() {
+	hi := Tri{A: 1, B: 2, C: 3}
+	if hi = (Tri{A: bumpC(&hi), ..hi}); hi.A == 7 {
+		check("spread-self-update-in-if-header", hi == Tri{A: 7, B: 2, C: 99}, hi, Tri{A: 7, B: 2, C: 99})
+	}
+	hs := Tri{A: 1, B: 2, C: 3}
+	switch hs = (Tri{A: 5, C: bumpC(&hs), ..hs}); hs.A {
+	case 5:
+		check("spread-self-update-in-switch-header", hs == Tri{A: 5, B: 2, C: 7}, hs, Tri{A: 5, B: 2, C: 7})
+	}
+	hf := Tri{A: 1, B: 2, C: 3}
+	steps := 0
+	for hf = (Tri{A: 0, ..hf}); hf.A < 2; hf = (Tri{A: hf.A + 1, ..hf}) {
+		steps++
+	}
+	check("spread-self-update-in-for-header", hf == Tri{A: 2, B: 2, C: 3} && steps == 2, fmt.Sprint(hf, steps), "{2 2 3} 2")
+	he := Tri{A: 1, B: 2, C: 3}
+	branch := "none"
+	if he.A == 0 {
+		branch = "first"
+	} else if he = (Tri{B: 8, ..he}); he.B == 8 {
+		branch = "second"
+	}
+	check("spread-self-update-in-else-if-header", branch == "second" && he == Tri{A: 1, B: 8, C: 3}, fmt.Sprint(branch, he), "second {1 8 3}")
+}
+
 func main() {
 	s := State{A: 10, ..State{A: 1, B: 2}}
 	check("spread-explicit-field-wins", s == State{A: 10, B: 2}, s, State{A: 10, B: 2})
@@ -101,6 +127,7 @@ func main() {
 		return false
 	}()
 	check("spread-self-update-writes-nothing-when-an-explicit-expression-panics", hit && keep == State{A: 1, B: 2}, fmt.Sprint(hit, keep), "true {1 2}")
+	headerSelfUpdates()
 	if failed {
 		os.Exit(1)
 	}

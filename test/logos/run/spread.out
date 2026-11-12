@@ -10,3 +10,7 @@ ok spread-fully-shadowed-base-still-evaluated-once
 ok spread-self-base-preserves-padding
 ok spread-self-update-leaves-unlisted-fields-untouched
 ok spread-self-update-writes-nothing-when-an-explicit-expression-panics
+ok spread-self-update-in-if-header
+ok spread-self-update-in-switch-header
+ok spread-self-update-in-for-header
+ok spread-self-update-in-else-if-header
