@@ -159,8 +159,19 @@ func (g *binaryGenerator) codec(t types2.Type) (int, bool) {
 			}
 		case *types2.Slice:
 			if b, ok := x.Elem().Underlying().(*types2.Basic); ok && b.Kind() == types2.Uint8 {
-				e("_logos_dst = _logos_bbinary.AppendUvarint(_logos_dst, uint64(len(_logos_v))); _logos_dst = append(_logos_dst, _logos_v...)")
-				d("_logos_n, _logos_used := _logos_bbinary.Uvarint(_logos_src[*_logos_off:]); if _logos_used <= 0 { %s }; *_logos_off += _logos_used; if _logos_n > uint64(len(_logos_src)-*_logos_off) { %s }; _logos_cap64 := min(_logos_n, uint64(len(_logos_src)-*_logos_off)/2, (1<<20)); *_logos_v = append(make(%s, 0, int(_logos_cap64)), _logos_src[*_logos_off:*_logos_off+int(_logos_n)]...); *_logos_off += int(_logos_n)", fail, fail, name)
+				head := "_logos_n, _logos_used := _logos_bbinary.Uvarint(_logos_src[*_logos_off:]); if _logos_used <= 0 { " + fail + " }; *_logos_off += _logos_used; if _logos_n > uint64(len(_logos_src)-*_logos_off) { " + fail + " }; _logos_cap64 := min(_logos_n, uint64(len(_logos_src)-*_logos_off)/2, (1<<20)); "
+				count := "_logos_dst = _logos_bbinary.AppendUvarint(_logos_dst, uint64(len(_logos_v))); "
+				if _, plain := types2.Unalias(x.Elem()).(*types2.Basic); plain {
+					e(count + "_logos_dst = append(_logos_dst, _logos_v...)")
+					d("%s*_logos_v = append(make(%s, 0, int(_logos_cap64)), _logos_src[*_logos_off:*_logos_off+int(_logos_n)]...); *_logos_off += int(_logos_n)", head, name)
+					break
+				}
+				elemType, ok := g.fl.spellLowered(x.Elem())
+				if !ok {
+					return 0, false
+				}
+				e(count + "for _, _logos_b := range _logos_v { _logos_dst = append(_logos_dst, byte(_logos_b)) }")
+				d("%s*_logos_v = make(%s, 0, int(_logos_cap64)); for _, _logos_b := range _logos_src[*_logos_off:*_logos_off+int(_logos_n)] { *_logos_v = append(*_logos_v, %s(_logos_b)) }; *_logos_off += int(_logos_n)", head, name, elemType)
 				break
 			}
 			if g.isZeroWire(x.Elem()) {

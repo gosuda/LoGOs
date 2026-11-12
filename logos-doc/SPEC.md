@@ -1564,7 +1564,7 @@ All integer kinds encode as 8 bytes little-endian of the 64-bit value. [T-Sec10.
 float32 encodes as 4 bytes little-endian of Float32bits. [T-Sec10.1]
 float64 encodes as 8 bytes little-endian of Float64bits. [T-Sec10.1]
 bool MUST encode as 0x00 or 0x01. [T-Sec10.1]
-string and []byte encode as uvarint length plus raw bytes. [T-Sec10.1]
+string and a slice whose element type has underlying type uint8 encode as uvarint length plus raw bytes. [T-Sec10.1]
 Slice and array encode as uvarint count plus elements. [T-Sec10.1]
 Maps with string keys encode as uvarint count plus entries sorted by key. [T-Sec10.1]
 Nested structs encode inline. [T-Sec10.1]
