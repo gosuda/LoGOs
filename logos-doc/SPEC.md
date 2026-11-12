@@ -649,7 +649,7 @@ An assignment of a value whose type is not a member MUST fail with `[correctness
 
 Any other conversion MUST fail with `[correctness::union_nonmember]` naming the type. [T-203.1]
 
-A comparison between a union and a constant MUST convert the constant to its default type and require membership. [T-203.1]
+A comparison between a union and a constant MUST convert the constant to its default type and require membership. A constant whose default type is not a member MUST fail with `[correctness::union_nonmember]`. [T-203.1]
 
 A case type outside the member set MUST fail with `[correctness::union_nonmember]`. An assertion expression on a union value MUST compile and check membership at run time. [T-203.1]
 
@@ -976,7 +976,7 @@ A `const switch` case that is not a type MUST fail with `[comptime::case_not_typ
 
 A `const switch` case MUST name exactly one type. A `default` arm and a list of types MUST be syntax errors. [T-205]
 
-An unlabeled `break` or `continue` directly in a `const switch` case MUST fail compilation, because the cases lower into generated switches. [T-205]
+An unlabeled `break` or `continue` directly in a `const switch` case MUST fail with `[comptime::const_switch_jump]`, because the cases lower into generated switches. [T-205]
 
 `[]*os.File` MUST never rebind as `[]io.Writer`. [T-205]
 

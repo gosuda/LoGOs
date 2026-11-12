@@ -4,7 +4,9 @@
 
 package syntax
 
-func logosConstBranches(stmt Stmt, ctxt targets, innerBlock func(targets, Pos, []Stmt)) {
+const logosConstSwitchJump = "[comptime::const_switch_jump]"
+
+func logosConstBranches(ls *labelScope, stmt Stmt, ctxt targets, innerBlock func(targets, Pos, []Stmt)) {
 	inner := targets{ctxt.breaks, ctxt.continues, -1}
 	switch s := stmt.(type) {
 	case *ConstIfStmt:
@@ -14,8 +16,18 @@ func logosConstBranches(stmt Stmt, ctxt targets, innerBlock func(targets, Pos, [
 		}
 	case *ConstSwitchStmt:
 		uncased := targets{nil, nil, -1}
+		ls.constSwitchDepth++
 		for _, c := range s.Cases {
 			innerBlock(uncased, c.Case, c.Body)
 		}
+		ls.constSwitchDepth--
 	}
+}
+
+func (ls *labelScope) logosJumpError(s *BranchStmt, plain string) {
+	if ls.constSwitchDepth > 0 {
+		ls.errf(s.Pos(), "%s %s directly in a const switch case: the cases lower into generated switches", logosConstSwitchJump, s.Tok)
+		return
+	}
+	ls.errf(s.Pos(), "%s", plain)
 }

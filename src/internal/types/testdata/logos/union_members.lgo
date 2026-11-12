@@ -101,11 +101,11 @@ func memberCases(x U) int {
 }
 
 func cmpNonMember(x U) bool {
-	return x == 1.5 /* ERROR "mismatched types" */
+	return x == 1.5 /* ERROR "correctness::union_nonmember" */
 }
 
 func cmpRuneNonMember(x U) bool {
-	return x == 'a' /* ERROR "mismatched types" */
+	return x == 'a' /* ERROR "correctness::union_nonmember" */
 }
 
 func assignVarNonMember(f float64) {

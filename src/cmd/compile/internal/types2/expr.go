@@ -532,6 +532,13 @@ func (check *Checker) comparison(x, y *operand, op syntax.Operator, switchCase b
 		// know after seeing the 2nd operand whether we have
 		// a type mismatch.
 		errOp = y
+		if switchCase {
+			if check.logosUnionCaseMiss(x, y) {
+				return
+			}
+		} else if check.logosUnionCompareMiss(x, y, op) {
+			return
+		}
 		cause = check.sprintf("mismatched types %s and %s", x.typ(), y.typ())
 		goto Error
 	}

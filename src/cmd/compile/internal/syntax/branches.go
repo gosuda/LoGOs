@@ -45,8 +45,9 @@ func checkBranches(body *BlockStmt, errh ErrorHandler) {
 }
 
 type labelScope struct {
-	errh   ErrorHandler
-	labels map[string]*label // all label declarations inside the function; allocated lazily
+	errh             ErrorHandler
+	labels           map[string]*label // all label declarations inside the function; allocated lazily
+	constSwitchDepth int
 }
 
 type label struct {
@@ -215,13 +216,13 @@ func (ls *labelScope) blockBranches(parent *block, ctxt targets, lstmt *LabeledS
 					if t := ctxt.breaks; t != nil {
 						s.Target = t
 					} else {
-						ls.errf(s.Pos(), "break is not in a loop, switch, or select")
+						ls.logosJumpError(s, "break is not in a loop, switch, or select")
 					}
 				case _Continue:
 					if t := ctxt.continues; t != nil {
 						s.Target = t
 					} else {
-						ls.errf(s.Pos(), "continue is not in a loop")
+						ls.logosJumpError(s, "continue is not in a loop")
 					}
 				case _Fallthrough:
 					msg := "fallthrough statement out of place"
@@ -325,7 +326,7 @@ func (ls *labelScope) blockBranches(parent *block, ctxt targets, lstmt *LabeledS
 			}
 
 		case *ConstIfStmt, *ConstSwitchStmt:
-			logosConstBranches(s, ctxt, innerBlock) // logos M7-S1/S4 hook.
+			logosConstBranches(ls, s, ctxt, innerBlock) // logos M7-S1/S4 hook.
 		}
 	}
 

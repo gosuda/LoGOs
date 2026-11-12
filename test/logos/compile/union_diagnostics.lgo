@@ -28,7 +28,7 @@ func compareConst(u U) {
 	if u == 1 {
 		println("one")
 	}
-	if u == 1.5 { // ERROR "mismatched types"
+	if u == 1.5 { // ERROR "union_nonmember"
 		println("other")
 	}
 	_ = u

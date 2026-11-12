@@ -5,14 +5,14 @@ package p
 func breakDirect[T any]() {
 	const switch T {
 	case int:
-		break // ERROR "break is not in a loop, switch, or select"
+		break // ERROR "comptime::const_switch_jump"
 	}
 }
 
 func continueDirect[T any]() {
 	const switch T {
 	case int:
-		continue // ERROR "continue is not in a loop"
+		continue // ERROR "comptime::const_switch_jump"
 	}
 }
 
@@ -20,7 +20,7 @@ func breakInLoop[T any]() {
 	for {
 		const switch T {
 		case int:
-			break // ERROR "break is not in a loop, switch, or select"
+			break // ERROR "comptime::const_switch_jump"
 		}
 	}
 }
@@ -29,7 +29,7 @@ func continueInLoop[T any]() {
 	for {
 		const switch T {
 		case int:
-			continue // ERROR "continue is not in a loop"
+			continue // ERROR "comptime::const_switch_jump"
 		}
 	}
 }
