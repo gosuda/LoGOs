@@ -437,6 +437,58 @@ func hostileByteCount() error {
 	return nil
 }
 
+type BinaryFatElem struct {
+	A       uint64     `json:"a"`
+	B       uint64     `json:"b"`
+	C       uint64     `json:"c"`
+	D       uint64     `json:"d"`
+	E       uint64     `json:"e"`
+	F       uint64     `json:"f"`
+	G       uint64     `json:"g"`
+	H       uint64     `json:"h"`
+	Scratch [1024]byte `json:"-"`
+}
+
+type BinaryFatHolder struct {
+	Items []BinaryFatElem `json:"items"`
+}
+
+func leastAlloc(run func()) uint64 {
+	least := ^uint64(0)
+	for range 8 {
+		var before, after runtime.MemStats
+		runtime.ReadMemStats(&before)
+		run()
+		runtime.ReadMemStats(&after)
+		least = min(least, after.TotalAlloc-before.TotalAlloc)
+	}
+	return least
+}
+
+func hostileFatCount() error {
+	const maxAllocation = 8 << 20
+	const count = 1 << 16
+	src := append(binary.AppendUvarint([]byte{1}, count), make([]byte, count)...)
+	var failure error
+	least := leastAlloc(func() {
+		var got BinaryFatHolder
+		err := got.UnmarshalBinary(src)
+		switch {
+		case err == nil:
+			failure = fmt.Errorf("count %d with a %d-byte body accepted", count, count)
+		case !strings.Contains(err.Error(), ".Items") || !strings.Contains(err.Error(), "offset"):
+			failure = fmt.Errorf("hostile count error lacks field/offset: %w", err)
+		}
+	})
+	if failure != nil {
+		return failure
+	}
+	if least > maxAllocation {
+		return fmt.Errorf("a %d-byte body with count %d allocated %d bytes, want at most %d", count, count, least, maxAllocation)
+	}
+	return nil
+}
+
 func run() error {
 	if err := edgeBytes(); err != nil { return err }
 	inner := BinaryInner{Flag: true}
@@ -533,6 +585,11 @@ fmt.Println("FAIL binary-hostile:", err)
 os.Exit(1)
 }
 fmt.Println("ok binary-hostile")
+if err := hostileFatCount(); err != nil {
+fmt.Println("FAIL binary-fat-hostile:", err)
+os.Exit(1)
+}
+fmt.Println("ok binary-fat-hostile")
 if err := run(); err != nil {
 fmt.Println("FAIL binary-run:", err)
 os.Exit(1)
