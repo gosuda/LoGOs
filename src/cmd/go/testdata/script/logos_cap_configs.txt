@@ -62,6 +62,16 @@ exec $WORK/bin/cfgi$GOEXE
 stdout '^dead-everywhere$'
 cd ../..
 
+cd j/main
+logos build -o $WORK/bin/cfgj$GOEXE ./cmd
+! stderr 'capabilities::'
+exec $WORK/bin/cfgj$GOEXE
+stdout '^malformed-excluded$'
+cd ../dep
+go mod tidy
+! grep 'ghost' go.mod
+cd ../..
+
 -- a/main/go.mod --
 module example.com/amain
 
@@ -452,3 +462,52 @@ var _ = unsafe.Sizeof(0)
 
 TEXT ·ignored(SB), 0, $0-0
 	RET
+
+-- j/main/go.mod --
+module example.com/jmain
+
+go 1.27
+
+require example.com/jdep v0.0.0
+
+replace example.com/jdep => ../dep
+
+-- j/main/logos.toml --
+[capabilities]
+transitive_unsafe = "deny"
+
+-- j/main/cmd/main.go --
+package main
+
+import (
+	"fmt"
+
+	"example.com/jdep"
+)
+
+func main() { fmt.Println(jdep.Name()) }
+
+-- j/dep/go.mod --
+module example.com/jdep
+
+go 1.27
+
+-- j/dep/dep.go --
+package jdep
+
+func Name() string { return "malformed-excluded" }
+
+-- j/dep/bad_plan9.go --
+//go:build (
+
+package jdep
+
+import (
+	"unsafe"
+
+	"example.com/ghost"
+)
+
+var _ = unsafe.Sizeof(0)
+
+var _ = ghost.Run
