@@ -24,6 +24,7 @@ func (p *Proxy) clientRequest(ctx context.Context, m *message) {
 		clear(p.pending)
 		clear(p.lowerErr)
 		p.mu.Unlock()
+		p.addPending(m.ID, pending{method: "shutdown"})
 		p.send(p.server, m)
 	case "logos/snapshotCounts":
 		p.snapshotCounts(ctx, m)

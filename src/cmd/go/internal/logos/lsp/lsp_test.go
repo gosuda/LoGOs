@@ -1991,10 +1991,9 @@ func TestServeAnswersParseErrorAndContinues(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	outR, outW, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
+	outR, outW := io.Pipe()
+	defer outR.Close()
+	defer outW.Close()
 	done := make(chan error, 1)
 	ctx := t.Context()
 	go func() { done <- Serve(ctx, inR, outW, opts) }()
@@ -2009,6 +2008,27 @@ func TestServeAnswersParseErrorAndContinues(t *testing.T) {
 		t.Fatal(err)
 	}
 	inW.Close()
+	deadline := time.After(waitLimit)
+	tick := time.NewTicker(time.Millisecond)
+	defer tick.Stop()
+	for {
+		log, err := os.ReadFile(filepath.Join(scratch, "gopls.log"))
+		if err == nil && strings.Contains(string(log), `"method":"shutdown"`) {
+			break
+		}
+		select {
+		case err := <-done:
+			t.Fatalf("Serve returned before the client read its replies: %v", err)
+		case <-deadline:
+			t.Fatal("gopls did not receive shutdown")
+		case <-tick.C:
+		}
+	}
+	select {
+	case err := <-done:
+		t.Fatalf("Serve returned with undelivered client replies: %v", err)
+	case <-time.After(250 * time.Millisecond):
+	}
 	rd := newReader(outR)
 	readFrame := func() *message {
 		t.Helper()

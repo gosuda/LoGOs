@@ -3315,7 +3315,7 @@ Anchor: David Parnas, Edsger W. Dijkstra, John Carmack
 ### M21-A-S1 Fix Serve misclassifying simultaneous client close and gopls exit
 Anchor: Kenya Hara, David Parnas
 - Attack: `src/cmd/go/internal/logos/lsp/lsp_test.go` `TestServePrefersClientCloseOverGoplsExit`: under load the verdict was `gopls exited unexpectedly` instead of nil; `TestProxyMapsRequestsAndResponses` shares the 600/600 pass.
-- Build: reorder the Serve shutdown verdict so a simultaneous client close wins over the gopls exit.
+- Build: reorder the Serve shutdown verdict so a simultaneous client close wins over the gopls exit. Serve MUST track the shutdown request until it queues the reply to the client before teardown. Successful teardown MUST wait for queued and in-flight client writes to complete, bounded by the existing three-second stop grace; cancellation, write failure, or expiration aborts delivery with an error instead of claiming success.
 - Gate: `go test -count=1 ./cmd/go/internal/logos/lsp`.
 - Red-team rows: none.
 - Docs: none.

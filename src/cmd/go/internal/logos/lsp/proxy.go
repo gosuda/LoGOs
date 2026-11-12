@@ -84,27 +84,28 @@ type Proxy struct {
 	hintSem chan struct{}
 	st      store
 
-	mu       sync.Mutex
-	files    map[string]*lowered
-	virt     map[string]*virtDoc
-	rootsMu  sync.RWMutex
-	roots    []string
-	pending  map[string]pending
-	srvDiags map[string]serverDiags
-	sent     map[string]string
-	lowerErr map[string]error
-	toClient chan *message
-	toServer chan *message
-	done     chan struct{}
-	cancel   context.CancelFunc
-	in       io.Reader
-	sendErr  error
-	stopMu   sync.Mutex
-	stopped  bool
-	shutdown bool
-	ended    bool
-	endedErr error
-	settled  chan struct{}
+	mu            sync.Mutex
+	files         map[string]*lowered
+	virt          map[string]*virtDoc
+	rootsMu       sync.RWMutex
+	roots         []string
+	pending       map[string]pending
+	srvDiags      map[string]serverDiags
+	sent          map[string]string
+	lowerErr      map[string]error
+	toClient      chan *message
+	toServer      chan *message
+	done          chan struct{}
+	cancel        context.CancelFunc
+	in            io.Reader
+	sendErr       error
+	clientPending atomic.Int64
+	stopMu        sync.Mutex
+	stopped       bool
+	shutdown      bool
+	ended         bool
+	endedErr      error
+	settled       chan struct{}
 
 	lastLogErr error
 }
@@ -206,6 +207,9 @@ func Serve(ctx context.Context, in io.Reader, out io.Writer, opts Options) error
 		if bye {
 			err = byeErr
 		}
+	}
+	if err == nil {
+		err = p.flushClient(workCtx)
 	}
 	p.stop(ctx, srv, cancelWork)
 	p.closeInput(in, clientDone)
@@ -347,16 +351,53 @@ func (p *Proxy) serverLoop(ctx context.Context, rd *reader) error {
 	}
 }
 
+func (p *Proxy) flushClient(ctx context.Context) error {
+	limit := time.NewTimer(stopGrace)
+	defer limit.Stop()
+	for {
+		n := p.clientPending.Load()
+		if err := p.sendError(); err != nil {
+			return err
+		}
+		if n == 0 {
+			return nil
+		}
+		select {
+		case <-p.settled:
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-limit.C:
+			return errors.New("logos lsp: timed out delivering client replies")
+		}
+	}
+}
+
 func (p *Proxy) send(w *writer, m *message) {
 	ch := p.toClient
 	if w == p.server {
 		ch = p.toServer
 	}
+	if w == p.client {
+		p.clientPending.Add(1)
+	}
+	queued := false
 	select {
 	case ch <- m:
+		queued = true
 	case <-p.done:
 	default:
 		p.failSession(errors.New("logos lsp: outbound queue full"))
+	}
+	if w == p.client && !queued {
+		p.clientDelivered()
+	}
+}
+
+func (p *Proxy) clientDelivered() {
+	p.clientPending.Add(-1)
+	select {
+	case p.settled <- struct{}{}:
+	default:
 	}
 }
 
@@ -367,6 +408,9 @@ func (p *Proxy) pump(w *writer, ch chan *message) {
 			if err := w.write(m); err != nil {
 				p.failSession(err)
 				return
+			}
+			if w == p.client {
+				p.clientDelivered()
 			}
 		case <-p.done:
 			return
