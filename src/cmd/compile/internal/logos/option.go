@@ -920,7 +920,7 @@ func (fl *fileLower) drainBodyWrapper(body syntax.Node, text otext) otext {
 }
 
 func (fl *fileLower) lowerMapIndex(e *syntax.IndexExpr) syntax.Expr {
-	if g, ok := fl.constMapUse(e.X); ok {
+	if g, ok := fl.constMapReadUse(e.X); ok {
 		return fl.lowerConstMapRead(e, g)
 	}
 	opt := fl.asOption(fl.optType(e))
@@ -1040,7 +1040,7 @@ func (fl *fileLower) lowerCoalesce(e *syntax.CoalesceExpr) syntax.Expr {
 	opt := fl.coeType(e.X)
 	ux, isIndex := syntax.Unparen(e.X).(*syntax.IndexExpr)
 	if isIndex {
-		if _, ok := fl.constMapUse(ux.X); ok {
+		if _, ok := fl.constMapReadUse(ux.X); ok {
 			isIndex = false
 		}
 	}

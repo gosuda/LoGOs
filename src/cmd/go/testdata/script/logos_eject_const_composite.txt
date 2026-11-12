@@ -79,6 +79,14 @@ cmp stdout $GOROOT/test/logos/run/const_composite_receiver.out
 cd ..
 rm out
 
+cp $GOROOT/test/logos/run/const_composite_allocs.lgo main.lgo
+logos eject -o out
+cd out
+exec env -u GOROOT $UPROOT1272/bin/go run .
+cmp stdout $GOROOT/test/logos/run/const_composite_allocs.out
+cd ..
+rm out
+
 -- a/go.mod --
 module example.com/cceject
 

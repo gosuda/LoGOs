@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"go/constant"
 	"go/token"
+	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -28,19 +29,28 @@ type compositePathStep struct {
 
 type compositeHidden struct {
 	steps   []compositePathStep
+	lens    []int
 	mapType types2.Type
 	val     ctfe.Value
 	gen     *constMapGen
 	parts   constMapParts
 }
 
+type compositeFamily struct {
+	name    string
+	length  int
+	members map[int]*compositeHidden
+}
+
 type compositeInfo struct {
-	obj     *types2.Const
-	val     ctfe.Value
-	typ     types2.Type
-	base    string
-	hiddens []*compositeHidden
-	byPath  map[string]*compositeHidden
+	obj      *types2.Const
+	val      ctfe.Value
+	typ      types2.Type
+	base     string
+	hiddens  []*compositeHidden
+	byPath   map[string]*compositeHidden
+	families map[string]*compositeFamily
+	famOrder []*compositeFamily
 }
 
 func (c *compositeInfo) builder() string { return c.base + "_build" }
@@ -144,22 +154,23 @@ func parseCompositePath(text string) ([]compositePathStep, bool) {
 	return steps, len(steps) > 0
 }
 
-func collectCompositeHiddens(val ctfe.Value, typ types2.Type, steps []compositePathStep, visit func([]compositePathStep, types2.Type, ctfe.Value)) {
+func collectCompositeHiddens(val ctfe.Value, typ types2.Type, steps []compositePathStep, lens []int, visit func([]compositePathStep, []int, types2.Type, ctfe.Value)) {
 	if val.IsNilValue() {
 		return
 	}
 	switch u := compositeUnderlying(typ).(type) {
 	case *types2.Map:
-		visit(slices.Clone(steps), typ, val)
+		visit(slices.Clone(steps), slices.Clone(lens), typ, val)
 	case *types2.Struct:
 		fields := val.Fields()
 		for i := range min(u.NumFields(), len(fields)) {
 			ns := append(slices.Clone(steps), compositePathStep{field: u.Field(i).Name(), isField: true})
-			collectCompositeHiddens(fields[i], u.Field(i).Type(), ns, visit)
+			collectCompositeHiddens(fields[i], u.Field(i).Type(), ns, append(slices.Clone(lens), 0), visit)
 		}
 	case *types2.Array:
-		for i, e := range val.Elems() {
-			collectCompositeHiddens(e, u.Elem(), append(slices.Clone(steps), compositePathStep{index: i}), visit)
+		elems := val.Elems()
+		for i, e := range elems {
+			collectCompositeHiddens(e, u.Elem(), append(slices.Clone(steps), compositePathStep{index: i}), append(slices.Clone(lens), len(elems)), visit)
 		}
 	case *types2.Slice:
 		backing, lo, length, _, ok := val.SliceHeader()
@@ -167,7 +178,7 @@ func collectCompositeHiddens(val ctfe.Value, typ types2.Type, steps []compositeP
 			return
 		}
 		for i := range min(length, len(backing)-lo) {
-			collectCompositeHiddens(backing[lo+i], u.Elem(), append(slices.Clone(steps), compositePathStep{index: i}), visit)
+			collectCompositeHiddens(backing[lo+i], u.Elem(), append(slices.Clone(steps), compositePathStep{index: i}), append(slices.Clone(lens), length), visit)
 		}
 	}
 }
@@ -391,15 +402,34 @@ func collectComposites(files []*syntax.File, info *types2.Info) (map[*types2.Con
 }
 
 func newCompositeInfo(obj *types2.Const, val ctfe.Value, seq int) *compositeInfo {
-	c := &compositeInfo{obj: obj, val: val, typ: obj.Type(), base: fmt.Sprintf("_logos_cc%d_%s", seq, obj.Name()), byPath: map[string]*compositeHidden{}}
-	collectCompositeHiddens(val, c.typ, nil, func(steps []compositePathStep, mt types2.Type, v ctfe.Value) {
+	c := &compositeInfo{obj: obj, val: val, typ: obj.Type(), base: fmt.Sprintf("_logos_cc%d_%s", seq, obj.Name()), byPath: map[string]*compositeHidden{}, families: map[string]*compositeFamily{}}
+	collectCompositeHiddens(val, c.typ, nil, nil, func(steps []compositePathStep, lens []int, mt types2.Type, v ctfe.Value) {
 		keys, vals := v.MapEntries()
 		gen := &constMapGen{name: fmt.Sprintf("%s_h%d", c.base, len(c.hiddens)), val: v, nkeys: len(keys), bearing: constMapBearing(vals)}
-		h := &compositeHidden{steps: steps, mapType: mt, val: v, gen: gen}
+		h := &compositeHidden{steps: steps, lens: lens, mapType: mt, val: v, gen: gen}
 		c.hiddens = append(c.hiddens, h)
 		c.byPath[compositePathText(steps)] = h
+		c.joinFamilies(h)
 	})
 	return c
+}
+
+func (c *compositeInfo) joinFamilies(h *compositeHidden) {
+	for p, s := range h.steps {
+		if s.isField {
+			continue
+		}
+		template := slices.Clone(h.steps)
+		template[p] = compositePathStep{dynamic: true}
+		key := compositePathText(template)
+		fam, ok := c.families[key]
+		if !ok {
+			fam = &compositeFamily{name: fmt.Sprintf("%s_f%d", c.base, len(c.families)), length: h.lens[p], members: map[int]*compositeHidden{}}
+			c.families[key] = fam
+			c.famOrder = append(c.famOrder, fam)
+		}
+		fam.members[s.index] = h
+	}
 }
 
 func (fl *fileLower) emitComposite(info *compositeInfo, pos syntax.Pos) bool {
@@ -408,7 +438,26 @@ func (fl *fileLower) emitComposite(info *compositeInfo, pos syntax.Pos) bool {
 			return false
 		}
 	}
+	for _, fam := range info.famOrder {
+		fl.emitCompositeFamily(fam, pos)
+	}
 	return fl.emitCompositeBuilder(info, pos) && fl.emitCompositeRO(info, pos)
+}
+
+func (fl *fileLower) emitCompositeFamily(fam *compositeFamily, pos syntax.Pos) {
+	indexes := slices.Sorted(maps.Keys(fam.members))
+	first := fam.members[indexes[0]]
+	mmt, _ := compositeHiddenMap(first.mapType)
+	kT := fl.mustSpell(mmt.Key(), pos)
+	vT := fl.mustSpell(mmt.Elem(), pos)
+	var b strings.Builder
+	fmt.Fprintf(&b, "func %s_lookup(_logos_i int, _logos_k %s) (%s, bool) {\n\tswitch _logos_i {\n", fam.name, kT, vT)
+	for _, i := range indexes {
+		fmt.Fprintf(&b, "\tcase %d:\n\t\treturn %s(_logos_k)\n", i, fam.members[i].gen.lookupName())
+	}
+	fmt.Fprintf(&b, "\t}\n\tvar _logos_n [%d]struct{}\n\t_ = _logos_n[_logos_i]\n\tvar _logos_zero %s\n\treturn _logos_zero, false\n}\n", fam.length, vT)
+	fl.constDecls = append(fl.constDecls, parseConstMapDecls(b.String(), pos)...)
+	fl.constText += "\n" + b.String()
 }
 
 func (fl *fileLower) emitCompositeHidden(h *compositeHidden, pos syntax.Pos) bool {
@@ -499,6 +548,7 @@ type compositeRef struct {
 	steps  []compositePathStep
 	method *types2.Func
 	recv   syntax.Expr
+	lead   syntax.Expr
 }
 
 func (r compositeRef) static() bool {
@@ -606,9 +656,41 @@ func (fl *fileLower) compositeIndexRef(n *syntax.IndexExpr) (compositeRef, bool)
 			step = compositePathStep{index: int(i)}
 		}
 	}
+	if step.dynamic {
+		ref.lead = n.Index
+	}
 	ref.steps = append(slices.Clone(ref.steps), step)
 	ref.recv = n
 	return ref, true
+}
+
+func (fl *fileLower) compositeFamilyFor(e syntax.Expr) (*constMapGen, bool) {
+	ref, ok := fl.compositeRefOf(e)
+	if !ok || ref.info == nil || ref.method != nil || ref.lead == nil || !fl.simpleIndex(ref.lead) {
+		return nil, false
+	}
+	fam, ok := ref.info.families[compositePathText(ref.steps)]
+	if !ok {
+		return nil, false
+	}
+	return &constMapGen{name: fam.name, lead: ref.lead}, true
+}
+
+func (fl *fileLower) simpleIndex(e syntax.Expr) bool {
+	switch n := syntax.Unparen(e).(type) {
+	case *syntax.BasicLit:
+		return true
+	case *syntax.Name:
+		v, ok := fl.pkg.info.Uses[n].(*types2.Var)
+		if !ok {
+			return false
+		}
+		b, ok := v.Type().Underlying().(*types2.Basic)
+		return ok && b.Info()&types2.IsInteger != 0
+	case *syntax.Operation:
+		return fl.simpleIndex(n.X) && (n.Y == nil || fl.simpleIndex(n.Y))
+	}
+	return false
 }
 
 func (fl *fileLower) compositeHiddenFor(e syntax.Expr) (*constMapGen, bool) {

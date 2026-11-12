@@ -32,6 +32,7 @@ type constMapGen struct {
 	nativeDecls []syntax.Decl
 	nkeys       int
 	bearing     bool
+	lead        syntax.Expr
 }
 
 func (g *constMapGen) lookupName() string { return g.name + "_lookup" }
@@ -197,6 +198,14 @@ func collectConstMaps(files []*syntax.File, info *types2.Info) map[*types2.Const
 	}
 	return out
 }
+
+func (fl *fileLower) constMapReadUse(x syntax.Expr) (*constMapGen, bool) {
+	if g, ok := fl.constMapUse(x); ok {
+		return g, true
+	}
+	return fl.compositeFamilyFor(x)
+}
+
 func (fl *fileLower) constMapUse(x syntax.Expr) (*constMapGen, bool) {
 	switch e := syntax.Unparen(x).(type) {
 	case *syntax.Name:
@@ -931,11 +940,18 @@ func (fl *fileLower) lowerConstMapRead(e *syntax.IndexExpr, g *constMapGen) synt
 	id := fl.nextWrapID()
 	mStart, lbrack, rbrack := fl.lookupSpans(e)
 	e.Index = fl.lowerOptExpr(e.Index)
-	lookup := callOf(pos, nameOf(pos, g.lookupName()), []syntax.Expr{e.Index})
+	args := []syntax.Expr{e.Index}
+	head, open := g.lookupName(), "("
+	if g.lead != nil {
+		args = []syntax.Expr{g.lead, e.Index}
+		head += "(" + string(fl.src[fl.off(syntax.StartPos(g.lead)):fl.exprEndOf(g.lead)]) + ", "
+		open = ""
+	}
+	lookup := callOf(pos, nameOf(pos, g.lookupName()), args)
 	opt := fl.asOption(fl.optType(e))
 	if opt == nil {
-		fl.addOwned(id, mStart, lbrack, g.lookupName())
-		fl.add(lbrack, lbrack+1, "(")
+		fl.addOwned(id, mStart, lbrack, head)
+		fl.add(lbrack, lbrack+1, open)
 		fl.add(rbrack, rbrack+1, ")")
 		fl.wrapSpan[lookup] = span{start: mStart, end: rbrack + 1}
 		fl.wrapOwner[lookup] = id
@@ -947,8 +963,8 @@ func (fl *fileLower) lowerConstMapRead(e *syntax.IndexExpr, g *constMapGen) synt
 	}
 	fl.needRT = true
 	out := callOf(pos, selOf(pos, nameOf(pos, rtAlias), wrap), []syntax.Expr{lookup})
-	fl.addOwned(id, mStart, lbrack, rtAlias+"."+wrap+"("+g.lookupName())
-	fl.add(lbrack, lbrack+1, "(")
+	fl.addOwned(id, mStart, lbrack, rtAlias+"."+wrap+"("+head)
+	fl.add(lbrack, lbrack+1, open)
 	fl.add(rbrack, rbrack+1, "))")
 	fl.wrapSpan[out] = span{start: mStart, end: rbrack + 1}
 	fl.wrapOwner[out] = id
