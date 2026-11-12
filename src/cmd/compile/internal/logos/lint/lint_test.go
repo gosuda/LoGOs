@@ -768,8 +768,8 @@ func groupBlock(ctx context.Context) error {
 }
 
 func valueStage(ctx context.Context, xs []int) error { // want
-	ys, err := xs.group(ctx, limit = 2).map(x => x)
-	println(len(ys), err == nil)
+	_, err := xs.group(ctx, limit = 2).map(x => x)
+	println(err == nil)
 	return valueStage(ctx, xs)
 }
 
