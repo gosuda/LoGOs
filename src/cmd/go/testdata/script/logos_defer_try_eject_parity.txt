@@ -14,6 +14,10 @@ exists out/main.go
 cd out
 go run .
 cp stdout $WORK/eject-stdout.txt
+# SPEC 0.3: ejected output builds with upstream go1.27.2 from $UPROOT1272.
+exists $UPROOT1272/bin/go
+exec env -u GOROOT $UPROOT1272/bin/go run .
+cmp stdout $WORK/logos-stdout.txt
 cd ..
 
 cmp $WORK/logos-stdout.txt $WORK/eject-stdout.txt
@@ -61,6 +65,27 @@ func join2() (err error) {
 	return nil
 }
 
+var seen any = "unset"
+
+func probe() error {
+	seen = recover()
+	return nil
+}
+
+func recoverInF() (err error) {
+	defer probe()?
+	panic("boom")
+}
+
+func recoverProbe() {
+	defer func() {
+		fmt.Println("recover in f:", seen, "outer:", recover())
+	}()
+	if err := recoverInF(); err != nil {
+		fmt.Println("unexpected", err)
+	}
+}
+
 func main() {
 	if err := loop(3); err != nil {
 		fmt.Println("loop err:", err)
@@ -78,6 +103,7 @@ func main() {
 	} else {
 		fmt.Println("join ok")
 	}
+	recoverProbe()
 }
 
 -- m/want-stdout.txt --
@@ -85,3 +111,4 @@ loop err: fail 1
 method ok 1
 join err: fail 3
 fail 1
+recover in f: <nil> outer: boom

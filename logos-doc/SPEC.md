@@ -227,6 +227,7 @@ func double(s string) (int, error) {
 ```
 `defer f()?` MUST join a non-nil result into the error result [T-104.2].
 When the deferred call's result is nil, the join MUST keep the existing error; otherwise it MUST join both errors with errors join semantics. [T-104.2]
+A `recover()` call inside `f` of `defer f()?` MUST return nil and MUST NOT stop a panic of the enclosing function, as in the ejected form that calls `f` from a deferred function literal. [T-104.2][T-0.3]
 `errdefer` MUST be allowed only in functions whose last result is `error` [T-104.2].
 Other uses MUST fail with `correctness::errdefer_needs_error_result` [T-104.2].
 `errdefer` MUST run when the frame panics, exits through Goexit, or holds a non-nil error result at pop time [T-104.2].
