@@ -32,9 +32,11 @@ import (
 // statement bodies of a done select are ordinary code. A range over a
 // channel, close, and len are not operations of this rule. A select with a
 // default case but no done case is not exempt. In loGo/s, a plain channel
-// operation directly inside a go group child block is bounded too, because
-// lowering turns it into a select on the group context's Done channel; a
-// function literal inside the block is not covered.
+// operation directly inside a go group child block, or directly inside a
+// lambda argument of a map or filter call that follows a group stage call
+// through map and filter calls only, is bounded too, because lowering turns
+// it into a select on the group context's Done channel; a function literal
+// or lambda inside the block or the lambda is not covered.
 var unboundedChannelOp = Rule{
 	ID:      "correctness::unbounded_channel_op",
 	Group:   Correctness,
@@ -198,8 +200,13 @@ func (u *chanUnit) visit(n syntax.Node) bool {
 		u.selectStmt(n)
 		return false
 	case *syntax.GroupChild:
-		u.child(n)
+		u.child(n.Body)
 		return false
+	case *syntax.CallExpr:
+		if u.segment(n) {
+			u.segmentCall(n)
+			return false
+		}
 	case *syntax.FuncLit:
 		u.nested(n.Body)
 		return false
@@ -247,12 +254,44 @@ func (u *chanUnit) nested(body syntax.Node) {
 	u.free = outer
 }
 
-// child walks a go group child block, whose operations are covered.
-func (u *chanUnit) child(g *syntax.GroupChild) {
+// child walks a go group child block or the lambda of a group stage segment,
+// whose operations are covered.
+func (u *chanUnit) child(body syntax.Node) {
 	outer := u.free
 	u.free = true
-	u.walk(g.Body)
+	u.walk(body)
 	u.free = outer
+}
+
+func (u *chanUnit) segment(call *syntax.CallExpr) bool {
+	for cur := call; isSegmentCall(cur); {
+		sel := syntax.Unparen(cur.Fun).(*syntax.SelectorExpr)
+		recv, ok := syntax.Unparen(sel.X).(*syntax.CallExpr)
+		if !ok {
+			return false
+		}
+		if _, ok := types2.LogosGroupStage(u.pass.Pkg, u.pass.Info, recv); ok {
+			return true
+		}
+		cur = recv
+	}
+	return false
+}
+
+func isSegmentCall(call *syntax.CallExpr) bool {
+	sel, ok := syntax.Unparen(call.Fun).(*syntax.SelectorExpr)
+	return ok && sel.Sel != nil && (sel.Sel.Value == "map" || sel.Sel.Value == "filter")
+}
+
+func (u *chanUnit) segmentCall(call *syntax.CallExpr) {
+	u.walk(call.Fun)
+	for _, arg := range call.ArgList {
+		if lam, ok := syntax.Unparen(arg).(*syntax.LambdaExpr); ok {
+			u.child(lam.Body)
+			continue
+		}
+		u.walk(arg)
+	}
 }
 
 // selectStmt walks a select statement: the operations of its cases are

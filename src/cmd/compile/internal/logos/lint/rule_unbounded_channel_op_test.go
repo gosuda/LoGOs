@@ -62,3 +62,102 @@ func TestUnboundedChannelOpSpan(t *testing.T) {
 		}
 	}
 }
+
+const unboundedSegmentExemptSrc = `package p
+
+import "context"
+
+func segmentSend(ctx context.Context, xs []int, out chan int) ([]int, error) {
+	return xs.group(ctx, limit = 2).map(x => {
+		out <- x
+		return x
+	})
+}
+
+func segmentRecv(ctx context.Context, xs []int, in chan int) ([]int, error) {
+	return xs.group(ctx, limit = 2).map(x => x + <-in)
+}
+
+func segmentFilter(ctx context.Context, xs []int, in chan int) ([]int, error) {
+	return xs.group(ctx, limit = 2).filter(x => x == <-in)
+}
+
+func segmentUnordered(ctx context.Context, xs []int, in chan int) ([]int, error) {
+	return xs.group(ctx, limit = 2).unordered().map(x => x + <-in)
+}
+
+func segmentSecondLambda(ctx context.Context, xs []int, in chan int) ([]int, error) {
+	return xs.group(ctx, limit = 2).filter(x => x > 0).map(x => x + <-in)
+}
+
+func segmentChannelSource(ctx context.Context, src <-chan int, in chan int) ([]int, error) {
+	return src.group(ctx, limit = 2).map(x => x + <-in)
+}
+
+func segmentRange(ctx context.Context, xs []int, in chan int) error {
+	for y := range xs.group(ctx, limit = 2).map(x => x + <-in) {
+		_ = y
+	}
+	return nil
+}
+
+func segmentNestedStage(ctx context.Context, xs, ys []int, in chan int) ([]int, error) {
+	return xs.group(ctx, limit = 2).map(x => ys.group(ctx, limit = 3).map(y => y + <-in).sum()?)
+}
+`
+
+const unboundedSegmentReportedSrc = `package p
+
+import "context"
+
+type store struct{}
+
+func (store) group(n int) []int { return nil }
+
+func plainSend(xs []int, out chan int) []int {
+	return xs.map(x => {
+		out <- x // want
+		return x
+	})
+}
+
+func plainRecv(xs []int, in chan int) []int {
+	return xs.map(x => x + <-in) // want
+}
+
+func plainFilter(xs []int, in chan int) []int {
+	return xs.filter(x => x == <-in) // want
+}
+
+func plainSecondLambda(xs []int, in chan int) []int {
+	return xs.filter(x => x > 0).map(x => x + <-in) // want
+}
+
+func afterSegment(ctx context.Context, xs []int, in chan int) (bool, error) {
+	return xs.group(ctx, limit = 2).map(x => x).any(x => x == <-in) // want
+}
+
+func mapAfterTerminalStage(ctx context.Context, xs []int, in chan int) ([]int, error) {
+	return xs.group(ctx, limit = 2).map(x => x).sortBy(x => x).map(x => x + <-in) // want
+}
+
+func methodNamedGroup(s store, in chan int) []int {
+	return s.group(1).map(x => x + <-in) // want
+}
+
+func closureInSegment(ctx context.Context, xs []int, in chan int) ([]int, error) {
+	return xs.group(ctx, limit = 2).map(x => func() int {
+		return <-in // want
+	}())
+}
+
+func plainChainInSegment(ctx context.Context, xs, ys []int, in chan int) ([]int, error) {
+	return xs.group(ctx, limit = 2).map(x => ys.map(y => y + <-in).sum()) // want
+}
+`
+
+func TestUnboundedChannelOpSegmentLambdas(t *testing.T) {
+	rule := finding{"correctness::unbounded_channel_op", Deny}
+	expect(t, KindLgo, nil, testSource{"exempt.lgo", unboundedSegmentExemptSrc}, rule)
+	expect(t, KindLgo, nil, testSource{"reported.lgo", unboundedSegmentReportedSrc}, rule)
+}
