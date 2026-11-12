@@ -77,6 +77,18 @@ cd k/main
 stderr 'ERROR \[capabilities::unauthorized_unsafe\]: Transitive dependency ''example\.com/kdep'' imports ''unsafe'''
 cd ../..
 
+cd l/main
+logos build -o $WORK/bin/cfgl$GOEXE ./cmd
+! stderr 'capabilities::'
+exec $WORK/bin/cfgl$GOEXE
+stdout '^host-clean$'
+[short] skip 'cross-links the standard library for plan9'
+env GOOS=plan9 GOARCH=amd64 CGO_ENABLED=0
+! logos build -o $WORK/bin/cfgl9 ./cmd
+stderr 'ERROR \[capabilities::unauthorized_exec\]: Transitive dependency ''example\.com/ldep'' reaches ''os\.StartProcess'''
+! stderr 'ghost'
+cd ../..
+
 -- a/main/go.mod --
 module example.com/amain
 
@@ -559,3 +571,56 @@ import "unsafe"
 var _ = unsafe.Sizeof(0)
 
 func (
+
+-- l/main/go.mod --
+module example.com/lmain
+
+go 1.27
+
+require example.com/ldep v0.0.0
+
+replace example.com/ldep => ../dep
+
+-- l/main/logos.toml --
+[capabilities]
+transitive_exec = "deny"
+transitive_net = "deny"
+
+-- l/main/cmd/main.go --
+package main
+
+import (
+	"fmt"
+
+	"example.com/ldep"
+)
+
+func main() { fmt.Println(ldep.Name()) }
+
+-- l/dep/go.mod --
+module example.com/ldep
+
+go 1.27
+
+-- l/dep/dep.go --
+package ldep
+
+func Name() string { return "host-clean" }
+
+-- l/dep/exec_plan9.go --
+package ldep
+
+import "os"
+
+func init() {
+	if len(os.Args) > 99 {
+		os.StartProcess("/bin/true", nil, &os.ProcAttr{})
+	}
+}
+
+-- l/dep/ghost_windows.go --
+package ldep
+
+import "example.com/ghost"
+
+func init() { ghost.Run() }
