@@ -5,6 +5,7 @@
 package logos
 
 import (
+	"go/token"
 	"slices"
 
 	"cmd/compile/internal/syntax"
@@ -75,42 +76,35 @@ func (fl *fileLower) dropComptimeImport(done map[*syntax.Name]bool) {
 			continue
 		}
 		at = append(at, i)
-		start := fl.off(imp.Pos())
-		if kw, ok := importKeywordStart(fl.src, start); ok {
-			start = kw
-		}
-		if line := int(imp.Pos().Line()) - 1; line >= 0 && line < len(fl.start) {
-			blank := true
-			for _, c := range fl.src[fl.start[line]:start] {
-				if c != ' ' && c != '\t' {
-					blank = false
-					break
-				}
-			}
-			if blank {
-				start = fl.start[line]
-			}
-		}
-		end := swallowSep(fl.src, fl.off(imp.Path.Pos())+len(imp.Path.Value))
-		fl.add(start, end, "")
+		fl.removeImportSpec(imp)
 	}
 	for i := len(at) - 1; i >= 0; i-- {
 		fl.file.DeclList = slices.Delete(fl.file.DeclList, at[i], at[i]+1)
 	}
 }
 
-func isComptimePath(v string) bool {
-	return v == `"comptime"` || v == "`comptime`"
+func (fl *fileLower) removeImportSpec(imp *syntax.ImportDecl) {
+	start := fl.off(syntax.StartPos(imp))
+	end := fl.off(syntax.EndPos(imp))
+	if imp.Group == nil {
+		keyword := start
+		scanSegment(fl.src, fl.off(syntax.EndPos(fl.file.PkgName)), start, func(t tok) bool {
+			if !t.comment && !t.auto {
+				keyword = t.start
+			}
+			return true
+		})
+		start = keyword
+	}
+	scanSegment(fl.src, end, len(fl.src), func(t tok) bool {
+		if t.kind == token.SEMICOLON && !t.auto {
+			end = t.end
+		}
+		return t.comment
+	})
+	fl.add(start, end, keepComments(fl.src, start, end, ""))
 }
 
-func importKeywordStart(src []byte, specOff int) (int, bool) {
-	off := specOff
-	for off > 0 && (src[off-1] == ' ' || src[off-1] == '\t') {
-		off--
-	}
-	if off >= 6 && string(src[off-6:off]) == "import" &&
-		(off == 6 || !isIdentChar(src[off-7]) && src[off-7] != '.') {
-		return off - 6, true
-	}
-	return 0, false
+func isComptimePath(v string) bool {
+	return v == `"comptime"` || v == "`comptime`"
 }

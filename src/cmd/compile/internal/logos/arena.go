@@ -427,35 +427,12 @@ func (a *arenaEject) fixImports() {
 		}
 		if a.arenaRefs == 0 && name != "_" && name != "." {
 			removed[imp] = true
-			a.removeImport(imp)
+			a.fl.removeImportSpec(imp)
 		}
 	}
 	if a.needRT && !a.rtPresent {
 		a.addRTImport(removed)
 	}
-}
-
-func (a *arenaEject) removeImport(imp *syntax.ImportDecl) {
-	src := a.fl.src
-	start := a.fl.off(syntax.StartPos(imp))
-	end := a.fl.off(syntax.EndPos(imp))
-	if imp.Group == nil {
-		keyword := start
-		scanSegment(src, a.fl.off(syntax.EndPos(a.fl.file.PkgName)), start, func(t tok) bool {
-			if !t.comment && !t.auto {
-				keyword = t.start
-			}
-			return true
-		})
-		start = keyword
-	}
-	scanSegment(src, end, len(src), func(t tok) bool {
-		if t.kind == token.SEMICOLON && !t.auto {
-			end = t.end
-		}
-		return t.comment
-	})
-	a.fl.add(start, end, keepComments(src, start, end, ""))
 }
 
 func (a *arenaEject) countArenaRefs() {
