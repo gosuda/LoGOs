@@ -153,14 +153,26 @@ func (fl *fileLower) literalBrace(lit *syntax.CompositeLit) int {
 		return fl.off(lit.Pos())
 	}
 	brace := -1
-	scanSegment(fl.src, fl.off(syntax.EndPos(lit.Type)), len(fl.src), func(t tok) bool {
+	depth := 0
+	typeBrace := false
+	scanSegment(fl.src, fl.off(syntax.StartPos(lit.Type)), len(fl.src), func(t tok) bool {
 		if t.comment || t.auto {
 			return true
 		}
-		if t.kind == token.LBRACE {
-			brace = t.start
-			return false
+		switch t.kind {
+		case token.STRUCT, token.INTERFACE:
+			typeBrace = true
+			return true
+		case token.LBRACE:
+			if !typeBrace && depth == 0 {
+				brace = t.start
+				return false
+			}
+			depth++
+		case token.RBRACE:
+			depth--
 		}
+		typeBrace = false
 		return true
 	})
 	if brace < 0 {
