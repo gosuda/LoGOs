@@ -164,7 +164,7 @@ func (fl *fileLower) renameBranchLabels(s syntax.Stmt, from, to string) int {
 	renamed := 0
 	syntax.Inspect(s, func(n syntax.Node) bool {
 		switch n := n.(type) {
-		case *syntax.FuncLit:
+		case *syntax.FuncLit, *syntax.LambdaExpr:
 			return false
 		case *syntax.BranchStmt:
 			if n.Label != nil && n.Label.Value == from && n.Tok != syntax.Goto {
@@ -713,7 +713,7 @@ func (fl *fileLower) mapForms(op chainOp) []resultForm {
 	var forms []resultForm
 	syntax.Inspect(op.lam.Body, func(n syntax.Node) bool {
 		switch n := n.(type) {
-		case *syntax.FuncLit:
+		case *syntax.FuncLit, *syntax.LambdaExpr:
 			return false
 		case *syntax.ReturnStmt:
 			for _, r := range syntax.UnpackListExpr(n.Results) {

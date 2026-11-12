@@ -23,6 +23,8 @@ stdout '^ok flight-panic-owned-tail$'
 stdout '^ok local-copy-of-local$'
 stdout '^ok value-drop-then-fail-owned-tail$'
 stdout '^ok value-panic$'
+stdout '^ok nested-chain-panic$'
+stdout '^ok nested-mirror-chain-try-fail$'
 cmp stdout ../../native.txt
 cd ../..
 

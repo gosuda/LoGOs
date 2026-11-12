@@ -806,6 +806,161 @@ func valCalm() string {
 	return fmt.Sprintf("%d %s", n, vState())
 }
 
+func didPanic(f func()) (hit string) {
+	defer func() { hit = fmt.Sprint(recover() != nil) }()
+	f()
+	return "false"
+}
+
+func nChainCount() string {
+	return fmt.Sprint(ids3().map(x => {
+		k := []int{x}.map(v => {
+			return v + x
+		}).count()
+		_ = k
+		return mk(x)
+	}).count())
+}
+
+func nChainTry() error {
+	n := ids3().map(x => {
+		k := []int{x}.map(v => {
+			return v + x
+		}).count()
+		_ = k
+		return mk(x)
+	}).filter(c => pass(c)?).count()
+	_ = n
+	return nil
+}
+
+func nChainTryFail() string { return fmt.Sprint(nChainTry() == errBoom) }
+
+func nChainPanic() string {
+	return didPanic(func() {
+		_ = ids3().map(x => {
+			k := []int{x}.map(v => {
+				return v + x
+			}).count()
+			_ = k
+			return mk(x)
+		}).filter(c => boomAt(c, 3)).count()
+	})
+}
+
+func nFuncCount() string {
+	return fmt.Sprint(ids3().map(x => {
+		h := func(v int) int {
+			return v + x
+		}
+		k := h(x)
+		_ = k
+		return mk(x)
+	}).count())
+}
+
+func nExprCount() string {
+	return fmt.Sprint(ids3().map(x => {
+		k := []int{x}.map(v => v + x).count()
+		_ = k
+		return mk(x)
+	}).count())
+}
+
+func nMirrorChainCount() string {
+	pool := conns3()
+	return fmt.Sprint(ids3().map(x => {
+		made := []int{x}.map(v => {
+			return mk(v)
+		}).count()
+		_ = made
+		return pool[x-1]
+	}).count())
+}
+
+func nMirrorFuncCount() string {
+	pool := conns3()
+	return fmt.Sprint(ids3().map(x => {
+		h := func(v int) *conn {
+			return mk(v)
+		}
+		tune(h(x))
+		return pool[x-1]
+	}).count())
+}
+
+func nMirrorChainTry() error {
+	pool := conns3()
+	n := ids3().map(x => {
+		made := []int{x}.map(v => {
+			return mk(v)
+		}).count()
+		_ = made
+		return pool[x-1]
+	}).filter(c => pass(c)?).count()
+	_ = n
+	return nil
+}
+
+func nMirrorChainTryFail() string { return fmt.Sprint(nMirrorChainTry() == errBoom) }
+
+func nMirrorChainPanic() string {
+	pool := conns3()
+	return didPanic(func() {
+		_ = ids3().map(x => {
+			made := []int{x}.map(v => {
+				return mk(v)
+			}).count()
+			_ = made
+			return pool[x-1]
+		}).filter(c => boomAt(c, 3)).count()
+	})
+}
+
+func nMirrorFuncTry() error {
+	pool := conns3()
+	n := ids3().map(x => {
+		h := func(v int) *conn {
+			return mk(v)
+		}
+		tune(h(x))
+		return pool[x-1]
+	}).filter(c => pass(c)?).count()
+	_ = n
+	return nil
+}
+
+func nMirrorFuncTryFail() string { return fmt.Sprint(nMirrorFuncTry() == errBoom) }
+
+func nMirrorFuncPanic() string {
+	pool := conns3()
+	return didPanic(func() {
+		_ = ids3().map(x => {
+			h := func(v int) *conn {
+				return mk(v)
+			}
+			tune(h(x))
+			return pool[x-1]
+		}).filter(c => boomAt(c, 3)).count()
+	})
+}
+
+func nestedLegs() []leg {
+	return []leg{
+		{"nested-chain-count", "3 [1 1 1]", nChainCount},
+		{"nested-chain-try-fail", "true [1 1]", nChainTryFail},
+		{"nested-chain-panic", "true [1 1 1]", nChainPanic},
+		{"nested-func-count", "3 [1 1 1]", nFuncCount},
+		{"nested-expr-lambda-count", "3 [1 1 1]", nExprCount},
+		{"nested-mirror-chain-count", "3 [0 0 0 1 1 1]", nMirrorChainCount},
+		{"nested-mirror-chain-try-fail", "true [0 0 0 1 1]", nMirrorChainTryFail},
+		{"nested-mirror-chain-panic", "true [0 0 0 1 1 1]", nMirrorChainPanic},
+		{"nested-mirror-func-count", "3 [0 0 0 0 0 0]", nMirrorFuncCount},
+		{"nested-mirror-func-try-fail", "true [0 0 0 0 0]", nMirrorFuncTryFail},
+		{"nested-mirror-func-panic", "true [0 0 0 0 0 0]", nMirrorFuncPanic},
+	}
+}
+
 type leg struct {
 	name string
 	want string
@@ -813,7 +968,7 @@ type leg struct {
 }
 
 func legs() []leg {
-	return slices.Concat(borrowLegs(), sharedLegs(), callLegs(), identityLegs(), madeLegs(), tryLegs(), dropLegs(), localLegs(), flightLegs(), valueLegs())
+	return slices.Concat(borrowLegs(), sharedLegs(), callLegs(), identityLegs(), madeLegs(), tryLegs(), dropLegs(), localLegs(), flightLegs(), valueLegs(), nestedLegs())
 }
 
 func borrowLegs() []leg {

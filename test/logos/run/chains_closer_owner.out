@@ -106,3 +106,14 @@ ok value-panic
 ok value-drop-then-fail-owned-tail
 ok value-panic-owned-tail
 ok value-calm
+ok nested-chain-count
+ok nested-chain-try-fail
+ok nested-chain-panic
+ok nested-func-count
+ok nested-expr-lambda-count
+ok nested-mirror-chain-count
+ok nested-mirror-chain-try-fail
+ok nested-mirror-chain-panic
+ok nested-mirror-func-count
+ok nested-mirror-func-try-fail
+ok nested-mirror-func-panic
