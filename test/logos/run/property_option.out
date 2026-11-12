@@ -9,3 +9,9 @@ ok value-option-write
 ok value-option-write-none
 ok method-sourced-option
 ok method-sourced-option-absent
+ok option-first
+ok option-middle
+ok pointer-option-middle
+ok option-then-method
+ok option-then-const
+ok option-first-write-none

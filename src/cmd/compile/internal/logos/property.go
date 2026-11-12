@@ -63,8 +63,15 @@ func (fl *fileLower) lowerPropertyInterface(it *syntax.InterfaceType) {
 			rw[f.Name.Value] = true
 		}
 	}
+	elemStart := func(f *syntax.Field) int {
+		start := fl.off(syntax.StartPos(f))
+		if pt, ok := f.Type.(*syntax.PropertyType); ok {
+			start = min(start, fl.off(pt.Pos()))
+		}
+		return start
+	}
 	seen := make(map[string]bool)
-	for _, f := range it.MethodList {
+	for i, f := range it.MethodList {
 		pt, ok := f.Type.(*syntax.PropertyType)
 		if !ok || f.Name == nil {
 			out = append(out, f)
@@ -77,11 +84,12 @@ func (fl *fileLower) lowerPropertyInterface(it *syntax.InterfaceType) {
 		if !ok {
 			base.Fatalf("logos: cannot span property type at %s", pos.String())
 		}
-		start := fl.off(pos)
-		if cpos := fl.off(pt.Pos()); cpos < start {
-			start = cpos
+		start := elemStart(f)
+		limit := typeSp.end
+		if i+1 < len(it.MethodList) {
+			limit = min(limit, elemStart(it.MethodList[i+1]))
 		}
-		afterName := span{start: fl.off(f.Name.Pos()) + len(name), end: typeSp.end}
+		afterName := span{start: fl.off(f.Name.Pos()) + len(name), end: lastTokenEnd(fl.src, typeSp.start, limit)}
 		typeText := fl.textOf(afterName).trim()
 		if seen[name] {
 			fl.addT(start, afterName.end, gen(""))

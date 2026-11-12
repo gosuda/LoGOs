@@ -51,6 +51,48 @@ func (h Half) Num() int? {
 	return h.n
 }
 
+type OptFirst interface {
+	Cnt int?
+	W   int
+}
+
+type OptMiddle interface {
+	A int
+	// a comment between elements
+	Cnt int?
+
+	// another comment after a blank line
+	B string
+}
+
+type PtrMiddle interface {
+	A   int
+	Cur *Item?
+	B   string
+}
+
+type OptThenMethod interface {
+	Cnt   int?
+	Twice() int
+}
+
+type OptThenConst interface {
+	Cnt int?
+	const W int
+}
+
+type Rec struct : OptFirst, OptMiddle, PtrMiddle, OptThenMethod, OptThenConst {
+	Cnt int?
+	W   int
+	A   int
+	B   string
+	Cur *Item?
+}
+
+func (r Rec) Twice() int {
+	return (r.Cnt ?? 0) * 2
+}
+
 func nOf(p *Item?) int {
 	return p?.N ?? -1
 }
@@ -81,6 +123,20 @@ func main() {
 	check("method-sourced-option", (n.Num ?? 0) == 5, n.Num ?? 0, 5)
 	n = Half{}
 	check("method-sourced-option-absent", (n.Num ?? 0) == 0, n.Num ?? 0, 0)
+
+	rec := &Rec{Cnt: 7, W: 3, A: 1, B: "b", Cur: &Item{N: 5}}
+	var first OptFirst = rec
+	check("option-first", (first.Cnt ?? 0) == 7 && first.W == 3, first.Cnt ?? 0, 7)
+	var middle OptMiddle = rec
+	check("option-middle", (middle.Cnt ?? 0) == 7 && middle.A == 1 && middle.B == "b", middle.Cnt ?? 0, 7)
+	var ptr PtrMiddle = rec
+	check("pointer-option-middle", nOf(ptr.Cur) == 5 && ptr.A == 1 && ptr.B == "b", nOf(ptr.Cur), 5)
+	var method OptThenMethod = rec
+	check("option-then-method", method.Twice() == 14 && (method.Cnt ?? 0) == 7, method.Twice(), 14)
+	var cst OptThenConst = rec
+	check("option-then-const", (cst.Cnt ?? 0) == 7 && cst.W == 3, cst.Cnt ?? 0, 7)
+	first.Cnt = nil
+	check("option-first-write-none", (rec.Cnt ?? -1) == -1 && first.W == 3, rec.Cnt ?? -1, -1)
 
 	if failed {
 		os.Exit(1)
