@@ -67,6 +67,14 @@ type jsonStruct struct {
 	staticJSON map[*types2.Named]bool
 	holderPkg  *types2.Package
 	pos        syntax.Pos
+	qualify    func(*types2.Package) string
+}
+
+func (fl *fileLower) genQualifier(p *types2.Package) string {
+	if p == fl.pkg.tpkg {
+		return ""
+	}
+	return fl.synthQualifier(p)
 }
 
 func (fl *fileLower) lowerStaticJSON() {
@@ -179,7 +187,7 @@ func parseGeneratedDecls(text string, pos syntax.Pos) []syntax.Decl {
 }
 
 func (fl *fileLower) buildJSONStruct(name string, st *types2.Struct, fields []*types2.Var) *jsonStruct {
-	js := &jsonStruct{name: name, staticJSON: fl.pkg.info.LogosStaticJSON, holderPkg: fl.pkg.tpkg}
+	js := &jsonStruct{name: name, staticJSON: fl.pkg.info.LogosStaticJSON, holderPkg: fl.pkg.tpkg, qualify: fl.genQualifier}
 
 	for _, fld := range fields {
 		i := fieldIndexOf(st, fld)

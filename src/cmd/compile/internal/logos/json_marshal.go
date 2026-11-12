@@ -464,18 +464,6 @@ func unionPackage(t types2.Type) *types2.Package {
 	return nil
 }
 
-func unionMemberSpelling(t types2.Type, pkg *types2.Package) string {
-	return types2.TypeString(t, func(p *types2.Package) string {
-		if pkg != nil && p == pkg {
-			return ""
-		}
-		if p == nil {
-			return ""
-		}
-		return p.Name()
-	})
-}
-
 func isMarshalJSONSignature(obj types2.Object) bool {
 	fn, ok := obj.(*types2.Func)
 	if !ok {
@@ -563,7 +551,7 @@ func (g *marshalGen) unionCode(f *jsonField) fieldCode {
 
 	sw := []string{"switch _logos_m := " + x + ".(type) {"}
 	for _, m := range terms {
-		mname := unionMemberSpelling(m, pkg)
+		mname := types2.TypeString(m, g.js.qualify)
 		sw = append(sw, "case "+mname+":", unionMemberStaticCall(m, pkg, b, e))
 	}
 	sw = append(sw, "case nil:")
@@ -871,7 +859,7 @@ func (fl *fileLower) instHelperModel(core types2.Type) (string, string, *jsonStr
 		return "", "", nil
 	}
 	params := inst.origin.TypeParams()
-	js := &jsonStruct{name: inst.spell, staticJSON: fl.pkg.info.LogosStaticJSON, holderPkg: fl.pkg.tpkg}
+	js := &jsonStruct{name: inst.spell, staticJSON: fl.pkg.info.LogosStaticJSON, holderPkg: fl.pkg.tpkg, qualify: fl.genQualifier}
 	for i := range st.NumFields() {
 		sf := st.Field(i)
 		ft, ok := substJSONType(sf.Type(), params, inst.args)

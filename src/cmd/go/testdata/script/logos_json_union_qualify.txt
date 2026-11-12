@@ -1,0 +1,180 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+cd w
+
+# A member imported under an alias decodes: the generated code spells it with
+# the file's own import name.
+logos run ./alias
+stdout '^alias circle r=3$'
+stdout '^alias local s=4$'
+
+# A member package the holder never imports decodes: the lowering adds the import.
+logos run ./unimported
+stdout '^unimported m\.A \{X:5\}$'
+stdout '^unimported m\.B \{Y:y\}$'
+
+# Two member packages with one name and one type name keep separate key sets.
+logos run ./samename
+stdout '^samename a r=1$'
+stdout '^samename b s=2$'
+
+-- w/go.mod --
+module example.com/jq
+
+go 1.27
+
+-- w/shape/shape.lgo --
+package shape
+
+type Circle struct {
+	R int64 `json:"r"`
+}
+
+-- w/alias/main.lgo --
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+
+	xs "example.com/jq/shape"
+)
+
+type Local struct {
+	S int64 `json:"s"`
+}
+
+type U interface {
+	xs.Circle | Local
+}
+
+type H struct {
+	V U `json:"v"`
+}
+
+func show(input string) {
+	var h H
+	if err := json.Unmarshal([]byte(input), &h); err != nil {
+		fmt.Println("error", err)
+		os.Exit(1)
+	}
+	switch v := h.V.(type) {
+	case xs.Circle:
+		fmt.Printf("alias circle r=%d\n", v.R)
+	case Local:
+		fmt.Printf("alias local s=%d\n", v.S)
+	case nil:
+		fmt.Println("alias nil")
+	}
+}
+
+func main() {
+	show(`{"v":{"r":3}}`)
+	show(`{"v":{"s":4}}`)
+}
+
+-- w/m/m.lgo --
+package m
+
+type A struct {
+	X int64 `json:"x"`
+}
+
+type B struct {
+	Y string `json:"y"`
+}
+
+-- w/u/u.lgo --
+package u
+
+import "example.com/jq/m"
+
+type U interface {
+	m.A | m.B
+}
+
+-- w/unimported/main.lgo --
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+
+	"example.com/jq/u"
+)
+
+type H struct {
+	V u.U `json:"v"`
+}
+
+func show(input string) {
+	var h H
+	if err := json.Unmarshal([]byte(input), &h); err != nil {
+		fmt.Println("error", err)
+		os.Exit(1)
+	}
+	fmt.Printf("unimported %T %+v\n", h.V, h.V)
+}
+
+func main() {
+	show(`{"v":{"x":5}}`)
+	show(`{"v":{"y":"y"}}`)
+}
+
+-- w/a/shape/shape.lgo --
+package shape
+
+type Item struct {
+	R int64 `json:"r"`
+}
+
+-- w/b/shape/shape.lgo --
+package shape
+
+type Item struct {
+	S int64 `json:"s"`
+}
+
+-- w/samename/main.lgo --
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+
+	a "example.com/jq/a/shape"
+	b "example.com/jq/b/shape"
+)
+
+type U interface {
+	a.Item | b.Item
+}
+
+type H struct {
+	V U `json:"v"`
+}
+
+func show(input string) {
+	var h H
+	if err := json.Unmarshal([]byte(input), &h); err != nil {
+		fmt.Println("error", err)
+		os.Exit(1)
+	}
+	switch v := h.V.(type) {
+	case a.Item:
+		fmt.Printf("samename a r=%d\n", v.R)
+	case b.Item:
+		fmt.Printf("samename b s=%d\n", v.S)
+	case nil:
+		fmt.Println("samename nil")
+	}
+}
+
+func main() {
+	show(`{"v":{"r":1}}`)
+	show(`{"v":{"s":2}}`)
+}

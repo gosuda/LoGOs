@@ -6,6 +6,7 @@ package logos
 
 import (
 	"cmp"
+	"fmt"
 	"strings"
 
 	"cmd/compile/internal/logos/facts"
@@ -14,6 +15,7 @@ import (
 
 type unionMemberClass struct {
 	spell   string
+	code    string
 	bare    string
 	keyFunc string
 	keys    []string
@@ -23,30 +25,38 @@ type unionMemberClass struct {
 	typ     types2.Type
 }
 
-func classifyUnionMembers(holderPkg *types2.Package, staticJSON map[*types2.Named]bool, unionType types2.Type) ([]unionMemberClass, string, bool) {
+type unionNames struct {
+	display string
+	code    string
+}
+
+func classifyUnionMembers(holderPkg *types2.Package, staticJSON map[*types2.Named]bool, unionType types2.Type, codeQual func(*types2.Package) string) ([]unionMemberClass, unionNames, bool) {
 	typ := unionType
 	if cv, ok := types2.Unalias(typ).(*types2.ConstView); ok {
 		typ = cv.Elem
 	}
+	names := unionNames{display: types2.TypeString(typ, qualifierFor(holderPkg)), code: types2.TypeString(typ, codeQual)}
 	terms := flattenUnionTerms(typ)
 	if len(terms) > 0 {
-		return classifyFromTerms(holderPkg, staticJSON, typ, terms)
+		members, ok := classifyFromTerms(holderPkg, staticJSON, terms, codeQual)
+		return members, names, ok
 	}
-	return classifyFromFacts(holderPkg, typ)
+	members, ok := classifyFromFacts(holderPkg, typ, codeQual)
+	return members, names, ok
 }
 
-func classifyFromTerms(holderPkg *types2.Package, staticJSON map[*types2.Named]bool, typ types2.Type, terms []types2.Type) ([]unionMemberClass, string, bool) {
+func classifyFromTerms(holderPkg *types2.Package, staticJSON map[*types2.Named]bool, terms []types2.Type, codeQual func(*types2.Package) string) ([]unionMemberClass, bool) {
 	qual := qualifierFor(holderPkg)
-	unionSpell := types2.TypeString(typ, qual)
 	out := make([]unionMemberClass, 0, len(terms))
 	for _, m := range terms {
 		c, ok := classifyOneMember(holderPkg, staticJSON, m, qual)
 		if !ok {
-			return nil, "", false
+			return nil, false
 		}
+		c.code = types2.TypeString(m, codeQual)
 		out = append(out, c)
 	}
-	return out, unionSpell, true
+	return out, true
 }
 
 func qualifierFor(holderPkg *types2.Package) func(*types2.Package) string {
@@ -96,25 +106,23 @@ func unionFactMembers(typ types2.Type) ([]facts.UnionMemberFact, bool) {
 	return indexed, true
 }
 
-func classifyFromFacts(holderPkg *types2.Package, typ types2.Type) ([]unionMemberClass, string, bool) {
+func classifyFromFacts(holderPkg *types2.Package, typ types2.Type, codeQual func(*types2.Package) string) ([]unionMemberClass, bool) {
 	indexed, ok := unionFactMembers(typ)
 	if !ok {
-		return nil, "", false
+		return nil, false
 	}
-	qual := qualifierFor(holderPkg)
-	unionSpell := types2.TypeString(typ, qual)
 	out := make([]unionMemberClass, 0, len(indexed))
 	for _, u := range indexed {
-		c, ok := classifyFactMember(holderPkg, u.Member)
+		c, ok := classifyFactMember(holderPkg, u.Member, codeQual)
 		if !ok {
-			return nil, "", false
+			return nil, false
 		}
 		out = append(out, c)
 	}
-	return out, unionSpell, true
+	return out, true
 }
 
-func classifyFactMember(holderPkg *types2.Package, member string) (unionMemberClass, bool) {
+func classifyFactMember(holderPkg *types2.Package, member string, codeQual func(*types2.Package) string) (unionMemberClass, bool) {
 	trimmed, isPtr := strings.CutPrefix(member, "*")
 	pkgPath, typeName, ok := strings.CutLast(trimmed, ".")
 	if !ok || pkgPath == "" || typeName == "" {
@@ -123,43 +131,48 @@ func classifyFactMember(holderPkg *types2.Package, member string) (unionMemberCl
 	if strings.Contains(typeName, "/") {
 		return unionMemberClass{}, false
 	}
-	pkgName := pkgNameFor(holderPkg, pkgPath)
-	if pkgName == "" {
+	pkg := memberPackageFor(holderPkg, pkgPath)
+	if pkg == nil {
 		return unionMemberClass{}, false
 	}
-	spell := pkgName + "." + typeName
+	spell := pkg.Name() + "." + typeName
+	code := typeName
+	if q := codeQual(pkg); q != "" {
+		code = q + "." + typeName
+	}
 	if isPtr {
 		spell = "*" + spell
+		code = "*" + code
 	}
 	keys, eligible, hasJSON := foreignUnionKeysByPath(pkgPath, typeName)
-	keyFunc := "_logos_jsonkey_" + pkgName + "_" + typeName
+	keyFunc := foreignKeyFunc(pkgPath, typeName)
 	foreign := true
 	if holderPkg != nil && holderPkg.Path() == pkgPath {
 		foreign = false
 		keyFunc = "_logos_jsonkey_" + typeName
 	}
 	if !eligible || len(keys) == 0 {
-		return unionMemberClass{spell: spell, bare: typeName, keyFunc: keyFunc, keyed: false, hasJSON: hasJSON, foreign: foreign}, hasJSON
+		return unionMemberClass{spell: spell, code: code, bare: typeName, keyFunc: keyFunc, keyed: false, hasJSON: hasJSON, foreign: foreign}, hasJSON
 	}
-	return unionMemberClass{spell: spell, bare: typeName, keyFunc: keyFunc, keys: keys, hasJSON: true, keyed: true, foreign: foreign}, true
+	return unionMemberClass{spell: spell, code: code, bare: typeName, keyFunc: keyFunc, keys: keys, hasJSON: true, keyed: true, foreign: foreign}, true
 }
 
-func pkgNameFor(holderPkg *types2.Package, path string) string {
+func memberPackageFor(holderPkg *types2.Package, path string) *types2.Package {
 	if holderPkg != nil {
 		for _, imp := range holderPkg.Imports() {
 			if imp.Path() == path {
-				return imp.Name()
+				return imp
 			}
 		}
 		if holderPkg.Path() == path {
-			return ""
+			return nil
 		}
 	}
 	_, name, ok := strings.CutLast(path, "/")
 	if !ok {
-		return path
+		name = path
 	}
-	return name
+	return types2.NewPackage(path, name)
 }
 
 func foreignUnionKeysByPath(pkgPath, typ string) ([]string, bool, bool) {
@@ -267,7 +280,11 @@ func keyFuncFor(bare string, memberPkg, holderPkg *types2.Package) string {
 	if holderPkg != nil && memberPkg != nil && holderPkg.Path() == memberPkg.Path() {
 		return "_logos_jsonkey_" + bare
 	}
-	return "_logos_jsonkey_" + memberPkg.Name() + "_" + bare
+	return foreignKeyFunc(memberPkg.Path(), bare)
+}
+
+func foreignKeyFunc(pkgPath, bare string) string {
+	return fmt.Sprintf("_logos_jsonkey_%016x_%s", constHashString(pkgPath), bare)
 }
 
 func jsonMetaFor(rec *facts.Facts, typ string) *facts.JsonMetaFact {

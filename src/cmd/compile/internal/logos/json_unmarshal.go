@@ -157,12 +157,13 @@ type jsonUnionClass struct {
 	members []trialMember
 	keyed   []int
 	name    string
+	typ     string
 	list    string
 	id      string
 }
 
 func (js *jsonStruct) unionMembersOf(utyp types2.Type) (jsonUnionClass, bool) {
-	members, unionName, ok := classifyUnionMembers(js.holderPkg, js.staticJSON, utyp)
+	members, names, ok := classifyUnionMembers(js.holderPkg, js.staticJSON, utyp, js.qualify)
 	if !ok || len(members) == 0 {
 		return jsonUnionClass{}, false
 	}
@@ -170,17 +171,17 @@ func (js *jsonStruct) unionMembersOf(utyp types2.Type) (jsonUnionClass, bool) {
 	for i, c := range members {
 		memberQuotes[i] = strconv.Quote(c.spell)
 	}
-	tid := unionName
+	tid := names.display
 	if js.holderPkg != nil {
-		tid = js.holderPkg.Path() + "\x00" + unionName
+		tid = js.holderPkg.Path() + "\x00" + names.display
 	}
-	uc := jsonUnionClass{name: unionName, list: strings.Join(memberQuotes, ", "), id: tid}
+	uc := jsonUnionClass{name: names.display, typ: names.code, list: strings.Join(memberQuotes, ", "), id: tid}
 	uc.members = make([]trialMember, len(members))
 	for i, c := range members {
-		sample, isPtr := strings.CutPrefix(c.spell, "*")
+		sample, isPtr := strings.CutPrefix(c.code, "*")
 		uc.members[i] = trialMember{
 			keyed:   c.keyed,
-			spell:   c.spell,
+			spell:   c.code,
 			sample:  sample,
 			ptr:     isPtr,
 			keyFunc: c.keyFunc,
@@ -242,9 +243,9 @@ func (js *jsonStruct) unionTrial(uc jsonUnionClass, target, scanner, errVar stri
 	trials = append(trials, fmt.Sprintf("_logos_hit, _logos_out := %s.LookupUnionTrial(%s, _logos_raw)", jsonAlias, strconv.Quote(uc.id)))
 	trials = append(trials, "var _logos_match int")
 	trials = append(trials, "var _logos_winidx int")
-	trials = append(trials, fmt.Sprintf("var _logos_target %s", uc.name))
+	trials = append(trials, fmt.Sprintf("var _logos_target %s", uc.typ))
 	trials = append(trials, "var _logos_custom int")
-	trials = append(trials, fmt.Sprintf("var _logos_custom_target %s", uc.name))
+	trials = append(trials, fmt.Sprintf("var _logos_custom_target %s", uc.typ))
 	if len(uc.keyed) > 0 {
 		trials = append(trials, unionKeyScanLines(uc)...)
 	}
@@ -628,7 +629,7 @@ func (js *jsonStruct) foreignKeyedMembers(f *jsonField) []unionMemberClass {
 		}
 		typ = uc.union
 	}
-	members, _, ok := classifyUnionMembers(js.holderPkg, js.staticJSON, typ)
+	members, _, ok := classifyUnionMembers(js.holderPkg, js.staticJSON, typ, js.qualify)
 	if !ok {
 		return nil
 	}
