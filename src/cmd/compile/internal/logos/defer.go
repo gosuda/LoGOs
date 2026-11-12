@@ -532,15 +532,7 @@ func (fc *funcLower) lowerReturn(s *syntax.ReturnStmt) []syntax.Stmt {
 	results := syntax.UnpackListExpr(s.Results)
 	temps := fc.nextTemps(len(fc.specs))
 	build := func(rhs []syntax.Expr) []syntax.Stmt {
-		out := make([]syntax.Stmt, 0, len(temps)+3)
-		for i, spelling := range temps {
-			out = append(out, typedVarDecl(retPos, nameOf(retPos, spelling), mustCloneType(fc.specs[i].typeExpr, retPos)))
-		}
-		return append(out,
-			assignOf(retPos, tempNodes(retPos, temps), rhs),
-			assignOf(retPos, []syntax.Expr{nameOf(retPos, fc.okName)}, []syntax.Expr{nameOf(retPos, "true")}),
-			returnOf(retPos, tempNodes(retPos, temps)),
-		)
+		return fc.returnValues(retPos, temps, rhs, nil)
 	}
 	native := build(slices.Clone(results))
 	tw := &twin{}
@@ -549,6 +541,19 @@ func (fc *funcLower) lowerReturn(s *syntax.ReturnStmt) []syntax.Stmt {
 	prefix := leftoverComments(fl, span{start: retOff, end: end}, []span{trimmed})
 	fl.addT(retOff, end, cat(prefix, text))
 	return native
+}
+
+func (fc *funcLower) returnValues(pos syntax.Pos, temps []string, rhs []syntax.Expr, mid []syntax.Stmt) []syntax.Stmt {
+	out := make([]syntax.Stmt, 0, len(temps)+len(mid)+3)
+	for i, spelling := range temps {
+		out = append(out, typedVarDecl(pos, nameOf(pos, spelling), mustCloneType(fc.specs[i].typeExpr, pos)))
+	}
+	out = append(out, assignOf(pos, tempNodes(pos, temps), rhs))
+	out = append(out, mid...)
+	if fc.hasErrdefer {
+		out = append(out, assignOf(pos, []syntax.Expr{nameOf(pos, fc.okName)}, []syntax.Expr{nameOf(pos, "true")}))
+	}
+	return append(out, returnOf(pos, tempNodes(pos, temps)))
 }
 
 func (fc *funcLower) nextTemps(n int) []string {

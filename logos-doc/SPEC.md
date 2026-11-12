@@ -1095,6 +1095,8 @@ Cancellation MUST reach siblings blocked on channels. [T-206]
 
 When the context argument of a `go group` statement is a plain identifier, that identifier MUST denote the group context everywhere inside the block, in the children and in the statements between them, as if the block began with `g, ctx := rt.NewGroup(ctx, limit)`, and MUST denote the outer context again after the block; the names the block declares MUST end with the block. [T-206]
 
+The operands of a `return` in the block body, outside any child, MUST be evaluated where the statement stands, with the identifier of the previous sentence denoting the group context; the join MUST follow, and the function MUST return those values unless the join reports an error, in which case it MUST return that error. A statement after the last child MUST run before the join. [T-206]
+
 When built by `logos`, a child blocked in netpoll-backed network I/O MUST wake within 100 ms with a timeout error satisfying `os.IsTimeout`. [T-206]
 
 In ejected code, cancellation MUST leave a child's blocked network I/O to complete on its own, and `Wait` MUST return once it completes. [T-206][T-0.3]

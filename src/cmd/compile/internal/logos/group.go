@@ -7,12 +7,15 @@ package logos
 import (
 	"fmt"
 	"go/token"
+	"slices"
 	"strings"
 
 	"cmd/compile/internal/base"
 	"cmd/compile/internal/syntax"
 	"cmd/compile/internal/types2"
 )
+
+const groupOperandMark = "_logos_RET"
 
 type groupFrame struct {
 	g          string
@@ -378,17 +381,33 @@ func (fc *funcLower) groupPrependJoin(pos syntax.Pos, spanStart int, native []sy
 }
 
 func (fc *funcLower) lowerGroupReturn(s *syntax.ReturnStmt, top groupFrame) []syntax.Stmt {
-	fl := fc.fl
-	pos := s.Pos()
-	prefix := fc.groupPrefixJoin(pos, top, fl.off(pos))
-	var rest []syntax.Stmt
-	if fc.hasErrdefer {
-		rest = fc.lowerReturn(s)
-	} else {
-		scanForLiterals(fl, s)
-		rest = []syntax.Stmt{s}
+	if s.Results == nil {
+		return fc.lowerGroupBareReturn(s, top)
 	}
-	return append(prefix, rest...)
+	fl := fc.fl
+	scanForLiterals(fl, s.Results)
+	pos := s.Pos()
+	retOff := fl.off(pos)
+	operands := trimSpan(fl.src, span{start: retOff + len("return"), end: stmtEnd(fl.src, retOff)})
+	temps := fc.nextTemps(len(fc.specs))
+	joinNative, joinText, joinSubs := fc.groupJoinCheck(pos, top)
+	native := fc.returnValues(pos, temps, slices.Clone(syntax.UnpackListExpr(s.Results)), joinNative)
+	tw := &twin{}
+	tw.absorb(joinSubs)
+	text := renderText(fc.returnValues(pos, temps, []syntax.Expr{nameOf(pos, groupOperandMark)}, joinText), tw.subs)
+	cut := strings.Index(text.s, groupOperandMark)
+	head := cat(leftoverComments(fl, span{start: retOff, end: operands.start}, nil), text.slice(0, cut))
+	fl.addT(retOff, operands.start, head)
+	fl.addT(operands.end, operands.end, text.slice(cut+len(groupOperandMark), len(text.s)))
+	return native
+}
+
+func (fc *funcLower) lowerGroupBareReturn(s *syntax.ReturnStmt, top groupFrame) []syntax.Stmt {
+	prefix := fc.groupPrefixJoin(s.Pos(), top, fc.fl.off(s.Pos()))
+	if fc.hasErrdefer {
+		return append(prefix, fc.lowerReturn(s)...)
+	}
+	return append(prefix, s)
 }
 
 func (fc *funcLower) groupBranchTarget(s *syntax.BranchStmt) syntax.Node {
