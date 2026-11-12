@@ -56,7 +56,6 @@ var capabilitySinks = map[string]CapabilityKind{
 	"syscall.SyscallN":                        CapSyscall,
 	"syscall.(*Proc).Call":                    CapSyscall,
 	"syscall.(*LazyProc).Call":                CapSyscall,
-	"internal/runtime/syscall/linux.Syscall6": CapSyscall,
 	"golang.org/x/sys/unix.Syscall":           CapSyscall,
 	"golang.org/x/sys/unix.Syscall6":          CapSyscall,
 	"golang.org/x/sys/unix.Syscall9":          CapSyscall,

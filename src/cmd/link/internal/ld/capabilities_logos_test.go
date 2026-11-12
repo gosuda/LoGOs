@@ -43,7 +43,6 @@ func TestLogosCapSinks(t *testing.T) {
 		"syscall.Syscall12", "syscall.Syscall15", "syscall.Syscall18",
 		"syscall.RawSyscall", "syscall.RawSyscall6", "syscall.SyscallN",
 		"syscall.(*Proc).Call", "syscall.(*LazyProc).Call",
-		"internal/runtime/syscall/linux.Syscall6",
 		"golang.org/x/sys/unix.Syscall", "golang.org/x/sys/unix.Syscall6",
 		"golang.org/x/sys/unix.Syscall9", "golang.org/x/sys/unix.RawSyscall",
 		"golang.org/x/sys/unix.RawSyscall6", "golang.org/x/sys/unix.SyscallNoError",
