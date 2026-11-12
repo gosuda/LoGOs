@@ -584,6 +584,10 @@ func (check *Checker) logosCheckUnionMemberJSON(fld *Var, m LogosUnionMember) {
 		check.logosCheckUnionTermJSON(fld, m.Type)
 		return
 	}
+	if !isExported(m.Name) && (check.pkg == nil || check.pkg.Path() != m.Pkg) {
+		check.errorf(fld, BadDecl, "%s union member %s.%s is not exported, so no UnmarshalJSON method of it is reachable here", logosNoUnionJSON, m.Pkg, m.Name)
+		return
+	}
 	mt, ok := check.logosForeignMemberType(m.Text())
 	if !ok {
 		return

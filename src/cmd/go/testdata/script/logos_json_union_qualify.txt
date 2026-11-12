@@ -38,6 +38,16 @@ stdout '^ok u-field$'
 stdout '^ok u-slice$'
 stdout '^ok u-map$'
 
+# A holder of a union with a member that its own package keeps unexported
+# fails with the rule ID at the field, in every position, and a union that
+# names such a union fails the same way.
+! logos build -o $devnull ./private
+stderr 'main\.lgo:14:2: \[correctness::union_member_no_json\]'
+stderr 'main\.lgo:18:2: \[correctness::union_member_no_json\]'
+stderr 'main\.lgo:22:2: \[correctness::union_member_no_json\]'
+stderr 'main\.lgo:26:2: \[correctness::union_member_no_json\]'
+! stderr 'internal compiler error'
+
 -- w/go.mod --
 module example.com/jq
 
@@ -352,3 +362,49 @@ func main() {
 	checkV()
 	checkU()
 }
+
+-- w/hidden/hidden.lgo --
+package hidden
+
+type small struct {
+	X int64 `json:"x"`
+}
+
+type Other struct {
+	Y string `json:"y"`
+}
+
+type U interface {
+	small | Other
+}
+
+-- w/private/main.lgo --
+package main
+
+import "example.com/jq/hidden"
+
+type L struct {
+	Q int64 `json:"q"`
+}
+
+type N interface {
+	hidden.U | L
+}
+
+type HField struct {
+	F hidden.U `json:"f"`
+}
+
+type HSlice struct {
+	S []hidden.U `json:"s"`
+}
+
+type HMap struct {
+	M map[string]hidden.U `json:"m"`
+}
+
+type HNested struct {
+	F N `json:"f"`
+}
+
+func main() {}
