@@ -61,6 +61,10 @@ func (c *discardCheck) walk(n syntax.Node) {
 			c.walkFunc(m.Body, m.Type)
 			return false
 		case *syntax.GroupStmt:
+			c.walk(m.Ctx)
+			if m.Limit != nil {
+				c.walk(m.Limit)
+			}
 			c.groupBody(m.Body)
 			return false
 		case *syntax.GroupChild:

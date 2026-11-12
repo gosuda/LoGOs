@@ -189,3 +189,26 @@ func keptCleanup() error {
 	}
 	return nil
 }
+
+func droppedInGroupHeader(ctx context.Context) error {
+	go group (func() context.Context {
+		f() // ERROR "\[slop::discarded_error\]"
+		return ctx
+	}(), limit = func() int {
+		f() // ERROR "\[slop::discarded_error\]"
+		return 2
+	}()) {
+	}
+	return nil
+}
+
+func keptInGroupHeader(ctx context.Context) error {
+	go group (func() context.Context {
+		if err := f(); err != nil {
+			return ctx
+		}
+		return ctx
+	}(), limit = 2) {
+	}
+	return nil
+}
