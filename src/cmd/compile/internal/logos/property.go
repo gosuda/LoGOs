@@ -6,6 +6,7 @@ package logos
 
 import (
 	"bytes"
+	"go/token"
 	"slices"
 	"strconv"
 	"strings"
@@ -373,7 +374,17 @@ func (fl *fileLower) propSelSpan(sel *syntax.SelectorExpr) (whole, recv span, ok
 	if selOff <= start {
 		return span{}, span{}, false
 	}
-	return span{start: start, end: selOff + len(sel.Sel.Value)}, span{start: start, end: selOff - 1}, true
+	dot := -1
+	scanSegment(fl.src, start, selOff, func(t tok) bool {
+		if t.kind == token.PERIOD {
+			dot = t.start
+		}
+		return true
+	})
+	if dot < 0 {
+		return span{}, span{}, false
+	}
+	return span{start: start, end: selOff + len(sel.Sel.Value)}, span{start: start, end: dot}, true
 }
 
 func propTempName(selOff int) string {
