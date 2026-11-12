@@ -5,8 +5,13 @@
 package rt
 
 import (
+	"cmp"
 	"iter"
+	"maps"
 	"math"
+	"reflect"
+	"slices"
+	"strings"
 	"sync"
 )
 
@@ -159,6 +164,69 @@ func ConstAll[K comparable, V any](sorted []ConstEntry[K, V]) iter.Seq2[K, V] {
 			}
 		}
 	}
+}
+
+// SortedAll returns the range iterator of a map over its keys in the order
+// SPEC Sec 7 gives a const map: a string by its bytes, an integer or float
+// by numeric value, false before true, a complex number by real part and
+// then imaginary part, and a struct or array field by field or element by
+// element. Keys of any other kind keep no defined order.
+func SortedAll[K comparable, V any](m map[K]V) iter.Seq2[K, V] {
+	return func(yield func(K, V) bool) {
+		keys := slices.Collect(maps.Keys(m))
+		slices.SortStableFunc(keys, func(a, b K) int {
+			return compareKeys(reflect.ValueOf(a), reflect.ValueOf(b))
+		})
+		for _, k := range keys {
+			if v, ok := m[k]; ok && !yield(k, v) {
+				return
+			}
+		}
+	}
+}
+
+func compareKeys(a, b reflect.Value) int {
+	switch a.Kind() {
+	case reflect.String:
+		return strings.Compare(a.String(), b.String())
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return cmp.Compare(a.Int(), b.Int())
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		return cmp.Compare(a.Uint(), b.Uint())
+	case reflect.Float32, reflect.Float64:
+		return cmp.Compare(a.Float(), b.Float())
+	case reflect.Bool:
+		return compareBools(a.Bool(), b.Bool())
+	case reflect.Complex64, reflect.Complex128:
+		x, y := a.Complex(), b.Complex()
+		if c := cmp.Compare(real(x), real(y)); c != 0 {
+			return c
+		}
+		return cmp.Compare(imag(x), imag(y))
+	case reflect.Struct:
+		for i := range a.NumField() {
+			if c := compareKeys(a.Field(i), b.Field(i)); c != 0 {
+				return c
+			}
+		}
+	case reflect.Array:
+		for i := range a.Len() {
+			if c := compareKeys(a.Index(i), b.Index(i)); c != 0 {
+				return c
+			}
+		}
+	}
+	return 0
+}
+
+func compareBools(a, b bool) int {
+	switch {
+	case a == b:
+		return 0
+	case b:
+		return -1
+	}
+	return 1
 }
 
 // Opt converts a lookup result to the option form of a single-value read

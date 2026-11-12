@@ -41,6 +41,17 @@ exec env -u GOROOT $UPROOT1272/bin/go run ./app
 cmp stdout ../want.txt
 cd ..
 
+# A range over a map of an imported composite visits sorted keys, for a variable index too.
+cd ../rangeimp
+logos build -o $WORK/bin/importrange$GOEXE ./app
+exec $WORK/bin/importrange$GOEXE
+cmp stdout want.txt
+logos eject -o out
+cd out
+exec env -u GOROOT $UPROOT1272/bin/go run ./app
+cmp stdout ../want.txt
+cd ..
+
 -- m/go.mod --
 module example.com/ccimport
 
@@ -303,4 +314,56 @@ import (
 func main() {
 	lib.C.Set()
 	fmt.Println(lib.C.N)
+}
+-- rangeimp/go.mod --
+module example.com/ccrangeimp
+
+go 1.27
+
+-- rangeimp/want.txt --
+dynamic abcdefghij xyz
+static abcdefghij
+view xyz
+-- rangeimp/lib/lib.lgo --
+package lib
+
+type Item struct {
+	M map[string]int
+	N int
+}
+
+const Items = []Item{{M: map[string]int{"j": 10, "b": 2, "h": 8, "a": 1, "e": 5, "c": 3, "i": 9, "d": 4, "g": 7, "f": 6}, N: 1}, {M: map[string]int{"z": 1, "y": 2, "x": 3}, N: 2}}
+-- rangeimp/app/main.lgo --
+package main
+
+import (
+	"fmt"
+
+	"example.com/ccrangeimp/lib"
+)
+
+func keysOf(m const map[string]int) string {
+	s := ""
+	for k := range m {
+		s += k
+	}
+	return s
+}
+
+func dynamic(i int) string {
+	s := ""
+	for k := range lib.Items[i].M {
+		s += k
+	}
+	return s
+}
+
+func main() {
+	static := ""
+	for k := range lib.Items[0].M {
+		static += k
+	}
+	fmt.Println("dynamic", dynamic(0), dynamic(1))
+	fmt.Println("static", static)
+	fmt.Println("view", keysOf(lib.Items[1].M))
 }

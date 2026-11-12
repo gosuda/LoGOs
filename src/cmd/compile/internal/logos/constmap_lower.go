@@ -883,6 +883,7 @@ func (fl *fileLower) lowerConstMapRanges() {
 		}
 		g, ok := fl.constMapUse(rc.X)
 		if !ok {
+			fl.lowerSortedRange(rc)
 			return true
 		}
 		pos := rc.X.Pos()
@@ -898,6 +899,35 @@ func (fl *fileLower) lowerConstMapRanges() {
 		rc.X = callOf(pos, selOf(pos, nameOf(pos, rtAlias), "ConstAll"), []syntax.Expr{nameOf(pos, g.sortedName())})
 		return true
 	})
+}
+
+func (fl *fileLower) lowerSortedRange(rc *syntax.RangeClause) {
+	if !fl.rangesConstMap(rc.X) {
+		return
+	}
+	pos := rc.X.Pos()
+	start, end := fl.off(syntax.StartPos(rc.X)), fl.endOff(rc.X)
+	fl.add(start, start, rtAlias+".SortedAll(")
+	fl.add(end, end, ")")
+	fl.needRT = true
+	rc.X = callOf(pos, selOf(pos, nameOf(pos, rtAlias), "SortedAll"), []syntax.Expr{rc.X})
+}
+
+func (fl *fileLower) rangesConstMap(x syntax.Expr) bool {
+	t := fl.pkg.info.TypeOf(x)
+	if t == nil {
+		return false
+	}
+	if view := constAsView(t); view != nil {
+		_, isMap := compositeUnderlying(view.Elem).(*types2.Map)
+		return isMap
+	}
+	ref, ok := fl.compositeRefOf(x)
+	if !ok || ref.method != nil {
+		return false
+	}
+	_, isMap := compositeUnderlying(t).(*types2.Map)
+	return isMap
 }
 
 func (fl *fileLower) lowerConstMapName(e *syntax.Name) (syntax.Expr, bool) {
