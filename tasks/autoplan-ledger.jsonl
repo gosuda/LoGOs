@@ -215,3 +215,17 @@
 {"id": "AUD-104", "description": "M9-A-S16 Apply defers of directly invoked closures at the call", "phase": "AUD"}
 {"id": "AUD-105", "description": "M3-A-S12 Assert Go package facts match across GOARCH", "phase": "AUD"}
 {"id": "AUD-106", "description": "M22-A-S2 Assert zeroalloc ignores heap fallback", "phase": "AUD"}
+{"id": "AUD-107", "description": "M1-A-S9 Capture defer try receiver once per iteration", "phase": "AUD"}
+{"id": "AUD-108", "description": "M3-A-S13 Prove always nil error callees in facts", "phase": "AUD"}
+{"id": "AUD-109", "description": "M3-A-S14 Pin C returned platform pointer stores", "phase": "AUD"}
+{"id": "AUD-110", "description": "M4-A-S3 Route qualified targets through conformance", "phase": "AUD"}
+{"id": "AUD-111", "description": "M7-A-S4 Fold constant Tag Get keys", "phase": "AUD"}
+{"id": "AUD-112", "description": "M11-A-S4 Route string tagged methods through raw fallback", "phase": "AUD"}
+{"id": "AUD-113", "description": "M11-A-S5 Enforce keyed trial for closed union decode", "phase": "AUD"}
+{"id": "AUD-114", "description": "M12-A-S1 Prove wasm deadcode drops unreachable code", "phase": "AUD"}
+{"id": "AUD-115", "description": "M13-A-S4 Serve variable make buffer at O0", "phase": "AUD"}
+{"id": "AUD-116", "description": "M13-A-S5 Pin Go package breadth with three scripts", "phase": "AUD"}
+{"id": "AUD-117", "description": "M14-A-S1 Allow float array bitwise operators", "phase": "AUD"}
+{"id": "AUD-118", "description": "M21-A-S8 Report retained snapshots per package", "phase": "AUD"}
+{"id": "AUD-119", "description": "M21-A-S9 Serve stock clients through proxy", "phase": "AUD"}
+{"id": "AUD-120", "description": "M22-A-S3 Run goparity fast oracle off and release tiers", "phase": "AUD"}

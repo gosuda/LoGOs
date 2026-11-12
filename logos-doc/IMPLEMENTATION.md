@@ -3297,7 +3297,7 @@ Prerequisites: run `./make.bash` in `src` and put the fork `bin` directory first
 
 Anchor: Tony Hoare
 
-Written to `tasks/autoplan-ledger.jsonl` by P0-S6. IDs: phase prefix plus a sequence in plan order. The original 103 rows are preserved verbatim; P0-S6 appends exactly the 5 remaining rows for M0-S7, P1-S3, M11-S3, M11-S4, and M18-S4 (listed at the end of the block); the M19 rows are pruned. The 2026-10-19 direction appended one more row after those, `DX-20` for the follow-up slice M0-S8; no other row changed (the descriptions of rows such as `ENG-26` name the slice as first written, and `CEO-02` names the original 182 REDTEAM rows; rows #183 to #189 were added later by the same direction). The audit direction appended rows `AUD-01` to `AUD-106` after those, one per recorded audit slice in commit order. The ledger holds 217 rows.
+Written to `tasks/autoplan-ledger.jsonl` by P0-S6. IDs: phase prefix plus a sequence in plan order. The original 103 rows are preserved verbatim; P0-S6 appends exactly the 5 remaining rows for M0-S7, P1-S3, M11-S3, M11-S4, and M18-S4 (listed at the end of the block); the M19 rows are pruned. The 2026-10-19 direction appended one more row after those, `DX-20` for the follow-up slice M0-S8; no other row changed (the descriptions of rows such as `ENG-26` name the slice as first written, and `CEO-02` names the original 182 REDTEAM rows; rows #183 to #189 were added later by the same direction). The audit direction appended rows `AUD-01` to `AUD-120` after those, one per recorded audit slice in commit order. The ledger holds 231 rows.
 
 ```jsonl
 {"id": "CEO-01", "description": "P0-S1 Rename logos-doc/PLAN.md to logos-doc/SPEC.md (pure rename) and P0-S2 rewrite SPEC.md as the tailored spec (tables T, N, Section 18)", "phase": "CEO"}
@@ -3517,4 +3517,18 @@ Written to `tasks/autoplan-ledger.jsonl` by P0-S6. IDs: phase prefix plus a sequ
 {"id": "AUD-104", "description": "M9-A-S16 Apply defers of directly invoked closures at the call", "phase": "AUD"}
 {"id": "AUD-105", "description": "M3-A-S12 Assert Go package facts match across GOARCH", "phase": "AUD"}
 {"id": "AUD-106", "description": "M22-A-S2 Assert zeroalloc ignores heap fallback", "phase": "AUD"}
+{"id": "AUD-107", "description": "M1-A-S9 Capture defer try receiver once per iteration", "phase": "AUD"}
+{"id": "AUD-108", "description": "M3-A-S13 Prove always nil error callees in facts", "phase": "AUD"}
+{"id": "AUD-109", "description": "M3-A-S14 Pin C returned platform pointer stores", "phase": "AUD"}
+{"id": "AUD-110", "description": "M4-A-S3 Route qualified targets through conformance", "phase": "AUD"}
+{"id": "AUD-111", "description": "M7-A-S4 Fold constant Tag Get keys", "phase": "AUD"}
+{"id": "AUD-112", "description": "M11-A-S4 Route string tagged methods through raw fallback", "phase": "AUD"}
+{"id": "AUD-113", "description": "M11-A-S5 Enforce keyed trial for closed union decode", "phase": "AUD"}
+{"id": "AUD-114", "description": "M12-A-S1 Prove wasm deadcode drops unreachable code", "phase": "AUD"}
+{"id": "AUD-115", "description": "M13-A-S4 Serve variable make buffer at O0", "phase": "AUD"}
+{"id": "AUD-116", "description": "M13-A-S5 Pin Go package breadth with three scripts", "phase": "AUD"}
+{"id": "AUD-117", "description": "M14-A-S1 Allow float array bitwise operators", "phase": "AUD"}
+{"id": "AUD-118", "description": "M21-A-S8 Report retained snapshots per package", "phase": "AUD"}
+{"id": "AUD-119", "description": "M21-A-S9 Serve stock clients through proxy", "phase": "AUD"}
+{"id": "AUD-120", "description": "M22-A-S3 Run goparity fast oracle off and release tiers", "phase": "AUD"}
 ```
