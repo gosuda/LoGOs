@@ -85,11 +85,8 @@ var directiveKinds = []string{
 
 func directiveOf(text string) (string, string) {
 	for _, k := range directiveKinds {
-		if text == k {
-			return k, ""
-		}
-		if strings.HasPrefix(text, k+" ") {
-			return k, strings.TrimSpace(text[len(k):])
+		if arg, ok := syntax.DirectiveArg(text, k); ok {
+			return k, arg
 		}
 	}
 	return "", ""

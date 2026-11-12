@@ -7,7 +7,6 @@ package lint
 import (
 	"bytes"
 	"cmp"
-	"regexp"
 	"slices"
 	"strings"
 
@@ -23,10 +22,6 @@ const ZeroAllocRule = "perf::zeroalloc_violation"
 
 // zeroAllocMarker is the text every //logos:zeroalloc comment contains.
 const zeroAllocMarker = "//logos:zeroalloc"
-
-// zeroAllocDirective matches //logos:zeroalloc, optionally followed by a
-// space and free text.
-var zeroAllocDirective = regexp.MustCompile(`^//logos:zeroalloc(?:\s.*)?$`)
 
 // ZeroAllocFunc is a function marked //logos:zeroalloc: its declared name,
 // and the file and line of its declaration, the line of the token after
@@ -80,7 +75,8 @@ func fileZeroAlloc(f *syntax.File, src []byte, mode syntax.Mode) ([]ZeroAllocFun
 	var funcs []ZeroAllocFunc
 	var misplaced []Result
 	syntax.CommentsDoMode(bytes.NewReader(src), mode, func(line, col uint, text string) {
-		if !zeroAllocDirective.MatchString(text) {
+		arg, ok := syntax.DirectiveArg(text, zeroAllocMarker)
+		if !ok {
 			return
 		}
 		decl, ok := decls[nextCodeLine(lines, line)]
@@ -96,7 +92,7 @@ func fileZeroAlloc(f *syntax.File, src []byte, mode syntax.Mode) ([]ZeroAllocFun
 			return
 		}
 		local := false
-		for _, word := range strings.Fields(text)[1:] {
+		for _, word := range strings.Fields(arg) {
 			if word == "local" {
 				local = true
 			}

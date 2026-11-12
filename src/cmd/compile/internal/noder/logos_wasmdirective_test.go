@@ -52,6 +52,11 @@ func TestRewriteLogosWasmDirectives(t *testing.T) {
 			want: "package main\n//logos:wasmexported f\nfunc f() {}\n",
 		},
 		{
+			name: "longer import name stays a comment",
+			src:  "package main\n//logos:wasmimport_old m f\nfunc f()\n",
+			want: "package main\n//logos:wasmimport_old m f\nfunc f()\n",
+		},
+		{
 			name: "block comment stays a comment",
 			src:  "package main\n/* //logos:wasmexport f */\nfunc f() {}\n",
 			want: "package main\n/* //logos:wasmexport f */\nfunc f() {}\n",

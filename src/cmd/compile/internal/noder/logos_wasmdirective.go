@@ -6,7 +6,6 @@ package noder
 
 import (
 	"bytes"
-	"strings"
 
 	"cmd/compile/internal/syntax"
 )
@@ -24,7 +23,7 @@ var logosWasmDirectives = [...]string{
 
 func isLogosWasmDirective(text string) bool {
 	for _, name := range logosWasmDirectives {
-		if rest, ok := strings.CutPrefix(text, name); ok && (rest == "" || rest[0] == ' ' || rest[0] == '\t') {
+		if _, ok := syntax.DirectiveArg(text, name); ok {
 			return true
 		}
 	}

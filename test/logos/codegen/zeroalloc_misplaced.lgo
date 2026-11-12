@@ -24,3 +24,17 @@ func trailing(c *counter) { c.n++ } //logos:zeroalloc // ERROR "\[perf::zeroallo
 func marked(c *counter) {
 	c.n++
 }
+
+//logos:zeroallocx
+type nearTagged struct{ v int }
+
+//logos:zeroalloc_old
+
+func nearDetached(c *counter) {
+	c.n++
+}
+
+func nearTrailing(c *counter) { c.n++ } //logos:zeroalloc:x
+
+//logos:zeroalloc	// ERROR "\[perf::zeroalloc_violation\] //logos:zeroalloc must be on its own line directly above a function declaration"
+type tabTagged struct{ v int }
