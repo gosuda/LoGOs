@@ -610,6 +610,7 @@ func (check *Checker) stmt(ctxt stmtContext, s syntax.Stmt) {
 					// ok to continue
 				}
 			}
+			check.logosRegionNamedResults(s, res)
 		} else {
 			var lhs []*Var
 			if res.Len() > 0 {

@@ -253,6 +253,19 @@ func (check *Checker) logosRegionResults(results []syntax.Expr) {
 	}
 }
 
+func (check *Checker) logosRegionNamedResults(at poser, results *Tuple) {
+	if !check.conf.Logos {
+		return
+	}
+	for _, result := range results.vars {
+		check.later(func() {
+			if logosRegionCarries(result.typ) || check.logosRegionVar[result] {
+				check.errorf(at, IncompatibleAssign, "%s cannot return %s: it holds a region value", logosRegionEscape, result.name)
+			}
+		})
+	}
+}
+
 func (check *Checker) logosRegionSend(val *operand) {
 	if !check.conf.Logos || !val.isValid() {
 		return
