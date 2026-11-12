@@ -128,12 +128,16 @@ func capFileImports(file string) []string {
 }
 
 func capHoldsAssembly(p *Package) bool {
-	if len(p.SFiles) > 0 {
+	if len(p.SFiles) > 0 || len(p.SysoFiles) > 0 {
 		return true
 	}
 	return slices.ContainsFunc(p.IgnoredOtherFiles, func(name string) bool {
-		return capIsAssembly(name) && capBuildsAnywhere(filepath.Join(p.Dir, name))
+		return capIsObject(name) || capIsAssembly(name) && capBuildsAnywhere(filepath.Join(p.Dir, name))
 	})
+}
+
+func capIsObject(name string) bool {
+	return filepath.Ext(name) == ".syso"
 }
 
 func capIsAssembly(name string) bool {
