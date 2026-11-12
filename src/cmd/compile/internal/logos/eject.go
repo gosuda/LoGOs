@@ -462,6 +462,96 @@ func EjectUnionEdits(info *types2.Info, files []*syntax.File, src map[*syntax.Fi
 	return unionEjectEdits(c, src), nil
 }
 
+func UnionImportEdits(info *types2.Info, src map[*syntax.File][]byte, lowered, union map[*syntax.File][]Edit) map[*syntax.File][]Edit {
+	out := make(map[*syntax.File][]Edit)
+	for file, erasures := range union {
+		data, ok := src[file]
+		if !ok {
+			continue
+		}
+		if blanks := blankErasedImports(info, file, data, lowered[file], erasures); len(blanks) > 0 {
+			out[file] = blanks
+		}
+	}
+	return out
+}
+
+func blankErasedImports(info *types2.Info, file *syntax.File, data []byte, lowered, erasures []Edit) []Edit {
+	starts := lineStarts(data)
+	at := func(p syntax.Pos) int {
+		line := int(p.Line())
+		if !p.IsKnown() || line > len(starts) {
+			return -1
+		}
+		return starts[line-1] + int(p.Col()) - 1
+	}
+	var erased [][2]int
+	for _, e := range erasures {
+		if s, t := at(e.Start), at(e.End); e.Text == "" && t > s {
+			erased = append(erased, [2]int{s, t})
+		}
+	}
+	used := make(map[string]bool)
+	var visit func(syntax.Node) bool
+	visit = func(n syntax.Node) bool {
+		switch n := n.(type) {
+		case *syntax.ImportDecl:
+			return false
+		case *syntax.SelectorExpr:
+			syntax.Inspect(n.X, visit)
+			return false
+		case *syntax.Name:
+			off := at(n.Pos())
+			if !slices.ContainsFunc(erased, func(s [2]int) bool { return off >= s[0] && off < s[1] }) {
+				used[n.Value] = true
+			}
+		}
+		return true
+	}
+	syntax.Inspect(file, visit)
+	var blanks []splice
+	for _, decl := range file.DeclList {
+		imp, ok := decl.(*syntax.ImportDecl)
+		if !ok || imp.Path == nil {
+			continue
+		}
+		var obj types2.Object
+		if imp.LocalPkgName != nil {
+			obj = info.Defs[imp.LocalPkgName]
+		} else {
+			obj = info.Implicits[imp]
+		}
+		pn, ok := obj.(*types2.PkgName)
+		if !ok || pn.Name() == "_" {
+			continue
+		}
+		local := pn.Name()
+		var kept bool
+		if local == "." {
+			kept = slices.ContainsFunc(pn.Imported().Scope().Names(), func(n string) bool { return token.IsExported(n) && used[n] })
+		} else {
+			kept = used[local] || slices.ContainsFunc(lowered, func(e Edit) bool { return containsIdent(e.Text, local) })
+		}
+		if kept {
+			continue
+		}
+		start := at(imp.Path.Pos())
+		if imp.LocalPkgName != nil {
+			start = at(imp.LocalPkgName.Pos())
+		}
+		end := at(imp.Path.Pos()) + len(imp.Path.Value)
+		if slices.ContainsFunc(lowered, func(e Edit) bool { return at(e.Start) <= end && at(e.End) >= start }) {
+			continue
+		}
+		if imp.LocalPkgName != nil {
+			blanks = append(blanks, splice{start: start, end: start + len(imp.LocalPkgName.Value), text: "_"})
+		} else {
+			blanks = append(blanks, splice{start: start, end: start, text: "_ "})
+		}
+	}
+	return editsOf(data, file.Pos().FileBase(), blanks)
+}
+
 func unionEjectEdits(c *unionClass, src map[*syntax.File][]byte) map[*syntax.File][]Edit {
 	out := make(map[*syntax.File][]Edit)
 	for obj, use := range c.modes {

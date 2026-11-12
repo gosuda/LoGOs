@@ -199,7 +199,11 @@ func lowerLogosHook(pkg *types2.Package, info *types2.Info, files []*syntax.File
 		if err != nil {
 			base.Fatalf("logos eject: %v", err)
 		}
+		importEdits := logos.UnionImportEdits(info, src, edits, unionEdits)
 		for file, list := range unionEdits {
+			edits[file] = append(edits[file], list...)
+		}
+		for file, list := range importEdits {
 			edits[file] = append(edits[file], list...)
 		}
 	} else {
