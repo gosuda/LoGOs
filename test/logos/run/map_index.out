@@ -14,6 +14,7 @@ ok present-nil-payload-keeps-nil-against-default
 ok direct-index-of-nil-payload-is-present
 ok missing-key-yields-default-length
 ok direct-index-of-missing-slice-is-nil
+ok direct-index-of-missing-slice-reports-not-ok
 ok comma-ok-keeps-nil-payload-with-ok
 ok nil-payload-coalesces-to-nil-not-default
 ok present-slice-length-ignores-default

@@ -72,6 +72,8 @@ func checkSlices() {
 	} else {
 		fmt.Println("ok direct-index-of-missing-slice-is-nil")
 	}
+	vsz, oksz := ms["zzz"]
+	bs("direct-index-of-missing-slice-reports-not-ok", !oksz && vsz == nil, true)
 	vn, okn := ms["n"]
 	bs("comma-ok-keeps-nil-payload-with-ok", vn == nil && okn, true)
 	bs("nil-payload-coalesces-to-nil-not-default", (ms["n"] ?? dflt) == nil, true)
