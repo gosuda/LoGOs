@@ -1200,7 +1200,7 @@ func (fl *fileLower) lowerOptSelect(e *syntax.OptSelectExpr) syntax.Expr {
 		e.X = fl.lowerOptExpr(e.X)
 		return e
 	}
-	xStart := fl.off(fl.optLeftmost(e.X))
+	xStart := fl.off(fl.optHeadStart(e.X))
 	nativeR, ejectR, ok := fl.spellLoweredBoth(ro, pos)
 	if !ok {
 		base.Fatalf("logos: cannot spell type %s of the ?. expression at %s", ro, pos.String())
