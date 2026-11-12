@@ -552,3 +552,89 @@ func timerLoopResetBound(in chan int, d time.Duration) int {
 	}
 	return 0
 }
+
+func timerGotoBackUnproven(in chan int, d time.Duration) int {
+	t := time.NewTimer(d)
+	defer t.Stop()
+retry:
+	select {
+	case v := <-in: // ERROR "unbounded_channel_op"
+		return v
+	case <-t.C: // ERROR "unbounded_channel_op"
+		goto retry
+	}
+}
+
+func timerGotoBackRecreatedBound(in chan int, d time.Duration) int {
+retry:
+	t := time.NewTimer(d)
+	select {
+	case v := <-in:
+		return v
+	case <-t.C:
+		goto retry
+	}
+}
+
+func tickerGotoBackBound(in chan int, d time.Duration) int {
+	t := time.NewTicker(d)
+	defer t.Stop()
+retry:
+	select {
+	case v := <-in:
+		return v
+	case <-t.C:
+		goto retry
+	}
+}
+
+func timerGotoForwardBound(in chan int, d time.Duration, skip bool) int {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	if skip {
+		goto done
+	}
+	select {
+	case v := <-in:
+		return v
+	case <-t.C:
+	}
+done:
+	return 0
+}
+
+func timerGotoBackLoopResetBound(in chan int, d time.Duration) int {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	rounds := 0
+retry:
+	for range 3 {
+		t.Reset(d)
+		select {
+		case v := <-in:
+			return v
+		case <-t.C:
+		}
+	}
+	if rounds < 2 {
+		rounds++
+		goto retry
+	}
+	return 0
+}
+
+func timerGotoBackPastResetUnproven(in chan int, d time.Duration) int {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	for range 3 {
+		t.Reset(d)
+	again:
+		select {
+		case v := <-in: // ERROR "unbounded_channel_op"
+			return v
+		case <-t.C: // ERROR "unbounded_channel_op"
+			goto again
+		}
+	}
+	return 0
+}

@@ -104,6 +104,7 @@ type chanUnit struct {
 	// time.NewTimer or time.NewTicker. The constructor is known before the
 	// walk; the rest is collected in source order while walking.
 	timers map[*types2.Var]*timerUse
+	reruns []span
 }
 
 // timerUse tracks one local variable of the unit that an assignment
@@ -120,6 +121,7 @@ type timerUse struct {
 	defIn    *syntax.ForStmt
 	recv     bool
 	reset    *syntax.ForStmt
+	resetAt  syntax.Pos
 	deferred []int
 	src      *types2.Var
 	taint    bool
@@ -137,6 +139,7 @@ func (u *chanUnit) run() {
 	u.defs = make(map[*types2.Var]int)
 	u.caps = make(map[*types2.Var]int64)
 	u.timers = make(map[*types2.Var]*timerUse)
+	u.reruns = backJumps(u.root)
 	syntax.Inspect(u.root, u.collect)
 	syntax.Inspect(u.root, u.taintAll)
 	syntax.Inspect(u.root, u.visit)
@@ -166,6 +169,12 @@ func (u *chanUnit) bounded(ch *types2.Var) bool {
 // receive or a range; every other mention, including a read or assignment
 // of t.C, taints.
 func (u *chanUnit) taintAll(n syntax.Node) bool {
+	if body, ok := funcBody(n); ok {
+		u.depth++
+		syntax.Inspect(body, u.taintAll)
+		u.depth--
+		return false
+	}
 	switch n := n.(type) {
 	case *syntax.Name:
 		u.timerUse(n)
@@ -192,18 +201,20 @@ func (u *chanUnit) taintAll(n syntax.Node) bool {
 	case *syntax.ForStmt:
 		u.forBody(n)
 		return false
-	case *syntax.FuncLit:
-		u.depth++
-		syntax.Inspect(n.Body, u.taintAll)
-		u.depth--
-		return false
-	case *syntax.LambdaExpr:
-		u.depth++
-		syntax.Inspect(n.Body, u.taintAll)
-		u.depth--
-		return false
 	}
 	return true
+}
+
+func funcBody(n syntax.Node) (syntax.Node, bool) {
+	switch n := n.(type) {
+	case *syntax.FuncLit:
+		return n.Body, true
+	case *syntax.LambdaExpr:
+		return n.Body, true
+	case *syntax.GroupChild:
+		return n.Body, true
+	}
+	return nil, false
 }
 
 // allowRecvOperand spares the C field of a tracked timer when x is the
@@ -438,7 +449,9 @@ func (u *chanUnit) nested(body syntax.Node) {
 func (u *chanUnit) child(g *syntax.GroupChild) {
 	outer := u.free
 	u.free = true
+	u.depth++
 	u.walk(g.Body)
+	u.depth--
 	u.free = outer
 }
 
@@ -453,6 +466,7 @@ func (u *chanUnit) bodyTop(f *syntax.ForStmt) {
 		if v := u.topReset(st); v != nil {
 			if t := u.timers[v]; t != nil {
 				t.reset = f
+				t.resetAt = st.Pos()
 				t.recv = false
 			}
 			if es, ok := st.(*syntax.ExprStmt); ok {
@@ -643,7 +657,7 @@ func (u *chanUnit) selectCovered(s *syntax.SelectStmt) bool {
 		if cc.Comm == nil {
 			return true
 		}
-		if op := commOperation(cc.Comm); op != nil && (isDoneCall(op.X) || u.isTimeoutRecv(op.X)) {
+		if op := commOperation(cc.Comm); op != nil && (isDoneCall(op.X) || u.isTimeoutRecv(s.Pos(), op.X)) {
 			return true
 		}
 	}
@@ -653,7 +667,7 @@ func (u *chanUnit) selectCovered(s *syntax.SelectStmt) bool {
 // isTimeoutRecv reports whether x is a receive that bounds a select: a call
 // of time.After, or the C field of a timer or ticker that the function
 // creates with time.NewTimer or time.NewTicker and has not stopped.
-func (u *chanUnit) isTimeoutRecv(x syntax.Expr) bool {
+func (u *chanUnit) isTimeoutRecv(at syntax.Pos, x syntax.Expr) bool {
 	if call, ok := bareExpr(x).(*syntax.CallExpr); ok {
 		return isTimeAfter(u.pass, call)
 	}
@@ -661,15 +675,15 @@ func (u *chanUnit) isTimeoutRecv(x syntax.Expr) bool {
 	if !ok || sel.Sel.Value != "C" {
 		return false
 	}
-	return u.localTimerBound(sel)
+	return u.localTimerBound(at, sel)
 }
 
-// localTimerBound reports whether sel ends the wait of the select being
-// walked: the timer is a local of the function the walk is under, declared
-// once and never assigned again, not stopped, and for a timer, not received
-// from and not waiting in a for statement that neither declares nor resets
-// it. A deferred Stop exempts only its own function.
-func (u *chanUnit) localTimerBound(sel *syntax.SelectorExpr) bool {
+// localTimerBound reports whether sel ends the wait of the select at
+// position at: the timer is a local of the function the walk is under,
+// declared once and never assigned again, not stopped, and for a timer, not
+// received from and not waiting in a for statement that neither declares
+// nor resets it. A deferred Stop exempts only its own function.
+func (u *chanUnit) localTimerBound(at syntax.Pos, sel *syntax.SelectorExpr) bool {
 	v := u.timerName(sel.X)
 	if v == nil {
 		return false
@@ -686,11 +700,45 @@ func (u *chanUnit) localTimerBound(sel *syntax.SelectorExpr) bool {
 	if t.ctor == "NewTicker" {
 		return true
 	}
-	if t.recv {
-		return false
+	armed, ok := t.armedFor(u.loopAt())
+	return ok && !t.recv && !u.rerunsWithout(at, armed)
+}
+
+func (t *timerUse) armedFor(loop *syntax.ForStmt) (syntax.Pos, bool) {
+	if loop != nil && t.reset == loop {
+		return t.resetAt, true
 	}
-	f := u.loopAt()
-	return f == nil || t.defIn == f || t.reset == f
+	return t.src.Pos(), loop == nil || t.defIn == loop
+}
+
+type span struct{ from, to syntax.Pos }
+
+func (s span) holds(pos syntax.Pos) bool {
+	return s.from.Cmp(pos) <= 0 && pos.Cmp(s.to) <= 0
+}
+
+func backJumps(root syntax.Node) []span {
+	var out []span
+	syntax.Inspect(root, func(n syntax.Node) bool {
+		jump, ok := n.(*syntax.BranchStmt)
+		if !ok || jump.Tok != syntax.Goto {
+			return true
+		}
+		if label, ok := jump.Target.(*syntax.LabeledStmt); ok && label.Pos().Cmp(jump.Pos()) < 0 {
+			out = append(out, span{label.Pos(), jump.Pos()})
+		}
+		return true
+	})
+	return out
+}
+
+func (u *chanUnit) rerunsWithout(stmt, armed syntax.Pos) bool {
+	for _, s := range u.reruns {
+		if s.holds(stmt) && !s.holds(armed) {
+			return true
+		}
+	}
+	return false
 }
 
 // timerCtor returns NewTimer or NewTicker when x is a call of that function
