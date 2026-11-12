@@ -14,6 +14,19 @@ logos run .
 stdout '^1 2 3 4 5 6$'
 cd ..
 
+# In a keyword position the same word is a statement in a loGo/s file
+# and a syntax error in a Go file, under plain go and under logos.
+cd kwpos
+logos run .
+stdout '^cleanup ran$'
+stdout '^true$'
+cd ../gobad
+! go build .
+stderr 'main\.go:11:[0-9]+: syntax error'
+! logos build .
+stderr 'main\.go:11:[0-9]+: syntax error'
+cd ..
+
 -- go/go.mod --
 module example.com/kwgo
 
@@ -53,3 +66,47 @@ func main() {
 	errdefer := 6
 	fmt.Println(yield, scope, group, option, comptime, errdefer)
 }
+
+-- kwpos/go.mod --
+module example.com/kwpos
+
+go 1.27
+
+-- kwpos/main.lgo --
+package main
+
+import (
+	"errors"
+	"fmt"
+)
+
+func cleanup() { fmt.Println("cleanup ran") }
+
+func work() error {
+	errdefer cleanup()
+	return errors.New("fail")
+}
+
+func main() { fmt.Println(work() != nil) }
+
+-- gobad/go.mod --
+module example.com/gobad
+
+go 1.27
+
+-- gobad/main.go --
+package main
+
+import (
+	"errors"
+	"fmt"
+)
+
+func cleanup() { fmt.Println("cleanup ran") }
+
+func work() error {
+	errdefer cleanup()
+	return errors.New("fail")
+}
+
+func main() { fmt.Println(work() != nil) }
