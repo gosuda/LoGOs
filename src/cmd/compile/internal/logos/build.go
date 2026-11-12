@@ -71,6 +71,11 @@ func leftmostOf(e syntax.Expr) syntax.Pos {
 				return e.Pos()
 			}
 			e = n.X
+		case *syntax.CompositeLit:
+			if n.Type == nil {
+				return e.Pos()
+			}
+			e = n.Type
 		default:
 			return e.Pos()
 		}
