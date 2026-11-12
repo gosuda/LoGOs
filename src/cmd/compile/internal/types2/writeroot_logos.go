@@ -90,6 +90,7 @@ func (check *Checker) logosUnderlying(e syntax.Expr) Type {
 	if t == nil {
 		return nil
 	}
+	t, _, _ = logosReadonlyBase(t)
 	return Unalias(t).Underlying()
 }
 

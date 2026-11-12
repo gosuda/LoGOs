@@ -134,7 +134,8 @@ func (check *Checker) logosSimdCall(x *operand, call *syntax.CallExpr) bool {
 	if obj, _, _ := lookupFieldOrMethod(rx.typ(), rx.mode() == variable, check.pkg, method, false); obj != nil {
 		return false
 	}
-	sh, ok := logosSimdShapeOf(rx.typ())
+	rt, _, _ := logosReadonlyBase(rx.typ())
+	sh, ok := logosSimdShapeOf(rt)
 	if !ok {
 		return false
 	}
@@ -175,8 +176,8 @@ func (check *Checker) logosSimdCall(x *operand, call *syntax.CallExpr) bool {
 			fail()
 			return true
 		}
-		if !Identical(av.typ(), rx.typ()) {
-			check.errorf(&av, IncompatibleAssign, "cannot use %s as %s value in argument to %s", &av, rx.typ(), call.Fun)
+		if at, _, _ := logosReadonlyBase(av.typ()); !Identical(at, rt) {
+			check.errorf(&av, IncompatibleAssign, "cannot use %s as %s value in argument to %s", &av, rt, call.Fun)
 			fail()
 			return true
 		}

@@ -6,7 +6,7 @@ ok lambda-block-edit
 ok lambda-block-edit-keeps-const
 ok lambda-block-return-fresh
 ok lambda-block-filter-reads-map
-ok lambda-slice-element-edit
+ok lambda-slice-element-read
 ok lambda-slice-element-keeps-const
 ok lambda-slice-element-fresh
 ok lambda-field-slice-read

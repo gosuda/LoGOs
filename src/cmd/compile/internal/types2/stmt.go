@@ -342,6 +342,11 @@ L:
 			if !isValid(T) {
 				continue L
 			}
+			if logosContainsReadonlyDescendants(T) {
+				check.error(e, InvalidTypeSwitch, "cannot use readonly descendants in type switch cases")
+				T = Typ[Invalid]
+				continue L
+			}
 		}
 		// look for duplicate types
 		// (quadratic algorithm, but type switches tend to be reasonably small)
@@ -878,7 +883,9 @@ func (check *Checker) typeSwitchStmt(inner stmtContext, s *syntax.SwitchStmt, gu
 		var x operand
 		check.expr(nil, &x, guard.X)
 		if x.isValid() {
-			if isTypeParam(x.typ()) {
+			if logosContainsReadonlyDescendants(x.typ()) {
+				check.error(&x, InvalidTypeSwitch, "cannot use type switch on value with readonly descendants")
+			} else if isTypeParam(x.typ()) {
 				check.errorf(&x, InvalidTypeSwitch, "cannot use type switch on type parameter value %s", &x)
 			} else if IsInterface(x.typ()) {
 				sx = &x

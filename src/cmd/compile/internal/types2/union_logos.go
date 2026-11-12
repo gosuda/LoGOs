@@ -127,6 +127,9 @@ func (check *Checker) logosUnionDefault(x *operand, u *Interface) (Type, bool) {
 	if !check.logosUnionsOK() || !logosIsClosed(u.typeSet()) {
 		return nil, false
 	}
+	if check.logosReadonlyBoundary(x, u, "union default") {
+		return nil, false
+	}
 	d := Default(x.typ())
 	if !check.implements(d, u, false, nil) {
 		return nil, false
@@ -137,6 +140,9 @@ func (check *Checker) logosUnionDefault(x *operand, u *Interface) (Type, bool) {
 func (check *Checker) logosUnionConversion(x *operand, T Type) bool {
 	if !check.logosConversionUnion(T) {
 		return false
+	}
+	if check.logosReadonlyBoundary(x, T, "union conversion") {
+		return true
 	}
 	if ok, _ := x.assignableTo(check, T, nil); ok {
 		return false
@@ -153,6 +159,13 @@ func (check *Checker) logosUnionConversion(x *operand, T Type) bool {
 func (check *Checker) logosNonMemberAssert(e syntax.Expr, x *operand, T Type) bool {
 	if !check.conf.Logos {
 		return false
+	}
+	if logosContainsReadonlyDescendants(x.typ()) {
+		probe := *x
+		if check.logosReadonlyBoundary(&probe, T, "type assertion") && !probe.isValid() {
+			x.invalidate()
+			return true
+		}
 	}
 	tset := logosClosedUnion(x.typ())
 	if tset == nil || isTypeParam(T) || logosMemberOf(T, tset) {
@@ -180,6 +193,9 @@ func (check *Checker) logosUnionAssign(x *operand, T Type, context string) bool 
 	tset := logosClosedUnion(T)
 	if tset == nil {
 		return false
+	}
+	if check.logosReadonlyBoundary(x, T, context) {
+		return true
 	}
 	from := x.typ()
 	if from == nil {
@@ -300,6 +316,9 @@ func LogosUnionMembers(t Type) ([]LogosUnionMember, bool) {
 	if cv, ok := t.(*ConstView); ok {
 		t = Unalias(cv.Elem)
 	}
+	if rd := logosAsReadonlyDescendants(t); rd != nil {
+		t = Unalias(rd.Elem)
+	}
 	var out []LogosUnionMember
 	seen := make(map[string]bool)
 	visited := make(map[string]bool)
@@ -325,9 +344,15 @@ func logosAppendTypeMember(term Type, out *[]LogosUnionMember, seen map[string]b
 	seen[key] = true
 	m := LogosUnionMember{Type: term}
 	elem := Unalias(term)
+	if rd := logosAsReadonlyDescendants(elem); rd != nil {
+		elem = Unalias(rd.Elem)
+	}
 	if p, ok := elem.(*Pointer); ok {
 		m.Ptr = true
 		elem = Unalias(p.Elem())
+		if rd := logosAsReadonlyDescendants(elem); rd != nil {
+			elem = Unalias(rd.Elem)
+		}
 	}
 	if named, ok := elem.(*Named); ok && named.Obj() != nil && named.Obj().Pkg() != nil {
 		m.Pkg = named.Obj().Pkg().Path()

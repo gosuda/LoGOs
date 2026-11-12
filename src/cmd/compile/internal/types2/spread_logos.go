@@ -128,7 +128,7 @@ func (check *Checker) logosSpreadSource(utyp *Struct, typ Type, se *syntax.Sprea
 	if !v.isValid() || !isValid(v.typ()) {
 		return nil
 	}
-	base := v.typ()
+	base, _, _ := logosReadonlyBase(v.typ())
 	if u, _ := commonUnder(base, nil); u != nil {
 		base = u
 	}

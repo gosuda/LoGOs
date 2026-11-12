@@ -466,6 +466,19 @@ func (check *Checker) logosImplementsProperty(V, T Type, Ti *Interface, cause *s
 		}
 		return false
 	}
+	if source, descendants, _ := logosReadonlyBase(V); descendants {
+		for _, pr := range logosProperties(Ti) {
+			if !pr.readOnly || !Identical(logosReadonlyProject(V, pr.typ, false), pr.typ) {
+				return fail("%s %s cannot erase readonly qualification of property %s in %s", logosConstEscape, V, pr.name, T)
+			}
+		}
+		for _, m := range Ti.typeSet().methods {
+			if !logosIsAccessor(m.name) {
+				return fail("%s %s cannot erase readonly qualification through method %s in %s", logosConstEscape, V, m.name, T)
+			}
+		}
+		V = source
+	}
 	base, _ := deref(V)
 	if _, ok := base.Underlying().(*Interface); ok {
 		return check.hasAllMethodsAt(V, Ti, true, Identical, cause, pos)

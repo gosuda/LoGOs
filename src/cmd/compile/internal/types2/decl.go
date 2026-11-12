@@ -359,6 +359,18 @@ func (check *Checker) constDecl(obj *Const, typ, init syntax.Expr, inherited boo
 
 func (check *Checker) varDecl(obj *Var, lhs []*Var, typ, init syntax.Expr) {
 	assert(obj.typ == nil)
+	if obj.Parent() == check.pkg.scope {
+		check.later(func() {
+			if obj.Exported() {
+				check.logosReadonlyExport(obj)
+			}
+			for _, v := range lhs {
+				if v != obj && v.Exported() {
+					check.logosReadonlyExport(v)
+				}
+			}
+		}).describef(obj, "readonly variable exports")
+	}
 
 	// determine type, if any
 	if typ != nil {
@@ -428,6 +440,11 @@ func (check *Checker) isImportedConstraint(typ Type) bool {
 
 func (check *Checker) typeDecl(obj *TypeName, tdecl *syntax.TypeDecl) {
 	assert(obj.typ == nil)
+	if obj.Exported() && obj.Parent() == check.pkg.scope {
+		check.later(func() {
+			check.logosReadonlyExport(obj)
+		}).describef(obj, "readonly export %s", obj.name)
+	}
 
 	// Only report a version error if we have not reported one already.
 	versionErr := false
@@ -692,6 +709,11 @@ func (check *Checker) funcDecl(obj *Func, decl *declInfo) {
 
 	fdecl := decl.fdecl
 	check.funcType(sig, fdecl.Recv, fdecl.TParamList, fdecl.Type)
+	if obj.Exported() {
+		check.later(func() {
+			check.logosReadonlyExport(obj)
+		}).describef(obj, "readonly export %s", obj.name)
+	}
 
 	if fdecl.Pragma != nil {
 		if p, ok := fdecl.Pragma.(interface{ Nointerface() bool }); ok && p.Nointerface() {
@@ -852,5 +874,11 @@ func (check *Checker) declStmt(list []syntax.Decl) {
 		default:
 			check.errorf(s, InvalidSyntaxTree, "unknown syntax.Decl node %T", s)
 		}
+	}
+}
+
+func (check *Checker) logosReadonlyExport(obj Object) {
+	if logosContainsReadonlyDescendants(obj.Type()) {
+		check.errorf(obj, BadDecl, "cannot export %s with readonly descendants before qualification export encoding is supported", obj.Name())
 	}
 }

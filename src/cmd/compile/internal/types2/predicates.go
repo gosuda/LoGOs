@@ -220,6 +220,8 @@ func hasNil(t Type) bool {
 		return true
 	case *ConstView: // logos M5-S1 hook: `nil` belongs to a const view with a nil-capable element.
 		return hasNil(u.Elem)
+	case *ReadonlyDescendants:
+		return hasNil(u.Elem)
 	case *Interface:
 		return !isTypeParam(t) || underIs(t, func(u Type) bool {
 			return u != nil && hasNil(u)
@@ -326,6 +328,11 @@ func (c *comparer) identical(x, y Type, p *ifacePair) bool {
 	case *ConstView: // logos M5-S1 hook: const view identity is structural over elements.
 		// Two const views are identical if they have identical element types.
 		if y, ok := y.(*ConstView); ok {
+			return c.identical(x.Elem, y.Elem, p)
+		}
+
+	case *ReadonlyDescendants:
+		if y, ok := y.(*ReadonlyDescendants); ok {
 			return c.identical(x.Elem, y.Elem, p)
 		}
 

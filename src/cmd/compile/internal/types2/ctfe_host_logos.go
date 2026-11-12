@@ -486,6 +486,8 @@ func (h *ctfeHost) fromType(t Type) *ctfe.Type {
 		return &ctfe.Type{Impure: "channel type in const func"}
 	case *ConstView:
 		return h.fromType(t.Elem)
+	case *ReadonlyDescendants:
+		return &ctfe.Type{Impure: "readonly-descendant capability in const func"}
 	}
 	return nil
 }

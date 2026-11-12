@@ -150,6 +150,10 @@ func (check *Checker) unary(x *operand, e *syntax.Operation) {
 			return
 		}
 		x.mode_ = value
+		if check.conf.Logos && logosAsReadonlyDescendants(x.typ()) != nil {
+			x.typ_ = &Pointer{base: x.typ()}
+			return
+		}
 		if check.logosConstAddr(x) {
 			return
 		}
@@ -1245,6 +1249,10 @@ func (check *Checker) exprInternal(T *target, x *operand, e syntax.Expr, hint Ty
 					check.validVarType(e.X, x.typ())
 					x.typ_ = &Pointer{base: x.typ()}
 				default:
+					readonlyContainer := x.typ()
+					if check.conf.Logos {
+						x.typ_, _, _ = logosReadonlyBase(x.typ())
+					}
 					check.logosConstUnwrapBase(x) // logos M5-S1 hook: dereference through const views.
 					var base Type
 					if !underIs(x.typ(), func(u Type) bool {
@@ -1272,6 +1280,9 @@ func (check *Checker) exprInternal(T *target, x *operand, e syntax.Expr, hint Ty
 					x.mode_ = variable
 					x.typ_ = base
 					check.logosConstWrapBase(x, e.X) // logos M5-S1 hook: dereference reads through const views.
+					if check.conf.Logos {
+						x.typ_ = logosReadonlyProject(readonlyContainer, x.typ(), true)
+					}
 				}
 				break
 			}
@@ -1366,6 +1377,11 @@ func keyVal(x constant.Value) any {
 
 // typeAssertion checks x.(T). The type of x must be an interface.
 func (check *Checker) typeAssertion(e syntax.Expr, x *operand, T Type, typeSwitch bool) {
+	if check.conf.Logos && (logosContainsReadonlyDescendants(x.typ()) || logosContainsReadonlyDescendants(T)) {
+		check.errorf(e, ImpossibleAssert, "%s cannot erase readonly descendants in a type assertion", logosConstEscape)
+		x.invalidate()
+		return
+	}
 	if check.logosNonMemberAssert(e, x, T) { // logos M2-S2 hook.
 		return
 	}

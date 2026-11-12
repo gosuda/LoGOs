@@ -82,6 +82,17 @@ func (check *Checker) builtin(x *operand, call *syntax.CallExpr, id builtinId) (
 		}
 	}
 
+	if check.conf.Logos {
+		for _, a := range args {
+			if !check.logosReadonlyBuiltinArg(a, id) {
+				x.invalidate()
+				return false
+			}
+		}
+		if len(args) > 0 {
+			*x = *args[0]
+		}
+	}
 	if check.logosConstBuiltin(x, call, id, args) { // logos M5-S1 hook: builtins over const views.
 		return x.isValid()
 	}

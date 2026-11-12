@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"unsafe"
 )
@@ -32,21 +33,29 @@ func childTarget() string {
 	return ""
 }
 
+func forged(addr string) unsafe.Pointer {
+	u, err := strconv.ParseUint(strings.TrimPrefix(addr, "0x"), 16, 64)
+	if err != nil {
+		panic(err)
+	}
+	return unsafe.Pointer(uintptr(u))
+}
+
 func runChild(target string) {
+	base := forged(fmt.Sprintf("%p", faultSlice))
 	switch target {
 	case "slice-uintptr":
-		p := unsafe.SliceData(faultSlice)
-		u := uintptr(unsafe.Pointer(p))
-		q := (*int)(unsafe.Pointer(u))
+		q := (*int)(base)
 		*q = 0xDEAD
 	case "stringdata":
-		p := unsafe.StringData(faultStr)
+		s := faultStr
+		p := (*byte)(unsafe.Pointer((*[2]uintptr)(unsafe.Pointer(&s))[0]))
 		*p = 'X'
 	case "add":
-		q := unsafe.Add(unsafe.Pointer(unsafe.SliceData(faultSlice)), 8)
+		q := unsafe.Add(base, 8)
 		*(*int)(q) = 0xDEAD
 	case "slice":
-		s := unsafe.Slice(unsafe.SliceData(faultSlice), 2)
+		s := unsafe.Slice((*int)(base), 2)
 		s[1] = 0xDEAD
 	}
 	fmt.Println("STORE-SUCCEEDED")

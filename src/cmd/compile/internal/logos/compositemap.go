@@ -57,11 +57,18 @@ func (c *compositeInfo) builder() string { return c.base + "_build" }
 func (c *compositeInfo) ro() string      { return c.base + "_ro" }
 
 func compositeUnderlying(t types2.Type) types2.Type {
-	u := types2.Unalias(t)
-	if n, ok := u.(*types2.Named); ok {
-		return n.Underlying()
+	for {
+		switch u := types2.Unalias(t).(type) {
+		case *types2.ConstView:
+			t = u.Elem
+		case *types2.ReadonlyDescendants:
+			t = u.Elem
+		case *types2.Named:
+			return u.Underlying()
+		default:
+			return u
+		}
 	}
-	return u
 }
 
 func compositeTypeReachesMap(t types2.Type) bool {

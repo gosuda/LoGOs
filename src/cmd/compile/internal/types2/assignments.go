@@ -189,6 +189,7 @@ func (check *Checker) initVar(lhs *Var, x *operand, context string) {
 		return
 	}
 
+	check.logosConstOrigin(x)
 	// If lhs doesn't have a type yet, use the type of x.
 	if lhs.typ == nil {
 		typ := x.typ()

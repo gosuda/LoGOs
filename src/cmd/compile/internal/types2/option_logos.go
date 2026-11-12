@@ -22,8 +22,11 @@ type Option struct {
 func (o *Option) Underlying() Type { return o }
 
 func logosCompositeKind(typ Type) string {
-	if _, ok := typ.Underlying().(*ConstView); ok {
+	switch typ.Underlying().(type) {
+	case *ConstView:
 		return "const view"
+	case *ReadonlyDescendants:
+		return "readonly descendants"
 	}
 	return "option"
 }
@@ -45,8 +48,12 @@ func logosAsOption(T Type) *Option {
 }
 
 func logosAsOptionThroughConst(T Type) *Option {
-	if c, ok := Unalias(T).(*ConstView); ok {
-		return logosAsOptionThroughConst(c.Elem)
+	base, descendants, readonly := logosReadonlyBase(T)
+	if descendants || readonly {
+		if o := logosAsOptionThroughConst(base); o != nil {
+			return &Option{Elem: logosReadonlyProject(T, o.Elem, false)}
+		}
+		return nil
 	}
 	return logosAsOption(T)
 }
@@ -55,6 +62,7 @@ func LogosOptionIsBare(elem Type) bool {
 	if elem == nil {
 		return false
 	}
+	elem, _, _ = logosReadonlyBase(elem)
 	if _, ok := elem.Underlying().(*Pointer); ok {
 		return true
 	}
@@ -67,6 +75,7 @@ func LogosOptionIsBare(elem Type) bool {
 			continue
 		}
 		mu := Unalias(m)
+		mu, _, _ = logosReadonlyBase(mu)
 		if n, ok := mu.(*Named); ok {
 			mu = n.Underlying()
 		}
@@ -265,9 +274,17 @@ func (check *Checker) logosOptSelect(x *operand, e *syntax.OptSelectExpr) exprKi
 	var rt Type
 	switch obj := obj.(type) {
 	case *Var:
-		rt = obj.typ
+		base, _, _ := logosReadonlyBase(opt.Elem)
+		_, throughReference := base.Underlying().(*Pointer)
+		rt = logosReadonlyProject(opt.Elem, obj.typ, throughReference)
 	case *Func:
 		check.objDecl(obj)
+		if _, descendants, readonly := logosReadonlyBase(opt.Elem); (descendants || readonly) && !check.logosReceiverReadonly(obj) {
+			check.errorf(e.Sel, InvalidMethodExpr, "%s cannot call mutating method %s through %s", logosConstEscape, e.Sel.Value, opt.Elem)
+			x.invalidate()
+			x.expr = e
+			return expression
+		}
 		check.addDeclDep(obj)
 		sig, ok := obj.typ.(*Signature)
 		if !ok {

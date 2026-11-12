@@ -103,7 +103,15 @@ func allowReadsAndCopies() {
 	d := cfg.L[1:]
 	_ = len(d)
 	c := cfg
-	c.L[0] = 9
-	c.M["z"] = 1
-	delete(c.M, "a")
+	c.N = 9
+	c.A[0] = 9
+	_ = copy(make([]int, 3), c.L)
+	_ = len(c.M) + c.L[0]
+}
+
+func rejectCopyReferenceWrites() {
+	c := cfg
+	c.L[0] = 9      // ERROR "const_view_mutation"
+	c.M["z"] = 1    // ERROR "const_view_mutation"
+	delete(c.M, "a") // ERROR "const_view_mutation"
 }

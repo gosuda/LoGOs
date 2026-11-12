@@ -185,6 +185,10 @@ func logosStaticUnwrap(t Type) Type {
 			t = cv.Elem
 			continue
 		}
+		if rd := logosAsReadonlyDescendants(t); rd != nil {
+			t = rd.Elem
+			continue
+		}
 		return t
 	}
 }
@@ -211,6 +215,9 @@ func logosStaticKindOK(t Type) bool {
 func logosIsNonNilPointer(t Type) bool {
 	if cv, ok := t.Underlying().(*ConstView); ok {
 		t = cv.Elem
+	}
+	if rd := logosAsReadonlyDescendants(t); rd != nil {
+		t = rd.Elem
 	}
 	_, ok := Unalias(t).(*Pointer)
 	return ok
@@ -277,6 +284,8 @@ func logosContainsLockSeen(t Type, seen map[Type]bool) bool {
 	}
 	switch u := t.Underlying().(type) {
 	case *ConstView:
+		return logosContainsLockSeen(u.Elem, seen)
+	case *ReadonlyDescendants:
 		return logosContainsLockSeen(u.Elem, seen)
 	case *Array:
 		return logosContainsLockSeen(u.Elem(), seen)
@@ -377,6 +386,8 @@ func logosBinaryTypeOK(t Type, seen map[Type]bool) bool {
 	}
 	switch u := t.Underlying().(type) {
 	case *ConstView:
+		return logosBinaryTypeOK(u.Elem, seen)
+	case *ReadonlyDescendants:
 		return logosBinaryTypeOK(u.Elem, seen)
 	case *Basic:
 		return u.Info()&(IsBoolean|IsInteger|IsFloat|IsString) != 0
@@ -492,6 +503,9 @@ func logosNestedUnionTypes(t Type) []Type {
 				return
 			}
 		}
+		if rd := logosAsReadonlyDescendants(t); rd != nil {
+			t = Unalias(rd.Elem)
+		}
 		if seen[t] {
 			return
 		}
@@ -605,6 +619,9 @@ func logosForeignUnionName(t Type) (logosForeignName, bool) {
 	if cv, ok := u.(*ConstView); ok {
 		u = Unalias(cv.Elem)
 	}
+	if rd := logosAsReadonlyDescendants(u); rd != nil {
+		u = Unalias(rd.Elem)
+	}
 	named, ok := u.(*Named)
 	if !ok || named.Obj() == nil || named.Obj().Pkg() == nil {
 		return logosForeignName{}, false
@@ -660,10 +677,16 @@ func logosUnionMemberHasJSON(m Type, pkg *Package) (bool, bool) {
 	if cv, ok := u.(*ConstView); ok {
 		u = Unalias(cv.Elem)
 	}
+	if rd := logosAsReadonlyDescendants(u); rd != nil {
+		u = Unalias(rd.Elem)
+	}
 	if ptr, ok := u.(*Pointer); ok {
 		u = Unalias(ptr.Elem())
 		if cv, ok := u.(*ConstView); ok {
 			u = Unalias(cv.Elem)
+		}
+		if rd := logosAsReadonlyDescendants(u); rd != nil {
+			u = Unalias(rd.Elem)
 		}
 	}
 	named, ok := u.(*Named)

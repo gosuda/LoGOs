@@ -1346,3 +1346,66 @@ func (check *Checker) logosDeferReadonlyCheck(fn *Func, pos syntax.Pos, baseExpr
 		name:     name,
 	})
 }
+
+func (check *Checker) logosReadonlySelect(x *operand, e *syntax.SelectorExpr, name string) bool {
+	if !check.conf.Logos || x.mode() == typexpr || !x.isValid() {
+		return false
+	}
+	container := x.typ()
+	base, descendants, readonly := logosReadonlyBase(container)
+	indirect := false
+	if p, ok := base.Underlying().(*Pointer); ok {
+		if _, d, r := logosReadonlyBase(p.base); d || r {
+			container = p.base
+			base, descendants, readonly = logosReadonlyBase(container)
+			indirect = true
+		}
+	}
+	if !descendants || readonly {
+		return false
+	}
+	obj, index, throughPointer := lookupFieldOrMethod(base, x.mode() == variable || indirect, check.pkg, name, false)
+	switch obj := obj.(type) {
+	case *Var:
+		projectedContainer := container
+		current := base
+		throughReference := false
+		for _, field := range index {
+			if p, ok := current.Underlying().(*Pointer); ok {
+				current = p.base
+				throughReference = true
+			}
+			s, ok := current.Underlying().(*Struct)
+			if !ok {
+				return false
+			}
+			current = s.fields[field].Type()
+		}
+		check.recordSelection(e, FieldVal, base, obj, index, indirect || throughPointer)
+		if x.mode() == variable || indirect || throughPointer {
+			x.mode_ = variable
+		} else {
+			x.mode_ = value
+		}
+		x.typ_ = logosReadonlyProject(projectedContainer, obj.Type(), throughReference)
+		x.expr = e
+		return true
+	case *Func:
+		check.objDecl(obj)
+		sig, _ := obj.Type().(*Signature)
+		if sig == nil || sig.Recv() == nil {
+			return false
+		}
+		if !logosReferenceFree(sig.Recv().Type()) && !check.logosReceiverReadonly(obj) {
+			check.errorf(e.Sel, IncompatibleAssign, "%s cannot call %s through readonly descendants", logosConstEscape, name)
+			x.invalidate()
+			return true
+		}
+		x.typ_ = base
+		if indirect {
+			x.typ_ = &Pointer{base: base}
+		}
+		return false
+	}
+	return false
+}

@@ -244,14 +244,14 @@ func (check *Checker) logosChainRoots(e syntax.Expr) []logosWritePath {
 }
 
 func (check *Checker) logosChainSlice(rx *operand, method string) (*Slice, bool) {
-	rt := rx.typ()
-	if c := logosAsConstView(rt); c != nil {
-		rt = c.Elem
-	}
+	rt, descendants, readonly := logosReadonlyBase(rx.typ())
 	if obj, _, _ := lookupFieldOrMethod(rt, rx.mode() == variable, check.pkg, method, false); obj != nil {
 		return nil, false
 	}
 	st, ok := Unalias(rt).(*Slice)
+	if ok && (descendants || readonly) {
+		st = NewSlice(logosWithReadonlyDescendants(st.Elem()))
+	}
 	return st, ok
 }
 
@@ -338,7 +338,11 @@ func (check *Checker) logosChainMethod(x *operand, call *syntax.CallExpr, sel *s
 			fail()
 			return
 		}
-		done(NewSlice(elem))
+		result := Type(NewSlice(elem))
+		if _, descendants, readonly := logosReadonlyBase(check.Info.TypeOf(sel.X)); descendants || readonly {
+			result = &ConstView{Elem: result}
+		}
+		done(result)
 	case "sum":
 		if !check.logosChainArity(call, args, 0) {
 			fail()
@@ -742,7 +746,7 @@ func (check *Checker) logosChainFuncArg(arg syntax.Expr, elem, want Type, method
 	}
 	fn := NewSignatureType(nil, nil, nil, NewTuple(NewParam(nopos, check.pkg, "", elem)), NewTuple(NewParam(nopos, check.pkg, "", want)), false)
 	check.assignment(&op, fn, "chain "+method)
-	return want, false, true
+	return want, false, op.isValid()
 }
 
 func (check *Checker) logosWarnSideEffectBeforeSort(sel *syntax.SelectorExpr, recv syntax.Expr) {
@@ -832,5 +836,5 @@ func (check *Checker) logosChainFuncInfer(arg syntax.Expr, elem Type) (Type, boo
 	u := sig.Results().At(0).Type()
 	fn := NewSignatureType(nil, nil, nil, NewTuple(NewParam(nopos, check.pkg, "", elem)), NewTuple(NewParam(nopos, check.pkg, "", u)), false)
 	check.assignment(&op, fn, "chain map")
-	return u, false, true
+	return u, false, op.isValid()
 }

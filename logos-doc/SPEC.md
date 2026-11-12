@@ -410,9 +410,9 @@ A `const func` that breaks a purity rule MUST fail with `[correctness::const_fun
 
 A compile-time evaluation that overflows the target width, inserts a NaN or duplicate map key, executes a panic, or reaches a form the interpreter does not support MUST fail with `[correctness::const_eval]` naming the cause. [T-201]
 
-Constant data with pointers MUST live in read-only memory, so a write to it faults. [T-201]
+On native targets, constant data with pointers MUST live in read-only memory. Native read-only placement is a separate defense against stores that reach that storage; it MUST NOT substitute for the checked-source rejection rules below or imply a portable run-time fault guarantee. [T-201]
 
-A write to a constant composite through `unsafe` MUST fault at run time. [T-201]
+A known `unsafe` derivation from constant-origin storage MUST preserve its readonly restriction and MUST fail statically if it would expose an ordinary writable reference, before native code generation or `logos eject` emits Go. A store that bypasses checked-source enforcement and reaches native read-only constant storage MUST fault at run time; this is not a promise for every target or every use of `unsafe`. [T-201]
 
 A hand-written `//logos:rodata` directive on its own line in the comment block directly above a package-level `var` declaration or a spec of a `var (...)` group in a loGo/s package MUST place the variable in read-only memory, and a variable under it whose initializer needs dynamic initialization MUST fail compilation with `[correctness::rodata_dynamic_init]` at the variable. A `//logos:rodata` directive anywhere else (above a `const`, a `func`, a `type`, or the `var (` line of a group, inside a function body, after code on its line, or apart from its declaration by a blank line) MUST fail compilation with `[correctness::misplaced_directive]` at the directive. The other `//logos:` directives report a misplaced directive under the rule they serve (Sec 1.2, Sec 17.2), and no rule serves this one. [T-201]
 
@@ -434,9 +434,17 @@ An exported const map is the one exception to the no-heap rule above: its packag
 
 A write from Go into such a variable lies outside the loGo/s contract. The Go compiler does not report it, and the write MAY fault at run time because the data can sit in read-only memory. This is a documented hole. [T-201][T-Sec5][R-U2][A-GOBOUNDARY]
 
-An `&` over a field or an array element of a const composite, local or imported, MUST yield a pointer to a fresh variable that holds a copy, and a write through that pointer MUST NOT change the constant. [T-201][T-104.5]
+An `&` over an inline field or an inline array element of a const composite, local or imported, MUST yield a pointer to a fresh variable that holds a copy. Only the copied slots are detached: a fresh outer struct or array copy MUST NOT make a nested pointer, slice, map, or other reference to protected constant storage writable. Writes to detached slots MUST NOT change the constant, and nested references MUST retain their readonly obligation. [T-201][T-104.5]
 
-An `&` over a slice element or a dereference inside a const composite, and a slice expression of an array inside a const composite, MUST fail with `[correctness::const_view_mutation]`. [T-201]
+An `&` whose path traverses a slice element or a dereference inside a const composite, and a slice expression of an array inside a const composite, MUST fail with `[correctness::const_view_mutation]`; copying an enclosing value MUST NOT bypass these rules for references still reaching protected storage. [T-201]
+
+A loGo/s read of an imported struct or other aggregate const composite that holds a map MUST preserve the readonly restriction on its reference descendants, including through a copied outer value; it MUST NOT yield a mutable deep copy per read. A write through a reference descendant that reaches protected constant storage MUST fail with `[correctness::const_view_mutation]`. The fresh-variable address rule above detaches only copied inline slots, not their nested references to protected storage. Bare const-map materialization under Sec 7 and the ordinary Go-importer boundary above are unchanged. [T-201][T-Sec5][T-Sec7][R-U2]
+
+The checked-source invariant is that constant-origin values MUST NOT expose ordinary writable references to protected storage. The compiler MUST preserve this obligation through aliases, aggregate copies, and known `unsafe.SliceData`, `unsafe.Slice`, `unsafe.Add`, `unsafe.StringData`, and `unsafe.String` derivations. A qualification-erasing escape MUST fail statically with `[correctness::const_view_escape]`, and a forbidden mutation or address/slice operation MUST fail with `[correctness::const_view_mutation]`, before either native compilation or Go ejection. Qualifier erasure during lowering is permitted only after these checks succeed. [T-201]
+
+A Go parameter's proven `ParamMutated=0` fact proves only the permitted call's non-mutation obligation, not independence of its returned aliases. A reference-carrying result that might alias a constant-origin argument MUST retain the readonly obligation unless result independence is separately proven; an unknown result MUST NOT become an ordinary writable reference merely because the parameter has that fact. [T-201][T-Sec5]
+
+This invariant applies to checked loGo/s source, not arbitrary forged `unsafe` addresses. External ordinary Go importers remain subject to the documented Go boundary hole above, and modified ejected Go is outside checked-source enforcement. These boundaries do not weaken rejection of known flows in checked source and do not assert a universal static proof of unsafe behavior. The hand-written `//logos:rodata` directive's scope and alias-store contract above are unchanged. [T-201][T-Sec5][R-U2][A-GOBOUNDARY]
 
 An index assignment through a constant view MUST fail with `[correctness::const_view_mutation]` naming the operation and the expression. [T-201]
 
@@ -454,7 +462,7 @@ A call of a method with a value receiver on a const composite that holds a map, 
 
 A call of a method with a pointer receiver on a const composite, local or imported, with or without a map, MUST be accepted when the method is proven readonly and MUST fail with `[correctness::const_view_mutation]` otherwise. [T-201]
 
-A map read from a const composite and used as a `map[K]V` value MUST be a copy, and a write to it MUST NOT change what the const composite reads as. [T-201][T-Sec7]
+A bare const map materialized as a `map[K]V` value under Sec 7 MUST be a copy, and a write to that copy MUST NOT change what the const map reads as. This materialization rule MUST NOT make a map field or another reference descendant of a struct or aggregate const composite writable, or permit a mutable deep copy of that aggregate per read. [T-201][T-Sec7]
 
 An interface method written `const M() T` (such as `const Name() string`) MUST be a readonly method obligation, distinct from a property element `const F T` (such as `const Name string`). [T-201]
 

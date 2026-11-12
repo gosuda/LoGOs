@@ -66,16 +66,24 @@ func logosAsTuple(T Type) *LogosTuple {
 }
 
 func tupleElemsOf(T Type) (types []Type, ok bool) {
-	if t := logosAsTuple(T); t != nil {
-		return t.types, true
+	base, descendants, readonly := logosReadonlyBase(T)
+	if t := logosAsTuple(base); t != nil {
+		if !descendants && !readonly {
+			return t.types, true
+		}
+		types = make([]Type, t.Len())
+		for i := range types {
+			types[i] = logosReadonlyProject(T, t.Elem(i), false)
+		}
+		return types, true
 	}
-	st, ok := Unalias(T).(*Struct)
+	st, ok := Unalias(base).(*Struct)
 	if !ok || !logosTupleShaped(st) {
 		return nil, false
 	}
 	types = make([]Type, st.NumFields())
 	for i := range types {
-		types[i] = st.Field(i).Type()
+		types[i] = logosReadonlyProject(T, st.Field(i).Type(), false)
 	}
 	return types, true
 }
@@ -152,14 +160,16 @@ func (check *Checker) logosTupleSelect(x *operand, e *syntax.SelectorExpr) bool 
 	if !check.conf.Logos || x.mode() == typexpr {
 		return false
 	}
-	t := logosAsTuple(x.typ())
+	container := x.typ()
+	base, _, _ := logosReadonlyBase(container)
+	t := logosAsTuple(base)
 	if t == nil {
 		return false
 	}
 	if i := logosTupleFieldIndex(t, e.Sel.Value); i >= 0 {
 		x.mode_ = value
 		x.expr = e
-		x.typ_ = t.Elem(i)
+		x.typ_ = logosReadonlyProject(container, t.Elem(i), false)
 		check.record(x)
 		return true
 	}
@@ -173,10 +183,12 @@ func (check *Checker) logosImportedTupleSelect(x *operand, e *syntax.SelectorExp
 	if x.mode() == typexpr {
 		return false
 	}
-	if f := logosTupleField(x.typ(), e.Sel.Value); f != nil {
+	container := x.typ()
+	base, _, _ := logosReadonlyBase(container)
+	if f := logosTupleField(base, e.Sel.Value); f != nil {
 		x.mode_ = value
 		x.expr = e
-		x.typ_ = f.Type()
+		x.typ_ = logosReadonlyProject(container, f.Type(), false)
 		check.record(x)
 		return true
 	}

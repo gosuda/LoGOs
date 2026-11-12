@@ -1,6 +1,8 @@
 env GOPROXY=off
 env GOTOOLCHAIN=local
 
+# Ordinary Go imports erase const qualifiers; native placement is still protected.
+# Checked loGo/s alias rejection is covered separately, not bypassed here.
 cd prog
 logos build -o prog.exe .
 exec ./prog.exe
@@ -16,39 +18,43 @@ stdout '^ok recs-fault$'
 ! stdout 'FAIL'
 
 exec go tool nm prog.exe
-stdout ' R main\.slice$'
-stdout ' R main\.slice\.logos_backing0$'
-stdout ' R main\.array$'
-stdout ' R main\.months$'
-stdout ' R main\.months\.logos_backing0$'
-stdout ' R main\.modes$'
-stdout ' R main\.modes\.logos_backing0$'
-stdout ' R main\.nested$'
-stdout ' R main\.anon$'
-stdout ' R main\.lists$'
-stdout ' R main\.lists\.logos_backing0$'
-stdout ' R main\.stamps$'
-stdout ' R main\.stamps\.logos_backing0$'
-stdout ' R main\.recs$'
-stdout ' R main\.recs\.logos_backing0$'
-! stdout ' [Tt] main\.init'
+stdout ' R example\.com/rodvalues/p\.Slice$'
+stdout ' R example\.com/rodvalues/p\.Slice\.logos_backing0$'
+stdout ' R example\.com/rodvalues/p\.Array$'
+stdout ' R example\.com/rodvalues/p\.Months$'
+stdout ' R example\.com/rodvalues/p\.Months\.logos_backing0$'
+stdout ' R example\.com/rodvalues/p\.Modes$'
+stdout ' R example\.com/rodvalues/p\.Modes\.logos_backing0$'
+stdout ' R example\.com/rodvalues/p\.Nested$'
+stdout ' R example\.com/rodvalues/p\.Anon$'
+stdout ' R example\.com/rodvalues/p\.ListsValue$'
+stdout ' R example\.com/rodvalues/p\.ListsValue\.logos_backing0$'
+stdout ' R example\.com/rodvalues/p\.Stamps$'
+stdout ' R example\.com/rodvalues/p\.Stamps\.logos_backing0$'
+stdout ' R example\.com/rodvalues/p\.Recs$'
+stdout ' R example\.com/rodvalues/p\.Recs\.logos_backing0$'
+! stdout ' [Tt] (main|example\.com/rodvalues/p)\.init'
 
 -- prog/go.mod --
 module example.com/rodimported
 
 go 1.27
 
--- prog/main.lgo --
-package main
+require example.com/rodvalues v0.0.0
+
+replace example.com/rodvalues => ../lib
+
+-- lib/go.mod --
+module example.com/rodvalues
+
+go 1.27
+
+-- lib/p/values.lgo --
+package p
 
 import (
-	"bytes"
-	"fmt"
 	"os"
-	"os/exec"
-	"strings"
 	"time"
-	"unsafe"
 )
 
 type Rec struct {
@@ -61,15 +67,30 @@ type Lists struct {
 	N int
 }
 
-const slice = []time.Duration{time.Second, 2 * time.Second}
-const array = [8]time.Duration{time.Millisecond, 3, 4, 5, 6, 7, 8, 9}
-const months = []time.Month{time.March, 12}
-const modes = []os.FileMode{0o644, os.ModeDir | 0o755}
-const nested = [][]time.Duration{{1, 2}, {3}}
-const anon = []struct{ D time.Duration }{{time.Second}, {2}}
-const lists = Lists{L: []time.Duration{time.Minute, 5}, N: 3}
-const stamps = []time.Time{{}, {}}
-const recs = []Rec{{N: 4}, {N: 5}}
+const Slice = []time.Duration{time.Second, 2 * time.Second}
+const Array = [8]time.Duration{time.Millisecond, 3, 4, 5, 6, 7, 8, 9}
+const Months = []time.Month{time.March, 12}
+const Modes = []os.FileMode{0o644, os.ModeDir | 0o755}
+const Nested = [][]time.Duration{{1, 2}, {3}}
+const Anon = []struct{ D time.Duration }{{time.Second}, {2}}
+const ListsValue = Lists{L: []time.Duration{time.Minute, 5}, N: 3}
+const Stamps = []time.Time{{}, {}}
+const Recs = []Rec{{N: 4}, {N: 5}}
+
+-- prog/main.go --
+package main
+
+import (
+	"bytes"
+	"fmt"
+	"os"
+	"os/exec"
+	"strings"
+	"time"
+	"unsafe"
+
+	. "example.com/rodvalues/p"
+)
 
 var failed bool
 
@@ -85,21 +106,21 @@ func check(name string, cond bool, got, want any) {
 func poke(name string) {
 	switch name {
 	case "slice":
-		*unsafe.SliceData(slice) = 0
+		*unsafe.SliceData(Slice) = 0
 	case "months":
-		*unsafe.SliceData(months) = 0
+		*unsafe.SliceData(Months) = 0
 	case "modes":
-		*unsafe.SliceData(modes) = 0
+		*unsafe.SliceData(Modes) = 0
 	case "nested":
-		*unsafe.SliceData(nested[0]) = 0
+		*unsafe.SliceData(Nested[0]) = 0
 	case "anon":
-		*(*time.Duration)(unsafe.Pointer(unsafe.SliceData(anon))) = 0
+		*(*time.Duration)(unsafe.Pointer(unsafe.SliceData(Anon))) = 0
 	case "stamps":
-		*unsafe.SliceData(stamps) = time.Time{}
+		*unsafe.SliceData(Stamps) = time.Time{}
 	case "recs":
-		*unsafe.SliceData(recs) = Rec{}
+		*unsafe.SliceData(Recs) = Rec{}
 	case "lists":
-		*unsafe.SliceData(lists.L) = 0
+		*unsafe.SliceData(ListsValue.L) = 0
 	}
 	fmt.Println("STORE-SUCCEEDED")
 }
@@ -125,10 +146,10 @@ func main() {
 	}
 	at := len(os.Args) - 1
 	var sum time.Duration
-	for _, d := range array {
+	for _, d := range Array {
 		sum += d
 	}
-	fmt.Println("read", slice[1], sum, months[at], modes[1], len(nested), len(nested[0]), nested[1][0], anon[at].D == time.Second, lists.N, len(stamps), stamps[1].IsZero(), recs[1].N)
+	fmt.Println("read", Slice[1], sum, Months[at], Modes[1], len(Nested), len(Nested[0]), Nested[1][0], Anon[at].D == time.Second, ListsValue.N, len(Stamps), Stamps[1].IsZero(), Recs[1].N)
 	self, err := os.Executable()
 	if err != nil {
 		fmt.Println("FAIL executable:", err)

@@ -57,6 +57,8 @@ func (s *gcSizes) Alignof(T Type) (result int64) {
 		}
 	case *ConstView:
 		return s.Alignof(t.Elem)
+	case *ReadonlyDescendants:
+		return s.Alignof(t.Elem)
 	case *Option:
 		return s.Alignof(logosOptionRepr(t))
 	case *LogosTuple:
@@ -160,6 +162,8 @@ func (s *gcSizes) Sizeof(T Type) int64 {
 		assert(!isTypeParam(T))
 		return s.WordSize * 2
 	case *ConstView:
+		return s.Sizeof(t.Elem)
+	case *ReadonlyDescendants:
 		return s.Sizeof(t.Elem)
 	case *Option:
 		return s.Sizeof(logosOptionRepr(t))

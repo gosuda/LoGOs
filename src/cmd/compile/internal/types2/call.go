@@ -220,6 +220,9 @@ func (check *Checker) callExpr(x *operand, call *syntax.CallExpr) exprKind {
 		case 1:
 			check.expr(newTarget(T, "conversion"), x, call.ArgList[0])
 			if x.isValid() {
+				if check.conf.Logos && check.logosReadonlyBoundary(x, T, "conversion") {
+					break
+				}
 				if t, _ := T.Underlying().(*Interface); t != nil && !isTypeParam(T) {
 					if !t.IsMethodSet() && !check.logosConversionUnion(T) { // logos M2-S1 hook.
 						check.errorf(call, MisplacedConstraintIface, "cannot use interface %s in conversion (contains specific type constraints or is comparable)", T)
@@ -643,6 +646,11 @@ func (check *Checker) arguments(call *syntax.CallExpr, sig *Signature, targs []T
 	assert(len(tparams) == len(targs))
 
 	// at the moment we only support implicit instantiations of argument functions
+	if check.conf.Logos {
+		for i, a := range args {
+			check.logosReadonlyBoundary(a, sigParams.vars[i].typ, "argument")
+		}
+	}
 	check.logosConstMapArgs(call, sigParams, args) // logos M5-S4 hook: const map arguments before inference.
 	_ = len(genericArgs) > 0 && check.verifyVersionf(args[genericArgs[0]], go1_21, "implicitly instantiated function as argument")
 
@@ -878,7 +886,10 @@ func (check *Checker) selector(x *operand, e *syntax.SelectorExpr, wantType bool
 		return
 	}
 
-	check.logosFieldVarSelMark(x, e)       // logos M7-S2 hook: selections on const-for field variables.
+	check.logosFieldVarSelMark(x, e) // logos M7-S2 hook: selections on const-for field variables.
+	if check.logosReadonlySelect(x, e, sel) {
+		return
+	}
 	if check.logosConstSelect(x, e, sel) { // logos M5-S1 hook: selections through const views.
 		return
 	}

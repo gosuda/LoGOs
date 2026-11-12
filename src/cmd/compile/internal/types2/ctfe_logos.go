@@ -148,10 +148,7 @@ func (check *Checker) logosConstCompute(obj *Const, init syntax.Expr, x *operand
 	}
 	check.logosMemoize(init, v)
 	check.logosRecord(obj, v)
-	if v.IsComposite() || !isConstType(x.typ()) {
-		return check.logosRecordComposite(obj, init, x, v)
-	}
-	return check.logosApplyScalar(obj, init, x, v)
+	return check.logosApplyValue(obj, init, x, v)
 }
 
 func (check *Checker) logosApplyMemo(obj *Const, init syntax.Expr, x *operand, v ctfe.Value) bool {
@@ -160,10 +157,23 @@ func (check *Checker) logosApplyMemo(obj *Const, init syntax.Expr, x *operand, v
 		return true
 	}
 	check.logosRecord(obj, v)
+	return check.logosApplyValue(obj, init, x, v)
+}
+
+func (check *Checker) logosApplyValue(obj *Const, init syntax.Expr, x *operand, v ctfe.Value) bool {
+	if !v.IsComposite() {
+		logosDetachScalarView(x)
+	}
 	if v.IsComposite() || !isConstType(x.typ()) {
 		return check.logosRecordComposite(obj, init, x, v)
 	}
 	return check.logosApplyScalar(obj, init, x, v)
+}
+
+func logosDetachScalarView(x *operand) {
+	if c := logosAsConstView(x.typ()); c != nil && logosReferenceFree(c.Elem) {
+		x.typ_ = c.Elem
+	}
 }
 
 func (check *Checker) logosApplyScalar(obj *Const, init syntax.Expr, x *operand, v ctfe.Value) bool {

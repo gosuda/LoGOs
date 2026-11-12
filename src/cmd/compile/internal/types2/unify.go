@@ -447,6 +447,10 @@ func (u *unifier) nify(x, y Type, mode unifyMode, p *ifacePair) (result bool) {
 		return true
 	}
 
+	if rx, ry := logosAsReadonlyDescendants(x), logosAsReadonlyDescendants(y); rx != nil || ry != nil {
+		return rx != nil && ry != nil && u.nify(rx.Elem, ry.Elem, mode|exact, p)
+	}
+
 	// x != y if we get here
 	assert(x != y && Unalias(x) != Unalias(y))
 

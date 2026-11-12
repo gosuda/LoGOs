@@ -87,6 +87,12 @@ func (check *Checker) logosConstAssign(x *operand, T Type, context string) bool 
 	if !check.conf.Logos {
 		return false
 	}
+	if !strings.HasPrefix(context, "argument to ") {
+		check.logosConstOrigin(x)
+	}
+	if check.logosReadonlyBoundary(x, T, context) {
+		return true
+	}
 	if csrc0 := logosAsConstView(x.typ()); csrc0 == nil && logosAsConstView(T) == nil {
 		if qiface := logosQualifiedIface(T); qiface != nil && x.isValid() && !x.isNil() && T != nil {
 			if Vu := Unalias(x.typ()); Vu != nil && !isTypeParam(Vu) {
@@ -129,7 +135,7 @@ func (check *Checker) logosConstAssign(x *operand, T Type, context string) bool 
 	if T == nil {
 		return false
 	}
-	if logosReferenceFree(csrc.Elem) || csrc.ConstMap {
+	if logosReferenceFree(csrc.Elem) || logosConstMapCopy(csrc) {
 		x.typ_ = csrc.Elem
 		check.updateExprType(x.expr, csrc.Elem, false)
 		return false
@@ -147,11 +153,22 @@ func (check *Checker) logosConstInferVar(lhs *Var) {
 	if !check.conf.Logos {
 		return
 	}
-	if csrc := logosAsConstView(lhs.typ); csrc != nil {
-		if logosReferenceFree(csrc.Elem) || csrc.ConstMap {
-			lhs.typ = csrc.Elem
-		}
+	csrc := logosAsConstView(lhs.typ)
+	if csrc == nil {
+		return
 	}
+	switch csrc.Elem.Underlying().(type) {
+	case *Struct, *Array:
+		lhs.typ = logosWithReadonlyDescendants(csrc.Elem)
+	}
+	if logosReferenceFree(csrc.Elem) || logosConstMapCopy(csrc) {
+		lhs.typ = csrc.Elem
+	}
+}
+
+func logosConstMapCopy(c *ConstView) bool {
+	m, ok := c.Elem.Underlying().(*Map)
+	return c.ConstMap && ok && logosReferenceFree(m.Key()) && logosReferenceFree(m.Elem())
 }
 
 func (check *Checker) logosConstWrap(x *operand, csrc *ConstView, cdst *ConstView, T Type, context string) bool {
@@ -352,7 +369,7 @@ func (check *Checker) logosConstStore(lhs syntax.Expr) bool {
 func (check *Checker) logosConstStoreBase(lhs syntax.Expr) syntax.Expr {
 	switch e := syntax.Unparen(lhs).(type) {
 	case *syntax.IndexExpr:
-		if logosAsConstView(check.Info.TypeOf(e.X)) != nil {
+		if logosIndexStoreProtected(check.Info.TypeOf(e.X)) {
 			if inner := check.logosConstStoreBase(e.X); inner != nil {
 				return inner
 			}
@@ -360,7 +377,7 @@ func (check *Checker) logosConstStoreBase(lhs syntax.Expr) syntax.Expr {
 		}
 		return check.logosConstStoreBase(e.X)
 	case *syntax.SelectorExpr:
-		if logosAsConstView(check.Info.TypeOf(e.X)) != nil {
+		if check.logosFieldStoreProtected(check.Info.TypeOf(e.X), e.Sel.Value) {
 			if inner := check.logosConstStoreBase(e.X); inner != nil {
 				return inner
 			}
@@ -371,7 +388,7 @@ func (check *Checker) logosConstStoreBase(lhs syntax.Expr) syntax.Expr {
 		if e.Op != syntax.Mul || e.Y != nil {
 			return nil
 		}
-		if logosAsConstView(check.Info.TypeOf(e.X)) != nil {
+		if logosDerefStoreProtected(check.Info.TypeOf(e.X)) {
 			return e.X
 		}
 		return check.logosConstStoreBase(e.X)
@@ -414,7 +431,8 @@ func (check *Checker) logosCompositeRootNode(e syntax.Expr) bool {
 	case *syntax.Name:
 		switch obj := check.Info.Uses[n].(type) {
 		case *Const:
-			return logosTypeHasMap(obj.Type()) && !check.logosIsBareMap(obj)
+			v, ok := check.logosRecorded(obj)
+			return ok && v.IsComposite()
 		case *Var:
 			return check.logosImportedComposite(obj)
 		}
@@ -451,16 +469,27 @@ func (check *Checker) logosCompositeCallProven(e *syntax.SelectorExpr, fn *Func)
 	if logosAsConstView(rt) != nil || logosReferenceFree(rt) {
 		return true
 	}
-	if _, pointer := Unalias(rt).(*Pointer); !pointer {
-		if _, composite := check.logosCompositeRoot(e.X); !composite {
-			return true
-		}
+	if _, pointer := Unalias(rt).(*Pointer); !pointer && !check.logosValueReceiverGuarded(e.X) {
+		return true
 	}
 	if fn.Origin().Pkg() == check.pkg {
 		check.logosDeferReadonlyCheck(fn, e.Sel.Pos(), e.X, e.Sel.Value)
 		return true
 	}
 	return check.logosReceiverReadonly(fn)
+}
+
+func (check *Checker) logosValueReceiverGuarded(e syntax.Expr) bool {
+	root, composite := check.logosCompositeRoot(e)
+	if !composite {
+		return false
+	}
+	if n, ok := root.(*syntax.Name); ok {
+		if obj, ok := check.Info.Uses[n].(*Const); ok {
+			return logosTypeHasMap(obj.Type()) && !check.logosIsBareMap(obj)
+		}
+	}
+	return true
 }
 
 func (check *Checker) logosCompositeMutatingCall(e *syntax.SelectorExpr, fn *Func) bool {
@@ -477,13 +506,11 @@ func (check *Checker) logosCompositeMutatingCall(e *syntax.SelectorExpr, fn *Fun
 
 func (check *Checker) logosIsBareMap(obj *Const) bool {
 	v, ok := check.Info.LogosCTFE[obj]
-	if !ok || v.Type() == nil {
-		return false
-	}
-	if _, ok := obj.Type().Underlying().(*Map); !ok {
-		return false
-	}
-	return v.Type().Kind == ctfe.KMap
+	return ok && v.Type() != nil && v.Type().Kind == ctfe.KMap
+}
+
+func (check *Checker) logosInConstInit() bool {
+	return check.iota != nil
 }
 
 func (check *Checker) logosCompositeWrite(x *operand, id builtinId, args []*operand) bool {
@@ -495,7 +522,7 @@ func (check *Checker) logosCompositeWrite(x *operand, id builtinId, args []*oper
 	default:
 		return false
 	}
-	if len(args) == 0 {
+	if len(args) == 0 || id == _Append && check.logosInConstInit() {
 		return false
 	}
 	root, ok := check.logosCompositeRoot(args[0].expr)
@@ -511,12 +538,16 @@ func (check *Checker) logosConstSelect(x *operand, e *syntax.SelectorExpr, sel s
 	if !check.conf.Logos || x.mode() == typexpr {
 		return false
 	}
+	check.logosConstOrigin(x)
 	base := logosAsConstView(x.typ())
 	if base == nil {
 		return false
 	}
-	obj, index, indirect := lookupFieldOrMethod(base.Elem, x.mode() == variable, check.pkg, sel, false)
+	obj, index, indirect := lookupFieldOrMethod(base.Elem, x.mode() == variable || check.logosConstAddressable(x, e), check.pkg, sel, false)
 	if obj == nil {
+		if logosReferenceFree(base.Elem) {
+			x.typ_ = base.Elem
+		}
 		return false
 	}
 	switch obj := obj.(type) {
@@ -531,6 +562,10 @@ func (check *Checker) logosConstSelect(x *operand, e *syntax.SelectorExpr, sel s
 		x.expr = e
 		return true
 	case *Func:
+		if _, _, rooted := check.logosConstBase(e.X); rooted {
+			x.typ_ = base.Elem
+			return false
+		}
 		check.objDecl(obj)
 		sig, _ := obj.Type().(*Signature)
 		if sig == nil || sig.Recv() == nil {
@@ -584,11 +619,41 @@ func (check *Checker) logosConstUnwrapBase(x *operand) {
 	}
 }
 
+func (check *Checker) logosConstOrigin(x *operand) {
+	if !check.conf.Logos || check.logosInConstInit() || !x.isValid() || x.expr == nil || logosAsConstView(x.typ()) != nil || logosReferenceFree(x.typ()) || check.logosBareConstMapCopy(x) {
+		return
+	}
+	if _, fn := x.typ().Underlying().(*Signature); fn {
+		return
+	}
+	if _, _, rooted := check.logosConstBase(x.expr); rooted {
+		x.typ_ = &ConstView{Elem: x.typ()}
+	}
+}
+
+func (check *Checker) logosBareConstMapCopy(x *operand) bool {
+	if c := logosAsConstView(check.Info.TypeOf(x.expr)); c != nil && c.ConstMap {
+		return true
+	}
+	base, _, _ := check.logosWriteBase(x.expr)
+	name, ok := base.(*syntax.Name)
+	if !ok {
+		return false
+	}
+	obj, ok := check.Info.Uses[name].(*Const)
+	return ok && check.logosIsBareMap(obj)
+}
+
 func (check *Checker) logosConstWrapBase(x *operand, base syntax.Expr) {
 	if !check.conf.Logos || !x.isValid() || x.mode() == mapindex {
 		return
 	}
 	if logosAsConstView(check.Info.TypeOf(syntax.Unparen(base))) == nil {
+		if _, _, rooted := check.logosConstBase(base); !rooted {
+			return
+		}
+	}
+	if logosAsConstView(x.typ()) != nil {
 		return
 	}
 	x.typ_ = &ConstView{Elem: x.typ()}
@@ -623,6 +688,10 @@ func (check *Checker) logosConstBinary(x, y *operand) {
 func (check *Checker) logosConstConvert(x *operand, T Type) bool {
 	if !check.conf.Logos || !x.isValid() {
 		return false
+	}
+	check.logosConstOrigin(x)
+	if check.logosReadonlyBoundary(x, T, "conversion") {
+		return true
 	}
 	c := logosAsConstView(x.typ())
 	if c == nil {
@@ -780,6 +849,12 @@ func (check *Checker) logosConstUnsafeDeriv(x *operand, call *syntax.CallExpr, i
 	}
 	if nargs == 2 {
 		check.logosConstUnsafeLen(args[1])
+	}
+	check.logosConstOrigin(args[0])
+	if logosAsConstView(args[0].typ()) == nil && args[0].isValid() {
+		if _, _, rooted := check.logosConstBase(args[0].expr); rooted {
+			args[0].typ_ = &ConstView{Elem: args[0].typ()}
+		}
 	}
 	if logosConstUnsafeData(args[0]) == nil {
 		return false
@@ -1053,6 +1128,7 @@ func (check *Checker) logosConstArgs(call *syntax.CallExpr, sigParams *Tuple, ar
 		if !a.isValid() {
 			continue
 		}
+		check.logosConstOrigin(a)
 		c := logosAsConstView(a.typ())
 		if c == nil {
 			continue
@@ -1079,7 +1155,17 @@ func (check *Checker) logosConstArgs(call *syntax.CallExpr, sigParams *Tuple, ar
 			continue
 		}
 		if gate.active {
+			if check.logosObservedConstArg(call, a, c) {
+				a.typ_ = c.Elem
+				check.updateExprType(a.expr, c.Elem, false)
+				continue
+			}
 			if check.logosGoParamProvenZero(gate, sigParams, i) {
+				if gate.sig == nil || !logosReferenceFreeResults(gate.sig.Results()) {
+					check.errorf(a, IncompatibleAssign, "%s cannot pass const view %s to %s: non-mutation does not prove result alias independence", logosConstEscape, ExprString(a.expr), ExprString(call.Fun))
+					a.invalidate()
+					continue
+				}
 				a.typ_ = c.Elem
 				check.updateExprType(a.expr, c.Elem, false)
 				continue
@@ -1091,6 +1177,66 @@ func (check *Checker) logosConstArgs(call *syntax.CallExpr, sigParams *Tuple, ar
 		check.errorf(a, IncompatibleAssign, "%s cannot pass argument through const view %s in argument to %s", logosConstMutation, ExprString(a.expr), ExprString(call.Fun))
 		a.invalidate()
 	}
+}
+
+func logosReferenceFreeResults(results *Tuple) bool {
+	for i := range results.Len() {
+		if !logosReferenceFree(results.At(i).Type()) {
+			return false
+		}
+	}
+	return true
+}
+
+var logosStdObservers = map[string]bool{
+	"fmt.Print":         true,
+	"fmt.Printf":        true,
+	"fmt.Println":       true,
+	"fmt.Sprint":        true,
+	"fmt.Sprintf":       true,
+	"fmt.Sprintln":      true,
+	"reflect.DeepEqual": true,
+}
+
+var logosFormatMethods = [...]string{"Error", "Format", "GoString", "String"}
+
+func (check *Checker) logosObservedConstArg(call *syntax.CallExpr, a *operand, c *ConstView) bool {
+	path, name, ok := logosImportedCallee(check, call)
+	if !ok || !logosStdObservers[path+"."+name] {
+		return false
+	}
+	if _, _, rooted := check.logosConstBase(a.expr); !rooted {
+		return false
+	}
+	return path != "fmt" || check.logosFormatReadonly(c.Elem)
+}
+
+func (check *Checker) logosFormatReadonly(T Type) bool {
+	readonly := true
+	seen := make(map[Type]bool)
+	var visit func(Type)
+	visit = func(t Type) {
+		switch u := Unalias(t).(type) {
+		case *Named:
+			readonly = readonly && check.logosFormatMethodsReadonly(u)
+			logosWalkType(u.Underlying(), visit, seen)
+		case *Interface, *TypeParam:
+			readonly = false
+		}
+	}
+	logosWalkType(T, visit, seen)
+	return readonly
+}
+
+func (check *Checker) logosFormatMethodsReadonly(n *Named) bool {
+	ptr := NewPointer(n)
+	for _, name := range logosFormatMethods {
+		obj, _, _ := lookupFieldOrMethod(ptr, false, check.pkg, name, false)
+		if fn, ok := obj.(*Func); ok && !check.logosReceiverReadonly(fn) {
+			return false
+		}
+	}
+	return true
 }
 
 func (check *Checker) logosConstRecvVar(recv *Var) *Var {
@@ -1119,17 +1265,22 @@ func (check *Checker) logosConstRange(x *operand) {
 	if !check.conf.Logos || !x.isValid() {
 		return
 	}
-	if c := logosAsConstView(x.typ()); c != nil {
-		x.typ_ = c.Elem
-	}
+	x.typ_, _, _ = logosReadonlyBase(x.typ())
 }
 
 func (check *Checker) logosConstRangeVal(rangeVar syntax.Expr, valp *Type) {
-	if !check.conf.Logos || !isValid(*valp) {
+	if !check.conf.Logos || *valp == nil || !isValid(*valp) {
 		return
 	}
-	if logosAsConstView(check.Info.TypeOf(rangeVar)) == nil {
+	_, descendants, readonly := logosReadonlyBase(check.Info.TypeOf(rangeVar))
+	if descendants {
+		*valp = logosWithReadonlyDescendants(*valp)
 		return
+	}
+	if !readonly {
+		if _, _, rooted := check.logosConstBase(rangeVar); !rooted {
+			return
+		}
 	}
 	*valp = &ConstView{Elem: *valp}
 }

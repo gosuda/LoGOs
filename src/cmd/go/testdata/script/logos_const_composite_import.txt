@@ -2,8 +2,15 @@ env GOPROXY=off
 env GOTOOLCHAIN=local
 mkdir $WORK/bin
 
-# An importer reads an exported const composite through tables and fresh copies.
+# An importer reads readonly descendants and writes only detached inline copies.
 cd m
+cp app/main.lgo $WORK/import-positive.lgo
+cp ../import-alias-attacks.lgo app/main.lgo
+! logos build -o $WORK/bin/import-alias-attack$GOEXE ./app
+stderr -count=5 '\[correctness::const_view_mutation\]'
+! logos eject -o $WORK/import-alias-out
+stderr -count=5 '\[correctness::const_view_mutation\]'
+cp $WORK/import-positive.lgo app/main.lgo
 logos build -o $WORK/bin/importcc$GOEXE ./app
 exec $WORK/bin/importcc$GOEXE
 cmp stdout want.txt
@@ -34,11 +41,15 @@ cd ../..
 cd badwrite
 ! logos build ./...
 stderr -count=9 '\[correctness::const_view_mutation\]'
+! logos eject -o $WORK/import-badwrite-out
+stderr -count=9 '\[correctness::const_view_mutation\]'
 cd ..
 
 # A slice expression of an imported const composite is no way around the rule.
 cd badslice
 ! logos build ./...
+stderr -count=7 '\[correctness::const_view_mutation\]'
+! logos eject -o $WORK/import-badslice-out
 stderr -count=7 '\[correctness::const_view_mutation\]'
 cd ..
 
@@ -80,17 +91,14 @@ module example.com/ccimport
 go 1.27
 
 -- m/want.txt --
-ok slice-leak-copy 1 99
-ok slice-leak-reread 1
-ok root-slice-leak-copy 1 99
-ok root-slice-fresh 1
-ok underscore-field-copy 1 99
-ok underscore-field-fresh 1
+ok readonly-slice 1
+ok detached-field 7 99
+ok readonly-map 1
 ok qualified-value 1 2
 ok promoted-range-sorted
 ok index-range-sorted
 ok array-leak-copy 1
-ok whole-copy-isolated 1 2
+ok detached-whole 1 99
 -- m/lib/lib.lgo --
 package lib
 
@@ -154,20 +162,11 @@ import (
 var failed bool
 
 func main() {
-	s := lib.C.L
-	s[0] = 99
-	fmt.Println("ok slice-leak-copy", lib.C.L[0], s[0])
-	fmt.Println("ok slice-leak-reread", lib.C.L[0])
-	x := lib.Items
-	x[0].N = 99
-	fmt.Println("ok root-slice-leak-copy", lib.Items[0].N, x[0].N)
-	y := lib.Items
-	fmt.Println("ok root-slice-fresh", y[0].N)
-	u := lib.Under
-	u.My_map["a"] = 99
-	fmt.Println("ok underscore-field-copy", lib.Under.My_map["a"] ?? -1, u.My_map["a"] ?? -1)
-	v := lib.Under
-	fmt.Println("ok underscore-field-fresh", v.My_map["a"] ?? -1)
+	fmt.Println("ok readonly-slice", lib.C.L[0])
+	x := &lib.C.N
+	*x = 99
+	fmt.Println("ok detached-field", lib.C.N, *x)
+	fmt.Println("ok readonly-map", lib.Under.My_map["a"] ?? -1)
 	pt := lib.Pts.P["o"] ?? lib.Point{}
 	fmt.Println("ok qualified-value", pt.X, pt.Y)
 	for range 64 {
@@ -197,13 +196,30 @@ func main() {
 	arr := lib.A.A
 	arr[0] = 5
 	fmt.Println("ok array-leak-copy", lib.A.A[0])
-	w := lib.C
-	w.M["a"] = 50
+	w := &lib.C
+	w.N = 99
 	z := lib.C
-	fmt.Println("ok whole-copy-isolated", z.M["a"] ?? -1, len(z.L)-1)
+	fmt.Println("ok detached-whole", z.M["a"] ?? -1, w.N)
 	if failed {
 		os.Exit(1)
 	}
+}
+-- import-alias-attacks.lgo --
+package main
+
+import "example.com/ccimport/lib"
+
+func main() {
+	s := lib.C.L
+	s[0] = 99
+	x := lib.Items
+	x[0].N = 99
+	u := lib.Under
+	u.My_map["a"] = 99
+	w := lib.C
+	w.M["a"] = 50
+	p := &lib.C
+	p.L[0] = 70
 }
 -- unnamed/go.mod --
 module example.com/ccunnamed

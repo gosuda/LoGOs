@@ -514,11 +514,20 @@ func (pw *pkgWriter) typIdx(typ types2.Type, dict *writerDict) typeInfo {
 	// bodies anyway. Otherwise, they can cause types.Sym collisions
 	// (e.g., "main.C" for both of the local type aliases in
 	// test/fixedbugs/issue50190.go).
+normalize:
 	for {
-		if alias, ok := typ.(*types2.Alias); ok && !isGlobal(alias.Obj()) {
-			typ = alias.Rhs()
-		} else {
-			break
+		switch t := typ.(type) {
+		case *types2.ConstView:
+			typ = t.Elem
+		case *types2.ReadonlyDescendants:
+			typ = t.Elem
+		case *types2.Alias:
+			if isGlobal(t.Obj()) {
+				break normalize
+			}
+			typ = t.Rhs()
+		default:
+			break normalize
 		}
 	}
 
@@ -615,8 +624,6 @@ func (pw *pkgWriter) typIdx(typ types2.Type, dict *writerDict) typeInfo {
 		w.Code(pkgbits.TypeInterface)
 		w.interfaceType(typ)
 
-	case *types2.ConstView:
-		return pw.typIdx(typ.Elem, dict)
 	case *types2.Union:
 		w.Code(pkgbits.TypeUnion)
 		w.unionType(typ)
@@ -2242,8 +2249,12 @@ func sliceElem(typ types2.Type) types2.Type {
 }
 func unconstView(t types2.Type) types2.Type {
 	for {
-		if cv, ok := types2.Unalias(t).(*types2.ConstView); ok {
-			t = cv.Elem
+		switch typ := types2.Unalias(t).(type) {
+		case *types2.ConstView:
+			t = typ.Elem
+			continue
+		case *types2.ReadonlyDescendants:
+			t = typ.Elem
 			continue
 		}
 		return t

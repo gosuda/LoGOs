@@ -7,6 +7,7 @@ package logos
 import (
 	"cmd/compile/internal/base"
 	"cmd/compile/internal/logos/ctfe"
+	"cmd/compile/internal/logos/facts"
 	"cmd/compile/internal/syntax"
 	"cmd/compile/internal/types2"
 	"fmt"
@@ -113,6 +114,7 @@ func (fl *fileLower) lowerCTFEFileList(gst *groupedMoveState) {
 			i--
 			continue
 		}
+		fl.recordCTFECompositeOrigin(r)
 		if !r.val.IsComposite() && !r.keepCall {
 			cd.Values = r.lit
 			fl.add(fl.off(syntax.StartPos(r.init)), fl.endOff(r.init), r.text)
@@ -137,6 +139,17 @@ func (fl *fileLower) lowerCTFEFileList(gst *groupedMoveState) {
 		}
 		i = fl.moveGroupedVar(cd, i, list, r, "", gst)
 	}
+}
+
+func (fl *fileLower) recordCTFECompositeOrigin(r ctfeResult) {
+	if r.obj == nil || !r.obj.Exported() || !r.val.IsComposite() || fl.pkg.tpkg.Scope().Lookup(r.obj.Name()) != r.obj {
+		return
+	}
+	f := facts.Current()
+	if f == nil || slices.Contains(f.ConstComps, r.obj.Name()) {
+		return
+	}
+	f.ConstComps = append(f.ConstComps, r.obj.Name())
 }
 
 func (fl *fileLower) lowerCTFEBlock(b *syntax.BlockStmt, gst *groupedMoveState) {

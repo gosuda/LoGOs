@@ -21,7 +21,7 @@ func (check *Checker) logosAddrFresh(x *operand, e *syntax.Operation) bool {
 	}
 	base, viaReference, constRooted := check.logosConstBase(e.X)
 	switch {
-	case constRooted && viaReference:
+	case constRooted && viaReference || !constRooted && x.mode() != variable && logosAsConstView(x.typ()) != nil:
 		check.errorf(e, IncompatibleAssign, "%s cannot take the address of %s through const view %s", logosConstMutation, ExprString(e.X), ExprString(base))
 		x.invalidate()
 		return true
@@ -29,7 +29,12 @@ func (check *Checker) logosAddrFresh(x *operand, e *syntax.Operation) bool {
 		return false
 	}
 	x.mode_ = value
-	x.typ_ = &Pointer{base: Default(x.typ())}
+	typ := x.typ()
+	if constRooted {
+		base, _, _ := logosReadonlyBase(typ)
+		typ = logosWithReadonlyDescendants(base)
+	}
+	x.typ_ = &Pointer{base: Default(typ)}
 	if check.Info != nil {
 		if check.Info.LogosAddrFresh == nil {
 			check.Info.LogosAddrFresh = make(map[syntax.Expr]bool)

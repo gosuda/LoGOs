@@ -54,6 +54,19 @@ func (check *Checker) infer(pos syntax.Pos, tparams []*TypeParam, targs []Type, 
 	// Parameters and arguments must match in number.
 	assert(params.Len() == len(args))
 
+	for _, arg := range args {
+		if arg.isValid() && logosContainsReadonlyDescendants(arg.typ()) {
+			err.addf(arg, "cannot use %s in generic inference: readonly descendants would be discarded", arg)
+			return nil
+		}
+	}
+	for _, targ := range targs {
+		if targ != nil && logosContainsReadonlyDescendants(targ) {
+			err.addf(atPos(pos), "cannot use type %s as generic type argument: readonly descendants would be discarded", targ)
+			return nil
+		}
+	}
+
 	// If we already have all type arguments, we're done.
 	if len(targs) == n && !slices.Contains(targs, nil) {
 		return targs
@@ -596,6 +609,9 @@ func (w *tpWalker) isParameterized(typ Type) (res bool) {
 	case *Pointer:
 		return w.isParameterized(t.base)
 
+	case *ReadonlyDescendants:
+		return w.isParameterized(t.Elem)
+
 	case *ConstView:
 		return w.isParameterized(t.Elem)
 
@@ -764,6 +780,9 @@ func (w *cycleFinder) typ(typ Type) {
 
 	case *Pointer:
 		w.typ(t.base)
+
+	case *ReadonlyDescendants:
+		w.typ(t.Elem)
 
 	case *ConstView:
 		w.typ(t.Elem)

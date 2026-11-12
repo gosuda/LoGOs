@@ -69,6 +69,16 @@ func (check *Checker) indexExpr(x *operand, e *syntax.IndexExpr) (isFuncInst boo
 		}
 	}
 
+	readonlyContainer := x.typ()
+	if check.conf.Logos {
+		x.typ_, _, _ = logosReadonlyBase(x.typ())
+		if p, ok := x.typ().Underlying().(*Pointer); ok {
+			if b, d, _ := logosReadonlyBase(p.base); d {
+				readonlyContainer = p.base
+				x.typ_ = &Pointer{base: b}
+			}
+		}
+	}
 	check.logosConstUnwrapBase(x) // logos M5-S1 hook: indexing through const views.
 	// ordinary index expression
 	valid := false
@@ -120,6 +130,9 @@ func (check *Checker) indexExpr(x *operand, e *syntax.IndexExpr) (isFuncInst boo
 		// ok to continue even if indexing failed - map element type is known
 		x.mode_ = mapindex
 		x.typ_ = typ.elem
+		if check.conf.Logos {
+			x.typ_ = logosReadonlyProject(readonlyContainer, x.typ(), true)
+		}
 		check.logosMapIndexOption(x) // logos M3-S2 hook: `m[k]` types as `V?`.
 		x.expr = e
 		return false
@@ -195,6 +208,9 @@ func (check *Checker) indexExpr(x *operand, e *syntax.IndexExpr) (isFuncInst boo
 				// ok to continue even if indexing failed - map element type is known
 				x.mode_ = mapindex
 				x.typ_ = elem
+				if check.conf.Logos {
+					x.typ_ = logosReadonlyProject(readonlyContainer, x.typ(), true)
+				}
 				check.logosMapIndexOption(x) // logos M3-S2 hook: `m[k]` types as `V?`.
 				x.expr = e
 				return false
@@ -215,6 +231,11 @@ func (check *Checker) indexExpr(x *operand, e *syntax.IndexExpr) (isFuncInst boo
 	}
 
 	check.logosConstWrapBase(x, e.X) // logos M5-S1 hook: index reads through const views.
+	if check.conf.Logos {
+		base, _, _ := logosReadonlyBase(readonlyContainer)
+		_, inline := base.Underlying().(*Array)
+		x.typ_ = logosReadonlyProject(readonlyContainer, x.typ(), !inline)
+	}
 	index := check.singleIndex(e)
 	if index == nil {
 		x.invalidate()
@@ -237,6 +258,16 @@ func (check *Checker) sliceExpr(x *operand, e *syntax.SliceExpr) {
 	if !x.isValid() {
 		check.use(e.Index[:]...)
 		return
+	}
+	readonlyContainer := x.typ()
+	if check.conf.Logos {
+		x.typ_, _, _ = logosReadonlyBase(x.typ())
+		if p, ok := x.typ().Underlying().(*Pointer); ok {
+			if b, d, _ := logosReadonlyBase(p.base); d {
+				readonlyContainer = p.base
+				x.typ_ = &Pointer{base: b}
+			}
+		}
 	}
 	check.logosConstUnwrapBase(x) // logos M5-S1 hook: slicing through const views.
 
@@ -401,6 +432,16 @@ L:
 	}
 	check.logosConstSliceBound(x, e) // logos M5-S1 hook: bounds over const views.
 	check.logosConstWrapBase(x, e.X) // logos M5-S1 hook: slice reads through const views.
+	if check.conf.Logos {
+		base, descendants, readonly := logosReadonlyBase(readonlyContainer)
+		if _, inline := base.Underlying().(*Array); inline && descendants && !readonly {
+			if s, ok := x.typ().Underlying().(*Slice); ok {
+				x.typ_ = &Slice{elem: logosWithReadonlyDescendants(s.elem)}
+			}
+		} else {
+			x.typ_ = logosReadonlyProject(readonlyContainer, x.typ(), true)
+		}
+	}
 }
 
 // singleIndex returns the (single) index from the index expression e.

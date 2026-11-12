@@ -240,6 +240,8 @@ func logosErasableQualified(t Type, seen map[Type]bool) bool {
 		}
 	case *Option:
 		return logosErasableQualified(u.Elem, seen)
+	case *ReadonlyDescendants:
+		return true
 	case *ConstView:
 		return logosErasableQualified(u.Elem, seen)
 	case *Union:
@@ -351,6 +353,8 @@ func logosParamBitsWalk(t Type, tpars []*TypeParam, into *[]byte, seen map[Type]
 			}
 		}
 	case *Option:
+		logosParamBits(u.Elem, tpars, into, seen)
+	case *ReadonlyDescendants:
 		logosParamBits(u.Elem, tpars, into, seen)
 	case *ConstView:
 		logosParamBits(u.Elem, tpars, into, seen)
@@ -668,6 +672,8 @@ func logosWalkType(t Type, add func(Type), seen map[Type]bool) {
 		}
 	case *Option:
 		logosWalkType(u.Elem, add, seen)
+	case *ReadonlyDescendants:
+		logosWalkType(u.Elem, add, seen)
 	case *ConstView:
 		logosWalkType(u.Elem, add, seen)
 	case *Union:
@@ -767,6 +773,8 @@ func logosWalkTypeChildren(t Type, visit func(Type)) {
 		}
 	case *Option:
 		visit(u.Elem)
+	case *ReadonlyDescendants:
+		visit(u.Elem)
 	case *ConstView:
 		visit(u.Elem)
 	case *Union:
@@ -839,6 +847,8 @@ func logosContainsTypeParam(t Type, seen map[Type]bool) bool {
 			}
 		}
 	case *Option:
+		return logosContainsTypeParam(u.Elem, seen)
+	case *ReadonlyDescendants:
 		return logosContainsTypeParam(u.Elem, seen)
 	case *ConstView:
 		return logosContainsTypeParam(u.Elem, seen)
@@ -1192,6 +1202,8 @@ func logosTypeContains(t, sub Type, seen map[Type]bool) bool {
 			}
 		}
 	case *Option:
+		return logosTypeContains(u.Elem, sub, seen)
+	case *ReadonlyDescendants:
 		return logosTypeContains(u.Elem, sub, seen)
 	case *ConstView:
 		return logosTypeContains(u.Elem, sub, seen)

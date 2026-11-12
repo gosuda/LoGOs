@@ -301,7 +301,7 @@ func (f *cycleFinder) visit(typ0 types2.Type) bool {
 
 		case *types2.Basic, *types2.Named, *types2.TypeParam:
 			return false // named types cannot be part of an anonymous cycle
-		case *types2.ConstView:
+		case *types2.ConstView, *types2.ReadonlyDescendants:
 			typ0 = unconstView(typ0)
 		case *types2.Option:
 			typ0 = typ.Elem

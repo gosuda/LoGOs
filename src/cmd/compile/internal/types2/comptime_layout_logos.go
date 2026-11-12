@@ -109,6 +109,8 @@ func LogosHasPointers(t Type) bool {
 		return true
 	case *ConstView:
 		return LogosHasPointers(u.Elem)
+	case *ReadonlyDescendants:
+		return LogosHasPointers(u.Elem)
 	case *Option:
 		return LogosHasPointers(u.Elem)
 	case *LogosTuple:

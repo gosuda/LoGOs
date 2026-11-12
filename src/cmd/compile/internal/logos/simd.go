@@ -118,6 +118,7 @@ func (fl *fileLower) simdArrayShape(t types2.Type) *simdShape {
 	if t == nil {
 		return nil
 	}
+	t = unaliasConstView(t)
 	at, ok := t.Underlying().(*types2.Array)
 	if !ok {
 		return nil
