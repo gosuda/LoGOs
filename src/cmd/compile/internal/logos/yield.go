@@ -163,11 +163,13 @@ func (fc *funcLower) lowerYieldStmt(s *syntax.YieldStmt) syntax.Stmt {
 	call := callOf(pos, nameOf(pos, yieldParam), args)
 	cond := at(&syntax.Operation{Op: syntax.Not, X: call}, pos)
 	native := ifOf(pos, nil, cond, []syntax.Stmt{returnOf(pos, nil)})
-	valStart := fl.exprStart(vals[0])
-	valEnd := fl.exprEndOf(vals[len(vals)-1])
+	valStart := fl.off(pos) + len("yield")
+	valEnd := fl.exprSpan(vals[len(vals)-1]).end
+	tail := fl.wrapperTail(vals[len(vals)-1])
 	fl.addT(fl.off(pos), valEnd, cat(
 		gen("if !"+yieldParam+"("),
-		fl.textOf(span{start: valStart, end: valEnd}),
+		fl.lazyText(span{start: valStart, end: valEnd}),
+		tail,
 		gen(") { return }")))
 	return native
 }
@@ -175,5 +177,7 @@ func (fc *funcLower) lowerYieldStmt(s *syntax.YieldStmt) syntax.Stmt {
 func (fc *funcLower) dropReturnValues(s *syntax.ReturnStmt) {
 	fl := fc.fl
 	vals := syntax.UnpackListExpr(s.Results)
-	fl.add(fl.exprStart(vals[0]), fl.exprEndOf(vals[len(vals)-1]), "")
+	end := fl.exprSpan(vals[len(vals)-1]).end
+	_ = fl.wrapperTail(vals[len(vals)-1])
+	fl.moveRegion(span{start: fl.off(s.Pos()) + len("return"), end: end}, "")
 }

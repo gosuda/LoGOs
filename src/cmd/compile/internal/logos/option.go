@@ -904,6 +904,22 @@ func (fl *fileLower) drainBodyWrapper(body syntax.Node, text otext) otext {
 	return cat(head, text, tail)
 }
 
+func (fl *fileLower) wrapperTail(e syntax.Expr) otext {
+	top, ok := syntax.Unparen(e).(*syntax.CallExpr)
+	if !ok {
+		return otext{}
+	}
+	id, ok := fl.wrapOwner[top]
+	if !ok {
+		return otext{}
+	}
+	vs, ok := fl.wrapSpan[top]
+	if !ok {
+		return otext{}
+	}
+	return drainOwnedAt(fl.ownerOfInsertion(vs.end), vs.end, id)
+}
+
 func (fl *fileLower) lowerMapIndex(e *syntax.IndexExpr) syntax.Expr {
 	if g, ok := fl.constMapReadUse(e.X); ok {
 		return fl.lowerConstMapRead(e, g)
