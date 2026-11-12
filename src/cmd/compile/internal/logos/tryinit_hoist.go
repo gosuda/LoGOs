@@ -423,8 +423,8 @@ func (h *tryHoist) hoistForCond(s *syntax.ForStmt, area span) {
 		x.hoistSwitch(bare, setCond, "")
 		test = s.Cond.(*syntax.Name).Value
 	} else {
-		test = fl.moveRegion(area, "")
 		x.child(s.Cond, setCond, area)
+		test = fl.moveRegion(area, "")
 	}
 	cond := s.Cond
 	s.Cond = nil
