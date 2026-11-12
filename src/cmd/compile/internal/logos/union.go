@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"go/token"
 	"reflect"
+	"slices"
 	"strings"
 
 	"cmd/compile/internal/base"
@@ -613,6 +614,7 @@ type unionUse struct {
 	nnodes  []syntax.Expr
 	nnode   syntax.Expr
 	from    bool
+	locals  []string
 }
 
 func (u *unionUse) isName() string     { return "_logos_is_" + u.suffix }
@@ -623,6 +625,43 @@ func (u *unionUse) assert2Name() string {
 
 func (u *unionUse) fromName() string  { return "_logos_assertfrom_" + u.suffix }
 func (u *unionUse) from2Name() string { return "_logos_assertfrom2_" + u.suffix }
+
+func (u *unionUse) tparams(pos syntax.Pos, extra ...string) []*syntax.Field {
+	var out []*syntax.Field
+	for _, name := range append(slices.Clone(u.locals), extra...) {
+		out = append(out, at(&syntax.Field{Name: nameOf(pos, name), Type: nameOf(pos, "any")}, pos))
+	}
+	return out
+}
+
+func (u *unionUse) ref(pos syntax.Pos, name string, extra syntax.Expr, extraText string) (syntax.Expr, string) {
+	args := make([]syntax.Expr, 0, len(u.locals)+1)
+	texts := slices.Clone(u.locals)
+	for _, local := range u.locals {
+		args = append(args, nameOf(pos, local))
+	}
+	if extra != nil {
+		args = append(args, extra)
+		texts = append(texts, extraText)
+	}
+	if len(args) == 0 {
+		return nameOf(pos, name), name
+	}
+	return at(&syntax.IndexExpr{X: nameOf(pos, name), Index: listOf(pos, args)}, pos), name + "[" + strings.Join(texts, ", ") + "]"
+}
+
+func localTypeNames(ts []types2.Type) []*types2.TypeName {
+	var out []*types2.TypeName
+	for _, t := range ts {
+		typeNamesAllow(t, func(obj *types2.TypeName) bool {
+			if obj.Pkg() != nil && obj.Parent() != obj.Pkg().Scope() && !slices.Contains(out, obj) {
+				out = append(out, obj)
+			}
+			return true
+		})
+	}
+	return out
+}
 
 type unionPkgState struct {
 	byFile map[*syntax.File]map[string]*unionUse
@@ -749,12 +788,25 @@ func (fl *fileLower) useOf(t types2.Type, pos syntax.Pos) *unionUse {
 	if t == nil {
 		return nil
 	}
+	members, ok := types2.LogosUnionTerms(t)
+	if !ok || mentionsTypeParam(t) {
+		return nil
+	}
+	for _, m := range members {
+		if mentionsTypeParam(m) {
+			return nil
+		}
+	}
+	locals := localTypeNames(append([]types2.Type{t}, members...))
 	key := types2.TypeString(t, func(p *types2.Package) string {
 		if p == nil {
 			return ""
 		}
 		return p.Path()
 	})
+	for _, obj := range locals {
+		key += fmt.Sprintf("#%p", obj)
+	}
 	st := logosUnionPkgs[fl.pkg.tpkg]
 	if st == nil {
 		st = &unionPkgState{byFile: make(map[*syntax.File]map[string]*unionUse), names: make(map[string]bool)}
@@ -770,15 +822,6 @@ func (fl *fileLower) useOf(t types2.Type, pos syntax.Pos) *unionUse {
 	}
 	if u, ok := slot[key]; ok {
 		return u
-	}
-	members, ok := types2.LogosUnionTerms(t)
-	if !ok || mentionsTypeParam(t) {
-		return nil
-	}
-	for _, m := range members {
-		if mentionsTypeParam(m) {
-			return nil
-		}
 	}
 	nnode, utext, ok := fl.spellTypeBoth(t, pos)
 	if !ok {
@@ -812,7 +855,11 @@ func (fl *fileLower) useOf(t types2.Type, pos syntax.Pos) *unionUse {
 		suffix = fmt.Sprintf("%s_%d", stem, i)
 	}
 	st.names[suffix] = true
-	u := &unionUse{suffix: suffix, union: ustr, members: members, texts: texts, utext: utext, nnodes: nnodes, nnode: nnode}
+	names := make([]string, len(locals))
+	for i, obj := range locals {
+		names[i] = obj.Name()
+	}
+	u := &unionUse{suffix: suffix, union: ustr, members: members, texts: texts, utext: utext, nnodes: nnodes, nnode: nnode, locals: names}
 	slot[key] = u
 	logosUnionUses[fl.file] = append(logosUnionUses[fl.file], u)
 	return u
@@ -842,14 +889,16 @@ func (fl *fileLower) emitHelpers(u *unionUse) {
 	}
 	decl := func(name string, params, results []*syntax.Field, body []syntax.Stmt) *syntax.FuncDecl {
 		return at(&syntax.FuncDecl{
-			Name: nameOf(pos, name),
-			Type: at(&syntax.FuncType{ParamList: params, ResultList: results}, pos),
-			Body: blockOf(pos, body),
+			Name:       nameOf(pos, name),
+			TParamList: u.tparams(pos),
+			Type:       at(&syntax.FuncType{ParamList: params, ResultList: results}, pos),
+			Body:       blockOf(pos, body),
 		}, pos)
 	}
 	build := func(utype syntax.Expr, mtypes []syntax.Expr) []syntax.Decl {
 		isCall := func(x syntax.Expr) *syntax.CallExpr {
-			return callOf(pos, nameOf(pos, u.isName()), []syntax.Expr{x})
+			fn, _ := u.ref(pos, u.isName(), nil, "")
+			return callOf(pos, fn, []syntax.Expr{x})
 		}
 		unionAssert := func(x syntax.Expr) *syntax.AssertExpr {
 			return at(&syntax.AssertExpr{X: x, Type: utype}, pos)
@@ -922,8 +971,8 @@ func (fl *fileLower) emitHelpers(u *unionUse) {
 
 func (fl *fileLower) buildFromDecls(u *unionUse, utype syntax.Expr, pos syntax.Pos) []syntax.Decl {
 	const tname = "_logos_T"
-	tparams := func() []*syntax.Field {
-		return []*syntax.Field{at(&syntax.Field{Name: nameOf(pos, tname), Type: nameOf(pos, "any")}, pos)}
+	if len(u.locals) > 0 {
+		utype = nameOf(pos, "any")
 	}
 	params := func() []*syntax.Field {
 		return []*syntax.Field{at(&syntax.Field{Name: nameOf(pos, "x"), Type: utype}, pos)}
@@ -932,12 +981,12 @@ func (fl *fileLower) buildFromDecls(u *unionUse, utype syntax.Expr, pos syntax.P
 		return at(&syntax.AssertExpr{X: nameOf(pos, "x"), Type: nameOf(pos, tname)}, pos)
 	}
 	nonMember := func(miss syntax.Stmt) []syntax.Stmt {
+		isFn, _ := u.ref(pos, u.isName(), nil, "")
 		dyn := callOf(pos, nameOf(pos, "any"), []syntax.Expr{nameOf(pos, "z")})
 		isNon := at(&syntax.Operation{
 			Op: syntax.AndAnd,
 			X:  at(&syntax.Operation{Op: syntax.Neq, X: nameOf(pos, "v"), Y: nilOf(pos)}, pos),
-			Y: at(&syntax.Operation{Op: syntax.Not, X: callOf(pos, nameOf(pos, u.isName()),
-				[]syntax.Expr{nameOf(pos, "v")})}, pos),
+			Y:  at(&syntax.Operation{Op: syntax.Not, X: callOf(pos, isFn, []syntax.Expr{nameOf(pos, "v")})}, pos),
 		}, pos)
 		return []syntax.Stmt{
 			typedVarDecl(pos, nameOf(pos, "z"), nameOf(pos, tname)),
@@ -960,7 +1009,7 @@ func (fl *fileLower) buildFromDecls(u *unionUse, utype syntax.Expr, pos syntax.P
 	}))
 	from1 := at(&syntax.FuncDecl{
 		Name:       nameOf(pos, u.fromName()),
-		TParamList: tparams(),
+		TParamList: u.tparams(pos, tname),
 		Type: at(&syntax.FuncType{
 			ParamList:  params(),
 			ResultList: []*syntax.Field{at(&syntax.Field{Type: nameOf(pos, tname)}, pos)},
@@ -970,7 +1019,7 @@ func (fl *fileLower) buildFromDecls(u *unionUse, utype syntax.Expr, pos syntax.P
 	miss := returnOf(pos, []syntax.Expr{nameOf(pos, "z"), nameOf(pos, "false")})
 	from2 := at(&syntax.FuncDecl{
 		Name:       nameOf(pos, u.from2Name()),
-		TParamList: tparams(),
+		TParamList: u.tparams(pos, tname),
 		Type: at(&syntax.FuncType{
 			ParamList: params(),
 			ResultList: []*syntax.Field{
@@ -1030,12 +1079,12 @@ func (fl *fileLower) lowerCommaOkAssign(s *syntax.AssignStmt) {
 		return
 	}
 	if a, u := fl.commaOkTarget(s.Rhs); a != nil {
-		s.Rhs = fl.assertCall(a, u.assert2Name(), nil, "")
+		s.Rhs = fl.assertCall(a, u, u.assert2Name(), nil, "")
 		return
 	}
 	if a, ok := unparenAssert(s.Rhs); ok {
 		if ou := fl.fromHelper(a); ou != nil {
-			s.Rhs = fl.fromCall(a, ou.from2Name())
+			s.Rhs = fl.fromCall(a, ou, ou.from2Name())
 		}
 	}
 }
@@ -1045,22 +1094,22 @@ func (fl *fileLower) lowerCommaOkVar(d *syntax.VarDecl) {
 		return
 	}
 	if a, u := fl.commaOkTarget(d.Values); a != nil {
-		d.Values = fl.assertCall(a, u.assert2Name(), nil, "")
+		d.Values = fl.assertCall(a, u, u.assert2Name(), nil, "")
 		return
 	}
 	if a, ok := unparenAssert(d.Values); ok {
 		if ou := fl.fromHelper(a); ou != nil {
-			d.Values = fl.fromCall(a, ou.from2Name())
+			d.Values = fl.fromCall(a, ou, ou.from2Name())
 		}
 	}
 }
 
 func (fl *fileLower) lowerSingleAssert(a *syntax.AssertExpr) syntax.Expr {
 	if u := fl.useOf(fl.pkg.info.TypeOf(a.Type), a.Pos()); u != nil {
-		return fl.assertCall(a, u.assertName(), nil, "")
+		return fl.assertCall(a, u, u.assertName(), nil, "")
 	}
 	if ou := fl.fromHelper(a); ou != nil {
-		return fl.fromCall(a, ou.fromName())
+		return fl.fromCall(a, ou, ou.fromName())
 	}
 	return nil
 }
@@ -1095,28 +1144,23 @@ func (fl *fileLower) fromHelper(a *syntax.AssertExpr) *unionUse {
 	return ou
 }
 
-func (fl *fileLower) fromCall(a *syntax.AssertExpr, name string) syntax.Expr {
+func (fl *fileLower) fromCall(a *syntax.AssertExpr, ou *unionUse, name string) syntax.Expr {
 	pos := a.Pos()
 	native, eject, ok := fl.spellTypeBoth(fl.pkg.info.TypeOf(a.Type), pos)
 	if !ok {
 		base.Fatalf("logos: cannot spell assertion type at %s", pos.String())
 	}
-	return fl.assertCall(a, name, native, eject)
+	return fl.assertCall(a, ou, name, native, eject)
 }
 
-func (fl *fileLower) assertCall(a *syntax.AssertExpr, name string, targ syntax.Expr, targText string) syntax.Expr {
+func (fl *fileLower) assertCall(a *syntax.AssertExpr, u *unionUse, name string, targ syntax.Expr, targText string) syntax.Expr {
 	pos := a.Pos()
 	xStart := fl.off(a.X.Pos())
 	dot, end, ok := splitAssert(fl.src, xStart)
 	if !ok {
 		base.Fatalf("logos: cannot split assertion at %s", pos.String())
 	}
-	var fn syntax.Expr = nameOf(pos, name)
-	head := name
-	if targ != nil {
-		fn = at(&syntax.IndexExpr{X: fn, Index: targ}, pos)
-		head += "[" + targText + "]"
-	}
+	fn, head := u.ref(pos, name, targ, targText)
 	fl.add(xStart, xStart, head+"(")
 	fl.add(dot, end, ")")
 	return callOf(pos, fn, []syntax.Expr{a.X})
@@ -1215,11 +1259,13 @@ type unionBind struct {
 }
 
 func (b *unionBind) open() string {
-	return "{ " + b.name + " := " + b.use.assertName() + "(" + b.name + "); _ = " + b.name + ";"
+	_, head := b.use.ref(syntax.Pos{}, b.use.assertName(), nil, "")
+	return "{ " + b.name + " := " + head + "(" + b.name + "); _ = " + b.name + ";"
 }
 
 func (b *unionBind) stmts(pos syntax.Pos) []syntax.Stmt {
-	call := callOf(pos, nameOf(pos, b.use.assertName()), []syntax.Expr{nameOf(pos, b.name)})
+	fn, _ := b.use.ref(pos, b.use.assertName(), nil, "")
+	call := callOf(pos, fn, []syntax.Expr{nameOf(pos, b.name)})
 	return []syntax.Stmt{
 		defineOf(pos, []syntax.Expr{nameOf(pos, b.name)}, []syntax.Expr{call}),
 		assignOf(pos, []syntax.Expr{nameOf(pos, "_")}, []syntax.Expr{nameOf(pos, b.name)}),
