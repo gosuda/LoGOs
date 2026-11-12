@@ -81,6 +81,20 @@ func main() {
 	mv, ok := m["k"]
 	mp, mq := mv
 	check("tuple-round-trips-map", ok && mp == 1 && mq == nil, fmt.Sprint(ok, mp, mq), "true 1 <nil>")
+	rows := [](x int, y string){(1, "a"), (2, "b")}
+	rows = append(rows, (3, "c"))
+	sum := 0
+	for _, row := range rows {
+		sum += row.x
+	}
+	r0, r1 := rows[2]
+	check("tuple-slice-literal-append-range", len(rows) == 3 && sum == 6 && rows[1].y == "b" && r0 == 3 && r1 == "c", fmt.Sprint(len(rows), sum, rows[1].y, r0, r1), "3 6 b 3 c")
+	var ps [](int, error)
+	one := pair()
+	ps = append(ps, one)
+	ps = append(ps, (5, nil))
+	p1a, p1b := ps[1]
+	check("tuple-slice-packed-element", len(ps) == 2 && ps[0] == c && p1a == 5 && p1b == nil, fmt.Sprint(ps), "[{3 <nil>} {5 <nil>}]")
 	check("named-tuple-params-unpack", show((42, nil)) == "42 <nil>", show((42, nil)), "42 <nil>")
 	direct()
 	if failed {
