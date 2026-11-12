@@ -72,32 +72,53 @@ func NewGroup(ctx context.Context, limit int) (*Group, context.Context) {
 // after Wait has returned panics with "logos: Group.Go called after
 // Wait".
 func (g *Group) Go(f func(context.Context) error) {
+	g.register()
+	g.acquire()
+	go g.run(f)
+}
+
+// GoNested spawns f as a child from a goroutine that is itself a child
+// of g. It never blocks the caller: f takes its concurrency slot in
+// its own goroutine, so a child that spawns while the limit is reached
+// does not wait for the slot it holds.
+func (g *Group) GoNested(f func(context.Context) error) {
+	g.register()
+	go func() {
+		g.acquire()
+		g.run(f)
+	}()
+}
+
+func (g *Group) register() {
 	g.mu.Lock()
+	defer g.mu.Unlock()
 	if g.joined {
-		g.mu.Unlock()
 		panic("logos: Group.Go called after Wait")
 	}
 	g.live++
-	g.mu.Unlock()
+}
+
+func (g *Group) acquire() {
 	if g.sem != nil {
 		g.sem <- struct{}{}
 	}
-	go func() {
-		if g.sem != nil {
-			defer func() { <-g.sem }()
-		}
-		defer g.childDone()
-		logosTagGroup(g.slot)
-		defer logosTagGroup(0)
-		defer func() {
-			if r := recover(); r != nil {
-				g.fail(&PanicError{Value: r, Stack: stackTrace()})
-			}
-		}()
-		if err := f(g.ctx); err != nil {
-			g.fail(err)
+}
+
+func (g *Group) run(f func(context.Context) error) {
+	if g.sem != nil {
+		defer func() { <-g.sem }()
+	}
+	defer g.childDone()
+	logosTagGroup(g.slot)
+	defer logosTagGroup(0)
+	defer func() {
+		if r := recover(); r != nil {
+			g.fail(&PanicError{Value: r, Stack: stackTrace()})
 		}
 	}()
+	if err := f(g.ctx); err != nil {
+		g.fail(err)
+	}
 }
 
 func (g *Group) fail(err error) {

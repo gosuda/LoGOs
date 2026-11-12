@@ -24,6 +24,13 @@ type groupFrame struct {
 	body       *syntax.BlockStmt
 }
 
+func (top groupFrame) spawn() string {
+	if top.child {
+		return "GoNested"
+	}
+	return "Go"
+}
+
 func groupExprEnd(src []byte, start int) int {
 	e := exprScan{end: start}
 	scanSegment(src, start, len(src), e.step)
@@ -189,7 +196,7 @@ func (fc *funcLower) lowerGroupWrap(s syntax.Stmt, pos syntax.Pos, top groupFram
 	cr := fmt.Sprintf("_logos_cr%d", fc.groupSeq)
 	fc.groupSeq++
 	ft := groupChildFuncType(pos, top.gctx, cr)
-	prefix := top.g + ".Go(func(" + top.gctx + " " + rtAlias + ".Context) (" + cr + " error) { "
+	prefix := top.g + "." + top.spawn() + "(func(" + top.gctx + " " + rtAlias + ".Context) (" + cr + " error) { "
 	var body *syntax.BlockStmt
 	var endText string
 	var endStmts []syntax.Stmt
@@ -217,7 +224,7 @@ func (fc *funcLower) lowerGroupWrap(s syntax.Stmt, pos syntax.Pos, top groupFram
 	body.List = append(body.List, endStmts...)
 	lit := at(&syntax.FuncLit{Type: ft, Body: body}, pos)
 	fc.groupMarkDone(lit)
-	native := exprStmtOf(pos, callOf(pos, selOf(pos, nameOf(pos, top.g), "Go"), []syntax.Expr{lit}))
+	native := exprStmtOf(pos, callOf(pos, selOf(pos, nameOf(pos, top.g), top.spawn()), []syntax.Expr{lit}))
 	return []syntax.Stmt{native}
 }
 
@@ -504,8 +511,8 @@ func (fc *funcLower) lowerGroupGo(s *syntax.CallStmt) []syntax.Stmt {
 	if len(parts) != 2 {
 		base.Fatalf("logos: group call text misses its call at %s", pos.String())
 	}
-	fl.add(fl.off(pos), callStart, "{ "+capText+top.g+".Go(func("+top.gctx+" "+rtAlias+".Context) ("+cr+" error) { "+parts[0])
+	fl.add(fl.off(pos), callStart, "{ "+capText+top.g+"."+top.spawn()+"(func("+top.gctx+" "+rtAlias+".Context) ("+cr+" error) { "+parts[0])
 	fl.add(callEnd, callEnd, parts[1]+"}) }")
-	native := exprStmtOf(pos, callOf(pos, selOf(pos, nameOf(pos, top.g), "Go"), []syntax.Expr{lit}))
+	native := exprStmtOf(pos, callOf(pos, selOf(pos, nameOf(pos, top.g), top.spawn()), []syntax.Expr{lit}))
 	return []syntax.Stmt{blockOf(pos, append(capNative, native))}
 }

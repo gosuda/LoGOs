@@ -1067,6 +1067,8 @@ It MUST bound concurrency with a semaphore when `limit` is present. [T-206]
 
 The function value and arguments MUST be evaluated in the calling goroutine before the child is submitted to the group, including when the concurrency limit would block submission. [T-206]
 
+A `go f(args)` statement or a `go { ... }` child written inside a child MUST form a child of the same group, and spawning it MUST NOT block the spawning child on the concurrency limit: the new child MUST start once a slot is free, and `Wait` MUST wait for it. [T-206]
+
 `go f()` outside any group body MUST fail with `[concurrency::unsupervised_goroutine]`. [T-206]
 
 A child outside a group body MUST fail with `[correctness::child_outside_group]`. [T-206]
@@ -1083,7 +1085,7 @@ The context MUST be cancelled at join. [T-206]
 
 A child panic MUST become `*logos/rt.PanicError` with the value and a stack. [T-206]
 
-`NewGroup`, `Go`, `Wait`, and `PanicError.Error` MUST form the `Group` API (`NewGroup(ctx, limit)` returns the group and a child context; `Go` takes `func(context.Context) error`). [T-206]
+`NewGroup`, `Go`, `GoNested`, `Wait`, and `PanicError.Error` MUST form the `Group` API (`NewGroup(ctx, limit)` returns the group and a child context; `Go` and `GoNested` take `func(context.Context) error`, and `GoNested` never blocks its caller on the concurrency limit). [T-206]
 
 A plain channel send, receive, or range directly in a child MUST lower to a `select` with `<-gctx.Done()`. [T-206]
 

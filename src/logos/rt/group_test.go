@@ -17,6 +17,7 @@ import (
 	"sync/atomic"
 	"testing"
 	"testing/synctest"
+	"time"
 )
 
 var (
@@ -294,6 +295,18 @@ func inFlightWhenQuiet(t *testing.T, limit, children int) int32 {
 	return got
 }
 
+func holdSlot(cur, peak *atomic.Int32) {
+	n := cur.Add(1)
+	for {
+		p := peak.Load()
+		if n <= p || peak.CompareAndSwap(p, n) {
+			break
+		}
+	}
+	time.Sleep(time.Millisecond)
+	cur.Add(-1)
+}
+
 func TestGroupLimitOneSerializes(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		if got := inFlightWhenQuiet(t, 1, 3); got != 1 {
@@ -302,6 +315,65 @@ func TestGroupLimitOneSerializes(t *testing.T) {
 	})
 }
 
+func TestGroupGoNestedUnderLimitOneJoins(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		g, _ := NewGroup(t.Context(), 1)
+		var order []string
+		g.Go(func(ctx context.Context) error {
+			g.GoNested(func(ctx context.Context) error {
+				order = append(order, "inner")
+				return nil
+			})
+			order = append(order, "outer")
+			return nil
+		})
+		if err := g.Wait(); err != nil {
+			t.Fatalf("Wait = %v, want nil", err)
+		}
+		if got := strings.Join(order, ","); got != "outer,inner" {
+			t.Fatalf("order = %s, want outer,inner", got)
+		}
+	})
+}
+
+func TestGroupGoNestedKeepsTheLimit(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		g, _ := NewGroup(t.Context(), 1)
+		var cur, peak atomic.Int32
+		g.Go(func(ctx context.Context) error {
+			for range 3 {
+				g.GoNested(func(ctx context.Context) error {
+					holdSlot(&cur, &peak)
+					return nil
+				})
+			}
+			holdSlot(&cur, &peak)
+			return nil
+		})
+		if err := g.Wait(); err != nil {
+			t.Fatalf("Wait = %v, want nil", err)
+		}
+		if p := peak.Load(); p != 1 {
+			t.Fatalf("peak concurrency = %d, want 1", p)
+		}
+	})
+}
+
+func TestGroupGoNestedErrorFailsTheGroup(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		g, _ := NewGroup(t.Context(), 1)
+		g.Go(func(ctx context.Context) error {
+			g.GoNested(func(ctx context.Context) error { return errGroupFirst })
+			return nil
+		})
+		if err := g.Wait(); !errors.Is(err, errGroupFirst) {
+			t.Fatalf("Wait = %v, want %v", err, errGroupFirst)
+		}
+	})
+}
+
+// M8-S1 attack: a limit of zero leaves the group unbounded, so all
+// children run at once.
 func TestGroupLimitZeroIsUnbounded(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		if got := inFlightWhenQuiet(t, 0, 3); got != 3 {
