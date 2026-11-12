@@ -2835,7 +2835,7 @@ func (p *parser) argList() (list []Expr, hasDots bool) {
 
 	p.xnest++
 	p.list("argument list", _Comma, _Rparen, func() bool {
-		list = append(list, p.expr())
+		list = append(list, p.logosNamedArg(p.expr()))
 		hasDots = p.got(_DotDotDot)
 		return hasDots
 	})

@@ -41,6 +41,19 @@ func (p *parser) groupList(plains *[]Expr) (limit Expr) {
 	return nil
 }
 
+func (p *parser) logosNamedArg(x Expr) Expr {
+	key, ok := x.(*Name)
+	if !ok || p.mode&LogosMode == 0 || p.tok != _Assign {
+		return x
+	}
+	arg := new(KeyValueExpr)
+	arg.pos = p.pos()
+	p.next()
+	arg.Key = key
+	arg.Value = p.expr()
+	return arg
+}
+
 func (p *parser) groupStmt(goPos Pos, gname *Name) Stmt {
 	lparen := p.pos()
 	p.next()
