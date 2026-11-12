@@ -190,6 +190,35 @@ func testRichV2ParityUnderNoJSONv2() {
 	}
 }
 
+type SeparatorTags struct {
+	Odd  string `json:"a\u2028b"`
+	Even string `json:"c\u2029d"`
+}
+
+type SeparatorTagsMirror SeparatorTags
+
+func testSeparatorTagNamesUnderNoJSONv2() {
+	v := SeparatorTags{Odd: "x", Even: "y"}
+	want, err := json.Marshal(SeparatorTagsMirror(v))
+	if err != nil {
+		panic(err)
+	}
+	got, err := json.Marshal(v)
+	if err != nil {
+		panic(err)
+	}
+	if !bytes.Equal(got, want) {
+		panic(fmt.Sprintf("nojsonv2 SeparatorTags:\n got %s\nwant %s", got, want))
+	}
+	var back SeparatorTags
+	if err := json.Unmarshal(want, &back); err != nil {
+		panic(err)
+	}
+	if back != v {
+		panic(fmt.Sprintf("nojsonv2 SeparatorTags round trip changed %+v into %+v", v, back))
+	}
+}
+
 func main() {
 testCallSiteParityWithMarshalJSON()
 fmt.Println("ok callsite-marshal")
@@ -201,4 +230,6 @@ testRichParityUnderNoJSONv2()
 fmt.Println("ok callsite-richv1")
 testRichV2ParityUnderNoJSONv2()
 fmt.Println("ok callsite-richv2")
+testSeparatorTagNamesUnderNoJSONv2()
+fmt.Println("ok callsite-separator-tags")
 }

@@ -6,6 +6,7 @@ package jsonmarshal
 import (
 	"bytes"
 	"encoding/json"
+	"maps"
 	"math"
 	"math/rand"
 	"os"
@@ -661,6 +662,37 @@ func TestKeyNamesEscapePerEncodingJSON(t *testing.T) {
 		if !bytes.Contains(got, []byte(literal)) {
 			t.Fatalf("output %s lacks hand-written key literal %s", got, literal)
 		}
+	}
+}
+
+type Separators struct {
+	Text string            `json:"text"`
+	Tags map[string]string `json:"tags"`
+}
+
+type separatorsMirror Separators
+
+func TestSeparatorsEncodeAndDecodePerEncodingJSON(t *testing.T) {
+	v := Separators{
+		Text: "a\u2028b\u2029c",
+		Tags: map[string]string{"k\u2028": "v\u2029", "\u2029\u2028": "x<&>"},
+	}
+	want := must(json.Marshal(separatorsMirror(v)))
+	got := must(v.MarshalJSON())
+	if !bytes.Equal(got, want) {
+		t.Fatalf("separators differ\n got %s\nwant %s", got, want)
+	}
+	for _, escape := range []string{`\u2028`, `\u2029`} {
+		if !bytes.Contains(got, []byte(escape)) {
+			t.Fatalf("output %s lacks the escape %s", got, escape)
+		}
+	}
+	var back Separators
+	if err := json.Unmarshal(got, &back); err != nil {
+		t.Fatal(err)
+	}
+	if back.Text != v.Text || !maps.Equal(back.Tags, v.Tags) {
+		t.Fatalf("round trip changed %+v into %+v", v, back)
 	}
 }
 
