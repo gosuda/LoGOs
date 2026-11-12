@@ -827,6 +827,8 @@ func cfBareSkip(n *syntax.Name, p syntax.Node) bool {
 			}
 		}
 		return false
+	case *syntax.TypeSwitchGuard:
+		return p.Lhs == n
 	case *syntax.RangeClause:
 		for _, e := range syntax.UnpackListExpr(p.Lhs) {
 			if en, ok := e.(*syntax.Name); ok && en == n {
@@ -1158,6 +1160,24 @@ func cfStmtBinds(s syntax.Stmt, name string) bool {
 	return false
 }
 
+func cfHeaderBinds(p, within syntax.Node, name string) bool {
+	var header syntax.SimpleStmt
+	switch p := p.(type) {
+	case *syntax.ForStmt:
+		header = p.Init
+	case *syntax.IfStmt:
+		header = p.Init
+	case *syntax.SwitchStmt:
+		header = p.Init
+		if g, ok := p.Tag.(*syntax.TypeSwitchGuard); ok && within != syntax.Node(g) && g.Lhs != nil && g.Lhs.Value == name {
+			return true
+		}
+	case *syntax.CommClause:
+		header = p.Comm
+	}
+	return header != nil && within != syntax.Node(header) && cfStmtBinds(header, name)
+}
+
 // cfHasBinderBefore reports whether a value binder of name sits
 // flow-before ref inside body: preceding siblings in each enclosing
 // list, plus function literal parameters on the path.
@@ -1170,6 +1190,9 @@ func cfHasBinderBefore(body *syntax.BlockStmt, ref syntax.Node, name string, par
 					return true
 				}
 			}
+		}
+		if cfHeaderBinds(p, prev, name) {
+			return true
 		}
 		if list := cfListOf(p); list != nil {
 			idx := -1
