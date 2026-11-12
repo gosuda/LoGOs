@@ -840,6 +840,26 @@ func (p *logosEFPass) varOf(e syntax.Expr) *Var {
 	return v
 }
 
+func (p *logosEFPass) addressRoot(e syntax.Expr) *Var {
+	switch e := syntax.Unparen(e).(type) {
+	case *syntax.SelectorExpr:
+		if sel := p.check.Selections[e]; sel != nil && sel.Kind() == FieldVal && !sel.Indirect() {
+			return p.addressRoot(e.X)
+		}
+	case *syntax.IndexExpr:
+		if typ, _, ok := p.check.logosChecked(e.X); ok {
+			for _, u := range typeset(typ) {
+				if _, ok := u.(*Array); ok {
+					return p.addressRoot(e.X)
+				}
+			}
+		}
+	default:
+		return p.varOf(e)
+	}
+	return nil
+}
+
 func (p *logosEFPass) errVar(e syntax.Expr) *Var {
 	v := p.varOf(e)
 	if v == nil || v.typ == nil || !Identical(v.typ, universeError) {
@@ -973,8 +993,20 @@ func (p *logosEFPass) collectAssigns() {
 		case *syntax.RangeClause:
 			note(syntax.UnpackListExpr(n.Lhs), nil, false)
 		case *syntax.Operation:
-			if v := p.varOf(n.X); v != nil && n.Op == syntax.And && n.Y == nil {
-				p.addr[v] = true
+			if n.Op == syntax.And && n.Y == nil {
+				if v := p.addressRoot(n.X); v != nil {
+					p.addr[v] = true
+				}
+			}
+		case *syntax.SelectorExpr:
+			sel := p.check.Selections[n]
+			if sel == nil || sel.Kind() != MethodVal || sel.Indirect() {
+				break
+			}
+			if sel.Obj().(*Func).hasPtrRecv() {
+				if v := p.addressRoot(n.X); v != nil {
+					p.addr[v] = true
+				}
 			}
 		}
 		return true

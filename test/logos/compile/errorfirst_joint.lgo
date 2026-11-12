@@ -191,3 +191,186 @@ func efCapturedLoop() {
 		f()
 	}
 }
+
+type efAmount int
+
+func (n *efAmount) touch() { *n = 2 }
+func (n efAmount) value() int { return int(n) }
+
+func efLoadAmount() (efAmount, error) {
+	return 1, nil
+}
+
+func efCapturedImplicitAddress() {
+	n, err := efLoadAmount()
+	if err != nil {
+		return
+	}
+	later := func() {
+		println(n) // ERROR "result_before_error_check"
+	}
+	n.touch()
+	later()
+}
+
+func efCapturedImplicitMethodValue() {
+	n, err := efLoadAmount()
+	if err != nil {
+		return
+	}
+	later := func() {
+		println(n) // ERROR "result_before_error_check"
+	}
+	touch := n.touch
+	touch()
+	later()
+}
+
+type efAmountFields struct {
+	n efAmount
+}
+
+func efLoadAmountFields() (efAmountFields, error) {
+	return efAmountFields{}, nil
+}
+
+func efCapturedImplicitFieldAddress() {
+	n, err := efLoadAmountFields()
+	if err != nil {
+		return
+	}
+	later := func() {
+		println(n.n) // ERROR "result_before_error_check"
+	}
+	touch := n.n.touch
+	touch()
+	later()
+}
+
+func efLoadAmountArray() ([1]efAmount, error) {
+	return [1]efAmount{}, nil
+}
+
+func efCapturedImplicitArrayAddress() {
+	n, err := efLoadAmountArray()
+	if err != nil {
+		return
+	}
+	later := func() {
+		println(n[0]) // ERROR "result_before_error_check"
+	}
+	n[0].touch()
+	later()
+}
+
+type efEmbeddedAmount struct {
+	efAmount
+}
+
+func efLoadEmbeddedAmount() (efEmbeddedAmount, error) {
+	return efEmbeddedAmount{}, nil
+}
+
+func efCapturedPromotedImplicitAddress() {
+	n, err := efLoadEmbeddedAmount()
+	if err != nil {
+		return
+	}
+	later := func() {
+		println(n.efAmount) // ERROR "result_before_error_check"
+	}
+	n.touch()
+	later()
+}
+
+func efCapturedValueReceiver() {
+	n, err := efLoadAmount()
+	if err != nil {
+		return
+	}
+	later := func() { println(n) }
+	value := n.value
+	println(n.value(), value())
+	later()
+}
+
+func efLoadAmountPointer() (*efAmount, error) {
+	n := efAmount(1)
+	return &n, nil
+}
+
+func efCapturedPointerReceiver() {
+	n, err := efLoadAmountPointer()
+	if err != nil {
+		return
+	}
+	later := func() { println(*n) }
+	touch := n.touch
+	n.touch()
+	touch()
+	later()
+}
+
+type efNamedAmountArray [1]efAmount
+type efAmountArrayAlias = efNamedAmountArray
+
+func efLoadGenericAmount[T any]() (T, error) {
+	var n T
+	return n, nil
+}
+
+func efCapturedNamedArrayAliasAddress() {
+	n, err := efLoadGenericAmount[efAmountArrayAlias]()
+	if err != nil {
+		return
+	}
+	later := func() {
+		println(n[0]) // ERROR "result_before_error_check"
+	}
+	n[0].touch()
+	later()
+}
+
+func efCapturedGenericArrayAddress[T ~[1]efAmount]() {
+	n, err := efLoadGenericAmount[T]()
+	if err != nil {
+		return
+	}
+	later := func() {
+		println(n[0]) // ERROR "result_before_error_check"
+	}
+	n[0].touch()
+	later()
+}
+
+func efCapturedGenericArrayOrSliceAddress[T ~[1]efAmount | ~[]efAmount]() {
+	n, err := efLoadGenericAmount[T]()
+	if err != nil {
+		return
+	}
+	later := func() {
+		println(n[0]) // ERROR "result_before_error_check"
+	}
+	n[0].touch()
+	later()
+}
+
+func efCapturedGenericSliceAddress[T ~[]efAmount]() {
+	n, err := efLoadGenericAmount[T]()
+	if err != nil {
+		return
+	}
+	later := func() { println(n[0]) }
+	n[0].touch()
+	later()
+}
+
+func efCapturedArrayPointerAddress() {
+	n, err := efLoadGenericAmount[*[1]efAmount]()
+	if err != nil {
+		return
+	}
+	later := func() { println(n[0]) }
+	n[0].touch()
+	later()
+}
