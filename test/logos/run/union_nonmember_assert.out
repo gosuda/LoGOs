@@ -18,3 +18,17 @@ ok local-other-shape-message
 ok local-comma-ok
 ok closure-local-comma-ok
 ok closure-local-type
+ok param-nonmember-type
+ok param-nonmember-message
+ok param-member-ok
+ok param-member-mismatch-native
+ok param-interface-ok
+ok param-interface-native
+ok param-comma-nonmember
+ok param-comma-member
+ok param-comma-member-mismatch
+ok param-slice-member
+ok param-slice-nonmember-type
+ok param-slice-nonmember-message
+ok param-union-named-T-type
+ok param-union-named-T-message

@@ -6,11 +6,22 @@ import (
 	"fmt"
 	"logos/rt"
 	"os"
+	"runtime"
 )
 
 type U interface {
 	int | string
 }
+
+type V interface {
+	[]int | string
+}
+
+type T interface {
+	int8 | uint8
+}
+
+type Cat struct{ lives int }
 
 var failed bool
 
@@ -144,6 +155,74 @@ func checkLocals(u U) {
 	}()
 }
 
+func asParam[T any](u U) (r any) {
+	defer func() { r = recover() }()
+	_ = u.(T)
+	return nil
+}
+
+func asParamOk[T any](u U) (T, bool) {
+	v, ok := u.(T)
+	return v, ok
+}
+
+func asSlice[T any](v V) (r any) {
+	defer func() { r = recover() }()
+	_ = v.([]T)
+	return nil
+}
+
+func asNamed[X any](t T) (r any) {
+	defer func() { r = recover() }()
+	_ = t.(X)
+	return nil
+}
+
+func checkParams(u U) {
+	var r any
+	r = asParam[Cat](u)
+	e, typeOk := r.(*rt.UnionAssertionError)
+	check("param-nonmember-type", typeOk, fmt.Sprintf("%T", r), "*rt.UnionAssertionError")
+	if typeOk {
+		want := "interface conversion: main.Cat is not a member of main.U"
+		check("param-nonmember-message", e.Error() == want, e.Error(), want)
+	}
+	r = asParam[int](u)
+	check("param-member-ok", r == nil, r, nil)
+	r = asParam[string](u)
+	_, native := r.(*runtime.TypeAssertionError)
+	check("param-member-mismatch-native", native, fmt.Sprintf("%T", r), "*runtime.TypeAssertionError")
+	r = asParam[any](u)
+	check("param-interface-ok", r == nil, r, nil)
+	r = asParam[fmt.Stringer](u)
+	_, native = r.(*runtime.TypeAssertionError)
+	check("param-interface-native", native, fmt.Sprintf("%T", r), "*runtime.TypeAssertionError")
+	cat, ok := asParamOk[Cat](u)
+	check("param-comma-nonmember", !ok && cat == Cat{}, ok, false)
+	n, ok := asParamOk[int](u)
+	check("param-comma-member", ok && n == 42, n, 42)
+	s, ok := asParamOk[string](u)
+	check("param-comma-member-mismatch", !ok && s == "", ok, false)
+	var v V = []int{1}
+	r = asSlice[int](v)
+	check("param-slice-member", r == nil, r, nil)
+	r = asSlice[string](v)
+	e, typeOk = r.(*rt.UnionAssertionError)
+	check("param-slice-nonmember-type", typeOk, fmt.Sprintf("%T", r), "*rt.UnionAssertionError")
+	if typeOk {
+		want := "interface conversion: []string is not a member of main.V"
+		check("param-slice-nonmember-message", e.Error() == want, e.Error(), want)
+	}
+	var t T = int8(1)
+	r = asNamed[Cat](t)
+	e, typeOk = r.(*rt.UnionAssertionError)
+	check("param-union-named-T-type", typeOk, fmt.Sprintf("%T", r), "*rt.UnionAssertionError")
+	if typeOk {
+		want := "interface conversion: main.Cat is not a member of main.T"
+		check("param-union-named-T-message", e.Error() == want, e.Error(), want)
+	}
+}
+
 func main() {
 	var u U = 42
 	v, ok := u.(float64)
@@ -173,6 +252,7 @@ func main() {
 	checkXU()
 	checkCases()
 	checkLocals(u)
+	checkParams(u)
 	if failed {
 		os.Exit(1)
 	}

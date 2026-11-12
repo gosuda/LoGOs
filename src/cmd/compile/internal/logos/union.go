@@ -902,7 +902,7 @@ func (fl *fileLower) emitHelpers(u *unionUse) {
 			[]syntax.Stmt{ifOf(pos, nil, isCall(nameOf(pos, "x")), []syntax.Stmt{hit}), miss[0], miss[1]})
 		decls := []syntax.Decl{isFn, assertFn, assert2Fn}
 		if u.from {
-			decls = append(decls, fl.buildFromDecls(u, pos)...)
+			decls = append(decls, fl.buildFromDecls(u, utype, pos)...)
 		}
 		return decls
 	}
@@ -920,13 +920,29 @@ func (fl *fileLower) emitHelpers(u *unionUse) {
 	fl.add(fl.orig, fl.orig, text.String())
 }
 
-func (fl *fileLower) buildFromDecls(u *unionUse, pos syntax.Pos) []syntax.Decl {
-	const tname = "T"
+func (fl *fileLower) buildFromDecls(u *unionUse, utype syntax.Expr, pos syntax.Pos) []syntax.Decl {
+	const tname = "_logos_T"
 	tparams := func() []*syntax.Field {
 		return []*syntax.Field{at(&syntax.Field{Name: nameOf(pos, tname), Type: nameOf(pos, "any")}, pos)}
 	}
-	xField := func() []*syntax.Field {
-		return []*syntax.Field{at(&syntax.Field{Name: nameOf(pos, "x"), Type: nameOf(pos, "any")}, pos)}
+	params := func() []*syntax.Field {
+		return []*syntax.Field{at(&syntax.Field{Name: nameOf(pos, "x"), Type: utype}, pos)}
+	}
+	assertX := func() *syntax.AssertExpr {
+		return at(&syntax.AssertExpr{X: nameOf(pos, "x"), Type: nameOf(pos, tname)}, pos)
+	}
+	nonMember := func(miss syntax.Stmt) []syntax.Stmt {
+		dyn := callOf(pos, nameOf(pos, "any"), []syntax.Expr{nameOf(pos, "z")})
+		isNon := at(&syntax.Operation{
+			Op: syntax.AndAnd,
+			X:  at(&syntax.Operation{Op: syntax.Neq, X: nameOf(pos, "v"), Y: nilOf(pos)}, pos),
+			Y: at(&syntax.Operation{Op: syntax.Not, X: callOf(pos, nameOf(pos, u.isName()),
+				[]syntax.Expr{nameOf(pos, "v")})}, pos),
+		}, pos)
+		return []syntax.Stmt{
+			typedVarDecl(pos, nameOf(pos, "z"), nameOf(pos, tname)),
+			ifOf(pos, defineOf(pos, []syntax.Expr{nameOf(pos, "v")}, []syntax.Expr{dyn}), isNon, []syntax.Stmt{miss}),
+		}
 	}
 	typeName := callOf(pos, at(&syntax.IndexExpr{X: rtSel(pos, "TypeName"), Index: nameOf(pos, tname)}, pos), nil)
 	errLit := at(&syntax.CompositeLit{
@@ -939,33 +955,32 @@ func (fl *fileLower) buildFromDecls(u *unionUse, pos syntax.Pos) []syntax.Decl {
 		NKeys:  3,
 		Rbrace: pos,
 	}, pos)
+	panicCall := exprStmtOf(pos, callOf(pos, nameOf(pos, "panic"), []syntax.Expr{
+		at(&syntax.Operation{Op: syntax.And, X: errLit}, pos),
+	}))
+	from1 := at(&syntax.FuncDecl{
+		Name:       nameOf(pos, u.fromName()),
+		TParamList: tparams(),
+		Type: at(&syntax.FuncType{
+			ParamList:  params(),
+			ResultList: []*syntax.Field{at(&syntax.Field{Type: nameOf(pos, tname)}, pos)},
+		}, pos),
+		Body: blockOf(pos, append(nonMember(panicCall), returnOf(pos, []syntax.Expr{assertX()}))),
+	}, pos)
+	miss := returnOf(pos, []syntax.Expr{nameOf(pos, "z"), nameOf(pos, "false")})
 	from2 := at(&syntax.FuncDecl{
 		Name:       nameOf(pos, u.from2Name()),
 		TParamList: tparams(),
 		Type: at(&syntax.FuncType{
-			ParamList: xField(),
+			ParamList: params(),
 			ResultList: []*syntax.Field{
 				at(&syntax.Field{Type: nameOf(pos, tname)}, pos),
 				at(&syntax.Field{Type: nameOf(pos, "bool")}, pos),
 			},
 		}, pos),
-		Body: blockOf(pos, []syntax.Stmt{
-			typedVarDecl(pos, nameOf(pos, "z"), nameOf(pos, tname)),
-			returnOf(pos, []syntax.Expr{nameOf(pos, "z"), nameOf(pos, "false")}),
-		}),
-	}, pos)
-	from1 := at(&syntax.FuncDecl{
-		Name:       nameOf(pos, u.fromName()),
-		TParamList: tparams(),
-		Type: at(&syntax.FuncType{
-			ParamList:  xField(),
-			ResultList: []*syntax.Field{at(&syntax.Field{Type: nameOf(pos, tname)}, pos)},
-		}, pos),
-		Body: blockOf(pos, []syntax.Stmt{
-			exprStmtOf(pos, callOf(pos, nameOf(pos, "panic"), []syntax.Expr{
-				at(&syntax.Operation{Op: syntax.And, X: errLit}, pos),
-			})),
-		}),
+		Body: blockOf(pos, append(nonMember(miss),
+			defineOf(pos, []syntax.Expr{nameOf(pos, "r"), nameOf(pos, "ok")}, []syntax.Expr{assertX()}),
+			returnOf(pos, []syntax.Expr{nameOf(pos, "r"), nameOf(pos, "ok")}))),
 	}, pos)
 	return []syntax.Decl{from2, from1}
 }
@@ -1052,11 +1067,13 @@ func (fl *fileLower) lowerSingleAssert(a *syntax.AssertExpr) syntax.Expr {
 
 func (fl *fileLower) fromHelper(a *syntax.AssertExpr) *unionUse {
 	t := fl.pkg.info.TypeOf(a.Type)
-	if t == nil || mentionsTypeParam(t) {
+	if t == nil {
 		return nil
 	}
-	if _, ok := types2.Unalias(t).Underlying().(*types2.Interface); ok {
-		return nil
+	if _, ok := types2.Unalias(t).(*types2.TypeParam); !ok {
+		if _, ok := types2.Unalias(t).Underlying().(*types2.Interface); ok {
+			return nil
+		}
 	}
 	ot := fl.pkg.info.TypeOf(a.X)
 	if ot == nil || types2.Identical(t, ot) {
