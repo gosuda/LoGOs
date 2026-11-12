@@ -329,7 +329,7 @@ func (fl *fileLower) ownerOfInsertion(off int) *[]splice {
 // that stands for the copy of r.
 func (fl *fileLower) openMove(r span) (*[]splice, string) {
 	outer := &fl.splices
-	if m := fl.moveContaining(r); m != nil {
+	if m := fl.moveAbove(r); m != nil {
 		outer = &m.inner
 	} else if rg := fl.regionAt(r.start, r.end); rg != nil {
 		outer = &rg.splices
@@ -597,7 +597,8 @@ func (fl *fileLower) newSite(pos syntax.Pos, line uint) string {
 func (fl *fileLower) lowerFile() {
 	fl.collectInterpKinds() // interpolation operand kinds before any rewrite.
 	fl.lowerComptime()      // comptime generic copies, then const for unrolling, before any rewrite.
-	fl.scanRodataMarkers()  // hand-written //logos:rodata lines.
+	fl.lowerStructDefaults()
+	fl.scanRodataMarkers() // hand-written //logos:rodata lines.
 	fl.lowerArenaEject()
 	fl.lowerZeroCopy() // zero-copy string/bytes conversions.
 	fl.lowerCTFE()
@@ -647,11 +648,10 @@ func (fl *fileLower) lowerFile() {
 	if fl.constText != "" {
 		fl.add(fl.orig, fl.orig, fl.constText)
 	}
-	fl.lowerStructDefaults() // strip `= const`, fill composite literals.
-	fl.lowerAddrFresh()      // `&expr` to new(expr).
-	fl.emitRodata()          // read-only vars, after every pass that creates them.
-	fl.lowerInterp()         // interpolated strings (last: whole-span text drains inner splices).
-	fl.resolveChainMoves()   // copies of moved chain operands, after every edit inside them.
+	fl.lowerAddrFresh()    // `&expr` to new(expr).
+	fl.emitRodata()        // read-only vars, after every pass that creates them.
+	fl.lowerInterp()       // interpolated strings (last: whole-span text drains inner splices).
+	fl.resolveChainMoves() // copies of moved chain operands, after every edit inside them.
 	fl.finalizeConstFor()
 	fl.remapRegions()
 }

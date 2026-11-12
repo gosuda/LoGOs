@@ -174,7 +174,7 @@ func (fl *fileLower) lambdaBody(lam *syntax.LambdaExpr, sig *types2.Signature, p
 		return fl.lambdaTryBody(sig, pos, t)
 	}
 	espan := fl.lambdaCaptureSpan(lam, expr)
-	text := fl.drainBodyWrapper(expr, fl.textOf(espan))
+	text := fl.drainBodyWrapper(expr, fl.lazyText(espan))
 	if native, done := fl.stagedReplacements[expr]; done {
 		expr = native
 	}

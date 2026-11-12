@@ -927,7 +927,7 @@ func (fl *fileLower) drainBodyWrapper(body syntax.Node, text otext) otext {
 	if !ok {
 		return text
 	}
-	id, ok := fl.wrapOwner[top]
+	_, ok = fl.wrapOwner[top]
 	if !ok {
 		return text
 	}
@@ -935,7 +935,7 @@ func (fl *fileLower) drainBodyWrapper(body syntax.Node, text otext) otext {
 	if !ok {
 		return text
 	}
-	head, tail := fl.drainOwned(vs, id)
+	head, tail := fl.drainBoundaries(vs)
 	return cat(head, text, tail)
 }
 

@@ -292,7 +292,7 @@ func tupleChildLists(s syntax.Stmt) []*[]syntax.Stmt {
 	return nil
 }
 
-func (fl *fileLower) lowerTupleNested(s syntax.Stmt) {
+func (fl *fileLower) lowerTupleNested(s syntax.Node) {
 	saved := fl.tupleScope
 	fl.tupleScope = s
 	defer func() { fl.tupleScope = saved }()
@@ -1025,6 +1025,7 @@ func (fl *fileLower) lowerTupleLitTargeted(lit *syntax.TupleLit, names []string,
 	split := fl.tupleSplit(pos, len(lit.Elems))
 	comp, head := fl.tupleLiteral(pos, names, types, slices.Clone(lit.Elems))
 	fl.cutTupleLit(fl.off(syntax.StartPos(lit)), split.end, split, gen(head), gen("}"))
+	fl.stashBodyType(fl.pkg.info.TypeOf(lit), lit, comp)
 	fl.replaceTuple(lit, comp)
 }
 

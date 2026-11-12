@@ -508,6 +508,9 @@ func (fl *fileLower) chainSpan(call *syntax.CallExpr) (int, int) {
 
 func (fl *fileLower) exprStart(e syntax.Expr) int {
 	for {
+		if ws, ok := fl.wrapSpan[e]; ok {
+			return ws.start
+		}
 		switch t := e.(type) {
 		case *syntax.SliceExpr:
 			e = t.X
@@ -860,6 +863,7 @@ func (cg *chainGen) run(call *syntax.CallExpr) {
 		return
 	}
 	cg.fl.loweredChains[call] = true
+	cg.fl.lowerTupleNested(call)
 	ops, base, term, carrier := cg.fl.decomposeChain(call)
 	if len(ops) == 0 && term.method == "" {
 		return
@@ -895,6 +899,7 @@ func (cg *chainGen) run(call *syntax.CallExpr) {
 		cg.fl.lowerOperandProps(term.arg)
 	}
 	cg.fl.lowerOperandProps(base)
+	cg.fl.preLowerCaptureInterps(call)
 	baseText := cg.fl.textOf(recv)
 	elemT := cg.baseElem(base)
 	resultT := cg.fl.pkg.info.TypeOf(call)

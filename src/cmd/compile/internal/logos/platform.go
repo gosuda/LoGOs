@@ -108,7 +108,7 @@ func (fl *fileLower) platformSpan(e syntax.Expr) (span, bool) {
 	if ws, ok := fl.wrapSpan[syntax.Unparen(e)]; ok {
 		return ws, true
 	}
-	start := fl.off(leftmostOf(e))
+	start := fl.exprStart(e)
 	end := fl.exprEndOf(e)
 	if end <= start {
 		return span{}, false

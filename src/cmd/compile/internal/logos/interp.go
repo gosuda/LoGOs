@@ -109,7 +109,7 @@ func (fl *fileLower) lowerInterp() {
 			needUnsafe = true
 		}
 	}
-	fl.flushOuterFirst()
+	fl.flushInnerFirst()
 	fl.flushInterpImports(needConv, needUnsafe)
 }
 
