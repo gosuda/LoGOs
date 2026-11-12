@@ -5,6 +5,8 @@ import (
 	"comptime"
 	"fmt"
 	"os"
+	"strings"
+	"time"
 )
 
 type Pair struct {
@@ -97,6 +99,32 @@ func LineSize() int {
 	return n
 }
 
+type List[E any] struct{ V []E }
+
+func Kind[T any]() string {
+	_ = comptime.TypeOf[T]()
+	var s []T
+	return strings.TrimPrefix(fmt.Sprintf("%T", s), "[]")
+}
+
+func NestedConcrete[T any]() string {
+	_ = comptime.TypeOf[T]()
+	return strings.Join([]string{
+		Kind[int](), Kind[string](), Kind[byte](), Kind[Pair](), Kind[*Pair](),
+		Kind[[]int](), Kind[[4]int](), Kind[map[string]int](), Kind[chan int](),
+		Kind[func(int) string](), Kind[struct{ X int }](), Kind[time.Duration](),
+		Kind[List[int]](),
+	}, " ")
+}
+
+func NestedParam[T any]() string {
+	_ = comptime.TypeOf[T]()
+	return strings.Join([]string{
+		Kind[T](), Kind[*T](), Kind[[]T](), Kind[[2]T](), Kind[map[string]T](),
+		Kind[chan T](), Kind[List[T]](),
+	}, " ")
+}
+
 var failed bool
 
 func check(name, got, want string) {
@@ -118,6 +146,8 @@ func main() {
 	check("line-comment-in-a-folded-condition", LineCond[Pair](), "ptr")
 	check("line-comment-between-folded-operands", LineAnd[Sized](), "both")
 	check("line-comment-in-a-folded-layout", fmt.Sprint(LineSize()), "5")
+	check("nested-concrete-type-arguments", NestedConcrete[Pair](), "int string uint8 main.Pair *main.Pair []int [4]int map[string]int chan int func(int) string struct { X int } time.Duration main.List[int]")
+	check("nested-type-parameter-arguments", NestedParam[Pair](), "main.Pair *main.Pair []main.Pair [2]main.Pair map[string]main.Pair chan main.Pair main.List[main.Pair]")
 	if failed {
 		os.Exit(1)
 	}

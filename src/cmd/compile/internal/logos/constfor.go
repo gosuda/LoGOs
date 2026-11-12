@@ -899,6 +899,8 @@ type cfSites struct {
 	spell        map[string]func() (string, bool)
 	types        map[string]types2.Type
 	scope        *types2.Scope
+	pkg          *types2.Package
+	imports      []cfImport
 	errPos       syntax.Pos
 }
 
@@ -934,7 +936,9 @@ func (fl *fileLower) cfRangeType(cf *syntax.ConstForStmt, active cfChain, sites 
 // cfResolveTypeExpr evaluates a type expression of const for context:
 // `f.Type` of an active field variable, a marker of the copy context, a
 // package-level name of the record's scope, a pointer or slice of those,
-// or any type the checker recorded without type parameters.
+// a type the checker recorded without type parameters, or any other
+// type expression of a copy, checked in the scope of the record's
+// package.
 func (fl *fileLower) cfResolveTypeExpr(e syntax.Expr, active cfChain, sites *cfSites) (types2.Type, bool) {
 	switch e := e.(type) {
 	case *syntax.ParenExpr:
@@ -959,7 +963,29 @@ func (fl *fileLower) cfResolveTypeExpr(e syntax.Expr, active cfChain, sites *cfS
 	if t := fl.cfRecordedType(e); t != nil && !cfHasTypeParam(t) {
 		return t, true
 	}
-	return nil, false
+	return fl.cfEvalTypeExpr(e, active, sites)
+}
+
+func (fl *fileLower) cfEvalTypeExpr(e syntax.Expr, active cfChain, sites *cfSites) (types2.Type, bool) {
+	if sites == nil || sites.scope == nil {
+		return nil, false
+	}
+	bind := types2.LogosTypeBindings{
+		Types:  sites.types,
+		Pkgs:   map[string]*types2.Package{cfPkgMarker: sites.pkg},
+		Fields: make(map[string]types2.Type),
+	}
+	for i, imp := range sites.imports {
+		if pkg, err := fl.cfLoadPackage(imp.path); err == nil {
+			bind.Pkgs[cfImportMarker+strconv.Itoa(i)] = pkg
+		}
+	}
+	for _, a := range active {
+		if !a.index {
+			bind.Fields[a.name] = a.field.typ
+		}
+	}
+	return types2.LogosResolveType(sites.pkg, fl.pkg.info, types2.LogosCopyContext{Scope: sites.scope, Bind: bind}, e)
 }
 
 // cfRecordedType returns the type the checker recorded for the type

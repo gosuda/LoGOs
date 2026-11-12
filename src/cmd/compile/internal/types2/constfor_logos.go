@@ -31,6 +31,7 @@ type LogosCopyContext struct {
 	Importer   Importer
 	Context    *Context
 	ConstFuncs map[string]LogosConstFunc
+	Bind       LogosTypeBindings
 }
 
 func (ctx LogosCopyContext) logosCopyChecker(pkg *Package, info *Info, errs *[]Error) *Checker {
@@ -141,6 +142,34 @@ func LogosCheckCopyFunc(pkg *Package, info *Info, ctx LogosCopyContext, fn *synt
 	mc.funcBody(nil, fn.Name.Value, sig, fn.Body, nil)
 	mc.logosCopyFinish()
 	return obj, errs
+}
+
+type LogosTypeBindings struct {
+	Types  map[string]Type
+	Pkgs   map[string]*Package
+	Fields map[string]Type
+}
+
+func LogosResolveType(pkg *Package, info *Info, ctx LogosCopyContext, e syntax.Expr) (Type, bool) {
+	if ctx.Scope == nil {
+		return nil, false
+	}
+	var errs []Error
+	mc := ctx.logosCopyChecker(pkg, info, &errs)
+	for name, t := range ctx.Bind.Types {
+		mc.scope.Insert(NewTypeName(nopos, pkg, name, t))
+	}
+	for name, p := range ctx.Bind.Pkgs {
+		mc.scope.Insert(NewPkgName(nopos, pkg, name, p))
+	}
+	for name, t := range ctx.Bind.Fields {
+		stub := NewPackage("", name)
+		stub.Scope().Insert(NewTypeName(nopos, stub, "Type", t))
+		mc.scope.Insert(NewPkgName(nopos, pkg, name, stub))
+	}
+	t := mc.typ(e)
+	mc.logosCopyFinish()
+	return t, len(errs) == 0 && isValid(t)
 }
 
 type logosFieldBinding struct {

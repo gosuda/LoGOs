@@ -7,3 +7,5 @@ ok dropped-with-comments
 ok line-comment-in-a-folded-condition
 ok line-comment-between-folded-operands
 ok line-comment-in-a-folded-layout
+ok nested-concrete-type-arguments
+ok nested-type-parameter-arguments

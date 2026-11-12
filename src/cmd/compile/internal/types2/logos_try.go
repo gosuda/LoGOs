@@ -19,7 +19,7 @@ func logosIsReserved(name string) bool {
 }
 
 func (check *Checker) logosReservedIdent(id *syntax.Name) {
-	if !check.conf.Logos || !logosIsReserved(id.Value) {
+	if !check.conf.Logos || check.logosCopy || !logosIsReserved(id.Value) {
 		return
 	}
 	check.errorf(id, BadDecl, "[correctness::reserved_identifier] identifier %s is reserved", id.Value)

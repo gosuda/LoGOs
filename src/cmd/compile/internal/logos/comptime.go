@@ -742,6 +742,8 @@ func (fl *fileLower) cfCopySites(site *cfSite, rec *cfRecord) (*cfSites, bool) {
 		spell:        make(map[string]func() (string, bool)),
 		types:        make(map[string]types2.Type),
 		scope:        site.obj.Pkg().Scope(),
+		pkg:          site.obj.Pkg(),
+		imports:      rec.imports,
 		errPos:       site.pos,
 	}
 	for i, t := range site.targs {
