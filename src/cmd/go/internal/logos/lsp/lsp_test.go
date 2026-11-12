@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"internal/testenv"
 	"io"
+	"math"
 	"net"
 	"os"
 	"os/exec"
@@ -32,6 +33,16 @@ const (
 
 	waitLimit = 30 * time.Second
 )
+
+func replyWait(t *testing.T) time.Duration {
+	t.Helper()
+	deadline, ok := t.Deadline()
+	if !ok {
+		return math.MaxInt64
+	}
+	left := time.Until(deadline)
+	return left - left/10
+}
 
 type fakeScript struct {
 	Responses map[string]json.RawMessage `json:"responses"`
@@ -173,7 +184,8 @@ func echoAnswer(wr *writer, script *fakeScript, m *message) error {
 	}
 	td, _ := root["textDocument"].(map[string]any)
 	uri, _ := td["uri"].(string)
-	pos, ok := asPosition(root["position"].(map[string]any))
+	where, _ := root["position"].(map[string]any)
+	pos, ok := asPosition(where)
 	if !ok {
 		return wr.respond(m.ID, nullResult)
 	}
@@ -490,7 +502,7 @@ func (c *testClient) readLoop(rd *reader) {
 
 func (c *testClient) waitFor(what string, match func(*message) bool) *message {
 	c.t.Helper()
-	timer := time.AfterFunc(waitLimit, func() {
+	timer := time.AfterFunc(replyWait(c.t), func() {
 		c.mu.Lock()
 		c.expired = true
 		c.cond.Broadcast()

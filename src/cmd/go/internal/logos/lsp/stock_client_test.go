@@ -52,7 +52,7 @@ func (c *stockClient) readLoop(rd *reader) {
 func (c *stockClient) waitFor(what string, match func(*message) bool) *message {
 	c.t.Helper()
 	expired := false
-	timer := time.AfterFunc(waitLimit, func() {
+	timer := time.AfterFunc(replyWait(c.t), func() {
 		c.mu.Lock()
 		expired = true
 		c.cond.Broadcast()
@@ -86,21 +86,6 @@ func (c *stockClient) call(method string, params any) []byte {
 	return []byte(m.Result)
 }
 
-func (c *stockClient) callRetry(method string, params any) []byte {
-	c.t.Helper()
-	for attempt := 1; ; attempt++ {
-		if m, ok := c.awaitCall(c.sendCall(method, params)); ok {
-			if len(m.Error) > 0 {
-				c.t.Fatalf("%s failed: %s", method, m.Error)
-			}
-			return []byte(m.Result)
-		}
-		if attempt >= 3 {
-			c.t.Fatalf("no response to %s from the proxy after %d attempts", method, attempt)
-		}
-	}
-}
-
 func (c *stockClient) sendCall(method string, params any) int {
 	c.t.Helper()
 	c.mu.Lock()
@@ -120,7 +105,7 @@ func (c *stockClient) sendCall(method string, params any) int {
 func (c *stockClient) awaitCall(id int) (*message, bool) {
 	c.t.Helper()
 	expired := false
-	timer := time.AfterFunc(waitLimit, func() {
+	timer := time.AfterFunc(replyWait(c.t), func() {
 		c.mu.Lock()
 		expired = true
 		c.cond.Broadcast()
@@ -188,17 +173,23 @@ func stockSpan(t *testing.T, text, needle string, nth int) Range {
 	return Range{Start: stockPos(t, text, off), End: stockPos(t, text, off+len(needle))}
 }
 
+func stockRange(t *testing.T, what string, v any) Range {
+	t.Helper()
+	m, _ := v.(map[string]any)
+	r, ok := asRange(m)
+	if !ok {
+		t.Fatalf("%s carries no range: %v", what, v)
+	}
+	return r
+}
+
 func stockDiagRange(t *testing.T, params map[string]any) Range {
 	t.Helper()
 	items, _ := params["diagnostics"].([]any)
 	for _, item := range items {
 		d, _ := item.(map[string]any)
 		if d["message"] == stockDiagMessage {
-			r, ok := asRange(d["range"].(map[string]any))
-			if !ok {
-				t.Fatalf("diagnostic carries no range: %v", d)
-			}
-			return r
+			return stockRange(t, "diagnostic", d["range"])
 		}
 	}
 	t.Fatalf("diagnostic %q missing from %v", stockDiagMessage, params)
@@ -300,7 +291,7 @@ func TestStockClientThroughRealProxy(t *testing.T) {
 		"textDocument": map[string]any{"uri": lgoURI, "languageId": "logos", "version": 1, "text": stockLgo},
 	})
 	operand := stockSpan(t, stockLgo, "path", 1)
-	hover, err := decode(c.callRetry("textDocument/hover", positionParams(lgoURI, operand.Start)))
+	hover, err := decode(c.call("textDocument/hover", positionParams(lgoURI, operand.Start)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -310,10 +301,10 @@ func TestStockClientThroughRealProxy(t *testing.T) {
 	if !strings.Contains(value, "stock hover") {
 		t.Errorf("hover contents = %q, want it to hold stock hover", value)
 	}
-	if r, ok := asRange(hm["range"].(map[string]any)); !ok || r != operand {
-		t.Errorf("hover range = %v, want %v", hm["range"], operand)
+	if r := stockRange(t, "hover", hm["range"]); r != operand {
+		t.Errorf("hover range = %v, want %v", r, operand)
 	}
-	def, err := decode(c.callRetry("textDocument/definition", positionParams(lgoURI, operand.Start)))
+	def, err := decode(c.call("textDocument/definition", positionParams(lgoURI, operand.Start)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -325,10 +316,10 @@ func TestStockClientThroughRealProxy(t *testing.T) {
 	if loc["uri"] != lgoURI {
 		t.Errorf("definition uri = %v, want %s", loc["uri"], lgoURI)
 	}
-	if r, ok := asRange(loc["range"].(map[string]any)); !ok || r != operand {
-		t.Errorf("definition range = %v, want %v", loc["range"], operand)
+	if r := stockRange(t, "definition", loc["range"]); r != operand {
+		t.Errorf("definition range = %v, want %v", r, operand)
 	}
-	comp, err := decode(c.callRetry("textDocument/completion", positionParams(lgoURI, operand.Start)))
+	comp, err := decode(c.call("textDocument/completion", positionParams(lgoURI, operand.Start)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -342,8 +333,8 @@ func TestStockClientThroughRealProxy(t *testing.T) {
 		t.Errorf("completion label = %v, want ReadFile", item["label"])
 	}
 	edit, _ := item["textEdit"].(map[string]any)
-	if r, ok := asRange(edit["range"].(map[string]any)); !ok || r != operand {
-		t.Errorf("completion edit range = %v, want %v", edit["range"], operand)
+	if r := stockRange(t, "completion edit", edit["range"]); r != operand {
+		t.Errorf("completion edit range = %v, want %v", r, operand)
 	}
 	got := c.notifyFor("diagnostics for the opener", func(m map[string]any) bool {
 		if m["uri"] != lgoURI {
@@ -370,13 +361,13 @@ func TestStockClientThroughRealProxy(t *testing.T) {
 		"contentChanges": []any{map[string]any{"text": changed}},
 	})
 	operand2 := stockSpan(t, changed, "path", 1)
-	hover2, err := decode(c.callRetry("textDocument/hover", positionParams(lgoURI, operand2.Start)))
+	hover2, err := decode(c.call("textDocument/hover", positionParams(lgoURI, operand2.Start)))
 	if err != nil {
 		t.Fatal(err)
 	}
 	hm2, _ := hover2.(map[string]any)
-	if r, ok := asRange(hm2["range"].(map[string]any)); !ok || r != operand2 {
-		t.Errorf("hover range after the edit = %v, want %v", hm2["range"], operand2)
+	if r := stockRange(t, "hover after the edit", hm2["range"]); r != operand2 {
+		t.Errorf("hover range after the edit = %v, want %v", r, operand2)
 	}
 	got2 := c.notifyFor("diagnostics for the edit", func(m map[string]any) bool {
 		if m["uri"] != lgoURI {
@@ -406,7 +397,7 @@ func TestStockClientThroughRealProxy(t *testing.T) {
 	}
 	select {
 	case <-c.done:
-	case <-time.After(waitLimit):
+	case <-time.After(replyWait(t)):
 		t.Fatal("the proxy did not close the stock exchange")
 	}
 	if err := cmd.Wait(); err != nil {
