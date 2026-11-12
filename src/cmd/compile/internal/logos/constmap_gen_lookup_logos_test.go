@@ -10,6 +10,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -155,5 +157,161 @@ func runConstmapLookupBehavior(t *testing.T, lookup string, keys []constMapKey) 
 	out, err := cmd.CombinedOutput()
 	if err != nil || strings.TrimSpace(string(out)) != "ok constmap-lookup" {
 		t.Fatalf("lookup behavior = %q, err %v, want ok constmap-lookup", out, err)
+	}
+}
+func constmapLogosTool(t *testing.T) string {
+	t.Helper()
+	testenv.MustHaveGoBuild(t)
+	logosTool := filepath.Join(filepath.Dir(testenv.GoToolPath(t)), "logos")
+	if runtime.GOOS == "windows" {
+		logosTool += ".exe"
+	}
+	if _, err := os.Stat(logosTool); err != nil {
+		t.Skipf("no logos command beside the go tool: %v", err)
+	}
+	return logosTool
+}
+
+func constmapWriteModule(t *testing.T, dir string, files map[string]string) {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o777); err != nil {
+		t.Fatal(err)
+	}
+	for name, text := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(text), 0o666); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func constmapBuildRun(t *testing.T, dir, exe string, runEnv []string) string {
+	t.Helper()
+	build := testenv.Command(t, constmapLogosTool(t), "build", "-o", exe, ".")
+	build.Dir = dir
+	build.Env = append(os.Environ(), "GOFLAGS=", "GOPROXY=off", "GOTOOLCHAIN=local")
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("logos build: %v\n%s", err, out)
+	}
+	run := testenv.Command(t, filepath.Join(dir, exe))
+	run.Dir = dir
+	run.Env = append(append(os.Environ(), "GOFLAGS=", "GOPROXY=off", "GOTOOLCHAIN=local"), runEnv...)
+	out, err := run.CombinedOutput()
+	if err != nil {
+		t.Fatalf("run %s: %v\n%s", exe, err, out)
+	}
+	return string(out)
+}
+
+const constmapFlatIters = 200000
+
+func constmapFlatSrc(sizes []int) string {
+	var b strings.Builder
+	b.WriteString("package main\n\nimport (\n\t\"fmt\"\n\t\"time\"\n)\n\n")
+	for _, n := range sizes {
+		fmt.Fprintf(&b, "const m%d = map[string]int{", n)
+		for i := range n {
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			fmt.Fprintf(&b, "%q: %d", fmt.Sprintf("k%05d", i), i)
+		}
+		b.WriteString("}\n\n")
+	}
+	fmt.Fprintf(&b, "var sink int\n\nconst iters = %d\n\ntype phase struct {\n\tname string\n\tf    func(int)\n}\n\nfunc phases(keys, miss []string) []phase {\n\treturn []phase{\n", constmapFlatIters)
+	for _, n := range sizes {
+		fmt.Fprintf(&b, "\t\t{\"hit%d\", func(int) {\n\t\t\tfor i := range iters {\n\t\t\t\tif v, ok := m%d[keys[i&%d]]; ok {\n\t\t\t\t\tsink += v\n\t\t\t\t}\n\t\t\t}\n\t\t}},\n", n, n, n-1)
+		fmt.Fprintf(&b, "\t\t{\"miss%d\", func(int) {\n\t\t\tfor i := range iters {\n\t\t\t\tif v, ok := m%d[miss[i&%d]]; ok {\n\t\t\t\t\tsink += v\n\t\t\t\t}\n\t\t\t}\n\t\t}},\n", n, n, n-1)
+	}
+	b.WriteString("\t}\n}\n\nfunc main() {\n\tkeys := make([]string, 16384)\n\tmiss := make([]string, 16384)\n\tfor i := range keys {\n\t\tkeys[i] = fmt.Sprintf(\"k%%05d\", i)\n\t\tmiss[i] = fmt.Sprintf(\"z%%05d\", i)\n\t}\n\tphases := phases(keys, miss)\n\tbest := make([]int64, len(phases))\n\tfor i := range best {\n\t\tbest[i] = int64(1 << 62)\n\t}\n\tfor range 9 {\n\t\tfor i, p := range phases {\n\t\t\tt0 := time.Now()\n\t\t\tp.f(iters)\n\t\t\tif ns := time.Since(t0).Nanoseconds(); ns < best[i] {\n\t\t\t\tbest[i] = ns\n\t\t\t}\n\t\t}\n\t}\n\tfor i, p := range phases {\n\t\tfmt.Println(p.name, best[i])\n\t}\n\t_ = sink\n}\n")
+	return b.String()
+}
+
+func TestConstmapLookupCostFlat(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a loGo/s program")
+	}
+	sizes := []int{16, 1024, 16384}
+	dir := t.TempDir()
+	constmapWriteModule(t, dir, map[string]string{
+		"go.mod":   "module flatcost\n\ngo 1.27\n",
+		"main.lgo": constmapFlatSrc(sizes),
+	})
+	out := constmapBuildRun(t, dir, "flatcost.exe", nil)
+	totals := map[string]int64{}
+	for line := range strings.SplitSeq(strings.TrimSpace(out), "\n") {
+		f := strings.Fields(line)
+		if len(f) != 2 {
+			t.Fatalf("flat-cost program printed %q", line)
+		}
+		n, err := strconv.ParseInt(f[1], 10, 64)
+		if err != nil {
+			t.Fatalf("flat-cost program printed %q", line)
+		}
+		totals[f[0]] = n
+	}
+	for _, kind := range []string{"hit", "miss"} {
+		lo, hi := int64(1<<62), int64(0)
+		for _, n := range sizes {
+			v, ok := totals[fmt.Sprintf("%s%d", kind, n)]
+			if !ok {
+				t.Fatalf("flat-cost program lacks %s%d output: %q", kind, n, out)
+			}
+			lo = min(lo, v)
+			hi = max(hi, v)
+		}
+		if ratio := float64(hi) / float64(lo); ratio > 3 {
+			t.Fatalf("%s lookup cost grows with key count: %s16=%dns %s1024=%dns %s16384=%dns over %d lookups (ratio %.2f > 3); a logarithmic fallback must not satisfy the contract",
+				kind, kind, totals[kind+"16"], kind, totals[kind+"1024"], kind, totals[kind+"16384"], constmapFlatIters, ratio)
+		}
+	}
+}
+
+func constmapHeapCtlSrc() string {
+	return "package main\n\nimport (\n\t\"fmt\"\n\t\"runtime\"\n)\n\nfunc main() {\n\tvar ms runtime.MemStats\n\truntime.ReadMemStats(&ms)\n\tfmt.Println(ms.HeapAlloc)\n}\n"
+}
+
+func constmapHeapBigSrc(n int) string {
+	var b strings.Builder
+	b.WriteString("package main\n\nimport (\n\t\"fmt\"\n\t\"runtime\"\n)\n\nconst big = map[string]int{")
+	for i := range n {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		fmt.Fprintf(&b, "%q: %d", fmt.Sprintf("k%05d", i), i)
+	}
+	b.WriteString("}\n\nfunc main() {\n\tvar ms runtime.MemStats\n\truntime.ReadMemStats(&ms)\n\tfmt.Println(ms.HeapAlloc)\n\t_ = big[\"k00031\"]\n}\n")
+	return b.String()
+}
+
+func TestConstmapInitNoHeap(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds loGo/s programs")
+	}
+	root := t.TempDir()
+	ctlDir := filepath.Join(root, "ctl")
+	bigDir := filepath.Join(root, "big")
+	constmapWriteModule(t, ctlDir, map[string]string{
+		"go.mod":   "module ctl\n\ngo 1.27\n",
+		"main.lgo": constmapHeapCtlSrc(),
+	})
+	constmapWriteModule(t, bigDir, map[string]string{
+		"go.mod":   "module bigmap\n\ngo 1.27\n",
+		"main.lgo": constmapHeapBigSrc(20000),
+	})
+	minHeap := func(dir string) uint64 {
+		lo := uint64(1 << 63)
+		for range 5 {
+			out := constmapBuildRun(t, dir, "heap.exe", []string{"GOGC=off"})
+			v, err := strconv.ParseUint(strings.TrimSpace(out), 10, 64)
+			if err != nil {
+				t.Fatalf("heap program printed %q", out)
+			}
+			lo = min(lo, v)
+		}
+		return lo
+	}
+	ctl, big := minHeap(ctlDir), minHeap(bigDir)
+	if big > ctl+512*1024 {
+		t.Fatalf("package init of a 20000-key const map added %d heap bytes (big %d, control %d); the table must sit in read-only data and init must add no heap bytes", big-ctl, big, ctl)
 	}
 }
