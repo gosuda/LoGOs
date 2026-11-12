@@ -5,6 +5,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"runtime"
 	"sync"
 )
 
@@ -56,6 +57,7 @@ func r138Sum(b []byte) int {
 }
 
 func main() {
+	runtime.GOMAXPROCS(1)
 	var p sync.Pool
 	r138Put(&p, 64)
 	clob := r138Clobber(64)
