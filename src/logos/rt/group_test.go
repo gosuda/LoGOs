@@ -17,7 +17,6 @@ import (
 	"sync/atomic"
 	"testing"
 	"testing/synctest"
-	"time"
 )
 
 var (
@@ -115,34 +114,10 @@ func TestGroupCancelThroughGroupContext(t *testing.T) {
 	})
 }
 
-// M8-S1 attack: limit = 2 never runs 3 children at once. Five children
-// record the peak concurrency; the peak must stay at or below 2.
 func TestGroupLimitBoundsConcurrency(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		g, _ := NewGroup(t.Context(), 2)
-		var cur, peak atomic.Int32
-		for range 5 {
-			g.Go(func(ctx context.Context) error {
-				n := cur.Add(1)
-				for {
-					p := peak.Load()
-					if n <= p || peak.CompareAndSwap(p, n) {
-						break
-					}
-				}
-				time.Sleep(time.Millisecond)
-				cur.Add(-1)
-				return nil
-			})
-		}
-		if err := g.Wait(); err != nil {
-			t.Fatalf("Wait = %v, want nil", err)
-		}
-		if p := peak.Load(); p > 2 {
-			t.Fatalf("peak concurrency = %d, want <= 2", p)
-		}
-		if p := peak.Load(); p < 2 {
-			t.Fatalf("peak concurrency = %d, want 2 (limit not saturated)", p)
+		if got := inFlightWhenQuiet(t, 2, 5); got != 2 {
+			t.Fatalf("children in flight = %d, want 2 (limit saturated, not exceeded)", got)
 		}
 	})
 }
@@ -293,57 +268,44 @@ func TestGroupOutsideGoroutineStaysBlocked(t *testing.T) {
 	})
 }
 
-func holdSlot(cur, peak *atomic.Int32) {
-	n := cur.Add(1)
-	for {
-		p := peak.Load()
-		if n <= p || peak.CompareAndSwap(p, n) {
-			break
-		}
-	}
-	time.Sleep(time.Millisecond)
-	cur.Add(-1)
-}
-
-// M8-S1 attack: limit = 1 serializes the children. The bound must hold
-// at its smallest value, where a `limit > 1` slip leaves the group
-// unbounded.
-func TestGroupLimitOneSerializes(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		g, _ := NewGroup(t.Context(), 1)
-		var cur, peak atomic.Int32
-		for range 3 {
+func inFlightWhenQuiet(t *testing.T, limit, children int) int32 {
+	t.Helper()
+	g, _ := NewGroup(t.Context(), limit)
+	var inFlight atomic.Int32
+	release := make(chan struct{})
+	spawned := make(chan struct{})
+	go func() {
+		defer close(spawned)
+		for range children {
 			g.Go(func(ctx context.Context) error {
-				holdSlot(&cur, &peak)
+				inFlight.Add(1)
+				<-release
 				return nil
 			})
 		}
-		if err := g.Wait(); err != nil {
-			t.Fatalf("Wait = %v, want nil", err)
-		}
-		if p := peak.Load(); p != 1 {
-			t.Fatalf("peak concurrency = %d, want 1", p)
+	}()
+	synctest.Wait()
+	got := inFlight.Load()
+	close(release)
+	<-spawned
+	if err := g.Wait(); err != nil {
+		t.Fatalf("Wait = %v, want nil", err)
+	}
+	return got
+}
+
+func TestGroupLimitOneSerializes(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		if got := inFlightWhenQuiet(t, 1, 3); got != 1 {
+			t.Fatalf("children in flight = %d, want 1", got)
 		}
 	})
 }
 
-// M8-S1 attack: a limit of zero leaves the group unbounded, so all
-// children run at once.
 func TestGroupLimitZeroIsUnbounded(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		g, _ := NewGroup(t.Context(), 0)
-		var cur, peak atomic.Int32
-		for range 3 {
-			g.Go(func(ctx context.Context) error {
-				holdSlot(&cur, &peak)
-				return nil
-			})
-		}
-		if err := g.Wait(); err != nil {
-			t.Fatalf("Wait = %v, want nil", err)
-		}
-		if p := peak.Load(); p != 3 {
-			t.Fatalf("peak concurrency = %d, want 3", p)
+		if got := inFlightWhenQuiet(t, 0, 3); got != 3 {
+			t.Fatalf("children in flight = %d, want 3", got)
 		}
 	})
 }
