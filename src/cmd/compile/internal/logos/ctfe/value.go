@@ -803,15 +803,17 @@ func (e *evaluator) evalElem(fr *frame, el syntax.Expr, elemT *Type) (Value, err
 	if err != nil {
 		return Value{}, err
 	}
-	if elemT != nil {
-		if v.isNil {
-			return e.coerceNil(v, elemT, posOf(el))
-		}
-		if v, err = e.convert(v, elemT, posOf(el)); err != nil {
-			return Value{}, err
-		}
+	return e.convertElem(v, elemT, posOf(el))
+}
+
+func (e *evaluator) convertElem(v Value, t *Type, pos syntax.Pos) (Value, error) {
+	if t == nil {
+		return v, nil
 	}
-	return v, nil
+	if v.isNil {
+		return e.coerceNil(v, t, pos)
+	}
+	return e.convert(v, t, pos)
 }
 
 func (e *evaluator) evalStructLit(fr *frame, lit *syntax.CompositeLit, t *Type) (Value, error) {
@@ -1100,6 +1102,13 @@ func (e *evaluator) indexPlace(fr *frame, ix *syntax.IndexExpr) (place, error) {
 	}
 	if base, ok := syntax.Unparen(ix.X).(*syntax.Name); ok {
 		if bv, found := e.lookup(fr, base.Value); found && bv.mval != nil {
+			var keyT *Type
+			if bv.typ != nil {
+				keyT = bv.typ.Key
+			}
+			if k, err = e.convertElem(k, keyT, posOf(ix.Index)); err != nil {
+				return place{}, err
+			}
 			for i := len(fr.scopes) - 1; i >= 0; i-- {
 				if _, ok := fr.scopes[i][base.Value]; ok {
 					idx := i
