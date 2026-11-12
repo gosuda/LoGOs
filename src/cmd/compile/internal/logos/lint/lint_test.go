@@ -744,6 +744,46 @@ func TestInfiniteRecursionTry(t *testing.T) {
 	expect(t, KindLgo, nil, testSource{"x.lgo", recursionLgoSrc}, finding{"correctness::infinite_recursion", Forbid})
 }
 
+const recursionStageSrc = `package p
+
+import "context"
+
+func rangeStage(ctx context.Context, xs []int) error {
+	for range xs.group(ctx, limit = 2).map(x => x) {
+	}
+	return rangeStage(ctx, xs)
+}
+
+func rangeStageUnordered(ctx context.Context, xs []int) error {
+	for range xs.group(ctx, limit = 2).unordered().map(x => x) {
+	}
+	return rangeStageUnordered(ctx, xs)
+}
+
+func groupBlock(ctx context.Context) error {
+	go group (ctx) {
+		go { println() }
+	}
+	return groupBlock(ctx)
+}
+
+func valueStage(ctx context.Context, xs []int) error { // want
+	ys, err := xs.group(ctx, limit = 2).map(x => x)
+	println(len(ys), err == nil)
+	return valueStage(ctx, xs)
+}
+
+func rangePlain(ctx context.Context, xs []int) error { // want
+	for range xs.map(x => x) {
+	}
+	return rangePlain(ctx, xs)
+}
+`
+
+func TestInfiniteRecursionStageRange(t *testing.T) {
+	expect(t, KindLgo, nil, testSource{"x.lgo", recursionStageSrc}, finding{"correctness::infinite_recursion", Forbid})
+}
+
 const recursionConstSwitchSrc = `package p
 
 func csSel(n int) int { // want

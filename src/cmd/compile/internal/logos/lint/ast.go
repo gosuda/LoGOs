@@ -81,3 +81,17 @@ func onSegment(pass *Pass, call *syntax.CallExpr) bool {
 	}
 	return false
 }
+
+func onStage(pass *Pass, e syntax.Expr) bool {
+	for call := callOf(e); call != nil; {
+		if _, ok := types2.LogosGroupStage(pass.Pkg, pass.Info, call); ok {
+			return true
+		}
+		sel, ok := syntax.Unparen(call.Fun).(*syntax.SelectorExpr)
+		if !ok {
+			return false
+		}
+		call = callOf(sel.X)
+	}
+	return false
+}
