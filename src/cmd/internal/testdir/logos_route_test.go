@@ -10,7 +10,7 @@ import (
 )
 
 func TestLogosUnsupportedActionText(t *testing.T) {
-	ts := test{goFile: "codegen/unsupported_action.lgo", T: t}
+	ts := test{goFile: "run/x.lgo", T: t}
 	err := ts.runLogos(logosCase{action: "rundir", src: []byte("package main\n")})
 	if err == nil {
 		t.Fatal("runLogos on unsupported .lgo action returned nil")
@@ -22,7 +22,7 @@ func TestLogosUnsupportedActionText(t *testing.T) {
 }
 
 func TestRouteLogosHarnessSkipBypass(t *testing.T) {
-	if routeLogosHarness("logos", "codegen/unsupported_action.lgo", "skip", nil) {
+	if routeLogosHarness("logos", "run/x.lgo", "skip", nil) {
 		t.Fatal("routeLogosHarness routed a skip case into the logos harness")
 	}
 	if routeLogosHarness("fixedbugs", "x.go", "rundir", nil) {

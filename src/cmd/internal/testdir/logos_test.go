@@ -1040,7 +1040,7 @@ func TestRouteLogosHarnessScopesToLogos(t *testing.T) {
 	if !routeLogosHarness("logos", "codegen/asm_twin.go", "asmcheck", nil) {
 		t.Fatal("routeLogosHarness did not route a test/logos asmcheck twin")
 	}
-	if !routeLogosHarness("logos", "codegen/unsupported_action.lgo", "rundir", nil) {
+	if !routeLogosHarness("logos", "run/x.lgo", "rundir", nil) {
 		t.Fatal("routeLogosHarness did not route a .lgo rundir case")
 	}
 	if routeLogosHarness("logos", "run/x.go", "skip", nil) {
