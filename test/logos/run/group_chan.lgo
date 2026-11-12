@@ -8,11 +8,16 @@ import (
 	"fmt"
 	"os"
 	"sync/atomic"
+	"time"
 )
 
 var errSib = errors.New("sibling failed")
 
-var defaultRan, defaultLoops atomic.Int32
+var defaultRan, defaultLoops, woke atomic.Int32
+
+func markWoke() {
+	woke.Add(1)
+}
 
 var bad bool
 
@@ -31,27 +36,33 @@ func failSibling() error { return errSib }
 func runGroup(ctx context.Context, ch1, ch2, ch3 chan int) error {
 	go group (ctx) {
 		go {
+			defer markWoke()
 			v := <-ch1
 			_ = v
 		}
 		go {
+			defer markWoke()
 			v, ok := <-ch1
 			_, _ = v, ok
 		}
 		go {
+			defer markWoke()
 			v := 0
 			v = <-ch1
 			_ = v
 		}
 		go {
+			defer markWoke()
 			var v = <-ch1
 			_ = v
 		}
 		go {
+			defer markWoke()
 			var v int = <-ch1
 			_ = v
 		}
 		go {
+			defer markWoke()
 			var v, ok = <-ch1
 			_, _ = v, ok
 		}
@@ -101,7 +112,11 @@ func main() {
 	ch3 := make(chan int)
 	err := runGroup(ctx, ch1, ch2, ch3)
 	check("group-chan-first-error-wins", err == errSib, fmt.Sprint(err), errSib.Error())
-	check("group-chan-join-unblocks-receivers", err != nil, fmt.Sprint(err), "non-nil")
+	deadline := time.Now().Add(30 * time.Second)
+	for woke.Load() < 6 && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	check("group-chan-join-unblocks-receivers", woke.Load() == 6, fmt.Sprint(woke.Load()), "6")
 	check("group-chan-select-default-unchanged", defaultRan.Load() == 1, fmt.Sprint(defaultRan.Load()), "1")
 	check("group-chan-default-loop-completes", defaultLoops.Load() == 40, fmt.Sprint(defaultLoops.Load()), "40")
 	if bad {
