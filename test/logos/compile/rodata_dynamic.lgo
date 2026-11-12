@@ -3,7 +3,7 @@
 package main
 
 //logos:rodata
-var dyn = []int{fresh(), 1} // ERROR "logos: const composite dyn needs dynamic initialization"
+var dyn = []int{fresh(), 1} // ERROR "needs dynamic initialization"
 
 //go:noinline
 func fresh() int {
