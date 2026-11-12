@@ -206,7 +206,8 @@ func (c *discardCheck) benignCall(call *syntax.CallExpr) bool {
 	case "fmt.Print", "fmt.Printf", "fmt.Println":
 		return true
 	case "fmt.Fprint", "fmt.Fprintf", "fmt.Fprintln":
-		return len(call.ArgList) > 0 && isStdoutOrStderr(c.pass, call.ArgList[0])
+		return len(call.ArgList) > 0 && (isStdoutOrStderr(c.pass, call.ArgList[0]) ||
+			isBufferOrBuilder(c.pass, call.ArgList[0]))
 	default:
 		if strings.HasPrefix(name, "(*bytes.Buffer).Write") ||
 			strings.HasPrefix(name, "(*strings.Builder).Write") {
@@ -236,4 +237,17 @@ func isStdoutOrStderr(pass *Pass, w syntax.Expr) bool {
 		return v.Name() == "Stdout" || v.Name() == "Stderr"
 	}
 	return false
+}
+
+func isBufferOrBuilder(pass *Pass, w syntax.Expr) bool {
+	ptr, ok := underOrNil(TypeOf(w)).(*types2.Pointer)
+	if !ok {
+		return false
+	}
+	named, ok := ptr.Elem().(*types2.Named)
+	if !ok || named.Obj().Pkg() == nil {
+		return false
+	}
+	name := named.Obj().Pkg().Path() + "." + named.Obj().Name()
+	return name == "bytes.Buffer" || name == "strings.Builder"
 }

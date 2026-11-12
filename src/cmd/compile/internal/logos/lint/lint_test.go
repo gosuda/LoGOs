@@ -370,8 +370,8 @@ func a() {
 	b.WriteByte('x')
 	var sb strings.Builder
 	sb.WriteString("x")
-	fmt.Fprintf(&b, "x") // want
-	fmt.Fprintf(&sb, "x") // want
+	fmt.Fprintf(&b, "x")
+	fmt.Fprintf(&sb, "x")
 	err := f()
 	_ = err
 	defer f() // want

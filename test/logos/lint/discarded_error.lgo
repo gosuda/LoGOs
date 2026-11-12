@@ -115,9 +115,9 @@ func written() {
 
 func printedToBuffer() {
 	var b bytes.Buffer
-	fmt.Fprintf(&b, "x") // ERROR "discarded_error"
+	fmt.Fprintf(&b, "x")
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "x") // ERROR "discarded_error"
+	fmt.Fprintf(&sb, "x")
 }
 
 func handled() {
