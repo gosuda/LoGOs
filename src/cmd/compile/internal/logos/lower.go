@@ -825,6 +825,11 @@ func namedValue(name *syntax.Name) string {
 
 // run prepares and lowers one function body.
 func (fc *funcLower) run() {
+	fc.lower()
+	fc.flushHoists()
+}
+
+func (fc *funcLower) lower() {
 	fc.lowerYield()
 	fc.detectCleanups()
 	if fc.hasDeferTry || fc.hasErrdefer || fc.hasScopeDefer {
@@ -836,31 +841,37 @@ func (fc *funcLower) run() {
 	fc.lowerScopeDefers()
 	fc.lowerConstIf()
 	fc.body.List = fc.lowerList(fc.body.List)
-	fc.flushHoists()
 }
 
 // detectCleanups records whether the body holds a defer? or an errdefer
-// outside nested function literals.
+// outside nested function literals and lambdas.
 func (fc *funcLower) detectCleanups() {
-	syntax.Inspect(fc.body, func(n syntax.Node) bool {
+	fc.hasDeferTry, fc.hasErrdefer, fc.hasScopeDefer = cleanupsIn(fc.body)
+}
+
+func cleanupsIn(body *syntax.BlockStmt) (deferTry, errdefer, scopeDefer bool) {
+	syntax.Inspect(body, func(n syntax.Node) bool {
 		switch n := n.(type) {
 		case *syntax.FuncLit:
-			return n.Body == fc.body
+			return n.Body == body
 		case *syntax.GroupChild:
-			return n.Body == fc.body
+			return n.Body == body
+		case *syntax.LambdaExpr:
+			return false
 		case *syntax.CallStmt:
 			if n.Tok == syntax.Defer {
 				if _, ok := syntax.Unparen(n.Call).(*syntax.TryExpr); ok {
-					fc.hasDeferTry = true
+					deferTry = true
 				}
 			}
 		case *syntax.ErrdeferStmt:
-			fc.hasErrdefer = true
+			errdefer = true
 		case *syntax.ScopeDeferStmt:
-			fc.hasScopeDefer = true
+			scopeDefer = true
 		}
 		return true
 	})
+	return
 }
 
 // ensureNamed gives every result an assignable name when a defer? or an

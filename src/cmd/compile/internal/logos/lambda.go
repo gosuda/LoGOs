@@ -85,7 +85,7 @@ func (fl *fileLower) lowerLambdaExpr(lam *syntax.LambdaExpr) *syntax.FuncLit {
 	var hoisted string
 	if block, ok := lam.Body.(*syntax.BlockStmt); ok {
 		var ok2 bool
-		resultsText, hoisted, ok2 = fl.lowerLambdaScopeDefers(lam, pos, sig, block, cat(params...).s, resultsText)
+		resultsText, hoisted, ok2 = fl.lowerLambdaFrame(pos, sig, block, cat(params...).s, resultsText)
 		if !ok2 {
 			return nil
 		}
@@ -224,11 +224,9 @@ func (fl *fileLower) lambdaTryBody(sig *types2.Signature, pos syntax.Pos, t *syn
 	return blockOf(pos, []syntax.Stmt{as, branch, ret}), cat(parts...)
 }
 
-func (fl *fileLower) lowerLambdaScopeDefers(lam *syntax.LambdaExpr, pos syntax.Pos, sig *types2.Signature, block *syntax.BlockStmt, paramText, resultsText string) (string, string, bool) {
-	if !hasDirectScopeDefer(block) {
-		return resultsText, "", true
-	}
-	if sig.Results().Len() > 0 {
+func (fl *fileLower) lowerLambdaFrame(pos syntax.Pos, sig *types2.Signature, block *syntax.BlockStmt, paramText, resultsText string) (string, string, bool) {
+	deferTry, errdefer, scopeDefer := cleanupsIn(block)
+	if (deferTry || errdefer || scopeDefer) && sig.Results().Len() > 0 {
 		named, ok := fl.lambdaNamedResults(pos, sig)
 		if !ok {
 			return "", "", false
@@ -244,28 +242,8 @@ func (fl *fileLower) lowerLambdaScopeDefers(lam *syntax.LambdaExpr, pos syntax.P
 		return "", "", false
 	}
 	fc := newFuncLower(fl, functype, sig, block)
-	fc.detectCleanups()
-	if fc.hasScopeDefer {
-		fc.lowerScopeDefers()
-	}
+	fc.lower()
 	return resultsText, fc.prependHoists(), true
-}
-
-func hasDirectScopeDefer(block *syntax.BlockStmt) bool {
-	found := false
-	syntax.Inspect(block, func(n syntax.Node) bool {
-		switch n.(type) {
-		case *syntax.FuncLit:
-			return false
-		case *syntax.LambdaExpr:
-			return false
-		case *syntax.ScopeDeferStmt:
-			found = true
-			return false
-		}
-		return !found
-	})
-	return found
 }
 
 func (fl *fileLower) lambdaNamedResults(pos syntax.Pos, sig *types2.Signature) (string, bool) {
