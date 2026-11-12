@@ -1,0 +1,9 @@
+ok ptr
+ok named
+ok slice
+ok map
+ok func
+ok try-ptr
+ok try-slice
+ok try-map
+ok try-func

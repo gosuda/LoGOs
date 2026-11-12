@@ -1,0 +1,196 @@
+// run
+
+package main
+
+import (
+	"errors"
+	"fmt"
+	"os"
+	"slices"
+)
+
+var failed bool
+
+func check(name string, cond bool, got, want any) {
+	if !cond {
+		failed = true
+		fmt.Println("FAIL", name+":", "got", got, "want", want)
+		return
+	}
+	fmt.Println("ok", name)
+}
+
+func eq(a, b []int) bool { return slices.Equal(a, b) }
+
+type pc struct {
+	id int
+}
+
+type pp *pc
+
+var errBad = errors.New("bad two")
+
+func mkp(i int) *pc { return &pc{id: i} }
+
+func mkpp(i int) pp { return pp(&pc{id: i}) }
+
+func mks(i int) []int { return []int{i, i} }
+
+func mkm(i int) map[int]int { return map[int]int{0: i} }
+
+func mkf(i int) func() int { return func() int { return i } }
+
+func tryMkp(i int) (*pc, error) { return mkp(i), nil }
+
+func tryMks(i int) ([]int, error) { return mks(i), nil }
+
+func tryMkm(i int) (map[int]int, error) { return mkm(i), nil }
+
+func tryMkf(i int) (func() int, error) { return mkf(i), nil }
+
+func xs3() []int { return []int{1, 2, 3} }
+
+func xs0() []int { return []int{} }
+
+func probePtr(v *pc?) int { return v?.id ?? -1 }
+
+func probeNamed(v pp?) int { return (v ?? mkpp(-1)).id }
+
+func probeSlice(v []int?) int { return (v ?? []int{-1})[0] }
+
+func probeMap(v map[int]int?) int { return (v ?? map[int]int{0: -1})[0] ?? -1 }
+
+func probeFunc(v (func() int)?) int { return (v ?? func() int { return -1 })() }
+
+func wantTerminals() []int { return []int{2, -1, 1, -1, 3, -1, 2, -1} }
+
+func ptrTerminals() []int {
+	a := xs3().map(i => mkp(i)).find(p => p.id == 2)
+	b := xs3().map(i => mkp(i)).find(p => p.id == 99)
+	c := xs3().map(i => mkp(i)).first()
+	d := xs0().map(i => mkp(i)).first()
+	e := xs3().map(i => mkp(i)).last()
+	f := xs0().map(i => mkp(i)).last()
+	g := xs3().map(i => mkp(i)).get(1)
+	h := xs3().map(i => mkp(i)).get(9)
+	return []int{probePtr(a), probePtr(b), probePtr(c), probePtr(d), probePtr(e), probePtr(f), probePtr(g), probePtr(h)}
+}
+
+func namedTerminals() []int {
+	a := xs3().map(i => mkpp(i)).find(p => p.id == 2)
+	b := xs3().map(i => mkpp(i)).find(p => p.id == 99)
+	c := xs3().map(i => mkpp(i)).first()
+	d := xs0().map(i => mkpp(i)).first()
+	e := xs3().map(i => mkpp(i)).last()
+	f := xs0().map(i => mkpp(i)).last()
+	g := xs3().map(i => mkpp(i)).get(1)
+	h := xs3().map(i => mkpp(i)).get(9)
+	return []int{probeNamed(a), probeNamed(b), probeNamed(c), probeNamed(d), probeNamed(e), probeNamed(f), probeNamed(g), probeNamed(h)}
+}
+
+func sliceTerminals() []int {
+	a := xs3().map(i => mks(i)).find(s => s[0] == 2)
+	b := xs3().map(i => mks(i)).find(s => s[0] == 99)
+	c := xs3().map(i => mks(i)).first()
+	d := xs0().map(i => mks(i)).first()
+	e := xs3().map(i => mks(i)).last()
+	f := xs0().map(i => mks(i)).last()
+	g := xs3().map(i => mks(i)).get(1)
+	h := xs3().map(i => mks(i)).get(9)
+	return []int{probeSlice(a), probeSlice(b), probeSlice(c), probeSlice(d), probeSlice(e), probeSlice(f), probeSlice(g), probeSlice(h)}
+}
+
+func mapTerminals() []int {
+	a := xs3().map(i => mkm(i)).find(m => (m[0] ?? -1) == 2)
+	b := xs3().map(i => mkm(i)).find(m => (m[0] ?? -1) == 99)
+	c := xs3().map(i => mkm(i)).first()
+	d := xs0().map(i => mkm(i)).first()
+	e := xs3().map(i => mkm(i)).last()
+	f := xs0().map(i => mkm(i)).last()
+	g := xs3().map(i => mkm(i)).get(1)
+	h := xs3().map(i => mkm(i)).get(9)
+	return []int{probeMap(a), probeMap(b), probeMap(c), probeMap(d), probeMap(e), probeMap(f), probeMap(g), probeMap(h)}
+}
+
+func funcTerminals() []int {
+	a := xs3().map(i => mkf(i)).find(f => f() == 2)
+	b := xs3().map(i => mkf(i)).find(f => f() == 99)
+	c := xs3().map(i => mkf(i)).first()
+	d := xs0().map(i => mkf(i)).first()
+	e := xs3().map(i => mkf(i)).last()
+	f := xs0().map(i => mkf(i)).last()
+	g := xs3().map(i => mkf(i)).get(1)
+	h := xs3().map(i => mkf(i)).get(9)
+	return []int{probeFunc(a), probeFunc(b), probeFunc(c), probeFunc(d), probeFunc(e), probeFunc(f), probeFunc(g), probeFunc(h)}
+}
+
+func tryPtrTerminals() ([]int, error) {
+	a := xs3().map(i => tryMkp(i)?).find(p => p.id == 2)
+	b := xs3().map(i => tryMkp(i)?).find(p => p.id == 99)
+	c := xs3().map(i => tryMkp(i)?).first()
+	d := xs0().map(i => tryMkp(i)?).first()
+	e := xs3().map(i => tryMkp(i)?).last()
+	f := xs0().map(i => tryMkp(i)?).last()
+	g := xs3().map(i => tryMkp(i)?).get(1)
+	h := xs3().map(i => tryMkp(i)?).get(9)
+	return []int{probePtr(a), probePtr(b), probePtr(c), probePtr(d), probePtr(e), probePtr(f), probePtr(g), probePtr(h)}, nil
+}
+
+func trySliceTerminals() ([]int, error) {
+	a := xs3().map(i => tryMks(i)?).find(s => s[0] == 2)
+	b := xs3().map(i => tryMks(i)?).find(s => s[0] == 99)
+	c := xs3().map(i => tryMks(i)?).first()
+	d := xs0().map(i => tryMks(i)?).first()
+	e := xs3().map(i => tryMks(i)?).last()
+	f := xs0().map(i => tryMks(i)?).last()
+	g := xs3().map(i => tryMks(i)?).get(1)
+	h := xs3().map(i => tryMks(i)?).get(9)
+	return []int{probeSlice(a), probeSlice(b), probeSlice(c), probeSlice(d), probeSlice(e), probeSlice(f), probeSlice(g), probeSlice(h)}, nil
+}
+
+func tryMapTerminals() ([]int, error) {
+	a := xs3().map(i => tryMkm(i)?).find(m => (m[0] ?? -1) == 2)
+	b := xs3().map(i => tryMkm(i)?).find(m => (m[0] ?? -1) == 99)
+	c := xs3().map(i => tryMkm(i)?).first()
+	d := xs0().map(i => tryMkm(i)?).first()
+	e := xs3().map(i => tryMkm(i)?).last()
+	f := xs0().map(i => tryMkm(i)?).last()
+	g := xs3().map(i => tryMkm(i)?).get(1)
+	h := xs3().map(i => tryMkm(i)?).get(9)
+	return []int{probeMap(a), probeMap(b), probeMap(c), probeMap(d), probeMap(e), probeMap(f), probeMap(g), probeMap(h)}, nil
+}
+
+func tryFuncTerminals() ([]int, error) {
+	a := xs3().map(i => tryMkf(i)?).find(f => f() == 2)
+	b := xs3().map(i => tryMkf(i)?).find(f => f() == 99)
+	c := xs3().map(i => tryMkf(i)?).first()
+	d := xs0().map(i => tryMkf(i)?).first()
+	e := xs3().map(i => tryMkf(i)?).last()
+	f := xs0().map(i => tryMkf(i)?).last()
+	g := xs3().map(i => tryMkf(i)?).get(1)
+	h := xs3().map(i => tryMkf(i)?).get(9)
+	return []int{probeFunc(a), probeFunc(b), probeFunc(c), probeFunc(d), probeFunc(e), probeFunc(f), probeFunc(g), probeFunc(h)}, nil
+}
+
+func drvTerminals(name string, got []int, err error) {
+	check(name, err == nil && eq(got, wantTerminals()), got, wantTerminals())
+}
+
+func main() {
+	drvTerminals("ptr", ptrTerminals(), nil)
+	drvTerminals("named", namedTerminals(), nil)
+	drvTerminals("slice", sliceTerminals(), nil)
+	drvTerminals("map", mapTerminals(), nil)
+	drvTerminals("func", funcTerminals(), nil)
+	got, err := tryPtrTerminals()
+	drvTerminals("try-ptr", got, err)
+	got, err = trySliceTerminals()
+	drvTerminals("try-slice", got, err)
+	got, err = tryMapTerminals()
+	drvTerminals("try-map", got, err)
+	got, err = tryFuncTerminals()
+	drvTerminals("try-func", got, err)
+	if failed {
+		os.Exit(1)
+	}
+}

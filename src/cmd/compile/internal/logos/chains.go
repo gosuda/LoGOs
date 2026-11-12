@@ -1313,12 +1313,23 @@ func (ce *chainEmit) findLines(p, cur string) []string {
 	return []string{fmt.Sprintf("if %s(%s) { %sreturn %s%s }", fname, cur, ce.handLast(p), ce.someText(p, cur), ce.rsuf())}
 }
 
+func (ce *chainEmit) bareOption() bool {
+	o := ce.cg.fl.asOptionThroughConst(ce.resultT)
+	return o != nil && keepMapRead(o.Elem)
+}
+
 func (ce *chainEmit) someText(p, cur string) string {
+	if ce.bareOption() {
+		return cur
+	}
 	ce.cg.fl.needRT = true
 	return fmt.Sprintf("_logos_rt.Option[%s]{Value: %s, Present: true}", ce.outElem, cur)
 }
 
 func (ce *chainEmit) noneText(p string) string {
+	if ce.bareOption() {
+		return "nil"
+	}
 	ce.cg.fl.needRT = true
 	return fmt.Sprintf("_logos_rt.Option[%s]{}", ce.outElem)
 }
