@@ -444,6 +444,8 @@ func (fl *fileLower) emitComposite(info *compositeInfo, pos syntax.Pos) bool {
 	return fl.emitCompositeBuilder(info, pos) && fl.emitCompositeRO(info, pos)
 }
 
+const compositeIndexConstraint = "~int | ~int8 | ~int16 | ~int32 | ~int64 | ~uint | ~uint8 | ~uint16 | ~uint32 | ~uint64 | ~uintptr"
+
 func (fl *fileLower) emitCompositeFamily(fam *compositeFamily, pos syntax.Pos) {
 	indexes := slices.Sorted(maps.Keys(fam.members))
 	first := fam.members[indexes[0]]
@@ -451,11 +453,11 @@ func (fl *fileLower) emitCompositeFamily(fam *compositeFamily, pos syntax.Pos) {
 	kT := fl.mustSpell(mmt.Key(), pos)
 	vT := fl.mustSpell(mmt.Elem(), pos)
 	var b strings.Builder
-	fmt.Fprintf(&b, "func %s_lookup(_logos_i int, _logos_k %s) (%s, bool) {\n\tswitch _logos_i {\n", fam.name, kT, vT)
+	fmt.Fprintf(&b, "func %s_lookup[_logos_I %s](_logos_i _logos_I, _logos_k %s) (%s, bool) {\n\tvar _logos_n [%d]struct{}\n\t_ = _logos_n[_logos_i]\n\tswitch int(_logos_i) {\n", fam.name, compositeIndexConstraint, kT, vT, fam.length)
 	for _, i := range indexes {
 		fmt.Fprintf(&b, "\tcase %d:\n\t\treturn %s(_logos_k)\n", i, fam.members[i].gen.lookupName())
 	}
-	fmt.Fprintf(&b, "\t}\n\tvar _logos_n [%d]struct{}\n\t_ = _logos_n[_logos_i]\n\tvar _logos_zero %s\n\treturn _logos_zero, false\n}\n", fam.length, vT)
+	fmt.Fprintf(&b, "\t}\n\tvar _logos_zero %s\n\treturn _logos_zero, false\n}\n", vT)
 	fl.constDecls = append(fl.constDecls, parseConstMapDecls(b.String(), pos)...)
 	fl.constText += "\n" + b.String()
 }
