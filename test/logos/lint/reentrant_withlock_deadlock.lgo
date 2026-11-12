@@ -740,3 +740,74 @@ func passLiteralToUnknownFunction() {
 		})
 	})
 }
+
+func relockValue(x int) int {
+	global.WithLock(func(n *int) { *n++ })
+	return x
+}
+
+func lockOtherValue(x int) int {
+	other.WithLock(func(n *int) { *n++ })
+	return x
+}
+
+func relockPicked(x int) bool {
+	global.WithLock(func(n *int) { *n++ })
+	return true
+}
+
+func (c *Counter) relockEach(x int) int {
+	c.mu.WithLock(func(n *int) { *n++ })
+	return x
+}
+
+func chainNamedFunctionRelock(xs []int) {
+	global.WithLock(func(n *int) {
+		_ = xs.map(relockValue) // ERROR "\[concurrency::reentrant_withlock_deadlock\]"
+	})
+}
+
+func chainMethodValueRelock(c *Counter, xs []int) {
+	c.mu.WithLock(func(n *int) {
+		_ = xs.map(c.relockEach) // ERROR "\[concurrency::reentrant_withlock_deadlock\]"
+	})
+}
+
+func chainStoredLiteralRelock(xs []int) {
+	f := func(x int) int {
+		global.WithLock(func(m *int) { *m++ }) // ERROR "\[concurrency::reentrant_withlock_deadlock\]"
+		return x
+	}
+	global.WithLock(func(n *int) {
+		_ = xs.map(f)
+	})
+}
+
+func segmentNamedFunctionRelock(ctx context.Context, xs []int) {
+	global.WithLock(func(n *int) {
+		_, err := xs.group(ctx, limit = 2).map(relockValue) // ERROR "\[concurrency::reentrant_withlock_deadlock\]"
+		println(err == nil)
+	})
+}
+
+func passChainNamedFunctionOtherLock(xs []int) {
+	global.WithLock(func(n *int) {
+		_ = xs.map(lockOtherValue)
+	})
+}
+
+func passChainMethodValueOtherReceiver(c, d *Counter, xs []int) {
+	c.mu.WithLock(func(n *int) {
+		_ = xs.map(d.relockEach)
+	})
+}
+
+func passChainNamedFunctionOutsideCallback(xs []int) {
+	_ = xs.map(relockValue)
+}
+
+func passNamedFunctionToUnknownMethod(p picker) {
+	global.WithLock(func(n *int) {
+		_ = p.filter(relockPicked)
+	})
+}

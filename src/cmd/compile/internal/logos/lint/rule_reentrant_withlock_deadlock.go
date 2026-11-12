@@ -20,7 +20,8 @@ const logosSyncPath = "logos/sync"
 // expression, which blocks forever on the mutex the outer call holds. The
 // inner call counts when it appears directly in the callback, in the body
 // of a directly invoked or deferred function literal, in a lambda or
-// function literal argument of a chain method call (a plain chain runs it
+// function literal argument of a chain method call or a named function,
+// method value, or stored literal passed to one (a plain chain runs it
 // in place, and the stage of a group chain joins its children before the
 // call returns), or anywhere in the synchronous call graph of the
 // same-package functions the callback calls, at any depth. Each
@@ -116,22 +117,24 @@ type lockCheck struct {
 	indexIDs     map[types2.Object]string
 	keyPathLimit int
 	reported     map[*syntax.CallExpr]bool
+	valueCalls   map[syntax.Expr]*syntax.CallExpr
 }
 
 // checkReentrantWithLock is the Check of reentrantWithLockDeadlock.
 func checkReentrantWithLock(pass *Pass) {
 	c := &lockCheck{
-		pass:      pass,
-		calls:     make(map[*syntax.CallExpr]lockCall),
-		callbacks: make(map[syntax.Node]bool),
-		decls:     make(map[*types2.Func]*syntax.FuncDecl),
-		declFiles: make(map[*syntax.FuncDecl]*syntax.File),
-		summaries: make(map[*types2.Func]*lockSummary),
-		callers:   make(map[*types2.Func][]lockEdge),
-		cbCallers: make(map[*types2.Func][]lockCallbackEdge),
-		fileOf:    make(map[*syntax.CallExpr]*syntax.File),
-		asyncCall: make(map[*syntax.CallExpr]bool),
-		reported:  make(map[*syntax.CallExpr]bool),
+		pass:       pass,
+		calls:      make(map[*syntax.CallExpr]lockCall),
+		callbacks:  make(map[syntax.Node]bool),
+		decls:      make(map[*types2.Func]*syntax.FuncDecl),
+		declFiles:  make(map[*syntax.FuncDecl]*syntax.File),
+		summaries:  make(map[*types2.Func]*lockSummary),
+		callers:    make(map[*types2.Func][]lockEdge),
+		cbCallers:  make(map[*types2.Func][]lockCallbackEdge),
+		fileOf:     make(map[*syntax.CallExpr]*syntax.File),
+		asyncCall:  make(map[*syntax.CallExpr]bool),
+		reported:   make(map[*syntax.CallExpr]bool),
+		valueCalls: make(map[syntax.Expr]*syntax.CallExpr),
 	}
 	for _, f := range pass.Files {
 		c.markAsync(f)
@@ -440,6 +443,22 @@ func (c *lockCheck) callbackTarget(arg syntax.Expr) (*types2.Func, syntax.Expr) 
 	return nil, nil
 }
 
+func (c *lockCheck) valueCall(arg syntax.Expr) *syntax.CallExpr {
+	arg = syntax.Unparen(arg)
+	if call, ok := c.valueCalls[arg]; ok {
+		return call
+	}
+	var call *syntax.CallExpr
+	if fn, _ := c.callbackTarget(arg); fn != nil {
+		if _, ok := c.decls[origin(fn)]; ok {
+			call = &syntax.CallExpr{Fun: arg}
+			call.SetPos(arg.Pos())
+		}
+	}
+	c.valueCalls[arg] = call
+	return call
+}
+
 // callbackBody returns the body of a function literal or a lambda, or nil.
 func callbackBody(e syntax.Expr) syntax.Node {
 	switch f := syntax.Unparen(e).(type) {
@@ -520,6 +539,7 @@ func (v *syncVisitor) Visit(n syntax.Node) syntax.Visitor {
 		for _, fn := range chainFuncs(v.c.pass, n) {
 			v.funLit[fn] = true
 		}
+		v.walkChainValues(n)
 		v.walkStoredCall(n)
 		if v.onCall != nil {
 			v.onCall(n)
@@ -542,14 +562,30 @@ func (v *syncVisitor) visitAsyncOperands(call *syntax.CallExpr) {
 	}
 }
 
+func (v *syncVisitor) walkChainValues(call *syntax.CallExpr) {
+	if !isChainCall(v.c.pass, call) {
+		return
+	}
+	for _, arg := range call.ArgList {
+		if name, ok := syntax.Unparen(arg).(*syntax.Name); ok {
+			v.walkStoredName(name)
+		}
+		if vc := v.c.valueCall(arg); vc != nil && v.onCall != nil {
+			v.onCall(vc)
+		}
+	}
+}
+
 func (v *syncVisitor) walkStoredCall(call *syntax.CallExpr) {
 	if immediateLiteral(call.Fun) != nil {
 		return
 	}
-	name, ok := syntax.Unparen(call.Fun).(*syntax.Name)
-	if !ok {
-		return
+	if name, ok := syntax.Unparen(call.Fun).(*syntax.Name); ok {
+		v.walkStoredName(name)
 	}
+}
+
+func (v *syncVisitor) walkStoredName(name *syntax.Name) {
 	obj, ok := v.c.pass.Info.Uses[name]
 	if !ok {
 		return
