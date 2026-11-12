@@ -119,6 +119,11 @@ func TestMixedStructsKeepGeneratedMethods(t *testing.T) {
 			t.Fatalf("mixed struct %T lost its generated methods", v)
 		}
 	}
+	for _, v := range []any{MixMirror{}, &MixMirror{}, NumberMixMirror{}, &NumberMixMirror{}} {
+		if hasGeneratedMethods(v) {
+			t.Fatalf("reflective mirror %T has generated methods", v)
+		}
+	}
 }
 
 func TestUnmarshalFallbackDeliversTheSameMethodInput(t *testing.T) {
@@ -144,8 +149,10 @@ func TestUnmarshalFallbackDeliversTheSameMethodInput(t *testing.T) {
 		t.Fatalf("user unmarshalers ran %d (static) and %d (reflective) times: %q vs %q",
 			len(staticInputs), len(reflectiveInputs), staticInputs, reflectiveInputs)
 	}
-	if staticInputs[0] != reflectiveInputs[0] || staticInputs[3] != reflectiveInputs[3] {
-		t.Fatalf("method input diverges from the reflective path: %q vs %q", staticInputs, reflectiveInputs)
+	for i := range staticInputs {
+		if staticInputs[i] != reflectiveInputs[i] {
+			t.Fatalf("method input %d diverges from the reflective path: %q vs %q", i, staticInputs, reflectiveInputs)
+		}
 	}
 	if staticInputs[3] != `"45"` {
 		t.Fatalf("a bare field must deliver its raw token: %q", staticInputs)
