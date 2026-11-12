@@ -55,7 +55,7 @@ func isErrorType(t types2.Type) bool {
 }
 
 func segmentFuncs(pass *Pass, call *syntax.CallExpr) []syntax.Expr {
-	if !onSegment(pass, call) {
+	if stageOf(pass, call) == nil {
 		return nil
 	}
 	return funcArgs(call)
@@ -80,18 +80,23 @@ func funcArgs(call *syntax.CallExpr) []syntax.Expr {
 	return fns
 }
 
-func onSegment(pass *Pass, call *syntax.CallExpr) bool {
+func stageOf(pass *Pass, call *syntax.CallExpr) *syntax.CallExpr {
 	for cur := call; isSegmentCall(cur); {
 		recv := callOf(syntax.Unparen(cur.Fun).(*syntax.SelectorExpr).X)
 		if recv == nil {
-			return false
+			return nil
 		}
 		if _, ok := types2.LogosGroupStage(pass.Pkg, pass.Info, recv); ok {
-			return true
+			return recv
 		}
 		cur = recv
 	}
-	return false
+	return nil
+}
+
+func isSegmentCall(call *syntax.CallExpr) bool {
+	sel, ok := syntax.Unparen(call.Fun).(*syntax.SelectorExpr)
+	return ok && sel.Sel != nil && (sel.Sel.Value == "map" || sel.Sel.Value == "filter")
 }
 
 func onStage(pass *Pass, e syntax.Expr) bool {

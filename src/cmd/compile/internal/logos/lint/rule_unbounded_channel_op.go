@@ -206,7 +206,7 @@ func (u *chanUnit) visit(n syntax.Node) bool {
 		u.child(n.Body)
 		return false
 	case *syntax.CallExpr:
-		if u.segment(n) {
+		if stageOf(u.pass, n) != nil {
 			u.segmentCall(n)
 			return false
 		}
@@ -280,26 +280,6 @@ func (u *chanUnit) child(body syntax.Node) {
 	u.free = true
 	u.walk(body)
 	u.free = outer
-}
-
-func (u *chanUnit) segment(call *syntax.CallExpr) bool {
-	for cur := call; isSegmentCall(cur); {
-		sel := syntax.Unparen(cur.Fun).(*syntax.SelectorExpr)
-		recv, ok := syntax.Unparen(sel.X).(*syntax.CallExpr)
-		if !ok {
-			return false
-		}
-		if _, ok := types2.LogosGroupStage(u.pass.Pkg, u.pass.Info, recv); ok {
-			return true
-		}
-		cur = recv
-	}
-	return false
-}
-
-func isSegmentCall(call *syntax.CallExpr) bool {
-	sel, ok := syntax.Unparen(call.Fun).(*syntax.SelectorExpr)
-	return ok && sel.Sel != nil && (sel.Sel.Value == "map" || sel.Sel.Value == "filter")
 }
 
 func (u *chanUnit) segmentCall(call *syntax.CallExpr) {
