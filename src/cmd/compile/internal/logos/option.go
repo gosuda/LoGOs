@@ -261,7 +261,6 @@ func (fl *fileLower) asOption(t types2.Type) *types2.Option {
 	return nil
 }
 
-
 func (fl *fileLower) lowerOptionType(e *syntax.OptionType) syntax.Expr {
 	if prev, ok := fl.optMemo[e]; ok {
 		return cloneType(prev, e.Pos())
@@ -1715,7 +1714,6 @@ func (fl *fileLower) lowerOptDeferGoIn(block *syntax.BlockStmt) {
 		return true
 	})
 }
-
 
 func (fl *fileLower) resultOption(r types2.Type) types2.Type {
 	if fl.asOption(r) != nil {

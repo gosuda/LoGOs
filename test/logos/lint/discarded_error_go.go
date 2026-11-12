@@ -143,10 +143,10 @@ func allowed() {
 }
 
 func droppedDeclaration() {
-	var _ = f() // ERROR "\[slop::discarded_error\]"
-	var _, _ = g() // ERROR "\[slop::discarded_error\]"
+	var _ = f()       // ERROR "\[slop::discarded_error\]"
+	var _, _ = g()    // ERROR "\[slop::discarded_error\]"
 	var _ error = f() // ERROR "\[slop::discarded_error\]"
-	var n, _ = g() // ERROR "\[slop::discarded_error\]"
+	var n, _ = g()    // ERROR "\[slop::discarded_error\]"
 	_ = n
 }
 
