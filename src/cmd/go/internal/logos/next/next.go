@@ -252,7 +252,9 @@ func buildNextTests(moduleLoader *modload.Loader, ctx context.Context, opts load
 		if pmain == nil {
 			continue
 		}
-		stageNextTestMain(b, pmain)
+		if err := b.StageTestmain(pmain); err != nil {
+			base.Fatalf("logos next: %v", err)
+		}
 		mains = append(mains, pmain)
 	}
 	if len(mains) == 0 {
@@ -273,17 +275,6 @@ func buildNextTestMain(ctx context.Context, moduleLoader *modload.Loader, opts l
 		base.Fatalf("logos next: no test main for %s", p.ImportPath)
 	}
 	return pmain
-}
-
-func stageNextTestMain(b *work.Builder, pmain *load.Package) {
-	testDir := b.CompileAction(work.ModeBuild, work.ModeBuild, pmain).Objdir
-	if err := os.MkdirAll(testDir, 0777); err != nil {
-		base.Fatalf("logos next: %v", err)
-	}
-	pmain.Dir = testDir
-	if err := os.WriteFile(testDir+"_testmain.go", *pmain.Internal.TestmainGo, 0666); err != nil {
-		base.Fatalf("logos next: %v", err)
-	}
 }
 
 func (s *scanState) readSidecar(sidecar, moddir string) {

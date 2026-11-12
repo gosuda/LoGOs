@@ -556,7 +556,9 @@ func buildEjectRoots(moduleLoader *modload.Loader, ctx context.Context, roots []
 	root := &work.Action{Mode: "go build"}
 	for _, p := range roots {
 		if p.Internal.TestmainGo != nil {
-			stageTestmain(b, p)
+			if err := b.StageTestmain(p); err != nil {
+				base.Fatalf("logos eject: %v", err)
+			}
 		}
 		root.Deps = append(root.Deps, b.AutoAction(moduleLoader, work.ModeBuild, work.ModeBuild, p))
 	}
@@ -566,17 +568,6 @@ func buildEjectRoots(moduleLoader *modload.Loader, ctx context.Context, roots []
 	}
 	if base.GetExitStatus() != 0 {
 		base.Exit()
-	}
-}
-
-func stageTestmain(b *work.Builder, pmain *load.Package) {
-	testDir := b.CompileAction(work.ModeBuild, work.ModeBuild, pmain).Objdir
-	if err := os.MkdirAll(testDir, 0777); err != nil {
-		base.Fatalf("logos eject: %v", err)
-	}
-	pmain.Dir = testDir
-	if err := os.WriteFile(testDir+"_testmain.go", *pmain.Internal.TestmainGo, 0666); err != nil {
-		base.Fatalf("logos eject: %v", err)
 	}
 }
 
