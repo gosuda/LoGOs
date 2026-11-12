@@ -973,7 +973,7 @@ func (fl *fileLower) lowerCoalesce(e *syntax.CoalesceExpr) syntax.Expr {
 	qoff := fl.off(pos)
 	yStart := fl.off(leftmostOf(e.Y))
 	yEnd := fl.exprEnd(yStart)
-	if isCompositeType(fl.optType(e.Y)) {
+	if hasBraceLiteral(e.Y) {
 		yEnd = fl.exprEndNested(yStart)
 	}
 	fl.add(qoff, qoff+2, "")
@@ -1049,10 +1049,22 @@ func (fl *fileLower) lowerCoalesce(e *syntax.CoalesceExpr) syntax.Expr {
 	return out
 }
 
-func isCompositeType(t types2.Type) bool {
-	switch types2.Unalias(t).(type) {
-	case *types2.Struct, *types2.Array, *types2.Slice, *types2.Map, *types2.Pointer:
+func hasBraceLiteral(e syntax.Expr) bool {
+	switch n := e.(type) {
+	case *syntax.CompositeLit, *syntax.FuncLit:
 		return true
+	case *syntax.SelectorExpr:
+		return hasBraceLiteral(n.X)
+	case *syntax.IndexExpr:
+		return hasBraceLiteral(n.X)
+	case *syntax.SliceExpr:
+		return hasBraceLiteral(n.X)
+	case *syntax.AssertExpr:
+		return hasBraceLiteral(n.X)
+	case *syntax.CallExpr:
+		return hasBraceLiteral(n.Fun)
+	case *syntax.Operation:
+		return hasBraceLiteral(n.X) || (n.Y != nil && hasBraceLiteral(n.Y))
 	}
 	return false
 }

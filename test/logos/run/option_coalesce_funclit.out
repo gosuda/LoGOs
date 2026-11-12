@@ -1,0 +1,8 @@
+ok bound-none
+ok bound-some
+ok inline-none
+ok inline-some
+ok iife-none
+ok iife-some
+ok capture-none
+ok capture-some

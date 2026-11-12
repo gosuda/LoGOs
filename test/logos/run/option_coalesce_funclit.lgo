@@ -1,0 +1,52 @@
+// run
+
+package main
+
+import (
+	"fmt"
+	"os"
+)
+
+var failed bool
+
+func check(name string, cond bool, got, want any) {
+	if !cond {
+		failed = true
+		fmt.Println("FAIL", name+":", "got", got, "want", want)
+		return
+	}
+	fmt.Println("ok", name)
+}
+
+var calls int
+
+func bound(v (func() int)?) int {
+	f := v ?? func() int { return -1 }
+	return f()
+}
+
+func inline(v (func() int)?) int { return (v ?? func() int { return -2 })() }
+
+func iife(v int?) int { return v ?? func() int { calls++; return 9 }() }
+
+func capture(v int?, base int) int { return v ?? func() int { return base + 1 }() }
+
+func main() {
+	check("bound-none", bound(nil) == -1, bound(nil), -1)
+	check("bound-some", bound(func() int { return 3 }) == 3, bound(func() int { return 3 }), 3)
+	check("inline-none", inline(nil) == -2, inline(nil), -2)
+	check("inline-some", inline(func() int { return 5 }) == 5, inline(func() int { return 5 }), 5)
+	calls = 0
+	got := iife(nil)
+	check("iife-none", got == 9 && calls == 1, []int{got, calls}, []int{9, 1})
+	calls = 0
+	got = iife(4)
+	check("iife-some", got == 4 && calls == 0, []int{got, calls}, []int{4, 0})
+	got = capture(nil, 10)
+	check("capture-none", got == 11, got, 11)
+	got = capture(6, 10)
+	check("capture-some", got == 6, got, 6)
+	if failed {
+		os.Exit(1)
+	}
+}
