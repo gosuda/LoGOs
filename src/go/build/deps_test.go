@@ -376,7 +376,7 @@ var depsRules = `
 	STR, slices
 	< internal/logosfile;
 
-	go/build/constraint, go/doc, go/parser, internal/buildcfg, internal/goroot, internal/goversion, internal/platform, internal/syslist
+	go/build/constraint, go/doc, go/parser, internal/buildcfg, internal/goroot, internal/goversion, internal/logosfile, internal/platform, internal/syslist
 	< go/build;
 
 	# images

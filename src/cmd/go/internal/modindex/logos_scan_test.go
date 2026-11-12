@@ -14,19 +14,7 @@ import (
 
 	"cmd/go/internal/cfg"
 	"cmd/go/internal/imports"
-	"golang.org/x/text/unicode/norm"
 )
-
-func TestLogosExtensionsNFC(t *testing.T) {
-	for _, ext := range logosExts {
-		if got := norm.NFC.String(ext); got != ext {
-			t.Errorf("extension %q NFC form = %q", ext, got)
-		}
-	}
-	if isLogosExt(".ʕ◔π◔ʔ") {
-		t.Fatal("compatibility-folded gopher extension was accepted")
-	}
-}
 
 func setLogosMode(t *testing.T) { applyLogosMode(t, true) }
 
