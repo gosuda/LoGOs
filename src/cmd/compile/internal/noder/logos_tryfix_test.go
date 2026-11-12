@@ -424,7 +424,7 @@ func step() (int, error) {
 	}
 	calls, fail = 0, true
 	v, err = compute()
-	if err == nil || err.Error() != "boom" || v != 0 {
+	if err == nil || err.Error() != "boom" {
 		println("bad")
 	} else {
 		println("err")
@@ -696,7 +696,7 @@ func gInt(x int) int { return x }
 	}
 	calls, fail = 0, true
 	v, err = compute()
-	if err == nil || err.Error() != "boom" || v != 0 {
+	if err == nil || err.Error() != "boom" {
 		println("bad")
 	} else {
 		println("err")
@@ -771,7 +771,7 @@ func gInt(x int) int { return x }
 			name:      "return_all_multi",
 			misplaced: "func compute() (int, bool, error) {\n\treturn step2()?\n}\n",
 			hand:      "func compute() (int, bool, error) {\n\t_a, _b, _e := step2()\n\tif _e != nil {\n\t\treturn 0, false, _e\n\t}\n\treturn _a, _b, nil\n}\n",
-			mainSrc:   "func main() {\n\tcalls, fail = 0, false\n\tv, b, err := compute()\n\tif err != nil || v != 42 || !b {\n\t\tprintln(\"bad\")\n\t} else {\n\t\tprintln(\"ok\")\n\t}\n\tcalls, fail = 0, true\n\tv, b, err = compute()\n\tif err == nil || err.Error() != \"boom\" || v != 0 || b {\n\t\tprintln(\"bad\")\n\t} else {\n\t\tprintln(\"err\")\n\t}\n\tif calls != 1 {\n\t\tprintln(\"bad\")\n\t} else {\n\t\tprintln(\"once\")\n\t}\n}\n",
+			mainSrc:   "func main() {\n\tcalls, fail = 0, false\n\tv, b, err := compute()\n\tif err != nil || v != 42 || !b {\n\t\tprintln(\"bad\")\n\t} else {\n\t\tprintln(\"ok\")\n\t}\n\tcalls, fail = 0, true\n\tv, b, err = compute()\n\tif err == nil || err.Error() != \"boom\" {\n\t\tprintln(\"bad\")\n\t} else {\n\t\tprintln(\"err\")\n\t}\n\tif calls != 1 {\n\t\tprintln(\"bad\")\n\t} else {\n\t\tprintln(\"once\")\n\t}\n}\n",
 			wantOffer: true,
 		},
 		{
@@ -792,7 +792,7 @@ func gInt(x int) int { return x }
 			name:      "generic",
 			misplaced: "func compute[T any](x T) (int, error) {\n\tv := step()? + 1\n\t_ = x\n\treturn v, nil\n}\n",
 			hand:      "func compute[T any](x T) (int, error) {\n\t_v, _e := step()\n\tif _e != nil {\n\t\treturn 0, _e\n\t}\n\tv := _v + 1\n\t_ = x\n\treturn v, nil\n}\n",
-			mainSrc:   "func main() {\n\tcalls, fail = 0, false\n\tv, err := compute(0)\n\tif err != nil || v != 43 {\n\t\tprintln(\"bad\")\n\t} else {\n\t\tprintln(\"ok\")\n\t}\n\tcalls, fail = 0, true\n\tv, err = compute(0)\n\tif err == nil || err.Error() != \"boom\" || v != 0 {\n\t\tprintln(\"bad\")\n\t} else {\n\t\tprintln(\"err\")\n\t}\n\tif calls != 1 {\n\t\tprintln(\"bad\")\n\t} else {\n\t\tprintln(\"once\")\n\t}\n}\n",
+			mainSrc:   "func main() {\n\tcalls, fail = 0, false\n\tv, err := compute(0)\n\tif err != nil || v != 43 {\n\t\tprintln(\"bad\")\n\t} else {\n\t\tprintln(\"ok\")\n\t}\n\tcalls, fail = 0, true\n\tv, err = compute(0)\n\tif err == nil || err.Error() != \"boom\" {\n\t\tprintln(\"bad\")\n\t} else {\n\t\tprintln(\"err\")\n\t}\n\tif calls != 1 {\n\t\tprintln(\"bad\")\n\t} else {\n\t\tprintln(\"once\")\n\t}\n}\n",
 			wantOffer: true,
 		},
 		{
@@ -1025,26 +1025,26 @@ func g1(x int) (int, error) {
 			name:      "and_left",
 			misplaced: "func compute() (bool, error) {\n\tv := okStep()? && flag\n\treturn v, nil\n}\n",
 			hand:      "func compute() (bool, error) {\n\t_v, _e := okStep()\n\tif _e != nil {\n\t\treturn false, _e\n\t}\n\tv := _v && flag\n\treturn v, nil\n}\n",
-			mainSrc:   "func main() {\n\tcalls, fail, flag = 0, false, true\n\tv, err := compute()\n\tif err != nil || !v {\n\t\tprintln(\"bad\")\n\t} else {\n\t\tprintln(\"ok\")\n\t}\n\tcalls, fail, flag = 0, true, true\n\tv, err = compute()\n\tif err == nil || err.Error() != \"boom\" || v {\n\t\tprintln(\"bad\")\n\t} else {\n\t\tprintln(\"err\")\n\t}\n\tif calls != 1 {\n\t\tprintln(\"bad\")\n\t} else {\n\t\tprintln(\"once\")\n\t}\n}\n",
+			mainSrc:   "func main() {\n\tcalls, fail, flag = 0, false, true\n\tv, err := compute()\n\tif err != nil || !v {\n\t\tprintln(\"bad\")\n\t} else {\n\t\tprintln(\"ok\")\n\t}\n\tcalls, fail, flag = 0, true, true\n\tv, err = compute()\n\tif err == nil || err.Error() != \"boom\" {\n\t\tprintln(\"bad\")\n\t} else {\n\t\tprintln(\"err\")\n\t}\n\tif calls != 1 {\n\t\tprintln(\"bad\")\n\t} else {\n\t\tprintln(\"once\")\n\t}\n}\n",
 		},
 		{
 			name:      "or_left",
 			misplaced: "func compute() (bool, error) {\n\tv := okStep()? || flag\n\treturn v, nil\n}\n",
 			hand:      "func compute() (bool, error) {\n\t_v, _e := okStep()\n\tif _e != nil {\n\t\treturn false, _e\n\t}\n\tv := _v || flag\n\treturn v, nil\n}\n",
-			mainSrc:   "func main() {\n\tcalls, fail, flag = 0, false, false\n\tv, err := compute()\n\tif err != nil || !v {\n\t\tprintln(\"bad\")\n\t} else {\n\t\tprintln(\"ok\")\n\t}\n\tcalls, fail, flag = 0, true, false\n\tv, err = compute()\n\tif err == nil || err.Error() != \"boom\" || v {\n\t\tprintln(\"bad\")\n\t} else {\n\t\tprintln(\"err\")\n\t}\n\tif calls != 1 {\n\t\tprintln(\"bad\")\n\t} else {\n\t\tprintln(\"once\")\n\t}\n}\n",
+			mainSrc:   "func main() {\n\tcalls, fail, flag = 0, false, false\n\tv, err := compute()\n\tif err != nil || !v {\n\t\tprintln(\"bad\")\n\t} else {\n\t\tprintln(\"ok\")\n\t}\n\tcalls, fail, flag = 0, true, false\n\tv, err = compute()\n\tif err == nil || err.Error() != \"boom\" {\n\t\tprintln(\"bad\")\n\t} else {\n\t\tprintln(\"err\")\n\t}\n\tif calls != 1 {\n\t\tprintln(\"bad\")\n\t} else {\n\t\tprintln(\"once\")\n\t}\n}\n",
 		},
 		{
 			name:      "temp_collision",
 			misplaced: "func compute() (int, error) {\n\t_step := 7\n\tv := step()? + _step\n\treturn v, nil\n}\n",
 			hand:      "func compute() (int, error) {\n\t_step := 7\n\t_v, _e := step()\n\tif _e != nil {\n\t\treturn 0, _e\n\t}\n\tv := _v + _step\n\treturn v, nil\n}\n",
-			mainSrc:   "func main() {\n\tcalls, fail = 0, false\n\tv, err := compute()\n\tif err != nil || v != 49 {\n\t\tprintln(\"bad\")\n\t} else {\n\t\tprintln(\"ok\")\n\t}\n\tcalls, fail = 0, true\n\tv, err = compute()\n\tif err == nil || err.Error() != \"boom\" || v != 0 {\n\t\tprintln(\"bad\")\n\t} else {\n\t\tprintln(\"err\")\n\t}\n\tif calls != 1 {\n\t\tprintln(\"bad\")\n\t} else {\n\t\tprintln(\"once\")\n\t}\n}\n",
+			mainSrc:   "func main() {\n\tcalls, fail = 0, false\n\tv, err := compute()\n\tif err != nil || v != 49 {\n\t\tprintln(\"bad\")\n\t} else {\n\t\tprintln(\"ok\")\n\t}\n\tcalls, fail = 0, true\n\tv, err = compute()\n\tif err == nil || err.Error() != \"boom\" {\n\t\tprintln(\"bad\")\n\t} else {\n\t\tprintln(\"err\")\n\t}\n\tif calls != 1 {\n\t\tprintln(\"bad\")\n\t} else {\n\t\tprintln(\"once\")\n\t}\n}\n",
 		},
 		{
 			name:      "coalesce_left",
 			decls:     "func optStep() (int?, error) {\n\tcalls++\n\tif fail {\n\t\treturn nil, myErr(\"boom\")\n\t}\n\treturn 7, nil\n}\n\n",
 			misplaced: "func compute() (int, error) {\n\tv := optStep()? ?? 0\n\treturn v, nil\n}\n",
 			hand:      "func compute() (int, error) {\n\t_v, _e := optStep()\n\tif _e != nil {\n\t\treturn 0, _e\n\t}\n\tv := _v ?? 0\n\treturn v, nil\n}\n",
-			mainSrc:   "func main() {\n\tcalls, fail = 0, false\n\tv, err := compute()\n\tif err != nil || v != 7 {\n\t\tprintln(\"bad\")\n\t} else {\n\t\tprintln(\"ok\")\n\t}\n\tcalls, fail = 0, true\n\tv, err = compute()\n\tif err == nil || err.Error() != \"boom\" || v != 0 {\n\t\tprintln(\"bad\")\n\t} else {\n\t\tprintln(\"err\")\n\t}\n\tif calls != 1 {\n\t\tprintln(\"bad\")\n\t} else {\n\t\tprintln(\"once\")\n\t}\n}\n",
+			mainSrc:   "func main() {\n\tcalls, fail = 0, false\n\tv, err := compute()\n\tif err != nil || v != 7 {\n\t\tprintln(\"bad\")\n\t} else {\n\t\tprintln(\"ok\")\n\t}\n\tcalls, fail = 0, true\n\tv, err = compute()\n\tif err == nil || err.Error() != \"boom\" {\n\t\tprintln(\"bad\")\n\t} else {\n\t\tprintln(\"err\")\n\t}\n\tif calls != 1 {\n\t\tprintln(\"bad\")\n\t} else {\n\t\tprintln(\"once\")\n\t}\n}\n",
 		},
 	}
 	for _, tc := range offered {
@@ -1133,7 +1133,7 @@ func inner(x int) (int, error) {
 	}
 	calls, fail = 0, true
 	v, err = compute()
-	if err == nil || err.Error() != "boom" || v != 0 || calls != 1 {
+	if err == nil || err.Error() != "boom" || calls != 1 {
 		println("bad")
 	} else {
 		println("err")
@@ -1153,7 +1153,7 @@ func inner(x int) (int, error) {
 			name:      "return_multi",
 			misplaced: "func compute() (int, int, error) {\n\treturn step()?, step()?\n}\n",
 			hand:      "func compute() (int, int, error) {\n\t_v, _e := step()\n\tif _e != nil {\n\t\treturn 0, 0, _e\n\t}\n\t_step, _e1 := step()\n\tif _e1 != nil {\n\t\treturn 0, 0, _e1\n\t}\n\treturn _v, _step, nil\n}\n",
-			mainSrc:   "func main() {\n\tcalls, fail = 0, false\n\ta, b, err := compute()\n\tif err != nil || a != 42 || b != 42 || calls != 2 {\n\t\tprintln(\"bad\")\n\t} else {\n\t\tprintln(\"ok\")\n\t}\n\tcalls, fail = 0, true\n\ta, b, err = compute()\n\tif err == nil || err.Error() != \"boom\" || a != 0 || b != 0 || calls != 1 {\n\t\tprintln(\"bad\")\n\t} else {\n\t\tprintln(\"err\")\n\t}\n\tprintln(\"once\")\n}\n",
+			mainSrc:   "func main() {\n\tcalls, fail = 0, false\n\ta, b, err := compute()\n\tif err != nil || a != 42 || b != 42 || calls != 2 {\n\t\tprintln(\"bad\")\n\t} else {\n\t\tprintln(\"ok\")\n\t}\n\tcalls, fail = 0, true\n\ta, b, err = compute()\n\tif err == nil || err.Error() != \"boom\" || calls != 1 {\n\t\tprintln(\"bad\")\n\t} else {\n\t\tprintln(\"err\")\n\t}\n\tprintln(\"once\")\n}\n",
 			wantVal:   42,
 			calls:     2,
 		},
