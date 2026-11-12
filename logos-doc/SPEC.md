@@ -1063,6 +1063,12 @@ The same operation in a lambda after the segment, in a plain chain, in a functio
 
 Results of a group stage MUST arrive in input order, and after `.unordered()` in completion order. [T-206]
 
+Children in flight plus finished results not yet consumed MUST NOT exceed `limit`. [T-206]
+
+`limit <= 0` MUST panic with `logos: group stage limit must be positive` when the range starts, before the source is touched. [T-206]
+
+Each group stage MUST keep its own limit, including a stage inside a segment lambda. [T-206]
+
 `logos/sync.Locked[T]` MUST expose `WithLock(f func(*T))`. [T-206]
 
 `WithLock` MUST hold `Lock`, defer `Unlock`, then call the function. [T-206]
