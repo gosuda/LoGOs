@@ -86,6 +86,29 @@ func childRangeChan(ctx context.Context, e *env) error {
 	return nil
 }
 
+func childRangeChanGoto(ctx context.Context, e *env) error {
+	go group (ctx) {
+		go {
+			pass := 0
+		L:
+			for v := range <-e.chain {
+				if v == 2 {
+					continue L
+				}
+				if v == 4 {
+					break L
+				}
+				e.out += v
+			}
+			pass++
+			if pass < 2 {
+				goto L
+			}
+		}
+	}
+	return nil
+}
+
 func childForPost(ctx context.Context, e *env) error {
 	go group (ctx) {
 		go {
@@ -430,14 +453,14 @@ func segIfInitGoto(ctx context.Context, e *env) error {
 }
 
 type cell struct {
-	name  string
-	run   func(ctx context.Context, e *env) error
-	feed  []int
-	rows  [][]int
-	inner []int
-	want  int
-	left  int
-	calls int
+	name   string
+	run    func(ctx context.Context, e *env) error
+	feed   []int
+	rows   [][]int
+	inners [][]int
+	want   int
+	left   int
+	calls  int
 }
 
 func cells() []cell {
@@ -445,7 +468,8 @@ func cells() []cell {
 	return []cell{
 		{name: "child-range-slice", run: childRangeSlice, rows: [][]int{five}, want: 4},
 		{name: "child-range-slice-goto", run: childRangeSliceGoto, rows: [][]int{five, five}, want: 8},
-		{name: "child-range-chan", run: childRangeChan, inner: five, want: 4},
+		{name: "child-range-chan", run: childRangeChan, inners: [][]int{five}, want: 4},
+		{name: "child-range-chan-goto", run: childRangeChanGoto, inners: [][]int{five, five}, want: 8},
 		{name: "child-for-post", run: childForPost, feed: []int{1, 1, 2, 2}, want: 5},
 		{name: "child-for-post-goto", run: childForPostGoto, feed: []int{1, 1, 2, 2, 1, 1, 2, 2}, want: 10},
 		{name: "child-switch-init", run: childSwitchInit, feed: []int{2}, want: 13, calls: 1},
@@ -466,10 +490,10 @@ func cells() []cell {
 
 //logos:allow(correctness::unbounded_channel_op)
 func exercise(c cell) string {
-	e := &env{in: make(chan int, len(c.feed)), rows: make(chan []int, len(c.rows)), chain: make(chan chan int, 1)}
-	if c.inner != nil {
-		inner := make(chan int, len(c.inner))
-		for _, v := range c.inner {
+	e := &env{in: make(chan int, len(c.feed)), rows: make(chan []int, len(c.rows)), chain: make(chan chan int, len(c.inners))}
+	for _, vals := range c.inners {
+		inner := make(chan int, len(vals))
+		for _, v := range vals {
 			inner <- v
 		}
 		close(inner)

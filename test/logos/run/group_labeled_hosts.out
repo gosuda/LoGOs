@@ -1,6 +1,7 @@
 ok child-range-slice
 ok child-range-slice-goto
 ok child-range-chan
+ok child-range-chan-goto
 ok child-for-post
 ok child-for-post-goto
 ok child-switch-init
