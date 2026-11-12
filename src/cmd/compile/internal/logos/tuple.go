@@ -39,6 +39,19 @@ func genList(list []string) []otext {
 	return out
 }
 
+func (fl *fileLower) tupleSplit(pos syntax.Pos, n int) callSplit {
+	split, ok := splitCall(fl.src, fl.off(pos))
+	if !ok || len(split.args) != n {
+		base.Fatalf("logos: tuple at %s has no matching parentheses", pos.String())
+	}
+	return split
+}
+
+func (fl *fileLower) exprListSpan(e syntax.Expr) span {
+	elems := syntax.UnpackListExpr(e)
+	return span{fl.off(syntax.StartPos(elems[0])), fl.exprEndOf(elems[len(elems)-1])}
+}
+
 func (fl *fileLower) lowerTuples() {
 	fl.lowerTupleTypes()
 	syntax.Inspect(fl.file, func(n syntax.Node) bool {
@@ -105,7 +118,8 @@ func (fl *fileLower) lowerTuplePackValues(decl *syntax.VarDecl, call *syntax.Cal
 	comp, compText := fl.tupleComposite(pos, names, types, tempNodes(pos, tempNames), genList(tempNames))
 	parts := []otext{gen("var " + strings.Join(tempNames, ", ") + " = "), callText, gen("\nvar " + decl.NameList[0].Value)}
 	if decl.Type != nil {
-		parts = append(parts, gen(" "), fl.textOf(span{fl.off(syntax.StartPos(decl.Type)), fl.off(syntax.EndPos(decl.Type))}))
+		typeStart := fl.off(syntax.StartPos(decl.Type))
+		parts = append(parts, gen(" "), fl.textOf(span{typeStart, fl.exprEndNested(typeStart)}))
 	}
 	parts = append(parts, gen(" = "), compText)
 	fl.addT(fl.off(syntax.StartPos(decl)), callSpan.end, cat(parts...))
@@ -315,6 +329,7 @@ func (fl *fileLower) lowerTupleType(t *syntax.TupleType) {
 	pos := t.Pos()
 	st := &syntax.StructType{}
 	st.SetPos(pos)
+	split := fl.tupleSplit(pos, len(t.Fields))
 	var parts []otext
 	parts = append(parts, gen("struct{ "))
 	for i, f := range t.Fields {
@@ -328,50 +343,12 @@ func (fl *fileLower) lowerTupleType(t *syntax.TupleType) {
 		if i > 0 {
 			parts = append(parts, gen("; "))
 		}
-		tspan := span{fl.off(syntax.StartPos(typ)), fl.off(syntax.EndPos(typ))}
+		tspan := span{fl.off(syntax.StartPos(typ)), split.args[i].end}
 		parts = append(parts, gen(lname+" "), fl.textOf(tspan))
 	}
 	parts = append(parts, gen(" }"))
-	fl.addT(fl.off(syntax.StartPos(t)), extendPastComma(fl.src, fl.off(syntax.EndPos(t))), cat(parts...))
+	fl.addT(fl.off(syntax.StartPos(t)), split.end, cat(parts...))
 	replaceTupleExpr(fl.file, t, st)
-}
-
-func extendPastComma(src []byte, end int) int {
-	i := end
-	for i < len(src) {
-		switch src[i] {
-		case ' ', '\t', '\n', '\r':
-			i++
-		case ',':
-			i++
-			for i < len(src) {
-				switch src[i] {
-				case ' ', '\t', '\n', '\r':
-					i++
-				case '/':
-					i = skipComment(src, i)
-					if i < 0 {
-						return end
-					}
-				case ')':
-					return i + 1
-				default:
-					return end
-				}
-			}
-			return end
-		case '/':
-			i = skipComment(src, i)
-			if i < 0 {
-				return end
-			}
-		case ')':
-			return i + 1
-		default:
-			return end
-		}
-	}
-	return end
 }
 
 func extendParens(src []byte, start, end int) (int, int) {
@@ -403,23 +380,6 @@ func wrapParenPair(src []byte, start, end int) (int, int, bool) {
 		return start, end, false
 	}
 	return i - 1, closer, true
-}
-
-func skipComment(src []byte, i int) int {
-	if i+1 < len(src) && src[i+1] == '/' {
-		for i < len(src) && src[i] != '\n' {
-			i++
-		}
-		return i
-	}
-	if i+1 < len(src) && src[i+1] == '*' {
-		j := i + 2
-		for j+1 < len(src) && (src[j] != '*' || src[j+1] != '/') {
-			j++
-		}
-		return j + 2
-	}
-	return -1
 }
 
 func replaceTupleExpr(root syntax.Node, old, repl syntax.Expr) {
@@ -716,7 +676,7 @@ func (fl *fileLower) lowerTuplePackStmt(s *syntax.AssignStmt, lhs []syntax.Expr,
 		gen(strings.Join(tempNames, ", ") + " := "),
 		callText,
 		gen("; "),
-		fl.textOf(span{fl.off(syntax.StartPos(s.Lhs)), fl.off(syntax.EndPos(s.Lhs))}),
+		fl.textOf(fl.exprListSpan(s.Lhs)),
 	}
 	if s.Op == syntax.Def {
 		parts = append(parts, gen(" := "))
@@ -768,11 +728,11 @@ func (fl *fileLower) lowerTupleUnpackStmt(s *syntax.AssignStmt, lhs []syntax.Exp
 			return nil
 		}
 		var texts []otext
-		for _, e := range lit.Elems {
-			texts = append(texts, fl.textOf(span{fl.off(syntax.StartPos(e)), fl.off(syntax.EndPos(e))}))
+		split := fl.tupleSplit(lit.Pos(), len(lit.Elems))
+		for i := range lit.Elems {
+			texts = append(texts, fl.textOf(split.args[i]))
 		}
-		start := fl.off(syntax.StartPos(r))
-		end := extendPastComma(fl.src, fl.off(syntax.EndPos(r)))
+		start, end := extendParens(fl.src, fl.off(syntax.StartPos(r)), split.end)
 		fl.addT(start, end, joinO(texts, ", "))
 		s.Rhs = listOf(s.Pos(), append([]syntax.Expr{}, lit.Elems...))
 		return nil
@@ -796,7 +756,7 @@ func (fl *fileLower) lowerTupleUnpackStmt(s *syntax.AssignStmt, lhs []syntax.Exp
 		return nil
 	}
 	tn := tupleTempKey(pos, 0)
-	rSpan := span{fl.off(syntax.StartPos(r)), fl.off(syntax.EndPos(r))}
+	rSpan := fl.exprListSpan(r)
 	if _, ok := r.(*syntax.CallExpr); ok {
 		rSpan = fl.callBodySpan(r.(*syntax.CallExpr))
 	}
@@ -807,7 +767,7 @@ func (fl *fileLower) lowerTupleUnpackStmt(s *syntax.AssignStmt, lhs []syntax.Exp
 		reads[i] = selOf(pos, nameOf(pos, tn), elems[i])
 		texts = append(texts, tn+"."+elems[i])
 	}
-	parts := []otext{gen(tn + " := "), rText, gen("; "), fl.textOf(span{fl.off(syntax.StartPos(s.Lhs)), fl.off(syntax.EndPos(s.Lhs))})}
+	parts := []otext{gen(tn + " := "), rText, gen("; "), fl.textOf(fl.exprListSpan(s.Lhs))}
 	if s.Op == syntax.Def {
 		parts = append(parts, gen(" := "))
 	} else {
@@ -833,11 +793,11 @@ func (fl *fileLower) lowerTupleReturnStmt(s *syntax.ReturnStmt) []syntax.Stmt {
 	pos := s.Pos()
 	if lit, ok := r.(*syntax.TupleLit); ok {
 		var texts []otext
-		for _, e := range lit.Elems {
-			texts = append(texts, fl.textOf(span{fl.off(syntax.StartPos(e)), fl.off(syntax.EndPos(e))}))
+		split := fl.tupleSplit(lit.Pos(), len(lit.Elems))
+		for i := range lit.Elems {
+			texts = append(texts, fl.textOf(split.args[i]))
 		}
-		start := fl.off(syntax.StartPos(r))
-		end := extendPastComma(fl.src, fl.off(syntax.EndPos(r)))
+		start, end := extendParens(fl.src, fl.off(syntax.StartPos(r)), split.end)
 		fl.addT(start, end, joinO(texts, ", "))
 		s.Results = listOf(pos, append([]syntax.Expr{}, lit.Elems...))
 		return nil
@@ -860,7 +820,8 @@ func (fl *fileLower) lowerTupleReturnStmt(s *syntax.ReturnStmt) []syntax.Stmt {
 		return nil
 	}
 	tn := tupleTempKey(pos, 0)
-	rText := fl.textOf(span{fl.off(syntax.StartPos(r)), fl.off(syntax.EndPos(r))})
+	rSpan := fl.exprListSpan(r)
+	rText := fl.textOf(rSpan)
 	fl.addT(fl.off(syntax.StartPos(s)), fl.off(syntax.StartPos(s)), cat(gen(tn+" := "), rText, gen("; ")))
 	hoist := defineOf(pos, []syntax.Expr{nameOf(pos, tn)}, []syntax.Expr{r})
 	reads := make([]syntax.Expr, len(elems))
@@ -870,7 +831,7 @@ func (fl *fileLower) lowerTupleReturnStmt(s *syntax.ReturnStmt) []syntax.Stmt {
 		texts = append(texts, tn+"."+elems[i])
 	}
 	s.Results = listOf(pos, reads)
-	start, end := extendParens(fl.src, fl.off(syntax.StartPos(r)), fl.off(syntax.EndPos(r)))
+	start, end := extendParens(fl.src, rSpan.start, rSpan.end)
 	fl.add(start, end, strings.Join(texts, ", "))
 	return []syntax.Stmt{hoist, s}
 }
@@ -993,12 +954,13 @@ func (fl *fileLower) lowerTupleLitTargeted(lit *syntax.TupleLit, names []string,
 	pos := lit.Pos()
 	vals := make([]syntax.Expr, len(lit.Elems))
 	texts := make([]otext, len(lit.Elems))
+	split := fl.tupleSplit(pos, len(lit.Elems))
 	for i, e := range lit.Elems {
 		vals[i] = e
-		texts[i] = fl.textOf(span{fl.off(syntax.StartPos(e)), fl.off(syntax.EndPos(e))})
+		texts[i] = fl.textOf(split.args[i])
 	}
 	comp, compText := fl.tupleComposite(pos, names, types, vals, texts)
-	fl.addT(fl.off(syntax.StartPos(lit)), extendPastComma(fl.src, fl.off(syntax.EndPos(lit))), compText)
+	fl.addT(fl.off(syntax.StartPos(lit)), split.end, compText)
 	replaceTupleExpr(fl.file, lit, comp)
 }
 
