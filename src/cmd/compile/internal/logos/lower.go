@@ -531,7 +531,7 @@ func (fl *fileLower) lowerFile() {
 	for _, decl := range fl.file.DeclList {
 		fn, ok := decl.(*syntax.FuncDecl)
 		if ok && fn.Body != nil {
-			newFuncLower(fl, fn.Type, fn.Body).run()
+			newFuncLower(fl, fn.Type, fl.cfFuncSig(fn), fn.Body).run()
 			continue
 		}
 		scanForLiterals(fl, decl)
@@ -725,7 +725,7 @@ func scanForLiterals(fl *fileLower, root syntax.Node) {
 		if fl.groupDone[lit] { // M8-S2 hook: group closures lower eagerly.
 			return false
 		}
-		newFuncLower(fl, lit.Type, lit.Body).run()
+		newFuncLower(fl, lit.Type, fl.cfLitSig(lit), lit.Body).run()
 		return false
 	})
 }
@@ -764,27 +764,30 @@ type funcLower struct {
 	scopeHoists      []string
 }
 
+func (fl *fileLower) resultSpecs(ft *syntax.FuncType, sig *types2.Signature) []resultSpec {
+	n := len(ft.ResultList)
+	specs := make([]resultSpec, n)
+	for i, field := range ft.ResultList {
+		typ := fl.pkg.info.TypeOf(field.Type)
+		if sig != nil {
+			typ = sig.Results().At(i).Type()
+		}
+		specs[i] = resultSpec{field: field, name: field.Name, typ: typ, typeExpr: field.Type, isErr: i == n-1}
+	}
+	return specs
+}
+
 // newFuncLower builds the lowering state of one function body.
-func newFuncLower(fl *fileLower, ft *syntax.FuncType, body *syntax.BlockStmt) *funcLower {
+func newFuncLower(fl *fileLower, ft *syntax.FuncType, sig *types2.Signature, body *syntax.BlockStmt) *funcLower {
 	if fc, ok := fl.funcs[body]; ok {
 		return fc
 	}
-	fc := &funcLower{fl: fl, ft: ft, body: body}
+	fc := &funcLower{fl: fl, ft: ft, body: body, specs: fl.resultSpecs(ft, sig)}
 	if fl.funcs == nil {
 		fl.funcs = make(map[*syntax.BlockStmt]*funcLower)
 	}
 	fl.funcs[body] = fc
-	n := len(ft.ResultList)
-	for i, field := range ft.ResultList {
-		fc.specs = append(fc.specs, resultSpec{
-			field:    field,
-			name:     field.Name,
-			typ:      fl.pkg.info.TypeOf(field.Type),
-			typeExpr: field.Type,
-			isErr:    i == n-1,
-		})
-	}
-	if n > 0 {
+	if n := len(fc.specs); n > 0 {
 		fc.errName = namedValue(fc.specs[n-1].name)
 	}
 	return fc

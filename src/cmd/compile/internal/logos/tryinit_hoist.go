@@ -18,12 +18,12 @@ func (fl *fileLower) hoistTryInits() {
 		switch d := decl.(type) {
 		case *syntax.FuncDecl:
 			if d.Body != nil {
-				newFuncLower(fl, d.Type, d.Body).hoistSwitchExprInits()
+				newFuncLower(fl, d.Type, fl.cfFuncSig(d), d.Body).hoistSwitchExprInits()
 			}
 		case *syntax.VarDecl:
 			syntax.Inspect(d, func(n syntax.Node) bool {
 				if lit, ok := n.(*syntax.FuncLit); ok {
-					newFuncLower(fl, lit.Type, lit.Body).hoistSwitchExprInits()
+					newFuncLower(fl, lit.Type, fl.cfLitSig(lit), lit.Body).hoistSwitchExprInits()
 					return false
 				}
 				return true
@@ -62,7 +62,7 @@ func (fc *funcLower) processLitBodies(s syntax.Stmt) {
 		switch t := n.(type) {
 		case *syntax.FuncLit:
 			if t.Body != nil {
-				newFuncLower(fc.fl, t.Type, t.Body).hoistSwitchExprInits()
+				newFuncLower(fc.fl, t.Type, fc.fl.cfLitSig(t), t.Body).hoistSwitchExprInits()
 			}
 			return false
 		case *syntax.GroupChild:
@@ -70,7 +70,7 @@ func (fc *funcLower) processLitBodies(s syntax.Stmt) {
 				ft := at(&syntax.FuncType{
 					ResultList: []*syntax.Field{at(&syntax.Field{Type: nameOf(t.Body.Pos(), "error")}, t.Body.Pos())},
 				}, t.Body.Pos())
-				newFuncLower(fc.fl, ft, t.Body).hoistSwitchExprInits()
+				newFuncLower(fc.fl, ft, nil, t.Body).hoistSwitchExprInits()
 			}
 			return false
 		case *syntax.GroupStmt:

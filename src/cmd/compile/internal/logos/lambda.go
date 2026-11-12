@@ -244,7 +244,7 @@ func (fl *fileLower) lowerLambdaScopeDefers(lam *syntax.LambdaExpr, pos syntax.P
 	if !ok {
 		return "", false
 	}
-	fc := newFuncLower(fl, functype, block)
+	fc := newFuncLower(fl, functype, sig, block)
 	fc.detectCleanups()
 	if fc.hasScopeDefer {
 		fc.lowerScopeDefers()
@@ -309,6 +309,9 @@ func (fl *fileLower) lambdaZero(typ types2.Type, pos syntax.Pos) syntax.Expr {
 		tn, ok := typeExprAt(spelled, pos)
 		if !ok {
 			return nilOf(pos)
+		}
+		if _, ok := u.(*types2.TypeParam); ok {
+			return at(&syntax.Operation{Op: syntax.Mul, X: callOf(pos, nameOf(pos, "new"), []syntax.Expr{tn})}, pos)
 		}
 		return at(&syntax.CompositeLit{Type: tn, Rbrace: pos}, pos)
 	}

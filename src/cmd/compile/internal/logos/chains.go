@@ -14,11 +14,6 @@ import (
 	"strings"
 )
 
-type chainResult struct {
-	typ  types2.Type
-	expr syntax.Expr
-}
-
 type chainHoist struct {
 	stmts []syntax.Stmt
 	text  otext
@@ -44,7 +39,7 @@ func (fl *fileLower) lowerChains() {
 		switch decl := decl.(type) {
 		case *syntax.FuncDecl:
 			if decl.Body != nil {
-				decl.Body.List = fl.lowerChainList(decl.Body.List, fl.chainFuncResults(decl.Type, fl.cfFuncSig(decl)))
+				decl.Body.List = fl.lowerChainList(decl.Body.List, fl.resultSpecs(decl.Type, fl.cfFuncSig(decl)))
 			}
 		case *syntax.VarDecl:
 			fl.lowerChainPkgDecl(decl)
@@ -68,19 +63,7 @@ func (fl *fileLower) transparentWrappers() {
 	}
 }
 
-func (fl *fileLower) chainFuncResults(ft *syntax.FuncType, sig *types2.Signature) []chainResult {
-	out := []chainResult{}
-	for i, field := range ft.ResultList {
-		var typ types2.Type
-		if sig != nil {
-			typ = sig.Results().At(i).Type()
-		}
-		out = append(out, chainResult{typ: typ, expr: field.Type})
-	}
-	return out
-}
-
-func (fl *fileLower) lowerChainList(list []syntax.Stmt, enc []chainResult) []syntax.Stmt {
+func (fl *fileLower) lowerChainList(list []syntax.Stmt, enc []resultSpec) []syntax.Stmt {
 	var out []syntax.Stmt
 	for _, s := range list {
 		if repl, ok := fl.lowerChainSpecial(s, enc); ok {
@@ -92,14 +75,14 @@ func (fl *fileLower) lowerChainList(list []syntax.Stmt, enc []chainResult) []syn
 	return out
 }
 
-func (fl *fileLower) lowerChainPlain(s syntax.Stmt, enc []chainResult) []syntax.Stmt {
+func (fl *fileLower) lowerChainPlain(s syntax.Stmt, enc []resultSpec) []syntax.Stmt {
 	out := fl.lowerChainStmt(s, enc)
 	out = append(out, s)
 	fl.lowerChainChildren(s, enc)
 	return out
 }
 
-func (fl *fileLower) lowerChainChildren(s syntax.Stmt, enc []chainResult) {
+func (fl *fileLower) lowerChainChildren(s syntax.Stmt, enc []resultSpec) {
 	for _, child := range tupleChildLists(s) {
 		*child = fl.lowerChainList(*child, enc)
 	}
@@ -112,7 +95,7 @@ func (fl *fileLower) lowerChainChildren(s syntax.Stmt, enc []chainResult) {
 			}
 			saved := fl.chainGrp
 			fl.chainGrp = chainGroup{}
-			lit.Body.List = fl.lowerChainList(lit.Body.List, fl.chainFuncResults(lit.Type, fl.cfLitSig(lit)))
+			lit.Body.List = fl.lowerChainList(lit.Body.List, fl.resultSpecs(lit.Type, fl.cfLitSig(lit)))
 			fl.chainGrp = saved
 			return false
 		}
@@ -139,7 +122,7 @@ func (fl *fileLower) chainsInDecl(decl *syntax.VarDecl) []*syntax.CallExpr {
 	var all []*syntax.CallExpr
 	syntax.Inspect(decl, func(n syntax.Node) bool {
 		if lit, ok := n.(*syntax.FuncLit); ok {
-			lit.Body.List = fl.lowerChainList(lit.Body.List, fl.chainFuncResults(lit.Type, fl.cfLitSig(lit)))
+			lit.Body.List = fl.lowerChainList(lit.Body.List, fl.resultSpecs(lit.Type, fl.cfLitSig(lit)))
 			return false
 		}
 		if call, ok := n.(*syntax.CallExpr); ok && fl.isChainCall(call) {
@@ -176,7 +159,7 @@ func (fl *fileLower) outermostChains(all []*syntax.CallExpr) []*syntax.CallExpr 
 	return outer
 }
 
-func (fl *fileLower) lowerChainStmt(s syntax.Stmt, enc []chainResult) []syntax.Stmt {
+func (fl *fileLower) lowerChainStmt(s syntax.Stmt, enc []resultSpec) []syntax.Stmt {
 	calls := fl.chainsInStmt(s)
 	if len(calls) == 0 {
 		return nil
@@ -190,7 +173,7 @@ func (fl *fileLower) lowerChainStmt(s syntax.Stmt, enc []chainResult) []syntax.S
 	return hoists
 }
 
-func (fl *fileLower) lowerChainElseIf(s syntax.Stmt, enc []chainResult) {
+func (fl *fileLower) lowerChainElseIf(s syntax.Stmt, enc []resultSpec) {
 	if lab, ok := s.(*syntax.LabeledStmt); ok {
 		fl.lowerChainElseIf(lab.Stmt, enc)
 		return
@@ -210,7 +193,7 @@ func (fl *fileLower) lowerChainElseIf(s syntax.Stmt, enc []chainResult) {
 	fl.lowerChainElseIf(els, enc)
 }
 
-func (fl *fileLower) lowerChainElseIfHead(ifs *syntax.IfStmt, els *syntax.IfStmt, enc []chainResult) {
+func (fl *fileLower) lowerChainElseIfHead(ifs *syntax.IfStmt, els *syntax.IfStmt, enc []resultSpec) {
 	if els.Init != nil {
 		fl.lowerChainElseIfInit(ifs, els, enc)
 		return
@@ -231,7 +214,7 @@ func (fl *fileLower) lowerChainElseIfHead(ifs *syntax.IfStmt, els *syntax.IfStmt
 	ifs.Else = &syntax.BlockStmt{List: append(hoists, els)}
 }
 
-func (fl *fileLower) lowerChainConstBodies(s syntax.Stmt, enc []chainResult) {
+func (fl *fileLower) lowerChainConstBodies(s syntax.Stmt, enc []resultSpec) {
 	if lab, ok := s.(*syntax.LabeledStmt); ok {
 		fl.lowerChainConstBodies(lab.Stmt, enc)
 		return
@@ -254,7 +237,7 @@ func (fl *fileLower) lowerChainConstBodies(s syntax.Stmt, enc []chainResult) {
 	}
 }
 
-func (fl *fileLower) lowerChainElseIfInit(ifs *syntax.IfStmt, els *syntax.IfStmt, enc []chainResult) {
+func (fl *fileLower) lowerChainElseIfInit(ifs *syntax.IfStmt, els *syntax.IfStmt, enc []resultSpec) {
 	var pre []syntax.Stmt
 	parts := []otext{gen("{ ")}
 	for _, h := range fl.lowerChainPiece(els.Init, enc) {
@@ -282,7 +265,7 @@ func (fl *fileLower) lowerChainElseIfInit(ifs *syntax.IfStmt, els *syntax.IfStmt
 	ifs.Else = wrapper
 }
 
-func (fl *fileLower) lowerChainGroupBody(s *syntax.GroupStmt, enc []chainResult) {
+func (fl *fileLower) lowerChainGroupBody(s *syntax.GroupStmt, enc []resultSpec) {
 	s.Body.List = fl.lowerChainList(s.Body.List, enc)
 	for _, st := range s.Body.List {
 		if gc, ok := st.(*syntax.GroupChild); ok {
@@ -307,7 +290,7 @@ func (fl *fileLower) stmtStartOf(s syntax.Stmt) int {
 	return fl.off(syntax.StartPos(s))
 }
 
-func (fl *fileLower) lowerChainGuarded(call *syntax.CallExpr, enc []chainResult, guard string) []chainHoist {
+func (fl *fileLower) lowerChainGuarded(call *syntax.CallExpr, enc []resultSpec, guard string) []chainHoist {
 	cg := &chainGen{fl: fl, pos: call.Pos(), prefix: chainPrefix(call.Pos()), enc: enc, guard: guard, exit: fl.chainExit}
 	cg.run(call)
 	return cg.hoists
@@ -573,7 +556,7 @@ type chainGen struct {
 	fl     *fileLower
 	pos    syntax.Pos
 	prefix string
-	enc    []chainResult
+	enc    []resultSpec
 	guard  string
 	exit   func(err string) string
 	whole  span

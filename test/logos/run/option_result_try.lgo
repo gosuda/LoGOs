@@ -1,0 +1,137 @@
+// run
+
+package main
+
+import (
+	"errors"
+	"fmt"
+	"os"
+)
+
+var failed bool
+
+func check(name string, cond bool, got, want any) {
+	if !cond {
+		failed = true
+		fmt.Println("FAIL", name+":", "got", got, "want", want)
+		return
+	}
+	fmt.Println("ok", name)
+}
+
+type pc struct {
+	id int
+}
+
+type pp *pc
+
+type mi int
+
+var errBad = errors.New("bad two")
+
+func tryNo2(i int) (int, error) {
+	if i == 2 {
+		return 0, errBad
+	}
+	return i, nil
+}
+
+func mkc(n int) pc { return pc{id: n} }
+
+func mkp(n int) *pc { return &pc{id: n} }
+
+func mkpp(n int) pp { return pp(&pc{id: n}) }
+
+func mks(n int) []int { return []int{n, n} }
+
+func probeStruct(v pc?) int { return v?.id ?? -1 }
+
+func probePtr(v *pc?) int { return v?.id ?? -1 }
+
+func probeSlice(v []int?) int { return (v ?? []int{-1})[0] }
+
+func structOpt(i int) (pc?, error) {
+	n := tryNo2(i)?
+	return mkc(n), nil
+}
+
+func intOpt(i int) (int?, error) {
+	n := tryNo2(i)?
+	return n, nil
+}
+
+func ptrOpt(i int) (*pc?, error) {
+	n := tryNo2(i)?
+	return mkp(n), nil
+}
+
+func sliceOpt(i int) ([]int?, error) {
+	n := tryNo2(i)?
+	return mks(n), nil
+}
+
+func leadOpt(i int) (int, string?, error) {
+	n := tryNo2(i)?
+	return n, "ok", nil
+}
+
+func namedRes(i int) (pp, error) {
+	n := tryNo2(i)?
+	return mkpp(n), nil
+}
+
+func basicRes(i int) (mi, error) {
+	n := tryNo2(i)?
+	return mi(n), nil
+}
+
+func viewRes(i int) (const []int, error) {
+	n := tryNo2(i)?
+	return mks(n), nil
+}
+
+func main() {
+	sv, err := structOpt(1)
+	check("struct", err == nil && probeStruct(sv) == 1, probeStruct(sv), 1)
+	sv, err = structOpt(2)
+	check("struct-fail", err == errBad && probeStruct(sv) == -1, probeStruct(sv), -1)
+	iv, err := intOpt(1)
+	check("int", err == nil && (iv ?? -1) == 1, iv ?? -1, 1)
+	iv, err = intOpt(2)
+	check("int-fail", err == errBad && (iv ?? -1) == -1, iv ?? -1, -1)
+	pv, err := ptrOpt(1)
+	check("ptr", err == nil && probePtr(pv) == 1, probePtr(pv), 1)
+	pv, err = ptrOpt(2)
+	check("ptr-fail", err == errBad && probePtr(pv) == -1, probePtr(pv), -1)
+	lv, err := sliceOpt(1)
+	check("slice", err == nil && probeSlice(lv) == 1, probeSlice(lv), 1)
+	lv, err = sliceOpt(2)
+	check("slice-fail", err == errBad && probeSlice(lv) == -1, probeSlice(lv), -1)
+	n, s, err := leadOpt(1)
+	check("lead", err == nil && n == 1 && (s ?? "none") == "ok", n, 1)
+	n, s, err = leadOpt(2)
+	check("lead-fail", err == errBad && n == 0 && (s ?? "none") == "none", n, 0)
+	rv, err := namedRes(1)
+	check("named", err == nil && rv.id == 1, rv == nil, false)
+	rv, err = namedRes(2)
+	check("named-fail", err == errBad && rv == nil, rv == nil, true)
+	bv, err := basicRes(1)
+	check("basic", err == nil && bv == 1, bv, 1)
+	bv, err = basicRes(2)
+	check("basic-fail", err == errBad && bv == 0, bv, 0)
+	vv, err := viewRes(1)
+	check("view", err == nil && len(vv) == 2, len(vv), 2)
+	vv, err = viewRes(2)
+	check("view-fail", err == errBad && vv == nil, vv == nil, true)
+	lit := func(i int) (pc?, error) {
+		c := tryNo2(i)?
+		return mkc(c), nil
+	}
+	fv, err := lit(1)
+	check("lit", err == nil && probeStruct(fv) == 1, probeStruct(fv), 1)
+	fv, err = lit(2)
+	check("lit-fail", err == errBad && probeStruct(fv) == -1, probeStruct(fv), -1)
+	if failed {
+		os.Exit(1)
+	}
+}

@@ -20,11 +20,11 @@ type chainGroup struct {
 	inChild bool
 }
 
-func chainChildResults() []chainResult {
-	return []chainResult{{typ: types2.Universe.Lookup("error").Type()}}
+func chainChildResults() []resultSpec {
+	return []resultSpec{{typ: types2.Universe.Lookup("error").Type()}}
 }
 
-func (fl *fileLower) lowerChainSpecial(s syntax.Stmt, enc []chainResult) ([]syntax.Stmt, bool) {
+func (fl *fileLower) lowerChainSpecial(s syntax.Stmt, enc []resultSpec) ([]syntax.Stmt, bool) {
 	inner := s
 	for {
 		lab, ok := inner.(*syntax.LabeledStmt)
@@ -61,7 +61,7 @@ func recvAssign(c *syntax.CommClause) *syntax.AssignStmt {
 	return nil
 }
 
-func (fl *fileLower) lowerChainSelect(s syntax.Stmt, ss *syntax.SelectStmt, enc []chainResult) []syntax.Stmt {
+func (fl *fileLower) lowerChainSelect(s syntax.Stmt, ss *syntax.SelectStmt, enc []resultSpec) []syntax.Stmt {
 	targets := make([][]chainHoist, len(ss.Body))
 	for i, c := range ss.Body {
 		if as := recvAssign(c); as != nil {
@@ -127,7 +127,7 @@ func (fl *fileLower) splitRecvTarget(c *syntax.CommClause, as *syntax.AssignStmt
 	c.Body = append(prefix, c.Body...)
 }
 
-func (fl *fileLower) lowerChainGroup(s syntax.Stmt, inner syntax.Stmt, enc []chainResult) []syntax.Stmt {
+func (fl *fileLower) lowerChainGroup(s syntax.Stmt, inner syntax.Stmt, enc []resultSpec) []syntax.Stmt {
 	saved := fl.chainGrp
 	encBody := enc
 	bodyGrp := chainGroup{inGroup: true}
@@ -167,7 +167,7 @@ func (fl *fileLower) lowerChainHeadLits(n syntax.Node) {
 			savedExit := fl.chainExit
 			fl.chainGrp = chainGroup{}
 			fl.chainExit = nil
-			lit.Body.List = fl.lowerChainList(lit.Body.List, fl.chainFuncResults(lit.Type, fl.cfLitSig(lit)))
+			lit.Body.List = fl.lowerChainList(lit.Body.List, fl.resultSpecs(lit.Type, fl.cfLitSig(lit)))
 			fl.chainGrp = saved
 			fl.chainExit = savedExit
 			return false
@@ -190,12 +190,12 @@ func (fl *fileLower) chainsInNode(n syntax.Node) []*syntax.CallExpr {
 	return fl.outermostChains(all)
 }
 
-func (fl *fileLower) lowerChainPiece(n syntax.Node, enc []chainResult) []chainHoist {
+func (fl *fileLower) lowerChainPiece(n syntax.Node, enc []resultSpec) []chainHoist {
 	fl.lowerChainHeadLits(n)
 	return fl.lowerChainUnit(n, fl.chainsInNode(n), enc)
 }
 
-func (fl *fileLower) lowerChainPieceExit(n syntax.Node, enc []chainResult, exit func(err string) string) []chainHoist {
+func (fl *fileLower) lowerChainPieceExit(n syntax.Node, enc []resultSpec, exit func(err string) string) []chainHoist {
 	fl.lowerChainHeadLits(n)
 	saved := fl.chainExit
 	fl.chainExit = exit
@@ -302,7 +302,7 @@ func (fl *fileLower) declareChainErr(s syntax.Stmt, errName string) []syntax.Stm
 	return parseChainStmtFrag(fl, "var "+errName+" error", stmtStartPos(s))
 }
 
-func (fl *fileLower) chainErrCheck(enc []chainResult, pos syntax.Pos, errName string) ([]syntax.Stmt, string) {
+func (fl *fileLower) chainErrCheck(enc []resultSpec, pos syntax.Pos, errName string) ([]syntax.Stmt, string) {
 	ret := (&chainGen{fl: fl, pos: pos, enc: enc}).returnText(errName)
 	text := "if " + errName + " != nil { " + ret + " }"
 	return parseChainStmtFrag(fl, text, pos), text
@@ -353,7 +353,7 @@ func (fl *fileLower) postClosure(post syntax.SimpleStmt, hoists []chainHoist, sp
 	return exprStmtOf(anchor, call)
 }
 
-func (fl *fileLower) lowerChainFor(s syntax.Stmt, fs *syntax.ForStmt, enc []chainResult) []syntax.Stmt {
+func (fl *fileLower) lowerChainFor(s syntax.Stmt, fs *syntax.ForStmt, enc []resultSpec) []syntax.Stmt {
 	var out []syntax.Stmt
 	if fs.Init != nil {
 		for _, h := range fl.lowerChainPiece(fs.Init, enc) {
@@ -414,7 +414,7 @@ func (fl *fileLower) ifCondSpan(ifs *syntax.IfStmt) span {
 	return fl.tokenSpan(semis[0]+1, to)
 }
 
-func (fl *fileLower) lowerChainIf(s syntax.Stmt, ifs *syntax.IfStmt, enc []chainResult) []syntax.Stmt {
+func (fl *fileLower) lowerChainIf(s syntax.Stmt, ifs *syntax.IfStmt, enc []resultSpec) []syntax.Stmt {
 	var out []syntax.Stmt
 	start := fl.stmtStartOf(s)
 	for _, h := range fl.lowerChainPiece(ifs.Init, enc) {
@@ -435,7 +435,7 @@ func (fl *fileLower) lowerChainIf(s syntax.Stmt, ifs *syntax.IfStmt, enc []chain
 	return append(out, s)
 }
 
-func (fl *fileLower) rewriteIfCond(ifs *syntax.IfStmt, hoists []chainHoist, enc []chainResult, errName string) (*syntax.CallExpr, []syntax.Stmt) {
+func (fl *fileLower) rewriteIfCond(ifs *syntax.IfStmt, hoists []chainHoist, enc []resultSpec, errName string) (*syntax.CallExpr, []syntax.Stmt) {
 	anchor := ifs.Then.Pos()
 	sp := fl.ifCondSpan(ifs)
 	cc := fl.condClosure(ifs.Cond, hoists, anchor)
@@ -578,7 +578,7 @@ func (fl *fileLower) chainTries(call *syntax.CallExpr) bool {
 	return found
 }
 
-func (fl *fileLower) lowerChainUnit(root syntax.Node, calls []*syntax.CallExpr, enc []chainResult) []chainHoist {
+func (fl *fileLower) lowerChainUnit(root syntax.Node, calls []*syntax.CallExpr, enc []resultSpec) []chainHoist {
 	if len(calls) == 0 {
 		return nil
 	}
@@ -613,7 +613,7 @@ type chainItem struct {
 	calls []*syntax.CallExpr
 }
 
-func (fl *fileLower) lowerChainRegion(calls []*syntax.CallExpr, paths chainPaths, depth int, guard string, enc []chainResult) []chainHoist {
+func (fl *fileLower) lowerChainRegion(calls []*syntax.CallExpr, paths chainPaths, depth int, guard string, enc []resultSpec) []chainHoist {
 	var items []chainItem
 	byOp := make(map[*syntax.Operation]int)
 	for _, call := range calls {
@@ -746,7 +746,7 @@ func clauseGuards(c *syntax.CaseClause) []syntax.Expr {
 	return syntax.UnpackListExpr(c.Cases)
 }
 
-func (fl *fileLower) lowerChainSwitch(s syntax.Stmt, ss *syntax.SwitchStmt, enc []chainResult) []syntax.Stmt {
+func (fl *fileLower) lowerChainSwitch(s syntax.Stmt, ss *syntax.SwitchStmt, enc []resultSpec) []syntax.Stmt {
 	if len(ss.Body) == 0 || isTypeSwitchTag(ss.Tag) {
 		return fl.lowerChainPlain(s, enc)
 	}
@@ -787,7 +787,7 @@ func (fl *fileLower) lowerChainSwitch(s syntax.Stmt, ss *syntax.SwitchStmt, enc 
 	return append(pre, fl.emitChainSwitch(s, ss, tagHoists, runs, enc))
 }
 
-func (fl *fileLower) emitChainSwitch(s syntax.Stmt, ss *syntax.SwitchStmt, tagHoists []chainHoist, runs [][]swGuard, enc []chainResult) *syntax.BlockStmt {
+func (fl *fileLower) emitChainSwitch(s syntax.Stmt, ss *syntax.SwitchStmt, tagHoists []chainHoist, runs [][]swGuard, enc []resultSpec) *syntax.BlockStmt {
 	hdr := fl.switchHeaderOf(s, ss)
 	p0 := stmtStartPos(s)
 	pfx := fmt.Sprintf("_logos_sw_%d_%d", ss.Pos().Line(), ss.Pos().Col())

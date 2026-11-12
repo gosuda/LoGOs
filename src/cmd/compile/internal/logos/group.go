@@ -208,7 +208,7 @@ func (fc *funcLower) lowerGroupWrap(s syntax.Stmt, pos syntax.Pos, top groupFram
 }
 
 func (fc *funcLower) groupChildFunc(top groupFrame, body *syntax.BlockStmt, ft *syntax.FuncType) *funcLower {
-	cfc := newFuncLower(fc.fl, ft, body)
+	cfc := newFuncLower(fc.fl, ft, nil, body)
 	cfc.errSeq, cfc.funSeq, cfc.argSeq = fc.errSeq, fc.funSeq, fc.argSeq
 	cfc.tmpSeq, cfc.scopeSeq, cfc.groupSeq = fc.tmpSeq, fc.scopeSeq, fc.groupSeq
 	cfc.groupStack = []groupFrame{{g: top.g, gctx: top.gctx, child: true}}
