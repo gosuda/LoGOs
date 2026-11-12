@@ -55,7 +55,7 @@ func main() {
 	fmt.Println("ok switch-expr-init-other:", okOther)
 
 	s, err = classifyN(7, true)
-	okErr := err == errLoad && s == "" && loads == 3
+	okErr := err != nil && err == errLoad && s == "" && loads == 3
 	fmt.Println("ok switch-expr-init-err:", okErr)
 
 	slot = -1
@@ -65,7 +65,7 @@ func main() {
 
 	slot = -1
 	s, err = classifyAssign(7, true)
-	okAssignErr := err == errLoad && s == "" && slot == 0
+	okAssignErr := err != nil && err == errLoad && s == "" && slot == 0
 	fmt.Println("ok switch-expr-assign-err:", okAssignErr)
 
 	loads = 0
@@ -74,6 +74,6 @@ func main() {
 	fmt.Println("ok switch-expr-expr-nil:", okExprNil)
 
 	s, err = probeExprInit(7, true)
-	okExprErr := err == errLoad && s == "" && loads == 2
+	okExprErr := err != nil && err == errLoad && s == "" && loads == 2
 	fmt.Println("ok switch-expr-expr-err:", okExprErr)
 }

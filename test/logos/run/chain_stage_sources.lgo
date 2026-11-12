@@ -82,7 +82,11 @@ func caseCallingGoroutine(ctx context.Context) {
 		post.add()
 		return y + 1
 	})
-	check("sources-values", err == nil && slices.Equal(got, []int{3, 5, 7, 9, 11, 13}), got, []int{3, 5, 7, 9, 11, 13})
+	if err != nil {
+		check("sources-values", false, err, []int{3, 5, 7, 9, 11, 13})
+	} else {
+		check("sources-values", err == nil && slices.Equal(got, []int{3, 5, 7, 9, 11, 13}), got, []int{3, 5, 7, 9, 11, 13})
+	}
 	check("sources-source-on-calling-goroutine", src.only(caller), "other goroutine", caller)
 	check("sources-later-stage-on-calling-goroutine", post.only(caller), "other goroutine", caller)
 	check("sources-children-elsewhere", !child.has(caller), "caller ran a child", "children on other goroutines")
@@ -120,7 +124,11 @@ func caseQuietChannelDelivers(ctx context.Context) {
 	short, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	first, err := quietFirst(short)
-	check("sources-quiet-channel-delivers", err == nil && first == 20, fmt.Sprint(first, err), "20 <nil>")
+	if err != nil {
+		check("sources-quiet-channel-delivers", false, err, "20 <nil>")
+	} else {
+		check("sources-quiet-channel-delivers", err == nil && first == 20, fmt.Sprint(first, err), "20 <nil>")
+	}
 }
 
 type emptyGrid [0]int
@@ -136,15 +144,31 @@ func emptySeq(yield func(int) bool) {}
 func caseEmptySources(ctx context.Context) {
 	var none []int
 	a, errA := none.group(ctx, limit = 2).map(x => x + 1)
-	check("sources-empty-slice", errA == nil && len(a) == 0, a, "empty")
+	if errA != nil {
+		check("sources-empty-slice", false, errA, "empty")
+	} else {
+		check("sources-empty-slice", errA == nil && len(a) == 0, a, "empty")
+	}
 	var grid emptyGrid
 	b, errB := grid.group(ctx, limit = 2).map(x => x + 1)
-	check("sources-empty-array", errB == nil && len(b) == 0, b, "empty")
+	if errB != nil {
+		check("sources-empty-array", false, errB, "empty")
+	} else {
+		check("sources-empty-array", errB == nil && len(b) == 0, b, "empty")
+	}
 	var seq iter.Seq[int] = emptySeq
 	c, errC := seq.group(ctx, limit = 2).map(x => x + 1)
-	check("sources-empty-seq", errC == nil && len(c) == 0, c, "empty")
+	if errC != nil {
+		check("sources-empty-seq", false, errC, "empty")
+	} else {
+		check("sources-empty-seq", errC == nil && len(c) == 0, c, "empty")
+	}
 	d, errD := closedChannel().group(ctx, limit = 2).map(x => x + 1)
-	check("sources-empty-channel", errD == nil && len(d) == 0, d, "empty")
+	if errD != nil {
+		check("sources-empty-channel", false, errD, "empty")
+	} else {
+		check("sources-empty-channel", errD == nil && len(d) == 0, d, "empty")
+	}
 }
 
 func run(f func(context.Context)) {

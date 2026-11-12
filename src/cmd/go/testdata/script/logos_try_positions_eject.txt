@@ -148,19 +148,44 @@ func ifPick(v int) (int, error) {
 }
 
 func main() {
+	postRuns()
+	initRuns()
+	orderRuns()
+}
+
+func postRuns() {
 	postCalls = 0
 	bodies = 0
 	total, err := sumOK()
-	fmt.Println("post-nil:", err == nil, total, postCalls, bodies)
+	if err != nil {
+		fmt.Println("post-nil: unexpected error", err)
+	} else {
+		fmt.Println("post-nil:", err == nil, total, postCalls, bodies)
+	}
 	postCalls = 0
 	bodies = 0
 	total, err = sumFail()
-	fmt.Println("post-err:", err == errStep, total, postCalls, bodies)
+	if err == nil {
+		fmt.Println("post-err: unexpected success", total)
+	} else {
+		fmt.Println("post-err:", err == errStep, total, postCalls, bodies)
+	}
+}
+
+func initRuns() {
 	postCalls = 0
 	s, err := classify(false)
-	fmt.Println("init-nil:", err == nil, s, postCalls)
+	if err != nil {
+		fmt.Println("init-nil: unexpected error", err)
+	} else {
+		fmt.Println("init-nil:", err == nil, s, postCalls)
+	}
 	s, err = classify(true)
-	fmt.Println("init-err:", err == errStep, s == "", postCalls)
+	if err == nil {
+		fmt.Println("init-err: unexpected success", s)
+	} else {
+		fmt.Println("init-err:", err == errStep, s == "", postCalls)
+	}
 	postCalls = 0
 	ok, err := gate(false, true)
 	fmt.Println("short-false:", err == nil && ok == false, postCalls)
@@ -168,22 +193,49 @@ func main() {
 	fmt.Println("short-true:", err == nil && ok == true, postCalls)
 	postCalls = 0
 	c, err := spin()
-	fmt.Println("loop-cond:", err == nil, c, postCalls)
+	if err != nil {
+		fmt.Println("loop-cond: unexpected error", err)
+	} else {
+		fmt.Println("loop-cond:", err == nil, c, postCalls)
+	}
+}
+
+func orderRuns() {
 	ord = nil
 	r, err := useOrder()
-	fmt.Println("order:", err == nil, r, ord)
+	if err != nil {
+		fmt.Println("order: unexpected error", err)
+	} else {
+		fmt.Println("order:", err == nil, r, ord)
+	}
 	ord = nil
 	n, err := keepScope(7)
-	fmt.Println("scope:", err == nil, n, ord)
+	if err != nil {
+		fmt.Println("scope: unexpected error", err)
+	} else {
+		fmt.Println("scope:", err == nil, n, ord)
+	}
 	ord = nil
 	r, err = nested(7)
-	fmt.Println("nested:", err == nil, r, ord)
+	if err != nil {
+		fmt.Println("nested: unexpected error", err)
+	} else {
+		fmt.Println("nested:", err == nil, r, ord)
+	}
 	ord = nil
 	r, err = viaClosure()
-	fmt.Println("closure:", err == nil, r, ord)
+	if err != nil {
+		fmt.Println("closure: unexpected error", err)
+	} else {
+		fmt.Println("closure:", err == nil, r, ord)
+	}
 	ord = nil
 	q, err := ifPick(7)
-	fmt.Println("ifcond:", err == nil, q, ord)
+	if err != nil {
+		fmt.Println("ifcond: unexpected error", err)
+	} else {
+		fmt.Println("ifcond:", err == nil, q, ord)
+	}
 }
 -- m/want-stdout.txt --
 post-nil: true 3 3 3

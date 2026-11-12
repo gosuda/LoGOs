@@ -353,21 +353,25 @@ func TestGeneratedDepthOffsetAndSideEffects(t *testing.T) {
 	for _, present := range []bool{false, true} {
 		head, mirror := buildDepthPair(present)
 		depthMethodCalls = 0
-		got, gerr := head.MarshalJSON()
+		got := marshalOutcomeOf(head.MarshalJSON())
 		gcalls := depthMethodCalls
 		depthMethodCalls = 0
-		want, werr := json.Marshal(mirror)
+		want := marshalOutcomeOf(json.Marshal(mirror))
 		wcalls := depthMethodCalls
 		if gcalls != wcalls {
 			t.Fatalf("present=%v: generated called custom method %d times, oracle %d", present, gcalls, wcalls)
 		}
-		assertSameMarshalOutcome(t, present, marshalOutcome{got, gerr}, marshalOutcome{want, werr})
+		assertSameMarshalOutcome(t, present, got, want)
 	}
 }
 
 type marshalOutcome struct {
 	bytes []byte
 	err   error
+}
+
+func marshalOutcomeOf(b []byte, err error) marshalOutcome {
+	return marshalOutcome{b, err}
 }
 
 func buildDepthPair(present bool) (*DepthNode, *DepthMirror) {

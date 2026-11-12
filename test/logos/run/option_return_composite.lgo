@@ -36,15 +36,35 @@ func single() pc? { return pc{id: 8} }
 
 func main() {
 	s, err := structRet()
-	check("struct", err == nil && (s?.id ?? -1) == 1, s?.id ?? -1, 1)
+	if err != nil {
+		check("struct", false, err, 1)
+	} else {
+		check("struct", err == nil && (s?.id ?? -1) == 1, s?.id ?? -1, 1)
+	}
 	p, err := ptrRet()
-	check("ptr", err == nil && (p?.id ?? -1) == 2, p?.id ?? -1, 2)
+	if err != nil {
+		check("ptr", false, err, 2)
+	} else {
+		check("ptr", err == nil && (p?.id ?? -1) == 2, p?.id ?? -1, 2)
+	}
 	l, err := sliceRet()
-	check("slice", err == nil && (l ?? []int{-1})[1] == 4, (l ?? []int{-1})[1], 4)
+	if err != nil {
+		check("slice", false, err, 4)
+	} else {
+		check("slice", err == nil && (l ?? []int{-1})[1] == 4, (l ?? []int{-1})[1], 4)
+	}
 	m, err := mapRet()
-	check("map", err == nil && ((m ?? map[int]int{0: -1})[0] ?? -1) == 5, (m ?? map[int]int{0: -1})[0] ?? -1, 5)
+	if err != nil {
+		check("map", false, err, 5)
+	} else {
+		check("map", err == nil && ((m ?? map[int]int{0: -1})[0] ?? -1) == 5, (m ?? map[int]int{0: -1})[0] ?? -1, 5)
+	}
 	a, err := arrayRet()
-	check("array", err == nil && (a ?? [2]int{-1, -1})[1] == 7, (a ?? [2]int{-1, -1})[1], 7)
+	if err != nil {
+		check("array", false, err, 7)
+	} else {
+		check("array", err == nil && (a ?? [2]int{-1, -1})[1] == 7, (a ?? [2]int{-1, -1})[1], 7)
+	}
 	one := single()
 	check("single", (one?.id ?? -1) == 8, one?.id ?? -1, 8)
 	if failed {

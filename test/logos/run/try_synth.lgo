@@ -73,7 +73,7 @@ func main() {
 	okOKErr := err == nil
 	check("ok-err", okOKErr, okOKErr, true)
 	v, err = unnamedFail()
-	okFailValue := err == errSyn && v == 0
+	okFailValue := err != nil && err == errSyn && v == 0
 	check("fail-value", okFailValue, okFailValue, true)
 	okFailErr := err == errSyn
 	check("fail-err", okFailErr, okFailErr, true)
@@ -88,7 +88,7 @@ func main() {
 	okEdOKErr := err == nil
 	check("ed-ok-err", okEdOKErr, okEdOKErr, true)
 	v, err = shadowedErrdefer(true)
-	okEdFailValue := err == errSyn && v == 0
+	okEdFailValue := err != nil && err == errSyn && v == 0
 	check("ed-fail-value", okEdFailValue, okEdFailValue, true)
 	okEdFailErr := err == errSyn
 	check("ed-fail-err", okEdFailErr, okEdFailErr, true)
@@ -98,7 +98,7 @@ func main() {
 	okBlankOKErr := err == nil
 	check("blank-ok-err", okBlankOKErr, okBlankOKErr, true)
 	v, err = blankRes(true)
-	okBlankFailValue := err == errSyn && v == 0
+	okBlankFailValue := err != nil && err == errSyn && v == 0
 	check("blank-fail-value", okBlankFailValue, okBlankFailValue, true)
 	okBlankFailErr := err == errSyn
 	check("blank-fail-err", okBlankFailErr, okBlankFailErr, true)

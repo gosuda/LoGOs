@@ -359,7 +359,7 @@ func drvTryFindMiss() {
 func drvTryFindFail() {
 	closed = nil
 	n, err := tryFindFail()
-	check("try-find-fail", err == errFail && n == 0 && eq(closed, []int{2, 1}), closed, []int{2, 1})
+	check("try-find-fail", err != nil && err == errFail && n == 0 && eq(closed, []int{2, 1}), closed, []int{2, 1})
 }
 
 //logos:allow(slop::discarded_error)
@@ -457,7 +457,7 @@ func drvTryCollect() {
 func drvTryCollectFail() {
 	closed = nil
 	got, err := tryCollectFail()
-	check("try-collect-fail", err == errFail && len(got) == 0 && eq(closed, []int{2, 1}), closed, []int{2, 1})
+	check("try-collect-fail", err != nil && err == errFail && len(got) == 0 && eq(closed, []int{2, 1}), closed, []int{2, 1})
 }
 
 type holder struct{ l lk }
@@ -607,7 +607,11 @@ func tryFilterFail() (int, error) {
 func drvTryFilterFail() {
 	closed = nil
 	n, err := tryFilterFail()
-	check("try-filter-fail", err == errFail && n == 0 && eq(closed, []int{1, 3, 2}), closed, []int{1, 3, 2})
+	if err == nil {
+		check("try-filter-fail", false, "no error", []int{1, 3, 2})
+	} else {
+		check("try-filter-fail", err == errFail && n == 0 && eq(closed, []int{1, 3, 2}), closed, []int{1, 3, 2})
+	}
 }
 
 func main() {

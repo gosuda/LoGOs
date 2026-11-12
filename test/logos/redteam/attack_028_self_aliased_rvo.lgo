@@ -94,7 +94,11 @@ func main() {
 
 	arr3 := [4]int{5, 6, 7, 8}
 	arr3, rerr := ReverseChecked(arr3)
-	check("rvo-guarded-self-alias-value", rerr == nil && arr3 == [4]int{8, 7, 6, 5}, fmt.Sprint(arr3, rerr), "[8 7 6 5]<nil>")
+	if rerr != nil {
+		check("rvo-guarded-self-alias-value", false, fmt.Sprint(rerr), "[8 7 6 5]<nil>")
+	} else {
+		check("rvo-guarded-self-alias-value", arr3 == [4]int{8, 7, 6, 5}, fmt.Sprint(arr3, rerr), "[8 7 6 5]<nil>")
+	}
 	check("rvo-guarded-cleanup-skipped-on-success", len(rvoOrder) == 0, fmt.Sprint(len(rvoOrder)), "0")
 	if failed {
 		os.Exit(1)

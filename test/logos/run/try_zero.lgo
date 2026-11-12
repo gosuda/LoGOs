@@ -77,24 +77,30 @@ func takeAssign() (Point, error) {
 	return observedAssign, nil
 }
 
+func zeroCase[T any](name string, f func() (T, error), zero func(T) bool, want string) {
+	v, err := f()
+	if err == nil {
+		check(name, false, "nil error", want)
+		return
+	}
+	check(name, zero(v) && err == errZero, fmt.Sprint(v, err), want)
+}
+
 func main() {
-	p, errP := takePoint()
-	check("point", p == (Point{}) && errP == errZero, fmt.Sprint(p, errP), "{0 0} zero")
-	a, errA := takeArray()
-	check("array", a == ([3]int{}) && errA == errZero, fmt.Sprint(a, errA), "[0 0 0] zero")
-	pt, errPt := takePtr()
-	check("ptr", pt == nil && errPt == errZero, fmt.Sprint(pt, errPt), "<nil> zero")
-	s, errS := takeSlice()
-	check("slice", s == nil && errS == errZero, fmt.Sprint(s, errS), "[] zero")
-	m, errM := takeMap()
-	check("map", len(m) == 0 && errM == errZero, fmt.Sprint(m, errM), "map[] zero")
-	st, errSt := takeString()
-	check("str", st == "" && errSt == errZero, fmt.Sprint(st, errSt), " zero")
-	g, errG := takeGen(7)
-	check("gen", g == 0 && errG == errZero, fmt.Sprint(g, errG), "0 zero")
+	zeroCase("point", takePoint, func(p Point) bool { return p == (Point{}) }, "{0 0} zero")
+	zeroCase("array", takeArray, func(a [3]int) bool { return a == ([3]int{}) }, "[0 0 0] zero")
+	zeroCase("ptr", takePtr, func(p *int) bool { return p == nil }, "<nil> zero")
+	zeroCase("slice", takeSlice, func(s []int) bool { return s == nil }, "[] zero")
+	zeroCase("map", takeMap, func(m map[string]int) bool { return len(m) == 0 }, "map[] zero")
+	zeroCase("str", takeString, func(s string) bool { return s == "" }, " zero")
+	zeroCase("gen", func() (int, error) { return takeGen(7) }, func(g int) bool { return g == 0 }, "0 zero")
 	_, errAssign := takeAssign()
 	want, wantErr := failPoint()
-	check("assign", errAssign != nil && wantErr != nil && observedAssign == want, fmt.Sprint(observedAssign, errAssign), "{5 6} zero")
+	if wantErr == nil {
+		check("assign", false, "nil error", "{5 6} zero")
+	} else {
+		check("assign", errAssign != nil && observedAssign == want, fmt.Sprint(observedAssign, errAssign), "{5 6} zero")
+	}
 	if failed {
 		os.Exit(1)
 	}

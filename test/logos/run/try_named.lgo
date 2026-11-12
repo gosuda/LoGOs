@@ -55,7 +55,7 @@ func main() {
 	okOKErr := err == nil
 	check("ok-err", okOKErr, okOKErr, true)
 	v, err = namedFail()
-	okFailValue := err == errNamed && v == 0
+	okFailValue := err != nil && err == errNamed && v == 0
 	check("fail-value", okFailValue, okFailValue, true)
 	okFailErr := err == errNamed
 	check("fail-err", okFailErr, okFailErr, true)

@@ -136,7 +136,12 @@ func main() {
 	failed := false
 	for _, c := range cases {
 		ok, err := c.run()
-		if ok && err == nil {
+		if err != nil {
+			failed = true
+			fmt.Println("FAIL", c.name+":", "got error", err, "want true <nil>")
+			continue
+		}
+		if ok {
 			fmt.Println("ok", c.name)
 			continue
 		}

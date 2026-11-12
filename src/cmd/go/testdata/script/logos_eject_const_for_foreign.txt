@@ -107,8 +107,7 @@ import (
 )
 
 func main() {
-	out, err := wire.Describe[wire.Row]("7")
-	fmt.Println(out, err)
-	_, err = wire.Describe[wire.Row]("x")
+	fmt.Println(wire.Describe[wire.Row]("7"))
+	_, err := wire.Describe[wire.Row]("x")
 	fmt.Println("bad:", err)
 }

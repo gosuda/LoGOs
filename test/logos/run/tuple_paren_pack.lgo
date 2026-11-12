@@ -24,10 +24,10 @@ func main() {
 	t := (pair())
 	a, b := t
 	pa, pb := pair()
-	check("paren-around-call-keeps-tuple", a == 3 && b == nil && a == pa && b == pb, fmt.Sprint(a, b), "3 <nil>")
+	check("paren-around-call-keeps-tuple", pb == nil && a == 3 && b == nil && a == pa && b == pb, fmt.Sprint(a, b), "3 <nil>")
 	u := ((pair()))
 	c, d := u
-	check("double-paren-around-call-keeps-tuple", c == 3 && d == nil && c == pa && d == pb, fmt.Sprint(c, d), "3 <nil>")
+	check("double-paren-around-call-keeps-tuple", pb == nil && c == 3 && d == nil && c == pa && d == pb, fmt.Sprint(c, d), "3 <nil>")
 	var w (int, error)
 	w = (pair())
 	e, f := w

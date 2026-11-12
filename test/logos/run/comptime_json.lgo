@@ -55,21 +55,29 @@ func JMarshal[T any](v T) []byte {
 	return b
 }
 
+func compare(name string, gen, ref func() ([]byte, error), generic func() []byte) {
+	g, gerr := gen()
+	if gerr != nil {
+		check(name, "generated error "+gerr.Error(), "true true <nil> <nil>")
+		return
+	}
+	w, werr := ref()
+	if werr != nil {
+		check(name, "oracle error "+werr.Error(), "true true <nil> <nil>")
+		return
+	}
+	check(name, fmt.Sprint(bytes.Equal(g, w), bytes.Equal(generic(), w), gerr, werr), "true true <nil> <nil>")
+}
+
 func main() {
 	check("field-count-cjs1", fmt.Sprint(FieldCount[CJS1]()), "2")
 	check("field-count-cjs2", fmt.Sprint(FieldCount[CJS2]()), "3")
 	a := CJS1{A: 1, B: "x"}
-	ad, aerr := a.MarshalJSON()
-	awant, awerr := json.Marshal(CJS1Mirror(a))
-	check("marshal-cjs1-matches-reflective", fmt.Sprint(bytes.Equal(ad, awant), bytes.Equal(JMarshal(a), awant), aerr, awerr), "true true <nil> <nil>")
+	compare("marshal-cjs1-matches-reflective", a.MarshalJSON, func() ([]byte, error) { return json.Marshal(CJS1Mirror(a)) }, func() []byte { return JMarshal(a) })
 	b := CJS2{X: 1.5, Y: "a<b", Z: 0}
-	bd, berr := b.MarshalJSON()
-	bwant, bwerr := json.Marshal(CJS2Mirror(b))
-	check("marshal-cjs2-matches-reflective", fmt.Sprint(bytes.Equal(bd, bwant), bytes.Equal(JMarshal(b), bwant), berr, bwerr), "true true <nil> <nil>")
+	compare("marshal-cjs2-matches-reflective", b.MarshalJSON, func() ([]byte, error) { return json.Marshal(CJS2Mirror(b)) }, func() []byte { return JMarshal(b) })
 	c := CJS2{X: -2.5, Y: "\xff\xfe\u2028end", Z: 9}
-	cd, cerr := c.MarshalJSON()
-	cwant, cwerr := json.Marshal(CJS2Mirror(c))
-	check("marshal-cjs2-escaping-matches-reflective", fmt.Sprint(bytes.Equal(cd, cwant), bytes.Equal(JMarshal(c), cwant), cerr, cwerr), "true true <nil> <nil>")
+	compare("marshal-cjs2-escaping-matches-reflective", c.MarshalJSON, func() ([]byte, error) { return json.Marshal(CJS2Mirror(c)) }, func() []byte { return JMarshal(c) })
 	if failed {
 		os.Exit(1)
 	}

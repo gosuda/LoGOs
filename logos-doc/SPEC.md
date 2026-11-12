@@ -546,6 +546,10 @@ Code MUST copy the field to a local first. [T-202]
 
 For a callee declared in `.lgo`, reading a result before the `err == nil` proof MUST fail with `[correctness::result_before_error_check]`. [T-202]
 
+A return that passes a result and the err it came with, both unread and unchanged, MUST NOT count as a read of the result. [T-202]
+
+Assigning a result to the blank identifier MUST NOT count as a read. [T-202]
+
 A Go-mode callee (the standard library or any Go package, such as `io.Reader.Read`) MUST keep its own contract, so use of n first stays allowed. [T-202][R-U2]
 
 `nil` MUST be assignable to every `T?`. [T-202]

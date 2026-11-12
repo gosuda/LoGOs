@@ -64,7 +64,11 @@ func caseOrderedReverseFinish(ctx context.Context) {
 	var log finishLog
 	got, err := []int{0, 1, 2, 3}.group(ctx, limit = 4).map(i => finishAfterNext(ctx, i, done, &log)?)
 	check("ordered-finish-reversed", err == nil && slices.Equal(log.order, []int{3, 2, 1, 0}), log.order, []int{3, 2, 1, 0})
-	check("ordered-input-order", err == nil && slices.Equal(got, []int{0, 10, 20, 30}), got, []int{0, 10, 20, 30})
+	if err != nil {
+		check("ordered-input-order", false, err, []int{0, 10, 20, 30})
+	} else {
+		check("ordered-input-order", err == nil && slices.Equal(got, []int{0, 10, 20, 30}), got, []int{0, 10, 20, 30})
+	}
 }
 
 func releasedByDelivery(ctx context.Context, i, last int, release []chan struct{}) (int, error) {
@@ -90,7 +94,11 @@ func caseUnorderedCompletionOrder(ctx context.Context) {
 	short, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	order, err := deliveryOrder(short)
-	check("unordered-completion-order", err == nil && slices.Equal(order, []int{30, 20, 10, 0}), order, []int{30, 20, 10, 0})
+	if err != nil {
+		check("unordered-completion-order", false, err, []int{30, 20, 10, 0})
+	} else {
+		check("unordered-completion-order", err == nil && slices.Equal(order, []int{30, 20, 10, 0}), order, []int{30, 20, 10, 0})
+	}
 }
 
 func main() {

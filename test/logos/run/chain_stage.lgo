@@ -178,7 +178,11 @@ func caseOrdered(ctx context.Context) {
 	var others atomic.Int64
 	got, err := xs.group(ctx, limit = 8).map(x => slowFirst(ctx, x, &others, int64(len(xs)))?)
 	want := []int{10, 20, 30, 40, 50, 60}
-	check("ordered", err == nil && slices.Equal(got, want), got, want)
+	if err != nil {
+		check("ordered", false, err, want)
+	} else {
+		check("ordered", err == nil && slices.Equal(got, want), got, want)
+	}
 }
 
 func caseTryError(ctx context.Context) {
@@ -191,20 +195,36 @@ func caseFilter(ctx context.Context) {
 	xs := []int{1, 2, 3, 4, 5, 6}
 	got, err := xs.group(ctx, limit = 4).filter(x => x%2 == 0).map(x => x * 10)
 	want := []int{20, 40, 60}
-	check("filter", err == nil && slices.Equal(got, want), got, want)
+	if err != nil {
+		check("filter", false, err, want)
+	} else {
+		check("filter", err == nil && slices.Equal(got, want), got, want)
+	}
 	back, err := xs.group(ctx, limit = 4).map(x => x * 10).filter(x => x > 30)
 	want = []int{40, 50, 60}
-	check("map-filter", err == nil && slices.Equal(back, want), back, want)
+	if err != nil {
+		check("map-filter", false, err, want)
+	} else {
+		check("map-filter", err == nil && slices.Equal(back, want), back, want)
+	}
 }
 
 func caseReceivers(ctx context.Context) {
 	want := []int{2, 3, 4, 5}
 	xs := nums{1, 2, 3, 4}
 	got, err := xs.group(ctx, limit = 2).map(x => x + 1)
-	check("recv-named-slice", err == nil && slices.Equal(got, want), got, want)
+	if err != nil {
+		check("recv-named-slice", false, err, want)
+	} else {
+		check("recv-named-slice", err == nil && slices.Equal(got, want), got, want)
+	}
 	arr := grid{1, 2, 3, 4}
 	got, err = arr.group(ctx, limit = 2).map(x => x + 1)
-	check("recv-array", err == nil && slices.Equal(got, want), got, want)
+	if err != nil {
+		check("recv-array", false, err, want)
+	} else {
+		check("recv-array", err == nil && slices.Equal(got, want), got, want)
+	}
 	var seq iter.Seq[int] = func(yield func(int) bool) {
 		for i := 1; i <= 4; i++ {
 			if !yield(i) {
@@ -213,19 +233,39 @@ func caseReceivers(ctx context.Context) {
 		}
 	}
 	got, err = seq.group(ctx, limit = 2).map(x => x + 1)
-	check("recv-seq", err == nil && slices.Equal(got, want), got, want)
+	if err != nil {
+		check("recv-seq", false, err, want)
+	} else {
+		check("recv-seq", err == nil && slices.Equal(got, want), got, want)
+	}
 	named := steps(seq)
 	got, err = named.group(ctx, limit = 2).map(x => x + 1)
-	check("recv-named-seq", err == nil && slices.Equal(got, want), got, want)
+	if err != nil {
+		check("recv-named-seq", false, err, want)
+	} else {
+		check("recv-named-seq", err == nil && slices.Equal(got, want), got, want)
+	}
 	ch := feed()
 	got, err = ch.group(ctx, limit = 2).map(x => x + 1)
-	check("recv-chan", err == nil && slices.Equal(got, want), got, want)
+	if err != nil {
+		check("recv-chan", false, err, want)
+	} else {
+		check("recv-chan", err == nil && slices.Equal(got, want), got, want)
+	}
 	var rch <-chan int = feed()
 	got, err = rch.group(ctx, limit = 2).map(x => x + 1)
-	check("recv-recv-chan", err == nil && slices.Equal(got, want), got, want)
+	if err != nil {
+		check("recv-recv-chan", false, err, want)
+	} else {
+		check("recv-recv-chan", err == nil && slices.Equal(got, want), got, want)
+	}
 	p := pipe(feed())
 	got, err = p.group(ctx, limit = 2).map(x => x + 1)
-	check("recv-named-chan", err == nil && slices.Equal(got, want), got, want)
+	if err != nil {
+		check("recv-named-chan", false, err, want)
+	} else {
+		check("recv-named-chan", err == nil && slices.Equal(got, want), got, want)
+	}
 }
 
 func rangeAll(ctx context.Context, xs []int) ([]int, error) {
@@ -312,15 +352,31 @@ func caseRange(ctx context.Context) {
 	xs := []int{1, 2, 3, 4}
 	got, err := rangeAll(ctx, xs)
 	want := []int{2, 4, 6, 8}
-	check("range-all", err == nil && slices.Equal(got, want), got, want)
+	if err != nil {
+		check("range-all", false, err, want)
+	} else {
+		check("range-all", err == nil && slices.Equal(got, want), got, want)
+	}
 	got, err = rangeFail(ctx, xs)
 	check("range-error", err != nil && errors.Is(err, errBoom) && got == nil, err, errBoom)
 	total, err := rangeAssign(ctx, xs)
-	check("range-assign", err == nil && total == 14, total, 14)
+	if err != nil {
+		check("range-assign", false, err, 14)
+	} else {
+		check("range-assign", err == nil && total == 14, total, 14)
+	}
 	total, err = rangeChan(ctx, feed())
-	check("range-chan", err == nil && total == 30, total, 30)
+	if err != nil {
+		check("range-chan", false, err, 30)
+	} else {
+		check("range-chan", err == nil && total == 30, total, 30)
+	}
 	first, err := rangeUnorderedFast([]int{1, 2, 3, 4})
-	check("range-unordered-fast", err == nil && first != 0 && first != 1, first, "not 1")
+	if err != nil {
+		check("range-unordered-fast", false, err, "not 1")
+	} else {
+		check("range-unordered-fast", err == nil && first != 0 && first != 1, first, "not 1")
+	}
 }
 
 func caseBreak(ctx context.Context) {
@@ -385,19 +441,47 @@ func caseTake(ctx context.Context) {
 func caseTerminals(ctx context.Context) {
 	xs := []int{1, 2, 3, 4, 5, 6}
 	sum, err := xs.group(ctx, limit = 4).map(x => x * 2).sum()
-	check("sum", err == nil && sum == 42, sum, 42)
+	if err != nil {
+		check("sum", false, err, 42)
+	} else {
+		check("sum", err == nil && sum == 42, sum, 42)
+	}
 	count, err := xs.group(ctx, limit = 4).filter(x => x%2 == 0).count()
-	check("count", err == nil && count == 3, count, 3)
+	if err != nil {
+		check("count", false, err, 3)
+	} else {
+		check("count", err == nil && count == 3, count, 3)
+	}
 	first, err := xs.group(ctx, limit = 4).map(x => x * 2).first()
-	check("first", err == nil && (first ?? -1) == 2, first, 2)
+	if err != nil {
+		check("first", false, err, 2)
+	} else {
+		check("first", err == nil && (first ?? -1) == 2, first, 2)
+	}
 	top, err := xs.group(ctx, limit = 4).map(x => x * 2).take(2)
-	check("take", err == nil && slices.Equal(top, []int{2, 4}), top, []int{2, 4})
+	if err != nil {
+		check("take", false, err, []int{2, 4})
+	} else {
+		check("take", err == nil && slices.Equal(top, []int{2, 4}), top, []int{2, 4})
+	}
 	sorted, err := xs.group(ctx, limit = 4).map(x => 7 - x).sortBy(x => x)
-	check("sort-by", err == nil && slices.Equal(sorted, []int{1, 2, 3, 4, 5, 6}), sorted, []int{1, 2, 3, 4, 5, 6})
+	if err != nil {
+		check("sort-by", false, err, []int{1, 2, 3, 4, 5, 6})
+	} else {
+		check("sort-by", err == nil && slices.Equal(sorted, []int{1, 2, 3, 4, 5, 6}), sorted, []int{1, 2, 3, 4, 5, 6})
+	}
 	lowest, err := xs.group(ctx, limit = 4).map(x => 7 - x).sortBy(x => x).first()
-	check("sort-first", err == nil && (lowest ?? -1) == 1, lowest, 1)
+	if err != nil {
+		check("sort-first", false, err, 1)
+	} else {
+		check("sort-first", err == nil && (lowest ?? -1) == 1, lowest, 1)
+	}
 	two, err := xs.group(ctx, limit = 4).map(x => 7 - x).sortBy(x => x).take(2)
-	check("sort-take", err == nil && slices.Equal(two, []int{1, 2}), two, []int{1, 2})
+	if err != nil {
+		check("sort-take", false, err, []int{1, 2})
+	} else {
+		check("sort-take", err == nil && slices.Equal(two, []int{1, 2}), two, []int{1, 2})
+	}
 }
 
 func caseUnordered(ctx context.Context) {
@@ -577,22 +661,46 @@ func noErrorResult(ctx context.Context, xs []int) int {
 func caseForms(ctx context.Context) {
 	xs := []int{1, 2, 3}
 	n, err := total(ctx, xs, []int{1, 2, 3})
-	check("nested-stage", err == nil && n == 36, n, 36)
+	if err != nil {
+		check("nested-stage", false, err, 36)
+	} else {
+		check("nested-stage", err == nil && n == 36, n, 36)
+	}
 	got, err := tryForm(ctx, xs)
-	check("try-form", err == nil && slices.Equal(got, []int{2, 4, 6, 2, 3, 4}), got, []int{2, 4, 6, 2, 3, 4})
+	if err != nil {
+		check("try-form", false, err, []int{2, 4, 6, 2, 3, 4})
+	} else {
+		check("try-form", err == nil && slices.Equal(got, []int{2, 4, 6, 2, 3, 4}), got, []int{2, 4, 6, 2, 3, 4})
+	}
 	check("no-error-result", noErrorResult(ctx, xs) == 12, noErrorResult(ctx, xs), 12)
 	tasks := []func() (int, error){
 		func() (int, error) { return 1, nil },
 		func() (int, error) { return 2, nil },
 	}
 	rs, err := tasks.group(ctx, limit = 2).map(t => t()?)
-	check("thunks", err == nil && slices.Equal(rs, []int{1, 2}), rs, []int{1, 2})
+	if err != nil {
+		check("thunks", false, err, []int{1, 2})
+	} else {
+		check("thunks", err == nil && slices.Equal(rs, []int{1, 2}), rs, []int{1, 2})
+	}
 	outs, err := xs.group(ctx, limit = 2).map(x => outcome{v: x, err: failErr(x, 2)})
-	check("error-in-value", err == nil && len(outs) == 3 && outs[1].err != nil && outs[2].err == nil, outs, "three outcomes")
+	if err != nil {
+		check("error-in-value", false, err, "three outcomes")
+	} else {
+		check("error-in-value", err == nil && len(outs) == 3 && outs[1].err != nil && outs[2].err == nil, outs, "three outcomes")
+	}
 	pre, err := xs.filter(x => x > 1).group(ctx, limit = 2).map(x => x * 2)
-	check("after-chain", err == nil && slices.Equal(pre, []int{4, 6}), pre, []int{4, 6})
+	if err != nil {
+		check("after-chain", false, err, []int{4, 6})
+	} else {
+		check("after-chain", err == nil && slices.Equal(pre, []int{4, 6}), pre, []int{4, 6})
+	}
 	lim, err := xs.group(ctx, limit = len(xs) * 2).map(x => x)
-	check("limit-expression", err == nil && slices.Equal(lim, xs), lim, xs)
+	if err != nil {
+		check("limit-expression", false, err, xs)
+	} else {
+		check("limit-expression", err == nil && slices.Equal(lim, xs), lim, xs)
+	}
 }
 
 func run(f func(context.Context)) {

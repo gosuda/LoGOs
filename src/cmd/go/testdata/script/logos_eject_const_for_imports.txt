@@ -97,8 +97,6 @@ type Item struct {
 }
 
 func main() {
-	out, err := wire.Labels[Item]("  ab  ")
-	fmt.Println(out, err)
-	out, err = wire.Labels[Item]("bad input")
-	fmt.Println(out, err)
+	fmt.Println(wire.Labels[Item]("  ab  "))
+	fmt.Println(wire.Labels[Item]("bad input"))
 }

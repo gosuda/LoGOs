@@ -133,14 +133,15 @@ func groupChildFilter(ctx context.Context, xs []int) (int, error) {
 	return n, nil
 }
 
-func show(name, want string, v any, err error) {
-var got string
-if err != nil {
-got = "err: " + err.Error()
-} else {
-got = fmt.Sprint(v)
-}
-check(name, got == want, got, want)
+func show(name, want string, f func() (any, error)) {
+	v, err := f()
+	var got string
+	if err != nil {
+		got = "err: " + err.Error()
+	} else {
+		got = fmt.Sprint(v)
+	}
+	check(name, got == want, got, want)
 }
 //logos:allow(complexity::cognitive_overflow)
 func main() {
@@ -158,12 +159,9 @@ check("post", false, err, "3 3")
 got := fmt.Sprint(total, calls)
 check("post", got == "3 3", got, "3 3")
 }
-s, err := caseGuard(1, []int{-1})
-show("caseguard", "one calls=0", s, err)
-s, err = caseGuard(2, []int{1, 2, 3})
-show("caseguardok", "count calls=3", s, err)
-s, err = caseGuard(9, []int{1})
-show("caseguarddefault", "default calls=1", s, err)
+show("caseguard", "one calls=0", func() (any, error) { return caseGuard(1, []int{-1}) })
+show("caseguardok", "count calls=3", func() (any, error) { return caseGuard(2, []int{1, 2, 3}) })
+show("caseguarddefault", "default calls=1", func() (any, error) { return caseGuard(9, []int{1}) })
 n, err := groupChildTry(context.Background(), []int{-1})
 if err != nil {
 got := fmt.Sprintf("%d err: %v %d", n, err, childRan)
@@ -171,8 +169,7 @@ check("groupchild", got == "0 err: neg 1", got, "0 err: neg 1")
 } else {
 check("groupchild", false, n, "0 err: neg 1")
 }
-t, err := takeNested([]int{1, 2, 3}, []int{4, 5})
-show("takenested", "[1 2]", t, err)
+show("takenested", "[1 2]", func() (any, error) { return takeNested([]int{1, 2, 3}, []int{4, 5}) })
 total, err = contPost([]int{1})
 if err != nil {
 check("contpost", false, err, "20 3")
@@ -180,12 +177,9 @@ check("contpost", false, err, "20 3")
 got := fmt.Sprint(total, calls)
 check("contpost", got == "20 3", got, "20 3")
 }
-s, err = switchFall(2, []int{1, 2, 3})
-show("switchfall", "hit calls=3", s, err)
-s, err = switchFall(9, []int{1, 2, 3})
-show("switchfallthrough", "def calls=100", s, err)
-s, err = switchFall(7, []int{1, 2, 3})
-show("switchfalldefault", "def calls=3", s, err)
+show("switchfall", "hit calls=3", func() (any, error) { return switchFall(2, []int{1, 2, 3}) })
+show("switchfallthrough", "def calls=100", func() (any, error) { return switchFall(9, []int{1, 2, 3}) })
+show("switchfalldefault", "def calls=3", func() (any, error) { return switchFall(7, []int{1, 2, 3}) })
 n, err = groupChildFilter(context.Background(), []int{-1})
 if err != nil {
 got := fmt.Sprintf("%d err: %v %d", n, err, childRan)

@@ -281,62 +281,124 @@ func mapperCalls() {
 	check("first-map", (f ?? -1) == 10 && calls == 1, []int{f ?? -1, calls}, []int{10, 1})
 }
 
-func drvTerminals(name string, got []int, err error) {
-	check(name, err == nil && eq(got, wantTerminals()), got, wantTerminals())
+func drvTerminals(name string) func([]int, error) {
+	return func(got []int, err error) {
+		check(name, err == nil && eq(got, wantTerminals()), got, wantTerminals())
+	}
 }
 
+//logos:allow(complexity::cognitive_overflow)
 func main() {
-	drvTerminals("ptr", ptrTerminals(), nil)
-	drvTerminals("named", namedTerminals(), nil)
-	drvTerminals("slice", sliceTerminals(), nil)
-	drvTerminals("map", mapTerminals(), nil)
-	drvTerminals("func", funcTerminals(), nil)
-	got, err := tryPtrTerminals()
-	drvTerminals("try-ptr", got, err)
-	got, err = tryNamedTerminals()
-	drvTerminals("try-named", got, err)
-	got, err = trySliceTerminals()
-	drvTerminals("try-slice", got, err)
-	got, err = tryMapTerminals()
-	drvTerminals("try-map", got, err)
-	got, err = tryFuncTerminals()
-	drvTerminals("try-func", got, err)
+	drvTerminals("ptr")(ptrTerminals(), nil)
+	drvTerminals("named")(namedTerminals(), nil)
+	drvTerminals("slice")(sliceTerminals(), nil)
+	drvTerminals("map")(mapTerminals(), nil)
+	drvTerminals("func")(funcTerminals(), nil)
+	drvTerminals("try-ptr")(tryPtrTerminals())
+	drvTerminals("try-named")(tryNamedTerminals())
+	drvTerminals("try-slice")(trySliceTerminals())
+	drvTerminals("try-map")(tryMapTerminals())
+	drvTerminals("try-func")(tryFuncTerminals())
 	sv, err := structOpt(xs13())
-	check("opt-struct", err == nil && probeStruct(sv) == 2, probeStruct(sv), 2)
+	if err != nil {
+		check("opt-struct", false, err, 2)
+	} else {
+		check("opt-struct", err == nil && probeStruct(sv) == 2, probeStruct(sv), 2)
+	}
 	sv, err = structOpt(xs3())
-	check("opt-struct-fail", err == errBad && probeStruct(sv) == -1, probeStruct(sv), -1)
+	if err == nil {
+		check("opt-struct-fail", false, "no error", -1)
+	} else {
+		check("opt-struct-fail", err == errBad && probeStruct(sv) == -1, probeStruct(sv), -1)
+	}
 	iv, err := intOpt(xs13())
-	check("opt-int", err == nil && (iv ?? -1) == 2, iv ?? -1, 2)
+	if err != nil {
+		check("opt-int", false, err, 2)
+	} else {
+		check("opt-int", err == nil && (iv ?? -1) == 2, iv ?? -1, 2)
+	}
 	iv, err = intOpt(xs3())
-	check("opt-int-fail", err == errBad && (iv ?? -1) == -1, iv ?? -1, -1)
+	if err == nil {
+		check("opt-int-fail", false, "no error", -1)
+	} else {
+		check("opt-int-fail", err == errBad && (iv ?? -1) == -1, iv ?? -1, -1)
+	}
 	pv, err := ptrOpt(xs13())
-	check("opt-ptr", err == nil && probePtr(pv) == 2, probePtr(pv), 2)
+	if err != nil {
+		check("opt-ptr", false, err, 2)
+	} else {
+		check("opt-ptr", err == nil && probePtr(pv) == 2, probePtr(pv), 2)
+	}
 	pv, err = ptrOpt(xs3())
-	check("opt-ptr-fail", err == errBad && probePtr(pv) == -1, probePtr(pv), -1)
+	if err == nil {
+		check("opt-ptr-fail", false, "no error", -1)
+	} else {
+		check("opt-ptr-fail", err == errBad && probePtr(pv) == -1, probePtr(pv), -1)
+	}
 	lv, err := sliceOpt(xs13())
-	check("opt-slice", err == nil && probeSlice(lv) == 1, probeSlice(lv), 1)
+	if err != nil {
+		check("opt-slice", false, err, 1)
+	} else {
+		check("opt-slice", err == nil && probeSlice(lv) == 1, probeSlice(lv), 1)
+	}
 	lv, err = sliceOpt(xs3())
-	check("opt-slice-fail", err == errBad && probeSlice(lv) == -1, probeSlice(lv), -1)
+	if err == nil {
+		check("opt-slice-fail", false, "no error", -1)
+	} else {
+		check("opt-slice-fail", err == errBad && probeSlice(lv) == -1, probeSlice(lv), -1)
+	}
 	n, s, err := leadOpt(xs13())
-	check("opt-lead", err == nil && n == 2 && (s ?? "none") == "ok", n, 2)
+	if err != nil {
+		check("opt-lead", false, err, 2)
+	} else {
+		check("opt-lead", err == nil && n == 2 && (s ?? "none") == "ok", n, 2)
+	}
 	n, s, err = leadOpt(xs3())
-	check("opt-lead-fail", err == errBad && n == 0 && (s ?? "none") == "none", n, 0)
+	if err == nil {
+		check("opt-lead-fail", false, "no error", 0)
+	} else {
+		check("opt-lead-fail", err == errBad && n == 0 && (s ?? "none") == "none", n, 0)
+	}
 	vv, err := viewRes(xs13())
-	check("res-view", err == nil && len(vv) == 2, len(vv), 2)
+	if err != nil {
+		check("res-view", false, err, 2)
+	} else {
+		check("res-view", err == nil && len(vv) == 2, len(vv), 2)
+	}
 	vv, err = viewRes(xs3())
-	check("res-view-fail", err == errBad && vv == nil, vv == nil, true)
+	if err == nil {
+		check("res-view-fail", false, "no error", true)
+	} else {
+		check("res-view-fail", err == errBad && vv == nil, vv == nil, true)
+	}
 	rv, err := namedRes(xs13())
-	check("res-named", err == nil && rv.id == 2, rv == nil, false)
+	if err != nil {
+		check("res-named", false, err, false)
+	} else {
+		check("res-named", err == nil && rv.id == 2, rv == nil, false)
+	}
 	rv, err = namedRes(xs3())
-	check("res-named-fail", err == errBad && rv == nil, rv == nil, true)
+	if err == nil {
+		check("res-named-fail", false, "no error", true)
+	} else {
+		check("res-named-fail", err == errBad && rv == nil, rv == nil, true)
+	}
 	lit := func(xs []int) (pc?, error) {
 		c := xs.map(i => tryNo2(i)?).count()
 		return mkc(c), nil
 	}
 	fv, err := lit(xs13())
-	check("opt-lit", err == nil && probeStruct(fv) == 2, probeStruct(fv), 2)
+	if err != nil {
+		check("opt-lit", false, err, 2)
+	} else {
+		check("opt-lit", err == nil && probeStruct(fv) == 2, probeStruct(fv), 2)
+	}
 	fv, err = lit(xs3())
-	check("opt-lit-fail", err == errBad && probeStruct(fv) == -1, probeStruct(fv), -1)
+	if err == nil {
+		check("opt-lit-fail", false, "no error", -1)
+	} else {
+		check("opt-lit-fail", err == errBad && probeStruct(fv) == -1, probeStruct(fv), -1)
+	}
 	mapperCalls()
 	if failed {
 		os.Exit(1)

@@ -90,7 +90,7 @@ func main() {
 	postCalls = 0
 	bodies = 0
 	total, err = sumFail()
-	okErr := err == errStep && total == 0 && postCalls == 3 && bodies == 3
+	okErr := err != nil && err == errStep && total == 0 && postCalls == 3 && bodies == 3
 	fmt.Println("ok for-post-assign-err:", okErr)
 
 	postCalls = 0

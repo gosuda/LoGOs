@@ -80,9 +80,8 @@ import (
 )
 
 func main() {
-	out, err := wire.Describe[gopkg.Row]("7")
-	fmt.Println(out, err)
-	_, err = wire.Describe[gopkg.Row]("x")
+	fmt.Println(wire.Describe[gopkg.Row]("7"))
+	_, err := wire.Describe[gopkg.Row]("x")
 	fmt.Println("bad:", err)
 }
 
@@ -116,9 +115,8 @@ func DescribeLocal(in string) (string, error) {
 }
 
 func main() {
-	out, err := DescribeLocal("7")
-	fmt.Println(out, err)
-	_, err = DescribeLocal("x")
+	fmt.Println(DescribeLocal("7"))
+	_, err := DescribeLocal("x")
 	fmt.Println("bad:", err)
 }
 

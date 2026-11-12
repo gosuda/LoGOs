@@ -71,13 +71,21 @@ func main() {
 	got1, err1 := grid("2", &log1)
 	want1 := []string{"Alpha.X=2", "Alpha.Y=4", "Alpha.Z=6"}
 	check("grid-lines", fmt.Sprint(log1) == fmt.Sprint(want1), log1, want1)
-	check("grid-stopped", got1 == 0 && err1 != nil, got1, 0)
+	if err1 == nil {
+		check("grid-stopped", false, "nil error", 0)
+	} else {
+		check("grid-stopped", got1 == 0, got1, 0)
+	}
 	calls = 100
 	var log2 []string
 	got2, err2 := grid("2", &log2)
 	want2 := []string{"Alpha.X=2", "Alpha.Y=4", "Alpha.Z=6", "Beta.X=8", "Beta.Y=10", "Beta.Z=12"}
 	check("grid-full-lines", fmt.Sprint(log2) == fmt.Sprint(want2), log2, want2)
-	check("grid-full-sum", err2 == nil && got2 == 12, got2, 12)
+	if err2 != nil {
+		check("grid-full-sum", false, err2, 12)
+	} else {
+		check("grid-full-sum", got2 == 12, got2, 12)
+	}
 	check("weights", weights() == 144, weights(), 144)
 	if failed {
 		os.Exit(1)

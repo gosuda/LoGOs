@@ -92,24 +92,21 @@ func describe[T any](v T) string {
 	return "other"
 }
 
+func show(b []byte, err error) {
+	fmt.Printf("%s %v\n", b, err)
+}
+
 func main() {
-	b, err := EncodeSlice([]byte("nums:"), []int64{1, 2, 3})
-	fmt.Printf("%s %v\n", b, err)
-	b, err = EncodeSlice([]byte("words:"), []Word{{"a"}, {"b"}})
-	fmt.Printf("%s %v\n", b, err)
+	show(EncodeSlice([]byte("nums:"), []int64{1, 2, 3}))
+	show(EncodeSlice([]byte("words:"), []Word{{"a"}, {"b"}}))
 	fmt.Println(describe(3))
 	fmt.Println(describe(UserID(3)))
 	fmt.Println(describe("s"))
-	kept, kerr := EncodeOrKeep([]byte("keep:"), []string{"x", "y"})
-	fmt.Printf("%s %v\n", kept, kerr)
-	sb, sberr := EncodeSwitch([]byte("sw-nums:"), []int64{1, 2, 3})
-	fmt.Printf("%s %v\n", sb, sberr)
-	sb, sberr = EncodeSwitch([]byte("sw-words:"), []Word{{"a"}, {"b"}})
-	fmt.Printf("%s %v\n", sb, sberr)
-	sb, sberr = EncodeSwitch([]byte("sw-point:"), []Point{{1, 2}})
-	fmt.Printf("%s %v\n", sb, sberr)
-	sb, sberr = EncodeSwitch([]byte("sw-keep:"), []string{"x", "y"})
-	fmt.Printf("%s %v\n", sb, sberr)
+	show(EncodeOrKeep([]byte("keep:"), []string{"x", "y"}))
+	show(EncodeSwitch([]byte("sw-nums:"), []int64{1, 2, 3}))
+	show(EncodeSwitch([]byte("sw-words:"), []Word{{"a"}, {"b"}}))
+	show(EncodeSwitch([]byte("sw-point:"), []Point{{1, 2}}))
+	show(EncodeSwitch([]byte("sw-keep:"), []string{"x", "y"}))
 }
 
 func EncodeOrKeep[T any](buf []byte, items []T) ([]byte, error) {

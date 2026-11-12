@@ -10,7 +10,7 @@ func load() (string, error) {
 
 func readBeforeCheck() {
 	v, err := load()
-	_ = v // ERROR "result_before_error_check"
+	println(v) // ERROR "result_before_error_check"
 	_ = err
 }
 

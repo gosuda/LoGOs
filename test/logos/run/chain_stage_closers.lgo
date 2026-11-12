@@ -42,7 +42,11 @@ func counts() []int64 {
 func caseFilterDropClosesOnceDeliveredStayOpen(ctx context.Context) {
 	got, err := []int{0, 1, 2, 3, 4, 5}.group(ctx, limit = 3).map(id => open(id)).filter(h => h.id%2 == 0)
 	want := []int64{0, 1, 0, 1, 0, 1}
-	check("closers-delivered-stay-open", err == nil && len(got) == 3, len(got), 3)
+	if err != nil {
+		check("closers-delivered-stay-open", false, err, 3)
+	} else {
+		check("closers-delivered-stay-open", err == nil && len(got) == 3, len(got), 3)
+	}
 	check("closers-filter-drop-closed-once", fmt.Sprint(counts()) == fmt.Sprint(want), counts(), want)
 }
 

@@ -111,7 +111,10 @@ func tryBorrowFilter() (int, error) {
 
 func bTryFilterFail() string {
 	n, err := tryBorrowFilter()
-	return fmt.Sprint(n, err == errBoom)
+	if err != nil {
+		return fmt.Sprint(n, err == errBoom)
+	}
+	return fmt.Sprint(n, false)
 }
 
 func sCount() string {
@@ -271,57 +274,90 @@ func tryProducedSort() ([]*conn, error) {
 
 func tCollect() string {
 	got, err := tryCollect()
-	return fmt.Sprint(idsOf(got), err == errBoom)
+	if err != nil {
+		return fmt.Sprint(idsOf(got), err == errBoom)
+	}
+	return fmt.Sprint(idsOf(got), false)
 }
 
 func tCount() string {
 	n, err := tryCount()
-	return fmt.Sprint(n, err == errBoom)
+	if err != nil {
+		return fmt.Sprint(n, err == errBoom)
+	}
+	return fmt.Sprint(n, false)
 }
 
 func tCountPred() string {
 	n, err := tryCountPred()
-	return fmt.Sprint(n, err == errBoom)
+	if err != nil {
+		return fmt.Sprint(n, err == errBoom)
+	}
+	return fmt.Sprint(n, false)
 }
 
 func tFindMiss() string {
 	n, err := tryFindMiss()
-	return fmt.Sprint(n, err == errBoom)
+	if err != nil {
+		return fmt.Sprint(n, err == errBoom)
+	}
+	return fmt.Sprint(n, false)
 }
 
 func tAnyMiss() string {
 	b, err := tryAnyMiss()
-	return fmt.Sprint(b, err == errBoom)
+	if err != nil {
+		return fmt.Sprint(b, err == errBoom)
+	}
+	return fmt.Sprint(b, false)
 }
 
 func tAllFull() string {
 	b, err := tryAllFull()
-	return fmt.Sprint(b, err == errBoom)
+	if err != nil {
+		return fmt.Sprint(b, err == errBoom)
+	}
+	return fmt.Sprint(b, false)
 }
 
 func tFirst() string {
 	n, err := tryFirst()
-	return fmt.Sprint(n, err == errBoom)
+	if err != nil {
+		return fmt.Sprint(n, err == errBoom)
+	}
+	return fmt.Sprint(n, false)
 }
 
 func tLast() string {
 	n, err := tryLast()
-	return fmt.Sprint(n, err == errBoom)
+	if err != nil {
+		return fmt.Sprint(n, err == errBoom)
+	}
+	return fmt.Sprint(n, false)
 }
 
 func tGet() string {
 	n, err := tryGet()
-	return fmt.Sprint(n, err == errBoom)
+	if err != nil {
+		return fmt.Sprint(n, err == errBoom)
+	}
+	return fmt.Sprint(n, false)
 }
 
 func tTake() string {
 	got, err := tryTake()
-	return fmt.Sprint(idsOf(got), err == errBoom)
+	if err != nil {
+		return fmt.Sprint(idsOf(got), err == errBoom)
+	}
+	return fmt.Sprint(idsOf(got), false)
 }
 
 func tSort() string {
 	got, err := tryProducedSort()
-	return fmt.Sprint(idsOf(got), err == errBoom)
+	if err != nil {
+		return fmt.Sprint(idsOf(got), err == errBoom)
+	}
+	return fmt.Sprint(idsOf(got), false)
 }
 
 func fCount() string { return fmt.Sprint(ids3().map(mk).filter(c => c.id != 2).count()) }
@@ -375,12 +411,18 @@ func tryFilterDrop() (int, error) {
 
 func tFilterFail() string {
 	n, err := tryFilter()
-	return fmt.Sprint(n, err == errBoom)
+	if err != nil {
+		return fmt.Sprint(n, err == errBoom)
+	}
+	return fmt.Sprint(n, false)
 }
 
 func tFilterDropFail() string {
 	n, err := tryFilterDrop()
-	return fmt.Sprint(n, err == errBoom)
+	if err != nil {
+		return fmt.Sprint(n, err == errBoom)
+	}
+	return fmt.Sprint(n, false)
 }
 
 func boomAt(c *conn, id int) bool {

@@ -92,15 +92,21 @@ check("get-idx", (getXS().get(2) ?? -1) == 4, getXS().get(2) ?? -1, 4)
 check("take-3", slices.Equal(getXS().take(3), []int{3, 1, 4}), getXS().take(3), []int{3, 1, 4})
 check("drop-2", slices.Equal(getXS().drop(2), []int{4, 1, 5, 9, 2, 6}), getXS().drop(2), []int{4, 1, 5, 9, 2, 6})
 check("find-gt4", (getXS().find(x => x > 4) ?? -1) == 5, getXS().find(x => x > 4) ?? -1, 5)
-gotShow, showErr := showPos()
-check("show-pos", showErr == nil && gotShow == "{5 true}", gotShow, "{5 true}")
+if gotShow, showErr := showPos(); showErr != nil {
+check("show-pos", false, showErr, "{5 true}")
+} else {
+check("show-pos", gotShow == "{5 true}", gotShow, "{5 true}")
+}
 if v, err := findPos(); err != nil {
 check("find-pos", false, err, 5)
 } else {
 check("find-pos", v == 5, v, 5)
 }
-c, cerr := countPos(getXS())
-check("count-pos", cerr == nil && c == 3, fmt.Sprint(c, cerr), "3 <nil>")
+if c, cerr := countPos(getXS()); cerr != nil {
+check("count-pos", false, cerr, "3 <nil>")
+} else {
+check("count-pos", c == 3, fmt.Sprint(c, cerr), "3 <nil>")
+}
 check("any-gt8", getXS().any(x => x > 8) == true, getXS().any(x => x > 8), true)
 check("all-pos", getXS().all(x => x > 0) == true, getXS().all(x => x > 0), true)
 check("all-gt2", getXS().all(x => x > 2) == false, getXS().all(x => x > 2), false)

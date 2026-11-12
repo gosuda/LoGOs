@@ -60,7 +60,11 @@ func caseFirstFailureWins(ctx context.Context) {
 		return v
 	}).map(y => failOn(y, 2)?)
 	stop()
-	check("cancel-first-failure-cancels-siblings", errors.Is(err, errFirst) && !errors.Is(err, context.Canceled) && got == nil && live.Load() == 0, err, errFirst)
+	if err == nil {
+		check("cancel-first-failure-cancels-siblings", false, "no error", errFirst)
+	} else {
+		check("cancel-first-failure-cancels-siblings", errors.Is(err, errFirst) && !errors.Is(err, context.Canceled) && got == nil && live.Load() == 0, err, errFirst)
+	}
 }
 
 func caseGroupPanic(ctx context.Context) {
@@ -71,7 +75,11 @@ func caseGroupPanic(ctx context.Context) {
 		return x
 	})
 	pe, ok := errors.AsType[*rt.PanicError](err)
-	check("cancel-panic-becomes-panicerror", ok && pe.Value == "boom" && len(pe.Stack) > 0 && got == nil, err, "*rt.PanicError")
+	if err == nil {
+		check("cancel-panic-becomes-panicerror", false, "no error", "*rt.PanicError")
+	} else {
+		check("cancel-panic-becomes-panicerror", ok && pe.Value == "boom" && len(pe.Stack) > 0 && got == nil, err, "*rt.PanicError")
+	}
 }
 
 func cancelFromChild(cancel context.CancelFunc, x int) (int, error) {
@@ -85,7 +93,11 @@ func caseParentCancelled(ctx context.Context) {
 	parent, cancel := context.WithCancel(ctx)
 	defer cancel()
 	got, err := []int{0, 1, 2, 3}.group(parent, limit = 1).map(x => cancelFromChild(cancel, x)?)
-	check("cancel-parent-context-error", errors.Is(err, context.Canceled) && len(got) < 4, err, context.Canceled)
+	if err == nil {
+		check("cancel-parent-context-error", false, "no error", context.Canceled)
+	} else {
+		check("cancel-parent-context-error", errors.Is(err, context.Canceled) && len(got) < 4, err, context.Canceled)
+	}
 }
 
 func caseEarlyStopDiscardsLaterFailure(ctx context.Context) {
@@ -106,7 +118,11 @@ func caseEarlyStopDiscardsLaterFailure(ctx context.Context) {
 
 func caseOrderedFindEarlierFailure(ctx context.Context) {
 	found, err := []int{0, 1, 2, 3}.group(ctx, limit = 4).map(x => failOn(x, 1)?).find(y => y == 2)
-	check("cancel-ordered-find-fails-like-sequential", errors.Is(err, errFirst) && (found ?? -1) == -1, err, errFirst)
+	if err == nil {
+		check("cancel-ordered-find-fails-like-sequential", false, "no error", errFirst)
+	} else {
+		check("cancel-ordered-find-fails-like-sequential", errors.Is(err, errFirst) && (found ?? -1) == -1, err, errFirst)
+	}
 }
 
 func bodyPanics(ctx context.Context, never chan int) (recovered any, err error) {
@@ -132,7 +148,11 @@ func caseBodyPanicJoins(ctx context.Context) {
 	stop := watchdog("cancel-body-panic-joins")
 	recovered, err := bodyPanics(ctx, make(chan int))
 	stop()
-	check("cancel-body-panic-joins", err == nil && recovered == "body" && live.Load() == 0, fmt.Sprint(recovered, " with ", live.Load(), " children live"), "body with 0 children live")
+	if err != nil {
+		check("cancel-body-panic-joins", false, err, "body with 0 children live")
+	} else {
+		check("cancel-body-panic-joins", err == nil && recovered == "body" && live.Load() == 0, fmt.Sprint(recovered, " with ", live.Load(), " children live"), "body with 0 children live")
+	}
 }
 
 func awaitLive(n int64) {
@@ -183,7 +203,11 @@ func caseQuietChannelFailure(ctx context.Context) {
 	stop := watchdog("cancel-quiet-channel-failure")
 	got, err := quietChannel().group(ctx, limit = 2).map(x => failOn(x, 1)?)
 	stop()
-	check("cancel-quiet-channel-failure", errors.Is(err, errFirst) && got == nil, err, errFirst)
+	if err == nil {
+		check("cancel-quiet-channel-failure", false, "no error", errFirst)
+	} else {
+		check("cancel-quiet-channel-failure", errors.Is(err, errFirst) && got == nil, err, errFirst)
+	}
 }
 
 func run(f func(context.Context)) {

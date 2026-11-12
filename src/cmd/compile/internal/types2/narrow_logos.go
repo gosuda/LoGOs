@@ -453,7 +453,7 @@ func (check *Checker) logosNarrowIdent(x *operand, obj Object) {
 		return
 	}
 	if errV, ok := check.logosErrUncheck[v]; ok {
-		if !check.logosStmtReadsErr(errV.name) {
+		if !check.logosResultUnobserved(x.expr, errV) {
 			check.errorf(x.expr, IncompatibleAssign, "%s read of %s before %s is checked (read %s only after %s is checked)", logosResultBeforeErr, v.name, errV.name, v.name, errV.name)
 		}
 		return
@@ -465,6 +465,79 @@ func (check *Checker) logosNarrowIdent(x *operand, obj Object) {
 	}
 }
 
+func (check *Checker) logosResultUnobserved(read syntax.Expr, errV *Var) bool {
+	return check.logosErrTestedBefore(read, errV) || check.logosPassedOn(read, errV) || check.logosBlankAssigned(read)
+}
+
+func (check *Checker) logosPassedOn(read syntax.Expr, errV *Var) bool {
+	ret, ok := check.logosCurStmt.(*syntax.ReturnStmt)
+	if !ok {
+		return false
+	}
+	results := syntax.UnpackListExpr(ret.Results)
+	if len(results) != 2 || results[0] != read {
+		return false
+	}
+	id, ok := results[1].(*syntax.Name)
+	return ok && check.lookup(id.Value) == Object(errV)
+}
+
+func (check *Checker) logosBlankAssigned(read syntax.Expr) bool {
+	as, ok := check.logosCurStmt.(*syntax.AssignStmt)
+	if !ok || as.Op != 0 {
+		return false
+	}
+	lhs, rhs := syntax.UnpackListExpr(as.Lhs), syntax.UnpackListExpr(as.Rhs)
+	if len(lhs) != len(rhs) {
+		return false
+	}
+	for i := range rhs {
+		id, blank := lhs[i].(*syntax.Name)
+		if blank && id.Value == "_" && syntax.Unparen(rhs[i]) == read {
+			return true
+		}
+	}
+	return false
+}
+
+func (check *Checker) logosErrTestedBefore(read syntax.Expr, errV *Var) bool {
+	if check.logosCurStmt == nil {
+		return false
+	}
+	var stack, path []syntax.Node
+	syntax.Inspect(check.logosCurStmt, func(n syntax.Node) bool {
+		if path != nil {
+			return false
+		}
+		if n == nil {
+			stack = stack[:len(stack)-1]
+			return false
+		}
+		stack = append(stack, n)
+		if n == syntax.Node(read) {
+			path = slices.Clone(stack)
+			return false
+		}
+		return true
+	})
+	for i := len(path) - 1; i > 0; i-- {
+		op, ok := path[i-1].(*syntax.Operation)
+		if ok && op.Y != nil && op.Y == path[i] && (op.Op == syntax.AndAnd || op.Op == syntax.OrOr) && check.logosChainHasErrTest(op.X, errV) {
+			return true
+		}
+	}
+	return false
+}
+
+func (check *Checker) logosChainHasErrTest(cond syntax.Expr, errV *Var) bool {
+	cond = syntax.Unparen(cond)
+	if op, ok := cond.(*syntax.Operation); ok && op.Y != nil && (op.Op == syntax.AndAnd || op.Op == syntax.OrOr) {
+		return check.logosChainHasErrTest(op.X, errV) || check.logosChainHasErrTest(op.Y, errV)
+	}
+	v, _, ok := check.logosNilTestOf(cond)
+	return ok && v == errV
+}
+
 func (check *Checker) logosStmtEnter(s syntax.Stmt) syntax.Stmt {
 	prev := check.logosCurStmt
 	check.logosCurStmt = s
@@ -473,31 +546,6 @@ func (check *Checker) logosStmtEnter(s syntax.Stmt) syntax.Stmt {
 
 func (check *Checker) logosStmtExit(prev syntax.Stmt) {
 	check.logosCurStmt = prev
-}
-
-func (check *Checker) logosStmtReadsErr(name string) bool {
-	if name == "" || name == "_" || check.logosCurStmt == nil {
-		return false
-	}
-	found := false
-	syntax.Walk(check.logosCurStmt, logosNameFinder{name: name, found: &found})
-	return found
-}
-
-type logosNameFinder struct {
-	name  string
-	found *bool
-}
-
-func (w logosNameFinder) Visit(node syntax.Node) syntax.Visitor {
-	if node == nil || *w.found {
-		return nil
-	}
-	if id, ok := node.(*syntax.Name); ok && id.Value == w.name {
-		*w.found = true
-		return nil
-	}
-	return w
 }
 
 func (check *Checker) logosLHSPush(lhs syntax.Expr) {
