@@ -43,7 +43,13 @@ cd ../..
 
 cd e/main
 ! logos build -o $WORK/bin/dare ./cmd
-stderr 'syscall\.syscalln'
+stderr 'invalid reference to syscall\.syscalln'
+cd ../..
+
+cd f/main
+! logos build -o $WORK/bin/darf ./cmd
+stderr 'invalid reference to syscall\.rawsyscalln'
+! stderr 'syscall\.syscalln'
 cd ../..
 
 -- a/main/go.mod --
@@ -295,5 +301,49 @@ func libcRawsyscalln(fn uintptr, args ...uintptr) (r1, r2, err uintptr)
 //go:noinline
 func Init() {
 	libcSyscalln(0)
+	libcRawsyscalln(0)
+}
+
+-- f/main/go.mod --
+module example.com/fmain
+
+go 1.27
+
+require example.com/fdep v0.0.0
+
+replace example.com/fdep => ../dep
+
+-- f/main/logos.toml --
+[capabilities]
+transitive_unsafe = "allow"
+transitive_exec = "allow"
+transitive_net = "allow"
+
+-- f/main/cmd/main.go --
+package main
+
+import "example.com/fdep"
+
+func main() { fdep.Init() }
+
+-- f/dep/go.mod --
+module example.com/fdep
+
+go 1.27
+
+-- f/dep/empty.s --
+-- f/dep/dep.go --
+package fdep
+
+import (
+	_ "syscall"
+	_ "unsafe"
+)
+
+//go:linkname libcRawsyscalln syscall.rawsyscalln
+func libcRawsyscalln(fn uintptr, args ...uintptr) (r1, r2, err uintptr)
+
+//go:noinline
+func Init() {
 	libcRawsyscalln(0)
 }
