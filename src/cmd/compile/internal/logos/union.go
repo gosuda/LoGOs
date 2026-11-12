@@ -1155,7 +1155,7 @@ func (fl *fileLower) fromCall(a *syntax.AssertExpr, ou *unionUse, name string) s
 
 func (fl *fileLower) assertCall(a *syntax.AssertExpr, u *unionUse, name string, targ syntax.Expr, targText string) syntax.Expr {
 	pos := a.Pos()
-	xStart := fl.off(a.X.Pos())
+	xStart := fl.off(syntax.StartPos(a.X))
 	dot, end, ok := splitAssert(fl.src, xStart)
 	if !ok {
 		base.Fatalf("logos: cannot split assertion at %s", pos.String())
