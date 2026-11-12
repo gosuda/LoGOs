@@ -55,6 +55,7 @@ exists $WORK/bin/allowpos$GOEXE
 exec $WORK/bin/allowpos$GOEXE
 stdout '^helped$'
 stdout '^extra$'
+stdout '^blockmid$'
 stdout '^ok quiet$'
 cd ..
 
@@ -214,4 +215,19 @@ func extra() string {
 
 func init() {
 	fmt.Println(extra())
+}
+-- allowpos/blockmid.📜 --
+// Package main stays quiet.
+//logos:allow(portability::alias_extension)
+// The directive is the middle line of the comment block.
+package main
+
+import "fmt"
+
+func blockmid() string {
+	return "blockmid"
+}
+
+func init() {
+	fmt.Println(blockmid())
 }
