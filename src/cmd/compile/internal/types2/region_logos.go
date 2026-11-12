@@ -87,16 +87,65 @@ func (check *Checker) logosRegionUnderlying(e syntax.Expr) Type {
 	return Unalias(t).Underlying()
 }
 
-func (check *Checker) logosRegionMarkedExpr(e syntax.Expr) bool {
-	switch x := syntax.Unparen(e).(type) {
+func (check *Checker) logosRegionHolds(e syntax.Expr) bool {
+	e = syntax.Unparen(e)
+	if t := check.Info.TypeOf(e); t != nil && logosRegionCarries(t) {
+		return true
+	}
+	switch x := e.(type) {
 	case *syntax.FuncLit:
 		return check.logosRegionLit[x]
 	case *syntax.Name:
 		if v := check.logosRegionLocal(check.Info.Uses[x]); v != nil {
 			return check.logosRegionVar[v]
 		}
+	case *syntax.CompositeLit:
+		return check.logosRegionHoldsElems(x)
+	case *syntax.Operation:
+		return x.Op == syntax.And && x.Y == nil && check.logosRegionHolds(x.X)
+	case *syntax.CallExpr:
+		if check.logosRegionPassesThrough(x.Fun) {
+			return check.logosRegionHoldsAny(x.ArgList)
+		}
 	}
 	return false
+}
+
+func (check *Checker) logosRegionHoldsAny(list []syntax.Expr) bool {
+	for _, e := range list {
+		if check.logosRegionHolds(e) {
+			return true
+		}
+	}
+	return false
+}
+
+func (check *Checker) logosRegionHoldsElems(lit *syntax.CompositeLit) bool {
+	_, keyed := check.logosRegionUnderlying(lit).(*Map)
+	for _, el := range lit.ElemList {
+		if kv, ok := el.(*syntax.KeyValueExpr); ok {
+			if keyed && check.logosRegionHolds(kv.Key) {
+				return true
+			}
+			el = kv.Value
+		}
+		if check.logosRegionHolds(el) {
+			return true
+		}
+	}
+	return false
+}
+
+func (check *Checker) logosRegionPassesThrough(fun syntax.Expr) bool {
+	if tv, ok := check.Info.Types[syntax.Unparen(fun)]; ok && tv.IsType() {
+		return true
+	}
+	name, _ := syntax.Unparen(fun).(*syntax.Name)
+	if name == nil || name.Value != "append" {
+		return false
+	}
+	_, builtin := check.Info.Uses[name].(*Builtin)
+	return builtin
 }
 
 func (check *Checker) logosRegionInitMap() {
@@ -129,7 +178,7 @@ func (check *Checker) logosRegionLitMark(e *syntax.FuncLit, sig *Signature) {
 				return true
 			}
 			v := check.logosRegionLocal(check.Info.Uses[name])
-			if v == nil || logosRegionScopeInside(v.Parent(), sig.scope) || !logosRegionCarries(v.typ) {
+			if v == nil || logosRegionScopeInside(v.Parent(), sig.scope) || !logosRegionCarries(v.typ) && !check.logosRegionVar[v] {
 				return true
 			}
 			check.logosRegionLit[e] = true
@@ -140,17 +189,10 @@ func (check *Checker) logosRegionLitMark(e *syntax.FuncLit, sig *Signature) {
 
 func (check *Checker) logosRegionEscapedLit(at poser, what string, e syntax.Expr) {
 	check.later(func() {
-		if check.logosRegionMarkedExpr(e) {
-			check.errorf(at, IncompatibleAssign, "%s cannot %s %s: the literal captures a region value", logosRegionEscape, what, ExprString(e))
+		if check.logosRegionHolds(e) {
+			check.errorf(at, IncompatibleAssign, "%s cannot %s %s: it holds a region value", logosRegionEscape, what, ExprString(e))
 		}
 	})
-}
-
-func (check *Checker) logosRegionQueueLit(at poser, what string, e syntax.Expr) {
-	switch syntax.Unparen(e).(type) {
-	case *syntax.FuncLit, *syntax.Name:
-		check.logosRegionEscapedLit(at, what, e)
-	}
 }
 
 func (check *Checker) logosRegionAssign(lhs syntax.Expr, x *operand) {
@@ -167,14 +209,14 @@ func (check *Checker) logosRegionAssign(lhs syntax.Expr, x *operand) {
 		if lv := check.logosRegionLocal(check.lookup(name.Value)); lv != nil {
 			check.logosRegionInitMap()
 			check.later(func() {
-				if check.logosRegionMarkedExpr(x.expr) {
+				if check.logosRegionHolds(x.expr) {
 					check.logosRegionVar[lv] = true
 				}
 			})
 		}
 	}
 	if !blank && root == nil {
-		check.logosRegionQueueLit(lhs, "store", x.expr)
+		check.logosRegionEscapedLit(lhs, "store", x.expr)
 	}
 }
 
@@ -192,7 +234,7 @@ func (check *Checker) logosRegionDecl(lhs *Var, x *operand) {
 	check.logosRegionInitMap()
 	e := x.expr
 	check.later(func() {
-		if check.logosRegionMarkedExpr(e) {
+		if check.logosRegionHolds(e) {
 			check.logosRegionVar[local] = true
 		}
 	})
@@ -207,7 +249,7 @@ func (check *Checker) logosRegionResults(results []syntax.Expr) {
 			check.errorf(r, IncompatibleAssign, "%s cannot return %s", logosRegionEscape, ExprString(r))
 			continue
 		}
-		check.logosRegionQueueLit(r, "return", r)
+		check.logosRegionEscapedLit(r, "return", r)
 	}
 }
 
@@ -219,7 +261,7 @@ func (check *Checker) logosRegionSend(val *operand) {
 		check.errorf(val, IncompatibleAssign, "%s cannot send %s on a channel", logosRegionEscape, ExprString(val.expr))
 		return
 	}
-	check.logosRegionQueueLit(val.expr, "send", val.expr)
+	check.logosRegionEscapedLit(val.expr, "send", val.expr)
 }
 
 func (check *Checker) logosRegionSuspended(keyword string, call syntax.Expr) {
@@ -233,11 +275,13 @@ func (check *Checker) logosRegionSuspended(keyword string, call syntax.Expr) {
 	for _, arg := range c.ArgList {
 		if t := check.Info.TypeOf(arg); t != nil && logosRegionCarries(t) {
 			check.errorf(arg, InvalidGo, "%s cannot pass %s to a goroutine", logosRegionEscape, ExprString(arg))
+			continue
 		}
+		check.logosRegionEscapedLit(arg, "pass to a goroutine", arg)
 	}
 	if lit, ok := syntax.Unparen(c.Fun).(*syntax.FuncLit); ok {
 		check.logosRegionEscapedLit(lit, "run with go", lit)
 		return
 	}
-	check.logosRegionQueueLit(c.Fun, "run with go", c.Fun)
+	check.logosRegionEscapedLit(c.Fun, "run with go", c.Fun)
 }

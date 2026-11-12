@@ -91,3 +91,90 @@ func immediateClosure() {
 		_ = r
 	}()
 }
+
+type holder struct {
+	p *box
+}
+
+func usePtr(b *box) {
+	_ = b
+}
+
+func retPtrLit() *box {
+	r := arena.Open()
+	return & /* ERROR "correctness::region_escape" */ box{r: r}
+}
+
+func retPtrLocal() *box {
+	r := arena.Open()
+	p := &box{r: r}
+	return p /* ERROR "correctness::region_escape" */
+}
+
+func retSliceLocal() []arena.Region {
+	r := arena.Open()
+	s := []arena.Region{r}
+	return s /* ERROR "correctness::region_escape" */
+}
+
+func retMapLocal() map[string]arena.Region {
+	r := arena.Open()
+	m := map[string]arena.Region{"k": r}
+	return m /* ERROR "correctness::region_escape" */
+}
+
+func retAny() any {
+	r := arena.Open()
+	var a any = r
+	return a /* ERROR "correctness::region_escape" */
+}
+
+func retConvAny() any {
+	r := arena.Open()
+	return any /* ERROR "correctness::region_escape" */ (r)
+}
+
+func storePtrLit(h *holder) {
+	r := arena.Open()
+	h /* ERROR "correctness::region_escape" */ .p = &box{r: r}
+}
+
+func storeGlobalPtr() {
+	r := arena.Open()
+	p := &box{r: r}
+	gptr /* ERROR "correctness::region_escape" */ = p
+}
+
+func sendPtrLit(c chan *box) {
+	r := arena.Open()
+	c <- & /* ERROR "correctness::region_escape" */ box{r: r}
+}
+
+func goPtrLocal(ctx context.Context) error {
+	r := arena.Open()
+	p := &box{r: r}
+	go group (ctx) {
+		go usePtr(p /* ERROR "correctness::region_escape" */)
+	}
+	return nil
+}
+
+func closurePtrLocal() func() {
+	r := arena.Open()
+	p := &box{r: r}
+	return func /* ERROR "correctness::region_escape" */ () { _ = p }
+}
+
+func localPtrOnly() {
+	r := arena.Open()
+	p := &box{r: r}
+	usePtr(p)
+	usePtr(&box{r: r})
+	_ = p
+}
+
+func fluent(b *box) *box {
+	return b
+}
+
+var gptr *box?
