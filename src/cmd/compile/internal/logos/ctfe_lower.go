@@ -5,10 +5,10 @@
 package logos
 
 import (
+	"cmd/compile/internal/base"
 	"cmd/compile/internal/logos/ctfe"
 	"cmd/compile/internal/syntax"
 	"cmd/compile/internal/types2"
-	"go/token"
 	"slices"
 )
 
@@ -301,54 +301,26 @@ func (fl *fileLower) deleteSpec(cd *syntax.ConstDecl) {
 }
 
 func (fl *fileLower) endOff(e syntax.Expr) int {
-	end := fl.off(syntax.EndPos(e))
-	if end < len(fl.src) && (fl.src[end] == ')' || fl.src[end] == ']' || fl.src[end] == '}') {
-		end++
-		return end
-	}
-	if _, ok := e.(*syntax.CallExpr); ok {
-		if close, ok := nullaryCallEnd(fl.src, end); ok {
-			return close
+	switch n := e.(type) {
+	case *syntax.CallExpr, *syntax.IndexExpr, *syntax.SliceExpr, *syntax.ParenExpr, *syntax.AssertExpr:
+		split, ok := splitCall(fl.src, fl.off(n.Pos()))
+		if !ok {
+			base.Fatalf("logos: expression at %s has no closing bracket", n.Pos().String())
 		}
-	}
-	return end
-}
-
-func lenCallEnd(src []byte, start int) (int, bool) {
-	depth, end := 0, -1
-	scanSegment(src, start, len(src), func(t tok) bool {
-		switch {
-		case t.comment || t.auto:
-		case t.kind == token.LPAREN:
-			depth++
-		case t.kind == token.RPAREN:
-			depth--
-			if depth == 0 {
-				end = t.end
-				return false
-			}
+		return split.end
+	case *syntax.CompositeLit:
+		return fl.off(n.Rbrace) + 1
+	case *syntax.FuncLit:
+		return fl.off(n.Body.Rbrace) + 1
+	case *syntax.Operation:
+		if n.Y != nil {
+			return fl.endOff(n.Y)
 		}
-		return true
-	})
-	return end, end >= 0
-}
-
-func nullaryCallEnd(src []byte, end int) (int, bool) {
-	off := end
-	for off < len(src) && (src[off] == ' ' || src[off] == '\t' || src[off] == '\n') {
-		off++
+		return fl.endOff(n.X)
+	case *syntax.ListExpr:
+		return fl.endOff(n.ElemList[len(n.ElemList)-1])
 	}
-	if off >= len(src) || src[off] != '(' {
-		return 0, false
-	}
-	off++
-	for off < len(src) && (src[off] == ' ' || src[off] == '\t' || src[off] == '\n') {
-		off++
-	}
-	if off >= len(src) || src[off] != ')' {
-		return 0, false
-	}
-	return off + 1, true
+	return fl.off(syntax.EndPos(e))
 }
 
 func constKeywordStart(src []byte, nameOff int) (int, bool) {
