@@ -19,3 +19,10 @@ ok or-short
 ok or-run
 ok and-if
 ok and-for
+ok recv-ret-list
+ok recv-assign-left
+ok recv-binary
+ok recv-compound
+ok recv-composite
+ok recv-index-base
+ok recv-tuple

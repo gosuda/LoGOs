@@ -14,6 +14,11 @@ var gxs = make([]int, 2)
 
 func rec(s string) { ev = append(ev, s) }
 
+func seen(v, queued int) (int, error) {
+	rec(fmt.Sprintf("load:s:%d", queued))
+	return v, nil
+}
+
 func load(tag string, v int) (int, error) {
 	rec("load:" + tag)
 	return v, nil
@@ -164,6 +169,62 @@ func andFor() (int, error) {
 	return c, nil
 }
 
+func recvRetList() (int, int, int, error) {
+	rch := make(chan int, 2)
+	rch <- 1
+	rch <- 2
+	return <-rch, switch n := seen(7, len(rch))?; n { case 7 => 5; default => 6 }, <-rch, nil
+}
+
+func recvAssignLeft() (int, error) {
+	gxs[0], gxs[1] = 0, 0
+	rch := make(chan int, 2)
+	rch <- 1
+	rch <- 2
+	gxs[<-rch] = switch n := seen(7, len(rch))?; n { case 7 => 5; default => 6 }
+	return gxs[1]*10 + <-rch, nil
+}
+
+func recvBinary() (int, error) {
+	rch := make(chan int, 2)
+	rch <- 1
+	rch <- 2
+	r := <-rch*10 + switch n := seen(7, len(rch))?; n { case 7 => 100; default => 200 } + <-rch
+	return r, nil
+}
+
+func recvCompound() (int, error) {
+	r := 1
+	rch := make(chan int, 2)
+	rch <- 1
+	rch <- 2
+	r += <-rch + switch n := seen(7, len(rch))?; n { case 7 => 70; default => 1 } + <-rch
+	return r, nil
+}
+
+func recvComposite() (int, error) {
+	rch := make(chan int, 2)
+	rch <- 1
+	rch <- 2
+	xs := []int{<-rch, switch n := seen(7, len(rch))?; n { case 7 => 2; default => 0 }, <-rch}
+	return xs[0]*100 + xs[1]*10 + xs[2], nil
+}
+
+func recvIndexBase() (int, error) {
+	sch := make(chan []int, 1)
+	sch <- []int{10, 20}
+	r := (<-sch)[switch n := seen(7, len(sch))?; n { case 7 => 1; default => 0 }]
+	return r, nil
+}
+
+func recvTuple() (int, error) {
+	rch := make(chan int, 2)
+	rch <- 1
+	rch <- 2
+	a, b := <-rch, switch n := seen(7, len(rch))?; n { case 7 => 70; default => 0 }
+	return a*1000 + b*10 + <-rch, nil
+}
+
 type cell struct {
 	name string
 	run  func() (string, error)
@@ -181,8 +242,8 @@ func show[T any](f func() (T, error)) func() (string, error) {
 	}
 }
 
-func main() {
-	cells := []cell{
+func cells() []cell {
+	return []cell{
 		{"ret-list", func() (string, error) {
 			a, b, c, err := retList()
 			if err != nil {
@@ -216,9 +277,25 @@ func main() {
 		{"or-run", show(orRun), []string{"a", "load:s"}, "true"},
 		{"and-if", show(andIf), []string{"a", "load:s"}, "1"},
 		{"and-for", show(andFor), []string{"load:c", "load:c"}, "2"},
+		{"recv-ret-list", func() (string, error) {
+			a, b, c, err := recvRetList()
+			if err != nil {
+				return "", err
+			}
+			return fmt.Sprint(a, b, c), nil
+		}, []string{"load:s:1"}, "1 5 2"},
+		{"recv-assign-left", show(recvAssignLeft), []string{"load:s:1"}, "52"},
+		{"recv-binary", show(recvBinary), []string{"load:s:1"}, "112"},
+		{"recv-compound", show(recvCompound), []string{"load:s:1"}, "74"},
+		{"recv-composite", show(recvComposite), []string{"load:s:1"}, "122"},
+		{"recv-index-base", show(recvIndexBase), []string{"load:s:0"}, "20"},
+		{"recv-tuple", show(recvTuple), []string{"load:s:1"}, "1702"},
 	}
+}
+
+func main() {
 	failed := false
-	for _, c := range cells {
+	for _, c := range cells() {
 		ev = nil
 		got, err := c.run()
 		if err != nil {

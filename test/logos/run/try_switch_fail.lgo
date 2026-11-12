@@ -19,6 +19,8 @@ var gxs = []int{0, 0}
 
 var target = -1
 
+var left int
+
 var childDone atomic.Int32
 
 func rec(s string) { ev = append(ev, s) }
@@ -64,6 +66,15 @@ func binaryRight() (int, error) {
 
 func binaryBetween() (int, error) {
 	r := val("a", 1) + switch n := loadFail("s")?; n { default => 10 } + val("b", 100)
+	return r, nil
+}
+
+func recvBetween() (int, error) {
+	rch := make(chan int, 2)
+	rch <- 1
+	rch <- 2
+	defer func() { left = len(rch) }()
+	r := <-rch*10 + switch n := loadFail("s")?; n { default => 100 } + <-rch
 	return r, nil
 }
 
@@ -291,6 +302,7 @@ func cells() []cell {
 		{"assign-target", showState(assignTarget, func() string { return " " + fmt.Sprint(target) }), []string{"load:s"}, "0 -1"},
 		{"binary-right", show(binaryRight), []string{"load:s"}, "0"},
 		{"binary-between", show(binaryBetween), []string{"a", "load:s"}, "0"},
+		{"recv-between", showState(recvBetween, func() string { return " " + fmt.Sprint(left) }), []string{"load:s"}, "0 1"},
 		{"divide", show(divide), []string{"load:s"}, "0"},
 		{"indexed", show(indexed), []string{"load:s"}, "0"},
 		{"element", show(element), []string{"e0", "load:s"}, "0"},
