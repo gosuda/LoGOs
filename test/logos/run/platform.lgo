@@ -107,7 +107,7 @@ func main() {
 		os.Exit(1)
 	}
 	check("file-open", f != nil, f != nil, true)
-	check("file-name", len(f.Name()) > 0, len(f.Name()) > 0, true)
+	check("file-name", f.Name() == os.Args[0], f.Name(), os.Args[0])
 	_ = f.Close()
 
 	check("global", flag.CommandLine != nil, flag.CommandLine != nil, true)

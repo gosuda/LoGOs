@@ -43,7 +43,8 @@ func main() {
 		os.Exit(1)
 	}
 	check("group-panic-value", pe.Value == "boom", fmt.Sprint(pe.Value), "boom")
-	check("group-panic-stack", len(pe.Stack) > 0, fmt.Sprint(len(pe.Stack) > 0), "non-empty")
+	stack := string(pe.Stack)
+	check("group-panic-stack", strings.Contains(stack, "goroutine") && strings.Contains(stack, "group_panic.lgo"), fmt.Sprintf("%d bytes", len(stack)), "stack naming goroutine and group_panic.lgo")
 	check("group-panic-text", strings.Contains(pe.Error(), "boom"), pe.Error(), "text containing boom")
 	if bad {
 		os.Exit(1)
