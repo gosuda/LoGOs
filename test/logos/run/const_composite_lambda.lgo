@@ -1,0 +1,49 @@
+// run
+
+package main
+
+import (
+	"fmt"
+	"os"
+)
+
+var failed bool
+
+func check(name string, cond bool, got, want any) {
+	if !cond {
+		failed = true
+		fmt.Println("FAIL", name+":", "got", got, "want", want)
+		return
+	}
+	fmt.Println("ok", name)
+}
+
+type box struct {
+	M map[string]int
+	N int
+}
+
+const Cfg = box{M: map[string]int{"a": 1, "b": 2}, N: 7}
+
+const cfg = box{M: map[string]int{"a": 1, "b": 2}, N: 7}
+
+func test() {
+	xs := []int{1}
+	ys := xs.map(x => Cfg)
+	ys[0].M["a"] = 50
+	ws := xs.map(x => Cfg)
+	check("lambda-exported-fresh", (ws[0].M["a"] ?? -1) == 1, ws[0].M["a"] ?? -1, 1)
+	check("lambda-exported-read", (Cfg.M["a"] ?? -1) == 1, Cfg.M["a"] ?? -1, 1)
+	us := xs.map(x => cfg)
+	us[0].M["b"] = 70
+	vs := xs.map(x => cfg)
+	check("lambda-unexported-fresh", (vs[0].M["b"] ?? -1) == 2, vs[0].M["b"] ?? -1, 2)
+	check("lambda-unexported-field", vs[0].N == 7, vs[0].N, 7)
+}
+
+func main() {
+	test()
+	if failed {
+		os.Exit(1)
+	}
+}

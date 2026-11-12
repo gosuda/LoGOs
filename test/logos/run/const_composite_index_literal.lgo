@@ -1,0 +1,48 @@
+// run
+
+package main
+
+import (
+	"fmt"
+	"os"
+)
+
+var failed bool
+
+func check(name string, cond bool, got, want any) {
+	if !cond {
+		failed = true
+		fmt.Println("FAIL", name+":", "got", got, "want", want)
+		return
+	}
+	fmt.Println("ok", name)
+}
+
+type item struct {
+	M map[string]int
+}
+
+const items = []item{
+	{M: map[string]int{"id": 0}}, {M: map[string]int{"id": 1}}, {M: map[string]int{"id": 2}}, {M: map[string]int{"id": 3}},
+	{M: map[string]int{"id": 4}}, {M: map[string]int{"id": 5}}, {M: map[string]int{"id": 6}}, {M: map[string]int{"id": 7}},
+	{M: map[string]int{"id": 8}}, {M: map[string]int{"id": 9}}, {M: map[string]int{"id": 10}},
+}
+
+func test() {
+	octal := items[010].M["id"] ?? -1
+	check("index-octal", octal == 8, octal, 8)
+	hex := items[0x8].M["id"] ?? -1
+	check("index-hex", hex == 8, hex, 8)
+	under := items[1_0].M["id"] ?? -1
+	check("index-underscore", under == 10, under, 10)
+	bin := items[0b1000].M["id"] ?? -1
+	check("index-binary", bin == 8, bin, 8)
+	check("index-octal-len", len(items[010].M) == 1, len(items[010].M), 1)
+}
+
+func main() {
+	test()
+	if failed {
+		os.Exit(1)
+	}
+}

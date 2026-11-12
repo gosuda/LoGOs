@@ -60,7 +60,7 @@ func Lower(pkg *types2.Package, info *types2.Info, files []*syntax.File, src map
 	shared := &packageLower{info: info, tpkg: pkg, constMaps: collectConstMaps(files, info)}
 	shared.importedMaps = map[*types2.Var]*constMapGen{}
 	shared.importedDone = map[string]bool{}
-	shared.composites = map[*types2.Const]*compositeInfo{}
+	shared.composites, shared.compositeSeq = collectComposites(files, info)
 	shared.importedComposites = map[*types2.Var]*importedComposite{}
 	base.ClearLogosCtClones(pkg.Path())
 	shared.ctExp = newCfExpander(shared, files, src) // comptime generics of every file, registered before any file lowers.
@@ -80,6 +80,7 @@ func Lower(pkg *types2.Package, info *types2.Info, files []*syntax.File, src map
 			base:          file.Pos().FileBase(),
 			start:         lineStarts(buf),
 			loweredChains: make(map[*syntax.CallExpr]bool),
+			compositeDone: make(map[*syntax.Name]bool),
 		}
 		fl.baseName = filepath.Base(fl.base.Filename())
 		fl.srcMap = origBuf(buf)
@@ -226,6 +227,7 @@ type fileLower struct {
 	chainExit          func(err string) string  // a header closure hands a failing hoist's error to its statement; nil returns it.
 	groupDone          map[*syntax.FuncLit]bool // finished group closures, pruned by the literal scan.
 	funcs              map[*syntax.BlockStmt]*funcLower
+	compositeDone      map[*syntax.Name]bool
 }
 
 // off converts a valid file position to a byte offset.

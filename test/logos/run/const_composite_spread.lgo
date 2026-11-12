@@ -1,0 +1,45 @@
+// run
+
+package main
+
+import (
+	"fmt"
+	"os"
+)
+
+var failed bool
+
+func check(name string, cond bool, got, want any) {
+	if !cond {
+		failed = true
+		fmt.Println("FAIL", name+":", "got", got, "want", want)
+		return
+	}
+	fmt.Println("ok", name)
+}
+
+type box struct {
+	M map[string]int
+	N int
+}
+
+const cfg = box{M: map[string]int{"a": 1, "b": 2}, N: 7}
+
+func test() {
+	o := box{..cfg, N: 1}
+	check("spread-keeps-map", o.M != nil && len(o.M) == 2, len(o.M), 2)
+	check("spread-keeps-entry", (o.M["b"] ?? -1) == 2, o.M["b"] ?? -1, 2)
+	check("spread-override", o.N == 1, o.N, 1)
+	p := box{..cfg}
+	check("spread-whole", p.N == 7 && len(p.M) == 2, p.N, 7)
+	o.M["a"] = 50
+	q := box{..cfg}
+	check("spread-fresh-map", (q.M["a"] ?? -1) == 1, q.M["a"] ?? -1, 1)
+}
+
+func main() {
+	test()
+	if failed {
+		os.Exit(1)
+	}
+}

@@ -6,6 +6,7 @@ package logos
 
 import (
 	"fmt"
+	"go/constant"
 	"go/token"
 	"slices"
 	"strconv"
@@ -22,31 +23,28 @@ type compositePathStep struct {
 	field   string
 	index   int
 	isField bool
+	dynamic bool
 }
 
 type compositeHidden struct {
-	path    string
 	steps   []compositePathStep
 	mapType types2.Type
 	val     ctfe.Value
 	gen     *constMapGen
-	keys    []string
-	vals    []string
-	order   []int
-	hashes  []uint64
-	canons  []string
-	bearing bool
+	parts   constMapParts
 }
 
 type compositeInfo struct {
 	obj     *types2.Const
 	val     ctfe.Value
 	typ     types2.Type
-	builder string
-	ro      string
-	hiddens map[string]*compositeHidden
-	order   []string
+	base    string
+	hiddens []*compositeHidden
+	byPath  map[string]*compositeHidden
 }
+
+func (c *compositeInfo) builder() string { return c.base + "_build" }
+func (c *compositeInfo) ro() string      { return c.base + "_ro" }
 
 func compositeUnderlying(t types2.Type) types2.Type {
 	u := types2.Unalias(t)
@@ -108,9 +106,12 @@ func compositePathString(steps []compositePathStep) string {
 		if i > 0 {
 			b.WriteString(".")
 		}
-		if s.isField {
+		switch {
+		case s.dynamic:
+			b.WriteString("*")
+		case s.isField:
 			b.WriteString(s.field)
-		} else {
+		default:
 			b.WriteString(strconv.Itoa(s.index))
 		}
 	}
@@ -132,56 +133,31 @@ func compositeSanitize(path string) string {
 	return b.String()
 }
 
-func compositeCloneSteps(steps []compositePathStep) []compositePathStep {
-	return slices.Clone(steps)
-}
-
-func (fl *fileLower) collectCompositeHiddens(val ctfe.Value, typ types2.Type, steps []compositePathStep, out *[]compositeHidden) {
+func collectCompositeHiddens(val ctfe.Value, typ types2.Type, steps []compositePathStep, visit func([]compositePathStep, types2.Type, ctfe.Value)) {
 	if val.IsNilValue() {
 		return
 	}
 	switch u := compositeUnderlying(typ).(type) {
 	case *types2.Map:
-		cp := compositeCloneSteps(steps)
-		*out = append(*out, compositeHidden{path: compositePathString(cp), steps: cp, mapType: typ, val: val})
+		visit(slices.Clone(steps), typ, val)
 	case *types2.Struct:
-		fl.collectStructHiddens(val, u, steps, out)
+		fields := val.Fields()
+		for i := range min(u.NumFields(), len(fields)) {
+			ns := append(slices.Clone(steps), compositePathStep{field: u.Field(i).Name(), isField: true})
+			collectCompositeHiddens(fields[i], u.Field(i).Type(), ns, visit)
+		}
 	case *types2.Array:
-		fl.collectArrayHiddens(val, u, steps, out)
+		for i, e := range val.Elems() {
+			collectCompositeHiddens(e, u.Elem(), append(slices.Clone(steps), compositePathStep{index: i}), visit)
+		}
 	case *types2.Slice:
-		fl.collectSliceHiddens(val, u, steps, out)
-	}
-}
-
-func (fl *fileLower) collectStructHiddens(val ctfe.Value, u *types2.Struct, steps []compositePathStep, out *[]compositeHidden) {
-	fields := val.Fields()
-	for i := range u.NumFields() {
-		if i >= len(fields) {
+		backing, lo, length, _, ok := val.SliceHeader()
+		if !ok {
 			return
 		}
-		ns := append(compositeCloneSteps(steps), compositePathStep{field: u.Field(i).Name(), isField: true})
-		fl.collectCompositeHiddens(fields[i], u.Field(i).Type(), ns, out)
-	}
-}
-
-func (fl *fileLower) collectArrayHiddens(val ctfe.Value, u *types2.Array, steps []compositePathStep, out *[]compositeHidden) {
-	for i, e := range val.Elems() {
-		ns := append(compositeCloneSteps(steps), compositePathStep{index: i})
-		fl.collectCompositeHiddens(e, u.Elem(), ns, out)
-	}
-}
-
-func (fl *fileLower) collectSliceHiddens(val ctfe.Value, u *types2.Slice, steps []compositePathStep, out *[]compositeHidden) {
-	backing, lo, length, _, ok := val.SliceHeader()
-	if !ok {
-		return
-	}
-	for i := range length {
-		if lo+i >= len(backing) {
-			return
+		for i := range min(length, len(backing)-lo) {
+			collectCompositeHiddens(backing[lo+i], u.Elem(), append(slices.Clone(steps), compositePathStep{index: i}), visit)
 		}
-		ns := append(compositeCloneSteps(steps), compositePathStep{index: i})
-		fl.collectCompositeHiddens(backing[lo+i], u.Elem(), ns, out)
 	}
 }
 
@@ -380,56 +356,61 @@ func (fl *fileLower) nilMappedSlice(v ctfe.Value, t types2.Type, pos syntax.Pos)
 	return lit, spell + "{" + strings.Join(texts, ", ") + "}", true
 }
 
-func (fl *fileLower) ensureCompositeInfo(obj *types2.Const, val ctfe.Value, pos syntax.Pos) (*compositeInfo, bool) {
-	if info, ok := fl.pkg.composites[obj]; ok {
-		return info, true
+func collectComposites(files []*syntax.File, info *types2.Info) (map[*types2.Const]*compositeInfo, int) {
+	out := map[*types2.Const]*compositeInfo{}
+	seq := 0
+	for _, file := range files {
+		syntax.Inspect(file, func(n syntax.Node) bool {
+			cd, ok := n.(*syntax.ConstDecl)
+			if !ok || len(cd.NameList) != 1 {
+				return true
+			}
+			obj, ok := info.Defs[cd.NameList[0]].(*types2.Const)
+			if !ok {
+				return true
+			}
+			if v, ok := info.LogosCTFE[obj]; ok && compositeIsBearing(obj, v) {
+				out[obj] = newCompositeInfo(obj, v, seq)
+				seq++
+			}
+			return true
+		})
 	}
-	seq := fl.pkg.compositeSeq
-	fl.pkg.compositeSeq++
-	base := fmt.Sprintf("_logos_cc%d_%s", seq, obj.Name())
-	info := &compositeInfo{obj: obj, val: val, typ: obj.Type(), builder: base + "_build", ro: base + "_ro", hiddens: map[string]*compositeHidden{}}
-	var hiddens []compositeHidden
-	fl.collectCompositeHiddens(val, obj.Type(), nil, &hiddens)
-	for i := range hiddens {
-		if hiddens[i].val.IsNilValue() {
-			continue
-		}
-		if !fl.emitCompositeHidden(info, &hiddens[i], base, pos) {
-			return nil, false
-		}
-	}
-	if !fl.emitCompositeBuilder(info, pos) {
-		return nil, false
-	}
-	fl.pkg.composites[obj] = info
-	return info, true
+	return out, seq
 }
 
-func (fl *fileLower) emitCompositeHidden(info *compositeInfo, h *compositeHidden, base string, pos syntax.Pos) bool {
-	keys, _ := h.val.MapEntries()
-	hname := fmt.Sprintf("%s_%s", base, compositeSanitize(h.path))
-	gen := &constMapGen{name: hname, val: h.val, nkeys: len(keys)}
+func newCompositeInfo(obj *types2.Const, val ctfe.Value, seq int) *compositeInfo {
+	c := &compositeInfo{obj: obj, val: val, typ: obj.Type(), base: fmt.Sprintf("_logos_cc%d_%s", seq, obj.Name()), byPath: map[string]*compositeHidden{}}
+	collectCompositeHiddens(val, c.typ, nil, func(steps []compositePathStep, mt types2.Type, v ctfe.Value) {
+		keys, vals := v.MapEntries()
+		gen := &constMapGen{name: fmt.Sprintf("%s_h%d", c.base, len(c.hiddens)), val: v, nkeys: len(keys), bearing: constMapBearing(vals)}
+		h := &compositeHidden{steps: steps, mapType: mt, val: v, gen: gen}
+		c.hiddens = append(c.hiddens, h)
+		c.byPath[compositePathString(steps)] = h
+	})
+	return c
+}
+
+func (fl *fileLower) emitComposite(info *compositeInfo, pos syntax.Pos) bool {
+	for _, h := range info.hiddens {
+		if !fl.emitCompositeHidden(h, pos) {
+			return false
+		}
+	}
+	return fl.emitCompositeBuilder(info, pos) && fl.emitCompositeRO(info, pos)
+}
+
+func (fl *fileLower) emitCompositeHidden(h *compositeHidden, pos syntax.Pos) bool {
 	fl.needRT = true
-	parts, ok := fl.buildCompositeHiddenParts(hname, h.mapType, h.val, pos)
+	parts, ok := fl.buildCompositeHiddenParts(h.gen.name, h.mapType, h.val, pos)
 	if !ok {
 		return false
 	}
 	decls := parseConstMapDecls(parts.text, pos)
-	fl.markConstMapTables(decls, gen)
-	_, vals := h.val.MapEntries()
-	gen.bearing = constMapBearing(vals)
+	fl.markConstMapTables(decls, h.gen)
 	fl.constDecls = append(fl.constDecls, decls...)
 	fl.constText += "\n" + parts.text
-	hc := *h
-	hc.gen = gen
-	hc.keys = parts.keyTexts
-	hc.vals = parts.valTexts
-	hc.order = parts.order
-	hc.hashes = parts.hashes
-	hc.canons = parts.canons
-	hc.bearing = parts.bearing
-	info.hiddens[h.path] = &hc
-	info.order = append(info.order, h.path)
+	h.parts = parts
 	return true
 }
 
@@ -442,14 +423,13 @@ func (fl *fileLower) emitCompositeBuilder(info *compositeInfo, pos syntax.Pos) b
 	if !ok {
 		return false
 	}
-	buildText := fmt.Sprintf("func %s() %s { return %s }\n", info.builder, spell, matText)
-	bdecls := parseConstMapDecls(buildText, pos)
-	fl.constDecls = append(fl.constDecls, bdecls...)
+	buildText := fmt.Sprintf("func %s() %s { return %s }\n", info.builder(), spell, matText)
+	fl.constDecls = append(fl.constDecls, parseConstMapDecls(buildText, pos)...)
 	fl.constText += "\n" + buildText
 	return true
 }
 
-func (fl *fileLower) emitCompositeRo(info *compositeInfo, pos syntax.Pos) bool {
+func (fl *fileLower) emitCompositeRO(info *compositeInfo, pos syntax.Pos) bool {
 	spell, ok := fl.spellLowered(info.typ)
 	if !ok {
 		return false
@@ -458,7 +438,7 @@ func (fl *fileLower) emitCompositeRo(info *compositeInfo, pos syntax.Pos) bool {
 	if !ok {
 		return false
 	}
-	roText := fmt.Sprintf("%s\nvar %s %s = %s\n", rodataMarker, info.ro, spell, nilText)
+	roText := fmt.Sprintf("%s\nvar %s %s = %s\n", rodataMarker, info.ro(), spell, nilText)
 	rdecls := parseConstMapDecls(roText, pos)
 	for _, d := range rdecls {
 		if vd, ok := d.(*syntax.VarDecl); ok {
@@ -467,110 +447,130 @@ func (fl *fileLower) emitCompositeRo(info *compositeInfo, pos syntax.Pos) bool {
 	}
 	fl.constDecls = append(fl.constDecls, rdecls...)
 	fl.constText += "\n" + roText
-	RegisterRodata(fl.pkg.tpkg.Path(), info.ro)
 	return true
 }
 
-func (fl *fileLower) lowerCompositeSpec(cd *syntax.ConstDecl, obj *types2.Const, val ctfe.Value) {
+func (fl *fileLower) lowerCompositeSpec(cd *syntax.ConstDecl, info *compositeInfo) {
 	pos := cd.Pos()
-	info, ok := fl.ensureCompositeInfo(obj, val, pos)
-	if !ok {
-		base.Fatalf("logos: cannot lower map-bearing composite %s at %s", obj.Name(), pos.String())
+	if !fl.emitComposite(info, pos) {
+		base.Fatalf("logos: cannot lower map-bearing composite %s at %s", info.obj.Name(), pos.String())
 	}
-	if token.IsExported(cd.NameList[0].Value) {
-		spell, ok := fl.spellLowered(obj.Type())
+	if name := cd.NameList[0].Value; token.IsExported(name) && fl.pkg.tpkg.Scope().Lookup(name) == info.obj {
+		spell, ok := fl.spellLowered(info.typ)
 		if !ok {
-			base.Fatalf("logos: cannot spell exported composite %s at %s", obj.Name(), pos.String())
+			base.Fatalf("logos: cannot spell exported composite %s at %s", info.obj.Name(), pos.String())
 		}
-		text := fmt.Sprintf("\nvar %s %s = %s()\n", cd.NameList[0].Value, spell, info.builder)
-		decls := parseConstMapDecls(text, pos)
-		fl.constDecls = append(fl.constDecls, decls...)
+		text := fmt.Sprintf("\nvar %s %s = %s()\n", name, spell, info.builder())
+		fl.constDecls = append(fl.constDecls, parseConstMapDecls(text, pos)...)
 		fl.constText += "\n" + text
-		fl.recordCompositeFacts(obj, info)
+		fl.recordCompositeFacts(info)
 	}
 	fl.dropConstSpec(cd)
 }
 
-func (fl *fileLower) recordCompositeFacts(obj *types2.Const, info *compositeInfo) {
+func (fl *fileLower) recordCompositeFacts(info *compositeInfo) {
 	f := facts.Current()
 	if f == nil {
 		return
 	}
-	for _, path := range info.order {
-		h := info.hiddens[path]
-		if h == nil {
+	for _, h := range info.hiddens {
+		name := info.obj.Name() + "__" + compositeSanitize(compositePathString(h.steps))
+		if slices.ContainsFunc(f.ConstMaps, func(c facts.ConstMapFact) bool { return c.Object == name }) {
 			continue
 		}
-		name := obj.Name() + "__" + compositeSanitize(path)
-		skip := false
-		for i := range f.ConstMaps {
-			if f.ConstMaps[i].Object == name {
-				skip = true
-				break
-			}
-		}
-		if skip {
-			continue
-		}
-		f.ConstMaps = append(f.ConstMaps, facts.ConstMapFact{Object: name, Bearing: h.bearing, Order: slices.Clone(h.order), Hashes: slices.Clone(h.hashes), Canons: slices.Clone(h.canons), Keys: slices.Clone(h.keys), Vals: slices.Clone(h.vals)})
+		p := h.parts
+		f.ConstMaps = append(f.ConstMaps, facts.ConstMapFact{Object: name, Bearing: p.bearing, Order: slices.Clone(p.order), Hashes: slices.Clone(p.hashes), Canons: slices.Clone(p.canons), Keys: slices.Clone(p.keyTexts), Vals: slices.Clone(p.valTexts)})
 	}
 }
-func (fl *fileLower) compositeRootConst(e syntax.Expr) (*types2.Const, []compositePathStep, bool) {
-	switch e := syntax.Unparen(e).(type) {
+
+type compositeRef struct {
+	info   *compositeInfo
+	root   *syntax.Name
+	steps  []compositePathStep
+	method *types2.Func
+	recv   syntax.Expr
+}
+
+func (r compositeRef) static() bool {
+	return !slices.ContainsFunc(r.steps, func(s compositePathStep) bool { return s.dynamic })
+}
+
+func (fl *fileLower) compositeRefOf(e syntax.Expr) (compositeRef, bool) {
+	switch n := syntax.Unparen(e).(type) {
 	case *syntax.Name:
-		return fl.compositeRootName(e)
+		obj, ok := fl.pkg.info.Uses[n].(*types2.Const)
+		if !ok || n.Value != obj.Name() || fl.pkg.composites[obj] == nil {
+			return compositeRef{}, false
+		}
+		return compositeRef{info: fl.pkg.composites[obj], root: n, recv: n}, true
 	case *syntax.SelectorExpr:
-		return fl.compositeRootSelector(e)
+		return fl.compositeSelectorRef(n)
 	case *syntax.IndexExpr:
-		return fl.compositeRootIndex(e)
+		return fl.compositeIndexRef(n)
 	}
-	return nil, nil, false
+	return compositeRef{}, false
 }
 
-func (fl *fileLower) compositeRootName(e *syntax.Name) (*types2.Const, []compositePathStep, bool) {
-	if obj, ok := fl.pkg.info.Defs[e].(*types2.Const); ok {
-		if fl.pkg.composites[obj] != nil {
-			return obj, nil, true
+func (fl *fileLower) compositeSelectorRef(n *syntax.SelectorExpr) (compositeRef, bool) {
+	sel := fl.pkg.info.Selections[n]
+	if sel == nil {
+		return compositeRef{}, false
+	}
+	ref, ok := fl.compositeRefOf(n.X)
+	if !ok || ref.method != nil {
+		return compositeRef{}, false
+	}
+	path := sel.Index()
+	if sel.Kind() == types2.MethodVal {
+		ref.method, _ = sel.Obj().(*types2.Func)
+		path = path[:len(path)-1]
+		ref.recv = n.X
+	} else if sel.Kind() == types2.FieldVal {
+		ref.recv = n
+	} else {
+		return compositeRef{}, false
+	}
+	steps, ok := compositeFieldSteps(sel.Recv(), path)
+	ref.steps = append(slices.Clone(ref.steps), steps...)
+	return ref, ok
+}
+
+func compositeFieldSteps(t types2.Type, path []int) ([]compositePathStep, bool) {
+	steps := make([]compositePathStep, 0, len(path))
+	for _, fi := range path {
+		deref := false
+		if p, ok := compositeUnderlying(t).(*types2.Pointer); ok {
+			t, deref = p.Elem(), true
 		}
-		return nil, nil, false
-	}
-	if obj, ok := fl.pkg.info.Uses[e].(*types2.Const); ok {
-		if fl.pkg.composites[obj] != nil {
-			return obj, nil, true
+		st, ok := compositeUnderlying(t).(*types2.Struct)
+		if !ok || fi >= st.NumFields() {
+			return nil, false
 		}
-		return nil, nil, false
+		steps = append(steps, compositePathStep{field: st.Field(fi).Name(), isField: true, dynamic: deref})
+		t = st.Field(fi).Type()
 	}
-	return nil, nil, false
+	return steps, true
 }
 
-func (fl *fileLower) compositeRootSelector(e *syntax.SelectorExpr) (*types2.Const, []compositePathStep, bool) {
-	if e.Sel == nil {
-		return nil, nil, false
+func (fl *fileLower) compositeIndexRef(n *syntax.IndexExpr) (compositeRef, bool) {
+	switch compositeUnderlying(fl.pkg.info.TypeOf(n.X)).(type) {
+	case *types2.Array, *types2.Slice:
+	default:
+		return compositeRef{}, false
 	}
-	root, steps, ok := fl.compositeRootConst(e.X)
-	if !ok {
-		return nil, nil, false
+	ref, ok := fl.compositeRefOf(n.X)
+	if !ok || ref.method != nil {
+		return compositeRef{}, false
 	}
-	return root, append(steps, compositePathStep{field: e.Sel.Value, isField: true}), true
-}
-
-func (fl *fileLower) compositeRootIndex(e *syntax.IndexExpr) (*types2.Const, []compositePathStep, bool) {
-	xt := fl.pkg.info.TypeOf(e.X)
-	if xt == nil {
-		return nil, nil, false
+	step := compositePathStep{dynamic: true}
+	if cv, ok := typeConst(fl.pkg.info, n.Index); ok && cv.Kind() == constant.Int {
+		if i, exact := constant.Int64Val(cv); exact && i >= 0 {
+			step = compositePathStep{index: int(i)}
+		}
 	}
-	if _, ok := compositeUnderlying(xt).(*types2.Map); ok {
-		return nil, nil, false
-	}
-	root, steps, ok := fl.compositeRootConst(e.X)
-	if !ok {
-		return nil, nil, false
-	}
-	idx, ok := compositeConstIndex(e.Index)
-	if !ok {
-		return nil, nil, false
-	}
-	return root, append(steps, compositePathStep{index: idx}), true
+	ref.steps = append(slices.Clone(ref.steps), step)
+	ref.recv = n
+	return ref, true
 }
 
 func compositeConstIndex(e syntax.Expr) (int, bool) {
@@ -593,16 +593,12 @@ func (fl *fileLower) compositeHiddenFor(e syntax.Expr) (*constMapGen, bool) {
 }
 
 func (fl *fileLower) compositeLocalHiddenFor(e syntax.Expr) (*constMapGen, bool) {
-	root, steps, ok := fl.compositeRootConst(e)
-	if !ok {
+	ref, ok := fl.compositeRefOf(e)
+	if !ok || ref.method != nil || !ref.static() {
 		return nil, false
 	}
-	info, ok := fl.pkg.composites[root]
+	h, ok := ref.info.byPath[compositePathString(ref.steps)]
 	if !ok {
-		return nil, false
-	}
-	h, ok := info.hiddens[compositePathString(steps)]
-	if !ok || h.gen == nil {
 		return nil, false
 	}
 	return h.gen, true
@@ -616,62 +612,80 @@ func (fl *fileLower) compositeRewriteRoot(e syntax.Expr) (syntax.Expr, bool) {
 }
 
 func (fl *fileLower) compositeLocalRewrite(e syntax.Expr) (syntax.Expr, bool) {
-	root, _, ok := fl.compositeRootConst(e)
-	if !ok {
+	ref, ok := fl.compositeRefOf(e)
+	if !ok || fl.compositeDone[ref.root] {
 		return nil, false
 	}
-	info, ok := fl.pkg.composites[root]
-	if !ok {
-		return nil, false
+	fl.compositeDone[ref.root] = true
+	t := fl.pkg.info.TypeOf(ref.recv)
+	if t != nil && !compositeTypeReachesMap(t) {
+		fl.compositeRename(ref.root, ref.info.ro())
+		return e, true
 	}
-	return fl.compositeSwapToBuild(e, info), true
+	return fl.compositeBuild(e, ref), true
 }
 
-func (fl *fileLower) compositeSwapToRo(e syntax.Expr, info *compositeInfo) syntax.Expr {
-	op := compositeSwapOp{info: info, text: info.ro, rep: nameOf(e.Pos(), info.ro)}
-	return fl.compositeSwap(e, op)
+func (fl *fileLower) compositeShapeArg(call *syntax.CallExpr) {
+	fn, ok := call.Fun.(*syntax.Name)
+	if !ok || (fn.Value != "len" && fn.Value != "cap") || len(call.ArgList) != 1 {
+		return
+	}
+	if _, ok := fl.pkg.info.Uses[fn].(*types2.Builtin); !ok {
+		return
+	}
+	arg := call.ArgList[0]
+	ref, ok := fl.compositeRefOf(arg)
+	if !ok || fl.compositeDone[ref.root] {
+		return
+	}
+	switch compositeUnderlying(fl.pkg.info.TypeOf(arg)).(type) {
+	case *types2.Array, *types2.Slice:
+		fl.compositeDone[ref.root] = true
+		fl.compositeRename(ref.root, ref.info.ro())
+	}
 }
 
-func (fl *fileLower) compositeSwapToBuild(e syntax.Expr, info *compositeInfo) syntax.Expr {
-	pos := e.Pos()
-	op := compositeSwapOp{info: info, text: info.builder + "()", rep: callOf(pos, nameOf(pos, info.builder), nil)}
-	return fl.compositeSwap(e, op)
+func (fl *fileLower) compositeRename(root *syntax.Name, to string) {
+	start := fl.off(root.Pos())
+	fl.add(start, start+len(root.Value), to)
+	root.Value = to
 }
 
-type compositeSwapOp struct {
-	info *compositeInfo
-	text string
-	rep  syntax.Expr
+func (fl *fileLower) compositeBuild(e syntax.Expr, ref compositeRef) syntax.Expr {
+	pos := ref.root.Pos()
+	start := fl.off(pos)
+	fl.add(start, start+len(ref.root.Value), ref.info.builder()+"()")
+	call := callOf(pos, nameOf(pos, ref.info.builder()), nil)
+	call.SetTypeInfo(ref.root.GetTypeInfo())
+	fl.wrapSpan[call] = span{start: start, end: start + len(ref.root.Value)}
+	return compositeReplaceRoot(e, ref.root, call)
 }
 
-func (fl *fileLower) compositeSwap(e syntax.Expr, op compositeSwapOp) syntax.Expr {
-	switch e := syntax.Unparen(e).(type) {
+func compositeReplaceRoot(e syntax.Expr, root *syntax.Name, repl syntax.Expr) syntax.Expr {
+	switch n := e.(type) {
 	case *syntax.Name:
-		start := fl.off(e.Pos())
-		fl.add(start, start+len(e.Value), op.text)
-		return op.rep
+		if n == root {
+			return repl
+		}
+	case *syntax.ParenExpr:
+		n.X = compositeReplaceRoot(n.X, root, repl)
 	case *syntax.SelectorExpr:
-		return fl.compositeSwapParent(e.X, e, op)
+		n.X = compositeReplaceRoot(n.X, root, repl)
 	case *syntax.IndexExpr:
-		return fl.compositeSwapParent(e.X, e, op)
+		n.X = compositeReplaceRoot(n.X, root, repl)
 	}
 	return e
 }
 
-func (fl *fileLower) compositeSwapParent(x syntax.Expr, parent syntax.Expr, op compositeSwapOp) syntax.Expr {
-	if _, _, ok := fl.compositeRootConst(x); !ok {
-		return parent
-	}
-	nx := fl.compositeSwap(x, op)
-	switch p := syntax.Unparen(parent).(type) {
-	case *syntax.SelectorExpr:
-		p.X = nx
-		return parent
-	case *syntax.IndexExpr:
-		p.X = nx
-		return parent
-	}
-	return parent
+func (fl *fileLower) rejectCompositeSurvivors() {
+	syntax.Inspect(fl.file, func(n syntax.Node) bool {
+		if name, ok := n.(*syntax.Name); ok {
+			if _, ok := fl.compositeRefOf(name); ok && !fl.compositeDone[name] {
+				base.Fatalf("logos: const composite %s at %s was not lowered", name.Value, name.Pos().String())
+			}
+		}
+		return true
+	})
 }
 
 type importedComposite struct {

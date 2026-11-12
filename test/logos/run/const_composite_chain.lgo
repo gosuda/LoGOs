@@ -1,0 +1,42 @@
+// run
+
+package main
+
+import (
+	"fmt"
+	"os"
+)
+
+var failed bool
+
+func check(name string, cond bool, got, want any) {
+	if !cond {
+		failed = true
+		fmt.Println("FAIL", name+":", "got", got, "want", want)
+		return
+	}
+	fmt.Println("ok", name)
+}
+
+type box struct {
+	M map[string]int
+	N int
+	L []int
+}
+
+const cfg = box{M: map[string]int{"a": 1}, N: 7, L: []int{1, 2, 3}}
+
+func test() {
+	check("chain-map-sum", cfg.L.map(x => x * 2).sum() == 12, cfg.L.map(x => x * 2).sum(), 12)
+	check("chain-count", cfg.L.count() == 3, cfg.L.count(), 3)
+	got := cfg.L.map(x => x).get(1) ?? -1
+	check("chain-get", got == 2, got, 2)
+	check("chain-filter", fmt.Sprint(cfg.L.filter(x => x > 1)) == "[2 3]", fmt.Sprint(cfg.L.filter(x => x > 1)), "[2 3]")
+}
+
+func main() {
+	test()
+	if failed {
+		os.Exit(1)
+	}
+}

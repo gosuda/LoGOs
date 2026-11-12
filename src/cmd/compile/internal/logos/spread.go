@@ -279,9 +279,11 @@ func (b *spreadBuilder) body() {
 	b.text = append(b.text, defineOf(pos,
 		[]syntax.Expr{v()},
 		[]syntax.Expr{at(&syntax.CompositeLit{Type: b.tw.mark(pos, b.typeText()), Rbrace: c.Rbrace}, pos)}))
+	spreads := 0
 	for _, el := range c.ElemList {
 		if se, ok := el.(*syntax.SpreadExpr); ok {
-			b.copy(se)
+			b.copy(se, b.infos[spreads].Fields)
+			spreads++
 			continue
 		}
 		kv, ok := el.(*syntax.KeyValueExpr)
@@ -302,14 +304,7 @@ func (b *spreadBuilder) body() {
 	}
 }
 
-func (b *spreadBuilder) copy(se *syntax.SpreadExpr) {
-	var fields []string
-	for _, info := range b.infos {
-		if info.Src == se.X {
-			fields = info.Fields
-			break
-		}
-	}
+func (b *spreadBuilder) copy(se *syntax.SpreadExpr, fields []string) {
 	pos := b.pos
 	srcText := b.fl.textOf(span{start: b.fl.spreadStartOf(se.X), end: b.fl.exprEndOf(se.X)})
 	if len(fields) == 0 {

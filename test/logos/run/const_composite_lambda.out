@@ -1,0 +1,4 @@
+ok lambda-exported-fresh
+ok lambda-exported-read
+ok lambda-unexported-fresh
+ok lambda-unexported-field

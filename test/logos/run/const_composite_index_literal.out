@@ -1,0 +1,5 @@
+ok index-octal
+ok index-hex
+ok index-underscore
+ok index-binary
+ok index-octal-len

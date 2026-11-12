@@ -38,6 +38,7 @@ func (fl *fileLower) lowerOptions() {
 		fl.lowerOptNode(n)
 		return true
 	})
+	fl.rejectCompositeSurvivors()
 }
 
 func (fl *fileLower) lowerOptNode(n syntax.Node) {
@@ -79,6 +80,10 @@ func (fl *fileLower) lowerOptLambdaBody(lam *syntax.LambdaExpr) {
 	}
 	switch syntax.Unparen(body).(type) {
 	case *syntax.CoalesceExpr, *syntax.OptSelectExpr:
+	case *syntax.Name, *syntax.SelectorExpr, *syntax.IndexExpr:
+		if _, ok := fl.compositeRefOf(body); !ok {
+			return
+		}
 	default:
 		return
 	}
@@ -155,8 +160,12 @@ func (fl *fileLower) lowerOptExpr(e syntax.Expr) syntax.Expr {
 		if out, ok := fl.lowerConstMapLen(e); ok {
 			return out
 		}
+		fl.compositeShapeArg(e)
 		return fl.lowerOptCallExpr(e)
 	case *syntax.IndexExpr:
+		if out, ok := fl.compositeRewriteRoot(e); ok {
+			return out
+		}
 		return fl.lowerMapIndex(e)
 	case *syntax.SelectorExpr:
 		if out, ok := fl.compositeRewriteRoot(e); ok {
