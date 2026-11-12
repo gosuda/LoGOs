@@ -1015,6 +1015,11 @@ func (fl *fileLower) lowerPropGeneric(s *syntax.AssignStmt) []syntax.Stmt {
 }
 
 func propMustSpan(fl *fileLower, e syntax.Expr) span {
+	if list, ok := e.(*syntax.ListExpr); ok && len(list.ElemList) > 0 {
+		first := propMustSpan(fl, list.ElemList[0])
+		last := propMustSpan(fl, list.ElemList[len(list.ElemList)-1])
+		return span{start: first.start, end: last.end}
+	}
 	sp, ok := fl.platformSpan(e)
 	if !ok {
 		base.Fatalf("logos: cannot span expression at %s", e.Pos().String())
