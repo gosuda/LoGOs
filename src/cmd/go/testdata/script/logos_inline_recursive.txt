@@ -1,32 +1,39 @@
 env GOPROXY=off
 env GOTOOLCHAIN=local
 
-logos build -gcflags='-m -m' -O=3 .
-stderr 'can inline smallEven with cost'
-stderr 'can inline smallOdd with cost'
-stderr 'can inline plainBig with cost'
-stderr 'can inline midBig'
-stderr 'cannot inline bigEven: function too complex: cost .* exceeds budget 80'
-stderr 'cannot inline bigOdd: function too complex: cost .* exceeds budget 80'
+# SPEC 1.5 [T-105]: O3 sets inline budget 400 with 80 inside recursive
+# cycles, so a recursive function above 80 keeps its calls while the
+# non-recursive plainBig and midBig inline. The calls objdump finds in
+# the caller observe each decision; no compiler message is read.
+logos build -o $WORK/o3$GOEXE -O=3 .
+exec go tool objdump -s 'inlrec\.Drive' $WORK/o3$GOEXE
+stdout 'R_CALL:fmt\.Fprintln'
+stdout 'R_CALL:example\.com/inlrec\.bigEven'
+stdout 'R_CALL:example\.com/inlrec\.bigOdd'
+! stdout 'R_CALL:example\.com/inlrec\.midBig'
+! stdout 'R_CALL:example\.com/inlrec\.plainBig'
+! stdout 'R_CALL:example\.com/inlrec\.smallPlain'
+! stdout 'R_CALL:example\.com/inlrec\.tiny'
 
-logos build -gcflags='-m -m -d=inlrecursivebudget=400' -O=3 .
-stderr 'can inline bigEven with cost'
-stderr 'cannot inline hugeEven'
-stderr 'cannot inline hugeOdd'
+# Raising the recursive budget to 400 inlines the recursive bigEven.
+logos build -o $WORK/b400$GOEXE -gcflags='-d=inlrecursivebudget=400' -O=3 .
+exec go tool objdump -s 'inlrec\.Drive' $WORK/b400$GOEXE
+stdout 'R_CALL:fmt\.Fprintln'
+! stdout 'R_CALL:example\.com/inlrec\.bigEven'
 
-logos build -gcflags='-m -m' -O=2 .
-stderr 'can inline tiny'
-stderr 'can inline smallPlain'
-stderr 'can inline plainBig'
-stderr 'cannot inline midBig'
-stderr 'cannot inline bigEven'
+# SPEC 1.5 [T-105]: O2 sets budget 120: plainBig inlines, midBig does not.
+logos build -o $WORK/o2$GOEXE -O=2 .
+exec go tool objdump -s 'inlrec\.Drive' $WORK/o2$GOEXE
+stdout 'R_CALL:example\.com/inlrec\.midBig'
+! stdout 'R_CALL:example\.com/inlrec\.plainBig'
 
-logos build -gcflags='-m -m' -O=s .
-stderr 'can inline tiny'
-stderr 'can inline smallPlain'
-stderr 'can inline smallEven'
-stderr 'cannot inline plainBig'
-stderr 'cannot inline midBig'
+# SPEC 1.5 [T-105]: Os sets budget 15: only tiny inlines among these.
+logos build -o $WORK/os$GOEXE -O=s .
+exec go tool objdump -s 'inlrec\.Drive' $WORK/os$GOEXE
+stdout 'R_CALL:example\.com/inlrec\.plainBig'
+stdout 'R_CALL:example\.com/inlrec\.midBig'
+stdout 'R_CALL:example\.com/inlrec\.smallPlain'
+! stdout 'R_CALL:example\.com/inlrec\.tiny'
 logos run -O=3 ./cmd
 stdout '^42$'
 stdout '^5 6$'
