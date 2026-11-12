@@ -126,7 +126,7 @@ func (fc *funcLower) groupRecvSelect(pos syntax.Pos, top groupFrame, e *groupRec
 	fl := fc.fl
 	ch := e.recv.X
 	chStart := fl.off(leftmostOf(ch))
-	chText := fl.textOf(span{start: chStart, end: groupExprEnd(fl.src, chStart)})
+	chText := fl.textOf(span{start: chStart, end: operandEnd(fl.src, chStart)})
 	elemT := groupChanElem(fl.pkg.info.TypeOf(ch))
 	e.tmp = fc.groupTempName("t")
 	names := []string{e.tmp}
@@ -247,17 +247,60 @@ func (fc *funcLower) groupChanStmt(s syntax.Stmt) ([]syntax.Stmt, bool) {
 	if !ok {
 		return nil, false
 	}
+	before := base.Errors()
+	out, handled := fc.groupChanDispatch(s, top)
+	if handled && base.Errors() == before && groupStmtHasRecv(out[len(out)-1]) {
+		fc.groupReject(out[len(out)-1].Pos(), "in an unsupported position")
+	}
+	return out, handled
+}
+
+func (fc *funcLower) groupChanDispatch(s syntax.Stmt, top groupFrame) ([]syntax.Stmt, bool) {
 	switch s := s.(type) {
 	case *syntax.AssignStmt:
-		return fc.groupChanAssign(s, top)
+		if out, handled := fc.groupChanAssign(s, top); handled {
+			return out, true
+		}
+		if groupStmtHasRecv(s) {
+			return fc.groupHoistAssign(s, top), true
+		}
 	case *syntax.DeclStmt:
-		return fc.groupChanDecl(s, top)
+		if out, handled := fc.groupChanDecl(s, top); handled {
+			return out, true
+		}
+		if groupStmtHasRecv(s) {
+			return fc.groupHoistDecl(s, top), true
+		}
 	case *syntax.ExprStmt:
-		return fc.groupChanExpr(s, top)
+		if out, handled := fc.groupChanExpr(s, top); handled {
+			return out, true
+		}
+		if groupStmtHasRecv(s) {
+			return fc.groupHoistExprStmt(s, top), true
+		}
 	case *syntax.SendStmt:
+		if groupStmtHasRecv(s) {
+			return fc.groupHoistSend(s, top), true
+		}
 		return fc.lowerGroupSend(s, top), true
 	case *syntax.ForStmt:
+		if groupStmtHasRecv(s) {
+			fc.groupReject(s.Pos(), "in a for statement header")
+			return nil, false
+		}
 		return fc.groupChanFor(s, top)
+	case *syntax.CallStmt:
+		if groupNodesHaveRecv(s.Call) {
+			fc.groupReject(s.Pos(), "in the arguments of a defer statement")
+		}
+	case *syntax.IfStmt:
+		if groupStmtHasRecv(s) {
+			return fc.groupHoistIf(s, top), true
+		}
+	case *syntax.SwitchStmt:
+		if groupStmtHasRecv(s) {
+			return fc.groupHoistSwitch(s, top), true
+		}
 	}
 	return nil, false
 }

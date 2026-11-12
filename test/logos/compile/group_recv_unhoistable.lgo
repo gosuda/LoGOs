@@ -1,0 +1,194 @@
+// errorcheck
+
+package p
+
+import "context"
+
+func get() func(int) {
+	return func(int) {}
+}
+
+func two() int {
+	return 2
+}
+
+func idxs() []int {
+	return []int{1, 2, 3}
+}
+
+func store(p *int, v int) {
+	*p = v
+}
+
+func rejectForCond(ctx context.Context, in chan int) error {
+	go group (ctx) {
+		go {
+			for <-in < 3 { // ERROR "logos:"
+			}
+		}
+	}
+	return nil
+}
+
+func rejectForPost(ctx context.Context, in chan int) error {
+	go group (ctx) {
+		go {
+			for i := 0; i < 3; i += <-in { // ERROR "logos:"
+			}
+		}
+	}
+	return nil
+}
+
+func rejectForInit(ctx context.Context, in chan int) error {
+	go group (ctx) {
+		go {
+			for i := <-in; i < 3; i++ { // ERROR "logos:"
+			}
+		}
+	}
+	return nil
+}
+
+func rejectRange(ctx context.Context, chch chan chan int) error {
+	go group (ctx) {
+		go {
+			for range <-chch { // ERROR "logos:"
+			}
+		}
+	}
+	return nil
+}
+
+func rejectAnd(ctx context.Context, in chan int, ok bool) error {
+	go group (ctx) {
+		go {
+			if ok && <-in == 1 { // ERROR "logos:"
+			}
+		}
+	}
+	return nil
+}
+
+func rejectOr(ctx context.Context, in chan int, ok bool) error {
+	go group (ctx) {
+		go {
+			if !ok || <-in == 1 { // ERROR "logos:"
+			}
+		}
+	}
+	return nil
+}
+
+func rejectCase(ctx context.Context, in chan int) error {
+	go group (ctx) {
+		go {
+			switch {
+			case <-in == 1: // ERROR "logos:"
+			}
+		}
+	}
+	return nil
+}
+
+func rejectIfInit(ctx context.Context, in chan int) error {
+	go group (ctx) {
+		go {
+			if v := 1; <-in == v { // ERROR "logos:"
+			}
+		}
+	}
+	return nil
+}
+
+func rejectSwitchTag(ctx context.Context, in chan int) error {
+	go group (ctx) {
+		go {
+			switch v := 1; <-in { // ERROR "logos:"
+			case v:
+			}
+		}
+	}
+	return nil
+}
+
+func rejectSwitchComma(ctx context.Context, in chan int) error {
+	go group (ctx) {
+		go {
+			switch v, ok := <-in; v { // ERROR "logos:"
+			case 1:
+				_ = ok
+			}
+		}
+	}
+	return nil
+}
+
+func rejectVarComma(ctx context.Context, in chan int) error {
+	go group (ctx) {
+		go {
+			var ( v, ok = <-in ) // ERROR "logos:"
+			_, _ = v, ok
+		}
+	}
+	return nil
+}
+
+func rejectDefer(ctx context.Context, in chan int) error {
+	n := 0
+	go group (ctx) {
+		go {
+			defer store(&n, <-in) // ERROR "logos:"
+		}
+	}
+	return nil
+}
+
+func rejectOperand(ctx context.Context, in chan int) error {
+	go group (ctx) {
+		go {
+			x := two()*2 + <-in // ERROR "logos:"
+			_ = x
+		}
+	}
+	return nil
+}
+
+func rejectFun(ctx context.Context, in chan int) error {
+	go group (ctx) {
+		go {
+			get()(<-in) // ERROR "logos:"
+		}
+	}
+	return nil
+}
+
+func rejectIndex(ctx context.Context, in chan int) error {
+	go group (ctx) {
+		go {
+			y := idxs()[<-in] // ERROR "logos:"
+			_ = y
+		}
+	}
+	return nil
+}
+
+func rejectTarget(ctx context.Context, in chan int) error {
+	arr := []int{1, 2, 3}
+	go group (ctx) {
+		go {
+			arr[two()] = <-in + 1 // ERROR "logos:"
+		}
+	}
+	return nil
+}
+
+func rejectAssert(ctx context.Context, anys chan any) error {
+	go group (ctx) {
+		go {
+			z := (<-anys).(int) // ERROR "logos:"
+			_ = z
+		}
+	}
+	return nil
+}

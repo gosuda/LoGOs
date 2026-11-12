@@ -101,7 +101,7 @@ func (fc *funcLower) lowerGroupHook(s syntax.Stmt) ([]syntax.Stmt, bool) {
 
 func (fc *funcLower) groupCallStmt(s *syntax.CallStmt) ([]syntax.Stmt, bool) {
 	if s.Tok != syntax.Go {
-		return nil, false
+		return fc.groupChanStmt(s)
 	}
 	if _, ok := fc.groupTop(); !ok {
 		return nil, false

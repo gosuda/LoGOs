@@ -769,6 +769,7 @@ type funcLower struct {
 	scopeCtxs        []*scopeDeferCtx
 	scopeHoists      []string
 	hoisted          []hoistedVar
+	hoistSubs        []hoistSub
 }
 
 func (fl *fileLower) resultSpecs(ft *syntax.FuncType, sig *types2.Signature) []resultSpec {
