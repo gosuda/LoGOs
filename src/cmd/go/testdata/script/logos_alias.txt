@@ -60,6 +60,11 @@ stderr -count=1 'portability::alias_extension'
 ! logos build ./dup
 stderr 'correctness::duplicate_stem_filename'
 
+! logos build ./dup2
+stderr 'correctness::duplicate_stem_filename'
+stderr 'x\.📜'
+stderr 'x\.⚡'
+
 -- go.mod --
 module example.com/m
 
@@ -136,3 +141,13 @@ import "fmt"
 func main() {
 	fmt.Println("txt ok")
 }
+
+-- dup2/x.📜 --
+package dup2
+
+func X() int { return 1 }
+
+-- dup2/x.⚡ --
+package dup2
+
+func Y() int { return 2 }
