@@ -9,6 +9,7 @@ import (
 	"cmd/compile/internal/syntax"
 	"go/constant"
 	. "internal/types/errors"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -33,25 +34,33 @@ func logosAsConstView(T Type) *ConstView {
 }
 
 func logosReferenceFree(t Type) bool {
+	return logosReferenceFreeAlong(t, nil)
+}
+
+func logosReferenceFreeAlong(t Type, expanding []*TypeParam) bool {
 	if tp, ok := Unalias(t).(*TypeParam); ok {
+		if slices.Contains(expanding, tp) {
+			return false
+		}
+		expanding = append(expanding, tp)
 		return tp.is(func(tm *term) bool {
-			return tm != nil && logosReferenceFree(tm.typ)
+			return tm != nil && logosReferenceFreeAlong(tm.typ, expanding)
 		})
 	}
 	switch t := t.Underlying().(type) {
 	case *Basic:
 		return t.Kind() != UnsafePointer
 	case *Array:
-		return logosReferenceFree(t.Elem())
+		return logosReferenceFreeAlong(t.Elem(), expanding)
 	case *Struct:
 		for i := range t.NumFields() {
-			if !logosReferenceFree(t.Field(i).Type()) {
+			if !logosReferenceFreeAlong(t.Field(i).Type(), expanding) {
 				return false
 			}
 		}
 		return true
 	case *Option:
-		return logosReferenceFree(t.Elem)
+		return logosReferenceFreeAlong(t.Elem, expanding)
 	}
 	return false
 }
