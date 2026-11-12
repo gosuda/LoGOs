@@ -1027,7 +1027,9 @@ A user `select` with `default` MUST stay unchanged. [T-206]
 
 Cancellation MUST reach siblings blocked on channels. [T-206]
 
-A child blocked in netpoll-backed network I/O MUST wake within 100 ms with a timeout error satisfying `os.IsTimeout`. [T-206]
+When built by `logos`, a child blocked in netpoll-backed network I/O MUST wake within 100 ms with a timeout error satisfying `os.IsTimeout`. [T-206]
+
+In ejected code, cancellation MUST leave a child's blocked network I/O to complete on its own, and `Wait` MUST return once it completes. [T-206][T-0.3]
 
 Cancellation MUST NOT wake a goroutine outside the group. [T-206]
 
