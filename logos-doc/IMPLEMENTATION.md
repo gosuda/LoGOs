@@ -222,7 +222,7 @@ P0 slices are documentation-only. Each carries its named structural Check (count
 - P0-S4 Commit this plan as `logos-doc/IMPLEMENTATION.md` (user decision, 2026-10-19), after P0-S1 so the rename stays pure. The committed copy drops every session-only reference (links with the `local` scheme and paths under the agent session directory): the P0-S2 draft path becomes `logos-doc/SPEC.md`, and every other one is removed with its clause (the P1 evidence clause, the `cmp` against the draft in the P0-S2 check).
   Anchor: David Parnas, Tony Hoare
   - Check: `grep -Ec 'loca[l]:/{2}' logos-doc/IMPLEMENTATION.md` prints `0`; `grep -c "$HOME/.omp/" logos-doc/IMPLEMENTATION.md` prints `0`.
-- P0-S5 Create `logos-doc/REDTEAM.md`, the test-status ledger for the attacks #1 to #233 (rows #183 to #189 were appended by the 2026-10-19 direction for the interop, boundary, loader, and cgo attacks it adds; their resolutions are SPEC.md Section 17.5, the interop suite; rows #190 to #233 were added later by the audit and closure lanes). The resolutions live only in SPEC.md Section 17, so this file holds no resolution text. Content: line 1 `Rules: logos-doc/SPEC.md. Status values: planned, tested, satisfied upstream, blocked.`, line 2 empty, then a table with header `| ID | Attack | Milestone | Test | Status |` and one row per attack in ID order: `ID` is `#N`; `Milestone` lists the milestones of every slice whose `Red-team rows` line in this plan names `#N`, comma-separated in plan order (`#80` gets `M22`); `Test` starts empty; `Status` starts `planned`.
+- P0-S5 Create `logos-doc/REDTEAM.md`, the test-status ledger for the attacks #1 to #242 (rows #183 to #189 were appended by the 2026-10-19 direction for the interop, boundary, loader, and cgo attacks it adds; their resolutions are SPEC.md Section 17.5, the interop suite; rows #190 to #242 were added later by the audit and closure lanes). The resolutions live only in SPEC.md Section 17, so this file holds no resolution text. Content: line 1 `Rules: logos-doc/SPEC.md. Status values: planned, tested, satisfied upstream, blocked.`, line 2 empty, then a table with header `| ID | Attack | Milestone | Test | Status |` and one row per attack in ID order: `ID` is `#N`; `Milestone` lists the milestones of every slice whose `Red-team rows` line in this plan names `#N`, comma-separated in plan order (`#80` gets `M22`); `Test` starts empty; `Status` starts `planned`.
   Anchor: Tony Hoare, Edward Tufte
   - Rule for later slices: a slice that lands a test for `#N` sets `Test` to the repository path of that test (for example `test/logos/redteam/attack_042_defer_close_join.lgo`, or the slice test that covers the attack) and `Status` to `tested` in the same commit. A slice that only pins upstream Go behavior sets `satisfied upstream` and names the upstream test. G1 rule 7 sets `blocked`.
   - Check: `grep -c '^| #' logos-doc/REDTEAM.md` counts one row per attack; `grep -c '| planned |$' logos-doc/REDTEAM.md` counts the untested rows until a slice lands a test.
@@ -2706,20 +2706,20 @@ Anchor: Edward Tufte, Tony Hoare
 - Red-team rows: none.
 - Docs: none (SPEC 2.4 carries the rule).
 
-### M13-A-S10 Eject writes the test files of a main module
-Anchor: Richard Feynman, Tony Hoare, Dieter Rams
-- Attack: `src/cmd/go/testdata/script/logos_eject_test_files.txt` MUST show that `logos eject -o out` of a module with an in-package test, an external test and a package of only test files writes each `_test.lgo` as a `_test.go` file, and that `go test -v ./...` of the copy, with the local toolchain and with `$UPROOT1272/bin/go`, prints the PASS lines of `logos test -v ./...`, that the copy vets and is gofmt-clean, and that a failing test fails in both. SPEC 63 and 67.
-- Build: `phaseOneRoots` leaves out a package that holds only test files, which builds only as a test variant; `buildEjectRoots` writes `_testmain.go` to the work directory of each test main before it builds it, as `go test` does.
-- Gate: `go test -count=1 cmd/go -run 'TestScript/(logos_eject_test_files|logos_interop_prop|logos_command)$'` MUST pass.
-- Red-team rows: #234.
-- Docs: none.
-
 ### M13-A-S9 Pin native target_cpu on a cross build
 Anchor: Tony Hoare, Claude Shannon, Dieter Rams
 - Attack: `src/cmd/go/testdata/script/logos_target_cpu_native.txt` MUST show the host level for `native` (the /proc/cpuinfo oracle), GOARM64 v8.0 for `GOARCH=arm64` on an amd64 host, and an explicit `GOAMD64=v2` or `GOARM64=v8.3` in the environment beating `native`, each through `go version -m` build settings.
 - Build: none (script only). `config.ArchLevels` reads `internal/cpu` for both architectures, and an architecture the host does not run reports no features, so it falls to its baseline; `settings.archLevels` leaves a level unset when the environment names one, except under `baseline` (M13-A-S8). SPEC 1.5 states both rules beside the `native` sentence.
 - Gate: `go test cmd/go -run 'TestScript/logos_target_cpu_native$'` MUST pass.
 - Red-team rows: none.
+- Docs: none.
+
+### M13-A-S10 Eject writes the test files of a main module
+Anchor: Richard Feynman, Tony Hoare, Dieter Rams
+- Attack: `src/cmd/go/testdata/script/logos_eject_test_files.txt` MUST show that `logos eject -o out` of a module with an in-package test, an external test and a package of only test files writes each `_test.lgo` as a `_test.go` file, and that `go test -v ./...` of the copy, with the local toolchain and with `$UPROOT1272/bin/go`, prints the PASS lines of `logos test -v ./...`, that the copy vets and is gofmt-clean, and that a failing test fails in both. SPEC 63 and 67.
+- Build: `phaseOneRoots` leaves out a package that holds only test files, which builds only as a test variant; `buildEjectRoots` writes `_testmain.go` to the work directory of each test main before it builds it, as `go test` does.
+- Gate: `go test -count=1 cmd/go -run 'TestScript/(logos_eject_test_files|logos_interop_prop|logos_command)$'` MUST pass.
+- Red-team rows: #242.
 - Docs: none.
 
 ## M14. Fixed-array SIMD
