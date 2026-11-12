@@ -31,7 +31,8 @@ func (fc *funcLower) groupCapture(pos syntax.Pos, call *syntax.CallExpr) ([]synt
 			continue
 		}
 		mark := fl.moveRegion(op.span, strings.Join(op.names, ", "))
-		stmts, stmtText := fc.groupBind(pos, op, mark)
+		head, tail := fl.drainBoundaries(op.span)
+		stmts, stmtText := fc.groupBind(pos, op, cat(head, gen(mark), tail).s)
 		native = append(native, stmts...)
 		text.WriteString(stmtText)
 		scanForLiterals(fl, op.expr)
@@ -63,13 +64,13 @@ func (fc *funcLower) groupOperands(call *syntax.CallExpr) (groupOperand, []group
 		base.Fatalf("logos: cannot split the operands of the group call at %s", call.Pos().String())
 	}
 	start := fl.off(leftmostOf(call.Fun))
-	fun := groupOperand{expr: call.Fun, span: span{start: start, end: lastTokenEnd(src, start, lparen)}}
+	fun := groupOperand{expr: call.Fun, span: fl.groupOperandSpan(call.Fun, span{start: start, end: lastTokenEnd(src, start, lparen)})}
 	if !isBuiltinExpr(fc, call.Fun) && !fc.groupStaticFunc(call.Fun) {
 		fun.names = []string{fc.nextFun()}
 	}
 	args := make([]groupOperand, len(call.ArgList))
 	for i, raw := range call.ArgList {
-		arg := groupOperand{expr: raw, span: trimSpan(src, split.args[i])}
+		arg := groupOperand{expr: raw, span: fl.groupOperandSpan(raw, trimSpan(src, split.args[i]))}
 		switch kind := argKind(fc, raw); {
 		case kind == argInline || fc.groupStaticFunc(raw):
 		case kind == argMulti:
@@ -81,6 +82,13 @@ func (fc *funcLower) groupOperands(call *syntax.CallExpr) (groupOperand, []group
 		args[i] = arg
 	}
 	return fun, args
+}
+
+func (fl *fileLower) groupOperandSpan(e syntax.Expr, source span) span {
+	if ws, ok := fl.wrapSpan[syntax.Unparen(e)]; ok {
+		return ws
+	}
+	return source
 }
 
 func (fc *funcLower) groupStaticFunc(e syntax.Expr) bool {

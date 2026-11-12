@@ -890,6 +890,24 @@ func drainOwnedAt(list *[]splice, off, id int) otext {
 	return text
 }
 
+func (fl *fileLower) drainBoundaries(vs span) (head, tail otext) {
+	take := func(off int) otext {
+		list := fl.ownerOfInsertion(off)
+		var text otext
+		var rest []splice
+		for _, sp := range *list {
+			if sp.owner == 0 || sp.start != sp.end || sp.start != off {
+				rest = append(rest, sp)
+				continue
+			}
+			text = cat(text, otext{s: sp.text, chunks: sp.chunks})
+		}
+		*list = rest
+		return text
+	}
+	return take(vs.start), take(vs.end)
+}
+
 func (fl *fileLower) drainBodyWrapper(body syntax.Node, text otext) otext {
 	expr, ok := body.(syntax.Expr)
 	if !ok {
