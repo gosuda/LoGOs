@@ -1083,6 +1083,12 @@ A `break`, a `return`, a panic in the loop body or in the source, and a terminal
 
 A receive-channel source MUST stop waiting when the stage is cancelled. [T-206]
 
+The source MUST be pulled in the calling goroutine, and the loop body and the stages after the segment MUST run on that goroutine. [T-206]
+
+A receive-channel source MUST deliver a finished result while the channel is quiet. [T-206]
+
+An empty source MUST yield no result and no error. [T-206]
+
 `logos/sync.Locked[T]` MUST expose `WithLock(f func(*T))`. [T-206]
 
 `WithLock` MUST hold `Lock`, defer `Unlock`, then call the function. [T-206]
