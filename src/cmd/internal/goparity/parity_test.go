@@ -1251,6 +1251,129 @@ func TestStageFailureIsABuildError(t *testing.T) {
 	}
 }
 
+var (
+	mainCompileLine = regexp.MustCompile(`(?m)^.* -p main .*$`)
+	modinfoLine     = regexp.MustCompile(`(?m)^modinfo .*$`)
+	compileAmd64    = regexp.MustCompile(`GOAMD64='(v\d)'`)
+	compileBudget   = regexp.MustCompile(`inlbudget=(\d+)`)
+	buildInfoExp    = regexp.MustCompile(`GOEXPERIMENT=([^\\"\s]*)`)
+)
+
+func (c config) experiment() string {
+	for _, kv := range c.env {
+		if v, ok := strings.CutPrefix(kv, "GOEXPERIMENT="); ok {
+			return v
+		}
+	}
+	if c.logos && !strings.Contains(c.toml, "arena = false") {
+		return "logosarena"
+	}
+	return ""
+}
+
+func dryBuild(t *testing.T, fork toolchain, c config) string {
+	t.Helper()
+	dir := t.TempDir()
+	files := map[string]string{
+		"go.mod":  "module example.com/dry\n\ngo 1.27\n",
+		"main.go": "package main\n\nfunc main() {}\n",
+	}
+	if c.toml != "" {
+		files["logos.toml"] = c.toml
+	}
+	for name, data := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(data), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	bin := fork.bin
+	if c.logos {
+		bin = fork.logos
+	}
+	args := append([]string{"build", "-n", "-o", filepath.Join(dir, "dry")}, c.args...)
+	out, err := goBuild(bin, dir, append(args, "."), appendEnv(baseEnv(forkCache()), c.env...), 5*time.Minute)
+	if err != nil {
+		t.Fatalf("dry build under %s: %v\n%s", c.id, err, clip(out))
+	}
+	return out
+}
+
+func compileProblems(c config, out string) []string {
+	line := mainCompileLine.FindString(out)
+	if line == "" {
+		return []string{"no compile command for package main"}
+	}
+	var problems []string
+	budgets := map[string]string{"0": "", "1": "", "2": "120", "3": "400", "s": "15"}
+	var budget string
+	if m := compileBudget.FindStringSubmatch(line); m != nil {
+		budget = m[1]
+	}
+	if want := budgets[c.levelKey()]; budget != want {
+		problems = append(problems, fmt.Sprintf("-O %s: compile inlbudget %q, want %q", c.levelKey(), budget, want))
+	}
+	if got, want := strings.Contains(line, " -N "), c.levelKey() == "0"; got != want {
+		problems = append(problems, fmt.Sprintf("-O %s: compile -N = %v, want %v", c.levelKey(), got, want))
+	}
+	level := "v1"
+	if m := compileAmd64.FindStringSubmatch(line); m != nil {
+		level = m[1]
+	}
+	if level != c.group {
+		problems = append(problems, fmt.Sprintf("compile GOAMD64 %s, want the %s of the matched upstream row", level, c.group))
+	}
+	if got, want := strings.Contains(line, " -race "), slices.Contains(c.args, "-race"); got != want {
+		problems = append(problems, fmt.Sprintf("compile -race = %v, want %v", got, want))
+	}
+	var experiment string
+	if m := buildInfoExp.FindStringSubmatch(modinfoLine.FindString(out)); m != nil {
+		experiment = m[1]
+	}
+	if experiment != c.experiment() {
+		problems = append(problems, fmt.Sprintf("build info GOEXPERIMENT %q, want %q", experiment, c.experiment()))
+	}
+	return problems
+}
+
+func TestForkConfigsReachTheCompiler(t *testing.T) {
+	fork := forkTool(t)
+	for _, c := range activeForkConfigs() {
+		t.Run(c.id, func(t *testing.T) {
+			for _, p := range compileProblems(c, dryBuild(t, fork, c)) {
+				t.Error(p)
+			}
+		})
+	}
+}
+
+func TestCompileProblemsSeeAnIgnoredFlag(t *testing.T) {
+	byID := make(map[string]config, len(forkConfigs))
+	for _, c := range forkConfigs {
+		byID[c.id] = c
+	}
+	const base = "/x/compile -o $WORK/b001/_pkg_.a -p main -lang=go1.27 -c=80"
+	for _, tc := range []struct {
+		name string
+		cfg  string
+		out  string
+		want int
+	}{
+		{"O3 honoured", "K3", base + " -d=inlbudget=400\n", 0},
+		{"O3 ignored", "K3", base + "\n", 1},
+		{"O0 without -N", "K2", base + "\n", 1},
+		{"O0 with -N", "K2", base + " -N -l\n", 0},
+		{"v3 row built at v1", "K4", base + " -d=inlbudget=400\n", 1},
+		{"v3 row built at v3", "K4", "GOAMD64='v3' " + base + " -d=inlbudget=400\n", 0},
+		{"arena off but build info has the arena", "K8", "GOAMD64='v3' " + base + " -d=inlbudget=400\nmodinfo \"build\\tGOEXPERIMENT=logosarena\\n\"\n", 1},
+		{"race ignored", "K16", "GOAMD64='v3' " + base + " -d=inlbudget=120\nmodinfo \"build\\tGOEXPERIMENT=logosarena\\n\"\n", 1},
+		{"no compile line", "K1", "nothing\n", 1},
+	} {
+		if got := compileProblems(byID[tc.cfg], tc.out); len(got) != tc.want {
+			t.Errorf("%s: %d problems %v, want %d", tc.name, len(got), got, tc.want)
+		}
+	}
+}
+
 func TestParity(t *testing.T) {
 	start := time.Now()
 	fork := forkTool(t)
