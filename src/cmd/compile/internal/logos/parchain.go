@@ -5,8 +5,8 @@
 package logos
 
 import (
-	"bytes"
 	"fmt"
+	"go/token"
 	"slices"
 	"strings"
 
@@ -110,11 +110,17 @@ func (fl *fileLower) parArgSpans(group *syntax.CallExpr) (ctx, limit span) {
 	}
 	ctx = trimSpan(fl.src, split.args[0])
 	arg := split.args[1]
-	eq := bytes.IndexByte(fl.src[arg.start:arg.end], '=')
+	eq := -1
+	scanSegment(fl.src, arg.start, arg.end, func(t tok) bool {
+		if t.kind == token.ASSIGN {
+			eq = t.end
+		}
+		return eq < 0
+	})
 	if eq < 0 {
 		base.Fatalf("logos: cannot locate the group stage limit at %s", group.Pos().String())
 	}
-	return ctx, trimSpan(fl.src, span{start: arg.start + eq + 1, end: arg.end})
+	return ctx, trimSpan(fl.src, span{start: eq, end: arg.end})
 }
 
 func (fl *fileLower) parStageOf(call *syntax.CallExpr, ops []chainOp, base syntax.Expr, term chainOp) *parStage {
