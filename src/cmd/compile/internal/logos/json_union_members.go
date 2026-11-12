@@ -62,10 +62,7 @@ func qualifierFor(holderPkg *types2.Package) func(*types2.Package) string {
 }
 
 func unionFactMembers(typ types2.Type) ([]facts.UnionMemberFact, bool) {
-	unwrapped := types2.Unalias(typ)
-	if cv, ok := unwrapped.(*types2.ConstView); ok {
-		unwrapped = types2.Unalias(cv.Elem)
-	}
+	unwrapped := unaliasConstView(typ)
 	named, ok := unwrapped.(*types2.Named)
 	if !ok || named.Obj() == nil || named.Obj().Pkg() == nil {
 		return nil, false
@@ -189,10 +186,7 @@ func classifyOneMember(holderPkg *types2.Package, staticJSON map[*types2.Named]b
 	if ptr, ok := types2.Unalias(elem).(*types2.Pointer); ok {
 		elem = ptr.Elem()
 	}
-	if cv, ok := types2.Unalias(elem).(*types2.ConstView); ok {
-		elem = cv.Elem
-	}
-	named, ok := types2.Unalias(elem).(*types2.Named)
+	named, ok := unaliasConstView(elem).(*types2.Named)
 	if !ok || named.Obj() == nil || named.Obj().Pkg() == nil {
 		return unionMemberClass{spell: spell, keyed: false, hasJSON: hasUnmarshalMethods(m), typ: m}, hasUnmarshalMethods(m)
 	}

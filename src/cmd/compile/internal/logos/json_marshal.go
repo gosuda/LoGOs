@@ -334,18 +334,12 @@ func (g *marshalGen) fallbackQuotedCode(f *jsonField) fieldCode {
 }
 
 func (g *marshalGen) fallbackScalarQuotedCode(f *jsonField, kind scalarKind) fieldCode {
-	u := types2.Unalias(f.typ)
-	if cv, ok := u.(*types2.ConstView); ok {
-		u = types2.Unalias(cv.Elem)
-	}
+	u := unaliasConstView(f.typ)
 	_, isPtr := u.(*types2.Pointer)
 	var elem types2.Type
 	if isPtr {
 		p := u.(*types2.Pointer)
-		elem = types2.Unalias(p.Elem())
-		if cv, ok := elem.(*types2.ConstView); ok {
-			elem = types2.Unalias(cv.Elem)
-		}
+		elem = unaliasConstView(p.Elem())
 	} else {
 		elem = u
 		if _, ok := elem.(*types2.Option); ok {
@@ -382,10 +376,7 @@ func (g *marshalGen) fallbackNumberQuotedCode(f *jsonField) fieldCode {
 	field := g.recv + "." + f.goName
 	b := fmt.Sprintf("_logos_b%d", f.pos)
 	e := fmt.Sprintf("_logos_e%d", f.pos)
-	u := types2.Unalias(f.typ)
-	if cv, ok := u.(*types2.ConstView); ok {
-		u = types2.Unalias(cv.Elem)
-	}
+	u := unaliasConstView(f.typ)
 	_, isPtr := u.(*types2.Pointer)
 	call := []string{
 		fmt.Sprintf("%s, %s := %s.MarshalField(%s)", b, e, jsonAlias, field),

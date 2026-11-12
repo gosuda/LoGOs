@@ -110,7 +110,8 @@ func (fl *fileLower) lowerStaticJSONType(td *syntax.TypeDecl) {
 		if !userDeclaresMethod(named, "UnmarshalJSON") {
 			js.unmarshalText(&b)
 		}
-		js.unmarshalKeys(&b)
+		js.keyFuncs(&b)
+		js.missingFunc(&b)
 		if fl.pkg.jsonUnionKeys == nil {
 			fl.pkg.jsonUnionKeys = make(map[string]bool)
 		}
@@ -300,36 +301,21 @@ var unmarshalMethodNames = []string{
 	"UnmarshalJSON", "UnmarshalJSONFrom", "UnmarshalText",
 }
 
-func hasMethodNamed(t types2.Type, names []string) bool {
+func unaliasConstView(t types2.Type) types2.Type {
 	u := types2.Unalias(t)
 	if cv, ok := u.(*types2.ConstView); ok {
-		u = types2.Unalias(cv.Elem)
+		return types2.Unalias(cv.Elem)
 	}
-	if _, ok := u.(*types2.Option); ok {
-		return false
-	}
-	var named *types2.Named
+	return u
+}
+
+func hasMethodNamed(t types2.Type, names []string) bool {
+	u := unaliasConstView(t)
 	if p, ok := u.(*types2.Pointer); ok {
-		e := types2.Unalias(p.Elem())
-		if cv, ok := e.(*types2.ConstView); ok {
-			e = types2.Unalias(cv.Elem)
-		}
-		if _, ok := e.(*types2.Option); ok {
-			return false
-		}
-		var ok bool
-		named, ok = e.(*types2.Named)
-		if !ok {
-			return false
-		}
-	} else {
-		var ok bool
-		named, ok = u.(*types2.Named)
-		if !ok {
-			return false
-		}
+		u = unaliasConstView(p.Elem())
 	}
-	if named.Obj() == nil {
+	named, ok := u.(*types2.Named)
+	if !ok || named.Obj() == nil {
 		return false
 	}
 	ptr := types2.NewPointer(named)
@@ -356,15 +342,9 @@ func hasUnmarshalMethods(t types2.Type) bool {
 }
 
 func isExactNumber(t types2.Type) bool {
-	u := types2.Unalias(t)
-	if cv, ok := u.(*types2.ConstView); ok {
-		u = types2.Unalias(cv.Elem)
-	}
+	u := unaliasConstView(t)
 	if p, ok := u.(*types2.Pointer); ok {
-		u = types2.Unalias(p.Elem())
-		if cv, ok := u.(*types2.ConstView); ok {
-			u = types2.Unalias(cv.Elem)
-		}
+		u = unaliasConstView(p.Elem())
 	}
 	named, ok := u.(*types2.Named)
 	if !ok || named.Obj() == nil || named.Obj().Name() != "Number" {
@@ -374,38 +354,14 @@ func isExactNumber(t types2.Type) bool {
 	if !ok || b.Kind() != types2.String {
 		return false
 	}
-	if pkg := named.Obj().Pkg(); pkg != nil {
-		return pkg.Path() == "encoding/json"
-	}
-	ptr := types2.NewPointer(named)
-	var pkg *types2.Package
-	if named.Obj() != nil {
-		pkg = named.Obj().Pkg()
-	}
-	has := func(name string) bool {
-		m, _, _ := types2.LookupFieldOrMethod(ptr, false, pkg, name)
-		return m != nil
-	}
-	return has("String") && has("Float64") && has("Int64")
+	pkg := named.Obj().Pkg()
+	return pkg != nil && pkg.Path() == "encoding/json"
 }
 
 func fallbackScalarKind(t types2.Type) (scalarKind, bool) {
-	u := types2.Unalias(t)
-	if cv, ok := u.(*types2.ConstView); ok {
-		u = types2.Unalias(cv.Elem)
-	}
-	if _, ok := u.(*types2.Option); ok {
-		return 0, false
-	}
+	u := unaliasConstView(t)
 	if p, ok := u.(*types2.Pointer); ok {
-		e := types2.Unalias(p.Elem())
-		if cv, ok := e.(*types2.ConstView); ok {
-			e = types2.Unalias(cv.Elem)
-		}
-		if _, ok := e.(*types2.Option); ok {
-			return 0, false
-		}
-		return scalarOfNamedOrBasic(e)
+		u = unaliasConstView(p.Elem())
 	}
 	return scalarOfNamedOrBasic(u)
 }
@@ -455,27 +411,16 @@ func isIsZeroSignature(obj types2.Object) bool {
 }
 
 func needsIsZero(t types2.Type) bool {
-	u := types2.Unalias(t)
-	if cv, ok := u.(*types2.ConstView); ok {
-		u = types2.Unalias(cv.Elem)
-	}
+	u := unaliasConstView(t)
 	if o, ok := u.(*types2.Option); ok {
-		u = types2.Unalias(o.Elem)
-		if cv, ok := u.(*types2.ConstView); ok {
-			u = types2.Unalias(cv.Elem)
-		}
+		u = unaliasConstView(o.Elem)
 	} else if n, ok := u.(*types2.Named); ok {
-		if n.Underlying() != nil {
-			if o, ok := n.Underlying().(*types2.Option); ok {
-				u = types2.Unalias(o.Elem)
-			}
+		if o, ok := n.Underlying().(*types2.Option); ok {
+			u = types2.Unalias(o.Elem)
 		}
 	}
 	if p, ok := u.(*types2.Pointer); ok {
-		u = types2.Unalias(p.Elem())
-		if cv, ok := u.(*types2.ConstView); ok {
-			u = types2.Unalias(cv.Elem)
-		}
+		u = unaliasConstView(p.Elem())
 	}
 	named, ok := u.(*types2.Named)
 	if !ok || named.Obj() == nil {
