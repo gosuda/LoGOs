@@ -651,24 +651,35 @@ func cfChainText(frames []cfFrame, label string) string {
 	return strings.Join(append(parts, label), " -> ")
 }
 
-func cfStripTParamsO(src otext, name string) (otext, bool) {
-	head := "func " + name
-	if !strings.HasPrefix(src.s, head+"[") {
-		return otext{}, false
-	}
-	depth := 0
-	for i := len(head); i < len(src.s); i++ {
-		switch src.s[i] {
-		case '[':
+func cfStripTParamsO(src otext) (otext, bool) {
+	want := []token.Token{token.FUNC, token.IDENT, token.LBRACK}
+	var open, depth, end int
+	scanSegment([]byte(src.s), 0, len(src.s), func(t tok) bool {
+		switch {
+		case t.comment:
+		case len(want) > 0:
+			if t.kind != want[0] {
+				return false
+			}
+			if want[0] == token.LBRACK {
+				open, depth = t.start, 1
+			}
+			want = want[1:]
+		case t.kind == token.LBRACK:
 			depth++
-		case ']':
+		case t.kind == token.RBRACK:
 			depth--
 			if depth == 0 {
-				return cat(src.slice(0, len(head)), src.slice(i+1, len(src.s))), true
+				end = t.end
+				return false
 			}
 		}
+		return true
+	})
+	if end == 0 {
+		return otext{}, false
 	}
-	return otext{}, false
+	return cat(src.slice(0, open), src.slice(end, len(src.s))), true
 }
 
 func (fl *fileLower) cfBuildCopy(site *cfSite, rec *cfRecord, copyName string) (otext, bool) {
@@ -676,7 +687,7 @@ func (fl *fileLower) cfBuildCopy(site *cfSite, rec *cfRecord, copyName string) (
 	if srcO.s == "" {
 		srcO = gen(rec.source)
 	}
-	body, ok := cfStripTParamsO(srcO, rec.name)
+	body, ok := cfStripTParamsO(srcO)
 	if !ok {
 		fl.cfError(site.pos, "[comptime::generic_targ] malformed comptime source of %s", rec.name)
 		return otext{}, false

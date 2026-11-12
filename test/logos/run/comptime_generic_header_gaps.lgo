@@ -1,0 +1,90 @@
+// run
+package main
+
+import (
+	"comptime"
+	"fmt"
+	"os"
+)
+
+type Pair struct {
+	X int
+	Y string
+}
+
+func /*a*/ Block /*b*/ [ /*c*/ T /*d*/ any /*e*/ , /*f*/ U /*g*/ interface{ ~[]int } /*h*/ ] /*i*/ ( /*j*/ ) /*k*/ []string /*l*/ {
+	var out []string
+	const for _, f := range comptime.Fields[T]() {
+		out = append(out, f.Name)
+	}
+	return out
+}
+
+func // line
+LineName[T any]() []string {
+	var out []string
+	const for _, f := range comptime.Fields[T]() {
+		out = append(out, f.Name)
+	}
+	return out
+}
+
+func
+BreakName[T any]() []string {
+	var out []string
+	const for _, f := range comptime.Fields[T]() {
+		out = append(out, f.Name)
+	}
+	return out
+}
+
+func Brackets[T /* ] [ */ any]() []string {
+	var out []string
+	const for _, f := range comptime.Fields[T]() {
+		out = append(out, f.Name)
+	}
+	return out
+}
+
+func Lines[ // x
+	T any,
+	// y
+	U any,
+]() []string {
+	var out []string
+	const for _, f := range comptime.Fields[T]() {
+		out = append(out, f.Name)
+	}
+	return out
+}
+
+func /*a*/ dropped /*b*/ [ /*c*/ T any]() []string {
+	var out []string
+	const for _, f := range comptime.Fields[T]() {
+		out = append(out, f.Name)
+	}
+	return out
+}
+
+var failed bool
+
+func check(name, got, want string) {
+	if got != want {
+		fmt.Println("FAIL", name, "got", got, "want", want)
+		failed = true
+		return
+	}
+	fmt.Println("ok", name)
+}
+
+func main() {
+	check("block-comments-in-every-gap", fmt.Sprint(Block[Pair, []int]()), "[X Y]")
+	check("line-comment-after-func", fmt.Sprint(LineName[Pair]()), "[X Y]")
+	check("line-break-after-func", fmt.Sprint(BreakName[Pair]()), "[X Y]")
+	check("brackets-inside-a-comment", fmt.Sprint(Brackets[Pair]()), "[X Y]")
+	check("line-comments-inside-the-list", fmt.Sprint(Lines[Pair, int]()), "[X Y]")
+	check("dropped-with-comments", fmt.Sprint(dropped[Pair]()), "[X Y]")
+	if failed {
+		os.Exit(1)
+	}
+}
