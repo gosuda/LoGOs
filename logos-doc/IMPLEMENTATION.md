@@ -2028,6 +2028,7 @@ Anchor: Tony Hoare, Edsger W. Dijkstra
 - Attack: `testdata/logos/spread.lgo`: same name with different type -> `spread_type_mismatch` (#119, #146); `test/logos/run/spread.lgo`: explicit fields win; source evaluated once; `s = State{A: s.B, B: s.A, ..s}` swaps correctly; a 4 KB struct self-update performs no full copy (codegen check: no `runtime.memmove` of 4 KB, #146).
 - Build: parser: `..expr` as a composite literal element in LogosMode; lowering: simple source operands referenced directly, others captured once in a function literal; self-update form -> one tuple assignment.
 - Gate: types2, testdir, codegen tests.
+- Red-team rows: #256 (statement-position and eject fixture guards; synthetic traversal omission turns the fixture red, restored-source native and upstream-ejected runs pass; no production fix).
 
 ### M6-S5 Tuples
 Anchor: Claude Shannon, Otl Aicher
