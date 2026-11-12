@@ -111,6 +111,8 @@ func LogosHasPointers(t Type) bool {
 		return LogosHasPointers(u.Elem)
 	case *Option:
 		return LogosHasPointers(u.Elem)
+	case *LogosTuple:
+		return LogosHasPointers(u.under)
 	case *Array:
 		return u.Len() > 0 && LogosHasPointers(u.Elem())
 	case *Struct:

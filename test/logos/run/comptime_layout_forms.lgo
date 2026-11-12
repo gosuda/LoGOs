@@ -56,6 +56,8 @@ type ViewOpt = const int?
 type OptView = ViewSlice?
 type Pair = (int, string)
 type PairOpt = (OptInt, OptStr)
+type DefPair (int, string)
+type DefPairOpt (OptInt, OptStr)
 type Cells = [3]OptInt
 
 type twinOpt[T any] struct {
@@ -173,6 +175,8 @@ func composites() []bool {
 	return []bool{
 		check[Pair]("tuple"),
 		check[PairOpt]("tuple-options"),
+		check[DefPair]("defined-tuple"),
+		check[DefPairOpt]("defined-tuple-options"),
 		check[OptOpt]("option-option"),
 		check[Rec]("struct-options"),
 		check[OptRec]("option-struct"),
@@ -191,6 +195,8 @@ func twins() []bool {
 		same[ViewSlice, []int]("twin-view"),
 		same[Pair, twinPair]("twin-tuple"),
 		same[PairOpt, twinPairOpt]("twin-tuple-options"),
+		same[DefPair, twinPair]("twin-defined-tuple"),
+		same[DefPairOpt, twinPairOpt]("twin-defined-tuple-options"),
 		same[Rec, twinRec]("twin-struct"),
 	}
 }

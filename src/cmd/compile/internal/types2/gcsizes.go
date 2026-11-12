@@ -59,6 +59,8 @@ func (s *gcSizes) Alignof(T Type) (result int64) {
 		return s.Alignof(t.Elem)
 	case *Option:
 		return s.Alignof(logosOptionRepr(t))
+	case *LogosTuple:
+		return s.Alignof(t.under)
 	case *TypeParam, *Union:
 		panic("unreachable")
 	}
@@ -161,6 +163,8 @@ func (s *gcSizes) Sizeof(T Type) int64 {
 		return s.Sizeof(t.Elem)
 	case *Option:
 		return s.Sizeof(logosOptionRepr(t))
+	case *LogosTuple:
+		return s.Sizeof(t.under)
 	case *TypeParam, *Union:
 		panic("unreachable")
 	}
