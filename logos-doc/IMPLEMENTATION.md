@@ -2112,6 +2112,7 @@ Anchor: David Parnas, Edsger W. Dijkstra
 Anchor: Tony Hoare, J.R.R. Tolkien
 - Attack (recursion): `test/logos/lint/infinite_recursion_const_switch.lgo` MUST reject recursion through a selected concrete case and ignore a recursive dead case. `TestInfiniteRecursionConstSwitch` covers exact, tilde, interface, first-match, and no-match selection. Lowering and lint MUST use the same checked case selector.
 - Attack (eject scopes): `test/logos/run/const_switch_exact_tilde_exact.lgo` places exact and tilde cases in sequence. Eject MUST close each generated scope at that case's source boundary. Native and ejected execution MUST match the expected output.
+- Attack (eject agreement of the run-time form): `src/cmd/go/testdata/script/logos_eject_const_switch.txt` copies `test/logos/run/const_switch.lgo`, `const_switch_order.lgo` and `const_switch_nomatch.lgo` into modules, runs each natively and ejected through upstream Go, and requires the stdout of both to equal the fixture's `.out`.
 - Attack: `testdata/logos/const_switch.lgo`: shadowed case after a broader one -> `[comptime::unreachable_case]` (#57); `case int` vs `case ~int` on `type UserID int` (#91); interface case gains the interface's methods inside the block and keeps outer constraint methods (#86); `[]*os.File` never rebinds as `[]io.Writer` (#45). `test/logos/run/const_switch.lgo` and `logos_eject_const_switch.txt`: the PLAN Sec 7.2 example runs natively and ejected with identical output (#37, #108). `test/logos/run/const_switch_nomatch.lgo`: a `T` matching no case returns the input unchanged (trailing `return buf, nil`).
 - Build: parser `ConstSwitchStmt` with `ConstSwitchCase` arms (`syntax/nodes_constif_logos.go`); types2 types each case body with `T` replaced by the case type (exact cases) or `T` constrained by the intersection (interface cases); the rebinding lives in `cmd/compile/internal/types2/constswitch_logos.go`; lowering: inside comptime-generic copies, fold to the matching case; elsewhere emit PLAN Sec 7.2's runtime form (`switch any((*T)(nil)).(type)` with `unsafe` rebinding for exact cases, `any(v).(I)` for interface cases). The runtime form ends with a trailing `return buf, nil` when no case matches.
 - Attack (comptime generic): `test/logos/run/const_switch_comptime.lgo` compiles a `const switch` inside a comptime generic. Each instantiation folds to its matching case. Native execution prints the expected output.
@@ -2749,6 +2750,22 @@ Anchor: Edward Tufte, Tony Hoare
 - Build: `src/cmd/compile/internal/types2/simd_logos.go` MUST admit float lanes for `& | ^`. `src/cmd/compile/internal/logos/simd.go` MUST spell scalar through bits. Vector form MUST reuse same width integer lane with AVX guard.
 - Gate: Types2 MUST pass. Testdir run MUST pass. Codegen MUST pass. Logos sweep MUST pass.
 - Red-team rows: #198.
+- Docs: none.
+
+### M14-A-S2 Read array operator object code of arm64 and riscv64 builds
+Anchor: John Carmack, Tony Hoare
+- Attack: `src/cmd/go/testdata/script/logos_simd_array_targets.txt` cross-builds one program for linux/arm64 and linux/riscv64 and reads `go tool objdump`. With `GOEXPERIMENT=simd` on arm64, float32 (also through an alias), byte, int32, float64 bitwise and the product stage of `dot` use `FADD`, `VADD`, `VAND` and `FMUL` with a vector arrangement and make no `X86Features` or `archsimd` call; `int`, `uint`, `uintptr`, a defined float lane and a float `sum` use no vector arrangement. Without the experiment `[8]float32` has eight scalar `FADDS`. On riscv64 with the experiment set, `[8]float32` has eight `FADDS`, `[4]int` has four `ADD` (one per lane, unrolled), and neither calls `archsimd`. The `// arm64:` and `// riscv64:` asmcheck lines of the codegen fixtures run only for the host GOARCH unless `-all_codegen` is set; the flag defaults to false except on a `gotip-linux-amd64` builder.
+- Build: none (test-only).
+- Gate: `TestScript/logos_simd_array_targets` MUST pass.
+- Red-team rows: none.
+- Docs: none.
+
+### M14-A-S3 Round each scalar lane product of dot
+Anchor: John Carmack, Claude Shannon
+- Attack: `src/cmd/go/testdata/script/logos_simd_array_targets.txt`: the scalar form of `dot` on arm64 held `FMADDD` while the NEON form rounds each product with `FMUL`, so `[4]float64` and `[4]lane` (a defined lane keeps the scalar form) disagreed on random inputs under `qemu-aarch64`. The script reads objdump on arm64, riscv64 and amd64 `GOAMD64=v3` and requires no `FMADD`, `FMSUB`, `VFMADD` or `VFMSUB` in `dotF64` and `dotLane`, and it runs `[2]`, `[4]` and `[8]float64` and `[4]`, `[8]` and `[16]float32` with 4000 random inputs each, comparing the bits of the vector and scalar forms, natively and under `qemu-aarch64` when the emulator is on `PATH`. `test/logos/run/simd_crossform.lgo` multiplies by ones, so it cannot see a fused product.
+- Build: `simdScalarBody` in `src/cmd/compile/internal/logos/simd.go` spells each float product as `T(a[i] * b[i])`. The conversion rounds to the element type, so no add absorbs the multiply.
+- Gate: `TestScript/logos_simd_array_targets` MUST pass; `TestSimd*` in `cmd/compile/internal/logos` MUST pass; the `simd*` run and codegen fixtures MUST pass.
+- Red-team rows: #234.
 - Docs: none.
 
 ## M15. Backend peepholes and long-loop preemption
