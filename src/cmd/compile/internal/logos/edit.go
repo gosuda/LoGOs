@@ -180,9 +180,10 @@ func applyChunks(src otext, splices []splice) (otext, error) {
 		}
 		out += upto - prev
 	}
+	var last splice
 	for _, s := range splices {
 		if s.start < prev {
-			return otext{}, fmt.Errorf("overlapping edits at byte offset %d", s.start)
+			return otext{}, fmt.Errorf("overlapping edits at byte offset %d: [%d,%d)->%q, [%d,%d)->%q", s.start, last.start, last.end, last.text, s.start, s.end, s.text)
 		}
 		gap(s.start)
 		sb.WriteString(s.text)
@@ -194,6 +195,7 @@ func applyChunks(src otext, splices []splice) (otext, error) {
 		}
 		out += len(s.text)
 		prev = s.end
+		last = s
 	}
 	gap(len(src.s))
 	res := otext{s: sb.String(), chunks: chunks}

@@ -386,7 +386,7 @@ func (fl *fileLower) resolveChainMoves() {
 		}
 		out, err := applyChunks(fl.srcMap.sliceO(r.start, r.end), adj)
 		if err != nil {
-			base.Fatalf("logos: overlapping edits at byte offset %d", r.start)
+			base.Fatalf("logos: %v", err)
 		}
 		subst := func(list []splice) {
 			for j := range list {
@@ -428,7 +428,7 @@ func (fl *fileLower) textOf(s span) otext {
 	}
 	out, err := applyChunks(fl.srcMap.sliceO(s.start, s.end), adj)
 	if err != nil {
-		base.Fatalf("logos: overlapping edits at byte offset %d", s.start)
+		base.Fatalf("logos: %v", err)
 	}
 	return out
 }
