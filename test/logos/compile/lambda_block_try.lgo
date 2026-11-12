@@ -2,7 +2,10 @@
 
 package p
 
-import "errors"
+import (
+	"context"
+	"errors"
+)
 
 var errOdd = errors.New("odd")
 
@@ -26,6 +29,24 @@ func deferTry(xs []int) ([]int, error) {
 		return x
 	})
 	return ys, nil
+}
+
+func deferTryNested(xs []int) ([]int, error) {
+	ys := xs.map(x => {
+		if x > 0 {
+			defer f(x)? // ERROR "misplaced_try"
+		}
+		return x
+	})
+	return ys, nil
+}
+
+func stageDeferTry(ctx context.Context, xs []int) ([]int, error) {
+	ys, err := xs.group(ctx, limit = 2).map(x => {
+		defer f(x)? // ERROR "misplaced_try"
+		return x
+	})
+	return ys, err
 }
 
 func errdeferInside(xs []int) ([]int, error) {
