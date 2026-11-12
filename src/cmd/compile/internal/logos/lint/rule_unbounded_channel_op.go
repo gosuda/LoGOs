@@ -121,6 +121,7 @@ type timerUse struct {
 	defIn    *syntax.ForStmt
 	recv     bool
 	reset    *syntax.ForStmt
+	resetAt  syntax.Pos
 	deferred []int
 	src      *types2.Var
 	taint    bool
@@ -465,6 +466,7 @@ func (u *chanUnit) bodyTop(f *syntax.ForStmt) {
 		if v := u.topReset(st); v != nil {
 			if t := u.timers[v]; t != nil {
 				t.reset = f
+				t.resetAt = st.Pos()
 				t.recv = false
 			}
 			if es, ok := st.(*syntax.ExprStmt); ok {
@@ -679,9 +681,8 @@ func (u *chanUnit) isTimeoutRecv(at syntax.Pos, x syntax.Expr) bool {
 // localTimerBound reports whether sel ends the wait of the select at
 // position at: the timer is a local of the function the walk is under,
 // declared once and never assigned again, not stopped, and for a timer, not
-// received from, not waiting in a for statement that neither declares nor
-// resets it, and not in the reach of a backward goto that does not declare
-// it. A deferred Stop exempts only its own function.
+// received from and not waiting in a for statement that neither declares
+// nor resets it. A deferred Stop exempts only its own function.
 func (u *chanUnit) localTimerBound(at syntax.Pos, sel *syntax.SelectorExpr) bool {
 	v := u.timerName(sel.X)
 	if v == nil {
@@ -699,11 +700,15 @@ func (u *chanUnit) localTimerBound(at syntax.Pos, sel *syntax.SelectorExpr) bool
 	if t.ctor == "NewTicker" {
 		return true
 	}
-	if t.recv || u.rerunsWithout(at, t.src.Pos()) {
-		return false
+	armed, ok := t.armedFor(u.loopAt())
+	return ok && !t.recv && !u.rerunsWithout(at, armed)
+}
+
+func (t *timerUse) armedFor(loop *syntax.ForStmt) (syntax.Pos, bool) {
+	if loop != nil && t.reset == loop {
+		return t.resetAt, true
 	}
-	f := u.loopAt()
-	return f == nil || t.defIn == f || t.reset == f
+	return t.src.Pos(), loop == nil || t.defIn == loop
 }
 
 type span struct{ from, to syntax.Pos }
@@ -727,9 +732,9 @@ func backJumps(root syntax.Node) []span {
 	return out
 }
 
-func (u *chanUnit) rerunsWithout(stmt, decl syntax.Pos) bool {
+func (u *chanUnit) rerunsWithout(stmt, armed syntax.Pos) bool {
 	for _, s := range u.reruns {
-		if s.holds(stmt) && !s.holds(decl) {
+		if s.holds(stmt) && !s.holds(armed) {
 			return true
 		}
 	}
