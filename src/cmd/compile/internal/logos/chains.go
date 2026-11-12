@@ -863,6 +863,7 @@ type chainGen struct {
 	hoists    []chainHoist
 	elemT     types2.Type
 	receiverT types2.Type
+	passRcv   bool
 }
 
 func (cg *chainGen) run(call *syntax.CallExpr) {
@@ -912,6 +913,7 @@ func (cg *chainGen) run(call *syntax.CallExpr) {
 	resultT := cg.fl.pkg.info.TypeOf(call)
 	isTry := cg.runIsTry(ops, term)
 	cg.receiverT = cg.fl.pkg.info.TypeOf(base)
+	cg.passRcv = !isTry && containsCall(base)
 	cg.emit(call, ops, baseText, elemT, resultT, term, isTry)
 }
 
@@ -1885,7 +1887,7 @@ func (cg *chainGen) emit(call *syntax.CallExpr, ops []chainOp, baseText otext, e
 	ce := &chainEmit{cg: cg, ops: ops, term: term, baseText: baseText, elemT: elemT, resultT: resultT, isTry: isTry}
 	ce.prepare()
 	prelude, body, epilogue := ce.runLoopO()
-	if !isTry {
+	if cg.passRcv {
 		prelude = prelude[1:]
 	}
 	var parts []otext
@@ -1900,7 +1902,7 @@ func (cg *chainGen) emit(call *syntax.CallExpr, ops []chainOp, baseText otext, e
 	}
 	loopText := cat(leftoverComments(fl, cg.whole, cg.kept), cat(parts...).trimRight(" "))
 	if !isTry {
-		text := cat(gen("func("+cg.prefix+"_rcv "+cg.spellType(cg.receiverT)+") "+ce.resultSpelling()+" { "), loopText, gen(" }("), baseText, gen(")"))
+		text := cg.exprLoop(ce, loopText, baseText)
 		native := parseChainExprFrag(fl, text.s, call.Pos())
 		fl.stageReplacement(call, native)
 		fl.wrapSpan[native] = cg.whole
@@ -1924,6 +1926,24 @@ func (cg *chainGen) emit(call *syntax.CallExpr, ops []chainOp, baseText otext, e
 	fl.stageReplacement(call, native)
 	fl.wrapSpan[native] = cg.whole
 	fl.add(cg.whole.start, cg.whole.end, temp)
+}
+
+func (cg *chainGen) exprLoop(ce *chainEmit, loopText, baseText otext) otext {
+	if !cg.passRcv {
+		return cat(gen("func() "+ce.resultSpelling()+" { "), loopText, gen(" }()"))
+	}
+	head := "func(" + cg.prefix + "_rcv " + cg.spellType(cg.receiverT) + ") " + ce.resultSpelling() + " { "
+	return cat(gen(head), loopText, gen(" }("), baseText, gen(")"))
+}
+
+func containsCall(e syntax.Expr) bool {
+	found := false
+	syntax.Inspect(e, func(n syntax.Node) bool {
+		_, isCall := n.(*syntax.CallExpr)
+		found = found || isCall
+		return !found
+	})
+	return found
 }
 
 func (ce *chainEmit) resultSpelling() string {
