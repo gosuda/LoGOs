@@ -67,8 +67,6 @@ func (fl *fileLower) lowerOptNode(n syntax.Node) {
 		fl.lowerOptSend(n)
 	case *syntax.LambdaExpr:
 		fl.lowerOptLambdaBody(n)
-	case *syntax.TupleType:
-		fl.lowerTypeExpr(n)
 	}
 	fl.lowerOptFields(n, "")
 }
@@ -445,11 +443,6 @@ func (fl *fileLower) lowerTypeExpr(e syntax.Expr) syntax.Expr {
 			if f.Type != nil {
 				f.Type = fl.lowerTypeExpr(f.Type)
 			}
-		}
-		return e
-	case *syntax.TupleType:
-		for _, f := range t.Fields {
-			f.Type = fl.lowerTypeExpr(f.Type)
 		}
 		return e
 	case *syntax.StructType:
