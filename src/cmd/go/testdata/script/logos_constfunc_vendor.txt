@@ -15,6 +15,11 @@ exists vendor/example.com/vmod/b/b.lgo
 
 logos run -mod=vendor .
 cmp stdout $WORK/want.txt
+
+cp go.mod.stale go.mod
+! logos run -mod=vendor .
+stderr 'inconsistent vendoring'
+! stdout .
 cd ..
 
 cd vendored_fixture
@@ -98,6 +103,15 @@ module example.com/modvendorgen
 go 1.27
 
 require example.com/vmod v0.0.0
+
+replace example.com/vmod => ../vmod
+
+-- mod_vendor_gen/go.mod.stale --
+module example.com/modvendorgen
+
+go 1.27
+
+require example.com/vmod v0.0.1
 
 replace example.com/vmod => ../vmod
 
