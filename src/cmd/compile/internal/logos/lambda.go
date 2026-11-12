@@ -150,7 +150,7 @@ func (fl *fileLower) lambdaCaptureSpan(lam *syntax.LambdaExpr, body syntax.Expr)
 			return stashed
 		}
 	}
-	start := fl.off(syntax.StartPos(body))
+	start := fl.exprStart(body)
 	return span{start, lambdaBodyEnd(fl.src, start)}
 }
 

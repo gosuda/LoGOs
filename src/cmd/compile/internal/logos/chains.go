@@ -517,6 +517,16 @@ func (fl *fileLower) exprStart(e syntax.Expr) int {
 			e = t.X
 		case *syntax.CallExpr:
 			e = t.Fun
+		case *syntax.Operation:
+			if t.Y == nil {
+				return fl.off(t.Pos())
+			}
+			e = t.X
+		case *syntax.CompositeLit:
+			if t.Type == nil {
+				return fl.off(t.Pos())
+			}
+			e = t.Type
 		default:
 			return fl.off(syntax.StartPos(e))
 		}
@@ -873,7 +883,8 @@ func (fl *fileLower) preLowerCaptureBody(lam *syntax.LambdaExpr) {
 	}
 	if body, ok := lam.Body.(syntax.Expr); ok {
 		if _, done := fl.optBodySpan[lam]; !done {
-			espan := span{fl.off(syntax.StartPos(body)), fl.off(syntax.EndPos(body))}
+			bodyStart := fl.exprStart(body)
+			espan := span{bodyStart, lambdaBodyEnd(fl.src, bodyStart)}
 			if ws, ok := fl.wrapSpan[syntax.Unparen(body)]; ok {
 				espan = ws
 			} else if call, ok := syntax.Unparen(body).(*syntax.CallExpr); ok {
