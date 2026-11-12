@@ -5,6 +5,12 @@ logos build -o app$GOEXE .
 exec ./app$GOEXE
 stdout '^jsonv2=on$'
 
+env GOEXPERIMENT=nojsonv2
+logos build -o appoff$GOEXE .
+exec ./appoff$GOEXE
+stdout '^jsonv2=off$'
+! stdout '^jsonv2=on$'
+
 -- go.mod --
 module example.com/jsonv2default
 
