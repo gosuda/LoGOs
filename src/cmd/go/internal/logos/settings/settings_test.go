@@ -46,6 +46,7 @@ func TestLoadPrecedence(t *testing.T) {
 	broken := logosModule(t, "[build]\narena = maybe\n")
 	baseline := logosModule(t, "[build]\ntarget_cpu = \"baseline\"\n")
 	det := logosModule(t, "[build]\ntarget_cpu = \"deterministic\"\n")
+	native := logosModule(t, "[build]\ntarget_cpu = \"native\"\n")
 	kitchen := logosModule(t, "[build]\narena = true\ncgo = \"allow\"\ntarget_cpu = \"baseline\"\nopt_level = \"O3\"\n")
 
 	tests := []struct {
@@ -122,15 +123,15 @@ func TestLoadPrecedence(t *testing.T) {
 			flags: Flags{Opt: "0"}, optLevel: "0",
 		},
 		{
-			name: "envBeatsFileAMD64", modRoot: baseline,
+			name: "baselineBeatsEnvAMD64", modRoot: baseline,
 			flags: Flags{Logos: true, Env: Env{GOAMD64: "v2"}}, optLevel: "2",
-			amd64: "", arm: "v8.0",
+			amd64: "v1", arm: "v8.0",
 			experiment: "logosarena", arena: true, module: true,
 		},
 		{
-			name: "envBeatsFileARM64", modRoot: baseline,
+			name: "baselineBeatsEnvARM64", modRoot: baseline,
 			flags: Flags{Logos: true, Env: Env{GOARM64: "v8.3"}}, optLevel: "2",
-			amd64: "v1", arm: "",
+			amd64: "v1", arm: "v8.0",
 			experiment: "logosarena", arena: true, module: true,
 		},
 		{
@@ -143,6 +144,12 @@ func TestLoadPrecedence(t *testing.T) {
 			name: "envBeatsFileDeterministic", modRoot: det,
 			flags: Flags{Logos: true, Env: Env{GOAMD64: "v4"}}, optLevel: "2",
 			amd64: "", arm: "v8.2",
+			experiment: "logosarena", arena: true, module: true,
+		},
+		{
+			name: "envBeatsFileNative", modRoot: native,
+			flags: Flags{Logos: true, Env: Env{GOAMD64: "v2", GOARM64: "v8.3"}}, optLevel: "2",
+			amd64: "", arm: "",
 			experiment: "logosarena", arena: true, module: true,
 		},
 		{

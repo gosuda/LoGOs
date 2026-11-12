@@ -2679,7 +2679,7 @@ Anchor: Edward Tufte, Tony Hoare
 ### M13-A-S6 Pin native target_cpu on a cross build
 Anchor: Tony Hoare, Claude Shannon, Dieter Rams
 - Attack: `src/cmd/go/testdata/script/logos_target_cpu_native.txt` MUST show the host level for `native` (the /proc/cpuinfo oracle), GOARM64 v8.0 for `GOARCH=arm64` on an amd64 host, and an explicit `GOAMD64=v2` or `GOARM64=v8.3` in the environment beating `native`, each through `go version -m` build settings.
-- Build: none (script only). `config.ArchLevels` reads `internal/cpu` for both architectures, and an architecture the host does not run reports no features, so it falls to its baseline; `settings.archLevels` leaves a level unset when the environment names one. SPEC 1.5 states both rules beside the `native` sentence.
+- Build: none (script only). `config.ArchLevels` reads `internal/cpu` for both architectures, and an architecture the host does not run reports no features, so it falls to its baseline; `settings.archLevels` leaves a level unset when the environment names one, except under `baseline` (M13-A-S8). SPEC 1.5 states both rules beside the `native` sentence.
 - Gate: `go test cmd/go -run 'TestScript/logos_target_cpu_native$'` MUST pass.
 - Red-team rows: none.
 - Docs: none.
@@ -2692,6 +2692,14 @@ Anchor: Edward Tufte, Tony Hoare
 - Commits: `4b4244201c` Pin the O2 inline budget between two functions.
 - Red-team rows: none.
 - Docs: M13-S1 gate names the fixture.
+
+### M13-A-S8 Baseline sets its levels whatever the environment holds
+Anchor: Tony Hoare, Dieter Rams
+- Attack: `src/cmd/go/testdata/script/logos_target_cpu_baseline.txt` MUST show GOAMD64=v1 with GOAMD64=v3 in the environment, and GOARM64=v8.0 for `GOARCH=arm64` with GOARM64=v8.3, through `go version -m` build settings. `TestLoadPrecedence` rows `baselineBeatsEnvAMD64` and `baselineBeatsEnvARM64` pin the same decision, and `envBeatsFileDeterministic` and `envBeatsFileNative` keep the environment exception of the other two values.
+- Build: `settings.archLevels` returns the baseline levels before it reads the environment; `deterministic` and `native` still leave a level unset when the environment names one (SPEC 369, 373).
+- Gate: `go test cmd/go -run 'TestScript/logos_target_cpu_baseline$'` and `go test cmd/go/internal/logos/settings -run TestLoadPrecedence` MUST pass.
+- Red-team rows: #231.
+- Docs: none.
 
 ### M13-A-S7 Judge archsimd availability against a build without the experiment
 Anchor: Edward Tufte, Tony Hoare

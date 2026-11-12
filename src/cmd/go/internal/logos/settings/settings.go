@@ -249,6 +249,9 @@ func pedanticMode(flags Flags) config.PedanticMode {
 
 func archLevels(f *config.File, env Env) (amd64, arm64 string) {
 	amd64, arm64 = config.ArchLevels(f.Build.TargetCPU)
+	if f.Build.TargetCPU == "baseline" {
+		return amd64, arm64
+	}
 	if env.GOAMD64 != "" {
 		amd64 = ""
 	}
