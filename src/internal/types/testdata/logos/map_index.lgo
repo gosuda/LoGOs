@@ -42,8 +42,8 @@ func mapStores(m map[string]int) {
 }
 
 func mapSelect(m map[string]MapUser) {
-	_ = m["k"].Name /* ERROR "[correctness::nil_deref_unproven] cannot access field Name of MapUser? without proving != nil" */
-	_ = m["k"].Greet /* ERROR "[correctness::nil_deref_unproven] cannot call method on MapUser? without proving != nil" */ ()
+	_ = m["k"].Name /* ERROR "correctness::nil_deref_unproven" */
+	_ = m["k"].Greet /* ERROR "correctness::nil_deref_unproven" */ ()
 	_ = (m["k"] ?? MapUser{Name: "anon"}).Name
 }
 

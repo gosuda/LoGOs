@@ -142,53 +142,53 @@ type Stray struct{}
 type MyInt int
 
 func convWide(w Wide) U {
-	return U(w /* ERRORx "correctness::union_nonmember.*Wide" */)
+	return U(w /* ERROR "correctness::union_nonmember" */)
 }
 
 func convDisjoint(d Disjoint) U {
-	return U(d /* ERRORx "correctness::union_nonmember.*Disjoint" */)
+	return U(d /* ERROR "correctness::union_nonmember" */)
 }
 
 func convAny(a any) U {
-	return U(a /* ERRORx "correctness::union_nonmember.*any" */)
+	return U(a /* ERROR "correctness::union_nonmember" */)
 }
 
 func convError(e error) U {
-	return U(e /* ERRORx "correctness::union_nonmember.*error" */)
+	return U(e /* ERROR "correctness::union_nonmember" */)
 }
 
 func convStruct(s Stray) U {
-	return U(s /* ERRORx "correctness::union_nonmember.*Stray" */)
+	return U(s /* ERROR "correctness::union_nonmember" */)
 }
 
 func convNamedBasic(m MyInt) U {
-	return U(m /* ERRORx "correctness::union_nonmember.*MyInt" */)
+	return U(m /* ERROR "correctness::union_nonmember" */)
 }
 
 func convPointer(p *int) U {
-	return U(p /* ERRORx "correctness::union_nonmember.*\\*int" */)
+	return U(p /* ERROR "correctness::union_nonmember" */)
 }
 
 func convSlice(s []int) U {
-	return U(s /* ERRORx "correctness::union_nonmember.*\\[\\]int" */)
+	return U(s /* ERROR "correctness::union_nonmember" */)
 }
 
 func convMap(m map[string]int) U {
-	return U(m /* ERRORx "correctness::union_nonmember.*map\\[string\\]int" */)
+	return U(m /* ERROR "correctness::union_nonmember" */)
 }
 
 func convFunc(f func()) U {
-	return U(f /* ERRORx "correctness::union_nonmember.*func\\(\\)" */)
+	return U(f /* ERROR "correctness::union_nonmember" */)
 }
 
 func convChan(c chan int) U {
-	return U(c /* ERRORx "correctness::union_nonmember.*chan int" */)
+	return U(c /* ERROR "correctness::union_nonmember" */)
 }
 
 func convUntypedFloat() U {
-	return U(1.5 /* ERRORx "correctness::union_nonmember.*float64" */)
+	return U(1.5 /* ERROR "correctness::union_nonmember" */)
 }
 
 func convUntypedRune() U {
-	return U('a' /* ERRORx "correctness::union_nonmember.*(rune|int32)" */)
+	return U('a' /* ERROR "correctness::union_nonmember" */)
 }

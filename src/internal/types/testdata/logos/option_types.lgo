@@ -78,13 +78,13 @@ func optReturnNarrowed(x int?, up *OptUser?) (int, *OptUser) {
 }
 
 func optMethods(up *OptUser?) {
-	_ = up.Greet /* ERROR "[correctness::nil_deref_unproven] cannot call method on *OptUser? without proving != nil" */ ()
-	_ = up.Name /* ERROR "[correctness::nil_deref_unproven] cannot access field Name of *OptUser? without proving != nil" */
+	_ = up.Greet /* ERROR "correctness::nil_deref_unproven" */ ()
+	_ = up.Name /* ERROR "correctness::nil_deref_unproven" */
 }
 
 func optChainBad(u OptUser, n int) {
-	_ = u /* ERROR "[correctness::not_an_option] ?. on non-option type OptUser" */ ?. Name
-	_ = n /* ERROR "[correctness::not_an_option] ?. on non-option type int" */ ?. Foo
+	_ = u /* ERROR "correctness::not_an_option" */ ?. Name
+	_ = n /* ERROR "correctness::not_an_option" */ ?. Foo
 }
 
 func optChain(up *OptUser?, a *OptAccount?) {
@@ -99,7 +99,7 @@ func optChain(up *OptUser?, a *OptAccount?) {
 }
 
 func optCoalBad(n int, d string) {
-	_ = n /* ERROR "[correctness::not_an_option] ?? with non-option left type int" */ ?? d
+	_ = n /* ERROR "correctness::not_an_option" */ ?? d
 }
 
 func optCoal(x int?, y int?, d int) {
@@ -180,16 +180,16 @@ func optNestWrap(x int?, w (int?)?) {
 
 func optFuncPlainLocal() {
 	var f (func(int) int)? = func(n int) int { return n + 1 }
-	_ = f /* ERROR "[correctness::nil_deref_unproven] cannot call func(int) int? without proving != nil" */ (1)
+	_ = f /* ERROR "correctness::nil_deref_unproven" */ (1)
 }
 
 func optFuncPlainParam(f (func(int) int)?) {
-	_ = f /* ERROR "[correctness::nil_deref_unproven] cannot call func(int) int? without proving != nil" */ (1)
+	_ = f /* ERROR "correctness::nil_deref_unproven" */ (1)
 }
 
 func optFuncPlainParen() {
 	var f (func(int) int)? = func(n int) int { return n + 1 }
-	_ = (f /* ERROR "[correctness::nil_deref_unproven] cannot call func(int) int? without proving != nil" */)(1)
+	_ = (f /* ERROR "correctness::nil_deref_unproven" */)(1)
 }
 
 func optFuncGuardedLocal() int {

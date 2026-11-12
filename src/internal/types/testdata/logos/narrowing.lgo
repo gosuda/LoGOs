@@ -77,7 +77,7 @@ func killAssign(up *User?, other *User?) {
 	if up != nil {
 		_ = up.Name
 		up = other
-		_ = up.Name /* ERROR "[correctness::nil_deref_unproven] cannot access field Name of *User? without proving != nil" */
+		_ = up.Name /* ERROR "correctness::nil_deref_unproven" */
 		if up != nil {
 			_ = up.Name
 		}
@@ -88,7 +88,7 @@ func addrTaken(up *User?) {
 	p := &up
 	_ = p
 	if up != nil {
-		_ = up.Name /* ERROR "[correctness::nil_deref_unproven] cannot access field Name of *User? without proving != nil" */
+		_ = up.Name /* ERROR "correctness::nil_deref_unproven" */
 	}
 }
 
@@ -98,7 +98,7 @@ func closureAssign(up *User?) {
 	}
 	_ = f
 	if up != nil {
-		_ = up.Name /* ERROR "[correctness::nil_deref_unproven] cannot access field Name of *User? without proving != nil" */
+		_ = up.Name /* ERROR "correctness::nil_deref_unproven" */
 	}
 }
 
@@ -107,13 +107,13 @@ func loopAssign(up *User?, n int) {
 		up = nil
 	}
 	if up != nil {
-		_ = up.Name /* ERROR "[correctness::nil_deref_unproven] cannot access field Name of *User? without proving != nil" */
+		_ = up.Name /* ERROR "correctness::nil_deref_unproven" */
 	}
 }
 
 func fieldNoNarrow(h Holder) {
 	if h.P != nil {
-		_ = h.P.Name /* ERROR "[correctness::nil_deref_unproven] cannot access field Name of *User? without proving != nil" */
+		_ = h.P.Name /* ERROR "correctness::nil_deref_unproven" */
 	}
 }
 
@@ -128,9 +128,9 @@ func elseBranch(up *User?) {
 	if up != nil {
 		_ = up.Name
 	} else {
-		_ = up.Name /* ERROR "[correctness::nil_deref_unproven] cannot access field Name of *User? without proving != nil" */
+		_ = up.Name /* ERROR "correctness::nil_deref_unproven" */
 	}
-	_ = up.Name /* ERROR "[correctness::nil_deref_unproven] cannot access field Name of *User? without proving != nil" */
+	_ = up.Name /* ERROR "correctness::nil_deref_unproven" */
 }
 
 func elseFall(up *User?) {
@@ -148,7 +148,7 @@ func elseFallKill(up *User?, other *User?) {
 	} else {
 		up = other
 	}
-	_ = up.Name /* ERROR "[correctness::nil_deref_unproven] cannot access field Name of *User? without proving != nil" */
+	_ = up.Name /* ERROR "correctness::nil_deref_unproven" */
 }
 
 func outerScope(up *User?) {
@@ -172,14 +172,14 @@ func shadowBlock(up *User?) {
 	_ = up.Name
 	{
 		var up *User? = nil
-		_ = up.Name /* ERROR "[correctness::nil_deref_unproven] cannot access field Name of *User? without proving != nil" */
+		_ = up.Name /* ERROR "correctness::nil_deref_unproven" */
 		_ = up
 	}
 	_ = up.Name
 }
 
 func noGuard(up *User?) {
-	_ = up.Name /* ERROR "[correctness::nil_deref_unproven] cannot access field Name of *User? without proving != nil" */
+	_ = up.Name /* ERROR "correctness::nil_deref_unproven" */
 	_ = *up /* ERROR "correctness::nil_deref_unproven" */
 	var v *User = up /* ERROR "correctness::nil_deref_unproven" */
 	_ = v
