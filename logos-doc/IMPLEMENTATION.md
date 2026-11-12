@@ -2706,6 +2706,14 @@ Anchor: Edward Tufte, Tony Hoare
 - Red-team rows: none.
 - Docs: none (SPEC 2.4 carries the rule).
 
+### M13-A-S10 Eject writes the test files of a main module
+Anchor: Richard Feynman, Tony Hoare, Dieter Rams
+- Attack: `src/cmd/go/testdata/script/logos_eject_test_files.txt` MUST show that `logos eject -o out` of a module with an in-package test, an external test and a package of only test files writes each `_test.lgo` as a `_test.go` file, and that `go test -v ./...` of the copy, with the local toolchain and with `$UPROOT1272/bin/go`, prints the PASS lines of `logos test -v ./...`, that the copy vets and is gofmt-clean, and that a failing test fails in both. SPEC 63 and 67.
+- Build: `phaseOneRoots` leaves out a package that holds only test files, which builds only as a test variant; `buildEjectRoots` writes `_testmain.go` to the work directory of each test main before it builds it, as `go test` does.
+- Gate: `go test -count=1 cmd/go -run 'TestScript/(logos_eject_test_files|logos_interop_prop|logos_command)$'` MUST pass.
+- Red-team rows: #234.
+- Docs: none.
+
 ### M13-A-S9 Pin native target_cpu on a cross build
 Anchor: Tony Hoare, Claude Shannon, Dieter Rams
 - Attack: `src/cmd/go/testdata/script/logos_target_cpu_native.txt` MUST show the host level for `native` (the /proc/cpuinfo oracle), GOARM64 v8.0 for `GOARCH=arm64` on an amd64 host, and an explicit `GOAMD64=v2` or `GOARM64=v8.3` in the environment beating `native`, each through `go version -m` build settings.
