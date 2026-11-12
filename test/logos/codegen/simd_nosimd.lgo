@@ -13,7 +13,7 @@ func addPlainF64(a, b [4]float64) [4]float64 {
 //go:noinline
 func addPlainI32(a, b [4]int32) [4]int32 {
 	// amd64:"ADDL" -"VPADDD" -"CALL simd/archsimd" -"J"
-	// arm64:"ADD" -"CALL simd/archsimd" -"B" -"CBZ" -"CBNZ" -"TBZ" -"TBNZ"
+	// arm64:"ADD R[0-9]+, R[0-9]+, R[0-9]+" -"CALL simd/archsimd" -"B" -"CBZ" -"CBNZ" -"TBZ" -"TBNZ"
 	// riscv64:-"CALL simd/archsimd" -"BLT" -"BGE" -"BEQ" -"BNE" -"JAL X0"
 	return a + b
 }
@@ -44,7 +44,7 @@ func addPlainU16(a, b [8]uint16) [8]uint16 {
 
 //go:noinline
 func addPlainI64(a, b [4]int64) [4]int64 {
-	// amd64:"ADDQ" -"VPADDQ" -"CALL simd/archsimd" -"J"
+	// amd64:"ADDQ [^$]" -"VPADDQ" -"CALL simd/archsimd" -"J"
 	// arm64:-"VADD" -"CALL simd/archsimd" -"B" -"CBZ" -"CBNZ" -"TBZ" -"TBNZ"
 	// riscv64:-"CALL simd/archsimd" -"BLT" -"BGE" -"BEQ" -"BNE" -"JAL X0"
 	return a + b

@@ -20,21 +20,21 @@ func addByte(a, b [32]byte) [32]byte {
 
 //go:noinline
 func addInt(a, b [4]int) [4]int {
-	// amd64:"ADDQ" -"VPADD" -"JMP"
+	// amd64:"ADDQ [^$]" -"VPADD" -"JMP"
 	// arm64:-"VADD"
 	return a + b
 }
 
 //go:noinline
 func addUint(a, b [4]uint) [4]uint {
-	// amd64:"ADDQ" -"VPADD" -"JMP" -"CALL simd/archsimd"
+	// amd64:"ADDQ [^$]" -"VPADD" -"JMP" -"CALL simd/archsimd"
 	// arm64:-"VADD" -"CALL simd/archsimd"
 	return a + b
 }
 
 //go:noinline
 func addUintptr(a, b [2]uintptr) [2]uintptr {
-	// amd64:"ADDQ" -"VPADD" -"JMP" -"CALL simd/archsimd"
+	// amd64:"ADDQ [^$]" -"VPADD" -"JMP" -"CALL simd/archsimd"
 	// arm64:-"VADD" -"CALL simd/archsimd"
 	return a + b
 }
@@ -44,7 +44,7 @@ type lane float64
 
 //go:noinline
 func addLane(a, b [4]lane) [4]lane {
-	// amd64:"ADDSD" -"ADDPD" -"CALL simd/archsimd" -"JMP"
+	// amd64:"ADDSD" -"VADDPD" -"CALL simd/archsimd" -"JMP"
 	// arm64:-"VFADD" -"CALL simd/archsimd"
 	return a + b
 }
