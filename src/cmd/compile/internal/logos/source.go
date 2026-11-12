@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"go/scanner"
 	"go/token"
+	"strings"
 )
 
 type span struct{ start, end int }
@@ -90,7 +91,11 @@ func commentsIn(src []byte, from, to int) []span {
 
 func keepComments(src []byte, from, to int, text string) string {
 	for _, c := range commentsIn(src, from, to) {
-		text += " " + string(src[c.start:c.end])
+		body := string(src[c.start:c.end])
+		if rest, ok := strings.CutPrefix(body, "//"); ok {
+			body = "/*" + strings.ReplaceAll(rest, "*/", "* /") + "*/"
+		}
+		text += " " + body
 	}
 	return text
 }

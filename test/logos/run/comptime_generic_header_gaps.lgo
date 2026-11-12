@@ -66,6 +66,37 @@ func /*a*/ dropped /*b*/ [ /*c*/ T any]() []string {
 	return out
 }
 
+type Sized struct {
+	A int32
+	B uint8
+}
+
+func LineCond[T any]() string {
+	const if comptime.HasPointers[*T]( // c
+	) {
+		return "ptr"
+	}
+	return "flat"
+}
+
+func LineAnd[T any]() string {
+	const if comptime.HasPointers[*T]() && // c
+		comptime.HasPointers[Pair]() {
+		return "both"
+	}
+	return "plain"
+}
+
+func LineSize() int {
+	n := 0
+	const for _, f := range comptime.Fields[Sized]() {
+		var c [comptime.SizeOf[f.Type]( // c
+		)]byte
+		n += len(c)
+	}
+	return n
+}
+
 var failed bool
 
 func check(name, got, want string) {
@@ -84,6 +115,9 @@ func main() {
 	check("brackets-inside-a-comment", fmt.Sprint(Brackets[Pair]()), "[X Y]")
 	check("line-comments-inside-the-list", fmt.Sprint(Lines[Pair, int]()), "[X Y]")
 	check("dropped-with-comments", fmt.Sprint(dropped[Pair]()), "[X Y]")
+	check("line-comment-in-a-folded-condition", LineCond[Pair](), "ptr")
+	check("line-comment-between-folded-operands", LineAnd[Sized](), "both")
+	check("line-comment-in-a-folded-layout", fmt.Sprint(LineSize()), "5")
 	if failed {
 		os.Exit(1)
 	}
