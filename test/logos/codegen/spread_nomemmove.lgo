@@ -11,5 +11,5 @@ type Big struct {
 var cur Big
 
 func update() {
-	cur = Big{X: cur.Y, ..cur} // amd64:-"runtime.memmove" arm64:-"runtime.memmove"
+	cur = Big{X: cur.Y, ..cur} // amd64:-".*memmove" -"DUFFCOPY" -"DUFFZERO" -"REP" -"MOVUPS" arm64:-".*memmove" -"DUFFCOPY" -"DUFFZERO" -"LDP" -"STP" -"FLDPQ" -"FSTPQ"
 }
