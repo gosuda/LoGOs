@@ -141,6 +141,31 @@ func jbFatAccepted() error {
 	return nil
 }
 
+func jbFatCapAllocation() error {
+	c := jbFatCap()
+	v := JbFatHolder{Items: make([]JbFat, c)}
+	enc, err := v.MarshalBinary()
+	if err != nil {
+		return fmt.Errorf("fat cap: MarshalBinary rejected lawful count: %w", err)
+	}
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	var got JbFatHolder
+	decodeErr := got.UnmarshalBinary(enc)
+	runtime.ReadMemStats(&after)
+	if decodeErr != nil {
+		return fmt.Errorf("fat cap: UnmarshalBinary rejected lawful count: %w", decodeErr)
+	}
+	if len(got.Items) != c {
+		return fmt.Errorf("fat cap: decoded %d items, want %d", len(got.Items), c)
+	}
+	if delta := after.TotalAlloc - before.TotalAlloc; delta > 9<<20 {
+		return fmt.Errorf("fat cap: decoding count %d allocated %d bytes, want at most 8 MiB of storage plus 1 MiB of slack", c, delta)
+	}
+	return nil
+}
+
 func jbFatOver() error {
 	c := jbFatCap() + 1
 	v := JbFatHolder{Items: make([]JbFat, c)}
@@ -227,6 +252,11 @@ fmt.Println("FAIL granular-fat:", err)
 os.Exit(1)
 }
 fmt.Println("ok granular-fat")
+if err := jbFatCapAllocation(); err != nil {
+fmt.Println("FAIL granular-fat-cap-alloc:", err)
+os.Exit(1)
+}
+fmt.Println("ok granular-fat-cap-alloc")
 if err := jbWordAtZeroCapOver(); err != nil {
 fmt.Println("FAIL granular-word:", err)
 os.Exit(1)
