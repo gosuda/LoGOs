@@ -190,13 +190,7 @@ func (fc *funcLower) lowerGroupRange(s *syntax.ForStmt, rc *syntax.RangeClause, 
 	s.Body.List = fc.lowerList(s.Body.List)
 	var lhsPart otext
 	if rc.Lhs != nil {
-		lhsStart := fl.off(leftmostOf(rc.Lhs))
-		lhsPart = fl.srcUser(lhsStart, fl.off(rc.Pos())).trimRight(" \t\n:=")
-		if rc.Def {
-			lhsPart = cat(lhsPart, gen(" := "))
-		} else {
-			lhsPart = cat(lhsPart, gen(" = "))
-		}
+		lhsPart = fl.srcUser(fl.off(leftmostOf(rc.Lhs)), fl.off(rc.Pos()))
 	}
 	headStart := fl.off(pos)
 	braceOff := fl.off(s.Body.Pos())
