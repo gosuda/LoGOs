@@ -6,6 +6,7 @@ package logos
 
 import (
 	"fmt"
+	"internal/logosfile"
 	"strings"
 
 	"cmd/compile/internal/syntax"
@@ -153,7 +154,7 @@ func (g *binaryGenerator) codec(t types2.Type) (int, bool) {
 		case *types2.Struct:
 			lgo := false
 			if n, ok := types2.Unalias(t).(*types2.Named); ok {
-				lgo = strings.HasSuffix(n.Obj().Pos().RelFilename(), ".lgo")
+				lgo = logosfile.Is(n.Obj().Pos().RelFilename())
 			}
 			for i := range x.NumFields() {
 				if _, ok := types2.LogosJSONFieldOf(x, i); !ok {

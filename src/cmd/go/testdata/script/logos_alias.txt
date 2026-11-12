@@ -51,6 +51,13 @@ logos run ./multi
 stdout '^multi ok$'
 stderr -count=2 'portability::alias_extension'
 
+logos run ./binary
+stdout '^binary scroll ok$'
+stdout '^binary lightning ok$'
+stdout '^binary gopher ok$'
+stdout '^binary vs ok$'
+stderr -count=4 'portability::alias_extension'
+
 ! go build ./scroll
 stderr 'no Go files in '
 
@@ -151,3 +158,62 @@ func X() int { return 1 }
 package dup2
 
 func Y() int { return 2 }
+
+-- binary/main.lgo --
+package main
+
+import (
+	"fmt"
+	"strings"
+)
+
+type Inner struct {
+	X int64 `json:"x"`
+}
+
+func rejects(name, field string, err error) {
+	if err == nil || !strings.Contains(err.Error(), field) || !strings.Contains(err.Error(), "offset 1") {
+		fmt.Printf("FAIL binary %s: %v\n", name, err)
+		return
+	}
+	fmt.Println("binary " + name + " ok")
+}
+
+func main() {
+	s := ScrollHolder{P: &Inner{}}
+	rejects("scroll", "ScrollHolder.P", s.UnmarshalBinary([]byte{1, 0}))
+	l := LightningHolder{P: &Inner{}}
+	rejects("lightning", "LightningHolder.P", l.UnmarshalBinary([]byte{1, 0}))
+	g := GopherHolder{P: &Inner{}}
+	rejects("gopher", "GopherHolder.P", g.UnmarshalBinary([]byte{1, 0}))
+	v := VSHolder{P: &Inner{}}
+	rejects("vs", "VSHolder.P", v.UnmarshalBinary([]byte{1, 0}))
+}
+
+-- binary/scroll.📜 --
+package main
+
+type ScrollHolder struct {
+	P *Inner `json:"p"`
+}
+
+-- binary/lightning.⚡ --
+package main
+
+type LightningHolder struct {
+	P *Inner `json:"p"`
+}
+
+-- binary/gopher.ʕ◔ϖ◔ʔ --
+package main
+
+type GopherHolder struct {
+	P *Inner `json:"p"`
+}
+
+-- binary/vs.⚡️ --
+package main
+
+type VSHolder struct {
+	P *Inner `json:"p"`
+}

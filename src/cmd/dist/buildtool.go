@@ -87,6 +87,7 @@ var bootstrapDirs = []string{
 	// by the Go 1.17 version of gccgo. It's on this list only to
 	// support gccgo, and can be removed if we require gccgo 14 or later.
 	"internal/lazyregexp",
+	"internal/logosfile",
 	"internal/pkgbits",
 	"internal/platform",
 	"internal/profile",
