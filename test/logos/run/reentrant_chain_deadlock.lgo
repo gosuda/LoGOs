@@ -44,11 +44,11 @@ func (t *target) plainChain(xs []int) {
 
 func (t *target) segment(ctx context.Context, xs []int) {
 	t.lock.WithLock(func(n *int) {
-		ys, err := xs.group(ctx, limit = 2).map(x => {
+		_, err := xs.group(ctx, limit = 2).map(x => {
 			t.relock()
 			return x
 		})
-		fmt.Println(len(ys), err)
+		fmt.Println(err)
 	})
 }
 
