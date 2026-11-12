@@ -7,6 +7,11 @@ stdout '^2 \[X Y\] 7$'
 
 logos lint ./...
 
+cd dirty
+! logos lint ./...
+stderr -count=1 'main\.lgo:15:3: \[slop::discarded_error\]'
+cd ..
+
 -- go.mod --
 module example.com/scope
 
@@ -62,4 +67,33 @@ func concrete(p Pair) int {
 
 func main() {
 	fmt.Println(Walk(Pair{X: 1, Y: 2}), Names[Pair](), concrete(Pair{X: 3, Y: 4}))
+}
+
+-- dirty/go.mod --
+module example.com/dirty
+
+go 1.27
+
+-- dirty/main.lgo --
+package main
+
+import (
+	"comptime"
+	"os"
+)
+
+type Pair struct {
+	X int
+	Y int
+}
+
+func drop(p Pair) {
+	const for _, f := range comptime.Fields[Pair]() {
+		os.Remove(f.Name)
+		_ = p.[f]
+	}
+}
+
+func main() {
+	drop(Pair{})
 }
