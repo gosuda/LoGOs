@@ -3,8 +3,11 @@ env GOTOOLCHAIN=local
 
 env CC=
 
+[cgo] env CGO_ENABLED=2
+[cgo] ! logos build .
+[cgo] stderr '\[restriction::cgo_usage\]'
+
 [cgo] env CGO_ENABLED=1
-[cgo] logos build .
 [cgo] logos run .
 [cgo] stdout '^env: 42$'
 
