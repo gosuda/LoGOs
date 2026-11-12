@@ -331,13 +331,13 @@ func (fc *funcLower) lowerGroupInline(s *syntax.GroupStmt) []syntax.Stmt {
 	g, gctx, j := frame.g, frame.gctx, frame.j
 	fl.needRT = true
 	pos := s.Pos()
-	ctxSpan := span{start: fl.off(leftmostOf(s.Ctx)), end: groupExprEnd(fl.src, fl.off(leftmostOf(s.Ctx)))}
+	ctxSpan := span{start: fl.exprStart(s.Ctx), end: fl.exprEndOf(s.Ctx)}
 	ctxText := fl.textOf(ctxSpan)
 	pieces := []span{ctxSpan}
 	limitText := gen("0")
 	limitNode := syntax.Expr(litOf(pos, "0", syntax.IntLit))
 	if s.Limit != nil {
-		limitSpan := span{start: fl.off(leftmostOf(s.Limit)), end: groupExprEnd(fl.src, fl.off(leftmostOf(s.Limit)))}
+		limitSpan := span{start: fl.exprStart(s.Limit), end: fl.exprEndOf(s.Limit)}
 		limitText = fl.textOf(limitSpan)
 		pieces = append(pieces, limitSpan)
 		limitNode = s.Limit
