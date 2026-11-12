@@ -122,24 +122,38 @@ func (fl *fileLower) lowerTupleUnpackDecl(decl *syntax.VarDecl, val syntax.Expr)
 	if decl.Type != nil {
 		namesEnd = fl.exprEndNested(fl.off(syntax.StartPos(decl.Type)))
 	}
-	rs := fl.exprSpan(r)
-	start, end := extendParens(fl.src, rs.start, rs.end)
-	reads := make([]syntax.Expr, len(fields))
-	texts := make([]string, len(fields))
-	for i, f := range fields {
-		reads[i] = selOf(pos, nameOf(pos, tn), f)
-		texts[i] = tn + "." + f
-	}
+	start, end := fl.tupleOperandSpan(r)
+	reads, texts := tupleReads(pos, tn, fields)
 	next := "\nvar "
 	if decl.Group != nil {
 		next = "\n\t"
 	}
 	fl.add(nameStart, start, tn+" = ")
-	fl.addT(end, end, cat(gen(next), fl.lazyText(span{nameStart, namesEnd}), gen(" = "+strings.Join(texts, ", "))))
+	fl.addT(end, end, cat(gen(next), fl.lazyText(span{nameStart, namesEnd}), gen(" = "+texts)))
 	hoist := &syntax.VarDecl{NameList: []*syntax.Name{nameOf(pos, tn)}, Group: decl.Group, Values: val}
 	hoist.SetPos(pos)
 	decl.Values = listOf(pos, reads)
 	return []syntax.Decl{hoist, decl}
+}
+
+func (fl *fileLower) tupleOperandSpan(r syntax.Expr) (int, int) {
+	rs := fl.exprSpan(r)
+	return extendParens(fl.src, rs.start, rs.end)
+}
+
+func tupleReads(pos syntax.Pos, base string, fields []string) ([]syntax.Expr, string) {
+	reads := make([]syntax.Expr, len(fields))
+	texts := make([]string, len(fields))
+	for i, f := range fields {
+		reads[i] = selOf(pos, nameOf(pos, base), f)
+		texts[i] = base + "." + f
+	}
+	return reads, strings.Join(texts, ", ")
+}
+
+func (fl *fileLower) isMultiValueCall(call *syntax.CallExpr) bool {
+	_, ok := fl.pkg.info.TypeOf(call).(*types2.Tuple)
+	return ok
 }
 
 func (fl *fileLower) lowerTuplePackValues(decl *syntax.VarDecl, call *syntax.CallExpr) []syntax.Decl {
@@ -670,7 +684,7 @@ func (fl *fileLower) lowerTupleAssignStmt(s *syntax.AssignStmt) []syntax.Stmt {
 		return nil
 	}
 	r := syntax.Unparen(rhs[0])
-	if call, ok := r.(*syntax.CallExpr); ok {
+	if call, ok := r.(*syntax.CallExpr); ok && fl.isMultiValueCall(call) {
 		return fl.lowerTuplePackStmt(s, lhs, call)
 	}
 	if len(lhs) == 1 {
@@ -806,26 +820,14 @@ func (fl *fileLower) lowerTupleUnpackStmt(s *syntax.AssignStmt, lhs []syntax.Exp
 		return nil
 	}
 	tn := tupleTempKey(pos, 0)
-	rSpan := fl.exprListSpan(r)
-	if _, ok := r.(*syntax.CallExpr); ok {
-		rSpan = fl.callBodySpan(r.(*syntax.CallExpr))
-	}
-	rText := fl.lazyText(rSpan)
-	reads := make([]syntax.Expr, len(lhs))
-	var texts []string
-	for i := range lhs {
-		reads[i] = selOf(pos, nameOf(pos, tn), elems[i])
-		texts = append(texts, tn+"."+elems[i])
-	}
-	parts := []otext{gen(tn + " := "), rText, gen("; "), fl.textOf(fl.exprListSpan(s.Lhs))}
+	start, end := fl.tupleOperandSpan(r)
+	reads, texts := tupleReads(pos, tn, elems)
+	op := " = "
 	if s.Op == syntax.Def {
-		parts = append(parts, gen(" := "))
-	} else {
-		parts = append(parts, gen(" = "))
+		op = " := "
 	}
-	parts = append(parts, gen(strings.Join(texts, ", ")))
-	_, rEnd := extendParens(fl.src, rSpan.start, rSpan.end)
-	fl.addT(fl.off(syntax.StartPos(s)), rEnd, cat(parts...))
+	fl.add(fl.off(syntax.StartPos(s)), start, tn+" := ")
+	fl.addT(end, end, cat(gen("; "), fl.lazyText(fl.exprListSpan(s.Lhs)), gen(op+texts)))
 	hoist := defineOf(pos, []syntax.Expr{nameOf(pos, tn)}, []syntax.Expr{r})
 	s.Rhs = listOf(pos, reads)
 	return []syntax.Stmt{hoist, s}
@@ -844,7 +846,7 @@ func (fl *fileLower) lowerTupleReturnStmt(s *syntax.ReturnStmt) []syntax.Stmt {
 		return nil
 	}
 	r := syntax.Unparen(results[0])
-	if _, ok := r.(*syntax.CallExpr); ok {
+	if call, ok := r.(*syntax.CallExpr); ok && fl.isMultiValueCall(call) {
 		return nil
 	}
 	pos := s.Pos()
@@ -876,19 +878,12 @@ func (fl *fileLower) lowerTupleReturnStmt(s *syntax.ReturnStmt) []syntax.Stmt {
 		return nil
 	}
 	tn := tupleTempKey(pos, 0)
-	rSpan := fl.exprListSpan(r)
-	rText := fl.lazyText(rSpan)
-	fl.addT(fl.off(syntax.StartPos(s)), fl.off(syntax.StartPos(s)), cat(gen(tn+" := "), rText, gen("; ")))
+	start, end := fl.tupleOperandSpan(r)
+	reads, texts := tupleReads(pos, tn, elems)
+	fl.add(fl.off(syntax.StartPos(s)), start, tn+" := ")
+	fl.add(end, end, "; return "+texts)
 	hoist := defineOf(pos, []syntax.Expr{nameOf(pos, tn)}, []syntax.Expr{r})
-	reads := make([]syntax.Expr, len(elems))
-	var texts []string
-	for i := range elems {
-		reads[i] = selOf(pos, nameOf(pos, tn), elems[i])
-		texts = append(texts, tn+"."+elems[i])
-	}
 	s.Results = listOf(pos, reads)
-	start, end := extendParens(fl.src, rSpan.start, rSpan.end)
-	fl.add(start, end, strings.Join(texts, ", "))
 	return []syntax.Stmt{hoist, s}
 }
 

@@ -246,34 +246,6 @@ func tupleElemOperand(rhs syntax.Expr, i int, typ Type) operand {
 	return operand{mode_: value, expr: elem, typ_: typ}
 }
 
-func (check *Checker) logosTupleUnpack(lhs []*Var, rhs []syntax.Expr, context string) bool {
-	if !check.conf.Logos || len(rhs) != 1 {
-		return false
-	}
-	if _, isCall := syntax.Unparen(rhs[0]).(*syntax.CallExpr); isCall {
-		return false
-	}
-	var op operand
-	check.expr(nil, &op, rhs[0])
-	if !op.isValid() {
-		for _, v := range lhs {
-			if v.typ == nil {
-				v.typ = Typ[Invalid]
-			}
-		}
-		return true
-	}
-	elems, ok := tupleElemsOf(op.typ())
-	if !ok || len(elems) != len(lhs) {
-		return false
-	}
-	for i, v := range lhs {
-		el := tupleElemOperand(rhs[0], i, elems[i])
-		check.initVar(v, &el, context)
-	}
-	return true
-}
-
 func (check *Checker) tupleCallResults(e *syntax.CallExpr) ([]string, []Type, bool) {
 	var fop operand
 	check.expr(nil, &fop, e.Fun)
@@ -323,9 +295,6 @@ func (check *Checker) logosTupleInitVars(lhs []*Var, orig_rhs []syntax.Expr, rhs
 		return check.logosTuplePack(lhs, orig_rhs, rhs, context)
 	}
 	if len(rhs) == 1 && len(lhs) >= 2 {
-		if _, isCall := syntax.Unparen(orig_rhs[0]).(*syntax.CallExpr); isCall {
-			return false
-		}
 		elems, ok := tupleElemsOf(rhs[0].typ())
 		if !ok || len(elems) != len(lhs) {
 			return false
@@ -366,9 +335,6 @@ func (check *Checker) logosTupleAssignStmt(lhs []syntax.Expr, orig_rhs []syntax.
 		return true
 	}
 	if len(rhs) == 1 && len(lhs) >= 2 {
-		if _, isCall := syntax.Unparen(orig_rhs[0]).(*syntax.CallExpr); isCall {
-			return false
-		}
 		elems, ok := tupleElemsOf(rhs[0].typ())
 		if !ok || len(elems) != len(lhs) {
 			return false
