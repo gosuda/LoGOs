@@ -130,30 +130,10 @@ func (check *Checker) logosReadonlyProofAt(V Type, f *Func, obligation string, p
 	if !ok || sig.Recv() == nil {
 		return false
 	}
-	if tp := sig.TypeParams(); tp != nil && tp.Len() > 0 {
-		return false
-	}
-	if rp := sig.RecvTypeParams(); rp != nil && rp.Len() > 0 {
-		return false
-	}
-	if rt0 := sig.Recv().Type(); rt0 != nil {
-		base := Unalias(rt0)
-		if p, ok := base.(*Pointer); ok {
-			base = Unalias(p.Elem())
-		}
-		if n, ok := base.(*Named); ok {
-			if tp := n.TypeParams(); tp != nil && tp.Len() > 0 {
-				return false
-			}
-		}
-	}
 	rt := sig.Recv().Type()
 	local := f.Pkg() == check.pkg
 	if !local {
 		return check.logosImportedReadonly(f)
-	}
-	if f.Origin() != f {
-		return false
 	}
 	if logosAsConstView(rt) != nil {
 		f.SetLogosReadonly(true)

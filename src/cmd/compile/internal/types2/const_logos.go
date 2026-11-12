@@ -33,6 +33,11 @@ func logosAsConstView(T Type) *ConstView {
 }
 
 func logosReferenceFree(t Type) bool {
+	if tp, ok := Unalias(t).(*TypeParam); ok {
+		return tp.is(func(tm *term) bool {
+			return tm != nil && logosReferenceFree(tm.typ)
+		})
+	}
 	switch t := t.Underlying().(type) {
 	case *Basic:
 		return t.Kind() != UnsafePointer
@@ -503,13 +508,7 @@ func (check *Checker) logosConstSelect(x *operand, e *syntax.SelectorExpr, sel s
 			x.typ_ = base.Elem
 			return false
 		}
-		decl := obj.Origin()
-		if decl != obj {
-			check.errorf(e.Sel, IncompatibleAssign, "%s cannot call %s through const view %s", logosConstMutation, sel, ExprString(e.X))
-			x.invalidate()
-			return true
-		}
-		if decl.Pkg() != check.pkg {
+		if obj.Origin().Pkg() != check.pkg {
 			if check.logosReceiverReadonly(obj) {
 				x.typ_ = base.Elem
 				return false

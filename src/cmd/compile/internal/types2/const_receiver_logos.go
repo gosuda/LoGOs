@@ -80,9 +80,6 @@ func logosProofObject(fn *Func) (string, bool) {
 	if tp := sig.TypeParams(); tp != nil && tp.Len() > 0 {
 		return "", false
 	}
-	if rp := sig.RecvTypeParams(); rp != nil && rp.Len() > 0 {
-		return "", false
-	}
 	if recv := sig.Recv(); recv != nil {
 		rt := recv.Type()
 		if logosAsConstView(rt) != nil {
@@ -98,9 +95,6 @@ func logosProofObject(fn *Func) (string, bool) {
 		}
 		n, ok := Unalias(base).(*Named)
 		if !ok || n.Obj() == nil {
-			return "", false
-		}
-		if tp := n.TypeParams(); tp != nil && tp.Len() > 0 {
 			return "", false
 		}
 		if isPtr {
@@ -157,9 +151,6 @@ func LogosSealExportedReadonly(pkg *Package, info *Info, files []*syntax.File) {
 		if named == nil || named.Obj() == nil || named.Obj().Pkg() != pkg {
 			continue
 		}
-		if tp := named.TypeParams(); tp != nil && tp.Len() > 0 {
-			continue
-		}
 		for i := range named.NumMethods() {
 			m := named.Method(i)
 			if m == nil {
@@ -174,12 +165,6 @@ func LogosSealExportedReadonly(pkg *Package, info *Info, files []*syntax.File) {
 			}
 			sig, ok := fn.Type().(*Signature)
 			if !ok || sig == nil || sig.Recv() == nil {
-				continue
-			}
-			if tp := sig.TypeParams(); tp != nil && tp.Len() > 0 {
-				continue
-			}
-			if rp := sig.RecvTypeParams(); rp != nil && rp.Len() > 0 {
 				continue
 			}
 			if logosAsConstView(sig.Recv().Type()) != nil {
@@ -232,41 +217,8 @@ func (check *Checker) logosReceiverReadonly(obj *Func) bool {
 	if decl == nil {
 		return false
 	}
-	if dsig, ok := decl.Type().(*Signature); ok && dsig != nil {
-		if tp := dsig.TypeParams(); tp != nil && tp.Len() > 0 {
-			return false
-		}
-		if rp := dsig.RecvTypeParams(); rp != nil && rp.Len() > 0 {
-			return false
-		}
-		if rt0 := dsig.Recv(); rt0 != nil {
-			base := Unalias(rt0.Type())
-			if p, ok := base.(*Pointer); ok {
-				base = Unalias(p.Elem())
-			}
-			if n, ok := base.(*Named); ok {
-				if on := n.Origin(); on != nil {
-					if tp := on.TypeParams(); tp != nil && tp.Len() > 0 {
-						return false
-					}
-				} else if tp := n.TypeParams(); tp != nil && tp.Len() > 0 {
-					return false
-				}
-			}
-		}
-	} else {
-		if tp := sig.TypeParams(); tp != nil && tp.Len() > 0 {
-			return false
-		}
-		if rp := sig.RecvTypeParams(); rp != nil && rp.Len() > 0 {
-			return false
-		}
-	}
 	if decl.Pkg() != check.pkg {
 		return check.logosImportedReadonly(decl)
-	}
-	if decl != obj {
-		return false
 	}
 	rt := sig.Recv().Type()
 	if logosAsConstView(rt) != nil {
@@ -348,7 +300,7 @@ func (s *logosRecvScan) summarize(fn *Func, arg int) bool {
 		s.memo[key] = false
 		return false
 	}
-	if fn.Origin() != fn || fn.Pkg() != s.check.pkg {
+	if fn.Pkg() != s.check.pkg {
 		return true
 	}
 	di, ok := s.check.objMap[fn]
@@ -802,6 +754,7 @@ func (s *logosRecvScan) callEffects(call *syntax.CallExpr) {
 }
 
 func (s *logosRecvScan) directCall(recv syntax.Expr, fn *Func, args []syntax.Expr) {
+	fn = fn.Origin()
 	sig, ok := fn.Type().(*Signature)
 	if !ok {
 		if (recv != nil && s.taintedRef(recv)) || s.anyTainted(args) {

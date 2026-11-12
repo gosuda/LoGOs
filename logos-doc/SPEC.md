@@ -447,6 +447,10 @@ A dynamic call through a constant view to a method the interface does not declar
 
 The explicit `const` receiver rule and the inference for ordinary concrete value receivers MUST stay unchanged. [T-201]
 
+A method of a generic type MUST be proven readonly by the same proof, from its body and receiver type independently of any instantiation, and an instantiated method MUST carry the proof of its origin; such a method MUST satisfy a readonly method obligation, MUST be callable through a constant view, and MUST export its `FnFact.Readonly` fact exactly as a method of a type without type parameters does. [T-201][T-Sec5]
+
+A value whose type is a type parameter MUST count as reference-free only when every type in its constraint's type set is, and a parameter whose type set has no specific types or admits a slice, map, pointer, channel, function, interface, or `unsafe.Pointer` type MUST count as bearing references; a method of a generic type that returns such a value read from its receiver, or writes through it, MUST fail the proof with `[correctness::const_view_mutation]` as the same method of a type without type parameters does. [T-201]
+
 Receiver readonlyness MUST NOT imply parameter purity: a `FnFact.Readonly` fact proves only the receiver obligation, and a readonly-only or assertion-only fact MUST NOT prove that arguments are unmodified. An absent `ParamMutated` summary MUST be treated as unknown, distinct from an explicit proven-zero `ParamMutated=0` summary. [T-201][T-Sec5]
 
 Ordinary generic assertion definitions, including `func As[T any](x any) T { return x.(T) }` and assertion methods on generic receivers, MUST remain legal. The compiler MUST record their assertion and type-switch effects and MUST require verified effects before manufacturing qualified targets for relevant function and receiver-type instantiations, including transitive wrappers and cross-package uses, independently of declaration order. An instantiation MUST NOT manufacture a readonly obligation erased from runtime interface identity; an unsafe instantiation MUST fail with `[correctness::const_view_mutation]`. [T-201][T-Sec5]
