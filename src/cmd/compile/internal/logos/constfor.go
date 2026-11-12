@@ -840,24 +840,38 @@ func cfBareSkip(n *syntax.Name, p syntax.Node) bool {
 
 // cfAssignTarget reports whether n is an assignment target under p.
 func cfAssignTarget(n *syntax.Name, p syntax.Node, parents map[syntax.Node]syntax.Node) bool {
-	if _, ok := p.(*syntax.ListExpr); ok {
-		p = parents[p]
-	}
-	as, ok := p.(*syntax.AssignStmt)
-	if !ok || as.Op == syntax.Def {
+	var lhs syntax.Expr
+	switch p := cfPastParens(p, parents).(type) {
+	case *syntax.AssignStmt:
+		if p.Op == syntax.Def {
+			return false
+		}
+		lhs = p.Lhs
+	case *syntax.RangeClause:
+		if p.Def {
+			return false
+		}
+		lhs = p.Lhs
+	default:
 		return false
 	}
-	for _, e := range syntax.UnpackListExpr(as.Lhs) {
-		if en, ok := e.(*syntax.Name); ok && en == n {
-			return true
-		}
-	}
-	if as.Rhs == nil {
-		if lhs, ok := as.Lhs.(*syntax.Name); ok && lhs == n {
+	for _, e := range syntax.UnpackListExpr(lhs) {
+		if syntax.Unparen(e) == syntax.Expr(n) {
 			return true
 		}
 	}
 	return false
+}
+
+func cfPastParens(p syntax.Node, parents map[syntax.Node]syntax.Node) syntax.Node {
+	for {
+		switch p.(type) {
+		case *syntax.ParenExpr, *syntax.ListExpr:
+			p = parents[p]
+		default:
+			return p
+		}
+	}
 }
 
 // cfSites carries the substitution context of one expansion: the local
@@ -1297,11 +1311,14 @@ func (c *cfLeaf) subName(n *syntax.Name) {
 		return
 	}
 	p, ok := c.parents[n]
-	if !ok || cfBareSkip(n, p) {
+	if !ok {
 		return
 	}
 	if cfAssignTarget(n, p, c.parents) {
 		c.fl.cfError(c.run.sites.at(n.Pos()), "[comptime::const_for_assign] cannot assign to const for variable %s", n.Value)
+		return
+	}
+	if cfBareSkip(n, p) {
 		return
 	}
 	c.add(s, e, strconv.Itoa(a.idx))

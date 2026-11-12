@@ -1,0 +1,48 @@
+// run
+
+package main
+
+import (
+	"comptime"
+	"fmt"
+)
+
+type Point struct {
+	X int
+	Y int
+}
+
+func shortDeclares() int {
+	total := 0
+	const for i, f := range comptime.Fields[Point]() {
+		_ = f.Name
+		_ = i
+		i := 5
+		total += i
+	}
+	return total
+}
+
+func varDeclares() int {
+	total := 0
+	const for i, f := range comptime.Fields[Point]() {
+		_ = f.Name
+		_ = i
+		var i = 9
+		total += i
+	}
+	return total
+}
+
+func check(name string, got, want int) {
+	if got != want {
+		fmt.Println("FAIL", name, got, want)
+		return
+	}
+	fmt.Println("ok", name)
+}
+
+func main() {
+	check("short", shortDeclares(), 10)
+	check("var", varDeclares(), 18)
+}
