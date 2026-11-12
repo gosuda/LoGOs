@@ -5,6 +5,8 @@
 package types2
 
 import (
+	"slices"
+
 	"cmd/compile/internal/syntax"
 	. "internal/types/errors"
 )
@@ -241,13 +243,8 @@ func (check *Checker) logosChainCall(x *operand, call *syntax.CallExpr) bool {
 	return true
 }
 
-func (check *Checker) logosChainRoots(e syntax.Expr) map[string]bool {
-	roots := make(map[string]bool)
-	base, _ := check.logosWriteBase(e)
-	if nm, ok := base.(*syntax.Name); ok {
-		roots[nm.Value] = true
-	}
-	return roots
+func (check *Checker) logosChainRoots(e syntax.Expr) []logosWritePath {
+	return []logosWritePath{check.logosWritePath(e)}
 }
 
 func (check *Checker) logosChainMethod(x *operand, call *syntax.CallExpr, sel *syntax.SelectorExpr, elem Type) {
@@ -387,21 +384,21 @@ func (check *Checker) logosChainIntArg(arg syntax.Expr, method string) bool {
 	return true
 }
 
-func (check *Checker) logosChainPred(arg syntax.Expr, elem Type, method string, roots map[string]bool) (Type, bool, bool) {
+func (check *Checker) logosChainPred(arg syntax.Expr, elem Type, method string, roots []logosWritePath) (Type, bool, bool) {
 	if lam, ok := syntax.Unparen(arg).(*syntax.LambdaExpr); ok {
 		return check.logosChainLambda(lam, elem, logosPredKind, roots)
 	}
 	return check.logosChainFuncArg(arg, elem, Typ[Bool], method)
 }
 
-func (check *Checker) logosChainMapArg(arg syntax.Expr, elem Type, roots map[string]bool) (Type, bool, bool) {
+func (check *Checker) logosChainMapArg(arg syntax.Expr, elem Type, roots []logosWritePath) (Type, bool, bool) {
 	if lam, ok := syntax.Unparen(arg).(*syntax.LambdaExpr); ok {
 		return check.logosChainLambda(lam, elem, logosMapKind, roots)
 	}
 	return check.logosChainFuncInfer(arg, elem)
 }
 
-func (check *Checker) logosChainKeyArg(arg syntax.Expr, elem Type, roots map[string]bool) (Type, bool, bool) {
+func (check *Checker) logosChainKeyArg(arg syntax.Expr, elem Type, roots []logosWritePath) (Type, bool, bool) {
 	if lam, ok := syntax.Unparen(arg).(*syntax.LambdaExpr); ok {
 		return check.logosChainLambda(lam, elem, logosKeyKind, roots)
 	}
@@ -483,7 +480,7 @@ func (check *Checker) logosChainNestedTry(body syntax.Node) {
 	})
 }
 
-func (check *Checker) logosChainLambda(lam *syntax.LambdaExpr, elem Type, kind logosChainKind, roots map[string]bool) (Type, bool, bool) {
+func (check *Checker) logosChainLambda(lam *syntax.LambdaExpr, elem Type, kind logosChainKind, roots []logosWritePath) (Type, bool, bool) {
 	if check.logosInPlace == nil {
 		check.logosInPlace = make(map[*syntax.LambdaExpr]bool)
 	}
@@ -494,20 +491,17 @@ func (check *Checker) logosChainLambda(lam *syntax.LambdaExpr, elem Type, kind l
 	}
 	check.logosChainNestedTry(lam.Body)
 	name := lam.Params[0]
-	merged := make(map[string]bool, len(roots)+1)
-	for r := range roots {
-		merged[r] = true
-	}
-	merged[name.Value] = true
 	scope := NewScope(check.scope, lam.Pos(), endPos(lam.Body), "chain lambda")
 	scope.isFunc = true
 	p := NewParam(name.Pos(), check.pkg, name.Value, elem)
 	check.declare(scope, name, p, name.Pos())
+	merged := append(slices.Clone(roots), logosWritePath{root: p})
 	saved := check.environment
 	check.environment = environment{decl: check.decl, scope: scope, version: check.version, iota: check.iota, sig: check.sig}
 	defer func() { check.environment = saved }()
+	defer check.logosChainNoMutate(merged, lam.Body)
 	if block, ok := lam.Body.(*syntax.BlockStmt); ok {
-		u, isTry, ok := check.logosChainBlock(lam, merged, scope, elem, kind, block)
+		u, isTry, ok := check.logosChainBlock(lam, scope, elem, kind, block)
 		check.usage(scope)
 		return u, isTry, ok
 	}
@@ -516,7 +510,6 @@ func (check *Checker) logosChainLambda(lam *syntax.LambdaExpr, elem Type, kind l
 		check.error(lam.Body, InvalidSyntaxTree, "invalid chain lambda body")
 		return nil, false, false
 	}
-	check.logosChainNoMutate(merged, body)
 	if t, ok := syntax.Unparen(body).(*syntax.TryExpr); ok {
 		results, ok := check.logosTryResults(t)
 		if !ok {
@@ -572,8 +565,7 @@ func logosOrderedKey(u Type) bool {
 	return ok && b.Info()&IsOrdered != 0
 }
 
-func (check *Checker) logosChainBlock(lam *syntax.LambdaExpr, roots map[string]bool, scope *Scope, elem Type, kind logosChainKind, block *syntax.BlockStmt) (Type, bool, bool) {
-	check.logosChainNoMutate(roots, block)
+func (check *Checker) logosChainBlock(lam *syntax.LambdaExpr, scope *Scope, elem Type, kind logosChainKind, block *syntax.BlockStmt) (Type, bool, bool) {
 	check.logosChainBlockTryForms(block)
 	saved := check.environment.chainRets
 	st := &chainReturnState{}
@@ -689,7 +681,7 @@ func (check *Checker) logosChainBlockTryForms(block *syntax.BlockStmt) {
 	})
 }
 
-func (check *Checker) logosChainNoMutate(roots map[string]bool, body syntax.Node) {
+func (check *Checker) logosChainNoMutate(roots []logosWritePath, body syntax.Node) {
 	syntax.Inspect(body, func(n syntax.Node) bool {
 		var targets []syntax.Expr
 		switch n := n.(type) {
@@ -705,7 +697,7 @@ func (check *Checker) logosChainNoMutate(roots map[string]bool, body syntax.Node
 			check.logosChainMutatingCall(n, roots)
 		}
 		for _, lhs := range targets {
-			if check.logosChainMutates(lhs, roots) {
+			if logosChainHits(check.logosWritePath(lhs), roots) {
 				check.errorf(lhs, IncompatibleAssign, "%s cannot assign to chain receiver or parameter", logosChainMutation)
 			}
 		}
@@ -713,23 +705,20 @@ func (check *Checker) logosChainNoMutate(roots map[string]bool, body syntax.Node
 	})
 }
 
-func (check *Checker) logosChainMutatingCall(call *syntax.CallExpr, roots map[string]bool) {
+func (check *Checker) logosChainMutatingCall(call *syntax.CallExpr, roots []logosWritePath) {
 	name, ok := syntax.Unparen(call.Fun).(*syntax.Name)
 	if !ok || len(call.ArgList) == 0 {
 		return
 	}
 	verb, mutating := logosChainMutatingBuiltins[name.Value]
-	_, obj := check.lookupScope(name.Value)
-	_, builtin := obj.(*Builtin)
-	if mutating && builtin && check.logosChainMutates(call.ArgList[0], roots) {
+	_, builtin := check.Info.Uses[name].(*Builtin)
+	if mutating && builtin && logosChainHits(check.logosContentsPath(call.ArgList[0]), roots) {
 		check.errorf(call.ArgList[0], IncompatibleAssign, "%s cannot %s chain receiver or parameter", logosChainMutation, verb)
 	}
 }
 
-func (check *Checker) logosChainMutates(e syntax.Expr, roots map[string]bool) bool {
-	base, _ := check.logosWriteBase(e)
-	nm, ok := base.(*syntax.Name)
-	return ok && roots[nm.Value]
+func logosChainHits(target logosWritePath, roots []logosWritePath) bool {
+	return slices.ContainsFunc(roots, func(root logosWritePath) bool { return logosWriteHits(root, target) })
 }
 
 func (check *Checker) logosChainFuncArg(arg syntax.Expr, elem, want Type, method string) (Type, bool, bool) {

@@ -380,7 +380,7 @@ func (check *Checker) logosConstStoreBase(lhs syntax.Expr) syntax.Expr {
 }
 
 func (check *Checker) logosCompositeRoot(e syntax.Expr) (syntax.Expr, bool) {
-	root, _ := check.logosWriteBase(e)
+	root, _, _ := check.logosWriteBase(e)
 	if !check.logosCompositeRootNode(root) {
 		return nil, false
 	}
@@ -388,7 +388,7 @@ func (check *Checker) logosCompositeRoot(e syntax.Expr) (syntax.Expr, bool) {
 }
 
 func (check *Checker) logosConstBase(e syntax.Expr) (base syntax.Expr, viaReference, constRooted bool) {
-	base, viaReference = check.logosWriteBase(e)
+	base, _, viaReference = check.logosWriteBase(e)
 	if n, ok := base.(*syntax.Name); ok {
 		if _, ok := check.Info.Uses[n].(*Const); ok {
 			return base, viaReference, true

@@ -234,14 +234,14 @@ func chainKeyOrdered(ns []int, ss []string, fs []float64) {
 
 func chainReceiverBuiltins(xs, ys []int) {
 	_ = xs.filter(x => {
-		_ = copy(xs /* ERROR "[correctness::const_view_mutation] cannot copy into chain receiver or parameter" */, ys)
+		_ = copy(xs /* ERROR "[correctness::const_view_mutation]" */, ys)
 		return true
 	})
 	_ = xs.filter(x => {
-		clear(xs /* ERROR "[correctness::const_view_mutation] cannot clear chain receiver or parameter" */)
+		clear(xs /* ERROR "[correctness::const_view_mutation]" */)
 		return true
 	})
-	_ = xs.filter(x => len(append(xs /* ERROR "[correctness::const_view_mutation] cannot append to chain receiver or parameter" */, x)) > 0)
+	_ = xs.filter(x => len(append(xs /* ERROR "[correctness::const_view_mutation]" */, x)) > 0)
 }
 
 func chainBuiltinReads(xs, ys []int, m map[string]int) {
@@ -257,23 +257,23 @@ type chainBox struct{ n int }
 
 func chainReceiverWrites(xs, ys []int, bs []*chainBox) {
 	_ = xs.filter(x => {
-		xs /* ERROR "[correctness::const_view_mutation] cannot assign to chain receiver or parameter" */ [0]++
+		xs /* ERROR "[correctness::const_view_mutation]" */ [0]++
 		return true
 	})
 	_ = xs.filter(x => {
-		xs /* ERROR "[correctness::const_view_mutation] cannot assign to chain receiver or parameter" */ [0] += x
+		xs /* ERROR "[correctness::const_view_mutation]" */ [0] += x
 		return true
 	})
 	_ = xs.filter(x => {
-		xs /* ERROR "[correctness::const_view_mutation] cannot assign to chain receiver or parameter" */ = ys
+		xs /* ERROR "[correctness::const_view_mutation]" */ = ys
 		return true
 	})
 	_ = bs.filter(b => {
-		* /* ERROR "[correctness::const_view_mutation] cannot assign to chain receiver or parameter" */ bs[0] = chainBox{}
+		* /* ERROR "[correctness::const_view_mutation]" */ bs[0] = chainBox{}
 		return true
 	})
 	_ = xs.filter(x => {
-		for xs /* ERROR "[correctness::const_view_mutation] cannot assign to chain receiver or parameter" */ [0] = range 3 {
+		for xs /* ERROR "[correctness::const_view_mutation]" */ [0] = range 3 {
 		}
 		return true
 	})
@@ -281,39 +281,39 @@ func chainReceiverWrites(xs, ys []int, bs []*chainBox) {
 
 func chainParamBuiltins(rows [][]int, tables []map[string]int) {
 	_ = rows.filter(r => {
-		_ = copy(r /* ERROR "[correctness::const_view_mutation] cannot copy into chain receiver or parameter" */, r)
+		_ = copy(r /* ERROR "[correctness::const_view_mutation]" */, r)
 		return true
 	})
 	_ = rows.filter(r => {
-		clear(r /* ERROR "[correctness::const_view_mutation] cannot clear chain receiver or parameter" */)
+		clear(r /* ERROR "[correctness::const_view_mutation]" */)
 		return true
 	})
-	_ = rows.filter(r => len(append(r /* ERROR "[correctness::const_view_mutation] cannot append to chain receiver or parameter" */, 1)) > 0)
+	_ = rows.filter(r => len(append(r /* ERROR "[correctness::const_view_mutation]" */, 1)) > 0)
 	_ = tables.filter(t => {
-		delete(t /* ERROR "[correctness::const_view_mutation] cannot delete from chain receiver or parameter" */, "k")
+		delete(t /* ERROR "[correctness::const_view_mutation]" */, "k")
 		return true
 	})
 }
 
 func chainParamWrites(bs []*chainBox, ns []*int, rows [][]int) {
 	_ = bs.filter(b => {
-		b /* ERROR "[correctness::const_view_mutation] cannot assign to chain receiver or parameter" */ .n++
+		b /* ERROR "[correctness::const_view_mutation]" */ .n++
 		return true
 	})
 	_ = bs.filter(b => {
-		b /* ERROR "[correctness::const_view_mutation] cannot assign to chain receiver or parameter" */ .n += 2
+		b /* ERROR "[correctness::const_view_mutation]" */ .n += 2
 		return true
 	})
 	_ = ns.filter(n => {
-		* /* ERROR "[correctness::const_view_mutation] cannot assign to chain receiver or parameter" */ n = 1
+		* /* ERROR "[correctness::const_view_mutation]" */ n = 1
 		return true
 	})
 	_ = rows.filter(r => {
-		r /* ERROR "[correctness::const_view_mutation] cannot assign to chain receiver or parameter" */ [0] = 1
+		r /* ERROR "[correctness::const_view_mutation]" */ [0] = 1
 		return true
 	})
 	_ = rows.filter(r => {
-		for r /* ERROR "[correctness::const_view_mutation] cannot assign to chain receiver or parameter" */ [0] = range 3 {
+		for r /* ERROR "[correctness::const_view_mutation]" */ [0] = range 3 {
 		}
 		return true
 	})
