@@ -426,6 +426,8 @@ func TestUnionNullLeavesFieldAbsent(t *testing.T) {
 	}
 }
 
+var anythingCalls int
+
 type Anything string
 
 func (a Anything) MarshalJSON() ([]byte, error) {
@@ -433,6 +435,7 @@ func (a Anything) MarshalJSON() ([]byte, error) {
 }
 
 func (a *Anything) UnmarshalJSON(b []byte) error {
+	anythingCalls++
 	*a = Anything(string(b))
 	return nil
 }
@@ -499,5 +502,21 @@ func TestUnionTrialsUseFreshScratch(t *testing.T) {
 	if zeroCheckSawNonZero {
 		t.Fatal("second ZeroCheck trial reused state from the first call")
 		return
+	}
+}
+
+func TestUnionNullRunsNoTrial(t *testing.T) {
+	anythingCalls = 0
+	h := MixedHolder{Item: Circle{R: 3}}
+	mustUnmarshal(t, []byte(`{"item":null}`), &h)
+	if anythingCalls != 0 {
+		t.Fatalf("null ran %d member trials, want none", anythingCalls)
+	}
+	if h.Item != nil {
+		t.Fatalf("expected nil union field after null, got %#v", h.Item)
+	}
+	mustUnmarshal(t, []byte(`{"item":"text"}`), &h)
+	if anythingCalls == 0 {
+		t.Fatal("a non-null value ran no member trial, so the call counter observes nothing")
 	}
 }
