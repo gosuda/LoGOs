@@ -437,14 +437,6 @@ func unconditionalAncestors(stack []syntax.Node, stmt syntax.Stmt) bool {
 		}
 		child := stack[i+1]
 		switch n := stack[i].(type) {
-		case *syntax.Operation:
-			if child == syntax.Node(n.Y) && (n.Op == syntax.AndAnd || n.Op == syntax.OrOr) {
-				return false
-			}
-		case *syntax.CoalesceExpr:
-			if child == syntax.Node(n.Y) {
-				return false
-			}
 		case *syntax.CallExpr:
 			if _, ok := syntax.Unparen(n.Fun).(*syntax.OptSelectExpr); ok && child != syntax.Node(n.Fun) {
 				return false
@@ -459,7 +451,7 @@ func unconditionalAncestors(stack []syntax.Node, stmt syntax.Stmt) bool {
 		case *syntax.SelectorExpr, *syntax.IndexExpr,
 			*syntax.SliceExpr, *syntax.AssertExpr, *syntax.ParenExpr,
 			*syntax.CompositeLit, *syntax.KeyValueExpr, *syntax.ListExpr,
-			*syntax.TryExpr:
+			*syntax.TryExpr, *syntax.Operation, *syntax.CoalesceExpr:
 		default:
 			return false
 		}
