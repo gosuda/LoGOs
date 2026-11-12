@@ -219,6 +219,11 @@ func (cg *chainGen) parSeqText(st *parStage) ([]otext, otext) {
 		cat(gen(ctxN+" := "), fl.textOf(st.ctxSpan)),
 		cat(gen(limN+" := "), fl.textOf(st.limSpan)),
 	}
+	for i, op := range st.seg {
+		if op.lam == nil {
+			binds = append(binds, cat(gen(cg.parOpName(i)+" := "), fl.textOf(op.argSpan)))
+		}
+	}
 	child := cg.parChild(st)
 	var src otext
 	switch st.source {
@@ -233,6 +238,10 @@ func (cg *chainGen) parSeqText(st *parStage) ([]otext, otext) {
 	return binds, cat(gen(rtAlias+"."+verb+"["+s+", "+r+"]("+ctxN+", "+limN+", "), src, gen(", "), child, gen(")"))
 }
 
+func (cg *chainGen) parOpName(i int) string {
+	return fmt.Sprintf("%s_c%d", cg.prefix, i)
+}
+
 func (cg *chainGen) parChild(st *parStage) otext {
 	p := cg.prefix
 	ps := p + "_ps"
@@ -243,7 +252,9 @@ func (cg *chainGen) parChild(st *parStage) otext {
 	}
 	in := st.elemT
 	for i, op := range st.seg {
-		parts = append(parts, cg.parClosure(fmt.Sprintf("%s_c%d", p, i), op, in, st.segT[i]), gen("; "))
+		if op.lam != nil {
+			parts = append(parts, cg.parClosure(cg.parOpName(i), op, in, st.segT[i]), gen("; "))
+		}
 		in = st.segT[i]
 	}
 	cur := ps
@@ -268,7 +279,7 @@ func parMapAfter(seg []chainOp, i int) bool {
 func (cg *chainGen) parStep(st *parStage, i int, cur string) (line, next string) {
 	op := st.seg[i]
 	p := cg.prefix
-	fn := fmt.Sprintf("%s_c%d", p, i)
+	fn := cg.parOpName(i)
 	errN := p + "_e"
 	zero := cg.zeroText(st.resT)
 	fail := "return " + zero + ", false, " + errN
@@ -292,9 +303,6 @@ func (cg *chainGen) parStep(st *parStage, i int, cur string) (line, next string)
 
 func (cg *chainGen) parClosure(name string, op chainOp, in, out types2.Type) otext {
 	fl := cg.fl
-	if op.lam == nil {
-		return cat(gen(name+" := "), fl.textOf(op.argSpan))
-	}
 	result, zero, resT := "bool", "false", types2.Type(types2.Typ[types2.Bool])
 	if op.method == "map" {
 		result, zero, resT = cg.spellType(out), cg.zeroText(out), out

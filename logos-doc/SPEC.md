@@ -312,6 +312,7 @@ func big(xs []int) []int {
 A call argument of the form `name = value` MUST fail with `[correctness::named_argument]`, except `limit = N` in a stage call [T-104.6].
 `.unordered()` MUST be allowed only directly after `group` [T-104.6].
 The segment MUST be every `map` and `filter` call directly after `group` or `.unordered()`, and a stage with none MUST fail compilation [T-104.6].
+A segment operand that is not a lambda literal MUST be evaluated once, before the stage starts, on the calling goroutine, in source order after the source, `ctx`, and `limit` [T-104.6].
 As a value, a stage chain MUST have type `(R, error)`, where `R` is the type the same chain has without the stage, and that form MUST be legal in a function with no error result; `?` on it MUST propagate the error as for any `?` [T-104.6].
 As the range expression of a `for` statement with at most one iteration variable, a stage chain MUST yield its results one at a time, only `map` and `filter` MAY follow the stage, and the enclosing function MUST have an error result or the statement MUST fail with `[correctness::group_needs_error_result]` [T-104.6].
 A function whose single result is `iter.Seq[T]` or `iter.Seq2[K, V]` MUST be a generator function [T-104.8].
