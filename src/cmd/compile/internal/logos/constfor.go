@@ -825,7 +825,10 @@ func cfBareSkip(n *syntax.Name, p syntax.Node) bool {
 }
 
 // cfAssignTarget reports whether n is an assignment target under p.
-func cfAssignTarget(n *syntax.Name, p syntax.Node) bool {
+func cfAssignTarget(n *syntax.Name, p syntax.Node, parents map[syntax.Node]syntax.Node) bool {
+	if _, ok := p.(*syntax.ListExpr); ok {
+		p = parents[p]
+	}
 	as, ok := p.(*syntax.AssignStmt)
 	if !ok || as.Op == syntax.Def {
 		return false
@@ -1283,7 +1286,7 @@ func (c *cfLeaf) subName(n *syntax.Name) {
 	if !ok || cfBareSkip(n, p) {
 		return
 	}
-	if cfAssignTarget(n, p) {
+	if cfAssignTarget(n, p, c.parents) {
 		c.fl.cfError(c.run.sites.at(n.Pos()), "[comptime::const_for_assign] cannot assign to const for variable %s", n.Value)
 		return
 	}
