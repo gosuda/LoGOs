@@ -164,3 +164,18 @@ func tryTypeSwitchArm(x intOrString) (int, error) {
 	}
 	return r, nil
 }
+
+func trySelectSend(c chan int) (int, error) {
+	select {
+	case c <- switch n := twoResults()? /* ERROR "[correctness::misplaced_try] ? must end an assignment, expression statement, defer, or errdefer" */; n { case 0 => 1; default => 2 }:
+		return 1, nil
+	default:
+		return 0, nil
+	}
+}
+
+func applyCheck(f func(int) error, v int) error { return f(v) }
+
+func tryLambdaBody() error {
+	return applyCheck(v => switch n := twoResults()? /* ERROR "[correctness::misplaced_try] ? must end an assignment, expression statement, defer, or errdefer" */; n { case 0 => nil; default => error(nil) }, 1)
+}
