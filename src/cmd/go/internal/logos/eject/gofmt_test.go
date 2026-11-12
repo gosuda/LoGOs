@@ -90,8 +90,8 @@ func TestRunEjectGofmtBatchesUnderArgLimit(t *testing.T) {
 				t.Fatal(err)
 			}
 			lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
-			var got []string
-			batches := 0
+			passed := map[string][]string{}
+			batches := map[string]int{}
 			for i := 0; i < len(lines); {
 				n, err := strconv.Atoi(lines[i])
 				if err != nil {
@@ -102,23 +102,25 @@ func TestRunEjectGofmtBatchesUnderArgLimit(t *testing.T) {
 				}
 				args := lines[i+1 : i+1+n]
 				i += 1 + n
-				if len(args) == 0 || args[0] != "-w" {
+				if len(args) == 0 || (args[0] != "-w" && args[0] != "-l") {
 					t.Fatalf("unexpected gofmt argv %q", args)
 				}
-				batches++
-				total := len(stub) + len(" -w")
+				batches[args[0]]++
+				total := len(stub) + 1 + len(args[0])
 				for _, f := range args[1:] {
 					total += 1 + len(f)
 				}
 				if total >= l {
-					t.Fatalf("gofmt batch %d: argument length %d, limit %d (batched by count, not argument length)", batches, total, l)
+					t.Fatalf("gofmt %s batch %d: argument length %d, limit %d (batched by count, not argument length)", args[0], batches[args[0]], total, l)
 				}
-				got = append(got, args[1:]...)
+				passed[args[0]] = append(passed[args[0]], args[1:]...)
 			}
-			if !slices.Equal(got, paths) {
-				t.Fatalf("formatted files diverge from input: got %d, want %d", len(got), len(paths))
+			for _, flag := range []string{"-w", "-l"} {
+				if !slices.Equal(passed[flag], paths) {
+					t.Fatalf("files passed to gofmt %s diverge from input: got %d, want %d", flag, len(passed[flag]), len(paths))
+				}
 			}
-			counts = append(counts, batches)
+			counts = append(counts, batches["-w"])
 		})
 	}
 	if len(counts) == 3 && !(counts[0] > counts[1] && counts[1] >= counts[2]) {
