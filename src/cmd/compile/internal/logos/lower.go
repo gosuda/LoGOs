@@ -188,6 +188,7 @@ type fileLower struct {
 	optMemo        map[*syntax.OptionType]syntax.Expr
 	narrowDone     map[*syntax.Name]bool
 	optDeferGoPend map[*syntax.CallExpr]optDeferGoWork
+	gotoTargets    map[*syntax.LabeledStmt]bool
 	wrapSpan       map[syntax.Expr]span
 	wrapOwner      map[syntax.Expr]int
 	wrapSeq        int
@@ -306,6 +307,12 @@ func (fl *fileLower) openMove(r span) (*[]splice, string) {
 
 func (fl *fileLower) add(start, end int, text string) {
 	fl.appendSplice(splice{start: start, end: end, text: text})
+}
+
+func (fl *fileLower) addFirst(off int, text string) {
+	list := fl.ownerOfInsertion(off)
+	*list = slices.Insert(*list, 0, splice{start: off, end: off, text: text})
+	fl.changed = true
 }
 
 // addOwned records one splice owned by one wrapper (a wrap ID from

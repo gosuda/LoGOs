@@ -80,11 +80,11 @@ func (fl *fileLower) lowerChainList(list []syntax.Stmt, enc []resultSpec) []synt
 			out = append(out, repl...)
 			continue
 		}
-		if repl, ok := fl.lowerChainSpecial(s, enc); ok {
-			out = append(out, repl...)
-			continue
+		repl, ok := fl.lowerChainSpecial(s, enc)
+		if !ok {
+			repl = fl.lowerChainPlain(s, enc)
 		}
-		out = append(out, fl.lowerChainPlain(s, enc)...)
+		out = append(out, fl.scopeChainHoists(s, repl)...)
 	}
 	return out
 }
@@ -94,6 +94,123 @@ func (fl *fileLower) lowerChainPlain(s syntax.Stmt, enc []resultSpec) []syntax.S
 	out = append(out, s)
 	fl.lowerChainChildren(s, enc)
 	return out
+}
+
+func hoistScopable(s syntax.Stmt) bool {
+	switch s := s.(type) {
+	case *syntax.LabeledStmt:
+		_, again := s.Stmt.(*syntax.LabeledStmt)
+		return !again && hoistScopable(s.Stmt)
+	case *syntax.AssignStmt:
+		return s.Op != syntax.Def
+	case *syntax.ExprStmt, *syntax.SendStmt, *syntax.ReturnStmt, *syntax.IfStmt, *syntax.ForStmt, *syntax.SwitchStmt, *syntax.SelectStmt:
+		return true
+	}
+	return false
+}
+
+func (fl *fileLower) hoistedStmtEnd(s syntax.Stmt) int {
+	for {
+		lab, ok := s.(*syntax.LabeledStmt)
+		if !ok {
+			break
+		}
+		s = lab.Stmt
+	}
+	switch s.(type) {
+	case *syntax.IfStmt, *syntax.ForStmt, *syntax.SwitchStmt, *syntax.SelectStmt:
+		return fl.off(syntax.EndPos(s)) + 1
+	}
+	return stmtEnd(fl.src, fl.off(syntax.StartPos(s)))
+}
+
+func (fl *fileLower) scopeChainHoists(s syntax.Stmt, repl []syntax.Stmt) []syntax.Stmt {
+	if len(repl) < 2 || repl[len(repl)-1] != s || !hoistScopable(s) {
+		return repl
+	}
+	if lab, ok := s.(*syntax.LabeledStmt); ok && fl.gotoTarget(lab) {
+		return fl.scopeLabeledHoists(lab, repl)
+	}
+	fl.addFirst(fl.stmtStartOf(s), "{ ")
+	end := fl.hoistedStmtEnd(s)
+	fl.add(end, end, " }")
+	wrapper := blockOf(s.Pos(), repl)
+	wrapper.Rbrace = syntax.EndPos(s)
+	return []syntax.Stmt{wrapper}
+}
+
+func (fl *fileLower) scopeLabeledHoists(lab *syntax.LabeledStmt, repl []syntax.Stmt) []syntax.Stmt {
+	inner := lab.Stmt
+	start := fl.stmtStartOf(lab)
+	innerStart := fl.off(syntax.StartPos(inner))
+	fl.addFirst(start, lab.Label.Value+": { ")
+	end := fl.hoistedStmtEnd(inner)
+	fl.add(end, end, " }")
+	body := inner
+	name := "_logos_in_" + lab.Label.Value
+	if fl.renameBranchLabels(inner, lab.Label.Value, name) > 0 {
+		fl.add(start, innerStart, name+": ")
+		body = at(&syntax.LabeledStmt{Label: nameOf(lab.Pos(), name), Stmt: inner}, lab.Pos())
+	} else {
+		fl.add(start, innerStart, "")
+	}
+	wrapper := blockOf(inner.Pos(), append(slices.Clone(repl[:len(repl)-1]), body))
+	wrapper.Rbrace = syntax.EndPos(inner)
+	lab.Stmt = wrapper
+	return []syntax.Stmt{lab}
+}
+
+func (fl *fileLower) renameBranchLabels(s syntax.Stmt, from, to string) int {
+	renamed := 0
+	syntax.Inspect(s, func(n syntax.Node) bool {
+		switch n := n.(type) {
+		case *syntax.FuncLit:
+			return false
+		case *syntax.BranchStmt:
+			if n.Label != nil && n.Label.Value == from && n.Tok != syntax.Goto {
+				off := fl.off(n.Label.Pos())
+				fl.add(off, off+len(from), to)
+				n.Label = nameOf(n.Label.Pos(), to)
+				renamed++
+			}
+		}
+		return true
+	})
+	return renamed
+}
+
+func (fl *fileLower) gotoTarget(lab *syntax.LabeledStmt) bool {
+	if fl.gotoTargets == nil {
+		fl.gotoTargets = make(map[*syntax.LabeledStmt]bool)
+		for _, decl := range fl.file.DeclList {
+			collectGotoTargets(decl, fl.gotoTargets)
+		}
+	}
+	return fl.gotoTargets[lab]
+}
+
+func collectGotoTargets(root syntax.Node, out map[*syntax.LabeledStmt]bool) {
+	gotos := make(map[string]bool)
+	var labeled []*syntax.LabeledStmt
+	syntax.Inspect(root, func(n syntax.Node) bool {
+		switch n := n.(type) {
+		case *syntax.FuncLit:
+			collectGotoTargets(n.Body, out)
+			return false
+		case *syntax.BranchStmt:
+			if n.Tok == syntax.Goto && n.Label != nil {
+				gotos[n.Label.Value] = true
+			}
+		case *syntax.LabeledStmt:
+			labeled = append(labeled, n)
+		}
+		return true
+	})
+	for _, lab := range labeled {
+		if gotos[lab.Label.Value] {
+			out[lab] = true
+		}
+	}
 }
 
 func (fl *fileLower) lowerChainChildren(s syntax.Stmt, enc []resultSpec) {
