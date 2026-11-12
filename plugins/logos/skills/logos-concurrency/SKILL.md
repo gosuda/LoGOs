@@ -36,7 +36,7 @@ The compiler lowers `go group` blocks to `logos/rt.Group`. The following invaria
 - Cancellation: the group context cancels upon the first child error or panic.
 - Joining: the group statement joins all child goroutines before proceeding. The enclosing function propagates any group error like `?`.
 - Concurrency limit: when `limit = N` is specified, an internal semaphore bounds concurrent execution to at most N child goroutines.
-- Child block contract: each child block has type `func() error`. Using `?` inside a child returns the error directly to the group.
+- Child block contract: using `?` inside a child returns the error directly to the group.
 - Disallowed return: a bare `return` inside a child block is rejected with `correctness::return_in_group_child`.
 - Channel operations: direct channel send, receive, and range operations inside a child block automatically select on context cancellation.
 - Netpoll integration: children blocked on netpoll-backed network I/O wake within 100 ms of group cancellation with a timeout error.
