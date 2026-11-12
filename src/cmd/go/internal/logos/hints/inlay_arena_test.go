@@ -11,6 +11,7 @@ import (
 
 func TestInlayArenaBadgeFromCompiler(t *testing.T) {
 	f := compilerFixture(t, "sites.lgo")
+	t.Setenv("GOEXPERIMENT", "nologosarena")
 	r, _ := compileHints(t, f)
 	if got := labelsAt(InlayHints(r, f.path, wholeFile), endOf(t, f.src, "make")); slices.Contains(got, "[arena]") {
 		t.Errorf("default build: make([]byte, n) hints %q, want no [arena]", got)
