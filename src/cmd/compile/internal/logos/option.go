@@ -972,10 +972,11 @@ func (fl *fileLower) lowerCoalesce(e *syntax.CoalesceExpr) syntax.Expr {
 	}, pos)
 	qoff := fl.off(pos)
 	yStart := fl.off(leftmostOf(e.Y))
-	yEnd := fl.exprEnd(yStart)
-	if hasBraceLiteral(e.Y) {
-		yEnd = fl.exprEndNested(yStart)
+	through := yStart
+	if rbrace, ok := lastBraceOf(e.Y); ok {
+		through = fl.off(rbrace) + 1
 	}
+	yEnd := fl.exprEndThrough(yStart, through)
 	fl.add(qoff, qoff+2, "")
 	fl.addOwned(id, yEnd, yEnd, " }()")
 	if isIndex {
@@ -1049,24 +1050,31 @@ func (fl *fileLower) lowerCoalesce(e *syntax.CoalesceExpr) syntax.Expr {
 	return out
 }
 
-func hasBraceLiteral(e syntax.Expr) bool {
+func lastBraceOf(e syntax.Expr) (syntax.Pos, bool) {
 	switch n := e.(type) {
-	case *syntax.CompositeLit, *syntax.FuncLit:
-		return true
+	case *syntax.CompositeLit:
+		return n.Rbrace, true
+	case *syntax.FuncLit:
+		return n.Body.Rbrace, true
 	case *syntax.SelectorExpr:
-		return hasBraceLiteral(n.X)
+		return lastBraceOf(n.X)
 	case *syntax.IndexExpr:
-		return hasBraceLiteral(n.X)
+		return lastBraceOf(n.X)
 	case *syntax.SliceExpr:
-		return hasBraceLiteral(n.X)
+		return lastBraceOf(n.X)
 	case *syntax.AssertExpr:
-		return hasBraceLiteral(n.X)
+		return lastBraceOf(n.X)
 	case *syntax.CallExpr:
-		return hasBraceLiteral(n.Fun)
+		return lastBraceOf(n.Fun)
 	case *syntax.Operation:
-		return hasBraceLiteral(n.X) || (n.Y != nil && hasBraceLiteral(n.Y))
+		if n.Y != nil {
+			if pos, ok := lastBraceOf(n.Y); ok {
+				return pos, true
+			}
+		}
+		return lastBraceOf(n.X)
 	}
-	return false
+	return syntax.Pos{}, false
 }
 
 func (fl *fileLower) lowerOptSelect(e *syntax.OptSelectExpr) syntax.Expr {
@@ -1952,6 +1960,14 @@ func (fl *fileLower) findRbrack(kStart int) int {
 }
 
 func (fl *fileLower) exprEnd(from int) int {
+	return fl.exprEndThrough(from, from)
+}
+
+func (fl *fileLower) exprEndNested(from int) int {
+	return fl.exprEndThrough(from, len(fl.src))
+}
+
+func (fl *fileLower) exprEndThrough(from, through int) int {
 	end := len(fl.src)
 	depth := 0
 	scanSegment(fl.src, from, len(fl.src), func(t tok) bool {
@@ -1966,44 +1982,10 @@ func (fl *fileLower) exprEnd(from int) int {
 		case token.LPAREN, token.LBRACK:
 			depth++
 		case token.LBRACE:
-			if depth == 0 {
+			if depth == 0 && t.start >= through {
 				end = t.start
 				return false
 			}
-			depth++
-		case token.RPAREN, token.RBRACK, token.RBRACE:
-			if depth == 0 {
-				end = t.start
-				return false
-			}
-			depth--
-		case token.COMMA, token.SEMICOLON, token.COLON, token.ASSIGN, token.DEFINE:
-			if depth == 0 {
-				end = t.start
-				return false
-			}
-		case token.EOF:
-			end = len(fl.src)
-			return false
-		}
-		return true
-	})
-	return end
-}
-
-func (fl *fileLower) exprEndNested(from int) int {
-	end := len(fl.src)
-	depth := 0
-	scanSegment(fl.src, from, len(fl.src), func(t tok) bool {
-		if t.comment {
-			return true
-		}
-		if t.auto {
-			end = t.start
-			return false
-		}
-		switch t.kind {
-		case token.LPAREN, token.LBRACK, token.LBRACE:
 			depth++
 		case token.RPAREN, token.RBRACK, token.RBRACE:
 			if depth == 0 {
