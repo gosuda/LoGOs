@@ -61,6 +61,32 @@ func convOnce() bool {
 	return calls == 1
 }
 
+func bumpInt(p *int) int {
+	*p += 10
+	return *p
+}
+
+func bumpStr(p *string) string {
+	*p += "!"
+	return *p
+}
+
+func flipBool(p *bool) bool {
+	*p = !*p
+	return *p
+}
+
+func snapshots() {
+	snapInt := 1
+	got1 := $"a={snapInt} b={bumpInt(&snapInt)}"
+	check("snapshot-int", got1 == "a=1 b=11", got1, "a=1 b=11")
+	snapStr := "s"
+	got2 := $"a={snapStr} b={bumpStr(&snapStr)}"
+	check("snapshot-string", got2 == "a=s b=s!", got2, "a=s b=s!")
+	snapBool := true
+	got3 := $"a={snapBool} b={flipBool(&snapBool)}"
+	check("snapshot-bool", got3 == "a=true b=false", got3, "a=true b=false")
+}
 
 func main() {
 name := "ada"
@@ -88,6 +114,7 @@ nextIDCalls = 0
 got10 := $"id={nextID()}"
 check("id", got10 == "id=1", got10, "id=1")
 check("calls", nextIDCalls == 1, nextIDCalls, 1)
+snapshots()
 got12 := $"outer {$"inner {n}"} end"
 check("nested", got12 == "outer inner 3 end", got12, "outer inner 3 end")
 m := map[string]int{"a": 1}

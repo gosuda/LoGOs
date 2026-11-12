@@ -9,6 +9,9 @@ ok order
 ok eval
 ok id
 ok calls
+ok snapshot-int
+ok snapshot-string
+ok snapshot-bool
 ok nested
 ok map
 ok percent
