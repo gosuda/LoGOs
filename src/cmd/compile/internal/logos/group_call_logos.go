@@ -58,9 +58,7 @@ func (fc *funcLower) groupOperands(call *syntax.CallExpr) (groupOperand, []group
 	split, ok := splitCall(src, lparen)
 	if !ok || len(split.args) != len(call.ArgList) {
 		if ok && len(call.ArgList) == 0 {
-			if _, isLit := syntax.Unparen(call.Fun).(*syntax.FuncLit); isLit {
-				return groupOperand{expr: call.Fun}, nil
-			}
+			return groupOperand{expr: call.Fun}, nil
 		}
 		base.Fatalf("logos: cannot split the operands of the group call at %s", call.Pos().String())
 	}

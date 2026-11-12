@@ -1623,15 +1623,8 @@ func (fl *fileLower) optDeferGoFinish(s *syntax.CallStmt) ([]syntax.Stmt, bool) 
 	delete(fl.optDeferGoPend, e)
 	pos := w.osel.Pos()
 	argc := len(w.vals)
-	lhs := make([]syntax.Expr, 0, argc+1)
-	lhs = append(lhs, nameOf(pos, w.lv))
-	rhs := make([]syntax.Expr, 0, argc+1)
-	rhs = append(rhs, w.nx)
-	for i := range argc {
-		lhs = append(lhs, nameOf(pos, w.names[i]))
-		rhs = append(rhs, w.vals[i])
-	}
-	hoist := defineOf(pos, lhs, rhs)
+	run := w.lv + "r"
+	hoistRecv := defineOf(pos, []syntax.Expr{nameOf(pos, w.lv)}, []syntax.Expr{w.nx})
 	racc, accSuffix := fl.selectAccessBare(nameOf(pos, w.lv), w.osel)
 	var cond syntax.Expr = notNil(pos, nameOf(pos, w.lv))
 	condT := w.lv + " != nil"
@@ -1646,25 +1639,41 @@ func (fl *fileLower) optDeferGoFinish(s *syntax.CallStmt) ([]syntax.Stmt, bool) 
 	}
 	bodyCall := callOf(pos, racc, bodyArgs)
 	bodyCall.HasDots = e.HasDots
-	var then []syntax.Stmt
+	var inner syntax.Stmt = exprStmtOf(pos, bodyCall)
 	if n := w.sig.Results().Len(); n > 1 {
 		blanks := make([]syntax.Expr, n)
 		for i := range blanks {
 			blanks[i] = nameOf(pos, "_")
 		}
-		then = []syntax.Stmt{assignOf(pos, blanks, []syntax.Expr{bodyCall})}
-	} else {
-		then = []syntax.Stmt{exprStmtOf(pos, bodyCall)}
+		inner = assignOf(pos, blanks, []syntax.Expr{bodyCall})
 	}
 	rpos := fl.optLeftmost(w.osel.X)
-	lit := at(&syntax.FuncLit{
-		Type: at(&syntax.FuncType{}, pos),
-		Body: blockOf(pos, []syntax.Stmt{ifOf(pos, nil, cond, then)}),
-	}, rpos)
-	s.Call = callOf(rpos, lit, nil)
+	noop := at(&syntax.FuncLit{Type: at(&syntax.FuncType{}, pos), Body: blockOf(pos, nil)}, rpos)
+	deferred := at(&syntax.FuncLit{Type: at(&syntax.FuncType{}, pos), Body: blockOf(pos, []syntax.Stmt{inner})}, rpos)
+	then := optDeferGoThen(w, pos, run, deferred)
+	hoist := []syntax.Stmt{
+		hoistRecv,
+		defineOf(pos, []syntax.Expr{nameOf(pos, run)}, []syntax.Expr{noop}),
+		ifOf(s.Pos(), nil, cond, then),
+	}
+	s.Call = callOf(rpos, nameOf(rpos, run), nil)
 	fl.optDeferGoEmit(s, w, pos, e, condT, accSuffix)
-	scanForLiterals(fl, hoist)
-	return []syntax.Stmt{hoist, s}, true
+	for _, h := range hoist {
+		scanForLiterals(fl, h)
+	}
+	return append(hoist, s), true
+}
+
+func optDeferGoThen(w optDeferGoWork, pos syntax.Pos, run string, deferred syntax.Expr) []syntax.Stmt {
+	var then []syntax.Stmt
+	if len(w.vals) > 0 {
+		argNames := make([]syntax.Expr, len(w.vals))
+		for i := range argNames {
+			argNames[i] = nameOf(pos, w.names[i])
+		}
+		then = append(then, defineOf(pos, argNames, w.vals))
+	}
+	return append(then, assignOf(pos, []syntax.Expr{nameOf(pos, run)}, []syntax.Expr{deferred}))
 }
 
 func (fl *fileLower) optDeferGoEmit(s *syntax.CallStmt, w optDeferGoWork, pos syntax.Pos, e *syntax.CallExpr, condT, accSuffix string) {
@@ -1679,15 +1688,18 @@ func (fl *fileLower) optDeferGoEmit(s *syntax.CallStmt, w optDeferGoWork, pos sy
 		recvSpan = vs
 	}
 	recvT := fl.textOf(recvSpan)
-	hoist := gen(w.lv)
+	run := w.lv + "r"
+	hoist := cat(gen(w.lv+" := "), recvT, gen("; "+run+" := func() {}; if "+condT+" { "))
 	if argc > 0 {
-		hoist = cat(hoist, gen(", "+strings.Join(w.names, ", ")))
+		hoist = cat(hoist, gen(strings.Join(w.names, ", ")+" := "))
+		for i := range argc {
+			if i > 0 {
+				hoist = cat(hoist, gen(", "))
+			}
+			hoist = cat(hoist, fl.textOf(fl.wrapSpanOf(w.vals[i])))
+		}
+		hoist = cat(hoist, gen("; "))
 	}
-	hoist = cat(hoist, gen(" := "), recvT)
-	for i := range argc {
-		hoist = cat(hoist, gen(", "), fl.textOf(fl.wrapSpanOf(w.vals[i])))
-	}
-	fl.addT(stmtStart, stmtStart, cat(hoist, gen("; ")))
 	discardHead := ""
 	if n := w.sig.Results().Len(); n > 1 {
 		blanks := ""
@@ -1703,8 +1715,9 @@ func (fl *fileLower) optDeferGoEmit(s *syntax.CallStmt, w optDeferGoWork, pos sy
 	if e.HasDots {
 		dotsT = "..."
 	}
-	stmt := gen("func() { if " + condT + " { " + discardHead + w.lv + accSuffix + "(" + strings.Join(w.names, ", ") + dotsT + "); } }()")
-	fl.addT(xStart, rparen+1, stmt)
+	hoist = cat(hoist, gen(run+" = func() { "+discardHead+w.lv+accSuffix+"("+strings.Join(w.names, ", ")+dotsT+") } }; "))
+	fl.addT(stmtStart, stmtStart, hoist)
+	fl.addT(xStart, rparen+1, gen(run+"()"))
 	fl.wrapSpan[e] = span{start: xStart, end: rparen + 1}
 	fl.wrapOwner[e] = w.id
 }

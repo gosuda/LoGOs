@@ -12,11 +12,11 @@ var failed = false
 
 func check(name string, ok bool, detail string) {
 	if !ok {
-		fmt.Println("FAIL", name, detail)
+		fmt.Printf("FAIL %s: %s\n", name, detail)
 		failed = true
 		return
 	}
-	fmt.Println(name, "ok")
+	fmt.Println("ok", name)
 }
 
 func sameStrings(a, c []string) bool {
@@ -197,6 +197,52 @@ func nilHand() []string {
 	return append([]string(nil), dLog...)
 }
 
+func noneArgsLogos() int {
+	dArgCalls = 0
+	func() {
+		var o *dUser?
+		defer o?.dGreet(dMkArg("hi "))
+	}()
+	return dArgCalls
+}
+
+func noneArgsHand() int {
+	dArgCalls = 0
+	func() {
+		var o *dUser?
+		if o != nil {
+			a0 := dMkArg("hi ")
+			defer func() {
+				o.dGreet(a0)
+			}()
+		}
+	}()
+	return dArgCalls
+}
+
+func goNoneLogos(ctx context.Context) (int, error) {
+	dArgCalls = 0
+	ch := make(chan string, 4)
+	var o *dUser?
+	go group (ctx) {
+		go o?.dSend(ch, dMkArg("hi"))
+	}
+	return dArgCalls + len(ch), nil
+}
+
+func goNoneHand(ctx context.Context) (int, error) {
+	dArgCalls = 0
+	ch := make(chan string, 4)
+	var o *dUser?
+	go group (ctx) {
+		if o != nil {
+			a0 := dMkArg("hi")
+			go o.dSend(ch, a0)
+		}
+	}
+	return dArgCalls + len(ch), nil
+}
+
 type dNamer interface {
 	dNameOf() string
 }
@@ -240,20 +286,24 @@ func valHand() string {
 func main() {
 	lr := recvLogos()
 	hr := recvHand()
-	check("recv-reassign", sameStrings(lr, hr) && len(lr) == 1, fmt.Sprint("logos=", lr, " hand=", hr))
+	check("recv-reassign", sameStrings(lr, hr) && len(lr) == 1, fmt.Sprint("got ", lr, " want ", hr))
 	ln, lg := argLogos()
 	hn, hg := argHand()
-	check("arg-once", ln == 1 && hn == 1 && sameStrings(lg, hg) && len(lg) == 1, fmt.Sprint("logos=", ln, lg, " hand=", hn, hg))
+	check("arg-once", ln == 1 && hn == 1 && sameStrings(lg, hg) && len(lg) == 1, fmt.Sprint("got ", ln, lg, " want ", hn, hg))
 	ll := loopLogos()
 	hl := loopHand()
-	check("loop-defers", sameStrings(ll, hl) && len(ll) == 3, fmt.Sprint("logos=", ll, " hand=", hl))
+	check("loop-defers", sameStrings(ll, hl) && len(ll) == 3, fmt.Sprint("got ", ll, " want ", hl))
 	gn, gv, _ := goLogos(context.Background())
 	jn, jv, _ := goHand(context.Background())
-	check("go-args", gn == 1 && jn == 1 && gv == jv && gv == "hi/ann", fmt.Sprint("logos=", gn, gv, " hand=", jn, jv))
+	check("go-args", gn == 1 && jn == 1 && gv == jv && gv == "hi/ann", fmt.Sprint("got ", gn, gv, " want ", jn, jv))
 	nl := nilLogos()
 	nh := nilHand()
-	check("nil-skip", sameStrings(nl, nh) && len(nl) == 0, fmt.Sprint("logos=", nl, " hand=", nh))
-	check("method-value", valLogos() == "a:x" && valHand() == "a:x", fmt.Sprint("logos=", valLogos(), " hand=", valHand()))
+	check("nil-skip", sameStrings(nl, nh) && len(nl) == 0, fmt.Sprint("got ", nl, " want ", nh))
+	check("none-args", noneArgsLogos() == 0 && noneArgsHand() == 0, fmt.Sprint("got ", noneArgsLogos(), " want ", noneArgsHand()))
+	gnl, _ := goNoneLogos(context.Background())
+	gnh, _ := goNoneHand(context.Background())
+	check("go-none-args", gnl == 0 && gnh == 0, fmt.Sprint("got ", gnl, " want ", gnh))
+	check("method-value", valLogos() == "a:x" && valHand() == "a:x", fmt.Sprint("got ", valLogos(), " want ", valHand()))
 	if failed {
 		os.Exit(1)
 	}
