@@ -6,7 +6,6 @@ package logos
 
 import (
 	"go/token"
-	"slices"
 	"strconv"
 	"strings"
 
@@ -416,9 +415,8 @@ func (a *arenaEject) insertBlankUse(name *syntax.Name) {
 
 func (a *arenaEject) fixImports() {
 	a.countArenaRefs()
-	var removed []span
-	lastSurvivor := -1
-	for i, d := range a.fl.file.DeclList {
+	removed := make(map[*syntax.ImportDecl]bool)
+	for _, d := range a.fl.file.DeclList {
 		imp, ok := d.(*syntax.ImportDecl)
 		if !ok || imp.Path == nil || strings.Trim(imp.Path.Value, `"`) != "logos/arena" {
 			continue
@@ -428,17 +426,36 @@ func (a *arenaEject) fixImports() {
 			name = imp.LocalPkgName.Value
 		}
 		if a.arenaRefs == 0 && name != "_" && name != "." {
-			removed = append(removed, a.lineSpan(imp))
-			continue
+			removed[imp] = true
+			a.removeImport(imp)
 		}
-		lastSurvivor = i
-	}
-	for _, r := range removed {
-		a.fl.add(r.start, r.end, "")
 	}
 	if a.needRT && !a.rtPresent {
-		a.addRTImport(lastSurvivor, removed)
+		a.addRTImport(removed)
 	}
+}
+
+func (a *arenaEject) removeImport(imp *syntax.ImportDecl) {
+	src := a.fl.src
+	start := a.fl.off(syntax.StartPos(imp))
+	end := a.fl.off(syntax.EndPos(imp))
+	if imp.Group == nil {
+		keyword := start
+		scanSegment(src, a.fl.off(syntax.EndPos(a.fl.file.PkgName)), start, func(t tok) bool {
+			if !t.comment && !t.auto {
+				keyword = t.start
+			}
+			return true
+		})
+		start = keyword
+	}
+	scanSegment(src, end, len(src), func(t tok) bool {
+		if t.kind == token.SEMICOLON && !t.auto {
+			end = t.end
+		}
+		return t.comment
+	})
+	a.fl.add(start, end, keepComments(src, start, end, ""))
 }
 
 func (a *arenaEject) countArenaRefs() {
@@ -462,42 +479,23 @@ func (a *arenaEject) countArenaRefs() {
 	})
 }
 
-func (a *arenaEject) addRTImport(lastSurvivor int, removed []span) {
-	off := -1
-	text := "\nimport " + rtAlias + ` "` + rtImportPath + `"`
+func (a *arenaEject) addRTImport(removed map[*syntax.ImportDecl]bool) {
+	spec := rtAlias + ` "` + rtImportPath + `"`
 	for i := len(a.fl.file.DeclList) - 1; i >= 0; i-- {
 		imp, ok := a.fl.file.DeclList[i].(*syntax.ImportDecl)
-		if !ok || imp.Path == nil {
+		if !ok || imp.Path == nil || removed[imp] {
 			continue
 		}
-		if i == lastSurvivor || !removedHas(removed, a.lineSpan(imp)) {
-			off = a.lineEnd(a.fl.off(syntax.EndPos(imp)))
-			if imp.Group != nil {
-				text = "\n\t" + rtAlias + ` "` + rtImportPath + `"`
-			}
-			break
+		off := a.fl.off(syntax.EndPos(imp))
+		if imp.Group != nil {
+			a.fl.add(off, off, "; "+spec)
+		} else {
+			a.fl.add(off, off, "\nimport "+spec)
 		}
+		return
 	}
-	if off < 0 {
-		off = a.lineEnd(a.fl.off(a.fl.file.PkgName.Pos()))
-	}
-	a.fl.add(off, off, text)
-}
-
-func (a *arenaEject) lineSpan(n syntax.Node) span {
-	s := a.fl.off(syntax.StartPos(n))
-	for s > 0 && a.fl.src[s-1] != '\n' {
-		s--
-	}
-	e := a.lineEnd(a.fl.off(syntax.EndPos(n)))
-	if e < len(a.fl.src) {
-		e++
-	}
-	return span{s, e}
-}
-
-func removedHas(removed []span, s span) bool {
-	return slices.Contains(removed, s)
+	off := a.fl.off(syntax.EndPos(a.fl.file.PkgName))
+	a.fl.add(off, off, "\nimport "+spec)
 }
 
 func (a *arenaEject) lineEnd(off int) int {
