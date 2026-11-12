@@ -300,32 +300,83 @@ func mutantCache(id string) string {
 
 func corpusPrograms(t *testing.T) []string {
 	t.Helper()
-	entries, err := os.ReadDir("testdata/run")
+	out, err := listPrograms("testdata/run")
 	if err != nil {
-		t.Fatalf("reading testdata/run: %v", err)
+		t.Fatal(err)
 	}
-	var out []string
-	for _, e := range entries {
-		if e.IsDir() {
-			out = append(out, e.Name())
-		}
-	}
-	slices.Sort(out)
 	return out
 }
 
 func corpusFails(t *testing.T) []string {
 	t.Helper()
-	matches, err := filepath.Glob("testdata/fail/*.go")
+	out, err := listFails("testdata/fail")
 	if err != nil {
-		t.Fatalf("globbing testdata/fail: %v", err)
+		t.Fatal(err)
+	}
+	return out
+}
+
+func listPrograms(dir string) ([]string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, fmt.Errorf("reading %s: %w", dir, err)
 	}
 	var out []string
-	for _, m := range matches {
-		out = append(out, strings.TrimSuffix(filepath.Base(m), ".go"))
+	for _, e := range entries {
+		if !e.IsDir() {
+			return nil, fmt.Errorf("%s: %s is not a program directory", dir, e.Name())
+		}
+		out = append(out, e.Name())
 	}
-	slices.Sort(out)
-	return out
+	return out, nil
+}
+
+func listFails(dir string) ([]string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, fmt.Errorf("reading %s: %w", dir, err)
+	}
+	var out []string
+	for _, e := range entries {
+		stem, ok := strings.CutSuffix(e.Name(), ".go")
+		if !ok || e.IsDir() {
+			return nil, fmt.Errorf("%s: %s is not a fail corpus .go file", dir, e.Name())
+		}
+		out = append(out, stem)
+	}
+	return out, nil
+}
+
+func TestCorpusDiscoveryRejectsStrayEntries(t *testing.T) {
+	layout := func(t *testing.T, files, dirs []string) string {
+		dir := t.TempDir()
+		for _, f := range files {
+			if err := os.WriteFile(filepath.Join(dir, f), nil, 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for _, d := range dirs {
+			if err := os.MkdirAll(filepath.Join(dir, d), 0o777); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return dir
+	}
+	if got, err := listPrograms(layout(t, nil, []string{"at02_b", "at01_a"})); err != nil || !slices.Equal(got, []string{"at01_a", "at02_b"}) {
+		t.Errorf("programs = %v, %v; want the two directories", got, err)
+	}
+	if got, err := listFails(layout(t, []string{"at14_b.go", "at14_a.go"}, nil)); err != nil || !slices.Equal(got, []string{"at14_a", "at14_b"}) {
+		t.Errorf("fail files = %v, %v; want the two stems", got, err)
+	}
+	if _, err := listPrograms(layout(t, []string{"at99.go"}, []string{"at01_a"})); err == nil {
+		t.Error("a stray file next to the program directories was accepted")
+	}
+	if _, err := listFails(layout(t, []string{"at14_a.go", "notes.txt"}, nil)); err == nil {
+		t.Error("a stray non-Go file among the fail files was accepted")
+	}
+	if _, err := listFails(layout(t, []string{"at14_a.go"}, []string{"nested"})); err == nil {
+		t.Error("a subdirectory among the fail files was accepted")
+	}
 }
 
 func activeForkConfigs() []config {
