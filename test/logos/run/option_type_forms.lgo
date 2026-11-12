@@ -115,6 +115,134 @@ func tuple_constDefined() bool {
 	return same[definedTupleConst]("tuple-const-defined", unsafe.Sizeof(s))
 }
 
+type aliasOptionFunc = (func())?
+type definedOptionFunc (func())?
+
+func option_funcAlias() bool {
+	var a aliasOptionFunc
+	var s (func())?
+	a = s
+	s = a
+	return same[aliasOptionFunc]("option-func-alias", unsafe.Sizeof(s))
+}
+
+func option_funcDefined() bool {
+	var s (func())?
+	return same[definedOptionFunc]("option-func-defined", unsafe.Sizeof(s))
+}
+
+type aliasOptionFuncArgs = (func(int))?
+type definedOptionFuncArgs (func(int))?
+
+func option_func_argsAlias() bool {
+	var a aliasOptionFuncArgs
+	var s (func(int))?
+	a = s
+	s = a
+	return same[aliasOptionFuncArgs]("option-func-args-alias", unsafe.Sizeof(s))
+}
+
+func option_func_argsDefined() bool {
+	var s (func(int))?
+	return same[definedOptionFuncArgs]("option-func-args-defined", unsafe.Sizeof(s))
+}
+
+type aliasOptionFuncOptions = (func(int?, string?) bool?)?
+type definedOptionFuncOptions (func(int?, string?) bool?)?
+
+func option_func_optionsAlias() bool {
+	var a aliasOptionFuncOptions
+	var s (func(int?, string?) bool?)?
+	a = s
+	s = a
+	return same[aliasOptionFuncOptions]("option-func-options-alias", unsafe.Sizeof(s))
+}
+
+func option_func_optionsDefined() bool {
+	var s (func(int?, string?) bool?)?
+	return same[definedOptionFuncOptions]("option-func-options-defined", unsafe.Sizeof(s))
+}
+
+type aliasOptionTuple = (int, string)?
+type definedOptionTuple (int, string)?
+
+func option_tupleAlias() bool {
+	var a aliasOptionTuple
+	var s (int, string)?
+	a = s
+	s = a
+	return same[aliasOptionTuple]("option-tuple-alias", unsafe.Sizeof(s))
+}
+
+func option_tupleDefined() bool {
+	var s (int, string)?
+	return same[definedOptionTuple]("option-tuple-defined", unsafe.Sizeof(s))
+}
+
+type aliasOptionTupleOptions = ((int?, string?))?
+type definedOptionTupleOptions ((int?, string?))?
+
+func option_tuple_optionsAlias() bool {
+	var a aliasOptionTupleOptions
+	var s ((int?, string?))?
+	a = s
+	s = a
+	return same[aliasOptionTupleOptions]("option-tuple-options-alias", unsafe.Sizeof(s))
+}
+
+func option_tuple_optionsDefined() bool {
+	var s ((int?, string?))?
+	return same[definedOptionTupleOptions]("option-tuple-options-defined", unsafe.Sizeof(s))
+}
+
+type aliasOptionDoubleParen = ((int))?
+type definedOptionDoubleParen ((int))?
+
+func option_double_parenAlias() bool {
+	var a aliasOptionDoubleParen
+	var s ((int))?
+	a = s
+	s = a
+	return same[aliasOptionDoubleParen]("option-double-paren-alias", unsafe.Sizeof(s))
+}
+
+func option_double_parenDefined() bool {
+	var s ((int))?
+	return same[definedOptionDoubleParen]("option-double-paren-defined", unsafe.Sizeof(s))
+}
+
+type aliasChanOption = chan (int?)
+type definedChanOption chan (int?)
+
+func chan_optionAlias() bool {
+	var a aliasChanOption
+	var s chan (int?)
+	a = s
+	s = a
+	return same[aliasChanOption]("chan-option-alias", unsafe.Sizeof(s))
+}
+
+func chan_optionDefined() bool {
+	var s chan (int?)
+	return same[definedChanOption]("chan-option-defined", unsafe.Sizeof(s))
+}
+
+type aliasArrayOptionFunc = [2]((func())?)
+type definedArrayOptionFunc [2]((func())?)
+
+func array_option_funcAlias() bool {
+	var a aliasArrayOptionFunc
+	var s [2]((func())?)
+	a = s
+	s = a
+	return same[aliasArrayOptionFunc]("array-option-func-alias", unsafe.Sizeof(s))
+}
+
+func array_option_funcDefined() bool {
+	var s [2]((func())?)
+	return same[definedArrayOptionFunc]("array-option-func-defined", unsafe.Sizeof(s))
+}
+
 type pairOf[T any] = (T, T?)
 
 func pair_ofGeneric() bool {
@@ -138,6 +266,22 @@ var cases = []func() bool{
 	func_tupleDefined,
 	tuple_constAlias,
 	tuple_constDefined,
+	option_funcAlias,
+	option_funcDefined,
+	option_func_argsAlias,
+	option_func_argsDefined,
+	option_func_optionsAlias,
+	option_func_optionsDefined,
+	option_tupleAlias,
+	option_tupleDefined,
+	option_tuple_optionsAlias,
+	option_tuple_optionsDefined,
+	option_double_parenAlias,
+	option_double_parenDefined,
+	chan_optionAlias,
+	chan_optionDefined,
+	array_option_funcAlias,
+	array_option_funcDefined,
 	pair_ofGeneric,
 }
 
