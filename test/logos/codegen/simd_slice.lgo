@@ -8,7 +8,7 @@ func sumI32(xs []int32) int32 {
 	// amd64/v2:1"VPMASKMOVD\\s+\\(" "VPADDD" "CALL simd/archsimd\\.X86Features\\.AVX2\\(SB\\)" -"CALL simd/archsimd\\.Load"
 	// amd64/v3:1"VPMASKMOVD\\s+\\(" "VPADDD" -"CALL simd/archsimd\\." -"CMPB internal/cpu\\.X86"
 	// amd64/v4:1"VPMASKMOVD\\s+\\(" "VPADDD" -"CALL simd/archsimd\\." -"CMPB internal/cpu\\.X86"
-	// arm64:1"CALL simd/archsimd\\.LoadInt32x4Part\\(SB\\)" "VADD V[0-9]+\\.S4" -"CALL simd/archsimd\\.X86Features" -"VPMASKMOV"
+	// arm64:1"CALL simd/archsimd\\.LoadInt32x4Part\\(SB\\)" "VADD V[0-9]+\\.S4" -"CALL simd/archsimd\\.X86Features"
 	return xs.sum()
 }
 
@@ -132,7 +132,7 @@ func sumAlias(xs []watt) float64 {
 //go:noinline
 func sumFiltered(xs []int32) int32 {
 	// amd64:-"VPMASKMOV" -"VMOVDQU" -"CALL simd/archsimd" -"CALL runtime\\.makeslice"
-	// arm64:-"VPMASKMOV" -"CALL simd/archsimd" -"CALL runtime\\.makeslice"
+	// arm64:-"CALL simd/archsimd" -"CALL runtime\\.makeslice"
 	return xs.filter(x => x > 0).sum()
 }
 
@@ -140,10 +140,12 @@ type loopVecF32 []float32
 
 //go:noinline
 func (v loopVecF32) sum() float32 {
-	// amd64:-"VPMASKMOV"
-	// arm64:-"VPMASKMOV"
 	var s float32
+	// amd64:-"VPMASKMOV"
+	// arm64:-"CALL simd/archsimd" -"VFADD"
 	for i := 0; i < len(v); i++ {
+		// amd64:-"VPMASKMOV"
+		// arm64:-"CALL simd/archsimd" -"VFADD"
 		s += v[i]
 	}
 	return s
@@ -153,10 +155,12 @@ type loopVecI32 []int32
 
 //go:noinline
 func (v loopVecI32) sum() int32 {
-	// amd64:-"VPMASKMOV"
-	// arm64:-"VPMASKMOV"
 	var s int32
+	// amd64:-"VPMASKMOV"
+	// arm64:-"CALL simd/archsimd" -"VADD V[0-9]+\\.S4"
 	for _, x := range v {
+		// amd64:-"VPMASKMOV"
+		// arm64:-"CALL simd/archsimd" -"VADD V[0-9]+\\.S4"
 		s += x
 	}
 	return s
@@ -164,10 +168,12 @@ func (v loopVecI32) sum() int32 {
 
 //go:noinline
 func sumLoopF32(xs []float32) float32 {
-	// amd64:-"VPMASKMOV"
-	// arm64:-"VPMASKMOV"
 	var s float32
+	// amd64:-"VPMASKMOV"
+	// arm64:-"CALL simd/archsimd" -"VFADD"
 	for i := 0; i < len(xs); i++ {
+		// amd64:-"VPMASKMOV"
+		// arm64:-"CALL simd/archsimd" -"VFADD"
 		s += xs[i]
 	}
 	return s
@@ -175,10 +181,12 @@ func sumLoopF32(xs []float32) float32 {
 
 //go:noinline
 func sumRangeI32(xs []int32) int32 {
-	// amd64:-"VPMASKMOV"
-	// arm64:-"VPMASKMOV"
 	var s int32
+	// amd64:-"VPMASKMOV"
+	// arm64:-"CALL simd/archsimd" -"VADD V[0-9]+\\.S4"
 	for _, x := range xs {
+		// amd64:-"VPMASKMOV"
+		// arm64:-"CALL simd/archsimd" -"VADD V[0-9]+\\.S4"
 		s += x
 	}
 	return s
