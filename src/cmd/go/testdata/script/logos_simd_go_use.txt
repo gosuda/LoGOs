@@ -10,6 +10,12 @@ cp stdout $WORK/logos.txt
 go run .
 cmp stdout $WORK/logos.txt
 
+env GOEXPERIMENT=
+! logos run .
+stderr 'simd/archsimd'
+! go run .
+stderr 'simd/archsimd'
+
 -- go.mod --
 module example.com/simdguse
 
