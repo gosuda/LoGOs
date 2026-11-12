@@ -551,30 +551,42 @@ func (a *logosCapAuditor) findings() []capFinding {
 	var out []capFinding
 	index := make(map[string]int)
 	for _, hit := range a.hits {
-		if hit.kind == CapCgo && a.role(hit.sink).dep == "" {
-			continue
-		}
 		for _, b := range a.graph.blamedChains(hit.sink, a.blameRole(hit)) {
-			out = addFinding(out, index, capFinding{kind: hit.kind, sink: hit.name, dep: b.dep, chain: b.chain})
+			out = addFinding(out, index, capFinding{kind: hit.kind, sink: hit.report(), dep: b.dep, chain: b.chain})
 		}
 	}
 	return out
 }
 
+func (h logosCapHit) report() string {
+	if h.kind == CapCgo {
+		return "runtime.cgocall"
+	}
+	return h.name
+}
+
+func (a *logosCapAuditor) directUse(hit logosCapHit) bool {
+	return hit.kind == CapSyscall || hit.kind == CapCgo && a.role(hit.sink).dep == ""
+}
+
 func (a *logosCapAuditor) blameRole(hit logosCapHit) func(loader.Sym) capRole {
-	if hit.kind != CapSyscall {
+	if !a.directUse(hit) {
 		return a.role
 	}
 	return func(s loader.Sym) capRole {
 		r := a.role(s)
 		switch {
-		case s == hit.sink:
+		case s == hit.sink, a.isForwarder(s):
 			return capRole{}
-		case r.dep == "":
+		case r.dep == "" && a.ldr.SymType(s).IsText():
 			return capRole{wall: true}
 		}
 		return r
 	}
+}
+
+func (a *logosCapAuditor) isForwarder(s loader.Sym) bool {
+	return strings.HasSuffix(a.ldr.SymName(s), "-fm")
 }
 
 func addFinding(out []capFinding, index map[string]int, f capFinding) []capFinding {

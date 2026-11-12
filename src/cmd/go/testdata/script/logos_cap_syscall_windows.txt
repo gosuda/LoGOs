@@ -64,6 +64,19 @@ stderr 'ERROR \[capabilities::unauthorized_exec\]: Transitive dependency ''examp
 stderr 'ERROR \[capabilities::unauthorized_exec\]: Transitive dependency ''example\.com/idep'' reaches ''syscall\.SyscallN'''
 cd ../..
 
+cd j/main
+! logos build -o $WORK/bin/winj.exe ./cmd
+stderr 'ERROR \[capabilities::unauthorized_exec\]: Transitive dependency ''example\.com/jdep'' reaches ''golang\.org/x/sys/windows\.\(\*LazyProc\)\.Call'''
+stderr 'ERROR \[capabilities::unauthorized_net\]: Transitive dependency ''example\.com/jdep'' reaches ''golang\.org/x/sys/windows\.\(\*LazyProc\)\.Call'''
+! stderr 'Transitive dependency ''golang\.org/x/sys/windows'''
+cd ../..
+
+cd k/main
+! logos build -o $WORK/bin/wink.exe ./cmd
+stderr 'ERROR \[capabilities::unauthorized_exec\]: Transitive dependency ''example\.com/kdep'' reaches ''syscall\.\(\*LazyProc\)\.Call'''
+stderr 'ERROR \[capabilities::unauthorized_net\]: Transitive dependency ''example\.com/kdep'' reaches ''syscall\.\(\*LazyProc\)\.Call'''
+cd ../..
+
 -- a/main/go.mod --
 module example.com/amain
 
@@ -490,4 +503,87 @@ func Init() {
 	syscall.Syscall15(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
 	syscall.Syscall18(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
 	syscall.SyscallN(0)
+}
+
+-- j/main/go.mod --
+module example.com/jmain
+
+go 1.27
+
+require (
+	example.com/jdep v0.0.0
+	golang.org/x/sys v0.0.0
+)
+
+replace example.com/jdep => ../dep
+
+replace golang.org/x/sys => ../../sys
+
+-- j/main/logos.toml --
+[capabilities]
+transitive_exec = "deny"
+transitive_exec_allowlist = ["golang.org/x/sys/**"]
+transitive_net = "deny"
+transitive_net_allowlist = ["golang.org/x/sys/**"]
+
+-- j/main/cmd/main.go --
+package main
+
+import "example.com/jdep"
+
+func main() { jdep.Init() }
+
+-- j/dep/go.mod --
+module example.com/jdep
+
+go 1.27
+
+require golang.org/x/sys v0.0.0
+
+-- j/dep/dep.go --
+package jdep
+
+import "golang.org/x/sys/windows"
+
+//go:noinline
+func Init() {
+	f := windows.NewLazyDLL("kernel32.dll").NewProc("GetCurrentProcessId").Call
+	f()
+}
+
+-- k/main/go.mod --
+module example.com/kmain
+
+go 1.27
+
+require example.com/kdep v0.0.0
+
+replace example.com/kdep => ../dep
+
+-- k/main/logos.toml --
+[capabilities]
+transitive_exec = "deny"
+transitive_net = "deny"
+
+-- k/main/cmd/main.go --
+package main
+
+import "example.com/kdep"
+
+func main() { kdep.Init() }
+
+-- k/dep/go.mod --
+module example.com/kdep
+
+go 1.27
+
+-- k/dep/dep.go --
+package kdep
+
+import "syscall"
+
+//go:noinline
+func Init() {
+	f := syscall.NewLazyDLL("kernel32.dll").NewProc("GetCurrentProcessId").Call
+	f()
 }
