@@ -527,7 +527,37 @@ type upKey struct {
 	noopt bool
 }
 
-func (c config) optOff() bool { return slices.Contains(c.args, "-O=0") }
+func (c config) levelKey() string {
+	for _, a := range c.args {
+		if level, ok := strings.CutPrefix(a, "-O="); ok {
+			return level
+		}
+	}
+	if c.logos {
+		return "2"
+	}
+	return "1"
+}
+
+func TestLevelKeySeparatesOptimizationSettings(t *testing.T) {
+	effective := map[string]string{
+		"K1": "1", "K3": "3", "K4": "3", "K5": "2", "K6": "0", "K7": "3", "K8": "3", "K10": "2",
+		"K2": "0", "K11": "2", "K12": "s", "K13": "1", "K14": "s", "K15": "2", "K16": "2",
+		"K17": "1", "K18": "1", "K19": "1", "K20": "1", "K21": "1",
+	}
+	if len(effective) != len(forkConfigs) {
+		t.Fatalf("expectation table has %d rows for %d configurations", len(effective), len(forkConfigs))
+	}
+	for i, a := range forkConfigs {
+		for _, b := range forkConfigs[i+1:] {
+			sameKey := a.levelKey() == b.levelKey()
+			sameOpt := effective[a.id] == effective[b.id]
+			if sameKey != sameOpt {
+				t.Errorf("%s (-O %s) and %s (-O %s): level key equal = %v, want %v", a.id, effective[a.id], b.id, effective[b.id], sameKey, sameOpt)
+			}
+		}
+	}
+}
 
 func levelPrefixes(prog string) []string {
 	data, err := os.ReadFile(filepath.Join("testdata", "run", prog, "level-dependent.txt"))
@@ -1221,7 +1251,7 @@ func TestParity(t *testing.T) {
 		for _, p := range progs {
 			prefs := levelPrefixes(p)
 			var gref *observation
-			lrefs := map[bool]string{}
+			lrefs := map[string]string{}
 			for _, m := range members {
 				o, ok := forkObs[m.id][p]
 				if !ok {
@@ -1235,10 +1265,10 @@ func TestParity(t *testing.T) {
 				} else if !obsEqual(*gref, og) {
 					t.Errorf("metamorphic: program %s differs between %s and %s (%s group): %s", p, members[0].id, m.id, group, firstDiff(gref.stdout, og.stdout))
 				}
-				if prev, ok := lrefs[m.optOff()]; ok && prev != lv {
-					t.Errorf("metamorphic: program %s level-dependent lines differ between %s and %s (%s group, optOff=%v): %s", p, members[0].id, m.id, group, m.optOff(), firstDiff(prev, lv))
+				if prev, ok := lrefs[m.levelKey()]; ok && prev != lv {
+					t.Errorf("metamorphic: program %s level-dependent lines differ between %s and %s (%s group, opt %s): %s", p, members[0].id, m.id, group, m.levelKey(), firstDiff(prev, lv))
 				} else if !ok {
-					lrefs[m.optOff()] = lv
+					lrefs[m.levelKey()] = lv
 				}
 			}
 		}
