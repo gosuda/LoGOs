@@ -877,3 +877,66 @@ func passSegmentIgnoresThunk(ctx context.Context) error {
 	println(s)
 	return err
 }
+
+func loopWriteBeforeChild(ctx context.Context, n int) error {
+	var s string
+	go group (ctx) {
+		for i := 0; i < n; i++ {
+			s = "a"
+			go { // ERROR "\[concurrency::concurrent_multiword_race\]"
+				println(s)
+			}
+		}
+	}
+	return nil
+}
+
+func loopRangeAssignBeforeChild(ctx context.Context, xs []string) error {
+	var s string
+	go group (ctx) {
+		for _, s = range xs {
+			go { // ERROR "\[concurrency::concurrent_multiword_race\]"
+				println(s)
+			}
+		}
+	}
+	return nil
+}
+
+func passLoopLocalVariable(ctx context.Context, n int) error {
+	go group (ctx) {
+		for i := 0; i < n; i++ {
+			s := "a"
+			s = "b"
+			go {
+				println(s)
+			}
+		}
+	}
+	return nil
+}
+
+func passGroupInsideLoop(ctx context.Context, n int) error {
+	var s string
+	for i := 0; i < n; i++ {
+		s = "a"
+		go group (ctx) {
+			go {
+				println(s)
+			}
+		}
+	}
+	return nil
+}
+
+func passSegmentInsideLoop(ctx context.Context, xs []int, n int) error {
+	var s string
+	for i := 0; i < n; i++ {
+		s = "a"
+		_, err := xs.group(ctx, limit = 2).map(x => len(s) + x)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}

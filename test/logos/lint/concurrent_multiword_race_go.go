@@ -438,3 +438,23 @@ func passThunkCalledInPlace() {
 	t()
 	println(s)
 }
+
+func loopWriteBeforeGo(n int) {
+	var s string
+	for i := 0; i < n; i++ {
+		s = "a"
+		go func() { // ERROR "\[concurrency::concurrent_multiword_race\]"
+			println(s)
+		}()
+	}
+}
+
+func passLoopLocalGo(n int) {
+	for i := 0; i < n; i++ {
+		s := "a"
+		s = "b"
+		go func() {
+			println(s)
+		}()
+	}
+}

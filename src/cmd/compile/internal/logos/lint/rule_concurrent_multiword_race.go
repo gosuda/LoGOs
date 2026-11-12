@@ -30,10 +30,13 @@ import (
 // it; storing through a pointer, a slice element, or a map entry writes other
 // storage. The spawn starts the write window, which ends with the
 // innermost enclosing go group block, because the group joins its children
-// there, and otherwise with the enclosing declaration. A write by the child
-// is inside the window. The rule reads syntax and checker objects only, so
-// it holds for Go packages through the go statement leg and for loGo/s
-// packages through both legs.
+// there, and otherwise with the enclosing declaration. For a variable
+// declared before a loop that encloses the spawn and ends inside the
+// window, the window starts at the first statement of each iteration
+// instead, because the next iteration writes while the previous child
+// still reads. A write by the child is inside the window. The rule reads
+// syntax and checker objects only, so it holds for Go packages through the
+// go statement leg and for loGo/s packages through both legs.
 var concurrentMultiwordRace = Rule{
 	ID:    "concurrency::concurrent_multiword_race",
 	Group: Concurrency,
@@ -66,6 +69,7 @@ type raceCheck struct {
 	groups  []*syntax.GroupStmt
 	spawns  []spawn
 	goCalls []*syntax.CallStmt
+	loops   []*syntax.ForStmt
 	bound   map[*types2.Var][]syntax.Expr
 }
 
@@ -103,6 +107,8 @@ func (c *raceCheck) collect(root syntax.Node) {
 			} else if n.Tok == syntax.Go {
 				c.goCalls = append(c.goCalls, n)
 			}
+		case *syntax.ForStmt:
+			c.loops = append(c.loops, n)
 		case *syntax.CallExpr:
 			c.noteSegment(n, path)
 		}
@@ -426,13 +432,37 @@ func within(p, start, end syntax.Pos) bool {
 
 // written reports whether v is written inside the window of s.
 func (c *raceCheck) written(s spawn, v *types2.Var) bool {
-	start, end := syntax.StartPos(s.node), c.window(s)
+	end := c.window(s)
+	start := c.windowStart(s, v, end)
 	return slices.ContainsFunc(c.writes, func(w varWrite) bool {
 		inThunk := slices.ContainsFunc(s.thunks, func(t *syntax.FuncLit) bool {
 			return within(w.pos, syntax.StartPos(t), syntax.EndPos(t))
 		})
 		return w.v == v && (within(w.pos, start, end) || inThunk)
 	})
+}
+
+// windowStart returns where a write to v begins to race with the child of
+// s: the spawn, or the first statement of an iteration of the outermost
+// loop that encloses the spawn, ends inside the window, and was entered
+// after v was declared.
+func (c *raceCheck) windowStart(s spawn, v *types2.Var, end syntax.Pos) syntax.Pos {
+	spawnStart := syntax.StartPos(s.node)
+	start := spawnStart
+	for _, l := range c.loops {
+		loopStart, loopEnd := syntax.StartPos(l), syntax.EndPos(l)
+		if !within(spawnStart, loopStart, loopEnd) || loopEnd.Cmp(end) > 0 || v.Pos().Cmp(loopStart) > 0 {
+			continue
+		}
+		first := syntax.StartPos(l.Body)
+		if rc, ok := l.Init.(*syntax.RangeClause); ok {
+			first = syntax.StartPos(rc)
+		}
+		if first.Cmp(start) < 0 {
+			start = first
+		}
+	}
+	return start
 }
 
 // window returns the end of the window in which a write races with the
