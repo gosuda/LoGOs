@@ -24,6 +24,13 @@ var imminent = make(chan struct{}, 1)
 
 var failedAt, wokeAt time.Time
 
+const (
+	specBound = 100 * time.Millisecond
+	rounds    = 20
+)
+
+var holdFor time.Duration
+
 func check(tag string, cond bool, got, want string) {
 	if !cond {
 		fmt.Println("FAIL "+tag+": got "+got+" want "+want)
@@ -48,7 +55,7 @@ func readChild(conn net.Conn, res chan string) error {
 //logos:allow(correctness::unbounded_channel_op)
 func sibling() error {
 	<-imminent
-	time.Sleep(20 * time.Millisecond)
+	time.Sleep(holdFor)
 	failedAt = time.Now()
 	return errBoom
 }
@@ -102,14 +109,18 @@ func main() {
 	})
 	defer watch.Stop()
 	var wakes []time.Duration
-	for range 5 {
+	holdFor = 5 * specBound
+	wakes = append(wakes, oneRound(ln))
+	holdFor = 20 * time.Millisecond
+	for range rounds - 1 {
 		wakes = append(wakes, oneRound(ln))
 	}
-	slices.Sort(wakes)
-	median := wakes[len(wakes)/2]
-	check("group-netpoll-first-error-wins", errWins == 5, fmt.Sprint(errWins), "5 of 5")
-	check("group-netpoll-cancel-wakes-with-timeout", timeoutHits == 5, fmt.Sprint(timeoutHits), "5 of 5")
-	check("group-netpoll-wake-prompt", median < 200*time.Millisecond, median.String(), "under 200ms median of 5 for the 100ms SPEC bound")
+	wantAll := fmt.Sprintf("%d of %d", rounds, rounds)
+	check("group-netpoll-first-error-wins", errWins == rounds, fmt.Sprint(errWins), wantAll)
+	check("group-netpoll-cancel-wakes-with-timeout", timeoutHits == rounds, fmt.Sprint(timeoutHits), wantAll)
+	spread := fmt.Sprintf("min %v max %v of %d rounds", slices.Min(wakes), slices.Max(wakes), len(wakes))
+	check("group-netpoll-read-held-until-cancel", slices.Min(wakes) >= 0, spread, "no read returned before the cancel, the first round held 5x the bound")
+	check("group-netpoll-wake-prompt", slices.Max(wakes) <= specBound, spread, "every wake within the 100ms SPEC bound")
 	if bad {
 		os.Exit(1)
 	}
