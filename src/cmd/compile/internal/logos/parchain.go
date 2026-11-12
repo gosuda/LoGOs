@@ -191,8 +191,9 @@ func (st *parStage) kept() []span {
 	return out
 }
 
-func (cg *chainGen) parSeqText(st *parStage) otext {
+func (cg *chainGen) parSeqText(st *parStage) ([]otext, otext) {
 	fl := cg.fl
+	p := cg.prefix
 	s, r := cg.spellType(st.elemT), cg.spellType(st.resT)
 	verb := "GroupSeq"
 	if st.source == parChan {
@@ -201,21 +202,24 @@ func (cg *chainGen) parSeqText(st *parStage) otext {
 	if st.unordered {
 		verb += "Unordered"
 	}
-	ctx := fl.textOf(st.ctxSpan)
-	limit := fl.textOf(st.limSpan)
-	recv := fl.textOf(st.recvSpan)
+	srcN, ctxN, limN := p+"_src", p+"_ctx", p+"_lim"
+	binds := []otext{
+		cat(gen(srcN+" := "), fl.textOf(st.recvSpan)),
+		cat(gen(ctxN+" := "), fl.textOf(st.ctxSpan)),
+		cat(gen(limN+" := "), fl.textOf(st.limSpan)),
+	}
 	child := cg.parChild(st)
 	var src otext
 	switch st.source {
 	case parSlice:
-		y, e := cg.prefix+"_y", cg.prefix+"_s"
-		src = cat(gen("func("+y+" func("+s+") bool) { for _, "+e+" := range "), recv, gen(" { if !"+y+"("+e+") { return } } }"))
+		y, e := p+"_y", p+"_s"
+		src = gen("func(" + y + " func(" + s + ") bool) { for _, " + e + " := range " + srcN + " { if !" + y + "(" + e + ") { return } } }")
 	case parSeq:
-		src = cat(gen("(func(func("+s+") bool))("), recv, gen(")"))
+		src = gen("(func(func(" + s + ") bool))(" + srcN + ")")
 	default:
-		src = recv
+		src = gen(srcN)
 	}
-	return cat(gen(rtAlias+"."+verb+"["+s+", "+r+"]("), ctx, gen(", "), limit, gen(", "), src, gen(", "), child, gen(")"))
+	return binds, cat(gen(rtAlias+"."+verb+"["+s+", "+r+"]("+ctxN+", "+limN+", "), src, gen(", "), child, gen(")"))
 }
 
 func (cg *chainGen) parChild(st *parStage) otext {
@@ -385,7 +389,8 @@ func (cg *chainGen) runParStage(call *syntax.CallExpr, ops []chainOp, base synta
 	cg.kept = st.kept()
 	cg.parPrepare(st)
 	ce := cg.parPost(st, call)
-	cg.parReplace(call, ce, cg.parLoopText(ce, cg.parSeqText(st)))
+	binds, seq := cg.parSeqText(st)
+	cg.parReplace(call, ce, cg.parLoopText(ce, binds, seq))
 }
 
 func (cg *chainGen) runParTail(call *syntax.CallExpr, ops []chainOp, base syntax.Expr, term chainOp, carrier *syntax.CallExpr) {
@@ -422,10 +427,13 @@ func (cg *chainGen) parReplace(call *syntax.CallExpr, ce *chainEmit, loop otext)
 	fl.addT(cg.whole.start, cg.whole.end, text)
 }
 
-func (cg *chainGen) parLoopText(ce *chainEmit, seq otext) otext {
+func (cg *chainGen) parLoopText(ce *chainEmit, binds []otext, seq otext) otext {
 	p := cg.prefix
 	prelude, body, epilogue := ce.loopO()
 	var parts []otext
+	for _, bind := range binds {
+		parts = append(parts, bind, gen("; "))
+	}
 	for _, line := range prelude[1:] {
 		parts = append(parts, line, gen("; "))
 	}
@@ -489,12 +497,16 @@ func (fl *fileLower) lowerParRange(s syntax.Stmt, enc []resultSpec) ([]syntax.St
 	cg := &chainGen{fl: fl, pos: call.Pos(), prefix: chainPrefix(call.Pos()), enc: enc}
 	st := fl.parStageOf(call, ops, base, term)
 	cg.parPrepare(st)
-	seq := cg.parSeqText(st)
+	binds, seq := cg.parSeqText(st)
 	var out []syntax.Stmt
 	start := fl.stmtStartOf(s)
 	for _, h := range cg.hoists {
 		out = append(out, h.stmts...)
 		fl.addT(start, start, cat(h.text, gen("; ")))
+	}
+	for _, bind := range binds {
+		out = append(out, parseChainStmtFrag(fl, bind.s, call.Pos())...)
+		fl.addT(start, start, cat(bind, gen("; ")))
 	}
 	errName := chainErrName(fs.Pos())
 	if !rc.Def && rc.Lhs != nil {
