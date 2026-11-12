@@ -586,6 +586,255 @@ var lawCases = []lawCase{
 }
 `,
 	},
+	{
+		name:  "nullary_tail",
+		offer: true,
+		broken: `func run19() (string, error) {
+	n := a()? + c()
+	return fmt.Sprint(n), nil
+}
+`,
+		fixed: `func run19() (string, error) {
+	x := a()?
+	n := x + c()
+	return fmt.Sprint(n), nil
+}
+`,
+	},
+	{
+		name:  "nullary_return",
+		offer: true,
+		broken: `func run20() (string, error) {
+	x, y, err := func() (int, int, error) {
+		return a()?, c(), nil
+	}()
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprint(x, y), nil
+}
+`,
+		fixed: `func run20() (string, error) {
+	x, y, err := func() (int, int, error) {
+		k := a()?
+		return k, c(), nil
+	}()
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprint(x, y), nil
+}
+`,
+	},
+	{
+		name:  "nullary_args",
+		offer: true,
+		broken: `func run21() (string, error) {
+	fmt.Println("args", a()?, c())
+	return "p", nil
+}
+`,
+		fixed: `func run21() (string, error) {
+	x := a()?
+	fmt.Println("args", x, c())
+	return "p", nil
+}
+`,
+	},
+	{
+		name:  "nullary_chain",
+		offer: true,
+		broken: `func run22() (string, error) {
+	s := S{}
+	v := s.add(a()?).done()
+	return fmt.Sprint(v), nil
+}
+`,
+		fixed: `func run22() (string, error) {
+	s := S{}
+	x := a()?
+	v := s.add(x).done()
+	return fmt.Sprint(v), nil
+}
+`,
+	},
+	{
+		name:  "nullary_nested",
+		offer: true,
+		broken: `func run23() (string, error) {
+	n := a()? + len(mk())
+	return fmt.Sprint(n), nil
+}
+`,
+		fixed: `func run23() (string, error) {
+	x := a()?
+	n := x + len(mk())
+	return fmt.Sprint(n), nil
+}
+`,
+	},
+	{
+		name:  "nullary_two",
+		offer: true,
+		broken: `func run24() (string, error) {
+	n := a()? + c() + c()
+	return fmt.Sprint(n), nil
+}
+`,
+		fixed: `func run24() (string, error) {
+	x := a()?
+	n := x + c() + c()
+	return fmt.Sprint(n), nil
+}
+`,
+	},
+	{
+		name:  "nullary_lambda_tail",
+		offer: true,
+		broken: `func run25() (string, error) {
+	xs := []int{1, 2}
+	n := a()? + xs.map(x => x * 2).sum()
+	return fmt.Sprint(n), nil
+}
+`,
+		fixed: `func run25() (string, error) {
+	xs := []int{1, 2}
+	k := a()?
+	n := k + xs.map(x => x * 2).sum()
+	return fmt.Sprint(n), nil
+}
+`,
+	},
+	{
+		name:  "empty_literal_tail",
+		offer: true,
+		broken: `func run26() (string, error) {
+	n := a()? + len([]int{})
+	return fmt.Sprint(n), nil
+}
+`,
+		fixed: `func run26() (string, error) {
+	x := a()?
+	n := x + len([]int{})
+	return fmt.Sprint(n), nil
+}
+`,
+	},
+	{
+		name: "defer_arg",
+		broken: `func run27() (string, error) {
+	defer fmt.Println("deferred", a()?)
+	return "d", nil
+}
+`,
+		fixed: `func run27() (string, error) {
+	x := a()?
+	defer fmt.Println("deferred", x)
+	return "d", nil
+}
+`,
+	},
+	{
+		name: "group_child",
+		broken: `func run28() (string, error) {
+	out := 0
+	go group (context.Background()) {
+		go {
+			v := a()? + 1
+			out = v
+		}
+	}
+	return fmt.Sprint(out), nil
+}
+`,
+		fixed: `func run28() (string, error) {
+	out := 0
+	go group (context.Background()) {
+		go {
+			x := a()?
+			v := x + 1
+			out = v
+		}
+	}
+	return fmt.Sprint(out), nil
+}
+`,
+	},
+	{
+		name: "switch_header",
+		broken: `func run29() (string, error) {
+	out := ""
+	switch n := a()? + 1; n {
+	case 2:
+		out = "two"
+	default:
+		out = "other"
+	}
+	return out, nil
+}
+`,
+		fixed: `func run29() (string, error) {
+	out := ""
+	k := a()?
+	switch n := k + 1; n {
+	case 2:
+		out = "two"
+	default:
+		out = "other"
+	}
+	return out, nil
+}
+`,
+	},
+	{
+		name: "for_header",
+		broken: `func run30() (string, error) {
+	cnt := 0
+	for i := 0; i < a()?+1; i++ {
+		cnt += i
+	}
+	return fmt.Sprint(cnt), nil
+}
+`,
+		fixed: `func run30() (string, error) {
+	cnt := 0
+	for i := 0; ; i++ {
+		lim := a()?
+		if !(i < lim+1) {
+			break
+		}
+		cnt += i
+	}
+	return fmt.Sprint(cnt), nil
+}
+`,
+	},
+	{
+		name: "case_expr",
+		broken: `func run31() (string, error) {
+	out := ""
+	switch {
+	case f(2)? > 0:
+		out = "pos"
+	default:
+		out = "other"
+	}
+	return out, nil
+}
+`,
+		fixed: `func run31() (string, error) {
+	out := ""
+	y := f(2)?
+	switch {
+	case y > 0:
+		out = "pos"
+	default:
+		out = "other"
+	}
+	return out, nil
+}
+`,
+	},
 }
 
 func TestMisplacedTryCandidateLaw(t *testing.T) {
@@ -634,6 +883,9 @@ func TestMisplacedTryCandidateLaw(t *testing.T) {
 				t.Fatalf("case %s: unexpected insert-before-line candidate", names[i])
 			}
 			p := pick{i, d.Span.ByteOffset, d.Span.ByteOffset + d.Span.ByteLen, fix.Replacement}
+			if tail := strings.TrimLeft(prog.text[p.end:], " \t"); tail != "" && !strings.ContainsRune("\r\n;}/", rune(tail[0])) {
+				t.Errorf("case %s: candidate span ends inside the statement, before %q", names[i], tail[:min(len(tail), 12)])
+			}
 			if slices.ContainsFunc(picks, func(q pick) bool { return q.i == i && p.start < q.end && q.start < p.end }) {
 				overlap = true
 				continue

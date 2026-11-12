@@ -802,6 +802,14 @@ func splitStmtEnd(src []byte, s syntax.Stmt) (int, bool) {
 	if !ok {
 		return 0, false
 	}
+	syntax.Inspect(s, func(n syntax.Node) bool {
+		if call, isCall := n.(*syntax.CallExpr); isCall {
+			if e, ok := callEnd(src, call); ok {
+				end = max(end, e)
+			}
+		}
+		return true
+	})
 	for end < len(src) && (src[end] == ')' || src[end] == ']' || src[end] == '}') {
 		end++
 	}
