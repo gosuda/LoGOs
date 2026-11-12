@@ -12,6 +12,14 @@ exists $WORK/bin/union$GOEXE
 cd ..
 
 cd union
+logos lint --pedantic=true ./...
+stderr 'main\.lgo:15:2: warning: \[pedantic::exhaustive_union_switch\]'
+logos build --pedantic=true -o $WORK/bin/uniontrue$GOEXE .
+stderr 'main\.lgo:15:2: warning: \[pedantic::exhaustive_union_switch\]'
+exists $WORK/bin/uniontrue$GOEXE
+cd ..
+
+cd union
 logos lint --pedantic ./...
 stderr 'main\.lgo:15:2: warning: \[pedantic::exhaustive_union_switch\]'
 cd ..
@@ -40,6 +48,8 @@ cd ..
 
 cd strict
 ! logos lint ./...
+stderr 'main\.lgo:15:2: \[pedantic::exhaustive_union_switch\]'
+! logos lint --pedantic=true ./...
 stderr 'main\.lgo:15:2: \[pedantic::exhaustive_union_switch\]'
 logos lint --pedantic=false ./...
 ! stderr .
