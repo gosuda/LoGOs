@@ -39,7 +39,8 @@ func (fl *fileLower) lowerAddrOp(e *syntax.Operation) syntax.Expr {
 }
 
 func (fl *fileLower) unaryOperandEnd(from int) int {
-	end := len(fl.src)
+	last, lastBeforeQuestion := from, from
+	end := -1
 	const (
 		needOperand  = false
 		needOperator = true
@@ -56,10 +57,12 @@ func (fl *fileLower) unaryOperandEnd(from int) int {
 			return true
 		}
 		if t.auto {
-			end = t.start
+			end = last
 			done = true
 			return false
 		}
+		prev := last
+		last = t.end
 		if question >= 0 && t.kind != token.ILLEGAL {
 			question = -1
 		}
@@ -69,7 +72,7 @@ func (fl *fileLower) unaryOperandEnd(from int) int {
 			operator = needOperand
 		case token.RPAREN, token.RBRACK, token.RBRACE:
 			if depth == 0 {
-				end = t.start
+				end = prev
 				done = true
 				return false
 			}
@@ -77,7 +80,7 @@ func (fl *fileLower) unaryOperandEnd(from int) int {
 			operator = needOperator
 		case token.COMMA, token.SEMICOLON, token.COLON, token.ASSIGN, token.DEFINE:
 			if depth == 0 {
-				end = t.start
+				end = prev
 				done = true
 				return false
 			}
@@ -88,11 +91,12 @@ func (fl *fileLower) unaryOperandEnd(from int) int {
 			if string(fl.src[t.start:t.end]) == "?" {
 				if depth == 0 && operator {
 					if question >= 0 {
-						end = question
+						end = lastBeforeQuestion
 						done = true
 						return false
 					}
 					question = t.start
+					lastBeforeQuestion = prev
 				}
 				return true
 			}
@@ -101,14 +105,14 @@ func (fl *fileLower) unaryOperandEnd(from int) int {
 			operator = needOperand
 		case token.ARROW:
 			if depth == 0 && operator {
-				end = t.start
+				end = prev
 				done = true
 				return false
 			}
 		default:
 			if isUnaryOperandEndOp(t.kind) {
 				if depth == 0 && operator {
-					end = t.start
+					end = prev
 					done = true
 					return false
 				}
@@ -118,6 +122,9 @@ func (fl *fileLower) unaryOperandEnd(from int) int {
 		}
 		return true
 	})
+	if !done {
+		end = last
+	}
 	return end
 }
 

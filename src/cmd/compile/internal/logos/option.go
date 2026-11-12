@@ -2242,41 +2242,35 @@ func (fl *fileLower) exprEndNested(from int) int {
 }
 
 func (fl *fileLower) exprEndThrough(from, through int) int {
-	end := len(fl.src)
+	last := from
 	depth := 0
 	scanSegment(fl.src, from, len(fl.src), func(t tok) bool {
 		if t.comment {
 			return true
 		}
 		if t.auto {
-			end = t.start
-			return false
+			return depth > 0
 		}
 		switch t.kind {
 		case token.LPAREN, token.LBRACK:
 			depth++
 		case token.LBRACE:
 			if depth == 0 && t.start >= through {
-				end = t.start
 				return false
 			}
 			depth++
 		case token.RPAREN, token.RBRACK, token.RBRACE:
 			if depth == 0 {
-				end = t.start
 				return false
 			}
 			depth--
 		case token.COMMA, token.SEMICOLON, token.COLON, token.ASSIGN, token.DEFINE:
 			if depth == 0 {
-				end = t.start
 				return false
 			}
-		case token.EOF:
-			end = len(fl.src)
-			return false
 		}
+		last = t.end
 		return true
 	})
-	return end
+	return last
 }

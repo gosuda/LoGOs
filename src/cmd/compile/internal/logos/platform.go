@@ -104,7 +104,7 @@ func (fl *fileLower) lowerPlatform() {
 // a depth-zero brace, so a for-post check cannot swallow the loop body.
 func (fl *fileLower) platformSpan(e syntax.Expr) (span, bool) {
 	start := fl.off(leftmostOf(e))
-	end := lastTokenEnd(fl.src, start, fl.exprEndOf(e))
+	end := fl.exprEndOf(e)
 	if end <= start {
 		return span{}, false
 	}
