@@ -83,12 +83,15 @@ func formDefer(ctx context.Context) {
 }
 
 func formDeferClosure(ctx context.Context) {
+	var ran atomic.Int64
 	got, err := []int{1, 2}.group(ctx, limit = 2).map(x => {
-		n := 0
-		defer func() { n++ }()
-		return x * 2
+		n := x
+		defer func() { ran.Add(int64(n)) }()
+		n *= 10
+		return n
 	})
-	check("defer-closure", err == nil && slices.Equal(got, []int{2, 4}), err, []int{2, 4})
+	check("defer-closure", err == nil && slices.Equal(got, []int{10, 20}), err, []int{10, 20})
+	check("defer-closure-ran", ran.Load() == 30, ran.Load(), 30)
 }
 
 func formFuncLitTry(ctx context.Context) {

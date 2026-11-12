@@ -4,6 +4,7 @@ ok labeled
 ok defer
 ok defer-ran
 ok defer-closure
+ok defer-closure-ran
 ok funclit-try
 ok goto
 ok nested-stage
