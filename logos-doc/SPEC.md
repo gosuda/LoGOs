@@ -277,6 +277,7 @@ The same name with a different type MUST fail with `correctness::spread_type_mis
 Explicit fields MUST win over spread fields [T-104.5].
 The source MUST be evaluated once [T-104.5].
 Self-update `x = T{f: e, ..x}` MUST lower to one tuple assignment of the explicit fields [T-104.5].
+The self-update MUST perform no full struct copy [T-104.5].
 Lambdas MUST have expression form `x => expr`, block form `x => { stmts }`, or tuple-parameter form `(a, b) => ...` [T-104.6].
 A lambda MUST appear only where a function value of known parameter types is expected [T-104.6].
 Parameter types MUST come from the target type [T-104.6].
@@ -342,7 +343,6 @@ For `errdefer f()?`, a rollback error MUST join the primary error with errors jo
 A nil primary error MUST take the rollback error as is. [T-104.2]
 `defer f()?` MUST run in place on the standard LIFO stack. [T-104.2]
 The fused loop MUST run that rollback before returning. [T-104.6]
-It MUST perform no full struct copy. [T-104.5]
 NaN keys MUST order deterministically. [T-104.6]
 
 ### 1.5 RFC-105: Optimization tiers
