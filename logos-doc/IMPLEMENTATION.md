@@ -3965,4 +3965,7 @@ Written to `tasks/autoplan-ledger.jsonl` by P0-S6. IDs: phase prefix plus a sequ
 {"id": "AUD-157", "description": "M0-A-S13 Judge the jsonv2 default against an explicit nojsonv2 build", "phase": "AUD"}
 {"id": "AUD-158", "description": "M13-A-S8 Baseline sets its levels whatever the environment holds", "phase": "AUD"}
 {"id": "AUD-159", "description": "M13-A-S9 Pin native target_cpu on a cross build", "phase": "AUD"}
+{"id": "AUD-160", "description": "M13-A-S10 Eject writes the test files of a main module", "phase": "AUD"}
+{"id": "AUD-161", "description": "M14-A-S2 Read array operator object code of arm64 and riscv64 builds", "phase": "AUD"}
+{"id": "AUD-162", "description": "M14-A-S3 Round each scalar lane product of dot", "phase": "AUD"}
 ```
