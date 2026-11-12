@@ -49,6 +49,11 @@ func truncFull() error {
 	if len(got.Items) != 5000 {
 		return fmt.Errorf("full array decoded %d items, want 5000", len(got.Items))
 	}
+	for i, v := range got.Items {
+		if v != 7 {
+			return fmt.Errorf("full array item %d decoded %d, want 7", i, v)
+		}
+	}
 	return nil
 }
 
