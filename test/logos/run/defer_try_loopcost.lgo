@@ -358,6 +358,61 @@ func errCases(bs []*box) bool {
 	return failed
 }
 
+func checkCompletedDefers(bs []*box) bool {
+	failed := false
+	for _, tc := range []struct {
+		name string
+		f func() error
+		want int
+	}{
+		{"fn", func() error { return loopFn(5) }, 5},
+		{"fn-hand", func() error { return loopFnHand(5) }, 5},
+		{"arg", func() error { return loopArg(5) }, 10},
+		{"arg-hand", func() error { return loopArgHand(5) }, 10},
+		{"method", func() error { return loopMethod(bs) }, 15},
+		{"method-hand", func() error { return loopMethodHand(bs) }, 15},
+	} {
+		before := sink
+		err := tc.f()
+		if err != nil || sink-before != tc.want {
+			fmt.Println("FAIL", tc.name, "result", err, "sink delta", sink-before, "want", tc.want)
+			failed = true
+		}
+	}
+	order = nil
+	sinkErr = loopOrderLogos(5)
+	if sinkErr != nil {
+		fmt.Println("FAIL order logos result:", sinkErr)
+		failed = true
+	}
+	logosOrder := append([]int(nil), order...)
+	order = nil
+	sinkErr = loopOrderHand(5)
+	want := []int{4, 3, 2, 1, 0}
+	if sinkErr != nil || !sameInts(logosOrder, want) || !sameInts(order, want) {
+		fmt.Println("FAIL", "order:", "got", logosOrder, order, "want", want)
+		failed = true
+	} else {
+		fmt.Println("ok", "order")
+	}
+	closedVs = nil
+	sinkErr = recvLogos()
+	if sinkErr != nil {
+		fmt.Println("FAIL recv logos result:", sinkErr)
+		failed = true
+	}
+	logosRec := append([]int(nil), closedVs...)
+	closedVs = nil
+	sinkErr = recvHand()
+	if sinkErr != nil || !sameInts(logosRec, []int{1}) || !sameInts(closedVs, []int{1}) {
+		fmt.Println("FAIL", "recv:", "got", logosRec, closedVs, "want", []int{1})
+		failed = true
+	} else {
+		fmt.Println("ok", "recv")
+	}
+	return failed
+}
+
 func main() {
 	failed := false
 	check := func(name string, logos, hand float64) {
@@ -376,28 +431,8 @@ func main() {
 		fmt.Println("FAIL sinkErr not nil:", sinkErr)
 		failed = true
 	}
-	order = nil
-	sinkErr = loopOrderLogos(5)
-	logosOrder := append([]int(nil), order...)
-	order = nil
-	sinkErr = loopOrderHand(5)
-	want := []int{4, 3, 2, 1, 0}
-	if sinkErr != nil || !sameInts(logosOrder, want) || !sameInts(order, want) {
-		fmt.Println("FAIL", "order:", "got", logosOrder, order, "want", want)
+	if checkCompletedDefers(bs) {
 		failed = true
-	} else {
-		fmt.Println("ok", "order")
-	}
-	closedVs = nil
-	sinkErr = recvLogos()
-	logosRec := append([]int(nil), closedVs...)
-	closedVs = nil
-	sinkErr = recvHand()
-	if sinkErr != nil || !sameInts(logosRec, []int{1}) || !sameInts(closedVs, []int{1}) {
-		fmt.Println("FAIL", "recv:", "got", logosRec, closedVs, "want", []int{1})
-		failed = true
-	} else {
-		fmt.Println("ok", "recv")
 	}
 	if errCases(bs) {
 		failed = true

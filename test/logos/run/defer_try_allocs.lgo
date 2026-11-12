@@ -457,6 +457,65 @@ func shapeAddrLogos(n int) (err error) {
 	return nil
 }
 
+func checkSemantic(name string, f func() error, want int) {
+	before := sink
+	err := f()
+	if err != nil || sink-before != want {
+		fmt.Println("FAIL", name, "result", err, "sink delta", sink-before, "want", want)
+		failed = true
+	}
+}
+
+func checkPanicSemantic(name string, f func(int) error, n, want int) {
+	before := sink
+	defer func() {
+		r := recover()
+		if r != preErr || sink-before != want {
+			fmt.Println("FAIL", name, "panic", r, "sink delta", sink-before, "want", want)
+			failed = true
+		}
+	}()
+	err := f(n)
+	fmt.Println("FAIL", name, "returned without panic", err)
+	failed = true
+}
+
+func checkDeferredSemantics(nn int, bs []*box, ints []int) {
+	sum := nn * (nn - 1) / 2
+	broken := min(nn, 3)
+	evens := (nn + 1) / 2
+	for _, tc := range []struct {
+		name string
+		logos func() error
+		hand func() error
+		want int
+	}{
+		{"fn", func() error { return shapeFnLogos(nn) }, func() error { return shapeFnHand(nn) }, nn},
+		{"int", func() error { return shapeIntLogos(nn) }, func() error { return shapeIntHand(nn) }, sum},
+		{"str", func() error { return shapeStrLogos(nn) }, func() error { return shapeStrHand(nn) }, 5 * nn},
+		{"three", func() error { return shapeThreeLogos(nn) }, func() error { return shapeThreeHand(nn) }, 3 * sum + 3 * nn},
+		{"big", func() error { return shapeBigLogos(nn) }, func() error { return shapeBigHand(nn) }, 2 * sum},
+		{"fnval", func() error { return shapeFnValLogos(nn) }, func() error { return shapeFnValHand(nn) }, sum},
+		{"gen", func() error { return shapeGenLogos(nn) }, func() error { return shapeGenHand(nn) }, nn},
+		{"var", func() error { return shapeVarLogos(nn) }, func() error { return shapeVarHand(nn) }, sum + 2 * nn},
+		{"method", func() error { return shapeMethodLogos(bs) }, func() error { return shapeMethodHand(bs) }, sum},
+		{"methodval", func() error { return shapeMethodValLogos(bs) }, func() error { return shapeMethodValHand(bs) }, sum},
+		{"iface", func() error { return shapeIfaceLogos(bs) }, func() error { return shapeIfaceHand(bs) }, sum},
+		{"rangeint", func() error { return loopRangeIntLogos(nn) }, func() error { return loopRangeIntHand(nn) }, nn},
+		{"rangeslice", func() error { return loopRangeSliceLogos(ints) }, func() error { return loopRangeSliceHand(ints) }, nn},
+		{"goto", func() error { return loopGotoLogos(nn) }, func() error { return loopGotoHand(nn) }, max(nn, 1)},
+		{"nested", func() error { return loopNestedLogos(nn) }, func() error { return loopNestedHand(nn) }, nn * nn},
+		{"break", func() error { return loopBreakLogos(nn) }, func() error { return loopBreakHand(nn) }, broken * (broken - 1) / 2},
+		{"continue", func() error { return loopContinueLogos(nn) }, func() error { return loopContinueHand(nn) }, evens * (evens - 1)},
+	} {
+		checkSemantic(fmt.Sprint(tc.name, " logos n", nn), tc.logos, tc.want)
+		checkSemantic(fmt.Sprint(tc.name, " hand n", nn), tc.hand, tc.want)
+	}
+	checkPanicSemantic(fmt.Sprint("panic logos n", nn), loopPanicLogos, nn, sum)
+	checkPanicSemantic(fmt.Sprint("panic hand n", nn), loopPanicHand, nn, sum)
+	checkSemantic(fmt.Sprint("addr logos n", nn), func() error { return shapeAddrLogos(nn) }, sum)
+}
+
 func main() {
 	for _, n := range []int{0, 1, 5, 31} {
 		nn := n
@@ -481,6 +540,7 @@ func main() {
 		check(fmt.Sprint("alloc fn continue n", nn), testing.AllocsPerRun(200, func() { sinkErr = loopContinueLogos(nn) }), testing.AllocsPerRun(200, func() { sinkErr = loopContinueHand(nn) }))
 		check(fmt.Sprint("alloc fn panic n", nn), testing.AllocsPerRun(200, func() { sinkErr = callRecovered(loopPanicLogos, nn) }), testing.AllocsPerRun(200, func() { sinkErr = callRecovered(loopPanicHand, nn) }))
 		checkExact(fmt.Sprint("alloc addr for3 n", nn), testing.AllocsPerRun(200, func() { sinkErr = shapeAddrLogos(nn) }), float64(nn))
+		checkDeferredSemantics(nn, bs, ints)
 	}
 	if failed {
 		os.Exit(1)
