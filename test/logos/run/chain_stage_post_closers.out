@@ -8,3 +8,7 @@ ok stage-find
 ok stage-take
 ok stage-drop
 ok stage-failure
+ok stage-last
+ok stage-get
+ok stage-sort-by
+ok stage-unordered-drop-count

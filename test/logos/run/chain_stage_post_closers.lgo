@@ -151,6 +151,46 @@ func caseFailure(ctx context.Context) {
 	verdict("stage-failure", err != nil && n == 0)
 }
 
+func caseLast(ctx context.Context) {
+	tail, err := []int{0, 1, 2, 3}.group(ctx, limit = 2).map(x => mk(x)).last()
+	if err != nil {
+		verdict("stage-last", false)
+		return
+	}
+	kept := -1
+	if tail != nil {
+		kept = tail.id
+	}
+	verdict("stage-last", kept == 3, kept)
+}
+
+func caseGet(ctx context.Context) {
+	at, err := []int{0, 1, 2, 3}.group(ctx, limit = 2).map(x => mk(x)).get(1)
+	if err != nil {
+		verdict("stage-get", false)
+		return
+	}
+	kept := -1
+	if at != nil {
+		kept = at.id
+	}
+	verdict("stage-get", kept == 1, kept)
+}
+
+func caseSortBy(ctx context.Context) {
+	got, err := []int{0, 1, 2, 3}.group(ctx, limit = 2).map(x => mk(x)).sortBy(r => -r.id)
+	var kept []int
+	if err == nil {
+		kept = ids(got)
+	}
+	verdict("stage-sort-by", slices.Equal(kept, []int{3, 2, 1, 0}), kept...)
+}
+
+func caseUnorderedDropCount(ctx context.Context) {
+	n, err := []int{0, 1, 2, 3}.group(ctx, limit = 2).unordered().map(x => mk(x)).drop(1).count()
+	verdict("stage-unordered-drop-count", err == nil && n == 3)
+}
+
 func main() {
 	ctx := context.Background()
 	caseDropCount(ctx)
@@ -163,6 +203,10 @@ func main() {
 	caseTake(ctx)
 	caseDrop(ctx)
 	caseFailure(ctx)
+	caseLast(ctx)
+	caseGet(ctx)
+	caseSortBy(ctx)
+	caseUnorderedDropCount(ctx)
 	if failed {
 		os.Exit(1)
 	}
