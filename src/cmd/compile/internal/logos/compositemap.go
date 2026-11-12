@@ -708,12 +708,7 @@ func (fl *fileLower) compositeHiddenFor(e syntax.Expr) (*constMapGen, bool) {
 		}
 		return h.gen, true
 	}
-	imp, ok := fl.importedCompositeFor(ref.imp, syntax.StartPos(ref.root))
-	if !ok {
-		return nil, false
-	}
-	g, ok := imp.hiddens[key]
-	return g, ok
+	return fl.importedCompositeHidden(ref.imp, key, syntax.StartPos(ref.root))
 }
 
 func (fl *fileLower) compositeRewriteRoot(e syntax.Expr) (syntax.Expr, bool) {
@@ -905,7 +900,10 @@ func (fl *fileLower) rejectCompositeSurvivors() {
 }
 
 type importedComposite struct {
+	facts   *facts.Facts
+	prefix  string
 	hiddens map[string]*constMapGen
+	tried   map[string]bool
 }
 
 func importedCompositeFacts(obj *types2.Var) *facts.Facts {
@@ -927,25 +925,51 @@ func (fl *fileLower) importedCompositeFor(obj *types2.Var, pos syntax.Pos) (*imp
 	if f == nil {
 		return nil, false
 	}
-	info := &importedComposite{hiddens: map[string]*constMapGen{}}
-	prefix := fmt.Sprintf("_logos_icomp%d_%s", fl.pkg.compositeSeq, obj.Name())
-	fl.pkg.compositeSeq++
-	for i, rec := range f.ConstMaps {
+	for _, rec := range f.ConstMaps {
 		if rec.Object != obj.Name() || rec.Path == "" {
 			continue
 		}
-		g, ok := fl.importedCompositeMap(obj, rec, fmt.Sprintf("%s_h%d", prefix, i), pos)
-		if !ok {
+		if _, _, ok := fl.importedCompositeRecordType(obj, rec, pos); !ok {
 			return nil, false
 		}
-		info.hiddens[rec.Path] = g
 	}
+	info := &importedComposite{
+		facts:   f,
+		prefix:  fmt.Sprintf("_logos_icomp%d_%s", fl.pkg.compositeSeq, obj.Name()),
+		hiddens: map[string]*constMapGen{},
+		tried:   map[string]bool{},
+	}
+	fl.pkg.compositeSeq++
 	fl.pkg.importedComposites[obj] = info
 	return info, true
 }
 
-func (fl *fileLower) importedCompositeMap(obj *types2.Var, rec facts.ConstMapFact, name string, pos syntax.Pos) (*constMapGen, bool) {
-	label := obj.Pkg().Path() + "." + obj.Name() + rec.Path
+func (fl *fileLower) importedCompositeHidden(obj *types2.Var, path string, pos syntax.Pos) (*constMapGen, bool) {
+	info, ok := fl.importedCompositeFor(obj, pos)
+	if !ok {
+		return nil, false
+	}
+	if g, ok := info.hiddens[path]; ok {
+		return g, true
+	}
+	if info.tried[path] {
+		return nil, false
+	}
+	info.tried[path] = true
+	for i, rec := range info.facts.ConstMaps {
+		if rec.Object != obj.Name() || rec.Path != path {
+			continue
+		}
+		g, ok := fl.importedCompositeMap(obj, rec, fmt.Sprintf("%s_h%d", info.prefix, i), pos)
+		if ok {
+			info.hiddens[path] = g
+		}
+		return g, ok
+	}
+	return nil, false
+}
+
+func (fl *fileLower) importedCompositeRecordType(obj *types2.Var, rec facts.ConstMapFact, pos syntax.Pos) (types2.Type, *types2.Map, bool) {
 	var mapType types2.Type
 	steps, ok := parseCompositePath(rec.Path)
 	if ok {
@@ -953,8 +977,20 @@ func (fl *fileLower) importedCompositeMap(obj *types2.Var, rec facts.ConstMapFac
 	}
 	mt, isMap := compositeUnderlying(mapType).(*types2.Map)
 	if !ok || !isMap {
-		base.Errorf("%s: logos: imported const composite %s has a record that does not match its type", pos.String(), label)
+		base.Errorf("%s: logos: imported const composite %s has a record that does not match its type", pos.String(), obj.Pkg().Path()+"."+obj.Name()+rec.Path)
 		base.ExitIfErrors()
+		return nil, nil, false
+	}
+	return mapType, mt, true
+}
+
+func (fl *fileLower) importedCompositeMap(obj *types2.Var, rec facts.ConstMapFact, name string, pos syntax.Pos) (*constMapGen, bool) {
+	mapType, mt, ok := fl.importedCompositeRecordType(obj, rec, pos)
+	if !ok {
+		return nil, false
+	}
+	label := obj.Pkg().Path() + "." + obj.Name() + rec.Path
+	if _, spellable := fl.unspellableImportedConstMap(label, mapType, mt); !spellable {
 		return nil, false
 	}
 	return fl.emitImportedConstMap(importedMapSpec{label: label, mapType: mapType, mt: mt, rec: rec, name: name}, pos)

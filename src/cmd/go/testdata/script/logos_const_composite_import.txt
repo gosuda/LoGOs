@@ -15,11 +15,16 @@ exec env -u GOROOT $UPROOT1272/bin/go run ./app
 cmp stdout ../want.txt
 cd ../..
 
-# A value type the importer cannot name fails the build with a diagnostic, never a compiler crash.
+# An unrelated field the importer cannot name leaves every other read of the composite working.
 cd unnamed
-! logos build ./...
-! stderr 'internal compiler error'
-cd ..
+logos build -o $WORK/bin/importunnamed$GOEXE ./app
+exec $WORK/bin/importunnamed$GOEXE
+cmp stdout want.txt
+logos eject -o out
+cd out
+exec env -u GOROOT $UPROOT1272/bin/go run ./app
+cmp stdout ../want.txt
+cd ../..
 
 # A write into an imported const composite fails with the rule ID, whatever the member.
 cd badwrite
@@ -188,14 +193,25 @@ module example.com/ccunnamed
 
 go 1.27
 
+-- unnamed/want.txt --
+hidden 5 true
+m 1
+un 3
+hidden-range g4;h5;
 -- unnamed/lib/lib.lgo --
 package lib
 
-type pt struct{ X int }
+type hidden struct{ V int }
 
-type S struct{ M map[string]pt }
+type Box struct {
+	M map[string]int
+	X map[string]hidden
+	n map[string]int
+}
 
-const C = S{M: map[string]pt{"a": {1}}}
+const C = Box{M: map[string]int{"a": 1, "b": 2}, X: map[string]hidden{"h": {V: 5}, "g": {V: 4}}, n: map[string]int{"u": 3}}
+
+func (b Box) Un(k string) int { return b.n[k] ?? -1 }
 -- unnamed/app/main.lgo --
 package main
 
@@ -206,8 +222,15 @@ import (
 )
 
 func main() {
-	v, ok := lib.C.M["a"]
-	fmt.Println(v.X, ok)
+	v, ok := lib.C.X["h"]
+	fmt.Println("hidden", v.V, ok)
+	fmt.Println("m", lib.C.M["a"] ?? -1)
+	fmt.Println("un", lib.C.Un("u"))
+	keys := ""
+	for k, hv := range lib.C.X {
+		keys += fmt.Sprint(k, hv.V, ";")
+	}
+	fmt.Println("hidden-range", keys)
 }
 -- badwrite/go.mod --
 module example.com/ccbadwrite
