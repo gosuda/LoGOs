@@ -130,6 +130,10 @@ func planFor(info *types2.Info, stmt syntax.Stmt, src []byte, plans map[syntax.S
 			scStack = scStack[:len(scStack)-1]
 			return false
 		}
+		switch n.(type) {
+		case *syntax.FuncLit, *syntax.LambdaExpr:
+			return false
+		}
 		sc := false
 		if len(stack) > 0 {
 			inherited := scStack[len(scStack)-1]
