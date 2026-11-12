@@ -488,9 +488,11 @@ func (p *forPost) emit() syntax.Stmt {
 	}
 	checkPos := p.s.Body.Pos()
 	checkSite := fl.newSite(checkPos, checkPos.Line())
-	checkNative, checkText, _ := p.fc.exitPair(checkPos, p.errSpell, checkSite)
+	checkNative, checkText, checkSubs := p.fc.exitPair(checkPos, p.errSpell, checkSite)
 	check := errCheckOf(checkPos, p.err(), checkNative)
-	checkTextOf := cat(gen("if "+p.errSpell+" != nil { "), renderText(checkText, nil), gen(" }"))
+	tw := &twin{}
+	tw.absorb(checkSubs)
+	checkTextOf := cat(gen("if "+p.errSpell+" != nil { "), renderText(checkText, tw.subs), gen(" }"))
 	open := fl.off(checkPos) + 1
 	fl.addT(open, open, cat(gen(" "), checkTextOf, gen("; ")))
 	p.s.Body.List = append([]syntax.Stmt{check}, p.s.Body.List...)
