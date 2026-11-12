@@ -1800,6 +1800,9 @@ m.WithLock(func(c *Config) {
 
 ### 17.1 Red-team completeness
 
+- A release MUST have no `planned` row in `logos-doc/REDTEAM.md`: each row MUST be `tested` or `satisfied upstream` with its proving test, or `blocked` with its mechanism recorded and the release `-O` matrix gating it. [T-Sec17]
+- The release `-O` matrix MUST pass `logos test` and `go test` at `-O=1`, `-O=2`, and `-O=3` over `std` and `cmd`, without `-short`, and MUST skip only the tests that `src/cmd/go/testdata/script/logos_redteam_80.txt` pins. [T-Sec17]
+
 ### 17.2 Zero-alloc and codegen checks
 
 - A function marked `//logos:zeroalloc` that performs a heap allocation MUST fail with `[perf::zeroalloc_violation]` naming the function and the escape-analysis reason. [T-Sec17]
