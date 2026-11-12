@@ -139,3 +139,38 @@ func chainSideEffectBuiltin(xs []int, m map[string]int) {
 		return x
 	}).sortBy /* ERROR "[suspicious::side_effect_before_sort] chain lambda with a call of unknown purity before sortBy" */ (x => x)
 }
+
+type chainKey struct{ n int }
+
+func chainKeyIdentity(k chainKey) chainKey { return k }
+
+func chainKeyPair(k chainKey) (chainKey, error) { return k, nil }
+
+func chainKeyExpression(bs []bool, ks []chainKey) {
+	_ = bs.sortBy(b => b /* ERROR "chain sortBy key must be ordered, have bool" */)
+	_ = ks.sortBy(k => k /* ERROR "chain sortBy key must be ordered, have chainKey" */)
+}
+
+func chainKeyBlock(ps []*int, ss [][]int) {
+	_ = ps.sortBy(p => { /* ERROR "chain sortBy key must be ordered, have *int" */
+		return p
+	})
+	_ = ss.sortBy(s => { /* ERROR "chain sortBy key must be ordered, have []int" */
+		return s
+	})
+}
+
+func chainKeyTry(ks []chainKey) error {
+	_ = ks.sortBy(k => chainKeyPair /* ERROR "chain sortBy key must be ordered, have chainKey" */ (k)?)
+	return nil
+}
+
+func chainKeyFunction(ks []chainKey) {
+	_ = ks.sortBy(chainKeyIdentity /* ERROR "chain sortBy key must be ordered, have chainKey" */)
+}
+
+func chainKeyOrdered(ns []int, ss []string, fs []float64) {
+	_ = ns.sortBy(n => n)
+	_ = ss.sortBy(s => s)
+	_ = fs.sortBy(f => { return f })
+}
