@@ -59,6 +59,11 @@ func test() {
 		sink += items[i].M["k05"] ?? 0
 	})
 	check("alloc-dynamic-index-read", dynamic == 0, dynamic, 0)
+	control := allocs(func() {
+		m := items[i].M
+		sink += len(m)
+	})
+	check("alloc-copy-control", control > 0, control, "more than 0")
 	for j := range 2 {
 		got := items[j].M["k05"] ?? -1
 		check("dynamic-index-value", got == 100*(j+1)+5, got, 100*(j+1)+5)
