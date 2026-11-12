@@ -6,6 +6,7 @@ package main
 
 import (
 	"internal/buildcfg"
+	"internal/logosfile"
 	"strings"
 )
 
@@ -30,7 +31,7 @@ func logosCgoCall(p *Package, n *Name) string {
 const logosFastcallMarker = "//logos:cgo_fastcall"
 
 func logosMapFastcallDirectives(f *File, srcfile string) {
-	if !isLogosCgoInput(srcfile) {
+	if !logosfile.Is(srcfile) {
 		return
 	}
 	if f.NoCallbacks == nil {

@@ -7,9 +7,9 @@ package logos
 import (
 	"flag"
 	"fmt"
+	"internal/logosfile"
 	"maps"
 	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 
@@ -104,20 +104,10 @@ func contextPkg(files []*syntax.File) string {
 }
 
 func contextFileMode(name string) syntax.Mode {
-	if contextLogosExt(name) {
+	if logosfile.Is(name) {
 		return syntax.LogosMode
 	}
 	return 0
-}
-
-func contextLogosExt(name string) bool {
-	ext := filepath.Ext(name)
-	ext = strings.TrimRightFunc(ext, func(r rune) bool { return r == 0xFE0E || r == 0xFE0F })
-	switch ext {
-	case ".lgo", ".📜", ".⚡", ".ʕ◔ϖ◔ʔ":
-		return true
-	}
-	return false
 }
 
 func collectDecls(files []*syntax.File) ([]syntax.Decl, map[string]*syntax.TypeDecl) {

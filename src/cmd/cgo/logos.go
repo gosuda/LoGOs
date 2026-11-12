@@ -8,8 +8,8 @@ import (
 	"fmt"
 	"go/scanner"
 	"go/token"
+	"internal/logosfile"
 	"os"
-	"strings"
 )
 
 const logosCgoSyntaxMsg = `[correctness::cgo_file_logos_syntax] files that import "C" must use Go syntax only`
@@ -201,7 +201,7 @@ func logosSyntaxPos(name string, src []byte) (token.Position, bool) {
 }
 
 func logosRejectSyntax(name string, src []byte) {
-	if !isLogosCgoInput(name) {
+	if !logosfile.Is(name) {
 		return
 	}
 	pos, ok := logosSyntaxPos(name, src)
@@ -210,21 +210,4 @@ func logosRejectSyntax(name string, src []byte) {
 	}
 	fmt.Fprintf(os.Stderr, "%s: %s\n", pos, logosCgoSyntaxMsg)
 	os.Exit(2)
-}
-
-func isLogosCgoInput(name string) bool {
-	trimmed := strings.TrimRight(name, "\uFE0E\uFE0F")
-	if strings.HasSuffix(trimmed, ".lgo") {
-		return true
-	}
-	if strings.HasSuffix(trimmed, ".📜") {
-		return true
-	}
-	if strings.HasSuffix(trimmed, ".⚡") {
-		return true
-	}
-	if strings.HasSuffix(trimmed, ".ʕ◔ϖ◔ʔ") {
-		return true
-	}
-	return false
 }

@@ -17,6 +17,7 @@ import (
 	"go/printer"
 	"go/token"
 	"internal/buildcfg"
+	"internal/logosfile"
 	"io"
 	"maps"
 	"os"
@@ -333,7 +334,7 @@ func main() {
 	// that are options to pass to gcc.
 	var i int
 	for i = len(args); i > 0; i-- {
-		if !strings.HasSuffix(args[i-1], ".go") && !isLogosCgoInput(args[i-1]) {
+		if !strings.HasSuffix(args[i-1], ".go") && !logosfile.Is(args[i-1]) {
 			break
 		}
 	}

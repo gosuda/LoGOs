@@ -6,6 +6,7 @@ package noder
 
 import (
 	"bytes"
+	"internal/logosfile"
 	"io"
 	"maps"
 	"os"
@@ -37,7 +38,7 @@ func logosStashesGo() bool {
 func parseLogosFile(fbase *syntax.PosBase, f *os.File, filename string, errh syntax.ErrorHandler, pragh syntax.PragmaHandler) *syntax.File {
 	mode := syntax.CheckBranches | logosMode(filename)
 	cgoUser := isLogosCgoUser(filename)
-	if !isLogosFile(filename) && !logosStashesGo() && !cgoUser {
+	if !logosfile.Is(filename) && !logosStashesGo() && !cgoUser {
 		file, _ := syntax.Parse(fbase, f, errh, pragh, mode)
 		return file
 	}
@@ -46,14 +47,14 @@ func parseLogosFile(fbase *syntax.PosBase, f *os.File, filename string, errh syn
 		errh(syntax.Error{Msg: err.Error()})
 		return nil
 	}
-	if isLogosFile(filename) {
+	if logosfile.Is(filename) {
 		data = rewriteLogosWasmDirectives(data, logosMode(filename))
 	}
 	file, _ := syntax.Parse(fbase, bytes.NewReader(data), errh, pragh, mode)
 	if file != nil {
 		logosStore.Lock()
 		defer logosStore.Unlock()
-		if isLogosFile(filename) || logosStashesGo() {
+		if logosfile.Is(filename) || logosStashesGo() {
 			logosStore.src[file] = data
 			logosStore.names[file] = filename
 		}

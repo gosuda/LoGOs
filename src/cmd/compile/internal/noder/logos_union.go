@@ -5,6 +5,7 @@
 package noder
 
 import (
+	"internal/logosfile"
 	"internal/pkgbits"
 
 	"cmd/compile/internal/base"
@@ -19,7 +20,7 @@ func logosExportHasLogosFile(pr *pkgbits.PkgDecoder) bool {
 		r := pr.TempDecoder(pkgbits.SectionPosBase, pkgbits.RelElemIdx(i), pkgbits.SyncPosBase)
 		name := r.String()
 		pr.RetireDecoder(&r)
-		if isLogosFile(name) {
+		if logosfile.Is(name) {
 			return true
 		}
 	}
