@@ -7,6 +7,7 @@ package json
 import (
 	stdjson "encoding/json"
 	"reflect"
+	"sort"
 	"testing"
 )
 
@@ -26,28 +27,40 @@ func TestWalkEnterFrameBalances(t *testing.T) {
 	s.LeaveFrame()
 }
 
-func TestWalkEnterFrameDepthBound(t *testing.T) {
-	var s Walk
-	ok := 0
-	for range 10001 {
-		if err := s.EnterFrame(int64(ok)); err != nil {
-			if ok < 10000 {
-				t.Fatalf("EnterFrame failed at depth %d: %v", ok, err)
-			}
-			s.LeaveFrame()
-			if err := s.EnterFrame(0); err != nil {
-				t.Fatalf("EnterFrame after depth failure = %v", err)
-			}
-			s.LeaveFrame()
-			for range ok {
-				s.LeaveFrame()
-			}
-			return
-		}
-		ok++
+func nestedArrays(depth int) nested {
+	var v nested
+	for range depth {
+		v = nested{v}
 	}
-	for range ok {
-		s.LeaveFrame()
+	return v
+}
+
+func TestWalkEnterFrameDepthBound(t *testing.T) {
+	if !stdIsV2 {
+		t.Skip("encoding/json v1 has no depth bound")
+	}
+	const searchLimit = 20000
+	rejected := sort.Search(searchLimit, func(depth int) bool {
+		_, err := stdjson.Marshal(nestedArrays(depth))
+		return err != nil
+	})
+	if rejected == searchLimit {
+		t.Fatalf("encoding/json accepted %d nested arrays", searchLimit)
+	}
+	accepted := rejected - 1
+	var s Walk
+	for pass := range 2 {
+		for depth := range accepted {
+			if err := s.EnterFrame(int64(depth)); err != nil {
+				t.Fatalf("pass %d: EnterFrame failed at depth %d, encoding/json accepts %d: %v", pass, depth, accepted, err)
+			}
+		}
+		if err := s.EnterFrame(int64(accepted)); err == nil {
+			t.Fatalf("pass %d: EnterFrame accepted depth %d, encoding/json rejects it", pass, rejected)
+		}
+		for range accepted {
+			s.LeaveFrame()
+		}
 	}
 }
 
