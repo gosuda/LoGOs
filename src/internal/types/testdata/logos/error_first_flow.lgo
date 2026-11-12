@@ -156,9 +156,35 @@ func c2LiteralAfterProof() {
 		return
 	}
 	f := func() {
+		use(n)
+	}
+	f()
+}
+
+func c2LiteralAfterProofReassigned() {
+	n, err := fetch()
+	if err != nil {
+		return
+	}
+	f := func() {
 		use(n /* ERROR "[correctness::result_before_error_check]" */)
 	}
 	f()
+	n, err = fetch()
+	_ = err
+}
+
+func c2LiteralAfterProofAddressed() {
+	n, err := fetch()
+	if err != nil {
+		return
+	}
+	p := &n
+	f := func() {
+		use(n /* ERROR "[correctness::result_before_error_check]" */)
+	}
+	f()
+	_ = p
 }
 
 func c2BlockLambdaInPlace(xs []int) {
