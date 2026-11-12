@@ -147,6 +147,11 @@ func (h *groupHoist) slotsThrough(slots []*syntax.Expr, last int) {
 			*s = h.expr(*s)
 		}
 		if i < last && fc.groupHasCall(*s) {
+			if lit, ok := (*s).(*syntax.CompositeLit); ok && lit.Type == nil {
+				inner := groupOperandSlots(lit)
+				h.slotsThrough(inner, len(inner))
+				continue
+			}
 			inner := fc.hoistSubTake(mark)
 			if h.withText {
 				fc.hoistSubEmit(inner)

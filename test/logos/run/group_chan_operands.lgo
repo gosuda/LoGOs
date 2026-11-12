@@ -52,6 +52,22 @@ func openGate(e *env, v int) int {
 	return e.open(v)
 }
 
+func sumBoxes(bs []box) int {
+	return bs[0].V*10 + bs[1].V
+}
+
+func sumBoxPtrs(bs []*box) int {
+	return bs[0].V*10 + bs[1].V
+}
+
+func sumNested(bs [][]box) int {
+	return bs[0][0].V*10 + bs[1][0].V
+}
+
+func sumMap(m map[box]int) int {
+	return (m[box{V: 2}] ?? 0)*10 + (m[box{V: 1}] ?? 0)
+}
+
 func recvFuncLitOperand(ctx context.Context, e *env, fail bool) error {
 	go group (ctx) {
 		go {
@@ -400,6 +416,62 @@ func recvCallOrderOperator(ctx context.Context, e *env, fail bool) error {
 	return nil
 }
 
+func recvElidedElement(ctx context.Context, e *env, fail bool) error {
+	go group (ctx) {
+		go {
+			e.out = sumBoxes([]box{{V: one()}, {V: <-e.in}})
+		}
+		go {
+			if fail {
+				failSibling()?
+			}
+		}
+	}
+	return nil
+}
+
+func recvElidedPointer(ctx context.Context, e *env, fail bool) error {
+	go group (ctx) {
+		go {
+			e.out = sumBoxPtrs([]*box{{V: one()}, {V: <-e.in}})
+		}
+		go {
+			if fail {
+				failSibling()?
+			}
+		}
+	}
+	return nil
+}
+
+func recvElidedNested(ctx context.Context, e *env, fail bool) error {
+	go group (ctx) {
+		go {
+			e.out = sumNested([][]box{{{V: one()}}, {{V: <-e.in}}})
+		}
+		go {
+			if fail {
+				failSibling()?
+			}
+		}
+	}
+	return nil
+}
+
+func recvElidedMapKey(ctx context.Context, e *env, fail bool) error {
+	go group (ctx) {
+		go {
+			e.out = sumMap(map[box]int{{V: one()}: 1, {V: 2}: <-e.in})
+		}
+		go {
+			if fail {
+				failSibling()?
+			}
+		}
+	}
+	return nil
+}
+
 type cell struct {
 	name    string
 	run     func(ctx context.Context, e *env, fail bool) error
@@ -444,6 +516,10 @@ func valueCells() []cell {
 		{name: "call-order", run: recvCallOrder, feed: []int{5, 99}, want: 57, left: 1},
 		{name: "call-order-method", run: recvCallOrderMethod, feed: []int{5, 99}, want: 57, left: 1},
 		{name: "call-order-operator", run: recvCallOrderOperator, feed: []int{5, 99}, want: 57, left: 1},
+		{name: "elided-element", run: recvElidedElement, feed: []int{5, 99}, want: 15, left: 1},
+		{name: "elided-pointer", run: recvElidedPointer, feed: []int{5, 99}, want: 15, left: 1},
+		{name: "elided-nested", run: recvElidedNested, feed: []int{5, 99}, want: 15, left: 1},
+		{name: "elided-map-key", run: recvElidedMapKey, feed: []int{5, 99}, want: 51, left: 1},
 	}
 }
 
@@ -468,6 +544,10 @@ func cancelCells() []cell {
 		{name: "call-order-cancel", run: recvCallOrder},
 		{name: "call-order-method-cancel", run: recvCallOrderMethod},
 		{name: "call-order-operator-cancel", run: recvCallOrderOperator},
+		{name: "elided-element-cancel", run: recvElidedElement},
+		{name: "elided-pointer-cancel", run: recvElidedPointer},
+		{name: "elided-nested-cancel", run: recvElidedNested},
+		{name: "elided-map-key-cancel", run: recvElidedMapKey},
 	}
 }
 
