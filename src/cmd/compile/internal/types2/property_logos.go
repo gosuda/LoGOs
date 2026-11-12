@@ -154,16 +154,28 @@ func (check *Checker) logosRecordConforms(def *TypeName, asserts []Type) {
 	if named == nil {
 		return
 	}
-	var props []Type
+	var declared []Type
 	for _, T := range asserts {
-		if !isValid(T) || logosPropertyInterface(T) == nil {
+		if !isValid(T) {
 			continue
 		}
 		if check.logosConforms == nil {
 			check.logosConforms = make(map[*Named][]Type)
 		}
 		check.logosConforms[named] = append(check.logosConforms[named], T)
-		props = append(props, T)
+		declared = append(declared, T)
+	}
+	check.later(func() {
+		check.logosRecordPropDecl(def, declared)
+	}).describef(def, "record property declarations of %s", def.name)
+}
+
+func (check *Checker) logosRecordPropDecl(def *TypeName, declared []Type) {
+	var props []Type
+	for _, T := range declared {
+		if logosPropertyInterface(T) != nil {
+			props = append(props, T)
+		}
 	}
 	if len(props) > 0 {
 		check.Info.LogosPropDecls = append(check.Info.LogosPropDecls, &LogosPropDecl{Def: def, Ifaces: props})
