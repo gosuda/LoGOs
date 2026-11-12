@@ -27,6 +27,22 @@ type Bytes interface {
 	[]byte | string
 }
 
+type MapOrStr interface {
+	map[string]int | string
+}
+
+type ChanOrStr interface {
+	chan int | string
+}
+
+type FuncOrStr interface {
+	func() int | string
+}
+
+type PointerOrInt interface {
+	unsafe.Pointer | int
+}
+
 func opt(present bool) NumOrStr? {
 	if present {
 		var u NumOrStr = 7
@@ -45,6 +61,30 @@ func main() {
 	var ob Bytes? = b
 	check("bytes-size", unsafe.Sizeof(ob) != unsafe.Sizeof(b), unsafe.Sizeof(ob) != unsafe.Sizeof(b), true)
 	check("bytes-none", ob != nil, ob != nil, true)
+	var um MapOrStr = map[string]int(nil)
+	var om MapOrStr? = um
+	check("map-size", unsafe.Sizeof(om) != unsafe.Sizeof(um), unsafe.Sizeof(om) != unsafe.Sizeof(um), true)
+	check("map-present-nil", om != nil, om != nil, true)
+	var nm MapOrStr?
+	check("map-absent", nm == nil, nm == nil, true)
+	var uc ChanOrStr = (chan int)(nil)
+	var oc ChanOrStr? = uc
+	check("chan-size", unsafe.Sizeof(oc) != unsafe.Sizeof(uc), unsafe.Sizeof(oc) != unsafe.Sizeof(uc), true)
+	check("chan-present-nil", oc != nil, oc != nil, true)
+	var nc ChanOrStr?
+	check("chan-absent", nc == nil, nc == nil, true)
+	var uf FuncOrStr = (func() int)(nil)
+	var of FuncOrStr? = uf
+	check("func-size", unsafe.Sizeof(of) != unsafe.Sizeof(uf), unsafe.Sizeof(of) != unsafe.Sizeof(uf), true)
+	check("func-present-nil", of != nil, of != nil, true)
+	var nf FuncOrStr?
+	check("func-absent", nf == nil, nf == nil, true)
+	var up PointerOrInt = unsafe.Pointer(nil)
+	var op PointerOrInt? = up
+	check("pointer-size", unsafe.Sizeof(op) != unsafe.Sizeof(up), unsafe.Sizeof(op) != unsafe.Sizeof(up), true)
+	check("pointer-present-nil", op != nil, op != nil, true)
+	var np PointerOrInt?
+	check("pointer-absent", np == nil, np == nil, true)
 	if failed {
 		os.Exit(1)
 	}

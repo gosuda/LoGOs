@@ -103,6 +103,34 @@ func N() (int?)? {
 	return i
 }
 
+func PickAny() any? {
+	return nil
+}
+
+func PickError() error? {
+	return nil
+}
+
+func PickMap() map[string]int? {
+	return nil
+}
+
+func PickFunc() (func() int)? {
+	return nil
+}
+
+func PickChan() chan int? {
+	return nil
+}
+
+type MapOrStr interface {
+	map[string]int | string
+}
+
+func PickMapUnion() MapOrStr? {
+	return nil
+}
+
 type Speaker interface {
 	const Speak() string
 }
@@ -136,6 +164,12 @@ var _ func(*a.User) string = a.G
 var _ func() rt.Option[[]int] = a.H
 var _ func() rt.Option[int] = a.I
 var _ func() rt.Option[rt.Option[int]] = a.N
+var _ func() rt.Option[any] = a.PickAny
+var _ func() rt.Option[error] = a.PickError
+var _ func() rt.Option[map[string]int] = a.PickMap
+var _ func() rt.Option[func() int] = a.PickFunc
+var _ func() rt.Option[chan int] = a.PickChan
+var _ func() rt.Option[a.MapOrStr] = a.PickMapUnion
 var _ *a.T = a.Box{}.P
 var _ a.Speaker = a.Person{}
 
