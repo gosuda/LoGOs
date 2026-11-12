@@ -207,6 +207,7 @@ type fileLower struct {
 	// capture text must cover the original extent (D7).
 	optBodySpan map[*syntax.LambdaExpr]span
 	erasedConst map[*syntax.ConstType]bool
+	tupleFn     *syntax.FuncType
 	// funcHeadOffs caches the offsets of `func` keywords in source
 	// order, built once per file by a single forward tokenization for
 	// the option type-head lookup.
