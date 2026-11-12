@@ -5,6 +5,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"os"
 )
 
 var errLoad = errors.New("load")
@@ -44,36 +45,45 @@ func probeExprInit(v int, fail bool) (string, error) {
 	return r, nil
 }
 
+func check(cond bool, msg string) {
+	if cond {
+		fmt.Println("ok " + msg)
+		return
+	}
+	fmt.Println("FAIL " + msg)
+	os.Exit(1)
+}
+
 func main() {
 	loads = 0
 	s, err := classifyN(7, false)
 	okNil := err == nil && s == "seven" && loads == 1
-	fmt.Println("ok switch-expr-init-nil:", okNil)
+	check(okNil, "switch-expr-init-nil")
 
 	s, err = classifyN(9, false)
 	okOther := err == nil && s == "other" && loads == 2
-	fmt.Println("ok switch-expr-init-other:", okOther)
+	check(okOther, "switch-expr-init-other")
 
 	s, err = classifyN(7, true)
 	okErr := err != nil && err == errLoad && s == "" && loads == 3
-	fmt.Println("ok switch-expr-init-err:", okErr)
+	check(okErr, "switch-expr-init-err")
 
 	slot = -1
 	s, err = classifyAssign(9, false)
 	okAssign := err == nil && s == "other" && slot == 9
-	fmt.Println("ok switch-expr-assign-nil:", okAssign)
+	check(okAssign, "switch-expr-assign-nil")
 
 	slot = -1
 	s, err = classifyAssign(7, true)
 	okAssignErr := err != nil && err == errLoad && s == "" && slot == 0
-	fmt.Println("ok switch-expr-assign-err:", okAssignErr)
+	check(okAssignErr, "switch-expr-assign-err")
 
 	loads = 0
 	s, err = probeExprInit(7, false)
 	okExprNil := err == nil && s == "seven" && loads == 1
-	fmt.Println("ok switch-expr-expr-nil:", okExprNil)
+	check(okExprNil, "switch-expr-expr-nil")
 
 	s, err = probeExprInit(7, true)
 	okExprErr := err != nil && err == errLoad && s == "" && loads == 2
-	fmt.Println("ok switch-expr-expr-err:", okExprErr)
+	check(okExprErr, "switch-expr-expr-err")
 }

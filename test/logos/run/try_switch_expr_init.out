@@ -1,7 +1,7 @@
-ok switch-expr-init-nil: true
-ok switch-expr-init-other: true
-ok switch-expr-init-err: true
-ok switch-expr-assign-nil: true
-ok switch-expr-assign-err: true
-ok switch-expr-expr-nil: true
-ok switch-expr-expr-err: true
+ok switch-expr-init-nil
+ok switch-expr-init-other
+ok switch-expr-init-err
+ok switch-expr-assign-nil
+ok switch-expr-assign-err
+ok switch-expr-expr-nil
+ok switch-expr-expr-err
