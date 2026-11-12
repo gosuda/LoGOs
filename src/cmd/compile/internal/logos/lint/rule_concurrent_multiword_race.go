@@ -37,11 +37,13 @@ var concurrentMultiwordRace = Rule{
 	Check: checkConcurrentMultiwordRace,
 }
 
-// spawn is one child of a declaration: its statement and the node whose
-// span is the child's own scope.
+// spawn is one child of a declaration: its statement, the node whose span is
+// the child's own scope, and for a segment child the end of the chain or loop
+// that joins it.
 type spawn struct {
 	node  syntax.Node
 	child syntax.Node
+	join  syntax.Pos
 }
 
 // varWrite is one assignment to a variable.
@@ -72,7 +74,13 @@ func checkConcurrentMultiwordRace(pass *Pass) {
 
 // collect records the writes, groups, and children under root.
 func (c *raceCheck) collect(root syntax.Node) {
+	var path []syntax.Node
 	syntax.Inspect(root, func(n syntax.Node) bool {
+		if n == nil {
+			path = path[:len(path)-1]
+			return true
+		}
+		path = append(path, n)
 		c.noteWrites(n)
 		switch n := n.(type) {
 		case *syntax.GroupStmt:
@@ -83,9 +91,70 @@ func (c *raceCheck) collect(root syntax.Node) {
 			if lit := goLiteral(n); lit != nil {
 				c.spawns = append(c.spawns, spawn{node: n, child: lit})
 			}
+		case *syntax.CallExpr:
+			c.noteSegment(n, path)
 		}
 		return true
 	})
+}
+
+func (c *raceCheck) noteSegment(call *syntax.CallExpr, path []syntax.Node) {
+	fns := segmentFuncs(c.pass, call)
+	if len(fns) == 0 {
+		return
+	}
+	join := syntax.EndPos(joinNode(path))
+	for _, fn := range fns {
+		c.spawns = append(c.spawns, spawn{node: fn, child: fn, join: join})
+	}
+}
+
+func joinNode(path []syntax.Node) syntax.Node {
+	top := len(path) - 1
+	for {
+		next, ok := chainParent(path, top)
+		if !ok {
+			break
+		}
+		top = next
+	}
+	if p := ancestor(path, top); p >= 0 {
+		if _, ok := path[p].(*syntax.RangeClause); ok {
+			if f := ancestor(path, p); f >= 0 {
+				return path[f]
+			}
+		}
+	}
+	return path[top]
+}
+
+func chainParent(path []syntax.Node, i int) (int, bool) {
+	sel := ancestor(path, i)
+	if sel < 0 {
+		return 0, false
+	}
+	s, ok := path[sel].(*syntax.SelectorExpr)
+	if !ok || syntax.Unparen(s.X) != path[i] {
+		return 0, false
+	}
+	call := ancestor(path, sel)
+	if call < 0 {
+		return 0, false
+	}
+	c, ok := path[call].(*syntax.CallExpr)
+	if !ok || syntax.Unparen(c.Fun) != s {
+		return 0, false
+	}
+	return call, true
+}
+
+func ancestor(path []syntax.Node, i int) int {
+	for i--; i >= 0; i-- {
+		if _, ok := path[i].(*syntax.ParenExpr); !ok {
+			return i
+		}
+	}
+	return -1
 }
 
 // goLiteral returns the function literal that go statement s calls, or nil.
@@ -208,9 +277,12 @@ func (c *raceCheck) written(s spawn, v *types2.Var) bool {
 
 // window returns the end of the window in which a write races with the
 // child of s: the end of the innermost group that holds s, or else the end
-// of the declaration.
+// of the declaration, and no later than the join of a segment child.
 func (c *raceCheck) window(s spawn) syntax.Pos {
 	end := c.end
+	if s.join.IsKnown() && s.join.Cmp(end) < 0 {
+		end = s.join
+	}
 	start := syntax.StartPos(s.node)
 	for _, g := range c.groups {
 		gend := syntax.EndPos(g)

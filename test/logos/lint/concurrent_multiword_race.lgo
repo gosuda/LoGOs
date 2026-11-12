@@ -5,6 +5,7 @@ package p
 import (
 	"context"
 	"logos/sync"
+	"sync/atomic"
 )
 
 type Union interface {
@@ -537,4 +538,201 @@ func passSequentialWrites(ctx context.Context) error {
 	s = "b"
 	println(s)
 	return nil
+}
+
+func segmentStringWrite(ctx context.Context, xs []int) error {
+	s := "a"
+	_, err := xs.group(ctx, limit = 4).map(x => { // ERROR "concurrent_multiword_race"
+		s = "b"
+		return x
+	})
+	println(s)
+	return err
+}
+
+func segmentInterfaceWrite(ctx context.Context, xs []int) error {
+	var v any = 1
+	_, err := xs.group(ctx, limit = 4).map(x => { // ERROR "concurrent_multiword_race"
+		v = "x"
+		return x
+	})
+	println(v != nil)
+	return err
+}
+
+func segmentSliceHeaderWrite(ctx context.Context, xs []int) error {
+	acc := []int{1}
+	_, err := xs.group(ctx, limit = 4).map(x => { // ERROR "concurrent_multiword_race"
+		acc = append(acc, x)
+		return x
+	})
+	println(len(acc))
+	return err
+}
+
+func segmentFilterWrite(ctx context.Context, xs []int) error {
+	s := "a"
+	_, err := xs.group(ctx, limit = 4).filter(x => { // ERROR "concurrent_multiword_race"
+		s = "b"
+		return x > 0
+	})
+	println(s)
+	return err
+}
+
+func segmentUnorderedWrite(ctx context.Context, xs []int) error {
+	s := "a"
+	_, err := xs.group(ctx, limit = 4).unordered().map(x => { // ERROR "concurrent_multiword_race"
+		s = "b"
+		return x
+	})
+	println(s)
+	return err
+}
+
+func segmentSecondLambdaWrite(ctx context.Context, xs []int) error {
+	s := "a"
+	_, err := xs.group(ctx, limit = 4).filter(x => x > 0).map(x => { // ERROR "concurrent_multiword_race"
+		s = "b"
+		return x
+	})
+	println(s)
+	return err
+}
+
+func segmentRangeWrite(ctx context.Context, xs []int) error {
+	s := "a"
+	for y := range xs.group(ctx, limit = 2).map(x => x + len(s)) { // ERROR "concurrent_multiword_race"
+		println(y)
+		s = "b"
+	}
+	return nil
+}
+
+func segmentSiblingLambdas(ctx context.Context, xs []int) error {
+	s := "a"
+	_, err := xs.group(ctx, limit = 4).map(x => { // ERROR "concurrent_multiword_race"
+		s = "b"
+		return x
+	}).map(x => {
+		println(s)
+		return x
+	})
+	return err
+}
+
+func segmentFuncLiteralWrite(ctx context.Context, xs []int) error {
+	s := "a"
+	_, err := xs.group(ctx, limit = 4).map(func(x int) int { // ERROR "concurrent_multiword_race"
+		s = "b"
+		return x
+	})
+	println(s)
+	return err
+}
+
+func segmentInsideGroupBlock(ctx context.Context, xs []int) error {
+	s := "a"
+	go group (ctx) {
+		_, err := xs.group(ctx, limit = 4).map(x => { // ERROR "concurrent_multiword_race"
+			s = "b"
+			return x
+		})
+		println(err == nil, s)
+	}
+	return nil
+}
+
+func passSegmentLocalWrite(ctx context.Context, xs []int) error {
+	_, err := xs.group(ctx, limit = 4).map(x => {
+		var local string
+		local = "b"
+		println(local)
+		return x
+	})
+	return err
+}
+
+func passSegmentWriteAfter(ctx context.Context, xs []int) error {
+	s := "a"
+	_, err := xs.group(ctx, limit = 4).map(x => {
+		println(s)
+		return x
+	})
+	s = "b"
+	println(s)
+	return err
+}
+
+func passSegmentWriteBefore(ctx context.Context, xs []int) error {
+	s := "a"
+	s = "b"
+	_, err := xs.group(ctx, limit = 4).map(x => {
+		println(s)
+		return x
+	})
+	return err
+}
+
+func passSegmentBothRead(ctx context.Context, xs []int) error {
+	s := "a"
+	_, err := xs.group(ctx, limit = 4).map(x => {
+		println(s)
+		return x
+	})
+	println(s)
+	return err
+}
+
+func passSegmentAtomic(ctx context.Context, xs []int) error {
+	var n atomic.Int64
+	_, err := xs.group(ctx, limit = 4).map(x => {
+		n.Add(1)
+		return x
+	})
+	println(n.Load())
+	return err
+}
+
+func passSegmentLocked(ctx context.Context, xs []int) error {
+	var l sync.Locked[string]
+	_, err := xs.group(ctx, limit = 4).map(x => {
+		l.WithLock(func(s *string) { *s = "a" })
+		return x
+	})
+	l.WithLock(func(s *string) { *s = "b" })
+	return err
+}
+
+func passSegmentConstView(ctx context.Context, xs []int, in []int) error {
+	var v const []int = in
+	_, err := xs.group(ctx, limit = 4).map(x => {
+		println(len(v))
+		return x
+	})
+	return err
+}
+
+func passOrdinaryChainWrite(xs []int) int {
+	s := "a"
+	ys := xs.map(x => {
+		s = "b"
+		return x
+	})
+	println(s)
+	return len(ys)
+}
+
+type chainHost struct{}
+
+func (chainHost) group(ctx context.Context, n int) []int { return nil }
+
+func passMethodNamedGroup(ctx context.Context, h chainHost) int {
+	s := "a"
+	ys := h.group(ctx, 1).map(x => {
+		s = "b"
+		return x
+	})
+	println(s)
+	return len(ys)
 }

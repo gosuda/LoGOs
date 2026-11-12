@@ -53,3 +53,31 @@ func isErrorType(t types2.Type) bool {
 	named, ok := types2.Unalias(t).(*types2.Named)
 	return ok && named.Obj().Pkg() == nil && named.Obj().Name() == "error"
 }
+
+func segmentFuncs(pass *Pass, call *syntax.CallExpr) []syntax.Expr {
+	if !onSegment(pass, call) {
+		return nil
+	}
+	var fns []syntax.Expr
+	for _, arg := range call.ArgList {
+		switch fn := syntax.Unparen(arg).(type) {
+		case *syntax.LambdaExpr, *syntax.FuncLit:
+			fns = append(fns, fn)
+		}
+	}
+	return fns
+}
+
+func onSegment(pass *Pass, call *syntax.CallExpr) bool {
+	for cur := call; isSegmentCall(cur); {
+		recv := callOf(syntax.Unparen(cur.Fun).(*syntax.SelectorExpr).X)
+		if recv == nil {
+			return false
+		}
+		if _, ok := types2.LogosGroupStage(pass.Pkg, pass.Info, recv); ok {
+			return true
+		}
+		cur = recv
+	}
+	return false
+}
