@@ -1069,6 +1069,20 @@ Children in flight plus finished results not yet consumed MUST NOT exceed `limit
 
 Each group stage MUST keep its own limit, including a stage inside a segment lambda. [T-206]
 
+A `?` in a segment lambda MUST fail the stage: the first failure in completion order MUST be the returned error and MUST cancel the siblings. [T-206]
+
+A panic in a segment lambda MUST become `*logos/rt.PanicError`. [T-206]
+
+When no child failed and the parent context is done after the join, the error MUST be the context's error. [T-206]
+
+An ordered stage MUST fail exactly where the same chain without the stage fails: a failed element MUST NOT be passed over. [T-206]
+
+A consumer that stops early MUST discard the failure of any element after the last delivered one. [T-206]
+
+A `break`, a `return`, a panic in the loop body or in the source, and a terminal that has its answer MUST cancel and join every child before control leaves the statement. [T-206]
+
+A receive-channel source MUST stop waiting when the stage is cancelled. [T-206]
+
 `logos/sync.Locked[T]` MUST expose `WithLock(f func(*T))`. [T-206]
 
 `WithLock` MUST hold `Lock`, defer `Unlock`, then call the function. [T-206]
