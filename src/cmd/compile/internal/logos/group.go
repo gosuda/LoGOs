@@ -260,7 +260,7 @@ func (fc *funcLower) groupJoinCheck(pos syntax.Pos, top groupFrame) (native, tex
 	fl := fc.fl
 	errSpelling := fc.nextErr()
 	siteSpelling := fl.newSite(pos, pos.Line())
-	exitNative, exitText, exitSubs := fc.exitPair(pos, errSpelling, siteSpelling)
+	exitNative, exitText, exitSubs := fc.scopedExitPair(pos, errSpelling, siteSpelling)
 	subs = exitSubs
 	mkWait := func() *syntax.CallExpr {
 		return callOf(pos, selOf(pos, nameOf(pos, top.g), "Wait"), nil)
@@ -371,13 +371,6 @@ func (fc *funcLower) groupPrefixJoin(pos syntax.Pos, top groupFrame, off int) []
 	joinNative, joinText, joinSubs := fc.groupJoinCheck(pos, top)
 	fc.fl.addT(off, off, renderText(joinText, joinSubs))
 	return joinNative
-}
-
-func (fc *funcLower) groupPrependJoin(pos syntax.Pos, spanStart int, native []syntax.Stmt) []syntax.Stmt {
-	if top, ok := fc.groupTop(); ok && !top.child {
-		return append(fc.groupPrefixJoin(pos, top, spanStart), native...)
-	}
-	return native
 }
 
 func (fc *funcLower) lowerGroupReturn(s *syntax.ReturnStmt, top groupFrame) []syntax.Stmt {

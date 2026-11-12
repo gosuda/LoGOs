@@ -105,6 +105,22 @@ func (fc *funcLower) zerosAt(pos syntax.Pos) []syntax.Expr {
 }
 
 func (fc *funcLower) exitPair(pos syntax.Pos, errSpelling, siteSpelling string) (native, text []syntax.Stmt, subs []textSub) {
+	return fc.exitPairAt(pos, pos, errSpelling, siteSpelling)
+}
+
+func (fc *funcLower) exitPairAt(checkPos, pos syntax.Pos, errSpelling, siteSpelling string) (native, text []syntax.Stmt, subs []textSub) {
+	native, text, subs = fc.scopedExitPair(pos, errSpelling, siteSpelling)
+	top, ok := fc.groupTop()
+	if !ok || top.child {
+		return native, text, subs
+	}
+	joinNative, joinText, joinSubs := fc.groupJoinCheck(checkPos, top)
+	native = append(joinNative, native...)
+	text = append(joinText, text...)
+	return native, text, append(subs, joinSubs...)
+}
+
+func (fc *funcLower) scopedExitPair(pos syntax.Pos, errSpelling, siteSpelling string) (native, text []syntax.Stmt, subs []textSub) {
 	native = buildExit(exitSpec{
 		pos:   pos,
 		err:   nameOf(pos, errSpelling),
@@ -631,7 +647,7 @@ func (fc *funcLower) tryAssignCore(s *syntax.AssignStmt, t *syntax.TryExpr, call
 	callText := fl.lazyText(span{start: fl.off(leftmostOf(call.Fun)), end: qOff})
 	errSpelling := fc.nextErr()
 	siteSpelling := fl.newSite(tpos, tpos.Line())
-	exitNative, exitText, exitSubs := fc.exitPair(tpos, errSpelling, siteSpelling)
+	exitNative, exitText, exitSubs := fc.exitPairAt(stmtPos, tpos, errSpelling, siteSpelling)
 	var native []syntax.Stmt
 	tw := &twin{}
 	tw.absorb(exitSubs)
@@ -646,7 +662,7 @@ func (fc *funcLower) tryAssignCore(s *syntax.AssignStmt, t *syntax.TryExpr, call
 			errDefineOf(stmtPos, []syntax.Expr{lhsMark}, callMark, nameOf(tpos, errSpelling)),
 			errCheckOf(stmtPos, nameOf(tpos, errSpelling), exitText),
 		}, tw.subs)
-		return fc.groupPrependJoin(stmtPos, spanStart, native), text, spanStart, spanEnd
+		return native, text, spanStart, spanEnd
 	}
 	errDecl := nameOf(tpos, errSpelling)
 	errUse := nameOf(tpos, errSpelling)
@@ -663,7 +679,7 @@ func (fc *funcLower) tryAssignCore(s *syntax.AssignStmt, t *syntax.TryExpr, call
 		assignOf(stmtPos, withErrT, []syntax.Expr{callMark}),
 		errCheckOf(stmtPos, nameOf(tpos, errSpelling), exitText),
 	})}, tw.subs)
-	return fc.groupPrependJoin(stmtPos, spanStart, native), text, spanStart, spanEnd
+	return native, text, spanStart, spanEnd
 }
 
 func (fc *funcLower) lowerTryExpr(s *syntax.ExprStmt, t *syntax.TryExpr, call *syntax.CallExpr) []syntax.Stmt {
@@ -683,7 +699,7 @@ func (fc *funcLower) tryExprCore(s *syntax.ExprStmt, t *syntax.TryExpr, call *sy
 	callText := fl.lazyText(span{start: fl.off(stmtPos), end: qOff})
 	errSpelling := fc.nextErr()
 	siteSpelling := fl.newSite(tpos, tpos.Line())
-	exitNative, exitText, exitSubs := fc.exitPair(tpos, errSpelling, siteSpelling)
+	exitNative, exitText, exitSubs := fc.exitPairAt(stmtPos, tpos, errSpelling, siteSpelling)
 	tw := &twin{}
 	tw.absorb(exitSubs)
 	callMark := tw.mark(tpos, callText)
@@ -703,5 +719,5 @@ func (fc *funcLower) tryExprCore(s *syntax.ExprStmt, t *syntax.TryExpr, call *sy
 			errCheckOf(stmtPos, nameOf(tpos, errSpelling), exitText),
 		}, tw.subs)
 	}
-	return fc.groupPrependJoin(stmtPos, spanStart, native), text, spanStart, spanEnd
+	return native, text, spanStart, spanEnd
 }
