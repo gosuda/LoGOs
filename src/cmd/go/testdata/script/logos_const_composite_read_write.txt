@@ -1,0 +1,595 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+mkdir $WORK/bin
+
+cd local
+logos build -o $WORK/bin/local$GOEXE .
+exec $WORK/bin/local$GOEXE control
+stdout '^before$'
+stdout '^after 0$'
+cp stdout $WORK/control.txt
+
+! exec $WORK/bin/local$GOEXE var-copy
+stdout '^before$'
+! stdout '^after'
+stderr '\[signal SIG(SEGV|BUS)'
+! exec $WORK/bin/local$GOEXE element-field
+! stdout '^after'
+stderr '\[signal SIG(SEGV|BUS)'
+! exec $WORK/bin/local$GOEXE variable-index
+! stdout '^after'
+stderr '\[signal SIG(SEGV|BUS)'
+! exec $WORK/bin/local$GOEXE reslice-append
+! stdout '^after'
+stderr '\[signal SIG(SEGV|BUS)'
+! exec $WORK/bin/local$GOEXE writer-call
+! stdout '^after'
+stderr '\[signal SIG(SEGV|BUS)'
+! exec $WORK/bin/local$GOEXE sort
+! stdout '^after'
+stderr '\[signal SIG(SEGV|BUS)'
+! exec $WORK/bin/local$GOEXE unsafe
+! stdout '^after'
+stderr '\[signal SIG(SEGV|BUS)'
+! exec $WORK/bin/local$GOEXE copy-into
+! stdout '^after'
+stderr '\[signal SIG(SEGV|BUS)'
+! exec $WORK/bin/local$GOEXE clear-var
+! stdout '^after'
+stderr '\[signal SIG(SEGV|BUS)'
+! exec $WORK/bin/local$GOEXE reverse-var
+! stdout '^after'
+stderr '\[signal SIG(SEGV|BUS)'
+! exec $WORK/bin/local$GOEXE three-index
+! stdout '^after'
+stderr '\[signal SIG(SEGV|BUS)'
+! exec $WORK/bin/local$GOEXE reflect-set
+! stdout '^after'
+stderr '\[signal SIG(SEGV|BUS)'
+! exec $WORK/bin/local$GOEXE boxed
+! stdout '^after'
+stderr '\[signal SIG(SEGV|BUS)'
+! exec $WORK/bin/local$GOEXE range-rows
+! stdout '^after'
+stderr '\[signal SIG(SEGV|BUS)'
+! exec $WORK/bin/local$GOEXE row-copy
+! stdout '^after'
+stderr '\[signal SIG(SEGV|BUS)'
+! exec $WORK/bin/local$GOEXE row-slice
+! stdout '^after'
+stderr '\[signal SIG(SEGV|BUS)'
+! exec $WORK/bin/local$GOEXE inner-slice
+! stdout '^after'
+stderr '\[signal SIG(SEGV|BUS)'
+! exec $WORK/bin/local$GOEXE outer-slice
+! stdout '^after'
+stderr '\[signal SIG(SEGV|BUS)'
+! exec $WORK/bin/local$GOEXE plain-whole
+! stdout '^after'
+stderr '\[signal SIG(SEGV|BUS)'
+! exec $WORK/bin/local$GOEXE func-map-bearing
+! stdout '^after'
+stderr '\[signal SIG(SEGV|BUS)'
+
+exec $WORK/bin/local$GOEXE range-element
+cmp stdout $WORK/control.txt
+exec $WORK/bin/local$GOEXE struct-copy
+cmp stdout $WORK/control.txt
+exec $WORK/bin/local$GOEXE element-copy
+cmp stdout $WORK/control.txt
+exec $WORK/bin/local$GOEXE map-copy
+cmp stdout $WORK/control.txt
+exec $WORK/bin/local$GOEXE array-copy
+cmp stdout $WORK/control.txt
+exec $WORK/bin/local$GOEXE whole
+cmp stdout $WORK/control.txt
+exec $WORK/bin/local$GOEXE array-pointer
+cmp stdout $WORK/control.txt
+exec $WORK/bin/local$GOEXE plain-array-pointer
+cmp stdout $WORK/control.txt
+exec $WORK/bin/local$GOEXE map-value
+cmp stdout $WORK/control.txt
+exec $WORK/bin/local$GOEXE func-array-copy
+cmp stdout $WORK/control.txt
+exec $WORK/bin/local$GOEXE func-address
+cmp stdout $WORK/control.txt
+
+logos eject -o out
+cd out
+exec $GOROOT/bin/gofmt -l .
+! stdout .
+go build -o $WORK/bin/ejected$GOEXE .
+exec $WORK/bin/ejected$GOEXE control
+cmp stdout $WORK/control.txt
+exists $UPROOT1272/bin/go
+exec $UPROOT1272/bin/go version
+stdout '^go version go1\.27\.2 '
+exec env -u GOROOT $UPROOT1272/bin/go build -o $WORK/bin/upstream$GOEXE .
+exec $WORK/bin/upstream$GOEXE range-element
+cmp stdout $WORK/control.txt
+exec $WORK/bin/upstream$GOEXE struct-copy
+cmp stdout $WORK/control.txt
+exec $WORK/bin/upstream$GOEXE element-copy
+cmp stdout $WORK/control.txt
+exec $WORK/bin/upstream$GOEXE map-copy
+cmp stdout $WORK/control.txt
+exec $WORK/bin/upstream$GOEXE array-copy
+cmp stdout $WORK/control.txt
+exec $WORK/bin/upstream$GOEXE whole
+cmp stdout $WORK/control.txt
+exec $WORK/bin/upstream$GOEXE array-pointer
+cmp stdout $WORK/control.txt
+exec $WORK/bin/upstream$GOEXE plain-array-pointer
+cmp stdout $WORK/control.txt
+exec $WORK/bin/upstream$GOEXE map-value
+cmp stdout $WORK/control.txt
+exec $WORK/bin/upstream$GOEXE func-array-copy
+cmp stdout $WORK/control.txt
+exec $WORK/bin/upstream$GOEXE func-address
+cmp stdout $WORK/control.txt
+cd ../..
+
+cd imported/app
+logos build -o $WORK/bin/imported$GOEXE .
+exec $WORK/bin/imported$GOEXE control
+stdout '^before$'
+stdout '^after 0$'
+cp stdout $WORK/icontrol.txt
+exec $WORK/bin/imported$GOEXE var-copy
+cmp stdout $WORK/icontrol.txt
+exec $WORK/bin/imported$GOEXE element-field
+cmp stdout $WORK/icontrol.txt
+exec $WORK/bin/imported$GOEXE variable-index
+cmp stdout $WORK/icontrol.txt
+exec $WORK/bin/imported$GOEXE whole-copy
+cmp stdout $WORK/icontrol.txt
+! exec $WORK/bin/imported$GOEXE plain-field
+! stdout '^after'
+stderr '\[signal SIG(SEGV|BUS)'
+! exec $WORK/bin/imported$GOEXE plain-slice
+! stdout '^after'
+stderr '\[signal SIG(SEGV|BUS)'
+
+logos eject -o out
+cd out
+exec $GOROOT/bin/gofmt -l .
+! stdout .
+go build -o $WORK/bin/iejected$GOEXE .
+exec $WORK/bin/iejected$GOEXE control
+cmp stdout $WORK/icontrol.txt
+exec $WORK/bin/iejected$GOEXE var-copy
+cmp stdout $WORK/icontrol.txt
+exec $WORK/bin/iejected$GOEXE element-field
+cmp stdout $WORK/icontrol.txt
+exec $WORK/bin/iejected$GOEXE variable-index
+cmp stdout $WORK/icontrol.txt
+exec $WORK/bin/iejected$GOEXE whole-copy
+cmp stdout $WORK/icontrol.txt
+exec env -u GOROOT $UPROOT1272/bin/go build -o $WORK/bin/iupstream$GOEXE .
+exec $WORK/bin/iupstream$GOEXE var-copy
+cmp stdout $WORK/icontrol.txt
+exec $WORK/bin/iupstream$GOEXE element-field
+cmp stdout $WORK/icontrol.txt
+exec $WORK/bin/iupstream$GOEXE variable-index
+cmp stdout $WORK/icontrol.txt
+exec $WORK/bin/iupstream$GOEXE whole-copy
+cmp stdout $WORK/icontrol.txt
+cd ../../..
+
+-- local/go.mod --
+module example.com/ccreadwrite
+
+go 1.27
+
+-- local/main.lgo --
+package main
+
+import (
+	"fmt"
+	"os"
+	"reflect"
+	"slices"
+	"sort"
+	"unsafe"
+)
+
+type box struct {
+	M map[string]int
+	L []int
+	A [3]int
+	N int
+}
+
+type plain struct {
+	V []int
+	A [3]int
+	N int
+}
+
+type row struct {
+	V []int
+	N int
+}
+
+const cfg = box{M: map[string]int{"a": 1}, L: []int{3, 2, 1}, A: [3]int{4, 5, 6}, N: 7}
+
+const items = []box{
+	{M: map[string]int{"a": 1}, L: []int{1, 2}, A: [3]int{1, 1, 1}, N: 1},
+	{M: map[string]int{"a": 5}, L: []int{10, 20}, A: [3]int{2, 2, 2}, N: 2},
+}
+
+const pl = plain{V: []int{3, 2, 1}, A: [3]int{4, 5, 6}, N: 7}
+
+const rows = []row{{V: []int{1, 2}, N: 1}, {V: []int{10, 20}, N: 2}}
+
+const grid = [][]int{{1, 2}, {3, 4}}
+
+const lookup = map[string][]int{"a": {5, 6}, "b": {7, 8}}
+
+func bump(s []int) { s[0] = 70 }
+
+func varCopy() int {
+	l := cfg.L
+	l[0] = 70
+	return 0
+}
+
+func elementField() int {
+	l := items[1].L
+	l[0] = 70
+	return 0
+}
+
+func variableIndex() int {
+	i := 1
+	l := items[i].L
+	l[0] = 70
+	return 0
+}
+
+func resliceAppend() int {
+	s := cfg.L[:1]
+	s = append(s, 70)
+	return len(s) - 2
+}
+
+func writerCall() int {
+	bump(cfg.L)
+	return 0
+}
+
+func sortCall() int {
+	sort.Ints(cfg.L)
+	return 0
+}
+
+func unsafeWrite() int {
+	p := unsafe.SliceData(cfg.L)
+	*p = 70
+	return 0
+}
+
+func copyInto() int {
+	l := cfg.L
+	copy(l, []int{70, 70, 70})
+	return 0
+}
+
+func clearVar() int {
+	l := cfg.L
+	clear(l)
+	return 0
+}
+
+func reverseVar() int {
+	l := cfg.L
+	slices.Reverse(l)
+	return 0
+}
+
+func threeIndex() int {
+	l := cfg.L[0:2:2]
+	l[0] = 70
+	return 0
+}
+
+func reflectSet() int {
+	reflect.ValueOf(cfg.L).Index(0).SetInt(70)
+	return 0
+}
+
+func boxed() int {
+	var x any = cfg.L
+	x.([]int)[0] = 70
+	return 0
+}
+
+func rangeRows() int {
+	for _, r := range rows {
+		r.V[0] = 70
+	}
+	return 0
+}
+
+func rowCopy() int {
+	r := rows[1]
+	r.V[0] = 70
+	return 0
+}
+
+func rowSlice() int {
+	s := rows[1:]
+	s[0].V[0] = 70
+	return 0
+}
+
+func innerSlice() int {
+	r := grid[0]
+	r[0] = 70
+	return 0
+}
+
+func outerSlice() int {
+	g := grid
+	g[0] = []int{70}
+	return 0
+}
+
+func plainWhole() int {
+	p := &pl
+	p.V[0] = 70
+	return 0
+}
+
+func rangeElement() int {
+	for _, e := range items {
+		e.L[0] = 70
+	}
+	return 0
+}
+
+func structCopy() int {
+	c := cfg
+	c.L[0] = 70
+	return 0
+}
+
+func elementCopy() int {
+	e := items[1]
+	e.L[0] = 70
+	return 0
+}
+
+func mapCopy() int {
+	m := cfg.M
+	m["z"] = 1
+	return 0
+}
+
+func arrayCopy() int {
+	a := cfg.A
+	a[0] = 99
+	return 0
+}
+
+func whole() int {
+	p := &cfg
+	p.L[0] = 70
+	return 0
+}
+
+func arrayPointer() int {
+	p := &cfg.A
+	p[0] = 70
+	return 0
+}
+
+func plainArrayPointer() int {
+	p := &pl.A
+	p[0] = 71
+	return 0
+}
+
+func mapValue() int {
+	v, _ := lookup["a"]
+	v[0] = 70
+	return 0
+}
+
+func funcMapBearing() int {
+	const c = box{M: map[string]int{"a": 1}, L: []int{5, 6, 7}, N: 1}
+	l := c.L
+	l[0] = 70
+	return c.L[0] - 5
+}
+
+func funcArrayCopy() int {
+	const a = [3]int{5, 6, 7}
+	b := a
+	b[0] = 70
+	return a[0] - 5
+}
+
+func funcAddress() int {
+	const c = plain{V: []int{5, 6, 7}, A: [3]int{1, 2, 3}, N: 1}
+	p := &c
+	q := &c.A
+	r := &c.N
+	p.N = 70
+	q[0] = 71
+	*r = 72
+	return c.N - 1 + c.A[0] - 1
+}
+
+func control() int { return 0 }
+
+var cases = map[string]func() int{
+	"var-copy":          varCopy,
+	"element-field":     elementField,
+	"variable-index":    variableIndex,
+	"reslice-append":    resliceAppend,
+	"writer-call":       writerCall,
+	"sort":              sortCall,
+	"unsafe":            unsafeWrite,
+	"copy-into":         copyInto,
+	"clear-var":         clearVar,
+	"reverse-var":       reverseVar,
+	"three-index":       threeIndex,
+	"reflect-set":       reflectSet,
+	"boxed":             boxed,
+	"range-rows":        rangeRows,
+	"row-copy":          rowCopy,
+	"row-slice":         rowSlice,
+	"inner-slice":       innerSlice,
+	"outer-slice":       outerSlice,
+	"plain-whole":       plainWhole,
+	"range-element":     rangeElement,
+	"struct-copy":       structCopy,
+	"element-copy":      elementCopy,
+	"map-copy":          mapCopy,
+	"array-copy":        arrayCopy,
+	"whole":             whole,
+	"array-pointer":     arrayPointer,
+	"plain-array-pointer": plainArrayPointer,
+	"map-value":         mapValue,
+	"func-map-bearing":  funcMapBearing,
+	"func-array-copy":   funcArrayCopy,
+	"func-address":      funcAddress,
+	"control":           control,
+}
+
+func drift() int {
+	a, _ := lookup["a"]
+	d := cfg.L[0] - 3 + items[1].L[0] - 10 + len(cfg.M) - 1 + cfg.A[0] - 4
+	d += pl.V[0] - 3 + pl.A[0] - 4 + rows[0].V[0] - 1 + rows[1].N - 2
+	d += grid[0][0] - 1 + len(grid[0]) - 2 + a[0] - 5
+	return d
+}
+
+func main() {
+	fmt.Println("before")
+	run, ok := cases[os.Args[1]]
+	if !ok {
+		os.Exit(2)
+	}
+	delta := run()
+	fmt.Println("after", drift()+delta)
+}
+
+-- imported/go.mod --
+module example.com/ccreadwriteimp
+
+go 1.27
+
+-- imported/lib/go.mod --
+module example.com/ccrwlib
+
+go 1.27
+
+-- imported/lib/lib.lgo --
+package lib
+
+type Box struct {
+	M map[string]int
+	L []int
+	A [3]int
+	N int
+}
+
+type Plain struct {
+	L []int
+	N int
+}
+
+const C = Box{M: map[string]int{"a": 1}, L: []int{3, 2, 1}, A: [3]int{4, 5, 6}, N: 7}
+
+const Items = []Box{
+	{M: map[string]int{"a": 1}, L: []int{1, 2}, A: [3]int{1, 1, 1}, N: 1},
+	{M: map[string]int{"a": 5}, L: []int{10, 20}, A: [3]int{2, 2, 2}, N: 2},
+}
+
+const P = Plain{L: []int{3, 2, 1}, N: 7}
+
+const Ints = []int{9, 8, 7}
+
+-- imported/app/go.mod --
+module example.com/ccrwapp
+
+go 1.27
+
+require example.com/ccrwlib v0.0.0
+
+replace example.com/ccrwlib => ../lib
+
+-- imported/app/main.lgo --
+package main
+
+import (
+	"fmt"
+	"os"
+
+	"example.com/ccrwlib"
+)
+
+func varCopy() int {
+	l := lib.C.L
+	l[0] = 70
+	return 0
+}
+
+func elementField() int {
+	l := lib.Items[1].L
+	l[0] = 70
+	return 0
+}
+
+func variableIndex() int {
+	i := 1
+	l := lib.Items[i].L
+	l[0] = 70
+	return 0
+}
+
+func wholeCopy() int {
+	c := lib.C
+	c.L[0] = 70
+	return 0
+}
+
+func plainField() int {
+	l := lib.P.L
+	l[0] = 70
+	return 0
+}
+
+func plainSlice() int {
+	l := lib.Ints
+	l[0] = 70
+	return 0
+}
+
+func control() int { return 0 }
+
+var cases = map[string]func() int{
+	"var-copy":       varCopy,
+	"element-field":  elementField,
+	"variable-index": variableIndex,
+	"whole-copy":     wholeCopy,
+	"plain-field":    plainField,
+	"plain-slice":    plainSlice,
+	"control":        control,
+}
+
+func drift() int {
+	return lib.C.L[0] - 3 + lib.Items[1].L[0] - 10 + lib.P.L[0] - 3 + lib.Ints[0] - 9
+}
+
+func main() {
+	fmt.Println("before")
+	run, ok := cases[os.Args[1]]
+	if !ok {
+		os.Exit(2)
+	}
+	delta := run()
+	fmt.Println("after", drift()+delta)
+}
