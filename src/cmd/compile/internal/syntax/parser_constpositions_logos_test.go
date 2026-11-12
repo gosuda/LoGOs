@@ -16,6 +16,9 @@ func TestPlainGoRejectsConstPositions(t *testing.T) {
 		"package p\n\nconst switch x {\n}",
 		"package p\n\nconst func F() {}",
 		"package p\n\ntype I interface {\n\tconst M() int\n}",
+		"package p\n\ntype I interface {\n\tconst Name string\n}",
+		"package p\n\nfunc f(x const []int) {}",
+		"package p\n\nvar v const int",
 	} {
 		var errs []string
 		_, _ = Parse(nil, strings.NewReader(src), func(err error) {
