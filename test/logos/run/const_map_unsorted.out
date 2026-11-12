@@ -7,3 +7,13 @@ ok uints9-order
 ok floats8-order
 ok floats9-order
 ok bools-order
+ok arrs8-order
+ok arrs8b-order
+ok arrs9-order
+ok arrs9b-order
+ok pairs8-order
+ok pairs8b-order
+ok pairs9-order
+ok pairs9b-order
+ok cells9-order
+ok cells9b-order
