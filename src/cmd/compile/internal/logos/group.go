@@ -25,6 +25,7 @@ type groupFrame struct {
 	segment    bool
 	segmentRes types2.Type
 	body       *syntax.BlockStmt
+	planned    bool
 }
 
 func (top groupFrame) spawn() string {
@@ -146,6 +147,16 @@ func (fc *funcLower) groupBranchStmt(s *syntax.BranchStmt) ([]syntax.Stmt, bool)
 }
 
 func (fc *funcLower) scopeGroupStmt(s *syntax.GroupStmt, active []*scopeDeferCtx, stack []scopeFrame) []syntax.Stmt {
+	if len(s.Body.List) == 0 {
+		return []syntax.Stmt{s}
+	}
+	frame := fc.planGroup(s)
+	ctx := &scopeDeferCtx{owner: s.Body, startOff: fc.fl.off(s.Body.Pos()), endOff: fc.fl.off(s.Body.Rbrace), depth: len(stack), join: &frame}
+	fc.scopeCtxs = append(fc.scopeCtxs, ctx)
+	if fc.groupCtxs == nil {
+		fc.groupCtxs = make(map[syntax.Node]*scopeDeferCtx)
+	}
+	fc.groupCtxs[s.Body] = ctx
 	s.Body.List = fc.scopeBlockList(s.Body.List, s.Body, fc.fl.off(s.Body.Rbrace), active, stack)
 	return []syntax.Stmt{s}
 }
@@ -257,32 +268,67 @@ func (fc *funcLower) groupTakeChild(cfc *funcLower) {
 }
 
 func (fc *funcLower) groupJoinCheck(pos syntax.Pos, top groupFrame) (native, text []syntax.Stmt, subs []textSub) {
-	fl := fc.fl
 	errSpelling := fc.nextErr()
-	siteSpelling := fl.newSite(pos, pos.Line())
-	exitNative, exitText, exitSubs := fc.scopedExitPair(pos, errSpelling, siteSpelling)
-	subs = exitSubs
-	mkWait := func() *syntax.CallExpr {
-		return callOf(pos, selOf(pos, nameOf(pos, top.g), "Wait"), nil)
-	}
-	mkJoin := func(jname, ename *syntax.Name, exit []syntax.Stmt) []syntax.Stmt {
-		set := assignOf(pos, []syntax.Expr{jname}, []syntax.Expr{nameOf(pos, "true")})
-		check := errCheckInitOf(pos, nil, mkWait(), ename, exit)
-		cond := at(&syntax.Operation{Op: syntax.Not, X: jname}, pos)
-		return []syntax.Stmt{ifOf(pos, nil, cond, []syntax.Stmt{set, check})}
-	}
-	native = mkJoin(nameOf(pos, top.j), nameOf(pos, errSpelling), exitNative)
-	text = mkJoin(nameOf(pos, top.j), nameOf(pos, errSpelling), exitText)
+	siteSpelling := fc.fl.newSite(pos, pos.Line())
+	exitNative, exitText, subs := fc.scopedExitPair(pos, errSpelling, siteSpelling)
+	native, text = fc.groupJoinStmts(pos, top, errSpelling, exitNative, exitText)
 	return native, text, subs
+}
+
+func (fc *funcLower) groupJoinWait(pos syntax.Pos, top groupFrame) (native, text []syntax.Stmt) {
+	errSpelling := fc.nextErr()
+	siteSpelling := fc.fl.newSite(pos, pos.Line())
+	exitNative, exitText := fc.plainExitPair(pos, errSpelling, siteSpelling)
+	return fc.groupJoinStmts(pos, top, errSpelling, exitNative, exitText)
+}
+
+func (fc *funcLower) groupJoinStmts(pos syntax.Pos, top groupFrame, errSpelling string, exitNative, exitText []syntax.Stmt) (native, text []syntax.Stmt) {
+	mkJoin := func(exit []syntax.Stmt) []syntax.Stmt {
+		set := assignOf(pos, []syntax.Expr{nameOf(pos, top.j)}, []syntax.Expr{nameOf(pos, "true")})
+		wait := callOf(pos, selOf(pos, nameOf(pos, top.g), "Wait"), nil)
+		check := errCheckInitOf(pos, nil, wait, nameOf(pos, errSpelling), exit)
+		cond := at(&syntax.Operation{Op: syntax.Not, X: nameOf(pos, top.j)}, pos)
+		join := ifOf(pos, nil, cond, []syntax.Stmt{set, check})
+		fc.fl.markJoin(join)
+		return []syntax.Stmt{join}
+	}
+	return mkJoin(exitNative), mkJoin(exitText)
+}
+
+func (fl *fileLower) markJoin(s syntax.Stmt) {
+	if fl.groupJoins == nil {
+		fl.groupJoins = make(map[syntax.Stmt]bool)
+	}
+	fl.groupJoins[s] = true
+}
+
+func groupWaitOnce(pos syntax.Pos, g, j string) *syntax.IfStmt {
+	return ifOf(pos, nil,
+		at(&syntax.Operation{Op: syntax.Not, X: nameOf(pos, j)}, pos),
+		[]syntax.Stmt{
+			assignOf(pos, []syntax.Expr{nameOf(pos, j)}, []syntax.Expr{nameOf(pos, "true")}),
+			exprStmtOf(pos, callOf(pos, selOf(pos, nameOf(pos, g), "Wait"), nil)),
+		})
+}
+
+func (fc *funcLower) newGroupFrame(s *syntax.GroupStmt) groupFrame {
+	n := fc.groupSeq
+	fc.groupSeq++
+	return groupFrame{
+		g:    fmt.Sprintf("_logos_g%d", n),
+		gctx: fmt.Sprintf("_logos_gctx%d", n),
+		j:    fmt.Sprintf("_logos_j%d", n),
+		body: s.Body,
+	}
 }
 
 func (fc *funcLower) lowerGroupInline(s *syntax.GroupStmt) []syntax.Stmt {
 	fl := fc.fl
-	n := fc.groupSeq
-	fc.groupSeq++
-	g := fmt.Sprintf("_logos_g%d", n)
-	gctx := fmt.Sprintf("_logos_gctx%d", n)
-	j := fmt.Sprintf("_logos_j%d", n)
+	frame, planned := fl.groupPlans[s.Body]
+	if !planned {
+		frame = fc.newGroupFrame(s)
+	}
+	g, gctx, j := frame.g, frame.gctx, frame.j
 	fl.needRT = true
 	pos := s.Pos()
 	ctxSpan := span{start: fl.off(leftmostOf(s.Ctx)), end: groupExprEnd(fl.src, fl.off(leftmostOf(s.Ctx)))}
@@ -301,14 +347,7 @@ func (fc *funcLower) lowerGroupInline(s *syntax.GroupStmt) []syntax.Stmt {
 	kept := leftoverComments(fl, span{start: headStart, end: braceOff + 1}, pieces)
 	guardText := renderText([]syntax.Stmt{
 		defineOf(pos, []syntax.Expr{nameOf(pos, j)}, []syntax.Expr{nameOf(pos, "false")}),
-		deferOf(pos, callOf(pos, deferClosure(pos, []syntax.Stmt{
-			ifOf(pos, nil,
-				at(&syntax.Operation{Op: syntax.Not, X: nameOf(pos, j)}, pos),
-				[]syntax.Stmt{
-					assignOf(pos, []syntax.Expr{nameOf(pos, j)}, []syntax.Expr{nameOf(pos, "true")}),
-					exprStmtOf(pos, callOf(pos, selOf(pos, nameOf(pos, g), "Wait"), nil)),
-				}),
-		}), nil)),
+		deferOf(pos, callOf(pos, deferClosure(pos, []syntax.Stmt{groupWaitOnce(pos, g, j)}), nil)),
 	}, nil)
 	rebindText, rebindStmts := groupRebind(pos, s.Ctx, gctx)
 	fl.addT(headStart, braceOff, cat(
@@ -325,19 +364,12 @@ func (fc *funcLower) lowerGroupInline(s *syntax.GroupStmt) []syntax.Stmt {
 		[]syntax.Expr{callOf(pos, rtSel(pos, "NewGroup"), []syntax.Expr{s.Ctx, limitNode})})
 	blankUse := assignOf(pos, []syntax.Expr{nameOf(pos, "_")}, []syntax.Expr{nameOf(pos, gctx)})
 	flagDef := defineOf(pos, []syntax.Expr{nameOf(pos, j)}, []syntax.Expr{nameOf(pos, "false")})
-	guardBody := ifOf(pos, nil,
-		at(&syntax.Operation{Op: syntax.Not, X: nameOf(pos, j)}, pos),
-		[]syntax.Stmt{
-			assignOf(pos, []syntax.Expr{nameOf(pos, j)}, []syntax.Expr{nameOf(pos, "true")}),
-			exprStmtOf(pos, callOf(pos, selOf(pos, nameOf(pos, g), "Wait"), nil)),
-		})
-	guardDef := deferOf(pos, callOf(pos, deferClosure(pos, []syntax.Stmt{guardBody}), nil))
-	fc.groupStack = append(fc.groupStack, groupFrame{g: g, gctx: gctx, j: j, body: s.Body})
+	guardDef := deferOf(pos, callOf(pos, deferClosure(pos, []syntax.Stmt{groupWaitOnce(pos, g, j)}), nil))
+	fc.groupStack = append(fc.groupStack, frame)
 	s.Body.List = fc.lowerList(s.Body.List)
 	fc.groupStack = fc.groupStack[:len(fc.groupStack)-1]
-	top := groupFrame{g: g, gctx: gctx, j: j, body: s.Body}
 	rbrace := s.Body.Rbrace
-	joinNative, joinText, joinSubs := fc.groupJoinCheck(rbrace, top)
+	joinNative, joinText, joinSubs := fc.groupEndJoin(rbrace, frame)
 	rbraceOff := fl.off(rbrace)
 	fl.addT(rbraceOff+1, rbraceOff+1, cat(gen("\n"), renderText(joinText, joinSubs), gen("}\n")))
 	out := append([]syntax.Stmt{header, blankUse}, rebindStmts...)
@@ -345,6 +377,23 @@ func (fc *funcLower) lowerGroupInline(s *syntax.GroupStmt) []syntax.Stmt {
 	block := blockOf(pos, out)
 	block.Rbrace = rbrace
 	return []syntax.Stmt{block}
+}
+
+func (fc *funcLower) groupEndJoin(pos syntax.Pos, top groupFrame) (native, text []syntax.Stmt, subs []textSub) {
+	if top.planned {
+		return nil, nil, nil
+	}
+	return fc.groupJoinCheck(pos, top)
+}
+
+func (fc *funcLower) planGroup(s *syntax.GroupStmt) groupFrame {
+	frame := fc.newGroupFrame(s)
+	frame.planned = true
+	if fc.fl.groupPlans == nil {
+		fc.fl.groupPlans = make(map[*syntax.BlockStmt]groupFrame)
+	}
+	fc.fl.groupPlans[s.Body] = frame
+	return frame
 }
 
 func groupRebind(pos syntax.Pos, ctx syntax.Expr, gctx string) (string, []syntax.Stmt) {
@@ -368,6 +417,9 @@ func plainContextName(e syntax.Expr) (string, bool) {
 }
 
 func (fc *funcLower) groupPrefixJoin(pos syntax.Pos, top groupFrame, off int) []syntax.Stmt {
+	if top.planned {
+		return nil
+	}
 	joinNative, joinText, joinSubs := fc.groupJoinCheck(pos, top)
 	fc.fl.addT(off, off, renderText(joinText, joinSubs))
 	return joinNative

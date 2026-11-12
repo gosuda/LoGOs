@@ -231,6 +231,8 @@ type fileLower struct {
 	chainGrp           chainGroup               // group-body scope for chain results.
 	chainExit          func(err string) string  // a header closure hands a failing hoist's error to its statement; nil returns it.
 	groupDone          map[*syntax.FuncLit]bool // finished group closures, pruned by the literal scan.
+	groupPlans         map[*syntax.BlockStmt]groupFrame
+	groupJoins         map[syntax.Stmt]bool
 	funcs              map[*syntax.BlockStmt]*funcLower
 	compositeDone      map[syntax.Expr]bool
 }
@@ -778,6 +780,7 @@ type funcLower struct {
 	scopeLabels      map[string]*syntax.LabeledStmt
 	scopeDeferLabels map[string]int
 	scopeCtxs        []*scopeDeferCtx
+	groupCtxs        map[syntax.Node]*scopeDeferCtx
 	scopeHoists      []string
 	hoisted          []hoistedVar
 	hoistSubs        []hoistSub

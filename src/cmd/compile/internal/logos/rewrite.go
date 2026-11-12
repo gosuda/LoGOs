@@ -111,7 +111,7 @@ func (fc *funcLower) exitPair(pos syntax.Pos, errSpelling, siteSpelling string) 
 func (fc *funcLower) exitPairAt(checkPos, pos syntax.Pos, errSpelling, siteSpelling string) (native, text []syntax.Stmt, subs []textSub) {
 	native, text, subs = fc.scopedExitPair(pos, errSpelling, siteSpelling)
 	top, ok := fc.groupTop()
-	if !ok || top.child {
+	if !ok || top.child || top.planned {
 		return native, text, subs
 	}
 	joinNative, joinText, joinSubs := fc.groupJoinCheck(checkPos, top)
@@ -121,6 +121,16 @@ func (fc *funcLower) exitPairAt(checkPos, pos syntax.Pos, errSpelling, siteSpell
 }
 
 func (fc *funcLower) scopedExitPair(pos syntax.Pos, errSpelling, siteSpelling string) (native, text []syntax.Stmt, subs []textSub) {
+	native, text = fc.plainExitPair(pos, errSpelling, siteSpelling)
+	if sn, st, ssubs := fc.scopeExitStanza(pos); sn != nil {
+		native = append(sn, native...)
+		text = append(st, text...)
+		subs = ssubs
+	}
+	return native, text, subs
+}
+
+func (fc *funcLower) plainExitPair(pos syntax.Pos, errSpelling, siteSpelling string) (native, text []syntax.Stmt) {
 	native = buildExit(exitSpec{
 		pos:   pos,
 		err:   nameOf(pos, errSpelling),
@@ -133,12 +143,7 @@ func (fc *funcLower) scopedExitPair(pos syntax.Pos, errSpelling, siteSpelling st
 		site:  nameOf(pos, siteSpelling),
 		zeros: fc.zerosAt(pos),
 	})
-	if sn, st, ssubs := fc.scopeExitStanza(pos); sn != nil {
-		native = append(sn, native...)
-		text = append(st, text...)
-		subs = ssubs
-	}
-	return native, text, subs
+	return native, text
 }
 
 func (fc *funcLower) lowerList(list []syntax.Stmt) []syntax.Stmt {
@@ -150,6 +155,9 @@ func (fc *funcLower) lowerList(list []syntax.Stmt) []syntax.Stmt {
 }
 
 func (fc *funcLower) lowerStmt(s syntax.Stmt) []syntax.Stmt {
+	if fc.fl.groupJoins[s] {
+		return []syntax.Stmt{s}
+	}
 	if cs, ok := s.(*syntax.CallStmt); ok {
 		if out, ok := fc.fl.optDeferGoFinish(cs); ok {
 			if gout, ok := fc.lowerGroupHook(out[len(out)-1]); ok {

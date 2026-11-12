@@ -1099,6 +1099,8 @@ The operands of a `return` in the block body, outside any child, MUST be evaluat
 
 A `?` statement in the block body, outside any child, MUST run where it stands while the children run, and MUST leave the group open for the statements after it; only when it fails MUST the join precede the return of its error, and a join error MUST replace the error of the statement. [T-206]
 
+A `scope defer` written directly in the block body MUST run after the join at every exit of the block (the end, `return`, `break`, `continue`, labeled `break`, `goto`, a failed `?`, and a panic), and a scope defer of an enclosing block MUST run after the join of every group the exit leaves; a scope defer of a block nested in the body MUST run when that nested block exits, before the join. [T-206][T-104.7]
+
 When built by `logos`, a child blocked in netpoll-backed network I/O MUST wake within 100 ms with a timeout error satisfying `os.IsTimeout`. [T-206]
 
 In ejected code, cancellation MUST leave a child's blocked network I/O to complete on its own, and `Wait` MUST return once it completes. [T-206][T-0.3]

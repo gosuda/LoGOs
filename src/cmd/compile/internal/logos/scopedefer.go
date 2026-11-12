@@ -5,6 +5,7 @@
 package logos
 
 import (
+	"slices"
 	"strconv"
 
 	"cmd/compile/internal/base"
@@ -17,6 +18,7 @@ type scopeItem struct {
 	armed   string
 	pos     syntax.Pos
 	hoisted bool
+	join    *groupFrame
 }
 
 type scopeDeferCtx struct {
@@ -25,6 +27,7 @@ type scopeDeferCtx struct {
 	endOff   int
 	items    []scopeItem
 	depth    int
+	join     *groupFrame
 }
 
 type scopeFrame struct {
@@ -34,11 +37,22 @@ type scopeFrame struct {
 
 func ownScopeItems(ctx *scopeDeferCtx) []scopeItem {
 	items := ctx.items
-	out := make([]scopeItem, len(items))
-	for i, it := range items {
-		out[len(items)-1-i] = it
+	out := make([]scopeItem, 0, len(items)+1)
+	if ctx.join != nil {
+		out = append(out, scopeItem{join: ctx.join})
+	}
+	for i := len(items) - 1; i >= 0; i-- {
+		out = append(out, items[i])
 	}
 	return out
+}
+
+func (ctx *scopeDeferCtx) guardBody(pos syntax.Pos, armed string, call syntax.Stmt) []syntax.Stmt {
+	body := []syntax.Stmt{assignOf(pos, []syntax.Expr{nameOf(pos, armed)}, []syntax.Expr{nameOf(pos, "false")})}
+	if ctx.join != nil {
+		body = append(body, groupWaitOnce(pos, ctx.join.g, ctx.join.j))
+	}
+	return append(body, call)
 }
 
 func (fc *funcLower) nextScope() string {
@@ -127,7 +141,10 @@ func (fc *funcLower) scopeContains(block, target syntax.Node) bool {
 func (fc *funcLower) scopeBlockList(list []syntax.Stmt, owner syntax.Node, endOff int, active []*scopeDeferCtx, stack []scopeFrame) []syntax.Stmt {
 	out := make([]syntax.Stmt, 0, len(list))
 	cur := active
-	var ctx *scopeDeferCtx
+	ctx := fc.groupCtxs[owner]
+	if ctx != nil {
+		cur = append(slices.Clone(active), ctx)
+	}
 	for _, s := range list {
 		target, labels := unwrapScopeLabels(s)
 		if sd, ok := target.(*syntax.ScopeDeferStmt); ok {
@@ -177,7 +194,7 @@ func (fc *funcLower) scopeBlockList(list []syntax.Stmt, owner syntax.Node, endOf
 
 func scopeStmtEnd(fl *fileLower, s syntax.Stmt) int {
 	switch s.(type) {
-	case *syntax.ForStmt, *syntax.SwitchStmt, *syntax.SelectStmt, *syntax.IfStmt, *syntax.BlockStmt, *syntax.LabeledStmt:
+	case *syntax.ForStmt, *syntax.SwitchStmt, *syntax.SelectStmt, *syntax.IfStmt, *syntax.BlockStmt, *syntax.LabeledStmt, *syntax.GroupStmt, *syntax.GroupChild:
 		return fl.off(syntax.EndPos(s)) + 1
 	}
 	return fl.off(syntax.EndPos(s))
@@ -252,14 +269,8 @@ func (fc *funcLower) scopePrelude(sd *syntax.ScopeDeferStmt, ctx *scopeDeferCtx,
 	callT.HasDots = plan.dots
 	armedN := nameOf(pos, item.armed)
 	armedT := nameOf(pos, item.armed)
-	guardN := ifOf(pos, nil, armedN, []syntax.Stmt{
-		assignOf(pos, []syntax.Expr{nameOf(pos, item.armed)}, []syntax.Expr{nameOf(pos, "false")}),
-		exprStmtOf(pos, callN),
-	})
-	guardT := ifOf(pos, nil, armedT, []syntax.Stmt{
-		assignOf(pos, []syntax.Expr{nameOf(pos, item.armed)}, []syntax.Expr{nameOf(pos, "false")}),
-		exprStmtOf(pos, callT),
-	})
+	guardN := ifOf(pos, nil, armedN, ctx.guardBody(pos, item.armed, exprStmtOf(pos, callN)))
+	guardT := ifOf(pos, nil, armedT, ctx.guardBody(pos, item.armed, exprStmtOf(pos, callT)))
 	var native []syntax.Stmt
 	var text []syntax.Stmt
 	if len(capNamesN) > 0 {
@@ -466,6 +477,12 @@ func (fc *funcLower) drainScopeHoists(pos syntax.Pos) []syntax.Stmt {
 func (fc *funcLower) scopeStanza(pos syntax.Pos, items []scopeItem) (native, text []syntax.Stmt, tw *twin) {
 	tw = &twin{}
 	for _, it := range items {
+		if it.join != nil {
+			joinNative, joinText := fc.groupJoinWait(pos, *it.join)
+			native = append(native, joinNative...)
+			text = append(text, joinText...)
+			continue
+		}
 		if it.hoisted {
 			temp := fc.nextScope()
 			native = append(native, scopeHolderStanza(pos, it.armed, temp))
@@ -668,10 +685,7 @@ func reverseScopeItems(active []*scopeDeferCtx, fc *funcLower, target syntax.Nod
 		if fc.scopeContains(active[i].owner, target) {
 			continue
 		}
-		items := active[i].items
-		for j := len(items) - 1; j >= 0; j-- {
-			out = append(out, items[j])
-		}
+		out = append(out, ownScopeItems(active[i])...)
 	}
 	return out
 }
@@ -709,9 +723,7 @@ func (fc *funcLower) scopeExitStanza(pos syntax.Pos) (native, text []syntax.Stmt
 	for i := len(fc.scopeCtxs) - 1; i >= 0; i-- {
 		ctx := fc.scopeCtxs[i]
 		if ctx.startOff <= off && off < ctx.endOff {
-			for j := len(ctx.items) - 1; j >= 0; j-- {
-				items = append(items, ctx.items[j])
-			}
+			items = append(items, ownScopeItems(ctx)...)
 		}
 	}
 	if len(items) == 0 {
