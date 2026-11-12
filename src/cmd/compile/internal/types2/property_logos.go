@@ -149,6 +149,38 @@ type LogosPropDecl struct {
 	Ifaces []Type
 }
 
+var logosDeclaredAccessors = struct {
+	mu sync.Mutex
+	m  map[*Named][]Type
+}{m: make(map[*Named][]Type)}
+
+func logosNoteDeclaredAccessors(named *Named, declared []Type) {
+	if len(declared) == 0 {
+		return
+	}
+	key := named.Origin()
+	logosDeclaredAccessors.mu.Lock()
+	defer logosDeclaredAccessors.mu.Unlock()
+	logosDeclaredAccessors.m[key] = append(logosDeclaredAccessors.m[key], declared...)
+}
+
+func logosHolderProp(holder *Named, prop string) (Type, bool, bool) {
+	logosDeclaredAccessors.mu.Lock()
+	defer logosDeclaredAccessors.mu.Unlock()
+	for _, iface := range logosDeclaredAccessors.m[holder] {
+		if logosPropertyInterface(iface) == nil {
+			continue
+		}
+		set, _ := LogosPropsOf(iface)
+		for _, pr := range set {
+			if pr.Name == prop {
+				return pr.Typ, pr.ReadOnly, true
+			}
+		}
+	}
+	return nil, false, false
+}
+
 func (check *Checker) logosRecordConforms(def *TypeName, asserts []Type) {
 	named, _ := def.Type().(*Named)
 	if named == nil {
@@ -165,6 +197,7 @@ func (check *Checker) logosRecordConforms(def *TypeName, asserts []Type) {
 		check.logosConforms[named] = append(check.logosConforms[named], T)
 		declared = append(declared, T)
 	}
+	logosNoteDeclaredAccessors(named, declared)
 	check.later(func() {
 		check.logosRecordPropDecl(def, declared)
 	}).describef(def, "record property declarations of %s", def.name)
@@ -226,6 +259,14 @@ func LogosPropsOf(t Type) ([]LogosProp, bool) {
 	return out, true
 }
 
+func LogosPropertySelection(pkg *Package, t Type, name string) (prop LogosProp, promoted, ok bool) {
+	sel := logosSelectProperty(pkg, t, name)
+	if sel.kind != logosSelectInterface && sel.kind != logosSelectPromoted {
+		return LogosProp{}, false, false
+	}
+	return LogosProp{Name: sel.prop.name, Typ: sel.prop.typ, ReadOnly: sel.prop.readOnly}, sel.kind == logosSelectPromoted, true
+}
+
 type LogosConformsIface struct {
 	PkgPath string
 	Name    string
@@ -281,6 +322,199 @@ func (check *Checker) logosImportedConforms(named *Named, T Type) bool {
 	return false
 }
 
+type logosSelectKind uint8
+
+const (
+	logosSelectOrdinary logosSelectKind = iota
+	logosSelectInterface
+	logosSelectPromoted
+	logosSelectAmbiguous
+)
+
+type logosSelection struct {
+	kind logosSelectKind
+	prop logosProperty
+}
+
+type logosMember struct {
+	obj   Object
+	index []int
+}
+
+func (m logosMember) found() bool { return m.obj != nil || m.index != nil }
+
+func (m logosMember) depth() int { return len(m.index) - 1 }
+
+func logosLookupMember(T Type, pkg *Package, name string) logosMember {
+	obj, index, _ := lookupFieldOrMethodImpl(T, true, pkg, name, false)
+	return logosMember{obj: obj, index: index}
+}
+
+func logosHasEmbedded(T Type) bool {
+	base, _ := deref(T)
+	st, _ := base.Underlying().(*Struct)
+	if st == nil {
+		return false
+	}
+	for _, f := range st.fields {
+		if f.embedded {
+			return true
+		}
+	}
+	return false
+}
+
+const logosSyntheticSlot = 1 << 20
+
+func logosHolderIsInterface(T Type, index []int) bool {
+	typ, _ := deref(T)
+	for _, i := range index[:len(index)-1] {
+		st, _ := typ.Underlying().(*Struct)
+		if st == nil {
+			return false
+		}
+		typ, _ = deref(st.fields[i].typ)
+	}
+	return len(index) > 1 && IsInterface(typ)
+}
+
+func logosAccessorMember(pkg *Package, T Type, prop string) logosMember {
+	real := logosLookupMember(T, pkg, logosGetterName(prop))
+	syn := logosSyntheticAccessor(pkg, T, prop, real)
+	if !syn.found() {
+		return real
+	}
+	if !real.found() || syn.depth() < real.depth() {
+		return syn
+	}
+	if syn.depth() > real.depth() || slices.Equal(real.index[:len(real.index)-1], syn.index[:len(syn.index)-1]) {
+		return real
+	}
+	return logosMember{index: syn.index}
+}
+
+func logosSyntheticAccessor(pkg *Package, T Type, prop string, real logosMember) logosMember {
+	base, _ := deref(T)
+	st, _ := base.Underlying().(*Struct)
+	if st == nil {
+		return logosMember{}
+	}
+	var best logosMember
+	bestDepth := -1
+	offer := func(m logosMember) {
+		d := m.depth()
+		if bestDepth >= 0 {
+			if d > bestDepth {
+				return
+			}
+			if d == bestDepth && slices.Equal(best.index[:len(best.index)-1], m.index[:len(m.index)-1]) {
+				return
+			}
+			if d == bestDepth {
+				m = logosMember{index: m.index}
+			}
+		}
+		best, bestDepth = m, d
+	}
+	if real.found() {
+		offer(real)
+	}
+	type frame struct {
+		typ   Type
+		index []int
+	}
+	seen := make(map[*Named]bool)
+	queue := []frame{{typ: T}}
+	for len(queue) > 0 {
+		cur := queue[0]
+		queue = queue[1:]
+		base, _ := deref(cur.typ)
+		named, _ := Unalias(base).(*Named)
+		if named != nil {
+			if len(cur.index) > 0 && named.TypeArgs().Len() == 0 && named.TypeParams().Len() == 0 {
+				if ptyp, _, ok := logosHolderProp(named, prop); ok {
+					sig := &Signature{recv: newVar(RecvVar, nopos, pkg, "", named)}
+					sig.results = NewTuple(NewParam(nopos, pkg, "", ptyp))
+					offer(logosMember{obj: NewFunc(nopos, pkg, logosGetterName(prop), sig), index: concat(cur.index, logosSyntheticSlot)})
+				}
+			}
+			if seen[named] {
+				continue
+			}
+			seen[named] = true
+		}
+		st, _ := base.Underlying().(*Struct)
+		if st == nil {
+			continue
+		}
+		for i, f := range st.fields {
+			if f.embedded {
+				queue = append(queue, frame{typ: f.typ, index: concat(cur.index, i)})
+			}
+		}
+	}
+	return best
+}
+
+func logosSelectProperty(pkg *Package, T Type, name string) logosSelection {
+	if iface := logosPropertyInterface(T); iface != nil {
+		if pr, ok := logosFindProperty(iface, name); ok {
+			return logosSelection{kind: logosSelectInterface, prop: pr}
+		}
+		return logosSelection{}
+	}
+	if !logosHasEmbedded(T) {
+		return logosSelection{}
+	}
+	accessor := logosAccessorMember(pkg, T, name)
+	if !accessor.found() || accessor.obj != nil && !logosHolderIsInterface(T, accessor.index) {
+		return logosSelection{}
+	}
+	ordinary := logosLookupMember(T, pkg, name)
+	if ordinary.found() && ordinary.depth() < accessor.depth() {
+		return logosSelection{}
+	}
+	if accessor.obj == nil || ordinary.found() && ordinary.depth() == accessor.depth() {
+		return logosSelection{kind: logosSelectAmbiguous}
+	}
+	pr, ok := logosPromotedProperty(pkg, T, name, accessor)
+	if !ok {
+		return logosSelection{}
+	}
+	return logosSelection{kind: logosSelectPromoted, prop: pr}
+}
+
+func logosPromotedProperty(pkg *Package, T Type, name string, getter logosMember) (logosProperty, bool) {
+	get, _ := getter.obj.(*Func)
+	if get == nil {
+		return logosProperty{}, false
+	}
+	gsig, ok := get.typ.(*Signature)
+	if !ok || gsig.params.Len() != 0 || gsig.results.Len() != 1 {
+		return logosProperty{}, false
+	}
+	pr := logosProperty{name: name, typ: gsig.results.At(0).typ, readOnly: true}
+	setter := logosLookupMember(T, pkg, logosSetterName(name))
+	set, _ := setter.obj.(*Func)
+	if set == nil || !slices.Equal(setter.index[:len(setter.index)-1], getter.index[:len(getter.index)-1]) {
+		return pr, true
+	}
+	if ssig, ok := set.typ.(*Signature); ok && ssig.params.Len() == 1 && ssig.results.Len() == 0 && Identical(ssig.params.At(0).typ, pr.typ) {
+		pr.readOnly = false
+	}
+	return pr, true
+}
+
+func logosAllPromoted(pkg *Package, V Type, iface *Interface) bool {
+	props := logosProperties(iface)
+	for _, pr := range props {
+		if logosSelectProperty(pkg, V, pr.name).kind != logosSelectPromoted {
+			return false
+		}
+	}
+	return len(props) > 0
+}
+
 type logosPropFailKind int
 
 const (
@@ -293,6 +527,15 @@ const (
 )
 
 func (check *Checker) logosPropertySource(V Type, name string, want Type) (getter, setter, ambig bool) {
+	switch sel := logosSelectProperty(check.pkg, V, name); sel.kind {
+	case logosSelectAmbiguous:
+		return false, false, true
+	case logosSelectPromoted:
+		if !Identical(sel.prop.typ, want) {
+			return false, false, false
+		}
+		return true, !sel.prop.readOnly, false
+	}
 	obj, index, _ := lookupFieldOrMethodImpl(V, false, check.pkg, name, false)
 	if obj == nil {
 		if index != nil {
@@ -355,6 +598,9 @@ func (check *Checker) logosCheckPropertySources(V Type, iface *Interface, pos sy
 func (check *Checker) logosMutatingGetter(V Type, iface *Interface, pos syntax.Pos) string {
 	for _, pr := range logosProperties(iface) {
 		if !pr.readOnly {
+			continue
+		}
+		if logosSelectProperty(check.pkg, V, pr.name).kind == logosSelectPromoted {
 			continue
 		}
 		obj, _, _ := lookupFieldOrMethodImpl(V, false, check.pkg, pr.name, false)
@@ -485,7 +731,7 @@ func (check *Checker) logosImplementsProperty(V, T Type, Ti *Interface, cause *s
 	}
 	named := asNamed(base)
 	kind, name := check.logosCheckPropertySources(V, Ti, pos)
-	declared := named != nil && check.logosDeclaredConforms(named, T, Ti)
+	declared := named != nil && check.logosDeclaredConforms(named, T, Ti) || logosAllPromoted(check.pkg, V, Ti)
 	if named == nil {
 		if _, ok := base.Underlying().(*Struct); !ok {
 			return fail("%s %s does not implement %s (missing method %s)", logosAssertFail, V, Ti, name)
@@ -519,20 +765,22 @@ func (check *Checker) logosPropertySelector(x *operand, e *syntax.SelectorExpr, 
 	if !check.conf.Logos || x.typ() == nil {
 		return false
 	}
-	iface := logosPropertyInterface(x.typ())
-	if iface == nil {
+	s := logosSelectProperty(check.pkg, x.typ(), sel)
+	if s.kind == logosSelectOrdinary || x.mode() == typexpr && s.kind != logosSelectInterface {
 		return false
 	}
-	pr, ok := logosFindProperty(iface, sel)
-	if !ok {
-		return false
+	if s.kind == logosSelectAmbiguous {
+		check.errorf(e.Sel, AmbiguousSelector, "ambiguous selector %s.%s", x.expr, sel)
+		x.invalidate()
+		x.expr = e
+		return true
 	}
-	if pr.readOnly {
+	if s.prop.readOnly {
 		x.mode_ = value
 	} else {
 		x.mode_ = variable
 	}
-	x.typ_ = pr.typ
+	x.typ_ = s.prop.typ
 	x.expr = e
 	if check.logosPropSel == nil {
 		check.logosPropSel = make(map[*syntax.SelectorExpr]bool)

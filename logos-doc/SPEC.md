@@ -778,11 +778,11 @@ func f(u U) int {
 
 A property interface is an interface with at least one `const F T` or `F T` element.
 
-A struct MUST satisfy a property interface only through an explicit `: I` declaration in any package. [T-203.2][R-U4]
+A struct MUST satisfy a property interface through an explicit `: I` declaration in any package, unless every target property is supplied by promoted embedded accessor methods under the selector-depth rules below. Plain field or method sources, including a mixture of plain and promoted property sources, MUST still require `: I`. [T-203.2][R-U4]
 
-For each property the declaring package MUST generate `Logos_GetF() T` from an exported field or from a method `F() T`. [T-203.2]
+For each property not already supplied by promoted embedded accessor methods, the declaring package MUST generate `Logos_GetF() T` from an exported field or from a method `F() T`; it MUST NOT generate redundant forwarding accessors for an already promoted property. [T-203.2]
 
-For each read-write property it MUST also generate `Logos_SetF(T)` from the field or from `SetF(T)`. [T-203.2]
+For each read-write property not already supplied by promoted embedded accessor methods it MUST also generate `Logos_SetF(T)` from the field or from `SetF(T)`. [T-203.2]
 
 A field-sourced getter MUST use a value receiver. [T-203.2]
 
@@ -806,7 +806,7 @@ Taking the address of a property (`&c.HP`) MUST fail with `[correctness::propert
 
 A `: I` declaration without a field or method source for a property MUST fail with `[correctness::property_unsatisfied]`. [T-203.2]
 
-A struct that has the right fields but no `: I` declaration MUST fail with `[correctness::property_requires_conformance]` telling the writer to add `: I`. [T-203.2]
+A struct that has the right fields but no `: I` declaration MUST fail with `[correctness::property_requires_conformance]` telling the writer to add `: I`, unless every target property is supplied by promoted embedded accessor methods. [T-203.2]
 
 Conflicting property types across listed interfaces MUST fail with `[correctness::property_conflict]`. [T-203.2]
 
@@ -818,13 +818,13 @@ A compound update through an interface MUST evaluate the receiver once and write
 
 A method call on a property value MUST use read-call-write-back around the call. [T-203.2]
 
-Only a type with a `: I` list MUST gain accessor methods. [T-203.2]
+Only a type with a `: I` list MUST gain newly generated accessor methods; embedded accessor methods MUST still promote without that list. [T-203.2]
 
 `reflect` MUST count the generated accessors. [T-203.2]
 
-A type without the declaration MUST see no method change. [T-203.2]
+A type without the declaration MUST gain no newly generated methods; ordinary promotion of embedded methods is unchanged. [T-203.2]
 
-Embedded fields MUST satisfy properties by Go selector depth rules. [T-203.2]
+Embedded fields, including property interfaces and their getter/setter accessor pairs, MUST promote properties by Go selector depth rules, with the same property selectors and conformance natively and after `logos eject`. Promotion MUST preserve the read-write property pointer requirement. [T-203.2]
 
 An ambiguous equal-depth selector MUST fail as an ambiguous selector. [T-203.2]
 

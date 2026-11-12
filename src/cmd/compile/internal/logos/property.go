@@ -174,6 +174,9 @@ func (fl *fileLower) emitAccessors(td *syntax.TypeDecl, obj *types2.TypeName, if
 	var added []*syntax.FuncDecl
 	var text bytes.Buffer
 	for _, pr := range props {
+		if _, promoted, _ := types2.LogosPropertySelection(fl.pkg.tpkg, types2.NewPointer(types2.LogosSelfInstance(named)), pr.Name); promoted {
+			continue
+		}
 		getter, setter, ambig, getFn, setFn := propSourceOf(fl.pkg.tpkg, types2.NewPointer(types2.LogosSelfInstance(named)), pr.Name, pr.Typ)
 		if ambig || !getter {
 			base.Fatalf("logos: property %s of %s has no source at lowering", pr.Name, typeName)
@@ -349,23 +352,11 @@ func (fl *fileLower) propSelOf(e syntax.Expr) (recv syntax.Expr, pr types2.Logos
 	if t == nil {
 		return nil, types2.LogosProp{}, nil, false
 	}
-	for {
-		p, is := t.(*types2.Pointer)
-		if !is {
-			break
-		}
-		t = p.Elem()
-	}
-	set, is := types2.LogosPropsOf(t)
-	if !is {
+	pr, _, found := types2.LogosPropertySelection(fl.pkg.tpkg, t, sel.Sel.Value)
+	if !found {
 		return nil, types2.LogosProp{}, nil, false
 	}
-	for _, pr := range set {
-		if pr.Name == sel.Sel.Value {
-			return recv, pr, sel, true
-		}
-	}
-	return nil, types2.LogosProp{}, nil, false
+	return recv, pr, sel, true
 }
 
 func (fl *fileLower) propSelSpan(sel *syntax.SelectorExpr) (whole, recv span, ok bool) {
