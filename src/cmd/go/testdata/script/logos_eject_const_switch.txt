@@ -37,11 +37,13 @@ cd ..
 cp $GOROOT/test/logos/run/const_switch.lgo n/main.lgo
 cp $GOROOT/test/logos/run/const_switch_order.lgo o/main.lgo
 cp $GOROOT/test/logos/run/const_switch_nomatch.lgo k/main.lgo
+cp $GOROOT/test/logos/run/const_switch_jumps.lgo b/main.lgo
 
 # The run fixtures of the run-time form print the same lines when ejected:
 # a case chosen by the type argument alone, an interface type argument,
 # shared storage for a rebound slice, map and pointer, an interface method
-# run on the value, first match, and no match.
+# run on the value, first match, no match, and a break, continue or labeled
+# jump that sits inside or leaves a case.
 cd n
 logos run .
 cmp stdout $GOROOT/test/logos/run/const_switch.out
@@ -67,6 +69,15 @@ logos eject -o out
 cd out
 exec env -u GOROOT $UPROOT1272/bin/go run .
 cmp stdout $GOROOT/test/logos/run/const_switch_nomatch.out
+cd ../..
+
+cd b
+logos run .
+cmp stdout $GOROOT/test/logos/run/const_switch_jumps.out
+logos eject -o out
+cd out
+exec env -u GOROOT $UPROOT1272/bin/go run .
+cmp stdout $GOROOT/test/logos/run/const_switch_jumps.out
 cd ../..
 
 -- m/go.mod --
@@ -180,6 +191,11 @@ type Point struct {
 	X int
 	Y int
 }
+
+-- b/go.mod --
+module example.com/ejectconstswitchjumps
+
+go 1.27
 
 -- n/go.mod --
 module example.com/ejectconstswitchrun

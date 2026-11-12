@@ -427,13 +427,23 @@ func (w cswWalker) list(stmts []syntax.Stmt) {
 	}
 }
 
-func (w cswWalker) node(n syntax.Node) {
-	if sw, ok := n.(*syntax.ConstSwitchStmt); ok {
-		for _, cc := range sw.Cases {
-			w.list(cc.Body)
+func (w cswWalker) node(root syntax.Node) {
+	syntax.Inspect(root, func(n syntax.Node) bool {
+		if n == nil {
+			return true
 		}
-		return
-	}
+		if sw, ok := n.(*syntax.ConstSwitchStmt); ok {
+			for _, cc := range sw.Cases {
+				w.list(cc.Body)
+			}
+			return false
+		}
+		w.replaceChildren(n)
+		return true
+	})
+}
+
+func (w cswWalker) replaceChildren(n syntax.Node) {
 	v := reflect.ValueOf(n)
 	if v.Kind() != reflect.Pointer || v.IsNil() {
 		return
@@ -444,33 +454,24 @@ func (w cswWalker) node(n syntax.Node) {
 	}
 	for i := range v.NumField() {
 		if v.Type().Field(i).IsExported() {
-			w.field(v.Field(i))
+			w.replaceNames(v.Field(i))
 		}
 	}
 }
 
-func (w cswWalker) field(f reflect.Value) {
+func (w cswWalker) replaceNames(f reflect.Value) {
 	switch f.Kind() {
 	case reflect.Interface:
-		w.interfaceField(f)
-	case reflect.Pointer:
-		w.pointerField(f)
+		if f.IsNil() || !f.CanSet() {
+			return
+		}
+		if x, ok := f.Elem().Interface().(*syntax.Name); ok {
+			w.replaceName(f, x)
+		}
 	case reflect.Slice, reflect.Array:
 		for i := range f.Len() {
-			w.field(f.Index(i))
+			w.replaceNames(f.Index(i))
 		}
-	}
-}
-
-func (w cswWalker) interfaceField(f reflect.Value) {
-	if f.IsNil() || !f.CanSet() {
-		return
-	}
-	switch x := f.Elem().Interface().(type) {
-	case *syntax.Name:
-		w.replaceName(f, x)
-	case syntax.Node:
-		w.node(x)
 	}
 }
 
@@ -481,15 +482,6 @@ func (w cswWalker) replaceName(f reflect.Value, x *syntax.Name) {
 	start := w.off(x.Pos())
 	w.splice(start, start+len(x.Value))
 	f.Set(reflect.ValueOf(w.repl(x.Pos())))
-}
-
-func (w cswWalker) pointerField(f reflect.Value) {
-	if f.IsNil() {
-		return
-	}
-	if n, ok := f.Interface().(syntax.Node); ok {
-		w.node(n)
-	}
 }
 
 func (c *cswLower) wrapSelectors(body []syntax.Stmt, cs *cswCase) {
