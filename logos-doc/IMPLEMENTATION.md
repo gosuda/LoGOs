@@ -2194,6 +2194,7 @@ Anchor: Tony Hoare, Edsger W. Dijkstra
 | `correctness::arena_pointer_escape` | forbid | `uintptr(unsafe.Pointer(&x))` or `unsafe.Pointer` of a local or arena object stored outside the expression |
 | `correctness::defer_erases_errdefer_state` | forbid | a plain deferred function literal assigns `nil` to the error result in a function with `errdefer` (#77) |
 | `correctness::infinite_recursion` | forbid | every path from function entry reaches a call to the same function with arguments syntactically identical to the parameters before any return (#157) |
+| `correctness::region_escape` | forbid | a `logos/arena.Region` stored outside a local variable, returned, sent on a channel, captured by a `go` statement, or captured by an escaping closure in a loGo/s package; types2 reports it (`types2/region_logos.go`) and the rule gives it the group severity (`test/logos/lint/region_escape.lgo`, `region_closure_smuggle.lgo`, #191) |
 | `concurrency::concurrent_multiword_race` | forbid | a variable of multi-word type (string, slice, interface, union, complex, multi-word struct or array) captured by a `go` statement or group child and written by either side after the spawn, unless it is a const view or a `logos/sync` type (#13, #148) |
 | `concurrency::reentrant_withlock_deadlock` | forbid | inside a `WithLock` lambda, a call to `WithLock` on the same receiver, directly or through the same-package call and callback graph, including bound method receivers (#167) |
 | `correctness::withlock_leak` | deny | a `WithLock` lambda that returns or stores its argument, sends it on a channel, or passes it to a goroutine |
@@ -2206,6 +2207,7 @@ Anchor: Tony Hoare, Edsger W. Dijkstra
 | `suspicious::unapplied_struct_default` | warn | `var x T` or `new(T)` for a type with field defaults |
 | `suspicious::side_effect_before_sort` | warn | a chain lambda with a call that is not known pure before `.sortBy()` (#31) |
 | `perf::large_backing_array_pin` | warn | escape analysis sees a subslice or substring of a backing array larger than 64 KB escape (#158) |
+| `perf::arena_fallback` | warn | a `logos/arena` call that escape analysis leaves on the heap instead of in its region; the message names the call and the escaping flow; `logos lint` reports it for a Go package and `logos build` does not (`test/logos/lint/arena_fallback.lgo` and `arena_fallback_go.go`, `logos_arena_go_fallback.txt`) |
 | `portability::serialized_unsized_int` | warn | a field of type `int` or `uint` in a struct with json tags (#182) |
 | `portability::alias_extension` | warn | M0-S2 rule re-labelled here |
 | `pedantic::exhaustive_union_switch` | allow | a `default` clause in a switch over a closed union (#10) |
