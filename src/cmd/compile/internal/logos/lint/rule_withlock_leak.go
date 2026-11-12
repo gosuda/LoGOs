@@ -341,26 +341,83 @@ func (c *leakCheck) scanUnit(body syntax.Node, cl *leakClosure) {
 			}
 		case *syntax.CallStmt:
 			if x.Tok == syntax.Go {
-				call := callOf(x.Call)
-				if call == nil {
-					break
-				}
-				for _, a := range call.ArgList {
-					if c.carriesPtr(a) {
-						c.pass.Reportf(x, "WithLock argument must not be passed to a goroutine")
-						break
-					}
-				}
-				if fun, ok := syntax.Unparen(call.Fun).(*syntax.FuncLit); ok && c.captures(fun.Body) {
-					c.pass.Reportf(x, "WithLock argument must not be passed to a goroutine")
-				}
-				if fun, ok := syntax.Unparen(call.Fun).(*syntax.LambdaExpr); ok && c.captures(fun.Body) {
+				if call := callOf(x.Call); call != nil && c.spawnEscapes(call) {
 					c.pass.Reportf(x, "WithLock argument must not be passed to a goroutine")
 				}
 			}
 		}
 		return true
 	})
+}
+
+func (c *leakCheck) spawnEscapes(call *syntax.CallExpr) bool {
+	for _, a := range call.ArgList {
+		if c.carriesPtr(a) {
+			return true
+		}
+	}
+	switch fun := syntax.Unparen(call.Fun).(type) {
+	case *syntax.FuncLit:
+		return c.captures(fun.Body)
+	case *syntax.LambdaExpr:
+		return c.captures(fun.Body)
+	case *syntax.SelectorExpr:
+		return c.receiverEscapes(fun)
+	}
+	return false
+}
+
+func (c *leakCheck) receiverEscapes(sel *syntax.SelectorExpr) bool {
+	s := c.pass.Info.Selections[sel]
+	if s == nil || s.Kind() != types2.MethodVal {
+		return false
+	}
+	x := syntax.Unparen(sel.X)
+	if recv := methodRecv(s); recv == nil || isReferenceType(recv) {
+		return c.rootedAtBorrowed(x) || c.carriesPtr(x)
+	}
+	return !isPointerType(TypeOf(x)) && c.carriesPtr(x)
+}
+
+func (c *leakCheck) rootedAtBorrowed(e syntax.Expr) bool {
+	for {
+		switch x := syntax.Unparen(e).(type) {
+		case *syntax.Name:
+			return c.isParamUse(x) || c.isAliasUse(x)
+		case *syntax.SelectorExpr:
+			e = x.X
+		case *syntax.IndexExpr:
+			e = x.X
+		case *syntax.SliceExpr:
+			e = x.X
+		case *syntax.Operation:
+			if x.Y != nil || (x.Op != syntax.Mul && x.Op != syntax.And) {
+				return false
+			}
+			e = x.X
+		default:
+			return false
+		}
+	}
+}
+
+func methodRecv(s *types2.Selection) types2.Type {
+	fn, ok := s.Obj().(*types2.Func)
+	if !ok {
+		return nil
+	}
+	if r := fn.Signature().Recv(); r != nil {
+		return r.Type()
+	}
+	return nil
+}
+
+func isPointerType(t types2.Type) bool {
+	if t == nil {
+		return false
+	}
+	_, ok := types2.Unalias(t).Underlying().(*types2.Pointer)
+	return ok
 }
 
 func (c *leakCheck) carriesPtr(e syntax.Expr) bool {
