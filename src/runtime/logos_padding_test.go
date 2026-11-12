@@ -51,18 +51,18 @@ func TestLogosRuntimeNoNewPadding(t *testing.T) {
 	if runtime.LogosPRegionSize != ptr {
 		t.Fatalf("logosRegionPool = %d, want %d", runtime.LogosPRegionSize, ptr)
 	}
-	if runtime.LogosGAlign != ptr {
-		t.Fatalf("Alignof(g) = %d, want %d", runtime.LogosGAlign, ptr)
+	if runtime.LogosGAlign != runtime.LogosGUpstreamAlign {
+		t.Fatalf("Alignof(g) = %d, want %d", runtime.LogosGAlign, runtime.LogosGUpstreamAlign)
 	}
-	if runtime.LogosMAlign != ptr {
-		t.Fatalf("Alignof(m) = %d, want %d", runtime.LogosMAlign, ptr)
+	if runtime.LogosMAlign != runtime.LogosMUpstreamAlign {
+		t.Fatalf("Alignof(m) = %d, want %d", runtime.LogosMAlign, runtime.LogosMUpstreamAlign)
 	}
-	if runtime.LogosPAlign != ptr {
-		t.Fatalf("Alignof(p) = %d, want %d", runtime.LogosPAlign, ptr)
+	if runtime.LogosPAlign != runtime.LogosPUpstreamAlign {
+		t.Fatalf("Alignof(p) = %d, want %d", runtime.LogosPAlign, runtime.LogosPUpstreamAlign)
 	}
 	var wantMTail, wantGTail, wantGMid, wantPTail uintptr
 	switch runtime.GOARCH {
-	case "amd64", "arm64", "wasm":
+	case "amd64", "arm64", "wasm", "386", "arm":
 		wantMTail = 4 * ptr
 		wantGTail = 11 * ptr
 		wantGMid = 4 * ptr

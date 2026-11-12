@@ -4,7 +4,11 @@
 
 package runtime
 
-import "unsafe"
+import (
+	"internal/abi"
+	"internal/stringslite"
+	"unsafe"
+)
 
 var (
 	LogosMFrameSize          = unsafe.Sizeof(m{}.fastCgoFrame)
@@ -45,3 +49,31 @@ var (
 	LogosSpanIsChunkOff      = unsafe.Offsetof(mspan{}.isLogosArenaChunk)
 	LogosSpanBeforeCacheOff  = unsafe.Offsetof(mspan{}.allocCountBeforeCache)
 )
+
+var (
+	LogosGUpstreamAlign = logosUpstreamAlign(abi.TypeFor[g]())
+	LogosMUpstreamAlign = logosUpstreamAlign(abi.TypeFor[m](), "inFastCall", "fastCgoFrame")
+	LogosPUpstreamAlign = logosUpstreamAlign(abi.TypeFor[p]())
+)
+
+func logosUpstreamAlign(t *abi.Type, forkNames ...string) uintptr {
+	align := 1
+	for _, f := range t.StructType().Fields {
+		if !logosForkField(f.Name.Name(), forkNames) {
+			align = max(align, f.Typ.Align())
+		}
+	}
+	return uintptr(align)
+}
+
+func logosForkField(name string, forkNames []string) bool {
+	if stringslite.HasPrefix(name, "logos") {
+		return true
+	}
+	for _, n := range forkNames {
+		if name == n {
+			return true
+		}
+	}
+	return false
+}
