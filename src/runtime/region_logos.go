@@ -202,12 +202,14 @@ func logosRegionChunkTake(rec *logosRegion) *sideStackChunk {
 	return c
 }
 
-func logosRegionMakeSlice(h unsafe.Pointer, gen uintptr, typ *_type, len64, cap64 int64) unsafe.Pointer {
+func logosRegionMakeSliceNoscan(h unsafe.Pointer, gen uintptr, typ *_type, len64, cap64 int64) unsafe.Pointer {
 	mem := logosRegionSliceMem(typ, len64, cap64)
-	if typ.Pointers() {
-		return logosRegionAllocScan(h, gen, typ, mem)
-	}
 	return logosRegionAllocNoscan(h, gen, mem, logosArenaAlign(typ))
+}
+
+func logosRegionMakeSliceScan(h unsafe.Pointer, gen uintptr, typ *_type, len64, cap64 int64) unsafe.Pointer {
+	mem := logosRegionSliceMem(typ, len64, cap64)
+	return logosRegionAllocScan(h, gen, typ, mem)
 }
 
 func logosRegionSliceMem(typ *_type, len64, cap64 int64) uintptr {
@@ -230,11 +232,32 @@ func logosRegionSliceMem(typ *_type, len64, cap64 int64) uintptr {
 	return mem
 }
 
-func logosRegionGrowSlice(h unsafe.Pointer, gen uintptr, oldPtr unsafe.Pointer, newLen, oldCap, num int, et *_type) slice {
+type logosRegionGrow struct {
+	h        unsafe.Pointer
+	gen      uintptr
+	oldPtr   unsafe.Pointer
+	newLen   int
+	oldCap   int
+	num      int
+	et       *_type
+	noscan   bool
+	callerpc uintptr
+}
+
+func logosRegionGrowSliceNoscan(h unsafe.Pointer, gen uintptr, oldPtr unsafe.Pointer, newLen, oldCap, num int, et *_type) slice {
+	return logosRegionGrowSliceOf(&logosRegionGrow{h, gen, oldPtr, newLen, oldCap, num, et, true, sys.GetCallerPC()})
+}
+
+func logosRegionGrowSliceScan(h unsafe.Pointer, gen uintptr, oldPtr unsafe.Pointer, newLen, oldCap, num int, et *_type) slice {
+	return logosRegionGrowSliceOf(&logosRegionGrow{h, gen, oldPtr, newLen, oldCap, num, et, false, sys.GetCallerPC()})
+}
+
+func logosRegionGrowSliceOf(q *logosRegionGrow) slice {
+	h, gen, oldPtr, newLen, oldCap, num, et := q.h, q.gen, q.oldPtr, q.newLen, q.oldCap, q.num, q.et
 	oldLen := newLen - num
 	if raceenabled {
-		callerpc := sys.GetCallerPC()
-		racereadrangepc(oldPtr, uintptr(oldLen*int(et.Size_)), callerpc, abi.FuncPCABIInternal(logosRegionGrowSlice))
+		callerpc := q.callerpc
+		racereadrangepc(oldPtr, uintptr(oldLen*int(et.Size_)), callerpc, abi.FuncPCABIInternal(logosRegionGrowSliceOf))
 	}
 	if msanenabled {
 		msanread(oldPtr, uintptr(oldLen*int(et.Size_)))
@@ -253,7 +276,7 @@ func logosRegionGrowSlice(h unsafe.Pointer, gen uintptr, oldPtr unsafe.Pointer, 
 
 	var overflow bool
 	var lenmem, newlenmem, capmem uintptr
-	noscan := !et.Pointers()
+	noscan := q.noscan
 	switch {
 	case et.Size_ == 1:
 		lenmem = uintptr(oldLen)

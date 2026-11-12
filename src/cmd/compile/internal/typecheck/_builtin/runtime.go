@@ -211,8 +211,10 @@ func logosRegionClose(h unsafe.Pointer, gen uintptr)
 func logosRegionBump(h unsafe.Pointer, gen uintptr, size uintptr) unsafe.Pointer
 func logosRegionAllocNoscan(h unsafe.Pointer, gen uintptr, size, align uintptr) unsafe.Pointer
 func logosRegionAllocScan(h unsafe.Pointer, gen uintptr, typ *byte, size uintptr) unsafe.Pointer
-func logosRegionMakeSlice(h unsafe.Pointer, gen uintptr, typ *byte, len, cap int64) unsafe.Pointer
-func logosRegionGrowSlice(h unsafe.Pointer, gen uintptr, oldPtr *any, newLen, oldCap, num int, et *byte) (ary []any)
+func logosRegionMakeSliceNoscan(h unsafe.Pointer, gen uintptr, typ *byte, len, cap int64) unsafe.Pointer
+func logosRegionMakeSliceScan(h unsafe.Pointer, gen uintptr, typ *byte, len, cap int64) unsafe.Pointer
+func logosRegionGrowSliceNoscan(h unsafe.Pointer, gen uintptr, oldPtr *any, newLen, oldCap, num int, et *byte) (ary []any)
+func logosRegionGrowSliceScan(h unsafe.Pointer, gen uintptr, oldPtr *any, newLen, oldCap, num int, et *byte) (ary []any)
 func growslice(oldPtr *any, newLen, oldCap, num int, et *byte) (ary []any)
 func growsliceBuf(oldPtr *any, newLen, oldCap, num int, et *byte, buf *any, bufLen int) (ary []any)
 func growsliceBufNoAlias(oldPtr *any, newLen, oldCap, num int, et *byte, buf *any, bufLen int) (ary []any)

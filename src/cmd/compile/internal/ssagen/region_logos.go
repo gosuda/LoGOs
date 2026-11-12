@@ -72,5 +72,12 @@ func (s *state) logosRegionGrowCall(n *ir.CallExpr) (*obj.LSym, *ssa.Value, *ssa
 	}
 	h := s.expr(info.H)
 	g := s.expr(info.G)
-	return typecheck.LookupRuntimeFunc("logosRegionGrowSlice"), h, g
+	return typecheck.LookupRuntimeFunc(LogosRegionGrowSliceEntry(n.Type().Elem())), h, g
+}
+
+func LogosRegionGrowSliceEntry(elem *types.Type) string {
+	if elem.HasPointers() {
+		return "logosRegionGrowSliceScan"
+	}
+	return "logosRegionGrowSliceNoscan"
 }

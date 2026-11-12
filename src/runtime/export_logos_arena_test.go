@@ -219,11 +219,21 @@ func LogosRegionAllocScan(h unsafe.Pointer, gen uintptr, elem any, size uintptr)
 }
 
 func LogosRegionMakeSlice(h unsafe.Pointer, gen uintptr, elem any, len64, cap64 int64) unsafe.Pointer {
-	return logosRegionMakeSlice(h, gen, logosEfaceType(elem), len64, cap64)
+	typ := logosEfaceType(elem)
+	if typ.Pointers() {
+		return logosRegionMakeSliceScan(h, gen, typ, len64, cap64)
+	}
+	return logosRegionMakeSliceNoscan(h, gen, typ, len64, cap64)
 }
 
 func LogosRegionGrowSlice(h unsafe.Pointer, gen uintptr, oldPtr unsafe.Pointer, newLen, oldCap, num int, elem any) (array unsafe.Pointer, capacity int) {
-	s := logosRegionGrowSlice(h, gen, oldPtr, newLen, oldCap, num, logosEfaceType(elem))
+	typ := logosEfaceType(elem)
+	var s slice
+	if typ.Pointers() {
+		s = logosRegionGrowSliceScan(h, gen, oldPtr, newLen, oldCap, num, typ)
+	} else {
+		s = logosRegionGrowSliceNoscan(h, gen, oldPtr, newLen, oldCap, num, typ)
+	}
 	return s.array, s.cap
 }
 

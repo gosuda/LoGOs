@@ -12,6 +12,7 @@ import (
 	"cmd/compile/internal/typecheck"
 	"cmd/compile/internal/types"
 	"cmd/internal/src"
+	"go/constant"
 	"internal/buildcfg"
 	"slices"
 )
@@ -576,8 +577,8 @@ func (p *logosRegionLowering) lowerSiteNew(call *ir.CallExpr, h, g ir.Node) ir.N
 	size := elem.Size()
 	pos := call.Pos()
 	init := p.init
-	if !elem.HasPointers() && size > 0 && size <= ssagen.LogosArenaBumpMaxBytes && buildcfg.GOARCH == "amd64" && !base.Flag.Race {
-		return p.lowerSiteBumpNew(call, elem, size, h, g)
+	if logosRegionBumpable(elem, size) {
+		return typecheck.Conv(p.bumpPointer(pos, elem, size, h, g), call.Type())
 	}
 	old := base.Pos
 	base.Pos = pos
@@ -598,8 +599,23 @@ func (p *logosRegionLowering) lowerSiteNew(call *ir.CallExpr, h, g ir.Node) ir.N
 	return out
 }
 
-func (p *logosRegionLowering) lowerSiteBumpNew(call *ir.CallExpr, elem *types.Type, size int64, h, g ir.Node) ir.Node {
-	pos := call.Pos()
+func logosRegionBumpable(elem *types.Type, size int64) bool {
+	return !elem.HasPointers() && size > 0 && size <= ssagen.LogosArenaBumpMaxBytes && buildcfg.GOARCH == "amd64" && !base.Flag.Race
+}
+
+func logosRegionMakeBumpSize(elem *types.Type, length ir.Node) (int64, bool) {
+	if !ir.IsConst(length, constant.Int) {
+		return 0, false
+	}
+	count, width := ir.Int64Val(length), elem.Size()
+	if count <= 0 || width <= 0 || count > ssagen.LogosArenaBumpMaxBytes/width {
+		return 0, false
+	}
+	size := count * width
+	return size, logosRegionBumpable(elem, size)
+}
+
+func (p *logosRegionLowering) bumpPointer(pos src.XPos, elem *types.Type, size int64, h, g ir.Node) *ir.Name {
 	init := p.init
 	pt := typecheck.TempAt(pos, p.fn, types.Types[types.TUNSAFEPTR])
 	old := base.Pos
@@ -618,7 +634,24 @@ func (p *logosRegionLowering) lowerSiteBumpNew(call *ir.CallExpr, elem *types.Ty
 	base.Pos = old
 	nif := ir.NewIfStmt(pos, ir.NewBinaryExpr(pos, ir.OEQ, pt, typecheck.NodNil()), slow, clr)
 	p.appendInit(init, nif)
-	return typecheck.Conv(pt, call.Type())
+	return pt
+}
+
+func (p *logosRegionLowering) makeSliceData(pos src.XPos, elem *types.Type, length, h, g ir.Node) *ir.Name {
+	init := p.init
+	entry := "logosRegionMakeSliceNoscan"
+	if elem.HasPointers() {
+		entry = "logosRegionMakeSliceScan"
+	}
+	pt := typecheck.TempAt(pos, p.fn, types.Types[types.TUNSAFEPTR])
+	len64 := typecheck.Conv(length, types.Types[types.TINT64])
+	old := base.Pos
+	base.Pos = pos
+	callMake := mkcall1(typecheck.LookupRuntime(entry), types.Types[types.TUNSAFEPTR], init, h, g, reflectdata.TypePtrAt(pos, elem), len64, len64)
+	callMake.SetPos(pos)
+	base.Pos = old
+	p.appendInit(init, ir.NewAssignStmt(pos, pt, callMake))
+	return pt
 }
 
 func (p *logosRegionLowering) lowerSiteMake(call *ir.CallExpr, h, g ir.Node) ir.Node {
@@ -628,19 +661,18 @@ func (p *logosRegionLowering) lowerSiteMake(call *ir.CallExpr, h, g ir.Node) ir.
 	}
 	pos := call.Pos()
 	init := p.init
-	lenNode := safeExpr(call.Args[argBase+1], init)
-	rtyp := reflectdata.TypePtrAt(pos, call.Type().Elem())
-	pt := typecheck.TempAt(pos, p.fn, types.Types[types.TUNSAFEPTR])
-	len64 := typecheck.Conv(lenNode, types.Types[types.TINT64])
-	old := base.Pos
-	base.Pos = pos
-	callMake := mkcall1(typecheck.LookupRuntime("logosRegionMakeSlice"), types.Types[types.TUNSAFEPTR], init, h, g, rtyp, len64, len64)
-	callMake.SetPos(pos)
-	base.Pos = old
-	p.appendInit(init, ir.NewAssignStmt(pos, pt, callMake))
-
+	elem := call.Type().Elem()
+	types.CalcSize(elem)
+	length := safeExpr(call.Args[argBase+1], init)
+	var data ir.Node
+	if size, ok := logosRegionMakeBumpSize(elem, length); ok {
+		data = p.bumpPointer(pos, elem, size, h, g)
+	} else {
+		data = p.makeSliceData(pos, elem, length, h, g)
+	}
 	slice := typecheck.TempAt(pos, p.fn, call.Type())
-	sh := ir.NewSliceHeaderExpr(pos, call.Type(), pt, typecheck.Conv(lenNode, types.Types[types.TINT]), typecheck.Conv(lenNode, types.Types[types.TINT]))
+	n := typecheck.Conv(length, types.Types[types.TINT])
+	sh := ir.NewSliceHeaderExpr(pos, call.Type(), data, n, n)
 	sh.SetTypecheck(1)
 	p.appendInit(init, ir.NewAssignStmt(pos, slice, sh))
 	return slice
@@ -713,7 +745,7 @@ func logosRegionGrowslice(g logosRegionGrow) *ir.CallExpr {
 	if v, ok := ssagen.LogosRegionAppends.Load(g.app); ok {
 		info := v.(ssagen.LogosRegionGrowInfo)
 		elem := g.slice.Type().Elem()
-		fn := typecheck.LookupRuntime("logosRegionGrowSlice", elem, elem)
+		fn := typecheck.LookupRuntime(ssagen.LogosRegionGrowSliceEntry(elem), elem, elem)
 		pos := g.app.Pos()
 		old := base.Pos
 		base.Pos = pos

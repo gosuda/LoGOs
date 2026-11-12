@@ -145,6 +145,107 @@ func regionUnplaced() int {
 	}
 }
 
+//go:noinline
+func regionMakeConstNoscan() int {
+	{
+		r := arena.Open()
+		// amd64:"LEAQ 7\\("
+		// amd64:"ANDQ \\$-8,"
+		// amd64:"LEAQ 64\\("
+		// amd64:"CMPQ .*24\\("
+		// amd64:"JHI"
+		// amd64:"PCDATA \\$0, \\$-2"
+		// amd64:1"CALL.*logosRegionAllocNoscan"
+		// amd64:-"CALL.*logosRegionMakeSlice"
+		// arm64:1"CALL.*logosRegionMakeSliceNoscan"
+		// arm64:-"CALL.*logosRegionBump"
+		s := arena.Make[int](r, 8)
+		s[0] = 1
+		return s[7]
+	}
+}
+
+//go:noinline
+func regionMakeConstLarge() int {
+	{
+		r := arena.Open()
+		// amd64:1"CALL.*logosRegionMakeSliceNoscan"
+		// amd64:-"ANDQ \\$-8,"
+		// amd64:-"PCDATA \\$0, \\$-2"
+		// arm64:1"CALL.*logosRegionMakeSliceNoscan"
+		s := arena.Make[int](r, 65)
+		s[0] = 1
+		return s[64]
+	}
+}
+
+//go:noinline
+func regionMakeVarNoscan(n int) int {
+	{
+		r := arena.Open()
+		// amd64:1"CALL.*logosRegionMakeSliceNoscan"
+		// amd64:-"CALL.*logosRegionMakeSliceScan"
+		// arm64:1"CALL.*logosRegionMakeSliceNoscan"
+		// arm64:-"CALL.*logosRegionMakeSliceScan"
+		s := arena.Make[int](r, n)
+		s[0] = 1
+		return s[n-1]
+	}
+}
+
+//go:noinline
+func regionMakeVarScan(n int) int {
+	{
+		r := arena.Open()
+		// amd64:1"CALL.*logosRegionMakeSliceScan"
+		// amd64:-"CALL.*logosRegionMakeSliceNoscan"
+		// arm64:1"CALL.*logosRegionMakeSliceScan"
+		// arm64:-"CALL.*logosRegionMakeSliceNoscan"
+		s := arena.Make[*int](r, n)
+		return len(s)
+	}
+}
+
+//go:noinline
+func regionMakeConstScan() int {
+	{
+		r := arena.Open()
+		// amd64:1"CALL.*logosRegionMakeSliceScan"
+		// amd64:-"CALL.*logosRegionMakeSliceNoscan"
+		// amd64:-"ANDQ \\$-8,"
+		// arm64:1"CALL.*logosRegionMakeSliceScan"
+		// arm64:-"CALL.*logosRegionMakeSliceNoscan"
+		s := arena.Make[*int](r, 4)
+		return len(s)
+	}
+}
+
+//go:noinline
+func regionAppendNoscan() int {
+	{
+		r := arena.Open()
+		// amd64:1"CALL.*logosRegionGrowSliceNoscan"
+		// amd64:-"CALL.*logosRegionGrowSliceScan"
+		// arm64:1"CALL.*logosRegionGrowSliceNoscan"
+		// arm64:-"CALL.*logosRegionGrowSliceScan"
+		t := arena.Append[int](r, nil, 1, 2, 3)
+		return len(t)
+	}
+}
+
+//go:noinline
+func regionAppendScan(p *int) int {
+	{
+		r := arena.Open()
+		// amd64:1"CALL.*logosRegionGrowSliceScan"
+		// amd64:-"CALL.*logosRegionGrowSliceNoscan"
+		// arm64:1"CALL.*logosRegionGrowSliceScan"
+		// arm64:-"CALL.*logosRegionGrowSliceNoscan"
+		t := arena.Append[*int](r, nil, p)
+		return len(t)
+	}
+}
+
 func main() {
 	regionSink += regionBump8()
 	regionSink += regionBump511()
@@ -152,5 +253,12 @@ func main() {
 	regionSink += regionSlow513()
 	regionSink += regionScanNew()
 	regionSink += regionUnplaced()
+	regionSink += regionMakeConstNoscan()
+	regionSink += regionMakeConstLarge()
+	regionSink += regionMakeVarNoscan(3)
+	regionSink += regionMakeVarScan(3)
+	regionSink += regionMakeConstScan()
+	regionSink += regionAppendNoscan()
+	regionSink += regionAppendScan(&regionSink)
 	_ = regionSink
 }

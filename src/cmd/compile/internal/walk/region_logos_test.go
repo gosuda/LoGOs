@@ -393,12 +393,12 @@ func TestLogosRegionMakeHeader(t *testing.T) {
 		t.Fatalf("make prelude has %d statements, want 2", len(makeAs.Init()))
 	}
 	allocAs := makeAs.Init()[0].(*ir.AssignStmt)
-	if regionCallName(allocAs.Y) != "logosRegionMakeSlice" {
-		t.Fatalf("make lowers to %q, want logosRegionMakeSlice", regionCallName(allocAs.Y))
+	if regionCallName(allocAs.Y) != "logosRegionMakeSliceNoscan" {
+		t.Fatalf("make of a pointer-free element lowers to %q, want logosRegionMakeSliceNoscan", regionCallName(allocAs.Y))
 	}
 	call := allocAs.Y.(*ir.CallExpr)
 	if len(call.Args) != 5 {
-		t.Fatalf("logosRegionMakeSlice has %d args, want 5", len(call.Args))
+		t.Fatalf("logosRegionMakeSliceNoscan has %d args, want 5", len(call.Args))
 	}
 	if call.Args[3].Type().Kind() != types.TINT64 || call.Args[4].Type().Kind() != types.TINT64 {
 		t.Fatal("length is not converted to int64 at run time")
@@ -409,6 +409,53 @@ func TestLogosRegionMakeHeader(t *testing.T) {
 	}
 	if regionCloseCount(list) != 1 {
 		t.Fatalf("owner block has %d closes, want 1", regionCloseCount(list))
+	}
+}
+
+func TestLogosRegionMakeEntries(t *testing.T) {
+	intType := types.Types[types.TINT]
+	ptrType := types.NewPtr(intType)
+	for _, tc := range []struct {
+		name   string
+		elem   *types.Type
+		length func(*ir.Func) ir.Node
+		first  string
+	}{
+		{"variable noscan", intType, func(fn *ir.Func) ir.Node { return typecheck.TempAt(src.NoXPos, fn, intType) }, "logosRegionMakeSliceNoscan"},
+		{"variable scan", ptrType, func(fn *ir.Func) ir.Node { return typecheck.TempAt(src.NoXPos, fn, intType) }, "logosRegionMakeSliceScan"},
+		{"constant noscan within the bump limit", intType, func(*ir.Func) ir.Node { return ir.NewInt(src.NoXPos, 8) }, "logosRegionBump"},
+		{"constant noscan past the bump limit", intType, func(*ir.Func) ir.Node { return ir.NewInt(src.NoXPos, 65) }, "logosRegionMakeSliceNoscan"},
+		{"constant scan", ptrType, func(*ir.Func) ir.Node { return ir.NewInt(src.NoXPos, 4) }, "logosRegionMakeSliceScan"},
+		{"constant zero length", intType, func(*ir.Func) ir.Node { return ir.NewInt(src.NoXPos, 0) }, "logosRegionMakeSliceNoscan"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			enableLogosRegion(t)
+			fn := regionTestFn()
+			openCall, openAs, r := regionTestOpen(fn)
+			ir.LogosRegions.Live(openCall)
+			sliceType := types.NewSlice(tc.elem)
+			makeCall := regionTestCall("Make", sliceType, r, tc.length(fn))
+			ir.LogosRegions.Place(makeCall)
+			slice := typecheck.TempAt(src.NoXPos, fn, sliceType)
+			makeAs := ir.NewAssignStmt(src.NoXPos, slice, makeCall)
+			makeAs.SetTypecheck(1)
+			fn.Body = ir.Nodes{regionTestBlock(openAs, makeAs)}
+			logosRegionLower(fn)
+			allocAs := makeAs.Init()[0].(*ir.AssignStmt)
+			if got := regionCallName(allocAs.Y); got != tc.first {
+				t.Fatalf("make lowers through %q, want %q", got, tc.first)
+			}
+		})
+	}
+}
+
+func TestLogosRegionGrowEntries(t *testing.T) {
+	intType := types.Types[types.TINT]
+	if got := ssagen.LogosRegionGrowSliceEntry(intType); got != "logosRegionGrowSliceNoscan" {
+		t.Fatalf("pointer-free element grows through %q", got)
+	}
+	if got := ssagen.LogosRegionGrowSliceEntry(types.NewPtr(intType)); got != "logosRegionGrowSliceScan" {
+		t.Fatalf("pointer element grows through %q", got)
 	}
 }
 
