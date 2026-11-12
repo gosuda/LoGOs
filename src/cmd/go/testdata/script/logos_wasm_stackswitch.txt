@@ -56,6 +56,22 @@ stderr '(?s)main\.pureSum<1> STEXT[^\n]*\n(\t[^\n]*\n)*\t[^\n]*\tBrTable'
 ! stderr 'ContNew'
 ! stderr '\tResume\t'
 
+# Dropping dispatch is not stack switching: the runtime assembly that
+# holds the continuation instructions must be selected by the flag on
+# both commands and absent without it.
+logos build -wasm-features=stack-switching -asmflags=runtime=-S -o $WORK/switch-rtasm.wasm .
+stderr '\tContNew'
+stderr '\tResume\t'
+stderr '\tSuspend'
+go build -wasm-features=stack-switching -asmflags=runtime=-S -o $WORK/gobuild-rtasm.wasm .
+stderr '\tContNew'
+stderr '\tResume\t'
+stderr '\tSuspend'
+logos build -asmflags=runtime=-S -o $WORK/plain-rtasm.wasm .
+! stderr '\tContNew'
+! stderr '\tResume\t'
+! stderr '\tSuspend'
+
 go build -wasm-features=stack-switching -o $WORK/gobuild.wasm .
 
 [!exec:node] skip 'node not in PATH'
