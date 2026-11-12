@@ -6,6 +6,7 @@ package lint
 
 import (
 	"fmt"
+	"internal/logosfile"
 	"path"
 	"strings"
 
@@ -51,8 +52,11 @@ func checkUnsafeImport(pass *Pass) {
 // _unsafe.go or _test.go, with the loGo/s extension in place of .go.
 func unsafeImportAllowed(f *syntax.File) bool {
 	name := f.Pos().RelFilename()
-	stem := strings.TrimSuffix(strings.TrimSuffix(name, ".lgo"), ".go")
-	return strings.HasSuffix(stem+".go", "_unsafe.go") || strings.HasSuffix(stem+".go", "_test.go")
+	stem, _, ok := logosfile.Split(name)
+	if !ok {
+		stem = strings.TrimSuffix(name, ".go")
+	}
+	return strings.HasSuffix(stem, "_unsafe") || strings.HasSuffix(stem, "_test")
 }
 
 // literalString returns the value of a string literal.
