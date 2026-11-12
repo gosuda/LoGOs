@@ -49,6 +49,13 @@ func logosReferenceFree(t Type) bool {
 	return false
 }
 
+func LogosAliasFreeReturn(value, result Type) bool {
+	if result != nil && logosAsConstView(result) != nil {
+		return true
+	}
+	return value != nil && logosReferenceFree(value)
+}
+
 func (check *Checker) logosConstType(e *syntax.ConstType, def *TypeName) Type {
 	typ := check.varType(e.Elem)
 	if !isValid(typ) {

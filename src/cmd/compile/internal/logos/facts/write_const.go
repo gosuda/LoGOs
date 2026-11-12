@@ -74,6 +74,7 @@ func analyzeMutations(pkg *types2.Package, info *types2.Info, files []*syntax.Fi
 		for _, d := range decls {
 			scan := &constBodyScan{pkg: pkg, info: info, recvMut: recvMut, paramMask: paramMask, strictRetain: strictRetain}
 			rm, mask := scan.funcMutations(d)
+			rm = rm && !d.obj.LogosReadonly()
 			if rm && !recvMut[d.obj] {
 				recvMut[d.obj] = true
 				changed = true
@@ -511,6 +512,7 @@ type constBodyScan struct {
 	mut          map[*types2.Var]bool
 	strictRetain bool
 	results      []*types2.Var
+	slots        []types2.Type
 }
 
 func (s *constBodyScan) funcMutations(d constFuncDecl) (bool, []byte) {
@@ -532,10 +534,12 @@ func (s *constBodyScan) funcMutations(d constFuncDecl) (bool, []byte) {
 			s.tainted[p] = p
 		}
 	}
+	s.slots = nil
 	if rs := d.sig.Results(); rs != nil {
 		for i := range rs.Len() {
 			if v := rs.At(i); v != nil {
 				s.results = append(s.results, v)
+				s.slots = append(s.slots, v.Type())
 			}
 		}
 	}
@@ -780,13 +784,21 @@ func (s *constBodyScan) blockStmt(n syntax.Node) {
 }
 
 func (s *constBodyScan) returned(results syntax.Expr) {
-	for _, e := range syntax.UnpackListExpr(results) {
-		if t := s.info.TypeOf(e); t != nil && types2.LogosReferenceFree(t) {
+	exprs := syntax.UnpackListExpr(results)
+	for i, e := range exprs {
+		if types2.LogosAliasFreeReturn(s.info.TypeOf(e), s.resultType(i, len(exprs))) {
 			s.scanReads(e)
 			continue
 		}
 		s.markMention(e)
 	}
+}
+
+func (s *constBodyScan) resultType(i, n int) types2.Type {
+	if n != len(s.slots) {
+		return nil
+	}
+	return s.slots[i]
 }
 
 func (s *constBodyScan) markAllParams() {
@@ -1042,7 +1054,10 @@ func (s *constBodyScan) varDecl(vd *syntax.VarDecl) {
 func (s *constBodyScan) doCall(call *syntax.CallExpr, escaping bool) {
 	if lit, ok := syntax.Unparen(call.Fun).(*syntax.FuncLit); ok {
 		if lit.Body != nil && !escaping {
+			slots := s.slots
+			s.slots = nil
 			s.block(lit.Body.List)
+			s.slots = slots
 		} else if lit.Body != nil {
 			s.markClosure(lit.Body)
 		}

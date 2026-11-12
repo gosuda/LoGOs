@@ -109,3 +109,125 @@ var _ Counter = &Plain{}
 func readPlain(c Counter) string {
 	return c.Name
 }
+
+type Holder struct {
+	tags []string
+}
+
+type Shape interface {
+	Area() int
+}
+
+type PosPoint struct {
+	X, Y int
+}
+
+type IChan interface {
+	const Ch chan int
+}
+
+type IFunc interface {
+	const Fn func() int
+}
+
+type IShape interface {
+	const Ifc Shape
+}
+
+type IHolder interface {
+	const Hold Holder
+}
+
+type ISlice interface {
+	const Tags []string
+}
+
+type IMap interface {
+	const Idx map[string]int
+}
+
+type IPtr interface {
+	const Ptr *PosPoint
+}
+
+type AliasChan struct : IChan /* ERROR "const_view_mutation" */ {
+	ch chan int
+}
+
+func (a *AliasChan) Ch() chan int { return a.ch }
+
+type AliasFunc struct : IFunc /* ERROR "const_view_mutation" */ {
+	fn func() int
+}
+
+func (a *AliasFunc) Fn() func() int { return a.fn }
+
+type AliasShape struct : IShape /* ERROR "const_view_mutation" */ {
+	ifc Shape
+}
+
+func (a *AliasShape) Ifc() Shape { return a.ifc }
+
+type AliasHolder struct : IHolder /* ERROR "const_view_mutation" */ {
+	hold Holder
+}
+
+func (a *AliasHolder) Hold() Holder { return a.hold }
+
+type AliasSlice struct : ISlice /* ERROR "const_view_mutation" */ {
+	tags []string
+}
+
+func (a *AliasSlice) Tags() []string { return a.tags }
+
+type AliasMap struct : IMap /* ERROR "const_view_mutation" */ {
+	idx map[string]int
+}
+
+func (a *AliasMap) Idx() map[string]int { return a.idx }
+
+type AliasPtr struct : IPtr /* ERROR "const_view_mutation" */ {
+	ptr *PosPoint
+}
+
+func (a *AliasPtr) Ptr() *PosPoint { return a.ptr }
+
+type IViewSlice interface {
+	const Tags const []string
+}
+
+type IViewMap interface {
+	const Idx const map[string]int
+}
+
+type IViewPtr interface {
+	const Ptr const *PosPoint
+}
+
+type ViewSlice struct : IViewSlice {
+	tags []string
+}
+
+func (v *ViewSlice) Tags() const []string { return v.tags }
+
+type ViewMap struct : IViewMap {
+	idx map[string]int
+}
+
+func (v *ViewMap) Idx() const map[string]int { return v.idx }
+
+type ViewPtr struct : IViewPtr {
+	ptr *PosPoint
+}
+
+func (v *ViewPtr) Ptr() const *PosPoint { return v.ptr }
+
+type ViewWrite struct : IViewSlice /* ERROR "const_view_mutation" */ {
+	n    int
+	tags []string
+}
+
+func (v *ViewWrite) Tags() const []string {
+	v.n++
+	return v.tags
+}

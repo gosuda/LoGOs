@@ -27,6 +27,38 @@ stderr 'samewrite\.lgo:.*const_view_mutation'
 ! logos build ./crosswrite
 stderr 'crosswrite\.lgo:.*const_view_mutation'
 
+! logos build ./samechan
+stderr 'samechan\.lgo:.*const_view_mutation'
+! logos build ./crosschan
+stderr 'crosschan\.lgo:.*const_view_mutation'
+
+! logos build ./samefunc
+stderr 'samefunc\.lgo:.*const_view_mutation'
+! logos build ./crossfunc
+stderr 'crossfunc\.lgo:.*const_view_mutation'
+
+! logos build ./sameiface
+stderr 'sameiface\.lgo:.*const_view_mutation'
+! logos build ./crossiface
+stderr 'crossiface\.lgo:.*const_view_mutation'
+
+! logos build ./samehold
+stderr 'samehold\.lgo:.*const_view_mutation'
+! logos build ./crosshold
+stderr 'crosshold\.lgo:.*const_view_mutation'
+
+logos build ./sameconst
+logos build ./crossconst
+logos run ./appconst
+stdout '^2 0 5$'
+! logos build -o $WORK/appwrite$GOEXE ./appwrite
+stderr 'appwrite\.lgo:.*const_view_mutation'
+
+! logos build ./samecwrite
+stderr 'samecwrite\.lgo:.*const_view_mutation'
+! logos build ./crosscwrite
+stderr 'crosscwrite\.lgo:.*const_view_mutation'
+
 -- w/go.mod --
 module example.com/shapes
 
@@ -50,7 +82,7 @@ type T struct {
 }
 
 func New() *T {
-	return &T{name: "tee", n: 7, pos: Point{1, 2}, grid: [2]int{3, 4}, ptr: &Point{5, 6}}
+	return &T{name: "tee", n: 7, pos: Point{1, 2}, grid: [2]int{3, 4}, tags: []string{"a", "b"}, ptr: &Point{5, 6}}
 }
 
 func (r *T) Name() string        { return r.name }
@@ -60,6 +92,9 @@ func (r *T) Grid() [2]int        { return r.grid }
 func (r *T) Tags() []string      { return r.tags }
 func (r *T) Idx() map[string]int { return r.idx }
 func (r *T) Ptr() *Point         { return r.ptr }
+func (r *T) TagsC() const []string      { return r.tags }
+func (r *T) IdxC() const map[string]int { return r.idx }
+func (r *T) PtrC() const *Point         { return r.ptr }
 
 type Writer struct {
 	n int
@@ -68,6 +103,36 @@ type Writer struct {
 func (w *Writer) Name() string {
 	w.n++
 	return "writer"
+}
+
+type Holder struct {
+	tags []string
+}
+
+type Shape interface {
+	Area() int
+}
+
+type A struct {
+	ch   chan int
+	fn   func() int
+	ifc  Shape
+	hold Holder
+}
+
+func (r *A) Ch() chan int   { return r.ch }
+func (r *A) Fn() func() int { return r.fn }
+func (r *A) Ifc() Shape     { return r.ifc }
+func (r *A) Hold() Holder   { return r.hold }
+
+type CWriter struct {
+	n    int
+	tags []string
+}
+
+func (w *CWriter) TagsC() const []string {
+	w.n++
+	return w.tags
 }
 
 -- w/same/same.lgo --
@@ -260,4 +325,250 @@ type Named interface {
 
 type W struct : Named {
 	*lib.Writer
+}
+
+-- w/samechan/samechan.lgo --
+package samechan
+
+type I interface {
+	const Ch chan int
+}
+
+type T struct : I {
+	ch chan int
+}
+
+func (r *T) Ch() chan int { return r.ch }
+
+-- w/crosschan/crosschan.lgo --
+package crosschan
+
+import "example.com/shapes/lib"
+
+type I interface {
+	const Ch chan int
+}
+
+type W struct : I {
+	*lib.A
+}
+
+-- w/samefunc/samefunc.lgo --
+package samefunc
+
+type I interface {
+	const Fn func() int
+}
+
+type T struct : I {
+	fn func() int
+}
+
+func (r *T) Fn() func() int { return r.fn }
+
+-- w/crossfunc/crossfunc.lgo --
+package crossfunc
+
+import "example.com/shapes/lib"
+
+type I interface {
+	const Fn func() int
+}
+
+type W struct : I {
+	*lib.A
+}
+
+-- w/sameiface/sameiface.lgo --
+package sameiface
+
+type Shape interface {
+	Area() int
+}
+
+type I interface {
+	const Ifc Shape
+}
+
+type T struct : I {
+	ifc Shape
+}
+
+func (r *T) Ifc() Shape { return r.ifc }
+
+-- w/crossiface/crossiface.lgo --
+package crossiface
+
+import "example.com/shapes/lib"
+
+type I interface {
+	const Ifc lib.Shape
+}
+
+type W struct : I {
+	*lib.A
+}
+
+-- w/samehold/samehold.lgo --
+package samehold
+
+type Holder struct {
+	tags []string
+}
+
+type I interface {
+	const Hold Holder
+}
+
+type T struct : I {
+	hold Holder
+}
+
+func (r *T) Hold() Holder { return r.hold }
+
+-- w/crosshold/crosshold.lgo --
+package crosshold
+
+import "example.com/shapes/lib"
+
+type I interface {
+	const Hold lib.Holder
+}
+
+type W struct : I {
+	*lib.A
+}
+
+-- w/sameconst/sameconst.lgo --
+package sameconst
+
+type Point struct {
+	X, Y int
+}
+
+type MTags interface {
+	const TagsC() const []string
+}
+
+type MIdx interface {
+	const IdxC() const map[string]int
+}
+
+type MPtr interface {
+	const PtrC() const *Point
+}
+
+type T1 struct : MTags {
+	tags []string
+}
+
+func (r *T1) TagsC() const []string { return r.tags }
+
+type T2 struct : MIdx {
+	idx map[string]int
+}
+
+func (r *T2) IdxC() const map[string]int { return r.idx }
+
+type T3 struct : MPtr {
+	ptr *Point
+}
+
+func (r *T3) PtrC() const *Point { return r.ptr }
+
+-- w/crossconst/crossconst.lgo --
+package crossconst
+
+import "example.com/shapes/lib"
+
+type MTags interface {
+	const TagsC() const []string
+}
+
+type MIdx interface {
+	const IdxC() const map[string]int
+}
+
+type MPtr interface {
+	const PtrC() const *lib.Point
+}
+
+type All interface {
+	const TagsC() const []string
+	const IdxC() const map[string]int
+	const PtrC() const *lib.Point
+}
+
+type W1 struct : MTags {
+	*lib.T
+}
+
+type W2 struct : MIdx {
+	*lib.T
+}
+
+type W3 struct : MPtr {
+	*lib.T
+}
+
+type Wrap struct : All {
+	*lib.T
+}
+
+func Make() All {
+	return &Wrap{lib.New()}
+}
+
+-- w/appconst/appconst.lgo --
+package main
+
+import (
+	"fmt"
+
+	"example.com/shapes/crossconst"
+)
+
+func main() {
+	v := crossconst.Make()
+	fmt.Println(len(v.TagsC()), len(v.IdxC()), v.PtrC().X)
+}
+
+-- w/appwrite/appwrite.lgo --
+package main
+
+import "example.com/shapes/crossconst"
+
+func main() {
+	v := crossconst.Make()
+	v.TagsC()[0] = "x"
+}
+
+-- w/samecwrite/samecwrite.lgo --
+package samecwrite
+
+type I interface {
+	const TagsC() const []string
+}
+
+type T struct : I {
+	n    int
+	tags []string
+}
+
+func (r *T) TagsC() const []string {
+	r.n++
+	return r.tags
+}
+
+-- w/crosscwrite/crosscwrite.lgo --
+package crosscwrite
+
+import "example.com/shapes/lib"
+
+type I interface {
+	const TagsC() const []string
+}
+
+type W struct : I {
+	*lib.CWriter
 }

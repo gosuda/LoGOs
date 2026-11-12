@@ -275,19 +275,15 @@ func (check *Checker) logosReceiverReadonly(obj *Func) bool {
 	if logosReferenceFree(rt) {
 		return true
 	}
+	if logosProvenInConfForCheck(check, decl) {
+		logosMarkReadonlyCapability(decl)
+		return true
+	}
 	di, ok := check.objMap[decl]
 	if !ok || di == nil || di.fdecl == nil || di.fdecl.Body == nil {
-		if logosProvenInConfForCheck(check, decl) {
-			logosMarkReadonlyCapability(decl)
-			return true
-		}
 		return false
 	}
 	if check.conf.IgnoreFuncBodies {
-		if logosProvenInConfForCheck(check, decl) {
-			logosMarkReadonlyCapability(decl)
-			return true
-		}
 		return false
 	}
 	s := &logosRecvScan{
@@ -316,6 +312,7 @@ type logosRecvScan struct {
 	mut     map[*Var]bool
 	root    *Var
 	results []*Var
+	slots   []Type
 	changed bool
 }
 
@@ -361,15 +358,17 @@ func (s *logosRecvScan) summarize(fn *Func, arg int) bool {
 	if s.check.conf.IgnoreFuncBodies {
 		return true
 	}
-	savedTainted, savedMut, savedRoot, savedResults, savedChanged :=
-		s.tainted, s.mut, s.root, s.results, s.changed
+	savedTainted, savedMut, savedRoot, savedResults, savedSlots, savedChanged :=
+		s.tainted, s.mut, s.root, s.results, s.slots, s.changed
 	s.tainted = map[Object]bool{pv: true}
 	s.mut = map[*Var]bool{}
 	s.root = pv
-	s.results = nil
+	s.results, s.slots = nil, nil
 	if rs := sig.Results(); rs != nil {
 		for i := range rs.Len() {
-			if rv := rs.At(i); rv != nil && rv.Name() != "_" && rv.Name() != "" {
+			rv := rs.At(i)
+			s.slots = append(s.slots, rv.Type())
+			if rv.Name() != "_" && rv.Name() != "" {
 				s.results = append(s.results, rv)
 			}
 		}
@@ -389,8 +388,8 @@ func (s *logosRecvScan) summarize(fn *Func, arg int) bool {
 	res := s.mut[pv]
 	delete(s.active, key)
 	s.memo[key] = res
-	s.tainted, s.mut, s.root, s.results, s.changed =
-		savedTainted, savedMut, savedRoot, savedResults, savedChanged
+	s.tainted, s.mut, s.root, s.results, s.slots, s.changed =
+		savedTainted, savedMut, savedRoot, savedResults, savedSlots, savedChanged
 	return res
 }
 
@@ -886,16 +885,17 @@ func (s *logosRecvScan) closureCall(lit *syntax.FuncLit, args []syntax.Expr) {
 	} else if s.anyTainted(args) {
 		s.markRoot()
 	}
-	if lit.Body != nil {
-		s.block(lit.Body.List)
-	}
+	s.closureEffects(lit)
 }
 
 func (s *logosRecvScan) closureEffects(lit *syntax.FuncLit) {
 	if lit == nil || lit.Body == nil {
 		return
 	}
+	saved := s.slots
+	s.slots = nil
 	s.block(lit.Body.List)
+	s.slots = saved
 }
 
 func (s *logosRecvScan) exprEffects(e syntax.Expr) {
@@ -1086,11 +1086,20 @@ func (s *logosRecvScan) ret(results syntax.Expr) {
 		return
 	}
 	s.exprEffects(results)
-	for _, e := range syntax.UnpackListExpr(results) {
-		if s.taintedRef(e) {
+	exprs := syntax.UnpackListExpr(results)
+	for i, e := range exprs {
+		if s.taintedRef(e) && !s.aliasFreeReturn(e, i, len(exprs)) {
 			s.markRoot()
 		}
 	}
+}
+
+func (s *logosRecvScan) aliasFreeReturn(e syntax.Expr, i, n int) bool {
+	var result Type
+	if n == len(s.slots) {
+		result = s.slots[i]
+	}
+	return LogosAliasFreeReturn(s.check.Info.TypeOf(e), result)
 }
 
 func (s *logosRecvScan) declList(list []syntax.Decl) {
