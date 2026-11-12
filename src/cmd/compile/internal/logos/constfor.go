@@ -874,6 +874,19 @@ func cfPastParens(p syntax.Node, parents map[syntax.Node]syntax.Node) syntax.Nod
 	}
 }
 
+func cfAddressTaken(p syntax.Node, parents map[syntax.Node]syntax.Node) bool {
+	for {
+		switch q := p.(type) {
+		case *syntax.ParenExpr:
+			p = parents[p]
+		case *syntax.Operation:
+			return q.Op == syntax.And && q.Y == nil
+		default:
+			return false
+		}
+	}
+}
+
 // cfSites carries the substitution context of one expansion: the local
 // name of the comptime import for live Error detection, and, for S3
 // copies built from record text, the marker spellings, the marker
@@ -1316,6 +1329,10 @@ func (c *cfLeaf) subName(n *syntax.Name) {
 	}
 	if cfAssignTarget(n, p, c.parents) {
 		c.fl.cfError(c.run.sites.at(n.Pos()), "[comptime::const_for_assign] cannot assign to const for variable %s", n.Value)
+		return
+	}
+	if cfAddressTaken(p, c.parents) {
+		c.fl.cfError(c.run.sites.at(n.Pos()), "[comptime::const_for_assign] cannot take the address of const for variable %s", n.Value)
 		return
 	}
 	if cfBareSkip(n, p) {
