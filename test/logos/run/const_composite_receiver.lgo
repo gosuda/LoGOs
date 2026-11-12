@@ -71,9 +71,26 @@ func testElements() {
 	check("receiver-field-slice-element-variable", sh.Items[i].Look("b") == 2, sh.Items[i].Look("b"), 2)
 }
 
+type pt struct{ X, Y int }
+
+func (p *pt) PeekX() int { return p.X }
+
+const P = pt{3, 4}
+
+func testReadonlyPointer() {
+	check("receiver-readonly-pointer", cfg.Peek() == 7, cfg.Peek(), 7)
+	check("receiver-readonly-pointer-nested", w.In.Peek() == 3, w.In.Peek(), 3)
+	check("receiver-readonly-pointer-array-element", grid[1].Peek() == 9, grid[1].Peek(), 9)
+	check("receiver-readonly-pointer-plain", P.PeekX() == 3, P.PeekX(), 3)
+	check("receiver-readonly-pointer-declared-later", cfg.LatePeek() == 7, cfg.LatePeek(), 7)
+}
+
+func (b *box) LatePeek() int { return b.N }
+
 func main() {
 	test()
 	testElements()
+	testReadonlyPointer()
 	if failed {
 		os.Exit(1)
 	}

@@ -452,6 +452,8 @@ A method with a `const` pointer receiver (such as `func (r const *T) M()`) MUST 
 
 A call of a method with a value receiver on a const composite that holds a map, or on an imported const composite, MUST fail with `[correctness::const_view_mutation]` unless the receiver type is reference-free or the method is proven readonly. [T-201]
 
+A call of a method with a pointer receiver on a const composite, local or imported, with or without a map, MUST be accepted when the method is proven readonly and MUST fail with `[correctness::const_view_mutation]` otherwise. [T-201]
+
 A map read from a const composite and used as a `map[K]V` value MUST be a copy, and a write to it MUST NOT change what the const composite reads as. [T-201][T-Sec7]
 
 An interface method written `const M() T` (such as `const Name() string`) MUST be a readonly method obligation, distinct from a property element `const F T` (such as `const Name string`). [T-201]

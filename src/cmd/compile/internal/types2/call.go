@@ -887,7 +887,7 @@ func (check *Checker) selector(x *operand, e *syntax.SelectorExpr, wantType bool
 		return
 	}
 
-	obj, index, indirect = lookupFieldOrMethod(x.typ(), x.mode() == variable, check.pkg, sel, false)
+	obj, index, indirect = lookupFieldOrMethod(x.typ(), x.mode() == variable || check.logosConstAddressable(x, e), check.pkg, sel, false)
 	if obj == nil {
 		// Don't report another error if the underlying type was invalid (go.dev/issue/49541).
 		if !isValid(x.typ().Underlying()) {
@@ -903,7 +903,7 @@ func (check *Checker) selector(x *operand, e *syntax.SelectorExpr, wantType bool
 		if indirect {
 			if x.mode() == typexpr {
 				check.errorf(e.Sel, InvalidMethodExpr, "invalid method expression %s.%s (needs pointer receiver (*%s).%s)", x.typ(), sel, x.typ(), sel)
-			} else if !check.logosCompositeMutatingCall(e, nil) {
+			} else {
 				check.errorf(e.Sel, InvalidMethodExpr, "cannot call pointer method %s on %s", sel, x.typ())
 			}
 			goto Error

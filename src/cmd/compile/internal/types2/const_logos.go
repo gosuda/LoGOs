@@ -431,6 +431,14 @@ func (check *Checker) logosImportedComposite(obj *Var) bool {
 		LogosImportedConstComposite != nil && LogosImportedConstComposite(obj.Pkg().Path(), obj.Name())
 }
 
+func (check *Checker) logosConstAddressable(x *operand, e *syntax.SelectorExpr) bool {
+	if !check.conf.Logos || x.mode() == typexpr {
+		return false
+	}
+	_, _, constRooted := check.logosConstBase(e.X)
+	return constRooted
+}
+
 func (check *Checker) logosCompositeCallProven(e *syntax.SelectorExpr, fn *Func) bool {
 	sig, _ := fn.Type().(*Signature)
 	if sig == nil || sig.Recv() == nil {
@@ -443,6 +451,11 @@ func (check *Checker) logosCompositeCallProven(e *syntax.SelectorExpr, fn *Func)
 	if logosAsConstView(rt) != nil || logosReferenceFree(rt) {
 		return true
 	}
+	if _, pointer := Unalias(rt).(*Pointer); !pointer {
+		if _, composite := check.logosCompositeRoot(e.X); !composite {
+			return true
+		}
+	}
 	if fn.Origin().Pkg() == check.pkg {
 		check.logosDeferReadonlyCheck(fn, e.Sel.Pos(), e.X, e.Sel.Value)
 		return true
@@ -454,14 +467,11 @@ func (check *Checker) logosCompositeMutatingCall(e *syntax.SelectorExpr, fn *Fun
 	if !check.conf.Logos {
 		return false
 	}
-	root, ok := check.logosCompositeRoot(e.X)
-	if !ok {
+	base, _, constRooted := check.logosConstBase(e.X)
+	if !constRooted || check.logosCompositeCallProven(e, fn) {
 		return false
 	}
-	if fn != nil && check.logosCompositeCallProven(e, fn) {
-		return false
-	}
-	check.errorf(e.Sel, IncompatibleAssign, "%s cannot call %s through const view %s", logosConstMutation, e.Sel.Value, ExprString(root))
+	check.errorf(e.Sel, IncompatibleAssign, "%s cannot call %s through const view %s", logosConstMutation, e.Sel.Value, ExprString(base))
 	return true
 }
 

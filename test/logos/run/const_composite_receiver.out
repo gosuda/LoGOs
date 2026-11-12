@@ -12,3 +12,8 @@ ok receiver-array-element
 ok receiver-array-element-variable
 ok receiver-field-slice-element
 ok receiver-field-slice-element-variable
+ok receiver-readonly-pointer
+ok receiver-readonly-pointer-nested
+ok receiver-readonly-pointer-array-element
+ok receiver-readonly-pointer-plain
+ok receiver-readonly-pointer-declared-later
