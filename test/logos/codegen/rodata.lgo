@@ -3,80 +3,68 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"reflect"
-	"runtime"
 	"strings"
+	"unsafe"
 )
-
-const roSlice = []int{2, 3, 5, 7, 11}
-const roArray = [4]string{"a", "b", "c", "d"}
-
-var roMutable = []int{1, 2, 3}
-
-const probeSrc = `package main
-
-import "fmt"
 
 const roSlice = []int{2, 3, 5, 7, 11}
 const roArray = [4]string{"a", "b", "c", "d"}
 
 const (
 	roGrouped = []int{9, 8, 7}
-	roGlen = len(roGrouped)
+	roGlen    = len(roGrouped)
 )
 
 var roMutable = []int{1, 2, 3}
 
-func main() {
-	fmt.Println(roSlice, roArray, roMutable, roGlen, roGrouped)
-}
-`
-
-func nmType(goBin, dir, sym string) string {
-	out, err := exec.Command(goBin, "tool", "nm", filepath.Join(dir, "probe.exe")).CombinedOutput()
-	if err != nil {
-		fmt.Printf("FAIL nm: %v\n%s", err, out)
-		os.Exit(1)
+func storeThrough(target string) {
+	switch target {
+	case "slice":
+		u := uintptr(unsafe.Pointer(unsafe.SliceData(roSlice)))
+		*(*int)(unsafe.Pointer(u)) = 1
+	case "array":
+		var boxed any = roArray
+		p := (*[2]unsafe.Pointer)(unsafe.Pointer(&boxed))[1]
+		*(*string)(p) = "z"
+	case "grouped":
+		u := uintptr(unsafe.Pointer(unsafe.SliceData(roGrouped)))
+		*(*int)(unsafe.Pointer(u)) = 1
+	case "mutable":
+		roMutable[0] = 9
 	}
-	for _, line := range strings.Split(string(out), "\n") {
-		f := strings.Fields(line)
-		if len(f) >= 3 && f[len(f)-1] == sym {
-			return f[1]
-		}
-	}
-	fmt.Printf("FAIL symbol %s not found\n%s", sym, out)
-	os.Exit(1)
-	return ""
+	fmt.Println("STORE-SUCCEEDED")
 }
 
-func buildProbe(logosBin string) string {
-	dir, err := os.MkdirTemp("", "rodatanm")
+func childOutcome(self, target string) (int, string) {
+	cmd := exec.Command(self, target)
+	var buf bytes.Buffer
+	cmd.Stdout = &buf
+	cmd.Stderr = &buf
+	err := cmd.Run()
+	if ee, ok := err.(*exec.ExitError); ok {
+		return ee.ExitCode(), buf.String()
+	}
 	if err != nil {
-		fmt.Printf("FAIL tempdir: %v\n", err)
-		os.Exit(1)
+		return -1, err.Error()
 	}
-	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module probe\n\ngo 1.27\n"), 0644); err != nil {
-		fmt.Printf("FAIL gomode: %v\n", err)
-		os.Exit(1)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "main.lgo"), []byte(probeSrc), 0644); err != nil {
-		fmt.Printf("FAIL source: %v\n", err)
-		os.Exit(1)
-	}
-	cmd := exec.Command(logosBin, "build", "-o", "probe.exe", ".")
-	cmd.Dir = dir
-	if out, err := cmd.CombinedOutput(); err != nil {
-		fmt.Printf("FAIL probe build: %v\n%s", err, out)
-		os.Exit(1)
-	}
-	return dir
+	return 0, buf.String()
+}
+
+func storeFaults(self, target string) bool {
+	code, out := childOutcome(self, target)
+	return code == 2 && strings.Contains(out, "fault") && !strings.Contains(out, "STORE-SUCCEEDED")
 }
 
 func main() {
+	if len(os.Args) > 1 {
+		storeThrough(os.Args[1])
+		return
+	}
 	if !reflect.DeepEqual(roSlice, []int{2, 3, 5, 7, 11}) {
 		fmt.Println("FAIL const-slice-holds-literal-values: DeepEqual mismatch")
 		os.Exit(1)
@@ -87,30 +75,29 @@ func main() {
 		os.Exit(1)
 	}
 	fmt.Println("ok const-array-holds-literal-values")
-	if roArray[0] != "a" || roArray[3] != "d" || len(roSlice) != 5 {
+	if roArray[0] != "a" || roArray[3] != "d" || len(roSlice) != 5 || roGlen != 3 {
 		fmt.Println("FAIL const-indexing-and-len-rules: got mismatch")
 		os.Exit(1)
 	}
 	fmt.Println("ok const-indexing-and-len-rules")
-	binDir := filepath.Join(runtime.GOROOT(), "bin")
-	goBin := filepath.Join(binDir, "go")
-	logosBin := filepath.Join(binDir, "logos")
-	if runtime.GOOS == "windows" {
-		goBin += ".exe"
-		logosBin += ".exe"
+	self, err := os.Executable()
+	if err != nil {
+		fmt.Printf("FAIL self: %v\n", err)
+		os.Exit(1)
 	}
-	dir := buildProbe(logosBin)
-	st := nmType(goBin, dir, "main.roSlice.logos_backing0")
-	at := nmType(goBin, dir, "main.roArray")
-	gt := nmType(goBin, dir, "main.roGrouped.logos_backing0")
-	mt := nmType(goBin, dir, "main.roMutable")
-	if st != "R" || at != "R" || gt != "R" {
-		fmt.Printf("FAIL const-composites-live-in-rodata: got %s %s %s want R R R\n", st, at, gt)
+	var writable []string
+	for _, target := range []string{"slice", "array", "grouped"} {
+		if !storeFaults(self, target) {
+			writable = append(writable, target)
+		}
+	}
+	if len(writable) != 0 {
+		fmt.Printf("FAIL const-composites-live-in-rodata: stores through %v did not fault\n", writable)
 		os.Exit(1)
 	}
 	fmt.Println("ok const-composites-live-in-rodata")
-	if mt != "D" {
-		fmt.Printf("FAIL mutable-slice-stays-writable: got %s want D\n", mt)
+	if code, out := childOutcome(self, "mutable"); code != 0 || !strings.Contains(out, "STORE-SUCCEEDED") {
+		fmt.Printf("FAIL mutable-slice-stays-writable: exit %d, first output line %q\n", code, strings.SplitN(out, "\n", 2)[0])
 		os.Exit(1)
 	}
 	fmt.Println("ok mutable-slice-stays-writable")
