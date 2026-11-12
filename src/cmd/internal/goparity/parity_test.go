@@ -1582,52 +1582,78 @@ func TestParity(t *testing.T) {
 			}
 		}
 	}
-	checkFailCorpus(t, fork, up, upOn, base, ks)
 	t.Logf("parity: %d programs, %d fork configs, %d upstream rows, wall %s", len(progs), len(ks), len(ups), time.Since(start))
 }
 
-func checkFailCorpus(t *testing.T, fork, up toolchain, upOn bool, base string, ks []config) {
-	t.Helper()
-	stems := corpusFails(t)
-	if len(stems) == 0 {
-		if upOn {
-			t.Fatal("no fail corpus files under testdata/fail")
+var failPosPattern = regexp.MustCompile(`(?m)(?:^|vet: )(\S+\.go):(\d+):(\d+): `)
+
+func failPositions(s string) []string {
+	var out []string
+	for _, m := range failPosPattern.FindAllStringSubmatch(s, -1) {
+		out = append(out, m[2]+":"+m[3])
+	}
+	slices.Sort(out)
+	return out
+}
+
+func stageFailCorpus(dir, toml string, stems []string) error {
+	if err := os.MkdirAll(dir, 0o777); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/parity\n\ngo 1.27\n"), 0o644); err != nil {
+		return err
+	}
+	if toml != "" {
+		if err := os.WriteFile(filepath.Join(dir, "logos.toml"), []byte(toml), 0o644); err != nil {
+			return err
 		}
-		return
-	}
-	if !upOn {
-		t.Log("fail corpus skipped: upstream oracle off")
-		return
-	}
-	stage := filepath.Join(base, "failmod")
-	if err := os.MkdirAll(stage, 0o777); err != nil {
-		t.Fatalf("creating %s: %v", stage, err)
-	}
-	if err := os.WriteFile(filepath.Join(stage, "go.mod"), []byte("module example.com/parity\n\ngo 1.27\n"), 0o644); err != nil {
-		t.Fatalf("writing go.mod: %v", err)
 	}
 	for _, s := range stems {
 		data, err := os.ReadFile(filepath.Join("testdata", "fail", s+".go"))
 		if err != nil {
-			t.Fatalf("reading fail corpus %s: %v", s, err)
+			return err
 		}
-		dir := filepath.Join(stage, s)
-		if err := os.MkdirAll(dir, 0o777); err != nil {
-			t.Fatalf("creating %s: %v", dir, err)
+		if err := os.MkdirAll(filepath.Join(dir, s), 0o777); err != nil {
+			return err
 		}
-		if err := os.WriteFile(filepath.Join(dir, "main.go"), data, 0o644); err != nil {
-			t.Fatalf("writing %s: %v", s, err)
+		if err := os.WriteFile(filepath.Join(dir, s, "main.go"), data, 0o644); err != nil {
+			return err
 		}
 	}
-	posPat := regexp.MustCompile(`(?m)(?:^|vet: )(\S+\.go):(\d+):(\d+): `)
-	positions := func(s string) []string {
-		var out []string
-		for _, m := range posPat.FindAllStringSubmatch(s, -1) {
-			out = append(out, m[2]+":"+m[3])
-		}
-		slices.Sort(out)
-		return out
+	return nil
+}
+
+type failRun struct {
+	fork toolchain
+	base string
+}
+
+type failRef struct {
+	stem   string
+	pos    []string
+	vetPos []string
+}
+
+func checkFailCorpus(t *testing.T, fork, up toolchain, base string, ks []config) []string {
+	t.Helper()
+	stems := corpusFails(t)
+	if len(stems) == 0 {
+		t.Fatal("no fail corpus files under testdata/fail")
 	}
+	stage := filepath.Join(base, "failmod")
+	if err := stageFailCorpus(stage, "", stems); err != nil {
+		t.Fatalf("staging the fail corpus: %v", err)
+	}
+	stages := make(map[string]string, len(ks))
+	var ran []string
+	for _, c := range ks {
+		stages[c.id] = filepath.Join(base, "failmod-"+c.id)
+		if err := stageFailCorpus(stages[c.id], c.toml, stems); err != nil {
+			t.Fatalf("staging the fail corpus for %s: %v", c.id, err)
+		}
+		ran = append(ran, c.id)
+	}
+	run := failRun{fork: fork, base: base}
 	for _, s := range stems {
 		upOut, upErr := goBuild(up.bin, stage, []string{"build", "-o", filepath.Join(base, "failbin-"+s), "./" + s}, baseEnv(upCache()), 5*time.Minute)
 		if upErr == nil {
@@ -1637,61 +1663,79 @@ func checkFailCorpus(t *testing.T, fork, up toolchain, upOn bool, base string, k
 		if _, err := os.Stat(filepath.Join(base, "failbin-"+s)); err == nil {
 			t.Errorf("fail corpus %s: upstream wrote a binary for a rejected program", s)
 		}
-		refPos := positions(upOut)
-		if len(refPos) == 0 {
+		ref := failRef{stem: s, pos: failPositions(upOut)}
+		if len(ref.pos) == 0 {
 			t.Errorf("fail corpus %s: upstream reported no file:line:col, corpus defect", s)
 			continue
 		}
-		refVetPos, vetErr := func() ([]string, error) {
-			out, err := goBuild(up.bin, stage, []string{"vet", "./" + s}, baseEnv(upCache()), 5*time.Minute)
-			if err == nil {
-				return nil, errors.New("upstream vet succeeded")
-			}
-			return positions(out), nil
-		}()
-		if vetErr != nil {
-			t.Errorf("fail corpus %s: %v, corpus defect", s, vetErr)
+		vetOut, vetErr := goBuild(up.bin, stage, []string{"vet", "./" + s}, baseEnv(upCache()), 5*time.Minute)
+		if vetErr == nil {
+			t.Errorf("fail corpus %s: upstream vet succeeded, corpus defect", s)
 			continue
 		}
-		if len(refVetPos) == 0 {
+		ref.vetPos = failPositions(vetOut)
+		if len(ref.vetPos) == 0 {
 			t.Errorf("fail corpus %s: upstream vet reported no file:line:col, corpus defect", s)
 			continue
 		}
+		var wg sync.WaitGroup
 		for _, c := range ks {
-			if c.id != "K1" && c.id != "K5" {
-				continue
-			}
-			bin := fork.bin
-			if c.logos {
-				bin = fork.logos
-			}
-			fenv := appendEnv(baseEnv(forkCache()), c.env...)
-			fout, ferr := goBuild(bin, stage, []string{"build", "-o", filepath.Join(base, "failbin-fork-"+c.id+"-"+s), "./" + s}, fenv, 5*time.Minute)
-			if ferr == nil {
-				t.Errorf("fail corpus %s: fork %s accepted invalid Go", s, c.id)
-			}
-			if _, err := os.Stat(filepath.Join(base, "failbin-fork-"+c.id+"-"+s)); err == nil {
-				t.Errorf("fail corpus %s: fork %s wrote a binary for a rejected program", s, c.id)
-			}
-			if got := positions(fout); len(got) == 0 {
-				t.Errorf("fail corpus %s: fork %s reported no file:line:col", s, c.id)
-			} else if !slices.Equal(got, refPos) {
-				t.Errorf("fail corpus %s: fork %s positions %v differ from upstream %v", s, c.id, got, refPos)
-			}
-			if c.id != "K1" {
-				continue
-			}
-			vout, verr := goBuild(bin, stage, []string{"vet", "./" + s}, fenv, 5*time.Minute)
-			if verr == nil {
-				t.Errorf("fail corpus %s: fork vet accepted invalid Go", s)
-				continue
-			}
-			if got := positions(vout); len(got) == 0 {
-				t.Errorf("fail corpus %s: fork vet reported no file:line:col", s)
-			} else if !slices.Equal(got, refVetPos) {
-				t.Errorf("fail corpus %s: fork vet positions %v differ from upstream %v", s, got, refVetPos)
-			}
+			wg.Go(func() { checkFailUnder(t, run, c, stages[c.id], ref) })
 		}
+		wg.Wait()
+	}
+	return ran
+}
+
+func checkFailUnder(t *testing.T, run failRun, c config, stage string, ref failRef) {
+	t.Helper()
+	bin := run.fork.bin
+	if c.logos {
+		bin = run.fork.logos
+	}
+	fenv := appendEnv(baseEnv(forkCache()), c.env...)
+	out := filepath.Join(run.base, "failbin-fork-"+c.id+"-"+ref.stem)
+	fout, ferr := goBuild(bin, stage, append(append([]string{"build"}, c.args...), "-o", out, "./"+ref.stem), fenv, 5*time.Minute)
+	if ferr == nil {
+		t.Errorf("fail corpus %s: fork %s accepted invalid Go", ref.stem, c.id)
+	}
+	if _, err := os.Stat(out); err == nil {
+		t.Errorf("fail corpus %s: fork %s wrote a binary for a rejected program", ref.stem, c.id)
+	}
+	if got := failPositions(fout); len(got) == 0 {
+		t.Errorf("fail corpus %s: fork %s reported no file:line:col", ref.stem, c.id)
+	} else if !slices.Equal(got, ref.pos) {
+		t.Errorf("fail corpus %s: fork %s positions %v differ from upstream %v", ref.stem, c.id, got, ref.pos)
+	}
+	if c.id != "K1" {
+		return
+	}
+	vout, verr := goBuild(bin, stage, []string{"vet", "./" + ref.stem}, fenv, 5*time.Minute)
+	if verr == nil {
+		t.Errorf("fail corpus %s: fork vet accepted invalid Go", ref.stem)
+		return
+	}
+	if got := failPositions(vout); len(got) == 0 {
+		t.Errorf("fail corpus %s: fork vet reported no file:line:col", ref.stem)
+	} else if !slices.Equal(got, ref.vetPos) {
+		t.Errorf("fail corpus %s: fork vet positions %v differ from upstream %v", ref.stem, got, ref.vetPos)
+	}
+}
+
+func TestParityFailCorpus(t *testing.T) {
+	fork := forkTool(t)
+	up, upOn := upstreamTool(t)
+	if !upOn {
+		t.Skip("upstream oracle off: the fail corpus compares positions with live upstream output")
+	}
+	ks := activeForkConfigs()
+	ran := checkFailCorpus(t, fork, up, t.TempDir(), ks)
+	want := make([]string, 0, len(ks))
+	for _, c := range ks {
+		want = append(want, c.id)
+	}
+	if !slices.Equal(ran, want) {
+		t.Errorf("the fail corpus ran under %v, want every active configuration %v", ran, want)
 	}
 }
 
