@@ -330,9 +330,18 @@ func (fl *fileLower) deleteGroupingParens(es, qoff int) {
 		}
 		return true
 	})
-	for off := skipBlankBack(fl.src, es); n > 0 && off > 0 && fl.src[off-1] == '('; off = skipBlankBack(fl.src, off-1) {
-		fl.add(off-1, off, "")
-		n--
+	off := skipBlankBack(fl.src, es)
+	for n > 0 && off > 0 {
+		switch {
+		case fl.src[off-1] == '(':
+			fl.add(off-1, off, "")
+			n--
+			off = skipBlankBack(fl.src, off-1)
+		case off >= len("const") && string(fl.src[off-len("const"):off]) == "const":
+			off = skipBlankBack(fl.src, off-len("const"))
+		default:
+			return
+		}
 	}
 }
 

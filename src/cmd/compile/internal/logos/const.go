@@ -143,47 +143,16 @@ func LogosClearErasedAnonReadonly() {
 }
 func (fl *fileLower) eraseConstViews() {
 	syntax.Inspect(fl.file, func(n syntax.Node) bool {
-		switch n := n.(type) {
-		case *syntax.Field:
-			fl.eraseConstIn(&n.Type)
-			if n.Const {
-				if _, ok := n.Type.(*syntax.FuncType); ok {
-					start := fl.off(n.Pos())
-					fl.add(start, start+len("const"), "")
-					erasedAnonReadonly = append(erasedAnonReadonly, n)
-					n.Const = false
-				}
-			}
-		case *syntax.PropertyType:
-			fl.eraseConstIn(&n.Type)
-		case *syntax.TypeDecl:
-			fl.eraseConstIn(&n.Type)
-		case *syntax.VarDecl:
-			fl.eraseConstIn(&n.Type)
-		case *syntax.ConstDecl:
-			fl.eraseConstIn(&n.Type)
-		case *syntax.ArrayType:
-			fl.eraseConstIn(&n.Elem)
-		case *syntax.SliceType:
-			fl.eraseConstIn(&n.Elem)
-		case *syntax.MapType:
-			fl.eraseConstIn(&n.Key)
-			fl.eraseConstIn(&n.Value)
-		case *syntax.ChanType:
-			fl.eraseConstIn(&n.Elem)
-		case *syntax.DotsType:
-			fl.eraseConstIn(&n.Elem)
-		case *syntax.Operation:
-			if n.Op == syntax.Mul && n.Y == nil {
-				fl.eraseConstIn(&n.X)
-			}
-		case *syntax.ParenExpr:
-			fl.eraseConstIn(&n.X)
-		case *syntax.IndexExpr:
-			fl.eraseConstIn(&n.Index)
-		case *syntax.ListExpr:
-			for i := range n.ElemList {
-				fl.eraseConstIn(&n.ElemList[i])
+		replaceFieldExprs(n, anyInterfaceFields, func(e syntax.Expr) syntax.Expr {
+			fl.eraseConstIn(&e)
+			return e
+		})
+		if f, ok := n.(*syntax.Field); ok && f.Const {
+			if _, ok := f.Type.(*syntax.FuncType); ok {
+				start := fl.off(f.Pos())
+				fl.add(start, start+len("const"), "")
+				erasedAnonReadonly = append(erasedAnonReadonly, f)
+				f.Const = false
 			}
 		}
 		return true
@@ -219,10 +188,11 @@ func (fl *fileLower) eraseConstNode(c *syntax.ConstType) {
 	}
 	fl.erasedConst[c] = true
 	start := fl.off(c.Pos())
-	end := fl.off(syntax.StartPos(c.Elem))
-	if end > start {
-		fl.add(start, end, "")
+	end := start + len("const")
+	for end < len(fl.src) && isSpace(fl.src[end]) {
+		end++
 	}
+	fl.add(start, end, "")
 }
 
 // boundConstSlice gives one recorded slice expression a max bound of

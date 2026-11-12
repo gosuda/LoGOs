@@ -10,6 +10,16 @@ ok func-tuple-alias
 ok func-tuple-defined
 ok tuple-const-alias
 ok tuple-const-defined
+ok option-const-alias
+ok option-const-defined
+ok const-option-alias
+ok const-option-defined
+ok paren-const-alias
+ok paren-const-defined
+ok slice-option-const-alias
+ok slice-option-const-defined
+ok map-option-const-alias
+ok map-option-const-defined
 ok option-func-alias
 ok option-func-defined
 ok option-func-args-alias

@@ -115,6 +115,86 @@ func tuple_constDefined() bool {
 	return same[definedTupleConst]("tuple-const-defined", unsafe.Sizeof(s))
 }
 
+type aliasOptionConst = (const []int)?
+type definedOptionConst (const []int)?
+
+func option_constAlias() bool {
+	var a aliasOptionConst
+	var s (const []int)?
+	a = s
+	s = a
+	return same[aliasOptionConst]("option-const-alias", unsafe.Sizeof(s))
+}
+
+func option_constDefined() bool {
+	var s (const []int)?
+	return same[definedOptionConst]("option-const-defined", unsafe.Sizeof(s))
+}
+
+type aliasConstOption = const (int?)
+type definedConstOption const (int?)
+
+func const_optionAlias() bool {
+	var a aliasConstOption
+	var s const (int?)
+	a = s
+	s = a
+	return same[aliasConstOption]("const-option-alias", unsafe.Sizeof(s))
+}
+
+func const_optionDefined() bool {
+	var s const (int?)
+	return same[definedConstOption]("const-option-defined", unsafe.Sizeof(s))
+}
+
+type aliasParenConst = const ([]int)
+type definedParenConst const ([]int)
+
+func paren_constAlias() bool {
+	var a aliasParenConst
+	var s const ([]int)
+	a = s
+	s = a
+	return same[aliasParenConst]("paren-const-alias", unsafe.Sizeof(s))
+}
+
+func paren_constDefined() bool {
+	var s const ([]int)
+	return same[definedParenConst]("paren-const-defined", unsafe.Sizeof(s))
+}
+
+type aliasSliceOptionConst = []((const []int)?)
+type definedSliceOptionConst []((const []int)?)
+
+func slice_option_constAlias() bool {
+	var a aliasSliceOptionConst
+	var s []((const []int)?)
+	a = s
+	s = a
+	return same[aliasSliceOptionConst]("slice-option-const-alias", unsafe.Sizeof(s))
+}
+
+func slice_option_constDefined() bool {
+	var s []((const []int)?)
+	return same[definedSliceOptionConst]("slice-option-const-defined", unsafe.Sizeof(s))
+}
+
+type aliasMapOptionConst = map[string]((const []int)?)
+type definedMapOptionConst map[string]((const []int)?)
+
+func map_option_constAlias() bool {
+	var a aliasMapOptionConst
+	var s map[string]((const []int)?)
+	a = s
+	s = a
+	return same[aliasMapOptionConst]("map-option-const-alias", unsafe.Sizeof(s))
+}
+
+func map_option_constDefined() bool {
+	var s map[string]((const []int)?)
+	return same[definedMapOptionConst]("map-option-const-defined", unsafe.Sizeof(s))
+}
+
 type aliasOptionFunc = (func())?
 type definedOptionFunc (func())?
 
@@ -266,6 +346,16 @@ var cases = []func() bool{
 	func_tupleDefined,
 	tuple_constAlias,
 	tuple_constDefined,
+	option_constAlias,
+	option_constDefined,
+	const_optionAlias,
+	const_optionDefined,
+	paren_constAlias,
+	paren_constDefined,
+	slice_option_constAlias,
+	slice_option_constDefined,
+	map_option_constAlias,
+	map_option_constDefined,
 	option_funcAlias,
 	option_funcDefined,
 	option_func_argsAlias,
