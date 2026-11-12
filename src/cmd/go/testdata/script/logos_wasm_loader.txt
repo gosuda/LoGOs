@@ -138,6 +138,25 @@ stderr '_logos_errmsg_ptr'
 stderr '_logos_errmsg_len'
 ! stderr '_logos_scratch_alloc'
 ! exists logos.loader.mjs
+# A name that only starts with a helper name does not provide the helper.
+cp helpers/lookalike.txt helper/helper.go
+! go build -x -o app.wasm .
+stderr '_logos_errmsg_len'
+! stderr '_logos_scratch_alloc|_logos_scratch_reset|_logos_errmsg_ptr'
+! exists app.loader.mjs
+! logos build -x -o logos.wasm .
+stderr '_logos_errmsg_len'
+! stderr '_logos_scratch_alloc|_logos_scratch_reset|_logos_errmsg_ptr'
+! exists logos.loader.mjs
+# The compiler splits the directive on white space, so a complete set
+# with extra spaces is still complete and the loader is written.
+cp helpers/spaced.txt helper/helper.go
+go build -x -o app.wasm .
+! stderr 'packagefile logos/rt='
+exists app.loader.mjs
+logos build -x -o logos.wasm .
+! stderr 'packagefile logos/rt='
+exists logos.loader.mjs
 cd ..
 
 cd lgo
@@ -844,6 +863,36 @@ package helper
 
 //go:wasmexport _logos_scratch_alloc
 func scratchAlloc(n int32) int32 { return 0 }
+
+-- partial/helpers/lookalike.txt --
+package helper
+
+//go:wasmexport _logos_scratch_alloc
+func scratchAlloc(n int32) int32 { return 0 }
+
+//go:wasmexport _logos_scratch_reset
+func scratchReset(p int32) {}
+
+//go:wasmexport _logos_errmsg_ptr
+func errmsgPtr() int32 { return 0 }
+
+//go:wasmexport _logos_errmsg_len_v2
+func errmsgLen() int32 { return 0 }
+
+-- partial/helpers/spaced.txt --
+package helper
+
+//go:wasmexport  _logos_scratch_alloc
+func scratchAlloc(n int32) int32 { return 0 }
+
+//go:wasmexport  _logos_scratch_reset
+func scratchReset(p int32) {}
+
+//go:wasmexport _logos_errmsg_ptr
+func errmsgPtr() int32 { return 0 }
+
+//go:wasmexport   _logos_errmsg_len
+func errmsgLen() int32 { return 0 }
 
 -- runok.mjs --
 import { readFileSync } from "node:fs";

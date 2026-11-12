@@ -1550,6 +1550,7 @@ Plain `go` MUST emit the same loader by default for such an output, and `--wasm-
 The loader MUST have identical bytes under both commands. [T-Sec12][R-U1]
 Both commands MUST add the implicit `logos/rt` import for the loader helpers when they emit the loader for a `-o` output that names a `.wasm` file, unless the module graph already provides the helpers. [T-Sec12][R-U1]
 A module graph that provides some but not all of the four loader helpers MUST fail the build with an error that names each missing helper export. [T-Sec12]
+A package of the module graph provides a helper when it declares `//go:wasmexport` with exactly that helper name, however the directive is spaced; a longer name that starts with the helper name does not provide it. [T-Sec12]
 A build with no `-o` writes no loader, because the default output name of a wasm main package carries no `.wasm` suffix. [T-Sec12]
 The loader MUST work under `GOOS=js` and, in a reactor module that the host initializes through WASI, under `GOOS=wasip1`. [T-Sec12]
 `logos/rt` MUST export the wasm helpers `_logos_scratch_alloc`, `_logos_scratch_reset`, `_logos_errmsg_ptr`, and `_logos_errmsg_len` for the loader. [T-Sec12]

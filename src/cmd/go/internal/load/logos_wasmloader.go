@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"cmd/go/internal/cfg"
@@ -58,11 +59,11 @@ func WasmLoaderFor(p *Package) (string, bool) {
 	return strings.TrimSuffix(p.Target, wasmOutputSuffix) + wasmLoaderSuffix, true
 }
 
-var loaderHelperDirectives = []string{
-	"//go:wasmexport _logos_scratch_alloc",
-	"//go:wasmexport _logos_scratch_reset",
-	"//go:wasmexport _logos_errmsg_ptr",
-	"//go:wasmexport _logos_errmsg_len",
+var loaderHelpers = []string{
+	"_logos_scratch_alloc",
+	"_logos_scratch_reset",
+	"_logos_errmsg_ptr",
+	"_logos_errmsg_len",
 }
 
 func pruneRedundantLogosRT(p *Package) {
@@ -70,14 +71,13 @@ func pruneRedundantLogosRT(p *Package) {
 	if len(found) == 0 {
 		return
 	}
-	if len(found) == len(loaderHelperDirectives) {
+	if len(found) == len(loaderHelpers) {
 		p.Internal.Imports = dropLogosRTImport(p.Internal.Imports)
 		p.Internal.CompiledImports = dropLogosRTCompiledImport(p.Internal.CompiledImports)
 		return
 	}
 	var missing []string
-	for _, d := range loaderHelperDirectives {
-		name := strings.TrimPrefix(d, "//go:wasmexport ")
+	for _, name := range loaderHelpers {
 		if !found[name] {
 			missing = append(missing, name)
 		}
@@ -101,7 +101,7 @@ func graphLoaderHelperSet(p *Package) map[string]bool {
 			continue
 		}
 		collectPackageWasmLoaderHelpers(q, found)
-		if len(found) == len(loaderHelperDirectives) {
+		if len(found) == len(loaderHelpers) {
 			break
 		}
 		stack = append(stack, q.Internal.Imports...)
@@ -116,14 +116,23 @@ func collectPackageWasmLoaderHelpers(q *Package, found map[string]bool) {
 			continue
 		}
 		for line := range bytes.SplitSeq(data, []byte("\n")) {
-			t := bytes.TrimLeft(line, " \t")
-			for _, d := range loaderHelperDirectives {
-				if bytes.HasPrefix(t, []byte(d)) {
-					found[strings.TrimPrefix(d, "//go:wasmexport ")] = true
-				}
+			if name, ok := wasmExportName(line); ok && slices.Contains(loaderHelpers, name) {
+				found[name] = true
 			}
 		}
 	}
+}
+
+func wasmExportName(line []byte) (string, bool) {
+	rest, ok := bytes.CutPrefix(bytes.TrimLeft(line, " \t"), []byte("//go:wasmexport "))
+	if !ok {
+		return "", false
+	}
+	fields := bytes.Fields(rest)
+	if len(fields) != 1 {
+		return "", false
+	}
+	return string(fields[0]), true
 }
 
 func dropLogosRTImport(pkgs []*Package) []*Package {
