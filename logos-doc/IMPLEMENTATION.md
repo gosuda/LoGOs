@@ -2933,10 +2933,64 @@ Anchor: John Carmack, Tony Hoare, Edsger W. Dijkstra
 
 ### M18-A-S13 Attach region bump checks to the placed New line
 Anchor: John Carmack, Tony Hoare, Edsger W. Dijkstra
-- Attack: `test/logos/codegen/region_bump.lgo`: a placed noscan `New` of constant size 8, 511, or 512 shows the inline bump shape (nil check, generation compare, align, size add, limit compare, cursor store, PCDATA markers, noscan slow path); 513 bytes and scan types call the runtime allocator; unplaced sites keep the original call. Each expectation block sits above its `New` line.
+- Attack: `test/logos/codegen/region_bump.lgo`: a placed noscan `New` of constant size 8, 511, or 512 shows the inline bump shape (nil check, generation compare, align, size add, limit compare, cursor store, PCDATA markers, noscan slow path); 513 bytes and scan types call the runtime allocator; unplaced sites keep the original call. Each expectation block sits above its `New` line, and the global that the unplaced site stores to is the optional `*int?`, so the fixture passes the non-nil check and reaches the assembler check.
 - Build: none (test-only).
 - Gate: `go test -count=1 cmd/internal/testdir -run 'Test/logos/codegen/region_bump'`.
-- Commits: `730f0c1abf` Attach region bump checks to the placed New line.
+- Commits: `730f0c1abf` Attach region bump checks to the placed New line; `1c3b7a6247` Fix the region bump fixture nonnil global.
+- Red-team rows: none.
+- Docs: none.
+
+### M18-A-S14 Isolate arena park tests from transient chunk holders
+Anchor: John Carmack, Tony Hoare, Edsger W. Dijkstra
+- Attack: `src/runtime/logos_arena_test.go`: the park tests (`TestLogosArenaParkReturnsChunk`, `TestLogosArenaParkKeepsLiveChunk`, `TestLogosArenaMarkSurvivesPark`, and the chain cases of `arenaParkCase`) wait for the goroutine count to return to its baseline before they read the leased-chunk count, resample a leased baseline that vanished before they fail (three retries), and pause the collector while they build and check a chunk chain. `src/runtime/logos_region_test.go` (`TestLogosRegionScanLivenessZeroAndCleanup`): the collector is paused around its liveness check.
+- Build: none (test-only).
+- Gate: `go test -count=30 -race -short -run 'Logos|Region' runtime`.
+- Commits: `8448f74932` Isolate arena park tests from transient chunk holders.
+- Red-team rows: none.
+- Docs: none.
+
+### M18-A-S15 Add positive evidence for the region lint rules
+Anchor: John Carmack, Tony Hoare, Edsger W. Dijkstra
+- Attack: `test/logos/lint/region_escape.lgo`: a `Region` stored into a struct field or a global, captured by a `go` statement, returned, or sent on a channel reports `[correctness::region_escape]`. `test/logos/lint/arena_fallback.lgo`: an `arena.New[int]` in a function that contains a `goto` reports `[perf::arena_fallback]` naming the call and `falls back to the heap`. `src/cmd/compile/internal/logos/lint_fixture_logos_test.go` (`TestEveryLintRuleHasFixture`): every registered rule has a positive fixture.
+- Build: none (test-only).
+- Gate: `go test -count=1 cmd/compile/internal/logos -run '^TestEveryLintRuleHasFixture$'`; `go test -count=1 cmd/internal/testdir -run 'Test/logos/lint/arena_fallback.lgo|Test/logos/lint/region_escape.lgo'`.
+- Commits: `64a6588e37` Add positive evidence for the region lint rules.
+- Red-team rows: none.
+- Docs: none (M9-S2 lists both rules).
+
+### M18-A-S16 Keep region close temps defined under race instrumentation
+Anchor: John Carmack, Tony Hoare, Edsger W. Dijkstra
+- Attack: `test/logos/run/region_race.lgo` (run with `-race` and `GOEXPERIMENT=logosarena,logosescape`): a region that holds an `arena.Make[int]` slice builds, matches the heap oracle, holds bytes inside its owner block, and releases them after it. Before the fix the build failed with a temp live at entry.
+- Build: `src/cmd/compile/internal/walk/region_logos.go` (`closeCall`) builds the runtime close with `typecheck.Call`, so the normal walk orders and spills its arguments into the statement init.
+- Gate: `go test -count=1 cmd/internal/testdir -run 'Test/logos/run/region_race.lgo'`.
+- Commits: `95c1b5be19` Keep region close temps defined under race instrumentation.
+- Red-team rows: none.
+- Docs: none.
+
+### M18-A-S17 Place block-local holders in the region
+Anchor: John Carmack, Tony Hoare, Edsger W. Dijkstra
+- Attack: the commit carries no test and no mutation probe. `test/logos/run/region_list.lgo` covers it: it links 10,000 nodes with `tail.next = n`, a store of a platform pointer from `arena.New` into a non-nil field (M3-S5 wraps such a store in `logos/rt.MustNonNil`), and it requires `rt.RegionBytes()` above 0 inside the block and 0 after it.
+- Build: `src/cmd/compile/internal/escape/region_logos.go` (`logosRegionTransparentValue`, `logosRegionProvName`, `logosRegionSinkName`): the provenance and sink lookups of the region analysis see through parentheses and `logos/rt.MustNonNil` calls, so a local variable that holds a region pointer keeps its region.
+- Gate: `go test -count=1 cmd/internal/testdir -run 'Test/logos/run/region_list.lgo'`.
+- Commits: `1c1528469e` Place block-local holders in the region.
+- Red-team rows: none.
+- Docs: none.
+
+### M18-A-S18 Run the region escape verdicts as a script
+Anchor: John Carmack, Tony Hoare, Edsger W. Dijkstra
+- Attack: `src/cmd/go/testdata/script/logos_region_escape.txt`: a small module built with `GOEXPERIMENT=logosarena,logosescape` and `-gcflags=-m` matches 30 hand-written stderr patterns (leaking parameters, placement, and region fallbacks by line). The script replaces an errorcheck test under `test/` that failed in a plain environment because the standard library carried only `logosarena`.
+- Build: none (test-only).
+- Gate: `go test -count=1 cmd/go -run 'Script/^logos_region_escape$'`.
+- Commits: `3482d7df47` Run the region escape verdicts as a script.
+- Red-team rows: none.
+- Docs: none.
+
+### M18-A-S19 Carry the copyright header in the arena test file
+Anchor: Edward Tufte, Tony Hoare
+- Attack: `src/internal/copyright/copyright_test.go` (`TestCopyright`) fails on `src/logos/arena/arena_test.go` until the file carries the 3-line notice.
+- Build: none (test-only; one header added).
+- Gate: `go test -count=1 internal/copyright`.
+- Commits: `966304fbbb` Add missing copyright headers to region files.
 - Red-team rows: none.
 - Docs: none.
 
@@ -3424,7 +3478,7 @@ Prerequisites: run `./make.bash` in `src` and put the fork `bin` directory first
 
 Anchor: Tony Hoare
 
-Written to `tasks/autoplan-ledger.jsonl` by P0-S6. IDs: phase prefix plus a sequence in plan order. The original 103 rows are preserved verbatim; P0-S6 appends exactly the 5 remaining rows for M0-S7, P1-S3, M11-S3, M11-S4, and M18-S4 (listed at the end of the block); the M19 rows are pruned. The 2026-10-19 direction appended one more row after those, `DX-20` for the follow-up slice M0-S8; no other row changed (the descriptions of rows such as `ENG-26` name the slice as first written, and `CEO-02` names the original 182 REDTEAM rows; rows #183 to #189 were added later by the same direction). The audit direction appended rows `AUD-01` to `AUD-134` after those, one per recorded audit slice in commit order. The ledger holds 245 rows.
+Written to `tasks/autoplan-ledger.jsonl` by P0-S6. IDs: phase prefix plus a sequence in plan order. The original 103 rows are preserved verbatim; P0-S6 appends exactly the 5 remaining rows for M0-S7, P1-S3, M11-S3, M11-S4, and M18-S4 (listed at the end of the block); the M19 rows are pruned. The 2026-10-19 direction appended one more row after those, `DX-20` for the follow-up slice M0-S8; no other row changed (the descriptions of rows such as `ENG-26` name the slice as first written, and `CEO-02` names the original 182 REDTEAM rows; rows #183 to #189 were added later by the same direction). The audit direction appended rows `AUD-01` to `AUD-140` after those, one per recorded audit slice in commit order. The ledger holds 251 rows.
 
 ```jsonl
 {"id": "CEO-01", "description": "P0-S1 Rename logos-doc/PLAN.md to logos-doc/SPEC.md (pure rename) and P0-S2 rewrite SPEC.md as the tailored spec (tables T, N, Section 18)", "phase": "CEO"}
@@ -3672,4 +3726,10 @@ Written to `tasks/autoplan-ledger.jsonl` by P0-S6. IDs: phase prefix plus a sequ
 {"id": "AUD-132", "description": "M18-A-S12 Lower placed region calls with dictionary arguments", "phase": "AUD"}
 {"id": "AUD-133", "description": "M18-A-S13 Attach region bump checks to the placed New line", "phase": "AUD"}
 {"id": "AUD-134", "description": "M22-A-S4 Pin the size gate boundary and failure", "phase": "AUD"}
+{"id": "AUD-135", "description": "M18-A-S14 Isolate arena park tests from transient chunk holders", "phase": "AUD"}
+{"id": "AUD-136", "description": "M18-A-S15 Add positive evidence for the region lint rules", "phase": "AUD"}
+{"id": "AUD-137", "description": "M18-A-S16 Keep region close temps defined under race instrumentation", "phase": "AUD"}
+{"id": "AUD-138", "description": "M18-A-S17 Place block-local holders in the region", "phase": "AUD"}
+{"id": "AUD-139", "description": "M18-A-S18 Run the region escape verdicts as a script", "phase": "AUD"}
+{"id": "AUD-140", "description": "M18-A-S19 Carry the copyright header in the arena test file", "phase": "AUD"}
 ```

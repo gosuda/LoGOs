@@ -243,3 +243,9 @@
 {"id": "AUD-132", "description": "M18-A-S12 Lower placed region calls with dictionary arguments", "phase": "AUD"}
 {"id": "AUD-133", "description": "M18-A-S13 Attach region bump checks to the placed New line", "phase": "AUD"}
 {"id": "AUD-134", "description": "M22-A-S4 Pin the size gate boundary and failure", "phase": "AUD"}
+{"id": "AUD-135", "description": "M18-A-S14 Isolate arena park tests from transient chunk holders", "phase": "AUD"}
+{"id": "AUD-136", "description": "M18-A-S15 Add positive evidence for the region lint rules", "phase": "AUD"}
+{"id": "AUD-137", "description": "M18-A-S16 Keep region close temps defined under race instrumentation", "phase": "AUD"}
+{"id": "AUD-138", "description": "M18-A-S17 Place block-local holders in the region", "phase": "AUD"}
+{"id": "AUD-139", "description": "M18-A-S18 Run the region escape verdicts as a script", "phase": "AUD"}
+{"id": "AUD-140", "description": "M18-A-S19 Carry the copyright header in the arena test file", "phase": "AUD"}
