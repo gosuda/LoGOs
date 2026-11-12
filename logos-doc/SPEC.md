@@ -786,6 +786,8 @@ A getter that writes its receiver, directly, through a nested field, or by calli
 
 A getter that returns receiver state of a type that can alias it, a slice, map, pointer, channel, function, or interface value, or a struct or array holding one, MUST NOT be proven readonly, in the same package and across packages, and so MUST fail a `: I` declaration that needs the proof with `[correctness::const_view_mutation]`; a getter whose declared result is a const view is not such a getter, because a const view is not a mutable alias. [T-201][T-203.2]
 
+An option `T?` holds what its payload `T` holds: a getter that returns receiver state of type `T?` follows the rule above for `T`, in the same package and across packages, so a getter of `int?` or `string?` MAY be proven readonly and a getter of `[]int?` or `*T?` MUST NOT be. [T-201][T-203.2][T-202]
+
 `type S struct : I, J { ... }` MUST assert that `*S` implements each listed interface at the declaration. [T-203.3]
 
 A missing method MUST fail with `[correctness::assertion_failed]` naming the method. [T-203.3]

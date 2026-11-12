@@ -59,6 +59,17 @@ stderr 'samecwrite\.lgo:.*const_view_mutation'
 ! logos build ./crosscwrite
 stderr 'crosscwrite\.lgo:.*const_view_mutation'
 
+logos build ./sameoption
+logos build ./crossoption
+! logos build ./sameoptslice
+stderr 'sameoptslice\.lgo:.*const_view_mutation'
+! logos build ./crossoptslice
+stderr 'crossoptslice\.lgo:.*const_view_mutation'
+! logos build ./sameoptptr
+stderr 'sameoptptr\.lgo:.*const_view_mutation'
+! logos build ./crossoptptr
+stderr 'crossoptptr\.lgo:.*const_view_mutation'
+
 -- w/go.mod --
 module example.com/shapes
 
@@ -134,6 +145,18 @@ func (w *CWriter) TagsC() const []string {
 	w.n++
 	return w.tags
 }
+
+type O struct {
+	n int?
+	s string?
+	l []int?
+	p *Point?
+}
+
+func (r *O) Num() int?     { return r.n }
+func (r *O) Str() string?  { return r.s }
+func (r *O) List() []int?  { return r.l }
+func (r *O) Link() *Point? { return r.p }
 
 -- w/same/same.lgo --
 package same
@@ -571,4 +594,90 @@ type I interface {
 
 type W struct : I {
 	*lib.CWriter
+}
+
+-- w/sameoption/sameoption.lgo --
+package sameoption
+
+type I interface {
+	const Num int?
+	const Str string?
+}
+
+type T struct : I {
+	n int?
+	s string?
+}
+
+func (r *T) Num() int?    { return r.n }
+func (r *T) Str() string? { return r.s }
+
+-- w/crossoption/crossoption.lgo --
+package crossoption
+
+import "example.com/shapes/lib"
+
+type I interface {
+	const Num int?
+	const Str string?
+}
+
+type W struct : I {
+	*lib.O
+}
+
+-- w/sameoptslice/sameoptslice.lgo --
+package sameoptslice
+
+type I interface {
+	const List []int?
+}
+
+type T struct : I {
+	l []int?
+}
+
+func (r *T) List() []int? { return r.l }
+
+-- w/crossoptslice/crossoptslice.lgo --
+package crossoptslice
+
+import "example.com/shapes/lib"
+
+type I interface {
+	const List []int?
+}
+
+type W struct : I {
+	*lib.O
+}
+
+-- w/sameoptptr/sameoptptr.lgo --
+package sameoptptr
+
+type Point struct {
+	X, Y int
+}
+
+type I interface {
+	const Link *Point?
+}
+
+type T struct : I {
+	p *Point?
+}
+
+func (r *T) Link() *Point? { return r.p }
+
+-- w/crossoptptr/crossoptptr.lgo --
+package crossoptptr
+
+import "example.com/shapes/lib"
+
+type I interface {
+	const Link *lib.Point?
+}
+
+type W struct : I {
+	*lib.O
 }
