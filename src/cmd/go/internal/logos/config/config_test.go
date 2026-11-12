@@ -388,6 +388,35 @@ func TestLoadAbsentReturnsDefaults(t *testing.T) {
 		Project: Project{StrictFiles: fourExts},
 		Build:   Build{Cgo: "forbid", OptLevel: "O2", TargetCPU: "deterministic"},
 	})
+	if got.Build.Arena != nil {
+		t.Errorf("Build.Arena = %v, want nil (default true)", *got.Build.Arena)
+	}
+	if got.Build.CgoAllowlist != nil {
+		t.Errorf("Build.CgoAllowlist = %q, want nil", got.Build.CgoAllowlist)
+	}
+	checkCapabilities(t, got.Capabilities, defaultCapabilities())
+	if got.Lints.Groups != nil {
+		t.Errorf("Lints.Groups = %v, want nil: lint defaults come from the compiler policy, not the file", got.Lints.Groups)
+	}
+	if got.Lints.Thresholds != nil {
+		t.Errorf("Lints.Thresholds = %v, want nil: threshold defaults come from the compiler policy, not the file", got.Lints.Thresholds)
+	}
+	empty, err := Load(mustDirWithEmptyLintsFile(t))
+	if err != nil {
+		t.Fatalf("Load(dir with empty logos.toml) error = %v", err)
+	}
+	if !reflect.DeepEqual(got, empty) {
+		t.Errorf("absent file = %#v, empty file = %#v, want equal", got, empty)
+	}
+}
+
+func mustDirWithEmptyLintsFile(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "logos.toml"), nil, 0644); err != nil {
+		t.Fatalf("WriteFile error = %v", err)
+	}
+	return dir
 }
 
 func TestLoadReadsFile(t *testing.T) {
