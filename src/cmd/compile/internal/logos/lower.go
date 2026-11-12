@@ -83,6 +83,8 @@ func Lower(pkg *types2.Package, info *types2.Info, files []*syntax.File, src map
 			start:         lineStarts(buf),
 			loweredChains: make(map[*syntax.CallExpr]bool),
 			compositeDone: make(map[syntax.Expr]bool),
+			wrapSpan:      make(map[syntax.Expr]span),
+			wrapOwner:     make(map[syntax.Expr]int),
 		}
 		fl.baseName = filepath.Base(fl.base.Filename())
 		fl.srcMap = origBuf(buf)

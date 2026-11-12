@@ -90,10 +90,12 @@ func (fl *fileLower) lowerPlatform() {
 		inner := fl.textOf(j.span)
 		pos := j.expr.Pos()
 		site := fl.newSite(pos, pos.Line())
-		j.set(callOf(pos, rtSel(pos, "MustNonNil"), []syntax.Expr{
+		wrapped := callOf(pos, rtSel(pos, "MustNonNil"), []syntax.Expr{
 			j.expr,
 			at(&syntax.Operation{Op: syntax.And, X: nameOf(pos, site)}, pos),
-		}))
+		})
+		j.set(wrapped)
+		fl.wrapSpan[wrapped] = j.span
 		fl.addT(j.span.start, j.span.end, cat(
 			gen(rtAlias+".MustNonNil("), inner, gen(", &"+site+")")))
 	}

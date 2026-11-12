@@ -27,8 +27,6 @@ var exprType = reflect.TypeFor[syntax.Expr]()
 func (fl *fileLower) lowerOptions() {
 	fl.optMemo = make(map[*syntax.OptionType]syntax.Expr)
 	fl.narrowDone = make(map[*syntax.Name]bool)
-	fl.wrapSpan = make(map[syntax.Expr]span)
-	fl.wrapOwner = make(map[syntax.Expr]int)
 	fl.optBodyType = make(map[syntax.Expr]types2.Type)
 	fl.collectOptReturns()
 	syntax.Inspect(fl.file, func(n syntax.Node) bool {
