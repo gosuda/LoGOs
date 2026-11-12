@@ -23,6 +23,15 @@ func check(name string, logos, hand float64) {
 	fmt.Println("ok", name)
 }
 
+func checkExact(name string, got, want float64) {
+	if got != want {
+		fmt.Println("FAIL", name+":", "got", got, "want", want, "(one object per evaluated argument, none for the defer)")
+		failed = true
+		return
+	}
+	fmt.Println("ok", name)
+}
+
 //go:noinline
 func failNil() error {
 	sink++
@@ -434,6 +443,20 @@ func mkInts(n int) []int {
 	return vs
 }
 
+//go:noinline
+func failPtr(p *int) error {
+	sink += *p
+	return nil
+}
+
+func shapeAddrLogos(n int) (err error) {
+	for i := 0; i < n; i++ {
+		x := i
+		defer failPtr(&x)?
+	}
+	return nil
+}
+
 func main() {
 	for _, n := range []int{0, 1, 5, 31} {
 		nn := n
@@ -457,6 +480,7 @@ func main() {
 		check(fmt.Sprint("alloc fn break n", nn), testing.AllocsPerRun(200, func() { sinkErr = loopBreakLogos(nn) }), testing.AllocsPerRun(200, func() { sinkErr = loopBreakHand(nn) }))
 		check(fmt.Sprint("alloc fn continue n", nn), testing.AllocsPerRun(200, func() { sinkErr = loopContinueLogos(nn) }), testing.AllocsPerRun(200, func() { sinkErr = loopContinueHand(nn) }))
 		check(fmt.Sprint("alloc fn panic n", nn), testing.AllocsPerRun(200, func() { sinkErr = callRecovered(loopPanicLogos, nn) }), testing.AllocsPerRun(200, func() { sinkErr = callRecovered(loopPanicHand, nn) }))
+		checkExact(fmt.Sprint("alloc addr for3 n", nn), testing.AllocsPerRun(200, func() { sinkErr = shapeAddrLogos(nn) }), float64(nn))
 	}
 	if failed {
 		os.Exit(1)

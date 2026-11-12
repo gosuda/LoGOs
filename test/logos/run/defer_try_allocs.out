@@ -16,6 +16,7 @@ ok alloc fn nested n0
 ok alloc fn break n0
 ok alloc fn continue n0
 ok alloc fn panic n0
+ok alloc addr for3 n0
 ok alloc fn for3 n1
 ok alloc int for3 n1
 ok alloc str for3 n1
@@ -34,6 +35,7 @@ ok alloc fn nested n1
 ok alloc fn break n1
 ok alloc fn continue n1
 ok alloc fn panic n1
+ok alloc addr for3 n1
 ok alloc fn for3 n5
 ok alloc int for3 n5
 ok alloc str for3 n5
@@ -52,6 +54,7 @@ ok alloc fn nested n5
 ok alloc fn break n5
 ok alloc fn continue n5
 ok alloc fn panic n5
+ok alloc addr for3 n5
 ok alloc fn for3 n31
 ok alloc int for3 n31
 ok alloc str for3 n31
@@ -70,3 +73,4 @@ ok alloc fn nested n31
 ok alloc fn break n31
 ok alloc fn continue n31
 ok alloc fn panic n31
+ok alloc addr for3 n31

@@ -63,6 +63,15 @@ func overRange(seq iter.Seq[int]) (err error) {
 	return nil
 }
 
+func shadowed(n int) (err error) {
+	for i := 0; i < n; i++ {
+		var err error
+		defer closeNil()? // ERROR "heap-allocated defer"
+		_ = err
+	}
+	return nil
+}
+
 func plainLoop(n int) {
 	for i := 0; i < n; i++ {
 		defer func() {}() // ERROR "heap-allocated defer"
