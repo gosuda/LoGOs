@@ -460,6 +460,156 @@ func drvTryCollectFail() {
 	check("try-collect-fail", err == errFail && len(got) == 0 && eq(closed, []int{2, 1}), closed, []int{2, 1})
 }
 
+type holder struct{ l lk }
+
+func hs3() []holder { return []holder{{mk(1)}, {mk(2)}, {mk(3)}} }
+
+var sharedLk = lk{id: 9}
+
+func passLk(t lk) (bool, error) {
+	switch t.id {
+	case 1:
+		return false, nil
+	case 3:
+		return false, errFail
+	}
+	return true, nil
+}
+
+func boomPred(t lk) bool {
+	if t.id == 3 {
+		panic("boom")
+	}
+	return true
+}
+
+func legBorrowCount() {
+	closed = nil
+	n := hs3().map(h => h.l).count()
+	check("borrow-count", n == 3 && eq(closed, []int{}), closed, []int{})
+}
+
+func legBorrowFind() {
+	closed = nil
+	v := hs3().map(h => h.l).find(t => t.id == 2)
+	id := v?.id ?? -1
+	check("borrow-find", id == 2 && eq(closed, []int{}), closed, []int{})
+}
+
+func legBorrowLast() {
+	closed = nil
+	v := hs3().map(h => h.l).last()
+	id := v?.id ?? -1
+	check("borrow-last", id == 3 && eq(closed, []int{}), closed, []int{})
+}
+
+func legBorrowCollect() {
+	closed = nil
+	got := hs3().map(h => h.l)
+	check("borrow-collect", len(got) == 3 && eq(closed, []int{}), closed, []int{})
+}
+
+func legSharedCount() {
+	closed = nil
+	n := xs3().map(i => sharedLk).count()
+	check("shared-count", n == 3 && eq(closed, []int{}), closed, []int{})
+}
+
+func legSharedAny() {
+	closed = nil
+	b := xs3().map(i => sharedLk).any(t => t.id == 7)
+	check("shared-any", !b && eq(closed, []int{}), closed, []int{})
+}
+
+func legFilterCount() {
+	closed = nil
+	n := xs3().map(i => mk(i)).filter(t => t.id != 2).count()
+	check("filter-count", n == 2 && eq(closed, []int{2, 3, 1}), closed, []int{2, 3, 1})
+}
+
+func legFilterCollect() {
+	closed = nil
+	got := xs3().map(i => mk(i)).filter(t => t.id != 2)
+	byChain := slices.Clone(closed)
+	for _, c := range got {
+		shutP(c)
+	}
+	check("filter-collect", len(got) == 2 && eq(byChain, []int{2}) && eq(closed, []int{2, 1, 3}), closed, []int{2, 1, 3})
+}
+
+func legDropCount() {
+	closed = nil
+	n := xs3().map(i => mk(i)).drop(1).count()
+	check("drop-count", n == 2 && eq(closed, []int{1, 3, 2}), closed, []int{1, 3, 2})
+}
+
+func legDropCollect() {
+	closed = nil
+	got := xs3().map(i => mk(i)).drop(1)
+	byChain := slices.Clone(closed)
+	for _, c := range got {
+		shutP(c)
+	}
+	check("drop-collect", len(got) == 2 && eq(byChain, []int{1}) && eq(closed, []int{1, 2, 3}), closed, []int{1, 2, 3})
+}
+
+func legTakeCount() {
+	closed = nil
+	n := xs3().map(i => mk(i)).take(2).count()
+	check("take-count", n == 2 && eq(closed, []int{2, 1}), closed, []int{2, 1})
+}
+
+func legTakeCollect() {
+	closed = nil
+	got := xs3().map(i => mk(i)).take(2)
+	byChain := len(closed)
+	for _, c := range got {
+		shutP(c)
+	}
+	check("take-collect", len(got) == 2 && byChain == 0 && eq(closed, []int{1, 2}), closed, []int{1, 2})
+}
+
+func legFilterFirst() {
+	closed = nil
+	v := xs3().map(i => mk(i)).filter(t => t.id != 1).first()
+	id := v?.id ?? -1
+	shut(v)
+	check("filter-first", id == 2 && eq(closed, []int{1, 2}), closed, []int{1, 2})
+}
+
+func legFilterLast() {
+	closed = nil
+	v := xs3().map(i => mk(i)).filter(t => t.id != 2).last()
+	id := v?.id ?? -1
+	shut(v)
+	check("filter-last", id == 3 && eq(closed, []int{2, 1, 3}), closed, []int{2, 1, 3})
+}
+
+func legFilterBetweenMaps() {
+	closed = nil
+	n := xs3().map(i => mk(i)).filter(t => t.id != 2).map(t => t.id).count()
+	check("filter-between-maps", n == 2 && eq(closed, []int{2}), closed, []int{2})
+}
+
+func legFilterPanic() {
+	closed = nil
+	rec := recovers(func() {
+		_ = xs3().map(i => mk(i)).filter(t => boomPred(t))
+	})
+	check("filter-panic", rec && eq(closed, []int{3, 2, 1}), closed, []int{3, 2, 1})
+}
+
+func tryFilterFail() (int, error) {
+	n := xs3().map(i => mk(i)).filter(t => passLk(t)?).count()
+	return n, nil
+}
+
+func drvTryFilterFail() {
+	closed = nil
+	n, err := tryFilterFail()
+	check("try-filter-fail", err == errFail && n == 0 && eq(closed, []int{1, 3, 2}), closed, []int{1, 3, 2})
+}
+
 func main() {
 	legFindHit()
 	legFindMiss()
@@ -501,7 +651,28 @@ func main() {
 	drvTryGetOob()
 	drvTryCollect()
 	drvTryCollectFail()
+	ownershipLegs()
 	if failed {
 		os.Exit(1)
 	}
+}
+
+func ownershipLegs() {
+	legBorrowCount()
+	legBorrowFind()
+	legBorrowLast()
+	legBorrowCollect()
+	legSharedCount()
+	legSharedAny()
+	legFilterCount()
+	legFilterCollect()
+	legDropCount()
+	legDropCollect()
+	legTakeCount()
+	legTakeCollect()
+	legFilterFirst()
+	legFilterLast()
+	legFilterBetweenMaps()
+	legFilterPanic()
+	drvTryFilterFail()
 }

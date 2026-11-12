@@ -37,8 +37,8 @@ type callPlan struct {
 	method   string
 }
 
-func typeFlagsOf(fc *funcLower, e syntax.Expr) (builtin, isType bool) {
-	info := fc.fl.pkg.info
+func typeFlagsOf(fl *fileLower, e syntax.Expr) (builtin, isType bool) {
+	info := fl.pkg.info
 	node := syntax.Unparen(e)
 	if info.Types != nil {
 		if tv, ok := info.Types[node]; ok {
@@ -54,7 +54,7 @@ func typeFlagsOf(fc *funcLower, e syntax.Expr) (builtin, isType bool) {
 }
 
 func isBuiltinExpr(fc *funcLower, e syntax.Expr) bool {
-	builtin, _ := typeFlagsOf(fc, e)
+	builtin, _ := typeFlagsOf(fc.fl, e)
 	return builtin
 }
 
@@ -70,7 +70,7 @@ func (fc *funcLower) planCall(call *syntax.CallExpr) (*callPlan, bool) {
 	fun := capturePiece{expr: call.Fun}
 	fun.start = fl.off(leftmostOf(call.Fun))
 	fun.end = lastTokenEnd(src, fun.start, lparen)
-	if _, isType := typeFlagsOf(fc, call.Fun); isType {
+	if _, isType := typeFlagsOf(fl, call.Fun); isType {
 		return nil, false
 	}
 	fun.text = fl.textOf(span{start: fun.start, end: fun.end})

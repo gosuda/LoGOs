@@ -28,7 +28,17 @@ type chainOp struct {
 	savedBody syntax.Node
 	isTry     bool
 	isBlk     bool
+	forms     []resultForm
 }
+
+type resultForm int
+
+const (
+	formBorrowed resultForm = iota
+	formParam
+	formCall
+	formMade
+)
 
 func (fl *fileLower) lowerChains() {
 	if fl.loweredChains == nil {
@@ -553,7 +563,69 @@ func (fl *fileLower) chainOpOf(cur *syntax.CallExpr, method string) chainOp {
 			}
 		}
 	}
+	if method == "map" {
+		op.forms = fl.mapForms(op)
+	}
 	return op
+}
+
+func (fl *fileLower) mapForms(op chainOp) []resultForm {
+	if op.lam == nil {
+		return []resultForm{formCall}
+	}
+	param := op.lam.Params[0].Value
+	if body, ok := op.lam.Body.(syntax.Expr); ok {
+		return []resultForm{fl.resultForm(body, param)}
+	}
+	var forms []resultForm
+	syntax.Inspect(op.lam.Body, func(n syntax.Node) bool {
+		switch n := n.(type) {
+		case *syntax.FuncLit:
+			return false
+		case *syntax.ReturnStmt:
+			for _, r := range syntax.UnpackListExpr(n.Results) {
+				forms = append(forms, fl.resultForm(r, param))
+			}
+		}
+		return true
+	})
+	return forms
+}
+
+func (fl *fileLower) resultForm(e syntax.Expr, param string) resultForm {
+	switch e := syntax.Unparen(e).(type) {
+	case *syntax.Name:
+		if e.Value == param {
+			return formParam
+		}
+	case *syntax.CompositeLit:
+		return formMade
+	case *syntax.Operation:
+		if _, ok := syntax.Unparen(e.X).(*syntax.CompositeLit); ok && e.Op == syntax.And && e.Y == nil {
+			return formMade
+		}
+	case *syntax.TryExpr:
+		return fl.resultForm(e.X, param)
+	case *syntax.CallExpr:
+		return fl.callForm(e, param)
+	}
+	return formBorrowed
+}
+
+func (fl *fileLower) callForm(call *syntax.CallExpr, param string) resultForm {
+	builtin, isType := typeFlagsOf(fl, call.Fun)
+	switch {
+	case isType && len(call.ArgList) == 1:
+		return fl.resultForm(call.ArgList[0], param)
+	case isType:
+		return formBorrowed
+	case builtin:
+		if name, ok := syntax.Unparen(call.Fun).(*syntax.Name); ok && name.Value == "new" {
+			return formMade
+		}
+		return formBorrowed
+	}
+	return formCall
 }
 
 type chainGen struct {
@@ -762,17 +834,20 @@ func (cg *chainGen) enclosingZeros() string {
 }
 
 type chainEmit struct {
-	cg       *chainGen
-	ops      []chainOp
-	term     chainOp
-	baseText otext
-	elemT    types2.Type
-	resultT  types2.Type
-	isTry    bool
-	closures []otext
-	outElem  string
-	outCap   string
-	hasCap   bool
+	cg        *chainGen
+	ops       []chainOp
+	term      chainOp
+	baseText  otext
+	elemT     types2.Type
+	resultT   types2.Type
+	isTry     bool
+	closures  []otext
+	outElem   string
+	outCap    string
+	hasCap    bool
+	ownBefore []bool
+	lastMap   int
+	owns      bool
 }
 
 func (ce *chainEmit) prepare() {
@@ -809,6 +884,7 @@ func (ce *chainEmit) prepare() {
 		ce.closures = append(ce.closures, cat(gen(fmt.Sprintf("%s_i := ", cg.prefix)), ce.argText(ce.term)))
 	}
 	ce.outElem = elem
+	ce.ownership()
 	ce.outCap, ce.hasCap = ce.capHint()
 }
 
@@ -1069,10 +1145,10 @@ func (ce *chainEmit) loopO() (prelude []otext, body, epilogue []string) {
 	p := cg.prefix
 	prelude = append(prelude, cat(gen(p+"_rcv := "), ce.baseText))
 	prelude = append(prelude, ce.closures...)
-	if ce.needBuffer() {
+	if ce.needOut() {
 		prelude = append(prelude, gen(ce.outDecl()))
 	}
-	if ce.deferClose() {
+	if ce.owns {
 		prelude = append(prelude, gen(p+"_done := false"))
 		prelude = append(prelude, gen("defer func() { if !"+p+"_done { "+ce.rollback(p)+" } }()"))
 	}
@@ -1098,10 +1174,13 @@ func (ce *chainEmit) loopO() (prelude []otext, body, epilogue []string) {
 		case "take":
 			body = append(body, fmt.Sprintf("%s_tc%d++", p, i))
 		case "drop":
-			body = append(body, fmt.Sprintf("if %[1]s_di%[2]d < %[1]s_d%[2]d { %[1]s_di%[2]d++; continue }", p, i))
+			body = append(body, fmt.Sprintf("if %[1]s_di%[2]d < %[1]s_d%[2]d { %[1]s_di%[2]d++; %[3]s }", p, i, ce.dropStmt(p, cur, i)))
 		case "map":
 			mname := fmt.Sprintf("%s_m%d", p, i)
 			body = append(body, ce.mapLines(p, fname, cur, mname, i)...)
+			if ce.owns && i == ce.lastMap {
+				body = append(body, fmt.Sprintf("%[1]s_out = append(%[1]s_out, %[2]s)", p, mname))
+			}
 			cur = mname
 		}
 	}
@@ -1114,17 +1193,51 @@ func (ce *chainEmit) loopO() (prelude []otext, body, epilogue []string) {
 func (ce *chainEmit) needOut() bool {
 	switch ce.term.method {
 	case "find", "any", "all", "count", "first":
-		return ce.isTry && ce.hasMap()
+		return ce.owns
 	}
 	return true
 }
 
-func (ce *chainEmit) tracks() bool {
-	return ce.hasMap() && ce.mayProduceCloser()
+func (ce *chainEmit) ownership() {
+	cg := ce.cg
+	ce.ownBefore = make([]bool, len(ce.ops))
+	ce.lastMap = -1
+	in := cg.elemT
+	owned := false
+	for i, op := range ce.ops {
+		ce.ownBefore[i] = owned
+		if op.method != "map" {
+			continue
+		}
+		out := cg.prodType(op)
+		same := in != nil && out != nil && types2.Identical(in, out)
+		owned = logosMayBeCloser(out) && formsOwn(op.forms, same, owned)
+		in = out
+		ce.lastMap = i
+	}
+	ce.owns = owned
 }
 
-func (ce *chainEmit) needBuffer() bool {
-	return ce.needOut() || ce.tracks()
+func formsOwn(forms []resultForm, same, prev bool) bool {
+	if len(forms) == 0 {
+		return false
+	}
+	for _, f := range forms {
+		switch f {
+		case formMade:
+		case formCall:
+			if same && !prev {
+				return false
+			}
+		case formParam:
+			if !prev {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func (ce *chainEmit) needElem() bool {
@@ -1148,12 +1261,23 @@ func (ce *chainEmit) argText(op chainOp) otext {
 }
 
 func (ce *chainEmit) filterLines(p, fname, cur string, i int) []string {
+	drop := ce.dropStmt(p, cur, i)
 	if ce.ops[i].isTry {
 		ok := fmt.Sprintf("%s_ok%d", p, i)
 		en := fmt.Sprintf("%s_e%d", p, i)
-		return []string{fmt.Sprintf("%s, %s := %s(%s); if %s != nil { %s }; if !%s { continue }", ok, en, fname, cur, en, ce.failStage(p, en), ok)}
+		return []string{fmt.Sprintf("%s, %s := %s(%s); if %s != nil { %s }; if !%s { %s }", ok, en, fname, cur, en, ce.failStage(p, en), ok, drop)}
 	}
-	return []string{fmt.Sprintf("if !%s(%s) { continue }", fname, cur)}
+	return []string{fmt.Sprintf("if !%s(%s) { %s }", fname, cur, drop)}
+}
+
+func (ce *chainEmit) dropStmt(p, cur string, i int) string {
+	switch {
+	case !ce.ownBefore[i]:
+		return "continue"
+	case i < ce.lastMap:
+		return ce.closeOne(p, cur) + "; continue"
+	}
+	return fmt.Sprintf("%s; %[2]s_out = %[2]s_out[:len(%[2]s_out)-1]; continue", ce.closeOne(p, cur), p)
 }
 
 func (ce *chainEmit) mapLines(p, fname, cur, mname string, i int) []string {
@@ -1165,33 +1289,15 @@ func (ce *chainEmit) mapLines(p, fname, cur, mname string, i int) []string {
 }
 
 func (ce *chainEmit) failStage(p, errVar string) string {
-	if ce.deferClose() {
+	if ce.owns {
 		return ce.rollback(p) + "; " + p + "_done = true; " + ce.failReturn(p, errVar)
-	}
-	if ce.hasMap() {
-		return ce.rollback(p) + "; " + ce.failReturn(p, errVar)
 	}
 	return ce.failReturn(p, errVar)
 }
+
 func (ce *chainEmit) hasMap() bool {
 	for _, op := range ce.ops {
 		if op.method == "map" {
-			return true
-		}
-	}
-	return false
-}
-
-func (ce *chainEmit) deferClose() bool {
-	return ce.needBuffer() && ce.mayProduceCloser()
-}
-
-func (ce *chainEmit) mayProduceCloser() bool {
-	for _, op := range ce.ops {
-		if op.method != "map" {
-			continue
-		}
-		if logosMayBeCloser(ce.cg.prodType(op)) {
 			return true
 		}
 	}
@@ -1221,37 +1327,43 @@ func logosMayBeCloser(t types2.Type) bool {
 	}
 	return types2.Implements(sig.Results().At(0).Type(), errIface)
 }
+
+func (ce *chainEmit) closeOne(p, v string) string {
+	return fmt.Sprintf("if %[1]s_c, %[1]s_ok := any(%[2]s).(interface{ Close() error }); %[1]s_ok { %[1]s_c.Close() }", p, v)
+}
+
 func (ce *chainEmit) closeBut(p, handed string) string {
-	return fmt.Sprintf("for %[1]s_ci := len(%[1]s_out) - 1; %[1]s_ci >= 0; %[1]s_ci-- { if %[1]s_ci != %[2]s { if %[1]s_c, %[1]s_ok := any(%[1]s_out[%[1]s_ci]).(interface{ Close() error }); %[1]s_ok { %[1]s_c.Close() } } }", p, handed)
+	return fmt.Sprintf("for %[1]s_ci := len(%[1]s_out) - 1; %[1]s_ci >= 0; %[1]s_ci-- { if %[1]s_ci != %[2]s { %[3]s } }", p, handed, ce.closeOne(p, p+"_out["+p+"_ci]"))
 }
 
 func (ce *chainEmit) handSlice(p string) string {
-	if !ce.deferClose() {
+	if !ce.owns {
 		return ""
 	}
 	return p + "_done = true; "
 }
 
 func (ce *chainEmit) handNone(p string) string {
-	if !ce.deferClose() {
+	if !ce.owns {
 		return ""
 	}
 	return ce.closeBut(p, "-1") + "; " + p + "_done = true; "
 }
 
 func (ce *chainEmit) handLast(p string) string {
-	if !ce.deferClose() {
+	if !ce.owns {
 		return ""
 	}
 	return ce.closeBut(p, "len("+p+"_out)-1") + "; " + p + "_done = true; "
 }
 
 func (ce *chainEmit) handIndex(p string) string {
-	if !ce.deferClose() {
+	if !ce.owns {
 		return ""
 	}
 	return ce.closeBut(p, p+"_i") + "; " + p + "_done = true; "
 }
+
 func (ce *chainEmit) failReturn(p, errVar string) string {
 	switch ce.term.method {
 	case "", "sortBy":
@@ -1271,32 +1383,20 @@ func (ce *chainEmit) rollback(p string) string {
 }
 
 func (ce *chainEmit) terminalLines(p, cur string) []string {
-	t := ce.term
-	appendCur := []string{fmt.Sprintf("%s_out = append(%s_out, %s)", p, p, cur)}
-	if t.method == "" {
-		return appendCur
-	}
-	keep := func(lines []string) []string {
-		if ce.needBuffer() {
-			return append(appendCur, lines...)
-		}
-		return lines
-	}
-	switch t.method {
+	switch ce.term.method {
 	case "find":
-		return keep(ce.findLines(p, cur))
+		return ce.findLines(p, cur)
 	case "any", "all":
-		return keep(ce.anyLines(p, cur))
+		return ce.anyLines(p, cur)
 	case "count":
-		return keep(ce.countLines(p, cur))
-	case "sum":
-		return appendCur
+		return ce.countLines(p, cur)
 	case "first":
-		return keep([]string{ce.handLast(p) + "return " + ce.someText(p, cur) + ce.rsuf()})
-	case "sortBy", "last", "get":
-		return appendCur
+		return []string{ce.handLast(p) + "return " + ce.someText(p, cur) + ce.rsuf()}
 	}
-	return appendCur
+	if ce.owns {
+		return nil
+	}
+	return []string{fmt.Sprintf("%s_out = append(%s_out, %s)", p, p, cur)}
 }
 
 func (ce *chainEmit) findLines(p, cur string) []string {
@@ -1347,7 +1447,7 @@ func (ce *chainEmit) anyLines(p, cur string) []string {
 
 func (ce *chainEmit) countLines(p, cur string) []string {
 	if ce.term.arg == nil {
-		if ce.hasMap() && !ce.needBuffer() {
+		if ce.hasMap() && !ce.owns {
 			return []string{"_ = " + cur, p + "_c++"}
 		}
 		return []string{p + "_c++"}
