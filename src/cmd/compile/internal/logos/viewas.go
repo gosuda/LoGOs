@@ -8,6 +8,7 @@ import (
 	"go/token"
 	"slices"
 
+	"cmd/compile/internal/logos/facts"
 	"cmd/compile/internal/syntax"
 	"cmd/compile/internal/types2"
 )
@@ -87,14 +88,9 @@ func (fl *fileLower) removeImportSpec(imp *syntax.ImportDecl) {
 	start := fl.off(syntax.StartPos(imp))
 	end := fl.off(syntax.EndPos(imp))
 	if imp.Group == nil {
-		keyword := start
-		scanSegment(fl.src, fl.off(syntax.EndPos(fl.file.PkgName)), start, func(t tok) bool {
-			if !t.comment && !t.auto {
-				keyword = t.start
-			}
-			return true
-		})
-		start = keyword
+		if kw, ok := facts.KeywordStart(fl.src, token.IMPORT, start); ok {
+			start = kw
+		}
 	}
 	scanSegment(fl.src, end, len(fl.src), func(t tok) bool {
 		if t.kind == token.SEMICOLON && !t.auto {
