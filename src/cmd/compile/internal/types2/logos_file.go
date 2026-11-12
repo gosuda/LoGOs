@@ -5,6 +5,7 @@
 package types2
 
 import (
+	"internal/logosfile"
 	"path/filepath"
 	"strings"
 
@@ -29,17 +30,5 @@ func (check *Checker) logosFuncInLgo(fn *Func) bool {
 		return !logosIsCgoName(fn.name) && !logosGoModePos(fn.pos)
 	}
 	base := fn.pos.FileBase()
-	return base != nil && logosLgoFileName(base.Filename())
-}
-
-func logosLgoFileName(name string) bool {
-	ext := filepath.Ext(strings.TrimSuffix(name, ".cgo1.go"))
-	for strings.HasSuffix(ext, "\uFE0E") || strings.HasSuffix(ext, "\uFE0F") {
-		ext = ext[:len(ext)-len("\uFE0E")]
-	}
-	switch ext {
-	case ".lgo", ".📜", ".⚡", ".ʕ◔ϖ◔ʔ":
-		return true
-	}
-	return false
+	return base != nil && logosfile.Is(strings.TrimSuffix(base.Filename(), ".cgo1.go"))
 }
