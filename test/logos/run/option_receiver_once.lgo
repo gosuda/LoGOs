@@ -2,7 +2,10 @@
 
 package main
 
-import "fmt"
+import (
+	"fmt"
+	"os"
+)
 
 type User struct {
 	Name string
@@ -30,6 +33,16 @@ func teamReceiver() *Team? {
 	return nil
 }
 
+
+func check(cond bool, msg string) {
+	if cond {
+		fmt.Println("ok " + msg)
+		return
+	}
+	fmt.Println("FAIL " + msg)
+	os.Exit(1)
+}
+
 func main() {
 	name := receiver()?.Name ?? "none"
 	someOK := name == "ok" && calls == 1
@@ -39,5 +52,5 @@ func main() {
 	teamCalls = 0
 	name3 := teamReceiver()?.Lead?.Name ?? "none"
 	chainOK := name3 == "none" && teamCalls == 1
-	fmt.Println("ok receiver-once:", someOK && noneOK && chainOK)
+	check(someOK && noneOK && chainOK, "receiver-once")
 }

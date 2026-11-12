@@ -5,6 +5,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"os"
 )
 
 var errStep = errors.New("step")
@@ -80,34 +81,43 @@ func driveExpr() error {
 	return nil
 }
 
+func check(cond bool, msg string) {
+	if cond {
+		fmt.Println("ok " + msg)
+		return
+	}
+	fmt.Println("FAIL " + msg)
+	os.Exit(1)
+}
+
 func main() {
 	postCalls = 0
 	bodies = 0
 	total, err := sumOK()
 	okNil := err == nil && total == 3 && postCalls == 3 && bodies == 3
-	fmt.Println("ok for-post-assign-nil:", okNil)
+	check(okNil, "for-post-assign-nil")
 
 	postCalls = 0
 	bodies = 0
 	total, err = sumFail()
 	okErr := err != nil && err == errStep && total == 0 && postCalls == 3 && bodies == 3
-	fmt.Println("ok for-post-assign-err:", okErr)
+	check(okErr, "for-post-assign-err")
 
 	postCalls = 0
 	bodies = 0
 	err = driveLast()
 	okZero := err == errStep && last == 0 && postCalls == 3 && bodies == 3
-	fmt.Println("ok for-post-assign-zero:", okZero)
+	check(okZero, "for-post-assign-zero")
 
 	ticks = 0
 	bodies = 0
 	err = driveExprOK()
 	okExprNil := err == nil && ticks == 3 && bodies == 3
-	fmt.Println("ok for-post-expr-nil:", okExprNil)
+	check(okExprNil, "for-post-expr-nil")
 
 	ticks = 0
 	bodies = 0
 	err = driveExpr()
 	okExprErr := err == errStep && ticks == 3 && bodies == 3
-	fmt.Println("ok for-post-expr-err:", okExprErr)
+	check(okExprErr, "for-post-expr-err")
 }
