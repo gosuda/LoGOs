@@ -42,7 +42,15 @@ exists $UPROOT1272/bin/go
 exec $UPROOT1272/bin/go version
 stdout '^go version go1\.27\.2 '
 exec env -u GOROOT $UPROOT1272/bin/go build ./...
+exists scroll.go
+exists bolt.go
+exists gopher.go
+grep 'func scrollName' scroll.go
+grep 'func boltName' bolt.go
+grep 'func gopherName' gopher.go
 cd ..
+exec find out ( -name '*.lgo' -o -name '*.📜' -o -name '*.⚡' -o -name '*.ʕ◔ϖ◔ʔ' )
+! stdout .
 
 grep 'Command ejectdemo' out/main.go
 grep 'load cleans the input' out/main.go
@@ -134,6 +142,21 @@ func main() {
 	}
 	fmt.Println("hello", name)
 }
+
+-- m/scroll.📜 --
+package main
+
+func scrollName() string { return "scroll" }
+
+-- m/bolt.⚡ --
+package main
+
+func boltName() string { return "bolt" }
+
+-- m/gopher.ʕ◔ϖ◔ʔ --
+package main
+
+func gopherName() string { return "gopher" }
 
 -- dep/go.mod --
 module example.com/dep
