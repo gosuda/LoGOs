@@ -1,7 +1,6 @@
 env GOPROXY=off
 env GOTOOLCHAIN=local
 
-# SPEC 381: go build accepts -O=0 with -N -l and -O=1 with no inline budget.
 go build -a -x -O=0 .
 stderr '\-N \-l'
 go build -a -gcflags=example.com/optlevelvalues=-m -O=0 .
