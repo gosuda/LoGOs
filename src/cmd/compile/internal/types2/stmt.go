@@ -132,6 +132,8 @@ func (check *Checker) stmtList(ctxt stmtContext, list []syntax.Stmt) {
 	narrowBase := check.logosNarrowBase() // logos M3-S4 hook: early-exit narrowing scope.
 	errBase := check.logosErrBase()       // logos M3-S4 hook.
 	for i, s := range list {
+		s = check.logosYieldForm(s)
+		list[i] = s
 		inner := inner
 		if ok && i+1 == len(list) {
 			inner |= fallthroughOk
@@ -455,6 +457,7 @@ func (check *Checker) stmt(ctxt stmtContext, s syntax.Stmt) {
 
 	case *syntax.LabeledStmt:
 		check.hasLabel = true
+		s.Stmt = check.logosYieldForm(s.Stmt)
 		check.stmt(ctxt, s.Stmt)
 
 	case *syntax.ExprStmt:

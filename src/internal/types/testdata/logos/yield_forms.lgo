@@ -150,3 +150,61 @@ L:
 		break L
 	}
 }
+
+type Ints = iter.Seq[int]
+
+type Pairs = iter.Seq2[int, int]
+
+type Named iter.Seq[int]
+
+func aliasCall() Ints {
+	yield(8)
+	yield (9)
+}
+
+func aliasSend(ch chan int) Ints {
+	yield <- ch
+	yield <-ch
+}
+
+func aliasLabeled() Ints {
+	if false {
+		goto L
+	}
+L:
+	yield(1)
+}
+
+func aliasClosureKeepsCalls() Ints {
+	f := func(yield func(int) bool) {
+		yield(1)
+		yield (2)
+	}
+	_ = f
+	yield 3
+}
+
+func aliasWrongType() Ints {
+	yield( /* ERROR "cannot use" */ "s")
+}
+
+func aliasWrongCount() Pairs {
+	yield /* ERROR "yield requires 2 values" */ (1)
+}
+
+func aliasPairs() Pairs {
+	yield 1, 2
+}
+
+type Ptrs = iter.Seq[*int]
+
+func aliasUnary(x int, p *int) Ints {
+	yield -x
+	yield +x
+	yield *p
+	yield ^x
+}
+
+func aliasAddr(v int) Ptrs {
+	yield &v
+}

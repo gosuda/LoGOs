@@ -132,6 +132,41 @@ func nested() iter.Seq[int] {
 	yield len(seen)
 }
 
+type Ints = iter.Seq[int]
+
+func aliasCall() Ints {
+	yield(8)
+	yield (9)
+}
+
+func aliasSend() Ints {
+	ch := make(chan int, 2)
+	ch <- 6
+	ch <- 7
+	yield <- ch
+	yield <-ch
+}
+
+func aliasNested() Ints {
+	func(yield func(int) bool) {
+		yield(1)
+	}(func(int) bool { return true })
+	yield(2)
+}
+
+type Ptrs = iter.Seq[*int]
+
+func aliasUnary(x int, p *int) Ints {
+	yield -x
+	yield +x
+	yield *p
+	yield ^x
+}
+
+func aliasAddr(v int) Ptrs {
+	yield &v
+}
+
 func main() {
 	n := 9
 	check("paren", slices.Equal(slices.Collect(paren()), []int{8}), slices.Collect(paren()), "[8]")
@@ -154,6 +189,12 @@ func main() {
 	check("identifier-forms", slices.Equal(slices.Collect(idents()), []int{6, 1, 6}), slices.Collect(idents()), "[6 1 6]")
 	check("go-iterator-idiom", slices.Equal(goIdiom(), []int{3, 4, 1, 2, 5}), goIdiom(), "[3 4 1 2 5]")
 	check("nested-literal-keeps-calls", slices.Equal(slices.Collect(nested()), []int{2}), slices.Collect(nested()), "[2]")
+	check("alias-call-form", slices.Equal(slices.Collect(aliasCall()), []int{8, 9}), slices.Collect(aliasCall()), "[8 9]")
+	check("alias-send-form", slices.Equal(slices.Collect(aliasSend()), []int{6, 7}), slices.Collect(aliasSend()), "[6 7]")
+	check("alias-closure-keeps-calls", slices.Equal(slices.Collect(aliasNested()), []int{2}), slices.Collect(aliasNested()), "[2]")
+	check("alias-unary-forms", slices.Equal(slices.Collect(aliasUnary(3, &n)), []int{-3, 3, 9, -4}), slices.Collect(aliasUnary(3, &n)), "[-3 3 9 -4]")
+	ptrs := slices.Collect(aliasAddr(7))
+	check("alias-address-form", len(ptrs) == 1 && *ptrs[0] == 7, len(ptrs), 1)
 	if failed {
 		os.Exit(1)
 	}

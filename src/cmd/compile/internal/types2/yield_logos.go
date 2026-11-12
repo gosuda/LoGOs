@@ -88,3 +88,58 @@ func (check *Checker) logosYield(s *syntax.YieldStmt) {
 		check.assignment(&x, targs[i], "yield")
 	}
 }
+
+func (check *Checker) logosYieldForm(s syntax.Stmt) syntax.Stmt {
+	if !check.conf.Logos || !check.logosGeneratorSig(check.sig) {
+		return s
+	}
+	switch s := s.(type) {
+	case *syntax.ExprStmt:
+		switch x := s.X.(type) {
+		case *syntax.CallExpr:
+			if isYieldWord(x.Fun) && len(x.ArgList) == 1 && !x.HasDots {
+				return yieldAfterWord(x.Fun, &syntax.ParenExpr{X: x.ArgList[0]})
+			}
+		case *syntax.Operation:
+			if x.Y != nil && isYieldWord(x.X) && isUnaryStart(x.Op) && !isBinaryValue(x.Y) {
+				return yieldAfterWord(x.X, &syntax.Operation{Op: x.Op, X: x.Y})
+			}
+		}
+	case *syntax.SendStmt:
+		if isYieldWord(s.Chan) && !isBinaryValue(s.Value) {
+			return yieldAfterWord(s.Chan, &syntax.Operation{Op: syntax.Recv, X: s.Value})
+		}
+	}
+	return s
+}
+
+func isYieldWord(e syntax.Expr) bool {
+	name, ok := e.(*syntax.Name)
+	return ok && name.Value == "yield"
+}
+
+func isBinaryValue(e syntax.Expr) bool {
+	switch e := e.(type) {
+	case *syntax.Operation:
+		return e.Y != nil
+	case *syntax.CoalesceExpr, *syntax.LambdaExpr:
+		return true
+	}
+	return false
+}
+
+func isUnaryStart(op syntax.Operator) bool {
+	switch op {
+	case syntax.Add, syntax.Sub, syntax.Mul, syntax.And, syntax.Xor:
+		return true
+	}
+	return false
+}
+
+func yieldAfterWord(word, value syntax.Expr) syntax.Stmt {
+	pos := word.Pos()
+	value.SetPos(syntax.MakePos(pos.Base(), pos.Line(), pos.Col()+uint(len("yield"))))
+	y := &syntax.YieldStmt{Value: value}
+	y.SetPos(pos)
+	return y
+}

@@ -12,3 +12,8 @@ ok pair-operands
 ok identifier-forms
 ok go-iterator-idiom
 ok nested-literal-keeps-calls
+ok alias-call-form
+ok alias-send-form
+ok alias-closure-keeps-calls
+ok alias-unary-forms
+ok alias-address-form
