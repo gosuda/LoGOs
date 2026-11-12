@@ -378,7 +378,6 @@ For a target architecture other than the architecture of the build host, `native
 An explicit GOAMD64 or GOARM64 in the environment MUST win over the level that `native` selects [T-105].
 The default binary MUST NOT run on x86 CPUs older than v3 [T-105].
 Self-aliased calls such as arr = Reverse(arr) MUST return correct results. [T-105]
-Recursive functions MUST NOT inline above that budget. [T-105][T-302]
 
 ## 2. Tier 2 specification
 
