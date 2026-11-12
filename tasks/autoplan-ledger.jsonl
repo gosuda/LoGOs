@@ -242,3 +242,4 @@
 {"id": "AUD-131", "description": "M18-A-S11 Exempt guard defers from the user-defer veto", "phase": "AUD"}
 {"id": "AUD-132", "description": "M18-A-S12 Lower placed region calls with dictionary arguments", "phase": "AUD"}
 {"id": "AUD-133", "description": "M18-A-S13 Attach region bump checks to the placed New line", "phase": "AUD"}
+{"id": "AUD-134", "description": "M22-A-S4 Pin the size gate boundary and failure", "phase": "AUD"}
