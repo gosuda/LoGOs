@@ -950,12 +950,19 @@ func (fl *fileLower) wrapperTail(e syntax.Expr) otext {
 	return drainOwnedAt(fl.ownerOfInsertion(vs.end), vs.end, id)
 }
 
+func (fl *fileLower) isMapRead(ix *syntax.IndexExpr) bool {
+	if m := fl.pkg.info.Types; m != nil {
+		return m[ix].HasOk()
+	}
+	return ix.GetTypeInfo().HasOk()
+}
+
 func (fl *fileLower) lowerMapIndex(e *syntax.IndexExpr) syntax.Expr {
 	if g, ok := fl.constMapReadUse(e.X); ok {
 		return fl.lowerConstMapRead(e, g)
 	}
 	opt := fl.asOption(fl.optType(e))
-	if opt == nil || types2.LogosOptionIsBare(opt.Elem) {
+	if !fl.isMapRead(e) || opt == nil || types2.LogosOptionIsBare(opt.Elem) {
 		e.X = fl.lowerOptExpr(e.X)
 		e.Index = fl.lowerOptExpr(e.Index)
 		return e
@@ -1070,12 +1077,13 @@ func (fl *fileLower) lookupFinish(e *syntax.IndexExpr, lbrack, rbrack int, id in
 func (fl *fileLower) lowerCoalesce(e *syntax.CoalesceExpr) syntax.Expr {
 	opt := fl.coeType(e.X)
 	ux, isIndex := syntax.Unparen(e.X).(*syntax.IndexExpr)
-	if isIndex {
+	mapRead := isIndex && fl.isMapRead(ux)
+	if mapRead {
 		if _, ok := fl.constMapReadUse(ux.X); ok {
-			isIndex = false
+			mapRead = false
 		}
 	}
-	if opt == nil && isIndex {
+	if opt == nil && mapRead {
 		opt = fl.asOption(fl.optType(ux))
 	}
 	if opt == nil {
@@ -1102,7 +1110,7 @@ func (fl *fileLower) lowerCoalesce(e *syntax.CoalesceExpr) syntax.Expr {
 	yEnd := fl.exprEndThrough(yStart, through)
 	fl.add(qoff, qoff+2, "")
 	fl.addOwned(id, yEnd, yEnd, " }()")
-	if isIndex {
+	if mapRead {
 		mStart, lbrack, rbrack := fl.lookupSpans(ux)
 		fl.deleteGroupingParens(mStart, mStart, qoff)
 		xStart := fl.off(fl.optHeadStart(e.X))
