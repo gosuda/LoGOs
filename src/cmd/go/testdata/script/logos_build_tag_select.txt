@@ -10,6 +10,13 @@ logos run .
 stdout '^arena$'
 go run .
 stdout '^noarena$'
+env GOOS=js
+env GOARCH=wasm
+logos list -f '{{.GoFiles}}' .
+stdout 'arena_on\.go'
+stdout 'preempt_on\.go'
+env GOOS=
+env GOARCH=
 cd ../expnoarena
 logos run .
 stdout '^noarena$'
@@ -69,6 +76,20 @@ func tag() string { return "arena" }
 package main
 
 func tag() string { return "noarena" }
+
+-- exp/preempt_on.go --
+//go:build goexperiment.preemptibleloops
+
+package main
+
+func preempt() string { return "preempt" }
+
+-- exp/preempt_off.go --
+//go:build !goexperiment.preemptibleloops
+
+package main
+
+func preempt() string { return "nopreempt" }
 
 -- expnoarena/go.mod --
 module example.com/tagnoarena
