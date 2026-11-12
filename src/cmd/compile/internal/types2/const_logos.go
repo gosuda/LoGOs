@@ -441,11 +441,14 @@ func logosPointerReceiver(fn *Func) bool {
 }
 
 func (check *Checker) logosCompositeMutatingCall(e *syntax.SelectorExpr, fn *Func) bool {
-	if fn != nil && (!logosPointerReceiver(fn) || check.logosReceiverReadonly(fn)) {
+	if !check.conf.Logos {
 		return false
 	}
 	root, ok := check.logosCompositeRoot(e.X)
 	if !ok {
+		return false
+	}
+	if fn != nil && (!logosPointerReceiver(fn) || check.logosReceiverReadonly(fn)) {
 		return false
 	}
 	check.errorf(e.Sel, IncompatibleAssign, "%s cannot call %s through const view %s", logosConstMutation, e.Sel.Value, ExprString(root))
@@ -464,6 +467,9 @@ func (check *Checker) logosIsBareMap(obj *Const) bool {
 }
 
 func (check *Checker) logosCompositeWrite(x *operand, id builtinId, args []*operand) bool {
+	if !check.conf.Logos {
+		return false
+	}
 	switch id {
 	case _Append, _Copy, _Clear, _Delete:
 	default:
