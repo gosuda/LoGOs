@@ -519,6 +519,9 @@ func buildssa(fn *ir.Func, worker int, isPgoHot bool) *ssa.Func {
 	// Populate closure variables.
 	if fn.Needctxt() {
 		clo := s.entryNewValue0(ssa.OpGetClosurePtr, s.f.Config.Types.BytePtr)
+		if fn.DeferTryThunk() {
+			s.assign(fn.Dcl[0], clo, false, 0)
+		}
 		if fn.RangeParent != nil && base.Flag.N != 0 {
 			// For a range body closure, keep its closure pointer live on the
 			// stack with a special name, so the debugger can look for it and
@@ -5093,7 +5096,7 @@ func (s *state) call(n *ir.CallExpr, k callKind, returnResultAddr bool, deferExt
 					callABI = s.f.ABI1
 				}
 			}
-			if fn := n.Fun.Sym().Name; n.Fun.Sym().Pkg == ir.Pkgs.Runtime && fn == "deferrangefunc" {
+			if sym := n.Fun.Sym(); sym.Pkg == ir.Pkgs.Runtime && (sym.Name == "deferrangefunc" || sym.Name == "deferprocTry") {
 				isCallDeferRangeFunc = true
 			}
 			break

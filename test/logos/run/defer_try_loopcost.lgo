@@ -361,8 +361,8 @@ func errCases(bs []*box) bool {
 func main() {
 	failed := false
 	check := func(name string, logos, hand float64) {
-		if logos != hand {
-			fmt.Println("FAIL", name+":", "got", logos, "want", hand)
+		if logos != 0 || hand != 6 {
+			fmt.Println("FAIL", name+":", "pooled", logos, "want 0; hand-written closure", hand, "want 6")
 			failed = true
 			return
 		}

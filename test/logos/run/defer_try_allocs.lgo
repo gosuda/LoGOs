@@ -15,12 +15,12 @@ var sinkErr error
 var failed = false
 
 func check(name string, logos, hand float64) {
-if logos != hand {
-fmt.Println("FAIL", name+":", "got", logos, "want", hand)
-failed = true
-return
-}
-fmt.Println("ok", name)
+	if logos != 0 || hand == 0 {
+		fmt.Println("FAIL", name+":", "pooled", logos, "want 0; hand-written closure", hand, "want above 0")
+		failed = true
+		return
+	}
+	fmt.Println("ok", name)
 }
 
 //go:noinline
@@ -450,7 +450,8 @@ func main() {
 		check(fmt.Sprint("alloc methodval for3 n", nn), testing.AllocsPerRun(200, func() { sinkErr = shapeMethodValLogos(bs) }), testing.AllocsPerRun(200, func() { sinkErr = shapeMethodValHand(bs) }))
 		check(fmt.Sprint("alloc iface for3 n", nn), testing.AllocsPerRun(200, func() { sinkErr = shapeIfaceLogos(bs) }), testing.AllocsPerRun(200, func() { sinkErr = shapeIfaceHand(bs) }))
 		check(fmt.Sprint("alloc fn rangeint n", nn), testing.AllocsPerRun(200, func() { sinkErr = loopRangeIntLogos(nn) }), testing.AllocsPerRun(200, func() { sinkErr = loopRangeIntHand(nn) }))
-		check(fmt.Sprint("alloc fn rangeslice n", nn), testing.AllocsPerRun(200, func() { sinkErr = loopRangeSliceLogos(mkInts(nn)) }), testing.AllocsPerRun(200, func() { sinkErr = loopRangeSliceHand(mkInts(nn)) }))
+		ints := mkInts(nn)
+		check(fmt.Sprint("alloc fn rangeslice n", nn), testing.AllocsPerRun(200, func() { sinkErr = loopRangeSliceLogos(ints) }), testing.AllocsPerRun(200, func() { sinkErr = loopRangeSliceHand(ints) }))
 		check(fmt.Sprint("alloc fn goto n", nn), testing.AllocsPerRun(200, func() { sinkErr = loopGotoLogos(nn) }), testing.AllocsPerRun(200, func() { sinkErr = loopGotoHand(nn) }))
 		check(fmt.Sprint("alloc fn nested n", nn), testing.AllocsPerRun(200, func() { sinkErr = loopNestedLogos(nn) }), testing.AllocsPerRun(200, func() { sinkErr = loopNestedHand(nn) }))
 		check(fmt.Sprint("alloc fn break n", nn), testing.AllocsPerRun(200, func() { sinkErr = loopBreakLogos(nn) }), testing.AllocsPerRun(200, func() { sinkErr = loopBreakHand(nn) }))

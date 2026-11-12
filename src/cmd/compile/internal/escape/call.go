@@ -251,6 +251,9 @@ func (e *escape) goDeferStmt(n *ir.GoDeferStmt) {
 		// force stack allocation of defer record, unless
 		// open-coded defers are used (see ssa.go)
 		n.SetEsc(ir.EscNever)
+	} else if clo := pooledTryDeferClosure(n); clo != nil {
+		clo.DeferTryErr = n.DeferTry
+		k = e.later(e.discardHole())
 	}
 
 	// If the function is already a zero argument/result function call,

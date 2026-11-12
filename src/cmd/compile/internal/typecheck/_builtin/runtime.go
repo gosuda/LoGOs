@@ -132,6 +132,9 @@ func panicrangestate(state int)
 // defer in range over func
 func deferrangefunc() interface{}
 
+func deferprocTry(thunk uintptr, ctype *byte, clo unsafe.Pointer, roff uintptr)
+func deferTryUnpack(rec unsafe.Pointer, ctype *byte, dst unsafe.Pointer, roff uintptr)
+
 func rand() uint64
 func rand32() uint32
 

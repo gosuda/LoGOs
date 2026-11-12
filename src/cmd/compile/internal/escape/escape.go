@@ -273,8 +273,13 @@ func (b *batch) flowClosure(k hole, clo *ir.ClosureExpr) {
 		}
 		skip := b.logosRegionSkipGroupCapture(clo, cv)
 
+		pooled := capturedByPooledTryDefer(clo, n)
+
 		// Capture by value for variables <= 128 bytes that are never reassigned.
-		n.SetByval(!loc.addrtaken && !loc.reassigned && n.Type().Size() <= 128)
+		n.SetByval(!loc.addrtaken && !loc.reassigned && (pooled || n.Type().Size() <= 128))
+		if clo.DeferTryErr != nil && !pooled && n.Byval() {
+			base.FatalfAt(n.Pos(), "pooled try defer captures its error result by value: %v", n)
+		}
 		if !n.Byval() {
 			n.SetAddrtaken(true)
 			if n.Sym().Name == typecheck.LocalDictName {
@@ -292,6 +297,9 @@ func (b *batch) flowClosure(k hole, clo *ir.ClosureExpr) {
 
 		// Flow captured variables to closure.
 		k := k
+		if pooled {
+			k = b.heapHole()
+		}
 		if !cv.Byval() {
 			k = k.addr(cv, "reference")
 		}
