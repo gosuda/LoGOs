@@ -296,3 +296,59 @@ func lambdaRecv(in chan int) {
 	var f func() int = () => <-in // ERROR "unbounded_channel_op"
 	_ = f
 }
+
+type store struct{}
+
+func (store) group(ctx context.Context, n int) []int { return nil }
+
+func segmentMapRecv(ctx context.Context, xs []int, in chan int) ([]int, error) {
+	return xs.group(ctx, limit = 2).map(x => x + <-in)
+}
+
+func segmentFilterRecv(ctx context.Context, xs []int, in chan int) ([]int, error) {
+	return xs.group(ctx, limit = 2).filter(x => x > <-in)
+}
+
+func segmentSend(ctx context.Context, xs []int, out chan int) ([]int, error) {
+	return xs.group(ctx, limit = 2).map(x => {
+		out <- x
+		return x
+	})
+}
+
+func segmentSeveral(ctx context.Context, xs []int, in chan int) ([]int, error) {
+	return xs.group(ctx, limit = 2).filter(x => x > <-in).map(x => x + <-in)
+}
+
+func segmentUnordered(ctx context.Context, xs []int, in chan int) ([]int, error) {
+	return xs.group(ctx, limit = 2).unordered().map(x => x + <-in)
+}
+
+func segmentRange(ctx context.Context, xs []int, in chan int) error {
+	for y := range xs.group(ctx, limit = 2).map(x => x + <-in) {
+		_ = y
+	}
+	return nil
+}
+
+func plainChainRecv(xs []int, in chan int) []int {
+	return xs.map(x => x + <-in) // ERROR "unbounded_channel_op"
+}
+
+func afterSegmentRecv(ctx context.Context, xs []int, in chan int) ([]int, error) {
+	return xs.group(ctx, limit = 2).map(x => x).sortBy(x => x + <-in) // ERROR "unbounded_channel_op"
+}
+
+func mapAfterSegmentRecv(ctx context.Context, xs []int, in chan int) ([]int, error) {
+	return xs.group(ctx, limit = 2).map(x => x).sortBy(x => x).map(x => x + <-in) // ERROR "unbounded_channel_op"
+}
+
+func literalInSegmentRecv(ctx context.Context, xs []int, in chan int) ([]int, error) {
+	return xs.group(ctx, limit = 2).map(x => func() int {
+		return <-in // ERROR "unbounded_channel_op"
+	}())
+}
+
+func userGroupRecv(ctx context.Context, s store, in chan int) []int {
+	return s.group(ctx, 2).map(x => x + <-in) // ERROR "unbounded_channel_op"
+}

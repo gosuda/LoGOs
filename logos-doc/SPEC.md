@@ -1057,6 +1057,10 @@ func f(ctx context.Context) error {
 }
 ```
 
+A channel send, receive, or range directly in the `map` or `filter` lambda of a group stage segment MUST wait on the cancellation of the stage like one directly in a group child, and `[correctness::unbounded_channel_op]` MUST NOT report it. [T-206]
+
+The same operation in a lambda after the segment, in a plain chain, in a function literal inside a segment lambda, or in a lambda after a method named `group` that is not a stage MUST still be reported. [T-206]
+
 `logos/sync.Locked[T]` MUST expose `WithLock(f func(*T))`. [T-206]
 
 `WithLock` MUST hold `Lock`, defer `Unlock`, then call the function. [T-206]

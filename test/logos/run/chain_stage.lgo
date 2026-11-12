@@ -150,12 +150,12 @@ func releaseFirst(ctx context.Context, release chan struct{}, x int) (int, error
 	return x, nil
 }
 
-//logos:allow(correctness::unbounded_channel_op)
-func feed(n int) chan int {
-	ch := make(chan int, n)
-	for i := 1; i <= n; i++ {
-		ch <- i
-	}
+func feed() chan int {
+	ch := make(chan int, 4)
+	ch <- 1
+	ch <- 2
+	ch <- 3
+	ch <- 4
 	close(ch)
 	return ch
 }
@@ -217,13 +217,13 @@ func caseReceivers(ctx context.Context) {
 	named := steps(seq)
 	got, err = named.group(ctx, limit = 2).map(x => x + 1)
 	check("recv-named-seq", err == nil && slices.Equal(got, want), got, want)
-	ch := feed(4)
+	ch := feed()
 	got, err = ch.group(ctx, limit = 2).map(x => x + 1)
 	check("recv-chan", err == nil && slices.Equal(got, want), got, want)
-	var rch <-chan int = feed(4)
+	var rch <-chan int = feed()
 	got, err = rch.group(ctx, limit = 2).map(x => x + 1)
 	check("recv-recv-chan", err == nil && slices.Equal(got, want), got, want)
-	p := pipe(feed(4))
+	p := pipe(feed())
 	got, err = p.group(ctx, limit = 2).map(x => x + 1)
 	check("recv-named-chan", err == nil && slices.Equal(got, want), got, want)
 }
@@ -252,7 +252,6 @@ func rangeAssign(ctx context.Context, xs []int) (int, error) {
 	return total, nil
 }
 
-//logos:allow(correctness::unbounded_channel_op)
 func rangeBreak(ctx context.Context, xs []int) (int, error) {
 	seen := 0
 	for y := range xs.group(ctx, limit = 4).map(x => {
@@ -271,7 +270,6 @@ func rangeBreak(ctx context.Context, xs []int) (int, error) {
 	return seen, nil
 }
 
-//logos:allow(correctness::unbounded_channel_op)
 func rangeReturn(ctx context.Context, xs []int) (int, error) {
 	for y := range xs.group(ctx, limit = 4).map(x => {
 		defer leave()
@@ -319,7 +317,7 @@ func caseRange(ctx context.Context) {
 	check("range-error", err != nil && errors.Is(err, errBoom) && got == nil, err, errBoom)
 	total, err := rangeAssign(ctx, xs)
 	check("range-assign", err == nil && total == 14, total, 14)
-	total, err = rangeChan(ctx, feed(4))
+	total, err = rangeChan(ctx, feed())
 	check("range-chan", err == nil && total == 30, total, 30)
 	first, err := rangeUnorderedFast([]int{1, 2, 3, 4})
 	check("range-unordered-fast", err == nil && first != 0 && first != 1, first, "not 1")
@@ -339,7 +337,6 @@ func caseReturn(ctx context.Context) {
 	check("return-joins", inTime() && err == nil && got == 2 && live.Load() == 0 && hanging.Load() >= 2, live.Load(), 0)
 }
 
-//logos:allow(correctness::unbounded_channel_op)
 func caseFind(ctx context.Context) {
 	reset()
 	inTime := timeLimit()
@@ -355,7 +352,6 @@ func caseFind(ctx context.Context) {
 	check("find-joins", inTime() && err == nil && (found ?? -1) == 2 && live.Load() == 0 && hanging.Load() >= 2, live.Load(), 0)
 }
 
-//logos:allow(correctness::unbounded_channel_op)
 func caseAny(ctx context.Context) {
 	reset()
 	inTime := timeLimit()
@@ -371,7 +367,6 @@ func caseAny(ctx context.Context) {
 	check("any-joins", inTime() && err == nil && any2 && live.Load() == 0 && hanging.Load() >= 2, live.Load(), 0)
 }
 
-//logos:allow(correctness::unbounded_channel_op)
 func caseTake(ctx context.Context) {
 	reset()
 	inTime := timeLimit()
@@ -464,7 +459,6 @@ func timedOut(err error) bool {
 	return err != nil && errors.Is(err, context.DeadlineExceeded)
 }
 
-//logos:allow(correctness::unbounded_channel_op)
 func caseCancelRecv(ctx context.Context) {
 	xs := []int{1, 2}
 	never, inTime := blocked()
@@ -477,14 +471,10 @@ func caseCancelRecv(ctx context.Context) {
 	check("cancel-wakes-recv", inTime() && timedOut(err), err, context.DeadlineExceeded)
 }
 
-//logos:allow(correctness::unbounded_channel_op)
 func caseCancelSend(ctx context.Context) {
 	xs := []int{1, 2}
 	sink := make(chan int)
-	inTime := rescued(func() {
-		<-sink
-		<-sink
-	})
+	inTime := rescued(func() { close(sink) })
 	short, cancel := shortly(ctx)
 	_, err := xs.group(short, limit = 2).map(x => {
 		sink <- x
@@ -494,7 +484,6 @@ func caseCancelSend(ctx context.Context) {
 	check("cancel-wakes-send", inTime() && timedOut(err), err, context.DeadlineExceeded)
 }
 
-//logos:allow(correctness::unbounded_channel_op)
 func caseCancelStmt(ctx context.Context) {
 	xs := []int{1, 2}
 	never, inTime := blocked()
@@ -507,7 +496,6 @@ func caseCancelStmt(ctx context.Context) {
 	check("cancel-wakes-stmt", inTime() && timedOut(err), err, context.DeadlineExceeded)
 }
 
-//logos:allow(correctness::unbounded_channel_op)
 func caseCancelPair(ctx context.Context) {
 	xs := []int{1, 2}
 	never, inTime := blocked()
@@ -520,7 +508,6 @@ func caseCancelPair(ctx context.Context) {
 	check("cancel-wakes-pair", inTime() && timedOut(err), err, context.DeadlineExceeded)
 }
 
-//logos:allow(correctness::unbounded_channel_op)
 func caseCancelDecl(ctx context.Context) {
 	xs := []int{1, 2}
 	never, inTime := blocked()
@@ -533,7 +520,6 @@ func caseCancelDecl(ctx context.Context) {
 	check("cancel-wakes-decl", inTime() && timedOut(err), err, context.DeadlineExceeded)
 }
 
-//logos:allow(correctness::unbounded_channel_op)
 func caseCancelSelect(ctx context.Context) {
 	xs := []int{1, 2}
 	never, inTime := blocked()
@@ -550,7 +536,6 @@ func caseCancelSelect(ctx context.Context) {
 	check("cancel-wakes-select", inTime() && timedOut(err), err, context.DeadlineExceeded)
 }
 
-//logos:allow(correctness::unbounded_channel_op)
 func caseCancelRange(ctx context.Context) {
 	xs := []int{1, 2}
 	never, inTime := blocked()
