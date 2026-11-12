@@ -104,6 +104,10 @@ func tryMk(i int) (*conn, error) {
 	return c, nil
 }
 
+func mkPair(i int) (*conn, int) {
+	return mk(i), i
+}
+
 func bCount() string { return fmt.Sprint(users3().map(u => u.c).count()) }
 
 func bCountPred() string { return fmt.Sprint(users3().map(u => u.c).count(c => c.id > 1)) }
@@ -544,10 +548,8 @@ func lVarDecl() string {
 
 func lTuple() string {
 	return fmt.Sprint(ids3().map(x => {
-		f, err := tryMk(x)
-		if err != nil {
-			tune(f)
-		}
+		f, _ := mkPair(x)
+		tune(f)
 		return f
 	}).count())
 }
@@ -622,7 +624,10 @@ func tryLocalFilter() (int, error) {
 
 func lTryFail() string {
 	n, err := tryLocalFilter()
-	return fmt.Sprint(n, err == errBoom)
+	if err != nil {
+		return fmt.Sprint(n, err == errBoom)
+	}
+	return fmt.Sprint(n, false)
 }
 
 func lPanic() (hit string) {
@@ -642,7 +647,10 @@ func tryFlight() (int, error) {
 
 func fliTryFail() string {
 	n, err := tryFlight()
-	return fmt.Sprint(n, err == errBoom)
+	if err != nil {
+		return fmt.Sprint(n, err == errBoom)
+	}
+	return fmt.Sprint(n, false)
 }
 
 func fliPanic() (hit string) {
@@ -658,7 +666,10 @@ func tryFlightWrap() (int, error) {
 
 func fliTryFailWrap() string {
 	n, err := tryFlightWrap()
-	return fmt.Sprintf("%d %v %s %v", n, err == errBoom, wrapCloses(), closeLog)
+	if err != nil {
+		return fmt.Sprintf("%d %v %s %v", n, err == errBoom, wrapCloses(), closeLog)
+	}
+	return fmt.Sprintf("%d %v %s %v", n, false, wrapCloses(), closeLog)
 }
 
 func fliPanicWrap() (got string) {
@@ -674,7 +685,10 @@ func tryFlightDrop() (int, error) {
 
 func fliDropFail() string {
 	n, err := tryFlightDrop()
-	return fmt.Sprintf("%d %v %s %v", n, err == errBoom, wrapCloses(), closeLog)
+	if err != nil {
+		return fmt.Sprintf("%d %v %s %v", n, err == errBoom, wrapCloses(), closeLog)
+	}
+	return fmt.Sprintf("%d %v %s %v", n, false, wrapCloses(), closeLog)
 }
 
 func fliCalm() string {
