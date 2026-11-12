@@ -1302,6 +1302,17 @@ func TestFastcallNoClockInFastBody(t *testing.T) {
 			t.Fatalf("fast body references clock %q:\n%s", want, body)
 		}
 	}
+	ctx, cancel := context.WithTimeoutCause(t.Context(), 10*time.Second, errors.New("fast calls exceeded their time bound"))
+	defer cancel()
+	const calls = 20000
+	for i := range calls {
+		if ctx.Err() != nil {
+			t.Fatalf("fast call %d of %d: %v", i, calls, context.Cause(ctx))
+		}
+		if got := callFastAdd(int32(i), 1); got != int32(i)+1 {
+			t.Fatalf("fast_add(%d, 1) = %d, want %d", i, got, i+1)
+		}
+	}
 }
 
 func TestFastcallNumCgoCallBoundary(t *testing.T) {
