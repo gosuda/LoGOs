@@ -177,7 +177,9 @@ func (check *Checker) logosTupleLit(x *operand, e *syntax.TupleLit) exprKind {
 	types := make([]Type, len(e.Elems))
 	for i, elem := range e.Elems {
 		var op operand
-		check.expr(nil, &op, elem)
+		if !check.logosLambdaDefer(&op, elem) {
+			check.expr(nil, &op, elem)
+		}
 		if !op.isValid() {
 			x.mode_ = invalid
 			x.expr = e
@@ -221,7 +223,9 @@ func (check *Checker) logosTupleAssign(x *operand, T Type, context string) bool 
 	if lit, ok := syntax.Unparen(x.expr).(*syntax.TupleLit); ok && len(lit.Elems) == len(targets) {
 		for i, elem := range lit.Elems {
 			var op operand
-			check.expr(nil, &op, elem)
+			if !check.logosLambdaDefer(&op, elem) {
+				check.expr(nil, &op, elem)
+			}
 			check.assignment(&op, targets[i], context)
 		}
 		x.typ_ = T

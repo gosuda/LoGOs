@@ -287,7 +287,9 @@ func (check *Checker) logosCoalesce(x *operand, e *syntax.CoalesceExpr) exprKind
 	var lx operand
 	check.expr(nil, &lx, e.X)
 	var rx operand
-	check.expr(nil, &rx, e.Y)
+	if !check.logosLambdaDefer(&rx, e.Y) {
+		check.expr(nil, &rx, e.Y)
+	}
 	if !lx.isValid() || !rx.isValid() {
 		x.invalidate()
 		x.expr = e

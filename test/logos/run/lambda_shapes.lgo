@@ -4,6 +4,7 @@ package main
 
 import (
 	"fmt"
+	"iter"
 	"os"
 	"slices"
 )
@@ -66,6 +67,47 @@ func reduce[T, A any](xs []T, init A, f func(A, T) A) A {
 		acc = f(acc, x)
 	}
 	return acc
+}
+
+func takeOpt(f (func(int) int)?) int {
+	g := f ?? (x => 0)
+	return g(1)
+}
+
+func optionalInc() (func(int) int)? {
+	return x => x + 1
+}
+
+func funcSeq() iter.Seq[func(int) int] {
+	yield x => x + 1
+	yield (x => x * 3)
+}
+
+func runWrapped() {
+	var o (func(int) int)? = x => x + 10
+	inOption := o ?? (x => 0)
+	check("arrow-in-option-location", inOption(1) == 11, inOption(1), 11)
+	var none (func(int) int)?
+	fallback := none ?? (x => x * 2)
+	check("arrow-on-right-of-coalesce", fallback(4) == 8, fallback(4), 8)
+	m := map[string]func(int) int{"k": x => x + 1}
+	absent := m["missing"] ?? (x => x + 100)
+	check("arrow-on-right-of-coalesce-on-map-index", absent(1) == 101, absent(1), 101)
+	check("arrow-to-option-parameter", takeOpt(x => x + 5) == 6, takeOpt(x => x + 5), 6)
+	returned := optionalInc() ?? (x => 0)
+	check("arrow-returned-as-option", returned(1) == 2, returned(1), 2)
+	total := 0
+	for f := range funcSeq() {
+		total += f(2)
+	}
+	check("arrow-yielded-by-generator", total == 9, total, 9)
+	var t (func(int) int, int) = (x => x + 1, 5)
+	tf, tn := t
+	check("arrow-in-tuple-element", tf(1) == 2 && tn == 5, tf(1), 2)
+	var nested ((func(int) int, int), int) = ((x => x * 4, 1), 2)
+	inner, outer := nested
+	nf, ni := inner
+	check("arrow-in-nested-tuple-element", nf(2) == 8 && ni == 1 && outer == 2, nf(2), 8)
 }
 
 func runPositions() {
@@ -131,6 +173,7 @@ func main() {
 	}
 	check("curried-arrow-applies-left-to-right", add(2)(3) == 5 && add(2)(3) == plainCurry(2)(3), add(2)(3), 5)
 	runPositions()
+	runWrapped()
 	if failed {
 		os.Exit(1)
 	}

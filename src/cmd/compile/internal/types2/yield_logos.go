@@ -81,7 +81,9 @@ func (check *Checker) logosYield(s *syntax.YieldStmt) {
 	}
 	for i, v := range vals {
 		var x operand
-		check.expr(nil, &x, v)
+		if !check.logosLambdaDefer(&x, v) {
+			check.expr(nil, &x, v)
+		}
 		if !x.isValid() {
 			continue
 		}

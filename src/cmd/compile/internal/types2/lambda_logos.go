@@ -63,6 +63,13 @@ func (check *Checker) logosLambdaNoTarget(lam *syntax.LambdaExpr) {
 	check.errorf(lam.Arrow, IncompatibleAssign, "%s", logosLambdaNeedsTarget)
 }
 
+func logosTargetType(typ Type) Type {
+	if o := logosAsOption(typ); o != nil {
+		return o.Elem
+	}
+	return typ
+}
+
 func (check *Checker) logosAppendArgs(id builtinId, argList []syntax.Expr, args *[]*operand) bool {
 	if !check.conf.Logos || id != _Append || len(argList) < 2 {
 		return false

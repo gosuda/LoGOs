@@ -1000,7 +1000,7 @@ type target struct {
 // The result is nil if typ is not a signature.
 func newTarget(typ Type, desc string) *target {
 	if typ != nil {
-		if u, _ := commonUnder(typ, nil); u != nil {
+		if u, _ := commonUnder(logosTargetType(typ), nil); u != nil {
 			if sig, _ := u.(*Signature); sig != nil {
 				return &target{sig, desc}
 			}

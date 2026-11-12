@@ -308,7 +308,9 @@ func (check *Checker) assignVar(lhs, rhs syntax.Expr, x *operand, context string
 			}
 		}
 		x = new(operand)
-		check.expr(target, x, rhs)
+		if !check.logosLambdaDefer(x, rhs) {
+			check.expr(target, x, rhs)
+		}
 	}
 
 	if T == nil && context == "assignment" {
@@ -322,6 +324,7 @@ func (check *Checker) assignVar(lhs, rhs syntax.Expr, x *operand, context string
 		}
 		return
 	}
+	check.logosLambdaResolve(x, T)
 	check.logosPushGoStore(lhs) // logos M3-S5 hook.
 	check.logosRegionAssign(lhs, x)
 	check.assignment(x, T, context)
