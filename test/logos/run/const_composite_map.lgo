@@ -73,11 +73,17 @@ func testStruct() {
 	check("struct-len", len(structMap.M) == 3, len(structMap.M), 3)
 	v, ok := structMap.M["zz"]
 	check("struct-comma-miss", !ok && v == 0, v, 0)
-	keys := ""
-	for k, val := range structMap.M {
-		keys += fmt.Sprintf("%s%d;", k, val)
+	badKeys := ""
+	for round := 0; round < 64 && badKeys == ""; round++ {
+		keys := ""
+		for k, val := range structMap.M {
+			keys += fmt.Sprintf("%s%d;", k, val)
+		}
+		if keys != "a1;b2;c3;" {
+			badKeys = keys
+		}
 	}
-	check("struct-range", keys == "a1;b2;c3;", keys, "a1;b2;c3;")
+	check("struct-range", badKeys == "", badKeys, "a1;b2;c3;")
 	c1 := structMap
 	c1.M["a"] = 99
 	r1 := structMap
@@ -137,11 +143,17 @@ func testMaps() {
 	check("maps-len", len(mapMaps.M) == 2, len(mapMaps.M), 2)
 	_, okMiss := mapMaps.M["zz"]
 	check("maps-comma", !okMiss, okMiss, false)
-	outerKeys := ""
-	for k := range mapMaps.M {
-		outerKeys += k + ";"
+	badOuter := ""
+	for round := 0; round < 64 && badOuter == ""; round++ {
+		outerKeys := ""
+		for k := range mapMaps.M {
+			outerKeys += k + ";"
+		}
+		if outerKeys != "o;p;" {
+			badOuter = outerKeys
+		}
 	}
-	check("maps-range", outerKeys == "o;p;", outerKeys, "o;p;")
+	check("maps-range", badOuter == "", badOuter, "o;p;")
 	m1 := mapMaps
 	m1o, _ := m1.M["o"]
 	m1o["a"] = 99
