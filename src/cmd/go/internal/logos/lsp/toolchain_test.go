@@ -299,3 +299,50 @@ func TestToolchainOneRunYieldsAllOutputs(t *testing.T) {
 		t.Errorf("the one run was %q, want -compiled -json -overlay", lines[0])
 	}
 }
+
+func failingToolchain(t *testing.T) *toolchain {
+	t.Helper()
+	wrapper := filepath.Join(t.TempDir(), "failing-logos")
+	script := "#!/bin/sh\necho 'go: writing build cache: no space left on device' >&2\nexit 1\n"
+	if err := os.WriteFile(wrapper, []byte(script), 0o777); err != nil {
+		t.Fatal(err)
+	}
+	return newToolchain(wrapper)
+}
+
+func TestToolchainReportsAFailedRun(t *testing.T) {
+	tc := failingToolchain(t)
+	dir := t.TempDir()
+	runs := map[string]func() error{
+		"Lower": func() error {
+			_, err := tc.Lower(t.Context(), dir, nil)
+			return err
+		},
+		"Diagnose": func() error {
+			_, err := tc.Diagnose(t.Context(), dir, nil)
+			return err
+		},
+		"Hints": func() error {
+			_, err := tc.Hints(t.Context(), dir, nil)
+			return err
+		},
+	}
+	for name, run := range runs {
+		if err := run(); err == nil || !strings.Contains(err.Error(), "no space left on device") {
+			t.Errorf("%s after a run that printed no package = %v, want an error that carries the tool's own complaint", name, err)
+		}
+	}
+}
+
+func TestProxyAnswersALoweringFailureWithAnError(t *testing.T) {
+	tc := failingToolchain(t)
+	f := newFixture(t, map[string]string{"a/a.lgo": aLgo}, fixtureOptions{
+		Tune: func(f *fixture, o *Options) { o.Compiler = tc },
+	})
+	f.open("a/a.lgo", 1)
+	operand := shift(findPos(t, aLgo, "ReadFile(path)?", 0), len("ReadFile("))
+	m := f.client.callMessage("textDocument/hover", positionParams(f.uri("a/a.lgo"), operand))
+	if len(m.Error) == 0 {
+		t.Errorf("hover on a document that could not be lowered = %s, want an error response", m.Result)
+	}
+}

@@ -160,6 +160,9 @@ func (t *toolchain) runOnce(ctx context.Context, dir string, buffers map[string]
 		}
 		pkgs = append(pkgs, p)
 	}
+	if len(pkgs) == 0 {
+		return nil, fmt.Errorf("logos list printed no package: %s", bytes.TrimSpace(stderr[:min(len(stderr), 1024)]))
+	}
 	last = &listRun{
 		key:   key,
 		pkgs:  pkgs,
