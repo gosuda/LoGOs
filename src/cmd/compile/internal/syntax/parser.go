@@ -35,6 +35,9 @@ type parser struct {
 	indent []byte // tracing support
 
 	lambdaBan int // M6-S6: `=>` suppression depth for switch-expression arm cases.
+
+	yieldIter []string // M6-S9: local names of the "iter" import, "." for a dot import.
+	yieldGen  bool     // M6-S9: the innermost function body is a generator.
 }
 
 func (p *parser) init(file *PosBase, r io.Reader, errh ErrorHandler, pragh PragmaHandler, mode Mode) {
@@ -584,6 +587,7 @@ func (p *parser) importDecl(group *Group) Decl {
 	}
 	// d.Path.Bad || d.Path.Kind == StringLit
 
+	p.logosNoteImport(d)
 	return d
 }
 
@@ -841,16 +845,18 @@ func (p *parser) funcDeclOrNil() *FuncDecl {
 	}
 
 	if p.tok == _Lbrace {
-		f.Body = p.funcBody()
+		f.Body = p.funcBody(f.Type)
 	}
 
 	return f
 }
 
-func (p *parser) funcBody() *BlockStmt {
+func (p *parser) funcBody(ftyp *FuncType) *BlockStmt {
 	p.fnest++
 	errcnt := p.errcnt
+	outer := p.logosEnterBody(ftyp)
 	body := p.blockStmt("")
+	p.yieldGen = outer
 	p.fnest--
 
 	// Don't check branches if there were syntax errors in the function
@@ -1082,7 +1088,7 @@ func (p *parser) operand(keep_parens bool) Expr {
 			f := new(FuncLit)
 			f.pos = pos
 			f.Type = ftyp
-			f.Body = p.funcBody()
+			f.Body = p.funcBody(ftyp)
 
 			p.xnest--
 			return f
@@ -2689,14 +2695,14 @@ func (p *parser) stmtOrNil() Stmt {
 	// look for it first before doing anything more expensive.
 	if p.tok == _Name {
 		p.clearPragma()
-		lhs := p.exprList()
+		lhs, ys := p.logosYield() // M6-S9 hook: yield statement.
+		if ys != nil {
+			return ys
+		}
 		if label, ok := lhs.(*Name); ok && p.tok == _Colon {
 			return p.labeledStmtOrNil(label)
 		}
 		if s := p.logosErrdefer(lhs); s != nil { // M1-S2 hook: errdefer statement.
-			return s
-		}
-		if s := p.logosYield(lhs); s != nil { // M6-S9 hook: yield statement.
 			return s
 		}
 		if s := p.logosScopeDefer(lhs); s != nil { // M6-S10 hook: scope defer statement.
@@ -2921,7 +2927,10 @@ func (p *parser) exprList() Expr {
 		defer p.trace("exprList")()
 	}
 
-	x := p.expr()
+	return p.exprListTail(p.expr())
+}
+
+func (p *parser) exprListTail(x Expr) Expr {
 	if p.got(_Comma) {
 		list := []Expr{x, p.expr()}
 		for p.got(_Comma) {

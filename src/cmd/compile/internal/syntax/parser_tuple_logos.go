@@ -138,7 +138,7 @@ func (p *parser) logosParenValueElem(keepParens bool) parenElem {
 			f := new(FuncLit)
 			f.pos = pos
 			f.Type = ftyp
-			f.Body = p.funcBody()
+			f.Body = p.funcBody(ftyp)
 			p.xnest--
 			return p.logosParenValueTail(f, keepParens)
 		}
