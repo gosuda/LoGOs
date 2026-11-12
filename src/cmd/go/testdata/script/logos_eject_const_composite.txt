@@ -107,6 +107,30 @@ exec $GOROOT/bin/gofmt -l .
 cd ..
 rm out
 
+cp $GOROOT/test/logos/run/const_composite_index_types.lgo main.lgo
+logos eject -o out
+cd out
+exec env -u GOROOT $UPROOT1272/bin/go run .
+cmp stdout $GOROOT/test/logos/run/const_composite_index_types.out
+cd ..
+rm out
+
+cp $GOROOT/test/logos/run/const_composite_range_dynamic.lgo main.lgo
+logos eject -o out
+cd out
+exec env -u GOROOT $UPROOT1272/bin/go run .
+cmp stdout $GOROOT/test/logos/run/const_composite_range_dynamic.out
+cd ..
+rm out
+
+cp $GOROOT/test/logos/run/const_composite_map.lgo main.lgo
+logos eject -o out
+cd out
+exec env -u GOROOT $UPROOT1272/bin/go run .
+cmp stdout $GOROOT/test/logos/run/const_composite_map.out
+cd ..
+rm out
+
 -- a/go.mod --
 module example.com/cceject
 
