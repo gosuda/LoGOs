@@ -317,7 +317,7 @@ func resultTwoGoSends() int {
 	ch := make(chan int, 1)
 	go func() { ch <- 1 }() // ERROR "\[correctness::unbounded_channel_op\]"
 	go func() { ch <- 2 }() // ERROR "\[correctness::unbounded_channel_op\]"
-	return <-ch // ERROR "\[correctness::unbounded_channel_op\]"
+	return <-ch             // ERROR "\[correctness::unbounded_channel_op\]"
 }
 
 func resultGoInLoop(n int) int {
