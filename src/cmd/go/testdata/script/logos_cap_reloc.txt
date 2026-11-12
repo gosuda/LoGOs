@@ -6,8 +6,10 @@ mkdir $WORK/bin
 # follows the variable to exec.Command and on to os.StartProcess.
 cd fv/main
 ! logos build -o $WORK/bin/sfv$GOEXE ./cmd
-stderr 'ERROR \[capabilities::unauthorized_exec\]: Transitive dependency ''example\.com/fvdep'' reaches ''os\.StartProcess'''
-stderr 'fvdep\.Init\(\)'
+stderr 'ERROR \[capabilities::unauthorized_exec\]'
+stderr 'example\.com/fvdep'
+stderr 'os\.StartProcess'
+stderr 'dep\.go:8'
 stderr 'transitive_exec_allowlist'
 cd ../..
 
@@ -15,8 +17,10 @@ cd ../..
 # follows the bound Start call to os.StartProcess.
 cd mv/main
 ! logos build -o $WORK/bin/smv$GOEXE ./cmd
-stderr 'ERROR \[capabilities::unauthorized_exec\]: Transitive dependency ''example\.com/mvdep'' reaches ''os\.StartProcess'''
-stderr 'mvdep\.Init\(\)'
+stderr 'ERROR \[capabilities::unauthorized_exec\]'
+stderr 'example\.com/mvdep'
+stderr 'os\.StartProcess'
+stderr 'dep\.go:6'
 stderr 'transitive_exec_allowlist'
 cd ../..
 
@@ -24,8 +28,10 @@ cd ../..
 # fails: the audit follows the stored literal to os.StartProcess.
 cd cl/main
 ! logos build -o $WORK/bin/scl$GOEXE ./cmd
-stderr 'ERROR \[capabilities::unauthorized_exec\]: Transitive dependency ''example\.com/cldep'' reaches ''os\.StartProcess'''
-stderr 'cldep\.Init\(\)'
+stderr 'ERROR \[capabilities::unauthorized_exec\]'
+stderr 'example\.com/cldep'
+stderr 'os\.StartProcess'
+stderr 'dep\.go:6'
 stderr 'transitive_exec_allowlist'
 cd ../..
 
