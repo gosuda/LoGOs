@@ -8,9 +8,6 @@ package testlogos
 #include <stdint.h>
 #include <time.h>
 
-// The file carries //export, so the preamble must hold declarations
-// only (cmd/cgo/doc.go): the bodies live in fastcall_c.c.
-
 int fast_add(int a, int b);
 int slow_noescape(int a, int b);
 int slow_nocallback(int a, int b);
@@ -22,9 +19,6 @@ unsigned long long busy_spin(unsigned long long iters);
 unsigned long long plain_spin(unsigned long long iters);
 int gate_wait(int ready_fd, int gate_fd);
 int gate_watch(int ready_fd, int gate_fd, unsigned char *p, unsigned char want);
-extern int GoCallback(int v);
-int cb_fire(void);
-int plain_cb_fire(void);
 
 #cgo noescape fast_add
 #cgo nocallback fast_add
@@ -50,18 +44,10 @@ int plain_cb_fire(void);
 
 #cgo noescape gate_watch
 #cgo nocallback gate_watch
-
-#cgo noescape cb_fire
-#cgo nocallback cb_fire
-
-#cgo nocallback plain_cb_fire
 */
 import "C"
 
 import "unsafe"
-
-//export GoCallback
-func GoCallback(v C.int) C.int { return v + 1 }
 
 func callFastAdd(a, b int32) int32 { return int32(C.fast_add(C.int(a), C.int(b))) }
 
@@ -88,9 +74,6 @@ func callFastBusy(iters uint64) uint64 { return uint64(C.busy_spin(C.ulonglong(i
 
 func callPlainBusy(iters uint64) uint64 { return uint64(C.plain_spin(C.ulonglong(iters))) }
 
-func callFastCallback() int32 { return int32(C.cb_fire()) }
-
-func callPlainCallback() int32 { return int32(C.plain_cb_fire()) }
 func callFastGateWait(readyFD, gateFD int32) int32 {
 	return int32(C.gate_wait(C.int(readyFD), C.int(gateFD)))
 }

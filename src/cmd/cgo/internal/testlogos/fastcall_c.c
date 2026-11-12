@@ -6,7 +6,6 @@
 #include <errno.h>
 #include <poll.h>
 #include <unistd.h>
-#include "_cgo_export.h"
 
 int
 fast_add(int a, int b)
@@ -86,17 +85,6 @@ plain_spin(unsigned long long iters)
 	return do_spin(iters);
 }
 
-int
-cb_fire(void)
-{
-	return GoCallback(41);
-}
-
-int
-plain_cb_fire(void)
-{
-	return GoCallback(7);
-}
 int
 gate_wait(int ready_fd, int gate_fd)
 {
