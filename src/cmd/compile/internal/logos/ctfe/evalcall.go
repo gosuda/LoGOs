@@ -258,9 +258,6 @@ func (e *evaluator) execRange(fr *frame, s *syntax.ForStmt, rc *syntax.RangeClau
 	if err != nil {
 		return flow{}, err
 	}
-	if xv.typ != nil && xv.typ.Kind == KMap {
-		return flow{}, e.impurity(fr, posOf(rc.X), "range over map in const func")
-	}
 	e.pushScope(fr)
 	defer e.popScope(fr)
 	var lhs []syntax.Expr
@@ -355,6 +352,9 @@ func (e *evaluator) execRange(fr *frame, s *syntax.ForStmt, rc *syntax.RangeClau
 		}
 		intIdxT := func(i *big.Int) Value { return intValue(new(big.Int).Set(i), idxT, false) }
 		return loop(intIdxT, intIdxT, new(big.Int).Set(xv.ival))
+	case xv.typ != nil && xv.typ.Kind == KMap:
+		keys, vals := sortedEntries(xv)
+		return loop(func(i *big.Int) Value { return keys[i.Int64()] }, func(i *big.Int) Value { return vals[i.Int64()] }, big.NewInt(int64(len(keys))))
 	}
 	return flow{}, e.fail(posOf(rc.X), "cannot range in const evaluation")
 }

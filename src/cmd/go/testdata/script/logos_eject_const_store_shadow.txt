@@ -30,6 +30,14 @@ cmp stdout $GOROOT/test/logos/run/const_for_index_decls.out
 cd ..
 rm out
 
+cp $GOROOT/test/logos/run/const_func_map_range.lgo main.lgo
+logos eject -o out
+cd out
+exec env -u GOROOT $UPROOT1272/bin/go run .
+cmp stdout $GOROOT/test/logos/run/const_func_map_range.out
+cd ..
+rm out
+
 -- a/go.mod --
 module example.com/ccstoreshadow
 

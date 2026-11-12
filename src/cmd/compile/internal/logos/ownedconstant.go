@@ -1278,7 +1278,7 @@ func (fl *fileLower) constMapOwnedTexts(g *constMapGen, pos syntax.Pos) (string,
 	for i := range order {
 		order[i] = i
 	}
-	slices.SortFunc(order, func(a, b int) int { return constKeyCompare(keys[a], keys[b]) })
+	slices.SortFunc(order, func(a, b int) int { return ctfe.CompareKeys(keys[a], keys[b]) })
 	sharedEntries := make([]constMapKey, len(keys))
 	for i := range keys {
 		sharedEntries[i] = constMapKey{hash: constKeyHash(keys[i]), canon: constKeyCanon(keys[i])}

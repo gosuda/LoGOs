@@ -243,7 +243,7 @@ func hiddenOrder(keys []ctfe.Value) []int {
 	for i := range order {
 		order[i] = i
 	}
-	slices.SortFunc(order, func(a, b int) int { return constKeyCompare(keys[a], keys[b]) })
+	slices.SortFunc(order, func(a, b int) int { return ctfe.CompareKeys(keys[a], keys[b]) })
 	return order
 }
 

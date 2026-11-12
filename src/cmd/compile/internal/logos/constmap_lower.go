@@ -719,7 +719,7 @@ func (fl *fileLower) buildConstMapParts(g *constMapGen, pos syntax.Pos) constMap
 	for i := range order {
 		order[i] = i
 	}
-	slices.SortFunc(order, func(a, b int) int { return constKeyCompare(keys[a], keys[b]) })
+	slices.SortFunc(order, func(a, b int) int { return ctfe.CompareKeys(keys[a], keys[b]) })
 	entries := make([]constMapKey, len(keys))
 	for i := range keys {
 		entries[i] = constMapKey{hash: hashes[i], canon: canons[i]}

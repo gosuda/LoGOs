@@ -306,7 +306,7 @@ func (s *logosPurity) visitStore(lhs syntax.Expr) bool {
 }
 
 func (s *logosPurity) visitRange(rc *syntax.RangeClause) {
-	if s.done {
+	if s.done || s.constRooted(rc.X) {
 		return
 	}
 	typ := s.check.Info.TypeOf(rc.X)
@@ -316,6 +316,25 @@ func (s *logosPurity) visitRange(rc *syntax.RangeClause) {
 	if u, _ := commonUnder(Unalias(typ), nil); u != nil {
 		if _, isMap := u.(*Map); isMap {
 			s.fail(rc.X, "range over map in const func")
+		}
+	}
+}
+
+func (s *logosPurity) constRooted(e syntax.Expr) bool {
+	for {
+		switch x := syntax.Unparen(e).(type) {
+		case *syntax.Name:
+			_, ok := s.check.Info.Uses[x].(*Const)
+			return ok
+		case *syntax.SelectorExpr:
+			if _, ok := s.check.Info.Uses[x.Sel].(*Const); ok {
+				return true
+			}
+			e = x.X
+		case *syntax.IndexExpr:
+			e = x.X
+		default:
+			return false
 		}
 	}
 }
