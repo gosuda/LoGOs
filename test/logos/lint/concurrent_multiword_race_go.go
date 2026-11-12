@@ -545,3 +545,53 @@ func passWrapperCallsOpaque(f func()) {
 	go b()
 	println(s)
 }
+
+func passArgumentEvaluatedByCaller() {
+	var s string
+	t := func(x string) {
+		println(x)
+	}
+	go t(func() string {
+		s = "copy"
+		return s
+	}())
+}
+
+func passLiteralArgumentEvaluatedByCaller() {
+	var s string
+	go func(x string) {
+		println(x)
+	}(func() string {
+		s = "copy"
+		return s
+	}())
+}
+
+func passVariableArgumentCopied() {
+	var s string
+	t := func(x string) {
+		println(x)
+	}
+	go t(s)
+	s = "b"
+}
+
+func thunkStoredTargetCapture() {
+	var s string
+	t := func(x string) {
+		println(s, x)
+	}
+	go t("a") // ERROR "\[concurrency::concurrent_multiword_race\]"
+	s = "b"
+}
+
+func thunkStoredTargetWithArgument() {
+	var s string
+	t := func(x string) {
+		s = x
+	}
+	go t(func() string { // ERROR "\[concurrency::concurrent_multiword_race\]"
+		return "copy"
+	}())
+	println(s)
+}

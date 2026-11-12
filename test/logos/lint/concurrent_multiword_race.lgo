@@ -1071,3 +1071,72 @@ func passWrapperCallsOpaque(ctx context.Context, f func() error) error {
 	println(s)
 	return nil
 }
+
+func passGroupArgumentEvaluatedByCaller(ctx context.Context) error {
+	var s string
+	t := func(x string) error {
+		println(x)
+		return nil
+	}
+	go group (ctx) {
+		go t(func() string {
+			s = "copy"
+			return s
+		}())
+	}
+	return nil
+}
+
+func passGroupLiteralArgumentEvaluatedByCaller(ctx context.Context) error {
+	var s string
+	go group (ctx) {
+		go func(x string) {
+			println(x)
+		}(func() string {
+			s = "copy"
+			return s
+		}())
+	}
+	return nil
+}
+
+func passGroupVariableArgumentCopied(ctx context.Context) error {
+	var s string
+	t := func(x string) error {
+		println(x)
+		return nil
+	}
+	go group (ctx) {
+		go t(s)
+		s = "b"
+	}
+	return nil
+}
+
+func thunkGroupStoredTargetCapture(ctx context.Context) error {
+	var s string
+	t := func(x string) error {
+		println(s, x)
+		return nil
+	}
+	go group (ctx) {
+		go t("a") // ERROR "\[concurrency::concurrent_multiword_race\]"
+		s = "b"
+	}
+	return nil
+}
+
+func thunkGroupStoredTargetWithArgument(ctx context.Context) error {
+	var s string
+	t := func(x string) error {
+		s = x
+		return nil
+	}
+	go group (ctx) {
+		go t(func() string { // ERROR "\[concurrency::concurrent_multiword_race\]"
+			return "copy"
+		}())
+	}
+	println(s)
+	return nil
+}

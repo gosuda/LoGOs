@@ -35,9 +35,11 @@ import (
 // declared before a loop that encloses the spawn and ends inside the
 // window, the window starts at the first statement of each iteration
 // instead, because the next iteration writes while the previous child
-// still reads. A write by the child is inside the window. The rule reads
-// syntax and checker objects only, so it holds for Go packages through the
-// go statement leg and for loGo/s packages through both legs.
+// still reads. A write by the child is inside the window. The function
+// value and the arguments of a go statement run in the calling goroutine,
+// so a variable that only they touch is not shared. The rule reads syntax
+// and checker objects only, so it holds for Go packages through the go
+// statement leg and for loGo/s packages through both legs.
 var concurrentMultiwordRace = Rule{
 	ID:    "concurrency::concurrent_multiword_race",
 	Group: Concurrency,
@@ -46,9 +48,11 @@ var concurrentMultiwordRace = Rule{
 }
 
 // spawn is one child of a declaration: its statement, the node whose span is
-// the child's own scope, for a segment child the end of the chain or loop
-// that joins it, and the function literals the child calls through a local
-// variable, a slice literal, or a stage source, which run in the child.
+// the child's own scope (nil for a go statement whose target is a stored
+// literal, which runs only that literal), for a segment child the end of the
+// chain or loop that joins it, and the function literals the child calls
+// through a local variable, a slice literal, or a stage source, which run in
+// the child.
 type spawn struct {
 	node   syntax.Node
 	child  syntax.Node
@@ -214,7 +218,7 @@ func (c *raceCheck) followThunks() {
 			continue
 		}
 		if lits := c.litsOf(call.Fun, make(map[*types2.Var]bool)); len(lits) > 0 {
-			c.spawns = append(c.spawns, spawn{node: g, child: g.Call, thunks: c.reachable(nil, lits)})
+			c.spawns = append(c.spawns, spawn{node: g, thunks: c.reachable(nil, lits)})
 		}
 	}
 }
@@ -407,7 +411,10 @@ func (c *raceCheck) report() {
 }
 
 func (c *raceCheck) shared(s spawn) []*types2.Var {
-	out := c.captured(s.child)
+	var out []*types2.Var
+	if s.child != nil {
+		out = c.captured(s.child)
+	}
 	for _, t := range s.thunks {
 		for _, v := range c.captured(t) {
 			if !slices.Contains(out, v) {
