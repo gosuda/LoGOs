@@ -58,6 +58,18 @@ func segmentFuncs(pass *Pass, call *syntax.CallExpr) []syntax.Expr {
 	if !onSegment(pass, call) {
 		return nil
 	}
+	return funcArgs(call)
+}
+
+func chainFuncs(pass *Pass, call *syntax.CallExpr) []syntax.Expr {
+	sel, ok := syntax.Unparen(call.Fun).(*syntax.SelectorExpr)
+	if !ok || !types2.LogosChainMethod(sel.Sel.Value) || pass.Info.Selections[sel] != nil || pass.Info.Uses[sel.Sel] != nil {
+		return nil
+	}
+	return funcArgs(call)
+}
+
+func funcArgs(call *syntax.CallExpr) []syntax.Expr {
 	var fns []syntax.Expr
 	for _, arg := range call.ArgList {
 		switch fn := syntax.Unparen(arg).(type) {

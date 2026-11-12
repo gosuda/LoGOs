@@ -201,6 +201,9 @@ var logosChainMethods = map[string]bool{
 	"count":  true,
 }
 
+// LogosChainMethod reports whether name is a method of a loGo/s chain.
+func LogosChainMethod(name string) bool { return logosChainMethods[name] }
+
 func (check *Checker) logosChainCall(x *operand, call *syntax.CallExpr) bool {
 	if !check.conf.Logos {
 		return false

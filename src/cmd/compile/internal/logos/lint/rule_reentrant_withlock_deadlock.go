@@ -19,9 +19,12 @@ const logosSyncPath = "logos/sync"
 // WithLock of a logos/sync.Locked, a call to WithLock on the same receiver
 // expression, which blocks forever on the mutex the outer call holds. The
 // inner call counts when it appears directly in the callback, in the body
-// of a directly invoked or deferred function literal, or anywhere in the
-// synchronous call graph of the same-package functions the callback calls,
-// at any depth. Each same-package function carries the set of receiver
+// of a directly invoked or deferred function literal, in a lambda or
+// function literal argument of a chain method call (a plain chain runs it
+// in place, and the stage of a group chain joins its children before the
+// call returns), or anywhere in the synchronous call graph of the
+// same-package functions the callback calls, at any depth. Each
+// same-package function carries the set of receiver
 // keys its synchronous execution can reach, composed across call sites
 // through the existing lockKey substitution, so mutually recursive helpers
 // reach a fixed point with no call-depth cap. A named same-package
@@ -465,8 +468,10 @@ func immediateLiteral(e syntax.Expr) syntax.Node {
 // query. A go statement contributes only its receiver and argument
 // subexpressions; the invoked call is asynchronous and never a seed or a
 // call edge. A function literal is traversed when it is a WithLock
-// callback or the directly invoked function of a synchronous call, and
-// skipped otherwise.
+// callback, the directly invoked function of a synchronous call, or an
+// argument of a chain method call, and skipped otherwise: a callee that
+// is not a chain method may store the literal, run it later, or spawn it.
+// A group child block is skipped like a go body.
 type syncVisitor struct {
 	c      *lockCheck
 	file   *syntax.File
@@ -511,6 +516,9 @@ func (v *syncVisitor) Visit(n syntax.Node) syntax.Visitor {
 		}
 		if lit := immediateLiteral(n.Fun); lit != nil {
 			v.funLit[lit] = true
+		}
+		for _, fn := range chainFuncs(v.c.pass, n) {
+			v.funLit[fn] = true
 		}
 		v.walkStoredCall(n)
 		if v.onCall != nil {
