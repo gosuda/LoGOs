@@ -20,6 +20,15 @@ func check(name string, cond bool, got, want any) {
 	fmt.Println("ok", name)
 }
 
+type observed[T any] struct {
+	v   T
+	err error
+}
+
+func observe[T any](v T, err error) observed[T] {
+	return observed[T]{v, err}
+}
+
 var errLoad = errors.New("load")
 
 var trace []string
@@ -140,7 +149,8 @@ func run(name string, f func(int, bool) (int, error), want int, wantTrace []stri
 		check(name, err == nil && got == want && slices.Equal(trace, wantTrace), []any{got, err, trace}, []any{want, nil, wantTrace})
 	}
 	trace = nil
-	got, err = f(7, true)
+	res := observe(f(7, true))
+	got, err = res.v, res.err
 	if err == nil {
 		check(name+"-fail", false, "no error", []any{0, errLoad, []string{"load7"}})
 	} else {
@@ -172,14 +182,16 @@ func main() {
 		check("two", err == nil && got == 150 && slices.Equal(trace, []string{"load7", "load8"}), []any{got, err, trace}, []any{150, nil, []string{"load7", "load8"}})
 	}
 	trace = nil
-	got, err = twoSwitches(7, 8, true, false)
+	first := observe(twoSwitches(7, 8, true, false))
+	got, err = first.v, first.err
 	if err == nil {
 		check("two-first-fails", false, "no error", []any{0, errLoad, []string{"load7"}})
 	} else {
 		check("two-first-fails", err == errLoad && got == 0 && slices.Equal(trace, []string{"load7"}), []any{got, err, trace}, []any{0, errLoad, []string{"load7"}})
 	}
 	trace = nil
-	got, err = twoSwitches(7, 8, false, true)
+	second := observe(twoSwitches(7, 8, false, true))
+	got, err = second.v, second.err
 	if err == nil {
 		check("two-second-fails", false, "no error", []any{0, errLoad, []string{"load7", "load8"}})
 	} else {

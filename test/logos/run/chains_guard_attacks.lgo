@@ -461,10 +461,17 @@ func runSelects() {
 	show("selectlhs", "ready 7 calls=0")(selectLhs([]int{2, 3}))
 	show("selectlhswins", "won 7 calls=2")(selectLhsWins([]int{2, 3}))
 	show("oneline", "4 calls=5")(oneLine([]int{2}))
-n, str, err := groupChild3(context.Background(), []int{-1})
+var r3 struct {
+n int
+s string
+err error
+}
+r3.n, r3.s, r3.err = groupChild3(context.Background(), []int{-1})
+n, str, err := r3.n, r3.s, r3.err
 got := fmt.Sprintf("%d %q %v", n, str, err)
 check("group3-neg", got == "0 \"\" neg", got, "0 \"\" neg")
-n, str, err = groupChild3(context.Background(), []int{1, 2})
+r3.n, r3.s, r3.err = groupChild3(context.Background(), []int{1, 2})
+n, str, err = r3.n, r3.s, r3.err
 got = fmt.Sprintf("%d %q %v", n, str, err)
 check("group3-ok", got == "2 \"ok\" <nil>", got, "2 \"ok\" <nil>")
 }

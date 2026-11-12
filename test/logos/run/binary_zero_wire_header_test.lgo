@@ -43,7 +43,12 @@ func checkBound() {
 func checkAbove() {
 	h := Holder{Items: make([]Empty, 1<<20+1)}
 	prefix := []byte{0xAA}
-	out, err := h.AppendBinary(prefix)
+	var res struct {
+		out []byte
+		err error
+	}
+	res.out, res.err = h.AppendBinary(prefix)
+	out, err := res.out, res.err
 	if err == nil {
 		report("zero-wire-above-bound-rejected", false, "accepted the count %d", len(h.Items))
 		return

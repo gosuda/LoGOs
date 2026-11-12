@@ -65,7 +65,12 @@ func main() {
 		check("total-sum", got == 15, got, 15)
 	}
 	var badLog []string
-	gotBad, errBad := total("z", &badLog)
+	var bad struct {
+		sum int
+		err error
+	}
+	bad.sum, bad.err = total("z", &badLog)
+	gotBad, errBad := bad.sum, bad.err
 	if errBad != nil {
 		check("total-bad-err", errBad.Error() == "bad z", errBad.Error(), "bad z")
 		check("total-bad-sum", gotBad == 0, gotBad, 0)

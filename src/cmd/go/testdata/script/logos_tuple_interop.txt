@@ -71,6 +71,10 @@ import (
 
 func main() {
 	a, b := p.Pair()
+	if b != nil {
+		fmt.Println(b)
+		return
+	}
 	fmt.Println(a, b)
 	n := p.Named()
 	fmt.Println(n.x, n.y)

@@ -24,6 +24,15 @@ func check(name string, cond bool, got, want any) {
 	fmt.Println("ok", name)
 }
 
+type observed[T any] struct {
+	v   T
+	err error
+}
+
+func observe[T any](v T, err error) observed[T] {
+	return observed[T]{v, err}
+}
+
 var live, peak, hanging, arrivals atomic.Int64
 
 func enter() {
@@ -187,7 +196,8 @@ func caseOrdered(ctx context.Context) {
 
 func caseTryError(ctx context.Context) {
 	xs := []int{1, 2, 3, 4, 5}
-	got, err := xs.group(ctx, limit = 2).map(x => failOn(x, 3)?)
+	res := observe(xs.group(ctx, limit = 2).map(x => failOn(x, 3)?))
+	got, err := res.v, res.err
 	check("try-error", err != nil && errors.Is(err, errBoom) && got == nil, err, errBoom)
 }
 
@@ -357,7 +367,8 @@ func caseRange(ctx context.Context) {
 	} else {
 		check("range-all", err == nil && slices.Equal(got, want), got, want)
 	}
-	got, err = rangeFail(ctx, xs)
+	failRes := observe(rangeFail(ctx, xs))
+	got, err = failRes.v, failRes.err
 	check("range-error", err != nil && errors.Is(err, errBoom) && got == nil, err, errBoom)
 	total, err := rangeAssign(ctx, xs)
 	if err != nil {

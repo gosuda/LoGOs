@@ -20,6 +20,15 @@ func check(name string, cond bool, got, want any) {
 	fmt.Println("ok", name)
 }
 
+type observed[T any] struct {
+	v   T
+	err error
+}
+
+func observe[T any](v T, err error) observed[T] {
+	return observed[T]{v, err}
+}
+
 func eq(a, b []int) bool { return slices.Equal(a, b) }
 
 type pc struct {
@@ -305,7 +314,12 @@ func main() {
 	} else {
 		check("opt-struct", err == nil && probeStruct(sv) == 2, probeStruct(sv), 2)
 	}
-	sv, err = structOpt(xs3())
+	var svRes struct {
+		v   pc?
+		err error
+	}
+	svRes.v, svRes.err = structOpt(xs3())
+	sv, err = svRes.v, svRes.err
 	if err == nil {
 		check("opt-struct-fail", false, "no error", -1)
 	} else {
@@ -317,7 +331,12 @@ func main() {
 	} else {
 		check("opt-int", err == nil && (iv ?? -1) == 2, iv ?? -1, 2)
 	}
-	iv, err = intOpt(xs3())
+	var ivRes struct {
+		v   int?
+		err error
+	}
+	ivRes.v, ivRes.err = intOpt(xs3())
+	iv, err = ivRes.v, ivRes.err
 	if err == nil {
 		check("opt-int-fail", false, "no error", -1)
 	} else {
@@ -329,7 +348,12 @@ func main() {
 	} else {
 		check("opt-ptr", err == nil && probePtr(pv) == 2, probePtr(pv), 2)
 	}
-	pv, err = ptrOpt(xs3())
+	var pvRes struct {
+		v   *pc?
+		err error
+	}
+	pvRes.v, pvRes.err = ptrOpt(xs3())
+	pv, err = pvRes.v, pvRes.err
 	if err == nil {
 		check("opt-ptr-fail", false, "no error", -1)
 	} else {
@@ -341,7 +365,12 @@ func main() {
 	} else {
 		check("opt-slice", err == nil && probeSlice(lv) == 1, probeSlice(lv), 1)
 	}
-	lv, err = sliceOpt(xs3())
+	var lvRes struct {
+		v   []int?
+		err error
+	}
+	lvRes.v, lvRes.err = sliceOpt(xs3())
+	lv, err = lvRes.v, lvRes.err
 	if err == nil {
 		check("opt-slice-fail", false, "no error", -1)
 	} else {
@@ -353,7 +382,13 @@ func main() {
 	} else {
 		check("opt-lead", err == nil && n == 2 && (s ?? "none") == "ok", n, 2)
 	}
-	n, s, err = leadOpt(xs3())
+	var leadRes struct {
+		a   int
+		b   string?
+		err error
+	}
+	leadRes.a, leadRes.b, leadRes.err = leadOpt(xs3())
+	n, s, err = leadRes.a, leadRes.b, leadRes.err
 	if err == nil {
 		check("opt-lead-fail", false, "no error", 0)
 	} else {
@@ -365,7 +400,12 @@ func main() {
 	} else {
 		check("res-view", err == nil && len(vv) == 2, len(vv), 2)
 	}
-	vv, err = viewRes(xs3())
+	var vvRes struct {
+		v   const []int
+		err error
+	}
+	vvRes.v, vvRes.err = viewRes(xs3())
+	vv, err = vvRes.v, vvRes.err
 	if err == nil {
 		check("res-view-fail", false, "no error", true)
 	} else {
@@ -377,7 +417,8 @@ func main() {
 	} else {
 		check("res-named", err == nil && rv.id == 2, rv == nil, false)
 	}
-	rv, err = namedRes(xs3())
+	rvRes := observe(namedRes(xs3()))
+	rv, err = rvRes.v, rvRes.err
 	if err == nil {
 		check("res-named-fail", false, "no error", true)
 	} else {
@@ -393,7 +434,12 @@ func main() {
 	} else {
 		check("opt-lit", err == nil && probeStruct(fv) == 2, probeStruct(fv), 2)
 	}
-	fv, err = lit(xs3())
+	var fvRes struct {
+		v   pc?
+		err error
+	}
+	fvRes.v, fvRes.err = lit(xs3())
+	fv, err = fvRes.v, fvRes.err
 	if err == nil {
 		check("opt-lit-fail", false, "no error", -1)
 	} else {

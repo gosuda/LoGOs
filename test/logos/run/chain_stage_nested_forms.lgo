@@ -27,6 +27,15 @@ func check(name string, cond bool, got, want any) {
 	fmt.Println("ok", name)
 }
 
+type observed[T any] struct {
+	v   T
+	err error
+}
+
+func observe[T any](v T, err error) observed[T] {
+	return observed[T]{v, err}
+}
+
 var live atomic.Int64
 
 type pair struct{ A, B int }
@@ -64,7 +73,7 @@ func caseNestedGroup(ctx context.Context) {
 }
 
 func caseNestedFails(ctx context.Context) {
-	got, err := []int{1, 2, 3}.group(ctx, limit = 1).map(x => {
+	res := observe([]int{1, 2, 3}.group(ctx, limit = 1).map(x => {
 		n := 0
 		go group (ctx) {
 			go {
@@ -75,7 +84,8 @@ func caseNestedFails(ctx context.Context) {
 			}
 		}
 		return n
-	})
+	}))
+	got, err := res.v, res.err
 	pe, ok := errors.AsType[*rt.PanicError](err)
 	check("nested-child-fails", err != nil && ok && pe.Value == "nested boom" && got == nil, err, "*rt.PanicError")
 }
@@ -84,7 +94,7 @@ func caseNestedCancelled(ctx context.Context) {
 	never := make(chan int)
 	short, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
 	defer cancel()
-	got, err := []int{1, 2}.group(short, limit = 2).map(x => {
+	res := observe([]int{1, 2}.group(short, limit = 2).map(x => {
 		n := 0
 		go group (short) {
 			go {
@@ -94,7 +104,8 @@ func caseNestedCancelled(ctx context.Context) {
 			}
 		}
 		return n + x
-	})
+	}))
+	got, err := res.v, res.err
 	check("nested-group-cancelled", err != nil && got == nil && errors.Is(err, context.DeadlineExceeded) && live.Load() == 0, fmt.Sprint(err, " with ", live.Load(), " children live"), "deadline with 0 children live")
 }
 

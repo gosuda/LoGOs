@@ -54,6 +54,15 @@ func check(cond bool, msg string) {
 	os.Exit(1)
 }
 
+type observed[T any] struct {
+	v   T
+	err error
+}
+
+func observe[T any](v T, err error) observed[T] {
+	return observed[T]{v, err}
+}
+
 func main() {
 	loads = 0
 	s, err := classifyN(7, false)
@@ -64,7 +73,8 @@ func main() {
 	okOther := err == nil && s == "other" && loads == 2
 	check(okOther, "switch-expr-init-other")
 
-	s, err = classifyN(7, true)
+	res := observe(classifyN(7, true))
+	s, err = res.v, res.err
 	okErr := err != nil && err == errLoad && s == "" && loads == 3
 	check(okErr, "switch-expr-init-err")
 
@@ -74,7 +84,8 @@ func main() {
 	check(okAssign, "switch-expr-assign-nil")
 
 	slot = -1
-	s, err = classifyAssign(7, true)
+	res = observe(classifyAssign(7, true))
+	s, err = res.v, res.err
 	okAssignErr := err != nil && err == errLoad && s == "" && slot == 0
 	check(okAssignErr, "switch-expr-assign-err")
 
@@ -83,7 +94,8 @@ func main() {
 	okExprNil := err == nil && s == "seven" && loads == 1
 	check(okExprNil, "switch-expr-expr-nil")
 
-	s, err = probeExprInit(7, true)
+	res = observe(probeExprInit(7, true))
+	s, err = res.v, res.err
 	okExprErr := err != nil && err == errLoad && s == "" && loads == 2
 	check(okExprErr, "switch-expr-expr-err")
 }

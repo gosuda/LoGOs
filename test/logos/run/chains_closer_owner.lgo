@@ -20,6 +20,15 @@ func (c *conn) Close() error {
 	return errClose
 }
 
+type observed[T any] struct {
+	v   T
+	err error
+}
+
+func observe[T any](v T, err error) observed[T] {
+	return observed[T]{v, err}
+}
+
 var (
 	errClose = errors.New("close failed")
 	errBoom  = errors.New("boom")
@@ -157,7 +166,8 @@ func tryBorrowFilter() (int, error) {
 }
 
 func bTryFilterFail() string {
-	n, err := tryBorrowFilter()
+	res := observe(tryBorrowFilter())
+	n, err := res.v, res.err
 	if err != nil {
 		return fmt.Sprint(n, err == errBoom)
 	}
@@ -320,7 +330,8 @@ func tryProducedSort() ([]*conn, error) {
 }
 
 func tCollect() string {
-	got, err := tryCollect()
+	res := observe(tryCollect())
+	got, err := res.v, res.err
 	if err != nil {
 		return fmt.Sprint(idsOf(got), err == errBoom)
 	}
@@ -328,7 +339,8 @@ func tCollect() string {
 }
 
 func tCount() string {
-	n, err := tryCount()
+	res := observe(tryCount())
+	n, err := res.v, res.err
 	if err != nil {
 		return fmt.Sprint(n, err == errBoom)
 	}
@@ -336,7 +348,8 @@ func tCount() string {
 }
 
 func tCountPred() string {
-	n, err := tryCountPred()
+	res := observe(tryCountPred())
+	n, err := res.v, res.err
 	if err != nil {
 		return fmt.Sprint(n, err == errBoom)
 	}
@@ -344,7 +357,8 @@ func tCountPred() string {
 }
 
 func tFindMiss() string {
-	n, err := tryFindMiss()
+	res := observe(tryFindMiss())
+	n, err := res.v, res.err
 	if err != nil {
 		return fmt.Sprint(n, err == errBoom)
 	}
@@ -352,7 +366,8 @@ func tFindMiss() string {
 }
 
 func tAnyMiss() string {
-	b, err := tryAnyMiss()
+	res := observe(tryAnyMiss())
+	b, err := res.v, res.err
 	if err != nil {
 		return fmt.Sprint(b, err == errBoom)
 	}
@@ -360,7 +375,8 @@ func tAnyMiss() string {
 }
 
 func tAllFull() string {
-	b, err := tryAllFull()
+	res := observe(tryAllFull())
+	b, err := res.v, res.err
 	if err != nil {
 		return fmt.Sprint(b, err == errBoom)
 	}
@@ -368,7 +384,8 @@ func tAllFull() string {
 }
 
 func tFirst() string {
-	n, err := tryFirst()
+	res := observe(tryFirst())
+	n, err := res.v, res.err
 	if err != nil {
 		return fmt.Sprint(n, err == errBoom)
 	}
@@ -376,7 +393,8 @@ func tFirst() string {
 }
 
 func tLast() string {
-	n, err := tryLast()
+	res := observe(tryLast())
+	n, err := res.v, res.err
 	if err != nil {
 		return fmt.Sprint(n, err == errBoom)
 	}
@@ -384,7 +402,8 @@ func tLast() string {
 }
 
 func tGet() string {
-	n, err := tryGet()
+	res := observe(tryGet())
+	n, err := res.v, res.err
 	if err != nil {
 		return fmt.Sprint(n, err == errBoom)
 	}
@@ -392,7 +411,8 @@ func tGet() string {
 }
 
 func tTake() string {
-	got, err := tryTake()
+	res := observe(tryTake())
+	got, err := res.v, res.err
 	if err != nil {
 		return fmt.Sprint(idsOf(got), err == errBoom)
 	}
@@ -400,7 +420,8 @@ func tTake() string {
 }
 
 func tSort() string {
-	got, err := tryProducedSort()
+	res := observe(tryProducedSort())
+	got, err := res.v, res.err
 	if err != nil {
 		return fmt.Sprint(idsOf(got), err == errBoom)
 	}
@@ -457,7 +478,8 @@ func tryFilterDrop() (int, error) {
 }
 
 func tFilterFail() string {
-	n, err := tryFilter()
+	res := observe(tryFilter())
+	n, err := res.v, res.err
 	if err != nil {
 		return fmt.Sprint(n, err == errBoom)
 	}
@@ -465,7 +487,8 @@ func tFilterFail() string {
 }
 
 func tFilterDropFail() string {
-	n, err := tryFilterDrop()
+	res := observe(tryFilterDrop())
+	n, err := res.v, res.err
 	if err != nil {
 		return fmt.Sprint(n, err == errBoom)
 	}
@@ -646,7 +669,8 @@ func tryLocalFilter() (int, error) {
 }
 
 func lTryFail() string {
-	n, err := tryLocalFilter()
+	res := observe(tryLocalFilter())
+	n, err := res.v, res.err
 	if err != nil {
 		return fmt.Sprint(n, err == errBoom)
 	}
@@ -669,7 +693,8 @@ func tryFlight() (int, error) {
 }
 
 func fliTryFail() string {
-	n, err := tryFlight()
+	res := observe(tryFlight())
+	n, err := res.v, res.err
 	if err != nil {
 		return fmt.Sprint(n, err == errBoom)
 	}
@@ -688,7 +713,8 @@ func tryFlightWrap() (int, error) {
 }
 
 func fliTryFailWrap() string {
-	n, err := tryFlightWrap()
+	res := observe(tryFlightWrap())
+	n, err := res.v, res.err
 	if err != nil {
 		return fmt.Sprintf("%d %v %s %v", n, err == errBoom, wrapCloses(), closeLog)
 	}
@@ -707,7 +733,8 @@ func tryFlightDrop() (int, error) {
 }
 
 func fliDropFail() string {
-	n, err := tryFlightDrop()
+	res := observe(tryFlightDrop())
+	n, err := res.v, res.err
 	if err != nil {
 		return fmt.Sprintf("%d %v %s %v", n, err == errBoom, wrapCloses(), closeLog)
 	}
@@ -769,7 +796,8 @@ func tryValFilter() (int, error) {
 }
 
 func valTryFail() string {
-	n, err := tryValFilter()
+	res := observe(tryValFilter())
+	n, err := res.v, res.err
 	if err != nil {
 		return fmt.Sprintf("%d %v %s", n, err == errBoom, vState())
 	}
@@ -788,7 +816,8 @@ func tryValTail() (int, error) {
 }
 
 func valDropFailTail() string {
-	n, err := tryValTail()
+	res := observe(tryValTail())
+	n, err := res.v, res.err
 	if err != nil {
 		return fmt.Sprintf("%d %v %s", n, err == errBoom, vState())
 	}

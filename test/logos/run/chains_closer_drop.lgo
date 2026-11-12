@@ -21,6 +21,15 @@ func check(name string, cond bool, got, want any) {
 	fmt.Println("ok", name)
 }
 
+type observed[T any] struct {
+	v   T
+	err error
+}
+
+func observe[T any](v T, err error) observed[T] {
+	return observed[T]{v, err}
+}
+
 type lk struct {
 	id int
 }
@@ -358,7 +367,8 @@ func drvTryFindMiss() {
 
 func drvTryFindFail() {
 	closed = nil
-	n, err := tryFindFail()
+	res := observe(tryFindFail())
+	n, err := res.v, res.err
 	check("try-find-fail", err != nil && err == errFail && n == 0 && eq(closed, []int{2, 1}), closed, []int{2, 1})
 }
 
@@ -456,7 +466,8 @@ func drvTryCollect() {
 
 func drvTryCollectFail() {
 	closed = nil
-	got, err := tryCollectFail()
+	res := observe(tryCollectFail())
+	got, err := res.v, res.err
 	check("try-collect-fail", err != nil && err == errFail && len(got) == 0 && eq(closed, []int{2, 1}), closed, []int{2, 1})
 }
 
@@ -606,7 +617,8 @@ func tryFilterFail() (int, error) {
 
 func drvTryFilterFail() {
 	closed = nil
-	n, err := tryFilterFail()
+	res := observe(tryFilterFail())
+	n, err := res.v, res.err
 	if err == nil {
 		check("try-filter-fail", false, "no error", []int{1, 3, 2})
 	} else {

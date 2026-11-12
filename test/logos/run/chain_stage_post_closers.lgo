@@ -142,7 +142,12 @@ func caseDrop(ctx context.Context) {
 }
 
 func caseFailure(ctx context.Context) {
-	n, err := []int{0, 1, 2, 3}.group(ctx, limit = 2).map(x => mkTry(x)?).drop(1).count()
+	var res struct {
+		n   int
+		err error
+	}
+	res.n, res.err = []int{0, 1, 2, 3}.group(ctx, limit = 2).map(x => mkTry(x)?).drop(1).count()
+	n, err := res.n, res.err
 	verdict("stage-failure", err != nil && n == 0)
 }
 

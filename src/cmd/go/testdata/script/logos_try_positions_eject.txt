@@ -153,7 +153,12 @@ func postRuns() {
 	}
 	postCalls = 0
 	bodies = 0
-	total, err = sumFail()
+	var sumRes struct {
+		total int
+		err   error
+	}
+	sumRes.total, sumRes.err = sumFail()
+	total, err = sumRes.total, sumRes.err
 	if err == nil {
 		fmt.Println("post-err: unexpected success", total)
 	} else {
@@ -169,7 +174,12 @@ func initRuns() {
 	} else {
 		fmt.Println("init-nil:", err == nil, s, postCalls)
 	}
-	s, err = classify(true)
+	var classRes struct {
+		s   string
+		err error
+	}
+	classRes.s, classRes.err = classify(true)
+	s, err = classRes.s, classRes.err
 	if err == nil {
 		fmt.Println("init-err: unexpected success", s)
 	} else {

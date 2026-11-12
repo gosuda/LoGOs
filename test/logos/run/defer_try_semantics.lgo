@@ -482,11 +482,16 @@ func nullFnHand() (point string, recovered any, err error) {
 }
 
 func nullCase(name string, lp, hp func() (string, any, error)) {
-	lpnt, lrec, lerr := lp()
-	hpnt, hrec, herr := hp()
-	lok := lrec != nil && lerr == nil
-	hok := hrec != nil && herr == nil
-	check(name, lok && hok && lpnt == hpnt, fmt.Sprint("logos=", lpnt, ",", lrec != nil, " hand=", hpnt, ",", hrec != nil))
+	var l, h struct {
+		point string
+		rec   any
+		err   error
+	}
+	l.point, l.rec, l.err = lp()
+	h.point, h.rec, h.err = hp()
+	lok := l.rec != nil && l.err == nil
+	hok := h.rec != nil && h.err == nil
+	check(name, lok && hok && l.point == h.point, fmt.Sprint("logos=", l.point, ",", l.rec != nil, " hand=", h.point, ",", h.rec != nil))
 }
 
 type bigArg struct {

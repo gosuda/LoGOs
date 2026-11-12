@@ -25,7 +25,12 @@ func truncAllocated(input []byte) (uint64, error) {
 
 func truncPadded() error {
 	input := []byte(`{"items":[` + strings.Repeat("7,", 100) + strings.Repeat(" ", 1<<20))
-	grew, err := truncAllocated(input)
+	var res struct {
+		grew uint64
+		err  error
+	}
+	res.grew, res.err = truncAllocated(input)
+	grew, err := res.grew, res.err
 	if err == nil {
 		return fmt.Errorf("padded truncated array decoded")
 	}

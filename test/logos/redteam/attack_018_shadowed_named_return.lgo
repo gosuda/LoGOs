@@ -93,16 +93,16 @@ func main() {
 	} else {
 		fmt.Println("shadowed ok:", v, err)
 	}
-	if v2, err2 := shadowed(true); err2 != nil {
-		fmt.Println("shadowed fail:", v2, errors.Is(err2, errWork), errors.Is(err2, errClose))
+	if _, err2 := shadowed(true); err2 != nil {
+		fmt.Println("shadowed fail:", errors.Is(err2, errWork), errors.Is(err2, errClose))
 	}
 	if e3, err3 := earlyShadow(false); err3 != nil {
 		fmt.Println("early shadow ok:", err3)
 	} else {
 		fmt.Println("early shadow ok:", e3, err3)
 	}
-	if e4, err4 := earlyShadow(true); err4 != nil {
-		fmt.Println("early shadow fail:", e4, errors.Is(err4, errWork), errors.Is(err4, errClose))
+	if _, err4 := earlyShadow(true); err4 != nil {
+		fmt.Println("early shadow fail:", errors.Is(err4, errWork), errors.Is(err4, errClose))
 	}
 	_ = guarded("ok")
 	_ = guarded("fail")

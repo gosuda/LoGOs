@@ -82,7 +82,12 @@ func decodeTimes() error {
 	if got > limit {
 		return fmt.Errorf("decode time grows with count: %d ns at %d vs %d ns at %d", got, maxLawful, small, lawful)
 	}
-	got, err = leastDecode(countWire(overCap), 20, limit)
+	var over struct {
+		ns  int64
+		err error
+	}
+	over.ns, over.err = leastDecode(countWire(overCap), 20, limit)
+	got, err = over.ns, over.err
 	if err == nil {
 		return fmt.Errorf("count %d accepted, want rejection before iteration", overCap)
 	}

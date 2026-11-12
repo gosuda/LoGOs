@@ -19,6 +19,15 @@ func check(name string, cond bool, got, want any) {
 	fmt.Println("ok", name)
 }
 
+type observed[T any] struct {
+	v   T
+	err error
+}
+
+func observe[T any](v T, err error) observed[T] {
+	return observed[T]{v, err}
+}
+
 var errNamed = errors.New("named")
 
 func getVal(fail bool, v int) (int, error) {
@@ -54,10 +63,10 @@ func main() {
 	check("ok-value", okOKValue, okOKValue, true)
 	okOKErr := err == nil
 	check("ok-err", okOKErr, okOKErr, true)
-	v, err = namedFail()
-	okFailValue := err != nil && err == errNamed && v == 0
+	res := observe(namedFail())
+	okFailValue := res.err != nil && res.err == errNamed && res.v == 0
 	check("fail-value", okFailValue, okFailValue, true)
-	okFailErr := err == errNamed
+	okFailErr := res.err == errNamed
 	check("fail-err", okFailErr, okFailErr, true)
 	_, _ = namedDefer()
 	if failed {

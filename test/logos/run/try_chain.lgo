@@ -22,6 +22,15 @@ func check(name string, cond bool, got, want any) {
 	fmt.Println("ok", name)
 }
 
+type observed[T any] struct {
+	v   T
+	err error
+}
+
+func observe[T any](v T, err error) observed[T] {
+	return observed[T]{v, err}
+}
+
 var errChain = errors.New("chain")
 
 func source(fail bool) (int, error) {
@@ -49,7 +58,8 @@ func top(fail bool) (int, error) {
 func run() error {
 	n := top(false)?
 	check("value", n == 16, n, 16)
-	n2, err := top(true)
+	res := observe(top(true))
+	n2, err := res.v, res.err
 	okZero := err != nil && n2 == 0
 	check("zero", okZero, okZero, true)
 	okErr := err != nil && err.Error() == "chain"

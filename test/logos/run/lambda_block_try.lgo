@@ -93,7 +93,12 @@ func main() {
 	if err == nil {
 		eq("plain-filter", fmt.Sprint(ys), "[2 4]")
 	}
-	ys, err = aroundErrdefer([]int{1, 2})
+	var around struct {
+		out []int
+		err error
+	}
+	around.out, around.err = aroundErrdefer([]int{1, 2})
+	ys, err = around.out, around.err
 	if err != nil {
 		eq("around-errdefer", fmt.Sprint(ys, trace), "[-1 2] [rollback]")
 	}

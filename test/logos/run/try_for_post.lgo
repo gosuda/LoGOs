@@ -90,6 +90,15 @@ func check(cond bool, msg string) {
 	os.Exit(1)
 }
 
+type observed[T any] struct {
+	v   T
+	err error
+}
+
+func observe[T any](v T, err error) observed[T] {
+	return observed[T]{v, err}
+}
+
 func main() {
 	postCalls = 0
 	bodies = 0
@@ -99,7 +108,8 @@ func main() {
 
 	postCalls = 0
 	bodies = 0
-	total, err = sumFail()
+	res := observe(sumFail())
+	total, err = res.v, res.err
 	okErr := err != nil && err == errStep && total == 0 && postCalls == 3 && bodies == 3
 	check(okErr, "for-post-assign-err")
 

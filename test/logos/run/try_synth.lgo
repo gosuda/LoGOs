@@ -19,6 +19,15 @@ func check(name string, cond bool, got, want any) {
 	fmt.Println("ok", name)
 }
 
+type observed[T any] struct {
+	v   T
+	err error
+}
+
+func observe[T any](v T, err error) observed[T] {
+	return observed[T]{v, err}
+}
+
 var errSyn = errors.New("syn")
 var order []string
 
@@ -72,10 +81,10 @@ func main() {
 	check("ok-value", okOKValue, okOKValue, true)
 	okOKErr := err == nil
 	check("ok-err", okOKErr, okOKErr, true)
-	v, err = unnamedFail()
-	okFailValue := err != nil && err == errSyn && v == 0
+	res := observe(unnamedFail())
+	okFailValue := res.err != nil && res.err == errSyn && res.v == 0
 	check("fail-value", okFailValue, okFailValue, true)
-	okFailErr := err == errSyn
+	okFailErr := res.err == errSyn
 	check("fail-err", okFailErr, okFailErr, true)
 	v, err = shadowed()
 	okShadowValue := err == nil && v == 42
@@ -87,20 +96,20 @@ func main() {
 	check("ed-ok-value", okEdOKValue, okEdOKValue, true)
 	okEdOKErr := err == nil
 	check("ed-ok-err", okEdOKErr, okEdOKErr, true)
-	v, err = shadowedErrdefer(true)
-	okEdFailValue := err != nil && err == errSyn && v == 0
+	res = observe(shadowedErrdefer(true))
+	okEdFailValue := res.err != nil && res.err == errSyn && res.v == 0
 	check("ed-fail-value", okEdFailValue, okEdFailValue, true)
-	okEdFailErr := err == errSyn
+	okEdFailErr := res.err == errSyn
 	check("ed-fail-err", okEdFailErr, okEdFailErr, true)
 	v, err = blankRes(false)
 	okBlankOKValue := err == nil && v == 9
 	check("blank-ok-value", okBlankOKValue, okBlankOKValue, true)
 	okBlankOKErr := err == nil
 	check("blank-ok-err", okBlankOKErr, okBlankOKErr, true)
-	v, err = blankRes(true)
-	okBlankFailValue := err != nil && err == errSyn && v == 0
+	res = observe(blankRes(true))
+	okBlankFailValue := res.err != nil && res.err == errSyn && res.v == 0
 	check("blank-fail-value", okBlankFailValue, okBlankFailValue, true)
-	okBlankFailErr := err == errSyn
+	okBlankFailErr := res.err == errSyn
 	check("blank-fail-err", okBlankFailErr, okBlankFailErr, true)
 	check("order-len", len(order) == 1, len(order), 1)
 	if len(order) == 1 {

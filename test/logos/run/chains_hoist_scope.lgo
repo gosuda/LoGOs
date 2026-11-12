@@ -17,6 +17,13 @@ return
 }
 fmt.Println("ok", name)
 }
+type observed[T any] struct {
+v T
+err error
+}
+func observe[T any](v T, err error) observed[T] {
+return observed[T]{v, err}
+}
 var calls int
 var errNeg = errors.New("neg")
 
@@ -162,7 +169,8 @@ check("post", got == "3 3", got, "3 3")
 show("caseguard", "one calls=0", func() (any, error) { return caseGuard(1, []int{-1}) })
 show("caseguardok", "count calls=3", func() (any, error) { return caseGuard(2, []int{1, 2, 3}) })
 show("caseguarddefault", "default calls=1", func() (any, error) { return caseGuard(9, []int{1}) })
-n, err := groupChildTry(context.Background(), []int{-1})
+res := observe(groupChildTry(context.Background(), []int{-1}))
+n, err := res.v, res.err
 if err != nil {
 got := fmt.Sprintf("%d err: %v %d", n, err, childRan)
 check("groupchild", got == "0 err: neg 1", got, "0 err: neg 1")
@@ -180,7 +188,8 @@ check("contpost", got == "20 3", got, "20 3")
 show("switchfall", "hit calls=3", func() (any, error) { return switchFall(2, []int{1, 2, 3}) })
 show("switchfallthrough", "def calls=100", func() (any, error) { return switchFall(9, []int{1, 2, 3}) })
 show("switchfalldefault", "def calls=3", func() (any, error) { return switchFall(7, []int{1, 2, 3}) })
-n, err = groupChildFilter(context.Background(), []int{-1})
+res2 := observe(groupChildFilter(context.Background(), []int{-1}))
+n, err = res2.v, res2.err
 if err != nil {
 got := fmt.Sprintf("%d err: %v %d", n, err, childRan)
 check("groupfilter", got == "0 err: neg 1", got, "0 err: neg 1")

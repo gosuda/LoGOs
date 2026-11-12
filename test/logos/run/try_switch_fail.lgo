@@ -239,7 +239,12 @@ type outcome struct {
 
 func attempt(c cell) (out outcome) {
 	defer func() { out.crash = recover() }()
-	got, err := c.run()
+	var res struct {
+		got string
+		err error
+	}
+	res.got, res.err = c.run()
+	got, err := res.got, res.err
 	if err != nil {
 		return outcome{got: got, err: err}
 	}
@@ -255,7 +260,12 @@ type cell struct {
 
 func showState[T any](f func() (T, error), state func() string) func() (string, error) {
 	return func() (string, error) {
-		r, err := f()
+		var res struct {
+			v   T
+			err error
+		}
+		res.v, res.err = f()
+		r, err := res.v, res.err
 		if err != nil {
 			return fmt.Sprint(r) + state(), err
 		}
@@ -268,7 +278,12 @@ func show[T any](f func() (T, error)) func() (string, error) {
 }
 
 func showRetList() (string, error) {
-	a, b, c, err := retList()
+	var res struct {
+		a, b, c int
+		err     error
+	}
+	res.a, res.b, res.c, res.err = retList()
+	a, b, c, err := res.a, res.b, res.c, res.err
 	if err != nil {
 		return fmt.Sprint(a, b, c), err
 	}
@@ -276,7 +291,14 @@ func showRetList() (string, error) {
 }
 
 func showMultiZero() (string, error) {
-	a, b, c, err := multiZero()
+	var res struct {
+		a   int
+		b   string
+		c   []int
+		err error
+	}
+	res.a, res.b, res.c, res.err = multiZero()
+	a, b, c, err := res.a, res.b, res.c, res.err
 	if err != nil {
 		return fmt.Sprintf("%d %q %v", a, b, c), err
 	}

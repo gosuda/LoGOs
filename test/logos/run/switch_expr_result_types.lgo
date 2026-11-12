@@ -139,7 +139,12 @@ func main() {
 	} else {
 		check("opt-try", err == nil && n == 7, n, 7)
 	}
-	n, err = optTry(7, true)
+	var one struct {
+		v   int
+		err error
+	}
+	one.v, one.err = optTry(7, true)
+	n, err = one.v, one.err
 	if err == nil {
 		check("opt-try-fail", false, "no error", 0)
 	} else {
@@ -151,7 +156,8 @@ func main() {
 	} else {
 		check("opt-field", err == nil && n == 7, n, 7)
 	}
-	n, err = optField(7, true)
+	one.v, one.err = optField(7, true)
+	n, err = one.v, one.err
 	if err == nil {
 		check("opt-field-fail", false, "no error", 0)
 	} else {
@@ -163,7 +169,8 @@ func main() {
 	} else {
 		check("ptr-try", err == nil && n == 7, n, 7)
 	}
-	n, err = ptrTry(7, true)
+	one.v, one.err = ptrTry(7, true)
+	n, err = one.v, one.err
 	if err == nil {
 		check("ptr-try-fail", false, "no error", 0)
 	} else {
@@ -175,7 +182,13 @@ func main() {
 	} else {
 		check("tuple-try", err == nil && ta == 1 && tb == "a", fmt.Sprint(ta, tb), "1 a")
 	}
-	ta, tb, err = tupleTry(7, true, (1, "a"), (2, "b"))
+	var two struct {
+		a   int
+		b   string
+		err error
+	}
+	two.a, two.b, two.err = tupleTry(7, true, (1, "a"), (2, "b"))
+	ta, tb, err = two.a, two.b, two.err
 	if err == nil {
 		check("tuple-try-fail", false, "no error", "0 ")
 	} else {
@@ -187,7 +200,8 @@ func main() {
 	} else {
 		check("view-try", err == nil && n == 1, n, 1)
 	}
-	n, err = viewTry(7, true, []int{1}, []int{2, 3})
+	one.v, one.err = viewTry(7, true, []int{1}, []int{2, 3})
+	n, err = one.v, one.err
 	if err == nil {
 		check("view-try-fail", false, "no error", 0)
 	} else {

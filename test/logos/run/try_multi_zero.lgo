@@ -19,6 +19,16 @@ func check(name string, cond bool, got, want any) {
 	fmt.Println("ok", name)
 }
 
+type observed[A, B any] struct {
+	a   A
+	b   B
+	err error
+}
+
+func observe[A, B any](a A, b B, err error) observed[A, B] {
+	return observed[A, B]{a, b, err}
+}
+
 var errSrc = errors.New("src")
 
 func fail3() (int, string, error) {
@@ -31,7 +41,8 @@ func get() (int, string, error) {
 }
 
 func main() {
-	a, b, err := get()
+	res := observe(get())
+	a, b, err := res.a, res.b, res.err
 	check("zero-int", a == 0, a, 0)
 	check("zero-str", b == "", b == "", true)
 	check("err", err == errSrc, fmt.Sprint(err), "src")

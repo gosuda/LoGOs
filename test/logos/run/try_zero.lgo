@@ -78,7 +78,12 @@ func takeAssign() (Point, error) {
 }
 
 func zeroCase[T any](name string, f func() (T, error), zero func(T) bool, want string) {
-	v, err := f()
+	var res struct {
+		v   T
+		err error
+	}
+	res.v, res.err = f()
+	v, err := res.v, res.err
 	if err == nil {
 		check(name, false, "nil error", want)
 		return
@@ -95,7 +100,12 @@ func main() {
 	zeroCase("str", takeString, func(s string) bool { return s == "" }, " zero")
 	zeroCase("gen", func() (int, error) { return takeGen(7) }, func(g int) bool { return g == 0 }, "0 zero")
 	_, errAssign := takeAssign()
-	want, wantErr := failPoint()
+	var wantRes struct {
+		v   Point
+		err error
+	}
+	wantRes.v, wantRes.err = failPoint()
+	want, wantErr := wantRes.v, wantRes.err
 	if wantErr == nil {
 		check("assign", false, "nil error", "{5 6} zero")
 	} else {
