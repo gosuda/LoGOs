@@ -966,6 +966,20 @@ func g1(x int) (int, error) {
 			wantCand:  0,
 			wantNote:  true,
 		},
+		{
+			name:      "coalesce_right",
+			compute:   "func compute() (int, error) {\n\tvar opt int?\n\tv := opt ?? step()?\n\treturn v, nil\n}\n",
+			wantDiags: 1,
+			wantCand:  0,
+			wantNote:  true,
+		},
+		{
+			name:      "coalesce_right_beside_left_try",
+			compute:   "func compute() (int, error) {\n\tvar opt int?\n\tv := step()? + (opt ?? step()?)\n\treturn v, nil\n}\n",
+			wantDiags: 2,
+			wantCand:  0,
+			wantNote:  true,
+		},
 	}
 	for _, tc := range refused {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1024,6 +1038,13 @@ func g1(x int) (int, error) {
 			misplaced: "func compute() (int, error) {\n\t_step := 7\n\tv := step()? + _step\n\treturn v, nil\n}\n",
 			hand:      "func compute() (int, error) {\n\t_step := 7\n\t_v, _e := step()\n\tif _e != nil {\n\t\treturn 0, _e\n\t}\n\tv := _v + _step\n\treturn v, nil\n}\n",
 			mainSrc:   "func main() {\n\tcalls, fail = 0, false\n\tv, err := compute()\n\tif err != nil || v != 49 {\n\t\tprintln(\"bad\")\n\t} else {\n\t\tprintln(\"ok\")\n\t}\n\tcalls, fail = 0, true\n\tv, err = compute()\n\tif err == nil || err.Error() != \"boom\" || v != 0 {\n\t\tprintln(\"bad\")\n\t} else {\n\t\tprintln(\"err\")\n\t}\n\tif calls != 1 {\n\t\tprintln(\"bad\")\n\t} else {\n\t\tprintln(\"once\")\n\t}\n}\n",
+		},
+		{
+			name:      "coalesce_left",
+			decls:     "func optStep() (int?, error) {\n\tcalls++\n\tif fail {\n\t\treturn nil, myErr(\"boom\")\n\t}\n\treturn 7, nil\n}\n\n",
+			misplaced: "func compute() (int, error) {\n\tv := optStep()? ?? 0\n\treturn v, nil\n}\n",
+			hand:      "func compute() (int, error) {\n\t_v, _e := optStep()\n\tif _e != nil {\n\t\treturn 0, _e\n\t}\n\tv := _v ?? 0\n\treturn v, nil\n}\n",
+			mainSrc:   "func main() {\n\tcalls, fail = 0, false\n\tv, err := compute()\n\tif err != nil || v != 7 {\n\t\tprintln(\"bad\")\n\t} else {\n\t\tprintln(\"ok\")\n\t}\n\tcalls, fail = 0, true\n\tv, err = compute()\n\tif err == nil || err.Error() != \"boom\" || v != 0 {\n\t\tprintln(\"bad\")\n\t} else {\n\t\tprintln(\"err\")\n\t}\n\tif calls != 1 {\n\t\tprintln(\"bad\")\n\t} else {\n\t\tprintln(\"once\")\n\t}\n}\n",
 		},
 	}
 	for _, tc := range offered {
