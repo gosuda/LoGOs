@@ -199,7 +199,7 @@ func logosStaticKindOK(t Type) bool {
 		if logosClosedUnion(u) != nil {
 			return true
 		}
-		_, ok := Unalias(u).(*Named)
+		_, ok := logosForeignUnionName(u)
 		return ok
 	case *Map:
 		b, ok := iface.Key().Underlying().(*Basic)

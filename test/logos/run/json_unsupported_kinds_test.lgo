@@ -35,6 +35,29 @@ type WithBadEmbedded struct {
 	Y string `json:"y"`
 }
 
+type Shape interface {
+	Area() int64
+}
+
+type Square struct {
+	S int64 `json:"s"`
+}
+
+func (s Square) Area() int64 {
+	return s.S * s.S
+}
+
+type WithShape struct {
+	Item Shape `json:"item"`
+	N    int64 `json:"n"`
+}
+
+type shapeMirror struct {
+	Item  Shape `json:"item"`
+	N     int64 `json:"n"`
+	NoGen any   `json:"-"`
+}
+
 
 func hasGeneratedMethods(v any) bool {
 	if _, ok := v.(json.Marshaler); ok {
@@ -127,6 +150,33 @@ func TestEmbeddedUsesTheReflectivePath(t *testing.T) {
 	}
 	if eback.X != 3 {
 		t.Fatalf("round trip lost the promoted field: %#v", eback)
+	}
+}
+
+func TestNamedInterfaceUsesTheReflectivePath(t *testing.T) {
+	sv := WithShape{Item: Square{S: 3}, N: 1}
+	if hasGeneratedMethods(sv) || hasGeneratedMethods(&sv) {
+		t.Fatalf("WithShape carries generated methods: %#v", sv)
+	}
+	got, err := json.Marshal(sv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, werr := json.Marshal(shapeMirror{Item: Square{S: 3}, N: 1})
+	if werr != nil {
+		t.Fatal(werr)
+	}
+	if !bytes.Equal(got, want) || string(got) != `{"item":{"s":3},"n":1}` {
+		t.Fatalf("WithShape marshaled as %s, want %s", got, want)
+	}
+	for _, in := range []string{`{"item":null,"n":2}`, `{"item":{"s":3},"n":2}`} {
+		var a WithShape
+		var b shapeMirror
+		aerr := json.Unmarshal([]byte(in), &a)
+		berr := json.Unmarshal([]byte(in), &b)
+		if (aerr == nil) != (berr == nil) || a.N != b.N || (a.Item == nil) != (b.Item == nil) {
+			t.Fatalf("decode of %s differs from the reflective oracle: %#v %v vs %#v %v", in, a, aerr, b, berr)
+		}
 	}
 }
 
