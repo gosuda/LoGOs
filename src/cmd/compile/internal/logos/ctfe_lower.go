@@ -366,8 +366,15 @@ func swallowSep(src []byte, off int) int {
 	for off < len(src) && (src[off] == ' ' || src[off] == '\t') {
 		off++
 	}
-	if off < len(src) && src[off] == ';' {
-		off++
+	semi := -1
+	scanSegment(src, off, len(src), func(t tok) bool {
+		if t.kind == token.SEMICOLON && !t.auto {
+			semi = t.end
+		}
+		return t.comment
+	})
+	if semi >= 0 {
+		off = semi
 		for off < len(src) && (src[off] == ' ' || src[off] == '\t') {
 			off++
 		}
