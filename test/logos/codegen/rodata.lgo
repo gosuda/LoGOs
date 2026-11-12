@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"reflect"
+	"strconv"
 	"strings"
 	"unsafe"
 )
@@ -22,18 +23,24 @@ const (
 
 var roMutable = []int{1, 2, 3}
 
+func forged(addr string) unsafe.Pointer {
+	u, err := strconv.ParseUint(strings.TrimPrefix(addr, "0x"), 16, 64)
+	if err != nil {
+		panic(err)
+	}
+	return unsafe.Pointer(uintptr(u))
+}
+
 func storeThrough(target string) {
 	switch target {
 	case "slice":
-		u := uintptr(unsafe.Pointer(unsafe.SliceData(roSlice)))
-		*(*int)(unsafe.Pointer(u)) = 1
+		*(*int)(forged(fmt.Sprintf("%p", roSlice))) = 1
 	case "array":
 		var boxed any = roArray
 		p := (*[2]unsafe.Pointer)(unsafe.Pointer(&boxed))[1]
 		*(*string)(p) = "z"
 	case "grouped":
-		u := uintptr(unsafe.Pointer(unsafe.SliceData(roGrouped)))
-		*(*int)(unsafe.Pointer(u)) = 1
+		*(*int)(forged(fmt.Sprintf("%p", roGrouped))) = 1
 	case "mutable":
 		roMutable[0] = 9
 	}

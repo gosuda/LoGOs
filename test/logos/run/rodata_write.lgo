@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"unsafe"
 )
@@ -24,9 +25,17 @@ func check(name string, cond bool, got, want any) {
 	fmt.Println("ok", name)
 }
 
+func forged(addr string) *int {
+	u, err := strconv.ParseUint(strings.TrimPrefix(addr, "0x"), 16, 64)
+	if err != nil {
+		panic(err)
+	}
+	return (*int)(unsafe.Pointer(uintptr(u)))
+}
+
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "child" {
-		p := unsafe.SliceData(faultSlice)
+		p := forged(fmt.Sprintf("%p", faultSlice))
 		*p = 0xDEAD
 		fmt.Println("STORE-SUCCEEDED")
 		return

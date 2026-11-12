@@ -47,15 +47,23 @@ type Rec struct {
 
 const recs = []Rec{{Name: "a", Age: 1}, {Name: "b", Age: 2}}
 
+func forged(addr string) unsafe.Pointer {
+	u, err := strconv.ParseUint(strings.TrimPrefix(addr, "0x"), 16, 64)
+	if err != nil {
+		panic(err)
+	}
+	return unsafe.Pointer(uintptr(u))
+}
+
 //logos:allow(complexity::cognitive_overflow)
 func main() {
 	if len(os.Args) > 2 && os.Args[1] == "child" {
 		switch os.Args[2] {
 		case "names":
-			sp := unsafe.SliceData(names)
+			sp := (*string)(forged(fmt.Sprintf("%p", names)))
 			*sp = "X"
 		case "recs":
-			rp := unsafe.SliceData(recs)
+			rp := (*Rec)(forged(fmt.Sprintf("%p", recs)))
 			rp.Age = 99
 		}
 		fmt.Println("STORE-SUCCEEDED")
