@@ -70,4 +70,6 @@ func main() {
 	check("struct-default", "point:S")(EncodeSwitch([]byte("point:"), []Point{{1, 2}}))
 
 	check("plain-default", "keep:")(EncodeSwitch([]byte("keep:"), []string{"x", "y"}))
+
+	check("iface-typed-T", "wi:ab")(EncodeSwitch([]byte("wi:"), []io.WriterTo{Word{"a"}, Word{"b"}}))
 }
