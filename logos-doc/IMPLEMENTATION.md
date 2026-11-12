@@ -2743,9 +2743,10 @@ Anchor: Tony Hoare, Claude Shannon, Dieter Rams
 ### M13-A-S10 Eject writes the test files of a main module
 Anchor: Richard Feynman, Tony Hoare, Dieter Rams
 - Attack: `src/cmd/go/testdata/script/logos_eject_test_files.txt` MUST show that `logos eject -o out` of a module with an in-package test, an external test and a package of only test files writes each `_test.lgo` as a `_test.go` file, and that `go test -v ./...` of the copy, with the local toolchain and with `$UPROOT1272/bin/go`, prints the PASS lines of `logos test -v ./...`, that the copy vets and is gofmt-clean, and that a failing test fails in both. SPEC 63 and 67.
-- Build: `phaseOneRoots` leaves out a package that holds only test files, which builds only as a test variant; `buildEjectRoots` writes `_testmain.go` to the work directory of each test main before it builds it, as `go test` does.
-- Gate: `go test -count=1 cmd/go -run 'TestScript/(logos_eject_test_files|logos_interop_prop|logos_command)$'` MUST pass.
-- Red-team rows: #242.
+- Build: `phaseOneRoots` leaves out a package that holds only test files, which builds only as a test variant; `buildEjectRoots` writes `_testmain.go` to the work directory of each test main before it builds it, as `go test` does. `Builder.StageTestmain` does that staging for `logos eject` and `logos next`; it lives in `src/cmd/go/internal/work/logos_stagemain.go`, because `cmd/dist` drops every source file whose name contains `_test` (the `shouldbuild` filter), and the bootstrap `go` could not compile `next.go` and `eject.go` against a method in a file named `logos_testmain.go`.
+- Attack (bootstrap): `src/cmd/dist/build_test.go` (`TestNoSourceFileNamedLikeATest`) walks `src/cmd` and fails on a Go file that is not a test file and whose name contains `_test`.
+- Gate: `go test -count=1 cmd/go -run 'TestScript/(logos_eject_test_files|logos_interop_prop|logos_command)$'` MUST pass. `go test -count=1 cmd/dist -run '^TestNoSourceFileNamedLikeATest$'` MUST pass.
+- Red-team rows: #242, #257.
 - Docs: none.
 
 ## M14. Fixed-array SIMD
