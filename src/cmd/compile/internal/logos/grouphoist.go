@@ -491,6 +491,21 @@ func (fc *funcLower) groupHoistSend(s *syntax.SendStmt, top groupFrame) []syntax
 	return h.native
 }
 
+func (fc *funcLower) groupHoistGo(s *syntax.CallStmt, top groupFrame) ([]syntax.Stmt, bool) {
+	call, ok := syntax.Unparen(s.Call).(*syntax.CallExpr)
+	if !ok || !groupNodesHaveRecv(call) {
+		return nil, false
+	}
+	start := fc.groupStmtStart(s)
+	mark := fc.hoistSubMark()
+	h := fc.newGroupHoist(top, start)
+	h.slots(groupOperandSlots(call))
+	if !h.before(mark, start) {
+		return nil, false
+	}
+	return append(h.native, fc.lowerGroupGo(s)...), true
+}
+
 func (fc *funcLower) groupHoistIf(s *syntax.IfStmt, top groupFrame) []syntax.Stmt {
 	scanForLiterals(fc.fl, s.Init)
 	scanForLiterals(fc.fl, s.Cond)

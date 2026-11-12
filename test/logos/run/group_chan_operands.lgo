@@ -212,6 +212,20 @@ func recvMixedFuncLit(ctx context.Context, e *env, fail bool) error {
 	return nil
 }
 
+func recvGoFuncLit(ctx context.Context, e *env, fail bool) error {
+	go group (ctx) {
+		go {
+			go set2(e, func() int { return 1 }(), <-e.in)
+		}
+		go {
+			if fail {
+				failSibling()?
+			}
+		}
+	}
+	return nil
+}
+
 type cell struct {
 	name    string
 	run     func(ctx context.Context, e *env, fail bool) error
@@ -245,6 +259,7 @@ func valueCells() []cell {
 		{name: "send-composite", run: sendCompositeValue, want: 4, observe: fromMid},
 		{name: "send-comments", run: sendComments, want: 3, observe: fromMid},
 		{name: "mixed-funclit", run: recvMixedFuncLit, feed: []int{5, 99}, want: 52, left: 1},
+		{name: "go-funclit", run: recvGoFuncLit, feed: []int{5, 99}, want: 15, left: 1},
 	}
 }
 
@@ -258,6 +273,7 @@ func cancelCells() []cell {
 		{name: "funclit-statement-cancel", run: recvFuncLitStatement},
 		{name: "composite-channel-cancel", run: recvCompositeChannel},
 		{name: "mixed-funclit-cancel", run: recvMixedFuncLit},
+		{name: "go-funclit-cancel", run: recvGoFuncLit},
 	}
 }
 

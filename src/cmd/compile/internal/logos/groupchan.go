@@ -132,6 +132,9 @@ func (fc *funcLower) groupChanDispatch(s syntax.Stmt, top groupFrame) ([]syntax.
 		}
 		return fc.groupChanFor(s, top)
 	case *syntax.CallStmt:
+		if s.Tok == syntax.Go {
+			return fc.groupHoistGo(s, top)
+		}
 		if groupNodesHaveRecv(s.Call) {
 			fc.groupReject(s.Pos(), "in the arguments of a defer statement")
 		}

@@ -479,6 +479,20 @@ func recvNestedindex(ctx context.Context, e *env, fail bool) error {
 	return nil
 }
 
+func recvGoarg(ctx context.Context, e *env, fail bool) error {
+	go group (ctx) {
+		go {
+			go store(&e.out, <-e.in)
+		}
+		go {
+			if fail {
+				failSibling()?
+			}
+		}
+	}
+	return nil
+}
+
 func recvKeyed(ctx context.Context, e *env, fail bool) error {
 	go group (ctx) {
 		go {
@@ -643,6 +657,7 @@ func valueCells() []cell {
 		{name: "mixed", run: recvMixed, feed: []int{4, 5, 99}, want: 46, left: 1},
 		{name: "nested", run: recvNested, nested: 7, want: 7},
 		{name: "nestedindex", run: recvNestedindex, feed: []int{0, 99}, sink: 7, want: 7, left: 1},
+		{name: "goarg", run: recvGoarg, feed: []int{5, 99}, want: 5, left: 1},
 		{name: "keyed", run: recvKeyed, capIn: 1, want: 105},
 		{name: "binoperand", run: recvBinoperand, capIn: 1, want: 205},
 		{name: "indexcall", run: recvIndexcall, capIn: 1, want: 20},
@@ -678,6 +693,7 @@ func cancelCells() []cell {
 		{name: "mixedfirst-cancel", run: recvMixedfirst},
 		{name: "assert-cancel", run: recvAssert},
 		{name: "typeswitch-cancel", run: recvTypeswitch},
+		{name: "goarg-cancel", run: recvGoarg},
 		{name: "trycall-cancel", run: recvTrycall},
 		{name: "slice-cancel", run: recvSlice},
 	}

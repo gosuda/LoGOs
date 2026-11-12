@@ -22,6 +22,7 @@ ok sendcall
 ok mixed
 ok nested
 ok nestedindex
+ok goarg
 ok keyed
 ok binoperand
 ok indexcall
@@ -52,5 +53,6 @@ ok nestedindex-cancel
 ok mixedfirst-cancel
 ok assert-cancel
 ok typeswitch-cancel
+ok goarg-cancel
 ok trycall-cancel
 ok slice-cancel

@@ -108,6 +108,9 @@ func (fc *funcLower) groupCallStmt(s *syntax.CallStmt) ([]syntax.Stmt, bool) {
 	if _, ok := fc.groupTop(); !ok {
 		return nil, false
 	}
+	if out, handled := fc.groupChanStmt(s); handled {
+		return out, true
+	}
 	return fc.lowerGroupGo(s), true
 }
 
