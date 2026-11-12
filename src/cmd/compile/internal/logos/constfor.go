@@ -95,24 +95,29 @@ func (fl *fileLower) lowerConstFor() {
 	for _, decl := range fl.file.DeclList {
 		fn, ok := decl.(*syntax.FuncDecl)
 		if !ok || fn.Body == nil {
-			fl.lowerConstForLits(decl)
+			fl.lowerConstForLits(decl, nil)
 			continue
 		}
-		fl.lowerConstForList(&fn.Body.List, cfFuncCtx{sig: fl.cfFuncSig(fn), body: fn.Body})
-		fl.lowerConstForLits(fn.Body)
+		sig := fl.cfFuncSig(fn)
+		fl.lowerConstForList(&fn.Body.List, cfFuncCtx{sig: sig, body: fn.Body})
+		fl.lowerConstForLits(fn.Body, sig)
 	}
 	fl.collectInterpKinds()
 }
 
 // lowerConstForLits unrolls the const fors of every function literal
-// under root, each literal under its own signature, outer literals
-// before the literals their copies and bodies hold: a literal's body is
-// expanded first, so the literals found inside it include those of its
-// fresh copies, whose types the copy checks recorded.
-func (fl *fileLower) lowerConstForLits(root syntax.Node) {
-	for _, lit := range collectFuncLits(root) {
-		fl.lowerConstForList(&lit.Body.List, cfFuncCtx{sig: fl.cfLitSig(lit), body: lit.Body})
-		fl.lowerConstForLits(lit.Body)
+// and block lambda under root, outer bodies before the bodies their
+// copies and bodies hold: a body is expanded first, so the bodies found
+// inside it include those of its fresh copies, whose types the copy
+// checks recorded.
+func (fl *fileLower) lowerConstForLits(root syntax.Node, enclosing *types2.Signature) {
+	for _, lb := range collectLitBodies(root) {
+		sig := enclosing
+		if lb.funcLit != nil {
+			sig = fl.cfLitSig(lb.funcLit)
+		}
+		fl.lowerConstForList(&lb.body.List, cfFuncCtx{sig: sig, body: lb.body})
+		fl.lowerConstForLits(lb.body, sig)
 	}
 }
 
@@ -136,14 +141,23 @@ func (fl *fileLower) cfLitSig(lit *syntax.FuncLit) *types2.Signature {
 	return sig
 }
 
-// collectFuncLits returns the function literals under root, outermost
-// first, without descending into nested ones twice.
-func collectFuncLits(root syntax.Node) []*syntax.FuncLit {
-	var out []*syntax.FuncLit
+type cfLitBody struct {
+	body    *syntax.BlockStmt
+	funcLit *syntax.FuncLit
+}
+
+func collectLitBodies(root syntax.Node) []cfLitBody {
+	var out []cfLitBody
 	syntax.Inspect(root, func(n syntax.Node) bool {
-		if lit, ok := n.(*syntax.FuncLit); ok {
-			out = append(out, lit)
+		switch n := n.(type) {
+		case *syntax.FuncLit:
+			out = append(out, cfLitBody{body: n.Body, funcLit: n})
 			return false
+		case *syntax.LambdaExpr:
+			if block, ok := n.Body.(*syntax.BlockStmt); ok {
+				out = append(out, cfLitBody{body: block})
+				return false
+			}
 		}
 		return true
 	})

@@ -3,6 +3,7 @@
 package main
 
 import (
+	"comptime"
 	"context"
 	"errors"
 	"fmt"
@@ -27,6 +28,8 @@ func check(name string, cond bool, got, want any) {
 }
 
 var live atomic.Int64
+
+type pair struct{ A, B int }
 
 func conv(x int) (int, error) { return strconv.Atoi(strconv.Itoa(x)) }
 
@@ -103,6 +106,17 @@ func caseFuncLitTryExpression(ctx context.Context) {
 	check("funclit-try-expression", err == nil && slices.Equal(got, []int{3, 6}), err, []int{3, 6})
 }
 
+func caseConstFor(ctx context.Context) {
+	got, err := []int{1, 2}.group(ctx, limit = 2).map(x => {
+		n := 0
+		const for _, f := range comptime.Fields[pair]() {
+			n += len(f.Name)
+		}
+		return n + x
+	})
+	check("const-for", err == nil && slices.Equal(got, []int{3, 4}), err, []int{3, 4})
+}
+
 func caseConstIf(ctx context.Context) {
 	got, err := []int{1, 2}.group(ctx, limit = 2).map(x => {
 		r := 0
@@ -133,6 +147,7 @@ func main() {
 	run(caseNestedFails)
 	run(caseNestedCancelled)
 	run(caseFuncLitTryExpression)
+	run(caseConstFor)
 	run(caseConstIf)
 	run(caseScopeDefer)
 	if failed {
