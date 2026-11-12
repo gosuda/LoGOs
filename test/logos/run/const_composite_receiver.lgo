@@ -46,8 +46,34 @@ func test() {
 	check("receiver-nested-map", w.In.Look("z") == 5, w.In.Look("z"), 5)
 }
 
+type shelf struct {
+	Items []box
+}
+
+func (b *box) Peek() int { return b.N }
+
+const boxes = []box{{M: map[string]int{"a": 1}, N: 4}, {M: map[string]int{"b": 2}, N: 9}}
+
+const grid = [2]box{{M: map[string]int{"a": 1}, N: 4}, {M: map[string]int{"b": 2}, N: 9}}
+
+const sh = shelf{Items: []box{{M: map[string]int{"a": 1}, N: 4}, {M: map[string]int{"b": 2}, N: 9}}}
+
+func testElements() {
+	i := 1
+	check("receiver-slice-element-const-pointer", boxes[1].Get() == 9, boxes[1].Get(), 9)
+	check("receiver-slice-element-map", boxes[1].Look("b") == 2, boxes[1].Look("b"), 2)
+	check("receiver-slice-element-value", boxes[0].Total() == 5, boxes[0].Total(), 5)
+	check("receiver-slice-element-readonly-pointer", boxes[1].Peek() == 9, boxes[1].Peek(), 9)
+	check("receiver-slice-element-variable", boxes[i].Get() == 9, boxes[i].Get(), 9)
+	check("receiver-array-element", grid[1].Get() == 9, grid[1].Get(), 9)
+	check("receiver-array-element-variable", grid[i].Look("b") == 2, grid[i].Look("b"), 2)
+	check("receiver-field-slice-element", sh.Items[1].Get() == 9, sh.Items[1].Get(), 9)
+	check("receiver-field-slice-element-variable", sh.Items[i].Look("b") == 2, sh.Items[i].Look("b"), 2)
+}
+
 func main() {
 	test()
+	testElements()
 	if failed {
 		os.Exit(1)
 	}

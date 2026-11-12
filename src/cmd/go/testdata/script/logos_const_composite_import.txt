@@ -246,6 +246,10 @@ ok const-receiver 5
 ok pointer-readonly 5
 ok value-receiver 5
 ok lookup 1
+ok slice-const-receiver 6
+ok slice-pointer-readonly 5
+ok slice-lookup 2
+ok slice-variable 6
 -- methods/lib/lib.lgo --
 package lib
 
@@ -265,6 +269,8 @@ func (r const *S) Lookup(k string) int { return r.M[k] ?? 0 }
 func (s *S) Set() { s.N = 1 }
 
 const C = S{M: map[string]int{"a": 1}, N: 5}
+
+const Items = []S{{M: map[string]int{"a": 1}, N: 5}, {M: map[string]int{"b": 2}, N: 6}}
 -- methods/app/main.lgo --
 package main
 
@@ -279,6 +285,11 @@ func main() {
 	fmt.Println("ok pointer-readonly", lib.C.Peek())
 	fmt.Println("ok value-receiver", lib.C.Val())
 	fmt.Println("ok lookup", lib.C.Lookup("a"))
+	i := 1
+	fmt.Println("ok slice-const-receiver", lib.Items[1].Get())
+	fmt.Println("ok slice-pointer-readonly", lib.Items[0].Peek())
+	fmt.Println("ok slice-lookup", lib.Items[1].Lookup("b"))
+	fmt.Println("ok slice-variable", lib.Items[i].Get())
 }
 -- methods/badcall/main.lgo --
 package main

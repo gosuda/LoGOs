@@ -816,7 +816,15 @@ func (fl *fileLower) compositeBuild(e syntax.Expr, ref compositeRef) syntax.Expr
 	return fl.compositeSwapRoot(e, ref, ref.info.builder()+"()", call)
 }
 
+func compositeSliceRoot(ref compositeRef) bool {
+	_, ok := compositeUnderlying(ref.root.GetTypeInfo().Type).(*types2.Slice)
+	return ok
+}
+
 func (fl *fileLower) compositeBuildAddr(e syntax.Expr, ref compositeRef) syntax.Expr {
+	if compositeSliceRoot(ref) {
+		return fl.compositeBuild(e, ref)
+	}
 	pos := syntax.StartPos(ref.root)
 	fresh := callOf(pos, nameOf(pos, "new"), []syntax.Expr{callOf(pos, nameOf(pos, ref.info.builder()), nil)})
 	tv := ref.root.GetTypeInfo()
@@ -834,6 +842,9 @@ func (fl *fileLower) compositeFreeze(e syntax.Expr, ref compositeRef) syntax.Exp
 }
 
 func (fl *fileLower) compositeFreezeAddr(e syntax.Expr, ref compositeRef) syntax.Expr {
+	if compositeSliceRoot(ref) {
+		return fl.compositeFreeze(e, ref)
+	}
 	text, call := fl.compositeFreezeCall(ref)
 	tv := ref.root.GetTypeInfo()
 	tv.Type = types2.NewPointer(tv.Type)
