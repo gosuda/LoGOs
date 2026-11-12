@@ -190,6 +190,8 @@ func (r *recursion) stmtCalls(s syntax.Stmt) bool {
 		return r.switchCalls(s)
 	case *syntax.ConstSwitchStmt:
 		return r.constSwitchCalls(s)
+	case *syntax.ForStmt:
+		return r.forCalls(s)
 	}
 	return false
 }
@@ -240,6 +242,10 @@ func (r *recursion) switchCalls(s *syntax.SwitchStmt) bool {
 func (r *recursion) constSwitchCalls(s *syntax.ConstSwitchStmt) bool {
 	sel, static := types2.LogosConstSelectedCase(r.pass.Info, s)
 	return static && sel != nil && r.always(sel.Body)
+}
+
+func (r *recursion) forCalls(s *syntax.ForStmt) bool {
+	return s.Init == nil && s.Cond == nil && r.always(s.Body.List)
 }
 
 // exitsCovered reports whether every path through s that leaves the
