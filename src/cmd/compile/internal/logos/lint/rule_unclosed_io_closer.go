@@ -5,6 +5,8 @@
 package lint
 
 import (
+	"maps"
+
 	"cmd/compile/internal/syntax"
 	"cmd/compile/internal/types2"
 )
@@ -22,10 +24,11 @@ import (
 // or without ?, or inside a deferred function literal. An errdefer does not
 // close it: it runs only on failure. The function hands the variable on when
 // the variable appears anywhere except as the receiver of a method call, a
-// field selection, an operand of == or !=, or the target of an assignment:
-// returned, stored, sent, passed as an argument, aliased, taken as a method
-// value, or captured by a function literal. One finding is reported for each
-// variable, at its first assignment from a call.
+// field selection, an operand of == or !=, the target of an assignment, or
+// the value of an alias: returned, stored, sent, passed as an argument,
+// copied to a variable that is not an alias, taken as a method value, or
+// captured by a function literal. One finding is reported for each variable,
+// at its first assignment from a call.
 var unclosedIOCloser = Rule{
 	ID:      "correctness::unclosed_io_closer",
 	Group:   Correctness,
@@ -82,9 +85,11 @@ type closerScan struct {
 	declared map[*types2.Var]bool
 	// plain holds the names whose occurrence neither closes nor hands the
 	// variable on.
-	plain  map[*syntax.Name]bool
-	closed map[*types2.Var]bool
-	moved  map[*types2.Var]bool
+	plain    map[*syntax.Name]bool
+	closed   map[*types2.Var]bool
+	moved    map[*types2.Var]bool
+	assigned map[*types2.Var]int
+	alias    map[*types2.Var]*syntax.Name
 }
 
 // newCloserScan prepares the analysis of the function with the given body.
@@ -107,6 +112,10 @@ func (c *closerScan) run() {
 	if len(c.order) == 0 {
 		return
 	}
+	c.assigned = make(map[*types2.Var]int)
+	c.alias = make(map[*types2.Var]*syntax.Name)
+	syntax.Inspect(c.body, c.noteAssignments)
+	c.keepAliases()
 	syntax.Inspect(c.body, c.mark)
 	syntax.Inspect(c.body, c.discard)
 	syntax.Inspect(c.body, c.transfer)
@@ -219,6 +228,66 @@ func (c *closerScan) hold(target, value syntax.Expr, t types2.Type) {
 		c.held[v] = heldCloser{name: id, call: call}
 		c.order = append(c.order, v)
 	}
+}
+
+func (c *closerScan) noteAssignments(n syntax.Node) bool {
+	switch n := n.(type) {
+	case *syntax.FuncLit:
+		return false
+	case *syntax.AssignStmt:
+		if lhs, rhs, ok := assignPairs(n); ok {
+			c.noteTargets(lhs, rhs)
+		}
+	case *syntax.VarDecl:
+		if lhs, rhs, ok := declPairs(n); ok {
+			c.noteTargets(lhs, rhs)
+		}
+	}
+	return true
+}
+
+func (c *closerScan) noteTargets(lhs, rhs []syntax.Expr) {
+	for i, l := range lhs {
+		id, ok := syntax.Unparen(l).(*syntax.Name)
+		if !ok || isBlank(id) {
+			continue
+		}
+		v := localVar(c.pass, id)
+		if v == nil {
+			continue
+		}
+		c.assigned[v]++
+		if len(rhs) != len(lhs) {
+			continue
+		}
+		if src, ok := syntax.Unparen(rhs[i]).(*syntax.Name); ok {
+			c.alias[v] = src
+		}
+	}
+}
+
+func (c *closerScan) keepAliases() {
+	maps.DeleteFunc(c.alias, func(v *types2.Var, _ *syntax.Name) bool {
+		return c.assigned[v] != 1 || !c.declaredHere(v) || !c.isCloser(v.Type())
+	})
+	for _, src := range c.alias {
+		c.plain[src] = true
+	}
+}
+
+func (c *closerScan) aliasRoot(v *types2.Var) *types2.Var {
+	for range len(c.alias) {
+		src, ok := c.alias[v]
+		if !ok {
+			break
+		}
+		next, ok := c.pass.Info.Uses[src].(*types2.Var)
+		if !ok {
+			break
+		}
+		v = next
+	}
+	return v
 }
 
 // mark records the occurrences that are not a transfer and the deferred
@@ -340,7 +409,7 @@ func (c *closerScan) closes(call *syntax.CallExpr) {
 		return
 	}
 	if v := localVar(c.pass, id); v != nil {
-		c.closed[v] = true
+		c.closed[c.aliasRoot(v)] = true
 	}
 }
 
@@ -370,6 +439,7 @@ func (c *closerScan) capture(n syntax.Node) bool {
 // move marks the variable id uses as handed on, when it is held.
 func (c *closerScan) move(id *syntax.Name) {
 	if v, ok := c.pass.Info.Uses[id].(*types2.Var); ok {
+		v = c.aliasRoot(v)
 		if _, held := c.held[v]; held {
 			c.moved[v] = true
 		}
