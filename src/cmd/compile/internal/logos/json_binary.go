@@ -304,21 +304,16 @@ func (g *binaryGenerator) zeroWire(t types2.Type, seen map[types2.Type]bool) boo
 	}
 }
 
-var binaryImportTable = []struct{ marker, alias, path string }{
-	{"_logos_bfmt.", "_logos_bfmt", "fmt"},
-	{"_logos_bbinary.", "_logos_bbinary", "encoding/binary"},
-	{"_logos_bmath.", "_logos_bmath", "math"},
-	{"_logos_bunsafe.", "_logos_bunsafe", "unsafe"},
-	{"_logos_bslices.", "_logos_bslices", "slices"},
+type binaryImport struct{ alias, path string }
+
+var binaryImportTable = []binaryImport{
+	{"_logos_bfmt", "fmt"},
+	{"_logos_bbinary", "encoding/binary"},
+	{"_logos_bmath", "math"},
+	{"_logos_bunsafe", "unsafe"},
+	{"_logos_bslices", "slices"},
 }
 
-func (fl *fileLower) binaryImports(pos syntax.Pos) []*syntax.ImportDecl {
-	var out []*syntax.ImportDecl
-	for _, item := range binaryImportTable {
-		if !strings.Contains(fl.constText, item.marker) {
-			continue
-		}
-		out = append(out, at(&syntax.ImportDecl{LocalPkgName: nameOf(pos, item.alias), Path: litOf(pos, fmt.Sprintf("%q", item.path), syntax.StringLit)}, pos))
-	}
-	return out
+func (b binaryImport) decl(pos syntax.Pos) *syntax.ImportDecl {
+	return at(&syntax.ImportDecl{LocalPkgName: nameOf(pos, b.alias), Path: litOf(pos, fmt.Sprintf("%q", b.path), syntax.StringLit)}, pos)
 }

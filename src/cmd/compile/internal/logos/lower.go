@@ -26,7 +26,7 @@ func isGeneratedFile(name string) bool {
 }
 
 // siteDisplay reports the file and line a generated check site names:
-// for a check under a //line directive in a generated input (M20-S0: the
+// for a check under a //line directive in a generated input (the
 // rewritten cgo user file, whose checks lowering adds after cmd/cgo
 // mapped the positions back to the .lgo source), the directive's file
 // and line, so the panic names the source the user wrote (SPEC T-202).
@@ -47,23 +47,23 @@ func siteDisplay(pos syntax.Pos, base string, line uint) (string, uint) {
 // may rewrite. Files without an entry in src are left alone. Lower mutates
 // the files in place and reports whether anything changed. A true result
 // also covers a semantic-only change: const views that live purely in
-// checker info (M5-S6 rt.Freeze results, with no ConstType node to erase)
+// checker info (rt.Freeze results, with no ConstType node to erase)
 // still need the plain recheck, so the export writer and the backend only
 // ever see Go-facing types. A surviving
 // loGo/s node (TryExpr, ErrdeferStmt, SwitchExpr, ArmClause,
 // AssertedStruct, OptionType, CoalesceExpr, OptSelectExpr, ConstType,
 // YieldStmt, ScopeDeferStmt, or InterpExpr) is an internal error.
 func Lower(pkg *types2.Package, info *types2.Info, files []*syntax.File, src map[*syntax.File][]byte) (bool, map[*syntax.File][]Edit) {
-	clearRodataPackage(pkg.Path()) // M5-S3: fresh read-only marks per compile.
+	clearRodataPackage(pkg.Path()) // fresh read-only marks per compile.
 	clearOwnedConstants()
-	facts.SetCurrent(facts.Write(pkg, info, files, src)) // M23-S1: every source-phase record, before any file lowers.
+	facts.SetCurrent(facts.Write(pkg, info, files, src)) // every source-phase record, before any file lowers.
 	shared := &packageLower{info: info, tpkg: pkg, constMaps: collectConstMaps(files, info)}
 	shared.importedMaps = map[*types2.Var]*constMapGen{}
 	shared.importedDone = map[string]bool{}
 	shared.composites = map[*types2.Const]*compositeInfo{}
 	shared.importedComposites = map[*types2.Var]*importedComposite{}
 	base.ClearLogosCtClones(pkg.Path())
-	shared.ctExp = newCfExpander(shared, files, src) // M7-S3 hook: comptime generics of every file, registered before any file lowers.
+	shared.ctExp = newCfExpander(shared, files, src) // comptime generics of every file, registered before any file lowers.
 	edits := make(map[*syntax.File][]Edit)
 	changed := false
 	for _, file := range files {
@@ -91,7 +91,7 @@ func Lower(pkg *types2.Package, info *types2.Info, files []*syntax.File, src map
 	}
 	clear(interpKinds) // Kinds of originals a const for replaced are never consumed; drop them with the rest.
 	if !changed {
-		changed = infoHasConstView(info, files) || hasSynthStaticMethods(pkg) // M5-S6: pure-info consts (rt.Freeze results) need a plain recheck.
+		changed = infoHasConstView(info, files) || hasSynthStaticMethods(pkg) // pure-info consts (rt.Freeze results) need a plain recheck.
 	}
 	base.ExitIfErrors()
 	for _, file := range files {
@@ -170,14 +170,14 @@ type fileLower struct {
 	needBinary   bool
 	needReflect  bool
 	siteDecls    []*syntax.VarDecl
-	// constDecls and constText hold the M5-S4 generated declarations of
+	// constDecls and constText hold the generated declarations of
 	// this file, as parsed nodes and as eject text.
 	constDecls                 []syntax.Decl
 	constText                  string
 	names                      map[*types2.Package]string
 	genImps                    *genImports
 	importsPendingGeneratedUse []*syntax.ImportDecl
-	// Option lowering state (M3): optMemo pins one lowering per shared
+	// Option lowering state: optMemo pins one lowering per shared
 	// `T?` type node, narrowDone pins rewritten narrowed reads,
 	// wrapSpan remembers original spans of synthetic wrapper tops for
 	// wraps, wrapOwner maps a wrapped node to its wrapper ID for
@@ -210,7 +210,7 @@ type fileLower struct {
 	interpNeedConv   bool
 	interpNeedUnsafe bool
 	interpNeedFmt    bool
-	// Chain lowering state (M6-S7): loweredChains pins one lowering per
+	// Chain lowering state: loweredChains pins one lowering per
 	// chain call, so traversals over replaced trees never reprocess a
 	// finished call with stale spans. transparent marks generated
 	// option-wrapper literals, whose chains lower with the enclosing
@@ -222,9 +222,9 @@ type fileLower struct {
 	// walk at the end of the pass, instead of rescanning the whole file
 	// per replaced node.
 	stagedReplacements map[syntax.Expr]syntax.Expr
-	chainGrp           chainGroup               // M6-S7 hook: group-body scope for chain results.
-	chainExit          func(err string) string  // M6-S7 hook: a header closure hands a failing hoist's error to its statement; nil returns it.
-	groupDone          map[*syntax.FuncLit]bool // M8-S2 hook: finished group closures, pruned by the literal scan.
+	chainGrp           chainGroup               // group-body scope for chain results.
+	chainExit          func(err string) string  // a header closure hands a failing hoist's error to its statement; nil returns it.
+	groupDone          map[*syntax.FuncLit]bool // finished group closures, pruned by the literal scan.
 	funcs              map[*syntax.BlockStmt]*funcLower
 }
 
@@ -519,23 +519,23 @@ func (fl *fileLower) newSite(pos syntax.Pos, line uint) string {
 
 // lowerFile lowers every function body of one file.
 func (fl *fileLower) lowerFile() {
-	fl.collectInterpKinds() // M6-S1 hook: interpolation operand kinds before any rewrite.
-	fl.lowerComptime()      // M7-S2/S3 hook: comptime generic copies, then const for unrolling, before any rewrite.
-	fl.scanRodataMarkers()  // M5-S3 hook: hand-written //logos:rodata lines.
+	fl.collectInterpKinds() // interpolation operand kinds before any rewrite.
+	fl.lowerComptime()      // comptime generic copies, then const for unrolling, before any rewrite.
+	fl.scanRodataMarkers()  // hand-written //logos:rodata lines.
 	fl.lowerArenaEject()
-	fl.lowerZeroCopy() // M5-S5 hook: zero-copy string/bytes conversions.
+	fl.lowerZeroCopy() // zero-copy string/bytes conversions.
 	fl.lowerCTFE()
 	fl.rejectImportedCompositeStores()
 	fl.lowerConstMapRanges()
-	fl.eraseConstViews()  // M5-S1 hook: erase const views and bound recorded slices; also erases readonly interface `const` qualifiers.
-	fl.lowerConstSlices() // M13-S3 hook: []C arguments to `const []I` parameters convert through rt.CovSlice.
-	fl.lowerPlatform()    // M3-S5 hook: MustNonNil wraps for platform-pointer stores.
+	fl.eraseConstViews()  // erase const views and bound recorded slices; also erases readonly interface `const` qualifiers.
+	fl.lowerConstSlices() // []C arguments to `const []I` parameters convert through rt.CovSlice.
+	fl.lowerPlatform()    // MustNonNil wraps for platform-pointer stores.
 	fl.hoistTryInits()    // switch-expression try inits out of IIFE closures.
-	fl.lowerUnions()      // M2 hook: switch expressions and struct assertions.
-	fl.lowerOptions()     // M3-S6 hook: single-value map reads and ?? over them.
-	fl.lowerViewAs()      // M7-S5 hook: comptime.ViewAs calls to the rt helper.
-	fl.lowerChains()      // M6-S7 hook: collection chains fused into loops.
-	fl.lowerSpreads()     // M6-S4 hook: `..src` spread elements.
+	fl.lowerUnions()      // switch expressions and struct assertions.
+	fl.lowerOptions()     // single-value map reads and ?? over them.
+	fl.lowerViewAs()      // comptime.ViewAs calls to the rt helper.
+	fl.lowerChains()      // collection chains fused into loops.
+	fl.lowerSpreads()     // `..src` spread elements.
 	for _, decl := range fl.file.DeclList {
 		fn, ok := decl.(*syntax.FuncDecl)
 		if ok && fn.Body != nil {
@@ -544,35 +544,22 @@ func (fl *fileLower) lowerFile() {
 		}
 		scanForLiterals(fl, decl)
 	}
-	fl.endComptime()     // M7-S2/S3 hook: comptime import and erased-package imports, after pruning removed the dead branches.
-	fl.lowerSimd()       // M14-S1 hook: array operators and reductions to IIFEs.
-	fl.lowerTuples()     // M6-S5 hook: tuples to structs, pack/unpack.
-	fl.lowerLambdas()    // M6-S6 hook: lambdas to function literals.
-	fl.lowerProperties() // M4-S2 hook: property accessors, selector lowering, prop facts.
-	fl.lowerMakeLen()    // M15-S2 hook: products in make lengths to MulLen; sets needRT before the import.
+	fl.endComptime()     // comptime import and erased-package imports, after pruning removed the dead branches.
+	fl.lowerSimd()       // array operators and reductions to IIFEs.
+	fl.lowerTuples()     // tuples to structs, pack/unpack.
+	fl.lowerLambdas()    // lambdas to function literals.
+	fl.lowerProperties() // property accessors, selector lowering, prop facts.
+	fl.lowerMakeLen()    // products in make lengths to MulLen; sets needRT before the import.
 
-	fl.lowerStaticJSON() // M11-S1/S2 hook: generated MarshalJSON and UnmarshalJSON; sets needRT and needJSON before the imports.
+	fl.lowerStaticJSON() // generated MarshalJSON and UnmarshalJSON; sets needRT and needJSON before the imports.
 	fl.flushTypeImports()
 	if fl.needRT || fl.needSimd || fl.needSimdMath || fl.needJSON || fl.needReflect || fl.needBinary {
 		var imps []syntax.Decl
 		pos := fl.file.Pos()
-		specs := fl.logosImportSpecs()
-		for _, spec := range specs[:3] {
-			if !spec.need {
-				continue
+		for _, spec := range fl.logosImportSpecs() {
+			if spec.need {
+				imps = append(imps, spec.make(pos))
 			}
-			imps = append(imps, spec.make(pos))
-		}
-		if fl.needBinary {
-			for _, imp := range fl.binaryImports(pos) {
-				imps = append(imps, imp)
-			}
-		}
-		for _, spec := range specs[3:] {
-			if !spec.need {
-				continue
-			}
-			imps = append(imps, spec.make(pos))
 		}
 		fl.file.DeclList = append(imps, fl.file.DeclList...)
 		fl.addHeaderSplice()
@@ -580,16 +567,16 @@ func (fl *fileLower) lowerFile() {
 	for _, decl := range fl.siteDecls {
 		fl.file.DeclList = append(fl.file.DeclList, decl)
 	}
-	fl.file.DeclList = append(fl.file.DeclList, fl.constDecls...) // M5-S4: generated const map code.
+	fl.file.DeclList = append(fl.file.DeclList, fl.constDecls...) // generated const map code.
 	fl.cfDemoteImportsUnusedByGenerated()
 	if fl.constText != "" {
 		fl.add(fl.orig, fl.orig, fl.constText)
 	}
-	fl.lowerStructDefaults() // M6-S3 hook: strip `= const`, fill composite literals.
-	fl.lowerAddrFresh()      // M6-S2 hook: `&expr` to new(expr).
-	fl.emitRodata()          // M5-S3 hook: read-only vars, after every pass that creates them.
-	fl.lowerInterp()         // M6-S1 hook: interpolated strings (last: whole-span text drains inner splices).
-	fl.resolveChainMoves()   // M6-S7 hook: copies of moved chain operands, after every edit inside them.
+	fl.lowerStructDefaults() // strip `= const`, fill composite literals.
+	fl.lowerAddrFresh()      // `&expr` to new(expr).
+	fl.emitRodata()          // read-only vars, after every pass that creates them.
+	fl.lowerInterp()         // interpolated strings (last: whole-span text drains inner splices).
+	fl.resolveChainMoves()   // copies of moved chain operands, after every edit inside them.
 	fl.finalizeConstFor()
 	fl.remapRegions()
 }
@@ -610,13 +597,19 @@ type logosImportSpec struct {
 }
 
 func (fl *fileLower) logosImportSpecs() []logosImportSpec {
-	return []logosImportSpec{
+	specs := []logosImportSpec{
 		{fl.needRT, rtAlias, rtImportPath, rtImport},
 		{fl.needJSON, jsonAlias, jsonImportPath, jsonImport},
 		{fl.needReflect, reflectAlias, "reflect", reflectImport},
-		{fl.needSimd, logosSimdAlias, logosSimdPath, simdImport},
-		{fl.needSimdMath, logosSimdMathAlias, logosSimdMathPath, simdMathImport},
 	}
+	for _, item := range binaryImportTable {
+		need := fl.needBinary && strings.Contains(fl.constText, item.alias+".")
+		specs = append(specs, logosImportSpec{need, item.alias, item.path, item.decl})
+	}
+	return append(specs,
+		logosImportSpec{fl.needSimd, logosSimdAlias, logosSimdPath, simdImport},
+		logosImportSpec{fl.needSimdMath, logosSimdMathAlias, logosSimdMathPath, simdMathImport},
+	)
 }
 
 func (fl *fileLower) getGenImports() *genImports {
@@ -665,26 +658,10 @@ func (fl *fileLower) addHeaderSplice() {
 	if ins < 0 {
 		ins = off
 	}
-	specs := fl.logosImportSpecs()
-	for _, spec := range specs[:3] {
-		if !spec.need {
-			continue
+	for _, spec := range fl.logosImportSpecs() {
+		if spec.need {
+			fl.add(ins, ins, "\n\nimport "+spec.alias+" "+fmt.Sprintf("%q", spec.path))
 		}
-		fl.add(ins, ins, "\n\nimport "+spec.alias+" "+fmt.Sprintf("%q", spec.path))
-	}
-	if fl.needBinary {
-		for _, item := range binaryImportTable {
-			if !strings.Contains(fl.constText, item.marker) {
-				continue
-			}
-			fl.add(ins, ins, "\n\nimport "+item.alias+" "+fmt.Sprintf("%q", item.path))
-		}
-	}
-	for _, spec := range specs[3:] {
-		if !spec.need {
-			continue
-		}
-		fl.add(ins, ins, "\n\nimport "+spec.alias+" "+fmt.Sprintf("%q", spec.path))
 	}
 	if len(fl.siteDecls) > 0 {
 		text := "\n\n"
@@ -730,7 +707,7 @@ func scanForLiterals(fl *fileLower, root syntax.Node) {
 		if !ok {
 			return true
 		}
-		if fl.groupDone[lit] { // M8-S2 hook: group closures lower eagerly.
+		if fl.groupDone[lit] { // group closures lower eagerly.
 			return false
 		}
 		newFuncLower(fl, lit.Type, fl.cfLitSig(lit), lit.Body).run()
@@ -769,8 +746,8 @@ type funcLower struct {
 	argSeq           int
 	tmpSeq           int
 	scopeSeq         int
-	groupSeq         int          // M8-S2 hook: group temporary counter.
-	groupStack       []groupFrame // M8-S2 hook: group frames under lowering.
+	groupSeq         int          // group temporary counter.
+	groupStack       []groupFrame // group frames under lowering.
 	scopeParents     map[syntax.Node]syntax.Node
 	scopeLabels      map[string]*syntax.LabeledStmt
 	scopeDeferLabels map[string]int
