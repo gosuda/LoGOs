@@ -65,6 +65,14 @@ stdout '^fn GoAssert AssertTP=1,AssertRTP=0$'
 stdout '^lang go$'
 ! stdout 'ParamMutated'
 cd go
+go build -o $WORK/go-build.a .
+cd ..
+go tool pack p $WORK/go-build.a __.LOGOS
+stdout '^logos-facts 3$'
+stdout '^fn GoAssert AssertTP=1,AssertRTP=0$'
+stdout '^lang go$'
+! stdout 'ParamMutated'
+cd go
 go tool compile -logos.gofacts -p example.com/go -o $WORK/go-flagged.a wire.go
 cd ..
 go tool pack p $WORK/go-flagged.a __.LOGOS
@@ -80,6 +88,12 @@ cd mut
 go build -o $WORK/mut-plain.a .
 cd ..
 ! go tool pack p $WORK/mut-plain.a __.LOGOS
+cd quiet
+go build -o $WORK/quiet-go.a .
+logos build -o $WORK/quiet-logos.a .
+cd ..
+! go tool pack p $WORK/quiet-go.a __.LOGOS
+! go tool pack p $WORK/quiet-logos.a __.LOGOS
 mkdir $WORK/bin
 cd imp
 logos build -o $WORK/bin/imp$GOEXE .
@@ -221,4 +235,16 @@ func main() {
 	c := wire.NewCounter()
 	var view const *wire.Counter = c
 	view.Inc()
+}
+
+-- quiet/go.mod --
+module example.com/quiet
+
+go 1.27
+
+-- quiet/quiet.go --
+package quiet
+
+func Make() []int {
+	return make([]int, 8)
 }
