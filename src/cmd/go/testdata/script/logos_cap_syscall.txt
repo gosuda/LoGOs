@@ -58,6 +58,14 @@ cd h/main
 stderr 'internal/runtime/syscall/linux\.Syscall6'
 cd ../..
 
+cd i/main
+! logos build -o $WORK/bin/sysi$GOEXE ./cmd
+stderr 'ERROR \[capabilities::unauthorized_exec\]: Transitive dependency ''example\.com/idep'' reaches ''syscall\.AllThreadsSyscall'''
+stderr 'ERROR \[capabilities::unauthorized_net\]: Transitive dependency ''example\.com/idep'' reaches ''syscall\.AllThreadsSyscall'''
+stderr 'ERROR \[capabilities::unauthorized_exec\]: Transitive dependency ''example\.com/idep'' reaches ''syscall\.AllThreadsSyscall6'''
+stderr 'ERROR \[capabilities::unauthorized_exec\]: Transitive dependency ''example\.com/idep'' reaches ''syscall\.runtime_doAllThreadsSyscall'''
+cd ../..
+
 -- a/main/go.mod --
 module example.com/amain
 
@@ -400,4 +408,50 @@ func sys6(trap, a1, a2, a3, a4, a5, a6 uintptr) (r1, r2, errno uintptr)
 //go:noinline
 func Init() {
 	sys6(39, 0, 0, 0, 0, 0, 0)
+}
+
+-- i/main/go.mod --
+module example.com/imain
+
+go 1.27
+
+require example.com/idep v0.0.0
+
+replace example.com/idep => ../dep
+
+-- i/main/logos.toml --
+[capabilities]
+transitive_unsafe = "allow"
+transitive_exec = "deny"
+transitive_net = "deny"
+
+-- i/main/cmd/main.go --
+package main
+
+import "example.com/idep"
+
+func main() { idep.Init() }
+
+-- i/dep/go.mod --
+module example.com/idep
+
+go 1.27
+
+-- i/dep/empty.s --
+-- i/dep/dep.go --
+package idep
+
+import (
+	"syscall"
+	_ "unsafe"
+)
+
+//go:linkname doAllThreads syscall.runtime_doAllThreadsSyscall
+func doAllThreads(trap, a1, a2, a3, a4, a5, a6 uintptr) (r1, r2, err uintptr)
+
+//go:noinline
+func Init() {
+	syscall.AllThreadsSyscall(0, 0, 0, 0)
+	syscall.AllThreadsSyscall6(0, 0, 0, 0, 0, 0, 0)
+	doAllThreads(0, 0, 0, 0, 0, 0, 0)
 }
