@@ -50,7 +50,7 @@ func regionBump8() int {
 		// amd64:-"CALL.*makeslice"
 		// arm64:1"CALL.*logosRegionAllocNoscan"
 		// arm64:-"CALL.*logosRegionBump"
-		// arm64:-"ANDQ \\$-8,"
+		// arm64:-"AND \\$-8,"
 		p := arena.New[int](r)
 		return regionUse(p)
 	}
@@ -96,7 +96,7 @@ func regionBump512() int {
 		// amd64:-"CALL.*makeslice"
 		// arm64:1"CALL.*logosRegionAllocNoscan"
 		// arm64:-"CALL.*logosRegionBump"
-		// arm64:-"ANDQ \\$-8,"
+		// arm64:-"AND \\$-8,"
 		p := arena.New[regionPad512](r)
 		p[0] = 1
 		return int(p[511])
