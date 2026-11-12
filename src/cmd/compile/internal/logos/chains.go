@@ -944,11 +944,40 @@ func (cg *chainGen) run(call *syntax.CallExpr) {
 	}
 	cg.lowerArgChains(term.arg)
 	cg.lowerArgChains(base)
+	cg.fl.lowerPlainLambdas(call)
 	baseText := cg.fl.textOf(recv)
 	elemT := cg.baseElem(base)
 	resultT := cg.fl.pkg.info.TypeOf(call)
 	isTry := cg.runIsTry(ops, term)
 	cg.emit(call, ops, baseText, elemT, resultT, term, isTry)
+}
+
+func (fl *fileLower) lowerPlainLambdas(root syntax.Node) {
+	chainLams := make(map[*syntax.LambdaExpr]bool)
+	var lams []*syntax.LambdaExpr
+	syntax.Inspect(root, func(n syntax.Node) bool {
+		switch n := n.(type) {
+		case *syntax.CallExpr:
+			if fl.isChainCall(n) {
+				for _, arg := range n.ArgList {
+					if lam, ok := arg.(*syntax.LambdaExpr); ok {
+						chainLams[lam] = true
+					}
+				}
+			}
+		case *syntax.LambdaExpr:
+			lams = append(lams, n)
+		}
+		return true
+	})
+	for i := len(lams) - 1; i >= 0; i-- {
+		if _, done := fl.stagedReplacements[lams[i]]; done || chainLams[lams[i]] {
+			continue
+		}
+		if lit := fl.lowerLambdaExpr(lams[i]); lit != nil {
+			fl.stageReplacement(lams[i], lit)
+		}
+	}
 }
 
 func (fl *fileLower) preLowerCaptureBody(lam *syntax.LambdaExpr) {
