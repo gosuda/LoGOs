@@ -628,6 +628,10 @@ func (fc *funcLower) scopeReturn(s *syntax.ReturnStmt, active []*scopeDeferCtx) 
 	for i, v := range results {
 		marks[i] = tw.mark(v.Pos(), fc.fl.lazyText(span{start: fc.fl.off(syntax.StartPos(v)), end: fc.fl.exprEndOf(v)}))
 	}
+	if fc.elementFrame && len(results) == 1 {
+		results = append(slices.Clone(results), nilOf(pos))
+		marks = append(marks, nilOf(pos))
+	}
 	native := append([]syntax.Stmt{assignOf(pos, names, results)}, stanzaN...)
 	native = append(native, returnOf(pos, nil))
 	text := append([]syntax.Stmt{assignOf(pos, namesT, marks)}, stanzaT...)
