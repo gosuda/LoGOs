@@ -333,6 +333,36 @@ func pair_ofGeneric() bool {
 	return same[pairOf[int]]("pair-of-generic", unsafe.Sizeof(s))
 }
 
+type optOf[T any] = T?
+
+func opt_ofGeneric() bool {
+	var a optOf[int]
+	var s int?
+	a = s
+	s = a
+	return same[optOf[int]]("opt-of-generic", unsafe.Sizeof(s))
+}
+
+type viewOf[T any] = (const []T)?
+
+func view_ofGeneric() bool {
+	var a viewOf[int]
+	var s (const []int)?
+	a = s
+	s = a
+	return same[viewOf[int]]("view-of-generic", unsafe.Sizeof(s))
+}
+
+type funcOf[T any] = (func(T?))?
+
+func func_ofGeneric() bool {
+	var a funcOf[int]
+	var s (func(int?))?
+	a = s
+	s = a
+	return same[funcOf[int]]("func-of-generic", unsafe.Sizeof(s))
+}
+
 var cases = []func() bool{
 	tuple_optionsAlias,
 	tuple_optionsDefined,
@@ -373,6 +403,9 @@ var cases = []func() bool{
 	array_option_funcAlias,
 	array_option_funcDefined,
 	pair_ofGeneric,
+	opt_ofGeneric,
+	view_ofGeneric,
+	func_ofGeneric,
 }
 
 func main() {

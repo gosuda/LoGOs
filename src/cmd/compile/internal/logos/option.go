@@ -967,7 +967,7 @@ func (fl *fileLower) lowerMapIndex(e *syntax.IndexExpr) syntax.Expr {
 		return fl.lowerConstMapRead(e, g)
 	}
 	opt := fl.asOption(fl.optType(e))
-	if !fl.isMapRead(e) || opt == nil || types2.LogosOptionIsBare(opt.Elem) {
+	if !fl.isMapRead(e) || opt == nil || types2.LogosOptionIsBare(opt.Elem) || fl.isTypeExpr(e) {
 		e.X = fl.lowerOptExpr(e.X)
 		e.Index = fl.lowerOptExpr(e.Index)
 		return e
@@ -1398,11 +1398,7 @@ func (fl *fileLower) callTargets(e *syntax.CallExpr, sig *types2.Signature) []ty
 	targets := make([]types2.Type, n)
 	shift := 0
 	if fun, ok := syntax.Unparen(e.Fun).(*syntax.SelectorExpr); ok {
-		isType := fun.X.GetTypeInfo().IsType()
-		if tv, ok := fl.pkg.info.Types[fun.X]; ok {
-			isType = tv.IsType()
-		}
-		if isType {
+		if fl.isTypeExpr(fun.X) {
 			if recv := sig.Recv(); recv != nil && n > 0 {
 				targets[0] = recv.Type()
 				shift = 1
@@ -1413,6 +1409,13 @@ func (fl *fileLower) callTargets(e *syntax.CallExpr, sig *types2.Signature) []ty
 		targets[i] = fl.paramTarget(params, sig.Variadic(), e.HasDots, n, i-shift)
 	}
 	return targets
+}
+
+func (fl *fileLower) isTypeExpr(e syntax.Expr) bool {
+	if tv, ok := fl.pkg.info.Types[e]; ok {
+		return tv.IsType()
+	}
+	return e.GetTypeInfo().IsType()
 }
 
 func (fl *fileLower) paramTarget(params *types2.Tuple, variadic, dots bool, nargs, i int) types2.Type {

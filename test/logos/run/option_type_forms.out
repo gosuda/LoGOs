@@ -37,3 +37,6 @@ ok chan-option-defined
 ok array-option-func-alias
 ok array-option-func-defined
 ok pair-of-generic
+ok opt-of-generic
+ok view-of-generic
+ok func-of-generic
