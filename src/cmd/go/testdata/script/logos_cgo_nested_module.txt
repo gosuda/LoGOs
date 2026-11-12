@@ -10,6 +10,13 @@ env CGO_ENABLED=
 [cgo] logos env CGO_ENABLED
 [cgo] stdout '^1$'
 
+cd plain
+[cgo] go build -o $WORK/plain-go.bin .
+[cgo] ! logos build -o $WORK/plain-logos.bin .
+[cgo] stderr '\[restriction::cgo_usage\]'
+[cgo] logos env CGO_ENABLED
+[cgo] stdout '^0$'
+
 -- go.mod --
 module example.com/g
 
@@ -38,3 +45,27 @@ package main
 import "fmt"
 
 func main() { fmt.Println("sub") }
+
+-- plain/go.mod --
+module example.com/g/plain
+
+go 1.27
+
+-- plain/main.go --
+package main
+
+/*
+int answer() { return 42; }
+*/
+import "C"
+
+import "fmt"
+
+func main() { fmt.Println("plain:", C.answer()) }
+
+-- plain/lgo/main.lgo --
+package main
+
+import "fmt"
+
+func main() { fmt.Println("lgo") }
