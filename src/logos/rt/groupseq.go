@@ -7,6 +7,7 @@ package rt
 import (
 	"cmp"
 	"context"
+	"errors"
 	"io"
 	"iter"
 	"reflect"
@@ -16,6 +17,8 @@ import (
 )
 
 var closerType = reflect.TypeFor[io.Closer]()
+
+var ErrNotOwned = errors.New("logos: group stage result is not owned by the stage")
 
 func GroupSeq[S, R any](ctx context.Context, limit int, src iter.Seq[S], f func(context.Context, S) (R, bool, error)) iter.Seq2[R, error] {
 	s := newGroupStage(limit, f)
@@ -40,10 +43,11 @@ func GroupChanUnordered[S, R any](ctx context.Context, limit int, src <-chan S, 
 }
 
 type groupItem[R any] struct {
-	idx  int
-	keep bool
-	r    R
-	err  error
+	idx     int
+	keep    bool
+	unowned bool
+	r       R
+	err     error
 }
 
 type groupJob[S any] struct {
@@ -250,6 +254,9 @@ func (s *groupStage[S, R]) call(ctx context.Context, j groupJob[S]) (it groupIte
 		}()
 	}
 	it.r, it.keep, it.err = s.f(ctx, j.v)
+	if it.err != nil && errors.Is(it.err, ErrNotOwned) {
+		it.err, it.unowned = nil, true
+	}
 	return it
 }
 
@@ -325,7 +332,7 @@ func (s *groupStage[S, R]) process(it groupItem[R]) {
 		return
 	}
 	if !it.keep {
-		if s.closes {
+		if s.closes && !it.unowned {
 			closeValue(it.r)
 		}
 		return
@@ -361,7 +368,7 @@ func (s *groupStage[S, R]) join() error {
 func (s *groupStage[S, R]) abandon() {
 	lost := make([]groupItem[R], 0, len(s.buf))
 	for _, it := range s.buf {
-		if it.err == nil {
+		if it.err == nil && !it.unowned {
 			lost = append(lost, it)
 		}
 	}
