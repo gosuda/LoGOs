@@ -154,6 +154,8 @@ func (fl *fileLower) eraseConstViews() {
 					n.Const = false
 				}
 			}
+		case *syntax.PropertyType:
+			fl.eraseConstIn(&n.Type)
 		case *syntax.TypeDecl:
 			fl.eraseConstIn(&n.Type)
 		case *syntax.VarDecl:

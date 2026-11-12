@@ -73,28 +73,21 @@ func (fl *fileLower) lowerPropertyInterface(it *syntax.InterfaceType) {
 		changed = true
 		pos := f.Pos()
 		name := f.Name.Value
-		if seen[name] {
-			typeSp, ok := fl.platformSpan(pt.Type)
-			if !ok {
-				base.Fatalf("logos: cannot span property type at %s", pos.String())
-			}
-			start := fl.off(pos)
-			if cpos := fl.off(pt.Pos()); cpos < start {
-				start = cpos
-			}
-			fl.addT(start, typeSp.end, gen(""))
-			continue
-		}
-		seen[name] = true
 		typeSp, ok := fl.platformSpan(pt.Type)
 		if !ok {
 			base.Fatalf("logos: cannot span property type at %s", pos.String())
 		}
-		typeText := fl.textOf(typeSp)
 		start := fl.off(pos)
 		if cpos := fl.off(pt.Pos()); cpos < start {
 			start = cpos
 		}
+		afterName := span{start: fl.off(f.Name.Pos()) + len(name), end: typeSp.end}
+		typeText := fl.textOf(afterName).trim()
+		if seen[name] {
+			fl.addT(start, afterName.end, gen(""))
+			continue
+		}
+		seen[name] = true
 		getResult := cloneType(pt.Type, pos)
 		out = append(out, at(&syntax.Field{
 			Name: nameOf(pos, "Logos_Get"+name),
@@ -109,7 +102,7 @@ func (fl *fileLower) lowerPropertyInterface(it *syntax.InterfaceType) {
 			}, pos))
 			parts = append(parts, gen("; Logos_Set"+name+"("), typeText, gen(")"))
 		}
-		fl.addT(start, typeSp.end, cat(parts...))
+		fl.addT(start, afterName.end, cat(parts...))
 	}
 	if changed {
 		it.MethodList = out
@@ -296,7 +289,7 @@ func isPointerRecv(fn *types2.Func) bool {
 }
 
 func (fl *fileLower) spellPropType(t types2.Type, pos syntax.Pos) (syntax.Expr, bool) {
-	text, ok := fl.spellType(t)
+	text, ok := fl.spellLowered(t)
 	if !ok {
 		return nil, false
 	}
