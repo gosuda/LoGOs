@@ -92,6 +92,23 @@
 // digits). Under cmd/dist the package is discovered by `go list std cmd` and
 // runs in the batched "Testing packages." pass with the per-binary
 // -timeout=180s budget, which the fast tier must fit.
+//
+// # Release tier and the gate
+//
+// cmd/dist and the default gate run the fast tier only. The release tier,
+// which holds the release configurations, TestParityMutants and the upstream
+// sweep, runs on a quiet host with
+//
+//	go test -count=1 -timeout 3h cmd/internal/goparity \
+//	    -goparity.release -goparity.stamp=FILE
+//
+// -goparity.release with -short is rejected, since it would run part of the
+// tier. -goparity.stamp is accepted only for a complete run: release, oracle
+// on, no -short, no -run, no -skip. The harness removes FILE first and
+// writes the git tip of the fork tree into it only when every test passed
+// and the tree has no uncommitted change to a tracked file. A gate that needs
+// the release tier compares FILE with git rev-parse HEAD and fails when FILE
+// is absent or differs: the release tier has then not run on the tip.
 package goparity
 
 import (
@@ -104,6 +121,7 @@ import (
 	"fmt"
 	"go/parser"
 	"go/token"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -126,6 +144,171 @@ var (
 	upstreamFlag = flag.String("goparity.upstream", "", `upstream oracle go binary, or "off" (default $UPROOT1273/bin/go)`)
 	releaseFlag  = flag.Bool("goparity.release", false, "add the release tier configurations and the mutation probes")
 )
+
+var stampFlag = flag.String("goparity.stamp", "", "after a complete green release run, write the git tip of the fork tree to this file")
+
+type tierRequest struct {
+	release  bool
+	short    bool
+	upstream string
+	run      string
+	skip     string
+	stamp    string
+}
+
+func tierProblem(r tierRequest) string {
+	switch {
+	case r.release && r.short:
+		return "-goparity.release with -short runs only part of the release tier"
+	case r.stamp == "":
+		return ""
+	case !r.release:
+		return "-goparity.stamp needs -goparity.release"
+	case r.upstream == "off":
+		return "-goparity.stamp needs the upstream oracle"
+	case r.run != "" || r.skip != "":
+		return "-goparity.stamp needs the whole suite, and -run or -skip selects a part"
+	}
+	return ""
+}
+
+func TestTierProblem(t *testing.T) {
+	complete := tierRequest{release: true, upstream: "/oracle/bin/go", stamp: "/gate/stamp"}
+	with := func(change func(*tierRequest)) tierRequest {
+		r := complete
+		change(&r)
+		return r
+	}
+	for _, tc := range []struct {
+		name string
+		req  tierRequest
+		bad  bool
+	}{
+		{"default tier", tierRequest{}, false},
+		{"default tier with -short and -run", tierRequest{short: true, run: "TestParity"}, false},
+		{"release", tierRequest{release: true}, false},
+		{"complete stamped release", complete, false},
+		{"release with -short", tierRequest{release: true, short: true}, true},
+		{"stamped release with -short", with(func(r *tierRequest) { r.short = true }), true},
+		{"stamp without release", tierRequest{stamp: "/gate/stamp"}, true},
+		{"stamp with the oracle off", with(func(r *tierRequest) { r.upstream = "off" }), true},
+		{"stamp with -run", with(func(r *tierRequest) { r.run = "TestParityMutants" }), true},
+		{"stamp with -skip", with(func(r *tierRequest) { r.skip = "TestParityUpstreamSweep" }), true},
+	} {
+		if got := tierProblem(tc.req) != ""; got != tc.bad {
+			t.Errorf("%s: problem reported = %v, want %v", tc.name, got, tc.bad)
+		}
+	}
+}
+
+func flagValue(name string) string {
+	if f := flag.Lookup(name); f != nil {
+		return f.Value.String()
+	}
+	return ""
+}
+
+func tipIdentity(goroot string) (string, error) {
+	status, err := exec.Command("git", "-C", goroot, "status", "--porcelain", "--untracked-files=no").Output()
+	if err != nil {
+		return "", fmt.Errorf("git status in %s: %w", goroot, err)
+	}
+	if len(bytes.TrimSpace(status)) != 0 {
+		return "", fmt.Errorf("%s has uncommitted changes to tracked files", goroot)
+	}
+	head, err := exec.Command("git", "-C", goroot, "rev-parse", "HEAD").Output()
+	if err != nil {
+		return "", fmt.Errorf("git rev-parse in %s: %w", goroot, err)
+	}
+	return strings.TrimSpace(string(head)), nil
+}
+
+func writeStamp(path, goroot string) error {
+	tip, err := tipIdentity(goroot)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, []byte(tip+"\n"), 0o644)
+}
+
+func runTier(m *testing.M, req tierRequest) int {
+	if problem := tierProblem(req); problem != "" {
+		fmt.Fprintln(os.Stderr, "goparity:", problem)
+		return 2
+	}
+	if req.stamp == "" {
+		return m.Run()
+	}
+	if err := os.Remove(req.stamp); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		fmt.Fprintln(os.Stderr, "goparity: removing the old stamp:", err)
+		return 2
+	}
+	if code := m.Run(); code != 0 {
+		return code
+	}
+	if err := writeStamp(req.stamp, forkGoroot()); err != nil {
+		fmt.Fprintln(os.Stderr, "goparity: the release run passed but left no stamp:", err)
+		return 1
+	}
+	return 0
+}
+
+func TestMain(m *testing.M) {
+	flag.Parse()
+	os.Exit(runTier(m, tierRequest{
+		release:  *releaseFlag,
+		short:    testing.Short(),
+		upstream: *upstreamFlag,
+		run:      flagValue("test.run"),
+		skip:     flagValue("test.skip"),
+		stamp:    *stampFlag,
+	}))
+}
+
+func TestTipIdentityNeedsACleanTrackedTree(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not installed")
+	}
+	dir := t.TempDir()
+	git := func(args ...string) string {
+		full := append([]string{"-C", dir, "-c", "user.name=goparity", "-c", "user.email=goparity@example.com", "-c", "commit.gpgsign=false"}, args...)
+		out, err := exec.Command("git", full...).CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	file := filepath.Join(dir, "tracked")
+	if err := os.WriteFile(file, []byte("1"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git("init", "-q")
+	git("add", "tracked")
+	git("commit", "-q", "-m", "tip")
+	want := git("rev-parse", "HEAD")
+	if err := os.WriteFile(filepath.Join(dir, "untracked"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := tipIdentity(dir); err != nil || got != want {
+		t.Errorf("tipIdentity with an untracked file = %q, %v; want %q", got, err, want)
+	}
+	stamp := filepath.Join(t.TempDir(), "stamp")
+	if err := writeStamp(stamp, dir); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := os.ReadFile(stamp); err != nil || string(got) != want+"\n" {
+		t.Errorf("stamp = %q, %v; want %q", got, err, want+"\n")
+	}
+	if err := os.WriteFile(file, []byte("2"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := tipIdentity(dir); err == nil {
+		t.Errorf("tipIdentity of a tree with an uncommitted change = %q, want an error", got)
+	}
+	if err := writeStamp(filepath.Join(t.TempDir(), "stamp2"), dir); err == nil {
+		t.Error("a stamp was written for a tree with an uncommitted change")
+	}
+}
 
 type config struct {
 	id       string
@@ -255,12 +438,13 @@ func TestForkToolIgnoresAStaleLogosBinary(t *testing.T) {
 	}
 }
 
+func forkGoroot() string {
+	return cmp.Or(os.Getenv("GOROOT"), runtime.GOROOT())
+}
+
 func forkTool(t *testing.T) toolchain {
 	t.Helper()
-	goroot := os.Getenv("GOROOT")
-	if goroot == "" {
-		goroot = runtime.GOROOT()
-	}
+	goroot := forkGoroot()
 	if goroot == "" {
 		t.Fatal("GOROOT is not set")
 	}
