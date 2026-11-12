@@ -868,14 +868,9 @@ func (e *evaluator) evalMapLit(fr *frame, lit *syntax.CompositeLit, t *Type) (Va
 		if !ok {
 			return Value{}, e.fail(posOf(el), "missing key in const map")
 		}
-		k, err := e.evalExpr(fr, kv.Key)
+		k, err := e.evalElem(fr, kv.Key, t.Key)
 		if err != nil {
 			return Value{}, err
-		}
-		if t.Key != nil {
-			if k, err = e.convert(k, t.Key, posOf(kv.Key)); err != nil {
-				return Value{}, err
-			}
 		}
 		val, err := e.evalElem(fr, kv.Value, t.Elem)
 		if err != nil {

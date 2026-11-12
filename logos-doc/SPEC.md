@@ -1408,6 +1408,7 @@ A const map with up to 8 keys MUST lower to a `switch` lookup [T-Sec7]. A const 
 A const map key of type complex64 or complex128 MUST be accepted. [T-201][T-Sec7]
 A complex key with a NaN real or imaginary component MUST fail compilation with `[correctness::const_eval]`. [T-201][T-Sec7]
 Const map range over complex keys MUST visit keys in sorted order by real part, then by imaginary part. [T-201][T-Sec7]
+A const map literal MUST take an elided composite key or element type from the map's key or element type, exactly where Go allows eliding it in a map, slice, or array literal. [T-Sec7]
 
 ```lgo
 const mimeMap = map[string]string{
