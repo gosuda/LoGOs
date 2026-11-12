@@ -62,3 +62,63 @@ func deferReleaseKeepsHeld(g *gate) {
 	defer g.release()
 	g.toggle()
 }
+
+//logos:requires g.mu
+func peek(g *gate) int {
+	return 1
+}
+
+func use(n int) {}
+
+func goLiteralInheritsNoLock(g *gate) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	go func() {
+		g.toggle() // ERROR "\[concurrency::lock_requirement_unmet\]"
+	}()
+}
+
+func goLiteralTakesOwnLock(g *gate) {
+	go func() {
+		g.mu.Lock()
+		g.toggle()
+		g.mu.Unlock()
+	}()
+}
+
+func goAcquireStaysInChild(g *gate) {
+	go func() {
+		g.seal()
+	}()
+	g.toggle() // ERROR "\[concurrency::lock_requirement_unmet\]"
+}
+
+func goCallCalleeRunsInChild(g *gate) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	go peek(g) // ERROR "\[concurrency::lock_requirement_unmet\]"
+}
+
+func goCallMethodRunsInChild(g *gate) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	go g.toggle() // ERROR "\[concurrency::lock_requirement_unmet\]"
+}
+
+func goCallArgumentCallRunsInParent(g *gate) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	go use(peek(g))
+}
+
+func goCallArgumentCallUnlocked(g *gate) {
+	go use(peek(g)) // ERROR "\[concurrency::lock_requirement_unmet\]"
+}
+
+func goLiteralCallBodyRunsInChild(g *gate) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	go func(n int) {
+		g.toggle() // ERROR "\[concurrency::lock_requirement_unmet\]"
+	}(peek(g))
+}

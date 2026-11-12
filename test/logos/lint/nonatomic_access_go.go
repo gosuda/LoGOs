@@ -59,3 +59,31 @@ func badGlobal() {
 func okGlobal() {
 	atomic.StoreInt64(&gtotal, 5)
 }
+
+func use(n int64) {}
+
+func goLiteralPlain(c *counter) {
+	go func() {
+		c.hits++ // ERROR "\[concurrency::nonatomic_access\]"
+	}()
+}
+
+func goLiteralAtomic(c *counter) {
+	go func() {
+		atomic.AddInt64(&c.hits, 1)
+	}()
+}
+
+func goCallArgumentPlain(c *counter) {
+	go use(c.hits) // ERROR "\[concurrency::nonatomic_access\]"
+}
+
+func goCallArgumentAtomic(c *counter) {
+	go use(atomic.LoadInt64(&c.hits))
+}
+
+func goLiteralCallBodyPlain(c *counter) {
+	go func(n int64) {
+		c.hits = n // ERROR "\[concurrency::nonatomic_access\]"
+	}(atomic.LoadInt64(&c.hits))
+}

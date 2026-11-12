@@ -2,7 +2,10 @@
 
 package p
 
-import "sync"
+import (
+	"context"
+	"sync"
+)
 
 type stats struct {
 	mu sync.Mutex
@@ -260,4 +263,123 @@ func unlockDeferredInEarlyClosure(s *stats) {
 		defer s.mu.Unlock()
 	}()
 	_ = s.total // ERROR "\[concurrency::unguarded_access\]"
+}
+
+func use(n int) error { return nil }
+
+func childInheritsNoLock(ctx context.Context, s *stats) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	go group (ctx) {
+		go {
+			s.total++ // ERROR "\[concurrency::unguarded_access\]"
+		}
+	}
+	return nil
+}
+
+func childTakesOwnLock(ctx context.Context, s *stats) error {
+	go group (ctx) {
+		go {
+			s.mu.Lock()
+			s.total++
+			s.mu.Unlock()
+		}
+	}
+	return nil
+}
+
+func childLockStaysInChild(ctx context.Context, s *stats) error {
+	go group (ctx) {
+		go {
+			s.mu.Lock()
+		}
+	}
+	_ = s.total // ERROR "\[concurrency::unguarded_access\]"
+	return nil
+}
+
+func groupBodyRunsInParent(ctx context.Context, s *stats) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	go group (ctx) {
+		s.total++
+	}
+	return nil
+}
+
+func groupBodyUnlocked(ctx context.Context, s *stats) error {
+	go group (ctx) {
+		s.total++ // ERROR "\[concurrency::unguarded_access\]"
+	}
+	return nil
+}
+
+func callFormArgumentsRunInParent(ctx context.Context, s *stats) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	go group (ctx) {
+		go use(s.total)
+	}
+	return nil
+}
+
+func callFormArgumentsUnlocked(ctx context.Context, s *stats) error {
+	go group (ctx) {
+		go use(s.total) // ERROR "\[concurrency::unguarded_access\]"
+	}
+	return nil
+}
+
+func literalCallArgumentsRunInParent(ctx context.Context, s *stats) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	go group (ctx) {
+		go func(n int) error {
+			s.total++ // ERROR "\[concurrency::unguarded_access\]"
+			return nil
+		}(s.total)
+	}
+	return nil
+}
+
+func nestedGroupChildInheritsNoLock(ctx context.Context, s *stats) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	go group (ctx) {
+		go {
+			go group (ctx) {
+				go {
+					s.total++ // ERROR "\[concurrency::unguarded_access\]"
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func nestedGroupBodyKeepsChildLock(ctx context.Context, s *stats) error {
+	go group (ctx) {
+		go {
+			s.mu.Lock()
+			go group (ctx) {
+				s.total++
+				go {
+					s.total++ // ERROR "\[concurrency::unguarded_access\]"
+				}
+			}
+			s.mu.Unlock()
+		}
+	}
+	return nil
+}
+
+func segmentLambdaInheritsNoLock(ctx context.Context, s *stats, xs []int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := xs.group(ctx, limit = 2).map(x => {
+		s.total++ // ERROR "\[concurrency::unguarded_access\]"
+		return x
+	})
+	return err
 }

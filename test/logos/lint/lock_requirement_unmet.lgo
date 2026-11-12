@@ -2,7 +2,10 @@
 
 package p
 
-import "sync"
+import (
+	"context"
+	"sync"
+)
 
 type gate struct {
 	mu sync.Mutex
@@ -61,4 +64,111 @@ func deferReleaseKeepsHeld(g *gate) {
 	g.mu.Lock()
 	defer g.release()
 	g.toggle()
+}
+
+//logos:requires g.mu
+func peek(g *gate) int {
+	return 1
+}
+
+func use(n int) error { return nil }
+
+func childInheritsNoLock(ctx context.Context, g *gate) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	go group (ctx) {
+		go {
+			g.toggle() // ERROR "\[concurrency::lock_requirement_unmet\]"
+		}
+	}
+	return nil
+}
+
+func childTakesOwnLock(ctx context.Context, g *gate) error {
+	go group (ctx) {
+		go {
+			g.mu.Lock()
+			g.toggle()
+			g.mu.Unlock()
+		}
+	}
+	return nil
+}
+
+func childAcquireStaysInChild(ctx context.Context, g *gate) error {
+	go group (ctx) {
+		go {
+			g.seal()
+		}
+	}
+	g.toggle() // ERROR "\[concurrency::lock_requirement_unmet\]"
+	return nil
+}
+
+func groupBodyRunsInParent(ctx context.Context, g *gate) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	go group (ctx) {
+		g.toggle()
+	}
+	return nil
+}
+
+func groupBodyUnlocked(ctx context.Context, g *gate) error {
+	go group (ctx) {
+		g.toggle() // ERROR "\[concurrency::lock_requirement_unmet\]"
+	}
+	return nil
+}
+
+func callFormCalleeRunsInChild(ctx context.Context, g *gate) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	go group (ctx) {
+		go peek(g) // ERROR "\[concurrency::lock_requirement_unmet\]"
+	}
+	return nil
+}
+
+func callFormArgumentCallRunsInParent(ctx context.Context, g *gate) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	go group (ctx) {
+		go use(peek(g))
+	}
+	return nil
+}
+
+func callFormArgumentCallUnlocked(ctx context.Context, g *gate) error {
+	go group (ctx) {
+		go use(peek(g)) // ERROR "\[concurrency::lock_requirement_unmet\]"
+	}
+	return nil
+}
+
+func literalCallBodyRunsInChild(ctx context.Context, g *gate) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	go group (ctx) {
+		go func(n int) error {
+			g.toggle() // ERROR "\[concurrency::lock_requirement_unmet\]"
+			return nil
+		}(peek(g))
+	}
+	return nil
+}
+
+func nestedGroupChildInheritsNoLock(ctx context.Context, g *gate) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	go group (ctx) {
+		go {
+			go group (ctx) {
+				go {
+					g.toggle() // ERROR "\[concurrency::lock_requirement_unmet\]"
+				}
+			}
+		}
+	}
+	return nil
 }

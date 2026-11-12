@@ -261,3 +261,46 @@ func unlockDeferredInEarlyClosure(s *stats) {
 	}()
 	_ = s.total // ERROR "\[concurrency::unguarded_access\]"
 }
+
+func use(n int) {}
+
+func goLiteralInheritsNoLock(s *stats) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	go func() {
+		s.total++ // ERROR "\[concurrency::unguarded_access\]"
+	}()
+}
+
+func goLiteralTakesOwnLock(s *stats) {
+	go func() {
+		s.mu.Lock()
+		s.total++
+		s.mu.Unlock()
+	}()
+}
+
+func goLiteralLockStaysInChild(s *stats) {
+	go func() {
+		s.mu.Lock()
+	}()
+	_ = s.total // ERROR "\[concurrency::unguarded_access\]"
+}
+
+func goCallArgumentsRunInParent(s *stats) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	go use(s.total)
+}
+
+func goCallArgumentsUnlocked(s *stats) {
+	go use(s.total) // ERROR "\[concurrency::unguarded_access\]"
+}
+
+func goLiteralCallArgumentsRunInParent(s *stats) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	go func(n int) {
+		s.total++ // ERROR "\[concurrency::unguarded_access\]"
+	}(s.total)
+}
