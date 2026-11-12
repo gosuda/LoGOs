@@ -272,7 +272,7 @@ func TestGroupOutsideGoroutineStaysBlocked(t *testing.T) {
 func inFlightWhenQuiet(t *testing.T, limit, children int) int32 {
 	t.Helper()
 	g, _ := NewGroup(t.Context(), limit)
-	var inFlight atomic.Int32
+	var inFlight, ran atomic.Int32
 	release := make(chan struct{})
 	spawned := make(chan struct{})
 	go func() {
@@ -281,6 +281,7 @@ func inFlightWhenQuiet(t *testing.T, limit, children int) int32 {
 			g.Go(func(ctx context.Context) error {
 				inFlight.Add(1)
 				<-release
+				ran.Add(1)
 				return nil
 			})
 		}
@@ -291,6 +292,9 @@ func inFlightWhenQuiet(t *testing.T, limit, children int) int32 {
 	<-spawned
 	if err := g.Wait(); err != nil {
 		t.Fatalf("Wait = %v, want nil", err)
+	}
+	if n := ran.Load(); n != int32(children) {
+		t.Fatalf("children that ran = %d, want %d", n, children)
 	}
 	return got
 }
