@@ -302,6 +302,13 @@ func (ls *labelScope) blockBranches(parent *block, ctxt targets, lstmt *LabeledS
 			inner := targets{ctxt.breaks, ctxt.continues, -1}
 			innerBlock(inner, s.Pos(), s.List)
 
+		case *GroupStmt:
+			inner := targets{ctxt.breaks, ctxt.continues, -1}
+			innerBlock(inner, s.Body.Pos(), s.Body.List)
+
+		case *GroupChild:
+			checkBranches(s.Body, ls.errh)
+
 		case *IfStmt:
 			inner := targets{ctxt.breaks, ctxt.continues, -1}
 			innerBlock(inner, s.Then.Pos(), s.Then.List)

@@ -1123,6 +1123,8 @@ When the context argument of a `go group` statement is a plain identifier, that 
 
 The operands of a `return` in the block body, outside any child, MUST be evaluated where the statement stands, with the identifier of the previous sentence denoting the group context; the join MUST follow, and the function MUST return those values unless the join reports an error, in which case it MUST return that error. A statement after the last child MUST run before the join. [T-206]
 
+The parent body of a `go group` MUST retain the enclosing function's label namespace and permit otherwise valid outward `break`, `continue`, and `goto` statements. Each child body MUST have an independent function label namespace: labels MUST be used within that child, and branches MUST NOT target labels in the parent or another child. [T-206]
+
 A `?` statement in the block body, outside any child, MUST run where it stands while the children run, and MUST leave the group open for the statements after it; only when it fails MUST the join precede the return of its error, and a join error MUST replace the error of the statement. [T-206]
 
 A `scope defer` written directly in the block body MUST run after the join at every exit of the block (the end, `return`, `break`, `continue`, labeled `break`, `goto`, a failed `?`, and a panic), and a scope defer of an enclosing block MUST run after the join of every group the exit leaves; a scope defer of a block nested in the body MUST run when that nested block exits, before the join. [T-206][T-104.7]
