@@ -1339,7 +1339,7 @@ The `[lints]` and `[capabilities]` tables MUST apply to modules of both kinds un
 When the file is absent, the tool MUST use the default for every key. [T-Sec8]
 The parser MUST accept tables. [T-Sec8]
 The parser MUST accept key and value pairs, basic strings, literal strings, integers, booleans, string arrays, and hash comments. [T-Sec8]
-Inputs larger than 1 MB MUST fail parsing. [T-Sec8]
+Inputs larger than 1 MiB MUST fail parsing. [T-Sec8]
 The parser MUST reject unknown tables and unknown keys. [T-Sec8]
 Each error MUST report file, line, and column as logos.toml:<line>:<col>: <message>. [T-Sec8]
 
