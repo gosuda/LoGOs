@@ -6,6 +6,8 @@ cp $GOROOT/test/logos/run/try_switch_fail.lgo b/main.lgo
 cp $GOROOT/test/logos/run/try_switch_scope.lgo c/main.lgo
 cp $GOROOT/test/logos/run/try_switch_complete.lgo d/main.lgo
 cp $GOROOT/test/logos/run/try_switch_control.lgo e/main.lgo
+cp $GOROOT/test/logos/run/try_switch_positions.lgo f/main.lgo
+cp $GOROOT/test/logos/run/try_switch_arms.lgo g/main.lgo
 
 cd a
 logos run .
@@ -77,6 +79,32 @@ exec $GOROOT/bin/gofmt -l .
 ! stdout .
 cd ../..
 
+cd f
+logos run .
+cmp stdout $GOROOT/test/logos/run/try_switch_positions.out
+logos eject -o out
+exists out/main.go
+cd out
+go run .
+cmp stdout $GOROOT/test/logos/run/try_switch_positions.out
+exec env -u GOROOT $UPROOT1272/bin/go build ./...
+exec $GOROOT/bin/gofmt -l .
+! stdout .
+cd ../..
+
+cd g
+logos run .
+cmp stdout $GOROOT/test/logos/run/try_switch_arms.out
+logos eject -o out
+exists out/main.go
+cd out
+go run .
+cmp stdout $GOROOT/test/logos/run/try_switch_arms.out
+exec env -u GOROOT $UPROOT1272/bin/go build ./...
+exec $GOROOT/bin/gofmt -l .
+! stdout .
+cd ../..
+
 -- a/go.mod --
 module example.com/switchtryorder
 
@@ -95,5 +123,13 @@ module example.com/switchtrycomplete
 go 1.27
 -- e/go.mod --
 module example.com/switchtrycontrol
+
+go 1.27
+-- f/go.mod --
+module example.com/switchtrypositions
+
+go 1.27
+-- g/go.mod --
+module example.com/switchtryarms
 
 go 1.27

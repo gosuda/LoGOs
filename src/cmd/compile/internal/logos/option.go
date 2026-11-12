@@ -1932,7 +1932,7 @@ func (fl *fileLower) targetOfLHS(e syntax.Expr) types2.Type {
 		if obj, ok := fl.pkg.info.Uses[e].(*types2.Var); ok {
 			return obj.Type()
 		}
-		return nil
+		return fl.optType(e)
 	case *syntax.SelectorExpr:
 		if sel := fl.pkg.info.Selections[e]; sel != nil {
 			return sel.Obj().Type()

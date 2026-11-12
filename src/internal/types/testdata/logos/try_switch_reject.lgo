@@ -91,11 +91,6 @@ again:
 	return x, nil
 }
 
-func trySwitchCallArg(v int) (int, error) {
-	_ = oneInt(switch n := twoResults()? /* ERROR "[correctness::misplaced_try] ? must end an assignment, expression statement, defer, or errdefer" */; n { case 0 => 1; default => 2 })
-	return 0, nil
-}
-
 func trySwitchCase(v int) (int, error) {
 	switch v {
 	case switch n := twoResults()? /* ERROR "[correctness::misplaced_try] ? must end an assignment, expression statement, defer, or errdefer" */; n { case 0 => 1; default => 2 }:
@@ -123,46 +118,9 @@ func tryAndRightInReturn(v int) (bool, error) {
 	return v > 0 && (switch n := twoResults()?; n { case 0 => true; default => false }), nil
 }
 
-func trySwitchInArm(v int) (int, error) {
-	r := switch v {
-	case 0 => switch n := twoResults()? /* ERROR "[correctness::misplaced_try] ? must end an assignment, expression statement, defer, or errdefer" */; n { case 0 => 1; default => 2 }
-	default => 1
-	}
-	return r, nil
-}
-
 func trySwitchForPost() (int, error) {
 	for i := 0; i < 1; i = (switch n := twoResults()? /* ERROR "[correctness::misplaced_try] ? must end an assignment, expression statement, defer, or errdefer" */; n { case 0 => 1; default => 2 }) {
 		return i, nil
-	}
-	return 0, nil
-}
-
-func trySwitchSend(ch chan int) (int, error) {
-	ch <- switch n := twoResults()? /* ERROR "[correctness::misplaced_try] ? must end an assignment, expression statement, defer, or errdefer" */; n { case 0 => 1; default => 2 }
-	return 0, nil
-}
-
-func trySwitchLabeledForInit() (int, error) {
-loop:
-	for i := (switch n := twoResults()? /* ERROR "[correctness::misplaced_try] ? must end an assignment, expression statement, defer, or errdefer" */; n { case 0 => 1; default => 2 }); i < 3; i++ {
-		continue loop
-	}
-	return 0, nil
-}
-
-func trySwitchLabeledSwitchTag() (int, error) {
-pick:
-	switch (switch n := twoResults()? /* ERROR "[correctness::misplaced_try] ? must end an assignment, expression statement, defer, or errdefer" */; n { case 0 => 1; default => 2 }) {
-	case 1:
-		break pick
-	}
-	return 0, nil
-}
-
-func trySwitchRange() (int, error) {
-	for range (switch n := twoResults()? /* ERROR "[correctness::misplaced_try] ? must end an assignment, expression statement, defer, or errdefer" */; n { case 0 => 1; default => 2 }) {
-		return 1, nil
 	}
 	return 0, nil
 }
@@ -172,4 +130,37 @@ func trySwitchVarGroup() (int, error) {
 		x = switch n := twoResults()? /* ERROR "[correctness::misplaced_try] ? must end an assignment, expression statement, defer, or errdefer" */; n { case 0 => 1; default => 2 }
 	)
 	return x, nil
+}
+
+func maybeInt() int? { return nil }
+
+func tryCoalesceRight() (int, error) {
+	r := maybeInt() ?? switch n := twoResults()? /* ERROR "[correctness::misplaced_try] ? must end an assignment, expression statement, defer, or errdefer" */; n { case 0 => 1; default => 2 }
+	return r, nil
+}
+
+func tryCaseListLater(v int) (int, error) {
+	r := switch v {
+	case 0, switch n := twoResults()? /* ERROR "[correctness::misplaced_try] ? must end an assignment, expression statement, defer, or errdefer" */; n { case 0 => 1; default => 2 } => 1
+	default => 0
+	}
+	return r, nil
+}
+
+func tryGoCall() (int, error) {
+	go /* ERROR "concurrency::unsupervised_goroutine" */ oneInt(switch n := twoResults()? /* ERROR "[correctness::misplaced_try] ? must end an assignment, expression statement, defer, or errdefer" */; n { case 0 => 1; default => 2 })
+	return 0, nil
+}
+
+type intOrString interface {
+	int | string
+}
+
+func tryTypeSwitchArm(x intOrString) (int, error) {
+	r := switch x.(type) {
+	case int => switch n := twoResults()? /* ERROR "[correctness::misplaced_try] ? must end an assignment, expression statement, defer, or errdefer" */; n { case 0 => 1; default => 2 }
+	case string => 0
+	case nil => 0
+	}
+	return r, nil
 }

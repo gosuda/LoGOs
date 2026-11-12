@@ -569,6 +569,14 @@ func anchorScopes(list []syntax.Stmt, pos syntax.Pos) {
 			if s.Else != nil {
 				anchorScopes([]syntax.Stmt{s.Else}, pos)
 			}
+		case *syntax.SwitchStmt:
+			s.SetPos(pos)
+			s.Rbrace = pos
+			for _, clause := range s.Body {
+				clause.SetPos(pos)
+				clause.Colon = pos
+				anchorScopes(clause.Body, pos)
+			}
 		}
 	}
 }

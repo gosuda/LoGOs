@@ -353,6 +353,11 @@ func (fl *fileLower) spreadSpan(e syntax.Expr) span {
 }
 
 func (fl *fileLower) exprEndOf(e syntax.Expr) int {
+	if n, ok := e.(*syntax.Name); ok {
+		if end, hosted := fl.stubEnd[n]; hosted {
+			return end
+		}
+	}
 	if c, ok := syntax.Unparen(e).(*syntax.CompositeLit); ok {
 		return skipCloseParens(fl.src, fl.off(c.Rbrace)+1)
 	}

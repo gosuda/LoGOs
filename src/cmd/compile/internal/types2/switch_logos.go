@@ -318,13 +318,12 @@ type logosSwitchWalk struct {
 
 func logosSwitchHostOk(s syntax.Stmt, e *syntax.SwitchExpr) bool {
 	w := logosSwitchWalk{target: e}
-	labeled := false
 	for {
 		lab, ok := s.(*syntax.LabeledStmt)
 		if !ok {
 			break
 		}
-		s, labeled = lab.Stmt, true
+		s = lab.Stmt
 	}
 	switch s := s.(type) {
 	case *syntax.AssignStmt:
@@ -335,14 +334,21 @@ func logosSwitchHostOk(s syntax.Stmt, e *syntax.SwitchExpr) bool {
 		return w.declared(s)
 	case *syntax.IfStmt:
 		return w.ifChain(s)
+	case *syntax.ExprStmt:
+		return w.root(s.X)
+	case *syntax.CallStmt:
+		return s.Tok == syntax.Defer && w.root(s.Call)
+	case *syntax.SendStmt:
+		found, ok := w.exprs([]syntax.Expr{s.Chan, s.Value})
+		return found && ok
 	case *syntax.SwitchStmt:
 		if found, ok := w.simple(s.Init); found {
-			return ok && !labeled
+			return ok
 		}
-		return !labeled && w.tag(s.Tag)
+		return w.tag(s.Tag)
 	case *syntax.ForStmt:
 		if found, ok := w.simple(s.Init); found {
-			return ok && !labeled
+			return ok
 		}
 		return s.Cond != nil && w.root(s.Cond)
 	}
@@ -380,8 +386,49 @@ func (w logosSwitchWalk) simple(s syntax.SimpleStmt) (found, ok bool) {
 			return found, ok
 		}
 		return w.expr(s.Rhs)
+	case *syntax.ExprStmt:
+		return w.expr(s.X)
+	case *syntax.RangeClause:
+		if s.Lhs != nil {
+			if found, _ := w.inside(s.Lhs); found {
+				return true, false
+			}
+		}
+		return w.expr(s.X)
 	}
 	return w.inside(s)
+}
+
+func (w logosSwitchWalk) switchExpr(n *syntax.SwitchExpr) (found, ok bool) {
+	if _, guard := n.Tag.(*syntax.TypeSwitchGuard); guard {
+		return w.inside(n)
+	}
+	if found, ok := w.simple(n.Init); found {
+		return found, ok
+	}
+	if found, ok := w.expr(n.Tag); found {
+		return found, ok
+	}
+	for _, arm := range n.Arms {
+		if found, ok := w.cases(arm.Cases); found {
+			return found, ok
+		}
+		if found, ok := w.expr(arm.Body); found {
+			return found, ok
+		}
+	}
+	return false, false
+}
+
+func (w logosSwitchWalk) cases(n syntax.Expr) (found, ok bool) {
+	list, isList := n.(*syntax.ListExpr)
+	if !isList {
+		return w.expr(n)
+	}
+	if found, ok := w.expr(list.ElemList[0]); found {
+		return found, ok
+	}
+	return w.inside(list)
 }
 
 func (w logosSwitchWalk) ifChain(s *syntax.IfStmt) bool {
@@ -398,6 +445,9 @@ func (w logosSwitchWalk) ifChain(s *syntax.IfStmt) bool {
 }
 
 func (w logosSwitchWalk) inside(n syntax.Node) (found, ok bool) {
+	if n == nil {
+		return false, false
+	}
 	syntax.Inspect(n, func(m syntax.Node) bool {
 		if m == syntax.Node(w.target) {
 			found = true
@@ -429,6 +479,23 @@ func (w logosSwitchWalk) expr(n syntax.Node) (found, ok bool) {
 		return w.exprs(n.ElemList)
 	case *syntax.KeyValueExpr:
 		return w.exprs([]syntax.Expr{n.Key, n.Value})
+	case *syntax.CallExpr:
+		return w.exprs(append([]syntax.Expr{n.Fun}, n.ArgList...))
+	case *syntax.TryExpr:
+		return w.expr(n.X)
+	case *syntax.InterpExpr:
+		return w.exprs(n.Exprs)
+	case *syntax.TupleLit:
+		return w.exprs(n.Elems)
+	case *syntax.OptSelectExpr:
+		return w.expr(n.X)
+	case *syntax.CoalesceExpr:
+		if found, ok := w.expr(n.X); found {
+			return found, ok
+		}
+		return w.inside(n.Y)
+	case *syntax.SwitchExpr:
+		return w.switchExpr(n)
 	}
 	return w.inside(n)
 }

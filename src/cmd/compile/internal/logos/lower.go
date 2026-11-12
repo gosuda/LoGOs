@@ -191,6 +191,7 @@ type fileLower struct {
 	optDeferGoPend map[*syntax.CallExpr]optDeferGoWork
 	gotoTargets    map[*syntax.LabeledStmt]bool
 	anchorBlocks   map[*syntax.BlockStmt]bool
+	stubEnd        map[*syntax.Name]int
 	armResult      map[*syntax.ReturnStmt]types2.Type
 	wrapSpan       map[syntax.Expr]span
 	wrapOwner      map[syntax.Expr]int
@@ -267,10 +268,18 @@ func (fl *fileLower) appendSplice(sp splice) {
 // A zero-width splice on the boundary stays outside, matching the
 // partition rule textOf drains with.
 func (fl *fileLower) moveContaining(s span) *chainMove {
+	return fl.narrowestMove(s, false)
+}
+
+func (fl *fileLower) moveAbove(s span) *chainMove {
+	return fl.narrowestMove(s, true)
+}
+
+func (fl *fileLower) narrowestMove(s span, properly bool) *chainMove {
 	var best *chainMove
 	for _, m := range fl.moves {
 		r := m.region
-		if s.start < r.start || s.end > r.end {
+		if s.start < r.start || s.end > r.end || (properly && s == r) {
 			continue
 		}
 		if s.start == s.end && (s.start <= r.start || s.end >= r.end) {
@@ -350,6 +359,8 @@ type chainMove struct {
 	region span
 	mark   string
 	inner  []splice
+	stub   *string
+	host   *[]splice
 }
 
 // moveRegion turns r into a moved region whose place holds stub, and
@@ -358,6 +369,8 @@ type chainMove struct {
 func (fl *fileLower) moveRegion(r span, stub string) string {
 	list, mark := fl.openMove(r)
 	*list = append(*list, splice{start: r.start, end: r.end, text: stub})
+	moved := fl.moves[len(fl.moves)-1]
+	moved.stub, moved.host = &stub, list
 	return mark
 }
 
@@ -366,8 +379,23 @@ func (fl *fileLower) moveRegion(r span, stub string) string {
 // inside r, recorded so far and recorded later, belong to the copy, so the
 // covering splice never overlaps them.
 func (fl *fileLower) copyRegion(r span) string {
+	for _, m := range fl.moves {
+		if m.stub != nil && m.region == r {
+			return fl.consumeStub(m)
+		}
+	}
 	_, mark := fl.openMove(r)
 	return mark
+}
+
+func (fl *fileLower) consumeStub(m *chainMove) string {
+	text := *m.stub
+	r := m.region
+	*m.host = slices.DeleteFunc(*m.host, func(sp splice) bool {
+		return sp.start == r.start && sp.end == r.end && sp.text == text
+	})
+	m.stub = nil
+	return text
 }
 
 func (fl *fileLower) lazyText(r span) otext {
@@ -435,7 +463,7 @@ func (fl *fileLower) resolveChainMoves() {
 // every nested splice embeds its own chunks.
 func (fl *fileLower) textOf(s span) otext {
 	var inner []splice
-	if m := fl.moveContaining(s); m != nil {
+	if m := fl.moveAbove(s); m != nil {
 		var kept []splice
 		kept, inner = partitionSplices(m.inner, s)
 		m.inner = kept
