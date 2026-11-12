@@ -286,7 +286,7 @@ func (fl *fileLower) lowerOptionType(e *syntax.OptionType) syntax.Expr {
 		fl.add(es, es, rtAlias+".Option[")
 		fl.add(qoff, qoff+1, "]")
 		out = at(&syntax.IndexExpr{X: selOf(pos, nameOf(pos, rtAlias), "Option"), Index: le}, pos)
-		fl.deleteGroupingParens(es, qoff)
+		fl.deleteGroupingParens(es, fl.optElemFloor(e.Elem, es), qoff)
 	}
 	fl.optMemo[e] = out
 	return out
@@ -318,9 +318,16 @@ func funcHeadOffsets(src []byte) []int {
 	return out
 }
 
-func (fl *fileLower) deleteGroupingParens(es, qoff int) {
+func (fl *fileLower) optElemFloor(elem syntax.Expr, es int) int {
+	if tt, ok := syntax.Unparen(elem).(*syntax.TupleType); ok {
+		return fl.tupleSplit(tt.Pos(), len(tt.Fields)).end
+	}
+	return es
+}
+
+func (fl *fileLower) deleteGroupingParens(es, floor, qoff int) {
 	n := 0
-	for off := skipBlankBack(fl.src, qoff); off > es && fl.src[off-1] == ')'; off = skipBlankBack(fl.src, off-1) {
+	for off := skipBlankBack(fl.src, qoff); off > floor && fl.src[off-1] == ')'; off = skipBlankBack(fl.src, off-1) {
 		fl.add(off-1, off, "")
 		n++
 	}
@@ -1099,7 +1106,7 @@ func (fl *fileLower) lowerCoalesce(e *syntax.CoalesceExpr) syntax.Expr {
 	fl.addOwned(id, yEnd, yEnd, " }()")
 	if isIndex {
 		mStart, lbrack, rbrack := fl.lookupSpans(ux)
-		fl.deleteGroupingParens(mStart, qoff)
+		fl.deleteGroupingParens(mStart, mStart, qoff)
 		xStart := fl.off(fl.optHeadStart(e.X))
 		xEnd := rbrack + 1
 		wy := fl.wrapKnown(fl.lowerOptExpr(e.Y), fl.optType(e.Y), opt.Elem)

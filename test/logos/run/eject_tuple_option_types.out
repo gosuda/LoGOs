@@ -14,3 +14,9 @@ ok ptr__field
 ok ptr__nested
 ok ptr__named
 ok ptr__mapvalue
+ok tup__var
+ok tup__grouped
+ok tup__param_none
+ok tup__param_some
+ok tup__field
+ok tup__result

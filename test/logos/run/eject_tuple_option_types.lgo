@@ -18,6 +18,7 @@ type P struct {
 type holder struct {
 	t  (int, int?)
 	pt (int, *P?)
+	ot (int, int)?
 }
 
 func show(args ...any) string {
@@ -40,6 +41,15 @@ func takesInt(p (int, int?)) string {
 func takesPtr(p (int, *P?)) string {
 	a, b := p
 	return show(a, b?.N ?? -1)
+}
+
+func takesTup(o (int, int)?) string {
+	t := o ?? (3, 4)
+	return show(t)
+}
+
+func optTup(m map[string](int, int)) ((int, int))? {
+	return m["k"]
 }
 
 func intCells() {
@@ -80,7 +90,20 @@ func ptrCells() {
 	}, "5 4")
 }
 
+func tupCells() {
+	m := map[string](int, int){"k": (7, 8)}
+	var none (int, int)?
+	var grouped ((int, int))?
+	cell("tup__var", func() string { t := none ?? (3, 4); return show(t) }, "{3 4}")
+	cell("tup__grouped", func() string { t := grouped ?? (3, 4); return show(t) }, "{3 4}")
+	cell("tup__param_none", func() string { return takesTup(none) }, "{3 4}")
+	cell("tup__param_some", func() string { return takesTup(m["k"]) }, "{7 8}")
+	cell("tup__field", func() string { var h holder; t := h.ot ?? (3, 4); return show(t) }, "{3 4}")
+	cell("tup__result", func() string { t := optTup(m) ?? (3, 4); return show(t) }, "{7 8}")
+}
+
 func main() {
 	intCells()
 	ptrCells()
+	tupCells()
 }
