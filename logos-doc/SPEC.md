@@ -1592,7 +1592,7 @@ For the allowlist keys that authorize each sink, see Sec 8.4. [T-Sec8][T-Sec11]
 Unsafe violations use capabilities::unauthorized_unsafe with the shortest import chain. [T-Sec11]
 cgo reachability reports capabilities::unauthorized_cgo unless the cgo policy allows the package. [T-Sec11][T-101.2]
 Only a dependency that owns the cgo wrapper is blamed: the standard library's own cgo never blames the dependencies that call it. [T-Sec11]
-The tailored cgo sink is the per-call-site `pkg._Cfunc_*` wrapper, reported as `runtime.cgocall`, because an external cgo call leaves the loader graph at the host object and `runtime.cgocall` is reachable only from `runtime.cgoContextPCs`. [T-Sec11]
+The cgo sink is the per-call-site `pkg._Cfunc_*` or `pkg._C2func_*` wrapper of the package that owns it, reported as `runtime.cgocall`, because `runtime.cgocall` itself lies in the runtime and has no owning dependency to blame. [T-Sec11]
 
 ## 12. Wasm profile
 
