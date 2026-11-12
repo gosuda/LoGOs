@@ -16,5 +16,5 @@ type WrongShape interface {
 	*WrongSig | *WrongSquare
 }
 type WrongHolder struct {
-	Item WrongShape `json:"item"` // ERROR "union_member_no_json.*WrongSig.*wrong signature.*func\(\[\]byte\) error"
+	Item WrongShape `json:"item"` // ERROR "\[correctness::union_member_no_json\]"
 }
