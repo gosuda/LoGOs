@@ -58,6 +58,14 @@ type valErr struct{ s string }
 
 func (v valErr) Error() string { return "E:" + v.s }
 
+type derefStr struct{ s string }
+
+func (p *derefStr) String() string { return "D:" + p.s }
+
+type derefErr struct{ s string }
+
+func (p *derefErr) Error() string { return "D:" + p.s }
+
 func check(name, got, want string) {
 	if got != want {
 		fmt.Println("FAIL", name, "got", got, "want", want)
@@ -88,6 +96,14 @@ func main() {
 	check("value-stringer", $"v {valStr{s: "x"}}", fmt.Sprintf("v %s", fmt.Sprint(valStr{s: "x"})))
 	check("value-error", $"v {valErr{s: "y"}}", fmt.Sprintf("v %s", fmt.Sprint(valErr{s: "y"})))
 	check("both-prefers-error", $"b {bothVal{s: "z"}}", fmt.Sprintf("b %s", fmt.Sprint(bothVal{s: "z"})))
+	ds := (*derefStr)(nil)
+	check("nil-receiver-deref-stringer", $"p {ds}", fmt.Sprintf("p %s", fmt.Sprint(ds)))
+	de := (*derefErr)(nil)
+	check("nil-receiver-deref-error", $"e {de}", fmt.Sprintf("e %s", fmt.Sprint(de)))
+	var is fmt.Stringer = ds
+	check("nil-receiver-deref-stringer-iface", $"p {is}", fmt.Sprintf("p %s", fmt.Sprint(is)))
+	var ie error = de
+	check("nil-receiver-deref-error-iface", $"e {ie}", fmt.Sprintf("e %s", fmt.Sprint(ie)))
 	n := 42
 	check("int-control", $"n={n}", fmt.Sprintf("n=%s", fmt.Sprint(n)))
 }

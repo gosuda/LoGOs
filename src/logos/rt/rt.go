@@ -162,7 +162,7 @@ func InterpError(v error, format PanicFormatter) (s string) {
 func InterpErrorValue[T error](v T, format PanicFormatter) (s string) {
 	defer func() {
 		if r := recover(); r != nil {
-			s = "%!v(PANIC=Error method: " + format(r) + ")"
+			s = methodPanicText(v, "Error", r, format)
 		}
 	}()
 	return v.Error()
@@ -178,8 +178,15 @@ func InterpStringer(v stringer, format PanicFormatter) (s string) {
 func InterpStringerValue[T stringer](v T, format PanicFormatter) (s string) {
 	defer func() {
 		if r := recover(); r != nil {
-			s = "%!v(PANIC=String method: " + format(r) + ")"
+			s = methodPanicText(v, "String", r, format)
 		}
 	}()
 	return v.String()
+}
+
+func methodPanicText(receiver any, method string, panicValue any, format PanicFormatter) string {
+	if rv := reflect.ValueOf(receiver); rv.Kind() == reflect.Pointer && rv.IsNil() {
+		return "<nil>"
+	}
+	return "%!v(PANIC=" + method + " method: " + format(panicValue) + ")"
 }

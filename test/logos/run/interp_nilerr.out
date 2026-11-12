@@ -12,4 +12,8 @@ ok nil-func-stringer
 ok value-stringer
 ok value-error
 ok both-prefers-error
+ok nil-receiver-deref-stringer
+ok nil-receiver-deref-error
+ok nil-receiver-deref-stringer-iface
+ok nil-receiver-deref-error-iface
 ok int-control
