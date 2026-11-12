@@ -106,12 +106,12 @@ func unrelatedBetween(n int) int {
 	for i := range x {
 		x[i] = 11
 	}
-	s1 := sumBytes(x)
-	v := callViaValue(n)
 	y := make([]byte, n)
 	for i := range y {
 		y[i] = 13
 	}
+	v := callViaValue(n)
+	s1 := sumBytes(x)
 	s2 := sumBytes(y)
 	return s1 + v + s2
 }
