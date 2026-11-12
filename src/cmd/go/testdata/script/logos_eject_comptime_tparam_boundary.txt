@@ -1,0 +1,78 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+# A comptime generic that nothing instantiates is dropped from the output
+# from its own func keyword, whatever stands between that keyword and the
+# name: a block comment, a line comment or a line break. The module runs
+# natively, ejects without the dropped functions, and the ejected module
+# builds and runs with go and with go1.27.2 from $UPROOT1272 and prints
+# the same output.
+cd m
+logos run .
+stdout '^ok$'
+cp stdout $WORK/native.txt
+logos eject -o out
+exists out/main.go
+! grep 'unused' out/main.go
+cd out
+go build ./...
+go run .
+cmp stdout $WORK/native.txt
+exists $UPROOT1272/bin/go
+exec $UPROOT1272/bin/go version
+stdout '^go version go1\.27\.2 '
+exec env -u GOROOT $UPROOT1272/bin/go build -o $WORK/upstream$GOEXE .
+exec $WORK/upstream$GOEXE
+cmp stdout $WORK/native.txt
+cd ..
+
+-- m/go.mod --
+module example.com/comptimetparamboundary
+
+go 1.27
+
+-- m/main.lgo --
+package main
+
+import (
+	"comptime"
+	"fmt"
+)
+
+func /*c*/ unusedBlock[T any]() []string {
+	var out []string
+	const for _, f := range comptime.Fields[T]() {
+		out = append(out, f.Name)
+	}
+	return out
+}
+
+func // c
+unusedLine[T any]() []string {
+	var out []string
+	const for _, f := range comptime.Fields[T]() {
+		out = append(out, f.Name)
+	}
+	return out
+}
+
+func
+unusedBreak[T any]() []string {
+	var out []string
+	const for _, f := range comptime.Fields[T]() {
+		out = append(out, f.Name)
+	}
+	return out
+}
+
+func /*c*/ /*d*/ unusedBoth /*e*/ [T any]() []string {
+	var out []string
+	const for _, f := range comptime.Fields[T]() {
+		out = append(out, f.Name)
+	}
+	return out
+}
+
+func main() {
+	fmt.Println("ok")
+}

@@ -7,6 +7,7 @@ package logos
 import (
 	"errors"
 	"fmt"
+	"go/token"
 	"slices"
 	"strconv"
 	"strings"
@@ -340,14 +341,11 @@ func (b *cfRecordBuilder) packageMarker(pn *types2.PkgName) string {
 }
 
 func cfFuncStart(src []byte, off int) int {
-	i := off
-	for i > 0 && (src[i-1] == ' ' || src[i-1] == '\t' || src[i-1] == '\n' || src[i-1] == '\r') {
-		i--
+	kw, ok := keywordStart(src, token.FUNC, off)
+	if !ok {
+		base.Fatalf("logos: no func keyword before offset %d", off)
 	}
-	if i >= 4 && string(src[i-4:i]) == "func" {
-		return i - 4
-	}
-	return off
+	return kw
 }
 
 func shiftSplices(subs []splice, off int) []splice {
