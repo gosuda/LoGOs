@@ -75,13 +75,7 @@ func prefixCheckOutput(t *testing.T, src, out string) {
 			continue
 		}
 		for _, sp := range gd.Specs {
-			ts, ok := sp.(*ast.TypeSpec)
-			if !ok {
-				continue
-			}
-			if prefixIsGen(ts.Name.Name) {
-				bad = append(bad, prefixCheckGenFields(ts)...)
-			}
+			bad = append(bad, prefixCheckSpec(sp, imports, words)...)
 		}
 	}
 	if len(bad) > 0 {
@@ -236,7 +230,7 @@ func prefixAllowed(name string, imports map[string]bool) bool {
 		return true
 	}
 	switch name {
-	case "true", "false", "iota", "nil", "bool", "byte", "complex64", "complex128", "error", "float32", "float64", "int", "int8", "int16", "int32", "int64", "rune", "string", "uint", "uint8", "uint16", "uint32", "uint64", "uintptr", "any", "comparable", "append", "cap", "clear", "close", "complex", "copy", "delete", "imag", "len", "make", "max", "min", "new", "panic", "print", "println", "real", "recover", "MarshalJSON", "UnmarshalJSON", "MarshalBinary", "AppendBinary", "UnmarshalBinary", "MarshalText", "UnmarshalText":
+	case "true", "false", "iota", "nil", "bool", "byte", "complex64", "complex128", "error", "float32", "float64", "int", "int8", "int16", "int32", "int64", "rune", "string", "uint", "uint8", "uint16", "uint32", "uint64", "uintptr", "any", "comparable", "append", "cap", "clear", "close", "complex", "copy", "delete", "imag", "len", "make", "max", "min", "new", "panic", "print", "println", "real", "recover", "MarshalJSON", "UnmarshalJSON", "MarshalBinary", "AppendBinary", "UnmarshalBinary":
 		return true
 	}
 	if prefixIsGen(name) {
@@ -334,6 +328,26 @@ func prefixCheckGenFields(ts *ast.TypeSpec) []string {
 			if !prefixIsGen(nm.Name) && !prefixIsProp(nm.Name) {
 				bad = append(bad, nm.Name)
 			}
+		}
+	}
+	return bad
+}
+
+func prefixCheckSpec(sp ast.Spec, imports, words map[string]bool) []string {
+	var names []*ast.Ident
+	var bad []string
+	switch s := sp.(type) {
+	case *ast.ValueSpec:
+		names = s.Names
+	case *ast.TypeSpec:
+		names = []*ast.Ident{s.Name}
+		if prefixIsGen(s.Name.Name) {
+			bad = prefixCheckGenFields(s)
+		}
+	}
+	for _, nm := range names {
+		if !prefixAllowed(nm.Name, imports) && !words[nm.Name] {
+			bad = append(bad, nm.Name)
 		}
 	}
 	return bad
