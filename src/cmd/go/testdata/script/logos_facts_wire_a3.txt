@@ -45,6 +45,14 @@ stdout '^fn GoAssert AssertTP=1,AssertRTP=0$'
 stdout '^fn ReadAll ParamMutated=0,MayYield=1$'
 stdout '^fn WriteAt ParamMutated=1,MayYield=1$'
 stdout '^lang go$'
+cd go
+go build -o $WORK/go-wasm-plain.a .
+cd ..
+go tool pack p $WORK/go-wasm-plain.a __.LOGOS
+stdout '^lang go$'
+stdout '^fn ReadAll MayYield=[01]$'
+stdout '^fn WriteAt MayYield=[01]$'
+! stdout 'ParamMutated'
 env GOOS=
 env GOARCH=
 cd go
