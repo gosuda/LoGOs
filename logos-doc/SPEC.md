@@ -1254,7 +1254,7 @@ UnionTerms   ::= Term ("|" Term)*
 AssertDecl   ::= "type" Name "struct" ":" InterfaceList "{" Fields "}"
 PropertyElem ::= ["const"] Name Type
 ReadonlyMethod ::= "const" Name Signature
-ConstView    ::= "const" ("[]" Type | "*" Type | "map" "[" Type "]" Type)
+ConstView    ::= "const" Type
 ConstDecl    ::= "const" Name "=" (CompositeLit | ConstFuncCall)
 ConstIf      ::= "const" "if" ConstExpr Block ["else" (Block | ConstIf)]
 ConstFor     ::= "const" "for" [Index ","] Field ":=" "range" ComptimeFieldsCall Block
