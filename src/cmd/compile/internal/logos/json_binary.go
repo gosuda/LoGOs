@@ -198,10 +198,10 @@ func (g *binaryGenerator) codec(t types2.Type) (int, bool) {
 				if !ok {
 					return 0, false
 				}
-				e("_logos_dst = _logos_bbinary.AppendUvarint(_logos_dst, uint64(len(_logos_v)))")
 				e("if uint64(len(_logos_v)) > (1 << 20) { return _logos_dst, _logos_bfmt.Errorf(\"binary count %%d out of range\", len(_logos_v)) }")
 				e("_logos_zsize := uint64(_logos_bunsafe.Sizeof(*new(%s))); if _logos_zsize == 0 { _logos_zsize = 1 }", elemType)
 				e("if uint64(len(_logos_v)) > (1 << 23)/_logos_zsize { return _logos_dst, _logos_bfmt.Errorf(\"binary count %%d out of range\", len(_logos_v)) }")
+				e("_logos_dst = _logos_bbinary.AppendUvarint(_logos_dst, uint64(len(_logos_v)))")
 				d("_logos_n, _logos_used := _logos_bbinary.Uvarint(_logos_src[*_logos_off:]); if _logos_used <= 0 { %s }; *_logos_off += _logos_used", fail)
 				d("if _logos_n > uint64(int(^uint(0) >> 1)) { return _logos_bfmt.Errorf(\"binary field %%s at offset %%d: count %%d out of range\", _logos_field, *_logos_off-_logos_used, _logos_n) }")
 				d("if _logos_n > (1 << 20) { return _logos_bfmt.Errorf(\"binary field %%s at offset %%d: count %%d out of range\", _logos_field, *_logos_off-_logos_used, _logos_n) }")
