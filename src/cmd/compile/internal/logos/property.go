@@ -755,9 +755,13 @@ func (fl *fileLower) propReadSimple(s syntax.Stmt) {
 
 func (fl *fileLower) emitPropReads(c *propCollect) {
 	for _, n := range c.needles {
-		if n.temp != "" {
+		if n.temp != "" || fl.propEmitted[n.end] {
 			continue
 		}
+		if fl.propEmitted == nil {
+			fl.propEmitted = make(map[int]bool)
+		}
+		fl.propEmitted[n.end] = true
 		off := n.end - len(n.name)
 		fl.add(off, n.end, "Logos_Get"+n.name+"()")
 	}

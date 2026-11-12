@@ -945,11 +945,29 @@ func (cg *chainGen) run(call *syntax.CallExpr) {
 	cg.lowerArgChains(term.arg)
 	cg.lowerArgChains(base)
 	cg.fl.lowerPlainLambdas(call)
+	for i := range ops {
+		if ops[i].lam == nil {
+			cg.fl.lowerOperandProps(ops[i].arg)
+		}
+	}
+	if term.lam == nil {
+		cg.fl.lowerOperandProps(term.arg)
+	}
+	cg.fl.lowerOperandProps(base)
 	baseText := cg.fl.textOf(recv)
 	elemT := cg.baseElem(base)
 	resultT := cg.fl.pkg.info.TypeOf(call)
 	isTry := cg.runIsTry(ops, term)
 	cg.emit(call, ops, baseText, elemT, resultT, term, isTry)
+}
+
+func (fl *fileLower) lowerOperandProps(e syntax.Expr) {
+	if e == nil {
+		return
+	}
+	c := &propCollect{}
+	fl.propWalk(e, c)
+	fl.emitPropReads(c)
 }
 
 func (fl *fileLower) lowerPlainLambdas(root syntax.Node) {
@@ -1599,7 +1617,7 @@ func (ce *chainEmit) argText(op chainOp) otext {
 	if op.arg == nil {
 		return gen("0")
 	}
-	return cg.fl.textOf(op.argSpan)
+	return cg.fl.drainBodyWrapper(op.arg, cg.fl.textOf(op.argSpan))
 }
 
 func (ce *chainEmit) filterLines(p, fname, cur string, i int) []string {
