@@ -9,3 +9,6 @@ ok inner-guard
 ok redecl-guarded
 ok shadow-siblings
 ok shadow-header
+ok child-read
+ok stage-read
+ok operands

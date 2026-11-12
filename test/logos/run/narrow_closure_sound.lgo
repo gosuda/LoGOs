@@ -191,6 +191,56 @@ func okShadowHeader(q okUser?) string {
 	return g()
 }
 
+func okChildRead(ctx context.Context, o okUser) (string, error) {
+	var q okUser? = o
+	res := make([]string, 1)
+	if q != nil {
+		go group (ctx) {
+			go {
+				res[0] = okTake(q)
+			}
+		}
+	}
+	return res[0], nil
+}
+
+func okStageRead(ctx context.Context, o okUser, xs []int) (string, error) {
+	var q okUser? = o
+	if q != nil {
+		ys, err := xs.group(ctx, limit = 2).map(x => okTake(q))
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprint(len(ys), ys[0]), nil
+	}
+	return "none", nil
+}
+
+var okSeen []string
+
+func okRecord(s string) {
+	okSeen = append(okSeen, s)
+}
+
+func okGoOperand(ctx context.Context, o okUser) error {
+	var q okUser? = o
+	if q != nil {
+		go group (ctx) {
+			go okRecord(okTake(q))
+			q = nil
+		}
+	}
+	return nil
+}
+
+func okDeferOperand(o okUser) {
+	var q okUser? = o
+	if q != nil {
+		defer okRecord(okTake(q))
+		q = nil
+	}
+}
+
 func main() {
 	check("immediate", okImmediate(), "ann")
 	check("deferred", okDeferred(), "ann")
@@ -207,6 +257,19 @@ func main() {
 	check("redecl-guarded", okRedeclGuarded(okUser{okName: "bob"}), "gone")
 	check("shadow-siblings", okShadowSiblings(okUser{okName: "cy"}), "cy")
 	check("shadow-header", okShadowHeader(okUser{okName: "di"}), "di")
+	if got, err := okChildRead(context.Background(), okUser{okName: "ev"}); err != nil {
+		check("child-read", err.Error(), "ev")
+	} else {
+		check("child-read", got, "ev")
+	}
+	if got, err := okStageRead(context.Background(), okUser{okName: "ev"}, []int{1, 2}); err != nil {
+		check("stage-read", err.Error(), "2ev")
+	} else {
+		check("stage-read", got, "2ev")
+	}
+	err := okGoOperand(context.Background(), okUser{okName: "g"})
+	okDeferOperand(okUser{okName: "d"})
+	check("operands", fmt.Sprint(okSeen, err == nil), "[g d] true")
 	if failed {
 		os.Exit(1)
 	}

@@ -549,11 +549,13 @@ A later assignment MUST end narrowing. [T-202]
 
 Taking the address of `x` MUST disable narrowing for `x`. [T-202]
 
-Assigning `x` in a closure MUST disable narrowing for `x`. [T-202]
+Assigning `x` in a function literal, in a `go group` child block, or in a lambda of a chain that opens with `.group(...)` MUST disable narrowing for `x`. [T-202]
 
-A function literal MUST NOT read `x` as narrowed when `x` is assigned anywhere besides its declaration. [T-202]
+A function literal or a `go group` child block MUST NOT read `x` as narrowed when `x` is assigned anywhere besides its declaration. [T-202]
 
 A short variable declaration that names a variable already declared in the same scope, such as a parameter, a named result, or a `var` variable, MUST count as an assignment to it. [T-202]
+
+The operands of a `go` or `defer` statement, and the statements of a `go group` block outside its children, MUST read `x` as narrowed where they stand, because they run there. [T-202]
 
 A nil test on a struct field MUST NOT narrow the field. [T-202]
 

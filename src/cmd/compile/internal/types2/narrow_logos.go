@@ -35,6 +35,7 @@ func (check *Checker) logosEnterFuncBody(body *syntax.BlockStmt) {
 	}
 	outermost := len(check.logosDisqual) == 0
 	dq := &logosDisqualWalk{
+		stage:     make(map[*syntax.LambdaExpr]bool),
 		addr:      make(map[string]bool),
 		inLoop:    make(map[string]bool),
 		inClos:    make(map[string]bool),
@@ -127,8 +128,10 @@ type logosDisqualWalk struct {
 	stack     []syntax.Node
 	scopes    []map[string]bool
 	params    []string
+	stage     map[*syntax.LambdaExpr]bool
 	loop      int
 	clos      int
+	lam       int
 	addr      map[string]bool
 	inLoop    map[string]bool
 	inClos    map[string]bool
@@ -143,8 +146,14 @@ func (w *logosDisqualWalk) Visit(node syntax.Node) syntax.Visitor {
 	}
 	w.declare(node)
 	switch t := node.(type) {
-	case *syntax.FuncLit:
+	case *syntax.FuncLit, *syntax.GroupChild:
 		w.clos++
+	case *syntax.CallExpr:
+		w.markStage(t)
+	case *syntax.LambdaExpr:
+		if w.stage[t] {
+			w.lam++
+		}
 	case *syntax.ForStmt:
 		w.loop++
 	case *syntax.Operation:
@@ -174,9 +183,13 @@ func (w *logosDisqualWalk) Visit(node syntax.Node) syntax.Visitor {
 func (w *logosDisqualWalk) leave() {
 	top := w.stack[len(w.stack)-1]
 	w.stack = w.stack[:len(w.stack)-1]
-	switch top.(type) {
-	case *syntax.FuncLit:
+	switch top := top.(type) {
+	case *syntax.FuncLit, *syntax.GroupChild:
 		w.clos--
+	case *syntax.LambdaExpr:
+		if w.stage[top] {
+			w.lam--
+		}
 	case *syntax.ForStmt:
 		w.loop--
 	case *syntax.BlockStmt, *syntax.CaseClause, *syntax.CommClause:
@@ -235,10 +248,21 @@ func (w *logosDisqualWalk) assign(s *syntax.AssignStmt) {
 }
 
 func (w *logosDisqualWalk) assigned(name string) {
-	if w.clos > 0 {
+	if w.clos > 0 || w.lam > 0 {
 		w.inClos[name] = true
 	} else {
 		w.assignOut[name] = true
+	}
+}
+
+func (w *logosDisqualWalk) markStage(call *syntax.CallExpr) {
+	if logosStageCalls(call) == nil {
+		return
+	}
+	for _, arg := range call.ArgList {
+		if lam, ok := syntax.Unparen(arg).(*syntax.LambdaExpr); ok {
+			w.stage[lam] = true
+		}
 	}
 }
 

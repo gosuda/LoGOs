@@ -102,7 +102,7 @@ func (check *Checker) logosGroupChild(s *syntax.GroupChild) {
 		iota:    check.iota,
 		sig:     csig,
 	}
-	check.logosEnterFunc(s.Body)
+	check.logosEnterLit(s.Body)
 	check.stmtList(0, s.Body.List)
 	check.logosExitFunc()
 	if check.hasLabel && !check.conf.IgnoreBranchErrors {

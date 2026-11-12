@@ -4,6 +4,8 @@
 
 package p
 
+import "context"
+
 type U struct{ Name string }
 
 func take(u U) string { return u.Name }
@@ -106,4 +108,72 @@ func shadowClosure(q U?) func() string {
 	}
 	h()
 	return g
+}
+
+func childReadsAssignedLater(ctx context.Context, o U) error {
+	var q U? = o
+	if q != nil {
+		go group (ctx) {
+			go {
+				_ = take(q /* ERROR "cannot use q" */)
+			}
+			q = nil
+		}
+	}
+	return nil
+}
+
+func childReadsAssignedInSibling(ctx context.Context, o U) error {
+	var q U? = o
+	if q != nil {
+		go group (ctx) {
+			go {
+				_ = take(q /* ERROR "cannot use q" */)
+			}
+			go {
+				q = nil
+			}
+		}
+	}
+	return nil
+}
+
+func stageLambdaAssignedInSibling(ctx context.Context, o U, xs []int) error {
+	var q U? = o
+	if q != nil {
+		_, err := xs.group(ctx, limit = 2).map(x => len(take(q /* ERROR "cannot use q" */)) + x).filter(x => {
+			q = nil
+			return true
+		})
+		return err
+	}
+	return nil
+}
+
+func childReadsUnassigned(ctx context.Context, q U?) error {
+	if q != nil {
+		go group (ctx) {
+			go {
+				_ = take(q)
+			}
+		}
+	}
+	return nil
+}
+
+func stageLambdaReadsUnassigned(ctx context.Context, q U?, xs []int) error {
+	if q != nil {
+		_, err := xs.group(ctx, limit = 2).map(x => len(take(q)) + x)
+		return err
+	}
+	return nil
+}
+
+func stageLambdaReadsThenAssignedAfterJoin(ctx context.Context, q U?, xs []int) error {
+	if q != nil {
+		_, err := xs.group(ctx, limit = 2).map(x => len(take(q)) + x)
+		q = nil
+		return err
+	}
+	return nil
 }
