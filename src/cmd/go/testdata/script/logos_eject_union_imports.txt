@@ -15,6 +15,7 @@ stdout '^dotjson m\.A$'
 stdout '^dotjson m\.B$'
 stdout '^nest m\.A$'
 stdout '^nest nest\.C$'
+stdout '^bindings ok$'
 cp stdout $WORK/native.txt
 
 logos eject -o $WORK/out
@@ -79,7 +80,17 @@ type U interface {
 	A | B
 }
 
+func shadow(A int) int {
+	type B struct {
+		n int
+	}
+	return A + B{n: 2}.n
+}
+
 func Show() string {
+	if shadow(3) != 5 {
+		panic("dot import shadow")
+	}
 	var u U
 	if u == nil {
 		return "dot"
@@ -98,6 +109,10 @@ type U interface {
 
 func Show() string {
 	var u U
+	mm := 3
+	if mm != 3 {
+		panic("aliased import shadow")
+	}
 	if u == nil {
 		return "alias"
 	}
@@ -154,6 +169,7 @@ import (
 	"example.com/ej/lib"
 	"example.com/ej/nest"
 	"example.com/ej/plain"
+	"example.com/ej/shadows"
 	"example.com/ej/usedp"
 )
 
@@ -172,6 +188,8 @@ func main() {
 		fmt.Println(line)
 	}
 	fmt.Println(usedp.Show())
+	shadows.Check()
+	fmt.Println("bindings ok")
 }
 
 -- w/dotjson/dotjson.lgo --
@@ -236,4 +254,57 @@ func Show() []string {
 		out = append(out, fmt.Sprintf("nest %T", h.V))
 	}
 	return out
+}
+
+-- w/state/state.lgo --
+package state
+
+var Ready bool
+
+-- w/shadowdep/shadowdep.lgo --
+package shadowdep
+
+import "example.com/ej/state"
+
+type A struct {}
+type B struct {}
+
+func init() {
+	state.Ready = true
+}
+
+-- w/shadows/shadows.lgo --
+package shadows
+
+import (
+	m "example.com/ej/shadowdep"
+	"example.com/ej/state"
+)
+
+type U interface {
+	m.A | m.B
+}
+
+type record struct {
+	m int
+}
+
+func parameter(m int) int {
+	return m
+}
+
+func localType() int {
+	type m struct {
+		n int
+	}
+	return m{n: 7}.n
+}
+
+func Check() {
+	m := 3
+	r := record{m: 5}
+	var u U
+	if m != 3 || parameter(4) != 4 || r.m != 5 || localType() != 7 || u != nil || !state.Ready {
+		panic("erased import binding or initialization")
+	}
 }

@@ -7,6 +7,8 @@ package logos
 import (
 	"bytes"
 	"errors"
+	"go/ast"
+	"go/parser"
 	"go/token"
 	"os"
 	"path/filepath"
@@ -491,7 +493,7 @@ func blankErasedImports(info *types2.Info, file *syntax.File, data []byte, lower
 			erased = append(erased, [2]int{s, t})
 		}
 	}
-	used := make(map[string]bool)
+	used := make(map[types2.Object]bool)
 	var visit func(syntax.Node) bool
 	visit = func(n syntax.Node) bool {
 		switch n := n.(type) {
@@ -503,12 +505,41 @@ func blankErasedImports(info *types2.Info, file *syntax.File, data []byte, lower
 		case *syntax.Name:
 			off := at(n.Pos())
 			if !slices.ContainsFunc(erased, func(s [2]int) bool { return off >= s[0] && off < s[1] }) {
-				used[n.Value] = true
+				used[info.Uses[n]] = true
 			}
 		}
 		return true
 	}
 	syntax.Inspect(file, visit)
+	var generated map[string]bool
+	generatedUse := func(local string) bool {
+		if !slices.ContainsFunc(lowered, func(e Edit) bool { return containsIdent(e.Text, local) }) {
+			return false
+		}
+		if generated == nil {
+			generated = make(map[string]bool)
+			all := append(slices.Clone(lowered), erasures...)
+			text, err := ApplyEdits(data, file.Pos().FileBase(), all)
+			if err != nil {
+				panic("logos: union import edits overlap lowering edits: " + err.Error())
+			}
+			f, err := parser.ParseFile(token.NewFileSet(), "", text, 0)
+			if err != nil {
+				panic("logos: lowered union import source is not Go syntax: " + err.Error())
+			}
+			if f != nil {
+				ast.Inspect(f, func(n ast.Node) bool {
+					if sel, ok := n.(*ast.SelectorExpr); ok {
+						if id, ok := sel.X.(*ast.Ident); ok && id.Obj == nil {
+							generated[id.Name] = true
+						}
+					}
+					return true
+				})
+			}
+		}
+		return generated[local]
+	}
 	var blanks []splice
 	for _, decl := range file.DeclList {
 		imp, ok := decl.(*syntax.ImportDecl)
@@ -528,9 +559,14 @@ func blankErasedImports(info *types2.Info, file *syntax.File, data []byte, lower
 		local := pn.Name()
 		var kept bool
 		if local == "." {
-			kept = slices.ContainsFunc(pn.Imported().Scope().Names(), func(n string) bool { return token.IsExported(n) && used[n] })
+			for obj := range used {
+				if obj != nil && obj.Pkg() == pn.Imported() && obj.Parent() == pn.Imported().Scope() {
+					kept = true
+					break
+				}
+			}
 		} else {
-			kept = used[local] || slices.ContainsFunc(lowered, func(e Edit) bool { return containsIdent(e.Text, local) })
+			kept = used[pn] || generatedUse(local)
 		}
 		if kept {
 			continue
