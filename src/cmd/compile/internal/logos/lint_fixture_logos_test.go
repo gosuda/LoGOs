@@ -202,4 +202,3 @@ func lintScriptAsserting(t *testing.T, scripts []string, id string) string {
 	}
 	return ""
 }
-
