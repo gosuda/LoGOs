@@ -819,7 +819,7 @@ func (fl *fileLower) wrapKnown(v syntax.Expr, rec, target types2.Type) syntax.Ex
 		cur = elem
 	}
 	vs := fl.wrapSpanOf(v)
-	text := fl.textOf(vs)
+	text := fl.lazyText(vs)
 	id, ok := fl.wrapOwner[v]
 	if !ok {
 		id = fl.nextWrapID()
@@ -2300,7 +2300,7 @@ func (fl *fileLower) exprEndThrough(from, through int) int {
 			}
 			depth--
 		case token.COMMA, token.SEMICOLON, token.COLON, token.ASSIGN, token.DEFINE:
-			if depth == 0 {
+			if depth == 0 && !fl.fatArrowAt(t) {
 				return false
 			}
 		}
@@ -2308,4 +2308,8 @@ func (fl *fileLower) exprEndThrough(from, through int) int {
 		return true
 	})
 	return last
+}
+
+func (fl *fileLower) fatArrowAt(t tok) bool {
+	return t.kind == token.ASSIGN && t.end < len(fl.src) && fl.src[t.end] == '>'
 }

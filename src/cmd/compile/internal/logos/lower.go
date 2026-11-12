@@ -256,7 +256,8 @@ func (fl *fileLower) off(pos syntax.Pos) int {
 // treats it, while region routing keeps the M7 boundary rule.
 func (fl *fileLower) appendSplice(sp splice) {
 	fl.changed = true
-	if m := fl.moveContaining(span{start: sp.start, end: sp.end}); m != nil {
+	s := span{start: sp.start, end: sp.end}
+	if m := fl.narrowestMove(s, fl.coversOwnCopy(sp)); m != nil {
 		m.inner = append(m.inner, sp)
 		return
 	}
@@ -297,6 +298,15 @@ func (fl *fileLower) narrowestMove(s span, properly bool) *chainMove {
 		}
 	}
 	return best
+}
+
+func (fl *fileLower) coversOwnCopy(sp splice) bool {
+	for _, m := range fl.moves {
+		if m.region.start == sp.start && m.region.end == sp.end && strings.Contains(sp.text, m.mark) {
+			return true
+		}
+	}
+	return false
 }
 
 // ownerOfInsertion returns the list holding a zero-width splice at off:
