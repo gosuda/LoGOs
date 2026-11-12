@@ -17,6 +17,7 @@ import (
 	"go/build/constraint"
 	"go/parser"
 	"go/token"
+	"internal/logosfile"
 	"maps"
 	"slices"
 	"strconv"
@@ -458,11 +459,9 @@ func ownedConstraintHeader(fl *fileLower) string {
 	if name == "" {
 		return ""
 	}
-	base := name
-	if i := len(base); i > 3 && base[i-3:] == ".go" {
-		base = base[:i-3]
-	} else if i := len(base); i > 4 && base[i-4:] == ".lgo" {
-		base = base[:i-4]
+	base := strings.TrimSuffix(name, ".go")
+	if stem, _, ok := logosfile.Split(name); ok {
+		base = stem
 	}
 	parts := strings.Split(base, "_")
 	if len(parts) < 2 {
