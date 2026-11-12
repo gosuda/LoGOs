@@ -45,6 +45,17 @@ func src() State {
 	return State{A: 1, B: 2}
 }
 
+type Tri struct {
+	A int
+	B int
+	C int
+}
+
+func bumpC(p *Tri) int {
+	p.C = 99
+	return 7
+}
+
 func main() {
 	s := State{A: 10, ..State{A: 1, B: 2}}
 	check("spread-explicit-field-wins", s == State{A: 10, B: 2}, s, State{A: 10, B: 2})
@@ -76,6 +87,9 @@ func main() {
 	b.Pad[4079] = 8
 	b = Big{X: b.Y, ..b}
 	check("spread-self-base-preserves-padding", b.X == 6 && b.Y == 6 && b.Pad[0] == 7 && b.Pad[4079] == 8, fmt.Sprint(b.X, b.Y, b.Pad[0], b.Pad[4079]), "6 6 7 8")
+	tri := Tri{A: 1, B: 2, C: 3}
+	tri = Tri{..tri, A: bumpC(&tri)}
+	check("spread-self-update-leaves-unlisted-fields-untouched", tri == Tri{A: 7, B: 2, C: 99}, tri, Tri{A: 7, B: 2, C: 99})
 	if failed {
 		os.Exit(1)
 	}
