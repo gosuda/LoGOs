@@ -181,6 +181,16 @@ func TestInlayAllocationBadges(t *testing.T) {
 	}
 }
 
+func TestInlayArenaBadgeGoPackage(t *testing.T) {
+	t.Setenv("GOEXPERIMENT", "logosarena")
+	goFile := compilerFixture(t, "alloc.go")
+	r, _ := compileHints(t, goFile)
+	hs := InlayHints(r, goFile.path, wholeFile)
+	if got := labelsAt(hs, endOf(t, goFile.src, "buf := make")); !slices.Contains(got, "[arena]") {
+		t.Errorf("Go file buf := make: hints %q, want [arena]", got)
+	}
+}
+
 func TestInlayArenaBadge(t *testing.T) {
 	r := &Report{Files: []File{{File: "a.lgo", Allocs: []Alloc{
 		{Position: Position{Line: 3, Character: 4}, Tier: "arena", Message: "make([]byte, n) does not escape"},
