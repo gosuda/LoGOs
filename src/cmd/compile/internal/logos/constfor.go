@@ -799,7 +799,7 @@ func cfBodyNodes(root syntax.Node) int {
 // label, or selector element rather than a value use. Assignment
 // targets are not skipped: writing a loop variable is meaningless and
 // fails loudly at substitution.
-func cfBareSkip(n *syntax.Name, p syntax.Node) bool {
+func (fl *fileLower) cfBareSkip(n *syntax.Name, p syntax.Node) bool {
 	switch p := p.(type) {
 	case *syntax.SelectorExpr:
 		return p.Sel == n
@@ -810,7 +810,10 @@ func cfBareSkip(n *syntax.Name, p syntax.Node) bool {
 	case *syntax.LabeledStmt:
 		return p.Label == n
 	case *syntax.KeyValueExpr:
-		return p.Key == n
+		if p.Key == n {
+			field, _ := fl.pkg.info.ObjectOf(n).(*types2.Var)
+			return field != nil && field.IsField()
+		}
 	case *syntax.AssignStmt:
 		if p.Op == syntax.Def {
 			for _, e := range syntax.UnpackListExpr(p.Lhs) {
@@ -1421,7 +1424,7 @@ func (c *cfLeaf) subName(n *syntax.Name) {
 		c.fl.cfError(c.run.sites.at(n.Pos()), "[comptime::const_for_assign] cannot take the address of const for variable %s", n.Value)
 		return
 	}
-	if cfBareSkip(n, p) {
+	if c.fl.cfBareSkip(n, p) {
 		return
 	}
 	c.add(s, e, strconv.Itoa(a.idx))
@@ -1436,7 +1439,7 @@ func (c *cfLeaf) subMarker(n *syntax.Name) bool {
 	if !ok {
 		return false
 	}
-	if p, ok := c.parents[n]; ok && cfBareSkip(n, p) {
+	if p, ok := c.parents[n]; ok && c.fl.cfBareSkip(n, p) {
 		return true
 	}
 	if spelling, ok := resolve(); ok {

@@ -6,6 +6,7 @@ package types2
 
 import (
 	"cmd/compile/internal/syntax"
+	"go/constant"
 	. "internal/types/errors"
 	"slices"
 )
@@ -176,10 +177,24 @@ type logosFieldBinding struct {
 	info  *LogosConstFor
 	index int
 	field *Var
+	outer *logosFieldBinding
 	tag   string
 }
 
 var logosFieldValueSels = []string{"Name", "Index", "Tag", "Exported"}
+
+func (check *Checker) logosConstForIndexValue(x *operand, obj Object) {
+	if n := len(check.logosLHS); n > 0 && check.logosLHS[n-1] == obj {
+		return
+	}
+	for b := check.logosFieldBind; b != nil; b = b.outer {
+		if b.info.IndexVar != nil && obj == b.info.IndexVar && x.isValid() {
+			x.mode_ = constant_
+			x.val = constant.MakeInt64(int64(b.index))
+			return
+		}
+	}
+}
 
 func (check *Checker) logosConstFor(s *syntax.ConstForStmt, ctxt stmtContext) {
 	info := &LogosConstFor{GoVersion: check.conf.GoVersion}
@@ -290,6 +305,8 @@ func (check *Checker) logosConstForBody(s *syntax.ConstForStmt, info *LogosConst
 func (check *Checker) logosConstForConcrete(s *syntax.ConstForStmt, info *LogosConstFor, inner stmtContext) {
 	saved := check.conf.Error
 	seen := make(map[string]bool)
+	outer := check.logosFieldBind
+	defer func() { check.logosFieldBind = outer }()
 	check.conf.Error = func(err error) {
 		if key := err.Error(); !seen[key] {
 			seen[key] = true
@@ -308,12 +325,11 @@ func (check *Checker) logosConstForConcrete(s *syntax.ConstForStmt, info *LogosC
 			continue
 		}
 		checked++
-		check.logosFieldBind = &logosFieldBinding{info: info, index: i, field: f, tag: info.Struct.Tag(i)}
+		check.logosFieldBind = &logosFieldBinding{info: info, index: i, field: f, tag: info.Struct.Tag(i), outer: outer}
 		check.openScope(s.Body, "const for iteration")
 		check.stmtList(inner, s.Body.List)
 		check.closeScope()
 	}
-	check.logosFieldBind = nil
 	if checked == 0 {
 		check.usedVars[info.FieldVar] = true
 		if info.IndexVar != nil {

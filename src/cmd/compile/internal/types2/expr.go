@@ -809,7 +809,13 @@ func init() {
 func (check *Checker) binary(x *operand, e syntax.Expr, lhs, rhs syntax.Expr, op syntax.Operator) {
 	var y operand
 
+	if e == nil {
+		check.logosLHSPush(lhs)
+	}
 	check.expr(nil, x, lhs)
+	if e == nil {
+		check.logosLHSPop()
+	}
 	anded := check.logosPushAndCond(op, lhs) // logos M3-S4 hook: `x != nil && rest` narrows x for rest.
 	top := len(check.delayed)
 	check.expr(nil, &y, rhs)
