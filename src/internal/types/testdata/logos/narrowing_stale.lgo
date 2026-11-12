@@ -1,0 +1,109 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package p
+
+type U struct{ Name string }
+
+func take(u U) string { return u.Name }
+
+func pair() (int, U?) { return 1, nil }
+
+func opt(o U) U? { return o }
+
+func redeclParam(q U?) func() string {
+	var g func() string
+	if q != nil {
+		g = func() string { return take(q /* ERROR "cannot use q" */) }
+	}
+	n, q := pair()
+	_, _ = n, q
+	return g
+}
+
+func redeclVar(o U) func() string {
+	var q U? = o
+	var g func() string
+	if q != nil {
+		g = func() string { return take(q /* ERROR "cannot use q" */) }
+	}
+	n, q := pair()
+	_, _ = n, q
+	return g
+}
+
+func redeclResult() (q U?, g func() string) {
+	if q != nil {
+		g = func() string { return take(q /* ERROR "cannot use q" */) }
+	}
+	n, q := pair()
+	_ = n
+	return
+}
+
+func redeclShort(o U) func() string {
+	n, q := 1, opt(o)
+	var g func() string
+	if q != nil {
+		g = func() string { return take(q /* ERROR "cannot use q" */) }
+	}
+	m, q := pair()
+	_, _, _ = n, m, q
+	return g
+}
+
+func shadowBlock(q U?) func() string {
+	var g func() string
+	if q != nil {
+		g = func() string { return take(q) }
+	}
+	{
+		n, q := pair()
+		_, _ = n, q
+	}
+	return g
+}
+
+func shadowSiblings(q U?) func() string {
+	var g func() string
+	if q != nil {
+		g = func() string { return take(q) }
+	}
+	{
+		n, q := pair()
+		_, _ = n, q
+	}
+	{
+		n, q := pair()
+		_, _ = n, q
+	}
+	return g
+}
+
+func shadowHeader(q U?) func() string {
+	var g func() string
+	if q != nil {
+		g = func() string { return take(q) }
+	}
+	if n, q := pair(); n > 0 {
+		_ = q
+	}
+	for n, q := pair(); n > 5; {
+		_ = q
+	}
+	return g
+}
+
+func shadowClosure(q U?) func() string {
+	var g func() string
+	if q != nil {
+		g = func() string { return take(q) }
+	}
+	h := func() {
+		n, q := pair()
+		_, _ = n, q
+	}
+	h()
+	return g
+}

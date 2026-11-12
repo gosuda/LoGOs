@@ -40,7 +40,16 @@ func (check *Checker) logosEnterFuncBody(body *syntax.BlockStmt) {
 		inClos:    make(map[string]bool),
 		refInClos: make(map[string]bool),
 		assignOut: make(map[string]bool),
-		defSeen:   make(map[string]bool),
+	}
+	if sig := check.sig; sig != nil {
+		for _, vars := range []*Tuple{sig.params, sig.results} {
+			for i := range vars.Len() {
+				dq.params = append(dq.params, vars.At(i).name)
+			}
+		}
+		if sig.recv != nil {
+			dq.params = append(dq.params, sig.recv.name)
+		}
 	}
 	if body != nil {
 		syntax.Walk(body, dq)
@@ -116,6 +125,8 @@ func (check *Checker) logosExitFunc() {
 
 type logosDisqualWalk struct {
 	stack     []syntax.Node
+	scopes    []map[string]bool
+	params    []string
 	loop      int
 	clos      int
 	addr      map[string]bool
@@ -123,21 +134,14 @@ type logosDisqualWalk struct {
 	inClos    map[string]bool
 	refInClos map[string]bool
 	assignOut map[string]bool
-	defSeen   map[string]bool
 }
 
 func (w *logosDisqualWalk) Visit(node syntax.Node) syntax.Visitor {
 	if node == nil {
-		top := w.stack[len(w.stack)-1]
-		w.stack = w.stack[:len(w.stack)-1]
-		switch top.(type) {
-		case *syntax.FuncLit:
-			w.clos--
-		case *syntax.ForStmt:
-			w.loop--
-		}
+		w.leave()
 		return w
 	}
+	w.declare(node)
 	switch t := node.(type) {
 	case *syntax.FuncLit:
 		w.clos++
@@ -154,40 +158,88 @@ func (w *logosDisqualWalk) Visit(node syntax.Node) syntax.Visitor {
 			w.refInClos[t.Value] = true
 		}
 	case *syntax.AssignStmt:
-		if t.Lhs != nil {
-			for _, name := range logosAssignNames(t.Lhs) {
-				if t.Op == syntax.Def {
-					if w.defSeen[name] {
-						w.assignOut[name] = true
-					} else {
-						w.defSeen[name] = true
-					}
-					continue
-				}
-				if w.loop > 0 {
-					w.inLoop[name] = true
-				}
-				if w.clos > 0 {
-					w.inClos[name] = true
-				} else {
-					w.assignOut[name] = true
-				}
-			}
-		}
+		w.assign(t)
 	case *syntax.RangeClause:
-		if !t.Def && t.Lhs != nil {
+		if !t.Def {
 			for _, name := range logosAssignNames(t.Lhs) {
 				w.inLoop[name] = true
-				if w.clos > 0 {
-					w.inClos[name] = true
-				} else {
-					w.assignOut[name] = true
-				}
+				w.assigned(name)
 			}
 		}
 	}
 	w.stack = append(w.stack, node)
 	return w
+}
+
+func (w *logosDisqualWalk) leave() {
+	top := w.stack[len(w.stack)-1]
+	w.stack = w.stack[:len(w.stack)-1]
+	switch top.(type) {
+	case *syntax.FuncLit:
+		w.clos--
+	case *syntax.ForStmt:
+		w.loop--
+	case *syntax.BlockStmt, *syntax.CaseClause, *syntax.CommClause:
+		w.scopes = w.scopes[:len(w.scopes)-1]
+	}
+}
+
+func (w *logosDisqualWalk) declare(node syntax.Node) {
+	switch t := node.(type) {
+	case *syntax.FuncLit:
+		for _, f := range slices.Concat(t.Type.ParamList, t.Type.ResultList) {
+			if f.Name != nil {
+				w.params = append(w.params, f.Name.Value)
+			}
+		}
+	case *syntax.LambdaExpr:
+		if _, ok := t.Body.(*syntax.BlockStmt); ok {
+			for _, name := range t.Params {
+				w.params = append(w.params, name.Value)
+			}
+		}
+	case *syntax.BlockStmt, *syntax.CaseClause, *syntax.CommClause:
+		scope := make(map[string]bool, len(w.params))
+		for _, name := range w.params {
+			scope[name] = true
+		}
+		w.params = nil
+		w.scopes = append(w.scopes, scope)
+	case *syntax.VarDecl:
+		for _, name := range t.NameList {
+			w.scopes[len(w.scopes)-1][name.Value] = true
+		}
+	}
+}
+
+func (w *logosDisqualWalk) assign(s *syntax.AssignStmt) {
+	header := false
+	switch w.stack[len(w.stack)-1].(type) {
+	case *syntax.IfStmt, *syntax.ForStmt, *syntax.SwitchStmt:
+		header = true
+	}
+	scope := w.scopes[len(w.scopes)-1]
+	for _, name := range logosAssignNames(s.Lhs) {
+		if s.Op == syntax.Def {
+			redeclared := scope[name] && !header
+			scope[name] = scope[name] || !header
+			if !redeclared {
+				continue
+			}
+		}
+		if w.loop > 0 {
+			w.inLoop[name] = true
+		}
+		w.assigned(name)
+	}
+}
+
+func (w *logosDisqualWalk) assigned(name string) {
+	if w.clos > 0 {
+		w.inClos[name] = true
+	} else {
+		w.assignOut[name] = true
+	}
 }
 
 func logosAssignNames(lhs syntax.Expr) []string {

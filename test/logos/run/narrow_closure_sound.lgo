@@ -136,6 +136,61 @@ func okInnerGuard() string {
 	return before + "/" + f()
 }
 
+func okPair() (int, okUser?) {
+	return 1, nil
+}
+
+func okRedeclGuarded(q okUser?) string {
+	var g func() string
+	if q != nil {
+		g = func() string {
+			if q != nil {
+				return okTake(q)
+			}
+			return "gone"
+		}
+	}
+	n, q := okPair()
+	_, _ = n, q
+	return g()
+}
+
+func okShadowSiblings(q okUser?) string {
+	var g func() string
+	if q != nil {
+		g = func() string { return okTake(q) }
+	}
+	{
+		n, q := okPair()
+		_, _ = n, q
+	}
+	{
+		n, q := okPair()
+		_, _ = n, q
+	}
+	if g == nil {
+		return "none"
+	}
+	return g()
+}
+
+func okShadowHeader(q okUser?) string {
+	var g func() string
+	if q != nil {
+		g = func() string { return okTake(q) }
+	}
+	if n, q := okPair(); n > 0 {
+		_ = q
+	}
+	for n, q := okPair(); n > 5; {
+		_ = q
+	}
+	if g == nil {
+		return "none"
+	}
+	return g()
+}
+
 func main() {
 	check("immediate", okImmediate(), "ann")
 	check("deferred", okDeferred(), "ann")
@@ -149,6 +204,9 @@ func main() {
 	}
 	check("method-in-closure", okMethodInClosure(), "a:y")
 	check("inner-guard", okInnerGuard(), "none/late")
+	check("redecl-guarded", okRedeclGuarded(okUser{okName: "bob"}), "gone")
+	check("shadow-siblings", okShadowSiblings(okUser{okName: "cy"}), "cy")
+	check("shadow-header", okShadowHeader(okUser{okName: "di"}), "di")
 	if failed {
 		os.Exit(1)
 	}

@@ -553,6 +553,8 @@ Assigning `x` in a closure MUST disable narrowing for `x`. [T-202]
 
 A function literal MUST NOT read `x` as narrowed when `x` is assigned anywhere besides its declaration. [T-202]
 
+A short variable declaration that names a variable already declared in the same scope, such as a parameter, a named result, or a `var` variable, MUST count as an assignment to it. [T-202]
+
 A nil test on a struct field MUST NOT narrow the field. [T-202]
 
 Code MUST copy the field to a local first. [T-202]

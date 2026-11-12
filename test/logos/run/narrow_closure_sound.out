@@ -6,3 +6,6 @@ ok method-value
 ok goroutine
 ok method-in-closure
 ok inner-guard
+ok redecl-guarded
+ok shadow-siblings
+ok shadow-header
