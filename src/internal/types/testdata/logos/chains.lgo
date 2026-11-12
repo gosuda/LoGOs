@@ -127,6 +127,55 @@ func chainNestedTry(xs []int, ys []int) (int, error) {
 
 func pairge(x, y int) (bool, error) { return x+y > 0, nil }
 
+func chainBlockTryFallback(xs []int) (int, error) {
+	v := xs.first() ?? xs.count(x => {
+		ok := pair(x)? /* ERROR "nested_try_capture" */
+		return ok
+	})
+	return v, nil
+}
+
+func chainBlockOptCallArg(up *chainOptUser?, xs []int) error {
+	up?.SetAge(xs.count(x => {
+		ok := pair(x)? /* ERROR "nested_try_capture" */
+		return ok
+	}))
+	return nil
+}
+
+func chainBlockNestedChain(xs []int, ys []int) (int, error) {
+	v := xs.map(x => ys.count(y => {
+		ok := pairge(x, y)? /* ERROR "nested_try_capture" */
+		return ok
+	})).sum()
+	return v, nil
+}
+
+func chainBlockNestedInBlock(xs []int, ys []int) (int, error) {
+	v := xs.map(x => {
+		n := ys.count(y => {
+			if y > 0 {
+				ok := pairge(x, y)? /* ERROR "nested_try_capture" */
+				return ok
+			}
+			return false
+		})
+		return n
+	}).sum()
+	return v, nil
+}
+
+func chainBlockTryInConstIf(xs []int) (int, error) {
+	v := xs.first() ?? xs.count(x => {
+		const if true {
+			ok := pair(x)? /* ERROR "nested_try_capture" */
+			return ok
+		}
+		return false
+	})
+	return v, nil
+}
+
 func chainNestedFlat(xs []int, ys []int) []int {
 	return xs.map(x => ys.count(y => y > x))
 }

@@ -134,6 +134,7 @@ func (fl *fileLower) scopeHoists(s syntax.Stmt, repl []syntax.Stmt) []syntax.Stm
 	fl.addFirst(fl.stmtStartOf(s), "{ ")
 	end := fl.hoistedStmtEnd(s)
 	fl.add(end, end, " }")
+	anchorScopes(repl[:len(repl)-1], s.Pos())
 	wrapper := blockOf(s.Pos(), repl)
 	wrapper.Rbrace = syntax.EndPos(s)
 	return []syntax.Stmt{wrapper}
@@ -680,44 +681,14 @@ func (fl *fileLower) chainOpOf(cur *syntax.CallExpr, method string) chainOp {
 		if lam, ok := syntax.Unparen(cur.ArgList[0]).(*syntax.LambdaExpr); ok {
 			op.lam = lam
 			op.bodySpan = fl.lambdaBodySpan(lam, op.argSpan)
-			if body, ok := lam.Body.(syntax.Expr); ok {
-				if _, ok := syntax.Unparen(body).(*syntax.TryExpr); ok {
-					op.isTry = true
-				}
-			}
-			if block, ok := lam.Body.(*syntax.BlockStmt); ok {
-				op.isBlk = true
-				op.isTry = chainBlockHasTry(block)
-			}
+			op.isTry = types2.LogosLambdaTry(lam) != nil
+			_, op.isBlk = lam.Body.(*syntax.BlockStmt)
 		}
 	}
 	if method == "map" {
 		op.forms = fl.mapForms(op)
 	}
 	return op
-}
-
-func chainBlockHasTry(root syntax.Node) bool {
-	found := false
-	syntax.Inspect(root, func(n syntax.Node) bool {
-		if found {
-			return false
-		}
-		switch n := n.(type) {
-		case *syntax.FuncLit, *syntax.LambdaExpr:
-			return false
-		case *syntax.AssignStmt:
-			if _, _, ok := tryAssignOf(n); ok {
-				found = true
-			}
-		case *syntax.ExprStmt:
-			if _, _, ok := tryExprOf(n); ok {
-				found = true
-			}
-		}
-		return !found
-	})
-	return found
 }
 
 type localWrites struct {

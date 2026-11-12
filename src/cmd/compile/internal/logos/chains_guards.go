@@ -563,14 +563,8 @@ func (fl *fileLower) chainTries(call *syntax.CallExpr) bool {
 			return true
 		}
 		for _, arg := range c.ArgList {
-			lam, ok := syntax.Unparen(arg).(*syntax.LambdaExpr)
-			if !ok {
-				continue
-			}
-			if body, ok := lam.Body.(syntax.Expr); ok {
-				if _, ok := syntax.Unparen(body).(*syntax.TryExpr); ok {
-					found = true
-				}
+			if lam, ok := syntax.Unparen(arg).(*syntax.LambdaExpr); ok && types2.LogosLambdaTry(lam) != nil {
+				found = true
 			}
 		}
 		return true

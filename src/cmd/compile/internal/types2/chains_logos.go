@@ -441,12 +441,8 @@ func logosIsTryChain(call *syntax.CallExpr) *syntax.TryExpr {
 		return nil
 	}
 	for _, arg := range call.ArgList {
-		lam, ok := syntax.Unparen(arg).(*syntax.LambdaExpr)
-		if !ok {
-			continue
-		}
-		if lb, ok := lam.Body.(syntax.Expr); ok {
-			if tb, ok := syntax.Unparen(lb).(*syntax.TryExpr); ok {
+		if lam, ok := syntax.Unparen(arg).(*syntax.LambdaExpr); ok {
+			if tb := LogosLambdaTry(lam); tb != nil {
 				return tb
 			}
 		}
@@ -454,23 +450,37 @@ func logosIsTryChain(call *syntax.CallExpr) *syntax.TryExpr {
 	return nil
 }
 
-func (check *Checker) logosChainNestedTry(body syntax.Node) {
-	syntax.Inspect(body, func(n syntax.Node) bool {
-		if _, ok := n.(*syntax.FuncLit); ok {
+func LogosLambdaTry(lam *syntax.LambdaExpr) *syntax.TryExpr {
+	if block, ok := lam.Body.(*syntax.BlockStmt); ok {
+		return logosBlockTry(block)
+	}
+	if body, ok := lam.Body.(syntax.Expr); ok {
+		tb, _ := syntax.Unparen(body).(*syntax.TryExpr)
+		return tb
+	}
+	return nil
+}
+
+func logosBlockTry(block *syntax.BlockStmt) *syntax.TryExpr {
+	var found *syntax.TryExpr
+	syntax.Inspect(block, func(n syntax.Node) bool {
+		if found != nil {
 			return false
 		}
-		if call, ok := n.(*syntax.CallExpr); ok {
-			if tb := logosIsTryChain(call); tb != nil {
-				check.error(tb.Pos(), IncompatibleAssign, "[correctness::nested_try_capture] ? cannot propagate from a nested chain")
-				return false
-			}
+		switch n := n.(type) {
+		case *syntax.FuncLit, *syntax.LambdaExpr:
+			return false
+		case *syntax.TryExpr:
+			found = n
+			return false
 		}
 		return true
 	})
+	return found
 }
 
-func (check *Checker) logosRejectTryChainUnder(e syntax.Expr) {
-	syntax.Inspect(e, func(n syntax.Node) bool {
+func (check *Checker) logosChainNestedTry(body syntax.Node) {
+	syntax.Inspect(body, func(n syntax.Node) bool {
 		if _, ok := n.(*syntax.FuncLit); ok {
 			return false
 		}

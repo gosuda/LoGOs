@@ -76,6 +76,169 @@ func aroundErrdefer(xs []int) (out []int, err error) {
 	return
 }
 
+var evals int
+
+func counted(x int) (int, error) {
+	evals++
+	return double(x)
+}
+
+type box struct{ items []int }
+
+func guardAnd(on bool, xs []int) (string, error) {
+	ok := on && len(xs.map(x => {
+		v := counted(x)?
+		return v
+	})) > 0
+	return fmt.Sprint(ok), nil
+}
+
+func guardOr(on bool, xs []int) (string, error) {
+	ok := on || len(xs.map(x => {
+		v := counted(x)?
+		return v
+	})) > 0
+	return fmt.Sprint(ok), nil
+}
+
+func guardIf(on bool, xs []int) (string, error) {
+	if on && len(xs.map(x => {
+		v := counted(x)?
+		return v
+	})) > 0 {
+		return "true", nil
+	}
+	return "false", nil
+}
+
+func guardReturn(on bool, xs []int) (string, error) {
+	return fmt.Sprint(on && len(xs.map(x => {
+		v := counted(x)?
+		return v
+	})) > 0), nil
+}
+
+func guardNarrow(b *box?) (string, error) {
+	ok := b != nil && len(b.items.map(x => {
+		v := counted(x)?
+		return v
+	})) > 0
+	return fmt.Sprint(ok), nil
+}
+
+func guardMixed(on bool, xs, ys []int) (string, error) {
+	ok := len(xs.map(x => counted(x)?)) > 0 && on && len(ys.map(y => {
+		v := counted(y)?
+		return v
+	})) > 0
+	return fmt.Sprint(ok), nil
+}
+
+func forCond(xs []int) (string, error) {
+	n := 0
+	for len(xs.map(x => {
+		v := counted(x)?
+		return v
+	})) > n {
+		n++
+	}
+	return fmt.Sprint(n), nil
+}
+
+func forPost(xs []int) (string, error) {
+	n := 0
+	for i := 0; i < 3; i += len(xs.map(x => {
+		v := counted(x)?
+		return v
+	})) {
+		n++
+	}
+	return fmt.Sprint(n), nil
+}
+
+func switchTag(xs []int) (string, error) {
+	switch len(xs.map(x => {
+		v := counted(x)?
+		return v
+	})) {
+	case 1:
+		return "one", nil
+	case 2:
+		return "two", nil
+	}
+	return "other", nil
+}
+
+func caseGuard(on bool, xs []int) (string, error) {
+	switch {
+	case on:
+		return "first", nil
+	case len(xs.map(x => {
+		v := counted(x)?
+		return v
+	})) > 0:
+		return "second", nil
+	}
+	return "none", nil
+}
+
+type cellWant struct {
+	text  string
+	err   error
+	evals int
+}
+
+func cellCheck(name string, f func() (string, error), want cellWant) {
+	evals = 0
+	text, err := f()
+	got := cellWant{"", err, evals}
+	if err == nil {
+		got.text = text
+	}
+	check(name, got == want, got, want)
+}
+
+func guardCells() {
+	odd, even := []int{1}, []int{2}
+	cellCheck("guard-and-skip", func() (string, error) { return guardAnd(false, odd) }, cellWant{"false", nil, 0})
+	cellCheck("guard-and-run", func() (string, error) { return guardAnd(true, even) }, cellWant{"true", nil, 1})
+	cellCheck("guard-and-err", func() (string, error) { return guardAnd(true, odd) }, cellWant{"", errOdd, 1})
+	cellCheck("guard-or-skip", func() (string, error) { return guardOr(true, odd) }, cellWant{"true", nil, 0})
+	cellCheck("guard-or-run", func() (string, error) { return guardOr(false, even) }, cellWant{"true", nil, 1})
+	cellCheck("guard-or-err", func() (string, error) { return guardOr(false, odd) }, cellWant{"", errOdd, 1})
+	cellCheck("guard-if-skip", func() (string, error) { return guardIf(false, odd) }, cellWant{"false", nil, 0})
+	cellCheck("guard-if-err", func() (string, error) { return guardIf(true, odd) }, cellWant{"", errOdd, 1})
+	cellCheck("guard-return-skip", func() (string, error) { return guardReturn(false, odd) }, cellWant{"false", nil, 0})
+	cellCheck("guard-return-err", func() (string, error) { return guardReturn(true, odd) }, cellWant{"", errOdd, 1})
+}
+
+func guardMixedCells() {
+	odd, even := []int{1}, []int{2}
+	cellCheck("guard-mixed-skip", func() (string, error) { return guardMixed(false, even, odd) }, cellWant{"false", nil, 1})
+	cellCheck("guard-mixed-run", func() (string, error) { return guardMixed(true, even, even) }, cellWant{"true", nil, 2})
+	cellCheck("guard-mixed-err", func() (string, error) { return guardMixed(true, even, odd) }, cellWant{"", errOdd, 2})
+}
+
+func guardNarrowCells() {
+	var none *box?
+	cellCheck("guard-narrow-skip", func() (string, error) { return guardNarrow(none) }, cellWant{"false", nil, 0})
+	cellCheck("guard-narrow-run", func() (string, error) { return guardNarrow(&box{items: []int{2}}) }, cellWant{"true", nil, 1})
+	cellCheck("guard-narrow-err", func() (string, error) { return guardNarrow(&box{items: []int{1}}) }, cellWant{"", errOdd, 1})
+}
+
+func hostCells() {
+	odd, even, pair := []int{1}, []int{2}, []int{2, 4}
+	cellCheck("for-cond-run", func() (string, error) { return forCond(pair) }, cellWant{"2", nil, 6})
+	cellCheck("for-cond-err", func() (string, error) { return forCond(odd) }, cellWant{"", errOdd, 1})
+	cellCheck("for-post-run", func() (string, error) { return forPost(even) }, cellWant{"3", nil, 3})
+	cellCheck("for-post-err", func() (string, error) { return forPost(odd) }, cellWant{"", errOdd, 1})
+	cellCheck("switch-tag-run", func() (string, error) { return switchTag(pair) }, cellWant{"two", nil, 2})
+	cellCheck("switch-tag-err", func() (string, error) { return switchTag(odd) }, cellWant{"", errOdd, 1})
+	cellCheck("case-guard-first", func() (string, error) { return caseGuard(true, odd) }, cellWant{"first", nil, 0})
+	cellCheck("case-guard-run", func() (string, error) { return caseGuard(false, even) }, cellWant{"second", nil, 1})
+	cellCheck("case-guard-err", func() (string, error) { return caseGuard(false, odd) }, cellWant{"", errOdd, 1})
+}
+
 func constIfReturn(xs []int) ([]int, error) {
 	ys := xs.map(x => {
 		v := double(x)?
@@ -179,6 +342,10 @@ func main() {
 		eq("around-errdefer", fmt.Sprint(ys, trace), "[-1 2] [rollback]")
 	}
 	constFormCells()
+	guardCells()
+	guardMixedCells()
+	guardNarrowCells()
+	hostCells()
 	if failed {
 		os.Exit(1)
 	}

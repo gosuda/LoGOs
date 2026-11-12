@@ -283,7 +283,7 @@ func (check *Checker) logosOptSelect(x *operand, e *syntax.OptSelectExpr) exprKi
 }
 
 func (check *Checker) logosCoalesce(x *operand, e *syntax.CoalesceExpr) exprKind {
-	check.logosRejectTryChainUnder(e.Y)
+	check.logosChainNestedTry(e.Y)
 	var lx operand
 	check.expr(nil, &lx, e.X)
 	var rx operand
@@ -337,7 +337,7 @@ func (check *Checker) logosOptionalCall(x *operand, call *syntax.CallExpr) bool 
 		return false
 	}
 	for _, arg := range call.ArgList {
-		check.logosRejectTryChainUnder(arg)
+		check.logosChainNestedTry(arg)
 	}
 	args, atargs := check.genericExprList(call.ArgList)
 	rsig := check.arguments(call, sig, nil, nil, args, atargs)
