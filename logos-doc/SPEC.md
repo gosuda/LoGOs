@@ -684,6 +684,20 @@ The switched value MUST evaluate once. [T-203.1]
 
 Only the chosen arm MUST evaluate. [T-203.1]
 
+A `?` in the init of a switch expression MUST evaluate the init once, at the position of the switch expression in the enclosing statement, after every call and receive operand to its left and before every operand to its right. [T-203.1][T-104.1]
+
+When that `?` fails, the enclosing statement MUST run no later operand, assignment, call, or arm, and the function MUST return the error as a `?` statement at that position does, with the same zero results, `defer`, and `errdefer` behavior. [T-203.1][T-104.1]
+
+The names such an init declares MUST be visible in the tag and the arms only, and the names declared in an enclosing `if`, `switch`, or `for` header before the switch expression MUST be visible in the init. [T-203.1]
+
+In a `for` condition the init MUST run again for each test of the condition. [T-203.1][T-104.1]
+
+A switch expression whose init ends in `?` MUST appear only in an assignment target or right-hand side, a `return` result, an ungrouped `var` declaration value, the init or condition of an `if` or `for`, or the init or tag of a `switch`, reached only through parentheses, unary and binary operands, index and selector operands, and composite literal elements [T-203.1][T-104.1]. Labels, `goto`, `break`, `continue`, and `fallthrough` around that statement MUST keep their meaning [T-203.1].
+
+Any other position, among them a call argument, a case expression, an arm, tag, or init of another switch expression, a `for` post statement, a `send` statement, a `range` clause, and the init of a labeled `for` or `switch`, MUST fail with `correctness::misplaced_try` [T-203.1][T-104.1].
+
+In the right operand of `&&` or `||` the init MUST run only when the left operand does not decide the result [T-203.1][T-104.1].
+
 The run-time representation MUST be the upstream interface. [T-203.1]
 
 A two-tier tag layout MUST NOT be used. [T-203.1]
