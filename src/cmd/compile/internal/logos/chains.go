@@ -852,16 +852,17 @@ func (fl *fileLower) callForm(call *syntax.CallExpr, param string) resultForm {
 }
 
 type chainGen struct {
-	fl     *fileLower
-	pos    syntax.Pos
-	prefix string
-	enc    []resultSpec
-	guard  string
-	exit   func(err string) string
-	whole  span
-	kept   []span
-	hoists []chainHoist
-	elemT  types2.Type
+	fl        *fileLower
+	pos       syntax.Pos
+	prefix    string
+	enc       []resultSpec
+	guard     string
+	exit      func(err string) string
+	whole     span
+	kept      []span
+	hoists    []chainHoist
+	elemT     types2.Type
+	receiverT types2.Type
 }
 
 func (cg *chainGen) run(call *syntax.CallExpr) {
@@ -910,6 +911,7 @@ func (cg *chainGen) run(call *syntax.CallExpr) {
 	elemT := cg.baseElem(base)
 	resultT := cg.fl.pkg.info.TypeOf(call)
 	isTry := cg.runIsTry(ops, term)
+	cg.receiverT = cg.fl.pkg.info.TypeOf(base)
 	cg.emit(call, ops, baseText, elemT, resultT, term, isTry)
 }
 
@@ -1883,6 +1885,9 @@ func (cg *chainGen) emit(call *syntax.CallExpr, ops []chainOp, baseText otext, e
 	ce := &chainEmit{cg: cg, ops: ops, term: term, baseText: baseText, elemT: elemT, resultT: resultT, isTry: isTry}
 	ce.prepare()
 	prelude, body, epilogue := ce.runLoopO()
+	if !isTry {
+		prelude = prelude[1:]
+	}
 	var parts []otext
 	for _, line := range prelude {
 		parts = append(parts, line, gen("; "))
@@ -1895,7 +1900,7 @@ func (cg *chainGen) emit(call *syntax.CallExpr, ops []chainOp, baseText otext, e
 	}
 	loopText := cat(leftoverComments(fl, cg.whole, cg.kept), cat(parts...).trimRight(" "))
 	if !isTry {
-		text := cat(gen("func() "+ce.resultSpelling()+" { "), loopText, gen(" }()"))
+		text := cat(gen("func("+cg.prefix+"_rcv "+cg.spellType(cg.receiverT)+") "+ce.resultSpelling()+" { "), loopText, gen(" }("), baseText, gen(")"))
 		native := parseChainExprFrag(fl, text.s, call.Pos())
 		fl.stageReplacement(call, native)
 		fl.wrapSpan[native] = cg.whole

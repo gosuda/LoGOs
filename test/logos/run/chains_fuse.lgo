@@ -17,6 +17,7 @@ fmt.Println("ok", name)
 }
 var mapCalls int
 var recvCalls int
+var fusedSink []int
 func bump(x int) int {
 mapCalls++
 return 2 * x
@@ -54,13 +55,19 @@ func main() {
 mapCalls = 0
 recvCalls = 0
 r := fused()
+check("fuse-values", slices.Equal(r, []int{6, 8}), r, []int{6, 8})
+check("fuse-calls", mapCalls == 2 && recvCalls == 1, fmt.Sprint(mapCalls, recvCalls), "2 1")
 allocs := testing.AllocsPerRun(20, func() {
 mapCalls = 0
 recvCalls = 0
-_ = fused()
+fusedSink = fused()
 })
-check("fuse-values", slices.Equal(r, []int{6, 8}), r, []int{6, 8})
-check("fuse-calls", mapCalls == 2 && recvCalls == 1, fmt.Sprint(mapCalls, recvCalls), "2 1")
+if !slices.Equal(fusedSink, []int{6, 8}) {
+check("fuse-measured-values", false, fusedSink, []int{6, 8})
+}
+if mapCalls != 2 || recvCalls != 1 {
+check("fuse-measured-calls", false, fmt.Sprint(mapCalls, recvCalls), "2 1")
+}
 check("fuse-allocs", allocs <= 2, allocs, "<=2")
 check("fuse-allocs-exact", allocs == 1, allocs, 1)
 check("fuse-empty-nil", fusedEmptyNil(), fusedEmptyNil(), true)
