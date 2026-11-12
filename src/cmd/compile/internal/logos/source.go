@@ -165,12 +165,22 @@ func extend(cur, t span) span {
 func stmtEnd(src []byte, from int) int {
 	end := from
 	depth := 0
+	header := -1
 	scanSegment(src, from, len(src), func(t tok) bool {
 		if t.comment {
 			return true
 		}
 		switch t.kind {
-		case token.LPAREN, token.LBRACK, token.LBRACE:
+		case token.SWITCH:
+			if header < 0 {
+				header = depth
+			}
+		case token.LPAREN, token.LBRACK:
+			depth++
+		case token.LBRACE:
+			if depth == header {
+				header = -1
+			}
 			depth++
 		case token.RPAREN, token.RBRACK:
 			depth--
@@ -180,7 +190,7 @@ func stmtEnd(src []byte, from int) int {
 			}
 			depth--
 		case token.SEMICOLON:
-			if depth == 0 {
+			if depth == 0 && header != 0 {
 				return false
 			}
 		}

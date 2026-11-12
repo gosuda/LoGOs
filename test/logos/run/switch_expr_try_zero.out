@@ -4,6 +4,8 @@ ok assign
 ok assign-fail
 ok expr
 ok expr-fail
+ok sum
+ok sum-fail
 ok return
 ok return-fail
 ok cond
