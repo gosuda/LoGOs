@@ -403,6 +403,9 @@ func (fl *fileLower) propWalk(e syntax.Expr, c *propCollect) syntax.Expr {
 	case *syntax.ParenExpr:
 		e.X = fl.propWalk(e.X, c)
 		return e
+	case *syntax.TryExpr:
+		e.X = fl.propWalk(e.X, c)
+		return e
 	case *syntax.SelectorExpr:
 		if _, pr, sel, ok := fl.propSelOf(e); ok {
 			fl.recordPropRead(c, pr, sel)
@@ -777,6 +780,16 @@ func (fl *fileLower) emitPropReads(c *propCollect) {
 
 func (fl *fileLower) lowerPropAssign(s *syntax.AssignStmt) []syntax.Stmt {
 	lhs := syntax.UnpackListExpr(s.Lhs)
+	if _, _, isTry := tryAssignOf(s); isTry && s.Op == 0 {
+		for _, l := range lhs {
+			if _, _, _, ok := fl.propSelOf(l); ok {
+				c := &propCollect{}
+				s.Rhs = fl.propWalk(s.Rhs, c)
+				fl.emitPropReads(c)
+				return []syntax.Stmt{s}
+			}
+		}
+	}
 	if s.Rhs == nil {
 		if len(lhs) != 1 {
 			return []syntax.Stmt{s}
@@ -1143,12 +1156,6 @@ func (fl *fileLower) lowerPropMulti(s *syntax.AssignStmt, lhs []syntax.Expr, roo
 		}
 		fl.propWalk(l, c)
 	}
-	rhsList := syntax.UnpackListExpr(s.Rhs)
-	for _, r := range rhsList {
-		if call, ok := syntax.Unparen(r).(*syntax.CallExpr); ok && propRawEndsWithQuestion(fl, call) {
-			return []syntax.Stmt{s}
-		}
-	}
 	s.Rhs = fl.propWalk(s.Rhs, c)
 	if !spOK {
 		fl.emitPropReads(c)
@@ -1162,34 +1169,11 @@ func (fl *fileLower) lowerPropMulti(s *syntax.AssignStmt, lhs []syntax.Expr, roo
 	}
 	lhsTexts := make([]otext, len(lhs))
 	for _, i := range roots {
-		l := lhs[i]
-		recv, pr, sel, ok := fl.propSelOf(l)
-		if !ok || pr.ReadOnly {
-			fl.emitPropReads(c)
-			return []syntax.Stmt{s}
-		}
-		fl.propWalk(recv, c)
-		_, recvSp, ok := fl.propSelSpan(sel)
+		temp, ok := fl.propRootHoist(c, pos, lhs[i])
 		if !ok {
 			fl.emitPropReads(c)
 			return []syntax.Stmt{s}
 		}
-		_ = fl.textOf(recvSp)
-		temp := propTempName(fl.off(sel.Sel.Pos()))
-		typ, ok := fl.spellPropType(pr.Typ, pos)
-		if !ok {
-			base.Fatalf("logos: property %s has a type that cannot be spelled in this file", pr.Name)
-		}
-		setBase := recv
-		if !propTrivialRecv(recv) {
-			pin := temp + "r"
-			c.hoist.pres = append(c.hoist.pres, defineOf(pos, []syntax.Expr{nameOf(pos, pin)}, []syntax.Expr{recv}))
-			setBase = nameOf(pos, pin)
-		}
-		c.hoist.pres = append(c.hoist.pres, at(&syntax.DeclStmt{DeclList: []syntax.Decl{
-			at(&syntax.VarDecl{NameList: []*syntax.Name{nameOf(pos, temp)}, Type: typ}, pos),
-		}}, pos))
-		c.hoist.posts = append(c.hoist.posts, exprStmtOf(pos, callOf(pos, selOf(pos, setBase, "Logos_Set"+pr.Name), []syntax.Expr{nameOf(pos, temp)})))
 		fl.propRetarget(s, i, temp)
 		lhsTexts[i] = gen(temp)
 	}
@@ -1208,21 +1192,41 @@ func (fl *fileLower) lowerPropMulti(s *syntax.AssignStmt, lhs []syntax.Expr, roo
 	return fl.finishPropReplace(c, sp, []syntax.Stmt{s}, []otext{main})
 }
 
+func (fl *fileLower) propRootHoist(c *propCollect, pos syntax.Pos, l syntax.Expr) (string, bool) {
+	recv, pr, sel, ok := fl.propSelOf(l)
+	if !ok || pr.ReadOnly {
+		return "", false
+	}
+	fl.propWalk(recv, c)
+	_, recvSp, ok := fl.propSelSpan(sel)
+	if !ok {
+		return "", false
+	}
+	_ = fl.textOf(recvSp)
+	temp := propTempName(fl.off(sel.Sel.Pos()))
+	typ, ok := fl.spellPropType(pr.Typ, pos)
+	if !ok {
+		base.Fatalf("logos: property %s has a type that cannot be spelled in this file", pr.Name)
+	}
+	setBase := recv
+	if !propTrivialRecv(recv) {
+		pin := temp + "r"
+		c.hoist.pres = append(c.hoist.pres, defineOf(pos, []syntax.Expr{nameOf(pos, pin)}, []syntax.Expr{recv}))
+		setBase = nameOf(pos, pin)
+	}
+	c.hoist.pres = append(c.hoist.pres, at(&syntax.DeclStmt{DeclList: []syntax.Decl{
+		at(&syntax.VarDecl{NameList: []*syntax.Name{nameOf(pos, temp)}, Type: typ}, pos),
+	}}, pos))
+	c.hoist.posts = append(c.hoist.posts, exprStmtOf(pos, callOf(pos, selOf(pos, setBase, "Logos_Set"+pr.Name), []syntax.Expr{nameOf(pos, temp)})))
+	return temp, true
+}
+
 func (fl *fileLower) propRetarget(s *syntax.AssignStmt, i int, temp string) {
 	le, ok := s.Lhs.(*syntax.ListExpr)
 	if !ok {
 		base.Fatalf("logos: multi-assign target without a list at %s", s.Pos().String())
 	}
 	le.ElemList[i] = nameOf(s.Pos(), temp)
-}
-
-func propRawEndsWithQuestion(fl *fileLower, call *syntax.CallExpr) bool {
-	sp, ok := fl.platformSpan(call)
-	if !ok {
-		return false
-	}
-	rest := bytes.TrimSpace(fl.src[sp.start:sp.end])
-	return len(rest) > 0 && rest[len(rest)-1] == '?'
 }
 
 func (fl *fileLower) lowerPropExprStmt(s *syntax.ExprStmt) []syntax.Stmt {

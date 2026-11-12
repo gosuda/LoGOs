@@ -673,21 +673,36 @@ func (fc *funcLower) tryAssignCore(s *syntax.AssignStmt, t *syntax.TryExpr, call
 		}, tw.subs)
 		return native, text, spanStart, spanEnd
 	}
-	errDecl := nameOf(tpos, errSpelling)
-	errUse := nameOf(tpos, errSpelling)
-	errChk := nameOf(tpos, errSpelling)
-	withErr := append(slices.Clone(lhs), errUse)
-	native = []syntax.Stmt{blockOf(stmtPos, []syntax.Stmt{
-		errorVarDecl(stmtPos, errDecl),
-		assignOf(stmtPos, withErr, []syntax.Expr{call}),
-		errCheckOf(stmtPos, errChk, exitNative),
-	})}
-	withErrT := []syntax.Expr{lhsMark, nameOf(tpos, errSpelling)}
-	text := renderText([]syntax.Stmt{blockOf(stmtPos, []syntax.Stmt{
-		errorVarDecl(stmtPos, nameOf(tpos, errSpelling)),
-		assignOf(stmtPos, withErrT, []syntax.Expr{callMark}),
-		errCheckOf(stmtPos, nameOf(tpos, errSpelling), exitText),
-	})}, tw.subs)
+	c := &propCollect{hoist: &propHoist{}}
+	assignLhs := slices.Clone(lhs)
+	lhsMarkOf := lhsMark
+	if spans, ok := fl.propLhsSpans(s, lhs); ok {
+		parts := make([]otext, len(lhs))
+		rooted := false
+		for i, l := range lhs {
+			if temp, isProp := fl.propRootHoist(c, stmtPos, l); isProp {
+				assignLhs[i] = nameOf(stmtPos, temp)
+				parts[i] = gen(temp)
+				rooted = true
+				continue
+			}
+			parts[i] = fl.srcUser(spans[i].start, spans[i].end).trim()
+		}
+		if rooted {
+			lhsMarkOf = tw.mark(stmtPos, joinO(parts, ", "))
+		}
+	}
+	stmts := func(assign *syntax.AssignStmt, exit []syntax.Stmt) []syntax.Stmt {
+		list := []syntax.Stmt{errorVarDecl(stmtPos, nameOf(tpos, errSpelling))}
+		list = append(list, c.hoist.pres...)
+		list = append(list, assign)
+		list = append(list, c.hoist.posts...)
+		return append(list, errCheckOf(stmtPos, nameOf(tpos, errSpelling), exit))
+	}
+	native = []syntax.Stmt{blockOf(stmtPos, stmts(
+		assignOf(stmtPos, append(assignLhs, nameOf(tpos, errSpelling)), []syntax.Expr{call}), exitNative))}
+	text := renderText([]syntax.Stmt{blockOf(stmtPos, stmts(
+		assignOf(stmtPos, []syntax.Expr{lhsMarkOf, nameOf(tpos, errSpelling)}, []syntax.Expr{callMark}), exitText))}, tw.subs)
 	return native, text, spanStart, spanEnd
 }
 
