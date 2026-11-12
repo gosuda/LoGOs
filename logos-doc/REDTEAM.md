@@ -80,7 +80,7 @@ Rules: logos-doc/SPEC.md. Status values: planned, tested, satisfied upstream, bl
 | #81 | concurrent collector racing scan zeroing | M18 | src/cmd/go/testdata/script/logos_redteam_81.txt (executed 2026-10-28: `go test cmd/go -run 'Script/^logos_redteam_81$'` passes, race leg included) | tested |
 | #82 | split union needing custom GC bitmap | M2 | test/logos/redteam/attack_082_union_gc_shape | tested |
 | #83 | escaping const byte to string zero copy mutation | M5 | test/logos/run/zerocopy.lgo | tested |
-| #84 | eject evaluating chain receiver twice | M6 | test/logos/run/chains_fuse.lgo (case fuse-calls: a fused chain evaluates its receiver once under logos run) | tested |
+| #84 | eject evaluating chain receiver twice | M6 | test/logos/run/chains_fuse.lgo (case fuse-calls: a fused chain evaluates its receiver once under logos run); src/cmd/go/testdata/script/logos_eject_chains_fuse.txt (the ejected module prints the same cases under go and under upstream go1.27.2) | tested |
 | #85 | typed nil error triggering errdefer | M1 | test/logos/redteam/attack_085_typed_nil_errdefer | tested |
 | #86 | const switch losing outer constraint methods | M7 | src/internal/types/testdata/logos/const_switch.lgo; test/logos/run/const_switch.lgo | tested |
 | #87 | errdefer skipped on panic or Goexit exit | M1 | test/logos/redteam/attack_087_errdefer_panic_goexit | tested |
