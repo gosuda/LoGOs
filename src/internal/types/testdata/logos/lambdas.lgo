@@ -16,6 +16,72 @@ func needTargetParen() {
 	_ = g
 }
 
+func takeAny(v any)                {}
+func takeAnys(vs ...any)           {}
+func takeError(e error)            {}
+func takeInt(n int)                {}
+func takeIface(s interface{ M() }) {}
+func apply2[T any](f func(T) T)    {}
+func ident[T any](v T) T           { return v }
+
+func needTargetAny() {
+	var a any = x => /* ERROR "lambda_needs_target" */ x
+	_ = a
+}
+
+func needTargetInt() {
+	var n int = x => /* ERROR "lambda_needs_target" */ x
+	_ = n
+}
+
+func needTargetError() {
+	var e error = x => /* ERROR "lambda_needs_target" */ x
+	_ = e
+}
+
+func needTargetAssign() {
+	var a any
+	a = x => /* ERROR "lambda_needs_target" */ x
+	_ = a
+}
+
+func needTargetArg() {
+	takeAny(x => /* ERROR "lambda_needs_target" */ x)
+	takeInt(x => /* ERROR "lambda_needs_target" */ x)
+	takeError(x => /* ERROR "lambda_needs_target" */ x)
+	takeIface(x => /* ERROR "lambda_needs_target" */ x)
+}
+
+func needTargetVariadic() {
+	takeAnys(x => /* ERROR "lambda_needs_target" */ x)
+	takeAnys(1, (a, b) => /* ERROR "lambda_needs_target" */ a)
+}
+
+func needTargetResult() int {
+	return x => /* ERROR "lambda_needs_target" */ x
+}
+
+func needTargetElement() {
+	_ = []any{x => /* ERROR "lambda_needs_target" */ x}
+	_ = map[string]any{"k": x => /* ERROR "lambda_needs_target" */ x}
+}
+
+func needTargetConversion() {
+	_ = any(x => /* ERROR "lambda_needs_target" */ x)
+}
+
+func needTargetBlock() {
+	var a any = x => /* ERROR "lambda_needs_target" */ {
+		return x
+	}
+	_ = a
+}
+
+func needTargetTypeParam() {
+	_ = ident(x => /* ERROR "lambda_needs_target" */ x)
+	apply2(x => /* ERROR "lambda_needs_target" */ x)
+}
+
 func countMismatch() {
 	var f func(int) int = (a, b) => /* ERROR "mismatch" */ a
 	_ = f
