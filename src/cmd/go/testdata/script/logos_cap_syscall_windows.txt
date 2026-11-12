@@ -1,0 +1,181 @@
+[short] skip 'cross-links the standard library for windows'
+
+env GOPROXY=off
+env GOTOOLCHAIN=local
+env GOOS=windows
+env GOARCH=amd64
+env CGO_ENABLED=0
+mkdir $WORK/bin
+
+cd a/main
+! logos build -o $WORK/bin/wina.exe ./cmd
+stderr 'ERROR \[capabilities::unauthorized_exec\]: Transitive dependency ''example\.com/adep'' reaches ''syscall\.\(\*LazyProc\)\.Call'''
+stderr 'ERROR \[capabilities::unauthorized_net\]: Transitive dependency ''example\.com/adep'' reaches ''syscall\.\(\*LazyProc\)\.Call'''
+cd ../..
+
+cd b/main
+! logos build -o $WORK/bin/winb.exe ./cmd
+stderr 'ERROR \[capabilities::unauthorized_exec\]: Transitive dependency ''example\.com/bdep'' reaches ''syscall\.\(\*Proc\)\.Call'''
+stderr 'ERROR \[capabilities::unauthorized_net\]: Transitive dependency ''example\.com/bdep'' reaches ''syscall\.\(\*Proc\)\.Call'''
+cd ../..
+
+cd c/main
+logos build -o $WORK/bin/winc.exe ./cmd
+! stderr 'capabilities::'
+cd ../..
+
+cd d/main
+logos build -o $WORK/bin/wind.exe ./cmd
+! stderr 'capabilities::'
+cd ../..
+
+-- a/main/go.mod --
+module example.com/amain
+
+go 1.27
+
+require example.com/adep v0.0.0
+
+replace example.com/adep => ../dep
+
+-- a/main/logos.toml --
+[capabilities]
+transitive_exec = "deny"
+transitive_net = "deny"
+
+-- a/main/cmd/main.go --
+package main
+
+import "example.com/adep"
+
+func main() { adep.Init() }
+
+-- a/dep/go.mod --
+module example.com/adep
+
+go 1.27
+
+-- a/dep/dep.go --
+package adep
+
+import "syscall"
+
+//go:noinline
+func Init() {
+	syscall.NewLazyDLL("kernel32.dll").NewProc("GetCurrentProcessId").Call()
+}
+
+-- b/main/go.mod --
+module example.com/bmain
+
+go 1.27
+
+require example.com/bdep v0.0.0
+
+replace example.com/bdep => ../dep
+
+-- b/main/logos.toml --
+[capabilities]
+transitive_exec = "deny"
+transitive_net = "deny"
+
+-- b/main/cmd/main.go --
+package main
+
+import "example.com/bdep"
+
+func main() { bdep.Init() }
+
+-- b/dep/go.mod --
+module example.com/bdep
+
+go 1.27
+
+-- b/dep/dep.go --
+package bdep
+
+import "syscall"
+
+//go:noinline
+func Init() {
+	syscall.MustLoadDLL("kernel32.dll").MustFindProc("GetCurrentProcessId").Call()
+}
+
+-- c/main/go.mod --
+module example.com/cmain
+
+go 1.27
+
+require example.com/cdep v0.0.0
+
+replace example.com/cdep => ../dep
+
+-- c/main/logos.toml --
+[capabilities]
+transitive_exec = "deny"
+transitive_net = "deny"
+transitive_exec_allowlist = ["example.com/cdep/**"]
+transitive_net_allowlist = ["example.com/cdep/**"]
+
+-- c/main/cmd/main.go --
+package main
+
+import "example.com/cdep"
+
+func main() { cdep.Init() }
+
+-- c/dep/go.mod --
+module example.com/cdep
+
+go 1.27
+
+-- c/dep/dep.go --
+package cdep
+
+import "syscall"
+
+//go:noinline
+func Init() {
+	syscall.NewLazyDLL("kernel32.dll").NewProc("GetCurrentProcessId").Call()
+}
+
+-- d/main/go.mod --
+module example.com/dmain
+
+go 1.27
+
+require example.com/ddep v0.0.0
+
+replace example.com/ddep => ../dep
+
+-- d/main/logos.toml --
+[capabilities]
+transitive_exec = "deny"
+transitive_net = "deny"
+
+-- d/main/cmd/main.go --
+package main
+
+import "example.com/ddep"
+
+func main() { ddep.Init() }
+
+-- d/dep/go.mod --
+module example.com/ddep
+
+go 1.27
+
+-- d/dep/dep.go --
+package ddep
+
+import (
+	"os"
+	"syscall"
+)
+
+//go:noinline
+func Init() {
+	syscall.Getpid()
+	os.Getpid()
+	os.ReadFile("go.mod")
+}
