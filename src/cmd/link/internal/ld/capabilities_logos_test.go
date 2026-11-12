@@ -48,6 +48,8 @@ func TestLogosCapSinks(t *testing.T) {
 		"golang.org/x/sys/unix.RawSyscall6", "golang.org/x/sys/unix.SyscallNoError",
 		"golang.org/x/sys/unix.RawSyscallNoError",
 		"golang.org/x/sys/windows.(*Proc).Call", "golang.org/x/sys/windows.(*LazyProc).Call",
+		"golang.org/x/sys/plan9.Syscall", "golang.org/x/sys/plan9.Syscall6",
+		"golang.org/x/sys/plan9.RawSyscall", "golang.org/x/sys/plan9.RawSyscall6",
 	} {
 		if capabilitySinks[sink] != CapSyscall {
 			t.Errorf("raw syscall entry %q must map to CapSyscall", sink)

@@ -65,6 +65,10 @@ var capabilitySinks = map[string]CapabilityKind{
 	"golang.org/x/sys/unix.RawSyscallNoError":   CapSyscall,
 	"golang.org/x/sys/windows.(*Proc).Call":     CapSyscall,
 	"golang.org/x/sys/windows.(*LazyProc).Call": CapSyscall,
+	"golang.org/x/sys/plan9.Syscall":            CapSyscall,
+	"golang.org/x/sys/plan9.Syscall6":           CapSyscall,
+	"golang.org/x/sys/plan9.RawSyscall":         CapSyscall,
+	"golang.org/x/sys/plan9.RawSyscall6":        CapSyscall,
 }
 
 const (
