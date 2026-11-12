@@ -26,8 +26,7 @@ type Reader struct {
 }
 
 func (r *Reader) Name() string {
-	s := r.S
-	return s
+	return r.S
 }
 
 type Mutator struct {

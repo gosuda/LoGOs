@@ -1,0 +1,263 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+cd w
+logos build ./same
+logos build ./cross
+logos run ./app
+stdout '^tee 7 \{1 2\} \[3 4\]$'
+
+! logos build ./sameslice
+stderr 'sameslice\.lgo:.*const_view_mutation'
+! logos build ./crossslice
+stderr 'crossslice\.lgo:.*const_view_mutation'
+
+! logos build ./samemap
+stderr 'samemap\.lgo:.*const_view_mutation'
+! logos build ./crossmap
+stderr 'crossmap\.lgo:.*const_view_mutation'
+
+! logos build ./sameptr
+stderr 'sameptr\.lgo:.*const_view_mutation'
+! logos build ./crossptr
+stderr 'crossptr\.lgo:.*const_view_mutation'
+
+! logos build ./samewrite
+stderr 'samewrite\.lgo:.*const_view_mutation'
+! logos build ./crosswrite
+stderr 'crosswrite\.lgo:.*const_view_mutation'
+
+-- w/go.mod --
+module example.com/shapes
+
+go 1.27
+
+-- w/lib/lib.lgo --
+package lib
+
+type Point struct {
+	X, Y int
+}
+
+type T struct {
+	name string
+	n    int
+	pos  Point
+	grid [2]int
+	tags []string
+	idx  map[string]int
+	ptr  *Point
+}
+
+func New() *T {
+	return &T{name: "tee", n: 7, pos: Point{1, 2}, grid: [2]int{3, 4}, ptr: &Point{5, 6}}
+}
+
+func (r *T) Name() string        { return r.name }
+func (r *T) N() int              { return r.n }
+func (r *T) Pos() Point          { return r.pos }
+func (r *T) Grid() [2]int        { return r.grid }
+func (r *T) Tags() []string      { return r.tags }
+func (r *T) Idx() map[string]int { return r.idx }
+func (r *T) Ptr() *Point         { return r.ptr }
+
+type Writer struct {
+	n int
+}
+
+func (w *Writer) Name() string {
+	w.n++
+	return "writer"
+}
+
+-- w/same/same.lgo --
+package same
+
+type Point struct {
+	X, Y int
+}
+
+type IName interface {
+	const Name string
+}
+
+type IN interface {
+	const N int
+}
+
+type IPos interface {
+	const Pos Point
+}
+
+type IGrid interface {
+	const Grid [2]int
+}
+
+type NameT struct : IName {
+	name string
+}
+
+func (r *NameT) Name() string { return r.name }
+
+type NT struct : IN {
+	n int
+}
+
+func (r *NT) N() int { return r.n }
+
+type PosT struct : IPos {
+	pos Point
+}
+
+func (r *PosT) Pos() Point { return r.pos }
+
+type GridT struct : IGrid {
+	grid [2]int
+}
+
+func (r *GridT) Grid() [2]int { return r.grid }
+
+-- w/cross/cross.lgo --
+package cross
+
+import "example.com/shapes/lib"
+
+type Named interface {
+	const Name string
+	const N int
+	const Pos lib.Point
+	const Grid [2]int
+}
+
+type Wrap struct : Named {
+	*lib.T
+}
+
+func Make() Named {
+	return &Wrap{lib.New()}
+}
+
+-- w/app/app.lgo --
+package main
+
+import (
+	"fmt"
+
+	"example.com/shapes/cross"
+)
+
+func main() {
+	v := cross.Make()
+	fmt.Println(v.Name, v.N, v.Pos, v.Grid)
+}
+
+-- w/sameslice/sameslice.lgo --
+package sameslice
+
+type ITags interface {
+	const Tags []string
+}
+
+type T struct : ITags {
+	tags []string
+}
+
+func (r *T) Tags() []string { return r.tags }
+
+-- w/crossslice/crossslice.lgo --
+package crossslice
+
+import "example.com/shapes/lib"
+
+type ITags interface {
+	const Tags []string
+}
+
+type W struct : ITags {
+	*lib.T
+}
+
+-- w/samemap/samemap.lgo --
+package samemap
+
+type IIdx interface {
+	const Idx map[string]int
+}
+
+type T struct : IIdx {
+	idx map[string]int
+}
+
+func (r *T) Idx() map[string]int { return r.idx }
+
+-- w/crossmap/crossmap.lgo --
+package crossmap
+
+import "example.com/shapes/lib"
+
+type IIdx interface {
+	const Idx map[string]int
+}
+
+type W struct : IIdx {
+	*lib.T
+}
+
+-- w/sameptr/sameptr.lgo --
+package sameptr
+
+type Point struct {
+	X, Y int
+}
+
+type IPtr interface {
+	const Ptr *Point
+}
+
+type T struct : IPtr {
+	ptr *Point
+}
+
+func (r *T) Ptr() *Point { return r.ptr }
+
+-- w/crossptr/crossptr.lgo --
+package crossptr
+
+import "example.com/shapes/lib"
+
+type IPtr interface {
+	const Ptr *lib.Point
+}
+
+type W struct : IPtr {
+	*lib.T
+}
+
+-- w/samewrite/samewrite.lgo --
+package samewrite
+
+type Named interface {
+	const Name string
+}
+
+type T struct : Named {
+	n int
+}
+
+func (r *T) Name() string {
+	r.n++
+	return "writer"
+}
+
+-- w/crosswrite/crosswrite.lgo --
+package crosswrite
+
+import "example.com/shapes/lib"
+
+type Named interface {
+	const Name string
+}
+
+type W struct : Named {
+	*lib.Writer
+}

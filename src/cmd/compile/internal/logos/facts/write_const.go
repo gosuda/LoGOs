@@ -695,7 +695,7 @@ func (s *constBodyScan) stmt(st syntax.Stmt) {
 		s.assign(st)
 	case *syntax.ReturnStmt:
 		if st.Results != nil {
-			s.markMention(st.Results)
+			s.returned(st.Results)
 			break
 		}
 		for _, r := range s.results {
@@ -776,6 +776,16 @@ func (s *constBodyScan) blockStmt(n syntax.Node) {
 		s.block(n.List)
 	case syntax.Stmt:
 		s.stmt(n)
+	}
+}
+
+func (s *constBodyScan) returned(results syntax.Expr) {
+	for _, e := range syntax.UnpackListExpr(results) {
+		if t := s.info.TypeOf(e); t != nil && types2.LogosReferenceFree(t) {
+			s.scanReads(e)
+			continue
+		}
+		s.markMention(e)
 	}
 }
 
