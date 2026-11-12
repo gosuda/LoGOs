@@ -192,6 +192,48 @@ type AliasPtr struct : IPtr /* ERROR "const_view_mutation" */ {
 
 func (a *AliasPtr) Ptr() *PosPoint { return a.ptr }
 
+type IArrSlice interface {
+	const Cells [2][]int
+}
+
+type IArrPtr interface {
+	const Ptrs [1]*PosPoint
+}
+
+type IArrMap interface {
+	const Idx [3]map[string]int
+}
+
+type IArrPure interface {
+	const Quad [4]int
+}
+
+type AliasArrSlice struct : IArrSlice /* ERROR "const_view_mutation" */ {
+	cells [2][]int
+}
+
+func (a *AliasArrSlice) Cells() [2][]int { return a.cells }
+
+type AliasArrPtr struct : IArrPtr /* ERROR "const_view_mutation" */ {
+	ptrs [1]*PosPoint
+}
+
+func (a *AliasArrPtr) Ptrs() [1]*PosPoint { return a.ptrs }
+
+type AliasArrMap struct : IArrMap /* ERROR "const_view_mutation" */ {
+	idx [3]map[string]int
+}
+
+func (a *AliasArrMap) Idx() [3]map[string]int { return a.idx }
+
+type PureArr struct : IArrPure {
+	quad [4]int
+}
+
+func (p *PureArr) Quad() [4]int { return p.quad }
+
+var _ IArrPure = &PureArr{}
+
 type IViewSlice interface {
 	const Tags const []string
 }

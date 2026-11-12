@@ -22,6 +22,21 @@ stderr 'sameptr\.lgo:.*const_view_mutation'
 ! logos build ./crossptr
 stderr 'crossptr\.lgo:.*const_view_mutation'
 
+! logos build ./samearrslice
+stderr 'samearrslice\.lgo:.*const_view_mutation'
+! logos build ./crossarrslice
+stderr 'crossarrslice\.lgo:.*const_view_mutation'
+
+! logos build ./samearrptr
+stderr 'samearrptr\.lgo:.*const_view_mutation'
+! logos build ./crossarrptr
+stderr 'crossarrptr\.lgo:.*const_view_mutation'
+
+! logos build ./samearrmap
+stderr 'samearrmap\.lgo:.*const_view_mutation'
+! logos build ./crossarrmap
+stderr 'crossarrmap\.lgo:.*const_view_mutation'
+
 ! logos build ./samewrite
 stderr 'samewrite\.lgo:.*const_view_mutation'
 ! logos build ./crosswrite
@@ -90,10 +105,14 @@ type T struct {
 	tags []string
 	idx  map[string]int
 	ptr  *Point
+	cells [2][]string
+	ptrs  [1]*Point
+	maps  [3]map[string]int
+	quad  [4]int
 }
 
 func New() *T {
-	return &T{name: "tee", n: 7, pos: Point{1, 2}, grid: [2]int{3, 4}, tags: []string{"a", "b"}, ptr: &Point{5, 6}}
+	return &T{name: "tee", n: 7, pos: Point{1, 2}, grid: [2]int{3, 4}, tags: []string{"a", "b"}, ptr: &Point{5, 6}, ptrs: [1]*Point{{7, 8}}}
 }
 
 func (r *T) Name() string        { return r.name }
@@ -106,6 +125,10 @@ func (r *T) Ptr() *Point         { return r.ptr }
 func (r *T) TagsC() const []string      { return r.tags }
 func (r *T) IdxC() const map[string]int { return r.idx }
 func (r *T) PtrC() const *Point         { return r.ptr }
+func (r *T) Cells() [2][]string      { return r.cells }
+func (r *T) Ptrs() [1]*Point         { return r.ptrs }
+func (r *T) Maps() [3]map[string]int { return r.maps }
+func (r *T) Quad() [4]int            { return r.quad }
 
 type Writer struct {
 	n int
@@ -205,6 +228,16 @@ type GridT struct : IGrid {
 
 func (r *GridT) Grid() [2]int { return r.grid }
 
+type IQuad interface {
+	const Quad [4]int
+}
+
+type QuadT struct : IQuad {
+	quad [4]int
+}
+
+func (r *QuadT) Quad() [4]int { return r.quad }
+
 -- w/cross/cross.lgo --
 package cross
 
@@ -215,6 +248,7 @@ type Named interface {
 	const N int
 	const Pos lib.Point
 	const Grid [2]int
+	const Quad [4]int
 }
 
 type Wrap struct : Named {
@@ -680,4 +714,86 @@ type I interface {
 
 type W struct : I {
 	*lib.O
+}
+
+-- w/samearrslice/samearrslice.lgo --
+package samearrslice
+
+type I interface {
+	const Cells [2][]string
+}
+
+type T struct : I {
+	cells [2][]string
+}
+
+func (r *T) Cells() [2][]string { return r.cells }
+
+-- w/crossarrslice/crossarrslice.lgo --
+package crossarrslice
+
+import "example.com/shapes/lib"
+
+type I interface {
+	const Cells [2][]string
+}
+
+type W struct : I {
+	*lib.T
+}
+
+-- w/samearrptr/samearrptr.lgo --
+package samearrptr
+
+type Point struct {
+	X, Y int
+}
+
+type I interface {
+	const Ptrs [1]*Point
+}
+
+type T struct : I {
+	ptrs [1]*Point
+}
+
+func (r *T) Ptrs() [1]*Point { return r.ptrs }
+
+-- w/crossarrptr/crossarrptr.lgo --
+package crossarrptr
+
+import "example.com/shapes/lib"
+
+type I interface {
+	const Ptrs [1]*lib.Point
+}
+
+type W struct : I {
+	*lib.T
+}
+
+-- w/samearrmap/samearrmap.lgo --
+package samearrmap
+
+type I interface {
+	const Maps [3]map[string]int
+}
+
+type T struct : I {
+	maps [3]map[string]int
+}
+
+func (r *T) Maps() [3]map[string]int { return r.maps }
+
+-- w/crossarrmap/crossarrmap.lgo --
+package crossarrmap
+
+import "example.com/shapes/lib"
+
+type I interface {
+	const Maps [3]map[string]int
+}
+
+type W struct : I {
+	*lib.T
 }
