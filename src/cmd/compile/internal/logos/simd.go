@@ -208,6 +208,11 @@ func (fl *fileLower) simdScalarBody(sh *simdShape, op syntax.Operator) string {
 	laneText := func(i int64) string {
 		return fmt.Sprintf("_logos_a[%d] %s _logos_b[%d]", i, simdOps[op].text, i)
 	}
+	if sh.lane.isFloat && op == syntax.Mul {
+		laneText = func(i int64) string {
+			return fmt.Sprintf("%s(_logos_a[%d] * _logos_b[%d])", sh.elemSpell, i, i)
+		}
+	}
 	if sh.lane.isFloat && simdFloatBitwiseOp(op) {
 		fl.needSimdMath = true
 		bits := "Float64bits"
