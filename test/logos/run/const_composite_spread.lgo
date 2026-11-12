@@ -20,10 +20,17 @@ func check(name string, cond bool, got, want any) {
 
 type box struct {
 	M map[string]int
+	L []int
+	A [2]int
 	N int
 }
 
-const cfg = box{M: map[string]int{"a": 1, "b": 2}, N: 7}
+const cfg = box{M: map[string]int{"a": 1, "b": 2}, L: []int{1, 2, 3}, A: [2]int{4, 5}, N: 7}
+
+const boxes = []box{
+	{M: map[string]int{"a": 1}, L: []int{1}, A: [2]int{1, 1}, N: 1},
+	{M: map[string]int{"a": 5, "b": 6}, L: []int{10, 20}, A: [2]int{8, 9}, N: 2},
+}
 
 func test() {
 	o := box{..cfg, N: 1}
@@ -37,8 +44,38 @@ func test() {
 	check("spread-fresh-map", (q.M["a"] ?? -1) == 1, q.M["a"] ?? -1, 1)
 }
 
+func testFields() {
+	o := box{..cfg, N: 1}
+	check("spread-keeps-slice", fmt.Sprint(o.L) == "[1 2 3]", fmt.Sprint(o.L), "[1 2 3]")
+	check("spread-keeps-array", o.A == [2]int{4, 5}, o.A, [2]int{4, 5})
+	o.L[0] = 99
+	o.A[1] = 50
+	q := box{..cfg}
+	check("spread-fresh-slice", q.L[0] == 1 && len(q.L) == 3, q.L[0], 1)
+	check("spread-fresh-array", q.A[1] == 5, q.A[1], 5)
+	m := box{..cfg, M: map[string]int{"z": 9}}
+	check("spread-override-map", len(m.M) == 1 && (m.M["z"] ?? -1) == 9, len(m.M), 1)
+	check("spread-override-keeps-slice", fmt.Sprint(m.L) == "[1 2 3]", fmt.Sprint(m.L), "[1 2 3]")
+}
+
+func testElements() {
+	e := box{..boxes[1], N: 9}
+	check("spread-element-fields", e.N == 9 && fmt.Sprint(e.L) == "[10 20]" && e.A == [2]int{8, 9}, e.N, 9)
+	check("spread-element-map", len(e.M) == 2 && (e.M["b"] ?? -1) == 6, len(e.M), 2)
+	e.M["a"] = 70
+	e.L[0] = 71
+	i := 1
+	v := box{..boxes[i]}
+	check("spread-variable-index-fresh", (v.M["a"] ?? -1) == 5 && v.L[0] == 10, v.L[0], 10)
+	c := cfg
+	r := box{..c, N: 2}
+	check("spread-variable-source", r.N == 2 && len(r.M) == 2 && fmt.Sprint(r.L) == "[1 2 3]", r.N, 2)
+}
+
 func main() {
 	test()
+	testFields()
+	testElements()
 	if failed {
 		os.Exit(1)
 	}
