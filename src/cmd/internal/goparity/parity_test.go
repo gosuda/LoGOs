@@ -102,6 +102,8 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"go/parser"
+	"go/token"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -496,22 +498,49 @@ func cgoProgram(dir string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
+	fset := token.NewFileSet()
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".go") {
 			continue
 		}
-		data, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		f, err := parser.ParseFile(fset, filepath.Join(dir, e.Name()), nil, parser.ImportsOnly)
 		if err != nil {
 			return false, err
 		}
-		for ln := range strings.SplitSeq(string(data), "\n") {
-			before, _, _ := strings.Cut(strings.TrimSpace(ln), "//")
-			if t := strings.TrimSpace(before); t == `import "C"` || t == `"C"` {
+		for _, imp := range f.Imports {
+			if imp.Path.Value == `"C"` {
 				return true, nil
 			}
 		}
 	}
 	return false, nil
+}
+
+func TestCgoProgramClassifiesByImport(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		src     string
+		want    bool
+		wantErr bool
+	}{
+		{name: "import C", src: "package main\n\nimport \"C\"\n\nfunc main() {}\n", want: true},
+		{name: "import group", src: "package main\n\nimport (\n\t\"fmt\"\n\t\"C\"\n)\n\nfunc main() { fmt.Println() }\n", want: true},
+		{name: "import group on one line", src: "package main\n\nimport (\"C\")\n\nfunc main() {}\n", want: true},
+		{name: "string continuation line", src: "package main\n\nvar s = \"x\" +\n\t\"C\"\n\nfunc main() {}\n"},
+		{name: "raw string line", src: "package main\n\nvar s = `\n\"C\"\n`\n\nfunc main() {}\n"},
+		{name: "commented import", src: "package main\n\n// import \"C\"\nfunc main() {}\n"},
+		{name: "no cgo", src: "package main\n\nimport \"fmt\"\n\nfunc main() { fmt.Println() }\n"},
+		{name: "unparsable import", src: "package main\n\nimport \"C\n", wantErr: true},
+	} {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte(tc.src), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		got, err := cgoProgram(dir)
+		if (err != nil) != tc.wantErr || got != tc.want {
+			t.Errorf("%s: cgoProgram = %v, %v; want %v, error %v", tc.name, got, err, tc.want, tc.wantErr)
+		}
+	}
 }
 
 func pkgArgs(progs []string) []string {
