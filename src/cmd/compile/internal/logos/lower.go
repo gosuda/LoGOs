@@ -843,6 +843,8 @@ func (fc *funcLower) detectCleanups() {
 		switch n := n.(type) {
 		case *syntax.FuncLit:
 			return n.Body == fc.body
+		case *syntax.GroupChild:
+			return n.Body == fc.body
 		case *syntax.CallStmt:
 			if n.Tok == syntax.Defer {
 				if _, ok := syntax.Unparen(n.Call).(*syntax.TryExpr); ok {

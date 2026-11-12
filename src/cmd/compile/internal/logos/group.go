@@ -191,27 +191,30 @@ func (fc *funcLower) lowerGroupWrap(s syntax.Stmt, pos syntax.Pos, top groupFram
 	ft := groupChildFuncType(pos, top.gctx, cr)
 	prefix := top.g + ".Go(func(" + top.gctx + " " + rtAlias + ".Context) (" + cr + " error) { "
 	var body *syntax.BlockStmt
+	var endText string
+	var endStmts []syntax.Stmt
 	if child, ok := s.(*syntax.GroupChild); ok {
 		body = child.Body
 		cfc := fc.groupChildFunc(top, body, ft)
 		cfc.run()
 		fc.groupTakeChild(cfc)
+		endText, endStmts = cfc.groupChildEnd(pos)
 		fl.add(fl.off(pos), fl.off(body.Pos())+1, prefix)
-		fl.add(fl.off(body.Rbrace), fl.off(body.Rbrace)+1, lineBreakBefore(fl.src, fl.off(body.Pos())+1, fl.off(body.Rbrace))+"return nil })")
+		fl.add(fl.off(body.Rbrace), fl.off(body.Rbrace)+1, lineBreakBefore(fl.src, fl.off(body.Pos())+1, fl.off(body.Rbrace))+endText)
 	} else if nested, ok := s.(*syntax.GroupStmt); ok {
 		body = blockOf(pos, nil)
 		cfc := fc.groupChildFunc(top, body, ft)
 		body.List = cfc.lowerGroupInline(nested)
 		fc.groupTakeChild(cfc)
+		endText, endStmts = cfc.groupChildEnd(pos)
 		start := fl.off(syntax.StartPos(s))
 		fl.add(start, start, prefix)
-		end := stmtEnd(fl.src, start)
-		fl.add(end, end, "return nil })")
+		endOff := stmtEnd(fl.src, start)
+		fl.add(endOff, endOff, endText)
 	} else {
 		return []syntax.Stmt{s}
 	}
-	retNil := returnOf(pos, []syntax.Expr{nilOf(pos)})
-	body.List = append(body.List, retNil)
+	body.List = append(body.List, endStmts...)
 	lit := at(&syntax.FuncLit{Type: ft, Body: body}, pos)
 	fc.groupMarkDone(lit)
 	native := exprStmtOf(pos, callOf(pos, selOf(pos, nameOf(pos, top.g), "Go"), []syntax.Expr{lit}))
@@ -220,11 +223,22 @@ func (fc *funcLower) lowerGroupWrap(s syntax.Stmt, pos syntax.Pos, top groupFram
 
 func (fc *funcLower) groupChildFunc(top groupFrame, body *syntax.BlockStmt, ft *syntax.FuncType) *funcLower {
 	cfc := newFuncLower(fc.fl, ft, nil, body)
+	cfc.ft, cfc.specs = ft, fc.fl.resultSpecs(ft, nil)
+	cfc.errName = namedValue(cfc.specs[0].name)
 	cfc.errSeq, cfc.funSeq, cfc.argSeq = fc.errSeq, fc.funSeq, fc.argSeq
 	cfc.tmpSeq, cfc.scopeSeq, cfc.groupSeq = fc.tmpSeq, fc.scopeSeq, fc.groupSeq
 	cfc.groupStack = []groupFrame{{g: top.g, gctx: top.gctx, child: true}}
 	cfc.scopeParents = fc.scopeParents
 	return cfc
+}
+
+func (fc *funcLower) groupChildEnd(pos syntax.Pos) (string, []syntax.Stmt) {
+	ret := returnOf(pos, []syntax.Expr{nilOf(pos)})
+	if !fc.hasErrdefer {
+		return "return nil })", []syntax.Stmt{ret}
+	}
+	ok := assignOf(pos, []syntax.Expr{nameOf(pos, fc.okName)}, []syntax.Expr{nameOf(pos, "true")})
+	return fc.okName + " = true; return nil })", []syntax.Stmt{ok, ret}
 }
 
 func (fc *funcLower) groupTakeChild(cfc *funcLower) {
