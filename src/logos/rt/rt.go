@@ -111,7 +111,7 @@ func Lookup[M ~map[K]V, K comparable, V any](m M, k K) Option[V] {
 // of x is not a member of U, it panics with
 // &UnionAssertionError{Value: x, Union: "<pkg>.U"}. When u.(T) fails
 // because T is not a member of U, it panics with the same error plus
-// Asserted holding the spelling of T.
+// Asserted holding TypeName[T]().
 type UnionAssertionError struct {
 	Value    any
 	Union    string
@@ -130,6 +130,13 @@ func (e *UnionAssertionError) Error() string {
 		actual = reflect.TypeOf(e.Value).String()
 	}
 	return "interface conversion: " + actual + " is not a member of " + e.Union
+}
+
+// TypeName returns the name of T as Go prints it in an interface
+// conversion panic: qualified by the package name, never by the
+// spelling or the import alias used where T was written.
+func TypeName[T any]() string {
+	return reflect.TypeFor[T]().String()
 }
 
 func AppendInt(b []byte, x int64, base int) []byte {

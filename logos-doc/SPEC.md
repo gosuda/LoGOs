@@ -650,6 +650,7 @@ A case type outside the member set MUST fail with `[correctness::union_nonmember
 A comma-ok assertion on a non-member MUST yield `ok == false`. [T-203.1]
 
 A single-value assertion on a non-member MUST panic with `interface conversion: <T> is not a member of <pkg>.<U>`. [T-203.1]
+The `<T>` of that panic text MUST be the string that `reflect.Type.String` returns for the asserted type, so it is qualified by the package name and never by the spelling or import alias written in the source. [T-203.1]
 
 `case U:` MUST match only members. [T-203.1]
 

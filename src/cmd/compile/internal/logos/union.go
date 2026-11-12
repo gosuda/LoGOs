@@ -1019,12 +1019,13 @@ func (fl *fileLower) buildFromDecls(f *unionFrom, pos syntax.Pos, text string) [
 			returnOf(pos, []syntax.Expr{nameOf(pos, "z"), nameOf(pos, "false")}),
 		}),
 	}, pos)
+	typeName := callOf(pos, at(&syntax.IndexExpr{X: rtSel(pos, "TypeName"), Index: mustTypeExprAt(fl, text, pos)}, pos), nil)
 	errLit := at(&syntax.CompositeLit{
 		Type: rtSel(pos, "UnionAssertionError"),
 		ElemList: []syntax.Expr{
 			at(&syntax.KeyValueExpr{Key: nameOf(pos, "Value"), Value: nameOf(pos, "x")}, pos),
 			at(&syntax.KeyValueExpr{Key: nameOf(pos, "Union"), Value: litOf(pos, fmt.Sprintf("%q", f.union), syntax.StringLit)}, pos),
-			at(&syntax.KeyValueExpr{Key: nameOf(pos, "Asserted"), Value: litOf(pos, fmt.Sprintf("%q", text), syntax.StringLit)}, pos),
+			at(&syntax.KeyValueExpr{Key: nameOf(pos, "Asserted"), Value: typeName}, pos),
 		},
 		NKeys:  3,
 		Rbrace: pos,
