@@ -1242,6 +1242,9 @@ func (check *Checker) exprInternal(T *target, x *operand, e syntax.Expr, hint Ty
 					if !underIs(x.typ(), func(u Type) bool {
 						p, _ := u.(*Pointer)
 						if p == nil {
+							if check.logosOptionIndirect(x) {
+								return false
+							}
 							check.errorf(x, InvalidIndirection, invalidOp+"cannot indirect %s", x)
 							return false
 						}

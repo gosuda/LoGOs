@@ -128,6 +128,9 @@ func (check *Checker) assignment(x *operand, T Type, context string) {
 		if check.logosUnionAssign(x, T, context) {
 			return
 		}
+		if check.logosOptionUnwrap(x, T, context) {
+			return
+		}
 		if cause != "" {
 			check.errorf(x, code, "cannot use %s as %s value in %s: %s", x, T, context, cause)
 		} else {

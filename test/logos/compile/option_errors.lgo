@@ -37,7 +37,7 @@ func notOptionCoalesce(y int) {
 }
 
 func rejectOptionToValue(o int?) {
-	var _ int = o // ERROR "cannot use o .+ as int value"
+	var _ int = o // ERROR "nil_deref_unproven"
 }
 
 func mapRead(m map[string]int) {

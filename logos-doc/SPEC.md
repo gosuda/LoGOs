@@ -569,7 +569,7 @@ A Go-mode callee (the standard library or any Go package, such as `io.Reader.Rea
 
 `T` MUST be assignable to `T?`. [T-202]
 
-`T?` MUST NOT be assignable to `T`. [T-202]
+`T?` MUST NOT be assignable to `T`. An assignment, argument, or result that needs `T` and receives an unnarrowed `T?` MUST fail with `[correctness::nil_deref_unproven]`. [T-202]
 
 `*T?` where `*T` is non-nil MUST lower to `*T` with nil as none and no extra storage. [T-202]
 For `*T?` where `*T` is non-nil, the ejected Go type MUST be `*T` with `nil` as none [T-202][T-0.3].
@@ -594,7 +594,7 @@ The spelling `T??` MUST be a syntax error reporting `T?? is not allowed; use (T?
 
 `??` with a non-option left side MUST fail with the same diagnostic. [T-104.3]
 
-An ordinary method call on an unnarrowed `T?` MUST fail with `[correctness::nil_deref_unproven]`; a `?.` call is not an ordinary call. [T-202]
+An ordinary method call on an unnarrowed `T?` MUST fail with `[correctness::nil_deref_unproven]`; a `?.` call is not an ordinary call. A dereference `*p` of an unnarrowed `*T?` MUST fail with the same diagnostic. [T-202]
 
 `??` MUST evaluate its right side only when the left side is none. [T-104.3]
 

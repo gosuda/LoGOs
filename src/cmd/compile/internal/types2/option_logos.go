@@ -156,6 +156,34 @@ func (check *Checker) logosOptionSelect(x *operand, e *syntax.SelectorExpr, sel 
 	return true
 }
 
+func (check *Checker) logosOptionUnwrap(x *operand, T Type, context string) bool {
+	if !check.conf.Logos {
+		return false
+	}
+	opt := logosAsOption(x.typ())
+	if opt == nil || !Identical(opt.Elem, T) {
+		return false
+	}
+	check.errorf(x, IncompatibleAssign, "%s cannot use %s as %s value in %s without proving != nil", logosNilDeref, x, T, context)
+	x.invalidate()
+	return true
+}
+
+func (check *Checker) logosOptionIndirect(x *operand) bool {
+	if !check.conf.Logos {
+		return false
+	}
+	opt := logosAsOption(x.typ())
+	if opt == nil {
+		return false
+	}
+	if _, ok := opt.Elem.Underlying().(*Pointer); !ok {
+		return false
+	}
+	check.errorf(x, InvalidIndirection, "%s cannot indirect %s without proving != nil", logosNilDeref, x)
+	return true
+}
+
 func (check *Checker) logosOptSelect(x *operand, e *syntax.OptSelectExpr) exprKind {
 	var rx operand
 	check.expr(nil, &rx, e.X)
