@@ -6,6 +6,7 @@ package logos
 
 import (
 	"fmt"
+	"go/token"
 
 	"cmd/compile/internal/base"
 	"cmd/compile/internal/syntax"
@@ -426,10 +427,31 @@ func (fl *fileLower) exprEndOf(e syntax.Expr) int {
 	if c, ok := syntax.Unparen(e).(*syntax.CompositeLit); ok {
 		return skipCloseParens(fl.src, fl.off(c.Rbrace)+1)
 	}
+	if lam, ok := syntax.Unparen(e).(*syntax.LambdaExpr); ok {
+		end := fl.lambdaEnd(lam)
+		for p, ok := e.(*syntax.ParenExpr); ok; p, ok = p.X.(*syntax.ParenExpr) {
+			end = closeParenEnd(fl.src, end)
+		}
+		return end
+	}
 	from := fl.exprStart(e)
 	through := from
 	if rbrace, ok := lastBraceOf(e); ok {
 		through = fl.off(rbrace) + 1
 	}
 	return fl.exprEndThrough(from, through)
+}
+
+func closeParenEnd(src []byte, from int) int {
+	end := from
+	scanSegment(src, from, len(src), func(t tok) bool {
+		if t.comment || t.auto {
+			return true
+		}
+		if t.kind == token.RPAREN {
+			end = t.end
+		}
+		return false
+	})
+	return end
 }

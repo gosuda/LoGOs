@@ -104,14 +104,18 @@ func (fl *fileLower) lowerLambdaExpr(lam *syntax.LambdaExpr) *syntax.FuncLit {
 	}
 	lit := &syntax.FuncLit{Type: functype, Body: body}
 	lit.SetPos(pos)
-	end := fl.off(syntax.EndPos(lam))
-	if block, ok := lam.Body.(*syntax.BlockStmt); ok {
-		end = fl.off(block.Rbrace) + 1
-	} else if expr, ok := lam.Body.(syntax.Expr); ok {
-		end = fl.lambdaCaptureSpan(lam, expr).end
-	}
-	fl.addT(fl.off(syntax.StartPos(lam)), end, fullText)
+	fl.addT(fl.off(syntax.StartPos(lam)), fl.lambdaEnd(lam), fullText)
 	return lit
+}
+
+func (fl *fileLower) lambdaEnd(lam *syntax.LambdaExpr) int {
+	switch body := lam.Body.(type) {
+	case *syntax.BlockStmt:
+		return fl.off(body.Rbrace) + 1
+	case syntax.Expr:
+		return fl.lambdaCaptureSpan(lam, body).end
+	}
+	return fl.off(syntax.EndPos(lam))
 }
 
 func (fl *fileLower) lambdaResultSpell(pos syntax.Pos, sig *types2.Signature) string {
