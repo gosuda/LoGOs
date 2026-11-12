@@ -1,0 +1,59 @@
+# SPEC T-303: in .lgo a constant product in a make length stays a
+# constant, so the buffer is fixed-size and never reaches the heap; the
+# same product of variables lowers to logos/rt.MulLen, takes the
+# variable-size path, and allocates once it outgrows the 32-byte stack
+# buffer at -O=1.
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+cd m
+logos test -count=1 -O=1 .
+
+-- m/go.mod --
+module example.com/makelenconst
+
+go 1.27
+
+-- m/logos.toml --
+[build]
+arena = false
+
+-- m/make.lgo --
+package makelenconst
+
+const rows = 8
+
+var cols = 8
+
+//go:noinline
+func constProduct() byte {
+	b := make([]byte, rows*8)
+	b[0] = 3
+	return b[63]
+}
+
+//go:noinline
+func variableProduct() byte {
+	b := make([]byte, rows*cols)
+	b[0] = 3
+	return b[63]
+}
+
+-- m/make_test.lgo --
+package makelenconst
+
+import "testing"
+
+var sink byte
+
+func TestConstProductStaysFixed(t *testing.T) {
+	if got := testing.AllocsPerRun(20, func() { sink = constProduct() }); got != 0 {
+		t.Errorf("constant product make took %v allocations, want none", got)
+	}
+}
+
+func TestVariableProductTakesChecked(t *testing.T) {
+	if got := testing.AllocsPerRun(20, func() { sink = variableProduct() }); got < 1 {
+		t.Errorf("variable product make took %v allocations, want the variable-size path", got)
+	}
+}
