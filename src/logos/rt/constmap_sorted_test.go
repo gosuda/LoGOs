@@ -6,6 +6,7 @@ package rt_test
 
 import (
 	"logos/rt"
+	"math"
 	"slices"
 	"testing"
 )
@@ -62,19 +63,70 @@ func TestSortedAllStopsWhenYieldReturnsFalse(t *testing.T) {
 	}
 }
 
-func TestSortedAllSkipsKeysDeletedDuringTheRange(t *testing.T) {
+func TestSortedAllRetainsCapturedEntries(t *testing.T) {
 	m := map[int]int{1: 0, 2: 0, 3: 0}
 	var got []int
 	for k := range rt.SortedAll(m) {
 		got = append(got, k)
 		delete(m, 3)
 	}
-	wantKeys(t, "after delete", got, []int{1, 2})
+	wantKeys(t, "captured before delete", got, []int{1, 2, 3})
 }
 
 func TestSortedAllOfNilMapVisitsNothing(t *testing.T) {
 	var m map[string]int
 	if keys := sortedKeys(m); len(keys) != 0 {
 		t.Fatalf("nil map visited %v", keys)
+	}
+}
+
+func TestSortedAllMixedDynamicTypes(t *testing.T) {
+	m := map[any]int{1: 1, 2: 2, "a": 3, "b": 4, nil: 5, [1]int{1}: 6, [2]int{1, 2}: 7, struct{ A int }{1}: 8, struct{ B string }{"b"}: 9}
+	for range 64 {
+		seen := make(map[any]bool)
+		ints, strs := []int{}, []string{}
+		for k, v := range rt.SortedAll(m) {
+			if seen[k] || m[k] != v {
+				t.Fatalf("duplicate or mismatched entry %v: %d", k, v)
+			}
+			seen[k] = true
+			switch k := k.(type) {
+			case int:
+				ints = append(ints, k)
+			case string:
+				strs = append(strs, k)
+			}
+		}
+		if len(seen) != len(m) {
+			t.Fatalf("visited %d entries, want %d", len(seen), len(m))
+		}
+		wantKeys(t, "dynamic ints", ints, []int{1, 2})
+		wantKeys(t, "dynamic strings", strs, []string{"a", "b"})
+	}
+}
+
+func TestSortedAllRetainsNaNEntries(t *testing.T) {
+	nan := math.NaN()
+	m := map[float64]int{1: 3}
+	m[nan] = 1
+	m[nan] = 2
+	seen := make(map[int]bool)
+	nans := 0
+	for k, v := range rt.SortedAll(m) {
+		if seen[v] || v < 1 || v > 3 {
+			t.Fatalf("duplicate or unexpected value %d", v)
+		}
+		seen[v] = true
+		if math.IsNaN(k) {
+			nans++
+			if v == 3 {
+				t.Fatal("NaN key lost its value")
+			}
+		} else if k != 1 || v != 3 {
+			t.Fatalf("unexpected finite entry %v: %d", k, v)
+		}
+	}
+	if len(seen) != 3 || nans != 2 {
+		t.Fatalf("visited %d entries and %d NaNs, want 3 and 2", len(seen), nans)
 	}
 }

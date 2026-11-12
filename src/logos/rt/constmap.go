@@ -7,7 +7,6 @@ package rt
 import (
 	"cmp"
 	"iter"
-	"maps"
 	"math"
 	"reflect"
 	"slices"
@@ -170,15 +169,35 @@ func ConstAll[K comparable, V any](sorted []ConstEntry[K, V]) iter.Seq2[K, V] {
 // SPEC Sec 7 gives a const map: a string by its bytes, an integer or float
 // by numeric value, false before true, a complex number by real part and
 // then imaginary part, and a struct or array field by field or element by
-// element. Keys of any other kind keep no defined order.
+// element. Keys of any other kind, and keys of different dynamic types,
+// keep no defined relative order. Each captured entry is yielded once,
+// without looking its key up again (a NaN key cannot be looked up).
 func SortedAll[K comparable, V any](m map[K]V) iter.Seq2[K, V] {
 	return func(yield func(K, V) bool) {
-		keys := slices.Collect(maps.Keys(m))
-		slices.SortStableFunc(keys, func(a, b K) int {
-			return compareKeys(reflect.ValueOf(a), reflect.ValueOf(b))
+		entries := make([]ConstEntry[K, V], 0, len(m))
+		var types map[reflect.Type]int
+		if reflect.TypeFor[K]().Kind() == reflect.Interface {
+			types = make(map[reflect.Type]int)
+		}
+		for k, v := range m {
+			entries = append(entries, ConstEntry[K, V]{Key: k, Val: v})
+			if types != nil {
+				t := reflect.TypeOf(k)
+				if _, ok := types[t]; !ok {
+					types[t] = len(types)
+				}
+			}
+		}
+		slices.SortStableFunc(entries, func(a, b ConstEntry[K, V]) int {
+			if types != nil {
+				if c := cmp.Compare(types[reflect.TypeOf(a.Key)], types[reflect.TypeOf(b.Key)]); c != 0 {
+					return c
+				}
+			}
+			return compareKeys(reflect.ValueOf(a.Key), reflect.ValueOf(b.Key))
 		})
-		for _, k := range keys {
-			if v, ok := m[k]; ok && !yield(k, v) {
+		for _, entry := range entries {
+			if !yield(entry.Key, entry.Val) {
 				return
 			}
 		}

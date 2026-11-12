@@ -1477,6 +1477,8 @@ A complex key with a NaN real or imaginary component MUST fail compilation with 
 Const map range over complex keys MUST visit keys in sorted order by real part, then by imaginary part. [T-201][T-Sec7]
 A const map literal MUST take an elided composite key or element type from the map's key or element type, exactly where Go allows eliding it in a map, slice, or array literal. [T-Sec7]
 
+Range over a const view of a runtime map MUST visit each captured key-value entry exactly once, unless the loop exits early, including entries whose keys contain NaN. The compile-time NaN-key rejection above applies to const map construction, not runtime map views. Ordering between different dynamic key types, and for key kinds without an ordering specified above, is unspecified; such keys MUST NOT cause entries to be rejected or omitted. [T-201][T-Sec7]
+
 ```lgo
 const mimeMap = map[string]string{
     "txt": "text/plain",

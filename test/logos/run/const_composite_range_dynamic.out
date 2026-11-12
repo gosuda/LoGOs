@@ -1,3 +1,5 @@
+ok view-mixed-entries
+ok view-nan-entries
 ok view-string-bare
 ok view-string-pairs
 ok view-string-composite-static

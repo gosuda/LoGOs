@@ -1953,8 +1953,10 @@ Anchor: Claude Shannon, Edsger W. Dijkstra
 - Build (inline): call sites call the generated `func _logos_cm<seq>_<name>_lookup(_logos_k K) (V, bool)`. The backend decides inlining. No slice asserts 6 instructions.
 - Attack (complex keys): `test/logos/run/const_map_complex.lgo` and `src/cmd/go/testdata/script/logos_constmap_complex.txt` pin complex const map keys. `complex128` keys work in switch and table forms. A `NaN` component fails. `-0` equals `+0`. `range` order is real then imaginary.
 - Attack (const len): `test/logos/run/constmap_len.lgo` pins `len` of a const map as a constant in type positions. Array lengths, type arguments, and case labels accept it.
-- Gate: testdir tests.
 - Attack (#265, sorted CTFE range): `6c40fa1117` records a no-op-sort mutation RED (`FAIL ints8 323175599472 499415085252`, also ints9/words/structs/break/keys/local/field; empty remains OK), plus the original const-map purity rejection and dynamic-map rejection mutation. Saved GREEN: `test/logos/run/const_func_map_range.lgo` 35.865s, `test/logos/compile/const_func_map_range_dynamic.lgo` 24.123s, and `src/cmd/go/testdata/script/logos_eject_const_store_shadow.txt` 14.382s (Go 1.27.2 eject). No new measurement.
+- Attack (runtime const-view range, #287 and #288): `test/logos/run/const_composite_range_dynamic.lgo` checks that mixed dynamic int/string keys preserve every key-value entry without a reflective accessor panic and that two NaN keys plus a finite key yield three entries with their original values. Existing string, integer, float, bool, and struct ordering controls remain in the same consumer fixture. `src/logos/rt/constmap_sorted_test.go` owns runtime helper coverage, including differently shaped dynamic arrays and structs, nil interface keys, captured entries surviving deletion, and early loop exit.
+- Build (runtime const-view range): `src/logos/rt/constmap.go` captures key-value entries together before sorting; values are not recovered by key lookup. Dynamic types are grouped in capture order before same-type key comparison. Relative ordering between dynamic types stays unspecified.
+- Gate: testdir tests, including `go test cmd/internal/testdir -run '^Test/logos/run/const_composite_range_dynamic.lgo$'`; `go test logos/rt -run '^TestSortedAll' -count=1`.
 - Red-team rows: #265.
 
 ### M5-S5 Zero-copy conversions
@@ -1970,7 +1972,7 @@ Anchor: Tony Hoare
 - Build (Go-facing export): the lowered declaration erases const views, so Go importers read plain types from `__.PKGDEF`; `.lgo` importers read the `const` fact lines (M5-S1).
 - Build: `func Freeze[T any](p *T) *T` in `logos/rt` (deep copy through `reflect`, cycles preserved with a visited map); the `.lgo` signature in facts is `func Freeze[T any](p *T) const *T`. PLAN's immortal-span promotion is replaced by a deep copy, so no heap object can be both frozen and mutable. A reachable non-nil `func`, `chan`, or `unsafe.Pointer` panics instead of copying; nil leaves copy as nil.
 - Gate: testdir test; `go test cmd/go -run 'Script/^logos_interop_const$'`; `go test -count=1 -race logos/rt`.
-- Red-team rows: #2, #3, #16 (`s = s[:0]` buffer reuse on ordinary slices is unaffected: only const views have the `len` bound), #24, #41, #47, #50, #51, #54, #62, #70, #73, #83, #93, #98, #102, #103, #110, #140, #152, #180.
+- Red-team rows: #2, #3, #16 (`s = s[:0]` buffer reuse on ordinary slices is unaffected: only const views have the `len` bound), #24, #41, #47, #50, #51, #54, #62, #70, #73, #83, #93, #98, #102, #103, #110, #140, #152, #180, #287 (runtime const-view NaN entry loss, M5-S4), #288 (runtime const-view mixed-kind comparison panic, M5-S4).
 - Docs: P1-S3, P2.
 - Milestone gate: G2.
 
