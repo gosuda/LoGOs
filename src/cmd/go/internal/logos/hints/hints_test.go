@@ -7,6 +7,8 @@ package hints
 import (
 	"bytes"
 	"encoding/json"
+	"go/parser"
+	"go/token"
 	"internal/testenv"
 	"os"
 	"os/exec"
@@ -240,16 +242,15 @@ func TestHoverLoweredSites(t *testing.T) {
 	f := compilerFixture(t, "sites.lgo")
 	r, _ := compileHints(t, f)
 	for _, c := range []struct {
-		name   string
-		kind   string
-		pos    Position
-		title  string
-		inCode []string
+		name  string
+		kind  string
+		pos   Position
+		title string
 	}{
-		{"try", SiteTry, startOf(t, f.src, "?\n\t_ = n"), "`?`", []string{"get()", "!= nil", "return"}},
-		{"const for", SiteConstFor, startOf(t, f.src, "const for"), "`const for`", []string{`out = append(out, "Name")`}},
-		{"const switch", SiteConstSwitch, startOf(t, f.src, "const switch"), "`const switch`", []string{"switch"}},
-		{"interpolation", SiteInterp, startOf(t, f.src, `$"user {name}!"`), "`$\"...\"`", nil},
+		{"try", SiteTry, startOf(t, f.src, "?\n\t_ = n"), "`?`"},
+		{"const for", SiteConstFor, startOf(t, f.src, "const for"), "`const for`"},
+		{"const switch", SiteConstSwitch, startOf(t, f.src, "const switch"), "`const switch`"},
+		{"interpolation", SiteInterp, startOf(t, f.src, `$"user {name}!"`), "`$\"...\"`"},
 	} {
 		h := HoverAt(r, f.path, c.pos)
 		if h == nil {
@@ -259,20 +260,34 @@ func TestHoverLoweredSites(t *testing.T) {
 		if h.Contents.Kind != "markdown" || !strings.Contains(h.Contents.Value, c.title) {
 			t.Errorf("%s: hover %+v lacks title %s", c.name, h.Contents, c.title)
 		}
-		for _, frag := range c.inCode {
-			if !strings.Contains(h.Contents.Value, frag) {
-				t.Errorf("%s: hover lacks %q:\n%s", c.name, frag, h.Contents.Value)
-			}
-		}
 		if lowered := siteLowered(t, r, f.path, c.kind, c.pos); lowered == "" || !strings.Contains(h.Contents.Value, lowered) {
 			t.Errorf("%s: hover does not show the reported lowered code %q:\n%s", c.name, lowered, h.Contents.Value)
 		}
+		hoverParsesAsGo(t, c.name, h.Contents.Value)
 		if h.Range == nil || h.Range.Start.Line != c.pos.Line {
 			t.Errorf("%s: hover range %+v", c.name, h.Range)
 		}
 	}
 	if h := HoverAt(r, f.path, startOf(t, f.src, "func area")); h != nil {
 		t.Errorf("hover outside any site: %+v", h)
+	}
+}
+
+func hoverParsesAsGo(t *testing.T, name, value string) {
+	t.Helper()
+	_, after, ok := strings.Cut(value, "```go\n")
+	if !ok {
+		t.Errorf("%s: hover has no go code block:\n%s", name, value)
+		return
+	}
+	block, _, ok := strings.Cut(after, "\n```")
+	if !ok {
+		t.Errorf("%s: hover code block does not close:\n%s", name, value)
+		return
+	}
+	wrapped := "package p\nfunc _() {\n" + block + "\n}\n"
+	if _, err := parser.ParseFile(token.NewFileSet(), "hover.go", wrapped, 0); err != nil {
+		t.Errorf("%s: hover code does not parse as Go: %v:\n%s", name, err, block)
 	}
 }
 

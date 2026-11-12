@@ -140,11 +140,19 @@ func TestProxyHintsEndToEnd(t *testing.T) {
 		"textDocument": map[string]any{"uri": f.uri("a/a.lgo")},
 		"position":     q,
 	})
-	if !strings.Contains(string(hover), "_e != nil") {
-		t.Errorf("hover lacks the lowered code: %s", hover)
+	var hoverBody struct {
+		Contents struct {
+			Value string `json:"value"`
+		} `json:"contents"`
 	}
-	if !strings.Contains(string(hover), "gopls hover") {
-		t.Errorf("hover lost the gopls text: %s", hover)
+	if err := json.Unmarshal(hover, &hoverBody); err != nil {
+		t.Fatalf("hover response is not JSON: %v\n%s", err, hover)
+	}
+	if !strings.Contains(hoverBody.Contents.Value, lowered) {
+		t.Errorf("hover lacks the reported lowered code %q:\n%s", lowered, hoverBody.Contents.Value)
+	}
+	if !strings.Contains(hoverBody.Contents.Value, "gopls hover") {
+		t.Errorf("hover lost the gopls text: %s", hoverBody.Contents.Value)
 	}
 
 	actions := f.client.call("textDocument/codeAction", map[string]any{
