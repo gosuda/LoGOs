@@ -6,7 +6,7 @@ package main
 func addPlainF64(a, b [4]float64) [4]float64 {
 	// amd64:"ADDSD" -"VADDPD" -"CALL simd/archsimd" -"J"
 	// arm64:"FADDD" -"CALL simd/archsimd" -"B" -"CBZ" -"CBNZ" -"TBZ" -"TBNZ"
-	// riscv64:-"CALL simd/archsimd" -"BLT" -"BGE" -"BEQ" -"BNE" -"JAL X0"
+	// riscv64:-"JAL X1, simd/archsimd" -"BLT" -"BGE" -"BEQ" -"BNE" -"JAL X0"
 	return a + b
 }
 
@@ -14,7 +14,7 @@ func addPlainF64(a, b [4]float64) [4]float64 {
 func addPlainI32(a, b [4]int32) [4]int32 {
 	// amd64:"ADDL" -"VPADDD" -"CALL simd/archsimd" -"J"
 	// arm64:"ADD R[0-9]+, R[0-9]+, R[0-9]+" -"CALL simd/archsimd" -"B" -"CBZ" -"CBNZ" -"TBZ" -"TBNZ"
-	// riscv64:-"CALL simd/archsimd" -"BLT" -"BGE" -"BEQ" -"BNE" -"JAL X0"
+	// riscv64:-"JAL X1, simd/archsimd" -"BLT" -"BGE" -"BEQ" -"BNE" -"JAL X0"
 	return a + b
 }
 
@@ -22,7 +22,7 @@ func addPlainI32(a, b [4]int32) [4]int32 {
 func addPlainI8(a, b [16]int8) [16]int8 {
 	// amd64:"ADDL" -"VPADDB" -"CALL simd/archsimd" -"J"
 	// arm64:-"VADD" -"CALL simd/archsimd" -"B" -"CBZ" -"CBNZ" -"TBZ" -"TBNZ"
-	// riscv64:-"CALL simd/archsimd" -"BLT" -"BGE" -"BEQ" -"BNE" -"JAL X0"
+	// riscv64:-"JAL X1, simd/archsimd" -"BLT" -"BGE" -"BEQ" -"BNE" -"JAL X0"
 	return a + b
 }
 
@@ -30,7 +30,7 @@ func addPlainI8(a, b [16]int8) [16]int8 {
 func addPlainI16(a, b [8]int16) [8]int16 {
 	// amd64:"ADDL" -"VPADDW" -"CALL simd/archsimd" -"J"
 	// arm64:-"VADD" -"CALL simd/archsimd" -"B" -"CBZ" -"CBNZ" -"TBZ" -"TBNZ"
-	// riscv64:-"CALL simd/archsimd" -"BLT" -"BGE" -"BEQ" -"BNE" -"JAL X0"
+	// riscv64:-"JAL X1, simd/archsimd" -"BLT" -"BGE" -"BEQ" -"BNE" -"JAL X0"
 	return a + b
 }
 
@@ -38,7 +38,7 @@ func addPlainI16(a, b [8]int16) [8]int16 {
 func addPlainU16(a, b [8]uint16) [8]uint16 {
 	// amd64:"ADDL" -"VPADDW" -"CALL simd/archsimd" -"J"
 	// arm64:-"VADD" -"CALL simd/archsimd" -"B" -"CBZ" -"CBNZ" -"TBZ" -"TBNZ"
-	// riscv64:-"CALL simd/archsimd" -"BLT" -"BGE" -"BEQ" -"BNE" -"JAL X0"
+	// riscv64:-"JAL X1, simd/archsimd" -"BLT" -"BGE" -"BEQ" -"BNE" -"JAL X0"
 	return a + b
 }
 
@@ -46,7 +46,7 @@ func addPlainU16(a, b [8]uint16) [8]uint16 {
 func addPlainI64(a, b [4]int64) [4]int64 {
 	// amd64:"ADDQ [^$]" -"VPADDQ" -"CALL simd/archsimd" -"J"
 	// arm64:-"VADD" -"CALL simd/archsimd" -"B" -"CBZ" -"CBNZ" -"TBZ" -"TBNZ"
-	// riscv64:-"CALL simd/archsimd" -"BLT" -"BGE" -"BEQ" -"BNE" -"JAL X0"
+	// riscv64:-"JAL X1, simd/archsimd" -"BLT" -"BGE" -"BEQ" -"BNE" -"JAL X0"
 	return a + b
 }
 
@@ -54,7 +54,7 @@ func addPlainI64(a, b [4]int64) [4]int64 {
 func addPlainRune(a, b [8]rune) [8]rune {
 	// amd64:"ADDL" -"VPADDD" -"CALL simd/archsimd" -"J"
 	// arm64:-"VADD" -"CALL simd/archsimd" -"B" -"CBZ" -"CBNZ" -"TBZ" -"TBNZ"
-	// riscv64:-"CALL simd/archsimd" -"BLT" -"BGE" -"BEQ" -"BNE" -"JAL X0"
+	// riscv64:-"JAL X1, simd/archsimd" -"BLT" -"BGE" -"BEQ" -"BNE" -"JAL X0"
 	return a + b
 }
 
