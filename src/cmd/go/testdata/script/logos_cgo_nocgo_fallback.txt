@@ -27,6 +27,12 @@ cd ../fbf
 [cgo] exec ./real.bin
 [cgo] stdout '^real-!cgo$'
 
+cp ../allow.toml logos.toml
+env CGO_ENABLED=
+[cgo] logos build -o realallow.bin ./real
+[cgo] exec ./realallow.bin
+[cgo] stdout '^real-cgo: 42$'
+
 -- fb/go.mod --
 module example.com/fb
 
@@ -141,3 +147,7 @@ package main
 func Variant() string {
 	return "real-!cgo"
 }
+
+-- allow.toml --
+[build]
+cgo = "allow"
