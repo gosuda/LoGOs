@@ -648,8 +648,19 @@ func (js *jsonStruct) writeKeyFunc(b *strings.Builder, name, kind string, keys [
 }
 
 func (js *jsonStruct) writeKeyTable(b *strings.Builder, name, kind string, keys []keyEntry) {
-	entries := make([]constMapKey, len(keys))
-	for i, e := range keys {
+	var placed, shadowed []keyEntry
+	taken := make(map[uint64]bool, len(keys))
+	for _, e := range keys {
+		h := constHashString(e.key)
+		if taken[h] {
+			shadowed = append(shadowed, e)
+			continue
+		}
+		taken[h] = true
+		placed = append(placed, e)
+	}
+	entries := make([]constMapKey, len(placed))
+	for i, e := range placed {
 		entries[i] = constMapKey{hash: constHashString(e.key), canon: e.key}
 	}
 	layout, err := buildConstMap(entries, constMapSeedBudget(js.pos))
@@ -674,8 +685,16 @@ func (js *jsonStruct) writeKeyTable(b *strings.Builder, name, kind string, keys 
 			b.WriteString("{}")
 			continue
 		}
-		fmt.Fprintf(b, "{Key: %s, Val: %d, Occ: true}", strconv.Quote(keys[ki].key), keys[ki].idx)
+		fmt.Fprintf(b, "{Key: %s, Val: %d, Occ: true}", strconv.Quote(placed[ki].key), placed[ki].idx)
 	}
 	b.WriteString("}}\n")
-	fmt.Fprintf(b, "func _logos_%s_%s(_logos_k string) int {\n\tif _logos_i, _logos_ok := %s.Get(%s.HashString(_logos_k), _logos_k); _logos_ok {\n\t\treturn _logos_i\n\t}\n\treturn -1\n}\n", kind, name, table, rtAlias)
+	fmt.Fprintf(b, "func _logos_%s_%s(_logos_k string) int {\n\tif _logos_i, _logos_ok := %s.Get(%s.HashString(_logos_k), _logos_k); _logos_ok {\n\t\treturn _logos_i\n\t}\n", kind, name, table, rtAlias)
+	if len(shadowed) > 0 {
+		b.WriteString("\tswitch _logos_k {\n")
+		for _, e := range shadowed {
+			fmt.Fprintf(b, "\tcase %s:\n\t\treturn %d\n", strconv.Quote(e.key), e.idx)
+		}
+		b.WriteString("\t}\n")
+	}
+	b.WriteString("\treturn -1\n}\n")
 }

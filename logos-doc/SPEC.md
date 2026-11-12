@@ -1535,6 +1535,7 @@ A _logos_seen mask sized [(K+63)/64]uint64 tracks matched keys against a require
 At the closing brace, a missing required non-nil field returns MissingFieldError naming type and field. [T-Sec10]
 JSON null for a non-nil field returns the same error. [T-Sec10]
 Keys MUST dispatch by switch up to 8 keys and by the Sec 7 const-map table above that. [T-Sec10][T-Sec7]
+Keys whose 64-bit hashes are equal MUST each dispatch to their own field. [T-Sec10][T-Sec7]
 The cost of decoding one key MUST NOT grow with the number of keys the type declares: dispatch MUST NOT scan the key set. [T-Sec10][T-Sec7]
 A key that matches a declared key only by hash or prefix MUST NOT be accepted: dispatch MUST validate the full key. [T-Sec10][T-Sec7]
 Unknown fields are ignored. [T-Sec10]
