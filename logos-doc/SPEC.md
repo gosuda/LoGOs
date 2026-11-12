@@ -1180,9 +1180,13 @@ A receive-channel source MUST deliver a finished result while the channel is qui
 
 An empty source MUST yield no result and no error. [T-206]
 
-A finished result that is never delivered MUST be closed when it implements `io.Closer`, in reverse input order after the join. [T-206]
+A finished result that is never delivered MUST be closed when it implements `io.Closer` and the chain owns it, in reverse input order after the join. [T-206]
 
-A result dropped by a `filter` of the segment MUST be closed once, and a delivered result MUST NOT be closed by the stage. [T-206]
+A result dropped by a `filter` of the segment, and the value that a failed `filter` predicate examined, MUST be closed once when the chain owns it, and a delivered result MUST NOT be closed by the stage. [T-206]
+
+The chain owns a value that a `map` of the segment produced, by the rule of a fused chain. [T-104.6][T-206]
+
+The stage MUST NOT close an element of the source, a value that a `map` returns unchanged or reads from elsewhere, or any other value that no `map` of the chain produced, whether the stage drops it, never delivers it, or stops before it hands the value to a lambda. [T-206]
 
 The ejected form of a group stage MUST build with upstream Go and print what the native build prints. [T-206][T-0.3]
 

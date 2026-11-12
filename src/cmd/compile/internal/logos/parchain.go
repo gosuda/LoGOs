@@ -45,6 +45,8 @@ type parStage struct {
 	segT      []types2.Type
 	post      []chainOp
 	term      chainOp
+	owned     []bool
+	ownedOut  bool
 }
 
 func (fl *fileLower) parHead(e syntax.Expr) (group *syntax.CallExpr, unordered bool, elem types2.Type, ok bool) {
@@ -189,6 +191,7 @@ func (cg *chainGen) parPrepare(st *parStage) {
 	}
 	st.resT = in
 	cg.elemT = in
+	st.ownership()
 }
 
 func (st *parStage) kept() []span {
@@ -263,7 +266,11 @@ func (cg *chainGen) parChild(st *parStage) otext {
 		line, cur = cg.parStep(st, i, cur)
 		parts = append(parts, gen(line+"; "))
 	}
-	parts = append(parts, gen("return "+cur+", true, nil }"))
+	ret := "return " + cur + ", true, nil }"
+	if logosMayBeCloser(st.resT) && !st.ownedOut {
+		ret = "return " + cur + ", true, " + rtAlias + ".ErrNotOwned }"
+	}
+	parts = append(parts, gen(ret))
 	return cat(parts...)
 }
 
@@ -276,6 +283,49 @@ func parMapAfter(seg []chainOp, i int) bool {
 	return false
 }
 
+func (st *parStage) inType(i int) types2.Type {
+	if i == 0 {
+		return st.elemT
+	}
+	return st.segT[i-1]
+}
+
+func (st *parStage) ownership() {
+	st.owned = make([]bool, len(st.seg))
+	st.ownedOut = false
+	for i, op := range st.seg {
+		st.owned[i] = st.ownedOut
+		if op.method == "map" {
+			in, out := st.inType(i), st.segT[i]
+			st.ownedOut = logosMayBeCloser(out) && formsOwn(op.forms, in != nil && out != nil && types2.Identical(in, out), st.ownedOut)
+		}
+	}
+}
+
+func (cg *chainGen) parCloseOne(i int, v string) string {
+	p := cg.prefix
+	return fmt.Sprintf("if %[1]s_cc%[2]d, %[1]s_ok%[2]d := any(%[3]s).(interface{ Close() error }); %[1]s_ok%[2]d { %[1]s_cc%[2]d.Close() }", p, i, v)
+}
+
+func (cg *chainGen) parNotOwned(st *parStage) string {
+	return cg.zeroText(st.resT) + ", false, " + rtAlias + ".ErrNotOwned"
+}
+
+func (cg *chainGen) parDrop(st *parStage, i int, cur string) string {
+	closes := st.owned[i] && logosMayBeCloser(st.inType(i))
+	switch {
+	case closes && !parMapAfter(st.seg, i):
+		return "return " + cur + ", false, nil"
+	case closes:
+		return cg.parCloseOne(i, cur) + "; return " + cg.parNotOwned(st)
+	case logosMayBeCloser(st.resT):
+		return "return " + cg.parNotOwned(st)
+	case parMapAfter(st.seg, i):
+		return "return " + cg.zeroText(st.resT) + ", false, nil"
+	}
+	return "return " + cur + ", false, nil"
+}
+
 func (cg *chainGen) parStep(st *parStage, i int, cur string) (line, next string) {
 	op := st.seg[i]
 	p := cg.prefix
@@ -284,15 +334,16 @@ func (cg *chainGen) parStep(st *parStage, i int, cur string) (line, next string)
 	zero := cg.zeroText(st.resT)
 	fail := "return " + zero + ", false, " + errN
 	if op.method == "filter" {
-		drop := zero
-		if !parMapAfter(st.seg, i) {
-			drop = cur
-		}
+		drop := cg.parDrop(st, i, cur)
 		if op.lam == nil {
-			return fmt.Sprintf("if !%s(%s) { return %s, false, nil }", fn, cur, drop), cur
+			return fmt.Sprintf("if !%s(%s) { %s }", fn, cur, drop), cur
 		}
 		keep := fmt.Sprintf("%s_k%d", p, i)
-		return fmt.Sprintf("%s, %s := %s(%s); if %s != nil { %s }; if !%s { return %s, false, nil }", keep, errN, fn, cur, errN, fail, keep, drop), cur
+		examined := fail
+		if st.owned[i] && logosMayBeCloser(st.inType(i)) {
+			examined = cg.parCloseOne(i, cur) + "; " + fail
+		}
+		return fmt.Sprintf("%s, %s := %s(%s); if %s != nil { %s }; if !%s { %s }", keep, errN, fn, cur, errN, examined, keep, drop), cur
 	}
 	next = fmt.Sprintf("%s_v%d", p, i)
 	if op.lam == nil {
@@ -390,22 +441,10 @@ func (fl *fileLower) parSignature(param string, in, res types2.Type) *types2.Sig
 }
 
 func (cg *chainGen) parPost(st *parStage, call *syntax.CallExpr) *chainEmit {
-	ce := &chainEmit{cg: cg, ops: st.post, term: st.term, elemT: st.resT, resultT: parResult(cg.fl.pkg.info.TypeOf(call)), isTry: true, ownedIn: cg.parOwned(st)}
+	ce := &chainEmit{cg: cg, ops: st.post, term: st.term, elemT: st.resT, resultT: parResult(cg.fl.pkg.info.TypeOf(call)), isTry: true, ownedIn: st.ownedOut}
 	ce.prepare()
 	ce.outCap, ce.hasCap = "", false
 	return ce
-}
-
-func (cg *chainGen) parOwned(st *parStage) bool {
-	in, owned := st.elemT, false
-	for i, op := range st.seg {
-		if op.method == "map" {
-			out := st.segT[i]
-			owned = logosMayBeCloser(out) && formsOwn(op.forms, in != nil && out != nil && types2.Identical(in, out), owned)
-			in = out
-		}
-	}
-	return owned
 }
 
 func parResult(t types2.Type) types2.Type {
