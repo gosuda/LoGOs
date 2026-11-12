@@ -103,6 +103,9 @@ func (fl *fileLower) lowerPlatform() {
 // The end is the expression's own end: the generic scanner stops before
 // a depth-zero brace, so a for-post check cannot swallow the loop body.
 func (fl *fileLower) platformSpan(e syntax.Expr) (span, bool) {
+	if ws, ok := fl.wrapSpan[syntax.Unparen(e)]; ok {
+		return ws, true
+	}
 	start := fl.off(leftmostOf(e))
 	end := fl.exprEndOf(e)
 	if end <= start {

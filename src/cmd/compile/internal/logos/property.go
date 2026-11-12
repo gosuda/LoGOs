@@ -958,7 +958,7 @@ func (fl *fileLower) lowerPropGeneric(s *syntax.AssignStmt) []syntax.Stmt {
 	}
 	rhsText := otext{}
 	if s.Rhs != nil {
-		rhsText = fl.textOf(propMustSpan(fl, s.Rhs))
+		rhsText = fl.propOperandText(s.Rhs)
 	}
 	subs := fl.propSubstitutions(c.needles)
 	for i := range lhsTexts {
@@ -984,6 +984,10 @@ func propMustSpan(fl *fileLower, e syntax.Expr) span {
 		base.Fatalf("logos: cannot span expression at %s", e.Pos().String())
 	}
 	return sp
+}
+
+func (fl *fileLower) propOperandText(e syntax.Expr) otext {
+	return fl.drainBodyWrapper(e, fl.textOf(propMustSpan(fl, e)))
 }
 
 func (fl *fileLower) propRecvText(sel *syntax.SelectorExpr) otext {
@@ -1053,7 +1057,7 @@ func (fl *fileLower) lowerPropWrite(s *syntax.AssignStmt, recv syntax.Expr, pr t
 	rhs := fl.propWalk(s.Rhs, c)
 	sel := mustPropSel(fl, s.Lhs)
 	recvText := fl.propRecvText(sel)
-	rhsText := fl.textOf(propMustSpan(fl, s.Rhs))
+	rhsText := fl.propOperandText(s.Rhs)
 	set := exprStmtOf(s.Pos(), callOf(s.Pos(), selOf(s.Pos(), recv, "Logos_Set"+pr.Name), []syntax.Expr{rhs}))
 	subs := fl.propSubstitutions(c.needles)
 	main := cat(propSubstText(recvText, subs), gen(".Logos_Set"+pr.Name+"("), propSubstText(rhsText, subs), gen(")"))
@@ -1085,7 +1089,7 @@ func (fl *fileLower) lowerPropCompound(s *syntax.AssignStmt, recv syntax.Expr, p
 	}
 	valueText := gen("1")
 	if rhs != nil {
-		valueText = fl.textOf(propMustSpan(fl, rhs))
+		valueText = fl.propOperandText(rhs)
 	}
 	bop := s.Op.String()
 	getBase, setBase := recv, recv
@@ -1183,7 +1187,7 @@ func (fl *fileLower) lowerPropMulti(s *syntax.AssignStmt, lhs []syntax.Expr, roo
 		}
 		lhsTexts[i] = fl.textOf(lhsSpans[i])
 	}
-	rhsText := fl.textOf(propMustSpan(fl, s.Rhs))
+	rhsText := fl.propOperandText(s.Rhs)
 	subs := fl.propSubstitutions(c.needles)
 	for i := range lhsTexts {
 		lhsTexts[i] = propSubstText(lhsTexts[i], subs)
@@ -1238,7 +1242,7 @@ func (fl *fileLower) lowerPropExprStmt(s *syntax.ExprStmt) []syntax.Stmt {
 	}
 	args := make([]otext, 0, len(call.ArgList))
 	for _, a := range call.ArgList {
-		args = append(args, fl.textOf(propMustSpan(fl, a)))
+		args = append(args, fl.propOperandText(a))
 	}
 	subs := fl.propSubstitutions(c.needles)
 	for i := range args {
