@@ -4,6 +4,7 @@ package main
 
 import (
 	"bytes"
+	"encoding"
 	"encoding/binary"
 	"fmt"
 	"math"
@@ -177,6 +178,46 @@ func layout() error {
 	want = append(want, 1, 1)
 	want = binary.LittleEndian.AppendUint64(want, 6)
 	if !bytes.Equal(got, want) { return fmt.Errorf("layout bytes %x, want %x", got, want) }
+	return nil
+}
+
+var (
+	_ encoding.BinaryMarshaler   = BinaryRecord{}
+	_ encoding.BinaryAppender    = BinaryRecord{}
+	_ encoding.BinaryUnmarshaler = (*BinaryRecord)(nil)
+)
+
+func binaryInterfaces() error {
+	var six int64? = 6
+	v := BinaryRecord{I: 7, F32: 1.5, Text: "iface", Raw: []byte{1, 2}, Nums: []int64{3}, Pair: [2]uint16{4, 5}, Labels: map[string]int32{"k": 1}, Inner: BinaryInner{Flag: true}, Maybe: six}
+	direct, err := v.MarshalBinary()
+	if err != nil {
+		return err
+	}
+	var m encoding.BinaryMarshaler = v
+	viaMarshaler, err := m.MarshalBinary()
+	if err != nil {
+		return err
+	}
+	if !bytes.Equal(viaMarshaler, direct) {
+		return fmt.Errorf("BinaryMarshaler bytes %x, direct call %x", viaMarshaler, direct)
+	}
+	var a encoding.BinaryAppender = v
+	viaAppender, err := a.AppendBinary([]byte{0xee})
+	if err != nil {
+		return err
+	}
+	if !bytes.Equal(viaAppender, append([]byte{0xee}, direct...)) {
+		return fmt.Errorf("BinaryAppender bytes %x, want 0xee then %x", viaAppender, direct)
+	}
+	var got BinaryRecord
+	var u encoding.BinaryUnmarshaler = &got
+	if err := u.UnmarshalBinary(direct); err != nil {
+		return err
+	}
+	if !reflect.DeepEqual(got, v) {
+		return fmt.Errorf("BinaryUnmarshaler decoded %+v, want %+v", got, v)
+	}
 	return nil
 }
 
@@ -462,6 +503,11 @@ fmt.Println("FAIL binary-layout:", err)
 os.Exit(1)
 }
 fmt.Println("ok binary-layout")
+if err := binaryInterfaces(); err != nil {
+fmt.Println("FAIL binary-interfaces:", err)
+os.Exit(1)
+}
+fmt.Println("ok binary-interfaces")
 if err := violations(); err != nil {
 fmt.Println("FAIL binary-violations:", err)
 os.Exit(1)

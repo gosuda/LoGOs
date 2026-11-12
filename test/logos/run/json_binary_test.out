@@ -1,6 +1,7 @@
 ok binary-edge
 ok binary-kinds
 ok binary-layout
+ok binary-interfaces
 ok binary-violations
 ok binary-count
 ok binary-bomb
