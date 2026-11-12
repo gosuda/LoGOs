@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"testing"
 )
 
 //go:noinline
@@ -19,12 +20,6 @@ func mk(depth int) []int {
 	return mk(depth - 1)
 }
 
-func heapBytes() uint64 {
-	var m runtime.MemStats
-	runtime.ReadMemStats(&m)
-	return m.HeapAlloc
-}
-
 func sumVals(s []int) int {
 	total := 0
 	for _, v := range s {
@@ -34,13 +29,7 @@ func sumVals(s []int) int {
 }
 
 func main() {
-	warm := mk(8)
-	runtime.KeepAlive(warm)
-	runtime.GC()
-	runtime.GC()
-	before := heapBytes()
 	s := mk(8)
-	after := heapBytes()
 	if len(s) != 16 || sumVals(s) != 136 {
 		fmt.Printf("FAIL caller-owned-return-values-survive: got len %d sum %d want 16 136\n", len(s), sumVals(s))
 		os.Exit(1)
@@ -53,9 +42,12 @@ func main() {
 		os.Exit(1)
 	}
 	fmt.Println("ok caller-owned-return-survives-gc")
-	grew := after - before
-	if grew != 0 {
-		fmt.Printf("FAIL caller-owned-return-placed-in-region-not-heap: heap grew by %d want 0\n", grew)
+	allocs := testing.AllocsPerRun(100, func() {
+		s := mk(8)
+		runtime.KeepAlive(s)
+	})
+	if allocs != 0 {
+		fmt.Printf("FAIL caller-owned-return-placed-in-region-not-heap: allocs %v want 0\n", allocs)
 		os.Exit(1)
 	}
 	fmt.Println("ok caller-owned-return-placed-in-region-not-heap")
