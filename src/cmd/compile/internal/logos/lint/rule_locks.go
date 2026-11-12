@@ -233,8 +233,11 @@ func bodyHasGoto(body *syntax.BlockStmt) bool {
 }
 
 // lockFlow walks one function body. The body of a go statement, a group
-// child and a function literal starts with no lock held; the function and
-// the arguments of a go statement are evaluated with the caller's locks.
+// child and a function literal starts with no lock held, except a lambda
+// or function literal argument of a chain method that is not a segment of
+// a group stage: it runs in place with the caller's locks. The function
+// and the arguments of a go statement are evaluated with the caller's
+// locks.
 type lockFlow struct {
 	c            *lockAudit
 	pass         *Pass
@@ -455,7 +458,7 @@ func (v *lockFlow) walkSpawn(call *syntax.CallExpr) {
 		v.walkInlineCall(call, body, heldSet{})
 		return
 	}
-	v.walkOperands(call)
+	v.walkOperands(call, nil)
 	v.child(heldSet{}).applyCall(call)
 }
 
@@ -711,20 +714,35 @@ func (v *lockFlow) walkCall(call *syntax.CallExpr) {
 		v.walkInlineCall(call, body, v.st.held)
 		return
 	}
-	v.walkOperands(call)
+	inPlace := chainFuncs(v.pass, call)
+	if stageOf(v.pass, call) != nil {
+		inPlace = nil
+	}
+	v.walkOperands(call, inPlace)
 	v.applyCall(call)
 }
 
-func (v *lockFlow) walkOperands(call *syntax.CallExpr) {
+func (v *lockFlow) walkOperands(call *syntax.CallExpr, inPlace []syntax.Expr) {
 	v.walkExpr(call.Fun)
 	atomic := atomicQualifiedCall(v.pass, call)
 	for _, arg := range call.ArgList {
-		if atomic {
+		switch {
+		case atomic:
 			v.walkAtomicArg(arg)
-		} else {
+		case slices.Contains(inPlace, syntax.Unparen(arg)):
+			v.walkInPlace(syntax.Unparen(arg))
+		default:
 			v.walkExpr(arg)
 		}
 	}
+}
+
+func (v *lockFlow) walkInPlace(fn syntax.Expr) {
+	body := callbackBody(fn)
+	held := v.st.held.clone()
+	v.noteClosureCapture(body)
+	v.child(held).walkBody(body)
+	v.st.held.merge(held)
 }
 
 func (v *lockFlow) applyCall(call *syntax.CallExpr) {

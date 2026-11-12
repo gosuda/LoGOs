@@ -383,3 +383,37 @@ func segmentLambdaInheritsNoLock(ctx context.Context, s *stats, xs []int) error 
 	})
 	return err
 }
+
+func plainChainLambdaKeepsLock(s *stats, xs []int) []int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return xs.map(x => x + s.total)
+}
+
+func plainChainBlockLambdaKeepsLock(s *stats, xs []int) []int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return xs.map(x => {
+		s.total += x
+		return x
+	})
+}
+
+func plainChainFuncLitKeepsLock(s *stats, xs []int) []int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return xs.map(func(x int) int {
+		return x + s.total
+	})
+}
+
+func plainChainLambdaUnlocked(s *stats, xs []int) []int {
+	return xs.map(x => x + s.total) // ERROR "\[concurrency::unguarded_access\]"
+}
+
+func stageTailLambdaKeepsLock(ctx context.Context, s *stats, xs []int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := xs.group(ctx, limit = 2).map(x => x).sortBy(x => x + s.total)
+	return err
+}

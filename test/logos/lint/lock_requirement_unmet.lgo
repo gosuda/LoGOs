@@ -172,3 +172,29 @@ func nestedGroupChildInheritsNoLock(ctx context.Context, g *gate) error {
 	}
 	return nil
 }
+
+func plainChainLambdaKeepsLock(g *gate, xs []int) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	_ = xs.map(x => {
+		g.toggle()
+		return x
+	})
+}
+
+func plainChainLambdaUnlocked(g *gate, xs []int) {
+	_ = xs.map(x => {
+		g.toggle() // ERROR "\[concurrency::lock_requirement_unmet\]"
+		return x
+	})
+}
+
+func segmentLambdaInheritsNoLock(ctx context.Context, g *gate, xs []int) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	_, err := xs.group(ctx, limit = 2).map(x => {
+		g.toggle() // ERROR "\[concurrency::lock_requirement_unmet\]"
+		return x
+	})
+	return err
+}
