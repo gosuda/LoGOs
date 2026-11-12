@@ -53,6 +53,7 @@ func (fl *fileLower) exprListSpan(e syntax.Expr) span {
 }
 
 func (fl *fileLower) lowerTuples() {
+	fl.tupleArity = -1
 	fl.lowerTupleTypes()
 	syntax.Inspect(fl.file, func(n syntax.Node) bool {
 		if e, ok := n.(*syntax.SelectorExpr); ok {
@@ -70,7 +71,7 @@ func (fl *fileLower) lowerTupleDeclList(decls []syntax.Decl) []syntax.Decl {
 		switch decl := decl.(type) {
 		case *syntax.FuncDecl:
 			if decl.Body != nil {
-				decl.Body.List = fl.lowerTupleBody(decl.Type, decl.Body.List)
+				decl.Body.List = fl.lowerTupleBody(len(decl.Type.ResultList), decl.Body.List)
 			}
 			out = append(out, decl)
 		case *syntax.VarDecl:
@@ -250,15 +251,15 @@ func (fl *fileLower) lowerTupleList(list []syntax.Stmt) []syntax.Stmt {
 	return out
 }
 
-func (fl *fileLower) lowerTupleBody(ft *syntax.FuncType, list []syntax.Stmt) []syntax.Stmt {
-	saved := fl.tupleFn
-	fl.tupleFn = ft
-	defer func() { fl.tupleFn = saved }()
+func (fl *fileLower) lowerTupleBody(results int, list []syntax.Stmt) []syntax.Stmt {
+	saved := fl.tupleArity
+	fl.tupleArity = results
+	defer func() { fl.tupleArity = saved }()
 	return fl.lowerTupleList(list)
 }
 
 func (fl *fileLower) returnsArity(n int) bool {
-	return fl.tupleFn == nil || len(fl.tupleFn.ResultList) == n
+	return fl.tupleArity < 0 || fl.tupleArity == n
 }
 
 func tupleChildLists(s syntax.Stmt) []*[]syntax.Stmt {
@@ -298,8 +299,15 @@ func (fl *fileLower) lowerTupleNested(s syntax.Stmt) {
 	syntax.Inspect(s, func(n syntax.Node) bool {
 		switch n := n.(type) {
 		case *syntax.FuncLit:
-			n.Body.List = fl.lowerTupleBody(n.Type, n.Body.List)
+			n.Body.List = fl.lowerTupleBody(len(n.Type.ResultList), n.Body.List)
 			return false
+		case *syntax.LambdaExpr:
+			if block, ok := n.Body.(*syntax.BlockStmt); ok {
+				if sig, ok := fl.pkg.info.TypeOf(n).(*types2.Signature); ok {
+					block.List = fl.lowerTupleBody(sig.Results().Len(), block.List)
+					return false
+				}
+			}
 		case *syntax.CallExpr:
 			fl.lowerTupleCallArgs(n)
 		case *syntax.CompositeLit:

@@ -208,7 +208,7 @@ type fileLower struct {
 	// capture text must cover the original extent (D7).
 	optBodySpan map[*syntax.LambdaExpr]span
 	erasedConst map[*syntax.ConstType]bool
-	tupleFn     *syntax.FuncType
+	tupleArity  int
 	tupleScope  syntax.Node
 	propEmitted map[int]bool
 	// funcHeadOffs caches the offsets of `func` keywords in source
