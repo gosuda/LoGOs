@@ -1744,8 +1744,6 @@ Anchor: Tony Hoare, Dieter Rams
 - Attack (readonly method): `src/internal/types/testdata/logos/property_iface.lgo` rejects a readonly method as property satisfaction. A type with `Name() string` but no `: Named` list fails against `Named`. The error is `correctness::property_requires_conformance`.
 - Attack (generated names): `src/cmd/compile/internal/logos/prefix_names_test.go` pins generated names. Lowered parameters and locals carry the `_logos_` prefix. Property accessors `Logos_GetF` and `Logos_SetF` are the exception.
 - Build: parser hook in `interfaceType` for elements of the form `const Name Type` and `Name Type` (LogosMode), node `PropertyType{Const bool; Type Expr}` as the `Field` type; `types2/property_logos.go` for conformance-driven satisfaction (it extends the M2-S6 `: I` check) and selector typing.
-- Attack (ordering): accessors stay exported-first then by-name order. `Logos_Get*` precedes `Start`.
-- Build (ordering): accessors are ordinary Go methods. `types2` orders objects exported-first then by name (`types2/object.go:163-166`), sorted via `sortMethods` (`types2/interface.go:50`, `types2/typeset.go:352-354`). The runtime matches them in sorted order (`runtime/iface.go:214-217`). The plan adds no custom order.
 - Gate: syntax and types2 tests.
 
 ### M4-S2 Lowering and write-back
