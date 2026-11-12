@@ -386,3 +386,10 @@ func goMeaningNamedSlice(t tagged) int {
 func goMeaningMethodExpression(s store) int {
 	return store.group(s, 3)
 }
+
+func stageBlockErrdefer(ctx context.Context, xs []int) ([]int, error) {
+	return xs.group(ctx, limit = 2).map(x => {
+		errdefer /* ERROR "errdefer_needs_error_result" */ plain(x)
+		return x
+	})
+}

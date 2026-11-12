@@ -679,7 +679,7 @@ func (check *Checker) logosChainBlockTryForms(block *syntax.BlockStmt) {
 				}
 			}
 		case *syntax.ErrdeferStmt:
-			check.error(n, InvalidDefer, "[correctness::errdefer_needs_error_result] errdefer requires enclosing function to return error")
+			check.error(n, InvalidDefer, logosErrdeferNeedsError)
 			check.logosErrdeferUse(n.Call)
 		}
 		return true

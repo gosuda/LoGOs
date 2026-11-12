@@ -112,6 +112,14 @@ func chainBlockNestedTry(xs []int) (int, error) {
 	return 0, nil
 }
 
+func chainBlockErrdefer(xs []int) (int, error) {
+	_ = xs.map(x => {
+		errdefer /* ERROR "[correctness::errdefer_needs_error_result] errdefer requires enclosing function to return error" */ pairi(x)
+		return x
+	})
+	return 0, nil
+}
+
 func chainNestedTry(xs []int, ys []int) (int, error) {
 	v := xs.map(x => ys.count(y => pairge(x, y)? /* ERROR "[correctness::nested_try_capture] ? cannot propagate from a nested chain" */)).sum()
 	return v, nil

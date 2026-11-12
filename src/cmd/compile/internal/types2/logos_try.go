@@ -12,6 +12,8 @@ import (
 
 const logosMisplacedTry = "[correctness::misplaced_try] ? must end an assignment, expression statement, defer, or errdefer"
 
+const logosErrdeferNeedsError = "[correctness::errdefer_needs_error_result] errdefer requires enclosing function to return error"
+
 func logosIsReserved(name string) bool {
 	return strings.HasPrefix(name, "_logos_") || strings.HasPrefix(name, "Logos_")
 }
@@ -267,7 +269,7 @@ func (check *Checker) logosErrdefer(s *syntax.ErrdeferStmt) {
 		return
 	}
 	if !check.logosEnclosingError() {
-		check.error(s, InvalidDefer, "[correctness::errdefer_needs_error_result] errdefer requires enclosing function to return error")
+		check.error(s, InvalidDefer, logosErrdeferNeedsError)
 		check.logosErrdeferUse(s.Call)
 		return
 	}

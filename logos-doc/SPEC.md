@@ -291,6 +291,7 @@ Chained calls MUST fuse into one loop with the receiver evaluated once before th
 Lambda parameters in chains MUST be const views [T-104.6].
 Mutation of the receiver inside a chain lambda MUST fail compilation [T-104.6].
 `?` in an expression-lambda body MUST propagate from the enclosing function [T-104.6].
+`errdefer` in a chain's block lambda body MUST fail with `correctness::errdefer_needs_error_result`: the block lambda is the function that holds it, and it has no error result of its own [T-104.6][T-104.2].
 A `?`-chain in a `for` condition or post statement, with the `?` inside a chain's expression lambda body, MUST run on every iteration: the loop lowers to an infinite loop evaluating the hoisted computation at the top and the narrowed post at the bottom of each pass, with `continue` reaching the post computation [T-104.6].
 A `?`-chain in a `switch` tag, with the `?` inside a chain's expression lambda body, MUST run once before any guard [T-104.6].
 A `?`-chain in a case guard, with the `?` inside a chain's expression lambda body, MUST run only when earlier guards miss, in order: the switch lowers to sequential guarded ifs over one tag temporary, with multi-guard cases joined by temporaries, a done flag keeping order, and `fallthrough` setting a flag tested by later conditions [T-104.6].
