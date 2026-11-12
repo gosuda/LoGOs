@@ -35,6 +35,22 @@ func tuple_optionsDefined() bool {
 	return same[definedTupleOptions]("tuple-options-defined", unsafe.Sizeof(s))
 }
 
+type aliasTupleNested = ((int?, string?), []int?)
+type definedTupleNested ((int?, string?), []int?)
+
+func tuple_nestedAlias() bool {
+	var a aliasTupleNested
+	var s ((int?, string?), []int?)
+	a = s
+	s = a
+	return same[aliasTupleNested]("tuple-nested-alias", unsafe.Sizeof(s))
+}
+
+func tuple_nestedDefined() bool {
+	var s ((int?, string?), []int?)
+	return same[definedTupleNested]("tuple-nested-defined", unsafe.Sizeof(s))
+}
+
 type aliasSliceOfTuple = [](int?, string?)
 type definedSliceOfTuple [](int?, string?)
 
@@ -112,6 +128,8 @@ func pair_ofGeneric() bool {
 var cases = []func() bool{
 	tuple_optionsAlias,
 	tuple_optionsDefined,
+	tuple_nestedAlias,
+	tuple_nestedDefined,
 	slice_of_tupleAlias,
 	slice_of_tupleDefined,
 	map_of_tupleAlias,

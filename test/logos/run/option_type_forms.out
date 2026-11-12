@@ -1,5 +1,7 @@
 ok tuple-options-alias
 ok tuple-options-defined
+ok tuple-nested-alias
+ok tuple-nested-defined
 ok slice-of-tuple-alias
 ok slice-of-tuple-defined
 ok map-of-tuple-alias
