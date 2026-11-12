@@ -180,8 +180,8 @@ func shadowBlock(up *User?) {
 
 func noGuard(up *User?) {
 	_ = up.Name /* ERROR "[correctness::nil_deref_unproven] cannot access field Name of *User? without proving != nil" */
-	_ = *up /* ERROR "cannot indirect" */
-	var v *User = up /* ERROR "as *User value in" */
+	_ = *up /* ERROR "correctness::nil_deref_unproven" */
+	var v *User = up /* ERROR "correctness::nil_deref_unproven" */
 	_ = v
 	_ = up
 }

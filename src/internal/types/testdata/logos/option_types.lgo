@@ -36,7 +36,7 @@ func optAssigns(n int, u OptUser) {
 }
 
 func optNoOut(x int?, up *OptUser?) {
-	var i int = x /* ERROR "cannot use x (variable of type int?) as int value in" */
+	var i int = x /* ERROR "correctness::nil_deref_unproven" */
 	var u OptUser = up /* ERROR "cannot use up (variable of type *OptUser?) as OptUser value in" */
 	_, _ = i, u
 }
@@ -81,10 +81,10 @@ func optCoalMismatch(x int?, sd string) {
 }
 
 func optMapRead(m map[string]int) {
-	var v int = m /* ERROR "of type int?) as int value in" */ ["k"]
+	var v int = m /* ERROR "correctness::nil_deref_unproven" */ ["k"]
 	_ = v
 	x := m["k"]
-	var i int = x /* ERROR "cannot use x (variable of type int?) as int value in" */
+	var i int = x /* ERROR "correctness::nil_deref_unproven" */
 	_ = i
 	a, ok := m["k"]
 	var ai int = a
@@ -115,7 +115,7 @@ func optConstResult() int? {
 }
 
 func optNested(x (int?)?) {
-	var y int? = x /* ERROR "as int? value in" */
+	var y int? = x /* ERROR "correctness::nil_deref_unproven" */
 	_ = y
 	var z (int?)? = nil
 	var w (int?)? = x
@@ -138,7 +138,7 @@ func optCompare(m map[string]string) {
 
 func optNestWrap(x int?, w (int?)?) {
 	var a (int?)? = x
-	var b int? = w /* ERROR "cannot use w (variable of type (int?)?) as int? value in" */
+	var b int? = w /* ERROR "correctness::nil_deref_unproven" */
 	_, _ = a, b
 }
 

@@ -12,10 +12,10 @@ type MapUser struct {
 func (u MapUser) Greet() string { return u.Name }
 
 func mapSingle(m map[string]int) {
-	var v int = m /* ERROR "of type int?) as int value in" */ ["k"]
+	var v int = m /* ERROR "correctness::nil_deref_unproven" */ ["k"]
 	_ = v
 	x := m["k"]
-	var i int = x /* ERROR "cannot use x (variable of type int?) as int value in" */
+	var i int = x /* ERROR "correctness::nil_deref_unproven" */
 	_ = i
 }
 
@@ -49,7 +49,7 @@ func mapSelect(m map[string]MapUser) {
 
 func mapPtr(mp map[string]*MapUser, dflt *MapUser) {
 	y := mp["u"]
-	var z *MapUser = y /* ERROR "cannot use y (variable of type *MapUser?) as *MapUser value in variable declaration" */
+	var z *MapUser = y /* ERROR "correctness::nil_deref_unproven" */
 	_, _ = y, z
 	var w *MapUser = mp["u"] ?? dflt
 	_ = w
@@ -57,7 +57,7 @@ func mapPtr(mp map[string]*MapUser, dflt *MapUser) {
 
 func mapSlice(ms map[string][]int) {
 	s := ms["k"]
-	var t []int = s /* ERROR "cannot use s (variable of type []int?) as []int value in variable declaration" */
+	var t []int = s /* ERROR "correctness::nil_deref_unproven" */
 	_, _ = s, t
 	var u []int = ms["k"] ?? nil
 	_ = u
