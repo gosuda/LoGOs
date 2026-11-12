@@ -1458,7 +1458,7 @@ Decoding through json.Decoder uses the same method. [T-Sec10]
 No validate tags are needed. [T-Sec10]
 Unmarshal of a closed union tries members in declaration order into fresh scratch values and counts successes. [T-Sec10][T-203.1]
 Unmarshal of a closed union MUST resolve members declared in another package. [T-Sec10][T-203.1]
-A keyed member trial MUST count a success only when at least one key in the object is modeled by that member and its decode then succeeds. A key modeled by any sibling member but not this one disqualifies this member trial, while keys no member models are ignored. Keys MUST decide every keyed member trial, including a member that declares its own UnmarshalJSON. Such a decoder MUST run only after its keys match. A member with no static key set MUST be tried only when no keyed member key occurs in the input. Exactly one such member MUST succeed for the union to select it. A closed union member without an UnmarshalJSON method MUST fail with [correctness::union_member_no_json]. [T-Sec10][T-203.1]
+A member has a static key set when its type is a struct, or a pointer to a struct, that Sec 10.1 makes eligible. The set holds the JSON key of each visible field, and a field is visible when it is exported and has no `-` tag. A keyed member has a static key set with at least one key. A keyless member has none: its type is not an eligible struct, or the struct has no visible field. A keyed member trial MUST count a success only when at least one key in the object is in that member's static key set and its decode then succeeds. A key in the static key set of a sibling member but not in this member's disqualifies this member trial, while a key in no member's static key set is ignored. Keys MUST decide every keyed member trial, including a member that declares its own UnmarshalJSON. Such a decoder MUST run only after its keys match. A keyless member MUST be tried only when no key of a keyed member occurs in the input. Exactly one such member MUST succeed for the union to select it. A closed union member without an UnmarshalJSON method MUST fail with [correctness::union_member_no_json]. [T-Sec10][T-203.1]
 It assigns the target only on a single success. [T-Sec10][T-203.1]
 Ambiguity returns an error naming the union and the members. [T-Sec10][T-203.1]
 Failed trials leave the target untouched. [T-Sec10][T-203.1]
@@ -1467,7 +1467,7 @@ Two keyed members sharing a key MUST both claim input with that key. [T-Sec10][T
 Non-object input MUST match only keyless members. [T-Sec10][T-203.1]
 JSON null for a union field MUST leave the field nil with no trial. [T-Sec10][T-203.1]
 Key matching MUST fold case as the default v1 encoding/json does. [T-Sec10][T-203.1]
-A member with no visible keys MUST be tried only when no keyed key occurs. [T-Sec10][T-203.1]
+A keyless member MUST be tried only when no key of a keyed member occurs in the input. [T-Sec10][T-203.1]
 UnionTrialError MUST name the union, the members in order, and the counts. [T-Sec10][T-203.1]
 
 ### 10.3 Binary encoding
