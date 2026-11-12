@@ -174,3 +174,50 @@ func chainKeyOrdered(ns []int, ss []string, fs []float64) {
 	_ = ss.sortBy(s => s)
 	_ = fs.sortBy(f => { return f })
 }
+
+func chainReceiverBuiltins(xs, ys []int) {
+	_ = xs.filter(x => {
+		_ = copy(xs /* ERROR "[correctness::const_view_mutation] cannot copy into chain receiver or parameter" */, ys)
+		return true
+	})
+	_ = xs.filter(x => {
+		clear(xs /* ERROR "[correctness::const_view_mutation] cannot clear chain receiver or parameter" */)
+		return true
+	})
+	_ = xs.filter(x => len(append(xs /* ERROR "[correctness::const_view_mutation] cannot append to chain receiver or parameter" */, x)) > 0)
+}
+
+func chainBuiltinReads(xs, ys []int, m map[string]int) {
+	_ = xs.filter(x => {
+		_ = copy(ys, xs)
+		clear(ys)
+		delete(m, "k")
+		return len(append(ys, xs...)) > x
+	})
+}
+
+type chainBox struct{ n int }
+
+func chainReceiverWrites(xs, ys []int, bs []*chainBox) {
+	_ = xs.filter(x => {
+		xs /* ERROR "[correctness::const_view_mutation] cannot assign to chain receiver or parameter" */ [0]++
+		return true
+	})
+	_ = xs.filter(x => {
+		xs /* ERROR "[correctness::const_view_mutation] cannot assign to chain receiver or parameter" */ [0] += x
+		return true
+	})
+	_ = xs.filter(x => {
+		xs /* ERROR "[correctness::const_view_mutation] cannot assign to chain receiver or parameter" */ = ys
+		return true
+	})
+	_ = bs.filter(b => {
+		* /* ERROR "[correctness::const_view_mutation] cannot assign to chain receiver or parameter" */ bs[0] = chainBox{}
+		return true
+	})
+	_ = xs.filter(x => {
+		for xs /* ERROR "[correctness::const_view_mutation] cannot assign to chain receiver or parameter" */ [0] = range 3 {
+		}
+		return true
+	})
+}

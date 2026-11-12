@@ -654,22 +654,48 @@ func (check *Checker) logosChainBlock(lam *syntax.LambdaExpr, roots map[string]b
 	return types[0], false, true
 }
 
+var logosChainMutatingBuiltins = map[string]string{
+	"append": "append to",
+	"copy":   "copy into",
+	"clear":  "clear",
+	"delete": "delete from",
+}
+
 func (check *Checker) logosChainNoMutate(roots map[string]bool, body syntax.Node) {
 	syntax.Inspect(body, func(n syntax.Node) bool {
-		as, ok := n.(*syntax.AssignStmt)
-		if !ok {
-			return true
+		var targets []syntax.Expr
+		switch n := n.(type) {
+		case *syntax.AssignStmt:
+			if n.Op != syntax.Def {
+				targets = syntax.UnpackListExpr(n.Lhs)
+			}
+		case *syntax.RangeClause:
+			if !n.Def {
+				targets = syntax.UnpackListExpr(n.Lhs)
+			}
+		case *syntax.CallExpr:
+			check.logosChainMutatingCall(n, roots)
 		}
-		if as.Op == syntax.Def {
-			return true
-		}
-		for _, lhs := range syntax.UnpackListExpr(as.Lhs) {
+		for _, lhs := range targets {
 			if logosChainMutates(lhs, roots) {
 				check.errorf(lhs, IncompatibleAssign, "%s cannot assign to chain receiver or parameter", logosChainMutation)
 			}
 		}
 		return true
 	})
+}
+
+func (check *Checker) logosChainMutatingCall(call *syntax.CallExpr, roots map[string]bool) {
+	name, ok := syntax.Unparen(call.Fun).(*syntax.Name)
+	if !ok || len(call.ArgList) == 0 {
+		return
+	}
+	verb, mutating := logosChainMutatingBuiltins[name.Value]
+	_, obj := check.lookupScope(name.Value)
+	_, builtin := obj.(*Builtin)
+	if mutating && builtin && logosChainMutates(call.ArgList[0], roots) {
+		check.errorf(call.ArgList[0], IncompatibleAssign, "%s cannot %s chain receiver or parameter", logosChainMutation, verb)
+	}
 }
 
 func logosChainMutates(e syntax.Expr, roots map[string]bool) bool {
@@ -684,6 +710,10 @@ func logosChainMutates(e syntax.Expr, roots map[string]bool) bool {
 		}
 		if ix, ok := cur.(*syntax.IndexExpr); ok {
 			cur = syntax.Unparen(ix.X)
+			continue
+		}
+		if op, ok := cur.(*syntax.Operation); ok && op.Y == nil && op.Op == syntax.Mul {
+			cur = syntax.Unparen(op.X)
 			continue
 		}
 		return false
