@@ -48,6 +48,9 @@ func TestPolicyForLinkMainModules(t *testing.T) {
 	if !slices.Equal(p.TransitiveExecAllowlist, []string{"example.com/x/**"}) {
 		t.Errorf("TransitiveExecAllowlist = %q", p.TransitiveExecAllowlist)
 	}
+	if !slices.Equal(p.ReflectAllowlist, []string{"example.com/r/**"}) {
+		t.Errorf("ReflectAllowlist = %q", p.ReflectAllowlist)
+	}
 }
 
 func TestPolicyForLinkNilConfigFailsClosed(t *testing.T) {
