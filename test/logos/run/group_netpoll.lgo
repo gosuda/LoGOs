@@ -1,4 +1,4 @@
-// run
+// run -t 60
 
 package main
 
@@ -8,12 +8,21 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"slices"
 	"time"
 )
 
 var errBoom = errors.New("boom")
 
 var bad bool
+
+var errWins int
+
+var timeoutHits int
+
+var imminent = make(chan struct{}, 1)
+
+var failedAt, wokeAt time.Time
 
 func check(tag string, cond bool, got, want string) {
 	if !cond {
@@ -25,7 +34,9 @@ func check(tag string, cond bool, got, want string) {
 }
 //logos:allow(correctness::unbounded_channel_op)
 func readChild(conn net.Conn, res chan string) error {
+	imminent <- struct{}{}
 	_, err := conn.Read(make([]byte, 1))
+	wokeAt = time.Now()
 	if !os.IsTimeout(err) {
 		res <- "not-timeout"
 		return err
@@ -34,7 +45,11 @@ func readChild(conn net.Conn, res chan string) error {
 	return nil
 }
 
+//logos:allow(correctness::unbounded_channel_op)
 func sibling() error {
+	<-imminent
+	time.Sleep(20 * time.Millisecond)
+	failedAt = time.Now()
 	return errBoom
 }
 
@@ -47,13 +62,7 @@ func run(conn net.Conn, res chan string) error {
 }
 
 //logos:allow(correctness::unbounded_channel_op)
-func main() {
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		fmt.Println("FAIL group-netpoll-setup: got", err, "want listener")
-		os.Exit(1)
-	}
-	defer ln.Close()
+func oneRound(ln net.Listener) time.Duration {
 	cli, err := net.Dial("tcp", ln.Addr().String())
 	if err != nil {
 		fmt.Println("FAIL group-netpoll-setup: got", err, "want dial")
@@ -67,13 +76,37 @@ func main() {
 	}
 	defer srv.Close()
 	res := make(chan string, 1)
-	start := time.Now()
-	gotErr := run(srv, res)
-	check("group-netpoll-first-error-wins", gotErr == errBoom, fmt.Sprint(gotErr), errBoom.Error())
-	got := <-res
-	check("group-netpoll-cancel-wakes-with-timeout", got == "timeout", got, "timeout")
-	took := time.Since(start)
-	check("group-netpoll-wake-prompt", took < 5*time.Second, took.String(), "under 5s for the 100ms SPEC bound")
+	if run(srv, res) == errBoom {
+		errWins++
+	}
+	if <-res == "timeout" {
+		timeoutHits++
+	}
+	return wokeAt.Sub(failedAt)
+}
+
+//logos:allow(correctness::unbounded_channel_op)
+func main() {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		fmt.Println("FAIL group-netpoll-setup: got", err, "want listener")
+		os.Exit(1)
+	}
+	defer ln.Close()
+	watch := time.AfterFunc(30*time.Second, func() {
+		fmt.Println("FAIL group-netpoll-cancel-deadline: group with a parked network read did not finish within 30s")
+		os.Exit(1)
+	})
+	defer watch.Stop()
+	var wakes []time.Duration
+	for range 5 {
+		wakes = append(wakes, oneRound(ln))
+	}
+	slices.Sort(wakes)
+	median := wakes[len(wakes)/2]
+	check("group-netpoll-first-error-wins", errWins == 5, fmt.Sprint(errWins), "5 of 5")
+	check("group-netpoll-cancel-wakes-with-timeout", timeoutHits == 5, fmt.Sprint(timeoutHits), "5 of 5")
+	check("group-netpoll-wake-prompt", median < 200*time.Millisecond, median.String(), "under 200ms median of 5 for the 100ms SPEC bound")
 	if bad {
 		os.Exit(1)
 	}
