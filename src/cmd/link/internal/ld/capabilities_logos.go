@@ -401,7 +401,7 @@ func (a *logosCapAuditor) followRelocs(d *deadcodePass, s loader.Sym) {
 }
 
 func (a *logosCapAuditor) callSite(s loader.Sym, r loader.Reloc) loader.Sym {
-	if capabilitySinks[capSinkName(a.ldr.SymName(r.Sym()))] != CapSyscall {
+	if a.role(s).dep == "" || capabilitySinks[capSinkName(a.ldr.SymName(r.Sym()))] != CapSyscall {
 		return s
 	}
 	fi := a.ldr.FuncInfo(s)
