@@ -3,6 +3,7 @@ ok expr-add
 ok expr-binop
 ok expr-callarg
 ok expr-callorder
+ok expr-recv-callorder
 ok expr-unary
 ok expr-index
 ok expr-composite
@@ -46,6 +47,7 @@ ok expr-add-cancel
 ok expr-binop-cancel
 ok expr-callarg-cancel
 ok expr-callorder-cancel
+ok expr-recv-callorder-cancel
 ok expr-unary-cancel
 ok expr-index-cancel
 ok expr-composite-cancel

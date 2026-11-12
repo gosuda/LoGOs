@@ -18,6 +18,9 @@ ok for-post-funclit
 ok case-funclit
 ok init-funclit
 ok defer-funclit
+ok call-order
+ok call-order-method
+ok call-order-operator
 ok funclit-operand-cancel
 ok composite-operand-cancel
 ok paren-operand-cancel
@@ -34,3 +37,6 @@ ok for-post-funclit-cancel
 ok case-funclit-cancel
 ok init-funclit-cancel
 ok defer-funclit-cancel
+ok call-order-cancel
+ok call-order-method-cancel
+ok call-order-operator-cancel

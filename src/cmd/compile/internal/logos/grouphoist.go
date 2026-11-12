@@ -137,13 +137,20 @@ func (h *groupHoist) slotsBeforeRecv(slots []*syntax.Expr) {
 }
 
 func (h *groupHoist) slotsThrough(slots []*syntax.Expr, last int) {
+	fc := h.fc
 	for i, s := range slots {
-		switch {
-		case i > last:
+		if i > last {
 			return
-		case groupContainsRecv(*s):
+		}
+		mark := fc.hoistSubMark()
+		if groupContainsRecv(*s) {
 			*s = h.expr(*s)
-		case h.fc.groupHasCall(*s):
+		}
+		if i < last && fc.groupHasCall(*s) {
+			inner := fc.hoistSubTake(mark)
+			if h.withText {
+				fc.hoistSubEmit(inner)
+			}
 			*s = h.plain(*s)
 		}
 	}

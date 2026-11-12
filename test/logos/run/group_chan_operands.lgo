@@ -17,9 +17,10 @@ const waitBound = 5 * time.Second
 func failSibling() error { return errSib }
 
 type env struct {
-	in  chan int
-	mid chan int
-	out int
+	in   chan int
+	mid  chan int
+	gate chan struct{}
+	out  int
 }
 
 type box struct {
@@ -40,6 +41,15 @@ func use2(a, b int) int {
 
 func set2(e *env, a, b int) {
 	e.out = use2(a, b)
+}
+
+func (e *env) open(v int) int {
+	close(e.gate)
+	return v
+}
+
+func openGate(e *env, v int) int {
+	return e.open(v)
 }
 
 func recvFuncLitOperand(ctx context.Context, e *env, fail bool) error {
@@ -339,6 +349,57 @@ func condDeferFuncLit(ctx context.Context, e *env, fail bool) error {
 	return nil
 }
 
+func recvCallOrder(ctx context.Context, e *env, fail bool) error {
+	go group (ctx) {
+		go {
+			e.out = use2(openGate(e, <-e.in), <-e.mid)
+		}
+		go {
+			if fail {
+				failSibling()?
+			} else {
+				<-e.gate
+				e.mid <- 7
+			}
+		}
+	}
+	return nil
+}
+
+func recvCallOrderMethod(ctx context.Context, e *env, fail bool) error {
+	go group (ctx) {
+		go {
+			e.out = use2(e.open(<-e.in), <-e.mid)
+		}
+		go {
+			if fail {
+				failSibling()?
+			} else {
+				<-e.gate
+				e.mid <- 7
+			}
+		}
+	}
+	return nil
+}
+
+func recvCallOrderOperator(ctx context.Context, e *env, fail bool) error {
+	go group (ctx) {
+		go {
+			e.out = openGate(e, <-e.in)*10 + <-e.mid
+		}
+		go {
+			if fail {
+				failSibling()?
+			} else {
+				<-e.gate
+				e.mid <- 7
+			}
+		}
+	}
+	return nil
+}
+
 type cell struct {
 	name    string
 	run     func(ctx context.Context, e *env, fail bool) error
@@ -380,6 +441,9 @@ func valueCells() []cell {
 		{name: "case-funclit", run: condCaseFuncLit, feed: []int{2, 99}, want: 2, left: 1},
 		{name: "init-funclit", run: condInitFuncLit, feed: []int{3, 99}, want: 3, left: 1},
 		{name: "defer-funclit", run: condDeferFuncLit, feed: []int{5, 99}, want: 15, left: 1},
+		{name: "call-order", run: recvCallOrder, feed: []int{5, 99}, want: 57, left: 1},
+		{name: "call-order-method", run: recvCallOrderMethod, feed: []int{5, 99}, want: 57, left: 1},
+		{name: "call-order-operator", run: recvCallOrderOperator, feed: []int{5, 99}, want: 57, left: 1},
 	}
 }
 
@@ -401,12 +465,15 @@ func cancelCells() []cell {
 		{name: "case-funclit-cancel", run: condCaseFuncLit},
 		{name: "init-funclit-cancel", run: condInitFuncLit},
 		{name: "defer-funclit-cancel", run: condDeferFuncLit},
+		{name: "call-order-cancel", run: recvCallOrder},
+		{name: "call-order-method-cancel", run: recvCallOrderMethod},
+		{name: "call-order-operator-cancel", run: recvCallOrderOperator},
 	}
 }
 
 //logos:allow(correctness::unbounded_channel_op)
 func exercise(c cell, fail bool) string {
-	e := &env{in: make(chan int, len(c.feed)), mid: make(chan int, 1)}
+	e := &env{in: make(chan int, len(c.feed)), mid: make(chan int, 1), gate: make(chan struct{})}
 	for _, v := range c.feed {
 		e.in <- v
 	}

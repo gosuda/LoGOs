@@ -33,6 +33,8 @@ func add2(a, b int) int { return a*100 + b }
 
 func lenIn(e *env) int { return len(e.in) }
 
+func peekIn(e *env, v int) int { return v*100 + len(e.in) }
+
 func check(v int) (int, error) { return v, nil }
 
 func b2i(b bool) int {
@@ -71,6 +73,10 @@ func vExprCallarg(ctx context.Context, e *env) (string, error) {
 
 func vExprCallorder(ctx context.Context, e *env) (string, error) {
 	return render([]int{1, 2}.group(ctx, limit = 1).map(x => add2(lenIn(e), <-e.in)))
+}
+
+func vExprRecvCallorder(ctx context.Context, e *env) (string, error) {
+	return render([]int{1, 2}.group(ctx, limit = 1).map(x => add2(peekIn(e, <-e.in), <-e.in)))
 }
 
 func vExprUnary(ctx context.Context, e *env) (string, error) {
@@ -389,6 +395,7 @@ func cells() []cell {
 		{name: "expr-binop", run: vExprBinop, feed: []int{10, 3, 8, 2}, want: "[7 6]"},
 		{name: "expr-callarg", run: vExprCallarg, feed: []int{5, 6}, want: "[10 12]"},
 		{name: "expr-callorder", run: vExprCallorder, feed: []int{5, 6}, want: "[205 106]"},
+		{name: "expr-recv-callorder", run: vExprRecvCallorder, feed: []int{5, 6, 7, 8}, want: "[50306 70108]"},
 		{name: "expr-unary", run: vExprUnary, feed: []int{5, 6}, want: "[-5 -6]"},
 		{name: "expr-index", run: vExprIndex, feed: []int{2, 3}, want: "[20 30]"},
 		{name: "expr-composite", run: vExprComposite, feed: []int{5, 6}, want: "[5 6]"},
