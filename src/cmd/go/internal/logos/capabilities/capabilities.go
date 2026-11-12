@@ -5,6 +5,7 @@
 package capabilities
 
 import (
+	"cmp"
 	"fmt"
 	"path"
 	"slices"
@@ -19,19 +20,31 @@ const (
 	Allow Severity = "allow"
 )
 
+const (
+	RuleUnsafe   = "unauthorized_unsafe"
+	RuleAssembly = "unclassified_assembly"
+)
+
+var ruleDetail = map[string]string{
+	RuleUnsafe:   "imports 'unsafe'",
+	RuleAssembly: "holds assembly files",
+}
+
 type Node struct {
 	ImportPath string
 	Imports    []string
 	Goroot     bool
 	Main       bool
+	Asm        bool
 }
 
 type Violation struct {
 	Dep   string
+	Rule  string
 	Chain []string
 }
 
-func CheckUnsafe(sev Severity, allowlist []string, all []Node) []Violation {
+func Check(sev Severity, allowlist []string, all []Node) []Violation {
 	if sev == Allow {
 		return nil
 	}
@@ -60,12 +73,9 @@ func CheckUnsafe(sev Severity, allowlist []string, all []Node) []Violation {
 		if !ok {
 			continue
 		}
-		if !exempt(n) && !seen[n.ImportPath] && slices.Contains(n.Imports, "unsafe") &&
-			!Allowlisted(allowlist, n.ImportPath) {
+		if !exempt(n) && !seen[n.ImportPath] && !Allowlisted(allowlist, n.ImportPath) {
 			seen[n.ImportPath] = true
-			chain := chainTo(parent, n.ImportPath)
-			chain = append(chain, "unsafe")
-			out = append(out, Violation{Dep: n.ImportPath, Chain: chain})
+			out = appendViolations(out, n, chainTo(parent, n.ImportPath))
 		}
 		for _, imp := range n.Imports {
 			if _, ok := parent[imp]; !ok {
@@ -74,7 +84,19 @@ func CheckUnsafe(sev Severity, allowlist []string, all []Node) []Violation {
 			}
 		}
 	}
-	slices.SortFunc(out, func(a, b Violation) int { return strings.Compare(a.Dep, b.Dep) })
+	slices.SortFunc(out, func(a, b Violation) int {
+		return cmp.Or(strings.Compare(a.Dep, b.Dep), strings.Compare(a.Rule, b.Rule))
+	})
+	return out
+}
+
+func appendViolations(out []Violation, n Node, chain []string) []Violation {
+	if slices.Contains(n.Imports, "unsafe") {
+		out = append(out, Violation{Dep: n.ImportPath, Rule: RuleUnsafe, Chain: append(slices.Clone(chain), "unsafe")})
+	}
+	if n.Asm {
+		out = append(out, Violation{Dep: n.ImportPath, Rule: RuleAssembly, Chain: chain})
+	}
 	return out
 }
 
@@ -137,7 +159,7 @@ func matchSegPatterns(pats, segs []string) bool {
 
 func FormatViolation(v Violation) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "ERROR [capabilities::unauthorized_unsafe]: Transitive dependency '%s' imports 'unsafe'\n", v.Dep)
+	fmt.Fprintf(&b, "ERROR [capabilities::%s]: Transitive dependency '%s' %s\n", v.Rule, v.Dep, ruleDetail[v.Rule])
 	b.WriteString("  --> Import chain (cmd/go capabilities audit):\n")
 	for i, frame := range v.Chain {
 		if i == 0 {

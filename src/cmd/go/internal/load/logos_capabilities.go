@@ -51,14 +51,9 @@ func checkLogosCapabilities(ld *modload.Loader, all []*Package) {
 		if p.Internal.TestmainGo != nil {
 			continue
 		}
-		nodes = append(nodes, capabilities.Node{
-			ImportPath: p.ImportPath,
-			Imports:    p.Imports,
-			Goroot:     p.Goroot || p.Standard,
-			Main:       capIsMain(p),
-		})
+		nodes = append(nodes, capNode(p))
 	}
-	violations := capabilities.CheckUnsafe(sev, allowlist, nodes)
+	violations := capabilities.Check(sev, allowlist, nodes)
 	if len(violations) == 0 {
 		return
 	}
@@ -75,6 +70,16 @@ func checkLogosCapabilities(ld *modload.Loader, all []*Package) {
 	if carrier := firstMainPackage(all); carrier != nil {
 		carrier.Error = &PackageError{Err: fmt.Errorf("%s", strings.Join(msgs, "\n"))}
 		carrier.Incomplete = true
+	}
+}
+
+func capNode(p *Package) capabilities.Node {
+	return capabilities.Node{
+		ImportPath: p.ImportPath,
+		Imports:    p.Imports,
+		Goroot:     p.Goroot || p.Standard,
+		Main:       capIsMain(p),
+		Asm:        len(p.SFiles) > 0,
 	}
 }
 
