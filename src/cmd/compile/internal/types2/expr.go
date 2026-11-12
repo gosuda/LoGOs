@@ -815,8 +815,10 @@ func (check *Checker) binary(x *operand, e syntax.Expr, lhs, rhs syntax.Expr, op
 
 	check.expr(nil, x, lhs)
 	anded := check.logosPushAndCond(op, lhs) // logos M3-S4 hook: `x != nil && rest` narrows x for rest.
+	top := len(check.delayed)
 	check.expr(nil, &y, rhs)
 	if anded {
+		check.processDelayed(top)
 		check.logosPopNarrow() // logos M3-S4 hook.
 	}
 

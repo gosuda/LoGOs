@@ -12,3 +12,5 @@ ok shadow-header
 ok child-read
 ok stage-read
 ok operands
+ok and-literal
+ok and-literal-nil

@@ -177,3 +177,38 @@ func stageLambdaReadsThenAssignedAfterJoin(ctx context.Context, q U?, xs []int) 
 	}
 	return nil
 }
+
+func andLiteral(q U?) bool {
+	return q != nil && func() bool { return take(q) != "" }()
+}
+
+func andLiteralChain(q, r U?) bool {
+	return q != nil && r != nil && func() bool { return take(q) != take(r) }()
+}
+
+func andLiteralInIf(q U?) string {
+	if q != nil && func() bool { return take(q) != "" }() {
+		return take(q)
+	}
+	return ""
+}
+
+func andLiteralNested(q U?) bool {
+	return q != nil && func() bool {
+		return func() bool { return take(q) != "" }()
+	}()
+}
+
+func andLiteralAssigned(q U?) bool {
+	ok := q != nil && func() bool { return take(q /* ERROR "cannot use q" */) != "" }()
+	q = nil
+	return ok
+}
+
+func andLiteralLeft(q U?) bool {
+	return func() bool { return take(q /* ERROR "cannot use q" */) != "" }() && q != nil
+}
+
+func orLiteral(q U?) bool {
+	return q == nil || func() bool { return take(q /* ERROR "cannot use q" */) != "" }()
+}

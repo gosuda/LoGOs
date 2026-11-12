@@ -241,6 +241,13 @@ func okDeferOperand(o okUser) {
 	}
 }
 
+func okAndLiteral(q okUser?) string {
+	if q != nil && func() bool { return okTake(q) != "" }() {
+		return okTake(q)
+	}
+	return "none"
+}
+
 func main() {
 	check("immediate", okImmediate(), "ann")
 	check("deferred", okDeferred(), "ann")
@@ -270,6 +277,8 @@ func main() {
 	err := okGoOperand(context.Background(), okUser{okName: "g"})
 	okDeferOperand(okUser{okName: "d"})
 	check("operands", fmt.Sprint(okSeen, err == nil), "[g d] true")
+	check("and-literal", okAndLiteral(okUser{okName: "fay"}), "fay")
+	check("and-literal-nil", okAndLiteral(nil), "none")
 	if failed {
 		os.Exit(1)
 	}
