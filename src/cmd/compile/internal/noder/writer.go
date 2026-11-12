@@ -1925,7 +1925,7 @@ func (w *writer) expr(expr syntax.Expr) {
 			return
 		}
 
-		if _, isNil := obj.(*types2.Nil); isNil {
+		if _, isNil := obj.(*types2.Nil); isNil || tv.IsNil() {
 			w.Code(exprZero)
 			w.pos(expr)
 			w.typ(tv.Type)

@@ -4,13 +4,15 @@ env GOTOOLCHAIN=local
 cd prog
 logos build -o prog.exe .
 exec ./prog.exe
-stdout '^read 2s 1.000042ms March drwxr-xr-x 2 2 3ns true 3$'
+stdout '^read 2s 1.000042ms March drwxr-xr-x 2 2 3ns true 3 2 true 5$'
 stdout '^ok slice-fault$'
 stdout '^ok months-fault$'
 stdout '^ok modes-fault$'
 stdout '^ok nested-fault$'
 stdout '^ok anon-fault$'
 stdout '^ok lists-fault$'
+stdout '^ok stamps-fault$'
+stdout '^ok recs-fault$'
 ! stdout 'FAIL'
 
 exec go tool nm prog.exe
@@ -25,6 +27,10 @@ stdout ' R main\.nested$'
 stdout ' R main\.anon$'
 stdout ' R main\.lists$'
 stdout ' R main\.lists\.logos_backing0$'
+stdout ' R main\.stamps$'
+stdout ' R main\.stamps\.logos_backing0$'
+stdout ' R main\.recs$'
+stdout ' R main\.recs\.logos_backing0$'
 ! stdout ' [Tt] main\.init'
 
 -- prog/go.mod --
@@ -45,6 +51,11 @@ import (
 	"unsafe"
 )
 
+type Rec struct {
+	At time.Time
+	N  int
+}
+
 type Lists struct {
 	L []time.Duration
 	N int
@@ -57,6 +68,8 @@ const modes = []os.FileMode{0o644, os.ModeDir | 0o755}
 const nested = [][]time.Duration{{1, 2}, {3}}
 const anon = []struct{ D time.Duration }{{time.Second}, {2}}
 const lists = Lists{L: []time.Duration{time.Minute, 5}, N: 3}
+const stamps = []time.Time{{}, {}}
+const recs = []Rec{{N: 4}, {N: 5}}
 
 var failed bool
 
@@ -81,6 +94,10 @@ func poke(name string) {
 		*unsafe.SliceData(nested[0]) = 0
 	case "anon":
 		*(*time.Duration)(unsafe.Pointer(unsafe.SliceData(anon))) = 0
+	case "stamps":
+		*unsafe.SliceData(stamps) = time.Time{}
+	case "recs":
+		*unsafe.SliceData(recs) = Rec{}
 	case "lists":
 		*unsafe.SliceData(lists.L) = 0
 	}
@@ -111,13 +128,13 @@ func main() {
 	for _, d := range array {
 		sum += d
 	}
-	fmt.Println("read", slice[1], sum, months[at], modes[1], len(nested), len(nested[0]), nested[1][0], anon[at].D == time.Second, lists.N)
+	fmt.Println("read", slice[1], sum, months[at], modes[1], len(nested), len(nested[0]), nested[1][0], anon[at].D == time.Second, lists.N, len(stamps), stamps[1].IsZero(), recs[1].N)
 	self, err := os.Executable()
 	if err != nil {
 		fmt.Println("FAIL executable:", err)
 		os.Exit(1)
 	}
-	for _, name := range []string{"slice", "months", "modes", "nested", "anon", "lists"} {
+	for _, name := range []string{"slice", "months", "modes", "nested", "anon", "lists", "stamps", "recs"} {
 		faults(self, name)
 	}
 	if failed {

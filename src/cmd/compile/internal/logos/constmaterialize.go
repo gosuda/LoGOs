@@ -381,6 +381,15 @@ func stampMatValue(n syntax.Expr, t types2.Type, c constant.Value) {
 	n.SetTypeInfo(tv)
 }
 
+func matNil(t types2.Type, pos syntax.Pos) syntax.Expr {
+	n := nilOf(pos)
+	tv := syntax.TypeAndValue{Type: t}
+	tv.SetIsValue()
+	tv.SetIsNil()
+	n.SetTypeInfo(tv)
+	return n
+}
+
 func BuildMatLiteral(v ctfe.Value, t types2.Type, pos syntax.Pos) syntax.Expr {
 	if v.IsNilValue() {
 		return nil
@@ -389,6 +398,9 @@ func BuildMatLiteral(v ctfe.Value, t types2.Type, pos syntax.Pos) syntax.Expr {
 }
 
 func buildMatLiteral(v ctfe.Value, t types2.Type, pos syntax.Pos) syntax.Expr {
+	if v.IsNilValue() || v.Type() != nil && v.Type().Impure != "" {
+		return matNil(t, pos)
+	}
 	ut := types2.Unalias(t)
 	if n, ok := ut.(*types2.Named); ok {
 		ut = n.Underlying()
