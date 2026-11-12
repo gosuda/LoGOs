@@ -95,22 +95,142 @@ func (check *Checker) logosYieldForm(s syntax.Stmt) syntax.Stmt {
 	}
 	switch s := s.(type) {
 	case *syntax.ExprStmt:
-		switch x := s.X.(type) {
-		case *syntax.CallExpr:
-			if isYieldWord(x.Fun) && len(x.ArgList) == 1 && !x.HasDots {
-				return yieldAfterWord(x.Fun, &syntax.ParenExpr{X: x.ArgList[0]})
-			}
-		case *syntax.Operation:
-			if x.Y != nil && isYieldWord(x.X) && isUnaryStart(x.Op) && !isBinaryValue(x.Y) {
-				return yieldAfterWord(x.X, &syntax.Operation{Op: x.Op, X: x.Y})
-			}
+		if value, word, ok := yieldStatementOperand(s.X); ok {
+			return yieldStmtOf(word, value)
 		}
 	case *syntax.SendStmt:
-		if isYieldWord(s.Chan) && !isBinaryValue(s.Value) {
-			return yieldAfterWord(s.Chan, &syntax.Operation{Op: syntax.Recv, X: s.Value})
+		if isYieldWord(s.Chan) && !isLambdaValue(s.Value) {
+			return yieldStmtOf(s.Chan, yieldPrefix(syntax.Recv, s.Value, yieldAnchor(s.Chan)))
 		}
 	}
 	return s
+}
+
+func yieldStatementOperand(x syntax.Expr) (value, word syntax.Expr, ok bool) {
+	switch x := x.(type) {
+	case *syntax.CallExpr:
+		if isYieldWord(x.Fun) {
+			if len(x.ArgList) != 1 || x.HasDots {
+				return nil, nil, false
+			}
+			paren := &syntax.ParenExpr{X: x.ArgList[0]}
+			paren.SetPos(yieldAnchor(x.Fun))
+			return paren, x.Fun, true
+		}
+	case *syntax.Operation:
+		if x.Y != nil && isYieldWord(x.X) {
+			if !isUnaryStart(x.Op) || isLambdaValue(x.Y) {
+				return nil, nil, false
+			}
+			return yieldPrefix(x.Op, x.Y, yieldAnchor(x.X)), x.X, true
+		}
+	}
+	left := yieldLeft(x)
+	if left == nil {
+		return nil, nil, false
+	}
+	value, word, ok = yieldStatementOperand(left)
+	if !ok {
+		return nil, nil, false
+	}
+	return yieldWithLeft(x, value), word, true
+}
+
+func yieldLeft(x syntax.Expr) syntax.Expr {
+	switch x := x.(type) {
+	case *syntax.Operation:
+		if x.Y != nil {
+			return x.X
+		}
+	case *syntax.CallExpr:
+		return x.Fun
+	case *syntax.IndexExpr:
+		return x.X
+	case *syntax.SliceExpr:
+		return x.X
+	case *syntax.SelectorExpr:
+		return x.X
+	case *syntax.AssertExpr:
+		return x.X
+	case *syntax.CoalesceExpr:
+		return x.X
+	case *syntax.TryExpr:
+		return x.X
+	case *syntax.OptSelectExpr:
+		return x.X
+	}
+	return nil
+}
+
+func yieldWithLeft(x, left syntax.Expr) syntax.Expr {
+	switch x := x.(type) {
+	case *syntax.Operation:
+		c := *x
+		c.X = left
+		return &c
+	case *syntax.CallExpr:
+		c := *x
+		c.Fun = left
+		return &c
+	case *syntax.IndexExpr:
+		c := *x
+		c.X = left
+		return &c
+	case *syntax.SliceExpr:
+		c := *x
+		c.X = left
+		return &c
+	case *syntax.SelectorExpr:
+		c := *x
+		c.X = left
+		return &c
+	case *syntax.AssertExpr:
+		c := *x
+		c.X = left
+		return &c
+	case *syntax.CoalesceExpr:
+		c := *x
+		c.X = left
+		return &c
+	case *syntax.TryExpr:
+		c := *x
+		c.X = left
+		return &c
+	case *syntax.OptSelectExpr:
+		c := *x
+		c.X = left
+		return &c
+	}
+	return x
+}
+
+func yieldPrefix(op syntax.Operator, e syntax.Expr, anchor syntax.Pos) syntax.Expr {
+	switch e := e.(type) {
+	case *syntax.Operation:
+		if e.Y != nil {
+			c := *e
+			c.X = yieldPrefix(op, e.X, anchor)
+			return &c
+		}
+	case *syntax.CoalesceExpr:
+		c := *e
+		c.X = yieldPrefix(op, e.X, anchor)
+		return &c
+	}
+	unary := &syntax.Operation{Op: op, X: e}
+	unary.SetPos(anchor)
+	return unary
+}
+
+func yieldAnchor(word syntax.Expr) syntax.Pos {
+	pos := word.Pos()
+	return syntax.MakePos(pos.Base(), pos.Line(), pos.Col()+uint(len("yield")))
+}
+
+func yieldStmtOf(word, value syntax.Expr) syntax.Stmt {
+	y := &syntax.YieldStmt{Value: value}
+	y.SetPos(word.Pos())
+	return y
 }
 
 func isYieldWord(e syntax.Expr) bool {
@@ -118,14 +238,9 @@ func isYieldWord(e syntax.Expr) bool {
 	return ok && name.Value == "yield"
 }
 
-func isBinaryValue(e syntax.Expr) bool {
-	switch e := e.(type) {
-	case *syntax.Operation:
-		return e.Y != nil
-	case *syntax.CoalesceExpr, *syntax.LambdaExpr:
-		return true
-	}
-	return false
+func isLambdaValue(e syntax.Expr) bool {
+	_, ok := e.(*syntax.LambdaExpr)
+	return ok
 }
 
 func isUnaryStart(op syntax.Operator) bool {
@@ -134,12 +249,4 @@ func isUnaryStart(op syntax.Operator) bool {
 		return true
 	}
 	return false
-}
-
-func yieldAfterWord(word, value syntax.Expr) syntax.Stmt {
-	pos := word.Pos()
-	value.SetPos(syntax.MakePos(pos.Base(), pos.Line(), pos.Col()+uint(len("yield"))))
-	y := &syntax.YieldStmt{Value: value}
-	y.SetPos(pos)
-	return y
 }
