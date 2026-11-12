@@ -573,26 +573,41 @@ func levelPrefixes(prog string) []string {
 	return out
 }
 
+func levelLine(ln, prefix string) bool {
+	return ln == prefix || strings.HasPrefix(ln, prefix+" ")
+}
+
 func splitLevel(stdout string, prefixes []string) (global, level string) {
-	if len(prefixes) == 0 {
-		return stdout, ""
-	}
 	var g, l []string
 	for ln := range strings.SplitSeq(stdout, "\n") {
-		isLevel := false
-		for _, p := range prefixes {
-			if ln == p || strings.HasPrefix(ln, p+" ") {
-				isLevel = true
-				break
-			}
-		}
-		if isLevel {
+		if slices.ContainsFunc(prefixes, func(p string) bool { return levelLine(ln, p) }) {
 			l = append(l, ln)
 		} else {
 			g = append(g, ln)
 		}
 	}
 	return strings.Join(g, "\n"), strings.Join(l, "\n")
+}
+
+func unmatchedPrefixes(stdout string, prefixes []string) []string {
+	lines := strings.Split(stdout, "\n")
+	var out []string
+	for _, p := range prefixes {
+		if !slices.ContainsFunc(lines, func(ln string) bool { return levelLine(ln, p) }) {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+func TestUnmatchedLevelPrefixes(t *testing.T) {
+	out := "ok\nraw64 a raw=1\nraw32 b raw=2\n"
+	if got := unmatchedPrefixes(out, []string{"raw64", "raw32"}); len(got) != 0 {
+		t.Errorf("matching prefixes reported as unmatched: %v", got)
+	}
+	if got := unmatchedPrefixes(out, []string{"raw64", "raw16", "ra"}); !slices.Equal(got, []string{"raw16", "ra"}) {
+		t.Errorf("unmatched prefixes = %v, want [raw16 ra]", got)
+	}
 }
 
 var sweepHexMask = regexp.MustCompile(`0[xX][0-9a-fA-F]{6,}`)
@@ -943,6 +958,32 @@ func firstDivergence(a, b observation) string {
 	return cmp.Or(firstDiff(a.stdout, b.stdout), firstDiff(a.stderr, b.stderr), fmt.Sprintf("exit %d vs %d", a.exit, b.exit))
 }
 
+func stabilityDiff(ref, got observation) string {
+	if obsEqual(ref, got) {
+		return ""
+	}
+	return firstDivergence(ref, got)
+}
+
+func TestStabilityDiffSeesLevelLines(t *testing.T) {
+	ref := observation{stdout: "ok\nraw64 a raw=1\n"}
+	for _, tc := range []struct {
+		name string
+		got  observation
+		same bool
+	}{
+		{"identical", ref, true},
+		{"level line differs", observation{stdout: "ok\nraw64 a raw=2\n"}, false},
+		{"compared line differs", observation{stdout: "no\nraw64 a raw=1\n"}, false},
+		{"stderr differs", observation{stdout: ref.stdout, stderr: "x\n"}, false},
+		{"exit differs", observation{stdout: ref.stdout, exit: 1}, false},
+	} {
+		if got := stabilityDiff(ref, tc.got) == ""; got != tc.same {
+			t.Errorf("%s: stable = %v, want %v", tc.name, got, tc.same)
+		}
+	}
+}
+
 func clip(s string) string {
 	if len(s) > 120 {
 		return s[:117] + "..."
@@ -1172,13 +1213,18 @@ func TestParity(t *testing.T) {
 	for _, u := range ups {
 		upByID[u.id] = u
 	}
+	stabilityRefs, stabilityLabel := forkObs["K1"], "fork K1"
+	if upOn {
+		stabilityRefs, stabilityLabel = upObs["U1"], "upstream U1"
+	}
 	for _, p := range progs {
 		prefs := levelPrefixes(p)
-		if len(prefs) > 0 && len(ups) > 0 {
-			if o, ok := upObs[ups[0].id][p]; ok {
-				if gs, _ := splitLevel(o.stdout, prefs); strings.TrimSpace(gs) == "" {
-					t.Errorf("program %s: level-dependent prefixes mark every line, no compared lines", p)
-				}
+		if o, ok := stabilityRefs[p]; ok && len(prefs) > 0 {
+			if gs, _ := splitLevel(o.stdout, prefs); strings.TrimSpace(gs) == "" {
+				t.Errorf("program %s: level-dependent prefixes mark every line, no compared lines", p)
+			}
+			for _, unmatched := range unmatchedPrefixes(o.stdout, prefs) {
+				t.Errorf("program %s: level-dependent prefix %q matches no output line", p, unmatched)
 			}
 		}
 		var gref *observation
@@ -1204,19 +1250,9 @@ func TestParity(t *testing.T) {
 			}
 		}
 		if o, ok := stability[p]; ok {
-			gs, _ := splitLevel(o.stdout, prefs)
-			og := observation{exit: o.exit, stdout: gs, stderr: o.stderr}
-			if gref != nil {
-				if !obsEqual(*gref, og) {
-					t.Errorf("stability gate: program %s differs under upstream U1 at GOMAXPROCS=1 vs 4: %s vs %s (%s)", p, obsDesc(*gref), obsDesc(og), firstDiff(gref.stdout, og.stdout))
-				}
-			} else if !upOn {
-				if o4, ok4 := forkObs["K1"][p]; ok4 {
-					gs4, _ := splitLevel(o4.stdout, prefs)
-					og4 := observation{exit: o4.exit, stdout: gs4, stderr: o4.stderr}
-					if !obsEqual(og4, og) {
-						t.Errorf("stability gate: program %s differs under fork K1 at GOMAXPROCS=1 vs 4: %s vs %s (%s)", p, obsDesc(og4), obsDesc(og), firstDiff(og4.stdout, og.stdout))
-					}
+			if ref, ok := stabilityRefs[p]; ok {
+				if d := stabilityDiff(ref, o); d != "" {
+					t.Errorf("stability gate: program %s differs under %s at GOMAXPROCS=1 vs 4: %s", p, stabilityLabel, d)
 				}
 			}
 		}
