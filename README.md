@@ -19,7 +19,7 @@ Why the extra syntax:
 * **File extensions**: `.lgo` for loGo/s source packages, plus three alias extensions (U+1F4DC, U+26A1, and the gopher sequence) that `logos` accepts; `.go` for plain Go packages.
 * **Module boundaries**: One language per module; Go and loGo/s modules interoperate across imports.
 * **Ejection**: `logos eject [-o DIR]` emits an upstream-compatible Go 1.27 module tree.
-* **Plain Go underneath**: ejected output matches the compiler's lowering, proven by `TestEjectMatchesLowering` in [src/cmd/compile/internal/logos/eject_test.go](src/cmd/compile/internal/logos/eject_test.go).
+* **Plain Go underneath**: the ejected module builds with upstream Go and prints the output of `logos run`, proven by the `logos_eject.txt` script test ([src/cmd/go/testdata/script/logos_eject.txt](src/cmd/go/testdata/script/logos_eject.txt)).
 * **Go keeps its meaning**: plain `go` retains upstream language semantics and command text ([src/run.bash](src/run.bash) runs the regression suite).
 * **Imports cross kinds, one kind per module**: Go and loGo/s packages import each other, and a module holds one language, proven by the `logos_interop.txt` script test ([src/cmd/go/testdata/script/logos_interop.txt](src/cmd/go/testdata/script/logos_interop.txt)).
 * **Diagnostics**: `logos lint` provides in-compiler analysis for main-module packages without building binaries.
