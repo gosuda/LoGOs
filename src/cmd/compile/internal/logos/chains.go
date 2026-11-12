@@ -1356,6 +1356,9 @@ func (ce *chainEmit) anyLines(p, cur string) []string {
 
 func (ce *chainEmit) countLines(p, cur string) []string {
 	if ce.term.arg == nil {
+		if ce.hasMap() && !ce.needBuffer() {
+			return []string{"_ = " + cur, p + "_c++"}
+		}
 		return []string{p + "_c++"}
 	}
 	fname := ce.funcOf(ce.term, p+"_ft")

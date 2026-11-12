@@ -24,3 +24,13 @@ ok res-named
 ok res-named-fail
 ok opt-lit
 ok opt-lit-fail
+ok count-map
+ok count-map-pred
+ok count-map-drop
+ok count-map-take
+ok count-filter-map
+ok count-map-map
+ok any-map
+ok all-map
+ok all-map-early
+ok first-map

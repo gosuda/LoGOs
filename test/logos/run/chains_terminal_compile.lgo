@@ -232,6 +232,51 @@ func namedRes(xs []int) (pp, error) {
 	return mkpp(n), nil
 }
 
+var calls, calls2 int
+
+func tick(i int) int {
+	calls++
+	return i * 10
+}
+
+func tock(i int) int {
+	calls2++
+	return i + 1
+}
+
+func mapperCalls() {
+	calls, calls2 = 0, 0
+	n := xs3().map(i => tick(i)).count()
+	check("count-map", n == 3 && calls == 3, []int{n, calls}, []int{3, 3})
+	calls = 0
+	n = xs3().map(i => tick(i)).count(v => v > 10)
+	check("count-map-pred", n == 2 && calls == 3, []int{n, calls}, []int{2, 3})
+	calls = 0
+	n = xs3().map(i => tick(i)).drop(1).count()
+	check("count-map-drop", n == 2 && calls == 3, []int{n, calls}, []int{2, 3})
+	calls = 0
+	n = xs3().map(i => tick(i)).take(2).count()
+	check("count-map-take", n == 2 && calls == 2, []int{n, calls}, []int{2, 2})
+	calls = 0
+	n = xs3().filter(i => i != 2).map(i => tick(i)).count()
+	check("count-filter-map", n == 2 && calls == 2, []int{n, calls}, []int{2, 2})
+	calls, calls2 = 0, 0
+	n = xs3().map(i => tick(i)).map(i => tock(i)).count()
+	check("count-map-map", n == 3 && calls == 3 && calls2 == 3, []int{n, calls, calls2}, []int{3, 3, 3})
+	calls = 0
+	b := xs3().map(i => tick(i)).any(v => v == 20)
+	check("any-map", b && calls == 2, []int{calls}, []int{2})
+	calls = 0
+	b = xs3().map(i => tick(i)).all(v => v < 100)
+	check("all-map", b && calls == 3, []int{calls}, []int{3})
+	calls = 0
+	b = xs3().map(i => tick(i)).all(v => v < 20)
+	check("all-map-early", !b && calls == 2, []int{calls}, []int{2})
+	calls = 0
+	f := xs3().map(i => tick(i)).first()
+	check("first-map", (f ?? -1) == 10 && calls == 1, []int{f ?? -1, calls}, []int{10, 1})
+}
+
 func drvTerminals(name string, got []int, err error) {
 	check(name, err == nil && eq(got, wantTerminals()), got, wantTerminals())
 }
@@ -288,6 +333,7 @@ func main() {
 	check("opt-lit", err == nil && probeStruct(fv) == 2, probeStruct(fv), 2)
 	fv, err = lit(xs3())
 	check("opt-lit-fail", err == errBad && probeStruct(fv) == -1, probeStruct(fv), -1)
+	mapperCalls()
 	if failed {
 		os.Exit(1)
 	}
