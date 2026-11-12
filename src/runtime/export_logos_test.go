@@ -32,11 +32,11 @@ func LogosFastCallPassedMCheckForTest(arg unsafe.Pointer) (touchedCurrent, recor
 	cur := getg().m
 	savedSlots := cur.fastCgoFrame
 	savedFlag := cur.inFastCall
-	var fake m
-	logosRecordFastCall(&fake, arg)
+	fake := new(m)
+	logosRecordFastCall(fake, arg)
 	recordOK = fake.inFastCall && fake.fastCgoFrame[0] == uintptr(arg)
 	touchedCurrent = cur.inFastCall != savedFlag || cur.fastCgoFrame != savedSlots
-	logosClearFastCall(&fake)
+	logosClearFastCall(fake)
 	clearOK = !fake.inFastCall && fake.fastCgoFrame == [4]uintptr{}
 	cur.fastCgoFrame = savedSlots
 	cur.inFastCall = savedFlag
