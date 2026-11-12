@@ -34,6 +34,8 @@ func mkp(i int) *pc { return &pc{id: i} }
 
 func mkpp(i int) pp { return pp(&pc{id: i}) }
 
+func mkc(n int) pc { return pc{id: n} }
+
 func mks(i int) []int { return []int{i, i} }
 
 func mkm(i int) map[int]int { return map[int]int{0: i} }
@@ -73,7 +75,9 @@ func probeSlice(v []int?) int { return (v ?? []int{-1})[0] }
 
 func probeMap(v map[int]int?) int { return (v ?? map[int]int{0: -1})[0] ?? -1 }
 
-func probeFunc(v (func() int)?) int { return (v ?? func() int { return -1 })() }
+func negOne() int { return -1 }
+
+func probeFunc(v (func() int)?) int { return (v ?? negOne)() }
 
 func wantTerminals() []int { return []int{2, -1, 1, -1, 3, -1, 2, -1} }
 
@@ -199,7 +203,7 @@ func tryNamedTerminals() ([]int, error) {
 
 func structOpt(xs []int) (pc?, error) {
 	n := xs.map(i => tryNo2(i)?).count()
-	return pc{id: n}, nil
+	return mkc(n), nil
 }
 
 func intOpt(xs []int) (int?, error) {
@@ -327,7 +331,7 @@ func main() {
 	check("res-named-fail", err == errBad && rv == nil, rv == nil, true)
 	lit := func(xs []int) (pc?, error) {
 		c := xs.map(i => tryNo2(i)?).count()
-		return pc{id: c}, nil
+		return mkc(c), nil
 	}
 	fv, err := lit(xs13())
 	check("opt-lit", err == nil && probeStruct(fv) == 2, probeStruct(fv), 2)
