@@ -10,6 +10,8 @@ cd m
 logos build -o logos_go.exe ./goonly
 go build -o plain_go.exe ./goonly
 logos build -o logos_lgo.exe ./lgoonly
+! go build -o plain_lgo.exe ./lgoonly
+! exists plain_lgo.exe
 go tool objdump -s 'main\.loadPair' logos_go.exe
 stdout 'LDP'
 go tool objdump -s 'main\.loadPair' plain_go.exe
