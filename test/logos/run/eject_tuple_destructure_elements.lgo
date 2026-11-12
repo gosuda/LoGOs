@@ -70,6 +70,8 @@ func tupCells() {
 	cell("tup__define_var", func() string { t := ((1, 2), (3, 4)); a, b := t; return show(a, b) }, "{1 2} {3 4}")
 	cell("tup__assign_lit", func() string { var a, b (int, int); a, b = ((1, 2), (3, 4)); return show(a, b) }, "{1 2} {3 4}")
 	cell("tup__assign_var", func() string { t := ((1, 2), (3, 4)); var a, b (int, int); a, b = t; return show(a, b) }, "{1 2} {3 4}")
+	cell("tup__var_lit", func() string { var a, b = ((1, 2), (3, 4)); return show(a, b) }, "{1 2} {3 4}")
+	cell("tup__var_var", func() string { t := ((1, 2), (3, 4)); var a, b = t; return show(a, b) }, "{1 2} {3 4}")
 	cell("tup__return_lit", func() string { a, b := retTupLit(); return show(a, b) }, "{1 2} {3 4}")
 	cell("tup__return_var", func() string { a, b := retTupVar(); return show(a, b) }, "{1 2} {3 4}")
 	cell("tup__triple", func() string { a, b, c := (1, (2, 3), 4); return show(a, b, c) }, "1 {2 3} 4")
@@ -82,6 +84,8 @@ func optCells() {
 	cell("opt__define_var", func() string { t := (m["a"], m["b"]); a, b := t; return show(a ?? -1, b ?? -1) }, "1 2")
 	cell("opt__assign_lit", func() string { var a, b int?; a, b = (m["a"], m["zz"]); return show(a ?? -1, b ?? -1) }, "1 -1")
 	cell("opt__assign_var", func() string { t := (m["a"], m["zz"]); var a, b int?; a, b = t; return show(a ?? -1, b ?? -1) }, "1 -1")
+	cell("opt__var_lit", func() string { var a, b = (m["a"], m["b"]); return show(a ?? -1, b ?? -1) }, "1 2")
+	cell("opt__var_var", func() string { t := (m["a"], m["b"]); var a, b = t; return show(a ?? -1, b ?? -1) }, "1 2")
 	cell("opt__return_lit", func() string { a, b := retOptLit(m); return show(a ?? -1, b ?? -1) }, "1 2")
 	cell("opt__return_var", func() string { a, b := retOptVar(m); return show(a ?? -1, b ?? -1) }, "1 2")
 }
@@ -92,6 +96,8 @@ func namedCells() {
 	cell("named__define_var", func() string { t := (n, n); a, b := t; return show(a.x, b.y) }, "5 6")
 	cell("named__assign_lit", func() string { var a, b (x int, y int); a, b = (n, n); return show(a.x, b.y) }, "5 6")
 	cell("named__assign_var", func() string { t := (n, n); var a, b (x int, y int); a, b = t; return show(a.x, b.y) }, "5 6")
+	cell("named__var_lit", func() string { var a, b = (n, n); return show(a.x, b.y) }, "5 6")
+	cell("named__var_var", func() string { t := (n, n); var a, b = t; return show(a.x, b.y) }, "5 6")
 	cell("named__return_lit", func() string { a, b := retNamedLit(); return show(a.x, b.y) }, "5 6")
 	cell("named__return_var", func() string { a, b := retNamedVar(); return show(a.x, b.y) }, "5 6")
 }
@@ -102,8 +108,38 @@ func ptrCells() {
 	cell("ptr__define_var", func() string { t := (p, p); a, b := t; return show(a?.N ?? -1, b?.N ?? -1) }, "4 4")
 	cell("ptr__assign_lit", func() string { var a, b *P?; a, b = (p, p); return show(a?.N ?? -1, b?.N ?? -1) }, "4 4")
 	cell("ptr__assign_var", func() string { t := (p, p); var a, b *P?; a, b = t; return show(a?.N ?? -1, b?.N ?? -1) }, "4 4")
+	cell("ptr__var_lit", func() string { var a, b = (p, p); return show(a?.N ?? -1, b?.N ?? -1) }, "4 4")
+	cell("ptr__var_var", func() string { t := (p, p); var a, b = t; return show(a?.N ?? -1, b?.N ?? -1) }, "4 4")
 	cell("ptr__return_lit", func() string { a, b := retPtrLit(p); return show(a?.N ?? -1, b?.N ?? -1) }, "4 4")
 	cell("ptr__return_var", func() string { a, b := retPtrVar(p); return show(a?.N ?? -1, b?.N ?? -1) }, "4 4")
+}
+
+var pt = (1, 2)
+
+var pa, pb = (1, 2)
+
+var pc, pd = pt
+
+var (
+	ga, gb = pt
+	gc     = 7
+)
+
+func varCells() {
+	t := (1, 2)
+	cell("var__plain_lit", func() string { var a, b = (1, 2); return show(a, b) }, "1 2")
+	cell("var__plain_var", func() string { var a, b = t; return show(a, b) }, "1 2")
+	cell("var__typed", func() string { var a, b int = t; return show(a, b) }, "1 2")
+	cell("var__triple", func() string { var a, b, c = (1, (2, 3), 4); return show(a, b, c) }, "1 {2 3} 4")
+	cell("var__package", func() string { return show(pa, pb, pc, pd) }, "1 2 1 2")
+	cell("var__package_group", func() string { return show(ga, gb, gc) }, "1 2 7")
+	cell("var__local_group", func() string {
+		var (
+			a, b = t
+			c    = 3
+		)
+		return show(a, b, c)
+	}, "1 2 3")
 }
 
 func main() {
@@ -111,4 +147,5 @@ func main() {
 	optCells()
 	namedCells()
 	ptrCells()
+	varCells()
 }

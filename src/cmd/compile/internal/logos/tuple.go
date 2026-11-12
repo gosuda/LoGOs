@@ -91,10 +91,55 @@ func (fl *fileLower) lowerTuplePackDecl(decl *syntax.VarDecl) []syntax.Decl {
 					return repl
 				}
 			}
+			if repl := fl.lowerTupleUnpackDecl(decl, vals[0]); repl != nil {
+				return repl
+			}
 		}
 	}
 	fl.lowerTupleVarValues(decl)
 	return []syntax.Decl{decl}
+}
+
+func (fl *fileLower) lowerTupleUnpackDecl(decl *syntax.VarDecl, val syntax.Expr) []syntax.Decl {
+	fields, _ := fl.tupleTargetOfType(fl.pkg.info.TypeOf(val))
+	if len(decl.NameList) < 2 || len(fields) != len(decl.NameList) {
+		return nil
+	}
+	pos := decl.Pos()
+	r := syntax.Unparen(val)
+	if lit, ok := r.(*syntax.TupleLit); ok {
+		split := fl.tupleSplit(lit.Pos(), len(lit.Elems))
+		start, end := extendParens(fl.src, fl.off(syntax.StartPos(lit)), split.end)
+		fl.cutTupleLit(start, end, split, otext{}, otext{})
+		decl.Values = listOf(pos, slices.Clone(lit.Elems))
+		fl.lowerTupleVarValues(decl)
+		return []syntax.Decl{decl}
+	}
+	tn := tupleTempKey(pos, 0)
+	last := decl.NameList[len(decl.NameList)-1]
+	nameStart := fl.off(decl.NameList[0].Pos())
+	namesEnd := fl.off(last.Pos()) + len(last.Value)
+	if decl.Type != nil {
+		namesEnd = fl.exprEndNested(fl.off(syntax.StartPos(decl.Type)))
+	}
+	rs := fl.exprSpan(r)
+	start, end := extendParens(fl.src, rs.start, rs.end)
+	reads := make([]syntax.Expr, len(fields))
+	texts := make([]string, len(fields))
+	for i, f := range fields {
+		reads[i] = selOf(pos, nameOf(pos, tn), f)
+		texts[i] = tn + "." + f
+	}
+	next := "\nvar "
+	if decl.Group != nil {
+		next = "\n\t"
+	}
+	fl.add(nameStart, start, tn+" = ")
+	fl.addT(end, end, cat(gen(next), fl.lazyText(span{nameStart, namesEnd}), gen(" = "+strings.Join(texts, ", "))))
+	hoist := &syntax.VarDecl{NameList: []*syntax.Name{nameOf(pos, tn)}, Group: decl.Group, Values: val}
+	hoist.SetPos(pos)
+	decl.Values = listOf(pos, reads)
+	return []syntax.Decl{hoist, decl}
 }
 
 func (fl *fileLower) lowerTuplePackValues(decl *syntax.VarDecl, call *syntax.CallExpr) []syntax.Decl {
