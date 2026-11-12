@@ -19,11 +19,8 @@ env GOEXPERIMENT=logosfastcgo
 logos build -o app$GOEXE .
 exec ./app$GOEXE
 stdout '^sum42 mode=fastcgo-on$'
-
-env GOEXPERIMENT=
-go build -o app$GOEXE .
-exec ./app$GOEXE
-stdout '^sum42 mode=fastcgo-off$'
+go tool nm app$GOEXE
+stdout 'runtime\.logosCgocallFast'
 
 env GOEXPERIMENT=nologosfastcgo
 logos build -o app$GOEXE .
@@ -78,6 +75,8 @@ env GOEXPERIMENT=
 logos build -o app$GOEXE .
 exec ./app$GOEXE
 stdout '^sum42 mode=fastcgo-off$'
+go tool nm app$GOEXE
+! stdout 'logosCgocallFast'
 
 -- go.mod --
 module example.com/fastcgotest
