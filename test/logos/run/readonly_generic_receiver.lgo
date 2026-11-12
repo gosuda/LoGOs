@@ -71,6 +71,23 @@ type Wrap struct : HasV {
 	Holder[int]
 }
 
+type GenProp[T any] interface {
+	const V T
+}
+
+type Tally[T any] struct : Counter {
+	n  int
+	xs []T
+}
+
+func (t *Tally[T]) Count() int { return t.n + len(t.xs) }
+
+type Slot[T Num] struct : GenProp[T] {
+	v T
+}
+
+func (s *Slot[T]) V() T { return s.v }
+
 func viewSize(b const Box[string]) int { return b.Size() }
 
 func viewNested(b const Box[[]int]) int { return b.Size() }
@@ -93,6 +110,12 @@ func main() {
 
 	nested := Box[[]int]{xs: [][]int{{1}, {2}, {3}}}
 	check("const-view-call-nested", viewNested(nested) == 3, viewNested(nested), 3)
+
+	var tally Counter = &Tally[string]{n: 2, xs: []string{"a", "b", "c"}}
+	check("asserted-reader", tally.Count() == 5, tally.Count(), 5)
+
+	var slot GenProp[float64] = &Slot[float64]{v: 1.5}
+	check("asserted-property", slot.V == 1.5, slot.V, 1.5)
 
 	var fg FloatGetter = &Scalar[float64]{v: 2.5}
 	check("type-set-reader", fg.Get() == 2.5, fg.Get(), 2.5)

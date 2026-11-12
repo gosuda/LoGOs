@@ -252,3 +252,44 @@ func viewPut(a const MapAlias[string, int]) int {
 func viewStore(a const Alias[int]) int {
 	return a.Store /* ERROR "[correctness::const_view_mutation]" */ (1)
 }
+
+type Tally[T any] struct : Counter {
+	n  int
+	xs []T
+}
+
+func (t *Tally[T]) Count() int { return t.n + len(t.xs) }
+
+type BadTally[T any] struct : Counter {
+	n int
+}
+
+func (t *BadTally[T]) Count /* ERROR "[correctness::const_view_mutation]" */ () int {
+	t.n++
+	return t.n
+}
+
+type GenProp[T any] interface {
+	const V T
+}
+
+type Slot[T Num] struct : GenProp[T] {
+	v T
+}
+
+func (s *Slot[T]) V() T { return s.v }
+
+type OpenSlot[T any] struct : GenProp[ /* ERROR "[correctness::const_view_mutation]" */ T] {
+	v T
+}
+
+func (s *OpenSlot[T]) V() T { return s.v }
+
+type BumpSlot[T Num] struct : GenProp[ /* ERROR "[correctness::const_view_mutation]" */ T] {
+	v T
+}
+
+func (s *BumpSlot[T]) V() T {
+	s.v++
+	return s.v
+}
