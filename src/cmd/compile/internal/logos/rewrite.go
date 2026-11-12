@@ -163,6 +163,9 @@ func (fc *funcLower) lowerStmt(s syntax.Stmt) []syntax.Stmt {
 			return out
 		}
 	}
+	if r, ok := s.(*syntax.ReturnStmt); ok && fc.elementFrame {
+		fc.fl.parReturn(r)
+	}
 	if out, ok := fc.lowerGroupHook(s); ok {
 		return out
 	}

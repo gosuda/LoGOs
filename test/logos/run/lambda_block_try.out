@@ -4,3 +4,11 @@ ok plain-nested
 ok plain-nested-err
 ok plain-filter
 ok around-errdefer
+ok const-if-return
+ok const-if-return-err
+ok const-if-try
+ok const-if-try-err
+ok const-switch-return
+ok const-switch-return-err
+ok const-switch-try
+ok const-switch-try-err

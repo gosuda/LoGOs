@@ -809,6 +809,7 @@ type funcLower struct {
 	scopeSeq         int
 	groupSeq         int          // group temporary counter.
 	groupStack       []groupFrame // group frames under lowering.
+	elementFrame     bool
 	scopeParents     map[syntax.Node]syntax.Node
 	scopeLabels      map[string]*syntax.LabeledStmt
 	scopeDeferLabels map[string]int

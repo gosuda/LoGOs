@@ -76,6 +76,82 @@ func aroundErrdefer(xs []int) (out []int, err error) {
 	return
 }
 
+func constIfReturn(xs []int) ([]int, error) {
+	ys := xs.map(x => {
+		v := double(x)?
+		const if true {
+			return v + 1
+		}
+		return v
+	})
+	return ys, nil
+}
+
+func constIfTry(xs []int) ([]int, error) {
+	ys := xs.map(x => {
+		const if true {
+			v := double(x)?
+			return v + 1
+		}
+		return x
+	})
+	return ys, nil
+}
+
+func constSwitchReturn(xs []int) ([]int, error) {
+	ys := xs.map(x => {
+		v := double(x)?
+		const switch int {
+		case int:
+			return v + 1
+		}
+		return v
+	})
+	return ys, nil
+}
+
+func constSwitchTry(xs []int) ([]int, error) {
+	ys := xs.map(x => {
+		const switch int {
+		case int:
+			v := double(x)?
+			return v + 1
+		}
+		return x
+	})
+	return ys, nil
+}
+
+type listWant struct {
+	text string
+	err  error
+}
+
+func listCheck(name string, f func([]int) ([]int, error), in []int, want listWant) {
+	ys, err := f(in)
+	if err != nil {
+		check(name, err == want.err, err, want.err)
+		return
+	}
+	check(name, want.err == nil && fmt.Sprint(ys) == want.text, fmt.Sprint(ys), want.text)
+}
+
+func constFormCells() {
+	cases := []struct {
+		name string
+		f    func([]int) ([]int, error)
+	}{
+		{"const-if-return", constIfReturn},
+		{"const-if-try", constIfTry},
+		{"const-switch-return", constSwitchReturn},
+		{"const-switch-try", constSwitchTry},
+	}
+	for _, c := range cases {
+		listCheck(c.name, c.f, []int{2, 4}, listWant{"[5 9]", nil})
+		listCheck(c.name+"-err", c.f, []int{2, 3}, listWant{"", errOdd})
+	}
+}
+
 func main() {
 	ys, err := plainTop([]int{2, 4})
 	if err == nil {
@@ -102,6 +178,7 @@ func main() {
 	if err != nil {
 		eq("around-errdefer", fmt.Sprint(ys, trace), "[-1 2] [rollback]")
 	}
+	constFormCells()
 	if failed {
 		os.Exit(1)
 	}

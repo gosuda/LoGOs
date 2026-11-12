@@ -740,39 +740,8 @@ func (cg *chainGen) chainBlockTryFrame(block *syntax.BlockStmt, out types2.Type)
 			types2.NewParam(pos, nil, "", errType),
 		), false)
 	fc := newFuncLower(cg.fl, ft, sig, block)
+	fc.elementFrame = true
 	fc.run()
-}
-
-func (fl *fileLower) chainBlockReturns(list []syntax.Stmt) {
-	for _, s := range list {
-		fl.chainBlockReturnStmt(s)
-	}
-}
-
-func (fl *fileLower) chainBlockReturnStmt(s syntax.Stmt) {
-	switch s := s.(type) {
-	case *syntax.ReturnStmt:
-		fl.parReturn(s)
-	case *syntax.BlockStmt:
-		fl.chainBlockReturns(s.List)
-	case *syntax.IfStmt:
-		fl.chainBlockReturns(s.Then.List)
-		if s.Else != nil {
-			fl.chainBlockReturnStmt(s.Else)
-		}
-	case *syntax.ForStmt:
-		fl.chainBlockReturns(s.Body.List)
-	case *syntax.SwitchStmt:
-		for _, c := range s.Body {
-			fl.chainBlockReturns(c.Body)
-		}
-	case *syntax.SelectStmt:
-		for _, c := range s.Body {
-			fl.chainBlockReturns(c.Body)
-		}
-	case *syntax.LabeledStmt:
-		fl.chainBlockReturnStmt(s.Stmt)
-	}
 }
 
 func (fl *fileLower) mapForms(op chainOp) []resultForm {
@@ -1406,7 +1375,6 @@ func (cg *chainGen) closure(name string, op chainOp, elem, result string) otext 
 	}
 	if block, ok := op.savedBody.(*syntax.BlockStmt); ok {
 		if op.isTry {
-			cg.fl.chainBlockReturns(block.List)
 			cg.chainBlockTryFrame(block, cg.inferType(op, result))
 		}
 		bt := fl.textOf(span{fl.off(syntax.StartPos(block)), fl.off(syntax.EndPos(block))})

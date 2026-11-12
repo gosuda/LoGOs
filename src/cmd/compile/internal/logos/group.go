@@ -130,9 +130,6 @@ func (fc *funcLower) groupReturnStmt(s *syntax.ReturnStmt) ([]syntax.Stmt, bool)
 	if !ok {
 		return nil, false
 	}
-	if fc.groupStack[0].segment {
-		fc.fl.parReturn(s)
-	}
 	if !top.child {
 		return fc.lowerGroupReturn(s, top), true
 	}

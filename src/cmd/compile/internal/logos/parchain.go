@@ -371,6 +371,7 @@ func (cg *chainGen) parBlockClosure(name string, op chainOp, in, res types2.Type
 	}
 	fc := newFuncLower(fl, ft.(*syntax.FuncType), fl.parSignature(op.lam.Params[0].Value, in, res), block)
 	fc.groupStack = parGroupStack(res)
+	fc.elementFrame = true
 	fc.run()
 	text := fl.textOf(span{start: fl.off(syntax.StartPos(block)), end: fl.off(syntax.EndPos(block))})
 	if strings.HasPrefix(text.s, "{") {

@@ -198,6 +198,29 @@ func formRangeInt(ctx context.Context) {
 	check("range-int", err == nil && slices.Equal(got, []int{4, 5}), err, []int{4, 5})
 }
 
+func formConstIfReturn(ctx context.Context) {
+	got, err := []int{1, 2}.group(ctx, limit = 2).map(x => {
+		v := conv(x)?
+		const if true {
+			return v + 10
+		}
+		return v
+	})
+	check("const-if-return", err == nil && slices.Equal(got, []int{11, 12}), err, []int{11, 12})
+}
+
+func formConstSwitchReturn(ctx context.Context) {
+	got, err := []int{1, 2}.group(ctx, limit = 2).map(x => {
+		const switch int {
+		case int:
+			v := conv(x)?
+			return v + 10
+		}
+		return x
+	})
+	check("const-switch-return", err == nil && slices.Equal(got, []int{11, 12}), err, []int{11, 12})
+}
+
 func main() {
 	ctx := context.Background()
 	formSelect(ctx)
@@ -214,6 +237,8 @@ func main() {
 	formInterpolation(ctx)
 	formTypeSwitch(ctx)
 	formRangeInt(ctx)
+	formConstIfReturn(ctx)
+	formConstSwitchReturn(ctx)
 	if failed {
 		os.Exit(1)
 	}
