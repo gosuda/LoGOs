@@ -44,13 +44,15 @@ func lambdaBodyEnd(src []byte, from int) int {
 		switch t.kind {
 		case token.LPAREN, token.LBRACK, token.LBRACE:
 			depth++
-		case token.RPAREN, token.RBRACK, token.RBRACE, token.COMMA, token.SEMICOLON:
+		case token.COMMA, token.SEMICOLON, token.COLON:
 			if depth == 0 {
 				return false
 			}
-			if t.kind != token.COMMA && t.kind != token.SEMICOLON {
-				depth--
+		case token.RPAREN, token.RBRACK, token.RBRACE:
+			if depth == 0 {
+				return false
 			}
+			depth--
 		}
 		end = t.end
 		return true
