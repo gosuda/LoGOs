@@ -272,6 +272,30 @@ func TestDefaultsAppliedFirst(t *testing.T) {
 	}
 }
 
+type DefaultsOnly struct {
+	Port int32  = 8080
+	Host string = "localhost"
+}
+
+func TestDefaultsOnlyStructAppliesDefaults(t *testing.T) {
+	cases := []struct {
+		doc  string
+		want DefaultsOnly
+	}{
+		{`{}`, DefaultsOnly{Port: 8080, Host: "localhost"}},
+		{`{"Port":9}`, DefaultsOnly{Port: 9, Host: "localhost"}},
+		{`{"host":"h"}`, DefaultsOnly{Port: 8080, Host: "h"}},
+		{`{"PORT":0,"Host":""}`, DefaultsOnly{Port: 0, Host: ""}},
+		{`{"Port":1,"Port":2}`, DefaultsOnly{Port: 2, Host: "localhost"}},
+	}
+	for _, c := range cases {
+		got := decodeOK[DefaultsOnly](c.doc)
+		if *got != c.want {
+			t.Fatalf("%s: got %+v, want %+v", c.doc, *got, c.want)
+		}
+	}
+}
+
 func TestNullDocumentIsNoOp(t *testing.T) {
 	c := Cfg{Port: 1, TLS: false, Host: "keep"}
 	if err := json.Unmarshal([]byte(`null`), &c); err != nil {
