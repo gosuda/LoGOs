@@ -24,7 +24,6 @@ import (
 	"fmt"
 	"runtime"
 	"sync"
-	"time"
 )
 
 //go:noinline
@@ -38,10 +37,17 @@ func withDefer() (r int) {
 	return straight(3)
 }
 
+//go:noinline
+func park() {
+	ready := make(chan struct{})
+	go func() { close(ready) }()
+	<-ready
+}
+
 func panicParks() (s string) {
 	defer func() {
 		recover()
-		time.Sleep(5 * time.Millisecond)
+		park()
 		s = "woke"
 	}()
 	var e error
@@ -55,7 +61,7 @@ func fault(s []int, i int) int { return s[i] }
 func boundsParks() (s string) {
 	defer func() {
 		recover()
-		time.Sleep(5 * time.Millisecond)
+		park()
 		s = "bounds"
 	}()
 	return fmt.Sprint(fault(nil, 3))
