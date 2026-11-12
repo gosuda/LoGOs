@@ -39,8 +39,8 @@ type outcome struct {
 
 func within(limit time.Duration, run func(ctx context.Context) error) outcome {
 	ctx, cancel := context.WithCancel(context.Background())
-	t := time.AfterFunc(limit, cancel)
 	start := time.Now()
+	t := time.AfterFunc(limit, cancel)
 	err := run(ctx)
 	prompt := time.Since(start) < limit
 	t.Stop()
@@ -283,17 +283,19 @@ func stageRange(ctx context.Context) error {
 
 func head(ctx context.Context, x int, started chan struct{}) (int, error) {
 	if x == 0 {
+		select {
+		case <-started:
+		case <-ctx.Done():
+		}
 		return x, nil
 	}
 	return 0, library(ctx, started)
 }
 
-//logos:allow(correctness::unbounded_channel_op)
 func stageBreak(ctx context.Context) error {
 	started := make(chan struct{})
 	for y := range []int{0, 1}.group(ctx, limit = 2).map(x => head(ctx, x, started)?) {
 		_ = y
-		<-started
 		break
 	}
 	return nil
