@@ -12,6 +12,7 @@ import (
 	"go/build/constraint"
 	"go/parser"
 	"go/token"
+	"internal/logosfile"
 	"maps"
 	"os"
 	"path/filepath"
@@ -558,12 +559,12 @@ func ownedSelectedFile(pkg *load.Package, declFile string) (string, bool, error)
 		}
 	}
 	for _, name := range pkg.GoFiles {
-		if cfg.IsLogosFile(name) && logosStem(name)+".go" == declFile {
+		if logosfile.Is(name) && logosStem(name)+".go" == declFile {
 			return name, false, nil
 		}
 	}
 	for _, name := range pkg.TestGoFiles {
-		if cfg.IsLogosFile(name) && logosStem(name)+".go" == declFile {
+		if logosfile.Is(name) && logosStem(name)+".go" == declFile {
 			return name, true, nil
 		}
 	}
@@ -678,7 +679,7 @@ func ownedHeaderExpr(f *ast.File) (constraint.Expr, error) {
 
 func ownedFilenameTags(name string) []string {
 	var base string
-	if cfg.IsLogosFile(name) {
+	if logosfile.Is(name) {
 		base = logosStem(name)
 	} else {
 		base = strings.TrimSuffix(name, ".go")

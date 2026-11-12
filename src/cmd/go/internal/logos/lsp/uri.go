@@ -6,12 +6,11 @@ package lsp
 
 import (
 	"fmt"
+	"internal/logosfile"
 	"net/url"
 	"path/filepath"
 	"runtime"
 	"strings"
-
-	"cmd/go/internal/cfg"
 )
 
 func uriPath(uri string) (string, error) {
@@ -46,7 +45,7 @@ func virtualPath(src string) string {
 }
 
 func isLogosPath(path string) bool {
-	return cfg.IsLogosFile(filepath.Base(path))
+	return logosfile.Is(path)
 }
 
 func isGoPath(path string) bool {

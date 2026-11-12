@@ -9,13 +9,14 @@ import (
 	"go/parser"
 	"go/scanner"
 	"go/token"
+	"internal/logosfile"
 	"io"
 
 	"cmd/go/internal/cfg"
 )
 
 func parseTestFile(fset *token.FileSet, filename string, src io.Reader) (*ast.File, error) {
-	if !cfg.IsLogosFile(filename) {
+	if !logosfile.Is(filename) {
 		return parser.ParseFile(fset, filename, src, parser.ParseComments|parser.SkipObjectResolution)
 	}
 	data, err := io.ReadAll(src)

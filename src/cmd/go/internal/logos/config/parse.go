@@ -6,15 +6,24 @@ package config
 
 import (
 	"fmt"
+	"internal/logosfile"
 	"path"
 	"slices"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 )
 
 const maxConfigSize = 1 << 20
 
-const strictFilesWant = `".lgo", ".📜", ".⚡", or ".ʕ◔ϖ◔ʔ"`
+func strictFilesWant() string {
+	exts := logosfile.Exts()
+	for i, e := range exts {
+		exts[i] = strconv.Quote(e)
+	}
+	last := len(exts) - 1
+	return strings.Join(exts[:last], ", ") + ", or " + exts[last]
+}
 
 func Parse(name string, data []byte) (*File, error) {
 	if len(data) > maxConfigSize {
@@ -391,8 +400,8 @@ func (p *parser) parseArrayValue(key string) error {
 }
 
 func (p *parser) checkArrayElem(key string, elemStart int, s string) error {
-	if key == "strict_files" && !slices.Contains(strictFileExts, s) {
-		return p.errorf(elemStart, "invalid strict_files entry %q (want %s)", s, strictFilesWant)
+	if key == "strict_files" && !slices.Contains(logosfile.Exts(), s) {
+		return p.errorf(elemStart, "invalid strict_files entry %q (want %s)", s, strictFilesWant())
 	}
 	var tag string
 	switch key {

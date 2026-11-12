@@ -20,9 +20,9 @@ package config
 
 import (
 	"fmt"
+	"internal/logosfile"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 )
 
@@ -86,18 +86,13 @@ type Capabilities struct {
 	TransitiveUnsafeAllowlist []string
 }
 
-// strictFileExts lists every loGo/s source extension: .lgo, the scroll
-// (U+1F4DC), the lightning bolt (U+26A1), and the gopher extension
-// (U+0295 U+25D4 U+03D6 U+25D4 U+0294).
-var strictFileExts = []string{".lgo", ".📜", ".⚡", ".ʕ◔ϖ◔ʔ"}
-
 // defaultFile returns the File used when logos.toml (or a table or key) is
 // absent: all four extensions enabled, cgo "forbid" with the
 // key marked absent, opt_level "O2", target_cpu "deterministic",
 // and arena unset (default true).
 func defaultFile() *File {
 	return &File{
-		Project: Project{StrictFiles: slices.Clone(strictFileExts)},
+		Project: Project{StrictFiles: logosfile.Exts()},
 		Build:   Build{Cgo: "forbid", OptLevel: "O2", TargetCPU: "deterministic"},
 		Capabilities: Capabilities{
 			TransitiveReflect: "warn",

@@ -7,6 +7,7 @@ package load
 import (
 	"context"
 	"fmt"
+	"internal/logosfile"
 	"maps"
 	"slices"
 	"strings"
@@ -25,7 +26,7 @@ import (
 func (p *Package) IsLogos() bool {
 	for _, files := range [][]string{p.GoFiles, p.CgoFiles, p.TestGoFiles, p.XTestGoFiles} {
 		if len(files) > 0 {
-			return cfg.IsLogosFile(files[0])
+			return logosfile.Is(files[0])
 		}
 	}
 	return false

@@ -24,21 +24,38 @@ func Exts() []string {
 	return slices.Clone(exts[:])
 }
 
+// Ext returns the loGo/s extension of name as Exts lists it, without
+// variation selectors. It returns "" when name is not loGo/s source.
+func Ext(name string) string {
+	trimmed := strings.TrimRight(name, variationSelectors)
+	for _, e := range exts {
+		if strings.HasSuffix(trimmed, e) {
+			return e
+		}
+	}
+	return ""
+}
+
 // Split cuts name at its loGo/s extension. The returned extension is the
 // on-disk one, variation selectors included, so stem+ext == name.
 func Split(name string) (stem, ext string, ok bool) {
-	trimmed := strings.TrimRight(name, variationSelectors)
-	for _, e := range exts {
-		if stem, found := strings.CutSuffix(trimmed, e); found {
-			return stem, name[len(stem):], true
-		}
+	e := Ext(name)
+	if e == "" {
+		return "", "", false
 	}
-	return "", "", false
+	stem = name[:len(strings.TrimRight(name, variationSelectors))-len(e)]
+	return stem, name[len(stem):], true
 }
 
 // Is reports whether name, a base name, a path or a bare extension, is
 // loGo/s source.
 func Is(name string) bool {
-	_, _, ok := Split(name)
-	return ok
+	return Ext(name) != ""
+}
+
+// IsAlias reports whether name is loGo/s source in one of the alias
+// extensions, not the canonical one.
+func IsAlias(name string) bool {
+	e := Ext(name)
+	return e != "" && e != Canonical
 }

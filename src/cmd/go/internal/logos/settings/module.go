@@ -5,6 +5,7 @@
 package settings
 
 import (
+	"internal/logosfile"
 	"io/fs"
 	"os"
 	"path"
@@ -147,7 +148,7 @@ func treeHasLogos(root string) bool {
 			}
 			return nil
 		}
-		if isLogosFile(d.Name()) {
+		if logosfile.Is(d.Name()) {
 			found = true
 		}
 		return nil
@@ -166,12 +167,4 @@ func skipsDir(p, name string) bool {
 		return true
 	}
 	return false
-}
-
-func isLogosFile(name string) bool {
-	trimmed := strings.TrimRight(name, "\uFE0E\uFE0F")
-	return strings.HasSuffix(trimmed, ".lgo") ||
-		strings.HasSuffix(trimmed, ".📜") ||
-		strings.HasSuffix(trimmed, ".⚡") ||
-		strings.HasSuffix(trimmed, ".ʕ◔ϖ◔ʔ")
 }

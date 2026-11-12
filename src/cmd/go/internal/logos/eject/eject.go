@@ -17,6 +17,7 @@ import (
 	"go/build/constraint"
 	"go/parser"
 	"go/token"
+	"internal/logosfile"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -395,7 +396,7 @@ func ejectOwnsLogos(p *load.Package) bool {
 		return true
 	}
 	for _, name := range p.IgnoredGoFiles {
-		if cfg.IsLogosFile(name) {
+		if logosfile.Is(name) {
 			return true
 		}
 	}
@@ -436,12 +437,12 @@ func isTestArtifact(p *load.Package) bool {
 // test-variant compilation for emission.
 func hasLogosTestFiles(p *load.Package) bool {
 	for _, name := range p.TestGoFiles {
-		if cfg.IsLogosFile(name) {
+		if logosfile.Is(name) {
 			return true
 		}
 	}
 	for _, name := range p.XTestGoFiles {
-		if cfg.IsLogosFile(name) {
+		if logosfile.Is(name) {
 			return true
 		}
 	}
@@ -746,7 +747,7 @@ func emitLoweredGoFiles(p *load.Package, plan *ejectPlan, dest emitDest, onMissi
 	used := false
 	seen := make(map[string]bool, len(names))
 	for _, name := range names {
-		if seen[name] || !cfg.IsLogosFile(name) {
+		if seen[name] || !logosfile.Is(name) {
 			continue
 		}
 		seen[name] = true
@@ -787,7 +788,7 @@ func collectInactiveLogosFiles(plan *ejectPlan, staging string) []inactiveFile {
 	var out []inactiveFile
 	for _, p := range plan.logos {
 		for _, name := range p.IgnoredGoFiles {
-			if !cfg.IsLogosFile(name) {
+			if !logosfile.Is(name) {
 				continue
 			}
 			if strings.HasSuffix(logosStem(name), "_test") && !plan.testBuilt[p] {
@@ -1348,7 +1349,7 @@ func copyModuleTree(srcRoot, dstRoot, skip string) bool {
 			return nil
 		}
 		name := filepath.Base(rel)
-		if name == "logos.toml" || cfg.IsLogosFile(name) {
+		if name == "logos.toml" || logosfile.Is(name) {
 			return nil
 		}
 		fileUses, err := copyDataFile(path, filepath.Join(dstRoot, rel))

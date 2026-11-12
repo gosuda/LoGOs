@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"internal/logosfile"
 	"maps"
 	"os"
 	"os/exec"
@@ -18,8 +19,6 @@ import (
 	"slices"
 	"strconv"
 	"sync"
-
-	"cmd/go/internal/cfg"
 )
 
 type compiledPkg struct {
@@ -230,7 +229,7 @@ func (t *toolchain) Lower(ctx context.Context, dir string, buffers map[string][]
 			names[f.File] = f
 		}
 		for _, name := range p.GoFiles {
-			if !cfg.IsLogosFile(name) {
+			if !logosfile.Is(name) {
 				continue
 			}
 			path := filepath.Join(p.Dir, name)

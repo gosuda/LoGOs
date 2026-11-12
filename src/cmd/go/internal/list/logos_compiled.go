@@ -7,6 +7,7 @@ package list
 import (
 	"encoding/json"
 	"fmt"
+	"internal/logosfile"
 	"maps"
 	"os"
 	"os/exec"
@@ -107,7 +108,7 @@ func logosFiles(p *load.Package, stage string) []logosLoweredFile {
 	dir := filepath.Join(stage, filepath.FromSlash(p.ImportPath))
 	var out []logosLoweredFile
 	for _, name := range p.GoFiles {
-		if !cfg.IsLogosFile(name) {
+		if !logosfile.Is(name) {
 			continue
 		}
 		lowered := filepath.Join(dir, logosEjectedName(name))

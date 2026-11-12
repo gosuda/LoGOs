@@ -5,6 +5,7 @@
 package base
 
 import (
+	"internal/logosfile"
 	"strings"
 
 	"cmd/go/internal/cfg"
@@ -31,7 +32,7 @@ func helpReference(longName string) string {
 }
 
 func isLogosTestFile(file string) bool {
-	if !cfg.IsLogosFile(file) {
+	if !logosfile.Is(file) {
 		return false
 	}
 	stem := file

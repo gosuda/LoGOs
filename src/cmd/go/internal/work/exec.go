@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"go/token"
 	"internal/lazyregexp"
+	"internal/logosfile"
 	"io"
 	"io/fs"
 	"log"
@@ -1241,7 +1242,7 @@ func buildVetConfig(a *Action, srcfiles []string, vetDeps []*Action) {
 	// srcfiles does not include raw cgo files.
 	var gofiles, nongofiles []string
 	for _, name := range srcfiles {
-		if cfg.IsGoFile(name) && !cfg.IsLogosFile(name) {
+		if cfg.IsGoFile(name) && !logosfile.Is(name) {
 			gofiles = append(gofiles, name)
 		} else {
 			nongofiles = append(nongofiles, name)

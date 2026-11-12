@@ -9,10 +9,10 @@ import (
 	"fmt"
 	"go/parser"
 	"go/token"
+	"internal/logosfile"
 	"path/filepath"
 	"slices"
 	"strconv"
-	"strings"
 
 	"cmd/go/internal/base"
 	"cmd/go/internal/cfg"
@@ -52,10 +52,10 @@ func checkLogosConfig(ld *modload.Loader, p *Package) {
 	}
 	for _, files := range [][]string{p.GoFiles, p.CgoFiles, p.TestGoFiles, p.XTestGoFiles} {
 		for _, name := range files {
-			if !cfg.IsLogosFile(name) {
+			ext := logosfile.Ext(name)
+			if ext == "" {
 				continue
 			}
-			ext := logosConfigExt(name)
 			if !slices.Contains(m.File.Project.StrictFiles, ext) {
 				if p.Error == nil {
 					p.Error = &PackageError{Err: fmt.Errorf("[correctness::extension_not_enabled] %s: extension %s is not enabled by logos.toml strict_files", filepath.Base(name), ext)}
@@ -181,12 +181,4 @@ func logosDenyCgo(p *Package, msg string) {
 	}
 	p.Error = &PackageError{Err: errors.New(msg)}
 	p.Incomplete = true
-}
-
-func logosConfigExt(name string) string {
-	trimmed := strings.TrimRight(name, "\uFE0E\uFE0F")
-	if i := strings.LastIndexByte(trimmed, '.'); i >= 0 {
-		return trimmed[i:]
-	}
-	return trimmed
 }

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"go/parser"
 	"go/token"
+	"internal/logosfile"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -23,10 +24,6 @@ import (
 const logosAliasRule = "portability::alias_extension"
 
 var logosAliasAllow = regexp.MustCompile(`^//logos:allow\(portability::alias_extension\)(?:\s.*)?$`)
-
-func logosIsCanonicalLgo(name string) bool {
-	return strings.HasSuffix(strings.TrimRight(name, "\uFE0E\uFE0F"), ".lgo")
-}
 
 func checkLogosAliases(ld *modload.Loader, p *Package) {
 	if !cfg.Logos || p.Internal.TestmainGo != nil {
@@ -56,7 +53,7 @@ func logosAliasFiles(p *Package) []string {
 	var names []string
 	for _, files := range [][]string{p.GoFiles, p.CgoFiles, p.TestGoFiles, p.XTestGoFiles} {
 		for _, name := range files {
-			if cfg.IsLogosFile(name) && !logosIsCanonicalLgo(name) {
+			if logosfile.IsAlias(name) {
 				names = append(names, name)
 			}
 		}
