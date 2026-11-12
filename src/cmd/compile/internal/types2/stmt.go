@@ -108,6 +108,7 @@ const (
 	// additional context information
 	finalSwitchCase
 	inTypeSwitch
+	logosConstSwitchContinue
 )
 
 func (check *Checker) simpleStmt(s syntax.Stmt) {
@@ -693,6 +694,9 @@ func (check *Checker) stmt(ctxt stmtContext, s syntax.Stmt) {
 
 	case *syntax.SwitchStmt:
 		inner |= breakOk
+		if inner&logosConstSwitchContinue != 0 {
+			inner |= continueOk
+		}
 		check.openScope(s, "switch")
 		defer check.closeScope()
 
@@ -706,6 +710,9 @@ func (check *Checker) stmt(ctxt stmtContext, s syntax.Stmt) {
 
 	case *syntax.SelectStmt:
 		inner |= breakOk
+		if inner&logosConstSwitchContinue != 0 {
+			inner |= continueOk
+		}
 
 		check.multipleSelectDefaults(s.Body)
 

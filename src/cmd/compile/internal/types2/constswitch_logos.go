@@ -271,6 +271,9 @@ func logosMethodSetCovers(super, sub *Interface) bool {
 }
 
 func (check *Checker) logosConstCaseBody(ctxt stmtContext, c *syntax.ConstSwitchCase, tag Type, info *logosCaseInfo) {
+	if ctxt&continueOk != 0 {
+		ctxt |= logosConstSwitchContinue
+	}
 	ctxt &= ^(breakOk | continueOk)
 	if info.kind == logosCaseIface {
 		check.logosCSwitch = append(check.logosCSwitch, logosIfaceCase{recv: tag, iface: info.iface(), syn: c})
