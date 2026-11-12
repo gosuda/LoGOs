@@ -314,6 +314,29 @@ func stageNotIdentifier(ctx context.Context) error {
 	return err
 }
 
+func keep(ctx context.Context, x int, started chan struct{}) (bool, error) {
+	if x == 1 {
+		return false, library(ctx, started)
+	}
+	return false, failer(started)
+}
+
+func stageFilterCall(ctx context.Context) error {
+	started := make(chan struct{})
+	_, err := []int{0, 1}.group(ctx, limit = 2).filter(x => keep(ctx, x, started)?)
+	return err
+}
+
+func stageNotIdentifierReceive(ctx context.Context) error {
+	started := make(chan struct{})
+	_, err := []int{0, 1}.group(ownContext(ctx), limit = 2).map(x => failOnFirst(x, started)?).map(x => {
+		close(started)
+		<-ctx.Done()
+		return x
+	})
+	return err
+}
+
 func record(ctx context.Context, x int, into *context.Context) (int, error) {
 	*into = ctx
 	return x, nil
@@ -328,6 +351,17 @@ func stageIdentity(ctx context.Context, s *seen) error {
 func recordPost(ctx context.Context, into *context.Context) bool {
 	*into = ctx
 	return true
+}
+
+func recordKeep(ctx context.Context, into *context.Context) bool {
+	*into = ctx
+	return true
+}
+
+func stageFilterIdentity(ctx context.Context, s *seen) error {
+	_, err := []int{0}.group(ctx, limit = 1).filter(x => recordKeep(ctx, &s.child)).any(y => recordPost(ctx, &s.post))
+	s.after = ctx
+	return err
 }
 
 func stageNested(ctx context.Context, s *seen) error {
@@ -373,6 +407,8 @@ func deadlineCases() {
 	released("go-not-identifier-receive-released", goNotIdentifierReceive, errBoom)
 	held("stage-other-name-held", stageOtherName)
 	held("stage-not-identifier-held", stageNotIdentifier)
+	released("stage-filter-call-released", stageFilterCall, errBoom)
+	released("stage-not-identifier-receive-released", stageNotIdentifierReceive, errBoom)
 }
 
 func goIdentityCases(outer context.Context) {
@@ -434,6 +470,12 @@ func stageIdentityCases(outer context.Context) {
 	distinct("stage-nested-outer-lambda", outer, m.outerLambda)
 	distinct("stage-nested-inner-lambda", outer, m.inner)
 	check("stage-nested-inner-differs", m.inner != m.outerLambda, m.inner != m.outerLambda, true)
+
+	var f seen
+	check("stage-filter-identity-run", stageFilterIdentity(outer, &f) == nil, nil, nil)
+	distinct("stage-filter-identity-lambda", outer, f.child)
+	check("stage-filter-identity-later-stage-outer", f.post == outer, f.post == outer, true)
+	check("stage-filter-identity-restored-after", f.after == outer, f.after == outer, true)
 }
 
 func main() {

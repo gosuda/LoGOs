@@ -11,6 +11,8 @@ ok go-not-identifier-held
 ok go-not-identifier-receive-released
 ok stage-other-name-held
 ok stage-not-identifier-held
+ok stage-filter-call-released
+ok stage-not-identifier-receive-released
 ok go-identity-run
 ok go-identity-between
 ok go-identity-child
@@ -44,3 +46,7 @@ ok stage-nested-run
 ok stage-nested-outer-lambda
 ok stage-nested-inner-lambda
 ok stage-nested-inner-differs
+ok stage-filter-identity-run
+ok stage-filter-identity-lambda
+ok stage-filter-identity-later-stage-outer
+ok stage-filter-identity-restored-after
