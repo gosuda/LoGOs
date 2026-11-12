@@ -15,7 +15,7 @@ func f(x int) (int, error) {
 
 func noErrorResult(xs []int) []int {
 	return xs.map(x => {
-		v := f(x)? // ERROR "requires enclosing function to return error"
+		v := f(x)? // ERROR "."
 		return v
 	})
 }

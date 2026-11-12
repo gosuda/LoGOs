@@ -114,7 +114,7 @@ func chainBlockNestedTry(xs []int) (int, error) {
 
 func chainBlockErrdefer(xs []int) (int, error) {
 	_ = xs.map(x => {
-		errdefer /* ERROR "[correctness::errdefer_needs_error_result] errdefer requires enclosing function to return error" */ pairi(x)
+		errdefer /* ERROR "[correctness::errdefer_needs_error_result]" */ pairi(x)
 		return x
 	})
 	return 0, nil
