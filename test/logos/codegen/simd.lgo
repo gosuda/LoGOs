@@ -52,7 +52,7 @@ func mulF64x2(a, b [2]float64) [2]float64 {
 func andF64x2(a, b [2]float64) [2]float64 {
 	// amd64/v1:"VPAND" "CALL simd/archsimd\\.X86Features\\.AVX\\(SB\\)"
 	// amd64/v3:"VPAND" -"CALL simd/archsimd\\.X86Features" -"CMPB internal/cpu\\.X86"
-	// arm64:"VAND V[0-9]+\\.D2" -"CALL simd/archsimd\\.X86Features"
+	// arm64:"VAND V[0-9]+\\.B16" -"CALL simd/archsimd\\.X86Features"
 	return a & b
 }
 
@@ -60,7 +60,7 @@ func andF64x2(a, b [2]float64) [2]float64 {
 func andF32x4(a, b [4]float32) [4]float32 {
 	// amd64/v1:"VPAND" "CALL simd/archsimd\\.X86Features\\.AVX\\(SB\\)"
 	// amd64/v3:"VPAND" -"CALL simd/archsimd\\.X86Features" -"CMPB internal/cpu\\.X86"
-	// arm64:"VAND V[0-9]+\\.S4" -"CALL simd/archsimd\\.X86Features"
+	// arm64:"VAND V[0-9]+\\.B16" -"CALL simd/archsimd\\.X86Features"
 	return a & b
 }
 
@@ -68,7 +68,7 @@ func andF32x4(a, b [4]float32) [4]float32 {
 func andF32x8(a, b [8]float32) [8]float32 {
 	// amd64/v1:"VPAND" "CALL simd/archsimd\\.X86Features\\.AVX2\\(SB\\)"
 	// amd64/v3:"VPAND" -"CALL simd/archsimd\\.X86Features" -"CMPB internal/cpu\\.X86"
-	// arm64:"VAND V[0-9]+\\.S4" -"CALL simd/archsimd\\.X86Features"
+	// arm64:"VAND V[0-9]+\\.B16" -"CALL simd/archsimd\\.X86Features"
 	return a & b
 }
 
@@ -76,7 +76,7 @@ func andF32x8(a, b [8]float32) [8]float32 {
 func orF64x4(a, b [4]float64) [4]float64 {
 	// amd64/v1:"VPOR" "CALL simd/archsimd\\.X86Features\\.AVX2\\(SB\\)"
 	// amd64/v3:"VPOR" -"CALL simd/archsimd\\.X86Features" -"CMPB internal/cpu\\.X86"
-	// arm64:"VORR V[0-9]+\\.D2" -"CALL simd/archsimd\\.X86Features"
+	// arm64:"VORR V[0-9]+\\.B16" -"CALL simd/archsimd\\.X86Features"
 	return a | b
 }
 
@@ -84,7 +84,7 @@ func orF64x4(a, b [4]float64) [4]float64 {
 func andU32x8(a, b [8]uint32) [8]uint32 {
 	// amd64/v1:"VPAND" "CALL simd/archsimd\\.X86Features\\.AVX2\\(SB\\)"
 	// amd64/v3:"VPAND" -"CALL simd/archsimd\\.X86Features" -"CMPB internal/cpu\\.X86"
-	// arm64:"VAND V[0-9]+\\.S4" -"CALL simd/archsimd\\.X86Features"
+	// arm64:"VAND V[0-9]+\\.B16" -"CALL simd/archsimd\\.X86Features"
 	return a & b
 }
 
@@ -92,7 +92,7 @@ func andU32x8(a, b [8]uint32) [8]uint32 {
 func orU32x8(a, b [8]uint32) [8]uint32 {
 	// amd64/v1:"VPOR" "CALL simd/archsimd\\.X86Features\\.AVX2\\(SB\\)"
 	// amd64/v3:"VPOR" -"CALL simd/archsimd\\.X86Features" -"CMPB internal/cpu\\.X86"
-	// arm64:"VORR V[0-9]+\\.S4" -"CALL simd/archsimd\\.X86Features"
+	// arm64:"VORR V[0-9]+\\.B16" -"CALL simd/archsimd\\.X86Features"
 	return a | b
 }
 
@@ -100,7 +100,7 @@ func orU32x8(a, b [8]uint32) [8]uint32 {
 func xorU32x8(a, b [8]uint32) [8]uint32 {
 	// amd64/v1:"VPXOR" "CALL simd/archsimd\\.X86Features\\.AVX2\\(SB\\)"
 	// amd64/v3:"VPXOR" -"CALL simd/archsimd\\.X86Features" -"CMPB internal/cpu\\.X86"
-	// arm64:"VEOR V[0-9]+\\.S4" -"CALL simd/archsimd\\.X86Features"
+	// arm64:"VEOR V[0-9]+\\.B16" -"CALL simd/archsimd\\.X86Features"
 	return a ^ b
 }
 
@@ -108,7 +108,7 @@ func xorU32x8(a, b [8]uint32) [8]uint32 {
 func xorF32x8(a, b [8]float32) [8]float32 {
 	// amd64/v1:"VPXOR" "CALL simd/archsimd\\.X86Features\\.AVX2\\(SB\\)"
 	// amd64/v3:"VPXOR" -"CALL simd/archsimd\\.X86Features" -"CMPB internal/cpu\\.X86"
-	// arm64:"VEOR V[0-9]+\\.S4" -"CALL simd/archsimd\\.X86Features"
+	// arm64:"VEOR V[0-9]+\\.B16" -"CALL simd/archsimd\\.X86Features"
 	return a ^ b
 }
 
