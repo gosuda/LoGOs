@@ -12,6 +12,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"internal/logosfile"
 	"maps"
 	"os"
 	"path/filepath"
@@ -366,7 +367,7 @@ func hasLgoFiles(moddir string) bool {
 			}
 			return nil
 		}
-		if strings.HasSuffix(path, ".lgo") {
+		if logosfile.Is(path) {
 			found = true
 		}
 		return nil
@@ -377,7 +378,7 @@ func hasLgoFiles(moddir string) bool {
 }
 
 func walkNextFileOK(path string) bool {
-	if strings.HasSuffix(path, ".lgo") {
+	if logosfile.Is(path) {
 		base.Fatalf("logos next: module already holds loGo/s file %s", path)
 	}
 	if !strings.HasSuffix(path, ".go") {
@@ -506,7 +507,7 @@ func newLines(s string) int {
 }
 
 func lgoName(rel string) string {
-	return strings.TrimSuffix(rel, ".go") + ".lgo"
+	return strings.TrimSuffix(rel, ".go") + logosfile.Canonical
 }
 
 func (s *scanState) planData() []byte {
