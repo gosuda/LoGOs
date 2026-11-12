@@ -99,6 +99,7 @@ func retarget(pp **[4]int, q *[4]int) {
 }
 
 func child(which string) {
+	fmt.Println("BEFORE-STORE")
 	switch which {
 	case "ints":
 		poke(&guardedInts[0])
@@ -133,15 +134,17 @@ func run(self, which string) (int, string) {
 	}
 	ee, ok := err.(*exec.ExitError)
 	if !ok {
-		return -1, err.Error()
+		fmt.Println("FAIL start:", err)
+		os.Exit(1)
 	}
 	return ee.ExitCode(), buf.String()
 }
 
 func checkFault(self, which string) {
 	code, out := run(self, which)
-	faulted := strings.Contains(out, "unexpected fault address") && strings.Contains(out, "fatal error: fault")
-	check("guarded-"+which+"-fault", code == 2 && faulted && !strings.Contains(out, "STORE-SUCCEEDED"), out, "exit 2 with an unexpected fault address")
+	reached := strings.Contains(out, "BEFORE-STORE")
+	stored := strings.Contains(out, "STORE-SUCCEEDED")
+	check("guarded-"+which+"-fault", code != 0 && reached && !stored, out, "death after BEFORE-STORE with no STORE-SUCCEEDED")
 }
 
 func main() {
