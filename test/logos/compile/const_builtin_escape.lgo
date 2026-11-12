@@ -67,6 +67,12 @@ func acceptRefFree(v const RefPoint) {
 	_ = p
 }
 
+func acceptRefFreeArray(v const [3]int, ps const [2]RefPoint) {
+	var a [3]int = v
+	var q [2]RefPoint = ps
+	_, _ = a, q
+}
+
 
 func validControls(v const []byte, s const *Stream) {
 	_ = len(v)

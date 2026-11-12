@@ -28,6 +28,11 @@ func toPlainStruct(cs const Labeled) Labeled {
 	return s
 }
 
+func toPlainStructArray(cs const [2]Labeled) [2]Labeled {
+	var a [2]Labeled = cs
+	return a
+}
+
 func check(cond bool, msg string) {
 	if cond {
 		fmt.Println("ok " + msg)
@@ -44,6 +49,8 @@ func main() {
 	check(s.Name == "seven", "struct-string-field")
 	check(s.N == 7, "struct-int-field")
 	check(s.At == Point{X: 1, Y: 2}, "nested-struct")
+	sa := toPlainStructArray([2]Labeled{{Name: "a", N: 1}, {Name: "b", N: 2}})
+	check(sa[0].Name == "a" && sa[0].N == 1 && sa[1].Name == "b" && sa[1].N == 2, "array-of-struct-values")
 	sum := 0
 	for _, v := range a {
 		sum += v
