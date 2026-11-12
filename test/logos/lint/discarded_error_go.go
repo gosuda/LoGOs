@@ -122,9 +122,14 @@ func printedToBuffer() {
 func handled() {
 	err := f()
 	_ = err
-	defer f()
+	defer f() // ERROR "discarded_error"
 	m, err := g()
 	_, _ = m, err
+}
+
+func spawned() {
+	go f()    // ERROR "discarded_error"
+	defer g() // ERROR "discarded_error"
 }
 
 func inErrorFunc() error {

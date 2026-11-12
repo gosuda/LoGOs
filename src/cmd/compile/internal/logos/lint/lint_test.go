@@ -374,7 +374,7 @@ func a() {
 	fmt.Fprintf(&sb, "x") // want
 	err := f()
 	_ = err
-	defer f()
+	defer f() // want
 	h := func() error { return f() }
 	h() // want
 	m, err := g()

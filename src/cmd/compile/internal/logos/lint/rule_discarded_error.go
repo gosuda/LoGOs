@@ -30,6 +30,10 @@ type discardCheck struct {
 	// returnsError tells whether the function being walked returns error
 	// as its last result.
 	returnsError bool
+	// group is the depth of go group blocks and child blocks around the
+	// statement being walked; a go statement at depth above zero hands its
+	// error to the group.
+	group int
 }
 
 // checkDiscardedError is the Check of discardedError.
@@ -54,29 +58,36 @@ func (c *discardCheck) walk(n syntax.Node) {
 		case *syntax.FuncLit:
 			c.walkFunc(m.Body, m.Type)
 			return false
+		case *syntax.GroupStmt:
+			c.groupBody(m.Body)
+			return false
+		case *syntax.GroupChild:
+			c.groupBody(m.Body)
+			return false
 		case *syntax.ExprStmt:
 			c.exprStmt(m)
 		case *syntax.AssignStmt:
 			c.assignStmt(m)
+		case *syntax.CallStmt:
+			c.callStmt(m)
 		}
 		return true
 	})
 }
 
-// walkFunc walks the body of a function with the signature sig.
 func (c *discardCheck) walkFunc(body *syntax.BlockStmt, sig *syntax.FuncType) {
 	outer := c.returnsError
+	outerGroup := c.group
 	c.returnsError = lastResultIsError(sig)
+	c.group = 0
 	c.walk(body)
 	c.returnsError = outer
+	c.group = outerGroup
 }
 
 func (c *discardCheck) exprStmt(s *syntax.ExprStmt) {
 	call := callOf(s.X)
-	if call == nil || c.benignCall(call) {
-		return
-	}
-	if !slices.ContainsFunc(elemTypes(TypeOf(call)), isErrorType) {
+	if call == nil || !c.dropsError(call) {
 		return
 	}
 	d := c.dropped(call)
@@ -84,6 +95,30 @@ func (c *discardCheck) exprStmt(s *syntax.ExprStmt) {
 		d.Fixes = []Fix{{Description: "add ? to propagate the error", Replacement: syntax.String(call) + "?"}}
 	}
 	c.pass.Report(d)
+}
+
+func (c *discardCheck) groupBody(body *syntax.BlockStmt) {
+	c.group++
+	c.walk(body)
+	c.group--
+}
+
+func (c *discardCheck) callStmt(s *syntax.CallStmt) {
+	if s.Tok == syntax.Go && c.group > 0 {
+		return
+	}
+	call := callOf(s.Call)
+	if call == nil || !c.dropsError(call) {
+		return
+	}
+	c.pass.Report(c.dropped(call))
+}
+
+func (c *discardCheck) dropsError(call *syntax.CallExpr) bool {
+	if c.benignCall(call) {
+		return false
+	}
+	return slices.ContainsFunc(elemTypes(TypeOf(call)), isErrorType)
 }
 
 // assignStmt reports a blank identifier that receives an error result.
