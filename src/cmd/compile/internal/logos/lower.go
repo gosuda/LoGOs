@@ -215,6 +215,7 @@ type fileLower struct {
 	tupleArity  int
 	tupleScope  syntax.Node
 	propEmitted map[int]bool
+	stmtLimit   map[syntax.Stmt]int
 	// funcHeadOffs caches the offsets of `func` keywords in source
 	// order, built once per file by a single forward tokenization for
 	// the option type-head lookup.

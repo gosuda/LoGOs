@@ -650,7 +650,7 @@ func (fl *fileLower) lowerPropStmt(s syntax.Stmt) []syntax.Stmt {
 		s.List = fl.lowerPropBlock(s.List)
 		return []syntax.Stmt{s}
 	case *syntax.IfStmt:
-		fl.propReadSimple(s.Init)
+		s.Init = fl.propClause(s.Init, -1)
 		if s.Cond != nil {
 			s.Cond = fl.propReadTop(s.Cond)
 		}
@@ -663,15 +663,15 @@ func (fl *fileLower) lowerPropStmt(s syntax.Stmt) []syntax.Stmt {
 		}
 		return []syntax.Stmt{s}
 	case *syntax.ForStmt:
-		fl.propReadSimple(s.Init)
+		s.Init = fl.propClause(s.Init, -1)
 		if s.Cond != nil {
 			s.Cond = fl.propReadTop(s.Cond)
 		}
-		fl.propReadSimple(s.Post)
+		s.Post = fl.propClause(s.Post, fl.off(s.Body.Pos()))
 		s.Body.List = fl.lowerPropBlock(s.Body.List)
 		return []syntax.Stmt{s}
 	case *syntax.SwitchStmt:
-		fl.propReadSimple(s.Init)
+		s.Init = fl.propClause(s.Init, -1)
 		if s.Tag != nil {
 			if tg, ok := s.Tag.(*syntax.TypeSwitchGuard); ok {
 				tg.X = fl.propReadTop(tg.X)
@@ -860,10 +860,54 @@ func (fl *fileLower) propStmtSpan(s syntax.Stmt, first syntax.Expr) (span, bool)
 		return span{}, false
 	}
 	end := stmtEnd(fl.src, sp.start)
+	if limit, ok := fl.stmtLimit[s]; ok {
+		end = lastTokenEnd(fl.src, sp.start, min(end, limit))
+	}
 	if end <= sp.start {
 		return span{}, false
 	}
 	return span{start: sp.start, end: end}, true
+}
+
+func (fl *fileLower) propClause(clause syntax.SimpleStmt, limit int) syntax.SimpleStmt {
+	if clause == nil {
+		return nil
+	}
+	if as, ok := clause.(*syntax.AssignStmt); ok && as.Op == syntax.Def {
+		fl.propReadSimple(clause)
+		return clause
+	}
+	if limit >= 0 {
+		if fl.stmtLimit == nil {
+			fl.stmtLimit = make(map[syntax.Stmt]int)
+		}
+		fl.stmtLimit[clause] = limit
+	}
+	var first syntax.Expr
+	switch c := clause.(type) {
+	case *syntax.AssignStmt:
+		first = syntax.UnpackListExpr(c.Lhs)[0]
+	case *syntax.ExprStmt:
+		first = c.X
+	case *syntax.SendStmt:
+		first = c.Chan
+	}
+	var sp span
+	spOK := false
+	if first != nil {
+		sp, spOK = fl.propStmtSpan(clause, first)
+	}
+	out := fl.lowerPropStmt(clause)
+	if len(out) == 1 && out[0] == clause {
+		return clause
+	}
+	if !spOK {
+		base.Fatalf("logos: cannot span clause statement at %s", clause.Pos().String())
+	}
+	pos := clause.Pos()
+	lit := at(&syntax.FuncLit{Type: at(&syntax.FuncType{}, pos), Body: blockOf(pos, out)}, pos)
+	fl.addT(sp.start, sp.end, cat(gen("func() { "), fl.textOf(sp), gen(" }()")))
+	return exprStmtOf(pos, callOf(pos, lit, nil))
 }
 
 func propNeedlesNest(needles []propNeedle) bool {
