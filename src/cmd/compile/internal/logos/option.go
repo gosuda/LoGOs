@@ -1954,6 +1954,9 @@ func (fl *fileLower) collectOptReturns() {
 			return true
 		})
 	}
+	for rs, typ := range fl.armResult {
+		fl.retResults[rs] = []types2.Type{typ}
+	}
 }
 
 func (fl *fileLower) funcDeclResults(fn *syntax.FuncDecl) []types2.Type {

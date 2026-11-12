@@ -81,16 +81,13 @@ func (fl *fileLower) lowerSwitchExpr(e *syntax.SwitchExpr) syntax.Expr {
 	}
 
 	results := fl.expandArmCases(e)
-	tupleElems, _ := fl.tupleTargetOfType(typ)
 	clauses := make([]*syntax.CaseClause, 0, len(e.Arms))
 	for i, arm := range e.Arms {
 		if results[i].drop {
 			continue
 		}
 		ret := at(&syntax.ReturnStmt{Results: arm.Body}, arm.Arrow)
-		if len(tupleElems) > 0 {
-			fl.keepTupleReturn(ret)
-		}
+		fl.recordArmResult(ret, typ)
 		var result syntax.Stmt = ret
 		if b := results[i].bind; b != nil {
 			result = blockOf(arm.Arrow, append(b.stmts(arm.Arrow), result))

@@ -781,11 +781,11 @@ func (fl *fileLower) lowerTupleUnpackStmt(s *syntax.AssignStmt, lhs []syntax.Exp
 	return []syntax.Stmt{hoist, s}
 }
 
-func (fl *fileLower) keepTupleReturn(s *syntax.ReturnStmt) {
-	if fl.tupleKeep == nil {
-		fl.tupleKeep = make(map[*syntax.ReturnStmt]bool)
+func (fl *fileLower) recordArmResult(s *syntax.ReturnStmt, typ types2.Type) {
+	if fl.armResult == nil {
+		fl.armResult = make(map[*syntax.ReturnStmt]types2.Type)
 	}
-	fl.tupleKeep[s] = true
+	fl.armResult[s] = typ
 }
 
 func (fl *fileLower) lowerTupleReturnStmt(s *syntax.ReturnStmt) []syntax.Stmt {
@@ -809,7 +809,7 @@ func (fl *fileLower) lowerTupleReturnStmt(s *syntax.ReturnStmt) []syntax.Stmt {
 		s.Results = listOf(pos, append([]syntax.Expr{}, lit.Elems...))
 		return nil
 	}
-	if fl.tupleKeep[s] {
+	if _, arm := fl.armResult[s]; arm {
 		return nil
 	}
 	elems, _ := fl.tupleTargetOfType(fl.pkg.info.TypeOf(results[0]))

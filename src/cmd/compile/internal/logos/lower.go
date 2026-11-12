@@ -191,7 +191,7 @@ type fileLower struct {
 	optDeferGoPend map[*syntax.CallExpr]optDeferGoWork
 	gotoTargets    map[*syntax.LabeledStmt]bool
 	anchorBlocks   map[*syntax.BlockStmt]bool
-	tupleKeep      map[*syntax.ReturnStmt]bool
+	armResult      map[*syntax.ReturnStmt]types2.Type
 	wrapSpan       map[syntax.Expr]span
 	wrapOwner      map[syntax.Expr]int
 	wrapSeq        int
