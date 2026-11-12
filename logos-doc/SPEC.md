@@ -1679,7 +1679,6 @@ On nonzero errCode the wrapper throws the message read from wasm memory. [T-Sec1
 
 ### 13.2 Amd64 masked tails, rotates, and checked lengths
 
-- In a native build, reductions over slices MUST use fault-suppressing masked loads for tail elements. [T-303]
 - Masked tails MUST NOT read past the end of the slice. [T-303]
 - The build MUST NOT add guard padding for vector tails. [T-303]
 - In a native build with `GOEXPERIMENT=simd` on amd64 or arm64, `.sum()` on a bare slice of a fixed-width numeric element kind or an alias of one MUST load full vectors for the body and load the tail once through a masked load that enables only the remaining elements. [T-303]
