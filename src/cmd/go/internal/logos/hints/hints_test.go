@@ -215,19 +215,31 @@ func TestInlayUnknownFile(t *testing.T) {
 	}
 }
 
+func siteLowered(t *testing.T, r *Report, file, kind string, pos Position) string {
+	t.Helper()
+	for _, s := range r.file(file).Sites {
+		if s.Kind == kind && s.Range.holds(pos) {
+			return s.Lowered
+		}
+	}
+	t.Fatalf("report has no %s site at %+v", kind, pos)
+	return ""
+}
+
 func TestHoverLoweredSites(t *testing.T) {
 	f := compilerFixture(t, "sites.lgo")
 	r, _ := compileHints(t, f)
 	for _, c := range []struct {
 		name   string
+		kind   string
 		pos    Position
 		title  string
 		inCode []string
 	}{
-		{"try", startOf(t, f.src, "?\n\t_ = n"), "`?`", []string{"get()", "!= nil", "return"}},
-		{"const for", startOf(t, f.src, "const for"), "`const for`", []string{`out = append(out, "Name")`}},
-		{"const switch", startOf(t, f.src, "const switch"), "`const switch`", []string{"switch"}},
-		{"interpolation", startOf(t, f.src, `$"user {name}!"`), "`$\"...\"`", []string{"make([]byte, 0, 6+len("}},
+		{"try", SiteTry, startOf(t, f.src, "?\n\t_ = n"), "`?`", []string{"get()", "!= nil", "return"}},
+		{"const for", SiteConstFor, startOf(t, f.src, "const for"), "`const for`", []string{`out = append(out, "Name")`}},
+		{"const switch", SiteConstSwitch, startOf(t, f.src, "const switch"), "`const switch`", []string{"switch"}},
+		{"interpolation", SiteInterp, startOf(t, f.src, `$"user {name}!"`), "`$\"...\"`", nil},
 	} {
 		h := HoverAt(r, f.path, c.pos)
 		if h == nil {
@@ -241,6 +253,9 @@ func TestHoverLoweredSites(t *testing.T) {
 			if !strings.Contains(h.Contents.Value, frag) {
 				t.Errorf("%s: hover lacks %q:\n%s", c.name, frag, h.Contents.Value)
 			}
+		}
+		if lowered := siteLowered(t, r, f.path, c.kind, c.pos); lowered == "" || !strings.Contains(h.Contents.Value, lowered) {
+			t.Errorf("%s: hover does not show the reported lowered code %q:\n%s", c.name, lowered, h.Contents.Value)
 		}
 		if h.Range == nil || h.Range.Start.Line != c.pos.Line {
 			t.Errorf("%s: hover range %+v", c.name, h.Range)

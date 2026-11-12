@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"unicode/utf16"
@@ -97,12 +98,14 @@ func TestHintsInterpFixedBytes(t *testing.T) {
 		}
 	}
 	want := []struct {
-		literal string
-		fixed   int
+		literal  string
+		fixed    int
+		buffered bool
+		lens     int
 	}{
-		{`$"user {name}: {n} items, {ratio}, {ok}, {raw}"`, 68},
-		{`$"{{id}}={n}"`, 25},
-		{`$"plain"`, 5},
+		{`$"user {name}: {n} items, {ratio}, {ok}, {raw}"`, 68, true, 2},
+		{`$"{{id}}={n}"`, 25, true, 0},
+		{`$"plain"`, 5, false, 0},
 	}
 	if len(sites) != len(want) {
 		t.Fatalf("%d interpolation sites, want %d: %+v", len(sites), len(want), sites)
@@ -117,11 +120,59 @@ func TestHintsInterpFixedBytes(t *testing.T) {
 		}
 		if s.Lowered == "" {
 			t.Errorf("%s: no lowered code", w.literal)
+			continue
+		}
+		fixed, lens, buffered := interpBufferBound(t, s.Lowered)
+		if buffered != w.buffered || (buffered && (fixed != w.fixed || lens != w.lens)) {
+			t.Errorf("%s: lowered buffer capacity %d fixed bytes + %d len terms (buffer %v), want %d + %d (buffer %v):\n%s",
+				w.literal, fixed, lens, buffered, w.fixed, w.lens, w.buffered, s.Lowered)
 		}
 	}
-	if !strings.Contains(sites[0].Lowered, "make([]byte, 0, 19+len(") {
-		t.Errorf("lowered interpolation does not show the buffer bound:\n%s", sites[0].Lowered)
+}
+
+func interpBufferBound(t *testing.T, lowered string) (fixed, lens int, buffered bool) {
+	t.Helper()
+	file := ejectParse(t, syntax.NewFileBase("lowered.go"), []byte("package p\n\nvar _ = "+lowered+"\n"), syntax.CheckBranches)
+	var capacity syntax.Expr
+	syntax.Inspect(file, func(n syntax.Node) bool {
+		if call, ok := n.(*syntax.CallExpr); ok && capacity == nil && len(call.ArgList) == 3 {
+			if name, ok := call.Fun.(*syntax.Name); ok && name.Value == "make" {
+				capacity = call.ArgList[2]
+			}
+		}
+		return capacity == nil
+	})
+	if capacity == nil {
+		return 0, 0, false
 	}
+	fixed, lens = capacityTerms(t, capacity)
+	return fixed, lens, true
+}
+
+func capacityTerms(t *testing.T, e syntax.Expr) (fixed, lens int) {
+	t.Helper()
+	switch e := e.(type) {
+	case *syntax.BasicLit:
+		n, err := strconv.Atoi(e.Value)
+		if e.Kind != syntax.IntLit || err != nil {
+			t.Fatalf("capacity term %s is not an int literal", e.Value)
+		}
+		return n, 0
+	case *syntax.ParenExpr:
+		return capacityTerms(t, e.X)
+	case *syntax.CallExpr:
+		if name, ok := e.Fun.(*syntax.Name); ok && name.Value == "len" {
+			return 0, 1
+		}
+	case *syntax.Operation:
+		if e.Op == syntax.Add && e.Y != nil {
+			xf, xl := capacityTerms(t, e.X)
+			yf, yl := capacityTerms(t, e.Y)
+			return xf + yf, xl + yl
+		}
+	}
+	t.Fatalf("capacity term %T is not a sum of int literals and len calls", e)
+	return 0, 0
 }
 
 func TestHintsFixedBytesMatchesBound(t *testing.T) {
@@ -228,8 +279,11 @@ func TestHintsSiteWithoutEditIsDropped(t *testing.T) {
 	if interp.Range.Start != startOf(t, src, `$"user {name}!"`) || interp.Range.End != endOf(t, src, `$"user {name}!"`) {
 		t.Errorf("interpolation range %+v, want the lowering-map span", interp.Range)
 	}
-	if interp.FixedBytes == nil || !strings.Contains(interp.Lowered, "make([]byte, 0,") {
-		t.Errorf("interpolation survivor lacks fixed bytes or lowered code: %+v", interp)
+	if interp.FixedBytes == nil {
+		t.Fatalf("interpolation survivor lacks fixed bytes: %+v", interp)
+	}
+	if fixed, lens, buffered := interpBufferBound(t, interp.Lowered); !buffered || fixed != *interp.FixedBytes || lens != 1 {
+		t.Errorf("interpolation survivor buffer capacity %d fixed bytes + %d len terms (buffer %v), want %d + 1:\n%s", fixed, lens, buffered, *interp.FixedBytes, interp.Lowered)
 	}
 }
 
