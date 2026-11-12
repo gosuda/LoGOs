@@ -8,7 +8,6 @@ import (
 	"go/token"
 	"slices"
 
-	"cmd/compile/internal/logos/facts"
 	"cmd/compile/internal/syntax"
 	"cmd/compile/internal/types2"
 )
@@ -88,7 +87,7 @@ func (fl *fileLower) removeImportSpec(imp *syntax.ImportDecl) {
 	start := fl.off(syntax.StartPos(imp))
 	end := fl.off(syntax.EndPos(imp))
 	if imp.Group == nil {
-		if kw, ok := facts.KeywordStart(fl.src, token.IMPORT, start); ok {
+		if kw, ok := fl.keywords.Start(fl.src, token.IMPORT, start); ok {
 			start = kw
 		}
 	}
