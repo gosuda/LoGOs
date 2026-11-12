@@ -1,0 +1,163 @@
+[!race] skip 'the race detector is not supported on this platform'
+[!cgo] skip 'the race detector needs cgo'
+
+env GOPROXY=off
+env GOTOOLCHAIN=local
+env CGO_ENABLED=1
+
+! logos run -race ./mixedrace
+stderr 'WARNING: DATA RACE'
+stderr 'main\.Rec\.MarshalJSON'
+stderr 'main\.\(\*Rec\)\.UnmarshalJSON'
+
+! logos run -race ./unmarshalrace
+stderr 'WARNING: DATA RACE'
+stderr 'main\.\(\*Rec\)\.UnmarshalJSON'
+
+logos run -race ./locked
+stdout '^locked ok$'
+! stderr 'DATA RACE'
+
+-- go.mod --
+module example.com/jsonrace
+
+go 1.27
+
+-- mixedrace/main.lgo --
+package main
+
+import (
+	"context"
+	"fmt"
+)
+
+type Rec struct {
+	Count *int64 `json:"count"`
+}
+
+func marshalLoop(r *Rec) {
+	for range 200 {
+		_, err := r.MarshalJSON()
+		if err != nil {
+			panic(err)
+		}
+	}
+}
+
+func unmarshalLoop(r *Rec) {
+	for range 200 {
+		err := r.UnmarshalJSON([]byte(`{"count":7}`))
+		if err != nil {
+			panic(err)
+		}
+	}
+}
+
+func run() error {
+	count := int64(3)
+	r := &Rec{Count: &count}
+	go group (context.Background()) {
+		go marshalLoop(r)
+		go unmarshalLoop(r)
+	}
+	fmt.Println("mixed ok")
+	return nil
+}
+
+func main() {
+	if err := run(); err != nil {
+		panic(err)
+	}
+}
+
+-- unmarshalrace/main.lgo --
+package main
+
+import (
+	"context"
+	"fmt"
+)
+
+type Rec struct {
+	Count *int64 `json:"count"`
+}
+
+func unmarshalLoop(r *Rec) {
+	for range 200 {
+		err := r.UnmarshalJSON([]byte(`{"count":7}`))
+		if err != nil {
+			panic(err)
+		}
+	}
+}
+
+func run() error {
+	count := int64(3)
+	r := &Rec{Count: &count}
+	go group (context.Background()) {
+		go unmarshalLoop(r)
+		go unmarshalLoop(r)
+	}
+	fmt.Println("unmarshal ok")
+	return nil
+}
+
+func main() {
+	if err := run(); err != nil {
+		panic(err)
+	}
+}
+
+-- locked/main.lgo --
+package main
+
+import (
+	"context"
+	"fmt"
+	"sync"
+)
+
+type Rec struct {
+	Count *int64 `json:"count"`
+}
+
+func marshalLoop(r *Rec, mu *sync.Mutex) {
+	for range 200 {
+		mu.Lock()
+		_, err := r.MarshalJSON()
+		mu.Unlock()
+		if err != nil {
+			panic(err)
+		}
+	}
+}
+
+func unmarshalLoop(r *Rec, mu *sync.Mutex) {
+	for range 200 {
+		mu.Lock()
+		err := r.UnmarshalJSON([]byte(`{"count":7}`))
+		mu.Unlock()
+		if err != nil {
+			panic(err)
+		}
+	}
+}
+
+func run() error {
+	count := int64(3)
+	r := &Rec{Count: &count}
+	var mu sync.Mutex
+	go group (context.Background()) {
+		go marshalLoop(r, &mu)
+		go unmarshalLoop(r, &mu)
+		go unmarshalLoop(r, &mu)
+	}
+	fmt.Println("locked ok")
+	return nil
+}
+
+func main() {
+	if err := run(); err != nil {
+		panic(err)
+	}
+}
