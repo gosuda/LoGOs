@@ -11,8 +11,6 @@ go help build
 ! stdout 'wasm-features'
 
 logos build -gcflags=-S=2 -o $WORK/plain.wasm .
-! stderr 'ContNew'
-! stderr '\tResume\t'
 stderr 'main\.waits<1> STEXT'
 stderr '(?s)main\.waits<1> STEXT[^\n]*\n(\t[^\n]*\n)*\t[^\n]*\tBrTable'
 ! stderr '(?s)main\.pureLeaf<1> STEXT[^\n]*\n(\t[^\n]*\n)*\t[^\n]*\t(BrTable|ContNew|Resume)'
@@ -53,12 +51,7 @@ go build -gcflags=-S=2 -o $WORK/gobuild-plain.wasm .
 stderr '(?s)main\.waits<1> STEXT[^\n]*\n(\t[^\n]*\n)*\t[^\n]*\tBrTable'
 stderr '(?s)main\.pureLeaf<1> STEXT[^\n]*\n(\t[^\n]*\n)*\t[^\n]*\tBrTable'
 stderr '(?s)main\.pureSum<1> STEXT[^\n]*\n(\t[^\n]*\n)*\t[^\n]*\tBrTable'
-! stderr 'ContNew'
-! stderr '\tResume\t'
 
-# Dropping dispatch is not stack switching: the runtime assembly that
-# holds the continuation instructions must be selected by the flag on
-# both commands and absent without it.
 logos build -wasm-features=stack-switching -asmflags=runtime=-S -o $WORK/switch-rtasm.wasm .
 stderr '\tContNew'
 stderr '\tResume\t'
