@@ -74,9 +74,19 @@ func (fl *fileLower) ctfeLookup(cd *syntax.ConstDecl) (ctfeResult, bool) {
 	}
 	lit, err := v.Expr(syntax.StartPos(init))
 	if err != nil {
-		return zero, false
+		return fl.ctfeUnspelled(obj, v, init)
 	}
 	return ctfeResult{obj: obj, val: v, init: init, lit: lit, text: renderExpr(lit)}, true
+}
+
+func (fl *fileLower) ctfeUnspelled(obj *types2.Const, v ctfe.Value, init syntax.Expr) (ctfeResult, bool) {
+	if _, ok := fl.pkg.constMaps[obj]; ok || fl.pkg.composites[obj] != nil {
+		return ctfeResult{obj: obj, val: v, init: init}, true
+	}
+	if !v.IsComposite() {
+		return ctfeResult{}, false
+	}
+	return fl.materializeComposite(obj, v, init, syntax.StartPos(init))
 }
 
 func (fl *fileLower) lowerCTFEFileList(gst *groupedMoveState) {
