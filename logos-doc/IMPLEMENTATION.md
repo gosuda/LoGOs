@@ -1914,6 +1914,7 @@ Anchor: Tony Hoare, John Carmack
 - Attack: `testdata/logos/ctfe.lgo`: `const primes = []int{2, 3, 5}` allowed; `const t = Fib(20)` with `const func Fib` allowed; `const func` doing I/O, reading a package variable, starting a goroutine, calling `recover`, converting to `uintptr`, ranging over a map, or using pointers -> `[correctness::const_func_impure] <reason>`; CTFE step limit uses the selected limit (default 100,000; configuration MAY raise it): tests at selected N-1, N, N+1 steps with N+1 failing `[comptime::ctfe_step_limit]`; a 1 MB value passes, 1 MB plus one byte fails with `[comptime::const_too_large]`; `1 << 32` evaluates with `GOARCH=wasm` and `GOARCH=386` widths (#102); `-0.0` and `NaN` handling in const maps (#103: `-0.0` key canonicalized, `NaN` key error).
 - Build: `cmd/compile/internal/logos/ctfe`: a tree-walking interpreter over checked syntax (values: integers with target width, floats, strings, bools, arrays, slices, structs, maps; control flow; calls to `const func`); results become composite literal syntax in the lowering.
 - Gate: types2 tests; `go test -short cmd/compile/internal/logos/ctfe`.
+- Red-team rows: #244.
 
 ### M5-S3 Read-only placement
 Anchor: John Carmack, David Parnas
