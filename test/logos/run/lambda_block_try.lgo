@@ -134,6 +134,19 @@ func guardMixed(on bool, xs, ys []int) (string, error) {
 	return fmt.Sprint(ok), nil
 }
 
+func guardLabeled(on bool, xs []int) (string, error) {
+	n := 0
+loop:
+	if on && len(xs.map(x => {
+		v := counted(x)?
+		return v
+	})) > n {
+		n++
+		goto loop
+	}
+	return fmt.Sprint(n), nil
+}
+
 func forCond(xs []int) (string, error) {
 	n := 0
 	for len(xs.map(x => {
@@ -217,6 +230,13 @@ func guardMixedCells() {
 	cellCheck("guard-mixed-skip", func() (string, error) { return guardMixed(false, even, odd) }, cellWant{"false", nil, 1})
 	cellCheck("guard-mixed-run", func() (string, error) { return guardMixed(true, even, even) }, cellWant{"true", nil, 2})
 	cellCheck("guard-mixed-err", func() (string, error) { return guardMixed(true, even, odd) }, cellWant{"", errOdd, 2})
+}
+
+func guardLabelCells() {
+	odd, pair := []int{1}, []int{2, 4}
+	cellCheck("guard-label-skip", func() (string, error) { return guardLabeled(false, pair) }, cellWant{"0", nil, 0})
+	cellCheck("guard-label-run", func() (string, error) { return guardLabeled(true, pair) }, cellWant{"2", nil, 6})
+	cellCheck("guard-label-err", func() (string, error) { return guardLabeled(true, odd) }, cellWant{"", errOdd, 1})
 }
 
 func guardNarrowCells() {
@@ -344,6 +364,7 @@ func main() {
 	constFormCells()
 	guardCells()
 	guardMixedCells()
+	guardLabelCells()
 	guardNarrowCells()
 	hostCells()
 	if failed {

@@ -25,6 +25,9 @@ ok guard-return-err
 ok guard-mixed-skip
 ok guard-mixed-run
 ok guard-mixed-err
+ok guard-label-skip
+ok guard-label-run
+ok guard-label-err
 ok guard-narrow-skip
 ok guard-narrow-run
 ok guard-narrow-err

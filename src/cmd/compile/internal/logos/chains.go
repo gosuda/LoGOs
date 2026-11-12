@@ -155,6 +155,7 @@ func (fl *fileLower) scopeLabeledHoists(lab *syntax.LabeledStmt, repl []syntax.S
 	} else {
 		fl.add(start, innerStart, "")
 	}
+	anchorScopes(repl[:len(repl)-1], inner.Pos())
 	wrapper := blockOf(inner.Pos(), append(slices.Clone(repl[:len(repl)-1]), body))
 	wrapper.Rbrace = syntax.EndPos(inner)
 	lab.Stmt = wrapper
