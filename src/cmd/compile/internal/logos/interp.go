@@ -148,10 +148,6 @@ func replaceFieldExpr(f reflect.Value, interfaceField func(reflect.Type) bool, r
 	}
 }
 
-func exprTypeFields(t reflect.Type) bool {
-	return t == exprType
-}
-
 func anyInterfaceFields(t reflect.Type) bool {
 	return true
 }

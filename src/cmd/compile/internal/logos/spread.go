@@ -7,6 +7,7 @@ package logos
 import (
 	"fmt"
 	"go/token"
+	"reflect"
 
 	"cmd/compile/internal/base"
 	"cmd/compile/internal/syntax"
@@ -14,21 +15,11 @@ import (
 )
 
 func (fl *fileLower) lowerSpreads() {
+	if len(fl.pkg.info.LogosSpreads) == 0 {
+		return
+	}
 	for _, decl := range fl.file.DeclList {
-		switch d := decl.(type) {
-		case *syntax.FuncDecl:
-			if d.Body != nil {
-				d.Body.List = fl.lowerSpreadList(d.Body.List)
-			}
-		case *syntax.VarDecl:
-			if d.Values != nil {
-				d.Values = fl.spreadValue(d.Values)
-			}
-		case *syntax.ConstDecl:
-			if d.Values != nil {
-				d.Values = fl.spreadValue(d.Values)
-			}
-		}
+		fl.spreadChildren(decl)
 	}
 }
 
@@ -36,129 +27,62 @@ func (fl *fileLower) hasSpread(c *syntax.CompositeLit) bool {
 	return len(fl.pkg.info.LogosSpreads[c]) > 0
 }
 
-func (fl *fileLower) lowerSpreadList(list []syntax.Stmt) []syntax.Stmt {
-	var out []syntax.Stmt
-	for _, s := range list {
-		out = append(out, fl.lowerSpreadStmt(s)...)
-	}
-	return out
-}
-
-func (fl *fileLower) lowerSpreadStmt(s syntax.Stmt) []syntax.Stmt {
-	if as, ok := s.(*syntax.AssignStmt); ok {
-		if tup, ok := fl.spreadSelfUpdate(as); ok {
-			return []syntax.Stmt{tup}
+func (fl *fileLower) spreadChildren(n syntax.Node) {
+	v := reflect.ValueOf(n).Elem()
+	typ := v.Type()
+	for i := range v.NumField() {
+		if typ.Field(i).IsExported() {
+			fl.spreadField(v.Field(i))
 		}
-		as.Lhs = fl.spreadValue(as.Lhs)
-		as.Rhs = fl.spreadValue(as.Rhs)
-		return []syntax.Stmt{s}
-	}
-	switch s := s.(type) {
-	case *syntax.BlockStmt:
-		s.List = fl.lowerSpreadList(s.List)
-	case *syntax.IfStmt:
-		s.Init = fl.spreadSimple(s.Init)
-		s.Cond = fl.spreadValue(s.Cond)
-		s.Then.List = fl.lowerSpreadList(s.Then.List)
-		fl.lowerSpreadElse(s)
-	case *syntax.ForStmt:
-		s.Init = fl.spreadSimple(s.Init)
-		s.Cond = fl.spreadValue(s.Cond)
-		s.Post = fl.spreadSimple(s.Post)
-		s.Body.List = fl.lowerSpreadList(s.Body.List)
-	case *syntax.SwitchStmt:
-		s.Init = fl.spreadSimple(s.Init)
-		s.Tag = fl.spreadValue(s.Tag)
-		for _, cc := range s.Body {
-			cc.Cases = fl.spreadValue(cc.Cases)
-			cc.Body = fl.lowerSpreadList(cc.Body)
-		}
-	case *syntax.SelectStmt:
-		for _, cc := range s.Body {
-			cc.Comm = fl.spreadSimple(cc.Comm)
-			cc.Body = fl.lowerSpreadList(cc.Body)
-		}
-	case *syntax.LabeledStmt:
-		inner := fl.lowerSpreadStmt(s.Stmt)
-		s.Stmt = inner[0]
-		return append([]syntax.Stmt{s}, inner[1:]...)
-	case *syntax.ExprStmt:
-		s.X = fl.spreadValue(s.X)
-	case *syntax.SendStmt:
-		s.Chan = fl.spreadValue(s.Chan)
-		s.Value = fl.spreadValue(s.Value)
-	case *syntax.CallStmt:
-		s.Call = fl.spreadValue(s.Call)
-	case *syntax.ReturnStmt:
-		s.Results = fl.spreadValue(s.Results)
-	case *syntax.DeclStmt:
-		for _, decl := range s.DeclList {
-			switch d := decl.(type) {
-			case *syntax.VarDecl:
-				if d.Values != nil {
-					d.Values = fl.spreadValue(d.Values)
-				}
-			case *syntax.ConstDecl:
-				if d.Values != nil {
-					d.Values = fl.spreadValue(d.Values)
-				}
-			}
-		}
-	case *syntax.RangeClause:
-		s.X = fl.spreadValue(s.X)
-	}
-	return []syntax.Stmt{s}
-}
-
-func (fl *fileLower) lowerSpreadElse(s *syntax.IfStmt) {
-	switch els := s.Else.(type) {
-	case nil:
-	case *syntax.BlockStmt:
-		els.List = fl.lowerSpreadList(els.List)
-	case *syntax.IfStmt:
-		s.Else = fl.lowerSpreadStmt(els)[0]
 	}
 }
 
-func (fl *fileLower) spreadSimple(s syntax.SimpleStmt) syntax.SimpleStmt {
-	if s == nil {
-		return nil
+func (fl *fileLower) spreadField(f reflect.Value) {
+	switch f.Kind() {
+	case reflect.Slice:
+		for i := range f.Len() {
+			fl.spreadField(f.Index(i))
+		}
+	case reflect.Interface, reflect.Pointer:
+		if f.IsNil() {
+			return
+		}
+		if n, ok := f.Interface().(syntax.Node); ok {
+			fl.spreadNode(f, n)
+		}
 	}
-	switch s := s.(type) {
+}
+
+func (fl *fileLower) spreadNode(slot reflect.Value, n syntax.Node) {
+	switch n := n.(type) {
+	case *syntax.BranchStmt:
 	case *syntax.AssignStmt:
-		if tup, ok := fl.spreadSelfUpdate(s); ok {
-			return tup
+		fl.spreadAssign(n)
+	case syntax.Expr:
+		if r := fl.spreadValue(n); r != n && slot.Kind() == reflect.Interface {
+			slot.Set(reflect.ValueOf(r))
 		}
-		s.Lhs = fl.spreadValue(s.Lhs)
-		s.Rhs = fl.spreadValue(s.Rhs)
-	case *syntax.RangeClause:
-		s.X = fl.spreadValue(s.X)
-	case *syntax.SendStmt:
-		s.Chan = fl.spreadValue(s.Chan)
-		s.Value = fl.spreadValue(s.Value)
-	case *syntax.ExprStmt:
-		s.X = fl.spreadValue(s.X)
+	default:
+		fl.spreadChildren(n)
 	}
-	return s
+}
+
+func (fl *fileLower) spreadAssign(as *syntax.AssignStmt) {
+	if tup, ok := fl.spreadSelfUpdate(as); ok {
+		*as = *tup
+		return
+	}
+	fl.spreadChildren(as)
 }
 
 func (fl *fileLower) spreadValue(e syntax.Expr) syntax.Expr {
-	if e == nil {
-		return nil
-	}
-	if lit, ok := e.(*syntax.FuncLit); ok {
-		lit.Body.List = fl.lowerSpreadList(lit.Body.List)
-		return e
-	}
 	if op, ok := e.(*syntax.Operation); ok && op.Op == syntax.And && op.Y == nil {
 		if c, ok := syntax.Unparen(op.X).(*syntax.CompositeLit); ok && fl.hasSpread(c) {
-			replaceFieldExprs(c, exprTypeFields, fl.spreadValue)
+			fl.spreadChildren(c)
 			return fl.spreadAddrOp(op, c)
 		}
-		op.X = fl.spreadValue(op.X)
-		return e
 	}
-	replaceFieldExprs(e, exprTypeFields, fl.spreadValue)
+	fl.spreadChildren(e)
 	if c, ok := e.(*syntax.CompositeLit); ok && fl.hasSpread(c) {
 		return fl.spreadValueComposite(c)
 	}

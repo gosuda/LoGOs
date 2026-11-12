@@ -1,0 +1,6 @@
+ok spread-in-group-body
+ok spread-in-group-call-child
+ok spread-in-group-block-child
+ok spread-in-errdefer-argument
+ok spread-in-errdefer-argument-skipped-on-success
+ok spread-in-yield-value
