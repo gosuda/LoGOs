@@ -200,7 +200,7 @@ type fileLower struct {
 	optBodyType map[syntax.Expr]types2.Type
 	// optBodySpan stashes the source span of a lambda body before the
 	// capture pre-pass replaces it: positions of synthetic replacements
-	// cannot recover the span (tupleCallSpan reads real parens), but the
+	// cannot recover the span (callBodySpan reads real parens), but the
 	// capture text must cover the original extent (D7).
 	optBodySpan map[*syntax.LambdaExpr]span
 	// funcHeadOffs caches the offsets of `func` keywords in source

@@ -9,6 +9,7 @@ import (
 	"go/token"
 	"strings"
 
+	"cmd/compile/internal/base"
 	"cmd/compile/internal/syntax"
 	"cmd/compile/internal/types2"
 )
@@ -134,14 +135,11 @@ func (fl *fileLower) lambdaResultSpell(pos syntax.Pos, sig *types2.Signature) st
 }
 
 func (fl *fileLower) callBodySpan(call *syntax.CallExpr) span {
-	start := fl.off(leftmostOf(call))
-	if _, ok := syntax.Unparen(call.Fun).(*syntax.FuncLit); ok {
-		if split, ok := splitCall(fl.src, fl.off(call.Pos())); ok {
-			return span{start, split.end}
-		}
+	split, ok := splitCall(fl.src, fl.off(call.Pos()))
+	if !ok {
+		base.Fatalf("logos: call at %s has no closing parenthesis", call.Pos().String())
 	}
-	_, rparen := fl.findCallParens(fl.off(syntax.EndPos(syntax.Unparen(call.Fun))))
-	return span{start, rparen + 1}
+	return span{fl.off(leftmostOf(call)), split.end}
 }
 
 func (fl *fileLower) lambdaCaptureSpan(lam *syntax.LambdaExpr, body syntax.Expr) span {
@@ -189,7 +187,7 @@ func (fl *fileLower) lambdaTryBody(sig *types2.Signature, pos syntax.Pos, t *syn
 		names = append(names, fmt.Sprintf("_logos_lam%d_%d_%d", pos.Line(), pos.Col(), i))
 	}
 	errName := fmt.Sprintf("_logos_lam%d_%d_e", pos.Line(), pos.Col())
-	callText := fl.textOf(fl.tupleCallSpan(call))
+	callText := fl.textOf(fl.callBodySpan(call))
 	var parts []otext
 	var lhs []syntax.Expr
 	var lhsTexts []string

@@ -39,12 +39,6 @@ func genList(list []string) []otext {
 	return out
 }
 
-func (fl *fileLower) tupleCallSpan(call *syntax.CallExpr) span {
-	start := fl.off(leftmostOf(call))
-	_, rparen := fl.findCallParens(fl.off(syntax.EndPos(syntax.Unparen(call.Fun))))
-	return span{start, rparen + 1}
-}
-
 func (fl *fileLower) lowerTuples() {
 	fl.lowerTupleTypes()
 	syntax.Inspect(fl.file, func(n syntax.Node) bool {
@@ -106,7 +100,7 @@ func (fl *fileLower) lowerTuplePackValues(decl *syntax.VarDecl, call *syntax.Cal
 		tempNames[i] = tupleTempKey(pos, i)
 		nameList[i] = nameOf(pos, tempNames[i])
 	}
-	callSpan := fl.tupleCallSpan(call)
+	callSpan := fl.callBodySpan(call)
 	callText := fl.textOf(callSpan)
 	comp, compText := fl.tupleComposite(pos, names, types, tempNodes(pos, tempNames), genList(tempNames))
 	parts := []otext{gen("var " + strings.Join(tempNames, ", ") + " = "), callText, gen("\nvar " + decl.NameList[0].Value)}
@@ -715,7 +709,7 @@ func (fl *fileLower) lowerTuplePackStmt(s *syntax.AssignStmt, lhs []syntax.Expr,
 		tempNames[i] = tupleTempKey(pos, i)
 		temps[i] = nameOf(pos, tempNames[i])
 	}
-	callSpan := fl.tupleCallSpan(call)
+	callSpan := fl.callBodySpan(call)
 	callText := fl.textOf(callSpan)
 	comp, compText := fl.tupleComposite(pos, names, types, tempNodes(pos, tempNames), genList(tempNames))
 	parts := []otext{
@@ -804,7 +798,7 @@ func (fl *fileLower) lowerTupleUnpackStmt(s *syntax.AssignStmt, lhs []syntax.Exp
 	tn := tupleTempKey(pos, 0)
 	rSpan := span{fl.off(syntax.StartPos(r)), fl.off(syntax.EndPos(r))}
 	if _, ok := r.(*syntax.CallExpr); ok {
-		rSpan = fl.tupleCallSpan(r.(*syntax.CallExpr))
+		rSpan = fl.callBodySpan(r.(*syntax.CallExpr))
 	}
 	rText := fl.textOf(rSpan)
 	reads := make([]syntax.Expr, len(lhs))
