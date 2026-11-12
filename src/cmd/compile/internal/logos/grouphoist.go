@@ -84,6 +84,7 @@ type groupHoist struct {
 	fc       *funcLower
 	top      groupFrame
 	from     int
+	pos      syntax.Pos
 	withText bool
 	native   []syntax.Stmt
 	text     []otext
@@ -153,8 +154,7 @@ func (h *groupHoist) expr(e syntax.Expr) syntax.Expr {
 		return nameOf(syntax.StartPos(op), h.recv(op, 1)[0])
 	}
 	if op, ok := e.(*syntax.Operation); ok && op.Y != nil && (op.Op == syntax.AndAnd || op.Op == syntax.OrOr) && groupContainsRecv(op.Y) {
-		h.fc.groupReject(op.Y.Pos(), "in the right operand of && or ||")
-		return e
+		return h.shortCircuit(op)
 	}
 	h.slots(groupOperandSlots(e))
 	return e
@@ -221,7 +221,7 @@ func (h *groupHoist) recv(op *syntax.Operation, vals int) []string {
 	fc := h.fc
 	whole := h.span(op)
 	nch, chText, elemT := h.channel(op)
-	native, text, names := fc.groupRecvSelect(op.Pos(), h.top, nch, chText, elemT, vals)
+	native, text, names := fc.groupRecvSelect(h.scopePos(op.Pos()), h.top, nch, chText, elemT, vals)
 	h.add(native, text...)
 	fc.hoistSubs = append(fc.hoistSubs, hoistSub{start: whole.start, end: whole.end, text: strings.Join(names, ", ")})
 	return names
@@ -429,19 +429,8 @@ func (fc *funcLower) groupHoistExprStmt(s *syntax.ExprStmt, top groupFrame) []sy
 func (fc *funcLower) groupHoistRecvStmt(s *syntax.ExprStmt, op *syntax.Operation, top groupFrame) []syntax.Stmt {
 	fl := fc.fl
 	scanForLiterals(fl, s)
-	start := fc.groupStmtStart(s)
-	h := fc.newGroupHoist(top, start)
-	whole := h.span(op)
-	nch, chText, _ := h.channel(op)
-	pos := s.Pos()
-	recv := at(&syntax.Operation{Op: syntax.Recv, X: nch}, pos)
-	sel := at(&syntax.SelectStmt{
-		Body: []*syntax.CommClause{
-			at(&syntax.CommClause{Comm: exprStmtOf(pos, recv)}, pos),
-			fc.groupDoneClause(pos, top),
-		},
-	}, pos)
-	text := cat(gen("select { case <-"), chText, gen(": "+fc.groupDoneText(top)+" }"))
+	h := fc.newGroupHoist(top, fc.groupStmtStart(s))
+	sel, text, whole := h.recvStmt(s, op)
 	h.add([]syntax.Stmt{sel}, text)
 	fl.addT(whole.start, whole.end, joinO(h.text, "\n"))
 	return h.native
@@ -470,114 +459,11 @@ func (fc *funcLower) groupHoistReturn(s *syntax.ReturnStmt, top groupFrame) []sy
 func (fc *funcLower) groupHoistSend(s *syntax.SendStmt, top groupFrame) []syntax.Stmt {
 	fl := fc.fl
 	scanForLiterals(fl, s)
-	pos := s.Pos()
-	start := fc.groupStmtStart(s)
-	mark := fc.hoistSubMark()
-	h := fc.newGroupHoist(top, start)
-	chSpan, valSpan := h.span(s.Chan), h.span(s.Value)
-	h.slots([]*syntax.Expr{&s.Chan, &s.Value})
-	fc.hoistSubEmit(fc.hoistSubTake(mark))
-	chText, valText := fl.textOf(chSpan), fl.textOf(valSpan)
-	send := at(&syntax.SendStmt{Chan: s.Chan, Value: s.Value}, pos)
-	sel := at(&syntax.SelectStmt{
-		Body: []*syntax.CommClause{
-			at(&syntax.CommClause{Comm: send}, pos),
-			fc.groupDoneClause(pos, top),
-		},
-	}, pos)
-	text := cat(gen("select { case "), chText, gen(" <- "), valText, gen(": "+fc.groupDoneText(top)+" }"))
+	h := fc.newGroupHoist(top, fc.groupStmtStart(s))
+	sel, text, sp := h.send(s)
 	h.add([]syntax.Stmt{sel}, text)
-	fl.addT(chSpan.start, valSpan.end, joinO(h.text, "\n"))
+	fl.addT(sp.start, sp.end, joinO(h.text, "\n"))
 	return h.native
-}
-
-func (fc *funcLower) groupHoistGo(s *syntax.CallStmt, top groupFrame) ([]syntax.Stmt, bool) {
-	call, ok := syntax.Unparen(s.Call).(*syntax.CallExpr)
-	if !ok || !groupNodesHaveRecv(call) {
-		return nil, false
-	}
-	start := fc.groupStmtStart(s)
-	mark := fc.hoistSubMark()
-	h := fc.newGroupHoist(top, start)
-	h.slots(groupOperandSlots(call))
-	if !h.before(mark, start) {
-		return nil, false
-	}
-	return append(h.native, fc.lowerGroupGo(s)...), true
-}
-
-func (fc *funcLower) groupHoistIf(s *syntax.IfStmt, top groupFrame) []syntax.Stmt {
-	scanForLiterals(fc.fl, s.Init)
-	scanForLiterals(fc.fl, s.Cond)
-	start := fc.fl.off(s.Pos())
-	mark := fc.hoistSubMark()
-	h := fc.newGroupHoist(top, start)
-	if as, ok := s.Init.(*syntax.AssignStmt); ok {
-		h.assign(as)
-	}
-	if s.Cond != nil && groupContainsRecv(s.Cond) {
-		if s.Init != nil {
-			fc.groupReject(s.Cond.Pos(), "in a condition that follows an init statement")
-		} else {
-			s.Cond = h.expr(s.Cond)
-		}
-	}
-	s.Then.List = fc.lowerList(s.Then.List)
-	fc.groupHoistElse(s, top)
-	if !h.before(mark, start) {
-		return []syntax.Stmt{s}
-	}
-	return append(h.native, s)
-}
-
-func (fc *funcLower) groupHoistElse(s *syntax.IfStmt, top groupFrame) {
-	if s.Else == nil {
-		return
-	}
-	switch e := s.Else.(type) {
-	case *syntax.BlockStmt:
-		e.List = fc.lowerList(e.List)
-	case *syntax.IfStmt:
-		if !groupStmtHasRecv(e) {
-			s.Else = fc.lowerIf(e)[0]
-			return
-		}
-		start := fc.fl.off(syntax.StartPos(e))
-		fc.fl.add(start, start, "{ ")
-		nr := fc.groupHoistIf(e, top)
-		end := fc.fl.off(syntax.EndPos(e)) + 1
-		fc.fl.add(end, end, " }")
-		s.Else = blockOf(s.Pos(), nr)
-	}
-}
-
-func (fc *funcLower) groupHoistSwitch(s *syntax.SwitchStmt, top groupFrame) []syntax.Stmt {
-	scanForLiterals(fc.fl, s.Init)
-	scanForLiterals(fc.fl, s.Tag)
-	start := fc.groupStmtStart(s)
-	mark := fc.hoistSubMark()
-	h := fc.newGroupHoist(top, start)
-	if as, ok := s.Init.(*syntax.AssignStmt); ok {
-		h.assign(as)
-	}
-	if s.Tag != nil && groupContainsRecv(s.Tag) {
-		if s.Init != nil {
-			fc.groupReject(s.Tag.Pos(), "in a tag that follows an init statement")
-		} else {
-			s.Tag = h.expr(s.Tag)
-		}
-	}
-	for _, c := range s.Body {
-		if c.Cases != nil && groupContainsRecv(c.Cases) {
-			fc.groupReject(c.Cases.Pos(), "in a switch case expression")
-		}
-		scanForLiterals(fc.fl, c.Cases)
-		c.Body = fc.lowerList(c.Body)
-	}
-	if !h.before(mark, start) {
-		return []syntax.Stmt{s}
-	}
-	return append(h.native, s)
 }
 
 func (fc *funcLower) groupHoistExpr(e syntax.Expr, top groupFrame) (syntax.Expr, []syntax.Stmt) {

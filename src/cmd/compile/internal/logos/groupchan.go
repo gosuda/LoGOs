@@ -99,8 +99,14 @@ func (fc *funcLower) groupChanStmt(s syntax.Stmt) ([]syntax.Stmt, bool) {
 	}
 	before := base.Errors()
 	out, handled := fc.groupChanDispatch(s, top)
-	if handled && base.Errors() == before && groupStmtHasRecv(out[len(out)-1]) {
-		fc.groupReject(out[len(out)-1].Pos(), "in an unsupported position")
+	if handled && base.Errors() == before {
+		last := out[len(out)-1]
+		if b, ok := last.(*syntax.BlockStmt); ok && len(b.List) > 0 {
+			last = b.List[len(b.List)-1]
+		}
+		if groupStmtHasRecv(last) {
+			fc.groupReject(last.Pos(), "in an unsupported position")
+		}
 	}
 	return out, handled
 }
@@ -127,17 +133,11 @@ func (fc *funcLower) groupChanDispatch(s syntax.Stmt, top groupFrame) ([]syntax.
 		return fc.groupHoistSend(s, top), true
 	case *syntax.ForStmt:
 		if groupStmtHasRecv(s) {
-			fc.groupReject(s.Pos(), "in a for statement header")
-			return nil, false
+			return fc.groupHoistFor(s, top), true
 		}
 		return fc.groupChanFor(s, top)
 	case *syntax.CallStmt:
-		if s.Tok == syntax.Go {
-			return fc.groupHoistGo(s, top)
-		}
-		if groupNodesHaveRecv(s.Call) {
-			fc.groupReject(s.Pos(), "in the arguments of a defer statement")
-		}
+		return fc.groupHoistCall(s, top)
 	case *syntax.IfStmt:
 		if groupStmtHasRecv(s) {
 			return fc.groupHoistIf(s, top), true
@@ -172,7 +172,7 @@ func (fc *funcLower) lowerGroupRange(s *syntax.ForStmt, rc *syntax.RangeClause, 
 	pos := s.Pos()
 	scanForLiterals(fl, rc.X)
 	chStart := fl.off(leftmostOf(rc.X))
-	chText := fl.srcUser(chStart, fl.off(s.Body.Pos())).trimRight(" \t\n")
+	chText := fl.textOf(trimSpan(fl.src, span{start: chStart, end: fl.off(s.Body.Pos())}))
 	fl.needRT = true
 	adapter := callOf(pos, selOf(pos, nameOf(pos, rtAlias), "Chan"), []syntax.Expr{
 		nameOf(pos, top.gctx), rc.X,

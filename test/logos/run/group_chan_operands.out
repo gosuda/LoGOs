@@ -11,6 +11,13 @@ ok send-composite
 ok send-comments
 ok mixed-funclit
 ok go-funclit
+ok and-funclit
+ok and-paren-comment
+ok for-funclit
+ok for-post-funclit
+ok case-funclit
+ok init-funclit
+ok defer-funclit
 ok funclit-operand-cancel
 ok composite-operand-cancel
 ok paren-operand-cancel
@@ -20,3 +27,10 @@ ok funclit-statement-cancel
 ok composite-channel-cancel
 ok mixed-funclit-cancel
 ok go-funclit-cancel
+ok and-funclit-cancel
+ok and-paren-comment-cancel
+ok for-funclit-cancel
+ok for-post-funclit-cancel
+ok case-funclit-cancel
+ok init-funclit-cancel
+ok defer-funclit-cancel

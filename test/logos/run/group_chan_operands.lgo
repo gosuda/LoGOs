@@ -226,6 +226,119 @@ func recvGoFuncLit(ctx context.Context, e *env, fail bool) error {
 	return nil
 }
 
+func condAndFuncLit(ctx context.Context, e *env, fail bool) error {
+	go group (ctx) {
+		go {
+			if one() == 1 && use2(func() int { return 1 }(), <-e.in) == 15 {
+				e.out = 1
+			}
+		}
+		go {
+			if fail {
+				failSibling()?
+			}
+		}
+	}
+	return nil
+}
+
+func condAndParenComment(ctx context.Context, e *env, fail bool) error {
+	go group (ctx) {
+		go {
+			if one() == 1 && /* a */ (<-e.in /* b */ + 1) == 6 {
+				e.out = 1
+			}
+		}
+		go {
+			if fail {
+				failSibling()?
+			}
+		}
+	}
+	return nil
+}
+
+func condForFuncLit(ctx context.Context, e *env, fail bool) error {
+	go group (ctx) {
+		go {
+			for func() bool { return true }() && <-e.in < 3 {
+				e.out++
+			}
+		}
+		go {
+			if fail {
+				failSibling()?
+			}
+		}
+	}
+	return nil
+}
+
+func condForPostFuncLit(ctx context.Context, e *env, fail bool) error {
+	go group (ctx) {
+		go {
+			for i := 0; i < 20; i += use2(func() int { return 0 }(), <-e.in /* c */) {
+				e.out++
+			}
+		}
+		go {
+			if fail {
+				failSibling()?
+			}
+		}
+	}
+	return nil
+}
+
+func condCaseFuncLit(ctx context.Context, e *env, fail bool) error {
+	go group (ctx) {
+		go {
+			switch {
+			case func() bool { return false }():
+				e.out = 1
+			case <-e.in == 2:
+				e.out = 2
+			}
+		}
+		go {
+			if fail {
+				failSibling()?
+			}
+		}
+	}
+	return nil
+}
+
+func condInitFuncLit(ctx context.Context, e *env, fail bool) error {
+	go group (ctx) {
+		go {
+			if v := func() int { return 3 }(); <-e.in == v {
+				e.out = v
+			}
+		}
+		go {
+			if fail {
+				failSibling()?
+			}
+		}
+	}
+	return nil
+}
+
+func condDeferFuncLit(ctx context.Context, e *env, fail bool) error {
+	go group (ctx) {
+		go {
+			defer set2(e, func() int { return 1 }(), <-e.in)
+		}
+		go {
+			if fail {
+				failSibling()?
+			}
+		}
+	}
+	return nil
+}
+
 type cell struct {
 	name    string
 	run     func(ctx context.Context, e *env, fail bool) error
@@ -260,6 +373,13 @@ func valueCells() []cell {
 		{name: "send-comments", run: sendComments, want: 3, observe: fromMid},
 		{name: "mixed-funclit", run: recvMixedFuncLit, feed: []int{5, 99}, want: 52, left: 1},
 		{name: "go-funclit", run: recvGoFuncLit, feed: []int{5, 99}, want: 15, left: 1},
+		{name: "and-funclit", run: condAndFuncLit, feed: []int{5, 99}, want: 1, left: 1},
+		{name: "and-paren-comment", run: condAndParenComment, feed: []int{5, 99}, want: 1, left: 1},
+		{name: "for-funclit", run: condForFuncLit, feed: []int{1, 5}, want: 1},
+		{name: "for-post-funclit", run: condForPostFuncLit, feed: []int{5, 5, 5, 5, 99}, want: 4, left: 1},
+		{name: "case-funclit", run: condCaseFuncLit, feed: []int{2, 99}, want: 2, left: 1},
+		{name: "init-funclit", run: condInitFuncLit, feed: []int{3, 99}, want: 3, left: 1},
+		{name: "defer-funclit", run: condDeferFuncLit, feed: []int{5, 99}, want: 15, left: 1},
 	}
 }
 
@@ -274,6 +394,13 @@ func cancelCells() []cell {
 		{name: "composite-channel-cancel", run: recvCompositeChannel},
 		{name: "mixed-funclit-cancel", run: recvMixedFuncLit},
 		{name: "go-funclit-cancel", run: recvGoFuncLit},
+		{name: "and-funclit-cancel", run: condAndFuncLit},
+		{name: "and-paren-comment-cancel", run: condAndParenComment},
+		{name: "for-funclit-cancel", run: condForFuncLit},
+		{name: "for-post-funclit-cancel", run: condForPostFuncLit, want: 1},
+		{name: "case-funclit-cancel", run: condCaseFuncLit},
+		{name: "init-funclit-cancel", run: condInitFuncLit},
+		{name: "defer-funclit-cancel", run: condDeferFuncLit},
 	}
 }
 
