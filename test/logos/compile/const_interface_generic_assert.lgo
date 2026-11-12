@@ -83,6 +83,34 @@ func attackWrap(v any) {
 	_ = WrapAs[Qualified](v) // ERROR "const_view_mutation"
 }
 
+func WrapFirst[T any](x any) T {
+	return LaterAs[T](x)
+}
+
+func attackWrapFirst(v any) {
+	_ = WrapFirst[Qualified](v) // ERROR "const_view_mutation"
+}
+
+func LaterAs[T any](x any) T {
+	return x.(T)
+}
+
+func TopAs[T any](x any) T {
+	return MidAs[T](x)
+}
+
+func MidAs[T any](x any) T {
+	return EndAs[T](x)
+}
+
+func attackChain(v any) {
+	_ = TopAs[Qualified](v) // ERROR "const_view_mutation"
+}
+
+func EndAs[T any](x any) T {
+	return x.(T)
+}
+
 func attackClosure(v any) {
 	f := func() Qualified {
 		return GenericAs[Qualified](v) // ERROR "const_view_mutation"

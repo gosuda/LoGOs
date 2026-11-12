@@ -39,6 +39,10 @@ stderr '\[correctness::const_view_mutation\]'
 stderr '\[correctness::const_view_mutation\]'
 ! logos build ./identity
 stderr '\[correctness::const_view_mutation\]'
+! logos build ./twofirst
+stderr '\[correctness::const_view_mutation\]'
+! logos build ./twolast
+stderr '\[correctness::const_view_mutation\]'
 cd ..
 
 cd gneg
@@ -486,6 +490,38 @@ import (
 
 func Attack(v any) c.Qualified {
 	return golib.Identity[c.Qualified](v)
+}
+
+-- neg/twofirst/a.lgo --
+package twofirst
+
+import "example.com/neg/c"
+
+func Attack(v any) c.Qualified {
+	return LaterAs[c.Qualified](v)
+}
+
+-- neg/twofirst/b.lgo --
+package twofirst
+
+func LaterAs[T any](x any) T {
+	return x.(T)
+}
+
+-- neg/twolast/a.lgo --
+package twolast
+
+func FirstAs[T any](x any) T {
+	return x.(T)
+}
+
+-- neg/twolast/b.lgo --
+package twolast
+
+import "example.com/neg/c"
+
+func Attack(v any) c.Qualified {
+	return FirstAs[c.Qualified](v)
 }
 
 -- gneg/go.mod --
