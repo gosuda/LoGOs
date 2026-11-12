@@ -1295,13 +1295,21 @@ func TestFastcallViolationNeverHangs(t *testing.T) {
 }
 
 func TestFastcallNoClockInFastBody(t *testing.T) {
-	self := selfTestBin(t)
-	body := objdumpFunc(t, self, "runtime\\.logosCgocallFast")
-	for _, want := range []string{"nanotime", "cputicks", "clock_gettime", "monotonic"} {
-		if strings.Contains(strings.ToLower(body), want) {
-			t.Fatalf("fast body references clock %q:\n%s", want, body)
+	t.Run("disassembly", func(t *testing.T) {
+		if !goexperiment.LogosFastCgo {
+			t.Skip("runtime.logosCgocallFast is linked only with GOEXPERIMENT=logosfastcgo")
 		}
-	}
+		self := selfTestBin(t)
+		body := objdumpFunc(t, self, "runtime\\.logosCgocallFast")
+		if !strings.Contains(body, "TEXT runtime.logosCgocallFast(SB)") {
+			t.Fatalf("no disassembly of runtime.logosCgocallFast:\n%s", body)
+		}
+		for _, want := range []string{"nanotime", "cputicks", "clock_gettime", "monotonic"} {
+			if strings.Contains(strings.ToLower(body), want) {
+				t.Fatalf("fast body references clock %q:\n%s", want, body)
+			}
+		}
+	})
 	ctx, cancel := context.WithTimeoutCause(t.Context(), 10*time.Second, errors.New("fast calls exceeded their time bound"))
 	defer cancel()
 	const calls = 20000
