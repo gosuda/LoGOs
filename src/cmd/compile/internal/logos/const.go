@@ -211,6 +211,13 @@ func (fl *fileLower) eraseConstIn(e *syntax.Expr) {
 // eraseConstNode records the eject splice deleting the `const `
 // prefix of one const view type.
 func (fl *fileLower) eraseConstNode(c *syntax.ConstType) {
+	if fl.erasedConst[c] {
+		return
+	}
+	if fl.erasedConst == nil {
+		fl.erasedConst = make(map[*syntax.ConstType]bool)
+	}
+	fl.erasedConst[c] = true
 	start := fl.off(c.Pos())
 	end := fl.off(syntax.StartPos(c.Elem))
 	if end > start {

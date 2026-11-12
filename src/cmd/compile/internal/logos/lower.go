@@ -206,6 +206,7 @@ type fileLower struct {
 	// cannot recover the span (callBodySpan reads real parens), but the
 	// capture text must cover the original extent (D7).
 	optBodySpan map[*syntax.LambdaExpr]span
+	erasedConst map[*syntax.ConstType]bool
 	// funcHeadOffs caches the offsets of `func` keywords in source
 	// order, built once per file by a single forward tokenization for
 	// the option type-head lookup.
