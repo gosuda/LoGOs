@@ -9,3 +9,4 @@ ok spread-unused-base-still-evaluated-once
 ok spread-fully-shadowed-base-still-evaluated-once
 ok spread-self-base-preserves-padding
 ok spread-self-update-leaves-unlisted-fields-untouched
+ok spread-self-update-writes-nothing-when-an-explicit-expression-panics

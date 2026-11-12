@@ -56,6 +56,10 @@ func bumpC(p *Tri) int {
 	return 7
 }
 
+func boomInt() int {
+	panic("boom")
+}
+
 func main() {
 	s := State{A: 10, ..State{A: 1, B: 2}}
 	check("spread-explicit-field-wins", s == State{A: 10, B: 2}, s, State{A: 10, B: 2})
@@ -90,6 +94,13 @@ func main() {
 	tri := Tri{A: 1, B: 2, C: 3}
 	tri = Tri{..tri, A: bumpC(&tri)}
 	check("spread-self-update-leaves-unlisted-fields-untouched", tri == Tri{A: 7, B: 2, C: 99}, tri, Tri{A: 7, B: 2, C: 99})
+	keep := State{A: 1, B: 2}
+	hit := func() (recovered bool) {
+		defer func() { recovered = recover() != nil }()
+		keep = State{A: 10, B: boomInt(), ..keep}
+		return false
+	}()
+	check("spread-self-update-writes-nothing-when-an-explicit-expression-panics", hit && keep == State{A: 1, B: 2}, fmt.Sprint(hit, keep), "true {1 2}")
 	if failed {
 		os.Exit(1)
 	}

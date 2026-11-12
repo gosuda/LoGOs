@@ -278,7 +278,7 @@ Spread `T{..src}` MUST copy fields with identical names and identical types [T-1
 The same name with a different type MUST fail with `correctness::spread_type_mismatch` [T-104.5].
 Explicit fields MUST win over spread fields [T-104.5].
 The source MUST be evaluated once [T-104.5].
-Self-update `x = T{f: e, ..x}` MUST lower to one tuple assignment of the explicit fields [T-104.5].
+Self-update `x = T{f: e, ..x}` MUST evaluate every explicit field expression before it writes any field of `x`, and MUST write only the explicit fields, so a field not listed keeps the value it holds when the assignment runs [T-104.5].
 The self-update MUST perform no full struct copy [T-104.5].
 Lambdas MUST have expression form `x => expr`, block form `x => { stmts }`, or tuple-parameter form `(a, b) => ...` [T-104.6].
 A lambda MUST appear only where a function value of known parameter types is expected [T-104.6].
