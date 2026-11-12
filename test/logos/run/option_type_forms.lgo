@@ -1,0 +1,134 @@
+// run
+
+package main
+
+import (
+	"comptime"
+	"fmt"
+	"os"
+	"unsafe"
+)
+
+func same[A any](name string, direct uintptr) bool {
+	var a A
+	if comptime.SizeOf[A]() == int(direct) && unsafe.Sizeof(a) == direct {
+		fmt.Println("ok", name)
+		return true
+	}
+	fmt.Println("FAIL", name, "layout differs from the directly spelled type")
+	return false
+}
+
+type aliasTupleOptions = (int?, string?)
+type definedTupleOptions (int?, string?)
+
+func tuple_optionsAlias() bool {
+	var a aliasTupleOptions
+	var s (int?, string?)
+	a = s
+	s = a
+	return same[aliasTupleOptions]("tuple-options-alias", unsafe.Sizeof(s))
+}
+
+func tuple_optionsDefined() bool {
+	var s (int?, string?)
+	return same[definedTupleOptions]("tuple-options-defined", unsafe.Sizeof(s))
+}
+
+type aliasSliceOfTuple = [](int?, string?)
+type definedSliceOfTuple [](int?, string?)
+
+func slice_of_tupleAlias() bool {
+	var a aliasSliceOfTuple
+	var s [](int?, string?)
+	a = s
+	s = a
+	return same[aliasSliceOfTuple]("slice-of-tuple-alias", unsafe.Sizeof(s))
+}
+
+func slice_of_tupleDefined() bool {
+	var s [](int?, string?)
+	return same[definedSliceOfTuple]("slice-of-tuple-defined", unsafe.Sizeof(s))
+}
+
+type aliasMapOfTuple = map[string](int?, []int?)
+type definedMapOfTuple map[string](int?, []int?)
+
+func map_of_tupleAlias() bool {
+	var a aliasMapOfTuple
+	var s map[string](int?, []int?)
+	a = s
+	s = a
+	return same[aliasMapOfTuple]("map-of-tuple-alias", unsafe.Sizeof(s))
+}
+
+func map_of_tupleDefined() bool {
+	var s map[string](int?, []int?)
+	return same[definedMapOfTuple]("map-of-tuple-defined", unsafe.Sizeof(s))
+}
+
+type aliasFuncTuple = func((int?, string?)) bool?
+type definedFuncTuple func((int?, string?)) bool?
+
+func func_tupleAlias() bool {
+	var a aliasFuncTuple
+	var s func((int?, string?)) bool?
+	a = s
+	s = a
+	return same[aliasFuncTuple]("func-tuple-alias", unsafe.Sizeof(s))
+}
+
+func func_tupleDefined() bool {
+	var s func((int?, string?)) bool?
+	return same[definedFuncTuple]("func-tuple-defined", unsafe.Sizeof(s))
+}
+
+type aliasTupleConst = (const []int, int)
+type definedTupleConst (const []int, int)
+
+func tuple_constAlias() bool {
+	var a aliasTupleConst
+	var s (const []int, int)
+	a = s
+	s = a
+	return same[aliasTupleConst]("tuple-const-alias", unsafe.Sizeof(s))
+}
+
+func tuple_constDefined() bool {
+	var s (const []int, int)
+	return same[definedTupleConst]("tuple-const-defined", unsafe.Sizeof(s))
+}
+
+type pairOf[T any] = (T, T?)
+
+func pair_ofGeneric() bool {
+	var a pairOf[int]
+	var s (int, int?)
+	a = s
+	s = a
+	return same[pairOf[int]]("pair-of-generic", unsafe.Sizeof(s))
+}
+
+var cases = []func() bool{
+	tuple_optionsAlias,
+	tuple_optionsDefined,
+	slice_of_tupleAlias,
+	slice_of_tupleDefined,
+	map_of_tupleAlias,
+	map_of_tupleDefined,
+	func_tupleAlias,
+	func_tupleDefined,
+	tuple_constAlias,
+	tuple_constDefined,
+	pair_ofGeneric,
+}
+
+func main() {
+	failed := false
+	for _, run := range cases {
+		failed = !run() || failed
+	}
+	if failed {
+		os.Exit(1)
+	}
+}

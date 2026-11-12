@@ -65,10 +65,7 @@ func (w walker) walkLogos(n Node) {
 		w.node(n.Default)
 	case *TupleType:
 		for _, f := range n.Fields {
-			if f.Name != nil {
-				w.node(f.Name)
-			}
-			w.node(f.Type)
+			w.node(f)
 		}
 	case *ConstForStmt:
 		if n.Index != nil {

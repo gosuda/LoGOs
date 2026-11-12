@@ -1,0 +1,11 @@
+ok tuple-options-alias
+ok tuple-options-defined
+ok slice-of-tuple-alias
+ok slice-of-tuple-defined
+ok map-of-tuple-alias
+ok map-of-tuple-defined
+ok func-tuple-alias
+ok func-tuple-defined
+ok tuple-const-alias
+ok tuple-const-defined
+ok pair-of-generic
