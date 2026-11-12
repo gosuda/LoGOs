@@ -36,7 +36,7 @@ A package MUST NOT mix user-authored `.go` files and `.lgo` files. Compiler-gene
 The tool MUST reject a mixed package with `correctness::mixed_package` [T-0.1][R-U3].
 The `correctness::mixed_package` text MUST name both file classes [T-0.1][R-U3].
 The tool MUST reject a module with both kinds with `correctness::mixed_module` [T-0.1][R-U3].
-The `correctness::mixed_module` text MUST name the Go packages and the loGo/s packages [T-0.1][R-U3].
+The `correctness::mixed_module` text MUST name the Go packages and the loGo/s packages of the module [T-0.1][R-U3].
 A loGo/s package MAY import any Go package [T-0.1][R-U2].
 A Go package MAY import any loGo/s package [T-0.1][R-U2].
 An import across kinds MUST NOT be an error [T-0.1][R-U2].
@@ -47,7 +47,7 @@ A workspace root `logos build ./...` MUST build every Go module and every loGo/s
 The `logos` command alone MUST select the `.lgo` language. This covers file recognition, loGo/s syntax, loGo/s type rules, and loGo/s lints [T-0.1][A-LGOSEL].
 Plain `go` MUST ignore `.lgo` files [T-0.1][A-LGOSEL].
 Plain `go` MUST report the upstream `no Go files` result for a loGo/s-only package [T-0.1][A-LGOSEL].
-A plain `go` build of a Go package that imports a loGo/s package MUST fail with a load error that names the imported package, because plain `go` ignores `.lgo` files [T-0.1][A-LGOSEL].
+A plain `go` build of a Go package that imports a loGo/s package, including `go build ./...` of its module, MUST fail with a load error that names the imported package, because plain `go` ignores `.lgo` files [T-0.1][A-LGOSEL].
 Packages from `golang.org/x` and other third-party Go modules MUST count as Go packages that `.lgo` code MAY import [A-XMOD][R-U2].
 A loGo/s package MUST NOT hold a generated `.go` file except cgo outputs [A-CODEGEN].
 A generator MAY write `.go` files into a Go package that a loGo/s package imports [A-CODEGEN][R-U2].
@@ -334,7 +334,6 @@ Side effects before sortBy MUST warn suspicious::side_effect_before_sort. [T-104
 Interpolation MUST evaluate each operand once, left to right, into a local variable, and MUST convert error and fmt.Stringer operands to strings before sizing. [T-104.4]
 `defer f()?` with nil result MUST leave the error result nil with no allocation. [T-104.2]
 With a prior error it MUST join both errors. [T-104.2]
-Interpolation operands MUST evaluate once from left to right. [T-104.4]
 Errdefer MUST work in functions with unnamed error results. [T-104.2]
 Errdefer MUST stay skipped on success returns. [T-104.2]
 `errdefer` MUST run when the frame holds a non-nil error, panics, or exits through Goexit. [T-104.2]
@@ -481,8 +480,7 @@ Converting `string` to `const []byte` MUST be zero-copy and MUST allocate nothin
 
 Converting `const []byte` to `string` MUST be zero-copy when provenance is a string or a constant composite. [T-201]
 
-The same conversion MUST copy for any other provenance. [T-201]
-Any other provenance MUST copy to the Go heap. [T-201]
+The same conversion MUST copy to the Go heap for any other provenance. [T-201]
 
 `logos/rt.Freeze` MUST deep-copy its argument and return a `const` view. [T-201]
 
@@ -705,7 +703,7 @@ The compiler MUST NOT check this case. [T-203.1]
 
 A closed-union value MUST marshal through its member static helper. [T-203.1]
 
-Unmarshalling MUST try members in declaration order into fresh scratch values. [T-203.1]
+Unmarshalling a closed union MUST try members in declaration order into fresh scratch values and count their successes. [T-203.1][T-Sec10]
 
 It MUST assign the target only on a single success. [T-203.1]
 
@@ -821,8 +819,7 @@ Each assertion MUST emit a compile-time check that `*S` implements each listed i
 
 An assertion list on a non-struct type MUST be a syntax error. [T-203.3]
 A readonly method `const M() T` MUST NOT count as a property element and MUST NOT satisfy a property requirement [T-201][T-203.2].
-Unions MUST use the upstream interface representation. [T-203.1]
-A closed union MUST use the upstream interface representation, including upstream handling of zero-sized members. [T-203.1]
+Unions MUST use the upstream interface representation, and a closed union MUST do so including upstream handling of zero-sized members. [T-203.1]
 
 Method bodies inside interfaces MUST fail compilation. [T-203.2]
 
@@ -1237,7 +1234,7 @@ Without history for a PC, it MUST keep the current stack size. [T-302]
 ### 3.3 RFC-303: Hardware backend optimizations
 
 Fault-suppressing masked tails MUST appear only in loops that the slice reductions of Sec 13 produce. [T-303]
-Other code MUST carry no tail padding. [T-303]
+Other code MUST carry no tail padding, and the build MUST NOT add guard padding for vector tails. [T-303]
 BMI2 code MUST come from existing `GOAMD64=v3` rules. [T-303]
 `CMOV` code MUST come from the existing baseline `CondSelect` rules at every `GOAMD64` level. [T-303]
 Constant-count rotates MUST use BMI2 rotates at `GOAMD64=v3`. [T-303]
@@ -1545,7 +1542,6 @@ Duplicate keys MUST keep the last value. [T-Sec10]
 Arrays MUST grow incrementally with no pre-allocation cap. [T-Sec10]
 Decoding through json.Decoder uses the same method. [T-Sec10]
 No validate tags are needed. [T-Sec10]
-Unmarshal of a closed union tries members in declaration order into fresh scratch values and counts successes. [T-Sec10][T-203.1]
 Unmarshal of a closed union MUST resolve members declared in another package. [T-Sec10][T-203.1]
 A member has a static key set when its type is a struct, or a pointer to a struct, that Sec 10.1 makes eligible. The set holds the JSON key of each visible field, and a field is visible when it is exported and has no `-` tag. A keyed member has a static key set with at least one key. A keyless member has none: its type is not an eligible struct, or the struct has no visible field. A keyed member trial MUST count a success only when at least one key in the object is in that member's static key set and its decode then succeeds. A key in the static key set of a sibling member but not in this member's disqualifies this member trial, while a key in no member's static key set is ignored. Keys MUST decide every keyed member trial, including a member that declares its own UnmarshalJSON. Such a decoder MUST run only after its keys match. A keyless member MUST be tried only when no key of a keyed member occurs in the input. Exactly one such member MUST succeed for the union to select it. A closed union member without an UnmarshalJSON method MUST fail with [correctness::union_member_no_json]. [T-Sec10][T-203.1]
 It assigns the target only on a single success. [T-Sec10][T-203.1]
@@ -1686,7 +1682,6 @@ On nonzero errCode the wrapper throws the message read from wasm memory. [T-Sec1
 ### 13.2 Amd64 masked tails, rotates, and checked lengths
 
 - Masked tails MUST NOT read past the end of the slice. [T-303]
-- The build MUST NOT add guard padding for vector tails. [T-303]
 - In a native build with `GOEXPERIMENT=simd` on amd64 or arm64, `.sum()` on a bare slice of a fixed-width numeric element kind or an alias of one MUST load full vectors for the body and load the tail once through a masked load that enables only the remaining elements. [T-303]
 - On amd64 that masked load MUST be VPMASKMOVD or VPMASKMOVQ for 32 and 64-bit elements, which need AVX2, and the zeroing K-masked VMOVDQU8 or VMOVDQU16 for 8 and 16-bit elements, which need AVX512. [T-303]
 - The amd64 vector form MUST run only when the archsimd CPU feature check its instructions need is true and MUST take the scalar loop when it is false, and the check MUST be omitted when the build's `GOAMD64` level guarantees the feature (`v3` for AVX2, `v4` for AVX512). [T-303]
@@ -1854,11 +1849,10 @@ func pack(v int) []int {
 ### 17.5 Interop suite
 
 - Case 1: a loGo/s package that imports a Go package from another workspace module MUST build and run. [T-Sec17][R-U2]
-- Case 2: a Go package that imports a loGo/s package from another workspace module MUST build and run under `logos`. [T-Sec17][R-U2][A-LGOSEL]
-- In case 2, a plain `go build ./...` of that Go module MUST fail with a load error that names the imported package. [T-Sec17][A-LGOSEL]
+- Case 2: a Go package that imports a loGo/s package from another workspace module MUST build and run under `logos`; Sec 0.1 states the result under plain `go`. [T-Sec17][R-U2][A-LGOSEL]
 - Case 3: a loGo/s package that imports `fmt` and `context` MUST build and run. [T-Sec17][R-U2]
-- Case 4: `correctness::mixed_module` MUST name the Go packages and the loGo/s packages of the module. [T-Sec17][R-U3]
-- Case 5: `logos build ./...` at a workspace root MUST build both modules, and each binary MUST run. [T-Sec17][R-U2]
+- Case 4: a module that holds both kinds; Sec 0.1 states the `correctness::mixed_module` rule. [T-Sec17][R-U3]
+- Case 5: `logos build ./...` at a workspace root builds both modules as Sec 0.1 states, and each binary MUST run. [T-Sec17][R-U2]
 
 ## 18. Spec areas
 
