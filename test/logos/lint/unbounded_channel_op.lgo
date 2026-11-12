@@ -4,6 +4,7 @@ package p
 
 import (
 	"context"
+	"iter"
 	"time"
 )
 
@@ -495,4 +496,46 @@ func rangeTypeParamChan[C ~chan int](c C) {
 func rangeTypeParamSlice[S ~[]int](s S) {
 	for range s {
 	}
+}
+
+type ints []int
+
+type feed chan int
+
+func segmentArrayRecv(ctx context.Context, xs [3]int, in chan int) ([]int, error) {
+	return xs.group(ctx, limit = 2).map(x => x + <-in)
+}
+
+func segmentSeqRecv(ctx context.Context, xs iter.Seq[int], in chan int) ([]int, error) {
+	return xs.group(ctx, limit = 2).map(x => x + <-in)
+}
+
+func segmentChanRecv(ctx context.Context, xs chan int, in chan int) ([]int, error) {
+	return xs.group(ctx, limit = 2).map(x => x + <-in)
+}
+
+func segmentRecvOnlyChanRecv(ctx context.Context, xs <-chan int, in chan int) ([]int, error) {
+	return xs.group(ctx, limit = 2).map(x => x + <-in)
+}
+
+func segmentNamedSliceRecv(ctx context.Context, xs ints, in chan int) ([]int, error) {
+	return xs.group(ctx, limit = 2).map(x => x + <-in)
+}
+
+func segmentNamedChanRecv(ctx context.Context, xs feed, in chan int) ([]int, error) {
+	return xs.group(ctx, limit = 2).map(x => x + <-in)
+}
+
+func segmentArraySend(ctx context.Context, xs [3]int, out chan int) ([]int, error) {
+	return xs.group(ctx, limit = 2).map(x => {
+		out <- x
+		return x
+	})
+}
+
+func segmentSeqSend(ctx context.Context, xs iter.Seq[int], out chan int) ([]int, error) {
+	return xs.group(ctx, limit = 2).map(x => {
+		out <- x
+		return x
+	})
 }
