@@ -466,6 +466,23 @@ func fPanic() (hit string) {
 	return "false"
 }
 
+func pick() *conn { return shared }
+
+func cCount() string {
+	shared = mk(9)
+	return fmt.Sprint(ids3().map(i => pick()).count())
+}
+
+func cAny() string {
+	shared = mk(9)
+	return fmt.Sprint(ids3().map(i => pick()).any(c => c.id == 7))
+}
+
+func cCollect() string {
+	shared = mk(9)
+	return fmt.Sprint(idsOf(ids3().map(i => pick())))
+}
+
 func tune(c *conn) {}
 
 func lCount() string {
@@ -672,7 +689,7 @@ type leg struct {
 }
 
 func legs() []leg {
-	return slices.Concat(borrowLegs(), sharedLegs(), identityLegs(), madeLegs(), tryLegs(), dropLegs(), localLegs(), flightLegs())
+	return slices.Concat(borrowLegs(), sharedLegs(), callLegs(), identityLegs(), madeLegs(), tryLegs(), dropLegs(), localLegs(), flightLegs())
 }
 
 func borrowLegs() []leg {
@@ -777,6 +794,14 @@ func dropLegs() []leg {
 		{"drop-try-filter-fail", "0 true [1 1]", tFilterFail},
 		{"drop-try-filter-drop-fail", "0 true [1 1 1]", tFilterDropFail},
 		{"drop-filter-panic", "true [1 1 1]", fPanic},
+	}
+}
+
+func callLegs() []leg {
+	return []leg{
+		{"call-shared-count", "3 [3]", cCount},
+		{"call-shared-any", "false [3]", cAny},
+		{"call-shared-collect", "[9 9 9] [0]", cCollect},
 	}
 }
 

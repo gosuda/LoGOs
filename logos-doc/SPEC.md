@@ -297,6 +297,9 @@ A `?`-chain in a case guard, with the `?` inside a chain's expression lambda bod
 A `?`-chain in a `go { }` child MUST return to the group with only the error result, never the enclosing function's results [T-206].
 A `?`-chain nested in a lambda body, in a `??` fallback, or in a `?.` call argument MUST fail with `correctness::nested_try_capture`: hoisting it to the enclosing function would unbind its captured parameters or run it when the source skips it [T-104.6].
 When produced elements implement `io.Closer`, partial failure MUST close already produced elements in reverse order [T-104.6].
+A fused chain MUST own only the `io.Closer` values its last `map` stage produces: a `map` produces a value when every return of its lambda, or its function value, yields a call result, a composite literal, `&T{}`, or `new(T)`, directly or through a variable local to the lambda whose every assignment is such an expression, so a call result is produced even when the callee returns one object for several elements, while a name, a field, or an index read, a captured variable, and the lambda argument returned unchanged are not produced, and a `map` whose result type is its argument type keeps the ownership its argument had [T-104.6].
+A fused chain MUST close every owned value it does not return exactly once: where a `filter` or `drop` discards it, at the terminal for each value the terminal does not return, and, on a failure by `?` or on a panic, in reverse order of production including the value a `filter` predicate was examining, and it MUST return the first error [T-104.6].
+A value that a chain passes to a later `map` lambda MUST belong to that lambda, and the chain MUST NOT close it [T-104.6].
 A newline followed by spaces or tabs then `.` plus a letter or `_` MUST insert no semicolon in `.lgo` [T-104.6].
 ```go
 func big(xs []int) []int {

@@ -23,6 +23,9 @@ ok shared-get
 ok shared-take
 ok shared-collect
 ok shared-sort
+ok call-shared-count
+ok call-shared-any
+ok call-shared-collect
 ok identity-lambda-count
 ok identity-lambda-collect
 ok identity-func-count
