@@ -240,6 +240,7 @@ type fileLower struct {
 	chainExit          func(err string) string  // a header closure hands a failing hoist's error to its statement; nil returns it.
 	groupDone          map[*syntax.FuncLit]bool // finished group closures, pruned by the literal scan.
 	groupPlans         map[*syntax.BlockStmt]groupFrame
+	groupRecvSelects   map[*syntax.SelectStmt]bool
 	groupJoins         map[syntax.Stmt]bool
 	funcs              map[*syntax.BlockStmt]*funcLower
 	compositeDone      map[syntax.Expr]bool

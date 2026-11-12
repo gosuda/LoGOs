@@ -25,6 +25,9 @@ ok elided-element
 ok elided-pointer
 ok elided-nested
 ok elided-map-key
+ok option-operand
+ok ptr-option-operand
+ok tuple-operand
 ok funclit-operand-cancel
 ok composite-operand-cancel
 ok paren-operand-cancel
@@ -48,3 +51,6 @@ ok elided-element-cancel
 ok elided-pointer-cancel
 ok elided-nested-cancel
 ok elided-map-key-cancel
+ok option-operand-cancel
+ok ptr-option-operand-cancel
+ok tuple-operand-cancel

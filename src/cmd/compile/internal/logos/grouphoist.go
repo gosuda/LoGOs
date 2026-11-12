@@ -172,38 +172,32 @@ func (h *groupHoist) expr(e syntax.Expr) syntax.Expr {
 	return e
 }
 
+func (h *groupHoist) valueTemp(pos syntax.Pos, like syntax.Expr, tmp string, value syntax.Expr, valueText otext) ([]syntax.Stmt, []otext) {
+	fl := h.fc.fl
+	if typ := fl.pkg.info.TypeOf(like); typ != nil {
+		if native, spelled, ok := fl.spellTypeBoth(types2.Default(typ), pos); ok {
+			return []syntax.Stmt{
+					typedVarDecl(pos, nameOf(pos, tmp), native),
+					assignOf(pos, []syntax.Expr{nameOf(pos, tmp)}, []syntax.Expr{value}),
+				},
+				[]otext{gen("var " + tmp + " " + spelled), cat(gen(tmp+" = "), valueText)}
+		}
+	}
+	return []syntax.Stmt{defineOf(pos, []syntax.Expr{nameOf(pos, tmp)}, []syntax.Expr{value})},
+		[]otext{cat(gen(tmp+" := "), valueText)}
+}
+
 func (h *groupHoist) plain(e syntax.Expr) syntax.Expr {
 	fc := h.fc
-	fl := fc.fl
-	pos := e.Pos()
-	typ := fl.pkg.info.TypeOf(e)
-	if typ != nil {
-		typ = types2.Default(typ)
-	}
-	if _, tuple := typ.(*types2.Tuple); typ == nil || tuple {
-		fc.groupReject(pos, "after an operand with no single type")
-		return e
-	}
-	native, spelled, ok := fl.spellTypeBoth(typ, pos)
-	if !ok {
-		fc.groupReject(pos, "after an operand whose type cannot be written")
-		return e
-	}
 	sp := h.span(e)
 	var text otext
 	if h.withText {
-		text = fl.textOf(sp)
+		text = fc.fl.textOf(sp)
 	}
 	tmp := fc.groupTempName("t")
 	fc.hoistSubs = append(fc.hoistSubs, hoistSub{start: sp.start, end: sp.end, text: tmp})
-	h.add(
-		[]syntax.Stmt{
-			typedVarDecl(pos, nameOf(pos, tmp), native),
-			assignOf(pos, []syntax.Expr{nameOf(pos, tmp)}, []syntax.Expr{e}),
-		},
-		gen("var "+tmp+" "+spelled),
-		cat(gen(tmp+" = "), text),
-	)
+	native, texts := h.valueTemp(e.Pos(), e, tmp, e, text)
+	h.add(native, texts...)
 	return nameOf(syntax.StartPos(e), tmp)
 }
 
@@ -233,7 +227,7 @@ func (h *groupHoist) recv(op *syntax.Operation, vals int) []string {
 	fc := h.fc
 	whole := h.span(op)
 	nch, chText, elemT := h.channel(op)
-	native, text, names := fc.groupRecvSelect(h.scopePos(op.Pos()), h.top, nch, chText, elemT, vals)
+	native, text, names := fc.groupRecvSelect(h.scopePos(op.Pos()), h.top, groupChanOperand{expr: nch, text: chText, elem: elemT}, vals)
 	h.add(native, text...)
 	fc.hoistSubs = append(fc.hoistSubs, hoistSub{start: whole.start, end: whole.end, text: strings.Join(names, ", ")})
 	return names
@@ -289,6 +283,18 @@ func groupOperandSlots(e syntax.Expr) []*syntax.Expr {
 		return []*syntax.Expr{&n.X}
 	case *syntax.TryExpr:
 		return []*syntax.Expr{&n.X}
+	case *syntax.InterpExpr:
+		out := make([]*syntax.Expr, len(n.Exprs))
+		for i := range n.Exprs {
+			out[i] = &n.Exprs[i]
+		}
+		return out
+	case *syntax.TupleLit:
+		out := make([]*syntax.Expr, len(n.Elems))
+		for i := range n.Elems {
+			out[i] = &n.Elems[i]
+		}
+		return out
 	}
 	return nil
 }
@@ -358,13 +364,11 @@ func (h *groupHoist) decl(s *syntax.DeclStmt) {
 		vals := syntax.UnpackListExpr(spec.Values)
 		if len(spec.NameList) == 2 && len(vals) == 1 {
 			if op, ok := groupRecvOp(vals[0]); ok {
-				if len(s.DeclList) != 1 {
-					h.fc.groupReject(pos, "in the comma-ok form of a var group")
-					return
-				}
+				h.slotsBeforeRecv(slots)
+				slots = nil
 				names := h.recv(op, 2)
 				spec.Values = listOf(pos, []syntax.Expr{nameOf(pos, names[0]), nameOf(pos, names[1])})
-				return
+				continue
 			}
 		}
 		specs = append(specs, spec)
@@ -574,6 +578,8 @@ func (fl *fileLower) groupOperandEnd(e syntax.Expr) int {
 		return fl.groupTokenEnd(fl.off(n.Sel.Pos()))
 	case *syntax.KeyValueExpr:
 		return fl.groupOperandEnd(n.Value)
+	case *syntax.TupleLit:
+		return fl.groupClosingEnd(fl.off(n.Pos()))
 	case *syntax.InterpExpr:
 		return fl.off(n.Pos()) + len(n.Raw)
 	case *syntax.Operation:

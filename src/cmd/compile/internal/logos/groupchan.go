@@ -65,17 +65,35 @@ func (fc *funcLower) groupTempName(prefix string) string {
 	return nm
 }
 
-func (fc *funcLower) groupRecvSelect(pos syntax.Pos, top groupFrame, ch syntax.Expr, chText otext, elemT types2.Type, vals int) ([]syntax.Stmt, []otext, []string) {
-	fl := fc.fl
-	elemNative, elemSpelled, ok := fl.spellTypeBoth(elemT, pos)
-	if !ok {
-		fc.groupReject(pos, "from a channel whose element type cannot be written")
-		return nil, nil, nil
+type groupChanOperand struct {
+	expr syntax.Expr
+	text otext
+	elem types2.Type
+}
+
+func (fc *funcLower) groupElemTemp(pos syntax.Pos, tmp string, c groupChanOperand) ([]syntax.Stmt, []otext, groupChanOperand) {
+	if elemNative, elemSpelled, ok := fc.fl.spellTypeBoth(c.elem, pos); ok {
+		return []syntax.Stmt{typedVarDecl(pos, nameOf(pos, tmp), elemNative)},
+			[]otext{gen("var " + tmp + " " + elemSpelled)}, c
 	}
+	chName := fc.groupTempName("c")
+	fc.fl.needRT = true
+	zero := callOf(pos, selOf(pos, nameOf(pos, rtAlias), "ElemZero"), []syntax.Expr{nameOf(pos, chName)})
+	native := []syntax.Stmt{
+		defineOf(pos, []syntax.Expr{nameOf(pos, chName)}, []syntax.Expr{c.expr}),
+		defineOf(pos, []syntax.Expr{nameOf(pos, tmp)}, []syntax.Expr{zero}),
+	}
+	text := []otext{
+		cat(gen(chName+" := "), c.text),
+		gen(tmp + " := " + rtAlias + ".ElemZero(" + chName + ")"),
+	}
+	return native, text, groupChanOperand{expr: nameOf(pos, chName), text: gen(chName), elem: c.elem}
+}
+
+func (fc *funcLower) groupRecvSelect(pos syntax.Pos, top groupFrame, c groupChanOperand, vals int) ([]syntax.Stmt, []otext, []string) {
 	tmp := fc.groupTempName("t")
 	names := []string{tmp}
-	native := []syntax.Stmt{typedVarDecl(pos, nameOf(pos, tmp), elemNative)}
-	text := []otext{gen("var " + tmp + " " + elemSpelled)}
+	native, text, c := fc.groupElemTemp(pos, tmp, c)
 	caseLHS := tmp
 	if vals == 2 {
 		okName := fc.groupTempName("o")
@@ -84,11 +102,16 @@ func (fc *funcLower) groupRecvSelect(pos syntax.Pos, top groupFrame, ch syntax.E
 		text = append(text, gen("var "+okName+" bool"))
 		caseLHS += ", " + okName
 	}
-	recvN := assignOf(pos, tempNodes(pos, names), []syntax.Expr{at(&syntax.Operation{Op: syntax.Recv, X: ch}, pos)})
-	native = append(native, at(&syntax.SelectStmt{
+	recvN := assignOf(pos, tempNodes(pos, names), []syntax.Expr{at(&syntax.Operation{Op: syntax.Recv, X: c.expr}, pos)})
+	recvSelect := at(&syntax.SelectStmt{
 		Body: []*syntax.CommClause{at(&syntax.CommClause{Comm: recvN}, pos), fc.groupDoneClause(pos, top)},
-	}, pos))
-	text = append(text, cat(gen("select { case "+caseLHS+" = <-"), chText, gen(": "+fc.groupDoneText(top)+" }")))
+	}, pos)
+	if fc.fl.groupRecvSelects == nil {
+		fc.fl.groupRecvSelects = make(map[*syntax.SelectStmt]bool)
+	}
+	fc.fl.groupRecvSelects[recvSelect] = true
+	native = append(native, recvSelect)
+	text = append(text, cat(gen("select { case "+caseLHS+" = <-"), c.text, gen(": "+fc.groupDoneText(top)+" }")))
 	return native, text, names
 }
 
@@ -144,6 +167,12 @@ func (fc *funcLower) groupChanDispatch(s syntax.Stmt, top groupFrame) ([]syntax.
 		return fc.groupChanFor(s, top)
 	case *syntax.CallStmt:
 		return fc.groupHoistCall(s, top)
+	case *syntax.ErrdeferStmt:
+		pre, ok := fc.groupHoistDeferredArgs(s, s.Call, top)
+		if !ok {
+			return nil, false
+		}
+		return append(pre, fc.lowerErrdefer(s)...), true
 	case *syntax.IfStmt:
 		if groupStmtHasRecv(s) {
 			return fc.groupHoistIf(s, top), true
@@ -220,6 +249,9 @@ func groupSelectHasDefault(s *syntax.SelectStmt) bool {
 }
 
 func (fc *funcLower) groupAugmentSelect(s *syntax.SelectStmt) {
+	if fc.fl.groupRecvSelects[s] {
+		return
+	}
 	top, ok := fc.groupChanTop()
 	if !ok || groupSelectHasDefault(s) {
 		return

@@ -254,6 +254,7 @@ func (fc *funcLower) scopePrelude(sd *syntax.ScopeDeferStmt, ctx *scopeDeferCtx,
 	if !ok {
 		return []syntax.Stmt{sd}
 	}
+	recv := fc.groupScopeArgs(sd, call)
 	plan, planned := fc.planScopeCall(call)
 	if !planned {
 		return []syntax.Stmt{sd}
@@ -273,6 +274,10 @@ func (fc *funcLower) scopePrelude(sd *syntax.ScopeDeferStmt, ctx *scopeDeferCtx,
 	guardT := ifOf(pos, nil, armedT, ctx.guardBody(pos, item.armed, exprStmtOf(pos, callT)))
 	var native []syntax.Stmt
 	var text []syntax.Stmt
+	if recv != nil {
+		native = append(native, recv.native...)
+		prefix = cat(prefix, recv.render())
+	}
 	if len(capNamesN) > 0 {
 		native = append(native, fc.bindCaptures(pos, plan, capNamesN, capValsN))
 		text = append(text, fc.bindCaptures(pos, plan, capNamesT, capValsT))
@@ -331,6 +336,7 @@ func (fc *funcLower) scopeHoistedPrelude(sd *syntax.ScopeDeferStmt, ctx *scopeDe
 	if !ok {
 		return []syntax.Stmt{sd}
 	}
+	recv := fc.groupScopeArgs(sd, call)
 	plan, planned := fc.planScopeCall(call)
 	if !planned {
 		return []syntax.Stmt{sd}
@@ -347,6 +353,10 @@ func (fc *funcLower) scopeHoistedPrelude(sd *syntax.ScopeDeferStmt, ctx *scopeDe
 	callT.HasDots = plan.dots
 	var native []syntax.Stmt
 	var text []syntax.Stmt
+	if recv != nil {
+		native = append(native, recv.native...)
+		prefix = cat(prefix, recv.render())
+	}
 	if len(capNamesN) > 0 {
 		native = append(native, fc.bindCaptures(pos, plan, capNamesN, capValsN))
 		text = append(text, fc.bindCaptures(pos, plan, capNamesT, capValsT))

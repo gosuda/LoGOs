@@ -33,3 +33,9 @@ func Chan[T any](ctx context.Context, ch <-chan T) iter.Seq[T] {
 		}
 	}
 }
+
+// ElemZero returns the zero value of the element type of ch, so that
+// lowered code can declare a temporary of a type it cannot name.
+func ElemZero[T any](ch <-chan T) (zero T) {
+	return
+}

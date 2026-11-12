@@ -28,6 +28,8 @@ type env struct {
 	flag  bool
 	base  int
 	calls int
+	bad   bool
+	undo  int
 	out   int
 }
 
@@ -1020,6 +1022,313 @@ func condRangeRecv(ctx context.Context, e *env, fail bool) error {
 	return nil
 }
 
+func pick(e *env) (int, error) {
+	e.calls++
+	if e.bad {
+		return 0, errSib
+	}
+	return e.base, nil
+}
+
+func pickArg(e *env, a int) (int, error) {
+	e.calls++
+	if e.bad {
+		return 0, errSib
+	}
+	return a, nil
+}
+
+func undo(e *env) {
+	e.undo++
+}
+
+func guard(e *env) error {
+	e.calls++
+	if e.bad {
+		return errSib
+	}
+	return nil
+}
+
+func tryIfExprInit(ctx context.Context, e *env, fail bool) error {
+	go group (ctx) {
+		go {
+			if guard(e)?; <-e.in == 1 {
+				e.out = 1
+			}
+		}
+		go {
+			if fail {
+				failSibling()?
+			}
+		}
+	}
+	return nil
+}
+
+func tryIfCond(ctx context.Context, e *env, fail bool) error {
+	go group (ctx) {
+		go {
+			if v := pick(e)?; <-e.in == v {
+				e.out = 1
+			} else {
+				e.out = 2
+			}
+		}
+		go {
+			if fail {
+				failSibling()?
+			}
+		}
+	}
+	return nil
+}
+
+func tryIfInitRecv(ctx context.Context, e *env, fail bool) error {
+	go group (ctx) {
+		go {
+			if v := pickArg(e, <-e.in)?; v > 0 {
+				e.out = v
+			}
+		}
+		go {
+			if fail {
+				failSibling()?
+			}
+		}
+	}
+	return nil
+}
+
+func trySwitchTag(ctx context.Context, e *env, fail bool) error {
+	go group (ctx) {
+		go {
+			switch v := pick(e)?; <-e.in {
+			case v:
+				e.out = 1
+			default:
+				e.out = 2
+			}
+		}
+		go {
+			if fail {
+				failSibling()?
+			}
+		}
+	}
+	return nil
+}
+
+func trySwitchCase(ctx context.Context, e *env, fail bool) error {
+	go group (ctx) {
+		go {
+			switch v := pick(e)?; {
+			case <-e.in == v:
+				e.out = 1
+			default:
+				e.out = 2
+			}
+		}
+		go {
+			if fail {
+				failSibling()?
+			}
+		}
+	}
+	return nil
+}
+
+func tryForCond(ctx context.Context, e *env, fail bool) error {
+	go group (ctx) {
+		go {
+			for i := pick(e)?; <-e.in < i; {
+				e.out++
+			}
+		}
+		go {
+			if fail {
+				failSibling()?
+			}
+		}
+	}
+	return nil
+}
+
+func tryForPost(ctx context.Context, e *env, fail bool) error {
+	go group (ctx) {
+		go {
+			for i := pick(e)?; i < 10; i += <-e.in {
+				e.out++
+			}
+		}
+		go {
+			if fail {
+				failSibling()?
+			}
+		}
+	}
+	return nil
+}
+
+func tryLabeledFor(ctx context.Context, e *env, fail bool) error {
+	go group (ctx) {
+		go {
+		loop:
+			for v := pick(e)?; <-e.in < v; {
+				e.out++
+				if e.out == 2 {
+					break loop
+				}
+				continue loop
+			}
+		}
+		go {
+			if fail {
+				failSibling()?
+			}
+		}
+	}
+	return nil
+}
+
+func tryLabeledSwitch(ctx context.Context, e *env, fail bool) error {
+	go group (ctx) {
+		go {
+		sw:
+			switch v := pick(e)?; <-e.in {
+			case v:
+				if e.flag {
+					break sw
+				}
+				e.out = 1
+			default:
+				e.out = 2
+			}
+			e.out += 10
+		}
+		go {
+			if fail {
+				failSibling()?
+			}
+		}
+	}
+	return nil
+}
+
+func tryUndo(ctx context.Context, e *env, fail bool) error {
+	go group (ctx) {
+		go {
+			errdefer undo(e)
+			if v := pick(e)?; <-e.in == v {
+				e.out = 1
+			}
+		}
+		go {
+			if fail {
+				failSibling()?
+			}
+		}
+	}
+	return nil
+}
+
+func recvVarGroup(ctx context.Context, e *env, fail bool) error {
+	go group (ctx) {
+		go {
+			var (
+				x     = tick(e, 1)
+				v, ok = <-e.in
+			)
+			e.out = x*100 + v*10 + b2i(ok)
+		}
+		go {
+			if fail {
+				failSibling()?
+			}
+		}
+	}
+	return nil
+}
+
+func recvErrdeferArg(ctx context.Context, e *env, fail bool) error {
+	go group (ctx) {
+		go {
+			errdefer record(e, 1, <-e.in)
+			failSibling()?
+		}
+		go {
+			if fail {
+				failSibling()?
+			}
+		}
+	}
+	return nil
+}
+
+func recvScopeDeferArg(ctx context.Context, e *env, fail bool) error {
+	go group (ctx) {
+		go {
+			scope defer record(e, 2, <-e.in)
+			e.out = 99
+		}
+		go {
+			if fail {
+				failSibling()?
+			}
+		}
+	}
+	return nil
+}
+
+func recvScopeDeferLoop(ctx context.Context, e *env, fail bool) error {
+	go group (ctx) {
+		go {
+			for i := 0; i < 1; i++ {
+				scope defer record(e, 2, <-e.in)
+				e.out = 99
+			}
+		}
+		go {
+			if fail {
+				failSibling()?
+			}
+		}
+	}
+	return nil
+}
+
+func recvInterp(ctx context.Context, e *env, fail bool) error {
+	go group (ctx) {
+		go {
+			s := $"v={<-e.in}"
+			if s == "v=7" {
+				e.out = 1
+			}
+		}
+		go {
+			if fail {
+				failSibling()?
+			}
+		}
+	}
+	return nil
+}
+
+func recvTupleLit(ctx context.Context, e *env, fail bool) error {
+	go group (ctx) {
+		go {
+			t := (<-e.in, 2)
+			a, b := t
+			e.out = a*10 + b
+		}
+		go {
+			if fail {
+				failSibling()?
+			}
+		}
+	}
+	return nil
+}
 type cell struct {
 	name      string
 	run       func(ctx context.Context, e *env, fail bool) error
@@ -1032,6 +1341,8 @@ type cell struct {
 	flag      bool
 	base      int
 	calls     int
+	bad       bool
+	undo      int
 	capIn     int
 	closed    bool
 	want      int
@@ -1165,6 +1476,71 @@ func cancelCells() []cell {
 	}
 }
 
+func tryValueCells() []cell {
+	return []cell{
+		{name: "try-if", run: tryIfCond, base: 3, feed: []int{3, 99}, want: 1, left: 1, calls: 1},
+		{name: "try-if-else", run: tryIfCond, base: 3, feed: []int{4, 99}, want: 2, left: 1, calls: 1},
+		{name: "try-if-bad", run: tryIfCond, base: 3, bad: true, feed: []int{3, 99}, left: 2, calls: 1},
+		{name: "try-if-init-recv", run: tryIfInitRecv, feed: []int{5, 99}, want: 5, left: 1, calls: 1},
+		{name: "try-if-init-recv-bad", run: tryIfInitRecv, bad: true, feed: []int{5, 99}, left: 1, calls: 1},
+		{name: "try-switch-tag", run: trySwitchTag, base: 3, feed: []int{3, 99}, want: 1, left: 1, calls: 1},
+		{name: "try-switch-tag-default", run: trySwitchTag, base: 3, feed: []int{5, 99}, want: 2, left: 1, calls: 1},
+		{name: "try-switch-tag-bad", run: trySwitchTag, base: 3, bad: true, feed: []int{3, 99}, left: 2, calls: 1},
+		{name: "try-switch-case", run: trySwitchCase, base: 3, feed: []int{3, 99}, want: 1, left: 1, calls: 1},
+		{name: "try-switch-case-default", run: trySwitchCase, base: 3, feed: []int{5, 99}, want: 2, left: 1, calls: 1},
+		{name: "try-switch-case-bad", run: trySwitchCase, base: 3, bad: true, feed: []int{3, 99}, left: 2, calls: 1},
+		{name: "try-for-cond", run: tryForCond, base: 3, feed: []int{1, 2, 5, 99}, want: 2, left: 1, calls: 1},
+		{name: "try-for-cond-bad", run: tryForCond, base: 3, bad: true, feed: []int{1, 2, 5, 99}, left: 4, calls: 1},
+		{name: "try-for-post", run: tryForPost, base: 3, feed: []int{4, 4, 99}, want: 2, left: 1, calls: 1},
+		{name: "try-for-post-bad", run: tryForPost, base: 3, bad: true, feed: []int{4, 4, 99}, left: 3, calls: 1},
+		{name: "try-undo", run: tryUndo, base: 3, feed: []int{3, 99}, want: 1, left: 1, calls: 1},
+		{name: "try-undo-bad", run: tryUndo, base: 3, bad: true, feed: []int{3, 99}, left: 2, calls: 1, undo: 1},
+		{name: "try-expr", run: tryIfExprInit, feed: []int{1, 99}, want: 1, left: 1, calls: 1},
+		{name: "try-expr-bad", run: tryIfExprInit, bad: true, feed: []int{1, 99}, left: 2, calls: 1},
+		{name: "try-label-for", run: tryLabeledFor, base: 3, feed: []int{1, 2, 5, 99}, want: 2, left: 2, calls: 1},
+		{name: "try-label-for-bad", run: tryLabeledFor, base: 3, bad: true, feed: []int{1, 2, 5, 99}, left: 4, calls: 1},
+		{name: "try-label-switch-break", run: tryLabeledSwitch, base: 3, flag: true, feed: []int{3, 99}, want: 10, left: 1, calls: 1},
+		{name: "try-label-switch", run: tryLabeledSwitch, base: 3, feed: []int{3, 99}, want: 11, left: 1, calls: 1},
+		{name: "try-label-switch-bad", run: tryLabeledSwitch, base: 3, bad: true, feed: []int{3, 99}, left: 2, calls: 1},
+	}
+}
+
+func tryCancelCells() []cell {
+	return []cell{
+		{name: "try-if-cancel", run: tryIfCond, base: 3, calls: 1},
+		{name: "try-if-init-recv-cancel", run: tryIfInitRecv},
+		{name: "try-switch-tag-cancel", run: trySwitchTag, base: 3, calls: 1},
+		{name: "try-switch-case-cancel", run: trySwitchCase, base: 3, calls: 1},
+		{name: "try-for-cond-cancel", run: tryForCond, base: 3, calls: 1},
+		{name: "try-for-post-cancel", run: tryForPost, base: 3, want: 1, calls: 1},
+		{name: "try-undo-cancel", run: tryUndo, base: 3, calls: 1, undo: 1},
+		{name: "try-expr-cancel", run: tryIfExprInit, calls: 1},
+		{name: "try-label-for-cancel", run: tryLabeledFor, base: 3, calls: 1},
+		{name: "try-label-switch-cancel", run: tryLabeledSwitch, base: 3, calls: 1},
+	}
+}
+
+func formValueCells() []cell {
+	return []cell{
+		{name: "var-group", run: recvVarGroup, feed: []int{5, 99}, want: 151, left: 1, calls: 1},
+		{name: "errdefer-arg", run: recvErrdeferArg, bad: true, feed: []int{7, 99}, want: 17, left: 1},
+		{name: "scope-defer-arg", run: recvScopeDeferArg, feed: []int{7, 99}, want: 27, left: 1},
+		{name: "scope-defer-loop", run: recvScopeDeferLoop, feed: []int{7, 99}, want: 27, left: 1},
+		{name: "interp", run: recvInterp, feed: []int{7, 99}, want: 1, left: 1},
+		{name: "tuple-lit", run: recvTupleLit, feed: []int{7, 99}, want: 72, left: 1},
+	}
+}
+
+func formCancelCells() []cell {
+	return []cell{
+		{name: "var-group-cancel", run: recvVarGroup, calls: 1},
+		{name: "errdefer-arg-cancel", run: recvErrdeferArg},
+		{name: "scope-defer-arg-cancel", run: recvScopeDeferArg},
+		{name: "scope-defer-loop-cancel", run: recvScopeDeferLoop},
+		{name: "interp-cancel", run: recvInterp},
+		{name: "tuple-lit-cancel", run: recvTupleLit},
+	}
+}
 func condCancelCells() []cell {
 	return []cell{
 		{name: "for-cond-cancel", run: condFor},
@@ -1190,7 +1566,7 @@ func condCancelCells() []cell {
 }
 
 //logos:allow(correctness::unbounded_channel_op)
-func exercise(c cell, fail bool) string {
+func newEnv(c cell) *env {
 	e := &env{in: make(chan int, max(len(c.feed), c.capIn)), mid: make(chan int, 1), boxes: make(chan box, len(c.boxes))}
 	e.sinks = []chan int{make(chan int, 1)}
 	e.chain = make(chan chan int, 1)
@@ -1198,6 +1574,7 @@ func exercise(c cell, fail bool) string {
 	e.anys = make(chan any, 1)
 	e.flag = c.flag
 	e.base = c.base
+	e.bad = c.bad
 	if c.anyv != 0 {
 		e.anys <- c.anyv
 	}
@@ -1226,13 +1603,19 @@ func exercise(c cell, fail bool) string {
 	if c.closed {
 		close(e.in)
 	}
+	return e
+}
+
+func exercise(c cell, fail bool) string {
+	e := newEnv(c)
 	watchdog := time.AfterFunc(waitBound, func() {
 		fmt.Printf("FAIL %s: group did not return within the bound\n", c.name)
 		os.Exit(1)
 	})
 	err := c.run(context.Background(), e, fail)
 	watchdog.Stop()
-	if fail != errors.Is(err, errSib) || (!fail && err != nil) {
+	wantErr := fail || c.bad
+	if wantErr != errors.Is(err, errSib) || (!wantErr && err != nil) {
 		return fmt.Sprintf("got error %v", err)
 	}
 	got := e.out
@@ -1244,6 +1627,9 @@ func exercise(c cell, fail bool) string {
 	}
 	if e.calls != c.calls {
 		return fmt.Sprintf("got %d evaluations want %d", e.calls, c.calls)
+	}
+	if e.undo != c.undo {
+		return fmt.Sprintf("got %d undos want %d", e.undo, c.undo)
 	}
 	if len(e.in) != c.left || len(e.boxes) != c.leftBoxes {
 		return fmt.Sprintf("got %d and %d values left want %d and %d", len(e.in), len(e.boxes), c.left, c.leftBoxes)
@@ -1265,12 +1651,12 @@ func main() {
 		}
 		fmt.Printf("ok %s\n", name)
 	}
-	for _, c := range slices.Concat(valueCells(), condValueCells()) {
+	for _, c := range slices.Concat(valueCells(), condValueCells(), tryValueCells(), formValueCells()) {
 		if selected(c.name) {
 			report(c.name, exercise(c, false))
 		}
 	}
-	for _, c := range slices.Concat(cancelCells(), condCancelCells()) {
+	for _, c := range slices.Concat(cancelCells(), condCancelCells(), tryCancelCells(), formCancelCells()) {
 		if selected(c.name) {
 			report(c.name, exercise(c, true))
 		}

@@ -9,7 +9,6 @@ import (
 	"strconv"
 
 	"cmd/compile/internal/syntax"
-	"cmd/compile/internal/types2"
 )
 
 func (h *groupHoist) child() *groupHoist {
@@ -32,17 +31,7 @@ func (h *groupHoist) drained(sp span) otext {
 
 func (h *groupHoist) shortCircuit(op *syntax.Operation) syntax.Expr {
 	fc := h.fc
-	fl := fc.fl
 	pos := h.scopePos(op.Pos())
-	typ := fl.pkg.info.TypeOf(op)
-	if typ != nil {
-		typ = types2.Default(typ)
-	}
-	native, spelled, ok := fl.spellTypeBoth(typ, pos)
-	if typ == nil || !ok {
-		fc.groupReject(pos, "in the right operand of && or || whose type cannot be written")
-		return op
-	}
 	whole, leftSpan, rightSpan := h.span(op), h.span(op.X), h.span(op.Y)
 	mark := fc.hoistSubMark()
 	left := h.expr(op.X)
@@ -55,6 +44,7 @@ func (h *groupHoist) shortCircuit(op *syntax.Operation) syntax.Expr {
 	}
 	leftText, rightText := h.drained(leftSpan), h.drained(rightSpan)
 	t := fc.groupTempName("t")
+	declN, declT := h.valueTemp(pos, op, t, left, leftText)
 	var guard syntax.Expr = nameOf(pos, t)
 	negate := ""
 	if op.Op == syntax.OrOr {
@@ -65,17 +55,11 @@ func (h *groupHoist) shortCircuit(op *syntax.Operation) syntax.Expr {
 	body := append(right.native, set)
 	bodyText := append(right.text, cat(gen(t+" = "), rightText))
 	h.add(
-		[]syntax.Stmt{
-			typedVarDecl(pos, nameOf(pos, t), native),
-			assignOf(pos, []syntax.Expr{nameOf(pos, t)}, []syntax.Expr{left}),
-			ifOf(pos, nil, guard, body),
-		},
-		gen("var "+t+" "+spelled),
-		cat(gen(t+" = "), leftText),
-		cat(gen("if "+negate+t+" {\n"), joinO(bodyText, "\n"), gen("\n}")),
+		append(declN, ifOf(pos, nil, guard, body)),
+		append(declT, cat(gen("if "+negate+t+" {\n"), joinO(bodyText, "\n"), gen("\n}")))...,
 	)
-	fc.hoistSubs = append(fc.hoistSubs, hoistSub{start: whole.start, end: whole.end, text: t})
-	return nameOf(syntax.StartPos(op), t)
+	fc.hoistSubs = append(fc.hoistSubs, hoistSub{start: whole.start, end: whole.end, text: "(" + t + " == true)"})
+	return at(&syntax.ParenExpr{X: at(&syntax.Operation{Op: syntax.Eql, X: nameOf(pos, t), Y: nameOf(pos, "true")}, pos)}, syntax.StartPos(op))
 }
 
 func (fl *fileLower) groupSimpleStart(s syntax.Stmt) int {
@@ -167,7 +151,25 @@ func (h *groupHoist) stmt(s syntax.Stmt, sp span) {
 		h.assign(n)
 	}
 	fc.hoistSubEmit(fc.hoistSubTake(mark))
+	if h.tryInit(s) {
+		return
+	}
 	h.add([]syntax.Stmt{s}, fl.textOf(sp))
+}
+
+func (h *groupHoist) tryInit(s syntax.Stmt) bool {
+	init, ok := s.(syntax.SimpleStmt)
+	if !ok {
+		return false
+	}
+	core, isTry := h.fc.initCoreOf(init)
+	if !isTry {
+		return false
+	}
+	native, text, _, _ := core()
+	anchorScopes(native, h.scopePos(s.Pos()))
+	h.add(native, text)
+	return true
 }
 
 func (h *groupHoist) moveInit(init syntax.SimpleStmt, limit int) (span, span) {
@@ -188,12 +190,11 @@ func (fc *funcLower) groupHoistIf(s *syntax.IfStmt, top groupFrame) []syntax.Stm
 	h := fc.newGroupHoist(top, start)
 	h.pos = s.Pos()
 	condRecv := s.Cond != nil && groupContainsRecv(s.Cond)
-	split := s.Init != nil && condRecv
+	split := s.Init != nil && (condRecv || fc.groupTryInit(s.Init))
 	switch {
 	case split:
-		condStart := h.span(s.Cond).start
-		moved, _ := h.moveInit(s.Init, fl.off(s.Then.Pos()))
-		fl.add(moved.start, condStart, "")
+		moved, semi := h.moveInit(s.Init, fl.off(s.Then.Pos()))
+		fl.add(moved.start, semi.end, "")
 		s.Init = nil
 	default:
 		if as, ok := s.Init.(*syntax.AssignStmt); ok {
@@ -248,11 +249,10 @@ func (fc *funcLower) groupHoistSwitch(s *syntax.SwitchStmt, top groupFrame) []sy
 	if groupCasesHaveRecv(s) {
 		return fc.groupSwitchCases(s, h, mark, start)
 	}
-	split := s.Init != nil && tagRecv
+	split := s.Init != nil && (tagRecv || fc.groupTryInit(s.Init))
 	if split {
-		tagStart := h.span(s.Tag).start
-		moved, _ := h.moveInit(s.Init, fl.groupSwitchHeaderEnd(s))
-		fl.add(moved.start, tagStart, "")
+		moved, semi := h.moveInit(s.Init, fl.groupSwitchHeaderEnd(s))
+		fl.add(moved.start, semi.end, "")
 		s.Init = nil
 	} else if as, ok := s.Init.(*syntax.AssignStmt); ok {
 		h.assign(as)
@@ -313,29 +313,12 @@ func (fc *funcLower) groupSwitchCases(s *syntax.SwitchStmt, h *groupHoist, mark,
 
 func (h *groupHoist) cacheTag(tag syntax.Expr, sp span) string {
 	fc := h.fc
-	fl := fc.fl
-	pos := tag.Pos()
-	typ := fl.pkg.info.TypeOf(tag)
-	if typ != nil {
-		typ = types2.Default(typ)
-	}
-	native, spelled, ok := fl.spellTypeBoth(typ, pos)
 	name := fc.groupTempName("tag")
-	if typ == nil || !ok {
-		fc.groupReject(pos, "in a switch whose tag type cannot be written")
-		return name
-	}
 	mark := fc.hoistSubMark()
 	value := h.expr(tag)
 	fc.hoistSubEmit(fc.hoistSubTake(mark))
-	h.add(
-		[]syntax.Stmt{
-			typedVarDecl(pos, nameOf(pos, name), native),
-			assignOf(pos, []syntax.Expr{nameOf(pos, name)}, []syntax.Expr{value}),
-		},
-		gen("var "+name+" "+spelled),
-		cat(gen(name+" = "), fc.fl.textOf(sp)),
-	)
+	native, texts := h.valueTemp(tag.Pos(), tag, name, value, fc.fl.textOf(sp))
+	h.add(native, texts...)
 	return name
 }
 
@@ -383,7 +366,7 @@ func (fc *funcLower) groupHoistFor(s *syntax.ForStmt, top groupFrame) []syntax.S
 	if postRecv {
 		flag = fc.groupTempName("first")
 	}
-	fc.groupLoopInit(h, s, semis, flag, open)
+	fc.groupLoopInit(h, s, groupForHead{semis: semis, open: open, flag: flag})
 	var topNative []syntax.Stmt
 	var topText []otext
 	if postRecv {
@@ -429,32 +412,45 @@ func (fc *funcLower) groupHoistFor(s *syntax.ForStmt, top groupFrame) []syntax.S
 	return out
 }
 
-func (fc *funcLower) groupLoopInit(h *groupHoist, s *syntax.ForStmt, semis []span, flag string, open int) {
+type groupForHead struct {
+	semis []span
+	open  int
+	flag  string
+}
+
+func (fc *funcLower) groupTryInit(init syntax.SimpleStmt) bool {
+	_, ok := fc.initCoreOf(init)
+	return ok
+}
+
+func (fc *funcLower) groupLoopInit(h *groupHoist, s *syntax.ForStmt, head groupForHead) {
 	fl := fc.fl
 	pos := s.Pos()
+	tryInit := fc.groupTryInit(s.Init)
 	def, isDef := s.Init.(*syntax.AssignStmt)
-	isDef = isDef && def.Op == syntax.Def
+	kept := isDef && def.Op == syntax.Def && !tryInit
 	switch {
-	case isDef:
+	case kept:
 		h.assign(def)
-	case s.Init != nil && (flag != "" || groupNodesHaveRecv(s.Init)):
-		moved, _ := h.moveInit(s.Init, open)
+	case s.Init != nil && (head.flag != "" || tryInit || groupNodesHaveRecv(s.Init)):
+		moved, _ := h.moveInit(s.Init, head.open)
 		fl.add(moved.start, moved.end, "")
 		s.Init = nil
 	}
-	if flag == "" {
+	if head.flag == "" {
 		return
 	}
-	if !isDef {
-		s.Init = defineOf(pos, []syntax.Expr{nameOf(pos, flag)}, []syntax.Expr{nameOf(pos, "true")})
-		fl.add(semis[0].start, semis[0].start, flag+" := true")
+	semi := head.semis[0].start
+	if !kept {
+		s.Init = defineOf(pos, []syntax.Expr{nameOf(pos, head.flag)}, []syntax.Expr{nameOf(pos, "true")})
+		fl.add(semi, semi, head.flag+" := true")
 		return
 	}
-	def.Lhs = listOf(pos, append(syntax.UnpackListExpr(def.Lhs), nameOf(pos, flag)))
+	def.Lhs = listOf(pos, append(syntax.UnpackListExpr(def.Lhs), nameOf(pos, head.flag)))
 	def.Rhs = listOf(pos, append(syntax.UnpackListExpr(def.Rhs), nameOf(pos, "true")))
 	op := fl.off(def.Pos())
-	fl.add(op, op, ", "+flag+" ")
-	fl.add(semis[0].start, semis[0].start, ", true")
+	fl.add(op, op, ", "+head.flag+" ")
+	fl.add(semi, semi, ", true")
 }
 
 func (fc *funcLower) groupHoistRange(s *syntax.ForStmt, rc *syntax.RangeClause, top groupFrame) []syntax.Stmt {
@@ -498,4 +494,41 @@ func (fc *funcLower) groupHoistCall(s *syntax.CallStmt, top groupFrame) ([]synta
 		return append(h.native, fc.lowerDeferTry(s, t, call)...), true
 	}
 	return append(h.native, s), true
+}
+
+func groupDeferredCall(deferred syntax.Expr) (*syntax.CallExpr, bool) {
+	e := syntax.Unparen(deferred)
+	if t, ok := e.(*syntax.TryExpr); ok {
+		e = syntax.Unparen(t.X)
+	}
+	call, ok := e.(*syntax.CallExpr)
+	return call, ok
+}
+
+func (fc *funcLower) groupHoistDeferredArgs(s syntax.Stmt, deferred syntax.Expr, top groupFrame) ([]syntax.Stmt, bool) {
+	call, ok := groupDeferredCall(deferred)
+	if !ok || !groupNodesHaveRecv(call) {
+		return nil, false
+	}
+	start := fc.fl.off(s.Pos())
+	mark := fc.hoistSubMark()
+	h := fc.newGroupHoist(top, start)
+	h.pos = s.Pos()
+	h.slots(groupOperandSlots(call))
+	h.before(mark, start)
+	return h.native, true
+}
+
+func (fc *funcLower) groupScopeArgs(s *syntax.ScopeDeferStmt, call *syntax.CallExpr) *groupHoist {
+	top, ok := fc.groupChanTop()
+	if !ok || !groupNodesHaveRecv(call) {
+		return nil
+	}
+	start := fc.fl.off(s.Pos())
+	mark := fc.hoistSubMark()
+	h := fc.newGroupHoist(top, start)
+	h.pos = s.Pos()
+	h.slots(groupOperandSlots(call))
+	fc.hoistSubEmit(fc.hoistSubTake(mark))
+	return h
 }

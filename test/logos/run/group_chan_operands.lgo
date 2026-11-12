@@ -472,6 +472,79 @@ func recvElidedMapKey(ctx context.Context, e *env, fail bool) error {
 	return nil
 }
 
+type user struct{ N int }
+
+func findUser(n int) *user? {
+	if n > 0 {
+		return &user{n}
+	}
+	return nil
+}
+
+func takeUser(u *user?, v int) int {
+	x := u ?? &user{-1}
+	return x.N*10 + v
+}
+
+func findInt(n int) int? {
+	if n > 0 {
+		return n
+	}
+	return nil
+}
+
+func takeInt(o int?, v int) int {
+	x := o ?? -1
+	return x*10 + v
+}
+
+func takePair(t (int, int), v int) int {
+	a, b := t
+	return a*100 + b*10 + v
+}
+
+func recvOptionOperand(ctx context.Context, e *env, fail bool) error {
+	go group (ctx) {
+		go {
+			e.out = takeInt(findInt(2), <-e.in)
+		}
+		go {
+			if fail {
+				failSibling()?
+			}
+		}
+	}
+	return nil
+}
+
+func recvPtrOptionOperand(ctx context.Context, e *env, fail bool) error {
+	go group (ctx) {
+		go {
+			e.out = takeUser(findUser(3), <-e.in)
+		}
+		go {
+			if fail {
+				failSibling()?
+			}
+		}
+	}
+	return nil
+}
+
+func recvTupleOperand(ctx context.Context, e *env, fail bool) error {
+	go group (ctx) {
+		go {
+			e.out = takePair((one(), 2), <-e.in)
+		}
+		go {
+			if fail {
+				failSibling()?
+			}
+		}
+	}
+	return nil
+}
+
 type cell struct {
 	name    string
 	run     func(ctx context.Context, e *env, fail bool) error
@@ -520,6 +593,9 @@ func valueCells() []cell {
 		{name: "elided-pointer", run: recvElidedPointer, feed: []int{5, 99}, want: 15, left: 1},
 		{name: "elided-nested", run: recvElidedNested, feed: []int{5, 99}, want: 15, left: 1},
 		{name: "elided-map-key", run: recvElidedMapKey, feed: []int{5, 99}, want: 51, left: 1},
+		{name: "option-operand", run: recvOptionOperand, feed: []int{5, 99}, want: 25, left: 1},
+		{name: "ptr-option-operand", run: recvPtrOptionOperand, feed: []int{5, 99}, want: 35, left: 1},
+		{name: "tuple-operand", run: recvTupleOperand, feed: []int{5, 99}, want: 125, left: 1},
 	}
 }
 
@@ -548,6 +624,9 @@ func cancelCells() []cell {
 		{name: "elided-pointer-cancel", run: recvElidedPointer},
 		{name: "elided-nested-cancel", run: recvElidedNested},
 		{name: "elided-map-key-cancel", run: recvElidedMapKey},
+		{name: "option-operand-cancel", run: recvOptionOperand},
+		{name: "ptr-option-operand-cancel", run: recvPtrOptionOperand},
+		{name: "tuple-operand-cancel", run: recvTupleOperand},
 	}
 }
 
