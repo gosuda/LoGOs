@@ -3,6 +3,7 @@
 package main
 
 import (
+	"encoding/binary"
 	"fmt"
 	"os"
 	"testing"
@@ -41,6 +42,54 @@ func mustBytes(b []byte, err error) []byte {
 		panic(err)
 	}
 	return b
+}
+
+func countWire(count uint64) []byte {
+	return binary.AppendUvarint([]byte{1}, count)
+}
+
+func leastDecode(wire []byte, runs int, stopAt int64) (int64, error) {
+	best := int64(1 << 62)
+	var firstErr error
+	for i := 0; i < runs && best > stopAt; i++ {
+		var v TickHolder
+		start := time.Now()
+		err := v.UnmarshalBinary(wire)
+		if el := time.Since(start).Nanoseconds(); el < best {
+			best = el
+		}
+		if firstErr == nil {
+			firstErr = err
+		}
+	}
+	return best, firstErr
+}
+
+func decodeTimes() error {
+	const lawful = 1000
+	const maxLawful = 1 << 20
+	const overCap = 1000000000
+	small, err := leastDecode(countWire(lawful), 100, 0)
+	if err != nil {
+		return fmt.Errorf("count %d rejected: %w", lawful, err)
+	}
+	small = max(small, 1)
+	limit := 200*small + 20000
+	got, err := leastDecode(countWire(maxLawful), 20, limit)
+	if err != nil {
+		return fmt.Errorf("count %d rejected: %w", maxLawful, err)
+	}
+	if got > limit {
+		return fmt.Errorf("decode time grows with count: %d ns at %d vs %d ns at %d", got, maxLawful, small, lawful)
+	}
+	got, err = leastDecode(countWire(overCap), 20, limit)
+	if err == nil {
+		return fmt.Errorf("count %d accepted, want rejection before iteration", overCap)
+	}
+	if got > limit {
+		return fmt.Errorf("rejection time grows with count: %d ns at %d vs %d ns at %d", got, overCap, small, lawful)
+	}
+	return nil
 }
 
 func main() {
@@ -84,8 +133,13 @@ func main() {
 		fmt.Printf("FAIL encode time grows with count: %d ns at %d vs %d ns at %d\n", bigBest, bigCount, smallBest, smallCount)
 		os.Exit(1)
 	}
+	if err := decodeTimes(); err != nil {
+		fmt.Println("FAIL decode-time-constant:", err)
+		os.Exit(1)
+	}
 	fmt.Println("ok wire-header-grows")
 	fmt.Println("ok roundtrip-count")
 	fmt.Println("ok encode-alloc-constant")
 	fmt.Println("ok encode-time-constant")
+	fmt.Println("ok decode-time-constant")
 }
