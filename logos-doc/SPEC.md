@@ -402,6 +402,10 @@ Constant data with pointers MUST live in read-only memory, so a write to it faul
 
 A write to a constant composite through `unsafe` MUST fault at run time. [T-201]
 
+A hand-written `//logos:rodata` directive above a package-level `var` outside a `var (...)` group in a loGo/s package MUST place the variable in read-only memory, and a variable under it whose initializer needs dynamic initialization MUST fail compilation with `[correctness::rodata_dynamic_init]` at the variable. [T-201]
+
+A write through any alias to a variable placed by that directive MUST fault at run time. [T-201]
+
 `reflect.DeepEqual` and `fmt.Println` MUST accept constant composites. [T-201]
 
 A package with a 1,000-key unexported constant map MUST add no heap bytes at init, with its table symbol in read-only memory. [T-201]
