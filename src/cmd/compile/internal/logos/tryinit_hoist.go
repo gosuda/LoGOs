@@ -343,7 +343,7 @@ func (fc *funcLower) tempSwitchStmt(s syntax.Stmt, switches []*syntax.SwitchExpr
 	hpos := stmtStartPos(s)
 	for _, sx := range ordered {
 		typ := fl.pkg.info.TypeOf(sx)
-		nativeT, _, ok := fl.spellTypeBoth(typ, sx.Pos())
+		nativeT, _, ok := fl.spellLoweredBoth(typ, sx.Pos())
 		if !ok {
 			continue
 		}
@@ -377,7 +377,7 @@ func (fc *funcLower) wrapSwitchStmt(s syntax.Stmt, switches []*syntax.SwitchExpr
 	inner := orderInnerFirst(fl, switches)
 	for _, sx := range inner {
 		typ := fl.pkg.info.TypeOf(sx)
-		nativeT, _, ok := fl.spellTypeBoth(typ, sx.Pos())
+		nativeT, _, ok := fl.spellLoweredBoth(typ, sx.Pos())
 		if !ok {
 			continue
 		}

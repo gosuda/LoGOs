@@ -208,19 +208,45 @@ func queueEjectGofmt(path string) {
 	ejectGofmtFiles = append(ejectGofmtFiles, path)
 }
 
+const ejectGofmtPasses = 3
+
 func runEjectGofmt() {
+	files := ejectGofmtFiles
+	ejectGofmtFiles = nil
+	gofmtFiles("-w", files)
+	for range ejectGofmtPasses {
+		files = unformattedFiles(files)
+		if len(files) == 0 {
+			return
+		}
+		gofmtFiles("-w", files)
+	}
+}
+
+func unformattedFiles(files []string) []string {
+	var out []string
+	for line := range strings.SplitSeq(string(gofmtFiles("-l", files)), "\n") {
+		if line != "" {
+			out = append(out, line)
+		}
+	}
+	return out
+}
+
+func gofmtFiles(flag string, files []string) []byte {
 	gofmt := gofmtBinary()
-	args := []string{gofmt, "-w"}
-	argLen := len(gofmt) + len(" -w")
+	args := []string{gofmt, flag}
+	argLen := len(gofmt) + 1 + len(flag)
 	base, baseLen := len(args), argLen
+	var out []byte
 	flush := func() {
 		if len(args) > base {
-			gofmtRun(args, nil)
+			out = append(out, gofmtRun(args, nil)...)
 			args = args[:base]
 			argLen = baseLen
 		}
 	}
-	for _, file := range ejectGofmtFiles {
+	for _, file := range files {
 		if len(args) > base && argLen+1+len(file) >= ejectArgLengthLimit {
 			flush()
 		}
@@ -228,7 +254,7 @@ func runEjectGofmt() {
 		argLen += 1 + len(file)
 	}
 	flush()
-	ejectGofmtFiles = nil
+	return out
 }
 
 func gofmtRun(args []string, stdin []byte) []byte {

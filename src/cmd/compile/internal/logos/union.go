@@ -72,7 +72,7 @@ func (fl *fileLower) lowerSwitchExpr(e *syntax.SwitchExpr) syntax.Expr {
 	if typ == nil {
 		base.Fatalf("logos: switch expression at %s has no checked type", pos.String())
 	}
-	resultType, text, ok := fl.spellTypeBoth(typ, pos)
+	resultType, text, ok := fl.spellLoweredBoth(typ, pos)
 	if !ok {
 		base.Fatalf("logos: switch expression at %s has type %s that cannot be spelled in this file", pos.String(), typ)
 	}
