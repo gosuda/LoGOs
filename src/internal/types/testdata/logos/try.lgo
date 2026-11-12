@@ -62,6 +62,10 @@ func tryReturn() (int, error) {
 	return twoResults()? /* ERROR "[correctness::misplaced_try] ? must end an assignment, expression statement, defer, or errdefer" */
 }
 
+func tryReturnList() (int, error) {
+	return twoResults()? /* ERROR "[correctness::misplaced_try] ? must end an assignment, expression statement, defer, or errdefer" */, nil
+}
+
 func tryGo() (int, error) {
 	go justError()? /* ERROR "[correctness::misplaced_try] ? must end an assignment, expression statement, defer, or errdefer" */
 	return 0, nil
