@@ -598,7 +598,7 @@ A single-value map read `m[k]` MUST type as `V?`, while `v, ok := m[k]` MUST kee
 Zero values of non-nil pointers MUST fail with correctness::nonnil_uninitialized. [T-202][T-Sec12]
 Absent map and JSON values MUST check through V? and MissingFieldError. [T-202][T-Sec12]
 Block scoping MUST stay standard Go. [T-202]
-Outer variables MUST narrow after if x == nil return guards. [T-202]
+A local or parameter declared in the block of an `if x == nil` early exit, or in a block that encloses it, is an outer variable of that guard. An outer variable MUST stay narrowed after the guard, inside nested blocks too, until a nested declaration shadows it. [T-202]
 
 ### 2.3 RFC-203: Closed unions, property interfaces, and inline assertions
 
