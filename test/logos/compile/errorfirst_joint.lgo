@@ -150,3 +150,44 @@ func efChainSentinel(sentinel error) bool {
 	n, err := efFetch()
 	return err == sentinel && n == 0 // ERROR "result_before_error_check"
 }
+
+func efCapturedReassigned() {
+	n, err := efFetch()
+	if err != nil {
+		return
+	}
+	f := func() {
+		efUse(n) // ERROR "result_before_error_check"
+	}
+	n, err = efFetch()
+	_ = err
+	f()
+}
+
+func efCapturedAlias() {
+	n, err := efFetch()
+	if err != nil {
+		return
+	}
+	alias := &n
+	f := func() {
+		efUse(n) // ERROR "result_before_error_check"
+	}
+	*alias = 2
+	f()
+}
+
+func efCapturedLoop() {
+	n, err := efFetch()
+	if err != nil {
+		return
+	}
+	f := func() {
+		efUse(n) // ERROR "result_before_error_check"
+	}
+	for range 2 {
+		n, err = efFetch()
+		_ = err
+		f()
+	}
+}

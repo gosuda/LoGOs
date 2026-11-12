@@ -688,11 +688,25 @@ func (s *logosEFState) detach(errV *Var) *logosEFState {
 	})
 }
 
-func (s *logosEFState) unprove() *logosEFState {
-	return s.remap(func(e logosEFEntry) logosEFEntry {
+func (p *logosEFPass) capture(st *logosEFState) *logosEFState {
+	if p.assigns == nil {
+		p.collectAssigns()
+	}
+	var out map[*Var]logosEFEntry
+	for v, e := range st.m {
+		if !e.proven || p.initialized[v] && len(p.assigns[v]) == 1 && !p.addr[v] {
+			continue
+		}
+		if out == nil {
+			out = maps.Clone(st.m)
+		}
 		e.proven = false
-		return e
-	})
+		out[v] = e
+	}
+	if out == nil {
+		return st
+	}
+	return &logosEFState{out}
 }
 
 func logosEFJoin(a, b *logosEFState) *logosEFState {
@@ -749,13 +763,14 @@ type logosEFEffects struct {
 }
 
 type logosEFPass struct {
-	check   *Checker
-	body    *syntax.BlockStmt
-	seen    map[syntax.Pos]bool
-	ctx     *logosEFCtx
-	eff     *logosEFEffects
-	assigns map[*Var][]syntax.Expr
-	addr    map[*Var]bool
+	check       *Checker
+	body        *syntax.BlockStmt
+	seen        map[syntax.Pos]bool
+	ctx         *logosEFCtx
+	eff         *logosEFEffects
+	assigns     map[*Var][]syntax.Expr
+	addr        map[*Var]bool
+	initialized map[*Var]bool
 }
 
 func (check *Checker) logosErrorFirst(body *syntax.BlockStmt) {
@@ -932,6 +947,7 @@ func (p *logosEFPass) sole(v *Var) syntax.Expr {
 func (p *logosEFPass) collectAssigns() {
 	p.assigns = make(map[*Var][]syntax.Expr)
 	p.addr = make(map[*Var]bool)
+	p.initialized = make(map[*Var]bool)
 	note := func(lhs []syntax.Expr, rhs []syntax.Expr, plain bool) {
 		for i, l := range lhs {
 			var r syntax.Expr
@@ -940,6 +956,9 @@ func (p *logosEFPass) collectAssigns() {
 			}
 			if v := p.varOf(l); v != nil {
 				p.assigns[v] = append(p.assigns[v], r)
+				if id, ok := syntax.Unparen(l).(*syntax.Name); ok && p.check.Defs[id] == v {
+					p.initialized[v] = true
+				}
 			}
 		}
 	}
@@ -1417,7 +1436,7 @@ func (p *logosEFPass) later(lit syntax.Node, body *syntax.BlockStmt, st *logosEF
 	saved := p.eff
 	eff := &logosEFEffects{inside: p.defsIn(lit), assigned: make(map[*Var]bool), created: make(map[*Var]string)}
 	p.eff = eff
-	p.run(body, st.unprove())
+	p.run(body, p.capture(st))
 	p.eff = saved
 	for v := range eff.assigned {
 		st = st.detach(v)
@@ -1438,7 +1457,7 @@ func (p *logosEFPass) lambda(lam *syntax.LambdaExpr, st *logosEFState) *logosEFS
 	if isBlock {
 		return p.later(lam, body, st)
 	}
-	p.expr(lam.Body, st.unprove())
+	p.expr(lam.Body, p.capture(st))
 	return st
 }
 

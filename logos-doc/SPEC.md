@@ -584,6 +584,8 @@ Code MUST copy the field to a local first. [T-202]
 
 For a callee declared in `.lgo`, reading a result before the `err == nil` proof MUST fail with `[correctness::result_before_error_check]`. [T-202]
 
+An `err == nil` proof MUST remain valid for a captured result in a function literal, lambda, or `go group` child when that result is initialized at its declaration, is never assigned again, and never has its address taken. A result assigned anywhere besides its declaration or whose address is taken MUST NOT inherit that proof across the capture boundary. [T-202]
+
 A return that passes a result and the err it came with, both unread and unchanged, MUST NOT count as a read of the result. [T-202]
 
 Assigning a result to the blank identifier MUST NOT count as a read. [T-202]
