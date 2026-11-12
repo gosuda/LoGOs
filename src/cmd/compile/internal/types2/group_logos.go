@@ -45,18 +45,23 @@ func (check *Checker) logosGroupStmt(ctxt stmtContext, s *syntax.GroupStmt) {
 }
 
 func (check *Checker) logosGroupContext(s *syntax.GroupStmt) {
+	check.logosContextArg(s.Ctx, "go group context")
+}
+
+func (check *Checker) logosContextArg(e syntax.Expr, what string) bool {
 	var x operand
-	check.expr(nil, &x, s.Ctx)
+	check.expr(nil, &x, e)
 	if !x.isValid() {
-		return
+		return false
 	}
 	if named, ok := Unalias(x.typ()).(*Named); ok {
 		if obj := named.Obj(); obj != nil && obj.Pkg() != nil &&
 			obj.Pkg().Path() == "context" && obj.Name() == "Context" {
-			return
+			return true
 		}
 	}
-	check.errorf(s.Ctx, MismatchedTypes, "go group context must be context.Context, have %s", x.typ())
+	check.errorf(e, MismatchedTypes, "%s must be context.Context, have %s", what, x.typ())
+	return false
 }
 
 func (check *Checker) logosGroupLimit(s *syntax.GroupStmt) {
