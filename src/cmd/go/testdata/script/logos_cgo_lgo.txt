@@ -75,6 +75,27 @@ stderr 'c_bridge\.lgo:9:2: \[correctness::cgo_file_logos_syntax\] files that imp
 ! logos build -o $WORK/badtuple.bin ./badtuple
 stderr 'c_bridge\.lgo:9:20: \[correctness::cgo_file_logos_syntax\] files that import "C" must use Go syntax only$'
 
+! logos build -o $WORK/badassert.bin ./badassert
+stderr 'c_bridge\.lgo:8:18: \[correctness::cgo_file_logos_syntax\] files that import "C" must use Go syntax only$'
+
+! logos build -o $WORK/badproperty.bin ./badproperty
+stderr 'c_bridge\.lgo:9:2: \[correctness::cgo_file_logos_syntax\] files that import "C" must use Go syntax only$'
+
+! logos build -o $WORK/badreadonly.bin ./badreadonly
+stderr 'c_bridge\.lgo:9:2: \[correctness::cgo_file_logos_syntax\] files that import "C" must use Go syntax only$'
+
+! logos build -o $WORK/badconstview.bin ./badconstview
+stderr 'c_bridge\.lgo:8:15: \[correctness::cgo_file_logos_syntax\] files that import "C" must use Go syntax only$'
+
+! logos build -o $WORK/badconstviewvar.bin ./badconstviewvar
+stderr 'c_bridge\.lgo:8:10: \[correctness::cgo_file_logos_syntax\] files that import "C" must use Go syntax only$'
+
+! logos build -o $WORK/badproj.bin ./badproj
+stderr 'c_bridge\.lgo:12:10: \[correctness::cgo_file_logos_syntax\] files that import "C" must use Go syntax only$'
+
+! logos build -o $WORK/baddefault.bin ./baddefault
+stderr 'c_bridge\.lgo:9:11: \[correctness::cgo_file_logos_syntax\] files that import "C" must use Go syntax only$'
+
 logos build -o $WORK/bridge.bin ./okbridge
 ! exec $WORK/bridge.bin
 stderr 'logos: nil from Go value stored into non-nil .* at c_bridge\.lgo:10$'
@@ -518,6 +539,116 @@ func main() {
 	_ = pair
 }
 
+-- badassert/c_bridge.lgo --
+package main
+
+/*
+int c_one(void) { return 1; }
+*/
+import "C"
+
+type Item struct : Named {
+	N int
+}
+
+func main() {
+	_ = C.c_one()
+}
+
+-- badproperty/c_bridge.lgo --
+package main
+
+/*
+int c_one(void) { return 1; }
+*/
+import "C"
+
+type Props interface {
+	const Name string
+}
+
+func main() {
+	_ = C.c_one()
+}
+
+-- badreadonly/c_bridge.lgo --
+package main
+
+/*
+int c_one(void) { return 1; }
+*/
+import "C"
+
+type Reader interface {
+	const Read() int
+}
+
+func main() {
+	_ = C.c_one()
+}
+
+-- badconstview/c_bridge.lgo --
+package main
+
+/*
+int c_one(void) { return 1; }
+*/
+import "C"
+
+func total(xs const []int) int {
+	return len(xs) + int(C.c_one())
+}
+
+func main() {
+	_ = total(nil)
+}
+
+-- badconstviewvar/c_bridge.lgo --
+package main
+
+/*
+int c_one(void) { return 1; }
+*/
+import "C"
+
+var view const []int
+
+func main() {
+	_ = C.c_one()
+	_ = view
+}
+
+-- badproj/c_bridge.lgo --
+package main
+
+/*
+int c_one(void) { return 1; }
+*/
+import "C"
+
+type Item struct{ N int }
+
+func main() {
+	item := Item{N: int(C.c_one())}
+	_ = item.[N]
+}
+
+-- baddefault/c_bridge.lgo --
+package main
+
+/*
+int c_one(void) { return 1; }
+*/
+import "C"
+
+type Config struct {
+	Port int = 8080
+}
+
+func main() {
+	_ = C.c_one()
+}
+
 -- okbridge/c_bridge.lgo --
 package main
 
@@ -543,6 +674,32 @@ import "C"
 func broken( {
 	_ = C.c_one()
 	_ = "what? $\"x\" a => b"
+}
+
+const limit = 8
+
+const (
+	first = iota
+	second
+)
+
+type Plain struct {
+	A int `json:"a"`
+	B []byte
+}
+
+type Shape interface {
+	Area() int
+}
+
+func fine() int {
+	const local = 3
+	switch limit {
+	case 8:
+		const inCase = 1
+		return local + inCase
+	}
+	return first + second
 }
 
 -- gomod/go.mod --

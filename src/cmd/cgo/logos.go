@@ -72,8 +72,23 @@ func logosSyntaxPos(name string, src []byte) (token.Position, bool) {
 		params  bool
 		commaOK bool
 		group   bool
+		iface   bool
+		strct   bool
 	}
 	var stack []opener
+	top := func() opener {
+		if n := len(stack); n > 0 {
+			return stack[n-1]
+		}
+		return opener{}
+	}
+	startsStatement := func(t token.Token) bool {
+		switch t {
+		case token.ILLEGAL, token.SEMICOLON, token.LBRACE, token.COLON:
+			return true
+		}
+		return false
+	}
 
 	for {
 		pos, tok, lit := s.Scan()
@@ -134,6 +149,14 @@ func logosSyntaxPos(name string, src []byte) (token.Position, bool) {
 			tok == token.SWITCH && prev == token.CONST ||
 			tok == token.FUNC && prev == token.CONST:
 			note(file.Pos(prevOffset))
+		case tok == token.COLON && prev == token.STRUCT:
+			note(pos)
+		case tok == token.LBRACK && prev == token.PERIOD && offset == prevOffset+1:
+			note(file.Pos(prevOffset))
+		case tok == token.CONST && (!startsStatement(prev) || top().iface):
+			note(pos)
+		case tok == token.ASSIGN && top().strct:
+			note(pos)
 		case tok == token.LPAREN:
 			params := prev == token.FUNC || (prev == token.IDENT && prevPrev == token.FUNC)
 			enclParams := len(stack) > 0 && stack[len(stack)-1].params
@@ -142,7 +165,12 @@ func logosSyntaxPos(name string, src []byte) (token.Position, bool) {
 				(prev == token.IDENT && prevPrev != token.VAR && prevPrev != token.CONST && prevPrev != token.TYPE && !enclParams)
 			stack = append(stack, opener{tok: tok, params: params, commaOK: params || callLike})
 		case tok == token.LBRACK || tok == token.LBRACE:
-			stack = append(stack, opener{tok: tok, commaOK: true})
+			stack = append(stack, opener{
+				tok:     tok,
+				commaOK: true,
+				iface:   tok == token.LBRACE && prev == token.INTERFACE,
+				strct:   tok == token.LBRACE && prev == token.STRUCT,
+			})
 		case tok == token.RPAREN || tok == token.RBRACK || tok == token.RBRACE:
 			if n := len(stack); n > 0 {
 				want := token.LPAREN
