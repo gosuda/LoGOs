@@ -439,6 +439,74 @@ func CFrac(x complex128) complex128 {
 	}
 }
 
+func TestCompositeNaNMapKeys(t *testing.T) {
+	floatType := BasicType("float64")
+	complexType := BasicType("complex128")
+	arrayOf := func(v Value) Value {
+		return Value{typ: &Type{Kind: KArray, Len: 2, Elem: v.typ}, array: []Value{zeroValue(v.typ), v}}
+	}
+	structOf := func(v Value) Value {
+		return Value{typ: &Type{Kind: KStruct, Fields: []Field{{Name: "V", Type: v.typ}}}, strct: []Value{v}}
+	}
+	for _, shape := range []struct {
+		name string
+		key  func(Value) Value
+	}{
+		{"array", arrayOf},
+		{"struct", structOf},
+		{"arrayStructArray", func(v Value) Value { return arrayOf(structOf(arrayOf(v))) }},
+		{"structArrayStruct", func(v Value) Value { return structOf(arrayOf(structOf(v))) }},
+	} {
+		for _, leaf := range []struct {
+			name string
+			bad  Value
+			good Value
+		}{
+			{"float", FloatValue(math.NaN(), floatType), FloatValue(2, floatType)},
+			{"complexReal", ComplexValue(complex(math.NaN(), 1), complexType), ComplexValue(complex(2, 1), complexType)},
+			{"complexImag", ComplexValue(complex(1, math.NaN()), complexType), ComplexValue(complex(1, 2), complexType)},
+		} {
+			t.Run(shape.name+"/"+leaf.name+"/NaN", func(t *testing.T) {
+				testCompositeMapKey(t, shape.key(leaf.bad), "NaN is not a valid const map key")
+			})
+			t.Run(shape.name+"/"+leaf.name+"/finite", func(t *testing.T) {
+				testCompositeMapKey(t, shape.key(leaf.good), "")
+			})
+		}
+	}
+}
+
+func testCompositeMapKey(t *testing.T, key Value, wantError string) {
+	t.Helper()
+	h := newFakeHost(t)
+	h.vars["key"] = key
+	mapType := &Type{Kind: KMap, Key: key.typ, Elem: BasicType("int")}
+	lit := parseExpr(t, `map[Key]int{key: 7}`).(*syntax.CompositeLit)
+	h.types[lit] = mapType
+	h.types[lit.Type] = mapType
+	h.types[lit.Type.(*syntax.MapType).Key] = key.typ
+	h.vars["m"] = Value{typ: mapType, mval: &mapVal{
+		keys: []Value{key},
+		vals: []Value{IntValue(big.NewInt(7), BasicType("int"))},
+	}}
+	for _, expr := range []syntax.Expr{lit, parseExpr(t, `m[key]`)} {
+		if wantError != "" {
+			cerr := evalErr(t, h, Config{}, expr)
+			if cerr.Code != CodeEval || cerr.Detail != wantError {
+				t.Fatalf("error = %v, want %s CodeEval", cerr, wantError)
+			}
+			continue
+		}
+		v, _ := evalOne(t, h, Config{}, expr)
+		if expr == lit && v.mapLen() != 1 {
+			t.Fatalf("map len = %d, want 1", v.mapLen())
+		}
+		if expr != lit && v.Int64() != 7 {
+			t.Fatalf("lookup = %v, want 7", v)
+		}
+	}
+}
+
 func TestAbsentMapKey(t *testing.T) {
 	h := newFakeHost(t)
 	mk := &Type{Kind: KMap, Key: UntypedString(), Elem: BasicType("int")}

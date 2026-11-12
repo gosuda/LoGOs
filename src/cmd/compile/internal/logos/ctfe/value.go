@@ -918,6 +918,20 @@ func isNaNKey(k Value) bool {
 		c := k.Complex()
 		return math.IsNaN(real(c)) || math.IsNaN(imag(c))
 	}
+	switch k.typ.Kind {
+	case KArray:
+		for _, elem := range k.array {
+			if isNaNKey(elem) {
+				return true
+			}
+		}
+	case KStruct:
+		for _, field := range k.strct {
+			if isNaNKey(field) {
+				return true
+			}
+		}
+	}
 	return false
 }
 
