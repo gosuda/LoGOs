@@ -245,7 +245,14 @@ func (fc *funcLower) lowerLeaf(s syntax.Stmt) []syntax.Stmt {
 	switch s := s.(type) {
 	case *syntax.LabeledStmt:
 		pos := s.Stmt.Pos()
+		saved := fc.label
+		fc.label = s
 		inner := fc.lowerStmt(s.Stmt)
+		scoped := fc.label != s
+		fc.label = saved
+		if scoped {
+			return inner
+		}
 		if len(inner) == 0 {
 			empty := &syntax.EmptyStmt{}
 			empty.SetPos(pos)
@@ -272,15 +279,14 @@ func (fc *funcLower) lowerLeaf(s syntax.Stmt) []syntax.Stmt {
 
 func (fc *funcLower) lowerIf(s *syntax.IfStmt) []syntax.Stmt {
 	scanForLiterals(fc.fl, s.Cond)
-	if wrapped := fc.wrapInitStmt(s, s.Init, "if"); wrapped != nil {
-		s.Then.List = fc.lowerList(s.Then.List)
-		fc.lowerElse(s)
-		return []syntax.Stmt{wrapped}
+	prologue, hoisted := fc.wrapInitStmt(s, s.Init, "if")
+	if !hoisted {
+		scanForLiterals(fc.fl, s.Init)
 	}
-	scanForLiterals(fc.fl, s.Init)
+	out := fc.scoped(s, prologue)
 	s.Then.List = fc.lowerList(s.Then.List)
 	fc.lowerElse(s)
-	return []syntax.Stmt{s}
+	return out
 }
 
 func (fc *funcLower) lowerElse(s *syntax.IfStmt) {
@@ -294,27 +300,40 @@ func (fc *funcLower) lowerElse(s *syntax.IfStmt) {
 }
 
 func (fc *funcLower) lowerFor(s *syntax.ForStmt) []syntax.Stmt {
-	decl := fc.wrapForPost(s)
+	var prologue []syntax.Stmt
+	if decl := fc.wrapForPost(s); decl != nil {
+		prologue = append(prologue, decl)
+	}
 	switch init := s.Init.(type) {
 	case nil:
 	case *syntax.RangeClause:
 		scanForLiterals(fc.fl, init)
 	default:
-		if wrapped := fc.wrapInitStmt(s, init, "for"); wrapped != nil {
-			fc.finishFor(s)
-			return fc.withDecl(decl, wrapped)
+		if native, hoisted := fc.wrapInitStmt(s, init, "for"); hoisted {
+			prologue = append(prologue, native...)
+		} else {
+			scanForLiterals(fc.fl, init)
 		}
-		scanForLiterals(fc.fl, init)
 	}
+	out := fc.scoped(s, prologue)
 	fc.finishFor(s)
-	return fc.withDecl(decl, s)
+	return out
 }
 
-func (fc *funcLower) withDecl(decl syntax.Stmt, s syntax.Stmt) []syntax.Stmt {
-	if decl == nil {
-		return []syntax.Stmt{s}
+func (fc *funcLower) scoped(host syntax.Stmt, prologue []syntax.Stmt) []syntax.Stmt {
+	var s syntax.Stmt = host
+	if fc.label != nil && fc.label.Stmt == host {
+		s = fc.label
+		fc.label = nil
 	}
-	return []syntax.Stmt{decl, s}
+	return fc.fl.scopeHoists(s, append(prologue, s))
+}
+
+func (fc *funcLower) hostStart(host syntax.Stmt) int {
+	if fc.label != nil && fc.label.Stmt == host {
+		return fc.fl.stmtStartOf(fc.label)
+	}
+	return fc.fl.off(host.Pos())
 }
 
 func (fc *funcLower) finishFor(s *syntax.ForStmt) {
@@ -456,8 +475,8 @@ func (p *forPost) emitText(native []syntax.Stmt, text otext) {
 func (p *forPost) emit() syntax.Stmt {
 	fl := p.fc.fl
 	decl := typedVarDecl(p.errPos, p.err(), nameOf(p.errPos, "error"))
-	kwOff := fl.off(p.s.Pos())
-	fl.addT(kwOff, kwOff, cat(renderText([]syntax.Stmt{decl}, nil).trimRight("\n"), gen("; ")))
+	start := p.fc.hostStart(p.s)
+	fl.addT(start, start, cat(renderText([]syntax.Stmt{decl}, nil).trimRight("\n"), gen("; ")))
 	if p.s.Cond != nil {
 		hdr := fl.forHeaderOf(p.s)
 		fl.add(hdr.cond.start, hdr.cond.start, p.errSpell+" != nil || (")
@@ -480,15 +499,14 @@ func (p *forPost) emit() syntax.Stmt {
 }
 
 func (fc *funcLower) lowerSwitch(s *syntax.SwitchStmt) []syntax.Stmt {
-	if wrapped := fc.wrapInitStmt(s, s.Init, "switch"); wrapped != nil {
-		scanForLiterals(fc.fl, s.Tag)
-		fc.lowerCases(s.Body)
-		return []syntax.Stmt{wrapped}
+	prologue, hoisted := fc.wrapInitStmt(s, s.Init, "switch")
+	if !hoisted {
+		scanForLiterals(fc.fl, s.Init)
 	}
-	scanForLiterals(fc.fl, s.Init)
+	out := fc.scoped(s, prologue)
 	scanForLiterals(fc.fl, s.Tag)
 	fc.lowerCases(s.Body)
-	return []syntax.Stmt{s}
+	return out
 }
 
 func (fc *funcLower) lowerCases(body []*syntax.CaseClause) {
@@ -519,27 +537,24 @@ func (fc *funcLower) initCoreOf(init syntax.SimpleStmt) (initCore, bool) {
 	return nil, false
 }
 
-func (fc *funcLower) wrapInitStmt(host syntax.Stmt, init syntax.SimpleStmt, kw string) *syntax.BlockStmt {
+func (fc *funcLower) wrapInitStmt(host syntax.Stmt, init syntax.SimpleStmt, kw string) ([]syntax.Stmt, bool) {
 	core, ok := fc.initCoreOf(init)
 	if !ok {
-		return nil
+		return nil, false
 	}
 	fl := fc.fl
 	scanForLiterals(fl, init)
 	native, text, _, spanEnd := core()
 	anchorScopes(native, host.Pos())
-	kwOff := fl.off(host.Pos())
-	semi := skipSemi(fl.src, spanEnd)
+	cut := skipSemi(fl.src, spanEnd)
 	if kw == "for" {
-		semi--
+		cut--
 	}
 	clearInit(host)
-	end := blockEndOff(fl, host)
-	fl.addT(kwOff, semi, cat(gen("{ "), text, gen(kw+" ")))
-	fl.add(end, end, "} ")
-	wrapper := blockOf(host.Pos(), append(native, host))
-	wrapper.Rbrace = hostRbrace(host)
-	return wrapper
+	start := fc.hostStart(host)
+	fl.addT(start, start, text)
+	fl.add(fl.off(host.Pos())+len(kw), cut, " ")
+	return native, true
 }
 
 func anchorScopes(list []syntax.Stmt, pos syntax.Pos) {
@@ -588,19 +603,6 @@ func clearInit(host syntax.Stmt) {
 		host.Init = nil
 	case *syntax.SwitchStmt:
 		host.Init = nil
-	}
-}
-
-func blockEndOff(fl *fileLower, host syntax.Stmt) int {
-	switch host := host.(type) {
-	case *syntax.IfStmt:
-		return ifEndOff(fl, host)
-	case *syntax.ForStmt:
-		return fl.off(host.Body.Rbrace) + 1
-	case *syntax.SwitchStmt:
-		return fl.off(host.Rbrace) + 1
-	default:
-		return fl.orig
 	}
 }
 

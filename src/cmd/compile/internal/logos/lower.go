@@ -784,6 +784,7 @@ type funcLower struct {
 	scopeHoists      []string
 	hoisted          []hoistedVar
 	hoistSubs        []hoistSub
+	label            *syntax.LabeledStmt
 }
 
 func (fl *fileLower) resultSpecs(ft *syntax.FuncType, sig *types2.Signature) []resultSpec {

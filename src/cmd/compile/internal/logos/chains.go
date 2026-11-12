@@ -84,7 +84,7 @@ func (fl *fileLower) lowerChainList(list []syntax.Stmt, enc []resultSpec) []synt
 		if !ok {
 			repl = fl.lowerChainPlain(s, enc)
 		}
-		out = append(out, fl.scopeChainHoists(s, repl)...)
+		out = append(out, fl.scopeHoists(s, repl)...)
 	}
 	return out
 }
@@ -124,7 +124,7 @@ func (fl *fileLower) hoistedStmtEnd(s syntax.Stmt) int {
 	return stmtEnd(fl.src, fl.off(syntax.StartPos(s)))
 }
 
-func (fl *fileLower) scopeChainHoists(s syntax.Stmt, repl []syntax.Stmt) []syntax.Stmt {
+func (fl *fileLower) scopeHoists(s syntax.Stmt, repl []syntax.Stmt) []syntax.Stmt {
 	if len(repl) < 2 || repl[len(repl)-1] != s || !hoistScopable(s) {
 		return repl
 	}
