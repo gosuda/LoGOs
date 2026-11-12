@@ -229,3 +229,7 @@
 {"id": "AUD-118", "description": "M21-A-S8 Report retained snapshots per package", "phase": "AUD"}
 {"id": "AUD-119", "description": "M21-A-S9 Serve stock clients through proxy", "phase": "AUD"}
 {"id": "AUD-120", "description": "M22-A-S3 Run goparity fast oracle off and release tiers", "phase": "AUD"}
+{"id": "AUD-121", "description": "M1-A-S10 Pin the pooled try-defer record and its eject twin", "phase": "AUD"}
+{"id": "AUD-122", "description": "M5-A-S3 Gate const views on proven-zero Go parameters", "phase": "AUD"}
+{"id": "AUD-123", "description": "M15-A-S4 Pin 16-byte pair limits and fault equivalence", "phase": "AUD"}
+{"id": "AUD-124", "description": "M15-A-S5 Pin the masked tail loads of vector sums", "phase": "AUD"}
