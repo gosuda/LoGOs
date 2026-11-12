@@ -377,7 +377,7 @@ func (p *forPost) buildPostAssign(s *syntax.AssignStmt, t *syntax.TryExpr, call 
 	p.spanStart = fl.off(stmtPos)
 	tw := &twin{}
 	lhsMark := tw.mark(stmtPos, fl.srcUser(p.spanStart, fl.off(s.Pos())).trim())
-	callMark := tw.mark(tpos, fl.textOf(span{start: fl.off(leftmostOf(call.Fun)), end: qOff}))
+	callMark := tw.mark(tpos, fl.lazyText(span{start: fl.off(leftmostOf(call.Fun)), end: qOff}))
 	withErr := append(slices.Clone(lhs), nameOf(stmtPos, innerErr))
 	native := []syntax.Stmt{blockOf(stmtPos, []syntax.Stmt{
 		errorVarDecl(stmtPos, nameOf(stmtPos, innerErr)),
@@ -402,7 +402,7 @@ func (p *forPost) buildPostExpr(s *syntax.ExprStmt, t *syntax.TryExpr, call *syn
 	qOff := fl.off(tpos)
 	p.spanStart = spanStartBack(fl.src, fl.off(stmtPos))
 	tw := &twin{}
-	callMark := tw.mark(tpos, fl.textOf(span{start: fl.off(stmtPos), end: qOff}))
+	callMark := tw.mark(tpos, fl.lazyText(span{start: fl.off(stmtPos), end: qOff}))
 	n := p.fc.callResults(call)
 	var native []syntax.Stmt
 	var text otext
@@ -628,7 +628,7 @@ func (fc *funcLower) tryAssignCore(s *syntax.AssignStmt, t *syntax.TryExpr, call
 	spanEnd := skipCloseParens(src, qOff+1)
 	lhs := syntax.UnpackListExpr(s.Lhs)
 	lhsText := fl.srcUser(spanStart, opOff).trim()
-	callText := fl.textOf(span{start: fl.off(leftmostOf(call.Fun)), end: qOff})
+	callText := fl.lazyText(span{start: fl.off(leftmostOf(call.Fun)), end: qOff})
 	errSpelling := fc.nextErr()
 	siteSpelling := fl.newSite(tpos, tpos.Line())
 	exitNative, exitText, exitSubs := fc.exitPair(tpos, errSpelling, siteSpelling)
@@ -680,7 +680,7 @@ func (fc *funcLower) tryExprCore(s *syntax.ExprStmt, t *syntax.TryExpr, call *sy
 	spanStart := spanStartBack(fl.src, fl.off(stmtPos))
 	qOff := fl.off(tpos)
 	spanEnd := skipCloseParens(fl.src, qOff+1)
-	callText := fl.textOf(span{start: fl.off(stmtPos), end: qOff})
+	callText := fl.lazyText(span{start: fl.off(stmtPos), end: qOff})
 	errSpelling := fc.nextErr()
 	siteSpelling := fl.newSite(tpos, tpos.Line())
 	exitNative, exitText, exitSubs := fc.exitPair(tpos, errSpelling, siteSpelling)

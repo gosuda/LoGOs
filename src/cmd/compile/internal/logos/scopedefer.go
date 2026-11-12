@@ -609,7 +609,7 @@ func (fc *funcLower) scopeReturn(s *syntax.ReturnStmt, active []*scopeDeferCtx) 
 	tw.absorb(stw.subs)
 	marks := make([]syntax.Expr, len(results))
 	for i, v := range results {
-		marks[i] = tw.mark(v.Pos(), fc.fl.textOf(span{start: fc.fl.off(syntax.StartPos(v)), end: fc.fl.exprEndOf(v)}))
+		marks[i] = tw.mark(v.Pos(), fc.fl.lazyText(span{start: fc.fl.off(syntax.StartPos(v)), end: fc.fl.exprEndOf(v)}))
 	}
 	native := append([]syntax.Stmt{assignOf(pos, names, results)}, stanzaN...)
 	native = append(native, returnOf(pos, nil))

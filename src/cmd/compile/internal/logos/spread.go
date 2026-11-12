@@ -297,7 +297,7 @@ func (b *spreadBuilder) body() {
 		if !ok {
 			continue
 		}
-		valText := b.fl.textOf(b.fl.spreadSpan(kv.Value))
+		valText := b.fl.lazyText(b.fl.spreadSpan(kv.Value))
 		b.native = append(b.native, assignOf(pos,
 			[]syntax.Expr{selOf(pos, v(), key.Value)},
 			[]syntax.Expr{kv.Value}))
@@ -309,7 +309,7 @@ func (b *spreadBuilder) body() {
 
 func (b *spreadBuilder) copy(se *syntax.SpreadExpr, fields []string) {
 	pos := b.pos
-	srcText := b.fl.textOf(b.fl.spreadSpan(se.X))
+	srcText := b.fl.lazyText(b.fl.spreadSpan(se.X))
 	if len(fields) == 0 {
 		b.native = append(b.native, assignOf(pos,
 			[]syntax.Expr{nameOf(pos, "_")},
@@ -383,7 +383,7 @@ func (fl *fileLower) spreadSelfUpdate(s *syntax.AssignStmt) (*syntax.AssignStmt,
 		fields = append(fields, key.Value)
 		values = append(values, val)
 		ltexts = append(ltexts, target.Value+"."+key.Value)
-		vtexts = append(vtexts, fl.textOf(fl.spreadSpan(val)))
+		vtexts = append(vtexts, fl.lazyText(fl.spreadSpan(val)))
 	}
 	if len(fields) == 0 {
 		native := assignOf(pos, []syntax.Expr{nameOf(pos, target.Value)}, []syntax.Expr{nameOf(pos, target.Value)})

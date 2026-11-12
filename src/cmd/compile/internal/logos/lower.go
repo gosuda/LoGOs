@@ -365,6 +365,10 @@ func (fl *fileLower) copyRegion(r span) string {
 	return mark
 }
 
+func (fl *fileLower) lazyText(r span) otext {
+	return gen(fl.copyRegion(r))
+}
+
 // resolveChainMoves composes the copy of every moved region, with the
 // edits of every pass inside it, into the texts that carry its mark.
 // Regions resolve in the order they were moved, which puts a region

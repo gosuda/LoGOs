@@ -73,7 +73,10 @@ func (fc *funcLower) planCall(call *syntax.CallExpr) (*callPlan, bool) {
 	if _, isType := typeFlagsOf(fl, call.Fun); isType {
 		return nil, false
 	}
-	fun.text = fl.textOf(span{start: fun.start, end: fun.end})
+	if len(split.args) != len(call.ArgList) {
+		return nil, false
+	}
+	fun.text = fl.lazyText(span{start: fun.start, end: fun.end})
 	if recv, method, ok := fc.methodRecv(call); ok {
 		plan.isMethod = true
 		plan.recv = recv
@@ -85,15 +88,12 @@ func (fc *funcLower) planCall(call *syntax.CallExpr) (*callPlan, bool) {
 		}
 	}
 	plan.fun = fun
-	if len(split.args) != len(call.ArgList) {
-		return nil, false
-	}
 	for i, raw := range call.ArgList {
 		arg := capturePiece{expr: raw}
 		trimmed := trimSpan(src, span{start: split.args[i].start, end: split.args[i].end})
 		arg.start = trimmed.start
 		arg.end = trimmed.end
-		arg.text = fl.textOf(trimmed)
+		arg.text = fl.lazyText(trimmed)
 		switch argKind(fc, raw) {
 		case argInline:
 			arg.capture = false
@@ -165,7 +165,7 @@ func (fc *funcLower) methodRecv(call *syntax.CallExpr) (capturePiece, string, bo
 	recv := capturePiece{expr: sel.X, capture: true}
 	recv.start = rspan.start
 	recv.end = rspan.end
-	recv.text = fl.textOf(rspan)
+	recv.text = fl.lazyText(rspan)
 	recv.single = fc.nextFun()
 	fc.bindRecv(&recv, s, sel.X)
 	if recv.takeAddr {
@@ -528,7 +528,7 @@ func (fc *funcLower) lowerReturn(s *syntax.ReturnStmt) []syntax.Stmt {
 		}
 	}
 	trimmed := trimSpan(fl.src, span{start: retOff + len("return"), end: end})
-	resText := fl.textOf(trimmed)
+	resText := fl.lazyText(trimmed)
 	results := syntax.UnpackListExpr(s.Results)
 	temps := fc.nextTemps(len(fc.specs))
 	build := func(rhs []syntax.Expr) []syntax.Stmt {

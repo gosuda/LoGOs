@@ -730,7 +730,7 @@ func (fl *fileLower) lowerTupleUnpackStmt(s *syntax.AssignStmt, lhs []syntax.Exp
 		var texts []otext
 		split := fl.tupleSplit(lit.Pos(), len(lit.Elems))
 		for i := range lit.Elems {
-			texts = append(texts, fl.textOf(split.args[i]))
+			texts = append(texts, fl.lazyText(split.args[i]))
 		}
 		start, end := extendParens(fl.src, fl.off(syntax.StartPos(r)), split.end)
 		fl.addT(start, end, joinO(texts, ", "))
@@ -760,7 +760,7 @@ func (fl *fileLower) lowerTupleUnpackStmt(s *syntax.AssignStmt, lhs []syntax.Exp
 	if _, ok := r.(*syntax.CallExpr); ok {
 		rSpan = fl.callBodySpan(r.(*syntax.CallExpr))
 	}
-	rText := fl.textOf(rSpan)
+	rText := fl.lazyText(rSpan)
 	reads := make([]syntax.Expr, len(lhs))
 	var texts []string
 	for i := range lhs {
@@ -802,7 +802,7 @@ func (fl *fileLower) lowerTupleReturnStmt(s *syntax.ReturnStmt) []syntax.Stmt {
 		var texts []otext
 		split := fl.tupleSplit(lit.Pos(), len(lit.Elems))
 		for i := range lit.Elems {
-			texts = append(texts, fl.textOf(split.args[i]))
+			texts = append(texts, fl.lazyText(split.args[i]))
 		}
 		start, end := extendParens(fl.src, fl.off(syntax.StartPos(r)), split.end)
 		fl.addT(start, end, joinO(texts, ", "))
@@ -831,7 +831,7 @@ func (fl *fileLower) lowerTupleReturnStmt(s *syntax.ReturnStmt) []syntax.Stmt {
 	}
 	tn := tupleTempKey(pos, 0)
 	rSpan := fl.exprListSpan(r)
-	rText := fl.textOf(rSpan)
+	rText := fl.lazyText(rSpan)
 	fl.addT(fl.off(syntax.StartPos(s)), fl.off(syntax.StartPos(s)), cat(gen(tn+" := "), rText, gen("; ")))
 	hoist := defineOf(pos, []syntax.Expr{nameOf(pos, tn)}, []syntax.Expr{r})
 	reads := make([]syntax.Expr, len(elems))
@@ -967,7 +967,7 @@ func (fl *fileLower) lowerTupleLitTargeted(lit *syntax.TupleLit, names []string,
 	split := fl.tupleSplit(pos, len(lit.Elems))
 	for i, e := range lit.Elems {
 		vals[i] = e
-		texts[i] = fl.textOf(split.args[i])
+		texts[i] = fl.lazyText(split.args[i])
 	}
 	comp, compText := fl.tupleComposite(pos, names, types, vals, texts)
 	fl.addT(fl.off(syntax.StartPos(lit)), split.end, compText)
