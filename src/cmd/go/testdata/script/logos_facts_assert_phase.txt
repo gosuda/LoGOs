@@ -8,6 +8,7 @@ go tool pack p $WORK/af.a __.LOGOS
 stdout '^logos-facts 3$'
 stdout '^fingerprint [0-9a-f]{16}$'
 stdout '^fn F AssertTP=1,AssertRTP=0$'
+stdout '^fn H AssertTP=2,AssertRTP=0$'
 
 env GOOS=js
 env GOARCH=wasm
@@ -52,5 +53,11 @@ package af
 func F[P any](x any) {
 	const switch P {
 	case *P:
+	}
+}
+
+func H[A, B any](x any) {
+	const switch B {
+	case *B:
 	}
 }
