@@ -190,12 +190,8 @@ func (h *groupHoist) valueTemp(pos syntax.Pos, like syntax.Expr, tmp string, val
 func (h *groupHoist) plain(e syntax.Expr) syntax.Expr {
 	fc := h.fc
 	sp := h.span(e)
-	var text otext
-	if h.withText {
-		text = fc.fl.textOf(sp)
-	}
 	tmp := fc.groupTempName("t")
-	fc.hoistSubs = append(fc.hoistSubs, hoistSub{start: sp.start, end: sp.end, text: tmp})
+	text := gen(fc.fl.moveRegion(sp, tmp))
 	native, texts := h.valueTemp(e.Pos(), e, tmp, e, text)
 	h.add(native, texts...)
 	return nameOf(syntax.StartPos(e), tmp)
