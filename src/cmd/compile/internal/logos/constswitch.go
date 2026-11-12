@@ -351,7 +351,8 @@ func (c *cswLower) rebindings(cs *cswCase) ([]syntax.Stmt, otext) {
 			base.Fatalf("logos: const switch rebinding of %s at %s cannot be respelled", r.name, cs.syn.Case.String())
 		}
 		decls = append(decls, defineOf(cs.syn.Case, []syntax.Expr{nameOf(cs.syn.Case, r.name)}, []syntax.Expr{expr}))
-		text = cat(text, gen(r.name+" := "+rhs+"\n"))
+		decls = append(decls, at(&syntax.AssignStmt{Lhs: nameOf(cs.syn.Case, "_"), Rhs: nameOf(cs.syn.Case, r.name)}, cs.syn.Case))
+		text = cat(text, gen(r.name+" := "+rhs+"\n_ = "+r.name+"\n"))
 	}
 	return decls, text
 }

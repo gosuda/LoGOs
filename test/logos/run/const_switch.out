@@ -16,3 +16,4 @@ ok exact-map-shared
 ok exact-map-other-type
 ok iface-case-runs-value-method
 ok iface-case-chosen-by-argument
+ok assign-only-rebound

@@ -107,6 +107,15 @@ func emit[T any](v T, s string) int {
 	return 0
 }
 
+func assignOnly[T any](x T) (out T) {
+	out = x
+	const switch T {
+	case int:
+		out = 100
+	}
+	return out
+}
+
 func main() {
 	b, err := EncodeSlice([]byte("nums:"), []int64{1, 2, 3})
 	if err != nil {
@@ -151,6 +160,8 @@ func main() {
 	var rw io.ReadWriter = buf
 	check("iface-case-runs-value-method", emit(rw, "hey") == 3 && buf.String() == "hey", buf.String(), "hey")
 	check("iface-case-chosen-by-argument", emit[io.Reader](buf, "z") == 0 && buf.String() == "hey", buf.String(), "hey")
+	assignOnly(1)
+	check("assign-only-rebound", assignOnly("s") == "s", assignOnly("s"), "s")
 	if failed {
 		os.Exit(1)
 	}
