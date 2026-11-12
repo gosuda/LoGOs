@@ -133,8 +133,12 @@ func (g *binaryGenerator) codec(t types2.Type) (int, bool) {
 				if s == scalarFloat64 {
 					bits, decode = "_logos_bmath.Float64bits(float64(_logos_v))", "_logos_bmath.Float64frombits(_logos_n)"
 				}
+				tail := fmt.Sprintf("*_logos_off += %d; *_logos_v = %s(%s)", width, name, decode)
+				if s != scalarFloat32 && s != scalarFloat64 {
+					tail = fmt.Sprintf("_logos_x := %s(_logos_n); if uint64(_logos_x) != _logos_n { return _logos_bfmt.Errorf(\"binary field %%s at offset %%d: value %%d out of range\", _logos_field, *_logos_off, _logos_n) }; *_logos_off += %d; *_logos_v = _logos_x", name, width)
+				}
 				e("_logos_n := %s; for _logos_i := uint(0); _logos_i < %d; _logos_i++ { _logos_dst = append(_logos_dst, byte(_logos_n >> (8*_logos_i))) }", bits, width)
-				d("if len(_logos_src)-*_logos_off < %d { %s }; var _logos_n uint64; for _logos_i := uint(0); _logos_i < %d; _logos_i++ { _logos_n |= uint64(_logos_src[*_logos_off+int(_logos_i)]) << (8*_logos_i) }; *_logos_off += %d; *_logos_v = %s(%s)", width, fail, width, width, name, decode)
+				d("if len(_logos_src)-*_logos_off < %d { %s }; var _logos_n uint64; for _logos_i := uint(0); _logos_i < %d; _logos_i++ { _logos_n |= uint64(_logos_src[*_logos_off+int(_logos_i)]) << (8*_logos_i) }; %s", width, fail, width, tail)
 			}
 		case *types2.Pointer:
 			pointed, ok := g.fl.spellLowered(x.Elem())
