@@ -177,7 +177,9 @@ func (check *Checker) logosConstCovariant(x *operand, cdst *ConstView, context s
 	if !strings.HasPrefix(context, "argument to ") {
 		return false
 	}
-	iface := check.logosCovariantTargetChecked(x.typ(), cdst.Elem, x.Pos())
+	iface := logosCovariantTarget(x.typ(), cdst.Elem, func(c, i Type) bool {
+		return check.logosElemImplementsChecked(c, i, x.Pos())
+	})
 	if iface == nil || !check.logosNameable(iface) {
 		return false
 	}
@@ -191,7 +193,7 @@ func (check *Checker) logosConstCovariant(x *operand, cdst *ConstView, context s
 	return true
 }
 
-func logosCovariantTarget(src, dst Type) Type {
+func logosCovariantTarget(src, dst Type, implements func(c, i Type) bool) Type {
 	if logosAsConstView(src) != nil {
 		return nil
 	}
@@ -205,7 +207,7 @@ func logosCovariantTarget(src, dst Type) Type {
 		return nil
 	}
 	c, i := from.Elem(), to.Elem()
-	if Identical(c, i) || !logosElemImplements(c, i) {
+	if Identical(c, i) || !implements(c, i) {
 		return nil
 	}
 	return i
@@ -233,19 +235,21 @@ func (check *Checker) logosNameable(t Type) bool {
 	return true
 }
 
-func logosElemImplements(c, i Type) bool {
+func logosElemTarget(c, i Type) *Interface {
 	if isTypeParam(i) || logosAsConstView(c) != nil || logosAsConstView(i) != nil {
-		return false
+		return nil
 	}
 	target, _ := i.Underlying().(*Interface)
+	return target
+}
+
+func logosElemImplements(c, i Type) bool {
+	target := logosElemTarget(c, i)
 	return target != nil && Implements(c, target)
 }
 
 func (check *Checker) logosElemImplementsChecked(c, i Type, pos syntax.Pos) bool {
-	if isTypeParam(i) || logosAsConstView(c) != nil || logosAsConstView(i) != nil {
-		return false
-	}
-	target, _ := i.Underlying().(*Interface)
+	target := logosElemTarget(c, i)
 	if target == nil {
 		return false
 	}
@@ -253,26 +257,6 @@ func (check *Checker) logosElemImplementsChecked(c, i Type, pos syntax.Pos) bool
 		return check.logosImplementsProperty(c, i, target, nil, pos)
 	}
 	return check.hasAllMethodsAt(c, target, true, Identical, nil, pos)
-}
-
-func (check *Checker) logosCovariantTargetChecked(src, dst Type, pos syntax.Pos) Type {
-	if logosAsConstView(src) != nil {
-		return nil
-	}
-	s := Unalias(src)
-	if s == nil {
-		return nil
-	}
-	from, _ := s.Underlying().(*Slice)
-	to, _ := Unalias(dst).(*Slice)
-	if from == nil || to == nil {
-		return nil
-	}
-	c, i := from.Elem(), to.Elem()
-	if Identical(c, i) || !check.logosElemImplementsChecked(c, i, pos) {
-		return nil
-	}
-	return i
 }
 
 func (check *Checker) logosCovSliceCall(call *syntax.CallExpr, args []*operand) {
@@ -1007,7 +991,7 @@ func (check *Checker) logosConstArgs(call *syntax.CallExpr, sigParams *Tuple, ar
 				pt = s.Elem()
 			}
 		}
-		if cp := logosAsConstView(pt); cp != nil && logosCovariantTarget(c.Elem, cp.Elem) != nil {
+		if cp := logosAsConstView(pt); cp != nil && logosCovariantTarget(c.Elem, cp.Elem, logosElemImplements) != nil {
 			check.errorf(a, IncompatibleAssign, "%s cannot pass const view %s as %s in argument to %s: its elements would convert through an interface", logosConstEscape, ExprString(a.expr), pt, ExprString(call.Fun))
 			a.invalidate()
 			continue
