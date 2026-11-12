@@ -250,7 +250,7 @@ func classifyUnions(info *types2.Info, files []*syntax.File) *unionClass {
 			if !ok || obj == nil {
 				return true
 			}
-			if td.Alias || len(td.TParamList) != 0 {
+			if td.Alias {
 				return true
 			}
 			iface, ok := obj.Type().Underlying().(*types2.Interface)

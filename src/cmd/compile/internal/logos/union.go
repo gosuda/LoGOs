@@ -691,7 +691,7 @@ func bareUnions(pkg *types2.Package) []string {
 			continue
 		}
 		n, ok := tn.Type().(*types2.Named)
-		if !ok || n.TypeParams().Len() != 0 {
+		if !ok {
 			continue
 		}
 		if _, isUnion := types2.LogosUnionTerms(n); isUnion && types2.LogosOptionIsBare(n) {
