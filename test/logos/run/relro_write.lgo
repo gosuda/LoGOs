@@ -113,6 +113,7 @@ func main() {
 		fmt.Printf("FAIL elf: %v\n", err)
 		os.Exit(1)
 	}
+//logos:allow(slop::discarded_error)
 	defer f.Close()
 	sectOf := func(addr uint64) string {
 		for _, s := range f.Sections {

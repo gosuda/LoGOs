@@ -199,6 +199,7 @@ package chanm
 
 func Over(ch chan int) []int {
 	var out []int
+//logos:allow(correctness::unbounded_channel_op)
 	for v := range ch {
 		out = append(out, v*2)
 	}

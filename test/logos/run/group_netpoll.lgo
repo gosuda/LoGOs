@@ -68,12 +68,14 @@ func oneRound(ln net.Listener) time.Duration {
 		fmt.Println("FAIL group-netpoll-setup: got", err, "want dial")
 		os.Exit(1)
 	}
+//logos:allow(slop::discarded_error)
 	defer cli.Close()
 	srv, err := ln.Accept()
 	if err != nil {
 		fmt.Println("FAIL group-netpoll-setup: got", err, "want accept")
 		os.Exit(1)
 	}
+//logos:allow(slop::discarded_error)
 	defer srv.Close()
 	res := make(chan string, 1)
 	if run(srv, res) == errBoom {
@@ -92,6 +94,7 @@ func main() {
 		fmt.Println("FAIL group-netpoll-setup: got", err, "want listener")
 		os.Exit(1)
 	}
+//logos:allow(slop::discarded_error)
 	defer ln.Close()
 	watch := time.AfterFunc(30*time.Second, func() {
 		fmt.Println("FAIL group-netpoll-cancel-deadline: group with a parked network read did not finish within 30s")

@@ -173,6 +173,7 @@ func rangeMapHand(m map[string]int) (err error) {
 }
 
 func rangeChanLogos(ch chan int) (err error) {
+//logos:allow(correctness::unbounded_channel_op)
 	for v := range ch {
 		defer ltry(fmt.Sprint(v))?
 	}
@@ -180,6 +181,7 @@ func rangeChanLogos(ch chan int) (err error) {
 }
 
 func rangeChanHand(ch chan int) (err error) {
+//logos:allow(correctness::unbounded_channel_op)
 	for v := range ch {
 		x := v
 		defer func() {
@@ -445,7 +447,7 @@ func nullIfaceHand() (point string, recovered any, err error) {
 		}
 	}()
 	var c ifaceCloser
-	defer c.Close()
+	defer c.Close()?
 	point = "stmt"
 	return
 }

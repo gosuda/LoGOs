@@ -130,7 +130,7 @@ func verdict() error {
 	if err != nil {
 		return err
 	}
-	defer os.RemoveAll(dir)
+	defer os.RemoveAll(dir)?
 	exe, err := buildProbe(dir)
 	if err != nil {
 		return err

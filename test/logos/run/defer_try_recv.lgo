@@ -96,6 +96,7 @@ func caseBTry() (err error) {
 func caseCPlain() {
 	seen = nil
 	var c Closer = &Tx{n: 1}
+//logos:allow(slop::discarded_error)
 	defer c.Close()
 	c = &Tx{n: 2}
 }
@@ -139,7 +140,7 @@ func caseEPlain() (point string, recovered any, err error) {
 		}
 	}()
 	var c Closer
-	defer c.Close()
+	defer c.Close()?
 	point = "stmt"
 	return
 }
