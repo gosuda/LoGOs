@@ -191,7 +191,7 @@ func (fc *funcLower) lowerGroupWrap(s syntax.Stmt, pos syntax.Pos, top groupFram
 		cfc.run()
 		fc.groupTakeChild(cfc)
 		fl.add(fl.off(pos), fl.off(body.Pos())+1, prefix)
-		fl.add(fl.off(body.Rbrace), fl.off(body.Rbrace)+1, "return nil })")
+		fl.add(fl.off(body.Rbrace), fl.off(body.Rbrace)+1, lineBreakBefore(fl.src, fl.off(body.Pos())+1, fl.off(body.Rbrace))+"return nil })")
 	} else if nested, ok := s.(*syntax.GroupStmt); ok {
 		body = blockOf(pos, nil)
 		cfc := fc.groupChildFunc(top, body, ft)

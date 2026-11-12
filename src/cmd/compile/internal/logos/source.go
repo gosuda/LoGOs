@@ -106,6 +106,14 @@ func lastTokenEnd(src []byte, from, to int) int {
 	return end
 }
 
+func lineBreakBefore(src []byte, from, off int) string {
+	last := lastTokenEnd(src, from, off)
+	if last > from && bytes.IndexByte(src[last:off], '\n') < 0 {
+		return "\n"
+	}
+	return ""
+}
+
 type callSplit struct {
 	args []span
 	end  int
