@@ -2427,6 +2427,49 @@ func TestProxyWatchedAloneDoesNotLower(t *testing.T) {
 	}
 }
 
+func TestProxyDidCloseOfSavedDocDoesNotLower(t *testing.T) {
+	f := newFixture(t, map[string]string{"a/a.lgo": aLgo}, fixtureOptions{})
+	f.open("a/a.lgo", 1)
+	aURI := f.uri("a/a.lgo")
+	f.client.notify("textDocument/didClose", map[string]any{
+		"textDocument": map[string]any{"uri": aURI},
+	})
+	f.client.call("initialize", map[string]any{"capabilities": map[string]any{}})
+	if calls := f.comp.lowerCalls(); len(calls) != 0 {
+		t.Fatalf("the proxy compiled %d times for closing a saved document with no request, want none: %v", len(calls), calls)
+	}
+	operand := shift(findPos(t, aLgo, "ReadFile(path)?", 0), len("ReadFile("))
+	f.open("a/a.lgo", 2)
+	f.client.call("textDocument/hover", positionParams(aURI, operand))
+	if calls := f.comp.lowerCalls(); len(calls) != 1 {
+		t.Fatalf("the proxy compiled %d times for one reopen and one hover after the saved close, want the single hover run: %v", len(calls), calls)
+	}
+}
+
+func TestProxyDidCloseAfterSaveDoesNotLowerAgain(t *testing.T) {
+	saved := aLgo + "// v2\n"
+	f := newFixture(t, map[string]string{"a/a.lgo": aLgo}, fixtureOptions{})
+	aPath, aURI := f.path("a/a.lgo"), f.uri("a/a.lgo")
+	f.open("a/a.lgo", 1)
+	f.client.notify("textDocument/didChange", map[string]any{
+		"textDocument":   map[string]any{"uri": aURI, "version": 2},
+		"contentChanges": []any{map[string]any{"text": saved}},
+	})
+	if err := os.WriteFile(aPath, []byte(saved), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f.client.notify("textDocument/didSave", map[string]any{"textDocument": map[string]any{"uri": aURI}})
+	f.client.call("initialize", map[string]any{"capabilities": map[string]any{}})
+	if calls := f.comp.lowerCalls(); len(calls) != 1 {
+		t.Fatalf("the proxy compiled %d times for one didSave, want the save's single run: %v", len(calls), calls)
+	}
+	f.client.notify("textDocument/didClose", map[string]any{"textDocument": map[string]any{"uri": aURI}})
+	f.client.call("initialize", map[string]any{"capabilities": map[string]any{}})
+	if calls := f.comp.lowerCalls(); len(calls) != 1 {
+		t.Fatalf("the proxy compiled %d times after closing the saved document, want still the save's single run: %v", len(calls), calls)
+	}
+}
+
 func TestProxyReversedChangeLeavesBuffer(t *testing.T) {
 	f := newFixture(t, map[string]string{"a/a.lgo": aLgo}, fixtureOptions{})
 	f.open("a/a.lgo", 1)
