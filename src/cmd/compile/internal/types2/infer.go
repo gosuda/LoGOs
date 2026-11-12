@@ -599,6 +599,16 @@ func (w *tpWalker) isParameterized(typ Type) (res bool) {
 	case *ConstView:
 		return w.isParameterized(t.Elem)
 
+	case *Option:
+		return w.isParameterized(t.Elem)
+
+	case *LogosTuple:
+		for _, e := range t.types {
+			if w.isParameterized(e) {
+				return true
+			}
+		}
+
 	case *Tuple:
 		// This case does not occur from within isParameterized
 		// because tuples only appear in signatures where they
@@ -757,6 +767,14 @@ func (w *cycleFinder) typ(typ Type) {
 
 	case *ConstView:
 		w.typ(t.Elem)
+
+	case *Option:
+		w.typ(t.Elem)
+
+	case *LogosTuple:
+		for _, e := range t.types {
+			w.typ(e)
+		}
 
 	// case *Tuple:
 	//      This case should not occur because tuples only appear
