@@ -85,12 +85,13 @@
 // goparity-upstream-gocache, goparity-mutant-<id>-gocache) and persist
 // across runs; toolexec mutant builds always use their own cache so a
 // mutant compiler can never be served clean cache entries. Program runs are
-// bounded by 10 s at GOMAXPROCS=4 with empty GODEBUG and GOTRACEBACK=single;
-// outputs are compared after masking hexadecimal addresses and cutting
-// stderr at the first traceback line. Under cmd/dist the package is
-// discovered by `go list std cmd` and runs in the batched "Testing packages."
-// pass with the per-binary -timeout=180s budget, which the fast tier must
-// fit.
+// bounded by 10 s at GOMAXPROCS=4 with empty GODEBUG and GOTRACEBACK=single.
+// Stdout is compared byte for byte; stderr is cut at the first traceback
+// line and masked only for pc=, addr=, sp=, fp= and lr= values and 0xc...
+// pointers (the upstream sweep still masks every 0x value of six or more
+// digits). Under cmd/dist the package is discovered by `go list std cmd` and
+// runs in the batched "Testing packages." pass with the per-binary
+// -timeout=180s budget, which the fast tier must fit.
 package goparity
 
 import (
@@ -564,31 +565,62 @@ func splitLevel(stdout string, prefixes []string) (global, level string) {
 	return strings.Join(g, "\n"), strings.Join(l, "\n")
 }
 
-var hexMask = regexp.MustCompile(`0[xX][0-9a-fA-F]{6,}`)
+var sweepHexMask = regexp.MustCompile(`0[xX][0-9a-fA-F]{6,}`)
 
-func normStd(s string) string {
-	return hexMask.ReplaceAllString(s, "0xADDR")
-}
+var addrMask = regexp.MustCompile(`\b(?:pc|addr|sp|fp|lr)=0[xX][0-9a-fA-F]+|0xc[0-9a-f]{9,}`)
 
-func normErr(s string) string {
+func cutTraceback(s string) string {
 	lines := strings.Split(s, "\n")
 	for i, ln := range lines {
 		if strings.HasPrefix(ln, "goroutine ") {
-			return normStd(strings.Join(lines[:i], "\n"))
+			return strings.Join(lines[:i], "\n")
 		}
 	}
-	return normStd(s)
+	return s
 }
 
 func runBinary(path, maxProcs string) (observation, error) {
-	return runBinaryTimeout(path, maxProcs, 10*time.Second)
+	return runBinaryTimeout(path, maxProcs, 10*time.Second, corpusNorm)
 }
 
 func runSweepBinary(path string) (observation, error) {
-	return runBinaryTimeout(path, "4", 60*time.Second)
+	return runBinaryTimeout(path, "4", 60*time.Second, sweepNorm)
 }
 
-func runBinaryTimeout(path, maxProcs string, budget time.Duration) (observation, error) {
+type normalizer func(stdout, stderr string) (string, string)
+
+func corpusNorm(stdout, stderr string) (string, string) {
+	return stdout, addrMask.ReplaceAllString(cutTraceback(stderr), "0xADDR")
+}
+
+func sweepNorm(stdout, stderr string) (string, string) {
+	return sweepHexMask.ReplaceAllString(stdout, "0xADDR"), sweepHexMask.ReplaceAllString(cutTraceback(stderr), "0xADDR")
+}
+
+func TestCorpusNormKeepsProgramValues(t *testing.T) {
+	for _, tc := range []struct {
+		name                   string
+		outA, outB, errA, errB string
+		same                   bool
+	}{
+		{name: "stdout six digit hex", outA: "sum 0x123456\n", outB: "sum 0x654321\n"},
+		{name: "stdout ten digit hex", outA: "sum 0x1234567890\n", outB: "sum 0x1234567891\n"},
+		{name: "stdout decimal", outA: "sum 123456\n", outB: "sum 654321\n"},
+		{name: "stderr six digit hex value", errA: "value 0x123456\n", errB: "value 0x654321\n"},
+		{name: "stderr heap pointer", errA: "panic: (*main.T) 0xc000123456\n", errB: "panic: (*main.T) 0xc0009a8b40\n", same: true},
+		{name: "stderr fault pc", errA: "[signal SIGSEGV: segmentation violation code=0x1 addr=0x0 pc=0x47f4a8]\n", errB: "[signal SIGSEGV: segmentation violation code=0x1 addr=0x0 pc=0x48aa10]\n", same: true},
+		{name: "stderr fault code", errA: "[signal SIGSEGV: segmentation violation code=0x1 addr=0x0 pc=0x47f4a8]\n", errB: "[signal SIGSEGV: segmentation violation code=0x2 addr=0x0 pc=0x47f4a8]\n"},
+		{name: "stderr after the traceback", errA: "panic: x\ngoroutine 1 [running]:\n\t0x400000\n", errB: "panic: x\ngoroutine 1 [running]:\n\t0x500000\n", same: true},
+	} {
+		outA, errA := corpusNorm(tc.outA, tc.errA)
+		outB, errB := corpusNorm(tc.outB, tc.errB)
+		if got := outA == outB && errA == errB; got != tc.same {
+			t.Errorf("%s: normalized equal = %v, want %v", tc.name, got, tc.same)
+		}
+	}
+}
+
+func runBinaryTimeout(path, maxProcs string, budget time.Duration, norm normalizer) (observation, error) {
 	ctx, cancel := context.WithTimeoutCause(context.Background(), budget, errors.New("goparity run timeout"))
 	defer cancel()
 	cmd := exec.CommandContext(ctx, path)
@@ -609,7 +641,8 @@ func runBinaryTimeout(path, maxProcs string, budget time.Duration) (observation,
 	cmd.Stdout = &out
 	cmd.Stderr = &errb
 	runErr := cmd.Run()
-	obs := observation{stdout: normStd(out.String()), stderr: normErr(errb.String())}
+	obs := observation{}
+	obs.stdout, obs.stderr = norm(out.String(), errb.String())
 	if runErr == nil {
 		obs.exit = 0
 		return obs, nil
@@ -664,7 +697,7 @@ func main() {
 	start := time.Now()
 	errCh := make(chan error, 1)
 	go func() {
-		_, err := runBinaryTimeout(bin, "4", 2*time.Second)
+		_, err := runBinaryTimeout(bin, "4", 2*time.Second, corpusNorm)
 		errCh <- err
 	}()
 	var pid int
@@ -752,7 +785,7 @@ func main() {
 	if out, err := goBuild(fork.bin, dir, []string{"build", "-o", bin, "."}, baseEnv(forkCache()), 5*time.Minute); err != nil {
 		t.Fatalf("building daemon: %v\n%s", err, clip(out))
 	}
-	obs, err := runBinaryTimeout(bin, "4", 15*time.Second)
+	obs, err := runBinaryTimeout(bin, "4", 15*time.Second, corpusNorm)
 	if err != nil {
 		t.Fatalf("daemon run = %v, want the exited parent observation", err)
 	}
