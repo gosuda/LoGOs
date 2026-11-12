@@ -128,3 +128,67 @@ func litNonMember(f float64) {
 func sendNonMember(ch chan U, f float64) {
 	ch <- f // ERROR "union_nonmember"
 }
+
+type Wide interface {
+	int | float64
+}
+
+type Disjoint interface {
+	bool | float64
+}
+
+type Stray struct{}
+
+type MyInt int
+
+func convWide(w Wide) U {
+	return U(w /* ERRORx "correctness::union_nonmember.*Wide is not a member" */)
+}
+
+func convDisjoint(d Disjoint) U {
+	return U(d /* ERRORx "correctness::union_nonmember.*Disjoint is not a member" */)
+}
+
+func convAny(a any) U {
+	return U(a /* ERRORx "correctness::union_nonmember.*any is not a member" */)
+}
+
+func convError(e error) U {
+	return U(e /* ERRORx "correctness::union_nonmember.*error is not a member" */)
+}
+
+func convStruct(s Stray) U {
+	return U(s /* ERRORx "correctness::union_nonmember.*Stray is not a member" */)
+}
+
+func convNamedBasic(m MyInt) U {
+	return U(m /* ERRORx "correctness::union_nonmember.*MyInt is not a member" */)
+}
+
+func convPointer(p *int) U {
+	return U(p /* ERRORx "correctness::union_nonmember.*\\*int is not a member" */)
+}
+
+func convSlice(s []int) U {
+	return U(s /* ERRORx "correctness::union_nonmember.*\\[\\]int is not a member" */)
+}
+
+func convMap(m map[string]int) U {
+	return U(m /* ERRORx "correctness::union_nonmember.*map\\[string\\]int is not a member" */)
+}
+
+func convFunc(f func()) U {
+	return U(f /* ERRORx "correctness::union_nonmember.*func\\(\\) is not a member" */)
+}
+
+func convChan(c chan int) U {
+	return U(c /* ERRORx "correctness::union_nonmember.*chan int is not a member" */)
+}
+
+func convUntypedFloat() U {
+	return U(1.5 /* ERRORx "correctness::union_nonmember.*float64 is not a member" */)
+}
+
+func convUntypedRune() U {
+	return U('a' /* ERRORx "correctness::union_nonmember.*(rune|int32) is not a member" */)
+}
