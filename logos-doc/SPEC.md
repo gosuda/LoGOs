@@ -1178,6 +1178,8 @@ The source MUST be pulled in the calling goroutine, and the loop body and the st
 
 A receive-channel source MUST deliver a finished result while the channel is quiet. [T-206]
 
+A slice, array, or `iter.Seq` source MUST deliver finished results when the source yields its next element or ends, and an `iter.Seq` that blocks without yielding MUST delay the delivery of finished results and the end of the range after a cancel until it yields or returns, because the stage pulls the source on the calling goroutine and starts no goroutine for it. [T-206]
+
 An empty source MUST yield no result and no error. [T-206]
 
 The sequence that a group stage lowers to MUST do no work until it is ranged, and ranging it a second time MUST panic with `logos: group stage sequence ranged twice`. [T-206]
