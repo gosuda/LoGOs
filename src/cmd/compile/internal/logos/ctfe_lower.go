@@ -10,6 +10,7 @@ import (
 	"cmd/compile/internal/logos/facts"
 	"cmd/compile/internal/syntax"
 	"cmd/compile/internal/types2"
+	"fmt"
 	"go/token"
 	"slices"
 )
@@ -172,6 +173,7 @@ func (fl *fileLower) lowerCTFEBlock(b *syntax.BlockStmt, gst *groupedMoveState) 
 				continue
 			}
 			if cd.Group == nil {
+				r = fl.hoistBlockConstData(cd, r)
 				vd := &syntax.VarDecl{NameList: cd.NameList, Type: cd.Type, Values: r.lit}
 				vd.SetPos(syntax.StartPos(cd))
 				ds.DeclList[j] = vd
@@ -183,13 +185,49 @@ func (fl *fileLower) lowerCTFEBlock(b *syntax.BlockStmt, gst *groupedMoveState) 
 				}
 				continue
 			}
-			j = fl.moveGroupedBlockVar(cd, j, blockMoveSite{ds: ds, b: b, i: i}, r, gst)
+			j = fl.moveGroupedBlockVar(cd, j, blockMoveSite{ds: ds, b: b, i: i}, fl.hoistBlockConstData(cd, r), gst)
 		}
 		if len(ds.DeclList) == 0 {
 			b.List = slices.Delete(b.List, i, i+1)
 			i--
 		}
 	}
+}
+
+func (fl *fileLower) hoistBlockConstData(cd *syntax.ConstDecl, r ctfeResult) ctfeResult {
+	if r.keepCall || !r.val.IsComposite() || !rodataStaticValue(r.val) || !ctfeBearsSlice(r.val.Type(), 0) {
+		return r
+	}
+	spell, ok := fl.spellLowered(r.obj.Type())
+	if !ok {
+		return r
+	}
+	pos := syntax.StartPos(cd)
+	name := fmt.Sprintf("_logos_cl%d_%s", fl.pkg.localConstSeq, r.obj.Name())
+	fl.pkg.localConstSeq++
+	fl.addGeneratedDecls(pos, fmt.Sprintf("%s\nvar %s %s = %s\n", rodataMarker, name, spell, r.text))
+	r.text = name
+	r.lit = nameOf(pos, name)
+	return r
+}
+
+func ctfeBearsSlice(t *ctfe.Type, depth int) bool {
+	if t == nil || depth > 64 {
+		return false
+	}
+	switch t.Kind {
+	case ctfe.KSlice:
+		return true
+	case ctfe.KArray:
+		return ctfeBearsSlice(t.Elem, depth+1)
+	case ctfe.KStruct:
+		for _, f := range t.Fields {
+			if ctfeBearsSlice(f.Type, depth+1) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (fl *fileLower) moveGroupedVar(cd *syntax.ConstDecl, i int, list *[]syntax.Decl, r ctfeResult, indent string, gst *groupedMoveState) int {

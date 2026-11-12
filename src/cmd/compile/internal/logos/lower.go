@@ -146,6 +146,7 @@ type packageLower struct {
 	importedDone       map[string]bool
 	composites         map[*types2.Const]*compositeInfo
 	compositeSeq       int
+	localConstSeq      int
 	importedComposites map[*types2.Var]*importedComposite
 	ctExp              *cfExpander
 	jsonHelpers        map[string]*jsonHelperDef

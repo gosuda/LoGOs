@@ -67,6 +67,21 @@ stderr '\[signal SIG(SEGV|BUS)'
 ! exec $WORK/bin/local$GOEXE plain-whole
 ! stdout '^after'
 stderr '\[signal SIG(SEGV|BUS)'
+! exec $WORK/bin/local$GOEXE func-slice
+! stdout '^after'
+stderr '\[signal SIG(SEGV|BUS)'
+! exec $WORK/bin/local$GOEXE func-field
+! stdout '^after'
+stderr '\[signal SIG(SEGV|BUS)'
+! exec $WORK/bin/local$GOEXE func-struct-copy
+! stdout '^after'
+stderr '\[signal SIG(SEGV|BUS)'
+! exec $WORK/bin/local$GOEXE func-nested
+! stdout '^after'
+stderr '\[signal SIG(SEGV|BUS)'
+! exec $WORK/bin/local$GOEXE func-grouped
+! stdout '^after'
+stderr '\[signal SIG(SEGV|BUS)'
 ! exec $WORK/bin/local$GOEXE func-map-bearing
 ! stdout '^after'
 stderr '\[signal SIG(SEGV|BUS)'
@@ -396,6 +411,44 @@ func mapValue() int {
 	return 0
 }
 
+func funcSlice() int {
+	const c = []int{5, 6, 7}
+	l := c
+	l[0] = 70
+	return c[0] - 5
+}
+
+func funcField() int {
+	const c = plain{V: []int{5, 6, 7}, N: 1}
+	l := c.V
+	l[0] = 70
+	return c.V[0] - 5
+}
+
+func funcStructCopy() int {
+	const c = plain{V: []int{5, 6, 7}, N: 1}
+	d := c
+	d.V[0] = 70
+	return c.V[0] - 5
+}
+
+func funcNested() int {
+	const g = [][]int{{5, 6}, {7, 8}}
+	r := g[0]
+	r[0] = 70
+	return g[0][0] - 5
+}
+
+func funcGrouped() int {
+	const (
+		a = []int{1, 2}
+		b = []int{5, 6}
+	)
+	l := b
+	l[0] = 70
+	return b[0] - 5 + a[0] - 1
+}
+
 func funcMapBearing() int {
 	const c = box{M: map[string]int{"a": 1}, L: []int{5, 6, 7}, N: 1}
 	l := c.L
@@ -452,6 +505,11 @@ var cases = map[string]func() int{
 	"array-pointer":     arrayPointer,
 	"plain-array-pointer": plainArrayPointer,
 	"map-value":         mapValue,
+	"func-slice":        funcSlice,
+	"func-field":        funcField,
+	"func-struct-copy":  funcStructCopy,
+	"func-nested":       funcNested,
+	"func-grouped":      funcGrouped,
 	"func-map-bearing":  funcMapBearing,
 	"func-array-copy":   funcArrayCopy,
 	"func-address":      funcAddress,
