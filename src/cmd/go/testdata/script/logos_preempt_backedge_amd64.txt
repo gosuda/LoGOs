@@ -1,5 +1,7 @@
 # Per-backedge reschedule checks run only with GOEXPERIMENT=preemptibleloops
-# on amd64: the default leaf loop carries no morestack reference.
+# on amd64: the default leaf loop carries no morestack reference. The checks
+# that fire every 4096 iterations stay on wasm: the explicit experiment on
+# amd64 adds no stride flag to any compile.
 env GOPROXY=off
 env GOTOOLCHAIN=local
 
@@ -12,6 +14,9 @@ env GOEXPERIMENT=preemptibleloops
 logos build -o preempt.exe .
 go tool objdump -s 'main\.spin' preempt.exe
 stdout 'morestack'
+logos build -a -x .
+stderr 'compile'
+! stderr 'logosloopstride'
 
 -- m/go.mod --
 module example.com/preemptbackedge
