@@ -60,6 +60,6 @@ import (
 )
 
 func main() {
-	fmt.Println(pkg.Get(map[string]int{"a": 1}, nil))
+	fmt.Println(pkg.Get(map[string]int{"a": 1}, &pkg.Config{Name: "c", N: 3}))
 	fmt.Println(pkg.Get(pkg.Table, pkg.Def))
 }
