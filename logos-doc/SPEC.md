@@ -701,11 +701,17 @@ The names such an init declares MUST be visible in the tag and the arms only, an
 
 In a `for` condition the init MUST run again for each test of the condition. [T-203.1][T-104.1]
 
-A switch expression whose init ends in `?` MUST appear only in an assignment target or right-hand side, a `return` result, an ungrouped `var` declaration value, the init or condition of an `if` or `for`, or the init or tag of a `switch`, reached only through parentheses, unary and binary operands, index and selector operands, and composite literal elements [T-203.1][T-104.1]. Labels, `goto`, `break`, `continue`, and `fallthrough` around that statement MUST keep their meaning [T-203.1].
+A switch expression whose init ends in `?` MUST appear only in an assignment target or right-hand side, a `return` result, an ungrouped `var` declaration value, an expression statement, the call of a `defer` statement, the channel or value of a send statement, the range expression of a `for`, the init or condition of an `if` or `for`, or the init or tag of a `switch`, and the `for` or `switch` MAY carry a label [T-203.1][T-104.1].
 
-Any other position, among them a call argument, a case expression, an arm, tag, or init of another switch expression, a `for` post statement, a `send` statement, a `range` clause, and the init of a labeled `for` or `switch`, MUST fail with `correctness::misplaced_try` [T-203.1][T-104.1].
+From such a statement it MUST be reached only through parentheses, unary and binary operands, index and selector operands, composite literal elements, the function, receiver, and arguments of a call, the operand of `?`, interpolation holes, tuple elements, the base of `?.`, the left operand of `??`, and the init, the tag, the first case expression of each case, and the result of each arm of another switch expression [T-203.1][T-104.1].
+
+Labels, `goto`, `break`, `continue`, and `fallthrough` around that statement MUST keep their meaning [T-203.1].
+
+Any other position, among them a `for` post statement, the call of a `go` statement, the right operand of `??`, a case expression of a switch statement, a case expression after the first of its case, a case expression or arm of a type switch expression, a grouped `var` declaration, a `select` communication clause, and the body of a lambda, MUST fail with `correctness::misplaced_try` [T-203.1][T-104.1].
 
 In the right operand of `&&` or `||` the init MUST run only when the left operand does not decide the result [T-203.1][T-104.1].
+
+In an arm of another switch expression the init MUST run only when that arm is chosen, and in a case expression it MUST run only when no earlier case of that switch expression matched [T-203.1][T-104.1].
 
 The run-time representation MUST be the upstream interface. [T-203.1]
 
