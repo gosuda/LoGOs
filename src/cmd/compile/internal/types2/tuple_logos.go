@@ -237,6 +237,15 @@ func (check *Checker) logosTupleAssign(x *operand, T Type, context string) bool 
 	return true
 }
 
+func tupleElemOperand(rhs syntax.Expr, i int, typ Type) operand {
+	if lit, ok := syntax.Unparen(rhs).(*syntax.TupleLit); ok && i < len(lit.Elems) {
+		return operand{mode_: value, expr: lit.Elems[i], typ_: typ}
+	}
+	elem := &syntax.ParenExpr{X: rhs}
+	elem.SetPos(rhs.Pos())
+	return operand{mode_: value, expr: elem, typ_: typ}
+}
+
 func (check *Checker) logosTupleUnpack(lhs []*Var, rhs []syntax.Expr, context string) bool {
 	if !check.conf.Logos || len(rhs) != 1 {
 		return false
@@ -259,7 +268,7 @@ func (check *Checker) logosTupleUnpack(lhs []*Var, rhs []syntax.Expr, context st
 		return false
 	}
 	for i, v := range lhs {
-		el := operand{mode_: value, expr: rhs[0], typ_: elems[i]}
+		el := tupleElemOperand(rhs[0], i, elems[i])
 		check.initVar(v, &el, context)
 	}
 	return true
@@ -322,7 +331,7 @@ func (check *Checker) logosTupleInitVars(lhs []*Var, orig_rhs []syntax.Expr, rhs
 			return false
 		}
 		for i, v := range lhs {
-			el := operand{mode_: value, expr: orig_rhs[0], typ_: elems[i]}
+			el := tupleElemOperand(orig_rhs[0], i, elems[i])
 			check.initVar(v, &el, context)
 		}
 		return true
@@ -365,7 +374,7 @@ func (check *Checker) logosTupleAssignStmt(lhs []syntax.Expr, orig_rhs []syntax.
 			return false
 		}
 		for i, l := range lhs {
-			el := operand{mode_: value, expr: orig_rhs[0], typ_: elems[i]}
+			el := tupleElemOperand(orig_rhs[0], i, elems[i])
 			check.assignVar(l, orig_rhs[0], &el, context)
 		}
 		return true
