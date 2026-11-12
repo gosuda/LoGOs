@@ -8,6 +8,7 @@ logos run ./l/app
 stdout '^view ab c 2 9$'
 stdout '^option 4 7$'
 stdout '^absent -1 -1$'
+stdout '^generic 5 x 3$'
 cp stdout $WORK/want.txt
 logos build -o $WORK/bin/gouse$GOEXE ./g/cmd
 exec $WORK/bin/gouse$GOEXE
@@ -64,6 +65,9 @@ func main() {
 	var e lib.Shown = lib.Holder{}
 	fmt.Printf("option %d %d\n", gouse.OptN(h), gouse.Num(h))
 	fmt.Printf("absent %d %d\n", gouse.OptN(e), gouse.Num(e))
+	sl := &lib.Slot[int]{}
+	gouse.Set(sl, 3)
+	fmt.Printf("generic %d %s %d\n", gouse.Int(lib.Cell[int]{V: 5}), gouse.Str(&lib.Cell[string]{V: "x"}), sl.Item)
 }
 
 -- w/l/go.mod --
@@ -109,6 +113,22 @@ func NewHolder() *Holder {
 	return &Holder{Opt: &Item{N: 4}, Num: 7}
 }
 
+type Valued[T any] interface {
+	const V T
+}
+
+type Slotted[T any] interface {
+	Item T
+}
+
+type Cell[T any] struct : Valued[T] {
+	V T
+}
+
+type Slot[T any] struct : Slotted[T] {
+	Item T
+}
+
 -- w/l/app/app.lgo --
 package main
 
@@ -128,6 +148,12 @@ func main() {
 	var e lib.Shown = lib.Holder{}
 	fmt.Printf("option %d %d\n", nOf(o.Opt), o.Num ?? -1)
 	fmt.Printf("absent %d %d\n", nOf(e.Opt), e.Num ?? -1)
+	var gi lib.Valued[int] = lib.Cell[int]{V: 5}
+	var gs lib.Valued[string] = &lib.Cell[string]{V: "x"}
+	sl := &lib.Slot[int]{}
+	var w lib.Slotted[int] = sl
+	w.Item = 3
+	fmt.Printf("generic %d %s %d\n", gi.V, gs.V, sl.Item)
 }
 
 func nOf(p *lib.Item?) int {
@@ -162,6 +188,12 @@ func Num(s lib.Shown) int {
 	return -1
 }
 
+func Int(v lib.Valued[int]) int { return v.Logos_GetV() }
+
+func Str(v lib.Valued[string]) string { return v.Logos_GetV() }
+
+func Set(s lib.Slotted[int], v int) { s.Logos_SetItem(v) }
+
 -- w/g/cmd/main.go --
 package main
 
@@ -180,4 +212,7 @@ func main() {
 	var e lib.Shown = lib.Holder{}
 	fmt.Printf("option %d %d\n", gouse.OptN(h), gouse.Num(h))
 	fmt.Printf("absent %d %d\n", gouse.OptN(e), gouse.Num(e))
+	sl := &lib.Slot[int]{}
+	gouse.Set(sl, 3)
+	fmt.Printf("generic %d %s %d\n", gouse.Int(lib.Cell[int]{V: 5}), gouse.Str(&lib.Cell[string]{V: "x"}), sl.Item)
 }

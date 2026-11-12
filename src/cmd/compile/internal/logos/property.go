@@ -161,18 +161,11 @@ func (fl *fileLower) emitAccessors(td *syntax.TypeDecl, obj *types2.TypeName, if
 	slices.SortFunc(props, func(a, b types2.LogosProp) int { return strings.Compare(a.Name, b.Name) })
 	pos := td.Pos()
 	typeName := td.Name.Value
-	var recvShape syntax.Expr = nameOf(pos, typeName)
-	if len(td.TParamList) > 0 {
-		args := make([]syntax.Expr, len(td.TParamList))
-		for i, p := range td.TParamList {
-			args[i] = nameOf(pos, p.Name.Value)
-		}
-		recvShape = at(&syntax.IndexExpr{X: recvShape, Index: listOf(pos, args)}, pos)
-	}
+	recvShape := selfShape(td, pos)
 	var added []*syntax.FuncDecl
 	var text bytes.Buffer
 	for _, pr := range props {
-		getter, setter, ambig, getFn, setFn := propSourceOf(fl.pkg.tpkg, types2.NewPointer(named), pr.Name, pr.Typ)
+		getter, setter, ambig, getFn, setFn := propSourceOf(fl.pkg.tpkg, types2.NewPointer(types2.LogosSelfInstance(named)), pr.Name, pr.Typ)
 		if ambig || !getter {
 			base.Fatalf("logos: property %s of %s has no source at lowering", pr.Name, typeName)
 		}
@@ -191,11 +184,10 @@ func (fl *fileLower) emitAccessors(td *syntax.TypeDecl, obj *types2.TypeName, if
 			getBody = selOf(pos, nameOf(pos, "m"), pr.Name)
 		}
 		added = append(added, at(&syntax.FuncDecl{
-			Recv:       at(&syntax.Field{Name: nameOf(pos, "m"), Type: getterRecv}, pos),
-			Name:       nameOf(pos, "Logos_Get"+pr.Name),
-			TParamList: cloneTParams(td.TParamList, pos),
-			Type:       at(&syntax.FuncType{ResultList: []*syntax.Field{at(&syntax.Field{Type: getResult}, pos)}}, pos),
-			Body:       blockOf(pos, []syntax.Stmt{returnOf(pos, []syntax.Expr{getBody})}),
+			Recv: at(&syntax.Field{Name: nameOf(pos, "m"), Type: getterRecv}, pos),
+			Name: nameOf(pos, "Logos_Get"+pr.Name),
+			Type: at(&syntax.FuncType{ResultList: []*syntax.Field{at(&syntax.Field{Type: getResult}, pos)}}, pos),
+			Body: blockOf(pos, []syntax.Stmt{returnOf(pos, []syntax.Expr{getBody})}),
 		}, pos))
 		if pr.ReadOnly {
 			continue
@@ -220,9 +212,8 @@ func (fl *fileLower) emitAccessors(td *syntax.TypeDecl, obj *types2.TypeName, if
 			setBody = at(&syntax.AssignStmt{Lhs: lhs, Rhs: setParam}, pos)
 		}
 		added = append(added, at(&syntax.FuncDecl{
-			Recv:       at(&syntax.Field{Name: nameOf(pos, "m"), Type: setterRecv}, pos),
-			Name:       nameOf(pos, "Logos_Set"+pr.Name),
-			TParamList: cloneTParams(td.TParamList, pos),
+			Recv: at(&syntax.Field{Name: nameOf(pos, "m"), Type: setterRecv}, pos),
+			Name: nameOf(pos, "Logos_Set"+pr.Name),
 			Type: at(&syntax.FuncType{ParamList: []*syntax.Field{at(&syntax.Field{
 				Name: setParam,
 				Type: setResult,
@@ -245,19 +236,16 @@ func (fl *fileLower) emitAccessors(td *syntax.TypeDecl, obj *types2.TypeName, if
 	fl.add(fl.orig, fl.orig, text.String())
 }
 
-func cloneTParams(list []*syntax.Field, pos syntax.Pos) []*syntax.Field {
-	var out []*syntax.Field
-	for _, p := range list {
-		if p == nil || p.Name == nil {
-			continue
-		}
-		np := &syntax.Field{Name: nameOf(pos, p.Name.Value)}
-		if p.Type != nil {
-			np.Type = cloneType(p.Type, pos)
-		}
-		out = append(out, at(np, pos))
+func selfShape(td *syntax.TypeDecl, pos syntax.Pos) syntax.Expr {
+	var shape syntax.Expr = nameOf(pos, td.Name.Value)
+	if len(td.TParamList) == 0 {
+		return shape
 	}
-	return out
+	args := make([]syntax.Expr, len(td.TParamList))
+	for i, p := range td.TParamList {
+		args[i] = nameOf(pos, p.Name.Value)
+	}
+	return at(&syntax.IndexExpr{X: shape, Index: listOf(pos, args)}, pos)
 }
 
 func recvTypeValue(base syntax.Expr, pos syntax.Pos) syntax.Expr {

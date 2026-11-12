@@ -39,8 +39,20 @@ func (check *Checker) logosAssertedStruct(e *syntax.AssertedStruct, def *TypeNam
 	return typ
 }
 
+func LogosSelfInstance(named *Named) Type {
+	list := named.TypeParams().list()
+	if len(list) == 0 {
+		return named
+	}
+	targs := make([]Type, len(list))
+	for i, tpar := range list {
+		targs[i] = tpar
+	}
+	return (*Checker)(nil).instance(nopos, named, targs, nil, NewContext())
+}
+
 func (check *Checker) logosCheckAsserts(e *syntax.AssertedStruct, def *TypeName, asserts []Type) {
-	ptr := NewPointer(def.Type())
+	ptr := NewPointer(LogosSelfInstance(asNamed(def.Type())))
 	var merged map[string]logosMergedProp
 	propErr := false
 	for i, T := range asserts {

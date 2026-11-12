@@ -197,8 +197,9 @@ func (check *Checker) logosDeclaredConforms(named *Named, T, iface Type) bool {
 		}
 	}
 	if origin := named.Origin(); origin != named {
+		smap := makeSubstMap(origin.TypeParams().list(), named.TypeArgs().list())
 		for _, R := range check.logosConforms[origin] {
-			if match(R) {
+			if match(check.subst(nopos, R, smap, nil, check.context())) {
 				return true
 			}
 		}

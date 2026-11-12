@@ -518,17 +518,12 @@ func (fl *fileLower) lowerAssertedDecls(list []syntax.Decl) []syntax.Decl {
 
 func (fl *fileLower) lowerAsserts(td *syntax.TypeDecl, asserted *syntax.AssertedStruct) []syntax.Decl {
 	pos := td.Pos()
-	name := td.Name.Value
 	decls := make([]syntax.Decl, len(asserted.Asserts))
 	var text string
 	for i, iface := range asserted.Asserts {
-		pointer := at(&syntax.ParenExpr{X: at(&syntax.Operation{Op: syntax.Mul, X: nameOf(pos, name)}, pos)}, pos)
-		decls[i] = at(&syntax.VarDecl{
-			NameList: []*syntax.Name{nameOf(pos, "_")},
-			Type:     iface,
-			Values:   callOf(pos, pointer, []syntax.Expr{nilOf(pos)}),
-		}, pos)
-		text += "\n\nvar _ " + renderExpr(iface) + " = (*" + name + ")(nil)"
+		var line string
+		decls[i], line = fl.assertDecl(td, iface)
+		text += "\n\n" + line
 	}
 
 	fl.add(fl.off(asserted.Colon), fl.off(asserted.Lbrace), "")
@@ -538,6 +533,45 @@ func (fl *fileLower) lowerAsserts(td *syntax.TypeDecl, asserted *syntax.Asserted
 	}
 	fl.add(end, end, text)
 	return decls
+}
+
+func (fl *fileLower) assertDecl(td *syntax.TypeDecl, iface syntax.Expr) (syntax.Decl, string) {
+	pos := td.Pos()
+	self := selfShape(td, pos)
+	pointer := at(&syntax.ParenExpr{X: at(&syntax.Operation{Op: syntax.Mul, X: self}, pos)}, pos)
+	check := at(&syntax.VarDecl{
+		NameList: []*syntax.Name{nameOf(pos, "_")},
+		Type:     iface,
+		Values:   callOf(pos, pointer, []syntax.Expr{nilOf(pos)}),
+	}, pos)
+	line := "var _ " + renderExpr(iface) + " = (*" + renderExpr(self) + ")(nil)"
+	if len(td.TParamList) == 0 {
+		return check, line
+	}
+	fn := at(&syntax.FuncDecl{
+		Name:       nameOf(pos, "_"),
+		TParamList: sharedTParams(td, pos),
+		Type:       at(&syntax.FuncType{}, pos),
+		Body:       blockOf(pos, []syntax.Stmt{at(&syntax.DeclStmt{DeclList: []syntax.Decl{check}}, pos)}),
+	}, pos)
+	return fn, "func _" + fl.tparamText(td) + "() {\n\t" + line + "\n}"
+}
+
+func sharedTParams(td *syntax.TypeDecl, pos syntax.Pos) []*syntax.Field {
+	out := make([]*syntax.Field, len(td.TParamList))
+	for i, p := range td.TParamList {
+		out[i] = at(&syntax.Field{Name: nameOf(pos, p.Name.Value), Type: p.Type}, pos)
+	}
+	return out
+}
+
+func (fl *fileLower) tparamText(td *syntax.TypeDecl) string {
+	parts := make([]string, len(td.TParamList))
+	for i, p := range td.TParamList {
+		start := fl.off(leftmostOf(p.Type))
+		parts[i] = p.Name.Value + " " + strings.TrimSpace(string(fl.src[start:fl.exprEndNested(start)]))
+	}
+	return "[" + strings.Join(parts, ", ") + "]"
 }
 
 func groupEnd(src []byte, from int) int {
