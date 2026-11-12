@@ -91,12 +91,17 @@ type chanUnit struct {
 	root syntax.Node
 	// free is set while walking code whose channel operations are covered:
 	// the cases of a done select and a go group child block.
-	free  bool
+	free bool
+	// loops and lits are the depth of for statements and of function
+	// literals and lambdas around the code being walked.
 	loops int
 	lits  int
+	// defs counts the assignments to each local variable; caps holds the
 	// capacity each one was made with, -1 when it is not constant.
-	defs   map[*types2.Var]int
-	caps   map[*types2.Var]int64
+	defs map[*types2.Var]int
+	caps map[*types2.Var]int64
+	// sent counts the sends on each channel outside loops and literals;
+	// looped holds the channels with a send inside one.
 	sent   map[*types2.Var]int
 	looped map[*types2.Var]bool
 	ops    []chanOp
