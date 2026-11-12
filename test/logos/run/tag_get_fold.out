@@ -1,3 +1,9 @@
+ok alloc-literal-folded
+ok alloc-package-folded
+ok alloc-local-folded
+ok alloc-concat-folded
+ok alloc-imported-folded
+ok alloc-runtime-ordinary-call
 ok literal
 ok package
 ok local

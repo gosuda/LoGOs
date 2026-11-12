@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"reflect"
+	"testing"
 )
 
 type FoldRecord struct {
@@ -104,16 +105,90 @@ func want(key string) []string {
 	return out
 }
 
+var failed bool
+
 func check(name, key string, got []string) {
 	w := want(key)
 	if fmt.Sprint(got) != fmt.Sprint(w) {
 		fmt.Println("FAIL", name, got, w)
+		failed = true
+		return
+	}
+	fmt.Println("ok", name)
+}
+
+type AllocRecord struct {
+	A int `custom:"a\"b\\c" GET:"g\"1" xml:"x\"1"`
+}
+
+var sink string
+
+func allocLit() {
+	const for _, f := range comptime.Fields[AllocRecord]() {
+		sink = f.Tag.Get("custom")
+	}
+}
+
+func allocPkg() {
+	const for _, f := range comptime.Fields[AllocRecord]() {
+		sink = f.Tag.Get(FoldKey)
+	}
+}
+
+func allocLocal() {
+	const k = "custom"
+	const for _, f := range comptime.Fields[AllocRecord]() {
+		sink = f.Tag.Get(k)
+	}
+}
+
+func allocConcat() {
+	const for _, f := range comptime.Fields[AllocRecord]() {
+		sink = f.Tag.Get("cus" + "tom")
+	}
+}
+
+func allocImported() {
+	const for _, f := range comptime.Fields[AllocRecord]() {
+		sink = f.Tag.Get(http.MethodGet)
+	}
+}
+
+var runtimeKey = "custom"
+
+func allocRuntime() {
+	const for _, f := range comptime.Fields[AllocRecord]() {
+		sink = f.Tag.Get(runtimeKey)
+	}
+}
+
+func fewestAllocs(f func()) float64 {
+	best := testing.AllocsPerRun(100, f)
+	for range 4 {
+		if n := testing.AllocsPerRun(100, f); n < best {
+			best = n
+		}
+	}
+	return best
+}
+
+func checkAllocs(name string, f func(), folded bool) {
+	n := fewestAllocs(f)
+	if folded && n != 0 || !folded && n < 1 {
+		fmt.Println("FAIL", name, "allocs", n)
+		failed = true
 		return
 	}
 	fmt.Println("ok", name)
 }
 
 func main() {
+	checkAllocs("alloc-literal-folded", allocLit, true)
+	checkAllocs("alloc-package-folded", allocPkg, true)
+	checkAllocs("alloc-local-folded", allocLocal, true)
+	checkAllocs("alloc-concat-folded", allocConcat, true)
+	checkAllocs("alloc-imported-folded", allocImported, true)
+	checkAllocs("alloc-runtime-ordinary-call", allocRuntime, false)
 	check("literal", "json", foldLit())
 	check("package", FoldKey, foldPkg())
 	check("local", "custom", foldLocal())
@@ -127,7 +202,10 @@ func main() {
 	check("runtime", key, foldRuntime(key))
 	if fmt.Sprint(foldFieldKey()) != fmt.Sprint(wantFieldKey()) {
 		fmt.Println("FAIL fieldkey", foldFieldKey(), wantFieldKey())
-		return
+		os.Exit(1)
 	}
 	fmt.Println("ok fieldkey")
+	if failed {
+		os.Exit(1)
+	}
 }
