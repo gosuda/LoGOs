@@ -148,10 +148,8 @@ func (fl *fileLower) spreadComposite(c *syntax.CompositeLit, addr bool) syntax.E
 func (fl *fileLower) spreadAddrOp(op *syntax.Operation, c *syntax.CompositeLit) syntax.Expr {
 	start := fl.off(op.Pos())
 	native := fl.spreadAddrComposite(c)
-	inner := fl.textOf(span{start: start + len("&"), end: fl.off(c.Rbrace) + 1})
-	end := skipCloseParens(fl.src, fl.off(c.Rbrace)+1)
-	fl.addT(start, end, inner)
-	fl.wrapSpan[native] = span{start: start, end: end}
+	fl.add(start, start+len("&"), "")
+	fl.wrapSpan[native] = span{start: start, end: fl.off(c.Rbrace) + 1}
 	return native
 }
 
@@ -359,7 +357,7 @@ func (fl *fileLower) exprEndOf(e syntax.Expr) int {
 		}
 	}
 	if c, ok := syntax.Unparen(e).(*syntax.CompositeLit); ok {
-		return skipCloseParens(fl.src, fl.off(c.Rbrace)+1)
+		return simdFwdEnd(fl.src, fl.off(syntax.StartPos(e)), fl.off(c.Rbrace)+1)
 	}
 	if lam, ok := syntax.Unparen(e).(*syntax.LambdaExpr); ok {
 		end := fl.lambdaEnd(lam)
