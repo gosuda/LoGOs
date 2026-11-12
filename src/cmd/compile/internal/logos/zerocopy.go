@@ -7,6 +7,7 @@ package logos
 import (
 	"strings"
 
+	"cmd/compile/internal/base"
 	"cmd/compile/internal/syntax"
 	"cmd/compile/internal/types2"
 	"reflect"
@@ -406,11 +407,13 @@ func (z *zeroCopy) stringOfSlice(call *syntax.CallExpr, arg syntax.Expr) syntax.
 
 func (z *zeroCopy) unsafeConvert(call *syntax.CallExpr, arg syntax.Expr, outer, inner, form string) syntax.Expr {
 	pos := call.Pos()
+	split, ok := splitCall(z.fl.src, z.fl.off(pos))
+	if !ok || len(split.args) != 1 {
+		base.Fatalf("logos: conversion at %s has no single operand", pos.String())
+	}
 	start := z.fl.off(syntax.Unparen(call.Fun).Pos())
-	end := z.fl.exprEnd(start)
-	argStart := z.fl.off(arg.Pos())
-	argEnd := z.fl.exprEnd(argStart)
-	text := z.fl.textOf(span{start: argStart, end: argEnd})
+	end := split.end
+	text := z.fl.textOf(split.args[0])
 	out := callOf(pos,
 		selOf(pos, nameOf(pos, "unsafe"), outer),
 		[]syntax.Expr{
