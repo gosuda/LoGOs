@@ -38,6 +38,21 @@ func TestLogosCapSinks(t *testing.T) {
 	if capabilitySinks["runtime.cgocall"] != CapCgo {
 		t.Error("runtime.cgocall must map to CapCgo")
 	}
+	for _, sink := range []string{
+		"syscall.Syscall", "syscall.Syscall6", "syscall.Syscall9",
+		"syscall.Syscall12", "syscall.Syscall15", "syscall.Syscall18",
+		"syscall.RawSyscall", "syscall.RawSyscall6", "syscall.SyscallN",
+		"syscall.(*Proc).Call", "syscall.(*LazyProc).Call",
+		"internal/runtime/syscall/linux.Syscall6",
+		"golang.org/x/sys/unix.Syscall", "golang.org/x/sys/unix.Syscall6",
+		"golang.org/x/sys/unix.Syscall9", "golang.org/x/sys/unix.RawSyscall",
+		"golang.org/x/sys/unix.RawSyscall6", "golang.org/x/sys/unix.SyscallNoError",
+		"golang.org/x/sys/unix.RawSyscallNoError",
+	} {
+		if capabilitySinks[sink] != CapSyscall {
+			t.Errorf("raw syscall entry %q must map to CapSyscall", sink)
+		}
+	}
 }
 
 func TestLogosCapDenyDecision(t *testing.T) {
@@ -372,6 +387,35 @@ func TestLogosCapEntryFile(t *testing.T) {
 			got, ok := capEntryFile(tc.data)
 			if ok != tc.ok || (ok && got != tc.want) {
 				t.Errorf("capEntryFile(%x) = (%d, %v), want (%d, %v)", tc.data, got, ok, tc.want, tc.ok)
+			}
+		})
+	}
+}
+
+func TestLogosCapInlineAt(t *testing.T) {
+	table := []byte{0x02, 0x04, 0x01, 0x02, 0x04, 0x03, 0x00}
+	tests := []struct {
+		name    string
+		table   []byte
+		off     int64
+		quantum int
+		want    int32
+	}{
+		{"first range start", table, 0, 1, 0},
+		{"first range end", table, 3, 1, 0},
+		{"outside any inlined call", table, 4, 1, -1},
+		{"second inlined call", table, 6, 1, 1},
+		{"last byte of table", table, 8, 1, 1},
+		{"past the table", table, 9, 1, -1},
+		{"scaled by the pc quantum", table, 15, 4, 0},
+		{"scaled boundary", table, 16, 4, -1},
+		{"empty table", nil, 0, 1, -1},
+		{"truncated span", []byte{0x02}, 0, 1, -1},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := capInlineAt(tc.table, tc.off, tc.quantum); got != tc.want {
+				t.Errorf("capInlineAt(%x, %d, %d) = %d, want %d", tc.table, tc.off, tc.quantum, got, tc.want)
 			}
 		})
 	}

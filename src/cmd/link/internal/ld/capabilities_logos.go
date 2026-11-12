@@ -28,22 +28,42 @@ const (
 	CapExec
 	CapNet
 	CapCgo
+	CapSyscall
 )
 
 var capabilitySinks = map[string]CapabilityKind{
-	"reflect.ValueOf":          CapReflect,
-	"reflect.TypeOf":           CapReflect,
-	"reflect.New":              CapReflect,
-	"syscall.Exec":             CapExec,
-	"syscall.ForkExec":         CapExec,
-	"syscall.StartProcess":     CapExec,
-	"os.StartProcess":          CapExec,
-	"os.startProcess":          CapExec,
-	"net.sysSocket":            CapNet,
-	"syscall.Socket":           CapNet,
-	"syscall.Connect":          CapNet,
-	"runtime.cgocall":          CapCgo,
-	"runtime.logosCgocallFast": CapCgo,
+	"reflect.ValueOf":                         CapReflect,
+	"reflect.TypeOf":                          CapReflect,
+	"reflect.New":                             CapReflect,
+	"syscall.Exec":                            CapExec,
+	"syscall.ForkExec":                        CapExec,
+	"syscall.StartProcess":                    CapExec,
+	"os.StartProcess":                         CapExec,
+	"os.startProcess":                         CapExec,
+	"net.sysSocket":                           CapNet,
+	"syscall.Socket":                          CapNet,
+	"syscall.Connect":                         CapNet,
+	"runtime.cgocall":                         CapCgo,
+	"runtime.logosCgocallFast":                CapCgo,
+	"syscall.Syscall":                         CapSyscall,
+	"syscall.Syscall6":                        CapSyscall,
+	"syscall.Syscall9":                        CapSyscall,
+	"syscall.Syscall12":                       CapSyscall,
+	"syscall.Syscall15":                       CapSyscall,
+	"syscall.Syscall18":                       CapSyscall,
+	"syscall.RawSyscall":                      CapSyscall,
+	"syscall.RawSyscall6":                     CapSyscall,
+	"syscall.SyscallN":                        CapSyscall,
+	"syscall.(*Proc).Call":                    CapSyscall,
+	"syscall.(*LazyProc).Call":                CapSyscall,
+	"internal/runtime/syscall/linux.Syscall6": CapSyscall,
+	"golang.org/x/sys/unix.Syscall":           CapSyscall,
+	"golang.org/x/sys/unix.Syscall6":          CapSyscall,
+	"golang.org/x/sys/unix.Syscall9":          CapSyscall,
+	"golang.org/x/sys/unix.RawSyscall":        CapSyscall,
+	"golang.org/x/sys/unix.RawSyscall6":       CapSyscall,
+	"golang.org/x/sys/unix.SyscallNoError":    CapSyscall,
+	"golang.org/x/sys/unix.RawSyscallNoError": CapSyscall,
 }
 
 const (
@@ -376,8 +396,50 @@ func (a *logosCapAuditor) followRelocs(d *deadcodePass, s loader.Sym) {
 			a.followIfaceImpls(s, d.decodeGenericIfaceMethod(a.ldr, r.Sym()), 0)
 			continue
 		}
-		a.enqueue(r.Sym(), s)
+		a.enqueue(r.Sym(), a.callSite(s, r))
 	}
+}
+
+func (a *logosCapAuditor) callSite(s loader.Sym, r loader.Reloc) loader.Sym {
+	if capabilitySinks[capSinkName(a.ldr.SymName(r.Sym()))] != CapSyscall {
+		return s
+	}
+	fi := a.ldr.FuncInfo(s)
+	_, _, _, pcinline, _ := a.ldr.PcdataAuxs(s, nil)
+	if !fi.Valid() || pcinline == 0 {
+		return s
+	}
+	fi.Preload()
+	idx := capInlineAt(a.ldr.Data(pcinline), int64(r.Off()), a.ctxt.Arch.MinLC)
+	if idx < 0 || int(idx) >= int(fi.NumInlTree()) {
+		return s
+	}
+	if inlined := fi.InlTree(int(idx)).Func; inlined != 0 {
+		return inlined
+	}
+	return s
+}
+
+func capInlineAt(table []byte, off int64, quantum int) int32 {
+	val, pc := int32(-1), int64(0)
+	for len(table) > 0 {
+		d, n := binary.Varint(table)
+		if n <= 0 {
+			return -1
+		}
+		table = table[n:]
+		span, n := binary.Uvarint(table)
+		if n <= 0 {
+			return -1
+		}
+		table = table[n:]
+		val += int32(d)
+		pc += int64(span) * int64(quantum)
+		if off < pc {
+			return val
+		}
+	}
+	return -1
 }
 
 func (a *logosCapAuditor) followExportedImpls(from loader.Sym) {
@@ -426,11 +488,27 @@ func (a *logosCapAuditor) findings() []capFinding {
 		if hit.kind == CapCgo && a.role(hit.sink).dep == "" {
 			continue
 		}
-		for _, b := range a.graph.blamedChains(hit.sink, a.role) {
+		for _, b := range a.graph.blamedChains(hit.sink, a.blameRole(hit)) {
 			out = addFinding(out, index, capFinding{kind: hit.kind, sink: hit.name, dep: b.dep, chain: b.chain})
 		}
 	}
 	return out
+}
+
+func (a *logosCapAuditor) blameRole(hit logosCapHit) func(loader.Sym) capRole {
+	if hit.kind != CapSyscall {
+		return a.role
+	}
+	return func(s loader.Sym) capRole {
+		r := a.role(s)
+		switch {
+		case s == hit.sink:
+			return capRole{}
+		case r.dep == "":
+			return capRole{wall: true}
+		}
+		return r
+	}
 }
 
 func addFinding(out []capFinding, index map[string]int, f capFinding) []capFinding {
@@ -453,6 +531,11 @@ func (a *logosCapAuditor) report() {
 }
 
 func (a *logosCapAuditor) judge(f capFinding) {
+	if f.kind == CapSyscall {
+		a.judge(capFinding{kind: CapExec, sink: f.sink, dep: f.dep, chain: f.chain})
+		a.judge(capFinding{kind: CapNet, sink: f.sink, dep: f.dep, chain: f.chain})
+		return
+	}
 	if f.kind == CapCgo {
 		if !slices.Contains(a.policy.CgoAllowed, f.dep) {
 			a.emit("ERROR", "unauthorized_cgo", f.dep, f.sink, f.chain,
