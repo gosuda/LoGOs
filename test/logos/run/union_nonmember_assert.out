@@ -13,3 +13,8 @@ ok case-member-int
 ok case-member-string
 ok case-nil
 ok case-nonmember
+ok local-single-message
+ok local-other-shape-message
+ok local-comma-ok
+ok closure-local-comma-ok
+ok closure-local-type

@@ -109,6 +109,41 @@ func checkCases() {
 	check("case-nonmember", gotNon == "other", gotNon, "other")
 }
 
+func asLocal(u U) (r string) {
+	type local struct{ a int }
+	defer func() { r = fmt.Sprint(recover()) }()
+	_ = u.(local)
+	return "ok"
+}
+
+func asOtherLocal(u U) (ok bool, r string) {
+	type local struct{ b string }
+	defer func() { r = fmt.Sprint(recover()) }()
+	_, ok = u.(local)
+	_ = u.(local)
+	return ok, "ok"
+}
+
+func checkLocals(u U) {
+	want := "interface conversion: main.local is not a member of main.U"
+	got := asLocal(u)
+	check("local-single-message", got == want, got, want)
+	ok, got := asOtherLocal(u)
+	check("local-other-shape-message", got == want, got, want)
+	check("local-comma-ok", !ok, ok, false)
+	func() {
+		type inner int
+		v, ok := u.(inner)
+		check("closure-local-comma-ok", !ok && v == 0, ok, false)
+		defer func() {
+			r := recover()
+			_, typeOk := r.(*rt.UnionAssertionError)
+			check("closure-local-type", typeOk, fmt.Sprintf("%T", r), "*rt.UnionAssertionError")
+		}()
+		_ = u.(inner)
+	}()
+}
+
 func main() {
 	var u U = 42
 	v, ok := u.(float64)
@@ -137,6 +172,7 @@ func main() {
 	checkMessages(u)
 	checkXU()
 	checkCases()
+	checkLocals(u)
 	if failed {
 		os.Exit(1)
 	}
