@@ -11,7 +11,8 @@ import (
 )
 
 // unboundedSpanSrc holds one channel operation of each operand form the rule
-// reports: a call, a selector, an index, a slice, and a call as a send value.
+// reports: a call, a selector, an index, a slice, a call as a send value, and
+// a range over a channel with and without iteration variables.
 const unboundedSpanSrc = `package p
 
 import "time"
@@ -28,12 +29,20 @@ func a(d time.Duration, t *time.Timer, chs []chan int, buf []byte, ch chan []byt
 	ch <- buf[:10]
 	c <- f(1)
 }
+
+func b(c chan int) {
+	for v := range c {
+		_ = v
+	}
+	for range c {
+	}
+}
 `
 
 // TestUnboundedChannelOpSpan checks that the span of a finding covers the
 // whole operation, through the closing token of its last operand: the call,
-// index, or slice bracket that syntax.EndPos leaves out. Tools splice by this
-// byte range.
+// index, or slice bracket that syntax.EndPos leaves out. A range over a
+// channel starts at the range keyword. Tools splice by this byte range.
 func TestUnboundedChannelOpSpan(t *testing.T) {
 	testenv.MustHaveGoBuild(t)
 	want := []string{
@@ -45,6 +54,8 @@ func TestUnboundedChannelOpSpan(t *testing.T) {
 		"<-(c)",
 		"ch <- buf[:10]",
 		"c <- f(1)",
+		"range c",
+		"range c",
 	}
 	for _, kind := range []Kind{KindGo, KindLgo} {
 		name := "x.go"

@@ -74,14 +74,14 @@ func checkUnboundedChannelOp(pass *Pass) {
 	}
 }
 
-// chanOp is one operation not covered by a done select: its node, the
-// position just after its last token, the local channel variable it names or
-// nil, and its description.
+// chanOp is one operation not covered by a done select: the position of its
+// first token, the position just after its last token, the local channel
+// variable it names or nil, and its description.
 type chanOp struct {
-	node syntax.Node
-	end  syntax.Pos
-	ch   *types2.Var
-	what string
+	start syntax.Pos
+	end   syntax.Pos
+	ch    *types2.Var
+	what  string
 }
 
 // chanUnit is the analysis of one function and the literals inside it.
@@ -123,7 +123,7 @@ func (u *chanUnit) run() {
 			continue
 		}
 		u.pass.Report(Diagnostic{
-			Pos:     syntax.StartPos(op.node),
+			Pos:     op.start,
 			End:     op.end,
 			Message: fmt.Sprintf("%s may block forever: put it in a select with a <-ctx.Done() case, or make the channel locally with a constant capacity that covers every send", op.what),
 		})
@@ -267,7 +267,7 @@ func (u *chanUnit) rangeOp(st syntax.SimpleStmt) {
 	if _, isChan := underOrNil(TypeOf(rc.X)).(*types2.Chan); !isChan {
 		return
 	}
-	u.record(rc, u.exprEnd(rc.X), u.chanVar(rc.X), "range over "+syntax.String(rc.X))
+	u.record(rc.Pos(), u.exprEnd(rc.X), u.chanVar(rc.X), "range over "+syntax.String(rc.X))
 }
 
 // nested walks a function literal or lambda body, whose operations are not
@@ -367,7 +367,7 @@ func (u *chanUnit) send(s *syntax.SendStmt) {
 	if ch != nil {
 		u.count(ch)
 	}
-	u.record(s, u.exprEnd(s.Value), ch, "send on "+syntax.String(s.Chan))
+	u.record(syntax.StartPos(s), u.exprEnd(s.Value), ch, "send on "+syntax.String(s.Chan))
 }
 
 // count adds a send to the channel's total, or marks the channel unbounded
@@ -390,14 +390,14 @@ func (u *chanUnit) recv(op *syntax.Operation) {
 	if isDoneCall(op.X) {
 		return
 	}
-	u.record(op, u.exprEnd(op.X), u.chanVar(op.X), "receive from "+syntax.String(op.X))
+	u.record(syntax.StartPos(op), u.exprEnd(op.X), u.chanVar(op.X), "receive from "+syntax.String(op.X))
 }
 
-// record keeps an operation that is not covered; end is the position just
-// after its last token.
-func (u *chanUnit) record(n syntax.Node, end syntax.Pos, ch *types2.Var, what string) {
+// record keeps an operation that is not covered; start is the position of
+// its first token and end the position just after its last token.
+func (u *chanUnit) record(start, end syntax.Pos, ch *types2.Var, what string) {
 	if !u.free {
-		u.ops = append(u.ops, chanOp{node: n, end: end, ch: ch, what: what})
+		u.ops = append(u.ops, chanOp{start: start, end: end, ch: ch, what: what})
 	}
 }
 
