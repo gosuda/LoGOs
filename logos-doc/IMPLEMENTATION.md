@@ -3952,4 +3952,6 @@ Written to `tasks/autoplan-ledger.jsonl` by P0-S6. IDs: phase prefix plus a sequ
 {"id": "AUD-155", "description": "M13-A-S7 Judge archsimd availability against a build without the experiment", "phase": "AUD"}
 {"id": "AUD-156", "description": "M0-A-S12 Delete the dead unsupported_action fixture", "phase": "AUD"}
 {"id": "AUD-157", "description": "M0-A-S13 Judge the jsonv2 default against an explicit nojsonv2 build", "phase": "AUD"}
+{"id": "AUD-158", "description": "M13-A-S8 Baseline sets its levels whatever the environment holds", "phase": "AUD"}
+{"id": "AUD-159", "description": "M13-A-S9 Pin native target_cpu on a cross build", "phase": "AUD"}
 ```
