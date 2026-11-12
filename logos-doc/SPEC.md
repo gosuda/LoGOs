@@ -631,6 +631,8 @@ Ejected and Go-facing signatures MUST use plain pointers and `rt.Option[T]` from
 
 A Go importer MUST see a non-nil `*T` and a `*T?` as `*T`, and MUST see every other `T?` as the lowered type of the rules above. [T-202][T-Sec5][R-U2]
 
+A `.lgo` importer MUST see each option that an imported declaration carries in a field, a property, a parameter, or a result, and MUST see it also when the declaration belongs to a generic type or is a generic function. [T-202][T-Sec5]
+
 ```lgo
 func greet(u *User?) string {
     return u?.Name ?? "anon"

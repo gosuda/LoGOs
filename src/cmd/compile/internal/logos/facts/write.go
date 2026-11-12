@@ -81,9 +81,6 @@ func eachExportedSig(pkg *types2.Package, yield func(object string, sig *types2.
 			if !ok || sig.Recv() != nil {
 				continue
 			}
-			if tp := sig.TypeParams(); tp != nil && tp.Len() > 0 {
-				continue
-			}
 			yield(name, sig)
 		case *types2.TypeName:
 			if obj.IsAlias() {
@@ -123,9 +120,6 @@ func eachExportedNamed(pkg *types2.Package, yield func(name string, named *types
 		}
 		named, ok := obj.Type().(*types2.Named)
 		if !ok {
-			continue
-		}
-		if tp := named.TypeParams(); tp != nil && tp.Len() > 0 {
 			continue
 		}
 		yield(name, named)

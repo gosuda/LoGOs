@@ -2231,12 +2231,14 @@ func substSignature(sub *typeSubst, sig *types2.Signature) *types2.Signature {
 	changed := newT != nil || newR != nil
 	var nrecv *types2.Var
 	if r := sig.Recv(); r != nil {
-		rt := substType(inner, r.Type())
-		if rt != r.Type() {
-			changed = true
+		if _, lit := r.Type().(*types2.Interface); !lit {
+			rt := substType(inner, r.Type())
+			if rt != r.Type() {
+				changed = true
+			}
+			nrecv = types2.NewVar(r.Pos(), sub.pkg, r.Name(), rt)
+			nrecv.SetKind(r.Kind())
 		}
-		nrecv = types2.NewVar(r.Pos(), sub.pkg, r.Name(), rt)
-		nrecv.SetKind(r.Kind())
 	}
 	params, paramsChanged := substTuple(inner, sig.Params())
 	results, resultsChanged := substTuple(inner, sig.Results())
