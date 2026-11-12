@@ -10,7 +10,11 @@ func MethodObject(typeName string, recv *types2.Var, method string) string {
 	if recv == nil {
 		return typeName + "." + method
 	}
-	if _, ok := types2.Unalias(recv.Type()).(*types2.Pointer); ok {
+	t := types2.Unalias(recv.Type())
+	if cv, ok := t.(*types2.ConstView); ok {
+		t = types2.Unalias(cv.Elem)
+	}
+	if _, ok := t.(*types2.Pointer); ok {
 		return "(*" + typeName + ")." + method
 	}
 	return typeName + "." + method

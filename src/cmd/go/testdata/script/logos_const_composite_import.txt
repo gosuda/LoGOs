@@ -27,6 +27,20 @@ cd badwrite
 stderr -count=9 '\[correctness::const_view_mutation\]'
 cd ..
 
+# A readonly method of an imported const composite is callable; a mutating one fails with the rule ID.
+cd methods
+logos build -o $WORK/bin/importmeth$GOEXE ./app
+exec $WORK/bin/importmeth$GOEXE
+cmp stdout want.txt
+! logos build -o $WORK/bin/badcall$GOEXE ./badcall
+stderr -count=1 '\[correctness::const_view_mutation\]'
+rm badcall
+logos eject -o out
+cd out
+exec env -u GOROOT $UPROOT1272/bin/go run ./app
+cmp stdout ../want.txt
+cd ..
+
 -- m/go.mod --
 module example.com/ccimport
 
@@ -219,6 +233,63 @@ func main() {
 	_ = append(lib.C.L, 4)
 	delete(lib.C.M, "a")
 	lib.C.L[0]++
+	lib.C.Set()
+	fmt.Println(lib.C.N)
+}
+-- methods/go.mod --
+module example.com/ccmethods
+
+go 1.27
+
+-- methods/want.txt --
+ok const-receiver 5
+ok pointer-readonly 5
+ok value-receiver 5
+ok lookup 1
+-- methods/lib/lib.lgo --
+package lib
+
+type S struct {
+	M map[string]int
+	N int
+}
+
+func (r const *S) Get() int { return r.N }
+
+func (s *S) Peek() int { return s.N }
+
+func (s S) Val() int { return s.N }
+
+func (r const *S) Lookup(k string) int { return r.M[k] ?? 0 }
+
+func (s *S) Set() { s.N = 1 }
+
+const C = S{M: map[string]int{"a": 1}, N: 5}
+-- methods/app/main.lgo --
+package main
+
+import (
+	"fmt"
+
+	"example.com/ccmethods/lib"
+)
+
+func main() {
+	fmt.Println("ok const-receiver", lib.C.Get())
+	fmt.Println("ok pointer-readonly", lib.C.Peek())
+	fmt.Println("ok value-receiver", lib.C.Val())
+	fmt.Println("ok lookup", lib.C.Lookup("a"))
+}
+-- methods/badcall/main.lgo --
+package main
+
+import (
+	"fmt"
+
+	"example.com/ccmethods/lib"
+)
+
+func main() {
 	lib.C.Set()
 	fmt.Println(lib.C.N)
 }

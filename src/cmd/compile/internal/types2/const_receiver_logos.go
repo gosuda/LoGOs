@@ -168,6 +168,7 @@ func LogosSealExportedReadonly(pkg *Package, info *Info, files []*syntax.File) {
 				continue
 			}
 			if logosAsConstView(sig.Recv().Type()) != nil {
+				logosMarkReadonlyCapability(fn)
 				continue
 			}
 			if fn.LogosReadonly() {
