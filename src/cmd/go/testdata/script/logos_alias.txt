@@ -58,6 +58,10 @@ stdout '^binary gopher ok$'
 stdout '^binary vs ok$'
 stderr -count=4 'portability::alias_extension'
 
+logos run ./deferq
+stdout '^deferq true \[body deferred\]$'
+stderr -count=1 'portability::alias_extension'
+
 ! go build ./scroll
 stderr 'no Go files in '
 
@@ -216,4 +220,29 @@ package main
 
 type VSHolder struct {
 	P *Inner `json:"p"`
+}
+
+-- deferq/main.lgo --
+package main
+
+import "fmt"
+
+func main() {
+	var log []string
+	err := runVS(&log)
+	fmt.Println("deferq", err == nil, log)
+}
+
+-- deferq/vs.⚡️ --
+package main
+
+func step(log *[]string) error {
+	*log = append(*log, "deferred")
+	return nil
+}
+
+func runVS(log *[]string) error {
+	defer step(log)?
+	*log = append(*log, "body")
+	return nil
 }

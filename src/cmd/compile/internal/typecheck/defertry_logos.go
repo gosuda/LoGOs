@@ -8,21 +8,9 @@ import (
 	"cmd/compile/internal/base"
 	"cmd/compile/internal/ir"
 	"cmd/compile/internal/types"
-	"cmd/internal/src"
+	"internal/logosfile"
 	"strings"
 )
-
-var logosDeferTryExts = []string{".lgo", ".📜", ".⚡", ".ʕ◔ϖ◔ʔ"}
-
-func isLogosDeferFile(pos src.XPos) bool {
-	name := base.Ctxt.OutermostPos(pos).RelFilename()
-	for _, ext := range logosDeferTryExts {
-		if strings.HasSuffix(name, ext) {
-			return true
-		}
-	}
-	return false
-}
 
 func isLogosDeferTry(n *ir.GoDeferStmt) bool {
 	if n.Op() != ir.ODEFER {
@@ -50,7 +38,7 @@ func isLogosDeferTry(n *ir.GoDeferStmt) bool {
 	if len(call.Args) != 2 {
 		return false
 	}
-	return isLogosDeferFile(n.Pos())
+	return logosfile.Is(base.Ctxt.OutermostPos(n.Pos()).RelFilename())
 }
 
 func normalizeDeferTryCall(n *ir.GoDeferStmt, outer ir.Node, init *ir.Nodes) bool {
