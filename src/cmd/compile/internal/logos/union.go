@@ -669,6 +669,16 @@ func unionTerms(t types2.Type) ([]types2.Type, bool) {
 	if len(out) == 0 {
 		return nil, false
 	}
+	iface, _ := types2.Unalias(t).Underlying().(*types2.Interface)
+	if iface != nil {
+		var kept []types2.Type
+		for _, m := range out {
+			if types2.Implements(m, iface) {
+				kept = append(kept, m)
+			}
+		}
+		out = kept
+	}
 	return out, true
 }
 
@@ -884,8 +894,9 @@ func (fl *fileLower) emitHelpers(u *unionUse) {
 			return at(&syntax.AssertExpr{X: x, Type: utype}, pos)
 		}
 
-		isBody := []syntax.Stmt{
-			at(&syntax.SwitchStmt{
+		isBody := []syntax.Stmt{returnOf(pos, []syntax.Expr{nameOf(pos, "false")})}
+		if len(mtypes) > 0 {
+			memberSwitch := at(&syntax.SwitchStmt{
 				Tag: at(&syntax.TypeSwitchGuard{X: nameOf(pos, "v")}, pos),
 				Body: []*syntax.CaseClause{at(&syntax.CaseClause{
 					Cases: listOf(pos, mtypes),
@@ -893,8 +904,8 @@ func (fl *fileLower) emitHelpers(u *unionUse) {
 					Colon: pos,
 				}, pos)},
 				Rbrace: pos,
-			}, pos),
-			returnOf(pos, []syntax.Expr{nameOf(pos, "false")}),
+			}, pos)
+			isBody = append([]syntax.Stmt{memberSwitch}, isBody...)
 		}
 		isFn := decl(u.isName(), []*syntax.Field{anyField("v")},
 			[]*syntax.Field{at(&syntax.Field{Type: nameOf(pos, "bool")}, pos)}, isBody)
