@@ -589,6 +589,7 @@ Anchor: David Parnas, J.R.R. Tolkien
   - `callStmt` (`parser.go callStmt`): in LogosMode, when `s.Tok == _Go`, check parenthesized operands behind `?` and keep the `TryExpr` in the go statement; types2 reports `misplaced_try` for `go f()?` (SPEC §1.4).
   - `walk.go` (`node` switch at `:55`), `positions.go` (`StartPos` `:10`, `EndPos` `:124`), `printer.go` (before the default panic at `:723`): hook lines calling `walkLogos`, `startPosLogos`, `endPosLogos`, `printLogos` in `*_logos.go` files; printer prints `X?` and `errdefer <call>`.
 - Gate: `go test -short cmd/compile/internal/syntax -run 'Logos'`.
+- Red-team rows: #216.
 
 ### M1-S3 Type checking
 Anchor: Tony Hoare, Edsger W. Dijkstra
@@ -637,6 +638,7 @@ Anchor: Tony Hoare, Edsger W. Dijkstra, David Parnas
     - No _logos_strconv and no _logos_errors imports are emitted.
   - Each rewrite also appends an `Edit` replacing the original statement span (or the result list, or inserting the import). Whole-statement `syntax.String` printing alone loses interior comments (A7); the lowering carries interior comments at the text level so `try_comment.lgo` preserves them, and valid comment-bearing programs are never rejected. Sequencing follows A6 (after first check, before midway/rangefunc, once-only `didLogos`, fresh `types2.Info` plus import reset on recheck).
 - Gate: `go test cmd/internal/testdir -run 'Test/logos/'`; `go test -short cmd/compile/internal/logos`.
+- Red-team rows: #234.
 
 ### M1-S6 `logos eject`
 Anchor: Christopher Alexander, Kenya Hara
@@ -653,6 +655,7 @@ Anchor: Christopher Alexander, Kenya Hara
   - Register `eject` in `logos.ConfigureCommand` (M0-S1).
 - Gate: `go test cmd/go -run 'Script/^logos_eject(_interop)?$'`; `go test -short cmd/compile/internal/logos -run Eject`.
 - Milestone gate: G2 milestone gate; then P1 and P2.
+- Red-team rows: #242.
 
 ### M1-A-S1 Assert eject support import rules
 Anchor: Tony Hoare, Christopher Alexander, Edsger W. Dijkstra
@@ -732,7 +735,7 @@ Anchor: Edward Tufte, Tony Hoare
 - Build: none (test-only).
 - Gate: `go test -count=1 -short runtime -run 'TestDeferTry'`; `go test -race -count=1 -short runtime -run 'TestDeferTry'`; `go test -count=1 cmd/compile/internal/logos -run '^TestEjectDeferTryJoinBehavior$'`; `go test -count=1 cmd/go -run 'Script/^logos_defer_try_eject_parity$|Script/^logos_defer_try_gofile$'`.
 - Commits: `f3af3870a4` Add dormant pooled try-defer runtime record; `b9f5f06bbe` Harden TestDeferTryGC to a sleep-free event wait; `a41b1af936` Harden TestDeferTryFreeZeroesExt to a sleep-free event wait; `948417557e` Check ejected defer-try Join behavior end to end; `7bd854d346` Prove plain .go files keep defer-try semantics built.
-- Red-team rows: #230.
+- Red-team rows: #230, #233.
 - Docs: none (M1-S5 records the marker path).
 
 ### M1-A-S11 Pin that recover in the callee of defer f()? does not recover
@@ -1680,6 +1683,7 @@ Anchor: David Parnas, Christopher Alexander
 - Red-team rows: #7, #8, #14, #23, #44, #49, #60, #61, #99, #115, #156, #186 (a Go caller passes nil to a non-nil parameter of a loGo/s function).
 - Docs: P1-S3 (0.3.0) and P2.
 - Milestone gate: G2.
+- Red-team rows: #217.
 
 ### M3-A Assert option representations
 Anchor: Tony Hoare, Claude Shannon, John Carmack
@@ -1694,7 +1698,7 @@ Anchor: Tony Hoare, Claude Shannon, John Carmack
 - Attack: `src/cmd/compile/internal/logos/facts/facts_test.go`: `ValidObject` rejects `Foo@junk!`, `Foo@`, and `Foo@1x`, and `TestTaggedObjectRoundTrip` rejects a malformed tag on decode.
 - Build: the tag in an object name must be an identifier in `facts/facts.go` `ValidObject`.
 - Gate: `go test -count=1 cmd/compile/internal/logos/facts`.
-- Red-team rows: none.
+- Red-team rows: #196.
 - Docs: none.
 
 ### M3-A-S4 Assert the const switch assertion mask reaches the facts
@@ -1758,7 +1762,7 @@ Anchor: Tony Hoare, Claude Shannon, John Carmack
 - Attack: `src/cmd/go/testdata/script/logos_interop_nil.txt`: a Go package importing a loGo/s package ejects with the erased const views in place (a skipped `eraseConstViews` was caught); `src/cmd/go/testdata/script/logos_facts_wire_a3.txt`: the ejected facts carry the `lang go` record and the per-function fact lines (a `GoPackage` flip was caught).
 - Build: none (test-only).
 - Gate: `go test -count=1 -run 'Script/^(logos_interop_nil|logos_facts_wire_a3)$' cmd/go`.
-- Red-team rows: none.
+- Red-team rows: #240.
 - Docs: none (SPEC 0.3 and 5 carry the rules).
 
 ### M3-A-S12 Assert Go package facts match across GOARCH
@@ -1903,6 +1907,7 @@ Anchor: Tony Hoare, Edsger W. Dijkstra
 - Attack: `testdata/logos/const_views.lgo`, one ERROR per forbidden operation with `[correctness::const_view_mutation] cannot <op> through const view <expr>`: index assignment, field assignment through `const *T`, `append`, `copy` into a const view, `delete`, `clear`, `b[:cap(b)]` and any slice bound beyond `len` (#93, lowered to a runtime check when not constant), method with pointer receiver lacking `const` (`func (r const *T) M()` is allowed), passing to a non-const `.lgo` parameter, passing to a Go-mode parameter (the standard library or any Go package) unless the imported fact proves `ParamMutated=0` (M5-A-S3); assignment of `const []*T` to `[]*T` -> `[correctness::const_view_escape]`; reference-free copy allowed; lambda parameters in chains are const (#41); `for _, v := range constSlice` yields const elements.
 - Build: syntax `ConstType{Elem Expr}` parsed when `const` starts a type in parameter, receiver, result, variable, and field types (LogosMode, `typeOrNil`); checks in `const_logos.go`; facts writer adds `const` lines and `ReceiverMutated`/`ParamMutated` flags (computed by a syntax pass over function bodies: writes through the parameter, `append` to it, passing it to a mutating parameter, storing it anywhere outside the frame).
 - Gate: types2 tests.
+- Red-team rows: #190.
 
 ### M5-S2 Const composites and `const func`
 Anchor: Tony Hoare, John Carmack
@@ -2048,6 +2053,7 @@ Anchor: Edsger W. Dijkstra, John Carmack
 - Red-team rows: #6, #17, #31, #34, #38 (lambda and tuple parsing needs no backtracking: `(` parses one element list, then `=>` decides), #39, #41, #52, #56, #64, #67, #84, #95, #113, #119, #123, #126, #142, #146, #177, #179.
 - Docs: P1-S3, P2.
 - Milestone gate: G2.
+- Red-team rows: #216.
 
 ### M6-A Enforce generator returns and ejected traces
 Anchor: Italo Calvino, Edsger W. Dijkstra, Otl Aicher
@@ -2110,6 +2116,7 @@ Anchor: David Parnas, Edsger W. Dijkstra
 - Attack: `test/logos/run/comptime_generic.lgo`: `Autowire[T]` (PLAN Sec 11 form) instantiated with two types in one package and with one type from another package (two-package testdir case); `Resolve[f.Type](c)` inside the loop resolves per field (#128); `ServiceA` needing `ServiceB` needing `ServiceA` -> `[comptime::circular_instantiation] ServiceA -> ServiceB -> ServiceA` (#129); expanded-node limit uses the selected limit (default 4096; configuration MAY raise it): triple-nested `const for` fails above the selected N and passes at N (#150; default N = 4096); the trace prints base names without `·logosct<N>` (the linker strips the suffix, owned by this slice; `test/logos/redteam/attack_009_comptime_trace_names.lgo` at `-O=3` reads the frames of `runtime.Callers` and the name from `runtime.FuncForPC` inside an instantiated `autowire[serviceA]`, fails on a `·logosct` or `_logosct` suffix, and requires the base name `main.autowire`, #9 and #74); this slice asserts instantiation, memoization, cycle behavior, and the stripped name.
 - Build: a generic function containing `const for`, `val.[f]`, or `comptime.*` calls is a comptime generic; each instantiation site gets a non-generic copy `<f>·logosct<N>` generated in the instantiating package (type arguments substituted in syntax, then checked); copies are memoized per type-argument list; exported comptime generics are written to `__.LOGOS` `comptime` records (source text of the function and the declarations it references, resolved names qualified); an instantiation stack detects cycles. The linker strips the `·logosct<N>` suffix in names written to pclntab, so traces print base names. No `noder/stencil.go` hook runs: this tree holds no such file, so the lowering generates the copies (not a stencil pass). An instantiating package need not import the packages the generic's body names: for a loGo/s compile root, cmd/go appends every transitive built package in its existing action graph that the root does not already import directly, sorted by import path, to its `-importcfg`, traversing package-less action wrappers to reach the built packages behind them; the same set feeds the build importcfg, the lint importcfg, and the content-ID hash, so any transitive content-ID change can recompile the root. The gate stays on the root: plain-Go roots and `BuildN` runs add nothing. The `__.LOGOS` comptime records still travel for compiler consumers. This over-invalidation is conservative until a more precise compiler dependency interface exists.
 - Gate: testdir `const_for`/`comptime` run plus compile fixtures (same 18 fixture selector as M7-S2); `go test -race -count=1 cmd/go -run 'TestScript/^logos_comptime_(scope|cross|foreign_types|importcfg|nodes)$'` and `go test -race -count=1 cmd/go -run 'TestScript/^logos_eject_comptime$'`; `go vet` over `logos`, `types2`, `work`, `runtime` plus scoped `gofmt` clean; the `comptime_generic.lgo` stack-trace case asserts `Autowire` without `·logosct<N>`.
+- Red-team rows: #9, #74.
 
 ### M7-S4 `const switch T`
 Anchor: Tony Hoare, J.R.R. Tolkien
@@ -2197,6 +2204,7 @@ Anchor: Tony Hoare, Edsger W. Dijkstra
 - Attack: `src/logos/rt/group_test.go` with `testing/synctest` (GA in this tree, `src/testing/synctest/synctest.go:289`): one test per transition and invariant: first error wins (two failing children, deterministic order under synctest); cancel reaches siblings; `limit = 2` never runs 3 children at once; child panic becomes `*PanicError` with the value and a stack; `Wait` returns only after all children exit (G1); `-race` clean.
 - Build: `type Group struct`, `func NewGroup(ctx context.Context, limit int) (*Group, context.Context)`, `func (g *Group) Go(f func(context.Context) error)`, `func (g *Group) Wait() error`, `type PanicError struct{ Value any; Stack []byte }` with `Error()`.
 - Gate: `go test -race -short logos/rt -run Group`.
+- Red-team rows: #216, #235, #236, #237, #238, #239.
 
 ### M8-S2 `go group` syntax and lowering
 Anchor: Dieter Rams, Edsger W. Dijkstra
@@ -2331,7 +2339,7 @@ Anchor: Tony Hoare, Edsger W. Dijkstra
 - Language-neutral rules (R-U1; `logos lint` applies these to Go packages; the rules with default `forbid` (`arena_pointer_escape`, `infinite_recursion`, `typed_nil_return`, `concurrent_multiword_race`, `reentrant_withlock_deadlock`, `unguarded_access`, `nonatomic_access`, `lock_requirement_unmet`, `layout_constant_mismatch`, `linkname_mismatch`) run at `deny` there): `correctness::arena_pointer_escape`, `correctness::infinite_recursion`, `correctness::typed_nil_return` (only the `(*T)(nil)` form is active in Go), `correctness::unclosed_io_closer`, `correctness::unbounded_channel_op`, `concurrency::concurrent_multiword_race` (the `go` statement leg; the exemption applies to `logos/sync` types), `concurrency::reentrant_withlock_deadlock` (a func literal passed to `WithLock` of `logos/sync.Locked[T]`), `correctness::withlock_leak`, `slop::err_chain_reset`, `slop::discarded_error`, `complexity::cognitive_overflow`, `perf::large_backing_array_pin`, `perf::time_after_in_loop`, `concurrency::unguarded_access`, `concurrency::nonatomic_access`, `concurrency::lock_requirement_unmet`, `correctness::layout_constant_mismatch`, `portability::atomic_plain_int64`, `correctness::linkname_mismatch`, `perf::arena_fallback` (`logos lint` reports it for a Go package; `logos build` runs no default lint on a Go module), and `pedantic::unsafe_outside_unsafe_file`. `go vet` owns printf, copylocks, structtag, assign, httpresponse, and stringintconv checks; `logos lint` does not repeat them. A rule is language-neutral when a Go package can trigger it with Go syntax and Go types alone and the code it guards exists in Go packages; loGo/s forms inside a detection (group child, const view, option, platform pointer, `?`, lambda) are inactive in Go. The other rules apply to `.lgo` packages only: `correctness::nil_deref_unproven`, `correctness::defer_erases_errdefer_state`, `correctness::region_escape`, `concurrency::unsupervised_goroutine`, `suspicious::unapplied_struct_default`, `suspicious::side_effect_before_sort`, `portability::serialized_unsized_int` (it guards the generated binary layout of M11-S3, which Go packages do not get), `portability::alias_extension`, and `pedantic::exhaustive_union_switch`. Each language-neutral rule also has a `.go` attack file `test/logos/lint/<rule>_go.go` with ERROR comments, a passing negative case, and the same boundary cases; testdir runs `.go` files under `test/logos/lint/` with `logos lint`, not `go`, and matches the lint diagnostics with the same ERROR matcher.
 - Autofix candidates (JSON output): `nil_deref_unproven` (optional chaining with `??` default; early-return guard), `misplaced_try` (split statement), `err_chain_reset` (replace the verb with `%w`), `discarded_error` (add `?` when the enclosing function returns `error`). Candidates that name `?` are emitted for `.lgo` files only.
 - Gate: `go test cmd/internal/testdir -run 'Test/logos/lint'`; the lint overhead benchmark `BenchmarkLintOverhead` reports its measurement.
-- Red-team rows: #10, #13, #77, #148, #157, #158, #162, #163, #164, #167, #170, #172, #182.
+- Red-team rows: #10, #13, #77, #148, #157, #158, #162, #163, #164, #167, #170, #172, #182, #201.
 - Docs: P1-S3 (add the rule table), P2.
 ### M9-S9 Native nogo rules
 Anchor: Tony Hoare, Dieter Rams, David Parnas
@@ -2643,6 +2651,7 @@ Anchor: John Carmack, Herbert Simon
 - Escape and prove budgets (PLAN "4x" and "5x"): this tree has no work budget in `prove.go` (only recursion and capacity guards, `prove.go:568`, `:671-679`) and none in escape analysis; the O3 row of the spec states this and the levels add nothing for them.
 - Gate: script test `logos_opt_levels.txt` plus codegen `inline_levels.lgo` and its Go twin `inline_levels.go`, `inline_levels_o1.lgo` and its Go twin, `inline_levels_o2.lgo` and its Go twin `inline_levels_o2.go` (at -O=2 a function of inline cost 102 is inlined and one of cost 167 is not, so the budget of 120 is bracketed from both sides), `property_inline.lgo` at -O=2, `interp_stack.lgo` at -O=3, `recursive_stack.lgo` and its Go twin `recursive_stack.go` at -O=3, and `go test -short -O=3 encoding/asn1`.
 - Gate, mode assertions: `src/cmd/go/testdata/script/logos_opt_levels.txt` owns the level-size pairs. Its embedded `stackbuf` fixture runs under plain `go`, `-O=1`, `-O=2` and `-O=3` with `WANT_STACKBUF` of 32, 32, 256 and 4096 bytes and MUST fail when the compiled buffer differs, or when appends inside the buffer take a heap allocation, capacity is below the buffer, one byte past the buffer does not allocate, or data is lost across the move to the heap. Standard-library packages and their external test packages never receive `variablemakethreshold` (`src/cmd/go/internal/work/logos_stdlib_gate.go` decides provenance by package and by `ForTest` path), so `std` tests keep their upstream bodies at every level and the buffer is never measured inside them.
+- Red-team rows: #28, #107, #134.
 
 ### M13-A-S1 Assert optimization tier scope
 Anchor: John Carmack, Herbert Simon, Dieter Rams
@@ -2768,7 +2777,7 @@ Anchor: John Carmack, Claude Shannon
 - Attack: `src/cmd/go/testdata/script/logos_simd_array_targets.txt`: the scalar form of `dot` on arm64 held `FMADDD` while the NEON form rounds each product with `FMUL`, so `[4]float64` and `[4]lane` (a defined lane keeps the scalar form) disagreed on random inputs under `qemu-aarch64`. The script reads objdump on arm64, riscv64 and amd64 `GOAMD64=v3` and requires no `FMADD`, `FMSUB`, `VFMADD` or `VFMSUB` in `dotF64` and `dotLane`, and it runs `[2]`, `[4]` and `[8]float64` and `[4]`, `[8]` and `[16]float32` with 4000 random inputs each, comparing the bits of the vector and scalar forms, natively and under `qemu-aarch64` when the emulator is on `PATH`. `test/logos/run/simd_crossform.lgo` multiplies by ones, so it cannot see a fused product.
 - Build: `simdScalarBody` in `src/cmd/compile/internal/logos/simd.go` spells each float product as `T(a[i] * b[i])`. The conversion rounds to the element type, so no add absorbs the multiply.
 - Gate: `TestScript/logos_simd_array_targets` MUST pass; `TestSimd*` in `cmd/compile/internal/logos` MUST pass; the `simd*` run and codegen fixtures MUST pass.
-- Red-team rows: #234.
+- Red-team rows: #243.
 - Docs: none.
 
 ## M15. Backend peepholes and long-loop preemption
@@ -2996,7 +3005,7 @@ Anchor: Tony Hoare, John Carmack, Edsger W. Dijkstra
 - Attack: `test/escape_logos_pointee.go` (`// errorcheck -0 -m`, experiment set through its run header): `func link(o, p *node) { o.next = p }` called as `var a, b node; link(&a, &b)` reports no `moved to heap: b`; a store into a global still escapes; mutual recursion stays conservative.
 - Build: a new leak kind in `escape/pointee_logos.go` plus one hook line in `escape/escape.go`; parameter tags go into export data only when active; active for `.lgo` packages and for Go packages under the new experiment `logosescape` (default off).
 - Gate: `go test -count=1 cmd/internal/testdir -run 'Test/escape'` passes unchanged with the experiment off.
-- Red-team rows: none.
+- Red-team rows: #218.
 - Docs: P1-S3, P2.
 
 ### M18-S7 `logos/arena` and explicit placement
@@ -3021,7 +3030,7 @@ Anchor: Tony Hoare, John Carmack, Edsger W. Dijkstra
 - Attack: `logos_arena_default.txt`: `logos build -x` without `logos.toml` passes a `GOEXPERIMENT` containing `logosarena`; with `[build] arena = false` it does not; plain `go build -x` never does, even with `arena = true` on disk; an appended `logosarena` entry beats an explicit `nologosarena` negation.
 - Build: the default in `cmd/go/internal/logos/config` is true (`config.go:63` `Arena *bool`, nil means true); `settings.go:268-281` `anyRootArena` treats a missing file, a missing key, and an explicit true as enabled and only an explicit false as off; `settings.go:112-114` appends the experiment through `WithArena` (`experiment.go:14`) when enabled; the plain-go path (`settings.go:87-92`) copies only `flags.Env.GOEXPERIMENT` and never applies `WithArena`.
 - Gate: lands only after `GOEXPERIMENT=logosarena go test -count=1 -short std` and `./run.bash --no-rebuild` pass.
-- Red-team rows: none.
+- Red-team rows: #214, #215, #225, #226.
 - Docs: P1-S3, P2.
 
 ### M18-A-S1 Add comptime layout intrinsics
@@ -3199,6 +3208,7 @@ Anchor: David Parnas, Tony Hoare
 - Build: cmd/cgo parses files that import `"C"` with go/parser, which rejects loGo/s syntax with the error above mapped by cmd/go; the cgo outputs `_cgo_gotypes.go` and `*.cgo1.go` are compiled with the package's other `.lgo` files; the compiler treats generated cgo files as Go-mode files and the rewritten user files (named from the `.lgo` source) as loGo/s files, with the per-file decision keyed on the file name (`types2` helper `isLogosFile(pos)`), because the user-facing no-mix rule does not apply to generated files.
 - Build (one pipeline): Go packages use the same cmd/cgo pipeline unchanged. The cgo file layout, the generated file names, and the action cache key format stay upstream (R-U1), and M20-S1 attaches to this one pipeline.
 - Gate: script test.
+- Red-team rows: #209.
 
 ### M20-S1 Fast-CGo for Go and loGo/s packages (`#cgo noescape` plus `#cgo nocallback`, `//logos:cgo_fastcall`, `GOEXPERIMENT=logosfastcgo`)
 Anchor: John Carmack, Tony Hoare
@@ -3366,6 +3376,7 @@ Notes (m22): the `//logos:zeroalloc` directive does not change allocation behavi
   One name is host-limit: `TestPipeThreads` calls `debug.SetMaxThreads(50)` and opens 100 pipes, and `SetMaxThreads` aborts the binary with `thread exhaustion` when the binary already holds more than 50 threads.
   Anchor: Tony Hoare, Richard Feynman
 - M22-S3 Red-team completeness (Sec 17.1): every row of `logos-doc/REDTEAM.md` is `tested` or `satisfied upstream`, with the test that proves it. The exceptions are row #80 and rows #214 to #218 and #226. Row #80 is `planned` until the cross-layer regression matrix has run on the release candidate. Rows #214 to #218 and #226 are `blocked`: the file records the mechanism of each row, and the release `-O` matrix gates them (Release gate). The gate `grep -c '| planned |$' logos-doc/REDTEAM.md` prints 1 while row #80 waits for that run and 0 after it, and `grep '| blocked |$' logos-doc/REDTEAM.md` lists only rows #214 to #218 and #226. Runtime attack tests (files under `test/logos/redteam/` whose header line is `// runtime`) run under `-race`.
+  - Red-team rows: #80.
   Anchor: Tony Hoare, Edward Tufte
 - M22-S4 Codegen and `//logos:zeroalloc` (Sec 17.2): the directive makes the compiler fail with `[perf::zeroalloc_violation] <func> allocates: <reason from escape analysis>` when the function performs a heap allocation; `test/logos/codegen/zeroalloc.lgo` covers a passing and a failing function, plus the SIMD and fast-call assertions from M14 and M20. `src/logos/rt/constmap_perf_test.go BenchmarkConstMapLookup` reports lookup latency with zero allocations and asserts the table symbol is read-only (`R`). `src/logos/sync/hot_load_bench_test.go BenchmarkHotLoad` reports `Hot.Load` latency against a plain `atomic.Pointer` load.
   `test/logos/codegen/zeroalloc_sites.lgo` MUST report escaping allocations from `new`, maps, string operations, and method values. Empty slice literals and zero-size interface values MUST compile without a diagnostic. `zeroalloc_run.lgo` MUST observe zero allocations for these two exemptions.
