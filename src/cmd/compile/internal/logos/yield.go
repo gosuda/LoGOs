@@ -163,8 +163,8 @@ func (fc *funcLower) lowerYieldStmt(s *syntax.YieldStmt) syntax.Stmt {
 	call := callOf(pos, nameOf(pos, yieldParam), args)
 	cond := at(&syntax.Operation{Op: syntax.Not, X: call}, pos)
 	native := ifOf(pos, nil, cond, []syntax.Stmt{returnOf(pos, nil)})
-	valStart := fl.off(syntax.StartPos(s.Value))
-	valEnd := fl.valuesEnd(vals)
+	valStart := fl.exprStart(vals[0])
+	valEnd := fl.exprEndOf(vals[len(vals)-1])
 	fl.addT(fl.off(pos), valEnd, cat(
 		gen("if !"+yieldParam+"("),
 		fl.textOf(span{start: valStart, end: valEnd}),
@@ -175,9 +175,5 @@ func (fc *funcLower) lowerYieldStmt(s *syntax.YieldStmt) syntax.Stmt {
 func (fc *funcLower) dropReturnValues(s *syntax.ReturnStmt) {
 	fl := fc.fl
 	vals := syntax.UnpackListExpr(s.Results)
-	fl.add(fl.off(syntax.StartPos(vals[0])), fl.valuesEnd(vals), "")
-}
-
-func (fl *fileLower) valuesEnd(vals []syntax.Expr) int {
-	return stmtEnd(fl.src, fl.off(syntax.StartPos(vals[len(vals)-1])))
+	fl.add(fl.exprStart(vals[0]), fl.exprEndOf(vals[len(vals)-1]), "")
 }

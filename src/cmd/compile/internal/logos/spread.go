@@ -421,7 +421,7 @@ func (fl *fileLower) exprEndOf(e syntax.Expr) int {
 	if c, ok := syntax.Unparen(e).(*syntax.CompositeLit); ok {
 		return skipCloseParens(fl.src, fl.off(c.Rbrace)+1)
 	}
-	from := fl.off(leftmostOf(e))
+	from := fl.exprStart(e)
 	through := from
 	if rbrace, ok := lastBraceOf(e); ok {
 		through = fl.off(rbrace) + 1
