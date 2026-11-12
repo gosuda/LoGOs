@@ -43,10 +43,10 @@ func runChild(target string) {
 		p := unsafe.StringData(faultStr)
 		*p = 'X'
 	case "add":
-		q := unsafe.Add(unsafe.Pointer(&faultSlice[0]), 8)
+		q := unsafe.Add(unsafe.Pointer(unsafe.SliceData(faultSlice)), 8)
 		*(*int)(q) = 0xDEAD
 	case "slice":
-		s := unsafe.Slice(&faultSlice[0], 2)
+		s := unsafe.Slice(unsafe.SliceData(faultSlice), 2)
 		s[1] = 0xDEAD
 	}
 	fmt.Println("STORE-SUCCEEDED")
