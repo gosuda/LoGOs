@@ -14,6 +14,10 @@ type box struct{ n int }
 
 func (b box) add(n int) int { return b.n + n }
 
+type mapper struct{}
+
+func (mapper) take(n int) int { return n }
+
 type nums []int
 
 type grid [3]int
@@ -63,6 +67,26 @@ func namedMethod(b box) {
 
 func namedChainMethod(xs []int) {
 	_ = xs.take(n /* ERROR "named_argument" */ = 1)
+}
+
+func namedChainMethodDeclared(m mapper) {
+	_ = m.take(n /* ERROR "named_argument" */ = 1)
+}
+
+func namedChainMethodOfInt(n int) {
+	_ = n.map /* ERROR "undefined" */ (a = 1)
+}
+
+func namedChainMethodOfStruct(b box) {
+	_ = b.take /* ERROR "undefined" */ (n = 1)
+}
+
+func namedChainMethodOfArray(a [3]int) {
+	_ = a.map /* ERROR "undefined" */ (v = 1)
+}
+
+func namedChainMethodOfMap(m map[string]int) {
+	_ = m.filter /* ERROR "undefined" */ (v = 1)
 }
 
 func namedSecond() {

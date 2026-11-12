@@ -228,14 +228,7 @@ func (check *Checker) logosChainCall(x *operand, call *syntax.CallExpr) bool {
 		x.typ_ = Typ[Invalid]
 		return true
 	}
-	rt := rx.typ()
-	if c := logosAsConstView(rt); c != nil {
-		rt = c.Elem
-	}
-	if obj, _, _ := lookupFieldOrMethod(rt, rx.mode() == variable, check.pkg, sel.Sel.Value, false); obj != nil {
-		return false
-	}
-	st, ok := Unalias(rt).(*Slice)
+	st, ok := check.logosChainSlice(&rx, sel.Sel.Value)
 	if !ok {
 		return false
 	}
@@ -245,6 +238,18 @@ func (check *Checker) logosChainCall(x *operand, call *syntax.CallExpr) bool {
 
 func (check *Checker) logosChainRoots(e syntax.Expr) []logosWritePath {
 	return []logosWritePath{check.logosWritePath(e)}
+}
+
+func (check *Checker) logosChainSlice(rx *operand, method string) (*Slice, bool) {
+	rt := rx.typ()
+	if c := logosAsConstView(rt); c != nil {
+		rt = c.Elem
+	}
+	if obj, _, _ := lookupFieldOrMethod(rt, rx.mode() == variable, check.pkg, method, false); obj != nil {
+		return nil, false
+	}
+	st, ok := Unalias(rt).(*Slice)
+	return st, ok
 }
 
 func (check *Checker) logosChainMethod(x *operand, call *syntax.CallExpr, sel *syntax.SelectorExpr, elem Type) {

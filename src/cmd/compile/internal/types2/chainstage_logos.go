@@ -46,8 +46,17 @@ func (check *Checker) logosNamedArgCall(x *operand, call *syntax.CallExpr) bool 
 }
 
 func (check *Checker) logosUseCallee(fun syntax.Expr) bool {
-	if sel, ok := syntax.Unparen(fun).(*syntax.SelectorExpr); ok && logosChainMethods[sel.Sel.Value] {
-		return check.use(sel.X)
+	sel, ok := syntax.Unparen(fun).(*syntax.SelectorExpr)
+	if !ok || !logosChainMethods[sel.Sel.Value] {
+		return check.use(fun)
+	}
+	var rx operand
+	check.exprOrType(&rx, sel.X, false)
+	if !rx.isValid() {
+		return false
+	}
+	if _, ok := check.logosChainSlice(&rx, sel.Sel.Value); ok {
+		return true
 	}
 	return check.use(fun)
 }
