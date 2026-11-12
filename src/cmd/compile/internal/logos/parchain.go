@@ -587,16 +587,33 @@ func (fl *fileLower) lowerParRange(s syntax.Stmt, enc []resultSpec) ([]syntax.St
 }
 
 func (fl *fileLower) parRangeHead(fs *syntax.ForStmt, rc *syntax.RangeClause, seq otext, errName string) {
-	lhs := gen("_")
+	lhs, assign := gen("_"), gen(" := ")
 	if rc.Lhs != nil {
 		start := fl.off(leftmostOf(rc.Lhs))
-		lhs = fl.srcUser(start, fl.off(rc.Pos())).trimRight(" \t\n:=")
+		rangeOff := fl.off(rc.Pos())
+		split := rangeOff
+		depth := 0
+		scanSegment(fl.src, start, rangeOff, func(t tok) bool {
+			if t.comment || t.auto {
+				return true
+			}
+			switch t.kind {
+			case token.LPAREN, token.LBRACK, token.LBRACE:
+				depth++
+			case token.RPAREN, token.RBRACK, token.RBRACE:
+				depth--
+			case token.DEFINE, token.ASSIGN:
+				if depth == 0 {
+					split = t.start
+					return false
+				}
+			}
+			return true
+		})
+		lhs = fl.srcUser(start, split)
+		assign = fl.srcUser(split, rangeOff)
 	}
-	assign := " := "
-	if !rc.Def && rc.Lhs != nil {
-		assign = " = "
-	}
-	fl.addT(fl.off(fs.Pos()), fl.off(fs.Body.Pos()), cat(gen("for "), lhs, gen(", "+errName+assign+"range "), seq, gen(" ")))
+	fl.addT(fl.off(fs.Pos()), fl.off(fs.Body.Pos()), cat(gen("for "), lhs, gen(", "+errName), assign, gen("range "), seq, gen(" ")))
 }
 
 func (fl *fileLower) parReturn(s *syntax.ReturnStmt) {
