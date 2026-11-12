@@ -637,8 +637,6 @@ A missing member MUST fail with `[correctness::nonexhaustive_switch]` listing mi
 
 A case naming a sub-union MUST cover its members. [T-203.1]
 
-A switch expression MUST lower to an immediately invoked function literal. [T-203.1]
-
 Its result type MUST be the common type of the arms (identical types, the default type of untyped constants, or `T` when other arms are `nil`). [T-203.1]
 
 Mismatched arms MUST fail with `[correctness::switch_arm_mismatch]`. [T-203.1]
