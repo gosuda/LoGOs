@@ -16,12 +16,22 @@ func logosConstBranches(ls *labelScope, stmt Stmt, ctxt targets, innerBlock func
 		}
 	case *ConstSwitchStmt:
 		uncased := targets{nil, nil, -1}
+		outer := ls.constContinues
+		ls.constContinues = ls.logosContinues(ctxt)
 		ls.constSwitchDepth++
 		for _, c := range s.Cases {
 			innerBlock(uncased, c.Case, c.Body)
 		}
 		ls.constSwitchDepth--
+		ls.constContinues = outer
 	}
+}
+
+func (ls *labelScope) logosContinues(ctxt targets) *ForStmt {
+	if ctxt.continues != nil {
+		return ctxt.continues
+	}
+	return ls.constContinues
 }
 
 func (ls *labelScope) logosJumpError(s *BranchStmt, plain string) {

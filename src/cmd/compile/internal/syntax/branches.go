@@ -48,6 +48,7 @@ type labelScope struct {
 	errh             ErrorHandler
 	labels           map[string]*label // all label declarations inside the function; allocated lazily
 	constSwitchDepth int
+	constContinues   *ForStmt
 }
 
 type label struct {
@@ -313,17 +314,23 @@ func (ls *labelScope) blockBranches(parent *block, ctxt targets, lstmt *LabeledS
 			innerBlock(inner, s.Body.Pos(), s.Body.List)
 
 		case *SwitchStmt:
-			inner := targets{s, ctxt.continues, -1}
+			inner := targets{s, ls.logosContinues(ctxt), -1}
+			depth := ls.constSwitchDepth
+			ls.constSwitchDepth = 0
 			for i, cc := range s.Body {
 				inner.caseIndex = i
 				innerBlock(inner, cc.Pos(), cc.Body)
 			}
+			ls.constSwitchDepth = depth
 
 		case *SelectStmt:
-			inner := targets{s, ctxt.continues, -1}
+			inner := targets{s, ls.logosContinues(ctxt), -1}
+			depth := ls.constSwitchDepth
+			ls.constSwitchDepth = 0
 			for _, cc := range s.Body {
 				innerBlock(inner, cc.Pos(), cc.Body)
 			}
+			ls.constSwitchDepth = depth
 
 		case *ConstIfStmt, *ConstSwitchStmt:
 			logosConstBranches(ls, s, ctxt, innerBlock) // logos M7-S1/S4 hook.
