@@ -1115,35 +1115,15 @@ func activeUpConfigs(ks []config) []upConfig {
 	return out
 }
 
-func buildAllFork(t *testing.T, fork toolchain, base string, progs []string, ks []config) map[string]buildResult {
-	t.Helper()
+func buildAllFork(fork toolchain, base string, progs []string, ks []config) map[string]buildResult {
 	results := make(map[string]buildResult, len(ks))
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 	for _, c := range ks {
 		wg.Go(func() {
-			stage := filepath.Join(base, "fork-"+c.id)
-			if err := stageCorpus(fork, stage, forkCache(), progs); err != nil {
-				t.Errorf("fork stage %s: %v", c.id, err)
-				return
-			}
-			if c.toml != "" {
-				if err := os.WriteFile(filepath.Join(stage, "logos.toml"), []byte(c.toml), 0o644); err != nil {
-					t.Errorf("writing logos.toml for %s: %v", c.id, err)
-					return
-				}
-			}
-			env := appendEnv(baseEnv(forkCache()), c.env...)
-			bin := fork.bin
-			if c.logos {
-				bin = fork.logos
-			}
-			outDir := filepath.Join(base, "out-fork-"+c.id)
-			wantCgo := *releaseFlag || c.id == "K1" || c.id == "K5"
-			sb := stagedBuild{bin: bin, stage: stage, outDir: outDir, args: c.args, env: env, progs: progs, wantCgo: wantCgo}
-			built, out, err := sb.build()
+			r := buildFork(fork, base, progs, c)
 			mu.Lock()
-			results[c.id] = buildResult{outDir: outDir, output: out, err: err, progs: built}
+			results[c.id] = r
 			mu.Unlock()
 		})
 	}
@@ -1151,34 +1131,71 @@ func buildAllFork(t *testing.T, fork toolchain, base string, progs []string, ks 
 	return results
 }
 
-func buildAllUpstream(t *testing.T, up toolchain, base string, progs []string, ups []upConfig) map[string]buildResult {
-	t.Helper()
+func buildFork(fork toolchain, base string, progs []string, c config) buildResult {
+	stage := filepath.Join(base, "fork-"+c.id)
+	if err := stageCorpus(fork, stage, forkCache(), progs); err != nil {
+		return buildResult{err: fmt.Errorf("fork stage: %w", err)}
+	}
+	if c.toml != "" {
+		if err := os.WriteFile(filepath.Join(stage, "logos.toml"), []byte(c.toml), 0o644); err != nil {
+			return buildResult{err: fmt.Errorf("writing logos.toml: %w", err)}
+		}
+	}
+	env := appendEnv(baseEnv(forkCache()), c.env...)
+	bin := fork.bin
+	if c.logos {
+		bin = fork.logos
+	}
+	outDir := filepath.Join(base, "out-fork-"+c.id)
+	wantCgo := *releaseFlag || c.id == "K1" || c.id == "K5"
+	sb := stagedBuild{bin: bin, stage: stage, outDir: outDir, args: c.args, env: env, progs: progs, wantCgo: wantCgo}
+	built, out, err := sb.build()
+	return buildResult{outDir: outDir, output: out, err: err, progs: built}
+}
+
+func buildAllUpstream(up toolchain, base string, progs []string, ups []upConfig) map[string]buildResult {
 	results := make(map[string]buildResult, len(ups))
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 	for _, u := range ups {
 		wg.Go(func() {
-			stage := filepath.Join(base, "up-"+u.id)
-			if err := stageCorpus(up, stage, upCache(), progs); err != nil {
-				t.Errorf("upstream stage %s: %v", u.id, err)
-				return
-			}
-			env := baseEnv(upCache())
-			if u.race {
-				env = appendEnv(env, "CGO_ENABLED=1")
-			}
-			env = appendEnv(env, u.env...)
-			outDir := filepath.Join(base, "out-up-"+u.id)
-			wantCgo := *releaseFlag || u.id == "U1" || u.id == "U3"
-			sb := stagedBuild{bin: up.bin, stage: stage, outDir: outDir, args: u.args, env: env, progs: progs, wantCgo: wantCgo}
-			built, out, err := sb.build()
+			r := buildUpstream(up, base, progs, u)
 			mu.Lock()
-			results[u.id] = buildResult{outDir: outDir, output: out, err: err, progs: built}
+			results[u.id] = r
 			mu.Unlock()
 		})
 	}
 	wg.Wait()
 	return results
+}
+
+func buildUpstream(up toolchain, base string, progs []string, u upConfig) buildResult {
+	stage := filepath.Join(base, "up-"+u.id)
+	if err := stageCorpus(up, stage, upCache(), progs); err != nil {
+		return buildResult{err: fmt.Errorf("upstream stage: %w", err)}
+	}
+	env := baseEnv(upCache())
+	if u.race {
+		env = appendEnv(env, "CGO_ENABLED=1")
+	}
+	env = appendEnv(env, u.env...)
+	outDir := filepath.Join(base, "out-up-"+u.id)
+	wantCgo := *releaseFlag || u.id == "U1" || u.id == "U3"
+	sb := stagedBuild{bin: up.bin, stage: stage, outDir: outDir, args: u.args, env: env, progs: progs, wantCgo: wantCgo}
+	built, out, err := sb.build()
+	return buildResult{outDir: outDir, output: out, err: err, progs: built}
+}
+
+func TestStageFailureIsABuildError(t *testing.T) {
+	progs := []string{"no-such-program"}
+	forkBuilds := buildAllFork(toolchain{}, t.TempDir(), progs, []config{{id: "K1"}})
+	if r, ok := forkBuilds["K1"]; !ok || r.err == nil {
+		t.Errorf("a fork stage failure left the result %+v, want a build error", r)
+	}
+	upBuilds := buildAllUpstream(toolchain{}, t.TempDir(), progs, []upConfig{{id: "U1"}})
+	if r, ok := upBuilds["U1"]; !ok || r.err == nil {
+		t.Errorf("an upstream stage failure left the result %+v, want a build error", r)
+	}
 }
 
 func TestParity(t *testing.T) {
@@ -1192,7 +1209,7 @@ func TestParity(t *testing.T) {
 	ks := activeForkConfigs()
 	base := t.TempDir()
 
-	forkBuilds := buildAllFork(t, fork, base, progs, ks)
+	forkBuilds := buildAllFork(fork, base, progs, ks)
 	for _, c := range ks {
 		if r := forkBuilds[c.id]; r.err != nil {
 			t.Errorf("fork build %s failed: %v\n%s", c.id, r.err, clip(r.output))
@@ -1202,7 +1219,7 @@ func TestParity(t *testing.T) {
 	var upBuilds map[string]buildResult
 	if upOn {
 		ups = activeUpConfigs(ks)
-		upBuilds = buildAllUpstream(t, up, base, progs, ups)
+		upBuilds = buildAllUpstream(up, base, progs, ups)
 		for _, u := range ups {
 			if r := upBuilds[u.id]; r.err != nil {
 				t.Errorf("upstream build %s failed: %v\n%s", u.id, r.err, clip(r.output))
