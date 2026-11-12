@@ -313,6 +313,10 @@ func (ls *labelScope) blockBranches(parent *block, ctxt targets, lstmt *LabeledS
 			inner := targets{s, s, -1}
 			innerBlock(inner, s.Body.Pos(), s.Body.List)
 
+		case *ConstForStmt:
+			inner := targets{ctxt.breaks, ctxt.continues, -1}
+			innerBlock(inner, s.Body.Pos(), s.Body.List)
+
 		case *SwitchStmt:
 			inner := targets{s, ls.logosContinues(ctxt), -1}
 			depth := ls.constSwitchDepth

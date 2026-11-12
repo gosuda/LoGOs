@@ -336,7 +336,7 @@ func (fl *fileLower) reparseTopCopy(text otext, cf *syntax.ConstForStmt, fctx cf
 	var errs []error
 	f, _ := syntax.Parse(fbase, strings.NewReader("package cfreparse\nfunc cfreparse() {\n"+text.s+"\n}\n"), func(err error) {
 		errs = append(errs, err)
-	}, nil, syntax.CheckBranches|syntax.LogosMode)
+	}, nil, syntax.LogosMode)
 	fn := cfFirstFunc(f)
 	if len(errs) > 0 || fn == nil || fn.Body == nil {
 		base.Fatalf("logos: cannot parse const for expansion at %s: %v", cf.Pos().String(), errs)
@@ -564,6 +564,8 @@ type cfRun struct {
 	fieldsOf cfFieldsFunc
 	sites    *cfSites
 	budget   int
+	labels   map[string]bool
+	labelID  int
 }
 
 // cfRunFor builds the run of one const for of the file being lowered.
@@ -670,12 +672,81 @@ func (v cfParentVisitor) Visit(n syntax.Node) syntax.Visitor {
 	return v
 }
 
+func (fl *fileLower) cfLabelSubs(body *syntax.BlockStmt, covered []span, run *cfRun) []cfSub {
+	var declarations []*syntax.Name
+	syntax.Inspect(body, func(n syntax.Node) bool {
+		switch n := n.(type) {
+		case *syntax.ConstForStmt, *syntax.FuncLit:
+			return false
+		case *syntax.LabeledStmt:
+			if n.Label.Value != "_" {
+				declarations = append(declarations, n.Label)
+			}
+		}
+		return true
+	})
+	if len(declarations) == 0 {
+		return nil
+	}
+	if run.labels == nil {
+		run.labels = make(map[string]bool)
+		syntax.Inspect(fl.file, func(n syntax.Node) bool {
+			if s, ok := n.(*syntax.LabeledStmt); ok {
+				run.labels[s.Label.Value] = true
+			}
+			return true
+		})
+		scanSegment(run.ctx.buf.b, 0, len(run.ctx.buf.b), func(t tok) bool {
+			if t.kind == token.IDENT {
+				run.labels[string(run.ctx.buf.b[t.start:t.end])] = true
+			}
+			return true
+		})
+	}
+	names := make(map[string]string)
+	for _, label := range declarations {
+		for {
+			run.labelID++
+			name := fmt.Sprintf("_logos_cf_label_%d_%d_%d", run.ctx.stamp.Line(), run.ctx.stamp.Col(), run.labelID)
+			if !run.labels[name] {
+				run.labels[name] = true
+				names[label.Value] = name
+				break
+			}
+		}
+	}
+	var subs []cfSub
+	syntax.Inspect(body, func(n syntax.Node) bool {
+		var label *syntax.Name
+		switch n := n.(type) {
+		case *syntax.FuncLit:
+			return false
+		case *syntax.LabeledStmt:
+			label = n.Label
+		case *syntax.BranchStmt:
+			label = n.Label
+		}
+		if label != nil {
+			if name, ok := names[label.Value]; ok {
+				start := offAt(run.ctx.starts, label.Pos())
+				end := start + len(label.Value)
+				if !insideAny(span{start: start, end: end}, covered) {
+					subs = append(subs, cfSub{start: start, end: end, text: name})
+				}
+			}
+		}
+		return true
+	})
+	return subs
+}
+
 // expandLevel substitutes the active bindings in the body text slice and
 // recursively expands nested const fors right to left. sliceStart is the
 // mapped offset of text[0]; m maps base offsets to the evolving text.
 func (fl *fileLower) expandLevel(body *syntax.BlockStmt, active cfChain, text otext, sliceStart int, m *cfMapper, run *cfRun) otext {
 	ctx := run.ctx
 	ls := fl.cfLeafSubs(body, active, m.covered(), run)
+	ls = append(ls, fl.cfLabelSubs(body, m.covered(), run)...)
 	rel := make([]splice, 0, len(ls))
 	for _, x := range ls {
 		ms, me := m.mapSpan(x.start, x.end)
@@ -737,7 +808,7 @@ func (fl *fileLower) reparseStmts(text string, stamp syntax.Pos) []syntax.Stmt {
 	var errs []error
 	f, _ := syntax.Parse(fbase, strings.NewReader(src), func(err error) {
 		errs = append(errs, err)
-	}, nil, syntax.CheckBranches|syntax.LogosMode)
+	}, nil, syntax.LogosMode)
 	if len(errs) > 0 || f == nil {
 		base.Fatalf("logos: cannot parse const for expansion at %s: %v", stamp.String(), errs)
 	}
