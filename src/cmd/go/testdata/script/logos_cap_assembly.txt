@@ -41,6 +41,16 @@ exec $WORK/bin/asme$GOEXE
 stdout '^std-asm-ok$'
 cd ../..
 
+cd f/main
+! logos build -o $WORK/bin/asmf$GOEXE ./cmd
+stderr 'ERROR \[capabilities::unclassified_assembly\]: Transitive dependency ''example\.com/fdep'' holds assembly files'
+cd ../..
+
+cd g/main
+! logos build -o $WORK/bin/asmg$GOEXE ./cmd
+stderr 'ERROR \[capabilities::unclassified_assembly\]: Transitive dependency ''example\.com/gdep'' holds assembly files'
+cd ../..
+
 -- a/main/go.mod --
 module example.com/amain
 
@@ -292,3 +302,101 @@ func Sum() string {
 	}
 	return "bad"
 }
+
+-- f/main/go.mod --
+module example.com/fmain
+
+go 1.27
+
+require example.com/fdep v0.0.0
+
+replace example.com/fdep => ../dep
+
+-- f/main/logos.toml --
+[capabilities]
+transitive_unsafe = "deny"
+
+-- f/main/cmd/main.go --
+package main
+
+import (
+	"fmt"
+
+	"example.com/fdep"
+)
+
+func main() { fmt.Println(fdep.Zero()) }
+
+-- f/dep/go.mod --
+module example.com/fdep
+
+go 1.27
+
+-- f/dep/stub.go --
+package fdep
+
+func Zero() int
+
+-- f/dep/stub_amd64.S --
+#include "textflag.h"
+
+TEXT ·Zero(SB), NOSPLIT, $0-8
+	MOVQ $0, ret+0(FP)
+	RET
+
+-- f/dep/stub_arm64.S --
+#include "textflag.h"
+
+TEXT ·Zero(SB), NOSPLIT, $0-8
+	MOVD $0, R0
+	MOVD R0, ret+0(FP)
+	RET
+
+-- g/main/go.mod --
+module example.com/gmain
+
+go 1.27
+
+require example.com/gdep v0.0.0
+
+replace example.com/gdep => ../dep
+
+-- g/main/logos.toml --
+[capabilities]
+transitive_unsafe = "deny"
+
+-- g/main/cmd/main.go --
+package main
+
+import (
+	"fmt"
+
+	"example.com/gdep"
+)
+
+func main() { fmt.Println(gdep.Zero()) }
+
+-- g/dep/go.mod --
+module example.com/gdep
+
+go 1.27
+
+-- g/dep/stub.go --
+package gdep
+
+func Zero() int
+
+-- g/dep/stub_amd64.sx --
+#include "textflag.h"
+
+TEXT ·Zero(SB), NOSPLIT, $0-8
+	MOVQ $0, ret+0(FP)
+	RET
+
+-- g/dep/stub_arm64.sx --
+#include "textflag.h"
+
+TEXT ·Zero(SB), NOSPLIT, $0-8
+	MOVD $0, R0
+	MOVD R0, ret+0(FP)
+	RET

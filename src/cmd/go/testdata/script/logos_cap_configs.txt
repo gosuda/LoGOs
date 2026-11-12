@@ -77,6 +77,16 @@ cd k/main
 stderr 'ERROR \[capabilities::unauthorized_unsafe\]: Transitive dependency ''example\.com/kdep'' imports ''unsafe'''
 cd ../..
 
+cd m/main
+! logos build -o $WORK/bin/cfgm$GOEXE ./cmd
+stderr 'ERROR \[capabilities::unclassified_assembly\]: Transitive dependency ''example\.com/mdep'' holds assembly files'
+cd ../..
+
+cd n/main
+! logos build -o $WORK/bin/cfgn$GOEXE ./cmd
+stderr 'ERROR \[capabilities::unclassified_assembly\]: Transitive dependency ''example\.com/ndep'' holds assembly files'
+cd ../..
+
 cd l/main
 logos build -o $WORK/bin/cfgl$GOEXE ./cmd
 ! stderr 'capabilities::'
@@ -624,3 +634,83 @@ package ldep
 import "example.com/ghost"
 
 func init() { ghost.Run() }
+
+-- m/main/go.mod --
+module example.com/mmain
+
+go 1.27
+
+require example.com/mdep v0.0.0
+
+replace example.com/mdep => ../dep
+
+-- m/main/logos.toml --
+[capabilities]
+transitive_unsafe = "deny"
+
+-- m/main/cmd/main.go --
+package main
+
+import (
+	"fmt"
+
+	"example.com/mdep"
+)
+
+func main() { fmt.Println(mdep.Name()) }
+
+-- m/dep/go.mod --
+module example.com/mdep
+
+go 1.27
+
+-- m/dep/dep.go --
+package mdep
+
+func Name() string { return "excluded-S" }
+
+-- m/dep/stub_plan9.S --
+#include "textflag.h"
+
+TEXT ·stub(SB), NOSPLIT, $0-0
+	RET
+
+-- n/main/go.mod --
+module example.com/nmain
+
+go 1.27
+
+require example.com/ndep v0.0.0
+
+replace example.com/ndep => ../dep
+
+-- n/main/logos.toml --
+[capabilities]
+transitive_unsafe = "deny"
+
+-- n/main/cmd/main.go --
+package main
+
+import (
+	"fmt"
+
+	"example.com/ndep"
+)
+
+func main() { fmt.Println(ndep.Name()) }
+
+-- n/dep/go.mod --
+module example.com/ndep
+
+go 1.27
+
+-- n/dep/dep.go --
+package ndep
+
+func Name() string { return "excluded-sx" }
+
+-- n/dep/stub_plan9.sx --
+#include "textflag.h"
+
+TEXT ·stub(SB), NOSPLIT, $0-0
+	RET
