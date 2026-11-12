@@ -402,7 +402,7 @@ Constant data with pointers MUST live in read-only memory, so a write to it faul
 
 A write to a constant composite through `unsafe` MUST fault at run time. [T-201]
 
-A hand-written `//logos:rodata` directive above a package-level `var` outside a `var (...)` group in a loGo/s package MUST place the variable in read-only memory, and a variable under it whose initializer needs dynamic initialization MUST fail compilation with `[correctness::rodata_dynamic_init]` at the variable. [T-201]
+A hand-written `//logos:rodata` directive on its own line in the comment block directly above a package-level `var` declaration or a spec of a `var (...)` group in a loGo/s package MUST place the variable in read-only memory, and a variable under it whose initializer needs dynamic initialization MUST fail compilation with `[correctness::rodata_dynamic_init]` at the variable. A `//logos:rodata` directive anywhere else (above a `const`, a `func`, a `type`, or the `var (` line of a group, inside a function body, after code on its line, or apart from its declaration by a blank line) MUST fail compilation with `[correctness::misplaced_directive]` at the directive. The other `//logos:` directives report a misplaced directive under the rule they serve (Sec 1.2, Sec 17.2), and no rule serves this one. [T-201]
 
 A write through any alias to a variable placed by that directive MUST fault at run time. [T-201]
 

@@ -16,11 +16,24 @@ var mapped = map[string]int{"a": 1} // ERROR "\[correctness::rodata_dynamic_init
 //logos:rodata
 var joined = suffix + "x" // ERROR "\[correctness::rodata_dynamic_init\]"
 
+var (
+	//logos:rodata
+	groupedCall = fresh() // ERROR "\[correctness::rodata_dynamic_init\]"
+
+	groupedPlain = fresh()
+
+	//logos:rodata
+	groupedMap = map[string]int{"b": 2} // ERROR "\[correctness::rodata_dynamic_init\]"
+
+	//logos:rodata
+	groupedStatic = [2]int{3, 4}
+)
+
 //go:noinline
 func fresh() int {
 	return 1
 }
 
 func main() {
-	println(dyn[0], dyn[1], called, len(mapped), joined)
+	println(dyn[0], dyn[1], called, len(mapped), joined, groupedCall, groupedPlain, len(groupedMap), groupedStatic[0])
 }

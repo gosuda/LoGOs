@@ -8,7 +8,9 @@ stdout '^ok guarded-ints-fault$'
 stdout '^ok guarded-pair-fault$'
 stdout '^ok guarded-ptr-fault$'
 stdout '^ok guarded-holder-fault$'
+stdout '^ok guarded-grouped-fault$'
 stdout '^ok plain-write-clean$'
+stdout '^ok grouped-plain-clean$'
 ! stdout 'FAIL'
 
 -- prog/go.mod --
@@ -55,6 +57,13 @@ var guardedHolder = holder{p: &guardedInts}
 
 var plainInts = [4]int{1, 2, 3, 4}
 
+var (
+	//logos:rodata
+	groupedInts = [4]int{1, 2, 3, 4}
+
+	groupedPlain = [4]int{1, 2, 3, 4}
+)
+
 var failed bool
 
 func check(name string, cond bool, got, want any) {
@@ -91,6 +100,10 @@ func child(which string) {
 		repoint(&guardedPtr, &spare)
 	case "holder":
 		retarget(&guardedHolder.p, &plainInts)
+	case "grouped":
+		poke(&groupedInts[0])
+	case "groupedplain":
+		poke(&groupedPlain[0])
 	case "plain":
 		poke(&plainInts[0])
 	}
@@ -134,6 +147,9 @@ func main() {
 	checkFault(self, "pair")
 	checkFault(self, "ptr")
 	checkFault(self, "holder")
+	checkFault(self, "grouped")
+	gcode, gout := run(self, "groupedplain")
+	check("grouped-plain-clean", gcode == 0 && strings.Contains(gout, "STORE-SUCCEEDED"), gout, "exit 0 with STORE-SUCCEEDED")
 	code, out := run(self, "plain")
 	check("plain-write-clean", code == 0 && strings.Contains(out, "STORE-SUCCEEDED"), out, "exit 0 with STORE-SUCCEEDED")
 	if failed {

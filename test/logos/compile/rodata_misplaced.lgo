@@ -1,0 +1,40 @@
+// errorcheck
+
+package main
+
+//logos:rodata // ERROR "\[correctness::misplaced_directive\]"
+const aboveConst = 1
+
+//logos:rodata // ERROR "\[correctness::misplaced_directive\]"
+type aboveType struct{}
+
+//logos:rodata // ERROR "\[correctness::misplaced_directive\]"
+func aboveFunc() {}
+
+//logos:rodata // ERROR "\[correctness::misplaced_directive\]"
+var (
+	aboveGroup = 1
+)
+
+//logos:rodata // ERROR "\[correctness::misplaced_directive\]"
+
+var apart = 1
+
+var trailing = 1 //logos:rodata // ERROR "\[correctness::misplaced_directive\]"
+
+var (
+	//logos:rodata
+	placed = 1
+
+	//logos:rodata // ERROR "\[correctness::misplaced_directive\]"
+
+	placedApart = 1
+)
+
+func main() {
+	//logos:rodata // ERROR "\[correctness::misplaced_directive\]"
+	local := 1
+	var unused aboveType
+	println(aboveConst, aboveGroup, apart, trailing, placed, placedApart, local, unused == aboveType{})
+	aboveFunc()
+}

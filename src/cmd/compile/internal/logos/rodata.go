@@ -5,10 +5,12 @@
 package logos
 
 import (
+	"bytes"
 	"maps"
 	"strings"
 	"sync"
 
+	"cmd/compile/internal/base"
 	"cmd/compile/internal/logos/ctfe"
 	"cmd/compile/internal/syntax"
 )
@@ -108,18 +110,31 @@ func rodataStaticType(t *ctfe.Type, depth int) bool {
 }
 
 func (fl *fileLower) scanRodataMarkers() {
+	attached := map[uint]bool{}
 	for _, decl := range fl.file.DeclList {
 		vd, ok := decl.(*syntax.VarDecl)
-		if !ok || vd.Group != nil {
+		if !ok {
 			continue
 		}
-		if _, found := rodataMarkerAbove(fl.src, fl.lineStart(vd)); !found {
+		top, found := rodataMarkerAbove(fl.src, fl.lineStart(vd))
+		if !found {
 			continue
 		}
+		attached[uint(bytes.Count(fl.src[:top], []byte("\n")))] = true
 		for _, name := range vd.NameList {
 			RegisterWrittenRodata(fl.pkg.tpkg.Path(), name.Value)
 		}
 	}
+	fl.reportUnattachedRodata(attached)
+}
+
+func (fl *fileLower) reportUnattachedRodata(attached map[uint]bool) {
+	posBase := fl.file.Pos().FileBase()
+	syntax.CommentsDoMode(bytes.NewReader(fl.src), syntax.LogosMode, func(line, col uint, text string) {
+		if strings.HasPrefix(text, rodataMarker) && !attached[line] {
+			base.Errorf("%s: [correctness::misplaced_directive] %s must be on its own line directly above a package-level var or a spec of a var group", syntax.MakePos(posBase, line, col).String(), rodataMarker)
+		}
+	})
 }
 
 func rodataMarkerAbove(src []byte, lineOff int) (top int, found bool) {
