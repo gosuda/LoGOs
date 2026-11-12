@@ -50,6 +50,9 @@ cmp stdout want.txt
 ! logos build -o $WORK/bin/badcall$GOEXE ./badcall
 stderr -count=1 '\[correctness::const_view_mutation\]'
 rm badcall
+! logos build -o $WORK/bin/badvalue$GOEXE ./badvalue
+stderr -count=2 '\[correctness::const_view_mutation\]'
+rm badvalue
 logos eject -o out
 cd out
 exec $GOROOT/bin/gofmt -l .
@@ -355,6 +358,10 @@ func (r const *S) Lookup(k string) int { return r.M[k] ?? 0 }
 
 func (s *S) Set() { s.N = 1 }
 
+func (s S) Stomp() { s.M["x"] = 1 }
+
+func (s S) Names() map[string]int { return s.M }
+
 const C = S{M: map[string]int{"a": 1}, N: 5}
 
 const Items = []S{{M: map[string]int{"a": 1}, N: 5}, {M: map[string]int{"b": 2}, N: 6}}
@@ -389,6 +396,20 @@ import (
 
 func main() {
 	lib.C.Set()
+	fmt.Println(lib.C.N)
+}
+-- methods/badvalue/main.lgo --
+package main
+
+import (
+	"fmt"
+
+	"example.com/ccmethods/lib"
+)
+
+func main() {
+	lib.C.Stomp()
+	_ = lib.C.Names()
 	fmt.Println(lib.C.N)
 }
 -- rangeimp/go.mod --

@@ -431,13 +431,23 @@ func (check *Checker) logosImportedComposite(obj *Var) bool {
 		LogosImportedConstComposite != nil && LogosImportedConstComposite(obj.Pkg().Path(), obj.Name())
 }
 
-func logosPointerReceiver(fn *Func) bool {
-	sig, ok := fn.Type().(*Signature)
-	if !ok || sig.Recv() == nil {
-		return false
+func (check *Checker) logosCompositeCallProven(e *syntax.SelectorExpr, fn *Func) bool {
+	sig, _ := fn.Type().(*Signature)
+	if sig == nil || sig.Recv() == nil {
+		return true
 	}
-	_, ptr := Unalias(sig.Recv().Type()).(*Pointer)
-	return ptr
+	rt := sig.Recv().Type()
+	if _, isInterface := Unalias(rt).Underlying().(*Interface); isInterface {
+		return true
+	}
+	if logosAsConstView(rt) != nil || logosReferenceFree(rt) {
+		return true
+	}
+	if fn.Origin().Pkg() == check.pkg {
+		check.logosDeferReadonlyCheck(fn, e.Sel.Pos(), e.X, e.Sel.Value)
+		return true
+	}
+	return check.logosReceiverReadonly(fn)
 }
 
 func (check *Checker) logosCompositeMutatingCall(e *syntax.SelectorExpr, fn *Func) bool {
@@ -448,7 +458,7 @@ func (check *Checker) logosCompositeMutatingCall(e *syntax.SelectorExpr, fn *Fun
 	if !ok {
 		return false
 	}
-	if fn != nil && (!logosPointerReceiver(fn) || check.logosReceiverReadonly(fn)) {
+	if fn != nil && check.logosCompositeCallProven(e, fn) {
 		return false
 	}
 	check.errorf(e.Sel, IncompatibleAssign, "%s cannot call %s through const view %s", logosConstMutation, e.Sel.Value, ExprString(root))

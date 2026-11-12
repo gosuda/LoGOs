@@ -34,6 +34,8 @@ const cfg = box{M: map[string]int{"a": 1}, L: []int{1, 2, 3}, A: [3]int{1, 2, 3}
 
 const w = wrap{In: box{M: map[string]int{"z": 5}, N: 3}, K: 1}
 
+func mutM(m map[string]int) { m["q"] = 1 }
+
 func main() {
 	n := &cfg.N
 	*n = 5
@@ -60,6 +62,11 @@ func main() {
 	x := &cfg.N
 	y := &cfg.N
 	check("fresh-per-evaluation", x != y, x, y)
+
+	mutM(cfg.M)
+	pm := cfg.M
+	pm["r"] = 2
+	check("map-argument-copy", len(cfg.M) == 1 && len(pm) == 2, len(cfg.M), 1)
 
 	if failed {
 		os.Exit(1)
