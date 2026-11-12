@@ -580,6 +580,9 @@ func (check *Checker) stmt(ctxt stmtContext, s syntax.Stmt) {
 		check.logosConstFor(s, inner) // logos M7-S2 hook.
 
 	case *syntax.ReturnStmt:
+		if check.logosChainReturn(s) { // logos M6-S6 hook: a return in a block lambda produces the element.
+			return
+		}
 		if check.logosGeneratorReturn(s) {
 			return
 		}

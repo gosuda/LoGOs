@@ -571,46 +571,19 @@ func logosOrderedKey(u Type) bool {
 
 func (check *Checker) logosChainBlock(lam *syntax.LambdaExpr, roots map[string]bool, scope *Scope, elem Type, kind logosChainKind, block *syntax.BlockStmt) (Type, bool, bool) {
 	check.logosChainNoMutate(roots, block)
-	syntax.Inspect(block, func(n syntax.Node) bool {
-		switch n.(type) {
-		case *syntax.FuncLit, *syntax.LambdaExpr:
-			return false
-		}
-		if t, ok := n.(*syntax.TryExpr); ok {
-			check.error(t.Pos(), InvalidCall, logosMisplacedTry)
-			return false
-		}
-		return true
-	})
-	var collected []*operand
+	saved := check.environment.chainRets
+	st := &chainReturnState{}
+	check.environment.chainRets = st
 	failed := !check.logosChainJumps(block)
-	for _, s := range block.List {
-		ret, isRet := s.(*syntax.ReturnStmt)
-		if !isRet {
-			check.stmt(0, s)
-			continue
-		}
-		for _, res := range syntax.UnpackListExpr(ret.Results) {
-			var op operand
-			check.expr(nil, &op, res)
-			if !op.isValid() {
-				failed = true
-				continue
-			}
-			if _, ok := op.typ().(*Tuple); ok {
-				check.error(res, WrongResultCount, "cannot infer chain element type from multi-value return")
-				failed = true
-				continue
-			}
-			collected = append(collected, &op)
-		}
-	}
-	if failed {
+	check.stmtList(0, block.List)
+	check.environment.chainRets = saved
+	if st.bad || failed {
 		return nil, false, false
 	}
+	collected := st.ops
 	if kind == logosPredKind {
 		for _, op := range collected {
-			check.assignment(op, Typ[Bool], "chain predicate")
+			check.assignment(op, Typ[Bool], "return statement")
 		}
 		if !check.isTerminating(block, "") {
 			check.error(block.Rbrace, MissingReturn, "missing return")
@@ -634,14 +607,15 @@ func (check *Checker) logosChainBlock(lam *syntax.LambdaExpr, roots map[string]b
 		check.error(block, IncompatibleAssign, "cannot infer chain element type: no return")
 		return nil, false, false
 	}
-	for _, t := range types[1:] {
-		if !Identical(t, types[0]) {
-			check.errorf(block, IncompatibleAssign, "inconsistent chain element types %s and %s", types[0], t)
-			return nil, false, false
+	mismatch := false
+	for _, op := range collected {
+		if ok, _ := op.assignableTo(check, types[0], nil); !ok {
+			check.assignment(op, types[0], "return statement")
+			mismatch = true
 		}
 	}
-	for _, op := range collected {
-		check.assignment(op, types[0], "chain element")
+	if mismatch {
+		return nil, false, false
 	}
 	if !check.isTerminating(block, "") {
 		check.error(block.Rbrace, MissingReturn, "missing return")
@@ -654,11 +628,42 @@ func (check *Checker) logosChainBlock(lam *syntax.LambdaExpr, roots map[string]b
 	return types[0], false, true
 }
 
+type chainReturnState struct {
+	ops []*operand
+	bad bool
+}
+
 var logosChainMutatingBuiltins = map[string]string{
 	"append": "append to",
 	"copy":   "copy into",
 	"clear":  "clear",
 	"delete": "delete from",
+}
+
+func (check *Checker) logosChainReturn(s *syntax.ReturnStmt) bool {
+	st := check.environment.chainRets
+	if st == nil {
+		return false
+	}
+	results := syntax.UnpackListExpr(s.Results)
+	if len(results) != 1 {
+		check.errorf(s, WrongResultCount, "chain lambda return provides %d values, want 1", len(results))
+		st.bad = true
+		return true
+	}
+	var op operand
+	check.expr(nil, &op, results[0])
+	if !op.isValid() {
+		st.bad = true
+		return true
+	}
+	if _, ok := op.typ().(*Tuple); ok {
+		check.error(results[0], WrongResultCount, "cannot infer chain element type from multi-value return")
+		st.bad = true
+		return true
+	}
+	st.ops = append(st.ops, &op)
+	return true
 }
 
 func (check *Checker) logosChainNoMutate(roots map[string]bool, body syntax.Node) {
