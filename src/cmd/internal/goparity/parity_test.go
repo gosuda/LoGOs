@@ -20,8 +20,9 @@
 // # Program contract
 //
 // A program reads no input, uses no network and no wall clock in its output,
-// prints deterministic text, and exits 0. A broken law prints a line starting
-// with LAW and exits 1. Programs must build and run identically under
+// prints deterministic text, and exits 0. A broken law prints a line with the
+// word LAW on stdout or stderr and exits 1, and the harness fails a program
+// that does either. Programs must build and run identically under
 // upstream Go: they may not use the logos build tag, //logos: directives,
 // runtime.Version(), loGo/s packages, or any sanctioned SPEC §0.1 difference.
 // They are float-free or pass every float result through an explicit
@@ -831,6 +832,32 @@ func obsEqual(a, b observation) bool {
 	return a.exit == b.exit && a.stdout == b.stdout && a.stderr == b.stderr
 }
 
+var lawWord = regexp.MustCompile(`\bLAW\b`)
+
+func corpusDefect(o observation) bool {
+	return o.exit != 0 || lawWord.MatchString(o.stdout) || lawWord.MatchString(o.stderr)
+}
+
+func TestCorpusDefectProbes(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		o    observation
+		want bool
+	}{
+		{"clean", observation{stdout: "ok\n"}, false},
+		{"nonzero exit", observation{exit: 1}, true},
+		{"law on stdout", observation{stdout: "LAW x\n"}, true},
+		{"law mid line", observation{stdout: "case 1 LAW clobbered\n"}, true},
+		{"law on stderr", observation{stderr: "LAW x\n"}, true},
+		{"word containing law", observation{stdout: "OUTLAW\n"}, false},
+		{"word containing law on stderr", observation{stderr: "claw LAWN\n"}, false},
+	} {
+		if got := corpusDefect(tc.o); got != tc.want {
+			t.Errorf("%s: corpusDefect = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
 func firstDiff(a, b string) string {
 	al := strings.Split(a, "\n")
 	bl := strings.Split(b, "\n")
@@ -1047,7 +1074,7 @@ func TestParity(t *testing.T) {
 	}
 	for _, c := range ks {
 		for _, p := range progs {
-			if o, ok := forkObs[c.id][p]; ok && (o.exit != 0 || strings.Contains(o.stdout, "LAW")) {
+			if o, ok := forkObs[c.id][p]; ok && corpusDefect(o) {
 				t.Errorf("corpus defect: program %s failed under fork %s: %s\n%s", p, c.id, obsDesc(o), clip(o.stdout))
 			}
 		}
@@ -1055,7 +1082,7 @@ func TestParity(t *testing.T) {
 	if upOn {
 		for _, u := range ups {
 			for _, p := range progs {
-				if o, ok := upObs[u.id][p]; ok && (o.exit != 0 || strings.Contains(o.stdout, "LAW")) {
+				if o, ok := upObs[u.id][p]; ok && corpusDefect(o) {
 					t.Errorf("corpus defect: program %s failed under upstream %s: %s\n%s", p, u.id, obsDesc(o), clip(o.stdout))
 				}
 			}
@@ -1705,7 +1732,7 @@ func TestParityMutants(t *testing.T) {
 			if ferr != nil {
 				t.Fatalf("mutant %s: %v", m.id, ferr)
 			}
-			red := fobs.exit != 0 || strings.Contains(fobs.stdout, "LAW")
+			red := corpusDefect(fobs)
 			if upOn {
 				ub, err := upOnce.build(t, cfg.upstream)
 				if err != nil {
