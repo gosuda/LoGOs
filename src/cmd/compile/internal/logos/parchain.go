@@ -17,6 +17,11 @@ import (
 
 const parCtxName = "_logos_pc"
 
+const (
+	parResultName = "_logos_lr0"
+	parErrorName  = "_logos_lr1"
+)
+
 type parSource int
 
 const (
@@ -288,13 +293,14 @@ func (cg *chainGen) parClosure(name string, op chainOp, in, out types2.Type) ote
 	if op.method == "map" {
 		result, zero, resT = cg.spellType(out), cg.zeroText(out), out
 	}
-	head := name + " := func(" + op.lam.Params[0].Value + " " + cg.spellType(in) + ") (" + result + ", error) {"
+	param := op.lam.Params[0].Value + " " + cg.spellType(in)
+	if op.isBlk {
+		return cg.parBlockClosure(name, op, in, resT)
+	}
+	head := name + " := func(" + param + ") (" + result + ", error) {"
 	fc := fl.parFuncLower(resT)
-	switch {
-	case op.isTry && !op.isBlk:
+	if op.isTry {
 		return cg.parTryClosure(fc, head, op, zero)
-	case op.isBlk:
-		return cg.parBlockClosure(fc, head, op)
 	}
 	body, ok := op.savedBody.(syntax.Expr)
 	if !ok {
@@ -305,10 +311,15 @@ func (cg *chainGen) parClosure(name string, op chainOp, in, out types2.Type) ote
 }
 
 func (fl *fileLower) parFuncLower(res types2.Type) *funcLower {
-	return &funcLower{fl: fl, groupStack: []groupFrame{{gctx: parCtxName, child: true, segment: true, segmentRes: res}}}
+	return &funcLower{fl: fl, groupStack: parGroupStack(res)}
+}
+
+func parGroupStack(res types2.Type) []groupFrame {
+	return []groupFrame{{gctx: parCtxName, child: true, segment: true, segmentRes: res}}
 }
 
 func (fc *funcLower) parHoist(e syntax.Expr) otext {
+	scanForLiterals(fc.fl, e)
 	top, _ := fc.groupTop()
 	mark := fc.hoistSubMark()
 	_, pre := fc.groupHoistExpr(e, top)
@@ -333,18 +344,34 @@ func (cg *chainGen) parTryClosure(fc *funcLower, head string, op chainOp, zero s
 	return cat(gen(head+" "), pre, gen(v+", "+e+" := "), call, gen("; if "+e+" != nil { return "+zero+", "+e+" }; return "+v+", nil }"))
 }
 
-func (cg *chainGen) parBlockClosure(fc *funcLower, head string, op chainOp) otext {
+func (cg *chainGen) parBlockClosure(name string, op chainOp, in, res types2.Type) otext {
 	fl := cg.fl
 	block, ok := op.savedBody.(*syntax.BlockStmt)
 	if !ok {
 		base.Fatalf("logos: group stage lambda at %s has no block body", op.lam.Pos().String())
 	}
-	fc.lowerList(block.List)
+	sig := "func(" + op.lam.Params[0].Value + " " + cg.spellType(in) + ") (" + parResultName + " " + cg.spellType(res) + ", " + parErrorName + " error)"
+	ft, ok := typeExprAt(sig, op.lam.Pos())
+	if !ok {
+		base.Fatalf("logos: cannot build the group stage lambda at %s", op.lam.Pos().String())
+	}
+	fc := newFuncLower(fl, ft.(*syntax.FuncType), fl.parSignature(op.lam.Params[0].Value, in, res), block)
+	fc.groupStack = parGroupStack(res)
+	fc.run()
 	text := fl.textOf(span{start: fl.off(syntax.StartPos(block)), end: fl.off(syntax.EndPos(block))})
 	if strings.HasPrefix(text.s, "{") {
 		text = text.slice(1, len(text.s))
 	}
-	return cat(gen(head), text, gen(" }"))
+	return cat(gen(name+" := "+sig+" {"), text, gen(" }"))
+}
+
+func (fl *fileLower) parSignature(param string, in, res types2.Type) *types2.Signature {
+	pkg := fl.pkg.tpkg
+	params := types2.NewTuple(types2.NewParam(syntax.Pos{}, pkg, param, in))
+	results := types2.NewTuple(
+		types2.NewParam(syntax.Pos{}, pkg, parResultName, res),
+		types2.NewParam(syntax.Pos{}, pkg, parErrorName, types2.Universe.Lookup("error").Type()))
+	return types2.NewSignatureType(nil, nil, nil, params, results, false)
 }
 
 func (cg *chainGen) parPost(st *parStage, call *syntax.CallExpr) *chainEmit {

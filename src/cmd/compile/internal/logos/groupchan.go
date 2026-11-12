@@ -457,11 +457,3 @@ func (fc *funcLower) groupAugmentSelect(s *syntax.SelectStmt) {
 	rbraceOff := fc.fl.off(s.Rbrace)
 	fc.fl.add(rbraceOff, rbraceOff, "\n"+fc.groupDoneText(top)+"\n")
 }
-
-func (fc *funcLower) groupSegmentStmt(s syntax.Stmt) ([]syntax.Stmt, bool) {
-	out, handled := fc.groupChanStmt(s)
-	if ret, ok := s.(*syntax.ReturnStmt); ok {
-		fc.fl.parReturn(ret)
-	}
-	return out, handled
-}

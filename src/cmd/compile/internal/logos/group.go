@@ -86,9 +86,6 @@ func (fc *funcLower) groupTop() (groupFrame, bool) {
 }
 
 func (fc *funcLower) lowerGroupHook(s syntax.Stmt) ([]syntax.Stmt, bool) {
-	if top, ok := fc.groupTop(); ok && top.segment {
-		return fc.groupSegmentStmt(s)
-	}
 	switch s := s.(type) {
 	case *syntax.GroupStmt:
 		return fc.lowerGroupStmt(s), true
@@ -115,10 +112,17 @@ func (fc *funcLower) groupCallStmt(s *syntax.CallStmt) ([]syntax.Stmt, bool) {
 }
 
 func (fc *funcLower) groupReturnStmt(s *syntax.ReturnStmt) ([]syntax.Stmt, bool) {
-	if top, ok := fc.groupTop(); ok && !top.child {
+	top, ok := fc.groupTop()
+	if !ok {
+		return nil, false
+	}
+	if fc.groupStack[0].segment {
+		fc.fl.parReturn(s)
+	}
+	if !top.child {
 		return fc.lowerGroupReturn(s, top), true
 	}
-	return nil, false
+	return fc.groupChanStmt(s)
 }
 
 func (fc *funcLower) groupBranchStmt(s *syntax.BranchStmt) ([]syntax.Stmt, bool) {
