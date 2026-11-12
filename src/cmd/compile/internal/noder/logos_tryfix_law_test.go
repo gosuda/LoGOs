@@ -397,6 +397,195 @@ var lawCases = []lawCase{
 }
 `,
 	},
+	{
+		name: "if_init_scope",
+		broken: `func run11() (string, error) {
+	out := "neg"
+	if x := 5; f(x)? > 0 {
+		out = "pos"
+	}
+	return out, nil
+}
+`,
+		fixed: `func run11() (string, error) {
+	out := "neg"
+	{
+		x := 5
+		y := f(x)?
+		if y > 0 {
+			out = "pos"
+		}
+	}
+	return out, nil
+}
+`,
+	},
+	{
+		name:  "if_init_try",
+		offer: true,
+		broken: `func run12() (string, error) {
+	out := "le"
+	if v := a()?; b()? > v {
+		out = "gt"
+	}
+	return out, nil
+}
+`,
+		fixed: `func run12() (string, error) {
+	out := "le"
+	{
+		v := a()?
+		y := b()?
+		if y > v {
+			out = "gt"
+		}
+	}
+	return out, nil
+}
+`,
+	},
+	{
+		name: "if_init_call",
+		broken: `func run13() (string, error) {
+	out := "neg"
+	if x := c(); f(x)? > 0 {
+		out = "pos"
+	}
+	return out, nil
+}
+`,
+		fixed: `func run13() (string, error) {
+	out := "neg"
+	{
+		x := c()
+		y := f(x)?
+		if y > 0 {
+			out = "pos"
+		}
+	}
+	return out, nil
+}
+`,
+	},
+	{
+		name: "if_init_else_uses",
+		broken: `func run14() (string, error) {
+	out := ""
+	if x := 5; f(x)? > 100 {
+		out = "big"
+	} else {
+		out = fmt.Sprint("small", x)
+	}
+	return out, nil
+}
+`,
+		fixed: `func run14() (string, error) {
+	out := ""
+	{
+		x := 5
+		y := f(x)?
+		if y > 100 {
+			out = "big"
+		} else {
+			out = fmt.Sprint("small", x)
+		}
+	}
+	return out, nil
+}
+`,
+	},
+	{
+		name: "else_if_init",
+		broken: `func run15() (string, error) {
+	out := ""
+	if failAt == "zz" {
+		out = "zz"
+	} else if x := 5; f(x)? > 0 {
+		out = fmt.Sprint("pos", x)
+	}
+	return out, nil
+}
+`,
+		fixed: `func run15() (string, error) {
+	out := ""
+	if failAt == "zz" {
+		out = "zz"
+	} else {
+		x := 5
+		y := f(x)?
+		if y > 0 {
+			out = fmt.Sprint("pos", x)
+		}
+	}
+	return out, nil
+}
+`,
+	},
+	{
+		name:  "if_cond",
+		offer: true,
+		broken: `func run16() (string, error) {
+	out := "neg"
+	if f(5)? > 0 {
+		out = "pos"
+	}
+	return out, nil
+}
+`,
+		fixed: `func run16() (string, error) {
+	out := "neg"
+	y := f(5)?
+	if y > 0 {
+		out = "pos"
+	}
+	return out, nil
+}
+`,
+	},
+	{
+		name:  "if_init_unrelated",
+		offer: true,
+		broken: `func run17() (string, error) {
+	out := "le"
+	if y := 1; f(5)? > y {
+		out = fmt.Sprint("gt", y)
+	}
+	return out, nil
+}
+`,
+		fixed: `func run17() (string, error) {
+	out := "le"
+	z := f(5)?
+	if y := 1; z > y {
+		out = fmt.Sprint("gt", y)
+	}
+	return out, nil
+}
+`,
+	},
+	{
+		name: "if_init_assign",
+		broken: `func run18() (string, error) {
+	out := "neg"
+	x := 2
+	if x = 7; f(x)? > 20 {
+		out = "pos"
+	}
+	return out + fmt.Sprint(x), nil
+}
+`,
+		fixed: `func run18() (string, error) {
+	out := "neg"
+	x := 2
+	x = 7
+	y := f(x)?
+	if y > 20 {
+		out = "pos"
+	}
+	return out + fmt.Sprint(x), nil
+}
+`,
+	},
 }
 
 func TestMisplacedTryCandidateLaw(t *testing.T) {

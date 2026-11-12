@@ -185,8 +185,46 @@ func planFor(info *types2.Info, stmt syntax.Stmt, src []byte, plans map[syntax.S
 		tup, _ := checkedCallResult(info, call)
 		p.tries[i] = trySite{expr: c.expr, call: call, tup: tup, argPos: c.argPos}
 	}
+	if ifInitFeedsTries(info, stmt, p.tries) {
+		p.tries = nil
+		return p
+	}
 	p.ok = true
 	return p
+}
+
+func ifInitFeedsTries(info *types2.Info, stmt syntax.Stmt, tries []trySite) bool {
+	ifs, ok := stmt.(*syntax.IfStmt)
+	if !ok || ifs.Init == nil {
+		return false
+	}
+	as, ok := ifs.Init.(*syntax.AssignStmt)
+	if !ok {
+		return true
+	}
+	written := map[types2.Object]bool{}
+	for _, l := range syntax.UnpackListExpr(as.Lhs) {
+		name, ok := syntax.Unparen(l).(*syntax.Name)
+		if !ok {
+			return true
+		}
+		if obj := cmp.Or(info.Defs[name], info.Uses[name]); obj != nil {
+			written[obj] = true
+		}
+	}
+	for _, t := range tries {
+		reads := false
+		syntax.Inspect(t.call, func(n syntax.Node) bool {
+			if name, ok := n.(*syntax.Name); ok && written[info.Uses[name]] {
+				reads = true
+			}
+			return !reads
+		})
+		if reads {
+			return true
+		}
+	}
+	return false
 }
 
 func planOrderOK(stmt syntax.Stmt, tries []trySite, src []byte) bool {
