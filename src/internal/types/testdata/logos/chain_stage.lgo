@@ -1,0 +1,57 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package p
+
+import "strconv"
+
+type box struct{ n int }
+
+func (b box) add(n int) int { return b.n + n }
+
+func plain(x int) int { return x }
+
+func pair(x int) (int, error) { return x, nil }
+
+func namedFunction() {
+	_ = plain(x /* ERROR "named_argument" */ = 1)
+}
+
+func namedBuiltin(xs []int) {
+	_ = len(s /* ERROR "named_argument" */ = xs)
+}
+
+func namedConversion() {
+	_ = int(v /* ERROR "named_argument" */ = 1)
+}
+
+func namedPackageFunction() {
+	_ = strconv.Itoa(i /* ERROR "named_argument" */ = 1)
+}
+
+func namedMethod(b box) {
+	_ = b.add(n /* ERROR "named_argument" */ = 1)
+}
+
+func namedChainMethod(xs []int) {
+	_ = xs.take(n /* ERROR "named_argument" */ = 1)
+}
+
+func namedSecond() {
+	_ = plain(1, y /* ERROR "named_argument" */ = 2)
+}
+
+func namedBoth() {
+	_ = plain(a /* ERROR "named_argument" */ = 1, b /* ERROR "named_argument" */ = 2)
+}
+
+func namedUnderTry() (int, error) {
+	v := pair(x /* ERROR "named_argument" */ = 1)?
+	return v, nil
+}
+
+func namedKeepsOperands(xs []int) {
+	n := len(xs)
+	_ = plain(x /* ERROR "named_argument" */ = n)
+}

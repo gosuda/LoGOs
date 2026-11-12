@@ -205,6 +205,9 @@ func (check *Checker) logosChainCall(x *operand, call *syntax.CallExpr) bool {
 	if !check.conf.Logos {
 		return false
 	}
+	if check.logosNamedArgCall(x, call) {
+		return true
+	}
 	sel, ok := syntax.Unparen(call.Fun).(*syntax.SelectorExpr)
 	if !ok {
 		return false
