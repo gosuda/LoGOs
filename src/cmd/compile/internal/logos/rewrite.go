@@ -99,7 +99,7 @@ func (fc *funcLower) zerosAt(pos syntax.Pos) []syntax.Expr {
 		if sp.isErr {
 			continue
 		}
-		out = append(out, fc.fl.lambdaZero(sp.typ, pos))
+		out = append(out, fc.fl.zeroValue(sp.typ, pos))
 	}
 	return out
 }

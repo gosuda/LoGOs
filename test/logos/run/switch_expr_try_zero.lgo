@@ -1,0 +1,142 @@
+// run
+
+package main
+
+import (
+	"errors"
+	"fmt"
+	"os"
+)
+
+var failed bool
+
+func check(name string, cond bool, got, want any) {
+	if !cond {
+		failed = true
+		fmt.Println("FAIL", name+":", "got", got, "want", want)
+		return
+	}
+	fmt.Println("ok", name)
+}
+
+type mi int
+
+type ms string
+
+type flag bool
+
+type pp *int
+
+var errLoad = errors.New("load")
+
+var slot int
+
+func load(v int, fail bool) (int, error) {
+	if fail {
+		return 0, errLoad
+	}
+	return v, nil
+}
+
+func defNamed(v int, fail bool) (mi, error) {
+	r := switch n := load(v, fail)?; n {
+	case 7 => mi(70)
+	default => mi(1)
+	}
+	return r, nil
+}
+
+func assignNamed(v int, fail bool) (ms, error) {
+	r := switch slot = load(v, fail)?; slot {
+	case 7 => ms("seven")
+	default => ms("other")
+	}
+	return r, nil
+}
+
+func exprNamed(v int, fail bool) (mi, error) {
+	r := switch load(v, fail)?; v {
+	case 7 => mi(70)
+	default => mi(1)
+	}
+	return r, nil
+}
+
+func sumNamed(v int, fail bool) (mi, error) {
+	r := mi(100) + switch n := load(v, fail)?; n {
+	case 7 => mi(70)
+	default => mi(1)
+	}
+	return r, nil
+}
+
+func returnNamed(v int, fail bool) (mi, error) {
+	return switch n := load(v, fail)?; n {
+	case 7 => mi(70)
+	default => mi(1)
+	}, nil
+}
+
+func condNamed(v int, fail bool) (int, error) {
+	if switch n := load(v, fail)?; n {
+	case 7 => flag(true)
+	default => flag(false)
+	} {
+		return 1, nil
+	}
+	return 0, nil
+}
+
+func ptrNamed(v int, fail bool, a, b pp) (pp, error) {
+	r := switch n := load(v, fail)?; n {
+	case 7 => a
+	default => b
+	}
+	return r, nil
+}
+
+func genericArm[T any](v int, fail bool, a, b T) (T, error) {
+	r := switch n := load(v, fail)?; n {
+	case 7 => a
+	default => b
+	}
+	return r, nil
+}
+
+func main() {
+	var bv mi
+	var sv ms
+	var err error
+	bv, err = defNamed(7, false)
+	check("def", err == nil && bv == 70, bv, 70)
+	bv, err = defNamed(7, true)
+	check("def-fail", err == errLoad && bv == 0, bv, 0)
+	sv, err = assignNamed(7, false)
+	check("assign", err == nil && sv == "seven" && slot == 7, sv, "seven")
+	sv, err = assignNamed(7, true)
+	check("assign-fail", err == errLoad && sv == "", sv, "")
+	bv, err = exprNamed(9, false)
+	check("expr", err == nil && bv == 1, bv, 1)
+	bv, err = exprNamed(9, true)
+	check("expr-fail", err == errLoad && bv == 0, bv, 0)
+	bv, err = sumNamed(7, false)
+	check("sum", err == nil && bv == 170, bv, 170)
+	bv, err = sumNamed(7, true)
+	check("sum-fail", err == errLoad && bv == 0, bv, 0)
+	bv, err = returnNamed(7, false)
+	check("return", err == nil && bv == 70, bv, 70)
+	bv, err = returnNamed(7, true)
+	check("return-fail", err == errLoad && bv == 0, bv, 0)
+	n, err := condNamed(7, false)
+	check("cond", err == nil && n == 1, n, 1)
+	n, err = condNamed(7, true)
+	check("cond-fail", err == errLoad && n == 0, n, 0)
+	one, two := 1, 2
+	pv, err := ptrNamed(7, true, &one, &two)
+	check("ptr-fail", err == errLoad && pv == nil, pv == nil, true)
+	gv, err := genericArm(7, true, 1, 2)
+	check("generic-fail", err == errLoad && gv == 0, gv, 0)
+	if failed {
+		os.Exit(1)
+	}
+}

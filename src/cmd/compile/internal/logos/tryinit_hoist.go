@@ -516,25 +516,25 @@ func (fc *funcLower) errorSwitchIIFE(sx *syntax.SwitchExpr, nativeT syntax.Expr,
 			at(&syntax.Field{Type: nameOf(pos, "error")}, pos),
 		},
 	}, pos)
-	body := fc.errorSwitchBody(sx, nativeT, typ)
+	body := fc.errorSwitchBody(sx, typ)
 	lit := at(&syntax.FuncLit{Type: ft, Body: body}, pos)
 	return lit, callOf(pos, lit, nil)
 }
 
-func (fc *funcLower) errorSwitchBody(sx *syntax.SwitchExpr, nativeT syntax.Expr, typ types2.Type) *syntax.BlockStmt {
+func (fc *funcLower) errorSwitchBody(sx *syntax.SwitchExpr, typ types2.Type) *syntax.BlockStmt {
 	pos := sx.Pos()
 	var list []syntax.Stmt
 	if sx.Init != nil {
 		switch init := sx.Init.(type) {
 		case *syntax.AssignStmt:
 			if t, call, ok := tryAssignOf(init); ok {
-				list = append(list, fc.innerTryAssign(init, t, call, nativeT, typ)...)
+				list = append(list, fc.innerTryAssign(init, t, call, typ)...)
 			} else {
 				list = append(list, init)
 			}
 		case *syntax.ExprStmt:
 			if t, call, ok := tryExprOf(init); ok {
-				list = append(list, fc.innerTryExpr(init, t, call, nativeT, typ)...)
+				list = append(list, fc.innerTryExpr(init, t, call, typ)...)
 			} else {
 				list = append(list, init)
 			}
@@ -554,12 +554,12 @@ func (fc *funcLower) errorSwitchBody(sx *syntax.SwitchExpr, nativeT syntax.Expr,
 	return at(&syntax.BlockStmt{List: list, Rbrace: sx.Rbrace}, pos)
 }
 
-func (fc *funcLower) innerTryAssign(s *syntax.AssignStmt, t *syntax.TryExpr, call *syntax.CallExpr, nativeT syntax.Expr, typ types2.Type) []syntax.Stmt {
+func (fc *funcLower) innerTryAssign(s *syntax.AssignStmt, t *syntax.TryExpr, call *syntax.CallExpr, typ types2.Type) []syntax.Stmt {
 	pos := s.Pos()
 	errSpell := fc.nextErr()
 	err := nameOf(pos, errSpell)
 	lhs := syntax.UnpackListExpr(s.Lhs)
-	zeroT := fc.zeroOfSwitchResult(nativeT, typ, pos)
+	zeroT := fc.fl.zeroValue(typ, pos)
 	site := nameOf(pos, fc.fl.newSite(t.Pos(), t.Pos().Line()))
 	trace := exprStmtOf(pos, callOf(pos, rtSel(pos, "TraceErr"), []syntax.Expr{err, at(&syntax.Operation{Op: syntax.And, X: site}, pos)}))
 	exit := []syntax.Stmt{trace, returnOf(pos, []syntax.Expr{zeroT, err})}
@@ -576,11 +576,11 @@ func (fc *funcLower) innerTryAssign(s *syntax.AssignStmt, t *syntax.TryExpr, cal
 	}
 }
 
-func (fc *funcLower) innerTryExpr(s *syntax.ExprStmt, t *syntax.TryExpr, call *syntax.CallExpr, nativeT syntax.Expr, typ types2.Type) []syntax.Stmt {
+func (fc *funcLower) innerTryExpr(s *syntax.ExprStmt, t *syntax.TryExpr, call *syntax.CallExpr, typ types2.Type) []syntax.Stmt {
 	pos := s.Pos()
 	errSpell := fc.nextErr()
 	err := nameOf(pos, errSpell)
-	zeroT := fc.zeroOfSwitchResult(nativeT, typ, pos)
+	zeroT := fc.fl.zeroValue(typ, pos)
 	site := nameOf(pos, fc.fl.newSite(t.Pos(), t.Pos().Line()))
 	trace := exprStmtOf(pos, callOf(pos, rtSel(pos, "TraceErr"), []syntax.Expr{err, at(&syntax.Operation{Op: syntax.And, X: site}, pos)}))
 	exit := []syntax.Stmt{trace, returnOf(pos, []syntax.Expr{zeroT, err})}
@@ -594,14 +594,6 @@ func (fc *funcLower) innerTryExpr(s *syntax.ExprStmt, t *syntax.TryExpr, call *s
 	}
 }
 
-func (fc *funcLower) zeroOfSwitchResult(nativeT syntax.Expr, typ types2.Type, pos syntax.Pos) syntax.Expr {
-	z := zeroForType(types2.Unalias(typ), nativeT, pos)
-	if z == nil {
-		return nilOf(pos)
-	}
-	return z
-}
-
 func (fc *funcLower) plainReturnCheck(pos syntax.Pos, errName string) ([]syntax.Stmt, otext) {
 	err := nameOf(pos, errName)
 	zeros := fc.zerosAt(pos)
@@ -612,7 +604,7 @@ func (fc *funcLower) plainReturnCheck(pos syntax.Pos, errName string) ([]syntax.
 
 func (fc *funcLower) wrapCallWithStmtErr(sx *syntax.SwitchExpr, lit *syntax.FuncLit, nativeT syntax.Expr, typ types2.Type, stmtErr string) syntax.Expr {
 	pos := sx.Pos()
-	zeroT := fc.zeroOfSwitchResult(nativeT, typ, pos)
+	zeroT := fc.fl.zeroValue(typ, pos)
 	innerCall := callOf(pos, lit, nil)
 	tmpT := fc.nextArg()
 	tmpE := fc.nextErr()

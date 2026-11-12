@@ -168,22 +168,35 @@ func rtSel(pos syntax.Pos, sel string) *syntax.SelectorExpr {
 	return selOf(pos, nameOf(pos, rtAlias), sel)
 }
 
-func zeroForType(typ types2.Type, typeExpr syntax.Expr, pos syntax.Pos) syntax.Expr {
-	typ = types2.Unalias(typ)
-	if _, ok := typ.(*types2.TypeParam); ok {
-		return at(&syntax.Operation{
-			Op: syntax.Mul,
-			X:  callOf(pos, nameOf(pos, "new"), []syntax.Expr{cloneType(typeExpr, pos)}),
-		}, pos)
+func (fl *fileLower) zeroValue(typ types2.Type, pos syntax.Pos) syntax.Expr {
+	if c := constAsView(typ); c != nil {
+		return fl.zeroValue(c.Elem, pos)
 	}
-	if b, ok := typ.(*types2.Basic); ok {
-		return zeroBasic(b, pos)
-	}
-	switch typ.Underlying().(type) {
-	case *types2.Struct, *types2.Array:
-		return at(&syntax.CompositeLit{Type: cloneType(typeExpr, pos), Rbrace: pos}, pos)
-	default:
+	if o := fl.asOption(typ); o != nil && keepMapRead(o.Elem) {
 		return nilOf(pos)
+	}
+	u := types2.Unalias(typ)
+	if n, ok := u.(*types2.Named); ok {
+		u = n.Underlying()
+	}
+	switch u := u.(type) {
+	case *types2.Basic:
+		return zeroBasic(u, pos)
+	case *types2.Pointer, *types2.Slice, *types2.Map, *types2.Chan, *types2.Signature, *types2.Interface:
+		return nilOf(pos)
+	default:
+		spelled, ok := fl.spellLowered(typ)
+		if !ok {
+			spelled, _ = fl.spellType(typ)
+		}
+		tn, ok := typeExprAt(spelled, pos)
+		if !ok {
+			return nilOf(pos)
+		}
+		if _, ok := u.(*types2.TypeParam); ok {
+			return at(&syntax.Operation{Op: syntax.Mul, X: callOf(pos, nameOf(pos, "new"), []syntax.Expr{tn})}, pos)
+		}
+		return at(&syntax.CompositeLit{Type: tn, Rbrace: pos}, pos)
 	}
 }
 

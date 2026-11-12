@@ -748,7 +748,7 @@ func (cg *chainGen) enclosingZeros() string {
 		if i == len(cg.enc)-1 {
 			break
 		}
-		out = append(out, renderExpr(cg.fl.lambdaZero(r.typ, cg.pos)))
+		out = append(out, renderExpr(cg.fl.zeroValue(r.typ, cg.pos)))
 	}
 	return strings.Join(out, ", ")
 }
@@ -1029,7 +1029,7 @@ func (cg *chainGen) zeroText(t types2.Type) string {
 	if t == nil {
 		return "nil"
 	}
-	return renderExpr(cg.fl.lambdaZero(t, cg.pos))
+	return renderExpr(cg.fl.zeroValue(t, cg.pos))
 }
 
 func (cg *chainGen) spellType(t types2.Type) string {

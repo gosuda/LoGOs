@@ -203,7 +203,7 @@ func (fl *fileLower) lambdaTryBody(sig *types2.Signature, pos syntax.Pos, t *syn
 	var zeros []syntax.Expr
 	var zeroTexts []string
 	for i := range nres - 1 {
-		zt := fl.lambdaZero(sig.Results().At(i).Type(), pos)
+		zt := fl.zeroValue(sig.Results().At(i).Type(), pos)
 		zeros = append(zeros, zt)
 		zeroTexts = append(zeroTexts, renderExpr(zt))
 	}
@@ -283,36 +283,4 @@ func (fl *fileLower) lambdaNamedResults(pos syntax.Pos, sig *types2.Signature) (
 		texts[i] = fmt.Sprintf("_logos_lr%d %s", i, spelled)
 	}
 	return " (" + strings.Join(texts, ", ") + ")", true
-}
-
-func (fl *fileLower) lambdaZero(typ types2.Type, pos syntax.Pos) syntax.Expr {
-	if c := constAsView(typ); c != nil {
-		return fl.lambdaZero(c.Elem, pos)
-	}
-	if o := fl.asOption(typ); o != nil && keepMapRead(o.Elem) {
-		return nilOf(pos)
-	}
-	u := types2.Unalias(typ)
-	if n, ok := u.(*types2.Named); ok {
-		u = n.Underlying()
-	}
-	switch u := u.(type) {
-	case *types2.Basic:
-		return zeroBasic(u, pos)
-	case *types2.Pointer, *types2.Slice, *types2.Map, *types2.Chan, *types2.Signature, *types2.Interface:
-		return nilOf(pos)
-	default:
-		spelled, ok := fl.spellLowered(typ)
-		if !ok {
-			spelled, _ = fl.spellType(typ)
-		}
-		tn, ok := typeExprAt(spelled, pos)
-		if !ok {
-			return nilOf(pos)
-		}
-		if _, ok := u.(*types2.TypeParam); ok {
-			return at(&syntax.Operation{Op: syntax.Mul, X: callOf(pos, nameOf(pos, "new"), []syntax.Expr{tn})}, pos)
-		}
-		return at(&syntax.CompositeLit{Type: tn, Rbrace: pos}, pos)
-	}
 }
