@@ -1,0 +1,701 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package logos
+
+import (
+	"bytes"
+	"fmt"
+	"slices"
+	"strings"
+
+	"cmd/compile/internal/base"
+	"cmd/compile/internal/syntax"
+	"cmd/compile/internal/types2"
+)
+
+const parCtxName = "_logos_pc"
+
+type parSource int
+
+const (
+	parSlice parSource = iota
+	parSeq
+	parChan
+)
+
+type parStage struct {
+	unordered bool
+	source    parSource
+	elemT     types2.Type
+	resT      types2.Type
+	recv      syntax.Expr
+	recvSpan  span
+	ctx       syntax.Expr
+	ctxSpan   span
+	limit     syntax.Expr
+	limSpan   span
+	seg       []chainOp
+	segT      []types2.Type
+	post      []chainOp
+	term      chainOp
+}
+
+func (fl *fileLower) parHead(e syntax.Expr) (group *syntax.CallExpr, unordered bool, elem types2.Type, ok bool) {
+	call, isCall := syntax.Unparen(e).(*syntax.CallExpr)
+	if !isCall {
+		return nil, false, nil, false
+	}
+	elem, ok = types2.LogosGroupStage(fl.pkg.tpkg, fl.pkg.info, call)
+	if !ok {
+		return nil, false, nil, false
+	}
+	group = call
+	if chainMethodOf(call) == "unordered" {
+		unordered = true
+		group = syntax.Unparen(syntax.Unparen(call.Fun).(*syntax.SelectorExpr).X).(*syntax.CallExpr)
+	}
+	return group, unordered, elem, true
+}
+
+func (fl *fileLower) isParStage(base syntax.Expr) bool {
+	_, _, _, ok := fl.parHead(base)
+	return ok
+}
+
+func parCalls(call *syntax.CallExpr, base syntax.Expr) []*syntax.CallExpr {
+	var out []*syntax.CallExpr
+	for cur := syntax.Expr(call); cur != base; {
+		c := syntax.Unparen(cur).(*syntax.CallExpr)
+		out = append(out, c)
+		cur = syntax.Unparen(c.Fun).(*syntax.SelectorExpr).X
+	}
+	return out
+}
+
+func parElem(t types2.Type) types2.Type {
+	if t == nil {
+		return nil
+	}
+	if s, ok := types2.Unalias(parResult(t)).(*types2.Slice); ok {
+		return s.Elem()
+	}
+	return nil
+}
+
+func (fl *fileLower) parSourceOf(recv syntax.Expr) parSource {
+	t := fl.pkg.info.TypeOf(recv)
+	if c := constAsView(t); c != nil {
+		t = c.Elem
+	}
+	switch types2.Unalias(t).Underlying().(type) {
+	case *types2.Chan:
+		return parChan
+	case *types2.Signature:
+		return parSeq
+	}
+	return parSlice
+}
+
+func (fl *fileLower) parArgSpans(group *syntax.CallExpr) (ctx, limit span) {
+	split, ok := splitCall(fl.src, fl.off(group.Pos()))
+	if !ok || len(split.args) != 2 {
+		base.Fatalf("logos: cannot locate the group stage arguments at %s", group.Pos().String())
+	}
+	ctx = trimSpan(fl.src, split.args[0])
+	arg := split.args[1]
+	eq := bytes.IndexByte(fl.src[arg.start:arg.end], '=')
+	if eq < 0 {
+		base.Fatalf("logos: cannot locate the group stage limit at %s", group.Pos().String())
+	}
+	return ctx, trimSpan(fl.src, span{start: arg.start + eq + 1, end: arg.end})
+}
+
+func (fl *fileLower) parStageOf(call *syntax.CallExpr, ops []chainOp, base syntax.Expr, term chainOp) *parStage {
+	group, unordered, elem, _ := fl.parHead(base)
+	sel := syntax.Unparen(group.Fun).(*syntax.SelectorExpr)
+	st := &parStage{unordered: unordered, elemT: elem, term: term, recv: sel.X}
+	st.source = fl.parSourceOf(st.recv)
+	st.recvSpan = fl.receiverSpan(group)
+	st.ctx = group.ArgList[0]
+	st.limit = group.ArgList[1].(*syntax.KeyValueExpr).Value
+	st.ctxSpan, st.limSpan = fl.parArgSpans(group)
+	calls := parCalls(call, base)
+	if term.method != "" {
+		calls = calls[1:]
+	}
+	inner := slices.Clone(ops)
+	slices.Reverse(inner)
+	slices.Reverse(calls)
+	n := 0
+	for n < len(inner) && (inner[n].method == "map" || inner[n].method == "filter") {
+		n++
+	}
+	st.seg, st.post = inner[:n], inner[n:]
+	for _, c := range calls[:n] {
+		st.segT = append(st.segT, parElem(fl.pkg.info.TypeOf(c)))
+	}
+	return st
+}
+
+func (cg *chainGen) parCapture(op *chainOp) {
+	if op.lam != nil {
+		cg.fl.preLowerCaptureBody(op.lam)
+		op.savedBody = op.lam.Body
+	}
+	cg.lowerArgChains(op.arg)
+}
+
+func (cg *chainGen) parPrepare(st *parStage) {
+	cg.fl.needRT = true
+	for i := range st.seg {
+		cg.parCapture(&st.seg[i])
+	}
+	for i := range st.post {
+		cg.parCapture(&st.post[i])
+	}
+	cg.parCapture(&st.term)
+	cg.lowerArgChains(st.ctx)
+	cg.lowerArgChains(st.limit)
+	cg.lowerArgChains(st.recv)
+	in := st.elemT
+	for i, op := range st.seg {
+		out := st.segT[i]
+		if op.method == "filter" {
+			out = in
+		} else if out == nil {
+			out = cg.prodType(op)
+		}
+		if out == nil {
+			out = in
+		}
+		if isUntypedBasic(out) {
+			out = defaultBasicType(out)
+		}
+		st.segT[i] = out
+		in = out
+	}
+	st.resT = in
+	cg.elemT = in
+}
+
+func (st *parStage) kept() []span {
+	out := []span{st.recvSpan, st.ctxSpan, st.limSpan, st.term.argSpan}
+	for _, op := range st.seg {
+		out = append(out, op.argSpan)
+	}
+	for _, op := range st.post {
+		out = append(out, op.argSpan)
+	}
+	return out
+}
+
+func (cg *chainGen) parSeqText(st *parStage) otext {
+	fl := cg.fl
+	s, r := cg.spellType(st.elemT), cg.spellType(st.resT)
+	verb := "GroupSeq"
+	if st.source == parChan {
+		verb = "GroupChan"
+	}
+	if st.unordered {
+		verb += "Unordered"
+	}
+	ctx := fl.textOf(st.ctxSpan)
+	limit := fl.textOf(st.limSpan)
+	recv := fl.textOf(st.recvSpan)
+	child := cg.parChild(st)
+	var src otext
+	switch st.source {
+	case parSlice:
+		y, e := cg.prefix+"_y", cg.prefix+"_s"
+		src = cat(gen("func("+y+" func("+s+") bool) { for _, "+e+" := range "), recv, gen(" { if !"+y+"("+e+") { return } } }"))
+	case parSeq:
+		src = cat(gen("(func(func("+s+") bool))("), recv, gen(")"))
+	default:
+		src = recv
+	}
+	return cat(gen(rtAlias+"."+verb+"["+s+", "+r+"]("), ctx, gen(", "), limit, gen(", "), src, gen(", "), child, gen(")"))
+}
+
+func (cg *chainGen) parChild(st *parStage) otext {
+	p := cg.prefix
+	ps := p + "_ps"
+	rs := cg.spellType(st.resT)
+	parts := []otext{gen("func(" + parCtxName + " " + rtAlias + ".Context, " + ps + " " + cg.spellType(st.elemT) + ") (" + rs + ", bool, error) { ")}
+	in := st.elemT
+	for i, op := range st.seg {
+		parts = append(parts, cg.parClosure(fmt.Sprintf("%s_c%d", p, i), op, in, st.segT[i]), gen("; "))
+		in = st.segT[i]
+	}
+	cur := ps
+	for i := range st.seg {
+		var line string
+		line, cur = cg.parStep(st, i, cur)
+		parts = append(parts, gen(line+"; "))
+	}
+	parts = append(parts, gen("return "+cur+", true, nil }"))
+	return cat(parts...)
+}
+
+func parMapAfter(seg []chainOp, i int) bool {
+	for _, op := range seg[i+1:] {
+		if op.method == "map" {
+			return true
+		}
+	}
+	return false
+}
+
+func (cg *chainGen) parStep(st *parStage, i int, cur string) (line, next string) {
+	op := st.seg[i]
+	p := cg.prefix
+	fn := fmt.Sprintf("%s_c%d", p, i)
+	errN := p + "_e"
+	zero := cg.zeroText(st.resT)
+	fail := "return " + zero + ", false, " + errN
+	if op.method == "filter" {
+		drop := zero
+		if !parMapAfter(st.seg, i) {
+			drop = cur
+		}
+		if op.lam == nil {
+			return fmt.Sprintf("if !%s(%s) { return %s, false, nil }", fn, cur, drop), cur
+		}
+		keep := fmt.Sprintf("%s_k%d", p, i)
+		return fmt.Sprintf("%s, %s := %s(%s); if %s != nil { %s }; if !%s { return %s, false, nil }", keep, errN, fn, cur, errN, fail, keep, drop), cur
+	}
+	next = fmt.Sprintf("%s_v%d", p, i)
+	if op.lam == nil {
+		return next + " := " + fn + "(" + cur + ")", next
+	}
+	return fmt.Sprintf("%s, %s := %s(%s); if %s != nil { %s }", next, errN, fn, cur, errN, fail), next
+}
+
+func (cg *chainGen) parClosure(name string, op chainOp, in, out types2.Type) otext {
+	fl := cg.fl
+	if op.lam == nil {
+		return cat(gen(name+" := "), fl.textOf(op.argSpan))
+	}
+	result, zero := "bool", "false"
+	if op.method == "map" {
+		result, zero = cg.spellType(out), cg.zeroText(out)
+	}
+	head := name + " := func(" + op.lam.Params[0].Value + " " + cg.spellType(in) + ") (" + result + ", error) {"
+	switch {
+	case op.isTry:
+		return cg.parTryClosure(head, op, zero)
+	case op.isBlk:
+		return cg.parBlockClosure(head, op, zero)
+	}
+	body, ok := op.savedBody.(syntax.Expr)
+	if !ok {
+		base.Fatalf("logos: group stage lambda at %s has no expression body", op.lam.Pos().String())
+	}
+	return cat(gen(head+" return "), fl.drainBodyWrapper(body, fl.textOf(op.bodySpan)), gen(", nil }"))
+}
+
+func (cg *chainGen) parTryClosure(head string, op chainOp, zero string) otext {
+	fl := cg.fl
+	body, _ := op.savedBody.(syntax.Expr)
+	try, _ := syntax.Unparen(body).(*syntax.TryExpr)
+	var inner *syntax.CallExpr
+	if try != nil {
+		inner, _ = syntax.Unparen(try.X).(*syntax.CallExpr)
+	}
+	if inner == nil {
+		base.Fatalf("logos: group stage lambda at %s needs a call before ?", op.lam.Pos().String())
+	}
+	call := fl.textOf(span{start: fl.exprStart(inner), end: fl.chainCallEnd(inner)})
+	v, e := cg.prefix+"_tv", cg.prefix+"_te"
+	return cat(gen(head+" "+v+", "+e+" := "), call, gen("; if "+e+" != nil { return "+zero+", "+e+" }; return "+v+", nil }"))
+}
+
+func (cg *chainGen) parBlockClosure(head string, op chainOp, zero string) otext {
+	fl := cg.fl
+	block, ok := op.savedBody.(*syntax.BlockStmt)
+	if !ok {
+		base.Fatalf("logos: group stage lambda at %s has no block body", op.lam.Pos().String())
+	}
+	fl.parBlock(block.List, zero)
+	text := fl.textOf(span{start: fl.off(syntax.StartPos(block)), end: fl.off(syntax.EndPos(block))})
+	if strings.HasPrefix(text.s, "{") {
+		text = text.slice(1, len(text.s))
+	}
+	return cat(gen(head), text, gen(" }"))
+}
+
+func (cg *chainGen) parPost(st *parStage, call *syntax.CallExpr) *chainEmit {
+	ce := &chainEmit{cg: cg, ops: st.post, term: st.term, elemT: st.resT, resultT: parResult(cg.fl.pkg.info.TypeOf(call)), isTry: true}
+	ce.prepare()
+	ce.outCap, ce.hasCap = "", false
+	return ce
+}
+
+func parResult(t types2.Type) types2.Type {
+	if tup, ok := t.(*types2.Tuple); ok && tup.Len() == 2 {
+		return tup.At(0).Type()
+	}
+	return t
+}
+
+func (fl *fileLower) isParChain(e syntax.Expr) bool {
+	for {
+		call, ok := syntax.Unparen(e).(*syntax.CallExpr)
+		if !ok {
+			return false
+		}
+		if fl.isParStage(call) {
+			return true
+		}
+		if !fl.isChainCall(call) {
+			return false
+		}
+		e = syntax.Unparen(call.Fun).(*syntax.SelectorExpr).X
+	}
+}
+
+func (cg *chainGen) runPar(call *syntax.CallExpr, ops []chainOp, base syntax.Expr, term chainOp, carrier *syntax.CallExpr) {
+	if cg.fl.isParStage(base) {
+		cg.runParStage(call, ops, base, term)
+		return
+	}
+	cg.runParTail(call, ops, base, term, carrier)
+}
+
+func (cg *chainGen) runParStage(call *syntax.CallExpr, ops []chainOp, base syntax.Expr, term chainOp) {
+	fl := cg.fl
+	st := fl.parStageOf(call, ops, base, term)
+	cg.whole.start, cg.whole.end = fl.chainSpan(call)
+	cg.kept = st.kept()
+	cg.parPrepare(st)
+	ce := cg.parPost(st, call)
+	cg.parReplace(call, ce, cg.parLoopText(ce, cg.parSeqText(st)))
+}
+
+func (cg *chainGen) runParTail(call *syntax.CallExpr, ops []chainOp, base syntax.Expr, term chainOp, carrier *syntax.CallExpr) {
+	fl := cg.fl
+	slices.Reverse(ops)
+	recv := fl.receiverSpan(carrier)
+	cg.whole.start, cg.whole.end = fl.chainSpan(call)
+	cg.kept = keptSpans(recv, ops, term)
+	for i := range ops {
+		cg.parCapture(&ops[i])
+	}
+	cg.parCapture(&term)
+	cg.lowerArgChains(base)
+	cg.elemT = cg.baseElem(base)
+	p := cg.prefix
+	in, inErr := p+"_in", p+"_ierr"
+	ce := &chainEmit{cg: cg, ops: ops, term: term, baseText: gen(in), elemT: cg.elemT, resultT: parResult(fl.pkg.info.TypeOf(call)), isTry: true}
+	ce.prepare()
+	prelude, body, epilogue := ce.runLoopO()
+	parts := []otext{cat(gen(in+", "+inErr+" := "), fl.textOf(recv), gen("; if "+inErr+" != nil { "+ce.failReturn(p, inErr)+" }; "))}
+	for _, line := range prelude {
+		parts = append(parts, line, gen("; "))
+	}
+	for _, line := range append(body, epilogue...) {
+		parts = append(parts, gen(line), gen("; "))
+	}
+	cg.parReplace(call, ce, cat(parts...).trimRight(" "))
+}
+
+func (cg *chainGen) parReplace(call *syntax.CallExpr, ce *chainEmit, loop otext) {
+	fl := cg.fl
+	text := cat(gen("func() ("+ce.resultSpelling()+", error) { "), cat(leftoverComments(fl, cg.whole, cg.kept), loop), gen(" }()"))
+	fl.stageReplacement(call, parseStageFrag(text.s, leftmostOf(call)))
+	fl.addT(cg.whole.start, cg.whole.end, text)
+}
+
+func (cg *chainGen) parLoopText(ce *chainEmit, seq otext) otext {
+	p := cg.prefix
+	prelude, body, epilogue := ce.loopO()
+	var parts []otext
+	for _, line := range prelude[1:] {
+		parts = append(parts, line, gen("; "))
+	}
+	head := fmt.Sprintf("for %[1]s_e, %[1]s_err := range ", p)
+	if !ce.needElem() {
+		head = fmt.Sprintf("for _, %[1]s_err := range ", p)
+	}
+	parts = append(parts, gen(head), seq, gen(" { "))
+	var breaks []string
+	for i, op := range ce.ops {
+		if op.method == "take" {
+			breaks = append(breaks, fmt.Sprintf("if %[1]s_tc%[2]d >= %[1]s_tn%[2]d { break }", p, i))
+		}
+	}
+	check := fmt.Sprintf("if %s_err != nil { %s }", p, ce.failStage(p, p+"_err"))
+	lines := slices.Insert(slices.Clone(body[1:len(body)-1]), len(breaks), check)
+	lines = append(append(lines, breaks...), "}")
+	for _, line := range lines {
+		parts = append(parts, gen(line), gen("; "))
+	}
+	for _, line := range epilogue {
+		parts = append(parts, gen(line), gen("; "))
+	}
+	return cat(parts...).trimRight(" ")
+}
+
+func (fl *fileLower) parRangeParts(s syntax.Stmt) (*syntax.ForStmt, *syntax.RangeClause, *syntax.CallExpr, bool) {
+	for {
+		lab, ok := s.(*syntax.LabeledStmt)
+		if !ok {
+			break
+		}
+		s = lab.Stmt
+	}
+	fs, ok := s.(*syntax.ForStmt)
+	if !ok {
+		return nil, nil, nil, false
+	}
+	rc, ok := fs.Init.(*syntax.RangeClause)
+	if !ok {
+		return nil, nil, nil, false
+	}
+	call, ok := syntax.Unparen(rc.X).(*syntax.CallExpr)
+	if !ok || !fl.isChainCall(call) {
+		return nil, nil, nil, false
+	}
+	return fs, rc, call, true
+}
+
+func (fl *fileLower) lowerParRange(s syntax.Stmt, enc []resultSpec) ([]syntax.Stmt, bool) {
+	fs, rc, call, ok := fl.parRangeParts(s)
+	if !ok {
+		return nil, false
+	}
+	ops, base, term, _ := fl.decomposeChain(call)
+	if term.method != "" || !fl.isParStage(base) {
+		return nil, false
+	}
+	fl.lowerChainHeadLits(rc)
+	fl.loweredChains[call] = true
+	cg := &chainGen{fl: fl, pos: call.Pos(), prefix: chainPrefix(call.Pos()), enc: enc}
+	st := fl.parStageOf(call, ops, base, term)
+	cg.parPrepare(st)
+	seq := cg.parSeqText(st)
+	var out []syntax.Stmt
+	start := fl.stmtStartOf(s)
+	for _, h := range cg.hoists {
+		out = append(out, h.stmts...)
+		fl.addT(start, start, cat(h.text, gen("; ")))
+	}
+	errName := chainErrName(fs.Pos())
+	if !rc.Def && rc.Lhs != nil {
+		out = append(out, fl.declareChainErr(s, errName)...)
+	}
+	check, checkText := fl.chainErrCheck(enc, fs.Body.Pos(), errName)
+	fl.parRangeHead(fs, rc, seq, errName)
+	open := fl.off(fs.Body.Pos()) + 1
+	fl.add(open, open, " "+checkText+"; ")
+	fl.lowerChainChildren(s, enc)
+	pos := fs.Pos()
+	names := []syntax.Expr{nameOf(pos, "_")}
+	if rc.Lhs != nil {
+		names = syntax.UnpackListExpr(rc.Lhs)
+	} else {
+		rc.Def = true
+	}
+	rc.Lhs = listOf(pos, append(slices.Clone(names), nameOf(pos, errName)))
+	rc.X = parseStageFrag(seq.s, pos)
+	fs.Body.List = append(check, fs.Body.List...)
+	return append(out, s), true
+}
+
+func (fl *fileLower) parRangeHead(fs *syntax.ForStmt, rc *syntax.RangeClause, seq otext, errName string) {
+	lhs := gen("_")
+	if rc.Lhs != nil {
+		start := fl.off(leftmostOf(rc.Lhs))
+		lhs = fl.srcUser(start, fl.off(rc.Pos())).trimRight(" \t\n:=")
+	}
+	assign := " := "
+	if !rc.Def && rc.Lhs != nil {
+		assign = " = "
+	}
+	fl.addT(fl.off(fs.Pos()), fl.off(fs.Body.Pos()), cat(gen("for "), lhs, gen(", "+errName+assign+"range "), seq, gen(" ")))
+}
+
+func parDoneText(zero string) string {
+	return "case <-" + parCtxName + ".Done(): return " + zero + ", " + parCtxName + ".Err()"
+}
+
+func (fl *fileLower) parBlock(list []syntax.Stmt, zero string) {
+	for _, s := range list {
+		fl.parStmt(s, zero)
+	}
+}
+
+func (fl *fileLower) parStmt(s syntax.Stmt, zero string) {
+	switch s := s.(type) {
+	case *syntax.ReturnStmt:
+		fl.parReturn(s)
+	case *syntax.AssignStmt:
+		fl.parRecvAssign(s, zero)
+	case *syntax.DeclStmt:
+		fl.parRecvDecl(s, zero)
+	case *syntax.ExprStmt:
+		fl.parRecvExpr(s, zero)
+	case *syntax.SendStmt:
+		fl.parSend(s, zero)
+	case *syntax.BlockStmt:
+		fl.parBlock(s.List, zero)
+	case *syntax.IfStmt:
+		fl.parBlock(s.Then.List, zero)
+		if s.Else != nil {
+			fl.parStmt(s.Else, zero)
+		}
+	case *syntax.ForStmt:
+		fl.parFor(s, zero)
+	case *syntax.SwitchStmt:
+		for _, c := range s.Body {
+			fl.parBlock(c.Body, zero)
+		}
+	case *syntax.SelectStmt:
+		fl.parSelect(s, zero)
+	case *syntax.LabeledStmt:
+		fl.parStmt(s.Stmt, zero)
+	}
+}
+
+func (fl *fileLower) parReturn(s *syntax.ReturnStmt) {
+	if s.Results == nil {
+		return
+	}
+	end := stmtEnd(fl.src, fl.off(s.Pos()))
+	fl.add(end, end, ", nil")
+}
+
+func (fl *fileLower) parExprText(e syntax.Expr) otext {
+	start := fl.off(leftmostOf(e))
+	return fl.textOf(span{start: start, end: groupExprEnd(fl.src, start)})
+}
+
+func (fl *fileLower) parElemSpelling(ch syntax.Expr) string {
+	elem := groupChanElem(fl.pkg.info.TypeOf(ch))
+	spelled, ok := fl.spellType(elem)
+	if !ok {
+		base.Fatalf("logos: cannot spell channel element type %s", elem)
+	}
+	return spelled
+}
+
+func (fl *fileLower) parRecvExpr(s *syntax.ExprStmt, zero string) {
+	op, ok := groupRecvOp(s.X)
+	if !ok {
+		return
+	}
+	start := fl.off(leftmostOf(op))
+	fl.addT(start, stmtEnd(fl.src, start), cat(gen("select { case "), fl.parExprText(op), gen(": "+parDoneText(zero)+" }")))
+}
+
+func (fl *fileLower) parSend(s *syntax.SendStmt, zero string) {
+	start := fl.off(leftmostOf(s.Chan))
+	ch := fl.textOf(span{start: start, end: fl.off(s.Pos())})
+	vStart := fl.off(leftmostOf(s.Value))
+	val := fl.textOf(span{start: vStart, end: groupExprEnd(fl.src, vStart)})
+	fl.addT(start, groupExprEnd(fl.src, vStart), cat(gen("select { case "), ch, gen(" <- "), val, gen(": "+parDoneText(zero)+" }")))
+}
+
+func (fl *fileLower) parRecvAssign(s *syntax.AssignStmt, zero string) {
+	if s.Op != 0 && s.Op != syntax.Def {
+		return
+	}
+	lhs, rhs := syntax.UnpackListExpr(s.Lhs), syntax.UnpackListExpr(s.Rhs)
+	if len(rhs) != 1 || len(lhs) > 2 {
+		return
+	}
+	op, ok := groupRecvOp(rhs[0])
+	if !ok {
+		return
+	}
+	pos := s.Pos()
+	temps := []string{fmt.Sprintf("_logos_pt%d_%d_0", pos.Line(), pos.Col())}
+	decls := "var " + temps[0] + " " + fl.parElemSpelling(op.X) + "; "
+	if len(lhs) == 2 {
+		temps = append(temps, fmt.Sprintf("_logos_pt%d_%d_1", pos.Line(), pos.Col()))
+		decls += "var " + temps[1] + " bool; "
+	}
+	list := strings.Join(temps, ", ")
+	assign := " = "
+	if s.Op == syntax.Def {
+		assign = " := "
+	}
+	start := fl.off(leftmostOf(lhs[0]))
+	target := fl.textOf(span{start: start, end: fl.off(pos)}).trimRight(" \t\n")
+	sel := gen("select { case " + list + " = <-")
+	fl.addT(start, stmtEnd(fl.src, start), cat(gen(decls), sel, fl.parExprText(op.X), gen(": "+parDoneText(zero)+" }; "), target, gen(assign+list)))
+}
+
+func (fl *fileLower) parRecvDecl(s *syntax.DeclStmt, zero string) {
+	d, ok := groupRecvDecl(s)
+	if !ok || len(d.NameList) != 1 {
+		return
+	}
+	values := syntax.UnpackListExpr(d.Values)
+	op, ok := groupRecvOp(values[0])
+	if !ok || len(values) != 1 {
+		return
+	}
+	start := fl.off(s.Pos())
+	head := fl.textOf(span{start: start, end: groupAssignOffset(fl.src, start)}).trimRight(" \t\n")
+	if d.Type == nil {
+		head = cat(head, gen(" "+fl.parElemSpelling(op.X)))
+	}
+	name := d.NameList[0].Value
+	fl.addT(start, stmtEnd(fl.src, start), cat(head, gen("; select { case "+name+" = <-"), fl.parExprText(op.X), gen(": "+parDoneText(zero)+" }")))
+}
+
+func (fl *fileLower) parFor(s *syntax.ForStmt, zero string) {
+	rc, ok := s.Init.(*syntax.RangeClause)
+	if ok && (&funcLower{fl: fl}).groupRangeOverChan(rc) {
+		fl.parRangeChan(s, rc, zero)
+	}
+	fl.parBlock(s.Body.List, zero)
+}
+
+func (fl *fileLower) parRangeChan(s *syntax.ForStmt, rc *syntax.RangeClause, zero string) {
+	fl.needRT = true
+	braceOff := fl.off(s.Body.Pos())
+	ch := fl.srcUser(fl.off(leftmostOf(rc.X)), braceOff).trimRight(" \t\n")
+	var lhs otext
+	if rc.Lhs != nil {
+		assign := " = "
+		if rc.Def {
+			assign = " := "
+		}
+		lhs = cat(fl.srcUser(fl.off(leftmostOf(rc.Lhs)), fl.off(rc.Pos())).trimRight(" \t\n:="), gen(assign))
+	}
+	fl.addT(fl.off(s.Pos()), braceOff, cat(gen("for "), lhs, gen("range "+rtAlias+".Chan("+parCtxName+", "), ch, gen(") ")))
+	end := fl.off(s.Body.Rbrace) + 1
+	fl.add(end, end, "\nif "+parCtxName+".Err() != nil { return "+zero+", "+parCtxName+".Err() }")
+}
+
+func (fl *fileLower) parSelect(s *syntax.SelectStmt, zero string) {
+	for _, c := range s.Body {
+		fl.parBlock(c.Body, zero)
+	}
+	if groupSelectHasDefault(s) {
+		return
+	}
+	rbrace := fl.off(s.Rbrace)
+	fl.add(rbrace, rbrace, "\n"+parDoneText(zero)+"\n")
+}
+
+func parseStageFrag(text string, pos syntax.Pos) syntax.Expr {
+	src := "package logoschain\nvar _ = " + text + "\n"
+	f, err := syntax.Parse(syntax.NewFileBase("logos-chain"), strings.NewReader(src), nil, nil, syntax.CheckBranches)
+	if err != nil || len(f.DeclList) != 1 {
+		base.Fatalf("logos: cannot parse chain fragment %q: %v", text, err)
+	}
+	decl, ok := f.DeclList[0].(*syntax.VarDecl)
+	if !ok {
+		base.Fatalf("logos: cannot parse chain fragment %q", text)
+	}
+	vals := syntax.UnpackListExpr(decl.Values)
+	if len(vals) != 1 {
+		base.Fatalf("logos: cannot parse chain fragment %q", text)
+	}
+	normalizeChainPos(vals[0], pos)
+	return vals[0]
+}

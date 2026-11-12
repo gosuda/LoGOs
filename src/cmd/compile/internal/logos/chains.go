@@ -66,6 +66,10 @@ func (fl *fileLower) transparentWrappers() {
 func (fl *fileLower) lowerChainList(list []syntax.Stmt, enc []resultSpec) []syntax.Stmt {
 	var out []syntax.Stmt
 	for _, s := range list {
+		if repl, ok := fl.lowerParRange(s, enc); ok {
+			out = append(out, repl...)
+			continue
+		}
 		if repl, ok := fl.lowerChainSpecial(s, enc); ok {
 			out = append(out, repl...)
 			continue
@@ -572,6 +576,10 @@ func (cg *chainGen) run(call *syntax.CallExpr) {
 	cg.fl.loweredChains[call] = true
 	ops, base, term, carrier := cg.fl.decomposeChain(call)
 	if len(ops) == 0 && term.method == "" {
+		return
+	}
+	if cg.fl.isParChain(base) {
+		cg.runPar(call, ops, base, term, carrier)
 		return
 	}
 	slices.Reverse(ops)
