@@ -69,7 +69,7 @@ Each non-standard loGo/s dependency module MUST be ejected too [T-0.3].
 Each ejected dependency MUST land in `DIR/_logos_deps/<module path>@<version>/` [T-0.3].
 The output `go.mod` MUST carry a `replace` line for each ejected module [T-0.3].
 A Go dependency module MUST stay a `require` entry of the output `go.mod` [T-0.3][R-U2].
-The support sources MUST become one shared support module `github.com/gosuda/loGos/rt` [T-0.3].
+The support sources MUST become one shared support module `github.com/gosuda/loGos/rt` [T-0.3][A-RTMOD].
 The shared module MUST land in `DIR/_logos_deps/rt` [T-0.3].
 The output MUST carry a `replace` line for the shared module [T-0.3].
 The tool MUST remove `import "comptime"` during eject [T-0.3].
@@ -497,6 +497,7 @@ Dynamic map iteration in const funcs MUST fail compilation. [T-201][T-Sec7]
 Const map range MUST visit keys in sorted order. [T-201][T-Sec7]
 Nil leaves MUST copy as nil. [T-201]
 Pointer-free constant data MUST live in read-only memory before any init runs. [T-201]
+A package-level `var` MAY carry a `//logos:rodata` line directly above it to place its data in read-only memory; the compiler MUST then fail with `logos: const composite <name> needs dynamic initialization` when the initializer needs dynamic initialization. [T-201]
 
 ### 2.2 RFC-202: Non-nil pointers, option types, and nil flow
 
@@ -1183,6 +1184,7 @@ Implicit placement [T-301.1][R-U1]:
 With implicit placement on, an object that escape analysis proves does not outlive its frame, but that cannot live on the stack, MUST allocate in the frame's region. [T-301.1]
 Frame exit, including exit by panic, MUST release that region and restore the watermark. [T-301.1]
 A returned value that the caller keeps MUST allocate in the caller's region only when escape analysis proves no pointer to it outlives the caller. [T-301.1]
+A value stored into `sync.Pool` MUST stay on the heap. [T-301.1]
 A loop back-edge MUST release iteration-local objects by restoring the watermark. [T-301.1]
 Implicit placement MUST stay off unless the build sets `GOEXPERIMENT=logosarena`. [T-301.1]
 Under `logos`, `[build] arena` MUST set that experiment, and its default MUST be true. [T-301.1][R-U1]
@@ -1536,6 +1538,7 @@ Unknown fields are ignored. [T-Sec10]
 Duplicate keys MUST keep the last value. [T-Sec10]
 Arrays MUST grow incrementally with no pre-allocation cap. [T-Sec10]
 Decoding through json.Decoder uses the same method. [T-Sec10]
+Decoding through a reflection-based decoder other than `encoding/json` lies outside this contract; this is a documented hole. [T-Sec10][A-GOBOUNDARY]
 No validate tags are needed. [T-Sec10]
 Unmarshal of a closed union MUST resolve members declared in another package. [T-Sec10][T-203.1]
 A member has a static key set when its type is a struct, or a pointer to a struct, that Sec 10.1 makes eligible. The set holds the JSON key of each visible field, and a field is visible when it is exported and has no `-` tag. A keyed member has a static key set with at least one key. A keyless member has none: its type is not an eligible struct, or the struct has no visible field. A keyed member trial MUST count a success only when at least one key in the object is in that member's static key set and its decode then succeeds. A key in the static key set of a sibling member but not in this member's disqualifies this member trial, while a key in no member's static key set is ignored. Keys MUST decide every keyed member trial, including a member that declares its own UnmarshalJSON. Such a decoder MUST run only after its keys match. A keyless member MUST be tried only when no key of a keyed member occurs in the input. Exactly one such member MUST succeed for the union to select it. A closed union member without an UnmarshalJSON method MUST fail with [correctness::union_member_no_json]. [T-Sec10][T-203.1]
@@ -1733,7 +1736,7 @@ The long-loop preemption rules are stated in Sec 3.3 (RFC-303: Hardware backend 
 - Each candidate holds `description` as a string and `replacement` as a string. [T-Sec14]
 - Candidates that insert text also hold `insert_before_line` as an integer. [T-Sec14]
 
-## 15. Unwind tables for scope defer and Locked
+## 15. Scope defer and Locked
 
 ### 15.1 Scope defer
 
