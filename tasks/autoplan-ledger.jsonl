@@ -249,3 +249,20 @@
 {"id": "AUD-138", "description": "M18-A-S17 Place block-local holders in the region", "phase": "AUD"}
 {"id": "AUD-139", "description": "M18-A-S18 Run the region escape verdicts as a script", "phase": "AUD"}
 {"id": "AUD-140", "description": "M18-A-S19 Carry the copyright header in the arena test file", "phase": "AUD"}
+{"id": "AUD-141", "description": "M8-A-S5 Rebind the context name inside group scopes", "phase": "AUD"}
+{"id": "AUD-142", "description": "M8-A-S6 Fail an ordered group stage at the lowest failed index", "phase": "AUD"}
+{"id": "AUD-143", "description": "M22-A-S5 Harden the goparity harness gates", "phase": "AUD"}
+{"id": "AUD-144", "description": "M1-A-S11 Pin that recover in the callee of defer f()? does not recover", "phase": "AUD"}
+{"id": "AUD-145", "description": "M1-A-S12 Reject errdefer in a Go file beside the identifier legs", "phase": "AUD"}
+{"id": "AUD-146", "description": "M3-A-S15 Pin that a build without the driver carries no AlwaysNilError line", "phase": "AUD"}
+{"id": "AUD-147", "description": "M3-A-S16 State the absent-receiver and stale-narrowing option rules", "phase": "AUD"}
+{"id": "AUD-148", "description": "M3-A-S17 Test the Go importer view of union and pointer options", "phase": "AUD"}
+{"id": "AUD-149", "description": "M3-A-S18 Reject writes through an imported const view in both import orders", "phase": "AUD"}
+{"id": "AUD-150", "description": "M4-A-S4 Cover getters that return an array holding a reference", "phase": "AUD"}
+{"id": "AUD-151", "description": "M6-A-S3 Pin lowering allocation growth of interpolations and lambdas", "phase": "AUD"}
+{"id": "AUD-152", "description": "M9-A-S17 Pin rule IDs in the errorcheck fixtures", "phase": "AUD"}
+{"id": "AUD-153", "description": "M11-A-S6 Test lawful binary counts above 8 MiB and hostile counts", "phase": "AUD"}
+{"id": "AUD-154", "description": "M13-A-S6 Pin the O2 inline budget between two functions", "phase": "AUD"}
+{"id": "AUD-155", "description": "M13-A-S7 Judge archsimd availability against a build without the experiment", "phase": "AUD"}
+{"id": "AUD-156", "description": "M0-A-S12 Delete the dead unsupported_action fixture", "phase": "AUD"}
+{"id": "AUD-157", "description": "M0-A-S13 Judge the jsonv2 default against an explicit nojsonv2 build", "phase": "AUD"}

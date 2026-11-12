@@ -544,6 +544,24 @@ Anchor: David Parnas, J.R.R. Tolkien, John Carmack
 - Red-team rows: none.
 - Docs: none (SPEC 0.1 already carries the parity, flag, generator, and tool rules).
 
+### M0-A-S12 Delete the dead unsupported_action fixture
+Anchor: David Parnas, J.R.R. Tolkien, John Carmack
+- Attack: `src/cmd/internal/testdir/logos_route_test.go` (`TestLogosUnsupportedActionText`, `TestRouteLogosHarnessSkipBypass`) and `src/cmd/internal/testdir/logos_test.go` (`TestRouteLogosHarnessScopesToLogos`) name a case path under `run/`, like the neighbouring route cases. A skip case still bypasses the route, and the unsupported-action error still carries its text. A fixture under `codegen/` held `// skip` and `// rundir`, the harness skipped it, and the tests used only its path with a source synthesized in the test, so the commit removes it. A route that runs a skip case, or an unsupported-action text changed to `.lgx`, turns the three tests red.
+- Build: none (test-only; one dead fixture removed).
+- Gate: `go test -count=1 cmd/internal/testdir -run '^(TestLogosUnsupportedActionText|TestRouteLogosHarnessSkipBypass|TestRouteLogosHarnessScopesToLogos)$'`.
+- Commits: `cf3d5cd15e` Delete the dead unsupported_action fixture.
+- Red-team rows: none.
+- Docs: none.
+
+### M0-A-S13 Judge the jsonv2 default against an explicit nojsonv2 build
+Anchor: David Parnas, J.R.R. Tolkien, John Carmack
+- Attack: `src/cmd/go/testdata/script/logos_jsonv2_default.txt`: the default build prints `jsonv2=on`, and a contrast build under `GOEXPERIMENT=nojsonv2` prints `jsonv2=off` and never `jsonv2=on`. Without the contrast, a toolchain that forced jsonv2 on, or that reported it from a constant, passed the script. With `ParseGOEXPERIMENT` setting jsonv2 on even for `nojsonv2`, the build is rejected (the object was built with jsonv2 and the importer expects it off) and the script fails at the contrast build.
+- Build: none (test-only).
+- Gate: `go test -count=1 cmd/go -run 'Script/^logos_jsonv2_default$'`.
+- Commits: `03c72dd693` Judge the jsonv2 default against an explicit nojsonv2 build.
+- Red-team rows: none.
+- Docs: none (SPEC 10.1 carries the rule).
+
 ## M1. `?`, `defer f()?`, `errdefer`, error traces, eject
 
 Anchor: Tony Hoare, Christopher Alexander, Edsger W. Dijkstra
@@ -715,6 +733,24 @@ Anchor: Edward Tufte, Tony Hoare
 - Commits: `f3af3870a4` Add dormant pooled try-defer runtime record; `b9f5f06bbe` Harden TestDeferTryGC to a sleep-free event wait; `a41b1af936` Harden TestDeferTryFreeZeroesExt to a sleep-free event wait; `948417557e` Check ejected defer-try Join behavior end to end; `7bd854d346` Prove plain .go files keep defer-try semantics built.
 - Red-team rows: #230.
 - Docs: none (M1-S5 records the marker path).
+
+### M1-A-S11 Pin that recover in the callee of defer f()? does not recover
+Anchor: Edward Tufte, Tony Hoare
+- Attack: `src/cmd/go/testdata/script/logos_defer_try_eject_parity.txt`: a program whose callee `f` of `defer f()?` calls `recover()` while the function panics, with an outer deferred literal that prints what `f` saw and what it recovered itself. The script requires the same stdout from `logos run`, from the ejected module under the logos `go`, and from the ejected module under upstream go1.27.2. `recover()` inside `f` returns nil, because the compiler wrapper calls `f` and `f` is not the deferred function. `test/logos/run/defer_try_semantics.lgo` (`recover-in-f-logos`, `recover-in-f-hand`) already pins the in-process side. Changing `SetWrapper(false)` to `SetWrapper(true)` in `defertry_logos.go` makes the script fail at its `cmp` step.
+- Build: none (test-only). `src/cmd/compile/internal/typecheck/defertry_logos.go` keeps the rule with `SetWrapper(false)` on the wrapper function.
+- Gate: `go test -count=1 cmd/go -run 'Script/^logos_defer_try_eject_parity$'`; `go test -count=1 cmd/internal/testdir -run 'Test/logos/run/defer_try_semantics.lgo'`.
+- Commits: `12b2730c76` Pin that recover in the callee of defer f()? does not recover.
+- Red-team rows: none.
+- Docs: SPEC 1.4 gains the sentence.
+
+### M1-A-S12 Reject errdefer in a Go file beside the identifier legs
+Anchor: Edward Tufte, Tony Hoare
+- Attack: `src/cmd/go/testdata/script/logos_keywords_identifiers.txt`: beside the legs that keep `errdefer`, `yield`, `scope`, and `group` identifiers in Go files, `errdefer cleanup()` in `main.lgo` builds and runs, and the same function in `main.go` fails at its line with a syntax error under both `go build` and `logos build`. Before this leg, a parser that also started an `errdefer` statement in a plain Go file passed the script. With the `LogosMode` gate removed from `logosErrdefer`, the script fails at the `go build` leg.
+- Build: none (test-only).
+- Gate: `go test -count=1 cmd/go -run 'Script/^logos_keywords_identifiers$'`.
+- Commits: `2e7f7e0921` Reject errdefer in a Go file beside the identifier legs.
+- Red-team rows: none.
+- Docs: none (SPEC 4.1 carries the rule).
 
 ## P1. Official agent skills plugin (R-SKILLS)
 
@@ -1745,6 +1781,42 @@ Anchor: Edward Tufte, Tony Hoare
 - Red-team rows: #209.
 - Docs: none.
 
+### M3-A-S15 Pin that a build without the driver carries no AlwaysNilError line
+Anchor: Edward Tufte, Tony Hoare
+- Attack: `src/cmd/go/testdata/script/logos_lint_nilerr_plain.txt` builds one package with an always-nil and a sometimes-nil exported function twice. `go build -o` must produce an archive whose `__.LOGOS` member, if any, holds no `AlwaysNilError` flag. `logos build -o` must produce the member with `fn AlwaysNil` carrying `AlwaysNilError` and `fn Sometimes` not carrying it. With `nilErrDriven` forced to true, the script fails at its first `! stdout 'AlwaysNilError'` line. A loGo/s importer cannot be built against the plain archive, because `logos build` compiles every dependency under the driver in its own build-cache entry. No test for that importer behaviour can exist without a driver-less dependency.
+- Build: none (test-only). `src/cmd/compile/internal/logos/facts/write_nilerr.go` writes `AlwaysNilError` only when `nilErrDriven` reports a logos driver flag.
+- Gate: `go test -count=1 cmd/go -run 'Script/^logos_lint_nilerr_plain$'`.
+- Commits: `187e8a3adf` Pin that a build without the driver carries no AlwaysNilError line.
+- Red-team rows: none.
+- Docs: SPEC section 5 gains the sentence.
+
+### M3-A-S16 State the absent-receiver and stale-narrowing option rules
+Anchor: Edward Tufte, Tony Hoare
+- Attack: `test/logos/run/defer_opt_eval.lgo` gains the cell `plain-none-args`: a `?.` statement and a `??` operand on an absent receiver, each against the hand-written `if o != nil` form, with the argument count at 0. The cells `nil-skip`, `none-args`, and `go-none-args` already pin the `defer` and `go` forms. `test/logos/compile/narrow_closure_stale.lgo` and `test/logos/run/narrow_closure_sound.lgo` already pin both sides of the stale-narrowing rule, so they do not change. Forcing the presence test of a one-result `?.` call to true in `src/cmd/compile/internal/logos/option.go` makes `defer_opt_eval.lgo` print seven `ok` cells and then panic on a nil pointer in `plainNoneLogos`.
+- Build: none (test-only).
+- Gate: `go test -count=1 cmd/internal/testdir -run 'Test/logos/(run/(defer_opt_eval|defer_try_semantics|narrow_closure_sound)\.lgo|compile/narrow_closure_stale\.lgo)'`.
+- Commits: `53d70080a2` State the absent-receiver and stale-narrowing option rules in SPEC.
+- Red-team rows: none.
+- Docs: SPEC 1.4 states that a `?.` call with an absent receiver skips the call and evaluates none of its arguments, as an ordinary call and in a `defer` or `go` statement. SPEC 2.2 states that a function literal does not read `x` as narrowed when `x` is assigned anywhere besides its declaration.
+
+### M3-A-S17 Test the Go importer view of union and pointer options
+Anchor: Edward Tufte, Tony Hoare
+- Attack: `src/cmd/go/testdata/script/logos_interop_nil.txt`: the loGo/s package of the `e/` part exports `func Find(ok bool) *User?`, a closed union `Choice`, `func Pick(i int) Choice?`, and `func Describe(c Choice?) string`. One Go source declares function variables and result variables with the lowered types (`*p.User`, `p.Choice`), checks that absent is nil, that a present `Choice` holds its member, and that nil and a member pass back. The script runs it against the loGo/s importer with `logos run`, and against the ejected module with the repo `go` and with `$UPROOT1272/bin/go`. A wrong lowered type fails to compile. A union option lowered to `rt.Option[Choice]` fails at script line 20 with `cannot use p.Pick(2) ... as p.Choice value in variable declaration`. A `*T?` lowered to `rt.Option[*T]` fails at line 6 with `cannot use p.Find ... as func(bool) *p.User value in variable declaration`. Ejected text that spells `Option[...]` while the tree stays bare passes the five stdout checks of `logos run` and then fails at line 32 with `undefined: _logos_rt` in the ejected module.
+- Build: none (test-only). The lowering lives in `src/cmd/compile/internal/logos/option.go`.
+- Gate: `go test -count=1 cmd/go -run 'Script/^logos_interop_nil$'`.
+- Commits: `4dc6aa6fd7` Test the Go importer view of union and pointer options.
+- Red-team rows: none.
+- Docs: none (SPEC 2.2 carries the rule).
+
+### M3-A-S18 Reject writes through an imported const view in both import orders
+Anchor: Edward Tufte, Tony Hoare
+- Attack: `src/cmd/go/testdata/script/logos_qualifier_import_order.txt`: the read legs print `11 2` under both import orders, which a toolchain that dropped the const qualifier from imported types also prints. The new legs `forwardwrite` and `reversewrite` write `value.Items[0] = 5` on a `b.Make()` result typed `a.Box`, under the two import orders. Each must fail with `const_view_mutation` at its own `main.lgo`, beside the read legs that still build and run. With the overlay no longer wrapping imported named types in their const qualifiers, the script fails at its `logos build -o` of `./forwardwrite` with `unexpected success`.
+- Build: none (test-only).
+- Gate: `go test -count=1 cmd/go -run 'Script/^logos_qualifier_import_order$'`.
+- Commits: `9d85be8c1e` Reject writes through an imported const view in both import orders.
+- Red-team rows: none.
+- Docs: none (SPEC 5 carries the rule).
+
 ## M4. Interface properties
 
 Anchor: Tony Hoare, David Parnas, J.R.R. Tolkien
@@ -1804,6 +1876,15 @@ Anchor: Edward Tufte, Tony Hoare
 - Gate: `go test cmd/internal/testdir -run 'Test/logos/run/property_const_method'` MUST pass.
 - Red-team rows: #205.
 - Docs: none.
+
+### M4-A-S4 Cover getters that return an array holding a reference
+Anchor: Edward Tufte, Tony Hoare
+- Attack: `src/internal/types/testdata/logos/property_getter_readonly.lgo` gains three rejected declarations whose getter returns an array that holds a reference (`[2][]int`, `[1]*PosPoint`, `[3]map[string]int`), each with `[correctness::const_view_mutation]`, and a `[4]int` getter beside them as the accepted twin. `src/cmd/go/testdata/script/logos_property_getter_shapes.txt` adds the same three shapes as packages `samearr*` and `crossarr*` that must fail `const_view_mutation`, a lib getter per shape, and the `[4]int` getter accepted in the same package and across packages. The earlier fixtures covered slice, map, pointer, channel, function, interface, and a struct holding one. Returning true from the array arm of `logosReferenceFree` makes the types2 fixture report the missing errors at `property_getter_readonly.lgo` lines 211, 217, and 223, and makes the script fail at its build of `./samearrslice` with `unexpected success`.
+- Build: none (test-only). `src/cmd/compile/internal/types2/const_logos.go` (`logosReferenceFree`) owns the predicate.
+- Gate: `go test -count=1 cmd/compile/internal/types2 -run 'TestLogos/property_getter_readonly'`; `go test -count=1 cmd/go -run 'Script/^logos_property_getter_shapes$'`.
+- Commits: `928bc2b725` Cover getters that return an array holding a reference.
+- Red-team rows: none.
+- Docs: none (SPEC 2.3 carries the rule).
 
 ## M5. Const composites, CTFE, const views, const maps
 
@@ -1985,6 +2066,15 @@ Anchor: Edsger W. Dijkstra, John Carmack
 - Commits: `13b887db03` Hoist loop-body scope guards out of loops.
 - Red-team rows: #52, #113.
 - Docs: none (SPEC 15.1 states the open-coded cleanup rule; M8-A-S2 records the guard emission).
+
+### M6-A-S3 Pin lowering allocation growth of interpolations and lambdas
+Anchor: Edsger W. Dijkstra, John Carmack
+- Attack: `src/cmd/compile/internal/logos/chain_growth_test.go`: `TestChainLowerGrowthBound` bounded only the chain shape. `TestInterpLowerGrowthBound` adds the same bound for one function with N interpolations, and `TestLambdaLowerGrowthBound` for one function with N capturing nested lambdas. Lowering 320 sites MUST allocate at most 6 times the bytes of 80 sites. The measuring loop takes the lowered-form check, so the three shapes share it. Both new shapes already met the bound at the commit, with growth of 4.1 times (chain), 3.9 times (interpolations), and 4.0 times (lambdas), so no lowering code changed. A staging replacement that allocates 512 bytes per site turned all three red in a probe that was not committed. The byte bound does not see a rescan that allocates nothing: a probe that walked the whole tree once per staged replacement passed the byte bound, and the three tests took 39 s, 22 s, and 38 s instead of 1.9 s, 0.5 s, and 1.2 s.
+- Build: none (test-only).
+- Gate: `go test -count=1 cmd/compile/internal/logos -run '^Test(ChainLower|InterpLower|LambdaLower)GrowthBound$'`.
+- Commits: `46ea1455b5` Pin lowering allocation growth of interpolations and lambdas.
+- Red-team rows: none.
+- Docs: none.
 
 ## M7. Comptime
 
@@ -2171,6 +2261,24 @@ Anchor: Tony Hoare, Edsger W. Dijkstra, John Carmack
 - Red-team rows: #219, #220, #221, #222, #223, #224.
 - Docs: none (SPEC 1.4 and 2.6 carry the rules).
 
+### M8-A-S5 Rebind the context name inside group scopes
+Anchor: Tony Hoare, Edsger W. Dijkstra, John Carmack
+- Attack: `test/logos/run/group_context.lgo` (44 `ok` lines): a call that takes `ctx` inside a `go group` block, in the `go` call form, and inside the map and filter lambdas of a stage (ordered, `.unordered()`, a `range` source, and a stage left by `break`) receives the group context, so a sibling blocked in a call on `ctx` wakes after the first failure (`go-block-call-released`, `go-call-form-released`, `stage-call-released`, `stage-unordered-released`, `stage-range-released`, `stage-break-released`). Inside the block the name differs from the outer context (`go-identity-between`, `stage-identity-lambda`, `stage-nested-inner-lambda`). After the block it denotes the outer context again (`go-identity-restored-after`, `go-shadow-restored-after`), and a context kept from inside still reports `context canceled` after the join (`go-kept-cancelled-after-join`). A context argument that is not a plain identifier, and a context captured under another name, rebind nothing (`go-not-identifier-held`, `stage-not-identifier-held`, `go-other-name-held`). `src/cmd/go/testdata/script/logos_eject_group_context.txt`: the ejected program prints the same lines. Each of these mutations of the lowering was seen red on the fixture: group rebinding dropped, stage rebinding dropped, rebinding for a non-identifier argument, and rebinding by assignment so it leaks past the block.
+- Build: `src/cmd/compile/internal/types2/group_logos.go` opens a scope for the body of a `go group`, so a name the block declares does not reach the code after it. `src/cmd/compile/internal/logos/group.go` emits every `go group` as a block around the user's block, in the native and the ejected form. When the context argument is a plain identifier (`plainContextName`), `groupRebind` defines that name as the group context at the head of the block. `src/cmd/compile/internal/logos/parchain.go` defines it inside each map and filter lambda of a stage as the context that the helper hands to the segment.
+- Gate: `go test -count=1 cmd/internal/testdir -run 'Test/logos/run/group_context'`; `go test -count=1 cmd/go -run 'Script/^logos_eject_group_context$'`.
+- Commits: `dff24e4f4e` Rebind the context name inside group scopes.
+- Red-team rows: #227.
+- Docs: SPEC 2.6 states the three cases.
+
+### M8-A-S6 Fail an ordered group stage at the lowest failed index
+Anchor: Tony Hoare, Edsger W. Dijkstra, John Carmack
+- Attack: `src/logos/rt/groupseq_test.go`: `TestGroupSeqOrderedErrorIsLowestIndexAfterDeliveredPrefix`, `TestGroupSeqOrderedFailureCancelsOnlyWhenItReachesTheHead`, `TestGroupSeqOrderedEarlierPanicBeatsLaterError`, `TestGroupSeqOrderedPanicWaitsForTheHeadLikeAnError`, `TestGroupSeqOrderedBreakBeforeFailureDiscardsIt`, `TestGroupSeqOrderedStopsPullingAfterFailure`, and `TestGroupChanOrderedStopsReceivingAfterFailure`. `test/logos/run/chain_stage_cancel.lgo`: `cancel-ordered-error-is-sequential` (an ordered stage delivers the results before the failed element and returns that element's error, as the chain without the stage does) and `cancel-unordered-failure-cancels-earlier-siblings`. Mutations of `groupseq.go` seen red: cancel at once, deliver past the failure, never cancel, keep pulling after a failure, a panic that cancels at once, and an ordered error returned to the group.
+- Build: `src/logos/rt/groupseq.go`: in input order a child error or panic is stored with its element and the group is not failed. The ranging goroutine stops taking source elements and channel values at once. It delivers the elements before the failed one. When the failure reaches the head of the window it cancels the group, joins, closes what was never delivered, and ends with that error. An earlier element that fails meanwhile is the failure. A `break` before the failure discards it. After `.unordered()` the first failure in completion order cancels at once. The cost: the elements after the failed one, at most limit-1 of them, keep running until the failure reaches the head, and an earlier element that returns only when the group is cancelled holds the stage as it would hold the sequential chain. The case `cancel-first-failure-cancels-siblings` had that shape and moved to `cancel-unordered-failure-cancels-earlier-siblings`.
+- Gate: `go test -count=1 -race logos/rt -run 'GroupSeq|GroupChan'`, and the same with `-tags logosejected`; `go test -count=1 cmd/internal/testdir -run 'Test/logos/run/chain_stage_cancel'`.
+- Commits: `8f5f7ee6d2` Fail an ordered group stage at the lowest failed index.
+- Red-team rows: #228.
+- Docs: SPEC 2.6 states both modes.
+
 ## M9. Lints and JSON diagnostics
 
 Anchor: Tony Hoare, Edward Tufte, Kenya Hara
@@ -2356,6 +2464,15 @@ Anchor: Tony Hoare, Edward Tufte, Kenya Hara
 - Red-team rows: #195 (unguarded field read after deferred unlock moved; the named subtest is the proof).
 - Docs: none (SPEC 1.2 carries the rule).
 
+### M9-A-S17 Pin rule IDs in the errorcheck fixtures
+Anchor: Tony Hoare, Edward Tufte, Kenya Hara
+- Attack: `test/logos/compile/freeze_const.lgo` pins `[correctness::const_view_mutation]` on both stores. `const_for_error.lgo` pins `[comptime::error]` and keeps its message text, because a live `comptime.Error` must fail compilation with that text. `const_map_float_keys.lgo` pins `[correctness::const_eval]` on the two duplicate-key lines and keeps the plain Go `duplicate key in map literal`, which has no rule. `test/logos/lint/serialized_unsized_int.lgo` pins the ID and keeps the field name on its two shared-field lines. `test/logos/lint/large_backing_array_pin.lgo` and `large_backing_array_pin_go.go` pin `[perf::large_backing_array_pin]` at each line instead of the generated byte-count text. The five `union_member_*` fixtures pin `[correctness::union_member_no_json]` on the holder field. `test/logos/compile/union_member_wrong_signature_json.lgo` and `test/logos/codegen/zeroalloc.lgo` pin the bracketed rule ID at the position and drop message prose. A misspelled ID in `LogosReport`, in the types2 const view, in the `comptime.Error` and `const_eval` messages, or in `logosNoUnionJSON` turns each group red.
+- Build: none (test-only).
+- Gate: `go test -count=1 cmd/internal/testdir -run 'Test/logos/(compile|lint|codegen)/(freeze_const|const_for_error|const_map_float_keys|serialized_unsized_int|large_backing_array_pin|union_member|zeroalloc)'`.
+- Commits: `511460bf70` Pin rule IDs in four errorcheck fixtures; `1a5e5824e5` Pin the large backing array rule ID in both twins; `a18289b185` Pin the union member JSON rule at the position only; `96ba0c6c58` Drop message prose from two rule pins.
+- Red-team rows: none.
+- Docs: none.
+
 ## M10. `logos next` and `logos context`
 
 Anchor: Christopher Alexander, Kenya Hara
@@ -2465,6 +2582,15 @@ Anchor: Edward Tufte, Tony Hoare
 - Red-team rows: #204.
 - Docs: none.
 
+### M11-A-S6 Test lawful binary counts above 8 MiB and hostile counts
+Anchor: Edward Tufte, Tony Hoare
+- Attack: `test/logos/run/binary_big_count.lgo` round-trips a `[]Uint64` of 1<<20+1 elements, a `[]byte` of 8 MiB + 1 bytes, and a `map[string]uint64` of 700000 entries, each with a wire above 8 MiB, and requires them intact. It decodes a count of 2^40 and a count one above the remaining input for a string, a `[]byte`, and a slice, and a count of 2^40 for a map, each behind a 1 KiB body. Each decode must fail with an error that names the field and the offset, and the least `TotalAlloc` of eight runs must stay at or under 1 MiB, which bounds every single allocation. Before this fixture nothing decoded a payload above 8 MiB, and a string or map count above its input had no test. A count check that rejects lawful counts (a string or `[]byte` above 8<<20, a slice above 1<<20, a map above 1<<19) turns `lawful-slice-above-8mib` and its three twins for bytes, string, and map red. A count bound relaxed by one for string and `[]byte` turns `hostile-string-next-byte` red, a slice check replaced by a 16 MiB prealloc turns `hostile-slice-count` red, and a map size hint capped at 1<<22 turns `hostile-map-count` red. A lawful payload above 8 MiB ends in one allocation of at least its size, so the waste a lawful decode adds is bounded by the growth factor of `append`. Measured with `runtime.MemProfileRate=1`, a 12.58 MB `[]Uint64` payload peaks at one 15,589,376-byte allocation and 75.9 MB in total, and a `[]byte` or string payload allocates 12,582,912 bytes once.
+- Build: none (test-only). The product is unchanged.
+- Gate: `go test -count=1 cmd/internal/testdir -run 'Test/logos/run/(binary_big_count|binary_prealloc_jb|binary_zero_wire_budget|binary_zero_granular_jb|json_binary_test)'`.
+- Commits: `e0ed5506bc` Test lawful binary counts above 8 MiB and hostile counts; `2cb4246787` Name the zero-wire subject of the 8 MiB allocation sentence.
+- Red-team rows: none.
+- Docs: SPEC 10.3: the zero-wire clause named no subject and contradicted the sentence before it, so it now names zero-wire counts. M11-A-S1 lists the fixture.
+
 ## M12. Capabilities auditor
 
 Anchor: Tony Hoare, Edward Tufte
@@ -2549,6 +2675,24 @@ Anchor: Edward Tufte, Tony Hoare
 - Gate: `go test cmd/go -run 'Script/^logos_(simd_go_use|pointee_logosescape|fastcall_seq)$'` MUST pass.
 - Red-team rows: #210, #211, #212.
 - Docs: none.
+
+### M13-A-S6 Pin the O2 inline budget between two functions
+Anchor: Edward Tufte, Tony Hoare
+- Attack: `test/logos/codegen/inline_levels_o2.lgo` and its plain Go twin `inline_levels_o2.go` hold two functions at `-O=2 -m=2`: `midCost`, cost 102, MUST inline, and `mediumCost`, cost 167, MUST NOT. They bracket the O2 budget of 120 from both sides. Before them only O1 and O3 had an inline-level fixture, so the O2 budget could move to any value with every errorcheck still passing. Raising the O2 `inlbudget` to 400, or lowering it to 80, in `src/cmd/go/internal/logos/settings/settings.go` turns the fixtures red.
+- Build: none (test-only).
+- Gate: `go test -count=1 cmd/internal/testdir -run 'Test/logos/codegen/inline_levels_o2'`.
+- Commits: `4b4244201c` Pin the O2 inline budget between two functions.
+- Red-team rows: none.
+- Docs: M13-S1 gate names the fixture.
+
+### M13-A-S7 Judge archsimd availability against a build without the experiment
+Anchor: Edward Tufte, Tony Hoare
+- Attack: `src/cmd/go/testdata/script/logos_simd_go_use.txt`: with `GOEXPERIMENT` unset, `logos run` and `go run` of the same program must both fail naming `simd/archsimd`. The script ran the program only with the experiment on, so a toolchain that enabled `simd` for every logos build passed it and made the condition `under GOEXPERIMENT=simd` vacuous. With the logos settings appending `simd` to every experiment, the script fails at its `logos run` of the unset leg with `unexpected success`.
+- Build: none (test-only).
+- Gate: `go test -count=1 cmd/go -run 'Script/^logos_simd_go_use$'`.
+- Commits: `dae3de2659` Judge archsimd availability against a build without the experiment.
+- Red-team rows: none.
+- Docs: none (SPEC 2.4 carries the rule).
 
 ## M14. Fixed-array SIMD
 
@@ -3215,6 +3359,15 @@ Anchor: Richard Feynman, Tony Hoare
 - Red-team rows: none.
 - Docs: none (SPEC 17.3 carries the rule).
 
+### M22-A-S5 Harden the goparity harness gates
+Anchor: Edward Tufte, Tony Hoare
+- Attack: `src/cmd/internal/goparity/parity_test.go` holds one probe per invariant. A program is a defect when it exits nonzero or when stdout or stderr holds the whole word `LAW`, and one predicate (`corpusDefect`) serves the fork rows, the upstream rows, and the mutant kill check (`TestCorpusDefectProbes`). Stdout compares byte for byte, and stderr masks only what a runtime fault prints (the pc, addr, sp, fp, and lr values and `0xc`-prefixed pointers) and is cut at the first traceback line, while the upstream sweep keeps its old normalizer (`TestCorpusNormKeepsProgramValues`). The metamorphic level check keys on the effective `-O` level, the `-O=` argument or else O2 under logos and O1 under plain go (`TestLevelKeySeparatesOptimizationSettings`, 115 configuration pairs that shared a key and ran at different levels before the change). The stability gate compares the whole observation, level lines included, and the harness reports a prefix in `level-dependent.txt` that matches no line of the reference run (`TestStabilityDiffSeesLevelLines`, `TestUnmatchedLevelPrefixes`). The cgo class of a corpus program comes from `go/parser` with `ImportsOnly`, and a file whose imports do not parse is an error (`TestCgoProgramClassifiesByImport`; the 16 programs `at17a` to `at17p` keep their class). `listPrograms` and `listFails` fail on any entry that is not a program directory or a fail `.go` file (`TestCorpusDiscoveryRejectsStrayEntries`). A staging or `logos.toml` failure is the build error of its row, never a row that built nothing (`TestStageFailureIsABuildError`). `toolVersion` asks the binary with `go env GOVERSION` under its own `GOROOT`, and the logos driver is always a clone of `bin/go` (`TestToolVersionComesFromTheBinary`, `TestForkToolIgnoresAStaleLogosBinary`). A dry run `go build -n` of a one-file module under each active configuration shows the inline budget (120, 400, and 15 for `-O` 2, 3, and s), `-N` for `-O 0`, the `GOAMD64` level, `-race`, and the `GOEXPERIMENT` in the build info, and the release tier checks its twelve extra rows the same way (`TestForkConfigsReachTheCompiler`, `TestCompileProblemsSeeAnIgnoredFlag`). `TestParityFailCorpus` runs the fail corpus under every active configuration (K1, K3, K4, K5, K6, K7, K8, K10; 18 files); the vet comparison stays on K1, the test skips visibly with the oracle off, and an empty corpus fails. `TestMain` rejects `-goparity.release` with `-short`. The flag `-goparity.stamp=FILE` is accepted only for a complete run (release, oracle on, no `-short`, no `-run`, no `-skip`). The harness removes FILE before the run and writes the git tip of the fork tree into it only when every test passed and no tracked file has an uncommitted change (`TestTierProblem`, `TestTipIdentityNeedsACleanTrackedTree`). A gate compares FILE with `git rev-parse HEAD`. The commit did not run the complete stamped run. `TestParityEveryAttackHasAMutant` requires `testdata/mutants/<id>.txt` for each attack id (`at` plus digits) found in a program directory or a fail file, in the default tier. The attacks `at09`, `at21`, and `at22` use runtime controls of a different fault than the design names, and replacing them needs a rebuilt compiler or runtime across the corpus, which only the release tier can show.
+- Build: none (test-only). All twelve commits change `parity_test.go` only. The package comment states the program contract and the stamp command.
+- Gate: `go test -p 8 -count=1 cmd/internal/goparity -run 'TestCorpusDefectProbes|TestCorpusNormKeepsProgramValues|TestLevelKeySeparatesOptimizationSettings|TestStabilityDiffSeesLevelLines|TestUnmatchedLevelPrefixes|TestCgoProgramClassifiesByImport|TestCorpusDiscoveryRejectsStrayEntries|TestStageFailureIsABuildError|TestToolVersionComesFromTheBinary|TestForkToolIgnoresAStaleLogosBinary|TestForkConfigsReachTheCompiler|TestCompileProblemsSeeAnIgnoredFlag|TestTierProblem|TestTipIdentityNeedsACleanTrackedTree|TestParityEveryAttackHasAMutant'`; `go test -p 8 -count=1 -timeout 25m cmd/internal/goparity -run TestParityFailCorpus`.
+- Commits: `8f9bca69d1` Fail a corpus program that prints LAW on stderr; `99d7028eac` Compare the hex values a corpus program prints; `ba551f7bb5` Key the metamorphic level check on the effective -O setting; `884f6cd823` Run the stability gate on level lines and check level prefixes; `9fab2017b3` Classify cgo corpus programs by their parsed imports; `b412c88d3e` Reject stray entries in the corpus directories; `3ca5c453a4` Return a stage failure as the build result of its row; `975534354c` Pin the version of the binary, and never trust a stale bin/logos; `23fa44121a` Assert that each configuration's knobs reach the compiler; `65167c0c2b` Run the fail corpus under every active configuration; `60782e7499` Reject a partial release run and stamp a complete one; `7790ef120b` Require a mutant file for every attack that has a corpus entry.
+- Red-team rows: none.
+- Docs: none.
+
 ### Release gate
 
 Anchor: Edward Tufte, Richard Feynman
@@ -3480,7 +3633,7 @@ Prerequisites: run `./make.bash` in `src` and put the fork `bin` directory first
 
 Anchor: Tony Hoare
 
-Written to `tasks/autoplan-ledger.jsonl` by P0-S6. IDs: phase prefix plus a sequence in plan order. The original 103 rows are preserved verbatim; P0-S6 appends exactly the 5 remaining rows for M0-S7, P1-S3, M11-S3, M11-S4, and M18-S4 (listed at the end of the block); the M19 rows are pruned. The 2026-10-19 direction appended one more row after those, `DX-20` for the follow-up slice M0-S8; no other row changed (the descriptions of rows such as `ENG-26` name the slice as first written, and `CEO-02` names the original 182 REDTEAM rows; rows #183 to #189 were added later by the same direction). The audit direction appended rows `AUD-01` to `AUD-140` after those, one per recorded audit slice in commit order. The ledger holds 251 rows.
+Written to `tasks/autoplan-ledger.jsonl` by P0-S6. IDs: phase prefix plus a sequence in plan order. The original 103 rows are preserved verbatim; P0-S6 appends exactly the 5 remaining rows for M0-S7, P1-S3, M11-S3, M11-S4, and M18-S4 (listed at the end of the block); the M19 rows are pruned. The 2026-10-19 direction appended one more row after those, `DX-20` for the follow-up slice M0-S8; no other row changed (the descriptions of rows such as `ENG-26` name the slice as first written, and `CEO-02` names the original 182 REDTEAM rows; rows #183 to #189 were added later by the same direction). The audit direction appended rows `AUD-01` to `AUD-157` after those, one per recorded audit slice in commit order. The ledger holds 268 rows.
 
 ```jsonl
 {"id": "CEO-01", "description": "P0-S1 Rename logos-doc/PLAN.md to logos-doc/SPEC.md (pure rename) and P0-S2 rewrite SPEC.md as the tailored spec (tables T, N, Section 18)", "phase": "CEO"}
@@ -3734,4 +3887,21 @@ Written to `tasks/autoplan-ledger.jsonl` by P0-S6. IDs: phase prefix plus a sequ
 {"id": "AUD-138", "description": "M18-A-S17 Place block-local holders in the region", "phase": "AUD"}
 {"id": "AUD-139", "description": "M18-A-S18 Run the region escape verdicts as a script", "phase": "AUD"}
 {"id": "AUD-140", "description": "M18-A-S19 Carry the copyright header in the arena test file", "phase": "AUD"}
+{"id": "AUD-141", "description": "M8-A-S5 Rebind the context name inside group scopes", "phase": "AUD"}
+{"id": "AUD-142", "description": "M8-A-S6 Fail an ordered group stage at the lowest failed index", "phase": "AUD"}
+{"id": "AUD-143", "description": "M22-A-S5 Harden the goparity harness gates", "phase": "AUD"}
+{"id": "AUD-144", "description": "M1-A-S11 Pin that recover in the callee of defer f()? does not recover", "phase": "AUD"}
+{"id": "AUD-145", "description": "M1-A-S12 Reject errdefer in a Go file beside the identifier legs", "phase": "AUD"}
+{"id": "AUD-146", "description": "M3-A-S15 Pin that a build without the driver carries no AlwaysNilError line", "phase": "AUD"}
+{"id": "AUD-147", "description": "M3-A-S16 State the absent-receiver and stale-narrowing option rules", "phase": "AUD"}
+{"id": "AUD-148", "description": "M3-A-S17 Test the Go importer view of union and pointer options", "phase": "AUD"}
+{"id": "AUD-149", "description": "M3-A-S18 Reject writes through an imported const view in both import orders", "phase": "AUD"}
+{"id": "AUD-150", "description": "M4-A-S4 Cover getters that return an array holding a reference", "phase": "AUD"}
+{"id": "AUD-151", "description": "M6-A-S3 Pin lowering allocation growth of interpolations and lambdas", "phase": "AUD"}
+{"id": "AUD-152", "description": "M9-A-S17 Pin rule IDs in the errorcheck fixtures", "phase": "AUD"}
+{"id": "AUD-153", "description": "M11-A-S6 Test lawful binary counts above 8 MiB and hostile counts", "phase": "AUD"}
+{"id": "AUD-154", "description": "M13-A-S6 Pin the O2 inline budget between two functions", "phase": "AUD"}
+{"id": "AUD-155", "description": "M13-A-S7 Judge archsimd availability against a build without the experiment", "phase": "AUD"}
+{"id": "AUD-156", "description": "M0-A-S12 Delete the dead unsupported_action fixture", "phase": "AUD"}
+{"id": "AUD-157", "description": "M0-A-S13 Judge the jsonv2 default against an explicit nojsonv2 build", "phase": "AUD"}
 ```
