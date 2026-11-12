@@ -215,56 +215,34 @@ func jbWordAtZeroCapOver() error {
 	return nil
 }
 
-func run() error {
-if int(unsafe.Sizeof(JbFat{})) != 4096 {
-return fmt.Errorf("JbFat size %d, want 4096", int(unsafe.Sizeof(JbFat{})))
+func jbSizes() error {
+	if int(unsafe.Sizeof(JbFat{})) != 4096 {
+		return fmt.Errorf("JbFat size %d, want 4096", int(unsafe.Sizeof(JbFat{})))
+	}
+	if int(unsafe.Sizeof(JbWord{})) != 8 {
+		return fmt.Errorf("JbWord size %d, want 8", int(unsafe.Sizeof(JbWord{})))
+	}
+	return nil
 }
-if int(unsafe.Sizeof(JbWord{})) != 8 {
-return fmt.Errorf("JbWord size %d, want 8", int(unsafe.Sizeof(JbWord{})))
-}
-if err := jbCountAccepted(); err != nil {
-return err
-}
-if err := jbCountOver(); err != nil {
-return err
-}
-if err := jbFatAccepted(); err != nil {
-return err
-}
-if err := jbWordAtZeroCapOver(); err != nil {
-return err
-}
-return jbFatOver()
-}
+
 func main() {
-if err := jbCountAccepted(); err != nil {
-fmt.Println("FAIL granular-count:", err)
-os.Exit(1)
-}
-fmt.Println("ok granular-count")
-if err := jbCountOver(); err != nil {
-fmt.Println("FAIL granular-over:", err)
-os.Exit(1)
-}
-fmt.Println("ok granular-over")
-if err := jbFatAccepted(); err != nil {
-fmt.Println("FAIL granular-fat:", err)
-os.Exit(1)
-}
-fmt.Println("ok granular-fat")
-if err := jbFatCapAllocation(); err != nil {
-fmt.Println("FAIL granular-fat-cap-alloc:", err)
-os.Exit(1)
-}
-fmt.Println("ok granular-fat-cap-alloc")
-if err := jbWordAtZeroCapOver(); err != nil {
-fmt.Println("FAIL granular-word:", err)
-os.Exit(1)
-}
-fmt.Println("ok granular-word")
-if err := jbFatOver(); err != nil {
-fmt.Println("FAIL granular-fat-over:", err)
-os.Exit(1)
-}
-fmt.Println("ok granular-fat-over")
+	steps := []struct {
+		name string
+		run  func() error
+	}{
+		{"granular-sizes", jbSizes},
+		{"granular-count", jbCountAccepted},
+		{"granular-over", jbCountOver},
+		{"granular-fat", jbFatAccepted},
+		{"granular-fat-cap-alloc", jbFatCapAllocation},
+		{"granular-word", jbWordAtZeroCapOver},
+		{"granular-fat-over", jbFatOver},
+	}
+	for _, s := range steps {
+		if err := s.run(); err != nil {
+			fmt.Println("FAIL", s.name+":", err)
+			os.Exit(1)
+		}
+		fmt.Println("ok", s.name)
+	}
 }
