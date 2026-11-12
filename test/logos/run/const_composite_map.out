@@ -37,6 +37,8 @@ ok big-read
 ok big-len
 ok big-range
 ok big-copy
+ok big-two-copies
+ok big-fmt
 ok view-struct
 ok view-slice
 ok view-map
