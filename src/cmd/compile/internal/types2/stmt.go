@@ -262,6 +262,9 @@ L:
 		if !x.isValid() || !v.isValid() {
 			continue L
 		}
+		if check.logosUnionConstMiss(&v, x) {
+			continue L
+		}
 		check.convertUntyped(&v, x.typ())
 		if !v.isValid() {
 			continue L

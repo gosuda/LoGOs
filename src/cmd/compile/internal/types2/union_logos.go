@@ -278,26 +278,26 @@ func LogosUnionTerms(t Type) ([]Type, bool) {
 	return out, true
 }
 
-func (check *Checker) logosUnionLiteralMiss(x, y *operand) (union Type, from Type) {
+func (check *Checker) logosUnionLiteralMiss(x, y *operand) (lit *operand, union Type, from Type) {
 	if !check.conf.Logos {
-		return nil, nil
+		return nil, nil, nil
 	}
 	for _, pair := range [2][2]*operand{{x, y}, {y, x}} {
-		un, lit := pair[0], pair[1]
+		un, c := pair[0], pair[1]
 		tset := logosClosedUnion(un.typ())
-		if tset == nil || lit.mode() != constant_ || !isUntyped(lit.typ()) {
+		if tset == nil || c.mode() != constant_ || !isUntyped(c.typ()) {
 			continue
 		}
-		if d := Default(lit.typ()); !logosMemberOf(d, tset) {
-			return un.typ(), d
+		if d := Default(c.typ()); !logosMemberOf(d, tset) {
+			return c, un.typ(), d
 		}
 	}
-	return nil, nil
+	return nil, nil, nil
 }
 
 func (check *Checker) logosUnionCompareMiss(x, y *operand, op syntax.Operator) bool {
-	union, from := check.logosUnionLiteralMiss(x, y)
-	if union == nil {
+	lit, union, from := check.logosUnionLiteralMiss(x, y)
+	if lit == nil {
 		return false
 	}
 	check.errorf(y, MismatchedTypes, "%s invalid operation: %s %s %s (%s is not a member of %s)", logosNonMember, x.expr, op, y.expr, from, union)
@@ -305,12 +305,11 @@ func (check *Checker) logosUnionCompareMiss(x, y *operand, op syntax.Operator) b
 	return true
 }
 
-func (check *Checker) logosUnionCaseMiss(x, y *operand) bool {
-	union, from := check.logosUnionLiteralMiss(x, y)
-	if union == nil {
+func (check *Checker) logosUnionConstMiss(x, y *operand) bool {
+	lit, union, from := check.logosUnionLiteralMiss(x, y)
+	if lit == nil {
 		return false
 	}
-	check.errorf(x, MismatchedTypes, "%s invalid case %s in switch on %s (%s is not a member of %s)", logosNonMember, x.expr, y.expr, from, union)
-	x.invalidate()
+	check.errorf(lit, InvalidUntypedConversion, "%s %s is not a member of %s", logosNonMember, from, union)
 	return true
 }
