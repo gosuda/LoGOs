@@ -197,14 +197,62 @@ type buildResult struct {
 	progs  []string
 }
 
-func goVersion(t *testing.T, goroot string) string {
-	t.Helper()
-	data, err := os.ReadFile(filepath.Join(goroot, "VERSION"))
+func toolVersion(bin, goroot string) (string, error) {
+	cmd := exec.Command(bin, "env", "GOVERSION")
+	cmd.Env = []string{"PATH=/usr/bin:/bin", "HOME=" + os.TempDir(), "GOROOT=" + goroot, "GOENV=off", "GOTOOLCHAIN=local"}
+	out, err := cmd.Output()
 	if err != nil {
-		t.Fatalf("reading VERSION in %s: %v", goroot, err)
+		return "", fmt.Errorf("%s env GOVERSION: %w", bin, err)
 	}
-	line, _, _ := strings.Cut(string(data), "\n")
-	return strings.TrimSpace(line)
+	return strings.TrimSpace(string(out)), nil
+}
+
+func fakeToolchain(t *testing.T, fileVersion, binVersion string) (goroot, bin string) {
+	t.Helper()
+	goroot = t.TempDir()
+	if err := os.MkdirAll(filepath.Join(goroot, "bin"), 0o777); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(goroot, "VERSION"), []byte(fileVersion+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	bin = filepath.Join(goroot, "bin", "go")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\necho "+binVersion+"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return goroot, bin
+}
+
+func TestToolVersionComesFromTheBinary(t *testing.T) {
+	for _, tc := range []struct{ name, file, bin string }{
+		{"file claims the pin, binary does not", "go1.27.3", "go1.0.0"},
+		{"binary reports the pin, file does not", "go1.0.0", "go1.27.3"},
+	} {
+		goroot, bin := fakeToolchain(t, tc.file, tc.bin)
+		if v, err := toolVersion(bin, goroot); err != nil || v != tc.bin {
+			t.Errorf("%s: toolVersion = %q, %v; want %q", tc.name, v, err, tc.bin)
+		}
+	}
+}
+
+func TestForkToolIgnoresAStaleLogosBinary(t *testing.T) {
+	goroot, bin := fakeToolchain(t, forkVersionPin, forkVersionPin)
+	if err := os.WriteFile(filepath.Join(goroot, "bin", "logos"), []byte("#!/bin/sh\necho stale\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GOROOT", goroot)
+	tc := forkTool(t)
+	got, err := os.ReadFile(tc.logos)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := os.ReadFile(bin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Errorf("the logos binary %s differs from bin/go: a stale bin/logos was used", tc.logos)
+	}
 }
 
 func forkTool(t *testing.T) toolchain {
@@ -220,14 +268,15 @@ func forkTool(t *testing.T) toolchain {
 	if _, err := os.Stat(bin); err != nil {
 		t.Fatalf("fork go binary missing: %v", err)
 	}
-	if v := goVersion(t, goroot); v != forkVersionPin {
+	v, err := toolVersion(bin, goroot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v != forkVersionPin {
 		t.Fatalf("fork version skew not audited: got %s want %s; re-run `git diff --stat %s <oracle> -- src test` and update the pin in parity_test.go", v, forkVersionPin, forkVersionPin)
 	}
-	logos := filepath.Join(goroot, "bin", "logos")
-	if _, err := os.Stat(logos); err != nil {
-		logos = filepath.Join(t.TempDir(), "logos")
-		cloneBinary(t, bin, logos)
-	}
+	logos := filepath.Join(t.TempDir(), "logos")
+	cloneBinary(t, bin, logos)
 	return toolchain{bin: bin, logos: logos, goroot: goroot}
 }
 
@@ -262,7 +311,11 @@ func upstreamTool(t *testing.T) (toolchain, bool) {
 		t.Fatalf("upstream oracle %s missing: %v (pass -goparity.upstream=off to run the metamorphic tier only)", bin, err)
 	}
 	goroot := filepath.Clean(filepath.Join(filepath.Dir(bin), ".."))
-	if v := goVersion(t, goroot); v != upstreamVersionPin {
+	v, err := toolVersion(bin, goroot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v != upstreamVersionPin {
 		t.Fatalf("upstream oracle version skew not audited: got %s want %s; re-run `git diff --stat %s <oracle tag> -- src test` and update the pin in parity_test.go", v, upstreamVersionPin, upstreamVersionPin)
 	}
 	return toolchain{bin: bin, goroot: goroot}, true
