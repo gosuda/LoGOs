@@ -26,7 +26,7 @@ Under `logos` with the default arena enablement, `runtime.Version()` MUST carry 
 A Go call into a loGo/s function MUST get the `logos/rt.MustNonNil` check per Sec 5 [T-0.1].
 These four MUST be the only differences from Go language semantics for Go modules under `logos` [T-0.1].
 The `logos` command MUST apply no loGo/s type rules to Go modules [T-0.1].
-The `logos build` command MUST run no default lint on Go modules [T-0.1][R-U1].
+The `logos build` command MUST run no default lint on Go modules; an author `//logos:zeroalloc` directive is the Sec 17.2 exception [T-0.1][T-102][R-U1].
 The `logos lint` command MUST lint Go packages with the language-neutral rules only [T-0.1][T-102][R-U1].
 A module MUST hold one kind only [T-0.1][R-U3].
 A loGo/s module MUST hold only loGo/s packages [T-0.1][R-U3].
@@ -62,8 +62,7 @@ The compiler MUST report such identifiers with `correctness::reserved_identifier
 ### 0.3 Pure Go output through eject
 The command `logos eject -o DIR` MUST write a complete pure-Go copy of the main module to DIR [T-0.3].
 The command `logos build --emit-go=DIR` MUST be an alias of `logos eject -o DIR` [T-0.3].
-DIR MUST NOT exist, or DIR MUST be empty [T-0.3].
-The tool MUST refuse a DIR that exists and holds files [T-0.3].
+DIR MUST NOT exist, or DIR MUST be empty; the tool MUST refuse a DIR that exists and holds files [T-0.3].
 Each `.lgo` file MUST become a `.go` file [T-0.3].
 The output MUST keep all comments from the source [T-0.3].
 Each non-standard loGo/s dependency module MUST be ejected too [T-0.3].
@@ -104,12 +103,12 @@ The value `restricted` MUST enable cgo only for packages that match `cgo_allowli
 In a loGo/s main module, a package with `import "C"` outside the allowlist MUST fail with `restriction::cgo_usage` [T-101.2].
 In a loGo/s main module with no `logos.toml`, a package with `import "C"` MUST fail with `restriction::cgo_usage` and text `cgo is disabled` [T-101.2].
 In a loGo/s main module, an explicit `CGO_ENABLED` in the environment MUST win over the default only when the `cgo` key is absent [T-101.2]. An explicit `[build] cgo = "forbid"` MUST stay enforced against the environment [T-101.2]. An explicit `[build] cgo = "restricted"` allowlist refusal MUST stay enforced against the environment [T-101.2].
-When cgo is enabled, `CC` is unset, and the default C compiler is missing, `logos` and plain `go` MUST use `zig cc -target <zig-arch>-<zig-os>` for every cgo package, Go or loGo/s, when `zig` is in PATH [T-101.2][R-U1].
+When cgo is enabled, `CC` is unset, and the default C compiler is missing, `logos` and plain `go` MUST use `zig cc -target <zig-arch>-<zig-os>` for every cgo package, Go or loGo/s, when `zig` is in PATH [T-101.2][R-U1]. The target MUST be the GOOS/GOARCH pair of the build, not the host [T-101.2][R-U1].
 The `-musl` suffix MUST apply only for Linux targets [T-101.2].
 The `[build] cgo` policy (`forbid`, `restricted`, `allow`) and its `forbid` default MUST apply to loGo/s main modules only [T-101.2][R-U1].
 A Go main module MUST keep the upstream default for `CGO_ENABLED` under `logos`, and a `cgo` key in its `logos.toml` MUST have no effect [T-101.2][R-U1].
 Plain `go` MUST keep the upstream default for `CGO_ENABLED` [T-101.2].
-With cgo off, `net` and `os/user` in the standard library MUST use their pure-Go paths [T-101.2].
+With cgo off, `net` and `os/user` in the standard library MUST use their pure-Go paths, which is the upstream `CGO_ENABLED=0` behavior [T-101.2].
 
 ### 1.2 RFC-102: Compiler linter and rule set
 The `logos lint` check MUST run inside the compiler on loGo/s packages for syntax and type rules [T-102].
@@ -143,15 +142,13 @@ In a loGo/s package, `forbid` MUST ignore `//logos:allow(<rule>)` [T-102].
 In a loGo/s package, a `//logos:allow` directive on a `forbid` rule MUST itself be an error with `correctness::allow_forbidden_rule` [T-102].
 The default group severities MUST be `correctness` forbid, `concurrency` forbid, `slop` deny, `complexity` deny, `perf` warn, `style` warn, `suspicious` warn, `portability` warn, `pedantic` allow [T-102].
 The `logos.toml [lints]` table MUST control group severities [T-102].
-The `logos.toml [lints.thresholds]` defaults MUST be 3 for nesting depth, 15 for cognitive complexity, 60 for function lines, 4 for function parameters, 4096 for comptime nodes, and 100000 for CTFE steps [T-102].
-Configuration MAY raise `max_comptime_ast_nodes` and `max_ctfe_steps` above their defaults [T-102].
+Configuration MAY raise `max_comptime_ast_nodes` and `max_ctfe_steps` above their defaults, which Sec 8.5 lists [T-102][T-Sec8].
 `logos build` and `logos lint` MUST accept `--pedantic` with default false [T-102].
 `--pedantic` and `--pedantic=true` MUST NOT lower a stricter `logos.toml` severity [T-102]. `--pedantic` MUST raise the pedantic group from `allow` to `warn` and MUST keep a stricter configured severity, and `--pedantic=false` MUST set the pedantic group to `allow` [T-102].
 A `logos.toml` value that lowers a `forbid` group MUST fail with `configuration::forbid_lowered` [T-102].
 A Go package MUST NOT run any rule at `forbid`: a group configured `forbid` runs at `deny` there [T-102][R-U1].
 A default build MUST stay silent for the pedantic group [T-102].
 `logos lint ./...` MUST report findings without building binaries [T-102].
-`--json-diagnostics` MUST print one JSON object per line on stderr for each compiler and lint diagnostic in `.lgo` files and in Go files with schema version `1.0` [T-102][R-U1].
 The compiler MUST enforce `correctness::nil_deref_unproven` as `forbid` against use of a nullable value before its guard [T-102].
 The compiler MUST enforce `correctness::typed_nil_return` as `forbid` against return of a concrete nil pointer as an interface or `error` result without a dominating nil check [T-102].
 The compiler MUST enforce `correctness::arena_pointer_escape` as `forbid` against storage of a stack or arena pointer outside its frame through an unsafe address [T-102].
@@ -972,8 +969,6 @@ A method of a generic type that uses `const for` over a type parameter MUST fail
 
 An expansion above the selected `max_comptime_ast_nodes` limit with default 4,096 nodes MUST fail with `[comptime::node_limit]`. [T-205][T-102]
 
-Configuration MAY raise `max_comptime_ast_nodes` above its default. [T-102]
-
 A stack trace MUST print the base name without the `_logosct<N>` suffix. [T-205]
 
 A shadowed `const switch` case MUST fail with `[comptime::unreachable_case]`. [T-205]
@@ -1462,9 +1457,6 @@ A package outside the list fails with restriction::cgo_usage. [T-101.2]
 cgo_allowlist is a string array of path globs with default empty. [T-Sec8][T-101.2]
 A double star matches any suffix. [T-Sec8][T-101.2]
 An example entry is "example.com/c-sqlite/**". [A-EXAMPLES][T-101.2]
-An explicit CGO_ENABLED value in the environment MUST win over the default only when the `cgo` key is absent [T-101.2]. It MUST NOT override an explicit `forbid` or a `restricted` allowlist refusal [T-101.2].
-When cgo is on, CC is unset, and no C compiler is present, logos and plain go MUST use zig cc with the build target for every cgo package, Go or loGo/s, if zig is on PATH. [T-101.2][R-U1] The build target is the GOOS/GOARCH pair of the build, not the host. [T-101.2][R-U1]
-With cgo off, net and os/user follow the upstream CGO_ENABLED=0 behavior. [T-101.2]
 opt_level is a string with default "O2". [T-Sec8][T-105]
 See Sec 1.5 for accepted `opt_level` values.
 A `-O=<level>` flag on `logos build` MUST override the key. [T-105]
@@ -1501,12 +1493,8 @@ deny fails the build unless a logos allow directive for the rule precedes the st
 warn prints a diagnostic. [T-102]
 allow stays silent. [T-102]
 `--pedantic` and `--pedantic=true` override the pedantic key for logos build and logos lint, but they MUST NOT lower a stricter configured severity. [T-Sec8]
-The lints.thresholds table holds six integer keys. [T-Sec8]
-Defaults are 3 for max_nesting_depth, 15 for max_cognitive_complexity, 60 for max_function_lines, 4 for max_function_params, 4096 for max_comptime_ast_nodes, and 100000 for max_ctfe_steps. [T-Sec8]
-Configuration MAY raise max_comptime_ast_nodes and max_ctfe_steps above their defaults. [T-Sec8][T-102]
-`logos lint` lints Go packages with the language-neutral rules of Sec 1.2 under these severities. [T-102][R-U1]
-A language-neutral rule whose default severity is forbid runs at deny for Go packages, and `//logos:allow(<rule>)` silences it there. [T-102][R-U1]
-`logos build` runs no default lints on Go packages; an author `//logos:zeroalloc` directive is the Sec 17.2 exception. [T-102][R-U1]
+The lints.thresholds table of `logos.toml` holds six integer keys. [T-Sec8]
+Defaults MUST be 3 for max_nesting_depth, 15 for max_cognitive_complexity, 60 for max_function_lines, 4 for max_function_params, 4096 for max_comptime_ast_nodes, and 100000 for max_ctfe_steps. [T-Sec8][T-102]
 Third-party modules of either kind get no code lints. [T-102][R-U1]
 
 ## 9. End-to-end example
@@ -1727,7 +1715,7 @@ The long-loop preemption rules are stated in Sec 3.3 (RFC-303: Hardware backend 
 
 ### 14.1 Emission
 
-- `logos lint --json-diagnostics` and `logos build --json-diagnostics` MUST write one JSON object per line to stderr for every compiler and lint diagnostic in `.lgo` files and in Go files. [T-Sec14][R-U1]
+- `--json-diagnostics` on `logos lint`, on `logos build`, and on every other command that accepts it MUST write one JSON object per line to stderr for every compiler and lint diagnostic in `.lgo` files and in Go files. [T-Sec14][T-102][R-U1]
 - Each line MUST be a complete object with schema version `1.0`. [T-Sec14]
 
 ### 14.2 Top-level fields
