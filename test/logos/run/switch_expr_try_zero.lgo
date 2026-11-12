@@ -62,12 +62,15 @@ func exprNamed(v int, fail bool) (mi, error) {
 	return r, nil
 }
 
-func sumNamed(v int, fail bool) (mi, error) {
-	r := mi(100) + switch n := load(v, fail)?; n {
-	case 7 => mi(70)
-	default => mi(1)
+func forNamed(v int, fail bool) (int, error) {
+	n := 0
+	for switch k := load(v, fail)?; k {
+	case 7 => flag(n < 2)
+	default => flag(false)
+	} {
+		n++
 	}
-	return r, nil
+	return n, nil
 }
 
 func returnNamed(v int, fail bool) (mi, error) {
@@ -119,10 +122,6 @@ func main() {
 	check("expr", err == nil && bv == 1, bv, 1)
 	bv, err = exprNamed(9, true)
 	check("expr-fail", err == errLoad && bv == 0, bv, 0)
-	bv, err = sumNamed(7, false)
-	check("sum", err == nil && bv == 170, bv, 170)
-	bv, err = sumNamed(7, true)
-	check("sum-fail", err == errLoad && bv == 0, bv, 0)
 	bv, err = returnNamed(7, false)
 	check("return", err == nil && bv == 70, bv, 70)
 	bv, err = returnNamed(7, true)
@@ -131,6 +130,10 @@ func main() {
 	check("cond", err == nil && n == 1, n, 1)
 	n, err = condNamed(7, true)
 	check("cond-fail", err == errLoad && n == 0, n, 0)
+	n, err = forNamed(7, false)
+	check("for", err == nil && n == 2, n, 2)
+	n, err = forNamed(7, true)
+	check("for-fail", err == errLoad && n == 0, n, 0)
 	one, two := 1, 2
 	pv, err := ptrNamed(7, true, &one, &two)
 	check("ptr-fail", err == errLoad && pv == nil, pv == nil, true)
