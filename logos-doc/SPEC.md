@@ -1093,6 +1093,8 @@ A finished result that is never delivered MUST be closed when it implements `io.
 
 A result dropped by a `filter` of the segment MUST be closed once, and a delivered result MUST NOT be closed by the stage. [T-206]
 
+The ejected form of a group stage MUST build with upstream Go and print what the native build prints. [T-206][T-0.3]
+
 `logos/sync.Locked[T]` MUST expose `WithLock(f func(*T))`. [T-206]
 
 `WithLock` MUST hold `Lock`, defer `Unlock`, then call the function. [T-206]
