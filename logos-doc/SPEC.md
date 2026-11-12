@@ -1000,8 +1000,6 @@ It MUST bound concurrency with a semaphore when `limit` is present. [T-206]
 
 `go group(x)` without a block MUST keep Go meaning as a call to a function named `group`. [T-206]
 
-A child block MUST have type `func() error`. [T-206]
-
 `?` inside a child MUST return to the group. [T-206]
 
 `return` inside a child MUST fail with `[correctness::return_in_group_child]`. [T-206]
