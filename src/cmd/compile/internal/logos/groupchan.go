@@ -22,6 +22,9 @@ func (fc *funcLower) groupChanTop() (groupFrame, bool) {
 
 func (fc *funcLower) groupDoneResults(pos syntax.Pos, top groupFrame) []syntax.Expr {
 	var res []syntax.Expr
+	if top.closure != nil {
+		res = append(res, tempNodes(pos, top.closure.values)...)
+	}
 	if top.segmentRes != nil {
 		res = append(res, fc.fl.zeroValue(top.segmentRes, pos))
 	}
@@ -133,7 +136,7 @@ func (fc *funcLower) groupChanStmt(s syntax.Stmt) ([]syntax.Stmt, bool) {
 				break
 			}
 		}
-		if groupStmtHasRecv(last) {
+		if fc.fl.groupStmtHasRecv(last) {
 			fc.groupReject(last.Pos(), "in an unsupported position")
 		}
 	}
@@ -143,25 +146,25 @@ func (fc *funcLower) groupChanStmt(s syntax.Stmt) ([]syntax.Stmt, bool) {
 func (fc *funcLower) groupChanDispatch(s syntax.Stmt, top groupFrame) ([]syntax.Stmt, bool) {
 	switch s := s.(type) {
 	case *syntax.AssignStmt:
-		if groupStmtHasRecv(s) {
+		if fc.fl.groupStmtHasRecv(s) {
 			return fc.groupHoistAssign(s, top), true
 		}
 	case *syntax.DeclStmt:
-		if groupStmtHasRecv(s) {
+		if fc.fl.groupStmtHasRecv(s) {
 			return fc.groupHoistDecl(s, top), true
 		}
 	case *syntax.ExprStmt:
-		if groupStmtHasRecv(s) {
+		if fc.fl.groupStmtHasRecv(s) {
 			return fc.groupHoistExprStmt(s, top), true
 		}
 	case *syntax.ReturnStmt:
-		if groupStmtHasRecv(s) {
+		if fc.fl.groupStmtHasRecv(s) {
 			return fc.groupHoistReturn(s, top), true
 		}
 	case *syntax.SendStmt:
 		return fc.groupHoistSend(s, top), true
 	case *syntax.ForStmt:
-		if groupStmtHasRecv(s) {
+		if fc.fl.groupStmtHasRecv(s) {
 			return fc.groupHoistFor(s, top), true
 		}
 		return fc.groupChanFor(s, top)
@@ -174,11 +177,11 @@ func (fc *funcLower) groupChanDispatch(s syntax.Stmt, top groupFrame) ([]syntax.
 		}
 		return append(pre, fc.lowerErrdefer(s)...), true
 	case *syntax.IfStmt:
-		if groupStmtHasRecv(s) {
+		if fc.fl.groupStmtHasRecv(s) {
 			return fc.groupHoistIf(s, top), true
 		}
 	case *syntax.SwitchStmt:
-		if groupStmtHasRecv(s) {
+		if fc.fl.groupStmtHasRecv(s) {
 			return fc.groupHoistSwitch(s, top), true
 		}
 	}

@@ -351,7 +351,9 @@ func (fl *fileLower) cfFuncStart(off int) int {
 func shiftSplices(subs []splice, off int) []splice {
 	out := make([]splice, 0, len(subs))
 	for _, s := range subs {
-		out = append(out, splice{start: s.start + off, end: s.end + off, text: s.text, chunks: s.chunks, owner: s.owner})
+		s.start += off
+		s.end += off
+		out = append(out, s)
 	}
 	return out
 }

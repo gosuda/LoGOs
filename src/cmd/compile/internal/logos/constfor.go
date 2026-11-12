@@ -478,7 +478,9 @@ func (fl *fileLower) composeHost(h *cfHost) otext {
 	for _, r := range h.regions {
 		adj := make([]splice, len(r.splices))
 		for i, sp := range r.splices {
-			adj[i] = splice{start: sp.start - r.start, end: sp.end - r.start, text: sp.text, chunks: sp.chunks, owner: sp.owner}
+			adj[i] = sp
+			adj[i].start -= r.start
+			adj[i].end -= r.start
 		}
 		out, err := applyChunks(fl.srcMap.sliceO(r.start, r.end), adj)
 		if err != nil {

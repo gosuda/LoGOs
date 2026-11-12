@@ -43,7 +43,7 @@ func (fc *funcLower) groupCapture(pos syntax.Pos, call *syntax.CallExpr) ([]synt
 
 func groupUses(op groupOperand) []syntax.Expr {
 	if len(op.names) == 0 {
-		return []syntax.Expr{op.expr}
+		return syntax.UnpackListExpr(op.expr)
 	}
 	uses := make([]syntax.Expr, len(op.names))
 	for i, name := range op.names {

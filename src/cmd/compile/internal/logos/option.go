@@ -631,7 +631,8 @@ func (fl *fileLower) spellLoweredSig(sig *types2.Signature) (string, bool) {
 		if !ok {
 			return "", false
 		}
-		b.WriteString(" " + r)
+		b.WriteByte(' ')
+		b.WriteString(r)
 	default:
 		b.WriteString(" (")
 		for i := range n {
@@ -671,10 +672,14 @@ func (fl *fileLower) spellLoweredStruct(st *types2.Struct) (string, bool) {
 			if !ok {
 				return "", false
 			}
-			b.WriteString(f.Name() + " " + t)
+			b.WriteString(f.Name())
+			b.WriteByte(' ')
+			b.WriteString(t)
 		}
 		if tag := st.Tag(i); tag != "" {
-			b.WriteString(" `" + tag + "`")
+			b.WriteString(" `")
+			b.WriteString(tag)
+			b.WriteByte('`')
 		}
 	}
 	b.WriteString(" }")
@@ -701,7 +706,9 @@ func (fl *fileLower) spellLoweredInterface(it *types2.Interface) (string, bool) 
 		if !ok {
 			return "", false
 		}
-		b.WriteString(sep + m.Name() + s)
+		b.WriteString(sep)
+		b.WriteString(m.Name())
+		b.WriteString(s)
 		sep = "; "
 	}
 	for i := range it.NumEmbeddeds() {
@@ -709,7 +716,8 @@ func (fl *fileLower) spellLoweredInterface(it *types2.Interface) (string, bool) 
 		if !ok {
 			return "", false
 		}
-		b.WriteString(sep + e)
+		b.WriteString(sep)
+		b.WriteString(e)
 		sep = "; "
 	}
 	b.WriteString(" }")
@@ -775,6 +783,9 @@ func (fl *fileLower) lowerOptReceiver(x syntax.Expr) syntax.Expr {
 
 func (fl *fileLower) needsWrap(v syntax.Expr, rec, target types2.Type) (wrap, zero bool) {
 	if target == nil {
+		return false, false
+	}
+	if _, multipleResults := rec.(*types2.Tuple); multipleResults {
 		return false, false
 	}
 	tOpt := fl.asOption(target)
@@ -910,12 +921,16 @@ func drainOwnedAt(list *[]splice, off, id int) otext {
 }
 
 func (fl *fileLower) drainBoundaries(vs span) (head, tail otext) {
+	return fl.drainBoundariesSince(vs, 1)
+}
+
+func (fl *fileLower) drainBoundariesSince(vs span, since int) (head, tail otext) {
 	take := func(off int) otext {
 		list := fl.ownerOfInsertion(off)
 		var text otext
 		var rest []splice
 		for _, sp := range *list {
-			if sp.owner == 0 || sp.start != sp.end || sp.start != off {
+			if sp.owner < since || sp.start != sp.end || sp.start != off {
 				rest = append(rest, sp)
 				continue
 			}
@@ -1105,6 +1120,7 @@ func (fl *fileLower) lowerCoalesce(e *syntax.CoalesceExpr) syntax.Expr {
 		e.Y = fl.lowerOptExpr(e.Y)
 		return e
 	}
+	closure := fl.newGroupClosure(e)
 	pos := e.Pos()
 	id := fl.nextWrapID()
 	resultType, etext, ok := fl.spellLoweredBoth(opt.Elem, pos)
@@ -1123,7 +1139,6 @@ func (fl *fileLower) lowerCoalesce(e *syntax.CoalesceExpr) syntax.Expr {
 	}
 	yEnd := fl.exprEndThrough(yStart, through)
 	fl.add(qoff, qoff+2, "")
-	fl.addOwned(id, yEnd, yEnd, " }()")
 	if mapRead {
 		mStart, lbrack, rbrack := fl.lookupSpans(ux)
 		fl.deleteGroupingParens(mStart, qoff)
@@ -1136,20 +1151,22 @@ func (fl *fileLower) lowerCoalesce(e *syntax.CoalesceExpr) syntax.Expr {
 		ux.Index = fl.lowerOptExpr(ux.Index)
 		fl.convertIndexKey(ux, rawIdx, ux.Index, idxT)
 		if types2.LogosOptionIsBare(opt.Elem) {
-			fl.addOwned(id, xStart, xStart, "func() "+etext+" { if "+optTemp+", "+optOk+" := ")
+			fl.addOwned(id, xStart, xStart, closure.head("func() "+etext, []string{etext})+" { "+closure.prefix(nil)+"if "+optTemp+", "+optOk+" := ")
 			init := defineOf(pos, []syntax.Expr{nameOf(pos, optTemp), nameOf(pos, optOk)}, []syntax.Expr{ux})
 			body := []syntax.Stmt{
 				ifOf(pos, init, nameOf(pos, optOk), []syntax.Stmt{returnOf(pos, []syntax.Expr{nameOf(pos, optTemp)})}),
 				returnOf(pos, []syntax.Expr{wy}),
 			}
 			lit := at(&syntax.FuncLit{Type: signature, Body: blockOf(pos, body)}, pos)
-			fl.addOwned(id, xEnd, xEnd, "; "+optOk+" { return "+optTemp+" }; return ")
+			fl.addOwned(id, xEnd, xEnd, "; "+optOk+" { return "+optTemp+closure.success()+" }; "+closure.prefix(body[1])+"return ")
 			out := callOf(pos, lit, nil)
 			fl.wrapSpan[out] = span{start: xStart, end: yEnd}
 			fl.wrapOwner[out] = id
+			fl.addOwned(id, yEnd, yEnd, closure.success()+" }()")
+			closure.bind(out, fl.wrapSpan[out], id)
 			return out
 		}
-		fl.addOwned(id, xStart, xStart, "func() "+etext+" { if "+optTemp+" := "+rtAlias+".Lookup(")
+		fl.addOwned(id, xStart, xStart, closure.head("func() "+etext, []string{etext})+" { "+closure.prefix(nil)+"if "+optTemp+" := "+rtAlias+".Lookup(")
 		call := fl.lookupFinish(ux, lbrack, rbrack, id)
 		init := defineOf(pos, []syntax.Expr{nameOf(pos, optTemp)}, []syntax.Expr{call})
 		cond := selOf(pos, nameOf(pos, optTemp), "Present")
@@ -1159,16 +1176,18 @@ func (fl *fileLower) lowerCoalesce(e *syntax.CoalesceExpr) syntax.Expr {
 			returnOf(pos, []syntax.Expr{wy}),
 		}
 		lit := at(&syntax.FuncLit{Type: signature, Body: blockOf(pos, body)}, pos)
-		fl.addOwned(id, xEnd, xEnd, "; "+optTemp+".Present { return "+optTemp+".Value }; return ")
+		fl.addOwned(id, xEnd, xEnd, "; "+optTemp+".Present { return "+optTemp+".Value"+closure.success()+" }; "+closure.prefix(body[1])+"return ")
 		out := callOf(pos, lit, nil)
 		fl.wrapSpan[out] = span{start: xStart, end: yEnd}
 		fl.wrapOwner[out] = id
+		fl.addOwned(id, yEnd, yEnd, closure.success()+" }()")
+		closure.bind(out, fl.wrapSpan[out], id)
 		return out
 	}
 	bare := types2.LogosOptionIsBare(opt.Elem)
 	xStart := fl.off(fl.optHeadStart(e.X))
 	openParen, closeParen := headerParens(e.X)
-	fl.addOwned(id, xStart, xStart, "func() "+etext+" { if "+optTemp+" := "+openParen)
+	fl.addOwned(id, xStart, xStart, closure.head("func() "+etext, []string{etext})+" { "+closure.prefix(nil)+"if "+optTemp+" := "+openParen)
 	nx := fl.lowerOptReceiver(e.X)
 	wy := fl.wrapKnown(fl.lowerOptExpr(e.Y), fl.optType(e.Y), opt.Elem)
 	xEnd := lastTokenEnd(fl.src, xStart, qoff)
@@ -1179,21 +1198,23 @@ func (fl *fileLower) lowerCoalesce(e *syntax.CoalesceExpr) syntax.Expr {
 	if bare {
 		cond = notNil(pos, nameOf(pos, optTemp))
 		taken = nameOf(pos, optTemp)
-		mid = "; " + optTemp + " != nil { return " + optTemp + " }; return "
+		mid = "; " + optTemp + " != nil { return " + optTemp + closure.success() + " }; "
 	} else {
 		cond = selOf(pos, nameOf(pos, optTemp), "Present")
 		taken = selOf(pos, nameOf(pos, optTemp), "Value")
-		mid = "; " + optTemp + ".Present { return " + optTemp + ".Value }; return "
+		mid = "; " + optTemp + ".Present { return " + optTemp + ".Value" + closure.success() + " }; "
 	}
 	body := []syntax.Stmt{
 		ifOf(pos, init, cond, []syntax.Stmt{returnOf(pos, []syntax.Expr{taken})}),
 		returnOf(pos, []syntax.Expr{wy}),
 	}
 	lit := at(&syntax.FuncLit{Type: signature, Body: blockOf(pos, body)}, pos)
-	fl.addOwned(id, xEnd, xEnd, closeParen+mid)
+	fl.addOwned(id, xEnd, xEnd, closeParen+mid+closure.prefix(body[1])+"return ")
 	out := callOf(pos, lit, nil)
 	fl.wrapSpan[out] = span{start: xStart, end: yEnd}
 	fl.wrapOwner[out] = id
+	fl.addOwned(id, yEnd, yEnd, closure.success()+" }()")
+	closure.bind(out, fl.wrapSpan[out], id)
 	return out
 }
 
@@ -1268,6 +1289,7 @@ func (fl *fileLower) lowerOptSelect(e *syntax.OptSelectExpr) syntax.Expr {
 		e.X = fl.lowerOptExpr(e.X)
 		return e
 	}
+	closure := fl.newGroupClosure(e)
 	xStart := fl.off(fl.optHeadStart(e.X))
 	nativeR, ejectR, ok := fl.spellLoweredBoth(ro, pos)
 	if !ok {
@@ -1275,7 +1297,7 @@ func (fl *fileLower) lowerOptSelect(e *syntax.OptSelectExpr) syntax.Expr {
 	}
 	rText := ejectR
 	openParen, closeParen := headerParens(e.X)
-	fl.addOwned(id, xStart, xStart, "func() "+ejectR+" { if "+optTemp+" := "+openParen)
+	fl.addOwned(id, xStart, xStart, closure.head("func() "+ejectR, []string{ejectR})+" { "+closure.prefix(nil)+"if "+optTemp+" := "+openParen)
 	nx := fl.lowerOptReceiver(e.X)
 	bareRecv := types2.LogosOptionIsBare(ox.Elem)
 	accessRec := ro.Elem
@@ -1326,10 +1348,11 @@ func (fl *fileLower) lowerOptSelect(e *syntax.OptSelectExpr) syntax.Expr {
 	lit := at(&syntax.FuncLit{Type: signature, Body: blockOf(pos, body)}, pos)
 	xEnd := lastTokenEnd(fl.src, xStart, fl.off(pos))
 	selEnd := fl.off(e.Sel.Pos()) + len(e.Sel.Value)
-	fl.add(xEnd, selEnd, closeParen+"; "+condT+" { return "+someHead+optTemp+accSuffix+someTail+" }; return "+noneT+" }()")
+	fl.add(xEnd, selEnd, closeParen+"; "+condT+" { return "+someHead+optTemp+accSuffix+someTail+closure.success()+" }; return "+noneT+closure.success()+" }()")
 	out := callOf(pos, lit, nil)
 	fl.wrapSpan[out] = span{start: xStart, end: selEnd}
 	fl.wrapOwner[out] = id
+	closure.bind(out, fl.wrapSpan[out], id)
 	return out
 }
 
@@ -1478,6 +1501,7 @@ func (fl *fileLower) lowerOptCall(e *syntax.CallExpr, osel *syntax.OptSelectExpr
 		}
 		return e
 	}
+	closure := fl.newGroupClosure(e)
 	xStart := fl.off(fl.optLeftmost(osel.X))
 	rs := sig.Results()
 	n := rs.Len()
@@ -1500,13 +1524,13 @@ func (fl *fileLower) lowerOptCall(e *syntax.CallExpr, osel *syntax.OptSelectExpr
 	var headText string
 	switch n {
 	case 0:
-		headText = "func() { if " + optTemp + " := "
+		headText = "func()"
 	case 1:
-		headText = "func() " + rTexts[0] + " { if " + optTemp + " := "
+		headText = "func() " + rTexts[0]
 	default:
-		headText = "func() (" + strings.Join(rTexts, ", ") + ") { if " + optTemp + " := "
+		headText = "func() (" + strings.Join(rTexts, ", ") + ")"
 	}
-	fl.addOwned(id, xStart, xStart, headText)
+	fl.addOwned(id, xStart, xStart, closure.head(headText, rTexts)+" { "+closure.prefix(nil)+"if "+optTemp+" := ")
 	nx := fl.lowerOptReceiver(osel.X)
 	params := sig.Params()
 	for i, a := range e.ArgList {
@@ -1534,21 +1558,24 @@ func (fl *fileLower) lowerOptCall(e *syntax.CallExpr, osel *syntax.OptSelectExpr
 	xEnd := lastTokenEnd(fl.src, xStart, fl.off(pos))
 	selEnd := fl.off(osel.Sel.Pos()) + len(osel.Sel.Value)
 	lparen, rparen := fl.findCallParens(selEnd)
-	argsText := fl.textOf(span{start: lparen, end: rparen + 1})
+	argsText := fl.lazyText(span{start: lparen, end: rparen + 1})
 	init := defineOf(pos, []syntax.Expr{nameOf(pos, optTemp)}, []syntax.Expr{nx})
 	call := callOf(pos, racc, e.ArgList)
 	switch rs.Len() {
 	case 0:
+		invoke := exprStmtOf(pos, call)
 		lit := at(&syntax.FuncLit{
 			Type: at(&syntax.FuncType{}, pos),
 			Body: blockOf(pos, []syntax.Stmt{
-				ifOf(pos, init, cond, []syntax.Stmt{exprStmtOf(pos, call)}),
+				ifOf(pos, init, cond, []syntax.Stmt{invoke}),
 			}),
 		}, pos)
-		fl.addT(xEnd, rparen+1, cat(gen("; "+condT+" { "+optTemp+accSuffix), argsText, gen(" } }()")))
+		fl.addT(xEnd, rparen+1, cat(gen("; "+condT+" { "+closure.prefix(invoke)+optTemp+accSuffix), argsText, gen(" }; "+closure.voidReturn()+"}()")))
 		out := callOf(pos, lit, nil)
+		fl.carryType(out, e)
 		fl.wrapSpan[out] = span{start: xStart, end: rparen + 1}
 		fl.wrapOwner[out] = id
+		closure.bind(out, fl.wrapSpan[out], id)
 		return out
 	case 1:
 		some, someHead, someTail := fl.wrapParts(call, recList[0], roList[0], pos)
@@ -1572,13 +1599,15 @@ func (fl *fileLower) lowerOptCall(e *syntax.CallExpr, osel *syntax.OptSelectExpr
 		}
 		lit := at(&syntax.FuncLit{Type: signature, Body: blockOf(pos, body)}, pos)
 		fl.addT(xEnd, rparen+1, cat(
-			gen("; "+condT+" { return "+someHead+optTemp+accSuffix),
+			gen("; "+condT+" { "+closure.prefix(body[0].(*syntax.IfStmt).Then.List[0])+"return "+someHead+optTemp+accSuffix),
 			argsText,
-			gen(someTail+" }; return "+noneT+" }()"),
+			gen(someTail+closure.success()+" }; return "+noneT+closure.success()+" }()"),
 		))
 		out := callOf(pos, lit, nil)
+		fl.carryType(out, e)
 		fl.wrapSpan[out] = span{start: xStart, end: rparen + 1}
 		fl.wrapOwner[out] = id
+		closure.bind(out, fl.wrapSpan[out], id)
 		return out
 	default:
 		fields := make([]*syntax.Field, n)
@@ -1610,7 +1639,7 @@ func (fl *fileLower) lowerOptCall(e *syntax.CallExpr, osel *syntax.OptSelectExpr
 			}
 		}
 		then := []syntax.Stmt{
-			assignOf(pos, tmps, []syntax.Expr{call}),
+			defineOf(pos, tmps, []syntax.Expr{call}),
 			returnOf(pos, rets),
 		}
 		body := []syntax.Stmt{
@@ -1619,13 +1648,15 @@ func (fl *fileLower) lowerOptCall(e *syntax.CallExpr, osel *syntax.OptSelectExpr
 		}
 		lit := at(&syntax.FuncLit{Type: signature, Body: blockOf(pos, body)}, pos)
 		fl.addT(xEnd, rparen+1, cat(
-			gen("; "+condT+" { "+strings.Join(headNames, ", ")+" := "+optTemp+accSuffix),
+			gen("; "+condT+" { "+closure.prefix(then[0])+strings.Join(headNames, ", ")+" := "+optTemp+accSuffix),
 			argsText,
-			gen("; return "+strings.Join(retWraps, ", ")+" }; return "+strings.Join(noneList, ", ")+" }()"),
+			gen("; return "+strings.Join(retWraps, ", ")+closure.success()+" }; return "+strings.Join(noneList, ", ")+closure.success()+" }()"),
 		))
 		out := callOf(pos, lit, nil)
+		fl.carryType(out, e)
 		fl.wrapSpan[out] = span{start: xStart, end: rparen + 1}
 		fl.wrapOwner[out] = id
+		closure.bind(out, fl.wrapSpan[out], id)
 		return out
 	}
 }

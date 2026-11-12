@@ -384,12 +384,14 @@ func parGroupStack(res types2.Type) []groupFrame {
 }
 
 func (fc *funcLower) parHoist(e syntax.Expr) otext {
+	defer fc.groupClosureOwner()()
 	scanForLiterals(fc.fl, e)
 	top, _ := fc.groupTop()
 	mark := fc.hoistSubMark()
-	_, pre := fc.groupHoistExpr(e, top)
+	h := fc.newGroupHoist(top, fc.fl.exprStart(e))
+	h.expr(e)
 	fc.hoistSubEmit(fc.hoistSubTake(mark))
-	return renderText(pre, nil)
+	return h.render()
 }
 
 func (cg *chainGen) parTryClosure(fc *funcLower, head string, op chainOp, zero string) otext {

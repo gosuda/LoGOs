@@ -35,27 +35,6 @@ func (fc *funcLower) hoistSubEmit(subs []hoistSub) {
 	}
 }
 
-func groupContainsRecv(e syntax.Expr) bool {
-	found := false
-	syntax.Inspect(e, func(n syntax.Node) bool {
-		if _, ok := n.(*syntax.FuncLit); ok {
-			return false
-		}
-		ex, ok := n.(syntax.Expr)
-		if !ok {
-			return !found
-		}
-		if op, ok := syntax.Unparen(ex).(*syntax.Operation); ok {
-			if op.Op == syntax.Recv && op.Y == nil {
-				found = true
-				return false
-			}
-		}
-		return !found
-	})
-	return found
-}
-
 func (fc *funcLower) groupHasCall(e syntax.Expr) bool {
 	found := false
 	syntax.Inspect(e, func(n syntax.Node) bool {
@@ -81,20 +60,16 @@ func (fc *funcLower) groupReject(pos syntax.Pos, where string) {
 }
 
 type groupHoist struct {
-	fc       *funcLower
-	top      groupFrame
-	from     int
-	pos      syntax.Pos
-	withText bool
-	native   []syntax.Stmt
-	text     []otext
+	fc      *funcLower
+	top     groupFrame
+	from    int
+	pos     syntax.Pos
+	native  []syntax.Stmt
+	text    []otext
+	prelude *groupClosurePrelude
 }
 
 func (fc *funcLower) newGroupHoist(top groupFrame, from int) *groupHoist {
-	return &groupHoist{fc: fc, top: top, from: from, withText: true}
-}
-
-func (fc *funcLower) newGroupTreeHoist(top groupFrame, from int) *groupHoist {
 	return &groupHoist{fc: fc, top: top, from: from}
 }
 
@@ -113,7 +88,11 @@ func (h *groupHoist) before(mark, start int) bool {
 		return false
 	}
 	h.fc.hoistSubEmit(h.fc.hoistSubTake(mark))
-	h.fc.fl.addT(start, start, h.render())
+	if h.prelude != nil {
+		h.prelude.text = cat(h.prelude.text, h.render())
+	} else {
+		h.fc.fl.addT(start, start, h.render())
+	}
 	return true
 }
 
@@ -125,7 +104,7 @@ func (h *groupHoist) span(e syntax.Expr) span {
 func (h *groupHoist) slots(slots []*syntax.Expr) {
 	last := -1
 	for i, s := range slots {
-		if groupContainsRecv(*s) {
+		if h.fc.fl.groupNodesHaveRecv(*s) {
 			last = i
 		}
 	}
@@ -143,7 +122,7 @@ func (h *groupHoist) slotsThrough(slots []*syntax.Expr, last int) {
 			return
 		}
 		mark := fc.hoistSubMark()
-		if groupContainsRecv(*s) {
+		if fc.fl.groupNodesHaveRecv(*s) {
 			*s = h.expr(*s)
 		}
 		if i < last && fc.groupHasCall(*s) {
@@ -152,23 +131,26 @@ func (h *groupHoist) slotsThrough(slots []*syntax.Expr, last int) {
 				h.slotsThrough(inner, len(inner))
 				continue
 			}
-			inner := fc.hoistSubTake(mark)
-			if h.withText {
-				fc.hoistSubEmit(inner)
-			}
+			fc.hoistSubEmit(fc.hoistSubTake(mark))
 			*s = h.plain(*s)
 		}
 	}
 }
 
 func (h *groupHoist) expr(e syntax.Expr) syntax.Expr {
+	if closure := h.fc.fl.groupClosureCall(e); closure != nil {
+		return h.closure(closure, groupClosureValue)
+	}
 	if op, ok := groupRecvOp(e); ok {
 		return nameOf(syntax.StartPos(op), h.recv(op, 1)[0])
 	}
-	if op, ok := e.(*syntax.Operation); ok && op.Y != nil && (op.Op == syntax.AndAnd || op.Op == syntax.OrOr) && groupContainsRecv(op.Y) {
+	if op, ok := e.(*syntax.Operation); ok && op.Y != nil && (op.Op == syntax.AndAnd || op.Op == syntax.OrOr) && h.fc.fl.groupNodesHaveRecv(op.Y) {
 		return h.shortCircuit(op)
 	}
 	h.slots(groupOperandSlots(e))
+	if call, ok := e.(*syntax.CallExpr); ok {
+		groupFlattenArgs(call)
+	}
 	return e
 }
 
@@ -204,18 +186,12 @@ func (h *groupHoist) channel(op *syntax.Operation) (syntax.Expr, otext, types2.T
 	elemT := groupChanElem(fl.pkg.info.TypeOf(ch))
 	chSpan := h.span(ch)
 	nch := ch
-	if groupContainsRecv(ch) {
+	if fl.groupNodesHaveRecv(ch) {
 		mark := fc.hoistSubMark()
 		nch = h.expr(ch)
-		inner := fc.hoistSubTake(mark)
-		if h.withText {
-			fc.hoistSubEmit(inner)
-		}
+		fc.hoistSubEmit(fc.hoistSubTake(mark))
 	}
-	var chText otext
-	if h.withText {
-		chText = fl.textOf(chSpan)
-	}
+	chText := fl.textOf(chSpan)
 	return nch, chText, elemT
 }
 
@@ -395,6 +371,7 @@ func (fc *funcLower) groupHoistAssign(s *syntax.AssignStmt, top groupFrame) []sy
 	start := fc.groupStmtStart(s)
 	mark := fc.hoistSubMark()
 	h := fc.newGroupHoist(top, start)
+	h.atStatement(s)
 	h.assign(s)
 	if !h.before(mark, start) {
 		return []syntax.Stmt{s}
@@ -428,9 +405,13 @@ func (fc *funcLower) groupHoistExprStmt(s *syntax.ExprStmt, top groupFrame) []sy
 	start := fc.groupStmtStart(s)
 	mark := fc.hoistSubMark()
 	h := fc.newGroupHoist(top, start)
-	s.X = h.expr(s.X)
+	h.atStatement(s)
+	s.X = h.statement(s.X)
 	if !h.before(mark, start) {
 		return []syntax.Stmt{s}
+	}
+	if s.X == nil {
+		return h.native
 	}
 	if t, call, ok := tryExprOf(s); ok {
 		return append(h.native, fc.lowerTryExpr(s, t, call)...)
@@ -453,6 +434,7 @@ func (fc *funcLower) groupHoistReturn(s *syntax.ReturnStmt, top groupFrame) []sy
 	start := fc.groupStmtStart(s)
 	mark := fc.hoistSubMark()
 	h := fc.newGroupHoist(top, start)
+	h.atStatement(s)
 	results := syntax.UnpackListExpr(s.Results)
 	slots := make([]*syntax.Expr, len(results))
 	for i := range results {
@@ -478,13 +460,7 @@ func (fc *funcLower) groupHoistSend(s *syntax.SendStmt, top groupFrame) []syntax
 	return h.native
 }
 
-func (fc *funcLower) groupHoistExpr(e syntax.Expr, top groupFrame) (syntax.Expr, []syntax.Stmt) {
-	h := fc.newGroupTreeHoist(top, fc.fl.exprStart(e))
-	ne := h.expr(e)
-	return ne, h.native
-}
-
-func groupNodesHaveRecv(nodes ...syntax.Node) bool {
+func (fl *fileLower) groupNodesHaveRecv(nodes ...syntax.Node) bool {
 	found := false
 	for _, n := range nodes {
 		if n == nil || found {
@@ -492,7 +468,12 @@ func groupNodesHaveRecv(nodes ...syntax.Node) bool {
 		}
 		syntax.Inspect(n, func(n syntax.Node) bool {
 			switch n := n.(type) {
-			case *syntax.FuncLit, *syntax.SelectStmt:
+			case *syntax.FuncLit:
+				if closure := fl.groupClosureFor(n); closure != nil && !closure.lifted {
+					found = true
+				}
+				return false
+			case *syntax.SelectStmt:
 				return false
 			case syntax.Expr:
 				if _, ok := groupRecvOp(n); ok {
@@ -505,21 +486,21 @@ func groupNodesHaveRecv(nodes ...syntax.Node) bool {
 	return found
 }
 
-func groupStmtHasRecv(s syntax.Stmt) bool {
+func (fl *fileLower) groupStmtHasRecv(s syntax.Stmt) bool {
 	switch s := s.(type) {
 	case *syntax.IfStmt:
-		return groupNodesHaveRecv(s.Init, s.Cond)
+		return fl.groupNodesHaveRecv(s.Init, s.Cond)
 	case *syntax.SwitchStmt:
-		return groupNodesHaveRecv(s.Init, s.Tag) || groupCasesHaveRecv(s)
+		return fl.groupNodesHaveRecv(s.Init, s.Tag) || fl.groupCasesHaveRecv(s)
 	case *syntax.ForStmt:
-		return groupNodesHaveRecv(s.Init, s.Cond, s.Post)
+		return fl.groupNodesHaveRecv(s.Init, s.Cond, s.Post)
 	}
-	return groupNodesHaveRecv(s)
+	return fl.groupNodesHaveRecv(s)
 }
 
-func groupCasesHaveRecv(s *syntax.SwitchStmt) bool {
+func (fl *fileLower) groupCasesHaveRecv(s *syntax.SwitchStmt) bool {
 	for _, c := range s.Body {
-		if c.Cases != nil && groupNodesHaveRecv(c.Cases) {
+		if c.Cases != nil && fl.groupNodesHaveRecv(c.Cases) {
 			return true
 		}
 	}
@@ -561,6 +542,9 @@ func (fl *fileLower) groupClosingEnd(open int) int {
 }
 
 func (fl *fileLower) groupOperandEnd(e syntax.Expr) int {
+	if closure := fl.groupClosureCall(e); closure != nil {
+		return closure.source.end
+	}
 	switch n := e.(type) {
 	case *syntax.CompositeLit:
 		return fl.off(n.Rbrace) + 1

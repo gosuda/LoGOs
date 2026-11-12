@@ -242,6 +242,7 @@ type fileLower struct {
 	groupDone          map[*syntax.FuncLit]bool // finished group closures, pruned by the literal scan.
 	groupPlans         map[*syntax.BlockStmt]groupFrame
 	groupRecvSelects   map[*syntax.SelectStmt]bool
+	groupClosures      *groupClosureRegistry
 	groupJoins         map[syntax.Stmt]bool
 	funcs              map[*syntax.BlockStmt]*funcLower
 	compositeDone      map[syntax.Expr]bool
@@ -257,9 +258,17 @@ func (fl *fileLower) off(pos syntax.Pos) int {
 // zero-width splice on a move boundary stays outside the move, as textOf
 // treats it, while region routing keeps the M7 boundary rule.
 func (fl *fileLower) appendSplice(sp splice) {
-	fl.changed = true
 	s := span{start: sp.start, end: sp.end}
-	if m := fl.narrowestMove(s, fl.coversOwnCopy(sp)); m != nil {
+	fl.placeSplice(sp, fl.narrowestMove(s, fl.coversOwnCopy(sp)))
+}
+
+func (fl *fileLower) clearMoved(s span) {
+	fl.placeSplice(splice{start: s.start, end: s.end}, fl.moveAbove(s))
+}
+
+func (fl *fileLower) placeSplice(sp splice, m *chainMove) {
+	fl.changed = true
+	if m != nil {
 		m.inner = append(m.inner, sp)
 		return
 	}
@@ -352,6 +361,10 @@ func (fl *fileLower) addFirst(off int, text string) {
 	fl.changed = true
 }
 
+func (fl *fileLower) addAfterExpression(off int, text string) {
+	fl.appendSplice(splice{start: off, end: off, text: text, placement: placementAfterExpression})
+}
+
 // addOwned records one splice owned by one wrapper (a wrap ID from
 // nextWrapID): a later wrap of the same wrapper drains its boundary
 // inserts into fused text instead of leaving them to interleave.
@@ -425,7 +438,9 @@ func (fl *fileLower) composeMove(m *chainMove) otext {
 	r := m.region
 	adj := make([]splice, len(m.inner))
 	for j, sp := range m.inner {
-		adj[j] = splice{start: sp.start - r.start, end: sp.end - r.start, text: sp.text, chunks: sp.chunks, owner: sp.owner}
+		adj[j] = sp
+		adj[j].start -= r.start
+		adj[j].end -= r.start
 	}
 	out, err := applyChunks(fl.srcMap.sliceO(r.start, r.end), adj)
 	if err != nil {
@@ -436,6 +451,9 @@ func (fl *fileLower) composeMove(m *chainMove) otext {
 
 func (fl *fileLower) settleMarks(t otext) otext {
 	return substNul(t, func(mark string) (otext, bool) {
+		if text, ok := fl.groupClosureText(mark); ok {
+			return fl.settleMarks(text), true
+		}
 		for _, m := range fl.moves {
 			if m.mark == mark {
 				return fl.settleMarks(fl.composeMove(m)), true
@@ -491,7 +509,9 @@ func (fl *fileLower) textOf(s span) otext {
 	}
 	adj := make([]splice, len(inner))
 	for i, sp := range inner {
-		adj[i] = splice{start: sp.start - s.start, end: sp.end - s.start, text: sp.text, chunks: sp.chunks, owner: sp.owner}
+		adj[i] = sp
+		adj[i].start -= s.start
+		adj[i].end -= s.start
 	}
 	out, err := applyChunks(fl.srcMap.sliceO(s.start, s.end), adj)
 	if err != nil {
@@ -534,7 +554,7 @@ func (fl *fileLower) drainInner(s span) []splice {
 		switch {
 		case sp.host != nil && spanInside(sp, s):
 			t := fl.retireHost(sp.host)
-			inner = append(inner, splice{start: sp.start, end: sp.end, text: t.s, chunks: t.chunks, owner: sp.owner})
+			inner = append(inner, splice{start: sp.start, end: sp.end, text: t.s, chunks: t.chunks, owner: sp.owner, placement: sp.placement})
 		case sp.host != nil && hostOverlaps(sp, s):
 			cutsHost(sp, s)
 		case sp.host == nil && spanInside(sp, s):
@@ -648,9 +668,10 @@ func (fl *fileLower) lowerFile() {
 	if fl.constText != "" {
 		fl.add(fl.orig, fl.orig, fl.constText)
 	}
-	fl.lowerAddrFresh()    // `&expr` to new(expr).
-	fl.emitRodata()        // read-only vars, after every pass that creates them.
-	fl.lowerInterp()       // interpolated strings (last: whole-span text drains inner splices).
+	fl.lowerAddrFresh() // `&expr` to new(expr).
+	fl.emitRodata()     // read-only vars, after every pass that creates them.
+	fl.lowerInterp()    // interpolated strings (last: whole-span text drains inner splices).
+	fl.resolveGroupClosureText()
 	fl.resolveChainMoves() // copies of moved chain operands, after every edit inside them.
 	fl.finalizeConstFor()
 	fl.remapRegions()
@@ -785,6 +806,9 @@ func scanForLiterals(fl *fileLower, root syntax.Node) {
 		if fl.groupDone[lit] { // group closures lower eagerly.
 			return false
 		}
+		if fl.groupClosurePending(lit) {
+			return false
+		}
 		newFuncLower(fl, lit.Type, fl.cfLitSig(lit), lit.Body).run()
 		return false
 	})
@@ -874,6 +898,7 @@ func namedValue(name *syntax.Name) string {
 
 // run prepares and lowers one function body.
 func (fc *funcLower) run() {
+	defer fc.groupClosureOwner()()
 	fc.lower()
 	fc.flushHoists()
 }

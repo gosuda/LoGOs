@@ -24,6 +24,7 @@ type groupFrame struct {
 	child      bool
 	segment    bool
 	segmentRes types2.Type
+	closure    *groupClosure
 	body       *syntax.BlockStmt
 	planned    bool
 }

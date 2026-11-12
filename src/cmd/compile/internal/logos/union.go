@@ -80,6 +80,11 @@ func (fl *fileLower) lowerSwitchExpr(e *syntax.SwitchExpr) syntax.Expr {
 		base.Fatalf("logos: switch expression at %s has type %s that cannot be spelled in this file", pos.String(), typ)
 	}
 
+	closure := fl.newGroupClosure(e)
+	wrap := 0
+	if closure != nil {
+		wrap = fl.nextWrapID()
+	}
 	results := fl.expandArmCases(e)
 	clauses := make([]*syntax.CaseClause, 0, len(e.Arms))
 	for i, arm := range e.Arms {
@@ -87,6 +92,7 @@ func (fl *fileLower) lowerSwitchExpr(e *syntax.SwitchExpr) syntax.Expr {
 			continue
 		}
 		ret := at(&syntax.ReturnStmt{Results: arm.Body}, arm.Arrow)
+		results[i].prefix = closure.prefix(ret)
 		fl.recordArmResult(ret, typ)
 		var result syntax.Stmt = ret
 		if b := results[i].bind; b != nil {
@@ -114,9 +120,10 @@ func (fl *fileLower) lowerSwitchExpr(e *syntax.SwitchExpr) syntax.Expr {
 	}, pos)
 	lit := at(&syntax.FuncLit{Type: signature, Body: at(&syntax.BlockStmt{List: body, Rbrace: e.Rbrace}, pos)}, pos)
 
-	fl.spliceSwitchExpr(e, text, unreachable, results)
+	fl.spliceSwitchExpr(e, switchExprText{text: text, unreachable: unreachable, results: results, closure: closure, wrap: wrap})
 	call := callOf(pos, lit, nil)
 	fl.carryType(call, e)
+	closure.bind(call, span{start: fl.off(e.Pos()), end: fl.off(e.Rbrace) + 1}, wrap)
 	return call
 }
 
@@ -129,10 +136,23 @@ func hasDefaultArm(e *syntax.SwitchExpr) bool {
 	return false
 }
 
-func (fl *fileLower) spliceSwitchExpr(e *syntax.SwitchExpr, text, unreachable string, results []siteResult) {
+type switchExprText struct {
+	text        string
+	unreachable string
+	results     []siteResult
+	closure     *groupClosure
+	wrap        int
+}
+
+func (fl *fileLower) spliceSwitchExpr(e *syntax.SwitchExpr, output switchExprText) {
+	text, results, closure := output.text, output.results, output.closure
 	head := fl.off(e.Pos())
-	fl.add(head, head+len("switch"), "func() "+text+" { switch")
-	closeLast := false
+	if closure == nil {
+		fl.add(head, head+len("switch"), "func() "+text+" { switch")
+	} else {
+		fl.addOwned(output.wrap, head, head, closure.head("func() "+text, []string{text})+" { "+closure.prefix(nil))
+	}
+	lastBindingEnd := ""
 	for i, arm := range e.Arms {
 		next := fl.off(e.Rbrace)
 		if i+1 < len(e.Arms) {
@@ -151,9 +171,12 @@ func (fl *fileLower) spliceSwitchExpr(e *syntax.SwitchExpr, text, unreachable st
 			open += b.open() + " "
 		}
 		if bytes.IndexByte(fl.src[after:result], '\n') >= 0 {
-			fl.add(arrow, result, open+"return ")
+			fl.add(arrow, result, open+results[i].prefix+"return ")
 		} else {
-			fl.add(arrow, after, open+"return")
+			fl.add(arrow, after, open+results[i].prefix+"return")
+		}
+		if closure != nil {
+			closure.armEnd(fl.exprEndNested(result))
 		}
 		if b == nil {
 			continue
@@ -161,18 +184,23 @@ func (fl *fileLower) spliceSwitchExpr(e *syntax.SwitchExpr, text, unreachable st
 		if i+1 < len(e.Arms) {
 			fl.add(next, next, "}\n")
 		} else {
-			closeLast = true
+			lastBindingEnd = "}\n"
 		}
 	}
 	brace := fl.off(e.Rbrace)
-	closing := "} }()"
-	if !hasDefaultArm(e) {
-		closing = "}; panic(" + unreachable + ") }()"
+	if closure == nil {
+		fl.add(brace, brace+1, lastBindingEnd+"}"+output.afterSwitch(e))
+		return
 	}
-	if closeLast {
-		closing = "}\n" + closing
+	fl.addAfterExpression(brace, lastBindingEnd)
+	fl.addOwned(output.wrap, brace+1, brace+1, output.afterSwitch(e))
+}
+
+func (output switchExprText) afterSwitch(e *syntax.SwitchExpr) string {
+	if hasDefaultArm(e) {
+		return " }()"
 	}
-	fl.add(brace, brace+1, closing)
+	return "; panic(" + output.unreachable + ") }()"
 }
 
 func firstTokenStart(src []byte, from int) int {
@@ -1366,9 +1394,10 @@ func (fl *fileLower) expandArmCases(e *syntax.SwitchExpr) []siteResult {
 }
 
 type siteResult struct {
-	cases syntax.Expr
-	bind  *unionBind
-	drop  bool
+	cases  syntax.Expr
+	bind   *unionBind
+	drop   bool
+	prefix string
 }
 
 func (fl *fileLower) dropSpan(s span) {

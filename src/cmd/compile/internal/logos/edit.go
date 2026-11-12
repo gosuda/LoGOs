@@ -21,11 +21,19 @@ type Edit struct {
 	Chunks     []chunk
 }
 
+type splicePlacement uint8
+
+const (
+	placementOrdinary splicePlacement = iota
+	placementAfterExpression
+)
+
 type splice struct {
 	start, end int
 	text       string
 	chunks     []chunk
 	owner      int
+	placement  splicePlacement
 	host       *cfHost
 }
 
@@ -155,7 +163,7 @@ func segmentsOf(sorted []splice, outLen int) []editmap.Segment {
 
 func sortSplices(splices []splice) {
 	slices.SortStableFunc(splices, func(a, b splice) int {
-		return cmp.Or(cmp.Compare(a.start, b.start), cmp.Compare(a.end, b.end))
+		return cmp.Or(cmp.Compare(a.start, b.start), cmp.Compare(a.end, b.end), cmp.Compare(a.placement, b.placement))
 	})
 }
 

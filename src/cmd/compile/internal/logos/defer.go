@@ -245,6 +245,9 @@ const (
 
 func argKind(fc *funcLower, raw syntax.Expr) argClass {
 	node := syntax.Unparen(raw)
+	if _, expanded := node.(*syntax.ListExpr); expanded {
+		return argInline
+	}
 	if name, ok := node.(*syntax.Name); ok && name.Value == "nil" {
 		return argInline
 	}
@@ -326,7 +329,7 @@ func (fc *funcLower) planUses(plan *callPlan, tw *twin) (syntax.Expr, []syntax.E
 		if piece.capture {
 			argNames = pieceNames(piece)
 		}
-		args = append(args, use(piece, argNames))
+		args = append(args, syntax.UnpackListExpr(use(piece, argNames))...)
 		names = append(names, nameList(piece)...)
 		vals = append(vals, valList(piece, tw)...)
 	}
