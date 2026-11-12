@@ -20,6 +20,9 @@ cd e/gapp
 logos run .
 stdout '^dep-ok$'
 stdout '^eject-check: logos$'
+stdout '^pointer-option: found true$'
+stdout '^union-option: true true 7 true r$'
+stdout '^union-param: absent right left$'
 logos eject -o bout
 exists bout/main.go
 exists bout/_logos_deps/example.com/lp@v1.2.3/p/p.go
@@ -30,11 +33,19 @@ go build ./...
 go run .
 stdout '^dep-ok$'
 stdout '^eject-check: no-logos$'
+stdout '^pointer-option: found true$'
+stdout '^union-option: true true 7 true r$'
+stdout '^union-param: absent right left$'
 # SPEC 0.3: ejected output builds with upstream go1.27.2 from $UPROOT1272.
 exists $UPROOT1272/bin/go
 exec $UPROOT1272/bin/go version
 stdout '^go version go1\.27\.2 '
 exec env -u GOROOT $UPROOT1272/bin/go build ./...
+exec env -u GOROOT $UPROOT1272/bin/go run .
+stdout '^dep-ok$'
+stdout '^pointer-option: found true$'
+stdout '^union-option: true true 7 true r$'
+stdout '^union-param: absent right left$'
 cd ..
 cd ..
 cd ..
@@ -265,6 +276,49 @@ func (p Person) Speak() string {
 	return p.Name
 }
 
+func Find(ok bool) *User? {
+	if ok {
+		return &User{Name: "found"}
+	}
+	return nil
+}
+
+type Left struct {
+	N int
+}
+
+func (l Left) Name() string { return "left" }
+
+type Right struct {
+	S string
+}
+
+func (r Right) Name() string { return "right" }
+
+type Choice interface {
+	Left | Right
+	Name() string
+}
+
+func Pick(i int) Choice? {
+	if i == 0 {
+		var c Choice = Left{N: 7}
+		return c
+	}
+	if i == 1 {
+		var c Choice = Right{S: "r"}
+		return c
+	}
+	return nil
+}
+
+func Describe(c Choice?) string {
+	if c != nil {
+		return c.Name()
+	}
+	return "absent"
+}
+
 -- e/gapp/go.mod --
 module example.com/gapp
 
@@ -284,8 +338,30 @@ import (
 	"example.com/lp/p"
 )
 
+var _ func(bool) *p.User = p.Find
+var _ func(int) p.Choice = p.Pick
+var _ func(p.Choice) string = p.Describe
+
+func pointerOption() {
+	var found *p.User = p.Find(true)
+	var absent *p.User = p.Find(false)
+	fmt.Println("pointer-option:", found.Name, absent == nil)
+}
+
+func unionOption() {
+	var absent p.Choice = p.Pick(2)
+	var left p.Choice = p.Pick(0)
+	var right p.Choice = p.Pick(1)
+	l, leftOK := left.(p.Left)
+	r, rightOK := right.(p.Right)
+	fmt.Println("union-option:", absent == nil, leftOK, l.N, rightOK, r.S)
+	fmt.Println("union-param:", p.Describe(nil), p.Describe(p.Right{S: "x"}), p.Describe(left))
+}
+
 func main() {
 	fmt.Println(p.Msg())
+	pointerOption()
+	unionOption()
 	func() {
 		defer func() {
 			if r := recover(); r != nil {
