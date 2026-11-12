@@ -31,7 +31,28 @@ var (
 	placedApart = 1
 )
 
+//logos:rodatax
+const nearConst = 1
+
+//logos:rodata_old
+func nearFunc() {}
+
+//logos:rodata:
+type nearType struct{}
+
+//logos:rodata	// ERROR "\[correctness::misplaced_directive\]"
+const tabConst = 1
+
+var nearTrailing = 1 //logos:rodatax
+
+//logos:rodata
+//logos:rodatax
+var nearBelow = 1
+
 func main() {
+	//logos:rodatax
+	nearLocal := 1
+	_ = nearLocal
 	//logos:rodata // ERROR "\[correctness::misplaced_directive\]"
 	local := 1
 	var unused aboveType

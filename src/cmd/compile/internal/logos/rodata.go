@@ -131,7 +131,7 @@ func (fl *fileLower) scanRodataMarkers() {
 func (fl *fileLower) reportUnattachedRodata(attached map[uint]bool) {
 	posBase := fl.file.Pos().FileBase()
 	syntax.CommentsDoMode(bytes.NewReader(fl.src), syntax.LogosMode, func(line, col uint, text string) {
-		if strings.HasPrefix(text, rodataMarker) && !attached[line] {
+		if _, ok := syntax.DirectiveArg(text, rodataMarker); ok && !attached[line] {
 			base.Errorf("%s: [correctness::misplaced_directive] %s must be on its own line directly above a package-level var or a spec of a var group", syntax.MakePos(posBase, line, col).String(), rodataMarker)
 		}
 	})
@@ -151,7 +151,7 @@ func rodataMarkerAbove(src []byte, lineOff int) (top int, found bool) {
 		if trim+1 >= top || src[trim] != '/' || src[trim+1] != '/' {
 			return top, false
 		}
-		if strings.HasPrefix(string(src[trim:top-1]), rodataMarker) {
+		if _, ok := syntax.DirectiveArg(string(src[trim:top-1]), rodataMarker); ok {
 			return top, true
 		}
 		top = prev
