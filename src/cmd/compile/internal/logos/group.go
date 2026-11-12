@@ -448,8 +448,8 @@ func (fc *funcLower) lowerGroupGo(s *syntax.CallStmt) []syntax.Stmt {
 	fc.groupSeq++
 	errSpelling := fc.nextErr()
 	ft := groupChildFuncType(pos, top.gctx, cr)
-	callStart := fl.off(leftmostOf(call))
-	callEnd := groupExprEnd(fl.src, callStart)
+	callSpan := fl.callBodySpan(call)
+	callStart, callEnd := callSpan.start, callSpan.end
 	for _, raw := range call.ArgList {
 		if constAsView(fl.pkg.info.TypeOf(raw)) != nil {
 			fl.recordConstViewDecl(pos)
