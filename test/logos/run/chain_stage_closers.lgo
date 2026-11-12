@@ -44,6 +44,16 @@ type boxed struct{ h *handle }
 
 func (b *boxed) Close() error { return b.h.Close() }
 
+type fragile struct{ id int }
+
+func (f *fragile) Close() error {
+	closes[f.id].Add(1)
+	if f.id == 2 {
+		panic("close boom")
+	}
+	return nil
+}
+
 type item struct{ id int }
 
 func (i *item) Close() error {
@@ -215,6 +225,30 @@ func caseFilterPredicateFailure(ctx context.Context) {
 	check("closers-filter-predicate-failure-closes-examined", ok, counts(&closes), "closes[3] == 1")
 }
 
+func closePanics(ctx context.Context) (recovered any) {
+	defer func() { recovered = recover() }()
+	got, err := items().group(ctx, limit = 6).map(i => {
+		if i.id == 0 {
+			waitOthers()
+		} else {
+			others.Add(1)
+		}
+		return &fragile{i.id}
+	}).take(1)
+	if err != nil {
+		return err
+	}
+	return len(got)
+}
+
+func caseClosePanic(ctx context.Context) {
+	reset()
+	recovered := closePanics(ctx)
+	want := []int64{1, 1, 1, 1, 1, 1}
+	ok := recovered == "close boom" && fmt.Sprint(counts(&closes)) == fmt.Sprint(want)
+	check("closers-close-panic-propagates-after-join", ok, fmt.Sprint(recovered, counts(&closes)), want)
+}
+
 func main() {
 	ctx := context.Background()
 	caseFilterDropClosesOnceDeliveredStayOpen(ctx)
@@ -231,6 +265,7 @@ func main() {
 	caseOwnedUndelivered(ctx)
 	caseSourceElementLeftOpen(ctx)
 	caseFilterPredicateFailure(ctx)
+	caseClosePanic(ctx)
 	if failed {
 		os.Exit(1)
 	}

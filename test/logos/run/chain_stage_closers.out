@@ -13,3 +13,4 @@ ok closers-unowned-undelivered-left-open
 ok closers-owned-undelivered-closed
 ok closers-source-element-left-open
 ok closers-filter-predicate-failure-closes-examined
+ok closers-close-panic-propagates-after-join

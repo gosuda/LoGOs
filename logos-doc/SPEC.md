@@ -1188,6 +1188,8 @@ The chain owns a value that a `map` of the segment produced, by the rule of a fu
 
 The stage MUST NOT close an element of the source, a value that a `map` returns unchanged or reads from elsewhere, or any other value that no `map` of the chain produced, whether the stage drops it, never delivers it, or stops before it hands the value to a lambda. [T-206]
 
+A `Close` that the stage calls and that panics MUST propagate to the caller after the join, and the stage MUST still close every remaining result it owns. [T-206]
+
 The ejected form of a group stage MUST build with upstream Go and print what the native build prints. [T-206][T-0.3]
 
 `logos/sync.Locked[T]` MUST expose `WithLock(f func(*T))`. [T-206]
