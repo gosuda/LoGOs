@@ -81,30 +81,62 @@ exists logos.loader.mjs
 exec node ../runok.mjs logos.wasm logos.loader.mjs
 stdout '^provided-ok$'
 cd ..
-cd partial3
+cd partial
 env GOOS=js
 env GOARCH=wasm
 cp $GOROOT/lib/wasm/wasm_exec.js wasm_exec.js
+mkdir helper
+# The helper set is empty or complete: the provided and noprov sections
+# above are the two accepted ends, and each proper subset below fails
+# the build naming exactly the helpers it lacks.
+cp helpers/no_alloc.txt helper/helper.go
 ! go build -x -o app.wasm .
-stderr '_logos_errmsg_len'
+stderr '_logos_scratch_alloc'
+! stderr '_logos_scratch_reset|_logos_errmsg_ptr|_logos_errmsg_len'
 ! exists app.loader.mjs
 ! logos build -x -o logos.wasm .
-stderr '_logos_errmsg_len'
+stderr '_logos_scratch_alloc'
+! stderr '_logos_scratch_reset|_logos_errmsg_ptr|_logos_errmsg_len'
 ! exists logos.loader.mjs
-cd ..
-cd partial1
-env GOOS=js
-env GOARCH=wasm
-cp $GOROOT/lib/wasm/wasm_exec.js wasm_exec.js
+cp helpers/no_reset.txt helper/helper.go
+! go build -x -o app.wasm .
+stderr '_logos_scratch_reset'
+! stderr '_logos_scratch_alloc|_logos_errmsg_ptr|_logos_errmsg_len'
+! exists app.loader.mjs
+! logos build -x -o logos.wasm .
+stderr '_logos_scratch_reset'
+! stderr '_logos_scratch_alloc|_logos_errmsg_ptr|_logos_errmsg_len'
+! exists logos.loader.mjs
+cp helpers/no_ptr.txt helper/helper.go
+! go build -x -o app.wasm .
+stderr '_logos_errmsg_ptr'
+! stderr '_logos_scratch_alloc|_logos_scratch_reset|_logos_errmsg_len'
+! exists app.loader.mjs
+! logos build -x -o logos.wasm .
+stderr '_logos_errmsg_ptr'
+! stderr '_logos_scratch_alloc|_logos_scratch_reset|_logos_errmsg_len'
+! exists logos.loader.mjs
+cp helpers/no_len.txt helper/helper.go
+! go build -x -o app.wasm .
+stderr '_logos_errmsg_len'
+! stderr '_logos_scratch_alloc|_logos_scratch_reset|_logos_errmsg_ptr'
+! exists app.loader.mjs
+! logos build -x -o logos.wasm .
+stderr '_logos_errmsg_len'
+! stderr '_logos_scratch_alloc|_logos_scratch_reset|_logos_errmsg_ptr'
+! exists logos.loader.mjs
+cp helpers/only_alloc.txt helper/helper.go
 ! go build -x -o app.wasm .
 stderr '_logos_scratch_reset'
 stderr '_logos_errmsg_ptr'
 stderr '_logos_errmsg_len'
+! stderr '_logos_scratch_alloc'
 ! exists app.loader.mjs
 ! logos build -x -o logos.wasm .
 stderr '_logos_scratch_reset'
 stderr '_logos_errmsg_ptr'
 stderr '_logos_errmsg_len'
+! stderr '_logos_scratch_alloc'
 ! exists logos.loader.mjs
 cd ..
 
@@ -745,129 +777,73 @@ package helper
 func Answer() int {
 	return 42
 }
--- partial3/go.mod --
-module example.com/partial3
+-- partial/go.mod --
+module example.com/partial
 
 go 1.27
 
--- partial3/main.go --
+-- partial/main.go --
 package main
 
-import (
-	_ "example.com/partial3/helper"
-	"unsafe"
-)
-
-//go:wasmimport host add
-func hostAdd(a, b int32) int32
-
-//go:wasmexport incr
-func incr(p unsafe.Pointer, n int32) int32 {
-	b := unsafe.Slice((*byte)(p), n)
-	for i := range b {
-		b[i]++
-	}
-	return 0
-}
-
-//go:wasmexport checkHost
-func checkHost(a, b, want int32) int32 {
-	if hostAdd(a, b) != want {
-		return 1
-	}
-	return 0
-}
+import _ "example.com/partial/helper"
 
 func main() {
 	select {}
 }
 
--- partial3/helper/helper.go --
+-- partial/helpers/no_alloc.txt --
 package helper
-
-import "unsafe"
-
-var scratch = map[int32][]byte{}
-
-var errmsg = []byte("helper errmsg")
-
-func address(b []byte) int32 {
-	return int32(uintptr(unsafe.Pointer(unsafe.SliceData(b))))
-}
-
-//go:wasmexport _logos_scratch_alloc
-func scratchAlloc(n int32) int32 {
-	b := make([]byte, n)
-	p := address(b)
-	scratch[p] = b
-	return p
-}
 
 //go:wasmexport _logos_scratch_reset
-func scratchReset(p int32) {
-	delete(scratch, p)
-}
+func scratchReset(p int32) {}
 
 //go:wasmexport _logos_errmsg_ptr
-func errmsgPtr() int32 {
-	return address(errmsg)
-}
+func errmsgPtr() int32 { return 0 }
 
--- partial1/go.mod --
-module example.com/partial1
+//go:wasmexport _logos_errmsg_len
+func errmsgLen() int32 { return 0 }
 
-go 1.27
-
--- partial1/main.go --
-package main
-
-import (
-	_ "example.com/partial1/helper"
-	"unsafe"
-)
-
-//go:wasmimport host add
-func hostAdd(a, b int32) int32
-
-//go:wasmexport incr
-func incr(p unsafe.Pointer, n int32) int32 {
-	b := unsafe.Slice((*byte)(p), n)
-	for i := range b {
-		b[i]++
-	}
-	return 0
-}
-
-//go:wasmexport checkHost
-func checkHost(a, b, want int32) int32 {
-	if hostAdd(a, b) != want {
-		return 1
-	}
-	return 0
-}
-
-func main() {
-	select {}
-}
-
--- partial1/helper/helper.go --
+-- partial/helpers/no_reset.txt --
 package helper
 
-import "unsafe"
+//go:wasmexport _logos_scratch_alloc
+func scratchAlloc(n int32) int32 { return 0 }
 
-var scratch = map[int32][]byte{}
+//go:wasmexport _logos_errmsg_ptr
+func errmsgPtr() int32 { return 0 }
 
-func address(b []byte) int32 {
-	return int32(uintptr(unsafe.Pointer(unsafe.SliceData(b))))
-}
+//go:wasmexport _logos_errmsg_len
+func errmsgLen() int32 { return 0 }
+
+-- partial/helpers/no_ptr.txt --
+package helper
 
 //go:wasmexport _logos_scratch_alloc
-func scratchAlloc(n int32) int32 {
-	b := make([]byte, n)
-	p := address(b)
-	scratch[p] = b
-	return p
-}
+func scratchAlloc(n int32) int32 { return 0 }
+
+//go:wasmexport _logos_scratch_reset
+func scratchReset(p int32) {}
+
+//go:wasmexport _logos_errmsg_len
+func errmsgLen() int32 { return 0 }
+
+-- partial/helpers/no_len.txt --
+package helper
+
+//go:wasmexport _logos_scratch_alloc
+func scratchAlloc(n int32) int32 { return 0 }
+
+//go:wasmexport _logos_scratch_reset
+func scratchReset(p int32) {}
+
+//go:wasmexport _logos_errmsg_ptr
+func errmsgPtr() int32 { return 0 }
+
+-- partial/helpers/only_alloc.txt --
+package helper
+
+//go:wasmexport _logos_scratch_alloc
+func scratchAlloc(n int32) int32 { return 0 }
 
 -- runok.mjs --
 import { readFileSync } from "node:fs";
