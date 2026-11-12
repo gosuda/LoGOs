@@ -263,13 +263,18 @@ func (u *chanUnit) loop(f *syntax.ForStmt) {
 	u.loops--
 }
 
-// rangeOp records a range over a channel as a receive.
+// rangeOp records a range over a channel as a receive. A type parameter is
+// a channel when its constraint has a channel core type.
 func (u *chanUnit) rangeOp(st syntax.SimpleStmt) {
 	rc, ok := st.(*syntax.RangeClause)
 	if !ok {
 		return
 	}
-	if _, isChan := underOrNil(TypeOf(rc.X)).(*types2.Chan); !isChan {
+	t := TypeOf(rc.X)
+	if t == nil {
+		return
+	}
+	if _, isChan := types2.CoreType(t).(*types2.Chan); !isChan {
 		return
 	}
 	u.record(rc.Pos(), u.exprEnd(rc.X), u.chanVar(rc.X), "range over "+syntax.String(rc.X))

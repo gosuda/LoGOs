@@ -334,3 +334,13 @@ func resultStoredLiteral() int {
 	f()
 	return <-ch // ERROR "\[correctness::unbounded_channel_op\]"
 }
+
+func rangeTypeParamChan[C ~chan int](c C) {
+	for range c { // ERROR "\[correctness::unbounded_channel_op\]"
+	}
+}
+
+func rangeTypeParamSlice[S ~[]int](s S) {
+	for range s {
+	}
+}
