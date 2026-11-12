@@ -1413,13 +1413,8 @@ func (fl *fileLower) lowerOptCall(e *syntax.CallExpr, osel *syntax.OptSelectExpr
 		}
 		return e
 	}
-	obj, _, _ := types2.LookupFieldOrMethod(ox.Elem, true, fl.pkg.tpkg, osel.Sel.Value)
-	fn, ok := obj.(*types2.Func)
-	var sig *types2.Signature
-	if ok {
-		sig, ok = types2.Unalias(fn.Type()).(*types2.Signature)
-	}
-	if !ok {
+	sig := fl.optCallSig(ox, osel.Sel.Value)
+	if sig == nil {
 		osel.X = fl.lowerOptReceiver(osel.X)
 		e.Fun = osel
 		for i, a := range e.ArgList {

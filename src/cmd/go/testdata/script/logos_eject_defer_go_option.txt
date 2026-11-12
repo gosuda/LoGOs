@@ -7,6 +7,7 @@ cp $GOROOT/test/logos/run/defer_opt_args.lgo args/main.lgo
 cp $GOROOT/test/logos/run/defer_opt_lambda.lgo lambda/main.lgo
 cp $GOROOT/test/logos/run/defer_opt_chain.lgo chain/main.lgo
 cp $GOROOT/test/logos/run/defer_opt_field.lgo field/main.lgo
+cp $GOROOT/test/logos/run/option_call_field.lgo call/main.lgo
 
 cd eval
 logos run .
@@ -78,6 +79,20 @@ exec $GOROOT/bin/gofmt -l .
 ! stdout .
 cd ../..
 
+cd call
+logos run .
+cmp stdout $GOROOT/test/logos/run/option_call_field.out
+logos eject -o out
+exists out/main.go
+cd out
+go run .
+cmp stdout $GOROOT/test/logos/run/option_call_field.out
+exec env -u GOROOT $UPROOT1272/bin/go run .
+cmp stdout $GOROOT/test/logos/run/option_call_field.out
+exec $GOROOT/bin/gofmt -l .
+! stdout .
+cd ../..
+
 cd field
 logos run .
 cmp stdout $GOROOT/test/logos/run/defer_opt_field.out
@@ -119,5 +134,10 @@ go 1.27
 
 -- field/go.mod --
 module example.com/deferoptfield
+
+go 1.27
+
+-- call/go.mod --
+module example.com/optcallfield
 
 go 1.27
