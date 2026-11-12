@@ -20,11 +20,20 @@ type env struct {
 	in    chan int
 	mid   chan int
 	boxes chan box
+	sinks []chan int
+	chain chan chan int
+	nums  []int
+	anys  chan any
 	out   int
 }
 
 type box struct {
 	V int
+}
+
+type pair struct {
+	A int
+	B int
 }
 
 func store(p *int, v int) {
@@ -333,11 +342,253 @@ func recvUnary(ctx context.Context, e *env, fail bool) error {
 	return nil
 }
 
+//logos:allow(correctness::unbounded_channel_op)
+func pushMid(e *env) chan int {
+	e.in <- 5
+	return e.mid
+}
+
+//logos:allow(correctness::unbounded_channel_op)
+func pushRows(e *env) []int {
+	e.in <- 1
+	return []int{10, 20, 30}
+}
+
+//logos:allow(correctness::unbounded_channel_op)
+func pushAdder(e *env) func(int) int {
+	e.in <- 5
+	return func(v int) int { return v + 100 }
+}
+
+//logos:allow(correctness::unbounded_channel_op)
+func pushIndex(e *env) int {
+	e.in <- 5
+	return 1
+}
+
+func inc(v int) int {
+	return v + 1
+}
+
+func incErr(v int) (int, error) {
+	return v + 1, nil
+}
+
+func recvSendcall(ctx context.Context, e *env, fail bool) error {
+	go group (ctx) {
+		go {
+			pushMid(e) <- <-e.in
+		}
+		go {
+			if fail {
+				failSibling()?
+			}
+		}
+	}
+	return nil
+}
+
+func recvMixed(ctx context.Context, e *env, fail bool) error {
+	go group (ctx) {
+		go {
+			a, b := <-e.in, inc(<-e.in)
+			e.out = a*10 + b
+		}
+		go {
+			if fail {
+				failSibling()?
+			}
+		}
+	}
+	return nil
+}
+
+func recvMixedfirst(ctx context.Context, e *env, fail bool) error {
+	go group (ctx) {
+		go {
+			a, b := inc(<-e.in), <-e.mid
+			e.out = a*10 + b
+		}
+		go {
+			if fail {
+				failSibling()?
+			}
+		}
+	}
+	return nil
+}
+
+func recvAssert(ctx context.Context, e *env, fail bool) error {
+	go group (ctx) {
+		go {
+			e.out = (<-e.anys).(int)
+		}
+		go {
+			if fail {
+				failSibling()?
+			}
+		}
+	}
+	return nil
+}
+
+func recvTypeswitch(ctx context.Context, e *env, fail bool) error {
+	go group (ctx) {
+		go {
+			switch v := (<-e.anys).(type) {
+			case int:
+				e.out = v
+			default:
+				e.out = -1
+			}
+		}
+		go {
+			if fail {
+				failSibling()?
+			}
+		}
+	}
+	return nil
+}
+
+func recvNested(ctx context.Context, e *env, fail bool) error {
+	go group (ctx) {
+		go {
+			e.out = <-<-e.chain
+		}
+		go {
+			if fail {
+				failSibling()?
+			}
+		}
+	}
+	return nil
+}
+
+func recvNestedindex(ctx context.Context, e *env, fail bool) error {
+	go group (ctx) {
+		go {
+			e.out = <-e.sinks[<-e.in]
+		}
+		go {
+			if fail {
+				failSibling()?
+			}
+		}
+	}
+	return nil
+}
+
+func recvKeyed(ctx context.Context, e *env, fail bool) error {
+	go group (ctx) {
+		go {
+			p := pair{A: pushFive(e), B: <-e.in}
+			e.out = p.A + p.B
+		}
+		go {
+			if fail {
+				failSibling()?
+			}
+		}
+	}
+	return nil
+}
+
+func recvBinoperand(ctx context.Context, e *env, fail bool) error {
+	go group (ctx) {
+		go {
+			e.out = pushFive(e)*2 + <-e.in
+		}
+		go {
+			if fail {
+				failSibling()?
+			}
+		}
+	}
+	return nil
+}
+
+func recvIndexcall(ctx context.Context, e *env, fail bool) error {
+	go group (ctx) {
+		go {
+			e.out = pushRows(e)[<-e.in]
+		}
+		go {
+			if fail {
+				failSibling()?
+			}
+		}
+	}
+	return nil
+}
+
+func recvFuncall(ctx context.Context, e *env, fail bool) error {
+	go group (ctx) {
+		go {
+			e.out = pushAdder(e)(<-e.in)
+		}
+		go {
+			if fail {
+				failSibling()?
+			}
+		}
+	}
+	return nil
+}
+
+func recvTarget(ctx context.Context, e *env, fail bool) error {
+	go group (ctx) {
+		go {
+			arr := []int{0, 0, 0}
+			arr[pushIndex(e)] = <-e.in + 1
+			e.out = arr[1]
+		}
+		go {
+			if fail {
+				failSibling()?
+			}
+		}
+	}
+	return nil
+}
+
+func recvTrycall(ctx context.Context, e *env, fail bool) error {
+	go group (ctx) {
+		go {
+			x := incErr(<-e.in)?
+			e.out = x
+		}
+		go {
+			if fail {
+				failSibling()?
+			}
+		}
+	}
+	return nil
+}
+
+func recvSlice(ctx context.Context, e *env, fail bool) error {
+	go group (ctx) {
+		go {
+			e.out = len(e.nums[<-e.in:])
+		}
+		go {
+			if fail {
+				failSibling()?
+			}
+		}
+	}
+	return nil
+}
+
 type cell struct {
 	name      string
 	run       func(ctx context.Context, e *env, fail bool) error
 	feed      []int
 	boxes     []int
+	sink      int
+	nested    int
+	anyv      int
 	capIn     int
 	closed    bool
 	want      int
@@ -388,6 +639,19 @@ func valueCells() []cell {
 		{name: "switchtag", run: recvSwitchtag, feed: []int{1, 99}, want: 1, left: 1},
 		{name: "index", run: recvIndex, feed: []int{2, 99}, want: 30, left: 1},
 		{name: "ifhoist", run: recvIfhoist, feed: []int{5, 99}, want: 6, left: 1},
+		{name: "sendcall", run: recvSendcall, capIn: 1, want: 5, observe: fromMid},
+		{name: "mixed", run: recvMixed, feed: []int{4, 5, 99}, want: 46, left: 1},
+		{name: "nested", run: recvNested, nested: 7, want: 7},
+		{name: "nestedindex", run: recvNestedindex, feed: []int{0, 99}, sink: 7, want: 7, left: 1},
+		{name: "keyed", run: recvKeyed, capIn: 1, want: 105},
+		{name: "binoperand", run: recvBinoperand, capIn: 1, want: 205},
+		{name: "indexcall", run: recvIndexcall, capIn: 1, want: 20},
+		{name: "funcall", run: recvFuncall, capIn: 1, want: 105},
+		{name: "target", run: recvTarget, capIn: 1, want: 6},
+		{name: "trycall", run: recvTrycall, feed: []int{5, 99}, want: 6, left: 1},
+		{name: "slice", run: recvSlice, feed: []int{1, 99}, want: 3, left: 1},
+		{name: "assert", run: recvAssert, anyv: 8, want: 8},
+		{name: "typeswitch", run: recvTypeswitch, anyv: 9, want: 9},
 		{name: "switchinit", run: recvSwitchinit, feed: []int{5, 99}, want: 6, left: 1},
 	}
 }
@@ -409,12 +673,34 @@ func cancelCells() []cell {
 		{name: "send-cancel", run: recvSend},
 		{name: "switchtag-cancel", run: recvSwitchtag},
 		{name: "index-cancel", run: recvIndex},
+		{name: "nested-cancel", run: recvNested},
+		{name: "nestedindex-cancel", run: recvNestedindex},
+		{name: "mixedfirst-cancel", run: recvMixedfirst},
+		{name: "assert-cancel", run: recvAssert},
+		{name: "typeswitch-cancel", run: recvTypeswitch},
+		{name: "trycall-cancel", run: recvTrycall},
+		{name: "slice-cancel", run: recvSlice},
 	}
 }
 
 //logos:allow(correctness::unbounded_channel_op)
 func exercise(c cell, fail bool) string {
 	e := &env{in: make(chan int, max(len(c.feed), c.capIn)), mid: make(chan int, 1), boxes: make(chan box, len(c.boxes))}
+	e.sinks = []chan int{make(chan int, 1)}
+	e.chain = make(chan chan int, 1)
+	e.nums = []int{1, 2, 3, 4}
+	e.anys = make(chan any, 1)
+	if c.anyv != 0 {
+		e.anys <- c.anyv
+	}
+	if c.sink != 0 {
+		e.sinks[0] <- c.sink
+	}
+	if c.nested != 0 {
+		inner := make(chan int, 1)
+		inner <- c.nested
+		e.chain <- inner
+	}
 	for _, v := range c.feed {
 		e.in <- v
 	}

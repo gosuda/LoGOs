@@ -4,18 +4,6 @@ package p
 
 import "context"
 
-func get() func(int) {
-	return func(int) {}
-}
-
-func two() int {
-	return 2
-}
-
-func idxs() []int {
-	return []int{1, 2, 3}
-}
-
 func store(p *int, v int) {
 	*p = v
 }
@@ -112,27 +100,6 @@ func rejectSwitchTag(ctx context.Context, in chan int) error {
 	return nil
 }
 
-func rejectSwitchComma(ctx context.Context, in chan int) error {
-	go group (ctx) {
-		go {
-			switch v, ok := <-in; v { // ERROR "channel receive .* cannot lower in a go group child"
-			case 1:
-				_ = ok
-			}
-		}
-	}
-	return nil
-}
-
-func rejectVarComma(ctx context.Context, in chan int) error {
-	go group (ctx) {
-		go {
-			var ( v, ok = <-in ) // ERROR "channel receive .* cannot lower in a go group child"
-			_, _ = v, ok
-		}
-	}
-	return nil
-}
 
 func rejectDefer(ctx context.Context, in chan int) error {
 	n := 0
@@ -144,51 +111,3 @@ func rejectDefer(ctx context.Context, in chan int) error {
 	return nil
 }
 
-func rejectOperand(ctx context.Context, in chan int) error {
-	go group (ctx) {
-		go {
-			x := two()*2 + <-in // ERROR "channel receive .* cannot lower in a go group child"
-			_ = x
-		}
-	}
-	return nil
-}
-
-func rejectFun(ctx context.Context, in chan int) error {
-	go group (ctx) {
-		go {
-			get()(<-in) // ERROR "channel receive .* cannot lower in a go group child"
-		}
-	}
-	return nil
-}
-
-func rejectIndex(ctx context.Context, in chan int) error {
-	go group (ctx) {
-		go {
-			y := idxs()[<-in] // ERROR "channel receive .* cannot lower in a go group child"
-			_ = y
-		}
-	}
-	return nil
-}
-
-func rejectTarget(ctx context.Context, in chan int) error {
-	arr := []int{1, 2, 3}
-	go group (ctx) {
-		go {
-			arr[two()] = <-in + 1 // ERROR "channel receive .* cannot lower in a go group child"
-		}
-	}
-	return nil
-}
-
-func rejectAssert(ctx context.Context, anys chan any) error {
-	go group (ctx) {
-		go {
-			z := (<-anys).(int) // ERROR "channel receive .* cannot lower in a go group child"
-			_ = z
-		}
-	}
-	return nil
-}

@@ -1,0 +1,319 @@
+// run
+
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"time"
+)
+
+var errSib = errors.New("sibling failed")
+
+const waitBound = 5 * time.Second
+
+func failSibling() error { return errSib }
+
+type env struct {
+	in  chan int
+	mid chan int
+	out int
+}
+
+type box struct {
+	V int
+}
+
+type holder struct {
+	c chan int
+}
+
+func one() int {
+	return 1
+}
+
+func use2(a, b int) int {
+	return a*10 + b
+}
+
+func set2(e *env, a, b int) {
+	e.out = use2(a, b)
+}
+
+func recvFuncLitOperand(ctx context.Context, e *env, fail bool) error {
+	go group (ctx) {
+		go {
+			e.out = use2(func() int { return 1 }(), <-e.in)
+		}
+		go {
+			if fail {
+				failSibling()?
+			}
+		}
+	}
+	return nil
+}
+
+func recvCompositeOperand(ctx context.Context, e *env, fail bool) error {
+	go group (ctx) {
+		go {
+			e.out = use2(box{V: 2}.V, <-e.in)
+		}
+		go {
+			if fail {
+				failSibling()?
+			}
+		}
+	}
+	return nil
+}
+
+func recvParenOperand(ctx context.Context, e *env, fail bool) error {
+	go group (ctx) {
+		go {
+			e.out = use2((e.out+one())*2, <-e.in)
+		}
+		go {
+			if fail {
+				failSibling()?
+			}
+		}
+	}
+	return nil
+}
+
+func recvCommentOperand(ctx context.Context, e *env, fail bool) error {
+	go group (ctx) {
+		go {
+			e.out = use2(one() /* a */ + /* b */ one(), <-e.in /* c */)
+		}
+		go {
+			if fail {
+				failSibling()?
+			}
+		}
+	}
+	return nil
+}
+
+func recvCommentArrow(ctx context.Context, e *env, fail bool) error {
+	go group (ctx) {
+		go {
+			e.out = <- /* c */ e.in
+		}
+		go {
+			if fail {
+				failSibling()?
+			}
+		}
+	}
+	return nil
+}
+
+func recvFuncLitChannel(ctx context.Context, e *env, fail bool) error {
+	go group (ctx) {
+		go {
+			e.out = <-func() chan int { return e.in }()
+		}
+		go {
+			if fail {
+				failSibling()?
+			}
+		}
+	}
+	return nil
+}
+
+func recvFuncLitStatement(ctx context.Context, e *env, fail bool) error {
+	go group (ctx) {
+		go {
+			<-func() chan int { return e.in }()
+			e.out = 7
+		}
+		go {
+			if fail {
+				failSibling()?
+			}
+		}
+	}
+	return nil
+}
+
+func recvCompositeChannel(ctx context.Context, e *env, fail bool) error {
+	go group (ctx) {
+		go {
+			e.out = <-holder{c: e.in}.c
+		}
+		go {
+			if fail {
+				failSibling()?
+			}
+		}
+	}
+	return nil
+}
+
+func sendFuncLitValue(ctx context.Context, e *env, fail bool) error {
+	go group (ctx) {
+		go {
+			e.mid <- func() int { return 7 }()
+		}
+		go {
+			if fail {
+				failSibling()?
+			}
+		}
+	}
+	return nil
+}
+
+func sendCompositeValue(ctx context.Context, e *env, fail bool) error {
+	go group (ctx) {
+		go {
+			e.mid <- box{V: 4}.V
+		}
+		go {
+			if fail {
+				failSibling()?
+			}
+		}
+	}
+	return nil
+}
+
+func sendComments(ctx context.Context, e *env, fail bool) error {
+	go group (ctx) {
+		go {
+			e.mid /* a */ <- /* b */ 3
+		}
+		go {
+			if fail {
+				failSibling()?
+			}
+		}
+	}
+	return nil
+}
+
+func recvMixedFuncLit(ctx context.Context, e *env, fail bool) error {
+	go group (ctx) {
+		go {
+			a, b := <-e.in, func() int { return 2 }()
+			e.out = use2(a, b)
+		}
+		go {
+			if fail {
+				failSibling()?
+			}
+		}
+	}
+	return nil
+}
+
+type cell struct {
+	name    string
+	run     func(ctx context.Context, e *env, fail bool) error
+	feed    []int
+	want    int
+	left    int
+	observe func(e *env) int
+}
+
+//logos:allow(correctness::unbounded_channel_op)
+func fromMid(e *env) int {
+	select {
+	case v := <-e.mid:
+		return v
+	default:
+		return -1
+	}
+}
+
+func valueCells() []cell {
+	return []cell{
+		{name: "funclit-operand", run: recvFuncLitOperand, feed: []int{5, 99}, want: 15, left: 1},
+		{name: "composite-operand", run: recvCompositeOperand, feed: []int{5, 99}, want: 25, left: 1},
+		{name: "paren-operand", run: recvParenOperand, feed: []int{5, 99}, want: 25, left: 1},
+		{name: "comment-operand", run: recvCommentOperand, feed: []int{5, 99}, want: 25, left: 1},
+		{name: "comment-arrow", run: recvCommentArrow, feed: []int{5, 99}, want: 5, left: 1},
+		{name: "funclit-channel", run: recvFuncLitChannel, feed: []int{5, 99}, want: 5, left: 1},
+		{name: "funclit-statement", run: recvFuncLitStatement, feed: []int{5, 99}, want: 7, left: 1},
+		{name: "composite-channel", run: recvCompositeChannel, feed: []int{5, 99}, want: 5, left: 1},
+		{name: "send-funclit", run: sendFuncLitValue, want: 7, observe: fromMid},
+		{name: "send-composite", run: sendCompositeValue, want: 4, observe: fromMid},
+		{name: "send-comments", run: sendComments, want: 3, observe: fromMid},
+		{name: "mixed-funclit", run: recvMixedFuncLit, feed: []int{5, 99}, want: 52, left: 1},
+	}
+}
+
+func cancelCells() []cell {
+	return []cell{
+		{name: "funclit-operand-cancel", run: recvFuncLitOperand},
+		{name: "composite-operand-cancel", run: recvCompositeOperand},
+		{name: "paren-operand-cancel", run: recvParenOperand},
+		{name: "comment-arrow-cancel", run: recvCommentArrow},
+		{name: "funclit-channel-cancel", run: recvFuncLitChannel},
+		{name: "funclit-statement-cancel", run: recvFuncLitStatement},
+		{name: "composite-channel-cancel", run: recvCompositeChannel},
+		{name: "mixed-funclit-cancel", run: recvMixedFuncLit},
+	}
+}
+
+//logos:allow(correctness::unbounded_channel_op)
+func exercise(c cell, fail bool) string {
+	e := &env{in: make(chan int, len(c.feed)), mid: make(chan int, 1)}
+	for _, v := range c.feed {
+		e.in <- v
+	}
+	watchdog := time.AfterFunc(waitBound, func() {
+		fmt.Printf("FAIL %s: group did not return within the bound\n", c.name)
+		os.Exit(1)
+	})
+	err := c.run(context.Background(), e, fail)
+	watchdog.Stop()
+	if fail != errors.Is(err, errSib) || (!fail && err != nil) {
+		return fmt.Sprintf("got error %v", err)
+	}
+	got := e.out
+	if c.observe != nil {
+		got = c.observe(e)
+	}
+	if got != c.want {
+		return fmt.Sprintf("got %d want %d", got, c.want)
+	}
+	if len(e.in) != c.left {
+		return fmt.Sprintf("got %d values left want %d", len(e.in), c.left)
+	}
+	return ""
+}
+
+func selected(name string) bool {
+	return len(os.Args) < 2 || os.Args[1] == name
+}
+
+func main() {
+	failed := false
+	report := func(name, problem string) {
+		if problem != "" {
+			fmt.Printf("FAIL %s: %s\n", name, problem)
+			failed = true
+			return
+		}
+		fmt.Printf("ok %s\n", name)
+	}
+	for _, c := range valueCells() {
+		if selected(c.name) {
+			report(c.name, exercise(c, false))
+		}
+	}
+	for _, c := range cancelCells() {
+		if selected(c.name) {
+			report(c.name, exercise(c, true))
+		}
+	}
+	if failed {
+		os.Exit(1)
+	}
+}
