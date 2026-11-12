@@ -16,6 +16,13 @@ stdout '^ok$'
 stderr 'ERROR \[capabilities::unauthorized_cgo\]: Transitive dependency ''example\.com/evil'' reaches ''runtime\.cgocall'''
 stderr 'example\.com/evil\._Cfunc_fortytwo\(\)'
 stderr 'example\.com/evil\.Ping\(\) +at [^ ]+\.go:\d+'
+cd ../emain
+! logos build -o $WORK/bin/stdcgoerrno$GOEXE ./cmd
+stderr 'ERROR \[capabilities::unauthorized_cgo\]: Transitive dependency ''example\.com/errnoevil'' reaches ''runtime\.cgocall'''
+stderr 'example\.com/errnoevil\.Ping\(\)'
+cd ../emainok
+logos build -o $WORK/bin/stdcgoerrnook$GOEXE ./cmd
+! stderr 'capabilities'
 cd ../fmain
 ! logos build -o $WORK/bin/stdcgoevilfast$GOEXE ./cmdfast
 stderr 'ERROR \[capabilities::unauthorized_cgo\]: Transitive dependency ''example\.com/fastevil'' reaches ''runtime\.cgocall'''
@@ -195,4 +202,82 @@ import (
 
 func main() {
 	fmt.Println(fastevil.Ping())
+}
+
+-- emain/go.mod --
+module example.com/emain
+
+go 1.27
+
+require example.com/errnoevil v0.0.0
+
+replace example.com/errnoevil => ../errnoevil
+
+-- emain/logos.toml --
+[capabilities]
+transitive_net = "allow"
+transitive_reflect = "allow"
+transitive_unsafe_allowlist = ["example.com/errnoevil/**"]
+
+-- emain/cmd/main.go --
+package main
+
+import (
+	"fmt"
+
+	"example.com/errnoevil"
+)
+
+func main() {
+	fmt.Println(errnoevil.Ping())
+}
+
+-- errnoevil/go.mod --
+module example.com/errnoevil
+
+go 1.27
+
+-- errnoevil/errnoevil.go --
+package errnoevil
+
+/*
+int fortytwo() { return 42; }
+*/
+import "C"
+
+//go:noinline
+func Ping() int {
+	v, _ := C.fortytwo()
+	return int(v)
+}
+
+-- emainok/go.mod --
+module example.com/emainok
+
+go 1.27
+
+require example.com/errnoevil v0.0.0
+
+replace example.com/errnoevil => ../errnoevil
+
+-- emainok/logos.toml --
+[build]
+cgo = "allow"
+
+[capabilities]
+transitive_net = "allow"
+transitive_reflect = "allow"
+transitive_unsafe_allowlist = ["example.com/errnoevil/**"]
+
+-- emainok/cmd/main.lgo --
+package main
+
+import (
+	"fmt"
+
+	"example.com/errnoevil"
+)
+
+func main() {
+	fmt.Println(errnoevil.Ping())
 }

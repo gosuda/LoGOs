@@ -118,9 +118,15 @@ type logosCapHit struct {
 	name string
 }
 
+var capCgoWrapperMarks = []string{"._Cfunc_", "._C2func_"}
+
 func capIsCgoTrampoline(name string) bool {
-	_, after, ok := strings.Cut(name, "._Cfunc_")
-	return ok && after != ""
+	for _, mark := range capCgoWrapperMarks {
+		if _, after, ok := strings.Cut(name, mark); ok && after != "" {
+			return true
+		}
+	}
+	return false
 }
 
 type logosCapAuditor struct {
