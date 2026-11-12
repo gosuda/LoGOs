@@ -290,6 +290,7 @@ const func BadSigChan(ch chan /* ERROR "correctness::const_func_impure" */ int) 
 const func Gen[T any](x T) T { return x }
 
 const gen /* ERRORx "const_eval.*generic" */ = Gen[int](1)
+const lit /* ERRORx "const_eval.*function literal" */ = func() int { return 1 }()
 
 const func C100() int8 { return 100 }
 
