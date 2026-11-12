@@ -65,3 +65,10 @@ outer:
 		}
 	}
 }
+
+func plainBreakAfterConstSwitch[T any]() {
+	const switch T {
+	case int:
+	}
+	break // ERROR "is not in a loop"
+}
