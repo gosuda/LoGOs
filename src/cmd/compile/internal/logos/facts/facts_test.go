@@ -718,6 +718,35 @@ func TestAllocFreeFactRoundTrip(t *testing.T) {
 	}
 }
 
+func TestBareUnionFactRoundTrip(t *testing.T) {
+	fp := goobj.FingerprintType{9, 8, 7, 6, 5, 4, 3, 2}
+	in := &facts.Facts{
+		Fingerprint: fp,
+		BareUnions:  []string{"Scalar", "Choice"},
+	}
+	want := "logos-facts 3\n" +
+		"fingerprint 0908070605040302\n" +
+		"unionbare Choice\n" +
+		"unionbare Scalar\n"
+	got := facts.Encode(fp, in)
+	if string(got) != want {
+		t.Fatalf("Encode mismatch:\n got %q\nwant %q", got, want)
+	}
+	back, err := facts.Decode(got)
+	if err != nil {
+		t.Fatalf("Decode(Encode) failed: %v", err)
+	}
+	if wantBack := []string{"Choice", "Scalar"}; !reflect.DeepEqual(back.BareUnions, wantBack) {
+		t.Errorf("round trip = %v, want %v", back.BareUnions, wantBack)
+	}
+	for _, bad := range []string{"unionbare no!such\n", "unionbare A B\n", "unionbare\n"} {
+		full := "logos-facts 3\nfingerprint 0908070605040302\n" + bad
+		if _, err := facts.Decode([]byte(full)); err == nil {
+			t.Errorf("Decode accepted %q", bad)
+		}
+	}
+}
+
 func TestJSONFactsRoundTrip(t *testing.T) {
 	fp := goobj.FingerprintType{9, 8, 7, 6, 5, 4, 3, 2}
 	in := &facts.Facts{

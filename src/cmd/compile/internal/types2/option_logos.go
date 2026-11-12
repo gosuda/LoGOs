@@ -60,9 +60,12 @@ func LogosOptionIsBare(elem Type) bool {
 	}
 	members, isUnion := LogosUnionTerms(elem)
 	if !isUnion {
-		return false
+		return logosImportedBareUnion(elem)
 	}
 	for _, m := range members {
+		if logosImportedBareUnion(m) {
+			continue
+		}
 		mu := Unalias(m)
 		if n, ok := mu.(*Named); ok {
 			mu = n.Underlying()

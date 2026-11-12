@@ -56,7 +56,9 @@ func siteDisplay(pos syntax.Pos, base string, line uint) (string, uint) {
 func Lower(pkg *types2.Package, info *types2.Info, files []*syntax.File, src map[*syntax.File][]byte) (bool, map[*syntax.File][]Edit) {
 	clearRodataPackage(pkg.Path()) // fresh read-only marks per compile.
 	clearOwnedConstants()
-	facts.SetCurrent(facts.Write(pkg, info, files, src)) // every source-phase record, before any file lowers.
+	f := facts.Write(pkg, info, files, src)
+	f.BareUnions = bareUnions(pkg)
+	facts.SetCurrent(f)
 	shared := &packageLower{info: info, tpkg: pkg, constMaps: collectConstMaps(files, info)}
 	shared.importedMaps = map[*types2.Var]*constMapGen{}
 	shared.importedDone = map[string]bool{}

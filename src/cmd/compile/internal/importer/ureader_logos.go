@@ -24,6 +24,7 @@ func logosOverlayHook(pkg *types2.Package) *types2.Package {
 	logosRegisterPropFacts(pkg)
 	logosRegisterDefaultFacts(pkg)
 	logosRegisterUnionFacts(pkg)
+	logosRegisterBareUnionFacts(pkg)
 	return pkg
 }
 
@@ -44,6 +45,15 @@ func logosRegisterUnionFacts(pkg *types2.Package) {
 	}
 	for typeName, members := range byType {
 		types2.LogosNoteImportedUnionMembers(pkg.Path(), typeName, members)
+	}
+}
+
+func logosRegisterBareUnionFacts(pkg *types2.Package) {
+	if pkg == nil {
+		return
+	}
+	if f, ok := facts.Lookup(pkg.Path()); ok && f != nil {
+		types2.LogosNoteImportedBareUnions(pkg.Path(), f.BareUnions)
 	}
 }
 

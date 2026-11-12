@@ -682,6 +682,25 @@ func (fl *fileLower) lowerUnionMembers() {
 	}
 }
 
+func bareUnions(pkg *types2.Package) []string {
+	var out []string
+	scope := pkg.Scope()
+	for _, name := range scope.Names() {
+		tn, ok := scope.Lookup(name).(*types2.TypeName)
+		if !ok || tn.IsAlias() {
+			continue
+		}
+		n, ok := tn.Type().(*types2.Named)
+		if !ok || n.TypeParams().Len() != 0 {
+			continue
+		}
+		if _, isUnion := types2.LogosUnionTerms(n); isUnion && types2.LogosOptionIsBare(n) {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
 func mentionsTypeParam(t types2.Type) bool {
 	seen := make(map[types2.Type]bool)
 	var walk func(t types2.Type) bool

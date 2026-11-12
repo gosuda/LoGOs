@@ -631,6 +631,8 @@ A Go importer MUST see a non-nil `*T` and a `*T?` as `*T`, and MUST see every ot
 
 A `.lgo` importer MUST see each option that an imported declaration carries in a field, a property, a parameter, or a result, and MUST see it also when the declaration belongs to a generic type or is a generic function. [T-202][T-Sec5]
 
+A `.lgo` importer MUST lower an option of an imported closed union by the rule of the package that declares the union, so that both packages use the bare interface for an option of a union with no nil-capable member and `logos/rt.Option[T]` for every other option. [T-202][T-Sec5]
+
 ```lgo
 func greet(u *User?) string {
     return u?.Name ?? "anon"

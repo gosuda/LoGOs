@@ -121,6 +121,7 @@ type Facts struct {
 	JsonMetas    []JsonMetaFact
 	JsonKeys     []JsonKeyFact
 	UnionMembers []UnionMemberFact
+	BareUnions   []string
 	GoPackage    bool
 }
 
@@ -129,7 +130,7 @@ func (f *Facts) empty() bool {
 		len(f.Readonlys) == 0 && len(f.Props) == 0 && len(f.Conforms) == 0 &&
 		len(f.Comptimes) == 0 && len(f.ConstFuncs) == 0 && len(f.Defaults) == 0 &&
 		len(f.Locks) == 0 && len(f.AllocFrees) == 0 && len(f.JsonMetas) == 0 &&
-		len(f.JsonKeys) == 0 && len(f.UnionMembers) == 0 && len(f.ConstMaps) == 0 && len(f.ConstComps) == 0 && !f.GoPackage
+		len(f.JsonKeys) == 0 && len(f.UnionMembers) == 0 && len(f.BareUnions) == 0 && len(f.ConstMaps) == 0 && len(f.ConstComps) == 0 && !f.GoPackage
 }
 
 type DefaultFact struct {
@@ -277,6 +278,11 @@ func Encode(fp goobj.FingerprintType, f *Facts) []byte {
 		for _, a := range f.AllocFrees {
 			if a.Object != "" {
 				recs = append(recs, factRecord{line: "allocfree " + a.Object})
+			}
+		}
+		for _, u := range f.BareUnions {
+			if isIdent(u) {
+				recs = append(recs, factRecord{line: "unionbare " + u})
 			}
 		}
 		recs = append(recs, f.jsonRecords()...)
@@ -649,6 +655,17 @@ func Decode(data []byte) (*Facts, error) {
 				return nil, err
 			}
 			f.AllocFrees = append(f.AllocFrees, AllocFreeFact{Object: fields[1]})
+		case strings.HasPrefix(line, "unionbare "):
+			if len(fields) != 2 {
+				return nil, fmt.Errorf(`logos facts line %d: bad unionbare record %q (want "unionbare <type>")`, ln, line)
+			}
+			if !isIdent(fields[1]) {
+				return nil, fmt.Errorf("logos facts line %d: bad type %q", ln, fields[1])
+			}
+			if err := d.dup(ln, "unionbare", fields[1], fields[1]); err != nil {
+				return nil, err
+			}
+			f.BareUnions = append(f.BareUnions, fields[1])
 		case strings.HasPrefix(line, "fn "):
 			if len(fields) != 3 {
 				return nil, fmt.Errorf("logos facts line %d: bad fn record %q (want %q)", ln, line, "fn <object> <flag>[,<flag>...]")

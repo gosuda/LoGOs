@@ -560,6 +560,29 @@ func logosLookupImportedUnionMembers(pkgPath, typeName string) []LogosImportedUn
 	return logosImportedUnionMembers.m[pkgPath][typeName]
 }
 
+var logosImportedBareUnions = struct {
+	sync.RWMutex
+	m map[string]bool
+}{m: make(map[string]bool)}
+
+func LogosNoteImportedBareUnions(pkgPath string, typeNames []string) {
+	logosImportedBareUnions.Lock()
+	defer logosImportedBareUnions.Unlock()
+	for _, name := range typeNames {
+		logosImportedBareUnions.m[pkgPath+"."+name] = true
+	}
+}
+
+func logosImportedBareUnion(t Type) bool {
+	n, ok := Unalias(t).(*Named)
+	if !ok || n.Obj().Pkg() == nil {
+		return false
+	}
+	logosImportedBareUnions.RLock()
+	defer logosImportedBareUnions.RUnlock()
+	return logosImportedBareUnions.m[n.Obj().Pkg().Path()+"."+n.Obj().Name()]
+}
+
 func (check *Checker) logosCheckForeignUnionMembers(fld *Var, t Type, seen map[string]bool) {
 	name, ok := logosForeignUnionName(t)
 	if !ok {
