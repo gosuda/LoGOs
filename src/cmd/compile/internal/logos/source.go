@@ -237,7 +237,8 @@ func skipSpaceBack(src []byte, off int) int {
 func commentStartBack(src []byte, j int) (int, bool) {
 	if j >= 2 && src[j-2] == '*' && src[j-1] == '/' {
 		if k := bytes.LastIndex(src[:j-2], []byte("/*")); k >= 0 {
-			return k, true
+			indent := src[bytes.LastIndexByte(src[:k], '\n')+1 : k]
+			return k, len(bytes.Trim(indent, " \t\r")) == 0
 		}
 		return 0, false
 	}
