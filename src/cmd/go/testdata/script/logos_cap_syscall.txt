@@ -66,6 +66,25 @@ stderr 'ERROR \[capabilities::unauthorized_exec\]: Transitive dependency ''examp
 stderr 'ERROR \[capabilities::unauthorized_exec\]: Transitive dependency ''example\.com/idep'' reaches ''syscall\.runtime_doAllThreadsSyscall'''
 cd ../..
 
+cd j/main
+logos build -o $WORK/bin/sysj$GOEXE ./cmd
+! stderr 'capabilities::'
+exec $WORK/bin/sysj$GOEXE
+stdout '^severity-allowed$'
+cd ../..
+
+cd k/main
+! logos build -o $WORK/bin/sysk$GOEXE ./cmd
+stderr 'ERROR \[capabilities::unauthorized_net\]: Transitive dependency ''example\.com/kdep'' reaches ''syscall\.Syscall'''
+! stderr 'unauthorized_exec'
+cd ../..
+
+cd l/main
+! logos build -o $WORK/bin/sysl$GOEXE ./cmd
+stderr 'ERROR \[capabilities::unauthorized_exec\]: Transitive dependency ''example\.com/ldep'' reaches ''syscall\.Syscall'''
+! stderr 'unauthorized_net'
+cd ../..
+
 -- a/main/go.mod --
 module example.com/amain
 
@@ -454,4 +473,119 @@ func Init() {
 	syscall.AllThreadsSyscall(0, 0, 0, 0)
 	syscall.AllThreadsSyscall6(0, 0, 0, 0, 0, 0, 0)
 	doAllThreads(0, 0, 0, 0, 0, 0, 0)
+}
+
+-- j/main/go.mod --
+module example.com/jmain
+
+go 1.27
+
+require example.com/jdep v0.0.0
+
+replace example.com/jdep => ../dep
+
+-- j/main/logos.toml --
+[capabilities]
+transitive_exec = "allow"
+transitive_net = "allow"
+
+-- j/main/cmd/main.go --
+package main
+
+import (
+	"fmt"
+
+	"example.com/jdep"
+)
+
+func main() {
+	jdep.Init()
+	fmt.Println("severity-allowed")
+}
+
+-- j/dep/go.mod --
+module example.com/jdep
+
+go 1.27
+
+-- j/dep/dep.go --
+package jdep
+
+import "syscall"
+
+//go:noinline
+func Init() {
+	syscall.Syscall(syscall.SYS_GETPID, 0, 0, 0)
+}
+
+-- k/main/go.mod --
+module example.com/kmain
+
+go 1.27
+
+require example.com/kdep v0.0.0
+
+replace example.com/kdep => ../dep
+
+-- k/main/logos.toml --
+[capabilities]
+transitive_exec = "allow"
+transitive_net = "deny"
+
+-- k/main/cmd/main.go --
+package main
+
+import "example.com/kdep"
+
+func main() { kdep.Init() }
+
+-- k/dep/go.mod --
+module example.com/kdep
+
+go 1.27
+
+-- k/dep/dep.go --
+package kdep
+
+import "syscall"
+
+//go:noinline
+func Init() {
+	syscall.Syscall(syscall.SYS_GETPID, 0, 0, 0)
+}
+
+-- l/main/go.mod --
+module example.com/lmain
+
+go 1.27
+
+require example.com/ldep v0.0.0
+
+replace example.com/ldep => ../dep
+
+-- l/main/logos.toml --
+[capabilities]
+transitive_exec = "deny"
+transitive_net = "allow"
+
+-- l/main/cmd/main.go --
+package main
+
+import "example.com/ldep"
+
+func main() { ldep.Init() }
+
+-- l/dep/go.mod --
+module example.com/ldep
+
+go 1.27
+
+-- l/dep/dep.go --
+package ldep
+
+import "syscall"
+
+//go:noinline
+func Init() {
+	syscall.Syscall(syscall.SYS_GETPID, 0, 0, 0)
 }
