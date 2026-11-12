@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+//go:build !logosejected
+
 // Attack tests for M1-S4: direct TraceErr/ErrorTrace behavior without ?
 // syntax. The three-function ? propagation chain is owned by M1-S5 and
 // is not covered here. Signatures follow the M1-S4 plan text verbatim:
