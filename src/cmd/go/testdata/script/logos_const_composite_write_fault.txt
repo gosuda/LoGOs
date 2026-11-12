@@ -1,0 +1,65 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+mkdir $WORK/bin
+
+# A write into a const slice that holds no map faults at run time, because constant data with pointers lives in read-only memory.
+logos build -o $WORK/bin/wfault$GOEXE .
+! exec $WORK/bin/wfault$GOEXE store
+stderr 'unexpected fault address'
+! exec $WORK/bin/wfault$GOEXE increment
+stderr 'unexpected fault address'
+! exec $WORK/bin/wfault$GOEXE copy
+stderr 'unexpected fault address'
+! exec $WORK/bin/wfault$GOEXE copy-reslice
+stderr 'unexpected fault address'
+! exec $WORK/bin/wfault$GOEXE clear
+stderr 'unexpected fault address'
+! exec $WORK/bin/wfault$GOEXE store-nested
+stderr 'unexpected fault address'
+
+# An append to a const slice allocates a new array and leaves the constant alone.
+exec $WORK/bin/wfault$GOEXE append
+stdout '^append \[1 2 3 4\] \[1 2 3\]$'
+
+-- go.mod --
+module example.com/wfault
+
+go 1.27
+
+-- main.lgo --
+package main
+
+import (
+	"fmt"
+	"os"
+)
+
+type row struct {
+	N int
+	V []int
+}
+
+const L = []int{1, 2, 3}
+
+const R = []row{{N: 1, V: []int{4, 5}}}
+
+func main() {
+	switch os.Args[1] {
+	case "store":
+		L[0] = 9
+	case "increment":
+		L[1]++
+	case "copy":
+		copy(L, []int{7})
+	case "copy-reslice":
+		copy(L[1:], []int{7})
+	case "clear":
+		clear(L)
+	case "store-nested":
+		R[0].V[0] = 9
+	case "append":
+		s := append(L, 4)
+		fmt.Println("append", s, L)
+	}
+	fmt.Println("no fault", L, R)
+}
