@@ -7,6 +7,9 @@ logos build -o $WORK/bin/nilpos$GOEXE ./g/cmd
 exec $WORK/bin/nilpos$GOEXE
 stdout '^later: logos: nil from Go value stored into non-nil \*a\.User at q\.go:15$'
 stdout '^now-n$'
+stdout '^last: logos: nil from Go value stored into non-nil \*a\.User at q\.go:32$'
+stdout '^first: logos: nil from Go value stored into non-nil \*a\.User at q\.go:42$'
+stdout '^both-pq$'
 cd ..
 cd ..
 
@@ -32,6 +35,10 @@ type User struct {
 
 func G(u *User) string {
 	return u.Name
+}
+
+func Join(first *User, sep int, second *User) string {
+	return first.Name + second.Name
 }
 
 -- w/g/go.mod --
@@ -65,6 +72,30 @@ func Now() string {
 	return a.G(&a.User{Name: "n"})
 }
 
+func Last() (msg string) {
+	defer func() {
+		if r := recover(); r != nil {
+			msg = "last: " + fmt.Sprint(r)
+		}
+	}()
+	_ = a.Join(&a.User{Name: "p"}, 1, nil)
+	return ""
+}
+
+func First() (msg string) {
+	defer func() {
+		if r := recover(); r != nil {
+			msg = "first: " + fmt.Sprint(r)
+		}
+	}()
+	_ = a.Join(nil, 1, &a.User{Name: "q"})
+	return ""
+}
+
+func Both() string {
+	return a.Join(&a.User{Name: "p"}, 1, &a.User{Name: "q"})
+}
+
 -- w/g/cmd/main.go --
 package main
 
@@ -77,4 +108,7 @@ import (
 func main() {
 	fmt.Println(q.Later())
 	fmt.Println("now-" + q.Now())
+	fmt.Println(q.Last())
+	fmt.Println(q.First())
+	fmt.Println("both-" + q.Both())
 }
