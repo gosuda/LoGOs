@@ -1509,12 +1509,6 @@ func (ce *chainEmit) resultSpelling() string {
 		_ = s
 		return "[]" + ce.outElem
 	}
-	if _, ok := types2.Unalias(t).(*types2.Option); ok {
-		cg.fl.needRT = true
-		if spelled, ok := cg.fl.spellLowered(t); ok {
-			return spelled
-		}
-	}
 	return cg.spellType(t)
 }
 
