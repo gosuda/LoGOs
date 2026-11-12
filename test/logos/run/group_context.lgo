@@ -29,7 +29,7 @@ var errBoom = errors.New("boom")
 type ctxKey struct{}
 
 type seen struct {
-	between, child, after, kept, deferred, inner, outerLambda, post context.Context
+	between, child, after, kept, deferred, errdeferred, inner, outerLambda, post context.Context
 }
 
 type outcome struct {
@@ -70,6 +70,8 @@ func fetch(ctx context.Context, x int, started chan struct{}) (int, error) {
 func note(ctx context.Context, into *context.Context) {
 	*into = ctx
 }
+
+func boom() error { return errBoom }
 
 func goBlockCall(ctx context.Context) error {
 	started := make(chan struct{})
@@ -132,6 +134,16 @@ func goDefer(ctx context.Context, s *seen) error {
 		go {
 			defer note(ctx, &s.deferred)
 			_ = ctx
+		}
+	}
+	return nil
+}
+
+func goErrdefer(ctx context.Context, s *seen) error {
+	go group (ctx, limit = 1) {
+		go {
+			errdefer note(ctx, &s.errdeferred)
+			boom()?
 		}
 	}
 	return nil
@@ -376,6 +388,10 @@ func goIdentityCases(outer context.Context) {
 	var d seen
 	check("go-defer-run", goDefer(outer, &d) == nil, nil, nil)
 	distinct("go-defer-sees-group-context", outer, d.deferred)
+
+	var e seen
+	check("go-errdefer-run", errors.Is(goErrdefer(outer, &e), errBoom), nil, errBoom)
+	distinct("go-errdefer-sees-group-context", outer, e.errdeferred)
 }
 
 func goScopeCases(outer context.Context) {

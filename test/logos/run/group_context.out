@@ -20,6 +20,8 @@ ok go-kept-run
 ok go-kept-cancelled-after-join
 ok go-defer-run
 ok go-defer-sees-group-context
+ok go-errdefer-run
+ok go-errdefer-sees-group-context
 ok go-limit-wait-run
 ok go-limit-wait-order
 ok go-shadow-run
