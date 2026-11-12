@@ -1,8 +1,9 @@
 # A standard-library-provenance package keeps the 32-byte
-# variable-make stack buffer at O2 and O3, while a user package
-# uses the tier buffer. Provenance follows the std gate: the probe
-# compiles as the external test package of a dotless import path,
-# which the gate treats as standard provenance.
+# variable-make stack buffer at every opt level (O0, O1, O2, O3,
+# Os), while a user package uses the tier buffer. Provenance
+# follows the std gate: the probe compiles as the external test
+# package of a dotless import path, which the gate treats as
+# standard provenance.
 env GOPROXY=off
 env GOTOOLCHAIN=local
 env GO111MODULE=off
@@ -18,6 +19,15 @@ go test -count=1 -O=2 .
 stdout '^ok'
 ! stdout 'no tests to run'
 go test -count=1 -O=3 .
+stdout '^ok'
+! stdout 'no tests to run'
+go test -count=1 -O=0 .
+stdout '^ok'
+! stdout 'no tests to run'
+go test -count=1 -O=1 .
+stdout '^ok'
+! stdout 'no tests to run'
+go test -count=1 -O=s .
 stdout '^ok'
 ! stdout 'no tests to run'
 
