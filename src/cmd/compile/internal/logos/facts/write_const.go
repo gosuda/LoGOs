@@ -122,21 +122,6 @@ func emitReadonlyFacts(pkg *types2.Package, f *Facts, decls []constFuncDecl, rec
 		if d.obj == nil || !d.obj.LogosReadonly() {
 			continue
 		}
-		if d.sig != nil {
-			if tp := d.sig.TypeParams(); tp != nil && tp.Len() > 0 {
-				continue
-			}
-			if rp := d.sig.RecvTypeParams(); rp != nil && rp.Len() > 0 {
-				continue
-			}
-			if d.sig.Recv() != nil {
-				if named, ok := constRecvBase(d.sig.Recv().Type()).(*types2.Named); ok {
-					if tp := named.TypeParams(); tp != nil && tp.Len() > 0 {
-						continue
-					}
-				}
-			}
-		}
 		if recvMut[d.obj] || len(paramMask[d.obj]) != 0 {
 			continue
 		}
