@@ -212,3 +212,27 @@ func andLiteralLeft(q U?) bool {
 func orLiteral(q U?) bool {
 	return q == nil || func() bool { return take(q /* ERROR "[correctness::nil_deref_unproven]" */) != "" }()
 }
+
+func operandsReadInPlace(ctx context.Context, q U?) error {
+	if q != nil {
+		defer take(q)
+		go group (ctx) {
+			_ = take(q)
+			go take(q)
+			go {
+				_ = take(q /* ERROR "[correctness::nil_deref_unproven]" */)
+			}
+		}
+		q = nil
+	}
+	return nil
+}
+
+func operandsUnnarrowed(ctx context.Context, q U?) error {
+	defer take(q /* ERROR "[correctness::nil_deref_unproven]" */)
+	go group (ctx) {
+		_ = take(q /* ERROR "[correctness::nil_deref_unproven]" */)
+		go take(q /* ERROR "[correctness::nil_deref_unproven]" */)
+	}
+	return nil
+}

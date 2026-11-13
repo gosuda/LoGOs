@@ -185,3 +185,30 @@ func noGuard(up *User?) {
 	_ = v
 	_ = up
 }
+
+func plainBlockScope() int {
+	x := 1
+	{
+		x := "s"
+		_ = x
+	}
+	var y int = x
+	return y
+}
+
+func localGuard() {
+	var up *User? = nil
+	if up == nil {
+		return
+	}
+	_ = up.Name
+	{
+		_ = up.Name
+		{
+			_ = up.Name
+		}
+		var up *User? = nil
+		_ = up.Name /* ERROR "correctness::nil_deref_unproven" */
+	}
+	_ = up.Name
+}
