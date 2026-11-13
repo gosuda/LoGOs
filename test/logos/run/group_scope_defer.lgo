@@ -115,6 +115,20 @@ func failureExit(ctx context.Context) error {
 	return nil
 }
 
+func fail() error { return errBoom }
+
+func failedTryExit(ctx context.Context) error {
+	go group (ctx) {
+		scope defer note("cleanup")
+		go {
+			slow("child-done")
+		}
+		fail()?
+		note("unreachable")
+	}
+	return nil
+}
+
 func innerBlock(ctx context.Context) error {
 	go group (ctx) {
 		go {
@@ -235,6 +249,7 @@ func main() {
 	scenario("scope-defer-runs-after-join-on-break", breakExit, "child-done,cleanup,after-loop", isNil)
 	scenario("scope-defers-run-last-in-first-out-after-join", lifoExit, "child-done,cleanup-2,cleanup-1", isNil)
 	scenario("scope-defer-runs-after-join-on-child-failure", failureExit, "child-fail,cleanup", isBoom)
+	scenario("scope-defer-runs-after-join-on-failed-try", failedTryExit, "child-done,cleanup", isBoom)
 	scenario("scope-defer-in-inner-block-runs-before-join", innerBlock, "inner-cleanup,child-done", isNil)
 	scenario("outer-scope-defer-runs-after-join-on-return", outerScope, "child-done,outer-cleanup", isNil)
 	scenario("scope-defer-runs-after-join-on-panic", panicExit, "child-done,cleanup,recovered", isNil)

@@ -678,11 +678,11 @@ func (fc *funcLower) tryAssignCore(s *syntax.AssignStmt, t *syntax.TryExpr, call
 	if s.Op == syntax.Def {
 		native = []syntax.Stmt{
 			errDefineOf(stmtPos, lhs, call, nameOf(tpos, errSpelling)),
-			errCheckOf(stmtPos, nameOf(tpos, errSpelling), exitNative),
+			closeAtExit(errCheckOf(stmtPos, nameOf(tpos, errSpelling), exitNative), tpos),
 		}
 		text := renderText([]syntax.Stmt{
 			errDefineOf(stmtPos, []syntax.Expr{lhsMark}, callMark, nameOf(tpos, errSpelling)),
-			errCheckOf(stmtPos, nameOf(tpos, errSpelling), exitText),
+			closeAtExit(errCheckOf(stmtPos, nameOf(tpos, errSpelling), exitText), tpos),
 		}, tw.subs)
 		return native, text, spanStart, spanEnd
 	}
@@ -710,11 +710,11 @@ func (fc *funcLower) tryAssignCore(s *syntax.AssignStmt, t *syntax.TryExpr, call
 		list = append(list, c.hoist.pres...)
 		list = append(list, assign)
 		list = append(list, c.hoist.posts...)
-		return append(list, errCheckOf(stmtPos, nameOf(tpos, errSpelling), exit))
+		return append(list, closeAtExit(errCheckOf(stmtPos, nameOf(tpos, errSpelling), exit), tpos))
 	}
-	native = []syntax.Stmt{blockOf(stmtPos, stmts(
+	native = []syntax.Stmt{blockEndingAt(stmtPos, tpos, stmts(
 		assignOf(stmtPos, append(assignLhs, nameOf(tpos, errSpelling)), []syntax.Expr{call}), exitNative))}
-	text := renderText([]syntax.Stmt{blockOf(stmtPos, stmts(
+	text := renderText([]syntax.Stmt{blockEndingAt(stmtPos, tpos, stmts(
 		assignOf(stmtPos, []syntax.Expr{lhsMarkOf, nameOf(tpos, errSpelling)}, []syntax.Expr{callMark}), exitText))}, tw.subs)
 	return native, text, spanStart, spanEnd
 }
@@ -744,16 +744,16 @@ func (fc *funcLower) tryExprCore(s *syntax.ExprStmt, t *syntax.TryExpr, call *sy
 	var native []syntax.Stmt
 	var text otext
 	if n == 0 {
-		native = []syntax.Stmt{errCheckInitOf(stmtPos, nil, call, nameOf(tpos, errSpelling), exitNative)}
-		text = renderText([]syntax.Stmt{errCheckInitOf(stmtPos, nil, callMark, nameOf(tpos, errSpelling), exitText)}, tw.subs)
+		native = []syntax.Stmt{closeAtExit(errCheckInitOf(stmtPos, nil, call, nameOf(tpos, errSpelling), exitNative), tpos)}
+		text = renderText([]syntax.Stmt{closeAtExit(errCheckInitOf(stmtPos, nil, callMark, nameOf(tpos, errSpelling), exitText), tpos)}, tw.subs)
 	} else {
 		native = []syntax.Stmt{
 			errDefineOf(stmtPos, blankNames(stmtPos, n), call, nameOf(tpos, errSpelling)),
-			errCheckOf(stmtPos, nameOf(tpos, errSpelling), exitNative),
+			closeAtExit(errCheckOf(stmtPos, nameOf(tpos, errSpelling), exitNative), tpos),
 		}
 		text = renderText([]syntax.Stmt{
 			errDefineOf(stmtPos, blankNames(stmtPos, n), callMark, nameOf(tpos, errSpelling)),
-			errCheckOf(stmtPos, nameOf(tpos, errSpelling), exitText),
+			closeAtExit(errCheckOf(stmtPos, nameOf(tpos, errSpelling), exitText), tpos),
 		}, tw.subs)
 	}
 	return native, text, spanStart, spanEnd

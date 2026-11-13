@@ -141,7 +141,11 @@ func exprStmtOf(pos syntax.Pos, x syntax.Expr) *syntax.ExprStmt {
 }
 
 func blockOf(pos syntax.Pos, list []syntax.Stmt) *syntax.BlockStmt {
-	return at(&syntax.BlockStmt{List: list, Rbrace: pos}, pos)
+	return blockEndingAt(pos, pos, list)
+}
+
+func blockEndingAt(pos, end syntax.Pos, list []syntax.Stmt) *syntax.BlockStmt {
+	return at(&syntax.BlockStmt{List: list, Rbrace: end}, pos)
 }
 
 func ifOf(pos syntax.Pos, init syntax.SimpleStmt, cond syntax.Expr, then []syntax.Stmt) *syntax.IfStmt {

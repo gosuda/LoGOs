@@ -41,6 +41,11 @@ func errCheckInitOf(pos syntax.Pos, lhs []syntax.Expr, call syntax.Expr, err *sy
 	return ifOf(pos, errDefineOf(pos, lhs, call, err), notNil(pos, err), exit)
 }
 
+func closeAtExit(check *syntax.IfStmt, exitPos syntax.Pos) *syntax.IfStmt {
+	check.Then.Rbrace = exitPos
+	return check
+}
+
 func typedVarDecl(pos syntax.Pos, name *syntax.Name, typ syntax.Expr) *syntax.DeclStmt {
 	return at(&syntax.DeclStmt{DeclList: []syntax.Decl{
 		at(&syntax.VarDecl{NameList: []*syntax.Name{name}, Type: typ}, pos),
