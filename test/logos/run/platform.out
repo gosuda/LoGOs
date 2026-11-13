@@ -2,6 +2,7 @@ ok file-open
 ok file-name
 ok global
 ok declared-store
+ok explicit-deref
 ok nil-branch
 ok opt-to-go
 ok opt-nil

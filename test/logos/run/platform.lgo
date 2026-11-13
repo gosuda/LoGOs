@@ -115,6 +115,8 @@ func main() {
 	good := flag.Lookup("have")
 	var fl *flag.Flag = good
 	check("declared-store", fl.Name == "have", fl.Name, "have")
+	deref := *good
+	check("explicit-deref", deref.Name == "have" && deref.DefValue == "HAVE", fmt.Sprint(deref.Name, deref.DefValue), "haveHAVE")
 
 	inferred := flag.Lookup("missing")
 	check("nil-branch", inferred == nil, inferred == nil, true)
