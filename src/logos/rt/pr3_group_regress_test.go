@@ -9,6 +9,8 @@ package rt
 import (
 	"context"
 	"errors"
+	"runtime"
+	"strings"
 	"testing"
 	"time"
 )
@@ -173,11 +175,25 @@ func TestPR3GroupFailureLeavesOutsiderNetpollBlocked(t *testing.T) {
 	defer cli.Close()
 	defer srv.Close()
 	outsider := make(chan error, 1)
+	reading := make(chan uint64, 1)
 	go func() {
+		reading <- goroutineID()
 		_, err := outSrv.Read(make([]byte, 1))
 		outsider <- err
 	}()
-	time.Sleep(100 * time.Millisecond)
+	id := <-reading
+	deadline := time.Now().Add(2 * time.Second)
+	for !strings.Contains(goroutineStack(id), "[IO wait]") {
+		select {
+		case err := <-outsider:
+			t.Fatalf("outsider Read returned before group failure: %v", err)
+		default:
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("outsider did not block in netpoll")
+		}
+		runtime.Gosched()
+	}
 	errChild := errors.New("child failed")
 	g, _ := NewGroup(context.Background(), 0)
 	started := make(chan struct{})
@@ -194,7 +210,7 @@ func TestPR3GroupFailureLeavesOutsiderNetpollBlocked(t *testing.T) {
 	select {
 	case err := <-outsider:
 		t.Fatalf("outsider Read returned %v after group failure", err)
-	case <-time.After(300 * time.Millisecond):
+	default:
 	}
 	if _, err := outCli.Write([]byte{1}); err != nil {
 		t.Fatal(err)
