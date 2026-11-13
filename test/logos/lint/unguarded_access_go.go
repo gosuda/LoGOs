@@ -304,3 +304,95 @@ func goLiteralCallArgumentsRunInParent(s *stats) {
 		s.total++ // ERROR "\[concurrency::unguarded_access\]"
 	}(s.total)
 }
+
+func backwardGotoInClosure(s *stats) {
+	s.mu.Lock()
+	func() {
+	L:
+		_ = s.total // ERROR "\[concurrency::unguarded_access\]"
+		s.mu.Unlock()
+		goto L
+	}()
+}
+
+func backwardGotoInClosureRelocked(s *stats) {
+	s.mu.Lock()
+	func() {
+	L:
+		_ = s.total
+		s.mu.Unlock()
+		s.mu.Lock()
+		goto L
+	}()
+}
+
+func fiveLabelClosureUnlock(s *stats) {
+	func() {
+		s.mu.Lock()
+		goto E
+	A:
+		_ = s.total // ERROR "\[concurrency::unguarded_access\]"
+		return
+		s.mu.Lock()
+	B:
+		goto A
+		s.mu.Lock()
+	C:
+		goto B
+		s.mu.Lock()
+	D:
+		goto C
+		s.mu.Lock()
+	E:
+		s.mu.Unlock()
+		goto D
+	}()
+}
+
+func fiveLabelClosureRelocked(s *stats) {
+	func() {
+		s.mu.Lock()
+		goto E
+	A:
+		_ = s.total
+		return
+		s.mu.Lock()
+	B:
+		s.mu.Lock()
+		goto A
+		s.mu.Lock()
+	C:
+		s.mu.Lock()
+		goto B
+		s.mu.Lock()
+	D:
+		s.mu.Lock()
+		goto C
+		s.mu.Lock()
+	E:
+		s.mu.Unlock()
+		s.mu.Lock()
+		goto D
+	}()
+}
+
+func backwardGotoDeferredClosure(s *stats, again bool) {
+	defer func() {
+		_ = s.total // ERROR "\[concurrency::unguarded_access\]"
+	}()
+L:
+	if again {
+		goto L
+	}
+}
+
+//logos:requires s.mu
+func requireStatsLock(s *stats) {}
+
+func backwardGotoDeferredRequire(s *stats, again bool) {
+	defer requireStatsLock(s) // ERROR "\[concurrency::lock_requirement_unmet\]"
+L:
+	if again {
+		goto L
+	}
+}

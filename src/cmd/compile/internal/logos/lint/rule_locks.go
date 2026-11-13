@@ -184,20 +184,9 @@ func (c *lockAudit) checkFile(pass *Pass, f *syntax.File) {
 // checkFunc walks one function body with the entry state its contract
 // declares.
 func (c *lockAudit) checkFunc(pass *Pass, decl *syntax.FuncDecl, f *syntax.File) {
-	v := &lockFlow{c: c, pass: pass, decl: decl, file: f, methods: make(map[types2.Object]methodLock), gotos: make(map[string]heldSet)}
-	if bodyHasGoto(decl.Body) {
-		for i := range 3 {
-			v.restart(pass, decl, f)
-			v.probe = true
-			v.walkStmts(decl.Body.List)
-			if len(v.gotos) == 0 || (i > 0 && !v.labelChanged) {
-				break
-			}
-		}
-	}
+	v := &lockFlow{c: c, pass: pass, decl: decl, file: f, methods: make(map[types2.Object]methodLock)}
 	v.restart(pass, decl, f)
-	v.walkStmts(decl.Body.List)
-	v.checkDefers(decl.Body.List)
+	v.solveBody(decl.Body)
 }
 
 func (v *lockFlow) restart(pass *Pass, decl *syntax.FuncDecl, f *syntax.File) {
@@ -216,16 +205,20 @@ func (v *lockFlow) restart(pass *Pass, decl *syntax.FuncDecl, f *syntax.File) {
 	v.st = &st
 	v.local = make(map[types2.Object]bool)
 	v.published = make(map[types2.Object]bool)
-	v.labelChanged = false
+	v.labels = nil
 	v.probe = false
 }
 
-func bodyHasGoto(body *syntax.BlockStmt) bool {
+func bodyHasLocalGoto(body *syntax.BlockStmt) bool {
 	found := false
 	syntax.Inspect(body, func(n syntax.Node) bool {
-		if b, ok := n.(*syntax.BranchStmt); ok && b.Tok == syntax.Goto && b.Label != nil {
-			found = true
+		switch n := n.(type) {
+		case *syntax.FuncLit, *syntax.LambdaExpr:
 			return false
+		case *syntax.BranchStmt:
+			found = found || n.Tok == syntax.Goto
+		case *syntax.LabeledStmt:
+			found = true
 		}
 		return true
 	})
@@ -239,17 +232,22 @@ func bodyHasGoto(body *syntax.BlockStmt) bool {
 // and the arguments of a go statement are evaluated with the caller's
 // locks.
 type lockFlow struct {
-	c            *lockAudit
-	pass         *Pass
-	decl         *syntax.FuncDecl
-	file         *syntax.File
-	st           *lockState
-	local        map[types2.Object]bool
-	published    map[types2.Object]bool
-	gotos        map[string]heldSet
-	methods      map[types2.Object]methodLock
-	probe        bool
-	labelChanged bool
+	c         *lockAudit
+	pass      *Pass
+	decl      *syntax.FuncDecl
+	file      *syntax.File
+	st        *lockState
+	local     map[types2.Object]bool
+	published map[types2.Object]bool
+	gotos     map[string]heldSet
+	labels    *lockLabels
+	methods   map[types2.Object]methodLock
+	probe     bool
+}
+
+type lockLabels struct {
+	bodies  map[*syntax.BlockStmt]map[string]heldSet
+	changed bool
 }
 
 type methodLock struct {
@@ -310,14 +308,17 @@ func (v *lockFlow) walkStmt(s syntax.Stmt) bool {
 }
 
 func (v *lockFlow) noteGoto(label string) {
-	if v.gotos == nil {
-		v.gotos = make(map[string]heldSet)
+	if !v.probe || v.gotos == nil {
+		return
 	}
 	if cur, ok := v.gotos[label]; ok {
+		before := cur.clone()
 		cur.merge(v.st.held)
+		v.labels.changed = v.labels.changed || !maps.Equal(before, cur)
 		return
 	}
 	v.gotos[label] = v.st.held.clone()
+	v.labels.changed = true
 }
 func (v *lockFlow) mergeGoto(label string) {
 	if v.gotos == nil {
@@ -327,11 +328,7 @@ func (v *lockFlow) mergeGoto(label string) {
 	if !ok {
 		return
 	}
-	before := v.st.held.clone()
 	v.st.held.merge(g)
-	if !maps.Equal(before, v.st.held) {
-		v.labelChanged = true
-	}
 }
 
 func (v *lockFlow) walkIf(s *syntax.IfStmt) {
@@ -773,12 +770,46 @@ func (v *lockFlow) walkInlineCall(call *syntax.CallExpr, body syntax.Node, held 
 }
 
 func (v *lockFlow) child(held heldSet) *lockFlow {
-	return &lockFlow{c: v.c, pass: v.pass, decl: v.decl, file: v.file, st: &lockState{held: held}, local: v.local, published: v.published, methods: v.methods, probe: v.probe}
+	return &lockFlow{c: v.c, pass: v.pass, decl: v.decl, file: v.file, st: &lockState{held: held}, local: v.local, published: v.published, methods: v.methods, probe: v.probe, labels: v.labels}
+}
+
+func (v *lockFlow) solveBody(body *syntax.BlockStmt) {
+	if !bodyHasLocalGoto(body) {
+		v.walkStmts(body.List)
+		v.checkDefers(body.List)
+		return
+	}
+	v.labels = &lockLabels{bodies: map[*syntax.BlockStmt]map[string]heldSet{body: make(map[string]heldSet)}}
+	for {
+		v.labels.changed = false
+		inner := v.child(v.st.held.clone())
+		inner.local = maps.Clone(v.local)
+		inner.published = maps.Clone(v.published)
+		inner.methods = maps.Clone(v.methods)
+		inner.probe = true
+		inner.walkBody(body)
+		if !v.labels.changed {
+			break
+		}
+	}
+	v.walkBody(body)
 }
 
 func (v *lockFlow) walkBody(body syntax.Node) {
 	switch b := body.(type) {
 	case *syntax.BlockStmt:
+		if v.labels == nil {
+			v.solveBody(b)
+			return
+		}
+		gotos, seen := v.labels.bodies[b]
+		if !seen {
+			if bodyHasLocalGoto(b) {
+				gotos = make(map[string]heldSet)
+			}
+			v.labels.bodies[b] = gotos
+		}
+		v.gotos = gotos
 		v.walkStmts(b.List)
 		v.checkDefers(b.List)
 	case syntax.Expr:
@@ -1260,7 +1291,8 @@ func (v *lockFlow) checkDefers(list []syntax.Stmt) {
 	for i := len(defers) - 1; i >= 0; i-- {
 		d := defers[i]
 		if d.fnBody != nil {
-			inner := &lockFlow{c: v.c, pass: v.pass, decl: v.decl, file: d.file, st: &lockState{held: exit.clone()}, local: v.local, published: v.published, methods: v.methods}
+			inner := v.child(exit.clone())
+			inner.file = d.file
 			switch b := d.fnBody.(type) {
 			case *syntax.BlockStmt:
 				inner.walkStmts(b.List)
@@ -1274,7 +1306,8 @@ func (v *lockFlow) checkDefers(list []syntax.Stmt) {
 			continue
 		}
 		if ct := v.callContract(d.call); ct != nil {
-			sub := &lockFlow{c: v.c, pass: v.pass, decl: v.decl, file: d.file, st: &lockState{held: exit}, local: v.local, published: v.published, methods: v.methods}
+			sub := v.child(exit)
+			sub.file = d.file
 			sub.applyCallContract(d.call, ct)
 		}
 	}

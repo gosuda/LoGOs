@@ -435,6 +435,11 @@ func TestAdvGuardedAccess(t *testing.T) {
 			[]string{"31 concurrency::unguarded_access forbid"},
 		},
 		{
+			"backwardGotoDeferredClosureReportsOnce",
+			"func bd(s *stats, again bool) {\n defer func() { _ = s.total }()\nL:\n if again {\n  goto L\n }\n}\n",
+			[]string{"30 concurrency::unguarded_access forbid"},
+		},
+		{
 			"backwardGotoReentryReports",
 			"func b1(s *stats, again bool) {\n s.mu.Lock()\nL:\n _ = s.total\n s.mu.Unlock()\n if again {\n  goto L\n }\n}\n",
 			[]string{"32 concurrency::unguarded_access forbid"},
@@ -442,6 +447,16 @@ func TestAdvGuardedAccess(t *testing.T) {
 		{
 			"backwardGotoRelockedStaysClean",
 			"func b2(s *stats, again bool) {\n s.mu.Lock()\nL:\n _ = s.total\n s.mu.Unlock()\n if again {\n  s.mu.Lock()\n  goto L\n }\n}\n",
+			nil,
+		},
+		{
+			"fiveLabelClosureUnlockReported",
+			"func b5(s *stats) {\n func() {\n  s.mu.Lock()\n  goto E\n A:\n  _ = s.total\n  return\n  s.mu.Lock()\n B:\n  goto A\n  s.mu.Lock()\n C:\n  goto B\n  s.mu.Lock()\n D:\n  goto C\n  s.mu.Lock()\n E:\n  s.mu.Unlock()\n  goto D\n }()\n}\n",
+			[]string{"34 concurrency::unguarded_access forbid"},
+		},
+		{
+			"fiveLabelClosureRelockedStaysClean",
+			"func b6(s *stats) {\n func() {\n  s.mu.Lock()\n  goto E\n A:\n  _ = s.total\n  return\n  s.mu.Lock()\n B:\n  s.mu.Lock()\n  goto A\n  s.mu.Lock()\n C:\n  s.mu.Lock()\n  goto B\n  s.mu.Lock()\n D:\n  s.mu.Lock()\n  goto C\n  s.mu.Lock()\n E:\n  s.mu.Unlock()\n  s.mu.Lock()\n  goto D\n }()\n}\n",
 			nil,
 		},
 		{
@@ -484,8 +499,13 @@ func TestAdvGuardedAccessLimitations(t *testing.T) {
 			[]string{"32 concurrency::unguarded_access deny"},
 		},
 		{
-			"backwardGotoInClosureUnreported",
+			"backwardGotoInClosureReported",
 			"func b3(s *stats) {\n s.mu.Lock()\n func() {\nL:\n  _ = s.total\n  s.mu.Unlock()\n  goto L\n }()\n}\n",
+			[]string{"33 concurrency::unguarded_access deny"},
+		},
+		{
+			"backwardGotoInClosureRelockedStaysClean",
+			"func b4(s *stats) {\n s.mu.Lock()\n func() {\nL:\n  _ = s.total\n  s.mu.Unlock()\n  s.mu.Lock()\n  goto L\n }()\n}\n",
 			nil,
 		},
 	}
@@ -526,6 +546,11 @@ func TestAdvLockRequirement(t *testing.T) {
 		body string
 		want []string
 	}{
+		{
+			"backwardGotoDeferredRequireReportsOnce",
+			"func rd(g *gate, again bool) {\n defer g.toggle()\nL:\n if again {\n  goto L\n }\n}\n",
+			[]string{"20 concurrency::lock_requirement_unmet forbid"},
+		},
 		{
 			"deferredReleaseThenRequire",
 			"func r3(g *gate) {\n g.mu.Lock()\n defer g.toggle()\n defer g.release()\n}\n",
