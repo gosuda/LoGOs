@@ -6,6 +6,7 @@ package lint
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"cmd/compile/internal/syntax"
@@ -97,7 +98,7 @@ func reportLinknameMismatch(pass *Pass, locals map[string]types2.Object, ln link
 	if !ok {
 		return
 	}
-	imported := importedPackage(pass, pkgPath)
+	imported := packageInImportGraph(pass, pkgPath)
 	if imported == nil {
 		return
 	}
@@ -131,15 +132,23 @@ func methodExpressionType(t types2.Type) types2.Type {
 	return types2.NewSignatureType(nil, nil, nil, types2.NewTuple(vars...), sig.Results(), sig.Variadic())
 }
 
-// importedPackage returns the direct import of pass with the given path.
-func importedPackage(pass *Pass, path string) *types2.Package {
+func packageInImportGraph(pass *Pass, path string) *types2.Package {
 	if pass.in.Pkg == nil {
 		return nil
 	}
-	for _, imp := range pass.in.Pkg.Imports() {
+	seen := make(map[*types2.Package]bool)
+	queue := slices.Clone(pass.in.Pkg.Imports())
+	for len(queue) > 0 {
+		imp := queue[0]
+		queue = queue[1:]
+		if seen[imp] {
+			continue
+		}
+		seen[imp] = true
 		if imp.Path() == path {
 			return imp
 		}
+		queue = append(queue, imp.Imports()...)
 	}
 	return nil
 }

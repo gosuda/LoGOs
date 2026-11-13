@@ -256,6 +256,27 @@ var keep = sync.Mutex{}
 	}
 }
 
+func TestLinknameMismatchTransitiveImport(t *testing.T) {
+	testenv.MustHaveGoBuild(t)
+	const src = `package p
+
+import (
+	"fmt"
+	_ "unsafe"
+)
+
+//go:linkname badLock sync.(*Mutex).Lock
+func badLock(n int)
+
+var keep = fmt.Sprint
+`
+	got := summarize(Run(checkSrc(t, KindGo, "x.go", src)))
+	want := []string{"9 correctness::linkname_mismatch deny"}
+	if !slices.Equal(got, want) {
+		t.Errorf("results = %q, want %q", got, want)
+	}
+}
+
 func TestUnsafeOutsideUnsafeFile(t *testing.T) {
 	testenv.MustHaveGoBuild(t)
 	const src = `package p
