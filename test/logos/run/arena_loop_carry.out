@@ -13,9 +13,11 @@ ok condpost-kept-sum-matches-fill-40-rule
 ok condpost-gc-preserves-kept-sum
 ok condpost-outer-sum-matches-fill-9-rule
 ok condpost-gc-preserves-outer-sum
+ok condpost-endpoints-match-arithmetic-series
 ok nested-kept-sum-matches-fill-50-rule
 ok nested-kept-first-byte-is-50
 ok nested-gc-preserves-kept-sum
+ok nested-consumed-fills-match-grid-and-series
 ok escape-kept-sum-matches-fill-60-rule
 ok escape-sink-sum-matches-fill-61-rule
 ok escape-gc-preserves-kept-sum

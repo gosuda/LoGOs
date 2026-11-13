@@ -519,6 +519,19 @@ func (t test) run() error {
 	if action == "" {
 		t.Fatalf("execution recipe not found in GOROOT/test/%s", t.goFileName())
 	}
+	if err := t.runAction(srcBytes, action); err != nil {
+		return err
+	}
+	for _, variant := range logosRecipeVariants(t.dir, src, action) {
+		if err := t.runAction(srcBytes, variant); err != nil {
+			return fmt.Errorf("recipe %q: %w", variant, err)
+		}
+	}
+	return nil
+}
+
+func (t test) runAction(srcBytes []byte, action string) error {
+	src := string(srcBytes)
 
 	// Check for build constraints only up to the actual code.
 	header, _, ok := strings.Cut(src, "\npackage")

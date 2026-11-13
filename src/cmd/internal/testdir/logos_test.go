@@ -145,6 +145,27 @@ func routeLogosHarness(dir string, _ string, action string, _ []string) bool {
 	return true
 }
 
+func logosRecipeVariants(dir, src, action string) []string {
+	if dir != "logos" {
+		return nil
+	}
+	verb, _, _ := strings.Cut(action, " ")
+	_, rest, found := strings.Cut(src, "// "+action+"\n")
+	if !found {
+		return nil
+	}
+	var variants []string
+	for {
+		line, next, _ := strings.Cut(rest, "\n")
+		recipe, ok := strings.CutPrefix(line, "// ")
+		if !ok || (recipe != verb && !strings.HasPrefix(recipe, verb+" ")) {
+			return variants
+		}
+		variants = append(variants, strings.TrimSpace(recipe))
+		rest = next
+	}
+}
+
 type logosCase struct {
 	action    string
 	args      []string
@@ -167,6 +188,17 @@ func pinTargetFlags(c logosCase) logosCase {
 	}
 	c.flags = flags
 	return c
+}
+
+func splitArenaFlag(flags []string) (rest []string, toml []byte) {
+	for _, f := range flags {
+		if v, ok := strings.CutPrefix(f, "-arena="); ok {
+			toml = fmt.Appendf(nil, "[build]\narena = %s\n", v)
+			continue
+		}
+		rest = append(rest, f)
+	}
+	return rest, toml
 }
 
 func splitOptFlags(flags []string) (buildFlags, optFlags []string) {
@@ -242,6 +274,8 @@ func logosGoBuildCmd(gcflags, file string, buildFlags, optFlags []string) []stri
 
 func (t test) runLogos(c logosCase) error {
 	c = pinTargetFlags(c)
+	var toml []byte
+	c.flags, toml = splitArenaFlag(c.flags)
 	base := path.Base(t.goFile)
 	isLgo := strings.HasSuffix(base, ".lgo")
 	stagedBase := base
@@ -251,6 +285,11 @@ func (t test) runLogos(c logosCase) error {
 	tempDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(tempDir, stagedBase), c.src, 0644); err != nil {
 		t.Fatal(err)
+	}
+	if toml != nil {
+		if err := os.WriteFile(filepath.Join(tempDir, "logos.toml"), toml, 0644); err != nil {
+			t.Fatal(err)
+		}
 	}
 	runcmd := func(args ...string) ([]byte, error) {
 		cmd := exec.Command(args[0], args[1:]...)

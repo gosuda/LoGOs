@@ -1,4 +1,5 @@
 // run -goexperiment logosarena -race
+// run -goexperiment logosarena -arena=false -race
 
 package main
 

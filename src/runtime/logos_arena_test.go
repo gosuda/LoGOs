@@ -219,6 +219,7 @@ const arenaParkMax = 4
 type arenaParkBuilt struct {
 	addrs [arenaParkMax]uintptr
 	objs  [arenaParkMax]unsafe.Pointer
+	goid  uint64
 }
 
 func arenaParkCase(t *testing.T, live []bool, empty func(addr uintptr) bool) {
@@ -235,6 +236,7 @@ func arenaParkCase(t *testing.T, live []bool, empty func(addr uintptr) bool) {
 		defer close(done)
 		m := runtime.LogosArenaSave()
 		var b arenaParkBuilt
+		b.goid = runtime.LogosArenaGoid()
 		for i := range live {
 			var p unsafe.Pointer
 			if i%2 == 0 {
@@ -277,6 +279,7 @@ func arenaParkCase(t *testing.T, live []bool, empty func(addr uintptr) bool) {
 	if total != leased+pooled {
 		t.Errorf("total = %d chunks, want leased %d + pooled %d", total, leased, pooled)
 	}
+	arenaParkChainCheck(t, b, live)
 	for j, keep := range live {
 		if !keep {
 			continue
@@ -291,6 +294,31 @@ func arenaParkCase(t *testing.T, live []bool, empty func(addr uintptr) bool) {
 	close(wake)
 	<-done
 	arenaWaitLeased(t, leasedBase)
+}
+
+func arenaParkChainCheck(t *testing.T, b arenaParkBuilt, live []bool) {
+	t.Helper()
+	var chain [arenaParkMax + 1]runtime.LogosArenaChunk
+	n, waiting := runtime.LogosArenaChainOf(b.goid, chain[:])
+	if !waiting {
+		t.Errorf("goroutine %d is not parked", b.goid)
+	}
+	held := make(map[uintptr]bool)
+	for _, c := range chain[:min(n, len(chain))] {
+		held[c.Addr] = true
+	}
+	want := 0
+	for j, keep := range live {
+		if keep {
+			want++
+			if !held[b.addrs[j]] {
+				t.Errorf("chunk %d at %#x left the parked goroutine's chain", j, b.addrs[j])
+			}
+		}
+	}
+	if n != want {
+		t.Errorf("parked chain holds %d chunks, want %d live ones", n, want)
+	}
 }
 
 func arenaWaitLeased(t *testing.T, want int) {
@@ -338,15 +366,18 @@ func TestLogosArenaParkReleasesEmptyChunksBehindLiveHead(t *testing.T) {
 func TestLogosArenaExitReturnsChunk(t *testing.T) {
 	_, leasedBase, _ := runtime.LogosArenaCounts()
 	const size = 4096
-	filled := make(chan struct{})
+	filled := make(chan int)
 	defer debug.SetGCPercent(debug.SetGCPercent(-1))
 	runtime.GC()
 	go func() {
 		runtime.LogosArenaAllocScan((*int)(nil), size)
 		runtime.LogosArenaAlloc(byte(0), 64)
-		close(filled)
+		_, leasedHeld, _ := runtime.LogosArenaCounts()
+		filled <- leasedHeld
 	}()
-	<-filled
+	if held := <-filled; held <= leasedBase {
+		t.Fatalf("leased = %d while the exiting goroutine held arena memory, want above %d (the exit probe never leased a chunk)", held, leasedBase)
+	}
 	if leased := waitLeased(t, leasedBase); leased != leasedBase {
 		t.Fatalf("leased = %d after the goroutine exited, want %d", leased, leasedBase)
 	}
@@ -743,6 +774,7 @@ func TestLogosArenaProcResizeFreesCachedChunks(t *testing.T) {
 	}
 	goroutines := runtime.NumGoroutine()
 	const n = 256
+	_, leasedBase, _ := runtime.LogosArenaCounts()
 	hold := make(chan struct{})
 	var held, finished sync.WaitGroup
 	held.Add(n)
@@ -758,6 +790,9 @@ func TestLogosArenaProcResizeFreesCachedChunks(t *testing.T) {
 		}()
 	}
 	held.Wait()
+	if _, leased, _ := runtime.LogosArenaCounts(); leased < leasedBase+n {
+		t.Errorf("leased = %d with %d goroutines holding arena memory, want at least %d", leased, n, leasedBase+n)
+	}
 	close(hold)
 	finished.Wait()
 	waitGoroutines(t, goroutines)
@@ -815,12 +850,15 @@ func TestLogosArenaDynamicMakeWatermark(t *testing.T) {
 	})
 }
 
+var arenaPanicWatermark uintptr
+
 //go:noinline
 func arenaMakeAndPanic(n int) {
 	b := make([]byte, n)
 	if len(b) > 0 {
 		b[0] = 7
 	}
+	arenaPanicWatermark = runtime.LogosArenaStat().NoscanUsed
 	panic("arena panic unwind test")
 }
 
@@ -839,6 +877,9 @@ func TestLogosArenaPanicUnwindRecovery(t *testing.T) {
 		}()
 
 		after := runtime.LogosArenaStat().NoscanUsed
+		if arenaPanicWatermark <= before {
+			t.Fatalf("panic probe allocated nothing in the arena: watermark during make = %d, want above %d (the unwind restore is not exercised)", arenaPanicWatermark, before)
+		}
 		if after != before {
 			t.Errorf("watermark leaked across recovered panic: before=%d, after=%d (G3 panic-unwind restore missing)", before, after)
 		}
@@ -867,6 +908,9 @@ func TestLogosArenaLoopWatermarkBounded(t *testing.T) {
 
 		wm1 := arenaMakeLoop(1, 1024)
 		used1 := wm1 - before
+		if used1 == 0 {
+			t.Fatalf("loop probe allocated nothing in the arena: 1-iter used 0 B, the attack is not live")
+		}
 
 		wm10 := arenaMakeLoop(10, 1024)
 		used10 := wm10 - before

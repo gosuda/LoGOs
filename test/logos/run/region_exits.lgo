@@ -167,10 +167,50 @@ func regionRecoverPanic() {
 	exitPanic()
 }
 
+func exitBareBlockInFrame() int {
+	{
+		r := arena.Open()
+		p := arena.New[int](r)
+		*p = 23
+		regionExitsSink += *p
+		regionInside()
+	}
+	return rt.RegionBytes()
+}
+
+func exitIfBodyInFrame() int {
+	if regionExitsSink >= 0 {
+		r := arena.Open()
+		p := arena.New[int](r)
+		*p = 29
+		regionExitsSink += *p
+		regionInside()
+	}
+	return rt.RegionBytes()
+}
+
+func exitIfInitInFrame() int {
+	if r := arena.Open(); regionExitsSink >= 0 {
+		p := arena.New[int](r)
+		*p = 31
+		regionExitsSink += *p
+		regionInside()
+	}
+	return rt.RegionBytes()
+}
+
 func main() {
 	failed := false
 	released := func(name string) {
 		if rb := rt.RegionBytes(); rb != 0 {
+			fmt.Printf("FAIL %s: got %d bytes want 0\n", name, rb)
+			failed = true
+			return
+		}
+		fmt.Printf("ok %s\n", name)
+	}
+	releasedInFrame := func(name string, rb int) {
+		if rb != 0 {
 			fmt.Printf("FAIL %s: got %d bytes want 0\n", name, rb)
 			failed = true
 			return
@@ -204,8 +244,11 @@ func main() {
 	released("range-func-break-releases-region")
 	regionRecoverPanic()
 	released("panic-edge-releases-region")
-	if regionExitsSink != 110 {
-		fmt.Printf("FAIL every-exit-ran-with-expected-values: got %d want 110\n", regionExitsSink)
+	releasedInFrame("bare-block-exit-releases-before-frame-exit", exitBareBlockInFrame())
+	releasedInFrame("if-body-exit-releases-before-frame-exit", exitIfBodyInFrame())
+	releasedInFrame("if-init-statement-exit-releases-before-frame-exit", exitIfInitInFrame())
+	if regionExitsSink != 193 {
+		fmt.Printf("FAIL every-exit-ran-with-expected-values: got %d want 193\n", regionExitsSink)
 		failed = true
 	} else {
 		fmt.Println("ok every-exit-ran-with-expected-values")

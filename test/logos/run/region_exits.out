@@ -10,4 +10,7 @@ ok switch-init-owner-releases-region
 ok for-init-owner-releases-region
 ok range-func-break-releases-region
 ok panic-edge-releases-region
+ok bare-block-exit-releases-before-frame-exit
+ok if-body-exit-releases-before-frame-exit
+ok if-init-statement-exit-releases-before-frame-exit
 ok every-exit-ran-with-expected-values

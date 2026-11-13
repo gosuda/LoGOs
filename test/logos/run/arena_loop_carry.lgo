@@ -1,4 +1,5 @@
 // run -goexperiment logosarena
+// run -goexperiment logosarena -arena=false
 
 package main
 
@@ -185,12 +186,12 @@ func main() {
 	eq("condpost-gc-preserves-kept-sum", cksGC, cks)
 	eq("condpost-outer-sum-matches-fill-9-rule", osum, 1024*9)
 	eq("condpost-gc-preserves-outer-sum", osumGC, osum)
-	_ = total
+	eq("condpost-endpoints-match-arithmetic-series", total, 2*(4*40+4*3/2))
 	nks, nkf, ntotal, nksGC := carryNested(1024)
 	eq("nested-kept-sum-matches-fill-50-rule", nks, 1024*50)
 	eq("nested-kept-first-byte-is-50", nkf, 50)
 	eq("nested-gc-preserves-kept-sum", nksGC, nks)
-	_ = ntotal
+	eq("nested-consumed-fills-match-grid-and-series", ntotal, 9*50+3*10*(0+1+2)+3*(0+1+2)-50+3*(3*90+3*2/2))
 	eks, ees, eksGC, eesGC := carryEscape(1024)
 	eq("escape-kept-sum-matches-fill-60-rule", eks, 1024*60)
 	eq("escape-sink-sum-matches-fill-61-rule", ees, 1024*61)

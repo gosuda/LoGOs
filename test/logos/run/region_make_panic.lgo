@@ -1,4 +1,5 @@
 // run -goexperiment logosarena
+// run -goexperiment logosarena -arena=false
 package main
 
 import (
@@ -7,38 +8,59 @@ import (
 	"os"
 )
 
-func main() {
+func makeNegativeDynamic() {
 	r := arena.Open()
+	n := -1
+	_ = arena.Make[int](r, n)
+}
+
+func makeNegativeLiteral() {
+	r := arena.Open()
+	_ = arena.Make[int](r, -1)
+}
+
+func main() {
 	failed := false
-	try := func(name string, fn func()) {
-		func() {
-			defer func() {
-				rec := recover()
-				if rec == nil {
-					fmt.Printf("FAIL %s: no panic\n", name)
-					failed = true
-					return
-				}
-				fmt.Printf("ok %s\n", name)
-			}()
-			n := -1
-			_ = arena.Make[int](r, n)
-		}()
-		_ = fn
+	check := func(name string, rec any) string {
+		err, ok := rec.(error)
+		if !ok {
+			fmt.Printf("FAIL %s: panic = %v, want runtime error\n", name, rec)
+			failed = true
+			return ""
+		}
+		message := err.Error()
+		if message != "runtime error: makeslice: len out of range" {
+			fmt.Printf("FAIL %s: panic = %q, want makeslice len out of range\n", name, message)
+			failed = true
+			return message
+		}
+		fmt.Printf("ok %s\n", name)
+		return message
 	}
-	try("negative-length-makeslice-panics-len-out-of-range", func() {})
+	var normal, dynamic, literal string
 	func() {
 		defer func() {
-			rec := recover()
-			if rec == nil {
-				fmt.Println("FAIL negative-length-literal-panics-len-out-of-range: no panic")
-				failed = true
-				return
-			}
-			fmt.Println("ok negative-length-literal-panics-len-out-of-range")
+			normal = check("normal-make-negative-length", recover())
 		}()
-		_ = arena.Make[int](r, -1)
+		n := -1
+		_ = make([]int, n)
 	}()
+	func() {
+		defer func() {
+			dynamic = check("negative-length-makeslice-panics-len-out-of-range", recover())
+		}()
+		makeNegativeDynamic()
+	}()
+	func() {
+		defer func() {
+			literal = check("negative-length-literal-panics-len-out-of-range", recover())
+		}()
+		makeNegativeLiteral()
+	}()
+	if dynamic != normal || literal != normal {
+		fmt.Printf("FAIL region make panic differs from normal make: dynamic %q literal %q normal %q\n", dynamic, literal, normal)
+		failed = true
+	}
 	if failed {
 		os.Exit(1)
 	}
