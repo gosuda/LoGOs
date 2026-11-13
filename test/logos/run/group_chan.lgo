@@ -7,13 +7,14 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"runtime"
 	"sync/atomic"
 	"time"
 )
 
 var errSib = errors.New("sibling failed")
 
-var defaultRan, defaultLoops, woke atomic.Int32
+var defaultRan, defaultLoops, cancelledDefault, woke atomic.Int32
 
 func markWoke() {
 	woke.Add(1)
@@ -99,6 +100,17 @@ func runGroup(ctx context.Context, ch1, ch2, ch3 chan int) error {
 			}
 		}
 		go {
+			for ctx.Err() == nil {
+				runtime.Gosched()
+			}
+			select {
+			case v := <-ch1:
+				_ = v
+			default:
+				cancelledDefault.Add(1)
+			}
+		}
+		go {
 			failSibling()?
 		}
 	}
@@ -119,6 +131,7 @@ func main() {
 	check("group-chan-join-unblocks-receivers", woke.Load() == 6, fmt.Sprint(woke.Load()), "6")
 	check("group-chan-select-default-unchanged", defaultRan.Load() == 1, fmt.Sprint(defaultRan.Load()), "1")
 	check("group-chan-default-loop-completes", defaultLoops.Load() == 40, fmt.Sprint(defaultLoops.Load()), "40")
+	check("group-chan-select-default-after-cancel", cancelledDefault.Load() == 1, fmt.Sprint(cancelledDefault.Load()), "1")
 	if bad {
 		os.Exit(1)
 	}
