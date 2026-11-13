@@ -945,8 +945,30 @@ func runBinary(path, maxProcs string) (observation, error) {
 	return runBinaryTimeout(path, maxProcs, 10*time.Second, corpusNorm)
 }
 
-func runSweepBinary(path string) (observation, error) {
-	return runBinaryTimeout(path, "4", 60*time.Second, sweepNorm)
+func sweepRunBudget(args []string) time.Duration {
+	if slices.Contains(args, "-race") {
+		return 5 * time.Minute
+	}
+	return time.Minute
+}
+
+func runSweepBinary(path string, args []string) (observation, error) {
+	return runBinaryTimeout(path, "4", sweepRunBudget(args), sweepNorm)
+}
+
+func TestSweepRunBudget(t *testing.T) {
+	for _, tc := range []struct {
+		args []string
+		want time.Duration
+	}{
+		{nil, time.Minute},
+		{[]string{"-gcflags=all=-N -l"}, time.Minute},
+		{[]string{"-race"}, 5 * time.Minute},
+	} {
+		if got := sweepRunBudget(tc.args); got != tc.want {
+			t.Errorf("sweepRunBudget(%q) = %s, want %s", tc.args, got, tc.want)
+		}
+	}
 }
 
 type normalizer func(stdout, stderr string) (string, string)
@@ -2558,11 +2580,11 @@ func (j sweepJob) compareRow(c config, fbin string, fobs observation, upObs map[
 	if obsEqual(fobs, uo.obs) {
 		return ""
 	}
-	fo2, err := runSweepBinary(fbin)
+	fo2, err := runSweepBinary(fbin, c.args)
 	if err != nil {
 		return fmt.Sprintf("fork %s rerun failed: %v", c.id, err)
 	}
-	uo2, err := runSweepBinary(uo.bin)
+	uo2, err := runSweepBinary(uo.bin, c.args)
 	if err != nil {
 		return fmt.Sprintf("upstream %s rerun failed: %v", c.upstream, err)
 	}
@@ -2599,7 +2621,7 @@ func (j sweepJob) check(f sweepFile) (excluded, failed string) {
 			return "upstream build failed: " + clip(err.Error()+" "+out), ""
 		}
 		bin := filepath.Join(outDir, f.pkg)
-		o, err := runSweepBinary(bin)
+		o, err := runSweepBinary(bin, u.args)
 		if err != nil {
 			return "", fmt.Sprintf("upstream %s run failed: %v", u.id, err)
 		}
@@ -2630,7 +2652,7 @@ func (j sweepJob) check(f sweepFile) (excluded, failed string) {
 			return "", fmt.Sprintf("fork %s build failed where upstream builds: %v\n%s", c.id, err, clip(out))
 		}
 		fbin := filepath.Join(outDir, f.pkg)
-		fo, err := runSweepBinary(fbin)
+		fo, err := runSweepBinary(fbin, c.args)
 		if err != nil {
 			return "", fmt.Sprintf("fork %s run failed: %v", c.id, err)
 		}
