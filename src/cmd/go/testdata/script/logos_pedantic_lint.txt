@@ -47,6 +47,12 @@ logos lint --pedantic ./...
 cd ..
 
 cd strict
+! logos build --pedantic -o $WORK/bin/strictped$GOEXE .
+stderr '\[pedantic::exhaustive_union_switch\]'
+! exists $WORK/bin/strictped$GOEXE
+! logos build --pedantic=true -o $WORK/bin/stricttrue$GOEXE .
+stderr '\[pedantic::exhaustive_union_switch\]'
+! exists $WORK/bin/stricttrue$GOEXE
 ! logos lint ./...
 stderr 'main\.lgo:15:2: \[pedantic::exhaustive_union_switch\]'
 ! logos lint --pedantic=true ./...

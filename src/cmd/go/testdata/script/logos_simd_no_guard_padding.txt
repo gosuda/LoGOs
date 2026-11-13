@@ -27,6 +27,60 @@ logos run .
 stdout '^pad32 0$'
 stdout '^pad64 0$'
 
+cd ../o
+logos run .
+stdout '^ordinary allocation ok$'
+
+-- o/go.mod --
+module example.com/ordinarynopadding
+
+go 1.27
+
+-- o/main.lgo --
+package main
+
+import (
+	"fmt"
+	"runtime"
+	"runtime/debug"
+)
+
+var bytes []byte
+var floats32 []float32
+var floats64 []float64
+
+func main() {
+	debug.SetGCPercent(-1)
+	var before, after runtime.MemStats
+	for size := 32768; size <= 49152; size += 8192 {
+		runtime.ReadMemStats(&before)
+		bytes = make([]byte, size)
+		runtime.ReadMemStats(&after)
+		if got := after.TotalAlloc - before.TotalAlloc; got != uint64(size) {
+			panic(fmt.Sprintf("control %d %d", size, got))
+		}
+		runtime.ReadMemStats(&before)
+		floats32 = make([]float32, size/4)
+		runtime.ReadMemStats(&after)
+		if got := after.TotalAlloc - before.TotalAlloc; got != uint64(size) {
+			panic(fmt.Sprintf("ordinary32 %d %d", size, got))
+		}
+		runtime.ReadMemStats(&before)
+		floats64 = make([]float64, size/8)
+		runtime.ReadMemStats(&after)
+		if got := after.TotalAlloc - before.TotalAlloc; got != uint64(size) {
+			panic(fmt.Sprintf("ordinary64 %d %d", size, got))
+		}
+		bytes[size-1] = 7
+		floats32[size/4-1] = 11
+		floats64[size/8-1] = 13
+		if len(bytes) != size || cap(bytes) != size || bytes[size-1] != 7 || len(floats32) != size/4 || cap(floats32) != size/4 || floats32[size/4-1] != 11 || len(floats64) != size/8 || cap(floats64) != size/8 || floats64[size/8-1] != 13 {
+			panic("ordinary values")
+		}
+	}
+	fmt.Println("ordinary allocation ok")
+}
+
 -- a/go.mod --
 module example.com/nopadalloc
 
