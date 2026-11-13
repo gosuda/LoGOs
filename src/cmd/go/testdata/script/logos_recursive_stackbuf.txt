@@ -23,6 +23,10 @@ logos test -count=1 -O=0 .
 stdout '^ok'
 go test -count=1 -O=0 .
 stdout '^ok'
+logos test -count=1 -O=s .
+stdout '^ok'
+go test -count=1 -O=s .
+stdout '^ok'
 
 -- go.mod --
 module example.com/recstackbuf
