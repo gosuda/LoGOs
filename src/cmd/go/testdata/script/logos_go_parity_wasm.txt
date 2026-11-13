@@ -12,7 +12,8 @@ env UPROOT=$UPROOT1273
 # Q3 pin: exactly oracle go1.27.3 against fork base go1.27.2.
 exec $UPROOT/bin/go version
 stdout '^go version go1\.27\.3 '
-go version
+# Check the installed plain driver, not the potentially experiment-built test binary.
+exec $TESTGO_GOROOT/bin/go$GOEXE version
 stdout '^go version go1\.27\.2 '
 
 env GOOS=js

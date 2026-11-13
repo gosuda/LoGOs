@@ -34,17 +34,6 @@ func logosApplyRawExperiment(raw string) {
 			CmdEnv[i].Value = RawGOEXPERIMENT
 		}
 	}
-	mirrored := false
-	for i := range OrigEnv {
-		if strings.HasPrefix(OrigEnv[i], "GOEXPERIMENT=") {
-			OrigEnv[i] = "GOEXPERIMENT=" + raw
-			mirrored = true
-			break
-		}
-	}
-	if !mirrored {
-		OrigEnv = append(OrigEnv, "GOEXPERIMENT="+raw)
-	}
 }
 
 func RefreshLogosPreemptible() {

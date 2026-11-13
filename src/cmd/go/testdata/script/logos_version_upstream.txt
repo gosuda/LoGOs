@@ -1,6 +1,7 @@
 env GOTOOLCHAIN=local
 
-go version
+# Check the installed plain driver, not the potentially experiment-built test binary.
+exec $TESTGO_GOROOT/bin/go$GOEXE version
 stdout '^go version go1\.27\.[0-9]+ [a-z0-9]+/[a-z0-9]+$'
 ! stdout '-X:'
 
