@@ -184,9 +184,6 @@ func localUnionKeys(staticJSON map[*types2.Named]bool, named *types2.Named) ([]s
 	if !ok {
 		return nil, false
 	}
-	if named.TypeArgs() != nil && named.TypeArgs().Len() > 0 {
-		return structKeys(st), true
-	}
 	if staticJSON == nil {
 		return nil, false
 	}

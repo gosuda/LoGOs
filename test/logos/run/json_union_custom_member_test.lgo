@@ -100,3 +100,42 @@ func TestUnionCustomMemberDecoderDecides(t *testing.T) {
 		t.Fatalf("trial error %q must name union RadShape", msg)
 	}
 }
+
+type WireBox[T any] struct {
+	V T `json:"v"`
+}
+
+func (b *WireBox[T]) UnmarshalJSON(data []byte) error {
+	var m map[string]T
+	if err := json.Unmarshal(data, &m); err != nil {
+		return err
+	}
+	v, ok := m["payload"]
+	if !ok {
+		return errors.New("WireBox requires payload")
+	}
+	b.V = v
+	return nil
+}
+
+type WireShape interface {
+	*WireBox[int] | *RadSquare
+}
+
+type WireHolder struct {
+	Item WireShape `json:"item"`
+}
+
+func TestUnionGenericInstantiationMemberDecodes(t *testing.T) {
+	var h WireHolder
+	if err := json.Unmarshal([]byte(`{"item":{"payload":42}}`), &h); err != nil {
+		t.Fatalf("instantiation member must decode, got error: %v", err)
+	}
+	wb, ok := h.Item.(*WireBox[int])
+	if !ok {
+		t.Fatalf("expected *WireBox[int], got %T: %#v", h.Item, h.Item)
+	}
+	if wb.V != 42 {
+		t.Fatalf("expected WireBox.V = 42 decoded from wire key payload, got %v", wb.V)
+	}
+}
