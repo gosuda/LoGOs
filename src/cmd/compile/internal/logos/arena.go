@@ -78,7 +78,7 @@ func (a *arenaEject) rewriteCall(c *syntax.CallExpr) {
 	}
 	if a.fl.arenaCallName(c) == "Open" {
 		a.needRT = true
-		a.replace(s, a.rtAlias+".Region{}")
+		a.replace(s, "("+a.rtAlias+".Region{})")
 		return
 	}
 	a.rewriteBuiltin(c, s)
@@ -357,60 +357,81 @@ func (a *arenaEject) findRTImport() {
 }
 
 func (a *arenaEject) insertBlankUses() {
+	inits := make(map[*syntax.AssignStmt]bool)
 	syntax.Inspect(a.fl.file, func(n syntax.Node) bool {
-		switch d := n.(type) {
+		switch s := n.(type) {
+		case *syntax.IfStmt:
+			a.blankInit(s.Init, a.fl.off(s.Then.Pos())+1, "", inits)
+		case *syntax.ForStmt:
+			a.blankInit(s.Init, a.fl.off(s.Body.Pos())+1, "", inits)
+		case *syntax.SwitchStmt:
+			a.blankSwitchInit(s, inits)
 		case *syntax.AssignStmt:
-			if d.Op == syntax.Def {
-				a.blankNames(syntax.UnpackListExpr(d.Lhs))
+			if s.Op == syntax.Def && !inits[s] {
+				a.insertBlankUse(stmtEnd(a.fl.src, a.fl.off(s.Pos())), ";", a.blankNames(syntax.UnpackListExpr(s.Lhs)))
 			}
 		case *syntax.VarDecl:
-			names := make([]syntax.Expr, len(d.NameList))
-			for i, name := range d.NameList {
-				names[i] = name
-			}
-			a.blankNames(names)
+			a.blankVarDecl(s)
 		}
 		return true
 	})
 }
 
-func (a *arenaEject) blankNames(names []syntax.Expr) {
-	for _, e := range names {
-		name, ok := e.(*syntax.Name)
-		if !ok {
-			continue
-		}
-		v, ok := a.fl.pkg.info.Defs[name].(*types2.Var)
-		if !ok || !logosRegionIsType(v.Type()) || !a.isLocal(v) {
-			continue
-		}
-		a.insertBlankUse(name)
+func (a *arenaEject) blankInit(init syntax.SimpleStmt, off int, prefix string, inits map[*syntax.AssignStmt]bool) {
+	s, ok := init.(*syntax.AssignStmt)
+	if !ok || s.Op != syntax.Def {
+		return
 	}
+	inits[s] = true
+	a.insertBlankUse(off, prefix, a.blankNames(syntax.UnpackListExpr(s.Lhs)))
+}
+
+func (a *arenaEject) blankSwitchInit(s *syntax.SwitchStmt, inits map[*syntax.AssignStmt]bool) {
+	if len(s.Body) == 0 {
+		a.blankInit(s.Init, a.fl.off(s.Rbrace), "default:", inits)
+		return
+	}
+	a.blankInit(s.Init, a.fl.off(s.Body[0].Colon)+1, "", inits)
+}
+
+func (a *arenaEject) blankVarDecl(d *syntax.VarDecl) {
+	end := stmtEnd(a.fl.src, a.fl.off(d.Pos()))
+	if d.Group != nil {
+		end = groupEnd(a.fl.src, a.fl.off(d.Pos()))
+	}
+	var text strings.Builder
+	for _, name := range d.NameList {
+		text.WriteString(a.blankName(name))
+	}
+	a.insertBlankUse(end, ";", text.String())
+}
+
+func (a *arenaEject) blankNames(names []syntax.Expr) string {
+	var text strings.Builder
+	for _, e := range names {
+		if name, ok := e.(*syntax.Name); ok {
+			text.WriteString(a.blankName(name))
+		}
+	}
+	return text.String()
+}
+
+func (a *arenaEject) blankName(name *syntax.Name) string {
+	v, ok := a.fl.pkg.info.Defs[name].(*types2.Var)
+	if !ok || !logosRegionIsType(v.Type()) || !a.isLocal(v) {
+		return ""
+	}
+	return "_ = " + name.Value + ";"
 }
 
 func (a *arenaEject) isLocal(v *types2.Var) bool {
 	return v.Parent() != nil && v.Parent() != a.fl.pkg.tpkg.Scope()
 }
 
-func (a *arenaEject) insertBlankUse(name *syntax.Name) {
-	start := a.fl.off(syntax.StartPos(name))
-	end := a.fl.endOff(name)
-	nl := a.lineEnd(end)
-	if nl == len(a.fl.src) {
-		return
+func (a *arenaEject) insertBlankUse(off int, prefix, text string) {
+	if text != "" {
+		a.fl.add(off, off, prefix+text)
 	}
-	lineStart := start
-	for lineStart > 0 && a.fl.src[lineStart-1] != '\n' {
-		lineStart--
-	}
-	indent := ""
-	for _, r := range string(a.fl.src[lineStart:start]) {
-		if r != ' ' && r != '\t' {
-			break
-		}
-		indent += string(r)
-	}
-	a.fl.add(nl, nl, "\n"+indent+"_ = "+name.Value)
 }
 
 func (a *arenaEject) fixImports() {

@@ -34,6 +34,20 @@ exists $UPROOT1272/bin/go
 exec $UPROOT1272/bin/go version
 stdout '^go version go1\.27\.2 '
 exec env -u GOROOT $UPROOT1272/bin/go build ./...
+cd ../..
+cd m3
+env GOEXPERIMENT=logosarena
+logos eject -o out
+grep '_ = grouped' out/main.go
+grep '_ = ifRegion' out/main.go
+grep '_ = forRegion' out/main.go
+grep '_ = switchRegion' out/main.go
+env GOEXPERIMENT=
+cd out
+exists $UPROOT1272/bin/go
+exec $UPROOT1272/bin/go version
+stdout '^go version go1\.27\.2 '
+exec env -u GOROOT $UPROOT1272/bin/go build ./...
 
 -- m/go.mod --
 module example.com/regionparity
@@ -115,4 +129,30 @@ func main() {
 		}
 	}
 	fmt.Println(total, inner, fibR(r, 10))
+}
+-- m3/go.mod --
+module example.com/regionunused
+
+go 1.27
+
+-- m3/main.lgo --
+package main
+
+import "logos/arena"
+
+func main() {
+	var (
+		grouped = arena.Open()
+	)
+	_ = arena.New[int](grouped)
+	if ifRegion := arena.Open(); true {
+		_ = arena.New[int](ifRegion)
+	}
+	for forRegion := arena.Open(); false; {
+		_ = arena.New[int](forRegion)
+	}
+	switch switchRegion := arena.Open(); {
+	default:
+		_ = arena.New[int](switchRegion)
+	}
 }
