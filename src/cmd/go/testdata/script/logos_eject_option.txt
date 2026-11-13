@@ -10,12 +10,17 @@ stdout '^chain: anon hi ann ann ann$'
 stdout '^chainnil: bob anon anon anon$'
 stdout '^log ann$'
 stdout '^once: hi ann anon ann 4$'
+stdout '^nested: true true 3$'
 cp stdout $WORK/eject-stdout.txt
 
 logos eject -o out
 exists out/main.go
 exists out/go.mod
 grep 'func H.*_logos_rt\.Option' out/main.go
+grep '^func F\(\) \*User \{' out/main.go
+grep '^func \(b \*Box\) Get\(\) \*T \{' out/main.go
+! grep 'Option\[\*User\]' out/main.go
+grep '^func N\(\) _logos_rt\.Option\[_logos_rt\.Option\[int\]\] \{' out/main.go
 grep 'func I.*_logos_rt\.Option' out/main.go
 grep 'func None\(\) Choice' out/main.go
 grep '_logos_rt\.Option' out/main.go
@@ -90,6 +95,16 @@ func I() int? {
 	return 7
 }
 
+func N() (int?)? {
+	var i int?
+	return i
+}
+
+func NSome() (int?)? {
+	var i int? = 3
+	return i
+}
+
 func (u *User) Greet(prefix string) string {
 	return prefix + u.Name
 }
@@ -153,6 +168,7 @@ func main() {
 	fmt.Printf("chainnil: %s %s %s %s\n", FieldOf(&User{Name: "bob"}), CallOf(nil), ChainOf(nil), IndexOf(map[string]*User{}))
 	VoidOf(&User{Name: "ann"})
 	fmt.Printf("once: %s\n", OnceOf())
+	fmt.Printf("nested: %t %t %d\n", N() != nil, (N() ?? I()) == nil, (NSome() ?? I()) ?? 0)
 }
 
 type A struct{}
