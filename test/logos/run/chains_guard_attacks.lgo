@@ -134,6 +134,18 @@ func switchBreak(k int, skip bool, ys []int) (string, error) {
 	return fmt.Sprintf("%s calls=%d", out, calls), nil
 }
 
+func twoGuards(k int, xs, ys []int) (string, error) {
+	order = ""
+	out := "none"
+	switch k {
+	case len(xs.map(x => note("A", x)?)):
+		out = "first"
+	case len(ys.map(y => note("B", y)?)):
+		out = "second"
+	}
+	return out + " " + order, nil
+}
+
 func tagless(xs, ys []int) (string, error) {
 	calls = 0
 	switch n := len(xs); {
@@ -446,6 +458,9 @@ func runOrder() {
 	show("tagless-empty", "empty")(tagless(nil, []int{2, 3}))
 	show("tagless-more", "more calls=2")(tagless([]int{1, 2, 3}, []int{2, 3}))
 	show("tagless-fewer", "fewer calls=2")(tagless([]int{1}, []int{2, 3}))
+	show("twoguards-first", "first A1")(twoGuards(1, []int{1}, []int{5, 6}))
+	show("twoguards-second", "second A1B5B6")(twoGuards(2, []int{1}, []int{5, 6}))
+	show("twoguards-none", "none A1B5B6")(twoGuards(7, []int{1}, []int{5, 6}))
 }
 
 func runLoops() {

@@ -14,6 +14,9 @@ ok switchbreak-guard
 ok tagless-empty
 ok tagless-more
 ok tagless-fewer
+ok twoguards-first
+ok twoguards-second
+ok twoguards-none
 ok labeledbreak
 ok condcapture
 ok postlabeled

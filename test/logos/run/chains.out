@@ -1,6 +1,7 @@
 ok filter-map-take
 ok map-calls
 ok recv-calls
+ok take-stops-map
 ok take-neg
 ok drop-huge
 ok get-neg

@@ -50,6 +50,9 @@ ok made-get-oob
 ok made-collect
 ok made-take
 ok made-sort
+ok made-new-count
+ok made-addr-lit-count
+ok borrow-index-count
 ok try-collect-fail
 ok try-count-fail
 ok try-count-pred-fail

@@ -273,6 +273,27 @@ func pTake() string { return fmt.Sprint(idsOf(ids3().map(mk).take(2))) }
 //logos:allow(suspicious::side_effect_before_sort)
 func pSort() string { return fmt.Sprint(idsOf(ids3().map(mk).sortBy(c => -c.id))) }
 
+func sortedCloseLog() []string {
+	slices.Sort(closeLog)
+	return closeLog
+}
+
+func pNewCount() string {
+	n := ids3().map(i => new(conn)).count()
+	return fmt.Sprint(n, sortedCloseLog())
+}
+
+func pAddrLitCount() string {
+	n := ids3().map(i => &conn{id: i}).count()
+	return fmt.Sprint(n, sortedCloseLog())
+}
+
+func bIndexCount() string {
+	cs := conns3()
+	n := cs.map(c => cs[0]).count()
+	return fmt.Sprint(n, closeLog)
+}
+
 func tryCollect() ([]*conn, error) {
 	got := ids3().map(i => tryMk(i)?)
 	return got, nil
@@ -1066,6 +1087,9 @@ func madeLegs() []leg {
 		{"made-collect", "[1 2 3] [0 0 0]", pCollect},
 		{"made-take", "[1 2] [0 0]", pTake},
 		{"made-sort", "[3 2 1] [0 0 0]", pSort},
+		{"made-new-count", "3 [c0 c0 c0] []", pNewCount},
+		{"made-addr-lit-count", "3 [c1 c2 c3] []", pAddrLitCount},
+		{"borrow-index-count", "3 [] [0 0 0]", bIndexCount},
 	}
 }
 
