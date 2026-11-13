@@ -34,6 +34,12 @@ func main() {
 	check("address-of-call-evaluates-call-once", *n == 1 && calls == 1)
 	m := &nextID()
 	check("each-address-of-call-allocates-fresh-result", *m == 2 && calls == 2)
+	check("first-call-address-keeps-its-value", *n == 1)
+	var ps []*int
+	for range 3 {
+		ps = append(ps, &nextID())
+	}
+	check("loop-call-addresses-are-fresh", *ps[0] == 3 && *ps[1] == 4 && *ps[2] == 5)
 	if failed {
 		os.Exit(1)
 	}
