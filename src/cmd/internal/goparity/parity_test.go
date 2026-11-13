@@ -520,6 +520,7 @@ func baseEnv(cacheDir, goroot string) []string {
 		"CGO_ENABLED=0",
 		"GOCACHE=" + cacheDir,
 		"GOTMPDIR=" + os.TempDir(),
+		"TMPDIR=" + os.TempDir(),
 		"GOPATH=" + cacheDir + "-path",
 	}
 }
