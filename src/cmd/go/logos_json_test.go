@@ -227,6 +227,76 @@ func TestLogosJSONDiagnostics(t *testing.T) {
 			t.Errorf("message = %v, want a string containing %q", m["message"], "undefined")
 		}
 	})
+	t.Run("ListEveryInput", func(t *testing.T) {
+		for _, tc := range []struct {
+			name   string
+			file   string
+			source string
+			rule   string
+		}{
+			{
+				name:   "GoTypeError",
+				file:   "main.go",
+				source: "package main\nfunc main(){ undefinedFn() }\n",
+				rule:   "",
+			},
+			{
+				name:   "LgoLint",
+				file:   "main.lgo",
+				source: "package main\nimport \"os\"\nfunc main() { os.Remove(\"missing\") }\n",
+				rule:   "slop::discarded_error",
+			},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				dir := logosJSONFixture(t, map[string]string{
+					"go.mod": "module example.com/jsonlisteveryinput\n\ngo 1.27\n",
+					tc.file:  tc.source,
+				})
+				code, records := runLogosJSON(t, dir, "list", "-export", "-compiled", "-json", "--json-diagnostics", ".")
+				if code == 0 {
+					t.Errorf("logos list exit status 0, want nonzero")
+				}
+				if len(records) != 1 {
+					t.Fatalf("got %d records, want 1: %v", len(records), records)
+				}
+				m := records[0]
+				checkLogosEnvelope(t, m, tc.file)
+				checkLogosRule(t, m, tc.rule)
+				if got := logosJSONNumber(t, logosJSONSpan(t, m), "start_line"); got <= 0 {
+					t.Errorf("span.start_line = %v, want > 0", got)
+				}
+			})
+		}
+	})
+
+	for _, tc := range []struct {
+		command string
+		file    string
+	}{
+		{command: "build", file: "main.go"},
+		{command: "build", file: "main.lgo"},
+		{command: "lint", file: "main.go"},
+		{command: "lint", file: "main.lgo"},
+	} {
+		t.Run("SyntaxError/"+tc.command+"/"+tc.file, func(t *testing.T) {
+			dir := logosJSONFixture(t, map[string]string{
+				"go.mod": "module example.com/jsonsyntax\n\ngo 1.27\n",
+				tc.file:  "package main\nfunc main( {\n",
+			})
+			code, records := runLogosJSON(t, dir, tc.command, "--json-diagnostics", ".")
+			if code == 0 {
+				t.Errorf("logos %s exit status 0, want nonzero", tc.command)
+			}
+			for _, m := range records {
+				checkLogosEnvelope(t, m, tc.file)
+				checkLogosRule(t, m, "")
+				if got := logosJSONNumber(t, logosJSONSpan(t, m), "start_line"); got <= 0 {
+					t.Errorf("span.start_line = %v, want > 0", got)
+				}
+			}
+		})
+	}
+
 	t.Run("GoLintTypeError", func(t *testing.T) {
 		dir := logosJSONFixture(t, map[string]string{
 			"go.mod":  "module example.com/golinttypeerr\n\ngo 1.27\n",
