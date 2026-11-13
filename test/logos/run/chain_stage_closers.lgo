@@ -191,6 +191,18 @@ func caseUnownedUndelivered(ctx context.Context) {
 	check("closers-unowned-undelivered-left-open", err == nil && len(got) == 1 && untouched(&itemCloses), counts(&itemCloses), "no close")
 }
 
+var table = []*handle{open(4), open(5)}
+
+func caseBorrowedReadsLeftOpen(ctx context.Context) {
+	reset()
+	got, err := []int{0, 1, 2, 3}.group(ctx, limit = 2).map(i => table[i%2]).filter(h => h.id < 0)
+	check("closers-indexed-read-left-open", err == nil && len(got) == 0 && untouched(&closes), counts(&closes), "no close")
+	reset()
+	keep := open(3)
+	got, err = []int{0, 1, 2, 3}.group(ctx, limit = 2).map(i => keep).filter(h => h.id < 0)
+	check("closers-captured-read-left-open", err == nil && len(got) == 0 && untouched(&closes), counts(&closes), "no close")
+}
+
 func caseOwnedUndelivered(ctx context.Context) {
 	reset()
 	got, err := items().group(ctx, limit = 6).map(i => {
@@ -262,6 +274,7 @@ func main() {
 	caseFilterMapFilter(ctx)
 	caseMapFilterMap(ctx)
 	caseUnownedUndelivered(ctx)
+	caseBorrowedReadsLeftOpen(ctx)
 	caseOwnedUndelivered(ctx)
 	caseSourceElementLeftOpen(ctx)
 	caseFilterPredicateFailure(ctx)
