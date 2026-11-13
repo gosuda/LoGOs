@@ -40,6 +40,10 @@ func (check *Checker) logosComptimeCall(x *operand, call *syntax.CallExpr) bool 
 	if !ok {
 		return false
 	}
+	if check.logosComptimeCallee == nil {
+		check.logosComptimeCallee = make(map[*syntax.SelectorExpr]bool)
+	}
+	check.logosComptimeCallee[sel] = true
 	check.recordUse(sel.Sel, check.logosComptimeObj(fname))
 	if name, ok := sel.X.(*syntax.Name); ok {
 		if _, obj := check.lookupScope(name.Value); obj != nil {
@@ -65,6 +69,14 @@ func (check *Checker) logosComptimeCall(x *operand, call *syntax.CallExpr) bool 
 		check.logosComptimeError(call)
 	}
 	return false
+}
+
+func (check *Checker) logosComptimeValueUse(e *syntax.SelectorExpr, obj Object) {
+	fname, ok := logosComptimeFunc(obj)
+	if !ok || fname == "ViewAs" || check.logosComptimeCallee[e] {
+		return
+	}
+	check.errorf(syntax.StartPos(e), InvalidPkgUse, "[comptime::runtime_use] comptime.%s is compile-time only", fname)
 }
 
 // logosIsStruct answers comptime.IsStruct[X]() in a `const if`

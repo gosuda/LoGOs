@@ -77,3 +77,17 @@ func nonConstantErrorVar() {
 func nonStringConstantError() {
 	comptime.Error(42) // ERROR "cannot use 42"
 }
+
+func predicateValue() any {
+	return comptime.IsStruct[Pair] // ERROR "comptime::runtime_use"
+}
+
+func errorValue() {
+	f := comptime.Error // ERROR "comptime::runtime_use"
+	_ = f
+}
+
+func fieldsValue() {
+	g := comptime.Fields[Pair] // ERROR "comptime::runtime_use"
+	_ = g
+}

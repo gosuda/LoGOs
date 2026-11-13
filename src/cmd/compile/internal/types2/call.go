@@ -801,6 +801,7 @@ func (check *Checker) selector(x *operand, e *syntax.SelectorExpr, wantType bool
 				}
 			}
 			check.recordUse(e.Sel, exp)
+			check.logosComptimeValueUse(e, exp)
 
 			// Simplified version of the code for *syntax.Names:
 			// - imported objects are always fully initialized

@@ -182,6 +182,7 @@ type Checker struct {
 	logosConstForBudget int
 	logosConstForDepth  int
 	logosLambdaPending  map[*syntax.LambdaExpr]bool
+	logosComptimeCallee map[*syntax.SelectorExpr]bool
 	logosPred           logosPredState           // logos M7-S3 hook: `const if` condition context for comptime predicates.
 	methods             map[*TypeName][]*Func    // maps package scope type names to associated non-blank (non-interface) methods
 	untyped             map[syntax.Expr]exprInfo // map of expressions without final type
