@@ -301,8 +301,8 @@ func (c *comparer) identical(x, y Type, p *ifacePair) bool {
 		if y, ok := y.(*Struct); ok {
 			return c.structIdentical(x, y, p)
 		}
-		if y, ok := y.(*LogosTuple); ok {
-			return c.structIdentical(x, y.underlyingStruct(), p)
+		if c.logosStructTupleIdentical(x, y, p) {
+			return true
 		}
 
 	case *Pointer:

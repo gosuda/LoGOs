@@ -340,11 +340,8 @@ func (x *operand) assignableTo(check *Checker, T Type, cause *string) (bool, Cod
 	if Identical(V, T) {
 		return true, 0
 	}
-	if logosContainsReadonlyDescendants(V) || logosContainsReadonlyDescendants(T) {
-		if x.isNil() && hasNil(T) {
-			return true, 0
-		}
-		return false, IncompatibleAssign
+	if logosAnyContainsReadonlyDescendants(V, T) {
+		return logosReadonlyDescendantsAssignable(x, T)
 	}
 
 	Vu := V.Underlying()

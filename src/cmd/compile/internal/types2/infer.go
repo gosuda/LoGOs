@@ -54,17 +54,8 @@ func (check *Checker) infer(pos syntax.Pos, tparams []*TypeParam, targs []Type, 
 	// Parameters and arguments must match in number.
 	assert(params.Len() == len(args))
 
-	for _, arg := range args {
-		if arg.isValid() && logosContainsReadonlyDescendants(arg.typ()) {
-			err.addf(arg, "cannot use %s in generic inference: readonly descendants would be discarded", arg)
-			return nil
-		}
-	}
-	for _, targ := range targs {
-		if targ != nil && logosContainsReadonlyDescendants(targ) {
-			err.addf(atPos(pos), "cannot use type %s as generic type argument: readonly descendants would be discarded", targ)
-			return nil
-		}
+	if check.logosRejectReadonlyInference(pos, args, targs, err) {
+		return nil
 	}
 
 	// If we already have all type arguments, we're done.

@@ -105,6 +105,19 @@ func (t *LogosTuple) underlyingStruct() *Struct {
 	return t.under
 }
 
+func (c *comparer) logosStructTupleIdentical(x *Struct, y Type, p *ifacePair) bool {
+	t, ok := y.(*LogosTuple)
+	return ok && c.structIdentical(x, t.underlyingStruct(), p)
+}
+
+func logosUnwrapTuples(types ...*Type) {
+	for _, T := range types {
+		if t, ok := (*T).(*LogosTuple); ok {
+			*T = t.underlyingStruct()
+		}
+	}
+}
+
 func (check *Checker) logosTupleType(e *syntax.TupleType, def *TypeName) Type {
 	if len(e.Fields) < 2 {
 		check.error(e, InvalidSyntaxTree, "tuple type needs at least two element types")

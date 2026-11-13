@@ -213,7 +213,7 @@ var filemap = map[string]action{
 	},
 	"scope.go":     func(f *ast.File) { fixTokenPos(f); renameIdents(f, "InsertLazy->_InsertLazy") },
 	"selection.go": nil,
-	"sizes.go":     func(f *ast.File) { renameIdents(f, "IsSyncAtomicAlign64->_IsSyncAtomicAlign64") },
+	"sizes.go":     func(f *ast.File) { stripLogosHooks(f); renameIdents(f, "IsSyncAtomicAlign64->_IsSyncAtomicAlign64") },
 	"slice.go":     nil,
 	"subst.go": func(f *ast.File) {
 		stripLogosHooks(f) // must happen before renaming identifiers
@@ -567,7 +567,7 @@ func fixSprintf(f *ast.File) {
 //	case *T, *LogoType:                     // mixed type list: logo type removed
 //
 // Logo types are types2-only types that go/types cannot represent (no
-// go/ast node produces them): Option and ConstView today; Union and
+// go/ast node produces them): the logosTypes set; Union and
 // AssertedStruct stay syntax-level, not types2 types, so they never
 // reach these switches.
 // The hooks must follow the gofmt layout, each on lines of its own. Anything
@@ -800,16 +800,21 @@ func isLogosCall(x ast.Node) bool {
 }
 
 var logosMethods = map[string]bool{
-	"LogosReadonly":         true,
-	"LogosAssertEffects":    true,
-	"SetLogosAssertEffects": true,
-	"SetLogosReadonly":      true,
+	"LogosReadonly":             true,
+	"LogosAssertEffects":        true,
+	"SetLogosAssertEffects":     true,
+	"SetLogosReadonly":          true,
+	"logosStructTupleIdentical": true,
 }
 var logosFuncs = map[string]bool{
-	"logosInterfaceReadonlyMismatch": true,
-	"logosConcreteAssertErasable":    true,
-	"logosEmbedReadonlyConflict":     true,
-	"logosAssertReadonly":            true,
+	"logosInterfaceReadonlyMismatch":      true,
+	"logosConcreteAssertErasable":         true,
+	"logosEmbedReadonlyConflict":          true,
+	"logosAssertReadonly":                 true,
+	"logosAnyContainsReadonlyDescendants": true,
+	"logosAnyIsReadonlyDescendants":       true,
+	"logosUnwrapTuples":                   true,
+	"logosUnwrapReadonlyDescendants":      true,
 }
 
 func logosCallName(call *ast.CallExpr) string {
@@ -1017,9 +1022,10 @@ func isLogosType(e ast.Expr) bool {
 
 // logosTypes is the set of types2 types with no go/ast counterpart.
 var logosTypes = map[string]bool{
-	"Option":     true,
-	"ConstView":  true,
-	"LogosTuple": true,
+	"Option":              true,
+	"ConstView":           true,
+	"LogosTuple":          true,
+	"ReadonlyDescendants": true,
 }
 
 // asIdent returns x as *ast.Ident if it is an identifier with the given name.

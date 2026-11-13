@@ -291,18 +291,7 @@ func (c *comparer) identical(x, y Type, p *ifacePair) bool {
 		// and identical tags. Two embedded fields are considered to have the same
 		// name. Lower-case field names from different packages are always different.
 		if y, ok := y.(*Struct); ok {
-			if x.NumFields() == y.NumFields() {
-				for i, f := range x.fields {
-					g := y.fields[i]
-					if f.embedded != g.embedded ||
-						!c.ignoreTags && x.Tag(i) != y.Tag(i) ||
-						!f.sameId(g.pkg, g.name, false) ||
-						!c.identical(f.typ, g.typ, p) {
-						return false
-					}
-				}
-				return true
-			}
+			return c.structIdentical(x, y, p)
 		}
 
 	case *Pointer:
@@ -507,6 +496,22 @@ func (c *comparer) identical(x, y Type, p *ifacePair) bool {
 func identicalOrigin(x, y *Named) bool {
 	// TODO(gri) is this correct?
 	return x.Origin().obj == y.Origin().obj
+}
+
+func (c *comparer) structIdentical(x, y *Struct, p *ifacePair) bool {
+	if x.NumFields() != y.NumFields() {
+		return false
+	}
+	for i, f := range x.fields {
+		g := y.fields[i]
+		if f.embedded != g.embedded ||
+			!c.ignoreTags && x.Tag(i) != y.Tag(i) ||
+			!f.sameId(g.pkg, g.name, false) ||
+			!c.identical(f.typ, g.typ, p) {
+			return false
+		}
+	}
+	return true
 }
 
 // identicalInstance reports if two type instantiations are identical.

@@ -97,6 +97,64 @@ func logosContainsReadonlyDescendants(T Type) bool {
 	return found
 }
 
+func logosAnyContainsReadonlyDescendants(V, T Type) bool {
+	return logosContainsReadonlyDescendants(V) || logosContainsReadonlyDescendants(T)
+}
+
+func logosReadonlyDescendantsAssignable(x *operand, T Type) (bool, Code) {
+	if x.isNil() && hasNil(T) {
+		return true, 0
+	}
+	return false, IncompatibleAssign
+}
+
+func logosAnyIsReadonlyDescendants(x, y Type) bool {
+	return logosAsReadonlyDescendants(x) != nil || logosAsReadonlyDescendants(y) != nil
+}
+
+func (u *unifier) logosNifyReadonlyDescendants(x, y Type, mode unifyMode, p *ifacePair) bool {
+	rx, ry := logosAsReadonlyDescendants(x), logosAsReadonlyDescendants(y)
+	return rx != nil && ry != nil && u.nify(rx.Elem, ry.Elem, mode|exact, p)
+}
+
+func logosUnwrapReadonlyDescendants(T *Type) {
+	if r, ok := (*T).Underlying().(*ReadonlyDescendants); ok {
+		*T = r.Elem
+	}
+}
+
+func (check *Checker) logosRejectReadonlyInference(pos syntax.Pos, args []*operand, targs []Type, err *error_) bool {
+	for _, arg := range args {
+		if arg.isValid() && logosContainsReadonlyDescendants(arg.typ()) {
+			err.addf(arg, "cannot use %s in generic inference: readonly descendants would be discarded", arg)
+			return true
+		}
+	}
+	for _, targ := range targs {
+		if targ != nil && logosContainsReadonlyDescendants(targ) {
+			err.addf(atPos(pos), "cannot use type %s as generic type argument: readonly descendants would be discarded", targ)
+			return true
+		}
+	}
+	return false
+}
+
+func (check *Checker) logosRejectReadonlyBuiltinArgs(x *operand, args []*operand, id builtinId) bool {
+	if !check.conf.Logos {
+		return false
+	}
+	for _, a := range args {
+		if !check.logosReadonlyBuiltinArg(a, id) {
+			x.invalidate()
+			return true
+		}
+	}
+	if len(args) > 0 {
+		*x = *args[0]
+	}
+	return false
+}
+
 func (check *Checker) logosReadonlyBuiltinArg(a *operand, id builtinId) bool {
 	if !logosContainsReadonlyDescendants(a.typ()) {
 		return true

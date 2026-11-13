@@ -311,9 +311,7 @@ func (conf *Config) offsetsof(T *Struct) []int64 {
 func (conf *Config) offsetof(T Type, index []int) int64 {
 	var offs int64
 	for _, i := range index {
-		if r, ok := T.Underlying().(*ReadonlyDescendants); ok {
-			T = r.Elem
-		}
+		logosUnwrapReadonlyDescendants(&T)
 		s := T.Underlying().(*Struct)
 		d := conf.offsetsof(s)[i]
 		if d < 0 {

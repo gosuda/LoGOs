@@ -447,8 +447,8 @@ func (u *unifier) nify(x, y Type, mode unifyMode, p *ifacePair) (result bool) {
 		return true
 	}
 
-	if rx, ry := logosAsReadonlyDescendants(x), logosAsReadonlyDescendants(y); rx != nil || ry != nil {
-		return rx != nil && ry != nil && u.nify(rx.Elem, ry.Elem, mode|exact, p)
+	if logosAnyIsReadonlyDescendants(x, y) {
+		return u.logosNifyReadonlyDescendants(x, y, mode, p)
 	}
 
 	// x != y if we get here
@@ -587,12 +587,7 @@ func (u *unifier) nify(x, y Type, mode unifyMode, p *ifacePair) (result bool) {
 	xorig, x := x, Unalias(x)
 	yorig, y := y, Unalias(y)
 
-	if t, ok := x.(*LogosTuple); ok {
-		x = t.underlyingStruct()
-	}
-	if t, ok := y.(*LogosTuple); ok {
-		y = t.underlyingStruct()
-	}
+	logosUnwrapTuples(&x, &y)
 
 	switch x := x.(type) {
 	case *Basic:
