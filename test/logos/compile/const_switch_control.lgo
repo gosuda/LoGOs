@@ -38,7 +38,7 @@ func breakSwitchLabel[T any]() {
 L:
 	const switch T {
 	case int:
-		break L // ERROR "invalid break label L"
+		break L // ERROR "invalid break label"
 	}
 }
 

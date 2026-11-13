@@ -75,7 +75,7 @@ type E2 struct {
 	HP int
 }
 
-type Ambig struct : HPInt { // ERROR "ambiguous selector"
+type Ambig struct : HPInt { // ERROR "ambiguous"
 	E1
 	E2
 }

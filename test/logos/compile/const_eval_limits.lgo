@@ -8,10 +8,10 @@ const func boom() int {
 	panic("boom")
 }
 
-const panicked = boom() // ERROR "correctness::const_eval"
+const panicked = boom() // ERROR "\[correctness::const_eval\]"
 
 const func k() string {
 	return "a"
 }
 
-const dup = map[string]int{k(): 1, "a": 2} // ERROR "correctness::const_eval"
+const dup = map[string]int{k(): 1, "a": 2} // ERROR "\[correctness::const_eval\]"

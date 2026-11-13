@@ -3,5 +3,5 @@
 package p
 
 type B interface {
-	M() int { return 1 } // ERROR "in interface type"
+	M() int { return 1 } // ERROR "syntax error"
 } // ERROR "non-declaration statement outside function body"

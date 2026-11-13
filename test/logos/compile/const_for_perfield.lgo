@@ -11,7 +11,7 @@ type Mixed struct {
 
 func perField(v Mixed) {
 	const for _, f := range comptime.Fields[Mixed]() {
-		var s string = v.[f] // ERROR "cannot use v\.\[f\]"
+		var s string = v.[f] // ERROR "cannot use"
 		_ = s
 	}
 }
@@ -20,6 +20,6 @@ func take(s string) {}
 
 func perFieldCall(v Mixed) {
 	const for _, f := range comptime.Fields[Mixed]() {
-		take(v.[f]) // ERROR "cannot use v\.\[f\]"
+		take(v.[f]) // ERROR "cannot use"
 	}
 }

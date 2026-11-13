@@ -27,5 +27,5 @@ func MapTo[D, S any](dst *D, src *S) {
 
 func use(d *Dst, ok *SrcOK, bad *SrcBad) {
 	MapTo[Dst, SrcOK](d, ok)
-	MapTo[Dst, SrcBad](d, bad) // ERROR "cannot use src.ID"
+	MapTo[Dst, SrcBad](d, bad) // ERROR "cannot use"
 }

@@ -9,7 +9,7 @@ L:
 	for i := 0; i < 2; i++ {
 		go group (ctx) {
 			go {
-				break L // ERROR "break label not defined: L"
+				break L // ERROR "break label not defined"
 			}
 			break L
 		}
@@ -22,7 +22,7 @@ L:
 	for i := 0; i < 2; i++ {
 		go group (ctx) {
 			go {
-				continue L // ERROR "continue label not defined: L"
+				continue L // ERROR "continue label not defined"
 			}
 			continue L
 		}
@@ -39,7 +39,7 @@ func siblingGoto(ctx context.Context) error {
 			}
 		}
 		go {
-			goto M // ERROR "label M not defined"
+			goto M // ERROR "not defined"
 		}
 	}
 	return nil

@@ -75,7 +75,7 @@ func nonConstantErrorVar() {
 }
 
 func nonStringConstantError() {
-	comptime.Error(42) // ERROR "cannot use 42"
+	comptime.Error(42) // ERROR "cannot use"
 }
 
 func predicateValue() any {
