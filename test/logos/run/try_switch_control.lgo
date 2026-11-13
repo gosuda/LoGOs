@@ -145,6 +145,20 @@ func fallthroughBody(tag string) (int, error) {
 	return r, nil
 }
 
+func fallthroughGuardChain() (int, error) {
+	xs := []int{1}
+	switch 1 {
+	case 1:
+		rec("c1")
+		fallthrough
+	case len(xs.map(x => load("guard", x)?)) + 1:
+		rec("c2")
+	case 3:
+		rec("c3")
+	}
+	return 0, nil
+}
+
 type cell struct {
 	name string
 	run  func() (string, error)
@@ -187,6 +201,7 @@ func main() {
 		{"break-in-host", show(breakInHost), []string{"load:s", "a", "after"}, "0"},
 		{"fallthrough-body", caught(func() (int, error) { return fallthroughBody("s") }), []string{"c1", "load:s", "x", "c2"}, "9"},
 		{"fallthrough-body-fail", caught(func() (int, error) { return fallthroughBody("bad") }), []string{"c1", "load:bad"}, "err bad"},
+		{"fallthrough-guard-chain", show(fallthroughGuardChain), []string{"c1", "c2"}, "0"},
 	}
 	failed := false
 	for _, c := range cells {
