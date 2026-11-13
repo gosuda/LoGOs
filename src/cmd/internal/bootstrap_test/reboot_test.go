@@ -76,6 +76,12 @@ func TestRepeatBootstrap(t *testing.T) {
 	cmd := exec.Command(filepath.Join(goroot, "src", makeScript))
 	cmd.Dir = gorootSrc
 	cmd.Env = append(cmd.Environ(), "GOROOT=", "GOROOT_BOOTSTRAP="+realGoroot)
+	version := runtime.Version()
+	if i := strings.LastIndexAny(version, " -"); i >= 0 && strings.HasPrefix(version[i+1:], "X:") {
+		if experiments := version[i+3:]; experiments != "" {
+			cmd.Env = append(cmd.Env, "GOEXPERIMENT="+experiments)
+		}
+	}
 	cmd.Stderr = os.Stderr
 	cmd.Stdout = io.MultiWriter(os.Stdout, &stdout)
 	if err := cmd.Run(); err != nil {
