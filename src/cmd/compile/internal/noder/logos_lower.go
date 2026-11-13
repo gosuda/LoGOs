@@ -32,7 +32,7 @@ var logosStore = struct {
 }{src: make(map[*syntax.File][]byte), cgo: make(map[*syntax.File][]byte), names: make(map[*syntax.File]string)}
 
 func logosStashesGo() bool {
-	return base.LogosNextOut != "" || base.LogosLintOnly || base.LogosMode == "hints"
+	return base.LogosNextOut != "" || base.LogosLintEnabled() || base.LogosMode == "hints"
 }
 
 func parseLogosFile(fbase *syntax.PosBase, f *os.File, filename string, errh syntax.ErrorHandler, pragh syntax.PragmaHandler) *syntax.File {

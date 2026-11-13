@@ -24,6 +24,9 @@ import (
 type lintActor struct{}
 
 func (b *Builder) LintAction(p *load.Package) *Action {
+	if p.UsesCgo() || p.UsesSwig() {
+		return b.CompileAction(ModeBuild, ModeBuild, p)
+	}
 	return b.cacheAction("logos lint", p, func() *Action {
 		a := &Action{
 			Mode:    "lint",
@@ -39,8 +42,26 @@ func (b *Builder) LintAction(p *load.Package) *Action {
 }
 
 func LintsPackage(p *load.Package) bool {
-	return p.Internal.LogosLint != nil && len(p.GoFiles) > 0 && !p.UsesCgo() && !p.UsesSwig() &&
+	return p.Internal.LogosLint != nil && (len(p.GoFiles) > 0 || p.UsesCgo() || p.UsesSwig()) &&
 		p.Internal.TestmainGo == nil
+}
+
+func logosCompileIsLint(p *load.Package) bool {
+	return settings.Current().LintCmd && LintsPackage(p) && logosGenerates(p) &&
+		(p.Internal.CmdlinePkg || p.Internal.CmdlineFiles)
+}
+
+func logosCompileLintOwned(a *Action) bool {
+	if _, ok := a.Actor.(lintActor); ok {
+		return false
+	}
+	p := a.Package
+	return settings.Current().LintCmd && LintsPackage(p) && !logosGenerates(p) &&
+		(p.Internal.CmdlinePkg || p.Internal.CmdlineFiles)
+}
+
+func logosGenerates(p *load.Package) bool {
+	return p.UsesCgo() || p.UsesSwig()
 }
 
 func (lintActor) Act(b *Builder, ctx context.Context, a *Action) error {
@@ -109,7 +130,7 @@ func logosCompilePolicy(a *Action) []byte {
 	if p.IsLogos() && !settings.Current().LintCmd {
 		return p.Internal.LogosLint
 	}
-	if settings.Current().LintCmd && LintsPackage(p) {
+	if settings.Current().LintCmd && LintsPackage(p) && (!logosGenerates(p) || logosCompileIsLint(p)) {
 		return p.Internal.LogosLint
 	}
 	return nil
@@ -134,6 +155,10 @@ func logosLintFlags(sh *Shell, a *Action) ([]string, error) {
 	flags = append(flags, "-logos.cfg="+file)
 	if _, ok := a.Actor.(lintActor); ok {
 		flags = append(flags, "-logos.lintonly")
+	} else if logosCompileIsLint(a.Package) {
+		flags = append(flags, "-logos.lint")
+	} else if logosCompileLintOwned(a) {
+		flags = append(flags, "-logos.lintowned")
 	}
 	return flags, nil
 }
@@ -151,6 +176,12 @@ func logosGoFactsFlags(p *load.Package) []string {
 func logosLintActionID(h io.Writer, a *Action) {
 	if policy := logosCompilePolicy(a); policy != nil {
 		fmt.Fprintf(h, "logos lint %x\n", sha256.Sum256(policy))
+		if logosCompileIsLint(a.Package) {
+			fmt.Fprintf(h, "logos lint compile\n")
+		}
+		if logosCompileLintOwned(a) {
+			fmt.Fprintf(h, "logos lint owned\n")
+		}
 	}
 	if settings.Current().JSON {
 		fmt.Fprintf(h, "logos json\n")

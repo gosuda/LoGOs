@@ -65,7 +65,7 @@ func writeLogosLockFacts(pkg *types2.Package, info *types2.Info, files []*syntax
 // arms escape analysis whenever the package marks a function, and a directive
 // that marks nothing fails here.
 func logosLintHook(m *posMap, files []*syntax.File, pkg *types2.Package, info *types2.Info) {
-	if !base.Logos && !base.LogosLintOnly && !base.LogosAllocFacts {
+	if !base.Logos && !base.LogosLintEnabled() && !base.LogosAllocFacts {
 		return
 	}
 	kind := lint.KindGo
@@ -80,9 +80,14 @@ func logosLintHook(m *posMap, files []*syntax.File, pkg *types2.Package, info *t
 		Sources: sources,
 		Kind:    kind,
 	}
-	results, zeroAlloc, zeroAllocMarks := logosZeroAllocArm(in)
+	var results []lint.Result
+	var zeroAlloc bool
+	var zeroAllocMarks []lint.ZeroAllocFunc
+	if !base.LogosLintOwned {
+		results, zeroAlloc, zeroAllocMarks = logosZeroAllocArm(in)
+	}
 	pins := false
-	if base.LogosCfg != "" {
+	if logosLintActive() && !base.LogosLintOwned {
 		in.Policy = logosLintPolicy()
 		in.Reported = logosTakeSoft()
 		results = append(results, lint.Run(in)...)
@@ -102,7 +107,7 @@ func logosLintHook(m *posMap, files []*syntax.File, pkg *types2.Package, info *t
 		logosEscape = &escapeLint{in: in, m: m, pins: pins, zeroAlloc: zeroAlloc, allocFacts: base.LogosAllocFacts, graph: graph}
 		escape.LogosPinning = pins
 	}
-	fallback := (base.Logos || base.LogosLintOnly) && lint.FallbackActive(in)
+	fallback := !base.LogosLintOwned && (base.Logos || base.LogosLintEnabled()) && lint.FallbackActive(in)
 	if fallback {
 		if logosEscape == nil {
 			logosEscape = &escapeLint{in: in, m: m}
@@ -114,7 +119,7 @@ func logosLintHook(m *posMap, files []*syntax.File, pkg *types2.Package, info *t
 // logosLintActive reports whether the compile runs the lints: a policy is
 // named, and the package is loGo/s or logos lint asks for a lint compile.
 func logosLintActive() bool {
-	return base.LogosCfg != "" && (base.Logos || base.LogosLintOnly)
+	return base.LogosCfg != "" && (base.Logos || base.LogosLintEnabled() || base.LogosLintOwned)
 }
 
 // logosZeroAllocArm makes escape analysis record the heap allocation sites

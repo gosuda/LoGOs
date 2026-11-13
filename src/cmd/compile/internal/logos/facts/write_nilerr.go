@@ -11,7 +11,7 @@ import (
 )
 
 func nilErrDriven() bool {
-	return base.LogosCfg != "" || base.LogosLintOnly || base.LogosAllocFacts
+	return base.LogosCfg != "" || base.LogosLintEnabled() || base.LogosAllocFacts
 }
 
 func writeNilErrors(pkg *types2.Package, info *types2.Info, files []*syntax.File, f *Facts) {

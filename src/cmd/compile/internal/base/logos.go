@@ -24,7 +24,11 @@ var LogosCfg string
 
 var LogosJSON bool
 
+var LogosLint bool
+
 var LogosLintOnly bool
+
+var LogosLintOwned bool
 
 var LogosAllocFacts bool
 var LogosGoFacts bool
@@ -47,10 +51,16 @@ func ClearLogosCtClones(pkgPath string) {
 	})
 }
 
+func LogosLintEnabled() bool {
+	return LogosLint || LogosLintOnly
+}
+
 func logosRegisterFlags() {
 	flag.StringVar(&LogosCfg, "logos.cfg", "", "read the lint policy from `file`")
 	flag.BoolVar(&LogosJSON, "logos.json", false, "print diagnostics as JSON lines")
+	flag.BoolVar(&LogosLint, "logos.lint", false, "lint the Go package while compiling")
 	flag.BoolVar(&LogosLintOnly, "logos.lintonly", false, "lint the package and stop after escape analysis")
+	flag.BoolVar(&LogosLintOwned, "logos.lintowned", false, "leave lint reporting to a separate lint action")
 	flag.BoolVar(&LogosAllocFacts, "logos.allocfacts", false, "record per-function heap allocations and write AllocFree facts")
 	flag.BoolVar(&LogosGoFacts, "logos.gofacts", false, "record per-parameter mutation facts for Go packages")
 	flag.StringVar(&LogosEject, "logos.eject", "", "write ejected Go sources to `directory`")
