@@ -505,7 +505,7 @@ func upstreamTool(t *testing.T) (toolchain, bool) {
 	return toolchain{bin: bin, goroot: goroot}, true
 }
 
-func baseEnv(cacheDir string) []string {
+func baseEnv(cacheDir, goroot string) []string {
 	os.MkdirAll(cacheDir, 0o777)
 	os.MkdirAll(cacheDir+"-path", 0o777)
 	return []string{
@@ -513,6 +513,7 @@ func baseEnv(cacheDir string) []string {
 		"HOME=" + cacheDir,
 		"GOENV=off",
 		"GOTOOLCHAIN=local",
+		"GOROOT=" + goroot,
 		"GOWORK=off",
 		"GOPROXY=off",
 		"GOMAXPROCS=8",
@@ -665,7 +666,7 @@ func stageCorpus(tc toolchain, dst, cacheDir string, progs []string) error {
 			return fmt.Errorf("staging %s: %w", p, err)
 		}
 		if _, err := os.Stat(filepath.Join(srcDir, "gen.go")); err == nil {
-			if _, err := runGenerator(tc.bin, p, filepath.Join(dst, p), baseEnv(cacheDir), generatorBudget); err != nil {
+			if _, err := runGenerator(tc.bin, p, filepath.Join(dst, p), baseEnv(cacheDir, tc.goroot), generatorBudget); err != nil {
 				return err
 			}
 		}
@@ -1079,7 +1080,7 @@ func main() {
 		t.Fatal(err)
 	}
 	bin := filepath.Join(dir, "sleeper")
-	if out, err := goBuild(fork.bin, dir, []string{"build", "-o", bin, "."}, baseEnv(forkCache()), 5*time.Minute); err != nil {
+	if out, err := goBuild(fork.bin, dir, []string{"build", "-o", bin, "."}, baseEnv(forkCache(), fork.goroot), 5*time.Minute); err != nil {
 		t.Fatalf("building sleeper: %v\n%s", err, clip(out))
 	}
 	start := time.Now()
@@ -1144,7 +1145,7 @@ func main() {
 		t.Fatal(err)
 	}
 	heldBin := filepath.Join(heldDir, "held")
-	if out, err := goBuild(fork.bin, heldDir, []string{"build", "-o", heldBin, "."}, baseEnv(forkCache()), 5*time.Minute); err != nil {
+	if out, err := goBuild(fork.bin, heldDir, []string{"build", "-o", heldBin, "."}, baseEnv(forkCache(), fork.goroot), 5*time.Minute); err != nil {
 		t.Fatalf("building pipe holder: %v\n%s", err, clip(out))
 	}
 	src := fmt.Sprintf(`package main
@@ -1170,7 +1171,7 @@ func main() {
 		t.Fatal(err)
 	}
 	bin := filepath.Join(dir, "daemon")
-	if out, err := goBuild(fork.bin, dir, []string{"build", "-o", bin, "."}, baseEnv(forkCache()), 5*time.Minute); err != nil {
+	if out, err := goBuild(fork.bin, dir, []string{"build", "-o", bin, "."}, baseEnv(forkCache(), fork.goroot), 5*time.Minute); err != nil {
 		t.Fatalf("building daemon: %v\n%s", err, clip(out))
 	}
 	obs, err := runBinaryTimeout(bin, "4", 15*time.Second, corpusNorm)
@@ -1220,7 +1221,7 @@ func main() {
 	}
 	ch := make(chan runRes, 1)
 	go func() {
-		out, err := runGenerator(fork.bin, "sleepgen", dir, baseEnv(forkCache()), 2*time.Second)
+		out, err := runGenerator(fork.bin, "sleepgen", dir, baseEnv(forkCache(), fork.goroot), 2*time.Second)
 		ch <- runRes{out, err}
 	}()
 	var pgid int
@@ -1404,7 +1405,7 @@ func buildFork(fork toolchain, base string, progs []string, c config) buildResul
 			return buildResult{err: fmt.Errorf("writing logos.toml: %w", err)}
 		}
 	}
-	env := appendEnv(baseEnv(forkCache()), c.env...)
+	env := appendEnv(baseEnv(forkCache(), fork.goroot), c.env...)
 	bin := fork.bin
 	if c.logos {
 		bin = fork.logos
@@ -1437,7 +1438,7 @@ func buildUpstream(up toolchain, base string, progs []string, u upConfig) buildR
 	if err := stageCorpus(up, stage, upCache(), progs); err != nil {
 		return buildResult{err: fmt.Errorf("upstream stage: %w", err)}
 	}
-	env := baseEnv(upCache())
+	env := baseEnv(upCache(), up.goroot)
 	if u.race {
 		env = appendEnv(env, "CGO_ENABLED=1")
 	}
@@ -1501,7 +1502,7 @@ func dryBuild(t *testing.T, fork toolchain, c config) string {
 		bin = fork.logos
 	}
 	args := append([]string{"build", "-n", "-o", filepath.Join(dir, "dry")}, c.args...)
-	out, err := goBuild(bin, dir, append(args, "."), appendEnv(baseEnv(forkCache()), c.env...), 5*time.Minute)
+	out, err := goBuild(bin, dir, append(args, "."), appendEnv(baseEnv(forkCache(), fork.goroot), c.env...), 5*time.Minute)
 	if err != nil {
 		t.Fatalf("dry build under %s: %v\n%s", c.id, err, clip(out))
 	}
@@ -1865,7 +1866,7 @@ func checkFailCorpus(t *testing.T, fork, up toolchain, base string, ks []config)
 	}
 	run := failRun{fork: fork, base: base}
 	for _, s := range stems {
-		upOut, upErr := goBuild(up.bin, stage, []string{"build", "-o", filepath.Join(base, "failbin-"+s), "./" + s}, baseEnv(upCache()), 5*time.Minute)
+		upOut, upErr := goBuild(up.bin, stage, []string{"build", "-o", filepath.Join(base, "failbin-"+s), "./" + s}, baseEnv(upCache(), up.goroot), 5*time.Minute)
 		if upErr == nil {
 			t.Errorf("fail corpus %s: upstream build succeeded, corpus defect", s)
 			continue
@@ -1878,7 +1879,7 @@ func checkFailCorpus(t *testing.T, fork, up toolchain, base string, ks []config)
 			t.Errorf("fail corpus %s: upstream reported no file:line:col, corpus defect", s)
 			continue
 		}
-		vetOut, vetErr := goBuild(up.bin, stage, []string{"vet", "./" + s}, baseEnv(upCache()), 5*time.Minute)
+		vetOut, vetErr := goBuild(up.bin, stage, []string{"vet", "./" + s}, baseEnv(upCache(), up.goroot), 5*time.Minute)
 		if vetErr == nil {
 			t.Errorf("fail corpus %s: upstream vet succeeded, corpus defect", s)
 			continue
@@ -1903,7 +1904,7 @@ func checkFailUnder(t *testing.T, run failRun, c config, stage string, ref failR
 	if c.logos {
 		bin = run.fork.logos
 	}
-	fenv := appendEnv(baseEnv(forkCache()), c.env...)
+	fenv := appendEnv(baseEnv(forkCache(), run.fork.goroot), c.env...)
 	out := filepath.Join(run.base, "failbin-fork-"+c.id+"-"+ref.stem)
 	fout, ferr := goBuild(bin, stage, append(append([]string{"build"}, c.args...), "-o", out, "./"+ref.stem), fenv, 5*time.Minute)
 	if ferr == nil {
@@ -2143,7 +2144,7 @@ func (mb *mutBuild) corpus(t *testing.T, progs []string) {
 			t.Fatalf("writing fail stage %s: %v", s, err)
 		}
 	}
-	mb.env = appendEnv(baseEnv(forkCache()), mb.cfg.env...)
+	mb.env = appendEnv(baseEnv(forkCache(), mb.fork.goroot), mb.cfg.env...)
 	mb.args = slices.Clone(mb.cfg.args)
 	mb.outDir = filepath.Join(mb.scratch, "out")
 	plain, cgoProg, err := splitStaged(mb.stage, progs)
@@ -2181,7 +2182,7 @@ func (mb *mutBuild) buildTool(t *testing.T, toolName string) (string, error) {
 	defer cancel()
 	cmd := exec.CommandContext(ctx, mb.fork.bin, "build", "-overlay="+mb.overlayPath, "-o", outPath, "cmd/"+toolName)
 	cmd.Dir = filepath.Join(mb.fork.goroot, "src")
-	cmd.Env = baseEnv(forkCache())
+	cmd.Env = baseEnv(forkCache(), mb.fork.goroot)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("%v\n%s", err, clip(string(out)))
@@ -2214,7 +2215,7 @@ func (mb *mutBuild) buildFile(t *testing.T, stem string) error {
 func (mb *mutBuild) cleanExpect(t *testing.T, prog string) (observation, error) {
 	t.Helper()
 	outDir := filepath.Join(mb.scratch, "out-clean")
-	env := appendEnv(baseEnv(forkCache()), mb.cfg.env...)
+	env := appendEnv(baseEnv(forkCache(), mb.fork.goroot), mb.cfg.env...)
 	sb := stagedBuild{bin: mb.driverBin(), stage: mb.stage, outDir: outDir, args: slices.Clone(mb.cfg.args), env: env, progs: []string{prog}, wantCgo: true}
 	if _, out, err := sb.build(); err != nil {
 		return observation{}, fmt.Errorf("clean build failed: %v\n%s", err, clip(out))
@@ -2224,7 +2225,7 @@ func (mb *mutBuild) cleanExpect(t *testing.T, prog string) (observation, error) 
 
 func (mb *mutBuild) cleanFile(t *testing.T, stem string) error {
 	t.Helper()
-	env := appendEnv(baseEnv(forkCache()), mb.cfg.env...)
+	env := appendEnv(baseEnv(forkCache(), mb.fork.goroot), mb.cfg.env...)
 	args := append([]string{"build"}, append(slices.Clone(mb.cfg.args), "-o", filepath.Join(mb.scratch, "failbin-clean-"+stem), "./"+stem)...)
 	ctx, cancel := context.WithTimeoutCause(context.Background(), 5*time.Minute, errors.New("goparity fail build timeout"))
 	defer cancel()
@@ -2335,7 +2336,7 @@ func TestParityMutants(t *testing.T) {
 		ctx, cancel := context.WithTimeoutCause(context.Background(), 5*time.Minute, errors.New("goparity shim build timeout"))
 		defer cancel()
 		cmd := exec.CommandContext(ctx, fork.bin, "build", "-o", shim, pkgDir)
-		cmd.Env = baseEnv(forkCache())
+		cmd.Env = baseEnv(forkCache(), fork.goroot)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("building toolexec shim: %v\n%s", err, clip(string(out)))
 		}
@@ -2462,7 +2463,7 @@ func (uo *upOnceBuild) build(t *testing.T, uID string) (buildResult, error) {
 	if err := stageCorpus(uo.up, stage, upCache(), uo.progs); err != nil {
 		return buildResult{}, fmt.Errorf("staging corpus: %w", err)
 	}
-	env := baseEnv(upCache())
+	env := baseEnv(upCache(), uo.up.goroot)
 	if u.race {
 		env = appendEnv(env, "CGO_ENABLED=1")
 	}
@@ -2615,7 +2616,7 @@ func (j sweepJob) check(f sweepFile) (excluded, failed string) {
 		dirs = append(dirs, st)
 		outDir := filepath.Join(j.base, "out-"+f.pkg+"-"+u.id)
 		dirs = append(dirs, outDir)
-		env := baseEnv(upCache())
+		env := baseEnv(upCache(), j.up.goroot)
 		if u.race {
 			env = appendEnv(env, "CGO_ENABLED=1")
 		}
@@ -2651,7 +2652,7 @@ func (j sweepJob) check(f sweepFile) (excluded, failed string) {
 		if c.logos {
 			bin = j.fork.logos
 		}
-		out, err := j.buildRow(bin, st, outDir, c.args, appendEnv(baseEnv(forkCache()), c.env...), f.pkg)
+		out, err := j.buildRow(bin, st, outDir, c.args, appendEnv(baseEnv(forkCache(), j.fork.goroot), c.env...), f.pkg)
 		if err != nil {
 			return "", fmt.Sprintf("fork %s build failed where upstream builds: %v\n%s", c.id, err, clip(out))
 		}
