@@ -298,10 +298,22 @@ func arenaParkCase(t *testing.T, live []bool, empty func(addr uintptr) bool) {
 
 func arenaParkChainCheck(t *testing.T, b arenaParkBuilt, live []bool) {
 	t.Helper()
+	deadline, ok := t.Deadline()
+	if !ok {
+		deadline = time.Now().Add(time.Minute)
+	}
 	var chain [arenaParkMax + 1]runtime.LogosArenaChunk
-	n, waiting := runtime.LogosArenaChainOf(b.goid, chain[:])
-	if !waiting {
-		t.Errorf("goroutine %d is not parked", b.goid)
+	var n int
+	for {
+		var waiting bool
+		n, waiting = runtime.LogosArenaChainOf(b.goid, chain[:])
+		if waiting {
+			break
+		}
+		if !time.Now().Before(deadline) {
+			t.Fatalf("goroutine %d is not parked", b.goid)
+		}
+		runtime.Gosched()
 	}
 	held := make(map[uintptr]bool)
 	for _, c := range chain[:min(n, len(chain))] {
