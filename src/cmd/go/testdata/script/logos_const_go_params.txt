@@ -55,6 +55,24 @@ stderr 'const_view_mutation'
 stderr 'parameter xs'
 cd ..
 
+# An archive built by plain go build has no ParamMutated summary for Read:
+# unknown, never the proven zero that logos build records for it.
+mkdir $WORK/withfacts/example.com
+cp $WORK/dep.a $WORK/withfacts/example.com/gopdep.a
+env GOAMD64=v3
+env GOEXPERIMENT=logosarena
+go tool compile -I $WORK/withfacts -p example.com/absentuse -o $WORK/absentuse-facts.a absent/use.lgo
+env GOAMD64=
+env GOEXPERIMENT=
+mkdir $WORK/nofacts/example.com
+cd dep
+go build -o $WORK/nofacts/example.com/gopdep.a .
+cd ..
+! go tool pack p $WORK/nofacts/example.com/gopdep.a __.LOGOS
+! go tool compile -I $WORK/nofacts -p example.com/absentuse -o $WORK/absentuse-nofacts.a absent/use.lgo
+stdout 'const_view_mutation'
+stdout 'parameter b'
+
 cd imp
 cp ../dep/dep.go.next ../dep/dep.go
 ! logos build -o $WORK/ok2$GOEXE ./ok
@@ -64,6 +82,16 @@ cd dep
 go build -o $WORK/dep-plain.a .
 cd ..
 ! go tool pack p $WORK/dep-plain.a __.LOGOS
+
+-- absent/use.lgo --
+package absentuse
+
+import "example.com/gopdep"
+
+func Use(xs []byte) int {
+	var v const []byte = xs
+	return dep.Read(v)
+}
 
 -- dep/go.mod --
 module example.com/gopdep
