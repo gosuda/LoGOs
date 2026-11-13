@@ -5,6 +5,7 @@
 package logos
 
 import (
+	"bytes"
 	"go/token"
 	"strconv"
 	"strings"
@@ -32,6 +33,9 @@ func (fl *fileLower) lowerArenaEject() {
 		calls = append(calls, c)
 		return false
 	})
+	if len(calls) > 0 {
+		a.recordGuardRenames()
+	}
 	for _, c := range calls {
 		a.rewriteCall(c)
 	}
@@ -45,6 +49,7 @@ func (fl *fileLower) lowerArenaEject() {
 type arenaEject struct {
 	fl        *fileLower
 	spans     []span
+	guardSeq  int
 	needRT    bool
 	rtAlias   string
 	rtPresent bool
@@ -394,6 +399,94 @@ func (a *arenaEject) blankSwitchInit(s *syntax.SwitchStmt, inits map[*syntax.Ass
 	a.blankInit(s.Init, a.fl.off(s.Body[0].Colon)+1, "", inits)
 }
 
+func (a *arenaEject) recordGuardRenames() {
+	var dropped []span
+	syntax.Inspect(a.fl.file, func(n syntax.Node) bool {
+		c, ok := n.(*syntax.CallExpr)
+		if !ok || len(c.ArgList) == 0 || !a.plainRegion(c.ArgList[0]) {
+			return true
+		}
+		switch a.fl.arenaCallName(c) {
+		case "New", "Make", "Append":
+			dropped = append(dropped, a.argSpan(c, 0))
+		}
+		return true
+	})
+	syntax.Inspect(a.fl.file, func(n syntax.Node) bool {
+		s, ok := n.(*syntax.SwitchStmt)
+		if !ok {
+			return true
+		}
+		a.renameGuardShadow(s, dropped)
+		return true
+	})
+}
+
+func (a *arenaEject) renameGuardShadow(s *syntax.SwitchStmt, dropped []span) {
+	g, ok := s.Tag.(*syntax.TypeSwitchGuard)
+	if !ok || g.Lhs == nil || g.Lhs.Value == "_" {
+		return
+	}
+	as, ok := s.Init.(*syntax.AssignStmt)
+	if !ok || as.Op != syntax.Def {
+		return
+	}
+	shadowed := false
+	for _, e := range syntax.UnpackListExpr(as.Lhs) {
+		n, ok := e.(*syntax.Name)
+		if ok && n.Value == g.Lhs.Value && a.blankNeeded(n) {
+			shadowed = true
+		}
+	}
+	if !shadowed {
+		return
+	}
+	objs := make([]*types2.Var, len(s.Body))
+	for i, cl := range s.Body {
+		if cl == nil {
+			return
+		}
+		obj, ok := a.fl.pkg.info.Implicits[cl].(*types2.Var)
+		if !ok {
+			return
+		}
+		objs[i] = obj
+	}
+	fresh := a.freshGuardName()
+	a.fl.add(a.fl.off(syntax.StartPos(g.Lhs)), a.fl.endOff(g.Lhs), fresh)
+	for i, cl := range s.Body {
+		for _, st := range cl.Body {
+			syntax.Inspect(st, func(n syntax.Node) bool {
+				name, ok := n.(*syntax.Name)
+				if !ok || a.fl.pkg.info.Uses[name] != objs[i] || inDroppedArg(dropped, a.spanOf(name)) {
+					return true
+				}
+				a.fl.add(a.fl.off(syntax.StartPos(name)), a.fl.endOff(name), fresh)
+				return false
+			})
+		}
+	}
+}
+
+func inDroppedArg(dropped []span, s span) bool {
+	for _, d := range dropped {
+		if d.start <= s.start && s.end <= d.end {
+			return true
+		}
+	}
+	return false
+}
+
+func (a *arenaEject) freshGuardName() string {
+	for i := a.guardSeq + 1; ; i++ {
+		cand := "_logos_arena_guard" + strconv.Itoa(i)
+		if !bytes.Contains(a.fl.src, []byte(cand)) {
+			a.guardSeq = i
+			return cand
+		}
+	}
+}
+
 func (a *arenaEject) blankVarDecl(d *syntax.VarDecl) {
 	end := stmtEnd(a.fl.src, a.fl.off(d.Pos()))
 	if d.Group != nil {
@@ -416,9 +509,13 @@ func (a *arenaEject) blankNames(names []syntax.Expr) string {
 	return text.String()
 }
 
-func (a *arenaEject) blankName(name *syntax.Name) string {
+func (a *arenaEject) blankNeeded(name *syntax.Name) bool {
 	v, ok := a.fl.pkg.info.Defs[name].(*types2.Var)
-	if !ok || !logosRegionIsType(v.Type()) || !a.isLocal(v) {
+	return ok && logosRegionIsType(v.Type()) && a.isLocal(v)
+}
+
+func (a *arenaEject) blankName(name *syntax.Name) string {
+	if !a.blankNeeded(name) {
 		return ""
 	}
 	return "_ = " + name.Value + ";"

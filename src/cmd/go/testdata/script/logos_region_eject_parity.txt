@@ -48,6 +48,22 @@ exists $UPROOT1272/bin/go
 exec $UPROOT1272/bin/go version
 stdout '^go version go1\.27\.2 '
 exec env -u GOROOT $UPROOT1272/bin/go build ./...
+cd ../..
+cd m4
+env GOEXPERIMENT=logosarena
+logos run .
+stdout '^7 11$'
+cp stdout $WORK/native4-stdout.txt
+env GOEXPERIMENT=
+logos eject -o out
+cd out
+go run .
+cmp stdout $WORK/native4-stdout.txt
+# REDTEAM #194: type-switch shadowing preserves native/eject parity.
+exists $UPROOT1272/bin/go
+exec $UPROOT1272/bin/go version
+stdout '^go version go1\.27\.2 '
+exec env -u GOROOT $UPROOT1272/bin/go build ./...
 
 -- m/go.mod --
 module example.com/regionparity
@@ -155,4 +171,32 @@ func main() {
 	default:
 		_ = arena.New[int](switchRegion)
 	}
+}
+
+-- m4/go.mod --
+module example.com/regionparity3
+
+go 1.27
+
+-- m4/main.lgo --
+package main
+
+import (
+	"fmt"
+
+	"logos/arena"
+)
+
+func main() {
+	shadow := 0
+	switch r := arena.Open(); r := any(arena.New[int](r)).(type) {
+	case *int:
+		shadow = *r + 7
+	}
+	distinct := 0
+	switch r := arena.Open(); q := any(arena.New[int](r)).(type) {
+	case *int:
+		distinct = *q + 11
+	}
+	fmt.Println(shadow, distinct)
 }
