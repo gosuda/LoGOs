@@ -472,11 +472,14 @@ func (check *Checker) logosCompositeCallProven(e *syntax.SelectorExpr, fn *Func)
 	if _, pointer := Unalias(rt).(*Pointer); !pointer && !check.logosValueReceiverGuarded(e.X) {
 		return true
 	}
+	if check.logosLocalValueReceiverSafe(e, sig) {
+		return true
+	}
 	if fn.Origin().Pkg() == check.pkg {
 		check.logosDeferReadonlyCheck(fn, e.Sel.Pos(), e.X, e.Sel.Value)
 		return true
 	}
-	return check.logosReceiverReadonly(fn) || check.logosImportedSafeValueCall(e, sig)
+	return check.logosReceiverReadonly(fn)
 }
 
 func (check *Checker) logosValueReceiverGuarded(e syntax.Expr) bool {
@@ -492,7 +495,7 @@ func (check *Checker) logosValueReceiverGuarded(e syntax.Expr) bool {
 	return true
 }
 
-func (check *Checker) logosImportedSafeValueCall(e *syntax.SelectorExpr, sig *Signature) bool {
+func (check *Checker) logosLocalValueReceiverSafe(e *syntax.SelectorExpr, sig *Signature) bool {
 	rt := sig.Recv().Type()
 	if _, pointer := Unalias(rt).(*Pointer); pointer || logosTypeHasMap(rt) || !logosReferenceFreeResults(sig.Results()) {
 		return false
@@ -510,7 +513,19 @@ func (check *Checker) logosImportedSafeValueCall(e *syntax.SelectorExpr, sig *Si
 		return false
 	}
 	v, ok := check.logosRecorded(obj)
-	return ok && check.logosReceiverValueSafe(e.X, n, v, nil)
+	if !ok {
+		return false
+	}
+	t := check.TypeOf(e.X)
+	if base := logosAsConstView(t); base != nil {
+		t = base.Elem
+	}
+	method, index, _ := lookupFieldOrMethod(t, false, check.pkg, e.Sel.Value, false)
+	if _, ok := method.(*Func); !ok {
+		return false
+	}
+	path := logosReceiverPath{expr: e, indices: index[:len(index)-1]}
+	return check.logosReceiverValueSafe(e.X, n, v, &path)
 }
 
 func (check *Checker) logosCompositeMutatingCall(e *syntax.SelectorExpr, fn *Func) bool {
@@ -615,8 +630,12 @@ func (check *Checker) logosConstSelect(x *operand, e *syntax.SelectorExpr, sel s
 			x.typ_ = base.Elem
 			return false
 		}
+		if check.logosLocalValueReceiverSafe(e, sig) {
+			x.typ_ = base.Elem
+			return false
+		}
 		if obj.Origin().Pkg() != check.pkg {
-			if check.logosReceiverReadonly(obj) || check.logosImportedSafeValueCall(e, sig) {
+			if check.logosReceiverReadonly(obj) {
 				x.typ_ = base.Elem
 				return false
 			}

@@ -16,6 +16,18 @@ logos build -buildvcs=false -o idxcase.exe ./idxcase
 exec ./idxcase.exe
 stderr '^ok$'
 
+logos build -buildvcs=false -o localcase.exe ./localcase
+exec ./localcase.exe
+stderr '^ok$'
+
+logos build -buildvcs=false -o promotedcase.exe ./promotedcase
+exec ./promotedcase.exe
+stderr '^ok$'
+
+logos build -buildvcs=false -o emptycase.exe ./emptycase
+exec ./emptycase.exe
+stderr '^ok$'
+
 -- go.mod --
 module example.com/receiver
 
@@ -34,6 +46,14 @@ func (s Set) Head() []int { return s.Items }
 func (s Set) Grow() int {
 	s.Items = append(s.Items, 0)
 	return len(s.Items)
+}
+
+func Sum(items []int) int {
+	total := 0
+	for _, item := range items {
+		total += item
+	}
+	return total
 }
 
 -- bump/main.lgo --
@@ -105,3 +125,59 @@ func main() {
 	}
 	println("ok")
 }
+
+-- localcase/main.lgo --
+package main
+
+import "example.com/receiver/lib"
+
+type plain struct {
+	L []int
+	N int
+}
+
+func (p plain) Total() int { return lib.Sum(p.L) + p.N }
+
+const c = plain{N: 5}
+
+// Red if same-package methods cannot use the value-level exception.
+func main() {
+	if c.Total() != 5 {
+		println("bad")
+		return
+	}
+	println("ok")
+}
+
+-- promotedcase/main.lgo --
+package main
+
+import "example.com/receiver/lib"
+
+type Outer struct {
+	lib.Set
+	Extra []int
+}
+
+const o = Outer{Extra: []int{1}}
+
+// Red if an imported promoted method checks the unrelated outer slice.
+func main() {
+	if o.Grow() != 1 || o.Grow() != 1 {
+		println("bad")
+		return
+	}
+	println("ok")
+}
+
+-- emptycase/main.lgo --
+package main
+
+import "example.com/receiver/lib"
+
+const empty = []lib.Set{}
+
+// Red if an empty unknown-index candidate set rejects an imported method.
+func probe(i int) int { return empty[i].Grow() }
+
+func main() { println("ok") }

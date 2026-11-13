@@ -292,8 +292,9 @@ func logosTypeHasMap(t Type) bool {
 }
 
 type logosReceiverPath struct {
-	expr syntax.Expr
-	next *logosReceiverPath
+	expr    syntax.Expr
+	indices []int
+	next    *logosReceiverPath
 }
 
 func (check *Checker) logosReceiverValueSafe(e syntax.Expr, root *syntax.Name, v ctfe.Value, path *logosReceiverPath) bool {
@@ -320,11 +321,15 @@ func (check *Checker) logosReceiverPathSafe(v ctfe.Value, path *logosReceiverPat
 	}
 	switch e := path.expr.(type) {
 	case *syntax.SelectorExpr:
-		sel := check.Selections[e]
-		if sel == nil || sel.Kind() != FieldVal {
-			return false
+		indices := path.indices
+		if path.next != nil {
+			sel := check.Selections[e]
+			if sel == nil || sel.Kind() != FieldVal {
+				return false
+			}
+			indices = sel.Index()
 		}
-		for _, index := range sel.Index() {
+		for _, index := range indices {
 			fields := v.Fields()
 			if v.Type().Kind != ctfe.KStruct || index >= len(fields) {
 				return false
@@ -339,7 +344,7 @@ func (check *Checker) logosReceiverPathSafe(v ctfe.Value, path *logosReceiverPat
 			elems = v.Elems()
 		case ctfe.KSlice:
 			backing, lo, length, _, ok := v.SliceHeader()
-			if !ok {
+			if !ok && !v.IsNilValue() {
 				return false
 			}
 			elems = backing[lo : lo+length]
@@ -348,9 +353,6 @@ func (check *Checker) logosReceiverPathSafe(v ctfe.Value, path *logosReceiverPat
 		}
 		if index, known := check.constBoundValue(e.Index); known {
 			return index >= 0 && index < int64(len(elems)) && check.logosReceiverPathSafe(elems[index], path.next)
-		}
-		if len(elems) == 0 {
-			return false
 		}
 		for _, elem := range elems {
 			if !check.logosReceiverPathSafe(elem, path.next) {
