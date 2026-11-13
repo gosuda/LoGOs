@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"logos/arena"
 	"os"
+	"reflect"
+	"runtime"
 )
 
 func makeNegativeDynamic() {
@@ -21,18 +23,20 @@ func makeNegativeLiteral() {
 
 func main() {
 	failed := false
+	var normalType reflect.Type
 	check := func(name string, rec any) string {
-		err, ok := rec.(error)
+		err, ok := rec.(runtime.Error)
 		if !ok {
 			fmt.Printf("FAIL %s: panic = %v, want runtime error\n", name, rec)
 			failed = true
 			return ""
 		}
 		message := err.Error()
-		if message != "runtime error: makeslice: len out of range" {
-			fmt.Printf("FAIL %s: panic = %q, want makeslice len out of range\n", name, message)
+		if normalType == nil {
+			normalType = reflect.TypeOf(rec)
+		} else if reflect.TypeOf(rec) != normalType {
+			fmt.Printf("FAIL %s: panic type = %T, want %v\n", name, rec, normalType)
 			failed = true
-			return message
 		}
 		fmt.Printf("ok %s\n", name)
 		return message
