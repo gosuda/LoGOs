@@ -4,7 +4,10 @@
 
 package config
 
-import "internal/cpu"
+import (
+	"internal/cpu"
+	"slices"
+)
 
 func ArchLevels(targetCPU string) (amd64, arm64 string) {
 	switch targetCPU {
@@ -18,13 +21,23 @@ func ArchLevels(targetCPU string) (amd64, arm64 string) {
 }
 
 func nativeAMD64() string {
-	if cpu.X86.HasAVX512F && cpu.X86.HasAVX512BW && cpu.X86.HasAVX512CD && cpu.X86.HasAVX512DQ && cpu.X86.HasAVX512VL {
-		return "v4"
+	x := &cpu.X86
+	levels := []struct {
+		name string
+		need []bool
+	}{
+		{"v2", []bool{x.HasSSE3, x.HasSSSE3, x.HasCX16, x.HasSSE41, x.HasSSE42, x.HasPOPCNT, x.HasLAHF}},
+		{"v3", []bool{x.HasFMA, x.HasMOVBE, x.HasOSXSAVE, x.HasAVX, x.HasF16C, x.HasLZCNT, x.HasBMI1, x.HasAVX2, x.HasBMI2}},
+		{"v4", []bool{x.HasAVX512F, x.HasAVX512DQ, x.HasAVX512CD, x.HasAVX512BW, x.HasAVX512VL}},
 	}
-	if cpu.X86.HasAVX2 && cpu.X86.HasBMI2 && cpu.X86.HasFMA {
-		return "v3"
+	host := "v1"
+	for _, level := range levels {
+		if slices.Contains(level.need, false) {
+			break
+		}
+		host = level.name
 	}
-	return "v1"
+	return host
 }
 
 func nativeARM64() string {
