@@ -435,6 +435,22 @@ func passGoSpawnedLiteral(ctx context.Context) {
 	})
 }
 
+func passGoGroupInCallback(ctx context.Context, l *sync.Locked[int]) {
+	l.WithLock(func(n *int) {
+		err := func() error {
+			go group (ctx) {
+				go func() {
+					l.WithLock(func(m *int) { *m++ })
+				}()
+			}
+			return nil
+		}()
+		if err != nil {
+			panic(err)
+		}
+	})
+}
+
 func spawnFuncArgLock(ctx context.Context, l *sync.Locked[int]) error {
 	go group (ctx) {
 		go sinkFunc(func() {

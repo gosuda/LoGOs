@@ -110,6 +110,11 @@ func waitDone(ctx context.Context) {
 	<-ctx.Done()
 }
 
+func rangeDone(ctx context.Context) {
+	for range ctx.Done() { // ERROR "unbounded_channel_op"
+	}
+}
+
 func belowCap() int {
 	ch := make(chan int, 2)
 	ch <- 1

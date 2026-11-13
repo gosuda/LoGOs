@@ -333,6 +333,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 )
@@ -385,6 +386,11 @@ func a() {
 func b() error {
 	f() // want
 	return nil
+}
+
+func w(out io.Writer) {
+	fmt.Fprintf(out, "x") // want
+	fmt.Fprintln(out, "x") // want
 }
 `
 
@@ -1056,6 +1062,12 @@ func d() {
 //logos:allow(slop::discarded_error)
 ` + "`" + `
 	f() // want
+}
+
+func e() {
+	f() // want
+	//logos:allow(slop::discarded_error)
+	f()
 }
 `
 	for _, kind := range []Kind{KindGo, KindLgo} {

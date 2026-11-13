@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 )
@@ -118,6 +119,11 @@ func printedToBuffer() {
 	fmt.Fprintf(&b, "x")
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "x")
+}
+
+func printedToWriter(out io.Writer) {
+	fmt.Fprintf(out, "x") // ERROR "discarded_error"
+	fmt.Fprintln(out, "x") // ERROR "discarded_error"
 }
 
 func handled() {
