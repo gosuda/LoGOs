@@ -29,13 +29,15 @@ package main
 import (
 	"context"
 	"fmt"
+	"sync"
 )
 
 type Rec struct {
 	Count *int64 `json:"count"`
 }
 
-func marshalLoop(r *Rec) {
+func marshalLoop(r *Rec, start *sync.WaitGroup) {
+	start.Wait()
 	for range 200 {
 		_, err := r.MarshalJSON()
 		if err != nil {
@@ -44,7 +46,8 @@ func marshalLoop(r *Rec) {
 	}
 }
 
-func unmarshalLoop(r *Rec) {
+func unmarshalLoop(r *Rec, start *sync.WaitGroup) {
+	start.Wait()
 	for range 200 {
 		err := r.UnmarshalJSON([]byte(`{"count":7}`))
 		if err != nil {
@@ -56,9 +59,12 @@ func unmarshalLoop(r *Rec) {
 func run() error {
 	count := int64(3)
 	r := &Rec{Count: &count}
+	var start sync.WaitGroup
+	start.Add(1)
 	go group (context.Background()) {
-		go marshalLoop(r)
-		go unmarshalLoop(r)
+		go marshalLoop(r, &start)
+		go unmarshalLoop(r, &start)
+		start.Done()
 	}
 	fmt.Println("mixed ok")
 	return nil
@@ -76,13 +82,15 @@ package main
 import (
 	"context"
 	"fmt"
+	"sync"
 )
 
 type Rec struct {
 	Count *int64 `json:"count"`
 }
 
-func unmarshalLoop(r *Rec) {
+func unmarshalLoop(r *Rec, start *sync.WaitGroup) {
+	start.Wait()
 	for range 200 {
 		err := r.UnmarshalJSON([]byte(`{"count":7}`))
 		if err != nil {
@@ -94,9 +102,12 @@ func unmarshalLoop(r *Rec) {
 func run() error {
 	count := int64(3)
 	r := &Rec{Count: &count}
+	var start sync.WaitGroup
+	start.Add(1)
 	go group (context.Background()) {
-		go unmarshalLoop(r)
-		go unmarshalLoop(r)
+		go unmarshalLoop(r, &start)
+		go unmarshalLoop(r, &start)
+		start.Done()
 	}
 	fmt.Println("unmarshal ok")
 	return nil
