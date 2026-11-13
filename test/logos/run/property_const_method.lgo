@@ -65,6 +65,12 @@ func init() {
 	if _, ok := reflect.TypeOf(&Gadget{}).MethodByName("Logos_GetStart"); ok {
 		panic("Logos_GetStart must not exist on pointer")
 	}
+	if _, ok := gt.MethodByName("Logos_SetStart"); ok {
+		panic("Logos_SetStart must not exist")
+	}
+	if _, ok := reflect.TypeOf(&Gadget{}).MethodByName("Logos_SetStart"); ok {
+		panic("Logos_SetStart must not exist on pointer")
+	}
 	if _, ok := gt.MethodByName("Logos_GetName"); !ok {
 		panic("Logos_GetName must exist")
 	}
