@@ -550,6 +550,39 @@ func caseLimits(ctx context.Context) {
 	defer cancel()
 	pair, err := []int{1, 2}.group(short, limit = 2).map(x => rendezvous(short, x)?)
 	check("limit-parallel", err == nil && slices.Equal(pair, []int{1, 2}) && peak.Load() == 2, peak.Load(), 2)
+	reset()
+	nested, err := []int{10}.group(short, limit = 1).map(x => {
+		ys, innerErr := []int{1, 2}.group(short, limit = 2).map(y => meet(short, y))
+		if innerErr != nil {
+			panic(innerErr)
+		}
+		return x + ys[0] + ys[1]
+	})
+	check("limit-nested-own", err == nil && slices.Equal(nested, []int{13}) && peak.Load() == 2, peak.Load(), 2)
+	reset()
+	_, err = []int{1, 2}.group(ctx, limit = 2).map(x => {
+		ys, innerErr := []int{1, 2, 3}.group(ctx, limit = 1).map(y => tracked(y))
+		if innerErr != nil {
+			panic(innerErr)
+		}
+		return x + len(ys)
+	})
+	check("limit-nested-bound", err == nil && peak.Load() <= 2, peak.Load(), "at most 2")
+}
+
+func meet(ctx context.Context, y int) int {
+	v, err := rendezvous(ctx, y)
+	if err != nil {
+		return -1000
+	}
+	return v
+}
+
+func tracked(y int) int {
+	enter()
+	defer leave()
+	time.Sleep(2 * time.Millisecond)
+	return y
 }
 
 func zeroLimit(ctx context.Context) (msg string, touched bool) {

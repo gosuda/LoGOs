@@ -32,6 +32,8 @@ ok unordered-set
 ok limit-one
 ok limit-bound
 ok limit-parallel
+ok limit-nested-own
+ok limit-nested-bound
 ok limit-zero
 ok cancel-wakes-recv
 ok cancel-wakes-send
