@@ -21,7 +21,7 @@ Plain `go` MUST select improvements through flags and `GOEXPERIMENT` and MUST re
 A flag that plain `go` gains MUST stay absent from the help text, so that text stays byte-identical to upstream [T-0.1][R-U1].
 The `logos` command MUST build Go modules with Go language semantics [T-0.1].
 Under `logos`, a Go-module build MUST set the `logos` build tag and, with the default arena enablement, the `goexperiment.logosarena` build tag [T-0.1].
-An author `//logos:zeroalloc` directive in a Go file MUST fail `logos build` per Sec 17.2, while `go build` MUST ignore it [T-0.1].
+An author `//logos:zeroalloc` directive in a Go file MUST be checked by `logos build` per Sec 17.2: a misplaced directive or a violation of its allocation and call requirements MUST fail with `[perf::zeroalloc_violation]`; a correctly placed directive whose function satisfies those requirements MUST NOT cause a build failure. The `go build` command MUST ignore the directive [T-0.1].
 Under `logos` with the default arena enablement, `runtime.Version()` MUST carry the `X:logosarena` experiment suffix [T-0.1].
 A Go call into a loGo/s function MUST get the `logos/rt.MustNonNil` check per Sec 5 [T-0.1].
 These four MUST be the only differences from Go language semantics for Go modules under `logos` [T-0.1].
