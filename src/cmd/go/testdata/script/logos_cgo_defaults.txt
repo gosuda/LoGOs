@@ -9,11 +9,15 @@ env GOEXPERIMENT=
 go build -o app$GOEXE .
 exec ./app$GOEXE
 stdout '^sum42 mode=fastcgo-off$'
+go tool nm app$GOEXE
+! stdout 'logosCgocallFast'
 
 env GOEXPERIMENT=logosfastcgo
 go build -o app$GOEXE .
 exec ./app$GOEXE
 stdout '^sum42 mode=fastcgo-on$'
+go tool objdump -s 'main\._Cfunc_add(\.abi0)?$' app$GOEXE
+stdout 'CALL runtime\.logosCgocallFast'
 
 env GOEXPERIMENT=logosfastcgo
 logos build -o app$GOEXE .
