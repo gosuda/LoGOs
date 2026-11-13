@@ -670,7 +670,7 @@ func tupleSelectionName(t types2.Type, sel string) string {
 	if t == nil {
 		return sel
 	}
-	t = tupleUnderlying(t)
+	t = compositeUnderlying(t)
 	if tup, ok := t.(*types2.LogosTuple); ok {
 		for i := range tup.Len() {
 			if tup.Name(i) == sel || tupleLoweredName(tup.Name(i), i) == sel {
