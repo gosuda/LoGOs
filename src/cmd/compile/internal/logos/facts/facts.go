@@ -552,34 +552,40 @@ func decodeJSONFact(f *Facts, d *decoder, ln int, line string) (bool, error) {
 	return false, nil
 }
 
-func Decode(data []byte) (*Facts, error) {
-	d := &decoder{data: data, line: 1}
-	f := &Facts{}
-
+func (d *decoder) preamble(f *Facts) error {
 	_, magic, err := d.header()
 	if err != nil {
-		if len(data) == 0 {
-			return nil, fmt.Errorf("logos facts line 1: empty facts member, want %q", versionLine)
+		if len(d.data) == 0 {
+			return fmt.Errorf("logos facts line 1: empty facts member, want %q", versionLine)
 		}
-		return nil, err
+		return err
 	}
 	if magic != versionLine {
-		return nil, fmt.Errorf("logos facts line 1: unsupported version %q (want %q)", magic, versionLine)
+		return fmt.Errorf("logos facts line 1: unsupported version %q (want %q)", magic, versionLine)
 	}
 
 	_, fpLine, err := d.header()
 	if err != nil {
-		return nil, err
+		return err
 	}
 	fpFields := strings.Fields(fpLine)
 	if len(fpFields) != 2 || fpFields[0] != "fingerprint" {
-		return nil, fmt.Errorf(`logos facts line 2: bad fingerprint line %q (want "fingerprint <hex>")`, fpLine)
+		return fmt.Errorf(`logos facts line 2: bad fingerprint line %q (want "fingerprint <hex>")`, fpLine)
 	}
 	raw, err := hex.DecodeString(fpFields[1])
 	if err != nil || len(raw) != len(f.Fingerprint) {
-		return nil, fmt.Errorf("logos facts line 2: bad fingerprint %q (want %d hex chars)", fpFields[1], 2*len(f.Fingerprint))
+		return fmt.Errorf("logos facts line 2: bad fingerprint %q (want %d hex chars)", fpFields[1], 2*len(f.Fingerprint))
 	}
 	copy(f.Fingerprint[:], raw)
+	return nil
+}
+
+func Decode(data []byte) (*Facts, error) {
+	d := &decoder{data: data, line: 1}
+	f := &Facts{}
+	if err := d.preamble(f); err != nil {
+		return nil, err
+	}
 
 	prev := ""
 	for d.off < len(d.data) {

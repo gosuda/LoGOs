@@ -108,7 +108,7 @@ func AlwaysNilErrorSet(pkg *types2.Package, info *types2.Info, files []*syntax.F
 
 func (s *nilErrScope) add(fd *syntax.FuncDecl) {
 	fn, ok := s.info.Defs[fd.Name].(*types2.Func)
-	if !ok || fn == nil {
+	if !ok {
 		return
 	}
 	sig, ok := fn.Type().(*types2.Signature)
