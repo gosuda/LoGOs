@@ -179,7 +179,11 @@ func (p *parser) logosParenTypeElem() parenElem {
 		return parenElem{e: p.logosOptionType(e)}
 
 	case _Name:
-		e := p.qualifiedName(nil)
+		name := p.name()
+		if p.tok == _Lbrack {
+			return p.logosParenTypeBracket(name)
+		}
+		e := p.qualifiedName(name)
 		if fe := p.logosParenTypeField(e); fe.name != nil {
 			return fe
 		}
@@ -199,6 +203,16 @@ func (p *parser) logosParenTypeElem() parenElem {
 		p.advance(_Comma, _Rparen)
 		return parenElem{e: p.badExpr()}
 	}
+}
+
+func (p *parser) logosParenTypeBracket(name *Name) parenElem {
+	typ := p.arrayOrTArgs()
+	inst, ok := typ.(*IndexExpr)
+	if !ok {
+		return parenElem{e: name, name: name, typ: typ}
+	}
+	inst.X = name
+	return parenElem{e: p.logosOptionType(inst)}
 }
 
 func (p *parser) logosParenTypeField(e Expr) parenElem {

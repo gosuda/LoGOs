@@ -218,6 +218,39 @@ func TestLogosParenColonMeansNamedType(t *testing.T) {
 	}
 }
 
+func TestLogosTupleNamedBracketElems(t *testing.T) {
+	for _, tc := range []struct {
+		src   string
+		names []string
+		types []string
+	}{
+		{"type A (id int, xs []int)", []string{"id", "xs"}, []string{"int", "[]int"}},
+		{"type A (id int, p *int, a [2]int)", []string{"id", "p", "a"}, []string{"int", "*int", "[2]int"}},
+		{"type A (xs []int?, n int)", []string{"xs", "n"}, []string{"[]int?", "int"}},
+		{"type A (G[int], int)", []string{"", ""}, []string{"G[int]", "int"}},
+		{"type A (G[int]?, x G[int])", []string{"", "x"}, []string{"G[int]?", "G[int]"}},
+	} {
+		f := parseLogos(t, "package p\n"+tc.src+"\n")
+		decl, ok := f.DeclList[0].(*TypeDecl)
+		if !ok {
+			t.Fatalf("%s: decl 0 is %T; want *TypeDecl", tc.src, f.DeclList[0])
+		}
+		tt, ok := decl.Type.(*TupleType)
+		if !ok || len(tt.Fields) != len(tc.names) {
+			t.Fatalf("%s: type is %T; want *TupleType with %d fields", tc.src, decl.Type, len(tc.names))
+		}
+		for i, fld := range tt.Fields {
+			name := ""
+			if fld.Name != nil {
+				name = fld.Name.Value
+			}
+			if got := String(fld.Type); name != tc.names[i] || got != tc.types[i] {
+				t.Errorf("%s: field %d is %q %q; want %q %q", tc.src, i, name, got, tc.names[i], tc.types[i])
+			}
+		}
+	}
+}
+
 func TestLogosParenOnceBranches(t *testing.T) {
 	for _, tc := range []struct {
 		shape  string
