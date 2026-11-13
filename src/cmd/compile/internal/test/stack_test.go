@@ -5,7 +5,7 @@
 package test
 
 import (
-	"internal/buildcfg"
+	"internal/goexperiment"
 	"internal/testenv"
 	"testing"
 	"unsafe"
@@ -50,7 +50,7 @@ func TestStackAllocation(t *testing.T) {
 	} {
 		max := maxStackSize / int(tc.elemSize)
 		overflowAllocs := 1.0
-		if buildcfg.Experiment.LogosArena {
+		if goexperiment.LogosArena {
 			overflowAllocs = 0
 		}
 		if n := testing.AllocsPerRun(10, func() {
