@@ -7,6 +7,7 @@ package syntax
 import (
 	"bytes"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -691,10 +692,9 @@ func TestLogosContextualWordsPlainModeReject(t *testing.T) {
 	}
 }
 
-func TestLogosValidSyntaxForms(t *testing.T) {
-	chain := parseLogos(t, "package p\n\nfunc f(batch []int) []int {\n\treturn batch\n\t\t.filter(10)\n\t\t.map(20)\n}\n")
+func leadingDotNames(f *File) []string {
 	var names []string
-	Inspect(chain, func(n Node) bool {
+	Inspect(f, func(n Node) bool {
 		c, ok := n.(*CallExpr)
 		if !ok {
 			return true
@@ -708,29 +708,27 @@ func TestLogosValidSyntaxForms(t *testing.T) {
 		}
 		return true
 	})
-	if len(names) != 2 {
-		t.Fatalf("leading-dot continuations = %q, want 2", names)
+	return names
+}
+
+func TestLogosValidSyntaxForms(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body string
+		want []string
+	}{
+		{"tabs", "\treturn batch\n\t\t.filter(10)\n\t\t.map(20)\n", []string{"filter", "map"}},
+		{"spaces", "\treturn batch\n    .filter(10)\n    .map(20)\n", []string{"filter", "map"}},
+		{"underscore", "\treturn batch\n\t\t._x(10)\n", []string{"_x"}},
+		{"inline", "\treturn batch.filter(10).map(20)\n", nil},
+	} {
+		f := parseLogos(t, "package p\n\nfunc f(batch []int) []int {\n"+tc.body+"}\n")
+		names := leadingDotNames(f)
+		slices.Sort(names)
+		if !slices.Equal(names, tc.want) {
+			t.Errorf("%s: leading-dot continuations = %q, want %q", tc.name, names, tc.want)
+		}
 	}
-	for _, want := range []string{"filter", "map"} {
-		ok := false
-		for _, got := range names {
-			ok = ok || got == want
-		}
-		if !ok {
-			t.Fatalf("leading-dot continuations = %q, missing %q", names, want)
-		}
-	}
-	inline := parseLogos(t, "package p\n\nfunc f(batch []int) []int {\n\treturn batch.filter(10).map(20)\n}\n")
-	Inspect(inline, func(n Node) bool {
-		if c, ok := n.(*CallExpr); ok {
-			if sel, ok := c.Fun.(*SelectorExpr); ok && sel.Sel != nil {
-				if sel.Sel.Pos().Line() > StartPos(sel.X).Line() {
-					t.Errorf("inline chain %q counted as leading-dot continuation", sel.Sel.Value)
-				}
-			}
-		}
-		return true
-	})
 	lambda := parseLogos(t, "package p\n\nfunc each(f func(int) int) int {\n\treturn f(1)\n}\n\nfunc g() int {\n\treturn each(x => {\n\t\treturn x\n\t})\n}\n")
 	foundBlock := false
 	Inspect(lambda, func(n Node) bool {
