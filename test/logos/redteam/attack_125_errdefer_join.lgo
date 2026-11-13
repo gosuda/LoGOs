@@ -49,7 +49,7 @@ func main() {
 	rerr := onlyRollback()
 	check("errdefer-panic-join-keeps-rollback-only", errors.Is(rerr, errRollback) && !errors.Is(rerr, errPrimary), fmt.Sprint(errors.Is(rerr, errPrimary)), "false")
 	kerr := primaryKept()
-	check("errdefer-success-keeps-primary", errors.Is(kerr, errPrimary) && !errors.Is(kerr, errRollback), fmt.Sprint(errors.Is(kerr, errRollback)), "false")
+	check("errdefer-success-keeps-primary", kerr == errPrimary, fmt.Sprint(kerr), "primary")
 	if failed {
 		os.Exit(1)
 	}

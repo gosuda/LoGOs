@@ -895,6 +895,37 @@ func funclitHand() (err error) {
 	return nil
 }
 
+func fnValLA() error { lnote("a"); return nil }
+
+func fnValLB() error { lnote("b"); return nil }
+
+func fnValHA() error { hnote("a"); return nil }
+
+func fnValHB() error { hnote("b"); return nil }
+
+func fnValLogos() (err error) {
+	f := fnValLA
+	defer f()?
+	f = fnValLB
+	return nil
+}
+
+func fnValHand() (err error) {
+	f := fnValHA
+	captured := f
+	defer func() {
+		if e := captured(); e != nil {
+			if err == nil {
+				err = e
+			} else {
+				err = errors.Join(err, e)
+			}
+		}
+	}()
+	f = fnValHB
+	return nil
+}
+
 var q1Seen any = "unset"
 
 //go:noinline
@@ -924,11 +955,13 @@ func q1Hand() (err error) {
 //logos:allow(slop::discarded_error)
 func q1Case(name string, f func() error) {
 	q1Seen = "unset"
+	var outer any
 	func() {
-		defer func() { _ = recover() }()
+		defer func() { outer = recover() }()
 		_ = f()
 	}()
 	check(name, q1Seen == nil, fmt.Sprint("recover() inside f returned ", q1Seen))
+	check(name+"-outer", outer == "q1", fmt.Sprint("outer recover() returned ", outer))
 }
 
 func sortedCopy(vs []string) []string {
@@ -972,6 +1005,8 @@ func main() {
 	orderCase("generic", genericLogos, genericHand)
 	orderCase("iface-method", ifaceLogos, ifaceHand)
 	orderCase("method-value", methodValLogos, methodValHand)
+	orderCase("fn-value", fnValLogos, fnValHand)
+	check("fn-value-first", sameStrings(lOrder, []string{"a"}), fmt.Sprint(lOrder))
 	joinCase("join-two-logos", joinLogos)
 	joinCase("join-two-hand", joinHand)
 	typedNilCase("typed-nil-logos", typedNilLogos)

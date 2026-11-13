@@ -94,6 +94,21 @@ func tryRedeclare() (int, error) {
 	return x, nil
 }
 
+func tryRedeclareWithNew() (int, error) {
+	y := 0
+	x, y, z := threeResults()?
+	return x + y + z, nil
+}
+
+func tryShadowInInnerScope() (int, error) {
+	x := 0
+	if x == 0 {
+		x := twoResults()?
+		_ = x
+	}
+	return x, nil
+}
+
 func tryCountMismatch() (int, error) {
 	x, y := threeResults()? /* ERROR "? provides 3 values for 2 variables" */
 	_, _ = x, y

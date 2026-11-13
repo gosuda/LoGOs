@@ -1122,6 +1122,18 @@ func inner(x int) (int, error) {
 	}
 	return x + 10, nil
 }
+
+func next() (int, error) {
+	calls++
+	if fail {
+		return 0, myErr("boom")
+	}
+	return calls, nil
+}
+
+func sub(a, b int) int {
+	return a*10 + b
+}
 `
 	const stdMain = `func main() {
 	calls, fail = 0, false
@@ -1197,6 +1209,13 @@ func inner(x int) (int, error) {
 			misplaced: "func compute() (int, error) {\n\tif step()? == step()? {\n\t\treturn 1, nil\n\t}\n\treturn 0, nil\n}\n",
 			hand:      "func compute() (int, error) {\n\t_v, _e := step()\n\tif _e != nil {\n\t\treturn 0, _e\n\t}\n\t_step, _e1 := step()\n\tif _e1 != nil {\n\t\treturn 0, _e1\n\t}\n\tif _v == _step {\n\t\treturn 1, nil\n\t}\n\treturn 0, nil\n}\n",
 			wantVal:   1,
+			calls:     2,
+		},
+		{
+			name:      "args_in_order",
+			misplaced: "func compute() (int, error) {\n\tv := sub(next()?, next()?)\n\treturn v, nil\n}\n",
+			hand:      "func compute() (int, error) {\n\t_v, _e := next()\n\tif _e != nil {\n\t\treturn 0, _e\n\t}\n\t_next, _e1 := next()\n\tif _e1 != nil {\n\t\treturn 0, _e1\n\t}\n\tv := sub(_v, _next)\n\treturn v, nil\n}\n",
+			wantVal:   12,
 			calls:     2,
 		},
 	}

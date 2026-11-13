@@ -77,10 +77,8 @@ func run() error {
 			}
 		}
 		check("trace-files", okFiles, fmt.Sprint(trace), "try_chain.lgo x3")
-		ordered := trace[0].Line < trace[1].Line && trace[1].Line < trace[2].Line
-		check("trace-order", ordered, fmt.Sprint(trace[0].Line, trace[1].Line, trace[2].Line), "increasing")
-		positive := trace[0].Line > 0 && trace[1].Line > 0 && trace[2].Line > 0
-		check("trace-lines", positive, fmt.Sprint(trace[0].Line, trace[1].Line, trace[2].Line), "positive")
+		lines := fmt.Sprint(trace[0].Line, trace[1].Line, trace[2].Line)
+		check("trace-lines", lines == "44 49 54", lines, "44 49 54")
 	}
 	return err
 }

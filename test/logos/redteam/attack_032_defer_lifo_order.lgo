@@ -60,7 +60,7 @@ func check(name string, cond bool, got, want string) {
 func main() {
 	ferr := lifoFail()
 	check("defer-lifo-runs-innermost-first", strings.Join(order, ",") == "A-defer,B-defertry-ok,C-defer,E-errdefer", strings.Join(order, ","), "A-defer,B-defertry-ok,C-defer,E-errdefer")
-	check("defer-lifo-failure-returns-error", errors.Is(ferr, errAlpha), fmt.Sprint(ferr), "alpha")
+	check("defer-lifo-failure-returns-error", ferr == errAlpha, fmt.Sprint(ferr), "alpha")
 	order = nil
 	oerr := lifoOk()
 	check("defer-lifo-success-skips-errdefer", strings.Join(order, ",") == "A2-defer,B2-defertry-ok,C2-defer", strings.Join(order, ","), "A2-defer,B2-defertry-ok,C2-defer")

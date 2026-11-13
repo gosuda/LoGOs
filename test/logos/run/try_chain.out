@@ -3,6 +3,5 @@ ok zero
 ok err
 ok trace-len
 ok trace-files
-ok trace-order
 ok trace-lines
 ok run-err

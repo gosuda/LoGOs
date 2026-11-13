@@ -17,6 +17,8 @@ ok variadic
 ok generic
 ok iface-method
 ok method-value
+ok fn-value
+ok fn-value-first
 ok join-two-logos
 ok join-two-hand
 ok typed-nil-logos
@@ -27,4 +29,6 @@ ok goexit-logos
 ok goexit-hand
 ok nested-funclit
 ok recover-in-f-logos
+ok recover-in-f-logos-outer
 ok recover-in-f-hand
+ok recover-in-f-hand-outer
