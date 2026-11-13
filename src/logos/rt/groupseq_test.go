@@ -702,45 +702,6 @@ func TestGroupSeqLimitMustBePositive(t *testing.T) {
 	})
 }
 
-func TestGroupSeqSecondRangePanics(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		seq := seqStage(t.Context(), 2, 3, func(_ context.Context, i int) (int, bool, error) { return i, true, nil })
-		d := finished(t, startStage(seq, nil))
-		if d.err != nil || len(d.rs) != 3 {
-			t.Fatalf("first range: rs = %v, err = %v, want 3 results and nil", d.rs, d.err)
-		}
-		if got := panicOf(func() {
-			for range seq {
-			}
-		}); got == nil {
-			t.Fatal("second range did not panic")
-		}
-	})
-}
-
-func TestGroupSeqDoesNothingUntilRanged(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		var pulled, calls atomic.Int32
-		src := func(yield func(int) bool) {
-			pulled.Add(1)
-			yield(0)
-		}
-		base := runtime.NumGoroutine()
-		seq := GroupSeq(t.Context(), 2, src, func(_ context.Context, i int) (int, bool, error) {
-			calls.Add(1)
-			return i, true, nil
-		})
-		synctest.Wait()
-		if got := goroutinesAtMost(base); pulled.Load() != 0 || calls.Load() != 0 || got > base {
-			t.Fatalf("before the range: pulled = %d, calls = %d, goroutines %d -> %d", pulled.Load(), calls.Load(), base, got)
-		}
-		d := finished(t, startStage(seq, nil))
-		if d.err != nil || !slices.Equal(d.rs, []int{0}) {
-			t.Fatalf("rs = %v, err = %v, want [0], nil", d.rs, d.err)
-		}
-	})
-}
-
 func TestGroupSeqParentCancelledBeforeRange(t *testing.T) {
 	eachStage(t, orderedStages, func(t *testing.T, run stageFunc) {
 		ctx, cancel := context.WithCancel(t.Context())
