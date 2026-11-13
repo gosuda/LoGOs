@@ -172,6 +172,7 @@ type fileLower struct {
 	moves        []*chainMove
 	changed      bool
 	needRT       bool
+	needRTText   bool // text-only rt need: eject output references rt, checked AST does not.
 	needSimd     bool
 	needSimdMath bool
 	needJSON     bool
@@ -651,7 +652,7 @@ func (fl *fileLower) lowerFile() {
 
 	fl.lowerStaticJSON() // generated MarshalJSON and UnmarshalJSON; sets needRT and needJSON before the imports.
 	fl.flushTypeImports()
-	if fl.needRT || fl.needSimd || fl.needSimdMath || fl.needJSON || fl.needReflect || fl.needBinary {
+	if fl.needRT || fl.needRTText || fl.needSimd || fl.needSimdMath || fl.needJSON || fl.needReflect || fl.needBinary {
 		var imps []syntax.Decl
 		pos := fl.file.Pos()
 		for _, spec := range fl.logosImportSpecs() {
@@ -757,7 +758,7 @@ func (fl *fileLower) addHeaderSplice() {
 		ins = off
 	}
 	for _, spec := range fl.logosImportSpecs() {
-		if spec.need {
+		if spec.need || (spec.path == rtImportPath && fl.needRTText) {
 			fl.add(ins, ins, "\n\nimport "+spec.alias+" "+fmt.Sprintf("%q", spec.path))
 		}
 	}

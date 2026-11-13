@@ -182,16 +182,19 @@ go 1.27
 package main
 
 import (
+	"context"
 	"fmt"
 
 	"logos/arena"
 )
 
-func main() {
+func run() error {
 	shadow := 0
 	switch r := arena.Open(); r := any(arena.New[int](r)).(type) {
 	case *int:
 		shadow = *r + 7
+		go group (context.Background(), limit = 2) {}
+		go group (context.Background(), limit = 2) { shadow += *r }
 	}
 	distinct := 0
 	switch r := arena.Open(); q := any(arena.New[int](r)).(type) {
@@ -199,4 +202,11 @@ func main() {
 		distinct = *q + 11
 	}
 	fmt.Println(shadow, distinct)
+	return nil
+}
+
+func main() {
+	if err := run(); err != nil {
+		panic(err)
+	}
 }

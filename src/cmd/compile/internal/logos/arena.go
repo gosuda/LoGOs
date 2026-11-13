@@ -533,7 +533,6 @@ func (a *arenaEject) insertBlankUse(off int, prefix, text string) {
 
 func (a *arenaEject) fixImports() {
 	a.countArenaRefs()
-	removed := make(map[*syntax.ImportDecl]bool)
 	for _, d := range a.fl.file.DeclList {
 		imp, ok := d.(*syntax.ImportDecl)
 		if !ok || imp.Path == nil || strings.Trim(imp.Path.Value, `"`) != "logos/arena" {
@@ -544,12 +543,11 @@ func (a *arenaEject) fixImports() {
 			name = imp.LocalPkgName.Value
 		}
 		if a.arenaRefs == 0 && name != "_" && name != "." {
-			removed[imp] = true
 			a.fl.removeImportSpec(imp)
 		}
 	}
 	if a.needRT && !a.rtPresent {
-		a.addRTImport(removed)
+		a.fl.needRTText = true
 	}
 }
 
@@ -572,25 +570,6 @@ func (a *arenaEject) countArenaRefs() {
 		}
 		return true
 	})
-}
-
-func (a *arenaEject) addRTImport(removed map[*syntax.ImportDecl]bool) {
-	spec := rtAlias + ` "` + rtImportPath + `"`
-	for i := len(a.fl.file.DeclList) - 1; i >= 0; i-- {
-		imp, ok := a.fl.file.DeclList[i].(*syntax.ImportDecl)
-		if !ok || imp.Path == nil || removed[imp] {
-			continue
-		}
-		off := a.fl.off(syntax.EndPos(imp))
-		if imp.Group != nil {
-			a.fl.add(off, off, "; "+spec)
-		} else {
-			a.fl.add(off, off, "\nimport "+spec)
-		}
-		return
-	}
-	off := a.fl.off(syntax.EndPos(a.fl.file.PkgName))
-	a.fl.add(off, off, "\nimport "+spec)
 }
 
 func (a *arenaEject) lineEnd(off int) int {
