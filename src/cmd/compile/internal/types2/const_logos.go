@@ -476,7 +476,7 @@ func (check *Checker) logosCompositeCallProven(e *syntax.SelectorExpr, fn *Func)
 		check.logosDeferReadonlyCheck(fn, e.Sel.Pos(), e.X, e.Sel.Value)
 		return true
 	}
-	return check.logosReceiverReadonly(fn)
+	return check.logosReceiverReadonly(fn) || check.logosImportedSafeValueCall(e, sig)
 }
 
 func (check *Checker) logosValueReceiverGuarded(e syntax.Expr) bool {
@@ -486,10 +486,31 @@ func (check *Checker) logosValueReceiverGuarded(e syntax.Expr) bool {
 	}
 	if n, ok := root.(*syntax.Name); ok {
 		if obj, ok := check.Info.Uses[n].(*Const); ok {
-			return logosTypeHasMap(obj.Type()) && !check.logosIsBareMap(obj)
+			return !check.logosIsBareMap(obj)
 		}
 	}
 	return true
+}
+
+func (check *Checker) logosImportedSafeValueCall(e *syntax.SelectorExpr, sig *Signature) bool {
+	rt := sig.Recv().Type()
+	if _, pointer := Unalias(rt).(*Pointer); pointer || logosTypeHasMap(rt) || !logosReferenceFreeResults(sig.Results()) {
+		return false
+	}
+	root, _, rooted := check.logosConstBase(e.X)
+	if !rooted {
+		return false
+	}
+	n, ok := root.(*syntax.Name)
+	if !ok {
+		return false
+	}
+	obj, ok := check.Info.Uses[n].(*Const)
+	if !ok || obj.Pkg() != check.pkg {
+		return false
+	}
+	v, ok := check.logosRecorded(obj)
+	return ok && check.logosReceiverValueSafe(e.X, n, v, nil)
 }
 
 func (check *Checker) logosCompositeMutatingCall(e *syntax.SelectorExpr, fn *Func) bool {
@@ -595,7 +616,7 @@ func (check *Checker) logosConstSelect(x *operand, e *syntax.SelectorExpr, sel s
 			return false
 		}
 		if obj.Origin().Pkg() != check.pkg {
-			if check.logosReceiverReadonly(obj) {
+			if check.logosReceiverReadonly(obj) || check.logosImportedSafeValueCall(e, sig) {
 				x.typ_ = base.Elem
 				return false
 			}

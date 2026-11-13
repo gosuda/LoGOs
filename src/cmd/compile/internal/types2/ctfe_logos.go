@@ -291,6 +291,77 @@ func logosTypeHasMap(t Type) bool {
 	return walk(t)
 }
 
+type logosReceiverPath struct {
+	expr syntax.Expr
+	next *logosReceiverPath
+}
+
+func (check *Checker) logosReceiverValueSafe(e syntax.Expr, root *syntax.Name, v ctfe.Value, path *logosReceiverPath) bool {
+	e = syntax.Unparen(e)
+	if e != root {
+		step := logosReceiverPath{expr: e, next: path}
+		switch e := e.(type) {
+		case *syntax.SelectorExpr:
+			return check.logosReceiverValueSafe(e.X, root, v, &step)
+		case *syntax.IndexExpr:
+			return check.logosReceiverValueSafe(e.X, root, v, &step)
+		}
+		return false
+	}
+	return check.logosReceiverPathSafe(v, path)
+}
+
+func (check *Checker) logosReceiverPathSafe(v ctfe.Value, path *logosReceiverPath) bool {
+	if !v.IsValid() {
+		return false
+	}
+	if path == nil {
+		return v.NoLiveReferences()
+	}
+	switch e := path.expr.(type) {
+	case *syntax.SelectorExpr:
+		sel := check.Selections[e]
+		if sel == nil || sel.Kind() != FieldVal {
+			return false
+		}
+		for _, index := range sel.Index() {
+			fields := v.Fields()
+			if v.Type().Kind != ctfe.KStruct || index >= len(fields) {
+				return false
+			}
+			v = fields[index]
+		}
+		return check.logosReceiverPathSafe(v, path.next)
+	case *syntax.IndexExpr:
+		var elems []ctfe.Value
+		switch v.Type().Kind {
+		case ctfe.KArray:
+			elems = v.Elems()
+		case ctfe.KSlice:
+			backing, lo, length, _, ok := v.SliceHeader()
+			if !ok {
+				return false
+			}
+			elems = backing[lo : lo+length]
+		default:
+			return false
+		}
+		if index, known := check.constBoundValue(e.Index); known {
+			return index >= 0 && index < int64(len(elems)) && check.logosReceiverPathSafe(elems[index], path.next)
+		}
+		if len(elems) == 0 {
+			return false
+		}
+		for _, elem := range elems {
+			if !check.logosReceiverPathSafe(elem, path.next) {
+				return false
+			}
+		}
+		return true
+	}
+	return false
+}
+
 func (check *Checker) logosCTFEFailed(obj *Const, init syntax.Expr, err error) bool {
 	check.logosMemoizeFailure(init)
 	if cerr, ok := err.(*ctfe.Error); ok {

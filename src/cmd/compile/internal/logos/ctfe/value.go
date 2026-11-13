@@ -103,6 +103,9 @@ func zeroValue(t *Type) Value {
 		}
 		return Value{typ: &Type{Kind: k}, ival: new(big.Int)}
 	}
+	if t.Kind == KInvalid && t.Impure != "" {
+		return Value{typ: t, isNil: true}
+	}
 	return Value{typ: t}
 }
 

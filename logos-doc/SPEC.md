@@ -460,6 +460,8 @@ A method with a `const` pointer receiver (such as `func (r const *T) M()`) MUST 
 
 A call of a method with a value receiver on a const composite that holds a map, or on an imported const composite, MUST fail with `[correctness::const_view_mutation]` unless the receiver type is reference-free or the method is proven readonly. [T-201]
 
+For a local const composite without a map, a value-receiver call also needs no readonly proof when the actual receiver value has no live reference leaves and every result type is reference-free. Selector and index paths MUST preserve this value-level proof; an unknown index MUST be safe for every candidate receiver. This exception does not apply to imported const composites or pointer receivers.
+
 A call of a method with a pointer receiver on a const composite, local or imported, with or without a map, MUST be accepted when the method is proven readonly and MUST fail with `[correctness::const_view_mutation]` otherwise. [T-201]
 
 A bare const map materialized as a `map[K]V` value under Sec 7 MUST be a copy, and a write to that copy MUST NOT change what the const map reads as. This materialization rule MUST NOT make a map field or another reference descendant of a struct or aggregate const composite writable, or permit a mutable deep copy of that aggregate per read. [T-201][T-Sec7]
