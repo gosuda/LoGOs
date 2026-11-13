@@ -11,11 +11,11 @@ require (
 	golang.org/x/sys v0.45.0
 	golang.org/x/telemetry v0.0.0-20260519152614-eab6ae52b5e2
 	golang.org/x/term v0.43.0
-	golang.org/x/text v0.37.0
 	golang.org/x/tools v0.45.1-0.20260917185718-3dd9077b8066
 )
 
 require (
 	github.com/ianlancetaylor/demangle v0.0.0-20250417193237-f615e6bd150b // indirect
+	golang.org/x/text v0.37.0 // indirect
 	rsc.io/markdown v0.0.0-20240306144322-0bf8f97ee8ef // indirect
 )
