@@ -296,7 +296,13 @@ func TestParseViolations(t *testing.T) {
 		{"invalid strict_files entry", "[project]\nstrict_files = [\".go\"]\n", `logos.toml:2:17: invalid strict_files entry ".go" (want ".lgo", ".📜", ".⚡", or ".ʕ◔ϖ◔ʔ")`},
 		{"bare opt level rejected", "[build]\nopt_level = \"3\"\n", `logos.toml:2:13: opt_level must be one of O0, O1, O2, O3, Os`},
 		{"unknown opt level rejected", "[build]\nopt_level = \"O4\"\n", `logos.toml:2:13: opt_level must be one of O0, O1, O2, O3, Os`},
+		{"lowercase opt level rejected", "[build]\nopt_level = \"o3\"\n", `logos.toml:2:13: opt_level must be one of O0, O1, O2, O3, Os`},
+		{"uppercase size level rejected", "[build]\nopt_level = \"OS\"\n", `logos.toml:2:13: opt_level must be one of O0, O1, O2, O3, Os`},
+		{"digit zero size level rejected", "[build]\nopt_level = \"0s\"\n", `logos.toml:2:13: opt_level must be one of O0, O1, O2, O3, Os`},
+		{"letter only opt level rejected", "[build]\nopt_level = \"O\"\n", `logos.toml:2:13: opt_level must be one of O0, O1, O2, O3, Os`},
+		{"padded opt level rejected", "[build]\nopt_level = \"O03\"\n", `logos.toml:2:13: opt_level must be one of O0, O1, O2, O3, Os`},
 		{"invalid target cpu", "[build]\ntarget_cpu = \"laptop\"\n", `logos.toml:2:14: target_cpu must be one of deterministic, baseline, native`},
+		{"capitalized target cpu rejected", "[build]\ntarget_cpu = \"Native\"\n", `logos.toml:2:14: target_cpu must be one of deterministic, baseline, native`},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

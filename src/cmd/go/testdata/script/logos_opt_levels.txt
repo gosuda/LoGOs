@@ -126,6 +126,10 @@ cd ../pkgdep-native
 logos build -a -x .
 stderr 'GOAMD64=.v[34]..*-p main'
 stderr 'GOAMD64=.v[34]..*-p example\.com/optlevels/pkgdepdep/godep'
+cd ../mixedlevel
+logos build -a -x .
+stderr '-p main .*-d=inlbudget=400,inlrecursivebudget=80,variablemakethreshold=4096|-d=inlbudget=400,inlrecursivebudget=80,variablemakethreshold=4096.*-p main '
+stderr '-p example\.com/optlevels/pkgdepdep/godep .*-d=inlbudget=400,inlrecursivebudget=80,variablemakethreshold=4096|-d=inlbudget=400,inlrecursivebudget=80,variablemakethreshold=4096.*-p example\.com/optlevels/pkgdepdep/godep '
 cd ..
 
 cd stackbuf
@@ -449,6 +453,32 @@ replace example.com/optlevels/pkgdepdep => ../pkgdepdep
 target_cpu = "native"
 
 -- pkgdep-native/main.lgo --
+package main
+
+import (
+	"fmt"
+
+	"example.com/optlevels/pkgdepdep/godep"
+)
+
+func main() {
+	fmt.Println(godep.Tag("hi"))
+}
+
+-- mixedlevel/go.mod --
+module example.com/optlevels/mixedlevel
+
+go 1.27
+
+require example.com/optlevels/pkgdepdep v0.0.0
+
+replace example.com/optlevels/pkgdepdep => ../pkgdepdep
+
+-- mixedlevel/logos.toml --
+[build]
+opt_level = "O3"
+
+-- mixedlevel/main.lgo --
 package main
 
 import (

@@ -18,6 +18,7 @@ cd o1test
 logos build -a -x .
 ! stderr 'variablemakethreshold'
 ! stderr '\-N \-l'
+! stderr ' -d='
 logos build -a -gcflags=-m -o $WORK/o1$GOEXE .
 stderr 'inlining call to medium'
 exec $WORK/o1$GOEXE
