@@ -46,8 +46,27 @@ func (g *constMapGen) allName() string    { return g.name + "_all" }
 
 func constMapBearing(vals []ctfe.Value) bool {
 	for _, v := range vals {
-		if !rodataStaticValue(v) {
+		if constMapValueBearing(v.Type()) {
 			return true
+		}
+	}
+	return false
+}
+
+func constMapValueBearing(t *ctfe.Type) bool {
+	if t == nil {
+		return true
+	}
+	switch t.Kind {
+	case ctfe.KSlice, ctfe.KMap:
+		return true
+	case ctfe.KArray:
+		return constMapValueBearing(t.Elem)
+	case ctfe.KStruct:
+		for _, f := range t.Fields {
+			if constMapValueBearing(f.Type) {
+				return true
+			}
 		}
 	}
 	return false

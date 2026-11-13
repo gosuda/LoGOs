@@ -167,8 +167,8 @@ func (check *Checker) logosConstInferVar(lhs *Var) {
 }
 
 func logosConstMapCopy(c *ConstView) bool {
-	m, ok := c.Elem.Underlying().(*Map)
-	return c.ConstMap && ok && logosReferenceFree(m.Key()) && logosReferenceFree(m.Elem())
+	_, ok := c.Elem.Underlying().(*Map)
+	return c.ConstMap && ok
 }
 
 func (check *Checker) logosConstWrap(x *operand, csrc *ConstView, cdst *ConstView, T Type, context string) bool {
