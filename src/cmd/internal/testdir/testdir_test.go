@@ -121,6 +121,13 @@ func Test(t *testing.T) {
 	goExperiment = env.GOEXPERIMENT
 	goDebug = env.GODEBUG
 	tmpDir = t.TempDir()
+	stdlibImportcfgFile = sync.OnceValue(func() string {
+		filename := filepath.Join(tmpDir, "importcfg")
+		if err := os.WriteFile(filename, []byte(stdlibImportcfg()), 0644); err != nil {
+			log.Fatal(err)
+		}
+		return filename
+	})
 
 	common := testCommon{
 		gorootTestDir: filepath.Join(testenv.GOROOT(t), "test"),
@@ -230,8 +237,7 @@ var stdlibImportcfg = sync.OnceValue(func() string {
 
 var stdlibImportcfgFile = sync.OnceValue(func() string {
 	filename := filepath.Join(tmpDir, "importcfg")
-	err := os.WriteFile(filename, []byte(stdlibImportcfg()), 0644)
-	if err != nil {
+	if err := os.WriteFile(filename, []byte(stdlibImportcfg()), 0644); err != nil {
 		log.Fatal(err)
 	}
 	return filename
