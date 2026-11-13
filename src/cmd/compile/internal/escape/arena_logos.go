@@ -182,6 +182,10 @@ func LogosArenaNeedsFrame(fn *ir.Func) bool {
 		if found {
 			return
 		}
+		if LogosArenaObject(n, fn) {
+			found = true
+			return
+		}
 		makeExpr, ok := n.(*ir.MakeExpr)
 		if !ok || makeExpr.Op() != ir.OMAKESLICE {
 			return

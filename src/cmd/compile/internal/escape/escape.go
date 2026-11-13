@@ -174,6 +174,8 @@ func Batch(fns []*ir.Func, reassignOracles map[*ir.Func]*ir.ReassignOracle) {
 	}
 	b.closures = nil
 
+	arenaObjects := b.logosArenaObjectShadows()
+
 	for _, loc := range b.allLocs {
 		// Try to replace some non-constant expressions with literals.
 		b.rewriteWithLiterals(loc.n, loc.curfn)
@@ -189,6 +191,7 @@ func Batch(fns []*ir.Func, reassignOracles map[*ir.Func]*ir.ReassignOracle) {
 	b.finish(fns)
 	b.logosCollect()      // logos M9: escaping subslices of large backing stores.
 	b.logosArenaMark(fns) // logos M18-S2: arena vetoes and caller-region verdicts.
+	b.logosArenaMarkObjects(arenaObjects)
 	b.logosRegionMark(fns)
 	b.logosCollectHints() // logos M18-S2: hints mode escape and arena decisions.
 }

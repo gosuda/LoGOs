@@ -135,3 +135,9 @@ func (s *state) logosArenaLoopRestoreDepth(depth int) {
 		s.logosArenaLoopRestore(s.arenaLoopStack[i].loop)
 	}
 }
+
+func (s *state) logosArenaNewObject(typ *types.Type, rtype *ssa.Value) *ssa.Value {
+	one := s.constInt(types.Types[types.TINT64], 1)
+	return s.rtcall(typecheck.LookupRuntimeFunc("logosArenaMakeSlice"), true,
+		[]*types.Type{types.NewPtr(typ)}, rtype, one, one)[0]
+}

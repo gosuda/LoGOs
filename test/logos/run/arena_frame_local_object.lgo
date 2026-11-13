@@ -1,0 +1,225 @@
+// run -goexperiment logosarena -gcflags=-smallframes
+// run -goexperiment logosarena -arena=false -gcflags=-smallframes
+
+package main
+
+import (
+	"fmt"
+	"os"
+	"runtime"
+	"testing"
+	"unsafe"
+)
+
+type localBytes [32 << 10]byte
+
+type boxedBytes [2 << 10]byte
+
+type pointerBox struct {
+	data [2 << 10]byte
+	p *int
+}
+
+type pointerObject struct {
+	data [32 << 10]byte
+	p *int
+}
+
+var escapedObject *localBytes?
+var escapedLiteral *pointerObject?
+var escapedBox any
+var observed uintptr
+var placement = os.Getenv("LOGOS_ARENA_PLACEMENT") != "off"
+
+func requireGrowth(before int) {
+	if placement && heapBytes() != before {
+		panic("frame-local object did not use region")
+	}
+}
+
+func heapBytes() int {
+	var stats runtime.MemStats
+	runtime.ReadMemStats(&stats)
+	return int(stats.TotalAlloc)
+}
+
+//go:noinline
+func addressOf(p unsafe.Pointer) uintptr {
+	return uintptr(p)
+}
+
+//go:noinline
+func heapReferent() *int {
+	p := new(int)
+	*p = 73
+	return p
+}
+
+//go:noinline
+func inspectBox(v any, before int) {
+	requireGrowth(before)
+	observed = uintptr((*[2]unsafe.Pointer)(unsafe.Pointer(&v))[1])
+	runtime.GC()
+	switch x := v.(type) {
+	case boxedBytes:
+		if x[0] != 17 || x[len(x)-1] != 29 {
+			panic("noscan box lost value")
+		}
+	case pointerBox:
+		if *x.p != 73 || x.data[0] != 31 {
+			panic("scan box lost heap referent")
+		}
+	default:
+		panic("unexpected box type")
+	}
+	runtime.KeepAlive(v)
+}
+
+//go:noinline
+func checkBoxes() {
+	before := heapBytes()
+	var b boxedBytes
+	b[0], b[len(b)-1] = 17, 29
+	inspectBox(b, before)
+}
+
+//go:noinline
+func checkPointerBox() {
+	p := heapReferent()
+	before := heapBytes()
+	inspectBox(pointerBox{p: p, data: [2 << 10]byte{31}}, before)
+}
+
+//go:noinline
+func checkNew() {
+	before := heapBytes()
+	p := new(localBytes)
+	requireGrowth(before)
+	observed = addressOf(unsafe.Pointer(p))
+	if p[0] != 0 || p[len(p)-1] != 0 {
+		panic("new object was not zeroed")
+	}
+	p[0], p[len(p)-1] = 17, 29
+	runtime.GC()
+	if p[0] != 17 || p[len(p)-1] != 29 {
+		panic("new object lost contents")
+	}
+	runtime.KeepAlive(p)
+}
+
+//go:noinline
+func checkLiteral() {
+	referent := heapReferent()
+	before := heapBytes()
+	p := &pointerObject{p: referent}
+	requireGrowth(before)
+	runtime.GC()
+	if *p.p != 73 || p.data[0] != 0 {
+		panic("pointer literal lost referent or initialization")
+	}
+	runtime.KeepAlive(p)
+}
+
+//go:noinline
+func checkLoop() {
+	var previous uintptr
+	for i := 0; i < 4; i++ {
+		before := heapBytes()
+		p := new(localBytes)
+		requireGrowth(before)
+		address := addressOf(unsafe.Pointer(p))
+		if placement && previous != 0 && address != previous {
+			panic("loop object storage was not reused")
+		}
+		previous = address
+		if p[0] != 0 || p[len(p)-1] != 0 {
+			panic("reused region object was not zeroed")
+		}
+		p[0], p[len(p)-1] = byte(i+1), byte(i+2)
+		runtime.KeepAlive(p)
+	}
+}
+
+//go:noinline
+func panicObject() {
+	before := heapBytes()
+	p := new(localBytes)
+	requireGrowth(before)
+	p[0] = 99
+	runtime.KeepAlive(p)
+	panic("object unwind")
+}
+
+func catchPanic() {
+	defer func() {
+		if recover() != "object unwind" {
+			panic("unexpected panic result")
+		}
+	}()
+	panicObject()
+}
+
+//go:noinline
+func checkEscapes() {
+	object := new(localBytes)
+	escapedObject = object
+	literal := &pointerObject{p: heapReferent()}
+	escapedLiteral = literal
+	var b boxedBytes
+	b[0] = 19
+	escapedBox = b
+	runtime.GC()
+	if object[0] != 0 || *literal.p != 73 || escapedBox.(boxedBytes)[0] != 19 {
+		panic("escaping control lost contents")
+	}
+	escapedBox = pointerBox{p: heapReferent()}
+	runtime.GC()
+	if *escapedBox.(pointerBox).p != 73 {
+		panic("escaping scan box lost referent")
+	}
+}
+
+//go:noinline
+func checkOverChunk() {
+	p := new([128 << 10]byte)
+	p[0], p[len(p)-1] = 17, 29
+	runtime.GC()
+	if p[0] != 17 || p[len(p)-1] != 29 {
+		panic("over-chunk fallback lost contents")
+	}
+	runtime.KeepAlive(p)
+}
+
+func main() {
+	checkBoxes()
+	first := observed
+	checkBoxes()
+	if placement && observed != first {
+		panic("box storage was not reused")
+	}
+	checkNew()
+	first = observed
+	checkNew()
+	if placement && observed != first {
+		panic("new storage was not reused")
+	}
+	checkPointerBox()
+	checkLiteral()
+	checkLoop()
+	catchPanic()
+	checkNew()
+	if placement && observed != first {
+		panic("panic exit did not restore object storage")
+	}
+	if placement && testing.AllocsPerRun(4, checkBoxes) != 0 {
+		panic("frame-local box allocated on heap")
+	}
+	if placement && testing.AllocsPerRun(4, checkNew) != 0 {
+		panic("frame-local new allocated on heap")
+	}
+	if testing.AllocsPerRun(4, checkEscapes) < 4 {
+		panic("escaping controls did not allocate on heap")
+	}
+	checkOverChunk()
+	fmt.Println("ok frame-local-object-region-lifetime")
+}
