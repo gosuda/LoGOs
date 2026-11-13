@@ -33,6 +33,14 @@ func cfNotFields(n int) {
 	}
 }
 
+func cfOther() []int { return nil }
+
+func cfNotFieldsCall() {
+	const for _, f := range cfOther( /* ERROR "comptime::const_for_fields" */ ) {
+		_ = f
+	}
+}
+
 func cfUnknownField(v CFWidget) {
 	const for _, f := range comptime.Fields[CFWidget]() {
 		_ = f.Name
