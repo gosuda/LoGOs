@@ -168,7 +168,10 @@ func (g *logosAllocGraph) addCall(in *lint.Input, k escape.LogosFuncKey, call *s
 		}
 	case *syntax.SelectorExpr:
 		if sel := in.Info.Selections[fun]; sel != nil {
-			if sel.Kind() != types2.MethodVal {
+			if sel.Kind() != types2.MethodVal && sel.Kind() != types2.MethodExpr {
+				if sel.Kind() == types2.FieldVal {
+					g.dyn[k] = "dynamic"
+				}
 				return
 			}
 			if _, isIface := sel.Recv().Underlying().(*types2.Interface); isIface {
