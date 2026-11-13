@@ -90,12 +90,14 @@ func (check *Checker) logosSpreadLiteral(x *operand, e *syntax.CompositeLit, uty
 		}
 	}
 	var infos []LogosSpread
+	readonlySpread := false
 	for _, se := range spreads {
-		fields := check.logosSpreadSource(utyp, typ, se, provided)
+		fields, ro := check.logosSpreadSource(utyp, typ, se, provided)
 		if fields == nil {
 			ok = false
 			continue
 		}
+		readonlySpread = readonlySpread || ro
 		for _, name := range fields {
 			provided[name] = true
 		}
@@ -118,27 +120,34 @@ func (check *Checker) logosSpreadLiteral(x *operand, e *syntax.CompositeLit, uty
 		return true
 	}
 	x.mode_ = value
-	x.typ_ = typ
+	if readonlySpread {
+		x.typ_ = logosWithReadonlyDescendants(typ)
+	} else {
+		x.typ_ = typ
+	}
 	return true
 }
 
-func (check *Checker) logosSpreadSource(utyp *Struct, typ Type, se *syntax.SpreadExpr, provided map[string]bool) []string {
+func (check *Checker) logosSpreadSource(utyp *Struct, typ Type, se *syntax.SpreadExpr, provided map[string]bool) ([]string, bool) {
 	var v operand
 	check.genericExpr(&v, se.X, nil)
 	if !v.isValid() || !isValid(v.typ()) {
-		return nil
+		return nil, false
 	}
-	base, _, _ := logosReadonlyBase(v.typ())
+	check.logosConstOrigin(&v)
+	base, descendants, readonly := logosReadonlyBase(v.typ())
+	readonlySource := readonly || descendants
 	if u, _ := commonUnder(base, nil); u != nil {
 		base = u
 	}
 	if b, isPtr := deref(base); isPtr {
-		base = b
+		base, descendants, readonly = logosReadonlyBase(b)
+		readonlySource = readonlySource || readonly || descendants
 	}
 	src, isStruct := base.Underlying().(*Struct)
 	if !isStruct {
 		check.errorf(se.X, InvalidLit, "spread source must be a struct type, have %s", v.typ())
-		return nil
+		return nil, false
 	}
 	fields := make([]string, 0, len(utyp.fields))
 	for _, fld := range utyp.fields {
@@ -161,11 +170,11 @@ func (check *Checker) logosSpreadSource(utyp *Struct, typ Type, se *syntax.Sprea
 		}
 		if !Identical(srcFld.typ, fld.typ) {
 			check.errorf(se.X, InvalidLitField, "%s field %s has type %s in source but type %s in %s", logosSpreadMismatch, fld.name, srcFld.typ, fld.typ, typ)
-			return nil
+			return nil, false
 		}
 		fields = append(fields, fld.name)
 	}
-	return fields
+	return fields, readonlySource && len(fields) > 0
 }
 
 func (check *Checker) logosSpreadMisplaced(x *operand, e *syntax.SpreadExpr) {
