@@ -128,24 +128,28 @@ func rolImm8(x uint8) uint8 {
 }
 
 func rolVar64(x uint64, n int) uint64 {
-	// amd64:"ROLQ" -"RORX"
+	// amd64/v3:"ROLQ" -"RORX"
+	// amd64/v4:"ROLQ" -"RORX"
 	return bits.RotateLeft64(x, n)
 }
 
 func rolVar32(x uint32, n int) uint32 {
-	// amd64:"ROLL" -"RORX"
+	// amd64/v3:"ROLL" -"RORX"
+	// amd64/v4:"ROLL" -"RORX"
 	return bits.RotateLeft32(x, n)
 }
 
 func rorVar64(x uint64, z uint) uint64 {
 	z &= 63
-	// amd64:"RORQ" -"AND" -"RORX"
+	// amd64/v3:"RORQ" -"AND" -"RORX"
+	// amd64/v4:"RORQ" -"AND" -"RORX"
 	return x>>z | x<<(64-z)
 }
 
 func rorVar32(x uint32, z uint) uint32 {
 	z &= 31
-	// amd64:"RORL" -"AND" -"RORX"
+	// amd64/v3:"RORL" -"AND" -"RORX"
+	// amd64/v4:"RORL" -"AND" -"RORX"
 	return x>>z | x<<(32-z)
 }
 
@@ -202,7 +206,10 @@ func cmovSigned(c int) int {
 	if x < 0 {
 		x = 182
 	}
-	// amd64:"CMOVQLT"
+	// amd64/v1:"CMOVQLT"
+	// amd64/v2:"CMOVQLT"
+	// amd64/v3:"CMOVQLT"
+	// amd64/v4:"CMOVQLT"
 	return x
 }
 
@@ -210,6 +217,32 @@ func cmovUnsigned32(x, y uint32) uint32 {
 	if x < y {
 		x = -y
 	}
-	// amd64:"CMOVL(HI|CS)"
+	// amd64/v1:"CMOVL(HI|CS)"
+	// amd64/v2:"CMOVL(HI|CS)"
+	// amd64/v3:"CMOVL(HI|CS)"
+	// amd64/v4:"CMOVL(HI|CS)"
 	return x
+}
+
+func andNot64(x, y uint64) uint64 {
+	// amd64/v1:-"ANDNQ"
+	// amd64/v2:-"ANDNQ"
+	// amd64/v3:"ANDNQ"
+	// amd64/v4:"ANDNQ"
+	return x &^ y
+}
+
+func clearLowest64(x uint64) uint64 {
+	// amd64/v1:-"BLSRQ"
+	// amd64/v2:-"BLSRQ"
+	// amd64/v3:"BLSRQ"
+	// amd64/v4:"BLSRQ"
+	return x & (x - 1)
+}
+
+func mulHigh64(x, y uint64) uint64 {
+	// amd64/v1:-"MULXQ"
+	// amd64/v2:-"MULXQ"
+	hi, _ := bits.Mul64(x, y)
+	return hi
 }
