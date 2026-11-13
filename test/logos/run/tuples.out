@@ -11,6 +11,8 @@ ok tuple-round-trips-map
 ok tuple-slice-literal-append-range
 ok tuple-slice-packed-element
 ok named-tuple-params-unpack
+ok var-decl-pack-keeps-values
+ok var-decl-named-pack-keeps-values
 ok named-bracket-elements
 ok direct-unpack-keeps-values
 ok direct-named-unpack-keeps-values

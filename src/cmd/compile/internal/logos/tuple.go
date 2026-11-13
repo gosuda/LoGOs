@@ -176,7 +176,11 @@ func (fl *fileLower) lowerTuplePackValues(decl *syntax.VarDecl, call *syntax.Cal
 	callSpan := fl.callBodySpan(call)
 	callText := fl.textOf(callSpan)
 	comp, compText := fl.tupleComposite(pos, names, types, tempNodes(pos, tempNames), genList(tempNames))
-	parts := []otext{gen("var " + strings.Join(tempNames, ", ") + " = "), callText, gen("\nvar " + decl.NameList[0].Value)}
+	next := "\nvar "
+	if decl.Group != nil {
+		next = "\n\t"
+	}
+	parts := []otext{gen(strings.Join(tempNames, ", ") + " = "), callText, gen(next + decl.NameList[0].Value)}
 	if decl.Type != nil {
 		typeStart := fl.off(syntax.StartPos(decl.Type))
 		parts = append(parts, gen(" "), fl.textOf(span{typeStart, fl.exprEndNested(typeStart)}))
