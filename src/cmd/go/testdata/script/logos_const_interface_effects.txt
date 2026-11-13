@@ -45,6 +45,21 @@ cp badsrc/p.lgo.bad p/p.lgo
 stderr '\[correctness::const_view_mutation\] cannot call Name through const view'
 cd ..
 
+# A Go dependency carries no Readonly fact for Plain.Name, so its
+# reference-free value receiver cannot satisfy the readonly obligation.
+cd absent
+! logos build ./...
+stderr 'use/use\.lgo:9:.*\[correctness::const_view_mutation\] \(method Name is not readonly\)'
+cd ..
+
+# A satisfaction error found only after the method body is checked still
+# fails the build, and no binary is written.
+cd late
+! logos build -o $WORK/late$GOEXE .
+stderr 'main\.lgo:9:.*\[correctness::const_view_mutation\].*does not implement readonly method Name'
+! exists $WORK/late$GOEXE
+cd ..
+
 -- w/go.work --
 go 1.27
 
@@ -470,4 +485,69 @@ import (
 
 func main() {
 	var _ c.Namer = &b.Bad{}
+}
+
+-- absent/go.mod --
+module example.com/absent
+
+go 1.27
+
+require example.com/plaingo v0.0.0
+
+replace example.com/plaingo => ../plaingo
+
+-- absent/use/use.lgo --
+package use
+
+import "example.com/plaingo"
+
+type Namer interface {
+	const Name() string
+}
+
+var _ Namer = plaingo.Plain{}
+
+-- plaingo/go.mod --
+module example.com/plaingo
+
+go 1.27
+
+-- plaingo/plain.go --
+package plaingo
+
+type Plain struct {
+	N int
+}
+
+func (p Plain) Name() string {
+	return "plain"
+}
+
+-- late/go.mod --
+module example.com/late
+
+go 1.27
+
+-- late/main.lgo --
+package main
+
+import "fmt"
+
+type Namer interface {
+	const Name() string
+}
+
+var _ Namer = Late{items: []int{1}}
+
+type Late struct {
+	items []int
+}
+
+func (l Late) Name() string {
+	l.items[0] = 2
+	return "late"
+}
+
+func main() {
+	fmt.Println("late-built")
 }
