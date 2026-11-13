@@ -8,6 +8,7 @@ import (
 	"cmd/compile/internal/base"
 	"cmd/compile/internal/syntax"
 	"cmd/compile/internal/types2"
+	"fmt"
 	"reflect"
 )
 
@@ -326,6 +327,32 @@ func (z *zeroCopy) runtimeConvert(call *syntax.CallExpr, arg syntax.Expr, helper
 	}
 	start := z.fl.off(syntax.Unparen(call.Fun).Pos())
 	text := z.fl.textOf(split.args[0])
+	if base.Flag.Std || z.fl.pkg.tpkg.Path() == rtImportPath {
+		qual := z.fl.synthQualifier(types2.Unsafe)
+		name := fmt.Sprintf("_logos_zeroCopy_%x", pos.String())
+		header := "struct { data " + qual + ".Pointer; length Length }"
+		decl := "func " + name + "[Source, Result, Length interface{}](source Source, result Result, _ Length) Result {\n" +
+			"header := *(*" + header + ")(" + qual + ".Pointer(&source))\n"
+		zero := qual + ".String(" + qual + ".StringData(\"\"), 0)"
+		if helper == "StringBytes" {
+			sliceHeader := "struct { data " + qual + ".Pointer; length, capacity Length }"
+			decl += "*(*" + sliceHeader + ")(" + qual + ".Pointer(&result)) = " + sliceHeader + "{header.data, header.length, header.length}\n"
+			zero = qual + ".Slice(" + qual + ".StringData(\"\"), 0)"
+		} else {
+			decl += "*(*" + header + ")(" + qual + ".Pointer(&result)) = header\n"
+		}
+		decl += "return result\n}\n"
+		z.fl.constDecls = append(z.fl.constDecls, parseGeneratedDecls(decl, pos)...)
+		z.fl.constText += "\n" + decl
+		z.fl.addT(start, split.end, cat(gen(name+"("), text, gen(", "+zero+", 0)")))
+		generated, ok := parseConstMapEntryExpr(name+"(operand, "+zero+", 0)", pos)
+		if !ok {
+			base.Fatalf("logos: cannot generate zero-copy conversion at %s", pos.String())
+		}
+		converted := generated.(*syntax.CallExpr)
+		converted.ArgList[0] = arg
+		return converted
+	}
 	z.fl.addT(start, split.end, cat(gen(rtAlias+"."+helper+"("), text, gen(")")))
 	z.fl.needRT = true
 	return callOf(pos, rtSel(pos, helper), []syntax.Expr{arg})
