@@ -43,10 +43,24 @@ env ZIGLOG=$WORK/zig-c.log
 [cgo] env GOARCH=arm64
 [cgo] env CGO_ENABLED=1
 [cgo] env CC=
+[cgo] env ZIGFAIL=1
 [cgo] env ZIGLOG=$WORK/zig-darwin.log
 [cgo] ! logos build -o gb-darwin.bin ./gb1
 [cgo] grep 'cc -target aarch64-macos' $WORK/zig-darwin.log
 [cgo] ! grep 'musl' $WORK/zig-darwin.log
+[cgo] env GOOS=linux
+[cgo] env GOARCH=ppc64le
+[cgo] env ZIGLOG=$WORK/zig-ppc64le.log
+[cgo] ! go build -o gb-ppc64le.bin ./gb1
+[cgo] grep 'cc -target powerpc64le-linux-musl' $WORK/zig-ppc64le.log
+[cgo] stderr 'fake zig: deliberate failure'
+[cgo] env GOOS=aix
+[cgo] env GOARCH=ppc64
+[cgo] env ZIGLOG=$WORK/zig-aix.log
+[cgo] ! go build -o gb-aix.bin ./gb1
+[cgo] stderr 'zig compiler fallback unsupported for target aix/ppc64; set CC explicitly'
+[cgo] ! exists $WORK/zig-aix.log
+env ZIGFAIL=
 env GOOS=
 env GOARCH=
 env CGO_ENABLED=
@@ -110,6 +124,10 @@ func main() { fmt.Println("gm:", C.answer()) }
 # compiler arguments to the real C compiler at an absolute path, so the
 # build finishes without needing PATH.
 echo "zig $@" >>"${ZIGLOG:-$WORK/zig.log}"
+if [ "$ZIGFAIL" = 1 ]; then
+	echo "fake zig: deliberate failure" >&2
+	exit 1
+fi
 if [ "$#" -lt 3 ]; then
 	echo "fake zig: expected 'cc -target <triple>' arguments, got: $@" >&2
 	exit 1

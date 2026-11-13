@@ -5,6 +5,7 @@
 package cfg
 
 import (
+	"fmt"
 	"internal/logosfile"
 	"os"
 	"path/filepath"
@@ -81,38 +82,53 @@ func IsGoFile(name string) bool {
 	return Logos && logosfile.Is(name)
 }
 
-// logosZigArch maps GOARCH to the zig cc -target architecture name.
-// logosZigOS maps GOOS to the zig cc -target operating system name;
-// the linux entry carries -musl, matching the plan's mapping table.
-var logosZigArch = map[string]string{
-	"amd64":   "x86_64",
-	"arm64":   "aarch64",
-	"386":     "x86",
-	"arm":     "arm",
-	"riscv64": "riscv64",
+var logosZigTargets = map[string]string{
+	"android/386":     "x86-linux-android",
+	"android/amd64":   "x86_64-linux-android",
+	"android/arm":     "arm-linux-androideabi",
+	"android/arm64":   "aarch64-linux-android",
+	"darwin/amd64":    "x86_64-macos",
+	"darwin/arm64":    "aarch64-macos",
+	"dragonfly/amd64": "x86_64-dragonfly",
+	"freebsd/386":     "x86-freebsd",
+	"freebsd/amd64":   "x86_64-freebsd",
+	"freebsd/arm":     "arm-freebsd",
+	"freebsd/arm64":   "aarch64-freebsd",
+	"freebsd/riscv64": "riscv64-freebsd",
+	"illumos/amd64":   "x86_64-illumos",
+	"ios/amd64":       "x86_64-ios",
+	"ios/arm64":       "aarch64-ios",
+	"linux/386":       "x86-linux-musl",
+	"linux/amd64":     "x86_64-linux-musl",
+	"linux/arm":       "arm-linux-musl",
+	"linux/arm64":     "aarch64-linux-musl",
+	"linux/loong64":   "loongarch64-linux-musl",
+	"linux/mips":      "mips-linux-musl",
+	"linux/mips64":    "mips64-linux-muslabi64",
+	"linux/mips64le":  "mips64el-linux-muslabi64",
+	"linux/mipsle":    "mipsel-linux-musl",
+	"linux/ppc64":     "powerpc64-linux-musl",
+	"linux/ppc64le":   "powerpc64le-linux-musl",
+	"linux/riscv64":   "riscv64-linux-musl",
+	"linux/s390x":     "s390x-linux-musl",
+	"linux/sparc64":   "sparc64-linux-musl",
+	"netbsd/386":      "x86-netbsd",
+	"netbsd/amd64":    "x86_64-netbsd",
+	"netbsd/arm":      "arm-netbsd",
+	"netbsd/arm64":    "aarch64-netbsd",
+	"openbsd/386":     "x86-openbsd",
+	"openbsd/amd64":   "x86_64-openbsd",
+	"openbsd/arm":     "arm-openbsd",
+	"openbsd/arm64":   "aarch64-openbsd",
+	"openbsd/riscv64": "riscv64-openbsd",
+	"windows/386":     "x86-windows-gnu",
+	"windows/amd64":   "x86_64-windows-gnu",
+	"windows/arm64":   "aarch64-windows-gnu",
 }
 
-var logosZigOS = map[string]string{
-	"linux":   "linux-musl",
-	"darwin":  "macos",
-	"windows": "windows-gnu",
-	"freebsd": "freebsd",
-}
-
-// ZigTarget maps a GOOS/GOARCH pair to the zig cc -target triple used by
-// the M0-S5 fallback (for example linux/amd64 becomes
-// "x86_64-linux-musl"). Only the pairs in the plan's table map; any other
-// pair reports false and gets no fallback.
 func ZigTarget(goos, goarch string) (string, bool) {
-	arch, ok := logosZigArch[goarch]
-	if !ok {
-		return "", false
-	}
-	osName, ok := logosZigOS[goos]
-	if !ok {
-		return "", false
-	}
-	return arch + "-" + osName, true
+	target, ok := logosZigTargets[goos+"/"+goarch]
+	return target, ok
 }
 
 // StartupCgoEnabled reports the user CGO_ENABLED observed at process
@@ -164,7 +180,9 @@ func zigCompiler(cmd, startup, kind string) string {
 	if target, ok := ZigTarget(Goos, Goarch); ok {
 		return "zig " + kind + " -target " + target
 	}
-	return cmd
+	fmt.Fprintf(os.Stderr, "go: zig compiler fallback unsupported for target %s/%s; set CC explicitly\n", Goos, Goarch)
+	os.Exit(2)
+	return ""
 }
 
 // compilerOnPath reports whether cmd is the compiler a cgo build would
