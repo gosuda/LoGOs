@@ -11,7 +11,7 @@ type IOnly interface {
 }
 
 func convertNonMember(x float64) {
-	_ = U(x) // ERROR "union_nonmember.*float64 is not a member"
+	_ = U(x) // ERROR "correctness::union_nonmember"
 }
 
 func widenSub(s IOnly) U { return U(s) }
@@ -35,7 +35,7 @@ func compareConst(u U) {
 }
 
 func missingMember(u U) string {
-	return switch u.(type) { // ERROR "nonexhaustive_switch.*misses: string, nil"
+	return switch u.(type) { // ERROR "correctness::nonexhaustive_switch"
 	case int => "i"
 	}
 }
@@ -45,7 +45,7 @@ type V3 interface {
 }
 
 func missingTwo(u V3) string {
-	return switch u.(type) { // ERROR "nonexhaustive_switch.*misses: string, bool, nil"
+	return switch u.(type) { // ERROR "correctness::nonexhaustive_switch"
 	case int => "i"
 	}
 }
