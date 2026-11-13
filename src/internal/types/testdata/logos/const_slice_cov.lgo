@@ -120,3 +120,20 @@ func covMutable(ms []*Monster) []Creature {
 	_ = xs
 	return ms /* ERROR "cannot use" */
 }
+
+func ptrIface(p const *Creature) bool { return *p != nil }
+
+func mapIface(m const map[string]Creature) int { return len(m) }
+
+func covIfaceContainers(c Creature, mc map[string]Creature) {
+	_ = ptrIface(&c)
+	_ = mapIface(mc)
+	var cp const *Creature = &c
+	var cm const map[string]Creature = mc
+	_, _ = cp, cm
+}
+
+func covIfaceContainerReadonly(p const *Creature, m const map[string]Creature) {
+	*p /* ERROR "const_view_mutation" */ = Rock{n: "r"}
+	m /* ERROR "const_view_mutation" */ ["k"] = Rock{n: "r"}
+}
