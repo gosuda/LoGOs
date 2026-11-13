@@ -15,6 +15,13 @@ stderr '"note":"[^"]*short-circuit'
 ! stderr '"description":"Split the expression'
 cd ..
 
+cd mixed
+! logos lint --json-diagnostics ./...
+stderr -count=2 '"rule_id":"correctness::misplaced_try"'
+stderr -count=2 '"note":"[^"]*short-circuit'
+! stderr '"description":"Split the expression'
+cd ..
+
 cd loopcondition
 ! logos lint --json-diagnostics ./...
 stderr '"rule_id":"correctness::misplaced_try"'
@@ -59,6 +66,33 @@ func okStep() (bool, error) {
 
 func gate(flag bool) error {
 	if flag && okStep()? {
+		return nil
+	}
+	return nil
+}
+
+func main() {
+	gate(true)
+}
+
+-- mixed/go.mod --
+module example.com/mixed
+
+go 1.27
+
+-- mixed/main.lgo --
+package main
+
+func okStep() (bool, error) {
+	return true, nil
+}
+
+func both(a, b bool) bool {
+	return a && b
+}
+
+func gate(flag bool) error {
+	if both(okStep()?, flag && okStep()?) {
 		return nil
 	}
 	return nil
