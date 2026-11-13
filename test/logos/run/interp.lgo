@@ -61,6 +61,20 @@ func convOnce() bool {
 	return calls == 1
 }
 
+type countErr struct{ p *int }
+
+func (e countErr) Error() string {
+	*e.p++
+	return "E"
+}
+
+func errorOnce() (int, string) {
+	calls := 0
+	var err error = countErr{&calls}
+	got := $"e={err}"
+	return calls, got
+}
+
 func bumpInt(p *int) int {
 	*p += 10
 	return *p
@@ -153,6 +167,8 @@ check("pct", got15 == "v=%s-%d", got15, "v=%s-%d")
 checkInterpolationAllocations(name, n)
 convertedOnce := convOnce()
 check("conv", convertedOnce, convertedOnce, true)
+errCalls, errText := errorOnce()
+check("error-once", errCalls == 1 && errText == "e=E", fmt.Sprint(errCalls, " ", errText), "1 e=E")
 if failed {
 os.Exit(1)
 }

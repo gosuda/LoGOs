@@ -22,3 +22,4 @@ ok len
 ok allocs3
 ok bound
 ok conv
+ok error-once
