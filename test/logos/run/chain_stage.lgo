@@ -66,7 +66,6 @@ func waitFor(n *atomic.Int64, want int64) bool {
 
 var gate = make(chan struct{})
 
-func settle() { time.Sleep(20 * time.Millisecond) }
 
 func park(x int) bool {
 	enter()
@@ -306,7 +305,6 @@ func rangeBreak(ctx context.Context, xs []int) (int, error) {
 	seen := 0
 	for y := range xs.group(ctx, limit = 4).map(x => {
 		defer leave()
-		defer settle()
 		if park(x) {
 			<-gate
 		}
@@ -323,7 +321,6 @@ func rangeBreak(ctx context.Context, xs []int) (int, error) {
 func rangeReturn(ctx context.Context, xs []int) (int, error) {
 	for y := range xs.group(ctx, limit = 4).map(x => {
 		defer leave()
-		defer settle()
 		if park(x) {
 			<-gate
 		}
@@ -410,7 +407,6 @@ func caseFind(ctx context.Context) {
 	long := []int{1, 2, 3, 4, 5, 6, 7, 8}
 	found, err := long.group(ctx, limit = 4).map(x => {
 		defer leave()
-		defer settle()
 		if park(x) {
 			<-gate
 		}
@@ -425,7 +421,6 @@ func caseAny(ctx context.Context) {
 	long := []int{1, 2, 3, 4, 5, 6, 7, 8}
 	any2, err := long.group(ctx, limit = 4).map(x => {
 		defer leave()
-		defer settle()
 		if park(x) {
 			<-gate
 		}
@@ -440,7 +435,6 @@ func caseTake(ctx context.Context) {
 	long := []int{1, 2, 3, 4, 5, 6, 7, 8}
 	top, err := long.group(ctx, limit = 4).map(x => {
 		defer leave()
-		defer settle()
 		if park(x) {
 			<-gate
 		}
@@ -455,7 +449,6 @@ func caseFirst(ctx context.Context) {
 	long := []int{1, 2, 3, 4, 5, 6, 7, 8}
 	got, err := long.group(ctx, limit = 4).map(x => {
 		defer leave()
-		defer settle()
 		if park(x) {
 			<-gate
 		}
@@ -470,7 +463,6 @@ func caseAll(ctx context.Context) {
 	long := []int{1, 2, 3, 4, 5, 6, 7, 8}
 	every, err := long.group(ctx, limit = 4).map(x => {
 		defer leave()
-		defer settle()
 		if park(x) {
 			<-gate
 		}

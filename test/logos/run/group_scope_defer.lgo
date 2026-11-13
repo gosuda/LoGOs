@@ -47,12 +47,10 @@ func seen() string {
 }
 
 func slow(tag string) {
-	time.Sleep(30 * time.Millisecond)
 	note(tag)
 }
 
 func slowFail(tag string) error {
-	time.Sleep(30 * time.Millisecond)
 	note(tag)
 	return errBoom
 }
@@ -130,11 +128,18 @@ func failedTryExit(ctx context.Context) error {
 }
 
 func innerBlock(ctx context.Context) error {
+	release := make(chan struct{})
 	go group (ctx) {
 		go {
+			select {
+			case <-release:
+			case <-time.After(10 * time.Second):
+				panic("inner cleanup timeout")
+			}
 			slow("child-done")
 		}
 		{
+			scope defer close(release)
 			scope defer note("inner-cleanup")
 		}
 	}
