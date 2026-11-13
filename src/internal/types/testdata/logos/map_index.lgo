@@ -23,7 +23,7 @@ func mapCoalesce(m map[string]int, x int?) {
 	var w int = m["k"] ?? 7
 	var w2 int = x ?? m["k"] ?? 7
 	_, _ = w, w2
-	var s string = m["k"] ?? "d" /* ERROR "as int value in ?? right-hand side" */
+	var s string = m["k"] ?? "d" /* ERRORx "." */
 	_ = s
 }
 

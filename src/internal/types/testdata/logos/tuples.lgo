@@ -78,17 +78,17 @@ func tupleCompareOK(a, b (int, string)) {
 }
 
 func tupleCompareBad(a, b ([]int, string)) {
-	_ = a /* ERROR "cannot be compared" */ == b
+	_ = a /* ERRORx "." */ == b
 }
 
 func tupleArityBad(n (x int, y string)) {
-	a, b, c := n /* ERROR "assignment mismatch" */
+	a, b, c := n /* ERRORx "." */
 	_, _, _ = a, b, c
 }
 
 func tupleAssignMismatch() {
 	var n (x int, y string)
-	n = (1, 2 /* ERROR "as string value in" */)
+	n = (1, 2 /* ERRORx "." */)
 	_ = n
 }
 

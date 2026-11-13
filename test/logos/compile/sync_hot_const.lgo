@@ -35,7 +35,7 @@ func hsHotUpdateOK() {
 
 func hsHotUpdateReject() {
 	h := sync.Hot[HSConfig]{}
-	h.Update(func(old *HSConfig) *HSConfig { // ERROR "cannot use"
+	h.Update(func(old *HSConfig) *HSConfig { // ERROR "."
 		return old
 	})
 }

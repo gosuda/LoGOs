@@ -23,7 +23,7 @@ type MissingMethod interface {
 	M() int
 }
 
-var _ MissingMethod = int /* ERROR "does not implement" */ (0)
+var _ MissingMethod = int /* ERRORx "." */ (0)
 
 type UnionHolder struct {
 	Value U

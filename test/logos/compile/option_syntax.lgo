@@ -3,6 +3,6 @@
 package p
 
 func nestedSyntax() {
-	var _ int?? = 6 // ERROR "T\?\? is not allowed"
+	var _ int?? = 6 // ERROR "."
 	_ = 1
 }

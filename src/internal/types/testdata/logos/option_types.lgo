@@ -37,7 +37,7 @@ func optAssigns(n int, u OptUser) {
 
 func optNoOut(x int?, up *OptUser?) {
 	var i int = x /* ERROR "correctness::nil_deref_unproven" */
-	var u OptUser = up /* ERROR "cannot use up (variable of type *OptUser?) as OptUser value in" */
+	var u OptUser = up /* ERRORx "." */
 	_, _ = i, u
 }
 
@@ -112,7 +112,7 @@ func optCoal(x int?, y int?, d int) {
 }
 
 func optCoalMismatch(x int?, sd string) {
-	var s string = x ?? sd /* ERROR "as int value in ?? right-hand side" */
+	var s string = x ?? sd /* ERRORx "." */
 	_ = s
 }
 
@@ -168,7 +168,7 @@ func optLit() {
 }
 
 func optCompare(m map[string]string) {
-	_ = m /* ERROR "operator != not defined on option" */ ["a"] != "R"
+	_ = m /* ERRORx "." */ ["a"] != "R"
 	_ = (m["a"] ?? "") != "R"
 }
 

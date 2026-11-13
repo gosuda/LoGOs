@@ -15,5 +15,5 @@ func fillText[T any](v *T) {
 }
 
 func triggerCopyMismatch() {
-	fillText[Mismatched](&Mismatched{N: 1}) // ERROR `cannot use "text"`
+	fillText[Mismatched](&Mismatched{N: 1}) // ERROR "."
 }

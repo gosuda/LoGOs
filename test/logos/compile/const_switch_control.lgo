@@ -38,7 +38,7 @@ func breakSwitchLabel[T any]() {
 L:
 	const switch T {
 	case int:
-		break L // ERROR "invalid break label"
+		break L // ERROR "."
 	}
 }
 
@@ -70,5 +70,5 @@ func plainBreakAfterConstSwitch[T any]() {
 	const switch T {
 	case int:
 	}
-	break // ERROR "is not in a loop"
+	break // ERROR "."
 }

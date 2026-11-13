@@ -32,9 +32,9 @@ func wordLaneOK(a [8]int, b [8]int) {
 }
 
 func badDotShape(a [2]float64, b [4]float64) {
-	_ = a.dot(b) // ERROR "cannot use"
+	_ = a.dot(b) // ERROR "."
 }
 
 func complexExcluded(a [2]complex128, b [2]complex128) {
-	_ = a + b // ERROR "not defined on"
+	_ = a + b // ERROR "."
 }

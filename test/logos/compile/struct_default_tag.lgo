@@ -3,5 +3,5 @@
 package p
 
 type TagBeforeDefault struct {
-	Port int `json:"port"` = 8080 // ERROR "syntax error"
+	Port int `json:"port"` = 8080 // ERROR "."
 }

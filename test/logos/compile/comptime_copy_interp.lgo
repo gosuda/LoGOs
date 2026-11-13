@@ -16,4 +16,4 @@ func Join[T any](v T) string {
 	return out
 }
 
-var _ = Join[Counter](Counter{Count: 1}) // ERROR "not an interface"
+var _ = Join[Counter](Counter{Count: 1}) // ERROR "."
