@@ -155,25 +155,50 @@ func (check *Checker) logosRejectReadonlyBuiltinArgs(x *operand, args []*operand
 	return false
 }
 
+func logosBuiltinObservesOnly(id builtinId) bool {
+	switch id {
+	case _Len, _Cap, _Sizeof, _Alignof, _Offsetof, _Print, _Println, _Min, _Max, _Complex, _Real, _Imag:
+		return true
+	}
+	return false
+}
+
+func logosBuiltinWritesThroughFirst(id builtinId) bool {
+	switch id {
+	case _Append, _Copy, _Delete, _Clear:
+		return true
+	}
+	return false
+}
+
+func logosObservedType(T Type) Type {
+	base, _, _ := logosReadonlyBase(T)
+	if p, ok := base.Underlying().(*Pointer); ok {
+		if b, d, _ := logosReadonlyBase(p.base); d {
+			return &Pointer{base: b}
+		}
+	}
+	return base
+}
+
+func (check *Checker) logosObservedOperand(x *operand) {
+	if check.conf.Logos {
+		x.typ_ = logosObservedType(x.typ())
+	}
+}
+
 func (check *Checker) logosReadonlyBuiltinArg(a *operand, id builtinId) bool {
 	if !logosContainsReadonlyDescendants(a.typ()) {
 		return true
 	}
-	base, _, _ := logosReadonlyBase(a.typ())
-	switch id {
-	case _Len, _Cap:
-		a.typ_ = base
-		if p, ok := base.Underlying().(*Pointer); ok {
-			if b, d, _ := logosReadonlyBase(p.base); d {
-				a.typ_ = &Pointer{base: b}
-			}
-		}
+	if logosBuiltinObservesOnly(id) {
+		a.typ_ = logosObservedType(a.typ())
 		return true
-	case _Append, _Copy, _Delete, _Clear:
-		if base != a.typ() {
-			a.typ_ = &ConstView{Elem: base}
-			return true
-		}
+	}
+	base, _, _ := logosReadonlyBase(a.typ())
+	if logosBuiltinWritesThroughFirst(id) && base != a.typ() {
+		a.typ_ = &ConstView{Elem: base}
+		return true
 	}
 	check.errorf(a, IncompatibleAssign, "%s cannot pass readonly descendants to builtin %s", logosConstEscape, predeclaredFuncs[id].name)
 	return false

@@ -794,6 +794,7 @@ func (check *Checker) builtin(x *operand, call *syntax.CallExpr, id builtinId) (
 		if !x.isValid() {
 			return
 		}
+		check.logosObservedOperand(x)
 
 		base := derefStructPtr(x.typ())
 		sel := selx.Sel.Value
