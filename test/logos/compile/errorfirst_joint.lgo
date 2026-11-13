@@ -164,6 +164,18 @@ func efCapturedReassigned() {
 	f()
 }
 
+func efCapturedBeforeTracked() {
+	var n int
+	var err error
+	f := func() {
+		efUse(n) // ERROR "result_before_error_check"
+		_ = err
+	}
+	n, err = efFetch()
+	_ = err
+	f()
+}
+
 func efCapturedAlias() {
 	n, err := efFetch()
 	if err != nil {

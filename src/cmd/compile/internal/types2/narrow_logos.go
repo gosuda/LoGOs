@@ -771,6 +771,7 @@ type logosEFPass struct {
 	assigns     map[*Var][]syntax.Expr
 	addr        map[*Var]bool
 	initialized map[*Var]bool
+	tracked     map[*Var]string
 }
 
 func (check *Checker) logosErrorFirst(body *syntax.BlockStmt) {
@@ -968,6 +969,18 @@ func (p *logosEFPass) collectAssigns() {
 	p.assigns = make(map[*Var][]syntax.Expr)
 	p.addr = make(map[*Var]bool)
 	p.initialized = make(map[*Var]bool)
+	p.tracked = make(map[*Var]string)
+	mark := func(lhs []syntax.Expr, rhs syntax.Expr) {
+		errV, vars := p.tuple(lhs, rhs)
+		if errV == nil {
+			return
+		}
+		for _, v := range vars {
+			if _, ok := p.tracked[v]; !ok {
+				p.tracked[v] = errV.name
+			}
+		}
+	}
 	note := func(lhs []syntax.Expr, rhs []syntax.Expr, plain bool) {
 		for i, l := range lhs {
 			var r syntax.Expr
@@ -985,10 +998,17 @@ func (p *logosEFPass) collectAssigns() {
 	syntax.Inspect(p.body, func(n syntax.Node) bool {
 		switch n := n.(type) {
 		case *syntax.AssignStmt:
-			note(syntax.UnpackListExpr(n.Lhs), syntax.UnpackListExpr(n.Rhs), n.Op == 0 || n.Op == syntax.Def)
+			lhs := syntax.UnpackListExpr(n.Lhs)
+			rhs := syntax.UnpackListExpr(n.Rhs)
+			note(lhs, rhs, n.Op == 0 || n.Op == syntax.Def)
+			if (n.Op == 0 || n.Op == syntax.Def) && len(rhs) == 1 {
+				mark(lhs, rhs[0])
+			}
 		case *syntax.VarDecl:
 			if n.Values != nil {
-				note(logosEFNames(n), syntax.UnpackListExpr(n.Values), true)
+				names := logosEFNames(n)
+				note(names, syntax.UnpackListExpr(n.Values), true)
+				mark(names, n.Values)
 			}
 		case *syntax.RangeClause:
 			note(syntax.UnpackListExpr(n.Lhs), nil, false)
@@ -1461,14 +1481,39 @@ func (p *logosEFPass) defsIn(n syntax.Node) map[*Var]bool {
 	return inside
 }
 
+func (p *logosEFPass) lateCaptures(st *logosEFState, lit syntax.Node, inside map[*Var]bool) *logosEFState {
+	if p.assigns == nil {
+		p.collectAssigns()
+	}
+	syntax.Inspect(lit, func(n syntax.Node) bool {
+		id, ok := n.(*syntax.Name)
+		if !ok {
+			return true
+		}
+		v, _ := p.check.Uses[id].(*Var)
+		if v == nil || inside[v] {
+			return true
+		}
+		if _, ok := st.m[v]; ok {
+			return true
+		}
+		if errName, ok := p.tracked[v]; ok {
+			st = st.set(v, logosEFEntry{name: errName})
+		}
+		return true
+	})
+	return st
+}
+
 func (p *logosEFPass) later(lit syntax.Node, body *syntax.BlockStmt, st *logosEFState) *logosEFState {
 	if body == nil {
 		return st
 	}
+	inside := p.defsIn(lit)
 	saved := p.eff
-	eff := &logosEFEffects{inside: p.defsIn(lit), assigned: make(map[*Var]bool), created: make(map[*Var]string)}
+	eff := &logosEFEffects{inside: inside, assigned: make(map[*Var]bool), created: make(map[*Var]string)}
 	p.eff = eff
-	p.run(body, p.capture(st))
+	p.run(body, p.lateCaptures(p.capture(st), lit, inside))
 	p.eff = saved
 	for v := range eff.assigned {
 		st = st.detach(v)
@@ -1489,7 +1534,7 @@ func (p *logosEFPass) lambda(lam *syntax.LambdaExpr, st *logosEFState) *logosEFS
 	if isBlock {
 		return p.later(lam, body, st)
 	}
-	p.expr(lam.Body, p.capture(st))
+	p.expr(lam.Body, p.lateCaptures(p.capture(st), lam, p.defsIn(lam)))
 	return st
 }
 
