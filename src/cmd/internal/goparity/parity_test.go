@@ -85,7 +85,7 @@
 // goparity-upstream-gocache, goparity-mutant-<id>-gocache) and persist
 // across runs; toolexec mutant builds always use their own cache so a
 // mutant compiler can never be served clean cache entries. Program runs are
-// bounded by 10 s at GOMAXPROCS=4 with empty GODEBUG and GOTRACEBACK=single.
+// bounded by 10 s (50 s with -race) at GOMAXPROCS=4 with empty GODEBUG and GOTRACEBACK=single.
 // Stdout is compared byte for byte; stderr is cut at the first traceback
 // line and masked only for pc=, addr=, sp=, fp= and lr= values and 0xc...
 // pointers (the upstream sweep still masks every 0x value of six or more
@@ -941,32 +941,36 @@ func cutTraceback(s string) string {
 	return s
 }
 
-func runBinary(path, maxProcs string) (observation, error) {
-	return runBinaryTimeout(path, maxProcs, 10*time.Second, corpusNorm)
+func runBinary(path, maxProcs string, args []string) (observation, error) {
+	return runBinaryTimeout(path, maxProcs, runBudget(args, 10*time.Second), corpusNorm)
 }
 
-func sweepRunBudget(args []string) time.Duration {
+func runBudget(args []string, plain time.Duration) time.Duration {
 	if slices.Contains(args, "-race") {
-		return 5 * time.Minute
+		return 5 * plain
 	}
-	return time.Minute
+	return plain
 }
 
 func runSweepBinary(path string, args []string) (observation, error) {
-	return runBinaryTimeout(path, "4", sweepRunBudget(args), sweepNorm)
+	return runBinaryTimeout(path, "4", runBudget(args, time.Minute), sweepNorm)
 }
 
-func TestSweepRunBudget(t *testing.T) {
+func TestRunBudget(t *testing.T) {
 	for _, tc := range []struct {
-		args []string
-		want time.Duration
+		args  []string
+		plain time.Duration
+		want  time.Duration
 	}{
-		{nil, time.Minute},
-		{[]string{"-gcflags=all=-N -l"}, time.Minute},
-		{[]string{"-race"}, 5 * time.Minute},
+		{nil, 10 * time.Second, 10 * time.Second},
+		{[]string{"-gcflags=all=-N -l"}, 10 * time.Second, 10 * time.Second},
+		{[]string{"-race"}, 10 * time.Second, 50 * time.Second},
+		{nil, time.Minute, time.Minute},
+		{[]string{"-gcflags=all=-N -l"}, time.Minute, time.Minute},
+		{[]string{"-race"}, time.Minute, 5 * time.Minute},
 	} {
-		if got := sweepRunBudget(tc.args); got != tc.want {
-			t.Errorf("sweepRunBudget(%q) = %s, want %s", tc.args, got, tc.want)
+		if got := runBudget(tc.args, tc.plain); got != tc.want {
+			t.Errorf("runBudget(%q, %s) = %s, want %s", tc.args, tc.plain, got, tc.want)
 		}
 	}
 }
@@ -1334,14 +1338,14 @@ func obsDesc(o observation) string {
 	return fmt.Sprintf("exit %d stdout %d bytes stderr %d bytes", o.exit, len(o.stdout), len(o.stderr))
 }
 
-func runAll(r buildResult, maxProcs string) (map[string]observation, error) {
+func runAll(r buildResult, maxProcs string, args []string) (map[string]observation, error) {
 	out := make(map[string]observation, len(r.progs))
 	var firstErr error
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 	for _, p := range r.progs {
 		wg.Go(func() {
-			o, err := runBinary(filepath.Join(r.outDir, p), maxProcs)
+			o, err := runBinary(filepath.Join(r.outDir, p), maxProcs, args)
 			mu.Lock()
 			defer mu.Unlock()
 			if err != nil {
@@ -1619,7 +1623,7 @@ func TestParity(t *testing.T) {
 			continue
 		}
 		wg.Go(func() {
-			o, err := runAll(forkBuilds[c.id], "4")
+			o, err := runAll(forkBuilds[c.id], "4", c.args)
 			mu.Lock()
 			if err != nil {
 				forkRunErrs[c.id] = err
@@ -1635,7 +1639,7 @@ func TestParity(t *testing.T) {
 				continue
 			}
 			wg.Go(func() {
-				o, err := runAll(upBuilds[u.id], "4")
+				o, err := runAll(upBuilds[u.id], "4", u.args)
 				mu.Lock()
 				if err != nil {
 					upRunErrs[u.id] = err
@@ -1673,7 +1677,7 @@ func TestParity(t *testing.T) {
 	}
 	stability := map[string]observation{}
 	if upOn && upBuilds["U1"].err == nil {
-		stab, stabErr := runAll(upBuilds["U1"], "1")
+		stab, stabErr := runAll(upBuilds["U1"], "1", nil)
 		if stabErr != nil {
 			t.Errorf("upstream stability runs failed: %v", stabErr)
 		} else {
@@ -1681,7 +1685,7 @@ func TestParity(t *testing.T) {
 		}
 	}
 	if !upOn && forkBuilds["K1"].err == nil {
-		stab, stabErr := runAll(forkBuilds["K1"], "1")
+		stab, stabErr := runAll(forkBuilds["K1"], "1", nil)
 		if stabErr != nil {
 			t.Errorf("fork stability runs failed: %v", stabErr)
 		} else {
@@ -2215,7 +2219,7 @@ func (mb *mutBuild) cleanExpect(t *testing.T, prog string) (observation, error) 
 	if _, out, err := sb.build(); err != nil {
 		return observation{}, fmt.Errorf("clean build failed: %v\n%s", err, clip(out))
 	}
-	return runBinary(filepath.Join(outDir, prog), "4")
+	return runBinary(filepath.Join(outDir, prog), "4", mb.cfg.args)
 }
 
 func (mb *mutBuild) cleanFile(t *testing.T, stem string) error {
@@ -2387,7 +2391,7 @@ func TestParityMutants(t *testing.T) {
 			if buildErr != nil {
 				t.Fatalf("mutant %s: corpus build failed under mutant (invalid probe): %v\n%s", m.id, buildErr, clip(buildOut))
 			}
-			fobs, ferr := runBinary(filepath.Join(mb.outDir, m.expect), "4")
+			fobs, ferr := runBinary(filepath.Join(mb.outDir, m.expect), "4", mb.args)
 			if ferr != nil {
 				t.Fatalf("mutant %s: %v", m.id, ferr)
 			}
@@ -2397,7 +2401,7 @@ func TestParityMutants(t *testing.T) {
 				if err != nil {
 					t.Fatalf("upstream build %s failed: %v\n%s", cfg.upstream, err, clip(ub.output))
 				}
-				uobs, uerr := runBinary(filepath.Join(ub.outDir, m.expect), "4")
+				uobs, uerr := runBinary(filepath.Join(ub.outDir, m.expect), "4", cfg.args)
 				if uerr != nil {
 					t.Fatalf("mutant %s: upstream run: %v", m.id, uerr)
 				}
