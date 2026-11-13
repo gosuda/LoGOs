@@ -1070,6 +1070,7 @@ func TestGroupSeqOrderedFailureCancelsOnlyWhenItReachesTheHead(t *testing.T) {
 		gate := make(chan struct{})
 		headSaw := make(chan error, 1)
 		tailSawCancel := make(chan struct{})
+		tailEntered := make(chan struct{})
 		seq := run(t.Context(), 3, 3, func(ctx context.Context, i int) (int, bool, error) {
 			switch i {
 			case 0:
@@ -1077,8 +1078,10 @@ func TestGroupSeqOrderedFailureCancelsOnlyWhenItReachesTheHead(t *testing.T) {
 				headSaw <- ctx.Err()
 				return 0, true, nil
 			case 1:
+				<-tailEntered
 				return 0, false, errBoom
 			}
+			close(tailEntered)
 			<-ctx.Done()
 			close(tailSawCancel)
 			return 0, false, ctx.Err()
@@ -1106,10 +1109,14 @@ func TestGroupSeqOrderedFailureAtHeadCancelsLaterSiblings(t *testing.T) {
 	eachStage(t, orderedStages, func(t *testing.T, run stageFunc) {
 		errFirst := errors.New("first")
 		var sawCancel atomic.Int32
+		entered := make(chan struct{}, 2)
 		seq := run(t.Context(), 3, 3, func(ctx context.Context, i int) (int, bool, error) {
 			if i == 0 {
+				<-entered
+				<-entered
 				return 0, false, errFirst
 			}
+			entered <- struct{}{}
 			<-ctx.Done()
 			sawCancel.Add(1)
 			return 0, false, ctx.Err()
