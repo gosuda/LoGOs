@@ -133,3 +133,36 @@ func TestGroupStageIgnoresSourceElementsAfterTheStop(t *testing.T) {
 		})
 	}
 }
+
+func TestGroupChanStopsReceivingAfterTheStop(t *testing.T) {
+	for name, entry := range map[string]func(context.Context, <-chan int, func(context.Context, int) (int, bool, error)) iter.Seq2[int, error]{
+		"chan": func(ctx context.Context, src <-chan int, f func(context.Context, int) (int, bool, error)) iter.Seq2[int, error] {
+			return GroupChan(ctx, 1, src, f)
+		},
+		"chan-unordered": func(ctx context.Context, src <-chan int, f func(context.Context, int) (int, bool, error)) iter.Seq2[int, error] {
+			return GroupChanUnordered(ctx, 1, src, f)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				ch := make(chan int, 8)
+				for i := range 8 {
+					ch <- i
+				}
+				close(ch)
+				var calls atomic.Int32
+				seq := entry(t.Context(), ch, func(_ context.Context, i int) (int, bool, error) {
+					calls.Add(1)
+					return i, true, nil
+				})
+				d := finished(t, startStage(seq, func(int) bool { return false }))
+				if d.err != nil || d.pan != nil || !slices.Equal(d.rs, []int{0}) {
+					t.Fatalf("rs = %v, err = %v, panic = %v, want [0], nil, nil", d.rs, d.err, d.pan)
+				}
+				if calls.Load() != 1 || len(ch) != 7 {
+					t.Fatalf("calls of f = %d, elements left = %d, want 1 and 7: the stage may not pull or start a child after the stop", calls.Load(), len(ch))
+				}
+			})
+		})
+	}
+}

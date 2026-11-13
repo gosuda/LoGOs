@@ -535,53 +535,63 @@ func TestGroupSeqOrderedFailedElementIsNeverPassedOver(t *testing.T) {
 }
 
 func TestGroupSeqClosesUndeliveredInReverseInputOrder(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		var log closeLog
-		errBoom := errors.New("boom")
-		started := make(chan struct{}, 3)
-		delivered := make(chan struct{})
-		seq := GroupSeq(t.Context(), 5, intSeq(5), func(_ context.Context, i int) (*tracked, bool, error) {
-			switch i {
-			case 0:
-				return &tracked{i, &log}, true, nil
-			case 1:
-				<-delivered
-				for range 3 {
-					<-started
+	all := entries[*tracked]()
+	for _, name := range []string{"seq", "chan"} {
+		t.Run(name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				var log closeLog
+				errBoom := errors.New("boom")
+				started := make(chan struct{}, 3)
+				delivered := make(chan struct{})
+				seq := all[name](t.Context(), 5, 5, func(_ context.Context, i int) (*tracked, bool, error) {
+					switch i {
+					case 0:
+						return &tracked{i, &log}, true, nil
+					case 1:
+						<-delivered
+						for range 3 {
+							<-started
+						}
+						return nil, false, errBoom
+					default:
+						started <- struct{}{}
+						return &tracked{i, &log}, true, nil
+					}
+				})
+				d := finished(t, startStage(seq, func(*tracked) bool {
+					close(delivered)
+					return true
+				}))
+				if !errors.Is(d.err, errBoom) || len(d.rs) != 1 || d.rs[0].id != 0 {
+					t.Fatalf("rs = %v, err = %v, want the result of element 0 and %v", d.rs, d.err, errBoom)
 				}
-				return nil, false, errBoom
-			default:
-				started <- struct{}{}
-				return &tracked{i, &log}, true, nil
-			}
+				if want := []int{4, 3, 2}; !slices.Equal(log.snapshot(), want) {
+					t.Fatalf("closed = %v, want %v", log.snapshot(), want)
+				}
+			})
 		})
-		d := finished(t, startStage(seq, func(*tracked) bool {
-			close(delivered)
-			return true
-		}))
-		if !errors.Is(d.err, errBoom) || len(d.rs) != 1 || d.rs[0].id != 0 {
-			t.Fatalf("rs = %v, err = %v, want the result of element 0 and %v", d.rs, d.err, errBoom)
-		}
-		if want := []int{4, 3, 2}; !slices.Equal(log.snapshot(), want) {
-			t.Fatalf("closed = %v, want %v", log.snapshot(), want)
-		}
-	})
+	}
 }
 
 func TestGroupSeqClosesUndeliveredOnEarlyStop(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
+	eachEntry(t, func(t *testing.T, run entryFunc[*tracked]) {
 		var log closeLog
 		started := make(chan struct{}, 2)
-		seq := GroupSeq(t.Context(), 3, intSeq(3), func(_ context.Context, i int) (*tracked, bool, error) {
+		stop := make(chan struct{})
+		seq := run(t.Context(), 3, 3, func(_ context.Context, i int) (*tracked, bool, error) {
 			if i == 0 {
 				<-started
 				<-started
 			} else {
 				started <- struct{}{}
+				<-stop
 			}
 			return &tracked{i, &log}, true, nil
 		})
-		d := finished(t, startStage(seq, func(*tracked) bool { return false }))
+		d := finished(t, startStage(seq, func(*tracked) bool {
+			close(stop)
+			return false
+		}))
 		if d.err != nil || len(d.rs) != 1 || d.rs[0].id != 0 {
 			t.Fatalf("rs = %v, err = %v, want the result of element 0 and nil", d.rs, d.err)
 		}
@@ -856,6 +866,40 @@ func TestGroupChanLoopBodyRunsOnRangingGoroutine(t *testing.T) {
 			t.Fatalf("body ran on %v, want six runs on goroutine %d", bodyIDs, ranging)
 		}
 	})
+}
+
+func TestGroupChanReceivesOnRangingGoroutine(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ch := make(chan int)
+		seq := GroupChan(t.Context(), 2, ch, func(_ context.Context, i int) (int, bool, error) { return i, true, nil })
+		var ranging uint64
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			ranging = goroutineID()
+			for range seq {
+			}
+		}()
+		synctest.Wait()
+		stack := goroutineStack(ranging)
+		close(ch)
+		recv(t, done)
+		if !strings.Contains(stack, ").fromChan(") {
+			t.Fatalf("goroutine %d parked outside fromChan:\n%s", ranging, stack)
+		}
+	})
+}
+
+func goroutineStack(id uint64) string {
+	buf := make([]byte, 1<<20)
+	buf = buf[:runtime.Stack(buf, true)]
+	head := "goroutine " + strconv.FormatUint(id, 10) + " "
+	for g := range strings.SplitSeq(string(buf), "\n\n") {
+		if strings.HasPrefix(g, head) {
+			return g
+		}
+	}
+	return ""
 }
 
 func TestGroupChanDeliversWhileChannelIsQuiet(t *testing.T) {

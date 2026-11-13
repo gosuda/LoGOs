@@ -8,6 +8,7 @@ package rt
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 )
@@ -161,5 +162,49 @@ func TestPR3GroupSlotReuseNotSpurious(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatalf("reader byte missing")
+	}
+}
+
+func TestPR3GroupFailureLeavesOutsiderNetpollBlocked(t *testing.T) {
+	outCli, outSrv := pr3DialPair(t)
+	defer outCli.Close()
+	defer outSrv.Close()
+	cli, srv := pr3DialPair(t)
+	defer cli.Close()
+	defer srv.Close()
+	outsider := make(chan error, 1)
+	go func() {
+		_, err := outSrv.Read(make([]byte, 1))
+		outsider <- err
+	}()
+	time.Sleep(100 * time.Millisecond)
+	errChild := errors.New("child failed")
+	g, _ := NewGroup(context.Background(), 0)
+	started := make(chan struct{})
+	g.Go(func(context.Context) error {
+		close(started)
+		_, err := srv.Read(make([]byte, 1))
+		return err
+	})
+	<-started
+	g.Go(func(context.Context) error { return errChild })
+	if err := g.Wait(); !errors.Is(err, errChild) {
+		t.Fatalf("Wait = %v, want %v", err, errChild)
+	}
+	select {
+	case err := <-outsider:
+		t.Fatalf("outsider Read returned %v after group failure", err)
+	case <-time.After(300 * time.Millisecond):
+	}
+	if _, err := outCli.Write([]byte{1}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-outsider:
+		if err != nil {
+			t.Fatalf("outsider Read = %v, want the written byte", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatalf("outsider Read did not complete after the write")
 	}
 }
