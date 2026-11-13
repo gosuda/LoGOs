@@ -110,6 +110,15 @@ func literalElementMismatch() {
 	_, _ = a, b
 }
 
+func optionLiteralElements() {
+	var a pair? = (1, 2)
+	var b named? = (1, "s" /* ERROR "as int value in" */)
+	var c (x int?, y int)? = (nil, 2)
+	var d (x int?, y int)? = (1, "a" /* ERROR "as int value in" */)
+	var e other? = pair /* ERROR "cannot use" */ ((1, 2))
+	_, _, _, _, _ = a, b, c, d, e
+}
+
 func literalArityMismatch() {
 	var a pair = ( /* ERROR "" */ 1, 2, 3)
 	var b named = ( /* ERROR "" */ 1, 2, 3)
