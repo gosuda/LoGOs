@@ -904,17 +904,33 @@ func violatorBin(t *testing.T, mode string) (bin string, out string) {
 func checkViolation(t *testing.T, mode, out string) {
 	t.Helper()
 	lines := strings.Split(strings.TrimSpace(out), "\n")
-	if len(lines) != 3 {
-		t.Fatalf("violator %q printed %d lines, want 3:\n%s", mode, len(lines), out)
+	if len(lines) != 3 || !strings.Contains(lines[0], "marked with #cgo nocallback called back into Go") {
+		t.Fatalf("violator %q output = %q, want the recovered nocallback message first", mode, out)
 	}
-	if !strings.Contains(lines[0], "marked with #cgo nocallback called back into Go") {
-		t.Fatalf("first line = %q, want the nocallback message", lines[0])
+	if mode == "plain" {
+		if !strings.Contains(lines[1], "unexpected setting cgoNoCallback") {
+			t.Fatalf("second line = %q, want the stuck-flag message", lines[1])
+		}
+		if strings.TrimSpace(lines[2]) != "add: 42" {
+			t.Fatalf("third line = %q, want add: 42", lines[2])
+		}
+		return
 	}
-	if !strings.Contains(lines[1], "unexpected setting cgoNoCallback") {
-		t.Fatalf("second line = %q, want the stuck-flag message", lines[1])
+	var ok, total int
+	if n, err := fmt.Sscanf(lines[1], "loop: %d/%d", &ok, &total); n != 2 || err != nil || total <= 0 {
+		t.Fatalf("violator %q loop line = %q, want loop: <ok>/<total>", mode, lines[1])
 	}
-	if strings.TrimSpace(lines[2]) != "add: 42" {
-		t.Fatalf("third line = %q, want add: 42", lines[2])
+	if goexperiment.LogosFastCgo {
+		if ok != total {
+			t.Fatalf("violator %q recovered the nocallback panic %d of %d times", mode, ok, total)
+		}
+		if strings.TrimSpace(lines[2]) != "add: 42" {
+			t.Fatalf("third line = %q, want the clean fast call result", lines[2])
+		}
+		return
+	}
+	if !strings.Contains(lines[2], "unexpected setting cgoNoCallback") {
+		t.Fatalf("third line = %q, want the upstream stuck-flag message", lines[2])
 	}
 }
 

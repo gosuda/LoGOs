@@ -132,7 +132,7 @@ func callOnce(fn func() int32) string {
 	}()
 	return msg
 }
-func checkPanicsTwice(name string, fn func() int32) {
+func checkPanicsTwice(name string, fn func() int32, secondWant string) {
 	first := callOnce(fn)
 	if first == "returned" {
 		fail(name + " survived callback")
@@ -141,7 +141,7 @@ func checkPanicsTwice(name string, fn func() int32) {
 		fail(name + " first panic: " + first)
 	}
 	second := callOnce(fn)
-	if !strings.Contains(second, "unexpected setting cgoNoCallback") {
+	if !strings.Contains(second, secondWant) {
 		fail(name + " second panic: " + second)
 	}
 }
@@ -311,9 +311,9 @@ func main() {
 		mode = os.Args[1]
 	}
 	if mode == "plain" {
-		checkPanicsTwice("cb plain", func() int32 { return int32(C.shape_cb_plain()) })
+		checkPanicsTwice("cb plain", func() int32 { return int32(C.shape_cb_plain()) }, "unexpected setting cgoNoCallback")
 	} else {
-		checkPanicsTwice("cb fast", func() int32 { return int32(C.shape_cb_fast()) })
+		checkPanicsTwice("cb fast", func() int32 { return int32(C.shape_cb_fast()) }, "marked with #cgo nocallback")
 	}
 	if int(C.shape_add_slow(20, 22)) != 42 {
 		fail("add after panic")

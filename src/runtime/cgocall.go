@@ -346,7 +346,8 @@ func cgocallbackg(fn, frame unsafe.Pointer, ctxt uintptr) {
 	// and will end up being stale when restored by reentersyscall.
 	savedsp := unsafe.Pointer(gp.syscallsp)
 	savedpc := gp.syscallpc
-	if gp.nocgocallback && gp.m.inFastCall {
+	fastForbidden := gp.nocgocallback && gp.m.inFastCall
+	if fastForbidden {
 		logosClearFastCall(gp.m)
 	}
 	savedbp := unsafe.Pointer(gp.syscallbp)
@@ -359,6 +360,10 @@ func cgocallbackg(fn, frame unsafe.Pointer, ctxt uintptr) {
 	osPreemptExtExit(gp.m)
 
 	if gp.nocgocallback {
+		if fastForbidden {
+			gp.nocgocallback = false
+			unwindFastForbidden(gp.m)
+		}
 		panic("runtime: function marked with #cgo nocallback called back into Go")
 	}
 
@@ -502,8 +507,7 @@ func unwindm(restore *bool) {
 		// Restore sp saved by cgocallback during
 		// unwind of g's stack (see comment at top of file).
 		mp := acquirem()
-		sched := &mp.g0.sched
-		sched.sp = *(*uintptr)(unsafe.Pointer(sched.sp + alignUp(sys.MinFrameSize, sys.StackAlign)))
+		restoreG0SchedSP(mp)
 
 		// Do the accounting that cgocall will not have a chance to do
 		// during an unwind.
@@ -526,6 +530,21 @@ func unwindm(restore *bool) {
 
 		releasem(mp)
 	}
+}
+
+//go:nosplit
+func restoreG0SchedSP(mp *m) {
+	sched := &mp.g0.sched
+	sched.sp = *(*uintptr)(unsafe.Pointer(sched.sp + alignUp(sys.MinFrameSize, sys.StackAlign)))
+}
+
+//go:nosplit
+func unwindFastForbidden(mp *m) {
+	restoreG0SchedSP(mp)
+	if mp.ncgo > 0 {
+		mp.ncgo--
+	}
+	unlockOSThread()
 }
 
 // called from assembly.

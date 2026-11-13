@@ -25,6 +25,7 @@ import "C"
 import (
 	"fmt"
 	"os"
+	"runtime/debug"
 	"strings"
 )
 
@@ -47,9 +48,28 @@ func forbidden(v C.int, want string) (panicked bool, bad string) {
 	return false, bad
 }
 
+func repeatWant() string {
+	bi, ok := debug.ReadBuildInfo()
+	if !ok {
+		return "unexpected setting cgoNoCallback"
+	}
+	for _, kv := range bi.Settings {
+		if kv.Key != "GOEXPERIMENT" {
+			continue
+		}
+		for name := range strings.SplitSeq(kv.Value, ",") {
+			if name == "logosfastcgo" {
+				return "called back into Go"
+			}
+		}
+	}
+	return "unexpected setting cgoNoCallback"
+}
+
 func worker(id int, bad chan<- string) {
+	wantRepeat := repeatWant()
 	for n := range 100 {
-		want := "unexpected setting cgoNoCallback"
+		want := wantRepeat
 		if n == 0 {
 			want = "called back into Go"
 		}
