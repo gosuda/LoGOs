@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"slices"
@@ -27,6 +28,22 @@ var deferred atomic.Int64
 func note() { deferred.Add(1) }
 
 func conv(x int) (int, error) { return strconv.Atoi(strconv.Itoa(x)) }
+
+var errBoom = errors.New("boom")
+
+func convFail(x int) (int, error) {
+	if x == 2 {
+		return 0, errBoom
+	}
+	return x, nil
+}
+
+func reject(x int) error {
+	if x == 2 {
+		return errBoom
+	}
+	return nil
+}
 
 func formSelect(ctx context.Context) {
 	got, err := []int{1, 2}.group(ctx, limit = 2).map(x => {
@@ -221,6 +238,24 @@ func formConstSwitchReturn(ctx context.Context) {
 	check("const-switch-return", err == nil && slices.Equal(got, []int{11, 12}), err, []int{11, 12})
 }
 
+func formAssignTryFails(ctx context.Context) {
+	_, err := []int{1, 2, 3}.group(ctx, limit = 2).map(x => {
+		v := convFail(x)?
+		return v
+	})
+	check("assign-try-fails-element", errors.Is(err, errBoom), err, errBoom)
+}
+
+func formIfExprTryFails(ctx context.Context) {
+	_, err := []int{1, 2, 3}.group(ctx, limit = 2).map(x => {
+		if x > 0 {
+			reject(x)?
+		}
+		return x
+	})
+	check("if-expr-try-fails-element", errors.Is(err, errBoom), err, errBoom)
+}
+
 func main() {
 	ctx := context.Background()
 	formSelect(ctx)
@@ -239,6 +274,8 @@ func main() {
 	formRangeInt(ctx)
 	formConstIfReturn(ctx)
 	formConstSwitchReturn(ctx)
+	formAssignTryFails(ctx)
+	formIfExprTryFails(ctx)
 	if failed {
 		os.Exit(1)
 	}

@@ -764,6 +764,14 @@ func tryForm(ctx context.Context, xs []int) ([]int, error) {
 	return append(ys, zs...), nil
 }
 
+var tryFormPassed bool
+
+func tryFormFails(ctx context.Context, xs []int) ([]int, error) {
+	ys := xs.group(ctx, limit = 2).map(x => failOn(x, 2)?)?
+	tryFormPassed = true
+	return ys, nil
+}
+
 func noErrorResult(ctx context.Context, xs []int) int {
 	ys, err := xs.group(ctx, limit = 2).map(x => x * 2)
 	if err != nil {
@@ -786,6 +794,8 @@ func caseForms(ctx context.Context) {
 	} else {
 		check("try-form", err == nil && slices.Equal(got, []int{2, 4, 6, 2, 3, 4}), got, []int{2, 4, 6, 2, 3, 4})
 	}
+	_, err = tryFormFails(ctx, xs)
+	check("try-form-fails", errors.Is(err, errBoom) && !tryFormPassed, err, errBoom)
 	check("no-error-result", noErrorResult(ctx, xs) == 12, noErrorResult(ctx, xs), 12)
 	tasks := []func() (int, error){
 		func() (int, error) { return 1, nil },

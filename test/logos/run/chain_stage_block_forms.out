@@ -16,3 +16,5 @@ ok type-switch
 ok range-int
 ok const-if-return
 ok const-switch-return
+ok assign-try-fails-element
+ok if-expr-try-fails-element

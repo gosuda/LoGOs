@@ -349,6 +349,14 @@ func stageUnorderedWithoutSegment(ctx context.Context, xs []int) {
 	_, _ = xs.group /* ERROR "needs map or filter" */ (ctx, limit = 2).unordered()
 }
 
+func stageSortAfterGroup(ctx context.Context, xs []int) {
+	_, _ = xs.group /* ERROR "needs map or filter" */ (ctx, limit = 2).sortBy(x => x)
+}
+
+func stageTryNoErrorResult(ctx context.Context, xs []int) {
+	_ = xs.group(ctx, limit = 2).map(x => x)? /* ERROR "requires enclosing function to return error" */
+}
+
 func unorderedAfterMap(ctx context.Context, xs []int) {
 	_, _ = xs.group(ctx, limit = 2).map(x => x).unordered /* ERROR "directly follow group" */ ()
 }

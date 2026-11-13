@@ -47,6 +47,7 @@ ok cancel-wakes-filter-send
 ok cancel-wakes-filter-range
 ok nested-stage
 ok try-form
+ok try-form-fails
 ok no-error-result
 ok thunks
 ok error-in-value
