@@ -1,3 +1,9 @@
+ok marshal-field-count-5
+ok unmarshal-field-count-5
+ok marshal-field-count-20
+ok unmarshal-field-count-20
+ok marshal-field-count-100
+ok unmarshal-field-count-100
 ok marshal-bytes-5
 ok marshal-single-make-5
 ok unmarshal-vs-reflective-5

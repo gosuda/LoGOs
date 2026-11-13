@@ -433,7 +433,23 @@ func checkSize(c sizeCase) {
 	report(label("unmarshal-per-key"), perKey == 0, "generated %v allocations for %d one-byte values", perKey, c.n)
 }
 
+func checkFieldCountGrowth() {
+	var marshalBase, unmarshalBase float64
+	for i, c := range []sizeCase{case5(), case20(), case100()} {
+		data := payloadSet(c.n, 1, oneByteValue)[0]
+		mustNil(c.load(data))
+		marshal := testing.AllocsPerRun(200, func() { sinkBytes = must(c.marshalGen()) })
+		unmarshal := testing.AllocsPerRun(200, func() { mustNil(c.unmarshalGen(data)) })
+		if i == 0 {
+			marshalBase, unmarshalBase = marshal, unmarshal
+		}
+		report(fmt.Sprintf("marshal-field-count-%d", c.n), marshal == marshalBase && marshal == 1, "allocations %g, baseline %g", marshal, marshalBase)
+		report(fmt.Sprintf("unmarshal-field-count-%d", c.n), unmarshal == unmarshalBase, "allocations %g, baseline %g", unmarshal, unmarshalBase)
+	}
+}
+
 func main() {
+	checkFieldCountGrowth()
 	for _, c := range []sizeCase{case5(), case20(), case100()} {
 		checkSize(c)
 	}
