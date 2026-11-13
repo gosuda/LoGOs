@@ -752,8 +752,13 @@ func TestLogosRegionOwnerEnforcedCrossGoroutine(t *testing.T) {
 		if p == nil || !runtime.LogosArenaInChunk(p) {
 			t.Fatal("owner region did not place")
 		}
-		if q := runtime.LogosRegionBump(h, gen, 8); q == nil {
-			t.Fatal("owner bump failed")
+		q := runtime.LogosRegionBump(h, gen, 8)
+		if runtime.Raceenabled {
+			if q != nil {
+				t.Fatal("race-enabled owner bump bypassed allocation tracking")
+			}
+		} else if q == nil || !runtime.LogosArenaInChunk(q) {
+			t.Fatal("owner bump did not place")
 		}
 		bumpCh := make(chan unsafe.Pointer, 1)
 		allocCh := make(chan unsafe.Pointer, 1)
