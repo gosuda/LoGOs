@@ -754,11 +754,56 @@ func (check *Checker) logosConstConvert(x *operand, T Type) bool {
 	return true
 }
 
+func (check *Checker) logosConstCopyElements(a *operand) bool {
+	c := logosAsConstView(a.typ())
+	if c == nil {
+		return false
+	}
+	source := *a
+	source.typ_ = c.Elem
+	elem, err := sliceElem(&source)
+	if err != nil {
+		return false
+	}
+	return check.logosConstCopyReference(a, elem)
+}
+
+func (check *Checker) logosConstCopyReference(a *operand, copied Type) bool {
+	c := logosAsConstView(a.typ())
+	if c == nil || logosReferenceFree(copied) || logosConstMapCopy(c) {
+		return false
+	}
+	check.errorf(a, IncompatibleAssign, "%s cannot copy reference-bearing elements through const view %s", logosConstMutation, ExprString(a.expr))
+	return true
+}
+
+func (check *Checker) logosConstBuiltinCopySources(call *syntax.CallExpr, id builtinId, args []*operand) bool {
+	if (id != _Copy && id != _Append) || len(args) < 2 {
+		return false
+	}
+	for _, a := range args[1:] {
+		if id == _Copy || hasDots(call) {
+			if check.logosConstCopyElements(a) {
+				return true
+			}
+			continue
+		}
+		if c := logosAsConstView(a.typ()); c != nil && check.logosConstCopyReference(a, c.Elem) {
+			return true
+		}
+	}
+	return false
+}
+
 func (check *Checker) logosConstBuiltin(x *operand, call *syntax.CallExpr, id builtinId, args []*operand) bool {
 	if !check.conf.Logos {
 		return false
 	}
 	if check.logosCompositeWrite(x, id, args) {
+		return true
+	}
+	if check.logosConstBuiltinCopySources(call, id, args) {
+		x.invalidate()
 		return true
 	}
 	unwrap := func(a *operand) {
