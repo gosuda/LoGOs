@@ -68,6 +68,23 @@ func run(conn net.Conn, res chan string) error {
 	return nil
 }
 
+func acceptPeer(ln net.Listener, peer string) net.Conn {
+	for {
+		conn, err := ln.Accept()
+		if err != nil {
+			fmt.Println("FAIL group-netpoll-setup: got", err, "want accept")
+			os.Exit(1)
+		}
+		if conn.RemoteAddr().String() == peer {
+			return conn
+		}
+		if err := conn.Close(); err != nil {
+			fmt.Println("FAIL group-netpoll-setup: got", err, "want stray connection closed")
+			os.Exit(1)
+		}
+	}
+}
+
 //logos:allow(correctness::unbounded_channel_op)
 func oneRound(ln net.Listener) time.Duration {
 	cli, err := net.Dial("tcp", ln.Addr().String())
@@ -77,11 +94,7 @@ func oneRound(ln net.Listener) time.Duration {
 	}
 //logos:allow(slop::discarded_error)
 	defer cli.Close()
-	srv, err := ln.Accept()
-	if err != nil {
-		fmt.Println("FAIL group-netpoll-setup: got", err, "want accept")
-		os.Exit(1)
-	}
+	srv := acceptPeer(ln, cli.LocalAddr().String())
 //logos:allow(slop::discarded_error)
 	defer srv.Close()
 	res := make(chan string, 1)
