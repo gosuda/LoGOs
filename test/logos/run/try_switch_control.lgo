@@ -3,6 +3,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"slices"
@@ -12,8 +13,13 @@ var ev []string
 
 func rec(s string) { ev = append(ev, s) }
 
+var errBad = errors.New("bad")
+
 func load(tag string, v int) (int, error) {
 	rec("load:" + tag)
+	if tag == "bad" {
+		return 0, errBad
+	}
 	return v, nil
 }
 
@@ -124,6 +130,21 @@ func breakInHost() (int, error) {
 	return 0, nil
 }
 
+func fallthroughBody(tag string) (int, error) {
+	r := 0
+	switch v := 1; v {
+	case 1:
+		rec("c1")
+		x := switch n := load(tag, 7)?; n { default => n + 2 }
+		rec("x")
+		r = x
+		fallthrough
+	case 2:
+		rec("c2")
+	}
+	return r, nil
+}
+
 type cell struct {
 	name string
 	run  func() (string, error)
@@ -136,6 +157,16 @@ func show[T any](f func() (T, error)) func() (string, error) {
 		r, err := f()
 		if err != nil {
 			return "", err
+		}
+		return fmt.Sprint(r), nil
+	}
+}
+
+func caught(f func() (int, error)) func() (string, error) {
+	return func() (string, error) {
+		r, err := f()
+		if err != nil {
+			return "err " + err.Error(), nil
 		}
 		return fmt.Sprint(r), nil
 	}
@@ -154,6 +185,8 @@ func main() {
 		{"continue-with-cond", show(continueWithCond), []string{"load:c", "body", "load:c", "load:c", "body", "load:c"}, "2"},
 		{"fallthrough-host", show(fallthroughHost), []string{"load:s", "c1", "c2"}, "0"},
 		{"break-in-host", show(breakInHost), []string{"load:s", "a", "after"}, "0"},
+		{"fallthrough-body", caught(func() (int, error) { return fallthroughBody("s") }), []string{"c1", "load:s", "x", "c2"}, "9"},
+		{"fallthrough-body-fail", caught(func() (int, error) { return fallthroughBody("bad") }), []string{"c1", "load:bad"}, "err bad"},
 	}
 	failed := false
 	for _, c := range cells {

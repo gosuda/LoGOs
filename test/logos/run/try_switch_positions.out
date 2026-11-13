@@ -16,3 +16,8 @@ ok complit-comment
 ok slice-lines
 ok call-trailing
 ok return-lines
+ok receiver
+ok function
+ok selector
+ok unary
+ok first-case

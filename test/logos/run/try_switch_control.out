@@ -9,3 +9,5 @@ ok break-outer
 ok continue-with-cond
 ok fallthrough-host
 ok break-in-host
+ok fallthrough-body
+ok fallthrough-body-fail

@@ -315,6 +315,65 @@ func returnLinesNested(v int) (int, error) {
 		nil
 }
 
+func fa(x int) int {
+	rec("fa")
+	return x + 70
+}
+
+func fb(x int) int {
+	rec("fb")
+	return x + 1
+}
+
+func recvNested(v int) (int, error) {
+	r := add3(g("a", 1), (switch n := load("s", v)?; n { case 7 => box{n: 70}; default => box{n: 1} }).add(g("x", 2)), 0)
+	return r, nil
+}
+
+func recvRef(v int) (int, error) {
+	x := g("a", 1)
+	b := switch n := load("s", v)?; n { case 7 => box{n: 70}; default => box{n: 1} }
+	y := g("x", 2)
+	return add3(x, b.add(y), 0), nil
+}
+
+func funcNested(v int) (int, error) {
+	r := g("a", 1) + (switch n := load("s", v)?; n { case 7 => fa; default => fb })(g("x", 3))
+	return r, nil
+}
+
+func funcRef(v int) (int, error) {
+	x := g("a", 1)
+	f := switch n := load("s", v)?; n { case 7 => fa; default => fb }
+	y := g("x", 3)
+	return x + f(y), nil
+}
+
+func selNested(v int) (int, error) {
+	r := g("a", 1) + (switch n := load("s", v)?; n { case 7 => box{n: 70}; default => box{n: 1} }).n + g("b", 2)
+	return r, nil
+}
+
+func unaryNested(v int) (int, error) {
+	r := g("a", 1) - -(switch n := load("s", v)?; n { case 7 => 70; default => 1 }) + g("b", 2)
+	return r, nil
+}
+
+func caseNested(v int) (int, error) {
+	r := switch g("t", 7) { case switch n := load("s", v)?; n { case 7 => 7; default => 1 } => 10; default => 20 }
+	return r, nil
+}
+
+func caseRef(v int) (int, error) {
+	t := g("t", 7)
+	k := switch n := load("s", v)?; n { case 7 => 7; default => 1 }
+	r := 20
+	if t == k {
+		r = 10
+	}
+	return r, nil
+}
+
 type cell struct {
 	name   string
 	nested func(int) (int, error)
@@ -360,6 +419,11 @@ func cells() []cell {
 		{"slice-lines", sliceLinesNested, argRef, [4]string{"73 [a load:s b]", "err load [a load:s]", "4 [a load:s b]", "err load [a load:s]"}},
 		{"call-trailing", callTrailingNested, argRef, [4]string{"73 [a load:s b]", "err load [a load:s]", "4 [a load:s b]", "err load [a load:s]"}},
 		{"return-lines", returnLinesNested, tupleRef, [4]string{"70 [load:s]", failS, "1 [load:s]", failS}},
+		{"receiver", recvNested, recvRef, [4]string{"73 [a load:s x add]", "err load [a load:s]", "4 [a load:s x add]", "err load [a load:s]"}},
+		{"function", funcNested, funcRef, [4]string{"74 [a load:s x fa]", "err load [a load:s]", "5 [a load:s x fb]", "err load [a load:s]"}},
+		{"selector", selNested, argRef, [4]string{"73 [a load:s b]", "err load [a load:s]", "4 [a load:s b]", "err load [a load:s]"}},
+		{"unary", unaryNested, argRef, [4]string{"73 [a load:s b]", "err load [a load:s]", "4 [a load:s b]", "err load [a load:s]"}},
+		{"first-case", caseNested, caseRef, [4]string{"10 [t load:s]", "err load [t load:s]", "20 [t load:s]", "err load [t load:s]"}},
 	}
 }
 
