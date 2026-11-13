@@ -72,6 +72,18 @@ func (s Safe) Secret() int { return s.hidden }
 
 func (s *Safe) SetSecret(v int) { s.hidden = v }
 
+type Leveled interface {
+	Level int
+}
+
+type VBox struct : Leveled {
+	lv *int
+}
+
+func (b VBox) Level() int { return *b.lv }
+
+func (b VBox) SetLevel(v int) { *b.lv = v }
+
 type Both interface {
 	const V int
 	V int
@@ -214,6 +226,8 @@ func checkPropertyAccessorReceivers() {
 	check("unexported-getter-on-value", hasMethod(safeValue, "Logos_GetSecret"), true, true)
 	check("unexported-setter-on-pointer", hasMethod(safePointer, "Logos_SetSecret"), true, true)
 	check("unexported-hides-setter-on-value", !hasMethod(safeValue, "Logos_SetSecret"), false, false)
+	vboxValue := reflect.TypeFor[VBox]()
+	check("value-setter-on-value", hasMethod(vboxValue, "Logos_SetLevel"), hasMethod(vboxValue, "Logos_SetLevel"), true)
 	check("pointer-adds-only-setter", monsterPointer.NumMethod() == monsterValue.NumMethod()+1, monsterPointer.NumMethod(), monsterValue.NumMethod()+1)
 	check("value-extends-plain-by-accessors", monsterValue.NumMethod() == reflect.TypeOf(Plain{}).NumMethod()+2, monsterValue.NumMethod(), reflect.TypeOf(Plain{}).NumMethod()+2)
 }

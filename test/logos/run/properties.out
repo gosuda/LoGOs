@@ -7,6 +7,7 @@ ok const-getter-on-pointer
 ok unexported-getter-on-value
 ok unexported-setter-on-pointer
 ok unexported-hides-setter-on-value
+ok value-setter-on-value
 ok pointer-adds-only-setter
 ok value-extends-plain-by-accessors
 ok merged-const-getter-on-value
