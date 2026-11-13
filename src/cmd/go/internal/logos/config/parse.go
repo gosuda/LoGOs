@@ -537,30 +537,38 @@ func (p *parser) parseString() (string, error) {
 			b.WriteByte('\\')
 			p.next()
 		case 'u', 'U':
-			n := 4
-			if e == 'U' {
-				n = 8
+			r, err := p.unicodeEscape(escOff, e)
+			if err != nil {
+				return "", err
 			}
-			p.next()
-			v := 0
-			for range n {
-				h := p.peek()
-				if !isHex(h) {
-					return "", p.errorf(escOff, "invalid escape %q", rune(e))
-				}
-				v = v*16 + hexVal(h)
-				p.next()
-			}
-			if !utf8.ValidRune(rune(v)) {
-				return "", p.errorf(escOff, "invalid escape %q", rune(e))
-			}
-			b.WriteRune(rune(v))
+			b.WriteRune(r)
 		case 0:
 			return "", p.errorf(start, "unterminated string")
 		default:
 			return "", p.errorf(escOff, "invalid escape %q", rune(e))
 		}
 	}
+}
+
+func (p *parser) unicodeEscape(escOff int, e byte) (rune, error) {
+	n := 4
+	if e == 'U' {
+		n = 8
+	}
+	p.next()
+	v := 0
+	for range n {
+		h := p.peek()
+		if !isHex(h) {
+			return 0, p.errorf(escOff, "invalid escape %q", rune(e))
+		}
+		v = v*16 + hexVal(h)
+		p.next()
+	}
+	if !utf8.ValidRune(rune(v)) {
+		return 0, p.errorf(escOff, "invalid escape %q", rune(e))
+	}
+	return rune(v), nil
 }
 
 func (p *parser) parseLiteral() (string, error) {
