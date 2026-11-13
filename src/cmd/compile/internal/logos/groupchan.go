@@ -184,8 +184,112 @@ func (fc *funcLower) groupChanDispatch(s syntax.Stmt, top groupFrame) ([]syntax.
 		if fc.fl.groupStmtHasRecv(s) {
 			return fc.groupHoistSwitch(s, top), true
 		}
+	case *syntax.SelectStmt:
+		if fc.fl.groupSelectHasRecv(s) {
+			return fc.groupHoistSelect(s, top), true
+		}
 	}
 	return nil, false
+}
+
+func (fc *funcLower) groupHoistSelect(s *syntax.SelectStmt, top groupFrame) []syntax.Stmt {
+	fl := fc.fl
+	start := fc.groupStmtStart(s)
+	mark := fc.hoistSubMark()
+	h := fc.newGroupHoist(top, start)
+	h.atStatement(s)
+	for _, clause := range s.Body {
+		scanForLiterals(fl, clause.Comm)
+	}
+	h.selectEntries(s)
+	h.before(mark, start)
+	for _, clause := range s.Body {
+		clause.Body = fc.lowerList(clause.Body)
+	}
+	fc.groupAugmentSelect(s)
+	return append(h.native, s)
+}
+
+type groupSelectEntry struct {
+	clause *syntax.CommClause
+	comm   *syntax.AssignStmt
+	op     *syntax.Operation
+	lhs    []syntax.Expr
+	chSpan span
+	vals   int
+}
+
+func (h *groupHoist) selectEntries(s *syntax.SelectStmt) {
+	var slots []*syntax.Expr
+	var entries []groupSelectEntry
+	for _, clause := range s.Body {
+		comm := clause.Comm
+		if comm == nil {
+			continue
+		}
+		switch comm := comm.(type) {
+		case *syntax.SendStmt:
+			slots = append(slots, &comm.Chan, &comm.Value)
+		case *syntax.ExprStmt:
+			if op, ok := groupRecvOp(comm.X); ok {
+				slots = append(slots, &op.X)
+			}
+		case *syntax.AssignStmt:
+			op, ok := h.recvComm(comm)
+			if !ok {
+				break
+			}
+			lhs := syntax.UnpackListExpr(comm.Lhs)
+			if comm.Op != syntax.Def && h.fc.fl.groupNodesHaveRecv(comm.Lhs) {
+				entries = append(entries, groupSelectEntry{clause: clause, comm: comm, op: op, lhs: lhs, chSpan: h.span(op.X), vals: len(lhs)})
+			}
+			slots = append(slots, &op.X)
+		}
+	}
+	h.slots(slots)
+	h.unwrapSendValues(s)
+	h.splitRecvComms(entries)
+}
+
+func (h *groupHoist) unwrapSendValues(s *syntax.SelectStmt) {
+	for _, clause := range s.Body {
+		send, ok := clause.Comm.(*syntax.SendStmt)
+		if !ok {
+			continue
+		}
+		if list, ok := send.Value.(*syntax.ListExpr); ok && len(list.ElemList) == 1 {
+			send.Value = list.ElemList[0]
+		}
+	}
+}
+
+func (h *groupHoist) recvComm(comm *syntax.AssignStmt) (*syntax.Operation, bool) {
+	rhs := syntax.UnpackListExpr(comm.Rhs)
+	if len(rhs) != 1 {
+		return nil, false
+	}
+	return groupRecvOp(rhs[0])
+}
+
+func (h *groupHoist) splitRecvComms(entries []groupSelectEntry) {
+	for _, e := range entries {
+		pos := e.comm.Pos()
+		chText := h.fc.fl.textOf(e.chSpan)
+		elemT := groupChanElem(h.fc.fl.pkg.info.TypeOf(e.op.X))
+		tmp := h.fc.groupTempName("r")
+		native, texts, c := h.fc.groupElemTemp(pos, tmp, groupChanOperand{expr: e.op.X, text: chText, elem: elemT})
+		h.add(native, texts...)
+		e.op.X = c.expr
+		names := []syntax.Expr{nameOf(pos, tmp)}
+		if e.vals == 2 {
+			okName := h.fc.groupTempName("o")
+			h.add([]syntax.Stmt{typedVarDecl(pos, nameOf(pos, okName), nameOf(pos, "bool"))}, gen("var "+okName+" bool"))
+			names = append(names, nameOf(pos, okName))
+		}
+		e.comm.Lhs = listOf(pos, names)
+		pro := assignOf(pos, e.lhs, names)
+		e.clause.Body = append([]syntax.Stmt{pro}, e.clause.Body...)
+	}
 }
 
 func (fc *funcLower) groupChanFor(s *syntax.ForStmt, top groupFrame) ([]syntax.Stmt, bool) {

@@ -416,7 +416,7 @@ func segmentSwitchRecv(ctx context.Context, xs []int, in chan int) ([]int, error
 func segmentSelectOperand(ctx context.Context, xs []int, in, out chan int) ([]int, error) {
 	return xs.group(ctx, limit = 2).map(x => {
 		select {
-		case out <- <-in: // ERROR "unbounded_channel_op"
+		case out <- <-in:
 		}
 		return x
 	})
@@ -426,7 +426,7 @@ func groupChildSelectOperand(ctx context.Context, in, out chan int) error {
 	go group (ctx) {
 		go {
 			select {
-			case out <- <-in: // ERROR "unbounded_channel_op"
+			case out <- <-in:
 			}
 		}
 	}

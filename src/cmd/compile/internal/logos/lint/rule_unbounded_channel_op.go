@@ -337,11 +337,10 @@ func (u *chanUnit) selectStmt(s *syntax.SelectStmt) {
 	for _, cc := range s.Body {
 		u.free = covered
 		operands := u.comm(cc.Comm)
-		u.free = false
+		u.free = outer
 		for _, x := range operands {
 			u.walk(x)
 		}
-		u.free = outer
 		for _, st := range cc.Body {
 			u.walk(st)
 		}

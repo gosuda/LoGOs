@@ -507,6 +507,15 @@ func (fl *fileLower) groupCasesHaveRecv(s *syntax.SwitchStmt) bool {
 	return false
 }
 
+func (fl *fileLower) groupSelectHasRecv(s *syntax.SelectStmt) bool {
+	for _, c := range s.Body {
+		if c.Comm != nil && fl.groupNodesHaveRecv(c.Comm) {
+			return true
+		}
+	}
+	return false
+}
+
 func (fl *fileLower) groupTokenEnd(off int) int {
 	end := off
 	scanSegment(fl.src, off, len(fl.src), func(t tok) bool {
