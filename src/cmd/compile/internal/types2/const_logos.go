@@ -1229,7 +1229,7 @@ func (check *Checker) logosConstArgs(call *syntax.CallExpr, sigParams *Tuple, ar
 			a.invalidate()
 			continue
 		}
-		if logosAsConstView(pt) != nil || isTypeParam(pt) {
+		if logosAsConstView(pt) != nil {
 			a.typ_ = c.Elem
 			check.updateExprType(a.expr, c.Elem, false)
 			continue
