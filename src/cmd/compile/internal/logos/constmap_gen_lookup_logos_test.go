@@ -315,3 +315,50 @@ func TestConstmapInitNoHeap(t *testing.T) {
 		t.Fatalf("package init of a 20000-key const map added %d heap bytes (big %d, control %d); the table must sit in read-only data and init must add no heap bytes", big-ctl, big, ctl)
 	}
 }
+
+func TestConstmapThousandKeyInitNoHeap(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds loGo/s programs")
+	}
+	root := t.TempDir()
+	dirs := []string{filepath.Join(root, "ctl"), filepath.Join(root, "map")}
+	source := strings.Replace(constmapHeapBigSrc(1000), `_ = big["k00031"]`, `if (big[fmt.Sprintf("k%05d", 31)] ?? -1) != 31 { panic("lookup") }`, 1)
+	supportOnly := strings.Replace(constmapHeapCtlSrc(), "\t\"runtime\"\n", "\t_ \"logos/rt\"\n\t\"runtime\"\n", 1)
+	sources := []string{supportOnly, source}
+	heaps := make([]uint64, len(dirs))
+	for i, dir := range dirs {
+		constmapWriteModule(t, dir, map[string]string{
+			"go.mod":   "module heapcheck\n\ngo 1.27\n",
+			"main.lgo": sources[i],
+		})
+		heaps[i] = ^uint64(0)
+		for range 5 {
+			out := constmapBuildRun(t, dir, "heap.exe", []string{"GOGC=off", "GOMAXPROCS=1"})
+			n, err := strconv.ParseUint(strings.TrimSpace(out), 10, 64)
+			if err != nil {
+				t.Fatalf("heap program printed %q: %v", out, err)
+			}
+			heaps[i] = min(heaps[i], n)
+		}
+	}
+	if heaps[1] != heaps[0] {
+		t.Fatalf("1000-key map init heap = %d, control that imports only the support package = %d; want exactly zero added bytes", heaps[1], heaps[0])
+	}
+	out, err := testenv.Command(t, testenv.GoToolPath(t), "tool", "nm", filepath.Join(dirs[1], "heap.exe")).CombinedOutput()
+	if err != nil {
+		t.Fatalf("go tool nm: %v\n%s", err, out)
+	}
+	found := false
+	for line := range strings.SplitSeq(string(out), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 3 && strings.HasPrefix(fields[2], "main.") && strings.HasSuffix(fields[2], "_tab") {
+			found = true
+			if fields[1] != "R" && fields[1] != "r" {
+				t.Errorf("constant map table is not read-only: %s", line)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("no constant map table symbol in go tool nm output:\n%s", out)
+	}
+}
