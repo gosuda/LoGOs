@@ -62,12 +62,14 @@ type fieldCode struct {
 }
 
 type marshalGen struct {
-	js         *jsonStruct
-	firstFixed int
-	runtimeSep bool
-	recv       string
-	edges      map[*jsonField]jsonEdge
-	calls      map[*jsonField]string
+	js          *jsonStruct
+	firstFixed  int
+	runtimeSep  bool
+	recv        string
+	edges       map[*jsonField]jsonEdge
+	calls       map[*jsonField]string
+	errorPrefix []string
+	snapshot    bool
 }
 
 func (f *jsonField) optional() bool {
@@ -234,6 +236,10 @@ func (g *marshalGen) pointerCode(f *jsonField) fieldCode {
 	if chk := c.checkStmt("*" + x); chk != "" {
 		out.pre = ifLines(x+" != nil", []string{chk})
 	}
+	if g.snapshot {
+		capture := ifLines(x+" != nil", []string{"_logos_value := *" + x, x + " = &_logos_value"})
+		out.pre = append(capture, out.pre...)
+	}
 	if f.optional() {
 		out.size = p.inlineSize()
 		out.emit = p.emit
@@ -249,9 +255,12 @@ func (g *marshalGen) sliceCode(f *jsonField) fieldCode {
 	x := f.local()
 	c := f.elemCodec()
 	out := fieldCode{pins: []string{x + " := " + g.recv + "." + f.goName}}
+	if g.snapshot {
+		out.pre = []string{x + " = append(" + x + "[:0:0], " + x + "...)"}
+	}
 	if chk := c.checkStmt("_logos_x"); chk != "" {
 		loop := append([]string{"for _, _logos_x := range " + x + " {"}, indentLines([]string{chk})...)
-		out.pre = append(loop, "}")
+		out.pre = append(out.pre, append(loop, "}")...)
 	}
 	n := g.nullParts(f)
 	out.size = ifElseLines(x+" == nil", n.inlineSize(), g.sliceSize(f, c, x))
@@ -1211,9 +1220,13 @@ func (g *marshalGen) edgeCode(f *jsonField, e jsonEdge) fieldCode {
 	b := fmt.Sprintf("_logos_b%d", f.pos)
 	ec := fmt.Sprintf("_logos_e%d", f.pos)
 	stmt := []string{fmt.Sprintf("%s, %s := %s", b, ec, call)}
-	check := ifLines(ec+" != nil", []string{
-		fmt.Sprintf("return nil, _logos_s.RebaseDepthError(%s, int64(len(_logos_buf) + %d))", ec, g.litLen(f, "")),
-	})
+	errorBody := []string{"var _logos_buf []byte"}
+	if g.runtimeSep && len(g.errorPrefix) != 0 {
+		errorBody = append(errorBody, "_logos_sep := byte('{')")
+	}
+	errorBody = append(errorBody, g.errorPrefix...)
+	errorBody = append(errorBody, fmt.Sprintf("return nil, _logos_s.RebaseDepthError(%s, int64(len(_logos_buf) + %d))", ec, g.litLen(f, "")))
+	check := ifLines(ec+" != nil", errorBody)
 	var c fieldCode
 	pins := []string{local + " := " + g.recv + "." + f.goName}
 	guard, ok := g.edgePresence(f, e, local)
@@ -1317,20 +1330,31 @@ func (def *jsonHelperDef) emitInto(b *strings.Builder) {
 }
 
 func sequentialJSONBody(g *marshalGen, prelude []string) []string {
-	var pins, fields []string
+	g.snapshot = true
+	var pins, pre, size, emit []string
+	fixed := 1
 	for _, f := range g.js.fields {
+		g.errorPrefix = emit
 		c := g.code(f)
 		pins = append(pins, c.pins...)
-		fields = append(fields, c.pre...)
-		fields = append(fields, c.emit...)
+		pre = append(pre, c.pre...)
+		size = append(size, c.size...)
+		emit = append(emit, c.emit...)
+		fixed += c.fixed
 	}
 	body := pins
 	body = append(body, prelude...)
-	body = append(body, "var _logos_buf []byte")
+	body = append(body, pre...)
+	body = append(body, fmt.Sprintf("_logos_n := %d", fixed))
+	body = append(body, size...)
+	if g.firstFixed < 0 {
+		body = append(body, ifLines("_logos_n == 1", []string{"_logos_n = 2"})...)
+	}
+	body = append(body, "_logos_buf := make([]byte, 0, _logos_n)")
 	if g.runtimeSep {
 		body = append(body, "_logos_sep := byte('{')")
 	}
-	body = append(body, fields...)
+	body = append(body, emit...)
 	if g.firstFixed < 0 {
 		body = append(body, ifLines("_logos_sep == '{'", []string{"_logos_buf = append(_logos_buf, '{')"})...)
 	}
