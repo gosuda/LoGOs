@@ -29,6 +29,14 @@ cd ../reject
 ! logos build ./inference_reverse
 ! logos build ./equality
 ! logos build ./equality_elements
+! logos build ./tagged_forward
+stderr 'cannot use t \(variable of type \(int, int\)\) as struct\{T_0 int "json:\\"a\\""; T_1 int\} value'
+! logos build ./tagged_reverse
+stderr 'cannot use s \(variable of type struct\{T_0 int "json:\\"a\\""; T_1 int\}\) as \(int, int\) value'
+! logos build ./embedded_forward
+stderr 'cannot use t \(variable of type \(T_0, int\)\) as struct\{T_0; T_1 int\} value'
+! logos build ./embedded_reverse
+stderr 'cannot use s \(variable of type struct\{T_0; T_1 int\}\) as \(T_0, int\) value'
 
 -- dep/go.mod --
 module example.com/tupledep
@@ -257,3 +265,33 @@ package equality_elements
 import "example.com/tupledep/p"
 var tuple (int, string)
 var _ = p.Make() == tuple
+-- reject/tagged_forward/main.lgo --
+package tagged_forward
+var t (int, int)
+var _ struct {
+	T_0 int `json:"a"`
+	T_1 int
+} = t
+-- reject/tagged_reverse/main.lgo --
+package tagged_reverse
+var s struct {
+	T_0 int `json:"a"`
+	T_1 int
+}
+var _ (int, int) = s
+-- reject/embedded_forward/main.lgo --
+package embedded_forward
+type T_0 int
+var t (T_0, int)
+var _ struct {
+	T_0
+	T_1 int
+} = t
+-- reject/embedded_reverse/main.lgo --
+package embedded_reverse
+type T_0 int
+var s struct {
+	T_0
+	T_1 int
+}
+var _ (T_0, int) = s
