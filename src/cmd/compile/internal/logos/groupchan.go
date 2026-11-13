@@ -217,6 +217,7 @@ type groupSelectEntry struct {
 	lhs    []syntax.Expr
 	chSpan span
 	vals   int
+	elem   types2.Type
 }
 
 func (h *groupHoist) selectEntries(s *syntax.SelectStmt) {
@@ -241,7 +242,7 @@ func (h *groupHoist) selectEntries(s *syntax.SelectStmt) {
 			}
 			lhs := syntax.UnpackListExpr(comm.Lhs)
 			if comm.Op != syntax.Def && h.fc.fl.groupNodesHaveRecv(comm.Lhs) {
-				entries = append(entries, groupSelectEntry{clause: clause, comm: comm, op: op, lhs: lhs, chSpan: h.span(op.X), vals: len(lhs)})
+				entries = append(entries, groupSelectEntry{clause: clause, comm: comm, op: op, lhs: lhs, chSpan: h.span(op.X), vals: len(lhs), elem: groupChanElem(h.fc.fl.pkg.info.TypeOf(op.X))})
 			}
 			slots = append(slots, &op.X)
 		}
@@ -273,13 +274,16 @@ func (h *groupHoist) recvComm(comm *syntax.AssignStmt) (*syntax.Operation, bool)
 
 func (h *groupHoist) splitRecvComms(entries []groupSelectEntry) {
 	for _, e := range entries {
+		fl := h.fc.fl
+		lhsSpan := span{start: h.span(e.lhs[0]).start, end: h.span(e.lhs[len(e.lhs)-1]).end}
 		pos := e.comm.Pos()
 		chText := h.fc.fl.textOf(e.chSpan)
-		elemT := groupChanElem(h.fc.fl.pkg.info.TypeOf(e.op.X))
+		elemT := e.elem
 		tmp := h.fc.groupTempName("r")
 		native, texts, c := h.fc.groupElemTemp(pos, tmp, groupChanOperand{expr: e.op.X, text: chText, elem: elemT})
 		h.add(native, texts...)
 		e.op.X = c.expr
+		fl.addT(e.chSpan.start, e.chSpan.end, c.text)
 		names := []syntax.Expr{nameOf(pos, tmp)}
 		if e.vals == 2 {
 			okName := h.fc.groupTempName("o")
@@ -288,7 +292,20 @@ func (h *groupHoist) splitRecvComms(entries []groupSelectEntry) {
 		}
 		e.comm.Lhs = listOf(pos, names)
 		pro := assignOf(pos, e.lhs, names)
-		e.clause.Body = append([]syntax.Stmt{pro}, e.clause.Body...)
+		target := h.fc.newGroupHoist(h.top, lhsSpan.start)
+		mark := h.fc.hoistSubMark()
+		target.assign(pro)
+		h.fc.hoistSubEmit(h.fc.hoistSubTake(mark))
+		var tempNames []string
+		for _, name := range names {
+			tempNames = append(tempNames, name.(*syntax.Name).Value)
+		}
+		list := strings.Join(tempNames, ", ")
+		lhsText := fl.moveRegion(lhsSpan, list)
+		bodyStart := fl.off(e.clause.Colon) + 1
+		fl.addT(bodyStart, bodyStart, cat(gen("\n"), target.render(), gen(lhsText+" = "+list+";\n")))
+		prefix := append(target.native, pro)
+		e.clause.Body = append(prefix, e.clause.Body...)
 	}
 }
 
