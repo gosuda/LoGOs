@@ -108,6 +108,7 @@ func capIsTestFile(name string) bool {
 }
 
 func capFileImports(file string) []string {
+	fsys.Trace("capRead", file)
 	f, err := fsys.Open(file)
 	if err != nil {
 		return nil
