@@ -119,11 +119,11 @@ func TestLogosStackSiteStartsAtLearnedSize(t *testing.T) {
 	runtime.GC()
 	debug.SetGCPercent(-1)
 	global := runtime.LogosGlobalStartSize()
-	if global == logosStackTarget {
-		t.Skip("global starting size equals the learned size; the other statement cannot tell them apart")
-	}
 	if got := runtime.LogosStartSize(^uintptr(0)); got != global {
 		t.Fatalf("LogosStartSize without history = %d, want the global size %d", got, global)
+	}
+	if global == logosStackTarget {
+		t.Skip("global starting size equals the learned size; the other statement cannot tell them apart")
 	}
 	starts, other := logosStackStarts(logosStackSpawnOther, 8)
 	if other == pc {
