@@ -87,3 +87,101 @@ func TestInterpLowerGrowthBound(t *testing.T) {
 func TestLambdaLowerGrowthBound(t *testing.T) {
 	assertGrowthBound(t, "lambdagrowth.lgo", lambdaGrowthSrc, func(out string) bool { return !strings.Contains(out, "=>") })
 }
+
+func TestChainMultiCallOneLoopShape(t *testing.T) {
+	src := "package main\n\nfunc main() {\nprobeItems := []int{3, 1, 4}\nprobeOut := probeItems.filter(probeX => probeX > 1).map(probeX => probeX * 2).take(2)\n_ = probeOut\n}\n"
+	out := lowerSnippetSrc(t, "chainshape.lgo", src)
+	before, _, ok := strings.CutLast(out, "_rcv := ")
+	if !ok {
+		t.Fatalf("lowered chain has no receiver binding:\n%s", out)
+	}
+	bi := len(before)
+	_, tail, ok := strings.CutLast(before, "_logos_ch")
+	if !ok {
+		t.Fatalf("receiver binding lacks a chain prefix:\n%s", out)
+	}
+	p := "_logos_ch" + tail
+	if c := strings.Count(out, p+"_rcv := "); c != 1 {
+		t.Fatalf("chain receiver is bound %d times, want exactly one:\n%s", c, out)
+	}
+	if c := strings.Count(out, "_e := range "); c != 1 {
+		t.Fatalf("lowered chain has %d iteration loops, want exactly one:\n%s", c, out)
+	}
+	loop := p + "_e := range " + p + "_rcv {"
+	if c := strings.Count(out, loop); c != 1 {
+		t.Fatalf("the single iteration loop must range the bound receiver:\n%s", out)
+	}
+	if ri := strings.Index(out, loop); ri < bi {
+		t.Fatalf("receiver binding must precede the iteration loop:\n%s", out)
+	}
+	for _, want := range []string{
+		p + "_tn2 := ",
+		p + "_tc2 := 0",
+		"if " + p + "_tc2 >= " + p + "_tn2 { break }",
+		"if !" + p + "_f0(",
+		p + "_m1 := ",
+		p + "_tc2++",
+	} {
+		if c := strings.Count(out, want); c != 1 {
+			t.Fatalf("fused stage %q appears %d times, want exactly once:\n%s", want, c, out)
+		}
+	}
+}
+
+func TestInterpOperandLocalBindingShape(t *testing.T) {
+	src := "package main\nimport \"fmt\"\ntype ProbeShout struct{}\nfunc (ProbeShout) String() string { return \"shout\" }\nfunc probeCall(probeX int) int { return probeX + 1 }\nfunc main() {\nvar probeErr error\nvar probeStr fmt.Stringer = ProbeShout{}\nout := $\"x={probeCall(7)} e={probeErr} s={probeStr}\"\n_ = out\n_ = probeErr\n_ = probeStr\n}\n"
+	out := lowerSnippetSrc(t, "interpshape.lgo", src)
+	if c := strings.Count(out, "probeCall(7)"); c != 1 {
+		t.Fatalf("operand probeCall(7) occurs %d times, want one binding site:\n%s", c, out)
+	}
+	binds := []string{"_logos_v0 := probeCall(7)", "_logos_v1 := probeErr", "_logos_v2 := probeStr"}
+	last := -1
+	for _, bind := range binds {
+		i := strings.Index(out, bind)
+		if i < 0 || strings.Count(out, bind) != 1 {
+			t.Fatalf("operand binding %q must occur exactly once:\n%s", bind, out)
+		}
+		if i <= last {
+			t.Fatalf("operand bindings are not left-to-right at %q:\n%s", bind, out)
+		}
+		last = i
+	}
+	if strings.Contains(out, "_logos_s0") {
+		t.Fatalf("plain operand must not get a conversion binding:\n%s", out)
+	}
+	mi := strings.Index(out, "_logos_b := make([]byte, 0, ")
+	if mi < 0 {
+		t.Fatalf("lowered interpolation has no sizing statement:\n%s", out)
+	}
+	convs := []struct{ conv, after string }{
+		{"_logos_s1 := _logos_rt.InterpError(_logos_v1, _logos_fmt.Sprint)", "_logos_v1 := probeErr"},
+		{"_logos_s2 := _logos_rt.InterpStringer(_logos_v2, _logos_fmt.Sprint)", "_logos_v2 := probeStr"},
+	}
+	for _, cv := range convs {
+		ci := strings.Index(out, cv.conv)
+		ai := strings.Index(out, cv.after)
+		if ci < 0 || strings.Count(out, cv.conv) != 1 || ai < 0 {
+			t.Fatalf("conversion binding %q must occur exactly once after its operand binding:\n%s", cv.conv, out)
+		}
+		if ci < ai {
+			t.Fatalf("conversion binding %q must follow its operand binding:\n%s", cv.conv, out)
+		}
+		if ci > mi {
+			t.Fatalf("conversion binding %q must precede sizing:\n%s", cv.conv, out)
+		}
+	}
+	bound, _, _ := strings.Cut(out[mi:], "\n")
+	for _, want := range []string{"len(_logos_s1)", "len(_logos_s2)"} {
+		if !strings.Contains(bound, want) {
+			t.Fatalf("sizing bound %q must use converted binding %q:\n%s", bound, want, out)
+		}
+	}
+	for _, want := range []string{
+		"_logos_b = append(_logos_b, _logos_s1...)",
+		"_logos_b = append(_logos_b, _logos_s2...)",
+	} {
+		if c := strings.Count(out, want); c != 1 {
+			t.Fatalf("append must use converted binding %q, got %d occurrences:\n%s", want, c, out)
+		}
+	}
+}
