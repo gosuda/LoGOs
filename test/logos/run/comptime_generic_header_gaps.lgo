@@ -81,6 +81,14 @@ func LineCond[T any]() string {
 	return "flat"
 }
 
+func BlockCond[T any]() string {
+	const if comptime.HasPointers[*T]( /* first
+		second */ ) {
+		return "ptr"
+	}
+	return "flat"
+}
+
 func LineAnd[T any]() string {
 	const if comptime.HasPointers[*T]() && // c
 		comptime.HasPointers[Pair]() {
@@ -144,6 +152,7 @@ func main() {
 	check("line-comments-inside-the-list", fmt.Sprint(Lines[Pair, int]()), "[X Y]")
 	check("dropped-with-comments", fmt.Sprint(dropped[Pair]()), "[X Y]")
 	check("line-comment-in-a-folded-condition", LineCond[Pair](), "ptr")
+	check("multiline-block-comment-in-a-folded-condition", BlockCond[Pair](), "ptr")
 	check("line-comment-between-folded-operands", LineAnd[Sized](), "both")
 	check("line-comment-in-a-folded-layout", fmt.Sprint(LineSize()), "5")
 	check("nested-concrete-type-arguments", NestedConcrete[Pair](), "int string uint8 main.Pair *main.Pair []int [4]int map[string]int chan int func(int) string struct { X int } time.Duration main.List[int]")

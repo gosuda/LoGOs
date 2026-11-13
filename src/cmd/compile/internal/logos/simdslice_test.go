@@ -248,11 +248,12 @@ func TestSimdSliceSumNoStagingElsewhere(t *testing.T) {
 		result string
 		body   string
 		makes  int
+		kept   string
 	}{
-		{"fused", "xs []int32", "int32", "return xs.filter(x => x > 0).sum()", 0},
-		{"count", "xs []int32", "int", "return xs.count()", 0},
-		{"loop", "xs []int32", "int32", "var t int32\n\tfor _, v := range xs {\n\t\tt += v\n\t}\n\treturn t", 0},
-		{"explicit", "n int", "int", "out := make([]int32, n)\n\treturn len(out)", 1},
+		{"fused", "xs []int32", "int32", "return xs.filter(x => x > 0).sum()", 0, ""},
+		{"count", "xs []int32", "int", "return xs.count()", 0, ""},
+		{"loop", "xs []int32", "int32", "var t int32\n\tfor _, v := range xs {\n\t\tt += v\n\t}\n\treturn t", 0, ""},
+		{"explicit", "n int", "int", "out := make([]int32, n)\n\treturn len(out)", 1, "make([]int32, n)"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			src := "package main\n\ntype f32 = float32\n\nfunc f(" + c.params + ") " + c.result + " {\n\t" + c.body + "\n}\n\nfunc trig(xs []int32) int {\n\treturn xs.count()\n}\n"
@@ -264,6 +265,9 @@ func TestSimdSliceSumNoStagingElsewhere(t *testing.T) {
 			}
 			if n := strings.Count(out, "make("); n != c.makes {
 				t.Errorf("%s: %d makes, want %d (only the source):\n%s", c.name, n, c.makes, out)
+			}
+			if !strings.Contains(out, c.kept) {
+				t.Errorf("%s: source make %q lost its exact length:\n%s", c.name, c.kept, out)
 			}
 		})
 	}

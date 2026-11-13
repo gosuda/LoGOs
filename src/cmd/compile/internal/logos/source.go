@@ -95,7 +95,7 @@ func keepComments(src []byte, from, to int, text string) string {
 		if rest, ok := strings.CutPrefix(body, "//"); ok {
 			body = "/*" + strings.ReplaceAll(rest, "*/", "* /") + "*/"
 		}
-		text += " " + body
+		text += " " + strings.ReplaceAll(body, "\n", " ")
 	}
 	return text
 }

@@ -5,6 +5,7 @@ ok brackets-inside-a-comment
 ok line-comments-inside-the-list
 ok dropped-with-comments
 ok line-comment-in-a-folded-condition
+ok multiline-block-comment-in-a-folded-condition
 ok line-comment-between-folded-operands
 ok line-comment-in-a-folded-layout
 ok nested-concrete-type-arguments
