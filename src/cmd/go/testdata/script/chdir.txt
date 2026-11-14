@@ -20,8 +20,11 @@ stdout 'custom[\\/]go.mod'
 stderr '^go: chdir ../nonexist: '
 
 cd $OLD/invalid
+# go test
 go test -C ../custom
+# go vet
 go vet -C ../custom
+# go fix
 go fix -C ../custom
 
 cd ../custom
