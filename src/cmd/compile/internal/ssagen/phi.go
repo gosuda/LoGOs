@@ -57,9 +57,10 @@ type phiState struct {
 	varnum map[ir.Node]int32 // variable numbering
 
 	// properties of the dominator tree
-	idom  []*ssa.Block // dominator parents
-	tree  []domBlock   // dominator child+sibling
-	level []int32      // level in dominator tree (0 = root or unreachable, 1 = children of root, ...)
+	idom              []*ssa.Block // dominator parents
+	tree              []domBlock   // dominator child+sibling
+	level             []int32      // level in dominator tree (0 = root or unreachable, 1 = children of root, ...)
+	minSuccessorLevel []int32
 
 	// scratch locations
 	priq   blockHeap    // priority queue of blocks, higher level (toward leaves) = higher priority
@@ -166,6 +167,7 @@ levels:
 			}
 		}
 	}
+	s.computeMinSuccessorLevels()
 
 	// Allocate scratch locations.
 	s.priq.level = s.level
@@ -198,6 +200,26 @@ levels:
 	}
 }
 
+func (s *phiState) computeMinSuccessorLevels() {
+	if len(s.f.Blocks) > 1<<31-1 {
+		s.s.Fatalf("too many blocks for phi dominator levels")
+	}
+	noSuccessorLevel := int32(len(s.f.Blocks))
+	s.minSuccessorLevel = make([]int32, s.f.NumBlocks())
+	for _, b := range s.f.Blocks {
+		minLevel := noSuccessorLevel
+		for _, e := range b.Succs {
+			minLevel = min(minLevel, s.level[e.Block().ID])
+		}
+		s.minSuccessorLevel[b.ID] = minLevel
+	}
+	for _, b := range s.f.Postorder() {
+		if p := s.idom[b.ID]; p != nil {
+			s.minSuccessorLevel[p.ID] = min(s.minSuccessorLevel[p.ID], s.minSuccessorLevel[b.ID])
+		}
+	}
+}
+
 func (s *phiState) insertVarPhis(n int, var_ ir.Node, defs []*ssa.Block, typ *types.Type) {
 	priq := &s.priq
 	q := s.q
@@ -224,6 +246,10 @@ func (s *phiState) insertVarPhis(n int, var_ ir.Node, defs []*ssa.Block, typ *ty
 		if debugPhi {
 			fmt.Printf("currentRoot %s\n", currentRoot)
 		}
+		currentRootLevel := s.level[currentRoot.ID]
+		if s.minSuccessorLevel[currentRoot.ID] > currentRootLevel {
+			continue
+		}
 		// Walk subtree below definition.
 		// Skip subtrees we've done in previous iterations.
 		// Find edges exiting tree dominated by definition (the dominance frontier).
@@ -240,7 +266,6 @@ func (s *phiState) insertVarPhis(n int, var_ ir.Node, defs []*ssa.Block, typ *ty
 				fmt.Printf("  processing %s\n", b)
 			}
 
-			currentRootLevel := s.level[currentRoot.ID]
 			for _, e := range b.Succs {
 				c := e.Block()
 				// TODO: if the variable is dead at c, skip it.
@@ -274,7 +299,7 @@ func (s *phiState) insertVarPhis(n int, var_ ir.Node, defs []*ssa.Block, typ *ty
 
 			// Visit children if they have not been visited yet.
 			for c := s.tree[b.ID].firstChild; c != nil; c = s.tree[c.ID].sibling {
-				if !queued.contains(c.ID) {
+				if s.minSuccessorLevel[c.ID] <= currentRootLevel && !queued.contains(c.ID) {
 					q = append(q, c)
 					queued.add(c.ID)
 				}
