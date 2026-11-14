@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// TODO: live at start of block instead?
-
 package ssa
 
 import (
@@ -11,14 +9,28 @@ import (
 	"cmd/compile/internal/types"
 	"cmd/internal/src"
 	"fmt"
+	"math/bits"
 )
+
+type stackLive struct {
+	ids   []ID
+	words [][]stackLiveWord
+}
+
+type stackLiveWord struct {
+	index int
+	bits  uint64
+}
+
+func (l stackLive) blockWords(bid ID) []stackLiveWord {
+	row := l.words[bid]
+	return row[:len(row):len(row)]
+}
 
 type stackAllocState struct {
 	f *Func
 
-	// live is the output of stackalloc.
-	// live[b.id] = live values at the end of block b.
-	live [][]ID
+	live stackLive
 
 	// The following slices are reused across multiple users
 	// of stackAllocState.
@@ -51,7 +63,7 @@ func putStackAllocState(s *stackAllocState) {
 	clear(s.names)
 	s.f.Cache.stackAllocState = s
 	s.f = nil
-	s.live = nil
+	s.live = stackLive{}
 	s.nArgSlot, s.nNotNeed, s.nNamedSlot, s.nReuse, s.nAuto, s.nSelfInterfere = 0, 0, 0, 0, 0, 0
 }
 
@@ -89,8 +101,7 @@ type stackUseBlock struct {
 
 // stackalloc allocates storage in the stack frame for
 // all Values that did not get a register.
-// Returns a map from block ID to the stack values live at the end of that block.
-func stackalloc(f *Func, spillLive [][]ID) [][]ID {
+func stackalloc(f *Func, spillLive [][]ID) stackLive {
 	if f.pass.debug > stackDebug {
 		fmt.Println("before stackalloc")
 		fmt.Println(f.String())
@@ -315,13 +326,26 @@ func (s *stackAllocState) stackalloc() {
 	}
 }
 
-// computeLive computes a map from block ID to a list of
-// stack-slot-needing value IDs live at the end of that block.
 func (s *stackAllocState) computeLive(spillLive [][]ID) {
+	s.collectLiveUses(spillLive)
+	s.initializeLiveSlots()
+	s.computeLiveWords()
 
-	// Because values using stack slots are few and far inbetween
-	// (compared to the set of all values), we use a path exploration
-	// algorithm to calculate liveness here.
+	if s.f.pass.debug > stackDebug {
+		for _, b := range s.f.Blocks {
+			var ids []ID
+			for _, chunk := range s.live.blockWords(b.ID) {
+				for word := chunk.bits; word != 0; {
+					ids = append(ids, s.live.ids[chunk.index*64+bits.TrailingZeros64(word)])
+					word &= word - 1
+				}
+			}
+			fmt.Printf("stacklive %s %v\n", b, ids)
+		}
+	}
+}
+
+func (s *stackAllocState) collectLiveUses(spillLive [][]ID) {
 	f := s.f
 	for _, b := range f.Blocks {
 		for _, spillvid := range spillLive[b.ID] {
@@ -337,7 +361,6 @@ func (s *stackAllocState) computeLive(spillLive [][]ID) {
 					useBlock = b.Preds[i].b
 					forceLiveout = true
 					if spill := val.spill; spill != nil {
-						//TODO: remove?  Subsumed by SpillUse?
 						s.values[spill.ID].addUseBlock(useBlock, true)
 					}
 				}
@@ -348,62 +371,126 @@ func (s *stackAllocState) computeLive(spillLive [][]ID) {
 			}
 		}
 	}
+}
 
-	s.live = make([][]ID, f.NumBlocks())
-	push := func(bid, vid ID) {
-		l := s.live[bid]
-		if l == nil || l[len(l)-1] != vid {
-			l = append(l, vid)
-			s.live[bid] = l
+func (s *stackAllocState) initializeLiveSlots() {
+	f := s.f
+	nslots := 0
+	for _, v := range s.values {
+		if v.needSlot {
+			nslots++
 		}
 	}
-	// TODO: If we can help along the interference graph by calculating livein sets,
-	// we can do so trivially by turning this sparse set into an array of arrays
-	// and checking the top for the current value instead of inclusion in the sparse set.
-	seen := f.newSparseSet(f.NumBlocks())
-	defer f.retSparseSet(seen)
-	// instead of pruning out duplicate blocks when we build the useblocks slices
-	// or when we add them to the queue, rely on the seen set to stop considering
-	// them. This is slightly faster than building the workqueues as sets
-	//
-	// However, this means that the queue can grow larger than the number of blocks,
-	// usually in very short functions. Returning a slice with values appended beyond the
-	// original allocation can corrupt the allocator state, so cap the queue and return
-	// the originally allocated slice regardless.
-	allocedBqueue := f.Cache.allocBlockSlice(f.NumBlocks())
-	defer f.Cache.freeBlockSlice(allocedBqueue)
-	bqueue := allocedBqueue[:0:f.NumBlocks()]
-
+	s.live = stackLive{
+		ids:   make([]ID, nslots),
+		words: make([][]stackLiveWord, f.NumBlocks()),
+	}
+	ordinal := 0
 	for vid, v := range s.values {
-		if !v.needSlot {
-			continue
+		if v.needSlot {
+			s.live.ids[ordinal] = ID(vid)
+			ordinal++
 		}
-		seen.clear()
-		bqueue = bqueue[:0]
-		for _, b := range v.useBlocks {
-			if b.liveout {
-				push(b.b.ID, ID(vid))
+	}
+}
+
+type stackLiveBlock struct {
+	defs    uint64
+	in      uint64
+	out     uint64
+	pending uint64
+}
+
+type stackLiveFlow struct {
+	blocks  []stackLiveBlock
+	touched []ID
+	queue   []*Block
+}
+
+func (flow *stackLiveFlow) touch(bid ID) {
+	block := &flow.blocks[bid]
+	if block.defs|block.in|block.out == 0 {
+		flow.touched = append(flow.touched, bid)
+	}
+}
+
+func (flow *stackLiveFlow) addInput(b *Block, mask uint64) {
+	block := &flow.blocks[b.ID]
+	fresh := mask &^ (block.defs | block.in)
+	if fresh == 0 {
+		return
+	}
+	flow.touch(b.ID)
+	block.in |= fresh
+	if block.pending == 0 {
+		flow.queue = append(flow.queue, b)
+	}
+	block.pending |= fresh
+}
+
+func (s *stackAllocState) seedLiveWord(flow *stackLiveFlow, ids []ID) {
+	for bit, vid := range ids {
+		bid := s.values[vid].defBlock
+		flow.touch(bid)
+		flow.blocks[bid].defs |= uint64(1) << uint(bit)
+	}
+	for bit, vid := range ids {
+		mask := uint64(1) << uint(bit)
+		for _, use := range s.values[vid].useBlocks {
+			if use.liveout {
+				flow.touch(use.b.ID)
+				flow.blocks[use.b.ID].out |= mask
 			}
-			bqueue = append(bqueue, b.b)
+			flow.addInput(use.b, mask)
 		}
-		for len(bqueue) > 0 {
-			work := bqueue[len(bqueue)-1]
-			bqueue = bqueue[:len(bqueue)-1]
-			if seen.contains(work.ID) || work.ID == v.defBlock {
+	}
+}
+
+func (flow *stackLiveFlow) propagate() {
+	for len(flow.queue) > 0 {
+		work := flow.queue[len(flow.queue)-1]
+		flow.queue = flow.queue[:len(flow.queue)-1]
+		delta := flow.blocks[work.ID].pending
+		flow.blocks[work.ID].pending = 0
+		for _, edge := range work.Preds {
+			block := &flow.blocks[edge.b.ID]
+			fresh := delta &^ block.out
+			if fresh == 0 {
 				continue
 			}
-			seen.add(work.ID)
-			for _, e := range work.Preds {
-				push(e.b.ID, ID(vid))
-				bqueue = append(bqueue, e.b)
-			}
+			flow.touch(edge.b.ID)
+			block.out |= fresh
+			flow.addInput(edge.b, fresh)
 		}
 	}
+}
 
-	if s.f.pass.debug > stackDebug {
-		for _, b := range s.f.Blocks {
-			fmt.Printf("stacklive %s %v\n", b, s.live[b.ID])
+func (s *stackAllocState) computeLiveWords() {
+	if len(s.live.ids) == 0 {
+		return
+	}
+	nblocks := s.f.NumBlocks()
+	queue := s.f.Cache.allocBlockSlice(nblocks)
+	defer s.f.Cache.freeBlockSlice(queue)
+	flow := stackLiveFlow{
+		blocks:  make([]stackLiveBlock, nblocks),
+		touched: make([]ID, 0, nblocks),
+		queue:   queue[:0:nblocks],
+	}
+	for start := 0; start < len(s.live.ids); start += 64 {
+		end := start + 64
+		if end > len(s.live.ids) {
+			end = len(s.live.ids)
 		}
+		s.seedLiveWord(&flow, s.live.ids[start:end])
+		flow.propagate()
+		for _, bid := range flow.touched {
+			if out := flow.blocks[bid].out; out != 0 {
+				s.live.words[bid] = append(s.live.words[bid], stackLiveWord{index: start / 64, bits: out})
+			}
+			flow.blocks[bid] = stackLiveBlock{}
+		}
+		flow.touched = flow.touched[:0]
 	}
 }
 
@@ -434,7 +521,12 @@ func (s *stackAllocState) buildInterferenceGraph() {
 		// Propagate liveness backwards to the start of the block.
 		// Two values interfere if one is defined while the other is live.
 		live.clear()
-		live.addAll(s.live[b.ID])
+		for _, chunk := range s.live.blockWords(b.ID) {
+			for word := chunk.bits; word != 0; {
+				live.add(s.live.ids[chunk.index*64+bits.TrailingZeros64(word)])
+				word &= word - 1
+			}
+		}
 		for i := len(b.Values) - 1; i >= 0; i-- {
 			v := b.Values[i]
 			if s.values[v.ID].needSlot {
