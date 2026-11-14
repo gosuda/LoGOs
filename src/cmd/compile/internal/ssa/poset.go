@@ -156,6 +156,7 @@ type poset struct {
 	roots   []uint32          // list of root nodes (forest)
 	noneq   map[uint32]bitset // non-equal relations
 	undo    []posetUndo       // undo chain
+	visited *sparseSet
 }
 
 func newPoset() *poset {
@@ -377,7 +378,24 @@ func (po *poset) removeroot(r uint32) {
 // a strict walk visits D,E,F.
 // If the visit ends, false is returned.
 func (po *poset) dfs(r uint32, strict bool, f func(i uint32) bool) bool {
-	closed := newBitset(int(po.lastidx + 1))
+	closed := po.visited
+	po.visited = nil
+	need := int(po.lastidx) + 1
+	if closed == nil || closed.cap() < need {
+		capacity := 64
+		if closed != nil {
+			capacity = closed.cap() * 2
+		}
+		for capacity < need {
+			capacity *= 2
+		}
+		closed = newSparseSet(capacity)
+	} else {
+		closed.clear()
+	}
+	defer func() {
+		po.visited = closed
+	}()
 	open := make([]uint32, 1, 64)
 	open[0] = r
 
@@ -395,8 +413,8 @@ func (po *poset) dfs(r uint32, strict bool, f func(i uint32) bool) bool {
 			// across non-strict paths are still visited at least once, so
 			// a non-strict path can never obscure a strict path to the
 			// same node.
-			if !closed.Test(i) {
-				closed.Set(i)
+			if !closed.contains(ID(i)) {
+				closed.add(ID(i))
 
 				l, r := po.children(i)
 				if l != 0 {
@@ -416,18 +434,18 @@ func (po *poset) dfs(r uint32, strict bool, f func(i uint32) bool) bool {
 			}
 		}
 		open = next
-		closed.Reset()
+		closed.clear()
 	}
 
 	for len(open) > 0 {
 		i := open[len(open)-1]
 		open = open[:len(open)-1]
 
-		if !closed.Test(i) {
+		if !closed.contains(ID(i)) {
 			if f(i) {
 				return true
 			}
-			closed.Set(i)
+			closed.add(ID(i))
 			l, r := po.children(i)
 			if l != 0 {
 				open = append(open, l.Target())
