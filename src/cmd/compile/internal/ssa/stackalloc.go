@@ -404,7 +404,34 @@ type stackLiveBlock struct {
 type stackLiveFlow struct {
 	blocks  []stackLiveBlock
 	touched []ID
-	queue   []*Block
+	queue   []ID
+	offsets []int
+	preds   []ID
+}
+
+func newStackLiveFlow(f *Func) stackLiveFlow {
+	nblocks := f.NumBlocks()
+	offsets := make([]int, nblocks+1)
+	for _, b := range f.Blocks {
+		offsets[b.ID+1] = len(b.Preds)
+	}
+	for i := 1; i < len(offsets); i++ {
+		offsets[i] += offsets[i-1]
+	}
+	ids := make([]ID, 2*nblocks+offsets[nblocks])
+	flow := stackLiveFlow{
+		blocks:  make([]stackLiveBlock, nblocks),
+		touched: ids[:0:nblocks],
+		queue:   ids[nblocks : nblocks : 2*nblocks],
+		offsets: offsets,
+		preds:   ids[2*nblocks:],
+	}
+	for _, b := range f.Blocks {
+		for i, edge := range b.Preds {
+			flow.preds[offsets[b.ID]+i] = edge.b.ID
+		}
+	}
+	return flow
 }
 
 func (flow *stackLiveFlow) touch(bid ID) {
@@ -414,16 +441,16 @@ func (flow *stackLiveFlow) touch(bid ID) {
 	}
 }
 
-func (flow *stackLiveFlow) addInput(b *Block, mask uint64) {
-	block := &flow.blocks[b.ID]
+func (flow *stackLiveFlow) addInput(bid ID, mask uint64) {
+	block := &flow.blocks[bid]
 	fresh := mask &^ (block.defs | block.in)
 	if fresh == 0 {
 		return
 	}
-	flow.touch(b.ID)
+	flow.touch(bid)
 	block.in |= fresh
 	if block.pending == 0 {
-		flow.queue = append(flow.queue, b)
+		flow.queue = append(flow.queue, bid)
 	}
 	block.pending |= fresh
 }
@@ -441,7 +468,7 @@ func (s *stackAllocState) seedLiveWord(flow *stackLiveFlow, ids []ID) {
 				flow.touch(use.b.ID)
 				flow.blocks[use.b.ID].out |= mask
 			}
-			flow.addInput(use.b, mask)
+			flow.addInput(use.b.ID, mask)
 		}
 	}
 }
@@ -450,17 +477,17 @@ func (flow *stackLiveFlow) propagate() {
 	for len(flow.queue) > 0 {
 		work := flow.queue[len(flow.queue)-1]
 		flow.queue = flow.queue[:len(flow.queue)-1]
-		delta := flow.blocks[work.ID].pending
-		flow.blocks[work.ID].pending = 0
-		for _, edge := range work.Preds {
-			block := &flow.blocks[edge.b.ID]
+		delta := flow.blocks[work].pending
+		flow.blocks[work].pending = 0
+		for _, bid := range flow.preds[flow.offsets[work]:flow.offsets[work+1]] {
+			block := &flow.blocks[bid]
 			fresh := delta &^ block.out
 			if fresh == 0 {
 				continue
 			}
-			flow.touch(edge.b.ID)
+			flow.touch(bid)
 			block.out |= fresh
-			flow.addInput(edge.b, fresh)
+			flow.addInput(bid, fresh)
 		}
 	}
 }
@@ -469,14 +496,7 @@ func (s *stackAllocState) computeLiveWords() {
 	if len(s.live.ids) == 0 {
 		return
 	}
-	nblocks := s.f.NumBlocks()
-	queue := s.f.Cache.allocBlockSlice(nblocks)
-	defer s.f.Cache.freeBlockSlice(queue)
-	flow := stackLiveFlow{
-		blocks:  make([]stackLiveBlock, nblocks),
-		touched: make([]ID, 0, nblocks),
-		queue:   queue[:0:nblocks],
-	}
+	flow := newStackLiveFlow(s.f)
 	for start := 0; start < len(s.live.ids); start += 64 {
 		end := start + 64
 		if end > len(s.live.ids) {

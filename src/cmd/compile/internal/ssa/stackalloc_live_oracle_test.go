@@ -16,6 +16,7 @@ func TestStackAllocLiveSetEquations(t *testing.T) {
 		"forcedSpillAtDefinition", "ordinarySameBlock", "phiSpillRegisterSource",
 		"disconnectedCyclesAndIsolated", "idGapsAndEmptyBlocks", "reusedMergePredecessor",
 		"requeueAfterPopWithDistinctBits",
+		"nonIDBlockOrder",
 		"denseSlots63", "denseSlots64", "denseSlots65",
 		"nonadjacentDenseWords",
 	} {
@@ -119,6 +120,13 @@ func TestStackAllocLiveSetEquations(t *testing.T) {
 				_ = dead
 				value(end, OpCopy, a)
 				block()
+			case "nonIDBlockOrder":
+				e, middle, end := block(), block(), block()
+				e.AddEdgeTo(middle)
+				middle.AddEdgeTo(end)
+				a := value(e, OpArg)
+				noSlot = append(noSlot, value(end, OpCopy, a))
+				f.Blocks[1], f.Blocks[2] = f.Blocks[2], f.Blocks[1]
 			case "reusedMergePredecessor":
 				e, j, k := block(), block(), block()
 				e.AddEdgeTo(j)
