@@ -916,6 +916,12 @@ func staticValue1(nn Node) Node {
 	if defn == nil {
 		return nil
 	}
+	if op := defn.Op(); op != OAS && op != OAS2 {
+		return nil
+	}
+	if Reassigned(n) {
+		return nil
+	}
 
 	var rhs Node
 FindRHS:
@@ -932,15 +938,9 @@ FindRHS:
 			}
 		}
 		base.FatalfAt(defn.Pos(), "%v missing from LHS of %v", n, defn)
-	default:
-		return nil
 	}
 	if rhs == nil {
 		base.FatalfAt(defn.Pos(), "RHS is nil: %v", defn)
-	}
-
-	if Reassigned(n) {
-		return nil
 	}
 
 	return rhs
