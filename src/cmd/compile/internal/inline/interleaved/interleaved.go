@@ -63,8 +63,8 @@ func DevirtualizeAndInlinePackage(pkg *ir.Package, profile *pgoir.Profile) {
 
 		s := &inlClosureState{bigCaller: bigCaller, profile: profile, fn: fn, callSites: make(map[*ir.ParenExpr]bool), useCounts: calleeUseCounts}
 		s.parenthesize()
+		s.initOracle()
 		inlState[fn] = s
-
 		// Do a first pass at counting call sites.
 		for i := range s.parens {
 			s.resolve(&state, i)
@@ -100,6 +100,7 @@ func DevirtualizeAndInlinePackage(pkg *ir.Package, profile *pgoir.Profile) {
 				s := inlState[fn]
 
 				ir.WithFunc(fn, func() {
+					s.initOracle()
 					l1 := len(s.parens)
 					l0 := 0
 
@@ -123,6 +124,7 @@ func DevirtualizeAndInlinePackage(pkg *ir.Package, profile *pgoir.Profile) {
 						if l0 == l1 {
 							break
 						}
+						s.initOracle()
 						for i := l0; i < l1; i++ {
 							s.resolve(&state, i)
 						}
@@ -175,6 +177,7 @@ func DevirtualizeAndInlineFunc(fn *ir.Func, profile *pgoir.Profile) {
 
 		s := &inlClosureState{bigCaller: bigCaller, profile: profile, fn: fn, callSites: make(map[*ir.ParenExpr]bool), useCounts: make(map[*ir.Func]int)}
 		s.parenthesize()
+		s.initOracle()
 		s.fixpoint()
 		s.unparenthesize()
 	})
@@ -193,6 +196,13 @@ type inlClosureState struct {
 	useCounts map[*ir.Func]int       // shared among all InlClosureStates
 	parens    []*ir.ParenExpr
 	bigCaller bool
+	oracle    ir.ReassignOracle
+}
+
+func (s *inlClosureState) initOracle() {
+	if len(s.parens) > 0 {
+		s.oracle.Init(s.fn)
+	}
 }
 
 // resolve attempts to resolve a call to a potentially inlineable callee
@@ -211,7 +221,7 @@ func (s *inlClosureState) resolve(state *devirtualize.State, i int) (*ir.Func, i
 		return nil, -1
 	}
 	devirtualize.StaticCall(state, call)
-	if callee := inline.InlineCallTarget(s.fn, call, s.profile); callee != nil {
+	if callee := inline.InlineCallTarget(s.fn, call, s.profile, &s.oracle); callee != nil {
 		for len(s.resolved) <= i {
 			s.resolved = append(s.resolved, nil)
 		}
@@ -236,7 +246,7 @@ func (s *inlClosureState) edit(state *devirtualize.State, i int) (*ir.CallExpr, 
 	if count <= 0 {
 		return nil, nil
 	}
-	if inlCall := inline.TryInlineCall(s.fn, call, s.bigCaller, s.profile, count == 1 && callee.ClosureParent != nil); inlCall != nil {
+	if inlCall := inline.TryInlineCall(s.fn, call, s.bigCaller, s.profile, count == 1 && callee.ClosureParent != nil, &s.oracle); inlCall != nil {
 		return call, inlCall
 	}
 	return nil, nil
@@ -328,18 +338,33 @@ func (s *inlClosureState) fixpoint() bool {
 	changed := false
 	var state devirtualize.State
 	ir.WithFunc(s.fn, func() {
+		for i := range s.parens {
+			s.resolve(&state, i)
+		}
 		done := false
 		for !done {
 			done = true
-			for i := 0; i < len(s.parens); i++ { // can't use "range parens" here
-				paren := s.parens[i]
-				if origCall, inlinedCall := s.edit(&state, i); inlinedCall != nil {
-					// Update AST and recursively mark nodes.
-					paren.X = inlinedCall
-					ir.EditChildren(inlinedCall, s.mark) // mark may append to parens
-					state.InlinedCall(s.fn, origCall, inlinedCall)
-					done = false
-					changed = true
+			s.initOracle()
+			l1 := len(s.parens)
+			l0 := 0
+			for {
+				for i := l0; i < l1; i++ {
+					paren := s.parens[i]
+					if origCall, inlinedCall := s.edit(&state, i); inlinedCall != nil {
+						paren.X = inlinedCall
+						ir.EditChildren(inlinedCall, s.mark)
+						state.InlinedCall(s.fn, origCall, inlinedCall)
+						done = false
+						changed = true
+					}
+				}
+				l0, l1 = l1, len(s.parens)
+				if l0 == l1 {
+					break
+				}
+				s.initOracle()
+				for i := l0; i < l1; i++ {
+					s.resolve(&state, i)
 				}
 			}
 		}
