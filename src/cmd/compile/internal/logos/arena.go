@@ -383,12 +383,23 @@ func (a *arenaEject) insertBlankUses() {
 }
 
 func (a *arenaEject) blankInit(init syntax.SimpleStmt, off int, prefix string, inits map[*syntax.AssignStmt]bool) {
-	s, ok := init.(*syntax.AssignStmt)
-	if !ok || s.Op != syntax.Def {
+	var lhs syntax.Expr
+	switch s := init.(type) {
+	case *syntax.AssignStmt:
+		if s.Op != syntax.Def {
+			return
+		}
+		inits[s] = true
+		lhs = s.Lhs
+	case *syntax.RangeClause:
+		if !s.Def {
+			return
+		}
+		lhs = s.Lhs
+	default:
 		return
 	}
-	inits[s] = true
-	a.insertBlankUse(off, prefix, a.blankNames(syntax.UnpackListExpr(s.Lhs)))
+	a.insertBlankUse(off, prefix, a.blankNames(syntax.UnpackListExpr(lhs)))
 }
 
 func (a *arenaEject) blankSwitchInit(s *syntax.SwitchStmt, inits map[*syntax.AssignStmt]bool) {

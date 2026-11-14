@@ -56,6 +56,8 @@ exists $UPROOT1272/bin/go
 exec $UPROOT1272/bin/go version
 stdout '^go version go1\.27\.2 '
 exec env -u GOROOT $UPROOT1272/bin/go build ./...
+exec env -u GOROOT $UPROOT1272/bin/go run .
+cmp stdout $WORK/eject-stdout.txt
 cd ..
 
 # The source tree is unchanged after the eject (#112).
@@ -103,7 +105,18 @@ func locals() []node {
 	return s
 }
 
+func rangeCell() {
+	for _, slot := range regs {
+		p := arena.New[node](slot)
+		p.v = 11
+		if p.v != 11 {
+			panic("rangeCell")
+		}
+	}
+}
+
 func main() {
+	rangeCell()
 	nodes := arena.Make[node](regs[bump()], 3)
 	nodes[1].v = 42
 	p := arena.New[node](regs[bump()])
