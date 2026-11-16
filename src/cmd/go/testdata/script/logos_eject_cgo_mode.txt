@@ -3,23 +3,23 @@ env GOTOOLCHAIN=local
 
 ! go tool compile -logos.cgoeject -logos.eject=$WORK/plain-out plain/main.go
 stdout 'logos.cgoeject requires original loGo/s cgo sources'
-! exists plain-out
+! exists $WORK/plain-out
 
 ! go tool compile -logos.cgoeject -logos.eject=$WORK/lgo-out lgo/main.lgo
 stdout 'logos.cgoeject requires original loGo/s cgo sources'
-! exists lgo-out
+! exists $WORK/lgo-out
 
 ! go tool compile -logos.cgoeject -logos.eject=$WORK/missing-out cgo/main.lgo
 stdout 'main.lgo:4:.*undefined: C.int'
-! exists missing-out
+! exists $WORK/missing-out
 
 ! go tool compile -logos.cgoeject -logos.eject=$WORK/wrong-out cgo/wrong.lgo cgo/_cgo_gotypes.go
 stdout 'wrong.lgo:4:.*cannot use "bad"'
-! exists wrong-out
+! exists $WORK/wrong-out
 
 go tool compile -p p -o source.o -logos.cgoeject -logos.eject=$WORK/valid-out cgo/main.lgo cgo/_cgo_gotypes.go
-exists valid-out/main.go
-grep 'var X C.int = 1' valid-out/main.go
+exists $WORK/valid-out/main.go
+grep 'var X C.int = 1' $WORK/valid-out/main.go
 ! exists source.o
 
 -- plain/main.go --
