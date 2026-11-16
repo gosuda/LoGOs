@@ -3307,6 +3307,21 @@ Anchor: Richard Feynman, Tony Hoare
 - Verification (2026-11-16, linux/amd64): the build, targeted native/race/nogreenteagc suites, metrics tests, vet, and native/ejected scripts passed. An overlay that skips every non-nil pointer fails both weak-reference liveness cases for the predicted lost-root reason. All six new test files retain their pre-implementation hashes. Linux/arm64 cross-compilation passed; arm64 execution and the full `run.bash` milestone gate were not run. Parallel compiler jobs and an initial serial mutation build were killed; bounded, serialized retries completed. Fixed-work measurements and their limits are recorded in `logos-doc/benchmarks/gc-region-scan.md` and its JSON companion.
 - Red-team row: #332.
 
+
+### M18-A-S22 Expand GC boundary and ownership gates
+
+Anchor: Tony Hoare, Richard Feynman
+
+- Contract: SPEC 3.5 retains the existing allocation, root-lifetime, zeroing, and scan-work contracts. This slice adds behavioral fixtures and execution gates before any further production optimization.
+- Ownership attack: observe ordinary explicit-region Close at stop-the-world boundaries. A published region head must not also belong to a P's reusable chunk pool. The observer compares head addresses without dereferencing them; it does not claim coverage of every interior chain link. The suspected release-order window is not yet reproduced.
+- Liveness attack: roots in three distinct manual chunks retain both small and large pointerful heap intermediates and their descendants. Weak references check survival before release and disappearance after release, for implicit and explicit regions.
+- Boundary attack: an independent declared-field-offset oracle checks the scan extent at every byte limit across repeated types, scalar gaps, interface/string/slice layouts, bitmap-word boundaries, and an empty mask word. Partially covered final pointer words remain readable and count in full. This checks the final extent, not the complete pointer visitation sequence.
+- Measurement fixture: `BenchmarkLogosGCScanSmall` isolates scanner initialization for small typed allocations with Self, Nil, and OtherArena inputs. OtherArena targets manual memory and does not measure heap marking. The existing large-block controls remain unchanged.
+- Gate: build the fork and execute runtime, metrics, pprof, and trace tests on native linux/amd64 and linux/arm64 with Green Tea enabled and disabled; run region race tests, repeated lifecycle/boundary tests, a synchronous-entry-preemption ownership stress, and gccheckmark heap-graph tests. Execute `./run.bash --no-rebuild` with default experiments. The workflow declares these gates; its presence is not evidence that they passed.
+- Status (2026-11-16): execution blocked. The local execution environment is unavailable and Codexify's tunnel is disconnected. The new fixtures have been source-reviewed only; no compilation, gofmt, behavioral RED/GREEN, mutation probe, or new performance result is claimed. Reproduce the ownership invariant failure and establish compiled safepoint reachability before changing release order. Keep follow-up PRs draft until the applicable G2/G6 evidence exists.
+- Red-team rows: #333, #334, #335.
+- Evidence and promotion requirements: `logos-doc/benchmarks/gc-followup-status.md`.
+
 ## M20. CGo in loGo/s packages and Fast-CGo for Go and loGo/s
 
 Anchor: Tony Hoare, John Carmack
