@@ -1722,6 +1722,7 @@ A dependency that imports a sink package but never calls it passes as dead code.
 Reflection through reflect.Value.Method counts as reachable. [T-Sec11]
 On diamond graphs the report MUST keep the shortest chain. [T-Sec11]
 The audit MUST terminate on cyclic reachability graphs and report only chains from its entry or initialization roots; edge discovery order MUST NOT change the minimum chain length. [T-Sec11]
+The prefix from an audit root to a blamed frame MUST remain a shortest rooted path when a relocation names an inlined owner before that owner's incoming edges have been discovered. Recorded call edges may contain cycles; discovery order MUST NOT create a cycle in the prefix's parent relation or manufacture a root for an unanchored predecessor. [T-Sec11]
 The audit reports one chain per sink and dependency, so a chain through the standard library alone never hides another dependency's chain to the same sink. [T-Sec11]
 A chain blames the dependency frame nearest the sink, and chains of standard-library or first-party frames blame nobody. [T-Sec11]
 The call belongs to the package of the innermost inlined function that contains it, so a dependency function inlined into first-party or standard-library code is still the dependency's frame, and the interface calls and reflective lookups of an inlined function body count as the function's own. [T-Sec11]
