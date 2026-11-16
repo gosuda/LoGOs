@@ -133,6 +133,35 @@ func QuotedJSONPtr[E any, T interface {
 	}
 }
 
+// errNonStringValue mirrors the message encoding/json reports through
+// UnmarshalTypeError.Err when a `,string` field's method sees a non-string
+// value.
+var errNonStringValue = errors.New("JSON value must be string type")
+
+// rejectNonString saves the type error a `,string` field reports for a
+// non-string value. The token may not reach a further unmarshal method:
+// a fresh Unmarshal call would dispatch the type's UnmarshalJSONFrom a
+// second time even though it already declined the value.
+func (s *Scanner) rejectNonString(tok []byte, typ reflect.Type) {
+	var value string
+	switch tok[0] {
+	case '{':
+		value = "object"
+	case '[':
+		value = "array"
+	case 't', 'f':
+		value = "bool"
+	default:
+		value = "number"
+	}
+	off := int64(len(tok))
+	if value == "object" || value == "array" {
+		off = 1
+	}
+	s.saveFallback(&stdjson.UnmarshalTypeError{
+		Value: value, Type: typ, Offset: off, Err: errNonStringValue})
+}
+
 func QuotedText[T encoding.TextUnmarshaler](s *Scanner, dst T) {
 	if s.scalar() == 0 {
 		return
@@ -147,7 +176,11 @@ func QuotedText[T encoding.TextUnmarshaler](s *Scanner, dst T) {
 			return
 		}
 	}
-	s.decodeRaw(tok, dst)
+	typ := reflect.TypeFor[T]()
+	if typ.Kind() == reflect.Pointer {
+		typ = typ.Elem()
+	}
+	s.rejectNonString(tok, typ)
 }
 
 func QuotedTextPtr[E any, T interface {
@@ -175,7 +208,10 @@ func QuotedTextPtr[E any, T interface {
 			return
 		}
 	}
-	s.decodeRaw(tok, dst)
+	if *dst == nil {
+		*dst = new(E)
+	}
+	s.rejectNonString(tok, reflect.TypeFor[E]())
 }
 
 func QuotedFrom[T any, PT interface {

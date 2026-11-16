@@ -155,6 +155,52 @@ func (p *streamNoConsumeProbe) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
 	return nil
 }
 
+// streamDeclineTextProbe declines its first streaming call; a fallback
+// decode that dispatches the method a second time changes the recorded
+// calls and the decoded value, so encoding/json divergence is visible.
+type streamDeclineTextProbe struct {
+	Calls int
+	Text  string
+}
+
+func (p *streamDeclineTextProbe) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
+	p.Calls++
+	if p.Calls == 1 {
+		return errors.ErrUnsupported
+	}
+	tok, err := dec.ReadValue()
+	if err != nil {
+		return err
+	}
+	p.Text += "|from:" + string(tok)
+	return nil
+}
+
+func (p *streamDeclineTextProbe) UnmarshalText(b []byte) error {
+	p.Text += "|text:" + string(b)
+	return nil
+}
+
+// streamDeclineOnlyProbe has no other unmarshal method: its fallback is
+// the plain decode, which must not re-dispatch the declined method.
+type streamDeclineOnlyProbe struct {
+	Calls int
+	Text  string
+}
+
+func (p *streamDeclineOnlyProbe) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
+	p.Calls++
+	if p.Calls == 1 {
+		return errors.ErrUnsupported
+	}
+	tok, err := dec.ReadValue()
+	if err != nil {
+		return err
+	}
+	p.Text += "|from:" + string(tok)
+	return nil
+}
+
 func checkStreamFallback[T any](t *testing.T, in string, newDst func(*streamTarget[T]) any) {
 	t.Helper()
 	data := `{"v":` + in + `,"after":17}`
@@ -191,6 +237,22 @@ func checkStreamFallback[T any](t *testing.T, in string, newDst func(*streamTarg
 				QuotedFrom[streamNoConsumeProbe](&s, dst)
 			case **streamNoConsumeProbe:
 				QuotedFromPtr[streamNoConsumeProbe](&s, dst)
+			case *streamDeclineTextProbe:
+				if !QuotedFrom[streamDeclineTextProbe](&s, dst) {
+					QuotedText(&s, dst)
+				}
+			case **streamDeclineTextProbe:
+				if !QuotedFromPtr[streamDeclineTextProbe](&s, dst) {
+					QuotedTextPtr[streamDeclineTextProbe](&s, dst)
+				}
+			case *streamDeclineOnlyProbe:
+				if !QuotedFrom[streamDeclineOnlyProbe](&s, dst) {
+					FallbackFrom(&s, dst)
+				}
+			case **streamDeclineOnlyProbe:
+				if !QuotedFromPtr[streamDeclineOnlyProbe](&s, dst) {
+					FallbackFromPtr(&s, dst)
+				}
 			default:
 				t.Fatalf("%s: unsupported fallback target %T", data, dst)
 			}
@@ -214,6 +276,17 @@ func TestStreamUnsupportedFallbackMatchesEncodingJSON(t *testing.T) {
 		checkStreamFallback[*streamUnsupportedJSONProbe](t, in, func(g *streamTarget[*streamUnsupportedJSONProbe]) any { return &g.V })
 		checkStreamFallback[streamUnsupportedTextProbe](t, in, func(g *streamTarget[streamUnsupportedTextProbe]) any { return &g.V })
 		checkStreamFallback[*streamUnsupportedTextProbe](t, in, func(g *streamTarget[*streamUnsupportedTextProbe]) any { return &g.V })
+	}
+}
+
+func TestStreamDeclineFallbackMatchesEncodingJSON(t *testing.T) {
+	for _, in := range []string{`"x"`, `7`, `{}`, `[1]`, `true`, `null`, `""`} {
+		checkStreamFallback[streamDeclineTextProbe](t, in, func(g *streamTarget[streamDeclineTextProbe]) any { return &g.V })
+		checkStreamFallback[*streamDeclineTextProbe](t, in, func(g *streamTarget[*streamDeclineTextProbe]) any { return &g.V })
+	}
+	for _, in := range []string{`7`, `{}`, `[1]`, `true`, `null`} {
+		checkStreamFallback[streamDeclineOnlyProbe](t, in, func(g *streamTarget[streamDeclineOnlyProbe]) any { return &g.V })
+		checkStreamFallback[*streamDeclineOnlyProbe](t, in, func(g *streamTarget[*streamDeclineOnlyProbe]) any { return &g.V })
 	}
 }
 

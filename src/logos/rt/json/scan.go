@@ -411,6 +411,128 @@ func FallbackQ[T any](s *Scanner, dst *T) {
 	}
 }
 
+// methodlessType builds the representation of t that carries none of
+// t's own methods: the decode that runs after UnmarshalJSONFrom
+// declined a value must not dispatch the same method a second time.
+// Field, key, element and pointer target types keep their methods;
+// only the outermost type is bare.
+func methodlessType(t reflect.Type) reflect.Type {
+	switch t.Kind() {
+	case reflect.Bool:
+		return reflect.TypeFor[bool]()
+	case reflect.Int:
+		return reflect.TypeFor[int]()
+	case reflect.Int8:
+		return reflect.TypeFor[int8]()
+	case reflect.Int16:
+		return reflect.TypeFor[int16]()
+	case reflect.Int32:
+		return reflect.TypeFor[int32]()
+	case reflect.Int64:
+		return reflect.TypeFor[int64]()
+	case reflect.Uint:
+		return reflect.TypeFor[uint]()
+	case reflect.Uint8:
+		return reflect.TypeFor[uint8]()
+	case reflect.Uint16:
+		return reflect.TypeFor[uint16]()
+	case reflect.Uint32:
+		return reflect.TypeFor[uint32]()
+	case reflect.Uint64:
+		return reflect.TypeFor[uint64]()
+	case reflect.Uintptr:
+		return reflect.TypeFor[uintptr]()
+	case reflect.Float32:
+		return reflect.TypeFor[float32]()
+	case reflect.Float64:
+		return reflect.TypeFor[float64]()
+	case reflect.Complex64:
+		return reflect.TypeFor[complex64]()
+	case reflect.Complex128:
+		return reflect.TypeFor[complex128]()
+	case reflect.String:
+		return reflect.TypeFor[string]()
+	case reflect.Pointer:
+		return reflect.PointerTo(t.Elem())
+	case reflect.Slice:
+		return reflect.SliceOf(t.Elem())
+	case reflect.Array:
+		return reflect.ArrayOf(t.Len(), t.Elem())
+	case reflect.Chan:
+		return reflect.ChanOf(t.ChanDir(), t.Elem())
+	case reflect.Map:
+		return reflect.MapOf(t.Key(), t.Elem())
+	case reflect.Struct:
+		fields := make([]reflect.StructField, 0, t.NumField())
+		for i := 0; i < t.NumField(); i++ {
+			f := t.Field(i)
+			f.Index = nil
+			f.Offset = 0
+			fields = append(fields, f)
+		}
+		return reflect.StructOf(fields)
+	default:
+		// Func, UnsafePointer and interface kinds have no built
+		// equivalent; they keep their own type.
+		return t
+	}
+}
+
+// decodePlain decodes raw into dst without dispatching T's own unmarshal
+// methods. It is the decode encoding/json runs after a method declined
+// the value: the remaining method set plus the plain decoding. A saved
+// UnmarshalTypeError still names T, not the bare representation.
+func (s *Scanner) decodePlain[T any](raw []byte, dst *T) {
+	t := reflect.TypeFor[T]()
+	st := methodlessType(t)
+	mv := reflect.New(st)
+	mv.Elem().Set(reflect.ValueOf(dst).Elem().Convert(st))
+	if s.decodeRaw(raw, mv.Interface()) {
+		reflect.ValueOf(dst).Elem().Set(mv.Elem().Convert(t))
+		return
+	}
+	if ute, ok := s.saved.(*stdjson.UnmarshalTypeError); ok && ute.Type == st {
+		ute.Type = t
+	}
+}
+
+// FallbackFrom is Fallback for the value an UnmarshalJSONFrom method
+// just declined. decodeRaw's Unmarshal would dispatch the streaming
+// method again, so the token decodes through the methodless view.
+func FallbackFrom[T any](s *Scanner, dst *T) {
+	if s.scalar() == 0 {
+		return
+	}
+	s.decodePlain(s.data[s.start:s.end], dst)
+}
+
+// FallbackFromPtr is FallbackFrom for a *E field: a nil pointer
+// allocates its element the way encoding/json does.
+func FallbackFromPtr[E any](s *Scanner, dst **E) {
+	if s.scalar() == 0 {
+		return
+	}
+	if s.kind == 'n' {
+		*dst = nil
+		return
+	}
+	t := reflect.TypeFor[E]()
+	st := methodlessType(t)
+	mv := reflect.New(st)
+	if *dst != nil {
+		mv.Elem().Set(reflect.ValueOf(*dst).Elem().Convert(st))
+	}
+	if !s.decodeRaw(s.data[s.start:s.end], mv.Interface()) {
+		if ute, ok := s.saved.(*stdjson.UnmarshalTypeError); ok && ute.Type == st {
+			ute.Type = t
+		}
+		return
+	}
+	pv := reflect.New(t)
+	pv.Elem().Set(mv.Elem().Convert(t))
+	*dst = pv.Interface().(*E)
+}
+
 func (s *Scanner) decodeRaw(raw []byte, dst any) bool {
 	err := stdjson.Unmarshal(raw, dst)
 	if err == nil {
