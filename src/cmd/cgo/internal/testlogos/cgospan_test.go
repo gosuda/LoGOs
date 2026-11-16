@@ -5,14 +5,12 @@
 package testlogos
 
 import (
-	"internal/asan"
 	"internal/goexperiment"
-	"internal/msan"
-	"internal/race"
 	"internal/testenv"
 	"os"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"strings"
 	"testing"
 	"unsafe"
@@ -70,27 +68,39 @@ func TestCgoOptSpanPointerRules(t *testing.T) {
 }
 
 // cgoSpanToolFlags keeps child builds on the experiment and instrumentation
-// of this test binary. An explicit test -c build also keeps objdump symbols.
+// of this test binary, with fast calls off so the cgoopt span path runs.
 func cgoSpanToolFlags(t *testing.T) []string {
 	t.Helper()
-	experiment := "nologoscgoopt,nologosfastcgo"
-	if goexperiment.LogosCgoOpt {
-		experiment = "logoscgoopt,nologosfastcgo"
+	return cgoTestToolFlags(t, false)
+}
+
+// cgoTestToolFlags replays this binary's experiment and instrumentation
+// settings with the caller's fast-call policy.
+func cgoTestToolFlags(t *testing.T, fastcgo bool) []string {
+	t.Helper()
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		t.Fatal("child build requires embedded build settings")
 	}
-	if goexperiment.CgoCheck2 {
-		experiment += ",cgocheck2"
+	var experiments []string
+	flags := []string{"-race=false", "-asan=false", "-msan=false"}
+	for _, setting := range info.Settings {
+		switch setting.Key {
+		case "GOEXPERIMENT":
+			if setting.Value != "" {
+				experiments = append(experiments, setting.Value)
+			}
+		case "-race", "-asan", "-msan":
+			flags = append(flags, setting.Key+"="+setting.Value)
+		}
 	}
-	t.Setenv("GOEXPERIMENT", experiment)
-	var flags []string
-	if race.Enabled {
-		flags = append(flags, "-race")
+	if fastcgo {
+		experiments = append(experiments, "logosfastcgo")
+	} else {
+		experiments = append(experiments, "nologosfastcgo")
 	}
-	if asan.Enabled {
-		flags = append(flags, "-asan")
-	}
-	if msan.Enabled {
-		flags = append(flags, "-msan")
-	}
+	t.Setenv("GOENV", "off")
+	t.Setenv("GOEXPERIMENT", strings.Join(experiments, ","))
 	return flags
 }
 

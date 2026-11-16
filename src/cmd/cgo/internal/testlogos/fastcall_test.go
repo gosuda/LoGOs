@@ -15,7 +15,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"runtime/debug"
 	"runtime/pprof"
 	"strconv"
 	"strings"
@@ -428,27 +427,20 @@ func TestFastcallLayout(t *testing.T) {
 	}
 }
 
+// fastcallToolFlags mirrors this test binary's experiment and instrumentation
+// into explicit test -c builds so disassembly assertions inspect the
+// configuration under test, including the fast-call experiment bit itself.
+func fastcallToolFlags(t *testing.T) []string {
+	t.Helper()
+	return cgoTestToolFlags(t, goexperiment.LogosFastCgo)
+}
+
 func selfTestBin(t *testing.T) string {
 	t.Helper()
 	requireCgo(t)
 	bin := filepath.Join(t.TempDir(), "testlogos.test")
 	srcCmd := filepath.Join(runtime.GOROOT(), "src", "cmd")
-	info, ok := debug.ReadBuildInfo()
-	if !ok {
-		t.Fatal("self build requires embedded build settings")
-	}
-	experiment := ""
-	args := []string{"test", "-c", "-o", bin, "-race=false", "-asan=false", "-msan=false"}
-	for _, setting := range info.Settings {
-		switch setting.Key {
-		case "GOEXPERIMENT":
-			experiment = setting.Value
-		case "-race", "-asan", "-msan":
-			args = append(args, setting.Key+"="+setting.Value)
-		}
-	}
-	t.Setenv("GOENV", "off")
-	t.Setenv("GOEXPERIMENT", experiment)
+	args := append([]string{"test", "-c", "-o", bin}, fastcallToolFlags(t)...)
 	out, err := runCmd(t, srcCmd, goBin(t), append(args, "cmd/cgo/internal/testlogos")...)
 	if err != nil {
 		t.Fatalf("self build: %v\n%s", err, out)
