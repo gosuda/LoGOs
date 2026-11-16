@@ -68,10 +68,11 @@ func logosGCScanBoundsLayouts() []logosGCScanBoundsLayout {
 			pointers: []uintptr{0},
 		},
 		{
-			name:     "Interface",
-			elem:     iface{},
-			size:     unsafe.Sizeof(iface{}),
-			pointers: []uintptr{0, logosGCScanBoundsWord},
+			name: "Interface",
+			elem: iface{},
+			size: unsafe.Sizeof(iface{}),
+			// Type metadata is retained separately; only data is traced.
+			pointers: []uintptr{logosGCScanBoundsWord},
 		},
 		{
 			name:     "String",
