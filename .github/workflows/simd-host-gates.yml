@@ -1,14 +1,18 @@
-name: "SIMD host fixture gates"
+name: "SIMD feature guards"
 
 "on":
   pull_request:
     paths:
       - ".github/workflows/simd-host-gates.yml"
       - "src/cmd/go/scriptconds_test.go"
+      - "src/cmd/go/scriptconds_simd_logos_test.go"
       - "src/cmd/go/internal/logos/config/targetcpu*"
+      - "src/cmd/compile/internal/ssa/zcse.go"
+      - "src/cmd/compile/internal/ssa/zcse_simd_logos_test.go"
       - "src/cmd/go/testdata/script/logos_simd_feature_gate.txt"
       - "src/cmd/go/testdata/script/logos_simd_gate_avx512.txt"
       - "src/cmd/go/testdata/script/logos_simd_gate_branch.txt"
+      - "src/cmd/go/testdata/script/logos_simd_nested_guard.txt"
   workflow_dispatch:
 
 permissions:
@@ -46,12 +50,16 @@ jobs:
           printf '%s\n' "$GITHUB_WORKSPACE/bin" >> "$GITHUB_PATH"
       - name: "Check formatting and vet"
         run: |
-          gofmt -d cmd/go/scriptconds_test.go
-          test -z "$(gofmt -l cmd/go/scriptconds_test.go)"
-          go vet cmd/go
+          files="cmd/go/scriptconds_test.go cmd/go/scriptconds_simd_logos_test.go cmd/compile/internal/ssa/zcse.go cmd/compile/internal/ssa/zcse_simd_logos_test.go"
+          gofmt -d $files
+          test -z "$(gofmt -l $files)"
+          go vet cmd/go cmd/compile/internal/ssa
+      - name: "Verify SIMD dominance and scalar controls"
+        run: |
+          go test -count=1 -short cmd/compile/internal/ssa
       - name: "Run host-ISA fixture gates under the race detector"
         env:
           GOAMD64: "v1"
           GOEXPERIMENT: ""
         run: |
-          go test -count=1 -race -timeout=30m -v cmd/go -run '^TestScript$/^(README|logos_simd_(feature_gate|gate_avx512|gate_branch))$'
+          go test -count=1 -race -timeout=30m -v cmd/go -run '^(TestLogosHostAMD64Condition|TestScript)$/(README|logos_simd_(feature_gate|gate_avx512|gate_branch|nested_guard))$'
