@@ -1,0 +1,5 @@
+{
+  "include": ["field_offset_ci.py", "test_field_offset_ci.py"],
+  "extraPaths": ["../tagged-method-facts"],
+  "typeCheckingMode": "strict"
+}
