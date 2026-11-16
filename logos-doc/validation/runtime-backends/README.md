@@ -29,17 +29,22 @@ The backend runtime results themselves remain pending the CI invocation.
   either a named or empty import path. See
   [`load/printer.go`](../../../src/cmd/go/internal/load/printer.go#L89-L124).
 - `green.log` records 97 passing tests and 27 passing subtests across the
-  unchanged shared harness and both new test files. Strict Pyright passed for
-  the runner and both new test files; Ruff passed for the runner. The frozen
-  initial test imports need a separate formatting follow-up because Ruff
-  classifies the newly created local module differently from the absent module
-  at freeze time. No assertion change is needed.
+  unchanged shared harness and both new test files. Strict Pyright and Ruff
+  passed for the runner and both new test files.
 - `mutation-skip.log` records the frozen skip control failing when the
   implementation ignored test skips. `mutation-build-fail.log` records both
   build-failure controls failing when the implementation ignored build failures.
   Both mutations were reverted; the restored suite passed again.
 - `frozen-files.sha256` records the unchanged test bytes and shared runner.
   All three matched after the repairs and mutation probes.
+
+The behavioral commit is `304deaace804c0c35d16d2f8086ef521f39708ac`.
+A separate follow-up formats the initial test file's import group: Ruff can
+classify the new module as local only after that module exists. The frozen
+pre-format file is preserved under `frozen/`, and `formatting.json` verifies
+unchanged import names, non-import syntax trees, and exact test-function source
+bytes. `frozen-files.sha256` now points to that preserved snapshot;
+`published-files.sha256` identifies the final files. No assertion was changed.
 
 The final Python command was run from `misc/logos-dogfood`:
 

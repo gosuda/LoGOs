@@ -9,9 +9,10 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
-import replay_backends
 from hypothesis import given
 from hypothesis import strategies as st
+
+import replay_backends
 from replay_backends import (
     Replay,
     assess_runtime,
@@ -23,7 +24,6 @@ from replay_backends import (
     positive_timeout,
     prepare_work,
 )
-
 from run import Run, Source, all_files, file_hash, prepare_source, tree_hash
 
 SQLITE_TESTS = ("TestOpen", "TestClose", "TestInsert")
