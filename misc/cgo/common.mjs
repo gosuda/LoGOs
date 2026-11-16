@@ -56,7 +56,7 @@ export function run(command, args, { env, cwd = root, log, allowFailure = false,
   if (!env || !log) throw new Error("commands require an explicit environment and log path");
   console.log("Running " + command + " " + args.join(" "));
   const start = new Date().toISOString();
-  const result = spawnSync(command, args, { cwd, env, encoding: "utf8", timeout,
+  const result = spawnSync(command, args, { cwd, env, shell: false, encoding: "utf8", timeout,
     maxBuffer: 128 * 1024 * 1024 });
   save(log + ".stdout", result.stdout || "");
   save(log + ".stderr", result.stderr || "");

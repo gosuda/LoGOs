@@ -10,9 +10,6 @@ stdout '^f32 130 '
 cp stdout $WORK/scalar-stdout.txt
 
 env GOEXPERIMENT=simd
-# The simd build lowers wide sums to AVX512 ops behind a host guard;
-# running needs a v4 host until the generated guards cover slot inits
-# (see fix/simd-feature-dominance). Static eject checks still run.
 [host-simd] logos run .
 [host-simd] cmp stdout $WORK/scalar-stdout.txt
 
