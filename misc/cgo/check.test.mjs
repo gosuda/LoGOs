@@ -8,8 +8,9 @@ import { timing, benchmarkRows, assessRow, goResults, expectedRed, replaceOnce, 
 
 const name = "BenchmarkCgoOptNocallback";
 const iterations = 40000000;
-const hyperfine = (seconds) => ({ results: [{ times: Array(10).fill(seconds),
-  exit_codes: Array(10).fill(0) }] });
+const hyperfine = (seconds) => ({ schema_version: 2, primary_metric: "time_wall_clock",
+  results: [{ measurements: Array.from({ length: 10 }, () => ({ exit_code: 0,
+    time_wall_clock: { value: seconds, unit: "second" } })) }] });
 const benchmark = (n, ns = 50, count = 10) =>
   Array(count).fill(name + "-1 " + n + " " + ns + " ns/op 0 B/op 0 allocs/op").join("\n");
 const phase = (seconds) => ({ hyperfine: hyperfine(seconds), corroboration: benchmark(iterations) });
@@ -28,7 +29,7 @@ test("requires every integration row to reach the unchanged 1.05 gate", () => {
 
 test("blocks noise instead of selecting favorable samples", () => {
   const input = phases();
-  input.candidate.hyperfine.results[0].times[9] = 8;
+  input.candidate.hyperfine.results[0].measurements[9].time_wall_clock.value = 8;
   assert.equal(assessRow(name, iterations, input).status, "measurement-blocked");
 });
 
@@ -42,15 +43,16 @@ test("rejects different work counts, omitted rows, and failed timed commands", (
   assert.throws(() => benchmarkRows(benchmark(iterations + 1), name, iterations, 10), /work count/);
   assert.throws(() => benchmarkRows(benchmark(iterations, 50, 9), name, iterations, 10), /exact benchmark/);
   const failed = hyperfine(2);
-  failed.results[0].exit_codes[4] = 1;
+  failed.results[0].measurements[4].exit_code = 1;
   assert.throws(() => timing(failed), /timed command failed/);
-  assert.throws(() => timing({ results: [] }), /exactly one command/);
+  assert.throws(() => timing({ schema_version: 2, primary_metric: "time_wall_clock",
+    results: [] }), /exactly one command/);
 });
 
 test("rejects invalid samples and missing allocation metrics", () => {
   for (const value of [0, -1, NaN, Infinity]) {
     const input = hyperfine(2);
-    input.results[0].times[0] = value;
+    input.results[0].measurements[0].time_wall_clock.value = value;
     assert.throws(() => timing(input), /finite and positive/);
   }
   assert.throws(() => benchmarkRows(name + " 4 2 ns/op", name, 4, 1), /metric/);
@@ -58,7 +60,7 @@ test("rejects invalid samples and missing allocation metrics", () => {
 
 test("recomputes statistics from the raw samples", () => {
   const input = hyperfine(2);
-  input.results[0].median = 1000;
+  input.results[0].summary = { time_wall_clock: { median: 1000 } };
   assert.equal(timing(input).median, 2);
 });
 

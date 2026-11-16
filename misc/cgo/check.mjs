@@ -13,14 +13,21 @@ function positive(value, label) {
 }
 
 export function timing(document) {
-  insist(document && Array.isArray(document.results) && document.results.length === 1,
+  insist(document && document.schema_version === 2 &&
+    document.primary_metric === "time_wall_clock",
+    "hyperfine must export schema 2 wall-clock timings");
+  insist(Array.isArray(document.results) && document.results.length === 1,
     "hyperfine must contain exactly one command");
   const result = document.results[0];
-  insist(Array.isArray(result.times) && result.times.length >= 10,
+  insist(Array.isArray(result.measurements) && result.measurements.length >= 10,
     "hyperfine must contain at least ten measured samples");
-  const times = result.times.map((value) => positive(value, "sample"));
-  insist(Array.isArray(result.exit_codes) && result.exit_codes.length === times.length &&
-    result.exit_codes.every((code) => code === 0), "a timed command failed or lacks an exit code");
+  const times = result.measurements.map((sample) => {
+    insist(sample && sample.exit_code === 0,
+      "a timed command failed or lacks an exit code");
+    insist(sample.time_wall_clock && sample.time_wall_clock.unit === "second",
+      "a timed sample is not a wall-clock second");
+    return positive(sample.time_wall_clock.value, "sample");
+  });
   const sorted = [...times].sort((a, b) => a - b);
   const middle = Math.floor(sorted.length / 2);
   const median = sorted.length % 2 === 0
