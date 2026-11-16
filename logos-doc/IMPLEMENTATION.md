@@ -56,6 +56,8 @@ Anchor: Richard Feynman, John Carmack
 
 Repository pins take precedence over newer releases. The table below records the initial 2026-10-19 inventory. The current compiler base is Go 1.27.4, as pinned by `VERSION`; both modules keep their `go 1.27` ceilings. Go 1.27.2 and Go 1.27.3 remain ejection oracles. The inherited vendored modules stay unchanged. Host tools are not automatically installed or upgraded.
 
+CI pin update (2026-11-16): `.github/scripts/install-ci-tool.sh` selects and verifies Node 26.13.1 for the compiler workflows. That checked-in pin and `logos-doc/validation/ci-bootstrap.md` define the current CI runtime; the Node row below remains the initial inventory. Record the actual local Node version separately when it differs from the CI pin.
+
 | Choice | Selected version | Release date | Channel and decision |
 |---|---|---|---|
 | Go | 1.27.2 | 2026-10-08 | [Official releases](https://go.dev/doc/devel/release), [download metadata](https://go.dev/dl/?mode=json): repository baseline wins; no Go LTS track |
