@@ -19,7 +19,7 @@ Note: the `go` command can differ from upstream Go 1.27.2 in performance, code g
 The `go` command MUST keep Go language semantics, so every valid Go program MUST keep its Go meaning [T-0.1][R-U1].
 The `go version` output and the `go help` output, including every help topic, MUST stay the upstream text [T-0.1].
 Plain `go` MUST select improvements through flags and `GOEXPERIMENT` and MUST read no `logos.toml` [T-0.1][R-U1].
-Test processes started by `logos test` MUST receive the effective `GOEXPERIMENT` used to build their test binary, including configuration defaults, explicit experiment tokens, and an arena opt-out. The test cache MUST hash that same effective value when a test reads `GOEXPERIMENT`. Plain `go test` MUST preserve its inherited experiment environment. [T-0.1]
+Test processes started by either `go test` or `logos test` MUST preserve the caller's inherited `GOEXPERIMENT`, including absence, explicit empty values, and explicit experiment tokens. The test-input cache MUST hash that inherited value and its presence. LoGo/s build defaults apply to compilation and MUST NOT rewrite this user-process environment. [T-0.1]
 A flag that plain `go` gains MUST stay absent from the help text, so that text stays byte-identical to upstream [T-0.1][R-U1].
 The `logos` command MUST build Go modules with Go language semantics [T-0.1].
 Under `logos`, a Go-module build MUST set the `logos` build tag and, with the default arena enablement, the `goexperiment.logosarena` build tag [T-0.1].
