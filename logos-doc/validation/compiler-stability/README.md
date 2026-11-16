@@ -97,14 +97,14 @@ complete regression results. The table below is the local publication snapshot.
 | Complete rebuilt toolchain and full regression | Required on the integrated tree. Early local attempts encountered compiler termination; the serialized preliminary build ended with stale-tool targets after running while source and commits changed. A later frozen-source `make.bash -d` with one worker reached toolchain3, then its SSA compiler was killed and the build exited 2; the source tree and all frozen hashes remained unchanged. Clean CI builds of the original PR tree passed, followed by the focused compiler gates, unit/library-race checks, and host-ISA checks. The PR records the subsequent complete results and the new-base acceptance separately. |
 
 The workflow `.github/workflows/compiler-stability.yml` builds the exact checked
-out source in two independent jobs. The focused job runs affected compiler
-packages, ejection race tests, all seven new command scripts, the new compiler
-fixtures, formatting, vet, and the ledger checker. The upstream job runs
-`./run.bash --no-rebuild` with the complete selection. It selects and verifies
-GCC 14 for the existing C23 consumer and sets timeout scale 6. It removes only
-the build resource overrides from GOFLAGS/GOMEMLIMIT before that full gate.
-All commands preserve failure status through `pipefail`; workflow logs are
-retained as artifacts.
+out source and runs affected compiler packages, ejection race tests, all seven
+new command scripts, the new compiler fixtures, formatting, vet, and the ledger
+checker. Its commands preserve failure status through `pipefail`, and its logs
+are retained as artifacts. In the combined stabilization candidate, the normal
+`logos.yml` workflow owns the complete `./run.bash --no-rebuild` job. That job
+selects and verifies GCC 14 on Ubuntu 24.04 for the existing C23 consumer, checks
+the ledger and consumer prerequisites, and uses the supported timeout scale 8.
+The full selection and all acceptance assertions remain unchanged.
 
 The repository's existing unit/library-race, complete script, compiler-fixture,
 lint, and host-ISA workflows remain applicable. A passing focused check does not

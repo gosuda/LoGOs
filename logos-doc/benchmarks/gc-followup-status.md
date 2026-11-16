@@ -6,6 +6,21 @@ Base: PR #26, commit `968b8b436b08a0d8772d2159daa36e9c575d4b3d`.
 
 **Status: native repair gates passed; full upstream gate requires a corrected rerun.** Local execution and Codexify remain unavailable, but GitHub Actions is running the new gates. Native arm64 builds, formatting, and vet passed. Ordinary runtime tests with both collectors reproduced the ownership defect below. The repaired source passed all four native runtime configurations and the original-order mutation checks described below. The [first-run record](gc-stability-first-run.md) separates the real defect from fixture errors. PR #26's earlier results do not verify this follow-up.
 
+## Stabilization integration
+
+The selected correctness ancestor is
+`e3a6a4e5602df172660e644b1d204d13ccf824ba`. Its
+[run 43843444561](https://github.com/gosuda/LoGOs/actions/runs/43843444561)
+passed all four native runtime jobs and the complete upstream regression job.
+The separate LoGo/s scripts job failed `logos_eject_simd_slice` with an AVX512
+illegal instruction, which remains a required control for the combined SIMD
+and ownership candidate. Earlier pending-gate notes below describe the
+preceding runs; they do not supersede this completed ancestor evidence.
+
+In the combined candidate, `gc-stability.yml` keeps the native runtime matrix,
+and the normal `logos.yml` job supplies the complete Go regression gate with
+its C23 compiler preflight. Fresh combined acceptance is still required.
+
 ## Reproduced ownership defect
 
 Before the repair, `logosRegionReleaseChunks` kept `rec.chunk` published until its release loop finished. Each `logosArenaRelease` makes a chunk reusable in a P pool before the loop clears that owner head. Implicit arena Drop and RegionPark detach their published owner before releasing chunks.

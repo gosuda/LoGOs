@@ -28,7 +28,7 @@ env:
 jobs:
   logos:
     name: "${{ matrix.suite }}"
-    runs-on: "ubuntu-26.04"
+    runs-on: "${{ matrix.suite == 'go-regression' && 'ubuntu-24.04' || 'ubuntu-26.04' }}"
     timeout-minutes: 90
     strategy:
       fail-fast: false
@@ -88,6 +88,23 @@ jobs:
           export GOROOT_BOOTSTRAP
           ./make.bash
           printf '%s\n' "$GITHUB_WORKSPACE/lib/wasm" "$GITHUB_WORKSPACE/bin" >> "$GITHUB_PATH"
+      - name: "Select and verify the C23 consumer compiler"
+        if: "matrix.suite == 'go-regression'"
+        run: |
+          compiler="$(command -v gcc-14)"
+          compiler_bin="$RUNNER_TEMP/logos-c23-bin"
+          mkdir "$compiler_bin"
+          ln -s "$compiler" "$compiler_bin/cc"
+          "$compiler_bin/cc" --version
+          printf 'int main(void) { return 0; }\n' |
+            "$compiler_bin/cc" -std=c23 -x c - -o "$RUNNER_TEMP/logos-c23-check"
+          "$RUNNER_TEMP/logos-c23-check"
+          printf '%s\n' "$compiler_bin" >> "$GITHUB_PATH"
+      - name: "Check full-regression prerequisites"
+        if: "matrix.suite == 'go-regression'"
+        run: |
+          go test -count=1 -short -timeout=5m cmd/internal/goparity -run '^TestRedteamLedgerRows$'
+          go test -count=1 -timeout=10m cmd/go -run '^TestScript$/^logos_cgo_shared$'
       - name: "Smoke"
         run: |
           logos version | grep -F "logos version $(head -n 1 ../VERSION)"

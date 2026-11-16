@@ -3400,6 +3400,7 @@ Anchor: Tony Hoare, Richard Feynman
 - Measurement fixture: `BenchmarkLogosGCScanSmall` isolates scanner initialization for small typed allocations with Self, Nil, and OtherArena inputs. OtherArena targets manual memory and does not measure heap marking. The existing large-block controls remain unchanged.
 - Gate: build the fork and execute runtime, metrics, pprof, and trace tests on native linux/amd64 and linux/arm64 with Green Tea enabled and disabled; run region race tests, repeated lifecycle/boundary tests, a synchronous-entry-preemption ownership stress, and gccheckmark heap-graph tests. Execute `./run.bash --no-rebuild` with default experiments. The workflow declares these gates; its presence is not evidence that they passed.
 - Verification (2026-11-16): ordinary native arm64 builds first reproduced overlapping published/pool ownership with both collectors. After early detachment, all four native amd64/arm64 × Green Tea on/off jobs passed build, gofmt/vet, runtime/metrics/pprof/trace regression, race, repeated lifecycle/layout, noinline synchronous-close stress, and gccheckmark at `45e2f57`. The frozen ownership test failed 10/10 under the exact-original production overlay on both architectures. CI run `43829310124` retains that RED/GREEN/PROBE evidence. The full upstream gate found host-ISA fixture assumptions, an insufficient script budget, and the pending row #333 formatting rule; its corrected rerun remains required. Local execution is unavailable; GitHub Actions supplies execution. Optimization promotion still requires its separate G6 evidence. The corrected native matrix also passed at `20c3f858`; its full upstream batch exposed the default cc/C23 mismatch and row #333's missing proving path. Commit `b02fb2d7` restores that path; the unchanged ledger checker fails before and passes after the correction locally. The job now preflights its C23 compiler and ledger before another complete upstream run.
+- Integration evidence: [run 43843444561](https://github.com/gosuda/LoGOs/actions/runs/43843444561) at `e3a6a4e5602df172660e644b1d204d13ccf824ba` subsequently passed all four native configurations and the complete upstream gate. The separate LoGo/s script job failed only its SIMD slice fixture, so combined acceptance still requires the integrated SIMD repair and a fresh complete run. The shared `logos` workflow now owns the full Go gate; `gc-stability` retains all four native runtime configurations and their ownership mutation probes.
 - Red-team rows: #333, #334, #335.
 - Evidence and promotion requirements: `logos-doc/benchmarks/gc-followup-status.md`.
 
@@ -3995,9 +3996,9 @@ Anchor: David Parnas
 Rebuild with `./make.bash` after the production files are frozen. Run uncached
 compiler/lowering tests, command race tests, all new native/ejected/pristine-Go
 scripts, compiler fixtures, formatting, vet, and the ledger checker. The
-`compiler-stability` workflow retains logs and also runs the complete
-`./run.bash --no-rebuild` gate with the C23 consumer compiler and an adequate
-script-test timeout. The unchanged test-only host-ISA prerequisite from PR #47
+`compiler-stability` workflow retains the focused gate logs. The normal
+`logos` workflow runs the complete `./run.bash --no-rebuild` gate with the
+C23 consumer compiler and the supported timeout scale 8. The unchanged test-only host-ISA prerequisite from PR #47
 keeps cross-target code-generation checks while executing only host-supported
 programs. Required gates are never replaced by the focused results.
 

@@ -3,6 +3,7 @@ name: "compiler-stability"
 "on":
   pull_request:
     paths:
+      - ".github/scripts/install-upstream-oracles.sh"
       - ".github/workflows/compiler-stability.yml"
       - "src/cmd/compile/**"
       - "src/cmd/go/**"
@@ -24,13 +25,9 @@ env:
 
 jobs:
   compiler:
-    name: "compiler-${{ matrix.suite }}"
+    name: "compiler-focused"
     runs-on: "ubuntu-24.04"
     timeout-minutes: 120
-    strategy:
-      fail-fast: false
-      matrix:
-        suite: ["focused", "upstream"]
     defaults:
       run:
         shell: "bash"
@@ -48,26 +45,15 @@ jobs:
           node-version: "26.13.1"
       - name: "Record source and install upstream oracles"
         run: |
-          evidence="$RUNNER_TEMP/compiler-stability-${{ matrix.suite }}"
+          evidence="$RUNNER_TEMP/compiler-stability-focused"
           mkdir -p "$evidence"
           git rev-parse HEAD > "$evidence/source.txt"
           go version >> "$evidence/source.txt"
-          printf 'UPROOT1274=%s\n' "$(go env GOROOT)" >> "$GITHUB_ENV"
-          while read -r version sha256 root; do
-            archive="$RUNNER_TEMP/go$version.linux-amd64.tar.gz"
-            curl --fail --silent --show-error --location --output "$archive" "https://go.dev/dl/go$version.linux-amd64.tar.gz"
-            printf '%s  %s\n' "$sha256" "$archive" | sha256sum --check --strict -
-            mkdir "$RUNNER_TEMP/go$version"
-            tar -xzf "$archive" -C "$RUNNER_TEMP/go$version" --strip-components=1
-            printf '%s=%s\n' "$root" "$RUNNER_TEMP/go$version" >> "$GITHUB_ENV"
-          done <<'PINS'
-          1.27.2 ecbadb99091a3f46e31f5f934b068b1864eafa7995211b39eaddf76996045fe5 UPROOT1272
-          1.27.3 65efbc80fdc1fa2cd2631cad5b481777a68e8725f34e89f50fc6ac714e379b40 UPROOT1273
-          PINS
+          bash ../.github/scripts/install-upstream-oracles.sh
       - name: "Build the complete toolchain"
         run: |
           export GOROOT_BOOTSTRAP="$(go env GOROOT)"
-          GOEXPERIMENT= ./make.bash 2>&1 | tee "$RUNNER_TEMP/compiler-stability-${{ matrix.suite }}/build.log"
+          GOEXPERIMENT= ./make.bash 2>&1 | tee "$RUNNER_TEMP/compiler-stability-focused/build.log"
           printf '%s\n' "$GITHUB_WORKSPACE/lib/wasm" "$GITHUB_WORKSPACE/bin" >> "$GITHUB_PATH"
       - name: "Select and verify the C23 consumer compiler"
         run: |
@@ -75,7 +61,7 @@ jobs:
           compiler_bin="$RUNNER_TEMP/compiler-stability-c23"
           mkdir "$compiler_bin"
           ln -s "$compiler" "$compiler_bin/cc"
-          evidence="$RUNNER_TEMP/compiler-stability-${{ matrix.suite }}"
+          evidence="$RUNNER_TEMP/compiler-stability-focused"
           "$compiler_bin/cc" --version | tee "$evidence/c23.log"
           printf 'int main(void) { return 0; }\n' |
             "$compiler_bin/cc" -std=c23 -x c - -o "$RUNNER_TEMP/compiler-stability-c23-check" \
@@ -83,7 +69,6 @@ jobs:
           "$RUNNER_TEMP/compiler-stability-c23-check" 2>&1 | tee -a "$evidence/c23.log"
           printf '%s\n' "$compiler_bin" >> "$GITHUB_PATH"
       - name: "Run focused compiler and command checks"
-        if: matrix.suite == 'focused'
         run: |
           evidence="$RUNNER_TEMP/compiler-stability-focused"
           cd ..
@@ -109,27 +94,11 @@ jobs:
             cmd/go/internal/logos/eject 2>&1 | tee "$evidence/vet.log"
           go test -count=1 -short cmd/internal/goparity -run '^TestRedteamLedgerRows$' \
             2>&1 | tee "$evidence/ledger.log"
-      - name: "Check full-regression prerequisites"
-        if: matrix.suite == 'upstream'
-        run: |
-          evidence="$RUNNER_TEMP/compiler-stability-upstream"
-          go test -count=1 -short -timeout=5m cmd/internal/goparity -run '^TestRedteamLedgerRows$' \
-            2>&1 | tee "$evidence/ledger-prerequisite.log"
-          go test -count=1 -timeout=10m cmd/go -run '^TestScript$/^logos_cgo_shared$' \
-            2>&1 | tee "$evidence/cgo-shared-prerequisite.log"
-      - name: "Run the complete upstream regression gate"
-        if: matrix.suite == 'upstream'
-        env:
-          GOEXPERIMENT: ""
-          GO_TEST_TIMEOUT_SCALE: "6"
-        run: |
-          env -u GOFLAGS -u GOMEMLIMIT ./run.bash --no-rebuild \
-            2>&1 | tee "$RUNNER_TEMP/compiler-stability-upstream/regression.log"
       - name: "Retain compiler validation logs"
         if: always()
         uses: "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02" # v4.6.2
         with:
-          name: "compiler-stability-${{ matrix.suite }}-${{ github.run_id }}-${{ github.run_attempt }}"
-          path: "${{ runner.temp }}/compiler-stability-${{ matrix.suite }}"
+          name: "compiler-stability-focused-${{ github.run_id }}-${{ github.run_attempt }}"
+          path: "${{ runner.temp }}/compiler-stability-focused"
           if-no-files-found: warn
           retention-days: 14
