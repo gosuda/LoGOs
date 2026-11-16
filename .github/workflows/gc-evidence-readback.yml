@@ -1,0 +1,64 @@
+name: "GC evidence readback"
+
+"on":
+  push:
+    branches: ["ci/gc-evidence-readback"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  readback:
+    runs-on: "ubuntu-24.04"
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - run: "43829350925"
+            head: "0866c25300d1268d2b4a96fd209a1b6777ad467b"
+          - run: "43829360508"
+            head: "cba52d5d93465a32195e992449c7fe5034c35425"
+    env:
+      EVIDENCE_RUN: "${{ matrix.run }}"
+      EVIDENCE_HEAD: "${{ matrix.head }}"
+    steps:
+      - name: "Verify the completed source run"
+        env:
+          GH_TOKEN: "${{ github.token }}"
+        run: |
+          set -euo pipefail
+          gh api "repos/gosuda/LoGOs/actions/runs/$EVIDENCE_RUN" > run.json
+          jq -e --arg head "$EVIDENCE_HEAD" \
+            '.head_sha == $head and .status == "completed" and .run_attempt == 1' run.json
+      - uses: "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093" # v4.3.0
+        with:
+          github-token: "${{ github.token }}"
+          repository: "gosuda/LoGOs"
+          run-id: "${{ matrix.run }}"
+          name: "gc-g6-${{ matrix.run }}-1"
+          path: "evidence"
+      - name: "Print retained measurement evidence"
+        run: |
+          set -euo pipefail
+          run="evidence/$EVIDENCE_RUN-1-${EVIDENCE_HEAD:0:12}"
+          jq -e --arg head "$EVIDENCE_HEAD" --arg base "45e2f57a37190ba5c10e7888b32671ea631bf393" \
+            '.head == $head and .base == $base' "$run/manifest.json"
+          cat "$run/manifest.json"
+          cat "$run/environment.txt"
+          cat "$run/timing-gate.json"
+          jq -c '.[] | {benchmark, iterations, minimumUsefulSeconds, benchmem, profile, comparison, integration}' "$run/results.json"
+          for version in base head; do
+            printf 'Binary bytes (%s):\n' "$version"
+            cat "$run/$version/binary-bytes.txt"
+            cmp "$run/$version/frozen-tests.sha256" "$run/$version/frozen-tests-after.sha256"
+            cmp "$run/$version/sources.sha256" "$run/$version/sources-after.sha256"
+          done
+          cmp "$run/base/frozen-tests.sha256" "$run/head/frozen-tests.sha256"
+          for profile in "$run"/cases/*/attempt-*/base-profile.txt "$run"/cases/*/attempt-*/head-profile.txt; do
+            test -f "$profile"
+            printf 'CPU profile: %s\n' "$profile"
+            cat "$profile"
+          done
