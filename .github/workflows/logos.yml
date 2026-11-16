@@ -2,15 +2,19 @@ name: "logos"
 
 "on":
   pull_request:
+    paths-ignore:
+      - "**/*.md"
   push:
     branches:
       - "release-branch.go1.27"
+    paths-ignore:
+      - "**/*.md"
 
 permissions:
   contents: "read"
 
 concurrency:
-  group: "logos-${{ github.ref }}"
+  group: "logos-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}"
   cancel-in-progress: true
 
 env:
@@ -28,10 +32,11 @@ env:
 jobs:
   logos:
     name: "${{ matrix.suite }}"
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: "ubuntu-26.04"
     timeout-minutes: 90
     strategy:
-      fail-fast: false
+      fail-fast: true
       matrix:
         include:
           # Share one toolchain build across the shorter suites.
