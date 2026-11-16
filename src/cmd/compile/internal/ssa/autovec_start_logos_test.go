@@ -15,8 +15,9 @@ import (
 // startGuardEvaluator executes the generated integer guard on synthetic values.
 // It never turns the synthetic addresses into Go pointers.
 type startGuardEvaluator struct {
-	t      *testing.T
-	inputs map[*Value]uint64
+	t            *testing.T
+	inputs       map[*Value]uint64
+	paniconfault bool
 }
 
 func (e startGuardEvaluator) integer(v *Value) uint64 {
@@ -49,6 +50,10 @@ func (e startGuardEvaluator) integer(v *Value) uint64 {
 
 func (e startGuardEvaluator) boolean(v *Value) bool {
 	switch v.Op {
+	case OpNot:
+		return !e.boolean(v.Args[0])
+	case OpSelectN, OpLoad:
+		return (autovecGuardEvaluator{t: e.t, inputs: e.inputs, paniconfault: e.paniconfault}).faultState(v)
 	case OpLess64:
 		return int64(e.integer(v.Args[0])) < int64(e.integer(v.Args[1]))
 	case OpLess64U:
@@ -151,7 +156,7 @@ func TestLogosAutovecInvariantStartAndAliasGuard(t *testing.T) {
 							if safe {
 								want.Add(want, count)
 							}
-							eval := startGuardEvaluator{t, map[*Value]uint64{
+							eval := startGuardEvaluator{t: t, inputs: map[*Value]uint64{
 								start:               uint64(b.start),
 								fun.values["limit"]: uint64(b.limit),
 								fun.values["dst"]:   dst,
@@ -160,6 +165,10 @@ func TestLogosAutovecInvariantStartAndAliasGuard(t *testing.T) {
 							if got := int64(eval.integer(bound)); got != want.Int64() {
 								t.Fatalf("start=%d limit=%d dst=%#x src=%#x: bound=%d, want %s",
 									b.start, b.limit, dst, source, got, want)
+							}
+							eval.paniconfault = true
+							if got := int64(eval.integer(bound)); got != b.start {
+								t.Fatalf("fault recovery with start=%d limit=%d: bound=%d, want start", b.start, b.limit, got)
 							}
 						}
 					}

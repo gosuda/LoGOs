@@ -123,7 +123,7 @@ func TestLogosAutovecExpressions(t *testing.T) {
 					} else if len(fun.values["sum"].Args) == 2 {
 						scalarCount := vector.Args[1]
 						if scalarCount.Op != OpConst64 || scalarCount.AuxInt != count ||
-							scalarCount.Type != fun.f.Config.Types.UInt64 || scalarCount.Block != fun.blocks["entry"] {
+							scalarCount.Type != fun.f.Config.Types.UInt64 || scalarCount.Block != fun.blocks["header"].Preds[0].b.Preds[0].b {
 							t.Fatalf("vector shift count was not preserved as a predecessor scalar: %s", scalarCount.LongString())
 						}
 					}

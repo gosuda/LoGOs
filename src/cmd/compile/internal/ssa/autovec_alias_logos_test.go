@@ -15,8 +15,9 @@ import (
 // the emitted alias guard. Pointer arguments are synthetic addresses; they are
 // never converted to Go pointers or dereferenced.
 type autovecGuardEvaluator struct {
-	t      *testing.T
-	inputs map[*Value]uint64
+	t            *testing.T
+	inputs       map[*Value]uint64
+	paniconfault bool
 }
 
 func (e autovecGuardEvaluator) integer(v *Value) uint64 {
@@ -47,6 +48,10 @@ func (e autovecGuardEvaluator) integer(v *Value) uint64 {
 
 func (e autovecGuardEvaluator) boolean(v *Value) bool {
 	switch v.Op {
+	case OpNot:
+		return !e.boolean(v.Args[0])
+	case OpSelectN, OpLoad:
+		return e.faultState(v)
 	case OpLess64U:
 		return e.integer(v.Args[0]) < e.integer(v.Args[1])
 	case OpLeq64U:
@@ -61,6 +66,38 @@ func (e autovecGuardEvaluator) boolean(v *Value) bool {
 		e.t.Fatalf("unexpected Boolean operation in alias guard: %s", v.LongString())
 		return false
 	}
+}
+
+func (e autovecGuardEvaluator) faultState(v *Value) bool {
+	var call *Value
+	switch v.Op {
+	case OpSelectN:
+		call = v.Args[0]
+		if v.AuxInt != 0 || !v.Type.IsBoolean() {
+			e.t.Fatalf("invalid register fault-state result: %s", v.LongString())
+		}
+	case OpLoad:
+		mem := v.Args[1]
+		if mem.Op != OpSelectN || mem.AuxInt != 0 || !v.Type.IsBoolean() {
+			e.t.Fatalf("invalid stack fault-state result: %s", v.LongString())
+		}
+		call = mem.Args[0]
+	}
+	if call.Op != OpStaticCall || call.Aux.(*AuxCall).Fn.Name != "logosAutovecPanicOnFault" {
+		e.t.Fatalf("unexpected Boolean source in vector guard: %s", v.LongString())
+	}
+	aux := call.Aux.(*AuxCall)
+	if v.Op == OpSelectN {
+		if len(aux.RegsOfResult(0)) != 1 {
+			e.t.Fatal("fault-state selector does not name a register result")
+		}
+	} else {
+		addr := v.Args[0]
+		if len(aux.RegsOfResult(0)) != 0 || addr.Op != OpOffPtr || addr.Args[0].Op != OpSP || addr.AuxInt != aux.OffsetOfResult(0) {
+			e.t.Fatalf("fault-state load does not use its ABI result slot: %s", addr.LongString())
+		}
+	}
+	return e.paniconfault
 }
 
 func TestLogosAutovecAliasGuardAddresses(t *testing.T) {
@@ -152,7 +189,7 @@ func TestLogosAutovecAliasGuardAddresses(t *testing.T) {
 								dstEnd := new(big.Int).Add(dstStart, span)
 								srcEnd := new(big.Int).Add(srcStart, span)
 								wantSafe := dst == src || dstEnd.Cmp(srcStart) <= 0 || srcEnd.Cmp(dstStart) <= 0
-								eval := autovecGuardEvaluator{t, map[*Value]uint64{
+								eval := autovecGuardEvaluator{t: t, inputs: map[*Value]uint64{
 									fun.values["dst"]:   dst,
 									fun.values["src"]:   src,
 									fun.values["limit"]: uint64(count),

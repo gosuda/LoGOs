@@ -28,7 +28,7 @@ func autovecTestLoop(t *testing.T, arch string) fun {
 	t.Helper()
 	c := testConfigArch(t, arch)
 	typ := &c.config.Types
-	return c.Fun("entry",
+	fn := c.Fun("entry",
 		Bloc("entry",
 			Valu("mem", OpInitMem, types.TypeMem, 0, nil),
 			Valu("dst", OpArg, typ.UInt32Ptr, 0, nil),
@@ -54,6 +54,8 @@ func autovecTestLoop(t *testing.T, arch string) fun {
 			Valu("next", OpAdd64, typ.Int64, 0, nil, "index", "one"),
 			Goto("header")),
 		Bloc("exit", Exit("loopmem")))
+	fn.f.ABIDefault = c.config.ABI1
+	return fn
 }
 
 func autovecVectorStores(f *Func) int {
