@@ -33,6 +33,32 @@
    "status": "triaged",
    "title": "Round-3 deep dogfood: lsp/context/eject verified; lint phase-gating documented",
    "detail": "logos lsp (gopls proxy) verified end-to-end on .lgo: didSave publishes 'undefined: undefinedFunction' mapped to the .lgo URI. logos context resolves std/dep/.lgo/generic symbols correctly. logos eject lowers ?, errdefer, go group, and yield generators to stock Go that vets clean and runs correctly. Key lint semantics verified: deny-severity diagnostics are compiler-stage errors flushed before ExitIfErrors, which gates the type-dependent registry checks (unbounded_channel_op, defer_erases_errdefer_state) — a file/package with any compiler-stage deny gets only those findings until fixed and re-linted (phased reporting, matches irgen ExitIfErrors design). logos lint silently skips the toolchain's own cmd module because cmd/... packages classify Standard with nil Module (same boundary as std). gglint self-dogfood on src/cmd (2244 findings, 33 analyzers, zero crashes). New corpus coverage: adversarial-lgo/{denied,checks} split attacks by phase so all rule families get exercised."
+  },
+  {
+   "id": "L-GAP-1",
+   "severity": "low",
+   "status": "triaged",
+   "title": "logos lint never lints _test.go files (coverage gap vs go vet)",
+   "detail": "work/lintActor compiles only p.GoFiles (work/logos_lint.go:78); TestGoFiles/XTestGoFiles are never linted. A package of only _test.go gets rc=0 silently, and violations inside _test.go of a normal package never surface — gglint flags them (goroutine leak in test caught on the same probe). go vet covers test files. The SPEC _test.go exemption in pedantic::unsafe_outside_unsafe_file (Sec 1.2) implies test files were meant to be linted. Candidate design gap: either extend LintAction to test variants or document the exclusion.",
+   "files": [
+    "src/cmd/go/internal/work/logos_lint.go"
+   ],
+   "found_via": "extreme-scenario grill: test-only package probe"
+  },
+  {
+   "id": "L-GAP-2",
+   "severity": "low",
+   "status": "triaged",
+   "title": "-json-diagnostics mixes raw-text errors with JSON diagnostics on stderr",
+   "detail": "Scanner/loader-level errors (illegal UTF-8 encoding, build constraints exclude all files, import cycle, ambiguous import) print as raw 'file:line: message' text on the same stderr stream as -json-diagnostics output. A consumer parsing line-delimited JSON chokes on these lines. Options: wrap them in the diagnostic envelope or document that the stream is JSON-per-line only for lint findings.",
+   "found_via": "extreme-scenario grill: invalid-UTF-8 .lgo probe"
+  },
+  {
+   "id": "L-TRIAGE-4",
+   "severity": "info",
+   "status": "triaged",
+   "title": "Extreme-scenario grill: all else clean",
+   "detail": "Verified: 8-way concurrent logos lint and gglint on same module (byte-identical outputs, no cache races), lint+build race clean, go.work workspace linting (GOWORK=off gives descriptive error), cross-GOOS lint (windows file linted only under GOOS=windows), mixed .go+.lgo package -> correctness::mixed_package, CRLF/BOM .lgo linted with correct positions, invalid UTF-8 -> descriptive error, import cycle / ambiguous stdlib-collision import / bad replace / future go directive -> descriptive errors, cgo-only and asm packages linted, 3814-line file with 3004-line function + 150-deep nesting linted fine (cognitive score 11325), recursive interface types rejected, SIGINT mid-lint exits rc=1 with no cache corruption."
   }
  ]
 }
