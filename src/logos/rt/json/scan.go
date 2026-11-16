@@ -466,6 +466,16 @@ func methodlessType(t reflect.Type) reflect.Type {
 		fields := make([]reflect.StructField, 0, t.NumField())
 		for i := 0; i < t.NumField(); i++ {
 			f := t.Field(i)
+			if f.Anonymous && f.PkgPath != "" {
+				// reflect.StructOf cannot represent an unexported
+				// embedded field, and clearing either attribute
+				// changes the type identity Convert relies on. Keep
+				// the original type: its decode dispatches the
+				// streaming method once more, and the method's
+				// decline still falls through to the plain decode
+				// this view exists to run.
+				return t
+			}
 			f.Index = nil
 			f.Offset = 0
 			fields = append(fields, f)
@@ -487,8 +497,11 @@ func (s *Scanner) decodePlain[T any](raw []byte, dst *T) {
 	st := methodlessType(t)
 	mv := reflect.New(st)
 	mv.Elem().Set(reflect.ValueOf(dst).Elem().Convert(st))
-	if s.decodeRaw(raw, mv.Interface()) {
-		reflect.ValueOf(dst).Elem().Set(mv.Elem().Convert(t))
+	ok := s.decodeRaw(raw, mv.Interface())
+	// Decoding is not transactional: fields decoded before an error stay
+	// visible in dst, so the view copies back on failure too.
+	reflect.ValueOf(dst).Elem().Set(mv.Elem().Convert(t))
+	if ok {
 		return
 	}
 	if ute, ok := s.saved.(*stdjson.UnmarshalTypeError); ok && ute.Type == st {
@@ -516,21 +529,23 @@ func FallbackFromPtr[E any](s *Scanner, dst **E) {
 		*dst = nil
 		return
 	}
+	// A nil pointer allocates its element before the value decodes, the
+	// way encoding/json does; the token then decodes into the existing
+	// object so aliases observe the update.
+	if *dst == nil {
+		*dst = new(E)
+	}
 	t := reflect.TypeFor[E]()
 	st := methodlessType(t)
 	mv := reflect.New(st)
-	if *dst != nil {
-		mv.Elem().Set(reflect.ValueOf(*dst).Elem().Convert(st))
-	}
-	if !s.decodeRaw(s.data[s.start:s.end], mv.Interface()) {
+	mv.Elem().Set(reflect.ValueOf(*dst).Elem().Convert(st))
+	ok := s.decodeRaw(s.data[s.start:s.end], mv.Interface())
+	reflect.ValueOf(*dst).Elem().Set(mv.Elem().Convert(t))
+	if !ok {
 		if ute, ok := s.saved.(*stdjson.UnmarshalTypeError); ok && ute.Type == st {
 			ute.Type = t
 		}
-		return
 	}
-	pv := reflect.New(t)
-	pv.Elem().Set(mv.Elem().Convert(t))
-	*dst = pv.Interface().(*E)
 }
 
 func (s *Scanner) decodeRaw(raw []byte, dst any) bool {

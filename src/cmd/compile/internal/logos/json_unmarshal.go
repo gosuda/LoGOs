@@ -131,11 +131,11 @@ func (js *jsonStruct) valueLines(f *jsonField) []string {
 				case hasUnmarshalText(f.typ):
 					fallback = js.quotedMethodCall(f, field, "QuotedText", "QuotedTextPtr")
 				default:
-					if kind, ok := fallbackScalarKind(f.typ); ok {
-						fallback = f.fallbackQuotedValueLines(field, kind)
-					} else {
-						fallback = js.declinedFallbackLines(f, field)
+					kind, ok := fallbackScalarKind(f.typ)
+					if !ok {
+						base.Fatalf("logos: ,string fallback field %s has no scalar kind", f.goName)
 					}
+					fallback = f.fallbackQuotedValueLines(field, kind)
 				}
 				return ifLines(js.quotedFromHead(f, field), fallback)
 			}
@@ -162,18 +162,6 @@ func (js *jsonStruct) quotedMethodCall(f *jsonField, field, valueName, ptrName s
 		return []string{fmt.Sprintf("%s.%s[%s](&_logos_s, &%s)", jsonAlias, ptrName, elem, field)}
 	}
 	return []string{fmt.Sprintf("%s.%s(&_logos_s, &%s)", jsonAlias, valueName, field)}
-}
-
-// declinedFallbackLines emits the catch-all leg that runs only after
-// UnmarshalJSONFrom declined the value: the FallbackFrom helpers decode
-// through a methodless view so encoding/json cannot dispatch the
-// declined streaming method a second time.
-func (js *jsonStruct) declinedFallbackLines(f *jsonField, field string) []string {
-	if p, isPtr := unaliasConstView(f.typ).(*types2.Pointer); isPtr {
-		elem := types2.TypeString(unaliasConstView(p.Elem()), js.qualify)
-		return []string{fmt.Sprintf("%s.FallbackFromPtr[%s](&_logos_s, &%s)", jsonAlias, elem, field)}
-	}
-	return []string{fmt.Sprintf("%s.FallbackFrom(&_logos_s, &%s)", jsonAlias, field)}
 }
 
 func (js *jsonStruct) quotedFromHead(f *jsonField, field string) string {

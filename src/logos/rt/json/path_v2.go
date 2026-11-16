@@ -103,12 +103,24 @@ func unquoteStringContent(item string) (string, bool) {
 
 var quotedNullLiteral = []byte(`"null"`)
 
+// rejectMethodUnsupported mirrors wrapErrUnsupported: only streaming
+// methods may decline a value with errors.ErrUnsupported; a classic
+// method returning it reports a misuse error instead.
+func rejectMethodUnsupported(err error, what string) error {
+	if errors.Is(err, errors.ErrUnsupported) {
+		return errors.New(what + " may not return errors.ErrUnsupported")
+	}
+	return err
+}
+
 func QuotedJSON[T stdjson.Unmarshaler](s *Scanner, dst T) {
 	if s.scalar() == 0 {
 		return
 	}
-	tok := s.data[s.start:s.end]
-	s.saveMethodError(dst.UnmarshalJSON(tok))
+	// Cap the slice so an appending method cannot overwrite the rest of
+	// the document.
+	tok := s.data[s.start:s.end:s.end]
+	s.saveMethodError(rejectMethodUnsupported(dst.UnmarshalJSON(tok), "UnmarshalJSON method"))
 }
 
 func QuotedJSONPtr[E any, T interface {
@@ -118,7 +130,7 @@ func QuotedJSONPtr[E any, T interface {
 	if s.scalar() == 0 {
 		return
 	}
-	tok := s.data[s.start:s.end]
+	tok := s.data[s.start:s.end:s.end]
 	if s.kind == 'n' {
 		*dst = nil
 		return
@@ -126,7 +138,7 @@ func QuotedJSONPtr[E any, T interface {
 	if *dst == nil {
 		*dst = new(E)
 	}
-	err := (*dst).UnmarshalJSON(tok)
+	err := rejectMethodUnsupported((*dst).UnmarshalJSON(tok), "UnmarshalJSON method")
 	s.saveMethodError(err)
 	if err == nil && bytes.Equal(tok, quotedNullLiteral) {
 		*dst = nil
@@ -166,13 +178,13 @@ func QuotedText[T encoding.TextUnmarshaler](s *Scanner, dst T) {
 	if s.scalar() == 0 {
 		return
 	}
-	tok := s.data[s.start:s.end]
+	tok := s.data[s.start:s.end:s.end]
 	if s.kind == 'n' {
 		return
 	}
 	if len(tok) > 0 && tok[0] == '"' {
 		if unq, err := jsontext.AppendUnquote(nil, tok); err == nil {
-			s.saveMethodError(dst.UnmarshalText(unq))
+			s.saveMethodError(rejectMethodUnsupported(dst.UnmarshalText(unq), "UnmarshalText method"))
 			return
 		}
 	}
@@ -190,7 +202,7 @@ func QuotedTextPtr[E any, T interface {
 	if s.scalar() == 0 {
 		return
 	}
-	tok := s.data[s.start:s.end]
+	tok := s.data[s.start:s.end:s.end]
 	if s.kind == 'n' {
 		*dst = nil
 		return
@@ -200,7 +212,7 @@ func QuotedTextPtr[E any, T interface {
 			*dst = new(E)
 		}
 		if unq, err := jsontext.AppendUnquote(nil, tok); err == nil {
-			err = (*dst).UnmarshalText(unq)
+			err = rejectMethodUnsupported((*dst).UnmarshalText(unq), "UnmarshalText method")
 			s.saveMethodError(err)
 			if err == nil && bytes.Equal(tok, quotedNullLiteral) {
 				*dst = nil

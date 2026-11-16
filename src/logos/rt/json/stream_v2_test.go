@@ -11,6 +11,7 @@ import (
 	"encoding/json/jsontext"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -297,5 +298,181 @@ func TestStreamProtocolErrorMatchesEncodingJSON(t *testing.T) {
 		checkStreamFallback[*streamUnsupportedMutatedProbe](t, in, func(g *streamTarget[*streamUnsupportedMutatedProbe]) any { return &g.V })
 		checkStreamFallback[streamNoConsumeProbe](t, in, func(g *streamTarget[streamNoConsumeProbe]) any { return &g.V })
 		checkStreamFallback[*streamNoConsumeProbe](t, in, func(g *streamTarget[*streamNoConsumeProbe]) any { return &g.V })
+	}
+}
+
+// streamDeclinePartialProbe decodes fields of a struct through the
+// methodless fallback: valid writes must survive a later field error,
+// matching encoding/json's non-transactional decode.
+type streamDeclinePartialProbe struct {
+	Calls int `json:"-"`
+	A     int
+	B     int
+}
+
+func (p *streamDeclinePartialProbe) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
+	p.Calls++
+	return errors.ErrUnsupported
+}
+
+func TestFallbackFromKeepsPartialUpdates(t *testing.T) {
+	data := `{"v":{"A":1,"B":"bad"},"after":17}`
+	var got, want streamTarget[streamDeclinePartialProbe]
+	s := NewScanner([]byte(data), (*streamTarget[streamDeclinePartialProbe])(nil))
+	s.Object()
+	for s.Next() {
+		switch s.Key() {
+		case "v":
+			if !QuotedFrom[streamDeclinePartialProbe](&s, &got.V) {
+				FallbackFrom(&s, &got.V)
+			}
+		case "after":
+			Int(&s, &got.After)
+		}
+	}
+	wantErr := stdjson.Unmarshal([]byte(data), &want)
+	if !sameError(s.End(), wantErr) {
+		t.Fatalf("End() = %v, encoding/json = %v", s.End(), wantErr)
+	}
+	if got.V.A != 1 || got.V.B != 0 {
+		t.Fatalf("partial decode lost: got %#v", got.V)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("value = %#v, encoding/json = %#v", got, want)
+	}
+}
+
+func TestFallbackFromPtrPreservesExistingAlias(t *testing.T) {
+	data := `{"v":{"Text":"x"},"after":17}`
+	shared := &streamDeclineOnlyProbe{Text: "seed"}
+	alias := shared
+	var got struct {
+		V     *streamDeclineOnlyProbe `json:"v"`
+		After int                     `json:"after"`
+	}
+	got.V = shared
+	s := NewScanner([]byte(data), (*streamDeclineOnlyProbe)(nil))
+	s.Object()
+	for s.Next() {
+		switch s.Key() {
+		case "v":
+			if !QuotedFromPtr[streamDeclineOnlyProbe](&s, &got.V) {
+				FallbackFromPtr[streamDeclineOnlyProbe](&s, &got.V)
+			}
+		case "after":
+			Int(&s, &got.After)
+		}
+	}
+	if err := s.End(); err != nil {
+		t.Fatal(err)
+	}
+	if got.V != alias {
+		t.Fatalf("pointer replaced: got %p, alias %p", got.V, alias)
+	}
+	if alias.Text != "x" {
+		t.Fatalf("alias did not observe update: Text = %q", alias.Text)
+	}
+}
+
+type quotedUnsupportedJSONProbe struct{}
+
+func (p *quotedUnsupportedJSONProbe) UnmarshalJSON(b []byte) error {
+	return errors.ErrUnsupported
+}
+
+func TestQuotedJSONUnsupportedMethodIsMisuse(t *testing.T) {
+	data := `{"v":"x","after":17}`
+	var got struct {
+		V     quotedUnsupportedJSONProbe `json:"v"`
+		After int                        `json:"after"`
+	}
+	s := NewScanner([]byte(data), nil)
+	s.Object()
+	for s.Next() {
+		switch s.Key() {
+		case "v":
+			QuotedJSON(&s, &got.V)
+		case "after":
+			Int(&s, &got.After)
+		}
+	}
+	err := s.End()
+	if err == nil || !strings.Contains(err.Error(), "UnmarshalJSON method may not return errors.ErrUnsupported") {
+		t.Fatalf("End() = %v", err)
+	}
+}
+
+type quotedAppendProbe struct {
+	Token []byte
+}
+
+func (p *quotedAppendProbe) UnmarshalJSON(b []byte) error {
+	p.Token = append(b, 'x')
+	return nil
+}
+
+func TestQuotedJSONMethodInputIsCapped(t *testing.T) {
+	data := `{"v":"7","after":17}`
+	var got struct {
+		V     quotedAppendProbe `json:"v"`
+		After int               `json:"after"`
+	}
+	s := NewScanner([]byte(data), nil)
+	s.Object()
+	for s.Next() {
+		switch s.Key() {
+		case "v":
+			QuotedJSON(&s, &got.V)
+		case "after":
+			Int(&s, &got.After)
+		}
+	}
+	if err := s.End(); err != nil {
+		t.Fatal(err)
+	}
+	if string(got.V.Token) != `"7"x` || got.After != 17 {
+		t.Fatalf("got %#v after %d", got.V, got.After)
+	}
+}
+
+// streamDeclineEmbedProbe has an unexported embedded field, a shape
+// reflect.StructOf cannot rebuild without its methods. The fallback
+// decodes through the type itself instead: the streaming method sees
+// one more decline, and the promoted fields still decode.
+type streamDeclineEmbedInner struct {
+	A int
+}
+
+type streamDeclineEmbedProbe struct {
+	Calls int `json:"-"`
+	streamDeclineEmbedInner
+	B int
+}
+
+func (p *streamDeclineEmbedProbe) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
+	p.Calls++
+	return errors.ErrUnsupported
+}
+
+func TestFallbackFromUnexportedEmbedDecodes(t *testing.T) {
+	data := `{"v":{"A":1,"B":2},"after":17}`
+	var got streamTarget[streamDeclineEmbedProbe]
+	s := NewScanner([]byte(data), (*streamDeclineEmbedProbe)(nil))
+	s.Object()
+	for s.Next() {
+		switch s.Key() {
+		case "v":
+			if !QuotedFrom[streamDeclineEmbedProbe](&s, &got.V) {
+				FallbackFrom(&s, &got.V)
+			}
+		case "after":
+			Int(&s, &got.After)
+		}
+	}
+	if err := s.End(); err != nil {
+		t.Fatal(err)
+	}
+	if got.V.A != 1 || got.V.B != 2 || got.After != 17 {
+		t.Fatalf("got %#v", got)
 	}
 }
