@@ -3,15 +3,14 @@
 
 from __future__ import annotations
 
-import argparse
-import json
 import sys
 from pathlib import Path
 from typing import cast
 
-# Reuse the separately tested exact event parser and subprocess capture.
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tagged-method-facts"))
-import check_ci as method_gate
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import native_frozen_gate as native_gate
+
+method_gate = native_gate.method_gate
 
 DIRECTORY = "logos-doc/validation/field-offset-lint"
 PRODUCTION = "src/cmd/compile/internal/logos/lint/rule_arena_pointer_escape.go"
@@ -49,90 +48,25 @@ def frozen(repo: Path) -> tuple[tuple[str, ...], frozenset[str], str, str]:
     )
 
 
-def run(repo: Path, out: Path) -> bool:
-    phases: list[dict[str, object]] = []
-    report: dict[str, object] = {"accepted": False, "complete": False, "phases": phases}
-    before: dict[str, object] | None = None
-    inputs: tuple[str, ...] = ()
-    try:
-        paths, names, negative_name, diagnostic = frozen(repo)
-        inputs = (*paths, PRODUCTION, f"{DIRECTORY}/field_offset_ci.py")
-        before = method_gate.identity(repo, inputs)
-        method_gate.write_json(out / "before.json", before)
-        if before["tracked_status"]:
-            raise ValueError("tracked checkout files are modified")
-        checks = (
-            method_gate.Check(
-                "old-rule",
-                PACKAGE,
-                frozenset(("TestArenaFieldOffset", negative_name)),
-                (negative_name, diagnostic),
-                (PRODUCTION, f"{DIRECTORY}/old-rule.go.txt"),
-            ),
-            method_gate.Check("candidate", PACKAGE, names),
-        )
-        env = method_gate.environment(repo)
-        for check in checks:
-            overlay_flags: tuple[str, ...] = ()
-            if check.overlay is not None:
-                source, old = check.overlay
-                overlay = out / "old-rule.overlay.json"
-                method_gate.write_json(
-                    overlay,
-                    {
-                        "Replace": {
-                            str(method_gate.rooted(repo, source)): str(
-                                method_gate.rooted(repo, old)
-                            )
-                        }
-                    },
+def suite(repo: Path) -> native_gate.FrozenSuite:
+    paths, names, negative_name, diagnostic = frozen(repo)
+    return native_gate.FrozenSuite(
+        inputs=paths,
+        observed=(PRODUCTION, f"{DIRECTORY}/field_offset_ci.py"),
+        phases=(
+            native_gate.Phase(
+                method_gate.Check(
+                    "old-rule",
+                    PACKAGE,
+                    frozenset(("TestArenaFieldOffset", negative_name)),
+                    (negative_name, diagnostic),
+                    (PRODUCTION, f"{DIRECTORY}/old-rule.go.txt"),
                 )
-                overlay_flags = (f"-overlay={overlay}",)
-            command = (
-                str(repo / "bin/go"),
-                "test",
-                "-json",
-                "-count=1",
-                "-p=1",
-                "-parallel=1",
-                "-vet=off",
-                "-timeout=10m",
-                *overlay_flags,
-                check.package,
-                "-run",
-                check.pattern(),
-            )
-            phases.append(method_gate.capture(command, repo, out, check, env, 660))
-        report["complete"] = len(phases) == len(checks)
-        report["accepted"] = all(phase["accepted"] is True for phase in phases)
-    except (OSError, TypeError, ValueError) as error:
-        report["rejection"] = str(error)
-    finally:
-        if before is not None:
-            try:
-                frozen(repo)
-                after = method_gate.identity(repo, inputs)
-                method_gate.write_json(out / "after.json", after)
-                if after != before:
-                    raise ValueError("source, frozen input, or installed tool changed")
-            except (OSError, TypeError, ValueError) as error:
-                report["accepted"] = False
-                report["identity_rejection"] = str(error)
-        method_gate.write_json(out / "report.json", report)
-        print(json.dumps(report, indent=2), flush=True)
-    return report["accepted"] is True and report["complete"] is True
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--repo", type=Path, required=True)
-    parser.add_argument("--evidence", type=Path, required=True)
-    args = parser.parse_args()
-    repo: Path = args.repo.resolve(strict=True)
-    out: Path = args.evidence.resolve()
-    out.mkdir(parents=True, exist_ok=False)
-    raise SystemExit(0 if run(repo, out) else 1)
+            ),
+            native_gate.Phase(method_gate.Check("candidate", PACKAGE, names)),
+        ),
+    )
 
 
 if __name__ == "__main__":
-    main()
+    native_gate.main(suite, __doc__)

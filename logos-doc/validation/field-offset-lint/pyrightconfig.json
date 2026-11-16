@@ -1,5 +1,5 @@
 {
-  "include": ["field_offset_ci.py", "test_field_offset_ci.py"],
-  "extraPaths": ["../tagged-method-facts"],
+  "include": ["../native_frozen_gate.py", "../test_native_frozen_gate.py", "field_offset_ci.py", "test_field_offset_ci.py"],
+  "extraPaths": ["..", "../tagged-method-facts"],
   "typeCheckingMode": "strict"
 }

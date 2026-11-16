@@ -136,12 +136,12 @@ jobs:
           uv run --no-project --no-config --python 3.12 --no-python-downloads --with-requirements "$helper/test-requirements.txt" pyright "$capability/test_check_ci.py"
           uv run --no-project --no-config --python 3.12 --no-python-downloads --with-requirements "$helper/test-requirements.txt" python -m pytest -q "$host"
           uv run --no-project --no-config --python 3.12 --no-python-downloads --with-requirements "$helper/test-requirements.txt" pyright "$host"/*.py
-          uv run --no-project --no-config --python 3.12 --no-python-downloads --with-requirements "$helper/test-requirements.txt" python -m pytest -q "$offset/test_field_offset_ci.py"
+          uv run --no-project --no-config --python 3.12 --no-python-downloads --with-requirements "$helper/test-requirements.txt" python -m pytest -q "$offset/test_field_offset_ci.py" logos-doc/validation/test_native_frozen_gate.py
           uv run --no-project --no-config --python 3.12 --no-python-downloads --with-requirements "$helper/test-requirements.txt" pyright --project "$offset/pyrightconfig.json"
           uv run --no-project --no-config --python 3.12 --no-python-downloads --with-requirements "$helper/test-requirements.txt" ruff check "$helper/check_ci.py" "$helper/test_check_ci.py" "$method/check_ci.py" "$method/test_check_ci.py" "$capability/test_check_ci.py" "$host"/*.py
           uv run --no-project --no-config --python 3.12 --no-python-downloads --with-requirements "$helper/test-requirements.txt" ruff format --check "$helper/check_ci.py" "$helper/test_check_ci.py" "$method/check_ci.py" "$method/test_check_ci.py" "$capability/test_check_ci.py" "$host"/*.py
-          uv run --no-project --no-config --python 3.12 --no-python-downloads --with-requirements "$helper/test-requirements.txt" ruff check "$offset"/*.py
-          uv run --no-project --no-config --python 3.12 --no-python-downloads --with-requirements "$helper/test-requirements.txt" ruff format --check "$offset"/*.py
+          uv run --no-project --no-config --python 3.12 --no-python-downloads --with-requirements "$helper/test-requirements.txt" ruff check "$offset"/*.py logos-doc/validation/native_frozen_gate.py logos-doc/validation/test_native_frozen_gate.py
+          uv run --no-project --no-config --python 3.12 --no-python-downloads --with-requirements "$helper/test-requirements.txt" ruff format --check "$offset"/*.py logos-doc/validation/native_frozen_gate.py logos-doc/validation/test_native_frozen_gate.py
           shellcheck "$capability/check_ci.sh" .github/scripts/logos-test-env.sh
       - name: "Build the toolchain"
         run: |
