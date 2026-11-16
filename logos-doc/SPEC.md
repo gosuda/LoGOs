@@ -231,6 +231,8 @@ Other uses MUST fail with `correctness::errdefer_needs_error_result` [T-104.2].
 `errdefer` MUST run when the frame panics, exits through Goexit, or holds a non-nil error result at pop time [T-104.2].
 A typed-nil error MUST count as non-nil for `errdefer` [T-104.2].
 The function, receiver, and arguments of a deferred call MUST be evaluated at the statement [T-104.2].
+An indexed function value MUST be captured at that statement, including when its callee expression is parenthesized. [T-104.2]
+An `errdefer` MUST evaluate the index and function value even when cleanup is skipped after a successful return. [T-104.2]
 A `?.` call with an absent receiver MUST skip the call and MUST NOT evaluate its arguments, as an ordinary call and in a `defer` or `go` statement [T-104.3][T-104.2].
 A panic while evaluating return values MUST count as failure for `errdefer` [T-104.2].
 Deferred calls MUST run in LIFO order across `defer`, `defer?`, and `errdefer` [T-104.2].
@@ -1836,6 +1838,7 @@ For the `scope` token rule, see Sec 4.1. [T-0.2]
 `scope defer f()` MUST run `f` at block exit. [T-104.7]
 Scope defers in one block MUST run last-in-first-out. [T-104.7]
 The function, receiver, and arguments MUST evaluate at the statement. [T-104.7]
+An indexed function value MUST be captured before control continues past the `scope defer` statement. [T-104.7]
 `return`, `break`, `continue`, labeled `break`, and `goto` out of the block MUST run scope defers first. [T-104.7]
 A panic MUST run scope defers during unwinding. [T-104.7]
 A scope defer in a loop body MUST run every iteration. [T-104.7]

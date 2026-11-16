@@ -68,7 +68,7 @@ func (fc *funcLower) planCall(call *syntax.CallExpr) (*callPlan, bool) {
 	}
 	plan := &callPlan{dots: call.HasDots, end: split.end}
 	fun := capturePiece{expr: call.Fun}
-	fun.start = fl.off(leftmostOf(call.Fun))
+	fun.start = fl.exprStart(call.Fun)
 	fun.end = lastTokenEnd(src, fun.start, lparen)
 	if _, isType := typeFlagsOf(fl, call.Fun); isType {
 		return nil, false
@@ -124,8 +124,10 @@ func (fc *funcLower) calleeFunc(fun syntax.Expr) (*types2.Func, bool) {
 }
 
 func genericTarget(fc *funcLower, fun syntax.Expr) bool {
-	if _, ok := syntax.Unparen(fun).(*syntax.IndexExpr); ok {
-		return true
+	if index, ok := syntax.Unparen(fun).(*syntax.IndexExpr); ok {
+		// Both indexing and instantiation use IndexExpr. Only a generic
+		// function can remain at the call for argument type inference.
+		fun = index.X
 	}
 	fn, ok := fc.calleeFunc(fun)
 	if !ok {
