@@ -285,7 +285,7 @@ P0 slices are documentation-only. Each carries its named structural Check (count
 |---|---|---|---|
 | T-0.1 | Sec 0.1 | Plain `go` keeps Go language semantics: every valid Go program keeps its Go meaning, the CI process runs `./run.bash --no-rebuild` on the freshly installed toolchain and keeps its suite green as the regression floor, and `go version` and `go help` print the upstream text. Go support stays first-class in every release. Plain `go` MAY differ from the current upstream Go 1.27.4 base in performance, code generation, runtime, and tooling, and every backend, runtime, cgo, and tooling improvement applies to Go packages as well as loGo/s packages under both `go` and `logos` (R-U1). The loGo/s language (`.lgo` recognition and loGo/s syntax and type rules) is selected by the `logos` command; plain `go` ignores `.lgo` files (A-LGOSEL). `logos` builds Go packages with Go semantics: no loGo/s typing rules apply to Go. A module is one kind: all its packages are `.lgo` (a loGo/s module) or all are `.go` (a Go module). The census checks every active package of each module that contributes a loaded source package, including unselected siblings and dependency siblings. It respects tags, overlays, nested modules, wildcard directory exclusions, and vendor/modules.txt ownership. A synthesized command-line package without a resolved module stays outside the census; its module-owned dependencies remain checked. Default logos list rejects census failures in dependencies; -e preserves structured errors. A package is one kind. A workspace may hold both kinds. Imports cross kinds in both directions, per import (R-U2). | M0, M9 |
 | T-0.2 | Sec 0.2 | No new global keywords. Contextual words, valid only in `.lgo`: `errdefer` (statement start, followed by an identifier or `func`), `yield` (statement start inside generator functions), `scope` (immediately before `defer`), `group` (immediately after `go`). `const` gains new positions (`const for/if/switch/func`) that are syntax errors in Go today. Sec 4.1 counts 4 contextual identifiers (errdefer, yield, scope, group). | M1, M6, M7, M8 |
-| T-0.3 | Sec 0.3 | `logos eject -o DIR` (alias `logos build --emit-go=DIR`) writes a complete pure-Go copy of the main module to DIR (must not exist or be empty): `.lgo` files become `.go` files and comments are kept, except that active C-preamble `//logos:cgo_fastcall F` markers become both upstream cgo directives. C imports retain their other preamble content and attachment after formatting; generated Go line directives stay outside it. Package clauses retain their physical Go filename for upstream cgo tooling, and original declaration positions resume after imports even on a shared source line. Direct-C source retains C selectors and types, receives the shared checked-store lowering with original positions, and leaves wrappers, pointer checks and errno rewriting to upstream cgo. Owned composite constants containing C types retain their checked type identity and values. Overlays preserve logical source names and replacement line layouts through one source-identity rewrite. Inactive variant selection validates filename and build constraints through go/build and uses complete constraint-directed custom-tag search without a word-sized mask. Mentioned custom tags may be disabled; unrelated host custom tags remain. An already satisfying host custom-tag assignment stays unchanged. The helper consumes the selected full tag set, including an empty set. Architecture feature implications and experiment facts come from the actual target configuration; the helper receives the real GO$GOARCH setting. Eject never invents architecture, compiler, release, or experiment facts as user tags; explicit feature-shaped user tags retain their Go meaning. Every non-standard loGo/s dependency module is ejected too, into `DIR/_logos_deps/<module path>@<version>/`, with `replace` lines added to `DIR/go.mod` (a Go package that imports a loGo/s package resolves it to the ejected copy, R-U2; the Go-facing signatures of T-Sec5 are the ones eject emits). The support sources (`logos/rt`, `logos/sync`) become one shared module `github.com/gosuda/loGos/rt` in `DIR/_logos_deps/rt` (one type identity for `Option[T]` and friends across ejected modules), with a `replace` line. `import "comptime"` is removed. No `//go:build !logos` line and no in-place coexistence (R-U3). Ejected code builds with an upstream Go 1.27 toolchain. | M1, M20-E-S2, M20-E-S3 |
+| T-0.3 | Sec 0.3 | `logos eject -o DIR` (alias `logos build --emit-go=DIR`) writes a complete pure-Go copy of the main module to DIR (must not exist or be empty): `.lgo` files become `.go` files and comments are kept, except that active C-preamble `//logos:cgo_fastcall F` markers become both upstream cgo directives. C imports retain their other preamble content and attachment after formatting; generated Go line directives stay outside it. Package clauses retain their physical Go filename for upstream cgo tooling, and original declaration positions resume after imports even on a shared source line. Direct-C source retains C selectors and types, receives the shared checked-store lowering with original positions, and leaves wrappers, pointer checks and errno rewriting to upstream cgo. Owned composite constants containing C types retain their checked type identity and values. Overlays preserve logical source names and replacement line layouts through one source-identity rewrite. Completeness includes packages and tests absent from the host load and modules reached only by inactive variants. The module census respects nested modules, ignored paths, and symlinks; actual compiler loads supply emission and declaration provenance. Owned requests and collision checks retain the selected package clause. Inactive variant selection validates filename and build constraints through go/build and uses complete constraint-directed custom-tag search without a word-sized mask. Mentioned custom tags may be disabled; unrelated host custom tags remain. An already satisfying host custom-tag assignment stays unchanged. The helper consumes the selected full tag set, including an empty set. Architecture feature implications and experiment facts come from the actual target configuration; the helper receives the real GO$GOARCH setting. Eject never invents architecture, compiler, release, or experiment facts as user tags; explicit feature-shaped user tags retain their Go meaning. Every non-standard loGo/s dependency module is ejected too, into `DIR/_logos_deps/<module path>@<version>/`, with `replace` lines added to `DIR/go.mod` (a Go package that imports a loGo/s package resolves it to the ejected copy, R-U2; the Go-facing signatures of T-Sec5 are the ones eject emits). The support sources (`logos/rt`, `logos/sync`) become one shared module `github.com/gosuda/loGos/rt` in `DIR/_logos_deps/rt` (one type identity for `Option[T]` and friends across ejected modules), with a `replace` line. `import "comptime"` is removed. No `//go:build !logos` line and no in-place coexistence (R-U3). Ejected code builds with an upstream Go 1.27 toolchain. | M1, M20-E-S2, M20-E-S3, M24 |
 | T-0.4 | Sec 0.4 | Kept as the design axiom; each later section states its own rules; enforced by types (M2, M3, M5) and lints (M9); the lint registry enumerates the enforced lint rules. | all |
 | T-101.1 | RFC-101.1 | Source extensions `.lgo` and the three aliases, recognized only in logos mode. Strip trailing U+FE0E/U+FE0F from the extension before matching. NFC normalization is the identity on all four extension strings (no code point in them decomposes canonically), so no normalizer runs. Two files whose names differ only by alias extension in one package: error `correctness::duplicate_stem_filename`. Alias files cannot be published: module zips reject non-letter symbols (x/mod `zip.go:306-308`); `logos` reports warning `portability::alias_extension` for each alias file when the main module path's first element contains a dot. | M0 |
 | T-101.2 | RFC-101.2 | When the main module is a loGo/s module, an absent `logos.toml [build] cgo` key defaults to `forbid` (`CGO_ENABLED` defaults to 0), but an explicitly set `CGO_ENABLED=0\|1` in the environment overrides that absent-key default. Presence wins: explicit `cgo = "forbid"` stays disabled even with `CGO_ENABLED=1`; explicit `cgo = "restricted"` keeps its `cgo_allowlist` check even with `CGO_ENABLED=1`; explicit `cgo = "allow"` stays enabled even with `CGO_ENABLED=0`; each violation is error `restriction::cgo_usage`. `logos.toml [build] cgo = "forbid" \| "restricted" \| "allow"`; `"restricted"` requires every package with `import "C"` to match `cgo_allowlist` globs. When cgo is enabled, `CC` is unset, and the default C compiler is missing, `logos` and plain `go` MUST use `zig cc -target <zig-arch>-<zig-os>[-musl]` for the build target if `zig` is in PATH (`-musl` only for linux), for Go packages and loGo/s packages alike (R-U1). The build target is the GOOS/GOARCH pair of the build, not the host. A Go main module keeps the upstream default and upstream `CGO_ENABLED` handling; a `cgo` key in a Go module's `logos.toml` has no effect (the policy is loGo/s-only). `go` keeps `cfg.go:171-178` behavior for the `CGO_ENABLED` default. Concern stated once: cgo off switches `net` and `os/user` in the standard library to their pure-Go paths. | M0 |
@@ -4046,8 +4046,8 @@ Anchor: David Parnas, Tony Hoare
   preference, exact-empty helpers, and a brute-force small-formula oracle.
 - Mutation: retain a failed branch assignment. Independent satisfiability cases
   must reject the solver. The final context check remains authoritative.
-- Trace: T-0.3, REDTEAM #415. Inactive-only package discovery remains tracked in
-  [issue #56](https://github.com/gosuda/LoGOs/issues/56).
+- Trace: T-0.3, REDTEAM #415. M24-A-S1 completes inactive-only package discovery
+  for [issue #56](https://github.com/gosuda/LoGOs/issues/56).
 
 ### M24-S6 Share the inliner's batch pass
 
@@ -4063,6 +4063,47 @@ Anchor: David Parnas
   method wrappers, recursion, reassignment, and effects before recovered panic.
 - Selected-fixture compiler output is compared at O0/O1/O2/O3/Os. No execution
   speedup is claimed; the complete upstream suite remains required.
+
+### M24-A-S1 Preserve inactive-only packages
+
+Anchor: Tony Hoare, David Parnas, Richard Feynman
+
+- Contract: complete-module ejection includes packages absent from the host
+  load, their inactive tests, and modules discovered only by alternate loads.
+  A directory census follows ordinary package/module ownership boundaries;
+  it cannot invent checked packages or relabel a missing active build output
+  as an inactive source.
+- Reuse the current helper compiler path with explicit package roots. Return
+  only its actual loaded source inventories and raw staging, including owned
+  sidecars. These inventories extend emission and declaration provenance,
+  never compilation roots. The ordinary module writer assembles the output.
+- Fixed-point invariant: the visited set grows by module-owned source and
+  complete target context. Each tuple is requested once. Every request must
+  produce its canonical staged file; a repeated or missing result fails with
+  the named source. Only actual helper-discovered modules extend the census.
+- Resolve an owned declaration through a load that selected its source file.
+  Match owned requests by import path and package clause, and group collision
+  checks by output directory and package clause. Unknown names, unselected
+  sources, standard-library destinations, and same-package collisions retain
+  their diagnostics. Sort and compact formatter paths before parallel gofmt.
+- Attacks: `inactive_*_test.go`, `logos_eject_inactive_packages.txt`,
+  `logos_eject_inactive_owned.txt`, and
+  `logos_eject_variant_package_names.txt`. They cover empty-host modules,
+  OS/architecture/custom-tag/test-only packages, newly reached dependencies,
+  ignored and nested ownership boundaries, real declaration provenance,
+  formatter uniqueness, and aliased platform-specific package clauses.
+- G1 history: attempt 1 exposed two fixture directory mistakes and duplicate
+  formatting. The production delta was reverted; only fixture paths were
+  corrected in a separate test commit, and a formatter attack was frozen.
+  Attempt 2 passes those attacks. Independent review then established two
+  further semantic REDs for package-clause selection and collision grouping;
+  their rejection controls pass before the repair. Attempt 3 passes the full
+  component suite and all eight command scripts with every frozen hash intact.
+- Evidence: `validation/ejection-completeness/README.md` records native and
+  pristine-Go checks, race/vet/format, caught/restored mutations, and the exact
+  local validation boundary. Integrated full rebuilding and upstream regression
+  gates remain required.
+- Trace: T-0.3, REDTEAM #392, AUD-196; resolves issue #56.
 
 ### M24-A-S2 Keep ejection target facts consistent
 
@@ -4439,6 +4480,7 @@ Written to `tasks/autoplan-ledger.jsonl` by P0-S6. IDs: phase prefix plus a sequ
 {"id": "AUD-191", "description": "M3-A-S19 Resolve the first generic type argument", "phase": "AUD"}
 {"id": "AUD-193", "description": "M11-A-S8 Preserve C type arguments in quoted JSON dispatch", "phase": "AUD"}
 {"id": "AUD-194", "description": "M16-A-S6 Isolate the wasm test execution environment", "phase": "AUD"}
+{"id": "AUD-196", "description": "M24-A-S1 Preserve inactive-only packages", "phase": "AUD"}
 {"id": "AUD-197", "description": "M24-A-S2 Keep ejection target facts consistent", "phase": "AUD"}
 {"id": "AUD-198", "description": "M0-A-S16 Respect the CI action ownership policy", "phase": "AUD"}
 {"id": "AUD-192", "description": "M20-E-S3 Keep checked C types in owned constants", "phase": "AUD"}

@@ -118,10 +118,11 @@ func runEject(ctx context.Context, cmd *base.Command, args []string) {
 
 // ejectModule groups the ejected packages of one module.
 type ejectModule struct {
-	path    string
-	version string
-	dir     string
-	pkgs    []*load.Package
+	path     string
+	version  string
+	dir      string
+	pkgs     []*load.Package
+	required bool // an actual helper load requires this module in the output
 }
 
 // ejectPlan splits the reachable packages into the main module, the
@@ -177,7 +178,13 @@ func ejectToDir(ctx context.Context, out string) {
 	load.ArmLogosEject(staging)
 	defer load.DisarmLogosEject()
 	opts := load.PackageOpts{AutoVCS: true}
-	pkgs := load.PackagesAndErrors(moduleLoader, ctx, opts, []string{"all"})
+	patterns := []string{"all"}
+	if isEjectVariant() {
+		if packages := os.Getenv("LOGOSEJECT_PACKAGES"); packages != "" {
+			patterns = strings.Split(packages, "\n")
+		}
+	}
+	pkgs := load.PackagesAndErrors(moduleLoader, ctx, opts, patterns)
 	load.CheckPackageErrors(pkgs)
 	plan := arrangeEjectPlan(pkgs)
 	builds := collectTestBuilds(moduleLoader, ctx, opts, plan)
@@ -187,14 +194,18 @@ func ejectToDir(ctx context.Context, out string) {
 		stripEjectCopies(builds)
 		buildEjectRoots(moduleLoader, ctx, testBuildMains(builds))
 	}
+	if isEjectVariant() && os.Getenv("LOGOSEJECT_STATE") == "1" {
+		writeVariantState(plan, staging, out)
+		return
+	}
 	var variantOuts []string
 	if !isEjectVariant() {
 		variantOuts = stageInactiveVariantsIntoStaging(ctx, plan, staging)
 	}
 	writeEjectedTree(ctx, plan, staging, out)
-	mergeVariantExtraDeps(out, variantOuts, plan)
 	for _, dir := range variantOuts {
 		_ = os.RemoveAll(dir)
+		_ = os.RemoveAll(variantStatePath(dir))
 	}
 	runEjectGofmt(ctx)
 }
@@ -213,6 +224,8 @@ const ejectGofmtPasses = 3
 
 func runEjectGofmt(ctx context.Context) {
 	files := ejectGofmtFiles
+	slices.Sort(files)
+	files = slices.Compact(files)
 	ejectGofmtFiles = nil
 	gofmtFiles(ctx, "-w", files)
 	for range ejectGofmtPasses {
@@ -376,7 +389,7 @@ func (plan *ejectPlan) addPackage(p *load.Package) {
 func resortEjectPlan(plan *ejectPlan) {
 	plan.deps = nil
 	for _, m := range plan.depByPath {
-		if moduleHasLogos(m) || moduleImportsLogos(m) {
+		if m.required || moduleHasLogos(m) || moduleImportsLogos(m) {
 			plan.deps = append(plan.deps, m)
 		}
 	}
@@ -779,38 +792,6 @@ type inactiveFile struct {
 	name string
 }
 
-// collectInactiveLogosFiles lists every owned .lgo file the host build
-// excluded: IgnoredGoFiles entries that are loGo/s sources, not
-// test-skipped, not //go:build ignore, and missing from host staging.
-// Active files missing from staging are build failures, not variants,
-// so only ignored entries qualify here.
-func collectInactiveLogosFiles(plan *ejectPlan, staging string) []inactiveFile {
-	var out []inactiveFile
-	for _, p := range plan.logos {
-		for _, name := range p.IgnoredGoFiles {
-			if !logosfile.Is(name) {
-				continue
-			}
-			if strings.HasSuffix(logosStem(name), "_test") && !plan.testBuilt[p] {
-				continue
-			}
-			srcData, err := os.ReadFile(filepath.Join(p.Dir, name))
-			if err != nil {
-				base.Fatalf("logos eject: missing inactive source %s: %v", filepath.Join(p.Dir, name), err)
-			}
-			if isBuildIgnored(srcData) {
-				continue
-			}
-			stem := logosStem(name)
-			if _, err := os.Stat(filepath.Join(staging, filepath.FromSlash(p.ImportPath), stem+".go")); err == nil {
-				continue
-			}
-			out = append(out, inactiveFile{pkg: p, name: name})
-		}
-	}
-	return out
-}
-
 // collectConstraintTags appends every tag named by expr.
 func collectConstraintTags(expr constraint.Expr, tags *[]string) {
 	switch e := expr.(type) {
@@ -963,6 +944,12 @@ type variantCtx struct {
 	archName  string
 	archValue string
 	tags      []string
+	packages  []string
+	files     []inactiveFile
+}
+
+func variantKey(vc variantCtx) string {
+	return vc.goos + "\x00" + vc.goarch + "\x00" + vc.archValue + "\x00" + strings.Join(vc.tags, ",")
 }
 
 // variantContextsForFiles groups inactive files by one satisfying
@@ -979,10 +966,16 @@ func variantContextsForFiles(files []inactiveFile) []variantCtx {
 		if !ok {
 			base.Fatalf("logos eject: no build context selects inactive file %s", filepath.Join(f.pkg.Dir, f.name))
 		}
-		key := vc.goos + "\x00" + vc.goarch + "\x00" + vc.archValue + "\x00" + strings.Join(vc.tags, ",")
-		if _, exists := byKey[key]; !exists {
+		key := variantKey(vc)
+		if existing, exists := byKey[key]; exists {
+			vc = existing
+		} else {
 			keys = append(keys, key)
 		}
+		if f.pkg.ImportPath != "" && !slices.Contains(vc.packages, f.pkg.ImportPath) {
+			vc.packages = append(vc.packages, f.pkg.ImportPath)
+		}
+		vc.files = append(vc.files, f)
 		byKey[key] = vc
 	}
 	slices.Sort(keys)
@@ -1018,12 +1011,13 @@ func spawnVariantEjects(ctx context.Context, ctxs []variantCtx) []string {
 		cmd.Stderr = os.Stderr
 		kept := make([]string, 0, len(os.Environ()))
 		for _, kv := range os.Environ() {
-			if strings.HasPrefix(kv, "GOOS=") || strings.HasPrefix(kv, "GOARCH=") || strings.HasPrefix(kv, "LOGOSEJECT_IN_VARIANT=") || strings.HasPrefix(kv, "LOGOSEJECT_TAGS=") || strings.HasPrefix(kv, "GOEXPERIMENT=") || strings.HasPrefix(kv, "CGO_ENABLED=") || vc.archName != "" && strings.HasPrefix(kv, vc.archName+"=") {
+			if strings.HasPrefix(kv, "GOOS=") || strings.HasPrefix(kv, "GOARCH=") || strings.HasPrefix(kv, "LOGOSEJECT_IN_VARIANT=") || strings.HasPrefix(kv, "LOGOSEJECT_TAGS=") || strings.HasPrefix(kv, "LOGOSEJECT_PACKAGES=") || strings.HasPrefix(kv, "LOGOSEJECT_STATE=") || strings.HasPrefix(kv, "GOEXPERIMENT=") || strings.HasPrefix(kv, "CGO_ENABLED=") || vc.archName != "" && strings.HasPrefix(kv, vc.archName+"=") {
 				continue
 			}
 			kept = append(kept, kv)
 		}
-		env := append(kept, "LOGOSEJECT_IN_VARIANT=1")
+		env := append(kept, "LOGOSEJECT_IN_VARIANT=1", "LOGOSEJECT_STATE=1")
+		env = append(env, "LOGOSEJECT_PACKAGES="+strings.Join(vc.packages, "\n"))
 		env = append(env, "GOOS="+vc.goos)
 		env = append(env, "GOARCH="+vc.goarch)
 		if vc.archName != "" {
@@ -1044,204 +1038,40 @@ func spawnVariantEjects(ctx context.Context, ctxs []variantCtx) []string {
 	return dirs
 }
 
-// variantOutFile maps one owned package file to its lowered output in
-// a helper eject tree: main-module packages at the module-relative
-// path, dependency packages under _logos_deps.
-func variantOutFile(variantOut string, plan *ejectPlan, pkg *load.Package, stem string) string {
-	if pkg.Module != nil && pkg.Module.Main {
-		rel, err := filepath.Rel(plan.main.dir, pkg.Dir)
-		if err != nil {
-			return ""
-		}
-		return filepath.Join(variantOut, rel, stem+".go")
-	}
-	if pkg.Module != nil && pkg.Module.Path != "" {
-		ver := pkg.Module.Version
-		mdir := pkg.Module.Dir
-		rel, err := filepath.Rel(mdir, pkg.Dir)
-		if err != nil {
-			return ""
-		}
-		return filepath.Join(variantOut, "_logos_deps", pkg.Module.Path+"@"+ver, rel, stem+".go")
-	}
-	return ""
-}
-
-// stageInactiveVariantsIntoStaging lowers every owned inactive
-// platform/tag variant with the real compiler: it spawns one helper
-// eject per satisfying GOOS/tags context, then copies each inactive
-// file's helper-lowered output into host staging before emission.
-// Host emission then finds every non-ignore file, preserves its build
-// constraints, and accounts support use via the normal rewritten
-// outputs. It returns the helper trees for extra-dependency merging.
+// stageInactiveVariantsIntoStaging reaches a fixed point over owned module
+// inventories. Each source/context request is dispatched once; a successful
+// helper must supply every requested source. Only its actual dependency loads
+// can extend the census, and every helper uses the normal compiler path.
 func stageInactiveVariantsIntoStaging(ctx context.Context, plan *ejectPlan, staging string) []string {
-	files := collectInactiveLogosFiles(plan, staging)
-	ctxs := variantContextsForFiles(files)
-	outs := spawnVariantEjects(ctx, ctxs)
-	for _, f := range files {
-		stem := logosStem(f.name)
-		dst := filepath.Join(staging, filepath.FromSlash(f.pkg.ImportPath), stem+".go")
-		if _, err := os.Stat(dst); err == nil {
-			continue
+	visited := map[string]bool{}
+	var outs []string
+	for {
+		files := collectInactiveLogosFiles(plan, staging)
+		if len(files) == 0 {
+			return outs
 		}
-		copied := false
-		for _, out := range outs {
-			src := variantOutFile(out, plan, f.pkg, stem)
-			if src == "" {
-				continue
-			}
-			data, err := os.ReadFile(src)
-			if err != nil {
-				continue
-			}
-			if err := os.MkdirAll(filepath.Dir(dst), 0777); err != nil {
-				base.Fatalf("logos eject: %v", err)
-			}
-			if err := os.WriteFile(dst, data, 0666); err != nil {
-				base.Fatalf("logos eject: %v", err)
-			}
-			copied = true
-			break
-		}
-		if !copied {
-			base.Fatalf("logos eject: missing ejected output for %s", filepath.Join(f.pkg.Dir, f.name))
-		}
-	}
-	return outs
-}
-
-func copyVariantDir(src, dst string) {
-	entries, err := os.ReadDir(src)
-	if err != nil {
-		base.Fatalf("logos eject: read variant dir %s: %v", src, err)
-	}
-	if err := os.MkdirAll(dst, 0777); err != nil {
-		base.Fatalf("logos eject: %v", err)
-	}
-	for _, e := range entries {
-		s := filepath.Join(src, e.Name())
-		d := filepath.Join(dst, e.Name())
-		if e.IsDir() {
-			copyVariantDir(s, d)
-			continue
-		}
-		info, err := e.Info()
-		if err != nil || !info.Mode().IsRegular() {
-			continue
-		}
-		data, err := os.ReadFile(s)
-		if err != nil {
-			base.Fatalf("logos eject: read variant file %s: %v", s, err)
-		}
-		if err := os.WriteFile(d, data, 0666); err != nil {
-			base.Fatalf("logos eject: write variant file %s: %v", d, err)
-		}
-	}
-}
-
-func variantDirUsesRT(dir string) bool {
-	found := false
-	_ = filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() || found {
-			return nil
-		}
-		if !strings.HasSuffix(d.Name(), ".go") {
-			return nil
-		}
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return nil
-		}
-		if strings.Contains(string(data), rtModulePath) {
-			found = true
-		}
-		return nil
-	})
-	return found
-}
-
-func mergeVariantExtraDeps(mainOut string, variantOuts []string, plan *ejectPlan) {
-	hostDeps := map[string]bool{}
-	for _, m := range plan.deps {
-		hostDeps[m.path+"@"+m.version] = true
-	}
-	var extra []string
-	for _, vout := range variantOuts {
-		depsRoot := filepath.Join(vout, "_logos_deps")
-		entries, err := os.ReadDir(depsRoot)
-		if err != nil {
-			continue
-		}
-		for _, e := range entries {
-			if !e.IsDir() || e.Name() == "rt" {
-				continue
-			}
-			if hostDeps[e.Name()] {
-				continue
-			}
-			dst := filepath.Join(mainOut, "_logos_deps", e.Name())
-			if _, err := os.Stat(dst); err == nil {
-				continue
-			}
-			copyVariantDir(filepath.Join(depsRoot, e.Name()), dst)
-			extra = append(extra, e.Name())
-		}
-	}
-	slices.Sort(extra)
-	mainMod := parseGoModFile(filepath.Join(mainOut, "go.mod"))
-	changed := false
-	for _, name := range extra {
-		path, vers, ok := strings.Cut(name, "@")
-		if !ok || path == "" || vers == "" {
-			continue
-		}
-		needRequire := true
-		for _, r := range mainMod.Require {
-			if r.Mod.Path == path {
-				needRequire = false
-				break
+		contexts := variantContextsForFiles(files)
+		for _, vc := range contexts {
+			for _, f := range vc.files {
+				key := f.pkg.ImportPath + "\x00" + filepath.Join(f.pkg.Dir, f.name) + "\x00" + variantKey(vc)
+				if visited[key] {
+					base.Fatalf("logos eject: variant made no progress for %s", filepath.Join(f.pkg.Dir, f.name))
+				}
+				visited[key] = true
 			}
 		}
-		if needRequire {
-			ensureGoRequire(mainMod, path, vers)
-			changed = true
+		batch := spawnVariantEjects(ctx, contexts)
+		for _, out := range batch {
+			absorbVariantState(plan, out, staging, len(outs))
+			outs = append(outs, out)
 		}
-		needReplace := true
-		for _, r := range mainMod.Replace {
-			if r.Old.Path == path && r.New.Path == "./_logos_deps/"+name {
-				needReplace = false
-				break
+		for _, f := range files {
+			dst := filepath.Join(staging, filepath.FromSlash(f.pkg.ImportPath), logosStem(f.name)+".go")
+			if _, err := os.Stat(dst); err != nil {
+				base.Fatalf("logos eject: missing ejected output for %s: %v", filepath.Join(f.pkg.Dir, f.name), err)
 			}
 		}
-		if needReplace {
-			setGoReplace(mainMod, path, vers, "./_logos_deps/"+name)
-			changed = true
-		}
 	}
-	if changed {
-		writeGoModFile(filepath.Join(mainOut, "go.mod"), mainMod)
-	}
-	ensureVariantSupport(mainOut, variantOuts)
-}
-
-func ensureVariantSupport(mainOut string, variantOuts []string) {
-	rtDst := filepath.Join(mainOut, "_logos_deps", "rt")
-	if _, err := os.Stat(rtDst); err == nil {
-		return
-	}
-	if !variantDirUsesRT(mainOut) {
-		return
-	}
-	for _, vout := range variantOuts {
-		rtSrc := filepath.Join(vout, "_logos_deps", "rt")
-		if _, err := os.Stat(rtSrc); err != nil {
-			continue
-		}
-		copyVariantDir(rtSrc, rtDst)
-		addSupportRequire(filepath.Join(mainOut, "go.mod"), "./_logos_deps/rt")
-		return
-	}
-	base.Fatalf("logos eject: missing support module for merged variants in %s", mainOut)
 }
 
 // isBuildIgnored reports whether source declares an ignore build constraint

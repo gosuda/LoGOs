@@ -156,10 +156,10 @@ this audit.
   scalar values and interface dynamic types. Imported private defaults fail to
   resolve. Option-valued defaults also need correct lowering. A partial literal
   substitution would not preserve all of these semantics.
-- [#56: inactive-only packages](https://github.com/gosuda/LoGOs/issues/56).
-  A package absent from host loading is missing from the ejection plan; its
-  `.lgo` files are removed during copying. The new constraint solver handles
-  variants only inside packages already discovered.
+- [#56: inactive-only packages](https://github.com/gosuda/LoGOs/issues/56) is repaired by M24-A-S1; see [complete-inventory evidence](../ejection-completeness/README.md).
+  The old plan omitted packages absent from host loading and removed their
+  `.lgo` files during copying. The module census now discovers them, and real
+  alternate compiler loads retain their emitted source and owned provenance.
 - [#57: target feature contexts](https://github.com/gosuda/LoGOs/issues/57) is repaired by M24-A-S2; see [target-fact evidence](../ejection-target-facts/README.md) for the separately frozen and verified controls.
   The old selector synthesized `amd64.v3` as a custom tag while its actual
   tool tags remained at v1. The new real-helper controls pin the architecture

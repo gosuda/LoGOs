@@ -85,6 +85,10 @@ The command `logos eject -o DIR` MUST write a complete pure-Go copy of the main 
 The command `logos build --emit-go=DIR` MUST be an alias of `logos eject -o DIR` [T-0.3].
 DIR MUST NOT exist, or DIR MUST be empty; the tool MUST refuse a DIR that exists and holds files [T-0.3].
 Each `.lgo` file MUST become a `.go` file [T-0.3].
+Completeness MUST include packages absent from the requested host build, including inactive-only tests and dependency modules reached only through an inactive variant [T-0.3].
+Source discovery MUST respect package and module ownership boundaries: nested modules, `vendor`, `testdata`, dot-prefixed and underscore-prefixed paths, module ignore rules, and directory symlinks MUST NOT become additional package roots [T-0.3].
+Each discovered inactive source MUST be type-checked and lowered by the ordinary compiler path under a context that selects it [T-0.3].
+Owned helpers MUST retain the package name selected by their source context; distinct package clauses in one directory MUST NOT be treated as declaration collisions [T-0.3].
 Selection of an inactive file's build context MUST satisfy its filename and build constraints, including repeated and negated custom tags [T-0.3].
 Selection MUST NOT impose a machine-word limit on the number of custom tags [T-0.3].
 An inactive variant MAY disable a custom tag named by its constraint; unrelated custom tags from the requested build MUST remain in effect [T-0.3].
