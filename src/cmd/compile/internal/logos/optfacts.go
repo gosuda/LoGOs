@@ -9,6 +9,7 @@ import (
 	"maps"
 	"slices"
 	"strings"
+	"unicode"
 
 	"cmd/compile/internal/logos/facts"
 	"cmd/compile/internal/types2"
@@ -76,7 +77,7 @@ func copyFuncAssert(dst *types2.Func, assert map[string]facts.FnFact, objects ..
 }
 
 func ApplyFuncFacts(pkg *types2.Package, fns []facts.FnFact) error {
-	if pkg == nil || pkg.Scope() == nil {
+	if pkg == nil || pkg.Scope() == nil || len(fns) == 0 {
 		return nil
 	}
 	objects := reachableFuncFactObjects(pkg)
@@ -118,7 +119,7 @@ func ApplyFuncFacts(pkg *types2.Package, fns []facts.FnFact) error {
 }
 
 func ApplyReadonlyFactsInPlace(pkg *types2.Package, readonlys []facts.ReadonlyFact) error {
-	if pkg == nil || pkg.Scope() == nil {
+	if pkg == nil || pkg.Scope() == nil || len(readonlys) == 0 {
 		return nil
 	}
 	funcObjs := reachableFuncFactObjects(pkg)
@@ -177,6 +178,25 @@ func checkedAssertMask(mask string, arity int) ([]byte, error) {
 	return parsed, nil
 }
 
+// isPackageIdent reports whether name is a valid Go identifier, which is
+// the only shape a package-level object name can take. Import scopes also
+// carry names that are not valid identifiers: method-qualified names like
+// "T.m" and function-local objects mangled as "entry·1".
+func isPackageIdent(name string) bool {
+	for i, r := range name {
+		switch {
+		case unicode.IsLetter(r) || r == '_':
+		case unicode.IsDigit(r):
+			if i == 0 {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return name != ""
+}
+
 func reachableFuncFactObjects(pkg *types2.Package) map[string]*types2.Func {
 	objects := make(map[string]*types2.Func)
 	graph := &overlayGraph{orig: pkg, nodes: make(map[types2.Type]bool)}
@@ -184,7 +204,14 @@ func reachableFuncFactObjects(pkg *types2.Package) map[string]*types2.Func {
 	seen := make(map[types2.Type]bool)
 	visit := func(t types2.Type) { graph.references(t, refs, seen) }
 	for _, name := range pkg.Scope().Names() {
-		if strings.Contains(name, ".") {
+		// Only package-level identifiers can ever be fact targets or
+		// reachability roots. Method-qualified names ("T.m") and
+		// function-local objects ("entry·1", "func·2") are skipped;
+		// resolving a function-local type's lazy object reads its
+		// implicit type parameters, which the importer format forbids
+		// (internal compiler error: unexpected object with N implicit
+		// type parameter(s)).
+		if !isPackageIdent(name) {
 			continue
 		}
 		obj := pkg.Scope().Lookup(name)
