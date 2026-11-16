@@ -268,6 +268,26 @@ def test_successful_stock_and_fork_baseline_is_bound(fixture: Fixture) -> None:
     ) == file_hash(fixture.options.baseline)
 
 
+@pytest.mark.parametrize("stage", (0, 1, 2), ids=("oracle", "go", "logos"))
+@pytest.mark.parametrize("status", (False, True, 0.0, 1.0))
+def test_baseline_rejects_noninteger_exit_status(
+    fixture: Fixture, stage: int, status: object
+) -> None:
+    baseline = read_baseline(fixture)
+    row = obj(cast(list[object], baseline["cases"])[0])
+    stages = cast(list[object], row["stages"])
+    obj(obj(stages[stage])["run"])["returncode"] = status
+    fixture.options.baseline.write_text(json.dumps(baseline))
+    with pytest.raises(ValueError, match="baseline build/profile did not match"):
+        probe.verify_baseline(
+            fixture.options.baseline,
+            fixture.case,
+            fixture.env,
+            fixture.native,
+            fixture.effective,
+        )
+
+
 @pytest.mark.parametrize(
     "fault",
     (
