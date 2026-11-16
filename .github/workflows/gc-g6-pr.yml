@@ -17,6 +17,4 @@ jobs:
       github.event.pull_request.head.ref == 'perf/gc-scan-extent'
     uses: ./.github/workflows/gc-g6.yml
     with:
-      base_sha: "${{ github.event.pull_request.base.sha }}"
-      head_sha: "${{ github.event.pull_request.head.sha }}"
       primary: "${{ github.event.pull_request.head.ref == 'perf/gc-scan-mask-init' && 'BenchmarkLogosGCScanSmall/Pointer/Self' || 'BenchmarkLogosGCScan/Self' }}"
