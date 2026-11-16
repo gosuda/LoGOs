@@ -65,18 +65,21 @@ frozen expected-value test. The final named-result controls complete the result
 assignment before mutating the view; both oracle configurations agree. The five
 explicit-return attacks were independently verified before their repair.
 
-## Validation status
+## Local evidence before integrated CI
 
 The source-overlay checks use an existing built fork whose CTFE and syntax
 sources were compared with the default baseline. They compile the edited
 packages and exercise their frozen tests. They are preliminary package evidence,
 not proof that a complete final toolchain was rebuilt.
+The pull request's Checks tab records the subsequent clean-checkout builds and
+complete regression results. The table below is the local publication snapshot.
 
 | Gate | Current record |
 |---|---|
 | CTFE assignment | Value cases passed at target word sizes 4 and 8; failure-phase cases passed with the default target configuration. An isolated RHS-first mutation failed the frozen order assertions. |
 | CTFE storage | Focused original storage and return-boundary checks passed. Direct storage replacement caused 38 failures; omitting the return copy caused 10 failures. Final uncached full CTFE package, including the fresh-cache differential oracle, passed in 200.685 seconds; serial vet passed. |
 | Tuple lowering | Both file orders, repeated compilation, independent variants, punctuation-distinct filenames, and duplicate raw-input basenames passed. A constant group ordinal failed the frozen tests; clean restoration passed. |
+| Full lowering package | The unchanged full short package suite passed in 180.590 seconds, followed by vet. An earlier run inherited unrelated ancestor Git metadata in temporary subprocess modules; moving the temporary directory outside that ancestry resolved the recorded setup failures. |
 | Ejection package | Final uncached normal and race suites passed. The final rollback mutation failed the independent satisfiability oracle; restoration and vet passed. |
 | Ejection integration | The frozen final driver passed native execution, all expected variant outputs, pristine Go 1.27.2 execution, and the exact-empty helper case. |
 | Spread semantic integration and mutation | The frozen fixture passed through an isolated compiler in native and pristine-Go 1.27.4 ejected execution. Omitting default initialization caused the six predicted failures while evaluation/zero-value controls passed. Both clean executions passed again after restoration. |
