@@ -1697,6 +1697,7 @@ The compiler MUST select methods by their complete signatures. If a streaming me
 Generated method helper type arguments MUST retain source-valid C selectors when a checked scalar receiver is instantiated with a C type; private cgo-generated type names MUST NOT appear in ejected Go. [T-Sec10]
 These paths MUST preserve the active profile's error types, offsets, field context, partial updates, and updates through existing pointer aliases. JSONv2 fallback type errors name the root struct; classic fallback errors retain the inner struct context. A quoted null clears a scalar pointer according to that profile, including escaped spellings in classic mode and only the exact token `"null"` in JSONv2. [T-Sec10]
 Generated quoted-text helper signatures MUST encode the destination pointer's element type without runtime kind inspection. A `reflect.Type` value MAY remain where a public JSON error API requires it. [T-Sec10]
+Quoted text methods MUST receive the active profile's Unicode replacement behavior for malformed UTF-8 and unpaired UTF-16 surrogates. Appending to a callback's input MUST NOT alter the scanner token or change the subsequent quoted-null decision. [T-Sec10]
 Decoding MUST fill defaults first, then parse. [T-Sec10]
 A _logos_seen mask sized [(K+63)/64]uint64 tracks matched keys against a required-mask constant, where K is the number of required non-nil fields of the struct. [T-Sec10]
 At the closing brace, a missing required non-nil field returns MissingFieldError naming type and field. [T-Sec10]

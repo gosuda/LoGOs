@@ -298,3 +298,4 @@
 {"id": "AUD-206", "description": "M18-A-S20 Account for region root scan work", "phase": "AUD"}
 {"id": "AUD-207", "description": "M18-A-S21 Skip redundant same-allocation GC lookup", "phase": "AUD"}
 {"id": "AUD-208", "description": "M18-A-S22 Expand GC boundary and ownership gates", "phase": "AUD"}
+{"id": "AUD-203", "description": "M11-A-S9 Preserve quoted-text Unicode and token ownership", "phase": "AUD"}
