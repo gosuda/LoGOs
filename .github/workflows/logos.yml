@@ -72,6 +72,18 @@ jobs:
         with:
           go-version: "1.27.4"
           cache: false
+      - name: "Install the verified evidence runner"
+        if: "matrix.suite != 'upstream'"
+        run: |
+          archive="$RUNNER_TEMP/logos-regression-uv.tar.gz"
+          runner="$RUNNER_TEMP/logos-regression-uv"
+          evidence="$RUNNER_TEMP/logos-regression-evidence"
+          mkdir -p "$runner" "$evidence"
+          curl --fail --silent --show-error --location --output "$archive" https://github.com/astral-sh/uv/releases/download/0.13.8/uv-x86_64-unknown-linux-gnu.tar.gz
+          printf '%s  %s\n' 5acfd9177cfecf0bf87578f059728215ccc884388988f55f7a65041b57387d91 "$archive" | sha256sum --check --strict - | tee "$evidence/uv-archive.txt"
+          tar -xzf "$archive" -C "$runner" --strip-components=1
+          printf '%s\n' "$runner" >> "$GITHUB_PATH"
+          printf 'PYTHONDONTWRITEBYTECODE=1\nPYTEST_DISABLE_PLUGIN_AUTOLOAD=1\n' >> "$GITHUB_ENV"
       - uses: "actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1" # v7.1.0
         if: "matrix.suite != 'unit'"
         with:
@@ -103,6 +115,16 @@ jobs:
           "$c23_dir/probe"
           ln -s "$c23_compiler" "$c23_dir/cc"
           printf '%s\n' "$c23_dir" >> "$GITHUB_PATH"
+      - name: "Verify regression evidence checkers"
+        if: "matrix.suite == 'unit'"
+        working-directory: "."
+        run: |
+          helper=logos-doc/validation/tagged-package-facts
+          method=logos-doc/validation/tagged-method-facts
+          uv run --no-project --no-config --python 3.12 --no-python-downloads --with-requirements "$helper/test-requirements.txt" python -m pytest -q "$helper/test_check_ci.py" "$method/test_check_ci.py"
+          uv run --no-project --no-config --python 3.12 --no-python-downloads --with-requirements "$helper/test-requirements.txt" pyright "$helper/check_ci.py" "$helper/test_check_ci.py" "$method/check_ci.py" "$method/test_check_ci.py"
+          uv run --no-project --no-config --python 3.12 --no-python-downloads --with-requirements "$helper/test-requirements.txt" ruff check "$helper/check_ci.py" "$helper/test_check_ci.py" "$method/check_ci.py" "$method/test_check_ci.py"
+          uv run --no-project --no-config --python 3.12 --no-python-downloads --with-requirements "$helper/test-requirements.txt" ruff format --check "$helper/check_ci.py" "$helper/test_check_ci.py" "$method/check_ci.py" "$method/test_check_ci.py"
       - name: "Build the toolchain"
         run: |
           GOROOT_BOOTSTRAP=$(go env GOROOT)
@@ -160,6 +182,27 @@ jobs:
           sha256sum ../bin/go ../bin/logos ../pkg/tool/linux_amd64/compile ../pkg/tool/linux_amd64/link
           go test -count=1 -race -parallel=1 -timeout 20m cmd/go -run 'Script/^logos_(cap_xtest_owner|test_experiment_env|test_plugin_experiment|test_cache_experiment)$'
 
+      - name: "Require isolated inline capability ownership"
+        if: "${{ !cancelled() && steps.smoke.outcome == 'success' && matrix.suite == 'scripts' }}"
+        working-directory: "."
+        timeout-minutes: 35
+        run: |
+          bash logos-doc/validation/capability-inline-context/check_ci.sh "$RUNNER_TEMP/logos-regression-evidence/cap-inline"
+
+      - name: "Require tagged package fact negative and positive controls"
+        if: "${{ !cancelled() && steps.smoke.outcome == 'success' && matrix.suite == 'unit' }}"
+        working-directory: "."
+        timeout-minutes: 45
+        run: |
+          uv run --no-project --no-config --python 3.12 --no-python-downloads python logos-doc/validation/tagged-package-facts/check_ci.py run --root "$GITHUB_WORKSPACE" --out "$RUNNER_TEMP/logos-regression-evidence/tagged-package" --expected-head "$(git rev-parse HEAD)"
+
+      - name: "Require tagged method codec and lazy-scope controls"
+        if: "${{ !cancelled() && steps.smoke.outcome == 'success' && matrix.suite == 'unit' }}"
+        working-directory: "."
+        timeout-minutes: 35
+        run: |
+          uv run --no-project --no-config --python 3.12 --no-python-downloads python logos-doc/validation/tagged-method-facts/check_ci.py --repo "$GITHUB_WORKSPACE" --evidence "$RUNNER_TEMP/logos-regression-evidence/tagged-method"
+
       - name: "Run upstream regression gate"
         if: "${{ !cancelled() && steps.smoke.outcome == 'success' && matrix.suite == 'upstream' }}"
         run: |
@@ -201,3 +244,21 @@ jobs:
           grep -F 'check.conf.Logos' "$mutation_dir/generator.log"
           go test -count=1 -short cmd/go/internal/test -run '^TestLogosTestExperiment(Env|Cache)$'
           go test -count=1 -short go/types -run '^(TestGenerate|TestGoTypesPanicSourceShape)$'
+
+      - name: "Retain regression events and exact identities"
+        if: "${{ always() && matrix.suite != 'upstream' }}"
+        uses: "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9" # v7.0.2
+        with:
+          name: "logos-${{ matrix.suite }}-${{ github.run_id }}-${{ github.run_attempt }}"
+          retention-days: 14
+          if-no-files-found: "error"
+          path: |
+            ${{ runner.temp }}/logos-regression-evidence/**/*.json
+            ${{ runner.temp }}/logos-regression-evidence/**/*.jsonl
+            ${{ runner.temp }}/logos-regression-evidence/**/*.log
+            ${{ runner.temp }}/logos-regression-evidence/**/*.txt
+            ${{ runner.temp }}/logos-regression-evidence/**/*.sha256
+            ${{ runner.temp }}/logos-regression-evidence/**/*.stderr
+            ${{ runner.temp }}/logos-regression-evidence/**/*.stdout
+            ${{ runner.temp }}/logos-mutations.*/*.log
+            ${{ runner.temp }}/logos-mutations.*/*.json
