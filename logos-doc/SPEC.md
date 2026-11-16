@@ -185,6 +185,7 @@ It MUST NOT hoist timers across iterations. [T-102]
 The command `logos context <pkg>#<Symbol>` MUST print the declaration plus one level of mentioned signatures with no function bodies [T-103].
 `logos context` output MUST hold at most 100 lines [T-103].
 `logos context` MUST serve `.lgo` and `.go` packages [T-103].
+The package pattern MUST select exactly one package; zero or multiple matches MUST report the pattern and the match count. [T-103]
 `logos context` MUST report an unknown symbol with text that names the package and the missing symbol [T-103].
 The command `logos next --fix` MUST convert a whole Go module to a loGo/s module [T-103][R-U3].
 `logos next` MUST use byte-span splicing and MUST keep every comment and build line byte-identical outside rewrites [T-103].
