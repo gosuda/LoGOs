@@ -2,7 +2,7 @@
 
 - Status: Tailored spec, 2026-10-19; amended 2026-11-08 (withdrew GC modes, synthetic PGO, ICF, clone specialization, the fast-cgo default, vet-duplicate lints, and numeric targets; replaced the upstream arena with placement regions; moved nogo into logos lint)
 - Base: Go 1.27.2
-- GC scan amendment: 2026-11-16; shared region scan accounting, with the alternate GC modes still withdrawn.
+- GC scan amendment: 2026-11-16; shared region scan accounting and same-allocation lookup elision, with the alternate GC modes still withdrawn.
 - Original: `logos-docs/PLAN.md` at commit 57475ed (`git show 57475ed:logos-docs/PLAN.md`)
 - Source files: `.lgo` (canonical); aliases U+1F4DC (scroll), U+26A1 (lightning), and U+0295 U+25D4 U+03D6 U+25D4 U+0294 (gopher); `.go` files stay Go source files with Go language semantics.
 
@@ -1408,6 +1408,12 @@ The controller's worst-case root-work estimate MUST include each leased region c
 The ordinary goroutine stack-size sample MUST include only the physical stack extent; region scan work MUST NOT enlarge that sample. [T-305]
 
 Implementation note (informative): scan extent is the byte-based GC work estimate used by the collector. It is not a count of pointer words, retained capacity, or process memory. Correcting this estimate does not by itself establish a speed improvement. Optional speed changes require the fixed-work measurements and behavior checks of IMPLEMENTATION G6.
+
+#### 3.5.2 Same-allocation pointer lookup
+
+While scanning a region allocation, the runtime MAY omit heap metadata lookup for a pointer whose target lies within that same allocation. The check MUST use the complete allocation's half-open byte range; sharing a chunk alone MUST NOT qualify. [T-305]
+The scanner MUST still visit every typed pointer slot, including repeated element types and slots beyond the first pointer-mask word. Internal pointer values MUST retain their scan-work contribution under Sec 3.5.1. [T-305]
+External heap and stack pointers MUST retain their existing tracing behavior. Scalar words MUST NOT become roots, and restore or close MUST end the allocation's contribution under the existing lifetime rules. [T-305]
 
 ## 4. Lexer, parser, and syntax
 

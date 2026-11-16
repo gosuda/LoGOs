@@ -331,7 +331,9 @@ func logosArenaScanObject(typ *_type, obj, size uintptr, gcw *gcWork, state *sta
 		}
 		scanned = addr - obj + goarch.PtrSize
 		p := *(*uintptr)(unsafe.Pointer(addr))
-		if p == 0 {
+		// This loop visits every pointer slot in the allocation, so an
+		// internal pointer cannot expose another root.
+		if p == 0 || p-obj < size {
 			continue
 		}
 		if state != nil && p >= state.stack.lo && p < state.stack.hi {
