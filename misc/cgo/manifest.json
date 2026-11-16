@@ -1,10 +1,28 @@
 {
   "version": 1,
-  "runtimeFamilies": [],
+  "runtimeFamilies": [
+    {
+      "package": "runtime",
+      "prefix": "TestLogosCgoSpan",
+      "tests": [
+        "TestLogosCgoSpanObject",
+        "TestLogosCgoSpanGlobals"
+      ],
+      "allowSkippedOff": false
+    }
+  ],
   "benchmarks": [
     {
       "name": "BenchmarkCgoOptNocallback",
       "role": "target"
+    },
+    {
+      "name": "BenchmarkCgoOptSpanLookup",
+      "role": "target"
+    },
+    {
+      "name": "BenchmarkCgoOptSpanReference",
+      "role": "reference"
     }
   ],
   "fixtures": [
@@ -13,6 +31,12 @@
       "path": "src/cmd/cgo/internal/testlogos/testdata/cgoopt",
       "args": [],
       "stdout": "callback stack moved; results, errno, retained pointer, and scheduler progress ok"
+    },
+    {
+      "name": "span-pointer",
+      "path": "src/cmd/cgo/internal/testlogos/testdata/cgospan",
+      "args": [],
+      "stdout": "span pointer and exported-result checks ok"
     }
   ]
 }
