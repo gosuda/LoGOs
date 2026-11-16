@@ -116,7 +116,7 @@ After building the fork, set HOME, PATH, RUNNER_TEMP, and UPROOT1274 to the stoc
 Go 1.27.4 root. Set HYPERFINE to the verified hyperfine binary for measurements.
 Use an evidence directory outside the checkout:
 
-    node --test misc/cgo/check.test.mjs
+    node --test misc/cgo/*.test.mjs
     node misc/cgo/probe.mjs "$RUNNER_TEMP/cgo-evidence/probes"
     node misc/cgo/verify.mjs "$RUNNER_TEMP/cgo-evidence/focused"
     node misc/cgo/benchmark.mjs "$RUNNER_TEMP/cgo-evidence/benchmark"
@@ -124,3 +124,10 @@ Use an evidence directory outside the checkout:
 Every executed command records its arguments, compact environment, status,
 stdout, and stderr. CI uploads evidence even when validation fails. Full dist
 records its complete combined output and the source/compiler fingerprint.
+
+The command runner executes a program with an argument array and explicitly
+disables shell execution. Configured executable paths are literal paths; spaces,
+quotes, substitutions, and other shell metacharacters in paths or arguments do
+not become shell code. The boundary test exercises those values and fails if
+shell execution is enabled. Hyperfine receives individually quoted benchmark
+arguments for its own command parser.

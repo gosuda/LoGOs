@@ -52,7 +52,7 @@ jobs:
         with:
           node-version: "26.13.1"
       - name: Test evidence checker
-        run: node --test misc/cgo/check.test.mjs
+        run: node --test misc/cgo/*.test.mjs
 
       - name: Install and require C compilers
         run: |
