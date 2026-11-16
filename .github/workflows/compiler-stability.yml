@@ -93,7 +93,7 @@ jobs:
             -run 'Script/^logos_(ctfe_assignment_.*|tuple_(package_names|variant_names)|spread_defaults|inline_batches|eject_variant_tags)$' \
             2>&1 | tee "$evidence/integration.log"
           go test -count=1 -race -timeout=30m cmd/go \
-            -run 'Script/^logos_(eject_cgo.*|cgo_lgo|eject|eject_target_features|eject_inactive.*)$' \
+            -run 'Script/^logos_(eject_cgo.*|cgo_lgo|eject|eject_target_(features|env_compat)|eject_inactive.*)$' \
             2>&1 | tee "$evidence/cgo-and-variant-integration.log"
           go test -count=1 -timeout=20m cmd/internal/testdir \
             -run 'Test/logos/run/(ctfe_assignment_.*|spread_defaults|inline_batches)' \
