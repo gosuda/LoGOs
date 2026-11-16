@@ -4,7 +4,10 @@
 
 package main
 
-import "internal/buildcfg"
+import (
+	"internal/buildcfg"
+	"maps"
+)
 
 // logosStableCgoFrame reports whether the result frame stays at its original
 // address until the C wrapper returns. Without a callback, cgocall remains in
@@ -16,4 +19,17 @@ func logosStableCgoFrame(p *Package, n *Name) bool {
 	}
 	return logosStableFastCall(p, n) ||
 		buildcfg.Experiment.LogosCgoOpt && p.noCallbacks[n.C]
+}
+
+// logosCollectCgoContracts makes the already parsed package contracts available
+// to C wrappers emitted before the file that supplied a directive. Record still
+// owns names, types, declarations, and diagnostics in their original order.
+func logosCollectCgoContracts(p *Package, files []*File) {
+	if !buildcfg.Experiment.LogosCgoOpt || *gccgo || *godefs {
+		return
+	}
+	for _, f := range files {
+		maps.Copy(p.noCallbacks, f.NoCallbacks)
+		maps.Copy(p.noEscapes, f.NoEscapes)
+	}
 }

@@ -3,6 +3,15 @@
   "runtimeFamilies": [
     {
       "package": "runtime",
+      "prefix": "TestLogosCgoSpan",
+      "tests": [
+        "TestLogosCgoSpanObject",
+        "TestLogosCgoSpanGlobals"
+      ],
+      "allowSkippedOff": false
+    },
+    {
+      "package": "runtime",
       "prefix": "TestLogosCgoPointerFreeAddr",
       "tests": [
         "TestLogosCgoPointerFreeAddr",
@@ -18,6 +27,18 @@
       "role": "target"
     },
     {
+      "name": "BenchmarkCgoOptLateContract",
+      "role": "target"
+    },
+    {
+      "name": "BenchmarkCgoOptSpanLookup",
+      "role": "target"
+    },
+    {
+      "name": "BenchmarkCgoOptSpanReference",
+      "role": "reference"
+    },
+    {
       "name": "BenchmarkCgoOptPointerFreeAddress",
       "role": "target"
     }
@@ -28,6 +49,12 @@
       "path": "src/cmd/cgo/internal/testlogos/testdata/cgoopt",
       "args": [],
       "stdout": "callback stack moved; results, errno, retained pointer, and scheduler progress ok"
+    },
+    {
+      "name": "span-pointer",
+      "path": "src/cmd/cgo/internal/testlogos/testdata/cgospan",
+      "args": [],
+      "stdout": "span pointer and exported-result checks ok"
     },
     {
       "name": "typed-address",
