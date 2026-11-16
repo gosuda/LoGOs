@@ -5,6 +5,10 @@
     {
       "name": "BenchmarkCgoOptNocallback",
       "role": "target"
+    },
+    {
+      "name": "BenchmarkCgoOptLateContract",
+      "role": "target"
     }
   ],
   "fixtures": [

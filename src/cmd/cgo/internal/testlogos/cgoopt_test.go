@@ -203,7 +203,7 @@ func B(v C.int) C.int { return C.opt_cross(v) }
 					t.Fatal(err)
 				}
 			}
-			first, second, lookups := "a.go", "b.go", 2
+			first, second, lookups := "a.go", "b.go", 0
 			if early {
 				first, second, lookups = "b.go", "a.go", 0
 			}
