@@ -127,12 +127,16 @@ jobs:
         run: |
           helper=logos-doc/validation/tagged-package-facts
           method=logos-doc/validation/tagged-method-facts
+          capability=logos-doc/validation/capability-inline-context
           for suite in "$helper" "$method"; do
             uv run --no-project --no-config --python 3.12 --no-python-downloads --with-requirements "$helper/test-requirements.txt" python -m pytest -q "$suite/test_check_ci.py"
             uv run --no-project --no-config --python 3.12 --no-python-downloads --with-requirements "$helper/test-requirements.txt" pyright "$suite/check_ci.py" "$suite/test_check_ci.py"
           done
-          uv run --no-project --no-config --python 3.12 --no-python-downloads --with-requirements "$helper/test-requirements.txt" ruff check "$helper/check_ci.py" "$helper/test_check_ci.py" "$method/check_ci.py" "$method/test_check_ci.py"
-          uv run --no-project --no-config --python 3.12 --no-python-downloads --with-requirements "$helper/test-requirements.txt" ruff format --check "$helper/check_ci.py" "$helper/test_check_ci.py" "$method/check_ci.py" "$method/test_check_ci.py"
+          uv run --no-project --no-config --python 3.12 --no-python-downloads --with-requirements "$helper/test-requirements.txt" python -m pytest -q "$capability/test_check_ci.py"
+          uv run --no-project --no-config --python 3.12 --no-python-downloads --with-requirements "$helper/test-requirements.txt" pyright "$capability/test_check_ci.py"
+          uv run --no-project --no-config --python 3.12 --no-python-downloads --with-requirements "$helper/test-requirements.txt" ruff check "$helper/check_ci.py" "$helper/test_check_ci.py" "$method/check_ci.py" "$method/test_check_ci.py" "$capability/test_check_ci.py"
+          uv run --no-project --no-config --python 3.12 --no-python-downloads --with-requirements "$helper/test-requirements.txt" ruff format --check "$helper/check_ci.py" "$helper/test_check_ci.py" "$method/check_ci.py" "$method/test_check_ci.py" "$capability/test_check_ci.py"
+          shellcheck "$capability/check_ci.sh"
       - name: "Build the toolchain"
         run: |
           GOROOT_BOOTSTRAP=$(go env GOROOT)
