@@ -432,7 +432,8 @@ func selfTestBin(t *testing.T) string {
 	requireCgo(t)
 	bin := filepath.Join(t.TempDir(), "testlogos.test")
 	srcCmd := filepath.Join(runtime.GOROOT(), "src", "cmd")
-	out, err := runCmd(t, srcCmd, goBin(t), "test", "-c", "-o", bin, "cmd/cgo/internal/testlogos")
+	args := append([]string{"test", "-c", "-o", bin}, cgoSpanToolFlags(t)...)
+	out, err := runCmd(t, srcCmd, goBin(t), append(args, "cmd/cgo/internal/testlogos")...)
 	if err != nil {
 		t.Fatalf("self build: %v\n%s", err, out)
 	}
