@@ -215,6 +215,25 @@ differential pass. Such invocations remain visibly `uncompared`.
 
 ## Coverage boundaries
 
+`corpus-runtime.json` is a separate xxhash runtime comparison. Its first two
+cases run the complete root package with cgo disabled, both with assembly and
+with the `purego` tag. The third runs every package with cgo enabled, including
+the upstream dynamic-plugin test. The original cgo-disabled `./...` cases stay
+unchanged: their root tests pass, but their plugin `TestMain` requires external
+linking and fails under stock Go. The supplemental cases preserve the same
+source pin and record their different package patterns and cgo settings.
+
+`replay_ffi.py` runs eight named upstream purego tests with JSON execution proof:
+symbol lookup, nested C++ loading, a native call, a callback from C, mixed
+floating-point and integer callback arguments, a wide callback result with
+stack arguments, a stack callback, and stack alignment. It requires all eight
+tests to start and pass without skips under each driver, with a passing stock
+baseline. The full purego short suite remains separate evidence; its credential
+and all-thread syscall tests can fail in a restricted host even under stock Go.
+The focused replay does not replace those failures or claim the full suite
+passes. Run `uv run --no-project python misc/logos-dogfood/replay_ffi.py --help`
+for the required explicit tool, source, cache, and output paths.
+
 - Go-only code, the `purego` build tag, ebitengine's purego FFI implementation,
   native cgo, and modernc-generated Go are separate cases.
 - The go-sqlite3 cgo-disabled case builds its four ordinary stub source files.
