@@ -189,6 +189,7 @@ The compiler MUST enforce `correctness::typed_nil_return` as `forbid` against re
 The compiler MUST enforce `correctness::arena_pointer_escape` as `forbid` against storage of a stack or arena pointer outside its frame through an unsafe address [T-102].
 The compiler MUST enforce `correctness::defer_erases_errdefer_state` as `forbid` against assignment of nil to the error result inside a plain deferred literal in a function with `errdefer` [T-102].
 The compiler MUST enforce `correctness::infinite_recursion` as `forbid` against a function whose every path from entry calls itself with identical arguments before any return [T-102].
+A panic call used to prove termination or narrow an option MUST resolve to the predeclared builtin, including through parentheses. A user function or variable named `panic` MUST NOT establish that proof [T-102][T-202].
 The compiler MUST enforce `concurrency::concurrent_multiword_race` as `forbid` against sharing of a mutable multi-word value with a child block plus a write on either side, unless the value is a const view or a `logos/sync` type [T-102].
 The compiler MUST enforce `concurrency::reentrant_withlock_deadlock` as `forbid` against a `WithLock` call on the same receiver inside its own synchronous closure call graph. A relock that a `go` statement inside the callback spawns MUST NOT report. [T-102].
 The compiler MUST enforce `correctness::withlock_leak` as `deny` against a `WithLock` lambda that returns or stores its argument, sends it on a channel, or passes it to a goroutine [T-102].
