@@ -13,7 +13,9 @@ exists out/variant.go
 exists out/inserted.go
 ! exists out/removed.go
 ! exists out/ignored.go
-! exists out/.overlay
+! exists out/.overlay/variant.go
+! exists out/.overlay/inserted.go
+! exists out/.overlay/ignored.go
 ! grep 'physicalOnly|missing' out/variant.go
 grep 'Variant' out/variant.go
 grep 'Inserted' out/inserted.go
