@@ -41,14 +41,14 @@ type autovecLoop struct {
 }
 
 func autovec(f *Func) {
-	if !buildcfg.Experiment.SIMD || !f.Config.optimize || f.Config.Race ||
+	if !buildcfg.Experiment.SIMD || !f.Config.optimize || f.NoSplit || f.Config.Race ||
 		base.Flag.Race || base.Flag.MSan || base.Flag.ASan || f.Config.SoftFloat {
 		return
 	}
 	if f.Config.arch != "arm64" && (f.Config.arch != "amd64" || buildcfg.GOAMD64 < 3) {
 		return
 	}
-	// New blocks are vector prefixes. Revisit only the original headers, and
+	// New blocks belong to vector prefixes. Revisit only the original headers, and
 	// obtain fresh dominance information after each accepted rewrite.
 	for _, h := range f.Blocks[:len(f.Blocks)] {
 		p := autovecMatch(f, h)
@@ -247,15 +247,38 @@ func (p *autovecLoop) expression(v *Value) bool {
 }
 
 func (p *autovecLoop) rewrite() {
-	f, pre := p.header.Func, p.predecessor.b
+	f := p.header.Func
 	typ, pos := &f.Config.Types, p.store.Pos
 	lanes := 16 / p.lane.size
+	// Keep the call on the loop-entry edge so other successors retain their
+	// memory. A separate setup block keeps broadcasts after the call.
+	callBlock, pre := f.NewBlock(BlockPlain), f.NewBlock(BlockPlain)
+	callBlock.Pos, pre.Pos = p.header.Pos, p.header.Pos
+	aux := StaticAuxCall(f.fe.Syslook("logosAutovecPanicOnFault"), f.ABIDefault.ABIAnalyzeTypes(nil, []*types.Type{typ.Bool}))
+	// Call expansion has already run. Only register results appear in the
+	// call tuple; stack results use the returned memory.
+	callType, memIndex := types.TypeResultMem, int64(0)
+	if len(aux.RegsOfResult(0)) != 0 {
+		callType = types.NewResults([]*types.Type{typ.Bool, types.TypeMem})
+		memIndex = 1
+	}
+	call := callBlock.NewValue1A(pos, OpStaticCall, callType, aux, p.mem.Args[p.entryIndex])
+	call.AuxInt = aux.ArgWidth()
+	initialMem := callBlock.NewValue1I(pos, OpSelectN, types.TypeMem, memIndex, call)
+	var paniconfault *Value
+	if memIndex != 0 {
+		paniconfault = callBlock.NewValue1I(pos, OpSelectN, typ.Bool, 0, call)
+	} else {
+		sp, _ := f.spSb()
+		addr := f.ConstOffPtrSP(typ.Bool.PtrTo(), aux.OffsetOfResult(0), sp)
+		paniconfault = pre.NewValue2(pos, OpLoad, typ.Bool, addr, initialMem)
+	}
+	safe := pre.NewValue1(pos, OpNot, typ.Bool, paniconfault)
 	zero := pre.NewValue0I(pos, OpConst64, p.index.Type, 0)
 	mask := pre.NewValue0I(pos, OpConst64, p.index.Type, -lanes)
 	limit := pre.NewValue2(pos, OpAnd64, p.index.Type, p.limit, mask)
-	initialMem := p.mem.Args[p.entryIndex]
 	dst := p.bases[p.store.Args[0]]
-	var dstInt, safe *Value
+	var dstInt *Value
 	for _, source := range p.sources {
 		if isSamePtr(dst, source) {
 			continue
@@ -277,21 +300,17 @@ func (p *autovecLoop) rewrite() {
 		disjoint := pre.NewValue2(pos, OpLeq64U, typ.Bool, limit, distance)
 		equal := pre.NewValue2(pos, OpEqPtr, typ.Bool, dst, source)
 		guard := pre.NewValue2(pos, OpOrB, typ.Bool, equal, disjoint)
-		if safe == nil {
-			safe = guard
-		} else {
-			safe = pre.NewValue2(pos, OpAndB, typ.Bool, safe, guard)
-		}
+		safe = pre.NewValue2(pos, OpAndB, typ.Bool, safe, guard)
 	}
-	if safe != nil {
-		limit = pre.NewValue3(pos, OpCondSelect, p.index.Type, limit, zero, safe)
-	}
+	limit = pre.NewValue3(pos, OpCondSelect, p.index.Type, limit, zero, safe)
 	h, b := f.NewBlock(BlockIf), f.NewBlock(BlockPlain)
 	h.Pos, b.Pos = p.header.Pos, p.body.Pos
 	h.Likely = BranchLikely
 	// Preserve the scalar header's predecessor index and its backedge.
-	pre.Succs[p.predecessor.i] = Edge{h, 0}
-	h.Preds = append(h.Preds, p.predecessor)
+	p.predecessor.b.Succs[p.predecessor.i] = Edge{callBlock, 0}
+	callBlock.Preds = append(callBlock.Preds, p.predecessor)
+	callBlock.AddEdgeTo(pre)
+	pre.AddEdgeTo(h)
 	h.AddEdgeTo(b)
 	h.Succs = append(h.Succs, Edge{p.header, p.entryIndex})
 	p.header.Preds[p.entryIndex] = Edge{h, 1}
