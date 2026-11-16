@@ -4123,9 +4123,11 @@ Written to `tasks/autoplan-ledger.jsonl` by P0-S6. IDs: phase prefix plus a sequ
 {"id": "AUD-160", "description": "M13-A-S10 Eject writes the test files of a main module", "phase": "AUD"}
 {"id": "AUD-161", "description": "M14-A-S2 Read array operator object code of arm64 and riscv64 builds", "phase": "AUD"}
 {"id": "AUD-162", "description": "M14-A-S3 Round each scalar lane product of dot", "phase": "AUD"}
+{"id": "AUD-180", "description": "M15-A-S6 Keep vector zero initialization inside CPU guards", "phase": "AUD"}
 {"id": "AUD-181", "description": "M1-A-S13 Capture deferred indexed function values", "phase": "AUD"}
 {"id": "AUD-183", "description": "M21-A-S10 Bound incomplete frame headers", "phase": "AUD"}
 {"id": "AUD-184", "description": "M10-A-S1 Require one context package", "phase": "AUD"}
 {"id": "AUD-185", "description": "M0-A-S14 Check whole-module source kinds", "phase": "AUD"}
 {"id": "AUD-186", "description": "M21-A-S11 Keep metadata independent of VCS stamping", "phase": "AUD"}
+{"id": "AUD-189", "description": "M0-A-S15 Enforce the upstream Go regression floor in CI", "phase": "AUD"}
 ```
