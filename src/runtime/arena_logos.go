@@ -320,7 +320,7 @@ func logosArenaScanChunk(c *sideStackChunk, gcw *gcWork, state *stackScanState) 
 //go:nowritebarrier
 func logosArenaScanObject(typ *_type, obj, size uintptr, gcw *gcWork, state *stackScanState) int64 {
 	limit := obj + size
-	tp := typePointers{elem: obj, addr: obj, mask: readUintptr(getGCMask(typ)), typ: typ}.fastForward(0, limit)
+	tp := typePointers{elem: obj, addr: obj, typ: typ}.fastForward(0, limit)
 	var scanned uintptr
 	for {
 		var addr uintptr
