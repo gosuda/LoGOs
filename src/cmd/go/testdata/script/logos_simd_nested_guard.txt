@@ -13,7 +13,13 @@ go build -o $WORK/checkguard .
 cd ../m
 exec $WORK/checkguard safe.txt avx512
 stdout '^guard excludes vectors avx512$'
+exec $WORK/checkguard safe-alignment.txt avx512
+stdout '^guard excludes vectors avx512$'
 ! exec $WORK/checkguard before-branch.txt avx512
+stderr 'feature check is not followed by TESTL and JE'
+! exec $WORK/checkguard alignment-before-vector.txt avx512
+stderr 'feature check is not followed by TESTL and JE'
+! exec $WORK/checkguard alignment-before-clobber.txt avx512
 stderr 'feature check is not followed by TESTL and JE'
 ! exec $WORK/checkguard false-target.txt avx512
 stderr 'vector instruction reachable with avx512 false'
@@ -177,8 +183,23 @@ func main() {
 	if guard < 0 || !hasVector {
 		panic("missing feature check or vector instruction")
 	}
-	branch := guard + 2
-	if branch >= len(code) || code[guard+1] != (instruction{"TESTL", "AL, AL"}) || code[branch].op != "JE" {
+	// Alignment may insert no-ops between the call, test, and branch.
+	// Skip only those instructions; real work here could execute a vector
+	// too early or change the flags that determine the false-feature edge.
+	skipAlignment := func(i int) int {
+		for i < len(code) {
+			switch code[i].op {
+			case "NOP", "NOPL", "NOPW":
+				i++
+			default:
+				return i
+			}
+		}
+		return i
+	}
+	test := skipAlignment(guard + 1)
+	branch := skipAlignment(test + 1)
+	if test >= len(code) || code[test] != (instruction{"TESTL", "AL, AL"}) || branch >= len(code) || code[branch].op != "JE" {
 		panic("feature check is not followed by TESTL and JE")
 	}
 	if _, ok := labels[code[branch].args]; !ok {
@@ -228,6 +249,36 @@ fixture:3 0x12 84 TESTL AL, AL
 fixture:4 0x13 74 JE 0x20
 fixture:5 0x14 c3 RET
 fixture:6 0x20 c3 RET
+
+-- m/safe-alignment.txt --
+fixture:1 0x10 e8 CALL simd/archsimd.X86Features.AVX512(SB)
+fixture:2 0x11 0f NOPL 0(AX)
+fixture:3 0x12 66 NOPW
+fixture:4 0x13 84 TESTL AL, AL
+fixture:5 0x14 90 NOP
+fixture:6 0x15 74 JE 0x20
+fixture:7 0x16 62 VPXORQ Z0, Z0, Z0
+fixture:8 0x17 c3 RET
+fixture:9 0x20 c3 RET
+
+-- m/alignment-before-vector.txt --
+fixture:1 0x10 e8 CALL simd/archsimd.X86Features.AVX512(SB)
+fixture:2 0x11 0f NOPL 0(AX)
+fixture:3 0x12 62 VPXORQ Z0, Z0, Z0
+fixture:4 0x13 84 TESTL AL, AL
+fixture:5 0x14 74 JE 0x20
+fixture:6 0x15 c3 RET
+fixture:7 0x20 c3 RET
+
+-- m/alignment-before-clobber.txt --
+fixture:1 0x10 e8 CALL simd/archsimd.X86Features.AVX512(SB)
+fixture:2 0x11 84 TESTL AL, AL
+fixture:3 0x12 0f NOPL 0(AX)
+fixture:4 0x13 31 XORL AX, AX
+fixture:5 0x14 74 JE 0x20
+fixture:6 0x15 62 VPXORQ Z0, Z0, Z0
+fixture:7 0x16 c3 RET
+fixture:8 0x20 c3 RET
 
 -- m/false-target.txt --
 fixture:1 0x10 e8 CALL simd/archsimd.X86Features.AVX512(SB)
