@@ -207,7 +207,49 @@ done
 
 summary=$(jq -cn --slurpfile b "$phase/base.json" --slurpfile c "$phase/cand.json" \
 	--arg run "$run_id" --arg benchmark "$bench" --argjson n "$n" '
-	$b[0].results[0] as $base | $c[0].results[0] as $cand |
+	def positive_number:
+		type == "number" and isfinite and . > 0;
+	def nonnegative_number:
+		type == "number" and isfinite and . >= 0;
+	def wall_clock_summary:
+		if .schema_version != 2 or .primary_metric != "time_wall_clock" then
+			error("expected hyperfine schema 2 with wall-clock primary metric")
+		elif (.results | type) != "array" then
+			error("hyperfine results is not an array")
+		elif (.results | length) != 1 then
+			error("expected exactly one hyperfine result")
+		else
+			.results[0] as $r
+			| if ($r.measurements | type) != "array" then
+				error("hyperfine measurements is not an array")
+			elif ($r.measurements | length) != 10 then
+				error("expected exactly ten hyperfine samples")
+			elif (all($r.measurements[];
+				.exit_code == 0
+				and .time_wall_clock.unit == "second"
+				and (.time_wall_clock.value | positive_number)) | not) then
+				error("invalid hyperfine wall-clock sample")
+			else
+				$r.summary.time_wall_clock as $s
+				| if ($s | type) != "object" then
+					error("missing hyperfine wall-clock summary")
+				elif $s.unit != "second" or $s.count != 10
+					or (($s.mean | positive_number) | not)
+					or (($s.median | positive_number) | not)
+					or (($s.min | positive_number) | not)
+					or (($s.max | positive_number) | not)
+					or (($s.stddev | nonnegative_number) | not)
+					or $s.min > $s.median or $s.median > $s.max then
+					error("invalid hyperfine wall-clock summary")
+				else $s end
+			end
+		end;
+	if ($b | length) != 1 or ($c | length) != 1 then
+		error("expected one JSON document per side")
+	else . end
+	| ($b[0] | wall_clock_summary) as $base
+	| ($c[0] | wall_clock_summary) as $cand
+	|
 	{event:"measurement",run:$run,benchmark:$benchmark,iterations:$n,shell:"bash",
 	 base:{median:$base.median,stddev:$base.stddev,min:$base.min,max:$base.max},
 	 candidate:{median:$cand.median,stddev:$cand.stddev,min:$cand.min,max:$cand.max},
