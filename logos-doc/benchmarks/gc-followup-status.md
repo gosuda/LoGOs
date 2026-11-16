@@ -4,7 +4,7 @@ Date: 2026-11-16
 
 Base: PR #26, commit `968b8b436b08a0d8772d2159daa36e9c575d4b3d`.
 
-**Status: draft; repair verification pending.** Local execution and Codexify remain unavailable, but GitHub Actions is running the new gates. Native arm64 builds, formatting, and vet passed. Ordinary runtime tests with both collectors reproduced the ownership defect below. Fixture corrections and the release-order repair require fresh execution. The [first-run record](gc-stability-first-run.md) separates the real defect from fixture errors. PR #26's earlier results do not verify this follow-up.
+**Status: native repair gates passed; full upstream gate requires a corrected rerun.** Local execution and Codexify remain unavailable, but GitHub Actions is running the new gates. Native arm64 builds, formatting, and vet passed. Ordinary runtime tests with both collectors reproduced the ownership defect below. The repaired source passed all four native runtime configurations and the original-order mutation checks described below. The [first-run record](gc-stability-first-run.md) separates the real defect from fixture errors. PR #26's earlier results do not verify this follow-up.
 
 ## Reproduced ownership defect
 
@@ -39,7 +39,7 @@ All pointer values are nil or target live manual allocations. This makes the exi
 | Gate | Configuration |
 | --- | --- |
 | Toolchain build | Default experiment build from the changed source |
-| Upstream regression | Native linux/amd64, default experiments, `./run.bash --no-rebuild` |
+| Upstream regression | Native linux/amd64, default experiments, `GO_TEST_TIMEOUT_SCALE=6 ./run.bash --no-rebuild`; full test selection retained |
 | Runtime regression | Native linux/amd64 and linux/arm64; `logosarena` and `logosarena,nogreenteagc`; runtime, metrics, pprof, and trace |
 | Race | Region, arena, and GC tests under the race detector |
 | Repetition | Count 10; heap-graph and layout tests at CPU counts 1, 2, and 4; ownership stress fixes two Ps |
@@ -48,7 +48,7 @@ All pointer values are nil or target live manual allocations. This makes the exi
 | Mutation | Restore the original release order through an overlay; require the frozen ownership assertion to fail |
 | Hygiene | gofmt and vet |
 
-The initial arm64 build, formatting, and vet gates passed; the runtime package exposed the defect and fixture errors recorded above. All gates on the repaired source remain pending.
+At commit `45e2f57a37190ba5c10e7888b32671ea631bf393`, [run 43829310124](https://github.com/gosuda/LoGOs/actions/runs/43829310124) passed all four native runtime configurations, including formatting/vet, regression, race, repetition, synchronous noinline stress, and checkmark tests. Both Green Tea jobs verified that the exact original production blob fails the frozen ownership test in all ten repetitions. The full upstream job failed an unsupported AVX512 fixture execution, the shared script time budget, and the initially blocked ledger row's formatting rule. The test-only [host-ISA repair in PR #47](https://github.com/gosuda/LoGOs/pull/47) preserves all compilation and assembly checks. The upstream job now scales its package timeout by six, matching the existing script gate's 60-minute budget instead of the upstream ten-minute default. The ledger records completed native evidence. These gate corrections require a complete rerun; native success does not substitute for it.
 
 ## Optimization queue
 
