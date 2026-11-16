@@ -7,6 +7,9 @@ follow-up implementation commit, without starting performance measurements.
 
 ## Requirements and coverage
 
+Before mutation probes, CI requires tracked cgo/runtime sources to pass gofmt
+without rewriting them, then runs full go vet checks with the experiment off/on.
+
 CI uses the existing pinned Go 1.27.4 bootstrap, pinned Node 26.13.1, and verified
 Go 1.27.2/1.27.3 oracles for dist tests. GCC, G++, gccgo, and Clang must exist;
 their versions are saved. Missing gccgo is a failure, even though the upstream
