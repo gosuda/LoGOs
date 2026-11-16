@@ -1,13 +1,20 @@
-# Struct-default binding repair: evidence and review
+# Struct defaults: retained validator and blocked binding work
 
 ## Status and scope
 
-This record covers the struct-default validation and binding repair through
-candidate 3's source-level tests and four isolated mutation probes, observed
-on 2026-11-16. The installed toolchain rebuild was still running at this
-handoff. Installed native and ejected export tests, the full regression run,
-and the candidate allocation comparison remain pending. This is a review
-record, not a completed release gate.
+The declaration validator, M6-S3a, is retained. The binding implementation,
+M6-S3b, is blocked and has been removed after its third implementation
+attempt failed installed-compiler tests on 2026-11-16. This follows G1's
+three-attempt limit, required by AGENTS.md. The following source-level
+results describe the rejected candidates; they do not establish a working
+native binding implementation.
+
+The rejected snapshot is commit
+`96a5a8cc599cbcc55263d32c4ceb2348abc6f0fd`. Its direct lowering suite passed,
+but both installed exported-package tests and the allocation probe failed
+with an internal compiler panic. The exact diagnosis and recovery are
+recorded below. The retained validator still needs its separate fresh
+installed-toolchain gate and the full hosted regression.
 
 The repair has two obligations. A default must be checked in the scope where
 it was declared, even if its type is never constructed. Applying that default
@@ -43,10 +50,9 @@ separately.
 | Blank-field source identity | The first validator repair selected a field type by its name. Repeated `_` fields therefore used the first blank field's type: valid declarations were rejected and invalid ones accepted. Six attack cases failed while two controls passed. This was a defect in the intermediate validator, not a separate untouched-baseline result. | `structdefault-blank-red.log` |
 | Helper metadata | The old decoder did not recognize `defaulthelper`; the old importer accepted legacy expression-only defaults without a helper. The four new wire tests failed before the boundary change. | `default-helper-wire-red.log` |
 
-The blank-field repair uses the field's source position to find its checked
-type. Blank defaults still receive declaration checks, but the facts writer,
-helper generator, local captures, and constructor insertion omit blank
-assignments.
+The retained blank-field validator uses the field's source position to find
+its checked type. The proposed omission of generated blank assignments was
+part of the blocked binding implementation and is not retained.
 
 Additional candidate attacks exposed local-derived type handling, generic
 substitution, inferred array spelling, capture planning across files, and
@@ -176,7 +182,12 @@ They match `default-attacks-final.sha256`, whose own SHA-256 is
 | `structdefault_shapes_test.go` | `977fac5dbf5fe1cb4fd270f844cea481feeaae4ae4be28b35767dfea45c018b8` |
 | `facts/default_helper_wire_test.go` | `9c0ec0aec4b33fa502713f106d145ea7461c1fc7cc219819e6e451a7327863c6` |
 
-## Implementation review
+## Review of the rejected binding candidate
+
+These findings describe the proposed implementation. The installed native
+failure exposed a type-information storage assumption that the direct
+harness and this source review did not catch. The helper APIs below are
+not present in the retained implementation.
 
 The review covered `structdefault_binding.go`, `structdefault.go`,
 `facts/write_default.go`, the facts import boundary, and JSON reuse. The
@@ -341,22 +352,21 @@ bash /workspace/scratch/fd0d13fb6a48/evidence/run-defaults-alloc-probe.sh \
 | Measurement log | `db24ccdf56705db991445fe42fb8ed661c0b007a7e46244dfd9a4901c84d2481` |
 | Probe executable | `88a9e52294c47c475e3bb19689d83bd1638d0fc64a07b4ae0c6e174feac206cf` |
 
-This is a baseline observation, not a new pass criterion. No candidate
-comparison or timing result is recorded here. Producer helpers can change
-inlining and escape analysis, so neither an allocation improvement nor a
-regression follows from the source design alone. Compare the identical
-program and environment after rebuilding the candidate before making either
-claim.
+This is a baseline observation. The installed candidate failed to compile
+the identical workload, so it produced no allocation measurement or timing
+result. No allocation improvement or regression can be inferred from that
+failed run. The workload is retained to check the independent validator
+and any future binding design.
 
-## Remaining gates and bounded residuals
+## Retained validator and unresolved binding behavior
 
-The validator and lowering commands must run without cached results. The
-installed toolchain must be rebuilt before tests that launch `bin/logos`:
+The retained validator commands must run without cached results. The
+installed toolchain must be rebuilt after removing the rejected lowering:
 
 ```sh
 # From src/, with the fork's bin directory first on PATH:
 ./make.bash
-go test -count=1 -short cmd/compile/internal/logos -run '^TestStructDefault'
+go test -count=1 -short cmd/compile/internal/logos -run '^TestStructDefault(LexicalScope|RejectsInvalidDeclaration|BlankFieldIdentity)$'
 go test -count=1 -short cmd/compile/internal/logos/facts
 go test -count=1 -short cmd/compile/internal/types2
 go test -count=1 cmd/go -run 'Script/^logos_(m6_addr_defaults|eject_struct_default)$'
@@ -370,7 +380,9 @@ variables pointed inside the valid disk-backed worktree. Package tests,
 script tests, and successful isolated examples do not replace the full Go
 regression floor. The full rebuilt regression run remains a merge gate.
 
-Two known language behaviors remain outside this repair. Exported anonymous
+The original application-binding, private-field, and blank-lowering defects
+above remain unresolved. Two further language behaviors also remain outside
+the retained validator. Exported anonymous
 structs nested in container types need declaration provenance by exported
 type path; the current named/default records do not identify that origin.
 Also, a default containing a literal of another default-bearing type retains
@@ -378,10 +390,9 @@ the previous nested behavior. The baseline reproduction in
 `default-nested-baseline.log` printed `7 0` for direct `Inner{}` and an outer
 default containing `Inner{}`. Neither behavior is claimed as repaired here.
 
-Ordinary Go struct literals continue to use Go zero initialization. The
-presence of exported producer functions does not change that boundary.
+Ordinary Go struct literals continue to use Go zero initialization.
 
-## Installed build and remaining verification
+## Installed failure and bounded recovery
 
 Two local `make.bash` attempts ended with a killed SSA compiler process.
 The first used two workers and a 1536 MiB soft memory limit and stopped
@@ -392,12 +403,51 @@ attempts, not successful G2 gates; neither produced a source diagnostic.
 The retained logs are `defaults-candidate-build-resource-failure.log` and
 `defaults-candidate-build.log`.
 
-The documented incremental recovery command, `go install std cmd`, is
-running against the retained build cache with one worker, `GOGC=20`, and
-a 512 MiB memory limit. Its log is
-`defaults-candidate-install-recovery.log`. Installed native/export/ejection
-tests and the candidate allocation comparison remain pending that recovery.
-The full hosted regression remains a merge gate.
+The documented incremental recovery command, `go install std cmd`, passed
+against the retained build cache with one worker, `GOGC=20`, and a 512 MiB
+memory limit. The installed Go and logos commands both reported Go 1.27.4.
+The rejected compiler binary had SHA-256
+`673bdff8dd21dda65d8164b5253fff134cce205c869fa08306dcc05a13d54eab`.
+
+The subsequent uncached installed gate failed in
+`TestStructDefaultExportedConstantBindings` and
+`TestStructDefaultExportedPrivateFields`, in both native and ejection
+operations. The allocation probe failed during compilation too. The logs
+are `defaults-installed-focused-rejected.log`,
+`defaults-alloc-candidate3.log`, and `defaults-installed-panic-trace.log`.
+The traced failure is:
+
+```text
+panic: assignment to entry in nil map
+cmd/compile/internal/logos.(*fileLower).fillStructDefaults
+    cmd/compile/internal/logos/structdefault.go:153
+```
+
+Native noder supplies `Info{StoreTypesInSyntax: true}` without `Info.Types`.
+The rejected constructor rewrite read and assigned the optional map
+directly. Its capture planner also read constant values only from that map.
+An empty replacement map is not a repair: `Info.TypeOf` falls back to syntax
+storage only while the map is nil, so allocating one would hide previously
+checked node types. A future design must use the existing dual-storage
+type-information API and test the actual native configuration.
+
+Under G1, the eight modified binding implementation files were restored and
+the three new implementation files removed. The independent validator was
+kept unchanged. Its lexical-scope and invalid-declaration tests, plus their
+two execution helpers, were moved with byte-identical function bodies to
+`structdefault_validation_test.go`. The original blank-field identity file
+was retained unchanged.
+
+[M6-S3b.patch](blocked/M6-S3b.patch) contains only the blocked tests. It
+removes the extracted validator test file before restoring the original
+combined file, avoiding duplicate test functions. A clean replay check
+restored all 14 hashes in the frozen manifest above. Its SHA-256 is
+`3d1bd84ac779294170db7d8e5e3d6403d005be31b94a634f5f9e4a16ae37d012`.
+The helper-boundary tests depend on the internal API in the rejected
+snapshot; the patch alone is an attack archive, not a repaired compiler.
+
+Fresh installed validation of the retained checker and the full hosted
+regression remain merge gates. No fourth binding repair was attempted.
 
 The exact allocation workload is also checked in as
 [struct-default-allocations.lgo](benchmarks/struct-default-allocations.lgo).

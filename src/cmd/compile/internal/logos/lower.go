@@ -59,7 +59,7 @@ func Lower(pkg *types2.Package, info *types2.Info, files []*syntax.File, src map
 	f := facts.Write(pkg, info, files, src)
 	f.BareUnions = bareUnions(pkg)
 	facts.SetCurrent(f)
-	shared := &packageLower{info: info, tpkg: pkg, constMaps: collectConstMaps(files, info), defaults: collectDefaultBindings(pkg, info, files)}
+	shared := &packageLower{info: info, tpkg: pkg, constMaps: collectConstMaps(files, info)}
 	shared.importedMaps = map[*types2.Var]*constMapGen{}
 	shared.importedDone = map[string]bool{}
 	shared.composites, shared.compositeSeq = collectComposites(files, info)
@@ -155,7 +155,6 @@ type packageLower struct {
 	jsonUnionKeys      map[string]bool
 	freezeCopiers      []freezeEntry
 	freezeSeq          int
-	defaults           *defaultBindings
 }
 
 // fileLower carries the state of lowering one file.

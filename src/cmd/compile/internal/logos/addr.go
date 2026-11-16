@@ -31,17 +31,11 @@ func (fl *fileLower) lowerAddrFresh() {
 }
 
 func (fl *fileLower) lowerAddrOp(e *syntax.Operation) syntax.Expr {
-	pos := e.Pos()
-	name := "new"
-	var fun syntax.Expr = nameOf(pos, name)
-	if fl.pkg.defaults.addresses[e] {
-		name = rtAlias + ".Logos_DefaultAddr"
-		fun = rtSel(pos, "Logos_DefaultAddr")
-	}
 	amp := fl.off(e.Pos())
-	fl.add(amp, amp+1, name+"(")
+	fl.add(amp, amp+1, "new(")
 	fl.add(fl.unaryOperandEnd(amp), fl.unaryOperandEnd(amp), ")")
-	return at(&syntax.CallExpr{Fun: fun, ArgList: []syntax.Expr{e.X}}, pos)
+	pos := e.Pos()
+	return at(&syntax.CallExpr{Fun: nameOf(pos, "new"), ArgList: []syntax.Expr{e.X}}, pos)
 }
 
 func (fl *fileLower) unaryOperandEnd(from int) int {

@@ -271,12 +271,6 @@ A struct field default MUST have form `F T = constExpr` before the tag [T-104.5]
 A default MUST be checked in its declaration's lexical scope and MUST be assignable to the field type, even when no composite literal constructs that type [T-104.5].
 A default MUST be a constant expression or a composite literal whose values and map keys recursively satisfy this rule [T-104.5].
 Defaults MUST apply in composite literals of the type, including address forms and partial literals [T-104.5].
-Applied defaults MUST retain their declaration bindings and value types across packages, aliases, and generic instantiations; a constructor's local names MUST NOT change them [T-104.5].
-An explicit initializer MUST suppress its field default, and each applied composite default MUST construct fresh mutable storage [T-104.5].
-An addressed default-bearing literal MUST evaluate once and yield a fresh variable even when the source declares an identifier named `new` [T-104.5].
-Blank-field defaults MUST be checked but MUST NOT generate a field assignment or a keyed literal element [T-104.5].
-Each type with imported default descriptions MUST have one `defaulthelper <Type> <Helper>` fact naming a producer function with the checked constructor signature [T-104.5][T-Sec5].
-An importer MUST treat default source text as descriptive data and MUST reject missing or incompatible producer helpers with a dependency-rebuild diagnostic [T-104.5][T-Sec5].
 A Go struct literal of an exported loGo/s struct MUST get zero values and MUST NOT get the field defaults; this is a documented hole [T-104.5][R-U2][A-GOBOUNDARY].
 `var x T` and `new(T)` MUST trigger `suspicious::unapplied_struct_default` [T-104.5].
 A non-constant default MUST fail with `correctness::default_not_constant` [T-104.5].
@@ -1987,9 +1981,7 @@ The toolchain is one complete toolchain for Go and loGo/s: Go packages and loGo/
 
 ### 18.2 Compiler-made names
 
-Compiler-made names use the `_logos_` prefix; comptime copies use the `_logosct` suffix. The exceptions are the Go-fixed method names `MarshalJSON`, `UnmarshalJSON`, `MarshalBinary`, `AppendBinary`, and `UnmarshalBinary`, the exported property accessors `Logos_GetF` and `Logos_SetF` of Sec 2.3, and the producer functions `Logos_Default_<Type>` that apply struct defaults. Default helpers are ordinary functions and MUST NOT change the source type's method set. Go importers can call the exported functions and accessors, while ordinary Go struct literals keep zero initialization.
-
-Generated default masks use `logos/rt.Logos_DefaultBool`, a transparent alias of the built-in Boolean type. Addresses of helper results use `logos/rt.Logos_DefaultAddr`; it MUST evaluate its argument once and return a fresh variable containing that value. These support names are referenced through the reserved runtime import alias, so source declarations of `bool`, `true`, or `new` MUST NOT capture the generated operations [T-104.5].
+Compiler-made names use the `_logos_` prefix; comptime copies use the `_logosct` suffix. The only exceptions are the Go-fixed method names `MarshalJSON`, `UnmarshalJSON`, `MarshalBinary`, `AppendBinary`, and `UnmarshalBinary`, and the exported property accessors `Logos_GetF` and `Logos_SetF` of Sec 2.3, which Go importers can call.
 For example, the lowering of `v := parse(s)?` reads as follows (temporary names and site indices vary by position).
 
 ```go

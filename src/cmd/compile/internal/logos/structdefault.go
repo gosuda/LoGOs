@@ -5,9 +5,7 @@
 package logos
 
 import (
-	"fmt"
 	"go/token"
-	"strconv"
 	"strings"
 
 	"cmd/compile/internal/base"
@@ -18,44 +16,15 @@ import (
 
 func (fl *fileLower) lowerStructDefaults() {
 	stripped := make(map[*syntax.FieldDefault]bool)
-	for _, s := range fl.pkg.defaults.order {
-		if s.file == fl.file {
-			fl.stripFieldDefaults(s.node, stripped)
-		}
-	}
-	fl.emitDefaultHelpers()
-	for _, s := range fl.pkg.defaults.order {
-		if s.file == fl.file && s.captureText != "" {
-			fl.addDefaultCaptures(s.stmt, s.captureText, s.node.Pos())
-		}
-	}
-	replacements := make(map[syntax.Expr]syntax.Expr)
 	syntax.Inspect(fl.file, func(n syntax.Node) bool {
 		switch n := n.(type) {
+		case *syntax.StructType:
+			fl.stripFieldDefaults(n, stripped)
 		case *syntax.CompositeLit:
-			if r := fl.fillStructDefaults(n); r != n {
-				replacements[n] = r
-			}
+			fl.fillStructDefaults(n)
 		}
 		return true
 	})
-	// An addressed literal becomes a call. The runtime helper retains its fresh
-	// variable without referring to a potentially shadowed source builtin.
-	syntax.Inspect(fl.file, func(n syntax.Node) bool {
-		if op, ok := n.(*syntax.Operation); ok && op.Op == syntax.And && op.Y == nil {
-			if replacements[syntax.Unparen(op.X)] != nil {
-				if fl.pkg.info.LogosAddrFresh == nil {
-					fl.pkg.info.LogosAddrFresh = make(map[syntax.Expr]bool)
-				}
-				fl.pkg.info.LogosAddrFresh[op] = true
-				fl.pkg.defaults.addresses[op] = true
-				fl.needRT = true
-			}
-		}
-		return true
-	})
-	replaceInnerFirst(fl.file, replacements)
-	fl.insertDefaultCaptures()
 }
 
 func (fl *fileLower) stripFieldDefaults(st *syntax.StructType, stripped map[*syntax.FieldDefault]bool) {
@@ -86,83 +55,10 @@ type structDefault struct {
 	text  string
 }
 
-func (fl *fileLower) fillStructDefaults(lit *syntax.CompositeLit) syntax.Expr {
-	t := fl.pkg.info.TypeOf(lit)
-	if t == nil {
-		return lit
-	}
-	ptr, isPtr := types2.Unalias(t).(*types2.Pointer)
-	valueType := t
-	if isPtr {
-		valueType = ptr.Elem()
-	}
-	st, ok := valueType.Underlying().(*types2.Struct)
-	if !ok {
-		return lit
-	}
-	defs, helper := fl.structDefaultsFor(valueType, lit.Pos())
-	if len(defs) == 0 {
-		return lit
-	}
-	present := make(map[string]bool)
-	for _, e := range lit.ElemList {
-		if _, ok := e.(*syntax.SpreadExpr); ok {
-			continue
-		}
-		kv, ok := syntax.Unparen(e).(*syntax.KeyValueExpr)
-		if !ok {
-			return lit
-		} // a positional literal supplies every field
-		if key, ok := syntax.Unparen(kv.Key).(*syntax.Name); ok {
-			present[key.Value] = true
-		}
-	}
-	for _, spread := range fl.pkg.info.LogosSpreads[lit] {
-		for _, field := range spread.Fields {
-			present[field] = true
-		}
-	}
-	var missing []structDefault
-	for _, d := range defs {
-		if d.field != "_" && !present[d.field] {
-			missing = append(missing, d)
-		}
-	}
+func (fl *fileLower) fillStructDefaults(lit *syntax.CompositeLit) {
+	missing := fl.missingDefaults(lit)
 	if len(missing) == 0 {
-		return lit
-	}
-	if helper != "" {
-		var mask []string
-		for i := range st.NumFields() {
-			if present[st.Field(i).Name()] {
-				mask = append(mask, strconv.Itoa(i)+": (0 == 0)")
-			}
-		}
-		maskText := fl.defaultMaskType(st.NumFields()) + "{" + strings.Join(mask, ", ") + "}"
-		pos := lit.Pos()
-		start, end := fl.off(syntax.StartPos(lit)), fl.off(lit.Rbrace)+1
-		prefix, suffix := helper+"(", ", "+maskText+")"
-		if lit.Type == nil {
-			typeText := fl.defaultLiteralType(valueType, pos)
-			lit.Type = fl.reparseDefault(typeText, pos)
-			prefix += typeText
-		}
-		tv := fl.pkg.info.Types[lit]
-		valueTV := tv
-		valueTV.Type = valueType
-		fl.pkg.info.Types[lit] = valueTV
-		result := syntax.Expr(callOf(pos, fl.reparseDefault(helper, pos), []syntax.Expr{lit, fl.reparseDefault(maskText, pos)}))
-		fl.pkg.info.Types[result] = valueTV
-		if isPtr {
-			prefix = rtAlias + ".Logos_DefaultAddr(" + prefix
-			suffix += ")"
-			result = callOf(pos, rtSel(pos, "Logos_DefaultAddr"), []syntax.Expr{result})
-		}
-		fl.addFirst(start, prefix)
-		fl.add(end, end, suffix)
-		fl.pkg.info.Types[result] = tv
-		fl.wrapSpan[result] = span{start: start, end: end}
-		return fl.retyped(lit, result)
+		return
 	}
 	var text strings.Builder
 	var native []syntax.Expr
@@ -178,114 +74,78 @@ func (fl *fileLower) fillStructDefaults(lit *syntax.CompositeLit) syntax.Expr {
 	lit.NKeys += len(native)
 	brace := fl.literalBrace(lit)
 	fl.add(brace+1, brace+1, text.String())
-	return lit
 }
 
-func (fl *fileLower) structDefaultsFor(t types2.Type, pos syntax.Pos) ([]structDefault, string) {
-	obj, args := defaultTypeObject(t)
-	if obj != nil {
-		var defs []structDefault
-		helper := ""
-		if h, ok := fl.pkg.defaults.byType[obj]; ok {
-			for _, d := range h.Fields {
-				defs = append(defs, structDefault{field: d.Field})
-			}
-			helper = facts.DefaultHelperName(obj.Name())
-		} else if obj.Pkg() != nil && obj.Pkg() != fl.pkg.tpkg {
-			if imported, ok := facts.Lookup(obj.Pkg().Path()); ok {
-				for _, d := range imported.Defaults {
-					if d.Type == obj.Name() {
-						defs = append(defs, structDefault{field: d.Field})
-					}
-				}
-				for _, h := range imported.DefaultHelpers {
-					if h.Type == obj.Name() {
-						helper = h.Helper
-						break
-					}
-				}
-				if len(defs) > 0 {
-					if err := checkDefaultHelper(obj.Pkg(), t, helper, args); err != nil {
-						base.Errorf("%s: logos: %v; rebuild dependency", pos.String(), err)
-						return nil, ""
-					}
-					helper = fl.defaultQualifier(obj.Pkg()) + "." + helper
-				}
-			}
+func (fl *fileLower) missingDefaults(lit *syntax.CompositeLit) []structDefault {
+	t := fl.pkg.info.TypeOf(lit)
+	if t == nil {
+		return nil
+	}
+	names, texts := fl.structDefaultsFor(t)
+	if len(names) == 0 {
+		return nil
+	}
+	present := make(map[string]bool)
+	for _, e := range lit.ElemList {
+		kv, ok := syntax.Unparen(e).(*syntax.KeyValueExpr)
+		if !ok {
+			return nil
 		}
-		if len(defs) > 0 {
-			// A named argument carries its exact type arguments, including
-			// private types and shadowed local type parameters, into inference.
-			_, named := t.(*types2.Named)
-			if args.Len() > 0 && !named {
-				var text []string
-				for i := range args.Len() {
-					text = append(text, fl.defaultTypeText(args.At(i)))
-				}
-				helper += "[" + strings.Join(text, ", ") + "]"
-			}
-			return defs, helper
-		}
-		if a, ok := t.(*types2.Alias); ok {
-			return fl.structDefaultsFor(a.Rhs(), pos)
-		}
-		if decl := fl.pkg.defaults.decls[obj]; decl != nil {
-			if _, direct := fl.pkg.info.TypeOf(decl.node.Type).(*types2.Struct); !direct {
-				return fl.localDerivedDefault(t.(*types2.Named), decl, pos)
-			}
+		if key, ok := syntax.Unparen(kv.Key).(*syntax.Name); ok {
+			present[key.Value] = true
 		}
 	}
-	st, _ := t.Underlying().(*types2.Struct)
-	if n, ok := t.(*types2.Named); ok {
-		st, _ = n.Origin().Underlying().(*types2.Struct)
-	}
-	s := fl.pkg.defaults.sources[st]
-	if s == nil {
-		return nil, ""
-	}
-	if !s.planned {
-		base.Fatalf("logos: local defaults used without a capture plan")
-	}
-	defs := make([]structDefault, len(s.values))
-	for i, d := range s.values {
-		text := d.text
-		for j := range args.Len() {
-			text = strings.ReplaceAll(text, "_logos_default_arg"+strconv.Itoa(j)+"_", fl.defaultTypeText(args.At(j)))
+	var out []structDefault
+	for i, name := range names {
+		if !present[name] {
+			out = append(out, structDefault{field: name, text: texts[i]})
 		}
-		defs[i] = structDefault{field: d.field, text: text}
 	}
-	return defs, ""
+	return out
 }
 
-func checkDefaultHelper(pkg *types2.Package, typ types2.Type, helper string, args *types2.TypeList) error {
-	fn, ok := pkg.Scope().Lookup(helper).(*types2.Func)
+func (fl *fileLower) structDefaultsFor(t types2.Type) ([]string, []string) {
+	u := types2.Unalias(t)
+	st, _ := u.(*types2.Struct)
+	if st == nil {
+		if n, ok := u.(*types2.Named); ok {
+			if s, ok := n.Underlying().(*types2.Struct); ok {
+				st = s
+			}
+		}
+	}
+	if st == nil {
+		return nil, nil
+	}
+	if defs := fl.pkg.info.LogosFieldDefaults[st]; len(defs) > 0 {
+		names := make([]string, 0, len(defs))
+		texts := make([]string, 0, len(defs))
+		for _, d := range defs {
+			names = append(names, d.Field)
+			texts = append(texts, renderExpr(d.Default))
+		}
+		return names, texts
+	}
+	named, ok := u.(*types2.Named)
 	if !ok {
-		return fmt.Errorf("default helper %s.%s is not a function", pkg.Path(), helper)
+		return nil, nil
 	}
-	sig := fn.Type().(*types2.Signature)
-	if sig.TypeParams().Len() != args.Len() {
-		return fmt.Errorf("default helper %s.%s has incompatible type parameters", pkg.Path(), helper)
+	obj := named.Obj()
+	if obj == nil || obj.Pkg() == nil || obj.Pkg() == fl.pkg.tpkg {
+		return nil, nil
 	}
-	if args.Len() > 0 {
-		var ts []types2.Type
-		for i := range args.Len() {
-			ts = append(ts, args.At(i))
+	imp, ok := facts.Lookup(obj.Pkg().Path())
+	if !ok || imp == nil {
+		return nil, nil
+	}
+	var names, texts []string
+	for _, d := range imp.Defaults {
+		if d.Type == obj.Name() {
+			names = append(names, d.Field)
+			texts = append(texts, d.Text)
 		}
-		inst, err := types2.Instantiate(nil, sig, ts, true)
-		if err != nil {
-			return fmt.Errorf("default helper %s.%s: %w", pkg.Path(), helper, err)
-		}
-		sig = inst.(*types2.Signature)
 	}
-	st := typ.Underlying().(*types2.Struct)
-	mask := types2.NewArray(types2.Typ[types2.Bool], int64(st.NumFields()))
-	if sig.Variadic() || sig.Params().Len() != 2 || sig.Results().Len() != 1 ||
-		!types2.Identical(sig.Params().At(0).Type(), typ) ||
-		!types2.Identical(sig.Params().At(1).Type(), mask) ||
-		!types2.Identical(sig.Results().At(0).Type(), typ) {
-		return fmt.Errorf("default helper %s.%s has incompatible signature", pkg.Path(), helper)
-	}
-	return nil
+	return names, texts
 }
 
 func (fl *fileLower) literalBrace(lit *syntax.CompositeLit) int {

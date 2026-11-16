@@ -98,7 +98,7 @@ func (fl *fileLower) lowerStaticJSONType(td *syntax.TypeDecl) {
 	if !jsonOK {
 		fields = binaryFields
 	}
-	js := fl.buildJSONStruct(named, fields)
+	js := fl.buildJSONStruct(td.Name.Value, named.Underlying().(*types2.Struct), fields)
 	js.pos = td.Pos()
 	var b strings.Builder
 	if jsonOK && !userDeclaresMethod(named, "MarshalJSON") {
@@ -187,9 +187,8 @@ func parseGeneratedDecls(text string, pos syntax.Pos) []syntax.Decl {
 	return decls
 }
 
-func (fl *fileLower) buildJSONStruct(named *types2.Named, fields []*types2.Var) *jsonStruct {
-	st := named.Underlying().(*types2.Struct)
-	js := &jsonStruct{name: named.Obj().Name(), staticJSON: fl.pkg.info.LogosStaticJSON, holderPkg: fl.pkg.tpkg, qualify: fl.genQualifier}
+func (fl *fileLower) buildJSONStruct(name string, st *types2.Struct, fields []*types2.Var) *jsonStruct {
+	js := &jsonStruct{name: name, staticJSON: fl.pkg.info.LogosStaticJSON, holderPkg: fl.pkg.tpkg, qualify: fl.genQualifier}
 
 	for _, fld := range fields {
 		i := fieldIndexOf(st, fld)
@@ -217,8 +216,8 @@ func (fl *fileLower) buildJSONStruct(named *types2.Named, fields []*types2.Var) 
 		}
 		js.fields = append(js.fields, f)
 	}
-	if defs, helper := fl.structDefaultsFor(named, named.Obj().Pos()); len(defs) > 0 && helper != "" {
-		js.defaults = append(js.defaults, fmt.Sprintf("*%s = %s(*%s, %s{})", jsonRecv, helper, jsonRecv, fl.defaultMaskType(st.NumFields())))
+	for _, d := range fl.pkg.info.LogosFieldDefaults[st] {
+		js.defaults = append(js.defaults, fmt.Sprintf("%s.%s = %s", jsonRecv, d.Field, renderExpr(d.Default)))
 	}
 	return js
 }
