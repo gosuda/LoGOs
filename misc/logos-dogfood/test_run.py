@@ -1,3 +1,4 @@
+# pyright: strict
 """Checks that replay evidence cannot turn an incomplete analysis into success."""
 
 from __future__ import annotations
@@ -92,6 +93,47 @@ class EvidenceTests(unittest.TestCase):
 
     def test_zero_empty_lint_is_clean(self) -> None:
         self.assertEqual(assess_lint(self.run_record(0), "logos-lint").status, "clean")
+
+    def test_native_compiler_error_is_a_failed_load(self) -> None:
+        error = (
+            Path(__file__).parent / "testdata" / "compiler-error.jsonl"
+        ).read_text()
+        stderr = json.dumps(self.diagnostic(severity="warn")) + "\n" + error
+        result = assess_lint(self.run_record(1, stderr=stderr), "logos-lint")
+        self.assertEqual((result.status, result.diagnostics), ("load-failed", 2))
+        self.assertEqual(
+            assess_lint(self.run_record(0, stderr=stderr), "logos-lint").status,
+            "invalid-report",
+        )
+
+    def test_malformed_untagged_diagnostic_is_not_a_compiler_error(self) -> None:
+        error = (
+            Path(__file__).parent / "testdata" / "compiler-error.jsonl"
+        ).read_text()
+        changes: tuple[tuple[str, object], ...] = (
+            ("span", {}),
+            ("provenance", {}),
+            (
+                "provenance",
+                {"origin_expr": "", "origin_line": False, "inferred_type": ""},
+            ),
+            ("autofix_candidates", None),
+            ("severity", "warn"),
+            ("message", ""),
+        )
+        for field, value in changes:
+            record: dict[str, object] = json.loads(error)
+            record[field] = value
+            with self.subTest(field=field):
+                result = assess_lint(
+                    self.run_record(1, stderr=json.dumps(record)), "logos-lint"
+                )
+                self.assertEqual(result.status, "invalid-report")
+        empty_rule = json.dumps(self.diagnostic(rule=""))
+        self.assertEqual(
+            assess_lint(self.run_record(1, stderr=empty_rule), "logos-lint").status,
+            "invalid-report",
+        )
 
     def test_deny_diagnostic_explains_failure(self) -> None:
         run = self.run_record(1, stderr=json.dumps(self.diagnostic()))
@@ -280,7 +322,7 @@ class EvidenceTests(unittest.TestCase):
                 f"{spawn}time.sleep(30)\n"
             )
         processes: list[subprocess.Popen[bytes]] = []
-        original_wait = subprocess.Popen.wait
+        original_wait = subprocess.Popen[bytes].wait
         log = self.root / "interrupted"
 
         def cleanup() -> None:
@@ -466,7 +508,9 @@ class PolicyTests(unittest.TestCase):
     def test_policy_cannot_weaken_defaults_or_grant_globs(self) -> None:
         for text in (
             '[capabilities]\ntransitive_unsafe = "allow"\n',
+            '[capabilities]\ntransitive_exec = "allow"\n',
             '[capabilities]\ntransitive_unsafe_allowlist = ["example.com/**"]\n',
+            '[capabilities]\ntransitive_exec_allowlist = ["example.com/**"]\n',
             '[capabilities]\ntransitive_unsafe_allowlist = ["example.com/../dependency"]\n',
             '[capabilities]\ntransitive_unsafe_allowlist = ["example.com/dep", "example.com/dep"]\n',
             '[capabilities]\nreflect_allowlist = ["example.com/dependency"]\n',
@@ -477,6 +521,15 @@ class PolicyTests(unittest.TestCase):
             case = replace(self.case, logos_policy_sha256=file_hash(self.policy_file))
             with self.subTest(text=text), self.assertRaises(ValueError):
                 verify_policy(case, self.root)
+
+    def test_policy_accepts_reviewed_execution_grants(self) -> None:
+        self.policy_file.write_text(
+            '[capabilities]\ntransitive_exec_allowlist = ["example.com/driver"]\n'
+        )
+        case = replace(self.case, logos_policy_sha256=file_hash(self.policy_file))
+        policy = verify_policy(case, self.root)
+        assert policy is not None
+        self.assertEqual(policy.content, self.policy_file.read_bytes())
 
     def test_policy_is_isolated_to_logos_stages(self) -> None:
         for stage in ("oracle", "go", "logos", "logos-lint", "gglint"):
