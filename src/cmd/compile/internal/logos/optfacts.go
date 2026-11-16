@@ -171,6 +171,9 @@ func ApplyReadonlyFactsInPlace(pkg *types2.Package, readonlys []facts.ReadonlyFa
 // declarations with valid fact tags. It excludes compiler-local and method
 // symbols before a scope lookup can resolve them.
 func isPackageDeclName(name string) bool {
+	if strings.ContainsRune(name, '.') {
+		return false
+	}
 	base, _, _ := strings.Cut(name, "@")
 	return token.IsIdentifier(base) && facts.ValidObject(name)
 }
