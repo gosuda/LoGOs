@@ -110,6 +110,42 @@ jobs:
           go version -m "$RUNNER_TEMP/gglint" | tee "$EVIDENCE/gglint-build-info.txt"
           sha256sum "$RUNNER_TEMP/gglint" | tee "$EVIDENCE/gglint.sha256"
 
+      - name: Capture early tools capability diagnostics
+        id: tools_probe
+        if: ${{ !cancelled() && steps.inputs.outcome == 'success' && steps.native.outcome == 'success' }}
+        run: |
+          set +e
+          uv run --no-project python misc/logos-dogfood/run.py \
+            --manifest misc/logos-dogfood/corpus-ci.json --only tools \
+            --go-oracle "$RUNNER_TEMP/oracle/bin/go" \
+            --go-candidate "$GITHUB_WORKSPACE/bin/go" --logos "$GITHUB_WORKSPACE/bin/logos" \
+            --source-root "$INPUTS/sources" --module-cache "$INPUTS/modules" \
+            --cache-root "$RUNNER_TEMP/corpus-cache" --operation build \
+            --stage oracle --stage go --stage logos \
+            --jobs 2 --timeout 600 --out "$EVIDENCE/tools-probe" \
+            2>&1 | tee "$EVIDENCE/tools-probe-console.txt"
+          statuses=("${PIPESTATUS[@]}")
+          set -e
+          printf 'runner=%s\nconsole_capture=%s\n' "${statuses[0]}" "${statuses[1]}" | tee "$EVIDENCE/tools-probe-exit.txt"
+          test "${statuses[0]}" -eq 0 || test "${statuses[0]}" -eq 1
+          test "${statuses[1]}" -eq 0
+          test -f "$EVIDENCE/tools-probe/report.json"
+          # This diagnostic capture does not accept the corpus. The complete
+          # replay and its unchanged acceptance checker below remain required.
+
+      - name: Retain early tools diagnostics
+        if: ${{ !cancelled() && steps.tools_probe.outcome != 'skipped' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: tools-probe-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 14
+          if-no-files-found: error
+          path: |
+            ${{ runner.temp }}/logos-corpus-evidence/tools-probe
+            ${{ runner.temp }}/logos-corpus-evidence/tools-probe-console.txt
+            ${{ runner.temp }}/logos-corpus-evidence/tools-probe-exit.txt
+            !${{ runner.temp }}/logos-corpus-evidence/tools-probe/work/**
+
       - name: Replay and assess all 196 corpus cells
         if: ${{ !cancelled() && steps.inputs.outcome == 'success' && steps.native.outcome == 'success' && steps.gglint.outcome == 'success' }}
         run: |

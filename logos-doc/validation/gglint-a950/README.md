@@ -17,5 +17,12 @@ The race command is `go test -race -count=1 -p 1 -parallel 2 -timeout 15m "${tes
 - [race.raw.log](race.raw.log), [lint.raw.log](lint.raw.log), and [vettool.raw.log](vettool.raw.log) retain the complete text returned by the GitHub job-log connector.
 - [run.json](run.json) and [jobs.json](jobs.json) retain the API response objects.
 - [summary.json](summary.json) records the exact revision, toolchain, commands, and observed results.
+- [checkout-identities.json](checkout-identities.json) proves that the Actions
+  checkout `d67294b7eb975cb3a27dd7dcafab9b00bee267ed` and the PR head have the
+  identical complete tree `9fc49c87690544f82703c0210d5259aaf5b89684`.
 
-This is independent CI evidence for the stated commit. Earlier local runs killed under resource pressure remain failed or incomplete observations. The earlier run on `077dc30277a1a2431059fd12e20e4028a356ec4a` was cancelled after the PR advanced and is not used as a passing result. No source, tests, workflow, or branch was changed while collecting these files.
+This is independent CI evidence for the stated commit. Earlier killed local runs
+remain failed or incomplete observations; their termination cause was not
+established. The earlier run on `077dc30277a1a2431059fd12e20e4028a356ec4a` was
+cancelled after the PR advanced and is not used as a passing result. No source,
+tests, workflow, or branch was changed while collecting these files.
