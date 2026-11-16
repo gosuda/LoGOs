@@ -14,6 +14,25 @@ import (
 
 const indexedFieldPaths = false
 
+func fallbackStructName(inner, root string) string {
+	if inner != "" {
+		return inner
+	}
+	return root
+}
+
+// QuotedNull consumes a string containing null under the active profile's
+// ,string pointer rule. Other values remain for the typed scalar decoder.
+func (s *Scanner) QuotedNull() bool {
+	pos := s.pos
+	item, st := s.readQuoted()
+	if st == quotedContent && item == "null" {
+		return true
+	}
+	s.pos = pos
+	return false
+}
+
 func (s *Scanner) rejectQuotedBare(typ reflect.Type) {
 	s.save(tagUnquoted(typ))
 }

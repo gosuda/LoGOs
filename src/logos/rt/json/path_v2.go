@@ -12,38 +12,47 @@ import (
 	stdjson "encoding/json"
 	"encoding/json/jsontext"
 	"errors"
-	"io"
 	"reflect"
 	"strconv"
-	"strings"
 )
 
 const indexedFieldPaths = true
 
-var stringContentReplacer = strings.NewReplacer(
-	"object name", "object key",
-	"at start of value", "looking for beginning of value",
-	"at start of string", "looking for beginning of object key string",
-	"after object value", "after object key:value pair",
-	"in number", "in numeric literal",
-)
+func fallbackStructName(_ string, root string) string {
+	return root
+}
+
+// QuotedNull consumes the exact token "null" under JSONv2's legacy
+// ,string pointer rule. Escaped spellings leave the pointer unchanged.
+func (s *Scanner) QuotedNull() bool {
+	i := skipSpace(s.data, s.pos)
+	end := i + len(`"null"`)
+	if end > len(s.data) || string(s.data[i:end]) != `"null"` {
+		return false
+	}
+	if end < len(s.data) && !isDelimiter(s.data[end]) {
+		return false
+	}
+	s.pos = end
+	return true
+}
 
 func stringContentError(item string) error {
-	_, err := jsontext.AppendUnquote(nil, []byte(item))
+	// SyntaxError's message is private. Let encoding/json construct the
+	// public error, including its type and offset, on this error path.
+	var dst struct {
+		V string `json:"v,string"`
+	}
+	raw := AppendEscaped([]byte(`{"v":"`), item)
+	raw = append(raw, '"', '}')
+	err := stdjson.Unmarshal(raw, &dst)
 	if err == nil {
 		return nil
 	}
-	msg := err.Error()
-	if syn, ok := err.(*jsontext.SyntacticError); ok && syn.Err != nil {
-		msg = syn.Err.Error()
+	if ute, ok := err.(*stdjson.UnmarshalTypeError); ok {
+		return ute.Err
 	}
-	if msg == io.ErrUnexpectedEOF.Error() {
-		return errors.New("unexpected end of JSON input")
-	}
-	if before, _, found := strings.Cut(msg, " (expecting"); found && !strings.Contains(msg, " in literal") {
-		msg = before
-	}
-	return errors.New(stringContentReplacer.Replace(msg))
+	return err
 }
 
 func (s *Scanner) rejectQuotedBare(typ reflect.Type) {

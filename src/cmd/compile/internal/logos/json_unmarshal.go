@@ -578,10 +578,14 @@ func (js *jsonStruct) unionLevelLines(f *jsonField, cls jsonUnionClass, uc *unio
 
 func (f *jsonField) pointerLines(field string) []string {
 	fill := fmt.Sprintf("%s(&_logos_s, %s.Alloc(&%s))", f.codec().decodeFn(), jsonAlias, field)
-	if f.required >= 0 {
-		return []string{fill}
+	lines := []string{fill}
+	if f.required < 0 {
+		lines = ifElseLines("_logos_s.Null()", []string{field + " = nil"}, lines)
 	}
-	return ifElseLines("_logos_s.Null()", []string{field + " = nil"}, []string{fill})
+	if f.quoted {
+		return ifElseLines("_logos_s.QuotedNull()", []string{field + " = nil"}, lines)
+	}
+	return lines
 }
 
 func (js *jsonStruct) requiredCheck() []string {

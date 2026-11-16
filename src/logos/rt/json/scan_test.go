@@ -567,6 +567,10 @@ func TestFallbackNestedStructFieldPath(t *testing.T) {
 	if ute.Field != "In.X" || ute.Value != "string" || ute.Offset != 16 {
 		t.Fatalf("saved error = %#v", ute)
 	}
+	var want outer
+	if wantErr := stdjson.Unmarshal([]byte(data), &want); !sameError(ute, wantErr) {
+		t.Fatalf("saved error = %#v, encoding/json = %#v", ute, wantErr)
+	}
 }
 
 func TestFallbackSyntaxError(t *testing.T) {
