@@ -3109,6 +3109,17 @@ Anchor: John Carmack, Dieter Rams
 - Red-team rows: #213.
 - Docs: none.
 
+### M16-A-S6 Isolate the wasm test execution environment
+Anchor: Tony Hoare, David Parnas, Richard Feynman
+- State: frozen RED; no launcher implementation attempt has begun.
+- Invariant: unrelated host environment metadata cannot change the output or trap of a wasm regression guest. Build commands retain their existing environment, and the guest retains the launcher's explicit `GOMAXPROCS=1` policy. The production wasm startup area and ABI are unchanged.
+- Attack: `src/cmd/compile/internal/logos/wasm_env_test.go` builds one Go guest and one actual `.lgo` guest with `?` propagation, then runs each unchanged module with an unrelated environment value of 0, 64, 8191, 8192, 8193 and 16384 bytes. Every run must print exactly `7`. Existing program-output, wrong-MayYield trap and yield-free source tests remain unchanged.
+- RED (2026-11-16): eight oversized cases fail before guest execution with `total length of command line and environment variables exceeds limit`; all four small controls pass. The existing output/yield/trap controls pass (2.39s, 0.46s and 0.61s); the combined run takes 20.758s. Both drivers are go1.27.4; the available Node is v24.22.1, recorded separately from the plan's v24.22.0 reference. No tool version was installed or changed.
+- Proposed seam: `runWasmNode` resolves Node on the host, then supplies an explicit execution environment. `wasmGoEnv` continues to serve build commands. No production linker or wasm_exec change is needed.
+- Gate: `go test -count=1 -short cmd/compile/internal/logos -run '^TestWasm(NodeIgnoresAmbientEnvironment|ProgramRunsUnderNode|WrongMayYieldTraps|YieldFreeSourcesRunUnderNode)$'`, a caught/restored ambient-forwarding mutation, formatting and vet. GREEN and PROBE are pending.
+- Red-team rows: #394.
+- Docs: this test-launcher contract changes no language rule or application environment semantics; SPEC and Table T retain their existing wasm contracts.
+
 ## M17. Smart stack
 
 Anchor: John Carmack, Herbert Simon
@@ -4407,5 +4418,6 @@ Written to `tasks/autoplan-ledger.jsonl` by P0-S6. IDs: phase prefix plus a sequ
 {"id": "AUD-190", "description": "M11-A-S7 Preserve JSON profile dispatch and errors", "phase": "AUD"}
 {"id": "AUD-191", "description": "M3-A-S19 Resolve the first generic type argument", "phase": "AUD"}
 {"id": "AUD-193", "description": "M11-A-S8 Preserve C type arguments in quoted JSON dispatch", "phase": "AUD"}
+{"id": "AUD-194", "description": "M16-A-S6 Isolate the wasm test execution environment", "phase": "AUD"}
 {"id": "AUD-197", "description": "M24-A-S2 Keep ejection target facts consistent", "phase": "AUD"}
 ```

@@ -284,4 +284,5 @@
 {"id": "AUD-190", "description": "M11-A-S7 Preserve JSON profile dispatch and errors", "phase": "AUD"}
 {"id": "AUD-191", "description": "M3-A-S19 Resolve the first generic type argument", "phase": "AUD"}
 {"id": "AUD-193", "description": "M11-A-S8 Preserve C type arguments in quoted JSON dispatch", "phase": "AUD"}
+{"id": "AUD-194", "description": "M16-A-S6 Isolate the wasm test execution environment", "phase": "AUD"}
 {"id": "AUD-197", "description": "M24-A-S2 Keep ejection target facts consistent", "phase": "AUD"}
