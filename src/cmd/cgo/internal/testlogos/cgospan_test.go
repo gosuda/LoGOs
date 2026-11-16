@@ -23,9 +23,13 @@ func TestCgoOptSpanCodegen(t *testing.T) {
 	if runtime.GOARCH != "amd64" && runtime.GOARCH != "arm64" {
 		t.Skip("object-code assertions cover amd64 and arm64")
 	}
-	binary, err := os.Executable()
+	testenv.MustHaveGoBuild(t)
+	binary := filepath.Join(t.TempDir(), "span.test")
+	args := append([]string{"test", "-c", "-o", binary}, cgoSpanToolFlags(t)...)
+	args = append(args, "cmd/cgo/internal/testlogos")
+	out, err := runCmd(t, filepath.Join(runtime.GOROOT(), "src", "cmd"), goBin(t), args...)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("build symbolized span test binary: %v\n%s", err, out)
 	}
 	body := objdumpFunc(t, binary, "^runtime\\.cgoCheckUnknownPointer$")
 	if !strings.Contains(body, "TEXT runtime.cgoCheckUnknownPointer") {
@@ -54,6 +58,21 @@ func TestCgoOptSpanPointerRules(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Setenv("GODEBUG", os.Getenv("GODEBUG")+",cgocheck=1")
+	args := append([]string{"run"}, cgoSpanToolFlags(t)...)
+	out, err := runCmd(t, dir, goBin(t), append(args, ".")...)
+	if err != nil {
+		t.Fatalf("span pointer fixture: %v\n%s", err, out)
+	}
+	if strings.TrimSpace(out) != "span pointer and exported-result checks ok" {
+		t.Fatalf("unexpected span fixture output: %q", out)
+	}
+}
+
+// cgoSpanToolFlags keeps child builds on the experiment and instrumentation
+// of this test binary. An explicit test -c build also keeps objdump symbols.
+func cgoSpanToolFlags(t *testing.T) []string {
+	t.Helper()
 	experiment := "nologoscgoopt,nologosfastcgo"
 	if goexperiment.LogosCgoOpt {
 		experiment = "logoscgoopt,nologosfastcgo"
@@ -62,24 +81,17 @@ func TestCgoOptSpanPointerRules(t *testing.T) {
 		experiment += ",cgocheck2"
 	}
 	t.Setenv("GOEXPERIMENT", experiment)
-	t.Setenv("GODEBUG", os.Getenv("GODEBUG")+",cgocheck=1")
-	args := []string{"run"}
+	var flags []string
 	if race.Enabled {
-		args = append(args, "-race")
+		flags = append(flags, "-race")
 	}
 	if asan.Enabled {
-		args = append(args, "-asan")
+		flags = append(flags, "-asan")
 	}
 	if msan.Enabled {
-		args = append(args, "-msan")
+		flags = append(flags, "-msan")
 	}
-	out, err := runCmd(t, dir, goBin(t), append(args, ".")...)
-	if err != nil {
-		t.Fatalf("span pointer fixture: %v\n%s", err, out)
-	}
-	if strings.TrimSpace(out) != "span pointer and exported-result checks ok" {
-		t.Fatalf("unexpected span fixture output: %q", out)
-	}
+	return flags
 }
 
 // Both benchmarks call an unmarked void C function with one pointer argument.
