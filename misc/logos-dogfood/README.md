@@ -50,8 +50,9 @@ network sandbox. Missing dependencies remain visible as blocked cells. Module
 inputs are verified against their pinned content sums before use.
 
 Each command receives a fresh private copy of its source. The copy is checked
-against the verified digest before execution. Tests cannot alter the corpus
-checkout or influence a later command by leaving files in the previous copy.
+against the verified digest before execution. Commands run outside the corpus
+checkout, and each subsequent command receives a new copy without earlier
+commands' output files. This copying does not provide a filesystem sandbox.
 Only one source copy remains on disk at a time; the copy is removed after its
 case. Symlinks and newline-containing source filenames are rejected explicitly.
 
@@ -106,6 +107,49 @@ stages. The gglint stage uses stock Go on PATH and an explicit configuration wit
 the same build tags. Its report includes test-file diagnostics. `logos lint`
 follows its own package scope and does not imply that the same test files were
 analyzed.
+
+### Replay with reviewed capability grants
+
+`corpus-permissions.json` is a separate manifest for ten pinned sources whose
+default-policy builds reported capability denials. It preserves their original
+source pins and selects reviewed files under `policies/`. These grants authorize
+replay of this pinned corpus only; they do not certify the dependencies or grant
+permissions to other versions. Keep the original default-policy evidence.
+
+Each policy has paired `logos_policy` and `logos_policy_sha256` fields. The
+runner verifies the exact bytes, saves a separate policy artifact in the new
+evidence directory, and applies it as `logos.toml` only in the private copies
+for `logos` and `logos lint`. It refuses to overwrite an upstream configuration.
+Oracle Go, fork Go, and gglint receive the pristine source. Both the original
+source digest and each command's effective input digest are recorded, including
+the repeated lint input.
+
+The accepted policy format contains only `[capabilities]` and exact package
+paths in `transitive_unsafe_allowlist` or `transitive_net_allowlist`. Paths with
+globs, duplicate grants, escaping or symlinked policy files, severity changes,
+build settings, and lint overrides are rejected. Default denials and reflection
+warnings remain enabled. The existing configuration semantics are documented
+in [the language specification](../../logos-doc/SPEC.md), sections 8 and 11.
+
+Run the separate compile and lint comparison with a successful stock oracle:
+
+```sh
+uv run --no-project python misc/logos-dogfood/run.py \
+  --manifest misc/logos-dogfood/corpus-permissions.json \
+  --go-oracle /opt/go1.27.4/bin/go \
+  --go-candidate "$PWD/bin/go" \
+  --logos "$PWD/bin/logos" \
+  --source-root /opt/dogfood/git \
+  --module-cache /opt/dogfood/modules \
+  --cache-root /tmp/logos-dogfood-cache \
+  --operation build --jobs 1 \
+  --out /tmp/logos-permission-evidence
+```
+
+A capability denial can occur before lint emits its JSON report. Its original
+failed or invalid-report cell remains evidence of that invocation. A successful
+permission replay is a separate result under its recorded grants. Additional
+linker denials require review before a new policy and replay are recorded.
 
 ## Evidence and interpretation
 
@@ -180,5 +224,5 @@ uv run --no-project python -m unittest discover \
 
 These tests cover false success on exit 1, partial-error masking, missing package
 patterns, schema and severity mismatches, typecheck failures, duplicate findings,
-repeat ordering and multiplicity, absent baselines, source hashes, and actual
-subprocess timeout handling.
+repeat ordering and multiplicity, absent baselines, source hashes, actual
+subprocess timeout and interruption cleanup, and the capability-policy boundary.

@@ -13,6 +13,7 @@ import shutil
 import signal
 import subprocess
 import time
+import tomllib
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import cast
@@ -102,6 +103,8 @@ class Case:
     tags: tuple[str, ...]
     patterns: tuple[str, ...]
     operation: str
+    logos_policy: str = ""
+    logos_policy_sha256: str = ""
 
     @staticmethod
     def parse(value: object) -> Case:
@@ -124,6 +127,8 @@ class Case:
             cgo=cgo,
             tags=strings(data.get("tags", [])),
             patterns=strings(data.get("patterns", ["./..."])),
+            logos_policy=string(data.get("logos_policy", "")),
+            logos_policy_sha256=string(data.get("logos_policy_sha256", "")),
         )
         if not re.fullmatch(r"[a-z0-9][a-z0-9-]*", case.id):
             raise ValueError(f"invalid case id: {case.id}")
@@ -147,6 +152,16 @@ class Case:
             raise ValueError("module and local sources require a full h1 checksum")
         if case.source_kind == "module" and not case.version:
             raise ValueError("module sources require an exact version")
+        if bool(case.logos_policy) != bool(case.logos_policy_sha256):
+            raise ValueError("logos_policy and logos_policy_sha256 must be paired")
+        if case.logos_policy:
+            path = Path(case.logos_policy)
+            if path.is_absolute() or ".." in path.parts:
+                raise ValueError(
+                    "policy path must remain within the manifest directory"
+                )
+            if not re.fullmatch(r"[0-9a-f]{64}", case.logos_policy_sha256):
+                raise ValueError("policy requires a full SHA-256 checksum")
         return case
 
 
@@ -156,6 +171,50 @@ class Source:
     files: tuple[str, ...]
     digest: str
     prefix: str = ""
+
+
+@dataclass(frozen=True)
+class Policy:
+    path: Path
+    content: bytes
+    sha256: str
+
+
+def verify_policy(case: Case, root: Path) -> Policy | None:
+    """Read only the exact reviewed capability grants pinned by the manifest."""
+    if not case.logos_policy:
+        return None
+    relative = Path(case.logos_policy)
+    path = within(root, case.logos_policy)
+    if any(
+        (root.joinpath(*relative.parts[:i])).is_symlink()
+        for i in range(1, len(relative.parts) + 1)
+    ):
+        raise ValueError("policy paths must not contain symlinks")
+    content = path.read_bytes()
+    digest = hashlib.sha256(content).hexdigest()
+    if digest != case.logos_policy_sha256:
+        raise ValueError("policy contents differ from the pinned SHA-256 checksum")
+    data = obj(cast(object, tomllib.loads(content.decode("utf-8"))))
+    if set(data) != {"capabilities"}:
+        raise ValueError("replay policy may contain only capability grants")
+    grants = obj(data["capabilities"])
+    if not grants or set(grants) - {
+        "transitive_unsafe_allowlist",
+        "transitive_net_allowlist",
+    }:
+        raise ValueError("replay policy may grant only unsafe or network capabilities")
+    for value in grants.values():
+        packages = strings(value)
+        if not packages or len(set(packages)) != len(packages):
+            raise ValueError("capability grants must be nonempty and unique")
+        if any(
+            not re.fullmatch(r"[A-Za-z0-9_~.!+-]+(?:/[A-Za-z0-9_~.!+-]+)*", p)
+            or any(part in (".", "..") for part in p.split("/"))
+            for p in packages
+        ):
+            raise ValueError("capability grants require exact package paths")
+    return Policy(path, content, digest)
 
 
 def git(root: Path, *args: str) -> str:
@@ -228,6 +287,25 @@ def copy_source(source: Source, target: Path) -> None:
         destination.chmod((source.path / name).stat().st_mode | 0o200)
     if tree_hash(target, source.files, source.prefix) != source.digest:
         raise ValueError("source changed while copying verified inputs")
+
+
+def prepare_source(
+    source: Source, target: Path, stage: str, policy: Policy | None
+) -> dict[str, object]:
+    """Keep the verified upstream input separate from LoGOs replay permissions."""
+    copy_source(source, target)
+    if policy is None or stage not in ("logos", "logos-lint"):
+        return {"effective_source_digest": source.digest}
+    destination = target / "logos.toml"
+    if destination.exists():
+        raise ValueError("replay policy must not overwrite an upstream logos.toml")
+    destination.write_bytes(policy.content)
+    return {
+        "policy_sha256": policy.sha256,
+        "effective_source_digest": tree_hash(
+            target, (*source.files, "logos.toml"), source.prefix
+        ),
+    }
 
 
 @dataclass(frozen=True)
@@ -551,6 +629,8 @@ def environment(
                 "GOOS",
                 "GOARCH",
                 "GOAMD64",
+                "GOMEMLIMIT",
+                "TMPDIR",
                 "CC",
                 "CXX",
                 "CGO_CFLAGS",
@@ -717,6 +797,17 @@ def main() -> int:
         try:
             source = verify_source(case, source_root, modules, manifest.parent)
             row["source_path"], row["source_digest"] = str(source.path), source.digest
+            policy = verify_policy(case, manifest.parent)
+            if policy is not None:
+                saved = out / "inputs" / case.id / "logos.toml"
+                saved.parent.mkdir(parents=True, exist_ok=True)
+                saved.write_bytes(policy.content)
+                row["logos_policy"] = {
+                    "source_path": str(policy.path),
+                    "saved_path": str(saved),
+                    "sha256": policy.sha256,
+                }
+            save_report(report_path, report)
             for stage in stages:
                 tool = "logos" if stage == "logos-lint" else stage
                 binary = binaries[tool]
@@ -732,7 +823,7 @@ def main() -> int:
                     continue
                 for mode in modes if stage == "gglint" else ("",):
                     label = f"{stage}-{mode}" if mode else stage
-                    copy_source(source, work)
+                    inputs = prepare_source(source, work, stage, policy)
                     driver = binaries["oracle"] if stage == "gglint" else binary
                     assert driver is not None
                     env = environment(case, driver, modules, caches / tool, args.jobs)
@@ -790,6 +881,7 @@ def main() -> int:
                     entry: dict[str, object] = {
                         "stage": stage,
                         "mode": mode,
+                        "inputs": inputs,
                         "run": asdict(run),
                         "assessment": asdict(assessment),
                     }
@@ -799,7 +891,9 @@ def main() -> int:
                         stage in ("gglint", "logos-lint")
                         and assessment.status in SUCCESS
                     ):
-                        copy_source(source, work)
+                        entry["repeat_inputs"] = prepare_source(
+                            source, work, stage, policy
+                        )
                         repeat = execute(
                             command,
                             work,

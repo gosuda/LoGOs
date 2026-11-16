@@ -23,13 +23,16 @@ from run import (
     Assessment,
     Case,
     Run,
+    Source,
     assess_build,
     assess_lint,
     canonical,
     compare_repeats,
     execute,
     file_hash,
+    prepare_source,
     tree_hash,
+    verify_policy,
     verify_source,
     within,
 )
@@ -391,6 +394,131 @@ class EvidenceTests(unittest.TestCase):
         }
         with self.assertRaises(ValueError):
             Case.parse(manifest)
+
+
+class PolicyTests(unittest.TestCase):
+    def setUp(self) -> None:
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        self.policy_file = self.root / "policies" / "source.toml"
+        self.policy_file.parent.mkdir()
+        self.policy_file.write_text(
+            '[capabilities]\ntransitive_unsafe_allowlist = ["example.com/dependency"]\n'
+        )
+        self.manifest: dict[str, object] = {
+            "id": "source",
+            "source_kind": "git",
+            "source": "source",
+            "module": "example.com/source",
+            "upstream": "https://example.com/source",
+            "revision": "a" * 40,
+            "cohort": "reference",
+            "backend": "go-only",
+            "cgo": 0,
+            "operation": "test",
+            "logos_policy": "policies/source.toml",
+            "logos_policy_sha256": file_hash(self.policy_file),
+        }
+        self.case = Case.parse(self.manifest)
+        policy = verify_policy(self.case, self.root)
+        assert policy is not None
+        self.policy = policy
+        source = self.root / "source"
+        source.mkdir()
+        (source / "go.mod").write_text("module example.com/source\n")
+        files = ("go.mod",)
+        self.source = Source(source, files, tree_hash(source, files))
+        self.work = self.root / "work"
+
+    def test_policy_fields_require_a_valid_pair(self) -> None:
+        changes: tuple[dict[str, object], ...] = (
+            {"logos_policy": ""},
+            {"logos_policy_sha256": ""},
+            {"logos_policy_sha256": "z" * 64},
+            {"logos_policy_sha256": "a" * 63},
+            {"logos_policy": 1},
+        )
+        for change in changes:
+            with (
+                self.subTest(change=change),
+                self.assertRaises((ValueError, TypeError)),
+            ):
+                Case.parse({**self.manifest, **change})
+
+    def test_policy_paths_reject_traversal_and_symlinks(self) -> None:
+        for name in ("../source.toml", str(self.policy_file)):
+            with self.subTest(name=name), self.assertRaises(ValueError):
+                Case.parse({**self.manifest, "logos_policy": name})
+        (self.root / "linked.toml").symlink_to(self.policy_file)
+        (self.root / "linked").symlink_to(
+            self.policy_file.parent, target_is_directory=True
+        )
+        for name in ("linked.toml", "linked/source.toml"):
+            with self.subTest(name=name), self.assertRaises(ValueError):
+                verify_policy(replace(self.case, logos_policy=name), self.root)
+
+    def test_policy_tampering_is_rejected(self) -> None:
+        self.policy_file.write_text(self.policy_file.read_text() + "# changed\n")
+        with self.assertRaisesRegex(ValueError, "pinned SHA-256"):
+            verify_policy(self.case, self.root)
+
+    def test_policy_cannot_weaken_defaults_or_grant_globs(self) -> None:
+        for text in (
+            '[capabilities]\ntransitive_unsafe = "allow"\n',
+            '[capabilities]\ntransitive_unsafe_allowlist = ["example.com/**"]\n',
+            '[capabilities]\ntransitive_unsafe_allowlist = ["example.com/../dependency"]\n',
+            '[capabilities]\ntransitive_unsafe_allowlist = ["example.com/dep", "example.com/dep"]\n',
+            '[capabilities]\nreflect_allowlist = ["example.com/dependency"]\n',
+            '[lints]\nstyle = "allow"\n',
+            "[capabilities]\ntransitive_unsafe_allowlist = []\n",
+        ):
+            self.policy_file.write_text(text)
+            case = replace(self.case, logos_policy_sha256=file_hash(self.policy_file))
+            with self.subTest(text=text), self.assertRaises(ValueError):
+                verify_policy(case, self.root)
+
+    def test_policy_is_isolated_to_logos_stages(self) -> None:
+        for stage in ("oracle", "go", "logos", "logos-lint", "gglint"):
+            inputs = prepare_source(self.source, self.work, stage, self.policy)
+            applied = stage in ("logos", "logos-lint")
+            self.assertEqual((self.work / "logos.toml").exists(), applied)
+            if applied:
+                self.assertEqual(inputs["policy_sha256"], self.policy.sha256)
+                self.assertNotEqual(
+                    inputs["effective_source_digest"], self.source.digest
+                )
+            else:
+                self.assertNotIn("policy_sha256", inputs)
+                self.assertEqual(inputs["effective_source_digest"], self.source.digest)
+            self.assertFalse((self.source.path / "logos.toml").exists())
+            self.assertEqual(
+                tree_hash(self.source.path, self.source.files), self.source.digest
+            )
+
+    def test_repeat_restores_pristine_source_and_exact_policy(self) -> None:
+        first = prepare_source(self.source, self.work, "logos-lint", self.policy)
+        (self.work / "go.mod").write_text("module modified\n")
+        (self.work / "logos.toml").write_text("changed\n")
+        repeated = prepare_source(self.source, self.work, "logos-lint", self.policy)
+        self.assertEqual(first, repeated)
+        self.assertEqual((self.work / "logos.toml").read_bytes(), self.policy.content)
+        self.assertEqual(
+            (self.work / "go.mod").read_bytes(),
+            (self.source.path / "go.mod").read_bytes(),
+        )
+
+    def test_policy_never_overwrites_upstream_configuration(self) -> None:
+        original = b"# upstream policy\n"
+        (self.source.path / "logos.toml").write_bytes(original)
+        files = (*self.source.files, "logos.toml")
+        source = replace(
+            self.source, files=files, digest=tree_hash(self.source.path, files)
+        )
+        with self.assertRaisesRegex(ValueError, "overwrite"):
+            prepare_source(source, self.work, "logos", self.policy)
+        self.assertEqual((self.source.path / "logos.toml").read_bytes(), original)
+        self.assertEqual((self.work / "logos.toml").read_bytes(), original)
 
 
 if __name__ == "__main__":
