@@ -35,7 +35,11 @@ The reconstructed merge starts at `e82c916ff4d8c2befc6f1891decb0f623401a94b`
 and incorporates release `13a968f350564e739bf700df698a9a635dcdddcd`, including
 the CI consolidation from `9a628f5b`. The compiler `src` tree remains
 `099367e1031585fa553ef7987b199288df36256a`. No compiler repair or frozen
-semantic assertion is changed by this merge.
+semantic assertion is changed by this merge. The published merge is
+`45c29ff215477f7e403188d7452fc79aef05d791`. GitHub subsequently reported the
+PR mergeable and created seven workflows. Their event merge
+`f2ad58be8742b8ec350db8f06d9dc794ea3302e4` has the same complete tree,
+`32b96f3a7c289c987bc021fe5a5adbf35cfe226b`, as the published head.
 
 M0-A-S18 retains the two-build workflow, independent suite results, native-shell
 checkout, pinned installers, and the full Go regression with its Node, oracle,
@@ -44,7 +48,8 @@ the structural checks pass over eight YAML inputs, 67 run blocks and two
 installer scripts. The isolated SC2155 mutation is caught, bootstrap exit 37
 is preserved, SIMD selects the same 17 files, and all ten input hashes remain
 unchanged. [CI merge evidence](ci-merge/README.md) records this scope. These
-results do not establish installed compiler or hosted acceptance.
+results alone do not establish installed compiler or hosted acceptance. The
+completed installed checks below now provide that separate evidence.
 
 ## Integrated scope
 
@@ -99,9 +104,9 @@ The imported-local-type author's raw RED log contains twelve whitespace-only
 output lines; they are retained byte for byte and excluded only from the
 whitespace check, never from a behavioral assertion.
 
-With AUD-200, the embedded and standalone task ledgers contain 293 identical,
-unique records. The CI merge adds no REDTEAM row.
-The final attack ledger contains 342 unique rows:
+At the AUD-200 snapshot, the embedded and standalone task ledgers contain
+293 identical, unique records. The CI merge adds no REDTEAM row.
+That snapshot's attack ledger contains 342 unique rows:
 
 | Status | Count | Remaining rows |
 |---|---:|---|
@@ -110,10 +115,11 @@ The final attack ledger contains 342 unique rows:
 | Planned | 5 | #386, #389, #391, #402, #418 |
 | Blocked | 7 | #216, #217, #218, #226, #403, #404, #405 |
 
-The five planned rows require final combined installed-toolchain acceptance
-for generic deferred calls, explicit generic arguments, quoted JSON with C
-types, native declaration validation, and imported local types respectively.
-They are not promoted by integration-only checks.
+The five planned rows required combined installed-toolchain acceptance for
+generic deferred calls, explicit generic arguments, quoted JSON with C types,
+native declaration validation, and imported local types respectively. The
+scoped installed checks now pass as recorded below. Their final ledger
+reconciliation is separate from the failed broad acceptance workflow.
 
 ## Behavioral evidence and its limits
 
@@ -135,18 +141,46 @@ repair, not final merged-toolchain acceptance.
 
 The [native declaration gate](../DEFAULT-VALIDATION-GATE.md) records one
 accepted baseline control and ten semantic failures across eleven packages.
-Its assertions are frozen. The retained validator still needs installed GREEN
-on the combined compiler.
+Its assertions remain frozen. On the combined installed compiler, all eleven
+commands pass: three valid declarations build and eight invalid declarations
+produce their required diagnostics.
+
+## Installed acceptance at the CI merge
+
+[The installed acceptance record](installed-acceptance-45c29ff2/README.md)
+preserves the exact source, raw hosted logs, local build records, tool hashes
+and environment recovery evidence. Six workflows passed after fresh builds:
+generic type arguments, deferred callees, compiler-focused checks, both JSON
+profiles, SIMD guards and all four native amd64/arm64 region-GC combinations.
+Their mutations were caught and restored as recorded in each workflow.
+
+A clean local `make.bash` also passed in 1410.125 seconds with the normal PGO
+and cleanup sequence. Both installed commands have SHA-256
+`987052b593c41cf60390eec80d98b01b89f9536d6d87b4e73672ab6e7a4eb2ef`;
+the compiler has SHA-256
+`61749f8f2b2242d26e613993270f654cf47c750739a22b223f94eedd5370bba9`.
+That installation passed all 48 imported-symbol cases, the eleven-command
+native declaration script under race, and explicit no-skip quoted-C ejection
+tests under race in both JSON profiles.
+
+The main workflow passed its configured unit suites, formatting and vet, but
+failed on the obsolete `const_func_unsupported_store.lgo` diagnostic oracle
+and two ejection-test lint findings. Its scripts leg was canceled by matrix
+fail-fast; the complete script selection has no result, and the full-Go step
+never started. [Acceptance follow-ups](acceptance-followups/README.md) records
+the separate test-oracle correction and test-infrastructure repair. No broad
+gate is promoted by the six successful focused workflows.
 
 ## Required release acceptance
 
-A fresh `src/make.bash` must install both commands before the final native and
-ejected script gates, affected suites, vet, and required race checks. The
-remaining release requirements include both JSON profiles, native GC matrices,
-`GO_TEST_TIMEOUT_SCALE=8 ./run.bash --no-rebuild`, both drivers over `std` and
-`cmd` at O1/O2/O3, the full goparity release run and clean-tip stamp,
-second-host reproducibility, native arm64 coverage, and actual execution of
-the wasm and LSP prerequisites.
+A fresh `src/make.bash` must install both commands after the follow-up's cmd/go
+source change. The complete script and compiler-fixture suites, configured
+lint and `GO_TEST_TIMEOUT_SCALE=8 ./run.bash --no-rebuild` still require a
+successful combined run. The remaining release requirements include both
+drivers over `std` and `cmd` at O1/O2/O3, the full goparity release run and
+clean-tip stamp, second-host reproducibility, actual QEMU-dependent cross-target
+execution and the real gopls prerequisite. The completed JSON and native GC
+matrices retain the exact source boundary recorded above.
 
 The [CI bootstrap repair](ci-bootstrap.md) and [CI consolidation](ci-merge/README.md)
 preserve the repository's action
@@ -154,7 +188,7 @@ ownership policy and acceptance commands. It uses exact-revision shell
 checkout and pinned, SHA-256-verified Go and Node archives. Its static checks
 passed. At the earlier publication check, GitHub confirmed the branch but
 returned no Actions runs for that source head. That observation is historical;
-fresh hosted acceptance of the reconstructed merge remains pending.
+the reconstructed merge produced the seven completed runs recorded above.
 
 ## Local build preflight
 
@@ -195,15 +229,20 @@ The fresh replacement environment and pinned Go 1.27.4 bootstrap, Node
 26.13.1 runtime, and Go 1.27.2/1.27.3 oracle toolchains are ready. GCC 14.2.0
 has passed the C23 compile/run prerequisite. Recovered CI input hashes match
 the validated candidates, and fresh workflow checks pass as recorded above.
-The combined `make.bash` and the five planned installed semantic gates remain
-pending; neither restored tools nor workflow validation completes them.
+The combined `make.bash` and the scoped installed semantic gates subsequently
+passed. Their command outputs and exact identities are preserved in the
+installed acceptance record; restoring the tools was only their prerequisite.
 
 Ordinary dist cleanup must remain intact. It removes `pkg/obj/go-build` at
-exit, and `--no-clean` is deprecated and ineffective. After an eventual
-successful build, use a newly empty dedicated cache for installed acceptance:
-the unchanged `VERSION` string can mask changed compiler code in an older
-external cache. An existing private bootstrap cache must not be assumed to
-survive, and a prior source overlay does not substitute for the fresh build.
+exit, and `--no-clean` is deprecated and ineffective. The completed installed
+acceptance used a newly empty dedicated cache. The earlier warning that an
+unchanged `VERSION` could conceal changed compiler code was overbroad for
+this fork: its existing release-build-ID hook and command tool-ID logic include
+compiler content identity in compilation keys on the audited Linux hosts.
+[The source audit](installed-acceptance-45c29ff2/hosted/runtime/cache-audit.md)
+records that correction and its limits. Fresh-cache isolation remains useful;
+it is not a missing correctness fix. A prior source overlay does not replace
+the actual installed build.
 
 ## Blocked default application
 
