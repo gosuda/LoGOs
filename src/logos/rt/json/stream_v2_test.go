@@ -283,6 +283,17 @@ func TestStreamDeclineFallbackMatchesEncodingJSON(t *testing.T) {
 	}
 }
 
+// encoding/json unquotes `,string` method input permissively: unpaired
+// surrogates and malformed UTF-8 decode as U+FFFD rather than rejecting the
+// string token.
+func TestQuotedTextPermissiveUnquoteMatchesEncodingJSON(t *testing.T) {
+	for _, in := range []string{`"\ud800"`, `"\ud83d\ude00"`, "\"\xff\"", `"x\ud800y"`} {
+		checkStreamFallback[streamUnsupportedTextProbe](t, in, func(g *streamTarget[streamUnsupportedTextProbe]) any { return &g.V })
+		checkStreamFallback[*streamUnsupportedTextProbe](t, in, func(g *streamTarget[*streamUnsupportedTextProbe]) any { return &g.V })
+		checkStreamFallback[streamDeclineTextProbe](t, in, func(g *streamTarget[streamDeclineTextProbe]) any { return &g.V })
+	}
+}
+
 func TestStreamProtocolErrorMatchesEncodingJSON(t *testing.T) {
 	inputs := []string{`"\"hi\""`, `"3"`, `7`, `{}`, `[]`, `""`}
 	for _, in := range inputs {

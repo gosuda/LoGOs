@@ -31,6 +31,7 @@ import (
 
 	"cmd/go/internal/base"
 	"cmd/go/internal/cfg"
+	"cmd/go/internal/fsys"
 	"cmd/go/internal/load"
 	"cmd/go/internal/modload"
 	"cmd/go/internal/work"
@@ -732,7 +733,7 @@ type emitMissingFunc func(p *load.Package, name string, ignoredSet map[string]bo
 
 func emitStrictMissing(p *load.Package, name string, ignoredSet map[string]bool, err error) bool {
 	if os.IsNotExist(err) && ignoredSet[name] {
-		srcData, readErr := os.ReadFile(filepath.Join(p.Dir, name))
+		srcData, readErr := fsys.ReadFile(filepath.Join(p.Dir, name))
 		if readErr != nil {
 			base.Fatalf("logos eject: missing ejected output for %s: %v", filepath.Join(p.Dir, name), readErr)
 		}
@@ -814,7 +815,7 @@ func collectConstraintTags(expr constraint.Expr, tags *[]string) {
 // It varies GOOS, GOARCH, and tags from the file; CGO stays host
 // to keep the helper count to real platform/tag variants.
 func selectVariantContext(pkgDir, name, hostGOOS, hostGOARCH string, hostTags []string) (variantCtx, bool) {
-	data, err := os.ReadFile(filepath.Join(pkgDir, name))
+	data, err := fsys.ReadFile(filepath.Join(pkgDir, name))
 	if err != nil {
 		base.Fatalf("logos eject: read inactive file %s: %v", filepath.Join(pkgDir, name), err)
 	}
@@ -1000,7 +1001,11 @@ func spawnVariantEjects(ctx context.Context, ctxs []variantCtx) []string {
 			base.Fatalf("logos eject: %v", err)
 		}
 		dirs = append(dirs, dir)
-		cmd := exec.CommandContext(ctx, exe, "eject", "-o", dir)
+		args := []string{"eject", "-o", dir}
+		if fsys.OverlayFile != "" {
+			args = []string{"build", "-overlay=" + fsys.OverlayFile, "-emit-go=" + dir}
+		}
+		cmd := exec.CommandContext(ctx, exe, args...)
 		cmd.Args[0] = "logos"
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr

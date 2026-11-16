@@ -292,3 +292,9 @@
 {"id": "AUD-199", "description": "M0-A-S17 Keep imported compiler symbols lazy", "phase": "AUD"}
 {"id": "AUD-200", "description": "M0-A-S18 Preserve acceptance gates while consolidating CI", "phase": "AUD"}
 {"id": "AUD-201", "description": "M0-A-S19 Keep ejection test helpers lint-clean", "phase": "AUD"}
+{"id": "AUD-202", "description": "M12-A-S2 Build shortest capability paths from explicit roots", "phase": "AUD"}
+{"id": "AUD-204", "description": "M9-A-S18 Prove native array-index boundary failures", "phase": "AUD"}
+{"id": "AUD-205", "description": "M24-A-S3 Honor overlays during inactive ejection", "phase": "AUD"}
+{"id": "AUD-206", "description": "M18-A-S20 Account for region root scan work", "phase": "AUD"}
+{"id": "AUD-207", "description": "M18-A-S21 Skip redundant same-allocation GC lookup", "phase": "AUD"}
+{"id": "AUD-208", "description": "M18-A-S22 Expand GC boundary and ownership gates", "phase": "AUD"}
