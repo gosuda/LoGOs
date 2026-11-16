@@ -1,24 +1,31 @@
 {
-  "queue": [
-    {
-      "id": "L-ICE-1",
-      "severity": "critical",
-      "status": "fixed",
-      "title": "Compiler ICE importing packages with local types inside generic functions",
-      "detail": "logos.reachableFuncFactObjects and the overlay-clone scope walks iterated pkg.Scope().Names() skipping only dotted names. Lazily-imported scopes also carry hoisted local types with vargen names (T\u00b7N); forcing their lookup reaches object dicts with implicit type parameters that the simplified importer cannot materialize: base.Fatalf \"unexpected object with N implicit type parameter(s)\". Any Go package with a local type inside a generic func (e.g. creachadair/mds slice.LCSFunc seq) made dependents uncompilable: go build, go vet, logos lint, gglint all ICE'd.",
-      "files": [
-        "src/cmd/compile/internal/logos/optfacts.go"
-      ],
-      "fix": "Added importedDeclNames() filtering vargen-suffixed (T\u00b7N) and dotted (T.M) names via types.SplitVargenSuffix, applied to all four imported-scope iterations in optfacts.go \u2014 matching gcimporter's promoted-name filters.",
-      "test": "src/cmd/go/testdata/script/logos_import_hoisted_local_type.txt reproduces the ICE on the unfixed compile and passes fixed.",
-      "found_via": "dogfooding corpus: gglint/logos lint rc=3 on tailscale (transitively imports creachadair/mds/mdiff)"
-    },
-    {
-      "id": "L-TRIAGE-1",
-      "severity": "info",
-      "status": "triaged",
-      "title": "Corpus harness residual signals classified \u2014 no further bugs",
-      "detail": "Post-fix harness re-run: tailscale gglint rc=1 (was rc=3 ICE), golang-petname logos rc=0 verified clean via injected discarded-error probe (lint runs, just no findings), adversarial-lgo gglint rc=3 is expected upstream go vet semantics ('matched no packages' \u2014 .lgo-only module has no Go packages; logos lint covers .lgo, rc=1 with findings). All gglint 'crash' signals (panic:/goroutine /SIGSEGV/fatal error:) are substring matches inside lint finding text and missing-system-header diagnostics (pcap.h), not tool crashes. All logos lint 'nondeterminism' is ordering-only: byte-identical sorted diagnostic sets across runs (documented nondeterministic ORDER, deterministic SET)."
-    }
-  ]
+ "queue": [
+  {
+   "id": "L-ICE-1",
+   "severity": "critical",
+   "status": "fixed",
+   "title": "Compiler ICE importing packages with local types inside generic functions",
+   "detail": "logos.reachableFuncFactObjects and the overlay-clone scope walks iterated pkg.Scope().Names() skipping only dotted names. Lazily-imported scopes also carry hoisted local types with vargen names (T·N); forcing their lookup reaches object dicts with implicit type parameters that the simplified importer cannot materialize: base.Fatalf \"unexpected object with N implicit type parameter(s)\". Any Go package with a local type inside a generic func (e.g. creachadair/mds slice.LCSFunc seq) made dependents uncompilable: go build, go vet, logos lint, gglint all ICE'd.",
+   "files": [
+    "src/cmd/compile/internal/logos/optfacts.go"
+   ],
+   "fix": "Added importedDeclNames() filtering vargen-suffixed (T·N) and dotted (T.M) names via types.SplitVargenSuffix, applied to all four imported-scope iterations in optfacts.go — matching gcimporter's promoted-name filters.",
+   "test": "src/cmd/go/testdata/script/logos_import_hoisted_local_type.txt reproduces the ICE on the unfixed compile and passes fixed.",
+   "found_via": "dogfooding corpus: gglint/logos lint rc=3 on tailscale (transitively imports creachadair/mds/mdiff)"
+  },
+  {
+   "id": "L-TRIAGE-1",
+   "severity": "info",
+   "status": "triaged",
+   "title": "Corpus harness residual signals classified — no further bugs",
+   "detail": "Post-fix harness re-run: tailscale gglint rc=1 (was rc=3 ICE), golang-petname logos rc=0 verified clean via injected discarded-error probe (lint runs, just no findings), adversarial-lgo gglint rc=3 is expected upstream go vet semantics ('matched no packages' — .lgo-only module has no Go packages; logos lint covers .lgo, rc=1 with findings). All gglint 'crash' signals (panic:/goroutine /SIGSEGV/fatal error:) are substring matches inside lint finding text and missing-system-header diagnostics (pcap.h), not tool crashes. All logos lint 'nondeterminism' is ordering-only: byte-identical sorted diagnostic sets across runs (documented nondeterministic ORDER, deterministic SET)."
+  },
+  {
+   "id": "L-TRIAGE-2",
+   "severity": "info",
+   "status": "triaged",
+   "title": "Expanded cross-platform corpus pass — all anomalies benign",
+   "detail": "Corpus grown to 34 active entries across GitHub, GitLab, Codeberg, Gitea.com, SourceHut (famous/clean/dirty/modernc/cgo tiers) plus synthetic adversarial Go module (linkname pulls, reentrant-lock/sync misuse, resource lifecycle, unsafe ptr, cgo flag violations, generic-local-type importers) and adversarial-lgo (edge subpackage). Full pass: every buildable entry lints rc=1 on both gglint and logos lint with real findings; adversarial-lgo gglint rc=3 is correct go vet semantics; gopacket 'fatal error:' = missing optional pfring.h; all 'panic:/goroutine' signals are finding-text substrings; all nondet flags are ordering-only (deterministic diagnostic set, documented). raylib needed system headers (wayland/xkbcommon/EGL) — env gap, not a tool bug; gitaly needed go:embed binary stubs — repo build prerequisite. No new tool defects found: the L-ICE-1 fix holds under 34-repo load including its advimporter adversarial sibling."
+  }
+ ]
 }
