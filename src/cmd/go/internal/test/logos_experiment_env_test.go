@@ -95,8 +95,12 @@ func TestLogosTestExperimentCache(t *testing.T) {
 				t.Error("test cache conflates absent and present-empty GOEXPERIMENT")
 			}
 			cfg.OrigEnv = []string{"GOEXPERIMENT=none"}
-			if empty == hashGetenv("GOEXPERIMENT") {
+			none := hashGetenv("GOEXPERIMENT")
+			if empty == none {
 				t.Error("test cache conflates empty and explicit GOEXPERIMENT values")
+			}
+			if absent == none {
+				t.Error("test cache conflates absent and explicit GOEXPERIMENT values")
 			}
 			cfg.OrigEnv = []string{"GOEXPERIMENT=none", "GOEXPERIMENT="}
 			if empty != hashGetenv("GOEXPERIMENT") {
