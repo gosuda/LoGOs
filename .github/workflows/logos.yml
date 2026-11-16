@@ -60,7 +60,7 @@ jobs:
       - name: "Record the exact candidate source"
         run: |
           test "$(git rev-parse HEAD)" = "$LOGOS_EXPECTED_HEAD"
-          git rev-parse HEAD HEAD^{tree} HEAD:src
+          git rev-parse HEAD 'HEAD^{tree}' HEAD:src
       - name: "Validate workflows and shell scripts"
         working-directory: "."
         timeout-minutes: 5
