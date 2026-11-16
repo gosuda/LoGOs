@@ -1,0 +1,15 @@
+{
+  "queue": [
+    {
+      "id": "L-ICE-1",
+      "severity": "critical",
+      "status": "fixed",
+      "title": "Compiler ICE importing packages with local types inside generic functions",
+      "detail": "logos.reachableFuncFactObjects and the overlay-clone scope walks iterated pkg.Scope().Names() skipping only dotted names. Lazily-imported scopes also carry hoisted local types with vargen names (T·N); forcing their lookup reaches object dicts with implicit type parameters that the simplified importer cannot materialize: base.Fatalf \"unexpected object with N implicit type parameter(s)\". Any Go package with a local type inside a generic func (e.g. creachadair/mds slice.LCSFunc seq) made dependents uncompilable: go build, go vet, logos lint, gglint all ICE'd.",
+      "files": ["src/cmd/compile/internal/logos/optfacts.go"],
+      "fix": "Added importedDeclNames() filtering vargen-suffixed (T·N) and dotted (T.M) names via types.SplitVargenSuffix, applied to all four imported-scope iterations in optfacts.go — matching gcimporter's promoted-name filters.",
+      "test": "src/cmd/go/testdata/script/logos_import_hoisted_local_type.txt reproduces the ICE on the unfixed compile and passes fixed.",
+      "found_via": "dogfooding corpus: gglint/logos lint rc=3 on tailscale (transitively imports creachadair/mds/mdiff)"
+    }
+  ]
+}
