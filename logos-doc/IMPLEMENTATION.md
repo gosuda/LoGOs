@@ -4032,6 +4032,16 @@ Anchor: Tony Hoare, David Parnas
 - Mutation: replace the helper with direct value replacement. Retained-view
   attacks must fail. The assignment-order tests remain unchanged.
 - Trace: T-201, REDTEAM #412.
+- Test-oracle correction (2026-11-16): the full installed fixture run exposed
+  the older `const_func_unsupported_store.lgo` expectation. M24's existing map
+  destination support accepts its fresh local `s.M["k"] = 4` store, as T-201
+  requires; it is no longer an unsupported form. A separate test-only change
+  preserves the exact function body in `const_func_map_field_store.lgo`, requires
+  the compile-time constant 4 through array type identity, and requires output
+  `4\n`. No CTFE implementation, normative rule, frozen M24 attack or genuine
+  rejection control changes. The original negative bytes and the reason for
+  correcting the oracle are preserved in
+  `logos-doc/validation/acceptance-followups/ctfe-map-field/`.
 
 ### M24-S3 Give tuple temporaries stable file identity
 
