@@ -33,6 +33,10 @@ func Eject(dir string, files []*syntax.File, src map[*syntax.File][]byte, edits 
 		}
 		base := file.Pos().FileBase()
 		lowered := edits[file]
+		cgoLines, err := ejectCgoImportLines(file, data)
+		if err != nil {
+			return err
+		}
 		var lineEdits []Edit
 		if starts := lineStarts(data); len(starts) > 0 {
 			type span struct{ s, e int }
@@ -70,6 +74,9 @@ func Eject(dir string, files []*syntax.File, src map[*syntax.File][]byte, edits 
 			})
 			for line, off := range starts {
 				no := line + 1
+				if cgoLines[no] {
+					continue
+				}
 				in := false
 				for _, c := range covered {
 					if off >= c.s && off < c.e {

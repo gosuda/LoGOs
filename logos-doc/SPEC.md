@@ -65,6 +65,7 @@ The command `logos build --emit-go=DIR` MUST be an alias of `logos eject -o DIR`
 DIR MUST NOT exist, or DIR MUST be empty; the tool MUST refuse a DIR that exists and holds files [T-0.3].
 Each `.lgo` file MUST become a `.go` file [T-0.3].
 The output MUST keep all comments from the source [T-0.3].
+C import declarations MUST retain their preamble attachment and content after ejection and formatting. Generated Go line directives MUST stay outside the C preamble. [T-0.3][T-304]
 Each non-standard loGo/s dependency module MUST be ejected too [T-0.3].
 Each ejected dependency MUST land in `DIR/_logos_deps/<module path>@<version>/` [T-0.3].
 The output `go.mod` MUST carry a `replace` line for each ejected module [T-0.3].
