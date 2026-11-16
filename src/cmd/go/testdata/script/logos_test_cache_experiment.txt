@@ -7,36 +7,49 @@
 env GOPROXY=off
 env GOTOOLCHAIN=local
 
-# logos: absent and present-empty select the same effective experiment.
-# The old cache hashes logosarena for both and replays present=false.
+# logos injects its effective experiment into test processes. Absent and
+# present-empty driver values therefore have identical observable inputs.
 exec env -u GOEXPERIMENT logos test -v .
 ! stdout '\(cached\)'
-stdout 'GOEXPERIMENT present=false'
+stdout 'GOEXPERIMENT present=true value="logosarena"'
 exec env -u GOEXPERIMENT logos test -v .
 stdout '\(cached\)'
-stdout 'GOEXPERIMENT present=false'
+stdout 'GOEXPERIMENT present=true value="logosarena"'
 env GOEXPERIMENT=
 logos test -v .
-! stdout '\(cached\)'
-stdout 'GOEXPERIMENT present=true'
+stdout '\(cached\)'
+stdout 'GOEXPERIMENT present=true value="logosarena"'
 logos test -v .
 stdout '\(cached\)'
-stdout 'GOEXPERIMENT present=true'
+stdout 'GOEXPERIMENT present=true value="logosarena"'
 
-# Plain go uses the same test-process environment and must distinguish presence.
+# Changing the effective experiment changes the test's input and cache entry.
+env GOEXPERIMENT=nojsonv2
+logos test -v .
+! stdout '\(cached\)'
+stdout 'GOEXPERIMENT present=true value="nojsonv2,logosarena"'
+logos test -v .
+stdout '\(cached\)'
+stdout 'GOEXPERIMENT present=true value="nojsonv2,logosarena"'
+env GOEXPERIMENT=
+logos test -v .
+stdout '\(cached\)'
+stdout 'GOEXPERIMENT present=true value="logosarena"'
+
+# Plain go preserves the caller's environment and must distinguish presence.
 exec env -u GOEXPERIMENT go test -v .
 ! stdout '\(cached\)'
-stdout 'GOEXPERIMENT present=false'
+stdout 'GOEXPERIMENT present=false value=""'
 exec env -u GOEXPERIMENT go test -v .
 stdout '\(cached\)'
-stdout 'GOEXPERIMENT present=false'
+stdout 'GOEXPERIMENT present=false value=""'
 env GOEXPERIMENT=
 go test -v .
 ! stdout '\(cached\)'
-stdout 'GOEXPERIMENT present=true'
+stdout 'GOEXPERIMENT present=true value=""'
 go test -v .
 stdout '\(cached\)'
-stdout 'GOEXPERIMENT present=true'
+stdout 'GOEXPERIMENT present=true value=""'
 
 -- go.mod --
 module example.com/testcacheexperiment
@@ -52,6 +65,6 @@ import (
 )
 
 func TestExperimentPresence(t *testing.T) {
-	_, present := os.LookupEnv("GOEXPERIMENT")
-	t.Logf("GOEXPERIMENT present=%t", present)
+	value, present := os.LookupEnv("GOEXPERIMENT")
+	t.Logf("GOEXPERIMENT present=%t value=%q", present, value)
 }
