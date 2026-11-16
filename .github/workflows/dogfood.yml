@@ -116,7 +116,7 @@ jobs:
         run: |
           set +e
           uv run --no-project python misc/logos-dogfood/run.py \
-            --manifest misc/logos-dogfood/corpus-ci.json --only tools \
+            --manifest misc/logos-dogfood/corpus-permissions.json --only tools \
             --go-oracle "$RUNNER_TEMP/oracle/bin/go" \
             --go-candidate "$GITHUB_WORKSPACE/bin/go" --logos "$GITHUB_WORKSPACE/bin/logos" \
             --source-root "$INPUTS/sources" --module-cache "$INPUTS/modules" \

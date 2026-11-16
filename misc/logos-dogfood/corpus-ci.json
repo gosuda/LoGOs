@@ -331,8 +331,8 @@
       "./..."
     ],
     "operation": "test",
-    "logos_policy": "policies/tools.toml",
-    "logos_policy_sha256": "005ba0707611025ef364004190601f0f103ab28ab97da9a6acd81e034d7f4d3f"
+    "logos_policy": "policies/tools-build.toml",
+    "logos_policy_sha256": "c57b54d9a78993eac2b2614730cfdf05b12e47c1dbbc77c243f16887d67d7def"
   },
   {
     "id": "garif",
