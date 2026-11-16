@@ -969,11 +969,13 @@ func (e *evaluator) fieldPlace(fr *frame, sel *syntax.SelectorExpr) (place, erro
 					if f.Name == sel.Sel.Value {
 						fidx := fi
 						return place{
-							get: func() Value { return fr.scopes[idx][name].strct[fidx] },
-							set: func(v Value) {
+							typ: f.Type,
+							get: func() (Value, error) { return fr.scopes[idx][name].strct[fidx], nil },
+							set: func(v Value) error {
 								cur := fr.scopes[idx][name]
 								cur.strct[fidx] = copyValue(v)
 								fr.scopes[idx][name] = cur
+								return nil
 							},
 						}, nil
 					}
@@ -1046,6 +1048,9 @@ func (e *evaluator) mapLookup(x, k Value, pos syntax.Pos) (Value, bool, error) {
 	if isNaNKey(k) {
 		return Value{}, false, &Error{Code: CodeEval, Detail: "NaN is not a valid const map key", Pos: pos}
 	}
+	if x.isNil {
+		return Value{}, false, nil
+	}
 	k = e.canonKey(k)
 	for i, ek := range x.mval.keys {
 		eq, err := e.equal(ek, k, pos)
@@ -1063,85 +1068,81 @@ func (e *evaluator) indexPlace(fr *frame, ix *syntax.IndexExpr) (place, error) {
 	if _, ok := ix.Index.(*syntax.ListExpr); ok {
 		return place{}, e.fail(posOf(ix), "generic instantiation in const func not supported")
 	}
-	k, err := e.evalExpr(fr, ix.Index)
-	if err != nil {
-		return place{}, err
-	}
-	if base, ok := syntax.Unparen(ix.X).(*syntax.Name); ok {
-		if bv, found := e.lookup(fr, base.Value); found && bv.mval != nil {
-			var keyT *Type
-			if bv.typ != nil {
-				keyT = bv.typ.Key
-			}
-			if k, err = e.convertElem(k, keyT, posOf(ix.Index)); err != nil {
-				return place{}, err
-			}
-			if isNaNKey(k) {
-				return place{}, &Error{Code: CodeEval, Detail: "NaN is not a valid const map key", Pos: posOf(ix)}
-			}
-			for i := len(fr.scopes) - 1; i >= 0; i-- {
-				if _, ok := fr.scopes[i][base.Value]; ok {
-					idx := i
-					name := base.Value
-					return place{
-						get: func() Value {
-							curMap := fr.scopes[idx][name]
-							v, err := e.indexValue(curMap, k, posOf(ix))
-							if err != nil {
-								if curMap.typ != nil && curMap.typ.Elem != nil {
-									return zeroValue(curMap.typ.Elem)
-								}
-								return zeroValue(&Type{Kind: KInt})
-							}
-							return v
-						},
-						set: func(v Value) {
-							cur := fr.scopes[idx][name]
-							kk := e.canonKey(k)
-							for i, ek := range cur.mval.keys {
-								if eq, _ := e.equal(ek, kk, posOf(ix)); eq {
-									cur.mval.vals[i] = copyValue(v)
-									return
-								}
-							}
-							cur.mval.keys = append(cur.mval.keys, kk)
-							cur.mval.vals = append(cur.mval.vals, copyValue(v))
-						},
-					}, nil
-				}
-			}
-		}
-	}
 	x, err := e.evalExpr(fr, ix.X)
 	if err != nil {
 		return place{}, err
 	}
-	if x.slice != nil {
-		if !isInteger(kindOf(k)) {
-			return place{}, e.fail(posOf(ix), "non-integer index in const evaluation")
+	k, err := e.evalExpr(fr, ix.Index)
+	if err != nil {
+		return place{}, err
+	}
+	pos := posOf(ix)
+	if x.typ != nil && x.typ.Kind == KMap {
+		k, err = e.convertElem(k, x.typ.Key, posOf(ix.Index))
+		if err != nil {
+			return place{}, err
 		}
-		i := int(k.ival.Int64())
-		elems := sliceElems(x)
-		if i < 0 || i >= len(elems) {
-			return place{}, e.fail(posOf(ix), "index out of range in const evaluation")
+		if isNaNKey(k) {
+			return place{}, &Error{Code: CodeEval, Detail: "NaN is not a valid const map key", Pos: pos}
 		}
-		backing := x.slice.backing
-		at := x.slice.lo + i
+		k = copyValue(e.canonKey(k))
 		return place{
-			get: func() Value { return (*backing)[at] },
-			set: func(v Value) { (*backing)[at] = copyValue(v) },
+			typ: x.typ.Elem,
+			get: func() (Value, error) {
+				v, present, err := e.mapLookup(x, k, pos)
+				if err != nil {
+					return Value{}, err
+				}
+				if !present {
+					v = zeroValue(x.typ.Elem)
+				}
+				return v, nil
+			},
+			set: func(v Value) error {
+				if x.isNil {
+					return e.fail(pos, "assignment to nil map in const evaluation")
+				}
+				for i, key := range x.mval.keys {
+					eq, err := e.equal(key, k, pos)
+					if err != nil {
+						return err
+					}
+					if eq {
+						x.mval.vals[i] = copyValue(v)
+						return nil
+					}
+				}
+				x.mval.keys = append(x.mval.keys, k)
+				x.mval.vals = append(x.mval.vals, copyValue(v))
+				return nil
+			},
 		}, nil
 	}
-	if x.array != nil {
-		if _, ok := syntax.Unparen(ix.X).(*syntax.Name); !ok {
-			return place{}, e.fail(posOf(ix), "cannot assign array element in const evaluation")
-		}
+	if x.typ != nil && (x.typ.Kind == KSlice || x.typ.Kind == KArray) {
 		if !isInteger(kindOf(k)) {
-			return place{}, e.fail(posOf(ix), "non-integer index in const evaluation")
+			return place{}, e.fail(pos, "non-integer index in const evaluation")
 		}
 		i := int(k.ival.Int64())
-		if i < 0 || i >= len(x.array) {
-			return place{}, e.fail(posOf(ix), "index out of range in const evaluation")
+		n := len(x.array)
+		if x.slice != nil {
+			n = x.slice.length
+		}
+		if i < 0 || i >= n {
+			err := e.fail(pos, "index out of range in const evaluation")
+			return place{
+				typ: x.typ.Elem,
+				get: func() (Value, error) { return Value{}, err },
+				set: func(Value) error { return err },
+			}, nil
+		}
+		if x.slice != nil {
+			backing := x.slice.backing
+			at := x.slice.lo + i
+			return place{
+				typ: x.typ.Elem,
+				get: func() (Value, error) { return (*backing)[at], nil },
+				set: func(v Value) error { (*backing)[at] = copyValue(v); return nil },
+			}, nil
 		}
 		if base, ok := syntax.Unparen(ix.X).(*syntax.Name); ok {
 			for si := len(fr.scopes) - 1; si >= 0; si-- {
@@ -1149,18 +1150,20 @@ func (e *evaluator) indexPlace(fr *frame, ix *syntax.IndexExpr) (place, error) {
 					sidx := si
 					name := base.Value
 					return place{
-						get: func() Value { return fr.scopes[sidx][name].array[i] },
-						set: func(v Value) {
+						typ: x.typ.Elem,
+						get: func() (Value, error) { return fr.scopes[sidx][name].array[i], nil },
+						set: func(v Value) error {
 							cur := fr.scopes[sidx][name]
 							cur.array[i] = copyValue(v)
 							fr.scopes[sidx][name] = cur
+							return nil
 						},
 					}, nil
 				}
 			}
 		}
 	}
-	return place{}, e.fail(posOf(ix), "cannot assign in const evaluation")
+	return place{}, e.fail(pos, "cannot assign in const evaluation")
 }
 
 func (e *evaluator) evalSlice(fr *frame, sx *syntax.SliceExpr) (Value, error) {
@@ -1413,7 +1416,7 @@ func (e *evaluator) summarize(v Value) string {
 	switch {
 	case v.typ != nil && isInteger(v.typ.Kind) && v.ival != nil:
 		return v.ival.String()
-	case v.typ != nil && v.typ.Kind == KString:
+	case v.typ != nil && isStringLike(v.typ.Kind):
 		return strconv.Quote(v.sval)
 	case v.typ != nil && (v.typ.Kind == KBool || v.typ.Kind == KUntypedBool):
 		return strconv.FormatBool(v.bval)
