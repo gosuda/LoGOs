@@ -640,6 +640,20 @@ Anchor: Tony Hoare, David Parnas, Richard Feynman
 - Evidence: `logos-doc/validation/acceptance-repairs-33752c03/alias/README.md` preserves the sealed component packet. `logos-doc/validation/installed-acceptance-33752c03/README.md` records the combined build, installed commands, raw outcomes, frozen source and tool identities, and independent reviews. AUD-210 tracks this slice. Historical component records retain their original scope and are supplemented by the installed evidence.
 - Docs: SPEC 0.1 and 1.1, T-0.1 and T-101.1 now distinguish package-local duplicate-stem rejection from module-wide source-kind accounting. Malformed-header and mixed-package failures remain required.
 
+### M0-A-S21 Preserve the Go-only type projection
+
+Anchor: Tony Hoare, David Parnas, Richard Feynman
+
+- Invariant: generating public `go/types` from the compiler's type checker preserves the checked-in Go-only API and source. Private loGo/s type-printer state and panic-narrowing hooks do not enter that projection. Native builtin-panic identity, including void functions, and C-aware source emission retain their existing behavior.
+- RED: the unchanged `src/go/types/generate_test.go` `TestGenerate` assertion reports stale `builtins.go` and `typestring.go` on the prior source tree. The local reproduction exits 1 in 4.765 seconds and agrees with the hosted full-Go failure. The public generated targets, exact assertion bodies, and 23 protected source and fixture files were frozen before implementation.
+- Build: add the C-printer method and `typeWriter.logosCgoPkg` field to the existing projection allowlists. Restore the upstream result-bearing panic block and call one private `logosRecordVoidPanic` hook for the additional loGo/s void-function case. The public generated files remain byte-identical; no language rule or public API changes.
+- Component gate: one implementation candidate passes the unchanged `TestGenerate` in 1.879 seconds. The preceding component invocation failed before test execution because the isolated checkout lacked generated build inputs. Copying six byte-identical ignored inputs from the installed reference tree repairs that environment; it is neither a semantic RED nor another implementation attempt. Removing only the C-printer method allowlist entry makes `TestGenerate` fail, and exact restoration passes in 0.470 seconds.
+- Installed gate: fresh normal make 002 passes on combined source `33752c03819ed5afcb37f87633a3cac668e181a8`. The unchanged physical `TestGenerate` passes in 29.531 seconds. All nine native panic cells and all eight C-type constant cells pass. A separate diagnostic compiler removes only the new void hook: exactly the two builtin void cases fail, while seven controls pass; the same assertion binary passes all nine after selecting the unchanged installed compiler again. Nine unchanged panic and C-ejection scripts pass under race without skips. C preamble, fastcall, owned-type and quoted-C controls pass under JSONv2 race, and the explicit classic quoted-C race control passes without skips. Both complete short type-checker suites and normal vet pass; each type-checker retains only its existing build-tag fixture skip and three short-mode skips.
+- Remaining gate: these receipts bind the frozen combined source and installed binaries. The full plain-Go regression and fresh hosted acceptance remain required. No clean published-tip release result is inferred from the local gates.
+- Red-team rows: #443 (tested for the recorded projection, native identity, and C-ejection scope).
+- Evidence: `logos-doc/validation/acceptance-repairs-33752c03/projection/README.md` preserves the sealed component packet; `logos-doc/validation/installed-acceptance-33752c03/README.md` supplies the later build, native mutation, restored controls, package, race and vet records. AUD-211 tracks this slice. Historical source manifests remain unchanged.
+- Docs: this slice restores the existing Go-only projection contract. It adds no normative SPEC rule and does not alter the prior panic-identity or ejection assertions.
+
 ## M1. `?`, `defer f()?`, `errdefer`, error traces, eject
 
 Anchor: Tony Hoare, Christopher Alexander, Edsger W. Dijkstra
@@ -4640,4 +4654,5 @@ Written to `tasks/autoplan-ledger.jsonl` by P0-S6. IDs: phase prefix plus a sequ
 {"id": "AUD-203", "description": "M11-A-S9 Preserve quoted-text Unicode and token ownership", "phase": "AUD"}
 {"id": "AUD-209", "description": "M22-A-S6 Execute independent release acceptance", "phase": "AUD"}
 {"id": "AUD-210", "description": "M0-A-S20 Keep duplicate-stem errors package-local", "phase": "AUD"}
+{"id": "AUD-211", "description": "M0-A-S21 Preserve the Go-only type projection", "phase": "AUD"}
 ```
