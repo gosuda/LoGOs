@@ -615,6 +615,16 @@ Anchor: Tony Hoare, David Parnas, Richard Feynman
 - Red-team rows: none (workflow validation and the existing acceptance corpus).
 - Evidence: `logos-doc/validation/ci-merge/README.md`; M0-A-S15 and M0-A-S16 retain the regression and action-policy contracts.
 
+### M0-A-S19 Keep ejection test helpers lint-clean
+Anchor: Tony Hoare, David Parnas, Richard Feynman
+- Invariant: the production variant selector, all eleven existing test-call inputs, and every existing assertion retain their behavior. Test cleanup reports an error instead of discarding it.
+- RED: the complete hosted unit job at source `45c29ff2` reported the unchecked `os.RemoveAll` result and the test-only tuple adapter's constant host parameters. The raw diagnostics remain in `logos-doc/validation/acceptance-followups/lint/`.
+- Build: move the tuple adapter into `eject_test.go` as `findVariantContextFromLinuxAMD64`, pass its original fixed host to the unchanged production selector, and check the existing cleanup result. Preserve both historical frozen manifests; versioned successors record the mechanical test hashes and the separate CTFE oracle correction. The active compiler workflow checks the successor and adds the new positive fixture without removing an existing selector.
+- Gate: configured golangci-lint 2.15.0 reports zero issues across `./go/internal/logos/...`; the complete existing eject race suite passes 45 top-level tests and 100 total cells without skips. Actionlint 1.7.12, ShellCheck 0.11.0, and both successor manifests pass. These component checks use the fresh source-45 toolchain. A fresh combined build, normal vet, and the complete Go regression remain required.
+- PROBE: an external overlay flips only the cleanup's `err != nil` condition; all four existing target cases fail on the resulting false cleanup error. A fresh no-overlay race binary passes those same cases, with source hashes unchanged. The bounded normal vet retry also passes without diagnostics in 8.305 seconds; the earlier interrupted attempt remains historical.
+- Red-team rows: none (test infrastructure and the existing acceptance corpus).
+- Evidence: `logos-doc/validation/acceptance-followups/lint/COMPLETED-2026-11-16.md`, its unchanged earlier component record, and `logos-doc/validation/acceptance-followups/static/summary.json`.
+
 ## M1. `?`, `defer f()?`, `errdefer`, error traces, eject
 
 Anchor: Tony Hoare, Christopher Alexander, Edsger W. Dijkstra
@@ -4535,4 +4545,5 @@ Written to `tasks/autoplan-ledger.jsonl` by P0-S6. IDs: phase prefix plus a sequ
 {"id": "AUD-192", "description": "M20-E-S3 Keep checked C types in owned constants", "phase": "AUD"}
 {"id": "AUD-199", "description": "M0-A-S17 Keep imported compiler symbols lazy", "phase": "AUD"}
 {"id": "AUD-200", "description": "M0-A-S18 Preserve acceptance gates while consolidating CI", "phase": "AUD"}
+{"id": "AUD-201", "description": "M0-A-S19 Keep ejection test helpers lint-clean", "phase": "AUD"}
 ```

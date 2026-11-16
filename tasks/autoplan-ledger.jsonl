@@ -291,3 +291,4 @@
 {"id": "AUD-192", "description": "M20-E-S3 Keep checked C types in owned constants", "phase": "AUD"}
 {"id": "AUD-199", "description": "M0-A-S17 Keep imported compiler symbols lazy", "phase": "AUD"}
 {"id": "AUD-200", "description": "M0-A-S18 Preserve acceptance gates while consolidating CI", "phase": "AUD"}
+{"id": "AUD-201", "description": "M0-A-S19 Keep ejection test helpers lint-clean", "phase": "AUD"}

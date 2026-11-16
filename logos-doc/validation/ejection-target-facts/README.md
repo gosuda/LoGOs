@@ -88,3 +88,19 @@ matched, and the embedded/JSONL ledgers matched with unique IDs.
 
 Local complete logs are retained under `tooling-evidence/ejection` in the
 stabilization workspace.
+
+## Acceptance follow-up and manifest succession
+
+The original `frozen-tests.sha256` remains unchanged. The later configured lint
+gate found an unchecked cleanup error and fixed host parameters in a tuple
+adapter used only by tests. The acceptance follow-up moves that adapter to
+`eject_test.go`, names its Linux/amd64 host explicitly, and checks `RemoveAll`'s
+error in the existing cleanup. The production selector, tested inputs, and
+existing semantic assertions remain unchanged.
+
+`frozen-tests-v2.sha256` records the mechanically updated target-feature test
+and the new adapter location. The other three original entries are unchanged.
+[Acceptance follow-ups](../acceptance-followups/README.md) records the exact
+transformation proof and the actual lint/race/vet results. The historical
+manifest remains the evidence for the original repair; the versioned successor
+identifies the tests used by the follow-up.

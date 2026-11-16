@@ -122,6 +122,25 @@ prove a complete final toolchain build for the other changed compiler packages.
 
 ## Reproduction
 
+### Freeze-manifest succession
+
+`frozen-tests.sha256` preserves the original repair's frozen bytes. The
+subsequent acceptance follow-up uses `frozen-tests-v2.sha256`. Its only changes
+to existing entries are the two variant-test call sites that now use the
+equivalent test-only Linux/amd64 adapter. The adapter still supplies the exact
+same host arguments to the unchanged production selector; all inputs and
+semantic assertions remain unchanged. The successor also records the adapter
+file, the target-feature test with checked cleanup, and the positive CTFE
+map-field fixture and expected output.
+
+The historical manifest is not rewritten. The follow-up's exact transformation
+proof and lint/race/vet results are recorded in
+[acceptance follow-ups](../acceptance-followups/README.md). The CTFE oracle
+correction is a separate test-only change, with its original negative input
+and the specification-based reason preserved there.
+
+### Commands
+
 From `src/`, with the rebuilt fork's `bin` directory first on PATH and
 `UPROOT1272`, `UPROOT1273`, and `UPROOT1274` pointing to the pinned pristine trees:
 
@@ -130,7 +149,7 @@ From `src/`, with the rebuilt fork's `bin` directory first on PATH and
 go test -count=1 -short cmd/compile/internal/inline/... cmd/compile/internal/logos/... cmd/go/internal/logos/eject
 go test -count=1 -short -race cmd/go/internal/logos/eject
 go test -count=1 -timeout=20m cmd/go -run 'Script/^logos_(ctfe_assignment_.*|tuple_(package_names|variant_names)|spread_defaults|inline_batches|eject_variant_tags)$'
-go test -count=1 -timeout=20m cmd/internal/testdir -run 'Test/logos/run/(ctfe_assignment_.*|spread_defaults|inline_batches)'
+go test -count=1 -timeout=20m cmd/internal/testdir -run 'Test/logos/run/(ctfe_assignment_.*|const_func_map_field_store|spread_defaults|inline_batches)'
 go vet cmd/compile/internal/inline/... cmd/compile/internal/logos/... cmd/go/internal/logos/eject
 go test -count=1 -short cmd/internal/goparity -run '^TestRedteamLedgerRows$'
 ./run.bash --no-rebuild

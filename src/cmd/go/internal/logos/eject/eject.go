@@ -808,16 +808,11 @@ func collectConstraintTags(expr constraint.Expr, tags *[]string) {
 	}
 }
 
-// findVariantContextForFile finds one host-close build context that
+// selectVariantContext finds one host-close build context that
 // selects the inactive file, using go/build MatchFile so filename
 // suffixes and //go:build lines evaluate exactly as the go tool does.
 // It varies GOOS, GOARCH, and tags from the file; CGO stays host
 // to keep the helper count to real platform/tag variants.
-func findVariantContextForFile(pkgDir, name, hostGOOS, hostGOARCH string, hostTags []string) (string, string, []string, bool) {
-	vc, ok := selectVariantContext(pkgDir, name, hostGOOS, hostGOARCH, hostTags)
-	return vc.goos, vc.goarch, vc.tags, ok
-}
-
 func selectVariantContext(pkgDir, name, hostGOOS, hostGOARCH string, hostTags []string) (variantCtx, bool) {
 	data, err := os.ReadFile(filepath.Join(pkgDir, name))
 	if err != nil {

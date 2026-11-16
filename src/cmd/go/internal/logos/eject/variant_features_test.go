@@ -83,7 +83,7 @@ func TestVariantFeaturesCannotBeInvented(t *testing.T) {
 	} {
 		t.Run(expression, func(t *testing.T) {
 			dir, name := variantTagTestFile(t, expression)
-			goos, goarch, tags, ok := findVariantContextForFile(dir, name, "linux", "amd64", nil)
+			goos, goarch, tags, ok := findVariantContextFromLinuxAMD64(dir, name, nil)
 			if ok {
 				t.Fatalf("impossible target %q selected by %s/%s tags=%q", expression, goos, goarch, tags)
 			}
@@ -106,13 +106,17 @@ func TestVariantFeatureSelectionReachesHelper(t *testing.T) {
 			dir, name := variantTagTestFile(t, tc.expression)
 			t.Setenv("LOGOS_TEST_VARIANT_DIR", dir)
 			cfg.BuildContext.BuildTags = []string{"keep", "untouched"}
-			if _, _, _, ok := findVariantContextForFile(dir, name, "linux", "amd64", cfg.BuildContext.BuildTags); !ok {
+			if _, _, _, ok := findVariantContextFromLinuxAMD64(dir, name, cfg.BuildContext.BuildTags); !ok {
 				t.Fatal("no context for a valid target feature constraint")
 			}
 			contexts := variantContextsForFiles([]inactiveFile{{pkg: &load.Package{PackagePublic: load.PackagePublic{Dir: dir}}, name: name}})
 			outs := spawnVariantEjects(context.Background(), contexts)
 			for _, out := range outs {
-				t.Cleanup(func() { os.RemoveAll(out) })
+				t.Cleanup(func() {
+					if err := os.RemoveAll(out); err != nil {
+						t.Errorf("remove variant output %s: %v", out, err)
+					}
+				})
 			}
 			if len(outs) != 1 {
 				t.Fatalf("one source produced %d helpers", len(outs))
@@ -146,7 +150,7 @@ func TestVariantFeaturesPreserveExplicitUserTags(t *testing.T) {
 	variantFeatureTestContext(t)
 	dir, name := variantTagTestFile(t, "arm64 && amd64.v3 && custom")
 	host := []string{"amd64.v3", "untouched"}
-	_, arch, tags, ok := findVariantContextForFile(dir, name, "linux", "amd64", host)
+	_, arch, tags, ok := findVariantContextFromLinuxAMD64(dir, name, host)
 	if !ok || arch != "arm64" || !slices.Equal(tags, []string{"amd64.v3", "custom", "untouched"}) {
 		t.Fatalf("explicit architecture-shaped user tag lost: arch=%s tags=%q ok=%v", arch, tags, ok)
 	}

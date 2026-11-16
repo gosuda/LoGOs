@@ -77,7 +77,7 @@ jobs:
         run: |
           evidence="$RUNNER_TEMP/compiler-stability-focused"
           cd ..
-          sha256sum --check logos-doc/validation/compiler-stability/frozen-tests.sha256 \
+          sha256sum --check logos-doc/validation/compiler-stability/frozen-tests-v2.sha256 \
             | tee "$evidence/frozen-tests.log"
           cd src
           unformatted=$(gofmt -l cmd/compile/internal/inline/interleaved \
@@ -100,7 +100,7 @@ jobs:
             -run 'Script/^logos_(eject_cgo.*|cgo_lgo|eject|eject_target_(features|env_compat)|eject_inactive.*|eject_variant_package_names)$' \
             2>&1 | tee "$evidence/cgo-and-variant-integration.log"
           go test -count=1 -timeout=20m cmd/internal/testdir \
-            -run 'Test/logos/run/(ctfe_assignment_.*|spread_defaults|inline_batches)' \
+            -run 'Test/logos/run/(ctfe_assignment_.*|const_func_map_field_store|spread_defaults|inline_batches)' \
             2>&1 | tee "$evidence/testdir.log"
           go vet cmd/compile/internal/inline/... cmd/compile/internal/logos/... \
             cmd/compile/internal/base cmd/compile/internal/syntax \
