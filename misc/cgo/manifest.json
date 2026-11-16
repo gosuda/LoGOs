@@ -17,6 +17,10 @@
       "role": "target"
     },
     {
+      "name": "BenchmarkCgoOptLateContract",
+      "role": "target"
+    },
+    {
       "name": "BenchmarkCgoOptSpanLookup",
       "role": "target"
     },

@@ -22,6 +22,18 @@
     "diagnostic": "stack-top lookups = 2, want 0"
   },
   {
+    "id": "package-contract-gate-inversion",
+    "kind": "mutation",
+    "path": "src/cmd/cgo/cgoopt_logos.go",
+    "before": "if !buildcfg.Experiment.LogosCgoOpt || *gccgo || *godefs {",
+    "after": "if buildcfg.Experiment.LogosCgoOpt || *gccgo || *godefs {",
+    "rebuild": "cgo",
+    "package": "cmd/cgo/internal/testlogos",
+    "test": "TestCgoOptPackageContracts",
+    "diagnostic": "stack-top lookups = 2, want 0",
+    "setting": "on"
+  },
+  {
     "id": "span-lookup-gate-inversion",
     "kind": "mutation",
     "setting": "on",
