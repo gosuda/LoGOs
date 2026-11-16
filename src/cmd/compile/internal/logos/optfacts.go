@@ -9,7 +9,6 @@ import (
 	"maps"
 	"slices"
 	"strings"
-	"unicode"
 
 	"cmd/compile/internal/logos/facts"
 	"cmd/compile/internal/types2"
@@ -178,25 +177,6 @@ func checkedAssertMask(mask string, arity int) ([]byte, error) {
 	return parsed, nil
 }
 
-// isPackageIdent reports whether name is a valid Go identifier, which is
-// the only shape a package-level object name can take. Import scopes also
-// carry names that are not valid identifiers: method-qualified names like
-// "T.m" and function-local objects mangled as "entry·1".
-func isPackageIdent(name string) bool {
-	for i, r := range name {
-		switch {
-		case unicode.IsLetter(r) || r == '_':
-		case unicode.IsDigit(r):
-			if i == 0 {
-				return false
-			}
-		default:
-			return false
-		}
-	}
-	return name != ""
-}
-
 func reachableFuncFactObjects(pkg *types2.Package) map[string]*types2.Func {
 	objects := make(map[string]*types2.Func)
 	graph := &overlayGraph{orig: pkg, nodes: make(map[types2.Type]bool)}
@@ -204,14 +184,16 @@ func reachableFuncFactObjects(pkg *types2.Package) map[string]*types2.Func {
 	seen := make(map[types2.Type]bool)
 	visit := func(t types2.Type) { graph.references(t, refs, seen) }
 	for _, name := range pkg.Scope().Names() {
-		// Only package-level identifiers can ever be fact targets or
-		// reachability roots. Method-qualified names ("T.m") and
-		// function-local objects ("entry·1", "func·2") are skipped;
-		// resolving a function-local type's lazy object reads its
-		// implicit type parameters, which the importer format forbids
-		// (internal compiler error: unexpected object with N implicit
-		// type parameter(s)).
-		if !isPackageIdent(name) {
+		// Only package-level objects can be fact targets or
+		// reachability roots. Names that cannot be package-level are
+		// skipped: method-qualified names ("T.m") and function-local
+		// objects mangled as "entry·1". Resolving a local type declared
+		// inside a generic function reads its implicit type parameters,
+		// which the importer format forbids (internal compiler error:
+		// unexpected object with N implicit type parameter(s)).
+		// Package-level names that are not plain identifiers, like
+		// midway's SIMD specializations "init@simd128", are kept.
+		if strings.ContainsAny(name, ".·") {
 			continue
 		}
 		obj := pkg.Scope().Lookup(name)
