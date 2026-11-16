@@ -91,8 +91,11 @@ func (fc *funcLower) planCall(call *syntax.CallExpr) (*callPlan, bool) {
 			names := fc.nextTemps(len(args))
 			for i, arg := range args {
 				part := types.args[i]
+				// An earlier type lowering may insert a prefix at this
+				// boundary. It belongs to the type moved into the alias.
+				head := drainOwnedAt(fl.ownerOfInsertion(part.start), part.start, 0)
 				plan.typeArgs = append(plan.typeArgs, capturePiece{
-					expr: arg, text: fl.lazyText(part), start: part.start,
+					expr: arg, text: cat(head, fl.lazyText(part)), start: part.start,
 					end: part.end, single: names[i],
 				})
 			}

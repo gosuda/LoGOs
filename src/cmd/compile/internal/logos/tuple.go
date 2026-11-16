@@ -436,6 +436,15 @@ func (fl *fileLower) lowerTupleType(t *syntax.TupleType) {
 		if f.Name != nil {
 			name = f.Name.Value
 			to += len(name)
+			scanSegment(fl.src, to, split.args[i].end, func(t tok) bool {
+				if t.comment {
+					return true
+				}
+				if t.kind == token.COLON {
+					fl.add(t.start, t.end, "")
+				}
+				return false
+			})
 		}
 		lname := tupleLoweredName(name, i)
 		st.FieldList = append(st.FieldList, &syntax.Field{Name: nameOf(pos, lname), Type: f.Type})

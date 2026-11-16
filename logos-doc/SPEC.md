@@ -580,6 +580,8 @@ Pointer-free constant data MUST live in read-only memory before any init runs. [
 
 `*T?` MUST denote an optional pointer. [T-202]
 
+Option types MUST have the same type meaning in every explicit generic-argument slot, including the first argument of a function, method, or generic type literal. Parentheses MUST retain their binding: `*T?` is an optional pointer, while `*(T?)` is a non-nil pointer to an option. [T-202]
+
 Assigning `nil` to `*T` MUST fail with `[correctness::nil_to_nonnil]`. [T-202]
 
 `var p *T` MUST fail compilation. [T-202]
@@ -914,6 +916,8 @@ Method bodies inside interfaces MUST fail compilation. [T-203.2]
 ### 2.4 RFC-204: Tuples and fixed-array SIMD
 
 Tuple types `(a A, b B)` and `(A, B)` in non-result positions MUST lower to structs with exported fields (`T_a`, `T_b` / `T_0`, `T_1`). [T-204.1]
+
+Every explicit generic-argument slot MUST accept tuple types with the same field names and element types as a strict type position. Named fields MAY use `a A` or `a: A`; either spelling MUST retain names, container and nested tuple types, and parenthesized type binding in native and ejected code. Brackets on a value MUST retain indexing and slicing semantics, including tuple keys and their evaluation order. [T-204.1][T-202]
 
 Exported field names MUST keep tuple identity across packages. [T-204.1]
 
