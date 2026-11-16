@@ -38,14 +38,23 @@ func grow(depth int) byte {
 	return frame[depth] + child
 }
 
+// stackAddress observes the marker without making it escape. ASan otherwise
+// heap-allocates it at the unsafe.Pointer conversion, hiding stack movement.
+//
+//go:noinline
+//go:nocheckptr
+func stackAddress(p *byte) uintptr {
+	return uintptr(unsafe.Pointer(p))
+}
+
 //export CgoOptGrow
 func CgoOptGrow(value C.int) C.int {
 	var marker byte
-	before := uintptr(unsafe.Pointer(&marker))
+	before := stackAddress(&marker)
 	if got := grow(64); got != 32 {
 		panic(fmt.Sprintf("callback recursion = %d, want 32", got))
 	}
-	if after := uintptr(unsafe.Pointer(&marker)); after == before {
+	if after := stackAddress(&marker); after == before {
 		panic("callback did not move the Go stack")
 	}
 	return value + 1

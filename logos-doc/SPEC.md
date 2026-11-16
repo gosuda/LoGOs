@@ -1469,6 +1469,25 @@ benchmark with fast-cgo disabled. G2, G3, and G6 in IMPLEMENTATION.md govern
 validation and promotion. The experiment's existence is not a performance
 claim or approval to change its default.
 
+#### 3.6.4 Reuse validated heap spans
+
+With `logoscgoopt` enabled, the unknown-pointer cgo checker MUST reuse the
+heap span it has already validated when locating the containing allocation.
+It MUST compute the same allocation base and scan the same pointer bitmap
+and extent as the existing `findObject` path. [T-306.2]
+
+An interior pointer MUST NOT restrict checking to bytes after that pointer.
+Unpinned nested pointers MUST still be rejected in small objects, objects with
+allocation headers, and large objects. Pinning the nested allocation MUST
+retain the existing successful result. Nil, foreign, stack, and global
+addresses MUST retain their existing treatment; unknown data/bss extents
+remain conservative. [T-306.2]
+
+Exported-result root and nested-pointer pinning, GC liveness, instrumentation,
+ordinary runtime entry, and callback behavior MUST remain unchanged. The
+disabled experiment MUST retain `findObject` and its returned base and span.
+The private selection helper MUST inline in both settings. [T-306.2]
+
 ## 4. Lexer, parser, and syntax
 
 ### 4.1 Tokens and contextual words
