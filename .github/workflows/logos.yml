@@ -117,6 +117,11 @@ jobs:
         if: "${{ !cancelled() && steps.smoke.outcome == 'success' && matrix.suite == 'unit' }}"
         run: |
           go test -count=1 -timeout 60m cmd/internal/testdir -run 'Test/logos/'
+      - name: "Validate test ownership and experiment handling"
+        if: "${{ !cancelled() && steps.smoke.outcome == 'success' && matrix.suite == 'unit' }}"
+        run: |
+          sha256sum ../bin/go ../bin/logos ../pkg/tool/linux_amd64/compile ../pkg/tool/linux_amd64/link
+          go test -count=1 -race -short -timeout 20m cmd/go/internal/test cmd/go/internal/work cmd/link/internal/ld
       - name: "Check formatting"
         if: "${{ !cancelled() && steps.smoke.outcome == 'success' && matrix.suite == 'unit' }}"
         run: |
@@ -141,3 +146,8 @@ jobs:
         if: "${{ !cancelled() && steps.smoke.outcome == 'success' && matrix.suite == 'scripts' }}"
         run: |
           go test -count=1 -timeout 60m cmd/go -run 'Script/^logos_'
+      - name: "Validate installed test subprocess behavior"
+        if: "${{ !cancelled() && steps.smoke.outcome == 'success' && matrix.suite == 'scripts' }}"
+        run: |
+          sha256sum ../bin/go ../bin/logos ../pkg/tool/linux_amd64/compile ../pkg/tool/linux_amd64/link
+          go test -count=1 -race -parallel=1 -timeout 20m cmd/go -run 'Script/^logos_(cap_xtest_owner|test_experiment_env|test_plugin_experiment|test_cache_experiment)$'
