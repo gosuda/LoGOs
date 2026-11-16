@@ -5,6 +5,7 @@ name: "SIMD feature dominance"
     paths:
       - ".github/workflows/simd-dominance.yml"
       - "src/cmd/compile/internal/ssa/**"
+      - "src/cmd/compile/internal/logos/wasm*_test.go"
       - "src/cmd/go/testdata/script/logos_simd_zero_dominance.txt"
   workflow_dispatch:
 
@@ -61,9 +62,39 @@ jobs:
           PINS
       - name: "Build the toolchain"
         run: |
-          export GOROOT_BOOTSTRAP="$(go env GOROOT)"
+          GOROOT_BOOTSTRAP=$(go env GOROOT)
+          export GOROOT_BOOTSTRAP
           ./make.bash
           printf '%s\n' "$GITHUB_WORKSPACE/bin" "$GITHUB_WORKSPACE/lib/wasm" >> "$GITHUB_PATH"
+      - name: "Check Wasm runner isolation"
+        if: "matrix.suite == 'focused'"
+        run: |
+          wasm_cache=$(go env GOCACHE)
+          env -i \
+            PATH="$PATH" GOROOT="$GITHUB_WORKSPACE" GOCACHE="$wasm_cache" \
+            TMPDIR="$RUNNER_TEMP" GOTMPDIR="$RUNNER_TEMP" \
+            GOENV=off GOTOOLCHAIN=local GOTELEMETRY=off \
+            GOMAXPROCS=2 GOFLAGS=-p=2 GOMEMLIMIT=2GiB \
+            go test -count=1 -timeout=10m -v cmd/compile/internal/logos \
+              -run '^TestWasm(RunIgnoresHostEnvironment|ProgramRunsUnderNode|WrongMayYieldTraps|YieldFreeSourcesRunUnderNode)        if: "matrix.suite == 'focused'"
+        run: |
+          test -z "$(gofmt -l cmd/compile/internal/ssa/*logos*.go cmd/compile/internal/logos/wasm*_test.go)"
+          go vet cmd/compile/internal/ssa cmd/compile/internal/logos
+      - name: "Run the complete SSA short suite"
+        if: "matrix.suite == 'focused'"
+        run: "go test -count=1 -short cmd/compile/internal/ssa"
+      - name: "Run source dominance and native/ejected SIMD gates"
+        if: "!cancelled() && matrix.suite == 'focused'"
+        run: |
+          go test -count=1 -race -timeout=40m -v cmd/go -run '^TestScript$/^(README|logos_simd_(zero_dominance|feature_gate|gate_avx512|gate_branch)|logos_eject_simd_slice)$'
+      - name: "Run the full upstream regression gate"
+        if: "matrix.suite == 'regression'"
+        env:
+          # cmd/go includes 511 loGo/s scripts in addition to the upstream set.
+          # Match the existing language CI's hour-long outer test budget.
+          GO_TEST_TIMEOUT_SCALE: "8"
+        run: "./run.bash --no-rebuild"
+
       - name: "Check formatting and vet"
         if: "matrix.suite == 'focused'"
         run: |
