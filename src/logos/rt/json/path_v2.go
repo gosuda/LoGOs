@@ -14,7 +14,6 @@ import (
 	"errors"
 	"reflect"
 	"strconv"
-	"strings"
 	"unicode"
 	"unicode/utf16"
 	"unicode/utf8"
@@ -187,7 +186,10 @@ func (s *Scanner) rejectNonString(tok []byte, typ reflect.Type) {
 		Value: value, Type: typ, Offset: off, Err: errNonStringValue})
 }
 
-func QuotedText[T encoding.TextUnmarshaler](s *Scanner, dst T) {
+func QuotedText[E any, T interface {
+	*E
+	encoding.TextUnmarshaler
+}](s *Scanner, dst T) {
 	if s.scalar() == 0 {
 		return
 	}
@@ -201,11 +203,7 @@ func QuotedText[T encoding.TextUnmarshaler](s *Scanner, dst T) {
 			return
 		}
 	}
-	typ := reflect.TypeFor[T]()
-	if typ.Kind() == reflect.Pointer {
-		typ = typ.Elem()
-	}
-	s.rejectNonString(tok, typ)
+	s.rejectNonString(tok, reflect.TypeFor[E]())
 }
 
 func QuotedTextPtr[E any, T interface {

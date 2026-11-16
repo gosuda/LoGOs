@@ -88,6 +88,7 @@ Each `.lgo` file MUST become a `.go` file [T-0.3].
 Completeness MUST include packages absent from the requested host build, including inactive-only tests and dependency modules reached only through an inactive variant [T-0.3].
 Source discovery MUST respect package and module ownership boundaries: nested modules, `vendor`, `testdata`, dot-prefixed and underscore-prefixed paths, module ignore rules, and directory symlinks MUST NOT become additional package roots [T-0.3].
 Each discovered inactive source MUST be type-checked and lowered by the ordinary compiler path under a context that selects it [T-0.3].
+Inactive discovery, build-constraint selection, and helper compilation MUST use the requested source overlay. Overlay-deleted sources MUST remain absent, and inserted or replaced sources MUST use their effective contents [T-0.3].
 Owned helpers MUST retain the package name selected by their source context; distinct package clauses in one directory MUST NOT be treated as declaration collisions [T-0.3].
 Selection of an inactive file's build context MUST satisfy its filename and build constraints, including repeated and negated custom tags [T-0.3].
 Selection MUST NOT impose a machine-word limit on the number of custom tags [T-0.3].
@@ -1694,6 +1695,7 @@ For a scalar field with the `,string` option, generated method dispatch MUST fol
 The compiler MUST select methods by their complete signatures. If a streaming method declines a value without consuming it, the generated decoder MUST call that method only once and then select the remaining method or scalar decoder at compile time; it MUST NOT construct a methodless type at run time. Non-scalar fields MUST use their ordinary fallback because `,string` does not apply to them. [T-Sec10]
 Generated method helper type arguments MUST retain source-valid C selectors when a checked scalar receiver is instantiated with a C type; private cgo-generated type names MUST NOT appear in ejected Go. [T-Sec10]
 These paths MUST preserve the active profile's error types, offsets, field context, partial updates, and updates through existing pointer aliases. JSONv2 fallback type errors name the root struct; classic fallback errors retain the inner struct context. A quoted null clears a scalar pointer according to that profile, including escaped spellings in classic mode and only the exact token `"null"` in JSONv2. [T-Sec10]
+Generated quoted-text helper signatures MUST encode the destination pointer's element type without runtime kind inspection. A `reflect.Type` value MAY remain where a public JSON error API requires it. [T-Sec10]
 Decoding MUST fill defaults first, then parse. [T-Sec10]
 A _logos_seen mask sized [(K+63)/64]uint64 tracks matched keys against a required-mask constant, where K is the number of required non-nil fields of the struct. [T-Sec10]
 At the closing brace, a missing required non-nil field returns MissingFieldError naming type and field. [T-Sec10]
