@@ -54,4 +54,4 @@ jobs:
           GOAMD64: "v1"
           GOEXPERIMENT: ""
         run: |
-          go test -count=1 -race -timeout=30m -v cmd/go -run '^TestScript$/^logos_simd_(feature_gate|gate_avx512|gate_branch)$'
+          go test -count=1 -race -timeout=30m -v cmd/go -run '^TestScript$/^(README|logos_simd_(feature_gate|gate_avx512|gate_branch))$'
