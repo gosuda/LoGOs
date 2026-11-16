@@ -303,3 +303,4 @@
 {"id": "AUD-210", "description": "M0-A-S20 Keep duplicate-stem errors package-local", "phase": "AUD"}
 {"id": "AUD-211", "description": "M0-A-S21 Preserve the Go-only type projection", "phase": "AUD"}
 {"id": "AUD-212", "description": "M22-A-S7 Isolate acceptance from bootstrap settings", "phase": "AUD"}
+{"id": "AUD-213", "description": "M22-A-S8 Bound parity child admission", "phase": "AUD"}

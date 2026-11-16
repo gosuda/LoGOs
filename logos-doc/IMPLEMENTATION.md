@@ -3870,6 +3870,21 @@ Anchor: Tony Hoare, David Parnas, Richard Feynman
 - Red-team rows: #444 (tested for the bootstrap environment contract). Actual SWIG/LTO and complete matrix results remain separate mandatory release gates; no release exception is added.
 - Docs: this implements the existing SPEC 17 and M22 acceptance requirements without changing language semantics or Table T.
 
+### M22-A-S8 Bound parity child admission
+
+Anchor: Tony Hoare, David Parnas, Richard Feynman
+
+- Invariant: parity execution helpers share one admission limit across rows. Waiting for admission does not consume a child's existing execution budget, and every completed helper call returns its permit, including process-start failure and timeout. The limit snapshots `GOMAXPROCS` at package initialization and bounds active helper calls; it does not limit compiler builds or every descendant process.
+- Diagnosis: the hosted release parity run times out on K6 `at08_recursion_bound`. Six isolated K6/U3N runs of the unchanged program pass the original 10-second budget. A separate two-CPU stress comparison runs 24 hardlinked copies of each same binary: both unbounded rows report a timeout as their first error, while all 48 executions pass through a diagnostic two-worker schedule. The OOM-kill counter does not increase. This comparison identifies an admission problem under controlled contention; it does not replay the complete release composition. The old `runAll` result records only the first error per row.
+- RED: freeze the complete pre-existing package and corpus, then add `src/cmd/internal/goparity/execution_queue_test.go`. Fresh scenario subprocesses set `GOMAXPROCS=2` before package initialization and use only existing execution helpers. The third call wrongly completes while two independent `runAll` rows hold ready children. The start-error and real-timeout release controls already pass; the suite fails semantically in 10.929 seconds without setup errors or skips.
+- Build: acquire a package-wide channel permit at the start of `runBinaryTimeout`, before creating the child deadline, and defer its release. Keep the sweep-file semaphore separate. APIs, child budgets, configurations, normalizers, existing corpus and mutant inputs, and clean-tip stamp rules remain unchanged.
+- Component gate: one candidate passes all three frozen scenarios in 10.788 seconds. The capacity boundary covers one holder, two holders and one queued caller; the queued call waits three seconds without spending its two-second child budget. Additional controls return permits after three missing-executable failures and three actual child timeouts. Bypassing admission is caught, starting the deadline before admission is caught, and the exact restored candidate passes under race detection in 15.145 seconds. Tests use readiness and release markers, buffered results, joined goroutines and subprocess watchdogs; they do not inspect the limiter variable.
+- Installed gate: after fresh normal make on source `33752c03819ed5afcb37f87633a3cac668e181a8`, the complete short parity race suite passes in 72.524 seconds. The three new queue scenarios, original budget and process/generator cleanup controls, 31 programs across three fork and two upstream rows, failure corpus, inventory checks, and ledger row check pass. Exactly the three existing release-only mutant, upstream-sweep, and release-ledger tests skip. Normal vet passes. Source, frozen inputs, and installed tools remain unchanged.
+- Remaining gate: the unfiltered, non-short, oracle-on release suite, all configured mutant executions, the upstream sweep, the unchanged clean-tip stamp, and the full Go regression remain required. This short gate creates no release stamp. Native execution evidence is Linux/amd64; the recorded existing Windows harness limitations do not waive Windows installation or Go-semantics obligations.
+- Red-team rows: #445 (tested for shared admission, deadline ordering and permit return).
+- Evidence: `logos-doc/validation/acceptance-repairs-33752c03/parity/README.md` preserves the sealed component packet; `logos-doc/validation/installed-acceptance-33752c03/README.md` supplies the combined installed race and vet records, expected skips, and independent reviews. AUD-213 tracks this slice. Earlier and later hosted scheduling failures retain their actual source identities.
+- Docs: this slice repairs parity-harness scheduling. It changes no SPEC language rule, expected program observation, release exception or timeout.
+
 ### Release gate
 
 Anchor: Edward Tufte, Richard Feynman
@@ -4669,4 +4684,5 @@ Written to `tasks/autoplan-ledger.jsonl` by P0-S6. IDs: phase prefix plus a sequ
 {"id": "AUD-210", "description": "M0-A-S20 Keep duplicate-stem errors package-local", "phase": "AUD"}
 {"id": "AUD-211", "description": "M0-A-S21 Preserve the Go-only type projection", "phase": "AUD"}
 {"id": "AUD-212", "description": "M22-A-S7 Isolate acceptance from bootstrap settings", "phase": "AUD"}
+{"id": "AUD-213", "description": "M22-A-S8 Bound parity child admission", "phase": "AUD"}
 ```
