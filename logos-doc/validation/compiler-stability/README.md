@@ -9,6 +9,16 @@ tiers, and experiment defaults. The host-ISA test prerequisite is the unchanged
 [PR #47](https://github.com/gosuda/LoGOs/pull/47), head
 `949e633789fe5122c548d6c9f39c06fbb2769702`.
 
+While the original PR checks were running, the target branch advanced to
+`15ff36f8bee66047199f2061624b1dfafa875478`, landing the shared GC scan work in
+[PR #26](https://github.com/gosuda/LoGOs/pull/26) and the host-ISA prerequisite.
+A normal merge incorporates that current base. The only conflict was the spec
+header: the current compiler baseline and the GC scan amendment are both
+retained. The compiler production files and all frozen tests are unchanged by
+this integration. The base's runtime metrics, arena race, and alternate
+collector checks remain in the existing unit workflow. Final acceptance must
+use the integrated tree; earlier green checks apply to the original base.
+
 ## Scope and proof obligations
 
 | Area | Original failure | Repair and invariant |
@@ -84,7 +94,7 @@ complete regression results. The table below is the local publication snapshot.
 | Ejection integration | The frozen final driver passed native execution, all expected variant outputs, pristine Go 1.27.2 execution, and the exact-empty helper case. |
 | Spread semantic integration and mutation | The frozen fixture passed through an isolated compiler in native and pristine-Go 1.27.4 ejected execution. Omitting default initialization caused the six predicted failures while evaluation/zero-value controls passed. Both clean executions passed again after restoration. |
 | Inliner equivalence | Source review and the source-bound selected-fixture comparison passed at O0/O1/O2/O3/Os. Compiler diagnostics and assembly are byte-identical to the frozen old-inliner outputs. Final Go/loGo/s script execution remains required. |
-| Complete rebuilt toolchain and full regression | Required. Early local attempts encountered compiler termination; the serialized preliminary build ended with stale-tool targets after running while source and commits changed. It is not final-build evidence. Frozen-source rebuilds and full-suite results must be recorded before acceptance. |
+| Complete rebuilt toolchain and full regression | Required on the integrated tree. Early local attempts encountered compiler termination; the serialized preliminary build ended with stale-tool targets after running while source and commits changed. A later frozen-source `make.bash -d` with one worker reached toolchain3, then its SSA compiler was killed and the build exited 2; the source tree and all frozen hashes remained unchanged. Clean CI builds of the original PR tree passed, followed by the focused compiler gates, unit/library-race checks, and host-ISA checks. The PR records the subsequent complete results and the new-base acceptance separately. |
 
 The workflow `.github/workflows/compiler-stability.yml` builds the exact checked
 out source in two independent jobs. The focused job runs affected compiler
