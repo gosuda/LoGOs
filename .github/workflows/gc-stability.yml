@@ -65,6 +65,7 @@ jobs:
       - name: "Run the upstream regression gate"
         env:
           GOEXPERIMENT: ""
+          GO_TEST_TIMEOUT_SCALE: "6"
         run: env -u GOFLAGS -u GOMEMLIMIT ./run.bash --no-rebuild
 
   runtime:
