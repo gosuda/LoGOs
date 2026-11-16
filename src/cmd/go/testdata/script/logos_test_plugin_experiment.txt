@@ -8,9 +8,11 @@ env GOEXPERIMENT=
 cd m
 
 # Like xxhash's upstream TestMain, the test builds its plugin with plain go.
-# Plugin identity requires matching build settings. Pin the host to plain Go's
-# O1; the unconfigured O2/O1 corpus failure remains separate evidence.
+# Plugin identity requires matching optimization and experiment settings.
+# Pin the logos host to O1 and explicitly share the arena experiment with the
+# plain-go child. Unconfigured mixed-driver failures remain separate evidence.
 go test -count=1 -run '^TestChildPlugin$' .
+env GOEXPERIMENT=logosarena
 logos test -O=1 -count=1 -run '^TestChildPlugin$' .
 
 # An explicit arena opt-out and GOEXPERIMENT=none must reach both binaries.

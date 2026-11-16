@@ -35,14 +35,15 @@ func TestLogosTestExperimentEnv(t *testing.T) {
 		want     string
 		present  bool
 	}{
-		{"default", true, "logosarena", nil, "logosarena", true},
-		{"explicit-empty", true, "logosarena", []string{"GOEXPERIMENT="}, "logosarena", true},
-		{"none-with-arena", true, "none,logosarena", []string{"GOEXPERIMENT=none"}, "none,logosarena", true},
-		{"classic-json", true, "nojsonv2,logosarena", []string{"GOEXPERIMENT=nojsonv2"}, "nojsonv2,logosarena", true},
-		{"jsonv2", true, "jsonv2,logosarena", []string{"GOEXPERIMENT=jsonv2"}, "jsonv2,logosarena", true},
-		{"arena-off", true, "", nil, "", true},
+		{"default", true, "logosarena", nil, "", false},
+		{"explicit-empty", true, "logosarena", []string{"GOEXPERIMENT="}, "", true},
+		{"none-with-arena", true, "none,logosarena", []string{"GOEXPERIMENT=none"}, "none", true},
+		{"classic-json", true, "nojsonv2,logosarena", []string{"GOEXPERIMENT=nojsonv2"}, "nojsonv2", true},
+		{"jsonv2", true, "jsonv2,logosarena", []string{"GOEXPERIMENT=jsonv2"}, "jsonv2", true},
+		{"explicit-arena", true, "logosarena", []string{"GOEXPERIMENT=logosarena"}, "logosarena", true},
+		{"arena-off", true, "", nil, "", false},
 		{"none-arena-off", true, "none", []string{"GOEXPERIMENT=none"}, "none", true},
-		{"duplicates", true, "nojsonv2,logosarena", []string{"GOEXPERIMENT=none", "GOEXPERIMENT=nojsonv2"}, "nojsonv2,logosarena", true},
+		{"duplicates", true, "nojsonv2,logosarena", []string{"GOEXPERIMENT=none", "GOEXPERIMENT=nojsonv2"}, "nojsonv2", true},
 		{"plain-unset", false, "", nil, "", false},
 		{"plain-empty", false, "", []string{"GOEXPERIMENT="}, "", true},
 		{"plain-none", false, "none", []string{"GOEXPERIMENT=none"}, "none", true},
@@ -76,29 +77,44 @@ func TestLogosTestExperimentEnv(t *testing.T) {
 }
 
 func TestLogosTestExperimentCache(t *testing.T) {
-	testExperimentEnv(t, true, "logosarena", nil)
-	first := hashGetenv("GOEXPERIMENT")
-	cfg.RawGOEXPERIMENT = "nojsonv2,logosarena"
-	if first == hashGetenv("GOEXPERIMENT") {
-		t.Fatal("test cache ignores the effective experiment inherited by subprocesses")
-	}
-	cfg.Logos = false
-	first = hashGetenv("GOEXPERIMENT")
-	cfg.RawGOEXPERIMENT = "logosarena"
-	if first != hashGetenv("GOEXPERIMENT") {
-		t.Fatal("plain go hashes an experiment absent from its test environment")
+	for _, mode := range []struct {
+		name  string
+		logos bool
+	}{{"logos", true}, {"go", false}} {
+		t.Run(mode.name, func(t *testing.T) {
+			testExperimentEnv(t, mode.logos, "logosarena", nil)
+			absent := hashGetenv("GOEXPERIMENT")
+			cfg.RawGOEXPERIMENT = "nojsonv2,logosarena"
+			if absent != hashGetenv("GOEXPERIMENT") {
+				t.Error("test-input hash includes an experiment absent from the test environment")
+			}
+			cfg.RawGOEXPERIMENT = "logosarena"
+			cfg.OrigEnv = []string{"GOEXPERIMENT="}
+			empty := hashGetenv("GOEXPERIMENT")
+			if absent == empty {
+				t.Error("test cache conflates absent and present-empty GOEXPERIMENT")
+			}
+			cfg.OrigEnv = []string{"GOEXPERIMENT=none"}
+			if empty == hashGetenv("GOEXPERIMENT") {
+				t.Error("test cache conflates empty and explicit GOEXPERIMENT values")
+			}
+			cfg.OrigEnv = []string{"GOEXPERIMENT=none", "GOEXPERIMENT="}
+			if empty != hashGetenv("GOEXPERIMENT") {
+				t.Error("test cache ignores the last duplicate environment entry")
+			}
+		})
 	}
 }
 
 func TestLogosTestExperimentEnvNames(t *testing.T) {
-	testExperimentEnv(t, true, "logosarena", []string{"GOEXPERIMENT_EXTRA=kept"})
+	testExperimentEnv(t, true, "logosarena", []string{"GOEXPERIMENT=nojsonv2", "GOEXPERIMENT_EXTRA=kept"})
 	if got, ok := logosInheritedTestEnv("GOEXPERIMENT_EXTRA"); got != "kept" || !ok {
 		t.Fatalf("prefixed name = (%q, %v), want (kept, true)", got, ok)
 	}
 	got, ok := logosInheritedTestEnv("goexperiment")
 	if runtime.GOOS == "windows" {
-		if got != "logosarena" || !ok {
-			t.Fatalf("Windows name = (%q, %v), want (logosarena, true)", got, ok)
+		if got != "nojsonv2" || !ok {
+			t.Fatalf("Windows name = (%q, %v), want (nojsonv2, true)", got, ok)
 		}
 	} else if ok {
 		t.Fatalf("case-sensitive name unexpectedly inherited %q", got)
