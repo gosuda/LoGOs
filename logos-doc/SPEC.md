@@ -1799,6 +1799,7 @@ The long-loop preemption rules are stated in Sec 3.3 (RFC-303: Hardware backend 
 Automatic vectorization MUST apply to ordinary Go and loGo/s loops through the shared compiler backend, without a source annotation or an explicit SIMD import. [T-303.AV][R-U1]
 The initial implementation MUST require `GOEXPERIMENT=simd`, enabled compiler optimization, and either amd64 with `GOAMD64=v3` or `v4`, or arm64. [T-303.AV]
 Other targets and builds with SIMD disabled, `-N`, race detection, MSan, or ASan MUST keep the scalar loop. [T-303.AV]
+Functions marked `//go:nosplit` MUST keep the scalar loop, because a fault-policy query requires a valid goroutine and an ordinary call budget. [T-303.AV]
 The SSA control `-d=ssa/autovec/off` MUST disable the pass; `-d=ssa/autovec/debug=1` MUST report each accepted loop. [T-303.AV]
 
 The compiler MAY vectorize a loop after it proves the following conditions. [T-303.AV]
@@ -1817,6 +1818,7 @@ A source and destination with identical base addresses MAY share a vector iterat
 For other addresses, the vector prefix MUST run only when its destination range is disjoint from every source range; a failed overlap guard MUST run the entire original scalar loop. [T-303.AV]
 The guard MUST NOT overflow pointer-end or byte-count arithmetic. Source ranges MAY overlap each other. [T-303.AV]
 The transformation MUST preserve nil and empty behavior, the final index, memory effects, and every panic and write that precedes it. [T-303.AV]
+When the current goroutine enables `runtime/debug.SetPanicOnFault`, the original scalar loop MUST execute so widened memory accesses cannot suppress earlier scalar writes. The fault-policy query MUST run only on the loop-entry edge, and its memory state MUST precede the vector setup and scalar fallback. [T-303.AV]
 Loops with unresolved checks, unsupported expressions, reductions, or additional loop-carried state MUST remain scalar. Floating-point arithmetic MUST remain scalar in this initial implementation. [T-303.AV]
 The new vector loop MUST receive the existing loop-preemption checks when that experiment is enabled. [T-303.AV]
 Eject MUST keep ordinary scalar source, so its output needs no SIMD package or experiment to compile with upstream Go. [T-303.AV][T-0.3]

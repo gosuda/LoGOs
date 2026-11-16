@@ -73,6 +73,10 @@ jobs:
           files=(cmd/compile/internal/ssa/autovec*.go cmd/compile/internal/ssa/testdata/autovec*.go ../test/logos/run/autovec*.go ../test/logos/codegen/autovec*.go runtime/autovec*.go runtime/export_autovec_logos_test.go)
           gofmt -d "${files[@]}" | tee "$RUNNER_TEMP/autovec-evidence/gofmt.diff"
           test ! -s "$RUNNER_TEMP/autovec-evidence/gofmt.diff"
+      - name: "Verify generated runtime builtins"
+        run: |
+          (cd cmd/compile/internal/typecheck && go generate)
+          git diff --exit-code -- cmd/compile/internal/typecheck/builtin.go
       - name: "Check compiler invariants and native fixtures"
         run: |
           go test -count=1 -short cmd/compile/internal/ssa
@@ -123,14 +127,19 @@ jobs:
           grep -F 'memoryMap' "$RUNNER_TEMP/autovec-evidence/tail-mutation.txt"
           grep -E 'SIGSEGV|unexpected fault address' "$RUNNER_TEMP/autovec-evidence/tail-mutation.txt"
           "$RUNNER_TEMP/memory"
-      - uses: "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9" # v7.0.2
+      - name: "Prove the runtime policy test rejects bypass"
+        run: |
+          mutation="$RUNNER_TEMP/autovec-fault-mutation"
+          mkdir "$mutation"
+          go run cmd/compile/internal/ssa/testdata/autovec_overlay.go runtime/autovec_logos.go 'return getg().paniconfault' 'return false' "$mutation" > "$mutation/overlay.json"
+          if go test -count=1 -short -overlay="$mutation/overlay.json" runtime -run '^TestLogosAutovecPanicOnFaultcf430e030ddbb5b0abf93d22962f4752f3646cd9" # v7.0.2
         if: "always()"
         with:
           name: "autovec-native-${{ matrix.arch }}-${{ github.run_id }}-${{ github.run_attempt }}"
           path: "${{ runner.temp }}/autovec-evidence"
 
   regression:
-    name: "upstream regression with SIMD"
+    name: "upstream and SIMD regression"
     concurrency:
       group: "autovec-upstream-${{ github.ref }}"
       cancel-in-progress: true
@@ -172,4 +181,147 @@ jobs:
           printf '%s\n' "$GITHUB_WORKSPACE/lib/wasm" "$GITHUB_WORKSPACE/bin" >> "$GITHUB_PATH"
       - name: "Run the complete upstream regression gate"
         run: |
-          GOEXPERIMENT=simd GOAMD64=v3 ./run.bash --no-rebuild
+          GO_TEST_TIMEOUT_SCALE=3 ./run.bash --no-rebuild
+      - name: "Run the SIMD-enabled standard library"
+        run: |
+          GOEXPERIMENT=simd GOAMD64=v3 go test -count=1 -timeout 30m std
+ > "$RUNNER_TEMP/autovec-evidence/fault-mutation.txt" 2>&1; then
+            cat "$RUNNER_TEMP/autovec-evidence/fault-mutation.txt"
+            printf 'fault-policy mutation unexpectedly passed\n' >&2
+            exit 1
+          fi
+          grep -F 'child enabled: got false want true' "$RUNNER_TEMP/autovec-evidence/fault-mutation.txt"
+          go test -count=1 -short runtime -run '^TestLogosAutovecPanicOnFaultcf430e030ddbb5b0abf93d22962f4752f3646cd9" # v7.0.2
+        if: "always()"
+        with:
+          name: "autovec-native-${{ matrix.arch }}-${{ github.run_id }}-${{ github.run_attempt }}"
+          path: "${{ runner.temp }}/autovec-evidence"
+
+  regression:
+    name: "upstream and SIMD regression"
+    concurrency:
+      group: "autovec-upstream-${{ github.ref }}"
+      cancel-in-progress: true
+    runs-on: "ubuntu-26.04"
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: "bash"
+        working-directory: "src"
+    steps:
+      - uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" # v7.0.1
+        with:
+          persist-credentials: false
+          ref: "${{ github.event.pull_request.head.sha }}"
+      - uses: "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e" # v7.0.0
+        with:
+          go-version: "1.27.4"
+          cache: false
+      - uses: "actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1" # v7.1.0
+        with:
+          node-version: "26.13.1"
+      - name: "Install the upstream oracle toolchains"
+        run: |
+          printf 'UPROOT1274=%s\n' "$(go env GOROOT)" >> "$GITHUB_ENV"
+          while read -r version sha256 root; do
+            archive="$RUNNER_TEMP/go$version.linux-amd64.tar.gz"
+            curl --fail --silent --show-error --location --output "$archive" "https://go.dev/dl/go$version.linux-amd64.tar.gz"
+            printf '%s  %s\n' "$sha256" "$archive" | sha256sum --check --strict -
+            mkdir "$RUNNER_TEMP/go$version"
+            tar -xzf "$archive" -C "$RUNNER_TEMP/go$version" --strip-components=1
+            printf '%s=%s\n' "$root" "$RUNNER_TEMP/go$version" >> "$GITHUB_ENV"
+          done <<'PINS'
+          1.27.2 ecbadb99091a3f46e31f5f934b068b1864eafa7995211b39eaddf76996045fe5 UPROOT1272
+          1.27.3 65efbc80fdc1fa2cd2631cad5b481777a68e8725f34e89f50fc6ac714e379b40 UPROOT1273
+          PINS
+      - name: "Build the toolchain"
+        run: |
+          GOROOT_BOOTSTRAP="$UPROOT1274" ./make.bash
+          printf '%s\n' "$GITHUB_WORKSPACE/lib/wasm" "$GITHUB_WORKSPACE/bin" >> "$GITHUB_PATH"
+      - name: "Run the complete upstream regression gate"
+        run: |
+          GO_TEST_TIMEOUT_SCALE=3 ./run.bash --no-rebuild
+      - name: "Run the SIMD-enabled standard library"
+        run: |
+          GOEXPERIMENT=simd GOAMD64=v3 go test -count=1 -timeout 30m std
+
+      - name: "Check native and ejected source with upstream Go"
+        run: |
+          fork="$GITHUB_WORKSPACE"
+          upgo="$UPROOT1274/bin/go"
+          upver=$(env -u GOROOT GOENV=off GOTOOLCHAIN=local "$upgo" version)
+          [[ "$upver" == 'go version go1.27.4 '* ]]
+          export GOENV=off GOFLAGS= GOWORK=off GOPROXY=off GOTOOLCHAIN=local
+          if [[ $(env -u GOROOT "$fork/bin/go" env GOARCH) == amd64 ]]; then export GOAMD64=v3; fi
+          smoke=$(mktemp -d "$RUNNER_TEMP/autovec-eject.XXXXXX")
+          for name in autovec autovec_expr autovec_start; do
+            fixture="$fork/test/logos/run/$name.lgo"
+            if [[ ! -f "$fixture" ]]; then continue; fi
+            dir="$smoke/$name"
+            mkdir "$dir"
+            printf 'module example.com/autovec-eject\n\ngo 1.27\n' > "$dir/go.mod"
+            cp "$fixture" "$dir/main.lgo"
+            (
+              cd "$dir"
+              env -u GOROOT GOEXPERIMENT=simd "$fork/bin/logos" run . > native.out
+              env -u GOROOT GOEXPERIMENT=simd "$fork/bin/logos" eject -o out
+              test -f out/main.go
+              cd out
+              env -u GOROOT GOEXPERIMENT=none "$upgo" run . > ../upstream.out
+              cmp ../native.out ../upstream.out
+            )
+            printf 'Native and upstream eject passed: %s\n' "$name"
+          done
+      - uses: "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9" # v7.0.2
+        if: "always()"
+        with:
+          name: "autovec-native-${{ matrix.arch }}-${{ github.run_id }}-${{ github.run_attempt }}"
+          path: "${{ runner.temp }}/autovec-evidence"
+
+  regression:
+    name: "upstream and SIMD regression"
+    concurrency:
+      group: "autovec-upstream-${{ github.ref }}"
+      cancel-in-progress: true
+    runs-on: "ubuntu-26.04"
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: "bash"
+        working-directory: "src"
+    steps:
+      - uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" # v7.0.1
+        with:
+          persist-credentials: false
+          ref: "${{ github.event.pull_request.head.sha }}"
+      - uses: "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e" # v7.0.0
+        with:
+          go-version: "1.27.4"
+          cache: false
+      - uses: "actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1" # v7.1.0
+        with:
+          node-version: "26.13.1"
+      - name: "Install the upstream oracle toolchains"
+        run: |
+          printf 'UPROOT1274=%s\n' "$(go env GOROOT)" >> "$GITHUB_ENV"
+          while read -r version sha256 root; do
+            archive="$RUNNER_TEMP/go$version.linux-amd64.tar.gz"
+            curl --fail --silent --show-error --location --output "$archive" "https://go.dev/dl/go$version.linux-amd64.tar.gz"
+            printf '%s  %s\n' "$sha256" "$archive" | sha256sum --check --strict -
+            mkdir "$RUNNER_TEMP/go$version"
+            tar -xzf "$archive" -C "$RUNNER_TEMP/go$version" --strip-components=1
+            printf '%s=%s\n' "$root" "$RUNNER_TEMP/go$version" >> "$GITHUB_ENV"
+          done <<'PINS'
+          1.27.2 ecbadb99091a3f46e31f5f934b068b1864eafa7995211b39eaddf76996045fe5 UPROOT1272
+          1.27.3 65efbc80fdc1fa2cd2631cad5b481777a68e8725f34e89f50fc6ac714e379b40 UPROOT1273
+          PINS
+      - name: "Build the toolchain"
+        run: |
+          GOROOT_BOOTSTRAP="$UPROOT1274" ./make.bash
+          printf '%s\n' "$GITHUB_WORKSPACE/lib/wasm" "$GITHUB_WORKSPACE/bin" >> "$GITHUB_PATH"
+      - name: "Run the complete upstream regression gate"
+        run: |
+          GO_TEST_TIMEOUT_SCALE=3 ./run.bash --no-rebuild
+      - name: "Run the SIMD-enabled standard library"
+        run: |
+          GOEXPERIMENT=simd GOAMD64=v3 go test -count=1 -timeout 30m std
