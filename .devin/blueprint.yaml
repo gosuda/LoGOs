@@ -3,6 +3,7 @@
 # Bootstraps upstream go1.27.4 (sha256-pinned) and builds the fork toolchain so
 # bin/go and bin/logos exist in the snapshot.
 initialize: |
+  set -e
   if [ ! -x "$HOME/go-bootstrap/bin/go" ]; then
     curl -LsSf -o /tmp/go.tgz https://go.dev/dl/go1.27.4.linux-amd64.tar.gz
     echo "7226736c2339719cda28fbf3a54d71aa63bcefe376e98cef00034268dab24840  /tmp/go.tgz" | sha256sum -c -
@@ -14,8 +15,8 @@ initialize: |
 knowledge:
   - name: test
     contents: |
-      cd src && go test -count=1 <pkg>
-      Script tests: go test -count=1 cmd/go -run 'Script/<name>'
+      cd src && go test -count=1 -short <pkg>
+      Script tests: go test -count=1 cmd/go -run 'Script/^logos_<name>$'
       Compiler dir tests: go test -count=1 cmd/internal/testdir -run 'Test/logos/'
   - name: lint
     contents: |
