@@ -321,15 +321,18 @@ func logosArenaScanChunk(c *sideStackChunk, gcw *gcWork, state *stackScanState) 
 func logosArenaScanObject(typ *_type, obj, size uintptr, gcw *gcWork, state *stackScanState) int64 {
 	limit := obj + size
 	tp := typePointers{elem: obj, addr: obj, typ: typ}.fastForward(0, limit)
-	var scanned uintptr
+	var last uintptr
 	for {
 		var addr uintptr
 		if tp, addr = tp.nextFast(); addr == 0 {
 			if tp, addr = tp.next(limit); addr == 0 {
-				return int64(scanned)
+				if last == 0 {
+					return 0
+				}
+				return int64(last - obj + goarch.PtrSize)
 			}
 		}
-		scanned = addr - obj + goarch.PtrSize
+		last = addr
 		p := *(*uintptr)(unsafe.Pointer(addr))
 		// This loop visits every pointer slot in the allocation, so an
 		// internal pointer cannot expose another root.
