@@ -1881,6 +1881,17 @@ Anchor: Edward Tufte, Tony Hoare
 - Red-team rows: none.
 - Docs: none (SPEC 5 carries the rule).
 
+### M3-A-S19 Resolve the first generic type argument
+Anchor: Tony Hoare, David Parnas, Richard Feynman
+- State: planned; frozen regression snapshot only. No production attempt has begun.
+- Invariant: an explicit LoGOs type argument has the same type in every generic-argument slot and in strict type instantiation. Brackets on a value retain indexing and slicing semantics, including tuple keys and misplaced-propagation diagnostics.
+- Attack: `src/cmd/compile/internal/types2/typeargs_logos_test.go` compares 18 types in six positions: strict, named alias, later argument, ordinary function, generic method, and generic type literal. The matrix covers option nesting, pointer precedence, receive-only channels, unnamed and named tuples, and named fields whose types are containers or nested tuples. Separate controls retain arithmetic and coalescing indices, tuple-key maps with shadowed type names, slices, and one exact `correctness::misplaced_try` rejection.
+- RED (2026-11-16): 48 of 108 matrix cells fail on the unchanged checker; all 54 strict/alias/later controls pass, as do six first-slot controls and the indexing controls. The function and method cells for `<-chan int?` panic with `unknown expression type *syntax.OptionType`; the test reports these as failed cells and continues. The same four minimal ordinary-function/method option/tuple cases fail with the installed compiler, while named aliases, strict instantiation, and later slots compile.
+- Proposed seam: preserve expression parsing in `syntax.typeList(false)`. Canonicalize ambiguous argument nodes only when the checker enters a confirmed generic function/method instantiation or a type-instantiation position. The canonical nodes must remain in the original `IndexExpr` for later lowering. Preserve pointer/option precedence, receive-channel direction, source spans, and every named tuple field. The expression parser currently drops names from simple named tuples and rejects some container/nested forms before checking, so named-field preservation and that grammar remain design prerequisites. A blanket switch to strict parsing would change valid tuple-key indexing.
+- Gate for the repair: `go test -count=1 -short cmd/compile/internal/types2 -run '^TestLogos(GenericTypeArgumentPositions|TypeArgumentIndexControls)$'`; full syntax and types2 suites, followed by fresh native/ejected parity fixtures, a caught/restored mutation, and G2. GREEN and PROBE are pending; the RED snapshot must stay separate from a release candidate until repaired.
+- Red-team rows: #389.
+- Docs for the repair: Table T-202 and T-204.1; SPEC 2.2 and 2.4. Those existing type rules contain no first-argument exception.
+
 ## M4. Interface properties
 
 Anchor: Tony Hoare, David Parnas, J.R.R. Tolkien
@@ -4356,5 +4367,6 @@ Written to `tasks/autoplan-ledger.jsonl` by P0-S6. IDs: phase prefix plus a sequ
 {"id": "AUD-188", "description": "M20-E-S2 Eject checked direct-C source", "phase": "AUD"}
 {"id": "AUD-189", "description": "M0-A-S15 Enforce the upstream Go regression floor in CI", "phase": "AUD"}
 {"id": "AUD-190", "description": "M11-A-S7 Preserve JSON profile dispatch and errors", "phase": "AUD"}
+{"id": "AUD-191", "description": "M3-A-S19 Resolve the first generic type argument", "phase": "AUD"}
 {"id": "AUD-193", "description": "M11-A-S8 Preserve C type arguments in quoted JSON dispatch", "phase": "AUD"}
 ```
