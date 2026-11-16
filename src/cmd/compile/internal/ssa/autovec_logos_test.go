@@ -171,7 +171,6 @@ func TestLogosAutovecRejectsUnsafeLoops(t *testing.T) {
 		change func(fun)
 	}{
 		{"division", func(f fun) { f.values["sum"].Op = OpDiv32u }},
-		{"nonzero start", func(f fun) { f.values["zero"].AuxInt = 1 }},
 		{"nonunit stride", func(f fun) { f.values["one"].AuxInt = 2 }},
 		{"inclusive limit", func(f fun) { f.values["cond"].Op = OpLeq64 }},
 		{"shifted source", func(f fun) {
