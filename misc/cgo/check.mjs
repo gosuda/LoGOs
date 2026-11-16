@@ -164,3 +164,35 @@ export function manifest(value) {
   insist(fixtures.size > 0, "no direct fixture configured");
   return value;
 }
+
+
+// Keep diagnostics independently of the output tail: later passing cases may
+// otherwise hide the reason an early test or subtest failed.
+export function goFailureSummary(output) {
+  const records = new Map();
+  for (const line of output.split("\n")) {
+    let event;
+    try {
+      event = JSON.parse(line);
+    } catch {
+      continue; // Non-JSON command output still has its complete raw log.
+    }
+    if (!event || typeof event !== "object" || typeof event.Action !== "string") continue;
+    const pkg = typeof event.Package === "string" ? event.Package : "";
+    const test = typeof event.Test === "string" ? event.Test : "";
+    const key = JSON.stringify([pkg, test]);
+    if (!records.has(key)) records.set(key, { package: pkg, test, diagnostics: [], failed: false });
+    const record = records.get(key);
+    if (typeof event.Output === "string" && record.diagnostics.length < 3) {
+      for (const text of event.Output.split("\n")) {
+        const diagnostic = text.trim();
+        if (!diagnostic || /^(=== |--- (PASS|FAIL|SKIP):|PASS$|FAIL(?:\s|$)|ok\s)/.test(diagnostic)) continue;
+        record.diagnostics.push(diagnostic.slice(0, 200));
+        if (record.diagnostics.length === 3) break;
+      }
+    }
+    if (event.Action === "fail" || event.Action === "build-fail") record.failed = true;
+  }
+  return [...records.values()].filter((record) => record.failed)
+    .map(({ package: pkg, test, diagnostics }) => ({ package: pkg, test, diagnostics }));
+}
