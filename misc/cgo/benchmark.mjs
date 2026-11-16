@@ -19,6 +19,18 @@ const phases = [
 ];
 const binaries = {};
 const output = [];
+// These records also make evidence readable when an artifact ZIP reader is
+// unavailable. Full command logs and binary/profile artifacts are still saved.
+const report = (kind, data) => console.log("CGO_BENCH " + JSON.stringify({ kind, data }));
+report("fingerprint", fingerprint);
+const cpuinfo = readFileSync(join(directory, "environment/cpuinfo.txt"), "utf8");
+const meminfo = readFileSync(join(directory, "environment/meminfo.txt"), "utf8");
+report("hardware", {
+  logicalProcessors: (cpuinfo.match(/^processor\s*:/gm) || []).length,
+  cpu: [...new Set(cpuinfo.split("\n").filter((line) =>
+    /^(model name|Hardware|vendor_id|cpu family|model|stepping|flags|Features|cache size)\s*:/.test(line)))],
+  memory: meminfo.split("\n").filter((line) => /^(MemTotal|MemAvailable|SwapTotal):/.test(line)),
+});
 const shellQuote = (value) => "'" + value.replaceAll("'", "'\\''") + "'";
 const benchmarkArgs = (name, duration) => ["-test.run=^$", "-test.bench=^" + name + "$",
   "-test.benchtime=" + duration, "-test.benchmem"];
@@ -44,6 +56,9 @@ try {
   }
   saveJSON(join(directory, "builds.json"), { fingerprint, builds: binaries,
     integration: "fresh -a build of the same checked-out source with the experiment enabled" });
+  report("builds", phases.map((phase) => ({ phase: phase.name, experiment: phase.experiment,
+    sha256: binaries[phase.name].sha256, bytes: binaries[phase.name].bytes,
+    gomaxprocs: 1, goflags: "-p=1" })));
 
   for (const target of config.benchmarks) {
     const name = target.name;
@@ -73,8 +88,10 @@ try {
       if (!Number.isSafeInteger(iterations) || iterations <= 0) throw new Error(name + ": invalid calibration");
     }
     if (!calibrated) throw new Error(name + ": useful-work calibration failed before scoring");
-    saveJSON(join(out, "frozen-work.json"), { name, iterations, role: target.role,
-      protocol: "one scored campaign; no automatic measurement retries" });
+    const frozen = { name, iterations, role: target.role,
+      protocol: "one scored campaign; no automatic measurement retries" };
+    saveJSON(join(out, "frozen-work.json"), frozen);
+    report("frozen-work", frozen);
     const measurements = {};
     for (const phase of phases) {
       const build = binaries[phase.name];
@@ -83,29 +100,37 @@ try {
       const command = [build.binary, ...benchmarkArgs(name, iterations + "x")].map(shellQuote).join(" ");
       run(process.env.HYPERFINE, ["--warmup", "3", "--min-runs", "10",
         "--export-json", timingPath, command], { env: build.env, log: join(log, "hyperfine") });
+      const hyperfine = JSON.parse(readFileSync(timingPath, "utf8"));
+      report("hyperfine", { benchmark: name, phase: phase.name, result: hyperfine });
       const corroboration = run(go, ["test", "-p=1", "-run=^$", "-bench=^" + name + "$",
         "-benchtime=" + iterations + "x", "-count=10", "-benchmem", "cmd/cgo/internal/testlogos"],
         { env: build.env, cwd: join(root, "src"), log: join(log, "corroboration") });
+      report("go-benchmark", { benchmark: name, phase: phase.name, output: corroboration.stdout });
       const profile = join(log, "cpu.pprof");
       run(build.binary, [...benchmarkArgs(name, iterations + "x"), "-test.cpuprofile=" + profile],
         { env: build.env, log: join(log, "profile") });
-      run(go, ["tool", "pprof", "-top", "-nodecount=30", build.binary, profile],
+      const profileTop = run(go, ["tool", "pprof", "-top", "-nodecount=30", build.binary, profile],
         { env: build.env, log: join(log, "profile-top") });
-      measurements[phase.name] = { hyperfine: JSON.parse(readFileSync(timingPath, "utf8")),
-        corroboration: corroboration.stdout };
+      report("cpu-profile", { benchmark: name, phase: phase.name, output: profileTop.stdout });
+      measurements[phase.name] = { hyperfine, corroboration: corroboration.stdout };
     }
     const row = { ...assessRow(name, iterations, measurements), role: target.role,
       binaryBytes: Object.fromEntries(phases.map((phase) => [phase.name, binaries[phase.name].bytes])) };
     if (target.role === "reference" && row.status !== "measurement-blocked") row.status = "reference-only";
     output.push(row);
     saveJSON(join(out, "assessment.json"), row);
+    report("assessment", row);
     saveJSON(join(directory, "rows.json"), output);
   }
   const targets = output.filter((row) => row.role === "target");
   const status = verdict(targets);
   const blockedReference = output.some((row) => row.role === "reference" && row.status === "measurement-blocked");
-  saveJSON(join(directory, "summary.json"), { status, blockedReference, rows: output,
-    promotion: "not established: this workflow does not manufacture or prove a same-contract floor" });
+  const summary = { status, blockedReference, rows: output,
+    promotion: "not established: this workflow does not manufacture or prove a same-contract floor" };
+  saveJSON(join(directory, "summary.json"), summary);
+  report("summary", { ...summary, rows: output.map(({ name, role, iterations, status,
+    blocked, candidateRatio, integrationRatio }) => ({ name, role, iterations, status,
+    blocked, candidateRatio, integrationRatio })) });
   const final = run("git", ["status", "--porcelain"], { env: goEnv(experiments.off),
     log: join(directory, "final-status") });
   if (final.stdout.trim()) throw new Error("benchmarking changed the source checkout");
@@ -114,5 +139,6 @@ try {
   }
 } catch (error) {
   saveJSON(join(directory, "failure.json"), { message: error.message });
+  report("failure", { message: error.message });
   throw error;
 }
