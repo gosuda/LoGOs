@@ -26,6 +26,13 @@
    "status": "triaged",
    "title": "Expanded cross-platform corpus pass — all anomalies benign",
    "detail": "Corpus grown to 34 active entries across GitHub, GitLab, Codeberg, Gitea.com, SourceHut (famous/clean/dirty/modernc/cgo tiers) plus synthetic adversarial Go module (linkname pulls, reentrant-lock/sync misuse, resource lifecycle, unsafe ptr, cgo flag violations, generic-local-type importers) and adversarial-lgo (edge subpackage). Full pass: every buildable entry lints rc=1 on both gglint and logos lint with real findings; adversarial-lgo gglint rc=3 is correct go vet semantics; gopacket 'fatal error:' = missing optional pfring.h; all 'panic:/goroutine' signals are finding-text substrings; all nondet flags are ordering-only (deterministic diagnostic set, documented). raylib needed system headers (wayland/xkbcommon/EGL) — env gap, not a tool bug; gitaly needed go:embed binary stubs — repo build prerequisite. No new tool defects found: the L-ICE-1 fix holds under 34-repo load including its advimporter adversarial sibling."
+  },
+  {
+   "id": "L-TRIAGE-3",
+   "severity": "info",
+   "status": "triaged",
+   "title": "Round-3 deep dogfood: lsp/context/eject verified; lint phase-gating documented",
+   "detail": "logos lsp (gopls proxy) verified end-to-end on .lgo: didSave publishes 'undefined: undefinedFunction' mapped to the .lgo URI. logos context resolves std/dep/.lgo/generic symbols correctly. logos eject lowers ?, errdefer, go group, and yield generators to stock Go that vets clean and runs correctly. Key lint semantics verified: deny-severity diagnostics are compiler-stage errors flushed before ExitIfErrors, which gates the type-dependent registry checks (unbounded_channel_op, defer_erases_errdefer_state) — a file/package with any compiler-stage deny gets only those findings until fixed and re-linted (phased reporting, matches irgen ExitIfErrors design). logos lint silently skips the toolchain's own cmd module because cmd/... packages classify Standard with nil Module (same boundary as std). gglint self-dogfood on src/cmd (2244 findings, 33 analyzers, zero crashes). New corpus coverage: adversarial-lgo/{denied,checks} split attacks by phase so all rule families get exercised."
   }
  ]
 }
