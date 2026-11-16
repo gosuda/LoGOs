@@ -16,7 +16,7 @@ func TestLogosReferenceFreeZeroArrays(t *testing.T) {
 		{"map", NewMap(Typ[String], Typ[Int])},
 		{"channel", NewChan(SendRecv, Typ[Int])},
 		{"function", NewSignatureType(nil, nil, nil, nil, nil, false)},
-		{"interface", NewInterfaceType(nil, nil).Complete()},
+		{"interface", NewInterfaceType(nil, nil)},
 		{"unsafe-pointer", Typ[UnsafePointer]},
 	}
 	lengths := []struct {
@@ -96,7 +96,7 @@ func TestLogosReferenceFreeZeroArrayTypeParams(t *testing.T) {
 			}
 			embeds = []Type{NewUnion(terms)}
 		}
-		constraint := NewInterfaceType(nil, embeds).Complete()
+		constraint := NewInterfaceType(nil, embeds)
 		return NewTypeParam(NewTypeName(nopos, nil, name, nil), constraint)
 	}
 	anyParam := typeParam("Any")

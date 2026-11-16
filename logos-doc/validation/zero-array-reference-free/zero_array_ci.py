@@ -16,6 +16,11 @@ PRODUCTION = "src/cmd/compile/internal/types2/const_logos.go"
 TYPES = "cmd/compile/internal/types2"
 LOGOS = "cmd/compile/internal/logos"
 MANIFEST_SHA256 = "b339088687a8d3f439680ac52dc91100c14ca097451762f6135a4fcdfdef11d6"
+TYPE_FIXTURE = "src/cmd/compile/internal/types2/referencefree_zero_array_logos_test.go"
+ORIGINAL_FIXTURE = (
+    f"{DIRECTORY}/api-compatibility/original-referencefree_zero_array_logos_test.go.txt"
+)
+REPLACEMENT_SHA256 = "211fa827cf08fc67309936b595a792723d4b0e348d6786a971563aec1080fdc7"
 ARRAYS = "TestLogosReferenceFreeZeroArrays"
 NESTING = "TestLogosReferenceFreeZeroArrayNesting"
 PARAMS = "TestLogosReferenceFreeZeroArrayTypeParams"
@@ -138,6 +143,8 @@ def frozen(repo: Path) -> tuple[str, ...]:
         expected, separator, relative = line.partition("  ")
         if not separator or len(expected) != 64 or relative in paths:
             raise ValueError("invalid frozen zero-array input")
+        if relative == TYPE_FIXTURE:
+            relative = ORIGINAL_FIXTURE
         if method_gate.digest(method_gate.rooted(repo, relative)) != expected:
             raise ValueError(f"frozen zero-array input changed: {relative}")
         paths.append(relative)
@@ -146,9 +153,45 @@ def frozen(repo: Path) -> tuple[str, ...]:
     return tuple(paths)
 
 
+def verify_fixture_api(original: bytes, active: bytes) -> None:
+    corrected = original
+    for call in (
+        b"NewInterfaceType(nil, nil).Complete()",
+        b"NewInterfaceType(nil, embeds).Complete()",
+    ):
+        if corrected.count(call) != 1:
+            raise ValueError("original fixture lacks exactly one known API call")
+        corrected = corrected.replace(call, call.removesuffix(b".Complete()"), 1)
+    if active != corrected:
+        raise ValueError("fixture differs from the exact two API suffix removals")
+
+
+def replacement(repo: Path) -> tuple[str, ...]:
+    manifest = f"{DIRECTORY}/REPLACEMENT.sha256"
+    path = method_gate.rooted(repo, manifest)
+    if method_gate.digest(path) != REPLACEMENT_SHA256:
+        raise ValueError("zero-array replacement manifest changed")
+    paths = [manifest]
+    for line in path.read_text(encoding="utf-8").splitlines():
+        expected, separator, relative = line.partition("  ")
+        if not separator or len(expected) != 64 or relative in paths:
+            raise ValueError("invalid zero-array replacement input")
+        if method_gate.digest(method_gate.rooted(repo, relative)) != expected:
+            raise ValueError(f"zero-array replacement input changed: {relative}")
+        paths.append(relative)
+    if len(paths) != 55:
+        raise ValueError("expected exactly 54 zero-array replacement inputs")
+    verify_fixture_api(
+        method_gate.rooted(repo, ORIGINAL_FIXTURE).read_bytes(),
+        method_gate.rooted(repo, TYPE_FIXTURE).read_bytes(),
+    )
+    return tuple(paths)
+
+
 def suite(repo: Path) -> native_gate.FrozenSuite:
+    frozen(repo)
     return native_gate.FrozenSuite(
-        inputs=frozen(repo),
+        inputs=replacement(repo),
         observed=(
             PRODUCTION,
             f"{DIRECTORY}/zero_array_ci.py",
