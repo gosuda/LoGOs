@@ -6,6 +6,40 @@ not a completed release certificate. The shared Go and loGo/s implementation,
 specification changes, frozen attacks, and remaining gates are published
 together.
 
+## Current source composition
+
+The final local source freeze for this acceptance round is
+`e96a570da271c43a80e23bb1a188aac054acff25`, with complete tree
+`0841c3d2a92b7d6091a5e248b82bd820326947a8` and `src` tree
+`e237c399aae8f8065b724e8a0e27585686c7da18`. It preserves concurrent PR head
+`8afec95580ed24e593307fd9d30d626eff31e22d` as an ordered merge parent and
+includes release `7d15ec7671582d0f022013bf36cf8f82a1b04cfc`. The earlier
+snapshots below remain historical evidence, with their original identities.
+
+This composition retains the shared linker discovery repair, the array-index
+lint rule and its frozen attacks, effective overlay source selection, and
+static element-type inference for quoted JSON dispatch. The follow-up removes
+the duplicate permissive string decoder in favor of the runtime's existing
+owned decoder. The append regression is placed in its required JSONv2 test
+file by a separate test-only correction; its assertions are unchanged.
+
+A fresh normal `make.bash` passed from a clean, separate worktree at that
+source freeze on 2026-11-16, from 18:23:09 to 18:44:39 UTC (1290.122 seconds).
+The source stayed clean and unchanged, and the separate acceptance cache
+remained empty. Both installed commands report Go 1.27.4 with their respective
+command names. [The new installed record](installed-acceptance-e96a570d/README.md)
+preserves the build and binary identities. Component evidence is linked from
+[acceptance follow-ups](acceptance-followups/README.md); completed build,
+installed behavioral acceptance and hosted gates are separate results.
+
+The current metadata records 301 identical task-ledger entries and 346 unique
+attack rows: 337 tested, two satisfied upstream, no planned rows and seven
+blocked rows. The four former planned rows #386, #389, #391 and #402 are
+promoted against the completed installed source-45 evidence below. Rows #336
+and #441 now have fresh installed combined-source proof in the new acceptance
+record. The seven blocked rows remain #216, #217, #218, #226 and #403 through
+#405. No binding attempt or frozen M6-S3b attack changes in this reconciliation.
+
 ## Compiler-source evidence snapshot
 
 These identities record the earlier integrated compiler source and its

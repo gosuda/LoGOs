@@ -76,14 +76,55 @@ documentation reconciliation; no M5 source or assertion changes.
 
 ## Integration boundary
 
+### Concurrent source repairs
+
+The combined source preserves the concurrent capability-discovery, array-index
+lint, overlay ejection and static quoted-JSON type-inference changes. The
+ordinary merge retains the incoming PR head as its second parent. Historical
+reports keep their original row numbers; the active ledger uses the current
+canonical numbers.
+
+[Linker capability evidence](linker-capabilities/README.md) records all 25
+selected top-level tests and 75 reported cells passing without skips, plus
+normal vet. Its overlay contains the exact incoming source and frozen test.
+The graph checks exercise discovery independent of ancestry, shuffled edge
+insertion and the existing shortest-path oracle. The original five-second
+child limit remains unchanged. Later [installed acceptance](../installed-acceptance-e96a570d/tooling-runtime/README.md)
+passes the graph suite, vet and five capability scripts with the final linker;
+both native cgo branches execute.
+
+[Overlay ejection evidence](ejection-overlay/README.md) preserves the baseline
+unit failure and real-driver script failure. The candidate race test passes;
+replacing effective overlay reads with ordinary disk reads is caught; a fresh
+restored race binary and normal vet pass. Installed script execution was pending
+at the component handoff. The later final-tool race script now passes without
+skips and closes row #441, as the installed record documents.
+
+[Quoted JSON evidence](json-text/README.md) records the corrected Unicode RED,
+both complete runtime profile race suites, vet, the caught pointer-only
+mutation and restored GREEN. The original classic-profile setup failure is
+retained separately in [test placement](json-test-placement/README.md). The
+final composition preserves the incoming static type inference and reuses
+the tested owned decoder. Its fresh installed acceptance is separate from
+the source-45 overlay component result.
+
+The array-index rule retains its incoming source and 96 frozen unit cases.
+[Combined installed acceptance](../installed-acceptance-e96a570d/array-index/README.md)
+passes the full lint package, native fixtures, fixture census, guarded-enum race
+script, vet and formatting. The reporting-condition mutation is caught in both
+source languages, and the unchanged restored cells pass.
+
+### Remaining acceptance
+
 The initial timing-wrapper failure, misselected testdir invocation, missing
 ignored timezone data in the temporary GOROOT view and disconnected executor
 are preserved as setup or infrastructure observations. None counts as a
 semantic RED or a passing gate. The unchanged intended checks ran after the
 environment and selectors were corrected.
 
-The published combined source still requires its fresh build, normal vet,
-complete script and compiler-fixture suites, and full Go regression. The first
+The combined source passed its fresh build and the scoped installed gates
+recorded above. Complete script and compiler-fixture suites and the full Go
+regression remain separate acceptance requirements. The first
 broad script selection was canceled and its full-Go step never started. The
 scoped passes above do not replace those gates. M6-S3b's frozen attacks and
 three-attempt stop remain unchanged.
