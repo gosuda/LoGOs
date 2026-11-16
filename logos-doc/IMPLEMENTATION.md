@@ -586,6 +586,14 @@ Anchor: Tony Hoare, Edsger W. Dijkstra
 - Red-team rows: none (runs the existing regression corpus).
 - Docs: SPEC 0.1 and 18.1 name the current Go 1.27.4 compiler base; SPEC 0.3 retains the Go 1.27.2 eject floor.
 
+### M0-A-S16 Respect the CI action ownership policy
+Anchor: Tony Hoare, Edsger W. Dijkstra
+- RED: hosted job 133360690933 failed before checkout because the repository allows actions only from repositories owned by `gosuda`; the external checkout and Go/Node setup actions were rejected. This is a bootstrap failure, not a compiler failure.
+- Build: the seven workflows use built-in shell steps to fetch and verify the exact `GITHUB_SHA`. `.github/scripts/install-ci-tool.sh` installs Go 1.27.4 and Node 26.13.1 from their official archives, verifies pinned SHA-256 hashes before extraction, and checks the installed version. Both native runner architectures retain their existing gates. Validation output and evidence hashes remain in job logs without an external artifact action.
+- Gate: parse all workflow YAML, check every shell block with `bash -n`, verify the tool pins against the official release metadata, and reject unsupported installer inputs before any download. The hosted fresh-build and full regression gates remain required; structural checks do not establish a compiler pass.
+- Red-team rows: none (CI bootstrap and the existing regression corpus).
+- Evidence: `logos-doc/validation/ci-bootstrap.md`.
+
 ## M1. `?`, `defer f()?`, `errdefer`, error traces, eject
 
 Anchor: Tony Hoare, Christopher Alexander, Edsger W. Dijkstra
@@ -4422,4 +4430,5 @@ Written to `tasks/autoplan-ledger.jsonl` by P0-S6. IDs: phase prefix plus a sequ
 {"id": "AUD-193", "description": "M11-A-S8 Preserve C type arguments in quoted JSON dispatch", "phase": "AUD"}
 {"id": "AUD-194", "description": "M16-A-S6 Isolate the wasm test execution environment", "phase": "AUD"}
 {"id": "AUD-197", "description": "M24-A-S2 Keep ejection target facts consistent", "phase": "AUD"}
+{"id": "AUD-198", "description": "M0-A-S16 Respect the CI action ownership policy", "phase": "AUD"}
 ```

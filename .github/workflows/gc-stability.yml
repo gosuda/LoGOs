@@ -3,6 +3,7 @@ name: "gc-stability"
 "on":
   pull_request:
     paths:
+      - ".github/scripts/install-ci-tool.sh"
       - ".github/workflows/gc-stability.yml"
       - "src/runtime/**"
       - "src/internal/abi/**"
@@ -38,13 +39,16 @@ jobs:
         shell: "bash"
         working-directory: "src"
     steps:
-      - uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e" # v7.0.0
-        with:
-          go-version: "1.27.4"
-          cache: false
+      - name: "Check out the tested revision"
+        working-directory: "${{ github.workspace }}"
+        run: |
+          git init --quiet .
+          git remote add origin "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git"
+          git -c protocol.version=2 fetch --no-tags --depth=1 origin "$GITHUB_SHA"
+          git -c advice.detachedHead=false checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+      - name: "Install the pinned Go bootstrap"
+        run: bash ../.github/scripts/install-ci-tool.sh go
       - name: "Build the default toolchain"
         run: |
           export GOROOT_BOOTSTRAP="$(go env GOROOT)"
@@ -125,12 +129,13 @@ jobs:
             /panic:|fatal error:|build failed|test timed out/ { unrelated = 1 }
             END { exit !(named && diagnostic && !unrelated) }
           ' "$probe/mutation.log"
-      - name: "Retain ownership probe evidence"
+      - name: "Record ownership probe evidence"
         if: always() && matrix.experiment == 'logosarena'
-        uses: "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02" # v4.6.2
-        with:
-          name: "gc-close-${{ matrix.runner }}-${{ github.run_id }}-${{ github.run_attempt }}"
-          path: ".outline/verify/gc-close-*"
-          include-hidden-files: true
-          if-no-files-found: warn
-          retention-days: 14
+        run: |
+          probe="$GITHUB_WORKSPACE/.outline/verify/gc-close-$RUNNER_ARCH"
+          if test -d "$probe"; then
+            for file in "$probe"/*; do
+              test -f "$file" || continue
+              sha256sum "$file"
+            done
+          fi

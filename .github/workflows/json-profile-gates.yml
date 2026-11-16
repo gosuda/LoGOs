@@ -3,6 +3,7 @@ name: "JSON profile compatibility"
 "on":
   pull_request:
     paths:
+      - ".github/scripts/install-ci-tool.sh"
       - ".github/scripts/install-upstream-oracles.sh"
       - ".github/workflows/json-profile-gates.yml"
       - "src/cmd/compile/internal/logos/**"
@@ -32,13 +33,16 @@ jobs:
         shell: "bash"
         working-directory: "src"
     steps:
-      - uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e" # v7.0.0
-        with:
-          go-version: "1.27.4"
-          cache: false
+      - name: "Check out the tested revision"
+        working-directory: "${{ github.workspace }}"
+        run: |
+          git init --quiet .
+          git remote add origin "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git"
+          git -c protocol.version=2 fetch --no-tags --depth=1 origin "$GITHUB_SHA"
+          git -c advice.detachedHead=false checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+      - name: "Install the pinned Go bootstrap"
+        run: bash ../.github/scripts/install-ci-tool.sh go
       - name: "Install upstream ejection toolchains"
         run: bash ../.github/scripts/install-upstream-oracles.sh
       - name: "Build the toolchain"

@@ -99,8 +99,10 @@ complete regression results. The table below is the local publication snapshot.
 The workflow `.github/workflows/compiler-stability.yml` builds the exact checked
 out source and runs affected compiler packages, ejection race tests, all seven
 new command scripts, the new compiler fixtures, formatting, vet, and the ledger
-checker. Its commands preserve failure status through `pipefail`, and its logs
-are retained as artifacts. In the combined stabilization candidate, the normal
+checker. Its commands preserve failure status through `pipefail`; validation
+output, source identity, and evidence hashes are retained in the job logs. The
+bootstrap uses repository-owned shell steps under the action ownership policy
+recorded in [ci-bootstrap.md](../ci-bootstrap.md). In the combined stabilization candidate, the normal
 `logos.yml` workflow owns the complete `./run.bash --no-rebuild` job. That job
 selects and verifies GCC 14 on Ubuntu 24.04 for the existing C23 consumer, checks
 the ledger and consumer prerequisites, and uses the supported timeout scale 8.

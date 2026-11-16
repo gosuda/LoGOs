@@ -68,17 +68,19 @@ jobs:
         shell: "bash"
         working-directory: "src"
     steps:
-      - uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e" # v7.0.0
-        with:
-          go-version: "1.27.4"
-          cache: false
-      - uses: "actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1" # v7.1.0
+      - name: "Check out the tested revision"
+        working-directory: "${{ github.workspace }}"
+        run: |
+          git init --quiet .
+          git remote add origin "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git"
+          git -c protocol.version=2 fetch --no-tags --depth=1 origin "$GITHUB_SHA"
+          git -c advice.detachedHead=false checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+      - name: "Install the pinned Go bootstrap"
+        run: bash ../.github/scripts/install-ci-tool.sh go
+      - name: "Install the pinned Node runtime"
         if: "matrix.suite == 'scripts' || matrix.suite == 'go-regression'"
-        with:
-          node-version: "26.13.1"
+        run: bash ../.github/scripts/install-ci-tool.sh node
       - name: "Install the upstream oracle toolchains"
         if: "matrix.suite == 'scripts' || matrix.suite == 'go-regression'"
         run: bash ../.github/scripts/install-upstream-oracles.sh
