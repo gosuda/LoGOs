@@ -45,7 +45,7 @@ func unquoteStringContent(item string) (string, bool) {
 	return unquoteLiteral(item)
 }
 
-func fallbackQuoted(s *Scanner, dst any) {
+func QuotedJSON[T stdjson.Unmarshaler](s *Scanner, dst T) {
 	item, st := s.readQuoted()
 	switch st {
 	case quotedBare:
@@ -55,58 +55,126 @@ func fallbackQuoted(s *Scanner, dst any) {
 			s.save(tagMismatch(item, reflect.TypeOf(dst).Elem()))
 			return
 		}
-		s.dispatchQuotedContent(dst, item)
+		s.fatalMethodError(dst.UnmarshalJSON([]byte(item)))
 	default:
 		if s.kind == 'n' {
-			s.dispatchBareNull(dst)
+			s.fatalMethodError(dst.UnmarshalJSON(s.data[s.start:s.end]))
+		}
+	}
+}
+
+func QuotedJSONPtr[E any, T interface {
+	*E
+	stdjson.Unmarshaler
+}](s *Scanner, dst *T) {
+	item, st := s.readQuoted()
+	elem := reflect.TypeOf(dst).Elem()
+	switch st {
+	case quotedBare:
+		s.save(tagUnquoted(elem))
+	case quotedContent:
+		if item == "" {
+			s.save(tagMismatch(item, elem))
 			return
 		}
-		if s.err == nil {
-			s.decodeRaw(s.data[s.start:s.end], dst)
+		if item[0] == 'n' {
+			if item == "null" {
+				*dst = nil
+				return
+			}
+			s.save(tagMismatch(item, elem))
+			return
+		}
+		if *dst == nil {
+			*dst = new(E)
+		}
+		s.fatalMethodError((*dst).UnmarshalJSON([]byte(item)))
+	default:
+		if s.kind == 'n' {
+			*dst = nil
 		}
 	}
 }
 
-func (s *Scanner) dispatchBareNull(dst any) {
-	u, _, pv := quotedIndirect(reflect.ValueOf(dst), true)
-	if u != nil {
-		s.fatalMethodError(u.UnmarshalJSON(s.data[s.start:s.end]))
-		return
-	}
-	switch pv.Kind() {
-	case reflect.Interface, reflect.Pointer, reflect.Map, reflect.Slice:
-		pv.SetZero()
+func QuotedText[T encoding.TextUnmarshaler](s *Scanner, dst T) {
+	item, st := s.readQuoted()
+	switch st {
+	case quotedBare:
+		s.save(tagUnquoted(reflect.TypeOf(dst).Elem()))
+	case quotedContent:
+		if item == "" {
+			s.save(tagMismatch(item, reflect.TypeOf(dst).Elem()))
+			return
+		}
+		if item[0] == 'n' {
+			if item == "null" {
+				return
+			}
+			s.save(tagMismatch(item, reflect.TypeOf(dst).Elem()))
+			return
+		}
+		if item[0] != '"' {
+			s.save(tagMismatch(item, reflect.TypeOf(dst).Elem()))
+			return
+		}
+		unq, ok := unquoteLiteralBytes(item)
+		if !ok {
+			s.fatal(tagMismatch(item, reflect.TypeOf(dst).Elem()))
+			return
+		}
+		s.fatalMethodError(dst.UnmarshalText(unq))
+	default:
 	}
 }
 
-func (s *Scanner) dispatchQuotedContent(dst any, item string) {
-	u, ut, _ := quotedIndirect(reflect.ValueOf(dst), item[0] == 'n')
-	if u != nil {
-		s.fatalMethodError(u.UnmarshalJSON([]byte(item)))
-		return
+func QuotedTextPtr[E any, T interface {
+	*E
+	encoding.TextUnmarshaler
+}](s *Scanner, dst *T) {
+	item, st := s.readQuoted()
+	elem := reflect.TypeOf(dst).Elem()
+	switch st {
+	case quotedBare:
+		s.save(tagUnquoted(elem))
+	case quotedContent:
+		if item == "" {
+			s.save(tagMismatch(item, elem))
+			return
+		}
+		if item[0] == 'n' {
+			if item == "null" {
+				*dst = nil
+				return
+			}
+			s.save(tagMismatch(item, elem))
+			return
+		}
+		if *dst == nil {
+			*dst = new(E)
+		}
+		if item[0] != '"' {
+			s.save(tagMismatch(item, elem))
+			return
+		}
+		unq, ok := unquoteLiteralBytes(item)
+		if !ok {
+			s.fatal(tagMismatch(item, elem))
+			return
+		}
+		s.fatalMethodError((*dst).UnmarshalText(unq))
+	default:
+		if s.kind == 'n' {
+			*dst = nil
+		}
 	}
-	if ut != nil {
-		s.dispatchQuotedText(ut, item, reflect.TypeOf(dst).Elem())
-		return
-	}
-	if item[0] == 'n' && item != "null" {
-		s.save(tagMismatch(item, reflect.TypeOf(dst).Elem()))
-		return
-	}
-	s.decodeRaw([]byte(item), dst)
 }
 
-func (s *Scanner) dispatchQuotedText(ut encoding.TextUnmarshaler, item string, typ reflect.Type) {
-	if item == "" || item[0] != '"' {
-		s.save(tagMismatch(item, typ))
-		return
-	}
-	unq, ok := unquoteStringContent(item)
-	if !ok {
-		s.fatal(tagMismatch(item, typ))
-		return
-	}
-	s.fatalMethodError(ut.UnmarshalText([]byte(unq)))
+func QuotedFrom[T any, PT interface{ *T }](s *Scanner, dst PT) bool {
+	return false
+}
+
+func QuotedFromPtr[E any, T interface{ *E }](s *Scanner, dst *T) bool {
+	return false
 }
 
 func (s *Scanner) fatalMethodError(err error) {

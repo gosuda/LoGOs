@@ -8,6 +8,7 @@ package json
 
 import (
 	"bytes"
+	"encoding"
 	stdjson "encoding/json"
 	"encoding/json/jsontext"
 	"errors"
@@ -102,49 +103,143 @@ func unquoteStringContent(item string) (string, bool) {
 
 var quotedNullLiteral = []byte(`"null"`)
 
-func fallbackQuoted(s *Scanner, dst any) {
+func QuotedJSON[T stdjson.Unmarshaler](s *Scanner, dst T) {
 	if s.scalar() == 0 {
 		return
 	}
 	tok := s.data[s.start:s.end]
-	if s.decodeQuotedRaw(tok, dst, s.kind == 'n') && bytes.Equal(tok, quotedNullLiteral) {
-		if rv := reflect.ValueOf(dst); rv.Kind() == reflect.Pointer && !rv.IsNil() && rv.Elem().Kind() == reflect.Pointer {
-			rv.Elem().SetZero()
-		}
+	s.saveMethodError(dst.UnmarshalJSON(tok))
+}
+
+func QuotedJSONPtr[E any, T interface {
+	*E
+	stdjson.Unmarshaler
+}](s *Scanner, dst *T) {
+	if s.scalar() == 0 {
+		return
+	}
+	tok := s.data[s.start:s.end]
+	if s.kind == 'n' {
+		*dst = nil
+		return
+	}
+	if *dst == nil {
+		*dst = new(E)
+	}
+	err := (*dst).UnmarshalJSON(tok)
+	s.saveMethodError(err)
+	if err == nil && bytes.Equal(tok, quotedNullLiteral) {
+		*dst = nil
 	}
 }
 
-func (s *Scanner) decodeQuotedRaw(tok []byte, dst any, decodingNull bool) bool {
-	u, ut, pv := quotedIndirect(reflect.ValueOf(dst), decodingNull)
-	if u != nil {
-		err := u.UnmarshalJSON(tok)
-		s.saveMethodError(err)
-		return err == nil
-	} else if ut != nil {
-		if len(tok) > 0 && tok[0] == '"' {
-			if unq, err := jsontext.AppendUnquote(nil, tok); err == nil {
-				err = ut.UnmarshalText(unq)
-				s.saveMethodError(err)
-				return err == nil
-			}
-		}
-		return s.decodeRaw(tok, dst)
+func QuotedText[T encoding.TextUnmarshaler](s *Scanner, dst T) {
+	if s.scalar() == 0 {
+		return
 	}
-	if decodingNull {
-		switch pv.Kind() {
-		case reflect.Interface, reflect.Pointer, reflect.Map, reflect.Slice:
-			pv.SetZero()
+	tok := s.data[s.start:s.end]
+	if s.kind == 'n' {
+		return
+	}
+	if len(tok) > 0 && tok[0] == '"' {
+		if unq, err := jsontext.AppendUnquote(nil, tok); err == nil {
+			s.saveMethodError(dst.UnmarshalText(unq))
+			return
 		}
+	}
+	s.decodeRaw(tok, dst)
+}
+
+func QuotedTextPtr[E any, T interface {
+	*E
+	encoding.TextUnmarshaler
+}](s *Scanner, dst *T) {
+	if s.scalar() == 0 {
+		return
+	}
+	tok := s.data[s.start:s.end]
+	if s.kind == 'n' {
+		*dst = nil
+		return
+	}
+	if len(tok) > 0 && tok[0] == '"' {
+		if *dst == nil {
+			*dst = new(E)
+		}
+		if unq, err := jsontext.AppendUnquote(nil, tok); err == nil {
+			err = (*dst).UnmarshalText(unq)
+			s.saveMethodError(err)
+			if err == nil && bytes.Equal(tok, quotedNullLiteral) {
+				*dst = nil
+			}
+			return
+		}
+	}
+	s.decodeRaw(tok, dst)
+}
+
+func QuotedFrom[T any, PT interface {
+	*T
+	UnmarshalJSONFrom(*jsontext.Decoder) error
+}](s *Scanner, dst PT) bool {
+	if s.scalar() == 0 {
 		return true
 	}
-	return s.decodeRaw(tok, dst)
+	tok := s.data[s.start:s.end]
+	dec := jsontext.NewDecoder(bytes.NewReader(tok), stdjson.DefaultOptionsV1())
+	err := dst.UnmarshalJSONFrom(dec)
+	if errors.Is(err, errors.ErrUnsupported) {
+		if dec.InputOffset() != 0 {
+			s.save(errors.New("unsupported calls must not read or write any tokens"))
+			return true
+		}
+		s.pos = s.start
+		return false
+	}
+	if err == nil && dec.InputOffset() != int64(len(tok)) {
+		s.save(errors.New("must read or write exactly one value"))
+		return true
+	}
+	s.saveMethodError(err)
+	return true
 }
 
-// saveMethodError records a `,string` method failure under the JSONv2
-// profile. A *UnmarshalTypeError from the method is saved verbatim: the
-// first one wins, decoding continues, and neither Offset nor struct/field
-// context is added (ReportErrorsWithLegacySemantics returns method errors
-// unwrapped). Any other non-nil error is fatal; nil is a no-op.
+func QuotedFromPtr[E any, T interface {
+	*E
+	UnmarshalJSONFrom(*jsontext.Decoder) error
+}](s *Scanner, dst *T) bool {
+	if s.scalar() == 0 {
+		return true
+	}
+	tok := s.data[s.start:s.end]
+	if s.kind == 'n' {
+		*dst = nil
+		return true
+	}
+	if *dst == nil {
+		*dst = new(E)
+	}
+	dec := jsontext.NewDecoder(bytes.NewReader(tok), stdjson.DefaultOptionsV1())
+	err := (*dst).UnmarshalJSONFrom(dec)
+	if errors.Is(err, errors.ErrUnsupported) {
+		if dec.InputOffset() != 0 {
+			s.save(errors.New("unsupported calls must not read or write any tokens"))
+			return true
+		}
+		s.pos = s.start
+		return false
+	}
+	if err == nil && dec.InputOffset() != int64(len(tok)) {
+		s.save(errors.New("must read or write exactly one value"))
+		return true
+	}
+	s.saveMethodError(err)
+	if err == nil && bytes.Equal(tok, quotedNullLiteral) {
+		*dst = nil
+	}
+	return true
+}
+
 func (s *Scanner) saveMethodError(err error) {
 	if ute, ok := err.(*stdjson.UnmarshalTypeError); ok {
 		if s.saved == nil {

@@ -678,7 +678,7 @@ type quotedTextPtrTarget struct {
 	V *quotedTextProbe `json:"v,string"`
 }
 
-func decodeFallbackQuoted(t *testing.T, data string, typ any, dst any) *Scanner {
+func decodeQuotedJSON(t *testing.T, data string, typ any, dst *quotedJSONProbe) *Scanner {
 	t.Helper()
 	s := NewScanner([]byte(data), typ)
 	if !s.Object() {
@@ -687,7 +687,59 @@ func decodeFallbackQuoted(t *testing.T, data string, typ any, dst any) *Scanner 
 	if !s.Next() {
 		t.Fatalf("Next failed: %v", s.End())
 	}
-	s.FallbackQuoted(dst)
+	QuotedJSON(&s, dst)
+	return &s
+}
+
+func decodeQuotedJSONPtr(t *testing.T, data string, typ any, dst **quotedJSONProbe) *Scanner {
+	t.Helper()
+	s := NewScanner([]byte(data), typ)
+	if !s.Object() {
+		t.Fatalf("Object failed: %v", s.Err())
+	}
+	if !s.Next() {
+		t.Fatalf("Next failed: %v", s.End())
+	}
+	QuotedJSONPtr[quotedJSONProbe](&s, dst)
+	return &s
+}
+
+func decodeQuotedText(t *testing.T, data string, typ any, dst *quotedTextProbe) *Scanner {
+	t.Helper()
+	s := NewScanner([]byte(data), typ)
+	if !s.Object() {
+		t.Fatalf("Object failed: %v", s.Err())
+	}
+	if !s.Next() {
+		t.Fatalf("Next failed: %v", s.End())
+	}
+	QuotedText(&s, dst)
+	return &s
+}
+
+func decodeQuotedTextPtr(t *testing.T, data string, typ any, dst **quotedTextProbe) *Scanner {
+	t.Helper()
+	s := NewScanner([]byte(data), typ)
+	if !s.Object() {
+		t.Fatalf("Object failed: %v", s.Err())
+	}
+	if !s.Next() {
+		t.Fatalf("Next failed: %v", s.End())
+	}
+	QuotedTextPtr[quotedTextProbe](&s, dst)
+	return &s
+}
+
+func decodeQuotedNullFailPtr(t *testing.T, data string, typ any, dst **quotedNullFailProbe) *Scanner {
+	t.Helper()
+	s := NewScanner([]byte(data), typ)
+	if !s.Object() {
+		t.Fatalf("Object failed: %v", s.Err())
+	}
+	if !s.Next() {
+		t.Fatalf("Next failed: %v", s.End())
+	}
+	QuotedJSONPtr[quotedNullFailProbe](&s, dst)
 	return &s
 }
 
@@ -711,7 +763,7 @@ func TestFallbackQuotedMatchesEncodingJSON(t *testing.T) {
 	for _, in := range inputs {
 		data := `{"v":` + in + `}`
 		var got quotedJSONTarget
-		s := decodeFallbackQuoted(t, data, (*quotedJSONTarget)(nil), &got.V)
+		s := decodeQuotedJSON(t, data, (*quotedJSONTarget)(nil), &got.V)
 		var want quotedJSONTarget
 		wantErr := stdjson.Unmarshal([]byte(data), &want)
 		if !sameError(s.End(), wantErr) {
@@ -742,7 +794,7 @@ func TestFallbackQuotedTextMatchesEncodingJSON(t *testing.T) {
 	for _, in := range inputs {
 		data := `{"v":` + in + `}`
 		var got quotedTextTarget
-		s := decodeFallbackQuoted(t, data, (*quotedTextTarget)(nil), &got.V)
+		s := decodeQuotedText(t, data, (*quotedTextTarget)(nil), &got.V)
 		var want quotedTextTarget
 		wantErr := stdjson.Unmarshal([]byte(data), &want)
 		if !sameError(s.End(), wantErr) {
@@ -766,7 +818,7 @@ func TestFallbackQuotedPointerMatchesEncodingJSON(t *testing.T) {
 	for _, in := range inputs {
 		data := `{"v":` + in + `}`
 		var got quotedJSONPtrTarget
-		s := decodeFallbackQuoted(t, data, (*quotedJSONPtrTarget)(nil), &got.V)
+		s := decodeQuotedJSONPtr(t, data, (*quotedJSONPtrTarget)(nil), &got.V)
 		var want quotedJSONPtrTarget
 		wantErr := stdjson.Unmarshal([]byte(data), &want)
 		if !sameError(s.End(), wantErr) {
@@ -784,7 +836,7 @@ func TestFallbackQuotedTextPointerMatchesEncodingJSON(t *testing.T) {
 	for _, in := range inputs {
 		data := `{"v":` + in + `}`
 		var got quotedTextPtrTarget
-		s := decodeFallbackQuoted(t, data, (*quotedTextPtrTarget)(nil), &got.V)
+		s := decodeQuotedTextPtr(t, data, (*quotedTextPtrTarget)(nil), &got.V)
 		var want quotedTextPtrTarget
 		wantErr := stdjson.Unmarshal([]byte(data), &want)
 		if !sameError(s.End(), wantErr) {
@@ -824,7 +876,7 @@ func TestFallbackQuotedNullMethodFailureKeepsPointer(t *testing.T) {
 		if prealloc {
 			got.V = new(quotedNullFailProbe)
 		}
-		s := decodeFallbackQuoted(t, data, (*quotedNullFailPtrTarget)(nil), &got.V)
+		s := decodeQuotedNullFailPtr(t, data, (*quotedNullFailPtrTarget)(nil), &got.V)
 		var want quotedNullFailPtrTarget
 		if prealloc {
 			want.V = new(quotedNullFailProbe)
@@ -889,7 +941,18 @@ func checkQuotedMethodError[T any](t *testing.T, in string) {
 	for s.Next() {
 		switch s.Key() {
 		case "v":
-			s.FallbackQuoted(&got.V)
+			switch dst := any(&got.V).(type) {
+			case *quotedNullFailProbe:
+				QuotedJSON(&s, dst)
+			case **quotedNullFailProbe:
+				QuotedJSONPtr[quotedNullFailProbe](&s, dst)
+			case *quotedNullFailTextProbe:
+				QuotedText(&s, dst)
+			case **quotedNullFailTextProbe:
+				QuotedTextPtr[quotedNullFailTextProbe](&s, dst)
+			default:
+				t.Fatalf("%s: unsupported method-error target %T", data, dst)
+			}
 		case "after":
 			Int(&s, &got.After)
 		}

@@ -5,7 +5,6 @@
 package json
 
 import (
-	"encoding"
 	stdjson "encoding/json"
 	"errors"
 	"reflect"
@@ -394,9 +393,10 @@ func (s *Scanner) Fallback(dst any) {
 // encoding/json, matching encoding/json's destring branch for Number. A bare
 // non-string value saves the invalid use of ,string error; null decodes as
 // null (pointer nil, value unchanged) via the same path as Fallback. A field
-// whose type declares its own UnmarshalJSON or UnmarshalText method must use
-// FallbackQuoted instead, which unwraps the token only under the classic
-// profile.
+// whose type declares its own UnmarshalJSON, UnmarshalText or
+// UnmarshalJSONFrom method uses the compiler-selected typed QuotedJSON,
+// QuotedText or QuotedFrom helpers instead, which keep the profile-specific
+// token and error policy without runtime method discovery.
 func FallbackQ[T any](s *Scanner, dst *T) {
 	item, st := s.readQuoted()
 	switch st {
@@ -409,15 +409,6 @@ func FallbackQ[T any](s *Scanner, dst *T) {
 			s.decodeRaw(s.data[s.start:s.end], dst)
 		}
 	}
-}
-
-// FallbackQuoted decodes a `,string` field whose type implements
-// json.Unmarshaler or encoding.TextUnmarshaler. Under
-// !goexperiment.jsonv2 the string is unwrapped before dispatch, as in
-// encoding/json; otherwise the raw token is decoded exactly like Fallback,
-// keeping the legacy rule that a quoted `"null"` nulls a pointer field.
-func (s *Scanner) FallbackQuoted(dst any) {
-	fallbackQuoted(s, dst)
 }
 
 func (s *Scanner) decodeRaw(raw []byte, dst any) bool {
@@ -447,66 +438,6 @@ func (s *Scanner) saveFallback(ute *stdjson.UnmarshalTypeError) {
 		ute.Field = s.key + "." + ute.Field
 	}
 	s.saved = ute
-}
-
-// quotedIndirect mirrors encoding/json indirect (decode.go) for `,string`
-// method dispatch: it walks down dst allocating pointers as needed until it
-// reaches a non-pointer. If it encounters a json.Unmarshaler it stops and
-// returns it; with decodingNull it stops at the first settable pointer so
-// null can nil it without invoking methods, and TextUnmarshaler is only
-// considered when not decoding null.
-func quotedIndirect(v reflect.Value, decodingNull bool) (stdjson.Unmarshaler, encoding.TextUnmarshaler, reflect.Value) {
-	v0 := v
-	haveAddr := false
-
-	if v.Kind() != reflect.Pointer && v.Type().Name() != "" && v.CanAddr() {
-		haveAddr = true
-		v = v.Addr()
-	}
-	for {
-		if v.Kind() == reflect.Interface && !v.IsNil() {
-			e := v.Elem()
-			if e.Kind() == reflect.Pointer && !e.IsNil() && (!decodingNull || e.Elem().Kind() == reflect.Pointer) {
-				haveAddr = false
-				v = e
-				continue
-			}
-		}
-
-		if v.Kind() != reflect.Pointer {
-			break
-		}
-
-		if decodingNull && v.CanSet() {
-			break
-		}
-
-		if v.Elem().Kind() == reflect.Interface && v.Elem().Elem().Equal(v) {
-			v = v.Elem()
-			break
-		}
-		if v.IsNil() {
-			v.Set(reflect.New(v.Type().Elem()))
-		}
-		if v.Type().NumMethod() > 0 && v.CanInterface() {
-			if u, ok := v.Interface().(stdjson.Unmarshaler); ok {
-				return u, nil, reflect.Value{}
-			}
-			if !decodingNull {
-				if u, ok := v.Interface().(encoding.TextUnmarshaler); ok {
-					return nil, u, reflect.Value{}
-				}
-			}
-		}
-
-		if haveAddr {
-			v = v0
-			haveAddr = false
-		} else {
-			v = v.Elem()
-		}
-	}
-	return nil, nil, v
 }
 
 // Err returns the fatal error: the syntax error, a *SyntaxError identical
