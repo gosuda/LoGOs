@@ -70,12 +70,23 @@ func TestCgoOptSpanPointerRules(t *testing.T) {
 }
 
 // cgoSpanToolFlags keeps child builds on the experiment and instrumentation
-// of this test binary. An explicit test -c build also keeps objdump symbols.
+// of this test binary, with fast calls off so the cgoopt span path runs.
 func cgoSpanToolFlags(t *testing.T) []string {
+	return cgoTestToolFlags(t, false)
+}
+
+// cgoTestToolFlags keeps child builds on the experiment and instrumentation
+// of this test binary. An explicit test -c build also keeps objdump symbols.
+func cgoTestToolFlags(t *testing.T, fastcgo bool) []string {
 	t.Helper()
-	experiment := "nologoscgoopt,nologosfastcgo"
+	experiment := "nologoscgoopt"
 	if goexperiment.LogosCgoOpt {
-		experiment = "logoscgoopt,nologosfastcgo"
+		experiment = "logoscgoopt"
+	}
+	if fastcgo {
+		experiment += ",logosfastcgo"
+	} else {
+		experiment += ",nologosfastcgo"
 	}
 	if goexperiment.CgoCheck2 {
 		experiment += ",cgocheck2"
