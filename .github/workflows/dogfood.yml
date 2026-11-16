@@ -66,8 +66,8 @@ jobs:
         id: contracts
         run: |
           uv --version | tee "$EVIDENCE/uv-version.txt"
-          uv run --no-project --with-requirements misc/logos-dogfood/test-requirements.txt python -m pytest -q misc/logos-dogfood/test_run.py misc/logos-dogfood/test_prepare.py misc/logos-dogfood/test_accept_corpus.py misc/logos-dogfood/test_replay_backends.py misc/logos-dogfood/test_replay_backend_events.py 2>&1 | tee "$EVIDENCE/contracts.txt"
-          checked=(misc/logos-dogfood/prepare.py misc/logos-dogfood/test_prepare.py misc/logos-dogfood/accept_corpus.py misc/logos-dogfood/test_accept_corpus.py misc/logos-dogfood/replay_backends.py misc/logos-dogfood/test_replay_backends.py misc/logos-dogfood/test_replay_backend_events.py)
+          uv run --no-project --with-requirements misc/logos-dogfood/test-requirements.txt python -m pytest -q misc/logos-dogfood/test_run.py misc/logos-dogfood/test_prepare.py misc/logos-dogfood/test_accept_corpus.py misc/logos-dogfood/test_replay_backends.py misc/logos-dogfood/test_replay_backend_events.py misc/logos-dogfood/test_probe_tools.py 2>&1 | tee "$EVIDENCE/contracts.txt"
+          checked=(misc/logos-dogfood/prepare.py misc/logos-dogfood/test_prepare.py misc/logos-dogfood/accept_corpus.py misc/logos-dogfood/test_accept_corpus.py misc/logos-dogfood/replay_backends.py misc/logos-dogfood/test_replay_backends.py misc/logos-dogfood/test_replay_backend_events.py misc/logos-dogfood/probe_tools.py misc/logos-dogfood/test_probe_tools.py)
           uv run --no-project --with-requirements misc/logos-dogfood/test-requirements.txt pyright "${checked[@]}" 2>&1 | tee "$EVIDENCE/helper-types.txt"
           uv run --no-project --with-requirements misc/logos-dogfood/test-requirements.txt ruff check "${checked[@]}" 2>&1 | tee "$EVIDENCE/helper-lint.txt"
           uv run --no-project --with-requirements misc/logos-dogfood/test-requirements.txt ruff format --check "${checked[@]}" 2>&1 | tee "$EVIDENCE/helper-format.txt"
@@ -133,6 +133,17 @@ jobs:
           # This diagnostic capture does not accept the corpus. The complete
           # replay and its unchanged acceptance checker below remain required.
 
+      - name: Capture unlimited strict tools diagnostics
+        id: tools_unlimited
+        if: ${{ !cancelled() && steps.tools_probe.outcome == 'success' }}
+        run: |
+          uv run --no-project python misc/logos-dogfood/probe_tools.py \
+            --logos "$GITHUB_WORKSPACE/bin/logos" \
+            --source-root "$INPUTS/sources" --module-cache "$INPUTS/modules" \
+            --cache-root "$RUNNER_TEMP/corpus-cache" \
+            --baseline "$EVIDENCE/tools-probe/report.json" \
+            --jobs 2 --timeout 600 --out "$EVIDENCE/tools-unlimited"
+
       - name: Retain early tools diagnostics
         if: ${{ !cancelled() && steps.tools_probe.outcome != 'skipped' }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -144,7 +155,12 @@ jobs:
             ${{ runner.temp }}/logos-corpus-evidence/tools-probe
             ${{ runner.temp }}/logos-corpus-evidence/tools-probe-console.txt
             ${{ runner.temp }}/logos-corpus-evidence/tools-probe-exit.txt
+            ${{ runner.temp }}/logos-corpus-evidence/tools-unlimited
+            ${{ runner.temp }}/logos-corpus-evidence/logos-source.txt
+            ${{ runner.temp }}/logos-corpus-evidence/native-tools.sha256
+            ${{ runner.temp }}/logos-corpus-evidence/resource-profile.txt
             !${{ runner.temp }}/logos-corpus-evidence/tools-probe/work/**
+            !${{ runner.temp }}/logos-corpus-evidence/tools-unlimited/work/**
 
       - name: Replay and assess all 196 corpus cells
         if: ${{ !cancelled() && steps.inputs.outcome == 'success' && steps.native.outcome == 'success' && steps.gglint.outcome == 'success' }}

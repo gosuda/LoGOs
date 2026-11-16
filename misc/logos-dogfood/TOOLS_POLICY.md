@@ -64,3 +64,38 @@ analysis contract and keeps its permissions explicit.
 These sources are telemetry `v0.0.0-20261009151841-97e8ea77aa2a`, Goldmark
 `v1.4.13`, and x/net `v0.61.0`, all pinned by the tools module graph. No changes
 are made to those sources or to the capability auditor to enable this profile.
+
+## Unlimited strict diagnostic capture
+
+The workflow first retains the three-driver strict build from
+`corpus-permissions.json`, then invokes `probe_tools.py` against that report:
+
+```sh
+uv run --no-project python misc/logos-dogfood/probe_tools.py \
+  --logos "$GITHUB_WORKSPACE/bin/logos" \
+  --source-root "$INPUTS/sources" --module-cache "$INPUTS/modules" \
+  --cache-root "$RUNNER_TEMP/corpus-cache" \
+  --baseline "$EVIDENCE/tools-probe/report.json" \
+  --jobs 2 --timeout 600 --out "$EVIDENCE/tools-unlimited"
+```
+
+The helper makes its own verified private source copy, applies the original
+strict policy, and runs the explicit command `logos build -ldflags=-e ./...`.
+It binds the earlier successful stock and fork builds to the exact profile,
+commands, working directory, resource environment, executable identities, and
+raw output hashes. It records the native source tree and executable receipts
+before and after the probe, then rechecks the source, policy, baseline, and
+private effective-source digest. The existing runner supplies source copying,
+policy validation, offline environment, process capture, and hashing unchanged.
+
+`complete: true` means that the diagnostic capture completed with stable inputs.
+A normal build exit of 1 is recorded as `build_succeeded: false`; it is not corpus
+acceptance. Timeout, process failure, changed inputs, malformed baseline exit
+codes, or another error-limit message fail the capture. The helper records the
+actual inherited `GOGC` presence and value in addition to the runner's environment
+receipt. The workflow uses the same resource settings for both captures.
+
+Python controls exercise these boundaries without running Go. Native execution
+of this new helper remains a hosted CI gate. The early artifact retains both
+strict captures and their source/tool/resource receipts. The full 196-cell
+replay and its existing acceptor remain independent and unchanged.
