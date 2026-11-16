@@ -203,7 +203,9 @@ func runWasmNode(tb testing.TB, wasm string) (string, error) {
 	node := wasmNode(tb)
 	host := filepath.Join(testenv.GOROOT(tb), "lib", "wasm", "wasm_exec_node.js")
 	cmd := testenv.Command(tb, node, host, wasm)
-	cmd.Env = wasmGoEnv(cmd, "js")
+	// The Node wrapper copies its environment into the guest's bounded
+	// startup area. Pass only the fixtures' runtime settings.
+	cmd.Env = []string{"GOMAXPROCS=1", "TMPDIR=" + tb.TempDir()}
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out
 	err := cmd.Run()

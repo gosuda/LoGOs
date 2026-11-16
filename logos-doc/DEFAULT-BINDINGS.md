@@ -7,10 +7,12 @@ attempt. Its grouped-local-scope correction passed the installed semantic
 gates, source tests, and corresponding mutation probe. The subsequent
 hosted child builds and full LoGOs unit, script, testdir, and lint gates
 passed at `eaf5e3e`. The child's full upstream gate failed only the Wasm
-test runner's host-environment overflow and the REDTEAM ledger schema;
-acceptance repairs and a passing upstream gate for the combined head remain
-pending. The parent
-`08646b8` passed all seven hosted jobs, including the full Go regression.
+test runner's host-environment overflow and the REDTEAM ledger schema.
+[WASM-ENVIRONMENT.md](WASM-ENVIRONMENT.md) records the separate runner repair
+and its local RED/GREEN/PROBE evidence. At publication of that repair,
+combined upstream acceptance had not been established; the candidate's
+[PR #54 checks](https://github.com/gosuda/LoGOs/pull/54/checks) record that gate.
+The parent `08646b8` passed all seven hosted jobs, including the full Go regression.
 Earlier local bootstrap failures remain recorded below. The binding
 implementation, M6-S3b, is blocked and has been removed after its third
 implementation attempt failed installed-compiler tests on 2026-11-16.
@@ -590,9 +592,11 @@ changed.
 The ledger repair supplies full proving-test paths in #402 and the required
 `Mechanism:` and `Gate:` labels in blocked rows #403–405. It changes no
 frozen test or implementation-attempt budget. The separate Wasm test-runner
-repair is tracked as M16-S1a and row #406, with no pass claimed yet.
-The combined head must still pass the full upstream gate after these acceptance
-repairs; the parent's passing regression does not establish that result.
+repair, M16-S1a/#406, has local RED/GREEN/PROBE and restoration evidence in
+[WASM-ENVIRONMENT.md](WASM-ENVIRONMENT.md). That report records the publication
+boundary and links the raw logs. Full upstream acceptance belongs to the
+candidate identified by the [PR #54 checks](https://github.com/gosuda/LoGOs/pull/54/checks);
+the parent's passing regression does not establish that result.
 
 The original application-binding, private-field, and blank-lowering defects
 above remain unresolved. Two further language behaviors also remain outside
@@ -662,8 +666,9 @@ snapshot; the patch alone is an attack archive, not a repaired compiler.
 
 Installed semantic checks passed for the final validator attempt before
 the unsuccessful local bootstrap; subsequent hosted child builds and
-LoGOs gates also passed. The combined head's full upstream gate still requires the
-Wasm test-runner and ledger-schema acceptance repairs recorded above.
+LoGOs gates also passed. The independent runner repair and its local proof
+are recorded in [WASM-ENVIRONMENT.md](WASM-ENVIRONMENT.md); combined full
+upstream acceptance is determined by the candidate's PR #54 checks.
 M6-S3b remains blocked under the third-attempt limit. No fourth binding
 repair was attempted.
 

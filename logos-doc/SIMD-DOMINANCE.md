@@ -139,12 +139,15 @@ and the three frozen SIMD attacks are unchanged.
 | [Full upstream regression](https://github.com/gosuda/LoGOs/actions/runs/43885316645/job/133417552899) | `ALL TESTS PASSED` at 17:03:41 UTC on 2026-11-16; its complete `cmd/internal/testdir` run passed in 433.108 seconds. |
 
 The later combined head `447d6ad7ecff885efed74e14ed7b458f26eb11ea`
-includes the struct-default repair from PR #63. Its full regression gate
-remains open: Wasm startup overflow from the host environment and the
-REDTEAM ledger schema check require follow-up validation. The original
-SIMD pass above is not an integrated green result for that head. All three
-frozen attack hashes still match the table above; no speed claim follows
-from these correctness results.
+includes the struct-default repair from PR #63 and has the same tree as
+child `eaf5e3e`. That child's full upstream gate failed the Wasm host-environment
+overflow and REDTEAM ledger schema. The schema repair and the independent
+runner correction do not turn the original SIMD pass into combined acceptance.
+[WASM-ENVIRONMENT.md](WASM-ENVIRONMENT.md) records the runner's local
+RED/GREEN/PROBE proof and publication boundary; the candidate's
+[PR #54 checks](https://github.com/gosuda/LoGOs/pull/54/checks) determine full
+upstream acceptance. All three frozen attack hashes still match the table
+above; no speed claim follows from these correctness results.
 
 ## Reproduction and merge gate
 
