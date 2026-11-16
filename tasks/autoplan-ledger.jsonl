@@ -274,4 +274,6 @@
 {"id": "AUD-163", "description": "M12-S3 Preserve rooted ancestry after inline discovery; installed combined-tree gates pending", "phase": "AUD"}
 {"id": "AUD-164", "description": "M0-A-S14 Preserve test subprocess experiment identity", "phase": "AUD"}
 {"id": "AUD-165", "description": "M12-S4 Preserve external test package ownership; installed combined-tree gates pending", "phase": "AUD"}
+{"id": "AUD-166", "description": "M9-A-S19 Preserve relative field offsets in arena lint; hosted proof pending", "phase": "AUD"}
 {"id": "AUD-167", "description": "M5-A-S4 Classify empty arrays by stored references; hosted gates pending", "phase": "AUD"}
+{"id": "AUD-168", "description": "M14-A-S4 Supply safe bindings for transitive SIMD rewrites; hosted proof pending", "phase": "AUD"}
