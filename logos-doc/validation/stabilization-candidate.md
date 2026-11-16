@@ -6,9 +6,79 @@ not a completed release certificate. The shared Go and loGo/s implementation,
 specification changes, frozen attacks, and remaining gates are published
 together.
 
-## Current source composition
+## Current acceptance repair composition
 
-The final local source freeze for this acceptance round is
+The current `src` tree is `33752c03819ed5afcb37f87633a3cac668e181a8`.
+Four independently recorded slices repair failures found by the preceding
+hosted acceptance round:
+
+| Slice | Repair | Scoped evidence |
+|---|---|---|
+| M0-A-S20 / #442 | Keep an unrelated duplicate-stem package in the module census without rejecting the selected package; retain mixed-language and malformed-header rejection | Eight frozen census cases, twelve unchanged scripts, and the complete short loader package suites pass under race detection |
+| M0-A-S21 / #443 | Strip the two private C type-printing facts from public `go/types` generation; keep void-panic tracking behind a private compiler hook | Unchanged physical `TestGenerate`, both complete short type-checker suites, native panic controls, and C/ejection scripts pass; removing the hook fails exactly the two builtin-void attacks |
+| M22-A-S7 / #444 | End bootstrap resource settings before acceptance, keep Go temporary files under `TMPDIR`, and use a matched GCC 14 C/C++ pair | Four frozen executable bootstrap-contract tests and three caught mutations pass; prior native runtime/security regressions are separately recorded |
+| M22-A-S8 / #445 | Limit active parity execution calls across rows and start each child deadline after admission | Three frozen queue scenarios and the complete short parity race suite pass; release-only mutant/sweep execution remains a separate gate |
+
+Each slice used one implementation candidate. Their immutable
+[component records](acceptance-repairs-33752c03/README.md) retain RED, GREEN,
+caught mutations, restoration, and their original source boundaries. Pending
+statements inside those original packets describe their assembly time; the
+[installed acceptance packet](installed-acceptance-33752c03/README.md) supplies
+the later combined-source results without rewriting historical evidence.
+
+A normal fresh `make.bash` passed on 2026-11-16 from 21:44:15 to 21:52:15 UTC
+in 480.027 seconds, with final PGO and dist cleanup enabled. The first make
+lost its execution session without a completion receipt; its cause remains
+unconfirmed and its partial output is preserved. No implementation or attack
+changed between the two build invocations.
+
+All nineteen installed gate commands matched their recorded expectations.
+Eighteen exited successfully; the intentional void-hook mutation exited with
+the expected two semantic failures, then the restored compiler passed all
+nine cells using the same assertion binary. The complete short type-checker
+suites retain eight documented upstream/short-mode skips in total. Short
+parity retains its three documented release-only skips. No skipped release
+test is counted as executed acceptance.
+
+These build and gate receipts bind the combined uncommitted snapshot based
+on local HEAD `2535486fe9596a9212d525a5007963ef9e8682f0`, with index tree
+`098de80a4ddf1e59b2750c1306ef495414f42d1e`. The subsequent four slice commits
+end at local `0a8eef6bab7d85e89e8e3efd0b933d73e78dff79` and preserve the same
+complete `src` tree and all twelve repaired-file hashes. The evidence does
+not represent a separate rebuild of each intermediate commit.
+
+The synchronized task ledgers contain 306 unique, identical records. The
+attack ledger contains 350 unique rows: 341 tested, two satisfied upstream,
+no planned rows, and seven blocked rows. The blocked rows remain #216,
+#217, #218, #226, #403, #404 and #405. SPEC and Table T now state the selected
+package boundary for duplicate-stem errors. No M6-S3b implementation or
+frozen attack changed.
+
+### Remaining combined release gates
+
+Fresh hosted acceptance must use this exact source tree. The earlier
+published head `e6e3f9bf` has source tree `e237c399`; its results cannot
+certify these compiler and harness repairs. The active release request now
+names `33752c03` and retains all six original frozen-input hashes.
+
+The remaining gates are the complete plain-Go regression
+(`GO_TEST_TIMEOUT_SCALE=8 ./run.bash --no-rebuild`), the full script and
+compiler-fixture suites, all six no-short `go`/`logos` O1/O2/O3 cells with
+their separate `os` legs, actual SWIG/LTO coverage, and the unfiltered
+oracle-on parity/mutant/sweep suite with a clean-tip release stamp. Fresh
+focused workflows, runtime jobs, and independent-host reproducibility must
+also retain their own source identity. Local installed evidence is Linux
+amd64 evidence; it does not establish native Windows acceptance.
+
+M6-S3b remains rolled back after the three-attempt limit. The
+[bounded exception plan](m6-binding-exception-plan/README.md) records the
+unchanged attacks and next native/export/ejection gates. Completing the
+independent acceptance repairs does not authorize another M6 candidate or
+establish complete language closure.
+
+## Earlier source composition
+
+The preceding local source freeze for the earlier acceptance round is
 `e96a570da271c43a80e23bb1a188aac054acff25`, with complete tree
 `0841c3d2a92b7d6091a5e248b82bd820326947a8` and `src` tree
 `e237c399aae8f8065b724e8a0e27585686c7da18`. It preserves concurrent PR head
@@ -32,7 +102,7 @@ preserves the build and binary identities. Component evidence is linked from
 [acceptance follow-ups](acceptance-followups/README.md); completed build,
 installed behavioral acceptance and hosted gates are separate results.
 
-The current metadata records 302 identical task-ledger entries and 346 unique
+At that snapshot, the metadata records 302 identical task-ledger entries and 346 unique
 attack rows: 337 tested, two satisfied upstream, no planned rows and seven
 blocked rows. The four former planned rows #386, #389, #391 and #402 are
 promoted against the completed installed source-45 evidence below. Rows #336
@@ -205,7 +275,10 @@ never started. [Acceptance follow-ups](acceptance-followups/README.md) records
 the separate test-oracle correction and test-infrastructure repair. No broad
 gate is promoted by the six successful focused workflows.
 
-## Required release acceptance
+## Earlier release acceptance setup and results
+
+This section retains the preceding source-e237 acceptance boundary. Its
+pending statements are historical; the current requirements are above.
 
 The first hosted follow-up at published head `1a4c7635` found two ambiguous
 prose phrases in REDTEAM #336 and #441 at the compiler workflow's final ledger
