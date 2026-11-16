@@ -3,6 +3,8 @@
 # while the masked tail loads stay. The v3 AVX2 omission and the
 # scalar path live in logos_simd_feature_gate.txt and
 # logos_simd_gate_branch.txt; this script pins the AVX512 level.
+# Both targets are built and inspected on every amd64 host. Only
+# execution requires the host to support the target level.
 [!GOARCH:amd64] skip 'gate objdump needs amd64'
 
 env GOPROXY=off
@@ -11,26 +13,26 @@ env GOEXPERIMENT=simd
 
 cd m
 env GOAMD64=v3
-logos build -o $WORK/exe3 .
-go tool objdump -s '^main\.sumU8$' $WORK/exe3
+logos build -o $WORK/exe3$GOEXE .
+go tool objdump -s '^main\.sumU8$' $WORK/exe3$GOEXE
 stdout 'VMOVDQU8\.Z'
 stdout 'AVX512'
-go tool objdump -s '^main\.sumI16$' $WORK/exe3
+go tool objdump -s '^main\.sumI16$' $WORK/exe3$GOEXE
 stdout 'VMOVDQU16\.Z'
 stdout 'AVX512'
-logos run .
-stdout '^sums ok$'
+[host-amd64:v3] exec $WORK/exe3$GOEXE
+[host-amd64:v3] stdout '^sums ok$'
 
 env GOAMD64=v4
-logos build -o $WORK/exe4 .
-go tool objdump -s '^main\.sumU8$' $WORK/exe4
+logos build -o $WORK/exe4$GOEXE .
+go tool objdump -s '^main\.sumU8$' $WORK/exe4$GOEXE
 stdout 'VMOVDQU8\.Z'
 ! stdout 'AVX512'
-go tool objdump -s '^main\.sumI16$' $WORK/exe4
+go tool objdump -s '^main\.sumI16$' $WORK/exe4$GOEXE
 stdout 'VMOVDQU16\.Z'
 ! stdout 'AVX512'
-logos run .
-stdout '^sums ok$'
+[host-amd64:v4] exec $WORK/exe4$GOEXE
+[host-amd64:v4] stdout '^sums ok$'
 
 -- m/go.mod --
 module example.com/gateavx512

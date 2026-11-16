@@ -5,17 +5,33 @@
 package main_test
 
 import (
+	"cmd/go/internal/logos/config"
 	"cmd/internal/script"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"time"
 )
 
 var testLogos string
+
+func scriptHostAMD64(level string) (bool, error) {
+	switch level {
+	case "v1", "v2", "v3", "v4":
+	default:
+		return false, fmt.Errorf("invalid GOAMD64 level %q: want v1, v2, v3, or v4", level)
+	}
+	if runtime.GOARCH != "amd64" {
+		return false, nil
+	}
+	host, _ := config.ArchLevels("native")
+	return host >= level, nil
+}
 
 func setupTestLogos() {
 	testLogos = filepath.Join(testBin, "logos"+exeSuffix)

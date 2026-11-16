@@ -31,8 +31,9 @@ stdout '^sums ok$'
 
 env GODEBUG=
 env GOAMD64=v3
-logos run .
-stdout '^sums ok$'
+logos build -o $WORK/exe-v3$GOEXE .
+[host-amd64:v3] exec $WORK/exe-v3$GOEXE
+[host-amd64:v3] stdout '^sums ok$'
 
 -- m/go.mod --
 module example.com/gatebranch

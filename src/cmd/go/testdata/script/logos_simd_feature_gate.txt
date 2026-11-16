@@ -11,51 +11,54 @@ env GOEXPERIMENT=simd
 env GOAMD64=v1
 
 cd m
+# Inspection helpers run on the host, regardless of the target being inspected.
+go build -o $WORK/hostprobe$GOEXE ./hostprobe
+go build -o $WORK/checkorder$GOEXE ./checkorder
 logos run .
 stdout '^sums ok$'
 cp stdout $WORK/on.txt
-exec go run ./hostprobe $WORK/on.txt baseline
+exec $WORK/hostprobe$GOEXE $WORK/on.txt baseline
 stdout 'host probe ok baseline'
 # The feature check precedes the masked tail load in sumI32 and sumU8.
 logos build -o $WORK/exe .
 go tool objdump -s '^main\.sumI32$' $WORK/exe
 cp stdout $WORK/sumI32.txt
-exec go run ./checkorder $WORK/sumI32.txt avx2
+exec $WORK/checkorder$GOEXE $WORK/sumI32.txt avx2
 stdout '^order ok avx2$'
 go tool objdump -s '^main\.sumU8$' $WORK/exe
 cp stdout $WORK/sumU8.txt
-exec go run ./checkorder $WORK/sumU8.txt avx512
+exec $WORK/checkorder$GOEXE $WORK/sumU8.txt avx512
 stdout '^order ok avx512$'
 
 env GODEBUG=cpu.avx2=off
 logos run .
 stdout '^sums ok$'
 cp stdout $WORK/off-avx2.txt
-exec go run ./hostprobe $WORK/off-avx2.txt avx2off
+exec $WORK/hostprobe$GOEXE $WORK/off-avx2.txt avx2off
 stdout 'host probe ok avx2off'
 
 env GODEBUG=cpu.avx512f=off
 logos run .
 stdout '^sums ok$'
 cp stdout $WORK/off-avx512.txt
-exec go run ./hostprobe $WORK/off-avx512.txt avx512off
+exec $WORK/hostprobe$GOEXE $WORK/off-avx512.txt avx512off
 stdout 'host probe ok avx512off'
 
 # GOAMD64=v3 guarantees AVX2: sumI32 drops the check but keeps the
 # masked tail load, while sumU8 keeps its AVX512 check in order.
 env GOAMD64=v3
 env GODEBUG=
-logos run .
-stdout '^avx2 true$'
-stdout '^sums ok$'
 logos build -o $WORK/exe-v3 .
+[host-amd64:v3] exec $WORK/exe-v3
+[host-amd64:v3] stdout '^avx2 true$'
+[host-amd64:v3] stdout '^sums ok$'
 go tool objdump -s '^main\.sumI32$' $WORK/exe-v3
 cp stdout $WORK/sumI32-v3.txt
-exec go run ./checkorder $WORK/sumI32-v3.txt noavx2
+exec $WORK/checkorder$GOEXE $WORK/sumI32-v3.txt noavx2
 stdout '^order ok noavx2$'
 go tool objdump -s '^main\.sumU8$' $WORK/exe-v3
 cp stdout $WORK/sumU8-v3.txt
-exec go run ./checkorder $WORK/sumU8-v3.txt avx512
+exec $WORK/checkorder$GOEXE $WORK/sumU8-v3.txt avx512
 stdout '^order ok avx512$'
 
 # GOAMD64=v4 guarantees AVX512 as well: sumU8 drops its check too.
@@ -63,7 +66,7 @@ env GOAMD64=v4
 logos build -o $WORK/exe-v4 .
 go tool objdump -s '^main\.sumU8$' $WORK/exe-v4
 cp stdout $WORK/sumU8-v4.txt
-exec go run ./checkorder $WORK/sumU8-v4.txt noavx512
+exec $WORK/checkorder$GOEXE $WORK/sumU8-v4.txt noavx512
 stdout '^order ok noavx512$'
 env GOAMD64=v1
 
