@@ -13,9 +13,16 @@ import (
 // GO$GOARCH setting. It does not read or change the process configuration.
 // Callers selecting another target use the same implications as ToolTags.
 func GOGOARCHTags(goarch, level string) ([]string, error) {
+	return gogoarchTagsFor(goarch, level, true)
+}
+
+// The ordinary tool-tag path preserves raw GO386 values so the compiler can
+// report its existing unsupported-setting diagnostic. Candidate selection has
+// no such later validation boundary and must reject invalid settings here.
+func gogoarchTagsFor(goarch, level string, validate386 bool) ([]string, error) {
 	switch goarch {
 	case "386":
-		if level == "sse2" || level == "softfloat" {
+		if !validate386 || level == "sse2" || level == "softfloat" {
 			return []string{goarch + "." + level}, nil
 		}
 	case "amd64":

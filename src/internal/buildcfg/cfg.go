@@ -408,9 +408,9 @@ func GOGOARCH() (name, value string) {
 
 func gogoarchTags() []string {
 	_, value := GOGOARCH()
-	tags, err := GOGOARCHTags(GOARCH, value)
+	tags, err := gogoarchTagsFor(GOARCH, value, false)
 	if err != nil {
-		panic(err) // Global settings have already been validated.
+		panic(err) // Settings other than raw GO386 have already been parsed.
 	}
 	return tags
 }

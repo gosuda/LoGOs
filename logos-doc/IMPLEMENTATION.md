@@ -3902,6 +3902,11 @@ Anchor: Tony Hoare, David Parnas, Richard Feynman
   context for `arm64 && !amd64.v1`. The first production attempt passes the
   frozen controls and real command test. Parent integration owns the complete
   rebuilt-toolchain and upstream regression gates.
+- Review correction, production attempt 2: ordinary tool-tag initialization
+  keeps raw GO386 so `go env` and the compiler retain upstream diagnostics.
+  Selector candidates remain strict. Additional frozen buildcfg/command
+  controls reproduced the initial panic; race, pristine command oracles,
+  caught/restored mutation, formatting, and vet pass after the correction.
 - Trace: T-0.3, REDTEAM #393, AUD-197; resolves issue #57.
 
 ### M24 integration gate
