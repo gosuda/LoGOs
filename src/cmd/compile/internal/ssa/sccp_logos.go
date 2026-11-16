@@ -16,6 +16,7 @@ func logosSCCPPossibleConst(v *Value) bool {
 	switch v.Op {
 	case OpBitLen8, OpBitLen16, OpBitLen32, OpBitLen64,
 		OpPopCount8, OpPopCount16, OpPopCount32, OpPopCount64,
+		OpBswap16, OpBswap32, OpBswap64,
 		OpAndB, OpOrB:
 		return true
 	case OpCondSelect:
@@ -39,6 +40,27 @@ func (t *worklist) logosSCCPLattice(v *Value) lattice {
 			return computeLattice(t.f, v, x.val)
 		}
 		return lattice{x.tag, nil}
+	case OpBswap16, OpBswap32, OpBswap64:
+		x := t.getLatticeCell(v.Args[0])
+		if x.tag != constant {
+			return lattice{x.tag, nil}
+		}
+		value, _ := logosBswap(v.Op, x.val.AuxInt)
+		// Byte swaps have no generic constant rewrite. Keep the original
+		// value intact until SCCP converges, and retain its result type
+		// rather than assuming that it has the opcode's width.
+		var c *Value
+		switch v.Type.Size() {
+		case 2:
+			c = t.f.ConstInt16(v.Type, int16(value))
+		case 4:
+			c = t.f.ConstInt32(v.Type, int32(value))
+		case 8:
+			c = t.f.ConstInt64(v.Type, value)
+		default:
+			v.Fatalf("unexpected result type for %s: %v", v.Op, v.Type)
+		}
+		return lattice{constant, c}
 	case OpCondSelect:
 		condition := t.getLatticeCell(v.Args[2])
 		if condition.tag == top {

@@ -13,6 +13,13 @@ func (kb *knownBitsState) foldLogos(v *Value) (value, known int64) {
 		return 0, 0
 	}
 	switch v.Op {
+	case OpBswap16, OpBswap32, OpBswap64:
+		return kb.foldLogosBswap(v)
+	case OpBitLen8, OpBitLen16, OpBitLen32, OpBitLen64,
+		OpCtz8, OpCtz16, OpCtz32, OpCtz64,
+		OpCtz8NonZero, OpCtz16NonZero, OpCtz32NonZero, OpCtz64NonZero,
+		OpPopCount8, OpPopCount16, OpPopCount32, OpPopCount64:
+		return kb.foldLogosBitIntrinsic(v)
 	case OpAdd8, OpAdd16, OpAdd32, OpAdd64:
 		x, xk := kb.fold(v.Args[0])
 		y, yk := kb.fold(v.Args[1])

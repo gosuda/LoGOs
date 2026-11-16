@@ -378,11 +378,15 @@ The analysis MUST preserve defined integer overflow at each target width [T-105.
 The analysis MUST preserve required calls, memory effects, nil and bounds checks, and panic behavior [T-105.1].
 The analysis MUST NOT reassociate floating-point arithmetic or assume that signed overflow cannot occur [T-105.1].
 O3 MAY eliminate arithmetic and conditions proved constant from known operand bits, including carries and rotation counts modulo the operand width [T-105.1].
+O3 MAY propagate known bits through byte swaps and derive bit-length, trailing-zero-count, and population-count facts from partially known operands [T-105.1].
+Each such transfer MUST use the operation's input width independently of its result type width and MUST perform bounded constant-time work without enumerating concrete input values [T-105.1].
+Byte-swap facts MUST preserve zero extension when the result type is wider than the byte-swap operation [T-105.1].
 Rotation-count analysis MUST examine no more than 64 count residues for one value [T-105.1].
 O3 MAY replace a rotate-left followed by an unsigned right shift at the same literal count `k` with the original input when both operations have the same integer width, `0 <= k < width`, and the input's top `k` bits are proved zero [T-105.1].
 O3 MAY fold an integer or Boolean operation whose constant inputs on each incoming control-flow edge produce the same result [T-105.1].
 That correlated analysis MUST inspect no more than eight incoming edges and MUST NOT unfold loop-carried values [T-105.1].
-O3 MUST propagate scalar constants through bit-length and population-count intrinsics, Boolean conjunction and disjunction, and integer or Boolean conditional selections [T-105.1].
+The correlated analysis MUST run before normalization of integer zero/one phis destroys their predecessor alignment [T-105.1].
+O3 MUST propagate scalar constants through byte-swap, bit-length, and population-count intrinsics, Boolean conjunction and disjunction, and integer or Boolean conditional selections [T-105.1].
 Unknown or unsupported inputs MUST retain the original computation when no result can be proved [T-105.1].
 `target_cpu` MUST accept `deterministic`, `baseline`, or `native` [T-105].
 `target_cpu` MUST apply to every package that `logos` builds, Go or loGo/s [T-105][R-U1].

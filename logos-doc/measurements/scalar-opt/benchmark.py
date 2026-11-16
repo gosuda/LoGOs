@@ -3,6 +3,10 @@
 
 Run through uv with the primary Python interpreter. This runner changes no
 repository source. Each invocation creates a new evidence directory.
+
+By default, compare logosopt=0 and logosopt=1 with the installed compiler.
+Pass both --baseline-compiler and --candidate-compiler to compare two compiler
+binaries at -O=3 with logosopt=1 on both sides.
 """
 
 from __future__ import annotations
@@ -36,6 +40,12 @@ BENCHMARKS = (
     "BenchmarkPackedDescriptors",
     "BenchmarkPackedHeaders",
     "BenchmarkCorrelatedDescriptors",
+    "BenchmarkPhi01Descriptors",
+    "BenchmarkBswapLateDispatch",
+    "BenchmarkBswapNetworkByteFields",
+    "BenchmarkAlignedBitCounts",
+    "BenchmarkHeaderBitLengths",
+    "BenchmarkSparsePopulationClasses",
 )
 MODES = (("baseline", 0), ("candidate", 1))
 
@@ -82,11 +92,21 @@ def samples(text: str, name: str) -> list[Sample]:
     for line in text.splitlines():
         if pattern.match(line):
             fields = line.split()
-            if fields[3] != "ns/op" or fields[5:8:2] != ["B/op", "allocs/op"]:
+            # SetBytes adds MB/s between latency and allocation metrics.
+            # Read by unit so throughput cannot shift the required columns.
+            metrics = {
+                unit: float(fields[index - 1])
+                for index, unit in enumerate(fields)
+                if unit in ("ns/op", "B/op", "allocs/op") and index > 1
+            }
+            if len(metrics) != 3:
                 raise ValueError(f"Unexpected benchmark fields: {line}")
             result.append(
                 Sample(
-                    int(fields[1]), float(fields[2]), float(fields[4]), float(fields[6])
+                    int(fields[1]),
+                    metrics["ns/op"],
+                    metrics["B/op"],
+                    metrics["allocs/op"],
                 )
             )
     if not result:
@@ -112,6 +132,8 @@ def main() -> int:
     parser.add_argument("--repo", type=Path, default=DEFAULT_REPO)
     parser.add_argument("--evidence", type=Path, default=DEFAULT_EVIDENCE)
     parser.add_argument("--hyperfine", type=Path, required=True)
+    parser.add_argument("--baseline-compiler", type=Path)
+    parser.add_argument("--candidate-compiler", type=Path)
     parser.add_argument("--benchmark", action="append", choices=BENCHMARKS)
     parser.add_argument("--compile-package", action="append")
     parser.add_argument("--target-seconds", type=float, default=1.25)
@@ -119,6 +141,14 @@ def main() -> int:
     repo = cast(Path, args.repo).resolve()
     evidence = cast(Path, args.evidence).resolve()
     hyperfine = cast(Path, args.hyperfine).resolve()
+    baseline_compiler = cast(Path | None, args.baseline_compiler)
+    candidate_compiler = cast(Path | None, args.candidate_compiler)
+    if (baseline_compiler is None) != (candidate_compiler is None):
+        parser.error("--baseline-compiler and --candidate-compiler must be paired")
+    paired_compilers = baseline_compiler is not None
+    modes: tuple[tuple[str, int], ...] = (
+        tuple((name, 1) for name, _ in MODES) if paired_compilers else MODES
+    )
     target_seconds = cast(float, args.target_seconds)
     if target_seconds < 1:
         raise ValueError("G6 requires at least one second of useful work")
@@ -146,6 +176,68 @@ def main() -> int:
         ).strip()
     )
     compiler = tool_dir / "compile"
+    profiler = tool_dir / "pprof"
+    if not profiler.is_file() or not os.access(profiler, os.X_OK):
+        raise ValueError(
+            "The selected toolchain lacks pprof; build cmd/pprof into its "
+            "GOTOOLDIR before starting the campaign"
+        )
+    compilers: dict[str, Path] = {name: compiler for name, _ in modes}
+    build_flags: dict[str, list[str]] = {
+        name: [f"-gcflags={PACKAGE}=-d=logosopt={mode}"] for name, mode in modes
+    }
+    wrappers: list[Path] = []
+    compiler_versions: dict[str, str] = {}
+    tool_ids: dict[str, str] = {}
+    difference = "only -d=logosopt=0 versus -d=logosopt=1"
+    if baseline_compiler is not None and candidate_compiler is not None:
+        compilers = {
+            "baseline": baseline_compiler.resolve(strict=True),
+            "candidate": candidate_compiler.resolve(strict=True),
+        }
+        wrapper_dir = out / "toolexec"
+        wrapper_dir.mkdir(mode=0o700)
+        # Bare wrapper names avoid -toolexec's non-shell quoting grammar.
+        env["PATH"] = str(wrapper_dir) + os.pathsep + env["PATH"]
+        for name, selected in compilers.items():
+            if not selected.is_file() or not os.access(selected, os.X_OK):
+                raise ValueError(f"Compiler is not an executable file: {selected}")
+            wrapper = wrapper_dir / f"scalaropt-{name}-toolexec"
+            wrapper.write_text(
+                "#!/usr/bin/env bash\nset -euo pipefail\n"
+                "tool=$1\nshift\n"
+                'case "${tool##*/}" in\n'
+                f'  compile) exec -a compile {shlex.quote(str(selected))} "$@" ;;\n'
+                '  *) exec "$tool" "$@" ;;\nesac\n'
+            )
+            wrapper.chmod(0o700)
+            wrappers.append(wrapper)
+            build_flags[name] = [
+                "-O=3",
+                f"-toolexec={wrapper.name}",
+                *build_flags[name],
+            ]
+            version = invoke(
+                [str(wrapper), str(compiler), "-V=full"],
+                env=env,
+                cwd=cwd,
+                output=out / f"{name}-compiler-version.txt",
+            ).strip()
+            fields = version.split()
+            if len(fields) < 3 or fields[:2] != ["compile", "version"]:
+                raise ValueError(f"Invalid compiler tool identity: {version}")
+            tool_id = version
+            if fields[-1].startswith("buildID="):
+                tool_id = fields[-1].removeprefix("buildID=").rsplit("/", 1)[-1]
+                if not tool_id:
+                    raise ValueError(f"Compiler reports an empty build ID: {selected}")
+            compiler_versions[name] = version
+            tool_ids[name] = tool_id
+        difference = (
+            "baseline compiler versus candidate compiler; both use -O=3 and "
+            "package -d=logosopt=1 with identical sources and optimization flags; "
+            "toolexec selects the compiler"
+        )
     invoke([str(go), "version"], env=env, cwd=cwd, output=out / "go-version.txt")
     invoke(
         [str(hyperfine), "--version"],
@@ -198,6 +290,9 @@ def main() -> int:
             *(repo / name for name in sorted(set(source_list.splitlines()))),
             go,
             compiler,
+            profiler,
+            *compilers.values(),
+            *wrappers,
             hyperfine,
             Path(__file__).resolve(),
         ]
@@ -205,6 +300,15 @@ def main() -> int:
     (out / "source-hashes.json").write_text(
         json.dumps(frozen, sort_keys=True, indent=2) + "\n"
     )
+    if (
+        paired_compilers
+        and frozen[str(compilers["baseline"])] != frozen[str(compilers["candidate"])]
+        and tool_ids["baseline"] == tool_ids["candidate"]
+    ):
+        raise ValueError(
+            "Different compiler binaries report the same -V=full tool identity; "
+            "the Go build cache cannot distinguish them"
+        )
     log = out / "log.jsonl"
     append_record(
         log,
@@ -237,7 +341,17 @@ def main() -> int:
                 "minimum_runs_per_side": 10,
                 "profiles": "separate runs, excluded from timed samples",
             },
-            "difference": "only -d=logosopt=0 versus -d=logosopt=1",
+            "difference": difference,
+            "compilers": {
+                name: {
+                    "path": str(selected),
+                    "sha256": frozen[str(selected)],
+                    "version": compiler_versions.get(name),
+                    "tool_id": tool_ids.get(name),
+                }
+                for name, selected in compilers.items()
+            },
+            "runtime_build_flags": build_flags,
             "ranking": "parent supplies hot-path admission, lower bound, complexity cost, and keep/revert decision",
         },
     )
@@ -262,7 +376,7 @@ def main() -> int:
             "--export-json",
             str(directory / "timing.json"),
         ]
-        for (name, _), workload in zip(MODES, commands, strict=True):
+        for (name, _), workload in zip(modes, commands, strict=True):
             command.extend(["--command-name", name, shlex.join(workload)])
         invoke(command, env=env, cwd=cwd, output=directory / "hyperfine.txt")
         parsed = cast(
@@ -270,7 +384,7 @@ def main() -> int:
         )
         results = cast(list[dict[str, object]], parsed["results"])
         entries: list[dict[str, object]] = []
-        for (name, _), result in zip(MODES, results, strict=True):
+        for (name, _), result in zip(modes, results, strict=True):
             median = float(cast(float, result["median"]))
             deviation = float(cast(float, result["stddev"]))
             minimum = float(cast(float, result["min"]))
@@ -311,7 +425,7 @@ def main() -> int:
 
     if args.phase in ("runtime", "all"):
         binaries: dict[str, Path] = {}
-        for name, mode in MODES:
+        for name, _ in modes:
             directory = out / name
             directory.mkdir()
             binary = directory / "scalaropt.test"
@@ -322,7 +436,7 @@ def main() -> int:
                     "-c",
                     "-o",
                     str(binary),
-                    f"-gcflags={PACKAGE}=-d=logosopt={mode}",
+                    *build_flags[name],
                     PACKAGE,
                 ],
                 env=env,
@@ -330,6 +444,7 @@ def main() -> int:
                 output=directory / "build.txt",
             )
             binaries[name] = binary
+            frozen[str(binary)] = digest(binary)
             invoke(
                 [str(binary), "-test.run=^TestScalar", "-test.count=1"],
                 env=env,
@@ -341,7 +456,7 @@ def main() -> int:
                 {
                     "event": "binary",
                     "mode": name,
-                    "sha256": digest(binary),
+                    "sha256": frozen[str(binary)],
                     "bytes": binary.stat().st_size,
                     "parity": "passed",
                 },
@@ -373,7 +488,7 @@ def main() -> int:
                     ),
                     bench,
                 )[0]
-                for name, _ in MODES
+                for name, _ in modes
             ]
             count = max(
                 1,
@@ -392,7 +507,7 @@ def main() -> int:
                         ),
                         bench,
                     )[0]
-                    for name, _ in MODES
+                    for name, _ in modes
                 ]
                 minimum_useful = min(sample.useful_seconds for sample in calibrated)
                 if minimum_useful >= 1.0:
@@ -413,10 +528,10 @@ def main() -> int:
             measure(
                 bench,
                 directory,
-                [bench_command(name, f"{count}x") for name, _ in MODES],
+                [bench_command(name, f"{count}x") for name, _ in modes],
                 count,
             )
-            for name, mode in MODES:
+            for name, _ in modes:
                 corroboration = samples(
                     invoke(
                         [
@@ -428,7 +543,7 @@ def main() -> int:
                             "-count=10",
                             "-benchmem",
                             "-cpu=1",
-                            f"-gcflags={PACKAGE}=-d=logosopt={mode}",
+                            *build_flags[name],
                             PACKAGE,
                         ],
                         env=env,
@@ -542,7 +657,6 @@ def main() -> int:
                 },
             )
             common = [
-                str(compiler),
                 "-p",
                 package,
                 "-std",
@@ -554,10 +668,18 @@ def main() -> int:
             ]
             batches: dict[str, Path] = {}
             compile_commands: dict[str, list[str]] = {}
-            for name, mode in MODES:
+            for name, mode in modes:
+                # Standard-library O3 excludes variablemakethreshold, matching
+                # logosForcedGcflags. Both compilers read the same archives.
+                compile_flags = (
+                    ["-d=inlbudget=400,inlrecursivebudget=80,logosopt=1"]
+                    if paired_compilers
+                    else [f"-d=logosopt={mode}"]
+                )
                 command = [
+                    str(compilers[name]),
                     *common,
-                    f"-d=logosopt={mode}",
+                    *compile_flags,
                     "-o",
                     str(directory / f"{name}.a"),
                     *sources,
@@ -572,7 +694,7 @@ def main() -> int:
             count = 1
             for attempt in range(5):
                 elapsed: list[float] = []
-                for name, _ in MODES:
+                for name, _ in modes:
                     start = time.perf_counter()
                     invoke(
                         ["bash", str(batches[name]), str(count)],
@@ -600,10 +722,10 @@ def main() -> int:
             measure(
                 f"compile/{package}",
                 directory,
-                [["bash", str(batches[name]), str(count)] for name, _ in MODES],
+                [["bash", str(batches[name]), str(count)] for name, _ in modes],
                 count,
             )
-            for name, _ in MODES:
+            for name, _ in modes:
                 cpu = directory / f"{name}.cpu.pprof"
                 memory = directory / f"{name}.memory.pprof"
                 command = compile_commands[name]
@@ -625,7 +747,7 @@ def main() -> int:
                         "pprof",
                         "-top",
                         "-nodecount=25",
-                        str(compiler),
+                        str(compilers[name]),
                         str(cpu),
                     ],
                     env=env,
@@ -640,7 +762,7 @@ def main() -> int:
                         "-top",
                         "-alloc_space",
                         "-nodecount=25",
-                        str(compiler),
+                        str(compilers[name]),
                         str(memory),
                     ],
                     env=env,
