@@ -25,6 +25,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
+  LOGOS_EXPECTED_HEAD: "${{ github.event.pull_request.head.sha || github.sha }}"
   LOGOS_PACKAGES: >-
     logos/...
     cmd/go/internal/logos/...
@@ -54,7 +55,12 @@ jobs:
     steps:
       - uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" # v7.0.1
         with:
+          ref: "${{ github.event.pull_request.head.sha || github.sha }}"
           persist-credentials: false
+      - name: "Record the exact candidate source"
+        run: |
+          test "$(git rev-parse HEAD)" = "$LOGOS_EXPECTED_HEAD"
+          git rev-parse HEAD HEAD^{tree} HEAD:src
       - name: "Validate workflows and shell scripts"
         working-directory: "."
         timeout-minutes: 5
