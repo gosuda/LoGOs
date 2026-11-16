@@ -6,6 +6,7 @@
 # Sums stay correct with the check forced false (scalar path) and at
 # v3 (check omitted).
 [!GOARCH:amd64] skip 'gate branch objdump needs amd64'
+[!GOOS:linux] skip 'host cpu probe reads /proc/cpuinfo'
 
 env GOPROXY=off
 env GOTOOLCHAIN=local
@@ -31,8 +32,10 @@ stdout '^sums ok$'
 
 env GODEBUG=
 env GOAMD64=v3
-logos run .
-stdout '^sums ok$'
+logos build -o $WORK/exe3 .
+env GOAMD64=v1
+exec go run ./runmin v3 $WORK/exe3
+stdout '^(sums ok|host below v3)$'
 
 -- m/go.mod --
 module example.com/gatebranch
@@ -69,4 +72,65 @@ func main() {
 		panic("int32 sum mismatch")
 	}
 	fmt.Println("sums ok")
+}
+
+-- m/runmin/main.go --
+package main
+
+import (
+	"fmt"
+	"os"
+	"os/exec"
+	"strings"
+)
+
+// runmin execs the binary named by its second argument only when the
+// host CPU meets the GOAMD64 level given as the first argument (v1
+// through v4); otherwise it prints "host below <level>" and exits 0.
+// The cpuinfo probe is Linux-only: the script header skips elsewhere.
+var levelFlags = map[byte][]string{
+	'2': {"cx16", "lahf_lm", "popcnt", "sse3", "sse4_1", "sse4_2", "ssse3"},
+	'3': {"avx", "avx2", "bmi1", "bmi2", "f16c", "fma", "lzcnt", "movbe", "osxsave"},
+	'4': {"avx512f", "avx512bw", "avx512cd", "avx512dq", "avx512vl"},
+}
+
+func main() {
+	if len(os.Args) != 3 || len(os.Args[1]) != 2 || os.Args[1][0] != 'v' {
+		fmt.Fprintln(os.Stderr, "usage: runmin v<level> <binary>")
+		os.Exit(2)
+	}
+	data, err := os.ReadFile("/proc/cpuinfo")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "read cpuinfo:", err)
+		os.Exit(2)
+	}
+	set := map[string]bool{}
+	for _, line := range strings.Split(string(data), "\n") {
+		if !strings.HasPrefix(line, "flags") {
+			continue
+		}
+		parts := strings.SplitN(line, ":", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		for _, f := range strings.Fields(parts[1]) {
+			set[f] = true
+		}
+		break
+	}
+	for lvl := byte('2'); lvl <= os.Args[1][1]; lvl++ {
+		for _, f := range levelFlags[lvl] {
+			if !set[f] {
+				fmt.Println("host below " + os.Args[1])
+				return
+			}
+		}
+	}
+	cmd := exec.Command(os.Args[2])
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		fmt.Fprintln(os.Stderr, "runmin:", err)
+		os.Exit(1)
+	}
 }
