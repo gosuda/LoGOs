@@ -78,4 +78,8 @@ jobs:
           go test -count=1 -race -timeout=40m -v cmd/go -run '^TestScript$/^(README|logos_simd_(zero_dominance|feature_gate|gate_avx512|gate_branch)|logos_eject_simd_slice)$'
       - name: "Run the full upstream regression gate"
         if: "matrix.suite == 'regression'"
+        env:
+          # cmd/go includes 511 loGo/s scripts in addition to the upstream set.
+          # Match the existing language CI's hour-long outer test budget.
+          GO_TEST_TIMEOUT_SCALE: "8"
         run: "./run.bash --no-rebuild"
