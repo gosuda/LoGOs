@@ -17,6 +17,13 @@ type logosCgoSpanSmall struct {
 	next *[64]byte
 }
 
+// The unpinned pointer precedes the checked address, so a scan that starts
+// at the passed address instead of the object base would miss it.
+type logosCgoSpanPrefix struct {
+	next *[64]byte
+	data [64]byte
+}
+
 type logosCgoSpanHeader struct {
 	data [1024]byte
 	next *[64]byte
@@ -65,6 +72,10 @@ func TestLogosCgoSpanObject(t *testing.T) {
 		}},
 		{"LargeInterior", func() (unsafe.Pointer, *[64]byte, any) {
 			value := &logosCgoSpanLarge{next: new([64]byte)}
+			return unsafe.Pointer(&value.data[len(value.data)-1]), value.next, value
+		}},
+		{"PrefixInterior", func() (unsafe.Pointer, *[64]byte, any) {
+			value := &logosCgoSpanPrefix{next: new([64]byte)}
 			return unsafe.Pointer(&value.data[len(value.data)-1]), value.next, value
 		}},
 	}
