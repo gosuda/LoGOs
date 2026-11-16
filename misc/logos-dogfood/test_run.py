@@ -3,11 +3,21 @@
 from __future__ import annotations
 
 import json
+import os
+import signal
+import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from dataclasses import replace
 from pathlib import Path
+from unittest.mock import patch
+
+try:
+    import fcntl
+except ImportError:
+    fcntl = None
 
 from run import (
     Assessment,
@@ -249,6 +259,69 @@ class EvidenceTests(unittest.TestCase):
         self.assertTrue(run.timed_out)
         self.assertIn("started", Path(run.stdout).read_text())
         self.assertEqual(assess_lint(run, "logos-lint").status, "timeout")
+
+    @unittest.skipUnless(fcntl is not None, "process-group lock probe requires POSIX")
+    def test_interrupt_terminates_descendants_and_reaps_command(self) -> None:
+        locks = tuple(self.root / f"process-{index}.lock" for index in range(3))
+        child = ""
+        for index in reversed(range(3)):
+            spawn = (
+                f"subprocess.Popen([sys.executable, '-c', {child!r}])\n"
+                if child
+                else "print('tree-ready', flush=True)\n"
+            )
+            child = (
+                "import fcntl, subprocess, sys, time\n"
+                f"lock = open({str(locks[index])!r}, 'w')\n"
+                "fcntl.flock(lock, fcntl.LOCK_EX)\n"
+                f"{spawn}time.sleep(30)\n"
+            )
+        processes: list[subprocess.Popen[bytes]] = []
+        original_wait = subprocess.Popen.wait
+        log = self.root / "interrupted"
+
+        def cleanup() -> None:
+            for process in processes:
+                if process.poll() is None:
+                    os.killpg(process.pid, signal.SIGKILL)
+                original_wait(process, timeout=5)
+
+        self.addCleanup(cleanup)
+
+        def interrupt_wait(
+            process: subprocess.Popen[bytes], timeout: float | None = None
+        ) -> int:
+            if processes:
+                return original_wait(process, timeout=timeout)
+            processes.append(process)
+            deadline = time.monotonic() + 5
+            while "tree-ready" not in log.with_suffix(".stdout").read_text():
+                if time.monotonic() >= deadline:
+                    self.fail("grandchild did not start before interruption")
+                time.sleep(0.01)
+            raise KeyboardInterrupt
+
+        with (
+            patch.object(subprocess.Popen, "wait", interrupt_wait),
+            self.assertRaises(KeyboardInterrupt),
+        ):
+            execute((sys.executable, "-c", child), self.root, {}, log, 10)
+        self.assertIsNotNone(
+            processes[0].returncode, "interrupted command was not reaped"
+        )
+        self.assertIn("tree-ready", log.with_suffix(".stdout").read_text())
+        assert fcntl is not None
+        for lock in locks:
+            with lock.open("rb") as stream:
+                deadline = time.monotonic() + 2
+                while True:
+                    try:
+                        fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                        break
+                    except BlockingIOError:
+                        if time.monotonic() >= deadline:
+                            self.fail(f"descendant still holds {lock.name}")
+                        time.sleep(0.01)
 
     def test_changed_source_changes_hash(self) -> None:
         source = self.root / "source.go"

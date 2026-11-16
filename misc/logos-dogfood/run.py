@@ -245,6 +245,17 @@ class Run:
     stderr_sha256: str
 
 
+def kill_and_reap(process: subprocess.Popen[bytes]) -> int:
+    try:
+        if os.name == "posix":
+            os.killpg(process.pid, signal.SIGKILL)
+        else:
+            process.kill()
+    except ProcessLookupError:
+        pass  # The command exited between cancellation and the kill.
+    return process.wait()
+
+
 def execute(
     command: tuple[str, ...], cwd: Path, env: dict[str, str], log: Path, timeout: float
 ) -> Run:
@@ -268,20 +279,17 @@ def execute(
                 stderr=err,
                 start_new_session=os.name == "posix",
             )
+        except OSError as exc:
+            error = str(exc)
+        else:
             try:
                 code = process.wait(timeout=timeout)
             except subprocess.TimeoutExpired:
                 timed_out = True
-                if os.name == "posix":
-                    try:
-                        os.killpg(process.pid, signal.SIGKILL)
-                    except ProcessLookupError:
-                        pass  # The process exited between the deadline and the kill.
-                else:
-                    process.kill()
-                code = process.wait()
-        except OSError as exc:
-            error = str(exc)
+                code = kill_and_reap(process)
+            except KeyboardInterrupt:
+                kill_and_reap(process)
+                raise
     return Run(
         command,
         str(cwd),
