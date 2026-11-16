@@ -1514,6 +1514,50 @@ escape and keepalive treatment. A noescape-only function MUST retain
 result-frame relocation. Experiment-off, gccgo, and godefs generation MUST
 remain unchanged. [T-306.1]
 
+#### 3.6.4 Reuse validated heap spans
+
+With `logoscgoopt` enabled, the unknown-pointer cgo checker MUST reuse the
+heap span it has already validated when locating the containing allocation.
+It MUST compute the same allocation base and scan the same pointer bitmap
+and extent as the existing `findObject` path. [T-306.2]
+
+An interior pointer MUST NOT restrict checking to bytes after that pointer.
+Unpinned nested pointers MUST still be rejected in small objects, objects with
+allocation headers, and large objects. Pinning the nested allocation MUST
+retain the existing successful result. Nil, foreign, stack, and global
+addresses MUST retain their existing treatment; unknown data/bss extents
+remain conservative. [T-306.2]
+
+Exported-result root and nested-pointer pinning, GC liveness, instrumentation,
+ordinary runtime entry, and callback behavior MUST remain unchanged. The
+disabled experiment MUST retain `findObject` and its returned base and span.
+The private selection helper MUST inline in both settings. [T-306.2]
+
+#### 3.6.5 Pointer-free typed addresses
+
+With `logoscgoopt` enabled, a cgo argument whose original typed address
+identifies a value containing no Go pointers MUST bypass redundant address
+classification. The optimization MUST preserve cgo's existing address-expression
+provenance and MUST NOT infer a contract from the C parameter type. [T-306.3]
+
+Saved `unsafe.Pointer` values, pointer-bearing values, and slice or array
+provenance MUST retain their existing checks. An arbitrary interior pointer
+MUST still check the allocation required by the upstream cgo rules. A
+pointer-free field MUST NOT make neighboring unpinned pointers safe to pass
+through a saved pointer. [T-306.3]
+
+The optimization MUST preserve argument evaluation count and order, deferred
+calls, typed nil values, GC liveness, pinning requirements, callback and result
+checking, and instrumentation. It MUST remain independent of `logosfastcgo`
+and MUST NOT change the default of `logoscgoopt`. [T-306.3]
+
+Correctness argument (informative): the existing address marker tells the
+runtime to check the pointed-to Go type. When that type contains no pointers,
+the checker returns without reading the address. Its earlier nil/non-Go
+address returns have the same result. The new predicate performs only type
+metadata reads and admits exactly this no-op case. The pointer-bearing and
+unknown-provenance paths remain unchanged.
+
 ## 4. Lexer, parser, and syntax
 
 ### 4.1 Tokens and contextual words
