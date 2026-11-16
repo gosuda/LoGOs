@@ -37,6 +37,11 @@ The tool MUST reject a mixed package with `correctness::mixed_package` [T-0.1][R
 The `correctness::mixed_package` text MUST name both file classes [T-0.1][R-U3].
 The tool MUST reject a module with both kinds with `correctness::mixed_module` [T-0.1][R-U3].
 The `correctness::mixed_module` text MUST name the Go packages and the loGo/s packages of the module [T-0.1][R-U3].
+Each module that contributes a loaded source package MUST be checked across all of its active packages, including unselected and unimported packages. [T-0.1][R-U3]
+The census MUST honor active build tags, source overlays, nested module boundaries, and package-pattern directory exclusions. [T-0.1][R-U3]
+The census MUST attribute vendored packages through `vendor/modules.txt`. [T-0.1][R-U3]
+Default `logos list` MUST reject a census failure in a module-owned dependency, while `logos list -e` MUST retain structured package errors. [T-0.1][R-U3]
+A synthesized command-line package without a resolved module has no module kind; its module-owned dependencies MUST still undergo the census. [T-0.1][R-U3]
 A loGo/s package MAY import any Go package [T-0.1][R-U2].
 A Go package MAY import any loGo/s package [T-0.1][R-U2].
 An import across kinds MUST NOT be an error [T-0.1][R-U2].
