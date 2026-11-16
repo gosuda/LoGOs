@@ -1794,6 +1794,29 @@ buf := make([]Pixel, w * h)
 
 The long-loop preemption rules are stated in Sec 3.3 (RFC-303: Hardware backend optimizations).
 
+### 13.4 RFC-305: SSA loop auto-vectorization
+
+Auto-vectorization MUST be an SSA optimization of ordinary Go and loGo/s loops, with no new syntax or explicit SIMD API. The pass MUST apply to packages of either language built by `go` or `logos` and preserve Go's observable behavior. [T-305][R-U1]
+
+- The pass MUST run only when `GOEXPERIMENT=simd` is enabled and optimization level `-O=2` or `-O=3` is selected. `-O=0`, `-O=1`, `-O=s`, and builds without that experiment MUST keep the original scalar loop. No new public build flag or `logos.toml` key is required. [T-305]
+- The first implementation MUST recognize single-exit, single-backedge counted loops with a zero-based induction variable, unit positive stride, a loop-invariant trip bound, and contiguous `a[i]` slice or array accesses. A `range` loop MAY qualify only when its lowered SSA has the same proven form. Any unrecognized loop MUST stay scalar. [T-305]
+- The initial element-wise forms MUST include copy and `+`, `-`, `*`, `&`, `|`, and `^` on fixed-width integers, and copy, `+`, `-`, and `*` on `float32` and `float64`, when the chosen target has an instruction with identical per-element semantics. Aliases and defined numeric types MAY use their underlying width. Division, shifts, min/max, saturating arithmetic, pointer-bearing lanes, `int`, `uint`, `uintptr`, and unsupported lane operations MUST stay scalar. [T-305]
+- Every memory access and every stored result MUST be independent across iterations, except a proven same-index read/modify/write and a reduction described below. Distinct slices cannot be assumed disjoint: if a write range may partially overlap a read range, the vector path MUST use a correct overflow-safe run-time disjoint-or-exact-index-alias guard, or take the original scalar loop. A failed guard MUST perform no speculative vector memory access. [T-305]
+- Before entering the vector path, the compiler MUST prove that every vector iteration is free of bounds, nil-dereference, arithmetic, and user-visible panics. Where safe length and trip-count predicates can be checked without side effects, it MAY guard the fast path and use the original scalar loop on failure. It MUST NOT move a panic before the scalar writes that precede it, suppress a panic, or change a panic's source position. Calls, atomics, volatile-like synchronization, defers, `recover`, side-effecting branches, and uncertain memory effects MUST prevent vectorization. [T-305]
+- Vector loads and stores MUST stay inside every slice's or array's bounds, including at a guard page; a short or uneven tail MUST use an in-bounds scalar epilogue. The original scalar loop MUST also serve short trips, failed legality or alias guards, unsupported targets, and unsupported instruction sets. The fast path MUST require at least two full vector widths of work. [T-305]
+- The first reduction form MAY vectorize only an integer `sum += a[i]` whose accumulator is not observed until loop exit, using exactly the scalar accumulator width and Go's wraparound arithmetic. Floating-point reductions MUST keep their scalar operation order, including signed zero and NaN behavior; vector reassociation, contraction into FMA, and altered rounding are forbidden. Element-wise floating-point code MUST preserve the scalar result bits for each lane. [T-305]
+- The initial targets MUST be amd64 with `GOAMD64=v3` or higher (AVX2) and arm64 with baseline NEON. A lower amd64 level, wasm, and other targets MUST take the scalar path. The compiler MUST NOT emit instructions absent from the declared target ISA or assume host features when cross-compiling. Runtime CPU dispatch, AVX-512-specific selection, SVE, and RVV are outside this first pass. [T-305]
+- The optimization MUST add no heap allocation and MUST preserve GC pointer liveness, safepoints, debugger-visible source positions, and loop preemption guarantees. Race, memory-sanitizer, and address-sanitizer builds MUST retain the scalar per-access instrumentation until a separately verified vector-aware instrumentation path exists. [T-305]
+- Code generation tests MUST distinguish vector instructions from scalar instructions for both `.go` and `.lgo` twins, on each supported target and optimization level. Behavioral tests MUST compare against the original scalar loop for empty, nil, short, odd-tail, overlapping, exact-in-place, out-of-range, overflow, NaN, signed-zero, and concurrent/instrumented inputs. Every transformation MUST pass the existing Go-semantics parity and upstream regression gates; a speed claim requires the measured G6 acceptance gate. [T-305]
+
+For example, the compiler MAY vectorize the body below only after proving its bounds and independence or inserting safe fast-path guards. The source code and its result are unchanged:
+
+```go
+for i := 0; i < len(dst); i++ {
+    dst[i] = a[i] + b[i]
+}
+```
+
 ## 14. JSON diagnostics schema
 
 ### 14.1 Emission
