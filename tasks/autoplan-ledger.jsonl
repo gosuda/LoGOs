@@ -282,3 +282,4 @@
 {"id": "AUD-188", "description": "M20-E-S2 Eject checked direct-C source", "phase": "AUD"}
 {"id": "AUD-189", "description": "M0-A-S15 Enforce the upstream Go regression floor in CI", "phase": "AUD"}
 {"id": "AUD-190", "description": "M11-A-S7 Preserve JSON profile dispatch and errors", "phase": "AUD"}
+{"id": "AUD-193", "description": "M11-A-S8 Preserve C type arguments in quoted JSON dispatch", "phase": "AUD"}

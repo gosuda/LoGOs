@@ -158,7 +158,7 @@ func (js *jsonStruct) valueLines(f *jsonField) []string {
 
 func (js *jsonStruct) quotedMethodCall(f *jsonField, field, valueName, ptrName string) []string {
 	if p, isPtr := unaliasConstView(f.typ).(*types2.Pointer); isPtr {
-		elem := types2.TypeString(unaliasConstView(p.Elem()), js.qualify)
+		elem := sourceTypeString(unaliasConstView(p.Elem()), js.qualify, js.holderPkg, js.cgoSource)
 		return []string{fmt.Sprintf("%s.%s[%s](&_logos_s, &%s)", jsonAlias, ptrName, elem, field)}
 	}
 	return []string{fmt.Sprintf("%s.%s(&_logos_s, &%s)", jsonAlias, valueName, field)}
@@ -166,10 +166,10 @@ func (js *jsonStruct) quotedMethodCall(f *jsonField, field, valueName, ptrName s
 
 func (js *jsonStruct) quotedFromHead(f *jsonField, field string) string {
 	if p, isPtr := unaliasConstView(f.typ).(*types2.Pointer); isPtr {
-		elem := types2.TypeString(unaliasConstView(p.Elem()), js.qualify)
+		elem := sourceTypeString(unaliasConstView(p.Elem()), js.qualify, js.holderPkg, js.cgoSource)
 		return fmt.Sprintf("!%s.QuotedFromPtr[%s](&_logos_s, &%s)", jsonAlias, elem, field)
 	}
-	elem := types2.TypeString(unaliasConstView(f.typ), js.qualify)
+	elem := sourceTypeString(unaliasConstView(f.typ), js.qualify, js.holderPkg, js.cgoSource)
 	return fmt.Sprintf("!%s.QuotedFrom[%s](&_logos_s, &%s)", jsonAlias, elem, field)
 }
 
