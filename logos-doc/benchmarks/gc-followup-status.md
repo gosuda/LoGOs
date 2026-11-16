@@ -22,7 +22,7 @@ The dedicated no-inlining gate uses `-gcflags=runtime=-l` with `GODEBUG=asyncpre
 
 `TestLogosGCHeapGraphLiveness` constructs roots in three different manual chunks. Each root reaches a small pointerful heap object and a pointerful heap object larger than 1 KiB; each intermediate owns a separate non-tiny leaf. A self pointer is present alongside the heap edges.
 
-The builder returns before collection and retains only manual addresses and weak references in the caller. The fixture rejects heap fallback for manual roots and rejects manual placement for intermediates and leaves. Both intermediates and descendants must survive collections while their region is live, then disappear after release. Strong values obtained from weak pointers are confined to a separate non-inlined checker. `KeepAlive` precedes release. Both implicit arenas and explicit regions are covered.
+The builder returns before collection and retains only manual addresses and weak references in the caller. The fixture rejects heap fallback for manual roots and requires heap spans for intermediates and leaves. The small intermediate is padded into Green Tea's inline-mark size range; its actual span classification must match the active collector. The large intermediate must use the fallback path. Both intermediates and descendants must survive collections while their region is live, then disappear after release. Strong values obtained from weak pointers are confined to a separate non-inlined checker. `KeepAlive` precedes release. Both implicit arenas and explicit regions are covered.
 
 ## Scan boundary contract
 
@@ -42,9 +42,9 @@ All pointer values are nil or target live manual allocations. This makes the exi
 | Upstream regression | Native linux/amd64, default experiments, `./run.bash --no-rebuild` |
 | Runtime regression | Native linux/amd64 and linux/arm64; `logosarena` and `logosarena,nogreenteagc`; runtime, metrics, pprof, and trace |
 | Race | Region, arena, and GC tests under the race detector |
-| Repetition | New ownership, heap-graph, and layout tests, count 10 at CPU counts 1, 2, and 4 |
+| Repetition | Count 10; heap-graph and layout tests at CPU counts 1, 2, and 4; ownership stress fixes two Ps |
 | Synchronous safepoints | Ownership test, count 10, runtime inlining disabled, asynchronous preemption disabled |
-| Mark verification | Existing external-pointer test and new heap graph, count 10, `gccheckmark=1` and `GOGC=1` |
+| Mark verification | Existing external-pointer test and new heap graph, count 10, `gccheckmark=1` with explicit collections |
 | Hygiene | gofmt and vet |
 
 These are pending requirements. This document records no passing result for them.

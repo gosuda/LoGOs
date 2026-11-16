@@ -6,7 +6,10 @@
 
 package runtime
 
-import "unsafe"
+import (
+	"internal/goexperiment"
+	"unsafe"
+)
 
 // LogosRegionPooledRoot reports a published region head belonging to goid
 // that is also in a P's reusable chunk pool. roots counts the non-nil region
@@ -41,4 +44,17 @@ func LogosRegionPooledRoot(goid uint64) (pooled uintptr, roots int) {
 	})
 	startTheWorld(stw)
 	return
+}
+
+// LogosGCGreenTea reports whether the collector uses Green Tea.
+const LogosGCGreenTea = goexperiment.GreenTeaGC
+
+// LogosGCHeapPath classifies a live Go object's span for the graph fixture.
+// p must point to an object that the caller keeps alive through this call.
+func LogosGCHeapPath(p unsafe.Pointer) (heap, inline bool) {
+	span := spanOfHeap(uintptr(p))
+	if span == nil {
+		return false, false
+	}
+	return true, gcUsesSpanInlineMarkBits(span.elemsize)
 }

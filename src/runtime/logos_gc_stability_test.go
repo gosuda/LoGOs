@@ -144,6 +144,7 @@ type logosGCStabilityLeaf struct {
 
 type logosGCStabilitySmall struct {
 	child *logosGCStabilityLeaf
+	pad   [16]byte // Reach the inline-mark size range on every pointer width.
 }
 
 type logosGCStabilityLarge struct {
@@ -168,7 +169,7 @@ type logosGCStabilityRefs struct {
 func makeLogosGCStabilityGraph(alloc func(any, uintptr) unsafe.Pointer) (
 	roots [3]unsafe.Pointer,
 	refs [3]logosGCStabilityRefs,
-	placed bool,
+	valid bool,
 ) {
 	const objectSize = unsafe.Sizeof(logosGCStabilityRoots{})
 	// Each allocation occupies more than half a chunk, so the three
@@ -186,10 +187,12 @@ func makeLogosGCStabilityGraph(alloc func(any, uintptr) unsafe.Pointer) (
 		largeLeaf := &logosGCStabilityLeaf{value: i + 101}
 		small := &logosGCStabilitySmall{child: smallLeaf}
 		large := &logosGCStabilityLarge{child: largeLeaf}
-		if runtime.LogosArenaInChunk(unsafe.Pointer(small)) ||
-			runtime.LogosArenaInChunk(unsafe.Pointer(large)) ||
-			runtime.LogosArenaInChunk(unsafe.Pointer(smallLeaf)) ||
-			runtime.LogosArenaInChunk(unsafe.Pointer(largeLeaf)) {
+		smallHeap, smallInline := runtime.LogosGCHeapPath(unsafe.Pointer(small))
+		largeHeap, largeInline := runtime.LogosGCHeapPath(unsafe.Pointer(large))
+		smallLeafHeap, _ := runtime.LogosGCHeapPath(unsafe.Pointer(smallLeaf))
+		largeLeafHeap, _ := runtime.LogosGCHeapPath(unsafe.Pointer(largeLeaf))
+		if !smallHeap || !largeHeap || !smallLeafHeap || !largeLeafHeap ||
+			smallInline != runtime.LogosGCGreenTea || largeInline {
 			return roots, refs, false
 		}
 		root := (*logosGCStabilityRoots)(p)
@@ -261,9 +264,9 @@ func TestLogosGCHeapGraphLiveness(t *testing.T) {
 					}
 				}()
 
-				roots, refs, placed := makeLogosGCStabilityGraph(alloc)
-				if !placed {
-					t.Fatal("heap graph fixture requires arena roots and heap-only descendants")
+				roots, refs, valid := makeLogosGCStabilityGraph(alloc)
+				if !valid {
+					t.Fatal("heap graph fixture did not reach the required manual and heap scan paths")
 				}
 
 				runtime.GC()

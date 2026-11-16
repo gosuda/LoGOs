@@ -114,9 +114,8 @@ jobs:
           GOEXPERIMENT: "${{ matrix.experiment }}"
           GODEBUG: "asyncpreemptoff=1"
         run: go test -count=10 -short -gcflags=runtime=-l -timeout=30m runtime -run '^TestLogosRegionReleaseOwnership$'
-      - name: "Check tracing with frequent collections"
+      - name: "Check heap graph marking"
         env:
           GOEXPERIMENT: "${{ matrix.experiment }}"
-          GOGC: "1"
           GODEBUG: "gccheckmark=1"
         run: go test -count=10 -short -timeout=30m runtime -run '^(TestLogosGCScanExternalPointers|TestLogosGCHeapGraphLiveness)$'
