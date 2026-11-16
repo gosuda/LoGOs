@@ -12,13 +12,12 @@ name: "autovec stability"
 permissions:
   contents: "read"
 
-concurrency:
-  group: "autovec-stability-${{ github.ref }}"
-  cancel-in-progress: true
-
 jobs:
   native:
     name: "autovec native ${{ matrix.arch }}"
+    concurrency:
+      group: "autovec-native-${{ github.ref }}-${{ matrix.arch }}"
+      cancel-in-progress: true
     runs-on: "${{ matrix.runner }}"
     timeout-minutes: 60
     strategy:
@@ -66,15 +65,20 @@ jobs:
             printf 'fork pass disabled\n'
             GOEXPERIMENT=simd GOAMD64=v3 go run -gcflags=-d=ssa/autovec/off "$probe"
           } | tee "$RUNNER_TEMP/autovec-evidence/fault-order.txt"
+      - name: "Preserve writes before recovered faults"
+        run: |
+          GOEXPERIMENT=simd GOAMD64=v3 go run ../test/logos/run/autovec_fault.go
       - name: "Check new fixture formatting"
         run: |
-          files=(../test/logos/run/autovec_memory.go ../test/logos/run/autovec_gc.go cmd/compile/internal/ssa/testdata/autovec_fault_probe.go)
+          files=(cmd/compile/internal/ssa/autovec*.go cmd/compile/internal/ssa/testdata/autovec*.go ../test/logos/run/autovec*.go ../test/logos/codegen/autovec*.go runtime/autovec*.go runtime/export_autovec_logos_test.go)
           gofmt -d "${files[@]}" | tee "$RUNNER_TEMP/autovec-evidence/gofmt.diff"
           test ! -s "$RUNNER_TEMP/autovec-evidence/gofmt.diff"
       - name: "Check compiler invariants and native fixtures"
         run: |
           go test -count=1 -short cmd/compile/internal/ssa
-          go vet cmd/compile/internal/ssa
+          go vet cmd/compile/internal/ssa cmd/compile/internal/ssagen cmd/compile/internal/typecheck runtime
+          go test -count=1 -short runtime -run TestLogosAutovecPanicOnFault
+          go test -count=1 -short -race runtime -run TestLogosAutovecPanicOnFault
           GOEXPERIMENT=simd GOAMD64=v3 go test -count=1 -timeout 20m cmd/internal/testdir -run '^Test$/^logos$/^(codegen|run)$/^autovec' -all_codegen
       - name: "Check guarded memory under compiler modes"
         run: |
@@ -92,6 +96,33 @@ jobs:
           GOEXPERIMENT=simd,preemptibleloops GOAMD64=v3 go build -gcflags=-d=ssa/autovec/debug=1 -o "$RUNNER_TEMP/vector-gc" ../test/logos/run/autovec_gc.go 2>&1 | tee "$RUNNER_TEMP/autovec-evidence/gc-vectorization.txt"
           grep -E 'autovec_gc.go:48:.*autovectorized 64-bit integer loop' "$RUNNER_TEMP/autovec-evidence/gc-vectorization.txt"
           GODEBUG=asyncpreemptoff=1 timeout 90s "$RUNNER_TEMP/vector-gc"
+      - name: "Prove the memory test catches a widened tail"
+        run: |
+          mutation="$RUNNER_TEMP/autovec-tail-mutation"
+          mkdir "$mutation"
+          sha256sum ../test/logos/run/autovec_memory.go cmd/compile/internal/ssa/autovec_logos.go | tee "$RUNNER_TEMP/autovec-evidence/mutation-inputs.sha256"
+          go run cmd/compile/internal/ssa/testdata/autovec_overlay.go cmd/compile/internal/ssa/autovec_logos.go 'h.SetControl(h.NewValue2(pos, OpLess64,' 'h.SetControl(h.NewValue2(pos, OpLeq64,' "$mutation" > "$mutation/overlay.json"
+          go build -overlay="$mutation/overlay.json" -o "$mutation/compile" cmd/compile
+          cat > "$mutation/toolexec" <<'WRAPPER'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          tool=$1
+          shift
+          if [[ "${tool##*/}" == compile && "${TOOLEXEC_IMPORTPATH-}" == command-line-arguments ]]; then
+            exec "$AUTOVEC_MUTANT_COMPILER" "$@"
+          fi
+          exec "$tool" "$@"
+          WRAPPER
+          chmod +x "$mutation/toolexec"
+          AUTOVEC_MUTANT_COMPILER="$mutation/compile" GOCACHE="$mutation/cache" GOEXPERIMENT=simd GOAMD64=v3 go build -toolexec="$mutation/toolexec" -o "$mutation/memory" ../test/logos/run/autovec_memory.go
+          if "$mutation/memory" > "$RUNNER_TEMP/autovec-evidence/tail-mutation.txt" 2>&1; then
+            cat "$RUNNER_TEMP/autovec-evidence/tail-mutation.txt"
+            printf 'tail mutation unexpectedly passed\n' >&2
+            exit 1
+          fi
+          grep -F 'memoryMap' "$RUNNER_TEMP/autovec-evidence/tail-mutation.txt"
+          grep -E 'SIGSEGV|unexpected fault address' "$RUNNER_TEMP/autovec-evidence/tail-mutation.txt"
+          "$RUNNER_TEMP/memory"
       - uses: "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9" # v7.0.2
         if: "always()"
         with:
@@ -100,6 +131,9 @@ jobs:
 
   regression:
     name: "upstream regression with SIMD"
+    concurrency:
+      group: "autovec-upstream-${{ github.ref }}"
+      cancel-in-progress: true
     runs-on: "ubuntu-26.04"
     timeout-minutes: 120
     defaults:
