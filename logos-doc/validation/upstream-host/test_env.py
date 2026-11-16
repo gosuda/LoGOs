@@ -51,6 +51,16 @@ def test_experiment_value_and_presence_are_preserved(experiment: str | None) -> 
     assert forwarded.get("GOEXPERIMENT") == experiment
 
 
+@pytest.mark.parametrize("value", (None, "", "/usr/bin:/bin"))
+def test_path_value_and_exported_presence_are_preserved(value: str | None) -> None:
+    env: dict[str, str] = {}
+    if value is not None:
+        env["PATH"] = value
+    forwarded = environment(invoke(env))
+    assert ("PATH" in forwarded) == (value is not None)
+    assert forwarded.get("PATH") == value
+
+
 @pytest.mark.parametrize(
     "key",
     (

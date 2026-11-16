@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # Keep host/build settings without copying Actions metadata into Wasm guests.
 set -euo pipefail
 
@@ -29,9 +29,9 @@ keys=(
 
 compact=()
 for key in "${keys[@]}"; do
-  if [[ -v $key ]]; then
+  if [[ -v $key && ${!key@a} == *x* ]]; then
     compact+=("$key=${!key}")
   fi
 done
 
-exec env -i "${compact[@]}" "$@"
+exec /usr/bin/env -i "${compact[@]}" "$@"

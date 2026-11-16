@@ -38,6 +38,10 @@ module policy, compiler settings, caches and resource controls, all three
 `UPROOT` oracles, and the existing `HOME`, `USER`, `PATH`, and `TMPDIR`. It does
 not create a replacement home or invent a builder identity.
 
+The Linux wrapper uses absolute interpreter and `env` paths, so an empty caller
+`PATH` does not break the wrapper itself. Only exported settings are copied;
+Bash's unexported default for a missing `PATH` is not added to the child.
+
 The wrapper removes Actions metadata, arbitrary credential/session variables,
 proxy transport variables, and `NODE_OPTIONS`. It does not fetch inputs or
 establish sessions. Configured Go module policy, including `GOAUTH`, remains
