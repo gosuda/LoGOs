@@ -20,7 +20,8 @@ try {
     const modes = configuration.name === "both-on"
       ? ["normal", "race", "cgocheck2", "asan", "msan"] : ["normal"];
     for (const mode of modes) {
-      const names = ["TestSelfBuildConfiguration", "TestCgoOptPointerFreeAddressInline"];
+      const names = ["TestSelfBuildConfiguration", "TestCgoOptPointerFreeAddressInline",
+        "TestCgoOptSpanCodegen", "TestCgoOptSpanPointerRules"];
       if (mode === "normal" || mode === "race") {
         names.push("TestFastcallOneTrampoline", "TestFastcallStructure", "TestFastcallNoClockInFastBody");
       }
