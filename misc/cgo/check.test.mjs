@@ -1,0 +1,116 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+import test from "node:test";
+import assert from "node:assert/strict";
+import { timing, benchmarkRows, assessRow, goResults, expectedRed, replaceOnce, verdict, manifest } from "./check.mjs";
+
+const name = "BenchmarkCgoOptNocallback";
+const iterations = 40000000;
+const hyperfine = (seconds) => ({ results: [{ times: Array(10).fill(seconds),
+  exit_codes: Array(10).fill(0) }] });
+const benchmark = (n, ns = 50, count = 10) =>
+  Array(count).fill(name + "-1 " + n + " " + ns + " ns/op 0 B/op 0 allocs/op").join("\n");
+const phase = (seconds) => ({ hyperfine: hyperfine(seconds), corroboration: benchmark(iterations) });
+const phases = () => ({ baseline: phase(2.2), candidate: phase(2), integration: phase(2) });
+const events = (...rows) => rows.map((row) => JSON.stringify(row)).join("\n");
+
+test("requires every integration row to reach the unchanged 1.05 gate", () => {
+  const good = assessRow(name, iterations, phases());
+  assert.equal(good.status, "latency-pass");
+  const bad = phases();
+  bad.integration = phase(2.15);
+  const rejected = assessRow(name, iterations, bad);
+  assert.equal(rejected.status, "latency-rejected");
+  assert.equal(verdict([good, rejected]), "not-accepted");
+});
+
+test("blocks noise instead of selecting favorable samples", () => {
+  const input = phases();
+  input.candidate.hyperfine.results[0].times[9] = 8;
+  assert.equal(assessRow(name, iterations, input).status, "measurement-blocked");
+});
+
+test("does not accept short work hidden by process overhead", () => {
+  const input = phases();
+  input.candidate.corroboration = benchmark(iterations, 10);
+  assert.equal(assessRow(name, iterations, input).status, "measurement-blocked");
+});
+
+test("rejects different work counts, omitted rows, and failed timed commands", () => {
+  assert.throws(() => benchmarkRows(benchmark(iterations + 1), name, iterations, 10), /work count/);
+  assert.throws(() => benchmarkRows(benchmark(iterations, 50, 9), name, iterations, 10), /exact benchmark/);
+  const failed = hyperfine(2);
+  failed.results[0].exit_codes[4] = 1;
+  assert.throws(() => timing(failed), /timed command failed/);
+  assert.throws(() => timing({ results: [] }), /exactly one command/);
+});
+
+test("rejects invalid samples and missing allocation metrics", () => {
+  for (const value of [0, -1, NaN, Infinity]) {
+    const input = hyperfine(2);
+    input.results[0].times[0] = value;
+    assert.throws(() => timing(input), /finite and positive/);
+  }
+  assert.throws(() => benchmarkRows(name + " 4 2 ns/op", name, 4, 1), /metric/);
+});
+
+test("recomputes statistics from the raw samples", () => {
+  const input = hyperfine(2);
+  input.results[0].median = 1000;
+  assert.equal(timing(input).median, 2);
+});
+
+test("a passing package with no required tests is not coverage", () => {
+  assert.throws(() => goResults(events({ Action: "pass", Package: "runtime" }),
+    { prefix: "TestLogosCgo" }), /did not execute/);
+});
+
+test("enabled runtime tests cannot silently skip", () => {
+  const output = events({ Action: "run", Test: "TestLogosCgoShape" },
+    { Action: "skip", Test: "TestLogosCgoShape" });
+  assert.throws(() => goResults(output, { prefix: "TestLogosCgo" }), /ended as skip/);
+  assert.equal(goResults(output, { prefix: "TestLogosCgo", allowSkipped: true }).TestLogosCgoShape, "skip");
+});
+
+test("RED requires the named running attack and its predicted diagnostic", () => {
+  const output = events({ Action: "run", Test: "TestCgoOptEmission" },
+    { Action: "output", Test: "TestCgoOptEmission", Output: "stack-top lookups = 2, want 0\n" },
+    { Action: "fail", Test: "TestCgoOptEmission" });
+  expectedRed(output, "TestCgoOptEmission", "stack-top lookups = 2, want 0");
+  assert.throws(() => expectedRed(output, "TestOther", "stack-top"), /did not execute/);
+  assert.throws(() => expectedRed(output, "TestCgoOptEmission", "wrong"), /wrong reason/);
+  assert.throws(() => expectedRed(output.replace('"Test":"TestCgoOptEmission","Output"',
+    '"Test":"TestUnrelated","Output"'), "TestCgoOptEmission", "stack-top"), /wrong reason/);
+  assert.throws(() => expectedRed(events({ Action: "build-fail" }),
+    "TestCgoOptEmission", "stack-top"), /build failure/);
+});
+
+test("probe replacements fail on absent or duplicated targets", () => {
+  assert.equal(replaceOnce("before target after", "target", "new"), "before new after");
+  assert.throws(() => replaceOnce("none", "target", "new"), /exactly once/);
+  assert.throws(() => replaceOnce("target target", "target", "new"), /exactly once/);
+});
+
+
+test("manifest requirements are explicit and cannot be silently duplicated", () => {
+  const base = { version: 1, runtimeFamilies: [], benchmarks: [{ name, role: "target" }],
+    fixtures: [{ name: "ordinary", path: "src/cmd/cgo/internal/testlogos/testdata/cgoopt",
+      args: [], stdout: "ok" }] };
+  assert.equal(manifest(base), base);
+  assert.throws(() => manifest({ ...base, benchmarks: [] }), /no target/);
+  assert.throws(() => manifest({ ...base, fixtures: [] }), /no direct fixture/);
+  assert.throws(() => manifest({ ...base, benchmarks: [...base.benchmarks, ...base.benchmarks] }),
+    /duplicate benchmark/);
+  const family = { package: "runtime", prefix: "TestLogosCgoShape",
+    tests: ["TestLogosCgoShape"], allowSkippedOff: false };
+  assert.equal(manifest({ ...base, runtimeFamilies: [family] }).runtimeFamilies.length, 1);
+  assert.throws(() => manifest({ ...base, runtimeFamilies: [{ ...family, tests: ["TestUnrelated"] }] }),
+    /runtime test requirement/);
+});
+
+test("a terminal pass event alone does not prove the required test ran", () => {
+  assert.throws(() => goResults(events({ Action: "pass", Test: "TestLogosCgoShape" }),
+    { prefix: "TestLogosCgo" }), /did not execute/);
+});
