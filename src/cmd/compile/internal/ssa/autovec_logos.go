@@ -86,7 +86,7 @@ func autovecMatch(f *Func, h *Block) *autovecLoop {
 	back := b.Succs[0].i
 	entry := 1 - back
 	start, next := index.Args[entry], index.Args[back]
-	if start.Op != OpConst64 || start.AuxInt != 0 || next.Op != OpAdd64 || next.Block != b {
+	if next.Op != OpAdd64 || next.Block != b {
 		return nil
 	}
 	one := next.Args[1]
@@ -135,7 +135,7 @@ func autovecMatch(f *Func, h *Block) *autovecLoop {
 		ops: make(map[*Value]Op), bases: make(map[*Value]*Value),
 		covered: make(map[*Value]bool), dom: f.Sdom(),
 	}
-	if p.inside(p.predecessor.b) || !p.invariant(limit) || !p.invariant(mem.Args[entry]) {
+	if p.inside(p.predecessor.b) || !p.invariant(start) || !p.invariant(limit) || !p.invariant(mem.Args[entry]) {
 		return nil
 	}
 	for _, v := range []*Value{index, mem, h.Controls[0], next, one} {
@@ -311,7 +311,23 @@ func (p *autovecLoop) rewrite() {
 	safe := pre.NewValue1(pos, OpNot, typ.Bool, paniconfault)
 	zero := pre.NewValue0I(pos, OpConst64, p.index.Type, 0)
 	mask := pre.NewValue0I(pos, OpConst64, p.index.Type, -lanes)
-	limit := pre.NewValue2(pos, OpAnd64, p.index.Type, p.limit, mask)
+	start := p.index.Args[p.entryIndex]
+	var count, end *Value
+	if start.Op == OpConst64 && start.AuxInt == 0 {
+		// Keep the original zero-start path, including its simpler guard.
+		count = pre.NewValue2(pos, OpAnd64, p.index.Type, p.limit, mask)
+		end = count
+	} else {
+		active := pre.NewValue2(pos, OpLess64, typ.Bool, start, p.limit)
+		difference := pre.NewValue2(pos, OpSub64, p.index.Type, p.limit, start)
+		rounded := pre.NewValue2(pos, OpAnd64, p.index.Type, difference, mask)
+		count = pre.NewValue3(pos, OpCondSelect, p.index.Type, rounded, zero, active)
+		end = pre.NewValue2(pos, OpAdd64, p.index.Type, start, count)
+		// For start < limit, unsigned modular subtraction equals their exact
+		// nonnegative mathematical distance, even across signed overflow.
+		// Rounding down makes start+count lie in [start, limit]. For an
+		// inactive loop count is zero, so its vector loop cannot execute.
+	}
 	dst := p.bases[p.store.Args[0]]
 	var dstInt *Value
 	for _, source := range p.sources {
@@ -332,12 +348,12 @@ func (p *autovecLoop) rewrite() {
 		}
 		// Dividing the ordered distance avoids overflowing an end pointer or
 		// a trip-count multiplication. Equal bases are safe in-place maps.
-		disjoint := pre.NewValue2(pos, OpLeq64U, typ.Bool, limit, distance)
+		disjoint := pre.NewValue2(pos, OpLeq64U, typ.Bool, count, distance)
 		equal := pre.NewValue2(pos, OpEqPtr, typ.Bool, dst, source)
 		guard := pre.NewValue2(pos, OpOrB, typ.Bool, equal, disjoint)
 		safe = pre.NewValue2(pos, OpAndB, typ.Bool, safe, guard)
 	}
-	limit = pre.NewValue3(pos, OpCondSelect, p.index.Type, limit, zero, safe)
+	end = pre.NewValue3(pos, OpCondSelect, p.index.Type, end, start, safe)
 	h, b := f.NewBlock(BlockIf), f.NewBlock(BlockPlain)
 	h.Pos, b.Pos = p.header.Pos, p.body.Pos
 	h.Likely = BranchLikely
@@ -350,9 +366,9 @@ func (p *autovecLoop) rewrite() {
 	h.Succs = append(h.Succs, Edge{p.header, p.entryIndex})
 	p.header.Preds[p.entryIndex] = Edge{h, 1}
 	b.AddEdgeTo(h)
-	index := h.NewValue1(pos, OpPhi, p.index.Type, zero)
+	index := h.NewValue1(pos, OpPhi, p.index.Type, start)
 	mem := h.NewValue1(pos, OpPhi, types.TypeMem, initialMem)
-	h.SetControl(h.NewValue2(pos, OpLess64, typ.Bool, index, limit))
+	h.SetControl(h.NewValue2(pos, OpLess64, typ.Bool, index, end))
 	values := make(map[*Value]*Value, len(p.ops))
 	addresses := make(map[*Value]*Value, len(p.bases))
 	offset := index

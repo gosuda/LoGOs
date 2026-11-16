@@ -175,6 +175,20 @@ jobs:
           cat "$RUNNER_TEMP/autovec-evidence/shift-mutation.txt"
           grep -E 'missing vector operation ShiftAllRightInt(16x8|32x4)' "$RUNNER_TEMP/autovec-evidence/shift-mutation.txt"
           go test -count=1 -short cmd/compile/internal/ssa -run '^TestLogosAutovecExpressions$'
+      - name: "Prove the range oracle rejects absolute alias bounds"
+        if: "!cancelled() && steps.build.outcome == 'success'"
+        run: |
+          mutation="$RUNNER_TEMP/autovec-start-mutation"
+          mkdir "$mutation"
+          "$RUNNER_TEMP/autovec-overlay" cmd/compile/internal/ssa/autovec_logos.go 'OpLeq64U, typ.Bool, count, distance' 'OpLeq64U, typ.Bool, end, distance' "$mutation" > "$mutation/overlay.json"
+          if go test -count=1 -short -overlay="$mutation/overlay.json" cmd/compile/internal/ssa -run '^TestLogosAutovecInvariantStartAndAliasGuard$' > "$RUNNER_TEMP/autovec-evidence/start-mutation.txt" 2>&1; then
+            cat "$RUNNER_TEMP/autovec-evidence/start-mutation.txt"
+            printf 'absolute-bound mutation unexpectedly passed\n' >&2
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/autovec-evidence/start-mutation.txt"
+          grep -F 'bound=' "$RUNNER_TEMP/autovec-evidence/start-mutation.txt"
+          go test -count=1 -short cmd/compile/internal/ssa -run '^TestLogosAutovecInvariantStartAndAliasGuard$'
       - name: "Check native and ejected source with upstream Go"
         if: "!cancelled() && steps.build.outcome == 'success'"
         run: |
