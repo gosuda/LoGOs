@@ -4,10 +4,14 @@
 
 The declaration validator, M6-S3a, is in its third and final implementation
 attempt. Its grouped-local-scope correction passed the installed semantic
-gates, source tests, and corresponding mutation probe before the final full
-bootstrap. That bootstrap failed with exit 2 during toolchain2 after a
-compiler process was killed. Its cause is not established. A completed
-full bootstrap and the full Go regression remain required. The binding
+gates, source tests, and corresponding mutation probe. The subsequent
+hosted child builds and full LoGOs unit, script, testdir, and lint gates
+passed at `eaf5e3e`. The child's full upstream gate failed only the Wasm
+test runner's host-environment overflow and the REDTEAM ledger schema;
+acceptance repairs and a passing upstream gate for the combined head remain
+pending. The parent
+`08646b8` passed all seven hosted jobs, including the full Go regression.
+Earlier local bootstrap failures remain recorded below. The binding
 implementation, M6-S3b, is blocked and has been removed after its third
 implementation attempt failed installed-compiler tests on 2026-11-16.
 This follows G1's three-attempt limit, required by AGENTS.md. The binding-candidate sections
@@ -27,8 +31,14 @@ with SIGINT during toolchain3, exiting 130, to address the review finding.
 It did not pass. Final installed checks subsequently passed with the
 compiler identified below, before the separate full bootstrap failed.
 Those checks were not rerun on the compiler left by that failed bootstrap.
-Hosted gates remain blocked before checkout by Actions policy.
+The initial Actions-policy setup failures are historical: later hosted runs
+passed setup without any workflow-policy change.
 None of these validator results rehabilitates the rejected binding work.
+
+PR #63 was externally squash-merged into PR #54 as
+`447d6ad7ecff885efed74e14ed7b458f26eb11ea`, whose tree is identical to the
+tested child head `eaf5e3e41ce5585c1679e5537f32e71940e727ba`.
+That integration is into the parent PR branch, not `main`.
 
 The repair has two obligations. A default must be checked in the scope where
 it was declared, even if its type is never constructed. Applying that default
@@ -558,14 +568,26 @@ binary whose SHA-256 is
 The passing semantic gates above used compiler `784517d2` before this
 bootstrap. They were not rerun on the replacement compiler.
 
-Hosted gates are blocked before checkout by the effective Actions policy,
-which permits actions only from `gosuda`-owned repositories. Job
-`133361756118` in run `43885316645` rejects the pinned `actions/checkout`,
-`actions/setup-go`, and `actions/setup-node` references. All seven PR #54
-jobs fail setup; they do not report source-test failures. No approved
-owned replacements were found, and the policy remains unchanged.
-Package and script results do not replace the full Go regression floor.
-A successful full build and `./run.bash --no-rebuild` remain merge gates.
+Initial hosted setup failures rejected the pinned `actions/checkout`,
+`actions/setup-go`, and `actions/setup-node` references under the effective
+Actions policy; job `133361756118` records that earlier result. Subsequent
+parent retries and the child run passed setup. No workflow policy was
+changed.
+
+### Hosted verification and integration state
+
+| Published snapshot | Verified hosted outcome | Evidence |
+| --- | --- | --- |
+| Parent PR #54, `08646b895facb9194ec89acf5d1d8f291d338061` | All seven jobs passed. The full Go regression reported `ALL TESTS PASSED` at 17:03:41 UTC. | [Run 43885316645, regression job 133417552899](https://github.com/gosuda/LoGOs/actions/runs/43885316645/job/133417552899) |
+| Child PR #63, `eaf5e3e41ce5585c1679e5537f32e71940e727ba` | Full toolchain builds and full LoGOs unit, scripts, testdir, and lint gates passed. | [Run 43900579074](https://github.com/gosuda/LoGOs/actions/runs/43900579074) |
+| Same child, full upstream job | Failed only the Wasm host-environment overflow and `TestRedteamLedgerRows` schema errors. This is not a full upstream pass. | [Job 133415743672](https://github.com/gosuda/LoGOs/actions/runs/43900579074/job/133415743672) |
+
+The ledger repair supplies full proving-test paths in #402 and the required
+`Mechanism:` and `Gate:` labels in blocked rows #403–405. It changes no
+frozen test or implementation-attempt budget. The separate Wasm test-runner
+repair is tracked as M16-S1a and row #406, with no pass claimed yet.
+The combined head must still pass the full upstream gate after these acceptance
+repairs; the parent's passing regression does not establish that result.
 
 The original application-binding, private-field, and blank-lowering defects
 above remain unresolved. Two further language behaviors also remain outside
@@ -634,9 +656,11 @@ The helper-boundary tests depend on the internal API in the rejected
 snapshot; the patch alone is an attack archive, not a repaired compiler.
 
 Installed semantic checks passed for the final validator attempt before
-the unsuccessful full bootstrap, as recorded above. A completed full
-bootstrap and the full Go regression remain required despite the hosted
-policy block. No fourth binding repair was attempted.
+the unsuccessful local bootstrap; subsequent hosted child builds and
+LoGOs gates also passed. The combined head's full upstream gate still requires the
+Wasm test-runner and ledger-schema acceptance repairs recorded above.
+M6-S3b remains blocked under the third-attempt limit. No fourth binding
+repair was attempted.
 
 The exact allocation workload is also checked in as
 [struct-default-allocations.lgo](benchmarks/struct-default-allocations.lgo).
