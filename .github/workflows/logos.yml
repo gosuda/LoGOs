@@ -46,7 +46,7 @@ jobs:
       fail-fast: true
       matrix:
         # Share one toolchain build across the shorter suites.
-        suite: ["unit", "scripts"]
+        suite: ["unit", "scripts", "upstream"]
     defaults:
       run:
         shell: "bash"
@@ -73,11 +73,11 @@ jobs:
           go-version: "1.27.4"
           cache: false
       - uses: "actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1" # v7.1.0
-        if: "matrix.suite == 'scripts'"
+        if: "matrix.suite != 'unit'"
         with:
           node-version: "26.13.1"
       - name: "Install the upstream oracle toolchains"
-        if: "matrix.suite == 'scripts'"
+        if: "matrix.suite != 'unit'"
         run: |
           printf 'UPROOT1274=%s\n' "$(go env GOROOT)" >> "$GITHUB_ENV"
           while read -r version sha256 root; do
@@ -141,3 +141,45 @@ jobs:
         if: "${{ !cancelled() && steps.smoke.outcome == 'success' && matrix.suite == 'scripts' }}"
         run: |
           go test -count=1 -timeout 60m cmd/go -run 'Script/^logos_'
+
+      - name: "Run upstream regression gate"
+        if: "${{ !cancelled() && steps.smoke.outcome == 'success' && matrix.suite == 'upstream' }}"
+        run: |
+          ./run.bash --no-rebuild -k
+
+      - name: "Verify dogfood invariants"
+        if: "${{ !cancelled() && steps.smoke.outcome == 'success' && matrix.suite == 'unit' }}"
+        run: |
+          set -euo pipefail
+          go test -count=1 -short -race cmd/link/internal/ld cmd/go/internal/work cmd/go/internal/test
+          go test -count=1 -short go/types -run '^(TestGenerate|TestGoTypesPanicSourceShape)$'
+          go vet cmd/link/internal/ld cmd/go/internal/work cmd/go/internal/test go/types
+          unformatted=$(gofmt -l go/types/generate_test.go go/types/generate_panic_logos_test.go go/types/generate_panic_shape_logos_test.go cmd/go/internal/test/logos_experiment_env_test.go)
+          printf '%s\n' "$unformatted"
+          test -z "$unformatted"
+          go test -count=1 -short -race -timeout 20m cmd/go -run 'Script/^logos_test_(experiment_env|plugin_experiment|cache_experiment)$'
+
+      - name: "Verify regression negative controls"
+        if: "${{ !cancelled() && steps.smoke.outcome == 'success' && matrix.suite == 'unit' }}"
+        run: |
+          set -euo pipefail
+          mutation_dir=$(mktemp -d "$RUNNER_TEMP/logos-mutations.XXXXXX")
+          printf '{"Replace":{"%s":"%s"}}\n' "$GITHUB_WORKSPACE/src/cmd/go/internal/test/logos_env.go" "$GITHUB_WORKSPACE/logos-doc/validation/test-experiments-contract/original/logos_env.go" > "$mutation_dir/environment.json"
+          if go test -overlay="$mutation_dir/environment.json" -json -count=1 -short cmd/go/internal/test -run '^TestLogosTestExperiment(Env|Cache)$' > "$mutation_dir/environment.log" 2>&1; then
+            cat "$mutation_dir/environment.log"
+            exit 1
+          fi
+          cat "$mutation_dir/environment.log"
+          grep -F '"Test":"TestLogosTestExperimentEnv/default"' "$mutation_dir/environment.log" | grep -F '"Action":"fail"'
+          grep -F '"Test":"TestLogosTestExperimentCache/logos"' "$mutation_dir/environment.log" | grep -F '"Action":"fail"'
+          printf 'package types_test\n\nfunc goTypesPanicSource(src []byte) []byte { return src }\n' > "$mutation_dir/generator.go"
+          printf '{"Replace":{"%s":"%s"}}\n' "$GITHUB_WORKSPACE/src/go/types/generate_panic_logos_test.go" "$mutation_dir/generator.go" > "$mutation_dir/generator.json"
+          if go test -overlay="$mutation_dir/generator.json" -json -count=1 -short go/types -run '^TestGenerate$' > "$mutation_dir/generator.log" 2>&1; then
+            cat "$mutation_dir/generator.log"
+            exit 1
+          fi
+          cat "$mutation_dir/generator.log"
+          grep -F '"Test":"TestGenerate"' "$mutation_dir/generator.log" | grep -F '"Action":"fail"'
+          grep -F 'check.conf.Logos' "$mutation_dir/generator.log"
+          go test -count=1 -short cmd/go/internal/test -run '^TestLogosTestExperiment(Env|Cache)$'
+          go test -count=1 -short go/types -run '^(TestGenerate|TestGoTypesPanicSourceShape)$'
