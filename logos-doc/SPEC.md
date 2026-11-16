@@ -924,6 +924,8 @@ On amd64 each array-operator vector form MUST run only when the `simd/archsimd` 
 
 Direct ISA lowering is replaced by this two-form rule. [T-204.2]
 
+Unless the build target guarantees a feature, a check guarding a vector operation MUST continue to guard every feature-dependent instruction generated for that operation, including initialization, spills, and reloads. This preservation rule applies to Go and loGo/s packages. [T-303.ISA][R-U1]
+
 A Go package MUST get no array operator and no reduction method from this rule. It MAY use `simd/archsimd` under `GOEXPERIMENT=simd`. [T-204.2][R-U1]
 
 Reductions MUST use one fixed pairwise order in both forms, giving bit-identical results. [T-204.2]
@@ -1774,6 +1776,7 @@ On nonzero errCode the wrapper throws the message read from wasm memory. [T-Sec1
 - On amd64 that masked load MUST be VPMASKMOVD or VPMASKMOVQ for 32 and 64-bit elements, which need AVX2, and the zeroing K-masked VMOVDQU8 or VMOVDQU16 for 8 and 16-bit elements, which need AVX512. [T-303]
 - The amd64 vector form MUST run only when the archsimd CPU feature check its instructions need is true and MUST take the scalar loop when it is false, and the check MUST be omitted when the build's `GOAMD64` level guarantees the feature (`v3` for AVX2, `v4` for AVX512). [T-303]
 - On arm64, which has no masked load, the tail MUST load only the elements present. [T-303]
+- Optimization MUST preserve the CPU feature guards for vector initialization and memory operations as well as arithmetic. An unsupported instruction MUST NOT become reachable on the scalar fallback path. [T-303.ISA]
 - An integer slice sum MUST accumulate in vector lanes. [T-303]
 - A float slice sum MUST run the fixed pairwise order of Sec 1.4 over the loaded elements, so its bits equal the scalar form with and without `GOEXPERIMENT=simd`. [T-303][T-104.6]
 - A slice sum with a fused operation, or over an `int`, `uint`, or `uintptr` element, MUST take the scalar form. [T-303]

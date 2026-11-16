@@ -333,6 +333,17 @@ Model limits of generic assertion effects: CTFE-driven instantiations after chec
 
 The M15-S4 rows record the original focused implementation. Later rows identify the exact native GREEN and mutation evidence available when recorded. Full upstream regression and benchmark acceptance are separate gates tracked in issue #30 and PRs #31, #33, and #39.
 
+## SIMD CPU feature guards
+
+| ID | Attack | Milestone | Test | Status |
+| --- | --- | --- | --- | --- |
+| ISA-1 | Early commoning moves a SIMD zero ahead of its CPU check, so a baseline binary executes an unsupported instruction even on an empty input | M15-S7 | `ssa/zcse_simd_logos_test.go` (RED: all three widths moved to entry and independent guards shared a zero; GREEN: guarded zeros and ordinary dominated sharing pass); `run/simd_zero_guard.go` (RED: Nehalem faults at 256/512 bits and Haswell at 512 bits; rebuilt native execution and all six emulated width/model cases pass). An exact-removal overlay restores the original source and the three SSA failures, followed by a clean pass. | tested |
+| ISA-2 | A script confuses its build target with host capability, executes an unsupported v4 binary, or suppresses every execution to hide the failure | M15-A-S7 | `cmd/go/logos_script_cpu_test.go`; `logos_simd_feature_gate`, `logos_simd_gate_avx512`, and `logos_simd_gate_branch` scripts (RED: missing host-condition registration in the unit and all three scripts; GREEN: valid/invalid levels, target-environment independence, unchanged assembly checks, and positive host execution pass normally and with race detection). A deny-all overlay fails the frozen host unit, followed by a clean pass. | tested |
+
+These checks cover the inherited explicit-SIMD defect exposed by the full regression of PR #39. The observed loGo/s crash and a plain-Go public-API reproducer both fail at `GOAMD64=v1`, where the automatic vectorizer returns before matching. The first moving pass is `zero arg cse`, established from consecutive SSA dumps. After the fix, the unchanged loGo/s reproducer passes natively and under both emulated CPUs, matching all 72 scalar-output lines. A masked feature flag on an AVX-512-capable CPU still executes the unsafe baseline successfully and is not evidence of instruction-set safety. The emulator artifact is pinned to SHA-256 `7132ffd39aef71c26d3344cc0c7dffc530e10e3e720c58c8279a97ef6fdd7784`.
+
+Full upstream and long SIMD standard-library acceptance remain separate gates recorded in issue #30 and the linked stability PR. The earlier runtime lock-profile timeout is a distinct retained failure; this repair does not claim to resolve that timeout.
+
 ## Cgo benchmark input validity
 
 The old `BenchmarkFastcall` recurrence caused signed C overflow.

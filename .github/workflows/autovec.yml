@@ -6,6 +6,11 @@ name: "autovec stability"
       - ".github/workflows/autovec.yml"
       - "src/cmd/compile/internal/ssa/autovec*"
       - "src/cmd/compile/internal/ssa/compile.go"
+      - "src/cmd/compile/internal/ssa/zcse*"
+      - "src/cmd/go/logos_script*"
+      - "src/cmd/go/scriptconds_test.go"
+      - "src/cmd/go/testdata/script/logos_simd_*"
+      - "test/logos/run/simd_zero_guard*"
       - "src/cmd/compile/internal/ssagen/ssa.go"
       - "src/cmd/compile/internal/typecheck/_builtin/runtime.go"
       - "src/cmd/compile/internal/typecheck/builtin.go"
@@ -58,6 +63,7 @@ jobs:
         continue-on-error: true
         run: |
           files=(cmd/compile/internal/ssa/autovec*.go cmd/compile/internal/ssa/testdata/autovec*.go ../test/logos/run/autovec*.go ../test/logos/codegen/autovec*.go runtime/autovec*.go runtime/export_autovec_logos_test.go cmd/compile/internal/ssagen/ssa.go cmd/compile/internal/typecheck/_builtin/runtime.go cmd/compile/internal/typecheck/builtin.go)
+          files+=(cmd/compile/internal/ssa/zcse.go cmd/compile/internal/ssa/zcse_simd_logos_test.go cmd/go/logos_script_test.go cmd/go/logos_script_cpu_test.go cmd/go/scriptconds_test.go ../test/logos/run/simd_zero_guard.go)
           gofmt -d "${files[@]}" | tee "$RUNNER_TEMP/autovec-evidence/gofmt.diff"
           (cd cmd/compile/internal/typecheck && go run mkbuiltin.go -stdout) > "$RUNNER_TEMP/autovec-evidence/builtin.generated.go"
           builtin_diff_status=0
@@ -91,7 +97,9 @@ jobs:
         if: "!cancelled() && steps.build.outcome == 'success'"
         run: |
           go test -count=1 -short cmd/compile/internal/ssa
-          go vet cmd/compile/internal/ssa cmd/compile/internal/ssagen cmd/compile/internal/typecheck runtime
+          go vet cmd/compile/internal/ssa cmd/compile/internal/ssagen cmd/compile/internal/typecheck runtime cmd/go
+          go test -count=1 -short cmd/go -run '^TestLogosScriptHostAMD64$'
+          go test -count=1 -short -race cmd/go -run '^TestLogosScriptHostAMD64$'
           go test -count=1 -short runtime -run TestLogosAutovecPanicOnFault
           go test -count=1 -short -race runtime -run TestLogosAutovecPanicOnFault
           GOEXPERIMENT=simd GOAMD64=v3 go test -count=1 -timeout 20m cmd/internal/testdir -run '^Test$/^logos$/^(codegen|run)$/^autovec' -all_codegen
@@ -107,6 +115,35 @@ jobs:
           GOEXPERIMENT=simd GOAMD64=v3 go run -gcflags=-d=ssa/autovec/off "$fixture"
           GOEXPERIMENT=none go run "$fixture"
           GOEXPERIMENT=simd GOAMD64=v3 go run -race "$fixture"
+      - name: "Execute SIMD guards without AVX or AVX-512"
+        if: "!cancelled() && steps.build.outcome == 'success' && matrix.arch == 'amd64'"
+        run: |
+          qemu_dir="$RUNNER_TEMP/autovec-qemu"
+          mkdir "$qemu_dir"
+          curl --fail --silent --show-error --location --output "$qemu_dir/qemu-x86_64" https://github.com/multiarch/qemu-user-static/releases/download/v7.2.0-1/qemu-x86_64-static
+          printf '%s  %s\n' 7132ffd39aef71c26d3344cc0c7dffc530e10e3e720c58c8279a97ef6fdd7784 "$qemu_dir/qemu-x86_64" | sha256sum --check --strict -
+          chmod +x "$qemu_dir/qemu-x86_64"
+          "$qemu_dir/qemu-x86_64" --version | tee "$RUNNER_TEMP/autovec-evidence/qemu-version.txt"
+          printf '%s\n' "$qemu_dir" >> "$GITHUB_PATH"
+          fixture=../test/logos/run/simd_zero_guard.go
+          GOEXPERIMENT=simd GOAMD64=v1 go build -o "$RUNNER_TEMP/simd-zero-guard" "$fixture"
+          "$RUNNER_TEMP/simd-zero-guard"
+          for cpu in Nehalem Haswell; do
+            for width in 128 256 512; do
+              printf 'CPU=%s width=%s\n' "$cpu" "$width"
+              "$qemu_dir/qemu-x86_64" -cpu "$cpu" "$RUNNER_TEMP/simd-zero-guard" "$width"
+            done
+          done | tee "$RUNNER_TEMP/autovec-evidence/simd-cpu-guards.txt"
+      - name: "Check host execution gates and target assembly"
+        if: "!cancelled() && steps.build.outcome == 'success' && matrix.arch == 'amd64'"
+        run: |
+          selection='^TestScript$/^(README|logos_simd_gate_avx512|logos_simd_feature_gate|logos_simd_gate_branch|logos_simd_gate_noavx_qemu)$'
+          go test -count=1 -short -timeout 20m cmd/go -run "$selection"
+          go test -count=1 -short -race -timeout 20m cmd/go -run "$selection"
+          # This exercises the host-condition false branch. The QEMU leg above
+          # separately proves that unsupported instructions are never executed.
+          GOAMD64=v1 GODEBUG=cpu.avx512f=off go test -count=1 -short -timeout 20m cmd/go -run '^TestLogosScriptHostAMD64$'
+          GOAMD64=v1 GODEBUG=cpu.avx512f=off go test -count=1 -short -timeout 20m cmd/go -run '^TestScript$/^logos_simd_gate_avx512$'
       - name: "Check synchronous GC in the vector loop"
         if: "!cancelled() && steps.build.outcome == 'success'"
         run: |
@@ -117,6 +154,34 @@ jobs:
         if: "!cancelled() && steps.build.outcome == 'success'"
         run: |
           go build -o "$RUNNER_TEMP/autovec-overlay" cmd/compile/internal/ssa/testdata/autovec_overlay.go
+      - name: "Prove SIMD zero guards reject entry hoisting"
+        if: "!cancelled() && steps.build.outcome == 'success'"
+        run: |
+          mutation="$RUNNER_TEMP/simd-zero-mutation"
+          mkdir "$mutation"
+          "$RUNNER_TEMP/autovec-overlay" cmd/compile/internal/ssa/zcse.go 'v.Op == OpZeroSIMD' 'v.Op == OpZeroSIMD && false' "$mutation" > "$mutation/overlay.json"
+          if go test -count=1 -short -overlay="$mutation/overlay.json" cmd/compile/internal/ssa -run '^TestZCSEPreservesSIMDZeroGuards$' > "$RUNNER_TEMP/autovec-evidence/simd-zero-mutation.txt" 2>&1; then
+            cat "$RUNNER_TEMP/autovec-evidence/simd-zero-mutation.txt"
+            printf 'SIMD zero-hoisting mutation unexpectedly passed\n' >&2
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/autovec-evidence/simd-zero-mutation.txt"
+          grep -F 'independently guarded SIMD stores share a zero' "$RUNNER_TEMP/autovec-evidence/simd-zero-mutation.txt"
+          go test -count=1 -short cmd/compile/internal/ssa -run '^(TestZCSE|TestZCSEPreservesSIMDZeroGuards|TestCSECommonsSIMDZeroWithinGuard)$'
+      - name: "Prove host gating cannot suppress every execution"
+        if: "!cancelled() && steps.build.outcome == 'success' && matrix.arch == 'amd64'"
+        run: |
+          mutation="$RUNNER_TEMP/simd-host-mutation"
+          mkdir "$mutation"
+          "$RUNNER_TEMP/autovec-overlay" cmd/go/logos_script_test.go 'return host >= level, nil' 'return host >= level && false, nil' "$mutation" > "$mutation/overlay.json"
+          if go test -count=1 -short -overlay="$mutation/overlay.json" cmd/go -run '^TestLogosScriptHostAMD64$' > "$RUNNER_TEMP/autovec-evidence/simd-host-mutation.txt" 2>&1; then
+            cat "$RUNNER_TEMP/autovec-evidence/simd-host-mutation.txt"
+            printf 'host-condition suppression mutation unexpectedly passed\n' >&2
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/autovec-evidence/simd-host-mutation.txt"
+          grep -F 'host-amd64:v1 = false, want true' "$RUNNER_TEMP/autovec-evidence/simd-host-mutation.txt"
+          go test -count=1 -short cmd/go -run '^TestLogosScriptHostAMD64$'
       - name: "Prove the memory test catches a widened tail"
         if: "!cancelled() && steps.build.outcome == 'success'"
         run: |
@@ -277,7 +342,7 @@ jobs:
       - name: "Run the complete upstream regression gate"
         if: "!cancelled() && steps.build.outcome == 'success'"
         run: |
-          GO_TEST_TIMEOUT_SCALE=3 ./run.bash --no-rebuild
+          GO_TEST_TIMEOUT_SCALE=4 ./run.bash --no-rebuild
       - name: "Run the SIMD-enabled standard library"
         if: "!cancelled() && steps.build.outcome == 'success'"
         run: |
