@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"runtime/pprof"
 	"strconv"
 	"strings"
@@ -432,7 +433,22 @@ func selfTestBin(t *testing.T) string {
 	requireCgo(t)
 	bin := filepath.Join(t.TempDir(), "testlogos.test")
 	srcCmd := filepath.Join(runtime.GOROOT(), "src", "cmd")
-	args := append([]string{"test", "-c", "-o", bin}, cgoSpanToolFlags(t)...)
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		t.Fatal("self build requires embedded build settings")
+	}
+	experiment := ""
+	args := []string{"test", "-c", "-o", bin, "-race=false", "-asan=false", "-msan=false"}
+	for _, setting := range info.Settings {
+		switch setting.Key {
+		case "GOEXPERIMENT":
+			experiment = setting.Value
+		case "-race", "-asan", "-msan":
+			args = append(args, setting.Key+"="+setting.Value)
+		}
+	}
+	t.Setenv("GOENV", "off")
+	t.Setenv("GOEXPERIMENT", experiment)
 	out, err := runCmd(t, srcCmd, goBin(t), append(args, "cmd/cgo/internal/testlogos")...)
 	if err != nil {
 		t.Fatalf("self build: %v\n%s", err, out)
