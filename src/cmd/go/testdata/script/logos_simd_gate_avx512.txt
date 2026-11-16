@@ -103,6 +103,24 @@ var levelFlags = map[byte][]string{
 	'4': {"avx512f", "avx512bw", "avx512cd", "avx512dq", "avx512vl"},
 }
 
+// /proc/cpuinfo spells some feature names differently from the
+// GOAMD64 docs: SSE3 reports as pni, LZCNT as abm, and OSXSAVE as
+// xsave. Each entry lists every accepted spelling.
+var flagNames = map[string][]string{
+	"sse3":    {"sse3", "pni"},
+	"lzcnt":   {"lzcnt", "abm"},
+	"osxsave": {"osxsave", "xsave"},
+}
+
+func hasFlag(set map[string]bool, f string) bool {
+	for _, name := range flagNames[f] {
+		if set[name] {
+			return true
+		}
+	}
+	return set[f]
+}
+
 func main() {
 	if len(os.Args) != 3 || len(os.Args[1]) != 2 || os.Args[1][0] != 'v' {
 		fmt.Fprintln(os.Stderr, "usage: runmin v<level> <binary>")
@@ -129,7 +147,7 @@ func main() {
 	}
 	for lvl := byte('2'); lvl <= os.Args[1][1]; lvl++ {
 		for _, f := range levelFlags[lvl] {
-			if !set[f] {
+			if !hasFlag(set, f) {
 				fmt.Println("host below " + os.Args[1])
 				return
 			}
