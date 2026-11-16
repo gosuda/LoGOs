@@ -4,7 +4,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { timing, benchmarkRows, assessRow, goResults, expectedRed, replaceOnce, verdict, manifest } from "./check.mjs";
+import { timing, benchmarkRows, assessRow, goResults, expectedRed, replaceOnce, verdict, manifest, goFailureSummary } from "./check.mjs";
 
 const name = "BenchmarkCgoOptNocallback";
 const iterations = 40000000;
@@ -113,4 +113,37 @@ test("manifest requirements are explicit and cannot be silently duplicated", () 
 test("a terminal pass event alone does not prove the required test ran", () => {
   assert.throws(() => goResults(events({ Action: "pass", Test: "TestLogosCgoShape" }),
     { prefix: "TestLogosCgo" }), /did not execute/);
+});
+
+
+test("an early failed diagnostic survives a long passing suffix", () => {
+  const early = events(
+    { Action: "run", Package: "runtime", Test: "TestLogosCgoAddress/eligible" },
+    { Action: "output", Package: "runtime", Test: "TestLogosCgoAddress/eligible",
+      Output: "    address_test.go:42: pointer-free address was rejected\n" },
+    { Action: "fail", Package: "runtime", Test: "TestLogosCgoAddress/eligible" });
+  const suffix = Array(2000).fill(events(
+    { Action: "output", Package: "runtime", Test: "TestOther", Output: "passing output\n" },
+    { Action: "pass", Package: "runtime", Test: "TestOther" })).join("\n");
+  const summary = goFailureSummary(early + "\n" + suffix);
+  assert.equal(summary.length, 1);
+  assert.equal(summary[0].test, "TestLogosCgoAddress/eligible");
+  assert.equal(summary[0].diagnostics[0], "address_test.go:42: pointer-free address was rejected");
+});
+
+test("failure summaries retain each failed test and bound assembly diagnostics", () => {
+  const summary = goFailureSummary("not JSON\n" + events(
+    { Action: "output", Package: "p", Test: "TestOne/sub", Output: "=== RUN   TestOne/sub\n" },
+    { Action: "output", Package: "p", Test: "TestOne/sub",
+      Output: "file.go:4: wrong lookup count\n" + "x".repeat(1000) + "\nassembly 2\nassembly 3\n" },
+    { Action: "fail", Package: "p", Test: "TestOne/sub" },
+    { Action: "fail", Package: "p", Test: "TestOne" },
+    { Action: "output", Package: "p", Test: "TestTwo", Output: "other.go:9: wrong eligibility\n" },
+    { Action: "fail", Package: "p", Test: "TestTwo" }));
+  assert.equal(summary.length, 3);
+  assert.equal(summary[0].diagnostics.length, 3);
+  assert.equal(summary[0].diagnostics[1].length, 200);
+  assert.equal(summary[1].test, "TestOne");
+  assert.equal(summary[1].diagnostics.length, 0);
+  assert.equal(summary[2].diagnostics[0], "other.go:9: wrong eligibility");
 });

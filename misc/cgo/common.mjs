@@ -7,6 +7,7 @@ import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { goFailureSummary } from "./check.mjs";
 
 export const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 export const go = join(root, "bin/go");
@@ -63,7 +64,13 @@ export function run(command, args, { env, cwd = root, log, allowFailure = false,
     status: result.status, signal: result.signal, error: result.error?.message || null });
   if (result.error) throw result.error;
   if (result.status !== 0 && !allowFailure) {
-    console.error((result.stdout || "").slice(-12000) + (result.stderr || "").slice(-12000));
+    const failures = goFailureSummary(result.stdout || "");
+    if (failures.length > 0) {
+      console.error("Go test failures:\n" + JSON.stringify(failures, null, 2));
+      if (result.stderr) console.error(result.stderr.slice(-6000));
+    } else {
+      console.error((result.stdout || "").slice(-12000) + (result.stderr || "").slice(-12000));
+    }
     throw new Error(command + " exited " + result.status + "; see " + log);
   }
   return { status: result.status, stdout: result.stdout || "", stderr: result.stderr || "" };
