@@ -49,8 +49,10 @@ class Workspace:
 def workspace(tmp_path: Path) -> Workspace:
     repo, evidence = tmp_path / "repository", tmp_path / "evidence"
     (repo / "src").mkdir(parents=True)
+    (repo / "test").mkdir()
     evidence.mkdir()
     (repo / "src/input.txt").write_text("tracked source\n")
+    (repo / "test/input.txt").write_text("tracked compiler fixture\n")
     for name in TOOLS:
         target = repo / name
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -66,7 +68,7 @@ def workspace(tmp_path: Path) -> Workspace:
     result.git("init", "--quiet", "--initial-branch=main")
     result.git("config", "user.name", "Receipt test")
     result.git("config", "user.email", "receipt-test@example.invalid")
-    result.git("add", "src/input.txt")
+    result.git("add", "src/input.txt", "test/input.txt")
     result.git("commit", "--quiet", "-m", "Record inert test source")
     return result
 
