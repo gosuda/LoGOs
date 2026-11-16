@@ -6,6 +6,7 @@ package main_test
 
 import (
 	"cmd/go/internal/cfg"
+	"cmd/go/internal/logos/config"
 	"cmd/internal/script"
 	"cmd/internal/script/scripttest"
 	"errors"
@@ -43,6 +44,17 @@ func scriptConditions(t *testing.T) map[string]script.Cond {
 	add("cc", script.PrefixCondition("go env CC = <suffix> (ignoring the go/env file)", ccIs))
 	add("git", lazyBool("the 'git' executable exists and provides the standard CLI", hasWorkingGit))
 	add("git-sha256", script.OnceCondition("the local 'git' version is recent enough to support sha256 object/commit hashes", gitSupportsSHA256))
+	add("host-simd", script.OnceCondition("host can execute GOEXPERIMENT=simd output (arm64 always; amd64 needs GOAMD64 v4)", func() (bool, error) {
+		switch runtime.GOARCH {
+		case "arm64":
+			return true, nil // NEON is the arm64 baseline; no host guard needed
+		case "amd64":
+			host, _ := config.ArchLevels("native")
+			return host >= "v4", nil
+		default:
+			return false, nil
+		}
+	}))
 	add("trimpath", script.OnceCondition("test binary was built with -trimpath", isTrimpath))
 	add("default-cgo", lazyBool("when CGO_ENABLED=1|0 was set in make.bash", defaultCgo))
 	add("wasmfx", script.OnceCondition("node runs WebAssembly stack switching (cont.new/resume)", hasWasmFx))
