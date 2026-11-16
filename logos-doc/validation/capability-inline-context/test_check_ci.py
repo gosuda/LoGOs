@@ -25,14 +25,14 @@ class Checker(Protocol):
 
 @pytest.fixture
 def checker() -> Checker:
-    # Evaluate only the embedded checker, never the shell or a Go command.
+    # Evaluate the repository-owned checker; no shell or Go command runs.
     runner = Path(__file__).with_name("check_ci.sh")
     parts = runner.read_text().split("<<'PY'\n")
     assert len(parts) == 2
     source, separator, _ = parts[1].partition("\nPY\n")
     assert separator
     module = ModuleType("inline_context_checker")
-    exec(compile(source, str(runner), "exec"), module.__dict__)
+    exec(compile(source, str(runner), "exec"), module.__dict__)  # noqa: S102
     return cast(Checker, module)
 
 
