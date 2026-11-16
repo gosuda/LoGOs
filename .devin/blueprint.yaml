@@ -11,6 +11,9 @@ initialize: |
     tar -C "$HOME/go-bootstrap" --strip-components=1 -xzf /tmp/go.tgz
   fi
   (cd src && GOROOT_BOOTSTRAP=$HOME/go-bootstrap ./make.bash)
+# $ENVRC is reset when initialize is skipped on differential builds, so PATH
+# lives in maintenance to be restored for every build kind.
+maintenance: |
   echo "PATH=$(pwd)/bin:$PATH" >> $ENVRC
 knowledge:
   - name: test
