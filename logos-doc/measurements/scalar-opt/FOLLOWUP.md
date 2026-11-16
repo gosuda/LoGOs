@@ -109,11 +109,26 @@ remain part of the evidence.
 
 The parent PR's [full CI rerun](https://github.com/gosuda/LoGOs/actions/runs/43841164938)
 passed testdir but failed regression in three SIMD command scripts. Two failures
-executed v4-targeted helpers on a host without v4. The third executed an AVX-512
-instruction from a baseline-targeted SIMD slice program. That correctness failure
-requires the separate investigation and repair in
-[issue #51](https://github.com/gosuda/LoGOs/issues/51); this scalar follow-up does
-not claim to resolve it.
+tried to execute v4-targeted binaries on a host without v4. The third executed an
+unsupported AVX-512 instruction in a SIMD slice program. The job's outer target
+setting does not establish that program's target: script tests reset the
+environment, and the unchanged slice script uses the driver's default target.
+A separate nested-sum reproducer explicitly sets `GOAMD64=v1` and confirms that
+vector initialization can escape its runtime feature guard at that baseline.
+
+[Issue #51](https://github.com/gosuda/LoGOs/issues/51) tracks the correctness
+dependency. The broader repair in [PR #54](https://github.com/gosuda/LoGOs/pull/54)
+addresses both zero-entry hoisting and short-arm SIMD speculation by branch
+elimination. Nested reductions alone do not test that second path. The scalar
+fact-closure changes do not resolve either defect, and a fresh complete
+regression pass remains required before merge. The independent zero-only repair
+is superseded by #54; its focused SSA results are not an installed-compiler or
+full-regression pass.
+
+The follow-up's own [CI run](https://github.com/gosuda/LoGOs/actions/runs/43855555345)
+at `635b0126` subsequently failed the same three scripts in its full regression
+job (`cmd/go`, 1672.425 seconds). Its separate testdir, lint, and scripts jobs
+passed. Those passes do not replace the failed full-regression gate.
 
 ## Incremental runtime measurements
 
@@ -196,6 +211,24 @@ three-second target. It failed to calibrate within five attempts and produced
 no timing distribution. This failed retry is recorded separately. No old baseline
 was reused, no samples were pooled across campaigns, and no compiler-cost gain
 is claimed.
+
+## Input retention audit
+
+On 2026-11-16, a separate SIMD repair rebuild exhausted disk space. Clearing the
+task's build cache also removed imported package archives referenced by these
+compiler measurements. Sources, manifests, measured executables, profiles, and
+numeric results were retained.
+
+The follow-up's 81 unique imported archives were regenerated using the retained
+measurement driver and candidate compiler, with the original plain export-list
+preparation at `GOAMD64=v2`. Every one of the 94 unique inputs across the three unchanged
+input manifests matched its original SHA-256 afterward. The archives were also
+copied outside the build cache and verified again. No benchmark was rerun, no
+historical manifest was rewritten, and no timing sample changed.
+
+This restoration covers the follow-up main campaign and its JSON calibration
+retry. It does not restore the earlier campaign's archives; that separate
+retention gap is recorded in [VALIDATION.md](VALIDATION.md#historical-input-retention).
 
 ## Reproduce a fresh comparison
 
