@@ -61,7 +61,7 @@ cmp ../out/bridge/bridge.go ../out-fast/bridge/bridge.go
 # The frontend-only mode must require an eject destination. It must not
 # silently turn an ordinary compiler invocation into a successful build.
 ! go tool compile -logos.cgoeject ../invalid.lgo
-stderr 'logos.cgoeject requires logos.eject'
+stdout 'logos.cgoeject requires logos.eject'
 
 -- m/go.mod --
 module example.com/directcgo

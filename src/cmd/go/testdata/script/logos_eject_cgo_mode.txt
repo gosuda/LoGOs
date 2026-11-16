@@ -2,19 +2,19 @@
 env GOTOOLCHAIN=local
 
 ! go tool compile -logos.cgoeject -logos.eject=$WORK/plain-out plain/main.go
-stderr 'logos.cgoeject requires original loGo/s cgo sources'
+stdout 'logos.cgoeject requires original loGo/s cgo sources'
 ! exists plain-out
 
 ! go tool compile -logos.cgoeject -logos.eject=$WORK/lgo-out lgo/main.lgo
-stderr 'logos.cgoeject requires original loGo/s cgo sources'
+stdout 'logos.cgoeject requires original loGo/s cgo sources'
 ! exists lgo-out
 
 ! go tool compile -logos.cgoeject -logos.eject=$WORK/missing-out cgo/main.lgo
-stderr 'main.lgo:4:.*undefined: C.int'
+stdout 'main.lgo:4:.*undefined: C.int'
 ! exists missing-out
 
 ! go tool compile -logos.cgoeject -logos.eject=$WORK/wrong-out cgo/wrong.lgo cgo/_cgo_gotypes.go
-stderr 'wrong.lgo:4:.*cannot use "bad"'
+stdout 'wrong.lgo:4:.*cannot use "bad"'
 ! exists wrong-out
 
 go tool compile -p p -o source.o -logos.cgoeject -logos.eject=$WORK/valid-out cgo/main.lgo cgo/_cgo_gotypes.go
