@@ -104,39 +104,48 @@ type AllocFreeFact struct {
 }
 
 type Facts struct {
-	Fingerprint  goobj.FingerprintType
-	Opts         []PathFact
-	Consts       []PathFact
-	Fns          []FnFact
-	Readonlys    []ReadonlyFact
-	Props        []PropFact
-	Conforms     []ConformsFact
-	Comptimes    []ComptimeFact
-	ConstFuncs   []ConstFuncFact
-	ConstMaps    []ConstMapFact
-	ConstComps   []string
-	Defaults     []DefaultFact
-	Locks        []LockFact
-	AllocFrees   []AllocFreeFact
-	JsonMetas    []JsonMetaFact
-	JsonKeys     []JsonKeyFact
-	UnionMembers []UnionMemberFact
-	BareUnions   []string
-	GoPackage    bool
+	Fingerprint    goobj.FingerprintType
+	Opts           []PathFact
+	Consts         []PathFact
+	Fns            []FnFact
+	Readonlys      []ReadonlyFact
+	Props          []PropFact
+	Conforms       []ConformsFact
+	Comptimes      []ComptimeFact
+	ConstFuncs     []ConstFuncFact
+	ConstMaps      []ConstMapFact
+	ConstComps     []string
+	Defaults       []DefaultFact
+	DefaultHelpers []DefaultHelperFact
+	Locks          []LockFact
+	AllocFrees     []AllocFreeFact
+	JsonMetas      []JsonMetaFact
+	JsonKeys       []JsonKeyFact
+	UnionMembers   []UnionMemberFact
+	BareUnions     []string
+	GoPackage      bool
 }
 
 func (f *Facts) empty() bool {
 	return len(f.Opts) == 0 && len(f.Consts) == 0 && len(f.Fns) == 0 &&
 		len(f.Readonlys) == 0 && len(f.Props) == 0 && len(f.Conforms) == 0 &&
-		len(f.Comptimes) == 0 && len(f.ConstFuncs) == 0 && len(f.Defaults) == 0 &&
+		len(f.Comptimes) == 0 && len(f.ConstFuncs) == 0 && len(f.Defaults) == 0 && len(f.DefaultHelpers) == 0 &&
 		len(f.Locks) == 0 && len(f.AllocFrees) == 0 && len(f.JsonMetas) == 0 &&
 		len(f.JsonKeys) == 0 && len(f.UnionMembers) == 0 && len(f.BareUnions) == 0 && len(f.ConstMaps) == 0 && len(f.ConstComps) == 0 && !f.GoPackage
 }
 
+// DefaultFact describes a field default. Importers must not reparse Text in
+// their own scope; the matching DefaultHelperFact preserves producer bindings.
 type DefaultFact struct {
 	Type  string
 	Field string
 	Text  string
+}
+
+// DefaultHelperFact names the producer function that fills omitted fields.
+type DefaultHelperFact struct {
+	Type   string
+	Helper string
 }
 
 type JsonMetaFact struct {
@@ -268,6 +277,11 @@ func Encode(fp goobj.FingerprintType, f *Facts) []byte {
 		for _, d := range f.Defaults {
 			if d.Type != "" && d.Field != "" && d.Text != "" {
 				recs = append(recs, factRecord{line: "default " + d.Type + " " + d.Field + " " + strconv.Itoa(len(d.Text)), body: []byte(d.Text)})
+			}
+		}
+		for _, d := range f.DefaultHelpers {
+			if isIdent(d.Type) && isIdent(d.Helper) && strings.HasPrefix(d.Helper, "Logos_") {
+				recs = append(recs, factRecord{line: "defaulthelper " + d.Type + " " + d.Helper})
 			}
 		}
 		for _, l := range f.Locks {
@@ -596,7 +610,10 @@ func Decode(data []byte) (*Facts, error) {
 		if line == "" {
 			return nil, fmt.Errorf("logos facts line %d: blank line", ln)
 		}
-		if line <= prev {
+		fields := strings.Fields(line)
+		defaultHelper := len(fields) > 0 && fields[0] == "defaulthelper"
+		// Repeated helper lines reach the keyed duplicate check below.
+		if line < prev || line == prev && !defaultHelper {
 			return nil, fmt.Errorf("logos facts line %d: unsorted records (%q after %q)", ln, line, prev)
 		}
 		prev = line
@@ -606,8 +623,21 @@ func Decode(data []byte) (*Facts, error) {
 			}
 			continue
 		}
-		fields := strings.Fields(line)
 		switch {
+		case defaultHelper:
+			if len(fields) != 3 {
+				return nil, fmt.Errorf(`logos facts line %d: bad defaulthelper record %q (want "defaulthelper <type> <helper>")`, ln, line)
+			}
+			if !isIdent(fields[1]) {
+				return nil, fmt.Errorf("logos facts line %d: bad defaulthelper type %q", ln, fields[1])
+			}
+			if !isIdent(fields[2]) || !strings.HasPrefix(fields[2], "Logos_") {
+				return nil, fmt.Errorf("logos facts line %d: bad defaulthelper name %q (want a Logos_ identifier)", ln, fields[2])
+			}
+			if err := d.dup(ln, "defaulthelper", fields[1], fields[1]); err != nil {
+				return nil, err
+			}
+			f.DefaultHelpers = append(f.DefaultHelpers, DefaultHelperFact{Type: fields[1], Helper: fields[2]})
 		case strings.HasPrefix(line, "opt ") || strings.HasPrefix(line, "const ") || strings.HasPrefix(line, "readonly "):
 			if len(fields) != 3 {
 				return nil, fmt.Errorf("logos facts line %d: bad %s record %q (want %q)", ln, fields[0], line, fields[0]+" <object> <path>")
@@ -993,6 +1023,17 @@ func Import(path, exportData string, member []byte) (*Facts, error) {
 	copy(want[:], exportData[len(exportData)-len(want):])
 	if f.Fingerprint != want {
 		return nil, fmt.Errorf("logos: stale facts for %s (fingerprint mismatch)", path)
+	}
+	if len(f.Defaults) > 0 {
+		helpers := make(map[string]bool, len(f.DefaultHelpers))
+		for _, h := range f.DefaultHelpers {
+			helpers[h.Type] = true
+		}
+		for _, d := range f.Defaults {
+			if !helpers[d.Type] {
+				return nil, fmt.Errorf("logos: bad facts for %s: missing default helper for %q; rebuild dependency with this compiler", path, d.Type)
+			}
+		}
 	}
 	importedMu.Lock()
 	defer importedMu.Unlock()

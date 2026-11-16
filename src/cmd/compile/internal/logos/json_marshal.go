@@ -847,7 +847,7 @@ func (fl *fileLower) modelNamedStruct(named *types2.Named) *jsonStruct {
 	for i := range vars {
 		vars[i] = st.Field(i)
 	}
-	return fl.buildJSONStruct(named.Obj().Name(), st, vars)
+	return fl.buildJSONStruct(named, vars)
 }
 
 type jsonInstType struct {

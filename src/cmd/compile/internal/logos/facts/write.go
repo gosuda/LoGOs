@@ -18,7 +18,7 @@ func Write(pkg *types2.Package, info *types2.Info, files []*syntax.File, src map
 	}
 	writeOpts(pkg, f)
 	writeConsts(pkg, info, files, f)
-	writeDefaults(pkg, info, f)
+	writeDefaults(pkg, info, files, f)
 	writeConstFuncs(pkg, info, files, src, f)
 	writeProps(pkg, info, f)
 	writeJSON(pkg, info, f)
