@@ -37,6 +37,8 @@ jobs:
           - suite: "unit"
             run: |
               go test -count=1 -short $LOGOS_PACKAGES
+              go test -count=1 -short cmd/compile/internal/ssa
+              go test -count=1 cmd/compile/internal/test -run '^TestLogosScalarOptimizationRuntime$'
               go test -count=1 -race logos/... cmd/go/internal/logos/lsp/...
           - suite: "scripts"
             run: |
@@ -44,6 +46,9 @@ jobs:
           - suite: "testdir"
             run: |
               go test -count=1 -timeout 60m cmd/internal/testdir -run 'Test/logos/'
+          - suite: "regression"
+            run: |
+              ./run.bash --no-rebuild
           - suite: "lint"
             run: |
               unformatted=$(gofmt -l logos internal/logosfile cmd/go/internal/logos cmd/compile/internal/logos cmd/internal/logos cmd/internal/logosowned cmd/cgo/internal/testlogos)
@@ -69,11 +74,11 @@ jobs:
           go-version: "1.27.4"
           cache: false
       - uses: "actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1" # v7.1.0
-        if: "matrix.suite == 'scripts'"
+        if: "matrix.suite == 'scripts' || matrix.suite == 'regression'"
         with:
           node-version: "26.13.1"
       - name: "Install the upstream oracle toolchains"
-        if: "matrix.suite == 'scripts'"
+        if: "matrix.suite == 'scripts' || matrix.suite == 'regression'"
         run: |
           printf 'UPROOT1274=%s\n' "$(go env GOROOT)" >> "$GITHUB_ENV"
           while read -r version sha256 root; do

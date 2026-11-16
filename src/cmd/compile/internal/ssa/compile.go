@@ -466,6 +466,7 @@ var passes = [...]pass{
 	{name: "opt deadcode", fn: deadcode, required: true}, // remove any blocks orphaned during opt
 	{name: "generic cse", fn: cse},
 	{name: "phiopt", fn: phiopt},
+	{name: "logos correlated constants", fn: logosCorrelatedConstants},
 	{name: "gcse deadcode", fn: deadcode, required: true}, // clean out after cse and phiopt
 	{name: "nilcheckelim", fn: nilcheckelim},
 	{name: "prove", fn: prove},
@@ -536,6 +537,9 @@ var passOrder = [...]constraint{
 
 	// prove relies on common-subexpression elimination for maximum benefits.
 	{"generic cse", "prove"},
+	// Fold aligned phis before branch elimination; clean evaluator temporaries.
+	{"phiopt", "logos correlated constants"},
+	{"logos correlated constants", "gcse deadcode"},
 	// deadcode after prove to eliminate all new dead blocks.
 	{"prove", "generic deadcode"},
 	// divisible after prove to let prove analyze div and mod
