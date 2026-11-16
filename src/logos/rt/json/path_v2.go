@@ -253,7 +253,10 @@ func permissiveUnquote(tok []byte) ([]byte, bool) {
 		r += size
 	}
 	if r == len(s) {
-		return s, true
+		// Cap the fast path so an UnmarshalText that appends to its input
+		// allocates instead of overwriting the token's closing quote, which
+		// QuotedTextPtr still compares against quotedNullLiteral.
+		return s[:len(s):len(s)], true
 	}
 
 	b := make([]byte, len(s)+2*utf8.UTFMax)

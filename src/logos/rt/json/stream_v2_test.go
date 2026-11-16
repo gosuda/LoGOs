@@ -295,7 +295,7 @@ func TestStreamDeclineFallbackMatchesEncodingJSON(t *testing.T) {
 // surrogates and malformed UTF-8 decode as U+FFFD rather than rejecting the
 // string token.
 func TestQuotedTextPermissiveUnquoteMatchesEncodingJSON(t *testing.T) {
-	for _, in := range []string{`"\\ud800"`, `"\\ud83d\\ude00"`, "\"\xff\"", `"x\\ud800y"`} {
+	for _, in := range []string{`"\ud800"`, `"\ud83d\ude00"`, "\"\xff\"", `"x\ud800y"`} {
 		checkStreamFallback[streamUnsupportedTextProbe](t, in, func(g *streamTarget[streamUnsupportedTextProbe]) any { return &g.V })
 		checkStreamFallback[*streamUnsupportedTextProbe](t, in, func(g *streamTarget[*streamUnsupportedTextProbe]) any { return &g.V })
 		checkStreamFallback[streamDeclineTextProbe](t, in, func(g *streamTarget[streamDeclineTextProbe]) any { return &g.V })
