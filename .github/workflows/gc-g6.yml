@@ -3,48 +3,28 @@ name: "GC fixed-work evidence"
 "on":
   workflow_call:
     inputs:
-      base_sha:
-        required: true
-        type: string
-      head_sha:
-        required: true
-        type: string
       primary:
         required: true
-        type: string
-  workflow_dispatch:
-    inputs:
-      base_sha:
-        description: "Exact 40-character baseline commit"
-        required: true
-        type: string
-      head_sha:
-        description: "Exact 40-character candidate commit"
-        required: true
-        type: string
-      primary:
-        description: "Primary exact benchmark name selected before measurement"
-        required: true
-        default: "BenchmarkLogosGCScanSmall/Pointer/Self"
         type: string
 
 permissions:
   contents: read
 
-# A new head cancels the older run for that PR. Different PRs use
-# independent hosted runners. Manual runs are keyed by the exact head.
+# Measurements execute only in the pull request's cache and token scope.
+# A new head cancels the older run for that PR.
 concurrency:
-  group: "gc-g6-evidence-${{ github.repository }}-${{ github.event.pull_request.number || inputs.head_sha }}"
+  group: "gc-g6-evidence-${{ github.repository }}-${{ github.event.pull_request.number }}"
   cancel-in-progress: true
 
 jobs:
   measurements:
     name: "amd64 fixed-work measurements"
+    if: github.event_name == 'pull_request'
     runs-on: "ubuntu-24.04"
     timeout-minutes: 90
     env:
-      BASE_SHA: "${{ inputs.base_sha }}"
-      HEAD_SHA: "${{ inputs.head_sha }}"
+      BASE_SHA: "${{ github.event.pull_request.base.sha }}"
+      HEAD_SHA: "${{ github.event.pull_request.head.sha }}"
       PRIMARY_BENCHMARK: "${{ inputs.primary }}"
     steps:
       - name: "Validate immutable revisions"
@@ -57,13 +37,13 @@ jobs:
 
       - uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" # v7.0.1
         with:
-          ref: "${{ inputs.base_sha }}"
+          ref: "${{ github.event.pull_request.base.sha }}"
           path: baseline
           persist-credentials: false
 
       - uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" # v7.0.1
         with:
-          ref: "${{ inputs.head_sha }}"
+          ref: "${{ github.event.pull_request.head.sha }}"
           path: candidate
           persist-credentials: false
 
