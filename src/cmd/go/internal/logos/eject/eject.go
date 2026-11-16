@@ -4,8 +4,8 @@
 
 // Package eject implements logos eject: it writes a complete pure-Go
 // copy of the main module for upstream Go toolchains. Every .lgo file
-// becomes a .go file compiled from the same lowered nodes the native
-// build uses, every ejected loGo/s dependency module lands under
+// becomes a .go file through the native checker's shared lowering,
+// every ejected loGo/s dependency module lands under
 // DIR/_logos_deps, and the support sources become the shared module
 // github.com/gosuda/loGos/rt.
 package eject

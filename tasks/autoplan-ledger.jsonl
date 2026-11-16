@@ -278,5 +278,7 @@
 {"id": "AUD-184", "description": "M10-A-S1 Require one context package", "phase": "AUD"}
 {"id": "AUD-185", "description": "M0-A-S14 Check whole-module source kinds", "phase": "AUD"}
 {"id": "AUD-186", "description": "M21-A-S11 Keep metadata independent of VCS stamping", "phase": "AUD"}
+{"id": "AUD-187", "description": "M20-E-S1 Preserve C preambles during ejection", "phase": "AUD"}
+{"id": "AUD-188", "description": "M20-E-S2 Eject checked direct-C source", "phase": "AUD"}
 {"id": "AUD-189", "description": "M0-A-S15 Enforce the upstream Go regression floor in CI", "phase": "AUD"}
 {"id": "AUD-190", "description": "M11-A-S7 Preserve JSON profile dispatch and errors", "phase": "AUD"}

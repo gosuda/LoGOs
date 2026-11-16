@@ -89,7 +89,9 @@ Selection of an inactive file's build context MUST satisfy its filename and buil
 Selection MUST NOT impose a machine-word limit on the number of custom tags [T-0.3].
 An inactive variant MAY disable a custom tag named by its constraint; unrelated custom tags from the requested build MUST remain in effect [T-0.3].
 Within a candidate target context, a requested custom-tag set that already satisfies the file MUST remain unchanged [T-0.3].
-The output MUST keep all comments from the source [T-0.3].
+The output MUST keep all comments from the source, except for the cgo fastcall directive replacement defined below. [T-0.3]
+C import declarations MUST retain their preamble attachment and content after ejection and formatting, except that each active `//logos:cgo_fastcall F` preamble marker MUST become `#cgo noescape F` and `#cgo nocallback F`. Generated Go line directives MUST stay outside the C preamble. Every emitted package clause MUST retain its physical Go filename so upstream cgo tools can reopen the file. Original declaration positions MUST resume after the imports, including a declaration on the same line as the package clause or C import. [T-0.3][T-304]
+An ejected file that imports `C` MUST retain source-level C selectors and types. It MUST receive the same loGo/s checks and lowering as its native form, including checked non-nil stores with the original `.lgo` positions. Upstream cgo MUST regenerate its wrappers, pointer-argument checks and two-result errno calls from that source. Overlays MUST preserve the original logical source filename and the replacement text's line layout; source identity MUST be recovered once before checking. [T-0.3][T-202][T-304]
 Each non-standard loGo/s dependency module MUST be ejected too [T-0.3].
 Each ejected dependency MUST land in `DIR/_logos_deps/<module path>@<version>/` [T-0.3].
 The output `go.mod` MUST carry a `replace` line for each ejected module [T-0.3].
@@ -1383,6 +1385,7 @@ It MUST NOT read a clock in the fast body: no per-call monotonic read takes part
 The fast path MUST stay behind `GOEXPERIMENT=logosfastcgo`, which is off by default under both commands. [T-304][R-U1]
 Profiling with `SIGPROF` during fast calls MUST NOT crash. [T-304]
 Fast calls MUST carry noescape and nocallback marks, spelled `//logos:cgo_fastcall` in `.lgo`. [T-304]
+The `.lgo` marker MUST be recognized only as a two-field line in the C preamble selected by cgo, after comment bodies are joined and carriage returns removed. Ejection MUST map that marker to both upstream directives regardless of `GOEXPERIMENT=logosfastcgo`; detached, ordinary Go, and malformed comments MUST NOT acquire a cgo contract. [T-304][T-0.3]
 A C function marked `nocallback` that calls into Go MUST still panic on the fast path. It MUST NOT hang and MUST NOT corrupt state. [T-304][R-U1]
 A CPU profile MUST attribute time in a fast-called C function to its Go call site. [T-304][R-U1]
 Go pointer arguments MUST stay valid during a fast call. [T-304]
