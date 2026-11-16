@@ -9,6 +9,16 @@
         "TestLogosCgoSpanGlobals"
       ],
       "allowSkippedOff": false
+    },
+    {
+      "package": "runtime",
+      "prefix": "TestLogosCgoPointerFreeAddr",
+      "tests": [
+        "TestLogosCgoPointerFreeAddr",
+        "TestLogosCgoPointerFreeAddrBoundary",
+        "TestLogosCgoPointerFreeAddrContainers"
+      ],
+      "allowSkippedOff": false
     }
   ],
   "benchmarks": [
@@ -27,6 +37,10 @@
     {
       "name": "BenchmarkCgoOptSpanReference",
       "role": "reference"
+    },
+    {
+      "name": "BenchmarkCgoOptPointerFreeAddress",
+      "role": "target"
     }
   ],
   "fixtures": [
@@ -41,6 +55,12 @@
       "path": "src/cmd/cgo/internal/testlogos/testdata/cgospan",
       "args": [],
       "stdout": "span pointer and exported-result checks ok"
+    },
+    {
+      "name": "typed-address",
+      "path": "src/cmd/cgo/internal/testlogos/testdata/cgoaddr",
+      "args": [],
+      "stdout": "typed-address, pinning, and deferred-evaluation checks ok"
     }
   ]
 }
