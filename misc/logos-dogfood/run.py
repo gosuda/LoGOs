@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# pyright: strict
 """Replay pinned external sources against Go, loGos, and both lint drivers."""
 
 from __future__ import annotations
@@ -34,7 +35,9 @@ BLOCKERS = (
 
 
 def obj(value: object) -> dict[str, object]:
-    if not isinstance(value, dict) or not all(isinstance(k, str) for k in value):
+    if not isinstance(value, dict) or not all(
+        isinstance(k, str) for k in cast(dict[object, object], value)
+    ):
         raise TypeError("expected a JSON object with string keys")
     return cast(dict[str, object], value)
 
@@ -48,7 +51,7 @@ def string(value: object) -> str:
 def strings(value: object) -> tuple[str, ...]:
     if not isinstance(value, list):
         raise TypeError("expected an array of strings")
-    return tuple(string(item) for item in value)
+    return tuple(string(item) for item in cast(list[object], value))
 
 
 def decode(text: str) -> object:
@@ -202,8 +205,9 @@ def verify_policy(case: Case, root: Path) -> Policy | None:
     if not grants or set(grants) - {
         "transitive_unsafe_allowlist",
         "transitive_net_allowlist",
+        "transitive_exec_allowlist",
     }:
-        raise ValueError("replay policy may grant only unsafe or network capabilities")
+        raise ValueError("replay policy contains an unsupported capability grant")
     for value in grants.values():
         packages = strings(value)
         if not packages or len(set(packages)) != len(packages):
@@ -476,6 +480,46 @@ def logos_records(stderr: str) -> list[dict[str, object]]:
     return records
 
 
+def validate_compiler_error(record: dict[str, object]) -> None:
+    """Check the untagged compiler-error shape emitted by base.logosRecord."""
+    fields = {
+        "schema_version",
+        "severity",
+        "rule_id",
+        "file",
+        "span",
+        "message",
+        "provenance",
+        "autofix_candidates",
+    }
+    span = obj(record.get("span"))
+    provenance = obj(record.get("provenance"))
+    span_fields = {
+        "start_line",
+        "start_col",
+        "end_line",
+        "end_col",
+        "byte_offset",
+        "byte_len",
+    }
+    if (
+        set(record) != fields
+        or set(span) != span_fields
+        or any(type(value) is not int or value < 0 for value in span.values())
+    ):
+        raise ValueError("malformed ordinary compiler-error fields")
+    if (
+        record["severity"] != "deny"
+        or provenance != {"origin_expr": "", "origin_line": 0, "inferred_type": ""}
+        or type(provenance.get("origin_line")) is not int
+        or record["autofix_candidates"] != []
+        or span["start_line"] != span["end_line"]
+        or span["start_col"] != span["end_col"]
+        or span["byte_len"] != 0
+    ):
+        raise ValueError("malformed ordinary compiler-error metadata")
+
+
 def assess_lint(run: Run, tool: str, mode: str = "") -> Assessment:
     problem = failure(run)
     if problem is not None:
@@ -485,6 +529,7 @@ def assess_lint(run: Run, tool: str, mode: str = "") -> Assessment:
     try:
         stdout = Path(run.stdout).read_text()
         stderr = Path(run.stderr).read_text()
+        compiler_errors = False
         if tool == "logos-lint":
             if stdout.strip():
                 raise ValueError("logos lint wrote unexpected stdout")
@@ -492,14 +537,16 @@ def assess_lint(run: Run, tool: str, mode: str = "") -> Assessment:
             for record in records:
                 if record.get("schema_version") != "1.0":
                     raise ValueError("unsupported diagnostic schema")
-                if not string(record.get("rule_id")) or not string(
-                    record.get("message")
-                ):
-                    raise ValueError("compiler error or empty lint diagnostic")
+                rule = string(record.get("rule_id"))
+                if not string(record.get("message")):
+                    raise ValueError("empty diagnostic message")
                 string(record.get("file"))
                 obj(record.get("span"))
                 if record.get("severity") not in ("warn", "deny", "forbid"):
                     raise ValueError("unknown diagnostic severity")
+                if not rule:
+                    validate_compiler_error(record)
+                    compiler_errors = True
             expected = int(
                 any(record["severity"] in ("deny", "forbid") for record in records)
             )
@@ -510,7 +557,7 @@ def assess_lint(run: Run, tool: str, mode: str = "") -> Assessment:
             raw = document.get("findings")
             if not isinstance(raw, list):
                 raise ValueError("gglint findings is not an array")
-            records = [obj(item) for item in raw]
+            records = [obj(item) for item in cast(list[object], raw)]
             for record in records:
                 for field in ("rule", "path", "message"):
                     if not string(record.get(field)):
@@ -536,6 +583,12 @@ def assess_lint(run: Run, tool: str, mode: str = "") -> Assessment:
             expected = int(bool(records))
         if run.returncode != expected:
             raise ValueError("exit status disagrees with diagnostic severity/count")
+        if compiler_errors:
+            return Assessment(
+                "load-failed",
+                "ordinary compiler errors prevent complete analysis",
+                len(records),
+            )
         digest, duplicates = canonical(records, run.cwd)
         if tool == "gglint" and duplicates:
             raise ValueError("gglint returned duplicate findings")
@@ -687,7 +740,7 @@ def main() -> int:
     raw = decode(manifest.read_text())
     if not isinstance(raw, list):
         raise TypeError("manifest must be an array")
-    cases = tuple(Case.parse(item) for item in raw)
+    cases = tuple(Case.parse(item) for item in cast(list[object], raw))
     ids = {case.id for case in cases}
     if not cases or len(ids) != len(cases) or set(args.only) - ids:
         raise ValueError("duplicate manifest id or unknown --only id")

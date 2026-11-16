@@ -125,7 +125,8 @@ source digest and each command's effective input digest are recorded, including
 the repeated lint input.
 
 The accepted policy format contains only `[capabilities]` and exact package
-paths in `transitive_unsafe_allowlist` or `transitive_net_allowlist`. Paths with
+paths in `transitive_unsafe_allowlist`, `transitive_net_allowlist`, or
+`transitive_exec_allowlist`. Paths with
 globs, duplicate grants, escaping or symlinked policy files, severity changes,
 build settings, and lint overrides are rejected. Default denials and reflection
 warnings remain enabled. The existing configuration semantics are documented
@@ -151,6 +152,14 @@ failed or invalid-report cell remains evidence of that invocation. A successful
 permission replay is a separate result under its recorded grants. Additional
 linker denials require review before a new policy and replay are recorded.
 
+The separate `corpus-link-permissions.json` records that next review for
+errorlint and exhaustive, using new files in `policies/link/`. Their pinned
+`golang.org/x/tools/go/packages` and `golang.org/x/tools/internal/gocommand`
+dependencies need process-launch authority. These package grants include their
+configured external drivers and helper commands. The initial policy files and
+manifest remain unchanged. Use the new manifest and another new evidence
+directory for this linker comparison; retain the earlier denial records.
+
 ## Evidence and interpretation
 
 `report.json` is saved atomically after each cell. It starts with `complete:
@@ -172,7 +181,7 @@ stdout and stderr remain separate files beside the report.
 | `upstream-failed` | The stock Go build or short-test baseline failed |
 | `candidate-failed` | Candidate failed against a successful baseline, crashed, or returned an invalid driver exit status |
 | `blocked` | A source, dependency, toolchain, native compiler, or disk prerequisite was unavailable |
-| `load-failed` | A requested pattern was empty, or type errors prevented complete lint analysis |
+| `load-failed` | A requested pattern was empty, or ordinary compiler/typecheck errors prevented complete lint analysis |
 | `timeout` | The command exceeded its deadline |
 | `invalid-report` | Diagnostic JSON, fields, severity, count, or exit status violated the report contract |
 | `nondeterministic` | Repeating lint changed the diagnostic multiset or exit status |
@@ -185,6 +194,14 @@ to emit each identical finding once is checked. A nonzero status alone is never
 accepted as evidence that a lint completed: its parsed records must explain the
 status. Package banners in logos stderr must be followed by diagnostic records;
 other unstructured stderr is not silently discarded.
+
+Native ordinary compiler errors intentionally use an empty `rule_id`. The
+runner verifies their full point-span record, zero provenance, empty fixes,
+deny severity, and failed exit status before classifying them as `load-failed`.
+Malformed or incomplete anonymous records remain `invalid-report`. This is a
+loading failure, including when mixed with valid lint findings, and never a
+successful lint result. Existing evidence retains the classification made by
+the runner version recorded in that report.
 
 `findings` establishes report integrity and repeatability, not diagnostic
 precision. Confirming a true positive or false positive requires source review
@@ -220,7 +237,10 @@ differential pass. Such invocations remain visibly `uncompared`.
 ```sh
 uv run --no-project python -m unittest discover \
   -s misc/logos-dogfood -p test_run.py
+uvx pyright misc/logos-dogfood/run.py misc/logos-dogfood/test_run.py
 ```
+
+Both Python files enable Pyright's strict mode directly.
 
 These tests cover false success on exit 1, partial-error masking, missing package
 patterns, schema and severity mismatches, typecheck failures, duplicate findings,
