@@ -105,6 +105,7 @@ def main() -> int:
             TMPDIR=str(args.tmpdir.resolve()),
             CC="/usr/bin/cc",
             CXX="/usr/bin/c++",
+            PUREGO_TEST_PREBUILT_LIBDIR="",
         )
         identity = toolchain_identity(binary, env, ROOT, out / "tools" / name)
         work = out / "work"
