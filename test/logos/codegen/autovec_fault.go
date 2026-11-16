@@ -8,8 +8,8 @@ func faultGuardedMap(dst, src []uint32, delta uint32) {
 		return
 	}
 	for i := range dst {
-		// amd64/v1:-"logosAutovecPanicOnFault" -"VPADDD"
-		// amd64/v2:-"logosAutovecPanicOnFault" -"VPADDD"
+		// amd64/v1:-"CALL.*logosAutovecPanicOnFault" -"VPADDD"
+		// amd64/v2:-"CALL.*logosAutovecPanicOnFault" -"VPADDD"
 		// amd64/v3:"CALL.*logosAutovecPanicOnFault" "VPADDD"
 		// amd64/v4:"CALL.*logosAutovecPanicOnFault" "VPADDD"
 		// arm64:"CALL.*logosAutovecPanicOnFault" "VADD V[0-9]+\\.S4"
@@ -21,9 +21,9 @@ func faultGuardedMap(dst, src []uint32, delta uint32) {
 //go:nosplit
 func nosplitMap(dst []uint32, delta uint32) {
 	for i := range dst {
-		// amd64/v3:-"logosAutovecPanicOnFault" -"VPADDD"
-		// amd64/v4:-"logosAutovecPanicOnFault" -"VPADDD"
-		// arm64:-"logosAutovecPanicOnFault" -"VADD V[0-9]+\\.S4"
+		// amd64/v3:-"CALL.*logosAutovecPanicOnFault" -"VPADDD"
+		// amd64/v4:-"CALL.*logosAutovecPanicOnFault" -"VPADDD"
+		// arm64:-"CALL.*logosAutovecPanicOnFault" -"VADD V[0-9]+\\.S4"
 		dst[i] += delta
 	}
 }
