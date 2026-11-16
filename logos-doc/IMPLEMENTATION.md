@@ -3857,6 +3857,19 @@ Anchor: Tony Hoare, Richard Feynman
 - Hosted follow-up: compiler run 43939662751 reaches its final ledger gate and rejects two prose substrings as nonexistent proving paths. The documentation-only correction in `validation/ledger-prose-correction/README.md` spells out those phrases in #336 and #441. The unchanged compiled Go validator reproduces both errors before the edit, passes afterward, catches each isolated reversion, and passes after exact restoration. Both ledger tests run, but this filtered check executes no parity corpus and creates no release stamp. Source, assertions, attack statuses and the 302 task records remain unchanged; hosted prerequisites and the final clean-tip stamp still require the corrected tip.
 - Docs: `logos-doc/validation/release-acceptance/INTEGRATION.md`, the versioned V1/V2 evidence and `stabilization-candidate.md` distinguish static acceptance from hosted execution. This slice implements existing SPEC 17 and M22 requirements without a new language rule or release exception.
 
+### M22-A-S7 Isolate acceptance from bootstrap settings
+
+Anchor: Tony Hoare, David Parnas, Richard Feynman
+
+- Invariant: make may use bounded build resources, while acceptance starts without make-only GOMAXPROCS, GOGC, GOMEMLIMIT, or GOFLAGS settings. C and C++ use the matching GCC 14 toolchain, and temporary Go test inputs remain inside the TMPDIR boundary recognized by the unchanged linker-security checks.
+- Attack: `logos-doc/validation/release-acceptance/test_bootstrap_environment.py` executes the real extracted bootstrap function with inert downloads, build calls, and C compilation. Four tests cover cleared acceptance settings, matching effective compiler versions, temporary-file containment, and the positive bounded-make/new-cache control. The parent replay records six expected assertion failures before implementation and no setup errors.
+- Build: `.github/scripts/release-acceptance.sh` clears the four make-only variables immediately after make, resolves and exports both gcc-14 and g++-14 with recorded version output, and places GOTMPDIR inside TMPDIR. The existing coverage checker, workflow, upstream tests, and fixed 31-name exception script remain unchanged.
+- Gate: the unchanged four-test boundary suite passes. Three isolated reversions, one per repaired setting boundary, are caught; exact restoration passes. The existing release coverage checker, Bash syntax, ShellCheck, and actionlint pass with durable commands, bound inputs, and raw streams. With installed e96 tools on source `e237c399`, both unchanged runtime memory-limit controls pass without skips in 4.258 seconds, and all seven unchanged linker-security families pass without skips in 6.388 seconds. The first native runtime execution used the wrong working directory and failed before child compilation; its setup correction is retained and adds no implementation attempt.
+- Pending acceptance: paired-toolchain `TestCall`, `TestCallback`, and both LTO subtests in `src/cmd/cgo/internal/swig/swig_test.go` still require hosted execution without skips because SWIG is absent locally. Fresh combined make and the targeted installed repair gates now pass, but all six complete optimization cells and each separate `os` stage remain required. The independent cmd/go shared-deadline failures need a complete rerun; this record does not claim they are resolved. Row #80, its exclusions, and all timeouts remain unchanged.
+- Evidence: `logos-doc/validation/acceptance-repairs-33752c03/environment/README.md` separates the stub boundary proof, unchanged native tests, setup-only failure, static checks, and pending hosted SWIG gate. The historical diagnosis memo is preserved with an explicit correction: the first failed security family was `TestCheckGCCSpecFiles`; the actual seven-family gate also covers `TestCheckLinkerSysrootFlags`. The combined build is recorded in `logos-doc/validation/installed-acceptance-33752c03/README.md`.
+- Red-team rows: #444 (tested for the bootstrap environment contract). Actual SWIG/LTO and complete matrix results remain separate mandatory release gates; no release exception is added.
+- Docs: this implements the existing SPEC 17 and M22 acceptance requirements without changing language semantics or Table T.
+
 ### Release gate
 
 Anchor: Edward Tufte, Richard Feynman
@@ -4655,4 +4668,5 @@ Written to `tasks/autoplan-ledger.jsonl` by P0-S6. IDs: phase prefix plus a sequ
 {"id": "AUD-209", "description": "M22-A-S6 Execute independent release acceptance", "phase": "AUD"}
 {"id": "AUD-210", "description": "M0-A-S20 Keep duplicate-stem errors package-local", "phase": "AUD"}
 {"id": "AUD-211", "description": "M0-A-S21 Preserve the Go-only type projection", "phase": "AUD"}
+{"id": "AUD-212", "description": "M22-A-S7 Isolate acceptance from bootstrap settings", "phase": "AUD"}
 ```
