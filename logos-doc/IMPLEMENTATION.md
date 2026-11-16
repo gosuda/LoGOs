@@ -3388,6 +3388,21 @@ Anchor: Richard Feynman, Tony Hoare
 - Verification (2026-11-16, linux/amd64): the build, targeted native/race/nogreenteagc suites, metrics tests, vet, and native/ejected scripts passed. An overlay that skips every non-nil pointer fails both weak-reference liveness cases for the predicted lost-root reason. All six new test files retain their pre-implementation hashes. Linux/arm64 cross-compilation passed; arm64 execution and the full `run.bash` milestone gate were not run. Parallel compiler jobs and an initial serial mutation build were killed; bounded, serialized retries completed. Fixed-work measurements and their limits are recorded in `logos-doc/benchmarks/gc-region-scan.md` and its JSON companion.
 - Red-team row: #332.
 
+
+### M18-A-S22 Expand GC boundary and ownership gates
+
+Anchor: Tony Hoare, Richard Feynman
+
+- Contract: SPEC 3.5 retains the existing allocation, root-lifetime, zeroing, and scan-work contracts. This slice adds behavioral fixtures and execution gates before any further production optimization.
+- Ownership attack: observe ordinary explicit-region Close at stop-the-world boundaries. A published region head must not also belong to a P's reusable chunk pool. The observer compares head addresses without dereferencing them; it does not claim coverage of every interior chain link. The initial native arm64 runs reproduced the ownership violation with both collectors.
+- Liveness attack: roots in three distinct manual chunks retain both small and large pointerful heap intermediates and their descendants. Weak references check survival before release and disappearance after release, for implicit and explicit regions.
+- Boundary attack: an independent declared-field-offset oracle checks the scan extent at every byte limit across repeated types, scalar gaps, interface/string/slice layouts, bitmap-word boundaries, and an empty mask word. Partially covered final pointer words remain readable and count in full. This checks the final extent, not the complete pointer visitation sequence.
+- Measurement fixture: `BenchmarkLogosGCScanSmall` isolates scanner initialization for small typed allocations with Self, Nil, and OtherArena inputs. OtherArena targets manual memory and does not measure heap marking. The existing large-block controls remain unchanged.
+- Gate: build the fork and execute runtime, metrics, pprof, and trace tests on native linux/amd64 and linux/arm64 with Green Tea enabled and disabled; run region race tests, repeated lifecycle/boundary tests, a synchronous-entry-preemption ownership stress, and gccheckmark heap-graph tests. Execute `./run.bash --no-rebuild` with default experiments. The workflow declares these gates; its presence is not evidence that they passed.
+- Verification (2026-11-16): ordinary native arm64 builds first reproduced overlapping published/pool ownership with both collectors. After early detachment, all four native amd64/arm64 × Green Tea on/off jobs passed build, gofmt/vet, runtime/metrics/pprof/trace regression, race, repeated lifecycle/layout, noinline synchronous-close stress, and gccheckmark at `45e2f57`. The frozen ownership test failed 10/10 under the exact-original production overlay on both architectures. CI run `43829310124` retains that RED/GREEN/PROBE evidence. The full upstream gate found host-ISA fixture assumptions, an insufficient script budget, and the pending row #333 formatting rule; its corrected rerun remains required. Local execution is unavailable; GitHub Actions supplies execution. Optimization promotion still requires its separate G6 evidence. The corrected native matrix also passed at `20c3f858`; its full upstream batch exposed the default cc/C23 mismatch and row #333's missing proving path. Commit `b02fb2d7` restores that path; the unchanged ledger checker fails before and passes after the correction locally. The job now preflights its C23 compiler and ledger before another complete upstream run.
+- Red-team rows: #333, #334, #335.
+- Evidence and promotion requirements: `logos-doc/benchmarks/gc-followup-status.md`.
+
 ## M20. CGo in loGo/s packages and Fast-CGo for Go and loGo/s
 
 Anchor: Tony Hoare, John Carmack
