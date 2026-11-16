@@ -96,10 +96,12 @@ try {
     for (const phase of phases) {
       const build = binaries[phase.name];
       const log = join(out, phase.name);
-      const timingPath = join(log, "hyperfine.json");
+      const timingPath = join(log, "hyperfine-export.json");
       const command = [build.binary, ...benchmarkArgs(name, iterations + "x")].map(shellQuote).join(" ");
       run(process.env.HYPERFINE, ["--warmup", "3", "--min-runs", "10",
         "--export-json", timingPath, command], { env: build.env, log: join(log, "hyperfine") });
+      // The run() record and the export must not share a path: run() writes
+      // <log>.json and would overwrite the hyperfine export before it is read.
       const hyperfine = JSON.parse(readFileSync(timingPath, "utf8"));
       report("hyperfine", { benchmark: name, phase: phase.name, result: hyperfine });
       const corroboration = run(go, ["test", "-p=1", "-run=^$", "-bench=^" + name + "$",
