@@ -7,6 +7,8 @@
 package json
 
 import (
+	"bytes"
+	stdjson "encoding/json"
 	"encoding/json/jsontext"
 	"errors"
 	"io"
@@ -96,4 +98,59 @@ func unquoteStringContent(item string) (string, bool) {
 		return "", false
 	}
 	return unsafeString(v), true
+}
+
+var quotedNullLiteral = []byte(`"null"`)
+
+func fallbackQuoted(s *Scanner, dst any) {
+	if s.scalar() == 0 {
+		return
+	}
+	tok := s.data[s.start:s.end]
+	if s.decodeQuotedRaw(tok, dst, s.kind == 'n') && bytes.Equal(tok, quotedNullLiteral) {
+		if rv := reflect.ValueOf(dst); rv.Kind() == reflect.Pointer && !rv.IsNil() && rv.Elem().Kind() == reflect.Pointer {
+			rv.Elem().SetZero()
+		}
+	}
+}
+
+func (s *Scanner) decodeQuotedRaw(tok []byte, dst any, decodingNull bool) bool {
+	u, ut, pv := quotedIndirect(reflect.ValueOf(dst), decodingNull)
+	if u != nil {
+		err := u.UnmarshalJSON(tok)
+		s.saveMethodError(err)
+		return err == nil
+	} else if ut != nil {
+		if len(tok) > 0 && tok[0] == '"' {
+			if unq, err := jsontext.AppendUnquote(nil, tok); err == nil {
+				err = ut.UnmarshalText(unq)
+				s.saveMethodError(err)
+				return err == nil
+			}
+		}
+		return s.decodeRaw(tok, dst)
+	}
+	if decodingNull {
+		switch pv.Kind() {
+		case reflect.Interface, reflect.Pointer, reflect.Map, reflect.Slice:
+			pv.SetZero()
+		}
+		return true
+	}
+	return s.decodeRaw(tok, dst)
+}
+
+// saveMethodError records a `,string` method failure under the JSONv2
+// profile. A *UnmarshalTypeError from the method is saved verbatim: the
+// first one wins, decoding continues, and neither Offset nor struct/field
+// context is added (ReportErrorsWithLegacySemantics returns method errors
+// unwrapped). Any other non-nil error is fatal; nil is a no-op.
+func (s *Scanner) saveMethodError(err error) {
+	if ute, ok := err.(*stdjson.UnmarshalTypeError); ok {
+		if s.saved == nil {
+			s.saved = ute
+		}
+		return
+	}
+	s.fatal(err)
 }
