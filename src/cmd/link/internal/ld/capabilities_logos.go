@@ -142,9 +142,18 @@ type logosCapAuditor struct {
 	ifaced map[loader.Sym]bool
 	queue  []loader.Sym
 	impls  []logosCapImpl
+
+	// The audit adds no loader symbols. Nodes below symLimit are physical
+	// symbols; higher nodes identify one host's inline-tree entry and map back
+	// through inlineOwners. Only physical symbols enter queue. Graph traversal
+	// keeps context nodes; loader queries use their symbol identity instead.
+	symLimit     loader.Sym
+	inlineOwners []loader.Sym
+	inlineHosts  map[loader.Sym][]loader.Sym
+
 	hits   []logosCapHit
 	spans  []capInlineSpan
-	fanned bool
+	fanned map[loader.Sym]bool
 	deps   []string
 }
 
@@ -172,9 +181,12 @@ func logosCapAudit(ctxt *Link, d *deadcodePass) {
 	if !a.hasDepPackage() {
 		return
 	}
-	a.graph = newCapGraph(a.ldr.NSym())
+	a.symLimit = loader.Sym(a.ldr.NSym())
+	a.graph = newCapGraph(int(a.symLimit))
 	a.roles = make(map[loader.Sym]capRole)
 	a.ifaced = make(map[loader.Sym]bool)
+	a.inlineHosts = make(map[loader.Sym][]loader.Sym)
+	a.fanned = make(map[loader.Sym]bool)
 	a.collectImpls(d)
 	a.seedRoots(d)
 	a.flood(d)
@@ -319,20 +331,9 @@ func (a *logosCapAuditor) isReflectSite(s loader.Sym) bool {
 	if !a.ldr.SymType(s).IsText() {
 		return false
 	}
-	if a.ldr.IsReflectMethod(s) || a.callsReflectLookup(s) {
-		return true
-	}
-	fi := a.ldr.FuncInfo(s)
-	if fi.Valid() {
-		fi.Preload()
-		for i := range int(fi.NumInlTree()) {
-			inlined := fi.InlTree(i).Func
-			if inlined != 0 && (a.ldr.IsReflectMethod(inlined) || a.callsReflectLookup(inlined) || capIsReflectLookupName(a.ldr.SymName(inlined))) {
-				return true
-			}
-		}
-	}
-	return false
+	// Host markers have no PC attribution. Explicit inline-tree lookups are
+	// handled by followInlTree, with each inline instance as their origin.
+	return a.ldr.IsReflectMethod(s) || a.callsReflectLookup(s)
 }
 
 func (a *logosCapAuditor) followInlTree(d *deadcodePass, s loader.Sym) {
@@ -342,15 +343,19 @@ func (a *logosCapAuditor) followInlTree(d *deadcodePass, s loader.Sym) {
 	}
 	fi.Preload()
 	ninl := int(fi.NumInlTree())
+	if ninl == 0 {
+		return
+	}
+	nodes := a.inlineNodes(s, fi)
 	for i := range ninl {
 		node := fi.InlTree(i)
-		inlined := node.Func
+		inlined := nodes[i]
 		if inlined == 0 {
 			continue
 		}
 		var p loader.Sym
 		if node.Parent >= 0 && int(node.Parent) < ninl {
-			p = fi.InlTree(int(node.Parent)).Func
+			p = nodes[node.Parent]
 		}
 		if p == 0 {
 			p = s
@@ -359,7 +364,7 @@ func (a *logosCapAuditor) followInlTree(d *deadcodePass, s loader.Sym) {
 			continue
 		}
 		a.graph.visit(inlined, p)
-		name := a.ldr.SymName(inlined)
+		name := a.ldr.SymName(node.Func)
 		base := capSinkName(name)
 		if kind, ok := capabilitySinks[base]; ok {
 			a.hits = append(a.hits, logosCapHit{sink: inlined, kind: kind, name: base})
@@ -367,7 +372,7 @@ func (a *logosCapAuditor) followInlTree(d *deadcodePass, s loader.Sym) {
 			a.hits = append(a.hits, logosCapHit{sink: inlined, kind: CapCgo, name: "runtime.cgocall"})
 		}
 		a.followInlinedIface(d, inlined)
-		if capIsReflectLookupName(name) || a.ldr.IsReflectMethod(inlined) || a.callsReflectLookup(inlined) {
+		if capIsReflectLookupName(name) || a.ldr.IsReflectMethod(node.Func) || a.callsReflectLookup(inlined) {
 			for _, impl := range a.impls {
 				if capIsExportedMethod(impl.name) {
 					a.enqueue(impl.fn, inlined)
@@ -378,7 +383,7 @@ func (a *logosCapAuditor) followInlTree(d *deadcodePass, s loader.Sym) {
 }
 
 func (a *logosCapAuditor) callsReflectLookup(s loader.Sym) bool {
-	relocs := a.ldr.Relocs(s)
+	relocs := a.ldr.Relocs(a.symbol(s))
 	for i := range relocs.Count() {
 		r := relocs.At(i)
 		t := r.Sym()
@@ -447,7 +452,7 @@ func (a *logosCapAuditor) followInlinedIface(d *deadcodePass, inlined loader.Sym
 		return
 	}
 	a.ifaced[inlined] = true
-	relocs := a.ldr.Relocs(inlined)
+	relocs := a.ldr.Relocs(a.symbol(inlined))
 	for i := range relocs.Count() {
 		if r := relocs.At(i); r.Type() == objabi.R_USEIFACEMETHOD || r.Type() == objabi.R_USENAMEDMETHOD {
 			a.followIface(d, inlined, r)
@@ -462,8 +467,34 @@ type capInlineSpan struct {
 
 type capInlineSite struct {
 	owner loader.Sym
-	fi    loader.FuncInfo
+	nodes []loader.Sym
 	spans []capInlineSpan
+}
+
+// symbol is the boundary between graph node identity and loader identity.
+func (a *logosCapAuditor) symbol(node loader.Sym) loader.Sym {
+	if len(a.inlineOwners) == 0 || node < a.symLimit {
+		return node
+	}
+	return a.inlineOwners[node-a.symLimit]
+}
+
+// inlineNodes interns entries by physical host and inline-tree index. fi must
+// be preloaded. A repeated owner symbol still gets a distinct node at each
+// index, including nested inline calls to the same function.
+func (a *logosCapAuditor) inlineNodes(host loader.Sym, fi loader.FuncInfo) []loader.Sym {
+	if nodes, ok := a.inlineHosts[host]; ok {
+		return nodes
+	}
+	nodes := make([]loader.Sym, fi.NumInlTree())
+	for i := range nodes {
+		if owner := fi.InlTree(i).Func; owner != 0 {
+			nodes[i] = a.symLimit + loader.Sym(len(a.inlineOwners))
+			a.inlineOwners = append(a.inlineOwners, owner)
+		}
+	}
+	a.inlineHosts[host] = nodes
+	return nodes
 }
 
 func (a *logosCapAuditor) inlineSite(s loader.Sym) capInlineSite {
@@ -478,7 +509,7 @@ func (a *logosCapAuditor) inlineSite(s loader.Sym) capInlineSite {
 	}
 	if _, _, _, pcinline, _ := a.ldr.PcdataAuxs(s, nil); pcinline != 0 {
 		a.spans = capInlineSpans(a.spans[:0], a.ldr.Data(pcinline), a.ctxt.Arch.MinLC)
-		site.fi = fi
+		site.nodes = a.inlineNodes(s, fi)
 		site.spans = a.spans
 	}
 	return site
@@ -486,10 +517,10 @@ func (a *logosCapAuditor) inlineSite(s loader.Sym) capInlineSite {
 
 func (c *capInlineSite) at(off int64) loader.Sym {
 	idx := capInlineIndex(c.spans, off)
-	if idx < 0 || int(idx) >= int(c.fi.NumInlTree()) {
+	if idx < 0 || int(idx) >= len(c.nodes) {
 		return c.owner
 	}
-	if inlined := c.fi.InlTree(int(idx)).Func; inlined != 0 {
+	if inlined := c.nodes[idx]; inlined != 0 {
 		return inlined
 	}
 	return c.owner
@@ -524,10 +555,10 @@ func capInlineIndex(spans []capInlineSpan, off int64) int32 {
 }
 
 func (a *logosCapAuditor) followExportedImpls(from loader.Sym) {
-	if a.fanned {
+	if a.fanned[from] {
 		return
 	}
-	a.fanned = true
+	a.fanned[from] = true
 	for _, impl := range a.impls {
 		if capIsExportedMethod(impl.name) {
 			a.enqueue(impl.fn, from)
@@ -598,7 +629,7 @@ func (a *logosCapAuditor) blameRole(hit logosCapHit) func(loader.Sym) capRole {
 		switch {
 		case s == hit.sink, a.isForwarder(s):
 			return capRole{}
-		case r.dep == "" && a.ldr.SymType(s).IsText():
+		case r.dep == "" && a.ldr.SymType(a.symbol(s)).IsText():
 			return capRole{wall: true}
 		}
 		return r
@@ -606,7 +637,7 @@ func (a *logosCapAuditor) blameRole(hit logosCapHit) func(loader.Sym) capRole {
 }
 
 func (a *logosCapAuditor) isForwarder(s loader.Sym) bool {
-	return strings.HasSuffix(a.ldr.SymName(s), "-fm")
+	return strings.HasSuffix(a.ldr.SymName(a.symbol(s)), "-fm")
 }
 
 func addFinding(out []capFinding, index map[string]int, f capFinding) []capFinding {
@@ -677,7 +708,7 @@ func (a *logosCapAuditor) ruleFor(kind CapabilityKind) capRule {
 func (a *logosCapAuditor) emit(word, ruleID, dep, sink string, chain []loader.Sym, help string) {
 	var frames []capFrame
 	for _, s := range chain {
-		if a.ldr.SymType(s).IsText() {
+		if a.ldr.SymType(a.symbol(s)).IsText() {
 			frames = append(frames, a.frameOf(s))
 		}
 	}
@@ -699,6 +730,7 @@ func (a *logosCapAuditor) role(s loader.Sym) capRole {
 }
 
 func (a *logosCapAuditor) roleOf(s loader.Sym) capRole {
+	s = a.symbol(s)
 	if !a.ldr.SymType(s).IsText() {
 		return capRole{}
 	}
@@ -722,6 +754,7 @@ func (a *logosCapAuditor) hasDepPackage() bool {
 }
 
 func (a *logosCapAuditor) textPkg(s loader.Sym) string {
+	s = a.symbol(s)
 	name := a.ldr.SymName(s)
 	if pkg := a.ldr.SymPkg(s); pkg != "" && a.ctxt.LibraryByPkg[pkg] != nil && strings.HasPrefix(name, objabi.PathToPrefix(pkg)+".") {
 		return pkg
@@ -788,6 +821,7 @@ func isLogosTestBinary() bool {
 }
 
 func (a *logosCapAuditor) frameOf(s loader.Sym) capFrame {
+	s = a.symbol(s)
 	name := a.ldr.SymName(s)
 	file, line := "unknown", 0
 	if fi := a.ldr.FuncInfo(s); fi.Valid() {
