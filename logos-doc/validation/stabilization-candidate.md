@@ -207,6 +207,16 @@ gate is promoted by the six successful focused workflows.
 
 ## Required release acceptance
 
+The first hosted follow-up at published head `1a4c7635` found two ambiguous
+prose phrases in REDTEAM #336 and #441 at the compiler workflow's final ledger
+check. The preceding configured compiler, command, cgo/ejection, testdir and
+vet steps passed. The [documentation correction](ledger-prose-correction/README.md)
+preserves the validator, every test path and all statuses; its direct compiled
+validator replay records RED, GREEN, both caught reversions and exact restored
+GREEN. This focused metadata check is not a parity or full Go regression pass.
+The corrected metadata needs fresh hosted prerequisites and a clean-tip stamp;
+earlier runs remain attached to their actual source and commit identities.
+
 The fresh normal `make.bash` above satisfies the rebuild requirement for source
 tree `e237c399aae8f8065b724e8a0e27585686c7da18`. The complete script and
 compiler-fixture suites, configured lint and
