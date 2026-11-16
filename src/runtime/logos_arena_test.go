@@ -1160,6 +1160,29 @@ func arenaMakeRun(t *testing.T, size uintptr, arena, heap func(n, c int)) {
 	}
 }
 
+// The direct runtime entry point is available even where compiler arena-make
+// lowering is not. Keep its overflow contract covered on every architecture.
+func TestLogosArenaRuntimeMakeOverflow(t *testing.T) {
+	for _, layout := range []struct {
+		name string
+		elem any
+		size uintptr
+	}{
+		{"int64", int64(0), 8},
+		{"elem24", arenaElem24{}, 24},
+	} {
+		t.Run(layout.name, func(t *testing.T) {
+			for _, tc := range arenaMakeOverflowCases(layout.size) {
+				t.Run(fmt.Sprintf("len=%d,cap=%d", tc.len, tc.cap), func(t *testing.T) {
+					arenaMakeMustPanic(t, "runtime arena make", tc.want, func() {
+						runtime.LogosArenaMakeSlice(layout.elem, tc.len, tc.cap)
+					})
+				})
+			}
+		})
+	}
+}
+
 func TestLogosArenaMakeOverflow(t *testing.T) {
 	if !goexperiment.LogosArena {
 		t.Skip("skipping test: GOEXPERIMENT=logosarena not enabled")
