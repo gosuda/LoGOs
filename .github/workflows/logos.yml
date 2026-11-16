@@ -142,6 +142,12 @@ jobs:
         run: |
           go test -count=1 -timeout 60m cmd/go -run 'Script/^logos_'
 
+      - name: "Validate installed test subprocess behavior"
+        if: "${{ !cancelled() && steps.smoke.outcome == 'success' && matrix.suite == 'scripts' }}"
+        run: |
+          sha256sum ../bin/go ../bin/logos ../pkg/tool/linux_amd64/compile ../pkg/tool/linux_amd64/link
+          go test -count=1 -race -parallel=1 -timeout 20m cmd/go -run 'Script/^logos_(cap_xtest_owner|test_experiment_env|test_plugin_experiment|test_cache_experiment)$'
+
       - name: "Run upstream regression gate"
         if: "${{ !cancelled() && steps.smoke.outcome == 'success' && matrix.suite == 'upstream' }}"
         run: |
@@ -151,13 +157,13 @@ jobs:
         if: "${{ !cancelled() && steps.smoke.outcome == 'success' && matrix.suite == 'unit' }}"
         run: |
           set -euo pipefail
-          go test -count=1 -short -race cmd/link/internal/ld cmd/go/internal/work cmd/go/internal/test
+          sha256sum ../bin/go ../bin/logos ../pkg/tool/linux_amd64/compile ../pkg/tool/linux_amd64/link
+          go test -count=1 -short -race -timeout 20m cmd/link/internal/ld cmd/go/internal/work cmd/go/internal/test
           go test -count=1 -short go/types -run '^(TestGenerate|TestGoTypesPanicSourceShape)$'
           go vet cmd/link/internal/ld cmd/go/internal/work cmd/go/internal/test go/types
           unformatted=$(gofmt -l go/types/generate_test.go go/types/generate_panic_logos_test.go go/types/generate_panic_shape_logos_test.go cmd/go/internal/test/logos_experiment_env_test.go)
           printf '%s\n' "$unformatted"
           test -z "$unformatted"
-          go test -count=1 -short -race -timeout 20m cmd/go -run 'Script/^logos_test_(experiment_env|plugin_experiment|cache_experiment)$'
 
       - name: "Verify regression negative controls"
         if: "${{ !cancelled() && steps.smoke.outcome == 'success' && matrix.suite == 'unit' }}"
