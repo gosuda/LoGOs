@@ -1,0 +1,135 @@
+name: "compiler-stability"
+
+"on":
+  pull_request:
+    paths:
+      - ".github/workflows/compiler-stability.yml"
+      - "src/cmd/compile/**"
+      - "src/cmd/go/**"
+      - "test/logos/**"
+      - "logos-doc/**"
+  workflow_dispatch:
+
+permissions:
+  contents: "read"
+
+concurrency:
+  group: "compiler-stability-${{ github.ref }}"
+  cancel-in-progress: true
+
+env:
+  GOMAXPROCS: "4"
+  GOFLAGS: "-p=2"
+  GOMEMLIMIT: "2GiB"
+
+jobs:
+  compiler:
+    name: "compiler-${{ matrix.suite }}"
+    runs-on: "ubuntu-24.04"
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: ["focused", "upstream"]
+    defaults:
+      run:
+        shell: "bash"
+        working-directory: "src"
+    steps:
+      - uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e" # v7.0.0
+        with:
+          go-version: "1.27.4"
+          cache: false
+      - uses: "actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1" # v7.1.0
+        with:
+          node-version: "26.13.1"
+      - name: "Record source and install upstream oracles"
+        run: |
+          evidence="$RUNNER_TEMP/compiler-stability-${{ matrix.suite }}"
+          mkdir -p "$evidence"
+          git rev-parse HEAD > "$evidence/source.txt"
+          go version >> "$evidence/source.txt"
+          printf 'UPROOT1274=%s\n' "$(go env GOROOT)" >> "$GITHUB_ENV"
+          while read -r version sha256 root; do
+            archive="$RUNNER_TEMP/go$version.linux-amd64.tar.gz"
+            curl --fail --silent --show-error --location --output "$archive" "https://go.dev/dl/go$version.linux-amd64.tar.gz"
+            printf '%s  %s\n' "$sha256" "$archive" | sha256sum --check --strict -
+            mkdir "$RUNNER_TEMP/go$version"
+            tar -xzf "$archive" -C "$RUNNER_TEMP/go$version" --strip-components=1
+            printf '%s=%s\n' "$root" "$RUNNER_TEMP/go$version" >> "$GITHUB_ENV"
+          done <<'PINS'
+          1.27.2 ecbadb99091a3f46e31f5f934b068b1864eafa7995211b39eaddf76996045fe5 UPROOT1272
+          1.27.3 65efbc80fdc1fa2cd2631cad5b481777a68e8725f34e89f50fc6ac714e379b40 UPROOT1273
+          PINS
+      - name: "Build the complete toolchain"
+        run: |
+          export GOROOT_BOOTSTRAP="$(go env GOROOT)"
+          GOEXPERIMENT= ./make.bash 2>&1 | tee "$RUNNER_TEMP/compiler-stability-${{ matrix.suite }}/build.log"
+          printf '%s\n' "$GITHUB_WORKSPACE/lib/wasm" "$GITHUB_WORKSPACE/bin" >> "$GITHUB_PATH"
+      - name: "Select and verify the C23 consumer compiler"
+        run: |
+          compiler="$(command -v gcc-14)"
+          compiler_bin="$RUNNER_TEMP/compiler-stability-c23"
+          mkdir "$compiler_bin"
+          ln -s "$compiler" "$compiler_bin/cc"
+          evidence="$RUNNER_TEMP/compiler-stability-${{ matrix.suite }}"
+          "$compiler_bin/cc" --version | tee "$evidence/c23.log"
+          printf 'int main(void) { return 0; }\n' |
+            "$compiler_bin/cc" -std=c23 -x c - -o "$RUNNER_TEMP/compiler-stability-c23-check" \
+            2>&1 | tee -a "$evidence/c23.log"
+          "$RUNNER_TEMP/compiler-stability-c23-check" 2>&1 | tee -a "$evidence/c23.log"
+          printf '%s\n' "$compiler_bin" >> "$GITHUB_PATH"
+      - name: "Run focused compiler and command checks"
+        if: matrix.suite == 'focused'
+        run: |
+          evidence="$RUNNER_TEMP/compiler-stability-focused"
+          cd ..
+          sha256sum --check logos-doc/validation/compiler-stability/frozen-tests.sha256 \
+            | tee "$evidence/frozen-tests.log"
+          cd src
+          unformatted=$(gofmt -l cmd/compile/internal/inline/interleaved \
+            cmd/compile/internal/logos cmd/go/internal/logos/eject)
+          printf '%s\n' "$unformatted" | tee "$evidence/format.log"
+          test -z "$unformatted"
+          go test -count=1 -short -timeout=20m \
+            cmd/compile/internal/inline/... cmd/compile/internal/logos/... \
+            cmd/go/internal/logos/eject 2>&1 | tee "$evidence/unit.log"
+          go test -count=1 -short -race -timeout=15m \
+            cmd/go/internal/logos/eject 2>&1 | tee "$evidence/race.log"
+          go test -count=1 -timeout=20m cmd/go \
+            -run 'Script/^logos_(ctfe_assignment_.*|tuple_(package_names|variant_names)|spread_defaults|inline_batches|eject_variant_tags)$' \
+            2>&1 | tee "$evidence/integration.log"
+          go test -count=1 -timeout=20m cmd/internal/testdir \
+            -run 'Test/logos/run/(ctfe_assignment_.*|spread_defaults|inline_batches)' \
+            2>&1 | tee "$evidence/testdir.log"
+          go vet cmd/compile/internal/inline/... cmd/compile/internal/logos/... \
+            cmd/go/internal/logos/eject 2>&1 | tee "$evidence/vet.log"
+          go test -count=1 -short cmd/internal/goparity -run '^TestRedteamLedgerRows$' \
+            2>&1 | tee "$evidence/ledger.log"
+      - name: "Check full-regression prerequisites"
+        if: matrix.suite == 'upstream'
+        run: |
+          evidence="$RUNNER_TEMP/compiler-stability-upstream"
+          go test -count=1 -short -timeout=5m cmd/internal/goparity -run '^TestRedteamLedgerRows$' \
+            2>&1 | tee "$evidence/ledger-prerequisite.log"
+          go test -count=1 -timeout=10m cmd/go -run '^TestScript$/^logos_cgo_shared$' \
+            2>&1 | tee "$evidence/cgo-shared-prerequisite.log"
+      - name: "Run the complete upstream regression gate"
+        if: matrix.suite == 'upstream'
+        env:
+          GOEXPERIMENT: ""
+          GO_TEST_TIMEOUT_SCALE: "6"
+        run: |
+          env -u GOFLAGS -u GOMEMLIMIT ./run.bash --no-rebuild \
+            2>&1 | tee "$RUNNER_TEMP/compiler-stability-upstream/regression.log"
+      - name: "Retain compiler validation logs"
+        if: always()
+        uses: "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02" # v4.6.2
+        with:
+          name: "compiler-stability-${{ matrix.suite }}-${{ github.run_id }}-${{ github.run_attempt }}"
+          path: "${{ runner.temp }}/compiler-stability-${{ matrix.suite }}"
+          if-no-files-found: warn
+          retention-days: 14

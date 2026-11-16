@@ -155,11 +155,10 @@ type testBuild struct {
 func ejectToDir(ctx context.Context, out string) {
 	checkEjectOut(out)
 	if isEjectVariant() {
-		if extra := os.Getenv("LOGOSEJECT_TAGS"); extra != "" {
-			for s := range strings.SplitSeq(extra, ",") {
-				if s != "" && !slices.Contains(cfg.BuildContext.BuildTags, s) {
-					cfg.BuildContext.BuildTags = append(cfg.BuildContext.BuildTags, s)
-				}
+		cfg.BuildContext.BuildTags = nil
+		for tag := range strings.SplitSeq(os.Getenv("LOGOSEJECT_TAGS"), ",") {
+			if tag != "" {
+				cfg.BuildContext.BuildTags = append(cfg.BuildContext.BuildTags, tag)
 			}
 		}
 	}
@@ -874,7 +873,7 @@ func findVariantContextForFile(pkgDir, name, hostGOOS, hostGOARCH string, hostTa
 			goarchMentioned = append(goarchMentioned, t)
 			continue
 		}
-		if t == "cgo" || t == "ignore" || t == "unix" || t == "boringcrypto" || strings.HasPrefix(t, "go1.") || strings.HasPrefix(t, "goexperiment.") {
+		if t == "cgo" || t == "ignore" || t == "unix" || t == "boringcrypto" || t == "logos" || t == cfg.BuildContext.Compiler || slices.Contains(cfg.BuildContext.ToolTags, t) || strings.HasPrefix(t, "go1.") || strings.HasPrefix(t, "goexperiment.") {
 			continue
 		}
 		customMentioned = append(customMentioned, t)
@@ -891,20 +890,16 @@ func findVariantContextForFile(pkgDir, name, hostGOOS, hostGOARCH string, hostTa
 			goarchCands = append(goarchCands, a)
 		}
 	}
-	hostTagSet := map[string]bool{}
-	for _, t := range hostTags {
-		hostTagSet[t] = true
-	}
 	var customUniq []string
 	seenCustom := map[string]bool{}
 	for _, t := range customMentioned {
-		if !seenCustom[t] && !hostTagSet[t] {
+		if !seenCustom[t] {
 			seenCustom[t] = true
 			customUniq = append(customUniq, t)
 		}
 	}
 	slices.Sort(customUniq)
-	if goos, goarch, tags, ok := searchVariantContext(pkgDir, name, goosCands, goarchCands, hostTags, customUniq); ok {
+	if goos, goarch, tags, ok := searchVariantContext(pkgDir, name, expr, goosCands, goarchCands, hostTags, customUniq); ok {
 		return goos, goarch, tags, true
 	}
 	for _, g := range []string{"linux", "darwin", "windows", "freebsd"} {
@@ -928,43 +923,16 @@ func findVariantContextForFile(pkgDir, name, hostGOOS, hostGOARCH string, hostTa
 			goarchCands = append(goarchCands, a)
 		}
 	}
-	return searchVariantContext(pkgDir, name, goosCands, goarchCands, hostTags, customUniq)
+	return searchVariantContext(pkgDir, name, expr, goosCands, goarchCands, hostTags, customUniq)
 }
 
-func matchVariantTags(pkgDir, name, goos, goarch string, hostTags, customUniq []string) ([]string, bool) {
-	for mask := range 1 << len(customUniq) {
-		tags := slices.Clone(hostTags)
-		for i, t := range customUniq {
-			if mask&(1<<i) != 0 && !slices.Contains(tags, t) {
-				tags = append(tags, t)
-			}
-		}
-		ctxt := cfg.BuildContext
-		ctxt.GOOS = goos
-		ctxt.GOARCH = goarch
-		ctxt.BuildTags = slices.Clone(tags)
-		if !slices.Contains(ctxt.ToolTags, "logos") {
-			ctxt.ToolTags = append(slices.Clone(ctxt.ToolTags), "logos")
-		}
-		match, err := ctxt.MatchFile(pkgDir, name)
-		if err != nil {
-			base.Fatalf("logos eject: match inactive file %s: %v", filepath.Join(pkgDir, name), err)
-		}
-		if match {
-			slices.Sort(tags)
-			return tags, true
-		}
-	}
-	return nil, false
-}
-
-func searchVariantContext(pkgDir, name string, goosCands, goarchCands, hostTags, customUniq []string) (string, string, []string, bool) {
+func searchVariantContext(pkgDir, name string, expr constraint.Expr, goosCands, goarchCands, hostTags, customUniq []string) (string, string, []string, bool) {
 	for _, goos := range goosCands {
 		for _, goarch := range goarchCands {
 			if work.CheckGOOSARCHPair(goos, goarch) != nil {
 				continue
 			}
-			if tags, ok := matchVariantTags(pkgDir, name, goos, goarch, hostTags, customUniq); ok {
+			if tags, ok := matchVariantTags(pkgDir, name, expr, goos, goarch, hostTags, customUniq); ok {
 				return goos, goarch, tags, true
 			}
 		}
