@@ -19,6 +19,8 @@ import "C"
 
 import (
 	"fmt"
+	"os"
+	"os/exec"
 	"runtime"
 	"strings"
 	"unsafe"
@@ -96,36 +98,51 @@ func checkInteriorAndGlobal() {
 	mustReject("unknown global extent", func() { consume(gp) })
 }
 
-func checkExportedResults() {
-	for _, tc := range []struct {
-		name  string
-		root  bool
-		child bool
-	}{
-		{"unpinned result root", false, true},
-		{"unpinned result child", true, false},
-		{"pinned result", true, true},
-	} {
-		func() {
-			value := &object{next: new([64]byte)}
-			var pin runtime.Pinner
-			defer pin.Unpin()
-			if tc.root {
-				pin.Pin(value)
-			}
-			if tc.child {
-				pin.Pin(value.next)
-			}
-			exported = unsafe.Pointer(value)
-			defer func() { exported = nil }()
-			if tc.root && tc.child {
-				roundtrip()
-			} else {
-				mustReject(tc.name, roundtrip)
-			}
-			runtime.KeepAlive(value)
-		}()
+func checkExportedResult(root, child bool) {
+	value := &object{next: new([64]byte)}
+	var pin runtime.Pinner
+	defer pin.Unpin()
+	if root {
+		pin.Pin(value)
 	}
+	if child {
+		pin.Pin(value.next)
+	}
+	exported = unsafe.Pointer(value)
+	defer func() { exported = nil }()
+	roundtrip()
+	runtime.KeepAlive(value)
+}
+
+func mustRejectExport(name string) {
+	executable, err := os.Executable()
+	if err != nil {
+		panic(err)
+	}
+	output, err := exec.Command(executable, name).CombinedOutput()
+	if err == nil {
+		panic(name + ": accepted an unpinned Go pointer")
+	}
+	if _, ok := err.(*exec.ExitError); !ok {
+		panic(fmt.Sprintf("%s: could not run child: %v", name, err))
+	}
+	text := string(output)
+	resultRejected := strings.Contains(text, "result of Go function") &&
+		strings.Contains(text, "called from cgo is unpinned Go") &&
+		strings.Contains(text, "or points to unpinned Go")
+	// cgocheck2 checks the pointer store into the C frame before the
+	// result check. An unpinned root then causes a throw, not a panic.
+	storeRejected := name == "export-unpinned-root" &&
+		strings.Contains(text, "fatal error: unpinned Go pointer stored into non-Go memory")
+	if !resultRejected && !storeRejected {
+		panic(fmt.Sprintf("%s: missing cgo rejection: %v\n%s", name, err, output))
+	}
+}
+
+func checkExportedResults() {
+	mustRejectExport("export-unpinned-root")
+	mustRejectExport("export-unpinned-child")
+	checkExportedResult(true, true)
 }
 
 func checkConcurrentGC() {
@@ -161,6 +178,20 @@ func checkConcurrentGC() {
 }
 
 func main() {
+	if len(os.Args) == 2 {
+		switch os.Args[1] {
+		case "export-unpinned-root":
+			checkExportedResult(false, true)
+		case "export-unpinned-child":
+			checkExportedResult(true, false)
+		default:
+			panic("unknown exported-result case")
+		}
+		return
+	}
+	if len(os.Args) != 1 {
+		panic("unexpected arguments")
+	}
 	checkMemoryKinds()
 	checkInteriorAndGlobal()
 	checkExportedResults()
