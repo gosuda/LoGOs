@@ -4,19 +4,19 @@ Date: 2026-11-16
 
 Base: PR #26, commit `968b8b436b08a0d8772d2159daa36e9c575d4b3d`.
 
-**Status: draft; execution blocked.** The local execution environment is unavailable and Codexify's execution tunnel is disconnected. The new Go fixtures have not been compiled, formatted with gofmt, or executed. The CI workflow supplies an execution path if repository Actions runs it. A declared gate is not a passed gate. PR #26's earlier results apply to its recorded source, not to this follow-up.
+**Status: draft; repair verification pending.** Local execution and Codexify remain unavailable, but GitHub Actions is running the new gates. Native arm64 builds, formatting, and vet passed. Ordinary runtime tests with both collectors reproduced the ownership defect below. Fixture corrections and the release-order repair require fresh execution. The [first-run record](gc-stability-first-run.md) separates the real defect from fixture errors. PR #26's earlier results do not verify this follow-up.
 
-## Ownership hypothesis
+## Reproduced ownership defect
 
-`logosRegionReleaseChunks` currently keeps `rec.chunk` published until its release loop finishes. Each `logosArenaRelease` makes a chunk reusable in a P pool before the loop clears that owner head. Implicit arena Drop and RegionPark detach their published owner before releasing chunks.
+Before the repair, `logosRegionReleaseChunks` kept `rec.chunk` published until its release loop finished. Each `logosArenaRelease` makes a chunk reusable in a P pool before the loop clears that owner head. Implicit arena Drop and RegionPark detach their published owner before releasing chunks.
 
-This is a source-supported hypothesis. Runtime code excludes asynchronous preemption, so a harmful observation requires a reachable synchronous safepoint or another proved interleaving. The generated call and inlining structure must be checked for both the original baseline and PR #26: the newly added accounting call may affect whether release is inlined.
+Ordinary native arm64 builds with Green Tea on and off observed the same chunk simultaneously published as a region head and held by a reusable P pool. Runtime code excludes asynchronous preemption, so the executed test establishes a reachable synchronous observation of that overlap. It does not demonstrate a use-after-free crash or establish whether PR #26 introduced the compiled reachability; the old publication order predates that PR.
 
 `TestLogosRegionReleaseOwnership` runs ordinary production Close while a test-only observer stops the world. The observer compares each published explicit-region head with live P-pool entries and never follows the potentially stale head. The first snapshot is a positive visibility control. The bounded workload closes 128 chunks per round for 32 rounds, taking up to 16 snapshots per close. The worker is stopped and joined before any failure is reported or process-wide settings are restored.
 
 This fixture checks published heads, not all interior owner-chain nodes. Pool lists are assumed to satisfy their existing acyclic-list invariant. A passing stress run cannot prove that every scheduling interval was exercised.
 
-The dedicated no-inlining gate uses `-gcflags=runtime=-l` with `GODEBUG=asyncpreemptoff=1` to expose ordinary entry safepoints. This changes compiler configuration, not production release code. No ownership repair is included before a behavioral RED. If the failure is reproduced, detach `rec.chunk` before returning the saved chain to pools, keep the test fixed, and probe the repair by restoring the old publication order.
+The dedicated no-inlining gate uses `-gcflags=runtime=-l` with `GODEBUG=asyncpreemptoff=1` to expose ordinary entry safepoints. This changes compiler configuration, not production release code. The repair detaches `rec.chunk` immediately after saving its chain locally and before returning any chunk to a pool. The ownership test remains unchanged from the RED run. The mutation gate reconstructs the exact old production file, checks its Git blob hash, and requires the original ownership assertion to fail.
 
 ## Heap graph contract
 
@@ -45,9 +45,10 @@ All pointer values are nil or target live manual allocations. This makes the exi
 | Repetition | Count 10; heap-graph and layout tests at CPU counts 1, 2, and 4; ownership stress fixes two Ps |
 | Synchronous safepoints | Ownership test, count 10, runtime inlining disabled, asynchronous preemption disabled |
 | Mark verification | Existing external-pointer test and new heap graph, count 10, `gccheckmark=1` with explicit collections |
+| Mutation | Restore the original release order through an overlay; require the frozen ownership assertion to fail |
 | Hygiene | gofmt and vet |
 
-These are pending requirements. This document records no passing result for them.
+The initial arm64 build, formatting, and vet gates passed; the runtime package exposed the defect and fixture errors recorded above. All gates on the repaired source remain pending.
 
 ## Optimization queue
 
