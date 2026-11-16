@@ -8,8 +8,9 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from test_upstream_identity import Workspace
-from test_upstream_identity import workspace as workspace
+from test_upstream_identity import Workspace, workspace
+
+__all__ = ["workspace"]
 
 
 @pytest.mark.parametrize("tracked", (True, False), ids=("tracked", "untracked"))
@@ -25,7 +26,15 @@ def test_top_level_compiler_fixture_changes_are_rejected(
 def test_receipt_records_exact_head_src_and_test_trees(workspace: Workspace) -> None:
     assert workspace.receipt("before").returncode == 0
     expected = subprocess.run(
-        ("git", "-C", str(workspace.repo), "rev-parse", "HEAD", "HEAD:src", "HEAD:test"),
+        (
+            "git",
+            "-C",
+            str(workspace.repo),
+            "rev-parse",
+            "HEAD",
+            "HEAD:src",
+            "HEAD:test",
+        ),
         env=workspace.env,
         capture_output=True,
         check=True,
