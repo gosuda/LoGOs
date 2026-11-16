@@ -76,6 +76,8 @@ jobs:
           echo "$GITHUB_WORKSPACE/lib/wasm" >> "$GITHUB_PATH"
       - name: Require formatted sources and full vet checks in both settings
         run: node misc/cgo/lint.mjs "$RUNNER_TEMP/cgo-evidence/lint"
+      - name: Preserve self-build configuration and fast-cgo compatibility
+        run: node misc/cgo/compat.mjs "$RUNNER_TEMP/cgo-evidence/compat"
       - name: Require expected RED and mutation failures, then restore GREEN
         run: node misc/cgo/probe.mjs "$RUNNER_TEMP/cgo-evidence/probes"
       - name: Check declared families, sanitizers, and the stock oracle
