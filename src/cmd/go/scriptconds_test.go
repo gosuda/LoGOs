@@ -44,6 +44,18 @@ func scriptConditions(t *testing.T) map[string]script.Cond {
 	add("cc", script.PrefixCondition("go env CC = <suffix> (ignoring the go/env file)", ccIs))
 	add("git", lazyBool("the 'git' executable exists and provides the standard CLI", hasWorkingGit))
 	add("git-sha256", script.OnceCondition("the local 'git' version is recent enough to support sha256 object/commit hashes", gitSupportsSHA256))
+	add("host-goamd64", script.CachedCondition("host supports GOAMD64=<suffix>", func(level string) (bool, error) {
+		switch level {
+		case "v1", "v2", "v3", "v4":
+		default:
+			return false, fmt.Errorf("unsupported GOAMD64 level %q", level)
+		}
+		if runtime.GOARCH != "amd64" {
+			return false, nil
+		}
+		host, _ := config.ArchLevels("native")
+		return host >= level, nil
+	}))
 	add("host-simd", script.OnceCondition("host can execute GOEXPERIMENT=simd output (arm64 always; amd64 needs GOAMD64 v4)", func() (bool, error) {
 		switch runtime.GOARCH {
 		case "arm64":
