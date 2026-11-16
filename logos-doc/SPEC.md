@@ -1872,6 +1872,8 @@ m.WithLock(func(c *Config) {
 - A request on a `.lgo` document MUST use a snapshot whose versions equal the current client versions of every document of the package; the proxy MUST compute it on demand, once per version set, and concurrent requests MUST share one computation. [T-Sec16]
 - The store MUST keep the newest client version of each open document; a change that carries an older version MUST be dropped and MUST NOT reach `gopls`. [T-Sec16]
 - A frame that carries a duplicate Content-Length header MUST fail with a descriptive error. [T-Sec16]
+- A frame header MUST contain at most 8192 bytes and 32 lines, including the line terminators and the blank separator. [T-Sec16]
+- An incomplete header that exhausts either limit MUST fail with a descriptive error without waiting for more input. [T-Sec16]
 - The proxy MUST NOT recompile without a request, a `didSave`, or the `didClose` of an unsaved `.lgo` document. [T-Sec16]
 - The lowering MUST come from one `logos list` run with compiled JSON output and the overlay that returns, per `.lgo` file, the lowered text and the edit map; per package, the hints JSON and the compiler diagnostics. [T-Sec16]
 - Position translation MUST rest on the compiler-written origin segments of the eject map: a lowered offset inside a copied segment maps to its exact original offset, and an offset inside a compiler-generated run maps to the anchor position of that run; no heuristic or size-capped textual matching takes part. [T-Sec16]
