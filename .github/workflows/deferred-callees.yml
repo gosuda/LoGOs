@@ -6,7 +6,9 @@ name: "Deferred callee correctness"
       - ".github/workflows/deferred-callees.yml"
       - "src/cmd/compile/internal/logos/**"
       - "src/cmd/go/testdata/script/logos_eject_defer_indexed_callee.txt"
+      - "src/cmd/go/testdata/script/logos_eject_defer_generic_receiver.txt"
       - "test/logos/run/defer_indexed_callee.*"
+      - "test/logos/run/defer_generic_receiver.*"
   workflow_dispatch:
 
 permissions:
@@ -53,15 +55,15 @@ jobs:
           printf '%s\n' "$GITHUB_WORKSPACE/bin" >> "$GITHUB_PATH"
       - name: "Check formatting and lowering"
         run: |
-          test -z "$(gofmt -l cmd/compile/internal/logos/defer.go)"
+          test -z "$(gofmt -l cmd/compile/internal/logos/defer.go cmd/compile/internal/logos/scopedefer.go)"
           go vet cmd/compile/internal/logos
           go test -count=1 -short -timeout 20m cmd/compile/internal/logos
       - name: "Check native deferred calls"
         run: |
-          go test -count=1 -timeout 20m cmd/internal/testdir -run 'Test/logos/run/(defer_indexed_callee|errdefer_recv|defer_try_semantics|scope_defer)'
+          go test -count=1 -timeout 20m cmd/internal/testdir -run 'Test/logos/run/(defer_indexed_callee|defer_generic_receiver|errdefer_recv|defer_try_semantics|scope_defer)'
       - name: "Check ejection with race detection"
         run: |
-          go test -count=1 -race -timeout 20m cmd/go -run 'Script/^logos_(eject_defer_indexed_callee|defer_try_eject_parity|eject_defer_go_option)$'
+          go test -count=1 -race -timeout 20m cmd/go -run 'Script/^logos_(eject_defer_indexed_callee|eject_defer_generic_receiver|defer_try_eject_parity|eject_defer_go_option)$'
       - name: "Catch and restore a callee span mutation"
         run: |
           target=cmd/compile/internal/logos/defer.go

@@ -239,6 +239,8 @@ A typed-nil error MUST count as non-nil for `errdefer` [T-104.2].
 The function, receiver, and arguments of a deferred call MUST be evaluated at the statement [T-104.2].
 An indexed function value MUST be captured at that statement, including when its callee expression is parenthesized. [T-104.2]
 An `errdefer` MUST evaluate the index and function value even when cleanup is skipped after a successful return. [T-104.2]
+A deferred generic method MUST capture its receiver at the statement, including when some or all method type arguments are explicit. A value receiver MUST copy the selected value, including a promoted receiver reached through a pointer; a pointer receiver MUST retain the selected pointer or implicit address. [T-104.2]
+Explicit method type arguments MUST keep their bindings from that statement. Remaining type arguments MUST retain call-argument inference, including an inferred type that the caller cannot name. [T-104.2]
 A `?.` call with an absent receiver MUST skip the call and MUST NOT evaluate its arguments, as an ordinary call and in a `defer` or `go` statement [T-104.3][T-104.2].
 A panic while evaluating return values MUST count as failure for `errdefer` [T-104.2].
 Deferred calls MUST run in LIFO order across `defer`, `defer?`, and `errdefer` [T-104.2].
@@ -1868,6 +1870,7 @@ For the `scope` token rule, see Sec 4.1. [T-0.2]
 Scope defers in one block MUST run last-in-first-out. [T-104.7]
 The function, receiver, and arguments MUST evaluate at the statement. [T-104.7]
 An indexed function value MUST be captured before control continues past the `scope defer` statement. [T-104.7]
+A generic method MUST capture its receiver and bind its explicit type arguments there. Every exit MUST use those same type bindings, including an exit from a nested scope that shadows a type name. Remaining method type arguments MUST retain call-argument inference. [T-104.7]
 `return`, `break`, `continue`, labeled `break`, and `goto` out of the block MUST run scope defers first. [T-104.7]
 A panic MUST run scope defers during unwinding. [T-104.7]
 A scope defer in a loop body MUST run every iteration. [T-104.7]
