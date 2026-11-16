@@ -272,3 +272,4 @@
 {"id": "AUD-161", "description": "M14-A-S2 Read array operator object code of arm64 and riscv64 builds", "phase": "AUD"}
 {"id": "AUD-162", "description": "M14-A-S3 Round each scalar lane product of dot", "phase": "AUD"}
 {"id": "AUD-189", "description": "M0-A-S15 Enforce the upstream Go regression floor in CI", "phase": "AUD"}
+{"id": "AUD-180", "description": "M15-A-S6 Keep vector zero initialization inside CPU guards", "phase": "AUD"}

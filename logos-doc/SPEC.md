@@ -1752,6 +1752,7 @@ On nonzero errCode the wrapper throws the message read from wasm memory. [T-Sec1
 ## 13. Backend peephole and SIMD passes
 
 - Every pass in this section MUST apply to Go packages under `logos` and under plain `go`, and to loGo/s packages under `logos`, except a rule about a loGo/s language construct (array operators, reduction methods, and `make` length checks) and except the wasm loop-stride default, which applies under `logos` only. [T-303][R-U1]
+- For a vector form selected by a runtime CPU feature check, every instruction of that form, including vector zero initialization, MUST remain unreachable when the check is false. This rule MUST survive inlining and optimization for Go and loGo/s input under both commands. [T-303][T-204.2][R-U1]
 
 ### 13.1 Arm64 load and store pairing
 
