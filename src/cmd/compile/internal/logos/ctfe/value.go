@@ -134,6 +134,26 @@ func copyValue(v Value) Value {
 	return v
 }
 
+// storeValue assigns src into dst's existing inline storage. Their types must
+// be assignment-compatible, and src's arrays and structs must already be
+// snapshotted before any overlapping store. Reference fields retain their
+// referents; array and struct slots retain storage observed by slice views.
+func storeValue(dst, src Value) Value {
+	switch {
+	case dst.array != nil:
+		for i := range dst.array {
+			dst.array[i] = storeValue(dst.array[i], src.array[i])
+		}
+		src.array = dst.array
+	case dst.strct != nil:
+		for i := range dst.strct {
+			dst.strct[i] = storeValue(dst.strct[i], src.strct[i])
+		}
+		src.strct = dst.strct
+	}
+	return src
+}
+
 type storeKey struct {
 	first *Value
 	n     int
@@ -973,7 +993,7 @@ func (e *evaluator) fieldPlace(fr *frame, sel *syntax.SelectorExpr) (place, erro
 							get: func() (Value, error) { return fr.scopes[idx][name].strct[fidx], nil },
 							set: func(v Value) error {
 								cur := fr.scopes[idx][name]
-								cur.strct[fidx] = copyValue(v)
+								cur.strct[fidx] = storeValue(cur.strct[fidx], v)
 								fr.scopes[idx][name] = cur
 								return nil
 							},
@@ -1141,7 +1161,10 @@ func (e *evaluator) indexPlace(fr *frame, ix *syntax.IndexExpr) (place, error) {
 			return place{
 				typ: x.typ.Elem,
 				get: func() (Value, error) { return (*backing)[at], nil },
-				set: func(v Value) error { (*backing)[at] = copyValue(v); return nil },
+				set: func(v Value) error {
+					(*backing)[at] = storeValue((*backing)[at], v)
+					return nil
+				},
 			}, nil
 		}
 		if base, ok := syntax.Unparen(ix.X).(*syntax.Name); ok {
@@ -1154,7 +1177,7 @@ func (e *evaluator) indexPlace(fr *frame, ix *syntax.IndexExpr) (place, error) {
 						get: func() (Value, error) { return fr.scopes[sidx][name].array[i], nil },
 						set: func(v Value) error {
 							cur := fr.scopes[sidx][name]
-							cur.array[i] = copyValue(v)
+							cur.array[i] = storeValue(cur.array[i], v)
 							fr.scopes[sidx][name] = cur
 							return nil
 						},
@@ -1345,7 +1368,8 @@ func (e *evaluator) evalBuiltin(fr *frame, name string, c *syntax.CallExpr) (Val
 		case v.slice != nil:
 			zero := zeroValue(v.typ.Elem)
 			for i := range v.slice.length {
-				(*v.slice.backing)[v.slice.lo+i] = zero
+				at := v.slice.lo + i
+				(*v.slice.backing)[at] = storeValue((*v.slice.backing)[at], zero)
 			}
 			return zeroValue(&Type{Kind: KInt}), nil
 		}
@@ -1459,7 +1483,10 @@ func (e *evaluator) evalAppend(fr *frame, c *syntax.CallExpr) (Value, error) {
 		if int64(length+len(elems)) > e.cfg.MaxValueBytes {
 			return Value{}, &Error{Code: CodeTooLarge, Detail: fmt.Sprintf("append of %d elements over %d byte limit", length+len(elems), e.cfg.MaxValueBytes), Pos: pos}
 		}
-		copy((*s.slice.backing)[lo+length:], elems)
+		for i, v := range elems {
+			at := lo + length + i
+			(*s.slice.backing)[at] = storeValue((*s.slice.backing)[at], v)
+		}
 		nh := *s.slice
 		nh.length += len(elems)
 		s.slice = &nh
@@ -1481,8 +1508,13 @@ func (e *evaluator) evalAppend(fr *frame, c *syntax.CallExpr) (Value, error) {
 		return Value{}, err
 	}
 	backing := make([]Value, newcap)
-	copy(backing, sliceElems(s))
+	for i, v := range sliceElems(s) {
+		backing[i] = copyValue(v)
+	}
 	copy(backing[length:], elems)
+	for i := need; i < newcap; i++ {
+		backing[i] = zeroValue(s.typ.Elem)
+	}
 	s.slice = &sliceVal{backing: &backing, length: need, cap_: newcap}
 	return s, nil
 }
@@ -1543,18 +1575,21 @@ func (e *evaluator) evalCopy(fr *frame, c *syntax.CallExpr) (Value, error) {
 	} else {
 		return Value{}, e.fail(pos, "bad copy call in const evaluation")
 	}
-	snap := slices.Clone(selems)
 	delems := sliceElems(dst)
-	n := min(len(delems), len(snap))
-	for i := range n {
-		v := copyValue(snap[i])
+	n := min(len(delems), len(selems))
+	snap := make([]Value, n)
+	for i := range snap {
+		v := copyValue(selems[i])
 		if dst.typ.Elem != nil {
 			var err error
 			if v, err = e.convert(v, dst.typ.Elem, pos); err != nil {
 				return Value{}, err
 			}
 		}
-		(*dst.slice.backing)[dst.slice.lo+i] = v
+		snap[i] = v
+	}
+	for i, v := range snap {
+		delems[i] = storeValue(delems[i], v)
 	}
 	return intValue(big.NewInt(int64(n)), UntypedInt(), true), nil
 }

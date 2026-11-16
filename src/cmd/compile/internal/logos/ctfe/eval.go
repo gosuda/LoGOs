@@ -476,7 +476,10 @@ func (e *evaluator) resolvePlace(fr *frame, lhs syntax.Expr) (place, error) {
 				return place{
 					typ: fr.scopes[idx][name].typ,
 					get: func() (Value, error) { return fr.scopes[idx][name], nil },
-					set: func(v Value) error { fr.scopes[idx][name] = v; return nil },
+					set: func(v Value) error {
+						fr.scopes[idx][name] = storeValue(fr.scopes[idx][name], v)
+						return nil
+					},
 				}, nil
 			}
 		}
