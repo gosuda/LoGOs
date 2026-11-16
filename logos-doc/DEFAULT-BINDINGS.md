@@ -2,19 +2,33 @@
 
 ## Status and scope
 
-The declaration validator, M6-S3a, is retained. The binding implementation,
-M6-S3b, is blocked and has been removed after its third implementation
-attempt failed installed-compiler tests on 2026-11-16. This follows G1's
-three-attempt limit, required by AGENTS.md. The following source-level
-results describe the rejected candidates; they do not establish a working
-native binding implementation.
+The declaration validator, M6-S3a, is in its third and final implementation
+attempt. Its grouped-local-scope correction passed the installed semantic
+gates, source tests, and corresponding mutation probe before the final full
+bootstrap. That bootstrap failed with exit 2 during toolchain2 after a
+compiler process was killed. Its cause is not established. A completed
+full bootstrap and the full Go regression remain required. The binding
+implementation, M6-S3b, is blocked and has been removed after its third
+implementation attempt failed installed-compiler tests on 2026-11-16.
+This follows G1's three-attempt limit, required by AGENTS.md. The binding-candidate sections
+below describe rejected work; their source-level results do not establish
+a working native binding implementation.
 
 The rejected snapshot is commit
 `96a5a8cc599cbcc55263d32c4ceb2348abc6f0fd`. Its direct lowering suite passed,
 but both installed exported-package tests and the allocation probe failed
 with an internal compiler panic. The exact diagnosis and recovery are
-recorded below. The retained validator still needs its separate fresh
-installed-toolchain gate and the full hosted regression.
+recorded below. After rollback and before the grouped-scope review finding,
+the retained validator passed uncached installed-compiler checks, including
+a native/ejection script calibrated against the baseline and an upstream
+Go 1.27.2 execution. Those results are historical evidence for the earlier
+validator. That earlier `make.bash` rebuild was deliberately interrupted
+with SIGINT during toolchain3, exiting 130, to address the review finding.
+It did not pass. Final installed checks subsequently passed with the
+compiler identified below, before the separate full bootstrap failed.
+Those checks were not rerun on the compiler left by that failed bootstrap.
+Hosted gates remain blocked before checkout by Actions policy.
+None of these validator results rehabilitates the rejected binding work.
 
 The repair has two obligations. A default must be checked in the scope where
 it was declared, even if its type is never constructed. Applying that default
@@ -48,6 +62,7 @@ separately.
 | Exported private fields | Lowering produced a consumer struct literal that tried to name the producer's unexported field. Native compilation and corrected-environment ejection rejected it. | `defaults-export-ejected-disk-red.log` |
 | Blank-field lowering | Generated code contained both keyed `_:` elements and assignments such as `_logos_v._`; neither is a legal field reference. | `defaults-blank-lowering-native-red.log`, `defaults-blank-lowering-eject-red.log` |
 | Blank-field source identity | The first validator repair selected a field type by its name. Repeated `_` fields therefore used the first blank field's type: valid declarations were rejected and invalid ones accepted. Six attack cases failed while two controls passed. This was a defect in the intermediate validator, not a separate untouched-baseline result. | `structdefault-blank-red.log` |
+| Grouped local declaration scope | The saved scope was mutated by later local type specifications before delayed defaults ran. A default referring to outer `const C = 17` instead resolved a later local type `C`. The exact unused-type repro passed the baseline compiler and failed the retained validator before attempt 3 with `C (type) is not an expression`. | `default-group-compile-baseline.log`, `default-group-compile-candidate-red.log` |
 | Helper metadata | The old decoder did not recognize `defaulthelper`; the old importer accepted legacy expression-only defaults without a helper. The four new wire tests failed before the boundary change. | `default-helper-wire-red.log` |
 
 The retained blank-field validator uses the field's source position to find
@@ -318,7 +333,7 @@ replace the installed-fork tests or the full regression gate.
 | `default-mutant-helper-mask.log` | `8b178c8b93f5b75c765b171a4efe20a69fca8518107086e59b7b434b2e073e6d` |
 | `default-mutant-helper-fill.log` | `9d27abe2af5793beb0d3845f7e9f13e054e312801749b736d5d9cd847a243134` |
 
-## Allocation baseline
+## Allocation baseline and retained-validator comparison
 
 A separate probe measured one representative nonescaping construction on the
 unchanged language compiler. It declares 32 scalar defaults, a four-element
@@ -352,33 +367,205 @@ bash /workspace/scratch/fd0d13fb6a48/evidence/run-defaults-alloc-probe.sh \
 | Measurement log | `db24ccdf56705db991445fe42fb8ed661c0b007a7e46244dfd9a4901c84d2481` |
 | Probe executable | `88a9e52294c47c475e3bb19689d83bd1638d0fc64a07b4ae0c6e174feac206cf` |
 
-This is a baseline observation. The installed candidate failed to compile
-the identical workload, so it produced no allocation measurement or timing
-result. No allocation improvement or regression can be inferred from that
-failed run. The workload is retained to check the independent validator
-and any future binding design.
+The rejected binding candidate failed to compile the identical workload,
+so it produced no allocation measurement or timing result. No allocation
+improvement or regression can be inferred from that failed run.
+
+After rollback, before the grouped-scope correction, the recovered compiler
+passed the unchanged probe with
+`0.000000` allocations per run and checksum `557`. The log
+`defaults-alloc-validator.log` has exactly the baseline measurement-log hash
+above. The recovered probe executable has SHA-256
+`b4b84689c8b0a8c135399f3c6922858b18a2d86836aaae1407ee94530daa4adb`.
+This establishes preservation for this workload, not a speed improvement.
+The final validator attempt also passed the identical probe with zero
+allocations per run and checksum `557`. Its log,
+`defaults-alloc-validator-final.log`, again has the baseline log hash
+`db24ccdf56705db991445fe42fb8ed661c0b007a7e46244dfd9a4901c84d2481`.
+The final probe executable has SHA-256
+`1ccfae42697e084d6f4ac77fdb04cb87f9682578cb5e65f091b5517fb97880fa`.
+
+## Historical verification before the grouped-scope correction
+
+Before the grouped-scope finding, the post-rollback incremental
+`go install cmd/compile` succeeded with
+`GOMAXPROCS=1`, `GOGC=10`, and `GOMEMLIMIT=384MiB`; the preceding attempt
+with `GOGC=50` and a 768 MiB limit was killed while compiling SSA. The logs
+are `default-validator-recovery-install.log` and
+`default-validator-recovery-install-lowheap.log`. The recovered compiler's
+SHA-256 is
+`e778b23c4a45977a5dc5c9894ae131aa2f0203f0147d1564fb59d7aae4a4ec67`.
+The build cache was cleared before the following semantic checks. This
+incremental installation does not establish a completed full toolchain
+rebuild or an installed result for the subsequent grouped-scope correction.
+
+The durable installed-compiler attack is
+[`logos_struct_default_validation.txt`](../src/cmd/go/testdata/script/logos_struct_default_validation.txt),
+with SHA-256
+`04f0ae478dbc4e346d9b82aca8f410c69470438453816a8031e1fc26c5eccc19`.
+It checks imported `time.Second` and a local constant, accepts the `uint8`
+bounds 0 and 255, and rejects unused declarations with defaults -1 and 256,
+wrong scalar and composite types, or an effectful map key. Native and
+ejection paths are unconditional. The valid ejected program must also build
+and run with the required upstream Go 1.27.2 oracle, producing the same
+output.
+
+Baseline calibration of that exact fixture failed with `undefined: time`
+and `undefined: amount` in the valid program. All five invalid declarations
+were accepted by both native compilation and ejection: ten incorrect
+acceptance paths. `default-validator-native-baseline-red.log` records this
+RED result. That recovered compiler passed the unchanged fixture, exercising
+the native checker's syntax-stored type information as well as ejection.
+
+| Post-rollback check before grouped-scope correction | Verified result | Evidence |
+| --- | --- | --- |
+| Retained lexical-scope, assignment, and blank-field identity tests | PASS, 11.270s | `default-validator-installed-focused.log` |
+| Full short facts suite | PASS, 0.012s | `default-validator-types2-facts.log` |
+| Full short types2 suite | PASS, 34.248s | `default-validator-types2-facts.log` |
+| Nine selected cmd/go scripts, including the new native/ejection/upstream attack | PASS, 20.725s | `default-validator-installed-scripts.log` |
+| Seven existing testdir fixtures for defaults and spread | PASS, 72.393s | `default-validator-testdir.log` |
+| Formatting and vet | Clean | `default-validator-gofmt.log`, `default-validator-vet.log` |
+| Unchanged 34-field allocation probe | PASS, zero allocations, checksum 557 | `defaults-alloc-validator.log` |
+
+The nine scripts are `logos_struct_default_validation`,
+`logos_m6_addr_defaults`, `logos_eject_struct_default`,
+`logos_struct_default_mixed_language`, `logos_interop_struct_default`,
+`logos_eject_spread`, `logos_eject_spread_addr`,
+`logos_eject_spread_statement_positions`, and `logos_eject_json_embedded`.
+The seven testdir fixtures are `compile/struct_default_tag.lgo`,
+`lint/unapplied_struct_default.lgo`, and the run fixtures `struct_default.lgo`,
+`struct_default_run.lgo`, `m22s6_d6_default_assert.lgo`, `spread.lgo`, and
+`spread_addr_literal.lgo`.
+
+The `structdefault_logos.go` validator and its original frozen attacks
+remain unchanged; the final attempt adds a local-declaration hook described
+below. The following mutation results also precede that hook.
+Assignment-check and map-key-proof mutants were caught before rollback;
+the source-position mutant failed six repeated-blank attacks while both
+controls passed. The new installed script makes the native configuration
+part of this retained invariant's durable regression coverage.
+
+## Final validator attempt: grouped local scopes
+
+The exact review reproduction declares outer `const C = 17`, then an unused
+local type group with `Cfg struct { N int = C }` followed by `C int`.
+The baseline installed compiler accepted it. The retained validator before
+attempt 3 rejected it because the delayed check observed the later type in
+the same mutable scope. The reproduction file, `review_group_default.lgo`,
+has SHA-256
+`e2d5e191878f9ca1cc7993b5adee1d6484dd1a93c9c2fd0ead538601d3f025ce`.
+
+The correction adds five lines at local `TypeDecl` handling in
+`types2/decl.go`. It saves the delayed-check queue length before checking
+the type specification, then drains the new checks after `typeDecl` and
+`check.pop`, before the next local specification enters the scope. The
+drain is guarded by `check.conf.Logos`. The type is complete when its
+defaults are checked; package-level forward declarations and ordinary Go
+processing retain their existing behavior.
+
+The new attacks were published without production changes in commit
+`48308dac845e0f1624b314d07f55f797abca063a`. The unit test covers nine cases
+under three `Info` configurations: no `Types` map, a requested `Types` map,
+and `StoreTypesInSyntax`, for 27 cases. It tests later local types and aliases
+shadowing constants, an imported package alias, and a constant map key.
+Controls preserve package forward constants, earlier local type conversions,
+and a completed recursive generic type followed by an alias. Negative
+controls require an earlier type used as a value to fail and a future local
+type without an outer binding to remain undefined. All affected types stay
+unconstructed, keeping these attacks within declaration checking.
+
+The script checks native execution, ejection, ejected Go execution, and the
+required upstream Go 1.27.2 oracle, plus native/ejection rejection controls.
+It passed unchanged on the pre-bootstrap installed compiler (0.81s within
+the ten-script gate).
+
+| Frozen artifact | SHA-256 |
+| --- | --- |
+| `structdefault_group_scope_test.go` | `52fd581f8761a8b16456ab7beb254b7bd10dd352d2bca940812d6496f70e98b8` |
+| `logos_struct_default_group_scope.txt` | `3a4d1120991c841089cfffc69cbf89b673bc94279f07d44935f244b72e64bf9b` |
+| Unchanged `structdefault_logos.go` | `372cf9b49f21ef4698d1be739544d1f07d5dce2917267892b067005f6576d645` |
+| Final `types2/decl.go` | `177f97b21228206de7092af6c658135a51487b6a40a7824514e441032743132c` |
+
+| Final-attempt evidence | Observed result | Log |
+| --- | --- | --- |
+| Grouped-scope unit tests before correction | RED: 15 failures, 12 passing controls; 9.339s | `default-group-scope-unit-red.log` |
+| Grouped-scope installed script before correction | RED; 4.844s | `default-group-scope-script-red.log` |
+| Final correction, original focused tests plus grouped-scope tests | GREEN; 1.338s | `default-validator-candidate3-unit-green.log` |
+| Overlay restoring only the old `decl.go` | RED: same 15 failures and 12 passing controls; 0.231s | `default-group-scope-mutant.log` |
+
+The overlay probe left the real `decl.go` at the final hash above throughout.
+The original native-validation script retains hash
+`04f0ae478dbc4e346d9b82aca8f410c69470438453816a8031e1fc26c5eccc19`.
+These source and mutation results are the evidence for M6-S3a's final
+implementation attempt. `go install cmd/compile` subsequently passed;
+`default-validator-candidate3-install.log` records the installation. The
+compiler used for the following pre-bootstrap semantic gates had SHA-256
+`784517d2d6c5fb8efd6dbea6ff5b0e78ecb352ab89cf6622354399558368ef10`.
+The exact review reproduction compiled natively and produced its
+output object, with no diagnostic in `default-group-compile-final-confirmed.log`.
+
+| Final installed semantic gate before bootstrap | Verified result | Log |
+| --- | --- | --- |
+| Focused original and grouped-scope tests with a fresh build cache | PASS, 10.415s | `default-validator-final-focused.log` |
+| Full short facts suite | PASS, 0.008s | `default-validator-final-types2-facts.log` |
+| Full short types2 suite | PASS, 33.601s | `default-validator-final-types2-facts.log` |
+| All ten selected scripts, including both native/ejection/upstream attacks | PASS, 18.634s | `default-validator-final-scripts.log` |
+| Seven existing default/spread testdir fixtures | PASS, 44.169s | `default-validator-final-testdir.log` |
+| Formatting and vet | Clean | `default-validator-final-gofmt.log`, `default-validator-final-vet.log` |
+| Identical 34-field allocation probe | PASS, zero allocations, checksum 557 | `defaults-alloc-validator-final.log` |
+
+The first final types2 run, using a tmpfs build cache, ended with
+`signal: killed` at 24.651s and no source diagnostic. Its log is
+`default-validator-final-types2-facts-killed.log`. The uncached test rerun
+with a disk build cache, `GOGC=20`, and `GOMEMLIMIT=768MiB` passed as shown
+above. The observed kill does not establish its cause. All source, frozen
+test, and blocked-patch hashes remain unchanged. M6-S3b remains blocked;
+no fourth binding attempt was made.
 
 ## Retained validator and unresolved binding behavior
 
-The retained validator commands must run without cached results. The
-installed toolchain must be rebuilt after removing the rejected lowering:
+The retained checks must run without cached results. A focused reproduction
+uses the following commands after installing the compiler. The script
+requires `UPROOT1272` to name the upstream Go 1.27.2 root; a missing oracle
+does not count as a passed gate. Script temporary roots must be outside
+GOROOT.
 
 ```sh
 # From src/, with the fork's bin directory first on PATH:
-./make.bash
-go test -count=1 -short cmd/compile/internal/logos -run '^TestStructDefault(LexicalScope|RejectsInvalidDeclaration|BlankFieldIdentity)$'
+go test -count=1 -short cmd/compile/internal/logos -run '^TestStructDefault(LexicalScope|RejectsInvalidDeclaration|BlankFieldIdentity|GroupScope)$'
 go test -count=1 -short cmd/compile/internal/logos/facts
 go test -count=1 -short cmd/compile/internal/types2
-go test -count=1 cmd/go -run 'Script/^logos_(m6_addr_defaults|eject_struct_default)$'
-go test -count=1 cmd/internal/testdir -run 'Test/logos/'
-./run.bash --no-rebuild
+go test -count=1 cmd/go -run '^TestScript$/^logos_(struct_default_validation|struct_default_group_scope|m6_addr_defaults|eject_struct_default|struct_default_mixed_language|interop_struct_default|eject_spread|eject_spread_addr|eject_spread_statement_positions|eject_json_embedded)$'
+go test -count=1 cmd/internal/testdir -run '^Test$/^logos$/^(compile|lint|run)$/^(struct_default_tag|unapplied_struct_default|struct_default|struct_default_run|m22s6_d6_default_assert|spread|spread_addr_literal)\.lgo$'
 ```
 
-Local probes bounded build resources with `GOFLAGS='-p=1 -buildvcs=false'`,
-`GOMAXPROCS=2`, `GOGC=50`, and `GOMEMLIMIT=1GiB`. Both temporary-directory
-variables pointed inside the valid disk-backed worktree. Package tests,
-script tests, and successful isolated examples do not replace the full Go
-regression floor. The full rebuilt regression run remains a merge gate.
+The full `make.bash` rebuild with `GOMAXPROCS=1`, `GOGC=10`,
+`GOMEMLIMIT=384MiB`, and `CGO_ENABLED=0` was deliberately stopped during
+toolchain3 to address the grouped-scope review. It exited 130 after SIGINT;
+`default-validator-full-build-lowheap.log` is an interrupted build record,
+not a pass or a running build. After final semantic checks passed, a new
+full `make.bash` started with `GOGC=10`, `GOMEMLIMIT=384MiB`, and
+`CGO_ENABLED=0`, logged in `default-validator-final-full-build.log`. That
+bootstrap exited 2 during toolchain2. Compiling
+`cmd/compile/internal/ssa` ended with `signal: killed`; `go tool dist`
+reported that `go_bootstrap install` failed with exit status 1. There was
+no source diagnostic, and the cause of the killed process is not
+established.
+
+The unsuccessful bootstrap replaced `pkg/tool/linux_amd64/compile` with a
+binary whose SHA-256 is
+`c04cfaae02623c56c5db7f9001af605ded82f165d2169c78afe4e4135b9d2b2b`.
+The passing semantic gates above used compiler `784517d2` before this
+bootstrap. They were not rerun on the replacement compiler.
+
+Hosted gates are blocked before checkout by the effective Actions policy,
+which permits actions only from `gosuda`-owned repositories. Job
+`133361756118` in run `43885316645` rejects the pinned `actions/checkout`,
+`actions/setup-go`, and `actions/setup-node` references. All seven PR #54
+jobs fail setup; they do not report source-test failures. No approved
+owned replacements were found, and the policy remains unchanged.
+Package and script results do not replace the full Go regression floor.
+A successful full build and `./run.bash --no-rebuild` remain merge gates.
 
 The original application-binding, private-field, and blank-lowering defects
 above remain unresolved. Two further language behaviors also remain outside
@@ -446,8 +633,10 @@ restored all 14 hashes in the frozen manifest above. Its SHA-256 is
 The helper-boundary tests depend on the internal API in the rejected
 snapshot; the patch alone is an attack archive, not a repaired compiler.
 
-Fresh installed validation of the retained checker and the full hosted
-regression remain merge gates. No fourth binding repair was attempted.
+Installed semantic checks passed for the final validator attempt before
+the unsuccessful full bootstrap, as recorded above. A completed full
+bootstrap and the full Go regression remain required despite the hosted
+policy block. No fourth binding repair was attempted.
 
 The exact allocation workload is also checked in as
 [struct-default-allocations.lgo](benchmarks/struct-default-allocations.lgo).
