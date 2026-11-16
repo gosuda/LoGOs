@@ -138,7 +138,11 @@ func scanModuleKinds(ctx context.Context, ld *modload.Loader, g *moduleKinds) er
 			if _, noGo := errors.AsType[*build.NoGoError](err); noGo {
 				continue
 			}
-			return fmt.Errorf("classifying package %s in module %s: %w", name, m.Path, err)
+			if _, duplicate := errors.AsType[logosfile.DuplicateStemError](err); !duplicate {
+				return fmt.Errorf("classifying package %s in module %s: %w", name, m.Path, err)
+			}
+			// Duplicate stems invalidate this package, but its complete file
+			// lists must still contribute to the module's source kinds.
 		}
 		for _, files := range [][]string{p.GoFiles, p.CgoFiles, p.TestGoFiles, p.XTestGoFiles} {
 			for _, file := range files {

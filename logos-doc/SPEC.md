@@ -54,6 +54,8 @@ The `correctness::mixed_package` text MUST name both file classes [T-0.1][R-U3].
 The tool MUST reject a module with both kinds with `correctness::mixed_module` [T-0.1][R-U3].
 The `correctness::mixed_module` text MUST name the Go packages and the loGo/s packages of the module [T-0.1][R-U3].
 Each module that contributes a loaded source package MUST be checked across all of its active packages, including unselected and unimported packages. [T-0.1][R-U3]
+A duplicate-stem error in an unselected and unimported package MUST NOT abort the census; all of that package's active source-file kinds MUST still count. [T-0.1][R-U3]
+A source-header failure or mixed-package error MUST still fail the census. [T-0.1][R-U3]
 The census MUST honor active build tags, source overlays, nested module boundaries, and package-pattern directory exclusions. [T-0.1][R-U3]
 The census MUST attribute vendored packages through `vendor/modules.txt`. [T-0.1][R-U3]
 Default `logos list` MUST reject a census failure in a module-owned dependency, while `logos list -e` MUST retain structured package errors. [T-0.1][R-U3]
@@ -128,7 +130,7 @@ The lint registry enumerates the enforced lint rules [T-0.4].
 ### 1.1 RFC-101: File loader, Unicode normalization, and cgo policy
 The loader MUST recognize `.lgo` and the three alias extensions only in `logos` mode [T-101.1].
 The loader MUST strip trailing U+FE0E and U+FE0F from the extension before matching [T-101.1].
-Two files in one package whose names differ only by alias extension MUST fail the build [T-101.1].
+Building or importing a package with two active files whose names differ only by alias extension MUST fail [T-101.1].
 The tool MUST report that failure with `correctness::duplicate_stem_filename` [T-101.1].
 Module zips MUST reject alias extensions as non-letter symbols for publication [T-101.1].
 The tool MUST report warning `portability::alias_extension` for each alias file when the main module path first element holds a dot [T-101.1].
