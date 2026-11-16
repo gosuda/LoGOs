@@ -87,31 +87,56 @@ environment estimate; it does not claim to measure the final guest argv.
 ## Complete dist partition
 
 From `src`, capture one unfiltered inventory through the same entrypoint as
-both executions:
+all three executions:
 
 ```sh
+bash ../.github/scripts/logos-upstream-identity.sh before "$GITHUB_WORKSPACE" "$evidence"
 ../.github/scripts/logos-test-env.sh ./run.bash --no-rebuild -list > "$evidence/all-tests.txt"
 uv run --no-project --no-config --python 3.12 --no-python-downloads python \
   ../logos-doc/validation/upstream-host/partition_dist.py \
   --inventory "$evidence/all-tests.txt" --evidence "$evidence/partition"
 GO_TEST_TIMEOUT_SCALE=1 ../.github/scripts/logos-test-env.sh \
-  ./run.bash --no-rebuild -k -run='!^cmd/go$'
+  ./run.bash --no-rebuild -k -run='!^(cmd/go|cmd/internal/testdir:(0|[1-9][0-9]*)_([1-9][0-9]*))$'
+GO_TEST_TIMEOUT_SCALE=2 ../.github/scripts/logos-test-env.sh \
+  ./run.bash --no-rebuild -k -run='^cmd/internal/testdir:(0|[1-9][0-9]*)_([1-9][0-9]*)$'
 GO_TEST_TIMEOUT_SCALE=4 ../.github/scripts/logos-test-env.sh \
   ./run.bash --no-rebuild -k -run='^cmd/go$'
+bash ../.github/scripts/logos-upstream-identity.sh after "$GITHUB_WORKSPACE" "$evidence"
 ```
 
-The workflow must run both partitions independently, retain both exit statuses
+The workflow must run all three partitions independently, retain all exit statuses
 and raw logs, and keep every other selection-affecting setting identical. The
 inventory uses `run.bash` too, because that script sets `GOENV=off` and evaluates
 the installed dist environment before registration. `dist -list -run=...` is
 not a filtered inventory: its list path prints all registered names.
 
-`partition_dist.py` requires unique nonempty names and exactly one literal
-`cmd/go`. It records the singleton, the complete disjoint complement, their
-filters and scales, and the original inventory hash. Prefixes and variants
-such as `cmd/go/internal/cfg` and `cmd/go:racebench` remain in the complement,
-matching `testName` and `shouldRunTest`. This receipt proves the partition only;
-it explicitly makes no execution claim.
+`partition_dist.py` requires unique nonempty names, exactly one literal
+`cmd/go`, and a complete coherent set of canonical `cmd/internal/testdir:I_N`
+shards. Every shard must have the same positive N and indices must cover exactly
+0 through N-1. It checks the observed count before allocating index coverage.
+Prefixes, other variants, and noncanonical spellings such as `00_1` and `0_01`
+stay in the complement. The parser and the three workflow filters use the same
+Go-compatible regexp grammar. Tests bind the actual workflow commands to those
+filters and timeout scales. The receipt records a disjoint complete union and
+explicitly makes no execution claim.
+
+The original 666-name inventory has one command-driver name, one testdir shard,
+and 664 complement names. The observed testdir timeout is retained in
+[testdir-timeout](testdir-timeout/README.md), together with the bounded capacity
+rationale. Testdir alone gets a 20-minute package timeout and a 25-minute step.
+The complement keeps scale 1, cmd/go keeps scale 4, and the job keeps 90 minutes.
+The original `frozen.json` retains its historical two-way plan and existing
+native source pins; the new evidence and selection controls supersede only
+that partition plan. [Provenance notes](testdir-timeout/NOTES.md) distinguish the
+failed-run source from the archived implementation-base workflow.
+
+`logos-upstream-identity.sh` records exact HEAD/src/test trees, clean source and
+fixture status, and hashes of both drivers plus compile/link/asm/cgo. It changes
+to the explicit repository root before inspecting `src test`. Baseline receipts
+cannot be overwritten. After all partitions, the same source and tool identities
+must match even after an ordinary suite failure. Cancellation or a failed build
+does not run the after step. The old run had no installed-tool receipts; this
+new boundary supplies them for the next hosted run.
 
 ## Local verifier checks
 
