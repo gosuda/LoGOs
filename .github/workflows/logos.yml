@@ -79,7 +79,6 @@ jobs:
           go-version: "1.27.4"
           cache: false
       - name: "Install the verified evidence runner"
-        if: "matrix.suite != 'upstream'"
         run: |
           archive="$RUNNER_TEMP/logos-regression-uv.tar.gz"
           runner="$RUNNER_TEMP/logos-regression-uv"
@@ -91,7 +90,6 @@ jobs:
           printf '%s\n' "$runner" >> "$GITHUB_PATH"
           printf 'PYTHONDONTWRITEBYTECODE=1\nPYTEST_DISABLE_PLUGIN_AUTOLOAD=1\n' >> "$GITHUB_ENV"
       - uses: "actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1" # v7.1.0
-        if: "matrix.suite != 'unit'"
         with:
           node-version: "26.13.1"
       - name: "Install the upstream oracle toolchains"
@@ -128,15 +126,18 @@ jobs:
           helper=logos-doc/validation/tagged-package-facts
           method=logos-doc/validation/tagged-method-facts
           capability=logos-doc/validation/capability-inline-context
+          host=logos-doc/validation/upstream-host
           for suite in "$helper" "$method"; do
             uv run --no-project --no-config --python 3.12 --no-python-downloads --with-requirements "$helper/test-requirements.txt" python -m pytest -q "$suite/test_check_ci.py"
             uv run --no-project --no-config --python 3.12 --no-python-downloads --with-requirements "$helper/test-requirements.txt" pyright "$suite/check_ci.py" "$suite/test_check_ci.py"
           done
           uv run --no-project --no-config --python 3.12 --no-python-downloads --with-requirements "$helper/test-requirements.txt" python -m pytest -q "$capability/test_check_ci.py"
           uv run --no-project --no-config --python 3.12 --no-python-downloads --with-requirements "$helper/test-requirements.txt" pyright "$capability/test_check_ci.py"
-          uv run --no-project --no-config --python 3.12 --no-python-downloads --with-requirements "$helper/test-requirements.txt" ruff check "$helper/check_ci.py" "$helper/test_check_ci.py" "$method/check_ci.py" "$method/test_check_ci.py" "$capability/test_check_ci.py"
-          uv run --no-project --no-config --python 3.12 --no-python-downloads --with-requirements "$helper/test-requirements.txt" ruff format --check "$helper/check_ci.py" "$helper/test_check_ci.py" "$method/check_ci.py" "$method/test_check_ci.py" "$capability/test_check_ci.py"
-          shellcheck "$capability/check_ci.sh"
+          uv run --no-project --no-config --python 3.12 --no-python-downloads --with-requirements "$helper/test-requirements.txt" python -m pytest -q "$host"
+          uv run --no-project --no-config --python 3.12 --no-python-downloads --with-requirements "$helper/test-requirements.txt" pyright "$host"/*.py
+          uv run --no-project --no-config --python 3.12 --no-python-downloads --with-requirements "$helper/test-requirements.txt" ruff check "$helper/check_ci.py" "$helper/test_check_ci.py" "$method/check_ci.py" "$method/test_check_ci.py" "$capability/test_check_ci.py" "$host"/*.py
+          uv run --no-project --no-config --python 3.12 --no-python-downloads --with-requirements "$helper/test-requirements.txt" ruff format --check "$helper/check_ci.py" "$helper/test_check_ci.py" "$method/check_ci.py" "$method/test_check_ci.py" "$capability/test_check_ci.py" "$host"/*.py
+          shellcheck "$capability/check_ci.sh" .github/scripts/logos-test-env.sh
       - name: "Build the toolchain"
         run: |
           GOROOT_BOOTSTRAP=$(go env GOROOT)
@@ -154,15 +155,22 @@ jobs:
         if: "${{ !cancelled() && steps.smoke.outcome == 'success' && matrix.suite == 'unit' }}"
         run: |
           read -r -a packages <<< "$LOGOS_PACKAGES"
-          go test -count=1 -short "${packages[@]}"
-          go test -count=1 -race logos/... cmd/go/internal/logos/lsp/...
-          go test -count=1 -short runtime/metrics
-          GOEXPERIMENT=logosarena go test -count=1 -short -race runtime -run '^TestLogos(Arena|Region|GCScan)'
-          GOEXPERIMENT=logosarena,nogreenteagc go test -count=1 -short runtime -run '^TestLogos(Arena|Region|GCScan)'
+          ../.github/scripts/logos-test-env.sh go test -count=1 -short "${packages[@]}"
+          ../.github/scripts/logos-test-env.sh go test -count=1 -race logos/... cmd/go/internal/logos/lsp/...
+          ../.github/scripts/logos-test-env.sh go test -count=1 -short runtime/metrics
+          GOEXPERIMENT=logosarena ../.github/scripts/logos-test-env.sh go test -count=1 -short -race runtime -run '^TestLogos(Arena|Region|GCScan)'
+          GOEXPERIMENT=logosarena,nogreenteagc ../.github/scripts/logos-test-env.sh go test -count=1 -short runtime -run '^TestLogos(Arena|Region|GCScan)'
+      - name: "Require every Wasm runtime control to execute"
+        if: "${{ !cancelled() && steps.smoke.outcome == 'success' && matrix.suite == 'unit' }}"
+        working-directory: "."
+        timeout-minutes: 15
+        run: |
+          node --version
+          uv run --no-project --no-config --python 3.12 --no-python-downloads python logos-doc/validation/upstream-host/check_wasm.py --repo "$GITHUB_WORKSPACE" --evidence "$RUNNER_TEMP/logos-regression-evidence/wasm"
       - name: "Run compiler fixtures"
         if: "${{ !cancelled() && steps.smoke.outcome == 'success' && matrix.suite == 'unit' }}"
         run: |
-          go test -count=1 -timeout 60m cmd/internal/testdir -run 'Test/logos/'
+          ../.github/scripts/logos-test-env.sh go test -count=1 -timeout 60m cmd/internal/testdir -run 'Test/logos/'
       - name: "Check formatting"
         if: "${{ !cancelled() && steps.smoke.outcome == 'success' && matrix.suite == 'unit' }}"
         run: |
@@ -186,13 +194,13 @@ jobs:
       - name: "Run script tests"
         if: "${{ !cancelled() && steps.smoke.outcome == 'success' && matrix.suite == 'scripts' }}"
         run: |
-          go test -count=1 -timeout 60m cmd/go -run 'Script/^logos_'
+          ../.github/scripts/logos-test-env.sh go test -count=1 -timeout 60m cmd/go -run 'Script/^logos_'
 
       - name: "Validate installed test subprocess behavior"
         if: "${{ !cancelled() && steps.smoke.outcome == 'success' && matrix.suite == 'scripts' }}"
         run: |
           sha256sum ../bin/go ../bin/logos ../pkg/tool/linux_amd64/compile ../pkg/tool/linux_amd64/link
-          go test -count=1 -race -parallel=1 -timeout 20m cmd/go -run 'Script/^logos_(cap_xtest_owner|test_experiment_env|test_plugin_experiment|test_cache_experiment)$'
+          ../.github/scripts/logos-test-env.sh go test -count=1 -race -parallel=1 -timeout 20m cmd/go -run 'Script/^logos_(cap_xtest_owner|test_experiment_env|test_plugin_experiment|test_cache_experiment)$'
 
       - name: "Require isolated inline capability ownership"
         if: "${{ !cancelled() && steps.smoke.outcome == 'success' && matrix.suite == 'scripts' }}"
@@ -215,10 +223,29 @@ jobs:
         run: |
           uv run --no-project --no-config --python 3.12 --no-python-downloads python logos-doc/validation/tagged-method-facts/check_ci.py --repo "$GITHUB_WORKSPACE" --evidence "$RUNNER_TEMP/logos-regression-evidence/tagged-method"
 
-      - name: "Run upstream regression gate"
+      - name: "Record the complete upstream test partition"
+        id: "upstream_inventory"
         if: "${{ !cancelled() && steps.smoke.outcome == 'success' && matrix.suite == 'upstream' }}"
         run: |
-          ./run.bash --no-rebuild -k
+          evidence="$RUNNER_TEMP/logos-regression-evidence/upstream"
+          mkdir "$evidence"
+          ../.github/scripts/logos-test-env.sh ../bin/go tool dist test -no-rebuild -list > "$evidence/all-tests.txt"
+          uv run --no-project --no-config --python 3.12 --no-python-downloads python ../logos-doc/validation/upstream-host/partition_dist.py --inventory "$evidence/all-tests.txt" --evidence "$evidence/partition"
+
+      - name: "Run upstream tests outside the command driver"
+        if: "${{ !cancelled() && steps.smoke.outcome == 'success' && matrix.suite == 'upstream' && steps.upstream_inventory.outcome == 'success' }}"
+        run: |
+          evidence="$RUNNER_TEMP/logos-regression-evidence/upstream"
+          printf 'filter=!^cmd/go$\ntimeout_scale=1\n' > "$evidence/complement-profile.txt"
+          GO_TEST_TIMEOUT_SCALE=1 ../.github/scripts/logos-test-env.sh ./run.bash --no-rebuild -k -run='!^cmd/go$' 2>&1 | tee "$evidence/complement.log"
+
+      - name: "Run the complete upstream command driver suite"
+        if: "${{ !cancelled() && steps.smoke.outcome == 'success' && matrix.suite == 'upstream' && steps.upstream_inventory.outcome == 'success' }}"
+        timeout-minutes: 45
+        run: |
+          evidence="$RUNNER_TEMP/logos-regression-evidence/upstream"
+          printf 'filter=^cmd/go$\ntimeout_scale=4\npackage_timeout_minutes=36\n' > "$evidence/cmd-go-profile.txt"
+          GO_TEST_TIMEOUT_SCALE=4 ../.github/scripts/logos-test-env.sh ./run.bash --no-rebuild -k -run='^cmd/go$' 2>&1 | tee "$evidence/cmd-go.log"
 
       - name: "Verify dogfood invariants"
         if: "${{ !cancelled() && steps.smoke.outcome == 'success' && matrix.suite == 'unit' }}"
@@ -258,7 +285,7 @@ jobs:
           go test -count=1 -short go/types -run '^(TestGenerate|TestGoTypesPanicSourceShape)$'
 
       - name: "Retain regression events and exact identities"
-        if: "${{ always() && matrix.suite != 'upstream' }}"
+        if: "always()"
         uses: "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9" # v7.0.2
         with:
           name: "logos-${{ matrix.suite }}-${{ github.run_id }}-${{ github.run_attempt }}"
