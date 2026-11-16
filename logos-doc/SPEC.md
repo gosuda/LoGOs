@@ -84,6 +84,9 @@ Selection of an inactive file's build context MUST satisfy its filename and buil
 Selection MUST NOT impose a machine-word limit on the number of custom tags [T-0.3].
 An inactive variant MAY disable a custom tag named by its constraint; unrelated custom tags from the requested build MUST remain in effect [T-0.3].
 Within a candidate target context, a requested custom-tag set that already satisfies the file MUST remain unchanged [T-0.3].
+Architecture feature and experiment facts used to select an inactive variant MUST describe its actual target configuration, including implied lower feature levels and target-specific experiment availability [T-0.3].
+The helper MUST receive the selected architecture setting as its real `GO$GOARCH` environment value; eject MUST NOT synthesize architecture feature, compiler, release, or experiment tags as arbitrary user tags [T-0.3].
+An explicitly supplied feature-shaped user tag MUST retain its ordinary Go build-tag meaning [T-0.3].
 The output MUST keep all comments from the source [T-0.3].
 Each non-standard loGo/s dependency module MUST be ejected too [T-0.3].
 Each ejected dependency MUST land in `DIR/_logos_deps/<module path>@<version>/` [T-0.3].

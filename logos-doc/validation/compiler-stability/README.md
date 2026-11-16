@@ -147,7 +147,7 @@ It does not claim faster compilation, faster generated programs, or different
 optimization decisions. No optional runtime speed optimization is admitted by
 this audit.
 
-## Confirmed remaining defects
+## Follow-up defects
 
 - [#55: declaration-owned defaults](https://github.com/gosuda/LoGOs/issues/55).
   Reparsed default text binds names in the caller, which can silently change
@@ -158,11 +158,10 @@ this audit.
   A package absent from host loading is missing from the ejection plan; its
   `.lgo` files are removed during copying. The new constraint solver handles
   variants only inside packages already discovered.
-- [#57: target feature contexts](https://github.com/gosuda/LoGOs/issues/57).
-  The old selector can synthesize `amd64.v3` as a custom tag while its actual
-  tool tags remain at v1. The isolated baseline test proves that inconsistent
-  selection, not an executed unsupported-instruction fault. Real target feature
-  settings and helper configuration need a separate repair.
+- [#57: target feature contexts](https://github.com/gosuda/LoGOs/issues/57) is repaired by M24-A-S2; see [target-fact evidence](../ejection-target-facts/README.md) for the separately frozen and verified controls.
+  The old selector synthesized `amd64.v3` as a custom tag while its actual
+  tool tags remained at v1. The new real-helper controls pin the architecture
+  environment, feature implications, and target-specific experiment facts.
 
 The specification retains its full language and complete-module contracts.
-These defects are not converted into exclusions or weaker acceptance rules.
+Remaining defects are not converted into exclusions or weaker acceptance rules.

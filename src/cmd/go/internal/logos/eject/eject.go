@@ -833,6 +833,11 @@ func collectConstraintTags(expr constraint.Expr, tags *[]string) {
 // It varies GOOS, GOARCH, and tags from the file; CGO stays host
 // to keep the helper count to real platform/tag variants.
 func findVariantContextForFile(pkgDir, name, hostGOOS, hostGOARCH string, hostTags []string) (string, string, []string, bool) {
+	vc, ok := selectVariantContext(pkgDir, name, hostGOOS, hostGOARCH, hostTags)
+	return vc.goos, vc.goarch, vc.tags, ok
+}
+
+func selectVariantContext(pkgDir, name, hostGOOS, hostGOARCH string, hostTags []string) (variantCtx, bool) {
 	data, err := os.ReadFile(filepath.Join(pkgDir, name))
 	if err != nil {
 		base.Fatalf("logos eject: read inactive file %s: %v", filepath.Join(pkgDir, name), err)
@@ -873,7 +878,7 @@ func findVariantContextForFile(pkgDir, name, hostGOOS, hostGOARCH string, hostTa
 			goarchMentioned = append(goarchMentioned, t)
 			continue
 		}
-		if t == "cgo" || t == "ignore" || t == "unix" || t == "boringcrypto" || t == "logos" || t == cfg.BuildContext.Compiler || slices.Contains(cfg.BuildContext.ToolTags, t) || strings.HasPrefix(t, "go1.") || strings.HasPrefix(t, "goexperiment.") {
+		if t == "cgo" || t == "ignore" || t == "unix" || t == "boringcrypto" || t == "logos" || t == "gc" || t == "gccgo" || architectureFeatureTag(t) || slices.Contains(cfg.BuildContext.ToolTags, t) || strings.HasPrefix(t, "go1.") || strings.HasPrefix(t, "goexperiment.") {
 			continue
 		}
 		customMentioned = append(customMentioned, t)
@@ -899,8 +904,8 @@ func findVariantContextForFile(pkgDir, name, hostGOOS, hostGOARCH string, hostTa
 		}
 	}
 	slices.Sort(customUniq)
-	if goos, goarch, tags, ok := searchVariantContext(pkgDir, name, expr, goosCands, goarchCands, hostTags, customUniq); ok {
-		return goos, goarch, tags, true
+	if vc, ok := searchVariantContext(pkgDir, name, expr, goosCands, goarchCands, hostTags, customUniq, uniqMention); ok {
+		return vc, true
 	}
 	for _, g := range []string{"linux", "darwin", "windows", "freebsd"} {
 		if !slices.Contains(goosCands, g) {
@@ -923,30 +928,41 @@ func findVariantContextForFile(pkgDir, name, hostGOOS, hostGOARCH string, hostTa
 			goarchCands = append(goarchCands, a)
 		}
 	}
-	return searchVariantContext(pkgDir, name, expr, goosCands, goarchCands, hostTags, customUniq)
+	return searchVariantContext(pkgDir, name, expr, goosCands, goarchCands, hostTags, customUniq, uniqMention)
 }
 
-func searchVariantContext(pkgDir, name string, expr constraint.Expr, goosCands, goarchCands, hostTags, customUniq []string) (string, string, []string, bool) {
+func searchVariantContext(pkgDir, name string, expr constraint.Expr, goosCands, goarchCands, hostTags, customUniq, mentioned []string) (variantCtx, bool) {
 	for _, goos := range goosCands {
 		for _, goarch := range goarchCands {
 			if work.CheckGOOSARCHPair(goos, goarch) != nil {
 				continue
 			}
-			if tags, ok := matchVariantTags(pkgDir, name, expr, goos, goarch, hostTags, customUniq); ok {
-				return goos, goarch, tags, true
+			archName, levels := variantArchLevels(goarch, mentioned)
+			for _, level := range levels {
+				vc := variantCtx{goos: goos, goarch: goarch, archName: archName, archValue: level}
+				ctxt, ok := variantBuildContext(vc)
+				if !ok {
+					continue
+				}
+				if tags, ok := matchVariantTags(pkgDir, name, expr, ctxt, hostTags, customUniq); ok {
+					vc.tags = tags
+					return vc, true
+				}
 			}
 		}
 	}
-	return "", "", nil, false
+	return variantCtx{}, false
 }
 
 // variantCtx is one helper-eject build context: the GOOS, GOARCH, and
 // full -tags list that select a group of inactive files with correct
 // dependencies.
 type variantCtx struct {
-	goos   string
-	goarch string
-	tags   []string
+	goos      string
+	goarch    string
+	archName  string
+	archValue string
+	tags      []string
 }
 
 // variantContextsForFiles groups inactive files by one satisfying
@@ -959,15 +975,15 @@ func variantContextsForFiles(files []inactiveFile) []variantCtx {
 	byKey := map[string]variantCtx{}
 	var keys []string
 	for _, f := range files {
-		goos, goarch, tags, ok := findVariantContextForFile(f.pkg.Dir, f.name, hostGOOS, hostGOARCH, hostTags)
+		vc, ok := selectVariantContext(f.pkg.Dir, f.name, hostGOOS, hostGOARCH, hostTags)
 		if !ok {
 			base.Fatalf("logos eject: no build context selects inactive file %s", filepath.Join(f.pkg.Dir, f.name))
 		}
-		key := goos + "\x00" + goarch + "\x00" + strings.Join(tags, ",")
+		key := vc.goos + "\x00" + vc.goarch + "\x00" + vc.archValue + "\x00" + strings.Join(vc.tags, ",")
 		if _, exists := byKey[key]; !exists {
 			keys = append(keys, key)
 		}
-		byKey[key] = variantCtx{goos: goos, goarch: goarch, tags: tags}
+		byKey[key] = vc
 	}
 	slices.Sort(keys)
 	out := make([]variantCtx, 0, len(keys))
@@ -1002,7 +1018,7 @@ func spawnVariantEjects(ctx context.Context, ctxs []variantCtx) []string {
 		cmd.Stderr = os.Stderr
 		kept := make([]string, 0, len(os.Environ()))
 		for _, kv := range os.Environ() {
-			if strings.HasPrefix(kv, "GOOS=") || strings.HasPrefix(kv, "GOARCH=") || strings.HasPrefix(kv, "LOGOSEJECT_IN_VARIANT=") || strings.HasPrefix(kv, "LOGOSEJECT_TAGS=") {
+			if strings.HasPrefix(kv, "GOOS=") || strings.HasPrefix(kv, "GOARCH=") || strings.HasPrefix(kv, "LOGOSEJECT_IN_VARIANT=") || strings.HasPrefix(kv, "LOGOSEJECT_TAGS=") || strings.HasPrefix(kv, "GOEXPERIMENT=") || strings.HasPrefix(kv, "CGO_ENABLED=") || vc.archName != "" && strings.HasPrefix(kv, vc.archName+"=") {
 				continue
 			}
 			kept = append(kept, kv)
@@ -1010,6 +1026,15 @@ func spawnVariantEjects(ctx context.Context, ctxs []variantCtx) []string {
 		env := append(kept, "LOGOSEJECT_IN_VARIANT=1")
 		env = append(env, "GOOS="+vc.goos)
 		env = append(env, "GOARCH="+vc.goarch)
+		if vc.archName != "" {
+			env = append(env, vc.archName+"="+vc.archValue)
+		}
+		env = append(env, "GOEXPERIMENT="+cfg.RawGOEXPERIMENT)
+		cgo := "0"
+		if cfg.BuildContext.CgoEnabled {
+			cgo = "1"
+		}
+		env = append(env, "CGO_ENABLED="+cgo)
 		env = append(env, "LOGOSEJECT_TAGS="+strings.Join(vc.tags, ","))
 		cmd.Env = env
 		if err := cmd.Run(); err != nil {

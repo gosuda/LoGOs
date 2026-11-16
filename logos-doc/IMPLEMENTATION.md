@@ -281,7 +281,7 @@ P0 slices are documentation-only. Each carries its named structural Check (count
 |---|---|---|---|
 | T-0.1 | Sec 0.1 | Plain `go` keeps Go language semantics: every valid Go program keeps its Go meaning, the CI process runs `./run.bash` and keeps its suite green as the regression floor, and `go version` and `go help` print the upstream text. Go support stays first-class in every release. Plain `go` MAY differ from upstream Go 1.27.2 in performance, code generation, runtime, and tooling, and every backend, runtime, cgo, and tooling improvement applies to Go packages as well as loGo/s packages under both `go` and `logos` (R-U1). The loGo/s language (`.lgo` recognition and loGo/s syntax and type rules) is selected by the `logos` command; plain `go` ignores `.lgo` files (A-LGOSEL). `logos` builds Go packages with Go semantics: no loGo/s typing rules apply to Go. A module is one kind: all its packages are `.lgo` (a loGo/s module) or all are `.go` (a Go module). A package is one kind. A workspace may hold both kinds. Imports cross kinds in both directions, per import (R-U2). | M0, M9 |
 | T-0.2 | Sec 0.2 | No new global keywords. Contextual words, valid only in `.lgo`: `errdefer` (statement start, followed by an identifier or `func`), `yield` (statement start inside generator functions), `scope` (immediately before `defer`), `group` (immediately after `go`). `const` gains new positions (`const for/if/switch/func`) that are syntax errors in Go today. Sec 4.1 counts 4 contextual identifiers (errdefer, yield, scope, group). | M1, M6, M7, M8 |
-| T-0.3 | Sec 0.3 | `logos eject -o DIR` (alias `logos build --emit-go=DIR`) writes a complete pure-Go copy of the main module to DIR (must not exist or be empty): `.lgo` files become `.go` files and comments are kept. Inactive variant selection validates filename and build constraints through go/build and uses complete constraint-directed custom-tag search without a word-sized mask. Mentioned custom tags may be disabled; unrelated host custom tags remain. An already satisfying host custom-tag assignment stays unchanged. The helper consumes the selected full tag set, including an empty set. Every non-standard loGo/s dependency module is ejected too, into `DIR/_logos_deps/<module path>@<version>/`, with `replace` lines added to `DIR/go.mod` (a Go package that imports a loGo/s package resolves it to the ejected copy, R-U2; the Go-facing signatures of T-Sec5 are the ones eject emits). The support sources (`logos/rt`, `logos/sync`) become one shared module `github.com/gosuda/loGos/rt` in `DIR/_logos_deps/rt` (one type identity for `Option[T]` and friends across ejected modules), with a `replace` line. `import "comptime"` is removed. No `//go:build !logos` line and no in-place coexistence (R-U3). Ejected code builds with an upstream Go 1.27 toolchain. | M1 |
+| T-0.3 | Sec 0.3 | `logos eject -o DIR` (alias `logos build --emit-go=DIR`) writes a complete pure-Go copy of the main module to DIR (must not exist or be empty): `.lgo` files become `.go` files and comments are kept. Inactive variant selection validates filename and build constraints through go/build and uses complete constraint-directed custom-tag search without a word-sized mask. Mentioned custom tags may be disabled; unrelated host custom tags remain. An already satisfying host custom-tag assignment stays unchanged. The helper consumes the selected full tag set, including an empty set. Architecture feature implications and experiment facts come from the actual target configuration; the helper receives the real GO$GOARCH setting. Eject never invents architecture, compiler, release, or experiment facts as user tags; explicit feature-shaped user tags retain their Go meaning. Every non-standard loGo/s dependency module is ejected too, into `DIR/_logos_deps/<module path>@<version>/`, with `replace` lines added to `DIR/go.mod` (a Go package that imports a loGo/s package resolves it to the ejected copy, R-U2; the Go-facing signatures of T-Sec5 are the ones eject emits). The support sources (`logos/rt`, `logos/sync`) become one shared module `github.com/gosuda/loGos/rt` in `DIR/_logos_deps/rt` (one type identity for `Option[T]` and friends across ejected modules), with a `replace` line. `import "comptime"` is removed. No `//go:build !logos` line and no in-place coexistence (R-U3). Ejected code builds with an upstream Go 1.27 toolchain. | M1 |
 | T-0.4 | Sec 0.4 | Kept as the design axiom; each later section states its own rules; enforced by types (M2, M3, M5) and lints (M9); the lint registry enumerates the enforced lint rules. | all |
 | T-101.1 | RFC-101.1 | Source extensions `.lgo` and the three aliases, recognized only in logos mode. Strip trailing U+FE0E/U+FE0F from the extension before matching. NFC normalization is the identity on all four extension strings (no code point in them decomposes canonically), so no normalizer runs. Two files whose names differ only by alias extension in one package: error `correctness::duplicate_stem_filename`. Alias files cannot be published: module zips reject non-letter symbols (x/mod `zip.go:306-308`); `logos` reports warning `portability::alias_extension` for each alias file when the main module path's first element contains a dot. | M0 |
 | T-101.2 | RFC-101.2 | When the main module is a loGo/s module, an absent `logos.toml [build] cgo` key defaults to `forbid` (`CGO_ENABLED` defaults to 0), but an explicitly set `CGO_ENABLED=0\|1` in the environment overrides that absent-key default. Presence wins: explicit `cgo = "forbid"` stays disabled even with `CGO_ENABLED=1`; explicit `cgo = "restricted"` keeps its `cgo_allowlist` check even with `CGO_ENABLED=1`; explicit `cgo = "allow"` stays enabled even with `CGO_ENABLED=0`; each violation is error `restriction::cgo_usage`. `logos.toml [build] cgo = "forbid" \| "restricted" \| "allow"`; `"restricted"` requires every package with `import "C"` to match `cgo_allowlist` globs. When cgo is enabled, `CC` is unset, and the default C compiler is missing, `logos` and plain `go` MUST use `zig cc -target <zig-arch>-<zig-os>[-musl]` for the build target if `zig` is in PATH (`-musl` only for linux), for Go packages and loGo/s packages alike (R-U1). The build target is the GOOS/GOARCH pair of the build, not the host. A Go main module keeps the upstream default and upstream `CGO_ENABLED` handling; a `cgo` key in a Go module's `logos.toml` has no effect (the policy is loGo/s-only). `go` keeps `cfg.go:171-178` behavior for the `CGO_ENABLED` default. Concern stated once: cgo off switches `net` and `os/user` in the standard library to their pure-Go paths. | M0 |
@@ -3876,6 +3876,34 @@ Anchor: David Parnas
 - Selected-fixture compiler output is compared at O0/O1/O2/O3/Os. No execution
   speedup is claimed; the complete upstream suite remains required.
 
+### M24-A-S2 Keep ejection target facts consistent
+
+Anchor: Tony Hoare, David Parnas, Richard Feynman
+
+- Contract: an inactive-source witness must select the file under the same
+  GOOS, GOARCH, architecture level, experiment configuration, and full user
+  tag set that its real helper receives. Feature implications cannot be
+  toggled independently. Explicit user tags keep their Go meaning.
+- Reuse `internal/buildcfg.GOGOARCHTags` for both normal tool tags and variant
+  contexts, and `ParseGOEXPERIMENT` for target-specific experiment facts.
+  Try the current architecture setting first, then constraint-named settings
+  and implied lower levels. Preserve floating-point/extension settings.
+- Keep the existing complete Boolean solver and final `MatchFile` check.
+  Deduplicate helpers by architecture setting as well as target and user tags.
+  The helper receives the real architecture environment, never invented
+  `-tags=amd64.v3` or retained host architecture facts on another target.
+- Attacks: `variant_features_test.go` observes the helper's actual environment
+  and build context, checks amd64 and arm64 implications, cross-target ABI
+  availability, invalid/compiler contexts, explicit feature-shaped user tags,
+  and unrelated tag preservation. `logos_eject_target_features.txt` builds
+  the ejected tree with pristine Go 1.27.2 at amd64 v1/v3 and arm64 v8.0/v9.1.
+- Evidence: `validation/ejection-target-facts/README.md`. RED: invented
+  `amd64.v3` with helper `GOAMD64=v1`, stale host features/ABI facts, and no
+  context for `arm64 && !amd64.v1`. The first production attempt passes the
+  frozen controls and real command test. Parent integration owns the complete
+  rebuilt-toolchain and upstream regression gates.
+- Trace: T-0.3, REDTEAM #393, AUD-197; resolves issue #57.
+
 ### M24 integration gate
 
 Rebuild with `./make.bash` after the production files are frozen. Run uncached
@@ -4204,4 +4232,5 @@ Written to `tasks/autoplan-ledger.jsonl` by P0-S6. IDs: phase prefix plus a sequ
 {"id": "AUD-160", "description": "M13-A-S10 Eject writes the test files of a main module", "phase": "AUD"}
 {"id": "AUD-161", "description": "M14-A-S2 Read array operator object code of arm64 and riscv64 builds", "phase": "AUD"}
 {"id": "AUD-162", "description": "M14-A-S3 Round each scalar lane product of dot", "phase": "AUD"}
+{"id": "AUD-197", "description": "M24-A-S2 Keep ejection target facts consistent", "phase": "AUD"}
 ```

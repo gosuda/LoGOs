@@ -6,24 +6,20 @@ package eject
 
 import (
 	"fmt"
+	"go/build"
 	"go/build/constraint"
 	"internal/syslist"
 	"path/filepath"
 	"slices"
 
 	"cmd/go/internal/base"
-	"cmd/go/internal/cfg"
 )
 
 // matchVariantTags solves the parsed constraint before asking MatchFile to
 // validate a complete context. customUniq is the caller's sorted list of tags
 // that may change; unrelated host tags and all other tag facts stay fixed.
-func matchVariantTags(pkgDir, name string, expr constraint.Expr, goos, goarch string, hostTags, customUniq []string) ([]string, bool) {
-	ctxt := cfg.BuildContext
-	ctxt.GOOS, ctxt.GOARCH = goos, goarch
-	if !slices.Contains(ctxt.ToolTags, "logos") {
-		ctxt.ToolTags = append(slices.Clone(ctxt.ToolTags), "logos")
-	}
+func matchVariantTags(pkgDir, name string, expr constraint.Expr, ctxt build.Context, hostTags, customUniq []string) ([]string, bool) {
+	goos, goarch := ctxt.GOOS, ctxt.GOARCH
 	values := map[string]bool{goos: true, goarch: true, ctxt.Compiler: true, "cgo": ctxt.CgoEnabled}
 	for _, tags := range [][]string{hostTags, ctxt.ToolTags, ctxt.ReleaseTags} {
 		for _, tag := range tags {
