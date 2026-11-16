@@ -279,3 +279,4 @@
 {"id": "AUD-185", "description": "M0-A-S14 Check whole-module source kinds", "phase": "AUD"}
 {"id": "AUD-186", "description": "M21-A-S11 Keep metadata independent of VCS stamping", "phase": "AUD"}
 {"id": "AUD-189", "description": "M0-A-S15 Enforce the upstream Go regression floor in CI", "phase": "AUD"}
+{"id": "AUD-190", "description": "M11-A-S7 Preserve JSON profile dispatch and errors", "phase": "AUD"}
