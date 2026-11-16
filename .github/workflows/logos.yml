@@ -237,7 +237,13 @@ jobs:
         run: |
           evidence="$RUNNER_TEMP/logos-regression-evidence/upstream"
           printf 'filter=!^cmd/go$\ntimeout_scale=1\n' > "$evidence/complement-profile.txt"
+          set +e
           GO_TEST_TIMEOUT_SCALE=1 ../.github/scripts/logos-test-env.sh ./run.bash --no-rebuild -k -run='!^cmd/go$' 2>&1 | tee "$evidence/complement.log"
+          statuses=("${PIPESTATUS[@]}")
+          set -e
+          printf 'driver=%s\nconsole_capture=%s\n' "${statuses[0]}" "${statuses[1]}" > "$evidence/complement-exit.txt"
+          test "${statuses[0]}" -eq 0
+          test "${statuses[1]}" -eq 0
 
       - name: "Run the complete upstream command driver suite"
         if: "${{ !cancelled() && steps.smoke.outcome == 'success' && matrix.suite == 'upstream' && steps.upstream_inventory.outcome == 'success' }}"
@@ -245,7 +251,13 @@ jobs:
         run: |
           evidence="$RUNNER_TEMP/logos-regression-evidence/upstream"
           printf 'filter=^cmd/go$\ntimeout_scale=4\npackage_timeout_minutes=36\n' > "$evidence/cmd-go-profile.txt"
+          set +e
           GO_TEST_TIMEOUT_SCALE=4 ../.github/scripts/logos-test-env.sh ./run.bash --no-rebuild -k -run='^cmd/go$' 2>&1 | tee "$evidence/cmd-go.log"
+          statuses=("${PIPESTATUS[@]}")
+          set -e
+          printf 'driver=%s\nconsole_capture=%s\n' "${statuses[0]}" "${statuses[1]}" > "$evidence/cmd-go-exit.txt"
+          test "${statuses[0]}" -eq 0
+          test "${statuses[1]}" -eq 0
 
       - name: "Verify dogfood invariants"
         if: "${{ !cancelled() && steps.smoke.outcome == 'success' && matrix.suite == 'unit' }}"
