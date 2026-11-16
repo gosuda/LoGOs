@@ -6,18 +6,21 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 
 CMD_GO_FILTER = "^cmd/go$"
-COMPLEMENT_FILTER = "!^cmd/go$"
+TESTDIR_FILTER = "^cmd/internal/testdir:(0|[1-9][0-9]*)_([1-9][0-9]*)$"
+COMPLEMENT_FILTER = f"!^({CMD_GO_FILTER[1:-1]}|{TESTDIR_FILTER[1:-1]})$"
 
 
 @dataclass(frozen=True)
 class Partition:
     all_names: tuple[str, ...]
     cmd_go: tuple[str, ...]
+    testdir: tuple[str, ...]
     complement: tuple[str, ...]
 
 
@@ -33,12 +36,28 @@ def partition(text: str) -> Partition:
     if names.count("cmd/go") != 1:
         raise ValueError("inventory must contain cmd/go exactly once")
     selected = tuple(name for name in names if name == "cmd/go")
-    complement = tuple(name for name in names if name != "cmd/go")
+    shards = tuple(
+        (name, int(match.group(1)), int(match.group(2)))
+        for name in names
+        if (match := re.fullmatch(TESTDIR_FILTER, name)) is not None
+    )
+    if not shards:
+        raise ValueError("inventory must contain the complete canonical testdir shards")
+    count = shards[0][2]
+    if len(shards) != count or any(total != count for _, _, total in shards):
+        raise ValueError("testdir shards have missing or inconsistent counts")
+    indices = {index for _, index, _ in shards}
+    if len(indices) != count or any(index >= count for index in indices):
+        raise ValueError("testdir shard indices must cover exactly 0 through N-1")
+    testdir = tuple(name for name, _, _ in shards)
+    separate = set(selected).union(testdir)
+    complement = tuple(name for name in names if name not in separate)
     if not complement:
         raise ValueError("unfiltered inventory has an empty complement")
-    assert not set(selected).intersection(complement)
-    assert set(selected).union(complement) == set(names)
-    return Partition(names, selected, complement)
+    assert len(selected) + len(testdir) + len(complement) == len(names)
+    assert not separate.intersection(complement)
+    assert separate.union(complement) == set(names)
+    return Partition(names, selected, testdir, complement)
 
 
 class Arguments(argparse.Namespace):
@@ -59,10 +78,15 @@ def main() -> int:
     out.mkdir(parents=True, exist_ok=False)
     (out / "inventory.txt").write_bytes(raw)
     report = {
-        "schema": 1,
+        "schema": 2,
         "inventory_sha256": hashlib.sha256(raw).hexdigest(),
         "all_names": result.all_names,
         "cmd_go": {"filter": CMD_GO_FILTER, "timeout_scale": 4, "names": result.cmd_go},
+        "testdir": {
+            "filter": TESTDIR_FILTER,
+            "timeout_scale": 2,
+            "names": result.testdir,
+        },
         "complement": {
             "filter": COMPLEMENT_FILTER,
             "timeout_scale": 1,
@@ -75,7 +99,8 @@ def main() -> int:
     with (out / "partition.json").open("x", encoding="utf-8") as stream:
         stream.write(json.dumps(report, indent=2, sort_keys=True) + "\n")
     print(
-        f"Partitioned {len(result.all_names)} dist names: cmd/go=1, complement={len(result.complement)}."
+        f"Partitioned {len(result.all_names)} dist names: cmd/go=1, "
+        f"testdir={len(result.testdir)}, complement={len(result.complement)}."
     )
     return 0
 

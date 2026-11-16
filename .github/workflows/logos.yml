@@ -150,7 +150,7 @@ jobs:
           uv run --no-project --no-config --python 3.12 --no-python-downloads --with-requirements "$helper/test-requirements.txt" ruff format --check "$helper/check_ci.py" "$helper/test_check_ci.py" "$method/check_ci.py" "$method/test_check_ci.py" "$capability/test_check_ci.py" "$host"/*.py "$zero"/*.py
           uv run --no-project --no-config --python 3.12 --no-python-downloads --with-requirements "$helper/test-requirements.txt" ruff check "$offset"/*.py logos-doc/validation/native_frozen_gate.py logos-doc/validation/test_native_frozen_gate.py
           uv run --no-project --no-config --python 3.12 --no-python-downloads --with-requirements "$helper/test-requirements.txt" ruff format --check "$offset"/*.py logos-doc/validation/native_frozen_gate.py logos-doc/validation/test_native_frozen_gate.py
-          shellcheck "$capability/check_ci.sh" .github/scripts/logos-test-env.sh
+          shellcheck "$capability/check_ci.sh" .github/scripts/logos-test-env.sh .github/scripts/logos-upstream-identity.sh
       - name: "Build the toolchain"
         run: |
           GOROOT_BOOTSTRAP=$(go env GOROOT)
@@ -263,19 +263,34 @@ jobs:
         run: |
           evidence="$RUNNER_TEMP/logos-regression-evidence/upstream"
           mkdir "$evidence"
+          bash ../.github/scripts/logos-upstream-identity.sh before "$GITHUB_WORKSPACE" "$evidence"
           ../.github/scripts/logos-test-env.sh ./run.bash --no-rebuild -list > "$evidence/all-tests.txt"
           uv run --no-project --no-config --python 3.12 --no-python-downloads python ../logos-doc/validation/upstream-host/partition_dist.py --inventory "$evidence/all-tests.txt" --evidence "$evidence/partition"
 
-      - name: "Run upstream tests outside the command driver"
+      - name: "Run the complete upstream complement"
         if: "${{ !cancelled() && steps.smoke.outcome == 'success' && matrix.suite == 'upstream' && steps.upstream_inventory.outcome == 'success' }}"
         run: |
           evidence="$RUNNER_TEMP/logos-regression-evidence/upstream"
-          printf 'filter=!^cmd/go$\ntimeout_scale=1\n' > "$evidence/complement-profile.txt"
+          printf 'filter=!^(cmd/go|cmd/internal/testdir:(0|[1-9][0-9]*)_([1-9][0-9]*))$\ntimeout_scale=1\n' > "$evidence/complement-profile.txt"
           set +e
-          GO_TEST_TIMEOUT_SCALE=1 ../.github/scripts/logos-test-env.sh ./run.bash --no-rebuild -k -run='!^cmd/go$' 2>&1 | tee "$evidence/complement.log"
+          GO_TEST_TIMEOUT_SCALE=1 ../.github/scripts/logos-test-env.sh ./run.bash --no-rebuild -k -run='!^(cmd/go|cmd/internal/testdir:(0|[1-9][0-9]*)_([1-9][0-9]*))$' 2>&1 | tee "$evidence/complement.log"
           statuses=("${PIPESTATUS[@]}")
           set -e
           printf 'driver=%s\nconsole_capture=%s\n' "${statuses[0]}" "${statuses[1]}" > "$evidence/complement-exit.txt"
+          test "${statuses[0]}" -eq 0
+          test "${statuses[1]}" -eq 0
+
+      - name: "Run the complete upstream compiler fixture suite"
+        if: "${{ !cancelled() && steps.smoke.outcome == 'success' && matrix.suite == 'upstream' && steps.upstream_inventory.outcome == 'success' }}"
+        timeout-minutes: 25
+        run: |
+          evidence="$RUNNER_TEMP/logos-regression-evidence/upstream"
+          printf 'filter=^cmd/internal/testdir:(0|[1-9][0-9]*)_([1-9][0-9]*)$\ntimeout_scale=2\npackage_timeout_minutes=20\n' > "$evidence/testdir-profile.txt"
+          set +e
+          GO_TEST_TIMEOUT_SCALE=2 ../.github/scripts/logos-test-env.sh ./run.bash --no-rebuild -k -run='^cmd/internal/testdir:(0|[1-9][0-9]*)_([1-9][0-9]*)$' 2>&1 | tee "$evidence/testdir.log"
+          statuses=("${PIPESTATUS[@]}")
+          set -e
+          printf 'driver=%s\nconsole_capture=%s\n' "${statuses[0]}" "${statuses[1]}" > "$evidence/testdir-exit.txt"
           test "${statuses[0]}" -eq 0
           test "${statuses[1]}" -eq 0
 
@@ -292,6 +307,12 @@ jobs:
           printf 'driver=%s\nconsole_capture=%s\n' "${statuses[0]}" "${statuses[1]}" > "$evidence/cmd-go-exit.txt"
           test "${statuses[0]}" -eq 0
           test "${statuses[1]}" -eq 0
+
+      - name: "Verify upstream source and installed tools"
+        if: "${{ !cancelled() && steps.smoke.outcome == 'success' && matrix.suite == 'upstream' && steps.upstream_inventory.outcome == 'success' }}"
+        run: |
+          evidence="$RUNNER_TEMP/logos-regression-evidence/upstream"
+          bash ../.github/scripts/logos-upstream-identity.sh after "$GITHUB_WORKSPACE" "$evidence"
 
       - name: "Verify dogfood invariants"
         if: "${{ !cancelled() && steps.smoke.outcome == 'success' && matrix.suite == 'unit' }}"
