@@ -44,3 +44,32 @@ No Go build, test, compiler, analyzer, or vet command ran locally for this gate.
 The new focused RED/GREEN runs, installed real SIMD regression replay, and full
 native gates remain pending hosted execution. The previously observed hosted
 failure is preserved separately in the frozen evidence.
+
+## Compiler-fixture API correction
+
+Hosted run `43967559240` exposed two invalid `.Complete()` calls in the new
+classification fixture. Compiler-internal `types2.NewInterfaceType` already
+marks its result complete and does not expose that method. Both classification
+phases failed package build; their named tests did not run. The mutation negative
+control was accepted, and all 15 candidate mutation names passed. The original
+helper, fixture,
+manifest, complete unit artifact/log, and all phase evidence are frozen under
+`api-compatibility/`; that failed result is retained unchanged.
+
+The active fixture removes only those two call suffixes. `FROZEN.sha256` remains
+byte-identical and records the historical fixture hash. Its other 20 inputs
+still match their original hashes; the historical fixture now also has an
+explicit archived copy. The historical `frozen()` check retains its 22-path
+contract and verifies every original digest literally, resolving the original
+fixture entry to its archived file. The replacement check verifies the active
+fixture separately.
+
+Hosted execution additionally requires `REPLACEMENT.sha256`, which binds all
+54 replacement inputs: the original 20 unchanged inputs, the corrected active
+fixture, the original manifest, and 32 preserved failure files including the
+archived original fixture. The suite records that manifest and all its inputs
+before and after execution. It verifies that the active fixture equals the
+archived original with exactly one removal of each known API suffix. Any other
+byte change, including an assertion, expected value, test name, or whitespace,
+fails the guard. The 67/15 positive inventories and both exact negative outcomes
+are unchanged. No production predicate changes are part of this correction.
