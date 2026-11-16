@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import cast
 
 from run import (
+    Assessment,
     Case,
     assess_build,
     copy_source,
@@ -126,8 +127,6 @@ def main() -> int:
             600,
         )
         assessment = assess_build(run, name, baseline)
-        if name == "oracle":
-            baseline = assessment
         events = [
             obj(decode(line)) for line in Path(run.stdout).read_text().splitlines()
         ]
@@ -146,6 +145,13 @@ def main() -> int:
             event for event in test_events if event["Action"] in ("fail", "skip")
         ]
         exact = started == sorted(TESTS) and passed == sorted(TESTS) and not incomplete
+        if assessment.status == "pass" and not exact:
+            assessment = Assessment(
+                "upstream-failed" if name == "oracle" else "candidate-failed",
+                "selected tests did not all execute and pass without skips",
+            )
+        if name == "oracle":
+            baseline = assessment
         row: dict[str, object] = {
             "stage": name,
             "tool_sha256": file_hash(binary),
