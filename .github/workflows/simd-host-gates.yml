@@ -3,16 +3,18 @@ name: "SIMD feature guards"
 "on":
   pull_request:
     paths:
+      - ".github/scripts/install-upstream-oracles.sh"
       - ".github/workflows/simd-host-gates.yml"
       - "src/cmd/go/scriptconds_test.go"
       - "src/cmd/go/scriptconds_simd_logos_test.go"
       - "src/cmd/go/internal/logos/config/targetcpu*"
-      - "src/cmd/compile/internal/ssa/zcse.go"
-      - "src/cmd/compile/internal/ssa/zcse_simd_logos_test.go"
+      - "src/cmd/compile/internal/ssa/**"
       - "src/cmd/go/testdata/script/logos_simd_feature_gate.txt"
       - "src/cmd/go/testdata/script/logos_simd_gate_avx512.txt"
       - "src/cmd/go/testdata/script/logos_simd_gate_branch.txt"
       - "src/cmd/go/testdata/script/logos_simd_nested_guard.txt"
+      - "src/cmd/go/testdata/script/logos_simd_zero_dominance.txt"
+      - "src/cmd/go/testdata/script/logos_eject_simd_slice.txt"
   workflow_dispatch:
 
 permissions:
@@ -26,6 +28,7 @@ env:
   GOMAXPROCS: "4"
   GOFLAGS: "-p=2"
   GOMEMLIMIT: "2GiB"
+  GOAMD64: "v1"
 
 jobs:
   scripts:
@@ -43,6 +46,8 @@ jobs:
         with:
           go-version: "1.27.4"
           cache: false
+      - name: "Install upstream ejection toolchains"
+        run: bash ../.github/scripts/install-upstream-oracles.sh
       - name: "Build the default toolchain"
         run: |
           export GOROOT_BOOTSTRAP="$(go env GOROOT)"
@@ -50,7 +55,7 @@ jobs:
           printf '%s\n' "$GITHUB_WORKSPACE/bin" >> "$GITHUB_PATH"
       - name: "Check formatting and vet"
         run: |
-          files="cmd/go/scriptconds_test.go cmd/go/scriptconds_simd_logos_test.go cmd/compile/internal/ssa/zcse.go cmd/compile/internal/ssa/zcse_simd_logos_test.go"
+          files="cmd/go/scriptconds_test.go cmd/go/scriptconds_simd_logos_test.go cmd/compile/internal/ssa/zcse.go cmd/compile/internal/ssa/branchelim.go cmd/compile/internal/ssa/*logos*.go"
           gofmt -d $files
           test -z "$(gofmt -l $files)"
           go vet cmd/go cmd/compile/internal/ssa
@@ -62,4 +67,4 @@ jobs:
           GOAMD64: "v1"
           GOEXPERIMENT: ""
         run: |
-          go test -count=1 -race -timeout=30m -v cmd/go -run '^(TestLogosHostAMD64Condition|TestScript)$/(README|logos_simd_(feature_gate|gate_avx512|gate_branch|nested_guard))$'
+          go test -count=1 -race -timeout=40m -v cmd/go -run '^(TestLogosHostAMD64Condition|TestScript)$/(README|logos_simd_(feature_gate|gate_avx512|gate_branch|nested_guard|zero_dominance)|logos_eject_simd_slice)$'
