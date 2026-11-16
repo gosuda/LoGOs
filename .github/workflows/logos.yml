@@ -91,6 +91,18 @@ jobs:
           1.27.2 ecbadb99091a3f46e31f5f934b068b1864eafa7995211b39eaddf76996045fe5 UPROOT1272
           1.27.3 65efbc80fdc1fa2cd2631cad5b481777a68e8725f34e89f50fc6ac714e379b40 UPROOT1273
           PINS
+      - name: "Provide a C23 compiler for native consumers"
+        if: "matrix.suite != 'unit'"
+        run: |
+          c23_compiler=$(command -v clang-18)
+          c23_dir="$RUNNER_TEMP/logos-c23-cc"
+          mkdir "$c23_dir"
+          "$c23_compiler" --version
+          sha256sum "$c23_compiler"
+          printf 'int main(void) { return 0; }\n' | "$c23_compiler" -std=c23 -Werror -x c - -o "$c23_dir/probe"
+          "$c23_dir/probe"
+          ln -s "$c23_compiler" "$c23_dir/cc"
+          printf '%s\n' "$c23_dir" >> "$GITHUB_PATH"
       - name: "Build the toolchain"
         run: |
           GOROOT_BOOTSTRAP=$(go env GOROOT)
