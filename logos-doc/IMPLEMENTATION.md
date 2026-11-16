@@ -3111,12 +3111,14 @@ Anchor: John Carmack, Dieter Rams
 
 ### M16-A-S6 Isolate the wasm test execution environment
 Anchor: Tony Hoare, David Parnas, Richard Feynman
-- State: frozen RED; no launcher implementation attempt has begun.
+- State: test-launcher repair and scoped gate complete on attempt 1. Compiler/runtime production code is unchanged; the parent's full hosted Go regression remains the release gate.
 - Invariant: unrelated host environment metadata cannot change the output or trap of a wasm regression guest. Build commands retain their existing environment, and the guest retains the launcher's explicit `GOMAXPROCS=1` policy. The production wasm startup area and ABI are unchanged.
 - Attack: `src/cmd/compile/internal/logos/wasm_env_test.go` builds one Go guest and one actual `.lgo` guest with `?` propagation, then runs each unchanged module with an unrelated environment value of 0, 64, 8191, 8192, 8193 and 16384 bytes. Every run must print exactly `7`. Existing program-output, wrong-MayYield trap and yield-free source tests remain unchanged.
 - RED (2026-11-16): eight oversized cases fail before guest execution with `total length of command line and environment variables exceeds limit`; all four small controls pass. The existing output/yield/trap controls pass (2.39s, 0.46s and 0.61s); the combined run takes 20.758s. Both drivers are go1.27.4; the available Node is v24.22.1, recorded separately from the plan's v24.22.0 reference. No tool version was installed or changed.
-- Proposed seam: `runWasmNode` resolves Node on the host, then supplies an explicit execution environment. `wasmGoEnv` continues to serve build commands. No production linker or wasm_exec change is needed.
-- Gate: `go test -count=1 -short cmd/compile/internal/logos -run '^TestWasm(NodeIgnoresAmbientEnvironment|ProgramRunsUnderNode|WrongMayYieldTraps|YieldFreeSourcesRunUnderNode)$'`, a caught/restored ambient-forwarding mutation, formatting and vet. GREEN and PROBE are pending.
+- Build: `runWasmNode` resolves Node on the host, then supplies only `GOMAXPROCS=1` to its execution environment. `wasmGoEnv` continues to serve build commands and archive queries. The production linker, wasm_exec scripts, programs, expected outputs and trap assertions are unchanged.
+- GREEN (2026-11-16): the frozen 12-cell environment matrix and unchanged output/yield/trap controls pass in 2.776s. After mutation restoration, the complete five-test Wasm group, including Go-package MayYield facts, passes in 2.602s. Focused `go vet`, formatting and source/fixture hash checks pass. Every byte outside `runWasmNode` in the original control file is unchanged.
+- PROBE: restoring ambient environment forwarding makes all eight oversized cases fail with the original startup-limit error (1.780s). The explicit environment and frozen attack hashes are restored before the final gate.
+- Gate: `go test -count=1 -short cmd/compile/internal/logos -run '^TestWasm'` and `go vet cmd/compile/internal/logos`, using a source overlay to compile the changed test launcher against the unchanged installed go1.27.4 toolchain. This test-only slice changes no compiler binary and needs no production ABI adjustment.
 - Red-team rows: #394.
 - Docs: this test-launcher contract changes no language rule or application environment semantics; SPEC and Table T retain their existing wasm contracts.
 
