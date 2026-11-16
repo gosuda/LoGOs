@@ -64,7 +64,7 @@ func TestLogosCgoPointerFreeAddr(t *testing.T) {
 	}
 }
 
-func logosCgoAddrMustPanic(t *testing.T, f func()) {
+func logosCgoAddrMustPanic(t *testing.T, kind string, f func()) {
 	t.Helper()
 	defer func() {
 		p := recover()
@@ -72,7 +72,7 @@ func logosCgoAddrMustPanic(t *testing.T, f func()) {
 			t.Fatal("cgo pointer check accepted an unpinned nested pointer; require cgocheck=1")
 		}
 		err, ok := p.(error)
-		if !ok || !strings.Contains(err.Error(), "Go pointer to unpinned Go pointer") {
+		if !ok || !strings.Contains(err.Error(), "Go pointer to unpinned Go "+kind) {
 			t.Fatalf("unexpected cgo pointer panic: %v", p)
 		}
 	}()
@@ -86,13 +86,13 @@ func TestLogosCgoPointerFreeAddrBoundary(t *testing.T) {
 	packet := &logosCgoAddrPacket{next: &storage[0]}
 	runtime.CgoCheckPointer(&packet.header, true)
 	runtime.CgoCheckPointer((*int)(nil), true)
-	logosCgoAddrMustPanic(t, func() {
+	logosCgoAddrMustPanic(t, "pointer", func() {
 		runtime.CgoCheckPointer(unsafe.Pointer(&packet.header), nil)
 	})
-	logosCgoAddrMustPanic(t, func() {
+	logosCgoAddrMustPanic(t, "pointer", func() {
 		runtime.CgoCheckPointer(unsafe.Pointer(&packet.header), true)
 	})
-	logosCgoAddrMustPanic(t, func() {
+	logosCgoAddrMustPanic(t, "pointer", func() {
 		runtime.CgoCheckPointer(&packet, true)
 	})
 
@@ -112,9 +112,9 @@ func TestLogosCgoPointerFreeAddrContainers(t *testing.T) {
 	slice := []*int{p}
 	array := [1]*int{p}
 	var value any = p
-	logosCgoAddrMustPanic(t, func() { runtime.CgoCheckPointer(&slice[0], slice) })
-	logosCgoAddrMustPanic(t, func() { runtime.CgoCheckPointer(&array[0], array) })
-	logosCgoAddrMustPanic(t, func() { runtime.CgoCheckPointer(&array[0], &array) })
-	logosCgoAddrMustPanic(t, func() { runtime.CgoCheckPointer(&value, true) })
+	logosCgoAddrMustPanic(t, "pointer", func() { runtime.CgoCheckPointer(&slice[0], slice) })
+	logosCgoAddrMustPanic(t, "pointer", func() { runtime.CgoCheckPointer(&array[0], array) })
+	logosCgoAddrMustPanic(t, "pointer", func() { runtime.CgoCheckPointer(&array[0], &array) })
+	logosCgoAddrMustPanic(t, "interface", func() { runtime.CgoCheckPointer(&value, true) })
 	runtime.KeepAlive(p)
 }
