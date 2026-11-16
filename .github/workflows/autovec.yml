@@ -113,13 +113,17 @@ jobs:
           GOEXPERIMENT=simd,preemptibleloops GOAMD64=v3 go build -gcflags=-d=ssa/autovec/debug=1 -o "$RUNNER_TEMP/vector-gc" ../test/logos/run/autovec_gc.go 2>&1 | tee "$RUNNER_TEMP/autovec-evidence/gc-vectorization.txt"
           grep -E 'autovec_gc.go:48:.*autovectorized 64-bit integer loop' "$RUNNER_TEMP/autovec-evidence/gc-vectorization.txt"
           GODEBUG=asyncpreemptoff=1 timeout 90s "$RUNNER_TEMP/vector-gc"
+      - name: "Build the mutation overlay helper"
+        if: "!cancelled() && steps.build.outcome == 'success'"
+        run: |
+          go build -o "$RUNNER_TEMP/autovec-overlay" cmd/compile/internal/ssa/testdata/autovec_overlay.go
       - name: "Prove the memory test catches a widened tail"
         if: "!cancelled() && steps.build.outcome == 'success'"
         run: |
           mutation="$RUNNER_TEMP/autovec-tail-mutation"
           mkdir "$mutation"
           sha256sum ../test/logos/run/autovec_memory.go cmd/compile/internal/ssa/autovec_logos.go | tee "$RUNNER_TEMP/autovec-evidence/mutation-inputs.sha256"
-          go run cmd/compile/internal/ssa/testdata/autovec_overlay.go cmd/compile/internal/ssa/autovec_logos.go 'h.SetControl(h.NewValue2(pos, OpLess64,' 'h.SetControl(h.NewValue2(pos, OpLeq64,' "$mutation" > "$mutation/overlay.json"
+          "$RUNNER_TEMP/autovec-overlay" cmd/compile/internal/ssa/autovec_logos.go 'h.SetControl(h.NewValue2(pos, OpLess64,' 'h.SetControl(h.NewValue2(pos, OpLeq64,' "$mutation" > "$mutation/overlay.json"
           go build -overlay="$mutation/overlay.json" -o "$mutation/compile" cmd/compile
           cat > "$mutation/toolexec" <<'WRAPPER'
           #!/usr/bin/env bash
@@ -147,7 +151,7 @@ jobs:
           mutation="$RUNNER_TEMP/autovec-fault-mutation"
           mkdir "$mutation"
           sha256sum runtime/autovec_logos.go runtime/autovec_logos_test.go | tee "$RUNNER_TEMP/autovec-evidence/fault-mutation-inputs.sha256"
-          go run cmd/compile/internal/ssa/testdata/autovec_overlay.go runtime/autovec_logos.go 'return getg().paniconfault' 'return false' "$mutation" > "$mutation/overlay.json"
+          "$RUNNER_TEMP/autovec-overlay" runtime/autovec_logos.go 'return getg().paniconfault' 'return false' "$mutation" > "$mutation/overlay.json"
           if GOCACHE="$mutation/cache" go test -count=1 -short -overlay="$mutation/overlay.json" runtime -run '^TestLogosAutovecPanicOnFault$' > "$RUNNER_TEMP/autovec-evidence/fault-mutation.txt" 2>&1; then
             cat "$RUNNER_TEMP/autovec-evidence/fault-mutation.txt"
             printf 'fault-policy mutation unexpectedly passed\n' >&2
@@ -162,7 +166,7 @@ jobs:
         run: |
           mutation="$RUNNER_TEMP/autovec-shift-mutation"
           mkdir "$mutation"
-          go run cmd/compile/internal/ssa/testdata/autovec_overlay.go cmd/compile/internal/ssa/autovec_logos.go 'op, scalarCount = p.lane.signedRight, true' 'op, scalarCount = p.lane.right, true' "$mutation" > "$mutation/overlay.json"
+          "$RUNNER_TEMP/autovec-overlay" cmd/compile/internal/ssa/autovec_logos.go 'op, scalarCount = p.lane.signedRight, true' 'op, scalarCount = p.lane.right, true' "$mutation" > "$mutation/overlay.json"
           if go test -count=1 -short -overlay="$mutation/overlay.json" cmd/compile/internal/ssa -run '^TestLogosAutovecExpressions$' > "$RUNNER_TEMP/autovec-evidence/shift-mutation.txt" 2>&1; then
             cat "$RUNNER_TEMP/autovec-evidence/shift-mutation.txt"
             printf 'signed-shift mutation unexpectedly passed\n' >&2
