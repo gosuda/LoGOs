@@ -492,6 +492,8 @@ The explicit `const` receiver rule and the inference for ordinary concrete value
 
 A method of a generic type MUST be proven readonly by the same proof, from its body and receiver type independently of any instantiation, and an instantiated method MUST carry the proof of its origin; such a method MUST satisfy a readonly method obligation, MUST be callable through a constant view, and MUST export its `FnFact.Readonly` fact exactly as a method of a type without type parameters does. [T-201][T-Sec5]
 
+An array of length zero MUST count as reference-free regardless of its element type. A positive-length array MUST count as reference-free only if its element type is reference-free. A pointer, slice, map, channel, function, or interface remains reference-bearing when it refers to, holds, or returns an empty array. [T-201]
+
 A value whose type is a type parameter MUST count as reference-free only when every type in its constraint's type set is, and a parameter whose type set has no specific types or admits a slice, map, pointer, channel, function, interface, or `unsafe.Pointer` type MUST count as bearing references; a method of a generic type that returns such a value read from its receiver, or writes through it, MUST fail the proof with `[correctness::const_view_mutation]` as the same method of a type without type parameters does. [T-201]
 
 Receiver readonlyness MUST NOT imply parameter purity: a `FnFact.Readonly` fact proves only the receiver obligation, and a readonly-only or assertion-only fact MUST NOT prove that arguments are unmodified. An absent `ParamMutated` summary MUST be treated as unknown, distinct from an explicit proven-zero `ParamMutated=0` summary. [T-201][T-Sec5]

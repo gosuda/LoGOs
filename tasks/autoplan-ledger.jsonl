@@ -274,3 +274,4 @@
 {"id": "AUD-163", "description": "M12-S3 Preserve rooted ancestry after inline discovery; installed combined-tree gates pending", "phase": "AUD"}
 {"id": "AUD-164", "description": "M0-A-S14 Preserve test subprocess experiment identity", "phase": "AUD"}
 {"id": "AUD-165", "description": "M12-S4 Preserve external test package ownership; installed combined-tree gates pending", "phase": "AUD"}
+{"id": "AUD-167", "description": "M5-A-S4 Classify empty arrays by stored references; hosted gates pending", "phase": "AUD"}
