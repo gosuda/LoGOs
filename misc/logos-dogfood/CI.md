@@ -5,6 +5,18 @@ Linux/amd64. It uses the pull request's exact head and a full reviewed gglint
 commit, rather than a moving gglint branch. The independent `logos.yml` workflow
 retains the native unit, script, race, mutation, and full upstream gates.
 
+## Reviewed gglint revision
+
+The workflow pins `4456e61c4dbdf636fca2b5bd77787873e2d1c1e8`, tree
+`dfb46c72af5ce9695844c5d567cbb8aab1568183`. All four gates in
+[run 43963396252](https://github.com/gosuda/gglint/actions/runs/43963396252)
+passed on a merge with that exact tree: 39 packages tested with the race detector,
+the unchanged nine-worker vettool stress case, vet/lint/self-lint, and the frozen default-select
+regression with two independent Chi copies. The strict Chi result removes only
+the targeted receive false positive; basic and standard findings are unchanged.
+This pin replaces `a95099aae13ff7ffb4b3825bd63f8510bd184c69`. Historical results
+for that earlier revision remain preserved under their original identities.
+
 ## What must pass
 
 The compile and lint sweep contains **196 primary cells**: 28 cases multiplied
@@ -56,8 +68,9 @@ cases and `decorder` as an incomplete analysis. It does not rewrite `report.json
 `corpus-ci.json` preserves every original case, source pin, build tag, cgo
 setting, package pattern, and operation. It selects the ten existing capability
 profiles, uses the existing linker profiles for errorlint and exhaustive, and
-selects `policies/modernc-sql-runtime.toml` for modernc SQLite. The checker rejects
-a changed corpus selection or source pin.
+selects `policies/modernc-sql-runtime.toml` for modernc SQLite and
+`policies/tools-build.toml` for tools. The checker rejects a changed corpus
+selection or source pin.
 
 The modernc runtime profile has SHA-256
 `5666c90bc1f25d5f0d7d0e5b53e80c2fa8e7ebe341286f7d7b0b1c5651513096`.
@@ -67,6 +80,16 @@ network capabilities, and permits execution by the test helper package
 `modernc.org/fileutil/ccgo`. SPEC section 11.1 classifies raw syscall entries as
 both execution and network sinks. The pinned fileutil helper uses
 `exec.LookPath`, `exec.CommandContext`, and `Run`.
+
+The tools build profile has SHA-256
+`c57b54d9a78993eac2b2614730cfdf05b12e47c1dbbc77c243f16887d67d7def`.
+[TOOLS_POLICY.md](TOOLS_POLICY.md) records the exact reviewed owners and the
+conservative interface paths behind its grants. The original strict policy
+still drives the early three-driver capture and the separate unlimited linker
+diagnostic command. That helper binds the pinned source, baseline commands,
+raw streams, resource settings, and before/after source/tool identities.
+Completed diagnostic capture is distinct from a successful build. Full corpus
+acceptance and every runtime gate remain required.
 
 These explicit grants apply only to the private native replay copies. Stock
 Go, fork Go, and gglint receive pristine source. No lint severity, diagnostic

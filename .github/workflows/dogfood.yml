@@ -32,7 +32,7 @@ jobs:
       GOTELEMETRY: 'off'
       CC: gcc
       CXX: g++
-      GGLINT_REVISION: a95099aae13ff7ffb4b3825bd63f8510bd184c69
+      GGLINT_REVISION: 4456e61c4dbdf636fca2b5bd77787873e2d1c1e8
       PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
