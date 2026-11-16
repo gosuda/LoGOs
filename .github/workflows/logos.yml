@@ -229,7 +229,7 @@ jobs:
         run: |
           evidence="$RUNNER_TEMP/logos-regression-evidence/upstream"
           mkdir "$evidence"
-          ../.github/scripts/logos-test-env.sh ../bin/go tool dist test -no-rebuild -list > "$evidence/all-tests.txt"
+          ../.github/scripts/logos-test-env.sh ./run.bash --no-rebuild -list > "$evidence/all-tests.txt"
           uv run --no-project --no-config --python 3.12 --no-python-downloads python ../logos-doc/validation/upstream-host/partition_dist.py --inventory "$evidence/all-tests.txt" --evidence "$evidence/partition"
 
       - name: "Run upstream tests outside the command driver"
