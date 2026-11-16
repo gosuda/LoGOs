@@ -48,8 +48,9 @@ jobs:
       - name: "Build the toolchain"
         id: build
         run: |
-          export GOROOT_BOOTSTRAP="$(go env GOROOT)"
-          GOEXPERIMENT= ./make.bash
+          GOROOT_BOOTSTRAP=$(go env GOROOT)
+          export GOROOT_BOOTSTRAP
+          GOEXPERIMENT="" ./make.bash
           printf '%s\n' "$GITHUB_WORKSPACE/bin" >> "$GITHUB_PATH"
       - name: "Check formatting"
         run: |

@@ -6,7 +6,10 @@ not a completed release certificate. The shared Go and loGo/s implementation,
 specification changes, frozen attacks, and remaining gates are published
 together.
 
-## Exact source
+## Compiler-source evidence snapshot
+
+These identities record the earlier integrated compiler source and its
+published evidence. The subsequent CI merge is recorded separately below.
 
 | Identity | Value |
 |---|---|
@@ -17,14 +20,31 @@ together.
 | Included release branch | `bd318f1c558f3aa73ad434929fba7f237db9877f` |
 
 Publication preserved each reviewed commit's complete tree and ordered
-parents. The fetched public branch is byte-identical to the local candidate.
-The release commit is an ancestor of that branch, and `git merge-tree`
-returns the candidate's complete tree without conflicts. GitHub's PR API
+parents. At that snapshot the fetched public branch was byte-identical to
+the local candidate. The release commit was an ancestor of that branch, and
+`git merge-tree` returned the candidate's complete tree without conflicts. GitHub's PR API
 nevertheless reported `mergeable: false` and `mergeable_state: dirty` at the
 last check on 2026-11-16. The cause of that disagreement is unconfirmed;
 no source conflict was found by the exact Git comparison.
 A single close/reopen refresh left the PR open at the same head, but did not
 clear that reported state or create an Actions run. No branch history was rewritten.
+
+## CI release merge
+
+The reconstructed merge starts at `e82c916ff4d8c2befc6f1891decb0f623401a94b`
+and incorporates release `13a968f350564e739bf700df698a9a635dcdddcd`, including
+the CI consolidation from `9a628f5b`. The compiler `src` tree remains
+`099367e1031585fa553ef7987b199288df36256a`. No compiler repair or frozen
+semantic assertion is changed by this merge.
+
+M0-A-S18 retains the two-build workflow, independent suite results, native-shell
+checkout, pinned installers, and the full Go regression with its Node, oracle,
+C23 and ledger prerequisites. Actual actionlint 1.7.12/ShellCheck 0.11.0 and
+the structural checks pass over eight YAML inputs, 67 run blocks and two
+installer scripts. The isolated SC2155 mutation is caught, bootstrap exit 37
+is preserved, SIMD selects the same 17 files, and all ten input hashes remain
+unchanged. [CI merge evidence](ci-merge/README.md) records this scope. These
+results do not establish installed compiler or hosted acceptance.
 
 ## Integrated scope
 
@@ -79,7 +99,8 @@ The imported-local-type author's raw RED log contains twelve whitespace-only
 output lines; they are retained byte for byte and excluded only from the
 whitespace check, never from a behavioral assertion.
 
-The embedded and standalone task ledgers contain 292 identical, unique records.
+With AUD-200, the embedded and standalone task ledgers contain 293 identical,
+unique records. The CI merge adds no REDTEAM row.
 The final attack ledger contains 342 unique rows:
 
 | Status | Count | Remaining rows |
@@ -127,16 +148,19 @@ remaining release requirements include both JSON profiles, native GC matrices,
 second-host reproducibility, native arm64 coverage, and actual execution of
 the wasm and LSP prerequisites.
 
-The [CI bootstrap repair](ci-bootstrap.md) preserves the repository's action
+The [CI bootstrap repair](ci-bootstrap.md) and [CI consolidation](ci-merge/README.md)
+preserve the repository's action
 ownership policy and acceptance commands. It uses exact-revision shell
 checkout and pinned, SHA-256-verified Go and Node archives. Its static checks
-passed. GitHub confirmed the published branch but returned no Actions runs
-for this source head at the last check. The reason is unconfirmed, and no
-hosted acceptance is claimed.
+passed. At the earlier publication check, GitHub confirmed the branch but
+returned no Actions runs for that source head. That observation is historical;
+fresh hosted acceptance of the reconstructed merge remains pending.
 
 ## Local build preflight
 
-A fresh build was prepared with one worker, a 512 MiB soft Go heap limit,
+### Historical resource-limited environment
+
+The earlier fresh build was prepared with one worker, a 512 MiB soft Go heap limit,
 compiler concurrency one in both bootstrap stages, and the normal final PGO
 sequence. Recent resource-limited builds and changing host availability led
 to a preflight reserve of 4 GiB workspace disk and 2.5 GiB available RAM.
@@ -157,12 +181,22 @@ last snapshot at 2026-11-16 15:42:57 UTC was:
 | Workspace disk | 3,965,952,000 bytes, 3.69 GiB | 4 GiB |
 | Available RAM | 3,213,959,168 bytes, 2.99 GiB | 2.5 GiB |
 
-Disk remained short by 329,015,296 bytes. The new combined `make.bash` was
-not started. The five planned semantic gates remain pending. The compact
+Disk remained short by 329,015,296 bytes, so that build was not started.
+This 3.69 GiB snapshot describes the former environment, not the replacement
+environment's current capacity. The compact
 [first](build-preflight/cleanup-first.json),
 [second](build-preflight/cleanup-second.json), and
 [final](build-preflight/cleanup-final.json) cleanup records retain the measured
 values and exact inventory hashes.
+
+### Replacement environment
+
+The fresh replacement environment and pinned Go 1.27.4 bootstrap, Node
+26.13.1 runtime, and Go 1.27.2/1.27.3 oracle toolchains are ready. GCC 14.2.0
+has passed the C23 compile/run prerequisite. Recovered CI input hashes match
+the validated candidates, and fresh workflow checks pass as recorded above.
+The combined `make.bash` and the five planned installed semantic gates remain
+pending; neither restored tools nor workflow validation completes them.
 
 Ordinary dist cleanup must remain intact. It removes `pkg/obj/go-build` at
 exit, and `--no-clean` is deprecated and ineffective. After an eventual

@@ -55,3 +55,20 @@ unsupported inputs before reaching a download.
 A successful hosted checkout, archive installation, fresh `make.bash`, and the
 configured acceptance jobs remain required. Static workflow checks do not stand
 in for those results.
+
+## CI consolidation follow-up (2026-11-16)
+
+M0-A-S18 merges the release workflow changes while preserving this action-policy
+repair. The main workflow now builds exactly twice, for `unit` and `scripts`.
+The scripts leg retains Node, all upstream oracles, C23 and ledger prerequisites,
+and the independent full Go regression step. Its job budget is 180 minutes;
+the full Go step and the unit job each retain a 90-minute budget.
+
+The earlier seven-workflow/60-block result above records M0-A-S16. The combined
+validation now covers eight YAML inputs, 67 workflow run blocks, and both
+installer scripts. Actual actionlint 1.7.12 with ShellCheck 0.11.0 exits 0;
+an isolated masked-export mutation is caught as SC2155, and all ten input
+hashes remain unchanged. The bootstrap failure probe preserves exit 37 before
+the build marker, and the SIMD array preserves all 17 selected files. See
+[the CI merge evidence](ci-merge/README.md) for RED, GREEN, and probe records.
+Fresh combined compiler and hosted full-regression acceptance remain pending.

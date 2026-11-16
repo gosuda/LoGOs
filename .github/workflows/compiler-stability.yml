@@ -56,8 +56,9 @@ jobs:
           bash ../.github/scripts/install-upstream-oracles.sh
       - name: "Build the complete toolchain"
         run: |
-          export GOROOT_BOOTSTRAP="$(go env GOROOT)"
-          GOEXPERIMENT= ./make.bash 2>&1 | tee "$RUNNER_TEMP/compiler-stability-focused/build.log"
+          GOROOT_BOOTSTRAP=$(go env GOROOT)
+          export GOROOT_BOOTSTRAP
+          GOEXPERIMENT="" ./make.bash 2>&1 | tee "$RUNNER_TEMP/compiler-stability-focused/build.log"
           printf '%s\n' "$GITHUB_WORKSPACE/lib/wasm" "$GITHUB_WORKSPACE/bin" >> "$GITHUB_PATH"
       - name: "Select and verify the C23 consumer compiler"
         run: |

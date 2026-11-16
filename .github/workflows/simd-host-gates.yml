@@ -54,14 +54,21 @@ jobs:
         run: bash ../.github/scripts/install-upstream-oracles.sh
       - name: "Build the default toolchain"
         run: |
-          export GOROOT_BOOTSTRAP="$(go env GOROOT)"
-          GOEXPERIMENT= ./make.bash
+          GOROOT_BOOTSTRAP=$(go env GOROOT)
+          export GOROOT_BOOTSTRAP
+          GOEXPERIMENT="" ./make.bash
           printf '%s\n' "$GITHUB_WORKSPACE/bin" >> "$GITHUB_PATH"
       - name: "Check formatting and vet"
         run: |
-          files="cmd/go/scriptconds_test.go cmd/go/scriptconds_simd_logos_test.go cmd/compile/internal/ssa/zcse.go cmd/compile/internal/ssa/branchelim.go cmd/compile/internal/ssa/*logos*.go"
-          gofmt -d $files
-          test -z "$(gofmt -l $files)"
+          files=(
+            cmd/go/scriptconds_test.go
+            cmd/go/scriptconds_simd_logos_test.go
+            cmd/compile/internal/ssa/zcse.go
+            cmd/compile/internal/ssa/branchelim.go
+            cmd/compile/internal/ssa/*logos*.go
+          )
+          gofmt -d "${files[@]}"
+          test -z "$(gofmt -l "${files[@]}")"
           go vet cmd/go cmd/compile/internal/ssa
       - name: "Verify SIMD dominance and scalar controls"
         run: |
