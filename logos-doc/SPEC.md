@@ -1413,8 +1413,8 @@ specialization. Calls without `nocallback`, including `noescape`-only calls,
 MUST retain relocation. The gccgo generator MUST remain unchanged. [T-306]
 
 A contract that is unknown when the C wrapper is generated MUST retain the
-conservative path. Cgo's existing per-file emission can therefore retain
-relocation when a directive appears only in a later input file. [T-306]
+conservative path. Section 3.6.3 makes parsed package contracts available
+before emission when `logoscgoopt` is enabled. [T-306][T-306.1]
 
 The ordinary wrapper MUST still call `runtime.cgocall` and enforce the
 `nocallback` contract. Scheduler transitions, system-stack switching, GC
@@ -1468,6 +1468,27 @@ stack-growth and pointer-lifetime regressions, and an identical-work A/B
 benchmark with fast-cgo disabled. G2, G3, and G6 in IMPLEMENTATION.md govern
 validation and promotion. The experiment's existence is not a performance
 claim or approval to change its default.
+
+#### 3.6.3 Package-wide cgo contracts
+
+With `logoscgoopt` enabled for the gc generator, cgo MUST collect the
+existing `nocallback` and `noescape` contracts from every parsed input
+after parsing completes and before emitting any C wrapper. Directive-only
+inputs and the contracts mapped from `//logos:cgo_fastcall` MUST participate.
+An eligible call MUST NOT miss return-frame specialization solely because
+its directive appears in a later input file. [T-306.1]
+
+Collection MUST copy only contract metadata. It MUST preserve per-file C
+preambles, macros, and declarations, the existing translation and recording
+order, and the existing phase of unmatched-directive validation. Invalid
+package names, incompatible C declarations, and unmatched directives MUST
+retain their existing rejection. [T-306.1]
+
+The final generated Go wrappers MUST remain unchanged: package collection
+MUST NOT broaden fast-cgo eligibility, change callback guards, or change
+escape and keepalive treatment. A noescape-only function MUST retain
+result-frame relocation. Experiment-off, gccgo, and godefs generation MUST
+remain unchanged. [T-306.1]
 
 ## 4. Lexer, parser, and syntax
 
