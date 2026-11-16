@@ -2580,6 +2580,14 @@ Anchor: Tony Hoare, Claude Shannon
 - Red-team rows: #333. Before implementation, the core unit test misses four expected findings: the off-by-one guard and signed lower-bound omission in both source languages.
 - Docs: SPEC 1.2 defines the suppressible deny rule and its boundary-only proof limits.
 
+### M9-A-S19 Preserve relative field offsets in arena lint
+Anchor: Tony Hoare
+- Attack: frozen `rule_field_offset_test.go` covers 44 Go/loGo/s rule cases and four installed compiler cases; the original Protobuf v1.36.12 diagnostics at presence.go:110 and :137 prove the real-source precision failure. Original escape fixtures remain unchanged.
+- Build: recognize only immediate typed direct-field address subtraction on one checker variable of struct-value type. Retain all other arithmetic propagation and existing severity policy.
+- Gate: archived old-rule overlay must fail the exact Protobuf delta subtest; all 50 named candidate tests must execute and pass. Fresh installed lint must remove exactly those two pinned Protobuf findings. Hosted gates pending; no local Go execution.
+- Red-team rows: #441; evidence in `validation/field-offset-lint`.
+- Docs: SPEC 1.2 already forbids retaining a frame address; a relative offset retains none. No language or severity change.
+
 ## M10. `logos next` and `logos context`
 
 Anchor: Christopher Alexander, Kenya Hara
@@ -4119,4 +4127,5 @@ Written to `tasks/autoplan-ledger.jsonl` by P0-S6. IDs: phase prefix plus a sequ
 {"id": "AUD-163", "description": "M12-S3 Preserve rooted ancestry after inline discovery; installed combined-tree gates pending", "phase": "AUD"}
 {"id": "AUD-164", "description": "M0-A-S14 Preserve test subprocess experiment identity", "phase": "AUD"}
 {"id": "AUD-165", "description": "M12-S4 Preserve external test package ownership; installed combined-tree gates pending", "phase": "AUD"}
+{"id": "AUD-166", "description": "M9-A-S19 Preserve relative field offsets in arena lint; hosted proof pending", "phase": "AUD"}
 ```
