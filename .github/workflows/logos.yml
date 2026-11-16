@@ -48,7 +48,9 @@ jobs:
               go test -count=1 -timeout 60m cmd/internal/testdir -run 'Test/logos/'
           - suite: "regression"
             run: |
-              ./run.bash --no-rebuild
+              # The expanded cmd/go script suite needs the same 60-minute
+              # package budget as the separate scripts job.
+              GO_TEST_TIMEOUT_SCALE=6 ./run.bash --no-rebuild
           - suite: "lint"
             run: |
               unformatted=$(gofmt -l logos internal/logosfile cmd/go/internal/logos cmd/compile/internal/logos cmd/internal/logos cmd/internal/logosowned cmd/cgo/internal/testlogos)

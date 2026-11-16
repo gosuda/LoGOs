@@ -314,6 +314,7 @@ Rules: logos-doc/SPEC.md. Status values: planned, tested, satisfied upstream, bl
 | #341 | Correlated folding pairs independent phis, loses predecessor order, unfolds a loop, or exceeds the eight-edge bound | M13-S2 | src/cmd/compile/internal/ssa/correlated_constants_logos_test.go | tested |
 | #342 | SCCP selects the wrong arm, freezes a transient loop constant, folds unsupported values, or loses effects | M13-S2 | src/cmd/compile/internal/ssa/sccp_logos_test.go; src/cmd/compile/internal/test/testdata/scalaropt/scalaropt_test.go | tested |
 | #343 | O3 scalar analysis leaks into lower tiers or fails to reach Go/loGo/s packages, or ejected/runtime behavior differs | M13-S2 | src/cmd/go/internal/logos/settings/scalaropt_test.go; src/cmd/go/testdata/script/logos_opt_scalar.txt | tested |
+| #344 | A large parent CI environment overflows wasm startup memory or leaks unrelated variables into compiler runtime fixtures | M13-S3 | src/cmd/compile/internal/logos/wasm_env_logos_test.go | tested |
 
 Ordinary assertion definitions remain legal; the compile fixture targets unsafe qualified instantiations, while the run fixture retains identity, ordinary named arguments, and known-zero storage-container controls. The script covers both Go-to-loGo/s and loGo/s-to-Go generic imports. Receiver-readonly facts do not stand in for parameter-mutation summaries, and neither assertion nor mutation masks truncate positions at or above 64.
 

@@ -203,7 +203,9 @@ func runWasmNode(tb testing.TB, wasm string) (string, error) {
 	node := wasmNode(tb)
 	host := filepath.Join(testenv.GOROOT(tb), "lib", "wasm", "wasm_exec_node.js")
 	cmd := testenv.Command(tb, node, host, wasm)
-	cmd.Env = wasmGoEnv(cmd, "js")
+	// These fixtures have no ambient environment inputs. Forwarding the
+	// host's CI or build environment can overflow wasm's startup area.
+	cmd.Env = []string{"GOMAXPROCS=1"}
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out
 	err := cmd.Run()

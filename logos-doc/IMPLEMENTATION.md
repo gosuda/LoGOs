@@ -2751,6 +2751,17 @@ Anchor: Tony Hoare, Richard Feynman, John Carmack
 - Measurement result: final paired Hyperfine and Go measurements both improve fixed-point dispatch and the three processing loops; Hyperfine baseline/candidate medians range from 1.067 to 1.907. Three tiny call benchmarks do not corroborate a speedup. The initial packed-header regression is preserved and motivated the proved rotate projection; the final campaign uses unchanged workloads. Direct compilation of `go/parser` and the `encoding/json` facade showed differences within the recorded spread, so no compilation-speed improvement is claimed. Full samples, initial non-wins, compiler RSS, source hashes, limitations, and the executable runner are in the [measurement record](measurements/scalar-opt/README.md).
 - Red-team rows: #340, #341, #342, #343.
 
+### M13-S3 Repair the full-regression test harness
+Anchor: Tony Hoare, Richard Feynman, John Carmack
+
+- Requirement: continue hardening the scalar optimization work after PR #28. The first complete CI attempt passed unit, scripts, testdir, and lint; regression exposed two harness constraints, recorded in [HARDENING.md](measurements/scalar-opt/HARDENING.md).
+- Attack: `TestWasmNodeIsolatesParentEnvironment` gives the parent a 16 KiB environment value. A wasm fixture must start, observe that the value is absent, and retain `GOMAXPROCS=1`. The old helper fails before main because its inherited environment exceeds wasm's startup area.
+- Build: give only the controlled runtime setting to the Node fixture process. Keep the build environment helper and public wasm launcher unchanged. Set `GO_TEST_TIMEOUT_SCALE=6` only for the regression matrix command, matching the separate script job's 60-minute package budget; the measured successful script job took 1500.810 seconds.
+- RED: the frozen environment attack failed with the exact startup-area error observed in CI.
+- GREEN: the new attack and all three previously failing wasm test families passed together; reverting the helper to inherit the build environment failed the attack again, and exact restoration returned it to green.
+- Bounds: no compiler, runtime, optimization flag, test selection, or expected program output changes. The complete regression job retains every test and remains a required gate.
+- Red-team row: #344.
+
 ### M13-A-S1 Assert optimization tier scope
 Anchor: John Carmack, Herbert Simon, Dieter Rams
 - Attack: `src/cmd/go/testdata/script/logos_opt_scope.txt`: a standard-library-provenance package keeps the default 32-byte variable-make buffer, and O3 adds no escape-analysis or prove-pass work budget.
