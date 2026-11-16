@@ -322,6 +322,8 @@ Rules: logos-doc/SPEC.md. Status values: planned, tested, satisfied upstream, bl
 
 | #441 | Same-object field offsets misreported as retained frame addresses, or a subtraction exemption hides real address arithmetic | M9 | Frozen `rule_field_offset_test.go`: 44 Go/loGo/s rule cases plus four installed compiler cases; archived original Protobuf presence.go:110 and :137 diagnostics; unchanged original escape fixtures; exact old-rule overlay and candidate hosted gates pending (`validation/field-offset-lint`) | planned |
 
+| #443 | A SIMD-dependent producer cannot be consumed without direct support imports, or generated qualifiers collide with user names | M14 | Frozen importcfg/action-ID, rewritten-AST, and installed ordinary-Go consumer controls; original native990 failure and unchanged real SIMD source preserved; 37 named tests and two archived-source negatives pending (`validation/simd-transitive-imports`) | planned |
+
 Ordinary assertion definitions remain legal; the compile fixture targets unsafe qualified instantiations, while the run fixture retains identity, ordinary named arguments, and known-zero storage-container controls. The script covers both Go-to-loGo/s and loGo/s-to-Go generic imports. Receiver-readonly facts do not stand in for parameter-mutation summaries, and neither assertion nor mutation masks truncate positions at or above 64.
 
 Model limits of generic assertion effects: CTFE-driven instantiations after checker cleanup are not validated by the recorded cleanup pass; exported per-parameter masks collapse direct and nested assertion targets, and imported declarations retain masks rather than local site evidence. Reflection and `unsafe` stay outside this model.

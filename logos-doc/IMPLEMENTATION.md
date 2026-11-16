@@ -2921,6 +2921,14 @@ Anchor: John Carmack, Claude Shannon
 - Red-team rows: #243.
 - Docs: none.
 
+### M14-A-S4 Supply safe bindings for transitive SIMD rewrites
+Anchor: Tony Hoare
+- Attack: unchanged real SIMD producer plus ordinary consumers, aliased/dot/blank imports, namespace shadows, type-only wrappers, and explicit internal-import denial. Work tests pin supported targets, experiment boundaries, unavailable archives, and cache content identity; rewriter tests recheck generated ASTs and forbid new import-retention calls.
+- Build: expose only already-built transitive SIMD support archives through the existing synthetic-import/action-hash mechanism. Every rewritten file gets compiler-only import qualifiers; source import usage and the special simd-package path remain explicit.
+- Gate: 37 frozen named tests and both archived-source semantic negatives; unchanged real tagged-method compiler witness; fresh installed toolchain and upstream regression floor. Hosted proof pending; no local Go execution.
+- Red-team rows: #443; evidence in `validation/simd-transitive-imports`.
+- Docs: compiler/tooling repair only; no language or capability-policy change.
+
 ## M15. Backend peepholes and long-loop preemption
 
 Anchor: John Carmack, Richard Feynman
@@ -4140,4 +4148,5 @@ Written to `tasks/autoplan-ledger.jsonl` by P0-S6. IDs: phase prefix plus a sequ
 {"id": "AUD-165", "description": "M12-S4 Preserve external test package ownership; installed combined-tree gates pending", "phase": "AUD"}
 {"id": "AUD-166", "description": "M9-A-S19 Preserve relative field offsets in arena lint; hosted proof pending", "phase": "AUD"}
 {"id": "AUD-167", "description": "M5-A-S4 Classify empty arrays by stored references; hosted gates pending", "phase": "AUD"}
+{"id": "AUD-168", "description": "M14-A-S4 Supply safe bindings for transitive SIMD rewrites; hosted proof pending", "phase": "AUD"}
 ```
