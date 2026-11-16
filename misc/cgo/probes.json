@@ -20,5 +20,17 @@
     "package": "cmd/cgo/internal/testlogos",
     "test": "TestCgoOptEmission",
     "diagnostic": "stack-top lookups = 2, want 0"
+  },
+  {
+    "id": "pointer-free-address-inversion",
+    "kind": "mutation",
+    "setting": "on",
+    "path": "src/runtime/cgocheck_addr_logos.go",
+    "before": "!(*ptrtype)(unsafe.Pointer(t)).Elem.Pointers()",
+    "after": "(*ptrtype)(unsafe.Pointer(t)).Elem.Pointers()",
+    "rebuild": "toolchain",
+    "package": "runtime",
+    "test": "TestLogosCgoPointerFreeAddrBoundary",
+    "diagnostic": "cgo pointer check accepted an unpinned nested pointer"
   }
 ]

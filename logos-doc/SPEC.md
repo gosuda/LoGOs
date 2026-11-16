@@ -1469,6 +1469,31 @@ benchmark with fast-cgo disabled. G2, G3, and G6 in IMPLEMENTATION.md govern
 validation and promotion. The experiment's existence is not a performance
 claim or approval to change its default.
 
+#### 3.6.5 Pointer-free typed addresses
+
+With `logoscgoopt` enabled, a cgo argument whose original typed address
+identifies a value containing no Go pointers MUST bypass redundant address
+classification. The optimization MUST preserve cgo's existing address-expression
+provenance and MUST NOT infer a contract from the C parameter type. [T-306.3]
+
+Saved `unsafe.Pointer` values, pointer-bearing values, and slice or array
+provenance MUST retain their existing checks. An arbitrary interior pointer
+MUST still check the allocation required by the upstream cgo rules. A
+pointer-free field MUST NOT make neighboring unpinned pointers safe to pass
+through a saved pointer. [T-306.3]
+
+The optimization MUST preserve argument evaluation count and order, deferred
+calls, typed nil values, GC liveness, pinning requirements, callback and result
+checking, and instrumentation. It MUST remain independent of `logosfastcgo`
+and MUST NOT change the default of `logoscgoopt`. [T-306.3]
+
+Correctness argument (informative): the existing address marker tells the
+runtime to check the pointed-to Go type. When that type contains no pointers,
+the checker returns without reading the address. Its earlier nil/non-Go
+address returns have the same result. The new predicate performs only type
+metadata reads and admits exactly this no-op case. The pointer-bearing and
+unknown-provenance paths remain unchanged.
+
 ## 4. Lexer, parser, and syntax
 
 ### 4.1 Tokens and contextual words

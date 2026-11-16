@@ -586,6 +586,9 @@ func cgoCheckPointer(ptr any, arg any) {
 
 	top := true
 	if arg != nil && (t.Kind() == abi.Pointer || t.Kind() == abi.UnsafePointer) {
+		if logosCgoPointerFreeAddr(t, efaceOf(&arg)._type) {
+			return
+		}
 		p := ep.data
 		if !t.IsDirectIface() {
 			p = *(*unsafe.Pointer)(p)
