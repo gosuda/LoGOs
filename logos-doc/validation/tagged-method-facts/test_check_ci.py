@@ -10,11 +10,10 @@ import sys
 from pathlib import Path
 from typing import cast
 
+import check_ci as gate
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
-
-import check_ci as gate
 
 
 def event(check: gate.Check, action: str, name: str | None = None) -> dict[str, object]:
