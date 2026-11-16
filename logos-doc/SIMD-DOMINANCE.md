@@ -68,8 +68,8 @@ unguarded `VPXOR` and `VPXORQ` instructions in the baseline.
 
 The starting revision is `949e633789fe5122c548d6c9f39c06fbb2769702`,
 the head of the separate host-capability fixture repair in PR #47.
-PR #54 is stacked on that branch. Its first two commits contain only tests
-and CI, preserving an independently reviewable pre-repair state.
+PR #54 was initially stacked on that branch. Its first two commits contain
+only tests and CI, preserving an independently reviewable pre-repair state.
 
 The fork's baseline `zcse.go` and `branchelim.go` were byte-identical to the
 pinned upstream Go 1.27.4 copies. An overlay onto that installed upstream
@@ -91,10 +91,11 @@ No upstream source file was modified.
 | Hosted focused workflow | Passed, including a fresh rebuild, formatting, vet, complete SSA short suite, and race-enabled source/ejection scripts (job 133294001990). |
 | Hosted full regression, first run | Every reported package except cmd/go passed. cmd/go reached its 540-second outer deadline at 541.663 seconds: 593 scripts reported cancellation and four active commands received SIGQUIT. This is not a pass. |
 | Local full regression | Unix-domain socket tests report `operation not permitted` in this environment. This is not a pass. |
-| Hosted full regression, corrected outer budget | Pending; an incomplete result remains a merge blocker. |
+| Hosted full regression, corrected outer budget | Passed on attempt 2 for the original SIMD source head `08646b895facb9194ec89acf5d1d8f291d338061`; exact CI tree and logs are recorded below. |
 
 These observations prove the two optimizer defects and the targeted repair.
-They do not substitute for the full regression gate.
+The completed hosted regression validates the original SIMD revision; it
+does not validate later integrated changes.
 The initial local bootstrap attempts were killed under memory pressure;
 using a disk-backed cache and temporary directory allowed bootstrap to
 continue. The baseline and repaired toolchains both rebuilt successfully.
@@ -103,17 +104,47 @@ cmd/go test harness correctly rejects writes; the unchanged scripts passed
 with a temporary directory outside GOROOT. Those environment failures are
 not counted as semantic test failures.
 
-The repository contains 1,444 cmd/go scripts, including 511 loGo/s scripts.
-The first hosted full run used upstream's nine-minute cmd/go outer deadline,
-while the existing dedicated language-script CI already budgets an hour.
+The first hosted full run tested a tree with 1,444 cmd/go scripts, including
+511 loGo/s scripts. It used upstream's nine-minute cmd/go outer deadline,
+while the dedicated language-script CI already budgeted an hour.
 The full workflow now sets the distribution harness's supported
 `GO_TEST_TIMEOUT_SCALE=8`, giving cmd/go a 72-minute outer deadline within
 the job's 90-minute limit. Test assertions and performance acceptance
-thresholds are unchanged. The canceled run is retained as evidence, and a
-completed rerun is still required.
+thresholds are unchanged. The canceled run is retained as evidence alongside
+the completed rerun.
 
 Hosted evidence: [focused job](https://github.com/gosuda/LoGOs/actions/runs/43865827289/job/133294001990)
 and [first full regression job](https://github.com/gosuda/LoGOs/actions/runs/43865827289/job/133294001373).
+
+### Completed hosted rerun and integration boundary
+
+Source head `08646b895facb9194ec89acf5d1d8f291d338061` passed all seven
+jobs across the second attempts of the [language workflow](https://github.com/gosuda/LoGOs/actions/runs/43885316569/attempts/2),
+[SIMD workflow](https://github.com/gosuda/LoGOs/actions/runs/43885316645/attempts/2),
+and [host-ISA workflow](https://github.com/gosuda/LoGOs/actions/runs/43885316705/attempts/2).
+Those jobs cover unit, scripts, testdir, lint, focused SIMD, full regression,
+and host-ISA scripts.
+
+The SIMD jobs checked out CI merge
+`420233bf572c32b9a9d2ad8fb7bd2cf507e15aa0`. Its
+[difference from the source head](https://github.com/gosuda/LoGOs/compare/08646b895facb9194ec89acf5d1d8f291d338061...420233bf572c32b9a9d2ad8fb7bd2cf507e15aa0)
+is only the added `logos_guarded_enum_index.txt` script from main commit
+`bd318f1c558f3aa73ad434929fba7f237db9877f`; production compiler source
+and the three frozen SIMD attacks are unchanged.
+
+| Hosted gate | Observed result |
+| --- | --- |
+| [Complete uncached SSA short suite](https://github.com/gosuda/LoGOs/actions/runs/43885316645/job/133417552350) | Passed in 54.215 seconds. |
+| [Six race-enabled source/ejection scripts](https://github.com/gosuda/LoGOs/actions/runs/43885316645/job/133417552350) | Passed in 66.540 seconds, including README consistency. |
+| [Full upstream regression](https://github.com/gosuda/LoGOs/actions/runs/43885316645/job/133417552899) | `ALL TESTS PASSED` at 17:03:41 UTC on 2026-11-16; its complete `cmd/internal/testdir` run passed in 433.108 seconds. |
+
+The later combined head `447d6ad7ecff885efed74e14ed7b458f26eb11ea`
+includes the struct-default repair from PR #63. Its full regression gate
+remains open: Wasm startup overflow from the host environment and the
+REDTEAM ledger schema check require follow-up validation. The original
+SIMD pass above is not an integrated green result for that head. All three
+frozen attack hashes still match the table above; no speed claim follows
+from these correctness results.
 
 ## Reproduction and merge gate
 

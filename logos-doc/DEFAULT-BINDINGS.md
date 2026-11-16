@@ -40,6 +40,11 @@ PR #63 was externally squash-merged into PR #54 as
 tested child head `eaf5e3e41ce5585c1679e5537f32e71940e727ba`.
 That integration is into the parent PR branch, not `main`.
 
+The current branch also preserves independent release-branch changes. The
+rollback fingerprints below identify their historical snapshot; unrelated
+files such as `json_static.go` may now include later fixes. The rejected
+default-binding helpers and their runtime ABI remain absent.
+
 The repair has two obligations. A default must be checked in the scope where
 it was declared, even if its type is never constructed. Applying that default
 must preserve the declaration's bindings and exact value types when a
