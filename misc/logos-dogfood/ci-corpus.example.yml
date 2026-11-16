@@ -1,0 +1,137 @@
+# Review this manual workflow before installing it under .github/workflows/.
+# All failures remain failures; expected default-policy denials are not suppressed.
+name: "Pinned corpus replay"
+
+"on":
+  workflow_dispatch:
+
+permissions:
+  contents: "read"
+
+jobs:
+  corpus:
+    runs-on: "ubuntu-24.04"
+    timeout-minutes: 180
+    defaults:
+      run:
+        shell: "bash"
+    env:
+      GOMAXPROCS: "2"
+      GOMEMLIMIT: "512MiB"
+      GOGC: "25"
+      GOTOOLCHAIN: "local"
+      GOWORK: "off"
+      GOENV: "off"
+      GOTELEMETRY: "off"
+      CC: "gcc"
+      CXX: "g++"
+      GGLINT_REVISION: "2d52a5337c7b685ed11d924ca08cf86406f07f5e"
+    steps:
+      - uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: "Install pinned oracle and Python launcher"
+        id: "tools"
+        run: |
+          INPUTS="$RUNNER_TEMP/logos-corpus-inputs"
+          EVIDENCE="$RUNNER_TEMP/logos-corpus-evidence"
+          printf 'INPUTS=%s\nEVIDENCE=%s\n' "$INPUTS" "$EVIDENCE" >> "$GITHUB_ENV"
+          mkdir -p "$EVIDENCE" "$RUNNER_TEMP/oracle" "$RUNNER_TEMP/uv"
+          go_archive="$RUNNER_TEMP/go1.27.4.linux-amd64.tar.gz"
+          uv_archive="$RUNNER_TEMP/uv-x86_64-unknown-linux-gnu.tar.gz"
+          curl --fail --silent --show-error --location --output "$go_archive" https://go.dev/dl/go1.27.4.linux-amd64.tar.gz
+          curl --fail --silent --show-error --location --output "$uv_archive" https://github.com/astral-sh/uv/releases/download/0.13.8/uv-x86_64-unknown-linux-gnu.tar.gz
+          printf '%s  %s\n' 7226736c2339719cda28fbf3a54d71aa63bcefe376e98cef00034268dab24840 "$go_archive" | sha256sum --check --strict - | tee "$EVIDENCE/go-archive.txt"
+          printf '%s  %s\n' 5acfd9177cfecf0bf87578f059728215ccc884388988f55f7a65041b57387d91 "$uv_archive" | sha256sum --check --strict - | tee "$EVIDENCE/uv-archive.txt"
+          tar -xzf "$go_archive" -C "$RUNNER_TEMP/oracle" --strip-components=1
+          tar -xzf "$uv_archive" -C "$RUNNER_TEMP/uv" --strip-components=1
+          printf '%s\n' "$RUNNER_TEMP/oracle/bin" "$RUNNER_TEMP/uv" >> "$GITHUB_PATH"
+          printf 'GOROOT_BOOTSTRAP=%s\n' "$RUNNER_TEMP/oracle" >> "$GITHUB_ENV"
+          git rev-parse HEAD | tee "$EVIDENCE/logos-revision.txt"
+          printf 'GOMAXPROCS=%s\nGOMEMLIMIT=%s\nGOGC=%s\n' "$GOMAXPROCS" "$GOMEMLIMIT" "$GOGC" | tee "$EVIDENCE/resource-profile.txt"
+          gcc --version | tee "$EVIDENCE/gcc-version.txt"
+          g++ --version | tee "$EVIDENCE/gxx-version.txt"
+
+      - name: "Check preparation and replay contracts"
+        id: "contracts"
+        run: |
+          uv --version | tee "$EVIDENCE/uv-version.txt"
+          uv run --no-project --with-requirements misc/logos-dogfood/test-requirements.txt python -m pytest -q misc/logos-dogfood/test_prepare.py misc/logos-dogfood/test_run.py 2>&1 | tee "$EVIDENCE/contracts.txt"
+          uv run --no-project --with-requirements misc/logos-dogfood/test-requirements.txt pyright misc/logos-dogfood/prepare.py misc/logos-dogfood/test_prepare.py 2>&1 | tee "$EVIDENCE/preparation-types.txt"
+          uv run --no-project --with-requirements misc/logos-dogfood/test-requirements.txt ruff check misc/logos-dogfood/prepare.py misc/logos-dogfood/test_prepare.py 2>&1 | tee "$EVIDENCE/preparation-lint.txt"
+          uv run --no-project --with-requirements misc/logos-dogfood/test-requirements.txt ruff format --check misc/logos-dogfood/prepare.py misc/logos-dogfood/test_prepare.py 2>&1 | tee "$EVIDENCE/preparation-format.txt"
+
+      - name: "Fetch and verify all pinned corpus inputs"
+        id: "inputs"
+        if: "${{ !cancelled() && steps.contracts.outcome == 'success' }}"
+        run: |
+          uv run --no-project python misc/logos-dogfood/prepare.py --go-oracle "$RUNNER_TEMP/oracle/bin/go" --out "$INPUTS" 2>&1 | tee "$EVIDENCE/preparation.txt"
+
+      - name: "Build the native toolchain"
+        id: "native"
+        if: "${{ !cancelled() && steps.tools.outcome == 'success' }}"
+        working-directory: "src"
+        run: |
+          ./make.bash 2>&1 | tee "$EVIDENCE/native-build.txt"
+          ../bin/go version | tee "$EVIDENCE/fork-go-version.txt"
+          ../bin/logos version | tee "$EVIDENCE/logos-version.txt"
+
+      - name: "Build pinned gglint"
+        id: "gglint"
+        if: "${{ !cancelled() && steps.tools.outcome == 'success' }}"
+        env:
+          GOPROXY: "https://proxy.golang.org"
+          GOSUMDB: "sum.golang.org"
+          GOMODCACHE: "${{ runner.temp }}/gglint-modules"
+        run: |
+          source="$RUNNER_TEMP/gglint-source"
+          git init --quiet --object-format=sha1 "$source"
+          git -C "$source" remote add origin https://github.com/gosuda/gglint.git
+          git -C "$source" fetch --no-tags --depth=1 origin "$GGLINT_REVISION" 2>&1 | tee "$EVIDENCE/gglint-fetch.txt"
+          git -C "$source" checkout --detach --quiet "$GGLINT_REVISION"
+          test "$(git -C "$source" rev-parse HEAD)" = "$GGLINT_REVISION"
+          cd "$source"
+          go mod download -json > "$EVIDENCE/gglint-downloads.json"
+          test -z "$(git status --porcelain --untracked-files=all)"
+          go build -mod=readonly -trimpath -o "$RUNNER_TEMP/gglint" ./cmd/gglint 2>&1 | tee "$EVIDENCE/gglint-build.txt"
+          go version -m "$RUNNER_TEMP/gglint" | tee "$EVIDENCE/gglint-build-info.txt"
+          sha256sum "$RUNNER_TEMP/gglint" | tee "$EVIDENCE/gglint.sha256"
+
+      - name: "Replay all gglint modes"
+        if: "${{ !cancelled() && steps.inputs.outcome == 'success' && steps.gglint.outcome == 'success' }}"
+        run: |
+          uv run --no-project python misc/logos-dogfood/run.py \
+            --go-oracle "$RUNNER_TEMP/oracle/bin/go" \
+            --gglint "$RUNNER_TEMP/gglint" \
+            --source-root "$INPUTS/sources" --module-cache "$INPUTS/modules" \
+            --cache-root "$RUNNER_TEMP/corpus-cache" --stage gglint \
+            --jobs 2 --timeout 600 --out "$EVIDENCE/gglint" \
+            2>&1 | tee "$EVIDENCE/gglint-console.txt"
+
+      - name: "Replay native compile and default-policy lint stages"
+        if: "${{ !cancelled() && steps.inputs.outcome == 'success' && steps.native.outcome == 'success' }}"
+        run: |
+          uv run --no-project python misc/logos-dogfood/run.py \
+            --go-oracle "$RUNNER_TEMP/oracle/bin/go" \
+            --go-candidate "$GITHUB_WORKSPACE/bin/go" \
+            --logos "$GITHUB_WORKSPACE/bin/logos" \
+            --source-root "$INPUTS/sources" --module-cache "$INPUTS/modules" \
+            --cache-root "$RUNNER_TEMP/corpus-cache" \
+            --stage oracle --stage go --stage logos --stage logos-lint \
+            --operation build --jobs 2 --timeout 600 --out "$EVIDENCE/native-default" \
+            2>&1 | tee "$EVIDENCE/native-console.txt"
+
+      - name: "Retain receipts, reports, and raw command logs"
+        if: "always()"
+        uses: "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02" # v4.6.2
+        with:
+          name: "corpus-${{ github.run_id }}-${{ github.run_attempt }}"
+          retention-days: 14
+          if-no-files-found: "error"
+          path: |
+            ${{ runner.temp }}/logos-corpus-evidence
+            ${{ runner.temp }}/logos-corpus-inputs/preparation.json
+            ${{ runner.temp }}/logos-corpus-inputs/logs
+            ${{ runner.temp }}/logos-corpus-inputs/inputs
+
