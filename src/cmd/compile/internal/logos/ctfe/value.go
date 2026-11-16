@@ -1513,7 +1513,9 @@ func (e *evaluator) evalAppend(fr *frame, c *syntax.CallExpr) (Value, error) {
 	}
 	copy(backing[length:], elems)
 	for i := need; i < newcap; i++ {
-		backing[i] = zeroValue(s.typ.Elem)
+		if s.typ.Elem != nil {
+			backing[i] = zeroValue(s.typ.Elem)
+		}
 	}
 	s.slice = &sliceVal{backing: &backing, length: need, cap_: newcap}
 	return s, nil
