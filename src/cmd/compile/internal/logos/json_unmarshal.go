@@ -165,7 +165,7 @@ type jsonUnionClass struct {
 }
 
 func (js *jsonStruct) unionMembersOf(utyp types2.Type) (jsonUnionClass, bool) {
-	members, names, ok := classifyUnionMembers(js.holderPkg, js.staticJSON, utyp, js.qualify)
+	members, names, ok := classifyUnionMembers(js.holderPkg, js.staticJSON, utyp, js.qualify, js.cgoSource)
 	if !ok || len(members) == 0 {
 		return jsonUnionClass{}, false
 	}
@@ -433,7 +433,7 @@ func (js *jsonStruct) unionContainerType(t types2.Type) string {
 	case *types2.Map:
 		return "map[" + js.unionContainerType(u.Key()) + "]" + js.unionContainerType(u.Elem())
 	}
-	return types2.TypeString(t, js.qualify)
+	return sourceTypeString(t, js.qualify, js.holderPkg, js.cgoSource)
 }
 
 func (js *jsonStruct) unionAddr(uc *unionContainer, target string) string {
@@ -639,7 +639,7 @@ func (js *jsonStruct) foreignKeyedMembers(f *jsonField) []unionMemberClass {
 		}
 		typ = uc.union
 	}
-	members, _, ok := classifyUnionMembers(js.holderPkg, js.staticJSON, typ, js.qualify)
+	members, _, ok := classifyUnionMembers(js.holderPkg, js.staticJSON, typ, js.qualify, js.cgoSource)
 	if !ok {
 		return nil
 	}

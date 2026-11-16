@@ -271,3 +271,5 @@
 {"id": "AUD-160", "description": "M13-A-S10 Eject writes the test files of a main module", "phase": "AUD"}
 {"id": "AUD-161", "description": "M14-A-S2 Read array operator object code of arm64 and riscv64 builds", "phase": "AUD"}
 {"id": "AUD-162", "description": "M14-A-S3 Round each scalar lane product of dot", "phase": "AUD"}
+{"id": "AUD-187", "description": "M20-E-S1 Preserve C preambles during ejection", "phase": "AUD"}
+{"id": "AUD-188", "description": "M20-E-S2 Eject checked direct-C source", "phase": "AUD"}

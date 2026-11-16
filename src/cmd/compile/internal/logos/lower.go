@@ -80,6 +80,7 @@ func Lower(pkg *types2.Package, info *types2.Info, files []*syntax.File, src map
 			src:           buf,
 			orig:          len(buf),
 			base:          file.Pos().FileBase(),
+			cgoSource:     hasCImport(file),
 			start:         lineStarts(buf),
 			loweredChains: make(map[*syntax.CallExpr]bool),
 			compositeDone: make(map[syntax.Expr]bool),
@@ -168,6 +169,7 @@ type fileLower struct {
 	start        []int
 	base         *syntax.PosBase
 	baseName     string
+	cgoSource    bool
 	splices      []splice
 	regions      []*cfRegion
 	hosts        []*cfHost
