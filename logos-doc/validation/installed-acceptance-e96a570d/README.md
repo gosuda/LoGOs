@@ -62,9 +62,19 @@ The command and comparison are present in the transcript. The cross-target
 phase did not force `CGO_ENABLED`. Final source, tests, six tools, retained test
 binary and QEMU identities stayed unchanged.
 
-The final JSON profile checks are recorded separately when complete. The broad
-main workflow, all six driver/optimization matrices, stamped parity tier, real
-LSP/Wasm legs and second-host reproducibility remain separate requirements.
+[Final JSON acceptance](json-runtime/README.md) passes the complete runtime
+race suite and normal runtime vet in both profiles. JSONv2 passes 141 top-level
+tests and 4,268 PASS records without skips. Classic passes 128 of 129 started
+top-level tests and 4,255 PASS records; its sole existing depth-bound skip is
+recorded explicitly. The quoted-C test runs and passes under race with CGO
+enabled in both profiles, without skips. All ten commands exit zero, and the
+source, reviewed composition, frozen C fixture and installed tools remain
+unchanged.
+
+The broad main workflow, all six driver/optimization matrices, stamped parity
+tier, real LSP/Wasm legs and second-host reproducibility remain separate
+requirements. Their hosted outcomes belong to the immutable tip tested by
+those runs, with this local source identity retained as a separate proof.
 
 M6-S3b remains blocked under G1 item 7. This successful build does not establish
 the unresolved default-application contract or authorize another binding

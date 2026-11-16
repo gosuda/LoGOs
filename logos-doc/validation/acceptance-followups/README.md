@@ -105,8 +105,10 @@ both complete runtime profile race suites, vet, the caught pointer-only
 mutation and restored GREEN. The original classic-profile setup failure is
 retained separately in [test placement](json-test-placement/README.md). The
 final composition preserves the incoming static type inference and reuses
-the tested owned decoder. Its fresh installed acceptance is separate from
-the source-45 overlay component result.
+the tested owned decoder. [Fresh installed acceptance](../installed-acceptance-e96a570d/json-runtime/README.md)
+now passes both runtime race suites, normal runtime vet and explicit quoted-C
+race execution in both profiles. Those final-source results remain separate
+from the source-45 overlay component record.
 
 The array-index rule retains its incoming source and 96 frozen unit cases.
 [Combined installed acceptance](../installed-acceptance-e96a570d/array-index/README.md)
