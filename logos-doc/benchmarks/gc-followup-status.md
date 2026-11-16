@@ -72,3 +72,18 @@ Keep each production candidate separate and retain the fixed behavioral fixtures
 For G6, freeze source and workload; use identical fixed work long enough for each timed invocation to last at least one second, compiled binaries, `GOMAXPROCS=1`, hyperfine with three warmups and at least ten measurements, separate CPU profiles, and ten benchmem samples. Reject noisy samples and non-wins under the repository's existing thresholds. Validate the integrated candidate against its immediate parent.
 
 PR #26 disclosed roughly 4-5% cost in its Nil and other-manual-allocation controls. Those controls remain part of acceptance; a focused Self result is not a whole-GC or application result. The first two queue items are reviewable draft candidates until measurement supports promotion.
+
+
+## Review correction, 2026-11-17
+
+The updated PR retains the region-close ownership repair and the frozen lifecycle,
+heap-graph, and scan-extent regressions. It restores the scanner from the current
+default branch: eager mask initialization and per-pointer extent accounting.
+Neither optional scanner candidate has the caller-contract floor required for
+G6 admission, so both production deltas are deferred. Their original measurement
+records remain available without a promotion claim or a lowered threshold.
+
+The default-branch merge preserves the independent compiler and lint ledgers.
+The GC adversarial rows are now #360 through #362 to avoid colliding with the
+existing #333 through #336 entries. Historical references above describe the
+row numbers at their cited revisions.

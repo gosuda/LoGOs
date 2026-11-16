@@ -1,5 +1,14 @@
 # Candidate: initialize the region scan bitmap once
 
+## Integration status, 2026-11-17
+
+This candidate is deferred. PR #35 restores the scanner implementation from
+`release-branch.go1.27` because the required caller-contract floor has not been
+established. The region-close ownership repair and every regression test remain.
+The measurements below describe the original candidate revisions and remain
+unchanged; they do not admit either scanner optimization into the updated PR.
+A future candidate must complete its floor and parity evidence before promotion.
+
 Date: 2026-11-16
 
 Status: draft; native parity and repeated timing verified; full upstream and G6 admission tracked separately.
