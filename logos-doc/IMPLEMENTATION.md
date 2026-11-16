@@ -3817,6 +3817,17 @@ Anchor: Edward Tufte, Tony Hoare
 - Red-team rows: none.
 - Docs: none.
 
+### M22-A-S6 Execute independent release acceptance
+
+Anchor: Tony Hoare, Richard Feynman
+
+- Attack: the frozen `logos-doc/validation/release-acceptance/check_release_contract.py` records baseline RED for the absent six no-short driver/optimization cells, complete stamped parity, independent two-host reproducibility, and mandatory guarded runtime execution. Adding `-short` to the bulk matrix command makes the unchanged checker fail; restoring the exact executor bytes passes. The checker asserts static coverage only, never a hosted or runtime result.
+- Build: `.github/workflows/release-acceptance.yml` and `.github/scripts/release-acceptance.sh` use exact clean-tip shell checkout, pinned bootstrap tools, normal final PGO, separate stock/fork caches, and measured disk/memory preflights. Six independent jobs run both drivers at O1/O2/O3 over the complete `std cmd` inventory without short mode, retaining the frozen 31-name exclusion contract and separate `os` invocation. The parity job rejects planned rows, runs the unfiltered release tier with its oracle, mutants and upstream sweep, and compares the actual stamp to the unchanged clean tip. Two independent hosted jobs run the unchanged repro/example scripts and two clean-cache builds of the actual order-service source for linux/amd64, linux/arm64 and js/wasm; their source, recipe and six digests must match, and their host fingerprints must differ. The runtime job verifies pinned gopls, QEMU and Node, then requires real LSP, arm64 sum and Wasm execution under the unchanged verbose race scripts, including all eleven LSP messages and no guarded-script skips.
+- Gate: the frozen checker, Bash syntax, actual actionlint 1.7.12 and ShellCheck 0.11.0 pass; the short-mode mutation is caught and exact restoration passes. File-only checks preserve the `m/go.mod` txtar member and `order_service.lgo` basename, and retain raw non-UTF-8 evidence through a hashed log bundle. The V2 executor aligns its direct arm64 export and recorded recipe to v8.2 because the script harness drops GOARM64 and the unchanged repro script uses the deterministic v8.2 default. V1 raw outcomes remain historical and unchanged. Actual hosted matrix, complete stamped parity, two-host digest comparison and guarded runtime outcomes remain pending on the immutable tip they test.
+- Scope: `logos-doc/validation/release-acceptance-request.json` binds the jobs to the reviewed source tree and frozen fixture hashes. Ordinary `run.bash` defaults to short mode and does not replace these release-only gates. The existing main workflow still owns the broad plain-Go regression. Full M22 closure remains separate: only the four historical blocked exceptions are accepted there, so M6-S3b rows #403 through #405 remain visible and do not suppress independent behavioral jobs. No binding implementation is retried.
+- Red-team rows: none. Existing assertions, 346 attack rows and blocked mechanisms are unchanged.
+- Docs: `logos-doc/validation/release-acceptance/INTEGRATION.md`, the versioned V1/V2 evidence and `stabilization-candidate.md` distinguish static acceptance from hosted execution. This slice implements existing SPEC 17 and M22 requirements without a new language rule or release exception.
+
 ### Release gate
 
 Anchor: Edward Tufte, Richard Feynman
@@ -4612,4 +4623,5 @@ Written to `tasks/autoplan-ledger.jsonl` by P0-S6. IDs: phase prefix plus a sequ
 {"id": "AUD-207", "description": "M18-A-S21 Skip redundant same-allocation GC lookup", "phase": "AUD"}
 {"id": "AUD-208", "description": "M18-A-S22 Expand GC boundary and ownership gates", "phase": "AUD"}
 {"id": "AUD-203", "description": "M11-A-S9 Preserve quoted-text Unicode and token ownership", "phase": "AUD"}
+{"id": "AUD-209", "description": "M22-A-S6 Execute independent release acceptance", "phase": "AUD"}
 ```

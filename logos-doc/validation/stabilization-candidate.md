@@ -32,7 +32,7 @@ preserves the build and binary identities. Component evidence is linked from
 [acceptance follow-ups](acceptance-followups/README.md); completed build,
 installed behavioral acceptance and hosted gates are separate results.
 
-The current metadata records 301 identical task-ledger entries and 346 unique
+The current metadata records 302 identical task-ledger entries and 346 unique
 attack rows: 337 tested, two satisfied upstream, no planned rows and seven
 blocked rows. The four former planned rows #386, #389, #391 and #402 are
 promoted against the completed installed source-45 evidence below. Rows #336
@@ -207,14 +207,32 @@ gate is promoted by the six successful focused workflows.
 
 ## Required release acceptance
 
-A fresh `src/make.bash` must install both commands after the follow-up's cmd/go
-source change. The complete script and compiler-fixture suites, configured
-lint and `GO_TEST_TIMEOUT_SCALE=8 ./run.bash --no-rebuild` still require a
-successful combined run. The remaining release requirements include both
-drivers over `std` and `cmd` at O1/O2/O3, the full goparity release run and
-clean-tip stamp, second-host reproducibility, actual QEMU-dependent cross-target
-execution and the real gopls prerequisite. The completed JSON and native GC
-matrices retain the exact source boundary recorded above.
+The fresh normal `make.bash` above satisfies the rebuild requirement for source
+tree `e237c399aae8f8065b724e8a0e27585686c7da18`. The complete script and
+compiler-fixture suites, configured lint and
+`GO_TEST_TIMEOUT_SCALE=8 ./run.bash --no-rebuild` still require a successful
+combined run. The ordinary regression defaults to short mode; it does not
+replace the six no-short `go`/`logos` O1/O2/O3 cells or the complete unfiltered
+goparity release suite and clean-tip stamp.
+
+[M22-A-S6 integration](release-acceptance/INTEGRATION.md) adds explicit hosted
+jobs for those six cells, stamped parity, second-host reproducibility, and
+actual guarded LSP/QEMU/Wasm execution. Its frozen coverage checker records
+baseline RED, static GREEN, a caught short-mode mutation and exact restoration;
+actual actionlint and ShellCheck also pass. These are workflow checks, not
+hosted behavioral results. The V2 recipe uses the same effective arm64 v8.2
+setting for the frozen repro script and direct example builds, while preserving
+all V1 raw outcomes. The new hosted results remain pending on their exact clean
+tip, with all original semantic assertions intact.
+
+The final e96 installed record already proves actual arm64 sum execution under
+QEMU and both complete JSON runtime race profiles, including explicit no-skip
+quoted-C tests. Real gopls, the selected Wasm runtime legs, the six full
+optimization cells, stamped parity and two-host digest comparison remain
+independent requirements. Earlier native GC evidence keeps its recorded source
+boundary. The seven blocked rows remain unchanged; #403 through #405 are not
+among M22's four historical exceptions. Independent job success therefore does
+not by itself establish complete language or release closure.
 
 The [CI bootstrap repair](ci-bootstrap.md) and [CI consolidation](ci-merge/README.md)
 preserve the repository's action
