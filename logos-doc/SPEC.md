@@ -1360,7 +1360,7 @@ The ordinary cgo pointer-lifetime rules still apply.
 With `GOEXPERIMENT=logosfastcgo`, eligible result wrappers omit stack-top lookups and result-frame relocation.
 The trusted `nocallback` contract and the runtime's syscall stack rules keep that frame stable.
 Outside fast-call eligibility, wrappers retain ordinary relocation unless
-section 3.5's independent `logoscgoopt` experiment proves a stable frame.
+section 3.6's independent `logoscgoopt` experiment proves a stable frame.
 Result stores, sanitizer operations, and callback guards are unchanged.
 These implementation changes do not establish the speed or blocking gates above.
 
@@ -1392,46 +1392,46 @@ Concurrent reads use an immutable object.
 The caller joins all reader threads before deleting its handle.
 The fixture's `-buildvcs=false` isolates the test from VCS metadata; it is not an FFI requirement.
 
-### 3.5 RFC-305: Cgo compiler optimization
+### 3.6 RFC-306: Cgo compiler optimization
 
 The cgo optimizer MUST specialize the shared cgo pipeline independently of
 fast-cgo trampoline selection. It MUST apply to Go packages built by `go` or
 `logos` and to loGo/s packages built by `logos`. It MUST preserve Go semantics,
-the C ABI, and the cgo pointer rules. [T-305]
+the C ABI, and the cgo pointer rules. [T-306]
 
-#### 3.5.1 Stable return frames
+#### 3.6.1 Stable return frames
 
 `GOEXPERIMENT=logoscgoopt` MUST enable ordinary-cgo return-frame specialization
 and MUST be off by default. `nologoscgoopt` MUST disable it. The experiment
-MUST NOT require or enable `logosfastcgo`. [T-305]
+MUST NOT require or enable `logosfastcgo`. [T-306]
 
 With `logoscgoopt` enabled, a gc-generated result wrapper whose C function's
 `#cgo nocallback` contract is known during generation MUST omit both
 `_cgo_topofstack()` calls and the result-frame relocation.
 `#cgo noescape` MUST NOT be required for this
 specialization. Calls without `nocallback`, including `noescape`-only calls,
-MUST retain relocation. The gccgo generator MUST remain unchanged. [T-305]
+MUST retain relocation. The gccgo generator MUST remain unchanged. [T-306]
 
 A contract that is unknown when the C wrapper is generated MUST retain the
 conservative path. Cgo's existing per-file emission can therefore retain
-relocation when a directive appears only in a later input file. [T-305]
+relocation when a directive appears only in a later input file. [T-306]
 
 The ordinary wrapper MUST still call `runtime.cgocall` and enforce the
 `nocallback` contract. Scheduler transitions, system-stack switching, GC
 visibility, call accounting, tracing, profiling, and blocking behavior MUST
 retain the ordinary cgo path. The specialization MUST preserve argument and
-result layout, result stores, errno capture, and TSan/MSan operations. [T-305]
+result layout, result stores, errno capture, and TSan/MSan operations. [T-306]
 
 `nocallback` alone MUST NOT imply `noescape`: a function may retain a legally
 pinned Go pointer. Its generated Go wrapper MUST retain the upstream escape
 and liveness treatment. The existing `noescape` plus `nocallback` pair MUST
 keep its upstream keepalive treatment. Pointer checks and pinning requirements
-MUST remain unchanged. [T-305]
+MUST remain unchanged. [T-306]
 
 When `logosfastcgo` is also enabled, section 3.4 MUST continue to determine
 trampoline eligibility. Disabling `logoscgoopt` MUST NOT disable the existing
 fast-call frame specialization. A call that may enter Go MUST still relocate
-its result frame after a callback that moves the goroutine stack. [T-305]
+its result frame after a callback that moves the goroutine stack. [T-306]
 
 Correctness argument (informative): `runtime.cgocall` enters syscall state
 before the C wrapper runs and leaves it after the wrapper returns. Without a
@@ -1440,7 +1440,7 @@ callback, the wrapper stores its result while that state is still active.
 rejects a syscall stack. The frame therefore cannot move in this interval.
 The proof does not require a short call or a nonblocking function.
 
-#### 3.5.2 Further compiler work (informative)
+#### 3.6.2 Further compiler work (informative)
 
 The following stages are planned work, not behavior enabled by `logoscgoopt`:
 

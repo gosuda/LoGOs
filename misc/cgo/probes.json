@@ -1,0 +1,24 @@
+[
+  {
+    "id": "return-frame-disabled",
+    "kind": "counterfactual-red",
+    "path": "src/cmd/cgo/cgoopt_logos.go",
+    "before": "buildcfg.Experiment.LogosCgoOpt && p.noCallbacks[n.C]",
+    "after": "buildcfg.Experiment.LogosCgoOpt && false",
+    "rebuild": "cgo",
+    "package": "cmd/cgo/internal/testlogos",
+    "test": "TestCgoOptEmission",
+    "diagnostic": "stack-top lookups = 2, want 0"
+  },
+  {
+    "id": "return-frame-callback-inversion",
+    "kind": "mutation",
+    "path": "src/cmd/cgo/cgoopt_logos.go",
+    "before": "buildcfg.Experiment.LogosCgoOpt && p.noCallbacks[n.C]",
+    "after": "buildcfg.Experiment.LogosCgoOpt && !p.noCallbacks[n.C]",
+    "rebuild": "cgo",
+    "package": "cmd/cgo/internal/testlogos",
+    "test": "TestCgoOptEmission",
+    "diagnostic": "stack-top lookups = 2, want 0"
+  }
+]
