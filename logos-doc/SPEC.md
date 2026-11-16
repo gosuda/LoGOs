@@ -1,7 +1,7 @@
 # loGo/s specification
 
-- Status: Tailored spec, 2026-10-19; amended 2026-11-08 (withdrew GC modes, synthetic PGO, ICF, clone specialization, the fast-cgo default, vet-duplicate lints, and numeric targets; replaced the upstream arena with placement regions; moved nogo into logos lint)
-- Base: Go 1.27.2
+- Status: Normative specification; compiler stability clarifications updated 2026-11-16
+- Base: Go 1.27.4; language version Go 1.27; ejected-code floor Go 1.27.2
 - Original: `logos-docs/PLAN.md` at commit 57475ed (`git show 57475ed:logos-docs/PLAN.md`)
 - Source files: `.lgo` (canonical); aliases U+1F4DC (scroll), U+26A1 (lightning), and U+0295 U+25D4 U+03D6 U+25D4 U+0294 (gopher); `.go` files stay Go source files with Go language semantics.
 
@@ -12,9 +12,24 @@ The words MUST, MUST NOT, SHOULD, SHOULD NOT, and MAY follow RFC 2119. The text 
 ### 0.1 Upstream compatibility
 Every improvement to code generation, runtime, stack, SIMD, wasm, cgo, optimization level, and tooling MUST apply to Go packages and to loGo/s packages [T-0.1][R-U1].
 That rule MUST hold under `logos` and under plain `go` [T-0.1][R-U1].
-The following are by design outside those two sentences: fixed-array operators and reduction methods, which Sec 2.4 withholds from Go packages; the `make` length overflow lowering, which Sec 3.3 and Sec 13.2 define for `.lgo` files; the slice-sum vector form, which needs the `.sum()` chain call of Sec 1.4 and has no Go spelling; the wasm loop-stride default, which Sec 13 applies under `logos` only while Sec 12.1 needs the explicit `--wasm-features` flag under plain `go`; `target_cpu`, which Sec 1.5 applies to `logos` builds while plain `go` keeps the upstream `GOAMD64` and `GOARM64` defaults; the capabilities auditor, which Sec 11.1 runs in `logos` builds only; the `//logos:zeroalloc` directive, which `go build` MUST ignore in Go packages per Sec 17.2 while `logos lint` and `logos build` apply it; tooling delivered as `logos` subcommands (`lint`, `eject`, `lsp`, `context`, `next`), which have no plain-`go` counterpart, while plain-`go` tooling breadth is the shared flags and diagnostics of Sec 0.1, Sec 12, and Sec 14; alternate GC modes and synthetic PGO, which carry no rules after the withdrawal; loGo/s syntax-gated lowering (options, unions, tuples, const views and composites, comptime, `go group`, static JSON and binary forms), which has no Go spelling while Go importers see the Go-facing forms of Sec 0.3 and Sec 5; and eject, which converts loGo/s to Go one way per Sec 0.3.
+The following rules define their scope separately:
+
+| Feature | Scope and controlling section |
+|---|---|
+| Fixed-array operators and reductions | loGo/s packages only; Sec 2.4 |
+| `make` length-overflow lowering | `.lgo` files only; Sec 3.3 and Sec 13.2 |
+| Slice-sum vector lowering | The `.sum()` chain call, which has no Go spelling; Sec 1.4 |
+| Wasm loop-stride default | `logos` by default; plain `go` through explicit `--wasm-features`; Sec 13 and Sec 12.1 |
+| `target_cpu` | `logos` builds; plain `go` retains upstream `GOAMD64` and `GOARM64` defaults; Sec 1.5 |
+| Capabilities auditor | `logos` builds only; Sec 11.1 |
+| `//logos:zeroalloc` | `logos lint` and `logos build`; `go build` ignores it in Go packages; Sec 17.2 |
+| `logos` subcommands | `lint`, `eject`, `lsp`, `context`, and `next` have no plain-`go` counterpart. Shared flags and diagnostics remain governed by Sec 0.1, Sec 12, and Sec 14. |
+| loGo/s syntax lowering | Options, unions, tuples, const views and composites, comptime, `go group`, and static JSON/binary forms have no Go spelling. Go importers see their Go-facing forms; Sec 0.3 and Sec 5. |
+| Ejection | One-way conversion from loGo/s to Go; Sec 0.3 |
+
+Alternate GC modes and synthetic PGO remain withdrawn and impose no rules.
 An improvement that this spec puts behind a named `GOEXPERIMENT` flag MUST stay behind that flag. The `logos_settings_env.txt` script gates the arena and preemptibleloops experiment defaults [T-0.1][R-U1].
-Note: the `go` command can differ from upstream Go 1.27.2 in performance, code generation, runtime, and tooling. No test asserts a difference.
+Note: the `go` command can differ from the pinned upstream Go release in performance, code generation, runtime, and tooling. No test asserts a difference.
 The `go` command MUST keep Go language semantics, so every valid Go program MUST keep its Go meaning [T-0.1][R-U1].
 The `go version` output and the `go help` output, including every help topic, MUST stay the upstream text [T-0.1].
 Plain `go` MUST select improvements through flags and `GOEXPERIMENT` and MUST read no `logos.toml` [T-0.1][R-U1].
@@ -64,6 +79,10 @@ The command `logos eject -o DIR` MUST write a complete pure-Go copy of the main 
 The command `logos build --emit-go=DIR` MUST be an alias of `logos eject -o DIR` [T-0.3].
 DIR MUST NOT exist, or DIR MUST be empty; the tool MUST refuse a DIR that exists and holds files [T-0.3].
 Each `.lgo` file MUST become a `.go` file [T-0.3].
+Selection of an inactive file's build context MUST satisfy its filename and build constraints, including repeated and negated custom tags [T-0.3].
+Selection MUST NOT impose a machine-word limit on the number of custom tags [T-0.3].
+An inactive variant MAY disable a custom tag named by its constraint; unrelated custom tags from the requested build MUST remain in effect [T-0.3].
+Within a candidate target context, a requested custom-tag set that already satisfies the file MUST remain unchanged [T-0.3].
 The output MUST keep all comments from the source [T-0.3].
 Each non-standard loGo/s dependency module MUST be ejected too [T-0.3].
 Each ejected dependency MUST land in `DIR/_logos_deps/<module path>@<version>/` [T-0.3].
@@ -274,6 +293,8 @@ A non-constant default MUST fail with `correctness::default_not_constant` [T-104
 Spread `T{..src}` MUST copy fields with identical names and identical types [T-104.5].
 The same name with a different type MUST fail with `correctness::spread_type_mismatch` [T-104.5].
 Explicit fields MUST win over spread fields [T-104.5].
+Defaults MUST fill only fields supplied by neither an explicit value nor a spread; a spread's zero value MUST suppress the default [T-104.5].
+Mutable storage created by a slice or map default MUST NOT be shared between separate literal evaluations [T-104.5].
 The source MUST be evaluated once [T-104.5].
 Self-update `x = T{f: e, ..x}` MUST evaluate every explicit field expression before it writes any field of `x`, and MUST write only the explicit fields, so a field not listed keeps the value it holds when the assignment runs [T-104.5].
 The self-update MUST perform no full struct copy [T-104.5].
@@ -400,6 +421,11 @@ A `const func` MUST NOT perform I/O, spawn a goroutine, read a mutable package v
 
 The compiler MUST evaluate `const` composites and `const func` calls at compile time with target integer widths, a step limit from `max_ctfe_steps` with default 100,000, and a value cap of 1 MB. [T-201][T-102]
 
+Compile-time assignments MUST preserve Go's operand evaluation order, destination identity, value-copy rules, and left-to-right store order. [T-201]
+The evaluation and assignment phases, including failures while evaluating a destination operand and failures while storing a result, MUST follow Go assignment semantics. [T-201]
+A two-value lookup on a nil map MUST return the element's zero value and `false`. [T-201]
+Assignment to an array or struct MUST preserve its existing inline storage, including storage observed by a slice view. Value copies MUST remain independent; slice and map fields MUST retain Go reference sharing. The same rules apply to range assignment, `clear`, `copy`, and `append`. [T-201]
+
 A run that exceeds the selected `max_ctfe_steps` limit MUST fail with `[comptime::ctfe_step_limit]`. [T-201][T-102]
 
 Configuration MAY raise `max_ctfe_steps` above its default. [T-102]
@@ -408,7 +434,8 @@ A constant value above 1 MB MUST fail with `[comptime::const_too_large]`. [T-201
 
 A `const func` that breaks a purity rule MUST fail with `[correctness::const_func_impure]` naming the reason. [T-201]
 
-A compile-time evaluation that overflows the target width, inserts a NaN or duplicate map key, executes a panic, or reaches a form the interpreter does not support MUST fail with `[correctness::const_eval]` naming the cause. [T-201]
+A constant that is not representable in its required target type MUST fail with `[correctness::const_eval]` naming the cause. Non-constant fixed-width integer operations inside a `const func` MUST retain Go's wrapping arithmetic. [T-201]
+A compile-time evaluation that inserts a NaN or duplicate map key, executes a panic, or reaches a form the interpreter does not support MUST fail with `[correctness::const_eval]` naming the cause. A panic with a string argument MUST retain that string in the diagnostic. [T-201]
 
 On native targets, constant data with pointers MUST live in read-only memory. Native read-only placement is a separate defense against stores that reach that storage; it MUST NOT substitute for the checked-source rejection rules below or imply a portable run-time fault guarantee. [T-201]
 
@@ -1949,12 +1976,14 @@ func pack(v int) []int {
 ### 18.1 Objective
 
 loGo/s is a complete toolchain for Go and for the loGo/s language, which adds checked error propagation to Go. The command `logos eject` writes the pure-Go form of a loGo/s module.
-Writers write `.lgo` files, the `logos` command checks and lowers them, and the Go 1.27.2 backend builds them.
+Writers write `.lgo` files, the `logos` command checks and lowers them, and the pinned Go backend builds them.
 The toolchain is one complete toolchain for Go and loGo/s: Go packages and loGo/s packages share one backend and one runtime, and each improvement serves both.
 
 ### 18.2 Compiler-made names
 
 Compiler-made names use the `_logos_` prefix; comptime copies use the `_logosct` suffix. The only exceptions are the Go-fixed method names `MarshalJSON`, `UnmarshalJSON`, `MarshalBinary`, `AppendBinary`, and `UnmarshalBinary`, and the exported property accessors `Logos_GetF` and `Logos_SetF` of Sec 2.3, which Go importers can call.
+Tuple temporary names MUST be distinct across all files and expansion sites of a package, including sites with identical source coordinates. Repeated compilation of the same ordered inputs MUST produce the same names. Source diagnostics MUST retain the original positions. [T-204.1]
+Separately lowered inactive files MUST retain distinct tuple temporary names when combined in an ejected package. [T-204.1]
 For example, the lowering of `v := parse(s)?` reads as follows (temporary names and site indices vary by position).
 
 ```go
