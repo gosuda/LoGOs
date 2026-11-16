@@ -594,6 +594,15 @@ Anchor: Tony Hoare, Edsger W. Dijkstra
 - Red-team rows: none (CI bootstrap and the existing regression corpus).
 - Evidence: `logos-doc/validation/ci-bootstrap.md`.
 
+### M0-A-S17 Keep imported compiler symbols lazy
+Anchor: Tony Hoare, David Parnas, Richard Feynman
+- Invariant: imported fact and declaration-overlay walks resolve source declaration identifiers only. Compiler-only generic locals stay lazy; private and Unicode declarations and methods reached through their declaring types retain their facts.
+- RED: frozen `compile_local_type_import_test.go` and `optfacts_scope_test.go` expose 12 imported generic compiler failures and 16 forbidden lazy lookups. Independent stock-Go/S3 comparisons reproduce the reduced programs and exact `golang.org/x/tools v0.52.0` digraph build; both nearby Go controls pass.
+- Build: integrate existing candidate `39c62004a991501a25f93eae7a63dc7c7fac5646` without changing its production or frozen-test bytes. Its recorded installed tool hashes match, all 48 recorded cells pass, and the independent five-program/digraph replay passes. This slice has used one production candidate; resource and launch interruptions did not consume additional implementation attempts.
+- Gate: source/test and evidence hashes plus ledger equality pass at integration. A fresh merged `make.bash`, complete affected compiler-package tests and vet, and the configured upstream regression gate remain required. No rebuild or behavioral rerun was performed while integrating this candidate.
+- Red-team rows: #418 (planned until merged-toolchain acceptance).
+- Docs: SPEC 5 and T-Sec5; commands, exact source/binary identities, raw independent 18 results, and reviewed author evidence in `logos-doc/validation/imported-local-types/README.md`.
+
 ## M1. `?`, `defer f()?`, `errdefer`, error traces, eject
 
 Anchor: Tony Hoare, Christopher Alexander, Edsger W. Dijkstra
@@ -4502,4 +4511,5 @@ Written to `tasks/autoplan-ledger.jsonl` by P0-S6. IDs: phase prefix plus a sequ
 {"id": "AUD-197", "description": "M24-A-S2 Keep ejection target facts consistent", "phase": "AUD"}
 {"id": "AUD-198", "description": "M0-A-S16 Respect the CI action ownership policy", "phase": "AUD"}
 {"id": "AUD-192", "description": "M20-E-S3 Keep checked C types in owned constants", "phase": "AUD"}
+{"id": "AUD-199", "description": "M0-A-S17 Keep imported compiler symbols lazy", "phase": "AUD"}
 ```
