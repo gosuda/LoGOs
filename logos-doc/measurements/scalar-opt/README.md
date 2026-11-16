@@ -131,6 +131,11 @@ Run this from the repository root or one of its subdirectories. The CPU is chose
 set -euo pipefail
 repo_root=$(git rev-parse --show-toplevel)
 hyperfine_bin=$(command -v hyperfine)
+tool_dir=$(env GOENV=off GOTOOLCHAIN=local GOFLAGS= GOOS=linux GOARCH=amd64 \
+  GOAMD64=v1 GOEXPERIMENT= GOROOT="$repo_root" "$repo_root/bin/go" env GOTOOLDIR)
+env GOENV=off GOTOOLCHAIN=local GOFLAGS= GOOS=linux GOARCH=amd64 \
+  GOAMD64=v1 GOEXPERIMENT= GOROOT="$repo_root" \
+  "$repo_root/bin/go" build -o "$tool_dir/pprof" cmd/pprof
 benchmark_cpu=$(uv run --no-project python -c 'import os; print(min(os.sched_getaffinity(0)))')
 evidence_root=$(mktemp -d "${TMPDIR:-/tmp}/logos-scalar-evidence.XXXXXX")
 mkdir -p "$evidence_root/tmp" "$evidence_root/work" "$evidence_root/cache"
@@ -152,7 +157,22 @@ env -u GODEBUG \
 
 The runner prints the fresh evidence directory and preserves all raw observations, profiles, manifests, fixed counts, and commands. It sets `GOROOT` to the supplied repository, `GOENV=off`, `GOTOOLCHAIN=local`, and empty `GOFLAGS`. The final recorded campaign used CPU 8; the portable command selects a CPU permitted on the new host. The new campaign's own environment and affinity records determine its provenance.
 
-For the full corpus, omit `--benchmark` and `--compile-package` as shown. The defaults cover all seven runtime kernels and the go/parser and encoding/json compiler workloads. A new host, compiler revision, or environment requires a new paired campaign; do not reuse earlier baseline samples. The correctness and full regression procedure and its recorded status belong to [VALIDATION.md](VALIDATION.md).
+The explicit profiler build handles toolchains whose normal build omits that
+optional tool. The runner checks its availability before timing and includes
+its binary hash in the frozen inputs. Historical runner hashes in
+`validation.json` identify the original PR #28 version; the current runner
+also supports the follow-up compiler comparison and throughput columns.
+
+For the full corpus, omit `--benchmark` and `--compile-package` as shown. The defaults now cover thirteen runtime kernels, including six added by [the scalar fact follow-up](FOLLOWUP.md), and the go/parser and encoding/json compiler workloads. The original campaign above measured seven runtime kernels. A new host, compiler revision, or environment requires a new paired campaign; do not reuse earlier baseline samples. The correctness and full regression procedure and its recorded status belong to [VALIDATION.md](VALIDATION.md).
+
+To compare two compiler revisions at actual O3, supply both
+`--baseline-compiler /path/to/original/compile` and
+`--candidate-compiler /path/to/new/compile`. The runner selects each compiler
+through `-toolexec`, rejects different binaries with colliding tool identities,
+freezes both binaries,
+and uses `-O=3` with `logosopt=1` on both sides. The initial builds and Go
+corroboration share those exact compiler selections and flags. This mode is
+separate from the default single-compiler flag-off/flag-on comparison.
 
 ## Public-data redaction
 

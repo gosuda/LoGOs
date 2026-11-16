@@ -7,8 +7,9 @@ Scope: generated-program performance at explicit `-O=3`, for Go and loGo/s.
 ## Decision
 
 Extend scalar facts in the existing SSA pipeline. Keep its representation,
-worklist, constant evaluator, and cleanup passes. Five selected techniques
-form three small implementation units. The lower optimization tiers keep
+worklist, constant evaluator, and cleanup passes. The initial five selected
+techniques form three implementation units; the follow-up adds bounded
+transfers within those units. The lower optimization tiers keep
 their current behavior. The change adds no dependency, whole-program mode,
 runtime dispatch, or second range-proof pass.
 
@@ -98,9 +99,13 @@ an excluded operation, or a differing result leaves the original operation
 intact. Division, remainder, shifts, floating-point, pointers, memory, and
 calls are excluded. Existing generic rules own width and comparison semantics.
 
-The pass runs after `phiopt` and before `gcse deadcode`. It allocates at most
-eight evaluator temporaries per candidate; the immediate cleanup removes
-unused values. This is one bounded traversal, not a fixed-point pass loop.
+The pass runs after generic CSE and before `phiopt`. It allocates at most
+eight evaluator temporaries per candidate; `gcse deadcode` after `phiopt`
+removes unused values. Running before `phiopt` preserves predecessor alignment
+when an integer phi chooses zero or one. For example, the aligned pairs
+`(0, 7)` and `(1, 6)` always sum to seven; converting the first phi to a
+Boolean conversion too early hides that relationship. The follow-up moves
+the existing traversal and adds no analysis round.
 
 ### Conditional constant propagation
 
@@ -113,6 +118,59 @@ moves from top to a constant to bottom, including newly reachable backedges.
 
 Changing a value never authorizes changing effects. Calls, memory order,
 bounds and nil checks, and division-by-zero behavior remain observable.
+
+### Closing scalar fact gaps
+
+[Issue #50](https://github.com/gosuda/LoGOs/issues/50) extends the selected
+techniques after source probes exposed three residual gaps in the first O3
+implementation. The baseline for this follow-up is `7089362d`, with scalar
+analysis enabled on both sides. It selects pass ordering, exact byte-swap
+facts, and bounded bit-query results over a second analysis pass, a new fact
+cache, or speculative rewrites. Each helper has one concern and bounded work;
+the G6 single-candidate exception applies to these small transfers.
+
+A byte swap is a fixed bit permutation. Applying that permutation to both
+the abstract value and its known mask preserves every bit fact exactly.
+The operation determines the permutation width: 16, 32, or 64. The result
+type determines constant representation. These widths are distinct on the
+Power10 `ReverseBytes16` intrinsic, which returns an SSA `uint` value. Bits
+above the operation width are known zero. Existing narrow-result
+normalization still owns canonical sign extension of SSA constants.
+
+SCCP must also evaluate byte swaps because loop convergence can discover a
+constant after known-bits analysis has finished. Its transfer maps Top to
+Top, a constant to the corresponding width-correct constant, and Bottom to
+Bottom. It preserves the original result type and lets the worklist revisit
+users. A conflicting backedge therefore cannot freeze a transient constant.
+
+For a width-masked abstract input, let `ones` be its known-one bits and
+`possible` include every bit not known zero. Every represented input has
+bit-length bounds `Len(ones)..Len(possible)`, population-count bounds
+`PopCount(ones)..PopCount(possible)`, and trailing-zero bounds
+`Ctz(possible)..Ctz(ones)`. Clamp trailing-zero counts of zero to the input
+width. The transfer deliberately uses these zero-inclusive bounds for
+`CtzNonZero` too, even when a separate path proof excludes zero.
+
+For a result interval `[lo, hi]`, every bit above the highest set bit of
+`lo XOR hi` is constant throughout that interval. Keep that common prefix
+and mark the remaining bits unknown. This can expose a constant projection
+without replacing a genuinely variable count. All operations use existing
+cached facts and constant-time word operations; cyclic input facts remain
+conservative. The new transfers allocate no analysis storage.
+
+The source attacks require actual instruction removal for aligned trailing
+counts, rotated header lengths, sparse population classes, byte-swap literals,
+masked byte fields, late loop predicates, and zero/one correlated phis.
+Dynamic controls must retain their operations. Independent concrete-value
+oracles cover all input widths, both 32- and 64-bit count results, narrow
+constant representation, overflow, changing loops, effects, and required
+panics. Cross-compilation and codegen assertions cover 386 and both Power10
+endian targets. Local 386 execution was unavailable; CI now selects both scalar
+flag values for execution. Power10 coverage is compilation evidence.
+
+Incremental measurements and the frozen-test record belong to
+[FOLLOWUP.md](measurements/scalar-opt/FOLLOWUP.md). The original flag-off
+versus flag-on measurements remain separate.
 
 ### Tier routing and limits
 

@@ -134,3 +134,20 @@ The upstream socket diagnostic uses the same cache, temporary roots and resource
 GOROOT="$UPROOT1274" "$UPROOT1274/bin/go" \
   test -count=1 -short log/syslog -run '^TestWithSimulated$'
 ```
+
+## Historical input retention
+
+A task-cache cleanup on 2026-11-16 removed imported package archives used by
+the original compiler-cost campaigns. The 04:46 campaign had recorded hashes
+for 81 unique archives. Those archives have not been restored: its exact driver
+was not retained, and no assembler fingerprint was recorded. The 03:43 campaign
+also lost its importcfg-referenced archives, which were not included in that
+campaign's original input-hash manifest.
+
+Source files, the archived compiler, import configurations, manifests, measured
+benchmark executables, profiles, logs, and numeric observations remain. The
+measurement-time validation is unchanged, but these earlier compiler workloads
+are not currently reproducible from a complete retained set of imported archive
+bytes. Historical hashes and results were not rewritten to hide that limit.
+The later follow-up's 81 archives were restored and verified separately, as
+recorded in [FOLLOWUP.md](FOLLOWUP.md#input-retention-audit).
