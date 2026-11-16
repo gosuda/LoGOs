@@ -21,6 +21,7 @@ import (
 )
 
 var flagLogosCap = flag.String("logos.cap", "", "read logos capabilities policy from `file` (logos builds only)")
+var flagLogosTestPackage = flag.String("logos.test-package", "", "attribute a synthetic external test package to its origin")
 
 type CapabilityKind uint8
 
@@ -104,6 +105,7 @@ type logosCapPolicy struct {
 	TransitiveExecAllowlist []string `json:"transitive_exec_allowlist"`
 	TransitiveNetAllowlist  []string `json:"transitive_net_allowlist"`
 	MainModules             []string `json:"main_modules"`
+	NestedModules           []string `json:"nested_modules"`
 	CgoAllowed              []string `json:"cgo_allowed"`
 }
 
@@ -165,7 +167,7 @@ func logosCapAudit(ctxt *Link, d *deadcodePass) {
 		ldr:    ctxt.loader,
 		policy: &policy,
 		std:    ctxt.loader.StdPackages(),
-		deps:   parseLogosModinfoDeps(strdata["runtime.modinfo"]),
+		deps:   append(parseLogosModinfoDeps(strdata["runtime.modinfo"]), policy.NestedModules...),
 	}
 	if !a.hasDepPackage() {
 		return
@@ -742,10 +744,13 @@ func (a *logosCapAuditor) namedPkg(name string) string {
 }
 
 func (a *logosCapAuditor) exemptPkg(pkg string) bool {
-	if capIsLocalPkg(pkg) || a.std[pkg] {
+	if a.std[pkg] {
 		return true
 	}
-	return a.mainOwns(pkg)
+	if isLogosTestBinary() && *flagLogosTestPackage != "" && pkg == *flagLogosTestPackage+"_test" {
+		pkg = *flagLogosTestPackage
+	}
+	return capIsLocalPkg(pkg) || a.mainOwns(pkg)
 }
 
 func (a *logosCapAuditor) mainOwns(pkg string) bool {

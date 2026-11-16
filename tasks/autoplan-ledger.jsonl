@@ -271,3 +271,5 @@
 {"id": "AUD-160", "description": "M13-A-S10 Eject writes the test files of a main module", "phase": "AUD"}
 {"id": "AUD-161", "description": "M14-A-S2 Read array operator object code of arm64 and riscv64 builds", "phase": "AUD"}
 {"id": "AUD-162", "description": "M14-A-S3 Round each scalar lane product of dot", "phase": "AUD"}
+{"id": "AUD-163", "description": "M12-S3 Preserve rooted ancestry after inline discovery; installed combined-tree gates pending", "phase": "AUD"}
+{"id": "AUD-165", "description": "M12-S4 Preserve external test package ownership; installed combined-tree gates pending", "phase": "AUD"}

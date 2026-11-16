@@ -1716,6 +1716,7 @@ The bound is one read of the import header of each excluded Go file of each non-
 A package outside the exempt set that holds assembly files (`.s`, `.S`, or `.sx`) or a precompiled object (`.syso`) is an unclassified capability, because the audit cannot see a raw SYSCALL instruction inside it, and a constructor in a `.syso` object runs at process start under external linking. [T-Sec11]
 cmd/go reports it with capabilities::unclassified_assembly and the shortest import chain, under the transitive_unsafe severity, and an entry in transitive_unsafe_allowlist authorizes it, since a grant of unsafe already names a package trusted to bypass the language's checks. [T-Sec11]
 The standard library, first-party packages under a main module, and the program's own packages are exempt. [T-Sec11]
+An external test package MUST retain the module ownership of its tested package. A `_test` suffix alone MUST NOT establish test provenance. [T-Sec11]
 A dependency MUST NOT count as the standard library merely because its module path has no dot; only packages of the toolchain's own GOROOT are the standard library. [T-Sec11]
 A dependency that imports a sink package but never calls it passes as dead code. [T-Sec11]
 Reflection through reflect.Value.Method counts as reachable. [T-Sec11]
