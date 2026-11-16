@@ -411,17 +411,16 @@ func FallbackQ[T any](s *Scanner, dst *T) {
 	}
 }
 
-func (s *Scanner) decodeRaw(raw []byte, dst any) bool {
+func (s *Scanner) decodeRaw(raw []byte, dst any) {
 	err := stdjson.Unmarshal(raw, dst)
 	if err == nil {
-		return true
+		return
 	}
 	if ute, ok := err.(*stdjson.UnmarshalTypeError); ok {
 		s.saveFallback(ute)
-		return false
+		return
 	}
 	s.fatal(err)
-	return false
 }
 
 func (s *Scanner) saveFallback(ute *stdjson.UnmarshalTypeError) {
