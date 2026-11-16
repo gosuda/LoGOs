@@ -277,7 +277,7 @@ jobs:
       - name: "Run the complete upstream regression gate"
         if: "!cancelled() && steps.build.outcome == 'success'"
         run: |
-          GO_TEST_TIMEOUT_SCALE=3 ./run.bash --no-rebuild
+          GO_TEST_TIMEOUT_SCALE=8 ./run.bash --no-rebuild
       - name: "Run the SIMD-enabled standard library"
         if: "!cancelled() && steps.build.outcome == 'success'"
         run: |

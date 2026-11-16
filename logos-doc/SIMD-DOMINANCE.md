@@ -115,6 +115,20 @@ completed rerun is still required.
 Hosted evidence: [focused job](https://github.com/gosuda/LoGOs/actions/runs/43865827289/job/133294001990)
 and [first full regression job](https://github.com/gosuda/LoGOs/actions/runs/43865827289/job/133294001373).
 
+## Independent lower-ISA execution follow-up
+
+The follow-up combines the existing autovectorization branch with this repair. It adds no compiler transformation. Its frozen SSA test, `src/cmd/compile/internal/ssa/zcse_simd_logos_test.go`, uses two sequential independent guards and a dominated duplicate. It checks all three vector widths and preserves a positive control for dominance-aware sharing. The frozen public Go fixture, `test/logos/run/simd_zero_guard.go`, places two guarded vector uses around an observable call and checks nil, empty, one-element, and vector-width boundary inputs against scalar results and exact call counts.
+
+| Frozen file | SHA-256 |
+| --- | --- |
+| `src/cmd/compile/internal/ssa/zcse_simd_logos_test.go` | `ba9fd261277bf4c3ce894651288d9565d4329d3634c0433c32d10214144dfefb` |
+| `test/logos/run/simd_zero_guard.go` | `7cdbc8e5243c835e234617fd77a97f9184f799054bb33edbade4db5978c7b323` |
+| `test/logos/run/simd_zero_guard.out` | `fd4f67d871fd0578854e61d239ff21353899fb0440daa94316c8a8ec3d234bdb` |
+
+Before the repair, the public fixture built at `GOAMD64=v1` with the parent compiler `5155dfff` faulted under QEMU Nehalem at 256 and 512 bits and under Haswell at 512 bits. The 128-bit case passed on both; the 256-bit case also passed on Haswell. The baseline SSA attack failed at all three widths. On the earlier combined candidate `31e27698` with a separate zero-CSE-only repair, the unchanged fixture passed all six model/width cases, and the unchanged loGo/s reproducer matched its 72-line scalar output natively and on both models. Removing that candidate's exception restored the original `zcse.go` blob `e08272c34580173c60929b7c9edc4183d80050f4` and all three SSA failures, followed by a clean rerun. These earlier results are not results for the integrated PR #54 tree.
+
+The first PR #39 full regression also timed out in the runtime lock-profile test; that separate failure is retained and is not attributed to this repair. The follow-up also runs both fixtures against the integrated tree and records native, Nehalem, and Haswell outcomes separately. The pinned QEMU x86-64 executable has SHA-256 `7132ffd39aef71c26d3344cc0c7dffc530e10e3e720c58c8279a97ef6fdd7784`. A masked CPU feature on capable hardware exercises feature detection but cannot establish that unsupported instructions are unreachable. The follow-up PR records integrated-tree execution and full CI results.
+
 ## Reproduction and merge gate
 
 After `src/make.bash` rebuilds and installs the fork, put its `bin` first on
