@@ -314,6 +314,19 @@ Ordinary assertion definitions remain legal; the compile fixture targets unsafe 
 
 Model limits of generic assertion effects: CTFE-driven instantiations after checker cleanup are not validated by the recorded cleanup pass; exported per-parameter masks collapse direct and nested assertion targets, and imported declarations retain masks rather than local site evidence. Reflection and `unsafe` stay outside this model.
 
+## Automatic loop vectorization
+
+| ID | Attack | Milestone | Test | Status |
+| --- | --- | --- | --- | --- |
+| AV-1 | Ordinary Go or loGo/s loops stay scalar despite eligible integer operations, or emit unsupported instructions on lower CPU targets | M15-S4 | test/logos/codegen/autovec.go; autovec.lgo; autovec_edges.go (RED: 56 missing packed instructions on the unchanged compiler; GREEN: amd64 v1-v4 and arm64 codegen) | tested |
+| AV-2 | A vector tail reads or writes outside the original range, including nil, empty, and unaligned slices | M15-S4 | test/logos/run/autovec.go; autovec_unaligned.go (canaries and scalar byte oracle) | tested |
+| AV-3 | Exact or shifted aliases change cross-iteration values, or an overlap guard overflows | M15-S4 | test/logos/run/autovec.go; autovec_edges.go; autovec_unaligned.go; src/cmd/compile/internal/ssa/autovec_alias_logos_test.go (actual guard DAG checked against arbitrary-precision intervals; reversing its comparison fails the byte-separated case) | tested |
+| AV-4 | Widened integer operations change wraparound or named-type results | M15-S4 | test/logos/run/autovec.go; autovec.lgo; autovec_edges.go | tested |
+| AV-5 | Vectorization removes calls, unresolved panics, earlier writes, loop-carried state, or required instrumentation | M15-S4 | test/logos/codegen/autovec.go; autovec_edges.go; test/logos/run/autovec.go; src/cmd/compile/internal/ssa/autovec_logos_test.go; autovec_preempt_logos_test.go | tested |
+| AV-6 | Prefix insertion corrupts predecessor order, phi inputs, final index, or later-loop analysis | M15-S4 | src/cmd/compile/internal/ssa/autovec_logos_test.go; test/logos/run/autovec_edges.go | tested |
+
+These rows record the focused M15-S4 checks, including amd64 execution and arm64 code generation. They do not claim arm64 execution or a full upstream regression pass.
+
 ## Cgo benchmark input validity
 
 The old `BenchmarkFastcall` recurrence caused signed C overflow.

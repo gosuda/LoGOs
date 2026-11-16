@@ -44,6 +44,13 @@ jobs:
           - suite: "testdir"
             run: |
               go test -count=1 -timeout 60m cmd/internal/testdir -run 'Test/logos/'
+          - suite: "autovec"
+            run: |
+              go test -count=1 -short cmd/compile/internal/ssa
+              GOEXPERIMENT=simd GOAMD64=v3 go test -count=1 -timeout 20m cmd/internal/testdir -run '^Test$/^logos$/^(codegen|run)$/^autovec' -all_codegen
+              GOEXPERIMENT=simd GOAMD64=v3 go run -gcflags=-d=ssa/autovec/off ../test/logos/run/autovec.go
+              GOEXPERIMENT=none go run ../test/logos/run/autovec.go
+              GOEXPERIMENT=simd,preemptibleloops GOAMD64=v3 go run ../test/logos/run/autovec.go
           - suite: "lint"
             run: |
               unformatted=$(gofmt -l logos internal/logosfile cmd/go/internal/logos cmd/compile/internal/logos cmd/internal/logos cmd/internal/logosowned cmd/cgo/internal/testlogos)

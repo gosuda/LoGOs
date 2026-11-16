@@ -1794,6 +1794,33 @@ buf := make([]Pixel, w * h)
 
 The long-loop preemption rules are stated in Sec 3.3 (RFC-303: Hardware backend optimizations).
 
+### 13.4 Automatic loop vectorization
+
+Automatic vectorization MUST apply to ordinary Go and loGo/s loops through the shared compiler backend, without a source annotation or an explicit SIMD import. [T-303.AV][R-U1]
+The initial implementation MUST require `GOEXPERIMENT=simd`, enabled compiler optimization, and either amd64 with `GOAMD64=v3` or `v4`, or arm64. [T-303.AV]
+Other targets and builds with SIMD disabled, `-N`, race detection, MSan, or ASan MUST keep the scalar loop. [T-303.AV]
+The SSA control `-d=ssa/autovec/off` MUST disable the pass; `-d=ssa/autovec/debug=1` MUST report each accepted loop. [T-303.AV]
+
+The compiler MAY vectorize a loop after it proves the following conditions. [T-303.AV]
+
+- The loop has a signed, zero-based index, a unit increment, and an invariant exclusive upper bound.
+- The body is straight-line code with exactly one integer element store. Its only loop-carried values are the index and memory state.
+- Every element access uses the same index and element width. All remaining scalar operands and pointer bases are available before the loop.
+- Bounds and nil checks have already been proved unnecessary. The loop contains no call, atomic operation, allocation, write barrier, or other observable effect.
+- The stored expression consists of integer element loads and invariant operands, optionally combined with addition, subtraction, bitwise AND, OR, or XOR on 8-, 16-, 32-, or 64-bit lanes, or multiplication on 16- or 32-bit lanes.
+
+For an accepted loop, the compiler MUST emit a 128-bit vector prefix and retain the original scalar loop for the remainder. [T-303.AV]
+A vector iteration MUST access only complete groups within the original iteration range; it MUST NOT read or write a padded tail. [T-303.AV]
+Integer overflow and truncation MUST match the scalar operations. Defined integer types and aliases MUST retain their Go meaning. [T-303.AV]
+
+A source and destination with identical base addresses MAY share a vector iteration. [T-303.AV]
+For other addresses, the vector prefix MUST run only when its destination range is disjoint from every source range; a failed overlap guard MUST run the entire original scalar loop. [T-303.AV]
+The guard MUST NOT overflow pointer-end or byte-count arithmetic. Source ranges MAY overlap each other. [T-303.AV]
+The transformation MUST preserve nil and empty behavior, the final index, memory effects, and every panic and write that precedes it. [T-303.AV]
+Loops with unresolved checks, unsupported expressions, reductions, or additional loop-carried state MUST remain scalar. Floating-point arithmetic MUST remain scalar in this initial implementation. [T-303.AV]
+The new vector loop MUST receive the existing loop-preemption checks when that experiment is enabled. [T-303.AV]
+Eject MUST keep ordinary scalar source, so its output needs no SIMD package or experiment to compile with upstream Go. [T-303.AV][T-0.3]
+
 ## 14. JSON diagnostics schema
 
 ### 14.1 Emission

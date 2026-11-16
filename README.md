@@ -536,6 +536,29 @@ Limits:
 - Vectorized execution needs `GOEXPERIMENT=simd` and a supported architecture and instruction set.
 - Otherwise, the compiler emits unrolled scalar instructions with identical numeric results but no throughput guarantee.
 
+### Automatic loop vectorization
+
+Ordinary Go and loGo/s integer loops can use SIMD without an import or annotation:
+
+```go
+func add(dst []int32, delta int32) {
+	for i := range dst {
+		dst[i] += delta
+	}
+}
+```
+
+Enable the existing SIMD experiment. On amd64, select an AVX2-capable target:
+
+```sh
+GOEXPERIMENT=simd GOAMD64=v3 go build ./...
+GOEXPERIMENT=simd GOAMD64=v3 logos build ./...
+```
+
+Arm64 uses baseline NEON with `GOEXPERIMENT=simd`. The compiler emits 128-bit vector operations for eligible integer maps and handles the remaining elements with the original scalar loop. Supported operations are addition, subtraction, and bitwise AND, OR, and XOR on 8-, 16-, 32-, and 64-bit integers, plus multiplication on 16- and 32-bit integers.
+
+Loops over several slices need bounds that the compiler can prove. An overlap guard keeps the original scalar behavior when their memory ranges are unsafe to vectorize. Calls, unresolved checks, reductions, floating-point expressions, instrumented builds, and unsupported loop shapes remain scalar. `-gcflags=-d=ssa/autovec/debug=1` reports accepted loops; `-gcflags=-d=ssa/autovec/off` disables the pass. See [the exact eligibility rules](logos-doc/SPEC.md#134-automatic-loop-vectorization).
+
 ### Also in the language
 
 You can also use these extensions; see [logos-doc/SPEC.md](logos-doc/SPEC.md) Sec 1.4:
