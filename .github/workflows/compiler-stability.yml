@@ -93,7 +93,7 @@ jobs:
             cmd/go/internal/work cmd/go/internal/logos/eject internal/buildcfg \
             2>&1 | tee "$evidence/race.log"
           go test -count=1 -timeout=20m cmd/go \
-            -run 'Script/^logos_(ctfe_assignment_.*|tuple_(package_names|variant_names)|spread_defaults|inline_batches|eject_variant_tags)$' \
+            -run 'Script/^logos_(ctfe_assignment_.*|tuple_(package_names|variant_names)|spread_defaults|inline_batches|eject_variant_tags|struct_default_validation)$' \
             2>&1 | tee "$evidence/integration.log"
           go test -count=1 -race -timeout=30m cmd/go \
             -run 'Script/^logos_(eject_cgo.*|cgo_lgo|eject|eject_target_(features|env_compat)|eject_inactive.*|eject_variant_package_names)$' \
