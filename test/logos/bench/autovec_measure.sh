@@ -2,6 +2,14 @@
 # Run one frozen autovectorization benchmark against two built toolchains.
 set -euo pipefail
 
+# Repeat a completed campaign with its exact work count. A short integration
+# sample fails and requires a fresh campaign for all sides.
+fixed_n=${AUTOVEC_FIXED_N:-}
+if [[ -n "$fixed_n" ]]; then
+	[[ "$fixed_n" =~ ^[1-9][0-9]*$ && ${#fixed_n} -le 10 ]] || { echo "invalid fixed iteration count" >&2; exit 2; }
+	(( fixed_n <= 1073741824 )) || { echo "fixed iteration count is too large" >&2; exit 2; }
+fi
+
 if [[ $# != 7 ]]; then
 	printf 'usage: %s RUN_ID BENCH BASE_GO CAND_GO FIXTURE BASE_COMMIT CAND_COMMIT\n' "$0" >&2
 	exit 2
@@ -122,21 +130,23 @@ ns_per_op() {
 	awk '/^Benchmark/ { for (i=1; i<=NF; i++) if ($i=="ns/op") { print $(i-1); found=1; exit } } END { if (!found) exit 1 }' "$1"
 }
 
-n=1
-while :; do
-	mkdir "$out/calibration-$n"
-	ready=1
-	for side in base cand; do
-		"$out/$side/workload.test" -test.run='^$' -test.bench="^$bench\$" -test.benchtime="${n}x" -test.benchmem > "$out/calibration-$n/$side.txt"
-		ns=$(ns_per_op "$out/calibration-$n/$side.txt")
-		if ! awk -v n="$n" -v ns="$ns" 'BEGIN { exit !(n * ns >= 1.2e9) }'; then
-			ready=0
-		fi
+n=${fixed_n:-1}
+if [[ -z "$fixed_n" ]]; then
+	while :; do
+		mkdir "$out/calibration-$n"
+		ready=1
+		for side in base cand; do
+			"$out/$side/workload.test" -test.run='^$' -test.bench="^$bench\$" -test.benchtime="${n}x" -test.benchmem > "$out/calibration-$n/$side.txt"
+			ns=$(ns_per_op "$out/calibration-$n/$side.txt")
+			if ! awk -v n="$n" -v ns="$ns" 'BEGIN { exit !(n * ns >= 1.2e9) }'; then
+				ready=0
+			fi
+		done
+		[[ $ready == 1 ]] && break
+		(( n < 1073741824 )) || { echo "calibration did not converge" >&2; exit 1; }
+		n=$((n * 2))
 	done
-	[[ $ready == 1 ]] && break
-	(( n < 1073741824 )) || { echo "calibration did not converge" >&2; exit 1; }
-	n=$((n * 2))
-done
+fi
 
 # If any corroboration sample falls below one second of useful work, retain
 # this phase as evidence, double the count, and recapture both sides.
@@ -168,6 +178,10 @@ while :; do
 		' "$phase/$side-gotest.txt"; then minimum_ok=0; fi
 	done
 	[[ $minimum_ok == 1 ]] && break
+	if [[ -n "$fixed_n" ]]; then
+		echo "integration sample below one second; recapture the complete campaign with a larger count" >&2
+		exit 1
+	fi
 	record "$(jq -cn --arg run "$run_id" --arg benchmark "$bench" --argjson n "$n" \
 		'{event:"recapture",run:$run,benchmark:$benchmark,iterations:$n,reason:"useful-work sample below one second or missing samples"}')"
 	(( n < 1073741824 )) || { echo "measurement did not converge" >&2; exit 1; }

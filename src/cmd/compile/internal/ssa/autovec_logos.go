@@ -14,13 +14,22 @@ type autovecLane struct {
 	size, shift                 int64
 	insert, broadcast           Op
 	add, sub, mul, and, or, xor Op
+	left, right, signedRight    Op
 }
 
 var autovecLanes = [...]autovecLane{
-	{1, 0, OpSetElemInt8x16, Opbroadcast1To16Int8x16, OpAddInt8x16, OpSubInt8x16, OpInvalid, OpAndInt8x16, OpOrInt8x16, OpXorInt8x16},
-	{2, 1, OpSetElemInt16x8, Opbroadcast1To8Int16x8, OpAddInt16x8, OpSubInt16x8, OpMulInt16x8, OpAndInt16x8, OpOrInt16x8, OpXorInt16x8},
-	{4, 2, OpSetElemInt32x4, Opbroadcast1To4Int32x4, OpAddInt32x4, OpSubInt32x4, OpMulInt32x4, OpAndInt32x4, OpOrInt32x4, OpXorInt32x4},
-	{8, 3, OpSetElemInt64x2, Opbroadcast1To2Int64x2, OpAddInt64x2, OpSubInt64x2, OpInvalid, OpAndInt64x2, OpOrInt64x2, OpXorInt64x2},
+	{1, 0, OpSetElemInt8x16, Opbroadcast1To16Int8x16,
+		OpAddInt8x16, OpSubInt8x16, OpInvalid, OpAndInt8x16, OpOrInt8x16, OpXorInt8x16,
+		OpInvalid, OpInvalid, OpInvalid},
+	{2, 1, OpSetElemInt16x8, Opbroadcast1To8Int16x8,
+		OpAddInt16x8, OpSubInt16x8, OpMulInt16x8, OpAndInt16x8, OpOrInt16x8, OpXorInt16x8,
+		OpShiftAllLeftInt16x8, OpShiftAllRightUint16x8, OpShiftAllRightInt16x8},
+	{4, 2, OpSetElemInt32x4, Opbroadcast1To4Int32x4,
+		OpAddInt32x4, OpSubInt32x4, OpMulInt32x4, OpAndInt32x4, OpOrInt32x4, OpXorInt32x4,
+		OpShiftAllLeftInt32x4, OpShiftAllRightUint32x4, OpShiftAllRightInt32x4},
+	{8, 3, OpSetElemInt64x2, Opbroadcast1To2Int64x2,
+		OpAddInt64x2, OpSubInt64x2, OpInvalid, OpAndInt64x2, OpOrInt64x2, OpXorInt64x2,
+		OpShiftAllLeftInt64x2, OpShiftAllRightUint64x2, OpInvalid},
 }
 
 // An autovecLoop is complete before the CFG changes. Every skipped scalar
@@ -41,14 +50,14 @@ type autovecLoop struct {
 }
 
 func autovec(f *Func) {
-	if !buildcfg.Experiment.SIMD || !f.Config.optimize || f.Config.Race ||
+	if !buildcfg.Experiment.SIMD || !f.Config.optimize || f.NoSplit || f.Config.Race ||
 		base.Flag.Race || base.Flag.MSan || base.Flag.ASan || f.Config.SoftFloat {
 		return
 	}
 	if f.Config.arch != "arm64" && (f.Config.arch != "amd64" || buildcfg.GOAMD64 < 3) {
 		return
 	}
-	// New blocks are vector prefixes. Revisit only the original headers, and
+	// New blocks belong to vector prefixes. Revisit only the original headers, and
 	// obtain fresh dominance information after each accepted rewrite.
 	for _, h := range f.Blocks[:len(f.Blocks)] {
 		p := autovecMatch(f, h)
@@ -225,7 +234,24 @@ func (p *autovecLoop) expression(v *Value) bool {
 		return true
 	}
 	var op Op
+	scalarCount := false
 	switch v.Op {
+	case OpNeg8, OpNeg16, OpNeg32, OpNeg64:
+		op = p.lane.sub
+	case OpCom8, OpCom16, OpCom32, OpCom64:
+		op = p.lane.xor
+	case OpLsh8x64:
+		// generic opt canonicalizes byte doubling to a shift.
+		if v.Args[1].Op != OpConst64 || v.Args[1].AuxInt != 1 {
+			return false
+		}
+		op, scalarCount = p.lane.add, true
+	case OpLsh16x64, OpLsh32x64, OpLsh64x64:
+		op, scalarCount = p.lane.left, true
+	case OpRsh16Ux64, OpRsh32Ux64, OpRsh64Ux64:
+		op, scalarCount = p.lane.right, true
+	case OpRsh16x64, OpRsh32x64:
+		op, scalarCount = p.lane.signedRight, true
 	case OpAdd8, OpAdd16, OpAdd32, OpAdd64:
 		op = p.lane.add
 	case OpSub8, OpSub16, OpSub32, OpSub64:
@@ -239,7 +265,16 @@ func (p *autovecLoop) expression(v *Value) bool {
 	case OpXor8, OpXor16, OpXor32, OpXor64:
 		op = p.lane.xor
 	}
-	if op == OpInvalid || !p.expression(v.Args[0]) || !p.expression(v.Args[1]) {
+	if op == OpInvalid || !p.expression(v.Args[0]) {
+		return false
+	}
+	if scalarCount {
+		count := v.Args[1]
+		if count.Op != OpConst64 || uint64(count.AuxInt) >= uint64(p.lane.size*8) {
+			return false
+		}
+		p.covered[count] = true
+	} else if len(v.Args) == 2 && !p.expression(v.Args[1]) {
 		return false
 	}
 	p.ops[v], p.covered[v] = op, true
@@ -247,15 +282,38 @@ func (p *autovecLoop) expression(v *Value) bool {
 }
 
 func (p *autovecLoop) rewrite() {
-	f, pre := p.header.Func, p.predecessor.b
+	f := p.header.Func
 	typ, pos := &f.Config.Types, p.store.Pos
 	lanes := 16 / p.lane.size
+	// Keep the call on the loop-entry edge so other successors retain their
+	// memory. A separate setup block keeps broadcasts after the call.
+	callBlock, pre := f.NewBlock(BlockPlain), f.NewBlock(BlockPlain)
+	callBlock.Pos, pre.Pos = p.header.Pos, p.header.Pos
+	aux := StaticAuxCall(f.fe.Syslook("logosAutovecPanicOnFault"), f.ABIDefault.ABIAnalyzeTypes(nil, []*types.Type{typ.Bool}))
+	// Call expansion has already run. Only register results appear in the
+	// call tuple; stack results use the returned memory.
+	callType, memIndex := types.TypeResultMem, int64(0)
+	if len(aux.RegsOfResult(0)) != 0 {
+		callType = types.NewResults([]*types.Type{typ.Bool, types.TypeMem})
+		memIndex = 1
+	}
+	call := callBlock.NewValue1A(pos, OpStaticCall, callType, aux, p.mem.Args[p.entryIndex])
+	call.AuxInt = aux.ArgWidth()
+	initialMem := callBlock.NewValue1I(pos, OpSelectN, types.TypeMem, memIndex, call)
+	var paniconfault *Value
+	if memIndex != 0 {
+		paniconfault = callBlock.NewValue1I(pos, OpSelectN, typ.Bool, 0, call)
+	} else {
+		sp, _ := f.spSb()
+		addr := f.ConstOffPtrSP(typ.Bool.PtrTo(), aux.OffsetOfResult(0), sp)
+		paniconfault = pre.NewValue2(pos, OpLoad, typ.Bool, addr, initialMem)
+	}
+	safe := pre.NewValue1(pos, OpNot, typ.Bool, paniconfault)
 	zero := pre.NewValue0I(pos, OpConst64, p.index.Type, 0)
 	mask := pre.NewValue0I(pos, OpConst64, p.index.Type, -lanes)
 	limit := pre.NewValue2(pos, OpAnd64, p.index.Type, p.limit, mask)
-	initialMem := p.mem.Args[p.entryIndex]
 	dst := p.bases[p.store.Args[0]]
-	var dstInt, safe *Value
+	var dstInt *Value
 	for _, source := range p.sources {
 		if isSamePtr(dst, source) {
 			continue
@@ -277,21 +335,17 @@ func (p *autovecLoop) rewrite() {
 		disjoint := pre.NewValue2(pos, OpLeq64U, typ.Bool, limit, distance)
 		equal := pre.NewValue2(pos, OpEqPtr, typ.Bool, dst, source)
 		guard := pre.NewValue2(pos, OpOrB, typ.Bool, equal, disjoint)
-		if safe == nil {
-			safe = guard
-		} else {
-			safe = pre.NewValue2(pos, OpAndB, typ.Bool, safe, guard)
-		}
+		safe = pre.NewValue2(pos, OpAndB, typ.Bool, safe, guard)
 	}
-	if safe != nil {
-		limit = pre.NewValue3(pos, OpCondSelect, p.index.Type, limit, zero, safe)
-	}
+	limit = pre.NewValue3(pos, OpCondSelect, p.index.Type, limit, zero, safe)
 	h, b := f.NewBlock(BlockIf), f.NewBlock(BlockPlain)
 	h.Pos, b.Pos = p.header.Pos, p.body.Pos
 	h.Likely = BranchLikely
 	// Preserve the scalar header's predecessor index and its backedge.
-	pre.Succs[p.predecessor.i] = Edge{h, 0}
-	h.Preds = append(h.Preds, p.predecessor)
+	p.predecessor.b.Succs[p.predecessor.i] = Edge{callBlock, 0}
+	callBlock.Preds = append(callBlock.Preds, p.predecessor)
+	callBlock.AddEdgeTo(pre)
+	pre.AddEdgeTo(h)
 	h.AddEdgeTo(b)
 	h.Succs = append(h.Succs, Edge{p.header, p.entryIndex})
 	p.header.Preds[p.entryIndex] = Edge{h, 1}
@@ -314,6 +368,15 @@ func (p *autovecLoop) rewrite() {
 		addresses[v] = ptr
 		return ptr
 	}
+	broadcast := func(v *Value) *Value {
+		scalar := v
+		if p.inside(v.Block) {
+			scalar = pre.NewValue0I(v.Pos, v.Op, v.Type, v.AuxInt)
+		}
+		z := pre.NewValue0(v.Pos, OpZeroSIMD, typ.Vec128)
+		first := pre.NewValue2I(v.Pos, p.lane.insert, typ.Vec128, 0, z, scalar)
+		return pre.NewValue1(v.Pos, p.lane.broadcast, typ.Vec128, first)
+	}
 	var expression func(*Value) *Value
 	expression = func(v *Value) *Value {
 		if result := values[v]; result != nil {
@@ -322,17 +385,31 @@ func (p *autovecLoop) rewrite() {
 		var result *Value
 		switch op := p.ops[v]; op {
 		case OpInvalid:
-			scalar := v
-			if p.inside(v.Block) {
-				scalar = pre.NewValue0I(v.Pos, v.Op, v.Type, v.AuxInt)
-			}
-			z := pre.NewValue0(v.Pos, OpZeroSIMD, typ.Vec128)
-			first := pre.NewValue2I(v.Pos, p.lane.insert, typ.Vec128, 0, z, scalar)
-			result = pre.NewValue1(v.Pos, p.lane.broadcast, typ.Vec128, first)
+			result = broadcast(v)
 		case OpLoad:
 			result = b.NewValue2(v.Pos, OpLoad, typ.Vec128, address(v.Args[0]), mem)
 		default:
-			result = b.NewValue2(v.Pos, op, typ.Vec128, expression(v.Args[0]), expression(v.Args[1]))
+			x := expression(v.Args[0])
+			switch v.Op {
+			case OpNeg8, OpNeg16, OpNeg32, OpNeg64:
+				zero := pre.NewValue0(v.Pos, OpZeroSIMD, typ.Vec128)
+				result = b.NewValue2(v.Pos, op, typ.Vec128, zero, x)
+			case OpCom8, OpCom16, OpCom32, OpCom64:
+				constant := [...]Op{OpConst8, OpConst16, OpConst32, OpConst64}[p.lane.shift]
+				ones := pre.NewValue0I(v.Pos, constant, v.Type, -1)
+				result = b.NewValue2(v.Pos, op, typ.Vec128, x, broadcast(ones))
+			case OpLsh8x64:
+				result = b.NewValue2(v.Pos, op, typ.Vec128, x, x)
+			case OpLsh16x64, OpLsh32x64, OpLsh64x64,
+				OpRsh16Ux64, OpRsh32Ux64, OpRsh64Ux64, OpRsh16x64, OpRsh32x64:
+				count := v.Args[1]
+				if p.inside(count.Block) {
+					count = pre.NewValue0I(count.Pos, count.Op, count.Type, count.AuxInt)
+				}
+				result = b.NewValue2(v.Pos, op, typ.Vec128, x, count)
+			default:
+				result = b.NewValue2(v.Pos, op, typ.Vec128, x, expression(v.Args[1]))
+			}
 		}
 		values[v] = result
 		return result

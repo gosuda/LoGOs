@@ -325,7 +325,12 @@ Model limits of generic assertion effects: CTFE-driven instantiations after chec
 | AV-5 | Vectorization removes calls, unresolved panics, earlier writes, loop-carried state, or required instrumentation | M15-S4 | test/logos/codegen/autovec.go; autovec_edges.go; test/logos/run/autovec.go; src/cmd/compile/internal/ssa/autovec_logos_test.go; autovec_preempt_logos_test.go | tested |
 | AV-6 | Prefix insertion corrupts predecessor order, phi inputs, final index, or later-loop analysis | M15-S4 | src/cmd/compile/internal/ssa/autovec_logos_test.go; test/logos/run/autovec_edges.go | tested |
 
-These rows record the focused M15-S4 checks, including amd64 execution and arm64 code generation. They do not claim arm64 execution or a full upstream regression pass.
+| AV-7 | A widened mapped-memory access suppresses scalar writes before a recovered fault, or a fault-policy call corrupts another CFG edge/ABI | M15-A-S6 | run/autovec_fault.go; codegen/autovec_fault.go; ssa/autovec_fault_logos_test.go; runtime/autovec_logos_test.go (RED on native ARM64 at 43a1112: source fault after one element leaves 100 instead of 48; fix GREEN/PROBE pending) | planned |
+| AV-8 | A vector prefix reads beyond a valid source range or writes outside a protected destination, including byte-unaligned overlaps | M15-A-S6 | run/autovec_memory.go (native amd64 and arm64 GREEN at e3514b9; tail-bound mutation pending) | planned |
+| AV-9 | Interior source pointers become unrooted or a vector loop prevents a requested collection from completing | M15-A-S6 | run/autovec_gc.go (native amd64 and arm64 execution with asyncpreemptoff=1 and simd,preemptibleloops, with positive vectorization diagnostics at e3514b9) | tested |
+| AV-10 | Unary or shifted integer lanes change truncation, signedness, extreme values, or unsupported-target behavior | M15-S5 | ssa/autovec_expr_logos_test.go; codegen/autovec_expr.go and .lgo; run/autovec_expr.go and .lgo (RED: 66 positive SSA cases on each native target and 72 missing packed opcodes in run 43825094208; implementation GREEN/PROBE and benchmark acceptance pending) | planned |
+
+The M15-S4 rows record the original focused implementation. M15-A-S6 adds native amd64 and ARM64 execution evidence in Actions run 43824937094. Its recovered-fault fix and full regression gate remain pending until their own runs pass.
 
 ## Cgo benchmark input validity
 
