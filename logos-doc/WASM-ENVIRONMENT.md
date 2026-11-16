@@ -22,8 +22,8 @@ Attempt 1 changes only the execution helper, with a two-line explanation:
 cmd.Env = []string{"GOMAXPROCS=1", "TMPDIR=" + tb.TempDir()}
 ```
 
-The fixed scheduler value and per-call writable directory are the guest's
-complete environment. `buildWasm`, `goExports`, the build environment,
+The helper explicitly supplies only the fixed scheduler value and a
+per-call writable directory. `buildWasm`, `goExports`, the build environment,
 production runtime, startup limit, and existing semantic/trap assertions
 are unchanged. No compiler or language implementation changes in this slice.
 

@@ -79,6 +79,12 @@
       "result": "PASS",
       "seconds": 0.03,
       "document_snapshot_sha256": "417d76714314a154203e82edc19bdacad05e5541267ade05375bd17d869802ea"
+    },
+    "initial_green": {
+      "exit_code": 0,
+      "seconds": 1.85,
+      "all_four_tests": "PASS",
+      "skips": 0
     }
   },
   "excluded_probe_launch": "The first overlay launch was rejected before tests because GOMODCACHE was empty. No mutation result is attributed to it.",
