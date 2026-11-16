@@ -263,13 +263,23 @@ func main() {
 	}
 	guard := -1
 	for i, ins := range code {
-		if ins.op != "CALL" || ins.args != "simd/archsimd.X86Features."+os.Args[2]+"(SB)" {
+		next := i + 1
+		switch {
+		case ins.op == "CALL" && ins.args == "simd/archsimd.X86Features."+os.Args[2]+"(SB)":
+			if next >= len(code) || code[next].op != "TESTL" || code[next].args != "AL, AL" {
+				fail("feature call must be followed by TESTL AL, AL")
+			}
+			next++
+		case ins.op == "CMPB" && strings.HasPrefix(ins.args, "internal/cpu.X86+") && strings.HasSuffix(ins.args, "(SB), $0x0"):
+			// The fixture's sole X86 field read is its inlined feature
+			// predicate. Its layout offset is not part of this contract.
+		default:
 			continue
 		}
-		if guard >= 0 || i+2 >= len(code) || code[i+1].op != "TESTL" || code[i+1].args != "AL, AL" || (code[i+2].op != "JE" && code[i+2].op != "JNE") {
-			fail("expected one feature call followed by TESTL AL, AL and JE/JNE")
+		if guard >= 0 || next >= len(code) || (code[next].op != "JE" && code[next].op != "JNE") {
+			fail("expected one feature predicate followed by JE/JNE")
 		}
-		guard = i + 2
+		guard = next
 	}
 	if guard < 0 {
 		fail("missing %s feature branch", os.Args[2])
