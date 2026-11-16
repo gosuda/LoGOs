@@ -287,3 +287,4 @@
 {"id": "AUD-194", "description": "M16-A-S6 Isolate the wasm test execution environment", "phase": "AUD"}
 {"id": "AUD-197", "description": "M24-A-S2 Keep ejection target facts consistent", "phase": "AUD"}
 {"id": "AUD-198", "description": "M0-A-S16 Respect the CI action ownership policy", "phase": "AUD"}
+{"id": "AUD-192", "description": "M20-E-S3 Keep checked C types in owned constants", "phase": "AUD"}
