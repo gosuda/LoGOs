@@ -43,7 +43,7 @@ jobs:
     runs-on: "ubuntu-26.04"
     timeout-minutes: 90
     strategy:
-      fail-fast: true
+      fail-fast: false
       matrix:
         # Share one toolchain build across the shorter suites.
         suite: ["unit", "scripts", "upstream"]
