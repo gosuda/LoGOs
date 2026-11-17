@@ -11,7 +11,7 @@ metadata:
 
 Dogfooding means the logos you use every day was built by logos. Stage 1 is `bin/logos` (built from an upstream Go). Stage 2 is `bin/bootstrap/logos` (built by stage 1 at `-O=3`). This skill installs stage 2 on the user's `PATH` and checks that it behaves like stage 1.
 
-It writes only one symlink (step 2), temporary directories, and test logs. It never copies binaries, never links a `go` command, and never changes `bin/logos`.
+It installs one symlink (step 2) and writes temporary directories and test logs. In the install directory it never copies a binary and never links a `go` command. It never changes `bin/logos`. The stage 2 root of step 3 is a temporary directory and holds copies of stage 2.
 
 ## Procedure
 
