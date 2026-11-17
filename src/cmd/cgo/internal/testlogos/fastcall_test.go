@@ -431,6 +431,7 @@ func TestFastcallLayout(t *testing.T) {
 // into explicit test -c builds so disassembly assertions inspect the
 // configuration under test, including the fast-call experiment bit itself.
 func fastcallToolFlags(t *testing.T) []string {
+	t.Helper()
 	return cgoTestToolFlags(t, goexperiment.LogosFastCgo)
 }
 
