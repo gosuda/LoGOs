@@ -108,7 +108,7 @@ Each non-standard LoGOs dependency module MUST be ejected too [T-0.3].
 Each ejected dependency MUST land in `DIR/_logos_deps/<module path>@<version>/` [T-0.3].
 The output `go.mod` MUST carry a `replace` line for each ejected module [T-0.3].
 A Go dependency module MUST stay a `require` entry of the output `go.mod` [T-0.3][R-U2].
-The support sources MUST become one shared support module `github.com/gosuda/LoGOs/rt` [T-0.3][A-RTMOD].
+The support sources MUST become one shared support module `github.com/gosuda/loGos/rt` [T-0.3][A-RTMOD].
 The shared module MUST land in `DIR/_logos_deps/rt` [T-0.3].
 The output MUST carry a `replace` line for the shared module [T-0.3].
 The tool MUST remove `import "comptime"` during eject [T-0.3].
@@ -116,7 +116,7 @@ The output MUST NOT include a `//go:build !logos` line [T-0.3][R-U3].
 The output MUST NOT emit `.gen.go` file names [T-0.3].
 The output MUST carry the reserved `_logos_` import aliases that lowering writes, such as `_logos_unsafe "unsafe"` [T-0.3].
 The output MUST NOT emit `_logos_errors` imports [T-0.3].
-Among support imports, lowered files before eject MUST import only `_logos_rt "logos/rt"`, `_logos_json "logos/rt/json"`, plus `_logos_unsafe "unsafe"` where needed, in addition to standard library imports under reserved `_logos_` aliases. Ejected files MUST spell those support imports as `_logos_rt "github.com/gosuda/LoGOs/rt"` and `_logos_json "github.com/gosuda/LoGOs/rt/json"` (the eject rewrite in `src/cmd/go/internal/logos/eject/eject.go:supportPathEdit`).
+Among support imports, lowered files before eject MUST import only `_logos_rt "logos/rt"`, `_logos_json "logos/rt/json"`, plus `_logos_unsafe "unsafe"` where needed, in addition to standard library imports under reserved `_logos_` aliases. Ejected files MUST spell those support imports as `_logos_rt "github.com/gosuda/loGos/rt"` and `_logos_json "github.com/gosuda/loGos/rt/json"` (the eject rewrite in `src/cmd/go/internal/logos/eject/eject.go:supportPathEdit`).
 The tool MUST NOT write ejected files into the source tree [T-0.3].
 Ejected code MUST build with an upstream Go 1.27.2 toolchain [T-0.3].
 A Go package that imports a LoGOs package MUST see each exported declaration with the Go-facing signature that `logos eject` emits for it [T-0.3][R-U2].
@@ -817,7 +817,7 @@ It MUST assign the target only on a single success. [T-203.1]
 
 Otherwise it MUST return an ambiguity error naming the union and the members. [T-203.1]
 
-An ejected value-used union MUST keep its methods and carry the comment `// LoGOs union: A | B`. [T-203.1]
+An ejected value-used union MUST keep its methods and carry the comment `// loGo/s union: A | B`. [T-203.1]
 
 A Go importer MUST see a value-used union as that method-only interface. [T-203.1][T-Sec5][R-U2]
 
@@ -1315,7 +1315,7 @@ Popped scan memory MUST be zeroed before reuse. [T-301.1]
 After a release, a collection MUST find no stale pointers. [T-301.1]
 Pointer-containing region objects MUST keep their heap referents alive across `runtime.GC()`. [T-301.1]
 When a goroutine parks, it MUST release every chunk whose noscan and scan regions are both empty, including empty chunks behind a live chunk. [T-301.1]
-`runtime.SetFinalizer` and `runtime.AddCleanup` on a region object MUST panic with `runtime: <API> on LoGOs arena object`, naming the called function. [T-301.1]
+`runtime.SetFinalizer` and `runtime.AddCleanup` on a region object MUST panic with `runtime: <API> on loGo/s arena object`, naming the called function. [T-301.1]
 Cgo pointer checks MUST NOT panic on region addresses. [T-301.1]
 Region placement MUST NOT change program meaning: every program MUST print the same output when every region allocation is a heap allocation. [T-301.1]
 
@@ -1829,10 +1829,10 @@ Deadcode removes unreachable functions, but type and method tables remain so ref
 `logos build` MUST emit <name>.loader.mjs beside the wasm file when the output is a `.wasm` file, for a Go main package and for a LoGOs main package. [T-Sec12][R-U1]
 Plain `go` MUST emit the same loader by default for such an output, and `--wasm-loader=false` MUST turn it off. The flag MUST stay absent from the `go help build` text, as Sec 0.1 states for flags that plain `go` gains. [T-Sec12][R-U1]
 The loader MUST have identical bytes under both commands. [T-Sec12][R-U1]
-Both commands MUST add the implicit `logos/rt` import for the loader helpers when they emit the loader for a `-o` output that names a `.wasm` file, unless packages of the main module or the package `github.com/gosuda/LoGOs/rt` already provide the helpers. [T-Sec12][R-U1]
+Both commands MUST add the implicit `logos/rt` import for the loader helpers when they emit the loader for a `-o` output that names a `.wasm` file, unless packages of the main module or the package `github.com/gosuda/loGos/rt` already provide the helpers. [T-Sec12][R-U1]
 A module graph that provides some but not all of the four loader helpers MUST fail the build with an error that names each missing helper export. [T-Sec12]
 A package of the module graph provides a helper when it declares `//go:wasmexport` with exactly that helper name, however the directive is spaced; a longer name that starts with the helper name does not provide it. [T-Sec12]
-Only a package of the main module or the package `github.com/gosuda/LoGOs/rt` MAY provide a loader helper, and a helper export in any other package of the module graph MUST fail the build with an error that names the helper and the package. [T-Sec12]
+Only a package of the main module or the package `github.com/gosuda/loGos/rt` MAY provide a loader helper, and a helper export in any other package of the module graph MUST fail the build with an error that names the helper and the package. [T-Sec12]
 A build with no `-o` writes no loader, because the default output name of a wasm main package carries no `.wasm` suffix. [T-Sec12]
 The loader MUST work under `GOOS=js` and, in a reactor module that the host initializes through WASI, under `GOOS=wasip1`. [T-Sec12]
 `logos/rt` MUST export the wasm helpers `_logos_scratch_alloc`, `_logos_scratch_reset`, `_logos_errmsg_ptr`, and `_logos_errmsg_len` for the loader. [T-Sec12]

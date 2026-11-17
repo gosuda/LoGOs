@@ -134,7 +134,7 @@ Ejection details:
 - `logos eject [-o DIR]` requires a target directory that does not exist or is empty.
 - Each `.lgo` source becomes a standard `.go` file, with source comments preserved.
 - Dependency modules go under `DIR/_logos_deps`.
-- Runtime support goes under `DIR/_logos_deps/rt` as module `github.com/gosuda/LoGOs/rt`.
+- Runtime support goes under `DIR/_logos_deps/rt` as module `github.com/gosuda/loGos/rt`.
 
 ## Features
 
