@@ -11,12 +11,12 @@ type Cfg struct {
 
 func Load[T any](out T) T {
 	const for _, f := range comptime.Fields[T]() {
-		parse[f.Type](&out.[f])
+		Parse[f.Type](&out.[f])
 	}
 	return out
 }
 
-func parse[F any](dst *F) {
+func Parse[F any](dst *F) {
 	const switch F {
 	case int:
 		*dst = 7
