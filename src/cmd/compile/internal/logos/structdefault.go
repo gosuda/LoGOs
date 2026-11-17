@@ -144,27 +144,52 @@ func (fl *fileLower) ownerArgsText(obj, ownerObj types2.Object, litArgs *types2.
 	var parts []string
 	for _, arg := range argExprs {
 		from, to := off(syntax.StartPos(arg)), off(syntax.EndPos(arg))
-		// EndPos excludes the closing ']' of a nested IndexExpr;
-		// extend the slice until the brackets balance.
-		depth := 0
-		for i := from; i < to; i++ {
-			switch dsrc[i] {
+		// EndPos excludes closing delimiters (e.g. the ']' of a nested
+		// IndexExpr or the '}' of a struct type); extend the slice until
+		// the brackets balance. Strings and comments are skipped so
+		// delimiters inside a struct tag do not count.
+		depth, str := 0, byte(0)
+		esc := false
+		i := from
+		for i < len(dsrc) {
+			c := dsrc[i]
+			if str != 0 {
+				if esc {
+					esc = false
+				} else if c == '\\' && str != '`' {
+					esc = true
+				} else if c == str {
+					str = 0
+				}
+				i++
+				continue
+			}
+			if c == '/' && i+1 < len(dsrc) && dsrc[i+1] == '/' {
+				for i < len(dsrc) && dsrc[i] != '\n' {
+					i++
+				}
+				continue
+			}
+			if c == '/' && i+1 < len(dsrc) && dsrc[i+1] == '*' {
+				for i += 2; i+1 < len(dsrc) && !(dsrc[i] == '*' && dsrc[i+1] == '/'); i++ {
+				}
+				i += 2
+				continue
+			}
+			switch c {
+			case '"', '\'', '`':
+				str = c
 			case '[', '(', '{':
 				depth++
 			case ']', ')', '}':
 				depth--
 			}
-		}
-		for to < len(dsrc) && depth > 0 {
-			switch dsrc[to] {
-			case ']', ')', '}':
-				depth--
-			case '[', '(', '{':
-				depth++
+			i++
+			if i >= to && depth <= 0 {
+				break
 			}
-			to++
 		}
-		text := string(dsrc[from:to])
+		text := string(dsrc[from:i])
 		type repl struct {
 			span
 			s string
