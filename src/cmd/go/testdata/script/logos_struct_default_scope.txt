@@ -22,7 +22,7 @@ stdout '^elp: 8080$'
 stdout '^names: 11 22$'
 stdout '^gen: 8080$'
 stdout '^coll: 3 5$'
-stdout '^derived: 8080 8080 8080 8080$'
+stdout '^derived: 8080 8080 8080 8080 8080$'
 cd ..
 
 -- w/go.work --
@@ -99,9 +99,16 @@ func DbBoxPort() int {
 	return h.Port
 }
 
+type Braced Box[struct{ A int }]
+
 func NestedPort() int {
 	n := Nested{}
 	return n.Port
+}
+
+func BracedPort() int {
+	b := Braced{}
+	return b.Port
 }
 
 func LogosDefault_Solo__F() int { return 5 }
@@ -189,5 +196,5 @@ func main() {
 	g := cfg.G[int]{}
 	fmt.Println("gen:", g.Port)
 	fmt.Println("coll:", cfg.Solo{}.F, cfg.LogosDefault_Solo__F())
-	fmt.Println("derived:", cfg.DerivedPort(), cfg.DbBoxPort(), cfg.IntBoxPort(), cfg.NestedPort())
+	fmt.Println("derived:", cfg.DerivedPort(), cfg.DbBoxPort(), cfg.IntBoxPort(), cfg.NestedPort(), cfg.BracedPort())
 }

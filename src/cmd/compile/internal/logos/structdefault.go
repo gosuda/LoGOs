@@ -149,17 +149,17 @@ func (fl *fileLower) ownerArgsText(obj, ownerObj types2.Object, litArgs *types2.
 		depth := 0
 		for i := from; i < to; i++ {
 			switch dsrc[i] {
-			case '[', '(':
+			case '[', '(', '{':
 				depth++
-			case ']', ')':
+			case ']', ')', '}':
 				depth--
 			}
 		}
 		for to < len(dsrc) && depth > 0 {
 			switch dsrc[to] {
-			case ']', ')':
+			case ']', ')', '}':
 				depth--
-			case '[', '(':
+			case '[', '(', '{':
 				depth++
 			}
 			to++
