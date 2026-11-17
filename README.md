@@ -32,7 +32,7 @@ Contents: [Install](#install) · [Quick start](#quick-start) · [Features](#feat
 
 ## Install
 
-Building LoGOs from source requires Bash and a bootstrap Go installation. Go 1.27.3 is known to work; Go 1.26.8 fails to compile the fork's compiler sources.
+Building LoGOs from source requires Bash and a bootstrap Go installation. Go 1.27.4 is known to work; Go 1.26.8 fails to compile the fork's compiler sources.
 
 1. Clone the repository:
 
