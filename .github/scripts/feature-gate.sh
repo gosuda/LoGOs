@@ -9,8 +9,14 @@ repo=$PWD
 setup() {
   cd "$repo/src"
   bash ../.github/scripts/install-ci-tool.sh go
+  # GITHUB_PATH/GITHUB_ENV only take effect in later steps; this step must
+  # export the pinned roots itself.
+  stock="$RUNNER_TEMP/go1.27.4-ci"
+  PATH="$stock/bin:$PATH"
+  export PATH
   bash ../.github/scripts/install-upstream-oracles.sh
-  GOROOT_BOOTSTRAP=$(go env GOROOT)
+  export UPROOT1272="$RUNNER_TEMP/go1.27.2" UPROOT1273="$RUNNER_TEMP/go1.27.3" UPROOT1274="$stock"
+  GOROOT_BOOTSTRAP=$stock
   export GOROOT_BOOTSTRAP
   GOEXPERIMENT="${GOEXPERIMENT-}" ./make.bash
   PATH="$repo/bin:$PATH"

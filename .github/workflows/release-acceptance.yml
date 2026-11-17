@@ -43,7 +43,9 @@ jobs:
         level: ["1", "2", "3"]
     steps:
       - name: "Check out the exact clean candidate tip"
-        run: bash .github/scripts/checkout-tested-revision.sh "$TESTED_REVISION"
+        uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" # v7.0.1
+        with:
+          ref: "${{ env.TESTED_REVISION }}"
       - name: "Build and execute the complete no-short cell"
         env:
           MATRIX_DRIVER: "${{ matrix.driver }}"
@@ -62,7 +64,9 @@ jobs:
     timeout-minutes: 300
     steps:
       - name: "Check out the exact clean candidate tip"
-        run: bash .github/scripts/checkout-tested-revision.sh "$TESTED_REVISION"
+        uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" # v7.0.1
+        with:
+          ref: "${{ env.TESTED_REVISION }}"
       - name: "Build, run all parity tiers and verify the release stamp"
         run: bash .github/scripts/release-acceptance.sh parity
       - name: "Retain source identities and recoverable raw evidence"
@@ -77,7 +81,9 @@ jobs:
       result: "${{ steps.repro.outputs.result }}"
     steps:
       - name: "Check out the exact clean candidate tip"
-        run: bash .github/scripts/checkout-tested-revision.sh "$TESTED_REVISION"
+        uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" # v7.0.1
+        with:
+          ref: "${{ env.TESTED_REVISION }}"
       - name: "Build and record both deterministic programs on host A"
         id: repro
         run: bash .github/scripts/release-acceptance.sh repro
@@ -93,7 +99,9 @@ jobs:
       result: "${{ steps.repro.outputs.result }}"
     steps:
       - name: "Check out the exact clean candidate tip"
-        run: bash .github/scripts/checkout-tested-revision.sh "$TESTED_REVISION"
+        uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" # v7.0.1
+        with:
+          ref: "${{ env.TESTED_REVISION }}"
       - name: "Build and record both deterministic programs on host B"
         id: repro
         run: bash .github/scripts/release-acceptance.sh repro
@@ -108,7 +116,9 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: "Check out the exact clean candidate tip"
-        run: bash .github/scripts/checkout-tested-revision.sh "$TESTED_REVISION"
+        uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" # v7.0.1
+        with:
+          ref: "${{ env.TESTED_REVISION }}"
       - name: "Require distinct hosts and identical source, recipe and digests"
         env:
           REPRO_A: "${{ needs.repro-a.outputs.result }}"
@@ -124,7 +134,9 @@ jobs:
     timeout-minutes: 240
     steps:
       - name: "Check out the exact clean candidate tip"
-        run: bash .github/scripts/checkout-tested-revision.sh "$TESTED_REVISION"
+        uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" # v7.0.1
+        with:
+          ref: "${{ env.TESTED_REVISION }}"
       - name: "Build and execute all guarded runtime legs"
         run: bash .github/scripts/release-acceptance.sh runtimes
       - name: "Retain runtime identities and recoverable raw evidence"
@@ -137,7 +149,9 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: "Check out the exact clean candidate tip"
-        run: bash .github/scripts/checkout-tested-revision.sh "$TESTED_REVISION"
+        uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" # v7.0.1
+        with:
+          ref: "${{ env.TESTED_REVISION }}"
       - name: "Report unresolved language closure without suppressing independent gates"
         run: bash .github/scripts/release-acceptance.sh closure
       - name: "Retain closure evidence"

@@ -41,12 +41,13 @@ jobs:
       gates: "${{ steps.gates.outputs.gates }}"
     steps:
       - name: "Check out the tested revision"
-        run: bash .github/scripts/checkout-tested-revision.sh "$GITHUB_SHA"
+        uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" # v7.0.1
       - name: "Classify the diff into gates"
         id: "gates"
         env:
           BASE_SHA: "${{ github.event.pull_request.base.sha || '' }}"
         run: |
+          set -o pipefail
           gates=$(bash .github/scripts/gate-changes.sh "$BASE_SHA" | sort -u)
           printf 'triggered gates: %s\n' "$gates"
           printf 'gates=%s\n' "$(jq -Rn -c '[inputs | select(length > 0)]' <<< "$gates")" >> "$GITHUB_OUTPUT"
@@ -63,7 +64,7 @@ jobs:
         gate: "${{ fromJSON(needs.changes.outputs.gates) }}"
     steps:
       - name: "Check out the tested revision"
-        run: bash .github/scripts/checkout-tested-revision.sh "$GITHUB_SHA"
+        uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" # v7.0.1
       - name: "Build the toolchain and run the gate"
         env:
           RUNNER_TEMP: "${{ runner.temp }}"
