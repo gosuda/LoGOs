@@ -701,6 +701,7 @@ func (check *Checker) builtin(x *operand, call *syntax.CallExpr, id builtinId) (
 			}
 			p[call] = true
 		}
+		check.logosRecordVoidPanic(call)
 
 		check.assignment(x, &emptyInterface, "argument to panic")
 		if !x.isValid() {

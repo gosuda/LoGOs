@@ -393,9 +393,10 @@ func (s *Scanner) Fallback(dst any) {
 // encoding/json, matching encoding/json's destring branch for Number. A bare
 // non-string value saves the invalid use of ,string error; null decodes as
 // null (pointer nil, value unchanged) via the same path as Fallback. A field
-// whose type declares its own UnmarshalJSON or UnmarshalText method must use
-// Fallback instead, so the method receives the raw token exactly as
-// encoding/json delivers it.
+// whose type declares its own UnmarshalJSON, UnmarshalText or
+// UnmarshalJSONFrom method uses the compiler-selected typed QuotedJSON,
+// QuotedText or QuotedFrom helpers instead, which keep the profile-specific
+// token and error policy without runtime method discovery.
 func FallbackQ[T any](s *Scanner, dst *T) {
 	item, st := s.readQuoted()
 	switch st {
@@ -427,9 +428,7 @@ func (s *Scanner) saveFallback(ute *stdjson.UnmarshalTypeError) {
 		return
 	}
 	ute.Offset += int64(s.start)
-	if ute.Struct == "" {
-		ute.Struct = s.structName()
-	}
+	ute.Struct = fallbackStructName(ute.Struct, s.structName())
 	if ute.Field == "" {
 		ute.Field = detach(s.key)
 	} else {
