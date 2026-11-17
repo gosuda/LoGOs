@@ -135,10 +135,6 @@ func TestLogosZCSEStillHoistsScalarConstants(t *testing.T) {
 		t.Fatal("scalar constants were not commoned in the entry block")
 	}
 }
-import (
-	"cmd/compile/internal/types"
-	"testing"
-)
 
 // Each SIMD store is reachable only through its own guard. The first guard
 // also has a dominated duplicate, so ordinary CSE can share that zero without
