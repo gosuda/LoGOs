@@ -1387,6 +1387,9 @@ func (fl *fileLower) lowerOptCallExpr(e *syntax.CallExpr) syntax.Expr {
 }
 
 func (fl *fileLower) callSig(e *syntax.CallExpr) *types2.Signature {
+	if sig := fl.instCallSig(e.Fun); sig != nil {
+		return sig
+	}
 	switch fun := syntax.Unparen(e.Fun).(type) {
 	case *syntax.Name:
 		if obj := fl.pkg.info.Uses[fun]; obj != nil {
@@ -1415,6 +1418,36 @@ func (fl *fileLower) callSig(e *syntax.CallExpr) *types2.Signature {
 		}
 		return nil
 	}
+}
+
+// instCallSig returns the instantiated signature of a generic callee. The
+// generic signature names the callee's type parameters, which are not in
+// scope at the call, and argument lowering spells the parameter type into
+// the call site, so only this call's instantiation gives spellable types.
+func (fl *fileLower) instCallSig(fun syntax.Expr) *types2.Signature {
+	for {
+		indexed, ok := syntax.Unparen(fun).(*syntax.IndexExpr)
+		if !ok {
+			break
+		}
+		fun = indexed.X
+	}
+	var name *syntax.Name
+	switch callee := syntax.Unparen(fun).(type) {
+	case *syntax.Name:
+		name = callee
+	case *syntax.SelectorExpr:
+		name = callee.Sel
+	}
+	if name == nil {
+		return nil
+	}
+	inst, ok := fl.pkg.info.Instances[name]
+	if !ok {
+		return nil
+	}
+	sig, _ := inst.Type.(*types2.Signature)
+	return sig
 }
 
 func (fl *fileLower) callTargets(e *syntax.CallExpr, sig *types2.Signature) []types2.Type {

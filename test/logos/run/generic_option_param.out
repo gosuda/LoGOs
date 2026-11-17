@@ -1,0 +1,15 @@
+inferred-present: true
+inferred-absent: false
+inferred-nil: false
+explicit-present: true
+explicit-absent: false
+some-present: true
+some-absent: false
+outer-present: true
+outer-absent: false
+ptr-present: true
+ptr-absent: false
+method-present: true
+method-absent: false
+string-present: true
+string-absent: false
