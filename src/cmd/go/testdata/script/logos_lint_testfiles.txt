@@ -24,7 +24,7 @@ cd ..
 # lints the package's non-test files.
 cd broken
 ! logos lint ./...
-stderr 'cannot find package'
+stderr 'is not in std'
 stderr 'bad\.go:8:2: \[slop::discarded_error\]'
 cd ..
 

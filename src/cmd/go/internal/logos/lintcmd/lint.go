@@ -66,7 +66,7 @@ func runLint(ctx context.Context, cmd *base.Command, args []string) {
 			base.Fatal(err)
 		}
 	}()
-	pkgOpts := load.PackageOpts{AutoVCS: true}
+	pkgOpts := load.PackageOpts{AutoVCS: true, ModResolveTests: true}
 	pkgs := load.PackagesAndErrors(moduleLoader, ctx, pkgOpts, args)
 	load.CheckPackageErrors(pkgs)
 	root := &work.Action{Mode: "logos lint"}
