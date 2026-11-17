@@ -97,14 +97,16 @@ complete regression results. The table below is the local publication snapshot.
 | Complete rebuilt toolchain and full regression | Required on the integrated tree. Early local attempts encountered compiler termination; the serialized preliminary build ended with stale-tool targets after running while source and commits changed. A later frozen-source `make.bash -d` with one worker reached toolchain3, then its SSA compiler was killed and the build exited 2; the source tree and all frozen hashes remained unchanged. Clean CI builds of the original PR tree passed, followed by the focused compiler gates, unit/library-race checks, and host-ISA checks. The PR records the subsequent complete results and the new-base acceptance separately. |
 
 The workflow `.github/workflows/compiler-stability.yml` builds the exact checked
-out source in two independent jobs. The focused job runs affected compiler
-packages, ejection race tests, all seven new command scripts, the new compiler
-fixtures, formatting, vet, and the ledger checker. The upstream job runs
-`./run.bash --no-rebuild` with the complete selection. It selects and verifies
-GCC 14 for the existing C23 consumer and sets timeout scale 6. It removes only
-the build resource overrides from GOFLAGS/GOMEMLIMIT before that full gate.
-All commands preserve failure status through `pipefail`; workflow logs are
-retained as artifacts.
+out source and runs affected compiler packages, ejection race tests, all seven
+new command scripts, the new compiler fixtures, formatting, vet, and the ledger
+checker. Its commands preserve failure status through `pipefail`; validation
+output, source identity, and evidence hashes are retained in the job logs. The
+bootstrap uses repository-owned shell steps under the action ownership policy
+recorded in [ci-bootstrap.md](../ci-bootstrap.md). In the combined stabilization candidate, the normal
+`logos.yml` workflow owns the complete `./run.bash --no-rebuild` job. That job
+selects and verifies GCC 14 on Ubuntu 24.04 for the existing C23 consumer, checks
+the ledger and consumer prerequisites, and uses the supported timeout scale 8.
+The full selection and all acceptance assertions remain unchanged.
 
 The repository's existing unit/library-race, complete script, compiler-fixture,
 lint, and host-ISA workflows remain applicable. A passing focused check does not
@@ -120,6 +122,25 @@ prove a complete final toolchain build for the other changed compiler packages.
 
 ## Reproduction
 
+### Freeze-manifest succession
+
+`frozen-tests.sha256` preserves the original repair's frozen bytes. The
+subsequent acceptance follow-up uses `frozen-tests-v2.sha256`. Its only changes
+to existing entries are the two variant-test call sites that now use the
+equivalent test-only Linux/amd64 adapter. The adapter still supplies the exact
+same host arguments to the unchanged production selector; all inputs and
+semantic assertions remain unchanged. The successor also records the adapter
+file, the target-feature test with checked cleanup, and the positive CTFE
+map-field fixture and expected output.
+
+The historical manifest is not rewritten. The follow-up's exact transformation
+proof and lint/race/vet results are recorded in
+[acceptance follow-ups](../acceptance-followups/README.md). The CTFE oracle
+correction is a separate test-only change, with its original negative input
+and the specification-based reason preserved there.
+
+### Commands
+
 From `src/`, with the rebuilt fork's `bin` directory first on PATH and
 `UPROOT1272`, `UPROOT1273`, and `UPROOT1274` pointing to the pinned pristine trees:
 
@@ -128,7 +149,7 @@ From `src/`, with the rebuilt fork's `bin` directory first on PATH and
 go test -count=1 -short cmd/compile/internal/inline/... cmd/compile/internal/logos/... cmd/go/internal/logos/eject
 go test -count=1 -short -race cmd/go/internal/logos/eject
 go test -count=1 -timeout=20m cmd/go -run 'Script/^logos_(ctfe_assignment_.*|tuple_(package_names|variant_names)|spread_defaults|inline_batches|eject_variant_tags)$'
-go test -count=1 -timeout=20m cmd/internal/testdir -run 'Test/logos/run/(ctfe_assignment_.*|spread_defaults|inline_batches)'
+go test -count=1 -timeout=20m cmd/internal/testdir -run 'Test/logos/run/(ctfe_assignment_.*|const_func_map_field_store|spread_defaults|inline_batches)'
 go vet cmd/compile/internal/inline/... cmd/compile/internal/logos/... cmd/go/internal/logos/eject
 go test -count=1 -short cmd/internal/goparity -run '^TestRedteamLedgerRows$'
 ./run.bash --no-rebuild
@@ -147,22 +168,21 @@ It does not claim faster compilation, faster generated programs, or different
 optimization decisions. No optional runtime speed optimization is admitted by
 this audit.
 
-## Confirmed remaining defects
+## Follow-up defects
 
 - [#55: declaration-owned defaults](https://github.com/gosuda/LoGOs/issues/55).
   Reparsed default text binds names in the caller, which can silently change
   scalar values and interface dynamic types. Imported private defaults fail to
   resolve. Option-valued defaults also need correct lowering. A partial literal
   substitution would not preserve all of these semantics.
-- [#56: inactive-only packages](https://github.com/gosuda/LoGOs/issues/56).
-  A package absent from host loading is missing from the ejection plan; its
-  `.lgo` files are removed during copying. The new constraint solver handles
-  variants only inside packages already discovered.
-- [#57: target feature contexts](https://github.com/gosuda/LoGOs/issues/57).
-  The old selector can synthesize `amd64.v3` as a custom tag while its actual
-  tool tags remain at v1. The isolated baseline test proves that inconsistent
-  selection, not an executed unsupported-instruction fault. Real target feature
-  settings and helper configuration need a separate repair.
+- [#56: inactive-only packages](https://github.com/gosuda/LoGOs/issues/56) is repaired by M24-A-S1; see [complete-inventory evidence](../ejection-completeness/README.md).
+  The old plan omitted packages absent from host loading and removed their
+  `.lgo` files during copying. The module census now discovers them, and real
+  alternate compiler loads retain their emitted source and owned provenance.
+- [#57: target feature contexts](https://github.com/gosuda/LoGOs/issues/57) is repaired by M24-A-S2; see [target-fact evidence](../ejection-target-facts/README.md) for the separately frozen and verified controls.
+  The old selector synthesized `amd64.v3` as a custom tag while its actual
+  tool tags remained at v1. The new real-helper controls pin the architecture
+  environment, feature implications, and target-specific experiment facts.
 
 The specification retains its full language and complete-module contracts.
-These defects are not converted into exclusions or weaker acceptance rules.
+Remaining defects are not converted into exclusions or weaker acceptance rules.

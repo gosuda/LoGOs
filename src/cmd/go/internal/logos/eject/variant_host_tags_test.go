@@ -21,7 +21,7 @@ func TestFindVariantContextKeepsValidHostAssignment(t *testing.T) {
 	} {
 		t.Run(tt.expr, func(t *testing.T) {
 			dir, name := variantTagTestFile(t, tt.expr)
-			goos, goarch, tags, ok := findVariantContextForFile(dir, name, "linux", "amd64", tt.host)
+			goos, goarch, tags, ok := findVariantContextFromLinuxAMD64(dir, name, tt.host)
 			if !ok || goos != "windows" || goarch != "amd64" {
 				t.Fatalf("context = %s/%s, found=%v, want windows/amd64", goos, goarch, ok)
 			}

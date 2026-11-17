@@ -60,7 +60,7 @@ func TestFindVariantContextTagCounts(t *testing.T) {
 				want[i] = fmt.Sprintf("variant%d", i)
 			}
 			dir, name := variantTagTestFile(t, strings.Join(want, " && "))
-			goos, goarch, tags, ok := findVariantContextForFile(dir, name, "linux", "amd64", nil)
+			goos, goarch, tags, ok := findVariantContextFromLinuxAMD64(dir, name, nil)
 			if !ok {
 				t.Fatalf("no context for a satisfiable %d-tag conjunction", count)
 			}
@@ -84,7 +84,7 @@ func TestFindVariantContextConstraintReadCount(t *testing.T) {
 		return os.Open(path)
 	}
 	dir, name := variantTagTestFile(t, "a && b && c && d && e && f && g && h && i && j && k && l")
-	if _, _, _, ok := findVariantContextForFile(dir, name, "linux", "amd64", nil); !ok {
+	if _, _, _, ok := findVariantContextFromLinuxAMD64(dir, name, nil); !ok {
 		t.Fatal("no context for a satisfiable conjunction")
 	}
 	if reads != 1 {
@@ -98,7 +98,7 @@ func TestFindVariantContextCanUnsetHostTags(t *testing.T) {
 		t.Run(expr, func(t *testing.T) {
 			dir, name := variantTagTestFile(t, expr)
 			host := []string{"selected", "untouched"}
-			goos, goarch, tags, ok := findVariantContextForFile(dir, name, "linux", "amd64", host)
+			goos, goarch, tags, ok := findVariantContextFromLinuxAMD64(dir, name, host)
 			if !ok {
 				t.Fatal("no context after disabling a named custom tag")
 			}
@@ -136,7 +136,7 @@ func TestFindVariantContextConstraintOracle(t *testing.T) {
 					want = true
 				}
 			}
-			goos, goarch, tags, ok := findVariantContextForFile(dir, name, "linux", "amd64", nil)
+			goos, goarch, tags, ok := findVariantContextFromLinuxAMD64(dir, name, nil)
 			if ok != want {
 				t.Fatalf("found=%v, exhaustive oracle=%v", ok, want)
 			}
@@ -152,7 +152,7 @@ func TestFindVariantContextFixedTags(t *testing.T) {
 	for _, expression := range []string{"linux && windows", "cgo && !cgo", "!go1.1", "go1.999", "goexperiment.unavailable"} {
 		t.Run(expression, func(t *testing.T) {
 			dir, name := variantTagTestFile(t, expression)
-			if goos, goarch, tags, ok := findVariantContextForFile(dir, name, "linux", "amd64", nil); ok {
+			if goos, goarch, tags, ok := findVariantContextFromLinuxAMD64(dir, name, nil); ok {
 				t.Errorf("found impossible context %s/%s tags=%q", goos, goarch, tags)
 			}
 		})
