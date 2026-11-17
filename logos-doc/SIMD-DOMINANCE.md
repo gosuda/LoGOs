@@ -68,8 +68,8 @@ unguarded `VPXOR` and `VPXORQ` instructions in the baseline.
 
 The starting revision is `949e633789fe5122c548d6c9f39c06fbb2769702`,
 the head of the separate host-capability fixture repair in PR #47.
-PR #54 was initially stacked on that branch. Its first two commits contain
-only tests and CI, preserving an independently reviewable pre-repair state.
+PR #54 is stacked on that branch. Its first two commits contain only tests
+and CI, preserving an independently reviewable pre-repair state.
 
 The fork's baseline `zcse.go` and `branchelim.go` were byte-identical to the
 pinned upstream Go 1.27.4 copies. An overlay onto that installed upstream
@@ -91,11 +91,10 @@ No upstream source file was modified.
 | Hosted focused workflow | Passed, including a fresh rebuild, formatting, vet, complete SSA short suite, and race-enabled source/ejection scripts (job 133294001990). |
 | Hosted full regression, first run | Every reported package except cmd/go passed. cmd/go reached its 540-second outer deadline at 541.663 seconds: 593 scripts reported cancellation and four active commands received SIGQUIT. This is not a pass. |
 | Local full regression | Unix-domain socket tests report `operation not permitted` in this environment. This is not a pass. |
-| Hosted full regression, corrected outer budget | Passed on attempt 2 for the original SIMD source head `08646b895facb9194ec89acf5d1d8f291d338061`; exact CI tree and logs are recorded below. |
+| Hosted full regression, corrected outer budget | Pending; an incomplete result remains a merge blocker. |
 
 These observations prove the two optimizer defects and the targeted repair.
-The completed hosted regression validates the original SIMD revision; it
-does not validate later integrated changes.
+They do not substitute for the full regression gate.
 The initial local bootstrap attempts were killed under memory pressure;
 using a disk-backed cache and temporary directory allowed bootstrap to
 continue. The baseline and repaired toolchains both rebuilt successfully.
@@ -104,17 +103,39 @@ cmd/go test harness correctly rejects writes; the unchanged scripts passed
 with a temporary directory outside GOROOT. Those environment failures are
 not counted as semantic test failures.
 
-The first hosted full run tested a tree with 1,444 cmd/go scripts, including
-511 loGo/s scripts. It used upstream's nine-minute cmd/go outer deadline,
-while the dedicated language-script CI already budgeted an hour.
+The repository contains 1,444 cmd/go scripts, including 511 loGo/s scripts.
+The first hosted full run used upstream's nine-minute cmd/go outer deadline,
+while the existing dedicated language-script CI already budgets an hour.
 The full workflow now sets the distribution harness's supported
 `GO_TEST_TIMEOUT_SCALE=8`, giving cmd/go a 72-minute outer deadline within
 the job's 90-minute limit. Test assertions and performance acceptance
-thresholds are unchanged. The canceled run is retained as evidence alongside
-the completed rerun.
+thresholds are unchanged. The canceled run is retained as evidence, and a
+completed rerun is still required.
 
 Hosted evidence: [focused job](https://github.com/gosuda/LoGOs/actions/runs/43865827289/job/133294001990)
 and [first full regression job](https://github.com/gosuda/LoGOs/actions/runs/43865827289/job/133294001373).
+
+## Reproduction and merge gate
+
+After `src/make.bash` rebuilds and installs the fork, put its `bin` first on
+`PATH` and run from `src`:
+
+```sh
+go test -count=1 -short cmd/compile/internal/ssa
+go vet cmd/compile/internal/ssa
+go test -count=1 -race -timeout=40m -v cmd/go \
+  -run '^TestScript$/^(README|logos_simd_(zero_dominance|feature_gate|gate_avx512|gate_branch)|logos_eject_simd_slice)$'
+GO_TEST_TIMEOUT_SCALE=8 ./run.bash --no-rebuild
+```
+
+The source/ejection scripts use the repository's pinned upstream 1.27.2,
+1.27.3, and 1.27.4 toolchains as independent oracles. Changed Go files must
+also pass `gofmt`. In the combined stabilization candidate,
+`simd-host-gates.yml` runs both independent source-dominance fixtures,
+the complete SSA short suite, and the native/ejected controls.
+The normal `logos.yml` workflow owns the full upstream regression job with
+the same timeout scale. Queued or incomplete CI is not a pass and does not
+permit merging.
 
 ### Completed hosted rerun and integration boundary
 
