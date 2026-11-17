@@ -168,7 +168,7 @@ jobs:
           upgo="$UPROOT1274/bin/go"
           upver=$(env -u GOROOT GOENV=off GOTOOLCHAIN=local "$upgo" version)
           [[ "$upver" == 'go version go1.27.4 '* ]]
-          export GOENV=off GOFLAGS= GOWORK=off GOPROXY=off GOTOOLCHAIN=local
+          export GOENV=off GOFLAGS='' GOWORK=off GOPROXY=off GOTOOLCHAIN=local
           if [[ $(env -u GOROOT "$fork/bin/go" env GOARCH) == amd64 ]]; then export GOAMD64=v3; fi
           test -f "$fork/test/logos/run/autovec.lgo"
           smoke=$(mktemp -d "$RUNNER_TEMP/autovec-eject.XXXXXX")
