@@ -1897,13 +1897,15 @@ The SSA control `-d=ssa/autovec/off` MUST disable the pass; `-d=ssa/autovec/debu
 
 The compiler MAY vectorize a loop after it proves the following conditions. [T-303.AV]
 
-- The loop has a signed, zero-based index, a unit increment, and an invariant exclusive upper bound.
+- The loop has a signed index with an invariant initial value, a unit increment, and an invariant exclusive upper bound.
 - The body is straight-line code with exactly one integer element store. Its only loop-carried values are the index and memory state.
 - Every element access uses the same index and element width. All remaining scalar operands and pointer bases are available before the loop.
 - Bounds and nil checks have already been proved unnecessary. The loop contains no call, atomic operation, allocation, write barrier, or other observable effect.
-- The stored expression consists of integer element loads and invariant operands, optionally combined with addition, subtraction, bitwise AND, OR, or XOR on 8-, 16-, 32-, or 64-bit lanes, or multiplication on 16- or 32-bit lanes.
+- The stored expression consists of integer element loads and invariant operands, optionally combined with addition, subtraction, negation, bitwise complement, AND, OR, or XOR on 8-, 16-, 32-, or 64-bit lanes, or multiplication on 16- or 32-bit lanes.
+- A remaining shift operation uses a constant count smaller than the lane width. Left shifts and unsigned right shifts may use 16-, 32-, or 64-bit lanes; signed right shifts may use 16- or 32-bit lanes. An 8-bit left shift by one may use vector addition. Other remaining shifts keep the loop scalar.
 
 For an accepted loop, the compiler MUST emit a 128-bit vector prefix and retain the original scalar loop for the remainder. [T-303.AV]
+The vector prefix MUST begin at the original initial index. If the initial index is not less than the bound, the prefix MUST have zero iterations. If a guard fails, the retained scalar loop MUST begin at the original initial index. [T-303.AV]
 A vector iteration MUST access only complete groups within the original iteration range; it MUST NOT read or write a padded tail. [T-303.AV]
 Integer overflow and truncation MUST match the scalar operations. Defined integer types and aliases MUST retain their Go meaning. [T-303.AV]
 

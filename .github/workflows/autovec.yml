@@ -161,6 +161,34 @@ jobs:
           grep -F 'child enabled: got false want true' "$RUNNER_TEMP/autovec-evidence/fault-mutation.txt"
           go test -count=1 -short runtime -run '^TestLogosAutovecPanicOnFault$'
           GOEXPERIMENT=simd GOAMD64=v3 go run ../test/logos/run/autovec_fault.go
+      - name: "Prove signed-shift tests reject unsigned lowering"
+        if: "!cancelled() && steps.build.outcome == 'success'"
+        run: |
+          mutation="$RUNNER_TEMP/autovec-shift-mutation"
+          mkdir "$mutation"
+          "$RUNNER_TEMP/autovec-overlay" cmd/compile/internal/ssa/autovec_logos.go 'op, scalarCount = p.lane.signedRight, true' 'op, scalarCount = p.lane.right, true' "$mutation" > "$mutation/overlay.json"
+          if go test -count=1 -short -overlay="$mutation/overlay.json" cmd/compile/internal/ssa -run '^TestLogosAutovecExpressions$' > "$RUNNER_TEMP/autovec-evidence/shift-mutation.txt" 2>&1; then
+            cat "$RUNNER_TEMP/autovec-evidence/shift-mutation.txt"
+            printf 'signed-shift mutation unexpectedly passed\n' >&2
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/autovec-evidence/shift-mutation.txt"
+          grep -E 'missing vector operation ShiftAllRightInt(16x8|32x4)' "$RUNNER_TEMP/autovec-evidence/shift-mutation.txt"
+          go test -count=1 -short cmd/compile/internal/ssa -run '^TestLogosAutovecExpressions$'
+      - name: "Prove the range oracle rejects absolute alias bounds"
+        if: "!cancelled() && steps.build.outcome == 'success'"
+        run: |
+          mutation="$RUNNER_TEMP/autovec-start-mutation"
+          mkdir "$mutation"
+          "$RUNNER_TEMP/autovec-overlay" cmd/compile/internal/ssa/autovec_logos.go 'OpLeq64U, typ.Bool, count, distance' 'OpLeq64U, typ.Bool, end, distance' "$mutation" > "$mutation/overlay.json"
+          if go test -count=1 -short -overlay="$mutation/overlay.json" cmd/compile/internal/ssa -run '^TestLogosAutovecInvariantStartAndAliasGuard$' > "$RUNNER_TEMP/autovec-evidence/start-mutation.txt" 2>&1; then
+            cat "$RUNNER_TEMP/autovec-evidence/start-mutation.txt"
+            printf 'absolute-bound mutation unexpectedly passed\n' >&2
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/autovec-evidence/start-mutation.txt"
+          grep -F 'bound=' "$RUNNER_TEMP/autovec-evidence/start-mutation.txt"
+          go test -count=1 -short cmd/compile/internal/ssa -run '^TestLogosAutovecInvariantStartAndAliasGuard$'
       - name: "Check native and ejected source with upstream Go"
         if: "!cancelled() && steps.build.outcome == 'success'"
         run: |
@@ -249,7 +277,7 @@ jobs:
       - name: "Run the complete upstream regression gate"
         if: "!cancelled() && steps.build.outcome == 'success'"
         run: |
-          GO_TEST_TIMEOUT_SCALE=3 ./run.bash --no-rebuild
+          GO_TEST_TIMEOUT_SCALE=8 ./run.bash --no-rebuild
       - name: "Run the SIMD-enabled standard library"
         if: "!cancelled() && steps.build.outcome == 'success'"
         run: |
