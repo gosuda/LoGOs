@@ -29,10 +29,15 @@ func writeDefaults(pkg *types2.Package, info *types2.Info, f *Facts) {
 			continue
 		}
 		for _, d := range info.LogosFieldDefaults[st] {
+			if d.Owner == "" {
+				continue
+			}
 			// The fact names the generated declaration-scope factory, not
 			// the raw default text: consumers emit pkg.Symbol() so private
 			// names and interface dynamic types stay bound where declared.
-			add(DefaultFact{Type: name, Field: d.Field, Text: "LogosDefault_" + name + "_" + d.Field})
+			// The owner, not the scope name, names the declaring type, so a
+			// defined type over the same struct resolves the real factory.
+			add(DefaultFact{Type: name, Field: d.Field, Text: "LogosDefault_" + d.Owner + "_" + d.Field})
 		}
 	}
 }

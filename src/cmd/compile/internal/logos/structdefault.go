@@ -205,16 +205,16 @@ func (fl *fileLower) structDefaultsFor(lit *syntax.CompositeLit) ([]string, []st
 			qual = n.Value + "."
 		}
 	}
-	call := func(field string) string {
-		return qual + defaultFactoryName(typeName, field) + targs + "()"
+	call := func(d types2.LogosFieldDefault) string {
+		return qual + defaultFactoryName(d.Owner, d.Field) + targs + "()"
 	}
 	if defs := fl.pkg.info.LogosFieldDefaults[st]; len(defs) > 0 {
 		names := make([]string, 0, len(defs))
 		texts := make([]string, 0, len(defs))
 		for _, d := range defs {
 			names = append(names, d.Field)
-			if pkgLevel {
-				texts = append(texts, call(d.Field))
+			if d.Owner != "" {
+				texts = append(texts, call(d))
 			} else {
 				texts = append(texts, renderExpr(d.Default))
 			}
