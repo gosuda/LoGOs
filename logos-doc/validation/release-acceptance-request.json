@@ -1,5 +1,5 @@
 {
-  "src_tree": "786c992bf75f88a388346932025fe5780529d4d0",
+  "src_tree": "e85c3a69dc8665e4a1b4fde8d1fcfb9afa71b8e3",
   "scope": "Independent M22 acceptance; additional blocked M6 binding rows still prevent full release closure.",
   "frozen_inputs": {
     "src/cmd/go/testdata/script/logos_redteam_80.txt": "3f0acf124680db65a8eb71b72d0e68b8779b778fa64bffc00ddd9afb42b9aeef",
