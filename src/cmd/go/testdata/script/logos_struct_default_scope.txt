@@ -22,6 +22,7 @@ stdout '^elp: 8080$'
 stdout '^names: 11 22$'
 stdout '^gen: 8080$'
 stdout '^coll: 3 5$'
+stdout '^derived: 8080 8080$'
 cd ..
 
 -- w/go.work --
@@ -72,11 +73,19 @@ type A struct {
 
 type G[T any] Config
 
-// A defined type over a generic instantiation (DbBox over Box[string])
-// still records defaults, but calling the owner's parameterized factory
-// cannot infer T, so literals of it fail loudly instead of silently
-// dropping the default.
+// A defined type over a generic instantiation still records defaults;
+// the owner arguments come from this declaration, not the literal's.
 type DbBox Box[string]
+
+type Derived[T any] Box[T]
+
+func DerivedPort() int {
+	defaultPort := 5
+	d := Derived[int]{}
+	h := DbBox{}
+	_ = defaultPort
+	return d.Port + h.Port*0
+}
 
 func LogosDefault_Solo__F() int { return 5 }
 
@@ -92,6 +101,11 @@ func Kind() string {
 func Elided() int {
 	s := []Config{{}}
 	return s[0].Port
+}
+
+func IntBoxPort() int {
+	type IntBox Box[int]
+	return (IntBox{}).Port
 }
 
 -- w/l/cmd/main.lgo --
@@ -158,4 +172,5 @@ func main() {
 	g := cfg.G[int]{}
 	fmt.Println("gen:", g.Port)
 	fmt.Println("coll:", cfg.Solo{}.F, cfg.LogosDefault_Solo__F())
+	fmt.Println("derived:", cfg.DerivedPort(), cfg.IntBoxPort())
 }

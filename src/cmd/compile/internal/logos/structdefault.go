@@ -79,6 +79,96 @@ func (fl *fileLower) importQualifier(pkg *types2.Package) string {
 	return q + "."
 }
 
+// typeQualifier adapts importQualifier to a types2.Qualifier so type
+// arguments rendered into generated calls use this file's import spellings.
+func (fl *fileLower) typeQualifier() types2.Qualifier {
+	return func(p *types2.Package) string {
+		if p == nil || p == fl.pkg.tpkg {
+			return ""
+		}
+		q := fl.synthQualifier(p)
+		if q == "." {
+			return ""
+		}
+		return q
+	}
+}
+
+// ownerArgsText renders the type arguments the derived type named by obj
+// instantiates its owner with, recovered from obj's own declaration:
+// `type DbBox Box[string]` yields "[string]" and `type Derived[T] Box[T]`
+// under a `Derived[int]` literal yields "[int]" by substituting the literal's
+// arguments through Derived's parameter names. Returning "" means the
+// arguments cannot be recovered and the caller must not guess.
+func (fl *fileLower) ownerArgsText(obj, ownerObj types2.Object, litArgs *types2.TypeList) string {
+	tn, ok := obj.(*types2.TypeName)
+	if !ok {
+		return ""
+	}
+	td, dsrc := fl.pkg.declOf(tn)
+	if td == nil || dsrc == nil {
+		return ""
+	}
+	rhs, ok := fl.pkg.info.TypeOf(td.Type).(*types2.Named)
+	if !ok || rhs.Origin() == nil || rhs.Origin().Obj() != ownerObj {
+		return ""
+	}
+	var argExprs []syntax.Expr
+	if t, ok := td.Type.(*syntax.IndexExpr); ok {
+		if list, ok := t.Index.(*syntax.ListExpr); ok {
+			argExprs = list.ElemList
+		} else {
+			argExprs = []syntax.Expr{t.Index}
+		}
+	}
+	if len(argExprs) == 0 {
+		return ""
+	}
+	// Substitute the derived type's parameters with the literal's type
+	// arguments. Uses-bound Name nodes inside the index arguments carry the
+	// substitution, so composite arguments like []T rewrite to []int.
+	subst := map[types2.Object]string{}
+	qf := fl.typeQualifier()
+	for i, f := range td.TParamList {
+		if f.Name == nil || litArgs == nil || i >= litArgs.Len() {
+			continue
+		}
+		if o := fl.pkg.info.Defs[f.Name]; o != nil {
+			subst[o] = types2.TypeString(litArgs.At(i), qf)
+		}
+	}
+	starts := lineStarts(dsrc)
+	off := func(pos syntax.Pos) int {
+		return starts[pos.Line()-1] + int(pos.Col()) - 1
+	}
+	var parts []string
+	for _, arg := range argExprs {
+		from, to := off(syntax.StartPos(arg)), off(syntax.EndPos(arg))
+		text := string(dsrc[from:to])
+		type repl struct {
+			span
+			s string
+		}
+		var repls []repl
+		syntax.Inspect(arg, func(n syntax.Node) bool {
+			name, ok := n.(*syntax.Name)
+			if !ok {
+				return true
+			}
+			if s, ok := subst[fl.pkg.info.Uses[name]]; ok {
+				repls = append(repls, repl{span{off(name.Pos()), off(syntax.EndPos(name))}, s})
+			}
+			return true
+		})
+		for i := len(repls) - 1; i >= 0; i-- {
+			r := repls[i]
+			text = text[:r.start-from] + r.s + text[r.end-from:]
+		}
+		parts = append(parts, text)
+	}
+	return "[" + strings.Join(parts, ", ") + "]"
+}
+
 func (fl *fileLower) stripFieldDefaults(st *syntax.StructType, stripped map[*syntax.FieldDefault]bool, typeNames map[*syntax.StructType]*syntax.TypeDecl) {
 	plan := fl.pkg.defaultFactoryPlan()
 	td := typeNames[st]
@@ -215,13 +305,15 @@ func (fl *fileLower) structDefaultsFor(lit *syntax.CompositeLit) ([]string, []st
 	named, _ := u.(*types2.Named)
 	var obj *types2.TypeName
 	var targs string
+	var litArgs *types2.TypeList
 	if named != nil {
-		if o := named.Obj(); o != nil && o.Pkg() != nil && o.Parent() == o.Pkg().Scope() {
+		if o := named.Obj(); o != nil && o.Pkg() != nil {
 			obj = o
-			if ta := named.TypeArgs(); ta != nil && ta.Len() > 0 {
+			litArgs = named.TypeArgs()
+			if litArgs != nil && litArgs.Len() > 0 {
 				var parts []string
-				for i := 0; i < ta.Len(); i++ {
-					parts = append(parts, ta.At(i).String())
+				for i := 0; i < litArgs.Len(); i++ {
+					parts = append(parts, litArgs.At(i).String())
 				}
 				targs = "[" + strings.Join(parts, ", ") + "]"
 			}
@@ -252,8 +344,15 @@ func (fl *fileLower) structDefaultsFor(lit *syntax.CompositeLit) ([]string, []st
 			if on, ok := tn.Type().(*types2.Named); !ok || on.TypeParams().Len() == 0 {
 				return qual + fname + "()"
 			}
+			// The owner is generic: recover its arguments from the derived
+			// type's own declaration. Rendering the default's text here would
+			// rebind its names to the literal's scope; emitting the bare call
+			// fails loudly instead.
+			if args := fl.ownerArgsText(obj, ownerObj, litArgs); args != "" {
+				return qual + fname + args + "()"
+			}
 		}
-		return renderExpr(d.Default)
+		return qual + fname + "()"
 	}
 	if defs := fl.pkg.info.LogosFieldDefaults[st]; len(defs) > 0 {
 		names := make([]string, 0, len(defs))
