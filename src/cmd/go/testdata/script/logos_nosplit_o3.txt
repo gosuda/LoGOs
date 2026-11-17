@@ -4,8 +4,8 @@ env GOTOOLCHAIN=local
 cd probe
 logos build -O=3 -o $WORK/probe$GOEXE .
 logos build -O=2 -o $WORK/probe2$GOEXE .
-exec $WORK/probe$GOEXE
-stdout '^5$'
+exec $WORK/probe$GOEXE a b c d
+stderr '^5$'
 
 -- probe/go.mod --
 module example.com/nosplitrepro
