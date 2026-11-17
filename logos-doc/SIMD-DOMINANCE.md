@@ -121,7 +121,7 @@ The follow-up combines the existing autovectorization branch with this repair. I
 
 | Frozen file | SHA-256 |
 | --- | --- |
-| `src/cmd/compile/internal/ssa/zcse_simd_logos_test.go` | `ba9fd261277bf4c3ce894651288d9565d4329d3634c0433c32d10214144dfefb` |
+| `src/cmd/compile/internal/ssa/zcse_simd_logos_test.go` | `c0eba294bdac97d1058b40ab07c4c626da02d839940383d4fb0f48c9565e280f` |
 | `test/logos/run/simd_zero_guard.go` | `7cdbc8e5243c835e234617fd77a97f9184f799054bb33edbade4db5978c7b323` |
 | `test/logos/run/simd_zero_guard.out` | `fd4f67d871fd0578854e61d239ff21353899fb0440daa94316c8a8ec3d234bdb` |
 
