@@ -61,7 +61,8 @@ jobs:
           [[ "$AUTOVEC_CAND_SHA" =~ ^[0-9a-f]{40}$ ]]
           test "$(git rev-parse HEAD)" = "$AUTOVEC_CAND_SHA"
           test "$(go env GOARCH)" = "${{ matrix.arch }}"
-          export GOROOT_BOOTSTRAP="$(go env GOROOT)"
+          GOROOT_BOOTSTRAP="$(go env GOROOT)"
+          export GOROOT_BOOTSTRAP
           git fetch --no-tags --depth=1 origin "$AUTOVEC_BASE_SHA"
           git worktree add --quiet --detach "$RUNNER_TEMP/autovec-base" "$AUTOVEC_BASE_SHA"
           (cd "$RUNNER_TEMP/autovec-base/src" && ./make.bash)

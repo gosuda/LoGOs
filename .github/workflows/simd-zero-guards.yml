@@ -154,7 +154,7 @@ jobs:
           (
             cd "$module"
             export GOENV=off GOTOOLCHAIN=local GOWORK=off GOPROXY=off
-            GOEXPERIMENT= GOAMD64=v1 "$GITHUB_WORKSPACE/bin/logos" build -o "$RUNNER_TEMP/eject-scalar" . 2>&1 | tee "$module/scalar-build.txt"
+            GOEXPERIMENT='' GOAMD64=v1 "$GITHUB_WORKSPACE/bin/logos" build -o "$RUNNER_TEMP/eject-scalar" . 2>&1 | tee "$module/scalar-build.txt"
             GOEXPERIMENT=simd GOAMD64=v1 "$GITHUB_WORKSPACE/bin/logos" build -o "$RUNNER_TEMP/eject-simd" . 2>&1 | tee "$module/simd-build.txt"
           )
           "$RUNNER_TEMP/eject-scalar" > "$module/scalar.out" 2> "$module/scalar.err"

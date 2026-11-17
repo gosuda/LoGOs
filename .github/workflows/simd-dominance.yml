@@ -61,7 +61,8 @@ jobs:
           PINS
       - name: "Build the toolchain"
         run: |
-          export GOROOT_BOOTSTRAP="$(go env GOROOT)"
+          GOROOT_BOOTSTRAP="$(go env GOROOT)"
+          export GOROOT_BOOTSTRAP
           ./make.bash
           printf '%s\n' "$GITHUB_WORKSPACE/bin" "$GITHUB_WORKSPACE/lib/wasm" >> "$GITHUB_PATH"
       - name: "Check formatting and vet"
