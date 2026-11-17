@@ -12,7 +12,6 @@ import (
 	"strings"
 
 	"cmd/compile/internal/logos/facts"
-	"cmd/compile/internal/types"
 	"cmd/compile/internal/types2"
 )
 
@@ -192,28 +191,6 @@ func checkedAssertMask(mask string, arity int) ([]byte, error) {
 		return nil, fmt.Errorf("invalid mask %q", mask)
 	}
 	return parsed, nil
-}
-
-// importedDeclNames returns the names of an imported package's
-// declared objects. A lazily-populated import scope may also carry
-// entries that are not package declarations: local types hoisted into
-// export data with a vargen suffix (T·N) and generic methods promoted
-// with a dotted name (T.M). Forcing their lookup can reach objects the
-// simplified importer cannot materialize (declarations with implicit
-// type parameters), so they are filtered out — matching gcimporter.
-func importedDeclNames(scope *types2.Scope) []string {
-	names := scope.Names()
-	out := names[:0]
-	for _, name := range names {
-		if strings.Contains(name, ".") {
-			continue
-		}
-		if _, suffix := types.SplitVargenSuffix(name); suffix != "" {
-			continue
-		}
-		out = append(out, name)
-	}
-	return out
 }
 
 func reachableFuncFactObjects(pkg *types2.Package) map[string]*types2.Func {
