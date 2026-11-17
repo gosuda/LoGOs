@@ -190,7 +190,7 @@ jobs:
           uv run --no-project --no-config --python 3.12 --no-python-downloads --with-requirements "$helper/test-requirements.txt" pyright "$capability/test_check_ci.py"
           uv run --no-project --no-config --python 3.12 --no-python-downloads --with-requirements "$helper/test-requirements.txt" python -m pytest -q "$host"
           uv run --no-project --no-config --python 3.12 --no-python-downloads --with-requirements "$helper/test-requirements.txt" pyright "$host"/*.py
-          uv run --no-project --no-config --python 3.12 --no-python-downloads --with-requirements "$helper/test-requirements.txt" python -m pytest -q "$offset/test_field_offset_ci.py" logos-doc/validation/test_native_frozen_gate.py
+          uv run --no-project --no-config --python 3.12 --no-python-downloads --with-requirements "$helper/test-requirements.txt" python -m pytest -q logos-doc/validation/test_native_frozen_gate.py
           uv run --no-project --no-config --python 3.12 --no-python-downloads --with-requirements "$helper/test-requirements.txt" pyright --project "$offset/pyrightconfig.json"
           uv run --no-project --no-config --python 3.12 --no-python-downloads --with-requirements "$helper/test-requirements.txt" python -m pytest -q "$simd_imports/test_simd_imports_ci.py"
           uv run --no-project --no-config --python 3.12 --no-python-downloads --with-requirements "$helper/test-requirements.txt" pyright --project "$simd_imports/pyrightconfig.json"
@@ -237,12 +237,12 @@ jobs:
         run: |
           uv run --no-project --no-config --python 3.12 --no-python-downloads python logos-doc/validation/tagged-method-facts/check_ci.py --repo "$GITHUB_WORKSPACE" --evidence "$RUNNER_TEMP/logos-regression-evidence/tagged-method"
 
-      - name: "Require field-offset precision and retained address controls"
+      - name: "Check unsafe lint and integer address controls"
         if: "${{ !cancelled() && steps.smoke.outcome == 'success' && matrix.suite == 'unit' }}"
-        working-directory: "."
         timeout-minutes: 25
         run: |
-          uv run --no-project --no-config --python 3.12 --no-python-downloads python logos-doc/validation/field-offset-lint/field_offset_ci.py --repo "$GITHUB_WORKSPACE" --evidence "$RUNNER_TEMP/logos-regression-evidence/field-offset"
+          ../.github/scripts/logos-test-env.sh go test -count=1 -timeout 10m cmd/compile/internal/logos/lint -run '^(TestArenaFieldOffset|TestCompileArenaFieldOffset|TestUnsafePointer.*|TestUnsafeLintCommand.*)$'
+          ../.github/scripts/logos-test-env.sh go test -count=1 -timeout 10m cmd/go -run '^TestScript$/^logos_(lint_unsafe(_cgo)?|cap_unsafe_defaults)$'
 
       - name: "Require transitive SIMD import and namespace controls"
         if: "${{ !cancelled() && steps.smoke.outcome == 'success' && matrix.suite == 'unit' }}"
