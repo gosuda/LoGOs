@@ -114,7 +114,19 @@ func checkLogosCapabilities(ld *modload.Loader, all []*Package) {
 		}
 	}
 	for carrier, msgs := range msgsByCarrier {
-		carrier.Error = &PackageError{Err: fmt.Errorf("%s", strings.Join(msgs, "\n"))}
+		text := strings.Join(msgs, "\n")
+		if jsonOut {
+			// JSON consumers get the record lines above; the package
+			// error stays one line so the chain/help block never
+			// leaks into the JSON stream.
+			if i := strings.IndexByte(text, '\n'); i >= 0 {
+				text = text[:i]
+			}
+		}
+		// A command-line package has an empty ImportStack, so
+		// PackageError would drop the path prefix; put it in the
+		// message instead.
+		carrier.Error = &PackageError{Err: fmt.Errorf("%s: %s", carrier.ImportPath, text)}
 		carrier.Incomplete = true
 	}
 }
