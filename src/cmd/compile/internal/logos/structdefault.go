@@ -55,39 +55,38 @@ func defaultFactoryName(typeName, field string) string {
 }
 
 func (fl *fileLower) stripFieldDefaults(st *syntax.StructType, stripped map[*syntax.FieldDefault]bool, typeNames map[*syntax.StructType]*syntax.TypeDecl) {
+	td := typeNames[st]
+	var tparams string
+	if td != nil && td.Name != nil && len(td.TParamList) > 0 {
+		var params []string
+		for _, p := range td.TParamList {
+			if p.Name != nil {
+				params = append(params, p.Name.Value+" "+renderExpr(p.Type))
+			} else {
+				params = append(params, renderExpr(p.Type))
+			}
+		}
+		tparams = "[" + strings.Join(params, ", ") + "]"
+	}
 	for i, f := range st.FieldList {
 		fd, ok := f.Type.(*syntax.FieldDefault)
 		if !ok {
 			continue
 		}
 		f.Type = fd.Type
-		if stripped[fd] {
+		if !stripped[fd] {
+			stripped[fd] = true
+			typeEnd := fl.exprEndNested(fl.off(syntax.StartPos(fd.Type)))
+			fl.add(typeEnd, fl.fieldDefaultEnd(st, i, fd, typeEnd), "")
+		}
+		if td == nil || td.Name == nil || f.Name == nil || f.Name.Value == "_" {
 			continue
 		}
-		stripped[fd] = true
-		typeEnd := fl.exprEndNested(fl.off(syntax.StartPos(fd.Type)))
-		fl.add(typeEnd, fl.fieldDefaultEnd(st, i, fd, typeEnd), "")
-		td := typeNames[st]
-		if td == nil || td.Name == nil {
-			continue
-		}
-		var tparams strings.Builder
-		if len(td.TParamList) > 0 {
-			var params []string
-			for _, p := range td.TParamList {
-				if p.Name != nil {
-					params = append(params, p.Name.Value+" "+renderExpr(p.Type))
-				} else {
-					params = append(params, renderExpr(p.Type))
-				}
-			}
-			tparams.WriteString("[" + strings.Join(params, ", ") + "]")
-		}
-		if f.Name != nil {
-			text := "func " + defaultFactoryName(td.Name.Value, f.Name.Value) + tparams.String() +
-				"() " + renderExpr(fd.Type) + " {\n\treturn " + renderExpr(fd.Default) + "\n}\n"
-			fl.addGeneratedDecls(fd.Pos(), text)
-		}
+		// Grouped fields (A, B int = v) share one FieldDefault: each name
+		// still needs its own factory.
+		text := "func " + defaultFactoryName(td.Name.Value, f.Name.Value) + tparams +
+			"() " + renderExpr(fd.Type) + " {\n\treturn " + renderExpr(fd.Default) + "\n}\n"
+		fl.addGeneratedDecls(fd.Pos(), text)
 	}
 }
 
