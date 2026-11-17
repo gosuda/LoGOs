@@ -39,7 +39,14 @@ func (fl *fileLower) defaultTypeNames() map[*syntax.StructType]*syntax.TypeDecl 
 		if !ok || td.Alias || td.Name == nil {
 			continue
 		}
-		if st, ok := td.Type.(*syntax.StructType); ok {
+		var st *syntax.StructType
+		switch t := td.Type.(type) {
+		case *syntax.StructType:
+			st = t
+		case *syntax.AssertedStruct:
+			st = t.Struct
+		}
+		if st != nil {
 			m[st] = td
 		}
 	}
@@ -90,6 +97,21 @@ func (pl *packageLower) defaultFactorySkips() map[string]bool {
 		}
 	}
 	return pl.factoryPlan
+}
+
+// importQualifier returns the source qualifier ("pkg." or "") that names the
+// given package in this file, so generated calls survive elided, generic, and
+// aliased literals that carry no selector in lit.Type. synthQualifier reuses
+// the file's import spellings and registers a synthesized import when needed.
+func (fl *fileLower) importQualifier(pkg *types2.Package) string {
+	if pkg == nil || pkg == fl.pkg.tpkg {
+		return ""
+	}
+	q := fl.synthQualifier(pkg)
+	if q == "" || q == "." {
+		return ""
+	}
+	return q + "."
 }
 
 func (fl *fileLower) stripFieldDefaults(st *syntax.StructType, stripped map[*syntax.FieldDefault]bool, typeNames map[*syntax.StructType]*syntax.TypeDecl) {
@@ -225,12 +247,11 @@ func (fl *fileLower) structDefaultsFor(lit *syntax.CompositeLit) ([]string, []st
 		return nil, nil
 	}
 	named, _ := u.(*types2.Named)
-	var typeName, targs string
-	pkgLevel := false
+	var obj *types2.TypeName
+	var targs string
 	if named != nil {
-		if obj := named.Obj(); obj != nil && obj.Pkg() != nil && obj.Parent() == obj.Pkg().Scope() {
-			typeName = obj.Name()
-			pkgLevel = true
+		if o := named.Obj(); o != nil && o.Pkg() != nil && o.Parent() == o.Pkg().Scope() {
+			obj = o
 			if ta := named.TypeArgs(); ta != nil && ta.Len() > 0 {
 				var parts []string
 				for i := 0; i < ta.Len(); i++ {
@@ -241,10 +262,8 @@ func (fl *fileLower) structDefaultsFor(lit *syntax.CompositeLit) ([]string, []st
 		}
 	}
 	qual := ""
-	if sel, ok := syntax.Unparen(lit.Type).(*syntax.SelectorExpr); ok {
-		if n, ok := syntax.Unparen(sel.X).(*syntax.Name); ok {
-			qual = n.Value + "."
-		}
+	if obj != nil {
+		qual = fl.importQualifier(obj.Pkg())
 	}
 	skips := fl.pkg.defaultFactorySkips()
 	call := func(d types2.LogosFieldDefault) string {
@@ -263,11 +282,7 @@ func (fl *fileLower) structDefaultsFor(lit *syntax.CompositeLit) ([]string, []st
 		}
 		return names, texts
 	}
-	if !pkgLevel {
-		return nil, nil
-	}
-	obj := named.Obj()
-	if obj == nil || obj.Pkg() == nil || obj.Pkg() == fl.pkg.tpkg {
+	if obj == nil || obj.Pkg() == fl.pkg.tpkg {
 		return nil, nil
 	}
 	imp, ok := facts.Lookup(obj.Pkg().Path())
@@ -276,7 +291,7 @@ func (fl *fileLower) structDefaultsFor(lit *syntax.CompositeLit) ([]string, []st
 	}
 	var names, texts []string
 	for _, d := range imp.Defaults {
-		if d.Type == typeName {
+		if d.Type == obj.Name() {
 			names = append(names, d.Field)
 			texts = append(texts, qual+d.Text+targs+"()")
 		}
