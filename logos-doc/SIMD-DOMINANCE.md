@@ -115,19 +115,60 @@ completed rerun is still required.
 Hosted evidence: [focused job](https://github.com/gosuda/LoGOs/actions/runs/43865827289/job/133294001990)
 and [first full regression job](https://github.com/gosuda/LoGOs/actions/runs/43865827289/job/133294001373).
 
-## Independent lower-ISA execution follow-up
+## Reproduction and merge gate
 
-The follow-up combines the existing autovectorization branch with this repair. It adds no compiler transformation. Its frozen SSA test, `src/cmd/compile/internal/ssa/zcse_simd_logos_test.go`, uses two sequential independent guards and a dominated duplicate. It checks all three vector widths and preserves a positive control for dominance-aware sharing. The frozen public Go fixture, `test/logos/run/simd_zero_guard.go`, places two guarded vector uses around an observable call and checks nil, empty, one-element, and vector-width boundary inputs against scalar results and exact call counts.
+After `src/make.bash` rebuilds and installs the fork, put its `bin` first on
+`PATH` and run from `src`:
 
-| Frozen file | SHA-256 |
+```sh
+go test -count=1 -short cmd/compile/internal/ssa
+go vet cmd/compile/internal/ssa
+go test -count=1 -race -timeout=40m -v cmd/go \
+  -run '^TestScript$/^(README|logos_simd_(zero_dominance|feature_gate|gate_avx512|gate_branch)|logos_eject_simd_slice)$'
+GO_TEST_TIMEOUT_SCALE=8 ./run.bash --no-rebuild
+```
+
+The source/ejection scripts use the repository's pinned upstream 1.27.2,
+1.27.3, and 1.27.4 toolchains as independent oracles. Changed Go files must
+also pass `gofmt`. In the combined stabilization candidate,
+the `simd-host` leg of `feature-gates.yml` runs both independent source-dominance fixtures,
+the complete SSA short suite, and the native/ejected controls.
+The normal `logos.yml` workflow owns the full upstream regression job with
+the same timeout scale. Queued or incomplete CI is not a pass and does not
+permit merging.
+
+### Completed hosted rerun and integration boundary
+
+Source head `08646b895facb9194ec89acf5d1d8f291d338061` passed all seven
+jobs across the second attempts of the [language workflow](https://github.com/gosuda/LoGOs/actions/runs/43885316569/attempts/2),
+[SIMD workflow](https://github.com/gosuda/LoGOs/actions/runs/43885316645/attempts/2),
+and [host-ISA workflow](https://github.com/gosuda/LoGOs/actions/runs/43885316705/attempts/2).
+Those jobs cover unit, scripts, testdir, lint, focused SIMD, full regression,
+and host-ISA scripts.
+
+The SIMD jobs checked out CI merge
+`420233bf572c32b9a9d2ad8fb7bd2cf507e15aa0`. Its
+[difference from the source head](https://github.com/gosuda/LoGOs/compare/08646b895facb9194ec89acf5d1d8f291d338061...420233bf572c32b9a9d2ad8fb7bd2cf507e15aa0)
+is only the added `logos_guarded_enum_index.txt` script from main commit
+`bd318f1c558f3aa73ad434929fba7f237db9877f`; production compiler source
+and the three frozen SIMD attacks are unchanged.
+
+| Hosted gate | Observed result |
 | --- | --- |
-| `src/cmd/compile/internal/ssa/zcse_simd_logos_test.go` | `c0eba294bdac97d1058b40ab07c4c626da02d839940383d4fb0f48c9565e280f` |
-| `test/logos/run/simd_zero_guard.go` | `7cdbc8e5243c835e234617fd77a97f9184f799054bb33edbade4db5978c7b323` |
-| `test/logos/run/simd_zero_guard.out` | `fd4f67d871fd0578854e61d239ff21353899fb0440daa94316c8a8ec3d234bdb` |
+| [Complete uncached SSA short suite](https://github.com/gosuda/LoGOs/actions/runs/43885316645/job/133417552350) | Passed in 54.215 seconds. |
+| [Six race-enabled source/ejection scripts](https://github.com/gosuda/LoGOs/actions/runs/43885316645/job/133417552350) | Passed in 66.540 seconds, including README consistency. |
+| [Full upstream regression](https://github.com/gosuda/LoGOs/actions/runs/43885316645/job/133417552899) | `ALL TESTS PASSED` at 17:03:41 UTC on 2026-11-16; its complete `cmd/internal/testdir` run passed in 433.108 seconds. |
 
-Before the repair, the public fixture built at `GOAMD64=v1` with the parent compiler `5155dfff` faulted under QEMU Nehalem at 256 and 512 bits and under Haswell at 512 bits. The 128-bit case passed on both; the 256-bit case also passed on Haswell. The baseline SSA attack failed at all three widths. On the earlier combined candidate `31e27698` with a separate zero-CSE-only repair, the unchanged fixture passed all six model/width cases, and the unchanged loGo/s reproducer matched its 72-line scalar output natively and on both models. Removing that candidate's exception restored the original `zcse.go` blob `e08272c34580173c60929b7c9edc4183d80050f4` and all three SSA failures, followed by a clean rerun. These earlier results are not results for the integrated PR #54 tree.
-
-The first PR #39 full regression also timed out in the runtime lock-profile test; that separate failure is retained and is not attributed to this repair. The follow-up also runs both fixtures against the integrated tree and records native, Nehalem, and Haswell outcomes separately. The pinned QEMU x86-64 executable has SHA-256 `7132ffd39aef71c26d3344cc0c7dffc530e10e3e720c58c8279a97ef6fdd7784`. A masked CPU feature on capable hardware exercises feature detection but cannot establish that unsupported instructions are unreachable. The follow-up PR records integrated-tree execution and full CI results.
+The later combined head `447d6ad7ecff885efed74e14ed7b458f26eb11ea`
+includes the struct-default repair from PR #63 and has the same tree as
+child `eaf5e3e`. That child's full upstream gate failed the Wasm host-environment
+overflow and REDTEAM ledger schema. The schema repair and the independent
+runner correction do not turn the original SIMD pass into combined acceptance.
+[WASM-ENVIRONMENT.md](WASM-ENVIRONMENT.md) records the runner's local
+RED/GREEN/PROBE proof and publication boundary; the candidate's
+[PR #54 checks](https://github.com/gosuda/LoGOs/pull/54/checks) determine full
+upstream acceptance. All three frozen attack hashes still match the table
+above; no speed claim follows from these correctness results.
 
 ## Reproduction and merge gate
 

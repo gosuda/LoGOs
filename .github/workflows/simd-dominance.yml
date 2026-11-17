@@ -5,6 +5,7 @@ name: "SIMD feature dominance"
     paths:
       - ".github/workflows/simd-dominance.yml"
       - "src/cmd/compile/internal/ssa/**"
+      - "src/cmd/compile/internal/logos/wasm*_test.go"
       - "src/cmd/go/testdata/script/logos_simd_zero_dominance.txt"
   workflow_dispatch:
 
@@ -38,6 +39,8 @@ jobs:
       - uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" # v7.0.1
         with:
           persist-credentials: false
+          # Keep focused baseline and mutation runs on the published snapshot.
+          ref: "${{ matrix.suite == 'focused' && github.event.pull_request.head.sha || github.sha }}"
       - uses: "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e" # v7.0.0
         with:
           go-version: "1.27.4"
@@ -61,15 +64,26 @@ jobs:
           PINS
       - name: "Build the toolchain"
         run: |
-          GOROOT_BOOTSTRAP="$(go env GOROOT)"
+          GOROOT_BOOTSTRAP=$(go env GOROOT)
           export GOROOT_BOOTSTRAP
           ./make.bash
           printf '%s\n' "$GITHUB_WORKSPACE/bin" "$GITHUB_WORKSPACE/lib/wasm" >> "$GITHUB_PATH"
+      - name: "Check Wasm runner isolation"
+        if: "matrix.suite == 'focused'"
+        run: |
+          wasm_cache=$(go env GOCACHE)
+          env -i \
+            PATH="$PATH" GOROOT="$GITHUB_WORKSPACE" GOCACHE="$wasm_cache" \
+            TMPDIR="$RUNNER_TEMP" GOTMPDIR="$RUNNER_TEMP" \
+            GOENV=off GOTOOLCHAIN=local GOTELEMETRY=off \
+            GOMAXPROCS=2 GOFLAGS=-p=2 GOMEMLIMIT=2GiB \
+            go test -count=1 -timeout=10m -v cmd/compile/internal/logos \
+              -run '^TestWasm(RunIgnoresHostEnvironment|ProgramRunsUnderNode|WrongMayYieldTraps|YieldFreeSourcesRunUnderNode)$'
       - name: "Check formatting and vet"
         if: "matrix.suite == 'focused'"
         run: |
-          test -z "$(gofmt -l cmd/compile/internal/ssa/*logos*.go)"
-          go vet cmd/compile/internal/ssa
+          test -z "$(gofmt -l cmd/compile/internal/ssa/*logos*.go cmd/compile/internal/logos/wasm*_test.go)"
+          go vet cmd/compile/internal/ssa cmd/compile/internal/logos
       - name: "Run the complete SSA short suite"
         if: "matrix.suite == 'focused'"
         run: "go test -count=1 -short cmd/compile/internal/ssa"
