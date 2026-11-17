@@ -88,7 +88,7 @@
    "files": [
     "src/cmd/compile/internal/noder/import_logos.go"
    ],
-   "fix": "On every post-Direct error return, roll back pkg1.Direct and the target.Imports entry when packages[path] never completed; keep both when it did.",
+   "fix": "On every post-Direct error return, roll back pkg1.Direct and remove pkg1's own target.Imports entry (not the tail: recursive imports may have appended completed dependencies after it) when packages[path] never completed; keep both when it did.",
    "test": "go test -count=1 -short cmd/compile/internal/logos/lint cmd/compile/internal/noder",
    "found_via": "Devin Review finding on the L-MAC-1 fix"
   }

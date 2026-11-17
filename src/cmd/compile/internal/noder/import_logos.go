@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"internal/pkgbits"
 	"os"
+	"slices"
 
 	"cmd/compile/internal/base"
 	"cmd/compile/internal/importer"
@@ -183,7 +184,9 @@ func readImportFileImpl(path string, target *ir.Package, env *types2.Context, pa
 	undo := func() {
 		if pkg2 := packages[path]; pkg2 == nil || !pkg2.Complete() {
 			pkg1.Direct = false
-			target.Imports = target.Imports[:len(target.Imports)-1]
+			if i := slices.Index(target.Imports, pkg1); i >= 0 {
+				target.Imports = slices.Delete(target.Imports, i, i+1)
+			}
 		}
 	}
 
