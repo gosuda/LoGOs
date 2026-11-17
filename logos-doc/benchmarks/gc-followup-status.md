@@ -4,7 +4,7 @@ Date: 2026-11-16
 
 Base: PR #26, commit `968b8b436b08a0d8772d2159daa36e9c575d4b3d`.
 
-**Status: native repair gates passed; full upstream gate requires a corrected rerun.** Local execution and Codexify remain unavailable, but GitHub Actions is running the new gates. Native arm64 builds, formatting, and vet passed. Ordinary runtime tests with both collectors reproduced the ownership defect below. The repaired source passed all four native runtime configurations and the original-order mutation checks described below. The [first-run record](gc-stability-first-run.md) separates the real defect from fixture errors. PR #26's earlier results do not verify this follow-up.
+**Status: native repair gates and the complete upstream gate passed; combined acceptance awaits the integrated SIMD repair.** Local execution and Codexify remain unavailable, but GitHub Actions supplies execution. [Run 43843444561](https://github.com/gosuda/LoGOs/actions/runs/43843444561) at `e3a6a4e5602df172660e644b1d204d13ccf824ba` passed all four native runtime configurations and the complete upstream gate (M18-A-S22); the separate LoGo/s script job failed only its SIMD slice fixture, so combined acceptance still requires that integrated repair and a fresh complete run. Native arm64 builds, formatting, and vet passed. Ordinary runtime tests with both collectors reproduced the ownership defect below. The repaired source passed all four native runtime configurations and the original-order mutation checks described below. The [first-run record](gc-stability-first-run.md) separates the real defect from fixture errors. PR #26's earlier results do not verify this follow-up.
 
 ## Reproduced ownership defect
 
