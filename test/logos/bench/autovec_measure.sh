@@ -111,7 +111,11 @@ for side in base cand; do
 	"$go" env -json GOOS GOARCH GOAMD64 GOARM64 GOEXPERIMENT GOROOT CGO_ENABLED > "$out/$side/go-env.json"
 	"$go" tool compile -V=full > "$out/$side/compiler-version.txt"
 	sha256sum "$go" "$("$go" env GOTOOLDIR)/compile" > "$out/$side/toolchain.sha256"
-	"$go" test -c -gcflags=-d=ssa/autovec/debug=1 -o "$out/$side/workload.test" "$fixture" > "$out/$side/build.log" 2>&1
+	# The base compiler predates the autovec phase; it rejects the debug
+	# option, so only the candidate compiles with it. Everything else in the
+	# workload build stays identical across both sides.
+	dbg=; [[ $side == cand ]] && dbg=-d=ssa/autovec/debug=1
+	"$go" test -c -gcflags="$dbg" -o "$out/$side/workload.test" "$fixture" > "$out/$side/build.log" 2>&1
 	sha256sum "$out/$side/workload.test" > "$out/$side/binary.sha256"
 	wc -c < "$out/$side/workload.test" > "$out/$side/binary.bytes"
 	"$out/$side/workload.test" -test.run='^TestAutovecBenchmarkParity$' > "$out/$side/parity.log" 2>&1
@@ -162,8 +166,9 @@ while :; do
 		printf -v quoted_binary '%q' "$binary"
 		command="$quoted_binary '-test.run=^$' '-test.bench=^$bench\$' '-test.benchtime=${n}x' '-test.benchmem'"
 		hyperfine --shell=bash --warmup 3 --min-runs 10 --max-runs 10 --export-json "$phase/$side.json" "$command" > "$phase/$side-hyperfine.txt"
+		dbg=; [[ $side == cand ]] && dbg=-d=ssa/autovec/debug=1
 		"$go" test -run='^$' -bench="^$bench\$" -benchtime="${n}x" -count=10 -benchmem \
-			-gcflags=-d=ssa/autovec/debug=1 "$fixture" > "$phase/$side-gotest.txt" 2>&1
+			-gcflags="$dbg" "$fixture" > "$phase/$side-gotest.txt" 2>&1
 	done
 	minimum_ok=1
 	for side in base cand; do

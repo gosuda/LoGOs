@@ -97,10 +97,12 @@ jobs:
           mkdir "$mutation"
           sha256sum "$source" > "$RUNNER_TEMP/simd-zero-evidence/production.sha256"
           test "$(grep -Fc ' && v.Op != OpZeroSIMD' "$source")" -eq 1
-          test "$(grep -Fc '// SIMD zeros may need a CPU feature guard. Leave them to the' "$source")" -eq 1
-          test "$(grep -Fc '// dominance-aware CSE pass instead of hoisting them to entry.' "$source")" -eq 1
-          sed -e '/^[[:space:]]*\/\/ SIMD zeros may need a CPU feature guard\. Leave them to the$/d' \
-              -e '/^[[:space:]]*\/\/ dominance-aware CSE pass instead of hoisting them to entry\.$/d' \
+          test "$(grep -Fc 'A SIMD zero may require a CPU feature checked' "$source")" -eq 1
+          test "$(grep -Fc 'predecessors. Leave it to dominance-aware CSE instead of' "$source")" -eq 1
+          test "$(grep -Fc 'moving it outside the guard.' "$source")" -eq 1
+          sed -e '/^[[:space:]]*\/\/ A SIMD zero may require a CPU feature checked by this block'"'"'s$/d' \
+              -e '/^[[:space:]]*\/\/ predecessors\. Leave it to dominance-aware CSE instead of$/d' \
+              -e '/^[[:space:]]*\/\/ moving it outside the guard\.$/d' \
               -e 's/ && v\.Op != OpZeroSIMD//' "$source" > "$mutation/zcse.go"
           printf '%s  %s\n' 89c0d4f2646b5dc9274534fc0f97ce5873a77db208aab96341309f61bf0ff324 "$mutation/zcse.go" | sha256sum --check --strict -
           jq -n --arg source "$source" --arg replacement "$mutation/zcse.go" '{Replace: {($source): $replacement}}' > "$mutation/overlay.json"
