@@ -896,6 +896,10 @@ Disclosure record (skill-authoring rules applied; mode skill; every skill model-
 | `logos-review` | review, audit, check `.lgo` code or a LoGOs diff | P1 | Owns the review checklist; each item states its rule |
 | `logos-concurrency` | `go group`, goroutine groups, cancellation, `Locked`, `Hot`, data races in `.lgo` | M8 Docs step | Shipped-features-only rule: its forms (`go group`, `Locked`, `Hot`) ship at M8; a P1 skill would claim unshipped features |
 | `logos-performance` | optimize, speed up, `-O` levels, binary size, allocation, SIMD, zero-alloc | M13 Docs step | Shipped-features-only rule: its flags (`-O` levels, arena) ship at M13 and later; a P1 skill would claim unshipped features |
+| `building-logos-first-from-go` | build LoGOs or logos from source, `make.bash`, `GOROOT_BOOTSTRAP`, no `logos` binary yet | Toolchain upkeep | Owns the stage 1 build from an upstream Go |
+| `bootstrapping-logos` | bootstrap logos with logos, self-host, build logos at `-O3` | Toolchain upkeep | Owns the stage 2 build at `-O=3`; needs stage 1 |
+| `dogfooding-logos` | dogfood logos, install the bootstrapped logos, test the bootstrapped binary | Toolchain upkeep | Owns the symlink install of stage 2 and the stage 2 versus stage 1 test comparison |
+| `updating-logos-baseline-go-version` | update or bump the baseline Go version, a new Go release | Toolchain upkeep | Owns grounding the release and syncing every baseline mention; floors and oracles stay |
 
 - `logos` SKILL.md inlines the M1 syntax and diagnostics tables (every write and eject run needs them; a reference loaded in over 80% of runs is inlined). `references/lowering.md` stays a reference (sharp load condition: only runs that read ejected code or explain run-time behavior reach it). The diagnostics table intentionally lives in both `logos` and `logos-review` (each skill is self-contained; table T is the single upstream source).
 - `logos-from-go` stays a monolith with no `references/` (one ordered job, small enough to inline; no branch-specific bulk).
