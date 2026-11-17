@@ -385,6 +385,14 @@ func (c *leakCheck) rootedAtBorrowed(e syntax.Expr) bool {
 		case *syntax.Name:
 			return c.isParamUse(x) || c.isAliasUse(x)
 		case *syntax.SelectorExpr:
+			// A pointer-typed field hands the rest of the chain to a
+			// different object: writing through it stores the borrowed
+			// value outside the locked state.
+			if isPointerType(TypeOf(x.X)) {
+				if n, ok := syntax.Unparen(x.X).(*syntax.Name); !ok || (!c.isParamUse(n) && !c.isAliasUse(n)) {
+					return false
+				}
+			}
 			e = x.X
 		case *syntax.IndexExpr:
 			e = x.X
@@ -426,6 +434,20 @@ func (c *leakCheck) carriesPtr(e syntax.Expr) bool {
 		if found {
 			return false
 		}
+		switch x := n.(type) {
+		case *syntax.FuncLit:
+			// A stored literal that mentions the borrowed handle
+			// retains it past the lock, whatever it reads inside.
+			if c.captures(x.Body) {
+				found = true
+			}
+			return false
+		case *syntax.LambdaExpr:
+			if c.captures(x.Body) {
+				found = true
+			}
+			return false
+		}
 		name, ok := n.(*syntax.Name)
 		if !ok {
 			return true
@@ -461,7 +483,17 @@ func (c *leakCheck) carriesPtr(e syntax.Expr) bool {
 // itself cannot escape: builtin len/cap or a boolean-producing operation
 // such as a nil comparison.
 func (c *leakCheck) scalarConsumed(e syntax.Node, sel *syntax.SelectorExpr) bool {
-	switch p := leakParent(e, sel).(type) {
+	node := syntax.Node(sel)
+	var p syntax.Node
+	for {
+		p = leakParent(e, node)
+		if pe, ok := p.(*syntax.ParenExpr); ok {
+			node = pe
+			continue
+		}
+		break
+	}
+	switch p := p.(type) {
 	case *syntax.CallExpr:
 		fn, ok := syntax.Unparen(p.Fun).(*syntax.Name)
 		if !ok {
