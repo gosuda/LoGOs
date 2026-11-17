@@ -129,7 +129,7 @@ func ApplyReadonlyFactsInPlace(pkg *types2.Package, readonlys []facts.ReadonlyFa
 		}
 		var base types2.Type
 		var obj types2.Object
-		if token.IsIdentifier(r.Object) {
+		if isPackageDeclName(r.Object) {
 			obj = pkg.Scope().Lookup(r.Object)
 		}
 		if obj != nil {
@@ -167,17 +167,24 @@ func ApplyReadonlyFactsInPlace(pkg *types2.Package, readonlys []facts.ReadonlyFa
 	return nil
 }
 
-// packageDeclNames excludes names that can never be package-level objects
-// before a scope lookup can resolve them. Imported scopes also hold lazy
-// hoisted local types (local·1) and method symbols (Type.Method). A generic
-// local type needs its enclosing dictionary, which the public type importer
-// forbids (internal compiler error: unexpected object with N implicit type
-// parameters). Methods are reached through their declaring types instead.
-// Package-level names that are not plain identifiers, like midway's SIMD
-// specializations "init@simd128", are kept.
+// isPackageDeclName accepts package declarations, including SIMD-generated
+// declarations with valid fact tags. It excludes compiler-local and method
+// symbols before a scope lookup can resolve them.
+func isPackageDeclName(name string) bool {
+	if strings.ContainsRune(name, '.') {
+		return false
+	}
+	base, _, _ := strings.Cut(name, "@")
+	return token.IsIdentifier(base) && facts.ValidObject(name)
+}
+
+// packageDeclNames excludes lazy hoisted local types (local·1) and method
+// symbols (Type.Method). A generic local type needs its enclosing dictionary
+// and cannot be resolved by the public type importer. Methods are reached
+// through their declaring types instead.
 func packageDeclNames(pkg *types2.Package) []string {
 	return slices.DeleteFunc(pkg.Scope().Names(), func(name string) bool {
-		return strings.ContainsAny(name, ".·")
+		return !isPackageDeclName(name)
 	})
 }
 
