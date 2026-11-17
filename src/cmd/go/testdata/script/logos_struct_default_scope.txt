@@ -22,7 +22,7 @@ stdout '^elp: 8080$'
 stdout '^names: 11 22$'
 stdout '^gen: 8080$'
 stdout '^coll: 3 5$'
-stdout '^derived: 8080 8080$'
+stdout '^derived: 8080 8080 8080 8080$'
 cd ..
 
 -- w/go.work --
@@ -79,12 +79,29 @@ type DbBox Box[string]
 
 type Derived[T any] Box[T]
 
+type Args2[A, B any] struct {
+	A A
+	B B
+}
+
+// A nested instantiation exercises bracket recovery in the derived args.
+type Nested Box[Args2[int, string]]
+
 func DerivedPort() int {
 	defaultPort := 5
 	d := Derived[int]{}
-	h := DbBox{}
 	_ = defaultPort
-	return d.Port + h.Port*0
+	return d.Port
+}
+
+func DbBoxPort() int {
+	h := DbBox{}
+	return h.Port
+}
+
+func NestedPort() int {
+	n := Nested{}
+	return n.Port
 }
 
 func LogosDefault_Solo__F() int { return 5 }
@@ -172,5 +189,5 @@ func main() {
 	g := cfg.G[int]{}
 	fmt.Println("gen:", g.Port)
 	fmt.Println("coll:", cfg.Solo{}.F, cfg.LogosDefault_Solo__F())
-	fmt.Println("derived:", cfg.DerivedPort(), cfg.IntBoxPort())
+	fmt.Println("derived:", cfg.DerivedPort(), cfg.DbBoxPort(), cfg.IntBoxPort(), cfg.NestedPort())
 }

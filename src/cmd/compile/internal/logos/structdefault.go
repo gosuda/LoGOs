@@ -144,6 +144,26 @@ func (fl *fileLower) ownerArgsText(obj, ownerObj types2.Object, litArgs *types2.
 	var parts []string
 	for _, arg := range argExprs {
 		from, to := off(syntax.StartPos(arg)), off(syntax.EndPos(arg))
+		// EndPos excludes the closing ']' of a nested IndexExpr;
+		// extend the slice until the brackets balance.
+		depth := 0
+		for i := from; i < to; i++ {
+			switch dsrc[i] {
+			case '[', '(':
+				depth++
+			case ']', ')':
+				depth--
+			}
+		}
+		for to < len(dsrc) && depth > 0 {
+			switch dsrc[to] {
+			case ']', ')':
+				depth--
+			case '[', '(':
+				depth++
+			}
+			to++
+		}
 		text := string(dsrc[from:to])
 		type repl struct {
 			span
