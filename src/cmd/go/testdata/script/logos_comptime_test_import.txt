@@ -3,7 +3,7 @@ env GOTOOLCHAIN=local
 
 cd probe
 logos test .
-logos eject -o $WORK/ejected .
+logos eject -o $WORK/ejected
 cd $WORK/ejected
 go test .
 
@@ -25,7 +25,13 @@ type Pair struct {
 }
 
 func TestFields(t *testing.T) {
-	if n := len(comptime.Fields[Pair]()); n != 2 {
+	n := 0
+	var v Pair
+	const for _, f := range comptime.Fields[Pair]() {
+		_ = v.[f]
+		n++
+	}
+	if n != 2 {
 		t.Fatalf("got %d fields, want 2", n)
 	}
 }
@@ -44,7 +50,13 @@ type Triple struct {
 }
 
 func TestExternalFields(t *testing.T) {
-	if n := len(comptime.Fields[Triple]()); n != 3 {
+	n := 0
+	var v Triple
+	const for _, f := range comptime.Fields[Triple]() {
+		_ = v.[f]
+		n++
+	}
+	if n != 3 {
 		t.Fatalf("got %d fields, want 3", n)
 	}
 }
