@@ -208,8 +208,10 @@ type jsonRecord struct {
 }
 
 // FormatJSON renders one violation as a single-line Sec 14 JSON record.
-// severity is "deny", "forbid", or "warn".
-func FormatJSON(v Violation, severity string) string {
+// severity is "deny", "forbid", or "warn". file is the chain-head
+// package's source path; an import path is not a document and cannot
+// anchor an editor diagnostic.
+func FormatJSON(v Violation, severity, file string) string {
 	var note strings.Builder
 	for i, frame := range v.Chain {
 		if i == 0 {
@@ -219,10 +221,6 @@ func FormatJSON(v Violation, severity string) string {
 		fmt.Fprintf(&note, "%d.   -> %s\n", i+1, frame)
 	}
 	fmt.Fprintf(&note, " = Help: Remove the dependency or explicitly authorize \"%s/**\" under 'transitive_unsafe_allowlist' in logos.toml.", v.Dep)
-	file := ""
-	if len(v.Chain) > 0 {
-		file = v.Chain[0]
-	}
 	rec := jsonRecord{
 		SchemaVersion:     "1.0",
 		Severity:          severity,

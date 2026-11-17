@@ -77,16 +77,6 @@ func checkLogosCapabilities(ld *modload.Loader, all []*Package) {
 	if len(violations) == 0 {
 		return
 	}
-	if sev == capabilities.Warn {
-		for _, v := range violations {
-			if settings.Current().JSON {
-				fmt.Fprintln(os.Stderr, capabilities.FormatJSON(v, "warn"))
-			} else {
-				fmt.Fprintln(os.Stderr, capabilities.FormatWarning(v))
-			}
-		}
-		return
-	}
 	byPath := make(map[string]*Package, len(all))
 	for _, p := range all {
 		if _, ok := byPath[p.ImportPath]; !ok {
@@ -94,20 +84,48 @@ func checkLogosCapabilities(ld *modload.Loader, all []*Package) {
 		}
 	}
 	jsonOut := settings.Current().JSON
+	if sev == capabilities.Warn {
+		for _, v := range violations {
+			if jsonOut {
+				fmt.Fprintln(os.Stderr, capabilities.FormatJSON(v, "warn", capSourceFile(byPath[firstChain(v)])))
+			} else {
+				fmt.Fprintln(os.Stderr, capabilities.FormatWarning(v))
+			}
+		}
+		return
+	}
 	msgsByCarrier := make(map[*Package][]string)
 	for _, v := range violations {
 		if jsonOut {
-			fmt.Fprintln(os.Stderr, capabilities.FormatJSON(v, "deny"))
+			fmt.Fprintln(os.Stderr, capabilities.FormatJSON(v, "deny", capSourceFile(byPath[firstChain(v)])))
 		}
-		// v.Chain[0] names the main-module package that heads the
-		// unauthorized import chain; blame it, not the first package
-		// alphabetically.
+		// Blame the first chain package that does not already carry a
+		// diagnostic, not the first package alphabetically; a package
+		// with an existing error keeps it.
 		var carrier *Package
-		if len(v.Chain) > 0 {
-			carrier = byPath[v.Chain[0]]
+		for _, path := range v.Chain {
+			cand := byPath[path]
+			if cand == nil {
+				continue
+			}
+			if carrier == nil {
+				carrier = cand
+			}
+			if cand.Error == nil {
+				carrier = cand
+				break
+			}
 		}
 		if carrier == nil {
 			carrier = firstMainPackage(all)
+		}
+		if carrier != nil && carrier.Error != nil {
+			// A package that already failed load keeps its diagnostic;
+			// report this violation inline so it is not hidden.
+			if !jsonOut {
+				fmt.Fprintln(os.Stderr, capabilities.FormatViolation(v))
+			}
+			continue
 		}
 		if carrier != nil {
 			msgsByCarrier[carrier] = append(msgsByCarrier[carrier], capabilities.FormatViolation(v))
@@ -129,6 +147,30 @@ func checkLogosCapabilities(ld *modload.Loader, all []*Package) {
 		carrier.Error = &PackageError{Err: fmt.Errorf("%s: %s", carrier.ImportPath, text)}
 		carrier.Incomplete = true
 	}
+}
+
+// firstChain names the main-module package heading a violation's
+// import chain, or "" for an empty chain.
+func firstChain(v capabilities.Violation) string {
+	if len(v.Chain) == 0 {
+		return ""
+	}
+	return v.Chain[0]
+}
+
+// capSourceFile resolves p to a real source path for the Sec 14
+// diagnostics schema: the first source file in Dir, or Dir itself when
+// the package has none.
+func capSourceFile(p *Package) string {
+	if p == nil {
+		return ""
+	}
+	for _, files := range [][]string{p.GoFiles, p.CgoFiles, p.TestGoFiles, p.XTestGoFiles} {
+		if len(files) > 0 {
+			return filepath.Join(p.Dir, files[0])
+		}
+	}
+	return p.Dir
 }
 
 func capNode(p *Package) capabilities.Node {
