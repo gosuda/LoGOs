@@ -385,11 +385,20 @@ func (c *leakCheck) rootedAtBorrowed(e syntax.Expr) bool {
 		case *syntax.Name:
 			return c.isParamUse(x) || c.isAliasUse(x)
 		case *syntax.SelectorExpr:
+			p := syntax.Unparen(x.X)
+			if op, ok := p.(*syntax.Operation); ok && op.Op == syntax.And && op.Y == nil {
+				// (&v).F is v.F: keep walking the operand. In valid
+				// code v is not a pointer (selecting a field through
+				// **T does not compile), so & only renames the object.
+				e = op.X
+				continue
+			}
 			// A pointer-typed field hands the rest of the chain to a
 			// different object: writing through it stores the borrowed
-			// value outside the locked state.
-			if isPointerType(TypeOf(x.X)) {
-				if n, ok := syntax.Unparen(x.X).(*syntax.Name); !ok || (!c.isParamUse(n) && !c.isAliasUse(n)) {
+			// value outside the locked state. The borrowed handle
+			// itself still resolves to locked storage.
+			if isPointerType(TypeOf(p)) {
+				if n, ok := p.(*syntax.Name); !ok || (!c.isParamUse(n) && !c.isAliasUse(n)) {
 					return false
 				}
 			}
