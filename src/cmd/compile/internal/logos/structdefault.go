@@ -49,12 +49,51 @@ func (fl *fileLower) defaultTypeNames() map[*syntax.StructType]*syntax.TypeDecl 
 // defaultFactoryName is the generated declaration-scope binding for one
 // defaulted field. It is exported so ejected and cross-package consumers can
 // reference it; declaration scope keeps private names and interface dynamic
-// types intact while every call allocates fresh composite storage.
+// types intact while every call allocates fresh composite storage. The double
+// underscore keeps (type, field) pairs like A_B.C and A.B_C distinct.
 func defaultFactoryName(typeName, field string) string {
-	return "LogosDefault_" + typeName + "_" + field
+	return "LogosDefault_" + typeName + "__" + field
+}
+
+// defaultFactorySkips computes the package-level set of "Owner.Field" pairs
+// that must not reference a generated factory: generated names colliding with
+// each other or with an existing package-scope declaration. The set derives
+// only from checker data, so every file lowering sees the same plan.
+func (pl *packageLower) defaultFactorySkips() map[string]bool {
+	if pl.factoryPlan != nil {
+		return pl.factoryPlan
+	}
+	pl.factoryPlan = map[string]bool{}
+	taken := map[string]string{}
+	if pl.info != nil {
+		for _, defs := range pl.info.LogosFieldDefaults {
+			for _, d := range defs {
+				if d.Owner == "" || d.Field == "_" {
+					continue
+				}
+				key := d.Owner + "." + d.Field
+				fname := defaultFactoryName(d.Owner, d.Field)
+				if prev, dup := taken[fname]; dup && prev != key {
+					pl.factoryPlan[key] = true
+					pl.factoryPlan[prev] = true
+					continue
+				}
+				taken[fname] = key
+			}
+		}
+	}
+	if pl.tpkg != nil && pl.tpkg.Scope() != nil {
+		for fname, key := range taken {
+			if pl.tpkg.Scope().Lookup(fname) != nil {
+				pl.factoryPlan[key] = true
+			}
+		}
+	}
+	return pl.factoryPlan
 }
 
 func (fl *fileLower) stripFieldDefaults(st *syntax.StructType, stripped map[*syntax.FieldDefault]bool, typeNames map[*syntax.StructType]*syntax.TypeDecl) {
+	skips := fl.pkg.defaultFactorySkips()
 	td := typeNames[st]
 	var tparams string
 	if td != nil && td.Name != nil && len(td.TParamList) > 0 {
@@ -84,6 +123,9 @@ func (fl *fileLower) stripFieldDefaults(st *syntax.StructType, stripped map[*syn
 		}
 		// Grouped fields (A, B int = v) share one FieldDefault: each name
 		// still needs its own factory.
+		if skips[td.Name.Value+"."+f.Name.Value] {
+			continue
+		}
 		text := "func " + defaultFactoryName(td.Name.Value, f.Name.Value) + tparams +
 			"() " + renderExpr(fd.Type) + " {\n\treturn " + renderExpr(fd.Default) + "\n}\n"
 		fl.addGeneratedDecls(fd.Pos(), text)
@@ -204,6 +246,7 @@ func (fl *fileLower) structDefaultsFor(lit *syntax.CompositeLit) ([]string, []st
 			qual = n.Value + "."
 		}
 	}
+	skips := fl.pkg.defaultFactorySkips()
 	call := func(d types2.LogosFieldDefault) string {
 		return qual + defaultFactoryName(d.Owner, d.Field) + targs + "()"
 	}
@@ -212,7 +255,7 @@ func (fl *fileLower) structDefaultsFor(lit *syntax.CompositeLit) ([]string, []st
 		texts := make([]string, 0, len(defs))
 		for _, d := range defs {
 			names = append(names, d.Field)
-			if d.Owner != "" {
+			if d.Owner != "" && d.Field != "_" && !skips[d.Owner+"."+d.Field] {
 				texts = append(texts, call(d))
 			} else {
 				texts = append(texts, renderExpr(d.Default))

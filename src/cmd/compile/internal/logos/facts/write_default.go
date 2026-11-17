@@ -37,7 +37,7 @@ func writeDefaults(pkg *types2.Package, info *types2.Info, f *Facts) {
 			// names and interface dynamic types stay bound where declared.
 			// The owner, not the scope name, names the declaring type, so a
 			// defined type over the same struct resolves the real factory.
-			add(DefaultFact{Type: name, Field: d.Field, Text: "LogosDefault_" + d.Owner + "_" + d.Field})
+			add(DefaultFact{Type: name, Field: d.Field, Text: "LogosDefault_" + d.Owner + "__" + d.Field})
 		}
 	}
 }
