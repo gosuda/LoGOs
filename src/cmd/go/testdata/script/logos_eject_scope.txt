@@ -1,0 +1,95 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+cd m
+
+logos run .
+cp stdout $WORK/native.txt
+
+
+logos eject -o out
+
+exists out/main.go
+exists out/go.mod
+exists out/assets/z.txt
+exists out/testdata/keep.txt
+
+# Dot and underscore trees are not packages, but they are module files:
+# //go:embed can reach them, so they must be copied.
+exists out/.cache/x.txt
+exists out/_scratch/y.txt
+exists out/.hidden.txt
+exists out/_data.txt
+exists out/static/.well-known/x.txt
+
+# A directory holding its own go.mod is another module and stays out,
+# including one nested under testdata.
+! exists out/other
+! exists out/other/go.mod
+! exists out/testdata/nested
+! exists out/.git
+
+cd out
+go build ./...
+go run .
+cp stdout $WORK/ejected.txt
+cmp $WORK/native.txt $WORK/ejected.txt
+
+-- m/go.mod --
+module example.com/ejectscope
+
+go 1.27
+-- m/main.lgo --
+// Command ejectscope exercises eject over a module tree that holds
+// foreign directories.
+package main
+
+import (
+	_ "embed"
+	"fmt"
+)
+
+//go:embed _data.txt
+var data string
+
+//go:embed .hidden.txt
+var hidden string
+
+//go:embed all:static
+var static string
+
+func main() {
+	fmt.Print(data)
+	fmt.Print(hidden)
+	fmt.Print(static)
+	fmt.Println("scoped eject")
+}
+-- m/_data.txt --
+underscore data
+
+-- m/.hidden.txt --
+hidden data
+
+-- m/static/.well-known/x.txt --
+well-known
+
+-- m/other/go.mod --
+module example.com/foreign
+
+go 1.27
+-- m/other/foreign.go --
+package foreign
+-- m/.cache/x.txt --
+cache
+-- m/_scratch/y.txt --
+scratch
+-- m/assets/z.txt --
+asset
+-- m/testdata/keep.txt --
+kept
+-- m/testdata/nested/go.mod --
+module example.com/testdata-nested
+
+go 1.27
+-- m/testdata/nested/inner.go --
+package inner

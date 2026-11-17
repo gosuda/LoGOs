@@ -1134,11 +1134,13 @@ func ejectSkipDir(modDir, outAbs, out string) string {
 
 // copyModuleTree copies the non-loGo/s files of one module: every
 // regular file except .git contents, logos.toml files, loGo/s sources
-// (emitted separately), and the skip subtree (the destination when it
-// sits inside the module). Symlinks and special files stay out, so a
-// link can never pull outside bytes into the tree. It reports whether
-// any copied Go file imports the loGo/s support packages, which the
-// copy remapped to the shared support module.
+// (emitted separately), the skip subtree (the destination when it
+// sits inside the module), and directories that hold their own go.mod
+// (a nested module is not part of this module). Symlinks and special
+// files stay out, so a link can never pull outside bytes into the
+// tree. It reports whether any copied Go file imports the loGo/s
+// support packages, which the copy remapped to the shared support
+// module.
 func copyModuleTree(srcRoot, dstRoot, skip string) bool {
 	uses := false
 	err := filepath.WalkDir(srcRoot, func(path string, d fs.DirEntry, err error) error {
@@ -1164,6 +1166,11 @@ func copyModuleTree(srcRoot, dstRoot, skip string) bool {
 					return filepath.SkipDir
 				}
 				return nil
+			}
+		}
+		if d.IsDir() {
+			if _, err := os.Stat(filepath.Join(path, "go.mod")); err == nil {
+				return filepath.SkipDir
 			}
 		}
 		if d.IsDir() {
