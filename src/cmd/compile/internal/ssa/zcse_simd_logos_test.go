@@ -136,9 +136,6 @@ func TestLogosZCSEStillHoistsScalarConstants(t *testing.T) {
 	}
 }
 
-// Each SIMD store is reachable only through its own guard. The first guard
-// also has a dominated duplicate, so ordinary CSE can share that zero without
-// crossing either guard. Distinct destination arguments keep all stores live.
 func guardedSIMDZeroStores(c *Conf, vec *types.Type) fun {
 	return c.Fun("entry",
 		Bloc("entry",
