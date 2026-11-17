@@ -811,6 +811,7 @@ var logosMethods = map[string]bool{
 	"LogosAssertEffects":        true,
 	"SetLogosAssertEffects":     true,
 	"SetLogosReadonly":          true,
+	"logosCgoTypeName":          true,
 	"logosStructTupleIdentical": true,
 }
 var logosFuncs = map[string]bool{
@@ -890,7 +891,8 @@ var logosDecls = map[string]bool{
 	"logosMonoCyclicNamed":  true,
 }
 var logosFields = map[string]map[string]bool{
-	"Func": {"logosReadonly": true, "logosAssert": true},
+	"Func":       {"logosReadonly": true, "logosAssert": true},
+	"typeWriter": {"logosCgoPkg": true},
 }
 
 func stripLogosDecls(f *ast.File, drop func(from, to token.Pos)) {
