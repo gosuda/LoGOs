@@ -53,48 +53,13 @@ func (fl *fileLower) defaultTypeNames() map[*syntax.StructType]*syntax.TypeDecl 
 	return m
 }
 
-// defaultFactoryName is the generated declaration-scope binding for one
-// defaulted field. It is exported so ejected and cross-package consumers can
-// reference it; declaration scope keeps private names and interface dynamic
-// types intact while every call allocates fresh composite storage. The double
-// underscore keeps (type, field) pairs like A_B.C and A.B_C distinct.
-func defaultFactoryName(typeName, field string) string {
-	return "LogosDefault_" + typeName + "__" + field
-}
-
-// defaultFactorySkips computes the package-level set of "Owner.Field" pairs
-// that must not reference a generated factory: generated names colliding with
-// each other or with an existing package-scope declaration. The set derives
-// only from checker data, so every file lowering sees the same plan.
-func (pl *packageLower) defaultFactorySkips() map[string]bool {
-	if pl.factoryPlan != nil {
-		return pl.factoryPlan
-	}
-	pl.factoryPlan = map[string]bool{}
-	taken := map[string]string{}
-	if pl.info != nil {
-		for _, defs := range pl.info.LogosFieldDefaults {
-			for _, d := range defs {
-				if d.Owner == "" || d.Field == "_" {
-					continue
-				}
-				key := d.Owner + "." + d.Field
-				fname := defaultFactoryName(d.Owner, d.Field)
-				if prev, dup := taken[fname]; dup && prev != key {
-					pl.factoryPlan[key] = true
-					pl.factoryPlan[prev] = true
-					continue
-				}
-				taken[fname] = key
-			}
-		}
-	}
-	if pl.tpkg != nil && pl.tpkg.Scope() != nil {
-		for fname, key := range taken {
-			if pl.tpkg.Scope().Lookup(fname) != nil {
-				pl.factoryPlan[key] = true
-			}
-		}
+// defaultFactoryPlan resolves each owner.field default pair in this package
+// to the emitted factory symbol. Colliding or already-declared names get a
+// deterministic suffix inside facts.FactoryNamePlan, so the factory always
+// exists under the same name that fact rows export.
+func (pl *packageLower) defaultFactoryPlan() map[string]string {
+	if pl.factoryPlan == nil {
+		pl.factoryPlan = facts.FactoryNamePlan(pl.info, pl.tpkg)
 	}
 	return pl.factoryPlan
 }
@@ -115,7 +80,7 @@ func (fl *fileLower) importQualifier(pkg *types2.Package) string {
 }
 
 func (fl *fileLower) stripFieldDefaults(st *syntax.StructType, stripped map[*syntax.FieldDefault]bool, typeNames map[*syntax.StructType]*syntax.TypeDecl) {
-	skips := fl.pkg.defaultFactorySkips()
+	plan := fl.pkg.defaultFactoryPlan()
 	td := typeNames[st]
 	var tparams string
 	if td != nil && td.Name != nil && len(td.TParamList) > 0 {
@@ -145,10 +110,11 @@ func (fl *fileLower) stripFieldDefaults(st *syntax.StructType, stripped map[*syn
 		}
 		// Grouped fields (A, B int = v) share one FieldDefault: each name
 		// still needs its own factory.
-		if skips[td.Name.Value+"."+f.Name.Value] {
+		fname := plan[td.Name.Value+"."+f.Name.Value]
+		if fname == "" {
 			continue
 		}
-		text := "func " + defaultFactoryName(td.Name.Value, f.Name.Value) + tparams +
+		text := "func " + fname + tparams +
 			"() " + renderExpr(fd.Type) + " {\n\treturn " + renderExpr(fd.Default) + "\n}\n"
 		fl.addGeneratedDecls(fd.Pos(), text)
 	}
@@ -265,20 +231,36 @@ func (fl *fileLower) structDefaultsFor(lit *syntax.CompositeLit) ([]string, []st
 	if obj != nil {
 		qual = fl.importQualifier(obj.Pkg())
 	}
-	skips := fl.pkg.defaultFactorySkips()
+	plan := fl.pkg.defaultFactoryPlan()
 	call := func(d types2.LogosFieldDefault) string {
-		return qual + defaultFactoryName(d.Owner, d.Field) + targs + "()"
+		fname := plan[d.Owner+"."+d.Field]
+		if fname == "" {
+			return renderExpr(d.Default)
+		}
+		// The factory's type parameters belong to the owner type. A literal
+		// naming the owner itself supplies matching type arguments; a type
+		// defined over the owner's struct resolves the plain factory when it
+		// is not generic, and otherwise falls back to the default's text.
+		var ownerObj types2.Object
+		if fl.pkg.tpkg != nil && fl.pkg.tpkg.Scope() != nil {
+			ownerObj = fl.pkg.tpkg.Scope().Lookup(d.Owner)
+		}
+		if obj == ownerObj {
+			return qual + fname + targs + "()"
+		}
+		if tn, ok := ownerObj.(*types2.TypeName); ok {
+			if on, ok := tn.Type().(*types2.Named); !ok || on.TypeParams().Len() == 0 {
+				return qual + fname + "()"
+			}
+		}
+		return renderExpr(d.Default)
 	}
 	if defs := fl.pkg.info.LogosFieldDefaults[st]; len(defs) > 0 {
 		names := make([]string, 0, len(defs))
 		texts := make([]string, 0, len(defs))
 		for _, d := range defs {
 			names = append(names, d.Field)
-			if d.Owner != "" && d.Field != "_" && !skips[d.Owner+"."+d.Field] {
-				texts = append(texts, call(d))
-			} else {
-				texts = append(texts, renderExpr(d.Default))
-			}
+			texts = append(texts, call(d))
 		}
 		return names, texts
 	}
@@ -291,10 +273,31 @@ func (fl *fileLower) structDefaultsFor(lit *syntax.CompositeLit) ([]string, []st
 	}
 	var names, texts []string
 	for _, d := range imp.Defaults {
-		if d.Type == obj.Name() {
-			names = append(names, d.Field)
-			texts = append(texts, qual+d.Text+targs+"()")
+		if d.Type != obj.Name() {
+			continue
 		}
+		// The factory's type parameters belong to the declaring (owner)
+		// type, which rides in front of the symbol in the fact text. A
+		// literal naming the owner itself supplies matching arguments;
+		// a defined-over literal takes the plain factory. When the owner
+		// is generic the bare call cannot infer its parameters, which
+		// surfaces the unsupported defined-over-generic case as a build
+		// error rather than a silent wrong value.
+		owner, sym, _ := strings.Cut(d.Text, "/")
+		if sym == "" {
+			sym = owner
+			owner = ""
+		}
+		var ownerObj types2.Object
+		if owner != "" && obj.Pkg().Scope() != nil {
+			ownerObj = obj.Pkg().Scope().Lookup(owner)
+		}
+		text := qual + sym + "()"
+		if ownerObj == obj {
+			text = qual + sym + targs + "()"
+		}
+		names = append(names, d.Field)
+		texts = append(texts, text)
 	}
 	return names, texts
 }

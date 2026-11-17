@@ -159,7 +159,7 @@ type packageLower struct {
 	jsonUnionKeys      map[string]bool
 	freezeCopiers      []freezeEntry
 	freezeSeq          int
-	factoryPlan        map[string]bool
+	factoryPlan        map[string]string
 }
 
 // fileLower carries the state of lowering one file.

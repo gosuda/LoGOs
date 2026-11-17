@@ -20,6 +20,8 @@ stdout '^box: 8080$'
 stdout '^elx: 8080$'
 stdout '^elp: 8080$'
 stdout '^names: 11 22$'
+stdout '^gen: 8080$'
+stdout '^coll: 3 5$'
 cd ..
 
 -- w/go.work --
@@ -66,6 +68,20 @@ type A_B struct {
 
 type A struct {
 	B_C int = 22
+}
+
+type G[T any] Config
+
+// A defined type over a generic instantiation (DbBox over Box[string])
+// still records defaults, but calling the owner's parameterized factory
+// cannot infer T, so literals of it fail loudly instead of silently
+// dropping the default.
+type DbBox Box[string]
+
+func LogosDefault_Solo__F() int { return 5 }
+
+type Solo struct {
+	F int = 3
 }
 
 func Kind() string {
@@ -139,4 +155,7 @@ func main() {
 	fmt.Println("elx:", el[0].Port)
 	fmt.Println("elp:", cfg.Elided())
 	fmt.Println("names:", cfg.A_B{}.C, cfg.A{}.B_C)
+	g := cfg.G[int]{}
+	fmt.Println("gen:", g.Port)
+	fmt.Println("coll:", cfg.Solo{}.F, cfg.LogosDefault_Solo__F())
 }
