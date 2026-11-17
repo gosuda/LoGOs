@@ -5,7 +5,11 @@ cd probe
 logos test .
 logos eject -o $WORK/ejected
 cd $WORK/ejected
-go test .
+exists $UPROOT1272/bin/go
+exec env -u GOROOT $UPROOT1272/bin/go test -count=1 -v ./...
+stdout '^--- PASS: TestFields '
+stdout '^--- PASS: TestExternalFields '
+! stdout '^--- FAIL'
 
 -- probe/go.mod --
 module example.com/comptimetest
