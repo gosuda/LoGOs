@@ -6,17 +6,41 @@ package types_test
 
 import "bytes"
 
-// goTypesPanicSource drops the loGo/s void-panic hook when generating
-// go/types. Compiler types2 calls logosRecordVoidPanic after the upstream
-// guard so option narrowing sees panic calls in functions without results;
-// public go/types has neither that mode nor its flag. The exact source shape
-// must occur once so a future checker edit fails closed.
+// goTypesPanicSource strips the LoGOs panic-recording hook when generating
+// go/types. Compiler types2 calls check.logosRecordVoidPanic to record
+// resultless panic calls for LoGOs option narrowing; public go/types has
+// neither that mode nor the hook. The exact source shape must occur once so a
+// future checker edit fails closed.
 func goTypesPanicSource(src []byte) []byte {
-	const logos = `			p[call] = true
+	const logos = `	case _Panic:
+		// panic(x)
+		// record panic call if inside a function with result parameters
+		// (for use in Checker.isTerminating)
+		if check.sig != nil && check.sig.results.Len() > 0 {
+			// function has result parameters
+			p := check.isPanic
+			if p == nil {
+				// allocate lazily
+				p = make(map[*syntax.CallExpr]bool)
+				check.isPanic = p
+			}
+			p[call] = true
 		}
 		check.logosRecordVoidPanic(call)
 `
-	const upstream = `			p[call] = true
+	const upstream = `	case _Panic:
+		// panic(x)
+		// record panic call if inside a function with result parameters
+		// (for use in Checker.isTerminating)
+		if check.sig != nil && check.sig.results.Len() > 0 {
+			// function has result parameters
+			p := check.isPanic
+			if p == nil {
+				// allocate lazily
+				p = make(map[*syntax.CallExpr]bool)
+				check.isPanic = p
+			}
+			p[call] = true
 		}
 `
 	if bytes.Count(src, []byte(logos)) != 1 {
