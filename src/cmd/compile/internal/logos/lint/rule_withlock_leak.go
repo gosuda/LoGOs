@@ -441,6 +441,9 @@ func (c *leakCheck) carriesPtr(e syntax.Expr) bool {
 			}
 			if sel, ok := p.(*syntax.SelectorExpr); ok {
 				if operand, ok := sel.X.(*syntax.Name); ok && operand == name {
+					if !addrTaken(e, sel) && c.scalarConsumed(e, sel) {
+						return true
+					}
 					if !addrTaken(e, sel) && !c.fieldLeaks(sel) {
 						return true
 					}
@@ -451,6 +454,29 @@ func (c *leakCheck) carriesPtr(e syntax.Expr) bool {
 		return false
 	})
 	return found
+}
+
+// scalarConsumed reports whether the result of sel feeds only into an
+// expression that produces a scalar value, so the borrowed reference
+// itself cannot escape: builtin len/cap or a boolean-producing operation
+// such as a nil comparison.
+func (c *leakCheck) scalarConsumed(e syntax.Node, sel *syntax.SelectorExpr) bool {
+	switch p := leakParent(e, sel).(type) {
+	case *syntax.CallExpr:
+		fn, ok := syntax.Unparen(p.Fun).(*syntax.Name)
+		if !ok {
+			return false
+		}
+		b, ok := c.pass.Info.Uses[fn].(*types2.Builtin)
+		return ok && (b.Name() == "len" || b.Name() == "cap")
+	case *syntax.Operation:
+		switch p.Op {
+		case syntax.Eql, syntax.Neq, syntax.Lss, syntax.Leq, syntax.Gtr, syntax.Geq,
+			syntax.AndAnd, syntax.OrOr, syntax.Not:
+			return true
+		}
+	}
+	return false
 }
 
 func addrTaken(e syntax.Node, sel *syntax.SelectorExpr) bool {
@@ -541,7 +567,10 @@ func (c *leakCheck) operandEscapes(e syntax.Expr) bool {
 		}
 		return !c.locals[obj]
 	case *syntax.SelectorExpr, *syntax.IndexExpr:
-		return true
+		// A field or element rooted at the callback parameter updates the
+		// locked state in place; that is what WithLock is for. Only a chain
+		// rooted elsewhere can store the borrowed reference outside.
+		return !c.rootedAtBorrowed(e)
 	case *syntax.Operation:
 		return c.operandEscapes(syntax.Unparen(x.X))
 	case *syntax.ListExpr:
