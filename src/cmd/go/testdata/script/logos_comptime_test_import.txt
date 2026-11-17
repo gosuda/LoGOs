@@ -1,0 +1,50 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+cd probe
+logos test .
+logos eject -o $WORK/ejected .
+cd $WORK/ejected
+go test .
+
+-- probe/go.mod --
+module example.com/comptimetest
+
+go 1.27
+-- probe/fields_test.lgo --
+package comptimetest
+
+import (
+	"comptime"
+	"testing"
+)
+
+type Pair struct {
+	A int
+	B string
+}
+
+func TestFields(t *testing.T) {
+	if n := len(comptime.Fields[Pair]()); n != 2 {
+		t.Fatalf("got %d fields, want 2", n)
+	}
+}
+-- probe/xfields_test.lgo --
+package comptimetest_test
+
+import (
+	"comptime"
+	"testing"
+)
+
+type Triple struct {
+	A int
+	B string
+	C bool
+}
+
+func TestExternalFields(t *testing.T) {
+	if n := len(comptime.Fields[Triple]()); n != 3 {
+		t.Fatalf("got %d fields, want 3", n)
+	}
+}
