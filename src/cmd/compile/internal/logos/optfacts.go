@@ -6,6 +6,7 @@ package logos
 
 import (
 	"fmt"
+	"go/token"
 	"maps"
 	"slices"
 	"strings"
@@ -127,7 +128,11 @@ func ApplyReadonlyFactsInPlace(pkg *types2.Package, readonlys []facts.ReadonlyFa
 			return fmt.Errorf("logos: bad readonly path %q (want at least one M<name> step)", r.Path)
 		}
 		var base types2.Type
-		if obj := pkg.Scope().Lookup(r.Object); obj != nil {
+		var obj types2.Object
+		if token.IsIdentifier(r.Object) {
+			obj = pkg.Scope().Lookup(r.Object)
+		}
+		if obj != nil {
 			switch o := obj.(type) {
 			case *types2.TypeName:
 				base = o.Type()
@@ -162,6 +167,20 @@ func ApplyReadonlyFactsInPlace(pkg *types2.Package, readonlys []facts.ReadonlyFa
 	return nil
 }
 
+// packageDeclNames excludes names that can never be package-level objects
+// before a scope lookup can resolve them. Imported scopes also hold lazy
+// hoisted local types (local·1) and method symbols (Type.Method). A generic
+// local type needs its enclosing dictionary, which the public type importer
+// forbids (internal compiler error: unexpected object with N implicit type
+// parameters). Methods are reached through their declaring types instead.
+// Package-level names that are not plain identifiers, like midway's SIMD
+// specializations "init@simd128", are kept.
+func packageDeclNames(pkg *types2.Package) []string {
+	return slices.DeleteFunc(pkg.Scope().Names(), func(name string) bool {
+		return strings.ContainsAny(name, ".·")
+	})
+}
+
 func checkedAssertMask(mask string, arity int) ([]byte, error) {
 	top, ok := facts.HighestAssertBit(mask)
 	if !ok {
@@ -183,19 +202,7 @@ func reachableFuncFactObjects(pkg *types2.Package) map[string]*types2.Func {
 	refs := make(map[types2.Type]bool)
 	seen := make(map[types2.Type]bool)
 	visit := func(t types2.Type) { graph.references(t, refs, seen) }
-	for _, name := range pkg.Scope().Names() {
-		// Only package-level objects can be fact targets or
-		// reachability roots. Names that cannot be package-level are
-		// skipped: method-qualified names ("T.m") and function-local
-		// objects mangled as "entry·1". Resolving a local type declared
-		// inside a generic function reads its implicit type parameters,
-		// which the importer format forbids (internal compiler error:
-		// unexpected object with N implicit type parameter(s)).
-		// Package-level names that are not plain identifiers, like
-		// midway's SIMD specializations "init@simd128", are kept.
-		if strings.ContainsAny(name, ".·") {
-			continue
-		}
+	for _, name := range packageDeclNames(pkg) {
 		obj := pkg.Scope().Lookup(name)
 		if fn, ok := obj.(*types2.Func); ok {
 			objects[name] = fn.Origin()
@@ -440,10 +447,7 @@ func clonePackageWithOverlays(orig *types2.Package, byObj map[string][]qualPath,
 	if err := graph.prepare(); err != nil {
 		return nil, err
 	}
-	for _, name := range orig.Scope().Names() {
-		if strings.Contains(name, ".") {
-			continue
-		}
+	for _, name := range packageDeclNames(orig) {
 		if err := insertOverlayDecl(out, graph, byObj, readonly, assert, name); err != nil {
 			return nil, err
 		}
@@ -1640,10 +1644,7 @@ func ifaceHasMethod(t types2.Type, name string, seen map[types2.Type]bool) bool 
 }
 
 func (g *overlayGraph) prepare() error {
-	for _, name := range g.orig.Scope().Names() {
-		if strings.Contains(name, ".") {
-			continue
-		}
+	for _, name := range packageDeclNames(g.orig) {
 		obj := g.orig.Scope().Lookup(name)
 		g.routeObject(name, obj.Type())
 		g.routeReadonlyObject(name, obj.Type())
@@ -1660,10 +1661,7 @@ func (g *overlayGraph) prepare() error {
 		slices.Sort(paths)
 		g.readonlyPaths[name] = paths
 	}
-	for _, name := range g.orig.Scope().Names() {
-		if strings.Contains(name, ".") {
-			continue
-		}
+	for _, name := range packageDeclNames(g.orig) {
 		g.references(g.orig.Scope().Lookup(name).Type(), make(map[types2.Type]bool), make(map[types2.Type]bool))
 	}
 	for {

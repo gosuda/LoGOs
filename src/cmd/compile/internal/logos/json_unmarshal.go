@@ -123,8 +123,27 @@ func (js *jsonStruct) valueLines(f *jsonField) []string {
 			if isExactNumber(f.typ) {
 				return []string{fmt.Sprintf("%s.FallbackQ(&_logos_s, &%s)", jsonAlias, field)}
 			}
-			if hasUnmarshalMethods(f.typ) {
-				return []string{fmt.Sprintf("_logos_s.Fallback(&%s)", field)}
+			if hasUnmarshalFrom(f.typ) {
+				var fallback []string
+				switch {
+				case hasUnmarshalJSON(f.typ):
+					fallback = js.quotedMethodCall(f, field, "QuotedJSON", "QuotedJSONPtr")
+				case hasUnmarshalText(f.typ):
+					fallback = js.quotedMethodCall(f, field, "QuotedText", "QuotedTextPtr")
+				default:
+					kind, ok := fallbackScalarKind(f.typ)
+					if !ok {
+						base.Fatalf("logos: ,string fallback field %s has no scalar kind", f.goName)
+					}
+					fallback = f.fallbackQuotedValueLines(field, kind)
+				}
+				return ifLines(js.quotedFromHead(f, field), fallback)
+			}
+			if hasUnmarshalJSON(f.typ) {
+				return js.quotedMethodCall(f, field, "QuotedJSON", "QuotedJSONPtr")
+			}
+			if hasUnmarshalText(f.typ) {
+				return js.quotedMethodCall(f, field, "QuotedText", "QuotedTextPtr")
 			}
 			if kind, ok := fallbackScalarKind(f.typ); ok {
 				return f.fallbackQuotedValueLines(field, kind)
@@ -135,6 +154,23 @@ func (js *jsonStruct) valueLines(f *jsonField) []string {
 		base.Fatalf("logos: unhandled shape kind %v for %s", f.shape.kind, f.goName)
 		return nil
 	}
+}
+
+func (js *jsonStruct) quotedMethodCall(f *jsonField, field, valueName, ptrName string) []string {
+	if p, isPtr := unaliasConstView(f.typ).(*types2.Pointer); isPtr {
+		elem := sourceTypeString(unaliasConstView(p.Elem()), js.qualify, js.holderPkg, js.cgoSource)
+		return []string{fmt.Sprintf("%s.%s[%s](&_logos_s, &%s)", jsonAlias, ptrName, elem, field)}
+	}
+	return []string{fmt.Sprintf("%s.%s(&_logos_s, &%s)", jsonAlias, valueName, field)}
+}
+
+func (js *jsonStruct) quotedFromHead(f *jsonField, field string) string {
+	if p, isPtr := unaliasConstView(f.typ).(*types2.Pointer); isPtr {
+		elem := sourceTypeString(unaliasConstView(p.Elem()), js.qualify, js.holderPkg, js.cgoSource)
+		return fmt.Sprintf("!%s.QuotedFromPtr[%s](&_logos_s, &%s)", jsonAlias, elem, field)
+	}
+	elem := sourceTypeString(unaliasConstView(f.typ), js.qualify, js.holderPkg, js.cgoSource)
+	return fmt.Sprintf("!%s.QuotedFrom[%s](&_logos_s, &%s)", jsonAlias, elem, field)
 }
 
 func (f *jsonField) fallbackQuotedValueLines(field string, kind scalarKind) []string {
@@ -165,7 +201,7 @@ type jsonUnionClass struct {
 }
 
 func (js *jsonStruct) unionMembersOf(utyp types2.Type) (jsonUnionClass, bool) {
-	members, names, ok := classifyUnionMembers(js.holderPkg, js.staticJSON, utyp, js.qualify)
+	members, names, ok := classifyUnionMembers(js.holderPkg, js.staticJSON, utyp, js.qualify, js.cgoSource)
 	if !ok || len(members) == 0 {
 		return jsonUnionClass{}, false
 	}
@@ -433,7 +469,7 @@ func (js *jsonStruct) unionContainerType(t types2.Type) string {
 	case *types2.Map:
 		return "map[" + js.unionContainerType(u.Key()) + "]" + js.unionContainerType(u.Elem())
 	}
-	return types2.TypeString(t, js.qualify)
+	return sourceTypeString(t, js.qualify, js.holderPkg, js.cgoSource)
 }
 
 func (js *jsonStruct) unionAddr(uc *unionContainer, target string) string {
@@ -542,10 +578,14 @@ func (js *jsonStruct) unionLevelLines(f *jsonField, cls jsonUnionClass, uc *unio
 
 func (f *jsonField) pointerLines(field string) []string {
 	fill := fmt.Sprintf("%s(&_logos_s, %s.Alloc(&%s))", f.codec().decodeFn(), jsonAlias, field)
-	if f.required >= 0 {
-		return []string{fill}
+	lines := []string{fill}
+	if f.required < 0 {
+		lines = ifElseLines("_logos_s.Null()", []string{field + " = nil"}, lines)
 	}
-	return ifElseLines("_logos_s.Null()", []string{field + " = nil"}, []string{fill})
+	if f.quoted {
+		return ifElseLines("_logos_s.QuotedNull()", []string{field + " = nil"}, lines)
+	}
+	return lines
 }
 
 func (js *jsonStruct) requiredCheck() []string {
@@ -639,7 +679,7 @@ func (js *jsonStruct) foreignKeyedMembers(f *jsonField) []unionMemberClass {
 		}
 		typ = uc.union
 	}
-	members, _, ok := classifyUnionMembers(js.holderPkg, js.staticJSON, typ, js.qualify)
+	members, _, ok := classifyUnionMembers(js.holderPkg, js.staticJSON, typ, js.qualify, js.cgoSource)
 	if !ok {
 		return nil
 	}
