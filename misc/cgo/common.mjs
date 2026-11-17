@@ -4,7 +4,7 @@
 
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { goFailureSummary } from "./check.mjs";
@@ -50,6 +50,22 @@ export function goEnv(experiment, extra = {}) {
     if (process.env[name]) env[name] = process.env[name];
   }
   return { ...env, ...extra };
+}
+
+export function toolPath(name) {
+  const value = process.env[name];
+  if (!value) throw new Error("required environment variable is missing: " + name);
+  const resolved = resolve(value);
+  const base = resolve(process.env.RUNNER_TEMP || "");
+  if (resolved !== value || !resolved.startsWith(base + "/")) {
+    throw new Error(name + " must be an absolute path inside RUNNER_TEMP");
+  }
+  try {
+    if (!statSync(resolved).isFile()) throw new Error("not a file");
+  } catch (e) {
+    throw new Error(name + " does not name an installed tool: " + resolved);
+  }
+  return resolved;
 }
 
 export function run(command, args, { env, cwd = root, log, allowFailure = false, timeout = 1800000 } = {}) {

@@ -5,10 +5,9 @@
 import { mkdirSync, readFileSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { assessRow, benchmarkRows, manifest, verdict } from "./check.mjs";
-import { root, go, experiments, goEnv, run, saveJSON, sha256, snapshot } from "./common.mjs";
+import { root, go, experiments, goEnv, run, saveJSON, sha256, snapshot, toolPath } from "./common.mjs";
 
 if (process.argv.length !== 3) throw new Error("usage: node benchmark.mjs EVIDENCE_DIRECTORY");
-if (!process.env.HYPERFINE) throw new Error("HYPERFINE must name the verified binary");
 const directory = resolve(process.argv[2]);
 const config = manifest(JSON.parse(readFileSync(join(root, "misc/cgo/manifest.json"), "utf8")));
 const fingerprint = snapshot(join(directory, "environment"));
@@ -35,7 +34,7 @@ const shellQuote = (value) => "'" + value.replaceAll("'", "'\\''") + "'";
 const benchmarkArgs = (name, duration) => ["-test.run=^$", "-test.bench=^" + name + "$",
   "-test.benchtime=" + duration, "-test.benchmem"];
 try {
-  run(process.env.HYPERFINE, ["--version"], { env: goEnv(experiments.off),
+  run(toolPath("HYPERFINE"), ["--version"], { env: goEnv(experiments.off),
     log: join(directory, "hyperfine-version") });
   for (const phase of phases) {
     const env = goEnv(phase.experiment, { GOMAXPROCS: "1", GOFLAGS: "-p=1" });
@@ -98,7 +97,7 @@ try {
       const log = join(out, phase.name);
       const timingPath = join(log, "hyperfine-export.json");
       const command = [build.binary, ...benchmarkArgs(name, iterations + "x")].map(shellQuote).join(" ");
-      run(process.env.HYPERFINE, ["--warmup", "3", "--min-runs", "10",
+      run(toolPath("HYPERFINE"), ["--warmup", "3", "--min-runs", "10",
         "--export-json", timingPath, command], { env: build.env, log: join(log, "hyperfine") });
       // The run() record and the export must not share a path: run() writes
       // <log>.json and would overwrite the hyperfine export before it is read.
