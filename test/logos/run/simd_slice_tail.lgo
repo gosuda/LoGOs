@@ -1,3 +1,5 @@
+//go:build unix
+
 // run -goexperiment simd
 
 package main
