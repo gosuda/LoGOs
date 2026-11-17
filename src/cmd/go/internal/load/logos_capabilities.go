@@ -18,6 +18,7 @@ import (
 	"cmd/go/internal/fsys"
 	"cmd/go/internal/imports"
 	"cmd/go/internal/logos/capabilities"
+	"cmd/go/internal/logos/settings"
 	"cmd/go/internal/modload"
 )
 
@@ -78,15 +79,41 @@ func checkLogosCapabilities(ld *modload.Loader, all []*Package) {
 	}
 	if sev == capabilities.Warn {
 		for _, v := range violations {
-			fmt.Fprintln(os.Stderr, capabilities.FormatWarning(v))
+			if settings.Current().JSON {
+				fmt.Fprintln(os.Stderr, capabilities.FormatJSON(v, "warn"))
+			} else {
+				fmt.Fprintln(os.Stderr, capabilities.FormatWarning(v))
+			}
 		}
 		return
 	}
-	var msgs []string
-	for _, v := range violations {
-		msgs = append(msgs, capabilities.FormatViolation(v))
+	byPath := make(map[string]*Package, len(all))
+	for _, p := range all {
+		if _, ok := byPath[p.ImportPath]; !ok {
+			byPath[p.ImportPath] = p
+		}
 	}
-	if carrier := firstMainPackage(all); carrier != nil {
+	jsonOut := settings.Current().JSON
+	msgsByCarrier := make(map[*Package][]string)
+	for _, v := range violations {
+		if jsonOut {
+			fmt.Fprintln(os.Stderr, capabilities.FormatJSON(v, "deny"))
+		}
+		// v.Chain[0] names the main-module package that heads the
+		// unauthorized import chain; blame it, not the first package
+		// alphabetically.
+		var carrier *Package
+		if len(v.Chain) > 0 {
+			carrier = byPath[v.Chain[0]]
+		}
+		if carrier == nil {
+			carrier = firstMainPackage(all)
+		}
+		if carrier != nil {
+			msgsByCarrier[carrier] = append(msgsByCarrier[carrier], capabilities.FormatViolation(v))
+		}
+	}
+	for carrier, msgs := range msgsByCarrier {
 		carrier.Error = &PackageError{Err: fmt.Errorf("%s", strings.Join(msgs, "\n"))}
 		carrier.Incomplete = true
 	}
