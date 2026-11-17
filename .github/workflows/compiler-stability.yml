@@ -78,6 +78,7 @@ jobs:
           "$RUNNER_TEMP/compiler-stability-c23-check" 2>&1 | tee -a "$evidence/c23.log"
           printf '%s\n' "$compiler_bin" >> "$GITHUB_PATH"
       - name: "Run focused compiler and command checks"
+        if: matrix.suite == 'focused'
         run: |
           evidence="$RUNNER_TEMP/compiler-stability-${{ matrix.suite }}"
           cd ..
