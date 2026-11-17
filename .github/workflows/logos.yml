@@ -132,7 +132,7 @@ jobs:
         run: |
           read -r -a packages <<< "$LOGOS_PACKAGES"
           ../.github/scripts/logos-test-env.sh go test -count=1 -short "${packages[@]}"
-          ../.github/scripts/logos-test-env.sh           ../.github/scripts/logos-test-env.sh go test -count=1 -short cmd/compile/internal/ssa
+          ../.github/scripts/logos-test-env.sh go test -count=1 -short cmd/compile/internal/ssa
           ../.github/scripts/logos-test-env.sh go test -count=1 cmd/compile/internal/test -run '^TestLogosScalarOptimizationRuntime$'
           for mode in 0 1; do
             GOARCH=386 CGO_ENABLED=0 ../.github/scripts/logos-test-env.sh go test -count=1 -gcflags="cmd/compile/internal/test/testdata/scalaropt=-d=logosopt=$mode,ssa/check/on" cmd/compile/internal/test/testdata/scalaropt
