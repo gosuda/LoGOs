@@ -85,15 +85,19 @@ func isIntegerType(t types2.Type) bool {
 	return ok && b.Info()&types2.IsInteger != 0
 }
 
+// spliceMakeLen wraps the product in _logos_rt.MulLen without covering the
+// operands: three boundary edits leave [start, opOff) and [yStart, yEnd) as
+// untouched source, so splices a later lowering records inside either operand
+// — a lambda, a property, a frozen operand — are still applied. A single
+// covering splice would drop them as orphans.
 func (fl *fileLower) spliceMakeLen(op *syntax.Operation) {
 	start := fl.off(syntax.StartPos(op))
 	opOff := fl.off(op.Pos())
 	yStart := fl.off(syntax.StartPos(op.Y))
 	yEnd := fl.operandEnd(yStart)
-	x := fl.textOf(span{start, opOff})
-	y := fl.textOf(span{opOff + len("*"), yEnd})
-	fl.addT(start, yEnd, cat(
-		gen("_logos_rt.MulLen("), x, gen(", "), y, gen(", "+strconv.Quote(renderExpr(op))+")")))
+	fl.addT(start, start, gen("_logos_rt.MulLen("))
+	fl.addT(opOff, opOff+len("*"), gen(","))
+	fl.addT(yEnd, yEnd, gen(", "+strconv.Quote(renderExpr(op))+")"))
 }
 
 func (fl *fileLower) operandEnd(from int) int {
