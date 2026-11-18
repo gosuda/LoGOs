@@ -1377,13 +1377,19 @@ func (c *cswLower) wrapConvs(body []syntax.Stmt, cs *cswCase, selWraps []span) (
 				// The wrapped receiver holds frozen operands: drain the
 				// pending splice and rebuild the cast around the text the
 				// inner subs spell, so the temps — not the original operands
-				// — appear inside any(...).
+				// — appear inside any(...). Each gap between subs is read
+				// through textOf so a splice recorded inside it — an option
+				// fallback, a conversion — survives in its lowered form
+				// instead of leaking logos-only syntax into the store text.
 				c.fl.textOf(w)
-				innerText := c.fl.srcUser(w.start, w.end).s
-				slices.SortFunc(inner, func(a, b lhsSub) int { return b.start - a.start })
+				slices.SortFunc(inner, func(a, b lhsSub) int { return a.start - b.start })
+				innerText := ""
+				cur := w.start
 				for _, s := range inner {
-					innerText = innerText[:s.start-w.start] + s.name + innerText[s.end-w.start:]
+					innerText += c.fl.textOf(span{cur, s.start}).s + s.name
+					cur = s.end
 				}
+				innerText += c.fl.textOf(span{cur, w.end}).s
 				kept := subs[:0]
 				for _, s := range subs {
 					if !(w.start <= s.start && s.end <= w.end) {
