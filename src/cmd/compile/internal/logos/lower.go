@@ -676,6 +676,7 @@ func (fl *fileLower) lowerFile() {
 	fl.lowerViewAs()      // comptime.ViewAs calls to the rt helper.
 	fl.lowerSpreads()     // `..src` spread elements.
 	fl.lowerChains()      // collection chains fused into loops.
+	fl.lowerMakeLen()     // products in make lengths to MulLen; sets needRT before the import; runs before func-lower so its splices predate caseBody text copies.
 	for _, decl := range fl.file.DeclList {
 		fn, ok := decl.(*syntax.FuncDecl)
 		if ok && fn.Body != nil {
@@ -689,7 +690,6 @@ func (fl *fileLower) lowerFile() {
 	fl.lowerTuples()     // tuples to structs, pack/unpack.
 	fl.lowerLambdas()    // lambdas to function literals.
 	fl.lowerProperties() // property accessors, selector lowering, prop facts.
-	fl.lowerMakeLen()    // products in make lengths to MulLen; sets needRT before the import.
 	fl.lowerFreezes()
 
 	fl.lowerStaticJSON() // generated MarshalJSON and UnmarshalJSON; sets needRT and needJSON before the imports.
