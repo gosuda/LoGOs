@@ -456,6 +456,24 @@ An explicit GOAMD64 or GOARM64 in the environment MUST win over the level that `
 The default binary MUST NOT run on x86 CPUs older than v3 [T-105].
 Self-aliased calls such as arr = Reverse(arr) MUST return correct results. [T-105]
 
+### 1.6 RFC-106: Concurrency monitor
+`logos conc run` MUST accept the arguments of `logos run`, and `logos conc test` MUST accept the arguments of `logos test` [T-106].
+`logos conc` MUST build the program with the build tag `logosconc` in addition to the build tags that the user gives [T-106].
+A build without the build tag `logosconc` MUST NOT contain the monitor, and an ejected module MUST NOT contain the monitor [T-106].
+`logos conc` MUST print each finding on standard error while the program runs [T-106].
+A finding MUST have a rule ID, a message, one or more source positions with the role of each position, and one fix hint [T-106].
+The text form of a finding MUST be the line `<file>:<line>: [<rule>] <message>`, then one line `<tab><file>:<line>: <role>` for each position, then the line `<tab>fix: <hint>` [T-106].
+With `--json-diagnostics`, `logos conc` MUST print each finding as one object of Section 14 with severity `deny` [T-106][T-Sec14].
+In that object, `file` and the two line fields of `span` MUST give the first position, the other fields of `span` MUST be 0, and the field `note` MUST hold the position lines and the fix line of the text form [T-106][T-Sec14].
+The exit status of `logos conc` MUST be the exit status of the program or of `logos test` when that status is not 0 [T-106].
+When that status is 0, the exit status MUST be 1 if `logos conc` printed a finding and 0 if it printed no finding [T-106].
+A finding line that `logos conc` cannot read MUST count as a finding [T-106].
+The monitor MUST report `conc::lock_order_inversion` when two goroutines took the same two `logos/sync.Locked` values in opposite orders, also when no goroutine waited [T-106].
+The monitor MUST NOT report `conc::lock_order_inversion` when one goroutine took the two values in the two orders [T-106].
+The monitor MUST report one pair of source positions only one time in one process [T-106].
+The monitor MUST discard the lock orders of a `Locked` value that the garbage collector has freed [T-106].
+`logos conc` MUST stop with an error on a system that has no named pipes [T-106].
+
 ## 2. Tier 2 specification
 
 This section defines the LoGOs type system: compile-time constants, pointers and options, unions and property interfaces, tuples and fixed-array operators, comptime expansion, and group concurrency.
