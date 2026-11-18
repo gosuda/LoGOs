@@ -5,7 +5,7 @@ cd m
 logos run .
 stdout '^n1$'
 stdout '^m1$'
-stdout 'https://example\.com/a 2'
+stdout '^https://example\.com/a 2 it.sb$'
 cp stdout $WORK/eject-stdout.txt
 
 logos eject -o out
