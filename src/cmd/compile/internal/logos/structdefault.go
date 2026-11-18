@@ -79,6 +79,13 @@ func (fl *fileLower) lowerTypeParamLits() {
 		fl.carryType(node, lit)
 		conv[lit] = node
 		texts[lit] = text
+		// The respelled node's positions all equal the literal's, so span
+		// walks (option wrap, group extents) would miscompute its extent;
+		// pin the literal's real span so a later wrap covers the whole
+		// respell and drains its splice into the wrap's fused text.
+		litSpan := span{fl.off(syntax.StartPos(lit)), fl.off(syntax.EndPos(lit)) + 1}
+		fl.wrapSpan[lit] = litSpan
+		fl.wrapSpan[node] = litSpan
 		return true
 	})
 	if len(conv) == 0 {
