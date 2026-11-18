@@ -100,5 +100,5 @@
     "TestCompileArenaFieldOffset/offset_unsafe.lgo/reconstruction"
   ],
   "negative_name": "TestArenaFieldOffset/offset_unsafe.go/protobuf_field_delta",
-  "negative_diagnostic": "keeps the address of a frame object as an integer the compiler cannot track"
+  "negative_diagnostic": "integer-only address arithmetic reported: [{Rule:correctness::arena_pointer_escape Severity:deny Pos:offset_unsafe.go:19:77 End:offset_unsafe.go:19:110 Message:uintptr(unsafe.Pointer(&frame.a)) keeps the address of a frame object as an integer the compiler cannot track; keep an unsafe.Pointer Note: Provenance:{OriginExpr: OriginLine:0 InferredType:} Fixes:[]}]"
 }

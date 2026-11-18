@@ -15,7 +15,7 @@ method_gate = native_gate.method_gate
 DIRECTORY = "logos-doc/validation/field-offset-lint"
 PRODUCTION = "src/cmd/compile/internal/logos/lint/rule_arena_pointer_escape.go"
 PACKAGE = "cmd/compile/internal/logos/lint"
-MANIFEST_SHA256 = "775c4b2f8bbfa79bcaa0234d15f09695d8c4c3f370ad39c26bde1d1064411f2b"
+MANIFEST_SHA256 = "568802a0e9a595c2c7b889fa1ed9366508de3820b2591aa76f15ca30430f2c0a"
 
 
 def frozen(repo: Path) -> tuple[tuple[str, ...], frozenset[str], str, str]:
