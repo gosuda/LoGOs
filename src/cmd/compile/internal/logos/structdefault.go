@@ -15,6 +15,10 @@ import (
 )
 
 func (fl *fileLower) lowerStructDefaults() {
+	// Respell marked zero literals first: the walk reaches literals inside
+	// field defaults before stripFieldDefaults orphans them, and fill/
+	// factory text then renders the respelled form on its own.
+	fl.lowerTypeParamLits()
 	stripped := make(map[*syntax.FieldDefault]bool)
 	typeNames := fl.defaultTypeNames()
 	syntax.Inspect(fl.file, func(n syntax.Node) bool {
@@ -26,7 +30,6 @@ func (fl *fileLower) lowerStructDefaults() {
 		}
 		return true
 	})
-	fl.lowerTypeParamLits()
 }
 
 // lowerTypeParamLits respells an empty composite literal the checker admitted
@@ -41,18 +44,12 @@ func (fl *fileLower) lowerTypeParamLits() {
 		if !ok || len(lit.ElemList) != 0 || !fl.pkg.info.LogosZeroLit[lit] {
 			return true
 		}
-		var spell string
-		if lit.Type != nil {
-			ts := span{fl.off(syntax.StartPos(lit.Type)), fl.off(syntax.EndPos(lit.Type))}
-			spell = fl.textOf(ts).s
-		} else {
-			spell = fl.typeSpell(fl.pkg.info.TypeOf(lit))
-		}
-		text := "*new(" + spell + ")"
+		text := fl.zeroLitSpell(lit)
 		node, ok := parseExprAt(text, lit.Pos())
 		if !ok {
 			base.Fatalf("logos: type parameter literal at %s cannot be respelled", lit.Pos().String())
 		}
+		fl.carryType(node, lit)
 		conv[lit] = node
 		texts[lit] = text
 		return true
@@ -65,10 +62,43 @@ func (fl *fileLower) lowerTypeParamLits() {
 		conv: conv,
 		wrap: func(x, r syntax.Expr) {
 			start := fl.off(leftmostOf(x))
-			fl.addT(start, fl.off(syntax.EndPos(x)), gen(texts[x]))
+			// EndPos of a composite literal is its `}` position, so +1 to
+			// cover it.
+			fl.addT(start, fl.off(syntax.EndPos(x))+1, gen(texts[x]))
 		},
 	}
 	w.node(fl.file)
+}
+
+// zeroLitSpell renders the source form a marked zero literal rewrites to:
+// *new(T), or [1](T){}[0] when a declaration in the file shadows the
+// builtin new (the array-index form names no identifier).
+func (fl *fileLower) zeroLitSpell(lit *syntax.CompositeLit) string {
+	var spell string
+	if lit.Type != nil {
+		start := fl.off(syntax.StartPos(lit.Type))
+		// The type ends at the last token before the literal's brace;
+		// EndPos of an index type drops its `]`.
+		spell = fl.textOf(span{start, lastTokenEnd(fl.src, start, fl.literalBrace(lit))}).s
+	} else {
+		spell = fl.typeSpell(fl.pkg.info.TypeOf(lit))
+	}
+	if fl.newShadowed() {
+		return "[1](" + spell + "){}[0]"
+	}
+	return "*new(" + spell + ")"
+}
+
+// newShadowed reports whether the file declares `new`: the builtin name
+// then resolves to the declaration inside its scope, so an emitted
+// *new(T) would call the declaration.
+func (fl *fileLower) newShadowed() bool {
+	for n := range fl.pkg.info.Defs {
+		if n.Value == "new" {
+			return true
+		}
+	}
+	return false
 }
 
 // renderDefault renders a field default expression, respelling a literal the
@@ -79,29 +109,13 @@ func (fl *fileLower) renderDefault(e syntax.Expr) string {
 	if !ok || !fl.pkg.info.LogosZeroLit[lit] {
 		return renderExpr(e)
 	}
-	var spell string
-	if lit.Type != nil {
-		spell = renderExpr(lit.Type)
-	} else {
-		spell = fl.typeSpell(fl.pkg.info.TypeOf(lit))
-	}
-	return "*new(" + spell + ")"
+	return fl.zeroLitSpell(lit)
 }
 
 // typeSpell renders a checked type with the file's import qualification, for
 // emitted code that must name it.
 func (fl *fileLower) typeSpell(typ types2.Type) string {
-	names := fl.importNames()
-	return types2.TypeString(typ, func(p *types2.Package) string {
-		if p == fl.pkg.tpkg {
-			return ""
-		}
-		q, ok := names[p]
-		if !ok {
-			base.Fatalf("logos: respelling type %s needs package %s, which the file does not import", types2.TypeString(typ, nil), p.Path())
-		}
-		return q
-	})
+	return types2.TypeString(typ, fl.typeQualifier())
 }
 
 // defaultTypeNames maps each package-level named struct type declaration in
