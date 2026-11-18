@@ -968,7 +968,12 @@ func (fl *fileLower) preLowerCaptureBody(lam *syntax.LambdaExpr) {
 			if ws, ok := fl.wrapSpan[syntax.Unparen(body)]; ok && ws.start <= espan.start && ws.end >= espan.end {
 				espan = ws
 			} else if call, ok := syntax.Unparen(body).(*syntax.CallExpr); ok {
-				espan = fl.callBodySpan(call)
+				// A generated call can carry an operand position with no
+				// source '(' after it, and a span narrower than the body
+				// would cut enclosing parens; keep the natural span then.
+				if cs, ok := fl.callBodySpanOr(call); ok && cs.start <= espan.start && cs.end >= espan.end {
+					espan = cs
+				}
 			}
 			if fl.optBodySpan == nil {
 				fl.optBodySpan = make(map[*syntax.LambdaExpr]span)
@@ -1378,7 +1383,7 @@ func (cg *chainGen) closure(name string, op chainOp, elem, result string) otext 
 		return cat(gen(name+" := func("+pname+" "+elem+") "+result+" {"), inner, gen(" }"))
 	}
 	if expr, ok := op.savedBody.(syntax.Expr); ok {
-		bodyText := fl.drainBodyWrapper(expr, fl.textOf(op.bodySpan))
+		bodyText := fl.drainBodyWrapper(expr, fl.textOf(op.bodySpan), op.bodySpan)
 		return cat(gen(name+" := func("+pname+" "+elem+") "+result+" { return "), bodyText, gen(" }"))
 	}
 	return gen("")
@@ -1579,7 +1584,7 @@ func (ce *chainEmit) argText(op chainOp) otext {
 	if op.arg == nil {
 		return gen("0")
 	}
-	return cg.fl.drainBodyWrapper(op.arg, cg.fl.textOf(op.argSpan))
+	return cg.fl.drainBodyWrapper(op.arg, cg.fl.textOf(op.argSpan), op.argSpan)
 }
 
 func (ce *chainEmit) filterLines(p, fname, cur string, i int) []string {
