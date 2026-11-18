@@ -278,7 +278,14 @@ func (check *Checker) logosOptSelect(x *operand, e *syntax.OptSelectExpr) exprKi
 		base, _, _ := logosReadonlyBase(opt.Elem)
 		_, throughReference := base.Underlying().(*Pointer)
 		if o := logosAsOption(obj.typ); o != nil {
-			rt = &Option{Elem: logosReadonlyProject(opt.Elem, o.Elem, false)}
+			// Rebuild the option only when the projection adds a qualification;
+			// an unchanged element keeps obj.typ so a named option preserves its
+			// identity and method set.
+			if projected := logosReadonlyProject(opt.Elem, o.Elem, false); projected != o.Elem {
+				rt = &Option{Elem: projected}
+			} else {
+				rt = obj.typ
+			}
 		} else {
 			rt = logosReadonlyProject(opt.Elem, obj.typ, throughReference)
 		}
