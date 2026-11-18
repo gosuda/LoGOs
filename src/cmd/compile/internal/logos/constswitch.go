@@ -857,13 +857,84 @@ func (c *cswLower) wrapConvs(body []syntax.Stmt, cs *cswCase) ([]syntax.Stmt, ot
 	for _, r := range recs {
 		recOf[r.e] = r
 	}
+	// cswLocalType reports whether t references a type declared inside the
+	// case body: a case-top alias for it would precede that declaration,
+	// while the spell resolves correctly at each use position because the
+	// emitted code stays in the scope the checker used.
+	var cswLocalType func(t types2.Type, seen map[types2.Type]bool) bool
+	cswLocalType = func(t types2.Type, seen map[types2.Type]bool) bool {
+		if t == nil || seen[t] {
+			return false
+		}
+		seen[t] = true
+		u := types2.Unalias(t)
+		if n, ok := u.(*types2.Named); ok {
+			if obj := n.Obj(); obj != nil && obj.Pos().IsKnown() &&
+				obj.Pos().FileBase() == c.fl.file.Pos().FileBase() {
+				if o := c.fl.off(obj.Pos()); cs.lo <= o && o < cs.hi {
+					return true
+				}
+			}
+			if args := n.TypeArgs(); args != nil {
+				for i := 0; i < args.Len(); i++ {
+					if cswLocalType(args.At(i), seen) {
+						return true
+					}
+				}
+			}
+			return false
+		}
+		switch x := u.(type) {
+		case *types2.Pointer:
+			return cswLocalType(x.Elem(), seen)
+		case *types2.Slice:
+			return cswLocalType(x.Elem(), seen)
+		case *types2.Array:
+			return cswLocalType(x.Elem(), seen)
+		case *types2.Map:
+			return cswLocalType(x.Key(), seen) || cswLocalType(x.Elem(), seen)
+		case *types2.Chan:
+			return cswLocalType(x.Elem(), seen)
+		case *types2.Struct:
+			for i := 0; i < x.NumFields(); i++ {
+				if cswLocalType(x.Field(i).Type(), seen) {
+					return true
+				}
+			}
+		case *types2.Tuple:
+			for i := 0; i < x.Len(); i++ {
+				if cswLocalType(x.At(i).Type(), seen) {
+					return true
+				}
+			}
+		case *types2.Signature:
+			return cswLocalType(x.Params(), seen) || cswLocalType(x.Results(), seen)
+		case *types2.Interface:
+			for i := 0; i < x.NumEmbeddeds(); i++ {
+				if cswLocalType(x.EmbeddedType(i), seen) {
+					return true
+				}
+			}
+			for i := 0; i < x.NumMethods(); i++ {
+				if cswLocalType(x.Method(i).Type(), seen) {
+					return true
+				}
+			}
+		}
+		return false
+	}
 	// spellFor names each destination type through a case-body alias: a
 	// declared or inferred type may spell an identifier a nested block
 	// shadows, and aliases mint lazily so assignments needing no rewrite
-	// never spell an unimported type.
+	// never spell an unimported type. A type declared inside the case body
+	// is spelled directly instead, since an alias at the case top would
+	// precede its declaration.
 	secAlias := map[string]string{}
 	spellFor := func(t types2.Type) string {
 		s := c.cswSpell(t)
+		if cswLocalType(t, map[types2.Type]bool{}) {
+			return s
+		}
 		if a, ok := secAlias[s]; ok {
 			return a
 		}
