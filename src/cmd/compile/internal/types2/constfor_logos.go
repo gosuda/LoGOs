@@ -450,6 +450,13 @@ func (check *Checker) logosFieldTypeType(e *syntax.SelectorExpr, x *operand) boo
 	check.usedVars[v] = true
 	x.expr = e
 	owner := check.logosFieldVars[v]
+	// The owning loop is recorded for bound and unbound f.Type alike so
+	// a case or tag can tell an outer loop's field (still varying per
+	// outer iteration) from the innermost loop's (concrete now).
+	if check.logosFieldTypeOwner == nil {
+		check.logosFieldTypeOwner = make(map[syntax.Expr]*LogosConstFor)
+	}
+	check.logosFieldTypeOwner[e] = owner
 	for b := check.logosFieldBind; b != nil; b = b.outer {
 		if owner == b.info {
 			x.mode_ = typexpr
@@ -463,10 +470,22 @@ func (check *Checker) logosFieldTypeType(e *syntax.SelectorExpr, x *operand) boo
 	}
 	x.mode_ = typexpr
 	x.typ_ = logosComptimeAny
-	if check.logosFieldTypeOwner == nil {
-		check.logosFieldTypeOwner = make(map[syntax.Expr]*LogosConstFor)
+	return true
+}
+
+// logosFieldTypePend reports whether a type read through owner's field
+// variable still varies per iteration: it does when the variable
+// belongs to an outer loop of the switch being checked (each outer
+// iteration re-checks the body with a different field) or when no
+// binding is on the stack (the generic single check). A field of the
+// innermost enclosing loop is concrete for this check.
+func (check *Checker) logosFieldTypePend(owner *LogosConstFor) bool {
+	if owner == nil {
+		return false
 	}
-	check.logosFieldTypeOwner[e] = owner
+	if b := check.logosFieldBind; b != nil && owner == b.info {
+		return false
+	}
 	return true
 }
 

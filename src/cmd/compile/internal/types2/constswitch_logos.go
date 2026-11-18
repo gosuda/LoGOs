@@ -53,10 +53,13 @@ func (check *Checker) logosConstSwitch(ctxt stmtContext, s *syntax.ConstSwitchSt
 	// this iteration only: cases that cannot match it are dead for the
 	// iteration, like copy-evaluation cases, not authoring errors.
 	fieldTag := check.logosFieldBind != nil && check.logosFieldBound[s.Targ]
-	// A tag resolved through an unbound field type is the comptime any:
-	// reachability defers to the instantiations that bind it.
-	tagPend := check.logosFieldTypeOwner[syntax.Unparen(s.Targ)] != nil
-	narrow := check.logosFieldTypeOwner[syntax.Unparen(s.Targ)]
+	// A tag resolved through an unbound field type, or through a field
+	// of an enclosing outer loop, is the comptime any or varies per
+	// outer iteration: reachability defers to the instantiations that
+	// bind it.
+	owner := check.logosFieldTypeOwner[syntax.Unparen(s.Targ)]
+	tagPend := check.logosFieldTypePend(owner)
+	narrow := owner
 	inner := ctxt &^ (fallthroughOk | finalSwitchCase | inTypeSwitch)
 	var seen []logosCaseInfo
 	for _, c := range s.Cases {
@@ -89,9 +92,17 @@ func (check *Checker) logosDeadCopyCase(c *syntax.ConstSwitchCase, tag Type, inf
 		return false
 	}
 	for i := range seen {
+		// A pending case resolves per iteration; it neither kills a
+		// later case nor is killed by an earlier one statically.
+		if seen[i].pend {
+			continue
+		}
 		if logosConstMatches(tag, seen[i].typ, seen[i].syn) {
 			return true
 		}
+	}
+	if info.pend {
+		return false
 	}
 	return !logosConstMatches(tag, info.typ, c)
 }
@@ -132,7 +143,7 @@ func (check *Checker) logosConstCase(c *syntax.ConstSwitchCase, tag Type) *logos
 		return nil
 	}
 	check.record(&x)
-	info := &logosCaseInfo{syn: c, typ: x.typ(), pend: check.logosFieldTypeOwner[syntax.Unparen(c.Type)] != nil}
+	info := &logosCaseInfo{syn: c, typ: x.typ(), pend: check.logosFieldTypePend(check.logosFieldTypeOwner[syntax.Unparen(c.Type)])}
 	if tpar, ok := tag.(*TypeParam); ok {
 		info.tpar = tpar
 	}
@@ -236,6 +247,12 @@ func (check *Checker) logosCaseShadowed(info *logosCaseInfo, seen []logosCaseInf
 }
 
 func (check *Checker) logosCaseCovered(info *logosCaseInfo, seen []logosCaseInfo, tag Type, fieldTag, tagPend bool) bool {
+	if info.pend {
+		// A pending case resolves only per iteration; whether earlier
+		// cases cover it varies with them, so it is never statically
+		// covered.
+		return false
+	}
 	if !fieldTag && info.kind == logosCaseExact && !check.logosCaseSatisfiable(info.typ, tag, tagPend) {
 		return true
 	}
@@ -325,9 +342,11 @@ func (check *Checker) logosConstCaseBody(ctxt stmtContext, c *syntax.ConstSwitch
 		ctxt |= logosConstSwitchContinue
 	}
 	ctxt &= ^(breakOk | continueOk)
-	if narrow != nil && !info.pend {
+	if narrow != nil && !info.pend && info.kind != logosCaseTilde {
 		// Inside `case T:` over an unbound f.Type, the field projects
-		// as T: the case runs only for fields of that type.
+		// as T: the case runs only for fields of that type. A ~T case
+		// matches named types with T's underlying type too, so the
+		// field stays its own type, not T.
 		old, had := check.logosFieldNarrow[narrow]
 		if check.logosFieldNarrow == nil {
 			check.logosFieldNarrow = make(map[*LogosConstFor]Type)
