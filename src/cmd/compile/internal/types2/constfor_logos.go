@@ -474,19 +474,31 @@ func (check *Checker) logosFieldTypeType(e *syntax.SelectorExpr, x *operand) boo
 }
 
 // logosFieldTypePend reports whether a type read through owner's field
-// variable still varies per iteration: it does when the variable
-// belongs to an outer loop of the switch being checked (each outer
-// iteration re-checks the body with a different field) or when no
-// binding is on the stack (the generic single check). A field of the
-// innermost enclosing loop is concrete for this check.
+// variable is unknown to this check: owner has no binding on the stack
+// (the generic single check). Any bound field — of the innermost loop
+// or of an outer one — resolves to a concrete type for this iteration.
 func (check *Checker) logosFieldTypePend(owner *LogosConstFor) bool {
 	if owner == nil {
 		return false
 	}
-	if b := check.logosFieldBind; b != nil && owner == b.info {
-		return false
+	for b := check.logosFieldBind; b != nil; b = b.outer {
+		if owner == b.info {
+			return false
+		}
 	}
 	return true
+}
+
+// logosFieldTypeVary reports whether a bound field variable belongs to
+// an outer loop of the switch being checked: its type is concrete for
+// this iteration but varies across outer iterations, so static case
+// coverage defers to each iteration while dead-case detection may use
+// the concrete type on hand.
+func (check *Checker) logosFieldTypeVary(owner *LogosConstFor) bool {
+	if owner == nil || check.logosFieldBind == nil {
+		return false
+	}
+	return owner != check.logosFieldBind.info
 }
 
 func (check *Checker) logosFieldProjExpr(x *operand, e *syntax.FieldProjExpr) {
