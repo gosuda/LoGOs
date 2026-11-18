@@ -1398,6 +1398,25 @@ func (c *cswLower) wrapConvs(body []syntax.Stmt, cs *cswCase, selWraps []span) (
 				}
 				subs = append(kept, lhsSub{w.start, w.end, "any(" + innerText + ").(" + cs.alias + ")"})
 			}
+			// Other pending splices inside the target — an option
+			// fallback's `??` lowering — would overlap the receive
+			// replacement that covers it, so drain and fold them into
+			// the store text. Inside a covering splice, a frozen
+			// operand's span still spells its temp: the splice's text
+			// holds the original expression, which would be evaluated a
+			// second time.
+			for _, sp := range c.fl.drainInner(span{lstart, lend}) {
+				text := sp.text
+				var kept []lhsSub
+				for _, s := range subs {
+					if sp.start <= s.start && s.end <= sp.end {
+						text = text[:s.start-sp.start] + s.name + text[s.end-sp.start:]
+						continue
+					}
+					kept = append(kept, s)
+				}
+				subs = append(kept, lhsSub{sp.start, sp.end, text})
+			}
 			slices.SortFunc(subs, func(a, b lhsSub) int { return b.start - a.start })
 			for _, s := range subs {
 				if s.start-lstart < 0 || s.end-lstart > len(lhsText.s) {

@@ -4,4 +4,7 @@ ok shadowed-local-type
 ok local-alias
 ok grouped-decl-alias
 ok clause-local-alias
+ok nested-clause-decl
+ok generic-alias-arg
+ok same-spell-siblings
 ok wrap-frozen-operand
