@@ -737,9 +737,61 @@ type logosImportSpec struct {
 	make  func(syntax.Pos) *syntax.ImportDecl
 }
 
+// rtReferenced reports whether the file's emitted text or mutated tree still
+// references the rt alias. Passes set needRT eagerly when they record a
+// reference, but a later removal — a dead const-if branch, a dropped case —
+// can erase every splice that carried it, and the bare flag would then emit
+// an unused import the build rejects.
+func (fl *fileLower) rtReferenced() bool {
+	needle := rtAlias + "."
+	if strings.Contains(fl.constText, needle) {
+		return true
+	}
+	for _, sp := range fl.splices {
+		if strings.Contains(sp.text, needle) {
+			return true
+		}
+	}
+	for _, r := range fl.regions {
+		for _, sp := range r.splices {
+			if strings.Contains(sp.text, needle) {
+				return true
+			}
+		}
+	}
+	for _, m := range fl.moves {
+		for _, sp := range m.inner {
+			if strings.Contains(sp.text, needle) {
+				return true
+			}
+		}
+	}
+	found := false
+	visit := func(n syntax.Node) bool {
+		if found {
+			return false
+		}
+		if sel, ok := n.(*syntax.SelectorExpr); ok {
+			if nm, ok := sel.X.(*syntax.Name); ok && nm.Value == rtAlias {
+				found = true
+				return false
+			}
+		}
+		return true
+	}
+	syntax.Inspect(fl.file, visit)
+	for _, d := range fl.siteDecls {
+		syntax.Inspect(d, visit)
+	}
+	for _, d := range fl.constDecls {
+		syntax.Inspect(d, visit)
+	}
+	return found
+}
+
 func (fl *fileLower) logosImportSpecs() []logosImportSpec {
 	specs := []logosImportSpec{
-		{fl.needRT, rtAlias, rtImportPath, rtImport},
+		{fl.needRT && fl.rtReferenced(), rtAlias, rtImportPath, rtImport},
 		{fl.needJSON, jsonAlias, jsonImportPath, jsonImport},
 		{fl.needReflect, reflectAlias, "reflect", reflectImport},
 	}
