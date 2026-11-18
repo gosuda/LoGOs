@@ -857,6 +857,16 @@ func (c *cswLower) wrapConvs(body []syntax.Stmt, cs *cswCase, selWraps []span) (
 	if len(recs) == 0 {
 		return decls, dtext
 	}
+	// clauses lists each comm clause holding a recorded operand, in
+	// record order; the alias pre-mint and the render loop share it.
+	var clauses []*syntax.CommClause
+	clauseSeen := make(map[*syntax.CommClause]bool)
+	for _, r := range recs {
+		if cc := clauseOf[r.e]; cc != nil && !clauseSeen[cc] {
+			clauseSeen[cc] = true
+			clauses = append(clauses, cc)
+		}
+	}
 	c.fl.needRT = true
 	recOf := make(map[syntax.Expr]rec, len(recs))
 	for _, r := range recs {
@@ -981,18 +991,18 @@ func (c *cswLower) wrapConvs(body []syntax.Stmt, cs *cswCase, selWraps []span) (
 	}
 	// spellFor names each destination type through a case-body alias: a
 	// declared or inferred type may spell an identifier a nested block
-	// shadows, and aliases mint lazily so assignments needing no rewrite
-	// never spell an unimported type. A spell naming a type declared
-	// inside the case body gets its alias right after that declaration
-	// instead of at the case top.
-	// Pinned aliases are emitted after the body walk: inserting a node
-	// into a statement list mid-walk shifts the slice the walk iterates.
+	// shadows. A spell naming a type declared inside the case body gets
+	// its alias right after that declaration instead of at the case top.
+	// The alias text is spliced at mint time: a use inside a boxed
+	// operand's span is composed into that operand's replacement by
+	// the next textOf, so the splice must exist before composition
+	// begins. Only the declaration node waits for the body walk:
+	// inserting it into a statement list mid-walk shifts the slice
+	// the walk iterates.
 	type pinnedAlias struct {
 		d    *syntax.DeclStmt
 		list *[]syntax.Stmt
 		stmt *syntax.DeclStmt
-		end  int
-		text string
 	}
 	var pinned []pinnedAlias
 	// secAlias dedupes by type, not spell: two types can spell the same
@@ -1013,7 +1023,8 @@ func (c *cswLower) wrapConvs(body []syntax.Stmt, cs *cswCase, selWraps []span) (
 			at(&syntax.TypeDecl{Name: nameOf(cs.syn.Case, a), Alias: true, Type: typ}, cs.syn.Case),
 		}}, cs.syn.Case)
 		if lt, ok := localTypeOf(t); ok {
-			pinned = append(pinned, pinnedAlias{d, lt.list, lt.stmt, lt.end, "\ntype " + a + " = " + s})
+			c.fl.addT(lt.end, lt.end, gen("\ntype "+a+" = "+s))
+			pinned = append(pinned, pinnedAlias{d, lt.list, lt.stmt})
 			return a
 		}
 		decls = append(decls, d)
@@ -1115,6 +1126,36 @@ func (c *cswLower) wrapConvs(body []syntax.Stmt, cs *cswCase, selWraps []span) (
 			return true
 		})
 	}
+	// Mint every alias the rewrites below will spell before the first
+	// expand: a pinned alias whose declaration sits inside a boxed
+	// operand's span must already be a pending splice so textOf drains
+	// it into the composed replacement. Minted later, it would survive
+	// as a sibling edit the covering replacement overlaps.
+	for _, r := range recs {
+		if clauseOf[r.e] != nil {
+			continue
+		}
+		if secondT, ok := multi[r.e]; ok {
+			spellFor(secondT)
+		}
+	}
+	for _, cc := range clauses {
+		as, ok := cc.Comm.(*syntax.AssignStmt)
+		if !ok || as.Op != 0 {
+			continue
+		}
+		var elems []syntax.Expr
+		if le, ok := as.Lhs.(*syntax.ListExpr); ok {
+			elems = le.ElemList
+		} else if as.Lhs != nil {
+			elems = []syntax.Expr{as.Lhs}
+		}
+		for _, l := range elems[1:] {
+			if t := c.info.TypeOf(l); t != nil {
+				spellFor(t)
+			}
+		}
+	}
 	// expand renders the span's source text with every recorded expression
 	// inside it boxed; nested recordings compose inside their outer boxes.
 	var expand func(start, end int) string
@@ -1163,14 +1204,8 @@ func (c *cswLower) wrapConvs(body []syntax.Stmt, cs *cswCase, selWraps []span) (
 	}
 	conv := make(map[syntax.Expr]syntax.Expr)
 	texts := make(map[syntax.Expr]otext)
-	var clauses []*syntax.CommClause
-	clauseSeen := make(map[*syntax.CommClause]bool)
 	for _, r := range recs {
-		if cc := clauseOf[r.e]; cc != nil {
-			if !clauseSeen[cc] {
-				clauseSeen[cc] = true
-				clauses = append(clauses, cc)
-			}
+		if clauseOf[r.e] != nil {
 			continue
 		}
 		contained := false
@@ -1463,11 +1498,11 @@ func (c *cswLower) wrapConvs(body []syntax.Stmt, cs *cswCase, selWraps []span) (
 		texts.WriteString("\n")
 		c.fl.addT(c.fl.off(cc.Colon)+1, c.fl.off(cc.Colon)+1, gen(freezeText.String()+texts.String()))
 	}
-	// Pinned aliases are emitted after the store walk: inserting a node
-	// into a statement list mid-walk shifts the slice the walk iterates.
+	// Pinned alias declarations insert after the store walk: inserting a
+	// node into a statement list mid-walk shifts the slice the walk
+	// iterates. Their text splices already went out at mint time.
 	emitPinned := func() {
 		for _, p := range pinned {
-			c.fl.addT(p.end, p.end, gen(p.text))
 			if i := slices.Index(*p.list, syntax.Stmt(p.stmt)); i >= 0 {
 				*p.list = slices.Insert(*p.list, i+1, syntax.Stmt(p.d))
 			}
