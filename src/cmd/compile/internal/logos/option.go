@@ -543,6 +543,9 @@ func (fl *fileLower) selectAccess(e *syntax.OptSelectExpr, native syntax.Expr, s
 
 func (fl *fileLower) spellLowered(t types2.Type) (string, bool) {
 	if o := fl.asOption(t); o != nil {
+		if _, named := types2.Unalias(t).(*types2.Named); named {
+			return fl.spellType(t)
+		}
 		if types2.LogosOptionIsBare(o.Elem) {
 			return fl.spellLowered(o.Elem)
 		}
@@ -1290,9 +1293,9 @@ func (fl *fileLower) lowerOptSelect(e *syntax.OptSelectExpr) syntax.Expr {
 	}
 	closure := fl.newGroupClosure(e)
 	xStart := fl.off(fl.optHeadStart(e.X))
-	nativeR, ejectR, ok := fl.spellLoweredBoth(ro, pos)
+	nativeR, ejectR, ok := fl.spellLoweredBoth(fl.optType(e), pos)
 	if !ok {
-		base.Fatalf("logos: cannot spell type %s of the ?. expression at %s", ro, pos.String())
+		base.Fatalf("logos: cannot spell type %s of the ?. expression at %s", fl.optType(e), pos.String())
 	}
 	rText := ejectR
 	openParen, closeParen := headerParens(e.X)
@@ -1316,6 +1319,21 @@ func (fl *fileLower) lowerOptSelect(e *syntax.OptSelectExpr) syntax.Expr {
 		acc, accSuffix = fl.selectAccessPresent(recv, e)
 	}
 	some, someHead, someTail := fl.wrapParts(acc, accessRec, ro, pos)
+	if obj != nil && accessRec == ro && !types2.LogosOptionIsBare(ro.Elem) {
+		if ft, ok := fl.spellLowered(obj.Type()); ok && ft != rText {
+			some = at(&syntax.CompositeLit{
+				Type: nativeR,
+				ElemList: []syntax.Expr{
+					at(&syntax.KeyValueExpr{Key: nameOf(pos, "Value"), Value: selOf(pos, acc, "Value")}, pos),
+					at(&syntax.KeyValueExpr{Key: nameOf(pos, "Present"), Value: selOf(pos, acc, "Present")}, pos),
+				},
+				NKeys:  2,
+				Rbrace: pos,
+			}, pos)
+			someHead = rText + "{Value: "
+			someTail = ".Value, Present: " + optTemp + accSuffix + ".Present}"
+		}
+	}
 	var none syntax.Expr
 	var noneT string
 	if types2.LogosOptionIsBare(ro.Elem) {
