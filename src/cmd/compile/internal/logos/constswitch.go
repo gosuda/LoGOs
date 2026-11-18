@@ -1334,16 +1334,40 @@ func (c *cswLower) wrapConvs(body []syntax.Stmt, cs *cswCase, selWraps []span) (
 					continue
 				}
 				inside := false
+				var inner []lhsSub
 				for _, s := range subs {
 					if w.start >= s.start && w.end <= s.end {
 						inside = true
 						break
 					}
+					if w.start <= s.start && s.end <= w.end {
+						inner = append(inner, s)
+					}
 				}
 				if inside {
 					continue
 				}
-				subs = append(subs, lhsSub{w.start, w.end, c.fl.textOf(w).s})
+				if len(inner) == 0 {
+					subs = append(subs, lhsSub{w.start, w.end, c.fl.textOf(w).s})
+					continue
+				}
+				// The wrapped receiver holds frozen operands: drain the
+				// pending splice and rebuild the cast around the text the
+				// inner subs spell, so the temps — not the original operands
+				// — appear inside any(...).
+				c.fl.textOf(w)
+				innerText := c.fl.srcUser(w.start, w.end).s
+				slices.SortFunc(inner, func(a, b lhsSub) int { return b.start - a.start })
+				for _, s := range inner {
+					innerText = innerText[:s.start-w.start] + s.name + innerText[s.end-w.start:]
+				}
+				kept := subs[:0]
+				for _, s := range subs {
+					if !(w.start <= s.start && s.end <= w.end) {
+						kept = append(kept, s)
+					}
+				}
+				subs = append(kept, lhsSub{w.start, w.end, "any(" + innerText + ").(" + cs.alias + ")"})
 			}
 			slices.SortFunc(subs, func(a, b lhsSub) int { return b.start - a.start })
 			for _, s := range subs {
