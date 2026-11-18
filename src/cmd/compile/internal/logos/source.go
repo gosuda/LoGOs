@@ -55,27 +55,88 @@ func tokenEnd(seg []byte, off int, kind token.Token, lit string) int {
 
 func scanSegment(src []byte, from, to int, visit func(tok) bool) {
 	seg := src[from:to]
-	fset := token.NewFileSet()
-	file := fset.AddFile("", fset.Base(), len(seg))
-	var s scanner.Scanner
-	s.Init(file, seg, nil, scanner.ScanComments)
-	for {
-		pos, kind, lit := s.Scan()
-		if kind == token.EOF {
-			return
-		}
-		off := file.Offset(pos)
-		t := tok{kind: kind, comment: kind == token.COMMENT}
-		if kind == token.SEMICOLON && lit == "\n" {
-			t.auto = true
-			t.span = span{from + off, from + off}
-		} else {
-			t.span = span{from + off, from + tokenEnd(seg, off, kind, lit)}
-		}
-		if !visit(t) {
-			return
+	// The Go scanner knows nothing of $"..." literals: it pairs each
+	// quote inside an interpolation hole as a string edge and leaks the
+	// hole's real parens and braces into the token stream. Merge every
+	// interp literal into one STRING token, resuming the scan after it.
+	for pos := 0; pos < len(seg); {
+		fset := token.NewFileSet()
+		file := fset.AddFile("", fset.Base(), len(seg)-pos)
+		var s scanner.Scanner
+		s.Init(file, seg[pos:], nil, scanner.ScanComments)
+		for {
+			p, kind, lit := s.Scan()
+			if kind == token.EOF {
+				return
+			}
+			off := file.Offset(p)
+			goff := pos + off
+			t := tok{kind: kind, comment: kind == token.COMMENT}
+			if kind == token.SEMICOLON && lit == "\n" {
+				t.auto = true
+				t.span = span{from + goff, from + goff}
+			} else {
+				t.span = span{from + goff, from + pos + tokenEnd(seg[pos:], off, kind, lit)}
+			}
+			if kind == token.ILLEGAL && lit == "$" && goff+1 < len(seg) &&
+				(seg[goff+1] == '"' || seg[goff+1] == '`') {
+				end := interpLitEnd(seg, goff+1)
+				t = tok{kind: token.STRING, span: span{from + goff, from + end}}
+				if !visit(t) {
+					return
+				}
+				pos = end
+				break
+			}
+			if !visit(t) {
+				return
+			}
 		}
 	}
+}
+
+// interpLitEnd returns the offset just past the $"..." or $`...`
+// literal whose quote is seg[off]. {expr} holes nest and hold ordinary
+// Go literals of their own; quoted escapes apply except in raw form.
+func interpLitEnd(seg []byte, off int) int {
+	q := seg[off]
+	depth := 0
+	for i := off + 1; i < len(seg); {
+		switch c := seg[i]; {
+		case c == '\\' && q != '`':
+			i += 2
+		case depth == 0 && c == q:
+			return i + 1
+		case c == '{':
+			depth++
+			i++
+		case depth > 0 && c == '}':
+			depth--
+			i++
+		case depth > 0 && (c == '"' || c == '\'' || c == '`'):
+			i = goLitEnd(seg, i)
+		default:
+			i++
+		}
+	}
+	return len(seg)
+}
+
+// goLitEnd returns the offset just past an ordinary Go string, rune, or
+// raw literal starting at seg[off].
+func goLitEnd(seg []byte, off int) int {
+	q := seg[off]
+	for i := off + 1; i < len(seg); {
+		switch c := seg[i]; {
+		case c == '\\' && q != '`':
+			i += 2
+		case c == q:
+			return i + 1
+		default:
+			i++
+		}
+	}
+	return len(seg)
 }
 
 func commentsIn(src []byte, from, to int) []span {
