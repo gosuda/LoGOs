@@ -1,0 +1,77 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+# A spread literal with a comment inside a two-target receive store
+# target: the store text must fold the spread closure through its moved
+# regions instead of slicing the generated text by source offsets, and
+# the frozen operands must run once.
+cd m
+logos run .
+cmp stdout want.txt
+ cp stdout $WORK/native-stdout.txt
+
+logos eject -o out
+exists out/main.go
+cd out
+go build ./...
+go run .
+cmp stdout $WORK/native-stdout.txt
+cd ../..
+
+-- m/go.mod --
+module example.com/csspreadstore
+
+go 1.27
+
+-- m/want.txt --
+store true once true
+-- m/main.lgo --
+package main
+
+import "fmt"
+
+type Holder struct {
+	Base bool
+	Ptr  *bool
+}
+
+var base = Holder{Base: true, Ptr: new(bool)}
+var ptrs = []*bool{new(bool)}
+var seq int
+
+func next() int {
+	seq++
+	return 0
+}
+
+type Word struct{}
+
+func (w Word) M() *bool { return &slot }
+
+var slot bool
+
+func spreadStore[T any](ch chan T) {
+	const switch T {
+	case interface{ M() *bool }:
+		var p interface{ M() *bool }
+		select {
+		case p, *Holder{
+			..base,
+			// The comment shifts the operands later in the source
+			// without appearing in the generated spread text.
+			Ptr: ptrs[next()],
+		}.Ptr = <-ch:
+			if p.M() != &slot {
+				fmt.Println("recv mismatch")
+			}
+		default:
+		}
+	}
+}
+
+func main() {
+	ch := make(chan Word, 1)
+	ch <- Word{}
+	spreadStore[Word](ch)
+	fmt.Println("store", *ptrs[0] == true, "once", seq == 1)
+}

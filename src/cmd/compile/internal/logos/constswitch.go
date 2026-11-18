@@ -1383,49 +1383,71 @@ func (c *cswLower) wrapConvs(body []syntax.Stmt, cs *cswCase, selWraps []span) (
 					continue
 				}
 				// The wrapped receiver holds frozen operands: drain the
-				// pending splice and rebuild the cast around the text the
-				// inner subs spell, so the temps — not the original operands
-				// — appear inside any(...). Each gap between subs is read
-				// through textOf so a splice recorded inside it — an option
-				// fallback, a conversion — survives in its lowered form
-				// instead of leaking logos-only syntax into the store text.
-				c.fl.textOf(w)
-				slices.SortFunc(inner, func(a, b lhsSub) int { return a.start - b.start })
-				innerText := ""
-				cur := w.start
+				// wrap's splice and substitute the temps into its composed
+				// text, so the temps — not the original operands — appear
+				// inside any(...). The composed text keeps every drain
+				// already folded into it — an option fallback's `??`
+				// lowering, a conversion — so their lowered forms survive;
+				// reading the raw gaps here would leak logos-only syntax
+				// into the store text, because wrapSelectors drained those
+				// splices into the cast when it built it.
+				wt := c.fl.textOf(w)
+				slices.SortFunc(inner, func(a, b lhsSub) int { return b.start - a.start })
 				for _, s := range inner {
-					innerText += c.fl.textOf(span{cur, s.start}).s + s.name
-					cur = s.end
+					at, ok := chunkOffsetOf(wt.chunks, s.start, s.end)
+					if !ok {
+						base.Fatalf("logos: const switch select target at %s: frozen operand [%d,%d) is not verbatim inside the cast text of [%d,%d)", l.Pos().String(), s.start, s.end, w.start, w.end)
+					}
+					wt.s = wt.s[:at] + s.name + wt.s[at+s.end-s.start:]
 				}
-				innerText += c.fl.textOf(span{cur, w.end}).s
 				kept := subs[:0]
 				for _, s := range subs {
 					if !(w.start <= s.start && s.end <= w.end) {
 						kept = append(kept, s)
 					}
 				}
-				subs = append(kept, lhsSub{w.start, w.end, "any(" + innerText + ").(" + cs.alias + ")"})
+				subs = append(kept, lhsSub{w.start, w.end, wt.s})
 			}
 			// Other pending splices inside the target — an option
-			// fallback's `??` lowering — would overlap the receive
-			// replacement that covers it, so drain and fold them into
-			// the store text. Inside a covering splice, a frozen
-			// operand's span still spells its temp: the splice's text
-			// holds the original expression, which would be evaluated a
-			// second time.
+			// fallback's `??` lowering, a spread literal's closure, a
+			// chain hoist — would overlap the receive replacement that
+			// covers it, so drain and fold them into the store text.
+			// Inside a covering splice, a frozen operand's span still
+			// spells its temp: the splice's text holds the original
+			// expression, which would be evaluated a second time. Where
+			// the operand's bytes live decides how the temp replaces
+			// them: a chainMove owns the copy of a moved region, so the
+			// substitution rides on the move; embedded source is located
+			// through the splice's origin chunks; only a
+			// length-preserving splice keeps byte-parallel offsets.
+			// Operands fold from the last to the first, so an offset
+			// taken from the chunks stays valid.
+			slices.SortFunc(subs, func(a, b lhsSub) int { return b.start - a.start })
 			for _, sp := range c.fl.drainInner(span{lstart, lend}) {
 				text := sp.text
 				var kept []lhsSub
 				for _, s := range subs {
-					if sp.start <= s.start && s.end <= sp.end {
+					if sp.start > s.start || s.end > sp.end {
+						kept = append(kept, s)
+						continue
+					}
+					if c.fl.moveContaining(span{s.start, s.end}) != nil {
+						c.fl.addT(s.start, s.end, gen(s.name))
+						continue
+					}
+					if at, ok := chunkOffsetOf(sp.chunks, s.start, s.end); ok {
+						text = text[:at] + s.name + text[at+s.end-s.start:]
+						continue
+					}
+					if len(sp.text) == sp.end-sp.start {
 						text = text[:s.start-sp.start] + s.name + text[s.end-sp.start:]
 						continue
 					}
-					kept = append(kept, s)
+					base.Fatalf("logos: const switch select target at %s: frozen operand [%d,%d) cannot fold into the lowered text of [%d,%d)", l.Pos().String(), s.start, s.end, sp.start, sp.end)
 				}
 				subs = append(kept, lhsSub{sp.start, sp.end, text})
+				slices.SortFunc(subs, func(a, b lhsSub) int { return b.start - a.start })
 			}
-			slices.SortFunc(subs, func(a, b lhsSub) int { return b.start - a.start })
 			for _, s := range subs {
 				if s.start-lstart < 0 || s.end-lstart > len(lhsText.s) {
 					base.Fatalf("logos: lhs sub [%d,%d) outside element %T span [%d,%d) text %q", s.start, s.end, l, lstart, lstart+len(lhsText.s), lhsText.s)

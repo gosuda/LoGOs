@@ -575,6 +575,19 @@ func spanInside(sp splice, s span) bool {
 	return sp.start >= s.start && sp.end <= s.end && (sp.end > sp.start || (sp.start > s.start && sp.end < s.end))
 }
 
+// chunkOffsetOf maps the source range [start, end) into a lowered text
+// through the origin chunks of that text. It reports the offset only
+// when one verbatim chunk covers the whole range: a chunk boundary
+// inside the range means lowered bytes stand where source stood.
+func chunkOffsetOf(chunks []chunk, start, end int) (int, bool) {
+	for _, c := range chunks {
+		if c.orig <= start && end <= c.orig+c.n {
+			return c.out + start - c.orig, true
+		}
+	}
+	return 0, false
+}
+
 func partitionSplices(list []splice, s span) (kept, inner []splice) {
 	kept = list[:0]
 	for _, sp := range list {
