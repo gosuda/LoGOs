@@ -29,23 +29,26 @@ func (fl *fileLower) lowerStructDefaults() {
 	fl.lowerTypeParamLits()
 }
 
-// lowerTypeParamLits respells an empty composite literal of a type parameter
-// as *new(T): the checker admits T{} as the zero value of T, which only a
-// concrete substitution can carry defaults for, so plain generics emit the
-// equivalent allocation instead.
+// lowerTypeParamLits respells an empty composite literal the checker admitted
+// as a zero value — T{} for a type parameter, int{}, or an elided {} element —
+// as *new(T): a concrete substitution in a comptime copy carries the real
+// literal, while a plain generic emits the equivalent allocation.
 func (fl *fileLower) lowerTypeParamLits() {
 	conv := make(map[syntax.Expr]syntax.Expr)
 	texts := make(map[syntax.Expr]string)
 	syntax.Inspect(fl.file, func(n syntax.Node) bool {
 		lit, ok := n.(*syntax.CompositeLit)
-		if !ok || lit.Type == nil || len(lit.ElemList) != 0 {
+		if !ok || len(lit.ElemList) != 0 || !fl.pkg.info.LogosZeroLit[lit] {
 			return true
 		}
-		if _, ok := types2.Unalias(fl.pkg.info.TypeOf(lit)).(*types2.TypeParam); !ok {
-			return true
+		var spell string
+		if lit.Type != nil {
+			ts := span{fl.off(syntax.StartPos(lit.Type)), fl.off(syntax.EndPos(lit.Type))}
+			spell = fl.textOf(ts).s
+		} else {
+			spell = fl.typeSpell(fl.pkg.info.TypeOf(lit))
 		}
-		ts := span{fl.off(syntax.StartPos(lit.Type)), fl.off(syntax.EndPos(lit.Type))}
-		text := "*new(" + fl.textOf(ts).s + ")"
+		text := "*new(" + spell + ")"
 		node, ok := parseExprAt(text, lit.Pos())
 		if !ok {
 			base.Fatalf("logos: type parameter literal at %s cannot be respelled", lit.Pos().String())
@@ -62,10 +65,43 @@ func (fl *fileLower) lowerTypeParamLits() {
 		conv: conv,
 		wrap: func(x, r syntax.Expr) {
 			start := fl.off(leftmostOf(x))
-			fl.addT(start, fl.exprEndNested(start), gen(texts[x]))
+			fl.addT(start, fl.off(syntax.EndPos(x)), gen(texts[x]))
 		},
 	}
 	w.node(fl.file)
+}
+
+// renderDefault renders a field default expression, respelling a literal the
+// checker admitted as a zero value to its *new(T) form so generated factory
+// and fill text never carries a bare T{} to the noder.
+func (fl *fileLower) renderDefault(e syntax.Expr) string {
+	lit, ok := e.(*syntax.CompositeLit)
+	if !ok || !fl.pkg.info.LogosZeroLit[lit] {
+		return renderExpr(e)
+	}
+	var spell string
+	if lit.Type != nil {
+		spell = renderExpr(lit.Type)
+	} else {
+		spell = fl.typeSpell(fl.pkg.info.TypeOf(lit))
+	}
+	return "*new(" + spell + ")"
+}
+
+// typeSpell renders a checked type with the file's import qualification, for
+// emitted code that must name it.
+func (fl *fileLower) typeSpell(typ types2.Type) string {
+	names := fl.importNames()
+	return types2.TypeString(typ, func(p *types2.Package) string {
+		if p == fl.pkg.tpkg {
+			return ""
+		}
+		q, ok := names[p]
+		if !ok {
+			base.Fatalf("logos: respelling type %s needs package %s, which the file does not import", types2.TypeString(typ, nil), p.Path())
+		}
+		return q
+	})
 }
 
 // defaultTypeNames maps each package-level named struct type declaration in
@@ -290,7 +326,7 @@ func (fl *fileLower) stripFieldDefaults(st *syntax.StructType, stripped map[*syn
 			continue
 		}
 		text := "func " + fname + tparams +
-			"() " + renderExpr(fd.Type) + " {\n\treturn " + renderExpr(fd.Default) + "\n}\n"
+			"() " + renderExpr(fd.Type) + " {\n\treturn " + fl.renderDefault(fd.Default) + "\n}\n"
 		fl.addGeneratedDecls(fd.Pos(), text)
 	}
 }
@@ -412,7 +448,7 @@ func (fl *fileLower) structDefaultsFor(lit *syntax.CompositeLit) ([]string, []st
 	call := func(d types2.LogosFieldDefault) string {
 		fname := plan[d.Owner+"."+d.Field]
 		if fname == "" {
-			return renderExpr(d.Default)
+			return fl.renderDefault(d.Default)
 		}
 		// The factory's type parameters belong to the owner type. A literal
 		// naming the owner itself supplies matching type arguments; a type

@@ -149,14 +149,27 @@ func (check *Checker) compositeLit(x *operand, e *syntax.CompositeLit, hint Type
 		return
 	}
 
-	if check.conf.Logos && len(e.ElemList) == 0 && isTypeParam(Unalias(base)) {
-		// logos: an empty composite literal of a type parameter spells its
-		// zero value. A comptime generic copy re-checks the substituted
-		// text as the concrete type argument; a plain generic emits the
-		// literal as *new(T).
-		x.mode_ = value
-		x.typ_ = typ
-		return
+	if check.conf.Logos && len(e.ElemList) == 0 {
+		u, _ := commonUnder(base, nil)
+		switch u.(type) {
+		case *Struct, *Array, *Slice, *Map:
+			// A composite kind keeps the ordinary literal path: T ~map,
+			// T ~struct or a concrete Cfg{} builds a real (non-nil,
+			// default-applied) literal.
+		default:
+			// logos: an empty composite literal with no composite kind
+			// (T{} for a type parameter, int{}, chan-flavored T{}) spells
+			// the zero value of the type. A comptime generic copy
+			// re-checks the substituted text as the concrete type
+			// argument; the lowering respells the literal as *new(T).
+			x.mode_ = value
+			x.typ_ = typ
+			if check.Info.LogosZeroLit == nil {
+				check.Info.LogosZeroLit = make(map[syntax.Expr]bool)
+			}
+			check.Info.LogosZeroLit[e] = true
+			return
+		}
 	}
 
 	switch u, _ := commonUnder(base, nil); utyp := u.(type) {
