@@ -977,14 +977,26 @@ func (c *cswLower) wrapConvs(body []syntax.Stmt, cs *cswCase, selWraps []span) (
 	// never spell an unimported type. A spell naming a type declared
 	// inside the case body gets its alias right after that declaration
 	// instead of at the case top.
-	secAlias := map[string]string{}
+	// Pinned aliases are emitted after the body walk: inserting a node
+	// into a statement list mid-walk shifts the slice the walk iterates.
+	type pinnedAlias struct {
+		d    *syntax.DeclStmt
+		list *[]syntax.Stmt
+		stmt *syntax.DeclStmt
+		end  int
+		text string
+	}
+	var pinned []pinnedAlias
+	// secAlias dedupes by type, not spell: two types can spell the same
+	// name when a nested declaration shadows a package name.
+	secAlias := map[types2.Type]string{}
 	spellFor := func(t types2.Type) string {
 		s := c.cswSpell(t)
-		if a, ok := secAlias[s]; ok {
+		if a, ok := secAlias[t]; ok {
 			return a
 		}
 		a := c.fl.cswName("caseV")
-		secAlias[s] = a
+		secAlias[t] = a
 		typ, ok := parseExprAt(s, cs.syn.Case)
 		if !ok {
 			base.Fatalf("logos: const switch conv type %s at %s cannot be respelled", s, cs.syn.Case.String())
@@ -993,10 +1005,7 @@ func (c *cswLower) wrapConvs(body []syntax.Stmt, cs *cswCase, selWraps []span) (
 			at(&syntax.TypeDecl{Name: nameOf(cs.syn.Case, a), Alias: true, Type: typ}, cs.syn.Case),
 		}}, cs.syn.Case)
 		if lt, ok := localTypeOf(t); ok {
-			c.fl.addT(lt.end, lt.end, gen("\ntype "+a+" = "+s))
-			if i := slices.Index(*lt.list, syntax.Stmt(lt.stmt)); i >= 0 {
-				*lt.list = slices.Insert(*lt.list, i+1, syntax.Stmt(d))
-			}
+			pinned = append(pinned, pinnedAlias{d, lt.list, lt.stmt, lt.end, "\ntype " + a + " = " + s})
 			return a
 		}
 		decls = append(decls, d)
@@ -1416,7 +1425,18 @@ func (c *cswLower) wrapConvs(body []syntax.Stmt, cs *cswCase, selWraps []span) (
 		texts.WriteString("\n")
 		c.fl.addT(c.fl.off(cc.Colon)+1, c.fl.off(cc.Colon)+1, gen(freezeText.String()+texts.String()))
 	}
+	// Pinned aliases are emitted after the store walk: inserting a node
+	// into a statement list mid-walk shifts the slice the walk iterates.
+	emitPinned := func() {
+		for _, p := range pinned {
+			c.fl.addT(p.end, p.end, gen(p.text))
+			if i := slices.Index(*p.list, syntax.Stmt(p.stmt)); i >= 0 {
+				*p.list = slices.Insert(*p.list, i+1, syntax.Stmt(p.d))
+			}
+		}
+	}
 	if len(conv) == 0 {
+		emitPinned()
 		return decls, dtext
 	}
 	w := cswWalker{
@@ -1429,6 +1449,7 @@ func (c *cswLower) wrapConvs(body []syntax.Stmt, cs *cswCase, selWraps []span) (
 		},
 	}
 	w.list(body)
+	emitPinned()
 	return decls, dtext
 }
 
