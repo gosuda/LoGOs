@@ -1135,11 +1135,13 @@ func cfScopeType(scope *types2.Scope, name string) (types2.Type, bool) {
 
 // cfExactEnd returns the exclusive end offset of node n in ctx. EndPos
 // stops short of the closing brackets of calls, indexes, and literals
-// (and of the brackets enclosing them), and short of the tag of the
-// last field of a struct type: the tokens between the node start and
-// its approximate end are balanced up, and the scan then continues
-// past that end until the brackets still open close, so a token such
-// as a field tag no longer ends the node short of its closers.
+// (and of the brackets enclosing them), short of the tag of the last
+// field of a struct type, and at the keyword of a struct type with no
+// field: the tokens between the node start and its approximate end
+// are balanced up, and the scan then continues past that end, still
+// counting the brackets that open there, until the brackets still open
+// close. A field tag, or the braces of an empty struct, no longer end
+// the node short of its closers.
 func cfExactEnd(ctx cfCtx, n syntax.Node) int {
 	start := offAt(ctx.starts, syntax.StartPos(n))
 	end := offAt(ctx.starts, syntax.EndPos(n))
@@ -1158,6 +1160,8 @@ func cfExactEnd(ctx cfCtx, n syntax.Node) int {
 	}
 	scanSegment(ctx.buf.b, end, len(ctx.buf.b), func(t tok) bool {
 		switch t.kind {
+		case token.LPAREN, token.LBRACK, token.LBRACE:
+			open++
 		case token.RPAREN, token.RBRACK, token.RBRACE:
 			open--
 			end = t.end

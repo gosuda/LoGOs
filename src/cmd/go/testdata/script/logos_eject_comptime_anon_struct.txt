@@ -6,6 +6,7 @@ cd m
 logos run .
 stdout '^anon 1 1 1 1$'
 stdout '^nested 3$'
+stdout '^empty 0 0 1$'
 cp stdout $WORK/native.txt
 
 mkdir $WORK/orig
@@ -79,4 +80,9 @@ func main() {
 				Q int `col:"q"`
 			}
 		}]())
+	fmt.Println("empty",
+		Count[struct{}](),
+		Count[struct {
+		}](),
+		Count[struct{ Unit struct{} }]())
 }
