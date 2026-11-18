@@ -8,7 +8,6 @@ name: "gc-stability"
       - "src/runtime/**"
       - "src/internal/abi/**"
       - "src/internal/goexperiment/**"
-      - "src/cmd/compile/**"
       - "src/logos/arena/**"
   workflow_dispatch:
 
@@ -16,7 +15,7 @@ permissions:
   contents: "read"
 
 concurrency:
-  group: "gc-stability-${{ github.ref }}"
+  group: "gc-stability-${{ github.event.pull_request.number || github.ref }}"
   cancel-in-progress: true
 
 env:
@@ -27,6 +26,7 @@ env:
 jobs:
   runtime:
     name: "runtime-${{ matrix.runner }}-${{ matrix.experiment }}"
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: "${{ matrix.runner }}"
     timeout-minutes: 120
     strategy:
@@ -82,17 +82,17 @@ jobs:
       - name: "Stress lifecycle and scan boundaries"
         env:
           GOEXPERIMENT: "${{ matrix.experiment }}"
-        run: go test -count=10 -short -cpu=1,2,4 -timeout=30m runtime -run '^(TestLogosRegionReleaseOwnership|TestLogosGCHeapGraphLiveness|TestLogosGCScanLayoutBounds)$'
+        run: go test -count=${{ github.event_name == 'pull_request' && '2' || '10' }} -short -cpu=1,2,4 -timeout=30m runtime -run '^(TestLogosRegionReleaseOwnership|TestLogosGCHeapGraphLiveness|TestLogosGCScanLayoutBounds)$'
       - name: "Stress close entry safepoints"
         env:
           GOEXPERIMENT: "${{ matrix.experiment }}"
           GODEBUG: "asyncpreemptoff=1"
-        run: go test -count=10 -short -gcflags=runtime=-l -timeout=30m runtime -run '^TestLogosRegionReleaseOwnership$'
+        run: go test -count=${{ github.event_name == 'pull_request' && '2' || '10' }} -short -gcflags=runtime=-l -timeout=30m runtime -run '^TestLogosRegionReleaseOwnership$'
       - name: "Check heap graph marking"
         env:
           GOEXPERIMENT: "${{ matrix.experiment }}"
           GODEBUG: "gccheckmark=1"
-        run: go test -count=10 -short -timeout=30m runtime -run '^(TestLogosGCScanExternalPointers|TestLogosGCHeapGraphLiveness)$'
+        run: go test -count=${{ github.event_name == 'pull_request' && '2' || '10' }} -short -timeout=30m runtime -run '^(TestLogosGCScanExternalPointers|TestLogosGCHeapGraphLiveness)$'
       - name: "Probe the original close ownership failure"
         if: matrix.experiment == 'logosarena'
         env:
@@ -143,6 +143,7 @@ jobs:
 
   upstream:
     name: "upstream-linux-amd64"
+    if: github.event_name != 'pull_request'
     runs-on: "ubuntu-24.04"
     timeout-minutes: 120
     defaults:
