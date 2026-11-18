@@ -42,9 +42,17 @@ func (fl *fileLower) lowerTypeParamLits() {
 	// for the generated text. Respelling one in place would only corrupt
 	// the default node's end position for that erasure.
 	defaults := map[syntax.Node]bool{}
+	// A marked literal under a unary & needs the pointer form: indexing an
+	// array literal by value is not addressable.
+	underAddr := map[*syntax.CompositeLit]bool{}
 	syntax.Inspect(fl.file, func(n syntax.Node) bool {
 		if fd, ok := n.(*syntax.FieldDefault); ok && fd.Default != nil {
 			defaults[fd.Default] = true
+		}
+		if op, ok := n.(*syntax.Operation); ok && op.Op == syntax.And && op.Y == nil {
+			if lit, ok := syntax.Unparen(op.X).(*syntax.CompositeLit); ok {
+				underAddr[lit] = true
+			}
 		}
 		return true
 	})
@@ -52,13 +60,18 @@ func (fl *fileLower) lowerTypeParamLits() {
 	texts := make(map[syntax.Expr]string)
 	syntax.Inspect(fl.file, func(n syntax.Node) bool {
 		if defaults[n] {
-			return false
+			// The default node itself is erased whole; descending still
+			// respells a marked literal nested inside it ([]int{int{}}), and
+			// its recorded edit inside the erased span is dropped by
+			// stripFieldDefaults while the swapped node renders through
+			// renderExpr for the generated factory and fill text.
+			return true
 		}
 		lit, ok := n.(*syntax.CompositeLit)
 		if !ok || len(lit.ElemList) != 0 || !fl.pkg.info.LogosZeroLit[lit] {
 			return true
 		}
-		text := fl.zeroLitSpell(lit)
+		text := fl.zeroLitSpell(lit, underAddr[lit])
 		node, ok := parseExprAt(text, lit.Pos())
 		if !ok {
 			base.Fatalf("logos: type parameter literal at %s cannot be respelled", lit.Pos().String())
@@ -85,9 +98,12 @@ func (fl *fileLower) lowerTypeParamLits() {
 }
 
 // zeroLitSpell renders the source form a marked zero literal rewrites to:
-// *new(T), or [1](T){}[0] when a declaration in the file shadows the
-// builtin new (the array-index form names no identifier).
-func (fl *fileLower) zeroLitSpell(lit *syntax.CompositeLit) string {
+// *new(T), or an array-index form when a declaration in the file shadows
+// the builtin new (the index names no identifier). The value form
+// ([1](T){})[0] never takes the array's address, so a large element stays
+// on the stack; under a surrounding & the addressable array-pointer form
+// is required.
+func (fl *fileLower) zeroLitSpell(lit *syntax.CompositeLit, addr bool) string {
 	var spell string
 	if lit.Type != nil {
 		start := fl.off(syntax.StartPos(lit.Type))
@@ -98,10 +114,13 @@ func (fl *fileLower) zeroLitSpell(lit *syntax.CompositeLit) string {
 		spell = fl.typeSpell(fl.pkg.info.TypeOf(lit))
 	}
 	if fl.newShadowed() {
-		// Indexing an array pointer yields an addressable element, so
-		// this form still works under a surrounding & (a plain array
-		// literal's element does not).
-		return "(&[1](" + spell + "){})[0]"
+		if addr {
+			// Indexing an array pointer yields an addressable element, so
+			// this form still works under a surrounding & (a plain array
+			// literal's element does not).
+			return "(&[1](" + spell + "){})[0]"
+		}
+		return "([1](" + spell + "){})[0]"
 	}
 	return "*new(" + spell + ")"
 }
@@ -126,7 +145,7 @@ func (fl *fileLower) renderDefault(e syntax.Expr) string {
 	if !ok || !fl.pkg.info.LogosZeroLit[lit] {
 		return renderExpr(e)
 	}
-	return fl.zeroLitSpell(lit)
+	return fl.zeroLitSpell(lit, false)
 }
 
 // typeSpell renders a checked type with the file's import qualification, for
