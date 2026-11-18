@@ -1,0 +1,100 @@
+// run
+
+package main
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"strconv"
+)
+
+var failed bool
+
+func check(name string, cond bool, got, want any) {
+	if !cond {
+		failed = true
+		fmt.Println("FAIL", name+":", "got", got, "want", want)
+		return
+	}
+	fmt.Println("ok", name)
+}
+
+type Port int
+
+// set converts a parsed value under a ~int case: F must admit conversion from
+// the basic case type while keeping its identity (SPEC Sec 2.5).
+func set[F any](raw string, dst *F) error {
+	const switch F {
+	case ~int:
+		n := strconv.ParseInt(raw, 10, 64)?
+		*dst = F(n)
+		return nil
+	}
+	return nil
+}
+
+// inner still dispatches on the real type argument inside a ~int case: a
+// defined int kind must hit the inner ~int case, not an exact int case.
+func inner[F any](dst *F) string {
+	out := ""
+	const switch F {
+	case ~int:
+		*dst = F(7)
+		const switch F {
+		case int:
+			out += "int;"
+		case ~int:
+			out += "tilde;"
+		}
+	}
+	return out + "end"
+}
+
+type Part interface{ Start(ctx context.Context) error }
+
+type W struct{ S string }
+
+func (w W) Start(ctx context.Context) error {
+	fmt.Println("start:" + w.S)
+	return nil
+}
+
+// keep stores a value of the switched type into the interface under a Part
+// case: the value keeps its concrete layout and gains the method set.
+func keep[F any](parts []Part, field F, f2 F) []Part {
+	const switch F {
+	case Part:
+		field = f2 // F stays concrete: assignment back to F must compile
+		var p Part = field
+		parts = append(parts, field, p)
+	}
+	return parts
+}
+
+func main() {
+	var p Port
+	if err := set[Port]("41", &p); err != nil {
+		fmt.Println("set err:", err)
+		failed = true
+	}
+	check("tilde-rebind", p == 41, p, 41)
+
+	got := inner[Port](new(Port))
+	check("tilde-nested", got == "tilde;end", got, "tilde;end")
+	var pi Port
+	inner[Port](&pi)
+	check("tilde-nested-store", pi == 7, pi, 7)
+
+	parts := keep[W](nil, W{S: "a"}, W{S: "b"})
+	check("iface-box", len(parts) == 2, len(parts), 2)
+	for _, part := range parts {
+		if err := part.Start(context.Background()); err != nil {
+			fmt.Println("start err:", err)
+			failed = true
+		}
+	}
+	if failed {
+		os.Exit(1)
+	}
+}

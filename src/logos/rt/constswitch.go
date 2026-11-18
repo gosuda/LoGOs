@@ -6,6 +6,7 @@ package rt
 
 import (
 	"reflect"
+	"unsafe"
 )
 
 // Reinterpret returns the value at p viewed as an S. A `const switch` exact
@@ -17,6 +18,17 @@ import (
 // without an unsafe cast or checkptr fatal.
 func Reinterpret[S, T any](p *T) S {
 	return *any(p).(*S)
+}
+
+// ReinterpretUnder returns the value at p viewed as an S. A `const switch`
+// tilde case rebinds each variable whose type names the switched type to the
+// case's basic type through it. The checker admits the rebinding only inside
+// a matched ~B case, where T's underlying type is B and therefore S's: the
+// layouts agree even though the types differ, so a layout-preserving pointer
+// cast is sound where Reinterpret's identity assertion would panic
+// (SPEC Sec 2.5). Sizes and alignment match exactly, so checkptr admits it.
+func ReinterpretUnder[S, T any](p *T) S {
+	return *(*S)(unsafe.Pointer(p))
 }
 
 // TildeIs reports whether the underlying type of T has the same kind as the

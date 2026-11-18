@@ -324,6 +324,7 @@ func (c *cswLower) cond(cs *cswCase) (syntax.Expr, otext) {
 func (c *cswLower) caseBody(cs *cswCase, done string) ([]syntax.Stmt, otext) {
 	if cs.kind == cswIface {
 		c.wrapSelectors(cs.syn.Body, cs)
+		c.wrapConvs(cs.syn.Body, cs)
 	} else if cs.sub.Target != nil {
 		c.replaceTargetNames(cs.syn.Body, cs)
 	}
@@ -346,6 +347,12 @@ func (c *cswLower) rebindings(cs *cswCase) ([]syntax.Stmt, otext) {
 	for _, r := range c.rebound(cs) {
 		c.fl.needRT = true
 		rhs := rtAlias + ".Reinterpret[" + r.spell + "](&" + r.name + ")"
+		if cs.kind == cswTilde {
+			// The rebound type keeps the layout but not the identity of the
+			// type argument (Port vs int), so an identity assert cannot see
+			// through it; the tilde match guarantees the layouts agree.
+			rhs = rtAlias + ".ReinterpretUnder[" + r.spell + "](&" + r.name + ")"
+		}
 		expr, ok := parseExprAt(rhs, cs.syn.Case)
 		if !ok {
 			base.Fatalf("logos: const switch rebinding of %s at %s cannot be respelled", r.name, cs.syn.Case.String())
@@ -420,6 +427,8 @@ type cswWalker struct {
 	repl   func(syntax.Pos) syntax.Expr
 	off    func(syntax.Pos) int
 	splice func(start, end int)
+	conv   map[syntax.Expr]syntax.Expr
+	wrap   func(x, r syntax.Expr)
 }
 
 func (w cswWalker) list(stmts []syntax.Stmt) {
@@ -466,8 +475,20 @@ func (w cswWalker) replaceNames(f reflect.Value) {
 		if f.IsNil() || !f.CanSet() {
 			return
 		}
-		if x, ok := f.Elem().Interface().(*syntax.Name); ok {
-			w.replaceName(f, x)
+		x, ok := f.Elem().Interface().(syntax.Expr)
+		if !ok {
+			return
+		}
+		if r, ok := w.conv[x]; ok {
+			delete(w.conv, x) // the replacement embeds x; consume the entry so it is not wrapped again
+			if w.wrap != nil {
+				w.wrap(x, r)
+			}
+			f.Set(reflect.ValueOf(r))
+			return
+		}
+		if name, ok := x.(*syntax.Name); ok {
+			w.replaceName(f, name)
 		}
 	case reflect.Slice, reflect.Array:
 		for i := range f.Len() {
@@ -477,12 +498,52 @@ func (w cswWalker) replaceNames(f reflect.Value) {
 }
 
 func (w cswWalker) replaceName(f reflect.Value, x *syntax.Name) {
-	if w.info.Uses[x] != w.target {
+	if w.target == nil || w.info.Uses[x] != w.target {
 		return
 	}
 	start := w.off(x.Pos())
 	w.splice(start, start+len(x.Value))
 	f.Set(reflect.ValueOf(w.repl(x.Pos())))
+}
+
+// wrapConvs boxes each operand the checker recorded under the interface case
+// as any(e).(I): the value keeps its concrete layout at storage sites and
+// widens to the case interface where the checker admitted it (SPEC Sec 2.5).
+func (c *cswLower) wrapConvs(body []syntax.Stmt, cs *cswCase) {
+	conv := make(map[syntax.Expr]syntax.Expr)
+	for _, s := range body {
+		syntax.Inspect(s, func(n syntax.Node) bool {
+			e, ok := n.(syntax.Expr)
+			if !ok || c.info.LogosConstConv[e] != cs.syn {
+				return true
+			}
+			iface, ok := typeExprAt(cs.spell.s, e.Pos())
+			if !ok {
+				base.Fatalf("logos: const switch interface %s at %s cannot be respelled", cs.spell.s, e.Pos().String())
+			}
+			conv[e] = at(&syntax.AssertExpr{
+				X: at(&syntax.CallExpr{
+					Fun:     at(nameOf(e.Pos(), "any"), e.Pos()),
+					ArgList: []syntax.Expr{e},
+				}, e.Pos()),
+				Type: iface,
+			}, e.Pos())
+			return true
+		})
+	}
+	if len(conv) == 0 {
+		return
+	}
+	w := cswWalker{
+		info: c.info,
+		conv: conv,
+		wrap: func(x, r syntax.Expr) {
+			start := c.fl.off(leftmostOf(x))
+			end := c.fl.exprEndNested(start)
+			c.fl.addT(start, end, cat(gen("any("), c.fl.textOf(span{start, end}), gen(").("), cs.spell, gen(")")))
+		},
+	}
+	w.list(body)
 }
 
 func (c *cswLower) wrapSelectors(body []syntax.Stmt, cs *cswCase) {
