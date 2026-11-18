@@ -875,7 +875,10 @@ func (c *cswLower) wrapConvs(body []syntax.Stmt, cs *cswCase, selWraps []span) (
 	scanTypeDecls = func(list *[]syntax.Stmt) {
 		for _, s := range *list {
 			if d, ok := s.(*syntax.DeclStmt); ok {
-				end := c.fl.off(syntax.EndPos(d))
+				// EndPos stops at a grouped declaration's closing token on
+				// some shapes while exprEndNested stops at an alias `=`: the
+				// later offset is the one past the whole declaration.
+				end := max(c.fl.exprEndNested(c.fl.off(syntax.StartPos(d))), c.fl.off(syntax.EndPos(d)))
 				for _, decl := range d.DeclList {
 					if td, ok := decl.(*syntax.TypeDecl); ok && td.Name != nil {
 						localDecls[c.fl.off(td.Name.Pos())] = localTypeDecl{end, list, d}
@@ -883,11 +886,17 @@ func (c *cswLower) wrapConvs(body []syntax.Stmt, cs *cswCase, selWraps []span) (
 				}
 			}
 			syntax.Inspect(s, func(n syntax.Node) bool {
-				if nb, ok := n.(*syntax.BlockStmt); ok {
-					scanTypeDecls(&nb.List)
-					return false
+				switch x := n.(type) {
+				case *syntax.BlockStmt:
+					scanTypeDecls(&x.List)
+				case *syntax.CaseClause:
+					scanTypeDecls(&x.Body)
+				case *syntax.CommClause:
+					scanTypeDecls(&x.Body)
+				default:
+					return true
 				}
-				return true
+				return false
 			})
 		}
 	}
