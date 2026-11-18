@@ -15,7 +15,7 @@ DIRECTORY = "logos-doc/validation/zero-array-reference-free"
 PRODUCTION = "src/cmd/compile/internal/types2/const_logos.go"
 TYPES = "cmd/compile/internal/types2"
 LOGOS = "cmd/compile/internal/logos"
-MANIFEST_SHA256 = "f6c47de6f41d4f146d4a72cd5f6666ee96e7565052fd0fdb007cc27bac0305b6"
+MANIFEST_SHA256 = "58eaff4815ba6a795c23807c1347ed2e66d15c4e8a25fa07eb5e1866ddc6709c"
 TYPE_FIXTURE = "src/cmd/compile/internal/types2/referencefree_zero_array_logos_test.go"
 ORIGINAL_FIXTURE = (
     f"{DIRECTORY}/api-compatibility/original-referencefree_zero_array_logos_test.go.txt"
