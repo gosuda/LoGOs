@@ -18,15 +18,15 @@
   "files": [
     {
       "path": "src/cmd/compile/internal/logos/lint/rule_field_offset_test.go",
-      "sha256": "3158f66c66b406ca9f5b2e659e250d60ff807e5b6f39e35aa268959785573cad"
+      "sha256": "991940e4bd224809c99d12a1806a3c3881416214f1e41d3f48faa3c5ad1faa1b"
     },
     {
       "path": "test/logos/lint/arena_pointer_escape_go.go",
-      "sha256": "7d219db66aaa216b95058c1e9d3b02e1a6b6e6dcc93319ae44ce34d833fe27b4"
+      "sha256": "f1f5355eb686d0c9dfa094822fbdce3c2420d9dee47417821e8d110c56f3ce58"
     },
     {
       "path": "test/logos/lint/arena_pointer_escape.lgo",
-      "sha256": "1c1f44432f169ed04890da55aa0fa237db08797d8b859069f447d03909a75db3"
+      "sha256": "f1f5355eb686d0c9dfa094822fbdce3c2420d9dee47417821e8d110c56f3ce58"
     },
     {
       "path": "logos-doc/validation/field-offset-lint/old-rule.go.txt",
