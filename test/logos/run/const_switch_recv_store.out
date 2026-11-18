@@ -9,3 +9,4 @@ ok generic-alias-arg
 ok same-spell-siblings
 ok wrap-frozen-operand
 ok opt-fallback-store
+ok opt-fallback-selector

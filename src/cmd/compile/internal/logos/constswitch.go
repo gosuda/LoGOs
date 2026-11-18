@@ -881,10 +881,12 @@ func (c *cswLower) wrapConvs(body []syntax.Stmt, cs *cswCase, selWraps []span) (
 	scanTypeDecls = func(list *[]syntax.Stmt) {
 		for _, s := range *list {
 			if d, ok := s.(*syntax.DeclStmt); ok {
-				// EndPos stops at a grouped declaration's closing token on
-				// some shapes while exprEndNested stops at an alias `=`: the
-				// later offset is the one past the whole declaration.
-				end := max(c.fl.exprEndNested(c.fl.off(syntax.StartPos(d))), c.fl.off(syntax.EndPos(d)))
+				// stmtEnd scans past balanced brackets to the declaration's
+				// line end: EndPos stops at a grouped declaration's closing
+				// token or a generic alias's last type argument on some
+				// shapes, and exprEndNested stops at an alias `=` — the later
+				// offset is the one past the whole declaration.
+				end := max(stmtEnd(c.fl.src, c.fl.off(syntax.StartPos(d))), c.fl.off(syntax.EndPos(d)))
 				for _, decl := range d.DeclList {
 					if td, ok := decl.(*syntax.TypeDecl); ok && td.Name != nil {
 						localDecls[c.fl.off(td.Name.Pos())] = localTypeDecl{end, list, d}
