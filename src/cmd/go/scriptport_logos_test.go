@@ -86,6 +86,10 @@ func scriptExecEnvU(base script.Cmd, cancel func(*exec.Cmd) error, waitDelay tim
 		script.CmdUsage{
 			Summary: "run an executable program with arguments",
 			Args:    "program [args...]",
+			Detail: []string{
+				"Note that 'exec' does not terminate the script (unlike Unix shells).",
+			},
+			Async: true,
 		},
 		func(s *script.State, args ...string) (script.WaitFunc, error) {
 			if len(args) < 2 || args[0] != "env" {
@@ -173,7 +177,8 @@ func scriptRunEnv(s *script.State, argv []string, unset, sets []string, cancel f
 		return nil, err
 	}
 	return func(*script.State) (stdout, stderr string, err error) {
-		return stdoutBuf.String(), stderrBuf.String(), cmd.Wait()
+		err = cmd.Wait()
+		return stdoutBuf.String(), stderrBuf.String(), err
 	}, nil
 }
 
