@@ -150,10 +150,19 @@ func logosCgoHidden(p *Package) bool {
 	if _, ok := errors.AsType[*NoGoError](p.Error.Err); !ok {
 		return false
 	}
-	if !slices.Contains(p.Internal.Build.AllTags, "cgo") {
-		return false
-	}
+	// A file only hides behind cgo when enabling cgo would admit it: the
+	// file must satisfy every build constraint under a context with cgo
+	// turned on (a `//go:build cgo && custom` file stays excluded while
+	// custom is unset) and import "C". Context.MatchFile never applies the
+	// cgo rule itself, so both halves are needed; AllTags only records
+	// consulted tags, not matched ones.
+	cgoOn := cfg.BuildContext
+	cgoOn.CgoEnabled = true
 	for _, name := range p.IgnoredGoFiles {
+		matched, err := cgoOn.MatchFile(p.Dir, name)
+		if err != nil || !matched {
+			continue
+		}
 		if logosFileImportsC(p.Dir, name) {
 			return true
 		}
