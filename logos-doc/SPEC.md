@@ -460,6 +460,7 @@ Self-aliased calls such as arr = Reverse(arr) MUST return correct results. [T-10
 `logos conc run` MUST accept the arguments of `logos run`, and `logos conc test` MUST accept the arguments of `logos test` [T-106].
 `logos conc` MUST build the program with the build tag `logosconc` in addition to the build tags that the user gives [T-106].
 A build without the build tag `logosconc` MUST NOT contain the monitor, and an ejected module MUST NOT contain the monitor [T-106].
+The build tag `logosconc` MUST NOT change the build of an ejected module [T-106].
 `logos conc` MUST print each finding on standard error while the program runs [T-106].
 A finding MUST have a rule ID, a message, one or more source positions with the role of each position, and one fix hint [T-106].
 The text form of a finding MUST be the line `<file>:<line>: [<rule>] <message>`, then one line `<tab><file>:<line>: <role>` for each position, then the line `<tab>fix: <hint>` [T-106].
