@@ -103,7 +103,7 @@ func (fl *fileLower) spliceMakeLen(op *syntax.Operation) {
 	yStart := fl.off(syntax.StartPos(op.Y))
 	yEnd := fl.operandEnd(yStart)
 	m := fl.narrowestMove(span{start: start, end: yEnd}, false)
-	head, tail := fl.drainBoundaries(span{start: start, end: yEnd})
+	head, tail := fl.drainEnclosing(span{start: start, end: yEnd})
 	put := func(start, end int, t otext) {
 		fl.placeSplice(splice{start: start, end: end, text: t.s, chunks: t.chunks}, m)
 	}
@@ -113,16 +113,16 @@ func (fl *fileLower) spliceMakeLen(op *syntax.Operation) {
 }
 
 func (fl *fileLower) operandEnd(from int) int {
-	end := len(fl.src)
+	end := from
 	scan := operandScan{prefix: true}
 	scanSegment(fl.src, from, len(fl.src), func(t tok) bool {
 		if t.comment {
 			return true
 		}
 		if scan.ends(t) {
-			end = t.start
 			return false
 		}
+		end = t.end
 		return true
 	})
 	return end
