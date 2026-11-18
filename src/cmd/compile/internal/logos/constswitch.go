@@ -1165,10 +1165,8 @@ func (c *cswLower) wrapConvs(body []syntax.Stmt, cs *cswCase, selWraps []span) (
 			name       string
 		}
 		lhsSubs := map[syntax.Expr][]lhsSub{}
-		// freeze emits `t := <src of [start,end)>` early and returns t.
-		freeze := func(e syntax.Expr, start, end int) string {
-			t := fmt.Sprintf("%s_lv%d", svbase, freezeN)
-			freezeN++
+		// freeze emits `t := <src of [start,end)>` early.
+		freeze := func(e syntax.Expr, start, end int, t string) {
 			var src string
 			if r, ok := recOf[e]; ok {
 				src = render(r)
@@ -1181,25 +1179,24 @@ func (c *cswLower) wrapConvs(body []syntax.Stmt, cs *cswCase, selWraps []span) (
 			}
 			freezeStmts = append(freezeStmts, at(&syntax.AssignStmt{Op: syntax.Def, Lhs: nameOf(e.Pos(), t), Rhs: rhs}, e.Pos()))
 			freezeText.WriteString("\n" + t + " := " + src)
-			return t
 		}
 		if len(elems) > 1 {
 			for _, l := range elems {
+				// Candidates are collected as the walk goes so a frozen X's
+				// replacement name prunes the reads nested inside it; the
+				// statements are emitted in source order afterwards because
+				// a left-hand operand evaluates left to right (m[i()][j()]
+				// reads i() before j()).
+				type cand struct {
+					e          syntax.Expr
+					start, end int
+					name       string
+				}
+				var cands []cand
 				syntax.Inspect(l, func(n syntax.Node) bool {
 					ix, ok := n.(*syntax.IndexExpr)
 					if !ok {
 						return true
-					}
-					if ix.Index != nil {
-						if _, lit := syntax.Unparen(ix.Index).(*syntax.BasicLit); !lit {
-							// The index operand ends where the parent's ']'
-							// closes at nesting depth zero.
-							st := c.fl.off(leftmostOf(ix.Index))
-							en := c.fl.exprEndNested(st)
-							t := freeze(ix.Index, st, en)
-							lhsSubs[l] = append(lhsSubs[l], lhsSub{st, en, t})
-							ix.Index = nameOf(ix.Index.Pos(), t)
-						}
 					}
 					if ix.X != nil {
 						frozen := false
@@ -1222,15 +1219,52 @@ func (c *cswLower) wrapConvs(body []syntax.Stmt, cs *cswCase, selWraps []span) (
 							// would swallow the index brackets.
 							st := c.fl.off(leftmostOf(ix.X))
 							en := c.fl.off(ix.Pos())
-							t := freeze(ix.X, st, en)
+							t := fmt.Sprintf("%s_lv%d", svbase, freezeN)
+							freezeN++
+							cands = append(cands, cand{ix.X, st, en, t})
 							lhsSubs[l] = append(lhsSubs[l], lhsSub{st, en, t})
-							ix.X = nameOf(ix.X.Pos(), t)
+							// The temp takes X's leftmost position so the
+							// element's recomputed start still reaches it —
+							// a selector's own Pos sits on the field name.
+							ix.X = nameOf(leftmostOf(ix.X), t)
+						}
+					}
+					if ix.Index != nil {
+						// Literals, constants, and type arguments are not
+						// runtime reads: leaving them keeps the map's own
+						// key conversion and never freezes a type as a value.
+						idx := syntax.Unparen(ix.Index)
+						_, lit := idx.(*syntax.BasicLit)
+						tv := c.info.Types[idx]
+						freezable := !lit && !tv.IsType() && tv.Value == nil
+						if freezable {
+							if name, ok := idx.(*syntax.Name); ok {
+								switch c.info.ObjectOf(name).(type) {
+								case *types2.TypeName, *types2.Const:
+									freezable = false
+								}
+							}
+						}
+						if freezable {
+							// The index operand ends where the parent's ']'
+							// closes at nesting depth zero.
+							st := c.fl.off(leftmostOf(ix.Index))
+							en := c.fl.exprEndNested(st)
+							t := fmt.Sprintf("%s_lv%d", svbase, freezeN)
+							freezeN++
+							cands = append(cands, cand{ix.Index, st, en, t})
+							lhsSubs[l] = append(lhsSubs[l], lhsSub{st, en, t})
+							ix.Index = nameOf(leftmostOf(ix.Index), t)
 						}
 					}
 					// Keep descending: an unfrozen X on the address path may
 					// hold another index whose operand still needs freezing.
 					return true
 				})
+				slices.SortFunc(cands, func(a, b cand) int { return a.start - b.start })
+				for _, cd := range cands {
+					freeze(cd.e, cd.start, cd.end, cd.name)
+				}
 			}
 		}
 		var assigns []syntax.Stmt
