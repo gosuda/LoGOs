@@ -249,7 +249,7 @@ var filemap = map[string]action{
 	},
 	"universe.go":  fixGlobalTypVarDecl,
 	"util_test.go": fixTokenPos,
-	"validtype.go": func(f *ast.File) { fixTokenPos(f); renameSelectors(f, "Trace->_Trace") },
+	"validtype.go": func(f *ast.File) { stripLogosHooks(f); fixTokenPos(f); renameSelectors(f, "Trace->_Trace") },
 	"version.go":   func(f *ast.File) { renameIdents(f, "poser->positioner") },
 }
 
@@ -813,6 +813,7 @@ var logosMethods = map[string]bool{
 	"SetLogosReadonly":          true,
 	"logosCgoTypeName":          true,
 	"logosStructTupleIdentical": true,
+	"logosIfaceWord":            true,
 }
 var logosFuncs = map[string]bool{
 	"logosInterfaceReadonlyMismatch":      true,
