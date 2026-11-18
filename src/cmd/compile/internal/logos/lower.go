@@ -47,9 +47,10 @@ func siteDisplay(pos syntax.Pos, base string, line uint) (string, uint) {
 // may rewrite. Files without an entry in src are left alone. Lower mutates
 // the files in place and reports whether anything changed. A true result
 // also covers a semantic-only change: const views that live purely in
-// checker info (rt.Freeze results, with no ConstType node to erase)
-// still need the plain recheck, so the export writer and the backend only
-// ever see Go-facing types. A surviving
+// checker info (rt.Freeze results, with no ConstType node to erase) and
+// one-value map reads whose bare option keeps its Go form still need the
+// plain recheck, so the export writer and the backend only ever see
+// Go-facing types. A surviving
 // loGo/s node (TryExpr, ErrdeferStmt, SwitchExpr, ArmClause,
 // AssertedStruct, OptionType, CoalesceExpr, OptSelectExpr, ConstType,
 // YieldStmt, ScopeDeferStmt, or InterpExpr) is an internal error.
@@ -230,6 +231,7 @@ type fileLower struct {
 	// boundary-insert drains, wrapSeq mints wrapper IDs, and
 	// retResults maps each return to its function results.
 	spreadSeq      int
+	cswAlias       int // const-switch name counter; file-wide so a const switch inside a function literal cannot reuse an enclosing case's names
 	rodataVars     []rodataVar
 	optMemo        map[*syntax.OptionType]syntax.Expr
 	parenClaims    map[int]bool
@@ -870,6 +872,14 @@ type hoistedVar struct {
 	name   string
 	native syntax.Expr
 	eject  string
+}
+
+// cswName mints a const-switch lowering name unique within the file: a const
+// switch inside a function literal gets a fresh funcLower, so a per-function
+// counter would reuse an enclosing case's alias.
+func (fl *fileLower) cswName(prefix string) string {
+	fl.cswAlias++
+	return fmt.Sprintf("_logos_%s%d", prefix, fl.cswAlias)
 }
 
 // funcLower carries the state of lowering one function body.

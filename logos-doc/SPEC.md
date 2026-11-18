@@ -90,6 +90,7 @@ DIR MUST NOT exist, or DIR MUST be empty; the tool MUST refuse a DIR that exists
 Each `.lgo` file MUST become a `.go` file [T-0.3].
 Completeness MUST include packages absent from the requested host build, including inactive-only tests and dependency modules reached only through an inactive variant [T-0.3].
 Source discovery MUST respect package and module ownership boundaries: nested modules, `vendor`, `testdata`, dot-prefixed and underscore-prefixed paths, module ignore rules, and directory symlinks MUST NOT become additional package roots [T-0.3].
+The physical copy MUST NOT contain a directory that holds its own `go.mod` (it is another module) unless the module's own `go.mod` has a local `replace` that names that directory, which the copy MUST keep so the replace still resolves. A kept module that lies below another nested module MUST be copied without the files of that other module [T-0.3]. Only a `go.mod` file marks a module, as in the go command: a directory named `go.mod` MUST be copied as data with the files beside it [T-0.3].
 Each discovered inactive source MUST be type-checked and lowered by the ordinary compiler path under a context that selects it [T-0.3].
 Inactive discovery, build-constraint selection, and helper compilation MUST use the requested source overlay. Overlay-deleted sources MUST remain absent, and inserted or replaced sources MUST use their effective contents [T-0.3].
 Owned helpers MUST retain the package name selected by their source context; distinct package clauses in one directory MUST NOT be treated as declaration collisions [T-0.3].
@@ -1064,6 +1065,10 @@ Each instantiation MUST expand into a non-generic copy `<f>_logosct<N>` in the i
 Copies MUST be memoized per type-argument list. [T-205]
 
 An exported comptime generic MUST travel as source text in `__.LOGOS`. [T-205]
+
+An exported comptime generic that names an unexported package-level identifier of its own package MUST fail with `[comptime::unexported_in_exported]` at that identifier in the defining package. [T-205]
+
+The rule applies to every package that can be imported; `main` is exempt because it cannot be imported. [T-205]
 
 A `const for` range MUST be `comptime.Fields[T]()` over a struct type. [T-205]
 
