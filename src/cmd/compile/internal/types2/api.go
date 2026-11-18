@@ -357,6 +357,8 @@ type Info struct {
 	LogosFieldDefaults map[*Struct][]LogosFieldDefault // logos M6-S3 hook: struct field defaults.
 	LogosStaticJSON    map[*Named]bool
 
+	LogosGroupTerminating map[*syntax.GroupStmt]bool // logos hook: `go group` statements whose block ends in a terminating statement, so the lowering emits no join after it.
+
 	LogosConstSlices map[syntax.Expr]bool                   // logos M5-S1 hook: slice expressions over const views with non-constant bounds, for the lowering-time runtime check.
 	LogosPropDecls   []*LogosPropDecl                       // logos M4-S2 hook: asserted property interfaces per declaring struct.
 	LogosCTFE        map[*Const]ctfe.Value                  // logos M5-S2 hook: evaluated const values (scalars and composites) for lowering.

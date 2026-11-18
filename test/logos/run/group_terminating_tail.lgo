@@ -1,0 +1,138 @@
+// run
+
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"sync/atomic"
+)
+
+var ran atomic.Int32
+
+func child() error {
+	ran.Add(1)
+	return nil
+}
+
+func tailReturn(ctx context.Context) error {
+	go group (ctx) {
+		return nil
+	}
+}
+
+func tailWithChild(ctx context.Context) (int32, error) {
+	go group (ctx) {
+		go child()
+		return 7, nil
+	}
+}
+
+func tailBothBranches(ctx context.Context, b bool) (string, error) {
+	go group (ctx) {
+		go child()
+		if b {
+			return "then", nil
+		}
+		return "else", nil
+	}
+}
+
+func tailIfElse(ctx context.Context, b bool) (string, error) {
+	go group (ctx) {
+		if b {
+			return "then", nil
+		} else {
+			return "else", nil
+		}
+	}
+}
+
+func tailScopeDefer(ctx context.Context, log *[]string) error {
+	go group (ctx) {
+		scope defer func() { *log = append(*log, "deferred") }()
+		go child()
+		*log = append(*log, "body")
+		return nil
+	}
+}
+
+func tailLimit(ctx context.Context) error {
+	go group (ctx, limit = 2) {
+		go child()
+		go child()
+		go child()
+		return nil
+	}
+}
+
+func tailInLoop(ctx context.Context) (int, error) {
+	for i := 0; ; i++ {
+		go group (ctx) {
+			go child()
+			if i == 2 {
+				return i, nil
+			}
+		}
+	}
+}
+
+var errParent = errors.New("parent failed")
+
+func tailParentError(ctx context.Context) error {
+	go group (ctx) {
+		go child()
+		return errParent
+	}
+}
+
+var errChild = errors.New("child failed")
+
+func tailChildError(ctx context.Context) (string, error) {
+	go group (ctx) {
+		go func() error { return errChild }()
+		return "value", nil
+	}
+}
+
+func tailPanic(ctx context.Context) (out string, err error) {
+	defer func() {
+		out = fmt.Sprint(recover())
+	}()
+	go group (ctx) {
+		panic("stopped")
+	}
+}
+
+func pair[T any](v T, err error) string {
+	return fmt.Sprintf("%v|%v", v, err)
+}
+
+func main() {
+	ctx := context.Background()
+	fmt.Println("return", tailReturn(ctx))
+
+	ran.Store(0)
+	fmt.Println("child", pair(tailWithChild(ctx)), ran.Load())
+
+	fmt.Println("branches", pair(tailBothBranches(ctx, true)))
+	fmt.Println("branches", pair(tailBothBranches(ctx, false)))
+	fmt.Println("ifelse", pair(tailIfElse(ctx, false)))
+
+	var log []string
+	fmt.Println("scope", tailScopeDefer(ctx, &log), log)
+
+	ran.Store(0)
+	fmt.Println("limit", tailLimit(ctx), ran.Load())
+
+	ran.Store(0)
+	fmt.Println("loop", pair(tailInLoop(ctx)), ran.Load())
+
+	ran.Store(0)
+	fmt.Println("parent-error", tailParentError(ctx), ran.Load())
+
+	fmt.Printf("child-error %q\n", pair(tailChildError(ctx)))
+
+	fmt.Println("panic", pair(tailPanic(ctx)))
+}

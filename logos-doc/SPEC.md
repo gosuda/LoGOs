@@ -1188,6 +1188,8 @@ The group MUST cancel on the first child error or panic. [T-206]
 
 It MUST join all children before scope exit. [T-206]
 
+A group statement MUST be a terminating statement when its block ends in a terminating statement. The join then runs at each `return` of the block, and no join follows the block. [T-206]
+
 It MUST bound concurrency with a semaphore when `limit` is present. [T-206]
 
 `go group(x)` without a block MUST keep Go meaning as a call to a function named `group`. [T-206]

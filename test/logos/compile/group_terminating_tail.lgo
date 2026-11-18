@@ -1,0 +1,65 @@
+// errorcheck
+
+package p
+
+import "context"
+
+// A group statement is terminating when its parent body is: the return
+// operands are evaluated where the statement stands, then the join runs,
+// so no statement can follow the group inside the function.
+func groupTailReturn(ctx context.Context) error {
+	go group (ctx) {
+		return nil
+	}
+}
+
+func groupTailReturnWithChild(ctx context.Context) error {
+	go group (ctx) {
+		go func() error { return nil }()
+		return nil
+	}
+}
+
+func groupTailIfBoth(ctx context.Context, b bool) error {
+	go group (ctx) {
+		if b {
+			return nil
+		}
+		return nil
+	}
+}
+
+// A scope defer in the block body runs after the join at every exit,
+// so the group still terminates the function.
+func note() {}
+
+func groupTailScopeDefer(ctx context.Context) error {
+	go group (ctx) {
+		scope defer note()
+		return nil
+	}
+}
+
+func groupTailLimit(ctx context.Context) error {
+	go group (ctx, limit = 8) {
+		go func() error { return nil }()
+		return nil
+	}
+}
+
+// A body that falls through is not terminating, so the function has no
+// return.
+func groupTailFallsThrough(ctx context.Context) error {
+	go group (ctx) {
+		go func() error { return nil }()
+	}
+} // ERROR "missing return"
+
+// A return in one branch only is not terminating.
+func groupTailOneBranch(ctx context.Context, b bool) error {
+	go group (ctx) {
+		if b {
+			return nil
+		}
+	}
+} // ERROR "missing return"

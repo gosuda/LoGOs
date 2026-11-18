@@ -42,6 +42,12 @@ func (check *Checker) logosGroupStmt(ctxt stmtContext, s *syntax.GroupStmt) {
 	check.logosGroup = append(check.logosGroup, logosGroupFrame{asig: check.sig})
 	check.openScope(s.Body, "group")
 	check.stmtList(ctxt, s.Body.List)
+	if check.isTerminatingList(s.Body.List, "") {
+		if check.Info.LogosGroupTerminating == nil {
+			check.Info.LogosGroupTerminating = make(map[*syntax.GroupStmt]bool)
+		}
+		check.Info.LogosGroupTerminating[s] = true
+	}
 	check.closeScope()
 	check.logosGroup = check.logosGroup[:len(check.logosGroup)-1]
 }
