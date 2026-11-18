@@ -8,3 +8,6 @@ Motor true
 [P~P N~N]
 []
 [Age:int]
+[sX sX]
+[V:sh]
+9

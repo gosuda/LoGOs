@@ -206,6 +206,65 @@ func localAlias[T any]() []string {
 	return out
 }
 
+// An outer-bound f.Type case resolves to a concrete type each
+// iteration: when it cannot match the inner field it is dead for that
+// iteration and its body is never checked or run.
+type OnlyInt struct {
+	P int
+	Q int
+}
+
+type Str struct {
+	X string
+}
+
+func outerVary() []string {
+	var out []string
+	const for _, f := range comptime.Fields[OnlyInt]() {
+		const for _, g := range comptime.Fields[Str]() {
+			const switch g.Type {
+			case f.Type:
+				out = append(out, f.Name+">"+g.Name)
+			case string:
+				out = append(out, "s"+g.Name)
+			}
+		}
+	}
+	return out
+}
+
+// A local named field type matches its local case name: the fold
+// resolves the name through the checked declaration, not a fresh type.
+func localNamed() []string {
+	type Sh int
+	type Local struct{ V Sh }
+	var out []string
+	const for _, f := range comptime.Fields[Local]() {
+		const switch f.Type {
+		case Sh:
+			out = append(out, f.Name+":sh")
+		}
+	}
+	return out
+}
+
+// Under ~T an unbound field projects as a parameter bounded by ~T:
+// conversions to T check, and the copy still sees the field's own type.
+type MyI int
+
+type Holder struct{ V MyI }
+
+func tildeConv[T any](root *T) int {
+	n := 0
+	const for _, f := range comptime.Fields[T]() {
+		const switch f.Type {
+		case ~int:
+			n += int(root.[f])
+		}
+	}
+	return n
+}
+
 func main() {
 	fmt.Println(tags[App]())
 	var r Rig
@@ -224,4 +283,9 @@ func main() {
 	fmt.Println(pend[Opt]())
 	fmt.Println(localDecl[Shadow]())
 	fmt.Println(localAlias[App]())
+	fmt.Println(outerVary())
+	fmt.Println(localNamed())
+	var h Holder
+	h.V = 9
+	fmt.Println(tildeConv(&h))
 }
