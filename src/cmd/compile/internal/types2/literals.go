@@ -149,6 +149,16 @@ func (check *Checker) compositeLit(x *operand, e *syntax.CompositeLit, hint Type
 		return
 	}
 
+	if check.conf.Logos && len(e.ElemList) == 0 && isTypeParam(Unalias(base)) {
+		// logos: an empty composite literal of a type parameter spells its
+		// zero value. A comptime generic copy re-checks the substituted
+		// text as the concrete type argument; a plain generic emits the
+		// literal as *new(T).
+		x.mode_ = value
+		x.typ_ = typ
+		return
+	}
+
 	switch u, _ := commonUnder(base, nil); utyp := u.(type) {
 	case *Struct:
 		if len(e.ElemList) == 0 {

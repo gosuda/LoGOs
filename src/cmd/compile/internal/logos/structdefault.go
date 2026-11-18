@@ -26,6 +26,46 @@ func (fl *fileLower) lowerStructDefaults() {
 		}
 		return true
 	})
+	fl.lowerTypeParamLits()
+}
+
+// lowerTypeParamLits respells an empty composite literal of a type parameter
+// as *new(T): the checker admits T{} as the zero value of T, which only a
+// concrete substitution can carry defaults for, so plain generics emit the
+// equivalent allocation instead.
+func (fl *fileLower) lowerTypeParamLits() {
+	conv := make(map[syntax.Expr]syntax.Expr)
+	texts := make(map[syntax.Expr]string)
+	syntax.Inspect(fl.file, func(n syntax.Node) bool {
+		lit, ok := n.(*syntax.CompositeLit)
+		if !ok || lit.Type == nil || len(lit.ElemList) != 0 {
+			return true
+		}
+		if _, ok := types2.Unalias(fl.pkg.info.TypeOf(lit)).(*types2.TypeParam); !ok {
+			return true
+		}
+		ts := span{fl.off(syntax.StartPos(lit.Type)), fl.off(syntax.EndPos(lit.Type))}
+		text := "*new(" + fl.textOf(ts).s + ")"
+		node, ok := parseExprAt(text, lit.Pos())
+		if !ok {
+			base.Fatalf("logos: type parameter literal at %s cannot be respelled", lit.Pos().String())
+		}
+		conv[lit] = node
+		texts[lit] = text
+		return true
+	})
+	if len(conv) == 0 {
+		return
+	}
+	w := cswWalker{
+		info: fl.pkg.info,
+		conv: conv,
+		wrap: func(x, r syntax.Expr) {
+			start := fl.off(leftmostOf(x))
+			fl.addT(start, fl.exprEndNested(start), gen(texts[x]))
+		},
+	}
+	w.node(fl.file)
 }
 
 // defaultTypeNames maps each package-level named struct type declaration in
