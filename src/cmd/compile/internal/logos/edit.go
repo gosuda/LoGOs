@@ -229,18 +229,33 @@ func editsOf(src []byte, base *syntax.PosBase, splices []splice) []Edit {
 	// Zero-width inserts at a cover's boundary stay: they place text
 	// immediately before or after the cover.
 	kept := sorted[:0]
+	maxEarlierEnd := 0
 	for i, s := range sorted {
 		orphan := false
-		for j := 0; j < i && !orphan; j++ {
-			k := sorted[j]
-			inside := k.start <= s.start && s.end <= k.end &&
-				(s.start > k.start || s.end < k.end)
-			if inside && !(s.start == s.end && (s.start == k.start || s.end == k.end)) {
+		// An earlier cover needs end >= s.end; when no earlier splice
+		// reaches that far the scan cannot find one.
+		if maxEarlierEnd >= s.end {
+			for j := 0; j < i && !orphan; j++ {
+				k := sorted[j]
+				inside := k.start <= s.start && s.end <= k.end &&
+					(s.start > k.start || s.end < k.end)
+				if inside && !(s.start == s.end && (s.start == k.start || s.end == k.end)) {
+					orphan = true
+				}
+			}
+		}
+		// A cover sharing s's start sorts after it (by end), so look
+		// ahead through the same-start run as well.
+		for j := i + 1; !orphan && j < len(sorted) && sorted[j].start == s.start; j++ {
+			if s.start != s.end && s.end < sorted[j].end {
 				orphan = true
 			}
 		}
 		if !orphan {
 			kept = append(kept, s)
+		}
+		if s.end > maxEarlierEnd {
+			maxEarlierEnd = s.end
 		}
 	}
 	edits := make([]Edit, len(kept))
