@@ -616,7 +616,13 @@ func (c *cswLower) fixReboundDef(cs *cswCase, targets map[types2.Object]cswTarge
 		*pl = append(*pl, nil)
 		copy((*pl)[idx+1:], (*pl)[idx:])
 		(*pl)[idx] = decl
-		c.fl.addT(c.fl.off(head.Pos()), c.fl.off(head.Pos()), gen("var "+name+" "+spell+"\n"))
+		// An AssignStmt's Pos is its operator token, not its left side:
+		// splice before the statement's first token instead.
+		start := head.Pos()
+		if as, ok := head.(*syntax.AssignStmt); ok {
+			start = as.Lhs.Pos()
+		}
+		c.fl.addT(c.fl.off(start), c.fl.off(start), gen("var "+name+" "+spell+"\n"))
 	}
 
 	defToAssign := func(lo, hi int) {
@@ -1438,6 +1444,11 @@ func (c *cswLower) wrapConvs(body []syntax.Stmt, cs *cswCase, selWraps []span) (
 		cc.Body = append(append(freezeStmts, assigns...), cc.Body...)
 		lhsStart := c.fl.off(leftmostOf(as.Lhs))
 		recvStart := c.fl.off(leftmostOf(as.Rhs))
+		// The temps declaration replaces the whole receive target,
+		// including the gaps between elements that no per-element
+		// drain reaches (a wrap crossing an element boundary). Any
+		// splice still inside the span is dead text.
+		c.fl.dropInner(span{lhsStart, recvStart})
 		var tempsText strings.Builder
 		for i, t := range tempNames {
 			if i > 0 {
