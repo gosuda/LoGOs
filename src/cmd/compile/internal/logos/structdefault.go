@@ -39,6 +39,20 @@ func (fl *fileLower) lowerStructDefaults() {
 func (fl *fileLower) lowerTypeParamLits() {
 	conv := make(map[syntax.Expr]syntax.Expr)
 	texts := make(map[syntax.Expr]string)
+	strippedWithDefault := make(map[syntax.Expr]bool)
+	syntax.Inspect(fl.file, func(n syntax.Node) bool {
+		fd, ok := n.(*syntax.FieldDefault)
+		if !ok {
+			return true
+		}
+		syntax.Inspect(fd.Default, func(n syntax.Node) bool {
+			if lit, ok := n.(*syntax.CompositeLit); ok {
+				strippedWithDefault[lit] = true
+			}
+			return true
+		})
+		return true
+	})
 	syntax.Inspect(fl.file, func(n syntax.Node) bool {
 		lit, ok := n.(*syntax.CompositeLit)
 		if !ok || len(lit.ElemList) != 0 || !fl.pkg.info.LogosZeroLit[lit] {
@@ -61,10 +75,12 @@ func (fl *fileLower) lowerTypeParamLits() {
 		info: fl.pkg.info,
 		conv: conv,
 		wrap: func(x, r syntax.Expr) {
-			start := fl.off(leftmostOf(x))
-			// EndPos of a composite literal is its `}` position, so +1 to
-			// cover it.
-			fl.addT(start, fl.off(syntax.EndPos(x))+1, gen(texts[x]))
+			if strippedWithDefault[x] {
+				return
+			}
+			whole := span{start: fl.off(leftmostOf(x)), end: fl.off(syntax.EndPos(x)) + 1}
+			fl.addT(whole.start, whole.end, gen(texts[x]))
+			fl.wrapSpan[r] = whole
 		},
 	}
 	w.node(fl.file)
