@@ -617,7 +617,8 @@ func (c *cswLower) fixReboundDef(cs *cswCase, targets map[types2.Object]cswTarge
 		*pl = append(*pl, nil)
 		copy((*pl)[idx+1:], (*pl)[idx:])
 		(*pl)[idx] = decl
-		c.fl.addT(c.fl.off(head.Pos()), c.fl.off(head.Pos()), gen("var "+name+" "+spell+"\n"))
+		headStart := c.fl.off(syntax.StartPos(head))
+		c.fl.addT(headStart, headStart, gen("var "+name+" "+spell+"\n"))
 	}
 
 	defToAssign := func(lo, hi int) {
