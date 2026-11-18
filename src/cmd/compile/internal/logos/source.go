@@ -54,54 +54,77 @@ func tokenEnd(seg []byte, off int, kind token.Token, lit string) int {
 }
 
 func scanSegment(src []byte, from, to int, visit func(tok) bool) {
-	seg := src[from:to]
 	// The Go scanner knows nothing of $"..." literals: it pairs each
-	// quote inside an interpolation hole as a string edge and leaks the
-	// hole's real parens and braces into the token stream. Merge every
-	// interp literal into one STRING token; every raw token it replaces
-	// lies strictly inside the merged span because a quote always ends
-	// a scanned token.
-	var raws []tok
-	{
-		fset := token.NewFileSet()
-		file := fset.AddFile("", fset.Base(), len(seg))
-		var s scanner.Scanner
-		s.Init(file, seg, nil, scanner.ScanComments)
-		for {
-			p, kind, lit := s.Scan()
-			if kind == token.EOF {
-				break
-			}
-			off := file.Offset(p)
-			t := tok{kind: kind, comment: kind == token.COMMENT}
-			if kind == token.SEMICOLON && lit == "\n" {
-				t.auto = true
-				t.span = span{from + off, from + off}
-			} else {
-				t.span = span{from + off, from + tokenEnd(seg, off, kind, lit)}
-			}
-			raws = append(raws, t)
+	// quote inside an interpolation hole as a string edge, and a rune,
+	// comment, or raw string it opens there can run past the literal's
+	// true end and swallow the real tokens that follow. Mask every
+	// interp literal into a same-length raw string — the one Go token
+	// that may span lines — so the scanner reads a single STRING token
+	// for it and never sees the hole text. Masking preserves every
+	// byte offset, newline, and the literal's semicolon insertion.
+	seg := maskInterpLiterals(src[from:to])
+	fset := token.NewFileSet()
+	file := fset.AddFile("", fset.Base(), len(seg))
+	var s scanner.Scanner
+	s.Init(file, seg, nil, scanner.ScanComments)
+	for {
+		p, kind, lit := s.Scan()
+		if kind == token.EOF {
+			return
 		}
-	}
-	for i := 0; i < len(raws); i++ {
-		t := raws[i]
-		start := t.span.start - from
-		if t.kind == token.ILLEGAL && start+1 < len(seg) && seg[start] == '$' &&
-			(seg[start+1] == '"' || seg[start+1] == '`') {
-			end := interpLitEnd(seg, start+1)
-			t = tok{kind: token.STRING, span: span{from + start, from + end}}
-			if !visit(t) {
-				return
-			}
-			for i+1 < len(raws) && raws[i+1].span.start < from+end {
-				i++
-			}
-			continue
+		off := file.Offset(p)
+		t := tok{kind: kind, comment: kind == token.COMMENT}
+		if kind == token.SEMICOLON && lit == "\n" {
+			t.auto = true
+			t.span = span{from + off, from + off}
+		} else {
+			t.span = span{from + off, from + tokenEnd(seg, off, kind, lit)}
 		}
 		if !visit(t) {
 			return
 		}
 	}
+}
+
+// maskInterpLiterals rewrites each $"..." or $`...` literal of seg as a
+// raw string of the same length. Go literals and comments are skipped
+// first, so a $ inside one is never mistaken for an interp opener.
+func maskInterpLiterals(seg []byte) []byte {
+	var out []byte
+	for i := 0; i+1 < len(seg); i++ {
+		if seg[i] != '$' || (seg[i+1] != '"' && seg[i+1] != '`') {
+			i = skipGoLit(seg, i)
+			continue
+		}
+		end := interpLitEnd(seg, i+1)
+		if out == nil {
+			out = append([]byte(nil), seg...)
+		}
+		out[i] = '`'
+		for j := i + 1; j < end-1; j++ {
+			if out[j] != '\n' {
+				out[j] = ' '
+			}
+		}
+		out[end-1] = '`'
+		i = end - 1
+	}
+	if out == nil {
+		return seg
+	}
+	return out
+}
+
+// skipGoLit returns the offset before the end of the Go literal or
+// comment starting at seg[i], or i when seg[i] starts neither.
+func skipGoLit(seg []byte, i int) int {
+	switch seg[i] {
+	case '"', '\'', '`':
+		return goLitEnd(seg, i) - 1
+	case '/':
+		return commentEnd(seg, i) - 1
+	}
+	return i
 }
 
 // interpLitEnd returns the offset just past the $"..." or $`...`
