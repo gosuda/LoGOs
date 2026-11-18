@@ -1,0 +1,17 @@
+// errorcheck
+
+package p
+
+type Island interface{ Node | Leaf } // ERROR "invalid recursive type Island"
+
+type Leaf struct{ V int }
+
+type Node struct {
+	V  int64
+	Up Island?
+}
+
+func useUnion() bool {
+	var n Node? = Node{V: 5}
+	return n != nil
+}
