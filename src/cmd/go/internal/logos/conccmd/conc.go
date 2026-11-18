@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"cmd/go/internal/base"
 )
@@ -23,9 +24,10 @@ const (
 	// monitorTag selects the monitored files of logos/rt and logos/sync.
 	monitorTag = "logosconc"
 
-	// sinkEnv and maxFindingLine equal SinkEnv and MaxLine of
-	// logos/internal/conc, which cmd/go may not import.
+	// sinkEnv, stallEnv and maxFindingLine equal SinkEnv, StallEnv and
+	// MaxLine of logos/internal/conc, which cmd/go may not import.
 	sinkEnv        = "LOGOSCONC_SINK"
+	stallEnv       = "LOGOSCONC_STALL"
 	maxFindingLine = 4000
 )
 
@@ -38,12 +40,17 @@ that carries a monitor, and reports concurrency faults while the program
 runs. It reports faults that 'logos lint' and 'logos test -race' do not
 see, because no memory is raced and nothing has failed yet.
 
-	logos conc run [build flags] [--json-diagnostics] package [arguments...]
-	logos conc test [build and test flags] [--json-diagnostics] [packages]
+	logos conc run [build flags] [-stall duration] [--json-diagnostics] package [arguments...]
+	logos conc test [build and test flags] [-stall duration] [--json-diagnostics] [packages]
 
 The finding conc::lock_order_inversion names two goroutines that took
 the same two logos/sync.Locked values in opposite orders. Run at the
 same moment, each goroutine waits for the other.
+
+The finding conc::group_child_stalled names a child of a go group that
+did not return after its group was cancelled. The group cannot join
+before that child returns. The -stall flag sets how long the monitor
+waits after the cancellation; the default is 5s.
 
 A finding is printed on standard error as soon as the monitor sees it:
 
@@ -65,14 +72,14 @@ See also: logos lint, logos test.
 }
 
 var cmdRun = &base.Command{
-	UsageLine:   "logos conc run [build flags] [--json-diagnostics] package [arguments...]",
+	UsageLine:   "logos conc run [build flags] [-stall duration] [--json-diagnostics] package [arguments...]",
 	Short:       "run a program under the concurrency monitor",
 	Long:        "Run is 'logos run' under the concurrency monitor. See 'logos help conc'.\n",
 	CustomFlags: true,
 }
 
 var cmdTest = &base.Command{
-	UsageLine:   "logos conc test [build and test flags] [--json-diagnostics] [packages]",
+	UsageLine:   "logos conc test [build and test flags] [-stall duration] [--json-diagnostics] [packages]",
 	Short:       "test packages under the concurrency monitor",
 	Long:        "Test is 'logos test' under the concurrency monitor. See 'logos help conc'.\n",
 	CustomFlags: true,
@@ -81,11 +88,14 @@ var cmdTest = &base.Command{
 // Register adds the command to root. The flag sets of the run and test
 // commands of root tell which of their flags take a value.
 func Register(root *base.Command) {
-	cmdRun.Run = func(ctx context.Context, cmd *base.Command, args []string) {
-		monitor("run", childArguments("run", args, valueFlags(root.Lookup("run"))))
-	}
-	cmdTest.Run = func(ctx context.Context, cmd *base.Command, args []string) {
-		monitor("test", childArguments("test", args, valueFlags(root.Lookup("test"))))
+	for verb, cmd := range map[string]*base.Command{"run": cmdRun, "test": cmdTest} {
+		cmd.Run = func(ctx context.Context, _ *base.Command, args []string) {
+			inv := childArguments(verb, args, valueFlags(root.Lookup(verb)))
+			if d, err := time.ParseDuration(inv.stall); inv.stall != "" && (err != nil || d <= 0) {
+				base.Fatalf("logos conc %s: -stall %q is not a positive duration", verb, inv.stall)
+			}
+			monitor(verb, inv)
+		}
 	}
 	root.Commands = append(root.Commands, CmdConc)
 }
@@ -93,6 +103,7 @@ func Register(root *base.Command) {
 type invocation struct {
 	arguments []string
 	asJSON    bool
+	stall     string
 }
 
 // valueFlags reports, for each flag of cmd, whether it takes its value
@@ -112,8 +123,8 @@ func valueFlags(cmd *base.Command) func(name string) bool {
 }
 
 // childArguments turns the arguments of `logos conc <verb>` into the
-// arguments of `logos <verb>`: it removes -json-diagnostics and adds the
-// monitor tag to the build tags. It reads flags up to the package of
+// arguments of `logos <verb>`: it removes -json-diagnostics and -stall
+// and adds the monitor tag to the build tags. It reads flags up to the package of
 // `run`, and up to -args or -- of `test`; later arguments belong to the
 // program.
 func childArguments(verb string, args []string, takesValue func(string) bool) invocation {
@@ -136,6 +147,12 @@ func childArguments(verb string, args []string, takesValue func(string) bool) in
 		switch {
 		case name == "json-diagnostics":
 			inv.asJSON = !hasValue || value == "true"
+		case name == "stall":
+			if !hasValue && i+1 < len(args) {
+				i++
+				value = args[i]
+			}
+			inv.stall = value
 		case name == "tags":
 			if !hasValue && i+1 < len(args) {
 				i++

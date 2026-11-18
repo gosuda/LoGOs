@@ -472,6 +472,15 @@ A finding line that `logos conc` cannot read MUST count as a finding [T-106].
 The monitor MUST report `conc::lock_order_inversion` when two goroutines took the same two `logos/sync.Locked` values in opposite orders, also when no goroutine waited [T-106].
 The monitor MUST NOT report `conc::lock_order_inversion` when one goroutine took the two values in the two orders [T-106].
 The monitor MUST report one pair of source positions only one time in one process [T-106].
+`logos conc` MUST accept the flag `-stall` with a positive Go duration before the package of `run` and before the program arguments of `test`, and the default MUST be `5s` [T-106].
+`logos conc` MUST stop with an error before it starts the program when the value of `-stall` is not a positive duration [T-106].
+The monitor MUST report `conc::group_child_stalled` when a child of a group has not returned at the end of the `-stall` duration after the cancellation of the group context [T-106].
+For a child that started after the cancellation, the duration MUST start when the child starts [T-106].
+The monitor MUST NOT report a child that returned before the end of its duration [T-106].
+The finding MUST give the statement that started the child [T-106].
+When the child has a frame whose source file is not a file of the toolchain, the first position of the finding MUST be the innermost frame of that kind, and its role MUST name the wait state of the goroutine [T-106].
+The monitor MUST report one statement that starts a child only one time in one process [T-106].
+The monitor MUST discard the record of a group when the join of the group ends [T-106].
 The monitor MUST discard the lock orders of a `Locked` value that the garbage collector has freed [T-106].
 `logos conc` MUST stop with an error on a system that has no named pipes [T-106].
 

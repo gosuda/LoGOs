@@ -7,7 +7,9 @@
 //
 // The monitor calls no user code and takes no user lock. Its memory is
 // bounded: one entry per goroutine that holds a lock, one entry per lock
-// that is still reachable, and at most maxOrderEdges lock pairs.
+// that is still reachable, at most maxOrderEdges lock pairs, one entry
+// per group that is not joined, one entry per running group child, and
+// one entry per reported spawn position.
 //
 // A lock is known by its address. An address is reused after the garbage
 // collector frees a lock, so each lock comes with a liveness probe, and
@@ -27,10 +29,12 @@ const (
 	maxOrderEdges  = 1 << 16
 	firstSweepSize = 1 << 10
 
-	// callerSkip names the frame that called the support function which
-	// called the hook: runtime.Callers, callerPC, the hook, the support
-	// function, then the caller.
-	callerSkip = 4
+	// lockCallerSkip names the frame that called the support function
+	// which called the hook: runtime.Callers, callerPC, the hook, the
+	// support function, then the caller. A spawn has one more support
+	// function between the hook and the caller.
+	lockCallerSkip  = 4
+	spawnCallerSkip = 5
 )
 
 type heldLock struct {
@@ -69,7 +73,7 @@ var locks = monitor{
 // lock; the caller then calls Track.
 func Acquire(lock unsafe.Pointer) (untracked bool) {
 	key := uintptr(lock)
-	pc := callerPC()
+	pc := callerPC(lockCallerSkip)
 	g := goroutineID()
 	locks.mu.Lock()
 	defer locks.mu.Unlock()
@@ -107,7 +111,7 @@ func Track(lock unsafe.Pointer, alive func() bool) {
 // Hold records that the calling goroutine now holds lock.
 func Hold(lock unsafe.Pointer) {
 	key := uintptr(lock)
-	pc := callerPC()
+	pc := callerPC(lockCallerSkip)
 	g := goroutineID()
 	locks.mu.Lock()
 	defer locks.mu.Unlock()
@@ -185,9 +189,9 @@ func (m *monitor) reportInversion(here, other pairSite) {
 	})
 }
 
-func callerPC() uintptr {
+func callerPC(skip int) uintptr {
 	var pcs [1]uintptr
-	if runtime.Callers(callerSkip, pcs[:]) == 0 {
+	if runtime.Callers(skip, pcs[:]) == 0 {
 		return 0
 	}
 	return pcs[0]

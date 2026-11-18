@@ -888,14 +888,14 @@ var depsRules = `
 	unsafe
 	< logos/arena;
 
-	context, errors, reflect, strings, unsafe, logos/arena
+	os, runtime, strconv, strings, sync, time, unicode/utf8, unsafe
+	< logos/internal/conc;
+
+	context, errors, reflect, strings, unsafe, logos/arena, logos/internal/conc
 	< logos/rt;
 
 	encoding/json, math, reflect, strconv, unicode, unicode/utf8, unsafe
 	< logos/rt/json;
-
-	os, runtime, strconv, sync, unicode/utf8, unsafe
-	< logos/internal/conc;
 
 	sync, sync/atomic, unsafe, weak, logos/internal/conc
 	< logos/sync;

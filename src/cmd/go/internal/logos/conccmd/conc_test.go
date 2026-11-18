@@ -126,20 +126,23 @@ func TestChildArguments(t *testing.T) {
 		args   string
 		want   string
 		asJSON bool
+		stall  string
 	}{
-		{"run", ".", "run -tags=logosconc .", false},
-		{"run", "-race ./cmd/app -tags x -json-diagnostics", "run -tags=logosconc -race ./cmd/app -tags x -json-diagnostics", false},
-		{"run", "-tags=a,b -json-diagnostics . serve", "run -tags=a,b,logosconc . serve", true},
-		{"run", "-tags a -exec wrap .", "run -tags=a,logosconc -exec wrap .", false},
-		{"run", "-tags logosconc .", "run -tags=logosconc .", false},
-		{"test", "-run TestA ./a ./b -race", "test -tags=logosconc -run TestA ./a ./b -race", false},
-		{"test", "--json-diagnostics=false ./a -args -tags z", "test -tags=logosconc ./a -args -tags z", false},
-		{"test", "", "test -tags=logosconc", false},
+		{"run", ".", "run -tags=logosconc .", false, ""},
+		{"run", "-race ./cmd/app -tags x -json-diagnostics -stall 1s", "run -tags=logosconc -race ./cmd/app -tags x -json-diagnostics -stall 1s", false, ""},
+		{"run", "-tags=a,b -json-diagnostics . serve", "run -tags=a,b,logosconc . serve", true, ""},
+		{"run", "-tags a -exec wrap .", "run -tags=a,logosconc -exec wrap .", false, ""},
+		{"run", "-tags logosconc .", "run -tags=logosconc .", false, ""},
+		{"run", "-stall 200ms -race .", "run -tags=logosconc -race .", false, "200ms"},
+		{"test", "-run TestA ./a ./b -race", "test -tags=logosconc -run TestA ./a ./b -race", false, ""},
+		{"test", "--json-diagnostics=false ./a -args -tags z", "test -tags=logosconc ./a -args -tags z", false, ""},
+		{"test", "./a --stall=1m30s -args -stall 9s", "test -tags=logosconc ./a -args -stall 9s", false, "1m30s"},
+		{"test", "", "test -tags=logosconc", false, ""},
 	}
 	for _, tt := range tests {
 		got := childArguments(tt.verb, strings.Fields(tt.args), takesValue)
-		if want := strings.Fields(tt.want); !slices.Equal(got.arguments, want) || got.asJSON != tt.asJSON {
-			t.Errorf("logos conc %s %s:\n got %q asJSON=%v\nwant %q asJSON=%v", tt.verb, tt.args, got.arguments, got.asJSON, want, tt.asJSON)
+		if want := strings.Fields(tt.want); !slices.Equal(got.arguments, want) || got.asJSON != tt.asJSON || got.stall != tt.stall {
+			t.Errorf("logos conc %s %s:\n got %q asJSON=%v stall=%q\nwant %q asJSON=%v stall=%q", tt.verb, tt.args, got.arguments, got.asJSON, got.stall, want, tt.asJSON, tt.stall)
 		}
 	}
 }

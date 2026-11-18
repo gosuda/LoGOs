@@ -11,11 +11,16 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
+	"testing/synctest"
+	"time"
 	"unsafe"
 )
 
 var sinkPath string
+
+const stall = 50 * time.Millisecond
 
 func TestMain(m *testing.M) {
 	dir, err := os.MkdirTemp("", "logosconc")
@@ -27,6 +32,7 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 	os.Setenv(conc.SinkEnv, sinkPath)
+	os.Setenv(conc.StallEnv, stall.String())
 	code := m.Run()
 	os.RemoveAll(dir)
 	os.Exit(code)
@@ -34,6 +40,7 @@ func TestMain(m *testing.M) {
 
 type reported struct {
 	Rule      string `json:"rule"`
+	Message   string `json:"message"`
 	Positions []struct {
 		File string `json:"file"`
 		Line int    `json:"line"`
@@ -217,4 +224,132 @@ func TestAFreedLockTakesItsPairsWithIt(t *testing.T) {
 	if got := findingsAt(t, third); len(got) != 1 {
 		t.Fatalf("the lock at the reused address lost its own pair with line %d: got %d findings, want 1", second, len(got))
 	}
+}
+
+// group stands where logos/rt.Group stands: the monitor reports the
+// line that calls spawn.
+type group struct {
+	key       unsafe.Pointer
+	cancelled func()
+	children  sync.WaitGroup
+}
+
+func newGroup() *group {
+	g := new(group)
+	g.key = unsafe.Pointer(g)
+	g.cancelled = conc.GroupCreated(g.key)
+	return g
+}
+
+func (g *group) spawn(body func()) {
+	site := g.site()
+	g.children.Go(func() {
+		conc.ChildStarted(g.key, site)
+		defer conc.ChildDone(g.key)
+		body()
+	})
+}
+
+func (g *group) site() uintptr { return conc.SpawnSite() }
+
+func (g *group) join() {
+	g.children.Wait()
+	conc.GroupJoined(g.key)
+}
+
+func TestGroupChildThatOutlivesCancellationIsReportedOncePerSpawnStatement(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		g := newGroup()
+		release := make(chan struct{})
+		var line int
+		for range 3 {
+			line = nextLine()
+			g.spawn(func() { <-release })
+		}
+		synctest.Wait()
+		g.cancelled()
+		time.Sleep(stall)
+		synctest.Wait()
+
+		got := findingsAt(t, line)
+		if len(got) != 1 {
+			t.Fatalf("got %d findings %v after the stall duration, want 1: %+v", len(got), stall, got)
+		}
+		f := got[0]
+		if f.Rule != "conc::group_child_stalled" || !strings.Contains(f.Message, "within "+stall.String()+" after") || f.Fix.Hint == "" || f.Pid != os.Getpid() {
+			t.Errorf("finding = %+v", f)
+		}
+		// This file is below the toolchain sources, so the finding has no
+		// frame of the child and names the spawn statement only.
+		if len(f.Positions) != 1 || f.Positions[0].Line != line {
+			t.Errorf("positions = %+v, want line %d only", f.Positions, line)
+		}
+		close(release)
+		g.join()
+	})
+}
+
+func TestGroupChildThatReturnsBeforeItsStallDurationEndsIsSilent(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		g := newGroup()
+		cancelled := make(chan struct{})
+		early := nextLine()
+		g.spawn(func() { <-cancelled; time.Sleep(stall - time.Millisecond) })
+		synctest.Wait()
+		g.cancelled()
+		close(cancelled)
+		time.Sleep(stall / 2)
+		late := nextLine()
+		g.spawn(func() { time.Sleep(stall - time.Millisecond) })
+		time.Sleep(10 * stall)
+		synctest.Wait()
+
+		if got := findingsAt(t, early, late); len(got) != 0 {
+			t.Errorf("two children that returned 1ms before the end of their durations gave %+v", got)
+		}
+		g.join()
+	})
+}
+
+func TestGroupChildThatStartsAfterCancellationIsWatchedFromItsStart(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		g := newGroup()
+		g.cancelled()
+		time.Sleep(3 * stall)
+		release := make(chan struct{})
+		line := nextLine()
+		g.spawn(func() { <-release })
+		synctest.Wait()
+		time.Sleep(stall)
+		synctest.Wait()
+
+		if got := findingsAt(t, line); len(got) != 1 {
+			t.Errorf("got %d findings %v after the child started in a cancelled group, want 1: %+v", len(got), stall, got)
+		}
+		close(release)
+		g.join()
+	})
+}
+
+func TestYoungerGroupChildIsReportedWhenItsOwnStallDurationEnds(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		g := newGroup()
+		release := make(chan struct{})
+		older := nextLine()
+		g.spawn(func() { <-release })
+		synctest.Wait()
+		g.cancelled()
+		time.Sleep(stall / 2)
+		younger := nextLine()
+		g.spawn(func() { <-release })
+		synctest.Wait()
+		time.Sleep(stall)
+		synctest.Wait()
+
+		if a, b := findingsAt(t, older), findingsAt(t, younger); len(a) != 1 || len(b) != 1 {
+			t.Errorf("the older child gave %d findings and the younger child gave %d, want 1 and 1", len(a), len(b))
+		}
+		close(release)
+		g.join()
+	})
 }

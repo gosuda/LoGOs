@@ -61,6 +61,7 @@ func NewGroup(ctx context.Context, limit int) (*Group, context.Context) {
 		g.sem = make(chan struct{}, limit)
 	}
 	g.live = 1
+	monitorCreated(g)
 	return g, c
 }
 
@@ -74,7 +75,7 @@ func NewGroup(ctx context.Context, limit int) (*Group, context.Context) {
 func (g *Group) Go(f func(context.Context) error) {
 	g.register()
 	g.acquire()
-	go g.run(f)
+	go g.run(monitored(g, f))
 }
 
 // GoNested spawns f as a child from a goroutine that is itself a child
@@ -83,6 +84,7 @@ func (g *Group) Go(f func(context.Context) error) {
 // does not wait for the slot it holds.
 func (g *Group) GoNested(f func(context.Context) error) {
 	g.register()
+	f = monitored(g, f)
 	go func() {
 		g.acquire()
 		g.run(f)
@@ -158,6 +160,7 @@ func (g *Group) Wait() error {
 	}
 	g.joined = true
 	g.mu.Unlock()
+	monitorJoined(g)
 	if !g.parentStop() {
 		<-g.parentDone
 	}
