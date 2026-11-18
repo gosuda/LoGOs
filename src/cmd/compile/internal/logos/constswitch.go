@@ -1232,7 +1232,8 @@ func (c *cswLower) wrapConvs(body []syntax.Stmt, cs *cswCase, selWraps []span) (
 					name       string
 				}
 				var cands []cand
-				syntax.Inspect(l, func(n syntax.Node) bool {
+				var visit func(syntax.Node) bool
+				visit = func(n syntax.Node) bool {
 					ix, ok := n.(*syntax.IndexExpr)
 					if !ok {
 						return true
@@ -1296,10 +1297,16 @@ func (c *cswLower) wrapConvs(body []syntax.Stmt, cs *cswCase, selWraps []span) (
 							ix.Index = nameOf(leftmostOf(ix.Index), t)
 						}
 					}
-					// Keep descending: an unfrozen X on the address path may
-					// hold another index whose operand still needs freezing.
-					return true
-				})
+					// Keep descending into X: an unfrozen X on the address path
+					// may hold another index whose operand still needs freezing,
+					// and a frozen X was already replaced by its temp name. A
+					// skipped index operand is a compile-time expression whose
+					// calls never run — unsafe.Sizeof does not evaluate its
+					// argument — so the walk must not descend into it.
+					syntax.Inspect(ix.X, visit)
+					return false
+				}
+				syntax.Inspect(l, visit)
 				slices.SortFunc(cands, func(a, b cand) int { return a.start - b.start })
 				for _, cd := range cands {
 					freeze(cd.e, cd.start, cd.end, cd.name)
