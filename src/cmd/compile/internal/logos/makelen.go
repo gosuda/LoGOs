@@ -90,27 +90,46 @@ func isIntegerType(t types2.Type) bool {
 // untouched source, so splices a later lowering records inside either operand
 // — a lambda, a property, a frozen operand — are still applied. A single
 // covering splice would drop them as orphans.
+//
+// The edits fuse with any wrap lowered around the operand: drainBoundaries
+// pulls a pending wrap's owned boundary inserts — a `??` closure's head and
+// `}()` tail — so `MulLen(` lands inside its return slot rather than after
+// its closing text, and the narrowest move holding the operand gets the
+// edits as inner splices for the same reason (an insert routed by its own
+// offset stays outside a moved region's end boundary).
 func (fl *fileLower) spliceMakeLen(op *syntax.Operation) {
 	start := fl.off(syntax.StartPos(op))
 	opOff := fl.off(op.Pos())
 	yStart := fl.off(syntax.StartPos(op.Y))
 	yEnd := fl.operandEnd(yStart)
-	fl.addT(start, start, gen("_logos_rt.MulLen("))
-	fl.addT(opOff, opOff+len("*"), gen(","))
-	fl.addT(yEnd, yEnd, gen(", "+strconv.Quote(renderExpr(op))+")"))
+	m := fl.narrowestMove(span{start: start, end: yEnd}, false)
+	head, tail := fl.drainEnclosing(span{start: start, end: yEnd})
+	put := func(start, end int, t otext) {
+		fl.placeSplice(splice{start: start, end: end, text: t.s, chunks: t.chunks}, m)
+	}
+	put(start, start, cat(head, gen("_logos_rt.MulLen(")))
+	put(opOff, opOff+len("*"), gen(","))
+	// The trailer closes MulLen's argument list, so it lands after every
+	// operand-internal suffix insert at the operand end — a fresh-address
+	// rewrite's closing paren recorded by the later lowerAddrFresh pass, a
+	// narrowed name's .Value — which placementAfterExpression sorts last at
+	// one offset.
+	trailer := cat(gen(", "+strconv.Quote(renderExpr(op))+")"), tail)
+	fl.placeSplice(splice{start: yEnd, end: yEnd, text: trailer.s, chunks: trailer.chunks,
+		placement: placementAfterExpression}, m)
 }
 
 func (fl *fileLower) operandEnd(from int) int {
-	end := len(fl.src)
+	end := from
 	scan := operandScan{prefix: true}
 	scanSegment(fl.src, from, len(fl.src), func(t tok) bool {
 		if t.comment {
 			return true
 		}
 		if scan.ends(t) {
-			end = t.start
 			return false
 		}
+		end = t.end
 		return true
 	})
 	return end
