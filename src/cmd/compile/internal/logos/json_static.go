@@ -11,11 +11,16 @@ import (
 
 	"cmd/compile/internal/syntax"
 	"cmd/compile/internal/types2"
+
+	"internal/buildcfg"
 )
 
 const jsonAlias = "_logos_json"
 
 const jsonImportPath = "logos/rt/json"
+
+const jsontextAlias = "_logos_jsontext"
+const jsontextImportPath = "encoding/json/jsontext"
 
 const jsonRecv = "_logos_v"
 
@@ -117,10 +122,16 @@ func (fl *fileLower) lowerStaticJSONType(td *syntax.TypeDecl) {
 		} else {
 			js.marshalText(&b)
 		}
+		if buildcfg.Experiment.JSONv2 && !userDeclaresMethod(named, "MarshalJSONTo") {
+			js.marshalToText(&b)
+		}
 	}
 	if jsonOK {
 		if !userDeclaresMethod(named, "UnmarshalJSON") {
 			js.unmarshalText(&b)
+			if buildcfg.Experiment.JSONv2 && !userDeclaresMethod(named, "UnmarshalJSONFrom") {
+				js.unmarshalFromText(&b)
+			}
 		}
 		js.keyFuncs(&b)
 		js.missingFunc(&b)
@@ -138,6 +149,7 @@ func (fl *fileLower) lowerStaticJSONType(td *syntax.TypeDecl) {
 	text := b.String()
 	fl.addGeneratedDecls(td.Pos(), text)
 	fl.needJSON = fl.needJSON || strings.Contains(text, jsonAlias+".")
+	fl.needJSONText = fl.needJSONText || strings.Contains(text, jsontextAlias+".")
 	fl.needRT = fl.needRT || strings.Contains(text, rtAlias+".")
 	fl.needBinary = fl.needBinary || strings.Contains(text, "_logos_b")
 }
@@ -527,6 +539,13 @@ func jsonImport(pos syntax.Pos) *syntax.ImportDecl {
 }
 
 const reflectAlias = "_logos_reflect"
+
+func jsontextImport(pos syntax.Pos) *syntax.ImportDecl {
+	return at(&syntax.ImportDecl{
+		LocalPkgName: nameOf(pos, jsontextAlias),
+		Path:         litOf(pos, fmt.Sprintf("%q", jsontextImportPath), syntax.StringLit),
+	}, pos)
+}
 
 func reflectImport(pos syntax.Pos) *syntax.ImportDecl {
 	return at(&syntax.ImportDecl{

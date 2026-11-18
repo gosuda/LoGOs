@@ -1079,6 +1079,33 @@ func (js *jsonStruct) marshalText(b *strings.Builder) {
 	b.WriteString("}\n")
 }
 
+// marshalToText emits the options-aware MarshalJSONTo form. The static
+// body implements the v1 default options, so it runs only when the
+// caller's options equal those defaults apart from the internal call
+// bits; any other option encodes through encoding/json's default
+// encoder over a method-free shadow type, which applies the caller's
+// options in full. On the fast path the static body's bytes go through
+// WriteValue.
+func (js *jsonStruct) marshalToText(b *strings.Builder) {
+	body := []string{
+		fmt.Sprintf("if !%s.CallerOptionsAreV1Default(_logos_enc.Options()) {", jsonAlias),
+		fmt.Sprintf("\ttype _logos_shadow_%s %s", js.name, js.name),
+		fmt.Sprintf("\treturn %s.EncodeDefault[_logos_shadow_%s, %s](_logos_enc, _logos_shadow_%s(%s))", jsonAlias, js.name, js.name, js.name, jsonRecv),
+		"}",
+		fmt.Sprintf("_logos_b, _logos_err := %s.MarshalJSON()", jsonRecv),
+		"if _logos_err != nil {",
+		"\treturn _logos_err",
+		"}",
+		"return _logos_enc.WriteValue(_logos_b)",
+	}
+	fmt.Fprintf(b, "\nfunc (%s %s) MarshalJSONTo(_logos_enc *%s.Encoder) error {\n", jsonRecv, js.name, jsontextAlias)
+	for _, l := range indentLines(body) {
+		b.WriteString(l)
+		b.WriteByte('\n')
+	}
+	b.WriteString("}\n")
+}
+
 func optionJSONPath(t types2.Type, seen map[types2.Type]bool) bool {
 	wrapped := false
 	for {

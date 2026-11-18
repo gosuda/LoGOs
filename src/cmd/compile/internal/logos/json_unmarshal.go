@@ -64,7 +64,35 @@ func (js *jsonStruct) unmarshalText(b *strings.Builder) {
 	body = append(body, ifLines("_logos_v := _logos_s.Saved(); _logos_v != nil", []string{"return _logos_v"})...)
 	body = append(body, js.requiredCheck()...)
 	body = append(body, "return nil")
-	fmt.Fprintf(b, "\nfunc (%s *%s) UnmarshalJSON(_logos_data []byte) error {\n", jsonRecv, js.name)
+	fmt.Fprintf(b, "\nfunc _logos_unmarshal_%s(_logos_data []byte, %s *%s, _logos_fold bool) error {\n", js.name, jsonRecv, js.name)
+	for _, l := range indentLines(body) {
+		b.WriteString(l)
+		b.WriteByte('\n')
+	}
+	b.WriteString("}\n")
+	fmt.Fprintf(b, "\nfunc (%s *%s) UnmarshalJSON(_logos_data []byte) error { return _logos_unmarshal_%s(_logos_data, %s, true) }\n", jsonRecv, js.name, js.name, jsonRecv)
+}
+
+// unmarshalFromText emits the options-aware UnmarshalJSONFrom form. The
+// static body implements the v1 default options, so it runs only when
+// the caller's options equal those defaults apart from the internal
+// call bits; any other option decodes through encoding/json's default
+// decoder over a method-free shadow type, which applies the caller's
+// options in full. On the fast path one value is streamed and the
+// static body runs under the v1 fold setting.
+func (js *jsonStruct) unmarshalFromText(b *strings.Builder) {
+	body := []string{
+		fmt.Sprintf("if !%s.CallerOptionsAreV1Default(_logos_dec.Options()) {", jsonAlias),
+		fmt.Sprintf("\ttype _logos_shadow_%s %s", js.name, js.name),
+		fmt.Sprintf("\treturn %s.DecodeDefault[_logos_shadow_%s, %s](_logos_dec, (*_logos_shadow_%s)(%s))", jsonAlias, js.name, js.name, js.name, jsonRecv),
+		"}",
+		"_logos_val, _logos_err := _logos_dec.ReadValue()",
+		"if _logos_err != nil {",
+		"\treturn _logos_err",
+		"}",
+		fmt.Sprintf("return _logos_unmarshal_%s(_logos_val, %s, true)", js.name, jsonRecv),
+	}
+	fmt.Fprintf(b, "\nfunc (%s *%s) UnmarshalJSONFrom(_logos_dec *%s.Decoder) error {\n", jsonRecv, js.name, jsontextAlias)
 	for _, l := range indentLines(body) {
 		b.WriteString(l)
 		b.WriteByte('\n')
@@ -75,7 +103,7 @@ func (js *jsonStruct) unmarshalText(b *strings.Builder) {
 func (js *jsonStruct) loopLines() []string {
 	body := []string{
 		fmt.Sprintf("_logos_i := _logos_jsonkey_%s(_logos_s.Key())", js.name),
-		"if _logos_i < 0 {",
+		"if _logos_i < 0 && _logos_fold {",
 		fmt.Sprintf("\t_logos_i = _logos_jsonfold_%s(_logos_s.FoldKey())", js.name),
 		"}",
 		"switch _logos_i {",

@@ -215,6 +215,7 @@ type fileLower struct {
 	needSimd      bool
 	needSimdMath  bool
 	needJSON      bool
+	needJSONText  bool
 	needBinary    bool
 	needReflect   bool
 	siteDecls     []*syntax.VarDecl
@@ -695,7 +696,7 @@ func (fl *fileLower) lowerFile() {
 
 	fl.lowerStaticJSON() // generated MarshalJSON and UnmarshalJSON; sets needRT and needJSON before the imports.
 	fl.flushTypeImports()
-	if fl.needRT || fl.needRTText || fl.needSimd || fl.needSimdMath || fl.needJSON || fl.needReflect || fl.needBinary {
+	if fl.needRT || fl.needRTText || fl.needSimd || fl.needSimdMath || fl.needJSON || fl.needJSONText || fl.needReflect || fl.needBinary {
 		var imps []syntax.Decl
 		pos := fl.file.Pos()
 		for _, spec := range fl.logosImportSpecs() {
@@ -797,6 +798,7 @@ func (fl *fileLower) logosImportSpecs() []logosImportSpec {
 	specs := []logosImportSpec{
 		{fl.needRT && fl.rtReferenced(), rtAlias, rtImportPath, rtImport},
 		{fl.needJSON, jsonAlias, jsonImportPath, jsonImport},
+		{fl.needJSONText, jsontextAlias, jsontextImportPath, jsontextImport},
 		{fl.needReflect, reflectAlias, "reflect", reflectImport},
 	}
 	for _, item := range binaryImportTable {
