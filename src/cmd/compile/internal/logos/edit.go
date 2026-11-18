@@ -221,8 +221,30 @@ func editsOf(src []byte, base *syntax.PosBase, splices []splice) []Edit {
 	}
 	sorted := slices.Clone(splices)
 	sortSplices(sorted)
-	edits := make([]Edit, len(sorted))
+	// A splice may cover earlier splices strictly inside it (a default
+	// erasure over a respelled literal, a drained fold). Those inner
+	// splices already resolved into any textOf copies made while they
+	// were pending; their source span is gone, so drop them here —
+	// after every composition — instead of reporting an overlap.
+	// Zero-width inserts at a cover's boundary stay: they place text
+	// immediately before or after the cover.
+	kept := sorted[:0]
 	for i, s := range sorted {
+		orphan := false
+		for j := 0; j < i && !orphan; j++ {
+			k := sorted[j]
+			inside := k.start <= s.start && s.end <= k.end &&
+				(s.start > k.start || s.end < k.end)
+			if inside && !(s.start == s.end && (s.start == k.start || s.end == k.end)) {
+				orphan = true
+			}
+		}
+		if !orphan {
+			kept = append(kept, s)
+		}
+	}
+	edits := make([]Edit, len(kept))
+	for i, s := range kept {
 		edits[i] = Edit{Start: posAt(s.start), End: posAt(s.end), Text: s.text, Chunks: s.chunks}
 	}
 	return edits
