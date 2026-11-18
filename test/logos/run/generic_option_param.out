@@ -13,3 +13,15 @@ method-present: true
 method-absent: false
 string-present: true
 string-absent: false
+gmeth-value-present: true
+gmeth-value-absent: false
+gmeth-value-nil: false
+gmeth-value-explicit-present: true
+gmeth-value-explicit-absent: false
+gmeth-value-plain: true
+gmeth-expr-present: true
+gmeth-expr-absent: false
+gmeth-expr-explicit-present: true
+gmeth-expr-explicit-absent: false
+gmeth-expr-explicit-plain: true
+gmeth-expr-explicit-nil: false

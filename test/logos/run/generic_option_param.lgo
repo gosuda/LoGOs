@@ -25,6 +25,12 @@ func (b *Box[V]) Has(got V?) bool {
 	return got != nil
 }
 
+type R struct{ n int }
+
+func (r R) Has[V any](x V?) bool {
+	return x != nil
+}
+
 func inner[W any](y W?) bool {
 	return y != nil
 }
@@ -64,4 +70,18 @@ func main() {
 	var sabsent string?
 	fmt.Println("string-present:", pick(spresent, "x"))
 	fmt.Println("string-absent:", pick(sabsent, "x"))
+
+	r := R{n: 1}
+	fmt.Println("gmeth-value-present:", r.Has(present))
+	fmt.Println("gmeth-value-absent:", r.Has(absent))
+	fmt.Println("gmeth-value-nil:", r.Has[int](nil))
+	fmt.Println("gmeth-value-explicit-present:", r.Has[int](present))
+	fmt.Println("gmeth-value-explicit-absent:", r.Has[int](absent))
+	fmt.Println("gmeth-value-plain:", r.Has[int](5))
+	fmt.Println("gmeth-expr-present:", R.Has(r, present))
+	fmt.Println("gmeth-expr-absent:", R.Has(r, absent))
+	fmt.Println("gmeth-expr-explicit-present:", R.Has[int](r, present))
+	fmt.Println("gmeth-expr-explicit-absent:", R.Has[int](r, absent))
+	fmt.Println("gmeth-expr-explicit-plain:", R.Has[int](r, 5))
+	fmt.Println("gmeth-expr-explicit-nil:", R.Has[int](r, nil))
 }

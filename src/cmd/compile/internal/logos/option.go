@@ -1420,11 +1420,12 @@ func (fl *fileLower) callSig(e *syntax.CallExpr) *types2.Signature {
 	}
 }
 
-// instCallSig returns the instantiated signature of a generic callee. The
-// generic signature names the callee's type parameters, which are not in
-// scope at the call, and argument lowering spells the parameter type into
-// the call site, so only this call's instantiation gives spellable types.
-func (fl *fileLower) instCallSig(fun syntax.Expr) *types2.Signature {
+// unindexedCallee strips parentheses and explicit type arguments from a
+// callee expression, leaving the name or method selector that identifies it.
+// Every generic call form, indexed or not, method value or method expression,
+// reduces through this one place, so the receiver offset and the
+// instantiation lookup cannot disagree.
+func unindexedCallee(fun syntax.Expr) syntax.Expr {
 	for {
 		indexed, ok := syntax.Unparen(fun).(*syntax.IndexExpr)
 		if !ok {
@@ -1432,8 +1433,28 @@ func (fl *fileLower) instCallSig(fun syntax.Expr) *types2.Signature {
 		}
 		fun = indexed.X
 	}
+	return fun
+}
+
+// methodExprCallee returns the method selector of a callee written as a
+// method expression, Type.Method with or without explicit type arguments,
+// whose receiver is the first call argument. A method value call (x.M) or a
+// plain selector call returns nil: its argument list has no receiver.
+func (fl *fileLower) methodExprCallee(fun syntax.Expr) *syntax.SelectorExpr {
+	sel, ok := syntax.Unparen(unindexedCallee(fun)).(*syntax.SelectorExpr)
+	if !ok || !fl.isTypeExpr(sel.X) {
+		return nil
+	}
+	return sel
+}
+
+// instCallSig returns the instantiated signature of a generic callee. The
+// generic signature names the callee's type parameters, which are not in
+// scope at the call, and argument lowering spells the parameter type into
+// the call site, so only this call's instantiation gives spellable types.
+func (fl *fileLower) instCallSig(fun syntax.Expr) *types2.Signature {
 	var name *syntax.Name
-	switch callee := syntax.Unparen(fun).(type) {
+	switch callee := syntax.Unparen(unindexedCallee(fun)).(type) {
 	case *syntax.Name:
 		name = callee
 	case *syntax.SelectorExpr:
@@ -1455,12 +1476,10 @@ func (fl *fileLower) callTargets(e *syntax.CallExpr, sig *types2.Signature) []ty
 	n := len(e.ArgList)
 	targets := make([]types2.Type, n)
 	shift := 0
-	if fun, ok := syntax.Unparen(e.Fun).(*syntax.SelectorExpr); ok {
-		if fl.isTypeExpr(fun.X) {
-			if recv := sig.Recv(); recv != nil && n > 0 {
-				targets[0] = recv.Type()
-				shift = 1
-			}
+	if fl.methodExprCallee(e.Fun) != nil {
+		if recv := sig.Recv(); recv != nil && n > 0 {
+			targets[0] = recv.Type()
+			shift = 1
 		}
 	}
 	for i := range targets {
