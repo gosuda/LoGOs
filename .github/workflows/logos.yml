@@ -61,7 +61,7 @@ jobs:
           git -c protocol.version=2 fetch --no-tags --depth=1 origin "$GITHUB_SHA"
           git -c advice.detachedHead=false checkout --detach FETCH_HEAD
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          test "$(git rev-parse HEAD)" = "$LOGOS_EXPECTED_HEAD"
+          test "$(git rev-parse 'HEAD^2' 2>/dev/null || git rev-parse HEAD)" = "$LOGOS_EXPECTED_HEAD"
           git rev-parse HEAD 'HEAD^{tree}' HEAD:src
       - name: "Validate workflows and shell scripts"
         working-directory: "."
