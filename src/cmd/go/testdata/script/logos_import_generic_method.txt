@@ -1,0 +1,123 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+# A Go package that imports a .lgo package runs the dual-use union check
+# over the imported scope. Export data lists a generic method there as
+# "Type.method", and resolving that name by scope lookup made the compiler
+# stop with "internal compiler error: assertion failed". The generated test
+# main is such a Go importer, so every test of the package failed to build.
+
+cd w
+logos build ./...
+logos test -count=1 ./box
+stdout '^ok\s+example\.com/genmethod/box'
+logos run ./main
+stdout '^42 kept$'
+
+# The check still walks the declarations of such a package: a union that is
+# a constraint and a value type is refused when a Go importer reads it.
+! logos test -count=1 ./dual
+stderr 'union D is used as a type constraint and as a value type; Go cannot express both'
+
+-- w/go.mod --
+module example.com/genmethod
+
+go 1.27
+
+-- w/box/box.lgo --
+package box
+
+type Box struct {
+	N int
+}
+
+func (b *Box) pick[T any](v T) T {
+	return v
+}
+
+func (b *Box) Twice() int {
+	return b.pick[int](b.N) * 2
+}
+
+func (b Box) Label[T any](v T) T {
+	return v
+}
+
+-- w/box/box_test.lgo --
+package box_test
+
+import (
+	"testing"
+
+	"example.com/genmethod/box"
+)
+
+func TestTwice(t *testing.T) {
+	b := &box.Box{N: 21}
+	if got := b.Twice(); got != 42 {
+		t.Fatalf("Twice = %d", got)
+	}
+}
+
+-- w/main/main.lgo --
+package main
+
+import (
+	"fmt"
+
+	"example.com/genmethod/box"
+)
+
+func main() {
+	b := &box.Box{N: 21}
+	fmt.Println(b.Twice(), box.Box{}.Label[string]("kept"))
+}
+
+-- w/dual/dual.lgo --
+package dual
+
+type A struct {
+	X int
+}
+
+func (a A) M() string {
+	return "A"
+}
+
+func (a A) Same[T any](v T) T {
+	return v
+}
+
+type B struct {
+	Y string
+}
+
+func (b B) M() string {
+	return "B"
+}
+
+type D interface {
+	A | B
+	M() string
+}
+
+func First[T D](x T) T {
+	return x
+}
+
+var U D = A{X: 3}
+
+-- w/dual/dual_test.lgo --
+package dual_test
+
+import (
+	"testing"
+
+	"example.com/genmethod/dual"
+)
+
+func TestFirst(t *testing.T) {
+	if dual.First(dual.B{Y: "z"}).M() != "B" {
+		t.Fatal("First")
+	}
+}

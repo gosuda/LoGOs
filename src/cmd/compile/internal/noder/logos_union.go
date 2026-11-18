@@ -32,8 +32,9 @@ func checkLogosGoImport(pkg *types2.Package) {
 	if scope == nil {
 		return
 	}
+	names := logos.PackageDeclNames(pkg)
 	cands := make(map[*types2.TypeName]bool)
-	for _, name := range scope.Names() {
+	for _, name := range names {
 		tn, ok := scope.Lookup(name).(*types2.TypeName)
 		if !ok || tn.IsAlias() {
 			continue
@@ -48,7 +49,7 @@ func checkLogosGoImport(pkg *types2.Package) {
 		return
 	}
 	v := &unionMentionWalker{cands: cands, seen: make(map[types2.Type]bool)}
-	for _, name := range scope.Names() {
+	for _, name := range names {
 		switch obj := scope.Lookup(name).(type) {
 		case *types2.Func:
 			v.signature(obj.Type())
