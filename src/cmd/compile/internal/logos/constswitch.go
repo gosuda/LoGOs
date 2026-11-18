@@ -41,15 +41,14 @@ type cswCase struct {
 }
 
 type cswLower struct {
-	fc     *funcLower
-	fl     *fileLower
-	info   *types2.Info
-	stmt   *syntax.ConstSwitchStmt
-	start  int
-	end    int
-	tag    types2.Type
-	cases  []cswCase
-
+	fc    *funcLower
+	fl    *fileLower
+	info  *types2.Info
+	stmt  *syntax.ConstSwitchStmt
+	start int
+	end   int
+	tag   types2.Type
+	cases []cswCase
 }
 
 type cswRebind struct {
