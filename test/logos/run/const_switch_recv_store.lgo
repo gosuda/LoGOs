@@ -131,6 +131,12 @@ type MBox struct{}
 
 func (m MBox) M() *bool { return &mboxPtr }
 
+var selPtr bool
+
+type MBox2 struct{}
+
+func (m MBox2) M() *bool { return &selPtr }
+
 func k() int { seq = append(seq, "k"); return 0 }
 
 func wrapFrozen[T any](ch chan T, s []T) {
@@ -206,8 +212,10 @@ func sameSpellSiblings[T any](ch chan T, out *bool) {
 		{
 			type St bool
 			var ok2 St
+			var p2 interface{ M() string }
 			select {
-			case _, ok2 = <-ch:
+			case p2, ok2 = <-ch:
+				_ = p2
 			default:
 			}
 			*out = *out && bool(ok2)
@@ -218,6 +226,20 @@ func sameSpellSiblings[T any](ch chan T, out *bool) {
 // A direct pointer fallback in a receive target keeps its `??`
 // lowering in the emitted store text instead of overlapping the
 // replacement, and the store reaches the fallback pointer.
+// A selector applied to an option fallback folds the `??` lowering
+// into the receiver cast, and the store reaches the selected pointer.
+func optWrapFrozenSel[T any](ch chan T, o T?, z T) {
+	const switch T {
+	case interface{ M() *bool }:
+		var p interface{ M() *bool }
+		select {
+		case p, *(o ?? z).M() = <-ch:
+			_ = p
+		default:
+		}
+	}
+}
+
 func optWrapFrozen[T any](ch chan T, o (*bool)?, w *bool) {
 	const switch T {
 	case interface{ M() *bool }:
@@ -259,6 +281,12 @@ func main() {
 	}
 	var optHit bool
 	optWrapFrozen[MBox](ch2, nil, &optHit)
+	ch3 := make(chan MBox2, 4)
+	select {
+	case ch3 <- MBox2{}:
+	default:
+	}
+	optWrapFrozenSel[MBox2](ch3, nil, MBox2{})
 	check("const-index-operand-not-run", len(seq) == 1 && seq[0] == "k", seq, []string{"k"})
 	check("const-index-store", flags[unsafe.Sizeof(buf[0])], flags[unsafe.Sizeof(buf[0])], true)
 	check("shadowed-local-type", ok2, ok2, true)
@@ -270,6 +298,7 @@ func main() {
 	check("same-spell-siblings", ok8, ok8, true)
 	check("wrap-frozen-operand", mboxPtr, mboxPtr, true)
 	check("opt-fallback-store", optHit, optHit, true)
+	check("opt-fallback-selector", selPtr, selPtr, true)
 	if failed {
 		os.Exit(1)
 	}
