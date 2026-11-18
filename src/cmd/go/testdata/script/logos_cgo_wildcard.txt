@@ -26,6 +26,22 @@ logos build ./...
 ! stderr '\[restriction::cgo_usage\]'
 logos lint ./...
 ! stderr '\[restriction::cgo_usage\]'
+
+# An explicit path reaches logosCgoHidden. A `cgo && spira_custom` file
+# with spira_custom unset must report the unmet constraints, not a cgo
+# denial: enabling cgo alone would not admit the file.
+! logos build ./c2
+stderr 'build constraints exclude'
+! stderr '\[restriction::cgo_usage\]'
+# With the tag set the only thing hiding the package is cgo.
+! logos build -tags=spira_custom ./c2
+stderr '\[restriction::cgo_usage\]'
+
+# A `package documentation` file is never admitted by ImportDir, so an
+# explicit path reports the missing sources rather than a cgo denial.
+! logos build ./docs
+stderr 'build constraints exclude'
+! stderr '\[restriction::cgo_usage\]'
 cd ..
 
 # A restricted policy with an empty allowlist denies every cgo package.
@@ -106,6 +122,22 @@ package c
 import "C"
 
 func One() int { return int(C.one()) }
+
+-- tagged/c2/c2.lgo --
+//go:build cgo && spira_custom
+
+package c2
+
+// int two(void) { return 2; }
+import "C"
+
+func Two() int { return int(C.two()) }
+
+-- tagged/docs/d.lgo --
+package documentation
+
+// int three(void) { return 3; }
+import "C"
 
 -- restricted/go.mod --
 module example.com/f06restricted

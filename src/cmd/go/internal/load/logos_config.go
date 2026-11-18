@@ -186,6 +186,11 @@ func logosFileImportsC(dir, name string) bool {
 	if err != nil || parsed == nil {
 		return false
 	}
+	// ImportDir never admits a `package documentation` file, so cgo cannot be
+	// what hides it.
+	if parsed.Name.Name == "documentation" {
+		return false
+	}
 	for _, imp := range parsed.Imports {
 		if path, err := strconv.Unquote(imp.Path.Value); err == nil && path == "C" {
 			return true
