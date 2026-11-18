@@ -1513,6 +1513,19 @@ func (c *cfLeaf) switchCaseType(cs *syntax.ConstSwitchCase, s *syntax.ConstSwitc
 			return a.field.typ, true
 		}
 	}
+	// When the case expression was checked (native parse), its recorded
+	// type already reflects the scope at the switch — local declarations,
+	// shadowing, aliases. Trust it over a manual re-resolution that would
+	// produce a different type object for a local named type.
+	if tv, ok := c.fl.pkg.info.Types[syntax.Unparen(cs.Type)]; ok && tv.IsType() {
+		// An unbound or still-parametric case type is not a concrete
+		// answer the fold can compare against a field type — leave the
+		// switch for the copy's own lowering.
+		if types2.IsInterface(tv.Type) || cfHasTypeParam(tv.Type) {
+			return nil, false
+		}
+		return tv.Type, true
+	}
 	// A bare name can resolve to a type declared inside the function
 	// body the record walk cannot see. An alias stands for its target;
 	// a local named type is fresh, so it can only match a field under
@@ -1526,7 +1539,16 @@ func (c *cfLeaf) switchCaseType(cs *syntax.ConstSwitchCase, s *syntax.ConstSwitc
 			if d.Alias {
 				return under, true
 			}
-			return types2.NewNamed(types2.NewTypeName(d.Pos(), nil, n.Value, nil), under, nil), true
+			// The decl carries the checker-created TypeName when the body
+			// was checked natively: returning it keeps local named types
+			// identical to the field type they may match. Without it the
+			// decl comes from a record parse and the named type is fresh.
+			if obj := c.fl.pkg.info.Defs[d.Name]; obj != nil {
+				if tn, ok := obj.(*types2.TypeName); ok {
+					return tn.Type(), true
+				}
+			}
+			return types2.NewNamed(types2.NewTypeName(d.Pos(), nil, n.Value, nil), under.Underlying(), nil), true
 		}
 	}
 	return c.fl.cfResolveTypeExpr(cs.Type, c.active, c.run.sites)
