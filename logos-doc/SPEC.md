@@ -473,14 +473,16 @@ The monitor MUST report `conc::lock_order_inversion` when two goroutines took th
 The monitor MUST NOT report `conc::lock_order_inversion` when one goroutine took the two values in the two orders [T-106].
 The monitor MUST report one pair of source positions only one time in one process [T-106].
 `logos conc` MUST accept the flag `-stall` with a positive Go duration before the package of `run` and before the program arguments of `test`, and the default MUST be `5s` [T-106].
-`logos conc` MUST stop with an error before it starts the program when the value of `-stall` is not a positive duration [T-106].
+`logos conc` MUST accept the flag `-hold` in the same places, with a positive Go duration, and the default MUST be `100ms` [T-106].
+`logos conc` MUST stop with an error before it starts the program when the value of `-stall` or of `-hold` is not a positive duration [T-106].
 The monitor MUST report `conc::group_child_stalled` when a child of a group has not returned at the end of the `-stall` duration after the cancellation of the group context [T-106].
 For a child that started after the cancellation, the duration MUST start when the child starts [T-106].
 The monitor MUST NOT report a child that returned before the end of its duration [T-106].
 The finding MUST give the statement that started the child [T-106].
 When the child has a frame whose source file is not a file of the toolchain, the first position of the finding MUST be the innermost frame of that kind, and its role MUST name the wait state of the goroutine [T-106].
 The monitor MUST report one statement that starts a child only one time in one process [T-106].
-The monitor MUST discard the record of a group when the join of the group ends [T-106].
+The group MUST hold the record that the monitor keeps of it, and the monitor MUST NOT keep a table of groups [T-106].
+The children of two groups MUST NOT wait for one lock of the monitor when they start and when they return [T-106].
 The monitor MUST NOT start a goroutine for a group whose children all return before the end of their `-stall` durations [T-106].
 A dump of all goroutines for one `conc::group_child_stalled` report MUST NOT be larger than 8 MiB; a child that the dump does not hold MUST get the finding without its frame [T-106].
 `logos conc` MUST link the monitor into the program and into each test binary, also when no package of the program imports `logos/rt` or `logos/sync` [T-106].
@@ -493,6 +495,11 @@ The monitor MUST check for leaked goroutines 0.1 s, 0.3 s, 0.7 s, 1.5 s, 3.1 s a
 After these six checks the monitor MUST NOT keep a timer, so that the runtime still ends a program in which every goroutine waits [T-106].
 After these six checks the monitor MUST check after a garbage collection of the program, with one minute or more between two checks [T-106].
 The monitor MUST discard the lock orders of a `Locked` value that the garbage collector has freed [T-106].
+The monitor MUST report `conc::lock_held_long` when a goroutine has held a `Locked` value for the `-hold` duration and another goroutine came for the value during that hold [T-106].
+The monitor MUST write that finding when a goroutine comes for the value after the duration, or when the hold ends, and it MUST NOT keep a timer for a hold [T-106].
+The first position of that finding MUST be the `WithLock` call that holds the value, and the second position MUST be the `WithLock` call that waits for it [T-106].
+The monitor MUST NOT report a hold that no other goroutine waited for, and it MUST NOT report a hold that is shorter than the duration [T-106].
+The monitor MUST report one `WithLock` call as the holder only one time in one process [T-106].
 `logos conc` MUST stop with an error on a system that has no named pipes [T-106].
 
 ## 2. Tier 2 specification

@@ -122,27 +122,28 @@ func TestRelayWritesDiagnosticRecords(t *testing.T) {
 func TestChildArguments(t *testing.T) {
 	takesValue := func(name string) bool { return name == "run" || name == "o" || name == "exec" }
 	tests := []struct {
-		verb   string
-		args   string
-		want   string
-		asJSON bool
-		stall  string
+		verb      string
+		args      string
+		want      string
+		asJSON    bool
+		durations map[string]string
 	}{
-		{"run", ".", "run -tags=logosconc .", false, ""},
-		{"run", "-race ./cmd/app -tags x -json-diagnostics -stall 1s", "run -tags=logosconc -race ./cmd/app -tags x -json-diagnostics -stall 1s", false, ""},
-		{"run", "-tags=a,b -json-diagnostics . serve", "run -tags=a,b,logosconc . serve", true, ""},
-		{"run", "-tags a -exec wrap .", "run -tags=a,logosconc -exec wrap .", false, ""},
-		{"run", "-tags logosconc .", "run -tags=logosconc .", false, ""},
-		{"run", "-stall 200ms -race .", "run -tags=logosconc -race .", false, "200ms"},
-		{"test", "-run TestA ./a ./b -race", "test -tags=logosconc -run TestA ./a ./b -race", false, ""},
-		{"test", "--json-diagnostics=false ./a -args -tags z", "test -tags=logosconc ./a -args -tags z", false, ""},
-		{"test", "./a --stall=1m30s -args -stall 9s", "test -tags=logosconc ./a -args -stall 9s", false, "1m30s"},
-		{"test", "", "test -tags=logosconc", false, ""},
+		{"run", ".", "run -tags=logosconc .", false, nil},
+		{"run", "-race ./cmd/app -tags x -json-diagnostics -stall 1s", "run -tags=logosconc -race ./cmd/app -tags x -json-diagnostics -stall 1s", false, nil},
+		{"run", "-tags=a,b -json-diagnostics . serve", "run -tags=a,b,logosconc . serve", true, nil},
+		{"run", "-tags a -exec wrap .", "run -tags=a,logosconc -exec wrap .", false, nil},
+		{"run", "-tags logosconc .", "run -tags=logosconc .", false, nil},
+		{"run", "-stall 200ms -race .", "run -tags=logosconc -race .", false, map[string]string{"stall": "200ms"}},
+		{"run", "-hold=20ms --stall 3s . -hold 9s", "run -tags=logosconc . -hold 9s", false, map[string]string{"hold": "20ms", "stall": "3s"}},
+		{"test", "-run TestA ./a ./b -race", "test -tags=logosconc -run TestA ./a ./b -race", false, nil},
+		{"test", "--json-diagnostics=false ./a -args -tags z", "test -tags=logosconc ./a -args -tags z", false, nil},
+		{"test", "./a --stall=1m30s -hold 1s -args -stall 9s", "test -tags=logosconc ./a -args -stall 9s", false, map[string]string{"stall": "1m30s", "hold": "1s"}},
+		{"test", "", "test -tags=logosconc", false, nil},
 	}
 	for _, tt := range tests {
 		got := childArguments(tt.verb, strings.Fields(tt.args), takesValue)
-		if want := strings.Fields(tt.want); !slices.Equal(got.arguments, want) || got.asJSON != tt.asJSON || got.stall != tt.stall {
-			t.Errorf("logos conc %s %s:\n got %q asJSON=%v stall=%q\nwant %q asJSON=%v stall=%q", tt.verb, tt.args, got.arguments, got.asJSON, got.stall, want, tt.asJSON, tt.stall)
+		if want := strings.Fields(tt.want); !slices.Equal(got.arguments, want) || got.asJSON != tt.asJSON || !maps.Equal(got.durations, tt.durations) {
+			t.Errorf("logos conc %s %s:\n got %q asJSON=%v durations=%v\nwant %q asJSON=%v durations=%v", tt.verb, tt.args, got.arguments, got.asJSON, got.durations, want, tt.asJSON, tt.durations)
 		}
 	}
 }

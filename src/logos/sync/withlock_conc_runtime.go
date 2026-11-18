@@ -25,8 +25,8 @@ func (l *Locked[T]) WithLock(f func(*T)) {
 	l.mu.Lock()
 	conc.Hold(key)
 	defer func() {
-		l.mu.Unlock()
 		conc.Release(key)
+		l.mu.Unlock()
 	}()
 	f(&l.v)
 }

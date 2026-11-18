@@ -20,7 +20,10 @@ import (
 
 var sinkPath string
 
-const stall = 50 * time.Millisecond
+const (
+	stall = 50 * time.Millisecond
+	hold  = 50 * time.Millisecond
+)
 
 func TestMain(m *testing.M) {
 	dir, err := os.MkdirTemp("", "logosconc")
@@ -33,6 +36,7 @@ func TestMain(m *testing.M) {
 	}
 	os.Setenv(conc.SinkEnv, sinkPath)
 	os.Setenv(conc.StallEnv, stall.String())
+	os.Setenv(conc.HoldEnv, hold.String())
 	code := m.Run()
 	os.RemoveAll(dir)
 	os.Exit(code)
@@ -237,24 +241,21 @@ func TestAFreedLockTakesItsPairsWithIt(t *testing.T) {
 // group stands where logos/rt.Group stands: the monitor reports the
 // line that calls spawn.
 type group struct {
-	key      unsafe.Pointer
+	record   *conc.Group
 	children sync.WaitGroup
 }
 
 func newGroup() *group {
-	g := new(group)
-	g.key = unsafe.Pointer(g)
-	conc.GroupCreated(g.key)
-	return g
+	return &group{record: conc.NewGroup()}
 }
 
-func (g *group) cancelled() { conc.GroupCancelled(g.key) }
+func (g *group) cancelled() { g.record.Cancelled() }
 
 func (g *group) spawn(body func()) {
 	site := g.site()
 	g.children.Go(func() {
-		conc.ChildStarted(g.key, site)
-		defer conc.ChildDone(g.key)
+		g.record.ChildStarted(site)
+		defer g.record.ChildDone()
 		body()
 	})
 }
@@ -263,7 +264,7 @@ func (g *group) site() uintptr { return conc.SpawnSite() }
 
 func (g *group) join() {
 	g.children.Wait()
-	conc.GroupJoined(g.key)
+	g.record.Joined()
 }
 
 func TestGroupChildThatOutlivesCancellationIsReportedOncePerSpawnStatement(t *testing.T) {
@@ -454,4 +455,138 @@ func TestLeakWatchChecksAfterACollection(t *testing.T) {
 	}()
 	conc.TestLeakWatch.CheckAfterEachCollection()
 	leakFindings(t, starts+1, runtime.GC)
+}
+
+// lockedValue stands where a logos/sync.Locked value stands. Its mutex
+// is a channel, so a goroutine that waits for it in a synctest bubble is
+// durably blocked.
+type lockedValue struct {
+	key   unsafe.Pointer
+	mutex chan struct{}
+}
+
+func newLockedValue() *lockedValue {
+	key, _ := twoLocks()
+	return &lockedValue{key: key, mutex: make(chan struct{}, 1)}
+}
+
+// with stands where WithLock stands: the monitor reports the line that
+// calls with.
+func (v *lockedValue) with(inner func()) {
+	if conc.Acquire(v.key) {
+		conc.Track(v.key, func() bool { return true })
+	}
+	v.mutex <- struct{}{}
+	conc.Hold(v.key)
+	defer func() {
+		conc.Release(v.key)
+		<-v.mutex
+	}()
+	inner()
+}
+
+func TestLongHoldIsReportedWhenAWaiterComesAfterTheLimit(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		v := newLockedValue()
+		var both sync.WaitGroup
+		holds := nextLine() + 1
+		both.Go(func() {
+			v.with(func() { time.Sleep(3 * hold) })
+		})
+		synctest.Wait()
+		time.Sleep(2 * hold)
+		waits := nextLine() + 1
+		both.Go(func() {
+			v.with(func() {})
+		})
+		synctest.Wait()
+
+		got := findingsAt(t, holds)
+		if len(got) != 1 {
+			t.Fatalf("got %d findings while the value is still held, want 1: %+v", len(got), got)
+		}
+		f := got[0]
+		if f.Rule != "conc::lock_held_long" || !strings.Contains(f.Message, "for "+(2*hold).String()+" while") || !strings.Contains(f.Message, "the limit is "+hold.String()) || f.Fix.Hint == "" {
+			t.Errorf("finding = %+v", f)
+		}
+		if lines := linesOf(f); len(lines) != 2 || lines[0] != holds || lines[1] != waits {
+			t.Errorf("positions at lines %v, want the holder at %d and then the waiter at %d", lines, holds, waits)
+		}
+		both.Wait()
+		if got := findingsAt(t, holds); len(got) != 1 {
+			t.Errorf("got %d findings after the hold ended, want the 1 of the waiter's arrival: %+v", len(got), got)
+		}
+	})
+}
+
+func TestLongHoldIsReportedAtItsEndWhenTheWaiterCameBeforeTheLimit(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		v := newLockedValue()
+		var both sync.WaitGroup
+		holds := nextLine() + 1
+		both.Go(func() {
+			v.with(func() { time.Sleep(3 * hold) })
+		})
+		synctest.Wait()
+		time.Sleep(hold / 2)
+		waits := nextLine() + 1
+		both.Go(func() {
+			v.with(func() {})
+		})
+		both.Wait()
+
+		got := findingsAt(t, holds)
+		if len(got) != 1 {
+			t.Fatalf("got %d findings after the hold of %v ended, want 1: %+v", len(got), 3*hold, got)
+		}
+		if lines := linesOf(got[0]); len(lines) != 2 || lines[0] != holds || lines[1] != waits {
+			t.Errorf("positions at lines %v, want the holder at %d and then the waiter at %d", lines, holds, waits)
+		}
+	})
+}
+
+func TestHoldWithoutAWaiterAndShortHoldAreSilent(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		alone := newLockedValue()
+		longAlone := nextLine()
+		alone.with(func() { time.Sleep(3 * hold) })
+
+		v := newLockedValue()
+		var both sync.WaitGroup
+		short := nextLine() + 1
+		both.Go(func() {
+			v.with(func() { time.Sleep(hold - time.Millisecond) })
+		})
+		synctest.Wait()
+		waits := nextLine() + 1
+		both.Go(func() {
+			v.with(func() {})
+		})
+		both.Wait()
+
+		if got := findingsAt(t, longAlone, short, waits); len(got) != 0 {
+			t.Errorf("a long hold that nobody waited for and a hold 1ms below the limit gave %+v", got)
+		}
+	})
+}
+
+func TestSecondCancellationDoesNotRestartTheStallDuration(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		g := newGroup()
+		release := make(chan struct{})
+		line := nextLine()
+		g.spawn(func() { <-release })
+		synctest.Wait()
+		g.cancelled()
+		time.Sleep(stall / 2)
+		g.cancelled()
+		time.Sleep(stall / 2)
+		synctest.Wait()
+
+		if got := findingsAt(t, line); len(got) != 1 {
+			t.Errorf("got %d findings %v after the first cancellation, want 1: %+v", len(got), stall, got)
+		}
+		close(release)
+		g.join()
+	})
 }

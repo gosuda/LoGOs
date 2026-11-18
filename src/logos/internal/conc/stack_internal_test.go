@@ -7,7 +7,6 @@ package conc
 import (
 	"strings"
 	"testing"
-	"unsafe"
 )
 
 const stackDump = `goroutine 71 [running]:
@@ -74,26 +73,5 @@ func TestStacksOfReadsEachGoroutineOfADump(t *testing.T) {
 	}
 	if ids != 3 {
 		t.Errorf("the dump gave %d goroutines, want 3", ids)
-	}
-}
-
-func TestJoinedGroupLeavesNoEntry(t *testing.T) {
-	var cell int
-	key := unsafe.Pointer(&cell)
-	open := func() int {
-		groups.mu.Lock()
-		defer groups.mu.Unlock()
-		return len(groups.open)
-	}
-	before := open()
-	GroupCreated(key)
-	ChildStarted(key, 0)
-	ChildDone(key)
-	if got := open(); got != before+1 {
-		t.Fatalf("an open group gave %d entries, want %d", got, before+1)
-	}
-	GroupJoined(key)
-	if got := open(); got != before {
-		t.Fatalf("a joined group left %d entries, want %d", got, before)
 	}
 }

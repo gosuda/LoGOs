@@ -54,8 +54,8 @@ func monitor(verb string, inv invocation) {
 	child.Stdout = os.Stdout
 	child.Stderr = os.Stderr
 	child.Env = append(slices.Clip(cfg.OrigEnv), sinkEnv+"="+path)
-	if inv.stall != "" {
-		child.Env = append(child.Env, stallEnv+"="+inv.stall)
+	for name, value := range inv.durations {
+		child.Env = append(child.Env, durationFlags[name]+"="+value)
 	}
 	base.StartSigHandlers()
 	runErr := child.Run()

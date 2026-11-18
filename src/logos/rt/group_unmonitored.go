@@ -8,6 +8,10 @@ package rt
 
 import "context"
 
+// monitorState is empty in a build without the monitor, so it adds no
+// byte to a Group.
+type monitorState struct{}
+
 func monitorCreated(*Group) {}
 
 func monitorCancelled(*Group) {}

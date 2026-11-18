@@ -12,6 +12,7 @@ import (
 // Group is a bound set of goroutines. Build it with NewGroup, spawn
 // children with Go, and join them with Wait.
 type Group struct {
+	monitor    monitorState
 	ctx        context.Context
 	cancel     context.CancelFunc
 	sem        chan struct{}

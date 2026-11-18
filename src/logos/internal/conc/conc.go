@@ -7,9 +7,9 @@
 //
 // The monitor calls no user code and takes no user lock. Its memory is
 // bounded: one entry per goroutine that holds a lock, one entry per lock
-// that is still reachable, at most maxOrderEdges lock pairs, one entry
-// per group that is not joined, one entry per running group child, and
-// one entry per reported spawn position.
+// that is held, one entry per lock that is still reachable, at most
+// maxOrderEdges lock pairs, one entry per group that is not joined, one
+// entry per running group child, and one entry per reported position.
 //
 // A lock is known by its address. An address is reused after the garbage
 // collector frees a lock, so each lock comes with a liveness probe, and
@@ -19,6 +19,7 @@ package conc
 import (
 	"runtime"
 	"sync"
+	"time"
 	"unsafe"
 )
 
@@ -50,27 +51,32 @@ type pairSite struct {
 }
 
 type monitor struct {
-	mu       sync.Mutex
-	held     map[uint64][]heldLock
-	order    map[lockPair]pairSite
-	alive    map[uintptr]func() bool
-	sweepAt  int
-	reported map[[4]uintptr]struct{}
+	mu        sync.Mutex
+	held      map[uint64][]heldLock
+	holding   map[uintptr]lockHold
+	order     map[lockPair]pairSite
+	alive     map[uintptr]func() bool
+	sweepAt   int
+	reported  map[[4]uintptr]struct{}
+	longHolds map[uintptr]struct{}
 }
 
 var locks = monitor{
-	held:     map[uint64][]heldLock{},
-	order:    map[lockPair]pairSite{},
-	alive:    map[uintptr]func() bool{},
-	sweepAt:  firstSweepSize,
-	reported: map[[4]uintptr]struct{}{},
+	held:      map[uint64][]heldLock{},
+	holding:   map[uintptr]lockHold{},
+	order:     map[lockPair]pairSite{},
+	alive:     map[uintptr]func() bool{},
+	sweepAt:   firstSweepSize,
+	reported:  map[[4]uintptr]struct{}{},
+	longHolds: map[uintptr]struct{}{},
 }
 
 // Acquire records that the calling goroutine is about to take lock while
 // it holds the locks of earlier Hold calls. It reports a lock order
 // inversion when another goroutine took the same two locks in the other
-// order. The result is true when the monitor has no liveness probe for
-// lock; the caller then calls Track.
+// order, and a long hold when another goroutine has held lock for the
+// hold limit. The result is true when the monitor has no liveness probe
+// for lock; the caller then calls Track.
 func Acquire(lock unsafe.Pointer) (untracked bool) {
 	key := uintptr(lock)
 	pc := callerPC(lockCallerSkip)
@@ -78,6 +84,7 @@ func Acquire(lock unsafe.Pointer) (untracked bool) {
 	locks.mu.Lock()
 	defer locks.mu.Unlock()
 	locks.forgetIfFreed(key)
+	locks.waiterArrived(key, pc)
 	_, tracked := locks.alive[key]
 	for _, outer := range locks.held[g] {
 		if outer.key == key {
@@ -116,14 +123,17 @@ func Hold(lock unsafe.Pointer) {
 	locks.mu.Lock()
 	defer locks.mu.Unlock()
 	locks.held[g] = append(locks.held[g], heldLock{key: key, pc: pc})
+	locks.holding[key] = lockHold{site: pc, since: time.Now()}
 }
 
-// Release records that the calling goroutine no longer holds lock.
+// Release records that the calling goroutine no longer holds lock. It
+// reports a long hold when another goroutine waited for lock.
 func Release(lock unsafe.Pointer) {
 	key := uintptr(lock)
 	g := goroutineID()
 	locks.mu.Lock()
 	defer locks.mu.Unlock()
+	locks.holdEnded(key)
 	stack := locks.held[g]
 	for i := len(stack) - 1; i >= 0; i-- {
 		if stack[i].key != key {

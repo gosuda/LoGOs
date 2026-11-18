@@ -14,6 +14,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
+	"slices"
 	"strings"
 	"time"
 
@@ -24,12 +26,19 @@ import (
 const (
 	monitorTag = load.LogosMonitorTag
 
-	// sinkEnv, stallEnv and maxFindingLine equal SinkEnv, StallEnv and
-	// MaxLine of logos/internal/conc, which cmd/go may not import.
+	// sinkEnv and maxFindingLine equal SinkEnv and MaxLine of
+	// logos/internal/conc, which cmd/go may not import.
 	sinkEnv        = "LOGOSCONC_SINK"
-	stallEnv       = "LOGOSCONC_STALL"
 	maxFindingLine = 4000
 )
+
+// durationFlags maps each flag of `logos conc` that takes a duration to
+// the variable that gives the duration to the monitor: StallEnv and
+// HoldEnv of logos/internal/conc.
+var durationFlags = map[string]string{
+	"stall": "LOGOSCONC_STALL",
+	"hold":  "LOGOSCONC_HOLD",
+}
 
 var CmdConc = &base.Command{
 	UsageLine: "logos conc",
@@ -40,8 +49,19 @@ that carries a monitor, and reports concurrency faults while the program
 runs. It reports faults that 'logos lint' and 'logos test -race' do not
 see, because no memory is raced and nothing has failed yet.
 
-	logos conc run [build flags] [-stall duration] [--json-diagnostics] package [arguments...]
-	logos conc test [build and test flags] [-stall duration] [--json-diagnostics] [packages]
+	logos conc run [build flags] [conc flags] package [arguments...]
+	logos conc test [build and test flags] [conc flags] [packages]
+
+The conc flags are:
+
+	-stall duration
+		report a group child that runs this long after its group was
+		cancelled (default 5s)
+	-hold duration
+		report a Locked value that one goroutine holds this long while
+		another goroutine waits for it (default 100ms)
+	--json-diagnostics
+		print each finding as one JSON object
 
 The finding conc::lock_order_inversion names two goroutines that took
 the same two logos/sync.Locked values in opposite orders. Run at the
@@ -49,8 +69,13 @@ same moment, each goroutine waits for the other.
 
 The finding conc::group_child_stalled names a child of a go group that
 did not return after its group was cancelled. The group cannot join
-before that child returns. The -stall flag sets how long the monitor
-waits after the cancellation; the default is 5s.
+before that child returns.
+
+The finding conc::lock_held_long names a WithLock call that held a
+logos/sync.Locked value for the -hold duration while another goroutine
+waited for it. The monitor has no timer for a hold: it prints the
+finding when a goroutine comes for the value after that duration, or
+when the hold ends.
 
 The finding conc::goroutine_leak names a goroutine that waits on a
 channel or a lock which no goroutine that can run reaches. It never
@@ -78,14 +103,14 @@ See also: logos lint, logos test.
 }
 
 var cmdRun = &base.Command{
-	UsageLine:   "logos conc run [build flags] [-stall duration] [--json-diagnostics] package [arguments...]",
+	UsageLine:   "logos conc run [build flags] [-stall duration] [-hold duration] [--json-diagnostics] package [arguments...]",
 	Short:       "run a program under the concurrency monitor",
 	Long:        "Run is 'logos run' under the concurrency monitor. See 'logos help conc'.\n",
 	CustomFlags: true,
 }
 
 var cmdTest = &base.Command{
-	UsageLine:   "logos conc test [build and test flags] [-stall duration] [--json-diagnostics] [packages]",
+	UsageLine:   "logos conc test [build and test flags] [-stall duration] [-hold duration] [--json-diagnostics] [packages]",
 	Short:       "test packages under the concurrency monitor",
 	Long:        "Test is 'logos test' under the concurrency monitor. See 'logos help conc'.\n",
 	CustomFlags: true,
@@ -97,8 +122,10 @@ func Register(root *base.Command) {
 	for verb, cmd := range map[string]*base.Command{"run": cmdRun, "test": cmdTest} {
 		cmd.Run = func(ctx context.Context, _ *base.Command, args []string) {
 			inv := childArguments(verb, args, valueFlags(root.Lookup(verb)))
-			if d, err := time.ParseDuration(inv.stall); inv.stall != "" && (err != nil || d <= 0) {
-				base.Fatalf("logos conc %s: -stall %q is not a positive duration", verb, inv.stall)
+			for _, name := range slices.Sorted(maps.Keys(inv.durations)) {
+				if d, err := time.ParseDuration(inv.durations[name]); err != nil || d <= 0 {
+					base.Fatalf("logos conc %s: -%s %q is not a positive duration", verb, name, inv.durations[name])
+				}
 			}
 			monitor(verb, inv)
 		}
@@ -109,7 +136,8 @@ func Register(root *base.Command) {
 type invocation struct {
 	arguments []string
 	asJSON    bool
-	stall     string
+	// durations holds the value of each duration flag that the user gave.
+	durations map[string]string
 }
 
 // valueFlags reports, for each flag of cmd, whether it takes its value
@@ -129,12 +157,12 @@ func valueFlags(cmd *base.Command) func(name string) bool {
 }
 
 // childArguments turns the arguments of `logos conc <verb>` into the
-// arguments of `logos <verb>`: it removes -json-diagnostics and -stall
-// and adds the monitor tag to the build tags. It reads flags up to the package of
-// `run`, and up to -args or -- of `test`; later arguments belong to the
-// program.
+// arguments of `logos <verb>`: it removes -json-diagnostics and the
+// duration flags, and adds the monitor tag to the build tags. It reads
+// flags up to the package of `run`, and up to -args or -- of `test`;
+// later arguments belong to the program.
 func childArguments(verb string, args []string, takesValue func(string) bool) invocation {
-	inv := invocation{arguments: []string{verb}}
+	inv := invocation{arguments: []string{verb}, durations: map[string]string{}}
 	tagged := false
 	i := 0
 	for ; i < len(args); i++ {
@@ -153,12 +181,12 @@ func childArguments(verb string, args []string, takesValue func(string) bool) in
 		switch {
 		case name == "json-diagnostics":
 			inv.asJSON = !hasValue || value == "true"
-		case name == "stall":
+		case durationFlags[name] != "":
 			if !hasValue && i+1 < len(args) {
 				i++
 				value = args[i]
 			}
-			inv.stall = value
+			inv.durations[name] = value
 		case name == "tags":
 			if !hasValue && i+1 < len(args) {
 				i++

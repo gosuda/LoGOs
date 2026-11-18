@@ -5,10 +5,8 @@
 package conc
 
 import (
-	"os"
 	"sync"
 	"time"
-	"unsafe"
 )
 
 // StallEnv names the Go duration that a group child may run after the
@@ -21,17 +19,22 @@ const (
 )
 
 type groupChild struct {
-	site    uintptr
+	site uintptr
+	// started is zero for a child that started before the cancellation
+	// of its group.
 	started time.Time
 }
 
-// group is the record of one group. cancelledAt is zero until the
-// context of the group is cancelled. watchdog is nil when no timer
-// waits to run reportStalled.
-type group struct {
-	children    map[uint64]groupChild
+// Group is the record of one group. The group holds it, so the monitor
+// has no table of groups, and the children of two groups do not wait
+// for one lock.
+type Group struct {
+	mu       sync.Mutex
+	children map[uint64]groupChild
+	// cancelledAt is zero until the context of the group is cancelled.
 	cancelledAt time.Time
-	watchdog    *time.Timer
+	// watchdog is nil when no timer waits to run reportStalled.
+	watchdog *time.Timer
 }
 
 type stalledChild struct {
@@ -39,36 +42,27 @@ type stalledChild struct {
 	site      uintptr
 }
 
-var groups = struct {
+var stalls = struct {
 	mu       sync.Mutex
-	open     map[uintptr]*group
 	reported map[uintptr]struct{}
 }{
-	open:     map[uintptr]*group{},
 	reported: map[uintptr]struct{}{},
 }
 
 var stallAfter = sync.OnceValue(func() time.Duration {
-	d, err := time.ParseDuration(os.Getenv(StallEnv))
-	if err != nil || d <= 0 {
-		return DefaultStall
-	}
-	return d
+	return durationSetting(StallEnv, DefaultStall)
 })
 
-// GroupCreated records a group, known by its address until GroupJoined.
-func GroupCreated(key unsafe.Pointer) {
-	groups.mu.Lock()
-	defer groups.mu.Unlock()
-	groups.open[uintptr(key)] = &group{children: map[uint64]groupChild{}}
+// NewGroup returns the record of a new group.
+func NewGroup() *Group {
+	return &Group{children: map[uint64]groupChild{}}
 }
 
-// GroupCancelled records that the context of the group is cancelled.
-// Only the first call for a group counts.
-func GroupCancelled(key unsafe.Pointer) {
-	groups.mu.Lock()
-	defer groups.mu.Unlock()
-	g := groups.open[uintptr(key)]
+// Cancelled records that the context of the group is cancelled. Only
+// the first call counts.
+func (g *Group) Cancelled() {
+	g.mu.Lock()
+	defer g.mu.Unlock()
 	if !g.cancelledAt.IsZero() {
 		return
 	}
@@ -86,37 +80,38 @@ func SpawnSite() uintptr {
 
 // ChildStarted records that the calling goroutine runs a child of the
 // group, started at site.
-func ChildStarted(key unsafe.Pointer, site uintptr) {
+func (g *Group) ChildStarted(site uintptr) {
 	id := goroutineID()
-	groups.mu.Lock()
-	defer groups.mu.Unlock()
-	g := groups.open[uintptr(key)]
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.cancelledAt.IsZero() {
+		g.children[id] = groupChild{site: site}
+		return
+	}
 	g.children[id] = groupChild{site: site, started: time.Now()}
-	if !g.cancelledAt.IsZero() && g.watchdog == nil {
+	if g.watchdog == nil {
 		g.watchdog = time.AfterFunc(stallAfter(), g.reportStalled)
 	}
 }
 
 // ChildDone records that the child of the calling goroutine returned.
-func ChildDone(key unsafe.Pointer) {
+func (g *Group) ChildDone() {
 	id := goroutineID()
-	groups.mu.Lock()
-	defer groups.mu.Unlock()
-	delete(groups.open[uintptr(key)].children, id)
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	delete(g.children, id)
 }
 
-// GroupJoined records that every child of the group has returned.
-func GroupJoined(key unsafe.Pointer) {
-	groups.mu.Lock()
-	defer groups.mu.Unlock()
-	g := groups.open[uintptr(key)]
-	delete(groups.open, uintptr(key))
+// Joined records that every child of the group has returned.
+func (g *Group) Joined() {
+	g.mu.Lock()
+	defer g.mu.Unlock()
 	if g.watchdog != nil {
 		g.watchdog.Stop()
 	}
 }
 
-func (g *group) reportStalled() {
+func (g *Group) reportStalled() {
 	stalled := g.unreportedStalled()
 	if len(stalled) == 0 {
 		return
@@ -130,9 +125,9 @@ func (g *group) reportStalled() {
 // unreportedStalled returns the children whose stall duration has
 // ended, one per spawn statement that has no finding yet. It arms the
 // watchdog for the child whose duration ends next.
-func (g *group) unreportedStalled() []stalledChild {
-	groups.mu.Lock()
-	defer groups.mu.Unlock()
+func (g *Group) unreportedStalled() []stalledChild {
+	g.mu.Lock()
+	defer g.mu.Unlock()
 	g.watchdog = nil
 	now := time.Now()
 	var next time.Time
@@ -145,11 +140,9 @@ func (g *group) unreportedStalled() []stalledChild {
 			}
 			continue
 		}
-		if _, done := groups.reported[child.site]; done {
-			continue
+		if firstStallAt(child.site) {
+			stalled = append(stalled, stalledChild{goroutine: id, site: child.site})
 		}
-		groups.reported[child.site] = struct{}{}
-		stalled = append(stalled, stalledChild{goroutine: id, site: child.site})
 	}
 	if !next.IsZero() {
 		g.watchdog = time.AfterFunc(next.Sub(now), g.reportStalled)
@@ -157,9 +150,19 @@ func (g *group) unreportedStalled() []stalledChild {
 	return stalled
 }
 
+func firstStallAt(site uintptr) bool {
+	stalls.mu.Lock()
+	defer stalls.mu.Unlock()
+	if _, done := stalls.reported[site]; done {
+		return false
+	}
+	stalls.reported[site] = struct{}{}
+	return true
+}
+
 // stallEnd is the time at which child has run for the stall duration
 // in the cancelled group.
-func (g *group) stallEnd(child groupChild) time.Time {
+func (g *Group) stallEnd(child groupChild) time.Time {
 	if child.started.After(g.cancelledAt) {
 		return child.started.Add(stallAfter())
 	}
