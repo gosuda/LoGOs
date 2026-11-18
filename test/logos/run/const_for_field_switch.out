@@ -1,2 +1,7 @@
 [Name:str Age:int]
 Motor true
+[N:int]
+[A:exact B:f64]
+[Name= Age=1]
+[Age.P Age.N]
+[P~P N~N]

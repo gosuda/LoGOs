@@ -57,6 +57,99 @@ type Rig struct {
 	Label string
 }
 
+// An option field's type is the option type, never the bare
+// element: *int? must not run case *int.
+type Opt struct {
+	P *int?
+	N int
+}
+
+func opts[T any]() []string {
+	var out []string
+	const for _, f := range comptime.Fields[T]() {
+		const switch f.Type {
+		case *int:
+			out = append(out, f.Name+":pint")
+		case int:
+			out = append(out, f.Name+":int")
+		}
+	}
+	return out
+}
+
+// The first matching case wins; a later overlapping case is dead for
+// that field, so even a comptime.Error in it never fires.
+type Two struct {
+	A int
+	B float64
+}
+
+func firstMatch[T any]() []string {
+	var out []string
+	const for _, f := range comptime.Fields[T]() {
+		const switch f.Type {
+		case int:
+			out = append(out, f.Name+":exact")
+		case ~int:
+			comptime.Error("an exact int field must not reach the tilde case")
+		case float64:
+			out = append(out, f.Name+":f64")
+		case complex128:
+			comptime.Error("no complex field exists")
+		}
+	}
+	return out
+}
+
+// Inside a case the field type is narrowed to the case type, so
+// root.[f] assigns to that type without a conversion.
+func narrow[T any](root *T) []string {
+	var out []string
+	const for _, f := range comptime.Fields[T]() {
+		const switch f.Type {
+		case string:
+			var s string = root.[f]
+			out = append(out, f.Name+"="+s)
+		case int:
+			var i int = root.[f]
+			out = append(out, f.Name+"="+fmt.Sprint(i+1))
+		}
+	}
+	return out
+}
+
+// A const switch over the OUTER field's type inside an inner const
+// for still resolves the outer binding.
+func nested[O, I any]() []string {
+	var out []string
+	const for _, f := range comptime.Fields[O]() {
+		const for _, g := range comptime.Fields[I]() {
+			const switch f.Type {
+			case int:
+				out = append(out, f.Name+"."+g.Name)
+			}
+		}
+	}
+	return out
+}
+
+// An unbound f.Type case is per-iteration, so it does not statically
+// cover a later concrete case.
+func pend[T any]() []string {
+	var out []string
+	const for _, f := range comptime.Fields[T]() {
+		const for _, g := range comptime.Fields[T]() {
+			const switch g.Type {
+			case f.Type:
+				out = append(out, f.Name+"~"+g.Name)
+			case string:
+				out = append(out, f.Name+">"+g.Name)
+			}
+		}
+	}
+	return out
+}
+
 func main() {
 	fmt.Println(tags[App]())
 	var r Rig
@@ -66,4 +159,10 @@ func main() {
 	if len(Steps(&r)) != 1 {
 		os.Exit(1)
 	}
+	fmt.Println(opts[Opt]())
+	fmt.Println(firstMatch[Two]())
+	var a App
+	fmt.Println(narrow(&a))
+	fmt.Println(nested[App, Opt]())
+	fmt.Println(pend[Opt]())
 }
