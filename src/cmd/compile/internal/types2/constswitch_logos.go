@@ -47,6 +47,10 @@ func (check *Checker) logosConstSwitch(ctxt stmtContext, s *syntax.ConstSwitchSt
 	if tag == nil {
 		return
 	}
+	// A tag resolved through a const-for field binding is concrete for
+	// this iteration only: cases that cannot match it are dead for the
+	// iteration, like copy-evaluation cases, not authoring errors.
+	fieldTag := check.logosFieldBind != nil && check.logosFieldBound[s.Targ]
 	inner := ctxt &^ (fallthroughOk | finalSwitchCase | inTypeSwitch)
 	var seen []logosCaseInfo
 	for _, c := range s.Cases {
@@ -54,19 +58,19 @@ func (check *Checker) logosConstSwitch(ctxt stmtContext, s *syntax.ConstSwitchSt
 		if info == nil {
 			continue
 		}
-		if !check.logosCopy && check.logosCaseShadowed(info, seen, tag) {
+		if !check.logosCopy && !fieldTag && check.logosCaseShadowed(info, seen, tag) {
 			continue
 		}
 		seen = append(seen, *info)
-		if check.logosDeadCopyCase(c, tag, info) {
+		if check.logosDeadCopyCase(c, tag, info, fieldTag) {
 			continue
 		}
 		check.logosConstCaseBody(inner, c, tag, info)
 	}
 }
 
-func (check *Checker) logosDeadCopyCase(c *syntax.ConstSwitchCase, tag Type, info *logosCaseInfo) bool {
-	if !check.logosCopy {
+func (check *Checker) logosDeadCopyCase(c *syntax.ConstSwitchCase, tag Type, info *logosCaseInfo, fieldTag bool) bool {
+	if !check.logosCopy && !fieldTag {
 		return false
 	}
 	if _, ok := tag.(*TypeParam); ok {
@@ -75,9 +79,18 @@ func (check *Checker) logosDeadCopyCase(c *syntax.ConstSwitchCase, tag Type, inf
 	return !logosConstMatches(tag, info.typ, c)
 }
 
+// logosFieldTypeSel admits e as a type when it is f.Type of a const-for
+// field variable, the same admission type positions get.
+func (check *Checker) logosFieldTypeSel(e syntax.Expr, x *operand) bool {
+	sel, ok := syntax.Unparen(e).(*syntax.SelectorExpr)
+	return ok && check.logosFieldTypeType(sel, x)
+}
+
 func (check *Checker) logosConstTag(e syntax.Expr) Type {
 	var x operand
-	check.exprOrType(&x, e, false)
+	if !check.logosFieldTypeSel(e, &x) {
+		check.exprOrType(&x, e, false)
+	}
 	if !x.isValid() {
 		return nil
 	}
@@ -91,7 +104,9 @@ func (check *Checker) logosConstTag(e syntax.Expr) Type {
 
 func (check *Checker) logosConstCase(c *syntax.ConstSwitchCase, tag Type) *logosCaseInfo {
 	var x operand
-	check.exprOrType(&x, c.Type, true)
+	if !check.logosFieldTypeSel(c.Type, &x) {
+		check.exprOrType(&x, c.Type, true)
+	}
 	if !x.isValid() {
 		return nil
 	}
@@ -246,6 +261,11 @@ func (info *logosCaseInfo) iface() *Interface {
 func (check *Checker) logosCaseSatisfiable(c, tag Type) bool {
 	if tpar, ok := tag.(*TypeParam); ok {
 		return check.implements(c, tpar.iface(), false, nil)
+	}
+	// An unbound field type is the comptime any: every case stays
+	// reachable until an iteration binds it to a field's type.
+	if Identical(tag, logosComptimeAny) {
+		return true
 	}
 	return Identical(c, tag)
 }

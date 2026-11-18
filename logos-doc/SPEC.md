@@ -1133,6 +1133,8 @@ Outside comptime generics a `const switch` MUST pick its case at run time from t
 
 Inside an interface case, a call of an interface method on a value of type `T` MUST run the method of that value, whether `T` is a concrete type or an interface type. [T-205]
 
+`const switch f.Type` inside a `const for` body MUST select the case matching the field's type for the iteration; a case that cannot match the field's type is dead for the iteration rather than an authoring error. While the field's type is unbound to a type parameter, every case stays reachable. [T-205]
+
 No match MUST return the input unchanged. [T-205]
 
 Native and ejected output of the run-time form MUST agree. [T-205]

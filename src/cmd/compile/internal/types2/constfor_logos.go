@@ -452,6 +452,10 @@ func (check *Checker) logosFieldTypeType(e *syntax.SelectorExpr, x *operand) boo
 	if b := check.logosFieldBind; b != nil && check.logosFieldVars[v] == b.info {
 		x.mode_ = typexpr
 		x.typ_ = b.field.Type()
+		if check.logosFieldBound == nil {
+			check.logosFieldBound = make(map[syntax.Expr]bool)
+		}
+		check.logosFieldBound[e] = true
 		return true
 	}
 	x.mode_ = typexpr

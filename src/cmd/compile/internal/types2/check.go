@@ -179,6 +179,7 @@ type Checker struct {
 	logosRegionVar      map[*Var]bool                   // logos M18-S7 hook: locals holding such literals.
 	logosFieldPend      map[*syntax.Name]*Var           // logos M7-S2 hook: bare field-variable uses awaiting consumption.
 	logosFieldBind      *logosFieldBinding              // logos M7-S2 hook: per-iteration field meaning over concrete structs.
+	logosFieldBound     map[syntax.Expr]bool            // logos M7-S2 hook: f.Type exprs resolved to a concrete field type.
 	logosConstForBudget int
 	logosConstForDepth  int
 	logosLambdaPending  map[*syntax.LambdaExpr]bool
