@@ -93,6 +93,14 @@
    "found_via": "Devin Review finding on the L-MAC-1 fix"
   },
   {
+   "id": "audit-cap-chains-lgo-dep-fold",
+   "severity": "medium",
+   "status": "open",
+   "summary": "logos_cap_chains rl/b,c,d: capability audit finds nothing when a .lgo dep calls reflect.TypeOf(0) — the call is comptime-folded so no runtime reach exists; fixture cannot pass on any platform until the dep uses a non-constant sink call (e.g. reflect.TypeOf(param)).",
+   "file": "src/cmd/go/testdata/script/logos_cap_chains.txt",
+   "platform": "all (observed darwin/arm64)"
+  },
+  {
    "id": "L-WIN-1",
    "severity": "high",
    "status": "fixed",
