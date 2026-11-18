@@ -335,33 +335,39 @@ func (c *cswLower) caseBody(cs *cswCase, done string) ([]syntax.Stmt, otext) {
 		head = append(head, at(&syntax.AssignStmt{Lhs: nameOf(cs.syn.Case, done), Rhs: nameOf(cs.syn.Case, "true")}, cs.syn.Case))
 		headText = gen(done + " = true\n")
 	}
-	decls, declText := c.rebindings(cs)
+	decls, tails, declText, tailText := c.rebindings(cs)
 	body := c.fl.textOf(span{cs.lo, cs.hi})
 	stmts := append(head, decls...)
-	return append(stmts, lowered...), cat(headText, declText, body)
+	stmts = append(stmts, lowered...)
+	return append(stmts, tails...), cat(headText, declText, body, tailText)
 }
 
-func (c *cswLower) rebindings(cs *cswCase) ([]syntax.Stmt, otext) {
-	var decls []syntax.Stmt
-	var text otext
-	for _, r := range c.rebound(cs) {
+func (c *cswLower) rebindings(cs *cswCase) (decls, tails []syntax.Stmt, declText, tailText otext) {
+	var dsrc, tsrc strings.Builder
+	for i, r := range c.rebound(cs) {
 		c.fl.needRT = true
-		rhs := rtAlias + ".Reinterpret[" + r.spell + "](&" + r.name + ")"
+		pun := "Reinterpret"
 		if cs.kind == cswTilde {
 			// The rebound type keeps the layout but not the identity of the
 			// type argument (Port vs int), so an identity assert cannot see
 			// through it; the tilde match guarantees the layouts agree.
-			rhs = rtAlias + ".ReinterpretUnder[" + r.spell + "](&" + r.name + ")"
+			pun = "ReinterpretUnder"
 		}
-		expr, ok := parseExprAt(rhs, cs.syn.Case)
-		if !ok {
-			base.Fatalf("logos: const switch rebinding of %s at %s cannot be respelled", r.name, cs.syn.Case.String())
-		}
-		decls = append(decls, defineOf(cs.syn.Case, []syntax.Expr{nameOf(cs.syn.Case, r.name)}, []syntax.Expr{expr}))
-		decls = append(decls, at(&syntax.AssignStmt{Lhs: nameOf(cs.syn.Case, "_"), Rhs: nameOf(cs.syn.Case, r.name)}, cs.syn.Case))
-		text = cat(text, gen(r.name+" := "+rhs+"\n_ = "+r.name+"\n"))
+		// The rebinding is a case-local copy of the switched storage, so the
+		// address is captured first: writes the case makes to the copy are
+		// stored back through it at the end of the body.
+		ptr := fmt.Sprintf("_logos_rebind%d", i)
+		dsrc.WriteString(ptr + " := &" + r.name + "\n")
+		dsrc.WriteString(r.name + " := " + rtAlias + "." + pun + "[" + r.spell + "](" + ptr + ")\n")
+		dsrc.WriteString("_ = " + r.name + "\n")
+		tsrc.WriteString(rtAlias + ".StoreUnder(" + ptr + ", " + r.name + ")\n")
 	}
-	return decls, text
+	if dsrc.Len() == 0 {
+		return nil, nil, otext{}, otext{}
+	}
+	decls = c.fl.reparseStmts(dsrc.String(), cs.syn.Case)
+	tails = c.fl.reparseStmts(tsrc.String(), cs.syn.Case)
+	return decls, tails, gen(dsrc.String()), gen(tsrc.String())
 }
 
 func (c *cswLower) rebound(cs *cswCase) []cswRebind {
@@ -507,40 +513,95 @@ func (w cswWalker) replaceName(f reflect.Value, x *syntax.Name) {
 }
 
 // wrapConvs boxes each operand the checker recorded under the interface case
-// as any(e).(I): the value keeps its concrete layout at storage sites and
+// as rt.Box[I](e): the value keeps its concrete layout at storage sites and
 // widens to the case interface where the checker admitted it (SPEC Sec 2.5).
+// A recorded expression nested inside another one is composed inside the
+// outer replacement so the splices never overlap.
 func (c *cswLower) wrapConvs(body []syntax.Stmt, cs *cswCase) {
-	conv := make(map[syntax.Expr]syntax.Expr)
+	type rec struct {
+		e          syntax.Expr
+		start, end int
+	}
+	var recs []rec // Inspect is a preorder walk, so recs arrive in source order.
 	for _, s := range body {
 		syntax.Inspect(s, func(n syntax.Node) bool {
 			e, ok := n.(syntax.Expr)
 			if !ok || c.info.LogosConstConv[e] != cs.syn {
 				return true
 			}
-			iface, ok := typeExprAt(cs.spell.s, e.Pos())
-			if !ok {
-				base.Fatalf("logos: const switch interface %s at %s cannot be respelled", cs.spell.s, e.Pos().String())
-			}
-			conv[e] = at(&syntax.AssertExpr{
-				X: at(&syntax.CallExpr{
-					Fun:     at(nameOf(e.Pos(), "any"), e.Pos()),
-					ArgList: []syntax.Expr{e},
-				}, e.Pos()),
-				Type: iface,
-			}, e.Pos())
+			start := c.fl.off(leftmostOf(e))
+			recs = append(recs, rec{e: e, start: start, end: c.fl.exprEndNested(start)})
 			return true
 		})
 	}
-	if len(conv) == 0 {
+	if len(recs) == 0 {
 		return
+	}
+	c.fl.needRT = true
+	box := func(text string) string {
+		return rtAlias + ".Box[" + cs.spell.s + "](" + text + ")"
+	}
+	// expand renders the span's source text with every recorded expression
+	// inside it boxed; nested recordings compose inside their outer boxes.
+	var expand func(start, end int) string
+	expand = func(start, end int) string {
+		var inner []rec
+		for _, r := range recs {
+			if r.start >= start && r.end <= end && (r.start != start || r.end != end) {
+				inner = append(inner, r)
+			}
+		}
+		var out strings.Builder
+		pos := start
+		for _, r := range inner {
+			nested := false
+			for _, o := range inner {
+				if o != r && o.start <= r.start && r.end <= o.end {
+					nested = true
+					break
+				}
+			}
+			if nested {
+				continue
+			}
+			if r.start > pos {
+				out.WriteString(c.fl.textOf(span{pos, r.start}).s)
+			}
+			out.WriteString(box(expand(r.start, r.end)))
+			pos = r.end
+		}
+		if pos < end {
+			out.WriteString(c.fl.textOf(span{pos, end}).s)
+		}
+		return out.String()
+	}
+	conv := make(map[syntax.Expr]syntax.Expr)
+	texts := make(map[syntax.Expr]otext)
+	for _, r := range recs {
+		contained := false
+		for _, o := range recs {
+			if o != r && o.start <= r.start && r.end <= o.end {
+				contained = true
+				break
+			}
+		}
+		if contained {
+			continue // emitted inside the outer box's composed text
+		}
+		text := box(expand(r.start, r.end))
+		node, ok := parseExprAt(text, r.e.Pos())
+		if !ok {
+			base.Fatalf("logos: const switch interface boxing at %s cannot be respelled", r.e.Pos().String())
+		}
+		conv[r.e] = node
+		texts[r.e] = gen(text)
 	}
 	w := cswWalker{
 		info: c.info,
 		conv: conv,
 		wrap: func(x, r syntax.Expr) {
 			start := c.fl.off(leftmostOf(x))
-			end := c.fl.exprEndNested(start)
-			c.fl.addT(start, end, cat(gen("any("), c.fl.textOf(span{start, end}), gen(").("), cs.spell, gen(")")))
+			c.fl.addT(start, c.fl.exprEndNested(start), texts[x])
 		},
 	}
 	w.list(body)

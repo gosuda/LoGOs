@@ -72,6 +72,59 @@ func keep[F any](parts []Part, field F, f2 F) []Part {
 	return parts
 }
 
+// bump writes to a rebound value variable under a ~int case: the write must
+// be stored back so it is visible after the switch.
+func bump[F any](field F) F {
+	const switch F {
+	case ~int:
+		field = F(9)
+	}
+	return field
+}
+
+// mask keeps a nearer binding of the same name from being rebound: inside the
+// case, v resolves to the block's own v, not the parameter.
+func mask[F any](v F) int {
+	out := 0
+	{
+		v := 7
+		const switch F {
+		case ~int:
+			out = v
+		}
+	}
+	return out
+}
+
+// swap returns its second argument; boxing both the call and its Part
+// parameter composes the nested boxes instead of overlapping them.
+func swap[F any](p Part, v F) F {
+	_ = p
+	return v
+}
+
+// gather mixes interface boxing, nested boxing, and a map two-result read
+// stored through a plain variable.
+func gather[F any](parts []Part, field F, m map[string]F) []Part {
+	const switch F {
+	case Part:
+		parts = append(parts, swap(field, field))
+		if v, ok := m["k"]; ok {
+			parts = append(parts, v)
+		}
+	}
+	return parts
+}
+
+// keepNil boxes a nil value of an interface-typed argument without panicking.
+func keepNil[J Part](parts []Part, field J) []Part {
+	const switch J {
+	case Part:
+		parts = append(parts, field)
+	}
+	return parts
+}
+
 func main() {
 	var p Port
 	if err := set[Port]("41", &p); err != nil {
@@ -94,6 +147,22 @@ func main() {
 			failed = true
 		}
 	}
+
+	check("writeback", bump[Port](Port(1)) == 9, bump[Port](Port(1)), 9)
+	check("mask", mask[int](1) == 7, mask[int](1), 7)
+
+	more := gather[W](nil, W{S: "c"}, map[string]W{"k": {S: "d"}})
+	check("nested-box", len(more) == 2, len(more), 2)
+	for _, part := range more {
+		if err := part.Start(context.Background()); err != nil {
+			fmt.Println("map err:", err)
+			failed = true
+		}
+	}
+
+	nilParts := keepNil[Part](nil, nil)
+	check("nil-box", len(nilParts) == 1 && nilParts[0] == nil, len(nilParts), 1)
+
 	if failed {
 		os.Exit(1)
 	}

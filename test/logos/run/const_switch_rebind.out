@@ -4,3 +4,9 @@ ok tilde-nested-store
 ok iface-box
 start:b
 start:b
+ok writeback
+ok mask
+ok nested-box
+start:c
+start:d
+ok nil-box

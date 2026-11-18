@@ -31,6 +31,25 @@ func ReinterpretUnder[S, T any](p *T) S {
 	return *(*S)(unsafe.Pointer(p))
 }
 
+// StoreUnder writes src's storage back through dst, viewed as a *D. A
+// `const switch` case rebinds a variable of the switched type as a case-local
+// copy; after the case body, the copy is stored back through the address
+// captured before the rebinding, so writes made inside the case are visible
+// afterwards. The checker admits the pair only where the layouts agree, so
+// reading src's bytes as D is sound (SPEC Sec 2.5).
+func StoreUnder[D, S any](dst *D, src S) {
+	*(*D)(unsafe.Pointer(dst)) = *(*D)(unsafe.Pointer(&src))
+}
+
+// Box returns v as an I. Inside a `const switch` interface case, a value of
+// the switched type keeps its concrete layout and gains I's method set where
+// the checker admitted it; the comma-ok assert returns the zero I rather than
+// panicking when v carries a nil interface value (SPEC Sec 2.5).
+func Box[I, T any](v T) I {
+	r, _ := any(v).(I)
+	return r
+}
+
 // TildeIs reports whether the underlying type of T has the same kind as the
 // basic type B. It is the run-time test of a `~B` case of a `const switch`
 // (SPEC Sec 2.5).

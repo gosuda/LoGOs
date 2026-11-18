@@ -343,8 +343,15 @@ func (check *Checker) logosShadowConstTarget(tpar *TypeParam, info *logosCaseInf
 	}
 	check.scope.Insert(shadow)
 	rec := LogosConstCase{Target: shadow, Vars: make(map[*Var]Type)}
+	seen := make(map[string]bool)
 	for sc := check.scope.Parent(); sc != nil; sc = sc.Parent() {
 		for _, objName := range sc.Names() {
+			if seen[objName] {
+				// A nearer scope already binds this name, so uses inside the
+				// case resolve to that object, not to an outer variable.
+				continue
+			}
+			seen[objName] = true
 			v, ok := sc.Lookup(objName).(*Var)
 			if !ok {
 				continue
@@ -379,13 +386,19 @@ func (check *Checker) logosShadowConstTarget(tpar *TypeParam, info *logosCaseInf
 // interface case's type is required: inside `case I:` a value of type T keeps
 // its concrete layout and gains I's method set, so it can be stored or passed
 // as I (SPEC Sec 2.5). The operand is recorded so the lowerer boxes it as
-// any(x).(I) at the use site; the type name T itself is not rebound.
+// rt.Box[I](x) at the use site; the type name T itself is not rebound.
 func (check *Checker) logosConstIfaceAssign(x *operand, T Type) bool {
 	if !check.conf.Logos || len(check.logosCSwitch) == 0 || x.expr == nil {
 		return false
 	}
 	top := check.logosCSwitch[len(check.logosCSwitch)-1]
 	if x.typ() != top.recv || !Identical(T, top.typ) {
+		return false
+	}
+	if x.mode() != variable && x.mode() != value {
+		// Boxing wraps the operand's text as a single-result expression;
+		// a map index or other multi-result form would lose its second
+		// result, so the admission is limited to plain operands.
 		return false
 	}
 	if check.Info.LogosConstConv == nil {
