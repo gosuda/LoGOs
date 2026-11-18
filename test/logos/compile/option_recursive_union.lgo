@@ -1,8 +1,8 @@
-// errorcheck
+// compile
 
 package p
 
-type Island interface{ Node | Leaf } // ERROR "invalid recursive type Island"
+type Island interface{ Node | Leaf }
 
 type Leaf struct{ V int }
 

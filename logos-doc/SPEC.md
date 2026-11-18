@@ -720,7 +720,9 @@ A value cycle through `T?` MUST fail compilation with `invalid recursive type`. 
 
 The diagnostic MUST name each type in the cycle. [T-202.1]
 
-A cycle broken by a pointer, slice, or map type MUST be allowed. [T-202.1]
+A cycle broken by a pointer, slice, or map type, or by a closed union in a value position, MUST be allowed. [T-202.1]
+
+A member of a closed union MAY hold an option of that union, because the union value is an interface word. [T-202.1]
 
 `?.` on a non-option value MUST fail with `[correctness::not_an_option]`. [T-104.3]
 
@@ -776,6 +778,8 @@ Every member, after nested unions are flattened, MUST have each declared method 
 A listed member that lacks a declared method MUST fail with `[correctness::union_member_method]`, reported once per member. [T-203.1]
 
 A closed union MUST be allowed in value positions in `.lgo` code (variables, parameters, results, fields, elements, keys, and values). [T-203.1]
+
+A member type MAY hold the union itself by value in a field, element, or type-argument position: the value position stores a fixed-size interface word, so holding the union is not an invalid recursive type. [T-203.1]
 
 A union with `~` terms or an unbounded set MUST fail with `[correctness::open_union_value]`. [T-203.1]
 
