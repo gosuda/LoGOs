@@ -47,9 +47,10 @@ func siteDisplay(pos syntax.Pos, base string, line uint) (string, uint) {
 // may rewrite. Files without an entry in src are left alone. Lower mutates
 // the files in place and reports whether anything changed. A true result
 // also covers a semantic-only change: const views that live purely in
-// checker info (rt.Freeze results, with no ConstType node to erase)
-// still need the plain recheck, so the export writer and the backend only
-// ever see Go-facing types. A surviving
+// checker info (rt.Freeze results, with no ConstType node to erase) and
+// one-value map reads whose bare option keeps its Go form still need the
+// plain recheck, so the export writer and the backend only ever see
+// Go-facing types. A surviving
 // loGo/s node (TryExpr, ErrdeferStmt, SwitchExpr, ArmClause,
 // AssertedStruct, OptionType, CoalesceExpr, OptSelectExpr, ConstType,
 // YieldStmt, ScopeDeferStmt, or InterpExpr) is an internal error.
@@ -230,6 +231,7 @@ type fileLower struct {
 	// boundary-insert drains, wrapSeq mints wrapper IDs, and
 	// retResults maps each return to its function results.
 	spreadSeq      int
+	cswAlias       int // const-switch name counter; file-wide so a const switch inside a function literal cannot reuse an enclosing case's names
 	rodataVars     []rodataVar
 	optMemo        map[*syntax.OptionType]syntax.Expr
 	parenClaims    map[int]bool
@@ -872,6 +874,14 @@ type hoistedVar struct {
 	eject  string
 }
 
+// cswName mints a const-switch lowering name unique within the file: a const
+// switch inside a function literal gets a fresh funcLower, so a per-function
+// counter would reuse an enclosing case's alias.
+func (fl *fileLower) cswName(prefix string) string {
+	fl.cswAlias++
+	return fmt.Sprintf("_logos_%s%d", prefix, fl.cswAlias)
+}
+
 // funcLower carries the state of lowering one function body.
 type funcLower struct {
 	fl               *fileLower
@@ -1029,14 +1039,42 @@ func (fc *funcLower) renameResult(sp *resultSpec, spelling string) {
 	}
 	sp.name = nameOf(pos, spelling)
 	sp.field.Name = sp.name
-	typeOff := fc.fl.off(leftmostOf(sp.typeExpr))
+	typeOff := fc.resultTypeHead(sp.typeExpr)
 	if len(fc.specs) > 1 || openParenBefore(fc.fl.src, typeOff) {
-		fc.fl.add(typeOff, typeOff, spelling+" ")
+		fc.fl.addFirst(typeOff, spelling+" ")
 		return
 	}
 	braceOff := fc.fl.off(fc.body.Pos())
-	fc.fl.add(typeOff, typeOff, "("+spelling+" ")
+	fc.fl.addFirst(typeOff, "("+spelling+" ")
 	fc.fl.add(braceOff, braceOff, ") ")
+}
+
+// resultTypeHead returns the offset of the first byte of a result type.
+// An option type T? has its position at the question mark, and so does
+// the rt.Option[T] expression it lowers to, so the head of either is the
+// head of its element, where the option wrapper text also starts; the
+// name is inserted first there and so precedes the wrapper.
+func (fc *funcLower) resultTypeHead(e syntax.Expr) int {
+	switch t := syntax.Unparen(e).(type) {
+	case *syntax.OptionType:
+		return fc.fl.optTypeHead(t.Elem)
+	case *syntax.IndexExpr:
+		if isRTOption(t.X) {
+			return fc.fl.optTypeHead(t.Index)
+		}
+	}
+	return fc.fl.off(leftmostOf(e))
+}
+
+// isRTOption reports whether e is the selector rt.Option that an option
+// type lowers to.
+func isRTOption(e syntax.Expr) bool {
+	sel, ok := e.(*syntax.SelectorExpr)
+	if !ok || sel.Sel.Value != "Option" {
+		return false
+	}
+	pkg, ok := sel.X.(*syntax.Name)
+	return ok && pkg.Value == rtAlias
 }
 
 // openParenBefore reports whether the previous token before off is "(".

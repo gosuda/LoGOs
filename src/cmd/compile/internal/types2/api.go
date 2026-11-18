@@ -364,6 +364,7 @@ type Info struct {
 
 	LogosConstIfDead  map[syntax.Stmt]bool                             // logos M7-S1 hook: statements of dead `const if` branches, for comptime checks.
 	LogosConstSel     map[*syntax.SelectorExpr]*syntax.ConstSwitchCase // logos M7-S4 hook: interface-case selectors on the switched value, by their case.
+	LogosConstConv    map[syntax.Expr]*syntax.ConstSwitchCase          // logos M7-S4 hook: interface-case operands of the switched type boxed to the case interface, by their case.
 	LogosConstCases   map[*syntax.ConstSwitchCase]LogosConstCase       // logos M7-S4 hook: the case-scope substitution of each `const switch` case.
 	LogosConstFor     map[syntax.Node]*LogosConstFor                   // logos M7-S2 hook: checked `const for` statements for unrolling.
 	LogosDisqual      map[*syntax.BlockStmt][]map[string]bool          // logos M7-S2 hook: narrowing-disqualified names per function body, for copy checks.
@@ -374,6 +375,8 @@ type Info struct {
 	LogosPlatformRets map[syntax.Pos][]LogosPlatformRet // logos M9-S2 hook: start positions of return operands holding platform pointers that convert to an interface result.
 
 	LogosConstCov map[syntax.Expr]Type // original const-slice arguments mapped to target interface elements
+
+	LogosZeroLit map[syntax.Expr]bool // logos hook: empty composite literals admitted as the zero value (T{}, int{}), for lowering to respell as *new(T)
 
 	// LogosConstFuncs carries the first check's CTFE proof for
 	// same-package functions, keyed by object name (SPEC Sec 2.1,
