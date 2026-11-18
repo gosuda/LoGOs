@@ -37,9 +37,23 @@ func (fl *fileLower) lowerStructDefaults() {
 // as *new(T): a concrete substitution in a comptime copy carries the real
 // literal, while a plain generic emits the equivalent allocation.
 func (fl *fileLower) lowerTypeParamLits() {
+	// Field defaults never emit their source: stripFieldDefaults erases
+	// the ` = default` span and renderDefault respells marked literals
+	// for the generated text. Respelling one in place would only corrupt
+	// the default node's end position for that erasure.
+	defaults := map[syntax.Node]bool{}
+	syntax.Inspect(fl.file, func(n syntax.Node) bool {
+		if fd, ok := n.(*syntax.FieldDefault); ok && fd.Default != nil {
+			defaults[fd.Default] = true
+		}
+		return true
+	})
 	conv := make(map[syntax.Expr]syntax.Expr)
 	texts := make(map[syntax.Expr]string)
 	syntax.Inspect(fl.file, func(n syntax.Node) bool {
+		if defaults[n] {
+			return false
+		}
 		lit, ok := n.(*syntax.CompositeLit)
 		if !ok || len(lit.ElemList) != 0 || !fl.pkg.info.LogosZeroLit[lit] {
 			return true
@@ -331,7 +345,13 @@ func (fl *fileLower) stripFieldDefaults(st *syntax.StructType, stripped map[*syn
 		if !stripped[fd] {
 			stripped[fd] = true
 			typeEnd := fl.exprEndNested(fl.off(syntax.StartPos(fd.Type)))
-			fl.add(typeEnd, fl.fieldDefaultEnd(st, i, fd, typeEnd), "")
+			end := fl.fieldDefaultEnd(st, i, fd, typeEnd)
+			// The default's source span is gone: an edit recorded inside
+			// it — the respell of a marked zero literal like `= int{}` —
+			// would overlap the erasure. The respelled form still reaches
+			// generated factory text through renderDefault.
+			fl.dropInner(span{typeEnd, end})
+			fl.add(typeEnd, end, "")
 		}
 		if td == nil || td.Name == nil || f.Name == nil || f.Name.Value == "_" {
 			continue
