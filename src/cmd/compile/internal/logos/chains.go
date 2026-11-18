@@ -962,7 +962,10 @@ func (fl *fileLower) preLowerCaptureBody(lam *syntax.LambdaExpr) {
 		if _, done := fl.optBodySpan[lam]; !done {
 			bodyStart := fl.exprStart(body)
 			espan := span{bodyStart, lambdaBodyEnd(fl.src, bodyStart)}
-			if ws, ok := fl.wrapSpan[syntax.Unparen(body)]; ok {
+			// A wrapSpan pin covers the pinned node's own extent; when the
+			// body sits inside parens the pin must still cover them, else
+			// the replacement end would cut before a closing paren.
+			if ws, ok := fl.wrapSpan[syntax.Unparen(body)]; ok && ws.start <= espan.start && ws.end >= espan.end {
 				espan = ws
 			} else if call, ok := syntax.Unparen(body).(*syntax.CallExpr); ok {
 				espan = fl.callBodySpan(call)
