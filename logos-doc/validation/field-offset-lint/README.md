@@ -22,9 +22,11 @@ unsafe.Pointer conversions of direct field addresses on the same checker
 variable of struct-value type qualifies. Parentheses and type aliases
 preserve the proof. The named variable must be local, each selection must
 be direct and non-indirect, and neither operand may contain an index,
-call, pointer alias, adjusted address, mask, or scale. Different objects
-and addition remain findings. A proven delta combined with another frame
-address still reports that separate address.
+call, pointer alias, adjusted address, mask, or scale. Different objects,
+addition, and a proven delta combined with another frame address stay
+silent: they are integer-only arithmetic, which the production rule no
+longer reports — the old rule's reports on them are exactly what the
+negative control preserves.
 
 The rule cases include both exact Protobuf expression shapes, reversed
 and identical fields, named conversions, returned and stored offsets,
