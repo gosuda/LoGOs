@@ -41,15 +41,14 @@ type cswCase struct {
 }
 
 type cswLower struct {
-	fc     *funcLower
-	fl     *fileLower
-	info   *types2.Info
-	stmt   *syntax.ConstSwitchStmt
-	start  int
-	end    int
-	tag    types2.Type
-	cases  []cswCase
-
+	fc    *funcLower
+	fl    *fileLower
+	info  *types2.Info
+	stmt  *syntax.ConstSwitchStmt
+	start int
+	end   int
+	tag   types2.Type
+	cases []cswCase
 }
 
 type cswRebind struct {
@@ -857,84 +856,116 @@ func (c *cswLower) wrapConvs(body []syntax.Stmt, cs *cswCase, selWraps []span) (
 	for _, r := range recs {
 		recOf[r.e] = r
 	}
-	// cswLocalType reports whether t references a type declared inside the
-	// case body: a case-top alias for it would precede that declaration,
-	// while the spell resolves correctly at each use position because the
-	// emitted code stays in the scope the checker used.
-	var cswLocalType func(t types2.Type, seen map[types2.Type]bool) bool
-	cswLocalType = func(t types2.Type, seen map[types2.Type]bool) bool {
-		if t == nil || seen[t] {
-			return false
-		}
-		seen[t] = true
-		u := types2.Unalias(t)
-		if n, ok := u.(*types2.Named); ok {
-			if obj := n.Obj(); obj != nil && obj.Pos().IsKnown() &&
-				obj.Pos().FileBase() == c.fl.file.Pos().FileBase() {
-				if o := c.fl.off(obj.Pos()); cs.lo <= o && o < cs.hi {
-					return true
-				}
-			}
-			if args := n.TypeArgs(); args != nil {
-				for i := 0; i < args.Len(); i++ {
-					if cswLocalType(args.At(i), seen) {
-						return true
+	// localDecls maps the name position of each type declared inside the
+	// case body to the offset just past its declaration and to the list
+	// holding it. A spell that resolves to such a type can't go in a
+	// case-top alias — the alias would precede the declaration — and a
+	// bare spell at the use site could re-resolve to a nested block's
+	// shadow of the name. Its alias is instead spliced right after the
+	// declaration it spells: after the name is in scope, before every
+	// use that the declaration permits, and past any shadow of either
+	// name.
+	type localTypeDecl struct {
+		end  int
+		list *[]syntax.Stmt
+		stmt *syntax.DeclStmt
+	}
+	localDecls := map[int]localTypeDecl{}
+	var scanTypeDecls func(list *[]syntax.Stmt)
+	scanTypeDecls = func(list *[]syntax.Stmt) {
+		for _, s := range *list {
+			if d, ok := s.(*syntax.DeclStmt); ok {
+				end := c.fl.off(syntax.EndPos(d))
+				for _, decl := range d.DeclList {
+					if td, ok := decl.(*syntax.TypeDecl); ok && td.Name != nil {
+						localDecls[c.fl.off(td.Name.Pos())] = localTypeDecl{end, list, d}
 					}
 				}
 			}
-			return false
+			syntax.Inspect(s, func(n syntax.Node) bool {
+				if nb, ok := n.(*syntax.BlockStmt); ok {
+					scanTypeDecls(&nb.List)
+					return false
+				}
+				return true
+			})
 		}
-		switch x := u.(type) {
-		case *types2.Pointer:
-			return cswLocalType(x.Elem(), seen)
-		case *types2.Slice:
-			return cswLocalType(x.Elem(), seen)
-		case *types2.Array:
-			return cswLocalType(x.Elem(), seen)
-		case *types2.Map:
-			return cswLocalType(x.Key(), seen) || cswLocalType(x.Elem(), seen)
-		case *types2.Chan:
-			return cswLocalType(x.Elem(), seen)
-		case *types2.Struct:
-			for i := 0; i < x.NumFields(); i++ {
-				if cswLocalType(x.Field(i).Type(), seen) {
-					return true
+	}
+	scanTypeDecls(&cs.syn.Body)
+	// localTypeOf reports the last case-body declaration that any object
+	// inside t names, by object identity — a same-named declaration of
+	// another scope never matches, so a package type shadowed inside the
+	// case body still gets the ordinary case-top alias.
+	localTypeOf := func(t types2.Type) (localTypeDecl, bool) {
+		var out localTypeDecl
+		found := false
+		seen := map[types2.Type]bool{}
+		var walk func(t types2.Type)
+		walk = func(t types2.Type) {
+			if t == nil || seen[t] {
+				return
+			}
+			seen[t] = true
+			var obj *types2.TypeName
+			switch x := t.(type) {
+			case *types2.Alias:
+				obj = x.Obj()
+			case *types2.Named:
+				obj = x.Obj()
+				if args := x.TypeArgs(); args != nil {
+					for i := 0; i < args.Len(); i++ {
+						walk(args.At(i))
+					}
+				}
+			case *types2.Pointer:
+				walk(x.Elem())
+			case *types2.Slice:
+				walk(x.Elem())
+			case *types2.Array:
+				walk(x.Elem())
+			case *types2.Map:
+				walk(x.Key())
+				walk(x.Elem())
+			case *types2.Chan:
+				walk(x.Elem())
+			case *types2.Struct:
+				for i := 0; i < x.NumFields(); i++ {
+					walk(x.Field(i).Type())
+				}
+			case *types2.Tuple:
+				for i := 0; i < x.Len(); i++ {
+					walk(x.At(i).Type())
+				}
+			case *types2.Signature:
+				walk(x.Params())
+				walk(x.Results())
+			case *types2.Interface:
+				for i := 0; i < x.NumEmbeddeds(); i++ {
+					walk(x.EmbeddedType(i))
+				}
+				for i := 0; i < x.NumMethods(); i++ {
+					walk(x.Method(i).Type())
 				}
 			}
-		case *types2.Tuple:
-			for i := 0; i < x.Len(); i++ {
-				if cswLocalType(x.At(i).Type(), seen) {
-					return true
-				}
-			}
-		case *types2.Signature:
-			return cswLocalType(x.Params(), seen) || cswLocalType(x.Results(), seen)
-		case *types2.Interface:
-			for i := 0; i < x.NumEmbeddeds(); i++ {
-				if cswLocalType(x.EmbeddedType(i), seen) {
-					return true
-				}
-			}
-			for i := 0; i < x.NumMethods(); i++ {
-				if cswLocalType(x.Method(i).Type(), seen) {
-					return true
+			if obj != nil && obj.Pos().IsKnown() &&
+				obj.Pos().FileBase() == c.fl.file.Pos().FileBase() {
+				if lt, ok := localDecls[c.fl.off(obj.Pos())]; ok && (!found || lt.end > out.end) {
+					out, found = lt, true
 				}
 			}
 		}
-		return false
+		walk(t)
+		return out, found
 	}
 	// spellFor names each destination type through a case-body alias: a
 	// declared or inferred type may spell an identifier a nested block
 	// shadows, and aliases mint lazily so assignments needing no rewrite
-	// never spell an unimported type. A type declared inside the case body
-	// is spelled directly instead, since an alias at the case top would
-	// precede its declaration.
+	// never spell an unimported type. A spell naming a type declared
+	// inside the case body gets its alias right after that declaration
+	// instead of at the case top.
 	secAlias := map[string]string{}
 	spellFor := func(t types2.Type) string {
 		s := c.cswSpell(t)
-		if cswLocalType(t, map[types2.Type]bool{}) {
-			return s
-		}
 		if a, ok := secAlias[s]; ok {
 			return a
 		}
@@ -944,9 +975,17 @@ func (c *cswLower) wrapConvs(body []syntax.Stmt, cs *cswCase, selWraps []span) (
 		if !ok {
 			base.Fatalf("logos: const switch conv type %s at %s cannot be respelled", s, cs.syn.Case.String())
 		}
-		decls = append(decls, at(&syntax.DeclStmt{DeclList: []syntax.Decl{
+		d := at(&syntax.DeclStmt{DeclList: []syntax.Decl{
 			at(&syntax.TypeDecl{Name: nameOf(cs.syn.Case, a), Alias: true, Type: typ}, cs.syn.Case),
-		}}, cs.syn.Case))
+		}}, cs.syn.Case)
+		if lt, ok := localTypeOf(t); ok {
+			c.fl.addT(lt.end, lt.end, gen("\ntype "+a+" = "+s))
+			if i := slices.Index(*lt.list, syntax.Stmt(lt.stmt)); i >= 0 {
+				*lt.list = slices.Insert(*lt.list, i+1, syntax.Stmt(d))
+			}
+			return a
+		}
+		decls = append(decls, d)
 		dtext = cat(dtext, gen("type "+a+" = "+s+"\n"))
 		return a
 	}
