@@ -138,6 +138,107 @@ func gather[F any](parts []Part, field F, m map[string]F) []Part {
 	return parts
 }
 
+// idx reads through a rebound variable: the emitted dereference must bind
+// the indexing, and len of the case array must stay a constant expression.
+func idx[F any](v F) int {
+	const switch F {
+	case [3]int:
+		const n = len(v)
+		return v[0] + n
+	}
+	return -1
+}
+
+// shadow keeps rebound reads working when an inner block redeclares the case
+// type's name: the respelled type resolves through the case-body alias.
+func shadow[F any](v F) int {
+	const switch F {
+	case int:
+		{
+			type int = float64
+			_ = int(0)
+		}
+		return v + 1
+	}
+	return -1
+}
+
+// closureResult judges `return` by the innermost function's arity: a
+// one-result literal inside the two-result parent boxes its value singly.
+func closureResult[F any](field F) (Part, bool) {
+	const switch F {
+	case Part:
+		fn := func() Part {
+			return field
+		}
+		return fn(), true
+	}
+	return nil, false
+}
+
+// selRecv receives a value of the switched type through a select: the comm
+// clause cannot name a call, so it receives into temporaries and assigns
+// the boxed values in the clause body.
+func selRecv[F any](p Part, ch chan F) bool {
+	const switch F {
+	case Part:
+		var ok bool
+		select {
+		case p, ok = <-ch:
+			_ = p
+		default:
+			return false
+		}
+		return ok
+	}
+	return false
+}
+
+type MyBool bool
+
+// namedOk keeps the left side's declared boolean type on the second result
+// through the two-result closure rewrite.
+func namedOk[F any](m map[string]F) (Part, MyBool) {
+	const switch F {
+	case Part:
+		var p Part
+		var ok MyBool
+		p, ok = m["k"]
+		return p, ok
+	}
+	return nil, false
+}
+
+// redecl reuses a rebound name in a short declaration: the `:=` left side
+// declares a fresh variable instead of dereferencing the rebound pointer.
+func redecl[F any](v F) int {
+	const switch F {
+	case int:
+		v, n := 5, 6
+		return v + n
+	}
+	return -1
+}
+
+// nestedLookup boxes a call whose literal has its own comma-ok map read: the
+// inner lookup keeps both values through the composed rewrite.
+func nestedLookup[F any](m map[string]F, field F) []Part {
+	const switch F {
+	case Part:
+		var p Part
+		p = func() Part {
+			var ok bool
+			p, ok = m["k"]
+			if ok {
+				return p
+			}
+			return field
+		}()
+		return []Part{p}
+	}
+	return nil
+}
+
 // keepNil boxes a nil value of an interface-typed argument without panicking.
 func keepNil[J Part](parts []Part, field J) []Part {
 	const switch J {
@@ -183,6 +284,8 @@ func main() {
 		}
 	}
 
+	checks2()
+
 	nilParts := keepNil[Part](nil, nil)
 	check("nil-box", len(nilParts) == 1 && nilParts[0] == nil, len(nilParts), 1)
 
@@ -190,3 +293,34 @@ func main() {
 		os.Exit(1)
 	}
 }
+
+// checks2 exercises the rebind and boxing edge cases kept out of main for
+// the cognitive-complexity budget.
+func checks2() {
+	check("rebound-index", idx[[3]int]([3]int{5, 0, 0}) == 8, idx[[3]int]([3]int{5, 0, 0}), 8)
+	check("shadow-alias", shadow[int](41) == 42, shadow[int](41), 42)
+	cp, cok := closureResult[W](W{S: "e"})
+	check("closure-return", cok && cp != nil, cok, true)
+	ch := make(chan W, 1)
+	ch <- W{S: "s"}
+	check("select-recv", selRecv[W](nil, ch) == true, selRecv[W](nil, ch), true)
+	np, nb := namedOk[W](map[string]W{"k": {S: "f"}})
+	check("named-bool", bool(nb) && np != nil, nb, true)
+	if np != nil {
+		if err := np.Start(context.Background()); err != nil {
+			fmt.Println("np err:", err)
+			failed = true
+		}
+	}
+	check("redecl", redecl[int](1) == 11, redecl[int](1), 11)
+	nlp := nestedLookup[W](map[string]W{"k": {S: "d"}}, W{S: "g"})
+	check("nested-lookup", len(nlp) == 1 && nlp[0] != nil, len(nlp), 1)
+	if len(nlp) == 1 && nlp[0] != nil {
+		if err := nlp[0].Start(context.Background()); err != nil {
+			fmt.Println("nlp err:", err)
+			failed = true
+		}
+	}
+}
+
+

@@ -872,6 +872,13 @@ type hoistedVar struct {
 	eject  string
 }
 
+// cswName mints a const-switch lowering name unique within the function body:
+// a nested const switch's case aliases must not collide with an outer case's.
+func (fc *funcLower) cswName(prefix string) string {
+	fc.cswAlias++
+	return fmt.Sprintf("_logos_%s%d", prefix, fc.cswAlias)
+}
+
 // funcLower carries the state of lowering one function body.
 type funcLower struct {
 	fl               *fileLower
@@ -882,6 +889,7 @@ type funcLower struct {
 	hasDeferTry      bool
 	hasErrdefer      bool
 	hasScopeDefer    bool
+	cswAlias         int // case-type alias counter; function-wide so nested const switches cannot collide
 	okName           string
 	errSeq           int
 	funSeq           int

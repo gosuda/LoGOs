@@ -12,4 +12,13 @@ start:c
 start:d
 start:d
 start:c
+ok rebound-index
+ok shadow-alias
+ok closure-return
+ok select-recv
+ok named-bool
+start:f
+ok redecl
+ok nested-lookup
+start:d
 ok nil-box
