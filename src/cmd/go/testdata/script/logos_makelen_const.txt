@@ -16,6 +16,8 @@ logos eject -o out
 grep 'MulLen\(len\(make\(\[\]struct\{\}, _logos_rt\.MulLen\(a, b,' out/main.go
 grep 'MulLen\(.*\), c,' out/main.go
 grep 'make\(\[\]struct\{\}, n, _logos_rt\.MulLen\(a, b,' out/main.go
+# The MulLen wrap lands inside the ?? closure's return slot, not after it.
+grep 'return _logos_rt\.MulLen\(n, m, "n \* m"\)' out/main.go
 
 -- m/go.mod --
 module example.com/makelenconst
@@ -89,6 +91,10 @@ func capacity(n, a, b int) (int, int) {
 	return len(x), cap(x)
 }
 
+func coalesced(opt int?, n, m int) int {
+	return len(make([]int, opt ?? n*m))
+}
+
 func expectPanic(f func(), want string) {
 	defer func() {
 		if got := recover(); got != want {
@@ -109,5 +115,8 @@ func main() {
 	expectPanic(func() { nested(max, 2, 1) }, "logos: make length overflow: a * b")
 	expectPanic(func() { nested(1, max, 2) }, "logos: make length overflow: len(make([]struct{}, a * b)) * c")
 	expectPanic(func() { capacity(1, max, 2) }, "logos: make length overflow: a * b")
+	if coalesced(3, 2, 2) != 3 || coalesced(nil, 2, 2) != 4 {
+		panic("coalesced")
+	}
 	fmt.Println("ok mullen-nested-and-capacity")
 }
