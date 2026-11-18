@@ -1512,24 +1512,29 @@ func (c *cfLeaf) switchCaseType(cs *syntax.ConstSwitchCase, s *syntax.ConstSwitc
 		if a := cfFieldBinding(sel.X, c.active, c.declParents); a != nil {
 			return a.field.typ, true
 		}
+		// An f.Type the bindings cannot resolve stands for an unknown
+		// type: its recorded comptime any would match every field, so
+		// leave the whole switch for the copy's own lowering.
+		return nil, false
 	}
 	// When the case expression was checked (native parse), its recorded
 	// type already reflects the scope at the switch — local declarations,
-	// shadowing, aliases. Trust it over a manual re-resolution that would
-	// produce a different type object for a local named type.
+	// shadowing, aliases, interface cases. Trust it over a manual
+	// re-resolution that would produce a different type object for a
+	// local named type.
 	if tv, ok := c.fl.pkg.info.Types[syntax.Unparen(cs.Type)]; ok && tv.IsType() {
-		// An unbound or still-parametric case type is not a concrete
-		// answer the fold can compare against a field type — leave the
-		// switch for the copy's own lowering.
-		if types2.IsInterface(tv.Type) || cfHasTypeParam(tv.Type) {
+		// A still-parametric case type is not a concrete answer the
+		// fold can compare against a field type — leave the switch for
+		// the copy's own lowering.
+		if cfHasTypeParam(tv.Type) {
 			return nil, false
 		}
 		return tv.Type, true
 	}
 	// A bare name can resolve to a type declared inside the function
 	// body the record walk cannot see. An alias stands for its target;
-	// a local named type is fresh, so it can only match a field under
-	// ~, never by exact name.
+	// a local named type comes back as the checked TypeName's type so
+	// an exact case can match a field of that same declaration.
 	if n, ok := syntax.Unparen(cs.Type).(*syntax.Name); ok {
 		if d := cfLocalTypeDeclBefore(c.declRoot, s, n.Value, c.declParents); d != nil {
 			under, ok := c.fl.cfResolveTypeExpr(d.Type, c.active, c.run.sites)
