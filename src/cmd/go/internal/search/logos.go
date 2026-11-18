@@ -13,6 +13,7 @@ import (
 	"strconv"
 
 	"cmd/go/internal/cfg"
+	"cmd/go/internal/fsys"
 )
 
 // logosKeepCgoOnly reports whether a wildcard match must keep a directory
@@ -35,7 +36,10 @@ import (
 // a name suffix, which cgo cannot override; the imports check rules out
 // a //go:build cgo file that carries no "C" import, which cgo being off
 // excludes without the package being a cgo package. A file rejected by
-// either half keeps the upstream silent skip. Only loGo/s sources
+// either half keeps the upstream silent skip. Both halves judge an
+// overlaid replacement by its effective content: MatchFile reads it
+// through the build context's file hooks, and the imports probe reads
+// through the same overlay-aware file system. Only loGo/s sources
 // qualify: a plain go context never admits .lgo files into
 // IgnoredGoFiles, so upstream behavior is unchanged.
 func logosKeepCgoOnly(p *build.Package) bool {
@@ -60,10 +64,18 @@ func logosKeepCgoOnly(p *build.Package) bool {
 }
 
 // logosFileImportsC reports whether the named Go-family source file in dir
-// imports "C". A parse failure reads as no import, matching how loading
-// treats unreadable files.
+// imports "C". It reads through cmd/go/internal/fsys, the overlay-aware
+// file system MatchFile and loading read, so an overlaid replacement is
+// judged by its effective content rather than the file on disk. A read or
+// parse failure reads as no import, matching how loading treats
+// unreadable files.
 func logosFileImportsC(dir, name string) bool {
-	parsed, err := parser.ParseFile(token.NewFileSet(), filepath.Join(dir, name), nil, parser.ImportsOnly)
+	path := filepath.Join(dir, name)
+	src, err := fsys.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	parsed, err := parser.ParseFile(token.NewFileSet(), path, src, parser.ImportsOnly)
 	if err != nil || parsed == nil {
 		return false
 	}

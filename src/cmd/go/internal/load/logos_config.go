@@ -16,6 +16,7 @@ import (
 
 	"cmd/go/internal/base"
 	"cmd/go/internal/cfg"
+	"cmd/go/internal/fsys"
 	"cmd/go/internal/logos/capabilities"
 	"cmd/go/internal/logos/config"
 	"cmd/go/internal/logos/settings"
@@ -160,8 +161,19 @@ func logosCgoHidden(p *Package) bool {
 	return false
 }
 
+// logosFileImportsC reports whether the named Go-family source file in dir
+// imports "C". It reads through cmd/go/internal/fsys, the overlay-aware
+// file system the rest of loading reads, so an overlaid replacement is
+// judged by its effective content rather than the file on disk. A parse
+// failure reads as no import, matching how loading treats unreadable
+// files.
 func logosFileImportsC(dir, name string) bool {
-	parsed, err := parser.ParseFile(token.NewFileSet(), filepath.Join(dir, name), nil, parser.ImportsOnly)
+	path := filepath.Join(dir, name)
+	src, err := fsys.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	parsed, err := parser.ParseFile(token.NewFileSet(), path, src, parser.ImportsOnly)
 	if err != nil || parsed == nil {
 		return false
 	}
