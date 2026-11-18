@@ -58,55 +58,72 @@ func scanSegment(src []byte, from, to int, visit func(tok) bool) {
 	// The Go scanner knows nothing of $"..." literals: it pairs each
 	// quote inside an interpolation hole as a string edge and leaks the
 	// hole's real parens and braces into the token stream. Merge every
-	// interp literal into one STRING token, resuming the scan after it.
-	for pos := 0; pos < len(seg); {
+	// interp literal into one STRING token; every raw token it replaces
+	// lies strictly inside the merged span because a quote always ends
+	// a scanned token.
+	var raws []tok
+	{
 		fset := token.NewFileSet()
-		file := fset.AddFile("", fset.Base(), len(seg)-pos)
+		file := fset.AddFile("", fset.Base(), len(seg))
 		var s scanner.Scanner
-		s.Init(file, seg[pos:], nil, scanner.ScanComments)
+		s.Init(file, seg, nil, scanner.ScanComments)
 		for {
 			p, kind, lit := s.Scan()
 			if kind == token.EOF {
-				return
+				break
 			}
 			off := file.Offset(p)
-			goff := pos + off
 			t := tok{kind: kind, comment: kind == token.COMMENT}
 			if kind == token.SEMICOLON && lit == "\n" {
 				t.auto = true
-				t.span = span{from + goff, from + goff}
+				t.span = span{from + off, from + off}
 			} else {
-				t.span = span{from + goff, from + pos + tokenEnd(seg[pos:], off, kind, lit)}
+				t.span = span{from + off, from + tokenEnd(seg, off, kind, lit)}
 			}
-			if kind == token.ILLEGAL && lit == "$" && goff+1 < len(seg) &&
-				(seg[goff+1] == '"' || seg[goff+1] == '`') {
-				end := interpLitEnd(seg, goff+1)
-				t = tok{kind: token.STRING, span: span{from + goff, from + end}}
-				if !visit(t) {
-					return
-				}
-				pos = end
-				break
-			}
+			raws = append(raws, t)
+		}
+	}
+	for i := 0; i < len(raws); i++ {
+		t := raws[i]
+		start := t.span.start - from
+		if t.kind == token.ILLEGAL && start+1 < len(seg) && seg[start] == '$' &&
+			(seg[start+1] == '"' || seg[start+1] == '`') {
+			end := interpLitEnd(seg, start+1)
+			t = tok{kind: token.STRING, span: span{from + start, from + end}}
 			if !visit(t) {
 				return
 			}
+			for i+1 < len(raws) && raws[i+1].span.start < from+end {
+				i++
+			}
+			continue
+		}
+		if !visit(t) {
+			return
 		}
 	}
 }
 
 // interpLitEnd returns the offset just past the $"..." or $`...`
 // literal whose quote is seg[off]. {expr} holes nest and hold ordinary
-// Go literals of their own; quoted escapes apply except in raw form.
+// Go literals and comments of their own; {{ and }} escape literal
+// braces outside holes; quoted escapes apply except in raw form.
 func interpLitEnd(seg []byte, off int) int {
 	q := seg[off]
 	depth := 0
 	for i := off + 1; i < len(seg); {
 		switch c := seg[i]; {
-		case c == '\\' && q != '`':
+		case depth == 0 && c == '\\' && q != '`':
 			i += 2
 		case depth == 0 && c == q:
 			return i + 1
+		case depth == 0 && c == '{' && i+1 < len(seg) && seg[i+1] == '{':
+			i += 2
+		case depth == 0 && c == '}':
+			i++
+			if i < len(seg) && seg[i] == '}' {
+				i++
+			}
 		case c == '{':
 			depth++
 			i++
@@ -115,9 +132,37 @@ func interpLitEnd(seg []byte, off int) int {
 			i++
 		case depth > 0 && (c == '"' || c == '\'' || c == '`'):
 			i = goLitEnd(seg, i)
+		case depth > 0 && c == '/':
+			i = commentEnd(seg, i)
 		default:
 			i++
 		}
+	}
+	return len(seg)
+}
+
+// commentEnd returns the offset just past the comment starting at
+// seg[off], or off+1 when seg[off] does not start one.
+func commentEnd(seg []byte, off int) int {
+	if off+1 >= len(seg) {
+		return off + 1
+	}
+	switch seg[off+1] {
+	case '/':
+		for i := off + 2; i < len(seg); i++ {
+			if seg[i] == '\n' {
+				return i
+			}
+		}
+	case '*':
+		for i := off + 2; i+1 < len(seg); i++ {
+			if seg[i] == '*' && seg[i+1] == '/' {
+				return i + 2
+			}
+		}
+		return len(seg)
+	default:
+		return off + 1
 	}
 	return len(seg)
 }
