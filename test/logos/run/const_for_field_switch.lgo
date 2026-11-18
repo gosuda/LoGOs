@@ -133,6 +133,26 @@ func nested[O, I any]() []string {
 	return out
 }
 
+// The same shape concretely: the ~int case trails cases that cover
+// every field of App, so it is dead on every iteration and its
+// comptime.Error must never evaluate.
+func nestedConcrete() []string {
+	var out []string
+	const for _, f := range comptime.Fields[App]() {
+		const for _, g := range comptime.Fields[Opt]() {
+			const switch f.Type {
+			case int:
+				out = append(out, f.Name+"."+g.Name)
+			case string:
+				out = append(out, f.Name+">"+g.Name)
+			case ~int:
+				comptime.Error("dead tilde case evaluated")
+			}
+		}
+	}
+	return out
+}
+
 // An unbound f.Type case is per-iteration, so it does not statically
 // cover a later concrete case.
 func pend[T any]() []string {
@@ -145,6 +165,42 @@ func pend[T any]() []string {
 			case string:
 				out = append(out, f.Name+">"+g.Name)
 			}
+		}
+	}
+	return out
+}
+
+// A body-local type declaration shadows the package-level name for a
+// case: the fold resolves it, so a package Sh field never matches a
+// local Sh.
+type Sh float64
+
+type Shadow struct {
+	V Sh
+}
+
+func localDecl[T any]() []string {
+	type Sh int
+	var out []string
+	const for _, f := range comptime.Fields[T]() {
+		const switch f.Type {
+		case Sh:
+			out = append(out, f.Name+":local")
+		case string:
+			out = append(out, f.Name+":str")
+		}
+	}
+	return out
+}
+
+// A body-local type alias stands for its target.
+func localAlias[T any]() []string {
+	type MyInt = int
+	var out []string
+	const for _, f := range comptime.Fields[T]() {
+		const switch f.Type {
+		case MyInt:
+			out = append(out, f.Name+":int")
 		}
 	}
 	return out
@@ -164,5 +220,8 @@ func main() {
 	var a App
 	fmt.Println(narrow(&a))
 	fmt.Println(nested[App, Opt]())
+	fmt.Println(nestedConcrete())
 	fmt.Println(pend[Opt]())
+	fmt.Println(localDecl[Shadow]())
+	fmt.Println(localAlias[App]())
 }
