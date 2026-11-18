@@ -194,29 +194,30 @@ func (pl *packageLower) declOf(tn *types2.TypeName) (*syntax.TypeDecl, []byte) {
 
 // fileLower carries the state of lowering one file.
 type fileLower struct {
-	pkg          *packageLower
-	file         *syntax.File
-	src          []byte
-	keywords     facts.KeywordIndex
-	srcMap       srcBuf
-	orig         int
-	start        []int
-	base         *syntax.PosBase
-	baseName     string
-	cgoSource    bool
-	splices      []splice
-	regions      []*cfRegion
-	hosts        []*cfHost
-	moves        []*chainMove
-	changed      bool
-	needRT       bool
-	needRTText   bool // text-only rt need: eject output references rt, checked AST does not.
-	needSimd     bool
-	needSimdMath bool
-	needJSON     bool
-	needBinary   bool
-	needReflect  bool
-	siteDecls    []*syntax.VarDecl
+	pkg           *packageLower
+	file          *syntax.File
+	src           []byte
+	keywords      facts.KeywordIndex
+	srcMap        srcBuf
+	orig          int
+	start         []int
+	base          *syntax.PosBase
+	baseName      string
+	cgoSource     bool
+	splices       []splice
+	regions       []*cfRegion
+	hosts         []*cfHost
+	moves         []*chainMove
+	changed       bool
+	needRT        bool
+	needRTText    bool // text-only rt need: eject output references rt, checked AST does not.
+	rtDeclEmitted bool // the import flush actually emitted the rt ImportDecl; needRT alone can outlive the reference that raised it.
+	needSimd      bool
+	needSimdMath  bool
+	needJSON      bool
+	needBinary    bool
+	needReflect   bool
+	siteDecls     []*syntax.VarDecl
 	// constDecls and constText hold the generated declarations of
 	// this file, as parsed nodes and as eject text.
 	constDecls                 []syntax.Decl
@@ -699,6 +700,9 @@ func (fl *fileLower) lowerFile() {
 		pos := fl.file.Pos()
 		for _, spec := range fl.logosImportSpecs() {
 			if spec.need {
+				if spec.path == rtImportPath {
+					fl.rtDeclEmitted = true
+				}
 				imps = append(imps, spec.make(pos))
 			}
 		}
