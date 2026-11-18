@@ -1404,6 +1404,17 @@ func (c *cfLeaf) visit(n syntax.Node) bool {
 			syntax.Inspect(live, c.visit)
 		}
 		return false
+	case *syntax.ConstSwitchStmt:
+		if cfInConstFor(n, c.parents) {
+			return true
+		}
+		if live, ok := c.fl.cfPruneConstSwitch(n, c.active, c.parents, c.run.sites, c.run, c.add); ok {
+			for _, st := range live {
+				syntax.Inspect(st, c.visit)
+			}
+			return false
+		}
+		return true
 	case *syntax.FieldProjExpr:
 		c.subFieldProj(n)
 		return true
@@ -1420,6 +1431,69 @@ func (c *cfLeaf) visit(n syntax.Node) bool {
 		return true
 	}
 	return true
+}
+
+// cfPruneConstSwitch answers a const switch over an active field's
+// f.Type: the field's type is concrete for this iteration, so the first
+// matching case is the only live body and the whole switch is replaced
+// by it. It reports handled=false for switches over other tags, which
+// stay for the copy's own const-switch lowering.
+func (fl *fileLower) cfPruneConstSwitch(s *syntax.ConstSwitchStmt, active cfChain, parents map[syntax.Node]syntax.Node, sites *cfSites, run *cfRun, add func(int, int, string)) ([]syntax.Stmt, bool) {
+	sel, ok := syntax.Unparen(s.Targ).(*syntax.SelectorExpr)
+	if !ok || sel.Sel.Value != "Type" {
+		return nil, false
+	}
+	a := cfFieldBinding(sel.X, active, parents)
+	if a == nil {
+		return nil, false
+	}
+	var match *syntax.ConstSwitchCase
+	for _, cs := range s.Cases {
+		typ, ok := fl.cfSwitchCaseType(cs, active, parents, sites)
+		if !ok {
+			return nil, false
+		}
+		if types2.LogosConstMatch(a.field.typ, typ, cs) {
+			match = cs
+			break
+		}
+	}
+	starts := run.ctx.starts
+	start := offAt(starts, s.Pos())
+	end := offAt(starts, syntax.EndPos(s))
+	if match == nil || len(match.Body) == 0 {
+		add(start, end, "")
+		return nil, true
+	}
+	liveStart := offAt(starts, match.Colon) + 1
+	liveEnd := offAt(starts, s.Rbrace)
+	for i := range s.Cases {
+		if s.Cases[i] == match {
+			if i+1 < len(s.Cases) {
+				liveEnd = offAt(starts, s.Cases[i+1].Case)
+			}
+			break
+		}
+	}
+	add(start, liveStart, "{")
+	add(liveEnd, end, "}")
+	return match.Body, true
+}
+
+// cfSwitchCaseType resolves a const-switch case type in the copy's
+// record namespace: f.Type of an active field variable is that field's
+// type; anything else goes through the same resolver type arguments
+// use.
+func (fl *fileLower) cfSwitchCaseType(c *syntax.ConstSwitchCase, active cfChain, parents map[syntax.Node]syntax.Node, sites *cfSites) (types2.Type, bool) {
+	if c.Type == nil {
+		return nil, true
+	}
+	if sel, ok := syntax.Unparen(c.Type).(*syntax.SelectorExpr); ok && sel.Sel.Value == "Type" {
+		if a := cfFieldBinding(sel.X, active, parents); a != nil {
+			return a.field.typ, true
+		}
+	}
+	return fl.cfResolveTypeExpr(c.Type, active, sites)
 }
 
 func (c *cfLeaf) subFieldProj(n *syntax.FieldProjExpr) {
