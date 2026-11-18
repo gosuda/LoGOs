@@ -20,7 +20,7 @@ TYPE_FIXTURE = "src/cmd/compile/internal/types2/referencefree_zero_array_logos_t
 ORIGINAL_FIXTURE = (
     f"{DIRECTORY}/api-compatibility/original-referencefree_zero_array_logos_test.go.txt"
 )
-REPLACEMENT_SHA256 = "d0a619a4973155bc622a1be09944c9fe31a7e91df7a5c27b1c38c8cff1424748"
+REPLACEMENT_SHA256 = "fd023d86aa35e91a91f28db177355ef0ec4bf686c2039c92abda783362eb993b"
 ARRAYS = "TestLogosReferenceFreeZeroArrays"
 NESTING = "TestLogosReferenceFreeZeroArrayNesting"
 PARAMS = "TestLogosReferenceFreeZeroArrayTypeParams"
