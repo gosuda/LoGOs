@@ -84,7 +84,10 @@ func (fl *fileLower) zeroLitSpell(lit *syntax.CompositeLit) string {
 		spell = fl.typeSpell(fl.pkg.info.TypeOf(lit))
 	}
 	if fl.newShadowed() {
-		return "[1](" + spell + "){}[0]"
+		// Indexing an array pointer yields an addressable element, so
+		// this form still works under a surrounding & (a plain array
+		// literal's element does not).
+		return "(&[1](" + spell + "){})[0]"
 	}
 	return "*new(" + spell + ")"
 }
