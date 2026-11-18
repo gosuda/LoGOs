@@ -4,7 +4,8 @@ env GOTOOLCHAIN=local
 # A field default is removed from the declaration whatever it ends in: a
 # composite literal, a parenthesis, an operator expression, a string holding
 # closers, a raw string over two lines, or a literal followed by a struct
-# tag or a line comment. The module runs natively, ejects, and the ejected
+# tag or a line comment. An &int{} in a function body exercises the
+# addressable spell. The module runs natively, ejects, and the ejected
 # module builds and runs with go and with go1.27.2 from $UPROOT1272 and
 # prints the same output.
 cd m
@@ -72,12 +73,13 @@ type Cfg struct {
 
 	Num   int   = int{}
 	Elems []int = []int{int{}, 2}
-	Ptr   *int  = &int{}
 }
+
+func zero() *int { return &int{} }
 
 func main() {
 	c := Cfg{}
-	fmt.Println(c.Name, c.Items, c.One, c.Gen, c.Last, c.Calc, c.Arr, len(c.Raw), c.Port, c.Num, c.Elems, *c.Ptr)
+	fmt.Println(c.Name, c.Items, c.One, c.Gen, c.Last, c.Calc, c.Arr, len(c.Raw), c.Port, c.Num, c.Elems, *zero())
 }
 
 -- m2/go.mod --
@@ -96,10 +98,11 @@ func new(v int) int { return v }
 type Cfg struct {
 	Num   int   = int{}
 	Elems []int = []int{int{}, 2}
-	Ptr   *int  = &int{}
 }
+
+func zero() *int { return &int{} }
 
 func main() {
 	c := Cfg{}
-	fmt.Println(c.Num, c.Elems, *c.Ptr)
+	fmt.Println(c.Num, c.Elems, *zero())
 }
