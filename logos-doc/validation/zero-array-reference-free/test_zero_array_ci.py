@@ -164,18 +164,19 @@ def test_replacement_manifest_preserves_original_inputs() -> None:
         relative: expected
         for expected, relative in (
             line.split("  ", 1)
-            for line in (
-                directory / "api-compatibility/FROZEN_FAILURES.sha256"
-            )
+            for line in (directory / "api-compatibility/FROZEN_FAILURES.sha256")
             .read_text()
             .splitlines()
         )
     }
-    assert gate.method_gate.digest(
-        directory / "api-compatibility/original-FROZEN.sha256.txt"
-    ) == inventory[
-        "logos-doc/validation/zero-array-reference-free/api-compatibility/original-FROZEN.sha256.txt"
-    ]
+    assert (
+        gate.method_gate.digest(
+            directory / "api-compatibility/original-FROZEN.sha256.txt"
+        )
+        == inventory[
+            "logos-doc/validation/zero-array-reference-free/api-compatibility/original-FROZEN.sha256.txt"
+        ]
+    )
     legacy = {
         relative: expected
         for expected, relative in (
