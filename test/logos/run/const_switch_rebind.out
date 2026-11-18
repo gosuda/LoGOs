@@ -21,4 +21,10 @@ start:f
 ok redecl
 ok nested-lookup
 start:d
+ok closure-switch
+ok recv-order
+ok send-clause
+ok def-reads
+ok len-mismatch
+ok shadow-status
 ok nil-box

@@ -230,6 +230,7 @@ type fileLower struct {
 	// boundary-insert drains, wrapSeq mints wrapper IDs, and
 	// retResults maps each return to its function results.
 	spreadSeq      int
+	cswAlias       int // const-switch name counter; file-wide so a const switch inside a function literal cannot reuse an enclosing case's names
 	rodataVars     []rodataVar
 	optMemo        map[*syntax.OptionType]syntax.Expr
 	parenClaims    map[int]bool
@@ -872,11 +873,12 @@ type hoistedVar struct {
 	eject  string
 }
 
-// cswName mints a const-switch lowering name unique within the function body:
-// a nested const switch's case aliases must not collide with an outer case's.
-func (fc *funcLower) cswName(prefix string) string {
-	fc.cswAlias++
-	return fmt.Sprintf("_logos_%s%d", prefix, fc.cswAlias)
+// cswName mints a const-switch lowering name unique within the file: a const
+// switch inside a function literal gets a fresh funcLower, so a per-function
+// counter would reuse an enclosing case's alias.
+func (fl *fileLower) cswName(prefix string) string {
+	fl.cswAlias++
+	return fmt.Sprintf("_logos_%s%d", prefix, fl.cswAlias)
 }
 
 // funcLower carries the state of lowering one function body.
@@ -889,7 +891,6 @@ type funcLower struct {
 	hasDeferTry      bool
 	hasErrdefer      bool
 	hasScopeDefer    bool
-	cswAlias         int // case-type alias counter; function-wide so nested const switches cannot collide
 	okName           string
 	errSeq           int
 	funSeq           int
