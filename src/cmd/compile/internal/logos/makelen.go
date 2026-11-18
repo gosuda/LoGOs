@@ -27,7 +27,7 @@ func (fl *fileLower) lowerMakeLen() {
 	}
 	syntax.Inspect(fl.file, func(n syntax.Node) bool {
 		if n != nil {
-			replaceMulLenFields(n, set)
+			fl.replaceMulLenFields(n, set)
 		}
 		return true
 	})
@@ -182,7 +182,7 @@ func stopOp(k token.Token) bool {
 	return false
 }
 
-func replaceMulLenFields(n syntax.Node, set map[syntax.Expr]bool) {
+func (fl *fileLower) replaceMulLenFields(n syntax.Node, set map[syntax.Expr]bool) {
 	v := reflect.ValueOf(n)
 	if v.Kind() != reflect.Pointer || v.IsNil() {
 		return
@@ -194,29 +194,34 @@ func replaceMulLenFields(n syntax.Node, set map[syntax.Expr]bool) {
 	t := v.Type()
 	for i := range v.NumField() {
 		if t.Field(i).IsExported() {
-			replaceMulLenField(v.Field(i), set)
+			fl.replaceMulLenField(v.Field(i), set)
 		}
 	}
 }
 
-func replaceMulLenField(f reflect.Value, set map[syntax.Expr]bool) {
+func (fl *fileLower) replaceMulLenField(f reflect.Value, set map[syntax.Expr]bool) {
 	switch f.Kind() {
 	case reflect.Interface:
 		if f.IsNil() || !f.CanSet() {
 			return
 		}
 		if op, ok := f.Elem().Interface().(*syntax.Operation); ok && set[op] {
-			f.Set(reflect.ValueOf(mulLenCall(op)))
+			f.Set(reflect.ValueOf(fl.mulLenCall(op)))
 		}
 	case reflect.Slice, reflect.Array:
 		for i := range f.Len() {
-			replaceMulLenField(f.Index(i), set)
+			fl.replaceMulLenField(f.Index(i), set)
 		}
 	}
 }
 
-func mulLenCall(op *syntax.Operation) syntax.Expr {
+func (fl *fileLower) mulLenCall(op *syntax.Operation) syntax.Expr {
 	pos := op.Pos()
 	msg := litOf(pos, strconv.Quote(renderExpr(op)), syntax.StringLit)
-	return callOf(pos, rtSel(pos, "MulLen"), []syntax.Expr{op.X, op.Y, msg})
+	call := callOf(pos, rtSel(pos, "MulLen"), []syntax.Expr{op.X, op.Y, msg})
+	// The synthetic call carries no source parens: pin the product's
+	// own span so source-extent walks — a group child's hoisted
+	// operand, a chain boundary — see `n*m`, not a call at `*`.
+	fl.wrapSpan[call] = span{fl.off(syntax.StartPos(op)), fl.off(syntax.EndPos(op))}
+	return call
 }
