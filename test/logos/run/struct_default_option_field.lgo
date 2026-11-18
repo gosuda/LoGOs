@@ -112,7 +112,9 @@ func checkJSON() {
 	checkBytes("json reflective present", qj, []byte(presentJSON))
 
 	// Unmarshal round-trips both values; an explicit zero payload overrides
-	// the payload defaults, an empty payload gets them.
+	// the payload defaults, an empty payload gets them, and decoding fills
+	// defaults first and then parses (SPEC 10.2), so every case below
+	// compares the decoded value against a hand-written expected value.
 	pbBack := Policy{}
 	check("json unmarshal empty", json.Unmarshal(pb, &pbBack) == nil, pbBack, p)
 	check("json unmarshal empty timeout", pbBack.Timeout == 10, pbBack.Timeout, 10)
@@ -121,11 +123,13 @@ func checkJSON() {
 	check("json unmarshal present", json.Unmarshal(qb, &qbBack) == nil, qbBack, q)
 	check("json unmarshal present attempts", (qbBack.Retry?.Attempts ?? -1) == 3, qbBack.Retry?.Attempts, 3)
 	zeroBack := Policy{}
-	check("json unmarshal explicit zero", json.Unmarshal([]byte(`{"Retry":{"Value":{"Attempts":0},"Present":true}}`), &zeroBack) == nil, zeroBack.Retry?.Attempts, 0)
+	check("json unmarshal explicit zero", json.Unmarshal([]byte(`{"Retry":{"Value":{"Attempts":0},"Present":true}}`), &zeroBack) == nil && (zeroBack.Retry?.Attempts ?? -1) == 0, zeroBack.Retry?.Attempts, 0)
 	defBack := Policy{}
-	check("json unmarshal empty payload default", json.Unmarshal([]byte(`{"Retry":{"Value":{},"Present":true}}`), &defBack) == nil, defBack.Retry?.Attempts, 3)
-	outerDef := Policy{}
-	check("json unmarshal outer default", json.Unmarshal([]byte(`{}`), &outerDef) == nil, outerDef.Timeout, 10)
+	check("json unmarshal empty payload default", json.Unmarshal([]byte(`{"Retry":{"Value":{},"Present":true}}`), &defBack) == nil && (defBack.Retry?.Attempts ?? -1) == 3, defBack.Retry?.Attempts, 3)
+	// The literal supplies Timeout explicitly, so the 10 the case demands can
+	// only come from decoding filling the outer default.
+	outerDef := Policy{Timeout: 0}
+	check("json unmarshal outer default", json.Unmarshal([]byte(`{}`), &outerDef) == nil && outerDef.Timeout == 10, outerDef.Timeout, 10)
 }
 
 func checkBinary() {
