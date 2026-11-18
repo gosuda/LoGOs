@@ -109,7 +109,14 @@ func (fl *fileLower) spliceMakeLen(op *syntax.Operation) {
 	}
 	put(start, start, cat(head, gen("_logos_rt.MulLen(")))
 	put(opOff, opOff+len("*"), gen(","))
-	put(yEnd, yEnd, cat(gen(", "+strconv.Quote(renderExpr(op))+")"), tail))
+	// The trailer closes MulLen's argument list, so it lands after every
+	// operand-internal suffix insert at the operand end — a fresh-address
+	// rewrite's closing paren recorded by the later lowerAddrFresh pass, a
+	// narrowed name's .Value — which placementAfterExpression sorts last at
+	// one offset.
+	trailer := cat(gen(", "+strconv.Quote(renderExpr(op))+")"), tail)
+	fl.placeSplice(splice{start: yEnd, end: yEnd, text: trailer.s, chunks: trailer.chunks,
+		placement: placementAfterExpression}, m)
 }
 
 func (fl *fileLower) operandEnd(from int) int {
