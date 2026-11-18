@@ -1,0 +1,133 @@
+// run
+
+package main
+
+import (
+	"fmt"
+	"os"
+	"unsafe"
+)
+
+var failed bool
+
+func check(name string, cond bool, got, want any) {
+	if !cond {
+		failed = true
+		fmt.Println("FAIL", name+":", "got", got, "want", want)
+		return
+	}
+	fmt.Println("ok", name)
+}
+
+type Word struct{ S string }
+
+func (w Word) M() string { return "m:" + w.S }
+
+var seq []string
+
+// The index operand of a receive-store target is a compile-time
+// expression: unsafe.Sizeof never evaluates its argument, so the call
+// inside it must not materialize as a frozen temp.
+var flags = make([]bool, 64)
+var buf = []int{1, 2, 3}
+
+func nextIdx() int { seq = append(seq, "next"); return 0 }
+
+func constIndex[T any](ch chan T) {
+	const switch T {
+	case interface{ M() string }:
+		var p interface{ M() string }
+		select {
+		case p, flags[unsafe.Sizeof(buf[nextIdx()])] = <-ch:
+			_ = p
+		default:
+		}
+	}
+}
+
+// A type declared in the case body may be shadowed inside a nested
+// block; the store's conversion must still name the type.
+func shadowType[T any](ch chan T, out *bool) {
+	const switch T {
+	case interface{ M() string }:
+		var p interface{ M() string }
+		type St bool
+		var ok St
+		{
+			St := func(b bool) bool { return b }
+			_ = St
+			select {
+			case p, ok = <-ch:
+				_ = p
+			default:
+			}
+		}
+		*out = bool(ok)
+	}
+}
+
+// A case-local alias names the same destination.
+func localAlias[T any](ch chan T, out *bool) {
+	const switch T {
+	case interface{ M() string }:
+		var p interface{ M() string }
+		type Status = bool
+		var ok Status
+		select {
+		case p, ok = <-ch:
+			_ = p
+		default:
+		}
+		*out = bool(ok)
+	}
+}
+
+// A matched selector on a switched-value receiver holds a frozen
+// operand inside the any(...) cast.
+var mboxPtr bool
+
+type MBox struct{}
+
+func (m MBox) M() *bool { return &mboxPtr }
+
+func k() int { seq = append(seq, "k"); return 0 }
+
+func wrapFrozen[T any](ch chan T, s []T) {
+	const switch T {
+	case interface{ M() *bool }:
+		var p interface{ M() *bool }
+		select {
+		case p, *s[k()].M() = <-ch:
+			_ = p
+		default:
+		}
+	}
+}
+
+func main() {
+	ch := make(chan Word, 8)
+	for i := 0; i < 3; i++ {
+		select {
+		case ch <- Word{S: "w"}:
+		default:
+		}
+	}
+	ch2 := make(chan MBox, 8)
+	select {
+	case ch2 <- MBox{}:
+	default:
+	}
+	var ok2, ok3 bool
+	constIndex[Word](ch)
+	shadowType[Word](ch, &ok2)
+	localAlias[Word](ch, &ok3)
+	wrapFrozen[MBox](ch2, []MBox{{}})
+	check("const-index-operand-not-run", len(seq) == 1 && seq[0] == "k", seq, []string{"k"})
+	check("const-index-store", flags[8], flags[8], true)
+	check("shadowed-local-type", ok2, ok2, true)
+	check("local-alias", ok3, ok3, true)
+	check("wrap-frozen-operand", mboxPtr, mboxPtr, true)
+	if failed {
+		os.Exit(1)
+	}
+}
