@@ -20,25 +20,25 @@ func Reinterpret[S, T any](p *T) S {
 	return *any(p).(*S)
 }
 
-// ReinterpretUnder returns the value at p viewed as an S. A `const switch`
-// tilde case rebinds each variable whose type names the switched type to the
-// case's basic type through it. The checker admits the rebinding only inside
-// a matched ~B case, where T's underlying type is B and therefore S's: the
-// layouts agree even though the types differ, so a layout-preserving pointer
-// cast is sound where Reinterpret's identity assertion would panic
-// (SPEC Sec 2.5). Sizes and alignment match exactly, so checkptr admits it.
-func ReinterpretUnder[S, T any](p *T) S {
-	return *(*S)(unsafe.Pointer(p))
+// PtrAs returns p viewed as a *S. A `const switch` case binds each variable
+// whose type names the switched type to a pointer of the case type, and every
+// use of the variable is rewritten to dereference the pointer, so reads and
+// writes reach the caller's storage directly. The checker admits the binding
+// only when the two types are identical after substitution, so the layouts
+// agree (SPEC Sec 2.5); the assertion preserves legitimate calls and panics
+// deterministically otherwise, without an unsafe cast or checkptr fatal.
+func PtrAs[S, T any](p *T) *S {
+	return any(p).(*S)
 }
 
-// StoreUnder writes src's storage back through dst, viewed as a *D. A
-// `const switch` case rebinds a variable of the switched type as a case-local
-// copy; after the case body, the copy is stored back through the address
-// captured before the rebinding, so writes made inside the case are visible
-// afterwards. The checker admits the pair only where the layouts agree, so
-// reading src's bytes as D is sound (SPEC Sec 2.5).
-func StoreUnder[D, S any](dst *D, src S) {
-	*(*D)(unsafe.Pointer(dst)) = *(*D)(unsafe.Pointer(&src))
+// UnderPtrAs returns p viewed as a *S. A `const switch` tilde case binds
+// variables as for PtrAs, but the case's basic type keeps the layout and not
+// the identity of the type argument (Port vs int), so an identity assertion
+// cannot see through it; the tilde match guarantees the layouts agree, making
+// the pointer cast sound (SPEC Sec 2.5). Sizes and alignment match exactly,
+// so checkptr admits it.
+func UnderPtrAs[S, T any](p *T) *S {
+	return (*S)(unsafe.Pointer(p))
 }
 
 // Box returns v as an I. Inside a `const switch` interface case, a value of

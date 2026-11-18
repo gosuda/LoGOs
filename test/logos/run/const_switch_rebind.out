@@ -6,7 +6,10 @@ start:b
 start:b
 ok writeback
 ok mask
+ok goto-writeback
 ok nested-box
 start:c
 start:d
+start:d
+start:c
 ok nil-box

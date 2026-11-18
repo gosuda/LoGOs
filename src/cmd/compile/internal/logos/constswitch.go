@@ -49,6 +49,7 @@ type cswLower struct {
 }
 
 type cswRebind struct {
+	obj   *types2.Var
 	name  string
 	spell string
 }
@@ -326,7 +327,7 @@ func (c *cswLower) caseBody(cs *cswCase, done string) ([]syntax.Stmt, otext) {
 		c.wrapSelectors(cs.syn.Body, cs)
 		c.wrapConvs(cs.syn.Body, cs)
 	} else if cs.sub.Target != nil {
-		c.replaceTargetNames(cs.syn.Body, cs)
+		c.rewriteRebound(cs)
 	}
 	lowered := c.fc.lowerList(cs.syn.Body)
 	var head []syntax.Stmt
@@ -335,39 +336,51 @@ func (c *cswLower) caseBody(cs *cswCase, done string) ([]syntax.Stmt, otext) {
 		head = append(head, at(&syntax.AssignStmt{Lhs: nameOf(cs.syn.Case, done), Rhs: nameOf(cs.syn.Case, "true")}, cs.syn.Case))
 		headText = gen(done + " = true\n")
 	}
-	decls, tails, declText, tailText := c.rebindings(cs)
 	body := c.fl.textOf(span{cs.lo, cs.hi})
-	stmts := append(head, decls...)
-	stmts = append(stmts, lowered...)
-	return append(stmts, tails...), cat(headText, declText, body, tailText)
+	return append(head, lowered...), cat(headText, body)
 }
 
-func (c *cswLower) rebindings(cs *cswCase) (decls, tails []syntax.Stmt, declText, tailText otext) {
-	var dsrc, tsrc strings.Builder
-	for i, r := range c.rebound(cs) {
+// rewriteRebound respells the switched type's name to the case type and
+// rewrites every use of a variable bound to the switched type as a
+// dereference of a type-correct pointer into the variable's own storage,
+// taken at the use site so the address is always the variable visible there:
+// reads see the current value and writes land directly, on every exit path.
+func (c *cswLower) rewriteRebound(cs *cswCase) {
+	targets := make(map[types2.Object]cswTarget)
+	spell := cs.spell
+	targets[cs.sub.Target] = cswTarget{
+		repl: func(pos syntax.Pos) syntax.Expr {
+			e, ok := parseExprAt(spell.s, pos)
+			if !ok {
+				base.Fatalf("logos: const switch case %s at %s cannot be respelled", spell.s, pos.String())
+			}
+			return e
+		},
+		splice: func(start, end int) { c.fl.addT(start, end, spell) },
+	}
+	pun := "PtrAs"
+	if cs.kind == cswTilde {
+		// The rebound type keeps the layout but not the identity of the
+		// type argument (Port vs int), so an identity assert cannot see
+		// through it; the tilde match guarantees the layouts agree.
+		pun = "UnderPtrAs"
+	}
+	for _, r := range c.rebound(cs) {
 		c.fl.needRT = true
-		pun := "Reinterpret"
-		if cs.kind == cswTilde {
-			// The rebound type keeps the layout but not the identity of the
-			// type argument (Port vs int), so an identity assert cannot see
-			// through it; the tilde match guarantees the layouts agree.
-			pun = "ReinterpretUnder"
+		replText := "*(" + rtAlias + "." + pun + "[" + r.spell + "](&" + r.name + "))"
+		targets[r.obj] = cswTarget{
+			repl: func(pos syntax.Pos) syntax.Expr {
+				e, ok := parseExprAt(replText, pos)
+				if !ok {
+					base.Fatalf("logos: const switch rebinding of %s at %s cannot be respelled", r.name, pos.String())
+				}
+				return e
+			},
+			splice: func(start, end int) { c.fl.addT(start, end, gen(replText)) },
 		}
-		// The rebinding is a case-local copy of the switched storage, so the
-		// address is captured first: writes the case makes to the copy are
-		// stored back through it at the end of the body.
-		ptr := fmt.Sprintf("_logos_rebind%d", i)
-		dsrc.WriteString(ptr + " := &" + r.name + "\n")
-		dsrc.WriteString(r.name + " := " + rtAlias + "." + pun + "[" + r.spell + "](" + ptr + ")\n")
-		dsrc.WriteString("_ = " + r.name + "\n")
-		tsrc.WriteString(rtAlias + ".StoreUnder(" + ptr + ", " + r.name + ")\n")
 	}
-	if dsrc.Len() == 0 {
-		return nil, nil, otext{}, otext{}
-	}
-	decls = c.fl.reparseStmts(dsrc.String(), cs.syn.Case)
-	tails = c.fl.reparseStmts(tsrc.String(), cs.syn.Case)
-	return decls, tails, gen(dsrc.String()), gen(tsrc.String())
+	w := cswWalker{info: c.info, off: c.fl.off, targets: targets}
+	w.list(cs.syn.Body)
 }
 
 func (c *cswLower) rebound(cs *cswCase) []cswRebind {
@@ -388,7 +401,7 @@ func (c *cswLower) rebound(cs *cswCase) []cswRebind {
 				return true
 			}
 			seen[v] = true
-			out = append(out, cswRebind{name: v.Name(), spell: c.cswSpell(sub)})
+			out = append(out, cswRebind{obj: v, name: v.Name(), spell: c.cswSpell(sub)})
 			return true
 		})
 	}
@@ -409,32 +422,19 @@ func (c *cswLower) cswSpell(typ types2.Type) string {
 	})
 }
 
-func (c *cswLower) replaceTargetNames(body []syntax.Stmt, cs *cswCase) {
-	spell := cs.spell
-	w := cswWalker{
-		info:   c.info,
-		target: cs.sub.Target,
-		repl: func(pos syntax.Pos) syntax.Expr {
-			e, ok := parseExprAt(spell.s, pos)
-			if !ok {
-				base.Fatalf("logos: const switch case %s at %s cannot be respelled", spell.s, pos.String())
-			}
-			return e
-		},
-		off:    c.fl.off,
-		splice: func(start, end int) { c.fl.addT(start, end, spell) },
-	}
-	w.list(body)
+// cswTarget is one name the walker rewrites: the AST replacement for the
+// node and the source-text splice for the emitted file.
+type cswTarget struct {
+	repl   func(syntax.Pos) syntax.Expr
+	splice func(start, end int)
 }
 
 type cswWalker struct {
-	info   *types2.Info
-	target types2.Object
-	repl   func(syntax.Pos) syntax.Expr
-	off    func(syntax.Pos) int
-	splice func(start, end int)
-	conv   map[syntax.Expr]syntax.Expr
-	wrap   func(x, r syntax.Expr)
+	info    *types2.Info
+	off     func(syntax.Pos) int
+	targets map[types2.Object]cswTarget
+	conv    map[syntax.Expr]syntax.Expr
+	wrap    func(x, r syntax.Expr)
 }
 
 func (w cswWalker) list(stmts []syntax.Stmt) {
@@ -504,12 +504,12 @@ func (w cswWalker) replaceNames(f reflect.Value) {
 }
 
 func (w cswWalker) replaceName(f reflect.Value, x *syntax.Name) {
-	if w.target == nil || w.info.Uses[x] != w.target {
+	t, ok := w.targets[w.info.Uses[x]]
+	if !ok {
 		return
 	}
-	start := w.off(x.Pos())
-	w.splice(start, start+len(x.Value))
-	f.Set(reflect.ValueOf(w.repl(x.Pos())))
+	t.splice(w.off(x.Pos()), w.off(x.Pos())+len(x.Value))
+	f.Set(reflect.ValueOf(t.repl(x.Pos())))
 }
 
 // wrapConvs boxes each operand the checker recorded under the interface case
@@ -540,6 +540,48 @@ func (c *cswLower) wrapConvs(body []syntax.Stmt, cs *cswCase) {
 	c.fl.needRT = true
 	box := func(text string) string {
 		return rtAlias + ".Box[" + cs.spell.s + "](" + text + ")"
+	}
+	// A recorded operand in multi-result position — the sole right side of a
+	// two-result assignment, declaration, or return — keeps its arity through
+	// a two-result closure that boxes the first value: `p, ok = m[k]` becomes
+	// `p, ok = func() (I, bool) { v, ok := m[k]; return Box[I](v), ok }()`.
+	multi := make(map[syntax.Expr]bool)
+	for _, s := range body {
+		syntax.Inspect(s, func(n syntax.Node) bool {
+			var rhs syntax.Expr
+			two := false
+			switch st := n.(type) {
+			case *syntax.AssignStmt:
+				rhs = st.Rhs
+				if lhs, ok := st.Lhs.(*syntax.ListExpr); ok {
+					two = len(lhs.ElemList) == 2
+				}
+			case *syntax.VarDecl:
+				rhs = st.Values
+				two = len(st.NameList) == 2
+			case *syntax.ReturnStmt:
+				rhs = st.Results
+				two = c.resultCount() == 2
+			}
+			if two && rhs != nil && c.info.LogosConstConv[rhs] == cs.syn {
+				multi[rhs] = true
+			}
+			return true
+		})
+	}
+	secondOf := func(e syntax.Expr) (string, bool) {
+		switch x := syntax.Unparen(e).(type) {
+		case *syntax.IndexExpr, *syntax.AssertExpr:
+			return "bool", true
+		case *syntax.Operation:
+			if x.Op == syntax.Recv {
+				return "bool", true
+			}
+		}
+		if tup, ok := c.info.TypeOf(e).(*types2.Tuple); ok && tup.Len() == 2 {
+			return c.cswSpell(tup.At(1).Type()), true
+		}
+		return "", false
 	}
 	// expand renders the span's source text with every recorded expression
 	// inside it boxed; nested recordings compose inside their outer boxes.
@@ -589,6 +631,13 @@ func (c *cswLower) wrapConvs(body []syntax.Stmt, cs *cswCase) {
 			continue // emitted inside the outer box's composed text
 		}
 		text := box(expand(r.start, r.end))
+		if multi[r.e] {
+			second, ok := secondOf(r.e)
+			if !ok {
+				base.Fatalf("logos: const switch boxing of a multi-result at %s cannot name its second type", r.e.Pos().String())
+			}
+			text = "func() (" + cs.spell.s + ", " + second + ") { _logos_v, _logos_s := " + expand(r.start, r.end) + "; return " + box("_logos_v") + ", _logos_s }()"
+		}
 		node, ok := parseExprAt(text, r.e.Pos())
 		if !ok {
 			base.Fatalf("logos: const switch interface boxing at %s cannot be respelled", r.e.Pos().String())
@@ -598,6 +647,7 @@ func (c *cswLower) wrapConvs(body []syntax.Stmt, cs *cswCase) {
 	}
 	w := cswWalker{
 		info: c.info,
+		off:  c.fl.off,
 		conv: conv,
 		wrap: func(x, r syntax.Expr) {
 			start := c.fl.off(leftmostOf(x))
@@ -605,6 +655,15 @@ func (c *cswLower) wrapConvs(body []syntax.Stmt, cs *cswCase) {
 		},
 	}
 	w.list(body)
+}
+
+// resultCount reports how many results the enclosing function declares:
+// `return e` is multi-result only when the signature takes two.
+func (c *cswLower) resultCount() int {
+	if c.fc.ft == nil {
+		return 0
+	}
+	return len(c.fc.ft.ResultList)
 }
 
 func (c *cswLower) wrapSelectors(body []syntax.Stmt, cs *cswCase) {
@@ -640,7 +699,7 @@ func (c *cswLower) wrapSelectors(body []syntax.Stmt, cs *cswCase) {
 }
 
 func parseExprAt(text string, pos syntax.Pos) (syntax.Expr, bool) {
-	file, err := syntax.Parse(syntax.NewFileBase("logos-clone"), strings.NewReader("package logosclone\nvar _ = "+text), nil, nil, 0)
+	file, err := syntax.Parse(syntax.NewFileBase("logos-clone"), strings.NewReader("package logosclone\nvar _ = "+text), nil, nil, syntax.LogosMode)
 	if err != nil || file == nil || len(file.DeclList) != 1 {
 		return nil, false
 	}

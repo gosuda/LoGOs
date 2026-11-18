@@ -395,12 +395,6 @@ func (check *Checker) logosConstIfaceAssign(x *operand, T Type) bool {
 	if x.typ() != top.recv || !Identical(T, top.typ) {
 		return false
 	}
-	if x.mode() != variable && x.mode() != value {
-		// Boxing wraps the operand's text as a single-result expression;
-		// a map index or other multi-result form would lose its second
-		// result, so the admission is limited to plain operands.
-		return false
-	}
 	if check.Info.LogosConstConv == nil {
 		check.Info.LogosConstConv = make(map[syntax.Expr]*syntax.ConstSwitchCase)
 	}

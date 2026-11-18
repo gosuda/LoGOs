@@ -103,14 +103,36 @@ func swap[F any](p Part, v F) F {
 	return v
 }
 
-// gather mixes interface boxing, nested boxing, and a map two-result read
-// stored through a plain variable.
+// gotoOut writes a rebound variable and leaves the case early through a
+// labeled jump: the write still reaches the caller's storage.
+func gotoOut[F any](v F) F {
+	const switch F {
+	case ~int:
+		v = F(9)
+		goto done
+	}
+done:
+	return v
+}
+
+// gather mixes interface boxing, nested boxing, and a two-result map read
+// kept through the closure rewrite.
 func gather[F any](parts []Part, field F, m map[string]F) []Part {
 	const switch F {
 	case Part:
 		parts = append(parts, swap(field, field))
 		if v, ok := m["k"]; ok {
 			parts = append(parts, v)
+		}
+		var p Part
+		var ok bool
+		p, ok = m["k"]
+		if ok {
+			parts = append(parts, p)
+		}
+		p, ok = m["missing"]
+		if !ok {
+			parts = append(parts, field)
 		}
 	}
 	return parts
@@ -150,9 +172,10 @@ func main() {
 
 	check("writeback", bump[Port](Port(1)) == 9, bump[Port](Port(1)), 9)
 	check("mask", mask[int](1) == 7, mask[int](1), 7)
+	check("goto-writeback", gotoOut[Port](Port(1)) == 9, gotoOut[Port](Port(1)), 9)
 
 	more := gather[W](nil, W{S: "c"}, map[string]W{"k": {S: "d"}})
-	check("nested-box", len(more) == 2, len(more), 2)
+	check("nested-box", len(more) == 4, len(more), 4)
 	for _, part := range more {
 		if err := part.Start(context.Background()); err != nil {
 			fmt.Println("map err:", err)
