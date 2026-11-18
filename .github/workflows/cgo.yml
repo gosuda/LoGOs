@@ -93,6 +93,9 @@ jobs:
   full:
     name: cgo full default-short dist (${{ matrix.setting }})
     if: github.event_name != 'pull_request'
+    concurrency:
+      group: logos-heavy-ci
+      queue: max
     needs: focused
     runs-on: ubuntu-26.04
     timeout-minutes: 180
@@ -184,6 +187,9 @@ jobs:
   benchmark:
     name: cgo benchmark per row
     if: github.event_name != 'pull_request'
+    concurrency:
+      group: logos-heavy-ci
+      queue: max
     needs: focused
     runs-on: ubuntu-26.04
     timeout-minutes: 120

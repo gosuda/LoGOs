@@ -28,6 +28,9 @@ jobs:
   compiler:
     name: "compiler-${{ matrix.suite }}"
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    concurrency:
+      group: logos-heavy-ci
+      queue: max
     strategy:
       fail-fast: false
       matrix:
