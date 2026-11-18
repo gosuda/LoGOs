@@ -25,8 +25,9 @@ be direct and non-indirect, and neither operand may contain an index,
 call, pointer alias, adjusted address, mask, or scale. Different objects,
 addition, and a proven delta combined with another frame address stay
 silent: they are integer-only arithmetic, which the production rule no
-longer reports — the old rule's reports on them are exactly what the
-negative control preserves.
+longer reports. The negative control replays only the pinned
+protobuf_field_delta case under the archived old rule; the other silent
+controls are asserted against the production rule alone.
 
 The rule cases include both exact Protobuf expression shapes, reversed
 and identical fields, named conversions, returned and stored offsets,
