@@ -919,6 +919,11 @@ func (c *cswLower) wrapConvs(body []syntax.Stmt, cs *cswCase, selWraps []span) (
 			switch x := t.(type) {
 			case *types2.Alias:
 				obj = x.Obj()
+				if args := x.TypeArgs(); args != nil {
+					for i := 0; i < args.Len(); i++ {
+						walk(args.At(i))
+					}
+				}
 			case *types2.Named:
 				obj = x.Obj()
 				if args := x.TypeArgs(); args != nil {
