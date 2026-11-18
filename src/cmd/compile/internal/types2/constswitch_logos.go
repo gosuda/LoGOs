@@ -219,7 +219,11 @@ func logosConstMatches(tag Type, typ Type, c *syntax.ConstSwitchCase) bool {
 	switch logosConstCaseKind(typ, c.Tilde) {
 	case logosCaseTilde:
 		ub, ok := Unalias(tag).Underlying().(*Basic)
-		return ok && Identical(ub, typ)
+		if !ok {
+			return false
+		}
+		cb, ok := underBasic(typ)
+		return ok && Identical(ub, cb)
 	case logosCaseIface:
 		iface, _ := Unalias(typ).Underlying().(*Interface)
 		return iface != nil && Implements(tag, iface)
