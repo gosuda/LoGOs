@@ -90,6 +90,7 @@ DIR MUST NOT exist, or DIR MUST be empty; the tool MUST refuse a DIR that exists
 Each `.lgo` file MUST become a `.go` file [T-0.3].
 Completeness MUST include packages absent from the requested host build, including inactive-only tests and dependency modules reached only through an inactive variant [T-0.3].
 Source discovery MUST respect package and module ownership boundaries: nested modules, `vendor`, `testdata`, dot-prefixed and underscore-prefixed paths, module ignore rules, and directory symlinks MUST NOT become additional package roots [T-0.3].
+The physical copy MUST NOT contain a directory that holds its own `go.mod` (it is another module) unless the module's own `go.mod` has a local `replace` that names that directory, which the copy MUST keep so the replace still resolves. A kept module that lies below another nested module MUST be copied without the files of that other module [T-0.3]. Only a `go.mod` file marks a module, as in the go command: a directory named `go.mod` MUST be copied as data with the files beside it [T-0.3].
 Each discovered inactive source MUST be type-checked and lowered by the ordinary compiler path under a context that selects it [T-0.3].
 Inactive discovery, build-constraint selection, and helper compilation MUST use the requested source overlay. Overlay-deleted sources MUST remain absent, and inserted or replaced sources MUST use their effective contents [T-0.3].
 Owned helpers MUST retain the package name selected by their source context; distinct package clauses in one directory MUST NOT be treated as declaration collisions [T-0.3].
@@ -190,7 +191,7 @@ A default build MUST stay silent for the pedantic group [T-102].
 `logos lint ./...` MUST report findings without building binaries [T-102].
 The compiler MUST enforce `correctness::nil_deref_unproven` as `forbid` against use of a nullable value before its guard [T-102].
 The compiler MUST enforce `correctness::typed_nil_return` as `forbid` against return of a concrete nil pointer as an interface or `error` result without a dominating nil check [T-102].
-`logos lint` MUST enforce `correctness::arena_pointer_escape` at default `deny` on Go and loGo/s packages against invalid `uintptr` reconstruction as `unsafe.Pointer` and standalone `reflect.SliceHeader` or `reflect.StringHeader` value misuse [T-102][R-U1].
+`logos lint` MUST enforce `correctness::arena_pointer_escape` at default `deny` on Go and LoGOs packages against invalid `uintptr` reconstruction as `unsafe.Pointer` and standalone `reflect.SliceHeader` or `reflect.StringHeader` value misuse [T-102][R-U1].
 The rule ID MUST remain unchanged so existing `//logos:allow(correctness::arena_pointer_escape)` directives keep their meaning [T-102].
 The check MUST resolve conversions and reflection types by their checked types. It MUST accept immediate pointer-to-integer-to-pointer conversions with valid `+`, `-`, or `&^` arithmetic, including an offset on either side of `+`, and immediate conversions of the real `reflect.Value.Pointer` or `reflect.Value.UnsafeAddr` result [T-102].
 Returning or storing an `unsafe.Pointer`, or using a converted address only as an integer, MUST NOT trigger this rule [T-102].
@@ -321,6 +322,7 @@ A struct field default MUST have form `F T = constExpr` before the tag [T-104.5]
 A default MUST be checked in its declaration's lexical scope and MUST be assignable to the field type, even when no composite literal constructs that type [T-104.5]. A later local type specification in the same declaration group MUST NOT change a default's bindings [T-104.5].
 A default MUST be a constant expression or a composite literal whose values and map keys recursively satisfy this rule [T-104.5].
 Defaults MUST apply in composite literals of the type, including address forms and partial literals [T-104.5].
+An empty composite literal whose type's underlying kind is not a struct, an array, a slice, or a map MUST evaluate to the type's zero value [T-104.5].
 A Go struct literal of an exported LoGOs struct MUST get zero values and MUST NOT get the field defaults; this is a documented hole [T-104.5][R-U2][A-GOBOUNDARY].
 `var x T` and `new(T)` MUST trigger `suspicious::unapplied_struct_default` [T-104.5].
 A non-constant default MUST fail with `correctness::default_not_constant` [T-104.5].
@@ -427,7 +429,7 @@ A function in a recursive call-graph cycle MUST keep the upstream variable-make 
 A standard-library-provenance package (a standard library package or its external test package) MUST keep the default variable-make buffer of 32 bytes at every opt level; non-standard packages MUST use 256 bytes at O2 and 4096 bytes at O3 [T-105][T-302].
 Os MUST set inline budget 15 [T-105].
 O3 MUST add no escape-analysis or prove-pass work budget [T-105].
-O3 MUST enable bounded scalar constant analysis for Go and loGo/s packages [T-105.1][R-U1].
+O3 MUST enable bounded scalar constant analysis for Go and LoGOs packages [T-105.1][R-U1].
 O0, O1, O2, and Os MUST keep their existing scalar-analysis behavior [T-105.1].
 The analysis MUST preserve defined integer overflow at each target width [T-105.1].
 The analysis MUST preserve required calls, memory effects, nil and bounds checks, and panic behavior [T-105.1].
@@ -590,6 +592,12 @@ A reference-free constant view MUST be assignable to its plain type. [T-201]
 A plain value MUST be assignable to its constant view. [T-201]
 
 A `for _, v := range` loop over a constant slice MUST yield constant elements. [T-201]
+
+The equality operators `==` and `!=` MUST be defined on operands whose types carry a const-view or readonly-descendants qualification whenever the unqualified operand types are comparable and one unqualified operand type is assignable to the other. A comparison reads its operands; it MUST NOT be reported as a mutation through the view or as a qualification-erasing escape. [T-201]
+
+A `?.` selector on an element reached through a constant view MUST resolve the field or method on the unqualified element type; a selected field keeps the element's qualification, and a selected method follows the receiver rules of this section. [T-201]
+
+A method call on a readonly-descendants value that fails the reference-free or readonly proof of this section MUST fail with `[correctness::const_view_mutation]`, the same diagnostic as the same call through the enclosing constant view. [T-201]
 
 Converting `string` to `const []byte` MUST be zero-copy and MUST allocate nothing. [T-201]
 
@@ -1059,6 +1067,10 @@ Copies MUST be memoized per type-argument list. [T-205]
 
 An exported comptime generic MUST travel as source text in `__.LOGOS`. [T-205]
 
+An exported comptime generic that names an unexported package-level identifier of its own package MUST fail with `[comptime::unexported_in_exported]` at that identifier in the defining package. [T-205]
+
+The rule applies to every package that can be imported; `main` is exempt because it cannot be imported. [T-205]
+
 A `const for` range MUST be `comptime.Fields[T]()` over a struct type. [T-205]
 
 Any other range operand, and a non-struct `T`, MUST fail with `[comptime::const_for_fields]`. [T-205]
@@ -1505,7 +1517,7 @@ External heap and stack pointers MUST retain their existing tracing behavior. Sc
 
 The cgo optimizer MUST specialize the shared cgo pipeline independently of
 fast-cgo trampoline selection. It MUST apply to Go packages built by `go` or
-`logos` and to loGo/s packages built by `logos`. It MUST preserve Go semantics,
+`logos` and to LoGOs packages built by `logos`. It MUST preserve Go semantics,
 the C ABI, and the cgo pointer rules. [T-306]
 
 #### 3.6.1 Stable return frames
@@ -2061,7 +2073,7 @@ The long-loop preemption rules are stated in Sec 3.3 (RFC-303: Hardware backend 
 
 ### 13.4 Automatic loop vectorization
 
-Automatic vectorization MUST apply to ordinary Go and loGo/s loops through the shared compiler backend, without a source annotation or an explicit SIMD import. [T-303.AV][R-U1]
+Automatic vectorization MUST apply to ordinary Go and LoGOs loops through the shared compiler backend, without a source annotation or an explicit SIMD import. [T-303.AV][R-U1]
 The initial implementation MUST require `GOEXPERIMENT=simd`, enabled compiler optimization, and either amd64 with `GOAMD64=v3` or `v4`, or arm64. [T-303.AV]
 Other targets and builds with SIMD disabled, `-N`, race detection, MSan, or ASan MUST keep the scalar loop. [T-303.AV]
 Functions marked `//go:nosplit` MUST keep the scalar loop, because a fault-policy query requires a valid goroutine and an ordinary call budget. [T-303.AV]

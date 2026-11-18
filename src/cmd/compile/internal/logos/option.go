@@ -1000,7 +1000,15 @@ func (fl *fileLower) lowerMapIndex(e *syntax.IndexExpr) syntax.Expr {
 		return fl.lowerConstMapRead(e, g)
 	}
 	opt := fl.asOption(fl.optType(e))
-	if !fl.isMapRead(e) || opt == nil || types2.LogosOptionIsBare(opt.Elem) || fl.isTypeExpr(e) {
+	oneValue := fl.isMapRead(e) && opt != nil && !fl.isTypeExpr(e)
+	if oneValue && types2.LogosOptionIsBare(opt.Elem) {
+		// A bare read keeps its Go form, so nothing is spliced, but the
+		// check recorded an option type for it. Mark the semantic-only
+		// change: the plain recheck re-infers the element type, and the
+		// export writer accepts Go-facing types only.
+		fl.changed = true
+	}
+	if !oneValue || types2.LogosOptionIsBare(opt.Elem) {
 		e.X = fl.lowerOptExpr(e.X)
 		e.Index = fl.lowerOptExpr(e.Index)
 		return e
@@ -1292,9 +1300,9 @@ func (fl *fileLower) lowerOptSelect(e *syntax.OptSelectExpr) syntax.Expr {
 	nx := fl.lowerOptReceiver(e.X)
 	bareRecv := types2.LogosOptionIsBare(ox.Elem)
 	accessRec := ro.Elem
-	obj, _, _ := types2.LookupFieldOrMethod(ox.Elem, true, fl.pkg.tpkg, fl.optSelectName(e))
+	obj, _, _ := types2.LookupFieldOrMethod(optElemBase(ox.Elem), true, fl.pkg.tpkg, fl.optSelectName(e))
 	if obj == nil {
-		obj, _, _ = types2.LookupFieldOrMethod(tupleUnderlying(ox.Elem).Underlying(), true, fl.pkg.tpkg, fl.optSelectName(e))
+		obj, _, _ = types2.LookupFieldOrMethod(tupleUnderlying(optElemBase(ox.Elem)).Underlying(), true, fl.pkg.tpkg, fl.optSelectName(e))
 	}
 	if obj != nil && fl.asOption(obj.Type()) != nil {
 		accessRec = ro
@@ -1387,6 +1395,9 @@ func (fl *fileLower) lowerOptCallExpr(e *syntax.CallExpr) syntax.Expr {
 }
 
 func (fl *fileLower) callSig(e *syntax.CallExpr) *types2.Signature {
+	if sig := fl.instCallSig(e.Fun); sig != nil {
+		return sig
+	}
 	switch fun := syntax.Unparen(e.Fun).(type) {
 	case *syntax.Name:
 		if obj := fl.pkg.info.Uses[fun]; obj != nil {
@@ -1417,17 +1428,66 @@ func (fl *fileLower) callSig(e *syntax.CallExpr) *types2.Signature {
 	}
 }
 
+// unindexedCallee strips parentheses and explicit type arguments from a
+// callee expression, leaving the name or method selector that identifies it.
+// Every generic call form, indexed or not, method value or method expression,
+// reduces through this one place, so the receiver offset and the
+// instantiation lookup cannot disagree.
+func unindexedCallee(fun syntax.Expr) syntax.Expr {
+	for {
+		indexed, ok := syntax.Unparen(fun).(*syntax.IndexExpr)
+		if !ok {
+			break
+		}
+		fun = indexed.X
+	}
+	return fun
+}
+
+// methodExprCallee returns the method selector of a callee written as a
+// method expression, Type.Method with or without explicit type arguments,
+// whose receiver is the first call argument. A method value call (x.M) or a
+// plain selector call returns nil: its argument list has no receiver.
+func (fl *fileLower) methodExprCallee(fun syntax.Expr) *syntax.SelectorExpr {
+	sel, ok := syntax.Unparen(unindexedCallee(fun)).(*syntax.SelectorExpr)
+	if !ok || !fl.isTypeExpr(sel.X) {
+		return nil
+	}
+	return sel
+}
+
+// instCallSig returns the instantiated signature of a generic callee. The
+// generic signature names the callee's type parameters, which are not in
+// scope at the call, and argument lowering spells the parameter type into
+// the call site, so only this call's instantiation gives spellable types.
+func (fl *fileLower) instCallSig(fun syntax.Expr) *types2.Signature {
+	var name *syntax.Name
+	switch callee := syntax.Unparen(unindexedCallee(fun)).(type) {
+	case *syntax.Name:
+		name = callee
+	case *syntax.SelectorExpr:
+		name = callee.Sel
+	}
+	if name == nil {
+		return nil
+	}
+	inst, ok := fl.pkg.info.Instances[name]
+	if !ok {
+		return nil
+	}
+	sig, _ := inst.Type.(*types2.Signature)
+	return sig
+}
+
 func (fl *fileLower) callTargets(e *syntax.CallExpr, sig *types2.Signature) []types2.Type {
 	params := sig.Params()
 	n := len(e.ArgList)
 	targets := make([]types2.Type, n)
 	shift := 0
-	if fun, ok := syntax.Unparen(e.Fun).(*syntax.SelectorExpr); ok {
-		if fl.isTypeExpr(fun.X) {
-			if recv := sig.Recv(); recv != nil && n > 0 {
-				targets[0] = recv.Type()
-				shift = 1
-			}
+	if fl.methodExprCallee(e.Fun) != nil {
+		if recv := sig.Recv(); recv != nil && n > 0 {
+			targets[0] = recv.Type()
+			shift = 1
 		}
 	}
 	for i := range targets {
@@ -1691,8 +1751,18 @@ func (fl *fileLower) markOptDeferGo(s *syntax.CallStmt) bool {
 	return true
 }
 
+func optElemBase(t types2.Type) types2.Type {
+	if r, ok := types2.Unalias(t).(*types2.ReadonlyDescendants); ok {
+		t = r.Elem
+	}
+	if c, ok := types2.Unalias(t).(*types2.ConstView); ok {
+		t = c.Elem
+	}
+	return t
+}
+
 func (fl *fileLower) optCallSig(ox *types2.Option, name string) *types2.Signature {
-	obj, _, _ := types2.LookupFieldOrMethod(ox.Elem, true, fl.pkg.tpkg, name)
+	obj, _, _ := types2.LookupFieldOrMethod(optElemBase(ox.Elem), true, fl.pkg.tpkg, name)
 	if obj == nil {
 		return nil
 	}
