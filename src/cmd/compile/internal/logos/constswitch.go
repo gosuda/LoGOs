@@ -344,8 +344,8 @@ func (c *cswLower) caseBody(cs *cswCase, done string) ([]syntax.Stmt, otext) {
 		headText = gen("type " + cs.alias + " = " + cs.spell.s + "\n")
 	}
 	if cs.kind == cswIface {
-		c.wrapSelectors(cs.syn.Body, cs)
-		decls, dtext := c.wrapConvs(cs.syn.Body, cs)
+		selWraps := c.wrapSelectors(cs.syn.Body, cs)
+		decls, dtext := c.wrapConvs(cs.syn.Body, cs, selWraps)
 		head = append(head, decls...)
 		headText = cat(headText, dtext)
 	} else if cs.sub.Target != nil {
@@ -811,7 +811,7 @@ func (w cswWalker) replaceName(f reflect.Value, x *syntax.Name) {
 // widens to the case interface where the checker admitted it (SPEC Sec 2.5).
 // A recorded expression nested inside another one is composed inside the
 // outer replacement so the splices never overlap.
-func (c *cswLower) wrapConvs(body []syntax.Stmt, cs *cswCase) ([]syntax.Stmt, otext) {
+func (c *cswLower) wrapConvs(body []syntax.Stmt, cs *cswCase, selWraps []span) ([]syntax.Stmt, otext) {
 	var decls []syntax.Stmt
 	var dtext otext
 	type rec struct {
@@ -1244,6 +1244,27 @@ func (c *cswLower) wrapConvs(body []syntax.Stmt, cs *cswCase) ([]syntax.Stmt, ot
 			lend := c.fl.exprEndNested(lstart)
 			lhsText := c.fl.srcUser(lstart, lend)
 			subs := lhsSubs[l]
+			// A matched-selector rewrite inside a surviving part of the
+			// target folds into the store text here: leaving it as a splice
+			// would overlap the receive-target replacement. A rewrite
+			// inside a frozen operand's span already reached the emitted
+			// temp through expand's textOf.
+			for _, w := range selWraps {
+				if w.start < lstart || w.end > lend {
+					continue
+				}
+				inside := false
+				for _, s := range subs {
+					if w.start >= s.start && w.end <= s.end {
+						inside = true
+						break
+					}
+				}
+				if inside {
+					continue
+				}
+				subs = append(subs, lhsSub{w.start, w.end, c.fl.textOf(w).s})
+			}
 			slices.SortFunc(subs, func(a, b lhsSub) int { return b.start - a.start })
 			for _, s := range subs {
 				if s.start-lstart < 0 || s.end-lstart > len(lhsText.s) {
@@ -1293,7 +1314,12 @@ func (c *cswLower) wrapConvs(body []syntax.Stmt, cs *cswCase) ([]syntax.Stmt, ot
 	return decls, dtext
 }
 
-func (c *cswLower) wrapSelectors(body []syntax.Stmt, cs *cswCase) {
+// wrapSelectors rewrites a matched selector's receiver to
+// any(x).(caseT) and returns each replaced receiver span so the
+// select-receive rewrite can fold the same edit into a replaced target's
+// store text instead of overlapping it.
+func (c *cswLower) wrapSelectors(body []syntax.Stmt, cs *cswCase) []span {
+	var wraps []span
 	for _, s := range body {
 		syntax.Inspect(s, func(n syntax.Node) bool {
 			sel, ok := n.(*syntax.SelectorExpr)
@@ -1320,9 +1346,11 @@ func (c *cswLower) wrapSelectors(body []syntax.Stmt, cs *cswCase) {
 				Type: iface,
 			}, xpos)
 			c.fl.addT(xspan.start, xspan.end, cat(gen("any("), xtext, gen(").("), gen(cs.alias), gen(")")))
+			wraps = append(wraps, xspan)
 			return true
 		})
 	}
+	return wraps
 }
 
 func parseExprAt(text string, pos syntax.Pos) (syntax.Expr, bool) {
