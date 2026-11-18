@@ -2776,6 +2776,12 @@ func LinkerDeps(s *modload.Loader, p *Package) ([]string, error) {
 	if cfg.BuildCover {
 		deps = append(deps, "runtime/coverage")
 	}
+	// The build tag of `logos conc` forces an import of logos/rt, which
+	// carries the monitor in such a build. The build of the main package
+	// adds a file with that import.
+	if slices.Contains(cfg.BuildContext.BuildTags, LogosMonitorTag) {
+		deps = append(deps, LogosRTPkg)
+	}
 
 	return deps, nil
 }

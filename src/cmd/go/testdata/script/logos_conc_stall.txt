@@ -35,6 +35,13 @@ stderr '^.*nested[/\\]main\.lgo:15: \[conc::group_child_stalled\] '
 stderr '^\t.*main\.lgo:23: the group started this child here$'
 stderr -count=1 'group_child_stalled'
 
+# A group whose parent context ends is watched in the same way.
+! logos conc run -stall 200ms ./outer
+stdout '^jobs done: <nil>$'
+stderr '^.*outer[/\\]main\.lgo:10: \[conc::group_child_stalled\] '
+stderr '^\t.*main\.lgo:18: the group started this child here$'
+stderr -count=1 'group_child_stalled'
+
 # The child returns before the default duration of 5s ends.
 logos conc run ./ignores
 stdout '^jobs done: first job failed$'
@@ -139,6 +146,32 @@ func TestJobs(t *testing.T) {
 	if err := jobs(t.Context()); err == nil {
 		t.Fatal("the first job did not fail the group")
 	}
+}
+-- jobs/outer/main.lgo --
+package main
+
+import (
+	"context"
+	"fmt"
+	"time"
+)
+
+func slow() error {
+	time.Sleep(1500 * time.Millisecond)
+	return nil
+}
+
+func jobs(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+	defer cancel()
+	go group (ctx) {
+		go slow()
+	}
+	return nil
+}
+
+func main() {
+	fmt.Println("jobs done:", jobs(context.Background()))
 }
 -- jobs/nested/main.lgo --
 package main

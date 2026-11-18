@@ -10,6 +10,8 @@ import "context"
 
 func monitorCreated(*Group) {}
 
+func monitorCancelled(*Group) {}
+
 func monitorJoined(*Group) {}
 
 func monitored(_ *Group, f func(context.Context) error) func(context.Context) error {

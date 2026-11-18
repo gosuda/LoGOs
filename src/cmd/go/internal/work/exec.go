@@ -958,6 +958,19 @@ func (b *Builder) build(ctx context.Context, a *Action) (err error) {
 		}
 	}
 
+	// A program built for `logos conc` imports logos/rt, which carries the
+	// monitor in such a build, also when no file of the program needs it.
+	if p.Name == "main" && slices.Contains(cfg.BuildContext.BuildTags, load.LogosMonitorTag) {
+		monitorImport := objdir + "_logosconc_.go"
+		if p.IsLogos() {
+			monitorImport = objdir + "_logosconc_.lgo"
+		}
+		if err := sh.writeFile(monitorImport, []byte("package main\n\nimport _ \""+load.LogosRTPkg+"\"\n")); err != nil {
+			return err
+		}
+		gofiles = append(gofiles, monitorImport)
+	}
+
 	// Compile Go.
 	objpkg := objdir + "_pkg_.a"
 	ofile, out, err := BuildToolchain.gc(b, a, objpkg, icfg.Bytes(), embedcfg, symabis, len(sfiles) > 0, pgoProfile, gofiles)

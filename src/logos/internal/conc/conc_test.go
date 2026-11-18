@@ -44,6 +44,7 @@ type reported struct {
 	Positions []struct {
 		File string `json:"file"`
 		Line int    `json:"line"`
+		Role string `json:"role"`
 	} `json:"positions"`
 	Fix struct {
 		Hint string `json:"hint"`
@@ -100,6 +101,17 @@ type probe struct{ freed bool }
 
 func (p *probe) alive() bool { return !p.freed }
 
+// testLocks keeps every lock of these tests reachable. A probe of a
+// test says that its lock is alive, so the collector must not give the
+// address of that lock to the lock of a later test.
+var testLocks []*int
+
+func twoLocks() (a, b unsafe.Pointer) {
+	first, second := new(int), new(int)
+	testLocks = append(testLocks, first, second)
+	return unsafe.Pointer(first), unsafe.Pointer(second)
+}
+
 // take stands where logos/sync.Locked.WithLock stands: the monitor
 // reports the line that calls take.
 func take(lock unsafe.Pointer, p *probe, inner func()) {
@@ -121,9 +133,8 @@ func inGoroutine(body func()) {
 }
 
 func TestOppositeOrdersInTwoGoroutinesAreReportedOnce(t *testing.T) {
-	var a, b int
 	pa, pb := new(probe), new(probe)
-	ka, kb := unsafe.Pointer(&a), unsafe.Pointer(&b)
+	ka, kb := twoLocks()
 
 	var lineAB, lineBA int
 	aThenB := func() {
@@ -166,9 +177,8 @@ func TestOppositeOrdersInTwoGoroutinesAreReportedOnce(t *testing.T) {
 }
 
 func TestBothOrdersInOneGoroutineAreSilent(t *testing.T) {
-	var a, b int
 	pa, pb := new(probe), new(probe)
-	ka, kb := unsafe.Pointer(&a), unsafe.Pointer(&b)
+	ka, kb := twoLocks()
 	var first, second int
 	inGoroutine(func() {
 		first = nextLine()
@@ -182,9 +192,8 @@ func TestBothOrdersInOneGoroutineAreSilent(t *testing.T) {
 }
 
 func TestOneOrderInTwoGoroutinesIsSilent(t *testing.T) {
-	var a, b int
 	pa, pb := new(probe), new(probe)
-	ka, kb := unsafe.Pointer(&a), unsafe.Pointer(&b)
+	ka, kb := twoLocks()
 	var line int
 	aThenB := func() {
 		line = nextLine()
@@ -198,9 +207,8 @@ func TestOneOrderInTwoGoroutinesIsSilent(t *testing.T) {
 }
 
 func TestAFreedLockTakesItsPairsWithIt(t *testing.T) {
-	var a, b int
 	old, pb := new(probe), new(probe)
-	ka, kb := unsafe.Pointer(&a), unsafe.Pointer(&b)
+	ka, kb := twoLocks()
 	var stale, second, third int
 	inGoroutine(func() {
 		stale = nextLine()
@@ -229,17 +237,18 @@ func TestAFreedLockTakesItsPairsWithIt(t *testing.T) {
 // group stands where logos/rt.Group stands: the monitor reports the
 // line that calls spawn.
 type group struct {
-	key       unsafe.Pointer
-	cancelled func()
-	children  sync.WaitGroup
+	key      unsafe.Pointer
+	children sync.WaitGroup
 }
 
 func newGroup() *group {
 	g := new(group)
 	g.key = unsafe.Pointer(g)
-	g.cancelled = conc.GroupCreated(g.key)
+	conc.GroupCreated(g.key)
 	return g
 }
+
+func (g *group) cancelled() { conc.GroupCancelled(g.key) }
 
 func (g *group) spawn(body func()) {
 	site := g.site()
@@ -352,4 +361,97 @@ func TestYoungerGroupChildIsReportedWhenItsOwnStallDurationEnds(t *testing.T) {
 		close(release)
 		g.join()
 	})
+}
+
+// leakFindings runs check until the monitor has a finding at line, and
+// returns the findings at line.
+func leakFindings(t *testing.T, line int, check func()) []reported {
+	t.Helper()
+	for deadline := time.Now().Add(30 * time.Second); time.Now().Before(deadline); runtime.Gosched() {
+		check()
+		if got := findingsAt(t, line); len(got) > 0 {
+			return got
+		}
+	}
+	t.Fatalf("no finding at line %d in 30s", line)
+	return nil
+}
+
+func linesOf(f reported) []int {
+	var lines []int
+	for _, p := range f.Positions {
+		lines = append(lines, p.Line)
+	}
+	return lines
+}
+
+func TestLeakedGoroutineIsReportedOnceWithItsWaitAndItsStart(t *testing.T) {
+	var starts int
+	for range 2 {
+		unreachable := make(chan int)
+		starts = nextLine()
+		go func() {
+			<-unreachable
+		}()
+	}
+	waits := starts + 1
+	leakFindings(t, waits, conc.TestLeakWatch.Report)
+	conc.TestLeakWatch.Report()
+
+	got := findingsAt(t, waits)
+	if len(got) != 1 {
+		t.Fatalf("two goroutines that leak at one statement gave %d findings, want 1: %+v", len(got), got)
+	}
+	f := got[0]
+	if f.Rule != "conc::goroutine_leak" || f.Positions[0].Role != "the goroutine waits here, in runtime.chanrecv1" || f.Fix.Hint == "" {
+		t.Errorf("finding = %+v", f)
+	}
+	if lines := linesOf(f); len(lines) != 2 || lines[0] != waits || lines[1] != starts {
+		t.Errorf("positions at lines %v, want the wait at %d and then the start at %d", lines, waits, starts)
+	}
+}
+
+func TestWaitingGoroutineThatAnotherCanWakeIsNotALeak(t *testing.T) {
+	reachable := make(chan int)
+	starts := nextLine()
+	go func() {
+		<-reachable
+	}()
+	for range 20 {
+		runtime.Gosched()
+		conc.TestLeakWatch.Report()
+	}
+	if got := findingsAt(t, starts, starts+1); len(got) != 0 {
+		t.Errorf("a goroutine that waits on a channel of this test gave %+v", got)
+	}
+	reachable <- 1
+}
+
+// waitLine is the line of the receive in waitOn.
+var waitLine = nextLine() + 2
+
+func waitOn(c chan int) {
+	<-c
+}
+
+func TestLeakNamesTheInnermostWaitAndTheOutermostFunctionOfTheUser(t *testing.T) {
+	unreachable := make(chan int)
+	starts := nextLine()
+	go func() {
+		waitOn(unreachable)
+	}()
+	got := leakFindings(t, waitLine, conc.TestLeakWatch.Report)
+	if lines := linesOf(got[0]); len(got) != 1 || len(lines) != 2 || lines[0] != waitLine || lines[1] != starts {
+		t.Errorf("got %d findings with positions at lines %v, want 1 with the wait at %d and then the function at %d", len(got), lines, waitLine, starts)
+	}
+}
+
+func TestLeakWatchChecksAfterACollection(t *testing.T) {
+	unreachable := make(chan int)
+	starts := nextLine()
+	go func() {
+		<-unreachable
+	}()
+	conc.TestLeakWatch.CheckAfterEachCollection()
+	leakFindings(t, starts+1, runtime.GC)
 }

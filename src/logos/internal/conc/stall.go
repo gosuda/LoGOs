@@ -6,9 +6,6 @@ package conc
 
 import (
 	"os"
-	"runtime"
-	"strconv"
-	"strings"
 	"sync"
 	"time"
 	"unsafe"
@@ -21,8 +18,6 @@ import (
 const (
 	StallEnv     = "LOGOSCONC_STALL"
 	DefaultStall = 5 * time.Second
-
-	maxStackDump = 64 << 20
 )
 
 type groupChild struct {
@@ -61,29 +56,26 @@ var stallAfter = sync.OnceValue(func() time.Duration {
 	return d
 })
 
-// toolchainSources is the directory prefix of the source files of the
-// toolchain, as this binary records them. It is empty when the binary
-// records no directory, as in a -trimpath build; the monitor then
-// cannot tell a toolchain frame from a frame of the user.
-var toolchainSources = func() string {
-	const self = "logos/internal/conc/stall.go"
-	_, file, _, _ := runtime.Caller(0)
-	root, found := strings.CutSuffix(file, self)
-	if !found {
-		return ""
-	}
-	return root
-}()
-
 // GroupCreated records a group, known by its address until GroupJoined.
-// The caller arranges that the result runs when the context of the
-// group is cancelled.
-func GroupCreated(key unsafe.Pointer) (cancelled func()) {
-	g := &group{children: map[uint64]groupChild{}}
+func GroupCreated(key unsafe.Pointer) {
 	groups.mu.Lock()
 	defer groups.mu.Unlock()
-	groups.open[uintptr(key)] = g
-	return g.cancel
+	groups.open[uintptr(key)] = &group{children: map[uint64]groupChild{}}
+}
+
+// GroupCancelled records that the context of the group is cancelled.
+// Only the first call for a group counts.
+func GroupCancelled(key unsafe.Pointer) {
+	groups.mu.Lock()
+	defer groups.mu.Unlock()
+	g := groups.open[uintptr(key)]
+	if !g.cancelledAt.IsZero() {
+		return
+	}
+	g.cancelledAt = time.Now()
+	if len(g.children) > 0 {
+		g.watchdog = time.AfterFunc(stallAfter(), g.reportStalled)
+	}
 }
 
 // SpawnSite returns the statement that called the Group method which
@@ -121,17 +113,6 @@ func GroupJoined(key unsafe.Pointer) {
 	delete(groups.open, uintptr(key))
 	if g.watchdog != nil {
 		g.watchdog.Stop()
-	}
-}
-
-// cancel runs when the context of the group is cancelled. That is also
-// the case at the end of the join, where the group has no child.
-func (g *group) cancel() {
-	groups.mu.Lock()
-	defer groups.mu.Unlock()
-	g.cancelledAt = time.Now()
-	if len(g.children) > 0 {
-		g.watchdog = time.AfterFunc(stallAfter(), g.reportStalled)
 	}
 }
 
@@ -187,9 +168,15 @@ func (g *group) stallEnd(child groupChild) time.Time {
 
 func (c stalledChild) finding(dump string) finding {
 	positions := []position{at(c.site, "the group started this child here")}
-	if state, where, found := blockedFrame(dump, c.goroutine, toolchainSources); found {
-		where.role = "the child is here now, in the state: " + state
-		positions = []position{where, positions[0]}
+	for stack := range stacksOf(dump) {
+		if stack.id != c.goroutine {
+			continue
+		}
+		if where, found := stack.innermost(outsideToolchain); found {
+			where.role = "the child is here now, in the state: " + stack.state
+			positions = []position{where, positions[0]}
+		}
+		break
 	}
 	return finding{
 		rule:      "conc::group_child_stalled",
@@ -197,54 +184,4 @@ func (c stalledChild) finding(dump string) finding {
 		positions: positions,
 		hint:      "make the child return when its context is done: receive from the Done channel of the context in a select, or give the context to the call that blocks",
 	}
-}
-
-func allStacks() string {
-	for size := 1 << 16; ; size *= 2 {
-		buf := make([]byte, size)
-		if n := runtime.Stack(buf, true); n < size || size >= maxStackDump {
-			return string(buf[:n])
-		}
-	}
-}
-
-// blockedFrame reads a dump of runtime.Stack. For the goroutine id it
-// returns the wait state and the innermost frame whose file is not
-// below toolchain. An empty toolchain matches every file, so no frame
-// is found.
-func blockedFrame(dump string, id uint64, toolchain string) (state string, where position, found bool) {
-	header := "goroutine " + strconv.FormatUint(id, 10) + " "
-	stack := dump
-	if !strings.HasPrefix(dump, header) {
-		_, after, present := strings.Cut(dump, "\n\n"+header)
-		if !present {
-			return "", position{}, false
-		}
-		stack = after
-	}
-	stack, _, _ = strings.Cut(stack, "\n\n")
-	head, frames, _ := strings.Cut(stack, "\n")
-	_, state, _ = strings.Cut(head, "[")
-	state, _, _ = strings.Cut(state, "]")
-	state, _, _ = strings.Cut(state, ",")
-	for line := range strings.SplitSeq(frames, "\n") {
-		if strings.HasPrefix(line, "created by ") {
-			break
-		}
-		file, isFile := strings.CutPrefix(line, "\t")
-		if !isFile || strings.HasPrefix(file, toolchain) {
-			continue
-		}
-		file, _, _ = strings.Cut(file, " +0x")
-		colon := strings.LastIndexByte(file, ':')
-		if colon < 0 {
-			continue
-		}
-		number, err := strconv.Atoi(file[colon+1:])
-		if err != nil {
-			continue
-		}
-		return state, position{file: file[:colon], line: number}, true
-	}
-	return state, position{}, false
 }

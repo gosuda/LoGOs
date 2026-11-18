@@ -13,11 +13,15 @@ import (
 	"logos/internal/conc"
 )
 
-// monitorCreated tells logos/internal/conc that g exists and when its
-// context is cancelled. The monitor knows g by its address until
-// monitorJoined.
+// The monitor of logos/internal/conc knows g by its address from
+// monitorCreated to monitorJoined.
+
 func monitorCreated(g *Group) {
-	context.AfterFunc(g.ctx, conc.GroupCreated(unsafe.Pointer(g)))
+	conc.GroupCreated(unsafe.Pointer(g))
+}
+
+func monitorCancelled(g *Group) {
+	conc.GroupCancelled(unsafe.Pointer(g))
 }
 
 func monitorJoined(g *Group) {

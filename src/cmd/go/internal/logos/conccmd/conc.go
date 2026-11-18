@@ -18,11 +18,11 @@ import (
 	"time"
 
 	"cmd/go/internal/base"
+	"cmd/go/internal/load"
 )
 
 const (
-	// monitorTag selects the monitored files of logos/rt and logos/sync.
-	monitorTag = "logosconc"
+	monitorTag = load.LogosMonitorTag
 
 	// sinkEnv, stallEnv and maxFindingLine equal SinkEnv, StallEnv and
 	// MaxLine of logos/internal/conc, which cmd/go may not import.
@@ -51,6 +51,12 @@ The finding conc::group_child_stalled names a child of a go group that
 did not return after its group was cancelled. The group cannot join
 before that child returns. The -stall flag sets how long the monitor
 waits after the cancellation; the default is 5s.
+
+The finding conc::goroutine_leak names a goroutine that waits on a
+channel or a lock which no goroutine that can run reaches. It never
+ends. The monitor checks for it six times in the first 6.3 seconds of
+the program, and later after a collection of the program, one time per
+minute at most.
 
 A finding is printed on standard error as soon as the monitor sees it:
 

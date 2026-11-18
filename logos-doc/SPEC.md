@@ -481,6 +481,17 @@ The finding MUST give the statement that started the child [T-106].
 When the child has a frame whose source file is not a file of the toolchain, the first position of the finding MUST be the innermost frame of that kind, and its role MUST name the wait state of the goroutine [T-106].
 The monitor MUST report one statement that starts a child only one time in one process [T-106].
 The monitor MUST discard the record of a group when the join of the group ends [T-106].
+The monitor MUST NOT start a goroutine for a group whose children all return before the end of their `-stall` durations [T-106].
+A dump of all goroutines for one `conc::group_child_stalled` report MUST NOT be larger than 8 MiB; a child that the dump does not hold MUST get the finding without its frame [T-106].
+`logos conc` MUST link the monitor into the program and into each test binary, also when no package of the program imports `logos/rt` or `logos/sync` [T-106].
+The monitor MUST report `conc::goroutine_leak` for a goroutine that the runtime marks as leaked: the goroutine waits, and no goroutine that can run reaches what it waits for [T-106].
+The first position of that finding MUST be the innermost frame of the goroutine outside the toolchain sources, and its role MUST name the function in which the goroutine waits [T-106].
+The second position MUST be the start of the outermost function of the goroutine outside the toolchain sources [T-106].
+A check MUST read the stacks of the leaked goroutines only [T-106].
+The monitor MUST NOT report a leaked goroutine that has no position outside the toolchain sources [T-106].
+The monitor MUST check for leaked goroutines 0.1 s, 0.3 s, 0.7 s, 1.5 s, 3.1 s and 6.3 s after the program starts [T-106].
+After these six checks the monitor MUST NOT keep a timer, so that the runtime still ends a program in which every goroutine waits [T-106].
+After these six checks the monitor MUST check after a garbage collection of the program, with one minute or more between two checks [T-106].
 The monitor MUST discard the lock orders of a `Locked` value that the garbage collector has freed [T-106].
 `logos conc` MUST stop with an error on a system that has no named pipes [T-106].
 

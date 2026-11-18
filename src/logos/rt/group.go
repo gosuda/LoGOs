@@ -49,19 +49,18 @@ func (e *PanicError) Error() string {
 // wake, until Wait has joined them all.
 func NewGroup(ctx context.Context, limit int) (*Group, context.Context) {
 	c, cancel := context.WithCancel(ctx)
-	slot := logosGroupAcquire()
-	done := make(chan struct{})
-	stop := context.AfterFunc(ctx, func() {
-		logosCancelGroup(slot)
-		close(done)
+	g := &Group{ctx: c, cancel: cancel, slot: logosGroupAcquire(), parentDone: make(chan struct{})}
+	monitorCreated(g)
+	g.parentStop = context.AfterFunc(ctx, func() {
+		logosCancelGroup(g.slot)
+		monitorCancelled(g)
+		close(g.parentDone)
 	})
-	g := &Group{ctx: c, cancel: cancel, slot: slot, parentStop: stop, parentDone: done}
 	g.cond.L = &g.mu
 	if limit > 0 {
 		g.sem = make(chan struct{}, limit)
 	}
 	g.live = 1
-	monitorCreated(g)
 	return g, c
 }
 
@@ -130,6 +129,7 @@ func (g *Group) fail(err error) {
 		g.first = err
 		g.cancel()
 		logosCancelGroup(g.slot)
+		monitorCancelled(g)
 	}
 }
 
@@ -160,10 +160,10 @@ func (g *Group) Wait() error {
 	}
 	g.joined = true
 	g.mu.Unlock()
-	monitorJoined(g)
 	if !g.parentStop() {
 		<-g.parentDone
 	}
+	monitorJoined(g)
 	logosGroupRelease(g.slot)
 	g.cancel()
 	g.mu.Lock()

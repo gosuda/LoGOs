@@ -5,6 +5,7 @@
 package conc
 
 import (
+	"strings"
 	"testing"
 	"unsafe"
 )
@@ -27,7 +28,7 @@ main.worker({0x4f2a38?, 0xc000012230?})
 logos/rt.monitored.func1({0x4f2a38, 0xc000012230})
 	/usr/lib/logos/src/logos/rt/group_conc_runtime.go:34 +0x8b
 created by logos/rt.(*Group).Go in goroutine 1
-	/home/dev/jobs/not-a-frame.lgo:1 +0x12
+	/usr/lib/logos/src/logos/rt/group.go:78 +0x12
 
 goroutine 9 [sleep]:
 time.Sleep(0x3b9aca00)
@@ -36,29 +37,43 @@ created by main.main in goroutine 1
 	/home/dev/jobs/main.lgo:41 +0x6c
 `
 
-func TestBlockedFrameIsTheInnermostFrameOutsideTheToolchain(t *testing.T) {
-	const toolchain = "/usr/lib/logos/src/"
+func TestStacksOfReadsEachGoroutineOfADump(t *testing.T) {
+	outside := func(file string) bool { return !strings.HasPrefix(file, "/usr/lib/logos/src/") }
+	nothing := func(string) bool { return false }
+	none := position{}
 	tests := []struct {
 		name      string
 		id        uint64
-		toolchain string
+		written   func(string) bool
 		state     string
-		file      string
-		line      int
-		found     bool
+		innermost position
 	}{
-		{"an inlined frame of the user below two runtime frames", 7, toolchain, "chan receive", "/home/dev/jobs/queue/queue.lgo", 31, true},
-		{"the first goroutine of the dump, whose id starts another id", 71, toolchain, "running", "/home/dev/jobs/busy.lgo", 9, true},
-		{"a goroutine with toolchain frames only", 9, toolchain, "sleep", "", 0, false},
-		{"a goroutine that the dump does not hold", 1, toolchain, "", "", 0, false},
-		{"a binary that records no source directory", 7, "", "chan receive", "", 0, false},
+		{"an inlined frame of the user below two runtime frames", 7, outside, "chan receive", position{file: "/home/dev/jobs/queue/queue.lgo", line: 31}},
+		{"the first goroutine of the dump, whose id starts another id", 71, outside, "running", position{file: "/home/dev/jobs/busy.lgo", line: 9}},
+		{"toolchain frames only; the frame that started it is not a frame of it", 9, outside, "sleep", none},
+		{"a binary that records no source directory", 7, nothing, "chan receive", none},
 	}
 	for _, tt := range tests {
-		state, where, found := blockedFrame(stackDump, tt.id, tt.toolchain)
-		if state != tt.state || where.file != tt.file || where.line != tt.line || found != tt.found {
-			t.Errorf("%s: got state %q at %s:%d found=%v; want state %q at %s:%d found=%v",
-				tt.name, state, where.file, where.line, found, tt.state, tt.file, tt.line, tt.found)
+		found := false
+		for stack := range stacksOf(stackDump) {
+			if stack.id != tt.id {
+				continue
+			}
+			found = true
+			if innermost, _ := stack.innermost(tt.written); stack.state != tt.state || innermost != tt.innermost {
+				t.Errorf("%s: got state %q innermost %+v; want state %q innermost %+v", tt.name, stack.state, innermost, tt.state, tt.innermost)
+			}
 		}
+		if !found {
+			t.Errorf("%s: the dump gave no goroutine %d", tt.name, tt.id)
+		}
+	}
+	ids := 0
+	for range stacksOf(stackDump) {
+		ids++
+	}
+	if ids != 3 {
+		t.Errorf("the dump gave %d goroutines, want 3", ids)
 	}
 }
 
