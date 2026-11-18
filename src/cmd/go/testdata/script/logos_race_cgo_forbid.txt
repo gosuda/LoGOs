@@ -1,0 +1,204 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+[!race] skip 'the platform has no race detector'
+[!cgo] skip 'the race runtime links through cgo'
+
+env CC=
+env CGO_ENABLED=
+
+cd forbid
+
+# The race detector runs and reports a real race.
+! logos test -race -count=1 ./racy
+stdout 'WARNING: DATA RACE'
+! stderr 'requires cgo'
+
+logos test -race -count=1 ./clean
+stdout '^ok  '
+
+# The race runtime is linked; net keeps its pure-Go files.
+logos list -race -test -deps -f '{{.ImportPath}}' ./clean
+stdout '^runtime/cgo$'
+stdout '^runtime/race$'
+logos list -race -test -deps -f '{{if eq .ImportPath "net"}}cgo={{.CgoFiles}}{{end}}' ./clean
+stdout '^cgo=\[\]$'
+logos list -race -test -deps -f '{{if eq .ImportPath "os/user"}}cgo={{.CgoFiles}}{{end}}' ./clean
+stdout '^cgo=\[\]$'
+
+# A package that uses cgo is still refused, whatever the environment says.
+! logos test -race -count=1 ./usesc
+stderr '\[restriction::cgo_usage\] cgo is disabled'
+env CGO_ENABLED=1
+! logos test -race -count=1 ./usesc
+stderr '\[restriction::cgo_usage\] cgo is disabled'
+! logos build -race ./usesc
+stderr '\[restriction::cgo_usage\] cgo is disabled'
+env CGO_ENABLED=
+
+# Without -race the ban still means no cgo at all.
+logos list -test -deps -f '{{.ImportPath}}' ./clean
+! stdout '^runtime/cgo$'
+logos test -count=1 ./clean
+stdout '^ok  '
+
+# An explicit CGO_ENABLED=0 wins, and the message names it.
+env CGO_ENABLED=0
+! logos test -race -count=1 ./clean
+stderr 'CGO_ENABLED=0'
+! stderr 'enable cgo by setting CGO_ENABLED=1'
+env CGO_ENABLED=
+
+# A module with no cgo key has the same default.
+cd ../nokey
+! logos test -race -count=1 ./racy
+stdout 'WARNING: DATA RACE'
+env CGO_ENABLED=0
+! logos test -race -count=1 ./racy
+stderr 'CGO_ENABLED=0'
+! stderr 'enable cgo by setting CGO_ENABLED=1'
+env CGO_ENABLED=
+
+# With no C compiler and no zig the message names the need and the policy.
+env PATH=$WORK/no-compiler
+! logos test -race -count=1 ./racy
+stderr 'needs a C compiler'
+stderr 'logos.toml'
+! stderr 'C compiler "gcc" not found'
+logos list -race -test -deps -f '{{.ImportPath}}' ./racy
+stdout '^runtime/race$'
+
+-- forbid/go.mod --
+module example.com/forbid
+
+go 1.27
+
+-- forbid/logos.toml --
+[build]
+cgo = "forbid"
+
+-- forbid/racy/racy.lgo --
+package racy
+
+import "context"
+
+func Count(ctx context.Context) (int, error) {
+	n := 0
+	go group (ctx) {
+		go {
+			for i := 0; i < 1000; i++ {
+				n++
+			}
+		}
+		go {
+			for i := 0; i < 1000; i++ {
+				n++
+			}
+		}
+	}
+	return n, nil
+}
+
+-- forbid/racy/racy_test.lgo --
+package racy
+
+import (
+	"context"
+	"testing"
+)
+
+func TestCount(t *testing.T) {
+	if _, err := Count(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+-- forbid/clean/clean.lgo --
+package clean
+
+import (
+	"net"
+	"os/user"
+)
+
+func Loopback() bool {
+	return net.ParseIP("127.0.0.1").IsLoopback()
+}
+
+func Current() error {
+	_, err := user.Current()
+	return err
+}
+
+-- forbid/clean/clean_test.lgo --
+package clean
+
+import "testing"
+
+func TestLoopback(t *testing.T) {
+	if !Loopback() {
+		t.Fatal("127.0.0.1 is not a loopback address")
+	}
+}
+
+-- forbid/usesc/usesc.lgo --
+package usesc
+
+/*
+int answer(void) { return 42; }
+*/
+import "C"
+
+func Answer() int { return int(C.answer()) }
+
+-- forbid/usesc/usesc_test.lgo --
+package usesc
+
+import "testing"
+
+func TestAnswer(t *testing.T) {
+	if Answer() != 42 {
+		t.Fatal("wrong answer")
+	}
+}
+
+-- nokey/go.mod --
+module example.com/nokey
+
+go 1.27
+
+-- nokey/racy/racy.lgo --
+package racy
+
+import "context"
+
+func Count(ctx context.Context) (int, error) {
+	n := 0
+	go group (ctx) {
+		go {
+			for i := 0; i < 1000; i++ {
+				n++
+			}
+		}
+		go {
+			for i := 0; i < 1000; i++ {
+				n++
+			}
+		}
+	}
+	return n, nil
+}
+
+-- nokey/racy/racy_test.lgo --
+package racy
+
+import (
+	"context"
+	"testing"
+)
+
+func TestCount(t *testing.T) {
+	if _, err := Count(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
