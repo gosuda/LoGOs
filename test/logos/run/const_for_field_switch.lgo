@@ -4,9 +4,9 @@ package main
 
 import (
 	"comptime"
+	"debug/elf"
 	"fmt"
 	"os"
-	"strings"
 )
 
 // A const switch over f.Type selects the matching case for each
@@ -266,18 +266,24 @@ func tildeConv[T any](root *T) int {
 	return n
 }
 
-// A package-qualified case type is an ordinary type, not a field
-// projection: pkg.Name folds by its resolved type like any case.
-type Build struct {
-	B strings.Builder
+// A package-qualified case ending in .Type is an ordinary named
+// type, not a field projection: it folds by its resolved type, and
+// ~pkg.Type matches every field whose basic underlying it names.
+type Elf struct {
+	T elf.Type
+	U uint16
 }
 
 func pkgQualified() []string {
 	var out []string
-	const for _, f := range comptime.Fields[Build]() {
+	const for _, f := range comptime.Fields[Elf]() {
 		const switch f.Type {
-		case strings.Builder:
-			out = append(out, f.Name+":b")
+		case elf.Type:
+			out = append(out, f.Name+":elf")
+		case ~elf.Type:
+			out = append(out, f.Name+":~elf")
+		case float64:
+			comptime.Error("no float64 field exists")
 		}
 	}
 	return out
