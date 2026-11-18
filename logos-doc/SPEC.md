@@ -149,11 +149,12 @@ The `[build] cgo` policy (`forbid`, `restricted`, `allow`) and its `forbid` defa
 A Go main module MUST keep the upstream default for `CGO_ENABLED` under `logos`, and a `cgo` key in its `logos.toml` MUST have no effect [T-101.2][R-U1].
 Plain `go` MUST keep the upstream default for `CGO_ENABLED` [T-101.2].
 With cgo off, `net` and `os/user` in the standard library MUST use their pure-Go paths, which is the upstream `CGO_ENABLED=0` behavior [T-101.2].
-A build with `-race` in a LoGOs main module whose cgo policy is `forbid`, by key or by default, MUST link the race runtime through `runtime/cgo`, unless the environment sets `CGO_ENABLED=0` [T-101.2].
+On a target whose race runtime links through cgo (every race target except darwin), a build with `-race` in a LoGOs main module whose cgo policy is `forbid`, by key or by default, MUST link the race runtime through `runtime/cgo`, unless the environment sets `CGO_ENABLED=0` [T-101.2].
 In that build, a package outside the standard library with `import "C"` MUST still fail with `restriction::cgo_usage` [T-101.2].
 In that build, `net` and `os/user` MUST keep their pure-Go paths [T-101.2].
-When the environment sets `CGO_ENABLED=0`, a build with `-race` in a LoGOs main module MUST fail with a message that names `CGO_ENABLED=0` [T-101.2].
 When that build finds neither the C compiler nor `zig` in PATH, it MUST fail before compilation with a message that names the race runtime and `logos.toml` [T-101.2].
+On such a target, when the environment sets `CGO_ENABLED=0`, a build with `-race` in a LoGOs main module MUST fail with a message that names `CGO_ENABLED=0` [T-101.2].
+On darwin the race runtime needs no cgo, and a build with `-race` MUST keep cgo off under that policy [T-101.2].
 
 ### 1.2 RFC-102: Compiler linter and rule set
 The `logos lint` check MUST run inside the compiler on LoGOs packages for syntax and type rules [T-102].
