@@ -1,0 +1,199 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+// Package conc is the run-time monitor behind `logos conc`. The loGo/s
+// support packages call it only in a build with the logosconc tag.
+//
+// The monitor calls no user code and takes no user lock. Its memory is
+// bounded: one entry per goroutine that holds a lock, one entry per lock
+// that is still reachable, and at most maxOrderEdges lock pairs.
+//
+// A lock is known by its address. An address is reused after the garbage
+// collector frees a lock, so each lock comes with a liveness probe, and
+// the monitor forgets every pair of a lock whose probe reports false.
+package conc
+
+import (
+	"runtime"
+	"sync"
+	"unsafe"
+)
+
+//go:linkname goroutineID runtime.logosGoid
+func goroutineID() uint64
+
+const (
+	maxOrderEdges  = 1 << 16
+	firstSweepSize = 1 << 10
+
+	// callerSkip names the frame that called the support function which
+	// called the hook: runtime.Callers, callerPC, the hook, the support
+	// function, then the caller.
+	callerSkip = 4
+)
+
+type heldLock struct {
+	key uintptr
+	pc  uintptr
+}
+
+type lockPair struct{ first, second uintptr }
+
+type pairSite struct {
+	goroutine         uint64
+	firstPC, secondPC uintptr
+}
+
+type monitor struct {
+	mu       sync.Mutex
+	held     map[uint64][]heldLock
+	order    map[lockPair]pairSite
+	alive    map[uintptr]func() bool
+	sweepAt  int
+	reported map[[4]uintptr]struct{}
+}
+
+var locks = monitor{
+	held:     map[uint64][]heldLock{},
+	order:    map[lockPair]pairSite{},
+	alive:    map[uintptr]func() bool{},
+	sweepAt:  firstSweepSize,
+	reported: map[[4]uintptr]struct{}{},
+}
+
+// Acquire records that the calling goroutine is about to take lock while
+// it holds the locks of earlier Hold calls. It reports a lock order
+// inversion when another goroutine took the same two locks in the other
+// order. The result is true when the monitor has no liveness probe for
+// lock; the caller then calls Track.
+func Acquire(lock unsafe.Pointer) (untracked bool) {
+	key := uintptr(lock)
+	pc := callerPC()
+	g := goroutineID()
+	locks.mu.Lock()
+	defer locks.mu.Unlock()
+	locks.forgetIfFreed(key)
+	_, tracked := locks.alive[key]
+	for _, outer := range locks.held[g] {
+		if outer.key == key {
+			continue
+		}
+		pair := lockPair{outer.key, key}
+		if _, known := locks.order[pair]; !known && len(locks.order) < maxOrderEdges {
+			locks.order[pair] = pairSite{goroutine: g, firstPC: outer.pc, secondPC: pc}
+		}
+		other, inverted := locks.order[lockPair{key, outer.key}]
+		if inverted && other.goroutine != g {
+			locks.reportInversion(pairSite{goroutine: g, firstPC: outer.pc, secondPC: pc}, other)
+		}
+	}
+	return !tracked
+}
+
+// Track gives the monitor the liveness probe of a lock that Acquire
+// reported as untracked. The probe reports false once the collector has
+// freed the lock.
+func Track(lock unsafe.Pointer, alive func() bool) {
+	key := uintptr(lock)
+	locks.mu.Lock()
+	defer locks.mu.Unlock()
+	locks.alive[key] = alive
+	if len(locks.alive) >= locks.sweepAt {
+		locks.sweep()
+	}
+}
+
+// Hold records that the calling goroutine now holds lock.
+func Hold(lock unsafe.Pointer) {
+	key := uintptr(lock)
+	pc := callerPC()
+	g := goroutineID()
+	locks.mu.Lock()
+	defer locks.mu.Unlock()
+	locks.held[g] = append(locks.held[g], heldLock{key: key, pc: pc})
+}
+
+// Release records that the calling goroutine no longer holds lock.
+func Release(lock unsafe.Pointer) {
+	key := uintptr(lock)
+	g := goroutineID()
+	locks.mu.Lock()
+	defer locks.mu.Unlock()
+	stack := locks.held[g]
+	for i := len(stack) - 1; i >= 0; i-- {
+		if stack[i].key != key {
+			continue
+		}
+		stack = append(stack[:i], stack[i+1:]...)
+		break
+	}
+	if len(stack) == 0 {
+		delete(locks.held, g)
+		return
+	}
+	locks.held[g] = stack
+}
+
+func (m *monitor) forgetIfFreed(key uintptr) {
+	alive, tracked := m.alive[key]
+	if !tracked || alive() {
+		return
+	}
+	m.forget(key)
+}
+
+func (m *monitor) forget(key uintptr) {
+	delete(m.alive, key)
+	for pair := range m.order {
+		if pair.first == key || pair.second == key {
+			delete(m.order, pair)
+		}
+	}
+}
+
+func (m *monitor) sweep() {
+	for key, alive := range m.alive {
+		if !alive() {
+			m.forget(key)
+		}
+	}
+	m.sweepAt = max(firstSweepSize, 2*len(m.alive))
+}
+
+func (m *monitor) reportInversion(here, other pairSite) {
+	a := [2]uintptr{here.firstPC, here.secondPC}
+	b := [2]uintptr{other.firstPC, other.secondPC}
+	if b[0] < a[0] || (b[0] == a[0] && b[1] < a[1]) {
+		a, b = b, a
+	}
+	seen := [4]uintptr{a[0], a[1], b[0], b[1]}
+	if _, done := m.reported[seen]; done {
+		return
+	}
+	m.reported[seen] = struct{}{}
+	write(finding{
+		rule:    "conc::lock_order_inversion",
+		message: "two goroutines take the same two Locked values in opposite orders; when both run at once, each waits for the other",
+		positions: []position{
+			at(here.secondPC, "this goroutine takes the second value here while it holds the first"),
+			at(here.firstPC, "this goroutine took the first value here"),
+			at(other.secondPC, "another goroutine took the values in the other order: second here"),
+			at(other.firstPC, "another goroutine took the values in the other order: first here"),
+		},
+		hint: "take the two values in one order everywhere, or keep both in one Locked value",
+	})
+}
+
+func callerPC() uintptr {
+	var pcs [1]uintptr
+	if runtime.Callers(callerSkip, pcs[:]) == 0 {
+		return 0
+	}
+	return pcs[0]
+}
+
+func at(pc uintptr, role string) position {
+	frame, _ := runtime.CallersFrames([]uintptr{pc}).Next()
+	return position{file: frame.File, line: frame.Line, role: role}
+}

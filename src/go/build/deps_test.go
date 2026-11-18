@@ -894,7 +894,10 @@ var depsRules = `
 	encoding/json, math, reflect, strconv, unicode, unicode/utf8, unsafe
 	< logos/rt/json;
 
-	sync, sync/atomic
+	os, runtime, strconv, sync, unicode/utf8, unsafe
+	< logos/internal/conc;
+
+	sync, sync/atomic, unsafe, weak, logos/internal/conc
 	< logos/sync;
 `
 
