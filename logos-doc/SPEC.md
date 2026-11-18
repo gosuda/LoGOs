@@ -689,6 +689,12 @@ A return that passes a result and the err it came with, both unread and unchange
 
 Assigning a result to the blank identifier MUST NOT count as a read. [T-202]
 
+A read of a result stored in a value-struct field or a constant array element MUST fail before the proof. [T-202]
+
+A read of a result stored in a slice or map element, or reached through a pointer, MAY stay accepted. [T-202]
+
+A plain assignment destination MUST NOT count as a read. [T-202]
+
 A Go-mode callee (the standard library or any Go package, such as `io.Reader.Read`) MUST keep its own contract, so use of n first stays allowed. [T-202][R-U2]
 
 `nil` MUST be assignable to every `T?`. [T-202]

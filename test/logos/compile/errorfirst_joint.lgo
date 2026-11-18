@@ -386,3 +386,232 @@ func efCapturedArrayPointerAddress() {
 	n[0].touch()
 	later()
 }
+
+type efStats struct {
+	count int
+	items [2]int
+}
+
+type efInner struct {
+	stats efStats
+}
+
+type efPtr struct {
+	inner efInner
+	p     *efStats
+}
+
+type efHeld struct {
+	stats  int
+	inner  efInner
+	labels map[string]int
+	vals   []int
+}
+
+// SPEC 2.5/T-202 names the read of a result, not the form of the
+// destination, so a result stored in a direct value-struct field, a
+// nested field, an array element, or a field of a pointer is tracked
+// like a plain variable. Slice and map element destinations stay
+// outside the tracked forms: a write through such an element can alias
+// the tracked memory in a way this pass cannot name, so tracking them
+// would need a guessing rule the SPEC does not license.
+
+func efFetchHeld() (int, error) {
+	return 1, nil
+}
+
+func efFetchStats() (efStats, error) {
+	return efStats{count: 1}, nil
+}
+
+func efFetchAll() (efHeld, error) {
+	return efHeld{}, nil
+}
+
+func efFetchStatsPtr() (*efStats, error) {
+	return &efStats{count: 1}, nil
+}
+
+func efFieldReadUnchecked() {
+	h := efHeld{inner: efInner{stats: efStats{}}}
+	var err error
+	h.stats, err = efFetchHeld()
+	println(h.stats) // ERROR "result_before_error_check"
+	if err != nil {
+		return
+	}
+	println(h.stats)
+}
+
+func efFieldReadChecked() {
+	h := efHeld{inner: efInner{stats: efStats{}}}
+	var err error
+	h.stats, err = efFetchHeld()
+	if err != nil {
+		return
+	}
+	println(h.stats)
+}
+
+func efNestedFieldReadUnchecked() {
+	h := efHeld{inner: efInner{stats: efStats{}}}
+	var err error
+	h.inner.stats, err = efFetchStats()
+	println(h.inner.stats.count) // ERROR "result_before_error_check"
+	if err != nil {
+		return
+	}
+	println(h.inner.stats.count)
+}
+
+func efFieldArrayElementUnchecked() {
+	h := efHeld{inner: efInner{stats: efStats{}}}
+	var err error
+	h.inner.stats.items[1], err = efFetchHeld()
+	println(h.inner.stats.items[1]) // ERROR "result_before_error_check"
+	if err != nil {
+		return
+	}
+	println(h.inner.stats.items[1])
+}
+
+func efPointerFieldReadUnchecked() {
+	hp := efPtr{inner: efInner{stats: efStats{}}, p: &efStats{}}
+	var err error
+	hp.p, err = efFetchStatsPtr()
+	println(hp.p.count) // ERROR "result_before_error_check"
+	if err != nil {
+		return
+	}
+	println(hp.p.count)
+}
+
+func efFieldReassigned() {
+	h := efHeld{inner: efInner{stats: efStats{}}}
+	var err error
+	h.stats, err = efFetchHeld()
+	h.stats = 9
+	println(h.stats)
+	_ = err
+}
+
+// Slicing the array before the tracked call means a later write through
+// the slice can overwrite the element, so the element is not tracked and
+// this read stays accepted.
+func efFieldSlicedBeforeWrite() {
+	h := efHeld{inner: efInner{stats: efStats{}}}
+	items := h.inner.stats.items[:]
+	var err error
+	h.inner.stats.items[0], err = efFetchHeld()
+	items[0] = 9
+	println(h.inner.stats.items[0])
+	_ = err
+}
+
+func efSliceElementUnchecked() {
+	h := efHeld{inner: efInner{stats: efStats{}}}
+	var err error
+	h.vals[0], err = efFetchHeld()
+	println(h.vals[0])
+	_ = err
+}
+
+func efMapElementUnchecked() {
+	h := efHeld{inner: efInner{stats: efStats{}}}
+	var err error
+	h.labels["a"], err = efFetchHeld()
+	println(h.labels["a"])
+	_ = err
+}
+
+// A store through a pointer to the struct is outside the tracked forms,
+// because another pointer to the same struct can overwrite the field
+// without a write this pass sees, and a stale entry would reject honest
+// code. The reads stay accepted.
+func efFieldStoreThroughPointer() {
+	h := efHeld{}
+	hp := &h
+	var err error
+	hp.stats, err = efFetchHeld()
+	println(hp.stats)
+	if err != nil {
+		return
+	}
+	println(hp.stats)
+}
+
+// A store in one branch only leaves the entry unproven at the join, so
+// the read inside the branch, before the check, fails. A read after the
+// in-branch check passes in the branch and after the join, because the
+// not-taken side holds no entry and the taken side holds a proof.
+func efFieldStoreOneBranchReadInside(cond bool) {
+	h := efHeld{}
+	var err error
+	if cond {
+		h.stats, err = efFetchHeld()
+		println(h.stats) // ERROR "result_before_error_check"
+		if err != nil {
+			return
+		}
+	}
+	println(h.stats)
+	_ = err
+}
+
+func efFieldStoreOneBranchChecked(cond bool) {
+	h := efHeld{}
+	var err error
+	if cond {
+		h.stats, err = efFetchHeld()
+		if err != nil {
+			return
+		}
+		println(h.stats)
+	}
+	println(h.stats)
+	_ = err
+}
+
+func efFieldStoreOneBranchReadAfterJoin(cond bool) {
+	h := efHeld{}
+	var err error
+	if cond {
+		h.stats, err = efFetchHeld()
+	}
+	println(h.stats) // ERROR "result_before_error_check"
+	if err != nil {
+		return
+	}
+	_ = err
+}
+
+// A plain assignment writes its destination; no part of the destination
+// spine is a read. A write into a tracked element or field drops the
+// entries of the memory it changes, so these stay accepted.
+func efElementWriteBeforeProof() {
+	h := efHeld{inner: efInner{stats: efStats{}}}
+	var err error
+	h.inner.stats, err = efFetchStats()
+	h.inner.stats.items[1] = 9
+	println(h.inner.stats.items[1])
+	_ = err
+}
+
+func efFieldWriteWhenRootTracked() {
+	h := efHeld{}
+	var err error
+	h, err = efFetchAll()
+	h.stats = 9
+	println(h)
+	_ = err
+}
+
+func efPatchedFieldRead() {
+	h := efHeld{inner: efInner{stats: efStats{}}}
+	var err error
+	h.inner.stats, err = efFetchStats()
+	h.inner.stats.count = 9
+	println(h.inner.stats.count)
+	println(h.inner.stats.items[0])
+	_ = err
+}
