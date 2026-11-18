@@ -1,4 +1,4 @@
-58eaff4815ba6a795c23807c1347ed2e66d15c4e8a25fa07eb5e1866ddc6709c  logos-doc/validation/zero-array-reference-free/FROZEN.sha256
+c2b4ee953da786f2a94783831d2abffa8467c6778e424abb1493a0693a3a1505  logos-doc/validation/zero-array-reference-free/FROZEN.sha256
 93e743e1c45f538095fb594d5a7efa393e15f27f1bbe63abbd9b7cd1723c88ab  logos-doc/validation/zero-array-reference-free/README.md
 455d840e4d430e9be84dbf336ab83772aa850ddfa81bbee49c4f8c50e67f45c3  logos-doc/validation/zero-array-reference-free/api-compatibility/FROZEN_FAILURES.sha256
 db1280e57c8d673660eb3a78ec98b9c56e2f686b3a519c867be00fcf7976230f  logos-doc/validation/zero-array-reference-free/api-compatibility/README.md
@@ -28,7 +28,7 @@ e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  logos-doc/vali
 17f888e66250b9905bdd23905f92d2187841ee3ad113a4933f5764fb0905fc41  logos-doc/validation/zero-array-reference-free/api-compatibility/hosted/zero-array/types.jsonl
 aaf575aa7f9dd1cfec4802b8b112e461b89b5c29c406d2201f1a17946c78a763  logos-doc/validation/zero-array-reference-free/api-compatibility/hosted/zero-array/types.status.json
 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  logos-doc/validation/zero-array-reference-free/api-compatibility/hosted/zero-array/types.stderr.txt
-b339088687a8d3f439680ac52dc91100c14ca097451762f6135a4fcdfdef11d6  logos-doc/validation/zero-array-reference-free/api-compatibility/original-FROZEN.sha256.txt
+c2b4ee953da786f2a94783831d2abffa8467c6778e424abb1493a0693a3a1505  logos-doc/validation/zero-array-reference-free/api-compatibility/original-FROZEN.sha256.txt
 f486bc2815f967e0810b1b4145848fcf684023a04421932debd6cc41f8033faa  logos-doc/validation/zero-array-reference-free/api-compatibility/original-referencefree_zero_array_logos_test.go.txt
 296630bf4d6893d5d0ee4e19cfe1f2d30f7037c0ad059077aa1599639de99057  logos-doc/validation/zero-array-reference-free/api-compatibility/original-zero_array_ci.py.txt
 95aa8b64d54bbc16bad05c37723ed583ecbd47afbdff9404c67f116f6948816a  logos-doc/validation/zero-array-reference-free/api-compatibility/provenance.json
