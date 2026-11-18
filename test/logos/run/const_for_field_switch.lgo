@@ -6,6 +6,7 @@ import (
 	"comptime"
 	"fmt"
 	"os"
+	"strings"
 )
 
 // A const switch over f.Type selects the matching case for each
@@ -265,6 +266,23 @@ func tildeConv[T any](root *T) int {
 	return n
 }
 
+// A package-qualified case type is an ordinary type, not a field
+// projection: pkg.Name folds by its resolved type like any case.
+type Build struct {
+	B strings.Builder
+}
+
+func pkgQualified() []string {
+	var out []string
+	const for _, f := range comptime.Fields[Build]() {
+		const switch f.Type {
+		case strings.Builder:
+			out = append(out, f.Name+":b")
+		}
+	}
+	return out
+}
+
 func main() {
 	fmt.Println(tags[App]())
 	var r Rig
@@ -288,4 +306,5 @@ func main() {
 	var h Holder
 	h.V = 9
 	fmt.Println(tildeConv(&h))
+	fmt.Println(pkgQualified())
 }

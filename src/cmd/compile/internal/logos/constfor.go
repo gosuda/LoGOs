@@ -1512,10 +1512,14 @@ func (c *cfLeaf) switchCaseType(cs *syntax.ConstSwitchCase, s *syntax.ConstSwitc
 		if a := cfFieldBinding(sel.X, c.active, c.declParents); a != nil {
 			return a.field.typ, true
 		}
-		// An f.Type the bindings cannot resolve stands for an unknown
-		// type: its recorded comptime any would match every field, so
-		// leave the whole switch for the copy's own lowering.
-		return nil, false
+		// A package-qualified name such as pkg.Type is an ordinary type,
+		// not a field projection — let the recorded or resolved type
+		// answer below. An f.Type the bindings cannot resolve stands for
+		// an unknown type: its recorded comptime any would match every
+		// field, so leave the whole switch for the copy's own lowering.
+		if n, ok := sel.X.(*syntax.Name); !ok || infoPkgName(c.fl.pkg.info, n) == nil {
+			return nil, false
+		}
 	}
 	// When the case expression was checked (native parse), its recorded
 	// type already reflects the scope at the switch — local declarations,
@@ -1557,6 +1561,17 @@ func (c *cfLeaf) switchCaseType(cs *syntax.ConstSwitchCase, s *syntax.ConstSwitc
 		}
 	}
 	return c.fl.cfResolveTypeExpr(cs.Type, c.active, c.run.sites)
+}
+
+// infoPkgName reports whether a case qualifier name is a package name
+// in the checker's record: pkg.Type is a type, while f.Type is a field
+// projection.
+func infoPkgName(info *types2.Info, n *syntax.Name) *types2.PkgName {
+	if info == nil {
+		return nil
+	}
+	p, _ := info.Uses[n].(*types2.PkgName)
+	return p
 }
 
 // cfLocalTypeDeclBefore returns the function-local type declaration of
