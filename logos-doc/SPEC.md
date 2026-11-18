@@ -485,6 +485,16 @@ The group MUST hold the record that the monitor keeps of it, and the monitor MUS
 The children of two groups MUST NOT wait for one lock of the monitor when they start and when they return [T-106].
 The monitor MUST NOT start a goroutine for a group whose children all return before the end of their `-stall` durations [T-106].
 A dump of all goroutines for one `conc::group_child_stalled` report MUST NOT be larger than 8 MiB; a child that the dump does not hold MUST get the finding without its frame [T-106].
+The monitor MUST report `conc::group_unbounded` when the children running at one time in a group without a limit reach 10000 [T-106].
+The first position of that finding MUST be the `go group` statement [T-106].
+The second position MUST be the spawn statement of the child that reached the count [T-106].
+The message MUST hold the count of children that ran at one time [T-106].
+The monitor MUST NOT report a group that has a limit [T-106].
+The monitor MUST NOT report the group of a group stage, because the stage bounds its children [T-106].
+The monitor MUST report when the count reaches that number, and MUST NOT report at a larger count [T-106].
+The monitor MUST report one `go group` statement only one time in one process [T-106].
+The monitor MUST NOT take a flag or an environment variable for that count [T-106].
+The monitor MUST NOT keep a timer or a goroutine for that report [T-106].
 `logos conc` MUST link the monitor into the program and into each test binary, also when no package of the program imports `logos/rt` or `logos/sync` [T-106].
 The monitor MUST report `conc::goroutine_leak` for a goroutine that the runtime marks as leaked: the goroutine waits, and no goroutine that can run reaches what it waits for [T-106].
 The first position of that finding MUST be the innermost frame of the goroutine outside the toolchain sources, and its role MUST name the function in which the goroutine waits [T-106].

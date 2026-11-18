@@ -51,7 +51,7 @@ func (e *PanicError) Error() string {
 func NewGroup(ctx context.Context, limit int) (*Group, context.Context) {
 	c, cancel := context.WithCancel(ctx)
 	g := &Group{ctx: c, cancel: cancel, slot: logosGroupAcquire(), parentDone: make(chan struct{})}
-	monitorCreated(g)
+	monitorCreated(g, limit)
 	g.parentStop = context.AfterFunc(ctx, func() {
 		logosCancelGroup(g.slot)
 		monitorCancelled(g)

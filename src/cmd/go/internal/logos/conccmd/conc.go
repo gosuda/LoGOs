@@ -71,6 +71,11 @@ The finding conc::group_child_stalled names a child of a go group that
 did not return after its group was cancelled. The group cannot join
 before that child returns.
 
+The finding conc::group_unbounded names a go group without a limit
+whose children reach 10000 at one time. The count of children then
+follows the work the program gives the group. A group with a limit
+never gets this finding.
+
 The finding conc::lock_held_long names a WithLock call that held a
 logos/sync.Locked value for the -hold duration while another goroutine
 waited for it. The monitor has no timer for a hold: it prints the

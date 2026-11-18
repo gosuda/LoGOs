@@ -17,8 +17,12 @@ type monitorState struct {
 	record *conc.Group
 }
 
-func monitorCreated(g *Group) {
-	g.monitor.record = conc.NewGroup()
+func monitorBounded(g *Group) {
+	g.monitor.record.Bounded()
+}
+
+func monitorCreated(g *Group, limit int) {
+	g.monitor.record = conc.NewGroup(limit)
 }
 
 func monitorCancelled(g *Group) {

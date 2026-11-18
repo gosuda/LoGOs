@@ -5,6 +5,7 @@
 package conc
 
 import (
+	"strconv"
 	"sync"
 	"time"
 )
@@ -27,7 +28,8 @@ type groupChild struct {
 
 // Group is the record of one group. The group holds it, so the monitor
 // has no table of groups, and the children of two groups do not wait
-// for one lock.
+// for one lock. The record holds whether the group bounds the children
+// that run at one time, and the `go group` statement that built it.
 type Group struct {
 	mu       sync.Mutex
 	children map[uint64]groupChild
@@ -35,6 +37,16 @@ type Group struct {
 	cancelledAt time.Time
 	// watchdog is nil when no timer waits to run reportStalled.
 	watchdog *time.Timer
+	// bounded says that the children that run at one time have a bound:
+	// the limit of the group, or a bound that its owner keeps. A bounded
+	// group is never reported as unbounded. It does not change after the
+	// first child starts.
+	bounded bool
+	// statement is the `go group` statement that built the record.
+	statement uintptr
+	// unboundedAt is the running-children count at which the monitor
+	// reports the group. The tests lower it.
+	unboundedAt int
 }
 
 type stalledChild struct {
@@ -49,13 +61,43 @@ var stalls = struct {
 	reported: map[uintptr]struct{}{},
 }
 
+// unboundedAt is the number of children that run at one time in a
+// group without a limit when the monitor reports the group. The
+// monitor takes no flag and no environment variable for it; only the
+// tests change it. NewGroup reads it once, so no child reads a shared
+// variable.
+var unboundedAt = 10000
+
+// unbounded holds the `go group` statements that have a finding. One
+// statement is reported one time in one process.
+var unbounded = struct {
+	mu       sync.Mutex
+	reported map[uintptr]struct{}
+}{
+	reported: map[uintptr]struct{}{},
+}
+
 var stallAfter = sync.OnceValue(func() time.Duration {
 	return durationSetting(StallEnv, DefaultStall)
 })
 
-// NewGroup returns the record of a new group.
-func NewGroup() *Group {
-	return &Group{children: map[uint64]groupChild{}}
+// NewGroup returns the record of a new group. A limit above zero
+// bounds the children that run at one time, so the monitor never
+// reports that group as unbounded.
+func NewGroup(limit int) *Group {
+	return &Group{
+		children:    map[uint64]groupChild{},
+		bounded:     limit > 0,
+		statement:   callerPC(groupCallerSkip),
+		unboundedAt: unboundedAt,
+	}
+}
+
+// Bounded records that the owner of the group bounds the children that
+// run at one time, although the group has no limit. The owner calls it
+// before it starts a child.
+func (g *Group) Bounded() {
+	g.bounded = true
 }
 
 // Cancelled records that the context of the group is cancelled. Only
@@ -79,19 +121,31 @@ func SpawnSite() uintptr {
 }
 
 // ChildStarted records that the calling goroutine runs a child of the
-// group, started at site.
+// group, started at site. In a group without a bound it also reports
+// the group statement when the running children reach the count of the
+// monitor. It reports at that count only, so a larger group takes no
+// lock of the monitor for a later child.
 func (g *Group) ChildStarted(site uintptr) {
-	id := goroutineID()
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	if g.cancelledAt.IsZero() {
-		g.children[id] = groupChild{site: site}
+	running := g.admit(goroutineID(), site)
+	if g.bounded || running != g.unboundedAt || !firstUnboundedAt(g.statement) {
 		return
 	}
-	g.children[id] = groupChild{site: site, started: time.Now()}
-	if g.watchdog == nil {
-		g.watchdog = time.AfterFunc(stallAfter(), g.reportStalled)
+	write(g.unboundedFinding(running, site))
+}
+
+// admit records the child and returns the number of children that run.
+func (g *Group) admit(id uint64, site uintptr) int {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	child := groupChild{site: site}
+	if !g.cancelledAt.IsZero() {
+		child.started = time.Now()
+		if g.watchdog == nil {
+			g.watchdog = time.AfterFunc(stallAfter(), g.reportStalled)
+		}
 	}
+	g.children[id] = child
+	return len(g.children)
 }
 
 // ChildDone records that the child of the calling goroutine returned.
@@ -100,6 +154,32 @@ func (g *Group) ChildDone() {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	delete(g.children, id)
+}
+
+// firstUnboundedAt reports whether the group statement has no finding
+// yet, and records it.
+func firstUnboundedAt(statement uintptr) bool {
+	unbounded.mu.Lock()
+	defer unbounded.mu.Unlock()
+	if _, done := unbounded.reported[statement]; done {
+		return false
+	}
+	unbounded.reported[statement] = struct{}{}
+	return true
+}
+
+// unboundedFinding is the finding for a group without a limit whose
+// running children reached the count of the monitor.
+func (g *Group) unboundedFinding(count int, site uintptr) finding {
+	return finding{
+		rule:    "conc::group_unbounded",
+		message: "a group without a limit runs " + strconv.Itoa(count) + " children at one time; the count follows the work the program gives the group",
+		positions: []position{
+			at(g.statement, "this go group has no limit"),
+			at(site, "the child that made the count reach "+strconv.Itoa(count)+" started here"),
+		},
+		hint: "give the group a limit: go group (ctx, limit = N)",
+	}
 }
 
 // Joined records that every child of the group has returned.

@@ -12,7 +12,9 @@ import "context"
 // byte to a Group.
 type monitorState struct{}
 
-func monitorCreated(*Group) {}
+func monitorCreated(*Group, int) {}
+
+func monitorBounded(*Group) {}
 
 func monitorCancelled(*Group) {}
 

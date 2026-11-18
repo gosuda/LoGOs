@@ -33,9 +33,11 @@ const (
 	// lockCallerSkip names the frame that called the support function
 	// which called the hook: runtime.Callers, callerPC, the hook, the
 	// support function, then the caller. A spawn has one more support
-	// function between the hook and the caller.
+	// function between the hook and the caller, and the `go group`
+	// statement has the Group constructor there.
 	lockCallerSkip  = 4
 	spawnCallerSkip = 5
+	groupCallerSkip = 5
 )
 
 type heldLock struct {

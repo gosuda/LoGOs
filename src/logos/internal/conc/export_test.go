@@ -19,3 +19,11 @@ func (w leakWatch) Report() { w.report() }
 // CheckAfterEachCollection starts the part of the watch that follows
 // the collections of the program, with no spacing between checks.
 func (w leakWatch) CheckAfterEachCollection() { w.checkAfterCollection(time.Now()) }
+
+// SetUnboundedAt sets the running-children count that reports a group
+// without a limit, and returns the count before the call.
+func SetUnboundedAt(count int) int {
+	old := unboundedAt
+	unboundedAt = count
+	return old
+}

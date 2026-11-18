@@ -245,9 +245,13 @@ type group struct {
 	children sync.WaitGroup
 }
 
-func newGroup() *group {
-	return &group{record: conc.NewGroup()}
+func newGroup(limit int) *group {
+	return &group{record: newRecord(limit)}
 }
+
+// newRecord stands where monitorCreated stands: the record holds the
+// line that calls newGroup.
+func newRecord(limit int) *conc.Group { return conc.NewGroup(limit) }
 
 func (g *group) cancelled() { g.record.Cancelled() }
 
@@ -269,7 +273,7 @@ func (g *group) join() {
 
 func TestGroupChildThatOutlivesCancellationIsReportedOncePerSpawnStatement(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		g := newGroup()
+		g := newGroup(0)
 		release := make(chan struct{})
 		var line int
 		for range 3 {
@@ -301,7 +305,7 @@ func TestGroupChildThatOutlivesCancellationIsReportedOncePerSpawnStatement(t *te
 
 func TestGroupChildThatReturnsBeforeItsStallDurationEndsIsSilent(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		g := newGroup()
+		g := newGroup(0)
 		cancelled := make(chan struct{})
 		early := nextLine()
 		g.spawn(func() { <-cancelled; time.Sleep(stall - time.Millisecond) })
@@ -323,7 +327,7 @@ func TestGroupChildThatReturnsBeforeItsStallDurationEndsIsSilent(t *testing.T) {
 
 func TestGroupChildThatStartsAfterCancellationIsWatchedFromItsStart(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		g := newGroup()
+		g := newGroup(0)
 		g.cancelled()
 		time.Sleep(3 * stall)
 		release := make(chan struct{})
@@ -343,7 +347,7 @@ func TestGroupChildThatStartsAfterCancellationIsWatchedFromItsStart(t *testing.T
 
 func TestYoungerGroupChildIsReportedWhenItsOwnStallDurationEnds(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		g := newGroup()
+		g := newGroup(0)
 		release := make(chan struct{})
 		older := nextLine()
 		g.spawn(func() { <-release })
@@ -362,6 +366,147 @@ func TestYoungerGroupChildIsReportedWhenItsOwnStallDurationEnds(t *testing.T) {
 		close(release)
 		g.join()
 	})
+}
+
+func TestUnboundedGroupIsReportedWhenTheCountReachesTheLimit(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		old := conc.SetUnboundedAt(4)
+		defer conc.SetUnboundedAt(old)
+		release := make(chan struct{})
+		var statement int
+		statement = nextLine()
+		g := newGroup(0)
+		var spawn int
+		for range 4 {
+			spawn = nextLine()
+			g.spawn(func() { <-release })
+		}
+		synctest.Wait()
+
+		got := findingsAt(t, statement, spawn)
+		if len(got) != 1 {
+			t.Fatalf("got %d findings at the limit of 4 children, want 1: %+v", len(got), got)
+		}
+		f := got[0]
+		if f.Rule != "conc::group_unbounded" || !strings.Contains(f.Message, "4 children") || f.Fix.Hint == "" || f.Pid != os.Getpid() {
+			t.Errorf("finding = %+v", f)
+		}
+		if len(f.Positions) != 2 || f.Positions[0].Line != statement || f.Positions[1].Line != spawn {
+			t.Errorf("positions = %+v, want the group statement %d first and the spawn %d second", f.Positions, statement, spawn)
+		}
+		close(release)
+		g.join()
+	})
+}
+
+func TestUnboundedGroupBelowTheLimitIsSilent(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		old := conc.SetUnboundedAt(4)
+		defer conc.SetUnboundedAt(old)
+		release := make(chan struct{})
+		var statement int
+		statement = nextLine()
+		g := newGroup(0)
+		var spawn int
+		for range 3 {
+			spawn = nextLine()
+			g.spawn(func() { <-release })
+		}
+		synctest.Wait()
+
+		if got := findingsAt(t, statement, spawn); len(got) != 0 {
+			t.Errorf("3 children in a group whose limit is 4 gave %+v", got)
+		}
+		close(release)
+		g.join()
+	})
+}
+
+func TestLimitedGroupIsNeverReportedAsUnbounded(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		old := conc.SetUnboundedAt(2)
+		defer conc.SetUnboundedAt(old)
+		release := make(chan struct{})
+		var statement int
+		statement = nextLine()
+		g := newGroup(1)
+		var spawn int
+		for range 6 {
+			spawn = nextLine()
+			g.spawn(func() { <-release })
+		}
+		synctest.Wait()
+
+		if got := findingsAt(t, statement, spawn); len(got) != 0 {
+			t.Errorf("a group with a limit gave %+v", got)
+		}
+		close(release)
+		g.join()
+	})
+}
+
+func TestGroupThatItsOwnerBoundsIsNeverReportedAsUnbounded(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		old := conc.SetUnboundedAt(2)
+		defer conc.SetUnboundedAt(old)
+		release := make(chan struct{})
+		statement := nextLine()
+		g := newGroup(0)
+		g.record.Bounded()
+		var spawn int
+		for range 6 {
+			spawn = nextLine()
+			g.spawn(func() { <-release })
+		}
+		synctest.Wait()
+
+		if got := findingsAt(t, statement, spawn); len(got) != 0 {
+			t.Errorf("a group that its owner bounds gave %+v", got)
+		}
+		close(release)
+		g.join()
+	})
+}
+
+func TestUnboundedGroupIsReportedOncePerStatement(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		old := conc.SetUnboundedAt(2)
+		defer conc.SetUnboundedAt(old)
+		release := make(chan struct{})
+		var statement int
+		statement = nextLine()
+		groups := []*group{newGroup(0), newGroup(0)}
+		for _, g := range groups {
+			g.spawn(func() { <-release })
+			g.spawn(func() { <-release })
+		}
+		synctest.Wait()
+
+		if got := findingsAt(t, statement); len(got) != 1 {
+			t.Fatalf("two groups from one statement gave %d findings, want 1: %+v", len(got), got)
+		}
+		close(release)
+		for _, g := range groups {
+			g.join()
+		}
+	})
+}
+
+func TestChildrenThatReturnKeepTheCountBelowTheLimit(t *testing.T) {
+	old := conc.SetUnboundedAt(2)
+	defer conc.SetUnboundedAt(old)
+	var statement int
+	statement = nextLine()
+	g := newGroup(0)
+	for range 6 {
+		g.spawn(func() {})
+		g.join()
+	}
+
+	if got := findingsAt(t, statement); len(got) != 0 {
+		t.Errorf("children that return one at a time gave %+v", got)
+	}
+	g.join()
 }
 
 // leakFindings runs check until the monitor has a finding at line, and
@@ -572,7 +717,7 @@ func TestHoldWithoutAWaiterAndShortHoldAreSilent(t *testing.T) {
 
 func TestSecondCancellationDoesNotRestartTheStallDuration(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		g := newGroup()
+		g := newGroup(0)
 		release := make(chan struct{})
 		line := nextLine()
 		g.spawn(func() { <-release })
