@@ -1136,9 +1136,11 @@ func ejectSkipDir(modDir, outAbs, out string) string {
 // regular file except .git contents, logos.toml files, loGo/s sources
 // (emitted separately), the skip subtree (the destination when it
 // sits inside the module), and files whose nearest enclosing nested
-// module (a directory below the root that holds its own go.mod) is
+// module (a directory below the root that holds its own go.mod file) is
 // not a local replace target of this module's go.mod. A foreign
-// nested module is still walked when a kept one lies below it.
+// nested module is still walked when a kept one lies below it. As in
+// the go command, a directory named go.mod marks no module, and a
+// go.mod that is a symlink to a file does.
 // Symlinks and special files stay out, so a link can never pull
 // outside bytes into the tree. It reports whether any copied Go file
 // imports the loGo/s support packages, which the copy remapped to
@@ -1173,7 +1175,7 @@ func copyModuleTree(srcRoot, dstRoot, skip string) bool {
 			}
 		}
 		if d.IsDir() {
-			if _, err := os.Stat(filepath.Join(path, "go.mod")); err == nil {
+			if fi, err := os.Stat(filepath.Join(path, "go.mod")); err == nil && !fi.IsDir() {
 				if !keep[rel] && !holdsKept(keep, rel) {
 					return filepath.SkipDir
 				}

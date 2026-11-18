@@ -2,6 +2,7 @@ env GOPROXY=off
 env GOTOOLCHAIN=local
 
 cd m
+[symlink] symlink linked/go.mod -> ../other/go.mod
 
 logos run .
 cp stdout $WORK/native.txt
@@ -37,6 +38,13 @@ exists out/outer/inner/inner.go
 ! exists out/other/go.mod
 ! exists out/testdata/nested
 ! exists out/.git
+
+# Only a go.mod file marks a module, as in the go command. A directory
+# named go.mod is plain data, so it and the files beside it are copied.
+# A go.mod that is a symlink to a file still marks a module.
+exists out/fixtures/go.mod/inside.txt
+exists out/fixtures/beside.txt
+[symlink] ! exists out/linked
 
 cd out
 go build ./...
@@ -112,6 +120,12 @@ scratch
 asset
 -- m/testdata/keep.txt --
 kept
+-- m/fixtures/go.mod/inside.txt --
+inside
+-- m/fixtures/beside.txt --
+beside
+-- m/linked/linked.go --
+package linked
 -- m/testdata/nested/go.mod --
 module example.com/testdata-nested
 
