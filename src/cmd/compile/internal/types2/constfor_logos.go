@@ -449,17 +449,24 @@ func (check *Checker) logosFieldTypeType(e *syntax.SelectorExpr, x *operand) boo
 	check.recordUse(name, obj)
 	check.usedVars[v] = true
 	x.expr = e
-	if b := check.logosFieldBind; b != nil && check.logosFieldVars[v] == b.info {
-		x.mode_ = typexpr
-		x.typ_ = b.field.Type()
-		if check.logosFieldBound == nil {
-			check.logosFieldBound = make(map[syntax.Expr]bool)
+	owner := check.logosFieldVars[v]
+	for b := check.logosFieldBind; b != nil; b = b.outer {
+		if owner == b.info {
+			x.mode_ = typexpr
+			x.typ_ = b.field.Type()
+			if check.logosFieldBound == nil {
+				check.logosFieldBound = make(map[syntax.Expr]bool)
+			}
+			check.logosFieldBound[e] = true
+			return true
 		}
-		check.logosFieldBound[e] = true
-		return true
 	}
 	x.mode_ = typexpr
 	x.typ_ = logosComptimeAny
+	if check.logosFieldTypeOwner == nil {
+		check.logosFieldTypeOwner = make(map[syntax.Expr]*LogosConstFor)
+	}
+	check.logosFieldTypeOwner[e] = owner
 	return true
 }
 
@@ -493,7 +500,7 @@ func (check *Checker) logosFieldProjExpr(x *operand, e *syntax.FieldProjExpr) {
 	if _, ok := xt.(*TypeParam); ok {
 		if info.Generic {
 			x.mode_ = mode
-			x.typ_ = logosComptimeAny
+			x.typ_ = check.logosFieldNarrowOr(info)
 			return
 		}
 		check.errorf(e.Pos(), MissingFieldOrMethod, "[comptime::const_for_projection] cannot project a field of %s", xop.typ())
@@ -505,14 +512,29 @@ func (check *Checker) logosFieldProjExpr(x *operand, e *syntax.FieldProjExpr) {
 		return
 	}
 	x.mode_ = mode
-	if b := check.logosFieldBind; b != nil && info == b.info {
-		x.typ_ = b.field.Type()
-		return
+	for b := check.logosFieldBind; b != nil; b = b.outer {
+		if info == b.info {
+			x.typ_ = b.field.Type()
+			return
+		}
 	}
-	x.typ_ = check.logosFieldProjType(info)
+	x.typ_ = check.logosFieldNarrowOr(info)
+}
+
+// logosFieldNarrowOr answers the field's type as narrowed by the
+// const-switch case under check, or the loop's shared field type when no
+// case narrowed it.
+func (check *Checker) logosFieldNarrowOr(info *LogosConstFor) Type {
+	if n, ok := check.logosFieldNarrow[info]; ok && n != nil {
+		return n
+	}
+	return check.logosFieldProjType(info)
 }
 
 func (check *Checker) logosFieldProjType(info *LogosConstFor) Type {
+	if info.Struct == nil {
+		return logosComptimeAny
+	}
 	var shared Type
 	for i := range info.Struct.NumFields() {
 		t := info.Struct.Field(i).Type()
