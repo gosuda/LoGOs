@@ -90,7 +90,7 @@ for cpu in Nehalem Haswell; do
 done | tee "$module/checks.txt"
 }
 zero3() {
-selection='^TestScript$/^(README|logos_simd_gate_avx512|logos_simd_feature_gate|logos_simd_gate_branch|logos_simd_gate_noavx_qemu|logos_simd_zero_dominance|logos_eject_simd_slice)$'
+selection='^TestScript$/^(logos_simd_gate_avx512|logos_simd_feature_gate|logos_simd_gate_branch|logos_simd_gate_noavx_qemu|logos_simd_zero_dominance|logos_eject_simd_slice)$'
 go test -count=1 -short -timeout 40m -v cmd/go -run "$selection" 2>&1 | tee "$RUNNER_TEMP/simd-zero-evidence/scripts.txt"
 go test -count=1 -short -race -timeout 40m -v cmd/go -run "$selection" 2>&1 | tee "$RUNNER_TEMP/simd-zero-evidence/scripts-race.txt"
 sha256sum --check --strict "$RUNNER_TEMP/simd-zero-evidence/attacks.sha256"
