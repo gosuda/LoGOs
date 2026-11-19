@@ -22,6 +22,12 @@ exists out/top/top.go
 ! grep '"comptime"' out/top/top.go
 ! grep '_logos_ctimp' out/main/main.go
 ! grep '_logos_tparam' out/main/main.go
+# Forwarded instantiations share one copy per type-argument list:
+# Describe[probe] is reached directly and through two forwarding paths.
+grep -count=3 'func Describe_logosct' out/main/main.go
+grep -count=2 'func Wrap_logosct' out/main/main.go
+grep -count=1 'func Wrap2_logosct' out/main/main.go
+grep -count=1 'func WrapFixed_logosct' out/main/main.go
 
 cd out
 go run ./main
