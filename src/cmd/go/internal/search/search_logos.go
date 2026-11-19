@@ -43,7 +43,7 @@ import (
 // qualify: a plain go context never admits .lgo files into
 // IgnoredGoFiles, so upstream behavior is unchanged.
 func logosKeepCgoOnly(p *build.Package) bool {
-	if p == nil || cfg.BuildContext.CgoEnabled {
+	if p == nil || !cfg.Logos || cfg.BuildContext.CgoEnabled {
 		return false
 	}
 	cgoOn := cfg.BuildContext
@@ -61,6 +61,28 @@ func logosKeepCgoOnly(p *build.Package) bool {
 		}
 	}
 	return false
+}
+
+// LogosKeepCgoOnlyDir reports whether a module-rooted wildcard match must keep
+// the directory dir even though scanning it reports no Go source files. It
+// applies the same per-directory decision as logosKeepCgoOnly: in logos mode
+// with cgo disabled, a directory whose only admitted loGo/s sources need cgo
+// is kept so loading denies it with [restriction::cgo_usage] exactly as an
+// explicit package path does. The caller restricts it to main-module
+// directories; third-party and standard-library directories that a pattern
+// such as all merely passes over must stay silently skipped.
+func LogosKeepCgoOnlyDir(dir string) bool {
+	if !cfg.Logos || cfg.BuildContext.CgoEnabled {
+		return false
+	}
+	pkg, err := cfg.BuildContext.ImportDir(dir, 0)
+	if err == nil {
+		return false
+	}
+	if _, ok := err.(*build.NoGoError); !ok {
+		return false
+	}
+	return logosKeepCgoOnly(pkg)
 }
 
 // logosFileImportsC reports whether the named Go-family source file in dir
