@@ -1065,6 +1065,8 @@ A generic function that uses them MUST become a comptime generic. [T-205]
 
 Each instantiation MUST expand into a non-generic copy `<f>_logosct<N>` in the instantiating package. [T-205]
 
+A comptime call inside an expansion whose type arguments are concrete after substitution MUST expand into the same copy, at any depth and across package boundaries. [T-205]
+
 Copies MUST be memoized per type-argument list. [T-205]
 
 An exported comptime generic MUST travel as source text in `__.LOGOS`. [T-205]
