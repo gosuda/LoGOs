@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # Contracts gate for the ci.yml `dogfood` job step
 # "Corpus: contracts, exact sources".
+# Latchkey runs each step as `bash -e -o pipefail`; this file sets the same,
+# so the moved body behaves exactly like the inline block. No -u: bodies
+# expand variables the runner leaves empty.
+set -eo pipefail
 . .latchkey/env.sh
 printf 'INPUTS=%s\nEVIDENCE=%s\n' "$RUNNER_TEMP/logos-corpus-inputs" "$RUNNER_TEMP/logos-corpus-evidence" >> "$GITHUB_ENV"
 . .latchkey/env.sh

@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # Autovec benchmark campaign for the ci.yml `bench` job step
 # "Autovec benchmarks: base vs candidate, measured sequentially".
+# Latchkey runs each step as `bash -e -o pipefail`; this file sets the same,
+# so the moved body behaves exactly like the inline block. No -u: bodies
+# expand variables the runner leaves empty.
+set -eo pipefail
 . .latchkey/env.sh
 archive=hyperfine-v2.0.0-x86_64-unknown-linux-gnu
 curl --fail --silent --show-error --location --output "$RUNNER_TEMP/$archive.tar.gz" "https://github.com/sharkdp/hyperfine/releases/download/v2.0.0/$archive.tar.gz"

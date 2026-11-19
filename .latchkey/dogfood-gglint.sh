@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # Reviewed-gglint build for the ci.yml `dogfood` job step
 # "Corpus: build reviewed gglint".
+# Latchkey runs each step as `bash -e -o pipefail`; this file sets the same,
+# so the moved body behaves exactly like the inline block. No -u: bodies
+# expand variables the runner leaves empty.
+set -eo pipefail
 . .latchkey/env.sh
 export GOPROXY=https://proxy.golang.org GOSUMDB=sum.golang.org GOMODCACHE="$RUNNER_TEMP/gglint-modules"
 source="$RUNNER_TEMP/gglint-source"
