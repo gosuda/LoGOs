@@ -213,11 +213,44 @@ func scopeEndsExiting(list []syntax.Stmt) bool {
 	if len(list) == 0 {
 		return false
 	}
-	switch list[len(list)-1].(type) {
+	return scopeStmtExits(list[len(list)-1])
+}
+
+func scopeStmtExits(s syntax.Stmt) bool {
+	switch s := s.(type) {
 	case *syntax.ReturnStmt, *syntax.BranchStmt:
 		return true
+	case *syntax.BlockStmt:
+		return scopeEndsExiting(s.List)
+	case *syntax.LabeledStmt:
+		return scopeStmtExits(s.Stmt)
+	case *syntax.IfStmt:
+		if s.Else == nil {
+			return false
+		}
+		return scopeBlockExits(s.Then) && scopeElseExits(s.Else)
 	}
 	return false
+}
+
+func scopeBlockExits(b *syntax.BlockStmt) bool {
+	if b == nil {
+		return false
+	}
+	return scopeEndsExiting(b.List)
+}
+
+func scopeElseExits(e syntax.Stmt) bool {
+	switch e := e.(type) {
+	case *syntax.BlockStmt:
+		return scopeEndsExiting(e.List)
+	case *syntax.IfStmt:
+		if e.Else == nil {
+			return false
+		}
+		return scopeBlockExits(e.Then) && scopeElseExits(e.Else)
+	}
+	return scopeStmtExits(e)
 }
 
 func unwrapScopeLabels(s syntax.Stmt) (syntax.Stmt, []*syntax.Name) {
