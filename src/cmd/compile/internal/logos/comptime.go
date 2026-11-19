@@ -929,12 +929,39 @@ func (fl *fileLower) cfCalleeObj(x syntax.Expr, sites *cfSites) *types2.Func {
 		return nil
 	}
 	if sites != nil && sites.scope != nil {
-		return cfScopeFunc(sites.scope, x)
+		if fn := cfScopeFunc(sites.scope, x); fn != nil {
+			return fn
+		}
+		return fl.cfForeignCallee(x, sites)
 	}
 	fn, _ := fl.pkg.info.Uses[name].(*types2.Func)
 	return fn
 }
 
+// cfForeignCallee resolves a nested call spelled with an import marker
+// of the defining package (`_logos_ctimpN.Name`): the marker stands for
+// the Nth import recorded with the generic's source, so the callee lives
+// in that import's package scope, not the defining package's scope.
+func (fl *fileLower) cfForeignCallee(x syntax.Expr, sites *cfSites) *types2.Func {
+	sel, ok := x.(*syntax.SelectorExpr)
+	if !ok {
+		return nil
+	}
+	qn, ok := sel.X.(*syntax.Name)
+	if !ok || !strings.HasPrefix(qn.Value, cfImportMarker) {
+		return nil
+	}
+	idx, err := strconv.Atoi(strings.TrimPrefix(qn.Value, cfImportMarker))
+	if err != nil || idx < 0 || idx >= len(sites.imports) {
+		return nil
+	}
+	pkg, err := fl.cfLoadPackage(sites.imports[idx].path)
+	if err != nil || pkg == nil {
+		return nil
+	}
+	fn, _ := pkg.Scope().Lookup(sel.Sel.Value).(*types2.Func)
+	return fn
+}
 func cfScopeFunc(scope *types2.Scope, x syntax.Expr) *types2.Func {
 	var name string
 	switch x := x.(type) {
