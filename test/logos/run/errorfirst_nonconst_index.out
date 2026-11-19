@@ -1,0 +1,3 @@
+ok nonconst-array-index 7
+ok map-string-key 7
+ok struct-field-variable-index 7

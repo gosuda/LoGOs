@@ -1,0 +1,41 @@
+// run
+
+package main
+
+import "fmt"
+
+func efLoad() (int, error) { return 7, nil }
+
+type efBox struct{ v int }
+
+// Stores through destinations the error-first pass cannot name must neither
+// crash the compiler nor need a diagnostic: a non-constant array index, a
+// string map key, and a struct field reached through a variable index all
+// stay outside the tracked forms, so a correct check followed by a read
+// passes.
+func main() {
+	var err error
+	xs := [4]int{}
+	k := 2
+	xs[k], err = efLoad()
+	if err != nil {
+		fmt.Println("FAIL nonconst-array-index")
+		return
+	}
+	fmt.Println("ok nonconst-array-index", xs[k])
+	m := map[string]int{}
+	m["a"], err = efLoad()
+	if err != nil {
+		fmt.Println("FAIL map-string-key")
+		return
+	}
+	fmt.Println("ok map-string-key", m["a"] ?? 0)
+	boxes := []efBox{{1}, {2}}
+	i := 1
+	boxes[i].v, err = efLoad()
+	if err != nil {
+		fmt.Println("FAIL struct-field-variable-index")
+		return
+	}
+	fmt.Println("ok struct-field-variable-index", boxes[i].v)
+}

@@ -6,6 +6,7 @@ package types2
 
 import (
 	"cmd/compile/internal/syntax"
+	"go/constant"
 	. "internal/types/errors"
 	"maps"
 	"slices"
@@ -639,6 +640,9 @@ type logosEFEntry struct {
 	err    *Var
 	name   string
 	proven bool
+	// pos is the source position of the store that created the entry, so
+	// diagnostics that choose among entries stay deterministic.
+	pos syntax.Pos
 }
 
 // A logosEFKey names the destination a tracked result is stored in: the
@@ -670,17 +674,17 @@ func (s *logosEFState) set(k logosEFKey, e logosEFEntry) *logosEFState {
 	return &logosEFState{m}
 }
 
-// dropWriting stops tracking every destination a write to k can change:
-// k itself, anything nested inside it, any destination that contains k,
-// and any destination whose path overlaps k's tail, because one field
-// reached through embedding has several spellings.
+// dropWriting stops tracking a destination that a write to k can change:
+// k itself, anything nested inside it, and any destination that contains k.
+// Paths name direct value-struct fields only, so sibling paths never alias
+// each other.
 func (s *logosEFState) dropWriting(k logosEFKey) *logosEFState {
 	var out map[logosEFKey]logosEFEntry
 	for v := range s.m {
 		if v.root != k.root {
 			continue
 		}
-		if logosEFPathUnder(v.path, k.path) || logosEFPathUnder(k.path, v.path) || strings.HasSuffix(v.path, k.path) || strings.HasSuffix(k.path, v.path) {
+		if logosEFPathUnder(v.path, k.path) || logosEFPathUnder(k.path, v.path) {
 			if out == nil {
 				out = maps.Clone(s.m)
 			}
@@ -871,6 +875,7 @@ type logosEFPass struct {
 	check       *Checker
 	body        *syntax.BlockStmt
 	seen        map[syntax.Pos]bool
+	spines      map[syntax.Pos]bool
 	ctx         *logosEFCtx
 	eff         *logosEFEffects
 	assigns     map[logosEFKey][]syntax.Expr
@@ -1147,18 +1152,85 @@ func (p *logosEFPass) collectAssigns() {
 	})
 }
 
+// A logosEFCand is an unproven entry eligible for one diagnostic.
+type logosEFCand struct {
+	key logosEFKey
+	ent logosEFEntry
+}
+
+// logosEFCands collects the unproven entries rooted at v in deterministic
+// order: by creation position, then by destination path, then by root name.
+// Map iteration order must never choose the reported result.
+func logosEFCands(st *logosEFState, v *Var) []logosEFCand {
+	var cands []logosEFCand
+	for key, e := range st.m {
+		if key.root != v || e.proven {
+			continue
+		}
+		cands = append(cands, logosEFCand{key, e})
+	}
+	slices.SortFunc(cands, func(a, b logosEFCand) int {
+		if c := a.ent.pos.Cmp(b.ent.pos); c != 0 {
+			return c
+		}
+		if a.key.path != b.key.path {
+			if a.key.path < b.key.path {
+				return -1
+			}
+			return 1
+		}
+		if a.key.root.name != b.key.root.name {
+			if a.key.root.name < b.key.root.name {
+				return -1
+			}
+			return 1
+		}
+		return 0
+	})
+	return cands
+}
+
+// logosEFDestPos reports the source position of the destination naming k.
+func (p *logosEFPass) logosEFDestPos(lhs []syntax.Expr, k logosEFKey) syntax.Pos {
+	for _, e := range lhs {
+		if kk, ok := p.destKey(e); ok && kk == k {
+			return e.Pos()
+		}
+	}
+	return nopos
+}
+
 func (p *logosEFPass) read(n *syntax.Name, st *logosEFState) {
 	v, _ := p.check.Uses[n].(*Var)
 	if v == nil {
 		return
 	}
 	k := logosEFKey{root: v}
-	e, ok := st.m[k]
-	if !ok || e.proven || p.seen[n.Pos()] {
+	if e, ok := st.m[k]; ok {
+		if e.proven || p.seen[n.Pos()] {
+			return
+		}
+		p.seen[n.Pos()] = true
+		p.check.errorf(n, IncompatibleAssign, "%s read of %s before %s is checked (read %s only after %s is checked)", logosResultBeforeErr, k.displayName(), e.name, k.displayName(), e.name)
+		return
+	}
+	// A whole-value read loads every result stored inside the value, so it
+	// fails while any nested destination is still unproven. A name that is
+	// the root of a selector or index spine is not a whole-value read; the
+	// spine's own check names the element.
+	if p.spines[n.Pos()] {
+		return
+	}
+	cands := logosEFCands(st, v)
+	if len(cands) == 0 {
+		return
+	}
+	if p.seen[n.Pos()] {
 		return
 	}
 	p.seen[n.Pos()] = true
-	p.check.errorf(n, IncompatibleAssign, "%s read of %s before %s is checked (read %s only after %s is checked)", logosResultBeforeErr, k.displayName(), e.name, k.displayName(), e.name)
+	first := cands[0]
+	p.check.errorf(n, IncompatibleAssign, "%s read of %s before %s is checked (read %s only after %s is checked)", logosResultBeforeErr, first.key.displayName(), first.ent.name, first.key.displayName(), first.ent.name)
 }
 
 // rawKey decomposes a trackable destination: a plain name, or a chain of
@@ -1178,29 +1250,11 @@ func (p *logosEFPass) rawKey(e syntax.Expr) (logosEFKey, bool) {
 			rev = append(rev, "."+x.Sel.Value)
 			e = x.X
 		case *syntax.IndexExpr:
-			lit, ok := syntax.Unparen(x.Index).(*syntax.BasicLit)
-			if !ok || lit.Kind != syntax.IntLit || lit.Bad {
-				return logosEFKey{}, false
-			}
-			n, err := strconv.Atoi(lit.Value)
-			if err != nil || n < 0 {
-				return logosEFKey{}, false
-			}
-			typ, _, ok := p.check.logosChecked(x.X)
+			n, ok := p.constArrayIndex(x)
 			if !ok {
 				return logosEFKey{}, false
 			}
-			isArray := false
-			for _, u := range typeset(typ) {
-				if _, ok := u.(*Array); ok {
-					isArray = true
-					break
-				}
-			}
-			if !isArray {
-				return logosEFKey{}, false
-			}
-			rev = append(rev, "["+strconv.Itoa(n)+"]")
+			rev = append(rev, "["+strconv.FormatInt(n, 10)+"]")
 			e = x.X
 		default:
 			v := p.varOf(e)
@@ -1209,6 +1263,53 @@ func (p *logosEFPass) rawKey(e syntax.Expr) (logosEFKey, bool) {
 			}
 			slices.Reverse(rev)
 			return logosEFKey{root: v, path: strings.Join(rev, "")}, true
+		}
+	}
+}
+
+// constArrayIndex reports the canonical value of a constant array index:
+// the checked constant, not the source spelling, so a named constant, a
+// hexadecimal literal, and an octal literal name the same slot as the
+// decimal form the checker validated.
+func (p *logosEFPass) constArrayIndex(x *syntax.IndexExpr) (int64, bool) {
+	_, val, ok := p.check.logosChecked(syntax.Unparen(x.Index))
+	// Only an integer constant can name an array slot. Any other index, such
+	// as a string map key, a variable, or a tuple element access, is not a
+	// constant the checker can place, so it stays untracked. There is no
+	// integer to read in that case: handing a non-Int value to
+	// constant.Int64Val panics.
+	if !ok || val == nil || val.Kind() != constant.Int {
+		return 0, false
+	}
+	n, ok := constant.Int64Val(val)
+	if !ok || n < 0 {
+		return 0, false
+	}
+	typ, _, ok := p.check.logosChecked(x.X)
+	if !ok {
+		return 0, false
+	}
+	for _, u := range typeset(typ) {
+		if _, ok := u.(*Array); ok {
+			return n, true
+		}
+	}
+	return 0, false
+}
+
+// spineRoot names the plain variable a trackable spine is rooted at, or nil
+// when the spine grows out of a call, a dereference, or another value this
+// pass cannot name.
+func spineRoot(x syntax.Expr) *syntax.Name {
+	for {
+		switch t := syntax.Unparen(x).(type) {
+		case *syntax.SelectorExpr:
+			x = t.X
+		case *syntax.IndexExpr:
+			x = t.X
+		default:
+			id, _ := syntax.Unparen(x).(*syntax.Name)
+			return id
 		}
 	}
 }
@@ -1243,44 +1344,110 @@ func (p *logosEFPass) destKey(e syntax.Expr) (logosEFKey, bool) {
 
 // readDest reports an unchecked-result read at a selector or index
 // destination. The report position is the field or element name, matching
-// the plain-variable report.
+// the plain-variable report. Reading a prefix of a tracked path loads the
+// nested result, so it fails too; an unrelated sibling stays accepted.
 func (p *logosEFPass) readDest(x syntax.Expr, st *logosEFState) {
 	k, ok := p.rawKey(x)
 	if !ok {
 		return
+	}
+	if p.spines == nil {
+		p.spines = make(map[syntax.Pos]bool)
+	}
+	// Spine segments below x are not standalone reads: the outer spine
+	// names the element, so only the outermost check reports the entry.
+	for d := x; ; {
+		var nx syntax.Expr
+		switch t := syntax.Unparen(d).(type) {
+		case *syntax.SelectorExpr:
+			nx = t.X
+		case *syntax.IndexExpr:
+			nx = t.X
+		default:
+			nx = nil
+		}
+		if nx == nil {
+			break
+		}
+		if _, ok := syntax.Unparen(nx).(*syntax.SelectorExpr); ok {
+			p.spines[nx.Pos()] = true
+			p.spines[syntax.Unparen(nx).Pos()] = true
+		} else if _, ok := syntax.Unparen(nx).(*syntax.IndexExpr); ok {
+			p.spines[nx.Pos()] = true
+			p.spines[syntax.Unparen(nx).Pos()] = true
+		}
+		d = nx
+	}
+	// The spine root is not a whole-value read: the spine names the
+	// element, so read leaves the root's nested entries to this check.
+	if id := spineRoot(x); id != nil {
+		p.spines[id.Pos()] = true
 	}
 	at := x
 	pos := x.Pos()
 	if sel, isSel := x.(*syntax.SelectorExpr); isSel {
 		at, pos = sel.Sel, sel.Sel.Pos()
 	}
-	e, found := st.m[k]
-	if !found || e.proven || p.seen[pos] {
+	if e, found := st.m[k]; found {
+		if e.proven || p.seen[pos] {
+			return
+		}
+		p.seen[pos] = true
+		p.check.errorf(at, IncompatibleAssign, "%s read of %s before %s is checked (read %s only after %s is checked)", logosResultBeforeErr, k.displayName(), e.name, k.displayName(), e.name)
+		return
+	}
+	// A segment below an outer spine is not a standalone read: the outer
+	// check names the entry, so this check stays silent for it.
+	if p.spines[x.Pos()] {
+		return
+	}
+	var cands []logosEFCand
+	for _, c := range logosEFCands(st, k.root) {
+		if c.key == k || !logosEFPathUnder(c.key.path, k.path) {
+			continue
+		}
+		cands = append(cands, c)
+	}
+	if len(cands) == 0 {
+		return
+	}
+	if p.seen[pos] {
 		return
 	}
 	p.seen[pos] = true
-	p.check.errorf(at, IncompatibleAssign, "%s read of %s before %s is checked (read %s only after %s is checked)", logosResultBeforeErr, k.displayName(), e.name, k.displayName(), e.name)
+	first := cands[0]
+	p.check.errorf(at, IncompatibleAssign, "%s read of %s before %s is checked (read %s only after %s is checked)", logosResultBeforeErr, first.key.displayName(), first.ent.name, first.key.displayName(), first.ent.name)
 }
 
-// quietPath walks the destination spine of a plain assignment's left
-// side and marks every position on it as written, not read: the spine
-// names the memory, it does not load a value. Reads inside index
-// operands stay checked.
+// quietPath walks the destination spine of a plain assignment's left side
+// and marks the trackable part as written, not read: a direct value-struct
+// field or a constant array element names the memory without loading a
+// value. Anything else on the spine loads a value first: a pointer the
+// selector runs through, a slice or map the index runs on, a dereference,
+// or a call. That remainder is checked as a read.
 func (p *logosEFPass) quietPath(l syntax.Expr, st *logosEFState) *logosEFState {
 	for {
 		switch x := syntax.Unparen(l).(type) {
 		case *syntax.SelectorExpr:
+			sel := p.check.Selections[x]
+			if sel == nil || sel.Kind() != FieldVal || sel.Indirect() || len(sel.Index()) != 1 {
+				return p.expr(l, st)
+			}
 			p.seen[x.Sel.Pos()] = true
 			l = x.X
 		case *syntax.IndexExpr:
+			if _, ok := p.constArrayIndex(x); !ok {
+				return p.expr(l, st)
+			}
 			p.seen[x.Pos()] = true
 			st = p.expr(x.Index, st)
 			l = x.X
 		default:
 			if id, ok := syntax.Unparen(l).(*syntax.Name); ok {
 				p.seen[id.Pos()] = true
+				return st
 			}
-			return st
+			return p.expr(l, st)
 		}
 	}
 }
@@ -1308,11 +1475,15 @@ func (p *logosEFPass) track(lhs []syntax.Expr, rhs syntax.Expr, st *logosEFState
 	if errV == nil {
 		return st
 	}
+	// Plain results track regardless of later address-taking or slicing: a
+	// read before the alias still needs the check, and stable withholds the
+	// proof from closures. Field and element destinations keep the alias
+	// inventory because a write through the alias is invisible.
 	for _, k := range keys {
-		if !p.trackable(k) {
+		if k.path != "" && !p.trackable(k) {
 			continue
 		}
-		st = st.set(k, logosEFEntry{err: errV, name: errV.name})
+		st = st.set(k, logosEFEntry{err: errV, name: errV.name, pos: p.logosEFDestPos(lhs, k)})
 		p.noteCreated(k, errV.name)
 	}
 	return st
@@ -1505,9 +1676,10 @@ func (p *logosEFPass) assign(s *syntax.AssignStmt, st *logosEFState) *logosEFSta
 	rhs := syntax.UnpackListExpr(s.Rhs)
 	plain := s.Op == 0 || s.Op == syntax.Def
 	for i, r := range rhs {
-		if !(s.Op == 0 && len(lhs) == len(rhs) && logosEFBlank(lhs[i]) && logosEFIsName(r)) {
-			st = p.expr(r, st)
+		if s.Op == 0 && len(lhs) == len(rhs) && logosEFBlank(lhs[i]) && p.isBlankable(r) {
+			continue
 		}
+		st = p.expr(r, st)
 	}
 	for _, l := range lhs {
 		if !(plain && s.Rhs != nil && logosEFIsName(l)) {
@@ -1525,6 +1697,17 @@ func (p *logosEFPass) assign(s *syntax.AssignStmt, st *logosEFState) *logosEFSta
 		st = p.track(lhs, rhs[0], st)
 	}
 	return st
+}
+
+// isBlankable reports whether discarding r to the blank identifier drops a
+// tracked destination without reading it: a plain name or a rawKey path.
+// Anything larger, such as h.count+1, still reads its operands.
+func (p *logosEFPass) isBlankable(r syntax.Expr) bool {
+	if logosEFIsName(r) {
+		return true
+	}
+	_, ok := p.rawKey(r)
+	return ok
 }
 
 func logosEFIsName(e syntax.Expr) bool {
@@ -1766,7 +1949,7 @@ func (p *logosEFPass) lateCaptures(st *logosEFState, lit syntax.Node, inside map
 				return true
 			}
 			if errName, ok := p.tracked[k]; ok {
-				st = st.set(k, logosEFEntry{name: errName})
+				st = st.set(k, logosEFEntry{name: errName, pos: lit.Pos()})
 			}
 		case *syntax.SelectorExpr, *syntax.IndexExpr:
 			k, ok := p.rawKey(n.(syntax.Expr))
@@ -1777,7 +1960,7 @@ func (p *logosEFPass) lateCaptures(st *logosEFState, lit syntax.Node, inside map
 				return true
 			}
 			if errName, tracked := p.tracked[k]; tracked && p.trackable(k) {
-				st = st.set(k, logosEFEntry{name: errName})
+				st = st.set(k, logosEFEntry{name: errName, pos: lit.Pos()})
 			}
 		}
 		return true
@@ -1802,7 +1985,7 @@ func (p *logosEFPass) later(lit syntax.Node, body *syntax.BlockStmt, st *logosEF
 		p.noteAssigned(k)
 	}
 	for k, errName := range eff.created {
-		st = st.set(k, logosEFEntry{name: errName})
+		st = st.set(k, logosEFEntry{name: errName, pos: body.Pos()})
 		p.noteCreated(k, errName)
 	}
 	return st

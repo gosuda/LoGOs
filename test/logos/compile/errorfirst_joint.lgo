@@ -410,11 +410,12 @@ type efHeld struct {
 
 // SPEC 2.5/T-202 names the read of a result, not the form of the
 // destination, so a result stored in a direct value-struct field, a
-// nested field, an array element, or a field of a pointer is tracked
-// like a plain variable. Slice and map element destinations stay
-// outside the tracked forms: a write through such an element can alias
-// the tracked memory in a way this pass cannot name, so tracking them
-// would need a guessing rule the SPEC does not license.
+// nested field, or a constant array element is tracked like a plain
+// variable, including a pointer result held in such a field. A store made
+// through a pointer stays outside the tracked forms, as do slice and map
+// element destinations: a write through such an element can alias the
+// tracked memory in a way this pass cannot name, so tracking them would
+// need a guessing rule the SPEC does not license.
 
 func efFetchHeld() (int, error) {
 	return 1, nil
@@ -613,5 +614,159 @@ func efPatchedFieldRead() {
 	h.inner.stats.count = 9
 	println(h.inner.stats.count)
 	println(h.inner.stats.items[0])
+	_ = err
+}
+
+func efFetchLabels() (map[string]int, error) {
+	return map[string]int{}, nil
+}
+
+// A plain result stays checked when a later statement takes its address:
+// the alias did not exist at the read.
+func efPlainReadBeforeAddr() {
+	n, err := efFetchHeld()
+	println(n) // ERROR "result_before_error_check"
+	p := &n // ERROR "result_before_error_check"
+	_ = p
+	_ = err
+}
+
+// Slicing a plain result after the read does not silence the read.
+func efPlainReadBeforeSlice() {
+	s, err := efSlice()
+	println(s[0]) // ERROR "result_before_error_check"
+	t := s[:] // ERROR "result_before_error_check"
+	_ = t
+	_ = err
+}
+
+// Storing through an unchecked pointer loads that pointer, so the store
+// is a read of the result.
+func efStoreThroughUncheckedPointer() {
+	p, err := efFetchStatsPtr()
+	p.count = 1 // ERROR "result_before_error_check"
+	_ = err
+}
+
+// Storing through an unchecked slice header loads the header.
+func efStoreThroughUncheckedSlice() {
+	s, err := efSlice()
+	s[0] = 1 // ERROR "result_before_error_check"
+	_ = err
+}
+
+// Storing through an unchecked map loads the map.
+func efStoreThroughUncheckedMap() {
+	m, err := efFetchLabels()
+	m["a"] = 1 // ERROR "result_before_error_check"
+	_ = err
+}
+
+// Storing through a dereference of an unchecked pointer loads it.
+func efStoreThroughUncheckedDeref() {
+	p, err := efFetchStatsPtr()
+	*p = efStats{} // ERROR "result_before_error_check"
+	_ = err
+}
+
+// Writing one field must not end tracking of a sibling field.
+func efSiblingWriteKeepsTracking() {
+	h := efHeld{inner: efInner{stats: efStats{}}}
+	var err error
+	h.stats, err = efFetchHeld()
+	h.inner.stats = efStats{}
+	println(h.stats) // ERROR "result_before_error_check"
+	_ = err
+}
+
+// Reading a whole value loads the results stored inside it.
+func efAggregateCopyReadsResult() {
+	h := efHeld{}
+	var err error
+	h.stats, err = efFetchHeld()
+	dup := h // ERROR "result_before_error_check"
+	_ = dup
+	_ = err
+}
+
+// Reading a nested aggregate loads the results stored inside it.
+func efNestedAggregateCopyReadsResult() {
+	h := efHeld{}
+	var err error
+	h.inner.stats, err = efFetchStats()
+	sub := h.inner // ERROR "result_before_error_check"
+	_ = sub
+	_ = err
+}
+
+// Reading an unrelated sibling does not load the tracked field.
+func efSiblingReadStaysAccepted() {
+	h := efHeld{}
+	var err error
+	h.stats, err = efFetchHeld()
+	println(h.inner)
+	_ = err
+}
+
+const efConstIdx = 1
+
+// A named constant names the same slot as its decimal value.
+func efConstIndexEquivalent() {
+	h := efHeld{inner: efInner{stats: efStats{}}}
+	var err error
+	h.inner.stats.items[efConstIdx], err = efFetchHeld()
+	println(h.inner.stats.items[1]) // ERROR "result_before_error_check"
+	if err != nil {
+		return
+	}
+	println(h.inner.stats.items[1])
+}
+
+// A hexadecimal literal names the same slot as its decimal value.
+func efHexIndexEquivalent() {
+	h := efHeld{inner: efInner{stats: efStats{}}}
+	var err error
+	h.inner.stats.items[0x1], err = efFetchHeld()
+	println(h.inner.stats.items[1]) // ERROR "result_before_error_check"
+	_ = err
+}
+
+// A constant expression names the same slot as its value.
+func efConstExprIndexEquivalent() {
+	h := efHeld{inner: efInner{stats: efStats{}}}
+	var err error
+	h.inner.stats.items[efConstIdx+0], err = efFetchHeld()
+	println(h.inner.stats.items[1]) // ERROR "result_before_error_check"
+	_ = err
+}
+
+// An octal literal writes the octal slot, not the decimal spelling.
+func efOctalIndexNamesSlotEight() {
+	var a [16]int
+	var err error
+	a[010], err = efFetchHeld()
+	println(a[8]) // ERROR "result_before_error_check"
+	println(a[10])
+	_ = err
+}
+
+// Discarding a tracked field to the blank identifier is not a read.
+func efFieldDiscardStaysAccepted() {
+	h := efHeld{}
+	var err error
+	h.stats, err = efFetchHeld()
+	_ = h.stats
+	_ = err
+}
+
+// With two unchecked results in one value, the whole-value read reports
+// the entry stored first by source position, deterministically.
+func efTwoUncheckedFirstByPosition() {
+	h := efHeld{}
+	var err error
+	h.stats, err = efFetchHeld()
+	h.inner.stats.count, err = efFetchHeld()
+	dup := h // ERROR "read of h.stats before"
+	_ = dup
 	_ = err
 }
