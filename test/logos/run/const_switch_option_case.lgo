@@ -1,0 +1,100 @@
+// run
+
+package main
+
+import (
+	"fmt"
+	"os"
+)
+
+var failed bool
+
+func check(name string, cond bool, got, want any) {
+	if !cond {
+		failed = true
+		fmt.Println("FAIL", name+":", "got", got, "want", want)
+		return
+	}
+	fmt.Println("ok", name)
+}
+
+func storeOpt[F any](dst *F, v F) {
+	const switch F {
+	case int8?:
+		*dst = v
+	}
+}
+
+func storeStr[F any](dst *F, v F) {
+	const switch F {
+	case string?:
+		*dst = v
+	}
+}
+
+// captureOpt keeps the reported crash shape: a closure inside the option
+// case captures the rebound pointer and stores through it.
+func captureOpt[F any](dst *F, v F) {
+	const switch F {
+	case int8?:
+		var set func(F) = x => { *dst = x }
+		set(v)
+	}
+}
+
+func storeBarePtr[F any](dst *F, v F) {
+	const switch F {
+	case *int?:
+		*dst = v
+	}
+}
+
+func pick[F any](dst *F, v F) {
+	const switch F {
+	case int:
+		*dst = v
+	case int8?:
+		*dst = v
+	}
+}
+
+func main() {
+	var a int8?
+	storeOpt(&a, 7)
+	check("opt-store", int(a ?? 0) == 7, int(a ?? 0), 7)
+	storeOpt(&a, 9)
+	check("opt-restore", int(a ?? 0) == 9, int(a ?? 0), 9)
+
+	var s string?
+	storeStr(&s, "hi")
+	check("opt-string", (s ?? "") == "hi", s ?? "", "hi")
+
+	var b int8?
+	captureOpt(&b, 5)
+	check("opt-capture", int(b ?? 0) == 5, int(b ?? 0), 5)
+
+	var p *int?
+	storeBarePtr(&p, nil)
+	check("opt-bare-nil", p == nil, p == nil, true)
+	m := 3
+	var q *int? = &m
+	storeBarePtr(&p, q)
+	var zero int
+	r := p ?? &zero
+	check("opt-bare-deref", *r == 3, *r, 3)
+
+	var i int
+	pick(&i, 11)
+	check("mixed-int", i == 11, i, 11)
+	var c int8?
+	pick(&c, 12)
+	check("mixed-opt", int(c ?? 0) == 12, int(c ?? 0), 12)
+
+	var n int
+	storeOpt(&n, 4)
+	check("opt-no-case", n == 0, n, 0)
+
+	if failed {
+		os.Exit(1)
+	}
+}

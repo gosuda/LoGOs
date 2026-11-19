@@ -1,0 +1,53 @@
+// run
+
+package main
+
+import (
+	"fmt"
+	"os"
+)
+
+var failed bool
+
+func check(name string, cond bool, got, want any) {
+	if !cond {
+		failed = true
+		fmt.Println("FAIL", name+":", "got", got, "want", want)
+		return
+	}
+	fmt.Println("ok", name)
+}
+
+type Box struct{ S string }
+
+func (b Box) M() string { return "box:" + b.S }
+
+func f[T any, U any](v T, u U) interface{ M() string } {
+	const switch T {
+	case interface{ M() string }:
+		var p interface{ M() string }
+		ch := make(chan T, 1)
+		ch <- v
+		var u2 U = u
+		_ = u2
+		p = func() T {
+			type Status bool
+			var ok Status
+			var p2 interface{ M() string }
+			p2, ok = <-ch
+			_ = p2
+			_ = ok
+			return v
+		}()
+		return p
+	}
+	return nil
+}
+
+func main() {
+	p := f[Box, int](Box{S: "g"}, 7)
+	check("boxed-localias-generic", p != nil && p.M() == "box:g", p, "box:g")
+	if failed {
+		os.Exit(1)
+	}
+}

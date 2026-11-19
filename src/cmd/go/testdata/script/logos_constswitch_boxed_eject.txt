@@ -1,0 +1,59 @@
+# A const-switch case that boxes a closure whose body receives into a
+# case-local type must eject to Go that builds and runs like the native
+# build: the alias splice for the local type composes into the boxed
+# operand's replacement instead of overlapping it.
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+cd m
+
+logos run .
+stdout '^true$'
+cp stdout $WORK/native-stdout.txt
+
+logos eject -o out
+exists out/main.go
+exists out/go.mod
+
+cd out
+go run .
+cmp stdout $WORK/native-stdout.txt
+
+-- m/go.mod --
+module example.com/boxed
+
+go 1.27
+
+-- m/main.lgo --
+// Command boxed exercises eject of a boxed const-switch closure whose
+// comma-ok receive names a case-local type.
+package main
+
+import "fmt"
+
+type Box struct{ S string }
+
+func (b Box) M() string { return "box:" + b.S }
+
+func f[T any](v T) interface{ M() string } {
+	const switch T {
+	case interface{ M() string }:
+		var p interface{ M() string }
+		ch := make(chan T, 1)
+		ch <- v
+		p = func() T {
+			type Status bool
+			var ok Status
+			p, ok = <-ch
+			_ = ok
+			return v
+		}()
+		return p
+	}
+	return nil
+}
+
+func main() {
+	p := f[Box](Box{S: "x"})
+	fmt.Println(p != nil && p.M() == "box:x")
+}

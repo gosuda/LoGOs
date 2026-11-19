@@ -1,0 +1,25 @@
+// errorcheck
+
+package p
+
+import "comptime"
+
+func first[T any]() int {
+	const for i, _ := range comptime.Fields[T]() {
+		return i
+	}
+}
+
+type One struct {
+	X int
+}
+
+type Empty struct{}
+
+func useOne() int {
+	return first[One]()
+}
+
+func useEmpty() int {
+	return first[Empty]() // ERROR "missing return"
+}
