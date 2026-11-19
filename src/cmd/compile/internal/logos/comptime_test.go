@@ -5,6 +5,8 @@
 package logos
 
 import (
+	"cmd/compile/internal/base"
+	"cmd/internal/obj"
 	"fmt"
 	"strings"
 	"testing"
@@ -130,5 +132,49 @@ func TestCfEmitCopyResolvesRuntimeAlias(t *testing.T) {
 	fl.cfEmitCopy(needsRT, &cfSite{pos: syntax.Pos{}})
 	if got := countCopyDecls(fl, "NeedRT_logosct1"); got != 1 {
 		t.Fatalf("runtime-alias copy emitted %d times, want 1 (check must resolve %s)", got, rtAlias)
+	}
+}
+
+func TestCfCopyForMemoizesOnlyEmitted(t *testing.T) {
+	prevCtxt := base.Ctxt
+	base.Ctxt = &obj.Link{}
+	t.Cleanup(func() {
+		base.Ctxt = prevCtxt
+		base.ResetErrors()
+	})
+	fl := testCopyFileLower(t, "package p\n")
+	exp := fl.pkg.ctExp
+	strType := types2.Universe.Lookup("string").Type()
+	goodObj := types2.NewFunc(syntax.Pos{}, fl.pkg.tpkg, "Good", nil)
+	goodRec := &cfRecord{name: "Good", tparams: 1, source: "func Good[T any]() string {\nreturn \"q\"\n}"}
+	exp.byObj = map[*types2.Func]*cfGenericDef{goodObj: {obj: goodObj, record: goodRec}}
+	goodSite := &cfSite{targs: []types2.Type{strType}, obj: goodObj, pos: syntax.Pos{}}
+	before := base.Errors()
+	first := fl.cfCopyFor(goodSite)
+	second := fl.cfCopyFor(goodSite)
+	if first != "Good_logosct0" || second != first {
+		t.Fatalf("cfCopyFor names = %q, %q, want both Good_logosct0", first, second)
+	}
+	if got := countCopyDecls(fl, first); got != 1 {
+		t.Fatalf("emitted copy %s appears %d times, want exactly once", first, got)
+	}
+	goodKey := cfExpKey(cfFactObject(goodObj), goodObj.Pkg().Path(), goodSite.targs)
+	if _, ok := exp.memo[goodKey]; !ok {
+		t.Fatalf("emitted copy %s missing from memo; later sites would re-emit it", first)
+	}
+	if base.Errors() != before {
+		t.Fatalf("emitted copy reported %d errors, want none", base.Errors()-before)
+	}
+	badObj := types2.NewFunc(syntax.Pos{}, fl.pkg.tpkg, "Bad", nil)
+	badRec := &cfRecord{name: "Bad", tparams: 1, source: "func Bad[T any]() string {\nreturn undeclaredX()\n}"}
+	exp.byObj[badObj] = &cfGenericDef{obj: badObj, record: badRec}
+	badSite := &cfSite{targs: []types2.Type{strType}, obj: badObj, pos: syntax.Pos{}}
+	badName := fl.cfCopyFor(badSite)
+	key := cfExpKey(cfFactObject(badObj), badObj.Pkg().Path(), badSite.targs)
+	if _, ok := exp.memo[key]; ok {
+		t.Fatalf("failed copy %s memoized without emission; later sites would reuse a missing copy", badName)
+	}
+	if got := countCopyDecls(fl, badName); got != 0 {
+		t.Fatalf("failed copy %s emitted %d times, want none", badName, got)
 	}
 }

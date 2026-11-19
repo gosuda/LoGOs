@@ -1,0 +1,216 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+cd w
+logos build ./...
+logos run ./app
+stdout '^add:isoiwrap-isoi$'
+stdout '^remove:drop:isoiwrap-isoiremove:drop:isiwrap-isi$'
+stdout '^deep:isiisoi$'
+logos test -count=1 -v ./...
+stdout '^--- PASS: TestExternalAdd '
+stdout '^--- PASS: TestExternalDeep '
+
+# SPEC: a comptime call inside an expansion whose type arguments are
+# concrete after substitution MUST expand into the same copy, at any
+# depth and across package boundaries.
+
+-- w/go.mod --
+module example.com/nestedcopy
+
+go 1.27
+
+-- w/lib/lib.lgo --
+package lib
+
+import "comptime"
+
+type Item struct {
+	ID      int64   `col:"id"`
+	Name    string  `col:"name"`
+	Note    string? `col:"note"`
+	Version int64   `col:"version"`
+}
+
+type Other struct {
+	ID      int64  `col:"id"`
+	Name    string `col:"name"`
+	Version int64  `col:"version"`
+}
+
+func KindOf[F any]() (string, bool) {
+	const switch F {
+	case int64:
+		return "i", true
+	case string:
+		return "s", true
+	case string?:
+		return "o", true
+	}
+	return "", false
+}
+
+func Wrap[E any](v *E) string {
+	const if !comptime.IsStruct[E]() {
+		comptime.Error("lib: need struct")
+	}
+	out := ""
+	const for _, f := range comptime.Fields[E]() {
+		kind, ok := KindOf[f.Type]()
+		if !ok {
+			panic("lib: unsupported field " + f.Name)
+		}
+		out += kind
+	}
+	run := func() string {
+		return Apply[E](v)
+	}
+	return out + run()
+}
+
+func Apply[E any](v *E) string {
+	const if !comptime.IsStruct[E]() {
+		comptime.Error("lib: need struct")
+	}
+	out := ""
+	const for _, f := range comptime.Fields[E]() {
+		kind, ok := KindOf[f.Type]()
+		if !ok {
+			panic("lib: unsupported field " + f.Name)
+		}
+		out += kind
+	}
+	return "wrap-" + out
+}
+
+func Add[E any](v *E) string {
+	const if comptime.IsStruct[E]() {
+		return "add:" + Wrap[E](v)
+	} else {
+		comptime.Error("lib: need struct")
+	}
+	return ""
+}
+
+func Drop[E any](v *E) string {
+	const if comptime.IsStruct[E]() {
+		return "drop:" + Wrap[E](v)
+	} else {
+		comptime.Error("lib: need struct")
+	}
+	return ""
+}
+
+func Remove[E any](v *E) string {
+	const if comptime.IsStruct[E]() {
+		return "remove:" + Drop[E](v)
+	} else {
+		comptime.Error("lib: need struct")
+	}
+	return ""
+}
+
+func DeepLeaf[E any](v *E) string {
+	const if !comptime.IsStruct[E]() {
+		comptime.Error("lib: need struct")
+	}
+	out := ""
+	const for _, f := range comptime.Fields[E]() {
+		kind, ok := KindOf[f.Type]()
+		if !ok {
+			panic("lib: unsupported field " + f.Name)
+		}
+		out += kind
+	}
+	return out
+}
+
+func DeepMid[E any](v *E) string {
+	const if comptime.IsStruct[E]() {
+		return DeepLeaf[E](v)
+	} else {
+		comptime.Error("lib: need struct")
+	}
+	return ""
+}
+
+func DeepTop[E any](v *E) string {
+	const if comptime.IsStruct[E]() {
+		return "deep:" + DeepMid[E](v)
+	} else {
+		comptime.Error("lib: need struct")
+	}
+	return ""
+}
+
+func DeepOther[E any](v *E) string {
+	const if comptime.IsStruct[E]() {
+		return DeepMid[E](v)
+	} else {
+		comptime.Error("lib: need struct")
+	}
+	return ""
+}
+
+-- w/lib/control.lgo --
+package lib
+
+var shapeItem = Item{}
+var shapeOther = Other{}
+
+func ControlAdd() string {
+	return Add(&shapeItem)
+}
+
+func ControlRemove() string {
+	s := Remove(&shapeItem)
+	return s + Remove(&shapeOther)
+}
+
+func ControlDeep() string {
+	return DeepTop(&shapeOther) + DeepOther(&shapeItem)
+}
+
+-- w/lib/extern_test.lgo --
+package lib_test
+
+import (
+	"testing"
+
+	"example.com/nestedcopy/lib"
+)
+
+type engineItem struct {
+	ID      int64  `col:"id"`
+	Name    string `col:"name"`
+	Version int64  `col:"version"`
+}
+
+func TestExternalAdd(t *testing.T) {
+	got := lib.Add(&engineItem{})
+	if got == "" {
+		t.Fatalf("Add returned empty string")
+	}
+}
+
+func TestExternalDeep(t *testing.T) {
+	got := lib.DeepTop(&engineItem{})
+	if got == "" {
+		t.Fatalf("DeepTop returned empty string")
+	}
+}
+
+-- w/app/app.lgo --
+package main
+
+import (
+	"fmt"
+
+	"example.com/nestedcopy/lib"
+)
+
+func main() {
+	fmt.Println(lib.ControlAdd())
+	fmt.Println(lib.ControlRemove())
+	fmt.Println(lib.ControlDeep())
+}

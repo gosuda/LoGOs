@@ -829,9 +829,8 @@ func (fl *fileLower) cfCopyFor(site *cfSite) string {
 	reported := base.Errors()
 	text, ok := fl.cfBuildCopy(site, rec, name)
 	exp.stack = exp.stack[:len(exp.stack)-1]
-	exp.memo[key] = name
-	if ok && base.Errors() == reported {
-		fl.cfEmitCopy(text, site)
+	if ok && base.Errors() == reported && fl.cfEmitCopy(text, site) {
+		exp.memo[key] = name
 	}
 	return name
 }
@@ -1262,18 +1261,19 @@ func (fl *fileLower) cfCaseBoundTypes(n syntax.Node, run *cfRun, parents map[syn
 	return bound
 }
 
-func (fl *fileLower) cfEmitCopy(text otext, site *cfSite) {
+func (fl *fileLower) cfEmitCopy(text otext, site *cfSite) bool {
 	file, errs := cfParseSource("package cfcopy\n" + text.s)
 	fn := cfFirstFunc(file)
 	if len(errs) > 0 || fn == nil {
 		base.Fatalf("logos: cannot parse comptime copy at %s: %v", site.pos.String(), errs)
 	}
 	if !fl.cfCheckCopyFunc(fn, site.pos, text) {
-		return
+		return false
 	}
 	region := fl.adoptRegion(text, site.pos, fn.Pos().FileBase(), 2, []syntax.Node{fn})
 	fl.file.DeclList = append(fl.file.DeclList, fn)
 	fl.addHost(fl.orig, fl.orig, &cfHost{regions: []*cfRegion{region}, head: "\n\n", tail: "\n"})
+	return true
 }
 
 func (fl *fileLower) cfCheckCopyFunc(fn *syntax.FuncDecl, pos syntax.Pos, text otext) bool {
