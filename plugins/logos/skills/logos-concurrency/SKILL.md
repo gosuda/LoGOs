@@ -10,79 +10,46 @@ metadata:
 
 # LoGOs concurrency
 
-LoGOs provides structured concurrency through goroutine groups and panic-safe synchronization primitives. Goroutines in `.lgo` files must run inside a `go group` block. Shared state is coordinated through `logos/sync.Locked[T]` and `logos/sync.Hot[T]`. `logos conc` runs the program or its tests with a monitor and reports concurrency faults that `logos lint` and `logos test -race` miss.
+LoGOs runs goroutines inside `go group` blocks. Shared state lives in `logos/sync.Locked[T]`. `logos conc` runs a program or its tests in a build that carries a monitor. The monitor reports five fault kinds. `logos lint` and `logos test -race` do not report them. No memory is raced and nothing has failed yet.
 
 ## Procedure
 
-1. Structure goroutines with `go group`: define child tasks inside `go group (ctx, limit = N) { ... }` blocks.
-2. Propagate errors: use `?` on fallible calls inside child tasks or invoke an error-last child call to yield errors to the group (direct `return` inside a child is rejected with `correctness::return_in_group_child`). Ensure the function enclosing the `go group` returns an `error`.
-3. Guard shared state: wrap mutable state with `logos/sync.Locked[T]` for mutex protection or `logos/sync.Hot[T]` for atomic read-mostly pointers.
-4. Run the linter and the race detector first: they catch static violations and exercised data races.
-5. Run the program under the monitor when the code is lint-clean and race-clean but still suspects a liveness or ordering fault: use `logos conc run` for a program and `logos conc test` for tests.
-6. Read each finding on standard error while the child still runs: repair the named position, then rerun without `conc` to confirm the program still behaves.
-7. Replay a shake failure with the printed seed: pass the same seed to reproduce the exact schedule.
+1. Write group code: start children inside `go group` blocks.
+2. Guard shared state with `logos/sync.Locked`.
+3. Run `logos lint` and `logos test -race` first.
+4. Run the program under the monitor only when it is lint-clean and race-clean.
+5. Use `logos conc run` for a program and `logos conc test` for tests.
+6. Read each finding on standard error while the child still runs.
+7. Repair the named position, then rerun without `conc` to confirm the behavior.
+8. Retry a shake failure with the printed seed to shake the run again.
 
-## Group syntax
+## Group and lock forms
 
 Each row contrasts the LoGOs form with the plain Go pattern it replaces.
 
 | LoGOs | Plain Go |
 |---|---|
-| `go group (ctx, limit = N) { go { work()? } }` | `g, gctx := rt.NewGroup(ctx, N)` followed by `g.Go(func(ctx context.Context) error { return work() })` and `g.Wait()` |
-| `go group (ctx) { go { work()? } }` | `g, gctx := rt.NewGroup(ctx, 0)` followed by `g.Go(func(ctx context.Context) error { return work() })` and `g.Wait()` |
+| `go group (ctx, limit = N) { go { work()? } }` | `rt.NewGroup(ctx, N)` followed by `Go` calls and `Wait` |
+| `go group (ctx) { go { work()? } }` | `rt.NewGroup(ctx, 0)` followed by `Go` calls and `Wait` |
 
-## Group semantics
+The group context cancels on the first child error or panic. The group joins every child before it returns. A child returns its error with `?`. A bare `return` inside a child is rejected. A `limit = N` bounds the children that run at one time. `Locked[T].WithLock` runs one callback at a time. Never return or leak the pointer from the callback.
 
-The compiler lowers `go group` blocks to `logos/rt.Group`. The following invariants govern group execution:
+## Run and test forms
 
-- Cancellation: the group context cancels upon the first child error or panic.
-- Joining: the group statement joins all child goroutines before proceeding. The enclosing function propagates any group error like `?`.
-- Concurrency limit: when `limit = N` is specified, an internal semaphore bounds concurrent execution to at most N child goroutines.
-- Child block contract: using `?` inside a child returns the error directly to the group.
-- Disallowed return: a bare `return` inside a child block is rejected with `correctness::return_in_group_child`.
-- Channel operations: direct channel send, receive, and range operations inside a child block automatically select on context cancellation.
-- Netpoll integration: children blocked on netpoll-backed network I/O wake within 100 ms of group cancellation with a timeout error.
-- Panic handling: a panicking child goroutine terminates the group and wraps the panic value and stack into `*logos/rt.PanicError`.
-
-## Shared state
-
-The `logos/sync` package provides concurrency containers:
-
-- `Locked[T]`: pairs a value of type `T` with a mutex. Call `l.WithLock(func(v *T) { ... })` to access the value. `WithLock` acquires the lock, executes the callback, and guarantees unlock on return or panic. Callbacks must not return or leak the pointer `*T`.
-- `Hot[T]`: holds a read-mostly pointer managed with atomic pointer swaps. `Load()` returns a read-only pointer `const *T`. `Store(*T)` publishes a new pointer. `Update(func(old const *T) *T)` applies updates inside a compare-and-swap loop without maintaining a retire list.
-
-## Diagnostics
-
-| Rule | Severity | Fix |
-|---|---|---|
-| `correctness::return_in_group_child` | forbid | Remove return statement; use ? or expression outcome to yield an error to the group. |
-| `correctness::child_outside_group` | forbid | Move the child go block inside an enclosing go group statement. |
-| `correctness::group_needs_error_result` | forbid | Add an error return type to the function enclosing the go group statement. |
-| `concurrency::unsupervised_goroutine` | forbid | Replace bare go f() with a managed child block inside go group. |
-| `concurrency::reentrant_withlock_deadlock` | forbid | Do not invoke WithLock on the same Locked receiver inside a WithLock callback. |
-| `concurrency::concurrent_multiword_race` | forbid | Protect multi-word structures accessed across goroutines with Locked or Hot. |
-| `conc::lock_order_inversion` | monitor | Take the two Locked values in one order everywhere, or keep both in one Locked value. |
-| `conc::group_child_stalled` | monitor | Make the child return when its context ends. |
-| `conc::goroutine_leak` | monitor | Give the wait an end: close the channel, release the lock, or wait on a context. |
-| `conc::lock_held_long` | monitor | Move the slow call out of the WithLock callback, or keep the value in Hot. |
-| `conc::group_unbounded` | monitor | Give the group a limit: `go group (ctx, limit = N)`. |
-
-## Use conc run and conc test
-
-Run `logos conc run` to watch a program. Run `logos conc test` to watch tests. Pick the verb by what executes the code. Keep every other flag unchanged: pass the same build and test flags used without `conc`. Place `conc` flags before the package for `run`. Place `conc` flags before `-args` or `--` for `test`. Treat everything after that boundary as program arguments. Expect each finding on standard error the moment the monitor sees it. Expect no output when the run is clean.
+`logos conc run` wraps `logos run`. `logos conc test` wraps `logos test`. Build and test flags pass through to the child. The monitor tag joins the build tags. `logos conc test` adds `-count=1` unless a count is already set. Place conc flags before the package for `run`. Place conc flags before `-args` or `--` for `test`. Text after that boundary belongs to the program.
 
 ```sh
-logos conc run ./cmd/app
-logos conc test -count=1 ./...
-logos conc run -hold 50ms ./slow serve --port 8080
-logos conc test -stall=200ms -count=1 ./ignores
+logos help conc
+logos conc run ./opposite
+logos conc test -count=1 ./opposite
+logos conc run ./oneorder
 ```
 
-## Read each finding kind
+Expect exit 0 for the help and the one-order run. Expect exit 1 for both opposite runs: the monitor prints one finding although the program exits zero.
 
-Each finding names a source position written by the user, a rule id, and a fix hint. Never edit a file under GOROOT to answer one.
+## Read conc::lock_order_inversion
 
-`conc::lock_order_inversion` means two goroutines took the same two `Locked` values in opposite orders. Treat it as a deadlock that this run escaped by timing. Run the two orders at once to deadlock. Repair by taking the two values in one order everywhere.
+Two goroutines took the same two `Locked` values in opposite orders. Treat it as a deadlock that this run escaped by timing. One order everywhere gives no finding. Repair by taking the two values in one order everywhere, or by keeping both in one `Locked` value. Never edit a file under GOROOT to answer one.
 
 ```lgo
 checking.WithLock(a => {
@@ -93,7 +60,9 @@ savings.WithLock(a => {
 })
 ```
 
-`conc::group_child_stalled` means a child still runs after its group was cancelled. Treat it as a join the group cannot reach. Repair by receiving from the `Done` channel of the context in a `select`, or by giving the context to the call that blocks.
+## Read conc::group_child_stalled
+
+A child did not return within the `-stall` duration after its group was cancelled. The group cannot join before the child returns. Repair by receiving from the `Done` channel of the context in a `select`. Or give the context to the call that blocks.
 
 ```lgo
 go group (ctx) {
@@ -102,16 +71,24 @@ go group (ctx) {
 }
 ```
 
-`conc::goroutine_leak` means a goroutine waits on something no running goroutine reaches. Treat it as a wait that never ends. Repair by letting the owner close the channel or release the lock, or by waiting on a context in the same `select`.
+## Read conc::goroutine_leak
 
-```lgo
+A goroutine waits, and no goroutine that can run reaches what it waits for. It never ends. The leak source lives in an imported Go package. A bare child outside `go group` is rejected in `.lgo`, so the `.lgo` caller only starts it and sleeps. Repair by letting the owner close the channel or release the lock. Or wait on a context in the same `select`. A goroutine the program can still wake is not a leak. A program where every goroutine sleeps ends with the runtime deadlock error and no finding.
+
+```go
+package blocks
+
 func Subscribe() {
-  updates := make(chan int)
-  go { <-updates }
+	updates := make(chan int)
+	go func() {
+		<-updates
+	}()
 }
 ```
 
-`conc::lock_held_long` means one goroutine held a `Locked` value past the `-hold` duration while another goroutine waited. Treat it as a liveness fault, not a race. Repair by copying what the slow call needs, leaving the callback, then calling; or keep the value in `Hot` when readers must not wait.
+## Read conc::lock_held_long
+
+One goroutine held a `Locked` value past the `-hold` duration while another goroutine waited. Treat it as a liveness fault, not a race. The monitor keeps no timer for a hold. It prints the finding when a waiter comes after the limit, or when the hold ends. Repair by copying what the slow call needs, leaving the callback, then calling. Keep the value in `logos/sync.Hot` when readers must not wait.
 
 ```lgo
 ledger.WithLock(a => {
@@ -120,7 +97,9 @@ ledger.WithLock(a => {
 })
 ```
 
-`conc::group_unbounded` means a group without a limit runs 10000 children at one time. Treat it as resource growth that follows the work given to the group. Repair by giving the group a limit.
+## Read conc::group_unbounded
+
+A group without a limit runs 10000 children at one time. The count follows the work the program gives the group. A group with a limit never gets this finding. Repair by giving the group a limit.
 
 ```lgo
 go group (ctx) {
@@ -130,37 +109,50 @@ go group (ctx) {
 }
 ```
 
-A shake schedule fault has no rule id. Treat a test that fails only under `-shake` as an order dependence. Rerun with the printed seed to replay it.
-
 ## Set flags and replay seeds
 
 Pass `-stall` with a Go duration to set how long a cancelled-group child may run before it is reported. Omit it to keep the 5s default. Pass `-hold` with a Go duration to set how long a contested hold may last. Omit it to keep the 100ms default. Use either the space form or the `=` form for both.
 
 ```sh
 logos conc run -stall 200ms ./ignores
-logos conc run -stall=200ms ./ignores
 logos conc run -hold 50ms ./slow
-logos conc run -hold=50ms ./slow
+logos conc run -hold 2s ./slow
 ```
 
-Pass `-shake` with a decimal seed to yield at group and lock hook points from that seed. Rerun the printed seed to replay the schedule. Pass bare `-shake` to take the seed from the clock; the command prints the seed it used. Omit `-shake` to turn shaking off. Treat a non-numeric seed as a usage error.
+Expect exit 1 for the first two: each prints its finding. Expect exit 0 for the third: the 400ms hold stays below the 2s limit.
+
+Pass `-shake` with a decimal seed to yield at group and lock hook points from that seed. Rerun the printed seed to shake the run again. The seed fixes the yield counts, not the exact goroutine schedule. Treat a rerun as a retry, not an exact replay. Pass bare `-shake` to take the seed from the clock; the command prints the seed it used. A bare `-shake` followed by a number takes that number as its seed. Omit `-shake` to turn shaking off. A seed of 0 is a usage error, because seed 0 turns shaking off. A non-numeric seed is a usage error.
 
 ```sh
 logos conc test -shake=1 -count=1 ./ord
-logos conc test -shake 1 -count=1 ./ord
+logos conc run -shake=1 ./ord
 logos conc test -shake -count=1 ./ord
 ```
 
-Pass `--json-diagnostics` to print each finding as one JSON object per line in the `logos lint --json-diagnostics` schema. Expect the `note` field to hold the position lines and the fix line. Expect tab-separated text output otherwise. Apply every repair by hand: this revision offers no `--fix` flag.
+Expect exit 1 for the test: the order flips and the test fails. Expect exit 1 for the run: the program prints the flipped order and `logos run` reports `exit status 2`. Expect exit 0 or 1 for the bare seed: the drawn order decides. Every one prints its `shake seed` line on standard error.
+
+Pass `--json-diagnostics` to print each finding as one JSON object per line in the `logos lint --json-diagnostics` schema. Expect the `note` field to hold the position lines and the fix line. Expect tab-separated text output otherwise. Apply every repair by hand. This revision offers no `--fix` flag.
 
 ```sh
 logos conc run --json-diagnostics ./opposite
 ```
 
+Expect exit 1 with one JSON object on standard error.
+
 ## Read exit codes
 
-Expect the child status when the child exits nonzero. Expect 1 when the child exits zero but a finding was printed. Expect 0 when the child exits zero and no finding was printed. Treat a damaged finding line as a finding. Expect a usage error and no child run for a bad flag value. Run only on unix: the command transports findings over a named pipe.
+Expect the status of the `logos run` or `logos test` child when that is not zero. A program that exits N makes `logos run` print `exit status N` and exit 1, so `conc run` exits 1 for it. Expect 1 when the child exits zero but a finding was printed. Expect 0 when the child exits zero and no finding was printed. Treat a damaged finding line as a finding. Expect a usage error and no child run for a bad flag value.
+
+```sh
+logos conc run ./oneorder fail
+logos conc run ./leaks
+logos conc test ./opposite
+logos conc run -stall soon ./ignores
+logos conc test -shake=nope -count=1 ./ord
+```
+
+Expect exit 1 for the first: `logos run` reports `exit status 3` and no finding prints. Expect exit 1 for the next two: each prints its finding. Expect exit 1 for both usage errors: each prints its message and runs no child. `logos conc test` without `-count` adds `-count=1` itself.
 
 ## Know what conc does not find
 
-Do not use `conc` for data races; use `logos test -race`. Do not use `conc` for static violations; `logos lint` rejects them before the program runs. Do not expect a finding for one lock order, a bounded group, or a goroutine the program can still wake. Do not expect a leak finding when every goroutine sleeps; the runtime ends that program itself with its own deadlock error. Do not expect findings from a plain `logos run`; only a `conc` build carries the monitor.
+Do not use `conc` for data races; use `logos test -race`. Do not use `conc` for static violations; `logos lint` rejects them before the program runs. Do not expect a finding for one lock order, a bounded group, or a goroutine the program can still wake. Do not expect findings from a plain `logos run`; only a `conc` build carries the monitor. Run only on unix: the command transports findings over a named pipe.
