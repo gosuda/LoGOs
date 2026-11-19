@@ -1,0 +1,4 @@
+ok opt-capture-arg
+ok opt-capture-arg-err
+ok opt-paren-param
+ok opt-paren-param-first

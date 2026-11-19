@@ -40,3 +40,20 @@ func TestCfCopyNameShape(t *testing.T) {
 		t.Fatalf("middle-dot copy name parses, want a parse error")
 	}
 }
+func TestCfCalleeObjResolvesImportMarker(t *testing.T) {
+	leaf := types2.NewPackage("example.com/fwdtest/leaf", "leaf")
+	desc := types2.NewFunc(syntax.Pos{}, leaf, "Describe", nil)
+	leaf.Scope().Insert(desc)
+	leaf.MarkComplete()
+	mid := types2.NewPackage("example.com/fwdtest/mid", "mid")
+	mid.SetImports([]*types2.Package{leaf})
+	mid.MarkComplete()
+	top := types2.NewPackage("example.com/fwdtest/top", "top")
+	top.MarkComplete()
+	fl := &fileLower{pkg: &packageLower{tpkg: top, ctExp: &cfExpander{roots: []*types2.Package{mid}}}}
+	sites := &cfSites{scope: mid.Scope(), imports: []cfImport{{name: "leaf", path: "example.com/fwdtest/leaf"}}}
+	call := &syntax.SelectorExpr{X: &syntax.Name{Value: cfImportMarker + "0"}, Sel: &syntax.Name{Value: "Describe"}}
+	if got := fl.cfCalleeObj(call, sites); got != desc {
+		t.Fatalf("cfCalleeObj import marker = %v, want Describe", got)
+	}
+}
