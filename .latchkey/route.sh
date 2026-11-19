@@ -7,11 +7,14 @@ ev=${LATCHKEY_CI_EVENT_CLASS:-}
 files=; base=; all=false
 case $ev in
   pr_update)
-    git fetch -q --no-tags --depth=300 origin "$LATCHKEY_CI_BASE_REF"
-    base=$(git rev-parse FETCH_HEAD)
-    git fetch -q --no-tags --depth=300 origin "$LATCHKEY_CI_SHA" || true
-    base=$(git merge-base "$base" HEAD 2>/dev/null) || base=$(git rev-parse FETCH_HEAD)
-    files=$(git diff --name-only "$base" HEAD) ;;
+  git fetch -q --no-tags --depth=300 origin "$LATCHKEY_CI_BASE_REF"
+  target=$(git rev-parse FETCH_HEAD)
+  git fetch -q --no-tags --depth=300 origin "$LATCHKEY_CI_SHA" || true
+  # The second fetch replaces FETCH_HEAD with the PR commit, so a failed
+  # merge-base must fall back to the saved target tip, never FETCH_HEAD:
+  # diffing the tip against itself would route nothing.
+  base=$(git merge-base "$target" HEAD 2>/dev/null) || base=$target
+  files=$(git diff --name-only "$base" HEAD) ;;
   branch_push)
     git fetch -q --no-tags --depth=2 origin "$LATCHKEY_CI_SHA"
     files=$(git diff --name-only HEAD~1 HEAD) || files= ;;
