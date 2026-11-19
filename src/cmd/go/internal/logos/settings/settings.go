@@ -34,6 +34,7 @@ type Flags struct {
 	WasmLoader   bool
 	WasmFeatures string
 	LintCmd      bool
+	RaceRuntime  bool
 }
 
 // CommandLine is the storage the flag-registration hook lines bind to.
@@ -41,7 +42,10 @@ var CommandLine Flags
 
 // Cgo is the build-wide cgo decision: Enabled and Opinion OR across the
 // main module roots, and Changed tracks an explicit user CGO_ENABLED.
-type Cgo struct{ Enabled, Opinion, Changed bool }
+// RaceRuntimeOnly marks a build whose roots all ban cgo and whose race
+// runtime still links through runtime/cgo: the per-package refusal stays
+// in force, and the standard library keeps its pure-Go paths.
+type Cgo struct{ Enabled, Opinion, Changed, RaceRuntimeOnly bool }
 
 // Settings is the resolved logos build state: every decision Load derives
 // from the flags, the environment, and the main module roots' logos.toml.
@@ -112,7 +116,7 @@ func Load(modRoot string, flags Flags) (*Settings, error) {
 	if len(roots) == 0 && modRoot != "" {
 		roots = []string{modRoot}
 	}
-	s.Cgo = cgoDecision(roots, flags.Env.CGO_ENABLED)
+	s.Cgo = cgoDecision(roots, flags.Env.CGO_ENABLED, flags.RaceRuntime)
 	s.Arena = anyRootArena(roots)
 	if s.Arena {
 		s.Experiment = WithArena(flags.Env.GOEXPERIMENT)
@@ -261,7 +265,7 @@ func archLevels(f *config.File, env Env) (amd64, arm64 string) {
 	return amd64, arm64
 }
 
-func cgoDecision(roots []string, cgoEnv string) (c Cgo) {
+func cgoDecision(roots []string, cgoEnv string, raceRuntime bool) (c Cgo) {
 	c.Changed = cgoEnv == "0" || cgoEnv == "1"
 	for _, root := range roots {
 		enabled, opinion := ModuleAt(root).CgoOpinion(cgoEnv)
@@ -269,6 +273,9 @@ func cgoDecision(roots []string, cgoEnv string) (c Cgo) {
 			c.Opinion = true
 			c.Enabled = c.Enabled || enabled
 		}
+	}
+	if raceRuntime && c.Opinion && !c.Enabled && cgoEnv != "0" {
+		c.Enabled, c.RaceRuntimeOnly = true, true
 	}
 	return c
 }
