@@ -1,0 +1,366 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package db
+
+import (
+	"bytes"
+	"database/sql"
+	"database/sql/driver"
+	"fmt"
+	"strconv"
+	"time"
+
+	"uuid"
+)
+
+// Assign copies src into the address dst, converting when the copy is
+// lossless. It is the comptime twin of convertAssignRows: the converter
+// is selected by the static type T, and only the driver value switches
+// at run time, so a scan pays no reflect boxing on the destination
+// side. A nil src is an absent value: it clears *any and *[]byte, fails
+// a non-option leaf with the same text the standard library reports,
+// and reaches a Scanner unchanged so sql.Null keeps its Valid flag
+// rules. Error texts match convertAssign for every covered pair.
+func Assign[T any](dst *T, src driver.Value) error {
+	if s, ok := any(dst).(sql.Scanner); ok {
+		return s.Scan(src)
+	}
+	if src == nil {
+		if p, ok := any(dst).(*any); ok {
+			*p = nil
+			return nil
+		}
+	}
+	if p, ok := any(dst).(*any); ok {
+		if b, ok := src.([]byte); ok {
+			*p = bytes.Clone(b)
+			return nil
+		}
+		*p = src
+		return nil
+	}
+	if err, done := assignText(dst, src); done {
+		return err
+	}
+	if err, done := assignInt(dst, src); done {
+		return err
+	}
+	if err, done := assignUint(dst, src); done {
+		return err
+	}
+	if err, done := assignFloat(dst, src); done {
+		return err
+	}
+	return unsupportedScan(dst, src)
+}
+
+func assignText[T any](dst *T, src driver.Value) (error, bool) {
+	const switch T {
+	case ~string:
+		if src == nil {
+			return nullConvertErr("string"), true
+		}
+		s, ok := srcTextStrict(src)
+		if !ok {
+			return unsupportedScan(dst, src), true
+		}
+		*dst = T(s)
+		return nil, true
+	case ~bool:
+		b, err := convertBoolValue(src)
+		if err != nil {
+			return err, true
+		}
+		*dst = T(b)
+		return nil, true
+	case []byte:
+		return storeBytesValue(dst, src), true
+	case time.Time:
+		if v, ok := src.(time.Time); ok {
+			*dst = v
+			return nil, true
+		}
+		return unsupportedScan(dst, src), true
+	case uuid.UUID:
+		return storeUUIDValue(dst, src), true
+	case sql.RawBytes:
+		return storeRawValue(dst, src), true
+	}
+	return nil, false
+}
+
+func assignInt[T any](dst *T, src driver.Value) (error, bool) {
+	const switch T {
+	case ~int:
+		return storeIntValue(dst, src, strconv.IntSize, "int"), true
+	case ~int8:
+		return storeInt8Value(dst, src), true
+	case ~int16:
+		return storeInt16Value(dst, src), true
+	case ~int32:
+		return storeInt32Value(dst, src), true
+	case ~int64:
+		return storeInt64Value(dst, src), true
+	}
+	return nil, false
+}
+
+func assignUint[T any](dst *T, src driver.Value) (error, bool) {
+	const switch T {
+	case ~uint:
+		return storeUintValue(dst, src, strconv.IntSize, "uint"), true
+	case ~uint8:
+		return storeUint8Value(dst, src), true
+	case ~uint16:
+		return storeUint16Value(dst, src), true
+	case ~uint32:
+		return storeUint32Value(dst, src), true
+	case ~uint64:
+		return storeUint64Value(dst, src), true
+	}
+	return nil, false
+}
+
+func assignFloat[T any](dst *T, src driver.Value) (error, bool) {
+	const switch T {
+	case ~float32:
+		return storeFloat32Value(dst, src), true
+	case ~float64:
+		return storeFloat64Value(dst, src), true
+	}
+	return nil, false
+}
+
+func storeIntValue[T ~int](dst *T, src driver.Value, bits int, kind string) error {
+	v, err := parseIntValue(src, bits, kind)
+	if err != nil {
+		return err
+	}
+	*dst = T(int(v))
+	return nil
+}
+
+func storeInt8Value[T ~int8](dst *T, src driver.Value) error {
+	v, err := parseIntValue(src, 8, "int8")
+	if err != nil {
+		return err
+	}
+	*dst = T(int8(v))
+	return nil
+}
+
+func storeInt16Value[T ~int16](dst *T, src driver.Value) error {
+	v, err := parseIntValue(src, 16, "int16")
+	if err != nil {
+		return err
+	}
+	*dst = T(int16(v))
+	return nil
+}
+
+func storeInt32Value[T ~int32](dst *T, src driver.Value) error {
+	v, err := parseIntValue(src, 32, "int32")
+	if err != nil {
+		return err
+	}
+	*dst = T(int32(v))
+	return nil
+}
+
+func storeInt64Value[T ~int64](dst *T, src driver.Value) error {
+	v, err := parseIntValue(src, 64, "int64")
+	if err != nil {
+		return err
+	}
+	*dst = T(v)
+	return nil
+}
+
+func storeUintValue[T ~uint](dst *T, src driver.Value, bits int, kind string) error {
+	v, err := parseUintValue(src, bits, kind)
+	if err != nil {
+		return err
+	}
+	*dst = T(uint(v))
+	return nil
+}
+
+func storeUint8Value[T ~uint8](dst *T, src driver.Value) error {
+	v, err := parseUintValue(src, 8, "uint8")
+	if err != nil {
+		return err
+	}
+	*dst = T(uint8(v))
+	return nil
+}
+
+func storeUint16Value[T ~uint16](dst *T, src driver.Value) error {
+	v, err := parseUintValue(src, 16, "uint16")
+	if err != nil {
+		return err
+	}
+	*dst = T(uint16(v))
+	return nil
+}
+
+func storeUint32Value[T ~uint32](dst *T, src driver.Value) error {
+	v, err := parseUintValue(src, 32, "uint32")
+	if err != nil {
+		return err
+	}
+	*dst = T(uint32(v))
+	return nil
+}
+
+func storeUint64Value[T ~uint64](dst *T, src driver.Value) error {
+	v, err := parseUintValue(src, 64, "uint64")
+	if err != nil {
+		return err
+	}
+	*dst = T(v)
+	return nil
+}
+
+func storeFloat32Value[T ~float32](dst *T, src driver.Value) error {
+	v, err := parseFloatValue(src, 32, "float32")
+	if err != nil {
+		return err
+	}
+	*dst = T(float32(v))
+	return nil
+}
+
+func storeFloat64Value[T ~float64](dst *T, src driver.Value) error {
+	v, err := parseFloatValue(src, 64, "float64")
+	if err != nil {
+		return err
+	}
+	*dst = T(v)
+	return nil
+}
+
+func storeBytesValue(dst *[]byte, src driver.Value) error {
+	switch s := src.(type) {
+	case nil:
+		*dst = nil
+		return nil
+	case string:
+		*dst = []byte(s)
+		return nil
+	case []byte:
+		*dst = bytes.Clone(s)
+		return nil
+	case time.Time:
+		*dst = s.AppendFormat(make([]byte, 0, len(time.RFC3339Nano)), time.RFC3339Nano)
+		return nil
+	}
+	if b, ok := appendNumericValue(nil, src); ok {
+		*dst = b
+		return nil
+	}
+	return unsupportedScan(dst, src)
+}
+
+func storeRawValue(dst *sql.RawBytes, src driver.Value) error {
+	switch s := src.(type) {
+	case nil:
+		*dst = nil
+		return nil
+	case string:
+		*dst = sql.RawBytes(s)
+		return nil
+	case []byte:
+		*dst = sql.RawBytes(bytes.Clone(s))
+		return nil
+	case time.Time:
+		*dst = sql.RawBytes(s.AppendFormat(make([]byte, 0, len(time.RFC3339Nano)), time.RFC3339Nano))
+		return nil
+	}
+	if b, ok := appendNumericValue(nil, src); ok {
+		*dst = sql.RawBytes(b)
+		return nil
+	}
+	return unsupportedScan(dst, src)
+}
+
+func storeUUIDValue(dst *uuid.UUID, src driver.Value) error {
+	switch s := src.(type) {
+	case string:
+		u, err := uuid.Parse(s)
+		if err != nil {
+			return fmt.Errorf("converting driver.Value type string (%q) to a UUID: %v", s, err)
+		}
+		*dst = u
+		return nil
+	case []byte:
+		if len(s) == len(*dst) {
+			copy((*dst)[:], s)
+			return nil
+		}
+		var u uuid.UUID
+		if err := u.UnmarshalText(s); err != nil {
+			return fmt.Errorf("converting driver.Value type []byte (%q) to a UUID: %v", s, err)
+		}
+		*dst = u
+		return nil
+	}
+	return unsupportedScan(dst, src)
+}
+
+func parseIntValue(src driver.Value, bits int, kind string) (int64, error) {
+	if src == nil {
+		return 0, nullConvertErr(kind)
+	}
+	s := srcNumberText(src)
+	v, err := strconv.ParseInt(s, 10, bits)
+	if err != nil {
+		return 0, cannotConvertErr(src, s, kind, err)
+	}
+	return v, nil
+}
+
+func parseUintValue(src driver.Value, bits int, kind string) (uint64, error) {
+	if src == nil {
+		return 0, nullConvertErr(kind)
+	}
+	s := srcNumberText(src)
+	v, err := strconv.ParseUint(s, 10, bits)
+	if err != nil {
+		return 0, cannotConvertErr(src, s, kind, err)
+	}
+	return v, nil
+}
+
+func parseFloatValue(src driver.Value, bits int, kind string) (float64, error) {
+	if src == nil {
+		return 0, nullConvertErr(kind)
+	}
+	s := srcNumberText(src)
+	v, err := strconv.ParseFloat(s, bits)
+	if err != nil {
+		return 0, cannotConvertErr(src, s, kind, err)
+	}
+	return v, nil
+}
+
+func nullConvertErr(kind string) error {
+	return fmt.Errorf("converting NULL to %s is unsupported", kind)
+}
+
+func cannotConvertErr(src driver.Value, s string, kind string, err error) error {
+	err = strconvErr(err)
+	return fmt.Errorf("converting driver.Value type %T (%q) to a %s: %v", src, s, kind, err)
+}
+
+func unsupportedScan(dst any, src any) error {
+	return fmt.Errorf("unsupported Scan, storing driver.Value type %T into type %T", src, dst)
+}
+
+func strconvErr(err error) error {
+	if ne, ok := err.(*strconv.NumError); ok {
+		return ne.Err
+	}
+	return err
+}

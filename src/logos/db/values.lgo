@@ -1,0 +1,225 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package db
+
+import (
+	"bytes"
+	"database/sql/driver"
+	"fmt"
+	"logos/rt"
+	"strconv"
+	"time"
+)
+
+// srcTextStrict renders a driver value for a string destination. Only
+// the kinds the standard library accepts report true; anything else,
+// including a decimal or a cursor, is left for the unsupported error.
+func srcTextStrict(src driver.Value) (string, bool) {
+	switch s := src.(type) {
+	case string:
+		return s, true
+	case []byte:
+		return string(s), true
+	case bool:
+		return strconv.FormatBool(s), true
+	case int:
+		return strconv.FormatInt(int64(s), 10), true
+	case int8:
+		return strconv.FormatInt(int64(s), 10), true
+	case int16:
+		return strconv.FormatInt(int64(s), 10), true
+	case int32:
+		return strconv.FormatInt(int64(s), 10), true
+	case int64:
+		return strconv.FormatInt(s, 10), true
+	case uint:
+		return strconv.FormatUint(uint64(s), 10), true
+	case uint8:
+		return strconv.FormatUint(uint64(s), 10), true
+	case uint16:
+		return strconv.FormatUint(uint64(s), 10), true
+	case uint32:
+		return strconv.FormatUint(uint64(s), 10), true
+	case uint64:
+		return strconv.FormatUint(s, 10), true
+	case float32:
+		return strconv.FormatFloat(float64(s), 'g', -1, 32), true
+	case float64:
+		return strconv.FormatFloat(s, 'g', -1, 64), true
+	case time.Time:
+		return s.Format(time.RFC3339Nano), true
+	}
+	return "", false
+}
+
+// srcNumberText renders a driver value for a numeric destination. It
+// mirrors asString exactly, including the Sprintf fallback for exotic
+// sources, so invalid-syntax texts match the standard library.
+func srcNumberText(src driver.Value) string {
+	if s, ok := srcTextStrict(src); ok {
+		return s
+	}
+	return fmt.Sprintf("%v", src)
+}
+
+// convertBoolValue converts a driver value with the driver.Bool rules,
+// enumerated without reflect so every width is named explicitly.
+func convertBoolValue(src driver.Value) (bool, error) {
+	switch s := src.(type) {
+	case bool:
+		return s, nil
+	case string:
+		return parseBoolText(s, src)
+	case []byte:
+		return parseBoolText(string(s), src)
+	case int:
+		return boolFromInt(int64(s), src)
+	case int8:
+		return boolFromInt(int64(s), src)
+	case int16:
+		return boolFromInt(int64(s), src)
+	case int32:
+		return boolFromInt(int64(s), src)
+	case int64:
+		return boolFromInt(s, src)
+	case uint:
+		return boolFromUint(uint64(s), src)
+	case uint8:
+		return boolFromUint(uint64(s), src)
+	case uint16:
+		return boolFromUint(uint64(s), src)
+	case uint32:
+		return boolFromUint(uint64(s), src)
+	case uint64:
+		return boolFromUint(s, src)
+	}
+	return false, fmt.Errorf("sql/driver: couldn't convert %v (%T) into type bool", src, src)
+}
+
+func parseBoolText(s string, src driver.Value) (bool, error) {
+	b, err := strconv.ParseBool(s)
+	if err != nil {
+		return false, fmt.Errorf("sql/driver: couldn't convert %q into type bool", s)
+	}
+	return b, nil
+}
+
+func boolFromInt(iv int64, src driver.Value) (bool, error) {
+	if iv == 1 || iv == 0 {
+		return iv == 1, nil
+	}
+	return false, fmt.Errorf("sql/driver: couldn't convert %d into type bool", iv)
+}
+
+func boolFromUint(uv uint64, src driver.Value) (bool, error) {
+	if uv == 1 || uv == 0 {
+		return uv == 1, nil
+	}
+	return false, fmt.Errorf("sql/driver: couldn't convert %d into type bool", uv)
+}
+
+// appendNumericValue appends the decimal rendering of a numeric,
+// string or bool driver value. It mirrors asBytes without reflect.
+func appendNumericValue(buf []byte, src driver.Value) ([]byte, bool) {
+	switch s := src.(type) {
+	case int:
+		return strconv.AppendInt(buf, int64(s), 10), true
+	case int8:
+		return strconv.AppendInt(buf, int64(s), 10), true
+	case int16:
+		return strconv.AppendInt(buf, int64(s), 10), true
+	case int32:
+		return strconv.AppendInt(buf, int64(s), 10), true
+	case int64:
+		return strconv.AppendInt(buf, s, 10), true
+	case uint:
+		return strconv.AppendUint(buf, uint64(s), 10), true
+	case uint8:
+		return strconv.AppendUint(buf, uint64(s), 10), true
+	case uint16:
+		return strconv.AppendUint(buf, uint64(s), 10), true
+	case uint32:
+		return strconv.AppendUint(buf, uint64(s), 10), true
+	case uint64:
+		return strconv.AppendUint(buf, s, 10), true
+	case float32:
+		return strconv.AppendFloat(buf, float64(s), 'g', -1, 32), true
+	case float64:
+		return strconv.AppendFloat(buf, s, 'g', -1, 64), true
+	case bool:
+		return strconv.AppendBool(buf, s), true
+	case string:
+		return append(buf, s...), true
+	}
+	return nil, false
+}
+
+// NotNullDest scans one column into a non-option field. A NULL column
+// is the twin's shape error; every other value converts through Assign.
+type NotNullDest[V any] struct {
+	dst  *V
+	path string
+}
+
+// Scan implements sql.Scanner.
+func (d *NotNullDest[V]) Scan(src any) error {
+	if src == nil {
+		return fmt.Errorf("db: NULL in non-optional %s", d.path)
+	}
+	return Assign[V](d.dst, src)
+}
+
+// OptionDest scans one column into an option field. A NULL column
+// becomes absent; any other value converts through Assign.
+type OptionDest[V any] struct {
+	dst  *rt.Option[V]
+	path string
+}
+
+// Scan implements sql.Scanner.
+func (d *OptionDest[V]) Scan(src any) error {
+	if src == nil {
+		var none rt.Option[V]
+		*d.dst = none
+		return nil
+	}
+	var v V
+	if err := Assign[V](&v, src); err != nil {
+		return err
+	}
+	*d.dst = rt.Option[V]{Value: v, Present: true}
+	return nil
+}
+
+// AnyDest scans one column into an *any destination. Byte slices are
+// cloned so the row never aliases driver memory.
+type AnyDest struct {
+	dst *any
+}
+
+// Scan implements sql.Scanner.
+func (d *AnyDest) Scan(src any) error {
+	if src == nil {
+		*d.dst = nil
+		return nil
+	}
+	if b, ok := src.([]byte); ok {
+		*d.dst = bytes.Clone(b)
+		return nil
+	}
+	*d.dst = src
+	return nil
+}
+
+// ScannerDest binds a destination that converts itself, such as
+// sql.Null. The wrapped Scan owns the conversion.
+type ScannerDest struct {
+	scan func(src any) error
+}
+
+// Scan implements sql.Scanner.
+func (d *ScannerDest) Scan(src any) error {
+	return d.scan(src)
+}

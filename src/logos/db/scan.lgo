@@ -1,0 +1,368 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package db
+
+import (
+	"comptime"
+	"database/sql"
+	"fmt"
+	"logos/rt"
+	"strings"
+	"time"
+
+	"uuid"
+)
+// ScanPlan describes the expected columns of one row or scalar query
+// in declaration order with nested structs flattened in place.
+type ScanPlan struct {
+	Type  string
+	Names []string
+	Paths []string
+	Count int
+}
+
+// PlanFields records the expected columns of struct T. Time and
+// Scanner fields are claimed by the runtime check first; the const if
+// then recurses into the remaining structs, whose types are concrete
+// structs here, while options and scalars take the inferred leaf call.
+func PlanFields[T any](row *T, prefix string, plan *ScanPlan) error {
+	const for _, f := range comptime.Fields[T]() {
+		if !PlanClaimed(&row.[f], prefix+"."+f.Name, f.Name, f.Tag.Get("col"), plan) {
+			const if comptime.IsStruct[f.Type]() {
+				if err := PlanFields[f.Type](&row.[f], prefix+"."+f.Name, plan); err != nil {
+					return err
+				}
+			} else {
+				if err := PlanScalar(&row.[f], prefix+"."+f.Name, f.Name, f.Tag.Get("col"), plan); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// PlanClaimed records the column for a time.Time or Scanner field and
+// reports whether it did, so the const if above only sees plain
+// structs, options, scalars and unsupported types.
+func PlanClaimed[F any](dst *F, path string, name string, tag string, plan *ScanPlan) bool {
+	var zero F
+	if _, isTime := any(zero).(time.Time); isTime {
+		PlanLeaf(path, name, tag, plan)
+		return true
+	}
+	if _, isScanner := any(dst).(sql.Scanner); isScanner {
+		PlanLeaf(path, name, tag, plan)
+		return true
+	}
+	return false
+}
+
+// PlanScalar records one non-struct field. The probe ScanLeaf call
+// rejects an unsupported field type before any row is read.
+func PlanScalar[F any](probe *F, path string, name string, tag string, plan *ScanPlan) error {
+	var scratch []any
+	if err := ScanLeaf[F](probe, path, &scratch); err != nil {
+		return err
+	}
+	PlanLeaf(path, name, tag, plan)
+	return nil
+}
+
+// PlanLeaf appends one expected column: the col tag when set, else the
+// snake-case field name.
+func PlanLeaf(path string, name string, tag string, plan *ScanPlan) {
+	column := tag
+	if column == "" {
+		column = SnakeName(name)
+	}
+	plan.Names = append(plan.Names, column)
+	plan.Paths = append(plan.Paths, path)
+}
+
+// ScanFields binds one destination per field of the row. Time and
+// Scanner fields are claimed by the runtime check first; the const if
+// then recurses into the remaining structs, whose types are concrete
+// structs here, while options and scalars take the inferred leaf call.
+// The caller builds the vector once and reuses it for every row.
+func ScanFields[T any](row *T, prefix string, dests *[]any) error {
+	const for _, f := range comptime.Fields[T]() {
+		if !ScanClaimed(&row.[f], prefix+"."+f.Name, dests) {
+			const if comptime.IsStruct[f.Type]() {
+				if err := ScanFields[f.Type](&row.[f], prefix+"."+f.Name, dests); err != nil {
+					return err
+				}
+			} else {
+				if err := ScanLeaf(&row.[f], prefix+"."+f.Name, dests); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// ScanClaimed binds time.Time and Scanner fields through the runtime
+// check and reports whether it did, so the const if above only sees
+// plain structs, options, scalars and unsupported types.
+func ScanClaimed[F any](dst *F, path string, dests *[]any) bool {
+	return ScanPlain(any(dst), path, dests) || ScanScanner(any(dst), path, dests)
+}
+
+func ScanLeaf[F any](dst *F, path string, dests *[]any) error {
+	if ScanPlain(any(dst), path, dests) || ScanOption(any(dst), path, dests) {
+		return nil
+	}
+	if ScanAny(any(dst), path, dests) || ScanScanner(any(dst), path, dests) {
+		return nil
+	}
+	before := len(*dests)
+	AppendNamed[F](dst, path, dests)
+	AppendNamedUint[F](dst, path, dests)
+	AppendNamedFloat[F](dst, path, dests)
+	if len(*dests) != before+1 {
+		return fmt.Errorf("db: %s: unsupported type", path)
+	}
+	return nil
+}
+
+// AppendNamed binds a named type by its underlying kind. A const switch
+// tilde case needs a basic type, so named slice types stay unsupported.
+func AppendNamed[F any](dst *F, path string, dests *[]any) {
+	const switch F {
+	case ~string:
+		*dests = append(*dests, &NotNullDest[F]{dst: dst, path: path})
+	case ~bool:
+		*dests = append(*dests, &NotNullDest[F]{dst: dst, path: path})
+	case ~int:
+		*dests = append(*dests, &NotNullDest[F]{dst: dst, path: path})
+	case ~int8:
+		*dests = append(*dests, &NotNullDest[F]{dst: dst, path: path})
+	case ~int16:
+		*dests = append(*dests, &NotNullDest[F]{dst: dst, path: path})
+	case ~int32:
+		*dests = append(*dests, &NotNullDest[F]{dst: dst, path: path})
+	}
+}
+
+// AppendNamedUint binds the remaining named integer kinds. It is split
+// from AppendNamed so each dispatcher stays under the complexity limit.
+func AppendNamedUint[F any](dst *F, path string, dests *[]any) {
+	const switch F {
+	case ~int64:
+		*dests = append(*dests, &NotNullDest[F]{dst: dst, path: path})
+	case ~uint:
+		*dests = append(*dests, &NotNullDest[F]{dst: dst, path: path})
+	case ~uint8:
+		*dests = append(*dests, &NotNullDest[F]{dst: dst, path: path})
+	case ~uint16:
+		*dests = append(*dests, &NotNullDest[F]{dst: dst, path: path})
+	case ~uint32:
+		*dests = append(*dests, &NotNullDest[F]{dst: dst, path: path})
+	case ~uint64:
+		*dests = append(*dests, &NotNullDest[F]{dst: dst, path: path})
+	}
+}
+
+// AppendNamedFloat binds the named floating-point, uuid and raw kinds.
+func AppendNamedFloat[F any](dst *F, path string, dests *[]any) {
+	const switch F {
+	case ~float32:
+		*dests = append(*dests, &NotNullDest[F]{dst: dst, path: path})
+	case ~float64:
+		*dests = append(*dests, &NotNullDest[F]{dst: dst, path: path})
+	case uuid.UUID:
+		*dests = append(*dests, &NotNullDest[F]{dst: dst, path: path})
+	case sql.RawBytes:
+		*dests = append(*dests, &NotNullDest[F]{dst: dst, path: path})
+	}
+}
+
+// ScanPlain binds the exact predeclared destination types.
+func ScanPlain(dst any, path string, dests *[]any) bool {
+	switch p := dst.(type) {
+	case *time.Time:
+		*dests = append(*dests, &NotNullDest[time.Time]{dst: p, path: path})
+		return true
+	case *[]byte:
+		*dests = append(*dests, &NotNullDest[[]byte]{dst: p, path: path})
+		return true
+	case *string:
+		*dests = append(*dests, &NotNullDest[string]{dst: p, path: path})
+		return true
+	case *bool:
+		*dests = append(*dests, &NotNullDest[bool]{dst: p, path: path})
+		return true
+	case *int:
+		*dests = append(*dests, &NotNullDest[int]{dst: p, path: path})
+		return true
+	case *int8:
+		*dests = append(*dests, &NotNullDest[int8]{dst: p, path: path})
+		return true
+	case *int16:
+		*dests = append(*dests, &NotNullDest[int16]{dst: p, path: path})
+		return true
+	case *int32:
+		*dests = append(*dests, &NotNullDest[int32]{dst: p, path: path})
+		return true
+	case *int64:
+		*dests = append(*dests, &NotNullDest[int64]{dst: p, path: path})
+		return true
+	}
+	return scanPlainUint(dst, path, dests)
+}
+
+func scanPlainUint(dst any, path string, dests *[]any) bool {
+	switch p := dst.(type) {
+	case *uint:
+		*dests = append(*dests, &NotNullDest[uint]{dst: p, path: path})
+		return true
+	case *uint8:
+		*dests = append(*dests, &NotNullDest[uint8]{dst: p, path: path})
+		return true
+	case *uint16:
+		*dests = append(*dests, &NotNullDest[uint16]{dst: p, path: path})
+		return true
+	case *uint32:
+		*dests = append(*dests, &NotNullDest[uint32]{dst: p, path: path})
+		return true
+	case *uint64:
+		*dests = append(*dests, &NotNullDest[uint64]{dst: p, path: path})
+		return true
+	case *float32:
+		*dests = append(*dests, &NotNullDest[float32]{dst: p, path: path})
+		return true
+	case *float64:
+		*dests = append(*dests, &NotNullDest[float64]{dst: p, path: path})
+		return true
+	}
+	return false
+}
+
+// ScanOption binds the option destinations. A NULL column becomes an
+// absent option; any other value scans into the element type.
+func ScanOption(dst any, path string, dests *[]any) bool {
+	switch p := dst.(type) {
+	case *rt.Option[time.Time]:
+		*dests = append(*dests, &OptionDest[time.Time]{dst: p, path: path})
+		return true
+	case *rt.Option[string]:
+		*dests = append(*dests, &OptionDest[string]{dst: p, path: path})
+		return true
+	case *rt.Option[bool]:
+		*dests = append(*dests, &OptionDest[bool]{dst: p, path: path})
+		return true
+	case *rt.Option[int16]:
+		*dests = append(*dests, &OptionDest[int16]{dst: p, path: path})
+		return true
+	case *rt.Option[int32]:
+		*dests = append(*dests, &OptionDest[int32]{dst: p, path: path})
+		return true
+	case *rt.Option[int64]:
+		*dests = append(*dests, &OptionDest[int64]{dst: p, path: path})
+		return true
+	case *rt.Option[float32]:
+		*dests = append(*dests, &OptionDest[float32]{dst: p, path: path})
+		return true
+	case *rt.Option[float64]:
+		*dests = append(*dests, &OptionDest[float64]{dst: p, path: path})
+		return true
+	}
+	return scanOptionInt(dst, path, dests)
+}
+
+func scanOptionInt(dst any, path string, dests *[]any) bool {
+	switch p := dst.(type) {
+	case *rt.Option[int]:
+		*dests = append(*dests, &OptionDest[int]{dst: p, path: path})
+		return true
+	case *rt.Option[int8]:
+		*dests = append(*dests, &OptionDest[int8]{dst: p, path: path})
+		return true
+	case *rt.Option[uint]:
+		*dests = append(*dests, &OptionDest[uint]{dst: p, path: path})
+		return true
+	case *rt.Option[uint8]:
+		*dests = append(*dests, &OptionDest[uint8]{dst: p, path: path})
+		return true
+	case *rt.Option[uint16]:
+		*dests = append(*dests, &OptionDest[uint16]{dst: p, path: path})
+		return true
+	case *rt.Option[uint32]:
+		*dests = append(*dests, &OptionDest[uint32]{dst: p, path: path})
+		return true
+	case *rt.Option[uint64]:
+		*dests = append(*dests, &OptionDest[uint64]{dst: p, path: path})
+		return true
+	}
+	return false
+}
+
+// ScanAny binds the *any destination. Byte slices are cloned so the row
+// never aliases driver memory.
+func ScanAny(dst any, path string, dests *[]any) bool {
+	if p, ok := dst.(*any); ok {
+		*dests = append(*dests, &AnyDest{dst: p})
+		return true
+	}
+	return false
+}
+
+// ScanScanner binds a destination that converts itself, such as
+// sql.Null. The twin never reflects into it; the Scan method owns the
+// conversion exactly as under rows.Scan.
+func ScanScanner(dst any, path string, dests *[]any) bool {
+	if s, ok := dst.(sql.Scanner); ok {
+		*dests = append(*dests, &ScannerDest{scan: s.Scan})
+		return true
+	}
+	return false
+}
+// CheckScan compares the query columns with the field plan before any
+// row is read, so a mismatch fails even for an empty result.
+func CheckScan(cols []string, plan ScanPlan) error {
+	if len(cols) != plan.Count {
+		return fmt.Errorf("db: %s has %d fields, query returned %d columns", plan.Type, plan.Count, len(cols))
+	}
+	for i, name := range plan.Names {
+		if cols[i] != name {
+			return fmt.Errorf("db: column %d is %q, field %s expects %q", i, cols[i], plan.Paths[i], name)
+		}
+	}
+	return nil
+}
+
+// TypeName reports the type for error messages.
+func TypeName[T any]() string {
+	var probe T
+	return fmt.Sprintf("%T", probe)
+}
+
+// SnakeName maps a field name to its default column name.
+func SnakeName(name string) string {
+	var b strings.Builder
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 'A' && c <= 'Z' {
+			if splitBefore(name, i) {
+				b.WriteByte('_')
+			}
+			c += 'a' - 'A'
+		}
+		b.WriteByte(c)
+	}
+	return b.String()
+}
+
+func splitBefore(name string, i int) bool {
+	if i == 0 {
+		return false
+	}
+	prev := name[i-1]
+	if prev < 'A' || prev > 'Z' {
+		return true
+	}
+	return i+1 < len(name) && name[i+1] >= 'a' && name[i+1] <= 'z'
+}
