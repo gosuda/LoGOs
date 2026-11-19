@@ -885,9 +885,12 @@ type logosEFPass struct {
 	addr        map[*Var]bool
 	initialized map[*Var]bool
 	tracked     map[logosEFKey]string
+	trackedErr  map[logosEFKey]*Var
 	sliced      map[logosEFKey]bool
 	storePos    map[logosEFKey][]syntax.Pos
 	inLoop      map[logosEFKey]bool
+	loopFresh   map[*Var]bool
+	loopTuple   map[*syntax.ForStmt]map[logosEFKey]bool
 }
 
 func (check *Checker) logosErrorFirst(body *syntax.BlockStmt) {
@@ -1087,9 +1090,12 @@ func (p *logosEFPass) collectAssigns() {
 	p.addr = make(map[*Var]bool)
 	p.initialized = make(map[*Var]bool)
 	p.tracked = make(map[logosEFKey]string)
+	p.trackedErr = make(map[logosEFKey]*Var)
 	p.sliced = make(map[logosEFKey]bool)
 	p.storePos = make(map[logosEFKey][]syntax.Pos)
 	p.inLoop = make(map[logosEFKey]bool)
+	p.loopFresh = make(map[*Var]bool)
+	p.loopTuple = make(map[*syntax.ForStmt]map[logosEFKey]bool)
 	mark := func(lhs []syntax.Expr, rhs syntax.Expr) {
 		errV, keys := p.tuple(lhs, rhs)
 		if errV == nil {
@@ -1098,6 +1104,7 @@ func (p *logosEFPass) collectAssigns() {
 		for _, k := range keys {
 			if _, ok := p.tracked[k]; !ok {
 				p.tracked[k] = errV.name
+				p.trackedErr[k] = errV
 			}
 			p.storePos[k] = append(p.storePos[k], p.logosEFDestPos(lhs, k))
 		}
@@ -1163,20 +1170,57 @@ func (p *logosEFPass) collectAssigns() {
 		if !ok {
 			return true
 		}
+		fresh := p.defsIn(f.Body)
+		if f.Post != nil {
+			for v := range p.defsIn(f.Post) {
+				fresh[v] = true
+			}
+		}
+		for v := range fresh {
+			p.loopFresh[v] = true
+		}
+		tuple := p.loopTuple[f]
+		if tuple == nil {
+			tuple = make(map[logosEFKey]bool)
+			p.loopTuple[f] = tuple
+		}
+		note := func(l syntax.Expr) {
+			k, ok := p.destKey(l)
+			if !ok || fresh[k.root] {
+				return
+			}
+			p.inLoop[k] = true
+		}
 		markLoop := func(m syntax.Node) bool {
 			switch m := m.(type) {
 			case *syntax.AssignStmt:
-				for _, l := range syntax.UnpackListExpr(m.Lhs) {
-					if k, ok := p.destKey(l); ok {
-						p.inLoop[k] = true
+				lhs := syntax.UnpackListExpr(m.Lhs)
+				for _, l := range lhs {
+					note(l)
+				}
+				if (m.Op == 0 || m.Op == syntax.Def) && len(syntax.UnpackListExpr(m.Rhs)) == 1 {
+					if _, keys := p.tuple(lhs, syntax.UnpackListExpr(m.Rhs)[0]); keys != nil {
+						for _, k := range keys {
+							tuple[k] = true
+						}
+					}
+				}
+			case *syntax.VarDecl:
+				if m.Values != nil {
+					names := logosEFNames(m)
+					for _, l := range names {
+						note(l)
+					}
+					if _, keys := p.tuple(names, m.Values); keys != nil {
+						for _, k := range keys {
+							tuple[k] = true
+						}
 					}
 				}
 			case *syntax.RangeClause:
 				if m.Lhs != nil {
 					for _, l := range syntax.UnpackListExpr(m.Lhs) {
-						if k, ok := p.destKey(l); ok {
-							p.inLoop[k] = true
-						}
+						note(l)
 					}
 				}
 			}
@@ -2171,13 +2215,48 @@ func (p *logosEFPass) defsIn(n syntax.Node) map[*Var]bool {
 	return inside
 }
 
+func inSubtree(root, target syntax.Node) bool {
+	found := false
+	syntax.Inspect(root, func(n syntax.Node) bool {
+		if n == target {
+			found = true
+			return false
+		}
+		return !found
+	})
+	return found
+}
+
 func (p *logosEFPass) seedAfter(k logosEFKey, lit syntax.Node) bool {
 	for _, pos := range p.storePos[k] {
 		if pos.Cmp(lit.Pos()) >= 0 {
 			return true
 		}
 	}
+	if p.loopFresh[k.root] {
+		return false
+	}
+	for f, keys := range p.loopTuple {
+		if !keys[k] {
+			continue
+		}
+		if inSubtree(f.Body, lit) {
+			return true
+		}
+	}
 	return false
+}
+
+func (p *logosEFPass) seedEntry(k logosEFKey, lit syntax.Node) (logosEFEntry, bool) {
+	errName, ok := p.tracked[k]
+	if !ok {
+		return logosEFEntry{}, false
+	}
+	e := logosEFEntry{name: errName, pos: lit.Pos()}
+	if errV := p.trackedErr[k]; errV != nil && len(p.assigns[logosEFKey{root: errV}]) == 1 {
+		e.err = errV
+	}
+	return e, true
 }
 
 func (p *logosEFPass) lateCaptures(st *logosEFState, lit syntax.Node, inside map[*Var]bool) *logosEFState {
@@ -2195,15 +2274,17 @@ func (p *logosEFPass) lateCaptures(st *logosEFState, lit syntax.Node, inside map
 			if _, ok := st.m[k]; ok {
 				return true
 			}
-			if errName, ok := p.tracked[k]; ok && p.seedAfter(k, lit) {
-				st = st.set(k, logosEFEntry{name: errName, pos: lit.Pos()})
+			if e, ok := p.seedEntry(k, lit); ok && p.seedAfter(k, lit) {
+				st = st.set(k, e)
 			}
-			for k2, errName := range p.tracked {
+			for k2 := range p.tracked {
 				if k2.root != v || k2.path == "" || !p.trackable(k2) || !p.seedAfter(k2, lit) {
 					continue
 				}
 				if _, has := st.m[k2]; !has {
-					st = st.set(k2, logosEFEntry{name: errName, pos: lit.Pos()})
+					if e, ok := p.seedEntry(k2, lit); ok {
+						st = st.set(k2, e)
+					}
 				}
 			}
 		case *syntax.SelectorExpr, *syntax.IndexExpr:
@@ -2214,10 +2295,10 @@ func (p *logosEFPass) lateCaptures(st *logosEFState, lit syntax.Node, inside map
 			if _, has := st.m[k]; has {
 				return true
 			}
-			if errName, tracked := p.tracked[k]; tracked && p.trackable(k) && p.seedAfter(k, lit) {
-				st = st.set(k, logosEFEntry{name: errName, pos: lit.Pos()})
+			if e, tracked := p.seedEntry(k, lit); tracked && p.trackable(k) && p.seedAfter(k, lit) {
+				st = st.set(k, e)
 			}
-			for k2, errName := range p.tracked {
+			for k2 := range p.tracked {
 				if k2.root != k.root || k2 == k || !logosEFPathUnder(k2.path, k.path) {
 					continue
 				}
@@ -2225,7 +2306,9 @@ func (p *logosEFPass) lateCaptures(st *logosEFState, lit syntax.Node, inside map
 					continue
 				}
 				if _, has := st.m[k2]; !has {
-					st = st.set(k2, logosEFEntry{name: errName, pos: lit.Pos()})
+					if e, ok := p.seedEntry(k2, lit); ok {
+						st = st.set(k2, e)
+					}
 				}
 			}
 		}

@@ -119,3 +119,59 @@ func ffIndexEffectsRunAfterBase() {
 	println(n /* ERROR "[correctness::result_before_error_check]" */)
 	_ = err
 }
+
+func ffDeferredSeesNextIterationStore() {
+	var n int
+	var err error
+	for i := 0; i < 2; i++ {
+		n, err = ffFetch()
+		if err != nil {
+			return
+		}
+		n = 0
+		defer func() {
+			println(n /* ERROR "[correctness::result_before_error_check]" */)
+		}()
+	}
+}
+
+func ffDeferredLoopLocalFieldStaysAccepted() {
+	for i := 0; i < 2; i++ {
+		h := ffHeld{}
+		var err error
+		h.stats, err = ffFetchHeld()
+		if err != nil {
+			return
+		}
+		defer func() {
+			println(h.stats)
+		}()
+	}
+}
+
+func ffDeferredLoopSharedFieldStillRejects() {
+	h := ffHeld{}
+	var err error
+	for i := 0; i < 2; i++ {
+		h.stats, err = ffFetchHeld()
+		if err != nil {
+			return
+		}
+		defer func() {
+			println(h.stats /* ERROR "[correctness::result_before_error_check]" */)
+		}()
+	}
+}
+
+func ffDeferredFieldProofMatchesError() {
+	h := ffHeld{}
+	var err error
+	defer func() {
+		if err != nil {
+			return
+		}
+		println(h)
+	}()
+	h.stats, err = ffFetchHeld()
+	_ = err
+}
