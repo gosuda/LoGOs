@@ -24,6 +24,8 @@ const v1CallOptionMask = 0x18
 
 var v1DefaultOptions = stdjson.DefaultOptionsV1()
 
+var v2DefaultOptions = jsonv2.DefaultOptionsV2()
+
 // optionsLayout mirrors the leaf fields of the options struct behind
 // jsontext.Options, in declaration order. optionsLayoutHolds proves at
 // start-up that the mirror matches the toolchain's struct; when it does
@@ -41,7 +43,9 @@ type optionsLayout struct {
 var (
 	v1OptionsType      = reflect.TypeOf(v1DefaultOptions)
 	v1OptionsLayout    = (*optionsLayout)(reflect.ValueOf(v1DefaultOptions).UnsafePointer())
+	v2OptionsLayout    = (*optionsLayout)(reflect.ValueOf(v2DefaultOptions).UnsafePointer())
 	optionsLayoutHolds = v1OptionsType.Kind() == reflect.Pointer &&
+		v1OptionsType == reflect.TypeOf(v2DefaultOptions) &&
 		sameLeafFields(v1OptionsType.Elem(), reflect.TypeFor[optionsLayout]()) &&
 		v1OptionsLayout.marshalers == nil && v1OptionsLayout.unmarshalers == nil
 )
@@ -91,14 +95,32 @@ func sameLeafFields(a, b reflect.Type) bool {
 // The options value is valid only within the MarshalJSONTo or
 // UnmarshalJSONFrom call that produced it.
 func CallerOptionsAreV1Default(opts jsontext.Options) bool {
+	return callerOptionsAreDefault(opts, v1OptionsLayout, v1DefaultOptions)
+}
+
+// CallerOptionsAreV2Default reports whether opts are exactly the v2
+// default options apart from the internal call bits: either the explicit
+// DefaultOptionsV2 set or no options at all. A plain Marshal, Unmarshal,
+// MarshalEncode or UnmarshalDecode call passes a zero options struct,
+// which behaves as the v2 defaults; the generated exempt methods take the
+// v1 bytes under either default, while any other option needs the
+// reflective path or a diagnostic.
+//
+// The options value is valid only within the MarshalJSONTo or
+// UnmarshalJSONFrom call that produced it.
+func CallerOptionsAreV2Default(opts jsontext.Options) bool {
+	return callerOptionsAreDefault(opts, v2OptionsLayout, v2DefaultOptions) || callerOptionsAreUnset(opts)
+}
+
+func callerOptionsAreDefault(opts jsontext.Options, want *optionsLayout, wantAny any) bool {
 	rv := reflect.ValueOf(opts)
 	if rv.Kind() != reflect.Pointer || rv.IsNil() || rv.Type() != v1OptionsType {
 		return false
 	}
 	if !optionsLayoutHolds {
-		return optionsEqualV1DefaultByReflection(rv)
+		return optionsEqualDefaultByReflection(rv, wantAny)
 	}
-	got, want := (*optionsLayout)(rv.UnsafePointer()), v1OptionsLayout
+	got := (*optionsLayout)(rv.UnsafePointer())
 	return got.presence&^v1CallOptionMask == want.presence&^v1CallOptionMask &&
 		got.values&^v1CallOptionMask == want.values&^v1CallOptionMask &&
 		got.indent == want.indent && got.indentPrefix == want.indentPrefix &&
@@ -108,14 +130,82 @@ func CallerOptionsAreV1Default(opts jsontext.Options) bool {
 }
 
 func optionsEqualV1DefaultByReflection(rv reflect.Value) bool {
+	return optionsEqualDefaultByReflection(rv, v1DefaultOptions)
+}
+
+func optionsEqualV2DefaultByReflection(rv reflect.Value) bool {
+	return optionsEqualDefaultByReflection(rv, v2DefaultOptions)
+}
+
+func optionsEqualDefaultByReflection(rv reflect.Value, wantAny any) bool {
+	s, ok := maskedOptionsCopy(rv)
+	if !ok {
+		return false
+	}
+	return reflect.DeepEqual(s.Interface(), reflect.ValueOf(wantAny).Elem().Interface())
+}
+
+// callerOptionsAreUnset reports whether opts carry no caller-facing option:
+// a plain call passes a zero options struct, which behaves as the v2
+// defaults. Only the internal call bits are masked out.
+func callerOptionsAreUnset(opts jsontext.Options) bool {
+	rv := reflect.ValueOf(opts)
+	if rv.Kind() != reflect.Pointer || rv.IsNil() || rv.Type() != v1OptionsType {
+		return false
+	}
+	if !optionsLayoutHolds {
+		return optionsEqualUnsetByReflection(rv)
+	}
+	got := (*optionsLayout)(rv.UnsafePointer())
+	return got.presence&^v1CallOptionMask == 0 &&
+		got.values&^v1CallOptionMask == 0 &&
+		got.indent == "" && got.indentPrefix == "" &&
+		got.byteLimit == 0 && got.depthLimit == 0 &&
+		got.marshalers == nil && got.unmarshalers == nil &&
+		got.format == ""
+}
+
+func optionsEqualUnsetByReflection(rv reflect.Value) bool {
+	s, ok := maskedOptionsCopy(rv)
+	if !ok {
+		return false
+	}
+	return reflect.DeepEqual(s.Interface(), reflect.Zero(v1OptionsType.Elem()).Interface())
+}
+
+// maskedOptionsCopy copies the options behind rv and clears the internal
+// call bits, reporting whether rv has the options struct shape at all.
+func maskedOptionsCopy(rv reflect.Value) (reflect.Value, bool) {
+	if rv.Kind() != reflect.Pointer || rv.IsNil() || rv.Type() != v1OptionsType {
+		return reflect.Value{}, false
+	}
 	s := reflect.New(v1OptionsType.Elem()).Elem()
 	s.Set(rv.Elem())
 	flags := s.FieldByName("Flags")
+	if !flags.IsValid() || flags.Kind() != reflect.Struct {
+		return reflect.Value{}, false
+	}
 	for _, name := range [...]string{"Presence", "Values"} {
 		f := flags.FieldByName(name)
+		if !f.IsValid() || !f.CanSet() {
+			return reflect.Value{}, false
+		}
+		switch f.Kind() {
+		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		default:
+			return reflect.Value{}, false
+		}
 		f.SetUint(f.Uint() &^ v1CallOptionMask)
 	}
-	return reflect.DeepEqual(s.Interface(), reflect.ValueOf(v1DefaultOptions).Elem().Interface())
+	return s, true
+}
+
+// UnsupportedOptions returns the diagnostic for a struct whose static
+// JSON methods cannot honor the caller's options: a non-bare option
+// field has no reflective representation, so the generated method
+// reports this error instead of silently writing v1 bytes.
+func UnsupportedOptions(structName string) error {
+	return errors.New("logos: json: caller options unsupported for struct with option fields: " + structName)
 }
 
 // DecodeDefault decodes the next JSON value from dec into v, whose type
@@ -142,6 +232,15 @@ func retypeShadowError[S, T any](err error) error {
 	var se *jsonv2.SemanticError
 	if errors.As(err, &se) && se.GoType != nil && se.GoType == reflect.TypeFor[S]() {
 		se.GoType = reflect.TypeFor[T]()
+	}
+	var ute *stdjson.UnmarshalTypeError
+	if errors.As(err, &ute) {
+		if ute.Type != nil && ute.Type == reflect.TypeFor[S]() {
+			ute.Type = reflect.TypeFor[T]()
+		}
+		if ute.Struct == reflect.TypeFor[S]().Name() {
+			ute.Struct = reflect.TypeFor[T]().Name()
+		}
 	}
 	return err
 }

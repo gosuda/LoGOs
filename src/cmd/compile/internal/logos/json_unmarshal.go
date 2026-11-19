@@ -83,21 +83,81 @@ func (js *jsonStruct) unmarshalText(b *strings.Builder) {
 func (js *jsonStruct) unmarshalFromText(b *strings.Builder) {
 	body := []string{
 		fmt.Sprintf("if !%s.CallerOptionsAreV1Default(_logos_dec.Options()) {", jsonAlias),
-		fmt.Sprintf("\ttype _logos_shadow_%s %s", js.name, js.name),
-		fmt.Sprintf("\treturn %s.DecodeDefault[_logos_shadow_%s, %s](_logos_dec, (*_logos_shadow_%s)(%s))", jsonAlias, js.name, js.name, js.name, jsonRecv),
-		"}",
-		"_logos_val, _logos_err := _logos_dec.ReadValue()",
-		"if _logos_err != nil {",
-		"\treturn _logos_err",
-		"}",
-		fmt.Sprintf("return _logos_unmarshal_%s(_logos_val, %s, true)", js.name, jsonRecv),
 	}
+	for _, l := range js.fallbackDecodeLines() {
+		body = append(body, "\t"+l)
+	}
+	body = append(body, "}", "_logos_val, _logos_err := _logos_dec.ReadValue()", "if _logos_err != nil {", "\treturn _logos_err", "}", fmt.Sprintf("return _logos_unmarshal_%s(_logos_val, %s, true)", js.name, jsonRecv))
 	fmt.Fprintf(b, "\nfunc (%s *%s) UnmarshalJSONFrom(_logos_dec *%s.Decoder) error {\n", jsonRecv, js.name, jsontextAlias)
 	for _, l := range indentLines(body) {
 		b.WriteString(l)
 		b.WriteByte('\n')
 	}
 	b.WriteString("}\n")
+}
+
+// unmarshalFromExemptText emits UnmarshalJSONFrom for a struct the
+// reflective decoder cannot represent directly (a non-bare option field
+// or a union member at any container depth): default options run the v1
+// method, and any other option decodes through the method-free shadow
+// with the required-field checks, so a strict caller is never silently
+// handed v1 semantics.
+func (js *jsonStruct) unmarshalFromExemptText(b *strings.Builder) {
+	body := []string{
+		fmt.Sprintf("if %s.CallerOptionsAreV1Default(_logos_dec.Options()) || %s.CallerOptionsAreV2Default(_logos_dec.Options()) {", jsonAlias, jsonAlias),
+		"\t_logos_val, _logos_err := _logos_dec.ReadValue()",
+		"\tif _logos_err != nil {",
+		"\t\treturn _logos_err",
+		"\t}",
+		fmt.Sprintf("\treturn %s.UnmarshalJSON([]byte(_logos_val))", jsonRecv),
+		"}",
+	}
+	body = append(body, js.fallbackDecodeLines()...)
+	fmt.Fprintf(b, "\nfunc (%s *%s) UnmarshalJSONFrom(_logos_dec *%s.Decoder) error {\n", jsonRecv, js.name, jsontextAlias)
+	for _, l := range indentLines(body) {
+		b.WriteString(l)
+		b.WriteByte('\n')
+	}
+	b.WriteString("}\n")
+}
+
+// fallbackDecodeLines emits the reflective fallback shared by the
+// options-aware path and the exempt path: it saves and clears each
+// required pointer so occurrence is tracked independently of the final
+// value, decodes through the method-free shadow, restores cleared fields
+// on error, and reports the first missing required field. The restore
+// block is built once and reused by every missing-field branch.
+func (js *jsonStruct) fallbackDecodeLines() []string {
+	decl := fmt.Sprintf("type _logos_shadow_%s %s", js.name, js.name)
+	call := fmt.Sprintf("return %s.DecodeDefault[_logos_shadow_%s, %s](_logos_dec, (*_logos_shadow_%s)(%s))", jsonAlias, js.name, js.name, js.name, jsonRecv)
+	if len(js.required) == 0 {
+		return []string{decl, call}
+	}
+	body := []string{decl}
+	for _, name := range js.required {
+		body = append(body, fmt.Sprintf("_logos_old_%s := %s.%s", name, jsonRecv, name))
+		body = append(body, fmt.Sprintf("%s.%s = nil", jsonRecv, name))
+	}
+	body = append(body, fmt.Sprintf("_logos_fallback_err := %s.DecodeDefault[_logos_shadow_%s, %s](_logos_dec, (*_logos_shadow_%s)(%s))", jsonAlias, js.name, js.name, js.name, jsonRecv))
+	body = append(body, "if _logos_fallback_err != nil {")
+	restores := []string{}
+	for _, other := range js.required {
+		restores = append(restores, fmt.Sprintf("if %s.%s == nil { %s.%s = _logos_old_%s }", jsonRecv, other, jsonRecv, other, other))
+	}
+	for _, l := range restores {
+		body = append(body, "\t"+l)
+	}
+	body = append(body, "\treturn _logos_fallback_err", "}")
+	for _, name := range js.required {
+		body = append(body, fmt.Sprintf("if %s.%s == nil {", jsonRecv, name))
+		for _, l := range restores {
+			body = append(body, "\t"+l)
+		}
+		body = append(body, fmt.Sprintf("\treturn %s.MissingFieldError{Type: %q, Field: %q}", rtAlias, js.name, name))
+		body = append(body, "}")
+	}
+	body = append(body, "return nil")
+	return body
 }
 
 func (js *jsonStruct) loopLines() []string {

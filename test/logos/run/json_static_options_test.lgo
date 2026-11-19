@@ -115,3 +115,23 @@ func TestStaticOptionsNestedValue(t *testing.T) {
 		t.Fatal("RejectUnknownMembers(true) accepted the nested member \"surplus\"")
 	}
 }
+
+type OptVal struct {
+	N int? `json:"n"`
+}
+
+func TestStaticOptionsOptionExemptMarshalRefusesOptions(t *testing.T) {
+	var b bytes.Buffer
+	enc := jsontext.NewEncoder(&b, jsontext.WithIndent("  "))
+	err := jsonv2.MarshalEncode(enc, OptVal{N: 1})
+	if err == nil {
+		t.Fatalf("indented marshal of an exempt struct succeeded with %s, want an UnsupportedOptions diagnostic", b.String())
+	}
+	if !strings.Contains(err.Error(), "option") {
+		t.Fatalf("refusal error %q does not name option fields", err)
+	}
+}
+
+// Union-exempt coverage lives in json_static_union_options_test.lgo: a
+// union interface used as a value type does not survive the eject profile,
+// so it cannot be declared in this ejected fixture.

@@ -65,3 +65,55 @@ func TestCallerOptionsAreV1DefaultDoesNotAllocate(t *testing.T) {
 		t.Errorf("CallerOptionsAreV1Default allocates %v times per call, want 0", n)
 	}
 }
+
+type shadowForRetype struct {
+	Name string `json:"name"`
+}
+
+type realForRetype struct {
+	Name string `json:"name"`
+}
+
+func TestRetypeShadowLegacyTypeError(t *testing.T) {
+	legacy := &stdjson.UnmarshalTypeError{
+		Value:  "array",
+		Type:   reflect.TypeFor[shadowForRetype](),
+		Offset: 2,
+		Struct: reflect.TypeFor[shadowForRetype]().Name(),
+		Field:  "",
+	}
+	if err := retypeShadowError[shadowForRetype, realForRetype](legacy); err == nil {
+		t.Fatal("retype returned nil, want legacy error")
+	}
+	if legacy.Type != reflect.TypeFor[realForRetype]() {
+		t.Errorf("Type = %v, want %v", legacy.Type, reflect.TypeFor[realForRetype]())
+	}
+	if legacy.Struct != reflect.TypeFor[realForRetype]().Name() {
+		t.Errorf("Struct = %q, want %q", legacy.Struct, reflect.TypeFor[realForRetype]().Name())
+	}
+	fieldErr := &stdjson.UnmarshalTypeError{
+		Value:  "number 1",
+		Type:   reflect.TypeFor[int](),
+		Offset: 10,
+		Struct: reflect.TypeFor[shadowForRetype]().Name(),
+		Field:  "name",
+	}
+	if err := retypeShadowError[shadowForRetype, realForRetype](fieldErr); err == nil {
+		t.Fatal("retype returned nil, want legacy error")
+	}
+	if fieldErr.Struct != reflect.TypeFor[realForRetype]().Name() {
+		t.Errorf("field Struct = %q, want %q", fieldErr.Struct, reflect.TypeFor[realForRetype]().Name())
+	}
+	if fieldErr.Type != reflect.TypeFor[int]() {
+		t.Errorf("field Type changed to %v, want int", fieldErr.Type)
+	}
+}
+
+func TestReflectionFallbackRejectsUnexpectedShape(t *testing.T) {
+	if got := optionsEqualV1DefaultByReflection(reflect.ValueOf(123)); got {
+		t.Errorf("int options compare = true, want false")
+	}
+	if got := optionsEqualV1DefaultByReflection(reflect.ValueOf("opts")); got {
+		t.Errorf("string options compare = true, want false")
+	}
+}

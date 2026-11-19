@@ -106,6 +106,19 @@ func (fl *fileLower) lowerStaticJSONType(td *syntax.TypeDecl) {
 	}
 	js := fl.buildJSONStruct(td.Name.Value, named.Underlying().(*types2.Struct), fields)
 	js.pos = td.Pos()
+	hasOptionUnsafe := false
+	hasUnionUnsafe := false
+	for _, f := range js.fields {
+		if fieldHasUnsafeOption(f.typ, make(map[types2.Type]bool)) {
+			hasOptionUnsafe = true
+		}
+		if f.shape.kind == shapeUnion || hasUnionMembers(f.typ) {
+			hasUnionUnsafe = true
+		}
+		if _, ok := unionContainerOf(f.typ); ok {
+			hasUnionUnsafe = true
+		}
+	}
 	var b strings.Builder
 	if jsonOK && !userDeclaresMethod(named, "MarshalJSON") {
 		plan := fl.planJSONWalk(js, named)
@@ -123,14 +136,22 @@ func (fl *fileLower) lowerStaticJSONType(td *syntax.TypeDecl) {
 			js.marshalText(&b)
 		}
 		if buildcfg.Experiment.JSONv2 && !userDeclaresMethod(named, "MarshalJSONTo") {
-			js.marshalToText(&b)
+			if hasOptionUnsafe {
+				js.marshalToRefusalText(&b)
+			} else {
+				js.marshalToText(&b)
+			}
 		}
 	}
 	if jsonOK {
 		if !userDeclaresMethod(named, "UnmarshalJSON") {
 			js.unmarshalText(&b)
 			if buildcfg.Experiment.JSONv2 && !userDeclaresMethod(named, "UnmarshalJSONFrom") {
-				js.unmarshalFromText(&b)
+				if hasOptionUnsafe || hasUnionUnsafe {
+					js.unmarshalFromExemptText(&b)
+				} else {
+					js.unmarshalFromText(&b)
+				}
 			}
 		}
 		js.keyFuncs(&b)
@@ -152,6 +173,43 @@ func (fl *fileLower) lowerStaticJSONType(td *syntax.TypeDecl) {
 	fl.needJSONText = fl.needJSONText || strings.Contains(text, jsontextAlias+".")
 	fl.needRT = fl.needRT || strings.Contains(text, rtAlias+".")
 	fl.needBinary = fl.needBinary || strings.Contains(text, "_logos_b")
+}
+
+// fieldHasUnsafeOption reports whether a value of type t reaches a
+// non-bare option value under reflection: through pointers, slices,
+// arrays, maps, and named types. Such a value has no reflective
+// representation (rt.Option has no JSON methods), so the struct holding
+// the field takes the refusal path on marshal and the reflective-only
+// path on unmarshal. Union members stop the search: the union rule
+// governs them.
+func fieldHasUnsafeOption(t types2.Type, seen map[types2.Type]bool) bool {
+	t = unaliasConstView(t)
+	if seen[t] {
+		return false
+	}
+	seen[t] = true
+	if o, ok := t.(*types2.Option); ok {
+		if !types2.LogosOptionIsBare(o.Elem) {
+			return true
+		}
+		return fieldHasUnsafeOption(o.Elem, seen)
+	}
+	if _, ok := types2.LogosUnionMembers(t); ok {
+		return false
+	}
+	switch u := t.(type) {
+	case *types2.Pointer:
+		return fieldHasUnsafeOption(u.Elem(), seen)
+	case *types2.Slice:
+		return fieldHasUnsafeOption(u.Elem(), seen)
+	case *types2.Array:
+		return fieldHasUnsafeOption(u.Elem(), seen)
+	case *types2.Map:
+		return fieldHasUnsafeOption(u.Elem(), seen)
+	case *types2.Named:
+		return fieldHasUnsafeOption(u.Underlying(), seen)
+	}
+	return false
 }
 
 func (fl *fileLower) declaredNamed(td *syntax.TypeDecl) *types2.Named {

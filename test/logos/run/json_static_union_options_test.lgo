@@ -1,0 +1,53 @@
+//go:build goexperiment.jsonv2
+
+// run
+
+package jsonstaticunionoptions
+
+import (
+	"encoding/json"
+	jsonv2 "encoding/json/v2"
+	"testing"
+)
+
+type OmitInner struct {
+	N int32 `json:"n"`
+}
+
+type OmitInner2 struct {
+	S string `json:"s"`
+}
+
+type OmitShape interface {
+	*OmitInner | *OmitInner2
+}
+
+type OmitBox struct {
+	Name string    `json:"name"`
+	S    OmitShape `json:"s"`
+}
+
+func TestStaticOptionsUnionExemptMarshalOptions(t *testing.T) {
+	var v OmitBox
+	if err := json.Unmarshal([]byte(`{"s":{"n":5}}`), &v); err != nil {
+		t.Fatalf("v1 decode of union struct failed: %v", err)
+	}
+	v1b, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v2b, err := jsonv2.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(v2b) != string(v1b) {
+		t.Fatalf("default options: v2 gave %s, v1 gave %s", v2b, v1b)
+	}
+	got, err := jsonv2.Marshal(v, jsonv2.OmitZeroStructFields(true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != `{"s":{"n":5}}` {
+		t.Fatalf("OmitZeroStructFields(true): got %s, want {\"s\":{\"n\":5}}", got)
+	}
+}
