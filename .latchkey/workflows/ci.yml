@@ -604,6 +604,9 @@ jobs:
         if: always()
         run: |
           . .latchkey/env.sh
+          # Steps start without pipefail, so set it here: each check below
+          # pipes to tee and a failing check must trip the fail accumulator.
+          set -o pipefail
           fail=0
           uv run --no-project python misc/logos-dogfood/run.py \
             --go-oracle "$RUNNER_TEMP/go1.27.4-ci/bin/go" \
