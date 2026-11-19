@@ -183,3 +183,29 @@ func ffEvaluatedArrayOperandReadsResult() {
 	println(len([1]int{ffEcho(n /* ERROR "[correctness::result_before_error_check]" */)}))
 	_ = err
 }
+
+func ffSplitAliasStaysTracked(p *int) {
+	var n int
+	p = &n
+	var err error
+	n, err = ffFetch()
+	*p = 9
+	println(n /* ERROR "[correctness::result_before_error_check]" */)
+	_ = err
+}
+
+func ffBackwardGotoSeesLaterStore() {
+	n, err := ffFetch()
+	if err != nil {
+		return
+	}
+	tries := 0
+retry:
+	println(n /* ERROR "[correctness::result_before_error_check]" */)
+	n, err = ffFetch()
+	tries++
+	if tries < 2 {
+		goto retry
+	}
+	_ = err
+}
