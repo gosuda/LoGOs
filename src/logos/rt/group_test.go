@@ -658,15 +658,32 @@ func TestGroupWaitContextBoundedReturn(t *testing.T) {
 func TestGroupWaitContextPrecancelled(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		g, _ := NewGroup(t.Context(), 0)
-		g.Go(func(ctx context.Context) error { return nil })
+		release := make(chan struct{})
+		exited := &atomic.Bool{}
+		g.Go(func(ctx context.Context) error {
+			<-release
+			exited.Store(true)
+			return nil
+		})
+		// The child is parked on release, so it is still live when
+		// WaitContext runs: the ordering is fixed, not left to the
+		// scheduler.
+		synctest.Wait()
 		waitCtx, cancel := context.WithCancel(t.Context())
 		cancel()
 		if err := g.WaitContext(waitCtx); err != context.Canceled {
 			t.Fatalf("WaitContext = %v, want context.Canceled", err)
 		}
+		if exited.Load() {
+			t.Fatal("child exited when WaitContext gave up; want it still running")
+		}
+		close(release)
 		synctest.Wait()
 		if err := g.Wait(); err != nil {
 			t.Fatalf("later Wait = %v, want nil", err)
+		}
+		if !exited.Load() {
+			t.Fatal("child parked before the precancelled WaitContext did not run")
 		}
 	})
 }
