@@ -22,7 +22,9 @@ import (
 	"time"
 
 	"cmd/go/internal/base"
+	"cmd/go/internal/cfg"
 	"cmd/go/internal/load"
+	"cmd/internal/quoted"
 )
 
 const (
@@ -149,7 +151,7 @@ func Register(root *base.Command) {
 				inv.shake = strconv.FormatUint(seed, 10)
 			}
 			if inv.shake != "" {
-				if _, err := strconv.ParseUint(inv.shake, 10, 64); err != nil {
+				if seed, err := strconv.ParseUint(inv.shake, 10, 64); err != nil || seed == 0 {
 					base.Fatalf("logos conc %s: -shake %q is not a seed", verb, inv.shake)
 				}
 				fmt.Fprintf(os.Stderr, "logos conc: shake seed %s\n", inv.shake)
@@ -221,14 +223,18 @@ func childArguments(verb string, args []string, takesValue func(string) bool) in
 		case name == "shake":
 			if hasValue && value != "" {
 				inv.shake = value
+				inv.shakeBare = false
 			} else if i+1 < len(args) {
 				if _, err := strconv.ParseUint(args[i+1], 10, 64); err == nil {
 					i++
 					inv.shake = args[i]
+					inv.shakeBare = false
 				} else {
+					inv.shake = ""
 					inv.shakeBare = true
 				}
 			} else {
+				inv.shake = ""
 				inv.shakeBare = true
 			}
 		case name == "tags":
@@ -259,11 +265,32 @@ func childArguments(verb string, args []string, takesValue func(string) bool) in
 			}
 		}
 		if !hasCount {
+			hasCount = goflagsHasCount()
+		}
+		if !hasCount {
 			inv.arguments = slices.Insert(inv.arguments, 1, "-count=1")
 		}
 	}
+
 	inv.arguments = append(inv.arguments, args[i:]...)
 	return inv
+}
+
+// goflagsHasCount reports whether the effective GOFLAGS already sets a
+// test repeat count. GOFLAGS holds one flag per entry in -name=value
+// form, so a bare name check covers both -count and -test.count.
+func goflagsHasCount() bool {
+	flags, err := quoted.Split(cfg.Getenv("GOFLAGS"))
+	if err != nil {
+		return false
+	}
+	for _, flag := range flags {
+		name, _, _ := strings.Cut(strings.TrimLeft(flag, "-"), "=")
+		if name == "count" || name == "test.count" {
+			return true
+		}
+	}
+	return false
 }
 
 func withMonitorTag(tags string) string {

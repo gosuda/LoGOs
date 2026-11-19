@@ -1,0 +1,59 @@
+// run
+
+package main
+
+import (
+	"fmt"
+	"os"
+)
+
+var failed bool
+
+func check(name string, cond bool, got, want any) {
+	if !cond {
+		failed = true
+		fmt.Println("FAIL", name+":", "got", got, "want", want)
+		return
+	}
+	fmt.Println("ok", name)
+}
+
+type Box struct{ S string }
+
+func (b Box) M() string { return "box:" + b.S }
+
+func f[T any](v T) interface{ M() string } {
+	const switch T {
+	case interface{ M() string }:
+		var p interface{ M() string }
+		ch := make(chan T, 2)
+		ch <- v
+		ch <- v
+		type Outer bool
+		var ok1 Outer
+		select {
+		case p, ok1 = <-ch:
+			p = func() T {
+				type Inner bool
+				var ok2 Inner
+				var p2 interface{ M() string }
+				p2, ok2 = <-ch
+				_ = p2
+				_ = ok2
+				return v
+			}()
+		default:
+		}
+		_ = ok1
+		return p
+	}
+	return nil
+}
+
+func main() {
+	p := f[Box](Box{S: "y"})
+	check("boxed-localias-clause", p != nil && p.M() == "box:y", p, "box:y")
+	if failed {
+		os.Exit(1)
+	}
+}

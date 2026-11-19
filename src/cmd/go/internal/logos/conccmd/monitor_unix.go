@@ -66,9 +66,11 @@ func monitor(verb string, inv invocation) {
 	if _, ok := inv.durations["hold"]; !ok {
 		child.Env = append(child.Env, durationFlags["hold"]+"=100ms")
 	}
-	if inv.shake != "" {
-		child.Env = append(child.Env, shakeEnv+"="+inv.shake)
-	}
+	// Always set the shake seed, even when empty: the child inherits
+	// OrigEnv, and an inherited nonzero value would shake the run without
+	// printing a seed. An empty value turns shaking off, matching the
+	// omitted -shake default. Later entries win over inherited ones.
+	child.Env = append(child.Env, shakeEnv+"="+inv.shake)
 	base.StartSigHandlers()
 	runErr := child.Run()
 

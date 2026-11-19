@@ -1,0 +1,64 @@
+// run
+
+package main
+
+import (
+	"fmt"
+	"os"
+)
+
+var failed bool
+
+func check(name string, cond bool, got, want any) {
+	if !cond {
+		failed = true
+		fmt.Println("FAIL", name+":", "got", got, "want", want)
+		return
+	}
+	fmt.Println("ok", name)
+}
+
+type Box struct{ S string }
+
+func (b Box) M() string { return "box:" + b.S }
+
+func pick(a interface{ M() string }, b interface{ M() string }) interface{ M() string } {
+	return a
+}
+
+func f[T any](v T) interface{ M() string } {
+	const switch T {
+	case interface{ M() string }:
+		var p interface{ M() string }
+		ch := make(chan T, 2)
+		ch <- v
+		ch <- v
+		p = pick(func() T {
+			type SA bool
+			var okA SA
+			var pa interface{ M() string }
+			pa, okA = <-ch
+			_ = pa
+			_ = okA
+			return v
+		}(), func() T {
+			type SB bool
+			var okB SB
+			var pb interface{ M() string }
+			pb, okB = <-ch
+			_ = pb
+			_ = okB
+			return v
+		}())
+		return p
+	}
+	return nil
+}
+
+func main() {
+	p := f[Box](Box{S: "z"})
+	check("boxed-localias-twice", p != nil && p.M() == "box:z", p, "box:z")
+	if failed {
+		os.Exit(1)
+	}
+}
