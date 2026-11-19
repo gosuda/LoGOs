@@ -202,66 +202,103 @@ func constmapBuildRun(t *testing.T, dir, exe string, runEnv []string) string {
 	return string(out)
 }
 
-const constmapFlatIters = 200000
-
-func constmapFlatSrc(sizes []int) string {
-	var b strings.Builder
-	b.WriteString("package main\n\nimport (\n\t\"fmt\"\n\t\"time\"\n)\n\n")
-	for _, n := range sizes {
-		fmt.Fprintf(&b, "const m%d = map[string]int{", n)
-		for i := range n {
-			if i > 0 {
-				b.WriteString(", ")
-			}
-			fmt.Fprintf(&b, "%q: %d", fmt.Sprintf("k%05d", i), i)
-		}
-		b.WriteString("}\n\n")
-	}
-	fmt.Fprintf(&b, "var sink int\n\nconst iters = %d\n\ntype phase struct {\n\tname string\n\tf    func(int)\n}\n\nfunc phases(keys, miss []string) []phase {\n\treturn []phase{\n", constmapFlatIters)
-	for _, n := range sizes {
-		fmt.Fprintf(&b, "\t\t{\"hit%d\", func(int) {\n\t\t\tfor i := range iters {\n\t\t\t\tif v, ok := m%d[keys[i&%d]]; ok {\n\t\t\t\t\tsink += v\n\t\t\t\t}\n\t\t\t}\n\t\t}},\n", n, n, n-1)
-		fmt.Fprintf(&b, "\t\t{\"miss%d\", func(int) {\n\t\t\tfor i := range iters {\n\t\t\t\tif v, ok := m%d[miss[i&%d]]; ok {\n\t\t\t\t\tsink += v\n\t\t\t\t}\n\t\t\t}\n\t\t}},\n", n, n, n-1)
-	}
-	b.WriteString("\t}\n}\n\nfunc main() {\n\tkeys := make([]string, 16384)\n\tmiss := make([]string, 16384)\n\tfor i := range keys {\n\t\tkeys[i] = fmt.Sprintf(\"k%%05d\", i)\n\t\tmiss[i] = fmt.Sprintf(\"z%%05d\", i)\n\t}\n\tphases := phases(keys, miss)\n\tbest := make([]int64, len(phases))\n\tfor i := range best {\n\t\tbest[i] = int64(1 << 62)\n\t}\n\tfor range 9 {\n\t\tfor i, p := range phases {\n\t\t\tt0 := time.Now()\n\t\t\tp.f(iters)\n\t\t\tif ns := time.Since(t0).Nanoseconds(); ns < best[i] {\n\t\t\t\tbest[i] = ns\n\t\t\t}\n\t\t}\n\t}\n\tfor i, p := range phases {\n\t\tfmt.Println(p.name, best[i])\n\t}\n\t_ = sink\n}\n")
-	return b.String()
-}
-
 func TestConstmapLookupCostFlat(t *testing.T) {
-	if testing.Short() {
-		t.Skip("builds a loGo/s program")
-	}
 	sizes := []int{16, 1024, 16384}
-	dir := t.TempDir()
-	constmapWriteModule(t, dir, map[string]string{
-		"go.mod":   "module flatcost\n\ngo 1.27\n",
-		"main.lgo": constmapFlatSrc(sizes),
-	})
-	out := constmapBuildRun(t, dir, "flatcost.exe", nil)
-	totals := map[string]int64{}
-	for line := range strings.SplitSeq(strings.TrimSpace(out), "\n") {
-		f := strings.Fields(line)
-		if len(f) != 2 {
-			t.Fatalf("flat-cost program printed %q", line)
-		}
-		n, err := strconv.ParseInt(f[1], 10, 64)
+	const misses = 1024
+	lookups := make(map[int]string, len(sizes))
+	type probeCount struct{ slots, cmps int64 }
+	counts := make(map[int]probeCount, len(sizes))
+	for _, n := range sizes {
+		keys := constmapKeys(n)
+		layout, err := buildConstMap(keys, defaultConstMapBudget)
 		if err != nil {
-			t.Fatalf("flat-cost program printed %q", line)
+			t.Fatalf("buildConstMap %d keys: %v", n, err)
 		}
-		totals[f[0]] = n
-	}
-	for _, kind := range []string{"hit", "miss"} {
-		lo, hi := int64(1<<62), int64(0)
-		for _, n := range sizes {
-			v, ok := totals[fmt.Sprintf("%s%d", kind, n)]
-			if !ok {
-				t.Fatalf("flat-cost program lacks %s%d output: %q", kind, n, out)
+		keyTexts := make([]string, n)
+		valTexts := make([]string, n)
+		order := make([]int, n)
+		for i := range keys {
+			keyTexts[i] = `"` + keys[i].canon + `"`
+			valTexts[i] = fmt.Sprintf("%d", i)
+			order[i] = i
+		}
+		decls := emitConstMapDecls(constMapEmission{
+			name: "testflat", kT: "string", vT: "int",
+			mapT:     "map[string]int",
+			keyTexts: keyTexts,
+			valTexts: valTexts,
+			hashExpr: "_logos_rt.HashString(_logos_k)",
+			order:    order,
+			layout:   layout,
+			isSwitch: false,
+			bearing:  false,
+		})
+		idx := strings.Index(decls, "func testflat_lookup")
+		if idx < 0 {
+			t.Fatalf("size %d: table decls lack lookup", n)
+		}
+		lookup := decls[idx:]
+		if got := strings.Count(lookup, ".Get("); got != 1 {
+			t.Fatalf("size %d: table lookup has %d Get calls, want exactly 1 (one-probe contract)", n, got)
+		}
+		if strings.Contains(lookup, "for ") {
+			t.Fatalf("size %d: table lookup must not loop (one-probe contract)", n)
+		}
+		for _, banned := range []string{"sort.", "BinarySearch", "binarySearch"} {
+			if strings.Contains(lookup, banned) {
+				t.Fatalf("size %d: generated lookup contains %q: no logarithmic fallback", n, banned)
 			}
-			lo = min(lo, v)
-			hi = max(hi, v)
 		}
-		if ratio := float64(hi) / float64(lo); ratio > 3 {
-			t.Fatalf("%s lookup cost grows with key count: %s16=%dns %s1024=%dns %s16384=%dns over %d lookups (ratio %.2f > 3); a logarithmic fallback must not satisfy the contract",
-				kind, kind, totals[kind+"16"], kind, totals[kind+"1024"], kind, totals[kind+"16384"], constmapFlatIters, ratio)
+		lookups[n] = lookup
+		var slots, cmps int64
+		probe := func(h uint64, canon string) bool {
+			slots++
+			ki := layout.slots[layout.probe(h)]
+			if ki < 0 {
+				return false
+			}
+			cmps++
+			return keys[ki].canon == canon
+		}
+		for i, k := range keys {
+			if !probe(k.hash, k.canon) {
+				t.Fatalf("size %d: one-probe lookup missed key %d", n, i)
+			}
+		}
+		for i := range misses {
+			m := fmt.Sprintf("z%05d", i)
+			if probe(constHashString(m), m) {
+				t.Fatalf("size %d: one-probe lookup hit absent key %q", n, m)
+			}
+		}
+		counts[n] = probeCount{slots: slots, cmps: cmps}
+		checkConstmapRuntimeGetString(t, n)
+		hashes := make([]uint64, n)
+		strs := make([]string, n)
+		for i := range strs {
+			strs[i] = keys[i].canon
+			hashes[i] = keys[i].hash
+		}
+		tab := constmapRuntimeTable(t, hashes, strs)
+		if got := testing.AllocsPerRun(100, func() { _, _ = tab.Get(hashes[7], strs[7]) }); got != 0 {
+			t.Fatalf("size %d: hit lookup averages %v allocations, want 0", n, got)
+		}
+		mh, mk := constHashString("z00007"), "z00007"
+		if got := testing.AllocsPerRun(100, func() { _, _ = tab.Get(mh, mk) }); got != 0 {
+			t.Fatalf("size %d: miss lookup averages %v allocations, want 0", n, got)
+		}
+	}
+	for _, n := range sizes {
+		if want := int64(n + misses); counts[n].slots != want {
+			t.Fatalf("size %d: %d lookups read %d slots, want exactly one probe per lookup", n, n+misses, counts[n].slots)
+		}
+		if got := counts[n].cmps; got < int64(n) || got > int64(n+misses) {
+			t.Fatalf("size %d: %d lookups made %d key comparisons, want one per hit and at most one per lookup", n, n+misses, got)
+		}
+	}
+	for _, n := range sizes[1:] {
+		if lookups[n] != lookups[sizes[0]] {
+			t.Fatalf("generated lookup differs between %d and %d keys: lookup cost is not table-size independent", sizes[0], n)
 		}
 	}
 }
