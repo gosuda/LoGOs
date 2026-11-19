@@ -454,8 +454,7 @@ func (fc *funcLower) groupHoistSend(s *syntax.SendStmt, top groupFrame) []syntax
 	fl := fc.fl
 	scanForLiterals(fl, s)
 	h := fc.newGroupHoist(top, fc.groupStmtStart(s))
-	sel, text, sp := h.send(s)
-	h.add([]syntax.Stmt{sel}, text)
+	sp := h.send(s)
 	fl.addT(sp.start, sp.end, joinO(h.text, "\n"))
 	return h.native
 }

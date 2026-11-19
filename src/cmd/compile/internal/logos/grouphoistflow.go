@@ -87,7 +87,7 @@ func (fl *fileLower) groupHeaderSemis(from, to int) []span {
 	return out
 }
 
-func (h *groupHoist) send(s *syntax.SendStmt) (syntax.Stmt, otext, span) {
+func (h *groupHoist) send(s *syntax.SendStmt) span {
 	fc := h.fc
 	fl := fc.fl
 	pos := h.scopePos(s.Pos())
@@ -96,15 +96,35 @@ func (h *groupHoist) send(s *syntax.SendStmt) (syntax.Stmt, otext, span) {
 	h.slots([]*syntax.Expr{&s.Chan, &s.Value})
 	fc.hoistSubEmit(fc.hoistSubTake(mark))
 	chText, valText := fl.textOf(chSpan), fl.textOf(valSpan)
-	send := at(&syntax.SendStmt{Chan: s.Chan, Value: s.Value}, pos)
-	sel := at(&syntax.SelectStmt{
+	if fc.groupHasCall(s.Chan) {
+		tmp := fc.groupTempName("t")
+		native, texts := h.valueTemp(pos, s.Chan, tmp, s.Chan, chText)
+		h.add(native, texts...)
+		s.Chan = nameOf(pos, tmp)
+		chText = gen(tmp)
+	}
+	if fc.groupHasCall(s.Value) {
+		tmp := fc.groupTempName("t")
+		native, texts := h.valueTemp(pos, s.Value, tmp, s.Value, valText)
+		h.add(native, texts...)
+		s.Value = nameOf(pos, tmp)
+		valText = gen(tmp)
+	}
+	slow := at(&syntax.SelectStmt{
 		Body: []*syntax.CommClause{
-			at(&syntax.CommClause{Comm: send}, pos),
+			at(&syntax.CommClause{Comm: at(&syntax.SendStmt{Chan: s.Chan, Value: s.Value}, pos)}, pos),
 			fc.groupDoneClause(pos, h.top),
 		},
 	}, pos)
-	text := cat(gen("select { case "), chText, gen(" <- "), valText, gen(": "+fc.groupDoneText(h.top)+" }"))
-	return sel, text, span{start: chSpan.start, end: valSpan.end}
+	slowText := cat(gen("select { case "), chText, gen(" <- "), valText, gen(": "+fc.groupDoneText(h.top)+" }"))
+	ready := at(&syntax.SelectStmt{
+		Body: []*syntax.CommClause{
+			at(&syntax.CommClause{Comm: at(&syntax.SendStmt{Chan: s.Chan, Value: s.Value}, pos)}, pos),
+			at(&syntax.CommClause{Body: []syntax.Stmt{slow}}, pos),
+		},
+	}, pos)
+	h.add([]syntax.Stmt{ready}, cat(gen("select { case "), chText, gen(" <- "), valText, gen(": default:\n"), slowText, gen("\n}")))
+	return span{start: chSpan.start, end: valSpan.end}
 }
 
 func (h *groupHoist) recvStmt(s *syntax.ExprStmt, op *syntax.Operation) (syntax.Stmt, otext, span) {
@@ -128,8 +148,7 @@ func (h *groupHoist) stmt(s syntax.Stmt, sp span) {
 	mark := fc.hoistSubMark()
 	switch n := s.(type) {
 	case *syntax.SendStmt:
-		sel, text, _ := h.send(n)
-		h.add([]syntax.Stmt{sel}, text)
+		h.send(n)
 		return
 	case *syntax.ExprStmt:
 		if op, ok := groupRecvOp(n.X); ok {
