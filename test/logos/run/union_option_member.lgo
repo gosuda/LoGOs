@@ -1,0 +1,39 @@
+// run
+
+package main
+
+import "fmt"
+
+type Part interface { Text | Call }
+type Text struct{ Text string }
+type Call struct{ Name string }
+
+type Chunk struct {
+	Part Part?
+}
+
+func take(p Part?) bool { return p != nil }
+
+func kind(p Part?) string {
+	q := p
+	if q == nil {
+		return "none"
+	}
+	if _, ok := q.(Text); ok {
+		return "text"
+	}
+	if _, ok := q.(Call); ok {
+		return "call"
+	}
+	return "unknown"
+}
+
+func main() {
+	plain := Chunk{Part: Part(Text{Text: "explicit"})}
+	direct := Chunk{Part: Text{Text: "direct"}}
+	var held Part? = Call{Name: "held"}
+	held = Text{Text: "reassigned"}
+	fmt.Println(plain.Part != nil, direct.Part != nil)
+	fmt.Println(kind(plain.Part), kind(direct.Part), kind(held))
+	fmt.Println(take(Text{Text: "arg"}), take(Call{Name: "arg"}), take(nil))
+}

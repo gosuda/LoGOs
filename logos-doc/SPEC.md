@@ -701,6 +701,8 @@ A Go-mode callee (the standard library or any Go package, such as `io.Reader.Rea
 
 `T` MUST be assignable to `T?`. [T-202]
 
+A value whose type is a member of a closed union `U` MUST be assignable to `U?`, unless the value's type is itself an option. [T-202]
+
 `T?` MUST NOT be assignable to `T`. An assignment, argument, or result that needs `T` and receives an unnarrowed `T?` MUST fail with `[correctness::nil_deref_unproven]`. [T-202]
 
 `*T?` where `*T` is non-nil MUST lower to `*T` with nil as none and no extra storage. [T-202]

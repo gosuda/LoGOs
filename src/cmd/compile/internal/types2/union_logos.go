@@ -212,6 +212,27 @@ func (check *Checker) logosUnionAssign(x *operand, T Type, context string) bool 
 	return true
 }
 
+func (check *Checker) logosUnionMemberOf(x *operand, elem Type, context string) bool {
+	if !check.logosUnionsOK() {
+		return false
+	}
+	tset := logosClosedUnion(elem)
+	if tset == nil {
+		return false
+	}
+	if check.logosReadonlyBoundary(x, elem, context) {
+		return true
+	}
+	from := x.typ()
+	if from == nil {
+		return false
+	}
+	if isUntyped(from) {
+		from = Default(from)
+	}
+	return logosMemberOf(from, tset)
+}
+
 func logosUnionShape(t Type) ([]Type, bool, bool) {
 	if t == nil {
 		return nil, false, false
