@@ -1,0 +1,71 @@
+// run
+
+package main
+
+import "fmt"
+
+type Maybe[T any] *T?
+
+type HolderG struct {
+	Link Maybe[int?]
+}
+
+type PairOpt[A any, B any] struct {
+	A A
+	B B
+}?
+
+type HolderP struct {
+	P PairOpt[int, string]
+}
+
+type HolderN struct {
+	N Maybe[Maybe[int]]
+}
+
+type HolderPtr struct {
+	P Maybe[*int]
+}
+
+type HolderS struct {
+	S Maybe[[]int]
+}
+
+type HolderM struct {
+	M Maybe[map[string]int]
+}
+
+func selectGeneric(h HolderG?) Maybe[int?] { return h?.Link }
+
+func isAbsent(h HolderG?) bool { return h?.Link == nil }
+
+func selectPair(h HolderP?) PairOpt[int, string] { return h?.P }
+
+func selectNested(h HolderN?) Maybe[Maybe[int]] { return h?.N }
+
+func selectPtr(h HolderPtr?) Maybe[*int] { return h?.P }
+
+func selectSlice(h HolderS?) Maybe[[]int] { return h?.S }
+
+func selectMap(h HolderM?) Maybe[map[string]int] { return h?.M }
+
+func main() {
+	var absent HolderG?
+	fmt.Println(selectGeneric(absent) == nil)
+	fmt.Println(isAbsent(absent))
+	var inner int? = 5
+	h := HolderG{Link: &inner}
+	var hv HolderG? = h
+	fmt.Println(selectGeneric(hv) == nil)
+	fmt.Println(isAbsent(hv))
+	var ap HolderP?
+	fmt.Println(selectPair(ap) == nil)
+	var an HolderN?
+	fmt.Println(selectNested(an) == nil)
+	var apt HolderPtr?
+	fmt.Println(selectPtr(apt) == nil)
+	var as HolderS?
+	fmt.Println(selectSlice(as) == nil)
+	var am HolderM?
+	fmt.Println(selectMap(am) == nil)
+}
