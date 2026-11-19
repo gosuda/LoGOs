@@ -1,0 +1,13 @@
+// errorcheck
+
+package p
+
+type Node struct { // ERROR "invalid recursive type: Node refers to itself"
+	V  int64
+	Up Node?
+}
+
+func useSelf() bool {
+	var up Node? = Node{V: 5}
+	return up != nil
+}

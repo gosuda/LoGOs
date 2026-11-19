@@ -1,0 +1,12 @@
+// errorcheck
+
+package p
+
+type A struct{ B B? } // ERROR "invalid recursive type A"
+
+type B struct{ A A? }
+
+func useMutual() bool {
+	var b B? = B{}
+	return b != nil
+}
