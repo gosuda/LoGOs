@@ -137,3 +137,32 @@ func TestFindVariantContextPlatformLogosSyntax(t *testing.T) {
 		t.Errorf("plat_windows_arm64.lgo context = %q/%q ok=%v, want windows/arm64", goos, goarch, ok)
 	}
 }
+
+func TestSupportRelMapping(t *testing.T) {
+	cases := map[string]string{
+		"logos/rt":      "",
+		"logos/rt/json": "json",
+		"logos/json":    "json",
+		"logos/arena":   "arena",
+		"logos/sync":    "sync",
+		"logos/ascii":   "ascii",
+		"logos/proc":    "proc",
+		"logos/leak":    "leak",
+		"logos/io":      "io",
+	}
+	for path, want := range cases {
+		got, ok := supportRel(path)
+		if !ok {
+			t.Errorf("supportRel(%q) = not ok, want %q", path, want)
+			continue
+		}
+		if got != want {
+			t.Errorf("supportRel(%q) = %q, want %q", path, got, want)
+		}
+	}
+	for _, path := range []string{"fmt", "example.com/logos/rt", "logosrt", "", "logos/"} {
+		if rel, ok := supportRel(path); ok {
+			t.Errorf("supportRel(%q) = %q, ok, want not ok", path, rel)
+		}
+	}
+}

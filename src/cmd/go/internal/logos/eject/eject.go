@@ -761,12 +761,16 @@ func gorootCovered(path string) bool {
 }
 
 // supportRel maps a GOROOT logos/* import path to its directory inside
-// the shared support module, mirroring supportPathEdit: logos/rt is the
-// root, a leading rt/ segment is dropped, everything else is kept.
+// the shared support module: logos/rt is the root, a leading rt/ segment
+// is dropped, everything else is kept. The import rewrite (supportPathEdit)
+// and the support copy share this one mapping.
 func supportRel(path string) (string, bool) {
 	rest, ok := strings.CutPrefix(path, "logos/")
 	if !ok || rest == "" {
 		return "", false
+	}
+	if rest == "rt" {
+		return "", true
 	}
 	return strings.TrimPrefix(rest, "rt/"), true
 }
@@ -1626,13 +1630,13 @@ func supportPathEdit(fset *token.FileSet, imp *ast.ImportSpec, uses *bool) (text
 		*uses = true
 		return textEdit{start, start + len(imp.Path.Value), strconv.Quote(rtModulePath + "/internal/jsonscan")}, true
 	}
-	rest, ok := strings.CutPrefix(path, "logos/")
+	rel, ok := supportRel(path)
 	if !ok {
 		return textEdit{}, false
 	}
 	target := rtModulePath
-	if rest != "rt" {
-		target = rtModulePath + "/" + strings.TrimPrefix(rest, "rt/")
+	if rel != "" {
+		target += "/" + rel
 	}
 	start := fset.Position(imp.Path.Pos()).Offset
 	*uses = true
