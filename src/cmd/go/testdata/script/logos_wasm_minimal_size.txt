@@ -1,0 +1,192 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+env GOOS=js
+env GOARCH=wasm
+logos build -O=s -o $WORK/min-s.wasm ./min
+logos build -o $WORK/min-1.wasm ./min
+go build -o $WORK/min-go.wasm ./min
+logos build -O=s -o $WORK/json-s.wasm ./json
+go build -o $WORK/json-go.wasm ./json
+env GOOS=$TESTGO_GOHOSTOS
+env GOARCH=$TESTGO_GOHOSTARCH
+go run ./sizecheck $WORK/min-s.wasm $WORK/min-1.wasm $WORK/min-go.wasm $WORK/json-s.wasm $WORK/json-go.wasm
+stdout '^ok min-raw='
+
+# The floor in this test is the shared Go runtime, not the fork: the
+# plain-go build of the same DOM-only program also exceeds 1 MB raw, and
+# code plus data exceed 90% of the bytes, so only the name/debug sections
+# (a few percent) are strippable without changing execution. A linker-only
+# diet inside the wasm profile cannot reach an island budget of a few
+# hundred KB compressed; shrinkage past a floor here must update this test
+# with the fix that earned it.
+
+-- go.mod --
+module example.com/wasmminimalsize
+
+go 1.27
+-- min/main.go --
+//go:build js && wasm
+
+package main
+
+import "syscall/js"
+
+func main() {
+	js.Global().Get("document").Call("getElementById", "t").Set("textContent", "7")
+	select {}
+}
+-- json/main.go --
+//go:build js && wasm
+
+package main
+
+import (
+	"encoding/json"
+	"strconv"
+	"syscall/js"
+)
+
+type Item struct {
+	Name  string `json:"name"`
+	Price int    `json:"price"`
+}
+
+func render(el js.Value, items []Item) {
+	data, err := json.Marshal(items)
+	if err != nil {
+		return
+	}
+	el.Set("textContent", string(data)+strconv.Itoa(len(items)))
+}
+
+func main() {
+	items := []Item{{Name: "a", Price: 1}, {Name: "b", Price: 2}}
+	render(js.Global().Get("document").Call("getElementById", "t"), items)
+	select {}
+}
+-- sizecheck/main.go --
+package main
+
+import (
+	"bytes"
+	"compress/gzip"
+	"fmt"
+	"os"
+)
+
+func uleb(data []byte, pos int) (int, int) {
+	r := 0
+	s := 0
+	for {
+		b := data[pos]
+		pos++
+		r |= int(b&0x7f) << s
+		if b&0x80 == 0 {
+			break
+		}
+		s += 7
+	}
+	return r, pos
+}
+
+type sections struct {
+	raw    int
+	code   int
+	data   int
+	name   int
+	custom int
+}
+
+func parse(path string) sections {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "read:", err)
+		os.Exit(1)
+	}
+	if len(data) < 8 || string(data[:4]) != "\x00asm" {
+		fmt.Fprintln(os.Stderr, "not wasm:", path)
+		os.Exit(1)
+	}
+	s := sections{raw: len(data)}
+	pos := 8
+	for pos < len(data) {
+		id, p := uleb(data, pos)
+		pos = p
+		sz, p := uleb(data, pos)
+		pos = p
+		content := data[pos : pos+sz]
+		switch id {
+		case 10:
+			s.code += sz
+		case 11:
+			s.data += sz
+		case 0:
+			s.custom += sz
+			nlen, p2 := uleb(content, 0)
+			if p2+nlen <= len(content) && string(content[p2:p2+nlen]) == "name" {
+				s.name += sz
+			}
+		}
+		pos += sz
+	}
+	return s
+}
+
+func gzSize(path string) int {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "read:", err)
+		os.Exit(1)
+	}
+	var buf bytes.Buffer
+	w, err := gzip.NewWriterLevel(&buf, gzip.BestCompression)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "gzip:", err)
+		os.Exit(1)
+	}
+	if _, err := w.Write(data); err != nil {
+		fmt.Fprintln(os.Stderr, "gzip:", err)
+		os.Exit(1)
+	}
+	if err := w.Close(); err != nil {
+		fmt.Fprintln(os.Stderr, "gzip:", err)
+		os.Exit(1)
+	}
+	return buf.Len()
+}
+
+func check(cond bool, msg string, args ...any) {
+	if !cond {
+		fmt.Fprintln(os.Stderr, "floor broken:", fmt.Sprintf(msg, args...))
+		os.Exit(1)
+	}
+}
+
+func main() {
+	if len(os.Args) != 6 {
+		fmt.Fprintln(os.Stderr, "usage: sizecheck min-s.wasm min-1.wasm min-go.wasm json-s.wasm json-go.wasm")
+		os.Exit(2)
+	}
+	minS := parse(os.Args[1])
+	min1 := parse(os.Args[2])
+	minGo := parse(os.Args[3])
+	jsonS := parse(os.Args[4])
+	jsonGo := parse(os.Args[5])
+	minGz := gzSize(os.Args[1])
+	jsonGz := gzSize(os.Args[4])
+	payloadFrac := float64(minS.code+minS.data) / float64(minS.raw)
+	nameFrac := float64(minS.name) / float64(minS.raw)
+	check(minGo.raw > 1000000, "go min raw=%d, want > 1000000", minGo.raw)
+	check(minS.raw > 1000000 && minS.raw < 3000000, "min raw=%d, want in (1000000, 3000000)", minS.raw)
+	check(minGz > 400000 && minGz < 800000, "min gzip=%d, want in (400000, 800000)", minGz)
+	check(jsonS.raw > 3000000 && jsonS.raw < 6500000, "json raw=%d, want in (3000000, 6500000)", jsonS.raw)
+	check(jsonGo.raw > 3000000, "go json raw=%d, want > 3000000", jsonGo.raw)
+	check(jsonGz > 800000 && jsonGz < 1600000, "json gzip=%d, want in (800000, 1600000)", jsonGz)
+	check(payloadFrac >= 0.90, "payload frac=%.3f, want >= 0.90", payloadFrac)
+	check(nameFrac <= 0.05, "name frac=%.3f, want <= 0.05", nameFrac)
+	// The wasm profile overhead stays bounded against plain go at the same
+	// default optimization level.
+	check(float64(min1.raw) <= float64(minGo.raw)*1.15, "fork overhead: logos=%d go=%d", min1.raw, minGo.raw)
+	fmt.Printf("ok min-raw=%d min-gzip=%d json-raw=%d json-gzip=%d payload=%.3f name=%.3f\n",
+		minS.raw, minGz, jsonS.raw, jsonGz, payloadFrac, nameFrac)
+}
