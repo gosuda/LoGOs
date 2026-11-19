@@ -1463,16 +1463,111 @@ func (p *logosEFPass) readWholeRoot(x syntax.Expr, st *logosEFState) {
 	p.check.errorf(id, IncompatibleAssign, "%s read of %s before %s is checked (read %s only after %s is checked)", logosResultBeforeErr, v.name, e.name, v.name, e.name)
 }
 
-// readDest reports an unchecked-result read at a selector or index
-// destination. The report position is the field or element name, matching
-// the plain-variable report. Reading a prefix of a tracked path loads the
-// nested result, so it fails too; an unrelated sibling stays accepted.
+func (p *logosEFPass) promotedStep(cur Type, i int) (string, Type, bool) {
+	name := ""
+	var next Type
+	for _, u := range typeset(cur) {
+		st, ok := u.(*Struct)
+		if !ok || i < 0 || i >= st.NumFields() {
+			return "", nil, false
+		}
+		f := st.Field(i)
+		if name == "" {
+			name = f.name
+			next = f.typ
+		} else if f.name != name || !Identical(f.typ, next) {
+			return "", nil, false
+		}
+	}
+	if name == "" {
+		return "", nil, false
+	}
+	return "." + name, next, true
+}
+
+func (p *logosEFPass) promotedKey(x syntax.Expr) (logosEFKey, bool) {
+	var rev []string
+	multi := false
+	for {
+		sel, isSel := syntax.Unparen(x).(*syntax.SelectorExpr)
+		if !isSel {
+			break
+		}
+		s := p.check.Selections[sel]
+		if s == nil || s.Kind() != FieldVal || s.Indirect() {
+			return logosEFKey{}, false
+		}
+		if len(s.Index()) == 1 {
+			rev = append(rev, "."+sel.Sel.Value)
+			x = sel.X
+			continue
+		}
+		bt, _, ok := p.check.logosChecked(sel.X)
+		if !ok {
+			return logosEFKey{}, false
+		}
+		base := len(rev)
+		for _, i := range s.Index() {
+			var seg string
+			seg, bt, ok = p.promotedStep(bt, i)
+			if !ok {
+				return logosEFKey{}, false
+			}
+			rev = append(rev, seg)
+		}
+		slices.Reverse(rev[base:])
+		multi = true
+		x = sel.X
+	}
+	if !multi {
+		return logosEFKey{}, false
+	}
+	v := p.varOf(x)
+	if v == nil {
+		return logosEFKey{}, false
+	}
+	slices.Reverse(rev)
+	return logosEFKey{root: v, path: strings.Join(rev, "")}, true
+}
+
+func (p *logosEFPass) reportPromoted(x syntax.Expr, k logosEFKey, st *logosEFState) bool {
+	at, pos := x, x.Pos()
+	if sel, isSel := x.(*syntax.SelectorExpr); isSel {
+		at, pos = sel.Sel, sel.Sel.Pos()
+	}
+	pres := logosEFPathPrefixes(k.path)
+	keys := make([]logosEFKey, 0, len(pres)+2)
+	keys = append(keys, k)
+	for i := len(pres) - 1; i >= 0; i-- {
+		keys = append(keys, logosEFKey{root: k.root, path: pres[i]})
+	}
+	keys = append(keys, logosEFKey{root: k.root})
+	for _, ck := range keys {
+		e, found := st.m[ck]
+		if !found || e.proven {
+			continue
+		}
+		if p.seen[pos] {
+			return true
+		}
+		p.seen[pos] = true
+		if id := spineRoot(x); id != nil {
+			p.seen[id.Pos()] = true
+		}
+		p.check.errorf(at, IncompatibleAssign, "%s read of %s before %s is checked (read %s only after %s is checked)", logosResultBeforeErr, ck.displayName(), e.name, ck.displayName(), e.name)
+		return true
+	}
+	return false
+}
+
 func (p *logosEFPass) readDest(x syntax.Expr, st *logosEFState) {
 	k, ok := p.rawKey(x)
 	if !ok {
 		if p.valueSpine(x) {
 			p.markSpine(x)
-			p.readWholeRoot(x, st)
+			if k2, ok := p.promotedKey(x); !ok || !p.reportPromoted(x, k2, st) {
+				p.readWholeRoot(x, st)
+			}
 		}
 		return
 	}

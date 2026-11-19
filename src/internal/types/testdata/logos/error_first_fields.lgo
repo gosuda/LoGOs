@@ -81,3 +81,29 @@ func ffPointerOverwriteDropsCheck() {
 	println(n)
 	_ = err
 }
+
+func ffPromotedReadSeesEmbeddedResult() {
+	h := ffOuter{}
+	var err error
+	h.ffMeta, err = ffLoadMeta()
+	println(h.tag /* ERROR "[correctness::result_before_error_check]" */)
+	_ = err
+}
+
+func ffPromotedReadSeesWholeRoot() {
+	h := ffOuter{}
+	var err error
+	h, err = ffLoadOuter()
+	println(h.tag /* ERROR "[correctness::result_before_error_check]" */)
+	_ = err
+}
+
+func ffPromotedSiblingStaysAccepted() {
+	h := ffOuter{}
+	var err error
+	h.count, err = ffFetchHeld()
+	println(h.tag)
+	h.tag = 1
+	println(h.count /* ERROR "[correctness::result_before_error_check]" */)
+	_ = err
+}
