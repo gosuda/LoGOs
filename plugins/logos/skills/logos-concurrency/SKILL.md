@@ -123,9 +123,11 @@ Expect exit 1 for the first two: each prints its finding. Expect exit 0 for the 
 
 Pass `-shake` with a decimal seed to yield at group and lock hook points from that seed. Rerun the printed seed to shake the run again. The seed fixes the yield counts, not the exact goroutine schedule. Treat a rerun as a retry, not an exact replay. Pass bare `-shake` to take the seed from the clock; the command prints the seed it used. A bare `-shake` followed by a number takes that number as its seed. Omit `-shake` to turn shaking off. A seed of 0 is a usage error, because seed 0 turns shaking off. A non-numeric seed is a usage error.
 
+Pin GOMAXPROCS=1 for the seeded runs: one thread keeps the spawn order.
+
 ```sh
-logos conc test -shake=1 -count=1 ./ord
-logos conc run -shake=1 ./ord
+GOMAXPROCS=1 logos conc test -shake=1 -count=1 ./ord
+GOMAXPROCS=1 logos conc run -shake=1 ./ord
 logos conc test -shake -count=1 ./ord
 ```
 
