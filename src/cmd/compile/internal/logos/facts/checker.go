@@ -15,6 +15,12 @@ func init() {
 	types2.LogosImportedParamProvenZero = paramProvenZero
 	types2.LogosImportedConstMapLen = constMapLen
 	types2.LogosImportedConstComposite = constComposite
+	types2.LogosImportedIsLogos = isLogosPackage
+}
+
+func isLogosPackage(path string) bool {
+	f, ok := Lookup(path)
+	return ok && f != nil && !f.GoPackage
 }
 
 func constMapLen(path, object string) (int, bool) {

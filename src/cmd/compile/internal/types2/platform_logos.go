@@ -295,15 +295,36 @@ func logosIsCgoName(name string) bool {
 	return false
 }
 
-// logosIsGoObj reports whether obj is declared outside the current
-// package (a Go-mode declaration), or is cgo-generated: named like a cgo
-// declaration or declared in a cgo-generated Go file of the package.
-// Universe objects (builtins, nil) are never Go-mode.
+// LogosImportedIsLogos reports whether the package at path was compiled
+// from loGo/s source (its export facts carry no lang go record). It is
+// set by cmd/compile/internal/logos/facts; a nil hook or a path without
+// facts fails safe to Go.
+var LogosImportedIsLogos func(path string) bool
+
+// logosIsGoPkg reports whether pkg is a Go-mode package for the
+// platform-pointer rules: any package other than the one being checked
+// that was not compiled from loGo/s source. Packages without export
+// facts (plain Go, or archives from before the facts member existed)
+// fail safe to Go.
+func (check *Checker) logosIsGoPkg(pkg *Package) bool {
+	if pkg == nil || pkg == check.pkg {
+		return false
+	}
+	if LogosImportedIsLogos != nil && LogosImportedIsLogos(pkg.Path()) {
+		return false
+	}
+	return true
+}
+
+// logosIsGoObj reports whether obj is declared in a Go-mode package,
+// or is cgo-generated: named like a cgo declaration or declared in a
+// cgo-generated Go file of the package. Universe objects (builtins,
+// nil) are never Go-mode.
 func (check *Checker) logosIsGoObj(obj Object) bool {
 	if obj == nil {
 		return false
 	}
-	if pkg := obj.Pkg(); pkg != nil && pkg != check.pkg {
+	if pkg := obj.Pkg(); pkg != nil && check.logosIsGoPkg(pkg) {
 		return true
 	}
 	return logosIsCgoName(obj.Name()) || logosGoModePos(obj.Pos())
@@ -365,7 +386,7 @@ func (check *Checker) logosCalleeIsGo(call *syntax.CallExpr) bool {
 					if pn.imported == nil {
 						return false
 					}
-					return pn.imported.cgo || pn.imported != check.pkg
+					return pn.imported.cgo || check.logosIsGoPkg(pn.imported)
 				}
 			}
 		}
@@ -476,7 +497,7 @@ func (check *Checker) logosExprDerived(e syntax.Expr) bool {
 		if check.logosDerivedVar[v] {
 			return true
 		}
-		return v.pkg != nil && v.pkg != check.pkg
+		return v.pkg != nil && check.logosIsGoPkg(v.pkg)
 	case *syntax.SelectorExpr:
 		if check.Info != nil {
 			if sel := check.Selections[e]; sel != nil {
@@ -489,7 +510,7 @@ func (check *Checker) logosExprDerived(e syntax.Expr) bool {
 			if obj := check.lookup(xn.Value); obj != nil {
 				if pn, ok := obj.(*PkgName); ok && pn.imported != nil {
 					if exp := pn.imported.scope.Lookup(e.Sel.Value); exp != nil {
-						return true
+						return check.logosIsGoPkg(pn.imported)
 					}
 					return false
 				}
