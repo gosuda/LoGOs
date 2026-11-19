@@ -771,6 +771,8 @@ A listed member that lacks a declared method MUST fail with `[correctness::union
 
 A closed union MUST be allowed in value positions in `.lgo` code (variables, parameters, results, fields, elements, keys, and values). [T-203.1]
 
+A member type MAY hold the union itself by value in a field, element, or type-argument position: the value position stores a fixed-size interface word, so holding the union is not an invalid recursive type. [T-203.1]
+
 A union with `~` terms or an unbounded set MUST fail with `[correctness::open_union_value]`. [T-203.1]
 
 A conversion MUST be allowed when the source type is a member or a closed union of members. [T-203.1]
@@ -1144,6 +1146,8 @@ Cases MUST evaluate top-down in first-match order. [T-205]
 Outside comptime generics a `const switch` MUST pick its case at run time from the type argument `T` alone, never from the dynamic type of a value. In an exact case, a rebound slice, map, or pointer MUST still refer to the storage of the caller's value. [T-205]
 
 Inside an interface case, a call of an interface method on a value of type `T` MUST run the method of that value, whether `T` is a concrete type or an interface type. [T-205]
+
+`const switch f.Type` inside a `const for` body MUST select the first case matching the field's type for the iteration; a case that cannot match the field's type is dead for the iteration rather than an authoring error, and inside the selected case `val.[f]` reads as the case's type under an exact or interface case, and keeps the field's own type under a `~T` case; an unbound field projects there as a parameter bounded by `~T`, so conversions to `T` check while assignments to `T` fail until the field binds. Case types resolve in the scope of the enclosing function body: a type or alias declared before the switch shadows the package-level name. A tag or case that names the field of an enclosing `const for` resolves per iteration of that outer loop, so it never statically covers a later case. While the field's type is unbound to a type parameter, every case stays reachable. [T-205]
 
 No match MUST return the input unchanged. [T-205]
 
