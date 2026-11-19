@@ -1,0 +1,68 @@
+// run
+
+package main
+
+import "fmt"
+
+type MaybeInt int?
+
+func (m MaybeInt) Twice() int { return (m ?? 0) * 2 }
+
+type Holder struct {
+	Val MaybeInt
+}
+
+type Outer struct {
+	In Holder?
+}
+
+type Box struct{ N int }
+
+type MaybeBox Box?
+
+func (b MaybeBox) Sum() int { return (b ?? Box{}).N }
+
+type BoxHolder struct{ B MaybeBox }
+
+func selectNamed(h Holder?) MaybeInt { return h?.Val }
+
+func selectTwice(h Holder?) int {
+	got := h?.Val
+	return got.Twice()
+}
+
+func plainTwice(h Holder) int {
+	got := h.Val
+	return got.Twice()
+}
+
+func coalesceNamed(h Holder?) int { return h?.Val ?? 0 }
+
+func selectBox(h BoxHolder?) int {
+	got := h?.B
+	return got.Sum()
+}
+
+func constMapNamed(m const map[string]Holder) int { return m["a"]?.Val ?? 0 }
+
+func constChainNamed(o const Outer) int { return o.In?.Val ?? 0 }
+
+func main() {
+	var five MaybeInt = 5
+	fmt.Println(five.Twice())
+	h := Holder{Val: five}
+	var hv Holder? = h
+	fmt.Println(selectTwice(hv), plainTwice(h))
+	fmt.Println(selectNamed(hv) ?? 11, coalesceNamed(hv))
+	var absent Holder?
+	fmt.Println(selectNamed(absent) == nil, coalesceNamed(absent))
+	var mb MaybeBox = Box{N: 7}
+	var bh BoxHolder? = BoxHolder{B: mb}
+	fmt.Println(selectBox(bh))
+	cm := map[string]Holder{"a": {Val: five}}
+	fmt.Println(constMapNamed(cm))
+	oc := Outer{In: hv}
+	fmt.Println(constChainNamed(oc))
+	var empty Outer
+	fmt.Println(constChainNamed(empty))
+}

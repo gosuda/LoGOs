@@ -9,6 +9,7 @@ import (
 	"go/token"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 
 	"cmd/compile/internal/base"
@@ -91,6 +92,12 @@ func newCswLower(fc *funcLower, s *syntax.ConstSwitchStmt) *cswLower {
 		if i+1 < len(s.Cases) {
 			cs.hi = fl.off(s.Cases[i+1].Case)
 			cs.close = s.Cases[i+1].Case
+		}
+		if _, ok := reparseType(cs.spell.s); !ok {
+			// The case type spells LoGOs-only syntax (an option suffix):
+			// the respell sites emit this text into a plain recheck, so
+			// spell the checked type in its lowered plain form instead.
+			cs.spell = gen(fl.plainTypeSpell(typ))
 		}
 		switch {
 		case syn.Tilde:
@@ -357,7 +364,7 @@ func (c *cswLower) caseBody(cs *cswCase, done string) ([]syntax.Stmt, otext) {
 		head = append(head, at(&syntax.AssignStmt{Lhs: nameOf(cs.syn.Case, done), Rhs: nameOf(cs.syn.Case, "true")}, cs.syn.Case))
 		headText = cat(headText, gen(done+" = true\n"))
 	}
-	body := c.fl.textOf(span{cs.lo, cs.hi})
+	body := c.fl.lazyText(span{cs.lo, cs.hi})
 	return append(head, lowered...), cat(headText, body)
 }
 
@@ -714,8 +721,122 @@ func (c *cswLower) rebound(cs *cswCase) []cswRebind {
 	return out
 }
 
+// cswSpell renders typ as the plain Go text the lowered file spells: an
+// option becomes the element type itself when the option is bare and
+// logosrt.Option[E] otherwise, and composite types spell their parts the
+// same way. Every respell site parses this text as plain Go, so a LoGOs
+// spelling here would fail the recheck.
 func (c *cswLower) cswSpell(typ types2.Type) string {
-	return c.fl.typeSpell(typ)
+	return c.fl.plainTypeSpell(typ)
+}
+
+func (fl *fileLower) plainTypeSpell(typ types2.Type) string {
+	if a, ok := typ.(*types2.Alias); ok && a.Obj() != nil {
+		if q := fl.typeQualifier()(a.Obj().Pkg()); q != "" {
+			var b strings.Builder
+			b.WriteString(q)
+			b.WriteString(".")
+			b.WriteString(a.Obj().Name())
+			if ta := a.TypeArgs(); ta != nil {
+				b.WriteString("[")
+				for i := range ta.Len() {
+					if i > 0 {
+						b.WriteString(", ")
+					}
+					b.WriteString(fl.plainTypeSpell(ta.At(i)))
+				}
+				b.WriteString("]")
+			}
+			return b.String()
+		}
+		return fl.plainTypeSpell(types2.Unalias(typ))
+	}
+	switch t := unaliasConstView(typ).(type) {
+	case *types2.Option:
+		if types2.LogosOptionIsBare(t.Elem) {
+			return fl.plainTypeSpell(t.Elem)
+		}
+		fl.needRT = true
+		return rtAlias + ".Option[" + fl.plainTypeSpell(t.Elem) + "]"
+	case *types2.Pointer:
+		return "*" + fl.plainTypeSpell(t.Elem())
+	case *types2.Slice:
+		return "[]" + fl.plainTypeSpell(t.Elem())
+	case *types2.Array:
+		return "[" + strconv.FormatInt(t.Len(), 10) + "]" + fl.plainTypeSpell(t.Elem())
+	case *types2.Map:
+		return "map[" + fl.plainTypeSpell(t.Key()) + "]" + fl.plainTypeSpell(t.Elem())
+	case *types2.Chan:
+		switch t.Dir() {
+		case types2.RecvOnly:
+			return "<-chan " + fl.plainTypeSpell(t.Elem())
+		case types2.SendOnly:
+			return "chan<- " + fl.plainTypeSpell(t.Elem())
+		}
+		if c, ok := types2.Unalias(t.Elem()).(*types2.Chan); ok && c.Dir() == types2.RecvOnly {
+			return "chan (" + fl.plainTypeSpell(t.Elem()) + ")"
+		}
+		return "chan " + fl.plainTypeSpell(t.Elem())
+	case *types2.Named:
+		ta := t.TypeArgs()
+		if ta == nil {
+			return fl.typeSpell(t)
+		}
+		var b strings.Builder
+		if q := fl.typeQualifier()(t.Obj().Pkg()); q != "" {
+			b.WriteString(q)
+			b.WriteByte('.')
+		}
+		b.WriteString(t.Obj().Name())
+		b.WriteByte('[')
+		for i := range ta.Len() {
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			b.WriteString(fl.plainTypeSpell(ta.At(i)))
+		}
+		b.WriteByte(']')
+		return b.String()
+	case *types2.Signature:
+		var b strings.Builder
+		b.WriteString("func(")
+		b.WriteString(fl.paramsText(t.Params(), t.Variadic()))
+		b.WriteByte(')')
+		if res := t.Results(); res != nil && res.Len() > 0 {
+			if res.Len() == 1 && res.At(0).Name() == "" {
+				b.WriteByte(' ')
+				b.WriteString(fl.plainTypeSpell(res.At(0).Type()))
+			} else {
+				b.WriteString(" (")
+				b.WriteString(fl.paramsText(res, false))
+				b.WriteByte(')')
+			}
+		}
+		return b.String()
+	}
+	return fl.typeSpell(typ)
+}
+
+func (fl *fileLower) paramsText(ps *types2.Tuple, variadic bool) string {
+	var b strings.Builder
+	for i := range ps.Len() {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		t := ps.At(i).Type()
+		if variadic && i == ps.Len()-1 {
+			if s, ok := t.(*types2.Slice); ok {
+				b.WriteString("...")
+				b.WriteString(fl.plainTypeSpell(s.Elem()))
+				continue
+			}
+			b.WriteString(fl.plainTypeSpell(t))
+			b.WriteString("...")
+			continue
+		}
+		b.WriteString(fl.plainTypeSpell(t))
+	}
+	return b.String()
 }
 
 // cswTarget is one name the walker rewrites: the AST replacement for the
@@ -857,6 +978,16 @@ func (c *cswLower) wrapConvs(body []syntax.Stmt, cs *cswCase, selWraps []selWrap
 	if len(recs) == 0 {
 		return decls, dtext
 	}
+	// clauses lists each comm clause holding a recorded operand, in
+	// record order; the alias pre-mint and the render loop share it.
+	var clauses []*syntax.CommClause
+	clauseSeen := make(map[*syntax.CommClause]bool)
+	for _, r := range recs {
+		if cc := clauseOf[r.e]; cc != nil && !clauseSeen[cc] {
+			clauseSeen[cc] = true
+			clauses = append(clauses, cc)
+		}
+	}
 	c.fl.needRT = true
 	recOf := make(map[syntax.Expr]rec, len(recs))
 	for _, r := range recs {
@@ -981,18 +1112,18 @@ func (c *cswLower) wrapConvs(body []syntax.Stmt, cs *cswCase, selWraps []selWrap
 	}
 	// spellFor names each destination type through a case-body alias: a
 	// declared or inferred type may spell an identifier a nested block
-	// shadows, and aliases mint lazily so assignments needing no rewrite
-	// never spell an unimported type. A spell naming a type declared
-	// inside the case body gets its alias right after that declaration
-	// instead of at the case top.
-	// Pinned aliases are emitted after the body walk: inserting a node
-	// into a statement list mid-walk shifts the slice the walk iterates.
+	// shadows. A spell naming a type declared inside the case body gets
+	// its alias right after that declaration instead of at the case top.
+	// The alias text is spliced at mint time: a use inside a boxed
+	// operand's span is composed into that operand's replacement by
+	// the next textOf, so the splice must exist before composition
+	// begins. Only the declaration node waits for the body walk:
+	// inserting it into a statement list mid-walk shifts the slice
+	// the walk iterates.
 	type pinnedAlias struct {
 		d    *syntax.DeclStmt
 		list *[]syntax.Stmt
 		stmt *syntax.DeclStmt
-		end  int
-		text string
 	}
 	var pinned []pinnedAlias
 	// secAlias dedupes by type, not spell: two types can spell the same
@@ -1013,7 +1144,8 @@ func (c *cswLower) wrapConvs(body []syntax.Stmt, cs *cswCase, selWraps []selWrap
 			at(&syntax.TypeDecl{Name: nameOf(cs.syn.Case, a), Alias: true, Type: typ}, cs.syn.Case),
 		}}, cs.syn.Case)
 		if lt, ok := localTypeOf(t); ok {
-			pinned = append(pinned, pinnedAlias{d, lt.list, lt.stmt, lt.end, "\ntype " + a + " = " + s})
+			c.fl.addT(lt.end, lt.end, gen("\ntype "+a+" = "+s))
+			pinned = append(pinned, pinnedAlias{d, lt.list, lt.stmt})
 			return a
 		}
 		decls = append(decls, d)
@@ -1114,6 +1246,36 @@ func (c *cswLower) wrapConvs(body []syntax.Stmt, cs *cswCase, selWraps []selWrap
 			}
 			return true
 		})
+	}
+	// Mint every alias the rewrites below will spell before the first
+	// expand: a pinned alias whose declaration sits inside a boxed
+	// operand's span must already be a pending splice so textOf drains
+	// it into the composed replacement. Minted later, it would survive
+	// as a sibling edit the covering replacement overlaps.
+	for _, r := range recs {
+		if clauseOf[r.e] != nil {
+			continue
+		}
+		if secondT, ok := multi[r.e]; ok {
+			spellFor(secondT)
+		}
+	}
+	for _, cc := range clauses {
+		as, ok := cc.Comm.(*syntax.AssignStmt)
+		if !ok || as.Op != 0 {
+			continue
+		}
+		var elems []syntax.Expr
+		if le, ok := as.Lhs.(*syntax.ListExpr); ok {
+			elems = le.ElemList
+		} else if as.Lhs != nil {
+			elems = []syntax.Expr{as.Lhs}
+		}
+		for _, l := range elems[1:] {
+			if t := c.info.TypeOf(l); t != nil {
+				spellFor(t)
+			}
+		}
 	}
 	// expand renders the span's source text with every recorded expression
 	// inside it boxed; nested recordings compose inside their outer boxes.
@@ -1233,14 +1395,8 @@ func (c *cswLower) wrapConvs(body []syntax.Stmt, cs *cswCase, selWraps []selWrap
 	}
 	conv := make(map[syntax.Expr]syntax.Expr)
 	texts := make(map[syntax.Expr]otext)
-	var clauses []*syntax.CommClause
-	clauseSeen := make(map[*syntax.CommClause]bool)
 	for _, r := range recs {
-		if cc := clauseOf[r.e]; cc != nil {
-			if !clauseSeen[cc] {
-				clauseSeen[cc] = true
-				clauses = append(clauses, cc)
-			}
+		if clauseOf[r.e] != nil {
 			continue
 		}
 		contained := false
@@ -1580,11 +1736,11 @@ func (c *cswLower) wrapConvs(body []syntax.Stmt, cs *cswCase, selWraps []selWrap
 		texts.WriteString("\n")
 		c.fl.addT(c.fl.off(cc.Colon)+1, c.fl.off(cc.Colon)+1, gen(freezeText.String()+texts.String()))
 	}
-	// Pinned aliases are emitted after the store walk: inserting a node
-	// into a statement list mid-walk shifts the slice the walk iterates.
+	// Pinned alias declarations insert after the store walk: inserting a
+	// node into a statement list mid-walk shifts the slice the walk
+	// iterates. Their text splices already went out at mint time.
 	emitPinned := func() {
 		for _, p := range pinned {
-			c.fl.addT(p.end, p.end, gen(p.text))
 			if i := slices.Index(*p.list, syntax.Stmt(p.stmt)); i >= 0 {
 				*p.list = slices.Insert(*p.list, i+1, syntax.Stmt(p.d))
 			}
