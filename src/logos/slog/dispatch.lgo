@@ -1,0 +1,36 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package slog
+
+import (
+	"fmt"
+	"log/slog"
+	"reflect"
+)
+
+// appendValue appends v with the handler's encoding, converting a
+// resolver or marshaler panic into the same markers log/slog produces.
+func (s *handleState) appendValue(v slog.Value) {
+	defer func() {
+		if r := recover(); r != nil {
+			// Adapted from the code in fmt/print.go.
+			if w := reflect.ValueOf(v.Any()); w.Kind() == reflect.Pointer && w.IsNil() {
+				s.appendString("<nil>")
+				return
+			}
+			s.appendString(fmt.Sprintf("!PANIC: %v", r))
+		}
+	}()
+
+	var err error
+	if s.h.json {
+		err = appendJSONValue(s, v)
+	} else {
+		err = appendTextValue(s, v)
+	}
+	if err != nil {
+		s.appendError(err)
+	}
+}

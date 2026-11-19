@@ -1,0 +1,83 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package slog_test
+
+import (
+	"io"
+	"log/slog"
+	"testing"
+
+	twinslog "logos/slog"
+)
+
+func twinBenchAttrs6() []slog.Attr { return twinAttrs6() }
+
+func BenchmarkTwin(b *testing.B) {
+	textLogger := twinslog.New(twinslog.NewTextHandler(io.Discard, new(slog.HandlerOptions)))
+	jsonLogger := twinslog.New(twinslog.NewJSONHandler(io.Discard, new(slog.HandlerOptions)))
+	attrs6 := twinBenchAttrs6()
+	attrs12 := append(twinBenchAttrs6(), twinBenchAttrs6()...)
+
+	b.Run("text/Info/0", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			textLogger.Info("msg")
+		}
+	})
+	b.Run("json/Info/0", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			jsonLogger.Info("msg")
+		}
+	})
+	b.Run("text/Info/6", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			textLogger.Info("msg", attrs6...)
+		}
+	})
+	b.Run("json/Info/6", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			jsonLogger.Info("msg", attrs6...)
+		}
+	})
+	b.Run("text/Info/12", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			textLogger.Info("msg", attrs12...)
+		}
+	})
+	b.Run("json/Info/12", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			jsonLogger.Info("msg", attrs12...)
+		}
+	})
+	b.Run("text/singleFloat", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			textLogger.Info("msg", slog.Float64("f", 3.14159))
+		}
+	})
+	b.Run("json/singleFloat", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			jsonLogger.Info("msg", slog.Float64("f", 3.14159))
+		}
+	})
+	b.Run("text/singleDuration", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			textLogger.Info("msg", slog.Duration("d", 123456789))
+		}
+	})
+	b.Run("json/singleBytes", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			jsonLogger.Info("msg", twinslog.Bytes("b", []byte("hello")))
+		}
+	})
+}

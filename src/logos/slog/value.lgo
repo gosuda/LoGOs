@@ -1,0 +1,145 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package slog
+
+import (
+	"log/slog"
+	"time"
+)
+
+// ByteSliceOf returns v as a []byte when v's dynamic type has []byte as
+// its underlying type, along with true. Otherwise it returns nil, false.
+// The probe itself allocates nothing. The twin handlers call the
+// unexported probe on the already-boxed attribute value, so the hot path
+// pays nothing. A generic spelling would box identically at the call
+// boundary and is intentionally not provided.
+func ByteSliceOf(v any) ([]byte, bool) {
+	return byteSliceOf(v)
+}
+
+// Bytes returns an Attr holding b. The handler renders it quoted in text
+// records and base64 in JSON records, exactly like log/slog.
+func Bytes(key string, b []byte) slog.Attr {
+	return slog.Any(key, b)
+}
+
+// BytesOf returns an Attr holding v, which may be any byte-slice type.
+// The conversion shares the backing array. It is the migration for
+// values of named []byte types, which the untyped helpers would format
+// with fmt instead of quoting.
+func BytesOf[T ~[]byte](key string, v T) slog.Attr {
+	return slog.Any(key, []byte(v))
+}
+
+// appendDuration appends the text form of d: byte for byte what
+// time.Duration.String returns. It mirrors Duration.format from the time
+// package, writing forward into the record buffer instead of returning a
+// string.
+func appendDuration(dst []byte, d time.Duration) []byte {
+	var arr [32]byte
+	w := len(arr)
+
+	u := uint64(d)
+	neg := d < 0
+	if neg {
+		u = -u
+	}
+
+	if u < uint64(time.Second) {
+		w = formatDurationSubSecond(&arr, w, u)
+	} else {
+		w = formatDurationLarge(&arr, w, u)
+	}
+
+	if neg {
+		w--
+		arr[w] = '-'
+	}
+
+	return append(dst, arr[w:]...)
+}
+
+func formatDurationSubSecond(arr *[32]byte, w int, u uint64) int {
+	var prec int
+	w--
+	arr[w] = 's'
+	w--
+	switch {
+	case u == 0:
+		arr[w] = '0'
+		return w
+	case u < uint64(time.Microsecond):
+		prec = 0
+		arr[w] = 'n'
+	case u < uint64(time.Millisecond):
+		prec = 3
+		w--
+		copy(arr[w:], "µ")
+	default:
+		prec = 6
+		arr[w] = 'm'
+	}
+	w, u = fmtDurationFrac(arr[:w], u, prec)
+	return fmtDurationInt(arr[:w], u)
+}
+
+func formatDurationLarge(arr *[32]byte, w int, u uint64) int {
+	w--
+	arr[w] = 's'
+
+	w, u = fmtDurationFrac(arr[:w], u, 9)
+
+	w = fmtDurationInt(arr[:w], u%60)
+	u /= 60
+
+	if u == 0 {
+		return w
+	}
+	w--
+	arr[w] = 'm'
+	w = fmtDurationInt(arr[:w], u%60)
+	u /= 60
+
+	if u == 0 {
+		return w
+	}
+	w--
+	arr[w] = 'h'
+	return fmtDurationInt(arr[:w], u)
+}
+
+func fmtDurationFrac(buf []byte, v uint64, prec int) (int, uint64) {
+	w := len(buf)
+	print := false
+	for i := 0; i < prec; i++ {
+		digit := v % 10
+		print = print || digit != 0
+		if print {
+			w--
+			buf[w] = byte(digit) + '0'
+		}
+		v /= 10
+	}
+	if print {
+		w--
+		buf[w] = '.'
+	}
+	return w, v
+}
+
+func fmtDurationInt(buf []byte, v uint64) int {
+	w := len(buf)
+	if v == 0 {
+		w--
+		buf[w] = '0'
+	} else {
+		for v > 0 {
+			w--
+			buf[w] = byte(v%10) + '0'
+			v /= 10
+		}
+	}
+	return w
+}

@@ -1,0 +1,56 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+// Package slog is the LoGOs twin of the standard log/slog text and JSON
+// handler path.
+//
+// It reuses the log/slog data model as is: Level, Attr, Value, Record,
+// Handler, HandlerOptions, Leveler, LogValuer and Source, together with
+// every slog constructor (String, Int64, Uint64, Float64, Bool, Time,
+// Duration, Any, Group, GroupAttrs and the Value constructors). A twin
+// handler implements slog.Handler, so it plugs into slog.Logger and any
+// existing handler chain, and a twin Logger wraps any slog.Handler.
+//
+// The twin provides the hot path without the two reflect sites and the
+// ...any boxing of the original:
+//
+//   - TextHandler and JSONHandler format the scalar attribute kinds
+//     (string, int64, uint64, float64, bool, duration, time) with plain
+//     appends into a pooled buffer. The single reflect probe that remains
+//     runs only for a dynamic Any value holding a named []byte type; the
+//     type is known only at run time there, so reflect is the honest tool.
+//   - Logger takes ...slog.Attr instead of ...any, so typed constructors
+//     never box on the way in.
+//   - JSON floats append through logos/rt/json instead of a pooled
+//     json.Encoder, and JSON []byte values append base64 directly.
+//   - Text quoting appends through strconv.AppendQuote into the record
+//     buffer instead of converting through an intermediate string.
+//
+// Compatibility boundary: DiscardHandler, the default logger, SetDefault,
+// NewLogLogger and every ...any entry point (Logger.Info and friends,
+// Record.Add, slog.Group with ...any) stay where they are in log/slog and
+// are intentionally absent here. Migrate Info(msg, args...) to
+// InfoAttrs(ctx, msg, slog.String(...), ...) or LogAttrs on a slog.Logger
+// wrapping the twin handler; migrate Record.Add(args...) to AddAttrs;
+// migrate slog.Group(key, args...) to slog.GroupAttrs(key, attrs...).
+// ReplaceAttr, WithAttrs preformatting, WithGroup, AddSource, LogValuer
+// resolution, empty-group elision and the one-write-per-record guarantee
+// behave exactly as in log/slog: the twin test suite replays the
+// standard handler, text and JSON behavior tests against the standard
+// handlers as oracle and requires byte-equal output.
+//
+// Allocation bound: the handler formatting path allocates nothing at any
+// attribute count while the record fits the pooled 1 KiB buffer; records
+// that outgrow it allocate only for buffer growth. Through the Logger,
+// records with more than the five inline slog.Record slots add exactly
+// the one slice-growth allocation that log/slog itself performs. Dynamic
+// Any values (maps, slices and structs through encoding/json, fmt
+// fallbacks, TextAppender and TextMarshaler payloads) may allocate exactly
+// as the original does. WithAttrs preformatting allocates once per
+// WithAttrs call, as in the original.
+//
+// The JSON invalid-UTF-8 escape follows the toolchain experiment through
+// build-tagged files, exactly like src/logos/rt/json: \ufffd by default,
+// a literal U+FFFD under GOEXPERIMENT=jsonv2.
+package slog

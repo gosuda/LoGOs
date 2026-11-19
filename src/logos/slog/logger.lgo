@@ -1,0 +1,116 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package slog
+
+import (
+	"context"
+	"log/slog"
+	"runtime"
+	"time"
+)
+
+// Logger is the twin of log/slog's Logger without the ...any entry
+// points. Every logging method takes ...slog.Attr built with the typed
+// constructors, so scalar values never box on the way in. The handler may
+// be a twin handler or any existing slog.Handler.
+//
+// Unlike log/slog's Logger there is no test hook that disables the caller
+// lookup: the program counter is always captured, and AddSource always
+// reports the logging call site.
+type Logger struct {
+	handler slog.Handler
+}
+
+// New creates a Logger that writes to h.
+func New(h slog.Handler) *Logger {
+	return &Logger{handler: h}
+}
+
+// Enabled reports whether l handles records at the given level.
+func (l *Logger) Enabled(ctx context.Context, level slog.Level) bool {
+	return l.handler.Enabled(ctx, level)
+}
+
+// Handler returns l's handler.
+func (l *Logger) Handler() slog.Handler {
+	return l.handler
+}
+
+// With returns a Logger whose handler holds l's attributes followed by
+// attrs.
+func (l *Logger) With(attrs ...slog.Attr) *Logger {
+	return &Logger{handler: l.handler.WithAttrs(attrs)}
+}
+
+// WithGroup returns a Logger whose handler starts the named group.
+func (l *Logger) WithGroup(name string) *Logger {
+	return &Logger{handler: l.handler.WithGroup(name)}
+}
+
+// Log logs a record at the given level with the given message and
+// attributes.
+func (l *Logger) Log(ctx context.Context, level slog.Level, msg string, attrs ...slog.Attr) {
+	l.log(ctx, level, msg, attrs)
+}
+
+// Debug logs at LevelDebug with the given message and attributes.
+func (l *Logger) Debug(msg string, attrs ...slog.Attr) {
+	l.log(context.Background(), slog.LevelDebug, msg, attrs)
+}
+
+// DebugContext logs at LevelDebug with the given context.
+func (l *Logger) DebugContext(ctx context.Context, msg string, attrs ...slog.Attr) {
+	l.log(ctx, slog.LevelDebug, msg, attrs)
+}
+
+// Info logs at LevelInfo with the given message and attributes.
+func (l *Logger) Info(msg string, attrs ...slog.Attr) {
+	l.log(context.Background(), slog.LevelInfo, msg, attrs)
+}
+
+// InfoContext logs at LevelInfo with the given context.
+func (l *Logger) InfoContext(ctx context.Context, msg string, attrs ...slog.Attr) {
+	l.log(ctx, slog.LevelInfo, msg, attrs)
+}
+
+// Warn logs at LevelWarn with the given message and attributes.
+func (l *Logger) Warn(msg string, attrs ...slog.Attr) {
+	l.log(context.Background(), slog.LevelWarn, msg, attrs)
+}
+
+// WarnContext logs at LevelWarn with the given context.
+func (l *Logger) WarnContext(ctx context.Context, msg string, attrs ...slog.Attr) {
+	l.log(ctx, slog.LevelWarn, msg, attrs)
+}
+
+// Error logs at LevelError with the given message and attributes.
+func (l *Logger) Error(msg string, attrs ...slog.Attr) {
+	l.log(context.Background(), slog.LevelError, msg, attrs)
+}
+
+// ErrorContext logs at LevelError with the given context.
+func (l *Logger) ErrorContext(ctx context.Context, msg string, attrs ...slog.Attr) {
+	l.log(ctx, slog.LevelError, msg, attrs)
+}
+
+// log builds one record and hands it to the handler. It must be called
+// directly by an exported logging method: the caller program counter is
+// taken at a fixed depth of three.
+func (l *Logger) log(ctx context.Context, level slog.Level, msg string, attrs []slog.Attr) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if !l.handler.Enabled(ctx, level) {
+		return
+	}
+	var pcs [1]uintptr
+	// skip runtime.Callers, this function, and this function's caller.
+	runtime.Callers(3, pcs[:])
+	r := slog.NewRecord(time.Now(), level, msg, pcs[0])
+	r.AddAttrs(attrs...)
+	// A Logger discards handler errors by design, matching log/slog.
+	//logos:allow(slop::discarded_error)
+	_ = l.handler.Handle(ctx, r)
+}

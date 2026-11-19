@@ -1,0 +1,234 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package slog
+
+import (
+	"bytes"
+	"context"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"log/slog"
+	"math"
+	"strconv"
+	"sync"
+	"time"
+	"unicode/utf8"
+
+	rtjson "logos/rt/json"
+)
+
+// JSONHandler writes records as line-delimited JSON objects, with exactly
+// the layout of log/slog's JSONHandler. Each call to Handle results in a
+// single serialized call to io.Writer.Write.
+type JSONHandler struct {
+	common *commonHandler
+}
+
+// NewJSONHandler creates a JSONHandler that writes to w with the given
+// options. If opts is nil, the default options are used.
+func NewJSONHandler(w io.Writer, opts *slog.HandlerOptions) *JSONHandler {
+	if opts == nil {
+		opts = &slog.HandlerOptions{}
+	}
+	return &JSONHandler{
+		common: &commonHandler{
+			json: true,
+			w:    w,
+			opts: *opts,
+			mu:   &sync.Mutex{},
+		},
+	}
+}
+
+// Enabled reports whether the handler handles records at the given level.
+func (h *JSONHandler) Enabled(_ context.Context, level slog.Level) bool {
+	return h.common.enabled(level)
+}
+
+// WithAttrs returns a new JSONHandler whose attributes consist of h's
+// attributes followed by attrs.
+func (h *JSONHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	return &JSONHandler{common: h.common.withAttrs(attrs)}
+}
+
+// WithGroup returns a new JSONHandler with the given group appended.
+func (h *JSONHandler) WithGroup(name string) slog.Handler {
+	return &JSONHandler{common: h.common.withGroup(name)}
+}
+
+// Handle formats its argument Record as a JSON object on a single line.
+func (h *JSONHandler) Handle(_ context.Context, r slog.Record) error {
+	return h.common.handle(r)
+}
+
+// appendJSONTime formats t as a quoted RFC3339Nano timestamp, mirroring
+// log/slog's appendJSONTime.
+func appendJSONTime(s *handleState, t time.Time) {
+	if y := t.Year(); y < 0 || y >= 10000 {
+		s.appendError(errors.New("time.Time year outside of range [0,9999]"))
+		return
+	}
+	s.buf.writeByte('"')
+	*s.buf = t.AppendFormat(s.buf.bytes(), time.RFC3339Nano)
+	s.buf.writeByte('"')
+}
+
+func appendJSONValue(s *handleState, v slog.Value) error {
+	switch v.Kind() {
+	case slog.KindString:
+		s.appendString(v.String())
+	case slog.KindInt64:
+		*s.buf = rtjson.AppendInt(s.buf.bytes(), v.Int64())
+	case slog.KindUint64:
+		*s.buf = rtjson.AppendUint(s.buf.bytes(), v.Uint64())
+	case slog.KindFloat64:
+		f := v.Float64()
+		if math.IsInf(f, 0) || math.IsNaN(f) {
+			return rtjson.FloatErr(v.Any(), f, 64)
+		}
+		*s.buf = rtjson.AppendFloat(s.buf.bytes(), f, 64)
+	case slog.KindBool:
+		*s.buf = strconv.AppendBool(s.buf.bytes(), v.Bool())
+	case slog.KindDuration:
+		*s.buf = rtjson.AppendInt(s.buf.bytes(), int64(v.Duration()))
+	case slog.KindTime:
+		s.appendTime(v.Time())
+	case slog.KindAny:
+		return appendJSONAnyValue(s, v.Any())
+	default:
+		panic(fmt.Sprintf("bad kind: %s", v.Kind()))
+	}
+	return nil
+}
+
+func appendJSONAnyValue(s *handleState, a any) error {
+	if _, jm := a.(json.Marshaler); jm {
+		return appendJSONMarshal(s.buf, a)
+	}
+	if err, ok := a.(error); ok {
+		s.appendString(err.Error())
+		return nil
+	}
+	if bs, ok := byteSliceOf(a); ok {
+		appendJSONBytes(s.buf, bs)
+		return nil
+	}
+	return appendJSONMarshal(s.buf, a)
+}
+
+// appendJSONBytes appends a []byte value as a quoted base64 string: the
+// same bytes encoding/json produces, without the pooled encoder.
+func appendJSONBytes(b *buffer, src []byte) {
+	b.writeByte('"')
+	*b = base64.StdEncoding.AppendEncode(b.bytes(), src)
+	b.writeByte('"')
+}
+
+type jsonEncoder struct {
+	buf     *bytes.Buffer
+	jsonEnc *json.Encoder
+}
+
+var jsonEncoderPool = &sync.Pool{
+	New: func() any {
+		buf := new(bytes.Buffer)
+		enc := json.NewEncoder(buf)
+		enc.SetEscapeHTML(false)
+		return &jsonEncoder{buf: buf, jsonEnc: enc}
+	},
+}
+
+func appendJSONMarshal(buf *buffer, v any) error {
+	j := jsonEncoderPool.Get().(*jsonEncoder)
+	defer func() {
+		const maxBufferSize = 16 << 10
+		if j.buf.Cap() > maxBufferSize {
+			return
+		}
+		j.buf.Reset()
+		jsonEncoderPool.Put(j)
+	}()
+
+	if err := j.jsonEnc.Encode(v); err != nil {
+		return err
+	}
+
+	bs := j.buf.Bytes()
+	buf.write(bs[:len(bs)-1])
+	return nil
+}
+
+// appendEscapedJSONString escapes s for JSON and appends it to buf,
+// without surrounding quotation marks. It disables HTML escaping, exactly
+// like log/slog's copy: <, > and & pass through, U+2028 and U+2029 are
+// escaped, and invalid UTF-8 becomes U+FFFD under the jsonv2 experiment
+// rule. logos/rt/json cannot be reused here: its escaper always escapes
+// HTML, so sharing it would change output bytes for keys and values
+// containing <, > or &.
+func appendEscapedJSONString(buf []byte, s string) []byte {
+	start := 0
+	for i := 0; i < len(s); {
+		if b := s[i]; b < utf8.RuneSelf {
+			if safeSet[b] {
+				i++
+				continue
+			}
+			if start < i {
+				buf = append(buf, s[start:i]...)
+			}
+			buf = appendEscapedByte(buf, b)
+			i++
+			start = i
+			continue
+		}
+		var next int
+		buf, next, start = appendEscapedRune(buf, s, i, start)
+		i = next
+	}
+	if start < len(s) {
+		buf = append(buf, s[start:]...)
+	}
+	return buf
+}
+
+func appendEscapedRune(buf []byte, s string, i int, start int) ([]byte, int, int) {
+	c, size := utf8.DecodeRuneInString(s[i:])
+	if c != utf8.RuneError || size != 1 {
+		if c != '\u2028' && c != '\u2029' {
+			return buf, i + size, start
+		}
+		if start < i {
+			buf = append(buf, s[start:i]...)
+		}
+		buf = append(buf, `\u202`...)
+		return append(buf, hexDigits[c&0xF]), i + size, i + size
+	}
+	if start < i {
+		buf = append(buf, s[start:i]...)
+	}
+	return append(buf, invalidUTF8Replacement...), i + size, i + size
+}
+
+func appendEscapedByte(buf []byte, b byte) []byte {
+	buf = append(buf, '\\')
+	switch b {
+	case '\\', '"':
+		return append(buf, b)
+	case '\n':
+		return append(buf, 'n')
+	case '\r':
+		return append(buf, 'r')
+	case '\t':
+		return append(buf, 't')
+	default:
+		buf = append(buf, 'u', '0', '0')
+		return append(buf, hexDigits[b>>4], hexDigits[b&0xF])
+	}
+}
+
+const hexDigits = "0123456789abcdef"
