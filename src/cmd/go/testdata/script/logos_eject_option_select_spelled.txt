@@ -1,0 +1,159 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+cd m
+logos run .
+cp stdout $WORK/native.txt
+
+# The three spellings fixed for ?. selections must survive ejection as
+# valid Go: ... for variadic last parameters, parentheses for a
+# receive-only channel element, and a quoted tag holding a backtick.
+logos eject -o out
+exists out/main.go
+grep 'Maybe\[func\(\.\.\.int\) int\]' out/main.go
+grep 'chan (\(<-chan int)\)' out/main.go
+grep 'tag:`v' out/main.go
+cd out
+go build ./...
+go run .
+cmp stdout $WORK/native.txt
+# SPEC 0.3: ejected output builds with upstream go1.27.2 from $UPROOT1272.
+exists $UPROOT1272/bin/go
+exec $UPROOT1272/bin/go version
+exec env -u GOROOT $UPROOT1272/bin/go build ./...
+exec env -u GOROOT $UPROOT1272/bin/go run .
+cmp stdout $WORK/native.txt
+cd ..
+cd out
+exec $GOROOT/bin/gofmt -l .
+! stdout .
+cd ..
+cd ..
+
+-- m/go.mod --
+module example.com/ejectoptspelled
+
+go 1.27
+
+-- m/main.lgo --
+package main
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"time"
+)
+
+type Maybe[T any] *T?
+
+var failed bool
+
+func check(name string, cond bool, got, want any) {
+	if !cond {
+		failed = true
+		fmt.Println("FAIL", name+":", "got", got, "want", want)
+		return
+	}
+	fmt.Println("ok", name)
+}
+
+type HolderV struct {
+	F Maybe[func(...int) int]
+}
+
+func selectVariadic(h HolderV?) Maybe[func(...int) int] { return h?.F }
+
+type HolderC struct {
+	C Maybe[chan (<-chan int)]
+}
+
+func selectChan(h HolderC?) Maybe[chan (<-chan int)] { return h?.C }
+
+type HolderT struct {
+	S Maybe[struct {
+		X int "tag:`v"
+	}]
+}
+
+func selectTagged(h HolderT?) Maybe[struct {
+	X int "tag:`v"
+}] {
+	return h?.S
+}
+
+func variadicCase() {
+	var av HolderV?
+	check("variadic-absent", selectVariadic(av) == nil, selectVariadic(av) == nil, true)
+	sum := func(ns ...int) int {
+		total := 0
+		for _, n := range ns {
+			total += n
+		}
+		return total
+	}
+	pv := HolderV{F: &sum}
+	var ppv HolderV? = pv
+	gotv := selectVariadic(ppv)
+	check("variadic-present", gotv != nil, gotv != nil, true)
+	if gotv != nil {
+		fn := *gotv
+		got := fn(1, 2, 3)
+		check("variadic-call", got == 6, got, 6)
+	}
+}
+
+func chanCase(ctx context.Context) {
+	var ac HolderC?
+	check("chan-absent", selectChan(ac) == nil, selectChan(ac) == nil, true)
+	inner := make(chan int, 1)
+	inner <- 7
+	var ro <-chan int = inner
+	outer := make(chan (<-chan int), 1)
+	outer <- ro
+	pc := HolderC{C: &outer}
+	var ppc HolderC? = pc
+	gotc := selectChan(ppc)
+	check("chan-present", gotc != nil, gotc != nil, true)
+	if gotc != nil {
+		var ro2 <-chan int
+		select {
+		case ro2 = <-(*gotc):
+		case <-ctx.Done():
+		}
+		var v int
+		select {
+		case v = <-ro2:
+		case <-ctx.Done():
+		}
+		check("chan-value", v == 7, v, 7)
+	}
+}
+
+func taggedCase() {
+	var at HolderT?
+	check("tagged-absent", selectTagged(at) == nil, selectTagged(at) == nil, true)
+	var s struct {
+		X int "tag:`v"
+	} = struct {
+		X int "tag:`v"
+	}{X: 3}
+	pt := HolderT{S: &s}
+	var ppt HolderT? = pt
+	gott := selectTagged(ppt)
+	check("tagged-present", gott != nil, gott != nil, true)
+	if gott != nil {
+		check("tagged-value", (*gott).X == 3, (*gott).X, 3)
+	}
+}
+
+func main() {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	variadicCase()
+	chanCase(ctx)
+	taggedCase()
+	if failed {
+		os.Exit(1)
+	}
+}

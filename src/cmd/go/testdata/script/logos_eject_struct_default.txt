@@ -30,7 +30,7 @@ cd ..
 
 # A file declaring its own `new` emits array-index zero spells: the value
 # form for a plain or nested literal and the array-pointer form under &.
-cd m2
+cd ../m2
 logos run .
 stdout '^0 \[0 2\] 0$'
 cp stdout $WORK/native2.txt
