@@ -108,6 +108,7 @@ go vet cmd/compile/internal/ssa cmd/compile/internal/logos
 av1() {
 mkdir -p $RUNNER_TEMP/autovec-evidence
 test "$(go env GOARCH)" = amd64
+set +e
 ( set -e
   files=(cmd/compile/internal/ssa/autovec*.go cmd/compile/internal/ssa/testdata/autovec*.go ../test/logos/run/autovec*.go ../test/logos/codegen/autovec*.go runtime/autovec*.go runtime/export_autovec_logos_test.go cmd/compile/internal/ssagen/ssa.go cmd/compile/internal/typecheck/_builtin/runtime.go cmd/compile/internal/typecheck/builtin.go)
   gofmt -d "${files[@]}" | tee "$RUNNER_TEMP/autovec-evidence/gofmt.diff"
@@ -116,7 +117,9 @@ test "$(go env GOARCH)" = amd64
   diff -u cmd/compile/internal/typecheck/builtin.go "$RUNNER_TEMP/autovec-evidence/builtin.generated.go" > "$RUNNER_TEMP/autovec-evidence/builtin.diff" || builtin_diff_status=$?
   cat "$RUNNER_TEMP/autovec-evidence/builtin.diff"
   test "$builtin_diff_status" -le 1
-) || touch "$RUNNER_TEMP/autovec-evidence/preflight.failed"
+)
+rc=$?; set -e
+if [ $rc -ne 0 ]; then touch "$RUNNER_TEMP/autovec-evidence/preflight.failed"; fi
 probe=cmd/compile/internal/ssa/testdata/autovec_fault_probe.go
 {
   printf 'upstream optimized\n'
