@@ -51,3 +51,23 @@ func TestStaticOptionsUnionExemptMarshalOptions(t *testing.T) {
 		t.Fatalf("OmitZeroStructFields(true): got %s, want {\"s\":{\"n\":5}}", got)
 	}
 }
+
+func TestStaticOptionsUnionExemptV2Decoding(t *testing.T) {
+	var plain OmitBox
+	if err := jsonv2.Unmarshal([]byte(`{"name":"o","s":{"n":5}}`), &plain); err != nil {
+		t.Fatal(err)
+	}
+	var explicit OmitBox
+	if err := jsonv2.Unmarshal([]byte(`{"name":"o","s":{"n":5}}`), &explicit, jsonv2.DefaultOptionsV2()); err != nil {
+		t.Fatal(err)
+	}
+	for i, v := range []OmitBox{plain, explicit} {
+		inner, ok := v.S.(*OmitInner)
+		if !ok {
+			t.Fatalf("decode %d: s has type %T, want *OmitInner", i, v.S)
+		}
+		if v.Name != "o" || inner.N != 5 {
+			t.Fatalf("decode %d: got %+v with n=%d, want name o and n 5", i, v, inner.N)
+		}
+	}
+}
