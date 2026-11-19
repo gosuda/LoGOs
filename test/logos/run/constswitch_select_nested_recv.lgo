@@ -49,4 +49,5 @@ func main() {
 	hs := []Holder{{Ptr: new(bool), Rank: 0}}
 	recv[Holder](hs, ch)
 	fmt.Println("seq", seq)
+	fmt.Println("store", *hs[0].Ptr)
 }
