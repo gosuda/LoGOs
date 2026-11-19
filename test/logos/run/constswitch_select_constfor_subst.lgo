@@ -25,8 +25,8 @@ func next() int {
 }
 
 type Two struct {
-	A int
-	B int
+	A     int
+	ABCDE int
 }
 
 func recvFor[T any](s []T, ch chan T) {
@@ -47,7 +47,12 @@ func main() {
 	ch := make(chan Holder, 2)
 	ch <- Holder{Ptr: new(bool)}
 	ch <- Holder{Ptr: new(bool)}
-	hs := []Holder{{Ptr: new(bool)}, {Ptr: new(bool)}}
+	hs := []Holder{{Ptr: new(bool)}, {Ptr: new(bool)}, {Ptr: new(bool)}, {Ptr: new(bool)}, {Ptr: new(bool)}, {Ptr: new(bool)}}
 	recvFor[Holder](hs, ch)
 	fmt.Println("seq", seq)
+	if seq == 2 && *hs[1].Ptr && *hs[5].Ptr && !*hs[0].Ptr && !*hs[2].Ptr && !*hs[3].Ptr && !*hs[4].Ptr {
+		fmt.Println("ok constfor-subst-destinations")
+	} else {
+		fmt.Println("FAIL constfor-subst-destinations")
+	}
 }

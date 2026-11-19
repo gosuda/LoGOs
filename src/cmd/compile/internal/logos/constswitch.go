@@ -816,7 +816,7 @@ func (w cswWalker) replaceName(f reflect.Value, x *syntax.Name) {
 // widens to the case interface where the checker admitted it (SPEC Sec 2.5).
 // A recorded expression nested inside another one is composed inside the
 // outer replacement so the splices never overlap.
-func (c *cswLower) wrapConvs(body []syntax.Stmt, cs *cswCase, selWraps []span) ([]syntax.Stmt, otext) {
+func (c *cswLower) wrapConvs(body []syntax.Stmt, cs *cswCase, selWraps []selWrap) ([]syntax.Stmt, otext) {
 	var decls []syntax.Stmt
 	var dtext otext
 	type rec struct {
@@ -1161,6 +1161,76 @@ func (c *cswLower) wrapConvs(body []syntax.Stmt, cs *cswCase, selWraps []span) (
 		}
 		return out.String()
 	}
+	// wrapTextOf returns the composed cast text of the smallest selector wrap
+	// containing [start, end). The wrap already drained every lowering splice
+	// inside it, so only its text still holds their lowered forms.
+	wrapTextOf := func(start, end int) (otext, bool) {
+		best := -1
+		for i, w := range selWraps {
+			if w.start <= start && end <= w.end {
+				if best < 0 || w.end-w.start < selWraps[best].end-selWraps[best].start {
+					best = i
+				}
+			}
+		}
+		if best < 0 {
+			return otext{}, false
+		}
+		return selWraps[best].text, true
+	}
+	// expandAt renders [start, end) from a composed wrap text the way expand
+	// renders it from the working buffer: gaps are located through the wrap's
+	// origin chunks so a make-length check the wrap absorbed stays in the
+	// temp, and recorded operands inside compose through renderAt.
+	var expandAt func(wt otext, start, end int) string
+	renderAt := func(wt otext, r rec) string {
+		if secondT, ok := multi[r.e]; ok {
+			second := spellFor(secondT)
+			return "func() (" + cs.alias + ", " + second + ") { _logos_v, _logos_s := " + expandAt(wt, r.start, r.end) + "; return " + box("_logos_v") + ", " + second + "(_logos_s) }()"
+		}
+		return box(expandAt(wt, r.start, r.end))
+	}
+	expandAt = func(wt otext, start, end int) string {
+		var inner []rec
+		for _, r := range recs {
+			if r.start >= start && r.end <= end && (r.start != start || r.end != end) {
+				inner = append(inner, r)
+			}
+		}
+		var out strings.Builder
+		pos := start
+		at := func(from, to int, what string) string {
+			aS, aE, ok := c.fl.loweredAt(wt.chunks, from, to)
+			if !ok {
+				base.Fatalf("logos: const switch select target temp cannot be read back from the cast text: frozen operand [%d,%d) %s is not inside it", from, to, what)
+			}
+			return wt.s[aS:aE]
+		}
+		for _, r := range inner {
+			nested := false
+			for _, o := range inner {
+				if o != r && o.start <= r.start && r.end <= o.end {
+					nested = true
+					break
+				}
+			}
+			if nested {
+				continue
+			}
+			if clauseOf[r.e] != nil {
+				base.Fatalf("logos: const switch select receive inside a boxed operand at %s is not supported", r.e.Pos().String())
+			}
+			if r.start > pos {
+				out.WriteString(at(pos, r.start, "gap"))
+			}
+			out.WriteString(renderAt(wt, r))
+			pos = r.end
+		}
+		if pos < end {
+			out.WriteString(at(pos, end, "tail"))
+		}
+		return out.String()
+	}
 	conv := make(map[syntax.Expr]syntax.Expr)
 	texts := make(map[syntax.Expr]otext)
 	var clauses []*syntax.CommClause
@@ -1235,10 +1305,20 @@ func (c *cswLower) wrapConvs(body []syntax.Stmt, cs *cswCase, selWraps []span) (
 			name       string
 		}
 		lhsSubs := map[syntax.Expr][]lhsSub{}
-		// freeze emits `t := <src of [start,end)>` early.
+		// freeze emits `t := <src of [start,end)>` early. When the operand
+		// sits inside a selector wrap, the wrap already drained the lowering
+		// splices (a make-length check) into its cast text, so the temp is
+		// built from that composed text: reading the raw source would drop
+		// the check from both the native tree and the ejected output.
 		freeze := func(e syntax.Expr, start, end int, t string) {
 			var src string
-			if r, ok := recOf[e]; ok {
+			if wt, ok := wrapTextOf(start, end); ok {
+				if r, ok := recOf[e]; ok {
+					src = renderAt(wt, r)
+				} else {
+					src = expandAt(wt, start, end)
+				}
+			} else if r, ok := recOf[e]; ok {
 				src = render(r)
 			} else {
 				src = expand(start, end)
@@ -1359,7 +1439,7 @@ func (c *cswLower) wrapConvs(body []syntax.Stmt, cs *cswCase, selWraps []span) (
 			// target folds into the store text here: leaving it as a splice
 			// would overlap the receive-target replacement. A rewrite
 			// inside a frozen operand's span already reached the emitted
-			// temp through expand's textOf.
+			// temp through the wrap's composed text.
 			for _, w := range selWraps {
 				if w.start < lstart || w.end > lend {
 					continue
@@ -1379,19 +1459,19 @@ func (c *cswLower) wrapConvs(body []syntax.Stmt, cs *cswCase, selWraps []span) (
 					continue
 				}
 				if len(inner) == 0 {
-					subs = append(subs, lhsSub{w.start, w.end, c.fl.textOf(w).s})
+					subs = append(subs, lhsSub{w.start, w.end, c.fl.textOf(w.span).s})
 					continue
 				}
-				// The wrapped receiver holds frozen operands: drain the
-				// wrap's splice and substitute the temps into its composed
-				// text, so the temps — not the original operands — appear
-				// inside any(...). The composed text keeps every drain
-				// already folded into it — an option fallback's `??`
-				// lowering, a conversion — so their lowered forms survive;
-				// reading the raw gaps here would leak logos-only syntax
-				// into the store text, because wrapSelectors drained those
-				// splices into the cast when it built it.
-				wt := c.fl.textOf(w)
+				// The wrapped receiver holds frozen operands: substitute the
+				// temps into its composed text, so the temps — not the
+				// original operands — appear inside any(...). The composed
+				// text keeps every drain already folded into it — an option
+				// fallback's `??` lowering, a conversion, a make-length
+				// check — so their lowered forms survive; reading the raw
+				// gaps here would leak logos-only syntax into the store
+				// text, because wrapSelectors drained those splices into
+				// the cast when it built it.
+				wt := c.fl.textOf(w.span)
 				slices.SortFunc(inner, func(a, b lhsSub) int { return b.start - a.start })
 				for _, s := range inner {
 					aS, aE, ok := c.fl.loweredAt(wt.chunks, s.start, s.end)
@@ -1428,6 +1508,16 @@ func (c *cswLower) wrapConvs(body []syntax.Stmt, cs *cswCase, selWraps []span) (
 				var kept []lhsSub
 				prevStart := -1
 				for _, s := range subs {
+					if s.start == s.end {
+						// A zero-width operand at a splice boundary covers
+						// no source bytes: it is adjacent to, not inside, the
+						// splice, the boundary rule spanInside and
+						// moveContaining use. It rides along for the store
+						// substitution below, where its text lands at
+						// exactly this point.
+						kept = append(kept, s)
+						continue
+					}
 					if sp.start > s.start || s.end > sp.end {
 						kept = append(kept, s)
 						continue
@@ -1518,12 +1608,21 @@ func (c *cswLower) wrapConvs(body []syntax.Stmt, cs *cswCase, selWraps []span) (
 	return decls, dtext
 }
 
+// selWrap is one matched-selector receiver rewrite: the replaced span and
+// the composed cast text built for it. The text keeps every lowering splice
+// the wrap drained (a make-length check, an option fallback), so a frozen
+// operand inside the span is read back from it instead of the raw source.
+type selWrap struct {
+	span
+	text otext
+}
+
 // wrapSelectors rewrites a matched selector's receiver to
 // any(x).(caseT) and returns each replaced receiver span so the
 // select-receive rewrite can fold the same edit into a replaced target's
 // store text instead of overlapping it.
-func (c *cswLower) wrapSelectors(body []syntax.Stmt, cs *cswCase) []span {
-	var wraps []span
+func (c *cswLower) wrapSelectors(body []syntax.Stmt, cs *cswCase) []selWrap {
+	var wraps []selWrap
 	for _, s := range body {
 		syntax.Inspect(s, func(n syntax.Node) bool {
 			sel, ok := n.(*syntax.SelectorExpr)
@@ -1549,8 +1648,9 @@ func (c *cswLower) wrapSelectors(body []syntax.Stmt, cs *cswCase) []span {
 				}, xpos),
 				Type: iface,
 			}, xpos)
-			c.fl.addT(xspan.start, xspan.end, cat(gen("any("), xtext, gen(").("), gen(cs.alias), gen(")")))
-			wraps = append(wraps, xspan)
+			cast := cat(gen("any("), xtext, gen(").("), gen(cs.alias), gen(")"))
+			c.fl.addT(xspan.start, xspan.end, cast)
+			wraps = append(wraps, selWrap{span: xspan, text: cast})
 			return true
 		})
 	}
