@@ -374,6 +374,8 @@ jobs:
         run: |
           . .latchkey/env.sh; cd src
           test "$(go env GOROOT)" = "$GITHUB_WORKSPACE"
+          # go test prints nothing while a slow package runs; Latchkey stops a job after 15 quiet minutes
+          (while sleep 240; do echo "[heartbeat] $(date -u +%T)"; done) & trap 'kill $!' EXIT
           env GOMAXPROCS=4 GOFLAGS=-p=2 GOEXPERIMENT=simd GOAMD64=v1 go test -count=1 -timeout 30m std
           GOEXPERIMENT=simd GOAMD64=v3 go test -count=1 -timeout 30m std
 
