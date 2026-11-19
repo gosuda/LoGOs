@@ -367,11 +367,16 @@ func (fc *funcLower) lowerGroupInline(s *syntax.GroupStmt) []syntax.Stmt {
 	s.Body.List = fc.lowerList(s.Body.List)
 	fc.groupStack = fc.groupStack[:len(fc.groupStack)-1]
 	rbrace := s.Body.Rbrace
-	joinNative, joinText, joinSubs := fc.groupEndJoin(rbrace, frame)
 	rbraceOff := fl.off(rbrace)
-	fl.addT(rbraceOff+1, rbraceOff+1, cat(gen("\n"), renderText(joinText, joinSubs), gen("}\n")))
 	out := append([]syntax.Stmt{header, blankUse}, rebindStmts...)
-	out = append(append(out, flagDef, guardDef, s.Body), joinNative...)
+	out = append(out, flagDef, guardDef, s.Body)
+	closing := gen("\n}\n")
+	if !fl.pkg.info.LogosGroupTerminating[s] {
+		joinNative, joinText, joinSubs := fc.groupEndJoin(rbrace, frame)
+		closing = cat(gen("\n"), renderText(joinText, joinSubs), gen("}\n"))
+		out = append(out, joinNative...)
+	}
+	fl.addT(rbraceOff+1, rbraceOff+1, closing)
 	block := blockOf(pos, out)
 	block.Rbrace = rbrace
 	return []syntax.Stmt{block}
