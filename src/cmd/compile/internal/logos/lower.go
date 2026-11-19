@@ -390,6 +390,19 @@ func (fl *fileLower) openMove(r span) (*[]splice, string) {
 	}
 	kept, inner := partitionSplices(*outer, r)
 	*outer = kept
+	for i, sp := range inner {
+		if sp.host == nil {
+			continue
+		}
+		t := fl.retireHost(sp.host)
+		inner[i] = splice{start: sp.start, end: sp.end, text: t.s, chunks: t.chunks, owner: sp.owner, placement: sp.placement}
+	}
+	for _, sp := range kept {
+		if sp.host != nil && hostOverlaps(sp, r) {
+			cutsHost(sp, r)
+		}
+	}
+
 	m := &chainMove{region: r, mark: fmt.Sprintf("\x00move%d\x00", len(fl.moves)), inner: inner}
 	fl.moves = append(fl.moves, m)
 	fl.changed = true
