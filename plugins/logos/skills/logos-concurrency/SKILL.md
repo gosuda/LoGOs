@@ -18,7 +18,7 @@ LoGOs provides structured concurrency through goroutine groups and panic-safe sy
 2. Structure goroutines with `go group`: define child tasks inside `go group (ctx, limit = N) { ... }` blocks.
 3. Propagate errors: use `?` on fallible calls inside child tasks or invoke an error-last child call to yield errors to the group (direct `return` inside a child is rejected with `correctness::return_in_group_child`). Ensure the function enclosing the `go group` returns an `error`.
 4. Guard shared state: wrap mutable state with `logos/sync.Locked[T]` for mutex protection or `logos/sync.Hot[T]` for atomic read-mostly pointers.
-5. Verify with race detector: run `logos test -race ./...` to detect exercised races; `-race` reports only exercised races and gives no universal data-race freedom. Fix any diagnostics reported by `logos build` or `logos lint`.
+5. Verify with race detector: run `logos test -race ./...` to detect exercised races; `-race` reports only exercised races and gives no universal data-race freedom. The run works under `[build] cgo = "forbid"`: it links only the race runtime and needs a C compiler or `zig` in PATH. Fix any diagnostics reported by `logos build` or `logos lint`.
 
 ## Group syntax
 

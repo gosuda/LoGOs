@@ -421,3 +421,28 @@ func (check *Checker) logosUnionConstMiss(x, y *operand) bool {
 	check.errorf(lit, InvalidUntypedConversion, "%s %s is not a member of %s", logosNonMember, from, union)
 	return true
 }
+
+// logosIfaceWord reports whether a value of type t is stored as a fixed-size
+// interface word under LoGOs value-union lowering (SPEC 1.2 lowers a
+// value-used closed union to a methods-only interface). A field,
+// element, or type argument of such a type does not nest the memory of
+// the members its type set admits, so a union member may hold the union
+// itself by value (say, a tree node) without creating an
+// infinitely-sized type. Interface-typed subterms are left out of the
+// memory nest; a type's own declaration still checks the type's
+// internal (type-set) cycles. It applies only when value unions are
+// enabled; a plain Go package keeps the upstream recursive-type rule
+// exactly.
+func (check *Checker) logosIfaceWord(t Type) bool {
+	if !check.conf.LogosUnions {
+		return false
+	}
+	switch t := Unalias(t).(type) {
+	case *Named:
+		_, ok := t.Underlying().(*Interface)
+		return ok
+	case *Interface:
+		return true
+	}
+	return false
+}
