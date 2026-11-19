@@ -67,6 +67,9 @@ func (check *Checker) isTerminating(s syntax.Stmt, label string) bool {
 		// enclosing statement.
 
 	case *syntax.ConstForStmt:
+		if !check.logosConstForExecutes(s) {
+			return false
+		}
 		// The const for is judged by its expansion over the concrete
 		// struct: some visible field's body must terminate, so a struct
 		// with no visible fields never terminates. // logos M7-S2 hook.

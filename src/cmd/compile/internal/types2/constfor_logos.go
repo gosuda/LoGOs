@@ -591,6 +591,26 @@ func (check *Checker) logosFieldProjType(info *LogosConstFor) Type {
 	return shared
 }
 
+func (check *Checker) logosConstForExecutes(s *syntax.ConstForStmt) bool {
+	info := check.Info.LogosConstFor[s]
+	if info == nil {
+		return false
+	}
+	if info.Generic && info.Struct == nil {
+		return true
+	}
+	if info.Struct == nil {
+		return false
+	}
+	for i := range info.Struct.NumFields() {
+		f := info.Struct.Field(i)
+		if f.Exported() || f.Pkg() == check.pkg {
+			return true
+		}
+	}
+	return false
+}
+
 // logosTerminatingConstFor reports whether a const for is terminating by
 // its expansion: over a concrete struct the statement stands for the
 // sequence of its per-field bodies, so it terminates when some visible
