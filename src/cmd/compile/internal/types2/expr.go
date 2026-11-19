@@ -1149,6 +1149,10 @@ func (check *Checker) exprInternal(T *target, x *operand, e syntax.Expr, hint Ty
 			goto Error
 		}
 		if _, ok := x.typ().Underlying().(*Interface); !ok {
+			if logosQualifiedInterface(x.typ()) {
+				check.errorf(e, ImpossibleAssert, "%s cannot erase readonly descendants in a type assertion", logosConstEscape)
+				goto Error
+			}
 			check.errorf(x, InvalidAssert, invalidOp+"%s is not an interface", x)
 			goto Error
 		}

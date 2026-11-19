@@ -55,6 +55,8 @@ func (check *Checker) logosStmtSwitchOperand(x *operand) *operand {
 			check.errorf(x, InvalidTypeSwitch, "cannot use type switch on type parameter value %s", x)
 		} else if IsInterface(x.typ()) {
 			return x
+		} else if logosQualifiedInterface(x.typ()) {
+			check.error(x, InvalidTypeSwitch, "cannot use type switch on value with readonly descendants")
 		} else {
 			check.errorf(x, InvalidTypeSwitch, "%s is not an interface", x)
 		}

@@ -131,6 +131,8 @@ func (check *Checker) logosTypeArms(e *syntax.SwitchExpr, guard *syntax.TypeSwit
 				check.errorf(&x, InvalidTypeSwitch, "cannot use type switch on type parameter value %s", &x)
 			} else if IsInterface(x.typ()) {
 				sx = &x
+			} else if logosQualifiedInterface(x.typ()) {
+				check.error(&x, InvalidTypeSwitch, "cannot use type switch on value with readonly descendants")
 			} else {
 				check.errorf(&x, InvalidTypeSwitch, "%s is not an interface", &x)
 			}

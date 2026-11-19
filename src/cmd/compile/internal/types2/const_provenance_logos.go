@@ -154,6 +154,24 @@ func logosContainsReadonlyDescendants(T Type) bool {
 	return found
 }
 
+func logosQualifiedInterface(T Type) bool {
+	q := false
+	for {
+		if c := logosAsConstView(T); c != nil {
+			q = true
+			T = c.Elem
+			continue
+		}
+		if r := logosAsReadonlyDescendants(T); r != nil {
+			q = true
+			T = r.Elem
+			continue
+		}
+		break
+	}
+	return q && IsInterface(T)
+}
+
 func logosAnyContainsReadonlyDescendants(V, T Type) bool {
 	return logosContainsReadonlyDescendants(V) || logosContainsReadonlyDescendants(T)
 }
