@@ -722,6 +722,12 @@ func runList(ctx context.Context, cmd *base.Command, args []string) {
 	// Do we need to run a build to gather information?
 	needStale := (listJson && listJsonFields.needAny("Stale", "StaleReason")) || strings.Contains(*listFmt, ".Stale")
 	if needStale || *listExport || *listCompiled {
+		for _, p := range pkgs {
+			if logosListNeedsBuildAction(p) {
+				work.CheckRaceRuntimeCompiler()
+				break
+			}
+		}
 		b := work.NewBuilder("", moduleLoader.VendorDirOrEmpty)
 		if *listE {
 			b.AllowErrors = true
