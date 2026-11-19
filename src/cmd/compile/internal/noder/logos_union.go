@@ -104,8 +104,8 @@ func logosImportableHoistedTypes(pr *pkgbits.PkgDecoder) []string {
 	names := pr.NumElems(pkgbits.SectionName)
 	for i := range names {
 		idx := pkgbits.RelElemIdx(i)
-		_, name, tag := pr.PeekObj(idx)
-		if tag != pkgbits.ObjType {
+		objPath, name, tag := pr.PeekObj(idx)
+		if objPath != pr.PkgPath() || tag != pkgbits.ObjType {
 			continue
 		}
 		if _, suffix := types.SplitVargenSuffix(name); suffix == "" {

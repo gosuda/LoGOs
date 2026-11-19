@@ -382,10 +382,23 @@ func classifyUnions(info *types2.Info, files []*syntax.File) *unionClass {
 		})
 	}
 
+	aliasPos := make(map[*syntax.Name]bool)
+	for _, file := range files {
+		syntax.Inspect(file, func(n syntax.Node) bool {
+			td, ok := n.(*syntax.TypeDecl)
+			if !ok || !td.Alias || td.Type == nil {
+				return true
+			}
+			if name, ok := unwrapParen(td.Type).(*syntax.Name); ok {
+				aliasPos[name] = true
+			}
+			return true
+		})
+	}
 	for _, file := range files {
 		syntax.Inspect(file, func(n syntax.Node) bool {
 			name, ok := n.(*syntax.Name)
-			if !ok || constraintPos[name] || embedPos[name] || barePos[name] {
+			if !ok || constraintPos[name] || embedPos[name] || barePos[name] || aliasPos[name] {
 				return true
 			}
 			note(resolveUnionRef(info.Uses[name]), value)

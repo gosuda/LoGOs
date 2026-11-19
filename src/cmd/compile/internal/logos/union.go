@@ -743,12 +743,20 @@ func bareUnions(pkg *types2.Package) []string {
 	return out
 }
 
-func dualUseUnionNames(info *types2.Info, files []*syntax.File) []string {
+func dualUseUnionNames(pkg *types2.Package, info *types2.Info, files []*syntax.File) []string {
 	var out []string
+	var scope *types2.Scope
+	if pkg != nil {
+		scope = pkg.Scope()
+	}
 	for obj, use := range ClassifyDeclaredUnions(info, files) {
-		if use == UnionDualUse {
-			out = append(out, obj.Name())
+		if use != UnionDualUse {
+			continue
 		}
+		if scope != nil && scope.Lookup(obj.Name()) != types2.Object(obj) {
+			continue
+		}
+		out = append(out, obj.Name())
 	}
 	slices.Sort(out)
 	return out

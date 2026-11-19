@@ -59,7 +59,7 @@ func Lower(pkg *types2.Package, info *types2.Info, files []*syntax.File, src map
 	clearOwnedConstants()
 	f := facts.Write(pkg, info, files, src)
 	f.BareUnions = bareUnions(pkg)
-	f.DualUse = dualUseUnionNames(info, files)
+	f.DualUse = dualUseUnionNames(pkg, info, files)
 	facts.SetCurrent(f)
 	shared := &packageLower{info: info, tpkg: pkg, files: files, src: src, constMaps: collectConstMaps(files, info)}
 	shared.importedMaps = map[*types2.Var]*constMapGen{}
