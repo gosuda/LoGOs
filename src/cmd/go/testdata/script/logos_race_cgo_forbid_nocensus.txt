@@ -1,0 +1,46 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+env CC=
+env CGO_ENABLED=
+
+[!cgo] skip 'a Go main module needs the default C compiler on PATH'
+
+cd forbid
+
+# A Go main module (no .lgo file) keeps the upstream default for
+# CGO_ENABLED under logos, and the cgo key has no effect: net still
+# builds with its cgo files, and no policy refusal appears.
+! stderr 'requires cgo'
+logos list -race -test -deps -f '{{.ImportPath}}' ./pure
+! stderr 'requires cgo'
+stdout '^runtime/cgo$'
+stdout '^runtime/race$'
+logos list -race -test -deps -f '{{if eq .ImportPath "net"}}cgo={{.CgoFiles}}{{end}}' ./pure
+! stderr 'requires cgo'
+stdout 'cgo=\[.+'
+
+-- forbid/go.mod --
+module example.com/forbidgomodule
+
+go 1.27
+
+-- forbid/logos.toml --
+[build]
+cgo = "forbid"
+
+-- forbid/pure/pure.go --
+package pure
+
+func Add(a int, b int) int { return a + b }
+
+-- forbid/pure/pure_test.go --
+package pure
+
+import "testing"
+
+func TestAdd(t *testing.T) {
+	if Add(1, 2) != 3 {
+		t.Fatal("wrong sum")
+	}
+}
