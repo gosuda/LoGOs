@@ -142,7 +142,7 @@ jobs:
           fail=0
           sha256sum ../bin/go ../bin/logos ../pkg/tool/linux_amd64/compile ../pkg/tool/linux_amd64/link
           ../.github/scripts/logos-test-env.sh go test -count=1 -race -parallel=1 -timeout 20m cmd/go -run 'Script/^logos_(cap_xtest_owner|test_experiment_env|test_plugin_experiment|test_cache_experiment)$' || fail=1
-          cd ..; bash logos-doc/validation/capability-inline-context/check_ci.sh "$RUNNER_TEMP/logos-regression-evidence/cap-inline" || fail=1
+          cd ..; GITHUB_ACTIONS=true bash logos-doc/validation/capability-inline-context/check_ci.sh "$RUNNER_TEMP/logos-regression-evidence/cap-inline" || fail=1
           exit $fail
 
   upstream:
@@ -274,9 +274,9 @@ jobs:
       - run: bash .latchkey/setup.sh restore 
       - name: Runtime GC stability under each experiment
         env:
-          GOEXPERIMENT: ${{ matrix.experiment }}
+          EXP: ${{ matrix.experiment }}
         run: |
-          . .latchkey/env.sh; cd src
+          . .latchkey/env.sh; cd src; export GOEXPERIMENT=$EXP
           n=2; [ "$LATCHKEY_CI_EVENT_CLASS" = pr_update ] || n=10
           files=(runtime/arena_logos.go runtime/region_logos.go runtime/logos_arena_test.go runtime/export_logos_gc_stability_test.go runtime/logos_gc_stability_test.go runtime/export_logos_gcscan_bounds_test.go runtime/logos_gcscan_bounds_test.go)
           test -z "$(gofmt -l "${files[@]}")"
@@ -289,9 +289,9 @@ jobs:
       - name: Original close-ownership failure probe
         if: matrix.experiment == 'logosarena'
         env:
-          GOEXPERIMENT: ${{ matrix.experiment }}
+          EXP: ${{ matrix.experiment }}
         run: |
-          . .latchkey/env.sh; cd src
+          . .latchkey/env.sh; cd src; export GOEXPERIMENT=$EXP
           probe="$GITHUB_WORKSPACE/.outline/verify/gc-close-$RUNNER_ARCH"
           mkdir -p "$probe"
           awk '
