@@ -410,7 +410,8 @@ func (check *Checker) logosConcreteCaseMatches(c *syntax.ConstSwitchCase, tag Ty
 	}
 	if c.Tilde {
 		ub, ok := Unalias(tag).Underlying().(*Basic)
-		return ok && Identical(ub, ctv)
+		cb, ok2 := underBasic(ctv)
+		return ok && ok2 && Identical(ub, cb)
 	}
 	if isIfaceCase(ctv) {
 		iface, _ := Unalias(ctv).Underlying().(*Interface)

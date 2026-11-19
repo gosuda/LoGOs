@@ -1083,6 +1083,10 @@ It MUST include exported fields and unexported fields of a current-package `T`. 
 
 It MUST exclude unexported fields of other packages. [T-205]
 
+A `const for` MUST terminate when the body of some visible field terminates; a struct with no visible fields MUST NOT terminate. [T-205]
+
+Unrolling MUST stop after the first terminating field. [T-205]
+
 `val.[f]` MUST read and write the named field. [T-205]
 
 `val.[f]` MUST name the field variable of an enclosing `const for` and project a struct value of that loop's type. [T-205]

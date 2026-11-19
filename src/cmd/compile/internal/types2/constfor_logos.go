@@ -325,6 +325,7 @@ func (check *Checker) logosConstForConcrete(s *syntax.ConstForStmt, info *LogosC
 	defer func() { check.conf.Error = saved }()
 	checked := 0
 	bodyNodes := logosCountBodyNodes(s.Body)
+	entry := logosConstIfDeadUnder(check.Info.LogosConstIfDead, s.Body)
 	for i := range info.Struct.NumFields() {
 		if !check.logosConstForCharge(s, bodyNodes) {
 			break
@@ -335,6 +336,7 @@ func (check *Checker) logosConstForConcrete(s *syntax.ConstForStmt, info *LogosC
 		}
 		checked++
 		check.logosFieldBind = &logosFieldBinding{info: info, index: i, field: f, tag: info.Struct.Tag(i), outer: outer}
+		check.logosRestoreConstIfDead(s.Body, entry)
 		check.openScope(s.Body, "const for iteration")
 		check.stmtList(inner, s.Body.List)
 		check.closeScope()
@@ -615,10 +617,12 @@ func (check *Checker) logosTerminatingConstFor(s *syntax.ConstForStmt) bool {
 
 // logosHasBreakConstFor reports whether some visible field's live body
 // holds a break that leaves the const for for the label-ed statement or,
-// when implicit is set, the closest outer breakable statement. A struct
-// with no visible fields holds no break. When no per-field verdict was
-// recorded, it falls back to the shared body, the previous rule.
-// logosConstForConcrete records Breaks per visible field.
+// when implicit is set, the closest outer breakable statement. Only the
+// emitted prefix counts: unrolling stops after the first terminating
+// field, so later fields never run. A struct with no visible fields holds
+// no break. When no per-field verdict was recorded, it falls back to the
+// shared body, the previous rule. logosConstForConcrete records Breaks
+// per visible field.
 func (check *Checker) logosHasBreakConstFor(s *syntax.ConstForStmt, label string, implicit bool) bool {
 	info := check.Info.LogosConstFor[s]
 	if info == nil {
@@ -627,12 +631,15 @@ func (check *Checker) logosHasBreakConstFor(s *syntax.ConstForStmt, label string
 	if len(info.Breaks) == 0 && info.Struct == nil {
 		return check.hasBreak(s.Body, label, implicit)
 	}
-	for _, brk := range info.Breaks {
+	for i, brk := range info.Breaks {
 		if implicit && brk.Implicit {
 			return true
 		}
 		if label != "" && slices.Contains(brk.Labels, label) {
 			return true
+		}
+		if i < len(info.Term) && info.Term[i] {
+			break
 		}
 	}
 	return false
@@ -707,7 +714,7 @@ func (check *Checker) logosLiveBreakWalk(s syntax.Stmt, inner bool, bound map[st
 		}
 
 	case *syntax.ConstIfStmt:
-		if v, ok := check.constIfValue(s.Cond); ok {
+		if v, ok := check.logosConstIfKnown(s.Cond); ok {
 			if v {
 				check.logosLiveBreakWalk(s.Then, inner, bound, brk)
 			} else if s.Else != nil {

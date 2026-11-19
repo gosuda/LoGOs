@@ -1,0 +1,25 @@
+// errorcheck
+
+package p
+
+import "comptime"
+
+type Inner struct {
+	V int
+}
+
+type Mixed struct {
+	First  Inner
+	Second int
+}
+
+func check() int {
+	const for _, f := range comptime.Fields[Mixed]() {
+		const if comptime.IsStruct[f.Type]() {
+			return 1
+		} else {
+			comptime.Error("unexpected field type") // ERROR "\[comptime::error\] unexpected field type"
+			return 0
+		}
+	}
+}

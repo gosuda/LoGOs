@@ -1,0 +1,49 @@
+// run
+
+
+package main
+
+import (
+	"comptime"
+	"fmt"
+	"os"
+)
+
+var failed bool
+
+func check(name string, cond bool, got, want any) {
+	if !cond {
+		failed = true
+		fmt.Println("FAIL", name+":", "got", got, "want", want)
+		return
+	}
+	fmt.Println("ok", name)
+}
+
+type IntString struct {
+	N int
+	S string
+}
+
+func count() int {
+	n := 0
+	const for _, f := range comptime.Fields[IntString]() {
+		const switch f.Type {
+		case int:
+			n += 1
+		case string:
+			const enabled = true
+			const if enabled {
+				n += 10
+			}
+		}
+	}
+	return n
+}
+
+func main() {
+	check("count", count() == 11, count(), 11)
+	if failed {
+		os.Exit(1)
+	}
+}

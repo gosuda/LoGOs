@@ -69,12 +69,19 @@ func (check *Checker) logosTerminatingConstIf(s *syntax.ConstIfStmt) bool {
 	return s.Else != nil && check.isTerminating(s.Then, "") && check.isTerminating(s.Else, "")
 }
 
-func (check *Checker) constIfValue(e syntax.Expr) (bool, bool) {
+func (check *Checker) logosConstIfKnown(e syntax.Expr) (bool, bool) {
 	if _, val, ok := check.logosChecked(e); ok && val != nil && val.Kind() == constant.Bool {
 		return constant.BoolVal(val), true
 	}
 	if info, ok := check.untyped[e]; ok && info.val != nil && info.val.Kind() == constant.Bool {
 		return constant.BoolVal(info.val), true
+	}
+	return false, false
+}
+
+func (check *Checker) constIfValue(e syntax.Expr) (bool, bool) {
+	if v, ok := check.logosConstIfKnown(e); ok {
+		return v, true
 	}
 	return check.logosConstIfDerived(e)
 }
@@ -112,4 +119,34 @@ func markDeadStmts(dead map[syntax.Stmt]bool, s syntax.Stmt) {
 		}
 		return true
 	})
+}
+
+func logosConstIfDeadUnder(dead map[syntax.Stmt]bool, root syntax.Node) []syntax.Stmt {
+	if len(dead) == 0 {
+		return nil
+	}
+	var out []syntax.Stmt
+	syntax.Inspect(root, func(n syntax.Node) bool {
+		if st, ok := n.(syntax.Stmt); ok && dead[st] {
+			out = append(out, st)
+		}
+		return true
+	})
+	return out
+}
+
+func (check *Checker) logosRestoreConstIfDead(body *syntax.BlockStmt, keep []syntax.Stmt) {
+	dead := check.Info.LogosConstIfDead
+	if dead == nil {
+		return
+	}
+	syntax.Inspect(body, func(n syntax.Node) bool {
+		if st, ok := n.(syntax.Stmt); ok {
+			delete(dead, st)
+		}
+		return true
+	})
+	for _, st := range keep {
+		dead[st] = true
+	}
 }
