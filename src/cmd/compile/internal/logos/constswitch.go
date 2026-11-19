@@ -9,6 +9,7 @@ import (
 	"go/token"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 
 	"cmd/compile/internal/base"
@@ -91,6 +92,12 @@ func newCswLower(fc *funcLower, s *syntax.ConstSwitchStmt) *cswLower {
 		if i+1 < len(s.Cases) {
 			cs.hi = fl.off(s.Cases[i+1].Case)
 			cs.close = s.Cases[i+1].Case
+		}
+		if _, ok := reparseType(cs.spell.s); !ok {
+			// The case type spells LoGOs-only syntax (an option suffix):
+			// the respell sites emit this text into a plain recheck, so
+			// spell the checked type in its lowered plain form instead.
+			cs.spell = gen(fl.plainTypeSpell(typ))
 		}
 		switch {
 		case syn.Tilde:
@@ -357,7 +364,7 @@ func (c *cswLower) caseBody(cs *cswCase, done string) ([]syntax.Stmt, otext) {
 		head = append(head, at(&syntax.AssignStmt{Lhs: nameOf(cs.syn.Case, done), Rhs: nameOf(cs.syn.Case, "true")}, cs.syn.Case))
 		headText = cat(headText, gen(done+" = true\n"))
 	}
-	body := c.fl.textOf(span{cs.lo, cs.hi})
+	body := c.fl.lazyText(span{cs.lo, cs.hi})
 	return append(head, lowered...), cat(headText, body)
 }
 
@@ -714,8 +721,91 @@ func (c *cswLower) rebound(cs *cswCase) []cswRebind {
 	return out
 }
 
+// cswSpell renders typ as the plain Go text the lowered file spells: an
+// option becomes the element type itself when the option is bare and
+// logosrt.Option[E] otherwise, and composite types spell their parts the
+// same way. Every respell site parses this text as plain Go, so a LoGOs
+// spelling here would fail the recheck.
 func (c *cswLower) cswSpell(typ types2.Type) string {
-	return c.fl.typeSpell(typ)
+	return c.fl.plainTypeSpell(typ)
+}
+
+func (fl *fileLower) plainTypeSpell(typ types2.Type) string {
+	switch t := unaliasConstView(typ).(type) {
+	case *types2.Option:
+		if types2.LogosOptionIsBare(t.Elem) {
+			return fl.plainTypeSpell(t.Elem)
+		}
+		fl.needRT = true
+		return rtAlias + ".Option[" + fl.plainTypeSpell(t.Elem) + "]"
+	case *types2.Pointer:
+		return "*" + fl.plainTypeSpell(t.Elem())
+	case *types2.Slice:
+		return "[]" + fl.plainTypeSpell(t.Elem())
+	case *types2.Array:
+		return "[" + strconv.FormatInt(t.Len(), 10) + "]" + fl.plainTypeSpell(t.Elem())
+	case *types2.Map:
+		return "map[" + fl.plainTypeSpell(t.Key()) + "]" + fl.plainTypeSpell(t.Elem())
+	case *types2.Chan:
+		switch t.Dir() {
+		case types2.RecvOnly:
+			return "<-chan " + fl.plainTypeSpell(t.Elem())
+		case types2.SendOnly:
+			return "chan<- " + fl.plainTypeSpell(t.Elem())
+		}
+		return "chan " + fl.plainTypeSpell(t.Elem())
+	case *types2.Named:
+		ta := t.TypeArgs()
+		if ta == nil {
+			return fl.typeSpell(t)
+		}
+		var b strings.Builder
+		if q := fl.typeQualifier()(t.Obj().Pkg()); q != "" {
+			b.WriteString(q)
+			b.WriteByte('.')
+		}
+		b.WriteString(t.Obj().Name())
+		b.WriteByte('[')
+		for i := range ta.Len() {
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			b.WriteString(fl.plainTypeSpell(ta.At(i)))
+		}
+		b.WriteByte(']')
+		return b.String()
+	case *types2.Signature:
+		var b strings.Builder
+		b.WriteString("func(")
+		b.WriteString(fl.paramsText(t.Params(), t.Variadic()))
+		b.WriteByte(')')
+		if res := t.Results(); res != nil && res.Len() > 0 {
+			if res.Len() == 1 && res.At(0).Name() == "" {
+				b.WriteByte(' ')
+				b.WriteString(fl.plainTypeSpell(res.At(0).Type()))
+			} else {
+				b.WriteString(" (")
+				b.WriteString(fl.paramsText(res, false))
+				b.WriteByte(')')
+			}
+		}
+		return b.String()
+	}
+	return fl.typeSpell(typ)
+}
+
+func (fl *fileLower) paramsText(ps *types2.Tuple, variadic bool) string {
+	var b strings.Builder
+	for i := range ps.Len() {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		if variadic && i == ps.Len()-1 {
+			b.WriteString("...")
+		}
+		b.WriteString(fl.plainTypeSpell(ps.At(i).Type()))
+	}
+	return b.String()
 }
 
 // cswTarget is one name the walker rewrites: the AST replacement for the
