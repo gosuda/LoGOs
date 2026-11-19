@@ -28,7 +28,7 @@ func twinWantAllocs(t *testing.T, want int, f func()) {
 
 func TestTwinAllocs(t *testing.T) {
 	p := twinPerson{Name: "ann", Age: 7, Bio: "x"}
-	twinWantAllocs(t, 2, func() {
+	twinWantAllocs(t, 1, func() {
 		b, err := twinjson.Marshal(p)
 		if err != nil {
 			return
@@ -59,7 +59,7 @@ func TestTwinAllocs(t *testing.T) {
 		twinSink = b
 	})
 	var buf bytes.Buffer
-	twinWantAllocs(t, 2, func() {
+	twinWantAllocs(t, 1, func() {
 		buf.Reset()
 		if err := twinjson.MarshalWrite(&buf, p); err != nil {
 			return

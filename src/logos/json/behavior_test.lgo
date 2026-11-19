@@ -5,8 +5,8 @@
 package json_test
 
 import (
-	stdjson "encoding/json"
 	"bytes"
+	stdjson "encoding/json"
 	"testing"
 
 	twinjson "logos/json"
@@ -43,6 +43,34 @@ type twinWithString struct {
 }
 
 type oracleWithString twinWithString
+
+func TestTwinNilPointerWritesNull(t *testing.T) {
+	var nilPerson *twinPerson?
+	twinBytes, twinErr := twinjson.Marshal(nilPerson)
+	if twinErr != nil {
+		t.Fatalf("twin Marshal nil: %v", twinErr)
+		return
+	}
+	if string(twinBytes) != "null" {
+		t.Fatalf("nil struct pointer = %q, want null", twinBytes)
+	}
+	oracleBytes, oracleErr := stdjson.Marshal((*oraclePerson)(nil))
+	if oracleErr != nil {
+		t.Fatalf("oracle Marshal nil: %v", oracleErr)
+	}
+	if !bytes.Equal(twinBytes, oracleBytes) {
+		t.Fatalf("nil pointer differs:\n twin %q\n orig %q", twinBytes, oracleBytes)
+	}
+	var nilString *string?
+	nilStringBytes, nilStringErr := twinjson.Marshal(nilString)
+	if nilStringErr != nil {
+		t.Fatalf("twin Marshal nil string: %v", nilStringErr)
+		return
+	}
+	if string(nilStringBytes) != "null" {
+		t.Fatalf("nil string pointer = %q, want null", nilStringBytes)
+	}
+}
 
 func TestTwinStaticStructByteEqual(t *testing.T) {
 	p := twinPerson{Name: "ann", Age: 0, Bio: "a<b>&\"q\"\u2028end"}

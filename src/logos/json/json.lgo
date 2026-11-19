@@ -5,19 +5,22 @@
 package json
 
 import (
+	"comptime"
 	stdjson "encoding/json"
 	"io"
 )
-
-// Marshal returns the JSON encoding of v. For a type with a generated
-// or hand-written MarshalJSON method it calls that method directly
-// through a comptime interface case, with no interface boxing of the
-// value. Every other value goes through encoding/json, so output bytes
-// equal the original on the same inputs.
+// Marshal returns the JSON encoding of v. For a value-struct type
+// with a generated or hand-written MarshalJSON method it calls that
+// method directly through a comptime interface case, with no value
+// boxing. Every other value, including nil pointers and interfaces,
+// goes through encoding/json, so output bytes equal the original on
+// the same inputs (a nil pointer marshals as null, never panics).
 func Marshal[T any](v T) ([]byte, error) {
-	const switch T {
-	case stdjson.Marshaler:
-		return v.MarshalJSON()
+	const if comptime.IsStruct[T]() {
+		const switch T {
+		case stdjson.Marshaler:
+			return v.MarshalJSON()
+		}
 	}
 	return stdjson.Marshal(v)
 }
@@ -39,14 +42,16 @@ func Unmarshal[T any](data []byte) (T, error) {
 // MarshalWrite marshals in and writes the bytes to out in one Write
 // call. It allocates only the single marshaled buffer.
 func MarshalWrite[T any](out io.Writer, in T) error {
-	const switch T {
-	case stdjson.Marshaler:
-		b, err := in.MarshalJSON()
-		if err != nil {
+	const if comptime.IsStruct[T]() {
+		const switch T {
+		case stdjson.Marshaler:
+			b, err := in.MarshalJSON()
+			if err != nil {
+				return err
+			}
+			_, err = out.Write(b)
 			return err
 		}
-		_, err = out.Write(b)
-		return err
 	}
 	b, err := stdjson.Marshal(in)
 	if err != nil {
