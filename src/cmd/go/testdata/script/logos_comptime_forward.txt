@@ -1,0 +1,184 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+cd w
+logos build ./...
+logos run ./main
+stdout '^direct struct$'
+stdout '^fwd1 struct$'
+stdout '^fwd1-other other$'
+stdout '^fwd2 struct$'
+stdout '^fixed struct$'
+stdout '^self struct$'
+logos run ./thin
+stdout '^thin-fwd2 struct$'
+logos test ./top/
+logos eject -o out
+exists out/main/main.go
+exists out/thin/thin.go
+exists out/top/top.go
+! grep '"comptime"' out/main/main.go
+! grep '"comptime"' out/thin/thin.go
+! grep '"comptime"' out/top/top.go
+! grep '_logos_ctimp' out/main/main.go
+! grep '_logos_tparam' out/main/main.go
+# Forwarded instantiations share one copy per type-argument list:
+# Describe[probe] is reached directly and through two forwarding paths.
+grep -count=3 'func Describe_logosct' out/main/main.go
+grep -count=2 'func Wrap_logosct' out/main/main.go
+grep -count=1 'func Wrap2_logosct' out/main/main.go
+grep -count=1 'func WrapFixed_logosct' out/main/main.go
+
+cd out
+go run ./main
+stdout '^direct struct$'
+stdout '^fwd1 struct$'
+stdout '^fwd1-other other$'
+stdout '^fwd2 struct$'
+stdout '^fixed struct$'
+stdout '^self struct$'
+go run ./thin
+stdout '^thin-fwd2 struct$'
+go test -count=1 ./top/
+# SPEC 0.3: ejected output builds with upstream go1.27.2 from $UPROOT1272.
+exists $UPROOT1272/bin/go
+exec env -u GOROOT $UPROOT1272/bin/go build ./...
+cd ..
+
+-- w/go.mod --
+module example.com/fwdtest
+
+go 1.27
+
+-- w/leaf/leaf.lgo --
+package leaf
+
+import "comptime"
+
+type Fixed struct {
+	Name string
+}
+
+func Describe[T any]() string {
+	const if comptime.IsStruct[T]() {
+		return "struct"
+	} else {
+		return "other"
+	}
+}
+
+-- w/mid/mid.lgo --
+package mid
+
+import (
+	"comptime"
+
+	"example.com/fwdtest/leaf"
+)
+
+func Wrap[T any]() string {
+	const if comptime.IsStruct[T]() {
+		s := leaf.Describe[T]()
+		return s
+	} else {
+		s := leaf.Describe[T]()
+		return s
+	}
+}
+
+func WrapFixed[T any]() string {
+	const if comptime.IsStruct[T]() {
+		s := leaf.Describe[leaf.Fixed]()
+		return s
+	} else {
+		s := leaf.Describe[leaf.Fixed]()
+		return s
+	}
+}
+
+-- w/top/top.lgo --
+package top
+
+import (
+	"comptime"
+
+	"example.com/fwdtest/mid"
+)
+func Wrap2[T any]() string {
+	const if comptime.IsStruct[T]() {
+		return mid.Wrap[T]()
+	} else {
+		return mid.Wrap[T]()
+	}
+}
+
+type inner struct {
+	Value int
+}
+
+func SelfProbe() string {
+	return Wrap2[inner]()
+}
+
+-- w/main/main.lgo --
+package main
+
+import (
+	"fmt"
+
+	"example.com/fwdtest/leaf"
+	"example.com/fwdtest/mid"
+	"example.com/fwdtest/top"
+)
+
+type probe struct {
+	Name string
+}
+
+func main() {
+	fmt.Println("direct", leaf.Describe[probe]())
+	fmt.Println("fwd1", mid.Wrap[probe]())
+	fmt.Println("fwd1-other", mid.Wrap[int]())
+	fmt.Println("fwd2", top.Wrap2[probe]())
+	fmt.Println("fixed", mid.WrapFixed[probe]())
+	fmt.Println("self", top.SelfProbe())
+}
+
+-- w/thin/thin.lgo --
+package main
+
+import (
+	"fmt"
+
+	"example.com/fwdtest/top"
+)
+
+type probe struct {
+	Name string
+}
+
+func main() {
+	fmt.Println("thin-fwd2", top.Wrap2[probe]())
+}
+
+-- w/top/wrap_x_test.lgo --
+package top_test
+
+import (
+	"testing"
+
+	"example.com/fwdtest/top"
+)
+
+type probe struct {
+	Name string
+}
+
+func TestWrap2External(t *testing.T) {
+	if got := top.Wrap2[probe](); got != "struct" {
+		t.Fatalf("Wrap2 = %q, want struct", got)
+	}
+	if got := top.Wrap2[int](); got != "other" {
+		t.Fatalf("Wrap2[int] = %q, want other", got)
+	}
+}
