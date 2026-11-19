@@ -691,6 +691,8 @@ Assigning a result to the blank identifier MUST NOT count as a read. [T-202]
 
 A Go-mode callee (the standard library or any Go package, such as `io.Reader.Read`) MUST keep its own contract, so use of n first stays allowed. [T-202][R-U2]
 
+An `.lgo` method that implements a Go-declared interface and must return `(*T, error)` MUST return a non-nil `*T` with the error on failure. A zero `&T{}` value satisfies this rule. The error is authoritative and the caller MUST ignore the pointed-to value. [T-202][R-U2]
+
 `nil` MUST be assignable to every `T?`. [T-202]
 
 `T` MUST be assignable to `T?`. [T-202]

@@ -76,6 +76,20 @@ func nilReturn() *User {
 	return nil /* ERROR "[correctness::nil_to_nonnil] cannot assign nil to non-nil *User" */
 }
 
+func nilPairReturn() (*User, error) {
+	return nil /* ERROR "[correctness::nil_to_nonnil] cannot assign nil to non-nil *User" */, nil
+}
+
+type gateway struct{}
+
+func (gateway) Fetch() (*Inner, error) {
+	return nil /* ERROR "[correctness::nil_to_nonnil] cannot assign nil to non-nil *Inner" */, nil
+}
+
+func okPairReturn() (*Inner, error) {
+	return &Inner{X: 1}, nil
+}
+
 func nilElem() {
 	_ = []*User{nil /* ERROR "[correctness::nil_to_nonnil] cannot assign nil to non-nil *User" */}
 }
