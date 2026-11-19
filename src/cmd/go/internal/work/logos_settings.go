@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 
 	"golang.org/x/mod/modfile"
@@ -32,31 +31,7 @@ func refreshLogosPolicy(ld *modload.Loader) {
 	logosSettingsErr = err
 	cfg.ApplyLogosEnv(s)
 	if s.Cgo.RaceRuntimeOnly {
-		keepStandardLibraryPureGo()
 		requireRaceRuntimeCompiler()
-	}
-}
-
-func keepStandardLibraryPureGo() {
-	// SPEC: with cgo enabled solely for the race runtime, net and
-	// os/user keep their pure-Go paths. A caller netcgo tag would
-	// select the native resolver instead, so the override swaps it
-	// for netgo. Both tags consult only net source selection, so no
-	// other package moves. Both tags set is the caller's own
-	// contradiction and keeps the upstream guard.
-	tags := cfg.BuildContext.BuildTags
-	switch {
-	case slices.Contains(tags, "netgo") && slices.Contains(tags, "netcgo"):
-		// Leave the contradiction for the upstream guard.
-	case slices.Contains(tags, "netcgo"):
-		swapped := slices.Clone(tags)
-		swapped = slices.DeleteFunc(swapped, func(t string) bool { return t == "netcgo" })
-		cfg.BuildContext.BuildTags = append(swapped, "netgo")
-	case !slices.Contains(tags, "netgo"):
-		cfg.BuildContext.BuildTags = append(tags, "netgo")
-	}
-	if !slices.Contains(cfg.BuildContext.BuildTags, "osusergo") {
-		cfg.BuildContext.BuildTags = append(cfg.BuildContext.BuildTags, "osusergo")
 	}
 }
 

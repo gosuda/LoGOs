@@ -7,6 +7,7 @@ package load
 import (
 	"errors"
 	"fmt"
+	"go/build"
 	"go/parser"
 	"go/token"
 	"internal/logosfile"
@@ -217,4 +218,29 @@ func logosDenyCgo(p *Package, msg string) {
 	}
 	p.Error = &PackageError{Err: errors.New(msg)}
 	p.Incomplete = true
+}
+
+func logosBuildContextFor(importPath string) build.Context {
+	ctxt := cfg.BuildContext
+	if !settings.Current().Cgo.RaceRuntimeOnly {
+		return ctxt
+	}
+	switch importPath {
+	case "net":
+		tags := ctxt.BuildTags
+		switch {
+		case slices.Contains(tags, "netgo") && slices.Contains(tags, "netcgo"):
+		case slices.Contains(tags, "netcgo"):
+			swapped := slices.Clone(tags)
+			swapped = slices.DeleteFunc(swapped, func(t string) bool { return t == "netcgo" })
+			ctxt.BuildTags = append(swapped, "netgo")
+		case !slices.Contains(tags, "netgo"):
+			ctxt.BuildTags = append(slices.Clone(tags), "netgo")
+		}
+	case "os/user":
+		if !slices.Contains(ctxt.BuildTags, "osusergo") {
+			ctxt.BuildTags = append(slices.Clone(ctxt.BuildTags), "osusergo")
+		}
+	}
+	return ctxt
 }

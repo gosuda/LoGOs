@@ -17,10 +17,14 @@ stdout 'WARNING: DATA RACE'
 logos test -race -count=1 ./clean
 stdout '^ok  '
 
-# An explicit netcgo tag is swapped for netgo: the race override keeps net
-# on its pure-Go path, so the resolver tag guard never trips.
+# The race override keeps net on its pure-Go path for net only and preserves
+# caller tags for other packages, so the resolver tag guard never trips.
 logos test -race -tags=netcgo -count=1 ./clean
 stdout '^ok  '
+logos test -race -tags=netcgo -v -count=1 ./clean
+stdout 'TestNetcgoTagPreserved'
+logos test -race -v -count=1 ./clean
+! stdout 'TestNetcgoTagPreserved'
 logos list -race -tags=netcgo -test -deps -f '{{if eq .ImportPath "net"}}cgo={{.CgoFiles}}{{end}}' ./clean
 stdout '^cgo=\[\]$'
 
@@ -176,6 +180,16 @@ func TestLoopback(t *testing.T) {
 	if !Loopback() {
 		t.Fatal("127.0.0.1 is not a loopback address")
 	}
+}
+
+-- forbid/clean/netcgo_tag_test.lgo --
+//go:build netcgo
+
+package clean
+
+import "testing"
+
+func TestNetcgoTagPreserved(t *testing.T) {
 }
 
 -- forbid/usesc/usesc.lgo --
