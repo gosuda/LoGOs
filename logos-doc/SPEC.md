@@ -736,6 +736,8 @@ An ordinary method call on an unnarrowed `T?` MUST fail with `[correctness::nil_
 
 `?.` over a field that is already an option MUST flatten the result. [T-104.3]
 
+`?.` over a field whose type is a defined option type MUST keep that declared type when the selection runs through no constant view; through a constant view the flattened result is the option of the qualified element. [T-104.3]
+
 See Sec 1.4 for `??` grouping, precedence, and single-value map reads.
 
 `m[k] ?? d` MUST type as `V`. [T-104.3]
