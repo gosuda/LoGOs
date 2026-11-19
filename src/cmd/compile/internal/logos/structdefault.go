@@ -19,14 +19,22 @@ func (fl *fileLower) lowerStructDefaults() {
 	// field defaults before stripFieldDefaults orphans them, and fill/
 	// factory text then renders the respelled form on its own.
 	fl.lowerTypeParamLits()
+	// Fill before strip: a composite literal inside a field default gets
+	// its own missing fields here, so the factory body rendered from the
+	// default subtree carries the inner defaults. The fill splice inside
+	// the erased default span is dropped by stripFieldDefaults while the
+	// appended elements stay in the subtree that renderDefault prints.
+	syntax.Inspect(fl.file, func(n syntax.Node) bool {
+		if lit, ok := n.(*syntax.CompositeLit); ok {
+			fl.fillStructDefaults(lit)
+		}
+		return true
+	})
 	stripped := make(map[*syntax.FieldDefault]bool)
 	typeNames := fl.defaultTypeNames()
 	syntax.Inspect(fl.file, func(n syntax.Node) bool {
-		switch n := n.(type) {
-		case *syntax.StructType:
-			fl.stripFieldDefaults(n, stripped, typeNames)
-		case *syntax.CompositeLit:
-			fl.fillStructDefaults(n)
+		if st, ok := n.(*syntax.StructType); ok {
+			fl.stripFieldDefaults(st, stripped, typeNames)
 		}
 		return true
 	})

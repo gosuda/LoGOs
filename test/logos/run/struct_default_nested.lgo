@@ -1,0 +1,48 @@
+// run
+
+package main
+
+import (
+	"fmt"
+	"os"
+)
+
+var failed bool
+
+func check(name string, cond bool, got, want any) {
+	if !cond {
+		failed = true
+		fmt.Println("FAIL", name+":", "got", got, "want", want)
+		return
+	}
+	fmt.Println("ok", name)
+}
+
+type Policy struct {
+	Timeout int = 10
+}
+
+type Client struct {
+	Name   string
+	Policy Policy = Policy{}
+}
+
+type Group struct {
+	Leader Client = Client{Name: "root"}
+}
+
+func main() {
+	direct := Policy{}
+	check("direct", direct.Timeout == 10, direct.Timeout, 10)
+	nested := Client{Name: "a"}
+	check("nested", nested.Policy.Timeout == 10, nested.Policy.Timeout, 10)
+	empty := Client{}
+	check("empty", empty.Policy.Timeout == 10, empty.Policy.Timeout, 10)
+	ptr := &Client{Name: "b"}
+	check("ptr", ptr.Policy.Timeout == 10, ptr.Policy.Timeout, 10)
+	deep := Group{}
+	check("deep", deep.Leader.Policy.Timeout == 10, deep.Leader.Policy.Timeout, 10)
+	if failed {
+		os.Exit(1)
+	}
+}
