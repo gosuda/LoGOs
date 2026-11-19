@@ -1,0 +1,51 @@
+// run
+
+package main
+
+import (
+	"fmt"
+	"os"
+)
+
+var failed bool
+
+func check(name string, cond bool, got, want any) {
+	if !cond {
+		failed = true
+		fmt.Println("FAIL", name+":", "got", got, "want", want)
+		return
+	}
+	fmt.Println("ok", name)
+}
+
+func callVariadic[F any](cb func(...F)) {
+	const switch F {
+	case int:
+		cb(1, 2)
+	}
+}
+
+func touchChan[F any](ch chan (<-chan F)) {
+	const switch F {
+	case int:
+		_ = ch
+	}
+}
+
+func main() {
+	sum := 0
+	callVariadic[int](func(v ...int) {
+		for _, x := range v {
+			sum += x
+		}
+	})
+	check("variadic-rebind", sum == 3, sum, 3)
+
+	outer := make(chan (<-chan int), 1)
+	touchChan[int](outer)
+	check("chan-rebind", true, true, true)
+
+	if failed {
+		os.Exit(1)
+	}
+}
