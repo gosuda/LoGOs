@@ -1,0 +1,303 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+[!race] skip 'the platform has no race detector'
+[!cgo] skip 'the race runtime links through cgo'
+
+env CC=
+env CGO_ENABLED=
+
+cd forbid
+
+# The race detector runs and reports a real race.
+! logos test -race -count=1 ./racy
+stdout 'WARNING: DATA RACE'
+! stderr 'requires cgo'
+
+logos test -race -count=1 ./clean
+stdout '^ok  '
+
+# The race override keeps net on its pure-Go path for net only and preserves
+# caller tags for other packages, so the resolver tag guard never trips.
+logos test -race -tags=netcgo -count=1 ./clean
+stdout '^ok  '
+logos test -race -tags=netcgo -v -count=1 ./clean
+stdout 'TestNetcgoTagPreserved'
+logos test -race -v -count=1 ./clean
+! stdout 'TestNetcgoTagPreserved'
+logos list -race -tags=netcgo -test -deps -f '{{if eq .ImportPath "net"}}cgo={{.CgoFiles}}{{end}}' ./clean
+stdout '^cgo=\[\]$'
+
+# The race runtime is linked; net keeps its pure-Go files.
+logos list -race -test -deps -f '{{.ImportPath}}' ./clean
+stdout '^runtime/cgo$'
+stdout '^runtime/race$'
+logos list -race -test -deps -f '{{if eq .ImportPath "net"}}cgo={{.CgoFiles}}{{end}}' ./clean
+stdout '^cgo=\[\]$'
+logos list -race -test -deps -f '{{if eq .ImportPath "os/user"}}cgo={{.CgoFiles}}{{end}}' ./clean
+stdout '^cgo=\[\]$'
+
+# A package that uses cgo is still refused, whatever the environment says.
+! logos test -race -count=1 ./usesc
+stderr '\[restriction::cgo_usage\] cgo is disabled'
+env CGO_ENABLED=1
+! logos test -race -count=1 ./usesc
+stderr '\[restriction::cgo_usage\] cgo is disabled'
+! logos build -race ./usesc
+stderr '\[restriction::cgo_usage\] cgo is disabled'
+env CGO_ENABLED=
+
+# Named files take the main-module policy: forbidden C is refused, not compiled.
+! logos run -race ./usescmain/main.lgo
+stderr '\[restriction::cgo_usage\] cgo is disabled'
+
+# Without -race the ban still means no cgo at all.
+logos list -test -deps -f '{{.ImportPath}}' ./clean
+! stdout '^runtime/cgo$'
+logos test -count=1 ./clean
+stdout '^ok  '
+
+# An explicit CGO_ENABLED=0 wins, and the message names it.
+env CGO_ENABLED=0
+! logos test -race -count=1 ./clean
+stderr 'CGO_ENABLED=0'
+! stderr 'enable cgo by setting CGO_ENABLED=1'
+env CGO_ENABLED=
+
+# A malformed CC is reported by the configuration diagnostic, not a panic.
+env CC='"gcc'
+! logos test -race -count=1 ./clean
+stderr 'could not be parsed'
+env CC=
+
+# A module with no cgo key has the same default.
+cd ../nokey
+! logos test -race -count=1 ./racy
+stdout 'WARNING: DATA RACE'
+env CGO_ENABLED=0
+! logos test -race -count=1 ./racy
+stderr 'CGO_ENABLED=0'
+! stderr 'enable cgo by setting CGO_ENABLED=1'
+env CGO_ENABLED=
+# Restricted pin: an allowlisted cgo package builds (its implicit
+# runtime/cgo edge is standard-library and exempt) while a non-listed package
+# is still refused.
+cd ../resrace
+[cgo] logos build -o ok.bin ./ok
+[cgo] ! logos build -o bad.bin ./bad
+[cgo] stderr 'not in cgo_allowlist'
+cd ../nokey
+
+# With no C compiler and no zig the message names the need and the policy.
+env PATH=$WORK/no-compiler
+! logos test -race -count=1 ./racy
+stderr 'needs a C compiler'
+stderr 'logos.toml'
+! stderr 'C compiler "gcc" not found'
+logos list -race -test -deps -f '{{.ImportPath}}' ./racy
+stdout '^runtime/race$'
+
+# A listing that compiles still gets the race compiler diagnostic.
+! logos list -race -export -f '{{.ImportPath}}' ./racy
+stderr 'needs a C compiler'
+stderr 'logos.toml'
+
+# A module listing returns metadata without building, so it needs no compiler.
+logos list -race -m -json
+stdout '"Path": "example.com/nokey"'
+# A package listing with no build action needs none either.
+logos list -race -export -f '{{.ImportPath}}' unsafe
+stdout '^unsafe$'
+
+-- forbid/go.mod --
+module example.com/forbid
+
+go 1.27
+
+-- forbid/logos.toml --
+[build]
+cgo = "forbid"
+
+-- forbid/racy/racy.lgo --
+package racy
+
+import "context"
+
+func Count(ctx context.Context) (int, error) {
+	n := 0
+	go group (ctx) {
+		go {
+			for i := 0; i < 1000; i++ {
+				n++
+			}
+		}
+		go {
+			for i := 0; i < 1000; i++ {
+				n++
+			}
+		}
+	}
+	return n, nil
+}
+
+-- forbid/racy/racy_test.lgo --
+package racy
+
+import (
+	"context"
+	"testing"
+)
+
+func TestCount(t *testing.T) {
+	if _, err := Count(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+-- forbid/clean/clean.lgo --
+package clean
+
+import (
+	"net"
+	"os/user"
+)
+
+func Loopback() bool {
+	return net.ParseIP("127.0.0.1").IsLoopback()
+}
+
+func Current() error {
+	_, err := user.Current()
+	return err
+}
+
+-- forbid/clean/clean_test.lgo --
+package clean
+
+import "testing"
+
+func TestLoopback(t *testing.T) {
+	if !Loopback() {
+		t.Fatal("127.0.0.1 is not a loopback address")
+	}
+}
+
+-- forbid/clean/netcgo_tag_test.lgo --
+//go:build netcgo
+
+package clean
+
+import "testing"
+
+func TestNetcgoTagPreserved(t *testing.T) {
+}
+
+-- forbid/usesc/usesc.lgo --
+package usesc
+
+/*
+int answer(void) { return 42; }
+*/
+import "C"
+
+func Answer() int { return int(C.answer()) }
+
+-- forbid/usesc/usesc_test.lgo --
+package usesc
+
+import "testing"
+
+func TestAnswer(t *testing.T) {
+	if Answer() != 42 {
+		t.Fatal("wrong answer")
+	}
+}
+
+-- forbid/usescmain/main.lgo --
+package main
+
+/*
+int answer(void) { return 42; }
+*/
+import "C"
+
+func main() {
+	if int(C.answer()) != 42 {
+		panic("wrong answer")
+	}
+}
+
+-- nokey/go.mod --
+module example.com/nokey
+
+go 1.27
+
+-- nokey/racy/racy.lgo --
+package racy
+
+import "context"
+
+func Count(ctx context.Context) (int, error) {
+	n := 0
+	go group (ctx) {
+		go {
+			for i := 0; i < 1000; i++ {
+				n++
+			}
+		}
+		go {
+			for i := 0; i < 1000; i++ {
+				n++
+			}
+		}
+	}
+	return n, nil
+}
+
+-- nokey/racy/racy_test.lgo --
+package racy
+
+import (
+	"context"
+	"testing"
+)
+
+func TestCount(t *testing.T) {
+	if _, err := Count(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+-- resrace/go.mod --
+module example.com/resrace
+
+go 1.27
+
+-- resrace/logos.toml --
+[build]
+cgo = "restricted"
+cgo_allowlist = ["example.com/resrace/ok/**"]
+
+-- resrace/ok/ok.lgo --
+package main
+
+/*
+int answer(void) { return 42; }
+*/
+import "C"
+
+import "fmt"
+
+func main() { fmt.Println("ok:", C.answer()) }
+
+-- resrace/bad/bad.lgo --
+package main
+
+/*
+int answer(void) { return 42; }
+*/
+import "C"
+
+import "fmt"
+
+func main() { fmt.Println("bad:", C.answer()) }
