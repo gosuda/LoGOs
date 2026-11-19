@@ -25,10 +25,10 @@ The `-O` build flag is accepted by both `logos build` and `go build`. In `logos.
 
 | Level | Inlining budget | Stack buffer threshold | Flags emitted |
 |---|---|---|---|
-| `O0` | none | none | `-N -l` |
+| `O0` | none | 32 B | `-N -l -d=variablemakethreshold=32,variablemakeundern=1` |
 | `O1` | upstream default | 32 B | upstream compiler defaults |
 | `O2` | 120 | 256 B | `-d=inlbudget=120,variablemakethreshold=256` |
-| `O3` | 400 | 4096 B | `-d=inlbudget=400,inlrecursivebudget=80,variablemakethreshold=4096` |
+| `O3` | 400 | 4096 B | `-d=inlbudget=400,inlrecursivebudget=80,variablemakethreshold=4096,logosopt=1` |
 | `Os` | 15 | 32 B | `-d=inlbudget=15` |
 
 Rules:
