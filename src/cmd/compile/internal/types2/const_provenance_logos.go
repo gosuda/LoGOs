@@ -154,22 +154,41 @@ func logosContainsReadonlyDescendants(T Type) bool {
 	return found
 }
 
-func logosQualifiedInterface(T Type) bool {
-	q := false
+// logosViewBase unwraps const views, readonly descendants, and defined
+// types to the value type they qualify. It reports whether a const or
+// readonly view was seen on the way down.
+func logosViewBase(T Type) (Type, bool) {
+	qualified := false
 	for {
 		if c := logosAsConstView(T); c != nil {
-			q = true
+			qualified = true
 			T = c.Elem
 			continue
 		}
 		if r := logosAsReadonlyDescendants(T); r != nil {
-			q = true
+			qualified = true
 			T = r.Elem
 			continue
 		}
-		break
+		if n, ok := Unalias(T).(*Named); ok {
+			T = n.Underlying()
+			continue
+		}
+		return T, qualified
 	}
-	return q && IsInterface(T)
+}
+
+// logosViewedTypeParam reports whether T is a type parameter seen through
+// a const or readonly view, so a viewed type parameter keeps the
+// type-parameter diagnostic instead of a readonly or not-an-interface one.
+func logosViewedTypeParam(T Type) bool {
+	base, qualified := logosViewBase(T)
+	return qualified && isTypeParam(base)
+}
+
+func logosQualifiedInterface(T Type) bool {
+	base, qualified := logosViewBase(T)
+	return qualified && !isTypeParam(base) && IsInterface(base)
 }
 
 func logosAnyContainsReadonlyDescendants(V, T Type) bool {
