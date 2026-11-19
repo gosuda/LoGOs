@@ -543,7 +543,12 @@ func (fl *fileLower) selectAccess(e *syntax.OptSelectExpr, native syntax.Expr, s
 
 func (fl *fileLower) spellLowered(t types2.Type) (string, bool) {
 	if o := fl.asOption(t); o != nil {
-		if _, named := types2.Unalias(t).(*types2.Named); named {
+		if n, ok := types2.Unalias(t).(*types2.Named); ok {
+			if args := n.TypeArgs(); args != nil && args.Len() > 0 {
+				if s, ok := fl.spellLoweredApplied(n.Obj(), args); ok {
+					return s, true
+				}
+			}
 			return fl.spellType(t)
 		}
 		if types2.LogosOptionIsBare(o.Elem) {
@@ -564,7 +569,14 @@ func (fl *fileLower) spellLowered(t types2.Type) (string, bool) {
 		return fl.spellLowered(c.Elem)
 	case *types2.ReadonlyDescendants:
 		return fl.spellLowered(c.Elem)
-	case *types2.Named, *types2.Alias, *types2.Basic, *types2.TypeParam:
+	case *types2.Named:
+		if args := c.TypeArgs(); args != nil && args.Len() > 0 {
+			if s, ok := fl.spellLoweredApplied(c.Obj(), args); ok {
+				return s, true
+			}
+		}
+		return fl.spellType(t)
+	case *types2.Alias, *types2.Basic, *types2.TypeParam:
 		return fl.spellType(t)
 	case *types2.Pointer:
 		e, ok := fl.spellLowered(c.Elem())
@@ -621,6 +633,31 @@ func (fl *fileLower) spellLowered(t types2.Type) (string, bool) {
 	default:
 		return "", false
 	}
+}
+
+func (fl *fileLower) spellLoweredApplied(obj *types2.TypeName, args *types2.TypeList) (string, bool) {
+	if obj == nil || args == nil || args.Len() == 0 {
+		return "", false
+	}
+	lowered := make([]string, args.Len())
+	for i := range args.Len() {
+		s, ok := fl.spellLowered(args.At(i))
+		if !ok {
+			return "", false
+		}
+		lowered[i] = s
+	}
+	pkg := obj.Pkg()
+	var base string
+	if pkg == nil || pkg == fl.pkg.tpkg {
+		base = obj.Name()
+	} else {
+		if !obj.Exported() {
+			return "", false
+		}
+		base = fl.synthQualifier(pkg) + "." + obj.Name()
+	}
+	return base + "[" + strings.Join(lowered, ", ") + "]", true
 }
 
 func (fl *fileLower) spellLoweredSig(sig *types2.Signature) (string, bool) {
