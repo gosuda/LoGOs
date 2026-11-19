@@ -129,7 +129,7 @@ func (check *Checker) logosTypeArms(e *syntax.SwitchExpr, guard *syntax.TypeSwit
 		if x.isValid() {
 			if check.conf.Logos && logosViewCyclic(x.typ()) {
 				check.error(&x, InvalidTypeSwitch, "cannot use type switch on recursive type")
-			} else if isTypeParam(x.typ()) || logosViewedTypeParam(x.typ()) {
+			} else if isTypeParam(x.typ()) || (check.conf.Logos && logosViewedTypeParam(x.typ())) {
 				check.errorf(&x, InvalidTypeSwitch, "cannot use type switch on type parameter value %s", &x)
 			} else if IsInterface(x.typ()) {
 				sx = &x

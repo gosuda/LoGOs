@@ -53,7 +53,7 @@ func (check *Checker) logosStmtSwitchOperand(x *operand) *operand {
 			check.error(x, InvalidTypeSwitch, "cannot use type switch on recursive type")
 		} else if logosContainsReadonlyDescendants(x.typ()) {
 			check.error(x, InvalidTypeSwitch, "cannot use type switch on value with readonly descendants")
-		} else if isTypeParam(x.typ()) || logosViewedTypeParam(x.typ()) {
+		} else if isTypeParam(x.typ()) || (check.conf.Logos && logosViewedTypeParam(x.typ())) {
 			check.errorf(x, InvalidTypeSwitch, "cannot use type switch on type parameter value %s", x)
 		} else if IsInterface(x.typ()) {
 			return x
