@@ -14,8 +14,9 @@ import (
 )
 
 // The leak watch runs a collection that finds leaked goroutines. A
-// short program gets timedLeakChecks checks, the first one after
-// firstLeakCheck and each next one after twice the wait. After them the
+// short program gets timedLeakChecks checks at the cumulative sums of
+// the doubling waits: 0.1 s, 0.3 s, 0.7 s, 1.5 s, 3.1 s and 6.3 s
+// after the program starts. After them the
 // watch has no timer: a timer keeps a deadlocked program alive, and the
 // runtime must still end such a program. Each later check follows a
 // collection of the program, leakCheckSpacing or more after the check
@@ -57,7 +58,7 @@ func (w leakWatch) run() {
 	start := time.Now()
 	wait := firstLeakCheck
 	for range timedLeakChecks {
-		time.Sleep(time.Until(start.Add(wait)))
+		time.Sleep(time.Until(start.Add(2*wait - firstLeakCheck)))
 		w.report()
 		wait *= 2
 	}

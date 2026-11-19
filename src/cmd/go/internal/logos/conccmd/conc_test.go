@@ -161,8 +161,12 @@ func TestChildArgumentsShake(t *testing.T) {
 		{"test", "-shake 7 -count=1 ./ord", "test -tags=logosconc -count=1 ./ord", "7", false},
 		{"test", "-count=1 ./ord -shake", "test -tags=logosconc -count=1 ./ord", "", true},
 		{"test", "-shake ./ord", "test -count=1 -tags=logosconc ./ord", "", true},
+		{"test", "-shake -shake=7 -count=1 ./ord", "test -tags=logosconc -count=1 ./ord", "7", false},
+		{"test", "-shake -shake 7 -count=1 ./ord", "test -tags=logosconc -count=1 ./ord", "7", false},
+		{"test", "-shake=7 -shake -count=1 ./ord", "test -tags=logosconc -count=1 ./ord", "", true},
 		{"run", "-shake=7 .", "run -tags=logosconc .", "7", false},
 		{"run", "-shake .", "run -tags=logosconc .", "", true},
+		{"run", "-shake -shake=7 .", "run -tags=logosconc .", "7", false},
 		{"test", "-count=1 ./ord", "test -tags=logosconc -count=1 ./ord", "", false},
 	}
 	for _, tt := range tests {
@@ -170,6 +174,22 @@ func TestChildArgumentsShake(t *testing.T) {
 		if want := strings.Fields(tt.want); !slices.Equal(got.arguments, want) || got.shake != tt.shake || got.shakeBare != tt.shakeBare {
 			t.Errorf("logos conc %s %s:\n got %q shake=%q bare=%v\nwant %q shake=%q bare=%v", tt.verb, tt.args, got.arguments, got.shake, got.shakeBare, want, tt.shake, tt.shakeBare)
 		}
+	}
+}
+
+func TestChildArgumentsKeepsGOFLAGSCount(t *testing.T) {
+	neverTakesValue := func(name string) bool { return false }
+	t.Setenv("GOFLAGS", "-count=10")
+	if got := childArguments("test", []string{"./ord"}, neverTakesValue); slices.Contains(got.arguments, "-count=1") {
+		t.Errorf("GOFLAGS=-count=10: child arguments are %q, want no injected -count=1", got.arguments)
+	}
+	t.Setenv("GOFLAGS", "-test.count=10")
+	if got := childArguments("test", []string{"./ord"}, neverTakesValue); slices.Contains(got.arguments, "-count=1") {
+		t.Errorf("GOFLAGS=-test.count=10: child arguments are %q, want no injected -count=1", got.arguments)
+	}
+	t.Setenv("GOFLAGS", "-tags=x")
+	if got := childArguments("test", []string{"./ord"}, neverTakesValue); !slices.Contains(got.arguments, "-count=1") {
+		t.Errorf("GOFLAGS=-tags=x: child arguments are %q, want injected -count=1", got.arguments)
 	}
 }
 
