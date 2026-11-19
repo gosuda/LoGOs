@@ -36,7 +36,7 @@ The group context cancels on the first child error or panic. The group joins eve
 
 ## Run and test forms
 
-`logos conc run` wraps `logos run`. `logos conc test` wraps `logos test`. Build and test flags pass through to the child. The monitor tag joins the build tags. `logos conc test` adds `-count=1` unless a count is already set. Place conc flags before the package for `run`. Place conc flags before `-args` or `--` for `test`. Text after that boundary belongs to the program.
+`logos conc run` wraps `logos run`. `logos conc test` wraps `logos test`. Build and test flags pass through to the child. The monitor tag joins tags passed with `-tags`; tags set only in `GOFLAGS` are replaced by the monitor tag, so pass them with `-tags` instead. `logos conc test` adds `-count=1` unless a count is already set. Place conc flags before the package for `run`. Place conc flags before `-args` or `--` for `test`. Text after that boundary belongs to the program.
 
 ```sh
 logos help conc
@@ -46,6 +46,8 @@ logos conc run ./oneorder
 ```
 
 Expect exit 0 for the help and the one-order run. Expect exit 1 for both opposite runs: the monitor prints one finding although the program exits zero.
+
+Set up the example packages before running the commands: create one module with a `go.mod`, then write each section's snippet into its package as `main.lgo` in a `package main` with the shown imports and a `main` that runs it (`./opposite` for the lock-order snippet, `./ignores` for the stalled child, `./leaks` for the leak with its `Subscribe` in an imported Go package, `./slow` for the hold; `./oneorder` repeats `./opposite` with both locks in one order, `./ord` is the order program in `logos_conc_shake.txt`). The exact fixtures these commands were tested against are in `src/cmd/go/testdata/script/logos_conc_*.txt`. Without the files the command fails with a package lookup error and exit 1, the same status a finding gives, so a bare run proves nothing.
 
 ## Read conc::lock_order_inversion
 
