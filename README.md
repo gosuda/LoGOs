@@ -136,7 +136,7 @@ Output:
 42 <nil>
 ```
 
-`DIR` must not exist, or it must be empty. Ejection never writes generated files into the source module.
+`DIR` must not exist, or it must be empty. Ejection never replaces files in the source module; keep `DIR` outside the module, because a nested `DIR` such as `./out` still lands inside the source tree.
 
 ### Lint
 
