@@ -1,0 +1,151 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+# The copy rule is stated where users look for it.
+logos help eject
+stdout 'version-control-ignored'
+
+cd m
+[git] exec git init
+[symlink] symlink link.txt -> data.json
+
+logos run .
+cp stdout $WORK/native.txt
+
+logos eject -o out
+
+exists out/main.go
+exists out/go.mod
+exists out/sub/s.go
+
+# Non-source files ride along: the ignore file itself, data files, and a
+# package note. data.json proves the copy is byte for byte.
+exists out/.gitignore
+exists out/README.md
+exists out/data.json
+cmp data.json out/data.json
+exists out/sub/note.md
+exists out/testdata/t.txt
+exists out/vendor/extra.txt
+
+# Dot-prefixed and underscore-prefixed paths are copied: //go:embed
+# reaches them, so dropping them would break the ejected build.
+exists out/.h.txt
+exists out/_u.txt
+
+# Paths a version-control ignore file lists are still copied: eject
+# reads no ignore file. The ignored note is embedded, so the ejected
+# build fails without it.
+exists out/ignored/note.txt
+exists out/.outline/notes.md
+exists out/_ignored/u.txt
+exists out/frontend/node_modules/pkg/index.js
+exists out/.references/plain.txt
+exists out/.references/loose/data.txt
+
+# A directory that holds its own go.mod is another module and stays
+# out, including one nested under testdata. .git contents, symlinks,
+# and special files stay out too.
+! exists out/foreign
+! exists out/foreign/go.mod
+! exists out/testdata/nested
+! exists out/.references/clone
+! exists out/.git
+[symlink] ! exists out/link.txt
+
+cd out
+go build ./...
+go run .
+cp stdout $WORK/ejected.txt
+cmp $WORK/native.txt $WORK/ejected.txt
+
+-- m/go.mod --
+module example.com/ejectcopy
+
+go 1.27
+-- m/main.lgo --
+// Command ejectcopy pins the eject copy rule: every regular file of
+// the main module is copied, including dot-prefixed,
+// underscore-prefixed, vendor, testdata, and ignored paths.
+package main
+
+import (
+	_ "embed"
+	"fmt"
+
+	"example.com/ejectcopy/sub"
+)
+
+//go:embed ignored/note.txt
+var note string
+
+//go:embed _u.txt
+var u string
+
+//go:embed .h.txt
+var h string
+
+func main() {
+	fmt.Print(note)
+	fmt.Print(u)
+	fmt.Print(h)
+	fmt.Println(sub.Msg())
+	fmt.Println("copy rule")
+}
+-- m/sub/s.lgo --
+package sub
+
+// Msg reports the subpackage string.
+func Msg() string {
+	return "sub-ok"
+}
+-- m/sub/note.md --
+sub note
+-- m/README.md --
+copy rule readme
+-- m/data.json --
+{"copy": true}
+-- m/testdata/t.txt --
+kept
+-- m/vendor/extra.txt --
+vendored data
+-- m/.h.txt --
+dot data
+-- m/_u.txt --
+underscore data
+-- m/ignored/note.txt --
+ignored note
+-- m/.gitignore --
+.references/
+.outline/
+frontend/node_modules/
+_ignored/
+ignored/
+-- m/.outline/notes.md --
+local notes
+-- m/_ignored/u.txt --
+ignored underscore data
+-- m/frontend/node_modules/pkg/index.js --
+console.log("node");
+-- m/.references/plain.txt --
+plain reference
+-- m/.references/loose/data.txt --
+loose reference data
+-- m/.references/clone/go.mod --
+module example.com/cloneforeign
+
+go 1.27
+-- m/.references/clone/c.go --
+package clone
+-- m/foreign/go.mod --
+module example.com/foreign
+
+go 1.27
+-- m/foreign/f.go --
+package foreign
+-- m/testdata/nested/go.mod --
+module example.com/testdata-nested
+
+go 1.27
+-- m/testdata/nested/inner.go --
+package inner
