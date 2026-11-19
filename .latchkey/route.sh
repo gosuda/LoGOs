@@ -18,12 +18,16 @@ if grep -q '^\.latchkey/' <<< "$files"; then all=true; fi
 want() { [[ " ${LATCHKEY_INPUT_SUITES:-all} " == *" all "* || " ${LATCHKEY_INPUT_SUITES:-all} " == *" $1 "* ]]; }
 hit() { [ $all = true ] || grep -Eq "$1" <<< "$files"; }
 any=false
+# .latchkey/only (temporary): space-separated suites to run, to re-validate one suite cheaply
+only=; if [ -f .latchkey/only ]; then only=$(cat .latchkey/only); fi
+in_only() { [ -z "$only" ] || [[ " $only " == *" $1 "* ]]; }
 # flag NAME REGEX [push]: set on pull requests and dispatch; also on pushes when "push" is given.
 flag() {
   local v=false
   if [ "$ev" = workflow_dispatch ]; then if want "$1"; then v=true; fi
   elif [ "$ev" = pr_update ] || { [ "$ev" = branch_push ] && [ "${3:-}" = push ]; }; then if hit "$2"; then v=true; fi
   fi
+  if ! in_only "$1"; then v=false; fi
   if [ $v = true ]; then any=true; fi
   echo "$1=$v" >> "$LATCHKEY_CI_OUTPUT"
 }
@@ -32,6 +36,7 @@ core=false
 if [ "$ev" = workflow_dispatch ]; then if want core; then core=true; fi
 elif grep -Evq '^(AGENTS|CONTRIBUTING|README|SECURITY)\.md$' <<< "$files"; then core=true
 fi
+if ! in_only core; then core=false; fi
 if [ $core = true ]; then any=true; fi
 echo "core=$core" >> "$LATCHKEY_CI_OUTPUT"
 flag ssa '^src/cmd/compile/internal/(ssa/|ssagen/(simd[^/]*|intrinsics[^/]*|ssa)\.go$|(amd64|arm64)/ssa\.go$|typecheck/(_builtin/runtime|builtin)\.go$|logos/wasm[^/]*_test\.go$)|^src/simd/archsimd/|^src/runtime/(autovec|export_autovec_logos_test)|^src/cmd/go/(scriptconds_test\.go$|testdata/script/logos_(simd_|eject_simd_slice))|^src/cmd/go/internal/logos/config/targetcpu|^test/logos/(run/simd_zero_guard|.*autovec)'
@@ -46,6 +51,7 @@ if [ "$ev" = workflow_dispatch ] || [ $all = true ]; then
 elif [ "$ev" = pr_update ]; then
   gates=$(GITHUB_SHA=$LATCHKEY_CI_SHA bash .github/scripts/gate-changes.sh "$base" | tr '\n' ' ')
 fi
+if ! in_only gates; then gates=; fi
 if [ -n "$gates" ]; then any=true; fi
 echo "gates=${gates:--}" >> "$LATCHKEY_CI_OUTPUT"
 echo "gate_any=$([ -n "$gates" ] && echo true || echo false)" >> "$LATCHKEY_CI_OUTPUT"
