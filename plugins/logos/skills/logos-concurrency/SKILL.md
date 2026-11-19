@@ -51,7 +51,7 @@ Set up the example packages before running the commands: create one module with 
 
 ## Read conc::lock_order_inversion
 
-Two goroutines took the same two `Locked` values in opposite orders. Treat it as a deadlock that this run escaped by timing. One order everywhere gives no finding. Repair by taking the two values in one order everywhere, or by keeping both in one `Locked` value. Never edit a file under GOROOT to answer one.
+Two goroutines took the same two `Locked` values in opposite orders. Treat it as a deadlock this run may have escaped by timing: the same run can still end with the runtime deadlock error after printing the finding, and the exit status is then the child's. One order everywhere gives no finding. Repair by taking the two values in one order everywhere, or by keeping both in one `Locked` value. Never edit a file under GOROOT to answer one.
 
 ```lgo
 checking.WithLock(a => {
@@ -125,7 +125,7 @@ Expect exit 1 for the first two: each prints its finding. Expect exit 0 for the 
 
 Pass `-shake` with a decimal seed to yield at group and lock hook points from that seed. Rerun the printed seed to shake the run again. The seed fixes the yield counts, not the exact goroutine schedule. Treat a rerun as a retry, not an exact replay. Pass bare `-shake` to take the seed from the clock; the command prints the seed it used. A bare `-shake` followed by a number takes that number as its seed. Omit `-shake` to turn shaking off. A seed of 0 is a usage error, because seed 0 turns shaking off. A non-numeric seed is a usage error.
 
-Pin GOMAXPROCS=1 for the seeded runs: one thread keeps the spawn order.
+Pin GOMAXPROCS=1 for the seeded runs: one thread stops cross-processor stealing from hiding the order fault. It does not fix the schedule: the run queue still picks among the children that can run, and the seed mixes in goroutine IDs and hook counts.
 
 ```sh
 GOMAXPROCS=1 logos conc test -shake=1 -count=1 ./ord
