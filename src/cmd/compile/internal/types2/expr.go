@@ -1144,6 +1144,10 @@ func (check *Checker) exprInternal(T *target, x *operand, e syntax.Expr, hint Ty
 			check.error(e, InvalidSyntaxTree, "invalid use of AssertExpr")
 			goto Error
 		}
+		if check.conf.Logos && logosViewCyclic(x.typ()) {
+			check.errorf(x, InvalidAssert, invalidOp+"cannot use type assertion on recursive type %s", x)
+			goto Error
+		}
 		if isTypeParam(x.typ()) || logosViewedTypeParam(x.typ()) {
 			check.errorf(x, InvalidAssert, invalidOp+"cannot use type assertion on type parameter value %s", x)
 			goto Error

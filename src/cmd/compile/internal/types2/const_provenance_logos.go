@@ -156,10 +156,19 @@ func logosContainsReadonlyDescendants(T Type) bool {
 
 // logosViewBase unwraps const views, readonly descendants, and defined
 // types to the value type they qualify. It reports whether a const or
-// readonly view was seen on the way down.
-func logosViewBase(T Type) (Type, bool) {
-	qualified := false
+// readonly view was seen on the way down. A type that revisits itself,
+// as in `type loop const loop`, stops the walk and reports cyclic, so the
+// traversal always terminates; callers reject a cyclic operand.
+func logosViewBase(T Type) (base Type, qualified bool, cyclic bool) {
+	seen := make(map[Type]bool)
 	for {
+		if T == nil {
+			return nil, qualified, false
+		}
+		if seen[T] {
+			return T, qualified, true
+		}
+		seen[T] = true
 		if c := logosAsConstView(T); c != nil {
 			qualified = true
 			T = c.Elem
@@ -174,21 +183,28 @@ func logosViewBase(T Type) (Type, bool) {
 			T = n.Underlying()
 			continue
 		}
-		return T, qualified
+		return T, qualified, false
 	}
+}
+
+// logosViewCyclic reports whether T revisits itself through const or
+// readonly views, as in `type loop const loop`.
+func logosViewCyclic(T Type) bool {
+	_, _, cyclic := logosViewBase(T)
+	return cyclic
 }
 
 // logosViewedTypeParam reports whether T is a type parameter seen through
 // a const or readonly view, so a viewed type parameter keeps the
 // type-parameter diagnostic instead of a readonly or not-an-interface one.
 func logosViewedTypeParam(T Type) bool {
-	base, qualified := logosViewBase(T)
-	return qualified && isTypeParam(base)
+	base, qualified, cyclic := logosViewBase(T)
+	return !cyclic && qualified && isTypeParam(base)
 }
 
 func logosQualifiedInterface(T Type) bool {
-	base, qualified := logosViewBase(T)
-	return qualified && !isTypeParam(base) && IsInterface(base)
+	base, qualified, cyclic := logosViewBase(T)
+	return !cyclic && qualified && !isTypeParam(base) && IsInterface(base)
 }
 
 func logosAnyContainsReadonlyDescendants(V, T Type) bool {

@@ -49,7 +49,9 @@ func logosStmtSwitchContext(inner stmtContext) stmtContext {
 
 func (check *Checker) logosStmtSwitchOperand(x *operand) *operand {
 	if x.isValid() {
-		if logosContainsReadonlyDescendants(x.typ()) {
+		if check.conf.Logos && logosViewCyclic(x.typ()) {
+			check.error(x, InvalidTypeSwitch, "cannot use type switch on recursive type")
+		} else if logosContainsReadonlyDescendants(x.typ()) {
 			check.error(x, InvalidTypeSwitch, "cannot use type switch on value with readonly descendants")
 		} else if isTypeParam(x.typ()) || logosViewedTypeParam(x.typ()) {
 			check.errorf(x, InvalidTypeSwitch, "cannot use type switch on type parameter value %s", x)
