@@ -1,0 +1,125 @@
+//go:build goexperiment.jsonv2
+
+// run
+
+package main
+
+import (
+	"encoding/json"
+	"encoding/json/jsontext"
+	jsonv2 "encoding/json/v2"
+	"errors"
+	"fmt"
+	"os"
+	"strings"
+
+	"logos/rt"
+)
+
+type PresenceProfile struct {
+	Name string `json:"name"`
+	Age  int64 `json:"age"`
+}
+
+type PresenceUser struct {
+	Name    string           `json:"name"`
+	Profile *PresenceProfile `json:"profile"`
+}
+
+var failed bool
+
+func check(label string, ok bool, detail string) {
+	if ok {
+		fmt.Println("ok " + label)
+	} else {
+		fmt.Println("FAIL " + label + " " + detail)
+		failed = true
+	}
+}
+
+func strict(doc string, u *PresenceUser) error {
+	return jsonv2.Unmarshal([]byte(doc), u, jsonv2.RejectUnknownMembers(true))
+}
+
+func isMissingField(err error, typ, field string) bool {
+	var mf rt.MissingFieldError
+	return errors.As(err, &mf) && mf.Type == typ && mf.Field == field
+}
+func strictAllowDups(doc string, u *PresenceUser) error {
+	return jsonv2.Unmarshal([]byte(doc), u, jsonv2.RejectUnknownMembers(true), jsontext.AllowDuplicateNames(true))
+}
+
+func isDuplicateError(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "duplicate object member name")
+}
+func strictOffset(doc string) int64 {
+	u := &PresenceUser{Profile: &PresenceProfile{}}
+	err := strict(doc, u)
+	se := &jsonv2.SemanticError{}
+	if !errors.As(err, &se) {
+		return -1
+	}
+	if !strings.Contains(se.Error(), `unknown object member name "bogus"`) {
+		return -2
+	}
+	return se.ByteOffset
+}
+
+func main() {
+	u := &PresenceUser{Name: "ann", Profile: &PresenceProfile{Name: "Ann", Age: 30}}
+	alias := u.Profile
+	err := strict(`{"profile":{}}`, u)
+	check("strict-empty-no-error", err == nil, fmt.Sprint(err))
+	check("strict-empty-keeps-nested", u.Profile.Name == "Ann" && u.Profile.Age == 30, fmt.Sprintf("%+v", u.Profile))
+	check("strict-empty-keeps-alias", alias == u.Profile, "alias broken")
+
+	u2 := &PresenceUser{Name: "ann", Profile: &PresenceProfile{Name: "Ann", Age: 30}}
+	alias2 := u2.Profile
+	err = strict(`{"profile":{"age":31}}`, u2)
+	check("strict-update-no-error", err == nil, fmt.Sprint(err))
+	check("strict-update-value", u2.Profile.Age == 31 && u2.Profile.Name == "Ann", fmt.Sprintf("%+v", u2.Profile))
+	check("strict-update-alias", alias2 == u2.Profile && alias2.Age == 31, "alias missed the update")
+
+	u3 := &PresenceUser{Name: "ann", Profile: &PresenceProfile{Name: "Ann", Age: 30}}
+	err = json.Unmarshal([]byte(`{"profile":{"age":31}}`), u3)
+	check("fast-update-no-error", err == nil, fmt.Sprint(err))
+	check("fast-strict-agree", u3.Profile.Age == u2.Profile.Age && u3.Profile.Name == u2.Profile.Name, fmt.Sprintf("fast %+v strict %+v", u3.Profile, u2.Profile))
+
+	u4 := &PresenceUser{Name: "ann", Profile: &PresenceProfile{Name: "Ann", Age: 30}}
+	err = strict(`{"name":"ann"}`, u4)
+	check("strict-missing", isMissingField(err, "PresenceUser", "Profile"), fmt.Sprint(err))
+	u5 := &PresenceUser{Name: "ann", Profile: &PresenceProfile{Name: "Ann", Age: 30}}
+	err = json.Unmarshal([]byte(`{"name":"ann"}`), u5)
+	check("fast-missing", isMissingField(err, "PresenceUser", "Profile"), fmt.Sprint(err))
+
+	u6 := &PresenceUser{Name: "ann", Profile: &PresenceProfile{Name: "Ann", Age: 30}}
+	err = strict(`{"profile":null}`, u6)
+	check("strict-null-missing", isMissingField(err, "PresenceUser", "Profile"), fmt.Sprint(err))
+
+	u7 := &PresenceUser{Name: "ann", Profile: &PresenceProfile{Name: "Ann", Age: 30}}
+	err = strict(`{"profile":null,"profile":{"age":31}}`, u7)
+	check("strict-duplicate-rejected", isDuplicateError(err), fmt.Sprint(err))
+
+	u8 := &PresenceUser{Name: "ann", Profile: &PresenceProfile{Name: "Ann", Age: 30}}
+	err = strict(`{"profile":{"age":31},"profile":null}`, u8)
+	check("strict-duplicate-rejected-null-last", isDuplicateError(err), fmt.Sprint(err))
+
+	u9 := &PresenceUser{Name: "ann", Profile: &PresenceProfile{Name: "Ann", Age: 30}}
+	alias9 := u9.Profile
+	err = strictAllowDups(`{"profile":null,"profile":{"age":31}}`, u9)
+	check("strict-allowdups-no-error", err == nil, fmt.Sprint(err))
+	check("strict-allowdups-value", u9.Profile.Age == 31 && u9.Profile.Name == "Ann", fmt.Sprintf("%+v", u9.Profile))
+	check("strict-allowdups-alias", alias9 == u9.Profile && alias9.Age == 31, "alias missed the update")
+
+	u10 := &PresenceUser{Name: "ann", Profile: &PresenceProfile{Name: "Ann", Age: 30}}
+	err = strictAllowDups(`{"profile":{"age":31},"profile":null}`, u10)
+	check("strict-allowdups-null-last-missing", isMissingField(err, "PresenceUser", "Profile"), fmt.Sprint(err))
+
+	o1 := strictOffset(`{"profile":{},"bogus":1}`)
+	o2 := strictOffset(`   {"profile":{},"bogus":1}`)
+	check("strict-offset-absolute", o1 >= 0 && o2-o1 == 3, fmt.Sprintf("%d %d", o1, o2))
+
+	if failed {
+		os.Exit(1)
+	}
+}
