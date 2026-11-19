@@ -18,7 +18,7 @@ if grep -q '^\.latchkey/' <<< "$files"; then all=true; fi
 want() { [[ " ${LATCHKEY_INPUT_SUITES:-all} " == *" all "* || " ${LATCHKEY_INPUT_SUITES:-all} " == *" $1 "* ]]; }
 hit() { [ $all = true ] || grep -Eq "$1" <<< "$files"; }
 any=false
-# .latchkey/only (temporary): space-separated suites to run, to re-validate one suite cheaply
+# Optional .latchkey/only: space-separated suites to run, to re-validate one suite cheaply (delete it when done)
 only=; if [ -f .latchkey/only ]; then only=$(cat .latchkey/only); fi
 in_only() { [ -z "$only" ] || [[ " $only " == *" $1 "* ]]; }
 # flag NAME REGEX [push]: set on pull requests and dispatch; also on pushes when "push" is given.
