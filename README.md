@@ -125,8 +125,8 @@ Module rules:
 `logos eject` writes every `.lgo` file as a `.go` file, copies LoGOs dependency modules under `_logos_deps`, and places the shared support module under `_logos_deps/rt` as `github.com/gosuda/loGos/rt`. The output builds with upstream Go 1.27.4 or newer.
 
 ```sh
-logos eject -o /tmp/logos-hello-go
-cd /tmp/logos-hello-go
+logos eject -o /tmp/logos-hello-go &&
+cd /tmp/logos-hello-go &&
 env -u GOROOT -u GOTOOLCHAIN "$upstream_go" run .
 ```
 
