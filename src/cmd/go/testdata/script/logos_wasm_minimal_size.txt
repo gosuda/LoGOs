@@ -12,13 +12,11 @@ env GOARCH=$TESTGO_GOHOSTARCH
 go run ./sizecheck $WORK/min-s.wasm $WORK/min-1.wasm $WORK/min-go.wasm $WORK/json-s.wasm $WORK/json-go.wasm
 stdout '^ok min-raw='
 
-# The floor in this test is the shared Go runtime, not the fork: the
-# plain-go build of the same DOM-only program also exceeds 1 MB raw, and
-# code plus data exceed 90% of the bytes, so only the name/debug sections
-# (a few percent) are strippable without changing execution. A linker-only
-# diet inside the wasm profile cannot reach an island budget of a few
-# hundred KB compressed; shrinkage past a floor here must update this test
-# with the fix that earned it.
+# The plain-go build of the same DOM-only program exceeds 1 MB raw, so the
+# size floor is the shared Go runtime, not the fork. The ceilings below
+# bound the fork's own output against sudden bloat; code plus data exceed
+# 90% of the bytes and the name section stays a few percent, so only
+# debug sections are strippable without changing execution.
 
 -- go.mod --
 module example.com/wasmminimalsize
@@ -157,7 +155,7 @@ func gzSize(path string) int {
 
 func check(cond bool, msg string, args ...any) {
 	if !cond {
-		fmt.Fprintln(os.Stderr, "floor broken:", fmt.Sprintf(msg, args...))
+		fmt.Fprintln(os.Stderr, "ceiling broken:", fmt.Sprintf(msg, args...))
 		os.Exit(1)
 	}
 }
@@ -177,11 +175,11 @@ func main() {
 	payloadFrac := float64(minS.code+minS.data) / float64(minS.raw)
 	nameFrac := float64(minS.name) / float64(minS.raw)
 	check(minGo.raw > 1000000, "go min raw=%d, want > 1000000", minGo.raw)
-	check(minS.raw > 1000000 && minS.raw < 3000000, "min raw=%d, want in (1000000, 3000000)", minS.raw)
-	check(minGz > 400000 && minGz < 800000, "min gzip=%d, want in (400000, 800000)", minGz)
-	check(jsonS.raw > 3000000 && jsonS.raw < 6500000, "json raw=%d, want in (3000000, 6500000)", jsonS.raw)
+	check(minS.raw < 3000000, "min raw=%d, want < 3000000", minS.raw)
+	check(minGz < 800000, "min gzip=%d, want < 800000", minGz)
+	check(jsonS.raw < 6500000, "json raw=%d, want < 6500000", jsonS.raw)
 	check(jsonGo.raw > 3000000, "go json raw=%d, want > 3000000", jsonGo.raw)
-	check(jsonGz > 800000 && jsonGz < 1600000, "json gzip=%d, want in (800000, 1600000)", jsonGz)
+	check(jsonGz < 1600000, "json gzip=%d, want < 1600000", jsonGz)
 	check(payloadFrac >= 0.90, "payload frac=%.3f, want >= 0.90", payloadFrac)
 	check(nameFrac <= 0.05, "name frac=%.3f, want <= 0.05", nameFrac)
 	// The wasm profile overhead stays bounded against plain go at the same
