@@ -1,9 +1,10 @@
 env GOPROXY=off
 env GOTOOLCHAIN=local
 
-# A yield statement and a discarded return value keep their whole operands
-# when the first one opens with a slice expression, when an operand is
-# parenthesised, and when the statement ends in a line or a block comment.
+# A yield statement keeps its whole operand when the first one opens with
+# a slice expression, when an operand is parenthesised, and when the
+# statement ends in a line or a block comment. A bare return ends the
+# sequence.
 # The module runs natively, ejects, and the ejected module builds and runs
 # with go and with go1.27.2 from $UPROOT1272 and prints the same output.
 cd m
@@ -55,7 +56,7 @@ func Pairs(xs []int) iter.Seq2[int, int] {
 func Returned(xs []int) iter.Seq[int] {
 	yield xs[0]
 	if len(xs) > 1 {
-		return slices.Values(xs[1:][:1]) // the value is discarded
+		return // ends the sequence
 	}
 }
 
