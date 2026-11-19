@@ -1230,14 +1230,75 @@ func (p *logosEFPass) exprStmt(s *syntax.ExprStmt, st *logosEFState) *logosEFSta
 	if !ok {
 		return st
 	}
-	name, ok := syntax.Unparen(call.Fun).(*syntax.Name)
-	if !ok {
+	if fun, ok := syntax.Unparen(call.Fun).(*syntax.Name); ok {
+		if b, ok := p.check.Uses[fun].(*Builtin); ok && b.Name() == "panic" {
+			return nil
+		}
 		return st
 	}
-	if b, ok := p.check.Uses[name].(*Builtin); ok && b.Name() == "panic" {
+	if fn := p.staticFunc(call.Fun); fn != nil && logosNeverReturns(fn) {
 		return nil
 	}
 	return st
+}
+
+// logosNeverReturns reports whether a call to fn cannot return to its
+// caller, from facts the type checker already knows: the listed
+// standard-library calls, each of which ends the process, panics, or
+// ends the test goroutine through runtime.Goexit. A user-declared
+// function is never inferred as never returning, even when it always
+// exits, and a same-named method declared outside its listed package
+// never counts.
+func logosNeverReturns(fn *Func) bool {
+	fn = fn.Origin()
+	pkg := fn.Pkg()
+	if pkg == nil {
+		return false
+	}
+	sig, _ := fn.Type().(*Signature)
+	if sig == nil {
+		return false
+	}
+	switch pkg.Path() {
+	case "os":
+		return sig.Recv() == nil && fn.Name() == "Exit"
+	case "runtime":
+		return sig.Recv() == nil && fn.Name() == "Goexit"
+	case "log":
+		if sig.Recv() != nil {
+			return false
+		}
+		switch fn.Name() {
+		case "Fatal", "Fatalf", "Fatalln", "Panic", "Panicf", "Panicln":
+			return true
+		}
+		return false
+	case "testing":
+		switch fn.Name() {
+		case "Fatal", "Fatalf", "FailNow", "Skip", "Skipf", "SkipNow":
+		default:
+			return false
+		}
+		if sig.Recv() == nil {
+			return true
+		}
+		base, _ := deref(sig.Recv().Type())
+		if named, ok := base.(*Named); ok {
+			obj := named.Obj()
+			// Any receiver type declared in package testing: the Fatal,
+			// FailNow and Skip families are declared on the unexported
+			// *common and reach *T, *B, and *F by promotion. A same-named
+			// method from any other package is rejected by this check.
+			return obj != nil && obj.Pkg() != nil && obj.Pkg().Path() == "testing"
+		}
+		// testing.TB declares the same names as interface methods, so the
+		// receiver is the interface literal and there is no named type to
+		// check. The method itself is declared in package testing (checked
+		// above), which only testing.TB satisfies for these names.
+		_, ok := base.(*Interface)
+		return ok
+	}
+	return false
 }
 
 func (p *logosEFPass) decls(s *syntax.DeclStmt, st *logosEFState) *logosEFState {
