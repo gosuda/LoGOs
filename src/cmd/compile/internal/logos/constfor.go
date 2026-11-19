@@ -1438,7 +1438,7 @@ func (c *cfLeaf) visit(n syntax.Node) bool {
 		for _, cc := range n.Cases {
 			syntax.Inspect(cc.Type, c.visit)
 		}
-		if sel, known := c.fl.cfLiveConstSwitch(n, c.active, c.run); known {
+		if sel, known := c.cfLiveConstSwitch(n); known {
 			if sel == nil {
 				return false
 			}
@@ -1551,32 +1551,35 @@ func (c *cfLeaf) switchCaseType(cs *syntax.ConstSwitchCase, s *syntax.ConstSwitc
 		}
 		return tv.Type, true
 	}
-	// A bare name can resolve to a type declared inside the function
-	// body the record walk cannot see. An alias stands for its target;
-	// a local named type comes back as the checked TypeName's type so
-	// an exact case can match a field of that same declaration.
 	if n, ok := syntax.Unparen(cs.Type).(*syntax.Name); ok {
-		if d := cfLocalTypeDeclBefore(c.declRoot, s, n.Value, c.declParents); d != nil {
-			under, ok := c.fl.cfResolveTypeExpr(d.Type, c.active, c.run.sites)
-			if !ok {
+		if typ, handled := c.cfLocalType(n.Value, s); handled {
+			if typ == nil {
 				return nil, false
 			}
-			if d.Alias {
-				return under, true
-			}
-			// The decl carries the checker-created TypeName when the body
-			// was checked natively: returning it keeps local named types
-			// identical to the field type they may match. Without it the
-			// decl comes from a record parse and the named type is fresh.
-			if obj := c.fl.pkg.info.Defs[d.Name]; obj != nil {
-				if tn, ok := obj.(*types2.TypeName); ok {
-					return tn.Type(), true
-				}
-			}
-			return types2.NewNamed(types2.NewTypeName(d.Pos(), nil, n.Value, nil), under.Underlying(), nil), true
+			return typ, true
 		}
 	}
 	return c.fl.cfResolveTypeExpr(cs.Type, c.active, c.run.sites)
+}
+
+func (c *cfLeaf) cfLocalType(name string, ref syntax.Node) (types2.Type, bool) {
+	d := cfLocalTypeDeclBefore(c.declRoot, ref, name, c.declParents)
+	if d == nil {
+		return nil, false
+	}
+	under, ok := c.fl.cfResolveTypeExpr(d.Type, c.active, c.run.sites)
+	if !ok {
+		return nil, true
+	}
+	if d.Alias {
+		return under, true
+	}
+	if obj := c.fl.pkg.info.Defs[d.Name]; obj != nil {
+		if tn, ok := obj.(*types2.TypeName); ok {
+			return tn.Type(), true
+		}
+	}
+	return types2.NewNamed(types2.NewTypeName(d.Pos(), nil, name, nil), under.Underlying(), nil), true
 }
 
 // infoPkgName reports whether a case qualifier name is a package name
@@ -1712,7 +1715,7 @@ func (c *cfLeaf) subComptimeError(n *syntax.CallExpr, sites *cfSites) bool {
 	if insideAny(span{start: s, end: e}, c.covered) {
 		return false
 	}
-	msg, ok := c.fl.cfComptimeErrorMsg(n.ArgList[0], c.run.sites, c.parents)
+	msg, ok := c.fl.cfComptimeErrorMsg(n.ArgList[0], c.run.sites, c)
 	if !ok {
 		c.fl.cfError(c.run.sites.at(n.ArgList[0].Pos()), "[comptime::error_not_constant] comptime.Error needs a constant message")
 	} else {
@@ -1725,21 +1728,14 @@ func (c *cfLeaf) subComptimeError(n *syntax.CallExpr, sites *cfSites) bool {
 // cfComptimeErrorMsg evaluates the comptime.Error message argument: a
 // recorded constant string, or a constant string expression when the
 // check left no record (copies re-check without one).
-func (fl *fileLower) cfComptimeErrorMsg(e syntax.Expr, sites *cfSites, parents map[syntax.Node]syntax.Node) (string, bool) {
+func (fl *fileLower) cfComptimeErrorMsg(e syntax.Expr, sites *cfSites, leaf *cfLeaf) (string, bool) {
 	if tv, ok := fl.pkg.info.Types[e]; ok && tv.Value != nil && tv.Value.Kind() == constant.String {
 		return constant.StringVal(tv.Value), true
 	}
-	return fl.cfStaticString(e, sites, parents)
+	return fl.cfStaticString(e, sites, leaf, e, make(map[string]bool))
 }
 
-// cfStaticString folds a constant string expression without a type
-// record: a string literal, a parenthesized constant, the concatenation
-// of two constants, or a name bound by a string constant declaration.
-func (fl *fileLower) cfStaticString(e syntax.Expr, sites *cfSites, parents map[syntax.Node]syntax.Node) (string, bool) {
-	return fl.cfStaticStringSeen(e, sites, parents, make(map[string]bool))
-}
-
-func (fl *fileLower) cfStaticStringSeen(e syntax.Expr, sites *cfSites, parents map[syntax.Node]syntax.Node, seen map[string]bool) (string, bool) {
+func (fl *fileLower) cfStaticString(e syntax.Expr, sites *cfSites, leaf *cfLeaf, ref syntax.Node, seen map[string]bool) (string, bool) {
 	switch e := syntax.Unparen(e).(type) {
 	case *syntax.BasicLit:
 		if e.Kind != syntax.StringLit {
@@ -1754,106 +1750,125 @@ func (fl *fileLower) cfStaticStringSeen(e syntax.Expr, sites *cfSites, parents m
 		if e.Op != syntax.Add || e.Y == nil {
 			return "", false
 		}
-		x, ok := fl.cfStaticStringSeen(e.X, sites, parents, seen)
+		x, ok := fl.cfStaticString(e.X, sites, leaf, ref, seen)
 		if !ok {
 			return "", false
 		}
-		y, ok := fl.cfStaticStringSeen(e.Y, sites, parents, seen)
+		y, ok := fl.cfStaticString(e.Y, sites, leaf, ref, seen)
 		if !ok {
 			return "", false
 		}
 		return x + y, true
 	case *syntax.Name:
-		if seen[e.Value] {
+		if init, ok := cfLocalConstInitBefore(leaf.declRoot, ref, e.Value, leaf.declParents); ok {
+			if seen[e.Value] {
+				return "", false
+			}
+			seen[e.Value] = true
+			defer delete(seen, e.Value)
+			return fl.cfStaticString(init, sites, leaf, ref, seen)
+		}
+		if cfHasLocalBinder(leaf.declRoot, ref, e.Value, leaf.declParents) {
 			return "", false
 		}
-		seen[e.Value] = true
+		if tv, ok := fl.pkg.info.Types[e]; ok && tv.Value == nil {
+			return "", false
+		}
 		if sites != nil && sites.scope != nil {
 			if obj, ok := sites.scope.Lookup(e.Value).(*types2.Const); ok && obj.Val() != nil && obj.Val().Kind() == constant.String {
 				return constant.StringVal(obj.Val()), true
 			}
 		}
-		init, ok := cfConstInit(e.Value, parents)
-		if !ok {
-			return "", false
-		}
-		return fl.cfStaticStringSeen(init, sites, parents, seen)
+		return "", false
 	}
 	return "", false
 }
 
-// cfConstInit finds the initializer of a constant declaration visible
-// from the copied tree: the declaration may sit in the copy itself,
-// where the check left no record for the re-parsed nodes.
-func cfConstInit(name string, parents map[syntax.Node]syntax.Node) (syntax.Expr, bool) {
-	var start syntax.Node
-	for n := range parents {
-		start = n
-		break
-	}
-	if start == nil {
-		return nil, false
-	}
-	root := start
-	for p := parents[root]; p != nil; p = parents[p] {
-		root = p
-	}
-	var found syntax.Expr
-	syntax.Inspect(root, func(n syntax.Node) bool {
-		d, ok := n.(*syntax.ConstDecl)
-		if !ok || d.Values == nil || found != nil {
-			return true
-		}
-		vals := syntax.UnpackListExpr(d.Values)
-		for i, q := range d.NameList {
-			if q.Value != name {
-				continue
+func cfLocalConstInitBefore(declRoot syntax.Node, ref syntax.Node, name string, parents map[syntax.Node]syntax.Node) (syntax.Expr, bool) {
+	prev := ref
+	for p := parents[prev]; p != nil; prev, p = p, parents[p] {
+		if list := cfListOf(p); list != nil {
+			idx := -1
+			for j, s := range *list {
+				if syntax.Node(s) == prev {
+					idx = j
+					break
+				}
 			}
-			if i < len(vals) {
-				found = vals[i]
-			} else {
-				found = vals[len(vals)-1]
+			if idx < 0 {
+				return nil, false
+			}
+			for _, s := range (*list)[:idx] {
+				ds, ok := s.(*syntax.DeclStmt)
+				if !ok {
+					continue
+				}
+				for _, dd := range ds.DeclList {
+					d, ok := dd.(*syntax.ConstDecl)
+					if !ok || d.Values == nil {
+						continue
+					}
+					vals := syntax.UnpackListExpr(d.Values)
+					for i, q := range d.NameList {
+						if q.Value != name {
+							continue
+						}
+						if i < len(vals) {
+							return vals[i], true
+						}
+						return vals[len(vals)-1], true
+					}
+				}
 			}
 		}
-		return true
-	})
-	if found == nil {
-		return nil, false
+		if p == declRoot {
+			return nil, false
+		}
 	}
-	return found, true
+	return nil, false
 }
 
-// cfLiveConstSwitch selects the const switch case the leaf walk keeps
-// for one expansion: the first case matching the resolved tag type,
-// mirroring types2 logosDeadCopyCase. It reports false when the tag or
-// some case type does not resolve, so the walk keeps every case instead
-// of dropping live code.
-func (fl *fileLower) cfLiveConstSwitch(s *syntax.ConstSwitchStmt, active cfChain, run *cfRun) (*syntax.ConstSwitchCase, bool) {
-	// An f.Type tag belongs to pruneConstSwitch above, which resolves
-	// outer field bindings through the whole-function parent map and
-	// replaces the switch outright: this selector must not prune on a
-	// resolution made without those bindings. The copy's own lowering
-	// folds such switches once rechecked.
+func cfHasLocalBinder(declRoot syntax.Node, ref syntax.Node, name string, parents map[syntax.Node]syntax.Node) bool {
+	body, ok := declRoot.(*syntax.BlockStmt)
+	if !ok {
+		return false
+	}
+	return cfHasBinderBefore(body, ref, name, parents)
+}
+
+func (c *cfLeaf) cfLiveConstSwitch(s *syntax.ConstSwitchStmt) (*syntax.ConstSwitchCase, bool) {
 	if sel, ok := syntax.Unparen(s.Targ).(*syntax.SelectorExpr); ok && sel.Sel.Value == "Type" {
 		return nil, false
 	}
-	tag, ok := fl.cfResolveTypeExpr(s.Targ, active, run.sites)
+	tag, ok := c.cfLiveTagType(s)
 	if !ok || tag == nil || cfHasTypeParam(tag) {
 		return nil, false
 	}
 	if _, ok := tag.(*types2.TypeParam); ok {
 		return nil, false
 	}
-	for _, c := range s.Cases {
-		typ, ok := fl.cfResolveTypeExpr(c.Type, active, run.sites)
+	for _, cc := range s.Cases {
+		typ, ok := c.switchCaseType(cc, s)
 		if !ok || typ == nil || cfHasTypeParam(typ) {
 			return nil, false
 		}
-		if cfConstSwitchMatches(tag, typ, c) {
-			return c, true
+		if cfConstSwitchMatches(tag, typ, cc) {
+			return cc, true
 		}
 	}
 	return nil, true
+}
+
+func (c *cfLeaf) cfLiveTagType(s *syntax.ConstSwitchStmt) (types2.Type, bool) {
+	if n, ok := syntax.Unparen(s.Targ).(*syntax.Name); ok {
+		if typ, handled := c.cfLocalType(n.Value, s); handled {
+			if typ == nil {
+				return nil, false
+			}
+			return typ, true
+		}
+	}
+	return c.fl.cfResolveTypeExpr(s.Targ, c.active, c.run.sites)
 }
 
 // cfConstSwitchMatches mirrors types2 logosConstMatches for the leaf

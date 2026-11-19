@@ -1,0 +1,36 @@
+// run
+package main
+
+import (
+	"comptime"
+	"fmt"
+)
+
+type Case = int
+
+func ShadowCase[T any]() string {
+	type Case = string
+	const switch T {
+	case Case:
+		_ = comptime.SizeOf[int]()
+		return "case"
+	}
+	return "other"
+}
+
+type Tag = int
+
+func ShadowTag[T any]() string {
+	type Tag = string
+	const switch Tag {
+	case string:
+		_ = comptime.SizeOf[int]()
+		return "tag"
+	}
+	return "other"
+}
+
+func main() {
+	fmt.Println(ShadowCase[string]())
+	fmt.Println(ShadowTag[int]())
+}

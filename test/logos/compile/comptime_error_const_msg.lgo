@@ -19,3 +19,24 @@ func FailConcat[T any]() int {
 }
 
 var _ = FailConcat[int]() // ERROR "concat message"
+
+const SharedPrefix = "bad: "
+
+func FailShared[T any]() int {
+	const A = SharedPrefix + "a"
+	const B = SharedPrefix + "b"
+	comptime.Error(A + B)
+	return 0
+}
+
+var _ = FailShared[int]() // ERROR "bad: abad: b"
+
+const ShadowedMsg = "pkg"
+
+func FailShadowed[T any]() int {
+	const ShadowedMsg = "local"
+	comptime.Error(ShadowedMsg)
+	return 0
+}
+
+var _ = FailShadowed[int]() // ERROR "local"
