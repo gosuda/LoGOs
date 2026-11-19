@@ -115,10 +115,7 @@ func logosConfigRoot(ld *modload.Loader) string {
 }
 
 func checkLogosCgo(ld *modload.Loader, p *Package) {
-	if !cfg.Logos || p.Internal.TestmainGo != nil {
-		return
-	}
-	if p.Standard && logosStandardRaceRuntime(p) {
+	if !cfg.Logos || p.Internal.TestmainGo != nil || p.Standard {
 		return
 	}
 	root := ""
@@ -127,10 +124,8 @@ func checkLogosCgo(ld *modload.Loader, p *Package) {
 		// package, which has no module metadata. Enforce the main-module
 		// policy for it all the same: under the race-runtime exception the
 		// build context admits C files, and skipping the check would let
-		// `logos run -race main.lgo` compile forbidden C. Standard-library
-		// packages carry no module metadata either and take the same root,
-		// so the ban holds for them too.
-		if !p.Internal.CmdlineFiles && !p.Standard {
+		// `logos run -race main.lgo` compile forbidden C.
+		if !p.Internal.CmdlineFiles {
 			return
 		}
 		root = logosConfigRoot(ld)
@@ -153,25 +148,6 @@ func checkLogosCgo(ld *modload.Loader, p *Package) {
 		return
 	}
 	logosDenyCgo(p, msg)
-}
-
-// logosStandardRaceRuntime reports whether a standard-library package is
-// exempt from the cgo ban. The race runtime links through runtime/cgo (and
-// runtime/race) in a raced build, and net keeps its cgo resolver when the
-// caller explicitly selected netcgo. Every other standard package with C
-// sources, including plugin and the cgo paths of os/user, falls through to
-// the same deny as any other package.
-func logosStandardRaceRuntime(p *Package) bool {
-	if !cfg.BuildRace {
-		return false
-	}
-	switch p.ImportPath {
-	case "runtime/cgo", "runtime/race":
-		return true
-	case "net":
-		return slices.Contains(cfg.BuildContext.BuildTags, "netcgo")
-	}
-	return false
 }
 
 func logosCgoHidden(p *Package) bool {

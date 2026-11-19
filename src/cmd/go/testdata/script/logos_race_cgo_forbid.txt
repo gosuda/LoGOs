@@ -72,6 +72,14 @@ env CGO_ENABLED=0
 stderr 'CGO_ENABLED=0'
 ! stderr 'enable cgo by setting CGO_ENABLED=1'
 env CGO_ENABLED=
+# Restricted pin: an allowlisted cgo package builds (its implicit
+# runtime/cgo edge is standard-library and exempt) while a non-listed package
+# is still refused.
+cd ../resrace
+[cgo] logos build -o ok.bin ./ok
+[cgo] ! logos build -o bad.bin ./bad
+[cgo] stderr 'not in cgo_allowlist'
+cd ../nokey
 
 # With no C compiler and no zig the message names the need and the policy.
 env PATH=$WORK/no-compiler
@@ -235,3 +243,37 @@ func TestCount(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+-- resrace/go.mod --
+module example.com/resrace
+
+go 1.27
+
+-- resrace/logos.toml --
+[build]
+cgo = "restricted"
+cgo_allowlist = ["example.com/resrace/ok/**"]
+
+-- resrace/ok/ok.lgo --
+package main
+
+/*
+int answer(void) { return 42; }
+*/
+import "C"
+
+import "fmt"
+
+func main() { fmt.Println("ok:", C.answer()) }
+
+-- resrace/bad/bad.lgo --
+package main
+
+/*
+int answer(void) { return 42; }
+*/
+import "C"
+
+import "fmt"
+
+func main() { fmt.Println("bad:", C.answer()) }

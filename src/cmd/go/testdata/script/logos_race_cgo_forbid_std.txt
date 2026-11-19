@@ -10,11 +10,10 @@ env CGO_ENABLED=
 
 cd forbid
 
-# A standard-library cgo package is refused under the ban in a raced build.
-! logos build -race .
-stderr '\[restriction::cgo_usage\] cgo is disabled'
-! logos run -race main.lgo
-stderr '\[restriction::cgo_usage\] cgo is disabled'
+# A standard-library cgo package is exempt from the ban, even in a raced
+# build: the policy applies to LoGOs main modules only, so plugin links.
+logos build -race .
+logos run -race main.lgo
 
 # Without -race no C sources enter the build, so the stubs link normally.
 logos build .
