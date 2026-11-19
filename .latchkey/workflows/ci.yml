@@ -67,58 +67,16 @@ jobs:
           into: ~
       - run: bash .latchkey/setup.sh restore py
       - name: Unit tests
-        run: |
-          . .latchkey/env.sh; cd src
-          t=../.github/scripts/logos-test-env.sh
-          read -r -a packages <<< "$LOGOS_PACKAGES"
-          $t go test -count=1 -short "${packages[@]}"
-          $t go test -count=1 -short cmd/compile/internal/ssa
-          $t go test -count=1 cmd/compile/internal/test -run '^TestLogosScalarOptimizationRuntime$'
-          for mode in 0 1; do
-            GOARCH=386 CGO_ENABLED=0 $t go test -count=1 -gcflags="cmd/compile/internal/test/testdata/scalaropt=-d=logosopt=$mode,ssa/check/on" cmd/compile/internal/test/testdata/scalaropt
-          done
-          $t go test -count=1 -race logos/... cmd/go/internal/logos/lsp/...
-          $t go test -count=1 -short runtime/metrics
-          GOEXPERIMENT=logosarena $t go test -count=1 -short -race runtime -run '^TestLogos(Arena|Region|GCScan)'
-          GOEXPERIMENT=logosarena,nogreenteagc $t go test -count=1 -short runtime -run '^TestLogos(Arena|Region|GCScan)'
+        run: bash .latchkey/unit-tests.sh
       - name: Compiler fixtures
         if: always()
-        run: |
-          . .latchkey/env.sh; cd src
-          ../.github/scripts/logos-test-env.sh go test -count=1 -timeout 60m cmd/internal/testdir -run 'Test/logos/'
-          ../.github/scripts/logos-test-env.sh go test -count=1 cmd/internal/testdir -run '^Test$/logos/codegen/scalar_' -all_codegen
+        run: bash .latchkey/unit-fixtures.sh
       - name: Lint (gofmt, vet, golangci-lint)
         if: always()
-        run: |
-          . .latchkey/env.sh; cd src
-          read -r -a packages <<< "$LOGOS_PACKAGES"
-          fail=0
-          unformatted=$(gofmt -l logos internal/logosfile cmd/go/internal/logos cmd/compile/internal/logos cmd/internal/logos cmd/internal/logosowned cmd/cgo/internal/testlogos)
-          printf '%s\n' "$unformatted"; [ -z "$unformatted" ] || fail=1
-          go vet "${packages[@]}" || fail=1
-          archive="golangci-lint-${GOLANGCI_LINT_VERSION}-linux-amd64"
-          curl --fail --silent --show-error --location --output "$RUNNER_TEMP/$archive.tar.gz" "https://github.com/golangci/golangci-lint/releases/download/v${GOLANGCI_LINT_VERSION}/$archive.tar.gz"
-          printf '%s  %s\n' "$GOLANGCI_LINT_SHA256" "$RUNNER_TEMP/$archive.tar.gz" | sha256sum --check --strict -
-          tar -xzf "$RUNNER_TEMP/$archive.tar.gz" -C "$RUNNER_TEMP"
-          (cd cmd && "$RUNNER_TEMP/$archive/golangci-lint" run --config ../../logos-doc/golangci.yml ./go/internal/logos/...) || fail=1
-          exit $fail
+        run: bash .latchkey/unit-lint.sh
       - name: Evidence checkers and controls (wasm, tagged facts/methods, field offsets, simd imports, zero arrays)
         if: always()
-        run: |
-          . .latchkey/env.sh
-          v=logos-doc/validation e=$RUNNER_TEMP/logos-regression-evidence
-          py() { uv run --no-project --no-config --python 3.12 --no-python-downloads python "$@"; }
-          fail=0
-          bash .github/scripts/verify-evidence-checkers.sh || fail=1
-          py $v/upstream-host/check_wasm.py --repo "$PWD" --evidence $e/wasm || fail=1
-          py $v/tagged-package-facts/check_ci.py verify --root "$PWD" --out $e/tagged-package --expected-head "$(git rev-parse HEAD)" || fail=1
-          py $v/tagged-package-facts/check_ci.py run --root "$PWD" --out $e/tagged-package --expected-head "$(git rev-parse HEAD)" || fail=1
-          py $v/tagged-method-facts/check_ci.py --repo "$PWD" --evidence $e/tagged-method || fail=1
-          py $v/field-offset-lint/field_offset_ci.py --repo "$PWD" --evidence $e/field-offset || fail=1
-          py $v/simd-transitive-imports/simd_imports_ci.py --repo "$PWD" --evidence $e/simd-imports || fail=1
-          py $v/zero-array-reference-free/zero_array_ci.py --repo "$PWD" --evidence $e/zero-array || fail=1
-          exit $fail
-
+        run: bash .latchkey/unit-evidence.sh
   scripts:
     needs: [route, build]
     if: needs.route.outputs.regression == 'true'
@@ -131,21 +89,10 @@ jobs:
           into: ~
       - run: bash .latchkey/setup.sh restore oracles c23
       - name: Full upstream and LoGOs regression (run.bash; includes every cmd/go script test)
-        run: |
-          . .latchkey/env.sh; cd src
-          go test -count=1 -short -timeout=5m cmd/internal/goparity -run '^TestRedteamLedgerRows$'
-          go test -count=1 -timeout=10m cmd/go -run '^TestScript$/^logos_cgo_shared$'
-          GO_TEST_TIMEOUT_SCALE=8 ./run.bash --no-rebuild
+        run: bash .latchkey/scripts-regression.sh
       - name: Installed test subprocess behavior and inline capability ownership
         if: always()
-        run: |
-          . .latchkey/env.sh; cd src
-          fail=0
-          sha256sum ../bin/go ../bin/logos ../pkg/tool/linux_amd64/compile ../pkg/tool/linux_amd64/link
-          ../.github/scripts/logos-test-env.sh go test -count=1 -race -parallel=1 -timeout 20m cmd/go -run 'Script/^logos_(cap_xtest_owner|test_experiment_env|test_plugin_experiment|test_cache_experiment)$' || fail=1
-          cd ..; GITHUB_ACTIONS=true bash logos-doc/validation/capability-inline-context/check_ci.sh "$RUNNER_TEMP/logos-regression-evidence/cap-inline" || fail=1
-          exit $fail
-
+        run: bash .latchkey/scripts-subprocess.sh
   upstream:
     needs: [route, build]
     if: needs.route.outputs.core == 'true'
@@ -158,23 +105,7 @@ jobs:
           into: ~
       - run: bash .latchkey/setup.sh restore oracles py c23
       - name: Complete upstream complement under the compact test environment
-        run: |
-          . .latchkey/env.sh; cd src
-          go test -count=1 -short -timeout=5m cmd/internal/goparity -run '^TestRedteamLedgerRows$'
-          go test -count=1 -timeout=10m cmd/go -run '^TestScript$/^logos_cgo_shared$'
-          evidence="$RUNNER_TEMP/logos-regression-evidence/upstream"; mkdir "$evidence"
-          bash ../.github/scripts/logos-upstream-identity.sh before "$GITHUB_WORKSPACE" "$evidence"
-          ../.github/scripts/logos-test-env.sh ./run.bash --no-rebuild -list > "$evidence/all-tests.txt"
-          uv run --no-project --no-config --python 3.12 --no-python-downloads python ../logos-doc/validation/upstream-host/partition_dist.py --inventory "$evidence/all-tests.txt" --evidence "$evidence/partition"
-          printf 'filter=!^(cmd/go|cmd/internal/testdir:(0|[1-9][0-9]*)_([1-9][0-9]*))$\ntimeout_scale=1\n' > "$evidence/complement-profile.txt"
-          set +e
-          GO_TEST_TIMEOUT_SCALE=1 ../.github/scripts/logos-test-env.sh ./run.bash --no-rebuild -k -run='!^(cmd/go|cmd/internal/testdir:(0|[1-9][0-9]*)_([1-9][0-9]*))$' 2>&1 | tee "$evidence/complement.log"
-          statuses=("${PIPESTATUS[@]}")
-          set -e
-          printf 'driver=%s\nconsole_capture=%s\n' "${statuses[0]}" "${statuses[1]}" | tee "$evidence/complement-exit.txt"
-          test "${statuses[0]}" -eq 0
-          test "${statuses[1]}" -eq 0
-
+        run: bash .latchkey/upstream-complement.sh
   autovec:
     needs: [route, build]
     if: needs.route.outputs.core == 'true'
@@ -187,17 +118,7 @@ jobs:
           into: ~
       - run: bash .latchkey/setup.sh restore oracles c23
       - name: Automatic vectorization tests
-        run: |
-          . .latchkey/env.sh; cd src
-          t=../.github/scripts/logos-test-env.sh
-          go test -count=1 -short -timeout=5m cmd/internal/goparity -run '^TestRedteamLedgerRows$'
-          go test -count=1 -timeout=10m cmd/go -run '^TestScript$/^logos_cgo_shared$'
-          $t go test -count=1 -short cmd/compile/internal/ssa
-          GOEXPERIMENT=simd GOAMD64=v3 $t go test -count=1 -timeout 20m cmd/internal/testdir -run '^Test$/^logos$/^(codegen|run)$/^autovec' -all_codegen
-          GOEXPERIMENT=simd GOAMD64=v3 $t go run -gcflags=-d=ssa/autovec/off ../test/logos/run/autovec.go
-          GOEXPERIMENT=none $t go run ../test/logos/run/autovec.go
-          GOEXPERIMENT=simd,preemptibleloops GOAMD64=v3 $t go run ../test/logos/run/autovec.go
-
+        run: bash .latchkey/autovec-tests.sh
   compiler:
     needs: [route, build]
     if: needs.route.outputs.compiler == 'true'
@@ -214,21 +135,7 @@ jobs:
           into: ~
       - run: bash .latchkey/setup.sh restore oracles c23
       - name: Focused compiler and command checks
-        run: |
-          . .latchkey/env.sh
-          sha256sum --check logos-doc/validation/compiler-stability/frozen-tests-v2.sha256
-          cd src
-          unformatted=$(gofmt -l cmd/compile/internal/inline/interleaved cmd/compile/internal/logos cmd/go/internal/logos/eject)
-          printf '%s\n' "$unformatted"; test -z "$unformatted"
-          pk="cmd/compile/internal/inline/... cmd/compile/internal/logos/... cmd/compile/internal/base cmd/compile/internal/noder cmd/compile/internal/syntax cmd/compile/internal/types2 cmd/go/internal/work cmd/go/internal/logos/eject internal/buildcfg"
-          go test -count=1 -short -timeout=20m $pk
-          go test -count=1 -short -race -timeout=15m cmd/go/internal/work cmd/go/internal/logos/eject internal/buildcfg
-          go test -count=1 -timeout=20m cmd/go -run 'Script/^logos_(ctfe_assignment_.*|tuple_(package_names|variant_names)|spread_defaults|inline_batches|eject_variant_tags|struct_default_validation)$'
-          go test -count=1 -race -timeout=30m cmd/go -run 'Script/^logos_(eject_cgo.*|cgo_lgo|eject|eject_target_(features|env_compat)|eject_inactive.*|eject_variant_package_names)$'
-          go test -count=1 -timeout=20m cmd/internal/testdir -run 'Test/logos/run/(ctfe_assignment_.*|const_func_map_field_store|spread_defaults|inline_batches)'
-          go vet $(printf '%s\n' $pk | grep -v '/noder$')
-          go vet -pgo="$PWD/cmd/compile/default.pgo" cmd/compile/internal/noder
-
+        run: bash .latchkey/compiler-checks.sh
   gates:
     needs: [route, build]
     if: needs.route.outputs.gate_any == 'true'
@@ -246,14 +153,7 @@ jobs:
           into: ~
       - run: bash .latchkey/setup.sh restore oracles
       - name: Routed feature gates (feature-gate.sh, minus its own toolchain build)
-        run: |
-          . .latchkey/env.sh
-          # feature-gate.sh rebuilds the toolchain in setup(); the shared build replaces that function
-          sed '/^setup() {/,/^}/c\setup() { cd "$repo/src"; }' .github/scripts/feature-gate.sh > "$RUNNER_TEMP/gate.sh"
-          fail=0
-          for g in $GATES; do [ "$g" = - ] || bash "$RUNNER_TEMP/gate.sh" "$g" || fail=1; done
-          exit $fail
-
+        run: bash .latchkey/gates-routed.sh
   gc:
     needs: [route, build]
     if: needs.route.outputs.gc == 'true'
@@ -276,56 +176,12 @@ jobs:
       - name: Runtime GC stability under each experiment
         env:
           EXP: ${{ matrix.experiment }}
-        run: |
-          . .latchkey/env.sh; cd src; export GOEXPERIMENT=$EXP
-          n=2; [ "$LATCHKEY_CI_EVENT_CLASS" = pr_update ] || n=10
-          files=(runtime/arena_logos.go runtime/region_logos.go runtime/logos_arena_test.go runtime/export_logos_gc_stability_test.go runtime/logos_gc_stability_test.go runtime/export_logos_gcscan_bounds_test.go runtime/logos_gcscan_bounds_test.go)
-          test -z "$(gofmt -l "${files[@]}")"
-          go vet runtime runtime/metrics
-          go test -count=1 -short -timeout=30m runtime runtime/metrics runtime/pprof runtime/trace
-          go test -count=1 -short -race -timeout=30m runtime -run '^TestLogos(Arena|Region|GC)'
-          go test -count=$n -short -cpu=1,2,4 -timeout=30m runtime -run '^(TestLogosRegionReleaseOwnership|TestLogosGCHeapGraphLiveness|TestLogosGCScanLayoutBounds)$'
-          GODEBUG=asyncpreemptoff=1 go test -count=$n -short -gcflags=runtime=-l -timeout=30m runtime -run '^TestLogosRegionReleaseOwnership$'
-          GODEBUG=gccheckmark=1 go test -count=$n -short -timeout=30m runtime -run '^(TestLogosGCScanExternalPointers|TestLogosGCHeapGraphLiveness)$'
+        run: bash .latchkey/gc-experiments.sh
       - name: Original close-ownership failure probe
         if: matrix.experiment == 'logosarena'
         env:
           EXP: ${{ matrix.experiment }}
-        run: |
-          . .latchkey/env.sh; cd src; export GOEXPERIMENT=$EXP
-          probe="$GITHUB_WORKSPACE/.outline/verify/gc-close-$RUNNER_ARCH"
-          mkdir -p "$probe"
-          awk '
-            /^func logosRegionReleaseChunks\(rec \*logosRegion\) \{$/ {
-              in_release = 1
-              seen++
-            }
-            in_release && /^\t\/\/ Detach the published root before any chunk becomes reusable\.$/ { next }
-            in_release && /^\trec\.chunk = nil$/ { removed++; next }
-            in_release && /^}$/ {
-              print "\trec.chunk = nil"
-              in_release = 0
-            }
-            { print }
-            END { if (in_release || seen != 1 || removed != 1) exit 2 }
-          ' runtime/region_logos.go > "$probe/region_logos.go"
-          test "$(git hash-object "$probe/region_logos.go")" = f1c09676d87d8d4bc82255eef5a9a8a7e8794c17
-          jq -n --arg from "$PWD/runtime/region_logos.go" --arg to "$probe/region_logos.go" \
-            '{"Replace": {($from): $to}}' > "$probe/overlay.json"
-          set +e
-          go test -overlay="$probe/overlay.json" -count=10 -short -timeout=10m \
-            runtime -run '^TestLogosRegionReleaseOwnership$' > "$probe/mutation.log" 2>&1
-          status=$?
-          set -e
-          cat "$probe/mutation.log"
-          test "$status" -eq 1
-          awk '
-            /--- FAIL: TestLogosRegionReleaseOwnership/ { named = 1 }
-            /published region root .* is also in a reusable chunk pool/ { diagnostic = 1 }
-            /panic:|fatal error:|build failed|test timed out/ { unrelated = 1 }
-            END { exit !(named && diagnostic && !unrelated) }
-          ' "$probe/mutation.log"
-
+        run: bash .latchkey/gc-probe.sh
   ssa:
     needs: [route, build]
     if: needs.route.outputs.ssa == 'true'
@@ -343,22 +199,22 @@ jobs:
           into: ~
       - run: bash .latchkey/setup.sh restore oracles
       - name: "SIMD zero guards: frozen attacks, vet, mutation proof"
-        run: bash .latchkey/ssa.sh zero1
+        run: bash .latchkey/ssa-zero1.sh
       - name: "SIMD zero guards: native and emulated (qemu) CPUs"
         if: always()
-        run: bash .latchkey/ssa.sh zero2
+        run: bash .latchkey/ssa-zero2.sh
       - name: "SIMD gate and dominance scripts (plain and race), wasm runner isolation"
         if: always()
-        run: bash .latchkey/ssa.sh zero3
+        run: bash .latchkey/ssa-zero3.sh
       - name: "Autovec native: preflight, faults, memory, GC"
         if: always()
-        run: bash .latchkey/ssa.sh av1
+        run: bash .latchkey/ssa-av1.sh
       - name: "Autovec native: mutation proofs and ejection"
         if: always()
-        run: bash .latchkey/ssa.sh av2
+        run: bash .latchkey/ssa-av2.sh
       - name: "Autovec native: formatting and generated builtins enforced"
         if: always()
-        run: bash .latchkey/ssa.sh av3
+        run: bash .latchkey/ssa-av3.sh
 
   # Stopped by Latchkey after ~15 min in every run so far (cause not found), so manual runs only.
   simdstd:
@@ -373,18 +229,7 @@ jobs:
           into: ~
       - run: bash .latchkey/setup.sh restore oracles
       - name: SIMD standard library at the baseline (v1) and v3 targets
-        run: |
-          . .latchkey/env.sh; cd src
-          test "$(go env GOROOT)" = "$GITHUB_WORKSPACE"
-          # go test prints nothing while a slow package runs; Latchkey stops a job after 15 quiet minutes
-          (
-            trap 'kill "$!" 2>/dev/null || :; exit 0' TERM
-            while sleep 240 & wait "$!"; do echo "[heartbeat] $(date -u +%T)"; done
-          ) & heartbeat=$!
-          trap 'kill "$heartbeat" 2>/dev/null || :; wait "$heartbeat" || :' EXIT
-          env GOMAXPROCS=4 GOFLAGS=-p=2 GOEXPERIMENT=simd GOAMD64=v1 go test -count=1 -timeout 30m std
-          GOEXPERIMENT=simd GOAMD64=v3 go test -count=1 -timeout 30m std
-
+        run: bash .latchkey/simdstd-library.sh
   cgo:
     needs: [route, build]
     if: needs.route.outputs.cgo == 'true'
@@ -397,22 +242,10 @@ jobs:
           into: ~
       - run: bash .latchkey/setup.sh restore oracles
       - name: C compilers (gccgo)
-        run: |
-          . .latchkey/env.sh
-          sudo apt-get update -qq && sudo apt-get install -y -qq gccgo
-          for c in gcc g++ gccgo clang; do command -v $c; done
-          echo "GCCGO=$(command -v gccgo)" >> "$GITHUB_ENV"
+        run: bash .latchkey/cgo-compilers.sh
       - name: "cgo focused: lint, compat, probes, families, sanitizers, stock oracle"
         if: always()
-        run: |
-          . .latchkey/env.sh
-          e=$RUNNER_TEMP/cgo-evidence
-          node --test misc/cgo/*.test.mjs
-          node misc/cgo/lint.mjs $e/lint
-          node misc/cgo/compat.mjs $e/compat
-          node misc/cgo/probe.mjs $e/probes
-          node misc/cgo/verify.mjs $e/focused
-
+        run: bash .latchkey/cgo-focused.sh
   cgofull:
     needs: [route, build, cgo]
     if: env.LATCHKEY_CI_EVENT_CLASS == 'branch_push' && needs.route.outputs.cgo == 'true'
@@ -429,27 +262,11 @@ jobs:
           into: ~
       - run: bash .latchkey/setup.sh restore oracles
       - name: C compilers (gccgo)
-        run: |
-          . .latchkey/env.sh
-          sudo apt-get update -qq && sudo apt-get install -y -qq gccgo
-          for c in gcc g++ gccgo clang; do command -v $c; done
-          echo "GCCGO=$(command -v gccgo)" >> "$GITHUB_ENV"
+        run: bash .latchkey/cgo-compilers.sh
       - name: cgo full default-short dist under each cgo experiment
         env:
           CGO_EXPERIMENT: ${{ matrix.experiment }}
-        run: |
-          . .latchkey/env.sh
-          node --input-type=module -e 'import { snapshot } from "./misc/cgo/common.mjs"; snapshot(process.env.RUNNER_TEMP + "/cgo-evidence/full/environment");'
-          cd src
-          env -i \
-            HOME="$HOME" PATH="$PATH" TMPDIR="$RUNNER_TEMP" LANG=C.UTF-8 TZ=UTC \
-            GOROOT="$GITHUB_WORKSPACE" GOENV=off GOTOOLCHAIN=local \
-            CGO_ENABLED=1 CC=gcc CXX=g++ GCCGO="$GCCGO" \
-            GOMAXPROCS=2 GOFLAGS=-p=2 GO_TEST_TIMEOUT_SCALE=6 GO_TEST_SHORT=1 \
-            GOEXPERIMENT="$CGO_EXPERIMENT" \
-            UPROOT1272="$UPROOT1272" UPROOT1273="$UPROOT1273" UPROOT1274="$UPROOT1274" \
-            bash ./run.bash --no-rebuild -k
-
+        run: bash .latchkey/cgofull-dist.sh
   cgobench:
     needs: [route, build, cgo]
     if: env.LATCHKEY_CI_EVENT_CLASS == 'branch_push' && needs.route.outputs.cgo == 'true'
@@ -462,22 +279,9 @@ jobs:
           into: ~
       - run: bash .latchkey/setup.sh restore oracles
       - name: C compilers (gccgo)
-        run: |
-          . .latchkey/env.sh
-          sudo apt-get update -qq && sudo apt-get install -y -qq gccgo
-          for c in gcc g++ gccgo clang; do command -v $c; done
-          echo "GCCGO=$(command -v gccgo)" >> "$GITHUB_ENV"
+        run: bash .latchkey/cgo-compilers.sh
       - name: "cgo benchmark: one frozen sequential campaign per declared row"
-        run: |
-          . .latchkey/env.sh
-          archive="$RUNNER_TEMP/hyperfine.tar.gz"
-          curl --fail --location --retry 3 https://github.com/sharkdp/hyperfine/releases/download/v2.0.0/hyperfine-v2.0.0-x86_64-unknown-linux-musl.tar.gz --output "$archive"
-          echo "38e59087bd65520930a13cf513d8a493b7043741e8ad62349a8a9929eb61bc5c  $archive" | sha256sum --check --strict
-          tar -xzf "$archive" -C "$RUNNER_TEMP"
-          echo "HYPERFINE=$RUNNER_TEMP/hyperfine-v2.0.0-x86_64-unknown-linux-musl/hyperfine" >> "$GITHUB_ENV"
-          . .latchkey/env.sh
-          node misc/cgo/benchmark.mjs "$RUNNER_TEMP/cgo-evidence/benchmark"
-
+        run: bash .latchkey/cgobench-benchmark.sh
   dogfood:
     needs: [route, build]
     if: needs.route.outputs.dogfood == 'true'
