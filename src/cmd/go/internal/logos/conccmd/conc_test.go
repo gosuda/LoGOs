@@ -141,7 +141,7 @@ func TestChildArguments(t *testing.T) {
 		{"test", "", "test -count=1 -tags=logosconc", false, nil},
 	}
 	for _, tt := range tests {
-		got := childArguments(tt.verb, strings.Fields(tt.args), takesValue)
+		got := childArguments(tt.verb, strings.Fields(tt.args), takesValue, "")
 		if want := strings.Fields(tt.want); !slices.Equal(got.arguments, want) || got.asJSON != tt.asJSON || !maps.Equal(got.durations, tt.durations) {
 			t.Errorf("logos conc %s %s:\n got %q asJSON=%v durations=%v\nwant %q asJSON=%v durations=%v", tt.verb, tt.args, got.arguments, got.asJSON, got.durations, want, tt.asJSON, tt.durations)
 		}
@@ -170,7 +170,7 @@ func TestChildArgumentsShake(t *testing.T) {
 		{"test", "-count=1 ./ord", "test -tags=logosconc -count=1 ./ord", "", false},
 	}
 	for _, tt := range tests {
-		got := childArguments(tt.verb, strings.Fields(tt.args), neverTakesValue)
+		got := childArguments(tt.verb, strings.Fields(tt.args), neverTakesValue, "")
 		if want := strings.Fields(tt.want); !slices.Equal(got.arguments, want) || got.shake != tt.shake || got.shakeBare != tt.shakeBare {
 			t.Errorf("logos conc %s %s:\n got %q shake=%q bare=%v\nwant %q shake=%q bare=%v", tt.verb, tt.args, got.arguments, got.shake, got.shakeBare, want, tt.shake, tt.shakeBare)
 		}
@@ -179,20 +179,23 @@ func TestChildArgumentsShake(t *testing.T) {
 
 func TestChildArgumentsKeepsGOFLAGSCount(t *testing.T) {
 	neverTakesValue := func(name string) bool { return false }
-	t.Setenv("GOFLAGS", "-count=10")
-	if got := childArguments("test", []string{"./ord"}, neverTakesValue); slices.Contains(got.arguments, "-count=1") {
-		t.Errorf("GOFLAGS=-count=10: child arguments are %q, want no injected -count=1", got.arguments)
+	tests := []struct {
+		goflags string
+		args    []string
+		want    []string
+	}{
+		{"-count=10", []string{"./ord"}, []string{"test", "-count=10", "-tags=logosconc", "./ord"}},
+		{"-test.count=10", []string{"./ord"}, []string{"test", "-count=10", "-tags=logosconc", "./ord"}},
+		{"-tags=x", []string{"./ord"}, []string{"test", "-count=1", "-tags=logosconc", "./ord"}},
+		{"", []string{"./ord"}, []string{"test", "-count=1", "-tags=logosconc", "./ord"}},
+		{"-count=10", []string{"-count=3", "./ord"}, []string{"test", "-tags=logosconc", "-count=3", "./ord"}},
 	}
-	t.Setenv("GOFLAGS", "-test.count=10")
-	if got := childArguments("test", []string{"./ord"}, neverTakesValue); slices.Contains(got.arguments, "-count=1") {
-		t.Errorf("GOFLAGS=-test.count=10: child arguments are %q, want no injected -count=1", got.arguments)
-	}
-	t.Setenv("GOFLAGS", "-tags=x")
-	if got := childArguments("test", []string{"./ord"}, neverTakesValue); !slices.Contains(got.arguments, "-count=1") {
-		t.Errorf("GOFLAGS=-tags=x: child arguments are %q, want injected -count=1", got.arguments)
+	for _, tt := range tests {
+		if got := childArguments("test", tt.args, neverTakesValue, tt.goflags); !slices.Equal(got.arguments, tt.want) {
+			t.Errorf("GOFLAGS=%q logos conc test %q:\n got %q\nwant %q", tt.goflags, tt.args, got.arguments, tt.want)
+		}
 	}
 }
-
 func TestWithMonitorTagJoinsSpaceSeparatedTags(t *testing.T) {
 	tests := []struct{ in, want string }{
 		{"debug trace", "debug,trace,logosconc"},
