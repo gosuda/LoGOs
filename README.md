@@ -36,7 +36,7 @@ Output:
 Why use it:
 
 - `?` makes an error path explicit at the call site and checked at compile time.
-- `*T` is non-nil in `.lgo`; `T?` marks absence and supports `?.` and `??`.
+- `*T` declared in `.lgo` is non-nil; pointers from imported Go packages may be nil, so compare them with `nil` before dereferencing. `T?` marks absence and supports `?.` and `??`.
 - A closed union declares its variants, and the compiler checks exhaustive switches.
 - `go group` joins child goroutines and cancels siblings on the first failure.
 - `logos eject` emits standard Go with source comments and support modules preserved.
