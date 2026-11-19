@@ -896,6 +896,9 @@ var depsRules = `
 
 	sync, sync/atomic
 	< logos/sync;
+
+	NONE
+	< logos/ascii;
 `
 
 // listStdPkgs returns the same list of packages as "go list std".
