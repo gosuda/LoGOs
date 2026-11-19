@@ -810,6 +810,9 @@ func (p *logosEFPass) stable(k logosEFKey) bool {
 	if n := len(p.assigns[logosEFKey{root: k.root}]); n > 0 && !(p.initialized[k.root] && n == 1) {
 		return false
 	}
+	if p.inLoop[k] {
+		return false
+	}
 	for _, pre := range logosEFPathPrefixes(k.path) {
 		if len(p.assigns[logosEFKey{root: k.root, path: pre}]) > 0 {
 			return false
@@ -883,6 +886,8 @@ type logosEFPass struct {
 	initialized map[*Var]bool
 	tracked     map[logosEFKey]string
 	sliced      map[logosEFKey]bool
+	storePos    map[logosEFKey][]syntax.Pos
+	inLoop      map[logosEFKey]bool
 }
 
 func (check *Checker) logosErrorFirst(body *syntax.BlockStmt) {
@@ -1083,6 +1088,8 @@ func (p *logosEFPass) collectAssigns() {
 	p.initialized = make(map[*Var]bool)
 	p.tracked = make(map[logosEFKey]string)
 	p.sliced = make(map[logosEFKey]bool)
+	p.storePos = make(map[logosEFKey][]syntax.Pos)
+	p.inLoop = make(map[logosEFKey]bool)
 	mark := func(lhs []syntax.Expr, rhs syntax.Expr) {
 		errV, keys := p.tuple(lhs, rhs)
 		if errV == nil {
@@ -1092,6 +1099,7 @@ func (p *logosEFPass) collectAssigns() {
 			if _, ok := p.tracked[k]; !ok {
 				p.tracked[k] = errV.name
 			}
+			p.storePos[k] = append(p.storePos[k], p.logosEFDestPos(lhs, k))
 		}
 	}
 	note := func(lhs []syntax.Expr, rhs []syntax.Expr, plain bool) {
@@ -1147,6 +1155,36 @@ func (p *logosEFPass) collectAssigns() {
 					p.addr[v] = true
 				}
 			}
+		}
+		return true
+	})
+	syntax.Inspect(p.body, func(n syntax.Node) bool {
+		f, ok := n.(*syntax.ForStmt)
+		if !ok {
+			return true
+		}
+		markLoop := func(m syntax.Node) bool {
+			switch m := m.(type) {
+			case *syntax.AssignStmt:
+				for _, l := range syntax.UnpackListExpr(m.Lhs) {
+					if k, ok := p.destKey(l); ok {
+						p.inLoop[k] = true
+					}
+				}
+			case *syntax.RangeClause:
+				if m.Lhs != nil {
+					for _, l := range syntax.UnpackListExpr(m.Lhs) {
+						if k, ok := p.destKey(l); ok {
+							p.inLoop[k] = true
+						}
+					}
+				}
+			}
+			return true
+		}
+		syntax.Inspect(f.Body, markLoop)
+		if f.Post != nil {
+			syntax.Inspect(f.Post, markLoop)
 		}
 		return true
 	})
@@ -1272,7 +1310,7 @@ func (p *logosEFPass) rawKey(e syntax.Expr) (logosEFKey, bool) {
 // hexadecimal literal, and an octal literal name the same slot as the
 // decimal form the checker validated.
 func (p *logosEFPass) constArrayIndex(x *syntax.IndexExpr) (int64, bool) {
-	_, val, ok := p.check.logosChecked(syntax.Unparen(x.Index))
+	_, val, ok := p.check.logosChecked(x.Index)
 	// Only an integer constant can name an array slot. Any other index, such
 	// as a string map key, a variable, or a tuple element access, is not a
 	// constant the checker can place, so it stays untracked. There is no
@@ -1295,6 +1333,41 @@ func (p *logosEFPass) constArrayIndex(x *syntax.IndexExpr) (int64, bool) {
 		}
 	}
 	return 0, false
+}
+
+func (p *logosEFPass) arrayBase(e syntax.Expr) bool {
+	typ, _, ok := p.check.logosChecked(e)
+	if !ok {
+		return false
+	}
+	found := false
+	for _, u := range typeset(typ) {
+		if _, ok := u.(*Array); !ok {
+			return false
+		}
+		found = true
+	}
+	return found
+}
+
+func (p *logosEFPass) valueSpine(e syntax.Expr) bool {
+	for {
+		switch x := syntax.Unparen(e).(type) {
+		case *syntax.SelectorExpr:
+			sel := p.check.Selections[x]
+			if sel == nil || sel.Kind() != FieldVal || sel.Indirect() {
+				return false
+			}
+			e = x.X
+		case *syntax.IndexExpr:
+			if _, ok := p.constArrayIndex(x); !ok {
+				return false
+			}
+			e = x.X
+		default:
+			return p.varOf(e) != nil
+		}
+	}
 }
 
 // spineRoot names the plain variable a trackable spine is rooted at, or nil
@@ -1342,20 +1415,10 @@ func (p *logosEFPass) destKey(e syntax.Expr) (logosEFKey, bool) {
 	return p.rawKey(e)
 }
 
-// readDest reports an unchecked-result read at a selector or index
-// destination. The report position is the field or element name, matching
-// the plain-variable report. Reading a prefix of a tracked path loads the
-// nested result, so it fails too; an unrelated sibling stays accepted.
-func (p *logosEFPass) readDest(x syntax.Expr, st *logosEFState) {
-	k, ok := p.rawKey(x)
-	if !ok {
-		return
-	}
+func (p *logosEFPass) markSpine(x syntax.Expr) {
 	if p.spines == nil {
 		p.spines = make(map[syntax.Pos]bool)
 	}
-	// Spine segments below x are not standalone reads: the outer spine
-	// names the element, so only the outermost check reports the entry.
 	for d := x; ; {
 		var nx syntax.Expr
 		switch t := syntax.Unparen(d).(type) {
@@ -1378,11 +1441,45 @@ func (p *logosEFPass) readDest(x syntax.Expr, st *logosEFState) {
 		}
 		d = nx
 	}
-	// The spine root is not a whole-value read: the spine names the
-	// element, so read leaves the root's nested entries to this check.
 	if id := spineRoot(x); id != nil {
 		p.spines[id.Pos()] = true
 	}
+}
+
+func (p *logosEFPass) readWholeRoot(x syntax.Expr, st *logosEFState) {
+	id := spineRoot(x)
+	if id == nil {
+		return
+	}
+	v, _ := p.check.Uses[id].(*Var)
+	if v == nil {
+		return
+	}
+	e, found := st.m[logosEFKey{root: v}]
+	if !found || e.proven || p.seen[id.Pos()] {
+		return
+	}
+	p.seen[id.Pos()] = true
+	p.check.errorf(id, IncompatibleAssign, "%s read of %s before %s is checked (read %s only after %s is checked)", logosResultBeforeErr, v.name, e.name, v.name, e.name)
+}
+
+// readDest reports an unchecked-result read at a selector or index
+// destination. The report position is the field or element name, matching
+// the plain-variable report. Reading a prefix of a tracked path loads the
+// nested result, so it fails too; an unrelated sibling stays accepted.
+func (p *logosEFPass) readDest(x syntax.Expr, st *logosEFState) {
+	k, ok := p.rawKey(x)
+	if !ok {
+		if p.valueSpine(x) {
+			p.markSpine(x)
+			p.readWholeRoot(x, st)
+		}
+		return
+	}
+	if p.spines == nil {
+		p.spines = make(map[syntax.Pos]bool)
+	}
+	p.markSpine(x)
 	at := x
 	pos := x.Pos()
 	if sel, isSel := x.(*syntax.SelectorExpr); isSel {
@@ -1431,13 +1528,21 @@ func (p *logosEFPass) quietPath(l syntax.Expr, st *logosEFState) *logosEFState {
 		case *syntax.SelectorExpr:
 			sel := p.check.Selections[x]
 			if sel == nil || sel.Kind() != FieldVal || sel.Indirect() || len(sel.Index()) != 1 {
-				return p.expr(l, st)
+				if !p.valueSpine(l) {
+					return p.expr(l, st)
+				}
 			}
 			p.seen[x.Sel.Pos()] = true
 			l = x.X
 		case *syntax.IndexExpr:
 			if _, ok := p.constArrayIndex(x); !ok {
-				return p.expr(l, st)
+				st = p.expr(x.Index, st)
+				if !p.arrayBase(x.X) {
+					return p.expr(l, st)
+				}
+				p.seen[x.Pos()] = true
+				l = x.X
+				continue
 			}
 			p.seen[x.Pos()] = true
 			st = p.expr(x.Index, st)
@@ -1501,6 +1606,10 @@ func (p *logosEFPass) expr(n syntax.Node, st *logosEFState) *logosEFState {
 			p.readDest(x, st)
 		case *syntax.IndexExpr:
 			p.readDest(x, st)
+		case *syntax.CallExpr:
+			if _, val, ok := p.check.logosChecked(x); ok && val != nil {
+				return false
+			}
 		case *syntax.Operation:
 			if x.Y == nil || (x.Op != syntax.AndAnd && x.Op != syntax.OrOr) {
 				return true
@@ -1732,7 +1841,34 @@ func (p *logosEFPass) dropDest(st *logosEFState, l syntax.Expr) *logosEFState {
 		p.noteAssigned(k)
 		return st.dropWriting(k)
 	}
+	if v := p.derefRoot(l); v != nil {
+		return p.assigned(st, v)
+	}
 	return st
+}
+
+func (p *logosEFPass) derefRoot(e syntax.Expr) *Var {
+	op, ok := syntax.Unparen(e).(*syntax.Operation)
+	if !ok || op.Op != syntax.Mul || op.Y != nil {
+		return nil
+	}
+	id, ok := syntax.Unparen(op.X).(*syntax.Name)
+	if !ok {
+		return nil
+	}
+	v, _ := p.check.Uses[id].(*Var)
+	if v == nil {
+		return nil
+	}
+	origin := p.sole(v)
+	if origin == nil {
+		return nil
+	}
+	and, ok := syntax.Unparen(origin).(*syntax.Operation)
+	if !ok || and.Op != syntax.And || and.Y != nil {
+		return nil
+	}
+	return p.addressRoot(and.X)
 }
 
 func (p *logosEFPass) ret(s *syntax.ReturnStmt, st *logosEFState) *logosEFState {
@@ -1933,6 +2069,15 @@ func (p *logosEFPass) defsIn(n syntax.Node) map[*Var]bool {
 	return inside
 }
 
+func (p *logosEFPass) seedAfter(k logosEFKey, lit syntax.Node) bool {
+	for _, pos := range p.storePos[k] {
+		if pos.Cmp(lit.Pos()) >= 0 {
+			return true
+		}
+	}
+	return false
+}
+
 func (p *logosEFPass) lateCaptures(st *logosEFState, lit syntax.Node, inside map[*Var]bool) *logosEFState {
 	if p.assigns == nil {
 		p.collectAssigns()
@@ -1948,8 +2093,16 @@ func (p *logosEFPass) lateCaptures(st *logosEFState, lit syntax.Node, inside map
 			if _, ok := st.m[k]; ok {
 				return true
 			}
-			if errName, ok := p.tracked[k]; ok {
+			if errName, ok := p.tracked[k]; ok && p.seedAfter(k, lit) {
 				st = st.set(k, logosEFEntry{name: errName, pos: lit.Pos()})
+			}
+			for k2, errName := range p.tracked {
+				if k2.root != v || k2.path == "" || !p.trackable(k2) || !p.seedAfter(k2, lit) {
+					continue
+				}
+				if _, has := st.m[k2]; !has {
+					st = st.set(k2, logosEFEntry{name: errName, pos: lit.Pos()})
+				}
 			}
 		case *syntax.SelectorExpr, *syntax.IndexExpr:
 			k, ok := p.rawKey(n.(syntax.Expr))
@@ -1959,8 +2112,19 @@ func (p *logosEFPass) lateCaptures(st *logosEFState, lit syntax.Node, inside map
 			if _, has := st.m[k]; has {
 				return true
 			}
-			if errName, tracked := p.tracked[k]; tracked && p.trackable(k) {
+			if errName, tracked := p.tracked[k]; tracked && p.trackable(k) && p.seedAfter(k, lit) {
 				st = st.set(k, logosEFEntry{name: errName, pos: lit.Pos()})
+			}
+			for k2, errName := range p.tracked {
+				if k2.root != k.root || k2 == k || !logosEFPathUnder(k2.path, k.path) {
+					continue
+				}
+				if !p.trackable(k2) || !p.seedAfter(k2, lit) {
+					continue
+				}
+				if _, has := st.m[k2]; !has {
+					st = st.set(k2, logosEFEntry{name: errName, pos: lit.Pos()})
+				}
 			}
 		}
 		return true

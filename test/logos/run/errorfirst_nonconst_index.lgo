@@ -38,4 +38,24 @@ func main() {
 		return
 	}
 	fmt.Println("ok struct-field-variable-index", boxes[i].v)
+	efUntrackedNeedsNoCheck()
+}
+
+// Reads that never check err still pass: these destinations stay outside
+// the tracked forms, so no proof is required. If any of them became
+// tracked, the unchecked read would fail compilation.
+func efUntrackedNeedsNoCheck() {
+	var err error
+	ys := [4]int{}
+	k := 2
+	ys[k], err = efLoad()
+	fmt.Println("ok unchecked-array-read", ys[k])
+	m := map[string]int{}
+	m["a"], err = efLoad()
+	fmt.Println("ok unchecked-map-read", m["a"] ?? 0)
+	boxes := []efBox{{1}, {2}}
+	i := 1
+	boxes[i].v, err = efLoad()
+	fmt.Println("ok unchecked-field-read", boxes[i].v)
+	_ = err
 }

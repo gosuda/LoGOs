@@ -1,3 +1,6 @@
 ok nonconst-array-index 7
 ok map-string-key 7
 ok struct-field-variable-index 7
+ok unchecked-array-read 7
+ok unchecked-map-read 7
+ok unchecked-field-read 7

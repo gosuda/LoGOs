@@ -770,3 +770,123 @@ func efTwoUncheckedFirstByPosition() {
 	_ = dup
 	_ = err
 }
+
+// A parenthesized float constant names the same slot as its value.
+func efParenIndexEquivalent() {
+	h := efHeld{inner: efInner{stats: efStats{}}}
+	var err error
+	h.inner.stats.items[(1.0)], err = efFetchHeld()
+	println(h.inner.stats.items[1]) // ERROR "result_before_error_check"
+	if err != nil {
+		return
+	}
+	println(h.inner.stats.items[1])
+}
+
+// A write through a variable index never reads the array element, so it
+// stays accepted while the stored result is unchecked.
+func efVariableIndexWriteStaysAccepted() {
+	var a [4]int
+	var err error
+	i := 2
+	a[0], err = efFetchHeld()
+	a[i] = 9
+	if err != nil {
+		return
+	}
+	println(a[0])
+}
+
+// A constant len of a fixed array never evaluates the array, so it stays
+// accepted while an element is unchecked. A slice len evaluates the
+// header, so it still fails.
+func efFixedArrayLenStaysAccepted() {
+	var a [4]int
+	var err error
+	a[0], err = efFetchHeld()
+	println(len(a))
+	if err != nil {
+		return
+	}
+	println(a[0])
+}
+
+func efSliceLenReadsHeader() {
+	s, err := efSlice()
+	println(len(s)) // ERROR "result_before_error_check"
+	_ = err
+}
+
+// A deferred read must not inherit a proof for memory a later loop
+// iteration rewrites: the defer runs after every iteration.
+func efLoopDeferredFieldProof() {
+	h := efHeld{}
+	var err error
+	for i := 0; i < 2; i++ {
+		h.stats, err = efFetchHeld()
+		if err != nil {
+			return
+		}
+		defer func() {
+			println(h.stats) // ERROR "result_before_error_check"
+		}()
+	}
+}
+
+// Overwriting the field with a plain value ends the check, so a deferred
+// read registered after the overwrite stays accepted.
+func efOverwriteBeforeCapture() {
+	h := efHeld{}
+	var err error
+	h.stats, err = efFetchHeld()
+	h.stats = 0
+	defer func() {
+		println(h.stats)
+	}()
+	_ = err
+}
+
+// A deferred whole-value copy reads a field stored after the defer, so it
+// fails without a check.
+func efDeferredCopySeesLaterStore() {
+	h := efHeld{}
+	var err error
+	defer func() {
+		println(h) // ERROR "result_before_error_check"
+	}()
+	h.stats, err = efFetchHeld()
+	_ = err
+}
+
+// Overwriting the result through a pointer known to name it ends the
+// check, so reading the replacement stays accepted.
+func efPointerOverwriteDropsCheck() {
+	var n int
+	p := &n
+	var err error
+	n, err = efFetchHeld()
+	*p = 9
+	println(n)
+	_ = err
+}
+
+type efMeta struct {
+	tag int
+}
+
+type efOuter struct {
+	efMeta
+	count int
+}
+
+// Reading or writing a promoted value field never reads an unrelated
+// tracked sibling field.
+func efPromotedSiblingStaysAccepted() {
+	h := efOuter{}
+	var err error
+	h.count, err = efFetchHeld()
+	println(h.tag)
+	h.tag = 1
+	println(h.count) // ERROR "result_before_error_check"
+	_ = err
+}
