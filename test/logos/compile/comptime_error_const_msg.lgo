@@ -1,0 +1,21 @@
+// errorcheck
+
+package p
+
+import "comptime"
+
+const BoomMsg = "named boom"
+
+func FailNamed[T any]() int {
+	comptime.Error(BoomMsg)
+	return 0
+}
+
+var _ = FailNamed[int]() // ERROR "named boom"
+
+func FailConcat[T any]() int {
+	comptime.Error("concat" + " message")
+	return 0
+}
+
+var _ = FailConcat[int]() // ERROR "concat message"

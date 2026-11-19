@@ -1431,6 +1431,22 @@ func (c *cfLeaf) visit(n syntax.Node) bool {
 			}
 			return false
 		}
+		// Marker and field references in the tag and case types still
+		// need their substitutions: the surviving text is rechecked,
+		// so an unsubstituted marker would leak. Only bodies prune.
+		syntax.Inspect(n.Targ, c.visit)
+		for _, cc := range n.Cases {
+			syntax.Inspect(cc.Type, c.visit)
+		}
+		if sel, known := c.fl.cfLiveConstSwitch(n, c.active, c.run); known {
+			if sel == nil {
+				return false
+			}
+			for _, s := range sel.Body {
+				syntax.Inspect(s, c.visit)
+			}
+			return false
+		}
 		return true
 	case *syntax.FieldProjExpr:
 		c.subFieldProj(n)
@@ -1686,9 +1702,9 @@ func (c *cfLeaf) subComptimeError(n *syntax.CallExpr, sites *cfSites) bool {
 	if !ok || sites == nil || qn.Value != sites.comptimeName {
 		return false
 	}
-	// A call inside a nested const for is answered by that loop's own
-	// expansion: firing here would evaluate bodies of cases the inner
-	// fold has not pruned yet.
+	// A call inside a const for body is answered by the inner-loop
+	// expansion that carries the inner field bindings: the outer pass
+	// reports nothing here, so a dead branch pruned later never fires.
 	if cfInConstFor(n, c.parents) {
 		return false
 	}
@@ -1696,7 +1712,7 @@ func (c *cfLeaf) subComptimeError(n *syntax.CallExpr, sites *cfSites) bool {
 	if insideAny(span{start: s, end: e}, c.covered) {
 		return false
 	}
-	msg, ok := c.fl.cfComptimeErrorMsg(n.ArgList[0])
+	msg, ok := c.fl.cfComptimeErrorMsg(n.ArgList[0], c.run.sites, c.parents)
 	if !ok {
 		c.fl.cfError(c.run.sites.at(n.ArgList[0].Pos()), "[comptime::error_not_constant] comptime.Error needs a constant message")
 	} else {
@@ -1707,18 +1723,158 @@ func (c *cfLeaf) subComptimeError(n *syntax.CallExpr, sites *cfSites) bool {
 }
 
 // cfComptimeErrorMsg evaluates the comptime.Error message argument: a
-// recorded constant string, or a string literal when the check left no
-// record (copies re-check without one).
-func (fl *fileLower) cfComptimeErrorMsg(e syntax.Expr) (string, bool) {
+// recorded constant string, or a constant string expression when the
+// check left no record (copies re-check without one).
+func (fl *fileLower) cfComptimeErrorMsg(e syntax.Expr, sites *cfSites, parents map[syntax.Node]syntax.Node) (string, bool) {
 	if tv, ok := fl.pkg.info.Types[e]; ok && tv.Value != nil && tv.Value.Kind() == constant.String {
 		return constant.StringVal(tv.Value), true
 	}
-	if lit, ok := syntax.Unparen(e).(*syntax.BasicLit); ok && lit.Kind == syntax.StringLit {
-		if msg, err := strconv.Unquote(lit.Value); err == nil {
-			return msg, true
+	return fl.cfStaticString(e, sites, parents)
+}
+
+// cfStaticString folds a constant string expression without a type
+// record: a string literal, a parenthesized constant, the concatenation
+// of two constants, or a name bound by a string constant declaration.
+func (fl *fileLower) cfStaticString(e syntax.Expr, sites *cfSites, parents map[syntax.Node]syntax.Node) (string, bool) {
+	return fl.cfStaticStringSeen(e, sites, parents, make(map[string]bool))
+}
+
+func (fl *fileLower) cfStaticStringSeen(e syntax.Expr, sites *cfSites, parents map[syntax.Node]syntax.Node, seen map[string]bool) (string, bool) {
+	switch e := syntax.Unparen(e).(type) {
+	case *syntax.BasicLit:
+		if e.Kind != syntax.StringLit {
+			return "", false
 		}
+		msg, err := strconv.Unquote(e.Value)
+		if err != nil {
+			return "", false
+		}
+		return msg, true
+	case *syntax.Operation:
+		if e.Op != syntax.Add || e.Y == nil {
+			return "", false
+		}
+		x, ok := fl.cfStaticStringSeen(e.X, sites, parents, seen)
+		if !ok {
+			return "", false
+		}
+		y, ok := fl.cfStaticStringSeen(e.Y, sites, parents, seen)
+		if !ok {
+			return "", false
+		}
+		return x + y, true
+	case *syntax.Name:
+		if seen[e.Value] {
+			return "", false
+		}
+		seen[e.Value] = true
+		if sites != nil && sites.scope != nil {
+			if obj, ok := sites.scope.Lookup(e.Value).(*types2.Const); ok && obj.Val() != nil && obj.Val().Kind() == constant.String {
+				return constant.StringVal(obj.Val()), true
+			}
+		}
+		init, ok := cfConstInit(e.Value, parents)
+		if !ok {
+			return "", false
+		}
+		return fl.cfStaticStringSeen(init, sites, parents, seen)
 	}
 	return "", false
+}
+
+// cfConstInit finds the initializer of a constant declaration visible
+// from the copied tree: the declaration may sit in the copy itself,
+// where the check left no record for the re-parsed nodes.
+func cfConstInit(name string, parents map[syntax.Node]syntax.Node) (syntax.Expr, bool) {
+	var start syntax.Node
+	for n := range parents {
+		start = n
+		break
+	}
+	if start == nil {
+		return nil, false
+	}
+	root := start
+	for p := parents[root]; p != nil; p = parents[p] {
+		root = p
+	}
+	var found syntax.Expr
+	syntax.Inspect(root, func(n syntax.Node) bool {
+		d, ok := n.(*syntax.ConstDecl)
+		if !ok || d.Values == nil || found != nil {
+			return true
+		}
+		vals := syntax.UnpackListExpr(d.Values)
+		for i, q := range d.NameList {
+			if q.Value != name {
+				continue
+			}
+			if i < len(vals) {
+				found = vals[i]
+			} else {
+				found = vals[len(vals)-1]
+			}
+		}
+		return true
+	})
+	if found == nil {
+		return nil, false
+	}
+	return found, true
+}
+
+// cfLiveConstSwitch selects the const switch case the leaf walk keeps
+// for one expansion: the first case matching the resolved tag type,
+// mirroring types2 logosDeadCopyCase. It reports false when the tag or
+// some case type does not resolve, so the walk keeps every case instead
+// of dropping live code.
+func (fl *fileLower) cfLiveConstSwitch(s *syntax.ConstSwitchStmt, active cfChain, run *cfRun) (*syntax.ConstSwitchCase, bool) {
+	// An f.Type tag belongs to pruneConstSwitch above, which resolves
+	// outer field bindings through the whole-function parent map and
+	// replaces the switch outright: this selector must not prune on a
+	// resolution made without those bindings. The copy's own lowering
+	// folds such switches once rechecked.
+	if sel, ok := syntax.Unparen(s.Targ).(*syntax.SelectorExpr); ok && sel.Sel.Value == "Type" {
+		return nil, false
+	}
+	tag, ok := fl.cfResolveTypeExpr(s.Targ, active, run.sites)
+	if !ok || tag == nil || cfHasTypeParam(tag) {
+		return nil, false
+	}
+	if _, ok := tag.(*types2.TypeParam); ok {
+		return nil, false
+	}
+	for _, c := range s.Cases {
+		typ, ok := fl.cfResolveTypeExpr(c.Type, active, run.sites)
+		if !ok || typ == nil || cfHasTypeParam(typ) {
+			return nil, false
+		}
+		if cfConstSwitchMatches(tag, typ, c) {
+			return c, true
+		}
+	}
+	return nil, true
+}
+
+// cfConstSwitchMatches mirrors types2 logosConstMatches for the leaf
+// walk: tilde cases match the underlying basic type, interface cases
+// match implemented interfaces, exact cases match identical types.
+func cfConstSwitchMatches(tag types2.Type, typ types2.Type, c *syntax.ConstSwitchCase) bool {
+	if c.Tilde {
+		ub, ok := types2.Unalias(tag).Underlying().(*types2.Basic)
+		if !ok {
+			return false
+		}
+		base, ok := types2.Unalias(typ).Underlying().(*types2.Basic)
+		if !ok {
+			return false
+		}
+		return types2.Identical(ub, base)
+	}
+	if iface, ok := types2.Unalias(typ).Underlying().(*types2.Interface); ok {
+		return types2.Implements(tag, iface)
+	}
+	return types2.Identical(tag, typ)
 }
 
 func (c *cfLeaf) subName(n *syntax.Name) {
