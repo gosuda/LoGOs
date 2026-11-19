@@ -1,0 +1,10 @@
+ok manual-empty
+ok err
+ok trace-len
+ok trace-lines
+ok format-30
+ok format-35
+ok format-40
+prog.lgo:30
+prog.lgo:35
+prog.lgo:40
