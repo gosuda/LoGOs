@@ -30,7 +30,7 @@ flag() {
 # core: every change except docs-only ones (the old logos.yml paths-ignore)
 core=false
 if [ "$ev" = workflow_dispatch ]; then if want core; then core=true; fi
-elif grep -v '^\.latchkey/' <<< "$files" | grep -Evq '^(AGENTS|CONTRIBUTING|README|SECURITY)\.md$'; then core=true
+elif grep -Evq '^(AGENTS|CONTRIBUTING|README|SECURITY)\.md$' <<< "$files"; then core=true
 fi
 if [ $core = true ]; then any=true; fi
 echo "core=$core" >> "$LATCHKEY_CI_OUTPUT"
