@@ -65,7 +65,7 @@ logos version
 Create a module outside the toolchain tree:
 
 ```sh
-mkdir -p /tmp/logos-hello && cd /tmp/logos-hello
+hello=$(mktemp -d) && cd "$hello"
 logos mod init example.com/hello
 cat > main.lgo <<'EOF'
 package main
