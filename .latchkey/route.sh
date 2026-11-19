@@ -7,8 +7,10 @@ ev=${LATCHKEY_CI_EVENT_CLASS:-}
 files=; base=; all=false
 case $ev in
   pr_update)
-    git fetch -q --no-tags --depth=1 origin "$LATCHKEY_CI_BASE_REF"
+    git fetch -q --no-tags --depth=300 origin "$LATCHKEY_CI_BASE_REF"
     base=$(git rev-parse FETCH_HEAD)
+    git fetch -q --no-tags --depth=300 origin "$LATCHKEY_CI_SHA" || true
+    base=$(git merge-base "$base" HEAD 2>/dev/null) || base=$(git rev-parse FETCH_HEAD)
     files=$(git diff --name-only "$base" HEAD) ;;
   branch_push)
     git fetch -q --no-tags --depth=2 origin "$LATCHKEY_CI_SHA"
@@ -24,7 +26,7 @@ in_only() { [ -z "$only" ] || [[ " $only " == *" $1 "* ]]; }
 # flag NAME REGEX [push]: set on pull requests and dispatch; also on pushes when "push" is given.
 flag() {
   local v=false
-  if [ "$ev" = workflow_dispatch ]; then if want "$1"; then v=true; fi
+  if [ "$ev" = workflow_dispatch ]; then if [ "${3:-}" != pr ] && want "$1"; then v=true; fi
   elif [ "$ev" = pr_update ] || { [ "$ev" = branch_push ] && [ "${3:-}" = push ]; }; then if hit "$2"; then v=true; fi
   fi
   if ! in_only "$1"; then v=false; fi
@@ -44,7 +46,7 @@ flag gc '^src/(runtime/|internal/abi/|internal/goexperiment/|logos/arena/)|^\.gi
 flag compiler '^src/(cmd/compile/|cmd/go/|internal/buildcfg/)|^test/logos/|^\.github/scripts/install-(ci-tool|upstream-oracles)\.sh$'
 flag cgo '^misc/cgo/|^src/(cmd/cgo/|runtime/|internal/goexperiment/|internal/buildcfg/|cmd/go/internal/logos/settings/)' push
 flag dogfood '^misc/logos-dogfood/|^src/'
-flag bench '^src/cmd/compile/internal/ssa/(autovec_logos\.go|testdata/autovec_bench_test\.go)$|^test/logos/bench/autovec_measure\.sh$'
+flag bench '^src/cmd/compile/internal/ssa/(autovec_logos\.go|testdata/autovec_bench_test\.go)$|^test/logos/bench/autovec_measure\.sh$' pr
 gates=
 if [ "$ev" = workflow_dispatch ] || [ $all = true ]; then
   if [ "$ev" != workflow_dispatch ] || want gates; then gates=$(bash .github/scripts/gate-changes.sh "" | tr '\n' ' '); fi
