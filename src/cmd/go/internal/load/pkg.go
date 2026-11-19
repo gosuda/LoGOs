@@ -937,7 +937,7 @@ func loadPackageData(ld *modload.Loader, ctx context.Context, path, parentPath, 
 		}
 		if r.dir != "" {
 			var buildMode build.ImportMode
-			buildContext := cfg.BuildContext
+			buildContext := logosBuildContextFor(r.path)
 			if !cfg.ModulesEnabled {
 				buildMode = build.ImportComment
 			} else {
@@ -953,7 +953,7 @@ func loadPackageData(ld *modload.Loader, ctx context.Context, path, parentPath, 
 			}
 			if modroot != "" {
 				if rp, err := modindex.GetPackage(modroot, r.dir); err == nil {
-					data.p, data.err = rp.Import(cfg.BuildContext, buildMode)
+					data.p, data.err = rp.Import(logosBuildContextFor(r.path), buildMode)
 					goto Happy
 				} else if !errors.Is(err, modindex.ErrNotIndexed) {
 					base.Fatal(err)
@@ -1001,7 +1001,8 @@ func loadPackageData(ld *modload.Loader, ctx context.Context, path, parentPath, 
 				// Not vendoring, or we already found the vendored path.
 				buildMode |= build.IgnoreVendor
 			}
-			data.p, data.err = cfg.BuildContext.Import(r.path, parentDir, buildMode)
+			buildContext := logosBuildContextFor(r.path)
+			data.p, data.err = buildContext.Import(r.path, parentDir, buildMode)
 		}
 		data.p.ImportPath = r.path
 
