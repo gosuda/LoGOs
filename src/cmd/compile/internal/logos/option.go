@@ -9,6 +9,7 @@ import (
 	"go/token"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 
 	"cmd/compile/internal/base"
@@ -617,6 +618,9 @@ func (fl *fileLower) spellLowered(t types2.Type) (string, bool) {
 		case types2.RecvOnly:
 			return "<-chan " + e, true
 		default:
+			if rc, ok := types2.Unalias(c.Elem()).(*types2.Chan); ok && rc.Dir() == types2.RecvOnly {
+				return "chan (" + e + ")", true
+			}
 			return "chan " + e, true
 		}
 	case *types2.Signature:
@@ -663,11 +667,32 @@ func (fl *fileLower) spellLoweredApplied(obj *types2.TypeName, args *types2.Type
 func (fl *fileLower) spellLoweredSig(sig *types2.Signature) (string, bool) {
 	var b strings.Builder
 	b.WriteString("func(")
+	last := -1
+	if sig.Variadic() {
+		last = sig.Params().Len() - 1
+	}
 	for i := range sig.Params().Len() {
 		if i > 0 {
 			b.WriteString(", ")
 		}
-		p, ok := fl.spellLowered(sig.Params().At(i).Type())
+		pt := sig.Params().At(i).Type()
+		if i == last {
+			if s, ok := types2.Unalias(pt).(*types2.Slice); ok {
+				e, ok := fl.spellLowered(s.Elem())
+				if !ok {
+					return "", false
+				}
+				b.WriteString("..." + e)
+				continue
+			}
+			p, ok := fl.spellLowered(pt)
+			if !ok {
+				return "", false
+			}
+			b.WriteString(p + "...")
+			continue
+		}
+		p, ok := fl.spellLowered(pt)
 		if !ok {
 			return "", false
 		}
@@ -727,9 +752,8 @@ func (fl *fileLower) spellLoweredStruct(st *types2.Struct) (string, bool) {
 			b.WriteString(t)
 		}
 		if tag := st.Tag(i); tag != "" {
-			b.WriteString(" `")
-			b.WriteString(tag)
-			b.WriteByte('`')
+			b.WriteByte(' ')
+			b.WriteString(strconv.Quote(tag))
 		}
 	}
 	b.WriteString(" }")
