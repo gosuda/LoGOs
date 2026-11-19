@@ -31,8 +31,9 @@ func main() {
 	w, ok := m.(Wrap).Inner.(Wrap)
 	fmt.Println(ok && w.Inner == Leaf{S: "y"})
 
-	var o Node = OptWrap{}
+	var o Node = OptWrap{Fallback: Node(Leaf{S: "z"})}
 	fmt.Println(o != nil)
+	fmt.Println(o.(OptWrap).Fallback != nil)
 
 	fmt.Println(Wrap{} == Wrap{Inner: Leaf{S: "x"}})
 
