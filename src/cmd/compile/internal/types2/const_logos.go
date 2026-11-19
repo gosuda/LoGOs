@@ -34,33 +34,39 @@ func logosAsConstView(T Type) *ConstView {
 }
 
 func logosReferenceFree(t Type) bool {
-	return logosReferenceFreeAlong(t, nil)
+	return logosReferenceFreeAlong(t, nil, nil)
 }
 
-func logosReferenceFreeAlong(t Type, expanding []*TypeParam) bool {
+func logosReferenceFreeAlong(t Type, expanding []*TypeParam, path []*Named) bool {
 	if tp, ok := Unalias(t).(*TypeParam); ok {
 		if slices.Contains(expanding, tp) {
 			return false
 		}
 		expanding = append(expanding, tp)
 		return tp.is(func(tm *term) bool {
-			return tm != nil && logosReferenceFreeAlong(tm.typ, expanding)
+			return tm != nil && logosReferenceFreeAlong(tm.typ, expanding, path)
 		})
+	}
+	if named, ok := Unalias(t).(*Named); ok {
+		if slices.Contains(path, named) {
+			return false
+		}
+		path = append(path, named)
 	}
 	switch t := t.Underlying().(type) {
 	case *Basic:
 		return t.Kind() != UnsafePointer
 	case *Array:
-		return t.Len() == 0 || logosReferenceFreeAlong(t.Elem(), expanding)
+		return t.Len() == 0 || logosReferenceFreeAlong(t.Elem(), expanding, path)
 	case *Struct:
 		for i := range t.NumFields() {
-			if !logosReferenceFreeAlong(t.Field(i).Type(), expanding) {
+			if !logosReferenceFreeAlong(t.Field(i).Type(), expanding, path) {
 				return false
 			}
 		}
 		return true
 	case *Option:
-		return logosReferenceFreeAlong(t.Elem, expanding)
+		return logosReferenceFreeAlong(t.Elem, expanding, path)
 	}
 	return false
 }

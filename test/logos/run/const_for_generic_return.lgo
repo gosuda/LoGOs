@@ -1,0 +1,38 @@
+// run
+
+package main
+
+import (
+	"comptime"
+	"fmt"
+	"os"
+)
+
+var failed bool
+
+func check(name string, cond bool, got, want any) {
+	if !cond {
+		failed = true
+		fmt.Println("FAIL", name+":", "got", got, "want", want)
+		return
+	}
+	fmt.Println("ok", name)
+}
+
+func first[T any]() int {
+	const for i, _ := range comptime.Fields[T]() {
+		return i
+	}
+}
+
+type One struct {
+	X int
+}
+
+func main() {
+	got := first[One]()
+	check("one-field", got == 0, got, 0)
+	if failed {
+		os.Exit(1)
+	}
+}
