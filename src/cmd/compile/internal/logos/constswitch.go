@@ -731,6 +731,9 @@ func (c *cswLower) cswSpell(typ types2.Type) string {
 }
 
 func (fl *fileLower) plainTypeSpell(typ types2.Type) string {
+	if _, ok := typ.(*types2.Alias); ok {
+		return fl.typeSpell(typ)
+	}
 	switch t := unaliasConstView(typ).(type) {
 	case *types2.Option:
 		if types2.LogosOptionIsBare(t.Elem) {
@@ -752,6 +755,9 @@ func (fl *fileLower) plainTypeSpell(typ types2.Type) string {
 			return "<-chan " + fl.plainTypeSpell(t.Elem())
 		case types2.SendOnly:
 			return "chan<- " + fl.plainTypeSpell(t.Elem())
+		}
+		if c, ok := types2.Unalias(t.Elem()).(*types2.Chan); ok && c.Dir() == types2.RecvOnly {
+			return "chan (" + fl.plainTypeSpell(t.Elem()) + ")"
 		}
 		return "chan " + fl.plainTypeSpell(t.Elem())
 	case *types2.Named:
@@ -800,10 +806,18 @@ func (fl *fileLower) paramsText(ps *types2.Tuple, variadic bool) string {
 		if i > 0 {
 			b.WriteString(", ")
 		}
+		t := ps.At(i).Type()
 		if variadic && i == ps.Len()-1 {
+			if s, ok := t.(*types2.Slice); ok {
+				b.WriteString("...")
+				b.WriteString(fl.plainTypeSpell(s.Elem()))
+				continue
+			}
+			b.WriteString(fl.plainTypeSpell(t))
 			b.WriteString("...")
+			continue
 		}
-		b.WriteString(fl.plainTypeSpell(ps.At(i).Type()))
+		b.WriteString(fl.plainTypeSpell(t))
 	}
 	return b.String()
 }
