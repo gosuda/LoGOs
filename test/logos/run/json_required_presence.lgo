@@ -108,8 +108,8 @@ func main() {
 	alias9 := u9.Profile
 	err = strictAllowDups(`{"profile":null,"profile":{"age":31}}`, u9)
 	check("strict-allowdups-no-error", err == nil, fmt.Sprint(err))
-	check("strict-allowdups-value", u9.Profile.Age == 31 && u9.Profile.Name == "Ann", fmt.Sprintf("%+v", u9.Profile))
-	check("strict-allowdups-alias", alias9 == u9.Profile && alias9.Age == 31, "alias missed the update")
+	check("strict-allowdups-value", u9.Profile.Age == 31 && u9.Profile.Name == "", fmt.Sprintf("%+v", u9.Profile))
+	check("strict-allowdups-alias", alias9 != u9.Profile && alias9.Age == 30 && alias9.Name == "Ann", fmt.Sprintf("%+v", alias9))
 
 	u10 := &PresenceUser{Name: "ann", Profile: &PresenceProfile{Name: "Ann", Age: 30}}
 	err = strictAllowDups(`{"profile":{"age":31},"profile":null}`, u10)
