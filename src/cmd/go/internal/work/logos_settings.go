@@ -18,6 +18,7 @@ import (
 	"cmd/go/internal/logos/settings"
 	"cmd/go/internal/modload"
 	"cmd/internal/pathcache"
+	"cmd/internal/quoted"
 )
 
 var logosSettingsErr error
@@ -37,21 +38,46 @@ func refreshLogosPolicy(ld *modload.Loader) {
 }
 
 func keepStandardLibraryPureGo() {
-	for _, tag := range []string{"netgo", "osusergo"} {
-		if !slices.Contains(cfg.BuildContext.BuildTags, tag) {
-			cfg.BuildContext.BuildTags = append(cfg.BuildContext.BuildTags, tag)
-		}
+	// A caller tag of netcgo asks for the cgo resolver explicitly. Adding
+	// netgo beside it trips the resolver tag guard, so the race override
+	// yields to the explicit tag; the cgo ban still refuses every
+	// non-standard C package. os/user has no opposing tag.
+	if !slices.Contains(cfg.BuildContext.BuildTags, "netgo") && !slices.Contains(cfg.BuildContext.BuildTags, "netcgo") {
+		cfg.BuildContext.BuildTags = append(cfg.BuildContext.BuildTags, "netgo")
 	}
+	if !slices.Contains(cfg.BuildContext.BuildTags, "osusergo") {
+		cfg.BuildContext.BuildTags = append(cfg.BuildContext.BuildTags, "osusergo")
+	}
+}
+
+// logosListBuildsBinaries records whether the list command will compile
+// packages for this invocation. The list command sets it after flag
+// parsing and before BuildInit, so the race compiler preflight applies to
+// the listings that build (-export, -compiled, or a Stale query) and stays
+// silent for the ones that only describe packages.
+var logosListBuildsBinaries bool
+
+// SetListBuildMode tells the race policy whether this list invocation
+// compiles packages.
+func SetListBuildMode(buildsBinaries bool) {
+	logosListBuildsBinaries = buildsBinaries
 }
 
 // requireRaceRuntimeCompiler ends a raced build that would fail later
 // inside runtime/cgo with a message that names neither the race runtime
-// nor logos.toml. A listing compiles nothing and needs no compiler.
+// nor logos.toml. A listing that compiles nothing needs no compiler; one
+// that does takes the same preflight as a build.
 func requireRaceRuntimeCompiler() {
-	if cfg.CmdName == "list" || cfg.BuildN {
+	if cfg.BuildN || (cfg.CmdName == "list" && !logosListBuildsBinaries) {
 		return
 	}
-	cc := envList("CC", cfg.DefaultCC(cfg.Goos, cfg.Goarch))
+	cc, ok := raceCompilerCommand()
+	if !ok {
+		// The CC setting does not parse. BuildInit validates CC, CXX and FC
+		// and reports the malformed value with its configuration
+		// diagnostic; the preflight stays out of its way.
+		return
+	}
 	if len(cc) > 0 {
 		if _, err := pathcache.LookPath(cc[0]); err == nil {
 			return
@@ -60,6 +86,23 @@ func requireRaceRuntimeCompiler() {
 	fmt.Fprintf(os.Stderr, "logos: -race links the race runtime through cgo and needs a C compiler; found neither %q nor zig on PATH (the [build] cgo policy of logos.toml still refuses every cgo package)\n", strings.Join(cc, " "))
 	base.SetExitStatus(2)
 	base.Exit()
+}
+
+// raceCompilerCommand reports the CC command for the race preflight. It
+// mirrors envList for CC but returns false instead of panicking when the
+// setting does not parse, so the caller can defer to the configuration
+// diagnostic in BuildInit.
+func raceCompilerCommand() ([]string, bool) {
+	v := cfg.Getenv("CC")
+	if v == "" {
+		v = cfg.DefaultCC(cfg.Goos, cfg.Goarch)
+	}
+	v = logosCompilerFallback("CC", v)
+	args, err := quoted.Split(v)
+	if err != nil {
+		return nil, false
+	}
+	return args, true
 }
 
 // logosRaceNeedsCgoLinkage ends a raced logos build that an explicit

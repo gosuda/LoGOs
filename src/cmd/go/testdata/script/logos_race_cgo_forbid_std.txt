@@ -1,0 +1,77 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+[!race] skip 'the platform has no race detector'
+[!cgo] skip 'the race runtime links through cgo'
+[!GOOS:linux] [!GOOS:darwin] [!GOOS:freebsd] skip 'plugin cgo paths exist only on linux, darwin and freebsd'
+
+env CC=
+env CGO_ENABLED=
+
+cd forbid
+
+# A standard-library cgo package is refused under the ban in a raced build.
+! logos build -race .
+stderr '\[restriction::cgo_usage\] cgo is disabled'
+! logos run -race main.lgo
+stderr '\[restriction::cgo_usage\] cgo is disabled'
+
+# Without -race no C sources enter the build, so the stubs link normally.
+logos build .
+
+# The race runtime linkage itself still works under the ban.
+! logos test -race -count=1 ./racy
+stdout 'WARNING: DATA RACE'
+! stderr 'requires cgo'
+
+-- forbid/go.mod --
+module example.com/forbidstd
+
+go 1.27
+
+-- forbid/logos.toml --
+[build]
+cgo = "forbid"
+
+-- forbid/main.lgo --
+package main
+
+import _ "plugin"
+
+func main() {}
+
+-- forbid/racy/racy.lgo --
+package racy
+
+import "context"
+
+func Count(ctx context.Context) (int, error) {
+	n := 0
+	go group (ctx) {
+		go {
+			for i := 0; i < 1000; i++ {
+				n++
+			}
+		}
+		go {
+			for i := 0; i < 1000; i++ {
+				n++
+			}
+		}
+	}
+	return n, nil
+}
+
+-- forbid/racy/racy_test.lgo --
+package racy
+
+import (
+	"context"
+	"testing"
+)
+
+func TestCount(t *testing.T) {
+	if _, err := Count(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}

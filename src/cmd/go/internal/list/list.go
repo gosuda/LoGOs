@@ -438,6 +438,7 @@ func runList(ctx context.Context, cmd *base.Command, args []string) {
 		base.Fatalf("go list -reuse cannot be used inside a module")
 	}
 
+	work.SetListBuildMode(*listExport || *listCompiled || (listJson && listJsonFields.needAny("Stale", "StaleReason")) || strings.Contains(*listFmt, ".Stale"))
 	work.BuildInit(moduleLoader)
 	out := newTrackingWriter(os.Stdout)
 	defer out.w.Flush()

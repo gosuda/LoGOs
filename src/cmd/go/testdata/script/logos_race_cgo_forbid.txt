@@ -17,6 +17,10 @@ stdout 'WARNING: DATA RACE'
 logos test -race -count=1 ./clean
 stdout '^ok  '
 
+# An explicit netcgo tag is kept: the race override must not add netgo beside it.
+logos test -race -tags=netcgo -count=1 ./clean
+stdout '^ok  '
+
 # The race runtime is linked; net keeps its pure-Go files.
 logos list -race -test -deps -f '{{.ImportPath}}' ./clean
 stdout '^runtime/cgo$'
@@ -36,6 +40,10 @@ stderr '\[restriction::cgo_usage\] cgo is disabled'
 stderr '\[restriction::cgo_usage\] cgo is disabled'
 env CGO_ENABLED=
 
+# Named files take the main-module policy: forbidden C is refused, not compiled.
+! logos run -race ./usescmain/main.lgo
+stderr '\[restriction::cgo_usage\] cgo is disabled'
+
 # Without -race the ban still means no cgo at all.
 logos list -test -deps -f '{{.ImportPath}}' ./clean
 ! stdout '^runtime/cgo$'
@@ -48,6 +56,12 @@ env CGO_ENABLED=0
 stderr 'CGO_ENABLED=0'
 ! stderr 'enable cgo by setting CGO_ENABLED=1'
 env CGO_ENABLED=
+
+# A malformed CC is reported by the configuration diagnostic, not a panic.
+env CC='"gcc'
+! logos test -race -count=1 ./clean
+stderr 'could not be parsed'
+env CC=
 
 # A module with no cgo key has the same default.
 cd ../nokey
@@ -67,6 +81,11 @@ stderr 'logos.toml'
 ! stderr 'C compiler "gcc" not found'
 logos list -race -test -deps -f '{{.ImportPath}}' ./racy
 stdout '^runtime/race$'
+
+# A listing that compiles still gets the race compiler diagnostic.
+! logos list -race -export -f '{{.ImportPath}}' ./racy
+stderr 'needs a C compiler'
+stderr 'logos.toml'
 
 -- forbid/go.mod --
 module example.com/forbid
@@ -159,6 +178,20 @@ import "testing"
 func TestAnswer(t *testing.T) {
 	if Answer() != 42 {
 		t.Fatal("wrong answer")
+	}
+}
+
+-- forbid/usescmain/main.lgo --
+package main
+
+/*
+int answer(void) { return 42; }
+*/
+import "C"
+
+func main() {
+	if int(C.answer()) != 42 {
+		panic("wrong answer")
 	}
 }
 
