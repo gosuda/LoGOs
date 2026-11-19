@@ -15,8 +15,8 @@ func pick[F any]() int {
 
 // Today the error fires for every instantiation, even one whose copy
 // returns from the selected case before reaching comptime.Error.
-var _ = pick[int]() // ERROR "unsupported"
-var _ = pick[string]() // ERROR "unsupported"
+var _ = pick[int]() // ERROR "\[comptime::error\] unsupported"
+var _ = pick[string]() // ERROR "\[comptime::error\] unsupported"
 
 func pickChecked[F any]() int {
 	const switch F {
