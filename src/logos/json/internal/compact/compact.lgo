@@ -1,0 +1,100 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+// Package compact applies the encoding/json marshalerEncoder contract
+// to bytes a MarshalJSON method returned. It lives in its own package
+// because an exported LoGOs generic cannot name an unexported function
+// of its own package.
+package compact
+
+import (
+	"bytes"
+	stdjson "encoding/json"
+	"reflect"
+)
+
+const hex = "0123456789abcdef"
+
+// Marshal applies the encoding/json marshalerEncoder contract to the
+// bytes a MarshalJSON method returned: insignificant space is elided,
+// '<', '>', '&' and U+2028/U+2029 inside strings are escaped, and a
+// failure of either step is reported as a *MarshalerError. Generated
+// methods already emit compact escaped bytes, so the pass is the
+// identity for them and the byte-equal fix for hand-written ones.
+func Marshal(typ reflect.Type, b []byte, err error) ([]byte, error) {
+	if err != nil {
+		return nil, &stdjson.MarshalerError{Type: typ, Err: err}
+	}
+	out, cerr := Escaped(b)
+	if cerr != nil {
+		return nil, &stdjson.MarshalerError{Type: typ, Err: cerr}
+	}
+	return out, nil
+}
+
+// Escaped reproduces appendCompact(src, escape=true): it strips
+// insignificant space while validating the input and escapes the HTML
+// metacharacters and the two Unicode line separators the way
+// encoding/json does for top-level Marshal output. Bytes that need no
+// compaction and no escaping are returned unchanged after a Valid
+// check, so generated output costs one scan and no copy.
+func Escaped(src []byte) ([]byte, error) {
+	if clean(src) {
+		if stdjson.Valid(src) {
+			return src, nil
+		}
+	}
+	var buf bytes.Buffer
+	buf.Grow(len(src))
+	if err := stdjson.Compact(&buf, src); err != nil {
+		return nil, err
+	}
+	compact := buf.Bytes()
+	if !needsEscape(compact) {
+		return compact, nil
+	}
+	out := make([]byte, 0, len(compact)+8)
+	for i := 0; i < len(compact); i++ {
+		c := compact[i]
+		switch {
+		case c == '<' || c == '>' || c == '&':
+			out = append(out, '\\', 'u', '0', '0', hex[c>>4], hex[c&0xF])
+		case c == 0xE2 && i+2 < len(compact) && compact[i+1] == 0x80 && compact[i+2]&^1 == 0xA8:
+			out = append(out, '\\', 'u', '2', '0', '2', hex[compact[i+2]&0xF])
+			i += 2
+		default:
+			out = append(out, c)
+		}
+	}
+	return out, nil
+}
+
+// clean reports whether src can contain neither insignificant space
+// nor a byte the escape pass would rewrite.
+func clean(b []byte) bool {
+	for i := 0; i < len(b); i++ {
+		c := b[i]
+		if c == ' ' || c == '\t' || c == '\r' || c == '\n' ||
+			c == '<' || c == '>' || c == '&' {
+			return false
+		}
+		if c == 0xE2 && i+2 < len(b) && b[i+1] == 0x80 && b[i+2]&^1 == 0xA8 {
+			return false
+		}
+	}
+	return true
+}
+
+func needsEscape(b []byte) bool {
+	for i := 0; i < len(b); i++ {
+		c := b[i]
+		if c == '<' || c == '>' || c == '&' {
+			return true
+		}
+		if c == 0xE2 && i+2 < len(b) && b[i+1] == 0x80 && b[i+2]&^1 == 0xA8 {
+			return true
+		}
+	}
+	return false
+}

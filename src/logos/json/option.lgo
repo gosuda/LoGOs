@@ -7,7 +7,9 @@ package json
 import (
 	"comptime"
 	stdjson "encoding/json"
+	"reflect"
 
+	"logos/json/internal/compact"
 	rt "logos/rt"
 )
 
@@ -22,7 +24,11 @@ func MarshalOption[T any](v rt.Option[T]) ([]byte, error) {
 	}
 	const if comptime.IsStruct[T]() {
 		if m, ok := any(v.Value).(stdjson.Marshaler); ok {
-			return m.MarshalJSON()
+			b, err := m.MarshalJSON()
+			if err != nil {
+				return compact.Marshal(reflect.PointerTo(reflect.TypeOf(v.Value)), nil, err)
+			}
+			return compact.Marshal(reflect.PointerTo(reflect.TypeOf(v.Value)), b, nil)
 		}
 	}
 	return stdjson.Marshal(v.Value)

@@ -8,18 +8,28 @@ import (
 	"comptime"
 	stdjson "encoding/json"
 	"io"
+	"reflect"
+
+	"logos/json/internal/compact"
 )
+
 // Marshal returns the JSON encoding of v. For a value-struct type
 // with a generated or hand-written MarshalJSON method it calls that
 // method directly through a comptime interface case, with no value
-// boxing. Every other value, including nil pointers and interfaces,
-// goes through encoding/json, so output bytes equal the original on
-// the same inputs (a nil pointer marshals as null, never panics).
+// boxing, compacts and HTML-escapes the result the way encoding/json
+// does, and wraps failures in *MarshalerError. Every other value,
+// including nil pointers and interfaces, goes through encoding/json,
+// so output bytes equal the original on the same inputs (a nil
+// pointer marshals as null, never panics).
 func Marshal[T any](v T) ([]byte, error) {
 	const if comptime.IsStruct[T]() {
 		const switch T {
 		case stdjson.Marshaler:
-			return v.MarshalJSON()
+			b, err := v.MarshalJSON()
+			if err != nil {
+				return compact.Marshal(reflect.PointerTo(reflect.TypeOf(v)), nil, err)
+			}
+			return compact.Marshal(reflect.PointerTo(reflect.TypeOf(v)), b, nil)
 		}
 	}
 	return stdjson.Marshal(v)
@@ -40,12 +50,18 @@ func Unmarshal[T any](data []byte) (T, error) {
 }
 
 // MarshalWrite marshals in and writes the bytes to out in one Write
-// call. It allocates only the single marshaled buffer.
+// call. Value-struct types take the same generated-method path as
+// Marshal; every other value goes through encoding/json.
 func MarshalWrite[T any](out io.Writer, in T) error {
 	const if comptime.IsStruct[T]() {
 		const switch T {
 		case stdjson.Marshaler:
 			b, err := in.MarshalJSON()
+			if err != nil {
+				_, merr := compact.Marshal(reflect.PointerTo(reflect.TypeOf(in)), nil, err)
+				return merr
+			}
+			b, err = compact.Marshal(reflect.PointerTo(reflect.TypeOf(in)), b, nil)
 			if err != nil {
 				return err
 			}
