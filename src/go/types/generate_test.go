@@ -813,6 +813,7 @@ var logosMethods = map[string]bool{
 	"SetLogosReadonly":          true,
 	"logosCgoTypeName":          true,
 	"logosStructTupleIdentical": true,
+	"ifaceWord":                 true,
 	"logosIfaceWord":            true,
 }
 var logosFuncs = map[string]bool{
@@ -890,6 +891,7 @@ var logosDecls = map[string]bool{
 	"logosMonoCyclicParam":  true,
 	"logosMonoCyclicDecl":   true,
 	"logosMonoCyclicNamed":  true,
+	"ifaceWord":             true,
 }
 var logosFields = map[string]map[string]bool{
 	"Func":       {"logosReadonly": true, "logosAssert": true},
