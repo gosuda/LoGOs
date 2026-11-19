@@ -6,9 +6,6 @@ package logos
 
 import (
 	"fmt"
-	"go/ast"
-	"go/parser"
-	"go/token"
 	"internal/testenv"
 	"os"
 	"os/exec"
@@ -230,76 +227,22 @@ func constmapFlatRuntimeTable(t *testing.T, keys []constMapKey) *rt.ConstTable[s
 	return tab
 }
 
-// constmapAssertOneProbeGet pins the shipped lookup to a single slot read:
-// the body of rt.ConstTable.Get must index Slots exactly once and hold no
-// loop. A scan or binary-search rewrite fails here with no timing involved.
-func constmapAssertOneProbeGet(t *testing.T) {
-	t.Helper()
-	_, self, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller(0) failed")
+// constmapDesignatedSlot recomputes, through the exported runtime API, the
+// one slot rt.ConstTable.Get may read for hash h: the bucket picked by
+// ConstMix(Salt, h) and the slot picked by ConstMix(Seed, h). It returns -1
+// for a Size-0 bucket, which Get answers without reading.
+func constmapDesignatedSlot[K comparable](tab *rt.ConstTable[K, int], h uint64) int {
+	b := &tab.Buckets[rt.ConstMix(tab.Salt, h)&uint64(len(tab.Buckets)-1)]
+	if b.Size == 0 {
+		return -1
 	}
-	path := filepath.Join(filepath.Dir(self), "../../../../logos/rt/constmap.go")
-	fset := token.NewFileSet()
-	f, err := parser.ParseFile(fset, path, nil, 0)
-	if err != nil {
-		t.Fatalf("parse %s: %v", path, err)
-	}
-	found := false
-	for _, decl := range f.Decls {
-		fn, ok := decl.(*ast.FuncDecl)
-		if !ok || fn.Name.Name != "Get" || fn.Recv == nil || len(fn.Recv.List) == 0 {
-			continue
-		}
-		deref, ok := fn.Recv.List[0].Type.(*ast.StarExpr)
-		if !ok {
-			continue
-		}
-		var recv *ast.Ident
-		switch x := deref.X.(type) {
-		case *ast.IndexExpr:
-			recv, _ = x.X.(*ast.Ident)
-		case *ast.IndexListExpr:
-			recv, _ = x.X.(*ast.Ident)
-		default:
-			recv, _ = deref.X.(*ast.Ident)
-		}
-		if recv == nil || recv.Name != "ConstTable" {
-			continue
-		}
-		found = true
-		loops, slots := 0, 0
-		ast.Inspect(fn.Body, func(n ast.Node) bool {
-			switch n := n.(type) {
-			case *ast.ForStmt, *ast.RangeStmt:
-				loops++
-			case *ast.BranchStmt:
-				if n.Tok == token.GOTO {
-					loops++
-				}
-			case *ast.IndexExpr:
-				if sel, ok := n.X.(*ast.SelectorExpr); ok && sel.Sel.Name == "Slots" {
-					slots++
-				}
-			}
-			return true
-		})
-		if loops != 0 {
-			t.Fatalf("ConstTable.Get holds %d loops: one-probe contract needs none", loops)
-		}
-		if slots != 1 {
-			t.Fatalf("ConstTable.Get reads %d slots: one-probe contract needs exactly one", slots)
-		}
-	}
-	if !found {
-		t.Fatalf("ConstTable.Get not found in %s", path)
-	}
+	return int(b.Off) + int(rt.ConstMix(b.Seed, h)&uint64(b.Size-1))
 }
 
 func TestConstmapLookupCostFlat(t *testing.T) {
-	// No wall clock here: every assertion below is structural or
-	// count-based, so host load cannot move the result.
-	constmapAssertOneProbeGet(t)
+	// No wall clock here: every assertion below is count-based, so host
+	// load cannot move the result. The one-probe contract itself is pinned
+	// behaviorally by TestConstmapLookupPoisonedSlots.
 	sizes := []int{16, 1024, 16384}
 	const misses = 1024
 	lookups := make(map[int]string, len(sizes))
@@ -397,6 +340,93 @@ func TestConstmapLookupCostFlat(t *testing.T) {
 			t.Fatalf("generated lookup differs between %d and %d keys: lookup cost is not table-size independent", sizes[0], n)
 		}
 	}
+}
+
+func TestConstmapLookupPoisonedSlots(t *testing.T) {
+	// No wall clock here: a lookup that reads any slot but the designated
+	// one finds poison, so host load cannot move the result.
+	const poison = -999
+	for _, n := range []int{1, 2, 16, 1024} {
+		keys := constmapKeys(n)
+		tab := constmapFlatRuntimeTable(t, keys)
+		sampled := []int{0}
+		if n > 2 {
+			sampled = []int{0, n / 2, n - 1}
+		} else if n == 2 {
+			sampled = []int{0, 1}
+		}
+		for _, i := range sampled {
+			k := keys[i]
+			h := rt.HashString(k.canon)
+			d := constmapDesignatedSlot(tab, h)
+			if d < 0 || !tab.Slots[d].Occ || tab.Slots[d].Key != k.canon {
+				t.Fatalf("size %d: designated slot of key %d is not its own", n, i)
+			}
+			saved := append([]rt.ConstSlot[string, int](nil), tab.Slots...)
+			for s := range tab.Slots {
+				if s != d {
+					tab.Slots[s] = rt.ConstSlot[string, int]{Key: k.canon, Val: poison, Occ: true}
+				}
+			}
+			if v, ok := tab.Get(h, k.canon); !ok || v != i {
+				t.Fatalf("size %d: poisoned Get(%q) = (%d, %v), want (%d, true)", n, k.canon, v, ok, i)
+			}
+			m := fmt.Sprintf("q%05d-%d", n, i)
+			hm := rt.HashString(m)
+			dm := constmapDesignatedSlot(tab, hm)
+			if dm < 0 {
+				t.Fatalf("size %d: miss key %q lands in a Size-0 bucket", n, m)
+			}
+			tab.Slots = append([]rt.ConstSlot[string, int](nil), saved...)
+			tab.Slots[dm] = rt.ConstSlot[string, int]{}
+			for s := range tab.Slots {
+				if s != dm {
+					tab.Slots[s] = rt.ConstSlot[string, int]{Key: m, Val: poison, Occ: true}
+				}
+			}
+			if v, ok := tab.Get(hm, m); ok {
+				t.Fatalf("size %d: poisoned Get(%q) = (%d, true), want absent", n, m, v)
+			}
+			tab.Slots = saved
+		}
+	}
+	// Hand-built edge: a key in a Size-1 bucket and a degenerate Size-0
+	// bucket. The generator never emits these shapes, so they are spelled
+	// by hand through the exported fields.
+	const salt = uint64(0xC0FFEE)
+	var k0, m string
+	for i := 0; k0 == "" || m == ""; i++ {
+		c := fmt.Sprintf("pk%05d", i)
+		if rt.ConstMix(salt, rt.HashString(c))&1 == 0 {
+			if k0 == "" {
+				k0 = c
+			}
+		} else if m == "" {
+			m = c
+		}
+	}
+	edge := &rt.ConstTable[string, int]{Salt: salt}
+	edge.Buckets = []rt.ConstBucket{{Off: 2, Size: 1, Seed: 0x9E37}, {Off: 3, Size: 0}}
+	edge.Slots = []rt.ConstSlot[string, int]{{}, {}, {Key: k0, Val: 42, Occ: true}, {}}
+	if d := constmapDesignatedSlot(edge, rt.HashString(k0)); d != 2 {
+		t.Fatalf("edge table: designated slot of %q is %d, want 2", k0, d)
+	}
+	edgeSaved := append([]rt.ConstSlot[string, int](nil), edge.Slots...)
+	for s := range edge.Slots {
+		if s != 2 {
+			edge.Slots[s] = rt.ConstSlot[string, int]{Key: k0, Val: poison, Occ: true}
+		}
+	}
+	if v, ok := edge.Get(rt.HashString(k0), k0); !ok || v != 42 {
+		t.Fatalf("edge table: poisoned Get(%q) = (%d, %v), want (42, true)", k0, v, ok)
+	}
+	for s := range edge.Slots {
+		edge.Slots[s] = rt.ConstSlot[string, int]{Key: m, Val: poison, Occ: true}
+	}
+	if v, ok := edge.Get(rt.HashString(m), m); ok {
+		t.Fatalf("edge table: poisoned Get(%q) = (%d, true), want absent", m, v)
+	}
+	edge.Slots = edgeSaved
 }
 
 func constmapHeapCtlSrc() string {
