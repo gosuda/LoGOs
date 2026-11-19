@@ -50,6 +50,7 @@ flag compiler '^src/(cmd/compile/|cmd/go/|internal/buildcfg/)|^test/logos/|^\.gi
 flag cgo '^misc/cgo/|^src/(cmd/cgo/|runtime/|internal/goexperiment/|internal/buildcfg/|cmd/go/internal/logos/settings/)' push
 flag dogfood '^misc/logos-dogfood/|^src/'
 flag bench '^src/cmd/compile/internal/ssa/(autovec_logos\.go|testdata/autovec_bench_test\.go)$|^test/logos/bench/autovec_measure\.sh$' pr
+if [ "$ev" = workflow_dispatch ] && want bench; then printf 'warning: bench runs on pull requests only; this dispatch runs no benchmark\n' >&2; fi
 gates=
 if [ "$ev" = workflow_dispatch ] || [ $all = true ]; then
   if [ "$ev" != workflow_dispatch ] || want gates; then gates=$(bash .github/scripts/gate-changes.sh "" | tr '\n' ' '); fi

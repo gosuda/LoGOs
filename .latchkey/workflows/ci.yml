@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       suites:
-        description: "core ssa gc gates compiler cgo dogfood bench, or all"
+        description: "core ssa gc gates compiler cgo dogfood, or all"
         default: all
 
 latchkey:
