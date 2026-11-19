@@ -18,6 +18,12 @@ type LogosConstFor struct {
 	IndexVar  *Var
 	Generic   bool
 	GoVersion string
+	// Term and Breaks record, per visible field in expansion order, the
+	// terminating and break verdict of the body under that field's
+	// predicate values, for the analysis in return.go. They stay empty
+	// for a generic const for, whose expansion is not yet known.
+	Term   []bool
+	Breaks []LogosConstForBreaks
 }
 
 type LogosCopyContext struct {
@@ -332,6 +338,8 @@ func (check *Checker) logosConstForConcrete(s *syntax.ConstForStmt, info *LogosC
 		check.openScope(s.Body, "const for iteration")
 		check.stmtList(inner, s.Body.List)
 		check.closeScope()
+		info.Term = append(info.Term, check.isTerminatingList(s.Body.List, ""))
+		info.Breaks = append(info.Breaks, check.logosLiveBreaks(s.Body))
 	}
 	if checked == 0 {
 		check.usedVars[info.FieldVar] = true
@@ -579,4 +587,191 @@ func (check *Checker) logosFieldProjType(info *LogosConstFor) Type {
 		return logosComptimeAny
 	}
 	return shared
+}
+
+// logosTerminatingConstFor reports whether a const for is terminating by
+// its expansion: over a concrete struct the statement stands for the
+// sequence of its per-field bodies, so it terminates when some visible
+// field's body terminates under that field's predicate values, and a
+// struct with no visible fields expands to nothing and never terminates.
+// When no per-field verdict was recorded (a generic const for or a
+// rejected range), it falls back to the shared body, the previous rule.
+// logosConstForConcrete records Term per visible field.
+func (check *Checker) logosTerminatingConstFor(s *syntax.ConstForStmt) bool {
+	info := check.Info.LogosConstFor[s]
+	if info == nil {
+		return false
+	}
+	if len(info.Term) == 0 && info.Struct == nil {
+		return check.isTerminatingList(s.Body.List, "")
+	}
+	for _, term := range info.Term {
+		if term {
+			return true
+		}
+	}
+	return false
+}
+
+// logosHasBreakConstFor reports whether some visible field's live body
+// holds a break that leaves the const for for the label-ed statement or,
+// when implicit is set, the closest outer breakable statement. A struct
+// with no visible fields holds no break. When no per-field verdict was
+// recorded, it falls back to the shared body, the previous rule.
+// logosConstForConcrete records Breaks per visible field.
+func (check *Checker) logosHasBreakConstFor(s *syntax.ConstForStmt, label string, implicit bool) bool {
+	info := check.Info.LogosConstFor[s]
+	if info == nil {
+		return false
+	}
+	if len(info.Breaks) == 0 && info.Struct == nil {
+		return check.hasBreak(s.Body, label, implicit)
+	}
+	for _, brk := range info.Breaks {
+		if implicit && brk.Implicit {
+			return true
+		}
+		if label != "" && slices.Contains(brk.Labels, label) {
+			return true
+		}
+	}
+	return false
+}
+
+// LogosConstForBreaks names the breaks of one field's live body that can
+// leave the const for: Implicit is an unlabeled break of the enclosing
+// breakable statement, Labels are labels not bound inside the body.
+type LogosConstForBreaks struct {
+	Implicit bool
+	Labels   []string
+}
+
+// logosLiveBreaks collects the breaks in a const for body that can leave
+// the statement: an unlabeled break of the enclosing breakable statement,
+// and a labeled break whose label is not bound to a breakable nested in
+// the body (labels are unique per function, so a label not bound inside
+// names a statement outside). Dead const code, which this field's
+// expansion does not run, holds no break; a const switch keeps every
+// case, because its tag is not recorded per field.
+func (check *Checker) logosLiveBreaks(s syntax.Stmt) LogosConstForBreaks {
+	var brk LogosConstForBreaks
+	check.logosLiveBreakWalk(s, false, nil, &brk)
+	return brk
+}
+
+// logosLiveBreakWalk walks s collecting leaving breaks into brk. inner
+// reports whether an unlabeled break under s binds to a breakable nested
+// in the const for body; bound holds the labels of those breakables.
+func (check *Checker) logosLiveBreakWalk(s syntax.Stmt, inner bool, bound map[string]bool, brk *LogosConstForBreaks) {
+	switch s := s.(type) {
+	case *syntax.BranchStmt:
+		if s.Tok != syntax.Break {
+			return
+		}
+		if s.Label == nil {
+			if !inner {
+				brk.Implicit = true
+			}
+			return
+		}
+		if !bound[s.Label.Value] && !slices.Contains(brk.Labels, s.Label.Value) {
+			brk.Labels = append(brk.Labels, s.Label.Value)
+		}
+
+	case *syntax.LabeledStmt:
+		if logosBreakableStmt(s.Stmt) {
+			bound = logosBindLabel(bound, s.Label.Value)
+		}
+		check.logosLiveBreakWalk(s.Stmt, inner, bound, brk)
+
+	case *syntax.BlockStmt:
+		check.logosLiveBreakList(s.List, inner, bound, brk)
+
+	case *syntax.IfStmt:
+		check.logosLiveBreakWalk(s.Then, inner, bound, brk)
+		if s.Else != nil {
+			check.logosLiveBreakWalk(s.Else, inner, bound, brk)
+		}
+
+	case *syntax.ForStmt:
+		check.logosLiveBreakList(s.Body.List, true, bound, brk)
+
+	case *syntax.SwitchStmt:
+		for _, cc := range s.Body {
+			check.logosLiveBreakList(cc.Body, true, bound, brk)
+		}
+
+	case *syntax.SelectStmt:
+		for _, cc := range s.Body {
+			check.logosLiveBreakList(cc.Body, true, bound, brk)
+		}
+
+	case *syntax.ConstIfStmt:
+		if v, ok := check.constIfValue(s.Cond); ok {
+			if v {
+				check.logosLiveBreakWalk(s.Then, inner, bound, brk)
+			} else if s.Else != nil {
+				check.logosLiveBreakWalk(s.Else, inner, bound, brk)
+			}
+			return
+		}
+		check.logosLiveBreakWalk(s.Then, inner, bound, brk)
+		if s.Else != nil {
+			check.logosLiveBreakWalk(s.Else, inner, bound, brk)
+		}
+
+	case *syntax.ConstSwitchStmt:
+		for _, c := range s.Cases {
+			check.logosLiveBreakList(c.Body, inner, bound, brk)
+		}
+
+	case *syntax.GroupStmt:
+		check.logosLiveBreakList(s.Body.List, inner, bound, brk)
+
+	case *syntax.ConstForStmt:
+		// A nested const for keeps the enclosing label namespace; its own
+		// recorded per-field breaks are the breaks its expansion runs.
+		// Without a record (a generic or rejected nested range) the walk
+		// falls back to the nested body, the previous rule.
+		if ninfo := check.Info.LogosConstFor[s]; ninfo != nil && (len(ninfo.Breaks) > 0 || ninfo.Struct != nil) {
+			for _, nbrk := range ninfo.Breaks {
+				if nbrk.Implicit && !inner {
+					brk.Implicit = true
+				}
+				for _, l := range nbrk.Labels {
+					if !bound[l] && !slices.Contains(brk.Labels, l) {
+						brk.Labels = append(brk.Labels, l)
+					}
+				}
+			}
+		} else {
+			check.logosLiveBreakWalk(s.Body, inner, bound, brk)
+		}
+	}
+}
+
+func (check *Checker) logosLiveBreakList(list []syntax.Stmt, inner bool, bound map[string]bool, brk *LogosConstForBreaks) {
+	for _, s := range list {
+		check.logosLiveBreakWalk(s, inner, bound, brk)
+	}
+}
+
+func logosBreakableStmt(s syntax.Stmt) bool {
+	switch s.(type) {
+	case *syntax.ForStmt, *syntax.SwitchStmt, *syntax.SelectStmt:
+		return true
+	}
+	return false
+}
+
+func logosBindLabel(bound map[string]bool, label string) map[string]bool {
+	if bound[label] {
+		return bound
+	}
+	next := make(map[string]bool, len(bound)+1)
+	for l := range bound {
+		next[l] = true
+	}
+	next[label] = true
+	return next
 }

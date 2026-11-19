@@ -169,6 +169,6 @@ func (check *Checker) logosTerminatingGroup(s *syntax.GroupStmt) bool {
 // logosHasBreakGroup searches the group parent body for a break targeting
 // the enclosing breakable statement; child bodies have their own label
 // namespace, so hasBreak never enters a GroupChild (SPEC 2.6).
-func logosHasBreakGroup(s *syntax.GroupStmt, label string, implicit bool) bool {
-	return hasBreakList(s.Body.List, label, implicit)
+func (check *Checker) logosHasBreakGroup(s *syntax.GroupStmt, label string, implicit bool) bool {
+	return check.hasBreakList(s.Body.List, label, implicit)
 }

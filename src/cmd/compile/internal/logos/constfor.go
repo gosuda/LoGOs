@@ -278,6 +278,10 @@ type cfActive struct {
 	body  *syntax.BlockStmt
 }
 
+func cutAfterTerminatingField(info *types2.LogosConstFor, ord int) bool {
+	return info != nil && ord < len(info.Term) && info.Term[ord]
+}
+
 // unrollConstFor expands one const for over the fields of info with the
 // outer chain applied inside. It returns the replacement statements and
 // their text.
@@ -300,6 +304,9 @@ func (fl *fileLower) unrollConstFor(cf *syntax.ConstForStmt, info *types2.LogosC
 		stmts, region := fl.reparseTopCopy(text, cf, fctx)
 		out = append(out, stmts...)
 		host.regions = append(host.regions, region)
+		if cutAfterTerminatingField(info, ord) {
+			break
+		}
 	}
 	fl.cfCountNodes(out, cf.Pos())
 	return out, host
@@ -607,6 +614,9 @@ func (fl *fileLower) unrollConstForFields(cf *syntax.ConstForStmt, fields []cfFi
 		text := fl.expandLevel(cf.Body, active, bodySrc, 0, m, run)
 		out = append(out, fl.reparseStmts(text.s, run.ctx.stamp)...)
 		parts = append(parts, text, gen("\n"))
+		if cutAfterTerminatingField(fl.pkg.info.LogosConstFor[cf], ord) {
+			break
+		}
 	}
 	return out, cat(parts...)
 }

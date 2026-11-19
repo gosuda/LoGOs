@@ -70,18 +70,35 @@ func (check *Checker) logosTerminatingConstIf(s *syntax.ConstIfStmt) bool {
 }
 
 func (check *Checker) constIfValue(e syntax.Expr) (bool, bool) {
-	_, val, ok := check.logosChecked(e)
-	if !ok || val == nil || val.Kind() != constant.Bool {
-		return false, false
+	if _, val, ok := check.logosChecked(e); ok && val != nil && val.Kind() == constant.Bool {
+		return constant.BoolVal(val), true
 	}
-	return constant.BoolVal(val), true
+	if info, ok := check.untyped[e]; ok && info.val != nil && info.val.Kind() == constant.Bool {
+		return constant.BoolVal(info.val), true
+	}
+	return check.logosConstIfDerived(e)
 }
 
-func logosHasBreakConstIf(s *syntax.ConstIfStmt, label string, implicit bool) bool {
-	if hasBreak(s.Then, label, implicit) {
+func (check *Checker) logosConstIfDerived(e syntax.Expr) (bool, bool) {
+	var x operand
+	outerPred := check.logosPred
+	check.logosPred = logosPredState{depth: 1}
+	saved := check.conf.Error
+	check.conf.Error = func(error) {}
+	check.expr(nil, &x, e)
+	check.conf.Error = saved
+	check.logosPred = outerPred
+	if !x.isValid() || x.val == nil || x.val.Kind() != constant.Bool {
+		return false, false
+	}
+	return constant.BoolVal(x.val), true
+}
+
+func (check *Checker) logosHasBreakConstIf(s *syntax.ConstIfStmt, label string, implicit bool) bool {
+	if check.hasBreak(s.Then, label, implicit) {
 		return true
 	}
-	return s.Else != nil && hasBreak(s.Else, label, implicit)
+	return s.Else != nil && check.hasBreak(s.Else, label, implicit)
 }
 
 func markDeadStmts(dead map[syntax.Stmt]bool, s syntax.Stmt) {

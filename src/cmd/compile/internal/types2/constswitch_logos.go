@@ -419,9 +419,9 @@ func (check *Checker) logosConcreteCaseMatches(c *syntax.ConstSwitchCase, tag Ty
 	return Identical(ctv, tag)
 }
 
-func logosHasBreakConstSwitch(s *syntax.ConstSwitchStmt, label string, implicit bool) bool {
+func (check *Checker) logosHasBreakConstSwitch(s *syntax.ConstSwitchStmt, label string, implicit bool) bool {
 	for _, c := range s.Cases {
-		if hasBreakList(c.Body, label, implicit) {
+		if check.hasBreakList(c.Body, label, implicit) {
 			return true
 		}
 	}

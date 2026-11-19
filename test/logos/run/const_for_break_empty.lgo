@@ -1,0 +1,29 @@
+// run
+
+
+package main
+
+import (
+	"comptime"
+	"fmt"
+)
+
+type Empty struct{}
+
+func count() int {
+	n := 0
+	for {
+		const for _, f := range comptime.Fields[Empty]() {
+			_ = f.Name
+			break
+		}
+		n++
+		if n >= 5 {
+			return n
+		}
+	}
+}
+
+func main() {
+	fmt.Println("count", count())
+}
