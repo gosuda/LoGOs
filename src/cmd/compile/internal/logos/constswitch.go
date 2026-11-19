@@ -731,8 +731,25 @@ func (c *cswLower) cswSpell(typ types2.Type) string {
 }
 
 func (fl *fileLower) plainTypeSpell(typ types2.Type) string {
-	if _, ok := typ.(*types2.Alias); ok {
-		return fl.typeSpell(typ)
+	if a, ok := typ.(*types2.Alias); ok && a.Obj() != nil {
+		if q := fl.typeQualifier()(a.Obj().Pkg()); q != "" {
+			var b strings.Builder
+			b.WriteString(q)
+			b.WriteString(".")
+			b.WriteString(a.Obj().Name())
+			if ta := a.TypeArgs(); ta != nil {
+				b.WriteString("[")
+				for i := range ta.Len() {
+					if i > 0 {
+						b.WriteString(", ")
+					}
+					b.WriteString(fl.plainTypeSpell(ta.At(i)))
+				}
+				b.WriteString("]")
+			}
+			return b.String()
+		}
+		return fl.plainTypeSpell(types2.Unalias(typ))
 	}
 	switch t := unaliasConstView(typ).(type) {
 	case *types2.Option:
