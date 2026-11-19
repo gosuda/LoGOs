@@ -1860,6 +1860,12 @@ func (p *logosEFPass) derefRoot(e syntax.Expr) *Var {
 	if v == nil {
 		return nil
 	}
+	if p.assigns == nil {
+		p.collectAssigns()
+	}
+	if !p.initialized[v] {
+		return nil
+	}
 	origin := p.sole(v)
 	if origin == nil {
 		return nil
@@ -1868,7 +1874,7 @@ func (p *logosEFPass) derefRoot(e syntax.Expr) *Var {
 	if !ok || and.Op != syntax.And || and.Y != nil {
 		return nil
 	}
-	return p.addressRoot(and.X)
+	return p.varOf(and.X)
 }
 
 func (p *logosEFPass) ret(s *syntax.ReturnStmt, st *logosEFState) *logosEFState {

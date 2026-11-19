@@ -1,0 +1,83 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package p
+
+func ffFetch() (int, error) {
+	return 1, nil
+}
+
+func ffFetchHeld() (int, error) {
+	return 1, nil
+}
+
+func ffFetchAll() (ffHeld, error) {
+	return ffHeld{}, nil
+}
+
+func ffLoadMeta() (ffMeta, error) {
+	return ffMeta{}, nil
+}
+
+func ffLoadOuter() (ffOuter, error) {
+	return ffOuter{}, nil
+}
+
+func ffGetSlice(n int) []int {
+	return []int{n}
+}
+
+func ffEcho(n int) int {
+	return n
+}
+
+type ffInner struct {
+	stats int
+}
+
+type ffHeld struct {
+	stats int
+	inner ffInner
+}
+
+type ffMeta struct {
+	tag int
+}
+
+type ffOuter struct {
+	ffMeta
+	count int
+}
+
+func ffCondAliasKeepsCheck(p *int, rebind bool) {
+	var n int
+	if rebind {
+		p = &n
+	}
+	n, err := ffFetch()
+	*p = 9
+	println(n /* ERROR "[correctness::result_before_error_check]" */)
+	_ = err
+}
+
+func ffFieldAddrWriteKeepsRootCheck() {
+	h := ffHeld{}
+	p := &h.stats
+	var err error
+	h, err = ffFetchAll()
+	*p = 9
+	println(h /* ERROR "[correctness::result_before_error_check]" */)
+	println(h /* ERROR "[correctness::result_before_error_check]" */ .inner)
+	_ = err
+}
+
+func ffPointerOverwriteDropsCheck() {
+	var n int
+	p := &n
+	var err error
+	n, err = ffFetch()
+	*p = 9
+	println(n)
+	_ = err
+}
