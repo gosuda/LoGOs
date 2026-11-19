@@ -716,6 +716,14 @@ A present nil payload MUST stay distinguishable from none in ejected code [T-202
 
 The spelling `T??` MUST be a syntax error reporting `T?? is not allowed; use (T?)?`. [T-202]
 
+A value cycle through `T?` MUST fail compilation with `invalid recursive type`. [T-202.1]
+
+The diagnostic MUST name each type in the cycle. [T-202.1]
+
+A cycle broken by a pointer, slice, or map type, or by a closed union in a value position, MUST be allowed. [T-202.1]
+
+A member of a closed union MAY hold an option of that union, because the union value is an interface word. [T-202.1]
+
 `?.` on a non-option value MUST fail with `[correctness::not_an_option]`. [T-104.3]
 
 `??` with a non-option left side MUST fail with the same diagnostic. [T-104.3]
