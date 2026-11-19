@@ -8,10 +8,13 @@ package conccmd
 
 import (
 	"errors"
+	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strings"
 	"syscall"
 
 	"cmd/go/internal/base"
@@ -48,8 +51,13 @@ func monitor(verb string, inv invocation) {
 	}
 	defer pipe.Close()
 
+	stream := io.Reader(pipe)
+	var raw strings.Builder
+	if inv.fix || inv.aiPatch {
+		stream = io.TeeReader(pipe, &raw)
+	}
 	findings := make(chan int, 1)
-	go func() { findings <- relay(pipe, os.Stderr, inv.asJSON) }()
+	go func() { findings <- relay(stream, os.Stderr, inv.asJSON) }()
 
 	child := exec.Command(self, inv.arguments...)
 	child.Args[0] = os.Args[0]
@@ -78,6 +86,16 @@ func monitor(verb string, inv invocation) {
 		base.Fatalf("logos conc %s: %v", verb, err)
 	}
 	found := <-findings
+	if inv.fix || inv.aiPatch {
+		fixes := collectStalledFixes(raw.String())
+		if inv.aiPatch {
+			printStalledBrief(fixes)
+		} else {
+			for _, done := range applyStalledFixes(fixes) {
+				fmt.Fprintf(os.Stderr, "logos conc: fixed %s\n", done)
+			}
+		}
+	}
 
 	var exit *exec.ExitError
 	switch {
