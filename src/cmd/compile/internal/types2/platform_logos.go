@@ -384,8 +384,10 @@ func (check *Checker) logosCalleeIsGo(call *syntax.CallExpr) bool {
 }
 
 // logosCalleeWasGeneric reports whether call targets a generic function
-// (explicitly or implicitly instantiated). Type-parameter results
-// instantiated with a non-nil pointer are platform pointers.
+// (explicitly or implicitly instantiated) or a method of a generic type
+// whose declared result mentions a receiver type parameter.
+// Type-parameter results instantiated with a non-nil pointer are platform
+// pointers.
 func (check *Checker) logosCalleeWasGeneric(call *syntax.CallExpr) bool {
 	if call == nil || !check.isLogosFile(call) {
 		return false
@@ -395,7 +397,69 @@ func (check *Checker) logosCalleeWasGeneric(call *syntax.CallExpr) bool {
 		return false
 	}
 	sig, ok := fn.typ.(*Signature)
-	return ok && sig.TypeParams().Len() > 0
+	if !ok {
+		return false
+	}
+	if sig.TypeParams().Len() > 0 {
+		return true
+	}
+	return check.logosReceiverWasGeneric(call, fn)
+}
+
+// logosReceiverWasGeneric reports whether call selects a method of a
+// generic type whose declared result mentions a receiver type parameter.
+// The method Func of an instantiation carries the expanded signature, so
+// the check reads the declared results and receiver type parameters off
+// the origin Func: identical objects by construction. A result
+// instantiated with a non-nil pointer then counts as a platform pointer.
+// The pointer check itself stays with the callers (logosIsNonNilPointer):
+// a method that returns a concrete pointer, or a T instantiated with a
+// non-pointer, is not platform.
+func (check *Checker) logosReceiverWasGeneric(call *syntax.CallExpr, fn *Func) bool {
+	sel, ok := syntax.Unparen(call.Fun).(*syntax.SelectorExpr)
+	if !ok || check.Info == nil {
+		return false
+	}
+	selection := check.Selections[sel]
+	if selection == nil {
+		return false
+	}
+	if _, ok := selection.Obj().(*Func); !ok {
+		return false
+	}
+	recv := selection.Recv()
+	if recv == nil {
+		return false
+	}
+	// Unwrap pointer receivers and aliases to the generic named type.
+	if ptr, ok := Unalias(recv).(*Pointer); ok {
+		recv = ptr.base
+	}
+	named, ok := Unalias(recv).(*Named)
+	if !ok {
+		return false
+	}
+	tparams := named.TypeParams().list()
+	if len(tparams) == 0 {
+		return false
+	}
+	// The method Func of an instantiation carries the expanded
+	// signature, so read the declared results off the origin Func.
+	decl := fn.Origin()
+	if decl == nil || decl.typ == nil {
+		return false
+	}
+	dsig, ok := decl.typ.(*Signature)
+	if !ok {
+		return false
+	}
+	results := dsig.Results()
+	for i := range results.Len() {
+		if isParameterized(dsig.RecvTypeParams().list(), results.At(i).Type()) {
+			return true
+		}
+	}
+	return false
 }
 
 // logosCallIsConversion reports whether e is a type conversion (its
