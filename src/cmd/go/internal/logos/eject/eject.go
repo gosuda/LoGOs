@@ -20,6 +20,7 @@ import (
 	"go/token"
 	"internal/logosfile"
 	"io/fs"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -149,6 +150,12 @@ type ejectPlan struct {
 	known      map[*load.Package]bool
 	testBuilt  map[*load.Package]bool
 	provenance map[string][]*load.Package
+	// gorootLogos holds the reached GOROOT logos/* packages (for example
+	// logos/slog) that the shared support module must materialize beyond
+	// the fixed rt/arena/sync set. Standard packages are never owned, so
+	// they stay out of logos and deps; they still need compiler lowering
+	// into staging, which phaseOneRoots and makeEjectStagingDirs arrange.
+	gorootLogos []*load.Package
 }
 
 // testBuild holds the test variant of one package for emission of its
@@ -356,8 +363,43 @@ func arrangeEjectPlan(pkgs []*load.Package) *ejectPlan {
 		plan.provenance[p.ImportPath] = append(plan.provenance[p.ImportPath], p)
 		plan.addPackage(p)
 	}
+	plan.gorootLogos = collectGorootLogos(plan.provenance)
 	resortEjectPlan(plan)
 	return plan
+}
+
+// isGorootLogos reports whether p is a GOROOT package under src/logos
+// (for example logos/slog): a standard package whose import path names
+// the fork's own tree. Dotless user modules cannot exist, so the prefix
+// test cannot misfire on a dependency module.
+func isGorootLogos(p *load.Package) bool {
+	if !p.Standard && !p.Goroot {
+		return false
+	}
+	rest, ok := strings.CutPrefix(p.ImportPath, "logos/")
+	return ok && rest != ""
+}
+
+// collectGorootLogos returns one record per reached GOROOT logos/*
+// package, sorted by import path for determinism. The first non-test
+// record wins; test variants share the same sources for emission.
+func collectGorootLogos(provenance map[string][]*load.Package) []*load.Package {
+	var out []*load.Package
+	for _, path := range slices.Sorted(maps.Keys(provenance)) {
+		recs := provenance[path]
+		if len(recs) == 0 || !isGorootLogos(recs[0]) {
+			continue
+		}
+		pick := recs[0]
+		for _, p := range recs {
+			if p.ForTest == "" {
+				pick = p
+				break
+			}
+		}
+		out = append(out, pick)
+	}
+	return out
 }
 
 // addPackage files one reachable package into the plan. Test artifacts
@@ -512,6 +554,9 @@ func collectTestBuilds(moduleLoader *modload.Loader, ctx context.Context, opts l
 		}
 		plan.addPackage(p)
 	}
+	// Test-only dependencies may reach new GOROOT logos/* packages; pick
+	// them up before the first build so they lower into staging too.
+	plan.gorootLogos = collectGorootLogos(plan.provenance)
 	resortEjectPlan(plan)
 	return builds
 }
@@ -526,6 +571,9 @@ func makeEjectStagingDirs(plan *ejectPlan, staging string, builds []testBuild) {
 		}
 	}
 	for _, p := range plan.logos {
+		mkdir(p.ImportPath)
+	}
+	for _, p := range plan.gorootLogos {
 		mkdir(p.ImportPath)
 	}
 	for _, t := range builds {
@@ -547,7 +595,9 @@ func testBuildMains(builds []testBuild) []*load.Package {
 }
 
 // phaseOneRoots returns the first-phase build roots: every main-module
-// package plus every marked loGo/s package, sorted for determinism.
+// package, every marked loGo/s package, and every reached GOROOT logos/*
+// package, sorted for determinism. GOROOT packages compile as roots so
+// the shared support module can emit their lowered output.
 func phaseOneRoots(plan *ejectPlan) []*load.Package {
 	set := map[*load.Package]bool{}
 	var roots []*load.Package
@@ -559,6 +609,13 @@ func phaseOneRoots(plan *ejectPlan) []*load.Package {
 		roots = append(roots, p)
 	}
 	for _, p := range plan.logos {
+		if p.IsTestOnly() || set[p] {
+			continue
+		}
+		set[p] = true
+		roots = append(roots, p)
+	}
+	for _, p := range plan.gorootLogos {
 		if p.IsTestOnly() || set[p] {
 			continue
 		}
@@ -674,6 +731,7 @@ func writeEjectedTree(ctx context.Context, plan *ejectPlan, staging, out string)
 		rtDir = filepath.Join(out, "_logos_deps", "rt")
 		writeSupportModule(out, goVersionOf(parseGoModFile(filepath.Join(out, "go.mod"))))
 		addSupportRequire(filepath.Join(out, "go.mod"), "./_logos_deps/rt")
+		materializeGorootLogos(plan, staging, out, rtDir)
 	}
 	rewriteMainGoMod(out, plan)
 	for _, m := range plan.deps {
@@ -683,6 +741,174 @@ func writeEjectedTree(ctx context.Context, plan *ejectPlan, staging, out string)
 		for _, m := range plan.deps {
 			addSupportRequire(filepath.Join(ejected[m.path], "go.mod"), relEjectTarget(ejected[m.path], rtDir))
 		}
+	}
+}
+
+// gorootCovered reports whether a GOROOT logos/* import path is already
+// materialized by the fixed support copy: logos/rt is the shared module
+// root, anything below it rides along recursively, and the arena and sync
+// subtrees are copied whole.
+func gorootCovered(path string) bool {
+	if path == "logos/rt" {
+		return true
+	}
+	for _, prefix := range []string{"logos/rt/", "logos/arena/", "logos/sync/"} {
+		if strings.HasPrefix(path, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// supportRel maps a GOROOT logos/* import path to its directory inside
+// the shared support module, mirroring supportPathEdit: logos/rt is the
+// root, a leading rt/ segment is dropped, everything else is kept.
+func supportRel(path string) (string, bool) {
+	rest, ok := strings.CutPrefix(path, "logos/")
+	if !ok || rest == "" {
+		return "", false
+	}
+	return strings.TrimPrefix(rest, "rt/"), true
+}
+
+// supportCandidates maps one ejected import path back to the GOROOT
+// logos/* packages that forward-map to it. Only candidates present in
+// the loaded import graph can be materialized; anything else is a
+// hand-written support import that the plain build will judge.
+func supportCandidates(imp string) []string {
+	if imp == rtModulePath {
+		return []string{"logos/rt"}
+	}
+	suffix, ok := strings.CutPrefix(imp, rtModulePath+"/")
+	if !ok || suffix == "" || strings.HasPrefix(suffix, "internal/") {
+		return nil
+	}
+	var out []string
+	for _, cand := range []string{"logos/" + suffix, "logos/rt/" + suffix} {
+		rel, ok := supportRel(cand)
+		if !ok {
+			continue
+		}
+		image := rtModulePath
+		if rel != "" {
+			image += "/" + rel
+		}
+		if image == imp {
+			out = append(out, cand)
+		}
+	}
+	return out
+}
+
+// ejectedSupportRefs scans written .go files for imports of the shared
+// support module and maps each back to the GOROOT logos/* packages the
+// tree needs. Files that fail to parse contribute nothing: an unrewritten
+// import either rode along as data or already failed loudly.
+func ejectedSupportRefs(root string) []string {
+	var refs []string
+	seen := map[string]bool{}
+	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".go") {
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil
+		}
+		f, err := parser.ParseFile(token.NewFileSet(), path, data, parser.ImportsOnly)
+		if err != nil {
+			return nil
+		}
+		for _, imp := range f.Imports {
+			p, err := strconv.Unquote(imp.Path.Value)
+			if err != nil {
+				continue
+			}
+			for _, cand := range supportCandidates(p) {
+				if !seen[cand] {
+					seen[cand] = true
+					refs = append(refs, cand)
+				}
+			}
+		}
+		return nil
+	})
+	slices.Sort(refs)
+	return refs
+}
+
+// materializeGorootLogos emits every reached GOROOT logos/* package
+// outside the fixed set into the shared support module, following the
+// import graph transitively. Packages owning .lgo files are emitted from
+// compiler staging (built as plan roots, or staged by variant helpers);
+// pure-Go packages are copied from GOROOT. A referenced package with no
+// lowered output is a loud failure, never a dangling import. The support
+// module ships no tests, so test files stay out on both paths.
+func materializeGorootLogos(plan *ejectPlan, staging, out, rtDir string) {
+	done := map[string]bool{}
+	queue := ejectedSupportRefs(out)
+	for len(queue) > 0 {
+		path := queue[0]
+		queue = queue[1:]
+		if done[path] || gorootCovered(path) {
+			continue
+		}
+		done[path] = true
+		recs := plan.provenance[path]
+		if len(recs) == 0 {
+			continue
+		}
+		var rec *load.Package
+		var names []string
+		seen := map[string]bool{}
+		for _, p := range recs {
+			if rec == nil || (rec.ForTest != "" && p.ForTest == "") {
+				rec = p
+			}
+			for _, files := range [][]string{p.GoFiles, p.CgoFiles, p.IgnoredGoFiles} {
+				for _, name := range files {
+					if !logosfile.Is(name) || seen[name] {
+						continue
+					}
+					seen[name] = true
+					if strings.HasSuffix(logosStem(name), "_test") {
+						continue
+					}
+					names = append(names, name)
+				}
+			}
+		}
+		slices.Sort(names)
+		rel, ok := supportRel(path)
+		if !ok || rec == nil {
+			continue
+		}
+		dst := rtDir
+		if rel != "" {
+			dst = filepath.Join(rtDir, filepath.FromSlash(rel))
+		}
+		if len(names) == 0 {
+			if st, err := os.Stat(rec.Dir); err != nil || !st.IsDir() {
+				base.Fatalf("logos eject: cannot materialize logos package %s: no lowered output and no GOROOT sources at %s", path, rec.Dir)
+			}
+			copySupportDir(rec.Dir, dst)
+			continue
+		}
+		for _, name := range names {
+			stem := logosStem(name)
+			raw, err := os.ReadFile(filepath.Join(staging, filepath.FromSlash(path), stem+".go"))
+			if err != nil {
+				base.Fatalf("logos eject: missing ejected output for %s: the ejected tree references it but no build lowered it", filepath.Join(rec.Dir, name))
+			}
+			writeLoweredFile(dst, ".", stem, name, raw)
+		}
+		for _, cand := range ejectedSupportRefs(dst) {
+			if !done[cand] {
+				queue = append(queue, cand)
+			}
+		}
+		slices.Sort(queue)
+		queue = slices.Compact(queue)
 	}
 }
 
