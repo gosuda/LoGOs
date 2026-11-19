@@ -138,8 +138,8 @@ func TestStaticOptionsOptionExemptStrictRefuses(t *testing.T) {
 	if err == nil {
 		t.Fatal("RejectUnknownMembers(true) on an option struct succeeded, want an UnsupportedOptions diagnostic")
 	}
-	if !strings.Contains(err.Error(), "option") {
-		t.Fatalf("strict error %q does not name option fields", err)
+	if !strings.Contains(err.Error(), "unsupported") {
+		t.Fatalf("strict error %q is not the UnsupportedOptions diagnostic", err)
 	}
 	var dflt OptVal
 	if err := jsonv2.Unmarshal([]byte(`{"n":{"Value":1,"Present":true}}`), &dflt); err != nil {
