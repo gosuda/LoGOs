@@ -230,3 +230,10 @@ func logosTargetCPU(p *load.Package) string {
 	}
 	return m.File.Build.TargetCPU
 }
+
+func logosListNeedsBuildAction(p *load.Package) bool {
+	if p.Standard && (p.ImportPath == "builtin" || p.ImportPath == "unsafe") {
+		return false
+	}
+	return len(p.GoFiles)+len(p.CgoFiles) > 0
+}
