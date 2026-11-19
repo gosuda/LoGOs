@@ -61,5 +61,12 @@ if ! in_only gates; then gates=; fi
 if [ -n "$gates" ]; then any=true; fi
 echo "gates=${gates:--}" >> "$LATCHKEY_CI_OUTPUT"
 echo "gate_any=$([ -n "$gates" ] && echo true || echo false)" >> "$LATCHKEY_CI_OUTPUT"
+# regression: the full run.bash gate the old compiler and SIMD workflows ran on
+# manual dispatch too. On pull requests and pushes it follows core; on dispatch
+# a targeted compiler or ssa selection brings it along.
+regression=$core
+if [ "$ev" = workflow_dispatch ] && { want compiler || want ssa; }; then regression=true; fi
+if ! in_only regression; then regression=false; fi
+echo "regression=$regression" >> "$LATCHKEY_CI_OUTPUT"
 echo "build=$any" >> "$LATCHKEY_CI_OUTPUT"
 printf 'changed files:\n%s\n--\n' "$files"; cat "$LATCHKEY_CI_OUTPUT"

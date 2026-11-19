@@ -25,6 +25,7 @@ jobs:
       - gc
       - gates
       - gate_any
+      - regression
       - compiler
       - cgo
       - dogfood
@@ -120,7 +121,7 @@ jobs:
 
   scripts:
     needs: [route, build]
-    if: needs.route.outputs.core == 'true'
+    if: needs.route.outputs.regression == 'true'
     runs-on: large
     timeout-minutes: 180
     steps:
