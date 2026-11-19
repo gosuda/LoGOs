@@ -1254,6 +1254,17 @@ func cfListOf(p syntax.Node) *[]syntax.Stmt {
 	return nil
 }
 
+func cfCaseStmtsBefore(css *syntax.ConstSwitchStmt, prev syntax.Node) []syntax.Stmt {
+	for _, cc := range css.Cases {
+		for j, s := range cc.Body {
+			if syntax.Node(s) == prev {
+				return cc.Body[:j]
+			}
+		}
+	}
+	return nil
+}
+
 // cfStmtBinds reports whether s declares name as a value.
 func cfStmtBinds(s syntax.Stmt, name string) bool {
 	switch s := s.(type) {
@@ -1348,6 +1359,13 @@ func cfHasBinderBefore(body *syntax.BlockStmt, ref syntax.Node, name string, par
 		if cfHeaderBinds(p, prev, name) {
 			return true
 		}
+		if css, ok := p.(*syntax.ConstSwitchStmt); ok {
+			for _, s := range cfCaseStmtsBefore(css, prev) {
+				if cfStmtBinds(s, name) {
+					return true
+				}
+			}
+		}
 		if list := cfListOf(p); list != nil {
 			idx := -1
 			for j, s := range *list {
@@ -1380,6 +1398,7 @@ type cfLeaf struct {
 	parents     map[syntax.Node]syntax.Node
 	declRoot    syntax.Node
 	declParents map[syntax.Node]syntax.Node
+	localNamed  map[*syntax.TypeDecl]types2.Type
 	out         []cfSub
 }
 
@@ -1390,7 +1409,7 @@ func (fl *fileLower) cfLeafSubs(root syntax.Node, active cfChain, covered []span
 	if run.funcBody != nil {
 		declRoot = run.funcBody
 	}
-	c := &cfLeaf{fl: fl, run: run, active: active, covered: covered, parents: cfParents(root), declRoot: declRoot, declParents: cfParents(declRoot)}
+	c := &cfLeaf{fl: fl, run: run, active: active, covered: covered, parents: cfParents(root), declRoot: declRoot, declParents: cfParents(declRoot), localNamed: make(map[*syntax.TypeDecl]types2.Type)}
 	syntax.Inspect(root, c.visit)
 	return c.out
 }
@@ -1533,6 +1552,9 @@ func (c *cfLeaf) switchCaseType(cs *syntax.ConstSwitchCase, s *syntax.ConstSwitc
 		// answer below. An f.Type the bindings cannot resolve stands for
 		// an unknown type: its recorded comptime any would match every
 		// field, so leave the whole switch for the copy's own lowering.
+		if n, ok := sel.X.(*syntax.Name); ok && cfRecordQualifier(n.Value) {
+			return c.fl.cfResolveTypeExpr(cs.Type, c.active, c.run.sites)
+		}
 		if n, ok := sel.X.(*syntax.Name); !ok || infoPkgName(c.fl.pkg.info, n) == nil {
 			return nil, false
 		}
@@ -1562,16 +1584,36 @@ func (c *cfLeaf) switchCaseType(cs *syntax.ConstSwitchCase, s *syntax.ConstSwitc
 	return c.fl.cfResolveTypeExpr(cs.Type, c.active, c.run.sites)
 }
 
+func cfRecordQualifier(name string) bool {
+	if name == cfPkgMarker {
+		return true
+	}
+	rest, ok := strings.CutPrefix(name, cfImportMarker)
+	if !ok || rest == "" {
+		return false
+	}
+	for i := 0; i < len(rest); i++ {
+		if rest[i] < '0' || rest[i] > '9' {
+			return false
+		}
+	}
+	return true
+}
+
 func (c *cfLeaf) cfLocalType(name string, ref syntax.Node) (types2.Type, bool) {
 	d := cfLocalTypeDeclBefore(c.declRoot, ref, name, c.declParents)
 	if d == nil {
 		return nil, false
 	}
-	under, ok := c.fl.cfResolveTypeExpr(d.Type, c.active, c.run.sites)
+	if typ, ok := c.localNamed[d]; ok {
+		return typ, true
+	}
+	under, ok := c.cfLocalScopeType(d.Type, d)
 	if !ok {
 		return nil, true
 	}
 	if d.Alias {
+		c.localNamed[d] = under
 		return under, true
 	}
 	if obj := c.fl.pkg.info.Defs[d.Name]; obj != nil {
@@ -1579,7 +1621,27 @@ func (c *cfLeaf) cfLocalType(name string, ref syntax.Node) (types2.Type, bool) {
 			return tn.Type(), true
 		}
 	}
-	return types2.NewNamed(types2.NewTypeName(d.Pos(), nil, name, nil), under.Underlying(), nil), true
+	typ := types2.NewNamed(types2.NewTypeName(d.Pos(), nil, name, nil), under.Underlying(), nil)
+	c.localNamed[d] = typ
+	return typ, true
+}
+
+func (c *cfLeaf) cfLocalScopeType(e syntax.Expr, d *syntax.TypeDecl) (types2.Type, bool) {
+	switch e := syntax.Unparen(e).(type) {
+	case *syntax.Name:
+		if typ, handled := c.cfLocalType(e.Value, d); handled {
+			return typ, true
+		}
+	case *syntax.Operation:
+		if t, ok := c.cfLocalScopeType(e.X, d); ok && e.Op == syntax.Mul && e.Y == nil {
+			return types2.NewPointer(t), true
+		}
+	case *syntax.SliceType:
+		if t, ok := c.cfLocalScopeType(e.Elem, d); ok {
+			return types2.NewSlice(t), true
+		}
+	}
+	return c.fl.cfResolveTypeExpr(e, c.active, c.run.sites)
 }
 
 // infoPkgName reports whether a case qualifier name is a package name
@@ -1600,7 +1662,19 @@ func infoPkgName(info *types2.Info, n *syntax.Name) *types2.PkgName {
 func cfLocalTypeDeclBefore(body syntax.Node, ref syntax.Node, name string, parents map[syntax.Node]syntax.Node) *syntax.TypeDecl {
 	prev := ref
 	for p := parents[prev]; p != nil; prev, p = p, parents[p] {
-		if list := cfListOf(p); list != nil {
+		if css, ok := p.(*syntax.ConstSwitchStmt); ok {
+			for _, s := range cfCaseStmtsBefore(css, prev) {
+				ds, ok := s.(*syntax.DeclStmt)
+				if !ok {
+					continue
+				}
+				for _, dd := range ds.DeclList {
+					if d, ok := dd.(*syntax.TypeDecl); ok && d.Name != nil && d.Name.Value == name {
+						return d
+					}
+				}
+			}
+		} else if list := cfListOf(p); list != nil {
 			idx := -1
 			for j, s := range *list {
 				if syntax.Node(s) == prev {
@@ -1760,13 +1834,13 @@ func (fl *fileLower) cfStaticString(e syntax.Expr, sites *cfSites, leaf *cfLeaf,
 		}
 		return x + y, true
 	case *syntax.Name:
-		if init, ok := cfLocalConstInitBefore(leaf.declRoot, ref, e.Value, leaf.declParents); ok {
+		if init, anchor, ok := cfLocalConstInitBefore(leaf.declRoot, ref, e.Value, leaf.declParents); ok {
 			if seen[e.Value] {
 				return "", false
 			}
 			seen[e.Value] = true
 			defer delete(seen, e.Value)
-			return fl.cfStaticString(init, sites, leaf, ref, seen)
+			return fl.cfStaticString(init, sites, leaf, anchor, seen)
 		}
 		if cfHasLocalBinder(leaf.declRoot, ref, e.Value, leaf.declParents) {
 			return "", false
@@ -1784,10 +1858,14 @@ func (fl *fileLower) cfStaticString(e syntax.Expr, sites *cfSites, leaf *cfLeaf,
 	return "", false
 }
 
-func cfLocalConstInitBefore(declRoot syntax.Node, ref syntax.Node, name string, parents map[syntax.Node]syntax.Node) (syntax.Expr, bool) {
+func cfLocalConstInitBefore(declRoot syntax.Node, ref syntax.Node, name string, parents map[syntax.Node]syntax.Node) (syntax.Expr, syntax.Node, bool) {
 	prev := ref
 	for p := parents[prev]; p != nil; prev, p = p, parents[p] {
-		if list := cfListOf(p); list != nil {
+		if css, ok := p.(*syntax.ConstSwitchStmt); ok {
+			if init, anchor, ok := cfConstInitInStmts(cfCaseStmtsBefore(css, prev), name); ok {
+				return init, anchor, true
+			}
+		} else if list := cfListOf(p); list != nil {
 			idx := -1
 			for j, s := range *list {
 				if syntax.Node(s) == prev {
@@ -1796,33 +1874,54 @@ func cfLocalConstInitBefore(declRoot syntax.Node, ref syntax.Node, name string, 
 				}
 			}
 			if idx < 0 {
-				return nil, false
+				return nil, nil, false
 			}
-			for _, s := range (*list)[:idx] {
-				ds, ok := s.(*syntax.DeclStmt)
-				if !ok {
-					continue
-				}
-				for _, dd := range ds.DeclList {
-					d, ok := dd.(*syntax.ConstDecl)
-					if !ok || d.Values == nil {
-						continue
-					}
-					vals := syntax.UnpackListExpr(d.Values)
-					for i, q := range d.NameList {
-						if q.Value != name {
-							continue
-						}
-						if i < len(vals) {
-							return vals[i], true
-						}
-						return vals[len(vals)-1], true
-					}
-				}
+			if init, anchor, ok := cfConstInitInStmts((*list)[:idx], name); ok {
+				return init, anchor, true
 			}
 		}
 		if p == declRoot {
-			return nil, false
+			return nil, nil, false
+		}
+	}
+	return nil, nil, false
+}
+
+func cfConstInitInStmts(list []syntax.Stmt, name string) (syntax.Expr, syntax.Node, bool) {
+	for _, s := range list {
+		ds, ok := s.(*syntax.DeclStmt)
+		if !ok {
+			continue
+		}
+		if init, ok := cfConstInitInDecl(ds, name); ok {
+			return init, ds, true
+		}
+	}
+	return nil, nil, false
+}
+
+func cfConstInitInDecl(ds *syntax.DeclStmt, name string) (syntax.Expr, bool) {
+	var lastVals []syntax.Expr
+	for _, dd := range ds.DeclList {
+		d, ok := dd.(*syntax.ConstDecl)
+		if !ok {
+			continue
+		}
+		vals := lastVals
+		if d.Values != nil {
+			vals = syntax.UnpackListExpr(d.Values)
+			lastVals = vals
+		}
+		for i, q := range d.NameList {
+			if q.Value != name {
+				continue
+			}
+			if i < len(vals) {
+				return vals[i], true
+			}
+			if len(vals) > 0 {
+				return vals[len(vals)-1], true
+			}
 		}
 	}
 	return nil, false

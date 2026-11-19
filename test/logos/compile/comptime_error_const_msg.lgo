@@ -40,3 +40,46 @@ func FailShadowed[T any]() int {
 }
 
 var _ = FailShadowed[int]() // ERROR "local"
+
+const Prefix = "p"
+
+func FailSelfShadowInit[T any]() int {
+	const Prefix = Prefix + "!"
+	comptime.Error(Prefix)
+	return 0
+}
+
+var _ = FailSelfShadowInit[int]() // ERROR "p!"
+
+const LaterB = "pkg"
+
+func FailLaterShadowInit[T any]() int {
+	const A = LaterB + "!"
+	const LaterB = "late"
+	comptime.Error(A)
+	return 0
+}
+
+var _ = FailLaterShadowInit[int]() // ERROR "pkg!"
+
+func FailCaseLocalMsg[T any]() int {
+	const switch T {
+	case int:
+		const Msg = "bad int"
+		comptime.Error(Msg)
+	}
+	return 0
+}
+
+var _ = FailCaseLocalMsg[int]() // ERROR "bad int"
+
+func FailInheritedMsg[T any]() int {
+	const (
+		_ = "bad"
+		InheritedMsg
+	)
+	comptime.Error(InheritedMsg)
+	return 0
+}
+
+var _ = FailInheritedMsg[int]() // ERROR "bad"

@@ -1,2 +1,5 @@
 case
 tag
+int
+exact
+alias

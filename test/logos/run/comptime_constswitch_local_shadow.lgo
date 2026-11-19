@@ -1,9 +1,9 @@
 // run
 package main
-
 import (
 	"comptime"
 	"fmt"
+	"reflect"
 )
 
 type Case = int
@@ -30,7 +30,54 @@ func ShadowTag[T any]() string {
 	return "other"
 }
 
+func ImportedDead[T any]() string {
+	const switch T {
+	case reflect.Type:
+		comptime.Error("not allowed")
+		return "iface"
+	case int:
+		_ = comptime.SizeOf[int]()
+		return "int"
+	}
+	return "other"
+}
+
+type Local int
+
+func ExactLocal[T any]() string {
+	type Local int
+	const switch Local {
+	case Local:
+		_ = comptime.SizeOf[int]()
+		return "exact"
+	case ~int:
+		comptime.Error("dead")
+		return "dead"
+	}
+	return "other"
+}
+
+type AliasBase = int
+type AliasTag = string
+
+func AliasScope[T any]() string {
+	type AliasBase = string
+	type AliasTag = AliasBase
+	const switch AliasTag {
+	case ~string:
+		_ = comptime.SizeOf[int]()
+		return "alias"
+	case ~int:
+		comptime.Error("dead alias")
+		return "alias-dead"
+	}
+	return "other"
+}
+
 func main() {
 	fmt.Println(ShadowCase[string]())
 	fmt.Println(ShadowTag[int]())
+	fmt.Println(ImportedDead[int]())
+	fmt.Println(ExactLocal[string]())
+	fmt.Println(AliasScope[int]())
 }
