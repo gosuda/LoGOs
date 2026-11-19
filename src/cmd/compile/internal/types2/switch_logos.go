@@ -180,7 +180,7 @@ func (check *Checker) logosCoverage(e *syntax.SwitchExpr, sx *operand, seen map[
 				misses = append(misses, TypeString(term.typ, check.qualifier))
 			}
 		}
-		if _, ok := seen[nil]; !ok {
+		if _, ok := seen[nil]; !ok && !check.logosSwitchNilExcused(sx) {
 			misses = append(misses, "nil")
 		}
 	} else {

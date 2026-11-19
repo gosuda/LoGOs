@@ -48,6 +48,35 @@ func logosClosedUnion(t Type) *_TypeSet {
 	return tset
 }
 
+// INVARIANT: a type switch is exhaustive over the values its operand can hold
+// at that point. A nil case is unreachable when the operand is a local or
+// parameter that narrowing has proven non-nil from an option whose absence
+// is the interface nil value itself (a bare option): the guard excluded
+// exactly the value a nil case would match, and no present-but-nil value can
+// exist without a separate presence flag. Assignment ends narrowing,
+// address-taken, closure-assigned, and goto-containing functions never
+// narrow, so an active narrowing at the switch means no intervening store
+// or jump could have restored nil.
+func (check *Checker) logosSwitchNilExcused(sx *operand) bool {
+	if sx == nil || !sx.isValid() {
+		return false
+	}
+	id, ok := syntax.Unparen(sx.expr).(*syntax.Name)
+	if !ok || id.Value == "_" {
+		return false
+	}
+	obj := check.lookup(id.Value)
+	v, ok := obj.(*Var)
+	if !ok || v.pkg != check.pkg || check.logosNarrow[v] == 0 {
+		return false
+	}
+	opt := logosAsOption(v.typ)
+	if opt == nil {
+		return false
+	}
+	return LogosOptionIsBare(opt.Elem)
+}
+
 func logosMemberOf(t Type, tset *_TypeSet) bool {
 	for _, term := range tset.terms {
 		if Identical(term.typ, t) {

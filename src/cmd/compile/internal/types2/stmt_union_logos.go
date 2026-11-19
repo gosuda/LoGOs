@@ -29,7 +29,7 @@ func (check *Checker) logosExhaustiveStmtSwitch(s *syntax.SwitchStmt, sx *operan
 			misses = append(misses, TypeString(term.typ, check.qualifier))
 		}
 	}
-	if _, ok := seen[nil]; !ok {
+	if _, ok := seen[nil]; !ok && !check.logosSwitchNilExcused(sx) {
 		misses = append(misses, "nil")
 	}
 	if len(misses) == 0 {

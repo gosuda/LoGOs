@@ -71,3 +71,97 @@ func dupCase(x U) {
 	case nil:
 	}
 }
+
+func narrowSwitchEarly(p U?) string {
+	if p == nil {
+		return "none"
+	}
+	switch p.(type) {
+	case A:
+		return "a"
+	case B:
+		return "b"
+	}
+	return "unreachable"
+}
+
+func narrowSwitchBlock(p U?) string {
+	if p != nil {
+		switch p.(type) {
+		case A:
+			return "a"
+		case B:
+			return "b"
+		}
+		return "unreachable"
+	}
+	return "none"
+}
+
+func narrowSwitchExpr(p U?) string {
+	if p == nil {
+		return "none"
+	}
+	return switch p.(type) {
+	case A => "a"
+	case B => "b"
+	}
+}
+
+type Bytes162 interface {
+	[]byte | A
+}
+
+func narrowSwitchStructRepr(p Bytes162?) {
+	if p == nil {
+		return
+	}
+	switch /* ERROR "misses: nil" */ p.(type) {
+	case []byte:
+	case A:
+	}
+}
+
+func narrowSwitchReassigned(p U?) {
+	if p == nil {
+		return
+	}
+	p = nil
+	switch p /* ERROR "not an interface" */ .(type) {
+	case A:
+	case B:
+	}
+}
+
+func narrowSwitchClosure(p U?) {
+	f := func() {
+		p = nil
+	}
+	_ = f
+	if p == nil {
+		return
+	}
+	switch p /* ERROR "not an interface" */ .(type) {
+	case A:
+	case B:
+	}
+}
+
+func narrowSwitchGoto(p U?, c bool) string {
+	if c {
+		goto done
+	}
+	if p == nil {
+		return "none"
+	}
+done:
+	switch p /* ERROR "not an interface" */ .(type) {
+	case A:
+		return "a"
+	case B:
+		return "b"
+	case nil:
+		return "nil"
+	}
+	return "?"
+}
