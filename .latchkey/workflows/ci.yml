@@ -315,12 +315,6 @@ jobs:
       - name: "Retain early tools diagnostics"
         if: always()
         run: bash .latchkey/dogfood-retainearly.sh
-      - uses: latchkey/artifact-upload@1.0.0
-        if: always()
-        with:
-          name: dogfood-tools-probe
-          from: .
-          path: dogfood-early
       - name: "Corpus: replay and assess all 196 cells"
         if: always()
         run: bash .latchkey/dogfood-replay.sh
