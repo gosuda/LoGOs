@@ -53,6 +53,7 @@ func main() {
 	check("no-yield-pairs-is-empty", pairs == 0, pairs, 0)
 
 	seq := Empty()
+	check("no-yield-is-a-sequence", seq != nil, seq != nil, true)
 
 	check("guarded-skips-yield", len(slices.Collect(Guarded(0))) == 0, len(slices.Collect(Guarded(0))), 0)
 	check("guarded-reaches-yield", slices.Equal(slices.Collect(Guarded(5)), []int{5}), slices.Collect(Guarded(5)), []int{5})
