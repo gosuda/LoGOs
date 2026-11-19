@@ -67,8 +67,9 @@ func (check *Checker) isTerminating(s syntax.Stmt, label string) bool {
 		// enclosing statement.
 
 	case *syntax.ConstForStmt:
-		// The const for body runs inline once per field, so the statement
-		// terminates when its body does.
+		if !check.logosConstForExecutes(s) {
+			return false
+		}
 		return check.isTerminatingList(s.Body.List, "")
 
 	case *syntax.SelectStmt:

@@ -1,0 +1,13 @@
+// errorcheck
+
+package p
+
+type Box[T any] struct {
+	Next Box[T]? // ERROR "invalid recursive type: Box\[T\] refers to itself"
+	V    T
+}
+
+func useGeneric() bool {
+	var b Box[int]? = Box[int]{V: 1}
+	return b != nil
+}

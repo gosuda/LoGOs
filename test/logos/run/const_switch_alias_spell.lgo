@@ -1,0 +1,66 @@
+// run
+
+package main
+
+import (
+	"fmt"
+	"os"
+)
+
+var failed bool
+
+func check(name string, cond bool, got, want any) {
+	if !cond {
+		failed = true
+		fmt.Println("FAIL", name+":", "got", got, "want", want)
+		return
+	}
+	fmt.Println("ok", name)
+}
+
+type Key = int
+
+// count spells its rebound parameter through the package alias Key. A block
+// that redeclares Key must not change the spelling: the generated alias is
+// declared inside the shadowing scope.
+func count[F any](v map[Key]F) int {
+	type Key = string
+	var _ Key
+	const switch F {
+	case int:
+		return len(v)
+	}
+	return 0
+}
+
+type List[T any] = []T
+
+// inspect spells its rebound parameter through the generic alias List. An
+// option argument must spell its plain form so no option node survives
+// lowering.
+func inspect[F any](v List[F]) int {
+	const switch F {
+	case int8?:
+		_ = v
+		return 1
+	}
+	return 0
+}
+
+func main() {
+	gotShadow := count[int](map[int]int{1: 2})
+	check("alias-shadow", gotShadow == 1, gotShadow, 1)
+
+	gotNo := inspect(List[int8]{3})
+	check("alias-option-nomatch", gotNo == 0, gotNo, 0)
+
+	var single int8? = 12
+	var lst List[int8?]
+	lst = append(lst, single)
+	gotOpt := inspect(lst)
+	check("alias-option-arg", gotOpt == 1, gotOpt, 1)
+
+	if failed {
+		os.Exit(1)
+	}
+}
