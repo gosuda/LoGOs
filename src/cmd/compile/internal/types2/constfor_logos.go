@@ -583,7 +583,13 @@ func (check *Checker) logosFieldProjType(info *LogosConstFor) Type {
 
 func (check *Checker) logosConstForExecutes(s *syntax.ConstForStmt) bool {
 	info := check.Info.LogosConstFor[s]
-	if info == nil || info.Struct == nil {
+	if info == nil {
+		return false
+	}
+	if info.Generic && info.Struct == nil {
+		return true
+	}
+	if info.Struct == nil {
 		return false
 	}
 	for i := range info.Struct.NumFields() {

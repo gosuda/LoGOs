@@ -1083,6 +1083,8 @@ It MUST include exported fields and unexported fields of a current-package `T`. 
 
 It MUST exclude unexported fields of other packages. [T-205]
 
+A `const for` statement MUST be a terminating statement when its body ends in a terminating statement and its range has at least one visible field; over no visible fields it falls through, and over an unresolved generic type parameter it is terminating when its body is terminating with each instantiation rechecked after unrolling. [T-205]
+
 `val.[f]` MUST read and write the named field. [T-205]
 
 `val.[f]` MUST name the field variable of an enclosing `const for` and project a struct value of that loop's type. [T-205]
@@ -1192,7 +1194,7 @@ The group MUST cancel on the first child error or panic. [T-206]
 
 It MUST join all children before scope exit. [T-206]
 
-A group statement MUST be a terminating statement when its block ends in a terminating statement. The join then runs at each `return` of the block, and no join follows the block. [T-206]
+A group statement MUST be a terminating statement when its block ends in a terminating statement, unless the group statement is nested directly inside another group body, in which case it is submitted as a child and falls through. The join then runs at each `return` of the block, and no join follows the block. [T-206]
 
 It MUST bound concurrency with a semaphore when `limit` is present. [T-206]
 
