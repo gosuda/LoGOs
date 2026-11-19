@@ -1194,7 +1194,7 @@ The group MUST cancel on the first child error or panic. [T-206]
 
 It MUST join all children before scope exit. [T-206]
 
-A group statement MUST be a terminating statement when its block ends in a terminating statement, unless the group statement is nested anywhere inside another group body, including inside an intervening `if`, `for`, or `switch`, in which case it is submitted as a child and falls through. The join then runs at each `return` of the block, and no join follows the block. [T-206]
+A group statement MUST be a terminating statement when its block ends in a terminating statement, unless the group statement is nested anywhere inside another group body in the same function body, including inside an intervening `if`, `for`, or `switch`, in which case it is submitted as a child and falls through. A group inside a function literal body or a `go { ... }` child block starts a new scope and is not nested. The join then runs at each `return` of the block, and no join follows the block. [T-206]
 
 It MUST bound concurrency with a semaphore when `limit` is present. [T-206]
 

@@ -174,10 +174,11 @@ func (check *Checker) logosGroupBranches(all *Scope, parent *block, lstmt *synta
 // logosTerminatingGroup reports whether a go group statement is terminating:
 // the parent body runs inline, so the group terminates exactly when its own
 // body does; child bodies are separate function bodies and never count.
-// A group nested anywhere inside another group's body, including inside an
-// intervening if, for, or switch, is submitted as a child and falls through
-// to the spawner, so it never terminates the enclosing body even when its
-// own body terminates.
+// A group nested anywhere inside another group's body in the same function
+// body, including inside an intervening if, for, or switch, is submitted as
+// a child and falls through to the spawner, so it never terminates the
+// enclosing body even when its own body terminates. A group inside a function
+// literal body or a go child block starts a new scope and is not nested.
 func (check *Checker) logosTerminatingGroup(s *syntax.GroupStmt) bool {
 	if check.Info.LogosGroupNested[s] {
 		return false
