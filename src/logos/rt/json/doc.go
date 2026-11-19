@@ -44,4 +44,12 @@
 //
 // Unmarshal methods receive borrowed input bytes. Methods must copy bytes
 // they retain after returning.
+//
+// The push side is the FeedScanner, a push-fed JSON tokenizer ported from
+// Zig's lib/std/json/Scanner.zig at revision c7826aa7a0 (MIT License).
+// Ideas ported, not code copied. The caller supplies input chunks with
+// Feed, marks the end with End and collects Tokens with Next; string and
+// number values arrive as Partial pieces followed by a final Token, joined
+// with AppendTokens or Join under DefaultMaxValueLen. Memory use is O(depth)
+// for object and array nesting; nesting beyond MaxDepth is a syntax error.
 package json
