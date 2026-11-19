@@ -39,4 +39,10 @@
 // upstream static-serializer fix (issue 160, repair commit 11cabf3757);
 // until that fix lands they keep the envelope form in both the twin
 // and encoding/json.
+//
+// Failure path: when a MarshalJSON method returns an error, or when its
+// output is not valid JSON, the twin delegates the whole value to
+// encoding/json and returns that result, so the error value, its type
+// field and its text are the original's by construction. The method runs
+// a second time inside that call.
 package json

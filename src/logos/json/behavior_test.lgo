@@ -7,7 +7,6 @@ package json_test
 import (
 	"bytes"
 	"errors"
-	"reflect"
 	stdjson "encoding/json"
 	"testing"
 
@@ -367,12 +366,6 @@ func (twinBadMarshaler) MarshalJSON() ([]byte, error) {
 
 var errTestSentinel = errors.New("boom")
 
-type oracleBadMarshaler struct{}
-
-func (oracleBadMarshaler) MarshalJSON() ([]byte, error) {
-	return nil, errTestSentinel
-}
-
 func TestTwinHandWrittenMarshalJSONByteEqual(t *testing.T) {
 	h := twinHandMarshaler{Inner: "x"}
 	twinBytes, twinErr := twinjson.Marshal(h)
@@ -400,31 +393,88 @@ func TestTwinHandWrittenMarshalJSONByteEqual(t *testing.T) {
 	}
 }
 
-func TestTwinHandWrittenMarshalJSONErrorWrapped(t *testing.T) {
-	_, twinErr := twinjson.Marshal(twinBadMarshaler{})
-	if twinErr == nil {
-		t.Fatalf("twin bad marshaler unexpectedly succeeded")
+type twinBadPtrMarshaler struct{}
+
+func (*twinBadPtrMarshaler) MarshalJSON() ([]byte, error) {
+	return nil, errTestSentinel
+}
+
+type twinInvalidMarshaler struct{}
+
+func (twinInvalidMarshaler) MarshalJSON() ([]byte, error) {
+	return []byte("{oops"), nil
+}
+
+func checkTwinMarshalerError(t *testing.T, name string, twinErr error, oracleErr error) {
+	t.Helper()
+	if twinErr == nil || oracleErr == nil {
+		t.Fatalf("%s: twinErr=%v oracleErr=%v, want both non-nil", name, twinErr, oracleErr)
 		return
 	}
-	me, ok := twinErr.(*stdjson.MarshalerError)
-	if !ok {
-		t.Fatalf("twin error type %T, want *MarshalerError: %v", twinErr, twinErr)
+twinMe := &stdjson.MarshalerError{}
+	if !errors.As(twinErr, &twinMe) {
+		t.Fatalf("%s: twin error type %T, want *MarshalerError: %v", name, twinErr, twinErr)
+		return
 	}
-	if !errors.Is(me, errTestSentinel) {
-		t.Fatalf("twin MarshalerError does not unwrap: %v", me)
+oracleMe := &stdjson.MarshalerError{}
+	if !errors.As(oracleErr, &oracleMe) {
+		t.Fatalf("%s: oracle error type %T, want *MarshalerError: %v", name, oracleErr, oracleErr)
+		return
 	}
-	_, oracleErr := stdjson.Marshal(oracleBadMarshaler{})
-	if oracleErr == nil {
-		t.Fatalf("oracle bad marshaler unexpectedly succeeded")
+	if twinMe.Type != oracleMe.Type {
+		t.Fatalf("%s: Type differs: twin %v orig %v", name, twinMe.Type, oracleMe.Type)
+		return
 	}
-	ome, ok := oracleErr.(*stdjson.MarshalerError)
-	if !ok {
-		t.Fatalf("oracle error type %T, want *MarshalerError: %v", oracleErr, oracleErr)
+	if twinErr.Error() != oracleErr.Error() {
+		t.Fatalf("%s: text differs:\n twin %q\n orig %q", name, twinErr.Error(), oracleErr.Error())
+		return
 	}
-	if me.Type.Kind() != reflect.Pointer || ome.Type.Kind() != reflect.Pointer {
-		t.Fatalf("MarshalerError.Type not pointer: twin %v orig %v", me.Type, ome.Type)
+}
+
+func TestTwinHandWrittenMarshalJSONErrorWrapped(t *testing.T) {
+	_, twinErr := twinjson.Marshal(twinBadMarshaler{})
+	_, oracleErr := stdjson.Marshal(twinBadMarshaler{})
+	checkTwinMarshalerError(t, "value/non-addressable", twinErr, oracleErr)
+	if !errors.Is(twinErr, errTestSentinel) || !errors.Is(oracleErr, errTestSentinel) {
+		t.Fatalf("value/non-addressable: sentinel missing: twin %v orig %v", twinErr, oracleErr)
+		return
 	}
-	if me.Type.Elem() != reflect.TypeOf(twinBadMarshaler{}) || ome.Type.Elem() != reflect.TypeOf(oracleBadMarshaler{}) {
-		t.Fatalf("MarshalerError.Type elem differs: twin %v orig %v", me.Type, ome.Type)
+	addrValue := twinBadMarshaler{}
+	_, twinErr = twinjson.Marshal(addrValue)
+	_, oracleErr = stdjson.Marshal(addrValue)
+	checkTwinMarshalerError(t, "value/addressable", twinErr, oracleErr)
+	if !errors.Is(twinErr, errTestSentinel) || !errors.Is(oracleErr, errTestSentinel) {
+		t.Fatalf("value/addressable: sentinel missing: twin %v orig %v", twinErr, oracleErr)
+		return
+	}
+	addrPtr := twinBadPtrMarshaler{}
+	_, twinErr = twinjson.Marshal(&addrPtr)
+	_, oracleErr = stdjson.Marshal(&addrPtr)
+	checkTwinMarshalerError(t, "pointer/addressable", twinErr, oracleErr)
+	if !errors.Is(twinErr, errTestSentinel) || !errors.Is(oracleErr, errTestSentinel) {
+		t.Fatalf("pointer/addressable: sentinel missing: twin %v orig %v", twinErr, oracleErr)
+		return
+	}
+	_, twinErr = twinjson.Marshal(&twinBadPtrMarshaler{})
+	_, oracleErr = stdjson.Marshal(&twinBadPtrMarshaler{})
+	checkTwinMarshalerError(t, "pointer/literal", twinErr, oracleErr)
+	if !errors.Is(twinErr, errTestSentinel) || !errors.Is(oracleErr, errTestSentinel) {
+		t.Fatalf("pointer/literal: sentinel missing: twin %v orig %v", twinErr, oracleErr)
+		return
+	}
+}
+
+func TestTwinHandWrittenMarshalJSONInvalidBytesDelegated(t *testing.T) {
+	_, twinErr := twinjson.Marshal(twinInvalidMarshaler{})
+	_, oracleErr := stdjson.Marshal(twinInvalidMarshaler{})
+	checkTwinMarshalerError(t, "invalid-bytes", twinErr, oracleErr)
+twinSyn := &stdjson.SyntaxError{}
+oracleSyn := &stdjson.SyntaxError{}
+	if !errors.As(twinErr, &twinSyn) || !errors.As(oracleErr, &oracleSyn) {
+		t.Fatalf("invalid bytes: twin %v orig %v, want SyntaxError inside", twinErr, oracleErr)
+		return
+	}
+	if twinSyn.Offset != oracleSyn.Offset {
+		t.Fatalf("invalid bytes offset: twin %d orig %d", twinSyn.Offset, oracleSyn.Offset)
 	}
 }

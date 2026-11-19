@@ -11,27 +11,9 @@ package compact
 import (
 	"bytes"
 	stdjson "encoding/json"
-	"reflect"
 )
 
 const hex = "0123456789abcdef"
-
-// Marshal applies the encoding/json marshalerEncoder contract to the
-// bytes a MarshalJSON method returned: insignificant space is elided,
-// '<', '>', '&' and U+2028/U+2029 inside strings are escaped, and a
-// failure of either step is reported as a *MarshalerError. Generated
-// methods already emit compact escaped bytes, so the pass is the
-// identity for them and the byte-equal fix for hand-written ones.
-func Marshal(typ reflect.Type, b []byte, err error) ([]byte, error) {
-	if err != nil {
-		return nil, &stdjson.MarshalerError{Type: typ, Err: err}
-	}
-	out, cerr := Escaped(b)
-	if cerr != nil {
-		return nil, &stdjson.MarshalerError{Type: typ, Err: cerr}
-	}
-	return out, nil
-}
 
 // Escaped reproduces appendCompact(src, escape=true): it strips
 // insignificant space while validating the input and escapes the HTML
