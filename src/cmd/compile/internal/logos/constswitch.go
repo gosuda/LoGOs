@@ -1394,11 +1394,11 @@ func (c *cswLower) wrapConvs(body []syntax.Stmt, cs *cswCase, selWraps []span) (
 				wt := c.fl.textOf(w)
 				slices.SortFunc(inner, func(a, b lhsSub) int { return b.start - a.start })
 				for _, s := range inner {
-					at, ok := chunkOffsetOf(wt.chunks, s.start, s.end)
+					aS, aE, ok := c.fl.loweredAt(wt.chunks, s.start, s.end)
 					if !ok {
 						base.Fatalf("logos: const switch select target at %s: frozen operand [%d,%d) is not verbatim inside the cast text of [%d,%d)", l.Pos().String(), s.start, s.end, w.start, w.end)
 					}
-					wt.s = wt.s[:at] + s.name + wt.s[at+s.end-s.start:]
+					wt.s = wt.s[:aS] + s.name + wt.s[aE:]
 				}
 				kept := subs[:0]
 				for _, s := range subs {
@@ -1426,17 +1426,22 @@ func (c *cswLower) wrapConvs(body []syntax.Stmt, cs *cswCase, selWraps []span) (
 			for _, sp := range c.fl.drainInner(span{lstart, lend}) {
 				text := sp.text
 				var kept []lhsSub
+				prevStart := -1
 				for _, s := range subs {
 					if sp.start > s.start || s.end > sp.end {
 						kept = append(kept, s)
 						continue
 					}
+					if prevStart >= 0 && s.end > prevStart {
+						base.Fatalf("logos: const switch select target at %s: overlapping frozen operands inside [%d,%d)", l.Pos().String(), sp.start, sp.end)
+					}
+					prevStart = s.start
 					if c.fl.moveContaining(span{s.start, s.end}) != nil {
 						c.fl.addT(s.start, s.end, gen(s.name))
 						continue
 					}
-					if at, ok := chunkOffsetOf(sp.chunks, s.start, s.end); ok {
-						text = text[:at] + s.name + text[at+s.end-s.start:]
+					if aS, aE, ok := c.fl.loweredAt(sp.chunks, s.start, s.end); ok {
+						text = text[:aS] + s.name + text[aE:]
 						continue
 					}
 					if len(sp.text) == sp.end-sp.start {

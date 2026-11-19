@@ -1,0 +1,54 @@
+// run
+
+package main
+
+import (
+	"comptime"
+	"fmt"
+)
+
+type Holder struct {
+	Ptr *bool
+}
+
+func (h Holder) M() *bool { return h.Ptr }
+
+func pick[A any, B any](a A, b B) A {
+	return a
+}
+
+var seq int
+
+func next() int {
+	seq++
+	return 0
+}
+
+type Two struct {
+	A int
+	B int
+}
+
+func recvFor[T any](s []T, ch chan T) {
+	const for _, f := range comptime.Fields[Two]() {
+		_ = f.Name
+		const switch T {
+		case interface{ M() *bool }:
+			var p interface{ M() *bool }
+			select {
+			case p, *pick(s[next()], 0).M() = <-ch:
+				_ = p
+			default:
+			}
+		}
+	}
+}
+
+func main() {
+	ch := make(chan Holder, 2)
+	ch <- Holder{Ptr: new(bool)}
+	ch <- Holder{Ptr: new(bool)}
+	hs := []Holder{{Ptr: new(bool)}, {Ptr: new(bool)}}
+	recvFor[Holder](hs, ch)
+	fmt.Println("seq", seq)
+}

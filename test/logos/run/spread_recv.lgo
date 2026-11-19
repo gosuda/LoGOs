@@ -9,6 +9,10 @@ type Holder struct {
 	Ptr  *bool
 }
 
+type Word struct{}
+
+func (Word) M() *bool { return new(bool) }
+
 var base = Holder{Base: true, Ptr: new(bool)}
 var ptrs = []*bool{new(bool)}
 var seq int
@@ -31,8 +35,11 @@ func spreadRecv[T any](ch chan T) {
 }
 
 func main() {
-	ch := make(chan bool, 1)
-	ch <- true
-	spreadRecv[bool](ch)
+	chBool := make(chan bool, 1)
+	chBool <- true
+	spreadRecv[bool](chBool)
+	chWord := make(chan Word, 1)
+	chWord <- Word{}
+	spreadRecv[Word](chWord)
 	fmt.Println("seq", seq)
 }

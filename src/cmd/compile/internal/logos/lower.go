@@ -588,6 +588,77 @@ func chunkOffsetOf(chunks []chunk, start, end int) (int, bool) {
 	return 0, false
 }
 
+// origRangeOf maps the working-buffer range [start, end) back to its
+// source range through the file origin chunks. Copies of one const for
+// body share the source range from different buffer ranges, so a frozen
+// operand inside an unrolled copy maps to the source its lowered copies
+// derive from. Const-for-substituted bytes are chunkless, so the range
+// may span a gap: both endpoints must land in verbatim chunks and the
+// result covers the substituted source between them.
+func (fl *fileLower) origRangeOf(start, end int) (int, int, bool) {
+	if end <= start {
+		return 0, 0, false
+	}
+	oS := -1
+	oE := -1
+	for _, c := range fl.srcMap.chunks {
+		if c.out <= start && start < c.out+c.n {
+			oS = c.orig + start - c.out
+		}
+		if c.out < end && end <= c.out+c.n {
+			oE = c.orig + end - c.out
+		}
+		if oS >= 0 && oE >= 0 {
+			break
+		}
+	}
+	if oS < 0 || oE < 0 || oE < oS {
+		return 0, 0, false
+	}
+	return oS, oE, true
+}
+
+// loweredSpanOf maps the source range [oStart, oEnd) to the output span
+// covering it in a lowered text. The span includes lowered bytes inserted
+// between the range source bytes, so replacing the whole span drops the
+// duplicate evaluation at the store site.
+func loweredSpanOf(chunks []chunk, oStart, oEnd int) (int, int, bool) {
+	if oEnd <= oStart {
+		return 0, 0, false
+	}
+	sOut := -1
+	eOut := -1
+	for _, c := range chunks {
+		if sOut < 0 && c.orig <= oStart && oStart < c.orig+c.n {
+			sOut = c.out + oStart - c.orig
+		}
+		if c.orig < oEnd && oEnd <= c.orig+c.n {
+			eOut = c.out + oEnd - c.orig
+		}
+		if sOut >= 0 && eOut >= 0 {
+			break
+		}
+	}
+	if sOut < 0 || eOut < 0 || eOut < sOut {
+		return 0, 0, false
+	}
+	return sOut, eOut, true
+}
+
+// loweredAt maps the working-buffer range [sStart, sEnd) into a lowered
+// text holding its source. The fast path covers a verbatim chunk; the
+// span path covers a frozen operand split by an earlier lowering.
+func (fl *fileLower) loweredAt(chunks []chunk, sStart, sEnd int) (int, int, bool) {
+	oS, oE, ok := fl.origRangeOf(sStart, sEnd)
+	if !ok {
+		return 0, 0, false
+	}
+	if at, ok := chunkOffsetOf(chunks, oS, oE); ok {
+		return at, at + (oE - oS), true
+	}
+	return loweredSpanOf(chunks, oS, oE)
+}
+
 func partitionSplices(list []splice, s span) (kept, inner []splice) {
 	kept = list[:0]
 	for _, sp := range list {
