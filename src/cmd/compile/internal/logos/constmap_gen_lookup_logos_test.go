@@ -6,6 +6,9 @@ package logos
 
 import (
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"internal/testenv"
 	"os"
 	"os/exec"
@@ -14,6 +17,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	rt "logos/rt"
 )
 
 func TestConstmapGeneratedLookupShape(t *testing.T) {
@@ -202,12 +207,102 @@ func constmapBuildRun(t *testing.T, dir, exe string, runEnv []string) string {
 	return string(out)
 }
 
+// constmapFlatRuntimeTable builds the shipped rt.ConstTable for keys, using
+// the keys' own hashes and canons, so tab.Get exercises the true hit path.
+func constmapFlatRuntimeTable(t *testing.T, keys []constMapKey) *rt.ConstTable[string, int] {
+	t.Helper()
+	layout, err := buildConstMap(keys, defaultConstMapBudget)
+	if err != nil {
+		t.Fatalf("buildConstMap %d keys: %v", len(keys), err)
+	}
+	tab := &rt.ConstTable[string, int]{Salt: layout.salt}
+	tab.Buckets = make([]rt.ConstBucket, len(layout.buckets))
+	for i, b := range layout.buckets {
+		tab.Buckets[i] = rt.ConstBucket{Off: uint32(b.off), Size: uint32(b.size), Seed: b.seed}
+	}
+	tab.Slots = make([]rt.ConstSlot[string, int], len(layout.slots))
+	for s, ki := range layout.slots {
+		if ki < 0 {
+			continue
+		}
+		tab.Slots[s] = rt.ConstSlot[string, int]{Key: keys[ki].canon, Val: ki, Occ: true}
+	}
+	return tab
+}
+
+// constmapAssertOneProbeGet pins the shipped lookup to a single slot read:
+// the body of rt.ConstTable.Get must index Slots exactly once and hold no
+// loop. A scan or binary-search rewrite fails here with no timing involved.
+func constmapAssertOneProbeGet(t *testing.T) {
+	t.Helper()
+	_, self, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller(0) failed")
+	}
+	path := filepath.Join(filepath.Dir(self), "../../../../logos/rt/constmap.go")
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, path, nil, 0)
+	if err != nil {
+		t.Fatalf("parse %s: %v", path, err)
+	}
+	found := false
+	for _, decl := range f.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Name.Name != "Get" || fn.Recv == nil || len(fn.Recv.List) == 0 {
+			continue
+		}
+		deref, ok := fn.Recv.List[0].Type.(*ast.StarExpr)
+		if !ok {
+			continue
+		}
+		var recv *ast.Ident
+		switch x := deref.X.(type) {
+		case *ast.IndexExpr:
+			recv, _ = x.X.(*ast.Ident)
+		case *ast.IndexListExpr:
+			recv, _ = x.X.(*ast.Ident)
+		default:
+			recv, _ = deref.X.(*ast.Ident)
+		}
+		if recv == nil || recv.Name != "ConstTable" {
+			continue
+		}
+		found = true
+		loops, slots := 0, 0
+		ast.Inspect(fn.Body, func(n ast.Node) bool {
+			switch n := n.(type) {
+			case *ast.ForStmt, *ast.RangeStmt:
+				loops++
+			case *ast.BranchStmt:
+				if n.Tok == token.GOTO {
+					loops++
+				}
+			case *ast.IndexExpr:
+				if sel, ok := n.X.(*ast.SelectorExpr); ok && sel.Sel.Name == "Slots" {
+					slots++
+				}
+			}
+			return true
+		})
+		if loops != 0 {
+			t.Fatalf("ConstTable.Get holds %d loops: one-probe contract needs none", loops)
+		}
+		if slots != 1 {
+			t.Fatalf("ConstTable.Get reads %d slots: one-probe contract needs exactly one", slots)
+		}
+	}
+	if !found {
+		t.Fatalf("ConstTable.Get not found in %s", path)
+	}
+}
+
 func TestConstmapLookupCostFlat(t *testing.T) {
+	// No wall clock here: every assertion below is structural or
+	// count-based, so host load cannot move the result.
+	constmapAssertOneProbeGet(t)
 	sizes := []int{16, 1024, 16384}
 	const misses = 1024
 	lookups := make(map[int]string, len(sizes))
-	type probeCount struct{ slots, cmps int64 }
-	counts := make(map[int]probeCount, len(sizes))
 	for _, n := range sizes {
 		keys := constmapKeys(n)
 		layout, err := buildConstMap(keys, defaultConstMapBudget)
@@ -239,7 +334,7 @@ func TestConstmapLookupCostFlat(t *testing.T) {
 		}
 		lookup := decls[idx:]
 		if got := strings.Count(lookup, ".Get("); got != 1 {
-			t.Fatalf("size %d: table lookup has %d Get calls, want exactly 1 (one-probe contract)", n, got)
+			t.Fatalf("size %d: table lookup has %d Get calls, want exactly one (one-probe contract)", n, got)
 		}
 		if strings.Contains(lookup, "for ") {
 			t.Fatalf("size %d: table lookup must not loop (one-probe contract)", n)
@@ -250,50 +345,51 @@ func TestConstmapLookupCostFlat(t *testing.T) {
 			}
 		}
 		lookups[n] = lookup
-		var slots, cmps int64
-		probe := func(h uint64, canon string) bool {
-			slots++
-			ki := layout.slots[layout.probe(h)]
-			if ki < 0 {
-				return false
-			}
-			cmps++
-			return keys[ki].canon == canon
-		}
+		// The layout is a perfect hash: every key resolves to its own
+		// slot and no miss collides with a stored key.
 		for i, k := range keys {
-			if !probe(k.hash, k.canon) {
-				t.Fatalf("size %d: one-probe lookup missed key %d", n, i)
+			if got := layout.slots[layout.probe(k.hash)]; got != i {
+				t.Fatalf("size %d: layout probe for key %d landed on slot %d", n, i, got)
 			}
 		}
-		for i := range misses {
-			m := fmt.Sprintf("z%05d", i)
-			if probe(constHashString(m), m) {
-				t.Fatalf("size %d: one-probe lookup hit absent key %q", n, m)
+		missKeys := make([]string, misses)
+		for i := range missKeys {
+			missKeys[i] = fmt.Sprintf("z%05d", i)
+			if ki := layout.slots[layout.probe(constHashString(missKeys[i]))]; ki >= 0 && keys[ki].canon == missKeys[i] {
+				t.Fatalf("size %d: layout probe hit absent key %q", n, missKeys[i])
 			}
 		}
-		counts[n] = probeCount{slots: slots, cmps: cmps}
+		// The shipped lookup path is rt.ConstTable.Get. Drive every hit
+		// and every miss through it and check each result, so a degraded
+		// Get (linear scan, broken hash, skipped key check) fails here.
+		tab := constmapFlatRuntimeTable(t, keys)
+		for i, k := range keys {
+			if v, ok := tab.Get(k.hash, k.canon); !ok || v != i {
+				t.Fatalf("size %d: Get(%q) = (%d, %v), want (%d, true)", n, k.canon, v, ok, i)
+			}
+		}
+		for _, m := range missKeys {
+			if v, ok := tab.Get(constHashString(m), m); ok {
+				t.Fatalf("size %d: Get(%q) = (%d, true), want absent", n, m, v)
+			}
+		}
 		checkConstmapRuntimeGetString(t, n)
-		hashes := make([]uint64, n)
-		strs := make([]string, n)
-		for i := range strs {
-			strs[i] = keys[i].canon
-			hashes[i] = keys[i].hash
-		}
-		tab := constmapRuntimeTable(t, hashes, strs)
-		if got := testing.AllocsPerRun(100, func() { _, _ = tab.Get(hashes[7], strs[7]) }); got != 0 {
+		var hv int
+		var hok bool
+		if got := testing.AllocsPerRun(100, func() { hv, hok = tab.Get(keys[7].hash, keys[7].canon) }); got != 0 {
 			t.Fatalf("size %d: hit lookup averages %v allocations, want 0", n, got)
 		}
+		if !hok || hv != 7 {
+			t.Fatalf("size %d: hit lookup returned (%d, %v), want (7, true)", n, hv, hok)
+		}
 		mh, mk := constHashString("z00007"), "z00007"
-		if got := testing.AllocsPerRun(100, func() { _, _ = tab.Get(mh, mk) }); got != 0 {
+		var mv int
+		var mok bool
+		if got := testing.AllocsPerRun(100, func() { mv, mok = tab.Get(mh, mk) }); got != 0 {
 			t.Fatalf("size %d: miss lookup averages %v allocations, want 0", n, got)
 		}
-	}
-	for _, n := range sizes {
-		if want := int64(n + misses); counts[n].slots != want {
-			t.Fatalf("size %d: %d lookups read %d slots, want exactly one probe per lookup", n, n+misses, counts[n].slots)
-		}
-		if got := counts[n].cmps; got < int64(n) || got > int64(n+misses) {
-			t.Fatalf("size %d: %d lookups made %d key comparisons, want one per hit and at most one per lookup", n, n+misses, got)
+		if mok {
+			t.Fatalf("size %d: miss lookup returned (%d, true), want absent", n, mv)
 		}
 	}
 	for _, n := range sizes[1:] {
