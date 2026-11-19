@@ -7,11 +7,14 @@ ev=${LATCHKEY_CI_EVENT_CLASS:-}
 files=; base=; all=false
 case $ev in
   pr_update)
-    git fetch -q --no-tags --depth=300 origin "$LATCHKEY_CI_BASE_REF"
-    base=$(git rev-parse FETCH_HEAD)
-    git fetch -q --no-tags --depth=300 origin "$LATCHKEY_CI_SHA" || true
-    base=$(git merge-base "$base" HEAD 2>/dev/null) || base=$(git rev-parse FETCH_HEAD)
-    files=$(git diff --name-only "$base" HEAD) ;;
+  git fetch -q --no-tags --depth=300 origin "$LATCHKEY_CI_BASE_REF"
+  target=$(git rev-parse FETCH_HEAD)
+  git fetch -q --no-tags --depth=300 origin "$LATCHKEY_CI_SHA" || true
+  # The second fetch replaces FETCH_HEAD with the PR commit, so a failed
+  # merge-base must fall back to the saved target tip, never FETCH_HEAD:
+  # diffing the tip against itself would route nothing.
+  base=$(git merge-base "$target" HEAD 2>/dev/null) || base=$target
+  files=$(git diff --name-only "$base" HEAD) ;;
   branch_push)
     git fetch -q --no-tags --depth=2 origin "$LATCHKEY_CI_SHA"
     files=$(git diff --name-only HEAD~1 HEAD) || files= ;;
@@ -47,6 +50,7 @@ flag compiler '^src/(cmd/compile/|cmd/go/|internal/buildcfg/)|^test/logos/|^\.gi
 flag cgo '^misc/cgo/|^src/(cmd/cgo/|runtime/|internal/goexperiment/|internal/buildcfg/|cmd/go/internal/logos/settings/)' push
 flag dogfood '^misc/logos-dogfood/|^src/'
 flag bench '^src/cmd/compile/internal/ssa/(autovec_logos\.go|testdata/autovec_bench_test\.go)$|^test/logos/bench/autovec_measure\.sh$' pr
+if [ "$ev" = workflow_dispatch ] && want bench; then printf 'warning: bench runs on pull requests only; this dispatch runs no benchmark\n' >&2; fi
 gates=
 if [ "$ev" = workflow_dispatch ] || [ $all = true ]; then
   if [ "$ev" != workflow_dispatch ] || want gates; then gates=$(bash .github/scripts/gate-changes.sh "" | tr '\n' ' '); fi
@@ -57,5 +61,12 @@ if ! in_only gates; then gates=; fi
 if [ -n "$gates" ]; then any=true; fi
 echo "gates=${gates:--}" >> "$LATCHKEY_CI_OUTPUT"
 echo "gate_any=$([ -n "$gates" ] && echo true || echo false)" >> "$LATCHKEY_CI_OUTPUT"
+# regression: the full run.bash gate the old compiler and SIMD workflows ran on
+# manual dispatch too. On pull requests and pushes it follows core; on dispatch
+# a targeted compiler or ssa selection brings it along.
+regression=$core
+if [ "$ev" = workflow_dispatch ] && { want compiler || want ssa; }; then regression=true; fi
+if ! in_only regression; then regression=false; fi
+echo "regression=$regression" >> "$LATCHKEY_CI_OUTPUT"
 echo "build=$any" >> "$LATCHKEY_CI_OUTPUT"
 printf 'changed files:\n%s\n--\n' "$files"; cat "$LATCHKEY_CI_OUTPUT"
