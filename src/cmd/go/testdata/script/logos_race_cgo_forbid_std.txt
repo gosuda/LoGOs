@@ -15,6 +15,13 @@ cd forbid
 logos build -race .
 logos run -race main.lgo
 
+# The raced build selects the cgo plugin implementation, not the stub.
+[!GOOS:darwin] logos list -race -f '{{.CgoFiles}}' plugin
+[!GOOS:darwin] stdout 'dlopen'
+# Without -race the stub is selected, so the assertion above discriminates.
+logos list -f '{{.CgoFiles}}' plugin
+! stdout 'dlopen'
+
 # Without -race no C sources enter the build, so the stubs link normally.
 logos build .
 

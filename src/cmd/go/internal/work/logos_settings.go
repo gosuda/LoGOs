@@ -38,39 +38,51 @@ func refreshLogosPolicy(ld *modload.Loader) {
 }
 
 func keepStandardLibraryPureGo() {
-	// A caller tag of netcgo asks for the cgo resolver explicitly. Adding
-	// netgo beside it trips the resolver tag guard, so the race override
-	// yields to the explicit tag; the cgo ban still refuses every
-	// non-standard C package. os/user has no opposing tag.
-	if !slices.Contains(cfg.BuildContext.BuildTags, "netgo") && !slices.Contains(cfg.BuildContext.BuildTags, "netcgo") {
-		cfg.BuildContext.BuildTags = append(cfg.BuildContext.BuildTags, "netgo")
+	// SPEC: with cgo enabled solely for the race runtime, net and
+	// os/user keep their pure-Go paths. A caller netcgo tag would
+	// select the native resolver instead, so the override swaps it
+	// for netgo. Both tags consult only net source selection, so no
+	// other package moves. Both tags set is the caller's own
+	// contradiction and keeps the upstream guard.
+	tags := cfg.BuildContext.BuildTags
+	switch {
+	case slices.Contains(tags, "netgo") && slices.Contains(tags, "netcgo"):
+		// Leave the contradiction for the upstream guard.
+	case slices.Contains(tags, "netcgo"):
+		swapped := slices.Clone(tags)
+		swapped = slices.DeleteFunc(swapped, func(t string) bool { return t == "netcgo" })
+		cfg.BuildContext.BuildTags = append(swapped, "netgo")
+	case !slices.Contains(tags, "netgo"):
+		cfg.BuildContext.BuildTags = append(tags, "netgo")
 	}
 	if !slices.Contains(cfg.BuildContext.BuildTags, "osusergo") {
 		cfg.BuildContext.BuildTags = append(cfg.BuildContext.BuildTags, "osusergo")
 	}
 }
 
-// logosListBuildsBinaries records whether the list command will compile
-// packages for this invocation. The list command sets it after flag
-// parsing and before BuildInit, so the race compiler preflight applies to
-// the listings that build (-export, -compiled, or a Stale query) and stays
-// silent for the ones that only describe packages.
-var logosListBuildsBinaries bool
-
-// SetListBuildMode tells the race policy whether this list invocation
-// compiles packages.
-func SetListBuildMode(buildsBinaries bool) {
-	logosListBuildsBinaries = buildsBinaries
-}
-
 // requireRaceRuntimeCompiler ends a raced build that would fail later
 // inside runtime/cgo with a message that names neither the race runtime
-// nor logos.toml. A listing that compiles nothing needs no compiler; one
-// that does takes the same preflight as a build.
+// nor logos.toml. Listings decide after loading packages whether build
+// actions will run, so runList calls CheckRaceRuntimeCompiler once it
+// knows; every other command takes the preflight here.
 func requireRaceRuntimeCompiler() {
-	if cfg.BuildN || (cfg.CmdName == "list" && !logosListBuildsBinaries) {
+	if cfg.BuildN || cfg.CmdName == "list" {
 		return
 	}
+	checkRaceRuntimeCompiler()
+}
+
+// CheckRaceRuntimeCompiler runs the race compiler preflight for callers,
+// like runList, that decide after loading packages whether the command
+// will run build actions.
+func CheckRaceRuntimeCompiler() {
+	if cfg.BuildN {
+		return
+	}
+	checkRaceRuntimeCompiler()
+}
+
+func checkRaceRuntimeCompiler() {
 	cc, ok := raceCompilerCommand()
 	if !ok {
 		// The CC setting does not parse. BuildInit validates CC, CXX and FC

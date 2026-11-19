@@ -17,9 +17,12 @@ stdout 'WARNING: DATA RACE'
 logos test -race -count=1 ./clean
 stdout '^ok  '
 
-# An explicit netcgo tag is kept: the race override must not add netgo beside it.
+# An explicit netcgo tag is swapped for netgo: the race override keeps net
+# on its pure-Go path, so the resolver tag guard never trips.
 logos test -race -tags=netcgo -count=1 ./clean
 stdout '^ok  '
+logos list -race -tags=netcgo -test -deps -f '{{if eq .ImportPath "net"}}cgo={{.CgoFiles}}{{end}}' ./clean
+stdout '^cgo=\[\]$'
 
 # The race runtime is linked; net keeps its pure-Go files.
 logos list -race -test -deps -f '{{.ImportPath}}' ./clean
@@ -94,6 +97,13 @@ stdout '^runtime/race$'
 ! logos list -race -export -f '{{.ImportPath}}' ./racy
 stderr 'needs a C compiler'
 stderr 'logos.toml'
+
+# A module listing returns metadata without building, so it needs no compiler.
+logos list -race -m -json
+stdout '"Path": "example.com/nokey"'
+# A package listing with no build action needs none either.
+logos list -race -export -f '{{.ImportPath}}' unsafe
+stdout '^unsafe$'
 
 -- forbid/go.mod --
 module example.com/forbid
