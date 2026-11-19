@@ -1,0 +1,6 @@
+ok capture-typed
+ok capture-arg
+ok capture-escape
+ok capture-nested
+ok capture-tilde
+ok capture-return

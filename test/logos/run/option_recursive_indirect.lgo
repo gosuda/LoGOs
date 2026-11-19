@@ -1,0 +1,85 @@
+// run
+
+package main
+
+import (
+	"fmt"
+	"os"
+)
+
+var failed bool
+
+func check(name string, cond bool, got, want any) {
+	if !cond {
+		failed = true
+		fmt.Println("FAIL", name+":", "got", got, "want", want)
+		return
+	}
+	fmt.Println("ok", name)
+}
+
+type Node struct {
+	V  int64
+	Up *Node?
+}
+
+type L struct {
+	V    int64
+	Kids []L?
+}
+
+type M struct {
+	V    int64
+	Kids [](M?)
+}
+
+type P struct {
+	V    int64
+	Kids []P
+}
+
+type Pair struct {
+	A int?
+	B string?
+}
+
+func main() {
+	var up *Node? = &Node{V: 5}
+	n := Node{V: 7, Up: up}
+	upV := (up?.V) ?? 0
+	check("ptr-option-self", up != nil, up != nil, true)
+	check("ptr-option-select", upV == 5, upV, int64(5))
+	check("ptr-option-field", n.Up != nil, n.Up != nil, true)
+
+	var kids []L? = nil
+	l := L{V: 1, Kids: kids}
+	var one L? = L{V: 2}
+	var list [](L?) = [](L?){one}
+	listLen := len(list)
+	check("slice-option-nil", l.Kids == nil, l.Kids == nil, true)
+	check("slice-of-option-len", listLen == 1, listLen, 1)
+	check("slice-of-option-elem", list[0] != nil, list[0] != nil, true)
+
+	m := M{V: 1, Kids: [](M?){M{V: 3}}}
+	mLen := len(m.Kids)
+	check("slice-of-option-self-len", mLen == 1, mLen, 1)
+	check("slice-of-option-self-elem", m.Kids[0] != nil, m.Kids[0] != nil, true)
+
+	p := P{V: 9}
+	p2 := P{V: 10, Kids: []P{{V: 11}}}
+	pLen := len(p.Kids)
+	childV := p2.Kids[0].V
+	check("plain-slice-self", pLen == 0, pLen, 0)
+	check("plain-slice-child", childV == 11, childV, int64(11))
+
+	var a int? = 3
+	var b (int?)? = a
+	pr := Pair{A: a}
+	prA := pr.A ?? 0
+	check("plain-option-pair", prA == 3, prA, 3)
+	check("nested-option", b != nil, b != nil, true)
+
+	if failed {
+		os.Exit(1)
+	}
+}

@@ -1,0 +1,48 @@
+// run
+
+package main
+
+import (
+	"comptime"
+	"fmt"
+	"os"
+)
+
+var failed bool
+
+func check(name string, cond bool, got, want any) {
+	if !cond {
+		failed = true
+		fmt.Println("FAIL", name+":", "got", got, "want", want)
+		return
+	}
+	fmt.Println("ok", name)
+}
+
+type Row struct {
+	Name string
+}
+
+func fieldNames() []string {
+	const switch int {
+	case int:
+		names := func() []string {
+			var out []string
+			const for _, fld := range comptime.Fields[Row]() {
+				out = append(out, fld.Name)
+			}
+			return out
+		}
+		return names()
+	}
+	return nil
+}
+
+func main() {
+	names := fieldNames()
+	check("constfor-in-case", len(names) == 1 && names[0] == "Name", names, "[Name]")
+
+	if failed {
+		os.Exit(1)
+	}
+}
