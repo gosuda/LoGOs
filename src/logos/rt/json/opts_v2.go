@@ -7,6 +7,7 @@
 package json
 
 import (
+	"bytes"
 	stdjson "encoding/json"
 	"encoding/json/jsontext"
 	jsonv2 "encoding/json/v2"
@@ -21,6 +22,16 @@ import (
 // bit; they are internal to json.Marshal, json.Unmarshal, and the
 // streaming wrappers.
 const v1CallOptionMask = 0x18
+
+// tagOptionsMask covers the struct-tag flags the reflective struct codec
+// sets while encoding or decoding a `,string` or `,format` field: StringTag
+// (bit 27) and FormatTag (bit 28) of the Marshal and Unmarshal flags word in
+// encoding/json/internal/jsonflags. No caller-facing option can set either
+// bit (encoding/json/v2 exposes no setter for them; only field tags set
+// them, transiently, for that field), and v1 ignores both flags on struct,
+// array and slice values. A v1 call that differs from the defaults only
+// here still carries v1 semantics for the struct under the method.
+const tagOptionsMask = 0x18000000
 
 var v1DefaultOptions = stdjson.DefaultOptionsV1()
 
@@ -98,6 +109,20 @@ func CallerOptionsAreV1Default(opts jsontext.Options) bool {
 	return callerOptionsAreDefault(opts, v1OptionsLayout, v1DefaultOptions)
 }
 
+// CallerOptionsAreV1DefaultIgnoringTags reports whether opts carry v1
+// default semantics apart from the internal call bits and the struct-tag
+// flags a reflective parent sets while encoding or decoding a `,string`
+// or `,format` field. The generated refusal methods run the v1 bytes or
+// method under these options: v1 ignores those flags on struct values,
+// so the tag changes nothing for the struct under the method, while any
+// other option still refuses.
+//
+// The options value is valid only within the MarshalJSONTo or
+// UnmarshalJSONFrom call that produced it.
+func CallerOptionsAreV1DefaultIgnoringTags(opts jsontext.Options) bool {
+	return callerOptionsAreDefaultMasked(opts, v1OptionsLayout, v1DefaultOptions, v1CallOptionMask|tagOptionsMask)
+}
+
 // CallerOptionsAreV2Default reports whether opts are exactly the v2
 // default options apart from the internal call bits: either the explicit
 // DefaultOptionsV2 set or no options at all. A plain Marshal, Unmarshal,
@@ -113,16 +138,20 @@ func CallerOptionsAreV2Default(opts jsontext.Options) bool {
 }
 
 func callerOptionsAreDefault(opts jsontext.Options, want *optionsLayout, wantAny any) bool {
+	return callerOptionsAreDefaultMasked(opts, want, wantAny, v1CallOptionMask)
+}
+
+func callerOptionsAreDefaultMasked(opts jsontext.Options, want *optionsLayout, wantAny any, mask uint64) bool {
 	rv := reflect.ValueOf(opts)
 	if rv.Kind() != reflect.Pointer || rv.IsNil() || rv.Type() != v1OptionsType {
 		return false
 	}
 	if !optionsLayoutHolds {
-		return optionsEqualDefaultByReflection(rv, wantAny)
+		return optionsEqualDefaultByReflectionMasked(rv, wantAny, mask)
 	}
 	got := (*optionsLayout)(rv.UnsafePointer())
-	return got.presence&^v1CallOptionMask == want.presence&^v1CallOptionMask &&
-		got.values&^v1CallOptionMask == want.values&^v1CallOptionMask &&
+	return got.presence&^mask == want.presence&^mask &&
+		got.values&^mask == want.values&^mask &&
 		got.indent == want.indent && got.indentPrefix == want.indentPrefix &&
 		got.byteLimit == want.byteLimit && got.depthLimit == want.depthLimit &&
 		got.marshalers == nil && got.unmarshalers == nil &&
@@ -138,7 +167,11 @@ func optionsEqualV2DefaultByReflection(rv reflect.Value) bool {
 }
 
 func optionsEqualDefaultByReflection(rv reflect.Value, wantAny any) bool {
-	s, ok := maskedOptionsCopy(rv)
+	return optionsEqualDefaultByReflectionMasked(rv, wantAny, v1CallOptionMask)
+}
+
+func optionsEqualDefaultByReflectionMasked(rv reflect.Value, wantAny any, mask uint64) bool {
+	s, ok := maskedOptionsCopyWithMask(rv, mask)
 	if !ok {
 		return false
 	}
@@ -176,6 +209,11 @@ func optionsEqualUnsetByReflection(rv reflect.Value) bool {
 // maskedOptionsCopy copies the options behind rv and clears the internal
 // call bits, reporting whether rv has the options struct shape at all.
 func maskedOptionsCopy(rv reflect.Value) (reflect.Value, bool) {
+	return maskedOptionsCopyWithMask(rv, v1CallOptionMask)
+}
+
+// maskedOptionsCopyWithMask is maskedOptionsCopy with a caller-supplied mask.
+func maskedOptionsCopyWithMask(rv reflect.Value, mask uint64) (reflect.Value, bool) {
 	if rv.Kind() != reflect.Pointer || rv.IsNil() || rv.Type() != v1OptionsType {
 		return reflect.Value{}, false
 	}
@@ -195,7 +233,7 @@ func maskedOptionsCopy(rv reflect.Value) (reflect.Value, bool) {
 		default:
 			return reflect.Value{}, false
 		}
-		f.SetUint(f.Uint() &^ v1CallOptionMask)
+		f.SetUint(f.Uint() &^ mask)
 	}
 	return s, true
 }
@@ -240,6 +278,48 @@ func retypeShadowError[S, T any](err error) error {
 		}
 		if ute.Struct == reflect.TypeFor[S]().Name() {
 			ute.Struct = reflect.TypeFor[T]().Name()
+		}
+	}
+	return err
+}
+
+// DecodeDefaultRaw decodes raw, one complete JSON value buffered from the
+// caller decoder, into v, whose type S carries no JSON methods, so the
+// reflective decoder applies opts in full. opts is the materialized options
+// of the caller decoder, joined onto a fresh decoder over raw. base is the
+// absolute offset of raw within the original stream; error offsets are
+// rebased by it, so a re-decoded value reports the same positions as a
+// streaming decode. A semantic error naming S is renamed to T.
+func DecodeDefaultRaw[S, T any](raw jsontext.Value, opts jsontext.Options, base int64, v *S) error {
+	dec := jsontext.NewDecoder(bytes.NewReader(raw))
+	var err error
+	if opts == nil {
+		err = jsonv2.UnmarshalDecode(dec, v)
+	} else {
+		err = jsonv2.UnmarshalDecode(dec, v, opts)
+	}
+	if err == nil {
+		return nil
+	}
+	err = shiftErrorOffset(err, base)
+	return retypeShadowError[S, T](err)
+}
+
+// shiftErrorOffset re-bases the byte offsets of a value decoded from a
+// buffered copy by the absolute start of that copy. Opaque caller errors
+// carry no offsets and pass through unchanged.
+func shiftErrorOffset(err error, base int64) error {
+	if err == nil || base == 0 {
+		return err
+	}
+	for e := err; e != nil; e = errors.Unwrap(e) {
+		switch t := e.(type) {
+		case *jsonv2.SemanticError:
+			t.ByteOffset += base
+		case *jsontext.SyntacticError:
+			t.ByteOffset += base
+		case *stdjson.UnmarshalTypeError:
+			t.Offset += base
 		}
 	}
 	return err
