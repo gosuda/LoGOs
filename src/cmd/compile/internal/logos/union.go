@@ -743,6 +743,17 @@ func bareUnions(pkg *types2.Package) []string {
 	return out
 }
 
+func dualUseUnionNames(info *types2.Info, files []*syntax.File) []string {
+	var out []string
+	for obj, use := range ClassifyDeclaredUnions(info, files) {
+		if use == UnionDualUse {
+			out = append(out, obj.Name())
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
 func mentionsTypeParam(t types2.Type) bool {
 	seen := make(map[types2.Type]bool)
 	var walk func(t types2.Type) bool

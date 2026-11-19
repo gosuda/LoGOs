@@ -19,6 +19,26 @@ stdout '^42 kept$'
 ! logos test -count=1 ./dual
 stderr 'union D is used as a type constraint and as a value type; Go cannot express both'
 
+# A method signature is a value use too: the union below appears as a
+# value only in a method parameter and result, so the check must walk
+# method signatures to refuse it.
+! logos test -count=1 ./dualmeth
+stderr 'union D is used as a type constraint and as a value type; Go cannot express both'
+
+# A hoisted local struct is a value use too: the union below appears as
+# a value only in the field of a function-local struct, which the
+# exporter publishes for inlining, so the check must scan hoisted types
+# whose object dictionary carries no implicit type parameters.
+! logos test -count=1 ./dualwrap
+stderr 'union D is used as a type constraint and as a value type; Go cannot express both'
+
+# A generic function body is a value use too: the union below appears as
+# a value only in the field of a struct local to a generic function,
+# which the importer cannot resolve, so the check must use the dual-use
+# names recorded in the export facts.
+! logos test -count=1 ./dualwrapgen
+stderr 'union D is used as a type constraint and as a value type; Go cannot express both'
+
 -- w/go.mod --
 module example.com/genmethod
 
@@ -119,5 +139,171 @@ import (
 func TestFirst(t *testing.T) {
 	if dual.First(dual.B{Y: "z"}).M() != "B" {
 		t.Fatal("First")
+	}
+}
+
+-- w/dualmeth/dualmeth.lgo --
+package dualmeth
+
+type A struct {
+	X int
+}
+
+func (a A) M() string {
+	return "A"
+}
+
+func (a A) Keep(v D) D {
+	return v
+}
+
+type B struct {
+	Y string
+}
+
+func (b B) M() string {
+	return "B"
+}
+
+type D interface {
+	A | B
+	M() string
+}
+
+func First[T D](x T) T {
+	return x
+}
+
+-- w/dualmeth/dualmeth_test.lgo --
+package dualmeth_test
+
+import (
+	"testing"
+
+	"example.com/genmethod/dualmeth"
+)
+
+func TestFirst(t *testing.T) {
+	if dualmeth.First(dualmeth.B{Y: "z"}).M() != "B" {
+		t.Fatal("First")
+	}
+}
+
+func TestKeep(t *testing.T) {
+	a := dualmeth.A{X: 1}
+	if a.Keep(dualmeth.B{Y: "z"}).M() != "B" {
+		t.Fatal("Keep")
+	}
+}
+
+-- w/dualwrap/dualwrap.lgo --
+package dualwrap
+
+type A struct {
+	X int
+}
+
+func (a A) M() string {
+	return "A"
+}
+
+type B struct {
+	Y string
+}
+
+func (b B) M() string {
+	return "B"
+}
+
+type D interface {
+	A | B
+	M() string
+}
+
+func First[T D](x T) T {
+	return x
+}
+
+func Wrap() any {
+	type holder struct {
+		Value D
+	}
+	return holder{Value: A{X: 3}}
+}
+
+-- w/dualwrap/dualwrap_test.lgo --
+package dualwrap_test
+
+import (
+	"testing"
+
+	"example.com/genmethod/dualwrap"
+)
+
+func TestFirst(t *testing.T) {
+	if dualwrap.First(dualwrap.B{Y: "z"}).M() != "B" {
+		t.Fatal("First")
+	}
+}
+
+func TestWrap(t *testing.T) {
+	if dualwrap.Wrap() == nil {
+		t.Fatal("Wrap")
+	}
+}
+
+-- w/dualwrapgen/dualwrapgen.lgo --
+package dualwrapgen
+
+type A struct {
+	X int
+}
+
+func (a A) M() string {
+	return "A"
+}
+
+type B struct {
+	Y string
+}
+
+func (b B) M() string {
+	return "B"
+}
+
+type D interface {
+	A | B
+	M() string
+}
+
+func First[T D](x T) T {
+	return x
+}
+
+func Wrap[T any](v T) any {
+	type holder struct {
+		Value D
+	}
+	return holder{Value: A{X: 3}}
+}
+
+-- w/dualwrapgen/dualwrapgen_test.lgo --
+package dualwrapgen_test
+
+import (
+	"testing"
+
+	"example.com/genmethod/dualwrapgen"
+)
+
+func TestFirst(t *testing.T) {
+	if dualwrapgen.First(dualwrapgen.B{Y: "z"}).M() != "B" {
+		t.Fatal("First")
+	}
+}
+
+func TestWrap(t *testing.T) {
+	if dualwrapgen.Wrap[int](1) == nil {
+		t.Fatal("Wrap")
 	}
 }

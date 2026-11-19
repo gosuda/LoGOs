@@ -11,6 +11,7 @@ import (
 	"cmd/compile/internal/base"
 	"cmd/compile/internal/logos"
 	"cmd/compile/internal/syntax"
+	"cmd/compile/internal/types"
 	"cmd/compile/internal/types2"
 )
 
@@ -27,7 +28,7 @@ func logosExportHasLogosFile(pr *pkgbits.PkgDecoder) bool {
 	return false
 }
 
-func checkLogosGoImport(pkg *types2.Package) {
+func checkLogosGoImport(pr *pkgbits.PkgDecoder, pkg *types2.Package, dualUse []string) {
 	scope := pkg.Scope()
 	if scope == nil {
 		return
@@ -70,6 +71,55 @@ func checkLogosGoImport(pkg *types2.Package) {
 			base.Fatalf("logos build: %s", logos.DualUseMessage(v.hit.Name()))
 		}
 	}
+	for _, name := range logosImportableHoistedTypes(pr) {
+		tn, ok := scope.Lookup(name).(*types2.TypeName)
+		if !ok || tn.IsAlias() {
+			continue
+		}
+		if n, ok := tn.Type().(*types2.Named); ok {
+			for i := range n.NumMethods() {
+				v.signature(n.Method(i).Type())
+			}
+		}
+		v.value(tn.Type().Underlying())
+		if v.hit != nil {
+			base.Fatalf("logos build: %s", logos.DualUseMessage(v.hit.Name()))
+		}
+	}
+	for _, name := range dualUse {
+		tn, ok := scope.Lookup(name).(*types2.TypeName)
+		if !ok || tn.IsAlias() {
+			continue
+		}
+		iface, ok := tn.Type().Underlying().(*types2.Interface)
+		if !ok || !logos.HasUnionTerms(iface) {
+			continue
+		}
+		base.Fatalf("logos build: %s", logos.DualUseMessage(tn.Name()))
+	}
+}
+
+func logosImportableHoistedTypes(pr *pkgbits.PkgDecoder) []string {
+	var out []string
+	names := pr.NumElems(pkgbits.SectionName)
+	for i := range names {
+		idx := pkgbits.RelElemIdx(i)
+		_, name, tag := pr.PeekObj(idx)
+		if tag != pkgbits.ObjType {
+			continue
+		}
+		if _, suffix := types.SplitVargenSuffix(name); suffix == "" {
+			continue
+		}
+		d := pr.TempDecoder(pkgbits.SectionObjDict, idx, pkgbits.SyncObject1)
+		implicits := d.Len()
+		pr.RetireDecoder(&d)
+		if implicits != 0 {
+			continue
+		}
+		out = append(out, name)
+	}
+	return out
 }
 
 type unionMentionWalker struct {
