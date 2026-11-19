@@ -4,8 +4,6 @@
 # Each check pipes through tee and trips the fail accumulator, so this file
 # sets pipefail itself and stays free of -e, exactly like the inline block.
 . .latchkey/env.sh
-# Steps start without pipefail, so set it here: each check below
-# pipes to tee and a failing check must trip the fail accumulator.
 set -o pipefail
 fail=0
 uv run --no-project python misc/logos-dogfood/run.py \
