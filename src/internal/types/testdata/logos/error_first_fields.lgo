@@ -175,3 +175,11 @@ func ffDeferredFieldProofMatchesError() {
 	h.stats, err = ffFetchHeld()
 	_ = err
 }
+
+func ffEvaluatedArrayOperandReadsResult() {
+	var n int
+	var err error
+	n, err = ffFetch()
+	println(len([1]int{ffEcho(n /* ERROR "[correctness::result_before_error_check]" */)}))
+	_ = err
+}
