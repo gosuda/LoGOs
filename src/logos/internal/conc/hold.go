@@ -74,10 +74,11 @@ func (m *monitor) reportIfLong(hold lockHold) {
 	if hold.waiter == 0 || age < holdLimit() {
 		return
 	}
-	if _, done := m.longHolds[hold.site]; done {
+	key := keyOf(hold.site)
+	if _, done := m.longHolds[key]; done {
 		return
 	}
-	m.longHolds[hold.site] = struct{}{}
+	m.longHolds[key] = struct{}{}
 	write(finding{
 		rule:    "conc::lock_held_long",
 		message: "a goroutine held a Locked value for " + age.Round(time.Millisecond).String() + " while another goroutine waited for it; the limit is " + holdLimit().String(),

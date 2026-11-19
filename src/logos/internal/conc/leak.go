@@ -54,9 +54,10 @@ func init() {
 }
 
 func (w leakWatch) run() {
+	start := time.Now()
 	wait := firstLeakCheck
 	for range timedLeakChecks {
-		time.Sleep(wait)
+		time.Sleep(time.Until(start.Add(wait)))
 		w.report()
 		wait *= 2
 	}

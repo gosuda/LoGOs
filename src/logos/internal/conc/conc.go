@@ -56,21 +56,21 @@ type monitor struct {
 	mu        sync.Mutex
 	held      map[uint64][]heldLock
 	holding   map[uintptr]lockHold
-	order     map[lockPair]pairSite
+	order     map[lockPair][]pairSite
 	alive     map[uintptr]func() bool
 	sweepAt   int
 	reported  map[[4]uintptr]struct{}
-	longHolds map[uintptr]struct{}
+	longHolds map[statementKey]struct{}
 }
 
 var locks = monitor{
 	held:      map[uint64][]heldLock{},
 	holding:   map[uintptr]lockHold{},
-	order:     map[lockPair]pairSite{},
+	order:     map[lockPair][]pairSite{},
 	alive:     map[uintptr]func() bool{},
 	sweepAt:   firstSweepSize,
 	reported:  map[[4]uintptr]struct{}{},
-	longHolds: map[uintptr]struct{}{},
+	longHolds: map[statementKey]struct{}{},
 }
 
 // Acquire records that the calling goroutine is about to take lock while
@@ -81,6 +81,7 @@ var locks = monitor{
 // for lock; the caller then calls Track.
 func Acquire(lock unsafe.Pointer) (untracked bool) {
 	key := uintptr(lock)
+	Shake()
 	pc := callerPC(lockCallerSkip)
 	g := goroutineID()
 	locks.mu.Lock()
@@ -93,12 +94,22 @@ func Acquire(lock unsafe.Pointer) (untracked bool) {
 			continue
 		}
 		pair := lockPair{outer.key, key}
-		if _, known := locks.order[pair]; !known && len(locks.order) < maxOrderEdges {
-			locks.order[pair] = pairSite{goroutine: g, firstPC: outer.pc, secondPC: pc}
+		here := pairSite{goroutine: g, firstPC: outer.pc, secondPC: pc}
+		witnesses, known := locks.order[pair]
+		if !known {
+			if len(locks.order) < maxOrderEdges {
+				locks.order[pair] = []pairSite{here}
+			}
+		} else if len(witnesses) == 1 && witnesses[0].goroutine != g {
+			locks.order[pair] = append(witnesses, here)
 		}
-		other, inverted := locks.order[lockPair{key, outer.key}]
-		if inverted && other.goroutine != g {
-			locks.reportInversion(pairSite{goroutine: g, firstPC: outer.pc, secondPC: pc}, other)
+		if others, inverted := locks.order[lockPair{key, outer.key}]; inverted {
+			for _, other := range others {
+				if other.goroutine != g {
+					locks.reportInversion(here, other)
+					break
+				}
+			}
 		}
 	}
 	return !tracked
@@ -212,4 +223,21 @@ func callerPC(skip int) uintptr {
 func at(pc uintptr, role string) position {
 	frame, _ := runtime.CallersFrames([]uintptr{pc}).Next()
 	return position{file: frame.File, line: frame.Line, role: role}
+}
+
+type statementKey struct {
+	file string
+	line int
+}
+
+var positionsByPC sync.Map
+
+func keyOf(pc uintptr) statementKey {
+	if v, ok := positionsByPC.Load(pc); ok {
+		return v.(statementKey)
+	}
+	frame, _ := runtime.CallersFrames([]uintptr{pc}).Next()
+	key := statementKey{file: frame.File, line: frame.Line}
+	actual, _ := positionsByPC.LoadOrStore(pc, key)
+	return actual.(statementKey)
 }

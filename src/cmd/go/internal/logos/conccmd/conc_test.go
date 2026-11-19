@@ -135,15 +135,54 @@ func TestChildArguments(t *testing.T) {
 		{"run", "-tags logosconc .", "run -tags=logosconc .", false, nil},
 		{"run", "-stall 200ms -race .", "run -tags=logosconc -race .", false, map[string]string{"stall": "200ms"}},
 		{"run", "-hold=20ms --stall 3s . -hold 9s", "run -tags=logosconc . -hold 9s", false, map[string]string{"hold": "20ms", "stall": "3s"}},
-		{"test", "-run TestA ./a ./b -race", "test -tags=logosconc -run TestA ./a ./b -race", false, nil},
-		{"test", "--json-diagnostics=false ./a -args -tags z", "test -tags=logosconc ./a -args -tags z", false, nil},
-		{"test", "./a --stall=1m30s -hold 1s -args -stall 9s", "test -tags=logosconc ./a -args -stall 9s", false, map[string]string{"stall": "1m30s", "hold": "1s"}},
-		{"test", "", "test -tags=logosconc", false, nil},
+		{"test", "-run TestA ./a ./b -race", "test -count=1 -tags=logosconc -run TestA ./a ./b -race", false, nil},
+		{"test", "--json-diagnostics=false ./a -args -tags z", "test -count=1 -tags=logosconc ./a -args -tags z", false, nil},
+		{"test", "./a --stall=1m30s -hold 1s -args -stall 9s", "test -count=1 -tags=logosconc ./a -args -stall 9s", false, map[string]string{"stall": "1m30s", "hold": "1s"}},
+		{"test", "", "test -count=1 -tags=logosconc", false, nil},
 	}
 	for _, tt := range tests {
 		got := childArguments(tt.verb, strings.Fields(tt.args), takesValue)
 		if want := strings.Fields(tt.want); !slices.Equal(got.arguments, want) || got.asJSON != tt.asJSON || !maps.Equal(got.durations, tt.durations) {
 			t.Errorf("logos conc %s %s:\n got %q asJSON=%v durations=%v\nwant %q asJSON=%v durations=%v", tt.verb, tt.args, got.arguments, got.asJSON, got.durations, want, tt.asJSON, tt.durations)
+		}
+	}
+}
+
+func TestChildArgumentsShake(t *testing.T) {
+	neverTakesValue := func(name string) bool { return false }
+	tests := []struct {
+		verb      string
+		args      string
+		want      string
+		shake     string
+		shakeBare bool
+	}{
+		{"test", "-shake=7 -count=1 ./ord", "test -tags=logosconc -count=1 ./ord", "7", false},
+		{"test", "-shake 7 -count=1 ./ord", "test -tags=logosconc -count=1 ./ord", "7", false},
+		{"test", "-count=1 ./ord -shake", "test -tags=logosconc -count=1 ./ord", "", true},
+		{"test", "-shake ./ord", "test -count=1 -tags=logosconc ./ord", "", true},
+		{"run", "-shake=7 .", "run -tags=logosconc .", "7", false},
+		{"run", "-shake .", "run -tags=logosconc .", "", true},
+		{"test", "-count=1 ./ord", "test -tags=logosconc -count=1 ./ord", "", false},
+	}
+	for _, tt := range tests {
+		got := childArguments(tt.verb, strings.Fields(tt.args), neverTakesValue)
+		if want := strings.Fields(tt.want); !slices.Equal(got.arguments, want) || got.shake != tt.shake || got.shakeBare != tt.shakeBare {
+			t.Errorf("logos conc %s %s:\n got %q shake=%q bare=%v\nwant %q shake=%q bare=%v", tt.verb, tt.args, got.arguments, got.shake, got.shakeBare, want, tt.shake, tt.shakeBare)
+		}
+	}
+}
+
+func TestWithMonitorTagJoinsSpaceSeparatedTags(t *testing.T) {
+	tests := []struct{ in, want string }{
+		{"debug trace", "debug,trace,logosconc"},
+		{"debug,trace", "debug,trace,logosconc"},
+		{"debug trace,logosconc", "debug,trace,logosconc"},
+		{"logosconc", "logosconc"},
+	}
+	for _, tt := range tests {
+		if got := withMonitorTag(tt.in); got != tt.want {
+			t.Errorf("withMonitorTag(%q) = %q, want %q", tt.in, got, tt.want)
 		}
 	}
 }

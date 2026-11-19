@@ -210,6 +210,32 @@ func TestOneOrderInTwoGoroutinesIsSilent(t *testing.T) {
 	}
 }
 
+func TestReversedOrderAfterTwoGoroutinesShareOrderIsReported(t *testing.T) {
+	pa, pb := new(probe), new(probe)
+	ka, kb := twoLocks()
+	var first, second, third int
+	firstDone := make(chan struct{})
+	secondDone := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		first = nextLine()
+		take(ka, pa, func() { take(kb, pb, func() {}) })
+		close(firstDone)
+		<-secondDone
+		third = nextLine()
+		take(kb, pb, func() { take(ka, pa, func() {}) })
+	}()
+	<-firstDone
+	second = nextLine()
+	take(ka, pa, func() { take(kb, pb, func() {}) })
+	close(secondDone)
+	<-done
+	if got := findingsAt(t, first, second, third); len(got) != 1 {
+		t.Fatalf("got %d findings, want 1: %+v", len(got), got)
+	}
+}
+
 func TestAFreedLockTakesItsPairsWithIt(t *testing.T) {
 	old, pb := new(probe), new(probe)
 	ka, kb := twoLocks()
@@ -476,6 +502,12 @@ func TestUnboundedGroupIsReportedOncePerStatement(t *testing.T) {
 		var statement int
 		statement = nextLine()
 		groups := []*group{newGroup(0), newGroup(0)}
+		defer func() {
+			close(release)
+			for _, g := range groups {
+				g.join()
+			}
+		}()
 		for _, g := range groups {
 			g.spawn(func() { <-release })
 			g.spawn(func() { <-release })
@@ -485,9 +517,31 @@ func TestUnboundedGroupIsReportedOncePerStatement(t *testing.T) {
 		if got := findingsAt(t, statement); len(got) != 1 {
 			t.Fatalf("two groups from one statement gave %d findings, want 1: %+v", len(got), got)
 		}
-		close(release)
-		for _, g := range groups {
-			g.join()
+	})
+}
+
+func TestUnboundedGroupsOnDifferentLinesAreReportedOnceEach(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		old := conc.SetUnboundedAt(2)
+		defer conc.SetUnboundedAt(old)
+		release := make(chan struct{})
+		lineA := nextLine()
+		gA := newGroup(0)
+		lineB := nextLine()
+		gB := newGroup(0)
+		defer func() {
+			close(release)
+			gA.join()
+			gB.join()
+		}()
+		for _, g := range []*group{gA, gB} {
+			g.spawn(func() { <-release })
+			g.spawn(func() { <-release })
+		}
+		synctest.Wait()
+
+		if got := findingsAt(t, lineA, lineB); len(got) != 2 {
+			t.Fatalf("groups on different lines gave %d findings, want 2: %+v", len(got), got)
 		}
 	})
 }

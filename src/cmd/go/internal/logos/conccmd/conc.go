@@ -15,7 +15,9 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -30,6 +32,9 @@ const (
 	// logos/internal/conc, which cmd/go may not import.
 	sinkEnv        = "LOGOSCONC_SINK"
 	maxFindingLine = 4000
+
+	// shakeEnv equals ShakeEnv of logos/internal/conc.
+	shakeEnv = "LOGOSCONC_SHAKE"
 )
 
 // durationFlags maps each flag of `logos conc` that takes a duration to
@@ -60,6 +65,10 @@ The conc flags are:
 	-hold duration
 		report a Locked value that one goroutine holds this long while
 		another goroutine waits for it (default 100ms)
+	-shake seed
+		yield at group and lock hook points from this seed, so one seed
+		gives one schedule perturbation (default off); without a value
+		the seed comes from the clock and is printed on standard error
 	--json-diagnostics
 		print each finding as one JSON object
 
@@ -108,14 +117,14 @@ See also: logos lint, logos test.
 }
 
 var cmdRun = &base.Command{
-	UsageLine:   "logos conc run [build flags] [-stall duration] [-hold duration] [--json-diagnostics] package [arguments...]",
+	UsageLine:   "logos conc run [build flags] [-stall duration] [-hold duration] [-shake seed] [--json-diagnostics] package [arguments...]",
 	Short:       "run a program under the concurrency monitor",
 	Long:        "Run is 'logos run' under the concurrency monitor. See 'logos help conc'.\n",
 	CustomFlags: true,
 }
 
 var cmdTest = &base.Command{
-	UsageLine:   "logos conc test [build and test flags] [-stall duration] [-hold duration] [--json-diagnostics] [packages]",
+	UsageLine:   "logos conc test [build and test flags] [-stall duration] [-hold duration] [-shake seed] [--json-diagnostics] [packages]",
 	Short:       "test packages under the concurrency monitor",
 	Long:        "Test is 'logos test' under the concurrency monitor. See 'logos help conc'.\n",
 	CustomFlags: true,
@@ -132,6 +141,19 @@ func Register(root *base.Command) {
 					base.Fatalf("logos conc %s: -%s %q is not a positive duration", verb, name, inv.durations[name])
 				}
 			}
+			if inv.shakeBare {
+				seed := uint64(time.Now().UnixNano())
+				if seed == 0 {
+					seed = 1
+				}
+				inv.shake = strconv.FormatUint(seed, 10)
+			}
+			if inv.shake != "" {
+				if _, err := strconv.ParseUint(inv.shake, 10, 64); err != nil {
+					base.Fatalf("logos conc %s: -shake %q is not a seed", verb, inv.shake)
+				}
+				fmt.Fprintf(os.Stderr, "logos conc: shake seed %s\n", inv.shake)
+			}
 			monitor(verb, inv)
 		}
 	}
@@ -143,6 +165,10 @@ type invocation struct {
 	asJSON    bool
 	// durations holds the value of each duration flag that the user gave.
 	durations map[string]string
+	// shake holds the value of -shake. shakeBare reports -shake without
+	// a value, which takes its seed from the clock in Register.
+	shake     string
+	shakeBare bool
 }
 
 // valueFlags reports, for each flag of cmd, whether it takes its value
@@ -192,6 +218,19 @@ func childArguments(verb string, args []string, takesValue func(string) bool) in
 				value = args[i]
 			}
 			inv.durations[name] = value
+		case name == "shake":
+			if hasValue && value != "" {
+				inv.shake = value
+			} else if i+1 < len(args) {
+				if _, err := strconv.ParseUint(args[i+1], 10, 64); err == nil {
+					i++
+					inv.shake = args[i]
+				} else {
+					inv.shakeBare = true
+				}
+			} else {
+				inv.shakeBare = true
+			}
 		case name == "tags":
 			if !hasValue && i+1 < len(args) {
 				i++
@@ -210,6 +249,19 @@ func childArguments(verb string, args []string, takesValue func(string) bool) in
 	if !tagged {
 		inv.arguments = append([]string{verb, "-tags=" + monitorTag}, inv.arguments[1:]...)
 	}
+	if verb == "test" {
+		hasCount := false
+		for _, arg := range inv.arguments {
+			name, _, _ := strings.Cut(strings.TrimLeft(arg, "-"), "=")
+			if name == "count" {
+				hasCount = true
+				break
+			}
+		}
+		if !hasCount {
+			inv.arguments = slices.Insert(inv.arguments, 1, "-count=1")
+		}
+	}
 	inv.arguments = append(inv.arguments, args[i:]...)
 	return inv
 }
@@ -218,12 +270,13 @@ func withMonitorTag(tags string) string {
 	if tags == "" {
 		return monitorTag
 	}
-	for _, tag := range strings.FieldsFunc(tags, func(r rune) bool { return r == ',' || r == ' ' }) {
+	fields := strings.FieldsFunc(tags, func(r rune) bool { return r == ',' || r == ' ' })
+	for _, tag := range fields {
 		if tag == monitorTag {
-			return tags
+			return strings.Join(fields, ",")
 		}
 	}
-	return tags + "," + monitorTag
+	return strings.Join(fields, ",") + "," + monitorTag
 }
 
 type findingLine struct {

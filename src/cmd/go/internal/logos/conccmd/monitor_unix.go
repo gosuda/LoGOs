@@ -30,6 +30,9 @@ func monitor(verb string, inv invocation) {
 	if err != nil {
 		base.Fatalf("logos conc %s: %v", verb, err)
 	}
+	if abs, err := filepath.Abs(dir); err == nil {
+		dir = abs
+	}
 	base.AtExit(func() { os.RemoveAll(dir) })
 
 	// The command holds the pipe open for reading and writing. A program
@@ -56,6 +59,15 @@ func monitor(verb string, inv invocation) {
 	child.Env = append(slices.Clip(cfg.OrigEnv), sinkEnv+"="+path)
 	for name, value := range inv.durations {
 		child.Env = append(child.Env, durationFlags[name]+"="+value)
+	}
+	if _, ok := inv.durations["stall"]; !ok {
+		child.Env = append(child.Env, durationFlags["stall"]+"=5s")
+	}
+	if _, ok := inv.durations["hold"]; !ok {
+		child.Env = append(child.Env, durationFlags["hold"]+"=100ms")
+	}
+	if inv.shake != "" {
+		child.Env = append(child.Env, shakeEnv+"="+inv.shake)
 	}
 	base.StartSigHandlers()
 	runErr := child.Run()

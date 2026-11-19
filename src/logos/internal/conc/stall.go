@@ -43,7 +43,7 @@ type Group struct {
 	// first child starts.
 	bounded bool
 	// statement is the `go group` statement that built the record.
-	statement uintptr
+	statement statementKey
 	// unboundedAt is the running-children count at which the monitor
 	// reports the group. The tests lower it.
 	unboundedAt int
@@ -56,9 +56,9 @@ type stalledChild struct {
 
 var stalls = struct {
 	mu       sync.Mutex
-	reported map[uintptr]struct{}
+	reported map[statementKey]struct{}
 }{
-	reported: map[uintptr]struct{}{},
+	reported: map[statementKey]struct{}{},
 }
 
 // unboundedAt is the number of children that run at one time in a
@@ -72,9 +72,9 @@ var unboundedAt = 10000
 // statement is reported one time in one process.
 var unbounded = struct {
 	mu       sync.Mutex
-	reported map[uintptr]struct{}
+	reported map[statementKey]struct{}
 }{
-	reported: map[uintptr]struct{}{},
+	reported: map[statementKey]struct{}{},
 }
 
 var stallAfter = sync.OnceValue(func() time.Duration {
@@ -88,7 +88,7 @@ func NewGroup(limit int) *Group {
 	return &Group{
 		children:    map[uint64]groupChild{},
 		bounded:     limit > 0,
-		statement:   callerPC(groupCallerSkip),
+		statement:   keyOf(callerPC(groupCallerSkip)),
 		unboundedAt: unboundedAt,
 	}
 }
@@ -126,6 +126,7 @@ func SpawnSite() uintptr {
 // monitor. It reports at that count only, so a larger group takes no
 // lock of the monitor for a later child.
 func (g *Group) ChildStarted(site uintptr) {
+	Shake()
 	running := g.admit(goroutineID(), site)
 	if g.bounded || running != g.unboundedAt || !firstUnboundedAt(g.statement) {
 		return
@@ -158,7 +159,7 @@ func (g *Group) ChildDone() {
 
 // firstUnboundedAt reports whether the group statement has no finding
 // yet, and records it.
-func firstUnboundedAt(statement uintptr) bool {
+func firstUnboundedAt(statement statementKey) bool {
 	unbounded.mu.Lock()
 	defer unbounded.mu.Unlock()
 	if _, done := unbounded.reported[statement]; done {
@@ -175,7 +176,7 @@ func (g *Group) unboundedFinding(count int, site uintptr) finding {
 		rule:    "conc::group_unbounded",
 		message: "a group without a limit runs " + strconv.Itoa(count) + " children at one time; the count follows the work the program gives the group",
 		positions: []position{
-			at(g.statement, "this go group has no limit"),
+			{file: g.statement.file, line: g.statement.line, role: "this go group has no limit"},
 			at(site, "the child that made the count reach "+strconv.Itoa(count)+" started here"),
 		},
 		hint: "give the group a limit: go group (ctx, limit = N)",
@@ -220,7 +221,7 @@ func (g *Group) unreportedStalled() []stalledChild {
 			}
 			continue
 		}
-		if firstStallAt(child.site) {
+		if firstStallAt(keyOf(child.site)) {
 			stalled = append(stalled, stalledChild{goroutine: id, site: child.site})
 		}
 	}
@@ -230,7 +231,7 @@ func (g *Group) unreportedStalled() []stalledChild {
 	return stalled
 }
 
-func firstStallAt(site uintptr) bool {
+func firstStallAt(site statementKey) bool {
 	stalls.mu.Lock()
 	defer stalls.mu.Unlock()
 	if _, done := stalls.reported[site]; done {
