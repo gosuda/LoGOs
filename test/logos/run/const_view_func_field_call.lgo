@@ -1,0 +1,35 @@
+// run
+
+package main
+
+import "fmt"
+
+type CVFunc struct {
+	Name string
+	Call func(x string) string
+}
+
+func cvFuncDirect(ts const []CVFunc) string { return ts[0].Call("hi") }
+
+func cvFuncBound(ts const []CVFunc) string {
+	f := ts[1].Call
+	return f("yo")
+}
+
+func cvFuncRange(ts const []CVFunc) string {
+	out := ""
+	for _, t := range ts {
+		out += t.Call("!")
+	}
+	return out
+}
+
+func cvFuncPtr(p const *CVFunc) string { return p.Call("ptr") }
+
+func main() {
+	ts := []CVFunc{
+		{Name: "a", Call: func(x string) string { return "a:" + x }},
+		{Name: "b", Call: func(x string) string { return "b:" + x }},
+	}
+	fmt.Println(cvFuncDirect(ts), cvFuncBound(ts), cvFuncRange(ts), cvFuncPtr(&ts[0]))
+}

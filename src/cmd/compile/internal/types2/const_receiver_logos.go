@@ -1387,7 +1387,11 @@ func (check *Checker) logosReadonlySelect(x *operand, e *syntax.SelectorExpr, na
 		} else {
 			x.mode_ = value
 		}
-		x.typ_ = logosReadonlyProject(projectedContainer, obj.Type(), throughReference)
+		if _, isFunc := obj.Type().Underlying().(*Signature); isFunc {
+			x.typ_ = obj.Type()
+		} else {
+			x.typ_ = logosReadonlyProject(projectedContainer, obj.Type(), throughReference)
+		}
 		x.expr = e
 		return true
 	case *Func:

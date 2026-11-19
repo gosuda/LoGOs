@@ -1,0 +1,16 @@
+// errorcheck
+
+package p
+
+type WFunc struct {
+	Name string
+	Call func(x string) string
+}
+
+func rejectFuncFieldWrite(ts const []WFunc) {
+	ts[0].Call = nil // ERROR "const_view_mutation"
+}
+
+func rejectFuncElemWrite(ts const []WFunc) {
+	ts[0] = WFunc{} // ERROR "const_view_mutation"
+}
