@@ -30,28 +30,7 @@ flag() {
 # core: every change except docs-only ones (the old logos.yml paths-ignore)
 core=false
 if [ "$ev" = workflow_dispatch ]; then if want core; then core=true; fi
-elif grep -v '^\.latchkey/' <<< "$files" | grep -Evq '^(AGENTS|CONTRIBUTING|README|SECURITY)\.md
-fi
-if [ $core = true ]; then any=true; fi
-echo "core=$core" >> "$LATCHKEY_CI_OUTPUT"
-flag ssa '^src/cmd/compile/internal/(ssa/|ssagen/(simd[^/]*|intrinsics[^/]*|ssa)\.go$|(amd64|arm64)/ssa\.go$|typecheck/(_builtin/runtime|builtin)\.go$|logos/wasm[^/]*_test\.go$)|^src/simd/archsimd/|^src/runtime/(autovec|export_autovec_logos_test)|^src/cmd/go/(scriptconds_test\.go$|testdata/script/logos_(simd_|eject_simd_slice))|^src/cmd/go/internal/logos/config/targetcpu|^test/logos/(run/simd_zero_guard|.*autovec)'
-flag gc '^src/(runtime/|internal/abi/|internal/goexperiment/|logos/arena/)|^\.github/scripts/install-ci-tool\.sh$'
-flag compiler '^src/(cmd/compile/|cmd/go/|internal/buildcfg/)|^test/logos/|^\.github/scripts/install-(ci-tool|upstream-oracles)\.sh$'
-flag cgo '^misc/cgo/|^src/(cmd/cgo/|runtime/|internal/goexperiment/|internal/buildcfg/|cmd/go/internal/logos/settings/)' push
-flag dogfood '^misc/logos-dogfood/|^src/'
-flag bench '^src/cmd/compile/internal/ssa/(autovec_logos\.go|testdata/autovec_bench_test\.go)$|^test/logos/bench/autovec_measure\.sh$'
-gates=
-if [ "$ev" = workflow_dispatch ] || [ $all = true ]; then
-  if [ "$ev" != workflow_dispatch ] || want gates; then gates=$(bash .github/scripts/gate-changes.sh "" | tr '\n' ' '); fi
-elif [ "$ev" = pr_update ]; then
-  gates=$(GITHUB_SHA=$LATCHKEY_CI_SHA bash .github/scripts/gate-changes.sh "$base" | tr '\n' ' ')
-fi
-if [ -n "$gates" ]; then any=true; fi
-echo "gates=${gates:--}" >> "$LATCHKEY_CI_OUTPUT"
-echo "gate_any=$([ -n "$gates" ] && echo true || echo false)" >> "$LATCHKEY_CI_OUTPUT"
-echo "build=$any" >> "$LATCHKEY_CI_OUTPUT"
-printf 'changed files:\n%s\n--\n' "$files"; cat "$LATCHKEY_CI_OUTPUT"
-; then core=true
+elif grep -v '^\.latchkey/' <<< "$files" | grep -Evq '^(AGENTS|CONTRIBUTING|README|SECURITY)\.md$'; then core=true
 fi
 if [ $core = true ]; then any=true; fi
 echo "core=$core" >> "$LATCHKEY_CI_OUTPUT"
