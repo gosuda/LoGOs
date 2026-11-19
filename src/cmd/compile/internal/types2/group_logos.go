@@ -34,6 +34,12 @@ func (check *Checker) logosGroupStmt(ctxt stmtContext, s *syntax.GroupStmt) {
 		check.error(s, InvalidSyntaxTree, "go group requires logos mode")
 		return
 	}
+	if top, ok := check.logosGroupTop(); ok && !top.child {
+		if check.Info.LogosGroupNested == nil {
+			check.Info.LogosGroupNested = make(map[*syntax.GroupStmt]bool)
+		}
+		check.Info.LogosGroupNested[s] = true
+	}
 	check.logosGroupContext(s)
 	check.logosGroupLimit(s)
 	if !check.logosEnclosingError() {
@@ -168,7 +174,16 @@ func (check *Checker) logosGroupBranches(all *Scope, parent *block, lstmt *synta
 // logosTerminatingGroup reports whether a go group statement is terminating:
 // the parent body runs inline, so the group terminates exactly when its own
 // body does; child bodies are separate function bodies and never count.
+// A group nested directly inside another group's body is submitted as a
+// child and falls through to the spawner, so it never terminates the
+// enclosing body even when its own body terminates.
 func (check *Checker) logosTerminatingGroup(s *syntax.GroupStmt) bool {
+	if check.Info.LogosGroupNested[s] {
+		return false
+	}
+	if top, ok := check.logosGroupTop(); ok && !top.child {
+		return false
+	}
 	return check.isTerminatingList(s.Body.List, "")
 }
 

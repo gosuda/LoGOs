@@ -3,6 +3,7 @@
 package main
 
 import (
+	"comptime"
 	"context"
 	"errors"
 	"fmt"
@@ -105,6 +106,44 @@ func tailPanic(ctx context.Context) (out string, err error) {
 	}
 }
 
+var errNested = errors.New("nested failed")
+
+func tailNestedGroup(ctx context.Context) error {
+	go group (ctx) {
+		go group (ctx) {
+			return errNested
+		}
+	}
+	return nil
+}
+
+type Empty struct{}
+
+func tailConstForEmpty(ctx context.Context) error {
+	go group (ctx) {
+		go func() error { return errChild }()
+		const for _, f := range comptime.Fields[Empty]() {
+			_ = f.Name
+			return nil
+		}
+	}
+	return nil
+}
+
+func tailScopeIfElse(ctx context.Context, b bool, log *[]string) error {
+	go group (ctx) {
+		scope defer func() { *log = append(*log, "deferred") }()
+		go child()
+		if b {
+			*log = append(*log, "then")
+			return nil
+		} else {
+			*log = append(*log, "else")
+			return nil
+		}
+	}
+}
+
 func pair[T any](v T, err error) string {
 	return fmt.Sprintf("%v|%v", v, err)
 }
@@ -135,4 +174,12 @@ func main() {
 	fmt.Printf("child-error %q\n", pair(tailChildError(ctx)))
 
 	fmt.Println("panic", pair(tailPanic(ctx)))
+
+	fmt.Println("nested", tailNestedGroup(ctx))
+	fmt.Println("constfor-empty", tailConstForEmpty(ctx))
+
+	var log2 []string
+	fmt.Println("scope-ifelse", tailScopeIfElse(ctx, true, &log2), log2)
+	log2 = nil
+	fmt.Println("scope-ifelse", tailScopeIfElse(ctx, false, &log2), log2)
 }

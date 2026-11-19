@@ -9,3 +9,7 @@ loop 2|<nil> 3
 parent-error parent failed 1
 child-error "|child failed"
 panic stopped|<nil>
+nested nested failed
+constfor-empty child failed
+scope-ifelse <nil> [then deferred]
+scope-ifelse <nil> [else deferred]

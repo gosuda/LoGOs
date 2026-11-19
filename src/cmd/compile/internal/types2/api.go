@@ -358,6 +358,7 @@ type Info struct {
 	LogosStaticJSON    map[*Named]bool
 
 	LogosGroupTerminating map[*syntax.GroupStmt]bool // logos hook: `go group` statements whose block ends in a terminating statement, so the lowering emits no join after it.
+	LogosGroupNested      map[*syntax.GroupStmt]bool // logos hook: `go group` statements nested inside another group body, submitted as children, never terminating the enclosing body.
 
 	LogosConstSlices map[syntax.Expr]bool                   // logos M5-S1 hook: slice expressions over const views with non-constant bounds, for the lowering-time runtime check.
 	LogosPropDecls   []*LogosPropDecl                       // logos M4-S2 hook: asserted property interfaces per declaring struct.

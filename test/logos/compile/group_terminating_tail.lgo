@@ -2,7 +2,10 @@
 
 package p
 
-import "context"
+import (
+	"comptime"
+	"context"
+)
 
 // A group statement is terminating when its parent body is: the return
 // operands are evaluated where the statement stands, then the join runs,
@@ -59,6 +62,30 @@ func groupTailFallsThrough(ctx context.Context) error {
 func groupTailOneBranch(ctx context.Context, b bool) error {
 	go group (ctx) {
 		if b {
+			return nil
+		}
+	}
+} // ERROR "missing return"
+
+// A trailing nested group is submitted as a child and falls through,
+// so the outer group does not terminate the function.
+func groupTailNestedFallsThrough(ctx context.Context) error {
+	go group (ctx) {
+		go group (ctx) {
+			return nil
+		}
+	}
+} // ERROR "missing return"
+
+type emptyForCheck struct{}
+
+// A const for over no visible fields expands to nothing and falls
+// through, so the outer group does not terminate the function.
+func groupTailConstForEmptyFallsThrough(ctx context.Context) error {
+	go group (ctx) {
+		go func() error { return nil }()
+		const for _, f := range comptime.Fields[emptyForCheck]() {
+			_ = f.Name
 			return nil
 		}
 	}
