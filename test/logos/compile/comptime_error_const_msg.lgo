@@ -11,14 +11,14 @@ func FailNamed[T any]() int {
 	return 0
 }
 
-var _ = FailNamed[int]() // ERROR "named boom"
+var _ = FailNamed[int]() // ERROR "\[comptime::error\] named boom"
 
 func FailConcat[T any]() int {
 	comptime.Error("concat" + " message")
 	return 0
 }
 
-var _ = FailConcat[int]() // ERROR "concat message"
+var _ = FailConcat[int]() // ERROR "\[comptime::error\] concat message"
 
 const SharedPrefix = "bad: "
 
@@ -29,7 +29,7 @@ func FailShared[T any]() int {
 	return 0
 }
 
-var _ = FailShared[int]() // ERROR "bad: abad: b"
+var _ = FailShared[int]() // ERROR "\[comptime::error\] bad: abad: b"
 
 const ShadowedMsg = "pkg"
 
@@ -39,7 +39,7 @@ func FailShadowed[T any]() int {
 	return 0
 }
 
-var _ = FailShadowed[int]() // ERROR "local"
+var _ = FailShadowed[int]() // ERROR "\[comptime::error\] local"
 
 const Prefix = "p"
 
@@ -49,7 +49,7 @@ func FailSelfShadowInit[T any]() int {
 	return 0
 }
 
-var _ = FailSelfShadowInit[int]() // ERROR "p!"
+var _ = FailSelfShadowInit[int]() // ERROR "\[comptime::error\] p!"
 
 const LaterB = "pkg"
 
@@ -60,7 +60,7 @@ func FailLaterShadowInit[T any]() int {
 	return 0
 }
 
-var _ = FailLaterShadowInit[int]() // ERROR "pkg!"
+var _ = FailLaterShadowInit[int]() // ERROR "\[comptime::error\] pkg!"
 
 func FailCaseLocalMsg[T any]() int {
 	const switch T {
@@ -71,7 +71,7 @@ func FailCaseLocalMsg[T any]() int {
 	return 0
 }
 
-var _ = FailCaseLocalMsg[int]() // ERROR "bad int"
+var _ = FailCaseLocalMsg[int]() // ERROR "\[comptime::error\] bad int"
 
 func FailInheritedMsg[T any]() int {
 	const (
@@ -82,4 +82,15 @@ func FailInheritedMsg[T any]() int {
 	return 0
 }
 
-var _ = FailInheritedMsg[int]() // ERROR "bad"
+var _ = FailInheritedMsg[int]() // ERROR "\[comptime::error\] bad"
+
+func FailGroupedConstMsg[T any]() int {
+	const (
+		GroupedA = "x"
+		GroupedB = GroupedA + "y"
+	)
+	comptime.Error(GroupedB)
+	return 0
+}
+
+var _ = FailGroupedConstMsg[int]() // ERROR "\[comptime::error\] xy"

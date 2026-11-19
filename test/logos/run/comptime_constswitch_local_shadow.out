@@ -3,3 +3,6 @@ tag
 int
 exact
 alias
+structlocal
+slicetag
+groupalias

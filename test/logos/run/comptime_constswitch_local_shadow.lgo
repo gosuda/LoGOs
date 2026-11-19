@@ -74,10 +74,62 @@ func AliasScope[T any]() string {
 	return "other"
 }
 
+func StructLocal[T any]() string {
+	type Elem int
+	type Alias = struct{ X Elem }
+	type Tag Alias
+	const switch Tag {
+	case Tag:
+		_ = comptime.SizeOf[int]()
+		return "structlocal"
+	}
+	return "other"
+}
+
+type SliceElem = int
+
+func SliceTag[T any]() string {
+	type SliceElem = string
+	type SliceTag = []SliceElem
+	const switch SliceTag {
+	case []SliceElem:
+		_ = comptime.SizeOf[int]()
+		return "slicetag"
+	case any:
+		comptime.Error("dead slice")
+		return "dead"
+	}
+	return "other"
+}
+
+type GroupBase = int
+
+func GroupAlias[T any]() string {
+	type GroupBase = float64
+	{
+		type (
+			GroupBase = string
+			GroupTag = GroupBase
+		)
+		const switch GroupTag {
+		case ~string:
+			_ = comptime.SizeOf[int]()
+			return "groupalias"
+		case ~float64:
+			comptime.Error("dead group")
+			return "dead"
+		}
+	}
+	return "other"
+}
+
 func main() {
 	fmt.Println(ShadowCase[string]())
 	fmt.Println(ShadowTag[int]())
 	fmt.Println(ImportedDead[int]())
 	fmt.Println(ExactLocal[string]())
 	fmt.Println(AliasScope[int]())
+	fmt.Println(StructLocal[string]())
+	fmt.Println(SliceTag[int]())
+	fmt.Println(GroupAlias[int]())
 }
