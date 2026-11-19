@@ -149,6 +149,12 @@ The `[build] cgo` policy (`forbid`, `restricted`, `allow`) and its `forbid` defa
 A Go main module MUST keep the upstream default for `CGO_ENABLED` under `logos`, and a `cgo` key in its `logos.toml` MUST have no effect [T-101.2][R-U1].
 Plain `go` MUST keep the upstream default for `CGO_ENABLED` [T-101.2].
 With cgo off, `net` and `os/user` in the standard library MUST use their pure-Go paths, which is the upstream `CGO_ENABLED=0` behavior [T-101.2].
+On a target whose race runtime links through cgo (every race target except darwin), a build with `-race` in a LoGOs main module whose cgo policy is `forbid`, by key or by default, MUST link the race runtime through `runtime/cgo`, unless the environment sets `CGO_ENABLED=0` [T-101.2].
+In that build, a package outside the standard library with `import "C"` MUST still fail with `restriction::cgo_usage` [T-101.2].
+In that build, `net` and `os/user` MUST keep their pure-Go paths [T-101.2].
+When that build finds neither the C compiler nor `zig` in PATH, it MUST fail before compilation with a message that names the race runtime and `logos.toml` [T-101.2].
+On such a target, when the environment sets `CGO_ENABLED=0`, a build with `-race` in a LoGOs main module MUST fail with a message that names `CGO_ENABLED=0` [T-101.2].
+On darwin the race runtime needs no cgo, and a build with `-race` MUST keep cgo off under that policy [T-101.2].
 
 ### 1.2 RFC-102: Compiler linter and rule set
 The `logos lint` check MUST run inside the compiler on LoGOs packages for syntax and type rules [T-102].
@@ -722,6 +728,14 @@ A present nil payload MUST stay distinguishable from none in ejected code [T-202
 
 The spelling `T??` MUST be a syntax error reporting `T?? is not allowed; use (T?)?`. [T-202]
 
+A value cycle through `T?` MUST fail compilation with `invalid recursive type`. [T-202.1]
+
+The diagnostic MUST name each type in the cycle. [T-202.1]
+
+A cycle broken by a pointer, slice, or map type, or by a closed union in a value position, MUST be allowed. [T-202.1]
+
+A member of a closed union MAY hold an option of that union, because the union value is an interface word. [T-202.1]
+
 `?.` on a non-option value MUST fail with `[correctness::not_an_option]`. [T-104.3]
 
 `??` with a non-option left side MUST fail with the same diagnostic. [T-104.3]
@@ -733,6 +747,8 @@ An ordinary method call on an unnarrowed `T?` MUST fail with `[correctness::nil_
 `?.` MUST evaluate its receiver once. [T-104.3]
 
 `?.` over a field that is already an option MUST flatten the result. [T-104.3]
+
+`?.` over a field whose type is a defined option type MUST keep that declared type when the selection runs through no constant view; through a constant view the flattened result is the option of the qualified element. [T-104.3]
 
 See Sec 1.4 for `??` grouping, precedence, and single-value map reads.
 
@@ -1071,6 +1087,8 @@ A generic function that uses them MUST become a comptime generic. [T-205]
 
 Each instantiation MUST expand into a non-generic copy `<f>_logosct<N>` in the instantiating package. [T-205]
 
+A comptime call inside an expansion whose type arguments are concrete after substitution MUST expand into the same copy, at any depth and across package boundaries. [T-205]
+
 Copies MUST be memoized per type-argument list. [T-205]
 
 An exported comptime generic MUST travel as source text in `__.LOGOS`. [T-205]
@@ -1088,6 +1106,8 @@ Expansion MUST visit fields in declaration order. [T-205]
 It MUST include exported fields and unexported fields of a current-package `T`. [T-205]
 
 It MUST exclude unexported fields of other packages. [T-205]
+
+A `const for` statement MUST be a terminating statement when its body ends in a terminating statement and its range has at least one visible field; over no visible fields it falls through, and over an unresolved generic type parameter it is terminating when its body is terminating with each instantiation rechecked after unrolling. [T-205]
 
 `val.[f]` MUST read and write the named field. [T-205]
 
@@ -1153,6 +1173,8 @@ Outside comptime generics a `const switch` MUST pick its case at run time from t
 
 Inside an interface case, a call of an interface method on a value of type `T` MUST run the method of that value, whether `T` is a concrete type or an interface type. [T-205]
 
+`const switch f.Type` inside a `const for` body MUST select the first case matching the field's type for the iteration; a case that cannot match the field's type is dead for the iteration rather than an authoring error, and inside the selected case `val.[f]` reads as the case's type under an exact or interface case, and keeps the field's own type under a `~T` case; an unbound field projects there as a parameter bounded by `~T`, so conversions to `T` check while assignments to `T` fail until the field binds. Case types resolve in the scope of the enclosing function body: a type or alias declared before the switch shadows the package-level name. A tag or case that names the field of an enclosing `const for` resolves per iteration of that outer loop, so it never statically covers a later case. While the field's type is unbound to a type parameter, every case stays reachable. [T-205]
+
 No match MUST return the input unchanged. [T-205]
 
 Native and ejected output of the run-time form MUST agree. [T-205]
@@ -1195,6 +1217,8 @@ An expansion at or below the selected limit MUST compile. [T-205][T-102]
 The group MUST cancel on the first child error or panic. [T-206]
 
 It MUST join all children before scope exit. [T-206]
+
+A group statement MUST be a terminating statement when its block ends in a terminating statement, unless the group statement is nested anywhere inside another group body in the same function body, including inside an intervening `if`, `for`, or `switch`, in which case it is submitted as a child and falls through. A group inside a function literal body or a `go { ... }` child block starts a new scope and is not nested. The join then runs at each `return` of the block, and no join follows the block. [T-206]
 
 It MUST bound concurrency with a semaphore when `limit` is present. [T-206]
 
