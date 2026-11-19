@@ -186,7 +186,7 @@ func TestChildArgumentsKeepsGOFLAGSCount(t *testing.T) {
 	}{
 		{"-count=10", []string{"./ord"}, []string{"test", "-count=10", "-tags=logosconc", "./ord"}},
 		{"-test.count=10", []string{"./ord"}, []string{"test", "-count=10", "-tags=logosconc", "./ord"}},
-		{"-tags=x", []string{"./ord"}, []string{"test", "-count=1", "-tags=logosconc", "./ord"}},
+		{"-tags=x", []string{"./ord"}, []string{"test", "-count=1", "-tags=x,logosconc", "./ord"}},
 		{"", []string{"./ord"}, []string{"test", "-count=1", "-tags=logosconc", "./ord"}},
 		{"-count=10", []string{"-count=3", "./ord"}, []string{"test", "-tags=logosconc", "-count=3", "./ord"}},
 	}
@@ -196,6 +196,31 @@ func TestChildArgumentsKeepsGOFLAGSCount(t *testing.T) {
 		}
 	}
 }
+
+func TestChildArgumentsKeepsGOFLAGSTags(t *testing.T) {
+	neverTakesValue := func(name string) bool { return false }
+	tests := []struct {
+		goflags string
+		args    []string
+		want    []string
+	}{
+		{"-tags=foo", []string{"."}, []string{"run", "-tags=foo,logosconc", "."}},
+		{"-tags=a,b", []string{"."}, []string{"run", "-tags=a,b,logosconc", "."}},
+		{"--tags=a", []string{"."}, []string{"run", "-tags=a,logosconc", "."}},
+		{"-tags=a -tags=b", []string{"."}, []string{"run", "-tags=b,logosconc", "."}},
+		{"'-tags=a b'", []string{"."}, []string{"run", "-tags=a,b,logosconc", "."}},
+		{"-tags=foo", []string{"-tags=bar", "."}, []string{"run", "-tags=bar,logosconc", "."}},
+		{"-tags=foo", []string{"--tags=bar", "."}, []string{"run", "-tags=bar,logosconc", "."}},
+		{"-tags foo", []string{"."}, []string{"run", "-tags=logosconc", "."}},
+		{"", []string{"."}, []string{"run", "-tags=logosconc", "."}},
+	}
+	for _, tt := range tests {
+		if got := childArguments("run", tt.args, neverTakesValue, tt.goflags); !slices.Equal(got.arguments, tt.want) {
+			t.Errorf("GOFLAGS=%q logos conc run %q:\n got %q\nwant %q", tt.goflags, tt.args, got.arguments, tt.want)
+		}
+	}
+}
+
 func TestWithMonitorTagJoinsSpaceSeparatedTags(t *testing.T) {
 	tests := []struct{ in, want string }{
 		{"debug trace", "debug,trace,logosconc"},

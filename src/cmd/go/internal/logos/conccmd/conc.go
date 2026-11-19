@@ -194,8 +194,11 @@ func valueFlags(cmd *base.Command) func(name string) bool {
 // duration flags, and adds the monitor tag to the build tags. It reads
 // flags up to the package of `run`, and up to -args or -- of `test`;
 // later arguments belong to the program. The goflags argument carries the
-// effective GOFLAGS, so the test repeat count is decided from an explicit
-// value instead of the ambient process configuration.
+// effective GOFLAGS, so the test repeat count and the GOFLAGS build tags
+// are decided from explicit values instead of the ambient process
+// configuration. An explicit -tags overrides GOFLAGS in the go command,
+// so the monitor joins the explicit set when one is present and the
+// GOFLAGS set otherwise.
 func childArguments(verb string, args []string, takesValue func(string) bool, goflags string) invocation {
 	inv := invocation{arguments: []string{verb}, durations: map[string]string{}}
 	tagged := false
@@ -255,7 +258,11 @@ func childArguments(verb string, args []string, takesValue func(string) bool, go
 		}
 	}
 	if !tagged {
-		inv.arguments = append([]string{verb, "-tags=" + monitorTag}, inv.arguments[1:]...)
+		if tags, ok := goflagsTags(goflags); ok {
+			inv.arguments = append([]string{verb, "-tags=" + withMonitorTag(tags)}, inv.arguments[1:]...)
+		} else {
+			inv.arguments = append([]string{verb, "-tags=" + monitorTag}, inv.arguments[1:]...)
+		}
 	}
 	if verb == "test" {
 		hasCount := false
@@ -304,6 +311,31 @@ func goflagsTestCount(goflags string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// goflagsTags returns the build tags the effective GOFLAGS configures.
+// GOFLAGS holds one flag per entry in -name=value form, so only the
+// -tags=value and --tags=value spellings count; a bare -tags entry is
+// invalid and the child reports it. The last entry wins, as in the go
+// command. The second result is false when no entry names tags.
+func goflagsTags(goflags string) (string, bool) {
+	flags, err := quoted.Split(goflags)
+	if err != nil {
+		return "", false
+	}
+	tags := ""
+	ok := false
+	for _, flag := range flags {
+		switch {
+		case strings.HasPrefix(flag, "--tags="):
+			tags, ok = flag[len("--tags="):], true
+		case strings.HasPrefix(flag, "-tags="):
+			tags, ok = flag[len("-tags="):], true
+		default:
+			continue
+		}
+	}
+	return tags, ok
 }
 
 func withMonitorTag(tags string) string {
