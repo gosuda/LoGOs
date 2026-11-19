@@ -1622,37 +1622,49 @@ type selWrap struct {
 // select-receive rewrite can fold the same edit into a replaced target's
 // store text instead of overlapping it.
 func (c *cswLower) wrapSelectors(body []syntax.Stmt, cs *cswCase) []selWrap {
-	var wraps []selWrap
+	var sels []*syntax.SelectorExpr
 	for _, s := range body {
 		syntax.Inspect(s, func(n syntax.Node) bool {
 			sel, ok := n.(*syntax.SelectorExpr)
 			if !ok || c.info.LogosConstSel[sel] != cs.syn {
 				return true
 			}
-			xpos := leftmostOf(sel.X)
-			iface, ok := typeExprAt(cs.alias, xpos)
-			if !ok {
-				base.Fatalf("logos: const switch interface %s at %s cannot be respelled", cs.alias, xpos.String())
-			}
-			xstart := c.fl.off(xpos)
-			xend := typeEnd(c.fl.src, xstart, c.fl.off(sel.Sel.Pos()))
-			if xend > xstart && c.fl.src[xend-1] == '.' {
-				xend--
-			}
-			xspan := span{xstart, xend}
-			xtext := c.fl.textOf(xspan)
-			sel.X = at(&syntax.AssertExpr{
-				X: at(&syntax.CallExpr{
-					Fun:     at(nameOf(xpos, "any"), xpos),
-					ArgList: []syntax.Expr{sel.X},
-				}, xpos),
-				Type: iface,
-			}, xpos)
-			cast := cat(gen("any("), xtext, gen(").("), gen(cs.alias), gen(")"))
-			c.fl.addT(xspan.start, xspan.end, cast)
-			wraps = append(wraps, selWrap{span: xspan, text: cast})
+			sels = append(sels, sel)
 			return true
 		})
+	}
+	recvSpan := func(sel *syntax.SelectorExpr) span {
+		xstart := c.fl.off(leftmostOf(sel.X))
+		xend := typeEnd(c.fl.src, xstart, c.fl.off(sel.Sel.Pos()))
+		if xend > xstart && c.fl.src[xend-1] == '.' {
+			xend--
+		}
+		return span{xstart, xend}
+	}
+	slices.SortStableFunc(sels, func(a, b *syntax.SelectorExpr) int {
+		as := recvSpan(a)
+		bs := recvSpan(b)
+		return (as.end - as.start) - (bs.end - bs.start)
+	})
+	var wraps []selWrap
+	for _, sel := range sels {
+		xpos := leftmostOf(sel.X)
+		iface, ok := typeExprAt(cs.alias, xpos)
+		if !ok {
+			base.Fatalf("logos: const switch interface %s at %s cannot be respelled", cs.alias, xpos.String())
+		}
+		xspan := recvSpan(sel)
+		xtext := c.fl.textOf(xspan)
+		sel.X = at(&syntax.AssertExpr{
+			X: at(&syntax.CallExpr{
+				Fun:     at(nameOf(xpos, "any"), xpos),
+				ArgList: []syntax.Expr{sel.X},
+			}, xpos),
+			Type: iface,
+		}, xpos)
+		cast := cat(gen("any("), xtext, gen(").("), gen(cs.alias), gen(")"))
+		c.fl.addT(xspan.start, xspan.end, cast)
+		wraps = append(wraps, selWrap{span: xspan, text: cast})
 	}
 	return wraps
 }
