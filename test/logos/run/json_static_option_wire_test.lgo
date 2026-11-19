@@ -1,0 +1,89 @@
+// run
+
+package jsonstaticoptionwire
+
+import (
+	"encoding/json"
+	"testing"
+)
+
+type WirePerson struct {
+	Name string? `json:"name"`
+	Age  int32?  `json:"age"`
+}
+
+type WireInner struct {
+	N int32 `json:"n"`
+}
+
+type WireOuter struct {
+	S WireInner? `json:"s"`
+}
+
+type WireOmit struct {
+	Name string? `json:"name,omitempty"`
+}
+
+func TestOptionScalarWireForm(t *testing.T) {
+	got, err := (WirePerson{Name: "ann"}).MarshalJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"name":"ann","age":null}`
+	if string(got) != want {
+		t.Fatalf("scalar marshal: got %s, want %s", got, want)
+	}
+	var p WirePerson
+	if err := json.Unmarshal([]byte(`{"name":null,"age":7}`), &p); err != nil {
+		t.Fatalf("scalar unmarshal: %v", err)
+	}
+	if p.Name != nil {
+		t.Fatalf("scalar unmarshal name: got some, want none")
+	}
+	if p.Age == nil || (p.Age ?? -1) != 7 {
+		t.Fatalf("scalar unmarshal age: got %v, want some 7", p.Age)
+	}
+}
+
+func TestOptionStructWireForm(t *testing.T) {
+	got, err := (WireOuter{S: WireInner{N: 5}}).MarshalJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"s":{"n":5}}`
+	if string(got) != want {
+		t.Fatalf("struct marshal: got %s, want %s", got, want)
+	}
+	var o WireOuter
+	if err := json.Unmarshal([]byte(`{"s":{"n":5}}`), &o); err != nil {
+		t.Fatalf("struct unmarshal: %v", err)
+	}
+	if o.S == nil {
+		t.Fatal("struct unmarshal: got none, want some")
+	}
+	var none WireOuter
+	got, err = none.MarshalJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != `{"s":null}` {
+		t.Fatalf("struct none marshal: got %s, want %s", got, `{"s":null}`)
+	}
+}
+
+func TestOptionOmitEmptyOmitsNone(t *testing.T) {
+	got, err := (WireOmit{}).MarshalJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != `{}` {
+		t.Fatalf("omit marshal none: got %s, want {}", got)
+	}
+	got, err = (WireOmit{Name: ""}).MarshalJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != `{"name":""}` {
+		t.Fatalf("omit marshal some-empty: got %s, want %s", got, `{"name":""}`)
+	}
+}

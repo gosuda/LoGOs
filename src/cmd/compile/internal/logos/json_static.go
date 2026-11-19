@@ -62,6 +62,7 @@ type jsonField struct {
 	pos       int
 	required  int
 	typ       types2.Type
+	opt       types2.Type
 }
 
 type jsonStruct struct {
@@ -358,6 +359,7 @@ func (fl *fileLower) buildJSONStruct(name string, st *types2.Struct, fields []*t
 			typ:       fld.Type(),
 		}
 		f.shape = fl.classifyJSONField(fld.Type())
+		f.opt = fl.nonBareOptionElem(fld.Type())
 		f.quoted = info.StringOpt && isQuotableForString(f.typ, f.shape)
 		if f.shape.nonNil {
 			f.required = len(js.required)
@@ -378,6 +380,16 @@ func fieldIndexOf(st *types2.Struct, fld *types2.Var) int {
 		}
 	}
 	return -1
+}
+func (fl *fileLower) nonBareOptionElem(t types2.Type) types2.Type {
+	if cv, ok := types2.Unalias(t).(*types2.ConstView); ok {
+		t = cv.Elem
+	}
+	o := fl.asOption(t)
+	if o == nil || types2.LogosOptionIsBare(o.Elem) {
+		return nil
+	}
+	return o.Elem
 }
 
 func (fl *fileLower) classifyJSONField(t types2.Type) jsonShape {
@@ -779,6 +791,12 @@ func isQuotableForString(t types2.Type, shape jsonShape) bool {
 	}
 	if shape.kind != shapeFallback {
 		return true
+	}
+	if o := jsonOptionOf(unaliasConstView(t)); o != nil && !types2.LogosOptionIsBare(o.Elem) {
+		elem := unaliasConstView(o.Elem)
+		if _, ok := scalarOf(elem); ok {
+			return true
+		}
 	}
 	_, ok := fallbackScalarKind(t)
 	return ok

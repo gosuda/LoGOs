@@ -93,23 +93,28 @@ func checkValues() {
 
 func checkJSON() {
 	p := Policy{}
-	// JSON: absent option of struct keeps the {Value, Present} envelope of
-	// the lowered rt.Option[Retry] (byte-identical to encoding/json, SPEC
-	// 10.1); the absent retry payload is the zero Retry, not its default.
-	emptyJSON := `{"Timeout":10,"Retry":{"Value":{"Attempts":0},"Present":false}}`
+	// JSON: an absent option of struct encodes null, a present one the
+	// payload alone (SPEC 10.1); the absent retry payload is the zero
+	// Retry, not its default.
+	emptyJSON := `{"Timeout":10,"Retry":null}`
+	// Plain encoding/json has no rt.Option methods, so the reflective
+	// form keeps the {Value, Present} envelope; only the static method
+	// uses the null-or-payload form.
+	emptyReflective := `{"Timeout":10,"Retry":{"Value":{"Attempts":0},"Present":false}}`
 	pb := mustJSON(p.MarshalJSON())
 	pj := mustJSON(json.Marshal(p))
 	checkBytes("json static empty", pb, []byte(emptyJSON))
-	checkBytes("json reflective empty", pj, []byte(emptyJSON))
+	checkBytes("json reflective empty", pj, []byte(emptyReflective))
 
 	// A present option payload that is a composite literal applies its own
-	// field defaults (attempts 3), inside the envelope.
-	presentJSON := `{"Timeout":10,"Retry":{"Value":{"Attempts":3},"Present":true}}`
+	// field defaults (attempts 3), encoded as the payload alone.
+	presentJSON := `{"Timeout":10,"Retry":{"Attempts":3}}`
+	presentReflective := `{"Timeout":10,"Retry":{"Value":{"Attempts":3},"Present":true}}`
 	q := Policy{Retry: Retry{}}
 	qb := mustJSON(q.MarshalJSON())
 	qj := mustJSON(json.Marshal(q))
 	checkBytes("json static present", qb, []byte(presentJSON))
-	checkBytes("json reflective present", qj, []byte(presentJSON))
+	checkBytes("json reflective present", qj, []byte(presentReflective))
 
 	// Unmarshal round-trips both values; an explicit zero payload overrides
 	// the payload defaults, an empty payload gets them, and decoding fills
@@ -123,9 +128,9 @@ func checkJSON() {
 	check("json unmarshal present", json.Unmarshal(qb, &qbBack) == nil, qbBack, q)
 	check("json unmarshal present attempts", (qbBack.Retry?.Attempts ?? -1) == 3, qbBack.Retry?.Attempts, 3)
 	zeroBack := Policy{}
-	check("json unmarshal explicit zero", json.Unmarshal([]byte(`{"Retry":{"Value":{"Attempts":0},"Present":true}}`), &zeroBack) == nil && (zeroBack.Retry?.Attempts ?? -1) == 0, zeroBack.Retry?.Attempts, 0)
+	check("json unmarshal explicit zero", json.Unmarshal([]byte(`{"Retry":{"Attempts":0}}`), &zeroBack) == nil && (zeroBack.Retry?.Attempts ?? -1) == 0, zeroBack.Retry?.Attempts, 0)
 	defBack := Policy{}
-	check("json unmarshal empty payload default", json.Unmarshal([]byte(`{"Retry":{"Value":{},"Present":true}}`), &defBack) == nil && (defBack.Retry?.Attempts ?? -1) == 3, defBack.Retry?.Attempts, 3)
+	check("json unmarshal empty payload default", json.Unmarshal([]byte(`{"Retry":{}}`), &defBack) == nil && (defBack.Retry?.Attempts ?? -1) == 3, defBack.Retry?.Attempts, 3)
 	// The literal supplies Timeout explicitly, so the 10 the case demands can
 	// only come from decoding filling the outer default.
 	outerDef := Policy{Timeout: 0}
@@ -194,17 +199,16 @@ func checkPointer() {
 	hpeBack := PtrPolicy{}
 	check("binary pointer unmarshal empty", hpeBack.UnmarshalBinary(hpe) == nil && hpeBack.Link == nil, hpeBack.Link, nil)
 }
-
 func checkNested() {
 	t := Top{}
 	t2 := Top{Mid: Mid{}}
 	t3 := Top{Mid: Mid{Leaf: Leaf{}}}
-	// Two levels of optional struct: each absent level keeps its envelope;
-	// the deepest present payload applies defaults only at composite
+	// Two levels of optional struct: each absent level encodes null; the
+	// deepest present payload applies defaults only at composite
 	// literals, so an absent leaf keeps the zero payload.
-	tEmpty := `{"T":1,"Mid":{"Value":{"M":0,"Leaf":{"Value":{"N":0},"Present":false}},"Present":false}}`
-	tMid := `{"T":1,"Mid":{"Value":{"M":2,"Leaf":{"Value":{"N":0},"Present":false}},"Present":true}}`
-	tLeaf := `{"T":1,"Mid":{"Value":{"M":2,"Leaf":{"Value":{"N":7},"Present":true}},"Present":true}}`
+	tEmpty := `{"T":1,"Mid":null}`
+	tMid := `{"T":1,"Mid":{"M":2,"Leaf":null}}`
+	tLeaf := `{"T":1,"Mid":{"M":2,"Leaf":{"N":7}}}`
 	tb := mustJSON(t.MarshalJSON())
 	t2b := mustJSON(t2.MarshalJSON())
 	t3b := mustJSON(t3.MarshalJSON())
