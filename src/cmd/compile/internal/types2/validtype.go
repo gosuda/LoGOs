@@ -51,7 +51,7 @@ func (check *Checker) validType0(pos syntax.Pos, typ Type, nest, path []*Named) 
 			return check.validType0(pos, t.elem, nest, path)
 		}
 
-	case *Option:
+	case *Option: // logos M3-S2 hook: option elements nest like array elements.
 		if !check.ifaceWord(t.Elem) {
 			return check.validType0(pos, t.Elem, nest, path)
 		}

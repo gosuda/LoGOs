@@ -12,6 +12,6 @@ type Node struct {
 }
 
 func useUnion() bool {
-	var n Node? = Node{V: 5}
+	var n Node? = Node{V: 5, Up: Island(Leaf{V: 1})}
 	return n != nil
 }
