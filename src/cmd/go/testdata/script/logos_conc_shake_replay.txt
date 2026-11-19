@@ -30,26 +30,26 @@ stdout '^locked,direct$'
 # command prints the seed that replays the schedule.
 ! logos conc test -shake=1 -count=1 ./ord
 stdout 'order = '
-stderr 'shake seed 1'
+stderr 'shake seed 1[^0-9]'
 
 # A replay with that printed seed fails the same way.
 ! logos conc test -shake=1 -count=1 ./ord
 stdout 'order = '
-stderr 'shake seed 1'
+stderr 'shake seed 1[^0-9]'
 
 # The space form carries the same seed and fails the same way.
 ! logos conc test -shake 1 -count=1 ./ord
 stdout 'order = '
-stderr 'shake seed 1'
+stderr 'shake seed 1[^0-9]'
 
 # The same schedule fault shows in run, and a replay with that printed
 # seed fails the same way.
 ! logos conc run -shake=1 ./ord
 stdout '^direct,locked$'
-stderr 'shake seed 1'
+stderr 'shake seed 1[^0-9]'
 ! logos conc run -shake=1 ./ord
 stdout '^direct,locked$'
-stderr 'shake seed 1'
+stderr 'shake seed 1[^0-9]'
 
 -- replay/go.mod --
 module example.com/shakereplay
