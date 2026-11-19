@@ -1,0 +1,9 @@
+ok variadic-absent
+ok variadic-present
+ok variadic-call
+ok chan-absent
+ok chan-present
+ok chan-value
+ok tagged-absent
+ok tagged-present
+ok tagged-value
