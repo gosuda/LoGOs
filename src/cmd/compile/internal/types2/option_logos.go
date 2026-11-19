@@ -103,6 +103,12 @@ func logosOptionRepr(o *Option) Type {
 	}, nil)
 }
 
+// LogosOptionRepr reports the lowered representation of an option type:
+// the bare payload for nil-admitting payloads, and struct{Value E;
+// Present bool} otherwise (the shape of logos/rt.Option[E]). Export
+// writers erase options to this representation at the package boundary.
+func LogosOptionRepr(o *Option) Type { return logosOptionRepr(o) }
+
 func logosWrapOption(t Type) *Option { return &Option{Elem: t} }
 
 func logosWrapOne(t Type) Type {

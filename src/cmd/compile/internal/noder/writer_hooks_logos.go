@@ -13,6 +13,13 @@ func logosWriterNormalizeType(typ types2.Type) types2.Type {
 normalize:
 	for {
 		switch t := typ.(type) {
+		case *types2.Option:
+			// Options survive in inferred positions (locals, init
+			// statements) when lowering makes no edit and no recheck
+			// runs. Erase them to their lowered representation: the
+			// export format carries no logos-only types, and option
+			// positions in declarations already travel through facts.
+			typ = types2.LogosOptionRepr(t)
 		case *types2.ConstView:
 			typ = t.Elem
 		case *types2.ReadonlyDescendants:
