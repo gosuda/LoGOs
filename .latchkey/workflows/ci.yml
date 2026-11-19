@@ -359,9 +359,10 @@ jobs:
         if: always()
         run: bash .latchkey/ssa.sh av3
 
+  # Stopped by Latchkey after ~15 min in every run so far (cause not found), so manual runs only.
   simdstd:
     needs: [route, build]
-    if: needs.route.outputs.ssa == 'true'
+    if: env.LATCHKEY_CI_EVENT_CLASS == 'workflow_dispatch' && needs.route.outputs.ssa == 'true'
     runs-on: medium
     timeout-minutes: 150
     steps:
