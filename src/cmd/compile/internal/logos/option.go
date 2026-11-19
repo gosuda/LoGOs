@@ -9,6 +9,7 @@ import (
 	"go/token"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 
 	"cmd/compile/internal/base"
@@ -543,6 +544,14 @@ func (fl *fileLower) selectAccess(e *syntax.OptSelectExpr, native syntax.Expr, s
 
 func (fl *fileLower) spellLowered(t types2.Type) (string, bool) {
 	if o := fl.asOption(t); o != nil {
+		if n, ok := types2.Unalias(t).(*types2.Named); ok {
+			if args := n.TypeArgs(); args != nil && args.Len() > 0 {
+				if s, ok := fl.spellLoweredApplied(n.Obj(), args); ok {
+					return s, true
+				}
+			}
+			return fl.spellType(t)
+		}
 		if types2.LogosOptionIsBare(o.Elem) {
 			return fl.spellLowered(o.Elem)
 		}
@@ -561,7 +570,14 @@ func (fl *fileLower) spellLowered(t types2.Type) (string, bool) {
 		return fl.spellLowered(c.Elem)
 	case *types2.ReadonlyDescendants:
 		return fl.spellLowered(c.Elem)
-	case *types2.Named, *types2.Alias, *types2.Basic, *types2.TypeParam:
+	case *types2.Named:
+		if args := c.TypeArgs(); args != nil && args.Len() > 0 {
+			if s, ok := fl.spellLoweredApplied(c.Obj(), args); ok {
+				return s, true
+			}
+		}
+		return fl.spellType(t)
+	case *types2.Alias, *types2.Basic, *types2.TypeParam:
 		return fl.spellType(t)
 	case *types2.Pointer:
 		e, ok := fl.spellLowered(c.Elem())
@@ -602,6 +618,9 @@ func (fl *fileLower) spellLowered(t types2.Type) (string, bool) {
 		case types2.RecvOnly:
 			return "<-chan " + e, true
 		default:
+			if rc, ok := types2.Unalias(c.Elem()).(*types2.Chan); ok && rc.Dir() == types2.RecvOnly {
+				return "chan (" + e + ")", true
+			}
 			return "chan " + e, true
 		}
 	case *types2.Signature:
@@ -620,14 +639,60 @@ func (fl *fileLower) spellLowered(t types2.Type) (string, bool) {
 	}
 }
 
+func (fl *fileLower) spellLoweredApplied(obj *types2.TypeName, args *types2.TypeList) (string, bool) {
+	if obj == nil || args == nil || args.Len() == 0 {
+		return "", false
+	}
+	lowered := make([]string, args.Len())
+	for i := range args.Len() {
+		s, ok := fl.spellLowered(args.At(i))
+		if !ok {
+			return "", false
+		}
+		lowered[i] = s
+	}
+	pkg := obj.Pkg()
+	var base string
+	if pkg == nil || pkg == fl.pkg.tpkg {
+		base = obj.Name()
+	} else {
+		if !obj.Exported() {
+			return "", false
+		}
+		base = fl.synthQualifier(pkg) + "." + obj.Name()
+	}
+	return base + "[" + strings.Join(lowered, ", ") + "]", true
+}
+
 func (fl *fileLower) spellLoweredSig(sig *types2.Signature) (string, bool) {
 	var b strings.Builder
 	b.WriteString("func(")
+	last := -1
+	if sig.Variadic() {
+		last = sig.Params().Len() - 1
+	}
 	for i := range sig.Params().Len() {
 		if i > 0 {
 			b.WriteString(", ")
 		}
-		p, ok := fl.spellLowered(sig.Params().At(i).Type())
+		pt := sig.Params().At(i).Type()
+		if i == last {
+			if s, ok := types2.Unalias(pt).(*types2.Slice); ok {
+				e, ok := fl.spellLowered(s.Elem())
+				if !ok {
+					return "", false
+				}
+				b.WriteString("..." + e)
+				continue
+			}
+			p, ok := fl.spellLowered(pt)
+			if !ok {
+				return "", false
+			}
+			b.WriteString(p + "...")
+			continue
+		}
+		p, ok := fl.spellLowered(pt)
 		if !ok {
 			return "", false
 		}
@@ -687,9 +752,8 @@ func (fl *fileLower) spellLoweredStruct(st *types2.Struct) (string, bool) {
 			b.WriteString(t)
 		}
 		if tag := st.Tag(i); tag != "" {
-			b.WriteString(" `")
-			b.WriteString(tag)
-			b.WriteByte('`')
+			b.WriteByte(' ')
+			b.WriteString(strconv.Quote(tag))
 		}
 	}
 	b.WriteString(" }")
@@ -1369,9 +1433,9 @@ func (fl *fileLower) lowerOptSelect(e *syntax.OptSelectExpr) syntax.Expr {
 	}
 	closure := fl.newGroupClosure(e)
 	xStart := fl.off(fl.optHeadStart(e.X))
-	nativeR, ejectR, ok := fl.spellLoweredBoth(ro, pos)
+	nativeR, ejectR, ok := fl.spellLoweredBoth(fl.optType(e), pos)
 	if !ok {
-		base.Fatalf("logos: cannot spell type %s of the ?. expression at %s", ro, pos.String())
+		base.Fatalf("logos: cannot spell type %s of the ?. expression at %s", fl.optType(e), pos.String())
 	}
 	rText := ejectR
 	openParen, closeParen := headerParens(e.X)
@@ -1395,6 +1459,21 @@ func (fl *fileLower) lowerOptSelect(e *syntax.OptSelectExpr) syntax.Expr {
 		acc, accSuffix = fl.selectAccessPresent(recv, e)
 	}
 	some, someHead, someTail := fl.wrapParts(acc, accessRec, ro, pos)
+	if obj != nil && accessRec == ro && !types2.LogosOptionIsBare(ro.Elem) {
+		if ft, ok := fl.spellLowered(obj.Type()); ok && ft != rText {
+			some = at(&syntax.CompositeLit{
+				Type: nativeR,
+				ElemList: []syntax.Expr{
+					at(&syntax.KeyValueExpr{Key: nameOf(pos, "Value"), Value: selOf(pos, acc, "Value")}, pos),
+					at(&syntax.KeyValueExpr{Key: nameOf(pos, "Present"), Value: selOf(pos, acc, "Present")}, pos),
+				},
+				NKeys:  2,
+				Rbrace: pos,
+			}, pos)
+			someHead = rText + "{Value: "
+			someTail = ".Value, Present: " + optTemp + accSuffix + ".Present}"
+		}
+	}
 	var none syntax.Expr
 	var noneT string
 	if types2.LogosOptionIsBare(ro.Elem) {

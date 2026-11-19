@@ -1,0 +1,12 @@
+ok ptr-option-self
+ok ptr-option-select
+ok ptr-option-field
+ok slice-option-nil
+ok slice-of-option-len
+ok slice-of-option-elem
+ok slice-of-option-self-len
+ok slice-of-option-self-elem
+ok plain-slice-self
+ok plain-slice-child
+ok plain-option-pair
+ok nested-option
