@@ -36,7 +36,7 @@ The group context cancels on the first child error or panic. The group joins eve
 
 ## Run and test forms
 
-`logos conc run` wraps `logos run`. `logos conc test` wraps `logos test`. Build and test flags pass through to the child. The monitor tag joins tags passed with `-tags`; tags set only in `GOFLAGS` are replaced by the monitor tag, so pass them with `-tags` instead. `logos conc test` adds `-count=1` unless a count is already set. Place conc flags before the package for `run`. Place conc flags before `-args` or `--` for `test`. Text after that boundary belongs to the program.
+`logos conc run` wraps `logos run`. `logos conc test` wraps `logos test`. Build and test flags pass through to the child. The monitor tag joins the build tags from `-tags` or from `GOFLAGS`. `logos conc test` adds `-count=1` unless a count is already set. Place conc flags before the package for `run`. Place conc flags before `-args` or `--` for `test`. Text after that boundary belongs to the program.
 
 ```sh
 logos help conc
