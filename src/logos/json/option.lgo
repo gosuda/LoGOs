@@ -1,0 +1,118 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package json
+
+import (
+	"comptime"
+	stdjson "encoding/json"
+
+	rt "logos/rt"
+)
+
+// MarshalOption returns the JSON encoding of an option value: null when
+// absent, the payload encoding alone when present. This is the
+// null-or-payload rule the static serializer must state (issue 160).
+// Bare-pointer options (*T? lowering to a bare *T) already encode this
+// way through encoding/json and need no helper.
+func MarshalOption[T any](v rt.Option[T]) ([]byte, error) {
+	if !v.Present {
+		return []byte("null"), nil
+	}
+	const if comptime.IsStruct[T]() {
+		if m, ok := any(v.Value).(stdjson.Marshaler); ok {
+			return m.MarshalJSON()
+		}
+	}
+	return stdjson.Marshal(v.Value)
+}
+
+// UnmarshalOption parses data into an option value: JSON null gives an
+// absent option, any other value decodes as the payload. Missing keys
+// are handled by the generated decoder, not here.
+func UnmarshalOption[T any](data []byte) (rt.Option[T], error) {
+	start := 0
+	for start < len(data) {
+		c := data[start]
+		if c == ' ' || c == '\t' || c == '\r' || c == '\n' {
+			start++
+			continue
+		}
+		break
+	}
+	end := len(data)
+	for end > start {
+		c := data[end-1]
+		if c == ' ' || c == '\t' || c == '\r' || c == '\n' {
+			end--
+			continue
+		}
+		break
+	}
+	isNull := end-start == 4 && data[start] == 'n' && data[start+1] == 'u' && data[start+2] == 'l' && data[start+3] == 'l'
+	if isNull {
+		var none rt.Option[T]
+		return none, nil
+	}
+	var payload T
+	const if comptime.IsStruct[T]() {
+		if u, ok := any(&payload).(stdjson.Unmarshaler); ok {
+			err := u.UnmarshalJSON(data)
+			if err != nil {
+				var none rt.Option[T]
+				return none, err
+			}
+			return rt.Option[T]{Value: payload, Present: true}, nil
+		}
+	}
+	if err := stdjson.Unmarshal(data, &payload); err != nil {
+		var none rt.Option[T]
+		return none, err
+	}
+	return rt.Option[T]{Value: payload, Present: true}, nil
+}
+
+// UnmarshalOptionInto is the statement form for callers that already
+// hold an option variable. It keeps the same null-or-payload rule.
+func UnmarshalOptionInto[T any](data []byte, out *rt.Option[T]) error {
+	start := 0
+	for start < len(data) {
+		c := data[start]
+		if c == ' ' || c == '\t' || c == '\r' || c == '\n' {
+			start++
+			continue
+		}
+		break
+	}
+	end := len(data)
+	for end > start {
+		c := data[end-1]
+		if c == ' ' || c == '\t' || c == '\r' || c == '\n' {
+			end--
+			continue
+		}
+		break
+	}
+	isNull := end-start == 4 && data[start] == 'n' && data[start+1] == 'u' && data[start+2] == 'l' && data[start+3] == 'l'
+	if isNull {
+		*out = rt.Option[T]{}
+		return nil
+	}
+	var payload T
+	const if comptime.IsStruct[T]() {
+		if u, ok := any(&payload).(stdjson.Unmarshaler); ok {
+			err := u.UnmarshalJSON(data)
+			if err != nil {
+				return err
+			}
+			*out = rt.Option[T]{Value: payload, Present: true}
+			return nil
+		}
+	}
+	if err := stdjson.Unmarshal(data, &payload); err != nil {
+		return err
+	}
+	*out = rt.Option[T]{Value: payload, Present: true}
+	return nil
+}

@@ -1,0 +1,316 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package json_test
+
+import (
+	stdjson "encoding/json"
+	"bytes"
+	"testing"
+
+	twinjson "logos/json"
+)
+
+type twinPerson struct {
+	Name string `json:"name"`
+	Age  int    `json:"age,omitempty"`
+	Bio  string `json:"bio"`
+}
+
+type oraclePerson twinPerson
+
+type twinTagged struct {
+	A int64  `json:"a"`
+	B string `json:"b,omitempty"`
+	C bool   `json:"c"`
+	D string `json:"-"`
+}
+
+type oracleTagged twinTagged
+
+type twinOmit struct {
+	Name string `json:"name,omitempty"`
+	Zero int    `json:"zero,omitzero"`
+	Skip string `json:"-"`
+	Keep int    `json:"keep"`
+}
+
+type oracleOmit twinOmit
+
+type twinWithString struct {
+	N int `json:"n,string"`
+}
+
+type oracleWithString twinWithString
+
+func TestTwinStaticStructByteEqual(t *testing.T) {
+	p := twinPerson{Name: "ann", Age: 0, Bio: "a<b>&\"q\"\u2028end"}
+	twinBytes, twinErr := twinjson.Marshal(p)
+	if twinErr != nil {
+		t.Fatalf("twin Marshal: %v", twinErr)
+		return
+	}
+	oracleBytes, err := stdjson.Marshal(oraclePerson(p))
+	if err != nil {
+		t.Fatalf("oracle Marshal: %v", err)
+	}
+	if !bytes.Equal(twinBytes, oracleBytes) {
+		t.Fatalf("static struct differs:\n twin %q\n orig %q", twinBytes, oracleBytes)
+	}
+	tagged := twinTagged{A: -123456789, B: "", C: true, D: "hidden"}
+	twinBytes, twinErr = twinjson.Marshal(tagged)
+	if twinErr != nil {
+		t.Fatalf("twin Marshal tagged: %v", twinErr)
+		return
+	}
+	oracleBytes, err = stdjson.Marshal(oracleTagged(tagged))
+	if err != nil {
+		t.Fatalf("oracle Marshal: %v", err)
+	}
+	if !bytes.Equal(twinBytes, oracleBytes) {
+		t.Fatalf("tagged struct differs:\n twin %q\n orig %q", twinBytes, oracleBytes)
+	}
+	omit := twinOmit{Name: "", Zero: 0, Skip: "x", Keep: 7}
+	twinBytes, twinErr = twinjson.Marshal(omit)
+	if twinErr != nil {
+		t.Fatalf("twin Marshal omit: %v", twinErr)
+		return
+	}
+	oracleBytes, err = stdjson.Marshal(oracleOmit(omit))
+	if err != nil {
+		t.Fatalf("oracle Marshal: %v", err)
+	}
+	if !bytes.Equal(twinBytes, oracleBytes) {
+		t.Fatalf("omit struct differs:\n twin %q\n orig %q", twinBytes, oracleBytes)
+	}
+}
+
+func TestTwinHTMLEscapeAndUTF8(t *testing.T) {
+	p := twinPerson{Name: "<script>&\"\xff\xfe", Age: 3, Bio: "x\u2028y\u2029z"}
+	twinBytes, twinErr := twinjson.Marshal(p)
+	if twinErr != nil {
+		t.Fatalf("twin Marshal: %v", twinErr)
+		return
+	}
+	oracleBytes, err := stdjson.Marshal(oraclePerson(p))
+	if err != nil {
+		t.Fatalf("oracle Marshal: %v", err)
+	}
+	if !bytes.Equal(twinBytes, oracleBytes) {
+		t.Fatalf("escape differs:\n twin %q\n orig %q", twinBytes, oracleBytes)
+	}
+	for _, want := range []string{`\u003c`, `\u003e`, `\u0026`, `\u2028`, `\u2029`, "\uFFFD"} {
+		if !bytes.Contains(twinBytes, []byte(want)) {
+			t.Fatalf("twin output %q misses %q", twinBytes, want)
+		}
+	}
+}
+
+func TestTwinMapKeySortAndTextKeys(t *testing.T) {
+	m := map[string]int{"z": 1, "a": 2, "m": 3}
+	twinBytes, twinErr := twinjson.Marshal(m)
+	if twinErr != nil {
+		t.Fatalf("twin Marshal map: %v", twinErr)
+		return
+	}
+	oracleBytes, err := stdjson.Marshal(m)
+	if err != nil {
+		t.Fatalf("oracle Marshal: %v", err)
+	}
+	if !bytes.Equal(twinBytes, oracleBytes) {
+		t.Fatalf("map differs:\n twin %q\n orig %q", twinBytes, oracleBytes)
+	}
+	if string(twinBytes) != `{"a":2,"m":3,"z":1}` {
+		t.Fatalf("map not sorted: %q", twinBytes)
+	}
+	im := map[int]string{2: "b", 1: "a", 10: "c"}
+	twinBytes, twinErr = twinjson.Marshal(im)
+	if twinErr != nil {
+		t.Fatalf("twin Marshal int map: %v", twinErr)
+		return
+	}
+	oracleBytes, err = stdjson.Marshal(im)
+	if err != nil {
+		t.Fatalf("oracle Marshal: %v", err)
+	}
+	if !bytes.Equal(twinBytes, oracleBytes) {
+		t.Fatalf("int-key map differs:\n twin %q\n orig %q", twinBytes, oracleBytes)
+	}
+}
+
+func TestTwinAnyAndRaw(t *testing.T) {
+	vals := []any{
+		nil,
+		"hello",
+		int64(-42),
+		float64(3.14159),
+		true,
+		[]int{1, 2, 3},
+		map[string]any{"b": 1, "a": []int{1}},
+		stdjson.RawMessage([]byte(`{"z":1}`)),
+	}
+	for i, v := range vals {
+		twinBytes, twinErr := twinjson.Marshal(v)
+		if twinErr != nil {
+			t.Fatalf("case %d twin Marshal: %v", i, twinErr)
+			return
+		}
+		oracleBytes, err := stdjson.Marshal(v)
+		if err != nil {
+			t.Fatalf("case %d oracle Marshal: %v", i, err)
+		}
+		if !bytes.Equal(twinBytes, oracleBytes) {
+			t.Fatalf("case %d differs:\n twin %q\n orig %q", i, twinBytes, oracleBytes)
+		}
+		back, backErr := twinjson.Unmarshal[any](twinBytes)
+		if backErr != nil {
+			t.Fatalf("case %d twin Unmarshal: %v", i, backErr)
+			return
+		}
+		oracleBack, err := stdjson.Marshal(back)
+		if err != nil {
+			t.Fatalf("case %d remarshal: %v", i, err)
+		}
+		if !bytes.Equal(twinBytes, oracleBack) {
+			t.Fatalf("case %d round trip differs:\n in %q\n out %q", i, twinBytes, oracleBack)
+		}
+	}
+}
+
+func TestTwinUnmarshalStaticStruct(t *testing.T) {
+	data := []byte(`{"name":"ann","bio":"x","extra":"ignored"}`)
+	got, gotErr := twinjson.Unmarshal[twinPerson](data)
+	if gotErr != nil {
+		t.Fatalf("twin Unmarshal: %v", gotErr)
+		return
+	}
+	var want oraclePerson
+	if err := stdjson.Unmarshal(data, &want); err != nil {
+		t.Fatalf("oracle Unmarshal: %v", err)
+	}
+	if got.Name != want.Name || got.Bio != want.Bio || got.Age != want.Age {
+		t.Fatalf("decoded differs: twin %+v orig %+v", got, want)
+	}
+	dup := []byte(`{"name":"a","name":"b","age":2,"bio":"z"}`)
+	gotDup, dupErr := twinjson.Unmarshal[twinPerson](dup)
+	if dupErr != nil {
+		t.Fatalf("twin dup Unmarshal: %v", dupErr)
+		return
+	}
+	var wantDup oraclePerson
+	if err := stdjson.Unmarshal(dup, &wantDup); err != nil {
+		t.Fatalf("oracle dup Unmarshal: %v", err)
+	}
+	if gotDup.Name != wantDup.Name {
+		t.Fatalf("dup last-wins differs: twin %q orig %q", gotDup.Name, wantDup.Name)
+	}
+}
+
+func TestTwinUnmarshalErrorsMatch(t *testing.T) {
+	bad := []byte(`{"name":1,"age":"x","bio":true}`)
+	_, twinErr := twinjson.Unmarshal[twinPerson](bad)
+	if twinErr != nil {
+		_ = twinErr.Error()
+	} else {
+		t.Fatalf("twin bad input unexpectedly succeeded")
+		return
+	}
+	var oracle oraclePerson
+	oracleErr := stdjson.Unmarshal(bad, &oracle)
+	if oracleErr == nil {
+		t.Fatalf("oracle bad input unexpectedly succeeded")
+	}
+	syntax := []byte(`{"name":`)
+	_, twinSynErr := twinjson.Unmarshal[twinPerson](syntax)
+	if twinSynErr != nil {
+		_ = twinSynErr.Error()
+	} else {
+		t.Fatalf("twin syntax unexpectedly succeeded")
+		return
+	}
+	var oracleSyn oraclePerson
+	oracleSynErr := stdjson.Unmarshal(syntax, &oracleSyn)
+	if oracleSynErr == nil {
+		t.Fatalf("oracle syntax unexpectedly succeeded")
+	}
+	if twinSynErr != nil && oracleSynErr != nil {
+		twinOff := offsetOf(t, twinSynErr)
+		oracleOff := offsetOf(t, oracleSynErr)
+		if twinOff != oracleOff {
+			t.Fatalf("offset differs: twin %d orig %d", twinOff, oracleOff)
+		}
+	}
+}
+
+func offsetOf(t *testing.T, err error) int64 {
+	t.Helper()
+	if se, ok := err.(*stdjson.SyntaxError); ok {
+		return se.Offset
+	}
+	if ute, ok := err.(*stdjson.UnmarshalTypeError); ok {
+		return ute.Offset
+	}
+	t.Fatalf("unexpected error type %T: %v", err, err)
+	return -1
+}
+
+func TestTwinMarshalWrite(t *testing.T) {
+	p := twinPerson{Name: "ann", Age: 5, Bio: "x"}
+	want, wantErr := twinjson.Marshal(p)
+	if wantErr != nil {
+		t.Fatalf("twin Marshal: %v", wantErr)
+		return
+	}
+	var buf bytes.Buffer
+	if err := twinjson.MarshalWrite(&buf, p); err != nil {
+		t.Fatalf("MarshalWrite: %v", err)
+	}
+	if !bytes.Equal(buf.Bytes(), want) {
+		t.Fatalf("MarshalWrite differs:\n got %q\n want %q", buf.Bytes(), want)
+	}
+	m := map[string]int{"b": 1, "a": 2}
+	wantMap, mapErr := twinjson.Marshal(m)
+	if mapErr != nil {
+		t.Fatalf("twin Marshal map: %v", mapErr)
+		return
+	}
+	buf.Reset()
+	if err := twinjson.MarshalWrite(&buf, m); err != nil {
+		t.Fatalf("MarshalWrite map: %v", err)
+	}
+	if !bytes.Equal(buf.Bytes(), wantMap) {
+		t.Fatalf("MarshalWrite map differs")
+	}
+}
+
+func TestTwinStringOptionAndCycle(t *testing.T) {
+	w := twinWithString{N: 42}
+	twinBytes, twinErr := twinjson.Marshal(w)
+	if twinErr != nil {
+		t.Fatalf("twin Marshal string opt: %v", twinErr)
+		return
+	}
+	oracleBytes, err := stdjson.Marshal(oracleWithString(w))
+	if err != nil {
+		t.Fatalf("oracle string option: %v", err)
+	}
+	if !bytes.Equal(twinBytes, oracleBytes) {
+		t.Fatalf("string option differs:\n twin %q\n orig %q", twinBytes, oracleBytes)
+	}
+	m := map[string]any{}
+	m["self"] = m
+	_, twinCycleErr := twinjson.Marshal(m)
+	if twinCycleErr != nil {
+		_ = twinCycleErr.Error()
+	} else {
+		t.Fatalf("twin cycle unexpectedly succeeded")
+		return
+	}
+	om := map[string]any{}
+	om["self"] = om
+	_, oracleErr := stdjson.Marshal(om)
+	if oracleErr == nil {
+		t.Fatalf("oracle cycle unexpectedly succeeded")
+	}
+}

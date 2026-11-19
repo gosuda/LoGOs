@@ -1,0 +1,104 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package json_test
+
+import (
+	"testing"
+
+	twinjson "logos/json"
+	rt "logos/rt"
+)
+
+type twinInner struct {
+	X int `json:"x"`
+}
+
+func TestTwinOptionNullOrPayload(t *testing.T) {
+	noneInt, noneErr := twinjson.MarshalOption(rt.Option[int]{})
+	if noneErr != nil {
+		t.Fatalf("MarshalOption none: %v", noneErr)
+		return
+	}
+	if string(noneInt) != "null" {
+		t.Fatalf("absent int option = %q, want null", noneInt)
+	}
+	someInt, someErr := twinjson.MarshalOption(rt.Option[int]{Value: 7, Present: true})
+	if someErr != nil {
+		t.Fatalf("MarshalOption some: %v", someErr)
+		return
+	}
+	if string(someInt) != "7" {
+		t.Fatalf("present int option = %q, want 7", someInt)
+	}
+	gotNone, gotNoneErr := twinjson.UnmarshalOption[int]([]byte(`null`))
+	if gotNoneErr != nil {
+		t.Fatalf("UnmarshalOption null: %v", gotNoneErr)
+		return
+	}
+	if gotNone.Present {
+		t.Fatalf("null decoded as present: %+v", gotNone)
+	}
+	gotSome, gotSomeErr := twinjson.UnmarshalOption[int]([]byte(` 7 `))
+	if gotSomeErr != nil {
+		t.Fatalf("UnmarshalOption 7: %v", gotSomeErr)
+		return
+	}
+	if !gotSome.Present || gotSome.Value != 7 {
+		t.Fatalf("7 decoded as %+v", gotSome)
+	}
+}
+
+func TestTwinOptionStringAndInto(t *testing.T) {
+	noneStr, noneStrErr := twinjson.MarshalOption(rt.Option[string]{})
+	if noneStrErr != nil {
+		t.Fatalf("MarshalOption none str: %v", noneStrErr)
+		return
+	}
+	if string(noneStr) != "null" {
+		t.Fatalf("absent string option = %q, want null", noneStr)
+	}
+	someStr, someStrErr := twinjson.MarshalOption(rt.Option[string]{Value: "a<b", Present: true})
+	if someStrErr != nil {
+		t.Fatalf("MarshalOption some str: %v", someStrErr)
+		return
+	}
+	if string(someStr) != `"a<b"` && string(someStr) != `"a\u003cb"` {
+		t.Fatalf("present string option = %q", someStr)
+	}
+	var held rt.Option[int]
+	if err := twinjson.UnmarshalOptionInto([]byte(`null`), &held); err != nil {
+		t.Fatalf("Into null: %v", err)
+		return
+	}
+	if held.Present {
+		t.Fatalf("Into null present")
+	}
+	if err := twinjson.UnmarshalOptionInto([]byte(`9`), &held); err != nil {
+		t.Fatalf("Into 9: %v", err)
+		return
+	}
+	if !held.Present || held.Value != 9 {
+		t.Fatalf("Into 9 = %+v", held)
+	}
+}
+
+func TestTwinOptionPayloadStruct(t *testing.T) {
+	some, someErr := twinjson.MarshalOption(rt.Option[twinInner]{Value: twinInner{X: 1}, Present: true})
+	if someErr != nil {
+		t.Fatalf("MarshalOption struct: %v", someErr)
+		return
+	}
+	if string(some) != `{"x":1}` {
+		t.Fatalf("struct payload = %q", some)
+	}
+	got, gotErr := twinjson.UnmarshalOption[twinInner](some)
+	if gotErr != nil {
+		t.Fatalf("UnmarshalOption struct: %v", gotErr)
+		return
+	}
+	if !got.Present || got.Value.X != 1 {
+		t.Fatalf("struct round trip = %+v", got)
+	}
+}

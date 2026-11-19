@@ -1,0 +1,66 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package json_test
+
+import (
+	stdjson "encoding/json"
+	"testing"
+
+	twinjson "logos/json"
+)
+
+func TestTwinDiagnosticsLineCol(t *testing.T) {
+	data := []byte("{\n  \"a\": 1,\n  \"b\": [1,\n}")
+	var v map[string]any
+	err := stdjson.Unmarshal(data, &v)
+	if err == nil {
+		t.Fatalf("expected syntax error")
+		return
+	}
+	se, ok := err.(*stdjson.SyntaxError)
+	if !ok {
+		t.Fatalf("expected SyntaxError, got %T", err)
+		return
+	}
+	d := twinjson.DiagnosticsFor(data, se.Offset)
+	if d.Offset != int(se.Offset) {
+		t.Fatalf("offset %d != %d", d.Offset, se.Offset)
+	}
+	if d.Line < 3 || d.Line > 4 {
+		t.Fatalf("line %d out of range", d.Line)
+	}
+	if d.Column < 1 {
+		t.Fatalf("column %d", d.Column)
+	}
+	if len(d.Context) == 0 {
+		t.Fatalf("empty context")
+	}
+	single := []byte(`{"a": 1, "b": }`)
+	err = stdjson.Unmarshal(single, &v)
+	if err == nil {
+		t.Fatalf("expected syntax error for single line")
+		return
+	}
+	se2, ok := err.(*stdjson.SyntaxError)
+	if !ok {
+		t.Fatalf("expected SyntaxError, got %T", err)
+		return
+	}
+	d2 := twinjson.DiagnosticsFor(single, se2.Offset)
+	if d2.Line != 1 {
+		t.Fatalf("single line %d != 1", d2.Line)
+	}
+	if d2.Context != string(single) {
+		t.Fatalf("context %q != input", d2.Context)
+	}
+	// Diagnostics are on demand: Unmarshal never computes them.
+	// Calling DiagnosticsFor twice gives the same answer with one
+	// context allocation per call and no other cost when disabled.
+	a := twinjson.DiagnosticsFor(data, se.Offset)
+	b := twinjson.DiagnosticsFor(data, se.Offset)
+	if a != b {
+		t.Fatalf("diagnostics not deterministic: %+v vs %+v", a, b)
+	}
+}

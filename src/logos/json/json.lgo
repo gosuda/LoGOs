@@ -1,0 +1,57 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package json
+
+import (
+	stdjson "encoding/json"
+	"io"
+)
+
+// Marshal returns the JSON encoding of v. For a type with a generated
+// or hand-written MarshalJSON method it calls that method directly
+// through a comptime interface case, with no interface boxing of the
+// value. Every other value goes through encoding/json, so output bytes
+// equal the original on the same inputs.
+func Marshal[T any](v T) ([]byte, error) {
+	const switch T {
+	case stdjson.Marshaler:
+		return v.MarshalJSON()
+	}
+	return stdjson.Marshal(v)
+}
+
+// Unmarshal parses data into a value of type T and returns it. For a
+// struct type with a generated or hand-written UnmarshalJSON method it
+// calls that method. Every other type goes through encoding/json, so
+// results and error values equal the original on the same inputs.
+func Unmarshal[T any](data []byte) (T, error) {
+	var v T
+	if u, ok := any(&v).(stdjson.Unmarshaler); ok {
+		err := u.UnmarshalJSON(data)
+		return v, err
+	}
+	err := stdjson.Unmarshal(data, &v)
+	return v, err
+}
+
+// MarshalWrite marshals in and writes the bytes to out in one Write
+// call. It allocates only the single marshaled buffer.
+func MarshalWrite[T any](out io.Writer, in T) error {
+	const switch T {
+	case stdjson.Marshaler:
+		b, err := in.MarshalJSON()
+		if err != nil {
+			return err
+		}
+		_, err = out.Write(b)
+		return err
+	}
+	b, err := stdjson.Marshal(in)
+	if err != nil {
+		return err
+	}
+	_, err = out.Write(b)
+	return err
+}
