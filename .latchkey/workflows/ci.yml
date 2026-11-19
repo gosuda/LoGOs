@@ -376,7 +376,11 @@ jobs:
           . .latchkey/env.sh; cd src
           test "$(go env GOROOT)" = "$GITHUB_WORKSPACE"
           # go test prints nothing while a slow package runs; Latchkey stops a job after 15 quiet minutes
-          (while sleep 240; do echo "[heartbeat] $(date -u +%T)"; done) & trap 'kill $!' EXIT
+          (
+            trap 'kill "$!" 2>/dev/null || :; exit 0' TERM
+            while sleep 240 & wait "$!"; do echo "[heartbeat] $(date -u +%T)"; done
+          ) & heartbeat=$!
+          trap 'kill "$heartbeat" 2>/dev/null || :; wait "$heartbeat" || :' EXIT
           env GOMAXPROCS=4 GOFLAGS=-p=2 GOEXPERIMENT=simd GOAMD64=v1 go test -count=1 -timeout 30m std
           GOEXPERIMENT=simd GOAMD64=v3 go test -count=1 -timeout 30m std
 
@@ -456,6 +460,12 @@ jobs:
           name: toolchain
           into: ~
       - run: bash .latchkey/setup.sh restore oracles
+      - name: C compilers (gccgo)
+        run: |
+          . .latchkey/env.sh
+          sudo apt-get update -qq && sudo apt-get install -y -qq gccgo
+          for c in gcc g++ gccgo clang; do command -v $c; done
+          echo "GCCGO=$(command -v gccgo)" >> "$GITHUB_ENV"
       - name: "cgo benchmark: one frozen sequential campaign per declared row"
         run: |
           . .latchkey/env.sh
