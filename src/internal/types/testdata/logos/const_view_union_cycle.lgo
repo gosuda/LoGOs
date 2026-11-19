@@ -25,3 +25,9 @@ func exprLoop(v loop) string {
 	default => "other"
 	}
 }
+
+func assertAfter(v loopAfter) {
+	_ = v.(int)
+}
+
+type loopAfter /* ERROR "invalid recursive type" */ const loopAfter
