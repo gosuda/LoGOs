@@ -32,7 +32,7 @@ Each row contrasts the LoGOs form with the plain Go pattern it replaces.
 | `go group (ctx, limit = N) { go { work()? } }` | `rt.NewGroup(ctx, N)` followed by `Go` calls and `Wait` |
 | `go group (ctx) { go { work()? } }` | `rt.NewGroup(ctx, 0)` followed by `Go` calls and `Wait` |
 
-The group context cancels on the first child error or panic. The group joins every child before it returns. A child returns its error with `?`. A bare `return` inside a child is rejected. A `limit = N` bounds the children that run at one time. `Locked[T].WithLock` runs one callback at a time. Never return or leak the pointer from the callback.
+The group context cancels on the first child error or panic. The group joins every child before it returns. A child returns its error with `?`. A bare `return` inside a child is rejected. A `limit = N` bounds the children that run at one time. `Locked[T].WithLock` runs one callback at a time. Never return or leak the pointer from the callback. A plain channel send, receive, or range written directly in a child selects on the group context: on cancel the child returns instead of waiting. A child panic ends the group as `*logos/rt.PanicError` with the value and a stack.
 
 ## Run and test forms
 
@@ -90,7 +90,7 @@ func Subscribe() {
 
 ## Read conc::lock_held_long
 
-One goroutine held a `Locked` value past the `-hold` duration while another goroutine waited. Treat it as a liveness fault, not a race. The monitor keeps no timer for a hold. It prints the finding when a waiter comes after the limit, or when the hold ends. Repair by copying what the slow call needs, leaving the callback, then calling. Keep the value in `logos/sync.Hot` when readers must not wait.
+One goroutine held a `Locked` value past the `-hold` duration while another goroutine waited. Treat it as a liveness fault, not a race. The monitor keeps no timer for a hold. It prints the finding when a waiter comes after the limit, or when the hold ends. Repair by copying what the slow call needs, leaving the callback, then calling. Keep read-mostly state in `logos/sync.Hot[T]`: `Load` returns a read-only pointer, `Store` publishes a new pointer, and `Update` applies `func(old) *T` in a compare-and-swap loop that never exposes a partial value.
 
 ```lgo
 ledger.WithLock(a => {
@@ -160,3 +160,22 @@ Expect exit 1 for the first: `logos run` reports `exit status 3` and no finding 
 ## Know what conc does not find
 
 Do not use `conc` for data races; use `logos test -race`. Do not use `conc` for static violations; `logos lint` rejects them before the program runs. Do not expect a finding for one lock order, a bounded group, or a goroutine the program can still wake. Do not expect findings from a plain `logos run`; only a `conc` build carries the monitor. Run only on unix: the command transports findings over a named pipe.
+
+## Diagnostics
+
+`logos lint` rejects group and lock misuse before the program runs; the `conc` sections above cover what only a running build shows. The concurrency lint rows:
+
+| Rule | Severity | Fix |
+|---|---|---|
+| `concurrency::unsupervised_goroutine` | forbid | Move the bare `go f()` into a `go group` child block. |
+| `concurrency::reentrant_withlock_deadlock` | forbid | Do not call `WithLock` on the same receiver inside its own callback. |
+| `concurrency::concurrent_multiword_race` | forbid | Guard the shared multi-word value with `Locked` or `Hot`, or make it a const view. |
+| `concurrency::unguarded_access` | forbid | Hold the `//logos:guardedby` lock at the access. |
+| `concurrency::nonatomic_access` | forbid | Touch a `//logos:atomic` field only through `sync/atomic`. |
+| `concurrency::lock_requirement_unmet` | forbid | Hold the `//logos:requires` set before the call. |
+
+```sh
+logos lint ./...
+```
+
+Expect exit 1 naming the rule id when a row is violated, and exit 0 when the tree is clean.
