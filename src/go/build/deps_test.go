@@ -905,6 +905,9 @@ var depsRules = `
 
 	os, runtime, strconv, testing, time
 	< logos/leak;
+
+	context, fmt, os, os/exec, sync, syscall
+	< logos/proc;
 `
 
 // listStdPkgs returns the same list of packages as "go list std".
