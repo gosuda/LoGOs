@@ -1,0 +1,118 @@
+// run
+
+package main
+
+import (
+	"fmt"
+	"os"
+)
+
+var failed bool
+
+func check(name string, cond bool, got, want any) {
+	if !cond {
+		failed = true
+		fmt.Println("FAIL", name+":", "got", got, "want", want)
+		return
+	}
+	fmt.Println("ok", name)
+}
+
+func apply(set func(int)) {
+	set(3)
+}
+
+func applyGen[E any](x E, set func(E)) {
+	set(x)
+}
+
+var keep func(int)
+
+var escaped int
+
+func captureTyped[F any](dst *F, v F) {
+	const switch F {
+	case int:
+		var f func(int) = x => { *dst = x }
+		f(v)
+	}
+}
+
+func captureArg[F any](dst *F, v F) {
+	const switch F {
+	case int:
+		apply(x => { *dst = x })
+		applyGen(v, x => { *dst = x + 1 })
+	}
+}
+
+func captureEscape[F any](dst *F) {
+	const switch F {
+	case int:
+		keep = x => { *dst = 9 }
+	}
+}
+
+func captureNested[F any](dst *F) {
+	const switch F {
+	case int:
+		var outer func(int) = a => {
+			var inner func(int) = b => { *dst = a + b }
+			inner(2)
+		}
+		outer(1)
+	}
+}
+
+func captureTilde[F any](dst *F) {
+	const switch F {
+	case ~int:
+		apply(x => { *dst = F(x) })
+	}
+}
+
+func captureReturn[F any](dst *F, raw string) (bool, error) {
+	const switch F {
+	case int8:
+		return store(raw, v => { *dst = v })
+	}
+	return false, nil
+}
+
+func store(raw string, set func(int8)) (bool, error) {
+	v := len(raw)
+	set(int8(v))
+	return true, nil
+}
+
+func main() {
+	var n int
+	captureTyped(&n, 7)
+	check("capture-typed", n == 7, n, 7)
+
+	n = 0
+	captureArg(&n, 5)
+	check("capture-arg", n == 6, n, 6)
+
+	n = 0
+	captureEscape(&n)
+	keep(0)
+	check("capture-escape", n == 9, n, 9)
+
+	n = 0
+	captureNested(&n)
+	check("capture-nested", n == 3, n, 3)
+
+	var t int
+	captureTilde(&t)
+	check("capture-tilde", t == 3, t, 3)
+
+	var s int8
+	ok, err := captureReturn(&s, "abc")
+	good := err == nil && ok && int(s) == 3
+	check("capture-return", good, int(s), 3)
+
+	if failed {
+		os.Exit(1)
+	}
+}
