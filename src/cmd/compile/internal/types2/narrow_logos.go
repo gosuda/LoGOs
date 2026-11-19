@@ -1234,7 +1234,6 @@ func (p *logosEFPass) exprStmt(s *syntax.ExprStmt, st *logosEFState) *logosEFSta
 		if b, ok := p.check.Uses[fun].(*Builtin); ok && b.Name() == "panic" {
 			return nil
 		}
-		return st
 	}
 	if fn := p.staticFunc(call.Fun); fn != nil && logosNeverReturns(fn) {
 		return nil
