@@ -107,3 +107,15 @@ func ffPromotedSiblingStaysAccepted() {
 	println(h.count /* ERROR "[correctness::result_before_error_check]" */)
 	_ = err
 }
+
+func ffIndexEffectsRunAfterBase() {
+	var n int
+	var err error
+	n, err = ffFetch()
+	if err != nil {
+		return
+	}
+	ffGetSlice(n)[func() int { n, err = ffFetch(); return 0 }()] = 9
+	println(n /* ERROR "[correctness::result_before_error_check]" */)
+	_ = err
+}

@@ -1631,10 +1631,11 @@ func (p *logosEFPass) quietPath(l syntax.Expr, st *logosEFState) *logosEFState {
 			l = x.X
 		case *syntax.IndexExpr:
 			if _, ok := p.constArrayIndex(x); !ok {
-				st = p.expr(x.Index, st)
 				if !p.arrayBase(x.X) {
 					return p.expr(l, st)
 				}
+				st = p.quietPath(x.X, st)
+				st = p.expr(x.Index, st)
 				p.seen[x.Pos()] = true
 				l = x.X
 				continue
