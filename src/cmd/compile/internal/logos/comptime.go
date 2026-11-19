@@ -257,6 +257,7 @@ type cfRecordBuilder struct {
 	fl        *fileLower
 	qualifier string
 	tpIndex   map[types2.Object]int
+	shadowOf  map[types2.Object]int
 	imports   []cfImport
 	subs      []splice
 }
@@ -268,6 +269,7 @@ func (fl *fileLower) cfRecordText(def *cfGenericDef, qualifier string) *cfRecord
 			b.tpIndex[o] = i
 		}
 	}
+	b.shadowOf = fl.cfCaseShadows(def)
 	syntax.Inspect(def.decl, b.visit)
 	start := fl.cfFuncStart(fl.off(syntax.StartPos(def.decl)))
 	end := fl.off(syntax.EndPos(def.decl)) + 1
@@ -286,6 +288,42 @@ func (fl *fileLower) cfRecordText(def *cfGenericDef, qualifier string) *cfRecord
 		source:  out.s,
 		sourceO: out,
 	}
+}
+
+// cfCaseShadows maps each const-switch case shadow of a type parameter of
+// def to that parameter's marker index. The checker rebinds a switched
+// type parameter inside each case body (logosShadowConstTarget), so uses
+// there resolve to the shadow, not to the parameter in tpIndex. The copy
+// selects the case only when its type argument satisfies the case, so the
+// shadow spells as the parameter's marker like the parameter itself.
+func (fl *fileLower) cfCaseShadows(def *cfGenericDef) map[types2.Object]int {
+	out := make(map[types2.Object]int)
+	if fl.pkg.info.LogosConstCases == nil {
+		return out
+	}
+	names := make(map[string]int)
+	for i, f := range def.decl.TParamList {
+		if f.Name != nil {
+			names[f.Name.Value] = i
+		}
+	}
+	syntax.Inspect(def.decl, func(n syntax.Node) bool {
+		s, ok := n.(*syntax.ConstSwitchStmt)
+		if !ok {
+			return true
+		}
+		for _, cs := range s.Cases {
+			rec, ok := fl.pkg.info.LogosConstCases[cs]
+			if !ok || rec.Target == nil {
+				continue
+			}
+			if idx, ok := names[rec.Target.Name()]; ok {
+				out[rec.Target] = idx
+			}
+		}
+		return true
+	})
+	return out
 }
 
 // cfCheckExportedRecord reports each package-level unexported identifier
@@ -400,6 +438,9 @@ func (b *cfRecordBuilder) spelling(obj types2.Object) (string, bool) {
 		return b.packageMarker(pn), true
 	}
 	if idx, ok := b.tpIndex[obj]; ok {
+		return cfMarker(idx), true
+	}
+	if idx, ok := b.shadowOf[obj]; ok {
 		return cfMarker(idx), true
 	}
 	if b.qualifier != "" && b.packageLevel(obj) {

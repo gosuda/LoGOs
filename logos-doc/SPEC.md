@@ -1083,6 +1083,8 @@ Each instantiation MUST expand into a non-generic copy `<f>_logosct<N>` in the i
 
 A comptime call inside an expansion whose type arguments are concrete after substitution MUST expand into the same copy, at any depth and across package boundaries. [T-205]
 
+A use of the switched type parameter inside a `const switch` case body MUST spell the instantiation's type argument in the copy, for tilde and exact cases alike. [T-205]
+
 Copies MUST be memoized per type-argument list. [T-205]
 
 An exported comptime generic MUST travel as source text in `__.LOGOS`. [T-205]
