@@ -1108,12 +1108,15 @@ func (js *jsonStruct) marshalToText(b *strings.Builder) {
 
 // marshalToRefusalText emits MarshalJSONTo for a struct whose fields the
 // reflective encoder cannot represent (a non-bare option value at any
-// container depth): both defaults take the v1 bytes, and any other option
-// reports an UnsupportedOptions diagnostic instead of silently writing
-// v1 bytes that ignore the caller.
+// container depth, modulo a JSON method boundary): the v1 and v2 defaults
+// take the v1 bytes, and any other option reports an UnsupportedOptions
+// diagnostic instead of silently writing v1 bytes that ignore the caller.
+// A v1 call that differs from the defaults only in struct-tag flags still
+// takes the v1 bytes: a reflective parent sets those flags while encoding
+// a `,string` or `,format` field, and v1 ignores them on struct values.
 func (js *jsonStruct) marshalToRefusalText(b *strings.Builder) {
 	body := []string{
-		fmt.Sprintf("if %s.CallerOptionsAreV1Default(_logos_enc.Options()) || %s.CallerOptionsAreV2Default(_logos_enc.Options()) {", jsonAlias, jsonAlias),
+		fmt.Sprintf("if %s.CallerOptionsAreV1DefaultIgnoringTags(_logos_enc.Options()) || %s.CallerOptionsAreV2Default(_logos_enc.Options()) {", jsonAlias, jsonAlias),
 		fmt.Sprintf("\t_logos_b, _logos_err := %s.MarshalJSON()", jsonRecv),
 		"\tif _logos_err != nil {",
 		"\t\treturn _logos_err",

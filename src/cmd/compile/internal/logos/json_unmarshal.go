@@ -96,12 +96,12 @@ func (js *jsonStruct) unmarshalFromText(b *strings.Builder) {
 	b.WriteString("}\n")
 }
 
-// unmarshalFromExemptText emits UnmarshalJSONFrom for a struct the
-// reflective decoder cannot represent directly (a non-bare option field
-// or a union member at any container depth): default options run the v1
-// method, and any other option decodes through the method-free shadow
-// with the required-field checks, so a strict caller is never silently
-// handed v1 semantics.
+// unmarshalFromExemptText emits UnmarshalJSONFrom for a struct whose fields
+// the reflective decoder can represent but the static decoder cannot check:
+// a union member at any container depth, with no non-bare option field.
+// The v1 and v2 defaults run the v1 method, and any other option decodes
+// through the method-free shadow with the required-field checks, so a
+// strict caller is never silently handed v1 semantics.
 func (js *jsonStruct) unmarshalFromExemptText(b *strings.Builder) {
 	body := []string{
 		fmt.Sprintf("if %s.CallerOptionsAreV1Default(_logos_dec.Options()) || %s.CallerOptionsAreV2Default(_logos_dec.Options()) {", jsonAlias, jsonAlias),
@@ -121,12 +121,43 @@ func (js *jsonStruct) unmarshalFromExemptText(b *strings.Builder) {
 	b.WriteString("}\n")
 }
 
+// unmarshalFromRefusalText emits UnmarshalJSONFrom for a struct whose fields
+// the reflective decoder cannot represent (a non-bare option value at any
+// container depth, modulo a JSON method boundary): the v1 and v2 defaults
+// take the v1 method, and any other option reports an UnsupportedOptions
+// diagnostic instead of failing inside the shadow type, where an option
+// field looks like a plain struct. A v1 call that differs from the defaults
+// only in struct-tag flags still takes the v1 method: a reflective parent
+// sets those flags while decoding a `,string` or `,format` field, and v1
+// ignores them on struct values.
+func (js *jsonStruct) unmarshalFromRefusalText(b *strings.Builder) {
+	body := []string{
+		fmt.Sprintf("if %s.CallerOptionsAreV1DefaultIgnoringTags(_logos_dec.Options()) || %s.CallerOptionsAreV2Default(_logos_dec.Options()) {", jsonAlias, jsonAlias),
+		"\t_logos_val, _logos_err := _logos_dec.ReadValue()",
+		"\tif _logos_err != nil {",
+		"\t\treturn _logos_err",
+		"\t}",
+		fmt.Sprintf("\treturn %s.UnmarshalJSON([]byte(_logos_val))", jsonRecv),
+		"}",
+		fmt.Sprintf("return %s.UnsupportedOptions(%q)", jsonAlias, js.name),
+	}
+	fmt.Fprintf(b, "\nfunc (%s *%s) UnmarshalJSONFrom(_logos_dec *%s.Decoder) error {\n", jsonRecv, js.name, jsontextAlias)
+	for _, l := range indentLines(body) {
+		b.WriteString(l)
+		b.WriteByte('\n')
+	}
+	b.WriteString("}\n")
+}
+
 // fallbackDecodeLines emits the reflective fallback shared by the
-// options-aware path and the exempt path: it saves and clears each
-// required pointer so occurrence is tracked independently of the final
-// value, decodes through the method-free shadow, restores cleared fields
-// on error, and reports the first missing required field. The restore
-// block is built once and reused by every missing-field branch.
+// options-aware path and the exempt path. A null or non-object document
+// carries no members to validate, so it decodes straight through the shadow
+// without touching the destination: the v1 profile accepts root null as a
+// no-op. Otherwise it buffers the object, scans member presence with the
+// fast path key dispatch, null tracking and last-wins duplicate semantics,
+// and decodes through the method-free shadow into the destination's
+// existing allocations, so a present member keeps nested data and pointer
+// aliases while an omitted member still fails the required-field check.
 func (js *jsonStruct) fallbackDecodeLines() []string {
 	decl := fmt.Sprintf("type _logos_shadow_%s %s", js.name, js.name)
 	call := fmt.Sprintf("return %s.DecodeDefault[_logos_shadow_%s, %s](_logos_dec, (*_logos_shadow_%s)(%s))", jsonAlias, js.name, js.name, js.name, jsonRecv)
@@ -134,29 +165,61 @@ func (js *jsonStruct) fallbackDecodeLines() []string {
 		return []string{decl, call}
 	}
 	body := []string{decl}
-	for _, name := range js.required {
-		body = append(body, fmt.Sprintf("_logos_old_%s := %s.%s", name, jsonRecv, name))
-		body = append(body, fmt.Sprintf("%s.%s = nil", jsonRecv, name))
-	}
-	body = append(body, fmt.Sprintf("_logos_fallback_err := %s.DecodeDefault[_logos_shadow_%s, %s](_logos_dec, (*_logos_shadow_%s)(%s))", jsonAlias, js.name, js.name, js.name, jsonRecv))
-	body = append(body, "if _logos_fallback_err != nil {")
-	restores := []string{}
-	for _, other := range js.required {
-		restores = append(restores, fmt.Sprintf("if %s.%s == nil { %s.%s = _logos_old_%s }", jsonRecv, other, jsonRecv, other, other))
-	}
-	for _, l := range restores {
-		body = append(body, "\t"+l)
-	}
-	body = append(body, "\treturn _logos_fallback_err", "}")
-	for _, name := range js.required {
-		body = append(body, fmt.Sprintf("if %s.%s == nil {", jsonRecv, name))
-		for _, l := range restores {
-			body = append(body, "\t"+l)
-		}
-		body = append(body, fmt.Sprintf("\treturn %s.MissingFieldError{Type: %q, Field: %q}", rtAlias, js.name, name))
-		body = append(body, "}")
-	}
+	body = append(body, "if _logos_dec.PeekKind() != '{' {")
+	body = append(body, "\t"+call)
+	body = append(body, "}")
+	body = append(body, "_logos_raw, _logos_read_err := _logos_dec.ReadValue()")
+	body = append(body, "if _logos_read_err != nil {")
+	body = append(body, "\treturn _logos_read_err")
+	body = append(body, "}")
+	body = append(body, fmt.Sprintf("var _logos_seen [%d]uint64", seenWords(len(js.required))))
+	body = append(body, "var _logos_firstnulled = -1")
+	body = append(body, js.presenceScanLines()...)
+	body = append(body, "if _logos_scan_err := _logos_pscan.Err(); _logos_scan_err != nil {")
+	body = append(body, "\treturn _logos_scan_err")
+	body = append(body, "}")
+	body = append(body, "_logos_base := _logos_dec.InputOffset() - int64(len(_logos_raw))")
+	body = append(body, fmt.Sprintf("if _logos_fallback_err := %s.DecodeDefaultRaw[_logos_shadow_%s, %s](_logos_raw, _logos_dec.Options(), _logos_base, (*_logos_shadow_%s)(%s)); _logos_fallback_err != nil {", jsonAlias, js.name, js.name, js.name, jsonRecv))
+	body = append(body, "\treturn _logos_fallback_err")
+	body = append(body, "}")
+	body = append(body, js.requiredCheck()...)
 	body = append(body, "return nil")
+	return body
+}
+
+// presenceScanLines emits the member-presence scan over the buffered raw
+// object. It mirrors the fast path key dispatch (exact then fold), null
+// tracking and last-wins duplicate semantics for the required fields only;
+// other members are skipped. Presence, not a nil pointer after decode,
+// decides the required-field check.
+func (js *jsonStruct) presenceScanLines() []string {
+	body := []string{
+		fmt.Sprintf("_logos_pscan := %s.NewScanner([]byte(_logos_raw), (*%s)(nil))", jsonAlias, js.name),
+		"if !_logos_pscan.Object() {",
+		"\treturn _logos_pscan.End()",
+		"}",
+		"for _logos_pscan.Next() {",
+		fmt.Sprintf("\t_logos_i := _logos_jsonkey_%s(_logos_pscan.Key())", js.name),
+		"\tif _logos_i < 0 {",
+		fmt.Sprintf("\t\t_logos_i = _logos_jsonfold_%s(_logos_pscan.FoldKey())", js.name),
+		"\t}",
+		"\tswitch _logos_i {",
+	}
+	for _, f := range js.fields {
+		if f.required < 0 {
+			continue
+		}
+		w, b := f.required/64, f.required%64
+		body = append(body, fmt.Sprintf("\tcase %d:", f.pos))
+		body = append(body, "\t\tif _logos_pscan.Null() {")
+		body = append(body, fmt.Sprintf("\t\t\t_logos_seen[%d] &^= 1 << %d", w, b))
+		body = append(body, fmt.Sprintf("\t\t\tif _logos_firstnulled < 0 { _logos_firstnulled = %d }", f.required))
+		body = append(body, "\t\t} else {")
+		body = append(body, fmt.Sprintf("\t\t\t_logos_seen[%d] |= 1 << %d", w, b))
+		body = append(body, "\t\t\t\t_logos_pscan.Skip()")
+		body = append(body, "\t\t}")
+	}
+	body = append(body, "\tdefault:", "\t\t_logos_pscan.Skip()", "\t}", "}")
 	return body
 }
 
