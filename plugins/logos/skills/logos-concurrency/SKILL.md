@@ -20,7 +20,7 @@ LoGOs provides structured concurrency through goroutine groups and panic-safe sy
 4. Run the linter and the race detector first: they catch static violations and exercised data races.
 5. Run the program under the monitor when the code is lint-clean and race-clean but still suspects a liveness or ordering fault: use `logos conc run` for a program and `logos conc test` for tests.
 6. Read each finding on standard error while the child still runs: repair the named position, then rerun without `conc` to confirm the program still behaves.
-7. Retry a shake failure with the printed seed: pass the same seed to shake the run again. The seed fixes the yield counts, not the exact goroutine schedule, so treat a rerun as a retry, not an exact replay.
+7. Retry a shake failure with the printed seed: pass the same seed to shake the run again. The same seed can yield differently, because yields also depend on goroutine identity and scheduling, so treat a rerun as a retry, not an exact replay.
 
 ## Group syntax
 
@@ -134,7 +134,7 @@ go group (ctx) {
 }
 ```
 
-A shake schedule fault has no rule id. Treat a test that fails only under `-shake` as an order dependence. Rerun with the printed seed to shake the run again; the seed fixes the yield counts, not the exact schedule.
+A shake schedule fault has no rule id. Treat a test that fails only under `-shake` as an order dependence. Rerun with the printed seed to shake the run again; the same seed can yield differently, so it is a retry, not an exact replay.
 
 ## Set flags and replay seeds
 
