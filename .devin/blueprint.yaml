@@ -32,3 +32,16 @@ knowledge:
   - name: notes
     contents: |
       Work on release-branch.go1.27; fork-first PATH. Rebuild after compiler/cmd changes — tests use installed binaries. Milestone gate: (cd src && ./run.bash --no-rebuild).
+---
+# macOS (arm64) variant: same bootstrap, darwin tarball.
+runs-on: macos
+initialize: |
+  set -e
+  if [ ! -x "$HOME/go-bootstrap/bin/go" ]; then
+    curl -LsSf -o /tmp/go.tgz https://go.dev/dl/go1.27.4.darwin-arm64.tar.gz
+    rm -rf "$HOME/go-bootstrap" && mkdir -p "$HOME/go-bootstrap"
+    tar -C "$HOME/go-bootstrap" --strip-components=1 -xzf /tmp/go.tgz
+  fi
+  (cd src && GOROOT_BOOTSTRAP=$HOME/go-bootstrap ./make.bash)
+maintenance: |
+  echo "PATH=$(pwd)/bin:$PATH" >> $ENVRC
