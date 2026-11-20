@@ -1366,6 +1366,11 @@ func (c *cswLower) wrapConvs(body []syntax.Stmt, cs *cswCase, selWraps []selWrap
 			if !ok {
 				base.Fatalf("logos: const switch select target temp cannot be read back from the cast text: frozen operand [%d,%d) %s is not inside it", from, to, what)
 			}
+			if from == start && to == end {
+				// Only the whole operand may absorb a generated wrap; gap
+				// and tail slices end inside it.
+				aS, aE = gapWrapExtend(wt.chunks, wt.s, aS, aE)
+			}
 			return wt.s[aS:aE]
 		}
 		for _, r := range inner {
@@ -1481,7 +1486,7 @@ func (c *cswLower) wrapConvs(body []syntax.Stmt, cs *cswCase, selWraps []selWrap
 			}
 			rhs, ok := parseExprAt(src, e.Pos())
 			if !ok {
-				base.Fatalf("logos: const switch select target temp at %s cannot be respelled", e.Pos().String())
+				base.Fatalf("logos: const switch select target temp at %s cannot be respelled: %q", e.Pos().String(), src)
 			}
 			freezeStmts = append(freezeStmts, at(&syntax.AssignStmt{Op: syntax.Def, Lhs: nameOf(e.Pos(), t), Rhs: rhs}, e.Pos()))
 			freezeText.WriteString("\n" + t + " := " + src)
@@ -1634,6 +1639,7 @@ func (c *cswLower) wrapConvs(body []syntax.Stmt, cs *cswCase, selWraps []selWrap
 					if !ok {
 						base.Fatalf("logos: const switch select target at %s: frozen operand [%d,%d) is not verbatim inside the cast text of [%d,%d)", l.Pos().String(), s.start, s.end, w.start, w.end)
 					}
+					aS, aE = gapWrapExtend(wt.chunks, wt.s, aS, aE)
 					wt.s = wt.s[:aS] + s.name + wt.s[aE:]
 				}
 				kept := subs[:0]
@@ -1687,6 +1693,7 @@ func (c *cswLower) wrapConvs(body []syntax.Stmt, cs *cswCase, selWraps []selWrap
 						continue
 					}
 					if aS, aE, ok := c.fl.loweredAt(sp.chunks, s.start, s.end); ok {
+						aS, aE = gapWrapExtend(sp.chunks, text, aS, aE)
 						text = text[:aS] + s.name + text[aE:]
 						continue
 					}

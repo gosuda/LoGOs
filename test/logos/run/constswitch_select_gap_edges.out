@@ -1,0 +1,4 @@
+seq 0
+store true
+seq 2
+ok gap-edges

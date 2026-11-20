@@ -607,20 +607,28 @@ func chunkOffsetOf(chunks []chunk, start, end int) (int, bool) {
 // body share the source range from different buffer ranges, so a frozen
 // operand inside an unrolled copy maps to the source its lowered copies
 // derive from. Const-for-substituted bytes are chunkless, so the range
-// may span a gap: both endpoints must land in verbatim chunks and the
-// result covers the substituted source between them.
+// may span a gap, and an endpoint may land inside one: a start in a gap
+// maps to the source the gap's substitution began at, an end to where it
+// stopped, so an operand that begins or ends with generated text keeps a
+// source range that covers the substituted source.
 func (fl *fileLower) origRangeOf(start, end int) (int, int, bool) {
 	if end <= start {
 		return 0, 0, false
 	}
 	oS := -1
 	oE := -1
-	for _, c := range fl.srcMap.chunks {
+	for i, c := range fl.srcMap.chunks {
 		if c.out <= start && start < c.out+c.n {
 			oS = c.orig + start - c.out
 		}
+		if oS < 0 && start < c.out && i > 0 {
+			oS = fl.srcMap.chunks[i-1].orig + fl.srcMap.chunks[i-1].n
+		}
 		if c.out < end && end <= c.out+c.n {
 			oE = c.orig + end - c.out
+		}
+		if oE < 0 && end <= c.out && i > 0 {
+			oE = c.orig
 		}
 		if oS >= 0 && oE >= 0 {
 			break
@@ -671,6 +679,73 @@ func (fl *fileLower) loweredAt(chunks []chunk, sStart, sEnd int) (int, int, bool
 		return at, at + (oE - oS), true
 	}
 	return loweredSpanOf(chunks, oS, oE)
+}
+
+// gapWrapExtend widens a slice computed by loweredAt inside a composed
+// lowered text so the generated wrappers that enclose the operand stay
+// part of it: an opening run like `any(` immediately before the slice
+// and a closing run like `.(caseT)` immediately after are chunkless, so
+// slicing between the operand's first and last verbatim bytes drops the
+// opener while retaining the close. An endpoint strictly inside a
+// verbatim chunk never extends.
+func gapWrapExtend(chunks []chunk, text string, s, e int) (int, int) {
+	inChunk := func(pos int) bool {
+		for _, c := range chunks {
+			if c.out < pos && pos < c.out+c.n {
+				return true
+			}
+		}
+		return false
+	}
+	if !inChunk(e) {
+		hi := len(text)
+		for _, c := range chunks {
+			if c.out >= e && c.out < hi {
+				hi = c.out
+			}
+		}
+		for e < hi {
+			b := text[e]
+			switch {
+			case b == ')' || b == '(' || b == ']' || b == '}' || b == '.':
+				e++
+			case 'a' <= b && b <= 'z' || 'A' <= b && b <= 'Z' || '0' <= b && b <= '9' || b == '_':
+				e++
+			default:
+				return s, e
+			}
+		}
+	}
+	if s > 0 && !inChunk(s) && text[s-1] == '(' {
+		lo := 0
+		for _, c := range chunks {
+			if c.out+c.n <= s && c.out+c.n > lo {
+				lo = c.out + c.n
+			}
+		}
+		// The opener's matching close must live inside the widened slice;
+		// otherwise the wrap belongs to more than this operand and pulling
+		// the opener in leaves the close behind.
+		depth, bal := 0, true
+		for i := lo; i < e; i++ {
+			switch text[i] {
+			case '(':
+				depth++
+			case ')':
+				depth--
+				if depth < 0 {
+					bal = false
+				}
+			}
+			if !bal {
+				break
+			}
+		}
+		if bal && depth == 0 {
+			s = lo
+		}
+	}
+	return s, e
 }
 
 func partitionSplices(list []splice, s span) (kept, inner []splice) {
