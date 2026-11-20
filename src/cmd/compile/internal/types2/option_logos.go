@@ -373,7 +373,14 @@ func (check *Checker) logosOptionalCall(x *operand, call *syntax.CallExpr) bool 
 	if opt == nil {
 		return false
 	}
-	sig, ok := Unalias(opt.Elem).(*Signature)
+	// A function field reached through `?.` on a const view carries the
+	// view's qualification; calling it mutates nothing, so read the
+	// signature from underneath.
+	elem := opt.Elem
+	if base, descendants, readonly := logosReadonlyBase(elem); descendants || readonly {
+		elem = base
+	}
+	sig, ok := Unalias(elem).(*Signature)
 	if !ok || sig.TypeParams().Len() > 0 {
 		return false
 	}

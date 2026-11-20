@@ -600,11 +600,7 @@ func (check *Checker) logosConstSelect(x *operand, e *syntax.SelectorExpr, sel s
 		} else {
 			x.mode_ = value
 		}
-		if _, isFunc := obj.Type().Underlying().(*Signature); isFunc {
-			x.typ_ = obj.Type()
-		} else {
-			x.typ_ = &ConstView{Elem: obj.Type()}
-		}
+		x.typ_ = &ConstView{Elem: obj.Type()}
 		x.expr = e
 		return true
 	case *Func:

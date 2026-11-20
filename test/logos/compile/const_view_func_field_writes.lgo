@@ -14,3 +14,15 @@ func rejectFuncFieldWrite(ts const []WFunc) {
 func rejectFuncElemWrite(ts const []WFunc) {
 	ts[0] = WFunc{} // ERROR "const_view_mutation"
 }
+
+func rejectFuncFieldAddrWrite(ts const []WFunc) {
+	p := &ts[0].Call
+	*p = nil // ERROR "const_view_mutation"
+}
+
+func rejectFuncRangeAddrWrite(ts const []WFunc) {
+	for _, t := range ts {
+		q := &t.Call
+		*q = nil // ERROR "const_view_mutation"
+	}
+}
