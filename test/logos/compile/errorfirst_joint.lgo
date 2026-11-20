@@ -890,3 +890,95 @@ func efPromotedSiblingStaysAccepted() {
 	println(h.count) // ERROR "result_before_error_check"
 	_ = err
 }
+
+// Two calls store the same field with different error variables. A nil
+// check on the first call's error cannot prove the value the deferred
+// literal reads, because the second call may have failed.
+func efDeferredMixedErrorVars() {
+	h := efHeld{}
+	var first, second error
+	defer func() {
+		println(h.stats) // ERROR "result_before_error_check"
+	}()
+	h.stats, first = efFetchHeld()
+	h.stats, second = efFetchHeld()
+	if first != nil {
+		return
+	}
+	_ = second
+}
+
+// A variable the outer loop declares is shared by the inner loop's
+// iterations, so a store inside the inner loop can rewrite the captured
+// value after the defer registers.
+func efInnerLoopStoreSharedVar() {
+	for i := 0; i < 2; i++ {
+		h := efHeld{}
+		var err error
+		for j := 0; j < 2; j++ {
+			defer func() {
+				println(h.stats) // ERROR "result_before_error_check"
+			}()
+			h.stats, err = efFetchHeld()
+			if err != nil {
+				return
+			}
+		}
+	}
+}
+
+func efArr() [2][2]int { return [2][2]int{} }
+
+func efUseVal(n int) int { return n }
+
+// A variable-index store evaluates its base once. A base that reads a
+// checked result stays accepted even though the index call rewrites the
+// result afterward.
+func efArrayBaseReadsResultOnce() {
+	n, err := efFetch()
+	if err != nil {
+		return
+	}
+	a := efArr()
+	a[efUseVal(n)][func() int { n, err = efFetch(); return 0 }()] = 9
+	_ = err
+}
+
+type efIn2 struct {
+	stats int
+}
+
+type efMid2 struct {
+	efIn2
+}
+
+type efOuter2 struct {
+	efMid2
+}
+
+// A promoted read loads the whole embedded value, so it fails while a
+// tracked destination nested under the promoted path is unproven.
+func efPromotedReadSeesNestedField() {
+	h := efOuter2{}
+	var err error
+	h.efMid2.efIn2.stats, err = efFetchHeld()
+	println(h.efIn2) // ERROR "result_before_error_check"
+	_ = err
+}
+
+// A loop that exits on every path after the defer registers cannot write
+// the captured field again, so the deferred read of the replacement
+// stays accepted.
+func efLoopBreakDeferredCopyStaysAccepted() {
+	h := efHeld{}
+	var err error
+	for {
+		h.stats, err = efFetchHeld()
+		h.stats = 0
+		defer func() {
+			println(h.stats)
+		}()
+		break
+	}
+	_ = err
+}

@@ -885,11 +885,11 @@ type logosEFPass struct {
 	addr        map[*Var]bool
 	initialized map[*Var]bool
 	tracked     map[logosEFKey]string
-	trackedErr  map[logosEFKey]*Var
+	storeErr    map[logosEFKey][]*Var
 	sliced      map[logosEFKey]bool
 	storePos    map[logosEFKey][]syntax.Pos
 	inLoop      map[logosEFKey]bool
-	loopFresh   map[*Var]bool
+	loopFresh   map[*syntax.ForStmt]map[*Var]bool
 	loopTuple   map[*syntax.ForStmt]map[logosEFKey]bool
 }
 
@@ -1090,11 +1090,11 @@ func (p *logosEFPass) collectAssigns() {
 	p.addr = make(map[*Var]bool)
 	p.initialized = make(map[*Var]bool)
 	p.tracked = make(map[logosEFKey]string)
-	p.trackedErr = make(map[logosEFKey]*Var)
+	p.storeErr = make(map[logosEFKey][]*Var)
 	p.sliced = make(map[logosEFKey]bool)
 	p.storePos = make(map[logosEFKey][]syntax.Pos)
 	p.inLoop = make(map[logosEFKey]bool)
-	p.loopFresh = make(map[*Var]bool)
+	p.loopFresh = make(map[*syntax.ForStmt]map[*Var]bool)
 	p.loopTuple = make(map[*syntax.ForStmt]map[logosEFKey]bool)
 	mark := func(lhs []syntax.Expr, rhs syntax.Expr) {
 		errV, keys := p.tuple(lhs, rhs)
@@ -1104,9 +1104,9 @@ func (p *logosEFPass) collectAssigns() {
 		for _, k := range keys {
 			if _, ok := p.tracked[k]; !ok {
 				p.tracked[k] = errV.name
-				p.trackedErr[k] = errV
 			}
 			p.storePos[k] = append(p.storePos[k], p.logosEFDestPos(lhs, k))
+			p.storeErr[k] = append(p.storeErr[k], errV)
 		}
 	}
 	note := func(lhs []syntax.Expr, rhs []syntax.Expr, plain bool) {
@@ -1176,9 +1176,7 @@ func (p *logosEFPass) collectAssigns() {
 				fresh[v] = true
 			}
 		}
-		for v := range fresh {
-			p.loopFresh[v] = true
-		}
+		p.loopFresh[f] = fresh
 		tuple := p.loopTuple[f]
 		if tuple == nil {
 			tuple = make(map[logosEFKey]bool)
@@ -1601,7 +1599,28 @@ func (p *logosEFPass) reportPromoted(x syntax.Expr, k logosEFKey, st *logosEFSta
 		p.check.errorf(at, IncompatibleAssign, "%s read of %s before %s is checked (read %s only after %s is checked)", logosResultBeforeErr, ck.displayName(), e.name, ck.displayName(), e.name)
 		return true
 	}
-	return false
+	// A promoted read loads the whole embedded value, so it also fails while
+	// any tracked destination nested under the read path is unproven.
+	var cands []logosEFCand
+	for _, c := range logosEFCands(st, k.root) {
+		if c.key == k || !logosEFPathUnder(c.key.path, k.path) {
+			continue
+		}
+		cands = append(cands, c)
+	}
+	if len(cands) == 0 {
+		return false
+	}
+	if p.seen[pos] {
+		return true
+	}
+	p.seen[pos] = true
+	if id := spineRoot(x); id != nil {
+		p.seen[id.Pos()] = true
+	}
+	first := cands[0]
+	p.check.errorf(at, IncompatibleAssign, "%s read of %s before %s is checked (read %s only after %s is checked)", logosResultBeforeErr, first.key.displayName(), first.ent.name, first.key.displayName(), first.ent.name)
+	return true
 }
 
 func (p *logosEFPass) readDest(x syntax.Expr, st *logosEFState) {
@@ -1681,8 +1700,7 @@ func (p *logosEFPass) quietPath(l syntax.Expr, st *logosEFState) *logosEFState {
 				st = p.quietPath(x.X, st)
 				st = p.expr(x.Index, st)
 				p.seen[x.Pos()] = true
-				l = x.X
-				continue
+				return st
 			}
 			p.seen[x.Pos()] = true
 			st = p.expr(x.Index, st)
@@ -2287,20 +2305,76 @@ func inSubtree(root, target syntax.Node) bool {
 	return found
 }
 
-func (p *logosEFPass) seedAfter(k logosEFKey, lit syntax.Node) bool {
-	for _, pos := range p.storePos[k] {
-		if pos.Cmp(lit.Pos()) >= 0 {
+// loopExitsAfterDefer reports whether lit's loop cannot run its tuple
+// stores again before a deferred literal executes: lit sits in a top-level
+// defer statement of the loop body and every later statement of that body
+// is an unlabeled break or a return, so the loop exits on every path after
+// registration. It answers only about this loop's own stores; a store
+// positioned after the literal still counts through storePos.
+func (p *logosEFPass) loopExitsAfterDefer(lit syntax.Node, f *syntax.ForStmt) bool {
+	if f.Body == nil {
+		return false
+	}
+	i := -1
+	for j, s := range f.Body.List {
+		if s == lit || inSubtree(s, lit) {
+			i = j
+			break
+		}
+	}
+	if i < 0 || i+1 >= len(f.Body.List) {
+		return false
+	}
+	cs, ok := f.Body.List[i].(*syntax.CallStmt)
+	if !ok || cs.Tok != syntax.Defer {
+		return false
+	}
+	for _, s := range f.Body.List[i+1:] {
+		switch s := s.(type) {
+		case *syntax.BranchStmt:
+			if s.Tok != syntax.Break || s.Label != nil {
+				return false
+			}
+		case *syntax.ReturnStmt:
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// storeLiveAfter reports whether the store of k at pos can write the value
+// a literal registered at lit later observes: the store is positioned after
+// the literal, or it sits in a loop containing the literal that can reach
+// it again before the literal runs.
+func (p *logosEFPass) storeLiveAfter(pos syntax.Pos, k logosEFKey, lit syntax.Node) bool {
+	if pos.Cmp(lit.Pos()) >= 0 {
+		return true
+	}
+	for f, keys := range p.loopTuple {
+		if !keys[k] || !inSubtree(f.Body, lit) {
+			continue
+		}
+		// A variable declared inside f's own body or post is fresh each
+		// iteration, but a variable from an outer loop is shared by f's
+		// iterations: freshness is a property of this loop, not of the
+		// variable.
+		if p.loopFresh[f][k.root] {
+			continue
+		}
+		if p.loopExitsAfterDefer(lit, f) {
+			continue
+		}
+		if pos.Cmp(f.Pos()) >= 0 && pos.Cmp(syntax.EndPos(f)) <= 0 {
 			return true
 		}
 	}
-	if p.loopFresh[k.root] {
-		return false
-	}
-	for f, keys := range p.loopTuple {
-		if !keys[k] {
-			continue
-		}
-		if inSubtree(f.Body, lit) {
+	return false
+}
+
+func (p *logosEFPass) seedAfter(k logosEFKey, lit syntax.Node) bool {
+	for _, pos := range p.storePos[k] {
+		if p.storeLiveAfter(pos, k, lit) {
 			return true
 		}
 	}
@@ -2313,7 +2387,22 @@ func (p *logosEFPass) seedEntry(k logosEFKey, lit syntax.Node) (logosEFEntry, bo
 		return logosEFEntry{}, false
 	}
 	e := logosEFEntry{name: errName, pos: lit.Pos()}
-	if errV := p.trackedErr[k]; errV != nil && len(p.assigns[logosEFKey{root: errV}]) == 1 {
+	// The entry's proof is valid only when every store that can write the
+	// captured value pairs it with the same error variable; mixed error
+	// variables leave the result unproven, so a check on the first error
+	// cannot pass a value a different call may have failed on.
+	var errV *Var
+	for i, ev := range p.storeErr[k] {
+		if !p.storeLiveAfter(p.storePos[k][i], k, lit) {
+			continue
+		}
+		if errV != nil && errV != ev {
+			errV = nil
+			break
+		}
+		errV = ev
+	}
+	if errV != nil && len(p.assigns[logosEFKey{root: errV}]) == 1 {
 		e.err = errV
 	}
 	return e, true
