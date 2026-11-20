@@ -104,11 +104,16 @@ GO_TEST_TIMEOUT_SCALE=4 ../.github/scripts/logos-test-env.sh \
 bash ../.github/scripts/logos-upstream-identity.sh after "$GITHUB_WORKSPACE" "$evidence"
 ```
 
-The workflow must run all three partitions independently, retain all exit statuses
-and raw logs, and keep every other selection-affecting setting identical. The
-inventory uses `run.bash` too, because that script sets `GOENV=off` and evaluates
-the installed dist environment before registration. `dist -list -run=...` is
-not a filtered inventory: its list path prints all registered names.
+A workflow that runs the complete partition must run all three partitions
+independently, retain all exit statuses and raw logs, and keep every other
+selection-affecting setting identical. The `logos` workflow on
+`release-branch.go1.27` deliberately runs only the complement partition with
+the inventory recorded before the run; the `cmd/go` and `testdir` steps and
+the after-run identity check live on the unmerged three-partition branches.
+The inventory uses `run.bash` too, because that script sets `GOENV=off` and
+evaluates the installed dist environment before registration.
+`dist -list -run=...` is not a filtered inventory: its list path prints all
+registered names.
 
 `partition_dist.py` requires unique nonempty names, exactly one literal
 `cmd/go`, and a complete coherent set of canonical `cmd/internal/testdir:I_N`
