@@ -75,7 +75,7 @@ func matchPackages(ld *Loader, ctx context.Context, m *search.Match, tags map[st
 
 	q := par.NewQueue(runtime.GOMAXPROCS(0))
 	ignorePatternsMap := parseIgnorePatterns(ld, ctx, treeCanMatch, modules)
-	walkPkgs := func(root, importPathRoot string, prune pruning) {
+	walkPkgs := func(root, importPathRoot string, prune pruning, isMain bool) {
 		_, span := trace.StartSpan(ctx, "walkPkgs "+root)
 		defer span.Done()
 
@@ -139,9 +139,15 @@ func matchPackages(ld *Loader, ctx context.Context, m *search.Match, tags map[st
 			if !have[name] {
 				have[name] = true
 				if isMatch(name) {
+					dir := pkgDir
+					pkgName := name
+					walkRoot := root
+					keepMain := isMain
 					q.Add(func() {
-						if _, _, err := scanDir(root, pkgDir, tags); err != imports.ErrNoGo {
-							addPkg(name)
+						if _, _, err := scanDir(walkRoot, dir, tags); err != imports.ErrNoGo {
+							addPkg(pkgName)
+						} else if keepMain && search.LogosKeepCgoOnlyDir(dir) {
+							addPkg(pkgName)
 						}
 					})
 				}
@@ -164,20 +170,20 @@ func matchPackages(ld *Loader, ctx context.Context, m *search.Match, tags map[st
 	}()
 
 	if filter == includeStd {
-		walkPkgs(cfg.GOROOTsrc, "", pruneGoMod)
+		walkPkgs(cfg.GOROOTsrc, "", pruneGoMod, false)
 		if treeCanMatch("cmd") {
-			walkPkgs(filepath.Join(cfg.GOROOTsrc, "cmd"), "cmd", pruneGoMod)
+			walkPkgs(filepath.Join(cfg.GOROOTsrc, "cmd"), "cmd", pruneGoMod, false)
 		}
 	}
 
 	if cfg.BuildMod == "vendor" {
 		for _, mod := range ld.MainModules.Versions() {
 			if modRoot := ld.MainModules.ModRoot(mod); modRoot != "" {
-				walkPkgs(modRoot, ld.MainModules.PathPrefix(mod), pruneGoMod|pruneVendor)
+				walkPkgs(modRoot, ld.MainModules.PathPrefix(mod), pruneGoMod|pruneVendor, true)
 			}
 		}
 		if ld.HasModRoot() {
-			walkPkgs(VendorDir(ld), "", pruneVendor)
+			walkPkgs(VendorDir(ld), "", pruneVendor, false)
 		}
 		return
 	}
@@ -207,6 +213,9 @@ func matchPackages(ld *Loader, ctx context.Context, m *search.Match, tags map[st
 			}
 			modPrefix = mod.Path
 		}
+		// Indexed modules live in the module cache or GOROOT and are never a
+		// main module, so the cgo-only keep does not apply to them: a pattern
+		// such as all must keep silently skipping their cgo-only packages.
 		if mi, err := modindex.GetModule(root); err == nil {
 			walkFromIndex(mi, modPrefix, isMatch, treeCanMatch, tags, have, addPkg, ignorePatternsMap[root], root)
 			continue
@@ -218,7 +227,10 @@ func matchPackages(ld *Loader, ctx context.Context, m *search.Match, tags map[st
 		if isLocal {
 			prune |= pruneGoMod
 		}
-		walkPkgs(root, modPrefix, prune)
+		// Only main-module directories may be kept for a cgo denial. A
+		// dependency that happens to hold loGo/s sources stays silently
+		// skipped even when a module-rooted or all pattern passes over it.
+		walkPkgs(root, modPrefix, prune, ld.MainModules.Contains(mod.Path))
 	}
 }
 

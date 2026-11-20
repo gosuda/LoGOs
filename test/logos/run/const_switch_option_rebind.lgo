@@ -1,0 +1,77 @@
+// run
+
+package main
+
+import (
+	"fmt"
+	"os"
+	"strconv"
+)
+
+var failed bool
+
+func check(name string, cond bool, got, want any) {
+	if !cond {
+		failed = true
+		fmt.Println("FAIL", name+":", "got", got, "want", want)
+		return
+	}
+	fmt.Println("ok", name)
+}
+
+type signed interface {
+	int | int8 | int16 | int32 | int64
+}
+
+func storeOptInt[E signed](raw string, bits int, set func(E)) (bool, error) {
+	n, perr := strconv.ParseInt(raw, 10, bits)
+	if perr != nil {
+		return true, perr
+	}
+	set(E(n))
+	return true, nil
+}
+
+// assign keeps the reported crash shape: the closure is passed directly
+// as a call argument and the call result is returned.
+func assign[F any](dst *F, raw string) (bool, error) {
+	const switch F {
+	case int8?:
+		return storeOptInt[int8](raw, 8, v => { *dst = v })
+	}
+	return false, nil
+}
+
+// Take keeps the second reported shape: no closure, a parenthesized
+// parameter type, and two option cases.
+func Take[F any](dst *(F)) string {
+	const switch F {
+	case string?:
+		return "string?"
+	case int64?:
+		return "int64?"
+	}
+	return "other"
+}
+
+func main() {
+	var n int8?
+	ok, err := assign(&n, "7")
+	check("opt-capture-arg", err == nil && ok && int(n ?? 0) == 7, int(n ?? 0), 7)
+
+	var bad int8?
+	ok, err = assign(&bad, "nope")
+	check("opt-capture-arg-err", err != nil, err != nil, true)
+
+	var x int64?
+	got := Take[int64?](&x)
+	check("opt-paren-param", got == "int64?", got, "int64?")
+
+	var s string?
+	got = Take[string?](&s)
+	check("opt-paren-param-first", got == "string?", got, "string?")
+
+	if failed {
+		os.Exit(1)
+	}
+	}
