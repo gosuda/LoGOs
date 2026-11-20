@@ -15,7 +15,7 @@ stdout '^ok min-raw='
 # The plain-go build of the same DOM-only program exceeds 1 MB raw, so the
 # size floor is the shared Go runtime, not the fork. The ceilings below
 # bound the fork's own output against sudden bloat; code plus data exceed
-# 90% of the bytes and the name section stays a few percent, so only
+# 90% of the bytes and the name section stays small, so only
 # debug sections are strippable without changing execution.
 
 -- go.mod --
@@ -172,16 +172,17 @@ func main() {
 	minGz := gzSize(os.Args[1])
 	jsonGz := gzSize(os.Args[4])
 	payloadFrac := float64(minS.code+minS.data) / float64(minS.raw)
-	nameFrac := float64(minS.name) / float64(minS.raw)
 	check(minS.raw < 3000000, "min raw=%d, want < 3000000", minS.raw)
 	check(minGz < 800000, "min gzip=%d, want < 800000", minGz)
 	check(jsonS.raw < 6500000, "json raw=%d, want < 6500000", jsonS.raw)
 	check(jsonGz < 1600000, "json gzip=%d, want < 1600000", jsonGz)
 	check(payloadFrac >= 0.90, "payload frac=%.3f, want >= 0.90", payloadFrac)
-	check(nameFrac <= 0.05, "name frac=%.3f, want <= 0.05", nameFrac)
+	// Absolute bound, not a ratio: a payload reduction must pass, and a
+	// fixed name section would otherwise fail a shrunken module.
+	check(minS.name <= 50000, "name bytes=%d, want <= 50000", minS.name)
 	// The wasm profile overhead stays bounded against plain go at the same
 	// default optimization level.
 	check(float64(min1.raw) <= float64(minGo.raw)*1.15, "fork overhead: logos=%d go=%d", min1.raw, minGo.raw)
-	fmt.Printf("ok min-raw=%d min-gzip=%d json-raw=%d json-gzip=%d payload=%.3f name=%.3f\n",
-		minS.raw, minGz, jsonS.raw, jsonGz, payloadFrac, nameFrac)
+	fmt.Printf("ok min-raw=%d min-gzip=%d json-raw=%d json-gzip=%d payload=%.3f name=%d\n",
+		minS.raw, minGz, jsonS.raw, jsonGz, payloadFrac, minS.name)
 }
