@@ -8,6 +8,8 @@ stdout '^direct leaf:direct$'
 stdout '^fwd leaf:x$'
 logos run ./thin
 stdout '^thin leaf:x$'
+logos run ./shadow
+stdout '^shadow: 2$'
 logos eject -o out
 exists out/main/main.go
 exists out/thin/thin.go
@@ -133,4 +135,24 @@ type probe struct {
 
 func main() {
 	fmt.Println("thin", mid.Forward[probe](mid.Codec{}))
+}
+
+-- w/shadow/shadow.lgo --
+package main
+
+import (
+	"fmt"
+
+	"example.com/qualtest/probe"
+)
+
+// The erased probe.Plan call was the import's only package use. The local
+// probe shadows the alias, so the scan must not keep the import alive.
+func useLocal() int {
+	probe := struct{ N int }{N: 1}
+	return probe.N
+}
+
+func main() {
+	fmt.Println("shadow:", useLocal()+probe.Plan[string]())
 }

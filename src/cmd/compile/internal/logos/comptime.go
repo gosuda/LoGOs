@@ -518,24 +518,27 @@ func (fl *fileLower) cfDemoteImportsUnusedByGenerated() {
 
 func (fl *fileLower) cfNamesInUse() map[string]bool {
 	used := make(map[string]bool)
-	var names func(syntax.Node) bool
-	names = func(n syntax.Node) bool {
-		switch n := n.(type) {
-		case *syntax.SelectorExpr:
-			syntax.Inspect(n.X, names)
-			return false
-		case *syntax.Name:
-			used[n.Value] = true
-		}
-		return true
-	}
 	var visit func(syntax.Node) bool
 	visit = func(n syntax.Node) bool {
 		switch n := n.(type) {
 		case *syntax.ImportDecl:
 			return false
 		case *syntax.SelectorExpr:
-			syntax.Inspect(n.X, names)
+			// A qualifier counts only when it resolves to a package
+			// name: a local declaration that shadows an import alias
+			// turns the selector into a field access and must not keep
+			// the import alive. An unresolvable name (generated code)
+			// keeps the import.
+			if x, ok := n.X.(*syntax.Name); ok {
+				if obj, found := fl.pkg.info.Uses[x]; found {
+					if pn, ok := obj.(*types2.PkgName); ok {
+						used[pn.Name()] = true
+					}
+				} else {
+					used[x.Value] = true
+				}
+			}
+			syntax.Inspect(n.X, visit)
 			return false
 		}
 		return true
