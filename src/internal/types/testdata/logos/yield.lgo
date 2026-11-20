@@ -311,3 +311,25 @@ func genReturnAlias(n int) reservedItems {
 	}
 	return /* ERROR "generator_return_value" */ 7
 }
+
+func genLambdaBlock() func(int) iter.Seq[int] {
+	return x => {
+		yield x
+		return
+	}
+}
+
+func genLambdaBlockValue() func(int) iter.Seq[int] {
+	return x => {
+		yield x
+		return /* ERROR "generator_return_value" */ 7
+	}
+}
+
+func genLambdaExpr() func(int) iter.Seq[int] {
+	return x => x // ERROR "generator_return_value"
+}
+
+func genLambdaExprNil() func(int) iter.Seq[int] {
+	return x => nil // ERROR "generator_return_value"
+}
