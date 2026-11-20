@@ -37,7 +37,7 @@ jobs:
   changes:
     name: "Route changed files to gates"
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
-    runs-on: "ubuntu-24.04"
+    runs-on: "depot-ubuntu-24.04"
     timeout-minutes: 10
     outputs:
       gates: "${{ steps.gates.outputs.gates }}"
@@ -58,7 +58,7 @@ jobs:
     name: "${{ matrix.gate }}"
     needs: "changes"
     if: "needs.changes.outputs.gates != '[]'"
-    runs-on: "ubuntu-24.04"
+    runs-on: "depot-ubuntu-24.04"
     timeout-minutes: 90
     strategy:
       fail-fast: false

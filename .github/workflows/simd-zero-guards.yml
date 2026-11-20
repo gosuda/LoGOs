@@ -40,9 +40,9 @@ jobs:
       matrix:
         include:
           - arch: "amd64"
-            runner: "ubuntu-26.04"
+            runner: "depot-ubuntu-24.04"
           - arch: "arm64"
-            runner: "ubuntu-26.04-arm"
+            runner: "depot-ubuntu-24.04-arm"
     defaults:
       run:
         shell: "bash"
@@ -198,7 +198,7 @@ jobs:
 
   simd_std:
     name: "SIMD baseline-target standard library"
-    runs-on: "ubuntu-26.04"
+    runs-on: "depot-ubuntu-24.04"
     timeout-minutes: 120
     defaults:
       run:
