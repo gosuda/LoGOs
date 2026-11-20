@@ -15,10 +15,16 @@ import (
 const yieldParam = "_logos_yield"
 
 func (fc *funcLower) generatorTarget() ([]types2.Type, bool) {
-	if len(fc.ft.ResultList) != 1 {
+	if len(fc.specs) != 1 {
 		return nil, false
 	}
-	typ := fc.fl.pkg.info.TypeOf(fc.ft.ResultList[0].Type)
+	// The spec result type resolves through the function's signature, so a
+	// lambda whose FuncType was rebuilt synthetically still detects as a
+	// generator.
+	typ := fc.specs[0].typ
+	if typ == nil {
+		typ = fc.fl.pkg.info.TypeOf(fc.ft.ResultList[0].Type)
+	}
 	named, ok := types2.Unalias(typ).(*types2.Named)
 	if !ok {
 		return nil, false
