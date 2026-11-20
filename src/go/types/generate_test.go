@@ -814,6 +814,7 @@ var logosMethods = map[string]bool{
 	"logosCgoTypeName":          true,
 	"logosStructTupleIdentical": true,
 	"ifaceWord":                 true,
+	"logosIfaceWord":            true,
 }
 var logosFuncs = map[string]bool{
 	"logosInterfaceReadonlyMismatch":      true,
