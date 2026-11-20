@@ -28,6 +28,46 @@ func kind(p Part?) string {
 	return "unknown"
 }
 
+// Duo holds a wrapped member so its options are rt.Option[Duo] values, not
+// bare interface pairs.
+type Duo interface { Text | Blob }
+type Blob []byte
+
+func pair() (Text, Blob) { return Text{Text: "pair"}, Blob{1} }
+
+func forward() (Duo?, Duo?) { return pair() }
+
+func take2(a, b Duo?) bool { return a != nil && b != nil }
+
+func pairVar() bool {
+	var a, b Duo? = pair()
+	return a != nil && b != nil
+}
+
+func pairAssign() bool {
+	var a, b Duo?
+	a, b = pair()
+	return a != nil && b != nil
+}
+
+func appendMember() bool {
+	var xs [](Duo?)
+	xs = append(xs, Text{}, Blob{1})
+	return len(xs) == 2 && xs[0] != nil && xs[1] != nil
+}
+
+func rangeMember() int {
+	xs := [](Duo?){Duo(Text{}), Duo(Blob{1})}
+	var e Duo?
+	n := 0
+	for _, e = range xs {
+		if e != nil {
+			n++
+		}
+	}
+	return n
+}
+
 func main() {
 	plain := Chunk{Part: Part(Text{Text: "explicit"})}
 	direct := Chunk{Part: Text{Text: "direct"}}
@@ -36,4 +76,8 @@ func main() {
 	fmt.Println(plain.Part != nil, direct.Part != nil)
 	fmt.Println(kind(plain.Part), kind(direct.Part), kind(held))
 	fmt.Println(take(Text{Text: "arg"}), take(Call{Name: "arg"}), take(nil))
+	a, b := forward()
+	fmt.Println(a != nil, b != nil)
+	fmt.Println(take2(pair()), pairVar(), pairAssign(), appendMember(), rangeMember())
+	fmt.Println(take2(Duo(Text{}), Duo(Blob(nil))), take2(Duo(Blob{1}), nil))
 }
