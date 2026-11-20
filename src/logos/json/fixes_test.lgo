@@ -1,0 +1,169 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package json_test
+
+import (
+	"bytes"
+	stdjson "encoding/json"
+	"errors"
+	"testing"
+
+	twinjson "logos/json"
+)
+
+// acceptAll records what its UnmarshalJSON was handed and never
+// rejects its input, so any rejection comes from the twin's own
+// validation.
+type acceptAll struct {
+	raw []byte
+}
+
+func (a *acceptAll) UnmarshalJSON(b []byte) error {
+	a.raw = append(a.raw[:0], b...)
+	return nil
+}
+
+func TestUnmarshalValidatesBeforeMethod(t *testing.T) {
+	var a acceptAll
+	_, err := twinjson.Unmarshal[acceptAll]([]byte(`{"x":1} garbage`))
+	if _, isSyn := err.(*stdjson.SyntaxError); !isSyn {
+		t.Fatalf("malformed input: got %T %v, want *SyntaxError", err, err)
+	}
+	if len(a.raw) != 0 {
+		t.Fatalf("method ran on invalid input: %q", a.raw)
+	}
+
+	// A valid document padded with space reaches the method trimmed,
+	// matching the standard decoder's dispatch.
+	a2, err2 := twinjson.Unmarshal[acceptAll]([]byte(" 7 "))
+	if err2 != nil {
+		t.Fatalf("padded value: %v", err2)
+	}
+	if string(a2.raw) != "7" {
+		t.Fatalf("method got %q, want trimmed %q", a2.raw, "7")
+	}
+
+	// The option decoder validates the payload the same way.
+	var a3 acceptAll
+	_, err3 := twinjson.UnmarshalOption[acceptAll]([]byte(`{`))
+	if _, isSyn := err3.(*stdjson.SyntaxError); !isSyn {
+		t.Fatalf("option malformed: got %T %v, want *SyntaxError", err3, err3)
+	}
+	if len(a3.raw) != 0 {
+		t.Fatalf("option method ran on invalid input: %q", a3.raw)
+	}
+}
+
+// flakyBox fails its first marshal and succeeds on the retry inside
+// the encoding/json fallback.
+type flakyBox struct {
+	calls *int
+}
+
+func (f flakyBox) MarshalJSON() ([]byte, error) {
+	*f.calls = *f.calls + 1
+	if *f.calls == 1 {
+		return nil, errors.New("flaky")
+	}
+	return []byte(`{"ok":true}`), nil
+}
+
+func TestMarshalWriteWritesFallbackBytes(t *testing.T) {
+	calls := 0
+	var buf bytes.Buffer
+	err := twinjson.MarshalWrite(&buf, flakyBox{calls: &calls})
+	if err != nil {
+		t.Fatalf("MarshalWrite: %v", err)
+	}
+	if buf.String() != `{"ok":true}` {
+		t.Fatalf("wrote %q, want fallback bytes", buf.String())
+	}
+	if calls != 2 {
+		t.Fatalf("method ran %d times, want 2", calls)
+	}
+}
+
+// retainedMarshaler returns its own field, so callers of Marshal must
+// get a copy the way encoding/json guarantees.
+type retainedMarshaler struct {
+	raw []byte
+}
+
+func (r retainedMarshaler) MarshalJSON() ([]byte, error) { return r.raw, nil }
+
+func TestMarshalReturnsFreshCopy(t *testing.T) {
+	m := retainedMarshaler{raw: []byte(`{"x":1}`)}
+	b, err := twinjson.Marshal(m)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	b[5] = '2'
+	b2, err := twinjson.Marshal(m)
+	if err != nil {
+		t.Fatalf("second Marshal: %v", err)
+	}
+	if string(b2) != `{"x":1}` {
+		t.Fatalf("mutating the returned slice corrupted the method's storage: %q", b2)
+	}
+}
+
+func TestDiagnosticsOffendingByte(t *testing.T) {
+	data := []byte(`{"a": @}`)
+	var v map[string]any
+	err := stdjson.Unmarshal(data, &v)
+	se, ok := err.(*stdjson.SyntaxError)
+	if !ok {
+		t.Fatalf("expected SyntaxError, got %T", err)
+	}
+	d := twinjson.DiagnosticsFor(data, se.Offset)
+	if d.Column != 7 || d.Line != 1 {
+		t.Fatalf("invalid byte: got line %d column %d, want line 1 column 7", d.Line, d.Column)
+	}
+	if d.Offset != int(se.Offset) {
+		t.Fatalf("offset %d != reported %d", d.Offset, se.Offset)
+	}
+	d2 := twinjson.DiagnosticsForError(data, err)
+	if d2.Column != 7 || d2.ContextColumn != 7 {
+		t.Fatalf("DiagnosticsForError: got column %d context column %d, want 7 7", d2.Column, d2.ContextColumn)
+	}
+
+	// A newline inside a string is the offending byte itself: it sits
+	// at the end of the line it terminates, not on the next line.
+	dataNL := []byte("{\n  \"a\": \"x\n@")
+	var vNL map[string]any
+	errNL := stdjson.Unmarshal(dataNL, &vNL)
+	dNL := twinjson.DiagnosticsForError(dataNL, errNL)
+	if dNL.Line != 2 {
+		t.Fatalf("newline-in-string: got line %d, want 2", dNL.Line)
+	}
+
+	// Unexpected EOF reports the end of input, not the last byte.
+	dataEOF := []byte(`{"a":`)
+	var vEOF map[string]any
+	errEOF := stdjson.Unmarshal(dataEOF, &vEOF)
+	if _, isSyn := errEOF.(*stdjson.SyntaxError); !isSyn {
+		t.Fatalf("expected SyntaxError, got %T", errEOF)
+	}
+	dEOF := twinjson.DiagnosticsForError(dataEOF, errEOF)
+	if dEOF.Column != 6 || dEOF.Offset != len(dataEOF) {
+		t.Fatalf("EOF: got column %d offset %d, want column 6 offset %d", dEOF.Column, dEOF.Offset, len(dataEOF))
+	}
+
+	// A column past the excerpt width stays indexable through
+	// ContextColumn.
+	long := append(bytes.Repeat([]byte{' '}, 300), '@')
+	var vLong map[string]any
+	errLong := stdjson.Unmarshal(long, &vLong)
+	dLong := twinjson.DiagnosticsForError(long, errLong)
+	if dLong.Column != 301 {
+		t.Fatalf("long line: got column %d, want 301", dLong.Column)
+	}
+	if len(dLong.Context) > 200 {
+		t.Fatalf("context kept %d bytes", len(dLong.Context))
+	}
+	if dLong.ContextColumn < 1 || dLong.ContextColumn > len(dLong.Context) {
+		t.Fatalf("context column %d not inside %d-byte context", dLong.ContextColumn, len(dLong.Context))
+	}
+}

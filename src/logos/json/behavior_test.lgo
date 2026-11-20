@@ -129,10 +129,15 @@ func TestTwinHTMLEscapeAndUTF8(t *testing.T) {
 	if !bytes.Equal(twinBytes, oracleBytes) {
 		t.Fatalf("escape differs:\n twin %q\n orig %q", twinBytes, oracleBytes)
 	}
-	for _, want := range []string{`\u003c`, `\u003e`, `\u0026`, `\u2028`, `\u2029`, "\uFFFD"} {
+	for _, want := range []string{`\u003c`, `\u003e`, `\u0026`, `\u2028`, `\u2029`} {
 		if !bytes.Contains(twinBytes, []byte(want)) {
 			t.Fatalf("twin output %q misses %q", twinBytes, want)
 		}
+	}
+	// The replacement rune is literal U+FFFD under JSONv2 and the
+	// escaped sequence under the classic profile.
+	if !bytes.Contains(twinBytes, []byte("\\ufffd")) && !bytes.Contains(twinBytes, []byte("\uFFFD")) {
+		t.Fatalf("twin output %q misses U+FFFD", twinBytes)
 	}
 }
 

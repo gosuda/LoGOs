@@ -5,8 +5,11 @@
 package json
 
 import (
+	"bytes"
 	"comptime"
 	stdjson "encoding/json"
+	"encoding/json/jsontext"
+	jsonv2 "encoding/json/v2"
 
 	"logos/json/internal/compact"
 	rt "logos/rt"
@@ -22,8 +25,19 @@ func MarshalOption[T any](v rt.Option[T]) ([]byte, error) {
 		return []byte("null"), nil
 	}
 	const if comptime.IsStruct[T]() {
-		if m, ok := any(v.Value).(stdjson.Marshaler); ok {
-			b, err := m.MarshalJSON()
+		const switch T {
+		case jsonv2.MarshalerTo:
+			var buf bytes.Buffer
+			if err := v.Value.MarshalJSONTo(jsontext.NewEncoder(&buf)); err != nil {
+				return stdjson.Marshal(v.Value)
+			}
+			out, cerr := compact.Escaped(buf.Bytes())
+			if cerr != nil {
+				return stdjson.Marshal(v.Value)
+			}
+			return append([]byte(nil), out...), nil
+		case stdjson.Marshaler:
+			b, err := v.Value.MarshalJSON()
 			if err != nil {
 				return stdjson.Marshal(v.Value)
 			}
@@ -31,7 +45,7 @@ func MarshalOption[T any](v rt.Option[T]) ([]byte, error) {
 			if cerr != nil {
 				return stdjson.Marshal(v.Value)
 			}
-			return out, nil
+			return append([]byte(nil), out...), nil
 		}
 	}
 	return stdjson.Marshal(v.Value)
@@ -41,42 +55,36 @@ func MarshalOption[T any](v rt.Option[T]) ([]byte, error) {
 // absent option, any other value decodes as the payload. Missing keys
 // are handled by the generated decoder, not here.
 func UnmarshalOption[T any](data []byte) (rt.Option[T], error) {
-	start := 0
-	for start < len(data) {
-		c := data[start]
-		if c == ' ' || c == '\t' || c == '\r' || c == '\n' {
-			start++
-			continue
-		}
-		break
-	}
-	end := len(data)
-	for end > start {
-		c := data[end-1]
-		if c == ' ' || c == '\t' || c == '\r' || c == '\n' {
-			end--
-			continue
-		}
-		break
-	}
-	isNull := end-start == 4 && data[start] == 'n' && data[start+1] == 'u' && data[start+2] == 'l' && data[start+3] == 'l'
-	if isNull {
-		var none rt.Option[T]
+	var none rt.Option[T]
+	if compact.IsNull(data) {
 		return none, nil
 	}
 	var payload T
 	const if comptime.IsStruct[T]() {
-		if u, ok := any(&payload).(stdjson.Unmarshaler); ok {
-			err := u.UnmarshalJSON(data)
-			if err != nil {
-				var none rt.Option[T]
-				return none, err
+		if u, ok := any(&payload).(jsonv2.UnmarshalerFrom); ok {
+			if val, valid := compact.Trimmed(data); valid {
+				err := u.UnmarshalJSONFrom(jsontext.NewDecoder(bytes.NewReader(val)))
+				if err != nil {
+					return none, err
+				}
+				return rt.Option[T]{Value: payload, Present: true}, nil
 			}
-			return rt.Option[T]{Value: payload, Present: true}, nil
+			err := stdjson.Unmarshal(data, &payload)
+			return none, err
+		}
+		if u, ok := any(&payload).(stdjson.Unmarshaler); ok {
+			if val, valid := compact.Trimmed(data); valid {
+				err := u.UnmarshalJSON(val)
+				if err != nil {
+					return none, err
+				}
+				return rt.Option[T]{Value: payload, Present: true}, nil
+			}
+			err := stdjson.Unmarshal(data, &payload)
+			return none, err
 		}
 	}
 	if err := stdjson.Unmarshal(data, &payload); err != nil {
-		var none rt.Option[T]
 		return none, err
 	}
 	return rt.Option[T]{Value: payload, Present: true}, nil
@@ -85,38 +93,31 @@ func UnmarshalOption[T any](data []byte) (rt.Option[T], error) {
 // UnmarshalOptionInto is the statement form for callers that already
 // hold an option variable. It keeps the same null-or-payload rule.
 func UnmarshalOptionInto[T any](data []byte, out *rt.Option[T]) error {
-	start := 0
-	for start < len(data) {
-		c := data[start]
-		if c == ' ' || c == '\t' || c == '\r' || c == '\n' {
-			start++
-			continue
-		}
-		break
-	}
-	end := len(data)
-	for end > start {
-		c := data[end-1]
-		if c == ' ' || c == '\t' || c == '\r' || c == '\n' {
-			end--
-			continue
-		}
-		break
-	}
-	isNull := end-start == 4 && data[start] == 'n' && data[start+1] == 'u' && data[start+2] == 'l' && data[start+3] == 'l'
-	if isNull {
+	if compact.IsNull(data) {
 		*out = rt.Option[T]{}
 		return nil
 	}
 	var payload T
 	const if comptime.IsStruct[T]() {
-		if u, ok := any(&payload).(stdjson.Unmarshaler); ok {
-			err := u.UnmarshalJSON(data)
-			if err != nil {
-				return err
+		if u, ok := any(&payload).(jsonv2.UnmarshalerFrom); ok {
+			if val, valid := compact.Trimmed(data); valid {
+				if err := u.UnmarshalJSONFrom(jsontext.NewDecoder(bytes.NewReader(val))); err != nil {
+					return err
+				}
+				*out = rt.Option[T]{Value: payload, Present: true}
+				return nil
 			}
-			*out = rt.Option[T]{Value: payload, Present: true}
-			return nil
+			return stdjson.Unmarshal(data, &payload)
+		}
+		if u, ok := any(&payload).(stdjson.Unmarshaler); ok {
+			if val, valid := compact.Trimmed(data); valid {
+				if err := u.UnmarshalJSON(val); err != nil {
+					return err
+				}
+				*out = rt.Option[T]{Value: payload, Present: true}
+				return nil
+			}
+			return stdjson.Unmarshal(data, &payload)
 		}
 	}
 	if err := stdjson.Unmarshal(data, &payload); err != nil {
@@ -125,3 +126,4 @@ func UnmarshalOptionInto[T any](data []byte, out *rt.Option[T]) error {
 	*out = rt.Option[T]{Value: payload, Present: true}
 	return nil
 }
+
