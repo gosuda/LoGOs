@@ -151,10 +151,12 @@ func (fl *fileLower) lowerStaticJSONType(td *syntax.TypeDecl) {
 		if !userDeclaresMethod(named, "UnmarshalJSON") {
 			js.unmarshalText(&b)
 			if buildcfg.Experiment.JSONv2 && !userDeclaresMethod(named, "UnmarshalJSONFrom") {
-				if hasOptionUnsafeUnmarshal {
+				// A union member has no reflective representation either:
+				// the shadow decoder would fill an interface with
+				// map[string]any or reject a valid document, so union
+				// structs refuse non-default options like option structs.
+				if hasOptionUnsafeUnmarshal || hasUnionUnsafe {
 					js.unmarshalFromRefusalText(&b)
-				} else if hasUnionUnsafe {
-					js.unmarshalFromExemptText(&b)
 				} else {
 					js.unmarshalFromText(&b)
 				}

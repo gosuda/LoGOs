@@ -96,35 +96,11 @@ func (js *jsonStruct) unmarshalFromText(b *strings.Builder) {
 	b.WriteString("}\n")
 }
 
-// unmarshalFromExemptText emits UnmarshalJSONFrom for a struct whose fields
-// the reflective decoder can represent but the static decoder cannot check:
-// a union member at any container depth, with no non-bare option field.
-// The v1 and v2 defaults run the v1 method, and any other option decodes
-// through the method-free shadow with the required-field checks, so a
-// strict caller is never silently handed v1 semantics.
-func (js *jsonStruct) unmarshalFromExemptText(b *strings.Builder) {
-	body := []string{
-		fmt.Sprintf("if %s.CallerOptionsAreV1Default(_logos_dec.Options()) || %s.CallerOptionsAreV2Default(_logos_dec.Options()) {", jsonAlias, jsonAlias),
-		"\t_logos_val, _logos_err := _logos_dec.ReadValue()",
-		"\tif _logos_err != nil {",
-		"\t\treturn _logos_err",
-		"\t}",
-		fmt.Sprintf("\treturn %s.UnmarshalJSON([]byte(_logos_val))", jsonRecv),
-		"}",
-	}
-	body = append(body, js.fallbackDecodeLines()...)
-	fmt.Fprintf(b, "\nfunc (%s *%s) UnmarshalJSONFrom(_logos_dec *%s.Decoder) error {\n", jsonRecv, js.name, jsontextAlias)
-	for _, l := range indentLines(body) {
-		b.WriteString(l)
-		b.WriteByte('\n')
-	}
-	b.WriteString("}\n")
-}
-
 // unmarshalFromRefusalText emits UnmarshalJSONFrom for a struct whose fields
-// the reflective decoder cannot represent (a non-bare option value at any
-// container depth, modulo a JSON method boundary): the v1 and v2 defaults
-// take the v1 method, and any other option reports an UnsupportedOptions
+// the reflective decoder cannot represent (a non-bare option value or a
+// union member at any container depth, modulo a JSON method boundary): the
+// v1 and v2 defaults take the v1 method, and any other option reports an
+// UnsupportedOptions
 // diagnostic instead of failing inside the shadow type, where an option
 // field looks like a plain struct. A v1 call that differs from the defaults
 // only in struct-tag flags still takes the v1 method: a reflective parent
@@ -162,12 +138,24 @@ func (js *jsonStruct) fallbackDecodeLines() []string {
 	decl := fmt.Sprintf("type _logos_shadow_%s %s", js.name, js.name)
 	call := fmt.Sprintf("return %s.DecodeDefault[_logos_shadow_%s, %s](_logos_dec, (*_logos_shadow_%s)(%s))", jsonAlias, js.name, js.name, js.name, jsonRecv)
 	if len(js.required) == 0 {
-		return []string{decl, call}
+		if len(js.defaults) == 0 {
+			return []string{decl, call}
+		}
+		// Field defaults apply only when the input is an object, matching
+		// the v1 body's position after its Object() check.
+		body := []string{decl, "if _logos_dec.PeekKind() == '{' {"}
+		for _, l := range js.defaults {
+			body = append(body, "\t"+l)
+		}
+		return append(body, "}", call)
 	}
 	body := []string{decl}
 	body = append(body, "if _logos_dec.PeekKind() != '{' {")
 	body = append(body, "\t"+call)
 	body = append(body, "}")
+	// Same position as the v1 body: defaults run once the input is known
+	// to be an object, before decoding fills it.
+	body = append(body, js.defaults...)
 	body = append(body, "_logos_raw, _logos_read_err := _logos_dec.ReadValue()")
 	body = append(body, "if _logos_read_err != nil {")
 	body = append(body, "\treturn _logos_read_err")
@@ -179,7 +167,7 @@ func (js *jsonStruct) fallbackDecodeLines() []string {
 	body = append(body, "\treturn _logos_scan_err")
 	body = append(body, "}")
 	body = append(body, "_logos_base := _logos_dec.InputOffset() - int64(len(_logos_raw))")
-	body = append(body, fmt.Sprintf("if _logos_fallback_err := %s.DecodeDefaultRaw[_logos_shadow_%s, %s](_logos_raw, _logos_dec.Options(), _logos_base, (*_logos_shadow_%s)(%s)); _logos_fallback_err != nil {", jsonAlias, js.name, js.name, js.name, jsonRecv))
+	body = append(body, fmt.Sprintf("if _logos_fallback_err := %s.DecodeDefaultRaw[_logos_shadow_%s, %s](_logos_raw, _logos_dec.Options(), _logos_base, _logos_dec.StackPointer(), (*_logos_shadow_%s)(%s)); _logos_fallback_err != nil {", jsonAlias, js.name, js.name, js.name, jsonRecv))
 	body = append(body, "\treturn _logos_fallback_err")
 	body = append(body, "}")
 	body = append(body, js.requiredCheck()...)
@@ -198,9 +186,13 @@ func (js *jsonStruct) presenceScanLines() []string {
 		"if !_logos_pscan.Object() {",
 		"\treturn _logos_pscan.End()",
 		"}",
+		// The reflective decode honors the caller's name-matching option,
+		// so presence must match under the same rule: fold only when the
+		// caller asked for case-insensitive matching.
+		fmt.Sprintf("_logos_casefold := %s.CallerMatchCaseInsensitive(_logos_dec.Options())", jsonAlias),
 		"for _logos_pscan.Next() {",
 		fmt.Sprintf("\t_logos_i := _logos_jsonkey_%s(_logos_pscan.Key())", js.name),
-		"\tif _logos_i < 0 {",
+		"\tif _logos_i < 0 && _logos_casefold {",
 		fmt.Sprintf("\t\t_logos_i = _logos_jsonfold_%s(_logos_pscan.FoldKey())", js.name),
 		"\t}",
 		"\tswitch _logos_i {",

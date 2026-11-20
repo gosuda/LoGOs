@@ -26,6 +26,15 @@ type PresenceUser struct {
 	Profile *PresenceProfile `json:"profile"`
 }
 
+type presenceBox struct {
+	Box PresenceUser `json:"box"`
+}
+
+type DefaultedUser struct {
+	Name  string `json:"name"`
+	Retry int32  = 7 `json:"retry"`
+}
+
 var failed bool
 
 func check(label string, ok bool, detail string) {
@@ -63,6 +72,31 @@ func strictOffset(doc string) int64 {
 		return -2
 	}
 	return se.ByteOffset
+}
+
+func checkFallbackExtras() {
+	check("strict-pointer-prefixed", strictPointer(`{"box":{"profile":{"age":1},"zzz":1}}`) == "/box/zzz", strictPointer(`{"box":{"profile":{"age":1},"zzz":1}}`))
+
+	u11 := &PresenceUser{Profile: &PresenceProfile{}}
+	err := jsonv2.Unmarshal([]byte(`{"name":"n","PROFILE":{"age":1}}`), u11, jsonv2.MatchCaseInsensitiveNames(false))
+	check("strict-no-fold-missing", isMissingField(err, "PresenceUser", "Profile"), fmt.Sprint(err))
+
+	d1 := &DefaultedUser{}
+	err = jsonv2.Unmarshal([]byte(`{}`), d1, jsonv2.RejectUnknownMembers(true))
+	check("strict-default-applied", err == nil && d1.Retry == 7, fmt.Sprint(err, d1.Retry))
+	d2 := &DefaultedUser{Retry: 9}
+	err = json.Unmarshal([]byte(`null`), d2)
+	check("null-default-untouched", err == nil && d2.Retry == 9, fmt.Sprint(err, d2.Retry))
+}
+
+func strictPointer(doc string) string {
+	u := &presenceBox{Box: PresenceUser{Profile: &PresenceProfile{}}}
+	err := jsonv2.Unmarshal([]byte(doc), u, jsonv2.RejectUnknownMembers(true))
+	se := &jsonv2.SemanticError{}
+	if !errors.As(err, &se) {
+		return fmt.Sprint(err)
+	}
+	return string(se.JSONPointer)
 }
 
 func main() {
@@ -118,6 +152,7 @@ func main() {
 	o1 := strictOffset(`{"profile":{},"bogus":1}`)
 	o2 := strictOffset(`   {"profile":{},"bogus":1}`)
 	check("strict-offset-absolute", o1 >= 0 && o2-o1 == 3, fmt.Sprintf("%d %d", o1, o2))
+	checkFallbackExtras()
 
 	if failed {
 		os.Exit(1)

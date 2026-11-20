@@ -238,10 +238,51 @@ func maskedOptionsCopyWithMask(rv reflect.Value, mask uint64) (reflect.Value, bo
 	return s, true
 }
 
+// matchCaseInsensitiveNamesBit is the jsonflags bit position of
+// MatchCaseInsensitiveNames inside the options Flags word: the first
+// flag after bit 22, per encoding/json/internal/jsonflags.
+const matchCaseInsensitiveNamesBit = 1 << 23
+
+// CallerMatchCaseInsensitive reports whether the caller's options demand
+// case-insensitive member-name matching: v1 semantics always carry the
+// MatchCaseInsensitiveNames value bit, and a v2 caller carries it only
+// when it passed MatchCaseInsensitiveNames(true). The generated
+// required-field presence scan folds member names only under this rule,
+// so presence matches what the reflective decode actually saw.
+//
+// The options value is valid only within the MarshalJSONTo or
+// UnmarshalJSONFrom call that produced it.
+func CallerMatchCaseInsensitive(opts jsontext.Options) bool {
+	rv := reflect.ValueOf(opts)
+	if rv.Kind() != reflect.Pointer || rv.IsNil() || rv.Type() != v1OptionsType {
+		return false
+	}
+	if !optionsLayoutHolds {
+		return optionValueBitByReflection(rv, matchCaseInsensitiveNamesBit)
+	}
+	got := (*optionsLayout)(rv.UnsafePointer())
+	return got.values&matchCaseInsensitiveNamesBit != 0
+}
+
+func optionValueBitByReflection(rv reflect.Value, bit uint64) bool {
+	s := reflect.New(v1OptionsType.Elem()).Elem()
+	s.Set(rv.Elem())
+	flags := s.FieldByName("Flags")
+	if !flags.IsValid() || flags.Kind() != reflect.Struct {
+		return false
+	}
+	f := flags.FieldByName("Values")
+	if !f.IsValid() || f.Kind() != reflect.Uint64 {
+		return false
+	}
+	return f.Uint()&bit != 0
+}
+
 // UnsupportedOptions returns the diagnostic for a struct whose static
 // JSON methods cannot honor the caller's options: a non-bare option
-// field has no reflective representation, so the generated method
-// reports this error instead of silently writing v1 bytes.
+// field or a union member has no reflective representation, so the
+// generated method reports this error instead of silently writing v1
+// bytes.
 func UnsupportedOptions(structName string) error {
 	return errors.New("logos: json: caller options unsupported for struct with option fields: " + structName)
 }
@@ -288,9 +329,11 @@ func retypeShadowError[S, T any](err error) error {
 // reflective decoder applies opts in full. opts is the materialized options
 // of the caller decoder, joined onto a fresh decoder over raw. base is the
 // absolute offset of raw within the original stream; error offsets are
-// rebased by it, so a re-decoded value reports the same positions as a
-// streaming decode. A semantic error naming S is renamed to T.
-func DecodeDefaultRaw[S, T any](raw jsontext.Value, opts jsontext.Options, base int64, v *S) error {
+// rebased by it, and error JSON pointers are prefixed with ptr, the
+// caller decoder's stack pointer at the buffered value, so a re-decoded
+// value reports the same positions as a streaming decode. A semantic
+// error naming S is renamed to T.
+func DecodeDefaultRaw[S, T any](raw jsontext.Value, opts jsontext.Options, base int64, ptr jsontext.Pointer, v *S) error {
 	dec := jsontext.NewDecoder(bytes.NewReader(raw))
 	var err error
 	if opts == nil {
@@ -301,21 +344,26 @@ func DecodeDefaultRaw[S, T any](raw jsontext.Value, opts jsontext.Options, base 
 	if err == nil {
 		return nil
 	}
-	err = shiftErrorOffset(err, base)
+	err = shiftErrorOffset(err, base, ptr)
 	return retypeShadowError[S, T](err)
 }
 
 // shiftErrorOffset re-bases the byte offsets of a value decoded from a
-// buffered copy by the absolute start of that copy. Opaque caller errors
-// carry no offsets and pass through unchanged.
-func shiftErrorOffset(err error, base int64) error {
-	if err == nil || base == 0 {
+// buffered copy by the absolute start of that copy, and prefixes error
+// JSON pointers with ptr, the stack pointer of the buffered value in the
+// original stream. Opaque caller errors carry no offsets and pass
+// through unchanged.
+func shiftErrorOffset(err error, base int64, ptr jsontext.Pointer) error {
+	if err == nil {
 		return err
 	}
 	for e := err; e != nil; e = errors.Unwrap(e) {
 		switch t := e.(type) {
 		case *jsonv2.SemanticError:
 			t.ByteOffset += base
+			if ptr != "" && t.JSONPointer != "" {
+				t.JSONPointer = ptr + t.JSONPointer
+			}
 		case *jsontext.SyntacticError:
 			t.ByteOffset += base
 		case *stdjson.UnmarshalTypeError:

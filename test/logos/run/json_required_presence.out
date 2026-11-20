@@ -16,3 +16,7 @@ ok strict-allowdups-value
 ok strict-allowdups-alias
 ok strict-allowdups-null-last-missing
 ok strict-offset-absolute
+ok strict-pointer-prefixed
+ok strict-no-fold-missing
+ok strict-default-applied
+ok null-default-untouched
