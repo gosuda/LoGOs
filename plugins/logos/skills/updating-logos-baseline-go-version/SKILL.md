@@ -28,7 +28,7 @@ This skill edits tracked text files and rebuilds `bin/`. It never edits `src/ven
    Done when every hit is classed as a baseline site (step 3), a floor or oracle (step 4), or evidence (step 4).
 3. Set the baseline sites to `n`:
    - `src/cmd/internal/goparity/parity_test.go`: `forkVersionPin` and `upstreamVersionPin`. Before you raise `upstreamVersionPin`, run the audit its failure message names (`git diff --stat <old tag> <new oracle tag> -- src test`) and read the result.
-   - `README.md`: the quick-start sentence naming the upstream Go release, the Installation sentence that CI bootstraps the fork with that release, and the sample outputs of `logos version` and `go version`.
+   - `README.md`: the opening `fork of the Go N` declaration, the build sentence `with Bash and an upstream Go N installation`, the `logos version` sample output, the `CI bootstraps the fork with upstream Go N` note, and the `logos eject` sentence's `upstream Go N or newer`.
    - `AGENTS.md`: the first sentence `fork of Go N`.
    - `logos-doc/SPEC.md`: the header `Base: Go N` and sections 0.1 and 18.1.
    - `logos-doc/IMPLEMENTATION.md`: the G2 baseline line, `Base: Go N` and `fork of Go N` in slice texts, and the compiler-base sentences. State version assertions as the `$GOROOT/VERSION` text, because `src/cmd/go/testdata/script/logos_command.txt` compares against `$GOROOT/VERSION` and not a literal.

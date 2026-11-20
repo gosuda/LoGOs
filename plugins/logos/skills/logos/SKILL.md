@@ -296,7 +296,7 @@ Rules:
 | `portability::serialized_unsized_int` | Use sized integers (int32, int64) in serialized binary layouts. |
 | `pedantic::exhaustive_union_switch` | Remove redundant default clause from exhaustive switch on closed union. |
 
-The `--json-diagnostics` flag prints one JSON object per line with fields `schema_version` ("1.0"), `severity`, `rule_id`, `file`, `span`, `message`, `note`, `provenance`, and `autofix_candidates`.
+The `--json-diagnostics` flag prints one JSON object per line with fields `schema_version` ("1.0"), `severity`, `rule_id`, `file`, `span`, `message`, `provenance`, and `autofix_candidates`, plus `note` when nonempty.
 This covers both `.lgo` and Go lint targets, and findings report original source positions, never ejected or generated Go.
 
 ## Eject
