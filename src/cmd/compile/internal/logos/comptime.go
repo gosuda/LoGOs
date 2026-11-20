@@ -257,7 +257,6 @@ type cfRecordBuilder struct {
 	fl        *fileLower
 	qualifier string
 	tpIndex   map[types2.Object]int
-	shadowOf  map[types2.Object]int
 	imports   []cfImport
 	subs      []splice
 }
@@ -269,7 +268,7 @@ func (fl *fileLower) cfRecordText(def *cfGenericDef, qualifier string) *cfRecord
 			b.tpIndex[o] = i
 		}
 	}
-	b.shadowOf = fl.cfCaseShadows(def)
+	b.subs = fl.cfCaseShadowDecls(def)
 	syntax.Inspect(def.decl, b.visit)
 	start := fl.cfFuncStart(fl.off(syntax.StartPos(def.decl)))
 	end := fl.off(syntax.EndPos(def.decl)) + 1
@@ -290,16 +289,19 @@ func (fl *fileLower) cfRecordText(def *cfGenericDef, qualifier string) *cfRecord
 	}
 }
 
-// cfCaseShadows maps each const-switch case shadow of a type parameter of
-// def to that parameter's marker index. The checker rebinds a switched
-// type parameter inside each case body (logosShadowConstTarget), so uses
-// there resolve to the shadow, not to the parameter in tpIndex. The copy
-// selects the case only when its type argument satisfies the case, so the
-// shadow spells as the parameter's marker like the parameter itself.
-func (fl *fileLower) cfCaseShadows(def *cfGenericDef) map[types2.Object]int {
-	out := make(map[types2.Object]int)
+// cfCaseShadowDecls binds each const-switch case shadow in the record to
+// its parameter's marker. The checker rebinds a switched type parameter
+// inside each case body (logosShadowConstTarget), so uses there resolve
+// to the shadow and keep the parameter's spelling. Binding that name
+// inside the case — `type F = _logos_tparam0`, an alias the case selects
+// only when the type argument satisfies it — keeps every shadow use
+// exact in the copy: a body type decl cannot capture the parameter's
+// substituted spelling, an unnamed target such as `*int` stays a
+// conversion, and a body alias to the shadow keeps an embedded field's
+// name.
+func (fl *fileLower) cfCaseShadowDecls(def *cfGenericDef) []splice {
 	if fl.pkg.info.LogosConstCases == nil {
-		return out
+		return nil
 	}
 	names := make(map[string]int)
 	for i, f := range def.decl.TParamList {
@@ -307,6 +309,7 @@ func (fl *fileLower) cfCaseShadows(def *cfGenericDef) map[types2.Object]int {
 			names[f.Name.Value] = i
 		}
 	}
+	var subs []splice
 	syntax.Inspect(def.decl, func(n syntax.Node) bool {
 		s, ok := n.(*syntax.ConstSwitchStmt)
 		if !ok {
@@ -317,13 +320,20 @@ func (fl *fileLower) cfCaseShadows(def *cfGenericDef) map[types2.Object]int {
 			if !ok || rec.Target == nil {
 				continue
 			}
-			if idx, ok := names[rec.Target.Name()]; ok {
-				out[rec.Target] = idx
+			idx, ok := names[rec.Target.Name()]
+			if !ok {
+				continue
 			}
+			p := fl.off(cs.Colon) + 1
+			subs = append(subs, splice{
+				start: p,
+				end:   p,
+				text:  " type " + rec.Target.Name() + " = " + cfMarker(idx) + ";",
+			})
 		}
 		return true
 	})
-	return out
+	return subs
 }
 
 // cfCheckExportedRecord reports each package-level unexported identifier
@@ -438,9 +448,6 @@ func (b *cfRecordBuilder) spelling(obj types2.Object) (string, bool) {
 		return b.packageMarker(pn), true
 	}
 	if idx, ok := b.tpIndex[obj]; ok {
-		return cfMarker(idx), true
-	}
-	if idx, ok := b.shadowOf[obj]; ok {
 		return cfMarker(idx), true
 	}
 	if b.qualifier != "" && b.packageLevel(obj) {

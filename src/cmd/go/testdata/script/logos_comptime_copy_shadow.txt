@@ -5,6 +5,7 @@ cd w
 logos build ./...
 logos run ./main
 stdout '^scan other int$'
+stdout '^copy 4 7 3$'
 logos test -count=1 ./...
 logos eject -o out
 exists out/main/main.go
@@ -15,6 +16,7 @@ exists out/scanlib/scan.go
 cd out
 go run ./main
 stdout '^scan other int$'
+stdout '^copy 4 7 3$'
 go test -count=1 ./...
 
 # SPEC 0.3: ejected output builds with upstream go1.27.2 from $UPROOT1272.
@@ -53,6 +55,41 @@ type NotNullDest[V any] struct {
 	Path string
 }
 
+// Convert exercises an unnamed case target: the shadow F binds *int, so
+// F(p) must stay a conversion, not parse as a dereference of int(p).
+func Convert[F any](p *int) int {
+	const switch F {
+	case *int:
+		return *F(p)
+	}
+	return -1
+}
+
+// Embed exercises an alias to the case shadow in embedded position:
+// struct{ G } keeps the field name G, so the keyed literal and selector
+// must resolve.
+func Embed[F any](v F) int {
+	const switch F {
+	case int:
+		type G = F
+		s := struct{ G }{G: 7}
+		return s.G
+	}
+	return -1
+}
+
+// Capture exercises a case body that declares its own int: the shadow F
+// must still mean the case's int, not the local string alias.
+func Capture[F any](v F) int {
+	const switch F {
+	case int:
+		type int = string
+		var x F = v
+		return x
+	}
+	return -1
+}
+
 func IntField[F any](v F) string {
 	const switch F {
 	case int:
@@ -83,6 +120,8 @@ func main() {
 		panic(err)
 	}
 	fmt.Println("scan", scanlib.IntField[Status]("x"), scanlib.IntField[int](1))
+	n := 4
+	fmt.Println("copy", scanlib.Convert[*int](&n), scanlib.Embed[int](0), scanlib.Capture[int](3))
 }
 
 -- w/scanlib/ext_test.lgo --
