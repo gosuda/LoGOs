@@ -247,6 +247,16 @@ type fileLower struct {
 	wrapOwner      map[syntax.Expr]int
 	wrapSeq        int
 	retResults     map[*syntax.ReturnStmt][]types2.Type
+	// Struct-default fill state: inDefault marks literals inside a field
+	// default's subtree, defInside maps such a literal to the enclosing
+	// defaulted-field keys, defEdges holds the factory keys each defaulted
+	// field's subtree requires, and defFillBytes/defFillOver run the
+	// nested-default expansion budget.
+	inDefault    map[*syntax.CompositeLit]bool
+	defInside    map[*syntax.CompositeLit][]string
+	defEdges     map[string]map[string]bool
+	defFillBytes int
+	defFillOver  bool
 	// optBodyType stashes the checked type of a replaced top-level
 	// lambda body (`??`/`?.`/property-read/interpolation): the
 	// replacement is synthetic and carries no recorded type, but chain
