@@ -93,37 +93,49 @@ func (h *groupHoist) send(s *syntax.SendStmt) span {
 	pos := h.scopePos(s.Pos())
 	chSpan, valSpan := h.span(s.Chan), h.span(s.Value)
 	mark := fc.hoistSubMark()
+	nMark, tMark := len(h.native), len(h.text)
 	h.slots([]*syntax.Expr{&s.Chan, &s.Value})
 	fc.hoistSubEmit(fc.hoistSubTake(mark))
+	// Snapshot both operands in source order so each is evaluated once and
+	// the two send arms share no expression nodes; the snapshots live in a
+	// block so no declaration lands in the enclosing scope where a forward
+	// goto might cross it, and `:=` avoids spelling a type that a local
+	// declaration could shadow.
 	chText, valText := fl.textOf(chSpan), fl.textOf(valSpan)
-	if fc.groupHasCall(s.Chan) {
-		tmp := fc.groupTempName("t")
-		native, texts := h.valueTemp(pos, s.Chan, tmp, s.Chan, chText)
-		h.add(native, texts...)
-		s.Chan = nameOf(pos, tmp)
-		chText = gen(tmp)
-	}
-	if fc.groupHasCall(s.Value) {
-		tmp := fc.groupTempName("t")
-		native, texts := h.valueTemp(pos, s.Value, tmp, s.Value, valText)
-		h.add(native, texts...)
-		s.Value = nameOf(pos, tmp)
-		valText = gen(tmp)
+	chTmp, valTmp := fc.groupTempName("c"), fc.groupTempName("v")
+	arm := func() *syntax.CommClause {
+		return at(&syntax.CommClause{Comm: at(&syntax.SendStmt{
+			Chan:  nameOf(pos, chTmp),
+			Value: nameOf(pos, valTmp),
+		}, pos)}, pos)
 	}
 	slow := at(&syntax.SelectStmt{
 		Body: []*syntax.CommClause{
-			at(&syntax.CommClause{Comm: at(&syntax.SendStmt{Chan: s.Chan, Value: s.Value}, pos)}, pos),
+			arm(),
 			fc.groupDoneClause(pos, h.top),
 		},
 	}, pos)
-	slowText := cat(gen("select { case "), chText, gen(" <- "), valText, gen(": "+fc.groupDoneText(h.top)+" }"))
 	ready := at(&syntax.SelectStmt{
 		Body: []*syntax.CommClause{
-			at(&syntax.CommClause{Comm: at(&syntax.SendStmt{Chan: s.Chan, Value: s.Value}, pos)}, pos),
+			arm(),
 			at(&syntax.CommClause{Body: []syntax.Stmt{slow}}, pos),
 		},
 	}, pos)
-	h.add([]syntax.Stmt{ready}, cat(gen("select { case "), chText, gen(" <- "), valText, gen(": default:\n"), slowText, gen("\n}")))
+	block := blockOf(pos, []syntax.Stmt{
+		defineOf(pos, []syntax.Expr{nameOf(pos, chTmp)}, []syntax.Expr{s.Chan}),
+		defineOf(pos, []syntax.Expr{nameOf(pos, valTmp)}, []syntax.Expr{s.Value}),
+		ready,
+	})
+	preNative, preText := h.native[nMark:], h.text[tMark:]
+	h.native, h.text = h.native[:nMark], h.text[:tMark]
+	block.List = append(preNative, block.List...)
+	selText := cat(gen("select { case " + chTmp + " <- " + valTmp + ": default:\nselect { case " + chTmp + " <- " + valTmp + ": " + fc.groupDoneText(h.top) + " }\n}"))
+	texts := append(preText,
+		cat(gen(chTmp+" := "), chText),
+		cat(gen(valTmp+" := "), valText),
+		selText,
+	)
+	h.add([]syntax.Stmt{block}, cat(gen("{\n"), joinO(texts, "\n"), gen("\n}")))
 	return span{start: chSpan.start, end: valSpan.end}
 }
 

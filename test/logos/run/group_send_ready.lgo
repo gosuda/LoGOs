@@ -55,6 +55,76 @@ func blockedSend(ctx context.Context, ch chan int) error {
 	return nil
 }
 
+func blockedSendCall(ctx context.Context, ch chan int) error {
+	go group (ctx) {
+		go {
+			ch <- next()
+		}
+	}
+	return nil
+}
+
+func interpSend(ctx context.Context, ch chan string, n int) error {
+	go group (ctx) {
+		go {
+			ch <- $"count={n}"
+		}
+	}
+	return nil
+}
+
+var first, second chan int
+
+func redirect() int {
+	first = second
+	return 7
+}
+
+func redirectSend(ctx context.Context) error {
+	go group (ctx) {
+		go {
+			first <- redirect()
+		}
+	}
+	return nil
+}
+
+type item struct{ N int }
+
+func nextItem() item {
+	return item{N: 9}
+}
+
+func shadowedSend(ctx context.Context, ch chan item, item int) error {
+	_ = item
+	go group (ctx) {
+		go {
+			ch <- nextItem()
+		}
+	}
+	return nil
+}
+
+var recordCalls atomic.Int32
+
+func record() {
+	recordCalls.Add(1)
+}
+
+func gotoSend(ctx context.Context, ch chan int, skip bool) error {
+	go group (ctx) {
+		go {
+			if skip {
+				goto Done
+			}
+			ch <- next()
+		Done:
+			record()
+		}
+	}
+	return nil
+}
+
 func precancelled() context.Context {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -98,6 +168,63 @@ func blockedStillCancels() {
 	check("blocked-send-cancelled", errors.Is(err, context.Canceled), err, context.Canceled)
 }
 
+func blockedCallOnce() {
+	calls.Store(0)
+	ch := make(chan int)
+	err := blockedSendCall(precancelled(), ch)
+	check("blocked-call-cancelled", errors.Is(err, context.Canceled), err, context.Canceled)
+	check("blocked-call-once", calls.Load() == 1, calls.Load(), 1)
+}
+
+func interpSendReady() {
+	ch := make(chan string, 1)
+	err := interpSend(precancelled(), ch, 4)
+	got := ""
+	select {
+	case got = <-ch:
+	default:
+	}
+	check("interp-send", err == nil && got == "count=4", fmt.Sprint(err, got), "<nil> count=4")
+}
+
+func chanSnapshotBeforeValue() {
+	first = make(chan int, 1)
+	second = make(chan int, 1)
+	original := first
+	err := redirectSend(precancelled())
+	gotFirst, gotSecond := -1, -1
+	select {
+	case gotFirst = <-original:
+	default:
+	}
+	select {
+	case gotSecond = <-second:
+	default:
+	}
+	check("send-original-chan", err == nil && gotFirst == 7 && gotSecond == -1, fmt.Sprint(err, gotFirst, gotSecond), "<nil> 7 -1")
+}
+
+func shadowedTypeName() {
+	ch := make(chan item, 1)
+	err := shadowedSend(precancelled(), ch, 1)
+	got := item{}
+	select {
+	case got = <-ch:
+	default:
+	}
+	check("shadowed-type-send", err == nil && got.N == 9, fmt.Sprint(err, got), "<nil> {9}")
+}
+
+func gotoPastSend() {
+	recordCalls.Store(0)
+	calls.Store(0)
+	ch := make(chan int, 1)
+	err := gotoSend(precancelled(), ch, true)
+	check("goto-skips-send", err == nil, err, nil)
+	check("goto-send-not-evaluated", calls.Load() == 0, calls.Load(), 0)
+	check("goto-record-ran", recordCalls.Load() == 1, recordCalls.Load(), 1)
+}
+
 func main() {
 	watchdog := time.AfterFunc(30*time.Second, func() {
 		fmt.Println("FAIL watchdog")
@@ -107,6 +234,11 @@ func main() {
 	bothArmsReady()
 	callOperandOnce()
 	blockedStillCancels()
+	blockedCallOnce()
+	interpSendReady()
+	chanSnapshotBeforeValue()
+	shadowedTypeName()
+	gotoPastSend()
 	if failed {
 		os.Exit(1)
 	}
