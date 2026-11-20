@@ -169,6 +169,8 @@ type Checker struct {
 	logosFuncSigs       []*Signature                    // logos hook: enclosing function signature stack (funcBody)
 	logosDerivedVar     map[*Var]bool                   // logos M3-S5 hook: inferred vars holding Go-derived values.
 	logosDerivedExpr    map[syntax.Expr]bool            // logos M3-S5 hook: synthetic tuple dummies from Go/generic calls.
+	logosPlatformVar    map[*Var]bool                   // logos M3-S5 hook: inferred vars holding platform pointers from generic calls (may be nil, not Go memory).
+	logosPlatformExpr   map[syntax.Expr]bool            // logos M3-S5 hook: synthetic tuple dummies holding platform pointers from generic calls.
 	logosGoCall         []bool                          // logos M3-S5 hook: Go-callee argument scope stack.
 	logosGenericCall    []logosGenericScope             // logos M3-S5 hook: generic-callee argument scope stack.
 	logosGoStore        []bool                          // logos M3-S5 hook: assignment-LHS Go-location suppression stack.

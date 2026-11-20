@@ -372,3 +372,43 @@ func genericMethodConcretePtr() error {
 	z := &cell[*Err]{v: &Err{msg: "m"}}
 	return z.freshPtr()
 }
+
+func (c cell[T]) pair() (T, *Err) {
+	return c.v, &Err{msg: "pair"}
+}
+
+func (c cell[T]) alloc() *T {
+	return new(T)
+}
+
+type outer struct{ cell[*Err] }
+
+func genericMethodPromoted() error {
+	o := outer{cell: cell[*Err]{v: &Err{msg: "m"}}}
+	return o.get() // ERROR "\[correctness::typed_nil_return\] platform pointer o\.get\(\) \(\*Err\) returned as error result without a dominating nil check"
+}
+
+func genericMethodMixedFirst() (error, int) {
+	z := cell[*Err]{v: &Err{msg: "m"}}
+	t, _ := z.pair()
+	return t, 1 // ERROR "\[correctness::typed_nil_return\] platform pointer t \(\*Err\) returned as error result without a dominating nil check"
+}
+
+func genericMethodMixedSecond() error {
+	_, p := cell[int]{v: 1}.pair()
+	return p
+}
+
+func genericMethodStar() any {
+	z := cell[int]{v: 0}
+	return z.alloc()
+}
+
+type getter[T any] interface {
+	get() T
+}
+
+func genericIfaceMethod() error {
+	var g getter[*Err] = cell[*Err]{v: &Err{msg: "m"}}
+	return g.get() // ERROR "\[correctness::typed_nil_return\] platform pointer g\.get\(\) \(\*Err\) returned as error result without a dominating nil check"
+}
