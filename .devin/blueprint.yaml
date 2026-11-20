@@ -52,6 +52,7 @@ knowledge:
       cd src && go test -count=1 -short <pkg>
       Script tests: go test -count=1 cmd/go -run 'Script/^logos_<name>$'
       Compiler dir tests: go test -count=1 cmd/internal/testdir -run 'Test/logos/'
+      Add -race for concurrency, runtime, and cmd/go changes.
   - name: lint
     contents: |
       gofmt -l <files> prints nothing; go vet <pkgs> passes.
@@ -62,5 +63,5 @@ knowledge:
       Smoke: logos version; logos help
   - name: notes
     contents: |
-      Work on release-branch.go1.27; fork-first PATH. Rebuild after compiler/cmd changes — tests use installed binaries. Milestone gate: (cd src && ./run.bash --no-rebuild).
-      Fast compiler rebuild: (cd src && go build -o pkg/tool/darwin_arm64/compile ./cmd/compile).
+      Work on release-branch.go1.27; fork-first PATH. Rebuild after compiler, runtime, or cmd changes — tests use installed binaries. Milestone gate: (cd src && ./run.bash --no-rebuild).
+      Fast compiler rebuild: (cd src && go build -o ../pkg/tool/darwin_arm64/compile ./cmd/compile).
