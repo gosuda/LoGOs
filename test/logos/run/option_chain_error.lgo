@@ -99,6 +99,11 @@ func main() {
 	check("box-absent-ran", (serra != nil) == false, serra != nil, false)
 	check("box-absent-err", errMsg(serra) == "<absent>", errMsg(serra), "<absent>")
 
+	sf2, serrf2 := absentB?.Label(false)
+	check("box-absent2-value", (sf2 ?? "fallback") == "fallback", sf2 ?? "fallback", "fallback")
+	check("box-absent2-ran", (serrf2 != nil) == false, serrf2 != nil, false)
+	check("box-absent2-err", errMsg(serrf2) == "<absent>", errMsg(serrf2), "<absent>")
+
 	if failed {
 		os.Exit(1)
 	}
