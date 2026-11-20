@@ -165,3 +165,101 @@ done:
 	}
 	return "?"
 }
+
+// A goto inside a closure that can jump over its own nil guard on a
+// captured option disqualifies the capture: the switch keeps demanding nil.
+func closGotoSkipsGuard(p U?, skip bool) func() string {
+	return func() string {
+		if skip {
+			goto done
+		}
+		if p == nil {
+			return "none"
+		}
+	done:
+		return switch p /* ERROR "is not an interface" */ .(type) {
+		case A => "a"
+		case B => "b"
+		}
+	}
+}
+
+// Without the jump the same guarded capture narrows normally.
+func closGuarded(p U?) func() string {
+	return func() string {
+		if p == nil {
+			return "none"
+		}
+		return switch p.(type) {
+		case A => "a"
+		case B => "b"
+		}
+	}
+}
+
+// An if initializer shadows the parameter; its guard must not excuse the
+// outer variable.
+func shadowedGuard(p U?) string {
+	if p := U(A(1)); p == nil {
+		return "none"
+	}
+	switch p /* ERROR "is not an interface" */ .(type) {
+	case A:
+		return "a"
+	case B:
+		return "b"
+	}
+	return "unreachable"
+}
+
+// A block lambda assigning a captured option disqualifies its narrowing.
+func lambdaAssigns(p U?) string {
+	var clear func(bool) = unused => { p = nil }
+	if p == nil {
+		return "none"
+	}
+	clear(true)
+	switch p /* ERROR "is not an interface" */ .(type) {
+	case A:
+		return "a"
+	case B:
+		return "b"
+	}
+	return "unreachable"
+}
+
+// A case body assigning the operand does not reintroduce the nil demand:
+// the excuse is evaluated where the operand is.
+func caseBodyAssign(p U?) string {
+	if p == nil {
+		return "none"
+	}
+	switch p.(type) {
+	case A:
+		p = nil
+		return "a"
+	case B:
+		return "b"
+	}
+	return "unreachable"
+}
+
+// An outer goto cannot jump into a closure: a closure's own guarded
+// parameter still narrows.
+func outerGotoInnerNarrows(skip bool) func(q U?) string {
+	f := func(q U?) string {
+		if q == nil {
+			return "none"
+		}
+		return switch q.(type) {
+		case A => "a"
+		case B => "b"
+		}
+	}
+	if skip {
+		goto done
+	}
+	_ = f
+done:
+	return f
+}

@@ -42,6 +42,7 @@ func (check *Checker) logosEnterFuncBody(body *syntax.BlockStmt) {
 		refInClos: make(map[string]bool),
 		assignOut: make(map[string]bool),
 		declared:  make(map[string]bool),
+		refTop:    make(map[string]bool),
 	}
 	if sig := check.sig; sig != nil {
 		for _, vars := range []*Tuple{sig.params, sig.results} {
@@ -72,6 +73,15 @@ func (check *Checker) logosEnterFuncBody(body *syntax.BlockStmt) {
 		}
 		for name := range dq.declared {
 			set[name] = true
+		}
+		// A jump can land past a nil guard on a captured variable too:
+		// every name this frame references without declaring it (a
+		// captured local — package objects are never narrowable) loses
+		// its proof as well.
+		for name := range dq.refTop {
+			if !dq.declared[name] {
+				set[name] = true
+			}
 		}
 	}
 	check.logosDisqual = append(check.logosDisqual, set)
@@ -152,6 +162,7 @@ type logosDisqualWalk struct {
 	refInClos map[string]bool
 	assignOut map[string]bool
 	declared  map[string]bool
+	refTop    map[string]bool
 	hasGoto   bool
 }
 
@@ -185,6 +196,8 @@ func (w *logosDisqualWalk) Visit(node syntax.Node) syntax.Visitor {
 	case *syntax.Name:
 		if w.clos > 0 && t.Value != "_" {
 			w.refInClos[t.Value] = true
+		} else if w.inner == 0 && t.Value != "_" {
+			w.refTop[t.Value] = true
 		}
 	case *syntax.AssignStmt:
 		w.assign(t)
@@ -195,7 +208,9 @@ func (w *logosDisqualWalk) Visit(node syntax.Node) syntax.Visitor {
 	case *syntax.RangeClause:
 		if t.Def {
 			for _, name := range logosAssignNames(t.Lhs) {
-				w.declared[name] = true
+				if w.inner == 0 {
+					w.declared[name] = true
+				}
 			}
 		} else {
 			for _, name := range logosAssignNames(t.Lhs) {
@@ -235,28 +250,34 @@ func (w *logosDisqualWalk) declare(node syntax.Node) {
 		for _, f := range slices.Concat(t.Type.ParamList, t.Type.ResultList) {
 			if f.Name != nil {
 				w.params = append(w.params, f.Name.Value)
-				w.declared[f.Name.Value] = true
 			}
 		}
 	case *syntax.LambdaExpr:
 		if _, ok := t.Body.(*syntax.BlockStmt); ok {
 			for _, name := range t.Params {
 				w.params = append(w.params, name.Value)
-				w.declared[name.Value] = true
 			}
 		}
 	case *syntax.BlockStmt, *syntax.CaseClause, *syntax.CommClause:
 		scope := make(map[string]bool, len(w.params))
 		for _, name := range w.params {
 			scope[name] = true
-			w.declared[name] = true
+			// Only names of this frame's own function join the goto
+			// disqualification set: a jump here cannot skip a guard
+			// inside a nested literal, and a jump there cannot skip one
+			// here, so closure-declared names stay eligible.
+			if w.inner == 0 {
+				w.declared[name] = true
+			}
 		}
 		w.params = nil
 		w.scopes = append(w.scopes, scope)
 	case *syntax.VarDecl:
 		for _, name := range t.NameList {
 			w.scopes[len(w.scopes)-1][name.Value] = true
-			w.declared[name.Value] = true
+			if w.inner == 0 {
+				w.declared[name.Value] = true
+			}
 		}
 	}
 }
@@ -269,7 +290,9 @@ func (w *logosDisqualWalk) assign(s *syntax.AssignStmt) {
 	scope := w.scopes[len(w.scopes)-1]
 	for _, name := range logosAssignNames(s.Lhs) {
 		if s.Op == syntax.Def {
-			w.declared[name] = true
+			if w.inner == 0 {
+				w.declared[name] = true
+			}
 			redeclared := scope[name] && !header
 			scope[name] = scope[name] || !header
 			if !redeclared {
@@ -284,7 +307,11 @@ func (w *logosDisqualWalk) assign(s *syntax.AssignStmt) {
 }
 
 func (w *logosDisqualWalk) assigned(name string) {
-	if w.clos > 0 || w.lam > 0 {
+	// Any closure assignment — function literal, group child, or an
+	// ordinary block lambda — can run after a guard is checked, so its
+	// captured target can never narrow; only writes in the frame itself
+	// count as plain outer assignments.
+	if w.inner > 0 {
 		w.inClos[name] = true
 	} else {
 		w.assignOut[name] = true
@@ -352,7 +379,14 @@ func (check *Checker) logosNilTestOf(cond syntax.Expr) (v *Var, isNeq bool, ok b
 	if name == nil || name.Value == "_" {
 		return nil, false, false
 	}
-	obj := check.lookup(name.Value)
+	// The object the checker bound to this Name is authoritative: a
+	// guard in an `if` initializer shadows an outer variable of the
+	// same name, and re-resolving after that scope closes would attach
+	// the proof to the wrong variable.
+	obj, _ := check.Info.Uses[name]
+	if obj == nil {
+		obj = check.lookup(name.Value)
+	}
 	w, _ := obj.(*Var)
 	if w == nil {
 		return nil, false, false

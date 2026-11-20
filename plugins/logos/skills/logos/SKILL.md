@@ -73,7 +73,7 @@ A closed union is an interface whose type set is a finite union of non-`~` terms
 | `type U interface { int \| string }` | methods-only interface plus generated membership functions |
 | `U(x)` | conversion; allowed when `x` is a member or a closed union of members |
 | `u == 1`, `u.(int)`, `case int:` | comparison, assertion, and case on a member type |
-| `switch x.(type) { case A: ...; case B: ...; case nil: }` | type switch; without `default` it covers every member and `nil` |
+| `switch x.(type) { case A: ...; case B: ...; case nil: }` | type switch; without `default` it covers every member and `nil`; the `nil` case is unneeded when narrowing proved a bare-option operand non-nil |
 | `r := switch n { case 1 => "one"; default => "many" }` | immediately invoked function returning the chosen arm |
 | `type S struct : I { ... }` | struct plus `var _ I = (*S)(nil)` per asserted interface |
 
@@ -234,7 +234,7 @@ Rules:
 | `correctness::open_union_value` | Use a closed union (no `~` terms, no `comparable`) in value positions. |
 | `correctness::union_nonmember` | Use a member type in the conversion, assertion, or case. |
 | `correctness::union_member_method` | Give the member the declared method (a value member needs a value receiver), or drop the member. |
-| `correctness::nonexhaustive_switch` | Cover the listed members and `nil`, or add `default`. |
+| `correctness::nonexhaustive_switch` | Cover the listed members and `nil`, or add `default`; `nil` is excused for a narrowed bare-option operand. |
 | `correctness::switch_arm_mismatch` | Give every switch-expression arm one common type. |
 | `correctness::switch_expr_needs_default` | Add a `default` arm to the value switch. |
 | `correctness::assertion_failed` | Implement the missing method on `*S`, or drop the interface from the list. |
