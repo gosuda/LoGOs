@@ -24,6 +24,14 @@ stderr 'comptime::unexported_in_exported'
 stderr 'unexported type named'
 stderr 'unexported func collect'
 ! stderr 'undefined: app'
+# logos test builds the external test package, which exercises the
+# importer path the issue reported; the diagnostic still lands on the
+# defining package's declaration.
+! logos test ./...
+stderr 'comptime::unexported_in_exported'
+stderr 'unexported type named'
+stderr 'unexported func collect'
+! stderr 'undefined: app'
 
 -- w/go.mod --
 module example.com/cfrepro
