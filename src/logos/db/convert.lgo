@@ -24,6 +24,9 @@ import (
 // and reaches a Scanner unchanged so sql.Null keeps its Valid flag
 // rules. Error texts match convertAssign for every covered pair.
 func Assign[T any](dst *T, src driver.Value) error {
+	if err, handled := assignNull[T](dst, src); handled {
+		return err
+	}
 	if s, ok := any(dst).(sql.Scanner); ok {
 		return s.Scan(src)
 	}
@@ -56,9 +59,86 @@ func Assign[T any](dst *T, src driver.Value) error {
 	return unsupportedScan(dst, src)
 }
 
+// assignNull scans into the sql.Null family at comptime: the value
+// field converts through Assign and Valid clears on a NULL column, so
+// a Null destination never reaches its reflective Scan body.
+func assignNull[T any](dst *T, src driver.Value) (error, bool) {
+	const switch T {
+	case sql.Null[string]:
+		return nullScan(&dst.V, &dst.Valid, src), true
+	case sql.Null[bool]:
+		return nullScan(&dst.V, &dst.Valid, src), true
+	case sql.Null[int]:
+		return nullScan(&dst.V, &dst.Valid, src), true
+	case sql.Null[int8]:
+		return nullScan(&dst.V, &dst.Valid, src), true
+	case sql.Null[int16]:
+		return nullScan(&dst.V, &dst.Valid, src), true
+	case sql.Null[int32]:
+		return nullScan(&dst.V, &dst.Valid, src), true
+	}
+	return assignNullUint[T](dst, src)
+}
+
+func assignNullUint[T any](dst *T, src driver.Value) (error, bool) {
+	const switch T {
+	case sql.Null[int64]:
+		return nullScan(&dst.V, &dst.Valid, src), true
+	case sql.Null[uint]:
+		return nullScan(&dst.V, &dst.Valid, src), true
+	case sql.Null[uint8]:
+		return nullScan(&dst.V, &dst.Valid, src), true
+	case sql.Null[uint16]:
+		return nullScan(&dst.V, &dst.Valid, src), true
+	case sql.Null[uint32]:
+		return nullScan(&dst.V, &dst.Valid, src), true
+	case sql.Null[uint64]:
+		return nullScan(&dst.V, &dst.Valid, src), true
+	}
+	return assignNullTime[T](dst, src)
+}
+
+func assignNullTime[T any](dst *T, src driver.Value) (error, bool) {
+	const switch T {
+	case sql.Null[float32]:
+		return nullScan(&dst.V, &dst.Valid, src), true
+	case sql.Null[float64]:
+		return nullScan(&dst.V, &dst.Valid, src), true
+	case sql.Null[time.Time]:
+		return nullScan(&dst.V, &dst.Valid, src), true
+	case sql.Null[[]byte]:
+		return nullScan(&dst.V, &dst.Valid, src), true
+	case sql.Null[uuid.UUID]:
+		return nullScan(&dst.V, &dst.Valid, src), true
+	}
+	return assignNullNamed[T](dst, src)
+}
+
+func assignNullNamed[T any](dst *T, src driver.Value) (error, bool) {
+	const switch T {
+	case sql.NullString:
+		return nullScan(&dst.String, &dst.Valid, src), true
+	case sql.NullBool:
+		return nullScan(&dst.Bool, &dst.Valid, src), true
+	case sql.NullByte:
+		return nullScan(&dst.Byte, &dst.Valid, src), true
+	case sql.NullInt16:
+		return nullScan(&dst.Int16, &dst.Valid, src), true
+	case sql.NullInt32:
+		return nullScan(&dst.Int32, &dst.Valid, src), true
+	case sql.NullInt64:
+		return nullScan(&dst.Int64, &dst.Valid, src), true
+	case sql.NullFloat64:
+		return nullScan(&dst.Float64, &dst.Valid, src), true
+	case sql.NullTime:
+		return nullScan(&dst.Time, &dst.Valid, src), true
+	}
+	return nil, false
+}
+
 func assignText[T any](dst *T, src driver.Value) (error, bool) {
 	const switch T {
-	case ~string:
+	case string:
 		if src == nil {
 			return nullConvertErr("string"), true
 		}
@@ -68,10 +148,39 @@ func assignText[T any](dst *T, src driver.Value) (error, bool) {
 		}
 		*dst = T(s)
 		return nil, true
-	case ~bool:
+	case ~string:
+		// A named string destination mirrors the upstream reflect
+		// path: only a string or byte-slice source converts.
+		if src == nil {
+			return nullConvertErr("string"), true
+		}
+		var s string
+		switch v := src.(type) {
+		case string:
+			s = v
+		case []byte:
+			s = string(v)
+		default:
+			return unsupportedScan(dst, src), true
+		}
+		*dst = T(s)
+		return nil, true
+	case bool:
 		b, err := convertBoolValue(src)
 		if err != nil {
 			return err, true
+		}
+		*dst = T(b)
+		return nil, true
+	case ~bool:
+		// A named bool destination mirrors the upstream reflect path:
+		// only a bool source converts.
+		if src == nil {
+			return nullConvertErr("bool"), true
+		}
+		b, ok := src.(bool)
+		if !ok {
+			return unsupportedScan(dst, src), true
 		}
 		*dst = T(b)
 		return nil, true
@@ -224,6 +333,16 @@ func storeUint64Value[T ~uint64](dst *T, src driver.Value) error {
 }
 
 func storeFloat32Value[T ~float32](dst *T, src driver.Value) error {
+	switch v := src.(type) {
+	case float64:
+		// One rounding keeps a float64 source lossless; the text
+		// round-trip below would round twice.
+		*dst = T(float32(v))
+		return nil
+	case float32:
+		*dst = T(v)
+		return nil
+	}
 	v, err := parseFloatValue(src, 32, "float32")
 	if err != nil {
 		return err
@@ -233,6 +352,16 @@ func storeFloat32Value[T ~float32](dst *T, src driver.Value) error {
 }
 
 func storeFloat64Value[T ~float64](dst *T, src driver.Value) error {
+	switch v := src.(type) {
+	case float64:
+		// A float64 source stores untouched so NaN payloads and
+		// values a %v round-trip would shift survive.
+		*dst = T(v)
+		return nil
+	case float32:
+		*dst = T(float64(v))
+		return nil
+	}
 	v, err := parseFloatValue(src, 64, "float64")
 	if err != nil {
 		return err
