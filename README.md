@@ -5,6 +5,8 @@
 [![CI](https://github.com/gosuda/LoGOs/workflows/logos/badge.svg)](https://github.com/gosuda/LoGOs/blob/release-branch.go1.27/.github/workflows/logos.yml)
 [![License: BSD-3-Clause](https://img.shields.io/badge/license-BSD--3--Clause-blue.svg)](LICENSE)
 
+[![Built with Depot](https://depot.dev/badges/built-with-depot.svg)](https://depot.dev?utm_source=gosuda)
+
 LoGOs is a fork of the Go 1.27.4 toolchain that adds the `.lgo` language and the `logos` command. It is for Go developers who want compiler-checked error paths, nilability, concurrency boundaries, and generated serialization while staying inside Go's module and package model.
 
 The `logos` command builds `.lgo` and `.go` packages. The `go` command keeps upstream Go language semantics and command text. When you need to leave, `logos eject` writes a standard Go copy of the module.
