@@ -1,0 +1,630 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+# A Go package that imports a .lgo package runs the dual-use union check
+# over the imported scope. Export data lists a generic method there as
+# "Type.method", and resolving that name by scope lookup made the compiler
+# stop with "internal compiler error: assertion failed". The generated test
+# main is such a Go importer, so every test of the package failed to build.
+
+cd w
+logos build ./...
+logos test -count=1 ./box
+stdout '^ok\s+example\.com/genmethod/box'
+logos run ./main
+stdout '^42 kept$'
+
+# The check still walks the declarations of such a package: a union that is
+# a constraint and a value type is refused when a Go importer reads it.
+! logos test -count=1 ./dual
+stderr 'union D is used as a type constraint and as a value type; Go cannot express both'
+
+# A method signature is a value use too: the union below appears as a
+# value only in a method parameter and result, so the check must walk
+# method signatures to refuse it.
+! logos test -count=1 ./dualmeth
+stderr 'union D is used as a type constraint and as a value type; Go cannot express both'
+
+# A hoisted local struct is a value use too: the union below appears as
+# a value only in the field of a function-local struct, which the
+# exporter publishes for inlining, so the check must scan hoisted types
+# whose object dictionary carries no implicit type parameters.
+! logos test -count=1 ./dualwrap
+stderr 'union D is used as a type constraint and as a value type; Go cannot express both'
+
+# A generic function body is a value use too: the union below appears as
+# a value only in the field of a struct local to a generic function,
+# which the importer cannot resolve, so the check must use the dual-use
+# names recorded in the export facts.
+! logos test -count=1 ./dualwrapgen
+stderr 'union D is used as a type constraint and as a value type; Go cannot express both'
+
+# A noinline function body exports no inline body: the union below still
+# appears as a value only in a hoisted local struct field, so the import
+# must stay refused through the dual-use names in the export facts.
+! logos test -count=1 ./dualwrapnoinline
+stderr 'union D is used as a type constraint and as a value type; Go cannot express both'
+
+# An alias that only names a union constraint is a declaration, not a
+# value use: the package below stays importable from Go.
+logos test -count=1 ./dualalias
+
+# Using the alias as a value still refuses the Go import.
+! logos test -count=1 ./dualaliasval
+stderr 'union D is used as a type constraint and as a value type; Go cannot express both'
+
+# A dependency's hoisted holder approves nothing: the scan only trusts
+# names owned by the imported package, and the dual-use facts still
+# refuse the import instead of crashing on the generic local.
+! logos test -count=1 ./dualcollide
+stderr 'union D is used as a type constraint and as a value type; Go cannot express both'
+
+# Same-named local dual-use unions share one source name: only
+# package-scope unions travel in the export facts, so a LoGOs importer
+# can still read the package.
+logos build ./uselocal
+logos test -count=1 ./uselocal
+
+-- w/go.mod --
+module example.com/genmethod
+
+go 1.27
+
+-- w/box/box.lgo --
+package box
+
+type Box struct {
+	N int
+}
+
+func (b *Box) pick[T any](v T) T {
+	return v
+}
+
+func (b *Box) Twice() int {
+	return b.pick[int](b.N) * 2
+}
+
+func (b Box) Label[T any](v T) T {
+	return v
+}
+
+-- w/box/box_test.lgo --
+package box_test
+
+import (
+	"testing"
+
+	"example.com/genmethod/box"
+)
+
+func TestTwice(t *testing.T) {
+	b := &box.Box{N: 21}
+	if got := b.Twice(); got != 42 {
+		t.Fatalf("Twice = %d", got)
+	}
+}
+
+-- w/main/main.lgo --
+package main
+
+import (
+	"fmt"
+
+	"example.com/genmethod/box"
+)
+
+func main() {
+	b := &box.Box{N: 21}
+	fmt.Println(b.Twice(), box.Box{}.Label[string]("kept"))
+}
+
+-- w/dual/dual.lgo --
+package dual
+
+type A struct {
+	X int
+}
+
+func (a A) M() string {
+	return "A"
+}
+
+func (a A) Same[T any](v T) T {
+	return v
+}
+
+type B struct {
+	Y string
+}
+
+func (b B) M() string {
+	return "B"
+}
+
+type D interface {
+	A | B
+	M() string
+}
+
+func First[T D](x T) T {
+	return x
+}
+
+var U D = A{X: 3}
+
+-- w/dual/dual_test.lgo --
+package dual_test
+
+import (
+	"testing"
+
+	"example.com/genmethod/dual"
+)
+
+func TestFirst(t *testing.T) {
+	if dual.First(dual.B{Y: "z"}).M() != "B" {
+		t.Fatal("First")
+	}
+}
+
+-- w/dualmeth/dualmeth.lgo --
+package dualmeth
+
+type A struct {
+	X int
+}
+
+func (a A) M() string {
+	return "A"
+}
+
+func (a A) Keep(v D) D {
+	return v
+}
+
+type B struct {
+	Y string
+}
+
+func (b B) M() string {
+	return "B"
+}
+
+type D interface {
+	A | B
+	M() string
+}
+
+func First[T D](x T) T {
+	return x
+}
+
+-- w/dualmeth/dualmeth_test.lgo --
+package dualmeth_test
+
+import (
+	"testing"
+
+	"example.com/genmethod/dualmeth"
+)
+
+func TestFirst(t *testing.T) {
+	if dualmeth.First(dualmeth.B{Y: "z"}).M() != "B" {
+		t.Fatal("First")
+	}
+}
+
+func TestKeep(t *testing.T) {
+	a := dualmeth.A{X: 1}
+	if a.Keep(dualmeth.B{Y: "z"}).M() != "B" {
+		t.Fatal("Keep")
+	}
+}
+
+-- w/dualwrap/dualwrap.lgo --
+package dualwrap
+
+type A struct {
+	X int
+}
+
+func (a A) M() string {
+	return "A"
+}
+
+type B struct {
+	Y string
+}
+
+func (b B) M() string {
+	return "B"
+}
+
+type D interface {
+	A | B
+	M() string
+}
+
+func First[T D](x T) T {
+	return x
+}
+
+func Wrap() any {
+	type holder struct {
+		Value D
+	}
+	return holder{Value: A{X: 3}}
+}
+
+-- w/dualwrap/dualwrap_test.lgo --
+package dualwrap_test
+
+import (
+	"testing"
+
+	"example.com/genmethod/dualwrap"
+)
+
+func TestFirst(t *testing.T) {
+	if dualwrap.First(dualwrap.B{Y: "z"}).M() != "B" {
+		t.Fatal("First")
+	}
+}
+
+func TestWrap(t *testing.T) {
+	if dualwrap.Wrap() == nil {
+		t.Fatal("Wrap")
+	}
+}
+
+-- w/dualwrapgen/dualwrapgen.lgo --
+package dualwrapgen
+
+type A struct {
+	X int
+}
+
+func (a A) M() string {
+	return "A"
+}
+
+type B struct {
+	Y string
+}
+
+func (b B) M() string {
+	return "B"
+}
+
+type D interface {
+	A | B
+	M() string
+}
+
+func First[T D](x T) T {
+	return x
+}
+
+func Wrap[T any](v T) any {
+	type holder struct {
+		Value D
+	}
+	return holder{Value: A{X: 3}}
+}
+
+-- w/dualwrapgen/dualwrapgen_test.lgo --
+package dualwrapgen_test
+
+import (
+	"testing"
+
+	"example.com/genmethod/dualwrapgen"
+)
+
+func TestFirst(t *testing.T) {
+	if dualwrapgen.First(dualwrapgen.B{Y: "z"}).M() != "B" {
+		t.Fatal("First")
+	}
+}
+
+func TestWrap(t *testing.T) {
+	if dualwrapgen.Wrap[int](1) == nil {
+		t.Fatal("Wrap")
+	}
+}
+
+-- w/dualwrapnoinline/dualwrapnoinline.lgo --
+package dualwrapnoinline
+
+type A struct {
+	X int
+}
+
+func (a A) M() string {
+	return "A"
+}
+
+type B struct {
+	Y string
+}
+
+func (b B) M() string {
+	return "B"
+}
+
+type D interface {
+	A | B
+	M() string
+}
+
+func First[T D](x T) T {
+	return x
+}
+
+//go:noinline
+func Wrap() any {
+	type holder struct {
+		Value D
+	}
+	return holder{Value: A{X: 3}}
+}
+
+-- w/dualwrapnoinline/dualwrapnoinline_test.lgo --
+package dualwrapnoinline_test
+
+import (
+	"testing"
+
+	"example.com/genmethod/dualwrapnoinline"
+)
+
+func TestFirst(t *testing.T) {
+	if dualwrapnoinline.First(dualwrapnoinline.B{Y: "z"}).M() != "B" {
+		t.Fatal("First")
+	}
+}
+
+func TestWrap(t *testing.T) {
+	if dualwrapnoinline.Wrap() == nil {
+		t.Fatal("Wrap")
+	}
+}
+
+-- w/dualalias/dualalias.lgo --
+package dualalias
+
+type A struct {
+	X int
+}
+
+func (a A) M() string {
+	return "A"
+}
+
+type B struct {
+	Y string
+}
+
+func (b B) M() string {
+	return "B"
+}
+
+type D interface {
+	A | B
+	M() string
+}
+
+type Scalar = D
+
+func First[T Scalar](x T) T {
+	return x
+}
+
+-- w/dualalias/dualalias_test.lgo --
+package dualalias_test
+
+import (
+	"testing"
+
+	"example.com/genmethod/dualalias"
+)
+
+func TestFirst(t *testing.T) {
+	if dualalias.First(dualalias.B{Y: "z"}).M() != "B" {
+		t.Fatal("First")
+	}
+}
+
+-- w/dualaliasval/dualaliasval.lgo --
+package dualaliasval
+
+type A struct {
+	X int
+}
+
+func (a A) M() string {
+	return "A"
+}
+
+type B struct {
+	Y string
+}
+
+func (b B) M() string {
+	return "B"
+}
+
+type D interface {
+	A | B
+	M() string
+}
+
+type Scalar = D
+
+func First[T Scalar](x T) T {
+	return x
+}
+
+var U Scalar = A{X: 3}
+
+-- w/dualaliasval/dualaliasval_test.lgo --
+package dualaliasval_test
+
+import (
+	"testing"
+
+	"example.com/genmethod/dualaliasval"
+)
+
+func TestFirst(t *testing.T) {
+	if dualaliasval.First(dualaliasval.B{Y: "z"}).M() != "B" {
+		t.Fatal("First")
+	}
+}
+
+-- w/depwrap/depwrap.lgo --
+package depwrap
+
+func Wrap() any {
+	type holder struct {
+		V int
+	}
+	return holder{V: 1}
+}
+
+-- w/depwrap/depwrap_test.lgo --
+package depwrap_test
+
+import (
+	"testing"
+
+	"example.com/genmethod/depwrap"
+)
+
+func TestWrap(t *testing.T) {
+	if depwrap.Wrap() == nil {
+		t.Fatal("Wrap")
+	}
+}
+
+-- w/dualcollide/dualcollide.lgo --
+package dualcollide
+
+import (
+	"example.com/genmethod/depwrap"
+)
+
+type A struct {
+	X int
+}
+
+func (a A) M() string {
+	return "A"
+}
+
+type B struct {
+	Y string
+}
+
+func (b B) M() string {
+	return "B"
+}
+
+type D interface {
+	A | B
+	M() string
+}
+
+func First[T D](x T) T {
+	return x
+}
+
+func UseDep() any {
+	return depwrap.Wrap()
+}
+
+func Wrap[T any](v T) any {
+	type holder struct {
+		Value D
+	}
+	return holder{Value: A{X: 3}}
+}
+
+-- w/dualcollide/dualcollide_test.lgo --
+package dualcollide_test
+
+import (
+	"testing"
+
+	"example.com/genmethod/dualcollide"
+)
+
+func TestFirst(t *testing.T) {
+	if dualcollide.First(dualcollide.B{Y: "z"}).M() != "B" {
+		t.Fatal("First")
+	}
+}
+
+func TestUseDep(t *testing.T) {
+	if dualcollide.UseDep() == nil {
+		t.Fatal("UseDep")
+	}
+}
+
+func TestWrap(t *testing.T) {
+	if dualcollide.Wrap[int](1) == nil {
+		t.Fatal("Wrap")
+	}
+}
+
+-- w/duallocal/duallocal.lgo --
+package duallocal
+
+func F() int {
+	type choice interface {
+		int | string
+	}
+	type box[C choice] struct {
+		v C
+	}
+	var c choice = 1
+	return c.(int) + box[int]{v: 2}.v
+}
+
+func G() int {
+	type choice interface {
+		int | string
+	}
+	type box[C choice] struct {
+		v C
+	}
+	var c choice = 5
+	return c.(int) + box[int]{v: 4}.v
+}
+
+-- w/uselocal/uselocal.lgo --
+package uselocal
+
+import (
+	"example.com/genmethod/duallocal"
+)
+
+func Total() int {
+	return duallocal.F() + duallocal.G()
+}
+
+-- w/uselocal/uselocal_test.lgo --
+package uselocal_test
+
+import (
+	"testing"
+
+	"example.com/genmethod/uselocal"
+)
+
+func TestTotal(t *testing.T) {
+	if uselocal.Total() != 12 {
+		t.Fatalf("Total = %d", uselocal.Total())
+	}
+}

@@ -235,7 +235,7 @@ func readImportFileImpl(path string, target *ir.Package, env *types2.Context, pa
 		}
 	}
 	if pkg2 != nil && checkLogosUnion {
-		checkLogosGoImport(pkg2)
+		checkLogosGoImport(&pr, pkg2, logosFacts.DualUse)
 	}
 
 	err = addFingerprint(path, data)

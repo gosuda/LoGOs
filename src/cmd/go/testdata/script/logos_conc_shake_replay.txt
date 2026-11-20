@@ -15,9 +15,11 @@ cd replay
 logos lint ./...
 ! stderr .
 
-# Without a shake the child the group started last runs first and takes
-# the lock twice before the other child sends, so the order holds and
-# the monitor stays silent.
+# Without a shake the start gate keeps the order the spawns give under
+# every schedule: the lock taker is the last child the group starts, so
+# it runs first even when the parent is preempted between spawns, takes
+# the lock twice before the direct child sends, and the monitor stays
+# silent.
 logos conc test -count=1 ./ord
 stdout '^ok '
 ! stderr .
@@ -30,26 +32,26 @@ stdout '^locked,direct$'
 # command prints the seed that replays the schedule.
 ! logos conc test -shake=1 -count=1 ./ord
 stdout 'order = '
-stderr 'shake seed 1'
+stderr 'shake seed 1[^0-9]'
 
 # A replay with that printed seed fails the same way.
 ! logos conc test -shake=1 -count=1 ./ord
 stdout 'order = '
-stderr 'shake seed 1'
+stderr 'shake seed 1[^0-9]'
 
 # The space form carries the same seed and fails the same way.
 ! logos conc test -shake 1 -count=1 ./ord
 stdout 'order = '
-stderr 'shake seed 1'
+stderr 'shake seed 1[^0-9]'
 
 # The same schedule fault shows in run, and a replay with that printed
 # seed fails the same way.
 ! logos conc run -shake=1 ./ord
 stdout '^direct,locked$'
-stderr 'shake seed 1'
+stderr 'shake seed 1[^0-9]'
 ! logos conc run -shake=1 ./ord
 stdout '^direct,locked$'
-stderr 'shake seed 1'
+stderr 'shake seed 1[^0-9]'
 
 -- replay/go.mod --
 module example.com/shakereplay
@@ -70,7 +72,12 @@ type box struct{ n int }
 
 var gate sync.Locked[box]
 
-func locked(first chan string) error {
+func locked(first chan string, start chan struct{}, ctx context.Context) error {
+	select {
+	case <-start:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 	gate.WithLock(b => {
 		b.n++
 	})
@@ -84,7 +91,12 @@ func locked(first chan string) error {
 	return nil
 }
 
-func direct(first chan string) error {
+func direct(first chan string, start chan struct{}, ctx context.Context) error {
+	select {
+	case <-start:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 	select {
 	case first <- "direct":
 	default:
@@ -94,9 +106,12 @@ func direct(first chan string) error {
 
 func order(ctx context.Context) (string, error) {
 	first := make(chan string, 2)
+	start := make(chan struct{}, 2)
 	go group (ctx) {
-		go direct(first)
-		go locked(first)
+		go direct(first, start, ctx)
+		go locked(first, start, ctx)
+		start <- struct{}{}
+		start <- struct{}{}
 	}
 	a := <-first
 	b := <-first

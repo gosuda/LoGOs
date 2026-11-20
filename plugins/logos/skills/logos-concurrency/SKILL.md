@@ -14,13 +14,14 @@ LoGOs provides structured concurrency through goroutine groups and panic-safe sy
 
 ## Procedure
 
-1. Structure goroutines with `go group`: define child tasks inside `go group (ctx, limit = N) { ... }` blocks.
-2. Propagate errors: use `?` on fallible calls inside child tasks or invoke an error-last child call to yield errors to the group (direct `return` inside a child is rejected with `correctness::return_in_group_child`). Ensure the function enclosing the `go group` returns an `error`.
-3. Guard shared state: wrap mutable state with `logos/sync.Locked[T]` for mutex protection or `logos/sync.Hot[T]` for atomic read-mostly pointers.
-4. Run the linter and the race detector first: they catch static violations and exercised data races.
-5. Run the program under the monitor when the code is lint-clean and race-clean but still suspects a liveness or ordering fault: use `logos conc run` for a program and `logos conc test` for tests.
-6. Read each finding on standard error while the child still runs: repair the named position, then rerun without `conc` to confirm the program still behaves.
-7. Retry a shake failure with the printed seed: pass the same seed to shake the run again. The seed fixes the yield counts, not the exact goroutine schedule, so treat a rerun as a retry, not an exact replay.
+1. Identify concurrency scope: verify whether work can run in parallel and requires context cancellation or worker limits.
+2. Structure goroutines with `go group`: define child tasks inside `go group (ctx, limit = N) { ... }` blocks.
+3. Propagate errors: use `?` on fallible calls inside child tasks or invoke an error-last child call to yield errors to the group (direct `return` inside a child is rejected with `correctness::return_in_group_child`). Ensure the function enclosing the `go group` returns an `error`.
+4. Guard shared state: wrap mutable state with `logos/sync.Locked[T]` for mutex protection or `logos/sync.Hot[T]` for atomic read-mostly pointers.
+5. Verify with race detector: run `logos test -race ./...` to detect exercised races; `-race` reports only exercised races and gives no universal data-race freedom. The run works under `[build] cgo = "forbid"`: it links only the race runtime and needs a C compiler or `zig` in PATH. Fix any diagnostics reported by `logos build` or `logos lint`.
+6. Run the program under the monitor when the code is lint-clean and race-clean but still suspects a liveness or ordering fault: use `logos conc run` for a program and `logos conc test` for tests.
+7. Read each finding on standard error while the child still runs: repair the named position, then rerun without `conc` to confirm the program still behaves.
+8. Retry a shake failure with the printed seed: pass the same seed to shake the run again. The same seed can yield differently, because yields also depend on goroutine identity and scheduling, so treat a rerun as a retry, not an exact replay.
 
 ## Group syntax
 
@@ -134,7 +135,7 @@ go group (ctx) {
 }
 ```
 
-A shake schedule fault has no rule id. Treat a test that fails only under `-shake` as an order dependence. Rerun with the printed seed to shake the run again; the seed fixes the yield counts, not the exact schedule.
+A shake schedule fault has no rule id. Treat a test that fails only under `-shake` as an order dependence. Rerun with the printed seed to shake the run again; the same seed can yield differently, so it is a retry, not an exact replay.
 
 ## Set flags and replay seeds
 
