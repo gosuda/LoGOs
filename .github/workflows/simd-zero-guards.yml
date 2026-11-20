@@ -198,7 +198,7 @@ jobs:
 
   simd_std:
     name: "SIMD baseline-target standard library"
-    runs-on: "depot-ubuntu-24.04"
+    runs-on: "depot-ubuntu-24.04-4"
     timeout-minutes: 120
     defaults:
       run:
