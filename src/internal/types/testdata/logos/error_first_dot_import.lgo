@@ -1,0 +1,60 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package p
+
+import . "log"
+import . "os"
+import . "runtime"
+
+func fetch() (int, error) {
+	return 1, nil
+}
+
+func useInt(v int) {
+}
+
+func afterDotExit() {
+	n, err := fetch()
+	if err != nil {
+		Exit(1)
+	}
+	useInt(n)
+}
+
+func afterDotLogFatal() {
+	n, err := fetch()
+	if err != nil {
+		Fatal("read failed: ", err)
+	}
+	useInt(n)
+}
+
+func afterDotGoexit() {
+	n, err := fetch()
+	if err != nil {
+		Goexit()
+	}
+	useInt(n)
+}
+
+func quit() {
+}
+
+func userFuncStillFlags() {
+	n, err := fetch()
+	if err != nil {
+		quit()
+	}
+	useInt(n /* ERROR "[correctness::result_before_error_check]" */)
+}
+
+func exitValueStillFlags() {
+	exit := Exit
+	n, err := fetch()
+	if err != nil {
+		exit(1)
+	}
+	useInt(n /* ERROR "[correctness::result_before_error_check]" */)
+}

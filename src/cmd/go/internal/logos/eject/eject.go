@@ -60,6 +60,16 @@ ejected loGo/s dependency module lands under DIR/_logos_deps, and
 the support sources become the shared module
 github.com/gosuda/loGos/rt under DIR/_logos_deps/rt.
 
+The copy holds every other regular file of the main module: each Go
+file that still parses is rewritten to the ejected import paths and
+formatted, and each remaining file is copied byte for byte.
+Dot-prefixed, underscore-prefixed, vendor, testdata, and
+version-control-ignored paths are copied because //go:embed can
+reach them; only package discovery skips those paths. The copy
+leaves out .git contents, logos.toml files, .lgo sources, the
+destination subtree, symlinks and special files, and foreign
+nested modules.
+
 DIR must not exist or must be empty. The ejected tree builds with an
 upstream Go 1.27.2 or newer toolchain. Eject never writes into the
 source tree.
