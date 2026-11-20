@@ -53,7 +53,7 @@ func (m *Module) census() (bool, error) {
 	if m.Root == "" {
 		return false, nil
 	}
-	m.scanOnce.Do(func() { m.logos, m.censusErr = treeHasLogos(m.Root) })
+	m.scanOnce.Do(func() { m.logos, m.censusErr = censusTreeWalk(m.Root) })
 	return m.logos, m.censusErr
 }
 
@@ -155,13 +155,27 @@ func cgoPatternAllows(pattern, importPath string) bool {
 // the subtree they came from, as before. Resource and integrity failures
 // fail the census: a "no .lgo files" answer computed through them could
 // silently drop the [build] cgo policy, including the -race exception,
-// and surface later as a misleading refusal.
+// and surface later as a misleading refusal. An fs.ErrInvalid walk entry
+// is fatal too: DirFS rejects non-UTF-8 names, which the native walker
+// traversed, so skipping one could hide the only .lgo files. Native OS
+// resource failures the POSIX compatibility values miss (Windows) count
+// through censusFatalErrno.
 func censusFatal(err error) bool {
-	return errors.Is(err, syscall.ENOMEM) ||
+	if errors.Is(err, fs.ErrInvalid) {
+		return true
+	}
+	if errors.Is(err, syscall.ENOMEM) ||
 		errors.Is(err, syscall.ENFILE) ||
 		errors.Is(err, syscall.EMFILE) ||
-		errors.Is(err, syscall.EIO)
+		errors.Is(err, syscall.EIO) {
+		return true
+	}
+	var errno syscall.Errno
+	return errors.As(err, &errno) && censusFatalErrno(errno)
 }
+
+// censusTreeWalk is replaceable in tests to fault-inject the census.
+var censusTreeWalk = treeHasLogos
 
 func treeHasLogos(root string) (bool, error) {
 	return treeHasLogosFS(os.DirFS(root))
@@ -184,8 +198,19 @@ func treeHasLogosFS(fsys fs.FS) (bool, error) {
 			return nil
 		}
 		if d.IsDir() {
-			if p != "." && skipsDirFS(fsys, p, d.Name()) {
-				return fs.SkipDir
+			if p != "." {
+				skip, serr := skipsDirFS(fsys, p, d.Name())
+				if serr != nil {
+					if firstErr == nil {
+						firstErr = serr
+					}
+					// A directory that might be a nested module cannot
+					// contribute its .lgo files either way; fail closed.
+					return fs.SkipDir
+				}
+				if skip {
+					return fs.SkipDir
+				}
 			}
 			return nil
 		}
@@ -194,18 +219,31 @@ func treeHasLogosFS(fsys fs.FS) (bool, error) {
 		}
 		return nil
 	})
-	return found, firstErr
+	// A found answer is already correct: a fatal walk error alongside it
+	// does not make the cgo policy untrustworthy.
+	if found {
+		return true, nil
+	}
+	return false, firstErr
 }
 
-func skipsDirFS(fsys fs.FS, p, name string) bool {
+// skipsDirFS reports whether the walk should skip the directory p/name,
+// and returns a fatal census error when the nested go.mod probe itself
+// fails: a resource failure there could hide a nested module's .lgo
+// files just as a failed directory open could.
+func skipsDirFS(fsys fs.FS, p, name string) (bool, error) {
 	if name == "vendor" || name == "testdata" {
-		return true
+		return true, nil
 	}
 	if strings.HasPrefix(name, ".") || strings.HasPrefix(name, "_") {
-		return true
+		return true, nil
 	}
-	if info, err := fs.Stat(fsys, path.Join(p, "go.mod")); err == nil && !info.IsDir() {
-		return true
+	info, err := fs.Stat(fsys, path.Join(p, "go.mod"))
+	if err != nil {
+		if censusFatal(err) {
+			return false, err
+		}
+		return false, nil
 	}
-	return false
+	return !info.IsDir(), nil
 }

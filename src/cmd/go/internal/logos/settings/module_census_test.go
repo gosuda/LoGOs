@@ -110,6 +110,85 @@ func TestTreeHasLogosFSFaulty(t *testing.T) {
 			t.Errorf("treeHasLogosFS err = %v, want nil (routine errors skip)", err)
 		}
 	})
+
+	t.Run("foundBeatsFault", func(t *testing.T) {
+		late := scanTree(t, map[string]string{
+			"gone/z.go": "package g\n",
+			"pkg/x.lgo": "package p\n",
+		}, nil)
+		fsys := faultFS{
+			fsys: os.DirFS(late),
+			fail: map[string]error{
+				"gone": faultErr("open", "gone", syscall.EIO),
+			},
+		}
+		found, err := treeHasLogosFS(fsys)
+		if !found || err != nil {
+			t.Errorf("treeHasLogosFS = (%v, %v), want (true, nil): a found answer is already correct", found, err)
+		}
+	})
+
+	t.Run("invalidPathFails", func(t *testing.T) {
+		fsys := faultFS{
+			fsys: os.DirFS(root),
+			fail: map[string]error{
+				"pkg": &fs.PathError{Op: "open", Path: "pkg", Err: fs.ErrInvalid},
+			},
+		}
+		found, err := treeHasLogosFS(fsys)
+		if found || err == nil {
+			t.Errorf("treeHasLogosFS = (%v, %v), want (false, err): a non-UTF-8 name can hide .lgo files", found, err)
+		}
+	})
+
+	t.Run("nestedModuleProbeFaultFails", func(t *testing.T) {
+		nested := scanTree(t, map[string]string{
+			"inner/go.mod": "module example.com/inner\n",
+			"inner/x.lgo":  "package i\n",
+		}, nil)
+		fsys := statFaultFS{
+			fsys: faultFS{fsys: os.DirFS(nested), fail: map[string]error{}},
+			fail: map[string]error{
+				"inner/go.mod": faultErr("stat", "inner/go.mod", syscall.EIO),
+			},
+		}
+		found, err := treeHasLogosFS(fsys)
+		if found || err == nil {
+			t.Errorf("treeHasLogosFS = (%v, %v), want (false, err): the go.mod probe can hide a nested module", found, err)
+		}
+	})
+}
+
+// statFaultFS fails Stat calls on configured paths.
+type statFaultFS struct {
+	fsys fs.FS
+	fail map[string]error
+}
+
+func (f statFaultFS) Open(name string) (fs.File, error) {
+	return f.fsys.Open(name)
+}
+
+func (f statFaultFS) Stat(name string) (fs.FileInfo, error) {
+	if err, ok := f.fail[name]; ok {
+		return nil, err
+	}
+	return fs.Stat(f.fsys, name)
+}
+
+func TestCensusErrFaulty(t *testing.T) {
+	root := scanTree(t, map[string]string{"a.go": "package p\n"}, nil)
+	old := censusTreeWalk
+	censusTreeWalk = func(string) (bool, error) {
+		return false, faultErr("open", "d", syscall.EIO)
+	}
+	defer func() { censusTreeWalk = old }()
+	m := &Module{Root: root}
+	if err := m.CensusErr(); err == nil {
+		t.Fatal("CensusErr() = nil, want the injected census failure")
+	} else if !censusFatal(err) {
+		t.Errorf("CensusErr() = %v, want a fatal census error", err)
+	}
 }
 
 func TestCensusErrClean(t *testing.T) {

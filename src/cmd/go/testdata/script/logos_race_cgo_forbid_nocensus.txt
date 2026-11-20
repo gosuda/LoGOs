@@ -4,7 +4,10 @@ env GOTOOLCHAIN=local
 env CC=
 env CGO_ENABLED=
 
+[!race] skip 'the platform has no race detector'
 [!cgo] skip 'a Go main module needs the default C compiler on PATH'
+[GOOS:windows] skip 'net has no cgo files on Windows'
+[GOOS:darwin] skip 'the race runtime does not link cgo on darwin'
 
 cd forbid
 

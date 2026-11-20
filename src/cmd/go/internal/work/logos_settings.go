@@ -30,7 +30,11 @@ func refreshLogosPolicy(ld *modload.Loader) {
 	s, err := settings.Load(modRoot, f)
 	settings.SetCurrent(s)
 	logosSettingsErr = err
-	failClosedCensus(f.Roots, modRoot)
+	if f.Logos {
+		// Plain go skips LoGOs policy (settings.Load above); it must not
+		// take the LoGOs census either.
+		failClosedCensus(f.Roots, modRoot)
+	}
 	cfg.ApplyLogosEnv(s)
 	if s.Cgo.RaceRuntimeOnly {
 		requireRaceRuntimeCompiler()
