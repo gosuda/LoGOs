@@ -7,6 +7,10 @@ package p
 import "bytes"
 import "io"
 import "strconv"
+import "log"
+import "os"
+import "runtime"
+import "testing"
 
 func fetch() (int, error) {
 	return 1, nil
@@ -98,4 +102,207 @@ func lgoIfaceRead(r lgoReader) {
 		return
 	}
 	useInt(n)
+}
+
+func afterFatalf(t *testing.T) {
+	n, err := fetch()
+	if err != nil {
+		t.Fatalf("read failed: %v", err)
+	}
+	useInt(n)
+}
+
+func afterFailNow(t *testing.T) {
+	n, err := fetch()
+	if err != nil {
+		t.FailNow()
+	}
+	useInt(n)
+}
+
+func afterFatal(t *testing.T) {
+	n, err := fetch()
+	if err != nil {
+		t.Fatal("read failed")
+	}
+	useInt(n)
+}
+
+func afterSkip(t *testing.T) {
+	n, err := fetch()
+	if err != nil {
+		t.Skip("no input")
+	}
+	useInt(n)
+}
+
+func afterSkipf(t *testing.T) {
+	n, err := fetch()
+	if err != nil {
+		t.Skipf("no input: %v", err)
+	}
+	useInt(n)
+}
+
+func afterSkipNow(t *testing.T) {
+	n, err := fetch()
+	if err != nil {
+		t.SkipNow()
+	}
+	useInt(n)
+}
+
+type embedHelper struct {
+	*testing.T
+}
+
+func afterEmbeddedFatalf(h embedHelper) {
+	n, err := fetch()
+	if err != nil {
+		h.Fatalf("read failed: %v", err)
+	}
+	useInt(n)
+}
+
+func afterBenchmarkFatalf(b *testing.B) {
+	n, err := fetch()
+	if err != nil {
+		b.Fatalf("read failed: %v", err)
+	}
+	useInt(n)
+}
+
+func afterFuzzFatalf(f *testing.F) {
+	n, err := fetch()
+	if err != nil {
+		f.Fatalf("read failed: %v", err)
+	}
+	useInt(n)
+}
+
+func tbInterfaceDischarges(tb testing.TB) {
+	n, err := fetch()
+	if err != nil {
+		tb.FailNow()
+	}
+	useInt(n)
+}
+
+func afterFatalfNested(t *testing.T) {
+	n, err := fetch()
+	if err != nil {
+		if err.Error() == "known" {
+			t.Fatalf("known bad input")
+		}
+		t.Fatalf("read failed: %v", err)
+	}
+	useInt(n)
+}
+
+func afterLogThenFatal(t *testing.T) {
+	n, err := fetch()
+	if err != nil {
+		log.Println("read failed:", err)
+		t.Fatalf("read failed: %v", err)
+	}
+	useInt(n)
+}
+
+func afterLogFatal() {
+	n, err := fetch()
+	if err != nil {
+		log.Fatal("read failed: ", err)
+	}
+	useInt(n)
+}
+
+func afterLogFatalf() {
+	n, err := fetch()
+	if err != nil {
+		log.Fatalf("read failed: %v", err)
+	}
+	useInt(n)
+}
+
+func afterLogPanic() {
+	n, err := fetch()
+	if err != nil {
+		log.Panic("read failed: ", err)
+	}
+	useInt(n)
+}
+
+func afterOsExit() {
+	n, err := fetch()
+	if err != nil {
+		os.Exit(1)
+	}
+	useInt(n)
+}
+
+func afterGoexit() {
+	n, err := fetch()
+	if err != nil {
+		runtime.Goexit()
+	}
+	useInt(n)
+}
+
+type spotter struct{}
+
+func (spotter) Fatalf(msg string) {}
+
+func userFatalfStillFlags(s spotter) {
+	n, err := fetch()
+	if err != nil {
+		s.Fatalf("read failed")
+	}
+	useInt(n /* ERROR "[correctness::result_before_error_check]" */)
+}
+
+func die(t *testing.T, msg string) {
+	t.Fatalf("cleanup: %s", msg)
+}
+
+func afterDieHelper(t *testing.T) {
+	n, err := fetch()
+	if err != nil {
+		die(t, "read failed")
+	}
+	useInt(n /* ERROR "[correctness::result_before_error_check]" */)
+}
+
+func conditionalFatalStillFlags(t *testing.T) {
+	n, err := fetch()
+	if err != nil {
+		if err.Error() == "boom" {
+			t.Fatal("boom")
+		}
+	}
+	useInt(n /* ERROR "[correctness::result_before_error_check]" */)
+}
+
+func logPrintlnStillFlags() {
+	n, err := fetch()
+	if err != nil {
+		log.Println("read failed:", err)
+	}
+	useInt(n /* ERROR "[correctness::result_before_error_check]" */)
+}
+
+func errorfStillFlags(t *testing.T) {
+	n, err := fetch()
+	if err != nil {
+		t.Errorf("read failed: %v", err)
+	}
+	useInt(n /* ERROR "[correctness::result_before_error_check]" */)
+}
+
+func methodValueStillFlags(t *testing.T) {
+	fatal := t.Fatalf
+	n, err := fetch()
+	if err != nil {
+		fatal("read failed: %v", err)
+	}
+	useInt(n /* ERROR "[correctness::result_before_error_check]" */)
 }
