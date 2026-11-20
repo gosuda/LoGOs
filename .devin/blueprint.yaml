@@ -64,4 +64,4 @@ knowledge:
   - name: notes
     contents: |
       Work on release-branch.go1.27; fork-first PATH. Rebuild after compiler, runtime, or cmd changes — tests use installed binaries. Milestone gate: (cd src && ./run.bash --no-rebuild).
-      Fast compiler rebuild: (cd src && go build -o ../pkg/tool/darwin_arm64/compile ./cmd/compile).
+      Fast compiler rebuild for iteration only: (cd src && env -u GOOS -u GOARCH go build -o ../pkg/tool/darwin_arm64/compile ./cmd/compile). env -u keeps a cross-build target from overwriting the host tool. Re-run make.bash before the final test pass or gate: it refreshes the linker and installed commands the shortcut leaves alone, and tests run installed binaries.
