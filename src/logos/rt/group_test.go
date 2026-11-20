@@ -621,20 +621,30 @@ func TestGroupWaitContextBoundedReturn(t *testing.T) {
 		synctest.Wait()
 		select {
 		case err := <-done:
+			close(release)
 			t.Fatalf("WaitContext returned %v before the wait context ended", err)
 		default:
 		}
 		cancel()
 		synctest.Wait()
+		var waitErr error
+		var waitErrSet bool
 		select {
-		case err := <-done:
-			if err != context.Canceled {
-				t.Fatalf("WaitContext = %v, want context.Canceled", err)
-			}
+		case waitErr = <-done:
+			waitErrSet = true
 		default:
+		}
+		stillRunning := !exited.Load()
+		// Unblock the child before any assertion can fail the test, so a
+		// failure cannot leave a parked goroutine for synctest to trip on.
+		close(release)
+		if !waitErrSet {
 			t.Fatal("WaitContext did not return after the wait context ended")
 		}
-		if exited.Load() {
+		if waitErr != context.Canceled {
+			t.Fatalf("WaitContext = %v, want context.Canceled", waitErr)
+		}
+		if !stillRunning {
 			t.Fatal("child exited when WaitContext gave up; want it still running")
 		}
 		var ran atomic.Bool
@@ -642,7 +652,6 @@ func TestGroupWaitContextBoundedReturn(t *testing.T) {
 			ran.Store(true)
 			return nil
 		})
-		close(release)
 		synctest.Wait()
 		if err := g.Wait(); err != nil {
 			t.Fatalf("later Wait = %v, want nil", err)
@@ -657,7 +666,7 @@ func TestGroupWaitContextBoundedReturn(t *testing.T) {
 // touching the group: the group stays joinable by a later Wait.
 func TestGroupWaitContextPrecancelled(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		g, _ := NewGroup(t.Context(), 0)
+		g, gctx := NewGroup(t.Context(), 0)
 		release := make(chan struct{})
 		exited := &atomic.Bool{}
 		g.Go(func(ctx context.Context) error {
@@ -671,13 +680,26 @@ func TestGroupWaitContextPrecancelled(t *testing.T) {
 		synctest.Wait()
 		waitCtx, cancel := context.WithCancel(t.Context())
 		cancel()
-		if err := g.WaitContext(waitCtx); err != context.Canceled {
+		err := g.WaitContext(waitCtx)
+		stillParked := !exited.Load()
+		var groupCancelled bool
+		select {
+		case <-gctx.Done():
+			groupCancelled = true
+		default:
+		}
+		// Unblock the child before any assertion can fail the test, so a
+		// failure cannot leave a parked goroutine for synctest to trip on.
+		close(release)
+		if err != context.Canceled {
 			t.Fatalf("WaitContext = %v, want context.Canceled", err)
 		}
-		if exited.Load() {
+		if groupCancelled {
+			t.Fatal("precancelled WaitContext cancelled the group context")
+		}
+		if !stillParked {
 			t.Fatal("child exited when WaitContext gave up; want it still running")
 		}
-		close(release)
 		synctest.Wait()
 		if err := g.Wait(); err != nil {
 			t.Fatalf("later Wait = %v, want nil", err)
