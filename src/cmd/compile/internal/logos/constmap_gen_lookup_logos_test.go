@@ -14,6 +14,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	rt "logos/rt"
 )
 
 func TestConstmapGeneratedLookupShape(t *testing.T) {
@@ -202,68 +204,229 @@ func constmapBuildRun(t *testing.T, dir, exe string, runEnv []string) string {
 	return string(out)
 }
 
-const constmapFlatIters = 200000
-
-func constmapFlatSrc(sizes []int) string {
-	var b strings.Builder
-	b.WriteString("package main\n\nimport (\n\t\"fmt\"\n\t\"time\"\n)\n\n")
-	for _, n := range sizes {
-		fmt.Fprintf(&b, "const m%d = map[string]int{", n)
-		for i := range n {
-			if i > 0 {
-				b.WriteString(", ")
-			}
-			fmt.Fprintf(&b, "%q: %d", fmt.Sprintf("k%05d", i), i)
+// constmapFlatRuntimeTable builds the shipped rt.ConstTable for keys, using
+// the keys' own hashes and canons, so tab.Get exercises the true hit path.
+func constmapFlatRuntimeTable(t *testing.T, keys []constMapKey) *rt.ConstTable[string, int] {
+	t.Helper()
+	layout, err := buildConstMap(keys, defaultConstMapBudget)
+	if err != nil {
+		t.Fatalf("buildConstMap %d keys: %v", len(keys), err)
+	}
+	tab := &rt.ConstTable[string, int]{Salt: layout.salt}
+	tab.Buckets = make([]rt.ConstBucket, len(layout.buckets))
+	for i, b := range layout.buckets {
+		tab.Buckets[i] = rt.ConstBucket{Off: uint32(b.off), Size: uint32(b.size), Seed: b.seed}
+	}
+	tab.Slots = make([]rt.ConstSlot[string, int], len(layout.slots))
+	for s, ki := range layout.slots {
+		if ki < 0 {
+			continue
 		}
-		b.WriteString("}\n\n")
+		tab.Slots[s] = rt.ConstSlot[string, int]{Key: keys[ki].canon, Val: ki, Occ: true}
 	}
-	fmt.Fprintf(&b, "var sink int\n\nconst iters = %d\n\ntype phase struct {\n\tname string\n\tf    func(int)\n}\n\nfunc phases(keys, miss []string) []phase {\n\treturn []phase{\n", constmapFlatIters)
-	for _, n := range sizes {
-		fmt.Fprintf(&b, "\t\t{\"hit%d\", func(int) {\n\t\t\tfor i := range iters {\n\t\t\t\tif v, ok := m%d[keys[i&%d]]; ok {\n\t\t\t\t\tsink += v\n\t\t\t\t}\n\t\t\t}\n\t\t}},\n", n, n, n-1)
-		fmt.Fprintf(&b, "\t\t{\"miss%d\", func(int) {\n\t\t\tfor i := range iters {\n\t\t\t\tif v, ok := m%d[miss[i&%d]]; ok {\n\t\t\t\t\tsink += v\n\t\t\t\t}\n\t\t\t}\n\t\t}},\n", n, n, n-1)
+	return tab
+}
+
+// constmapDesignatedSlot recomputes, through the exported runtime API, the
+// one slot rt.ConstTable.Get may read for hash h: the bucket picked by
+// ConstMix(Salt, h) and the slot picked by ConstMix(Seed, h). It returns -1
+// for a Size-0 bucket, which Get answers without reading.
+func constmapDesignatedSlot[K comparable](tab *rt.ConstTable[K, int], h uint64) int {
+	b := &tab.Buckets[rt.ConstMix(tab.Salt, h)&uint64(len(tab.Buckets)-1)]
+	if b.Size == 0 {
+		return -1
 	}
-	b.WriteString("\t}\n}\n\nfunc main() {\n\tkeys := make([]string, 16384)\n\tmiss := make([]string, 16384)\n\tfor i := range keys {\n\t\tkeys[i] = fmt.Sprintf(\"k%%05d\", i)\n\t\tmiss[i] = fmt.Sprintf(\"z%%05d\", i)\n\t}\n\tphases := phases(keys, miss)\n\tbest := make([]int64, len(phases))\n\tfor i := range best {\n\t\tbest[i] = int64(1 << 62)\n\t}\n\tfor range 9 {\n\t\tfor i, p := range phases {\n\t\t\tt0 := time.Now()\n\t\t\tp.f(iters)\n\t\t\tif ns := time.Since(t0).Nanoseconds(); ns < best[i] {\n\t\t\t\tbest[i] = ns\n\t\t\t}\n\t\t}\n\t}\n\tfor i, p := range phases {\n\t\tfmt.Println(p.name, best[i])\n\t}\n\t_ = sink\n}\n")
-	return b.String()
+	return int(b.Off) + int(rt.ConstMix(b.Seed, h)&uint64(b.Size-1))
 }
 
 func TestConstmapLookupCostFlat(t *testing.T) {
-	if testing.Short() {
-		t.Skip("builds a loGo/s program")
-	}
+	// No wall clock here: every assertion below is count-based, so host
+	// load cannot move the result. The one-probe contract itself is pinned
+	// behaviorally by TestConstmapLookupPoisonedSlots.
 	sizes := []int{16, 1024, 16384}
-	dir := t.TempDir()
-	constmapWriteModule(t, dir, map[string]string{
-		"go.mod":   "module flatcost\n\ngo 1.27\n",
-		"main.lgo": constmapFlatSrc(sizes),
-	})
-	out := constmapBuildRun(t, dir, "flatcost.exe", nil)
-	totals := map[string]int64{}
-	for line := range strings.SplitSeq(strings.TrimSpace(out), "\n") {
-		f := strings.Fields(line)
-		if len(f) != 2 {
-			t.Fatalf("flat-cost program printed %q", line)
-		}
-		n, err := strconv.ParseInt(f[1], 10, 64)
+	const misses = 1024
+	lookups := make(map[int]string, len(sizes))
+	for _, n := range sizes {
+		keys := constmapKeys(n)
+		layout, err := buildConstMap(keys, defaultConstMapBudget)
 		if err != nil {
-			t.Fatalf("flat-cost program printed %q", line)
+			t.Fatalf("buildConstMap %d keys: %v", n, err)
 		}
-		totals[f[0]] = n
-	}
-	for _, kind := range []string{"hit", "miss"} {
-		lo, hi := int64(1<<62), int64(0)
-		for _, n := range sizes {
-			v, ok := totals[fmt.Sprintf("%s%d", kind, n)]
-			if !ok {
-				t.Fatalf("flat-cost program lacks %s%d output: %q", kind, n, out)
+		keyTexts := make([]string, n)
+		valTexts := make([]string, n)
+		order := make([]int, n)
+		for i := range keys {
+			keyTexts[i] = `"` + keys[i].canon + `"`
+			valTexts[i] = fmt.Sprintf("%d", i)
+			order[i] = i
+		}
+		decls := emitConstMapDecls(constMapEmission{
+			name: "testflat", kT: "string", vT: "int",
+			mapT:     "map[string]int",
+			keyTexts: keyTexts,
+			valTexts: valTexts,
+			hashExpr: "_logos_rt.HashString(_logos_k)",
+			order:    order,
+			layout:   layout,
+			isSwitch: false,
+			bearing:  false,
+		})
+		idx := strings.Index(decls, "func testflat_lookup")
+		if idx < 0 {
+			t.Fatalf("size %d: table decls lack lookup", n)
+		}
+		lookup := decls[idx:]
+		if got := strings.Count(lookup, ".Get("); got != 1 {
+			t.Fatalf("size %d: table lookup has %d Get calls, want exactly one (one-probe contract)", n, got)
+		}
+		if strings.Contains(lookup, "for ") {
+			t.Fatalf("size %d: table lookup must not loop (one-probe contract)", n)
+		}
+		for _, banned := range []string{"sort.", "BinarySearch", "binarySearch"} {
+			if strings.Contains(lookup, banned) {
+				t.Fatalf("size %d: generated lookup contains %q: no logarithmic fallback", n, banned)
 			}
-			lo = min(lo, v)
-			hi = max(hi, v)
 		}
-		if ratio := float64(hi) / float64(lo); ratio > 3 {
-			t.Fatalf("%s lookup cost grows with key count: %s16=%dns %s1024=%dns %s16384=%dns over %d lookups (ratio %.2f > 3); a logarithmic fallback must not satisfy the contract",
-				kind, kind, totals[kind+"16"], kind, totals[kind+"1024"], kind, totals[kind+"16384"], constmapFlatIters, ratio)
+		lookups[n] = lookup
+		// The layout is a perfect hash: every key resolves to its own
+		// slot and no miss collides with a stored key.
+		for i, k := range keys {
+			if got := layout.slots[layout.probe(k.hash)]; got != i {
+				t.Fatalf("size %d: layout probe for key %d landed on slot %d", n, i, got)
+			}
+		}
+		missKeys := make([]string, misses)
+		for i := range missKeys {
+			missKeys[i] = fmt.Sprintf("z%05d", i)
+			if ki := layout.slots[layout.probe(constHashString(missKeys[i]))]; ki >= 0 && keys[ki].canon == missKeys[i] {
+				t.Fatalf("size %d: layout probe hit absent key %q", n, missKeys[i])
+			}
+		}
+		// The shipped lookup path is rt.ConstTable.Get. Drive every hit
+		// and every miss through it and check each result, so a degraded
+		// Get (linear scan, broken hash, skipped key check) fails here.
+		tab := constmapFlatRuntimeTable(t, keys)
+		for i, k := range keys {
+			if v, ok := tab.Get(k.hash, k.canon); !ok || v != i {
+				t.Fatalf("size %d: Get(%q) = (%d, %v), want (%d, true)", n, k.canon, v, ok, i)
+			}
+		}
+		for _, m := range missKeys {
+			if v, ok := tab.Get(constHashString(m), m); ok {
+				t.Fatalf("size %d: Get(%q) = (%d, true), want absent", n, m, v)
+			}
+		}
+		checkConstmapRuntimeGetString(t, n)
+		var hv int
+		var hok bool
+		if got := testing.AllocsPerRun(100, func() { hv, hok = tab.Get(keys[7].hash, keys[7].canon) }); got != 0 {
+			t.Fatalf("size %d: hit lookup averages %v allocations, want 0", n, got)
+		}
+		if !hok || hv != 7 {
+			t.Fatalf("size %d: hit lookup returned (%d, %v), want (7, true)", n, hv, hok)
+		}
+		mh, mk := constHashString("z00007"), "z00007"
+		var mv int
+		var mok bool
+		if got := testing.AllocsPerRun(100, func() { mv, mok = tab.Get(mh, mk) }); got != 0 {
+			t.Fatalf("size %d: miss lookup averages %v allocations, want 0", n, got)
+		}
+		if mok {
+			t.Fatalf("size %d: miss lookup returned (%d, true), want absent", n, mv)
 		}
 	}
+	for _, n := range sizes[1:] {
+		if lookups[n] != lookups[sizes[0]] {
+			t.Fatalf("generated lookup differs between %d and %d keys: lookup cost is not table-size independent", sizes[0], n)
+		}
+	}
+}
+
+func TestConstmapLookupPoisonedSlots(t *testing.T) {
+	// No wall clock here: a lookup that reads any slot but the designated
+	// one finds poison, so host load cannot move the result.
+	const poison = -999
+	for _, n := range []int{1, 2, 16, 1024} {
+		keys := constmapKeys(n)
+		tab := constmapFlatRuntimeTable(t, keys)
+		sampled := []int{0}
+		if n > 2 {
+			sampled = []int{0, n / 2, n - 1}
+		} else if n == 2 {
+			sampled = []int{0, 1}
+		}
+		for _, i := range sampled {
+			k := keys[i]
+			h := rt.HashString(k.canon)
+			d := constmapDesignatedSlot(tab, h)
+			if d < 0 || !tab.Slots[d].Occ || tab.Slots[d].Key != k.canon {
+				t.Fatalf("size %d: designated slot of key %d is not its own", n, i)
+			}
+			saved := append([]rt.ConstSlot[string, int](nil), tab.Slots...)
+			for s := range tab.Slots {
+				if s != d {
+					tab.Slots[s] = rt.ConstSlot[string, int]{Key: k.canon, Val: poison, Occ: true}
+				}
+			}
+			if v, ok := tab.Get(h, k.canon); !ok || v != i {
+				t.Fatalf("size %d: poisoned Get(%q) = (%d, %v), want (%d, true)", n, k.canon, v, ok, i)
+			}
+			m := fmt.Sprintf("q%05d-%d", n, i)
+			hm := rt.HashString(m)
+			dm := constmapDesignatedSlot(tab, hm)
+			if dm < 0 {
+				t.Fatalf("size %d: miss key %q lands in a Size-0 bucket", n, m)
+			}
+			tab.Slots = append([]rt.ConstSlot[string, int](nil), saved...)
+			tab.Slots[dm] = rt.ConstSlot[string, int]{}
+			for s := range tab.Slots {
+				if s != dm {
+					tab.Slots[s] = rt.ConstSlot[string, int]{Key: m, Val: poison, Occ: true}
+				}
+			}
+			if v, ok := tab.Get(hm, m); ok {
+				t.Fatalf("size %d: poisoned Get(%q) = (%d, true), want absent", n, m, v)
+			}
+			tab.Slots = saved
+		}
+	}
+	// Hand-built edge: a key in a Size-1 bucket and a degenerate Size-0
+	// bucket. The generator never emits these shapes, so they are spelled
+	// by hand through the exported fields.
+	const salt = uint64(0xC0FFEE)
+	var k0, m string
+	for i := 0; k0 == "" || m == ""; i++ {
+		c := fmt.Sprintf("pk%05d", i)
+		if rt.ConstMix(salt, rt.HashString(c))&1 == 0 {
+			if k0 == "" {
+				k0 = c
+			}
+		} else if m == "" {
+			m = c
+		}
+	}
+	edge := &rt.ConstTable[string, int]{Salt: salt}
+	edge.Buckets = []rt.ConstBucket{{Off: 2, Size: 1, Seed: 0x9E37}, {Off: 3, Size: 0}}
+	edge.Slots = []rt.ConstSlot[string, int]{{}, {}, {Key: k0, Val: 42, Occ: true}, {}}
+	if d := constmapDesignatedSlot(edge, rt.HashString(k0)); d != 2 {
+		t.Fatalf("edge table: designated slot of %q is %d, want 2", k0, d)
+	}
+	edgeSaved := append([]rt.ConstSlot[string, int](nil), edge.Slots...)
+	for s := range edge.Slots {
+		if s != 2 {
+			edge.Slots[s] = rt.ConstSlot[string, int]{Key: k0, Val: poison, Occ: true}
+		}
+	}
+	if v, ok := edge.Get(rt.HashString(k0), k0); !ok || v != 42 {
+		t.Fatalf("edge table: poisoned Get(%q) = (%d, %v), want (42, true)", k0, v, ok)
+	}
+	for s := range edge.Slots {
+		edge.Slots[s] = rt.ConstSlot[string, int]{Key: m, Val: poison, Occ: true}
+	}
+	if v, ok := edge.Get(rt.HashString(m), m); ok {
+		t.Fatalf("edge table: poisoned Get(%q) = (%d, true), want absent", m, v)
+	}
+	edge.Slots = edgeSaved
 }
 
 func constmapHeapCtlSrc() string {
