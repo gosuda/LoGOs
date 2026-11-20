@@ -87,9 +87,14 @@ func monitor(verb string, inv invocation) {
 	}
 	found := <-findings
 	if inv.fix || inv.aiPatch {
-		fixes := collectStalledFixes(raw.String())
+		var fixes []stalledFix
+		// A declared -overlay that cannot be read hides which file the
+		// compiler really compiled, so no fix is offered at all.
+		if overlay, ok := overlayFiles(inv.arguments); ok {
+			fixes = collectStalledFixes(raw.String(), overlay)
+		}
 		if inv.aiPatch {
-			printStalledBrief(fixes)
+			printStalledBrief(fixes, inv.asJSON)
 		} else {
 			for _, done := range applyStalledFixes(fixes) {
 				fmt.Fprintf(os.Stderr, "logos conc: fixed %s\n", done)
