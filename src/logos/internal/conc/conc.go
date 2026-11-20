@@ -19,7 +19,6 @@ package conc
 import (
 	"runtime"
 	"sync"
-	"time"
 	"unsafe"
 )
 
@@ -56,6 +55,7 @@ type monitor struct {
 	mu        sync.Mutex
 	held      map[uint64][]heldLock
 	holding   map[uintptr]lockHold
+	pending   map[uintptr][]pendingWaiter
 	order     map[lockPair][]pairSite
 	alive     map[uintptr]func() bool
 	sweepAt   int
@@ -66,6 +66,7 @@ type monitor struct {
 var locks = monitor{
 	held:      map[uint64][]heldLock{},
 	holding:   map[uintptr]lockHold{},
+	pending:   map[uintptr][]pendingWaiter{},
 	order:     map[lockPair][]pairSite{},
 	alive:     map[uintptr]func() bool{},
 	sweepAt:   firstSweepSize,
@@ -87,7 +88,7 @@ func Acquire(lock unsafe.Pointer) (untracked bool) {
 	locks.mu.Lock()
 	defer locks.mu.Unlock()
 	locks.forgetIfFreed(key)
-	locks.waiterArrived(key, pc)
+	locks.waiterArrived(g, key, pc)
 	_, tracked := locks.alive[key]
 	for _, outer := range locks.held[g] {
 		if outer.key == key {
@@ -136,7 +137,7 @@ func Hold(lock unsafe.Pointer) {
 	locks.mu.Lock()
 	defer locks.mu.Unlock()
 	locks.held[g] = append(locks.held[g], heldLock{key: key, pc: pc})
-	locks.holding[key] = lockHold{site: pc, since: time.Now()}
+	locks.holdStarted(g, key, pc)
 }
 
 // Release records that the calling goroutine no longer holds lock. It
@@ -172,6 +173,8 @@ func (m *monitor) forgetIfFreed(key uintptr) {
 
 func (m *monitor) forget(key uintptr) {
 	delete(m.alive, key)
+	delete(m.holding, key)
+	delete(m.pending, key)
 	for pair := range m.order {
 		if pair.first == key || pair.second == key {
 			delete(m.order, pair)

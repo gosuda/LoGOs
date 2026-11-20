@@ -7,11 +7,15 @@
 package conccmd
 
 import (
+	"bytes"
 	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
+	"strconv"
+	"sync"
 	"syscall"
 
 	"cmd/go/internal/base"
@@ -55,7 +59,15 @@ func monitor(verb string, inv invocation) {
 	child.Args[0] = os.Args[0]
 	child.Stdin = os.Stdin
 	child.Stdout = os.Stdout
-	child.Stderr = os.Stderr
+	scanner := &exitScanWriter{}
+	if verb == "run" {
+		// `logos run` reports the program's status as a line on
+		// standard error and itself exits 1; watch for the line so
+		// the command can forward the program's own status.
+		child.Stderr = scanner
+	} else {
+		child.Stderr = os.Stderr
+	}
 	child.Env = append(slices.Clip(cfg.OrigEnv), sinkEnv+"="+path)
 	for name, value := range inv.durations {
 		child.Env = append(child.Env, durationFlags[name]+"="+value)
@@ -86,10 +98,59 @@ func monitor(verb string, inv invocation) {
 		if status <= 0 {
 			status = 1
 		}
+		// The wrapper exits 1 for a failed program; the line it
+		// prints names the program's own status.
+		if status == 1 {
+			if code := scanner.status(); code > 0 {
+				status = code
+			}
+		}
 		base.SetExitStatus(status)
 	case runErr != nil:
 		base.Fatalf("logos conc %s: %v", verb, runErr)
 	case found > 0:
 		base.SetExitStatus(1)
 	}
+}
+
+// exitLine matches the line `logos run` prints when the program it ran
+// exits nonzero.
+var exitLine = regexp.MustCompile(`^exit status ([0-9]+)$`)
+
+// exitScanWriter passes the child's standard error through to standard
+// error while it watches for the "exit status N" line `logos run`
+// prints. The wrapper's own status is 1, so the last such line is the
+// only way to recover the program's status.
+type exitScanWriter struct {
+	mu   sync.Mutex
+	tail []byte
+	code int
+}
+
+func (s *exitScanWriter) Write(p []byte) (int, error) {
+	n, err := os.Stderr.Write(p)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.tail = append(s.tail, p...)
+	for {
+		i := bytes.IndexByte(s.tail, '\n')
+		if i < 0 {
+			break
+		}
+		line := s.tail[:i]
+		s.tail = s.tail[i+1:]
+		if m := exitLine.FindSubmatch(line); m != nil {
+			s.code, _ = strconv.Atoi(string(m[1]))
+		}
+	}
+	if len(s.tail) > 4096 {
+		s.tail = s.tail[len(s.tail)-4096:]
+	}
+	return n, err
+}
+
+func (s *exitScanWriter) status() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.code
 }

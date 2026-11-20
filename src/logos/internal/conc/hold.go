@@ -40,16 +40,37 @@ type lockHold struct {
 	waiter uintptr
 }
 
+// pendingWaiter is one goroutine that has called Acquire for a lock and
+// has not held it since. The monitor keeps waiters outside the current
+// hold, so a waiter that stays queued across a change of holder still
+// counts as waiting on the new hold.
+type pendingWaiter struct {
+	g  uint64
+	pc uintptr
+}
+
 // The monitor has no timer for a hold. It looks at the age of a hold
 // when another goroutine comes for the lock and when the hold ends, so
 // it reports a long hold at the first of these two events after the
 // limit.
 
-// waiterArrived records that a goroutine comes for the lock at pc. The
+// waiterArrived records that goroutine g comes for the lock at pc. The
 // holder is another goroutine: a second WithLock call of the holder on
 // one value never returns, and the linter rejects it. The caller holds
 // m.mu.
-func (m *monitor) waiterArrived(key uintptr, pc uintptr) {
+func (m *monitor) waiterArrived(g uint64, key uintptr, pc uintptr) {
+	ws := m.pending[key]
+	seen := false
+	for i := range ws {
+		if ws[i].g == g {
+			ws[i].pc = pc
+			seen = true
+			break
+		}
+	}
+	if !seen {
+		m.pending[key] = append(ws, pendingWaiter{g: g, pc: pc})
+	}
 	hold, held := m.holding[key]
 	if !held {
 		return
@@ -59,7 +80,30 @@ func (m *monitor) waiterArrived(key uintptr, pc uintptr) {
 	m.reportIfLong(hold)
 }
 
-// holdEnded forgets the hold of the lock. The caller holds m.mu.
+// holdStarted opens a hold on the lock for goroutine g. Its wait is
+// over; every other outstanding waiter still queues behind it, so the
+// earliest is the waiter of the new hold. The caller holds m.mu.
+func (m *monitor) holdStarted(g uint64, key uintptr, pc uintptr) {
+	hold := lockHold{site: pc, since: time.Now()}
+	ws := m.pending[key]
+	for i := range ws {
+		if ws[i].g == g {
+			ws = append(ws[:i], ws[i+1:]...)
+			break
+		}
+	}
+	if len(ws) == 0 {
+		delete(m.pending, key)
+	} else {
+		m.pending[key] = ws
+		hold.waiter = ws[0].pc
+	}
+	m.holding[key] = hold
+}
+
+// holdEnded forgets the hold of the lock. Outstanding waiters stay
+// recorded: they queue behind the next hold as well. The caller holds
+// m.mu.
 func (m *monitor) holdEnded(key uintptr) {
 	hold, held := m.holding[key]
 	if !held {

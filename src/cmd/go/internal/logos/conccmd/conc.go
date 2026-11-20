@@ -202,7 +202,24 @@ func valueFlags(cmd *base.Command) func(name string) bool {
 func childArguments(verb string, args []string, takesValue func(string) bool, goflags string) invocation {
 	inv := invocation{arguments: []string{verb}, durations: map[string]string{}}
 	tagged := false
+	countSet := false
 	i := 0
+	// The -C flag must stay first: the go command consumes it only in
+	// the leading position, so injected flags go behind it.
+	if i < len(args) && (args[i] == "-C" || args[i] == "--C") {
+		inv.arguments = append(inv.arguments, args[i])
+		i++
+		if i < len(args) {
+			inv.arguments = append(inv.arguments, args[i])
+			i++
+		}
+	} else if i < len(args) && (strings.HasPrefix(args[i], "-C=") || strings.HasPrefix(args[i], "--C=")) {
+		inv.arguments = append(inv.arguments, args[i])
+		i++
+	}
+	// injectAt is where injected flags (-tags, -count) join the
+	// arguments: behind -C, before everything else.
+	injectAt := len(inv.arguments)
 	for ; i < len(args); i++ {
 		arg := args[i]
 		if arg == "--" || arg == "-args" || arg == "--args" {
@@ -216,6 +233,9 @@ func childArguments(verb string, args []string, takesValue func(string) bool, go
 			continue
 		}
 		name, value, hasValue := strings.Cut(strings.TrimLeft(arg, "-"), "=")
+		if name == "count" || name == "test.count" {
+			countSet = true
+		}
 		switch {
 		case name == "json-diagnostics":
 			inv.asJSON = !hasValue || value == "true"
@@ -259,20 +279,12 @@ func childArguments(verb string, args []string, takesValue func(string) bool, go
 	}
 	if !tagged {
 		if tags, ok := goflagsTags(goflags); ok {
-			inv.arguments = append([]string{verb, "-tags=" + withMonitorTag(tags)}, inv.arguments[1:]...)
+			inv.arguments = slices.Insert(inv.arguments, injectAt, "-tags="+withMonitorTag(tags))
 		} else {
-			inv.arguments = append([]string{verb, "-tags=" + monitorTag}, inv.arguments[1:]...)
+			inv.arguments = slices.Insert(inv.arguments, injectAt, "-tags="+monitorTag)
 		}
 	}
 	if verb == "test" {
-		hasCount := false
-		for _, arg := range inv.arguments {
-			name, _, _ := strings.Cut(strings.TrimLeft(arg, "-"), "=")
-			if name == "count" {
-				hasCount = true
-				break
-			}
-		}
 		// Without an explicit count on the command line, repeat the
 		// count the effective GOFLAGS configures as an explicit flag,
 		// so the child runs the configured repeat count even when it
@@ -280,14 +292,14 @@ func childArguments(verb string, args []string, takesValue func(string) bool, go
 		// the explicit flag keeps the monitored run out of the test
 		// result cache. A bare -count entry with no value keeps the old
 		// behavior: the child reports the malformed flag itself.
-		if !hasCount {
+		if !countSet {
 			if count, ok := goflagsTestCount(goflags); ok && count != "" {
-				inv.arguments = slices.Insert(inv.arguments, 1, "-count="+count)
-				hasCount = true
+				inv.arguments = slices.Insert(inv.arguments, injectAt, "-count="+count)
+				countSet = true
 			}
 		}
-		if !hasCount {
-			inv.arguments = slices.Insert(inv.arguments, 1, "-count=1")
+		if !countSet {
+			inv.arguments = slices.Insert(inv.arguments, injectAt, "-count=1")
 		}
 	}
 
