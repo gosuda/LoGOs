@@ -1400,6 +1400,7 @@ type cfLeaf struct {
 	declParents map[syntax.Node]syntax.Node
 	localNamed  map[*syntax.TypeDecl]types2.Type
 	out         []cfSub
+	deferred    []span
 }
 
 // cfLeafSubs collects the leaf substitutions for active bindings in
@@ -1465,6 +1466,18 @@ func (c *cfLeaf) visit(n syntax.Node) bool {
 				syntax.Inspect(s, c.visit)
 			}
 			return false
+		}
+		// The selection cannot be decided here: the switch survives
+		// for the copy's own check, which prunes dead cases and
+		// reports only live comptime.Error calls. Substitute inside
+		// the surviving text but defer those diagnostics.
+		for i, cc := range n.Cases {
+			st := offAt(c.run.ctx.starts, cc.Case)
+			en := offAt(c.run.ctx.starts, n.Rbrace)
+			if i+1 < len(n.Cases) {
+				en = offAt(c.run.ctx.starts, n.Cases[i+1].Case)
+			}
+			c.deferred = append(c.deferred, span{start: st, end: en})
 		}
 		return true
 	case *syntax.FieldProjExpr:
@@ -1674,8 +1687,83 @@ func (c *cfLeaf) cfLocalTypeExpr(e syntax.Expr, ref syntax.Node) (types2.Type, b
 			}
 			return types2.NewSlice(t), true
 		}
+	case *syntax.MapType:
+		k, ki := c.cfLocalTypeExpr(e.Key, ref)
+		v, vi := c.cfLocalTypeExpr(e.Value, ref)
+		if ki || vi {
+			if k == nil || v == nil {
+				return nil, true
+			}
+			if !ki {
+				kk, ok := c.fl.cfResolveTypeExpr(e.Key, c.active, c.run.sites)
+				if !ok {
+					return nil, true
+				}
+				k = kk
+			}
+			if !vi {
+				vv, ok := c.fl.cfResolveTypeExpr(e.Value, c.active, c.run.sites)
+				if !ok {
+					return nil, true
+				}
+				v = vv
+			}
+			return types2.NewMap(k, v), true
+		}
+	case *syntax.ArrayType:
+		if t, involved := c.cfLocalTypeExpr(e.Elem, ref); involved {
+			if t == nil {
+				return nil, true
+			}
+			n, ok := cfArrayLen(e.Len)
+			if !ok {
+				return nil, true
+			}
+			return types2.NewArray(t, n), true
+		}
+	case *syntax.ChanType:
+		if t, involved := c.cfLocalTypeExpr(e.Elem, ref); involved {
+			if t == nil {
+				return nil, true
+			}
+			return types2.NewChan(types2.ChanDir(e.Dir), t), true
+		}
+	default:
+		// A composite this leaf cannot build (struct, interface, func)
+		// that still names a local type is left for the copy's own
+		// lowering rather than resolved from package scope.
+		if c.cfMentionsLocalType(e, ref) {
+			return nil, true
+		}
 	}
 	return nil, false
+}
+
+// cfArrayLen reads the length of an array type expression; a `...` or a
+// non-literal length cannot be folded here.
+func cfArrayLen(e syntax.Expr) (int64, bool) {
+	lit, ok := e.(*syntax.BasicLit)
+	if !ok || lit.Kind != syntax.IntLit {
+		return 0, false
+	}
+	n, err := strconv.ParseInt(lit.Value, 0, 64)
+	return n, err == nil
+}
+
+// cfMentionsLocalType reports whether any name inside e resolves to a
+// function-local type declaration in scope at ref.
+func (c *cfLeaf) cfMentionsLocalType(e syntax.Expr, ref syntax.Node) bool {
+	found := false
+	syntax.Inspect(e, func(n syntax.Node) bool {
+		if found {
+			return false
+		}
+		if name, ok := n.(*syntax.Name); ok && cfLocalTypeDeclBefore(c.declRoot, ref, name.Value, c.declParents) != nil {
+			found = true
+		}
+		return !found
+	})
+	return found
 }
 
 // infoPkgName reports whether a case qualifier name is a package name
@@ -1839,6 +1927,11 @@ func (c *cfLeaf) subComptimeError(n *syntax.CallExpr, sites *cfSites) bool {
 	if insideAny(span{start: s, end: e}, c.covered) {
 		return false
 	}
+	// A comptime.Error inside a const switch whose live case this
+	// pass cannot decide is left for the copy's own check.
+	if insideAny(span{start: s, end: e}, c.deferred) {
+		return false
+	}
 	msg, ok := c.fl.cfComptimeErrorMsg(n.ArgList[0], c.run.sites, c)
 	if !ok {
 		c.fl.cfError(c.run.sites.at(n.ArgList[0].Pos()), "[comptime::error_not_constant] comptime.Error needs a constant message")
@@ -1856,10 +1949,18 @@ func (fl *fileLower) cfComptimeErrorMsg(e syntax.Expr, sites *cfSites, leaf *cfL
 	if tv, ok := fl.pkg.info.Types[e]; ok && tv.Value != nil && tv.Value.Kind() == constant.String {
 		return constant.StringVal(tv.Value), true
 	}
-	return fl.cfStaticString(e, sites, leaf, e, make(map[string]bool))
+	return fl.cfStaticString(e, sites, leaf, e, make(map[cfConstRef]bool))
 }
 
-func (fl *fileLower) cfStaticString(e syntax.Expr, sites *cfSites, leaf *cfLeaf, ref syntax.Node, seen map[string]bool) (string, bool) {
+// cfConstRef identifies one constant spec by its declaring spec and
+// name, so a name reused by a shadowing declaration does not read as a
+// cycle on the fold's active path.
+type cfConstRef struct {
+	decl syntax.Node
+	name string
+}
+
+func (fl *fileLower) cfStaticString(e syntax.Expr, sites *cfSites, leaf *cfLeaf, ref syntax.Node, seen map[cfConstRef]bool) (string, bool) {
 	switch e := syntax.Unparen(e).(type) {
 	case *syntax.BasicLit:
 		if e.Kind != syntax.StringLit {
@@ -1885,11 +1986,12 @@ func (fl *fileLower) cfStaticString(e syntax.Expr, sites *cfSites, leaf *cfLeaf,
 		return x + y, true
 	case *syntax.Name:
 		if init, anchor, ok := cfLocalConstInitBefore(leaf.declRoot, ref, e.Value, leaf.declParents); ok {
-			if seen[e.Value] {
+			key := cfConstRef{decl: anchor, name: e.Value}
+			if seen[key] {
 				return "", false
 			}
-			seen[e.Value] = true
-			defer delete(seen, e.Value)
+			seen[key] = true
+			defer delete(seen, key)
 			return fl.cfStaticString(init, sites, leaf, anchor, seen)
 		}
 		if cfHasLocalBinder(leaf.declRoot, ref, e.Value, leaf.declParents) {

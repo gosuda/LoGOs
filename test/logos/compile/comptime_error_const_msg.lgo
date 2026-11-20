@@ -94,3 +94,16 @@ func FailGroupedConstMsg[T any]() int {
 }
 
 var _ = FailGroupedConstMsg[int]() // ERROR "\[comptime::error\] xy"
+
+const RepeatPrefix = "denied"
+
+func FailRepeatedInit[T any]() int {
+	const (
+		RepeatPrefix = RepeatPrefix
+		RepeatMsg
+	)
+	comptime.Error(RepeatMsg)
+	return 0
+}
+
+var _ = FailRepeatedInit[int]() // ERROR "\[comptime::error\] denied"

@@ -123,6 +123,22 @@ func GroupAlias[T any]() string {
 	return "other"
 }
 
+type MapElem = int
+
+func MapTag[T any]() string {
+	type MapElem = string
+	type MapTag = map[string]MapElem
+	const switch MapTag {
+	case map[string]MapElem:
+		_ = comptime.SizeOf[int]()
+		return "maptag"
+	case any:
+		comptime.Error("dead map")
+		return "dead"
+	}
+	return "other"
+}
+
 func main() {
 	fmt.Println(ShadowCase[string]())
 	fmt.Println(ShadowTag[int]())
@@ -132,4 +148,5 @@ func main() {
 	fmt.Println(StructLocal[string]())
 	fmt.Println(SliceTag[int]())
 	fmt.Println(GroupAlias[int]())
+	fmt.Println(MapTag[int]())
 }
