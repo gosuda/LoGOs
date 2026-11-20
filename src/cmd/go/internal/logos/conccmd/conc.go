@@ -137,7 +137,7 @@ var cmdTest = &base.Command{
 func Register(root *base.Command) {
 	for verb, cmd := range map[string]*base.Command{"run": cmdRun, "test": cmdTest} {
 		cmd.Run = func(ctx context.Context, _ *base.Command, args []string) {
-			inv := childArguments(verb, args, valueFlags(root.Lookup(verb)))
+			inv := childArguments(verb, args, valueFlags(root.Lookup(verb)), cfg.Getenv("GOFLAGS"))
 			for _, name := range slices.Sorted(maps.Keys(inv.durations)) {
 				if d, err := time.ParseDuration(inv.durations[name]); err != nil || d <= 0 {
 					base.Fatalf("logos conc %s: -%s %q is not a positive duration", verb, name, inv.durations[name])
@@ -193,8 +193,13 @@ func valueFlags(cmd *base.Command) func(name string) bool {
 // arguments of `logos <verb>`: it removes -json-diagnostics and the
 // duration flags, and adds the monitor tag to the build tags. It reads
 // flags up to the package of `run`, and up to -args or -- of `test`;
-// later arguments belong to the program.
-func childArguments(verb string, args []string, takesValue func(string) bool) invocation {
+// later arguments belong to the program. The goflags argument carries the
+// effective GOFLAGS, so the test repeat count and the GOFLAGS build tags
+// are decided from explicit values instead of the ambient process
+// configuration. An explicit -tags overrides GOFLAGS in the go command,
+// so the monitor joins the explicit set when one is present and the
+// GOFLAGS set otherwise.
+func childArguments(verb string, args []string, takesValue func(string) bool, goflags string) invocation {
 	inv := invocation{arguments: []string{verb}, durations: map[string]string{}}
 	tagged := false
 	i := 0
@@ -253,7 +258,11 @@ func childArguments(verb string, args []string, takesValue func(string) bool) in
 		}
 	}
 	if !tagged {
-		inv.arguments = append([]string{verb, "-tags=" + monitorTag}, inv.arguments[1:]...)
+		if tags, ok := goflagsTags(goflags); ok {
+			inv.arguments = append([]string{verb, "-tags=" + withMonitorTag(tags)}, inv.arguments[1:]...)
+		} else {
+			inv.arguments = append([]string{verb, "-tags=" + monitorTag}, inv.arguments[1:]...)
+		}
 	}
 	if verb == "test" {
 		hasCount := false
@@ -264,8 +273,18 @@ func childArguments(verb string, args []string, takesValue func(string) bool) in
 				break
 			}
 		}
+		// Without an explicit count on the command line, repeat the
+		// count the effective GOFLAGS configures as an explicit flag,
+		// so the child runs the configured repeat count even when it
+		// resolves the configuration from a different directory, and
+		// the explicit flag keeps the monitored run out of the test
+		// result cache. A bare -count entry with no value keeps the old
+		// behavior: the child reports the malformed flag itself.
 		if !hasCount {
-			hasCount = goflagsHasCount()
+			if count, ok := goflagsTestCount(goflags); ok && count != "" {
+				inv.arguments = slices.Insert(inv.arguments, 1, "-count="+count)
+				hasCount = true
+			}
 		}
 		if !hasCount {
 			inv.arguments = slices.Insert(inv.arguments, 1, "-count=1")
@@ -276,21 +295,47 @@ func childArguments(verb string, args []string, takesValue func(string) bool) in
 	return inv
 }
 
-// goflagsHasCount reports whether the effective GOFLAGS already sets a
-// test repeat count. GOFLAGS holds one flag per entry in -name=value
-// form, so a bare name check covers both -count and -test.count.
-func goflagsHasCount() bool {
-	flags, err := quoted.Split(cfg.Getenv("GOFLAGS"))
+// goflagsTestCount returns the test repeat count the effective GOFLAGS
+// configures. GOFLAGS holds one flag per entry in -name=value form, so a
+// bare name check covers both -count and -test.count. The second result
+// is false when no entry names a count.
+func goflagsTestCount(goflags string) (string, bool) {
+	flags, err := quoted.Split(goflags)
 	if err != nil {
-		return false
+		return "", false
 	}
 	for _, flag := range flags {
-		name, _, _ := strings.Cut(strings.TrimLeft(flag, "-"), "=")
+		name, value, _ := strings.Cut(strings.TrimLeft(flag, "-"), "=")
 		if name == "count" || name == "test.count" {
-			return true
+			return value, true
 		}
 	}
-	return false
+	return "", false
+}
+
+// goflagsTags returns the build tags the effective GOFLAGS configures.
+// GOFLAGS holds one flag per entry in -name=value form, so only the
+// -tags=value and --tags=value spellings count; a bare -tags entry is
+// invalid and the child reports it. The last entry wins, as in the go
+// command. The second result is false when no entry names tags.
+func goflagsTags(goflags string) (string, bool) {
+	flags, err := quoted.Split(goflags)
+	if err != nil {
+		return "", false
+	}
+	tags := ""
+	ok := false
+	for _, flag := range flags {
+		switch {
+		case strings.HasPrefix(flag, "--tags="):
+			tags, ok = flag[len("--tags="):], true
+		case strings.HasPrefix(flag, "-tags="):
+			tags, ok = flag[len("-tags="):], true
+		default:
+			continue
+		}
+	}
+	return tags, ok
 }
 
 func withMonitorTag(tags string) string {

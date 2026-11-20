@@ -317,6 +317,9 @@ func classifyUnions(info *types2.Info, files []*syntax.File) *unionClass {
 					continue
 				}
 				syntax.Inspect(f.Type, func(m syntax.Node) bool {
+					if _, ok := m.(*syntax.FuncType); ok {
+						return false
+					}
 					if name, ok := m.(*syntax.Name); ok {
 						noteAll(name, constraintPos, constraint)
 					}
@@ -382,10 +385,23 @@ func classifyUnions(info *types2.Info, files []*syntax.File) *unionClass {
 		})
 	}
 
+	aliasPos := make(map[*syntax.Name]bool)
+	for _, file := range files {
+		syntax.Inspect(file, func(n syntax.Node) bool {
+			td, ok := n.(*syntax.TypeDecl)
+			if !ok || !td.Alias || td.Type == nil {
+				return true
+			}
+			if name := aliasBaseName(td.Type); name != nil {
+				aliasPos[name] = true
+			}
+			return true
+		})
+	}
 	for _, file := range files {
 		syntax.Inspect(file, func(n syntax.Node) bool {
 			name, ok := n.(*syntax.Name)
-			if !ok || constraintPos[name] || embedPos[name] || barePos[name] {
+			if !ok || constraintPos[name] || embedPos[name] || barePos[name] || aliasPos[name] {
 				return true
 			}
 			note(resolveUnionRef(info.Uses[name]), value)
@@ -444,6 +460,18 @@ func bareRefName(e syntax.Expr) *syntax.Name {
 	default:
 		return nil
 	}
+}
+
+func aliasBaseName(e syntax.Expr) *syntax.Name {
+	e = unwrapParen(e)
+	for {
+		ix, ok := e.(*syntax.IndexExpr)
+		if !ok {
+			break
+		}
+		e = unwrapParen(ix.X)
+	}
+	return bareRefName(e)
 }
 
 func unionNameRef(info *types2.Info, e syntax.Expr) *types2.TypeName {

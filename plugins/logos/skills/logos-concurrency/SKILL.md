@@ -16,12 +16,12 @@ LoGOs runs goroutines inside `go group` blocks. Shared state lives in `logos/syn
 
 1. Write group code: start children inside `go group` blocks.
 2. Guard shared state with `logos/sync.Locked`.
-3. Run `logos lint` and `logos test -race` first.
+3. Run `logos lint` and `logos test -race` first. `-race` reports only exercised races and gives no universal data-race freedom. The run works under `[build] cgo = "forbid"`: it links only the race runtime and needs a C compiler or `zig` in PATH.
 4. Run the program under the monitor only when it is lint-clean and race-clean.
 5. Use `logos conc run` for a program and `logos conc test` for tests.
 6. Read each finding on standard error while the child still runs.
 7. Repair the named position, then rerun without `conc` to confirm the behavior.
-8. Retry a shake failure with the printed seed to shake the run again.
+8. Retry a shake failure with the printed seed to shake the run again. The seed fixes the yield counts, not the exact goroutine schedule, so treat a rerun as a retry, not an exact replay.
 
 ## Group and lock forms
 
@@ -111,6 +111,14 @@ go group (ctx) {
 }
 ```
 
+<<<<<<< HEAD
+||||||| 69ec667c04
+A shake schedule fault has no rule id. Treat a test that fails only under `-shake` as an order dependence. Rerun with the printed seed to shake the run again; the seed fixes the yield counts, not the exact schedule.
+
+=======
+A shake schedule fault has no rule id. Treat a test that fails only under `-shake` as an order dependence. Rerun with the printed seed to shake the run again; the same seed can yield differently, so it is a retry, not an exact replay.
+
+>>>>>>> origin/feat/logos-conc
 ## Set flags and replay seeds
 
 Pass `-stall` with a Go duration to set how long a cancelled-group child may run before it is reported. Omit it to keep the 5s default. Pass `-hold` with a Go duration to set how long a contested hold may last. Omit it to keep the 100ms default. Use either the space form or the `=` form for both.
