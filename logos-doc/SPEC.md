@@ -91,6 +91,7 @@ Each `.lgo` file MUST become a `.go` file [T-0.3].
 Completeness MUST include packages absent from the requested host build, including inactive-only tests and dependency modules reached only through an inactive variant [T-0.3].
 Source discovery MUST respect package and module ownership boundaries: nested modules, `vendor`, `testdata`, dot-prefixed and underscore-prefixed paths, module ignore rules, and directory symlinks MUST NOT become additional package roots [T-0.3].
 The physical copy MUST NOT contain a directory that holds its own `go.mod` (it is another module) unless the module's own `go.mod` has a local `replace` that names that directory, which the copy MUST keep so the replace still resolves. A kept module that lies below another nested module MUST be copied without the files of that other module [T-0.3]. Only a `go.mod` file marks a module, as in the go command: a directory named `go.mod` MUST be copied as data with the files beside it [T-0.3].
+The physical copy MUST hold every other regular file of the main module: each Go file that still parses is rewritten to the ejected import paths and formatted, and each remaining file is copied byte for byte. Dot-prefixed and underscore-prefixed paths, `vendor`, `testdata`, and paths a version-control ignore file lists are copied when they lie in the copied module, because `//go:embed` can reach them; only package discovery skips those paths. The copy MUST leave out `.git` contents, `logos.toml` files, `.lgo` sources (emitted as `.go` files), the destination subtree, symlinks and special files, and the files of foreign nested modules [T-0.3].
 Each discovered inactive source MUST be type-checked and lowered by the ordinary compiler path under a context that selects it [T-0.3].
 Inactive discovery, build-constraint selection, and helper compilation MUST use the requested source overlay. Overlay-deleted sources MUST remain absent, and inserted or replaced sources MUST use their effective contents [T-0.3].
 Owned helpers MUST retain the package name selected by their source context; distinct package clauses in one directory MUST NOT be treated as declaration collisions [T-0.3].
@@ -149,6 +150,12 @@ The `[build] cgo` policy (`forbid`, `restricted`, `allow`) and its `forbid` defa
 A Go main module MUST keep the upstream default for `CGO_ENABLED` under `logos`, and a `cgo` key in its `logos.toml` MUST have no effect [T-101.2][R-U1].
 Plain `go` MUST keep the upstream default for `CGO_ENABLED` [T-101.2].
 With cgo off, `net` and `os/user` in the standard library MUST use their pure-Go paths, which is the upstream `CGO_ENABLED=0` behavior [T-101.2].
+On a target whose race runtime links through cgo (every race target except darwin), a build with `-race` in a LoGOs main module whose cgo policy is `forbid`, by key or by default, MUST link the race runtime through `runtime/cgo`, unless the environment sets `CGO_ENABLED=0` [T-101.2].
+In that build, a package outside the standard library with `import "C"` MUST still fail with `restriction::cgo_usage` [T-101.2].
+In that build, `net` and `os/user` MUST keep their pure-Go paths [T-101.2].
+When that build finds neither the C compiler nor `zig` in PATH, it MUST fail before compilation with a message that names the race runtime and `logos.toml` [T-101.2].
+On such a target, when the environment sets `CGO_ENABLED=0`, a build with `-race` in a LoGOs main module MUST fail with a message that names `CGO_ENABLED=0` [T-101.2].
+On darwin the race runtime needs no cgo, and a build with `-race` MUST keep cgo off under that policy [T-101.2].
 
 ### 1.2 RFC-102: Compiler linter and rule set
 The `logos lint` check MUST run inside the compiler on LoGOs packages for syntax and type rules [T-102].
@@ -683,6 +690,8 @@ Code MUST copy the field to a local first. [T-202]
 
 For a callee declared in `.lgo`, reading a result before the `err == nil` proof MUST fail with `[correctness::result_before_error_check]`. [T-202]
 
+A call that cannot return MUST discharge the `err == nil` proof. The calls that count are the builtin `panic` and a closed list of standard library calls: `os.Exit`; `log.Fatal`, `log.Fatalf`, `log.Fatalln`, `log.Panic`, `log.Panicf`, `log.Panicln`; the methods `Fatal`, `Fatalf`, `FailNow`, `Skip`, `Skipf`, `SkipNow` called through `*testing.T`, `*testing.B`, `*testing.F`, or `testing.TB`; and `runtime.Goexit`. A method with one of those names declared outside its listed package MUST NOT discharge the proof, and a user declared function MUST NOT be inferred as never returning. [T-202]
+
 An `err == nil` proof MUST remain valid for a captured result in a function literal, lambda, or `go group` child when that result is initialized at its declaration, is never assigned again, and never has its address taken. A result assigned anywhere besides its declaration or whose address is taken MUST NOT inherit that proof across the capture boundary. [T-202]
 
 A return that passes a result and the err it came with, both unread and unchanged, MUST NOT count as a read of the result. [T-202]
@@ -1074,6 +1083,8 @@ Any run-time use of those compile-time-only forms MUST fail with `[comptime::run
 A generic function that uses them MUST become a comptime generic. [T-205]
 
 Each instantiation MUST expand into a non-generic copy `<f>_logosct<N>` in the instantiating package. [T-205]
+
+A comptime call inside an expansion whose type arguments are concrete after substitution MUST expand into the same copy, at any depth and across package boundaries. [T-205]
 
 Copies MUST be memoized per type-argument list. [T-205]
 
