@@ -28,6 +28,13 @@ cd bad
 stderr 'platform pointer f \(\*os\.File\)'
 cd ..
 
+cd derived
+! logos build ./...
+stderr 'platform pointer beta\.Missing \(\*bytes\.Buffer\)'
+stderr 'platform pointer b\.E \(\*example\.com/derived/beta\.MyError\)'
+stderr 'platform pointer beta\.Gen\[\*beta\.MyError\]\{\}\.Zero\(\) \(\*example\.com/derived/beta\.MyError\)'
+cd ..
+
 -- ok/go.mod --
 module example.com/cross
 
@@ -112,4 +119,61 @@ func platformStillGo() io.Closer {
 
 func main() {
 	_ = platformStillGo()
+}
+
+-- derived/go.mod --
+module example.com/derived
+
+go 1.27
+
+-- derived/beta/beta.lgo --
+package beta
+
+import "bytes"
+
+type MyError struct {
+	Msg string
+}
+
+func (e MyError) Error() string {
+	return e.Msg
+}
+
+// Missing is inferred from a Go-mode call, so it can be nil; the
+// derived marker must cross the import boundary.
+var Missing = bytes.NewBuffer(nil)
+
+// Box is an opaque imported named type: its zero value can hold a nil
+// field, so field reads keep the nullable contract.
+type Box struct {
+	E *MyError
+}
+
+type Gen[T any] struct{}
+
+func (g Gen[T]) Zero() T {
+	var z T
+	return z
+}
+
+-- derived/alpha/alpha.lgo --
+package alpha
+
+import (
+	"fmt"
+
+	"example.com/derived/beta"
+)
+
+func ReturnDerived() fmt.Stringer {
+	return beta.Missing
+}
+
+func ReturnField() error {
+	var b beta.Box
+	return b.E
+}
+
+func ReturnGeneric() error {
+	return beta.Gen[*beta.MyError]{}.Zero()
 }

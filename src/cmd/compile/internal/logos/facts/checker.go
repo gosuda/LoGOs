@@ -16,6 +16,15 @@ func init() {
 	types2.LogosImportedConstMapLen = constMapLen
 	types2.LogosImportedConstComposite = constComposite
 	types2.LogosImportedIsLogos = isLogosPackage
+	types2.LogosImportedDerivedVar = importedDerivedVar
+}
+
+func importedDerivedVar(path, object string) bool {
+	f, ok := Lookup(path)
+	if !ok || f == nil {
+		return false
+	}
+	return slices.Contains(f.Deriveds, object)
 }
 
 func isLogosPackage(path string) bool {
