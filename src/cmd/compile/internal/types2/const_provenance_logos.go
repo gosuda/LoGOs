@@ -122,26 +122,53 @@ func (check *Checker) logosReadonlySliceResult(x *operand, e *syntax.SliceExpr, 
 }
 
 func logosIndexStoreProtected(container Type) bool {
-	base, descendants, readonly := logosReadonlyBase(container)
-	if !descendants {
-		return readonly
+	for {
+		base, descendants, readonly := logosReadonlyBase(container)
+		if readonly {
+			return true
+		}
+		if descendants {
+			_, inline := base.Underlying().(*Array)
+			return !inline
+		}
+		p, ok := Unalias(container).(*Pointer)
+		if !ok {
+			return false
+		}
+		container = p.base
 	}
-	_, inline := base.Underlying().(*Array)
-	return !inline
 }
 
 func (check *Checker) logosFieldStoreProtected(container Type, name string) bool {
-	base, descendants, readonly := logosReadonlyBase(container)
-	if !descendants {
-		return readonly
+	for {
+		base, descendants, readonly := logosReadonlyBase(container)
+		if readonly {
+			return true
+		}
+		if descendants {
+			_, _, indirect := lookupFieldOrMethod(base, true, check.pkg, name, false)
+			return indirect
+		}
+		p, ok := Unalias(container).(*Pointer)
+		if !ok {
+			return false
+		}
+		container = p.base
 	}
-	_, _, indirect := lookupFieldOrMethod(base, true, check.pkg, name, false)
-	return indirect
 }
 
 func logosDerefStoreProtected(container Type) bool {
-	_, descendants, readonly := logosReadonlyBase(container)
-	return readonly || descendants
+	for {
+		_, descendants, readonly := logosReadonlyBase(container)
+		if readonly || descendants {
+			return true
+		}
+		p, ok := Unalias(container).(*Pointer)
+		if !ok {
+			return false
+		}
+		container = p.base
+	}
 }
 
 func logosContainsReadonlyDescendants(T Type) bool {
