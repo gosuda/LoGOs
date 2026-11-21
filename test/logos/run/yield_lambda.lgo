@@ -44,6 +44,16 @@ func held() func(int) iter.Seq[int] {
 	}
 }
 
+var calls []int
+
+var lazy func(int) iter.Seq[int] = x => {
+	calls = append(calls, x)
+	yield x
+	calls = append(calls, -x)
+	yield x * 10
+	return
+}
+
 func main() {
 	var got []int
 	for v := range seqOf(7) {
@@ -71,6 +81,18 @@ func main() {
 		got = append(got, v)
 	}
 	check("returned lambda", fmt.Sprint(got) == "[9]", fmt.Sprint(got), "[9]")
+
+	seq := lazy(5)
+	check("generator body is lazy", len(calls) == 0, fmt.Sprint(calls), "[]")
+	n := 0
+	for v := range seq {
+		_ = v
+		n++
+		if n == 1 {
+			break
+		}
+	}
+	check("early break stops body", fmt.Sprint(calls) == "[5]", fmt.Sprint(calls), "[5]")
 
 	if failed {
 		os.Exit(1)
