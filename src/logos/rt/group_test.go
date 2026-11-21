@@ -635,6 +635,14 @@ func TestGroupWaitContextBoundedReturn(t *testing.T) {
 		default:
 		}
 		stillRunning := !exited.Load()
+		// Submit the next child while the first is still parked, so the
+		// Go-after-abandoned-WaitContext submission is covered with a
+		// running child, not left to whether the first exited first.
+		var ran atomic.Bool
+		g.Go(func(ctx context.Context) error {
+			ran.Store(true)
+			return nil
+		})
 		// Unblock the child before any assertion can fail the test, so a
 		// failure cannot leave a parked goroutine for synctest to trip on.
 		close(release)
@@ -647,11 +655,6 @@ func TestGroupWaitContextBoundedReturn(t *testing.T) {
 		if !stillRunning {
 			t.Fatal("child exited when WaitContext gave up; want it still running")
 		}
-		var ran atomic.Bool
-		g.Go(func(ctx context.Context) error {
-			ran.Store(true)
-			return nil
-		})
 		synctest.Wait()
 		if err := g.Wait(); err != nil {
 			t.Fatalf("later Wait = %v, want nil", err)
