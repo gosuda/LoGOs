@@ -139,6 +139,63 @@ func MapTag[T any]() string {
 	return "other"
 }
 
+
+type MapMixElem = int
+
+func MapMix[T any]() string {
+	type MapMixElem = string
+	const switch T {
+	case map[int]MapMixElem:
+		_ = comptime.SizeOf[int]()
+		return "mapmix"
+	case any:
+		comptime.Error("dead mapmix")
+		return "dead"
+	}
+	return "other"
+}
+
+type FieldElem = int
+
+func FieldName[T any]() string {
+	type FieldElem = string
+	const switch T {
+	case struct{ FieldElem int }:
+		_ = comptime.SizeOf[int]()
+		return "fieldname"
+	case any:
+		comptime.Error("dead fieldname")
+		return "dead"
+	}
+	return "other"
+}
+
+
+func ArrLenLit[T any]() string {
+	type ArrElem = int
+	const switch T {
+	case [2]ArrElem:
+		return "arr"
+	case any:
+		comptime.Error("dead arr lit")
+		return "dead"
+	}
+	return "other"
+}
+
+func ArrLenName[T any]() string {
+	const N = 2
+	type ArrElem = int
+	const switch T {
+	case [N]ArrElem:
+		return "arr"
+	case any:
+		comptime.Error("dead arr name")
+		return "dead"
+	}
+	return "other"
+}
+
 func main() {
 	fmt.Println(ShadowCase[string]())
 	fmt.Println(ShadowTag[int]())
@@ -149,4 +206,8 @@ func main() {
 	fmt.Println(SliceTag[int]())
 	fmt.Println(GroupAlias[int]())
 	fmt.Println(MapTag[int]())
+	fmt.Println(MapMix[map[int]string]())
+	fmt.Println(FieldName[struct{ FieldElem int }]())
+	fmt.Println(ArrLenLit[[2]int]())
+	fmt.Println(ArrLenName[[2]int]())
 }

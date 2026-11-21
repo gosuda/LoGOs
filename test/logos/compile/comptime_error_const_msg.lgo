@@ -107,3 +107,16 @@ func FailRepeatedInit[T any]() int {
 }
 
 var _ = FailRepeatedInit[int]() // ERROR "\[comptime::error\] denied"
+
+func FailDeferredCase[T any]() int {
+	type Local = struct{ X T }
+	const switch T {
+	case Local:
+		comptime.Error("local case")
+	case int:
+		comptime.Error("int case")
+	}
+	return 0
+}
+
+var _ = FailDeferredCase[int]() // ERROR "\[comptime::error\] int case"
