@@ -212,9 +212,12 @@ recheck:
 	if !didLogos {
 		didLogos = true
 		logosLintHook(&m, files, pkg, info, &importer) // logos M9 hook: lints see the unlowered tree.
+		// Capture the carry regardless of which recheck path follows: a
+		// midway (SIMD) rebuild loses the derived marks the same way a
+		// logos recheck does.
+		logosDerivedCarry = types2.LogosDerivedVarNames(pkg)
 		if logosRecheckHook(&conf, pkg, info, files) {
 			logosProvenCarry = conf.LogosProvenReadonly
-			logosDerivedCarry = types2.LogosDerivedVarNames(pkg)
 			goto recheck
 		}
 	}
