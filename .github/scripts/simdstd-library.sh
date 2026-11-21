@@ -6,7 +6,7 @@
 set -eo pipefail
 . .github/scripts/env.sh; cd src
 test "$(go env GOROOT)" = "$GITHUB_WORKSPACE"
-# go test prints nothing while a slow package runs; Latchkey stops a job after 15 quiet minutes
+# go test prints nothing while a slow package runs; a silent job looks hung, so a heartbeat keeps the log alive
 (
   trap 'kill "$!" 2>/dev/null || :; exit 0' TERM
   while sleep 240 & wait "$!"; do echo "[heartbeat] $(date -u +%T)"; done

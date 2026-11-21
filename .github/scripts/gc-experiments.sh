@@ -5,7 +5,7 @@
 # expand variables the runner leaves empty.
 set -eo pipefail
 . .github/scripts/env.sh; cd src; export GOEXPERIMENT=$EXP
-n=2; [ "$LATCHKEY_CI_EVENT_CLASS" = pr_update ] || n=10
+n=2; [ "$GITHUB_EVENT_NAME" = pull_request ] || n=10
 files=(runtime/arena_logos.go runtime/region_logos.go runtime/logos_arena_test.go runtime/export_logos_gc_stability_test.go runtime/logos_gc_stability_test.go runtime/export_logos_gcscan_bounds_test.go runtime/logos_gcscan_bounds_test.go)
 test -z "$(gofmt -l "${files[@]}")"
 go vet runtime runtime/metrics
