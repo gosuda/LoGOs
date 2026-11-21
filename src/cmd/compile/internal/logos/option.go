@@ -2362,13 +2362,19 @@ func (fl *fileLower) wrapTuple(v syntax.Expr, recs, targets []types2.Type) synta
 	rTexts := make([]string, n)
 	pTexts := make([]string, n)
 	for i := range n {
-		nt, et, ok := fl.spellLoweredBoth(targets[i], pos)
+		rt := targets[i]
+		if rt == nil {
+			// A blank destination accepts the produced value untyped:
+			// forward it under its own result type.
+			rt = recs[i]
+		}
+		nt, et, ok := fl.spellLoweredBoth(rt, pos)
 		if !ok {
-			base.Fatalf("logos: cannot spell type %s of the option wrap at %s", targets[i], pos.String())
+			base.Fatalf("logos: cannot spell type %s of the option wrap at %s", rt, pos.String())
 		}
 		results[i] = at(&syntax.Field{Type: nt}, pos)
 		rTexts[i] = et
-		pt, pet, ok := fl.spellTypeBoth(recs[i], pos)
+		pt, pet, ok := fl.spellLoweredBoth(recs[i], pos)
 		if !ok {
 			base.Fatalf("logos: cannot spell type %s of the option wrap at %s", recs[i], pos.String())
 		}
