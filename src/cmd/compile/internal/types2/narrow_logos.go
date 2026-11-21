@@ -220,6 +220,8 @@ func (w *logosDisqualWalk) Visit(node syntax.Node) syntax.Visitor {
 				if w.inner == 0 {
 					w.declared[name] = true
 				}
+				// The for's scope is already on the stack.
+				w.scopes[len(w.scopes)-1][name] = true
 			}
 		} else {
 			for _, name := range logosAssignNames(t.Lhs) {
@@ -253,7 +255,9 @@ func (w *logosDisqualWalk) leave() {
 		}
 	case *syntax.ForStmt:
 		w.loop--
-	case *syntax.BlockStmt, *syntax.CaseClause, *syntax.CommClause:
+		w.scopes = w.scopes[:len(w.scopes)-1]
+	case *syntax.BlockStmt, *syntax.CaseClause, *syntax.CommClause,
+		*syntax.IfStmt, *syntax.SwitchStmt, *syntax.SwitchExpr:
 		w.scopes = w.scopes[:len(w.scopes)-1]
 	}
 }
@@ -272,7 +276,12 @@ func (w *logosDisqualWalk) declare(node syntax.Node) {
 				w.params = append(w.params, name.Value)
 			}
 		}
-	case *syntax.BlockStmt, *syntax.CaseClause, *syntax.CommClause:
+	case *syntax.BlockStmt, *syntax.CaseClause, *syntax.CommClause,
+		*syntax.IfStmt, *syntax.ForStmt, *syntax.SwitchStmt, *syntax.SwitchExpr:
+		// Header-bearing statements get a scope too: their initializer
+		// := declares into the statement's own scope, and recording it
+		// is what lets a later closure write to the name stay local
+		// instead of escaping onto a same-named outer variable.
 		scope := make(map[string]bool, len(w.params))
 		for _, name := range w.params {
 			scope[name] = true
@@ -310,7 +319,7 @@ func (w *logosDisqualWalk) assign(s *syntax.AssignStmt) {
 				w.declared[name] = true
 			}
 			redeclared := scope[name] && !header
-			scope[name] = scope[name] || !header
+			scope[name] = true
 			if !redeclared {
 				continue
 			}
