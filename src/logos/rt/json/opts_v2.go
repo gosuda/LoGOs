@@ -264,6 +264,35 @@ func CallerMatchCaseInsensitive(opts jsontext.Options) bool {
 	return got.values&matchCaseInsensitiveNamesBit != 0
 }
 
+// matchCaseSensitiveDelimiterBit is the jsonflags bit position of
+// MatchCaseSensitiveDelimiter inside the options Flags word: the fifth
+// marshal/unmarshal flag of the v1 block, per
+// encoding/json/internal/jsonflags.
+const matchCaseSensitiveDelimiterBit = 1 << 34
+
+// CallerMatchCaseSensitiveDelimiter reports whether the caller's options
+// demand delimiter-sensitive member-name matching: under v1 semantics the
+// value bit is set and case-insensitive matching keeps '-' and '_'
+// significant, while a v2 caller that asked for
+// MatchCaseInsensitiveNames folds delimiters away unless it also passed
+// MatchCaseSensitiveDelimiter(true). The generated presence scan picks
+// its folded key dispatch by this rule so presence matches what the
+// reflective decode actually accepts.
+//
+// The options value is valid only within the MarshalJSONTo or
+// UnmarshalJSONFrom call that produced it.
+func CallerMatchCaseSensitiveDelimiter(opts jsontext.Options) bool {
+	rv := reflect.ValueOf(opts)
+	if rv.Kind() != reflect.Pointer || rv.IsNil() || rv.Type() != v1OptionsType {
+		return false
+	}
+	if !optionsLayoutHolds {
+		return optionValueBitByReflection(rv, matchCaseSensitiveDelimiterBit)
+	}
+	got := (*optionsLayout)(rv.UnsafePointer())
+	return got.values&matchCaseSensitiveDelimiterBit != 0
+}
+
 func optionValueBitByReflection(rv reflect.Value, bit uint64) bool {
 	s := reflect.New(v1OptionsType.Elem()).Elem()
 	s.Set(rv.Elem())

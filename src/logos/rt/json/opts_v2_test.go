@@ -117,3 +117,25 @@ func TestReflectionFallbackRejectsUnexpectedShape(t *testing.T) {
 		t.Errorf("string options compare = true, want false")
 	}
 }
+
+func TestCallerMatchCaseSensitiveDelimiter(t *testing.T) {
+	tests := []struct {
+		name string
+		opts jsontext.Options
+		want bool
+	}{
+		{"v1 default", stdjson.DefaultOptionsV1(), true},
+		{"v2 default", jsonv2.DefaultOptionsV2(), false},
+		{"v2 case-insensitive", jsonv2.JoinOptions(jsonv2.DefaultOptionsV2(), jsonv2.MatchCaseInsensitiveNames(true)), false},
+		{"v2 case-insensitive delimiter-sensitive", jsonv2.JoinOptions(jsonv2.DefaultOptionsV2(), jsonv2.MatchCaseInsensitiveNames(true), stdjson.MatchCaseSensitiveDelimiter(true)), true},
+		{"v1 delimiter off", jsonv2.JoinOptions(stdjson.DefaultOptionsV1(), stdjson.MatchCaseSensitiveDelimiter(false)), false},
+		{"nil", nil, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := CallerMatchCaseSensitiveDelimiter(tt.opts); got != tt.want {
+				t.Errorf("CallerMatchCaseSensitiveDelimiter = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

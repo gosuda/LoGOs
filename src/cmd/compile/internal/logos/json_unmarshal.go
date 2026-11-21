@@ -34,6 +34,32 @@ func foldJSONKey(k string) string {
 	return b.String()
 }
 
+// foldJSONKeyNoDelim folds a member name like encoding/json/v2 does under
+// MatchCaseInsensitiveNames without MatchCaseSensitiveDelimiter: case-fold
+// and drop '-' and '_'.
+func foldJSONKeyNoDelim(k string) string {
+	var b strings.Builder
+	for i := 0; i < len(k); {
+		c := k[i]
+		if c < utf8.RuneSelf {
+			if c == '-' || c == '_' {
+				i++
+				continue
+			}
+			if 'a' <= c && c <= 'z' {
+				c -= 'a' - 'A'
+			}
+			b.WriteByte(c)
+			i++
+			continue
+		}
+		r, n := utf8.DecodeRuneInString(k[i:])
+		b.WriteRune(foldJSONRune(r))
+		i += n
+	}
+	return b.String()
+}
+
 func foldJSONRune(r rune) rune {
 	for {
 		r2 := unicode.SimpleFold(r)
@@ -198,14 +224,20 @@ func (js *jsonStruct) presenceScanLines() []string {
 		"if !_logos_pscan.Object() {",
 		"\treturn _logos_pscan.End()",
 		"}",
-		// The reflective decode honors the caller's name-matching option,
+		// The reflective decode honors the caller's name-matching options,
 		// so presence must match under the same rule: fold only when the
-		// caller asked for case-insensitive matching.
+		// caller asked for case-insensitive matching, and drop '-' and '_'
+		// only when the caller did not keep delimiters significant.
 		fmt.Sprintf("_logos_casefold := %s.CallerMatchCaseInsensitive(_logos_dec.Options())", jsonAlias),
+		fmt.Sprintf("_logos_delimsens := %s.CallerMatchCaseSensitiveDelimiter(_logos_dec.Options())", jsonAlias),
 		"for _logos_pscan.Next() {",
 		fmt.Sprintf("\t_logos_i := _logos_jsonkey_%s(_logos_pscan.Key())", js.name),
 		"\tif _logos_i < 0 && _logos_casefold {",
-		fmt.Sprintf("\t\t_logos_i = _logos_jsonfold_%s(_logos_pscan.FoldKey())", js.name),
+		"\t\tif _logos_delimsens {",
+		fmt.Sprintf("\t\t\t_logos_i = _logos_jsonfold_%s(_logos_pscan.FoldKey())", js.name),
+		"\t\t} else {",
+		fmt.Sprintf("\t\t\t_logos_i = %s(_logos_pscan.FoldKeyNoDelims())", js.foldDName()),
+		"\t\t}",
 		"\t}",
 		"\tswitch _logos_i {",
 	}
@@ -794,6 +826,40 @@ func (js *jsonStruct) keyFuncs(b *strings.Builder) {
 	}
 	js.writeKeyFunc(b, js.name, "jsonkey", exact)
 	js.writeKeyFunc(b, js.name, "jsonfold", folded)
+	if len(js.required) > 0 && js.hasDelimKeys() {
+		seenD := make(map[string]bool)
+		var foldedD []keyEntry
+		for _, f := range js.fields {
+			fk := foldJSONKeyNoDelim(f.key)
+			if !seenD[fk] {
+				seenD[fk] = true
+				foldedD = append(foldedD, keyEntry{fk, f.pos})
+			}
+		}
+		js.writeKeyFunc(b, js.name, "jsonfoldd", foldedD)
+	}
+}
+
+// hasDelimKeys reports whether a member name carries '-' or '_', the
+// delimiters encoding/json/v2 folds away under MatchCaseInsensitiveNames
+// without MatchCaseSensitiveDelimiter.
+func (js *jsonStruct) hasDelimKeys() bool {
+	for _, f := range js.fields {
+		if strings.ContainsAny(f.key, "-_") {
+			return true
+		}
+	}
+	return false
+}
+
+// foldDName names the delimiter-insensitive fold dispatch: the dedicated
+// table when a member name carries a delimiter, otherwise the plain fold
+// table, whose entries fold identically either way.
+func (js *jsonStruct) foldDName() string {
+	if js.hasDelimKeys() {
+		return "_logos_jsonfoldd_" + js.name
+	}
+	return "_logos_jsonfold_" + js.name
 }
 
 func unionFoldFunc(keyFunc string) string {
