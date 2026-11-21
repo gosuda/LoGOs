@@ -395,6 +395,9 @@ func shiftErrorOffset(err error, base int64, ptr jsontext.Pointer) error {
 			}
 		case *jsontext.SyntacticError:
 			t.ByteOffset += base
+			if ptr != "" && t.JSONPointer != "" {
+				t.JSONPointer = ptr + t.JSONPointer
+			}
 		case *stdjson.UnmarshalTypeError:
 			t.Offset += base
 		}
