@@ -438,5 +438,5 @@ func (check *Checker) logosIfaceWord(t Type) bool {
 		return false
 	}
 	base, _ := logosViewBase(t)
-	return IsInterface(base)
+	return isNonTypeParamInterface(base)
 }
