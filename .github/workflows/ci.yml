@@ -1,6 +1,6 @@
 name: CI
 
-# Depot GitHub Actions replacement for the Latchkey CI (see .github/scripts/*.sh). One run per commit:
+# Native GitHub Actions CI (see .github/scripts/*.sh). One run per commit:
 # route picks suites from the changed paths, build compiles the toolchain once, the suites reuse it.
 on:
   push:
@@ -11,15 +11,6 @@ on:
       suites:
         description: "core ssa gc gates compiler cgo dogfood, or all"
         default: all
-
-# Latchkey runtime inputs the moved .github/scripts/*.sh scripts still read.
-env:
-  LATCHKEY_CI_EVENT_CLASS: ${{ github.event_name == 'pull_request' && 'pr_update' || github.event_name == 'push' && 'branch_push' || 'workflow_dispatch' }}
-  LATCHKEY_CI_BASE_REF: ${{ github.base_ref }}
-  LATCHKEY_CI_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-  LATCHKEY_CI_RUN_ID: ${{ github.run_id }}
-  LATCHKEY_CI_ATTEMPT: ${{ github.run_attempt }}
-  LATCHKEY_INPUT_SUITES: ${{ github.event.inputs.suites }}
 
 jobs:
   route:
@@ -45,7 +36,9 @@ jobs:
           persist-credentials: false
       - run: for f in .github/scripts/*.sh; do bash -n "$f"; done
       - id: route
-        run: LATCHKEY_CI_OUTPUT="$GITHUB_OUTPUT" bash .github/scripts/route.sh
+        run: GITHUB_SHA="${{ github.event.pull_request.head.sha || github.sha }}" bash .github/scripts/route.sh
+        env:
+          INPUT_SUITES: ${{ inputs.suites || 'all' }}
 
   build:
     needs: route
@@ -263,7 +256,7 @@ jobs:
         if: always()
         run: bash .github/scripts/ssa-av3.sh
 
-  # Stopped by Latchkey after ~15 min in every run so far (cause not found), so manual runs only.
+  # The runner kills a silent job; the heartbeat keeps the log alive (cause not found), so manual runs only.
   simdstd:
     needs: [route, build]
     if: github.event_name == 'workflow_dispatch' && needs.route.outputs.ssa == 'true'
@@ -414,3 +407,5 @@ jobs:
       - run: bash .github/scripts/setup.sh restore
       - name: "Autovec benchmarks: base vs candidate, measured sequentially"
         run: bash .github/scripts/bench-autovec.sh
+        env:
+          AUTOVEC_CAND_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
