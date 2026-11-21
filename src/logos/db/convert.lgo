@@ -9,6 +9,7 @@ import (
 	"database/sql"
 	"database/sql/driver"
 	"fmt"
+	"math"
 	"strconv"
 	"time"
 
@@ -336,8 +337,14 @@ func storeFloat32Value[T ~float32](dst *T, src driver.Value) error {
 	switch v := src.(type) {
 	case float64:
 		// One rounding keeps a float64 source lossless; the text
-		// round-trip below would round twice.
-		*dst = T(float32(v))
+		// round-trip below would round twice. A finite source that
+		// overflows float32 becomes infinity — a range error, same
+		// as the text path reports.
+		f := float32(v)
+		if math.IsInf(float64(f), 0) && !math.IsInf(v, 0) {
+			return cannotConvertErr(src, "float64", "float32", strconv.ErrRange)
+		}
+		*dst = T(f)
 		return nil
 	case float32:
 		*dst = T(v)
