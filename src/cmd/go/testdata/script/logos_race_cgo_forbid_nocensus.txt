@@ -18,10 +18,11 @@ logos list -race -test -deps -f '{{.ImportPath}}' ./pure
 stdout '^runtime/race$'
 # The race runtime links runtime/cgo everywhere but darwin.
 [!GOOS:darwin] stdout '^runtime/cgo$'
-# net carries cgo files everywhere but Windows.
-[!GOOS:windows] logos list -race -test -deps -f '{{if eq .ImportPath "net"}}cgo={{.CgoFiles}}{{end}}' ./pure
-[!GOOS:windows] ! stderr 'requires cgo'
-[!GOOS:windows] stdout 'cgo=\[.+'
+# net carries cgo files on unix platforms other than darwin (whose
+# resolver uses syscall wrappers and imports no C) and not on Windows.
+[!GOOS:windows] [!GOOS:darwin] logos list -race -test -deps -f '{{if eq .ImportPath "net"}}cgo={{.CgoFiles}}{{end}}' ./pure
+[!GOOS:windows] [!GOOS:darwin] ! stderr 'requires cgo'
+[!GOOS:windows] [!GOOS:darwin] stdout 'cgo=\[.+'
 
 -- forbid/go.mod --
 module example.com/forbidgomodule
