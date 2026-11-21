@@ -635,18 +635,20 @@ func TestGroupWaitContextBoundedReturn(t *testing.T) {
 		default:
 		}
 		stillRunning := !exited.Load()
-		// Unblock the child before the submission probe and before any
-		// assertion can fail the test, so a panic from Go cannot leave a
-		// parked goroutine for synctest to trip on.
-		close(release)
 		// Submit the next child while the first is still parked, so the
 		// Go-after-abandoned-WaitContext submission is covered with a
 		// running child, not left to whether the first exited first.
 		var ran atomic.Bool
-		g.Go(func(ctx context.Context) error {
-			ran.Store(true)
-			return nil
-		})
+		func() {
+			// Release only after the submission, and even if Go panics,
+			// so a panic cannot leave a parked goroutine for synctest to
+			// trip on.
+			defer close(release)
+			g.Go(func(ctx context.Context) error {
+				ran.Store(true)
+				return nil
+			})
+		}()
 		if !waitErrSet {
 			t.Fatal("WaitContext did not return after the wait context ended")
 		}
