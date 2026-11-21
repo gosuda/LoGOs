@@ -176,7 +176,7 @@ Do not use `conc` for data races; use `logos test -race`. Do not use `conc` for 
 
 ## Diagnostics
 
-`logos lint` rejects group and lock misuse before the program runs; the `conc` sections above cover what only a running build shows. The concurrency lint rows:
+`logos lint` rejects group and lock misuse before the program runs; the `conc` sections above cover what only a running build shows. These rows give the `.lgo` policy: in Go packages `logos lint` runs only language-neutral rules and reports `forbid` as suppressible `deny`. The concurrency lint rows:
 
 | Rule | Severity | Fix |
 |---|---|---|
