@@ -69,19 +69,22 @@ func recvForLead[T any](s []T, ch chan T) {
 
 var pool = []Holder{{Ptr: new(bool)}}
 
-func values(x string) []Holder {
-	_ = x
-	return pool
+func values[T any](s []T, label string) []T {
+	_ = label
+	return s
 }
 
 // A quoted parenthesis inside the operand is not a bracket of the
 // generated cast wrapper: the widened slice must keep `any(` matched.
-func recvQuoted[T any](ch chan T) {
+// The receiver element type is the type parameter itself, so `.M()`
+// resolves through the case interface and the lowering emits the cast;
+// a quote inside the comment is not a literal start.
+func recvQuoted[T any](s []T, ch chan T) {
 	const switch T {
 	case interface{ M() *bool }:
 		var p interface{ M() *bool }
 		select {
-		case p, *values(")")[next()].M() = <-ch:
+		case p, *values(s, /* don't normalize */ string('x'))[next()].M() = <-ch:
 			_ = p
 		default:
 		}
@@ -110,7 +113,7 @@ func main() {
 
 	ch3 := make(chan Holder, 1)
 	ch3 <- Holder{Ptr: new(bool)}
-	recvQuoted[Holder](ch3)
+	recvQuoted[Holder](pool, ch3)
 	if *pool[0].Ptr {
 		fmt.Println("ok quoted")
 	} else {
