@@ -982,3 +982,86 @@ func efLoopBreakDeferredCopyStaysAccepted() {
 	}
 	_ = err
 }
+
+type efIn3 struct {
+	stats int
+	other int
+}
+
+type efMid3 struct {
+	efIn3
+}
+
+type efOuter3 struct {
+	efMid3
+}
+
+// A promoted selector segment is a path step, not a copy of the embedded
+// value: reading a sibling field through it stays accepted while a read
+// of the embedded aggregate itself still fails.
+func efPromotedSegmentReadsSibling() {
+	h := efOuter3{}
+	var err error
+	h.efMid3.efIn3.stats, err = efFetchHeld()
+	println(h.efIn3.other)
+	println(h.efIn3) // ERROR "result_before_error_check"
+	_ = err
+}
+
+// A range clause variable has a new instance each iteration, so the defer
+// registered in one iteration reads its own h, not a shared field.
+func efRangeVarFreshDeferred() {
+	var err error
+	for _, h := range [2]efHeld{} {
+		h.stats, err = efFetchHeld()
+		h.stats = 0
+		defer func() {
+			println(h.stats)
+		}()
+	}
+	_ = err
+}
+
+// A backward goto can re-enter the loop and overwrite the captured field
+// after the defer registered, so the break exemption cannot hide the
+// unchecked read.
+func efGotoReentryDeferred() {
+	h := efHeld{}
+	var err error
+	retried := false
+retry:
+	for {
+		h.stats, err = efFetchHeld()
+		if retried {
+			return
+		}
+		h.stats = 0
+		defer func() {
+			println(h.stats) // ERROR "result_before_error_check"
+		}()
+		break
+	}
+	_ = err
+	retried = true
+	goto retry
+}
+
+// An error variable declared inside the loop is a new instance each
+// iteration, so a check on the captured error cannot prove a field a
+// later iteration's store may have failed on.
+func efLoopLocalErrSeedsUnproven() {
+	h := efHeld{}
+	var first error
+	h.stats, first = efFetchHeld()
+	for i := 0; i < 2; i++ {
+		var err error
+		h.stats = 0
+		defer func() {
+			if err == nil {
+				println(h.stats) // ERROR "result_before_error_check"
+			}
+		}()
+		h.stats, err = efFetchHeld()
+	}
+	_ = first
+}
