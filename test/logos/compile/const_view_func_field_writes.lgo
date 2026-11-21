@@ -26,3 +26,22 @@ func rejectFuncRangeAddrWrite(ts const []WFunc) {
 		*q = nil // ERROR "const_view_mutation"
 	}
 }
+
+// A copied callback keeps a reference into viewed data: a func value
+// is not reference-free, so handing it a plain signature is an escape.
+func rejectFuncCopy(ts const []WFunc) func(string) string {
+	return ts[0].Call // ERROR "const_view_escape"
+}
+
+// `t = v` on a const-view variable rebinds the view, but a store
+// through a pointer taken into the view writes viewed data and stays
+// protected — the same rule as `*(&t.Call) = v` above.
+func rejectViewRebindThroughPointer(ts const []WFunc) {
+	for _, t := range ts {
+		p := &t
+		*p = WFunc{} // ERROR "const_view_mutation"
+	}
+	var cv const []byte = []byte{1}
+	out := &cv
+	*out = []byte{2} // ERROR "const_view_mutation"
+}
