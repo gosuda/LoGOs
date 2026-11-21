@@ -24,11 +24,22 @@ const (
 	cfImportMarker   = "_logos_ctimp"
 	cfComptimeMarker = "_logos_ctcomptime"
 	cfTParamMarker   = "_logos_tparam"
+	cfBindMarker     = "_logos_bind"
 	cfCopyInfix      = "_logosct"
 )
 
 func cfMarker(n int) string {
 	return cfTParamMarker + strconv.Itoa(n)
+}
+
+// cfBind names the alias a record declares at the top of a generic's body
+// for parameter n when a case shadow exists: `type _logos_bind0 =
+// _logos_tparam0`. References spelled with it always resolve to the
+// parameter's argument, while the substituted spelling itself
+// materializes only in the bind's right-hand side — at body scope, where
+// no case alias can capture it.
+func cfBind(n int) string {
+	return cfBindMarker + strconv.Itoa(n)
 }
 
 type cfImport struct {
@@ -259,6 +270,7 @@ type cfRecordBuilder struct {
 	tpIndex   map[types2.Object]int
 	imports   []cfImport
 	subs      []splice
+	shadowed  []span // const-switch cases that bind a case shadow, in record offsets
 }
 
 func (fl *fileLower) cfRecordText(def *cfGenericDef, qualifier string) *cfRecord {
@@ -268,7 +280,7 @@ func (fl *fileLower) cfRecordText(def *cfGenericDef, qualifier string) *cfRecord
 			b.tpIndex[o] = i
 		}
 	}
-	b.subs = fl.cfCaseShadowDecls(def)
+	b.subs = fl.cfCaseShadowDecls(def, b)
 	syntax.Inspect(def.decl, b.visit)
 	start := fl.cfFuncStart(fl.off(syntax.StartPos(def.decl)))
 	end := fl.off(syntax.EndPos(def.decl)) + 1
@@ -292,14 +304,19 @@ func (fl *fileLower) cfRecordText(def *cfGenericDef, qualifier string) *cfRecord
 // cfCaseShadowDecls binds each const-switch case shadow in the record to
 // its parameter's marker. The checker rebinds a switched type parameter
 // inside each case body (logosShadowConstTarget), so uses there resolve
-// to the shadow and keep the parameter's spelling. Binding that name
-// inside the case — `type F = _logos_tparam0`, an alias the case selects
-// only when the type argument satisfies it — keeps every shadow use
-// exact in the copy: a body type decl cannot capture the parameter's
-// substituted spelling, an unnamed target such as `*int` stays a
-// conversion, and a body alias to the shadow keeps an embedded field's
-// name.
-func (fl *fileLower) cfCaseShadowDecls(def *cfGenericDef) []splice {
+// to the shadow and keep the parameter's spelling. A `type F =
+// _logos_bind0` alias inside the case keeps that spelling exact — a body
+// type decl cannot capture the parameter's substituted spelling, an
+// unnamed target such as `*int` stays a conversion, and a body alias to
+// the shadow keeps an embedded field's name. The alias points at a bind
+// rather than the marker itself, so the argument's own spelling
+// materializes only in the body's top-level `type _logos_bind0 =
+// _logos_tparam0`: there a type argument named `F` stays the caller's
+// `F` (never `type F = F`), and no case alias captures the same-named
+// spelling of another parameter's argument. Every other parameter
+// reference inside a shadowed case spells the bind name for the same
+// reason; cfRecordBuilder.shadowed marks those cases for visit.
+func (fl *fileLower) cfCaseShadowDecls(def *cfGenericDef, b *cfRecordBuilder) []splice {
 	if fl.pkg.info.LogosConstCases == nil {
 		return nil
 	}
@@ -315,7 +332,7 @@ func (fl *fileLower) cfCaseShadowDecls(def *cfGenericDef) []splice {
 		if !ok {
 			return true
 		}
-		for _, cs := range s.Cases {
+		for i, cs := range s.Cases {
 			rec, ok := fl.pkg.info.LogosConstCases[cs]
 			if !ok || rec.Target == nil {
 				continue
@@ -324,15 +341,28 @@ func (fl *fileLower) cfCaseShadowDecls(def *cfGenericDef) []splice {
 			if !ok {
 				continue
 			}
+			end := fl.off(syntax.EndPos(s)) + 1
+			if i+1 < len(s.Cases) {
+				end = fl.off(s.Cases[i+1].Case)
+			}
+			b.shadowed = append(b.shadowed, span{start: fl.off(cs.Case), end: end})
 			p := fl.off(cs.Colon) + 1
 			subs = append(subs, splice{
 				start: p,
 				end:   p,
-				text:  " type " + rec.Target.Name() + " = " + cfMarker(idx) + ";",
+				text:  " type " + rec.Target.Name() + " = " + cfBind(idx) + ";",
 			})
 		}
 		return true
 	})
+	if len(b.shadowed) > 0 && def.decl.Body != nil {
+		var text string
+		for i := range def.decl.TParamList {
+			text += " type " + cfBind(i) + " = " + cfMarker(i) + ";"
+		}
+		p := fl.off(syntax.StartPos(def.decl.Body)) + 1
+		subs = append(subs, splice{start: p, end: p, text: text})
+	}
 	return subs
 }
 
@@ -431,11 +461,20 @@ func (b *cfRecordBuilder) visit(n syntax.Node) bool {
 	if !ok {
 		return true
 	}
-	text, ok := b.spelling(b.fl.pkg.info.Uses[name])
+	obj := b.fl.pkg.info.Uses[name]
+	text, ok := b.spelling(obj)
 	if !ok {
 		return true
 	}
 	s := b.fl.off(name.Pos())
+	if insideAny(span{start: s, end: s}, b.shadowed) {
+		// Inside a case that binds a shadow, a parameter reference spells
+		// the bind name so the substituted spelling cannot be captured by
+		// the case alias.
+		if idx, ok := b.tpIndex[obj]; ok {
+			text = cfBind(idx)
+		}
+	}
 	b.subs = append(b.subs, splice{start: s, end: s + len(name.Value), text: text})
 	return true
 }
@@ -884,6 +923,7 @@ func (fl *fileLower) cfCopySites(site *cfSite, rec *cfRecord) (*cfSites, bool) {
 	}
 	for i, t := range site.targs {
 		sites.types[cfMarker(i)] = t
+		sites.types[cfBind(i)] = t
 		sites.spell[cfMarker(i)] = fl.cfLazySpelling(func() (string, bool) { return fl.spellType(t) }, func() {
 			fl.cfError(site.pos, "[comptime::generic_targ] cannot spell type argument %s of %s", t, rec.name)
 		})
