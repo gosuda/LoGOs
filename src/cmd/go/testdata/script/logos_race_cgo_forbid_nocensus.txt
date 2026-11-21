@@ -6,22 +6,22 @@ env CGO_ENABLED=
 
 [!race] skip 'the platform has no race detector'
 [!cgo] skip 'a Go main module needs the default C compiler on PATH'
-[GOOS:windows] skip 'net has no cgo files on Windows'
-[GOOS:darwin] skip 'the race runtime does not link cgo on darwin'
 
 cd forbid
 
 # A Go main module (no .lgo file) keeps the upstream default for
-# CGO_ENABLED under logos, and the cgo key has no effect: net still
-# builds with its cgo files, and no policy refusal appears.
+# CGO_ENABLED under logos, and the cgo key has no effect: the race
+# runtime still links in deps, and no policy refusal appears.
 ! stderr 'requires cgo'
 logos list -race -test -deps -f '{{.ImportPath}}' ./pure
 ! stderr 'requires cgo'
-stdout '^runtime/cgo$'
 stdout '^runtime/race$'
-logos list -race -test -deps -f '{{if eq .ImportPath "net"}}cgo={{.CgoFiles}}{{end}}' ./pure
-! stderr 'requires cgo'
-stdout 'cgo=\[.+'
+# The race runtime links runtime/cgo everywhere but darwin.
+[!GOOS:darwin] stdout '^runtime/cgo$'
+# net carries cgo files everywhere but Windows.
+[!GOOS:windows] logos list -race -test -deps -f '{{if eq .ImportPath "net"}}cgo={{.CgoFiles}}{{end}}' ./pure
+[!GOOS:windows] ! stderr 'requires cgo'
+[!GOOS:windows] stdout 'cgo=\[.+'
 
 -- forbid/go.mod --
 module example.com/forbidgomodule
