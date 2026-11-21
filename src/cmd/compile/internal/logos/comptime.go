@@ -1065,7 +1065,7 @@ func cfScopeFunc(scope *types2.Scope, x syntax.Expr) *types2.Func {
 	return fn
 }
 
-func (fl *fileLower) cfNestedSite(call *syntax.CallExpr, active cfChain, run *cfRun) (int, int, string, bool) {
+func (fl *fileLower) cfNestedSite(call *syntax.CallExpr, active cfChain, run *cfRun, parents map[syntax.Node]syntax.Node) (int, int, string, bool) {
 	fun, indexed := call.Fun.(*syntax.IndexExpr)
 	callee := call.Fun
 	if indexed {
@@ -1080,8 +1080,19 @@ func (fl *fileLower) cfNestedSite(call *syntax.CallExpr, active cfChain, run *cf
 		fl.cfError(pos, "[comptime::generic_targ] comptime generic %s needs explicit type arguments here", obj.Name())
 		return 0, 0, "", false
 	}
+	bound := fl.cfCaseBoundTypes(call, run, parents)
 	var targs []types2.Type
 	for _, arg := range syntax.UnpackListExpr(fun.Index) {
+		if n, ok := arg.(*syntax.Name); ok {
+			if t, ok := bound[n.Value]; ok {
+				// A case shadow spelled with the parameter's name: the
+				// case's alias decl binds it to the type argument, so the
+				// nested site specializes for the argument, not for a
+				// same-named package type.
+				targs = append(targs, t)
+				continue
+			}
+		}
 		t, ok := fl.cfResolveTypeExpr(arg, active, run.sites)
 		if !ok {
 			fl.cfError(pos, "[comptime::generic_targ] cannot resolve a type argument of %s", obj.Name())
@@ -1091,6 +1102,90 @@ func (fl *fileLower) cfNestedSite(call *syntax.CallExpr, active cfChain, run *cf
 	}
 	name := fl.cfCopyFor(&cfSite{call: call, fun: fun, targs: targs, obj: obj, pos: pos})
 	return offAt(run.ctx.starts, syntax.StartPos(fun)), cfExactEnd(run.ctx, fun), name, true
+}
+
+// cfCaseBoundTypes maps the names each enclosing const-switch case binds
+// to a parameter's argument. The record spells a case shadow's binding
+// as a `type <name> = _logos_bind<i>` (or `_logos_tparam<i>`) alias at
+// the case's start; the name keeps the parameter's spelling, so looking
+// it up by scope would find a same-named package type instead of the
+// argument. Type declarations in blocks between n and the case rebind
+// those names and block the mapping.
+func (fl *fileLower) cfCaseBoundTypes(n syntax.Node, run *cfRun, parents map[syntax.Node]syntax.Node) map[string]types2.Type {
+	sites := run.sites
+	if sites == nil {
+		return nil
+	}
+	var bound map[string]types2.Type
+	blocked := make(map[string]bool)
+	bindType := func(d syntax.Decl) (*syntax.TypeDecl, types2.Type, bool) {
+		td, ok := d.(*syntax.TypeDecl)
+		if !ok || !td.Alias {
+			return nil, nil, false
+		}
+		tn, ok := td.Type.(*syntax.Name)
+		if !ok || (!strings.HasPrefix(tn.Value, cfBindMarker) && !strings.HasPrefix(tn.Value, cfTParamMarker)) {
+			return nil, nil, false
+		}
+		t, ok := sites.types[tn.Value]
+		return td, t, ok
+	}
+	blockDecls := func(list []syntax.Stmt) {
+		for _, st := range list {
+			ds, ok := st.(*syntax.DeclStmt)
+			if !ok {
+				continue
+			}
+			for _, d := range ds.DeclList {
+				if _, _, ok := bindType(d); ok {
+					continue
+				}
+				if td, ok := d.(*syntax.TypeDecl); ok {
+					blocked[td.Name.Value] = true
+				}
+			}
+		}
+	}
+	pos := offAt(run.ctx.starts, syntax.StartPos(n))
+	for p := parents[n]; p != nil; p = parents[p] {
+		switch p := p.(type) {
+		case *syntax.BlockStmt:
+			blockDecls(p.List)
+		case *syntax.ConstSwitchStmt:
+			for _, cs := range p.Cases {
+				if len(cs.Body) == 0 {
+					continue
+				}
+				// ConstSwitchCase is not a syntax.Node, so it never
+				// appears in parents: match the case whose body holds n.
+				bs := offAt(run.ctx.starts, syntax.StartPos(cs.Body[0]))
+				be := offAt(run.ctx.starts, syntax.EndPos(cs.Body[len(cs.Body)-1]))
+				if pos < bs || pos > be {
+					continue
+				}
+				blockDecls(cs.Body)
+				for _, st := range cs.Body {
+					ds, ok := st.(*syntax.DeclStmt)
+					if !ok {
+						continue
+					}
+					for _, d := range ds.DeclList {
+						td, t, ok := bindType(d)
+						if !ok || blocked[td.Name.Value] {
+							continue
+						}
+						if bound == nil {
+							bound = make(map[string]types2.Type)
+						}
+						if _, dup := bound[td.Name.Value]; !dup {
+							bound[td.Name.Value] = t
+						}
+					}
+				}
+			}
+		}
+	}
+	return bound
 }
 
 func (fl *fileLower) cfEmitCopy(text otext, site *cfSite) {

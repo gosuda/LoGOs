@@ -1667,7 +1667,7 @@ func (c *cfLeaf) subCall(n *syntax.CallExpr) bool {
 	if insideAny(span{start: s, end: e}, c.covered) {
 		return true
 	}
-	if s, e, text, ok := c.fl.cfNestedSite(n, c.active, c.run); ok {
+	if s, e, text, ok := c.fl.cfNestedSite(n, c.active, c.run, c.parents); ok {
 		c.add(s, e, text)
 	}
 	return true
