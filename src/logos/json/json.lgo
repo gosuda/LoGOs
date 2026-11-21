@@ -10,6 +10,7 @@ import (
 	stdjson "encoding/json"
 	"encoding/json/jsontext"
 	jsonv2 "encoding/json/v2"
+	"errors"
 	"io"
 
 	"logos/json/internal/compact"
@@ -75,7 +76,7 @@ func Unmarshal[T any](data []byte) (T, error) {
 			err := stdjson.Unmarshal(data, &v)
 			return v, err
 		}
-		err := u.UnmarshalJSONFrom(jsontext.NewDecoder(bytes.NewReader(val), jsonv2.MatchCaseInsensitiveNames(true)))
+		err := unmarshalJSONFromValue(u, val)
 		return v, err
 	}
 	if u, ok := any(&v).(stdjson.Unmarshaler); ok {
@@ -89,6 +90,26 @@ func Unmarshal[T any](data []byte) (T, error) {
 	}
 	err := stdjson.Unmarshal(data, &v)
 	return v, err
+}
+
+// errNonSingularValue is the contract the standard dispatch enforces
+// on a streaming method: a nil result must have consumed exactly one
+// JSON value.
+var errNonSingularValue = errors.New("must read or write exactly one value")
+
+// unmarshalJSONFromValue runs u's streaming method over the trimmed
+// JSON value in val and checks the dispatch contract: a nil result
+// requires the method to have consumed exactly that value, so a
+// callback that reads nothing cannot report success.
+func unmarshalJSONFromValue(u jsonv2.UnmarshalerFrom, val []byte) error {
+	dec := jsontext.NewDecoder(bytes.NewReader(val), jsonv2.MatchCaseInsensitiveNames(true))
+	if err := u.UnmarshalJSONFrom(dec); err != nil {
+		return err
+	}
+	if dec.StackDepth() != 0 || dec.InputOffset() != int64(len(val)) {
+		return errNonSingularValue
+	}
+	return nil
 }
 
 // MarshalWrite marshals in and writes the bytes to out in one Write
