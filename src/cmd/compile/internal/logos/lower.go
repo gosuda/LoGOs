@@ -766,6 +766,14 @@ func gapWrapExtend(chunks []chunk, text string, s, e int) (int, int) {
 				if ni > i {
 					i = ni - 1
 				}
+			case '/':
+				// A quote inside a comment ("don't") would otherwise
+				// start a fake literal that swallows a real opener and
+				// leaves its close to drive depth negative.
+				ni := commentEnd([]byte(text), i)
+				if ni > i {
+					i = ni - 1
+				}
 			}
 			if !bal {
 				break
