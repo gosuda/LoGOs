@@ -15,6 +15,23 @@ cd ../m
 # name an unexported function of the package; the program runs.
 logos run .
 stdout '^2$'
+cd ../x
+# The issue's exact shape: an external test package instantiates the
+# generic with a field-type argument and a field projection. The
+# defining package still fails at the declaration, not at the importer.
+! logos build ./...
+stderr 'comptime::unexported_in_exported'
+stderr 'unexported type named'
+stderr 'unexported func collect'
+! stderr 'undefined: app'
+# logos test builds the external test package, which exercises the
+# importer path the issue reported; the diagnostic still lands on the
+# defining package's declaration.
+! logos test ./...
+stderr 'comptime::unexported_in_exported'
+stderr 'unexported type named'
+stderr 'unexported func collect'
+! stderr 'undefined: app'
 
 -- w/go.mod --
 module example.com/cfrepro
@@ -93,3 +110,40 @@ func Load[T any]() int {
 func main() {
 	fmt.Println(Load[pair]())
 }
+
+-- x/go.mod --
+module example.com/x
+
+go 1.27
+
+-- x/app/app.lgo --
+package app
+
+import "comptime"
+
+type named struct{ name string }
+
+func collect[F any](parts []named, name string, field F) []named {
+	return append(parts, named{name: name})
+}
+
+func Run[T any](root *T) int {
+	var parts []named
+	const for _, f := range comptime.Fields[T]() {
+		parts = collect[f.Type](parts, f.Name, root.[f])
+	}
+	return len(parts)
+}
+
+-- x/app/app_test.lgo --
+package app_test
+
+import (
+	"testing"
+
+	"example.com/x/app"
+)
+
+type root struct{ A int }
+
+func TestRun(t *testing.T) { _ = app.Run[root](&root{}) }

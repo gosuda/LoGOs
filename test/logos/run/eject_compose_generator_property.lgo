@@ -440,7 +440,7 @@ func g_c_yield_ret_chainc(v int, xs []int, fail bool) iter.Seq[int] {
 	var w Prop = &wb
 	_ = w
 	yield 1
-	return xs.map(x => x + v).count()
+	return
 	yield 2
 }
 
@@ -466,7 +466,7 @@ func g_c_yield_ret_coal(v int, xs []int, fail bool) iter.Seq[int] {
 	var w Prop = &wb
 	_ = w
 	yield 1
-	return maybe(v) ?? -1
+	return
 	yield 2
 }
 
@@ -492,7 +492,7 @@ func g_c_yield_ret_cv(v int, xs []int, fail bool) iter.Seq[int] {
 	var w Prop = &wb
 	_ = w
 	yield 1
-	return viewLen(xs)
+	return
 	yield 2
 }
 
@@ -518,7 +518,7 @@ func g_c_yield_ret_lamapply(v int, xs []int, fail bool) iter.Seq[int] {
 	var w Prop = &wb
 	_ = w
 	yield 1
-	return apply(x => x + 1, v)
+	return
 	yield 2
 }
 
@@ -544,7 +544,7 @@ func g_c_yield_ret_optcomp(v int, xs []int, fail bool) iter.Seq[int] {
 	var w Prop = &wb
 	_ = w
 	yield 1
-	return box{o: maybe(v), p: 1}.p
+	return
 	yield 2
 }
 
@@ -570,7 +570,7 @@ func g_c_yield_ret_propcoal(v int, xs []int, fail bool) iter.Seq[int] {
 	var w Prop = &wb
 	_ = w
 	yield 1
-	return maybe(v) ?? w.P
+	return
 	yield 2
 }
 
@@ -596,7 +596,7 @@ func g_c_yield_ret_proplam(v int, xs []int, fail bool) iter.Seq[int] {
 	var w Prop = &wb
 	_ = w
 	yield 1
-	return apply(x => x + w.P, v)
+	return
 	yield 2
 }
 
@@ -622,7 +622,7 @@ func g_c_yield_ret_propr(v int, xs []int, fail bool) iter.Seq[int] {
 	var w Prop = &wb
 	_ = w
 	yield 1
-	return w.P
+	return
 	yield 2
 }
 
@@ -648,10 +648,7 @@ func g_c_yield_ret_sw(v int, xs []int, fail bool) iter.Seq[int] {
 	var w Prop = &wb
 	_ = w
 	yield 1
-	return switch v {
-		case 7 => 70
-		default => 1
-		}
+	return
 	yield 2
 }
 

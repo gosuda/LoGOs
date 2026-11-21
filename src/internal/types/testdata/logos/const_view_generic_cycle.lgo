@@ -1,0 +1,23 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package p
+
+// A type parameter is not an interface word, so the memory nest walks
+// its type argument and finds the recursion.
+type Box[T any] struct {
+	Value T
+}
+
+type Loop /* ERROR "invalid recursive type" */ struct {
+	Value Box[Loop]
+}
+
+// An expanding view cycles through a fresh instance per unwrap; the
+// recursive-type rejection must still fire instead of walking forever.
+type Grow[T any] const Grow /* ERROR "invalid recursive type" */ [*T]
+
+var g Grow[int]
+
+var _ = g /* ERROR "is not an interface" */ .(int)

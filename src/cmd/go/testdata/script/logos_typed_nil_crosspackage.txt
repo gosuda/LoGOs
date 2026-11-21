@@ -1,0 +1,179 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+# Cross-package loGo/s pointers are non-nil (SPEC Sec 2.2, T-202).
+# beta.New returns *beta.MyError from .lgo source, so alpha may return
+# it as error with no nil check. The bad module keeps failing after
+# the fix: a real Go pointer is still a platform pointer.
+# Model: logos_facts_nil.txt and logos_interop_platform.txt (the
+# named model file does not exist at this revision).
+# Note: an imported option result bound to a local in a library
+# package does not reach checking on this revision: the export
+# writer has no Option case (noder/writer.go typIdx) and fails with
+# "unexpected type: ... (*types2.Option)". Bisection: beta alone
+# builds, alpha without option use builds, the same shape with a
+# same-package option builds, and only the imported-option binding
+# fails. That exporter hole is independent of this fix (the writer
+# path is untouched) and is left as a follow-up; the option
+# consequence is therefore not covered by this script.
+cd ok
+logos build ./...
+logos build -o $WORK/bin/cross$GOEXE ./cmd
+exec $WORK/bin/cross$GOEXE
+stdout '^cross ok: fresh boom$'
+cd ..
+
+cd bad
+! logos build ./...
+stderr 'platform pointer f \(\*os\.File\)'
+cd ..
+
+cd derived
+! logos build ./...
+stderr 'platform pointer beta\.Missing \(\*bytes\.Buffer\)'
+stderr 'platform pointer b\.E \(\*example\.com/derived/beta\.MyError\)'
+stderr 'platform pointer beta\.Gen\[\*beta\.MyError\]\{\}\.Zero\(\) \(\*example\.com/derived/beta\.MyError\)'
+cd ..
+
+-- ok/go.mod --
+module example.com/cross
+
+go 1.27
+
+-- ok/beta/beta.lgo --
+package beta
+
+type MyError struct {
+	Msg string
+}
+
+func (e MyError) Error() string {
+	return e.Msg
+}
+
+func New(msg string) *MyError {
+	return &MyError{Msg: msg}
+}
+
+func ReturnLocal() error {
+	e := New("local")
+	return e
+}
+
+-- ok/alpha/alpha.lgo --
+package alpha
+
+import "example.com/cross/beta"
+
+var ErrX = beta.New("boom")
+
+func ReturnVar() error {
+	return ErrX
+}
+
+func ReturnCall() error {
+	e := beta.New("fresh")
+	return e
+}
+
+-- ok/cmd/main.lgo --
+package main
+
+import (
+	"fmt"
+
+	"example.com/cross/alpha"
+	"example.com/cross/beta"
+)
+
+func main() {
+	if err := alpha.ReturnVar(); err == nil || err.Error() != "boom" {
+		panic("ReturnVar")
+	}
+	if err := alpha.ReturnCall(); err == nil || err.Error() != "fresh" {
+		panic("ReturnCall")
+	}
+	if err := beta.ReturnLocal(); err == nil || err.Error() != "local" {
+		panic("ReturnLocal")
+	}
+	fmt.Println("cross ok: fresh boom")
+}
+
+-- bad/go.mod --
+module example.com/crossbad
+
+go 1.27
+
+-- bad/main.lgo --
+package main
+
+import (
+	"io"
+	"os"
+)
+
+func platformStillGo() io.Closer {
+	f := os.Stdout
+	return f
+}
+
+func main() {
+	_ = platformStillGo()
+}
+
+-- derived/go.mod --
+module example.com/derived
+
+go 1.27
+
+-- derived/beta/beta.lgo --
+package beta
+
+import "bytes"
+
+type MyError struct {
+	Msg string
+}
+
+func (e MyError) Error() string {
+	return e.Msg
+}
+
+// Missing is inferred from a Go-mode call, so it can be nil; the
+// derived marker must cross the import boundary.
+var Missing = bytes.NewBuffer(nil)
+
+// Box is an opaque imported named type: its zero value can hold a nil
+// field, so field reads keep the nullable contract.
+type Box struct {
+	E *MyError
+}
+
+type Gen[T any] struct{}
+
+func (g Gen[T]) Zero() T {
+	var z T
+	return z
+}
+
+-- derived/alpha/alpha.lgo --
+package alpha
+
+import (
+	"fmt"
+
+	"example.com/derived/beta"
+)
+
+func ReturnDerived() fmt.Stringer {
+	return beta.Missing
+}
+
+func ReturnField() error {
+	var b beta.Box
+	return b.E
+}
+
+func ReturnGeneric() error {
+	return beta.Gen[*beta.MyError]{}.Zero()
+}

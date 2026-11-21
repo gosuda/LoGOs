@@ -1,0 +1,22 @@
+// run
+package main
+
+import (
+	"comptime"
+	"fmt"
+)
+
+func Label[T any]() string {
+	const switch T {
+	case int:
+		comptime.Error("int not allowed")
+		return "int"
+	case string:
+		return "string ok"
+	}
+	return "other"
+}
+
+func main() {
+	fmt.Println(Label[string]())
+}

@@ -1,0 +1,63 @@
+// run
+
+package main
+
+import (
+	"fmt"
+	"strings"
+)
+
+type Holder struct {
+	Ptr *bool
+}
+
+func (h Holder) M() *bool { return h.Ptr }
+
+func pick[A any, B any](a A, b B) A {
+	return a
+}
+
+var seq int
+
+func next() int {
+	seq++
+	return 0
+}
+
+func recv[T any](s []T, size int, ch chan T) {
+	const switch T {
+	case interface{ M() *bool }:
+		var p interface{ M() *bool }
+		select {
+		case p, *pick(s[next()+len(make([]byte, size*2))], 0).M() = <-ch:
+			_ = p
+		default:
+		}
+	}
+}
+
+func tryOverflow(size int) (panicked string) {
+	defer func() {
+		if r := recover(); r != nil {
+			panicked = fmt.Sprint(r)
+		}
+	}()
+	ch := make(chan Holder, 1)
+	ch <- Holder{Ptr: new(bool)}
+	hs := []Holder{{Ptr: new(bool)}}
+	recv[Holder](hs, size, ch)
+	return ""
+}
+
+func main() {
+	ch := make(chan Holder, 1)
+	ch <- Holder{Ptr: new(bool)}
+	hs := []Holder{{Ptr: new(bool)}}
+	recv[Holder](hs, 0, ch)
+	fmt.Println("seq", seq)
+	if out := tryOverflow(int(^uint(0)>>1)/2 + 1); !strings.Contains(out, "logos: make length overflow") {
+		fmt.Println("FAIL makelen-overflow", out)
+	} else {
+		fmt.Println("ok makelen-overflow")
+	}
+}

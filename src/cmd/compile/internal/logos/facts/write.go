@@ -36,6 +36,7 @@ func WriteChecked(pkg *types2.Package, info *types2.Info, files []*syntax.File, 
 	writeAsserts(pkg, out)
 	writeLocks(pkg, info, files, out)
 	writeNilErrors(pkg, info, files, out)
+	writeDeriveds(pkg, out)
 	if f == nil && out.empty() {
 		return nil
 	}

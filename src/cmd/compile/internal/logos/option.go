@@ -1131,6 +1131,25 @@ func (fl *fileLower) wrapperTail(e syntax.Expr) otext {
 	return drainOwnedAt(fl.ownerOfInsertion(vs.end), vs.end, id)
 }
 
+// wrapperHead drains the opening zero-width splice a wrapper (such as
+// the coalescing function) owned at the start of e's span, the mirror
+// of wrapperTail at the end.
+func (fl *fileLower) wrapperHead(e syntax.Expr) otext {
+	top, ok := syntax.Unparen(e).(*syntax.CallExpr)
+	if !ok {
+		return otext{}
+	}
+	id, ok := fl.wrapOwner[top]
+	if !ok {
+		return otext{}
+	}
+	vs, ok := fl.wrapSpan[top]
+	if !ok {
+		return otext{}
+	}
+	return drainOwnedAt(fl.ownerOfInsertion(vs.start), vs.start, id)
+}
+
 func (fl *fileLower) isMapRead(ix *syntax.IndexExpr) bool {
 	if m := fl.pkg.info.Types; m != nil {
 		return m[ix].HasOk()

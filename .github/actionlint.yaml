@@ -1,8 +1,12 @@
-# GitHub hosts these runners; actionlint 1.7.12 does not yet list their labels.
+# Runner labels not listed by actionlint 1.7.12.
 self-hosted-runner:
   labels:
     - ubuntu-26.04
     - ubuntu-26.04-arm
+    - depot-ubuntu-24.04
+    - depot-ubuntu-24.04-4
+    - depot-ubuntu-24.04-8
+    - depot-ubuntu-24.04-arm
 
 paths:
   .github/workflows/**:
