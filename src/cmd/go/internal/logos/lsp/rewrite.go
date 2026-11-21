@@ -139,6 +139,16 @@ func (w *rewriter) child(key string, v any, own, ctx *lowered) any {
 		if m, ok := v.(map[string]any); ok {
 			return w.changes(m)
 		}
+	case "documentChanges":
+		v = w.rewrite(v, own)
+		if l, ok := v.([]any); ok {
+			for _, e := range l {
+				if em, ok := e.(map[string]any); ok {
+					em["edits"] = dedupEdits(em["edits"])
+				}
+			}
+		}
+		return v
 	case "originSelectionRange":
 		return w.rewrite(v, ctx)
 	}
@@ -152,7 +162,29 @@ func (w *rewriter) changes(m map[string]any) map[string]any {
 		if lw != nil {
 			uri = w.name(lw)
 		}
-		out[uri] = w.rewrite(v, lw)
+		out[uri] = dedupEdits(w.rewrite(v, lw))
+	}
+	return out
+}
+
+// dedupEdits drops identical text edits. One source token can produce
+// several identical edits after ranges map back to the original file
+// (e.g. a group send value spelled in two select arms), and workspace
+// edits must not overlap.
+func dedupEdits(v any) any {
+	edits, ok := v.([]any)
+	if !ok {
+		return v
+	}
+	seen := make(map[string]bool, len(edits))
+	out := edits[:0]
+	for _, e := range edits {
+		key, _ := json.Marshal(e)
+		if seen[string(key)] {
+			continue
+		}
+		seen[string(key)] = true
+		out = append(out, e)
 	}
 	return out
 }
