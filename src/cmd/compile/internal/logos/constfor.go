@@ -1758,15 +1758,26 @@ func cfArrayLen(e syntax.Expr) (int64, bool) {
 // function-local type declaration in scope at ref.
 func (c *cfLeaf) cfMentionsLocalType(e syntax.Expr, ref syntax.Node) bool {
 	found := false
-	syntax.Inspect(e, func(n syntax.Node) bool {
+	var visit func(n syntax.Node) bool
+	visit = func(n syntax.Node) bool {
 		if found {
+			return false
+		}
+		// A field's own name is not a type reference; only its type
+		// can consult a local declaration. Names in nested fields go
+		// through the same walk.
+		if f, ok := n.(*syntax.Field); ok {
+			if f.Type != nil {
+				syntax.Inspect(f.Type, visit)
+			}
 			return false
 		}
 		if name, ok := n.(*syntax.Name); ok && cfLocalTypeDeclBefore(c.declRoot, ref, name.Value, c.declParents) != nil {
 			found = true
 		}
 		return !found
-	})
+	}
+	syntax.Inspect(e, visit)
 	return found
 }
 
