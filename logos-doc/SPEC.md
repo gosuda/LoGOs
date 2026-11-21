@@ -736,6 +736,8 @@ Taking the address of `x` MUST disable narrowing for `x`. [T-202]
 
 Assigning `x` in a function literal, in a `go group` child block, or in a lambda of a chain that opens with `.group(...)` MUST disable narrowing for `x`. [T-202]
 
+A function whose body contains a `goto` statement MUST NOT narrow any of its variables. [T-202]
+
 A function literal or a `go group` child block MUST NOT read `x` as narrowed when `x` is assigned anywhere besides its declaration. [T-202]
 
 A short variable declaration that names a variable already declared in the same scope, such as a parameter, a named result, or a `var` variable, MUST count as an assignment to it. [T-202]
@@ -880,6 +882,8 @@ The `<T>` of that panic text MUST be the string that `reflect.Type.String` retur
 `nil` MUST go to `case nil`. [T-203.1]
 
 An exhaustive `switch x.(type)` MUST cover every member and `nil`, or carry `default`. [T-203.1]
+
+If the switched operand is a local or parameter that narrowing has proven non-nil from an option whose absence is the interface nil value, an exhaustive `switch x.(type)` MUST cover every member with no `case nil` required. [T-203.1]
 
 A missing member MUST fail with `[correctness::nonexhaustive_switch]` listing misses in declaration order. [T-203.1]
 

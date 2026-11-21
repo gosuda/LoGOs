@@ -73,7 +73,7 @@ A closed union is an interface whose type set is a finite union of non-`~` terms
 | `type U interface { int \| string }` | methods-only interface plus generated membership functions |
 | `U(x)` | conversion; allowed when `x` is a member or a closed union of members |
 | `u == 1`, `u.(int)`, `case int:` | comparison, assertion, and case on a member type |
-| `switch x.(type) { case A: ...; case B: ...; case nil: }` | type switch; without `default` it covers every member and `nil` |
+| `switch x.(type) { case A: ...; case B: ...; case nil: }` | type switch; without `default` it covers every member and `nil`; the `nil` case is unneeded when narrowing proved a bare-option operand non-nil |
 | `r := switch n { case 1 => "one"; default => "many" }` | immediately invoked function returning the chosen arm |
 | `type S struct : I { ... }` | struct plus `var _ I = (*S)(nil)` per asserted interface |
 
@@ -103,7 +103,7 @@ Rules:
 - `nil` and `T` assign into `T?`; `T?` never converts back to `T`. `(T?)?` nests and stays distinct from `T?`; `T??` is rejected, write `(T?)?`. Options whose payload admits nil as a valid value (slices, funcs, chans, interfaces) use `logos/rt.Option[T]` so present-nil stays distinct from absent.
 - `?.` and `??` need an option on the left. A plain method call, field selection, or dereference on an option is an error until narrowing proves `!= nil`. `?.` flattens when the selected field is already an option.
 - `*T` in `.lgo` code is non-nil: `var p *T`, arrays of non-nil pointers without initializers, `make` with nonzero length, `new` of a pointer or of a type with a non-nil field, composite literals missing a non-nil field, and zero-clearing stores are errors. Assigning `nil` to a non-nil location is an error. Use `T?` for a pointer that may be nil.
-- Narrowing: `if x != nil` narrows locals and parameters in the block, through `&&` chains, and after an early exit (`return`, `panic`, `break`, `continue`) on `x == nil`. Assignment ends it. Fields never narrow (copy to a local first). Taking the address or assigning in a closure disables narrowing for that variable only.
+- Narrowing: `if x != nil` narrows locals and parameters in the block, through `&&` chains, and after an early exit (`return`, `panic`, `break`, `continue`) on `x == nil`. Assignment ends it. Fields never narrow (copy to a local first). Taking the address or assigning in a closure disables narrowing for that variable only; a `goto` anywhere in the function body disables narrowing for the whole function.
 - Error-first guard: for a callee declared in `.lgo`, reading a result before the `err` check is an error; the fall-through of `if err != nil { exit }` or the inside of `if err == nil {}` discharges it. Calls into other packages keep their own contracts.
 - Map reads: `m[k] ?? d` types as the element type. `v, ok := m[k]`, stores, `++`, compound assignment, and `delete` keep Go meaning.
 
@@ -234,7 +234,7 @@ Rules:
 | `correctness::open_union_value` | Use a closed union (no `~` terms, no `comparable`) in value positions. |
 | `correctness::union_nonmember` | Use a member type in the conversion, assertion, or case. |
 | `correctness::union_member_method` | Give the member the declared method (a value member needs a value receiver), or drop the member. |
-| `correctness::nonexhaustive_switch` | Cover the listed members and `nil`, or add `default`. |
+| `correctness::nonexhaustive_switch` | Cover the listed members and `nil`, or add `default`; `nil` is excused for a narrowed bare-option operand. |
 | `correctness::switch_arm_mismatch` | Give every switch-expression arm one common type. |
 | `correctness::switch_expr_needs_default` | Add a `default` arm to the value switch. |
 | `correctness::assertion_failed` | Implement the missing method on `*S`, or drop the interface from the list. |
