@@ -63,11 +63,15 @@ func diagnostics(data []byte, offset int64, atEnd bool) Diagnostics {
 	line, lineStart := countLines(data, pos)
 	lineEnd := findLineEnd(data, pos)
 	lo := trimStart(lineEnd-lineStart, pos-lineStart)
+	excerptEnd := lineEnd
+	if end := lineStart + lo + 200; end < excerptEnd {
+		excerptEnd = end
+	}
 	return Diagnostics{
 		Line:          line,
 		Column:        pos - lineStart + 1,
 		Offset:        off,
-		Context:       string(data[lineStart+lo : lineEnd]),
+		Context:       string(data[lineStart+lo : excerptEnd]),
 		ContextColumn: pos - (lineStart + lo) + 1,
 	}
 }
