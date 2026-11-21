@@ -20,11 +20,12 @@
 // invalid UTF-8 handling and error texts are those of encoding/json.
 //
 // Allocation bound: the static struct path calls the generated method
-// directly without a per-field reflect walk. The output buffer is the
-// single make the generated method performs. Dynamic values (any,
-// interface fields, non-string-key maps) allocate exactly as
-// encoding/json does. MarshalWrite writes the single marshaled buffer
-// once and allocates nothing beyond Marshal.
+// directly without a per-field reflect walk. Marshal allocates the
+// generated method's output buffer plus one copy that hands the caller
+// ownership the way encoding/json does — two allocations. MarshalWrite
+// writes that buffer once without the copy — one allocation. Dynamic
+// values (any, interface fields, non-string-key maps) allocate exactly
+// as encoding/json does.
 //
 // Diagnostics: malformed input errors carry the encoding/json offset.
 // DiagnosticsFor converts an offset to line, column and context only
