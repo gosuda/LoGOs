@@ -1,0 +1,47 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+// Package stream drives streaming unmarshal methods with the
+// encoding/json V1 option set and the standard dispatch contract.
+package stream
+
+import (
+	"bytes"
+	"encoding/json/jsontext"
+	jsonv2 "encoding/json/v2"
+	"errors"
+)
+
+// The standard dispatch contract for a streaming method: a nil result
+// must have consumed exactly one JSON value, and an
+// errors.ErrUnsupported result is only a decline when nothing was
+// consumed.
+var (
+	errNonSingularValue    = errors.New("must read or write exactly one value")
+	errUnsupportedMutation = errors.New("unsupported calls must not read or write any tokens")
+)
+
+// FromValue runs u's streaming method over the trimmed JSON value in
+// val with the V1 option set (notably case-insensitive member
+// matching), and checks the dispatch contract: a nil result requires
+// the method to have consumed exactly that value. It returns
+// declined=true only when the method answered errors.ErrUnsupported
+// without consuming input, telling the caller to try its next
+// decoder; declining after consuming input is a contract violation.
+func FromValue(u jsonv2.UnmarshalerFrom, val []byte) (declined bool, err error) {
+	dec := jsontext.NewDecoder(bytes.NewReader(val), jsonv2.MatchCaseInsensitiveNames(true))
+	if err := u.UnmarshalJSONFrom(dec); err != nil {
+		if errors.Is(err, errors.ErrUnsupported) {
+			if dec.StackDepth() == 0 && dec.InputOffset() == 0 {
+				return true, nil
+			}
+			return false, errUnsupportedMutation
+		}
+		return false, err
+	}
+	if dec.StackDepth() != 0 || dec.InputOffset() != int64(len(val)) {
+		return false, errNonSingularValue
+	}
+	return false, nil
+}

@@ -12,6 +12,7 @@ import (
 	jsonv2 "encoding/json/v2"
 
 	"logos/json/internal/compact"
+	"logos/json/internal/stream"
 	rt "logos/rt"
 )
 
@@ -63,14 +64,18 @@ func UnmarshalOption[T any](data []byte) (rt.Option[T], error) {
 	const if comptime.IsStruct[T]() {
 		if u, ok := any(&payload).(jsonv2.UnmarshalerFrom); ok {
 			if val, valid := compact.Trimmed(data); valid {
-				err := unmarshalJSONFromValue(u, val)
+				declined, err := stream.FromValue(u, val)
 				if err != nil {
 					return none, err
 				}
-				return rt.Option[T]{Value: payload, Present: true}, nil
+				if !declined {
+					return rt.Option[T]{Value: payload, Present: true}, nil
+				}
+				// The method declined without reading; try the next decoder.
+			} else {
+				err := stdjson.Unmarshal(data, &payload)
+				return none, err
 			}
-			err := stdjson.Unmarshal(data, &payload)
-			return none, err
 		}
 		if u, ok := any(&payload).(stdjson.Unmarshaler); ok {
 			if val, valid := compact.Trimmed(data); valid {
@@ -101,13 +106,18 @@ func UnmarshalOptionInto[T any](data []byte, out *rt.Option[T]) error {
 	const if comptime.IsStruct[T]() {
 		if u, ok := any(&payload).(jsonv2.UnmarshalerFrom); ok {
 			if val, valid := compact.Trimmed(data); valid {
-				if err := unmarshalJSONFromValue(u, val); err != nil {
+				declined, err := stream.FromValue(u, val)
+				if err != nil {
 					return err
 				}
-				*out = rt.Option[T]{Value: payload, Present: true}
-				return nil
+				if !declined {
+					*out = rt.Option[T]{Value: payload, Present: true}
+					return nil
+				}
+				// The method declined without reading; try the next decoder.
+			} else {
+				return stdjson.Unmarshal(data, &payload)
 			}
-			return stdjson.Unmarshal(data, &payload)
 		}
 		if u, ok := any(&payload).(stdjson.Unmarshaler); ok {
 			if val, valid := compact.Trimmed(data); valid {
