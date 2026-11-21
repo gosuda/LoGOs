@@ -93,11 +93,24 @@ func Subscribe() {
 One goroutine held a `Locked` value past the `-hold` duration while another goroutine waited. Treat it as a liveness fault, not a race. The monitor keeps no timer for a hold. It prints the finding when a waiter comes after the limit, or when the hold ends. Repair by copying what the slow call needs, leaving the callback, then calling. Keep read-mostly state in `logos/sync.Hot[T]`: `Load` returns a read-only pointer, `Store` publishes a new pointer, and `Update` applies `func(old) *T` in a compare-and-swap loop that never exposes a partial value.
 
 ```lgo
-ledger.WithLock(a => {
-  time.Sleep(400 * time.Millisecond)
-  a.balance += 10
-})
+go group (ctx) {
+  go {
+    ledger.WithLock(a => {
+      time.Sleep(400 * time.Millisecond)
+      a.balance += 10
+    })
+  }
+  go {
+    ledger.WithLock(a => {
+      a.balance--
+    })
+  }
+}
 ```
+
+The example needs the second goroutine: with only the slow callback no
+goroutine ever waits on the lock, so no finding prints even at
+`-hold 50ms`.
 
 ## Read conc::group_unbounded
 
