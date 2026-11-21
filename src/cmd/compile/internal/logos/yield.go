@@ -111,6 +111,7 @@ func (fc *funcLower) lowerYield() bool {
 		Body: blockOf(pos, fc.body.List),
 	}, pos)
 	fc.body.List = []syntax.Stmt{returnOf(pos, []syntax.Expr{lit})}
+	fc.yieldSpellings = spellings
 	braceOff := fl.off(pos)
 	fl.add(braceOff+1, braceOff+1, " return func("+yieldParam+" func("+strings.Join(spellings, ", ")+") bool) {")
 	rbraceOff := fl.off(fc.body.Rbrace)

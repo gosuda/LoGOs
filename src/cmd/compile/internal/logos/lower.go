@@ -980,6 +980,7 @@ type funcLower struct {
 	hoisted          []hoistedVar
 	hoistSubs        []hoistSub
 	label            *syntax.LabeledStmt
+	yieldSpellings   []string // non-nil when lowerYield wrapped the body: the element spellings of the yield callback.
 }
 
 func (fl *fileLower) resultSpecs(ft *syntax.FuncType, sig *types2.Signature) []resultSpec {
