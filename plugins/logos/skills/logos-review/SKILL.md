@@ -71,7 +71,7 @@ Proven by `test/logos/run/interp.lgo`, `test/logos/run/addr_lit.lgo`, `test/logo
 21. Interpolation and address-of: operands are strings, integers, bools, floats, `[]byte`, `error`, or `fmt.Stringer`; braces are escaped; `&` applies to any operand with a fresh variable per evaluation. Finding: `correctness::interp_type`.
 22. Defaults and spread: defaults are constant and stand before the tag; `var`/`new` zero is intended where it appears; spread copies identical names and types with explicit fields winning; no Go literal is expected to carry defaults. Findings: `correctness::default_not_constant`, `suspicious::unapplied_struct_default` (warning), `correctness::spread_type_mismatch`.
 23. Tuples and lambdas: tuples live in non-result positions with named access and destructuring; every lambda has a typed target with matching arity. Finding: `correctness::lambda_needs_target`.
-24. Chains, yield, scope defer: chain lambdas never mutate the receiver or nest `?` where it cannot propagate; `yield` sits directly in a `Seq`/`Seq2` body with matching arity; `scope defer` cleanups run at block exit on every path. Findings: `correctness::nested_try_capture`, `correctness::misplaced_try`, `correctness::const_view_mutation`, `correctness::yield_outside_generator`.
+24. Chains, yield, scope defer: chain lambdas never mutate the receiver or nest `?` where it cannot propagate; `yield` sits directly in a `Seq`/`Seq2` body with matching arity; a valued `return` inside a generator fails; `scope defer` cleanups run at block exit on every path. Findings: `correctness::nested_try_capture`, `correctness::misplaced_try`, `correctness::const_view_mutation`, `correctness::yield_outside_generator`, `correctness::generator_return_value`.
 
 ## Checklist (M12)
 

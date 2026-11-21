@@ -50,7 +50,11 @@ func (check *Checker) logosGeneratorReturn(s *syntax.ReturnStmt) bool {
 	if !check.conf.Logos || !check.logosGeneratorSig(check.sig) {
 		return false
 	}
-	for _, result := range syntax.UnpackListExpr(s.Results) {
+	results := syntax.UnpackListExpr(s.Results)
+	if len(results) > 0 {
+		check.error(s, WrongResultCount, "[correctness::generator_return_value] return value is discarded in a generator (use yield, or return without a value)")
+	}
+	for _, result := range results {
 		check.use(result)
 	}
 	return true

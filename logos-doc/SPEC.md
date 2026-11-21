@@ -330,6 +330,8 @@ A default MUST be checked in its declaration's lexical scope and MUST be assigna
 A default MUST be a constant expression or a composite literal whose values and map keys recursively satisfy this rule [T-104.5].
 Defaults MUST apply in composite literals of the type, including address forms and partial literals [T-104.5].
 An empty composite literal whose type's underlying kind is not a struct, an array, a slice, or a map MUST evaluate to the type's zero value [T-104.5].
+A fill whose literal needs the enclosing default's generated factory — directly or through defaults in other files — MUST be rejected as recursive instead of filled, and literal arguments of `unsafe.Sizeof`, `unsafe.Alignof`, and `unsafe.Offsetof` are folded, not evaluated, so they carry no factory dependency [T-104.5].
+
 A Go struct literal of an exported LoGOs struct MUST get zero values and MUST NOT get the field defaults; this is a documented hole [T-104.5][R-U2][A-GOBOUNDARY].
 `var x T` and `new(T)` MUST trigger `suspicious::unapplied_struct_default` [T-104.5].
 A non-constant default MUST fail with `correctness::default_not_constant` [T-104.5].
@@ -392,7 +394,7 @@ A generator MUST supply one value per `yield` for `iter.Seq[T]` and two values p
 Each yielded value MUST be assignable to its element type [T-104.8].
 A generator body MUST NOT run until the sequence the function returns is iterated, MUST run from its first statement once for each iteration of that sequence, and MUST pass each `yield e` to the consumer; an early `break` in the consumer MUST end the body at that `yield` with no further statement of it running [T-104.8].
 A generator body MUST need no `return`: falling off the end ends the sequence [T-104.8].
-A `return` with values inside a generator MUST act as a bare `return`: the values are discarded [T-104.8].
+A `return` with values inside a generator MUST fail with `correctness::generator_return_value` [T-104.8].
 ```go
 func Count(n int) iter.Seq[int] {
 	for i := range n {
@@ -462,6 +464,62 @@ For a target architecture other than the architecture of the build host, `native
 An explicit GOAMD64 or GOARM64 in the environment MUST win over the level that `native` selects [T-105].
 The default binary MUST NOT run on x86 CPUs older than v3 [T-105].
 Self-aliased calls such as arr = Reverse(arr) MUST return correct results. [T-105]
+
+### 1.6 RFC-106: Concurrency monitor
+`logos conc run` MUST accept the arguments of `logos run`, and `logos conc test` MUST accept the arguments of `logos test` [T-106].
+`logos conc` MUST build the program with the build tag `logosconc` in addition to the build tags that the user gives [T-106].
+A build without the build tag `logosconc` MUST NOT contain the monitor, and an ejected module MUST NOT contain the monitor [T-106].
+The build tag `logosconc` MUST NOT change the build of an ejected module [T-106].
+`logos conc` MUST print each finding on standard error while the program runs [T-106].
+A finding MUST have a rule ID, a message, one or more source positions with the role of each position, and one fix hint [T-106].
+The text form of a finding MUST be the line `<file>:<line>: [<rule>] <message>`, then one line `<tab><file>:<line>: <role>` for each position, then the line `<tab>fix: <hint>` [T-106].
+With `--json-diagnostics`, `logos conc` MUST print each finding as one object of Section 14 with severity `deny` [T-106][T-Sec14].
+In that object, `file` and the two line fields of `span` MUST give the first position, the other fields of `span` MUST be 0, and the field `note` MUST hold the position lines and the fix line of the text form [T-106][T-Sec14].
+The exit status of `logos conc` MUST be the exit status of the program or of `logos test` when that status is not 0 [T-106].
+When that status is 0, the exit status MUST be 1 if `logos conc` printed a finding and 0 if it printed no finding [T-106].
+A finding line that `logos conc` cannot read MUST count as a finding [T-106].
+The monitor MUST report `conc::lock_order_inversion` when two goroutines took the same two `logos/sync.Locked` values in opposite orders, also when no goroutine waited [T-106].
+The monitor MUST NOT report `conc::lock_order_inversion` when one goroutine took the two values in the two orders [T-106].
+The monitor MUST report one pair of source positions only one time in one process [T-106].
+`logos conc` MUST accept the flag `-stall` with a positive Go duration before the package of `run` and before the program arguments of `test`, and the default MUST be `5s` [T-106].
+`logos conc` MUST accept the flag `-hold` in the same places, with a positive Go duration, and the default MUST be `100ms` [T-106].
+`logos conc` MUST stop with an error before it starts the program when the value of `-stall` or of `-hold` is not a positive duration [T-106].
+The monitor MUST report `conc::group_child_stalled` when a child of a group has not returned at the end of the `-stall` duration after the cancellation of the group context [T-106].
+For a child that started after the cancellation, the duration MUST start when the child starts [T-106].
+The monitor MUST NOT report a child that returned before the end of its duration [T-106].
+The finding MUST give the statement that started the child [T-106].
+When the child has a frame whose source file is not a file of the toolchain, the first position of the finding MUST be the innermost frame of that kind, and its role MUST name the wait state of the goroutine [T-106].
+The monitor MUST report one statement that starts a child only one time in one process [T-106].
+The group MUST hold the record that the monitor keeps of it, and the monitor MUST NOT keep a table of groups [T-106].
+The children of two groups MUST NOT wait for one lock of the monitor when they start and when they return [T-106].
+The monitor MUST NOT start a goroutine for a group whose children all return before the end of their `-stall` durations [T-106].
+A dump of all goroutines for one `conc::group_child_stalled` report MUST NOT be larger than 8 MiB; a child that the dump does not hold MUST get the finding without its frame [T-106].
+The monitor MUST report `conc::group_unbounded` when the children running at one time in a group without a limit reach 10000 [T-106].
+The first position of that finding MUST be the `go group` statement [T-106].
+The second position MUST be the spawn statement of the child that reached the count [T-106].
+The message MUST hold the count of children that ran at one time [T-106].
+The monitor MUST NOT report a group that has a limit [T-106].
+The monitor MUST NOT report the group of a group stage, because the stage bounds its children [T-106].
+The monitor MUST report when the count reaches that number, and MUST NOT report at a larger count [T-106].
+The monitor MUST report one `go group` statement only one time in one process [T-106].
+The monitor MUST NOT take a flag or an environment variable for that count [T-106].
+The monitor MUST NOT keep a timer or a goroutine for that report [T-106].
+`logos conc` MUST link the monitor into the program and into each test binary, also when no package of the program imports `logos/rt` or `logos/sync` [T-106].
+The monitor MUST report `conc::goroutine_leak` for a goroutine that the runtime marks as leaked: the goroutine waits, and no goroutine that can run reaches what it waits for [T-106].
+The first position of that finding MUST be the innermost frame of the goroutine outside the toolchain sources, and its role MUST name the function in which the goroutine waits [T-106].
+The second position MUST be the start of the outermost function of the goroutine outside the toolchain sources [T-106].
+A check MUST read the stacks of the leaked goroutines only [T-106].
+The monitor MUST NOT report a leaked goroutine that has no position outside the toolchain sources [T-106].
+The monitor MUST check for leaked goroutines 0.1 s, 0.3 s, 0.7 s, 1.5 s, 3.1 s and 6.3 s after the program starts [T-106].
+After these six checks the monitor MUST NOT keep a timer, so that the runtime still ends a program in which every goroutine waits [T-106].
+After these six checks the monitor MUST check after a garbage collection of the program, with one minute or more between two checks [T-106].
+The monitor MUST discard the lock orders of a `Locked` value that the garbage collector has freed [T-106].
+The monitor MUST report `conc::lock_held_long` when a goroutine has held a `Locked` value for the `-hold` duration and another goroutine came for the value during that hold [T-106].
+The monitor MUST write that finding when a goroutine comes for the value after the duration, or when the hold ends, and it MUST NOT keep a timer for a hold [T-106].
+The first position of that finding MUST be the `WithLock` call that holds the value, and the second position MUST be the `WithLock` call that waits for it [T-106].
+The monitor MUST NOT report a hold that no other goroutine waited for, and it MUST NOT report a hold that is shorter than the duration [T-106].
+The monitor MUST report one `WithLock` call as the holder only one time in one process [T-106].
+`logos conc` MUST stop with an error on a system that has no named pipes [T-106].
 
 ## 2. Tier 2 specification
 
@@ -690,11 +748,19 @@ Code MUST copy the field to a local first. [T-202]
 
 For a callee declared in `.lgo`, reading a result before the `err == nil` proof MUST fail with `[correctness::result_before_error_check]`. [T-202]
 
+A call that cannot return MUST discharge the `err == nil` proof. The calls that count are the builtin `panic` and a closed list of standard library calls: `os.Exit`; `log.Fatal`, `log.Fatalf`, `log.Fatalln`, `log.Panic`, `log.Panicf`, `log.Panicln`; the methods `Fatal`, `Fatalf`, `FailNow`, `Skip`, `Skipf`, `SkipNow` called through `*testing.T`, `*testing.B`, `*testing.F`, or `testing.TB`; and `runtime.Goexit`. A method with one of those names declared outside its listed package MUST NOT discharge the proof, and a user declared function MUST NOT be inferred as never returning. [T-202]
+
 An `err == nil` proof MUST remain valid for a captured result in a function literal, lambda, or `go group` child when that result is initialized at its declaration, is never assigned again, and never has its address taken. A result assigned anywhere besides its declaration or whose address is taken MUST NOT inherit that proof across the capture boundary. [T-202]
 
 A return that passes a result and the err it came with, both unread and unchanged, MUST NOT count as a read of the result. [T-202]
 
 Assigning a result to the blank identifier MUST NOT count as a read. [T-202]
+
+A read of a result stored in a value-struct field or a constant array element MUST fail before the proof. [T-202]
+
+A read of a result stored in a slice or map element, or reached through a pointer, MAY stay accepted. [T-202]
+
+A plain assignment destination MUST NOT count as a read. [T-202]
 
 A Go-mode callee (the standard library or any Go package, such as `io.Reader.Read`) MUST keep its own contract, so use of n first stays allowed. [T-202][R-U2]
 
@@ -1083,6 +1149,8 @@ A generic function that uses them MUST become a comptime generic. [T-205]
 Each instantiation MUST expand into a non-generic copy `<f>_logosct<N>` in the instantiating package. [T-205]
 
 A comptime call inside an expansion whose type arguments are concrete after substitution MUST expand into the same copy, at any depth and across package boundaries. [T-205]
+
+A use of the switched type parameter inside a `const switch` case body MUST spell the instantiation's type argument in the copy, for tilde and exact cases alike. [T-205]
 
 Copies MUST be memoized per type-argument list. [T-205]
 
@@ -1886,6 +1954,12 @@ A struct with a field whose JSON tag name `encoding/json` v1 rejects as invalid,
 Generated output MUST be byte-identical to encoding/json for the same value under both `goexperiment.jsonv2` and `!goexperiment.jsonv2`; `json.Marshal` on an eligible value MUST return the same bytes as the generated method. [T-Sec10]
 The default build MUST use the fork baseline with `goexperiment.jsonv2` on. [T-Sec10]
 The generator MUST NOT rewrite any call site. [T-Sec10]
+Under `goexperiment.jsonv2`, the lowering MUST also generate a value-receiver MarshalJSONTo method unless the type declares MarshalJSON or MarshalJSONTo. [T-Sec10.2]
+The generated bytes implement the options `json.DefaultOptionsV1()`. [T-Sec10.2]
+MarshalJSONTo MUST use the generated bytes only when the options of the caller equal `json.DefaultOptionsV1()`. [T-Sec10.2]
+For all other options, MarshalJSONTo MUST encode through the reflective encoder of `encoding/json/v2` with the options of the caller. [T-Sec10.2]
+A struct with an option field at any container depth other than a bare pointer option or a union option, unless a named type on the path declares MarshalJSON, MUST NOT encode through the reflective encoder: its MarshalJSONTo MUST use the generated bytes when the caller options are the v1 or v2 defaults and MUST return an `UnsupportedOptions` diagnostic otherwise. A v1 call that differs from the defaults only in struct-tag flags counts as the v1 defaults. [T-Sec10.2]
+The fast-path options compare MUST NOT allocate; the reflection fallback used when the layout check fails MAY allocate. [T-Sec10.2]
 The generator emits fixed key literals first, computes a size bound, then fills one buffer from a single make. [T-Sec10]
 The buffer is returned to the caller, so it escapes to the heap. [T-Sec10]
 No size threshold and no caller buffer apply. [T-Sec10]
@@ -1903,6 +1977,11 @@ Each instantiation carries its own static helpers. [T-205]
 ### 10.2 Static unmarshaling
 
 For each eligible struct, the lowering generates pointer-receiver UnmarshalJSON. [T-Sec10]
+Under `goexperiment.jsonv2`, the lowering MUST also generate a pointer-receiver UnmarshalJSONFrom method unless the type declares UnmarshalJSON or UnmarshalJSONFrom. [T-Sec10.2]
+UnmarshalJSONFrom MUST use the generated decoder only when the options of the caller equal `json.DefaultOptionsV1()`. [T-Sec10.2]
+For all other options, such as `RejectUnknownMembers(true)`, UnmarshalJSONFrom MUST decode through the reflective decoder of `encoding/json/v2` with the options of the caller. [T-Sec10.2]
+A semantic error from the reflective path MUST name the declared struct type; a legacy UnmarshalTypeError from that path MUST carry the declared type and struct name. [T-Sec10.2]
+A struct with an option field at any container depth other than a bare pointer option or a union option, unless a named type on the path declares UnmarshalJSON or UnmarshalJSONFrom, MUST NOT use the reflective decoder: its UnmarshalJSONFrom MUST decode through the v1 method when the caller options are the v1 or v2 defaults and MUST return an `UnsupportedOptions` diagnostic otherwise. A v1 call that differs from the defaults only in struct-tag flags counts as the v1 defaults. A struct with a union member at any container depth and no such option field MUST take the same refusal path: the reflective decoder cannot dispatch a union member, so the v1 or v2 defaults decode through the v1 method and any other option returns an `UnsupportedOptions` diagnostic. [T-Sec10.2]
 For a scalar field with the `,string` option, generated method dispatch MUST follow the active `encoding/json` profile: classic mode unwraps the outer string, while JSONv2 passes the original JSON token and gives `UnmarshalJSONFrom` precedence over `UnmarshalJSON` and `UnmarshalText`. [T-Sec10]
 The compiler MUST select methods by their complete signatures. If a streaming method declines a value without consuming it, the generated decoder MUST call that method only once and then select the remaining method or scalar decoder at compile time; it MUST NOT construct a methodless type at run time. Non-scalar fields MUST use their ordinary fallback because `,string` does not apply to them. [T-Sec10]
 Generated method helper type arguments MUST retain source-valid C selectors when a checked scalar receiver is instantiated with a C type; private cgo-generated type names MUST NOT appear in ejected Go. [T-Sec10]
@@ -1913,6 +1992,7 @@ Decoding MUST fill defaults first, then parse. [T-Sec10]
 A _logos_seen mask sized [(K+63)/64]uint64 tracks matched keys against a required-mask constant, where K is the number of required non-nil fields of the struct. [T-Sec10]
 At the closing brace, a missing required non-nil field returns MissingFieldError naming type and field. [T-Sec10]
 JSON null for a non-nil field returns the same error. [T-Sec10]
+The option-aware fallback MUST preserve the same required-field checks, scanning member presence over a buffered copy of the object with the fast path fold and duplicate semantics while decoding into the destination's existing allocations, so an omitted member still fails when the destination already holds a non-nil pointer and a present member keeps nested data and pointer aliases. [T-Sec10.2]
 Keys MUST dispatch by switch up to 8 keys and by the Sec 7 const-map table above that. [T-Sec10][T-Sec7]
 Keys whose 64-bit hashes are equal MUST each dispatch to their own field. [T-Sec10][T-Sec7]
 The cost of decoding one key MUST NOT grow with the number of keys the type declares: dispatch MUST NOT scan the key set. [T-Sec10][T-Sec7]

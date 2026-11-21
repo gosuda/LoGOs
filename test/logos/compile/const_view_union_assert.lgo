@@ -1,0 +1,52 @@
+// errorcheck
+
+package p
+
+type Circle struct {
+	Radius float64
+}
+
+type Square struct {
+	Side float64
+}
+
+type Blob struct {
+	Name string
+	Tags []string
+}
+
+type ShapeVal interface {
+	Circle | Square
+}
+
+type ShapeRef interface {
+	Circle | Blob
+}
+
+type HolderVal struct {
+	S  ShapeVal
+	ID int
+}
+
+type HolderRef struct {
+	S    ShapeRef
+	Tags []string
+}
+
+func assertVal(xs const []HolderVal) {
+	if _, ok := xs[0].S.(Circle); ok { // ERROR "cannot erase readonly descendants in a type assertion"
+	}
+}
+
+func assertRef(xs const []HolderRef) {
+	if _, ok := xs[0].S.(Circle); ok { // ERROR "cannot erase readonly descendants in a type assertion"
+	}
+}
+
+func assertControl() {
+	holders := []HolderVal{
+		HolderVal{S: Circle{Radius: 1}, ID: 1},
+	}
+	if _, ok := holders[0].S.(Circle); ok {
+	}
+}

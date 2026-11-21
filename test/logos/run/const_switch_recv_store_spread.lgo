@@ -1,0 +1,129 @@
+// run
+
+package main
+
+import (
+	"fmt"
+	"os"
+)
+
+var failed bool
+
+func check(name string, cond bool, got, want any) {
+	if !cond {
+		failed = true
+		fmt.Println("FAIL", name+":", "got", got, "want", want)
+		return
+	}
+	fmt.Println("ok", name)
+}
+
+type Holder struct {
+	Base bool
+	Ptr  *bool
+}
+
+type Word struct{}
+
+func (w Word) M() *bool { return &wordSlot }
+
+var wordSlot bool
+
+var lineBase = Holder{Base: true, Ptr: new(bool)}
+var blockBase = Holder{Base: true, Ptr: new(bool)}
+var multiBase = Holder{Base: true, Ptr: new(bool)}
+
+var slots = []*bool{new(bool), new(bool), new(bool)}
+
+var lineSeq int
+var blockSeq int
+var multiSeq int
+
+func nextLine() int { lineSeq++; return 0 }
+func nextBlock() int {
+	blockSeq++
+	return 1
+}
+func nextMulti() int {
+	multiSeq++
+	return 2
+}
+
+// The spread closure replaces the literal's source with generated text
+// whose moved regions hold the frozen operands, so the receive-store
+// fold must spell the temps through those moves instead of slicing the
+// generated text by source offsets. Each comment placement below
+// shifts the operands without entering the generated text.
+func spreadLine[T any](ch chan T) {
+	const switch T {
+	case interface{ M() *bool }:
+		var p interface{ M() *bool }
+		select {
+		case p, *Holder{
+			..lineBase,
+			// A line comment between the spread element and the field
+			// shifts the operands later in the source.
+			Ptr: slots[nextLine()],
+		}.Ptr = <-ch:
+			wordIface = p
+		default:
+		}
+	}
+}
+
+func spreadBlock[T any](ch chan T) {
+	const switch T {
+	case interface{ M() *bool }:
+		var p interface{ M() *bool }
+		select {
+		case p, *Holder{
+			/* a block comment spanning
+			   several lines sits where the
+			   fold used to slice */
+			..blockBase,
+			Ptr: slots[nextBlock()],
+		}.Ptr = <-ch:
+			_ = p
+		default:
+		}
+	}
+}
+
+func spreadMulti[T any](ch chan T) {
+	const switch T {
+	case interface{ M() *bool }:
+		var p interface{ M() *bool }
+		select {
+		case p, *Holder{ // 日本語 comment é before the spread
+			..multiBase,
+			Ptr: slots[nextMulti()], // trailing comment after the field
+		}.Ptr = <-ch:
+			_ = p
+		default:
+		}
+	}
+}
+
+var wordIface interface{ M() *bool }
+
+func main() {
+	ch := make(chan Word, 3)
+	ch <- Word{}
+	ch <- Word{}
+	ch <- Word{}
+	spreadLine[bool](make(chan bool))
+	spreadLine[Word](ch)
+	spreadBlock[Word](ch)
+	spreadMulti[Word](ch)
+
+	check("line-store", *slots[0], *slots[0], true)
+	check("line-once", lineSeq == 1, lineSeq, 1)
+	check("line-recv", wordIface.M() == &wordSlot, wordIface.M() == &wordSlot, true)
+	check("block-store", *slots[1], *slots[1], true)
+	check("block-once", blockSeq == 1, blockSeq, 1)
+	check("multi-store", *slots[2], *slots[2], true)
+	check("multi-once", multiSeq == 1, multiSeq, 1)
+	if failed {
+		os.Exit(1)
+	}
+}

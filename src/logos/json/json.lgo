@@ -1,0 +1,136 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package json
+
+import (
+	"bytes"
+	"comptime"
+	stdjson "encoding/json"
+	"encoding/json/jsontext"
+	jsonv2 "encoding/json/v2"
+	"io"
+
+	"logos/json/internal/compact"
+	"logos/json/internal/stream"
+)
+
+// Marshal returns the JSON encoding of v. For a value-struct type
+// with a generated or hand-written marshal method it calls that
+// method directly through a comptime interface case, with no value
+// boxing, preferring the streaming MarshalJSONTo over MarshalJSON the
+// way encoding/json does under JSONv2. The result runs through the
+// same compact-and-escape pass the original applies and is copied, so
+// the caller owns the returned slice. Every other value, including nil
+// pointers and interfaces, goes through encoding/json, so output bytes
+// equal the original on the same inputs (a nil pointer marshals as
+// null, never panics).
+//
+// Failure path: when the method returns an error, or when its output
+// is not valid JSON, the twin delegates the whole value to
+// encoding/json and returns that result, so the error value, its type
+// field and its text are the original's by construction. The method
+// runs a second time inside that call.
+func Marshal[T any](v T) ([]byte, error) {
+	const if comptime.IsStruct[T]() {
+		const switch T {
+		case jsonv2.MarshalerTo:
+			var buf bytes.Buffer
+			if err := v.MarshalJSONTo(jsontext.NewEncoder(&buf)); err != nil {
+				return stdjson.Marshal(v)
+			}
+			out, cerr := compact.Escaped(buf.Bytes())
+			if cerr != nil {
+				return stdjson.Marshal(v)
+			}
+			return append([]byte(nil), out...), nil
+		case stdjson.Marshaler:
+			b, err := v.MarshalJSON()
+			if err != nil {
+				return stdjson.Marshal(v)
+			}
+			out, cerr := compact.Escaped(b)
+			if cerr != nil {
+				return stdjson.Marshal(v)
+			}
+			return append([]byte(nil), out...), nil
+		}
+	}
+	return stdjson.Marshal(v)
+}
+
+// Unmarshal parses data into a value of type T and returns it. For a
+// struct type with a generated or hand-written unmarshal method it
+// calls that method, preferring the streaming UnmarshalJSONFrom over
+// UnmarshalJSON the way encoding/json does under JSONv2. The input is
+// validated as a whole first, and the method receives only the JSON
+// value without surrounding space, matching the standard dispatch.
+// Every other type goes through encoding/json, so results and error
+// values equal the original on the same inputs.
+func Unmarshal[T any](data []byte) (T, error) {
+	var v T
+	if u, ok := any(&v).(jsonv2.UnmarshalerFrom); ok {
+		val, valid := compact.Trimmed(data)
+		if !valid {
+			err := stdjson.Unmarshal(data, &v)
+			return v, err
+		}
+		declined, err := stream.FromValue(u, val)
+		if err != nil {
+			return v, err
+		}
+		if !declined {
+			return v, nil
+		}
+		// The method declined without reading; try the next decoder.
+	}
+	if u, ok := any(&v).(stdjson.Unmarshaler); ok {
+		val, valid := compact.Trimmed(data)
+		if !valid {
+			err := stdjson.Unmarshal(data, &v)
+			return v, err
+		}
+		err := u.UnmarshalJSON(val)
+		return v, err
+	}
+	err := stdjson.Unmarshal(data, &v)
+	return v, err
+}
+
+// MarshalWrite marshals in and writes the bytes to out in one Write
+// call. Value-struct types take the same method path as Marshal;
+// every other value goes through encoding/json. When the method path
+// fails, the fallback's bytes are written when its marshal succeeds,
+// so a successful fallback is never reported without output.
+func MarshalWrite[T any](out io.Writer, in T) error {
+	const if comptime.IsStruct[T]() {
+		const switch T {
+		case jsonv2.MarshalerTo:
+			var buf bytes.Buffer
+			if err := in.MarshalJSONTo(jsontext.NewEncoder(&buf)); err == nil {
+				eb, cerr := compact.Escaped(buf.Bytes())
+				if cerr == nil {
+					_, werr := out.Write(eb)
+					return werr
+				}
+			}
+		case stdjson.Marshaler:
+			b, err := in.MarshalJSON()
+			if err == nil {
+				eb, cerr := compact.Escaped(b)
+				if cerr == nil {
+					_, werr := out.Write(eb)
+					return werr
+				}
+			}
+		}
+	}
+	b, err := stdjson.Marshal(in)
+	if err != nil {
+		return err
+	}
+	_, err = out.Write(b)
+	return err
+}
+

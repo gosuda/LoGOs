@@ -1,0 +1,53 @@
+// run
+
+package main
+
+import (
+	"fmt"
+)
+
+type Holder struct {
+	Ptr  *bool
+	Rank int
+}
+
+func (h Holder) M() *bool  { return h.Ptr }
+func (h Holder) Index() int { return h.Rank }
+
+func pick[A any, B any](a A, b B) A {
+	return a
+}
+
+var seq int
+
+func next() int {
+	seq++
+	return 0
+}
+
+func recv[T any](s []T, ch chan T) {
+	const switch T {
+	case interface {
+		M() *bool
+		Index() int
+	}:
+		var p interface {
+			M() *bool
+			Index() int
+		}
+		select {
+		case p, *pick(s[next()+s[0].Index()], 0).M() = <-ch:
+			_ = p
+		default:
+		}
+	}
+}
+
+func main() {
+	ch := make(chan Holder, 1)
+	ch <- Holder{Ptr: new(bool), Rank: 0}
+	hs := []Holder{{Ptr: new(bool), Rank: 0}}
+	recv[Holder](hs, ch)
+	fmt.Println("seq", seq)
+	fmt.Println("store", *hs[0].Ptr)
+}

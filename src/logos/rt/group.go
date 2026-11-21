@@ -12,6 +12,7 @@ import (
 // Group is a bound set of goroutines. Build it with NewGroup, spawn
 // children with Go, and join them with Wait or WaitContext.
 type Group struct {
+	monitor    monitorState
 	ctx        context.Context
 	cancel     context.CancelFunc
 	sem        chan struct{}
@@ -49,13 +50,13 @@ func (e *PanicError) Error() string {
 // wake, until Wait has joined them all.
 func NewGroup(ctx context.Context, limit int) (*Group, context.Context) {
 	c, cancel := context.WithCancel(ctx)
-	slot := logosGroupAcquire()
-	done := make(chan struct{})
-	stop := context.AfterFunc(ctx, func() {
-		logosCancelGroup(slot)
-		close(done)
+	g := &Group{ctx: c, cancel: cancel, slot: logosGroupAcquire(), parentDone: make(chan struct{})}
+	monitorCreated(g, limit)
+	g.parentStop = context.AfterFunc(ctx, func() {
+		logosCancelGroup(g.slot)
+		monitorCancelled(g)
+		close(g.parentDone)
 	})
-	g := &Group{ctx: c, cancel: cancel, slot: slot, parentStop: stop, parentDone: done}
 	g.cond.L = &g.mu
 	if limit > 0 {
 		g.sem = make(chan struct{}, limit)
@@ -74,7 +75,7 @@ func NewGroup(ctx context.Context, limit int) (*Group, context.Context) {
 func (g *Group) Go(f func(context.Context) error) {
 	g.register()
 	g.acquire()
-	go g.run(f)
+	go g.run(monitored(g, f))
 }
 
 // GoNested spawns f as a child from a goroutine that is itself a child
@@ -83,6 +84,7 @@ func (g *Group) Go(f func(context.Context) error) {
 // does not wait for the slot it holds.
 func (g *Group) GoNested(f func(context.Context) error) {
 	g.register()
+	f = monitored(g, f)
 	go func() {
 		g.acquire()
 		g.run(f)
@@ -128,6 +130,7 @@ func (g *Group) fail(err error) {
 		g.first = err
 		g.cancel()
 		logosCancelGroup(g.slot)
+		monitorCancelled(g)
 	}
 }
 
@@ -147,6 +150,7 @@ func (g *Group) finishJoin() error {
 	if !g.parentStop() {
 		<-g.parentDone
 	}
+	monitorJoined(g)
 	logosGroupRelease(g.slot)
 	g.cancel()
 	g.mu.Lock()

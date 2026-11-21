@@ -25,6 +25,7 @@ func TestJSONProfileEjectedBehavior(t *testing.T) {
 		"json_string_pointer_null_test.lgo",
 		"json_marshal_v2_test.lgo",
 		"json_static_encoder_methods_test.lgo",
+		"json_static_options_test.lgo",
 		"json_unsupported_kinds_test.lgo",
 	} {
 		t.Run(name, func(t *testing.T) {
