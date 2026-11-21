@@ -681,6 +681,25 @@ func (fl *fileLower) loweredAt(chunks []chunk, sStart, sEnd int) (int, int, bool
 	return loweredSpanOf(chunks, oS, oE)
 }
 
+// skipLiteral returns the index just past the string or rune literal
+// starting at i, or i itself when the literal is unterminated.
+func skipLiteral(text string, i int) int {
+	q := text[i]
+	j := i + 1
+	for j < len(text) {
+		c := text[j]
+		if q != '`' && c == '\\' {
+			j += 2
+			continue
+		}
+		if c == q {
+			return j + 1
+		}
+		j++
+	}
+	return i
+}
+
 // gapWrapExtend widens a slice computed by loweredAt inside a composed
 // lowered text so the generated wrappers that enclose the operand stay
 // part of it: an opening run like `any(` immediately before the slice
@@ -711,6 +730,12 @@ func gapWrapExtend(chunks []chunk, text string, s, e int) (int, int) {
 				e++
 			case 'a' <= b && b <= 'z' || 'A' <= b && b <= 'Z' || '0' <= b && b <= '9' || b == '_':
 				e++
+			case b == '"' || b == '\'' || b == '`':
+				ne := skipLiteral(text, e)
+				if ne == e {
+					return s, e
+				}
+				e = ne
 			default:
 				return s, e
 			}
@@ -735,6 +760,11 @@ func gapWrapExtend(chunks []chunk, text string, s, e int) (int, int) {
 				depth--
 				if depth < 0 {
 					bal = false
+				}
+			case '"', '\'', '`':
+				ni := skipLiteral(text, i)
+				if ni > i {
+					i = ni - 1
 				}
 			}
 			if !bal {
