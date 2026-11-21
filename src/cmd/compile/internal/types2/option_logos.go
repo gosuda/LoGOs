@@ -162,7 +162,13 @@ func (check *Checker) logosOptionAssign(x *operand, T Type, context string) bool
 				return true
 			}
 		}
-		return Identical(x.typ(), Topt.Elem) || Identical(x.typ(), T)
+		if Identical(x.typ(), Topt.Elem) || Identical(x.typ(), T) {
+			return true
+		}
+		if Vopt != nil {
+			return false
+		}
+		return check.logosUnionMemberOf(x, Topt.Elem, context)
 	}
 	if Vopt != nil && check.logosInGoCall() {
 		if check.logosIsNonNilPointer(Vopt.Elem) && Identical(Vopt.Elem, T) {
