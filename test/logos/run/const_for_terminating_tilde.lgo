@@ -1,0 +1,49 @@
+// run
+
+
+package main
+
+import (
+	"comptime"
+	"fmt"
+	"os"
+)
+
+var failed bool
+
+func check(name string, cond bool, got, want any) {
+	if !cond {
+		failed = true
+		fmt.Println("FAIL", name+":", "got", got, "want", want)
+		return
+	}
+	fmt.Println("ok", name)
+}
+
+type Count int
+
+type TwoCounts struct {
+	A Count
+	B Count
+}
+
+var seen []string
+
+func collect() {
+	const for _, f := range comptime.Fields[TwoCounts]() {
+		const switch f.Type {
+		case ~Count:
+			seen = append(seen, f.Name)
+		case any:
+			return
+		}
+	}
+}
+
+func main() {
+	collect()
+	check("seen", fmt.Sprint(seen) == "[A B]", seen, "[A B]")
+	if failed {
+		os.Exit(1)
+	}
+}

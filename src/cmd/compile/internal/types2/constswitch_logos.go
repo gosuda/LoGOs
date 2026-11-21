@@ -410,7 +410,8 @@ func (check *Checker) logosConcreteCaseMatches(c *syntax.ConstSwitchCase, tag Ty
 	}
 	if c.Tilde {
 		ub, ok := Unalias(tag).Underlying().(*Basic)
-		return ok && Identical(ub, ctv)
+		cb, ok2 := underBasic(ctv)
+		return ok && ok2 && Identical(ub, cb)
 	}
 	if isIfaceCase(ctv) {
 		iface, _ := Unalias(ctv).Underlying().(*Interface)
@@ -419,9 +420,9 @@ func (check *Checker) logosConcreteCaseMatches(c *syntax.ConstSwitchCase, tag Ty
 	return Identical(ctv, tag)
 }
 
-func logosHasBreakConstSwitch(s *syntax.ConstSwitchStmt, label string, implicit bool) bool {
+func (check *Checker) logosHasBreakConstSwitch(s *syntax.ConstSwitchStmt, label string, implicit bool) bool {
 	for _, c := range s.Cases {
-		if hasBreakList(c.Body, label, implicit) {
+		if check.hasBreakList(c.Body, label, implicit) {
 			return true
 		}
 	}

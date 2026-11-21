@@ -70,11 +70,13 @@ func (check *Checker) isTerminating(s syntax.Stmt, label string) bool {
 		if !check.logosConstForExecutes(s) {
 			return false
 		}
-		return check.isTerminatingList(s.Body.List, "")
-
+		// The const for is judged by its expansion over the concrete
+		// struct: some visible field's body must terminate, so a struct
+		// with no visible fields never terminates. // logos M7-S2 hook.
+		return check.logosTerminatingConstFor(s)
 	case *syntax.SelectStmt:
 		for _, cc := range s.Body {
-			if !check.isTerminatingList(cc.Body, "") || hasBreakList(cc.Body, label, true) {
+			if !check.isTerminatingList(cc.Body, "") || check.hasBreakList(cc.Body, label, true) {
 				return false
 			}
 
@@ -87,7 +89,7 @@ func (check *Checker) isTerminating(s syntax.Stmt, label string) bool {
 			// so the loop is not a terminating statement. See go.dev/issue/49003.
 			break
 		}
-		if s.Cond == nil && !hasBreak(s.Body, label, true) {
+		if s.Cond == nil && !check.hasBreak(s.Body, label, true) {
 			return true
 		}
 	}
@@ -111,7 +113,7 @@ func (check *Checker) isTerminatingSwitch(body []*syntax.CaseClause, label strin
 		if cc.Cases == nil {
 			hasDefault = true
 		}
-		if !check.isTerminatingList(cc.Body, "") || hasBreakList(cc.Body, label, true) {
+		if !check.isTerminatingList(cc.Body, "") || check.hasBreakList(cc.Body, label, true) {
 			return false
 		}
 	}
@@ -125,7 +127,7 @@ func (check *Checker) isTerminatingSwitch(body []*syntax.CaseClause, label strin
 // hasBreak reports if s is or contains a break statement
 // referring to the label-ed statement or implicit-ly the
 // closest outer breakable statement.
-func hasBreak(s syntax.Stmt, label string, implicit bool) bool {
+func (check *Checker) hasBreak(s syntax.Stmt, label string, implicit bool) bool {
 	switch s := s.(type) {
 	default:
 		panic("unreachable")
@@ -137,7 +139,7 @@ func hasBreak(s syntax.Stmt, label string, implicit bool) bool {
 		// no chance
 
 	case *syntax.LabeledStmt:
-		return hasBreak(s.Stmt, label, implicit)
+		return check.hasBreak(s.Stmt, label, implicit)
 
 	case *syntax.BranchStmt:
 		if s.Tok == syntax.Break {
@@ -150,43 +152,43 @@ func hasBreak(s syntax.Stmt, label string, implicit bool) bool {
 		}
 
 	case *syntax.BlockStmt:
-		return hasBreakList(s.List, label, implicit)
+		return check.hasBreakList(s.List, label, implicit)
 
 	case *syntax.IfStmt:
-		if hasBreak(s.Then, label, implicit) ||
-			s.Else != nil && hasBreak(s.Else, label, implicit) {
+		if check.hasBreak(s.Then, label, implicit) ||
+			s.Else != nil && check.hasBreak(s.Else, label, implicit) {
 			return true
 		}
 
 	case *syntax.SwitchStmt:
-		if label != "" && hasBreakCaseList(s.Body, label, false) {
+		if label != "" && check.hasBreakCaseList(s.Body, label, false) {
 			return true
 		}
 
 	case *syntax.ConstIfStmt: // logos M7-S1 hook.
-		return logosHasBreakConstIf(s, label, implicit)
+		return check.logosHasBreakConstIf(s, label, implicit)
 
 	case *syntax.ConstSwitchStmt: // logos M7-S4 hook.
-		return logosHasBreakConstSwitch(s, label, implicit)
+		return check.logosHasBreakConstSwitch(s, label, implicit)
 
 	case *syntax.GroupStmt: // logos M8-S2 hook.
-		return logosHasBreakGroup(s, label, implicit)
+		return check.logosHasBreakGroup(s, label, implicit)
 
 	case *syntax.GroupChild:
 		// Branches cannot leave a group child; its body never breaks out.
 
 	case *syntax.ConstForStmt: // logos M7-S2 hook.
-		// The const for body keeps the enclosing label namespace, so an
-		// unlabeled break inside it exits the enclosing breakable statement.
-		return hasBreak(s.Body, label, implicit)
+		// The const for body keeps the enclosing label namespace, but a
+		// break counts only when some field's expansion runs it.
+		return check.logosHasBreakConstFor(s, label, implicit)
 
 	case *syntax.SelectStmt:
-		if label != "" && hasBreakCommList(s.Body, label, false) {
+		if label != "" && check.hasBreakCommList(s.Body, label, false) {
 			return true
 		}
 
 	case *syntax.ForStmt:
-		if label != "" && hasBreak(s.Body, label, false) {
+		if label != "" && check.hasBreak(s.Body, label, false) {
 			return true
 		}
 	}
@@ -194,27 +196,26 @@ func hasBreak(s syntax.Stmt, label string, implicit bool) bool {
 	return false
 }
 
-func hasBreakList(list []syntax.Stmt, label string, implicit bool) bool {
+func (check *Checker) hasBreakList(list []syntax.Stmt, label string, implicit bool) bool {
 	for _, s := range list {
-		if hasBreak(s, label, implicit) {
+		if check.hasBreak(s, label, implicit) {
 			return true
 		}
 	}
 	return false
 }
 
-func hasBreakCaseList(list []*syntax.CaseClause, label string, implicit bool) bool {
+func (check *Checker) hasBreakCaseList(list []*syntax.CaseClause, label string, implicit bool) bool {
 	for _, s := range list {
-		if hasBreakList(s.Body, label, implicit) {
+		if check.hasBreakList(s.Body, label, implicit) {
 			return true
 		}
 	}
 	return false
 }
-
-func hasBreakCommList(list []*syntax.CommClause, label string, implicit bool) bool {
+func (check *Checker) hasBreakCommList(list []*syntax.CommClause, label string, implicit bool) bool {
 	for _, s := range list {
-		if hasBreakList(s.Body, label, implicit) {
+		if check.hasBreakList(s.Body, label, implicit) {
 			return true
 		}
 	}

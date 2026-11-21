@@ -1,0 +1,58 @@
+// run
+
+
+package main
+
+import (
+	"comptime"
+	"fmt"
+	"os"
+)
+
+var failed bool
+
+func check(name string, cond bool, got, want any) {
+	if !cond {
+		failed = true
+		fmt.Println("FAIL", name+":", "got", got, "want", want)
+		return
+	}
+	fmt.Println("ok", name)
+}
+
+type Cfg struct {
+	Host string
+	Port int
+}
+
+type Inner struct {
+	V int
+}
+
+type Mixed struct {
+	First Inner
+	Last  int
+}
+
+func first() string {
+	const for _, f := range comptime.Fields[Cfg]() {
+		return f.Name
+	}
+}
+
+func pick() int {
+	const for _, f := range comptime.Fields[Mixed]() {
+		_ = f.Name
+		const if comptime.IsStruct[f.Type]() {
+			return 1
+		}
+	}
+}
+
+func main() {
+	check("first", first() == "Host", first(), "Host")
+	check("pick", pick() == 1, pick(), 1)
+	if failed {
+		os.Exit(1)
+	}
+}

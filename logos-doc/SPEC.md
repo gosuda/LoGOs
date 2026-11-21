@@ -1178,7 +1178,9 @@ It MUST include exported fields and unexported fields of a current-package `T`. 
 
 It MUST exclude unexported fields of other packages. [T-205]
 
-A `const for` statement MUST be a terminating statement when its body ends in a terminating statement and its range has at least one visible field; over no visible fields it falls through, and over an unresolved generic type parameter it is terminating when its body is terminating with each instantiation rechecked after unrolling. [T-205]
+A `const for` MUST terminate when the body of some visible field terminates; a struct with no visible fields MUST NOT terminate. Over an unresolved generic type parameter it is terminating when its body is terminating with each instantiation rechecked after unrolling. [T-205]
+
+Unrolling MUST stop after the first terminating field. [T-205]
 
 `val.[f]` MUST read and write the named field. [T-205]
 
