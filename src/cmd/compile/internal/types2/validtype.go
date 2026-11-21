@@ -73,6 +73,16 @@ func (check *Checker) validType0(pos syntax.Pos, typ Type, nest, path []*Named) 
 			}
 		}
 
+	case *ConstView:
+		if !check.validType0(pos, t.Elem, nest, path) {
+			return false
+		}
+
+	case *ReadonlyDescendants:
+		if !check.validType0(pos, t.Elem, nest, path) {
+			return false
+		}
+
 	case *Interface:
 		for _, etyp := range t.embeddeds {
 			if !check.validType0(pos, etyp, nest, path) {

@@ -28,17 +28,6 @@ type Locked[T any] struct {
 	v  T
 }
 
-// WithLock holds Lock, defers Unlock, then calls f with the value's
-// address. The deferred Unlock runs during unwinding, so a panic in f
-// unlocks the mutex before propagating (#176). f must neither return
-// nor store its argument; .lgo callers get that rule from the M9 lint,
-// which rejects escaping the pointer.
-func (l *Locked[T]) WithLock(f func(*T)) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	f(&l.v)
-}
-
 // Hot is a read-mostly pointer: loads are one atomic load, updates
 // swap in a fully constructed value with a CAS loop, so concurrent
 // readers never observe a partially initialized value (#26). The zero

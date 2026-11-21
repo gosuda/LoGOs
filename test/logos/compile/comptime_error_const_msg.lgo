@@ -1,0 +1,122 @@
+// errorcheck
+
+package p
+
+import "comptime"
+
+const BoomMsg = "named boom"
+
+func FailNamed[T any]() int {
+	comptime.Error(BoomMsg)
+	return 0
+}
+
+var _ = FailNamed[int]() // ERROR "\[comptime::error\] named boom"
+
+func FailConcat[T any]() int {
+	comptime.Error("concat" + " message")
+	return 0
+}
+
+var _ = FailConcat[int]() // ERROR "\[comptime::error\] concat message"
+
+const SharedPrefix = "bad: "
+
+func FailShared[T any]() int {
+	const A = SharedPrefix + "a"
+	const B = SharedPrefix + "b"
+	comptime.Error(A + B)
+	return 0
+}
+
+var _ = FailShared[int]() // ERROR "\[comptime::error\] bad: abad: b"
+
+const ShadowedMsg = "pkg"
+
+func FailShadowed[T any]() int {
+	const ShadowedMsg = "local"
+	comptime.Error(ShadowedMsg)
+	return 0
+}
+
+var _ = FailShadowed[int]() // ERROR "\[comptime::error\] local"
+
+const Prefix = "p"
+
+func FailSelfShadowInit[T any]() int {
+	const Prefix = Prefix + "!"
+	comptime.Error(Prefix)
+	return 0
+}
+
+var _ = FailSelfShadowInit[int]() // ERROR "\[comptime::error\] p!"
+
+const LaterB = "pkg"
+
+func FailLaterShadowInit[T any]() int {
+	const A = LaterB + "!"
+	const LaterB = "late"
+	comptime.Error(A)
+	return 0
+}
+
+var _ = FailLaterShadowInit[int]() // ERROR "\[comptime::error\] pkg!"
+
+func FailCaseLocalMsg[T any]() int {
+	const switch T {
+	case int:
+		const Msg = "bad int"
+		comptime.Error(Msg)
+	}
+	return 0
+}
+
+var _ = FailCaseLocalMsg[int]() // ERROR "\[comptime::error\] bad int"
+
+func FailInheritedMsg[T any]() int {
+	const (
+		_ = "bad"
+		InheritedMsg
+	)
+	comptime.Error(InheritedMsg)
+	return 0
+}
+
+var _ = FailInheritedMsg[int]() // ERROR "\[comptime::error\] bad"
+
+func FailGroupedConstMsg[T any]() int {
+	const (
+		GroupedA = "x"
+		GroupedB = GroupedA + "y"
+	)
+	comptime.Error(GroupedB)
+	return 0
+}
+
+var _ = FailGroupedConstMsg[int]() // ERROR "\[comptime::error\] xy"
+
+const RepeatPrefix = "denied"
+
+func FailRepeatedInit[T any]() int {
+	const (
+		RepeatPrefix = RepeatPrefix
+		RepeatMsg
+	)
+	comptime.Error(RepeatMsg)
+	return 0
+}
+
+var _ = FailRepeatedInit[int]() // ERROR "\[comptime::error\] denied"
+
+func FailDeferredCase[T any]() int {
+	type Local = struct{ X T }
+	const switch T {
+	case Local:
+		comptime.Error("local case")
+	case int:
+		comptime.Error("int case")
+	}
+	return 0
+}
+
+var _ = FailDeferredCase[int]() // ERROR "\[comptime::error\] int case"

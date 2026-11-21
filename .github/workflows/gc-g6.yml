@@ -20,7 +20,7 @@ jobs:
   measurements:
     name: "amd64 fixed-work measurements"
     if: github.event_name == 'pull_request'
-    runs-on: "ubuntu-24.04"
+    runs-on: "depot-ubuntu-24.04"
     timeout-minutes: 90
     env:
       BASE_SHA: "${{ github.event.pull_request.base.sha }}"

@@ -386,3 +386,682 @@ func efCapturedArrayPointerAddress() {
 	n[0].touch()
 	later()
 }
+
+type efStats struct {
+	count int
+	items [2]int
+}
+
+type efInner struct {
+	stats efStats
+}
+
+type efPtr struct {
+	inner efInner
+	p     *efStats
+}
+
+type efHeld struct {
+	stats  int
+	inner  efInner
+	labels map[string]int
+	vals   []int
+}
+
+// SPEC 2.5/T-202 names the read of a result, not the form of the
+// destination, so a result stored in a direct value-struct field, a
+// nested field, or a constant array element is tracked like a plain
+// variable, including a pointer result held in such a field. A store made
+// through a pointer stays outside the tracked forms, as do slice and map
+// element destinations: a write through such an element can alias the
+// tracked memory in a way this pass cannot name, so tracking them would
+// need a guessing rule the SPEC does not license.
+
+func efFetchHeld() (int, error) {
+	return 1, nil
+}
+
+func efFetchStats() (efStats, error) {
+	return efStats{count: 1}, nil
+}
+
+func efFetchAll() (efHeld, error) {
+	return efHeld{}, nil
+}
+
+func efFetchStatsPtr() (*efStats, error) {
+	return &efStats{count: 1}, nil
+}
+
+func efFieldReadUnchecked() {
+	h := efHeld{inner: efInner{stats: efStats{}}}
+	var err error
+	h.stats, err = efFetchHeld()
+	println(h.stats) // ERROR "result_before_error_check"
+	if err != nil {
+		return
+	}
+	println(h.stats)
+}
+
+func efFieldReadChecked() {
+	h := efHeld{inner: efInner{stats: efStats{}}}
+	var err error
+	h.stats, err = efFetchHeld()
+	if err != nil {
+		return
+	}
+	println(h.stats)
+}
+
+func efNestedFieldReadUnchecked() {
+	h := efHeld{inner: efInner{stats: efStats{}}}
+	var err error
+	h.inner.stats, err = efFetchStats()
+	println(h.inner.stats.count) // ERROR "result_before_error_check"
+	if err != nil {
+		return
+	}
+	println(h.inner.stats.count)
+}
+
+func efFieldArrayElementUnchecked() {
+	h := efHeld{inner: efInner{stats: efStats{}}}
+	var err error
+	h.inner.stats.items[1], err = efFetchHeld()
+	println(h.inner.stats.items[1]) // ERROR "result_before_error_check"
+	if err != nil {
+		return
+	}
+	println(h.inner.stats.items[1])
+}
+
+func efPointerFieldReadUnchecked() {
+	hp := efPtr{inner: efInner{stats: efStats{}}, p: &efStats{}}
+	var err error
+	hp.p, err = efFetchStatsPtr()
+	println(hp.p.count) // ERROR "result_before_error_check"
+	if err != nil {
+		return
+	}
+	println(hp.p.count)
+}
+
+func efFieldReassigned() {
+	h := efHeld{inner: efInner{stats: efStats{}}}
+	var err error
+	h.stats, err = efFetchHeld()
+	h.stats = 9
+	println(h.stats)
+	_ = err
+}
+
+// Slicing the array before the tracked call means a later write through
+// the slice can overwrite the element, so the element is not tracked and
+// this read stays accepted.
+func efFieldSlicedBeforeWrite() {
+	h := efHeld{inner: efInner{stats: efStats{}}}
+	items := h.inner.stats.items[:]
+	var err error
+	h.inner.stats.items[0], err = efFetchHeld()
+	items[0] = 9
+	println(h.inner.stats.items[0])
+	_ = err
+}
+
+func efSliceElementUnchecked() {
+	h := efHeld{inner: efInner{stats: efStats{}}}
+	var err error
+	h.vals[0], err = efFetchHeld()
+	println(h.vals[0])
+	_ = err
+}
+
+func efMapElementUnchecked() {
+	h := efHeld{inner: efInner{stats: efStats{}}}
+	var err error
+	h.labels["a"], err = efFetchHeld()
+	println(h.labels["a"])
+	_ = err
+}
+
+// A store through a pointer to the struct is outside the tracked forms,
+// because another pointer to the same struct can overwrite the field
+// without a write this pass sees, and a stale entry would reject honest
+// code. The reads stay accepted.
+func efFieldStoreThroughPointer() {
+	h := efHeld{}
+	hp := &h
+	var err error
+	hp.stats, err = efFetchHeld()
+	println(hp.stats)
+	if err != nil {
+		return
+	}
+	println(hp.stats)
+}
+
+// A store in one branch only leaves the entry unproven at the join, so
+// the read inside the branch, before the check, fails. A read after the
+// in-branch check passes in the branch and after the join, because the
+// not-taken side holds no entry and the taken side holds a proof.
+func efFieldStoreOneBranchReadInside(cond bool) {
+	h := efHeld{}
+	var err error
+	if cond {
+		h.stats, err = efFetchHeld()
+		println(h.stats) // ERROR "result_before_error_check"
+		if err != nil {
+			return
+		}
+	}
+	println(h.stats)
+	_ = err
+}
+
+func efFieldStoreOneBranchChecked(cond bool) {
+	h := efHeld{}
+	var err error
+	if cond {
+		h.stats, err = efFetchHeld()
+		if err != nil {
+			return
+		}
+		println(h.stats)
+	}
+	println(h.stats)
+	_ = err
+}
+
+func efFieldStoreOneBranchReadAfterJoin(cond bool) {
+	h := efHeld{}
+	var err error
+	if cond {
+		h.stats, err = efFetchHeld()
+	}
+	println(h.stats) // ERROR "result_before_error_check"
+	if err != nil {
+		return
+	}
+	_ = err
+}
+
+// A plain assignment writes its destination; no part of the destination
+// spine is a read. A write into a tracked element or field drops the
+// entries of the memory it changes, so these stay accepted.
+func efElementWriteBeforeProof() {
+	h := efHeld{inner: efInner{stats: efStats{}}}
+	var err error
+	h.inner.stats, err = efFetchStats()
+	h.inner.stats.items[1] = 9
+	println(h.inner.stats.items[1])
+	_ = err
+}
+
+func efFieldWriteWhenRootTracked() {
+	h := efHeld{}
+	var err error
+	h, err = efFetchAll()
+	h.stats = 9
+	println(h)
+	_ = err
+}
+
+func efPatchedFieldRead() {
+	h := efHeld{inner: efInner{stats: efStats{}}}
+	var err error
+	h.inner.stats, err = efFetchStats()
+	h.inner.stats.count = 9
+	println(h.inner.stats.count)
+	println(h.inner.stats.items[0])
+	_ = err
+}
+
+func efFetchLabels() (map[string]int, error) {
+	return map[string]int{}, nil
+}
+
+// A plain result stays checked when a later statement takes its address:
+// the alias did not exist at the read.
+func efPlainReadBeforeAddr() {
+	n, err := efFetchHeld()
+	println(n) // ERROR "result_before_error_check"
+	p := &n // ERROR "result_before_error_check"
+	_ = p
+	_ = err
+}
+
+// Slicing a plain result after the read does not silence the read.
+func efPlainReadBeforeSlice() {
+	s, err := efSlice()
+	println(s[0]) // ERROR "result_before_error_check"
+	t := s[:] // ERROR "result_before_error_check"
+	_ = t
+	_ = err
+}
+
+// Storing through an unchecked pointer loads that pointer, so the store
+// is a read of the result.
+func efStoreThroughUncheckedPointer() {
+	p, err := efFetchStatsPtr()
+	p.count = 1 // ERROR "result_before_error_check"
+	_ = err
+}
+
+// Storing through an unchecked slice header loads the header.
+func efStoreThroughUncheckedSlice() {
+	s, err := efSlice()
+	s[0] = 1 // ERROR "result_before_error_check"
+	_ = err
+}
+
+// Storing through an unchecked map loads the map.
+func efStoreThroughUncheckedMap() {
+	m, err := efFetchLabels()
+	m["a"] = 1 // ERROR "result_before_error_check"
+	_ = err
+}
+
+// Storing through a dereference of an unchecked pointer loads it.
+func efStoreThroughUncheckedDeref() {
+	p, err := efFetchStatsPtr()
+	*p = efStats{} // ERROR "result_before_error_check"
+	_ = err
+}
+
+// Writing one field must not end tracking of a sibling field.
+func efSiblingWriteKeepsTracking() {
+	h := efHeld{inner: efInner{stats: efStats{}}}
+	var err error
+	h.stats, err = efFetchHeld()
+	h.inner.stats = efStats{}
+	println(h.stats) // ERROR "result_before_error_check"
+	_ = err
+}
+
+// Reading a whole value loads the results stored inside it.
+func efAggregateCopyReadsResult() {
+	h := efHeld{}
+	var err error
+	h.stats, err = efFetchHeld()
+	dup := h // ERROR "result_before_error_check"
+	_ = dup
+	_ = err
+}
+
+// Reading a nested aggregate loads the results stored inside it.
+func efNestedAggregateCopyReadsResult() {
+	h := efHeld{}
+	var err error
+	h.inner.stats, err = efFetchStats()
+	sub := h.inner // ERROR "result_before_error_check"
+	_ = sub
+	_ = err
+}
+
+// Reading an unrelated sibling does not load the tracked field.
+func efSiblingReadStaysAccepted() {
+	h := efHeld{}
+	var err error
+	h.stats, err = efFetchHeld()
+	println(h.inner)
+	_ = err
+}
+
+const efConstIdx = 1
+
+// A named constant names the same slot as its decimal value.
+func efConstIndexEquivalent() {
+	h := efHeld{inner: efInner{stats: efStats{}}}
+	var err error
+	h.inner.stats.items[efConstIdx], err = efFetchHeld()
+	println(h.inner.stats.items[1]) // ERROR "result_before_error_check"
+	if err != nil {
+		return
+	}
+	println(h.inner.stats.items[1])
+}
+
+// A hexadecimal literal names the same slot as its decimal value.
+func efHexIndexEquivalent() {
+	h := efHeld{inner: efInner{stats: efStats{}}}
+	var err error
+	h.inner.stats.items[0x1], err = efFetchHeld()
+	println(h.inner.stats.items[1]) // ERROR "result_before_error_check"
+	_ = err
+}
+
+// A constant expression names the same slot as its value.
+func efConstExprIndexEquivalent() {
+	h := efHeld{inner: efInner{stats: efStats{}}}
+	var err error
+	h.inner.stats.items[efConstIdx+0], err = efFetchHeld()
+	println(h.inner.stats.items[1]) // ERROR "result_before_error_check"
+	_ = err
+}
+
+// An octal literal writes the octal slot, not the decimal spelling.
+func efOctalIndexNamesSlotEight() {
+	var a [16]int
+	var err error
+	a[010], err = efFetchHeld()
+	println(a[8]) // ERROR "result_before_error_check"
+	println(a[10])
+	_ = err
+}
+
+// Discarding a tracked field to the blank identifier is not a read.
+func efFieldDiscardStaysAccepted() {
+	h := efHeld{}
+	var err error
+	h.stats, err = efFetchHeld()
+	_ = h.stats
+	_ = err
+}
+
+// With two unchecked results in one value, the whole-value read reports
+// the entry stored first by source position, deterministically.
+func efTwoUncheckedFirstByPosition() {
+	h := efHeld{}
+	var err error
+	h.stats, err = efFetchHeld()
+	h.inner.stats.count, err = efFetchHeld()
+	dup := h // ERROR "read of h.stats before"
+	_ = dup
+	_ = err
+}
+
+// A parenthesized float constant names the same slot as its value.
+func efParenIndexEquivalent() {
+	h := efHeld{inner: efInner{stats: efStats{}}}
+	var err error
+	h.inner.stats.items[(1.0)], err = efFetchHeld()
+	println(h.inner.stats.items[1]) // ERROR "result_before_error_check"
+	if err != nil {
+		return
+	}
+	println(h.inner.stats.items[1])
+}
+
+// A write through a variable index never reads the array element, so it
+// stays accepted while the stored result is unchecked.
+func efVariableIndexWriteStaysAccepted() {
+	var a [4]int
+	var err error
+	i := 2
+	a[0], err = efFetchHeld()
+	a[i] = 9
+	if err != nil {
+		return
+	}
+	println(a[0])
+}
+
+// A constant len of a fixed array never evaluates the array, so it stays
+// accepted while an element is unchecked. A slice len evaluates the
+// header, so it still fails.
+func efFixedArrayLenStaysAccepted() {
+	var a [4]int
+	var err error
+	a[0], err = efFetchHeld()
+	println(len(a))
+	if err != nil {
+		return
+	}
+	println(a[0])
+}
+
+func efSliceLenReadsHeader() {
+	s, err := efSlice()
+	println(len(s)) // ERROR "result_before_error_check"
+	_ = err
+}
+
+// A deferred read must not inherit a proof for memory a later loop
+// iteration rewrites: the defer runs after every iteration.
+func efLoopDeferredFieldProof() {
+	h := efHeld{}
+	var err error
+	for i := 0; i < 2; i++ {
+		h.stats, err = efFetchHeld()
+		if err != nil {
+			return
+		}
+		defer func() {
+			println(h.stats) // ERROR "result_before_error_check"
+		}()
+	}
+}
+
+// Overwriting the field with a plain value ends the check, so a deferred
+// read registered after the overwrite stays accepted.
+func efOverwriteBeforeCapture() {
+	h := efHeld{}
+	var err error
+	h.stats, err = efFetchHeld()
+	h.stats = 0
+	defer func() {
+		println(h.stats)
+	}()
+	_ = err
+}
+
+// A deferred whole-value copy reads a field stored after the defer, so it
+// fails without a check.
+func efDeferredCopySeesLaterStore() {
+	h := efHeld{}
+	var err error
+	defer func() {
+		println(h) // ERROR "result_before_error_check"
+	}()
+	h.stats, err = efFetchHeld()
+	_ = err
+}
+
+// Overwriting the result through a pointer known to name it ends the
+// check, so reading the replacement stays accepted.
+func efPointerOverwriteDropsCheck() {
+	var n int
+	p := &n
+	var err error
+	n, err = efFetchHeld()
+	*p = 9
+	println(n)
+	_ = err
+}
+
+type efMeta struct {
+	tag int
+}
+
+type efOuter struct {
+	efMeta
+	count int
+}
+
+// Reading or writing a promoted value field never reads an unrelated
+// tracked sibling field.
+func efPromotedSiblingStaysAccepted() {
+	h := efOuter{}
+	var err error
+	h.count, err = efFetchHeld()
+	println(h.tag)
+	h.tag = 1
+	println(h.count) // ERROR "result_before_error_check"
+	_ = err
+}
+
+// Two calls store the same field with different error variables. A nil
+// check on the first call's error cannot prove the value the deferred
+// literal reads, because the second call may have failed.
+func efDeferredMixedErrorVars() {
+	h := efHeld{}
+	var first, second error
+	defer func() {
+		println(h.stats) // ERROR "result_before_error_check"
+	}()
+	h.stats, first = efFetchHeld()
+	h.stats, second = efFetchHeld()
+	if first != nil {
+		return
+	}
+	_ = second
+}
+
+// A variable the outer loop declares is shared by the inner loop's
+// iterations, so a store inside the inner loop can rewrite the captured
+// value after the defer registers.
+func efInnerLoopStoreSharedVar() {
+	for i := 0; i < 2; i++ {
+		h := efHeld{}
+		var err error
+		for j := 0; j < 2; j++ {
+			defer func() {
+				println(h.stats) // ERROR "result_before_error_check"
+			}()
+			h.stats, err = efFetchHeld()
+			if err != nil {
+				return
+			}
+		}
+	}
+}
+
+func efArr() [2][2]int { return [2][2]int{} }
+
+func efUseVal(n int) int { return n }
+
+// A variable-index store evaluates its base once. A base that reads a
+// checked result stays accepted even though the index call rewrites the
+// result afterward.
+func efArrayBaseReadsResultOnce() {
+	n, err := efFetch()
+	if err != nil {
+		return
+	}
+	a := efArr()
+	a[efUseVal(n)][func() int { n, err = efFetch(); return 0 }()] = 9
+	_ = err
+}
+
+type efIn2 struct {
+	stats int
+}
+
+type efMid2 struct {
+	efIn2
+}
+
+type efOuter2 struct {
+	efMid2
+}
+
+// A promoted read loads the whole embedded value, so it fails while a
+// tracked destination nested under the promoted path is unproven.
+func efPromotedReadSeesNestedField() {
+	h := efOuter2{}
+	var err error
+	h.efMid2.efIn2.stats, err = efFetchHeld()
+	println(h.efIn2) // ERROR "result_before_error_check"
+	_ = err
+}
+
+// A loop that exits on every path after the defer registers cannot write
+// the captured field again, so the deferred read of the replacement
+// stays accepted.
+func efLoopBreakDeferredCopyStaysAccepted() {
+	h := efHeld{}
+	var err error
+	for {
+		h.stats, err = efFetchHeld()
+		h.stats = 0
+		defer func() {
+			println(h.stats)
+		}()
+		break
+	}
+	_ = err
+}
+
+type efIn3 struct {
+	stats int
+	other int
+}
+
+type efMid3 struct {
+	efIn3
+}
+
+type efOuter3 struct {
+	efMid3
+}
+
+// A promoted selector segment is a path step, not a copy of the embedded
+// value: reading a sibling field through it stays accepted while a read
+// of the embedded aggregate itself still fails.
+func efPromotedSegmentReadsSibling() {
+	h := efOuter3{}
+	var err error
+	h.efMid3.efIn3.stats, err = efFetchHeld()
+	println(h.efIn3.other)
+	println(h.efIn3) // ERROR "result_before_error_check"
+	_ = err
+}
+
+// A range clause variable has a new instance each iteration, so the defer
+// registered in one iteration reads its own h, not a shared field.
+func efRangeVarFreshDeferred() {
+	var err error
+	for _, h := range [2]efHeld{} {
+		h.stats, err = efFetchHeld()
+		h.stats = 0
+		defer func() {
+			println(h.stats)
+		}()
+	}
+	_ = err
+}
+
+// A backward goto can re-enter the loop and overwrite the captured field
+// after the defer registered, so the break exemption cannot hide the
+// unchecked read.
+func efGotoReentryDeferred() {
+	h := efHeld{}
+	var err error
+	retried := false
+retry:
+	for {
+		h.stats, err = efFetchHeld()
+		if retried {
+			return
+		}
+		h.stats = 0
+		defer func() {
+			println(h.stats) // ERROR "result_before_error_check"
+		}()
+		break
+	}
+	_ = err
+	retried = true
+	goto retry
+}
+
+// An error variable declared inside the loop is a new instance each
+// iteration, so a check on the captured error cannot prove a field a
+// later iteration's store may have failed on.
+func efLoopLocalErrSeedsUnproven() {
+	h := efHeld{}
+	var first error
+	h.stats, first = efFetchHeld()
+	for i := 0; i < 2; i++ {
+		var err error
+		h.stats = 0
+		defer func() {
+			if err == nil {
+				println(h.stats) // ERROR "result_before_error_check"
+			}
+		}()
+		h.stats, err = efFetchHeld()
+	}
+	_ = first
+}

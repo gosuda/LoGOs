@@ -1,0 +1,211 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package p
+
+func ffFetch() (int, error) {
+	return 1, nil
+}
+
+func ffFetchHeld() (int, error) {
+	return 1, nil
+}
+
+func ffFetchAll() (ffHeld, error) {
+	return ffHeld{}, nil
+}
+
+func ffLoadMeta() (ffMeta, error) {
+	return ffMeta{}, nil
+}
+
+func ffLoadOuter() (ffOuter, error) {
+	return ffOuter{}, nil
+}
+
+func ffGetSlice(n int) []int {
+	return []int{n}
+}
+
+func ffEcho(n int) int {
+	return n
+}
+
+type ffInner struct {
+	stats int
+}
+
+type ffHeld struct {
+	stats int
+	inner ffInner
+}
+
+type ffMeta struct {
+	tag int
+}
+
+type ffOuter struct {
+	ffMeta
+	count int
+}
+
+func ffCondAliasKeepsCheck(p *int, rebind bool) {
+	var n int
+	if rebind {
+		p = &n
+	}
+	n, err := ffFetch()
+	*p = 9
+	println(n /* ERROR "[correctness::result_before_error_check]" */)
+	_ = err
+}
+
+func ffFieldAddrWriteKeepsRootCheck() {
+	h := ffHeld{}
+	p := &h.stats
+	var err error
+	h, err = ffFetchAll()
+	*p = 9
+	println(h /* ERROR "[correctness::result_before_error_check]" */)
+	println(h /* ERROR "[correctness::result_before_error_check]" */ .inner)
+	_ = err
+}
+
+func ffPointerOverwriteDropsCheck() {
+	var n int
+	p := &n
+	var err error
+	n, err = ffFetch()
+	*p = 9
+	println(n)
+	_ = err
+}
+
+func ffPromotedReadSeesEmbeddedResult() {
+	h := ffOuter{}
+	var err error
+	h.ffMeta, err = ffLoadMeta()
+	println(h.tag /* ERROR "[correctness::result_before_error_check]" */)
+	_ = err
+}
+
+func ffPromotedReadSeesWholeRoot() {
+	h := ffOuter{}
+	var err error
+	h, err = ffLoadOuter()
+	println(h.tag /* ERROR "[correctness::result_before_error_check]" */)
+	_ = err
+}
+
+func ffPromotedSiblingStaysAccepted() {
+	h := ffOuter{}
+	var err error
+	h.count, err = ffFetchHeld()
+	println(h.tag)
+	h.tag = 1
+	println(h.count /* ERROR "[correctness::result_before_error_check]" */)
+	_ = err
+}
+
+func ffIndexEffectsRunAfterBase() {
+	var n int
+	var err error
+	n, err = ffFetch()
+	if err != nil {
+		return
+	}
+	ffGetSlice(n)[func() int { n, err = ffFetch(); return 0 }()] = 9
+	println(n /* ERROR "[correctness::result_before_error_check]" */)
+	_ = err
+}
+
+func ffDeferredSeesNextIterationStore() {
+	var n int
+	var err error
+	for i := 0; i < 2; i++ {
+		n, err = ffFetch()
+		if err != nil {
+			return
+		}
+		n = 0
+		defer func() {
+			println(n /* ERROR "[correctness::result_before_error_check]" */)
+		}()
+	}
+}
+
+func ffDeferredLoopLocalFieldStaysAccepted() {
+	for i := 0; i < 2; i++ {
+		h := ffHeld{}
+		var err error
+		h.stats, err = ffFetchHeld()
+		if err != nil {
+			return
+		}
+		defer func() {
+			println(h.stats)
+		}()
+	}
+}
+
+func ffDeferredLoopSharedFieldStillRejects() {
+	h := ffHeld{}
+	var err error
+	for i := 0; i < 2; i++ {
+		h.stats, err = ffFetchHeld()
+		if err != nil {
+			return
+		}
+		defer func() {
+			println(h.stats /* ERROR "[correctness::result_before_error_check]" */)
+		}()
+	}
+}
+
+func ffDeferredFieldProofMatchesError() {
+	h := ffHeld{}
+	var err error
+	defer func() {
+		if err != nil {
+			return
+		}
+		println(h)
+	}()
+	h.stats, err = ffFetchHeld()
+	_ = err
+}
+
+func ffEvaluatedArrayOperandReadsResult() {
+	var n int
+	var err error
+	n, err = ffFetch()
+	println(len([1]int{ffEcho(n /* ERROR "[correctness::result_before_error_check]" */)}))
+	_ = err
+}
+
+func ffSplitAliasStaysTracked(p *int) {
+	var n int
+	p = &n
+	var err error
+	n, err = ffFetch()
+	*p = 9
+	println(n /* ERROR "[correctness::result_before_error_check]" */)
+	_ = err
+}
+
+func ffBackwardGotoSeesLaterStore() {
+	n, err := ffFetch()
+	if err != nil {
+		return
+	}
+	tries := 0
+retry:
+	println(n /* ERROR "[correctness::result_before_error_check]" */)
+	n, err = ffFetch()
+	tries++
+	if tries < 2 {
+		goto retry
+	}
+	_ = err
+}

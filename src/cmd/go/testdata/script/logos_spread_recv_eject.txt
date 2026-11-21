@@ -1,0 +1,25 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+# A spread composite in a select receive target must lower on both paths:
+# the spread's temporary is declared where the store text reads it, and the
+# frozen index operands appear exactly once, so plain go builds the ejected
+# module and its output matches the native run.
+cd m
+cp $GOROOT/test/logos/run/spread_recv.lgo main.lgo
+cp $GOROOT/test/logos/run/spread_recv.out expected.txt
+logos run .
+cmp stdout expected.txt
+logos eject -o out
+cd out
+go build ./...
+go run .
+cmp stdout ../expected.txt
+exists $UPROOT1274/bin/go
+exec env -u GOROOT $UPROOT1274/bin/go run .
+cmp stdout ../expected.txt
+
+-- m/go.mod --
+module example.com/spreadrecv
+
+go 1.27
