@@ -1,0 +1,455 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package db_test
+
+import (
+	"database/sql"
+	"database/sql/driver"
+	"fmt"
+	"math"
+	"strings"
+	"testing"
+	"time"
+
+	twindb "logos/db"
+
+	"uuid"
+)
+
+func mustAssign[T any](t *testing.T, name string, src driver.Value) T {
+	t.Helper()
+	var v T
+	if err := twindb.Assign(&v, src); err != nil {
+		panic(fmt.Sprintf("%s: Assign(%v) error = %v", name, src, err))
+	}
+	return v
+}
+
+func checkAssignValue[T comparable](t *testing.T, name string, src driver.Value, want T) {
+	t.Helper()
+	got := mustAssign[T](t, name, src)
+	if got != want {
+		t.Fatalf("%s: Assign(%v) = %v, want %v", name, src, got, want)
+	}
+}
+
+func checkAssignError(t *testing.T, name string, src driver.Value, dest any, want string) {
+	t.Helper()
+	var err error
+	switch p := dest.(type) {
+	case *string:
+		err = twindb.Assign(p, src)
+	case *int:
+		err = twindb.Assign(p, src)
+	case *int8:
+		err = twindb.Assign(p, src)
+	case *uint8:
+		err = twindb.Assign(p, src)
+	case *uint16:
+		err = twindb.Assign(p, src)
+	case *bool:
+		err = twindb.Assign(p, src)
+	case *float32:
+		err = twindb.Assign(p, src)
+	case *float64:
+		err = twindb.Assign(p, src)
+	case *uuid.UUID:
+		err = twindb.Assign(p, src)
+	default:
+		t.Fatalf("%s: no error harness for %T", name, dest)
+	}
+	if err == nil {
+		t.Fatalf("%s: Assign(%v) succeeded, want error %q", name, src, want)
+	}
+	if err.Error() != want {
+		t.Fatalf("%s: Assign(%v) error = %q, want %q", name, src, err.Error(), want)
+	}
+}
+
+func TestAssignExact(t *testing.T) {
+	checkAssignValue(t, "string", "foo", "foo")
+	checkAssignValue(t, "int", 123, 123)
+	someTime := time.Unix(123, 0).UTC()
+	got := mustAssign[time.Time](t, "time", someTime)
+	if !got.Equal(someTime) {
+		t.Fatalf("time: Assign = %v, want %v", got, someTime)
+	}
+}
+
+func TestAssignToString(t *testing.T) {
+	checkAssignValue(t, "string", "string", "string")
+	checkAssignValue(t, "bytes", []byte("byteslice"), "byteslice")
+	checkAssignValue(t, "int", 123, "123")
+	checkAssignValue(t, "int8", int8(123), "123")
+	checkAssignValue(t, "int64", int64(123), "123")
+	checkAssignValue(t, "uint8", uint8(123), "123")
+	checkAssignValue(t, "uint16", uint16(123), "123")
+	checkAssignValue(t, "uint32", uint32(123), "123")
+	checkAssignValue(t, "uint64", uint64(123), "123")
+	checkAssignValue(t, "float", 1.5, "1.5")
+	checkAssignValue(t, "bool", true, "true")
+	checkAssignValue(t, "unix1", time.Unix(1, 0).UTC(), "1970-01-01T00:00:01Z")
+	checkAssignValue(t, "zone", time.Unix(1453874597, 0).In(time.FixedZone("here", -3600*8)), "2016-01-26T22:03:17-08:00")
+	checkAssignValue(t, "nanos", time.Unix(1, 2).UTC(), "1970-01-01T00:00:01.000000002Z")
+	checkAssignValue(t, "zero", time.Time{}, "0001-01-01T00:00:00Z")
+}
+
+func TestAssignToBytes(t *testing.T) {
+	got := mustAssign[[]byte](t, "nil", nil)
+	if got != nil {
+		t.Fatalf("nil: Assign = %q, want nil", got)
+	}
+	checkAssignBytes(t, "string", "string", []byte("string"))
+	checkAssignBytes(t, "bytes", []byte("byteslice"), []byte("byteslice"))
+	checkAssignBytes(t, "int", 123, []byte("123"))
+	checkAssignBytes(t, "int8", int8(123), []byte("123"))
+	checkAssignBytes(t, "int64", int64(123), []byte("123"))
+	checkAssignBytes(t, "uint8", uint8(123), []byte("123"))
+	checkAssignBytes(t, "uint16", uint16(123), []byte("123"))
+	checkAssignBytes(t, "uint32", uint32(123), []byte("123"))
+	checkAssignBytes(t, "uint64", uint64(123), []byte("123"))
+	checkAssignBytes(t, "float", 1.5, []byte("1.5"))
+	checkAssignBytes(t, "time", time.Unix(1, 2).UTC(), []byte("1970-01-01T00:00:01.000000002Z"))
+}
+
+func TestAssignBytesClone(t *testing.T) {
+	src := []byte("byteslice")
+	got := mustAssign[[]byte](t, "clone", src)
+	if string(got) != string(src) {
+		t.Fatalf("Assign = %q, want %q", got, src)
+	}
+	if len(got) > 0 && &got[0] == &src[0] {
+		t.Fatal("Assign aliased the driver slice")
+	}
+}
+
+func TestAssignToRawBytes(t *testing.T) {
+	got := mustAssign[sql.RawBytes](t, "nil", nil)
+	if got != nil {
+		t.Fatalf("nil: Assign = %q, want nil", got)
+	}
+	checkAssignRaw(t, "bytes", []byte("byteslice"), sql.RawBytes("byteslice"))
+	checkAssignRaw(t, "string", "string", sql.RawBytes("string"))
+	checkAssignRaw(t, "int", 123, sql.RawBytes("123"))
+	checkAssignRaw(t, "int64", int64(123), sql.RawBytes("123"))
+	checkAssignRaw(t, "uint16", uint16(12), sql.RawBytes("12"))
+	checkAssignRaw(t, "float", 1.5, sql.RawBytes("1.5"))
+	checkAssignRaw(t, "time", time.Unix(2, 5).UTC(), sql.RawBytes("1970-01-01T00:00:02.000000005Z"))
+}
+
+func TestAssignStringToInts(t *testing.T) {
+	checkAssignValue(t, "uint8", "255", uint8(255))
+	var v uint8
+	checkAssignError(t, "uint8-range", "256", &v, `converting driver.Value type string ("256") to a uint8: value out of range`)
+	checkAssignValue(t, "uint16", "256", uint16(256))
+	var n int
+	checkAssignError(t, "int-syntax", "foo", &n, `converting driver.Value type string ("foo") to a int: invalid syntax`)
+	checkAssignValue(t, "neg", "-1", -1)
+}
+
+func TestAssignInt64ToSmaller(t *testing.T) {
+	checkAssignValue(t, "uint8", int64(5), uint8(5))
+	var v8 uint8
+	checkAssignError(t, "uint8-range", int64(256), &v8, `converting driver.Value type int64 ("256") to a uint8: value out of range`)
+	checkAssignValue(t, "uint16", int64(256), uint16(256))
+	var v16 uint16
+	checkAssignError(t, "uint16-range", int64(65536), &v16, `converting driver.Value type int64 ("65536") to a uint16: value out of range`)
+}
+
+func TestAssignBools(t *testing.T) {
+	checkAssignValue(t, "true", true, true)
+	checkAssignValue(t, "True", "True", true)
+	checkAssignValue(t, "TRUE", "TRUE", true)
+	checkAssignValue(t, "one", "1", true)
+	checkAssignValue(t, "int1", 1, true)
+	checkAssignValue(t, "int64-1", int64(1), true)
+	checkAssignValue(t, "uint16-1", uint16(1), true)
+	checkAssignValue(t, "false", false, false)
+	checkAssignValue(t, "false-s", "false", false)
+	checkAssignValue(t, "FALSE", "FALSE", false)
+	checkAssignValue(t, "zero-s", "0", false)
+	checkAssignValue(t, "zero", 0, false)
+	checkAssignValue(t, "int64-0", int64(0), false)
+	checkAssignValue(t, "uint16-0", uint16(0), false)
+	var b bool
+	checkAssignError(t, "yup", "yup", &b, `sql/driver: couldn't convert "yup" into type bool`)
+	checkAssignError(t, "two", 2, &b, `sql/driver: couldn't convert 2 into type bool`)
+}
+
+func TestAssignFloats(t *testing.T) {
+	checkAssignValue(t, "f64", float64(1.5), float64(1.5))
+	checkAssignValue(t, "int64", int64(1), float64(1))
+	checkAssignValue(t, "f32", float64(1.5), float32(1.5))
+	checkAssignValue(t, "str32", "1.5", float32(1.5))
+	checkAssignValue(t, "str64", "1.5", float64(1.5))
+}
+
+func checkAssignBytes(t *testing.T, name string, src driver.Value, want []byte) {
+	t.Helper()
+	got := mustAssign[[]byte](t, name, src)
+	if string(got) != string(want) {
+		t.Fatalf("%s: Assign(%v) = %q, want %q", name, src, got, want)
+	}
+}
+
+func checkAssignRaw(t *testing.T, name string, src driver.Value, want sql.RawBytes) {
+	t.Helper()
+	got := mustAssign[sql.RawBytes](t, name, src)
+	if string(got) != string(want) {
+		t.Fatalf("%s: Assign(%v) = %q, want %q", name, src, got, want)
+	}
+}
+
+func checkAssignIface(t *testing.T, name string, src driver.Value, want any) {
+	t.Helper()
+	got := mustAssign[any](t, name, src)
+	switch w := want.(type) {
+	case []byte:
+		gb, ok := got.([]byte)
+		if !ok || string(gb) != string(w) {
+			t.Fatalf("%s: Assign(%v) = %#v, want %q", name, src, got, w)
+		}
+	default:
+		if got != want {
+			t.Fatalf("%s: Assign(%v) = %#v, want %#v", name, src, got, want)
+		}
+	}
+}
+
+func TestAssignUUID(t *testing.T) {
+	want := uuid.MustParse("97b6a4e0-5323-43e9-82c8-88110d6686d6")
+	checkAssignValue(t, "lower", "97b6a4e0-5323-43e9-82c8-88110d6686d6", want)
+	checkAssignValue(t, "upper", "97B6A4E0-5323-43E9-82C8-88110D6686D6", want)
+	checkAssignValue(t, "bytes", []byte("97b6a4e0-5323-43e9-82c8-88110d6686d6"), want)
+	checkAssignValue(t, "bytes-upper", []byte("97B6A4E0-5323-43E9-82C8-88110D6686D6"), want)
+	checkAssignValue(t, "raw16", []byte{0x97, 0xb6, 0xa4, 0xe0, 0x53, 0x23, 0x43, 0xe9, 0x82, 0xc8, 0x88, 0x11, 0x0d, 0x66, 0x86, 0xd6}, want)
+	var u uuid.UUID
+	checkAssignError(t, "bad-string", "x", &u, `converting driver.Value type string ("x") to a UUID: invalid uuid`)
+	checkAssignError(t, "bad-bytes", []byte("x"), &u, `converting driver.Value type []byte ("x") to a UUID: invalid uuid`)
+}
+
+func TestAssignPointersUnsupported(t *testing.T) {
+	p := new(int64)
+	err := twindb.Assign(&p, nil)
+	if err == nil || !strings.Contains(err.Error(), "unsupported Scan") {
+		t.Fatalf("nil pointer: Assign error = %v, want unsupported Scan", err)
+	}
+	err = twindb.Assign(&p, int64(42))
+	if err == nil || !strings.Contains(err.Error(), "unsupported Scan") {
+		t.Fatalf("int64 pointer: Assign error = %v, want unsupported Scan", err)
+	}
+}
+
+func TestAssignToInterface(t *testing.T) {
+	checkAssignIface(t, "f64", float64(1.5), any(float64(1.5)))
+	checkAssignIface(t, "int64", int64(1), any(int64(1)))
+	checkAssignIface(t, "str", "str", any("str"))
+	checkAssignIface(t, "bool", true, any(true))
+	got := mustAssign[any](t, "nil", nil)
+	if got != nil {
+		t.Fatalf("nil: Assign = %#v, want nil", got)
+	}
+	src := []byte("byteslice")
+	boxed := mustAssign[any](t, "bytes", src)
+	bb, ok := boxed.([]byte)
+	if !ok || string(bb) != string(src) {
+		t.Fatalf("bytes: Assign = %#v, want %q", boxed, src)
+	}
+	if len(bb) > 0 && &bb[0] == &src[0] {
+		t.Fatal("bytes: Assign aliased the driver slice")
+	}
+	empty := mustAssign[any](t, "empty", []byte(nil))
+	eb, ok := empty.([]byte)
+	if !ok || eb != nil {
+		t.Fatalf("empty: Assign = %#v, want nil bytes", empty)
+	}
+}
+
+type userDefined float64
+
+type userDefinedSlice []int
+
+type userDefinedString string
+
+type userDefinedBytes []byte
+
+func TestAssignUserDefined(t *testing.T) {
+	checkAssignValue(t, "float", 1.5, userDefined(1.5))
+	checkAssignValue(t, "int64", int64(123), userDefined(123))
+	checkAssignValue(t, "string", "1.5", userDefined(1.5))
+	checkAssignValue(t, "str", "str", userDefinedString("str"))
+	var uds userDefinedSlice
+	err := twindb.Assign(&uds, []byte{1, 2, 3})
+	if err == nil || !strings.Contains(err.Error(), "unsupported Scan") || !strings.Contains(err.Error(), "userDefinedSlice") {
+		t.Fatalf("slice: Assign error = %v, want unsupported Scan naming userDefinedSlice", err)
+	}
+	var udb userDefinedBytes
+	err = twindb.Assign(&udb, []byte("foo"))
+	if err == nil || !strings.Contains(err.Error(), "unsupported Scan") {
+		t.Fatalf("named bytes: Assign error = %v, want unsupported Scan", err)
+	}
+}
+
+type userDefinedBool bool
+
+func TestAssignNamedScalarSources(t *testing.T) {
+	// Named destinations mirror the upstream reflect path: a named
+	// string converts only from string or []byte, a named bool only
+	// from bool.
+	var us userDefinedString
+	if err := twindb.Assign(&us, "on"); err != nil {
+		panic(fmt.Sprintf("string: Assign error = %v", err))
+	}
+	if us != "on" {
+		t.Fatalf("string: Assign = %q, want on", us)
+	}
+	if err := twindb.Assign(&us, []byte("raw")); err != nil {
+		panic(fmt.Sprintf("bytes: Assign error = %v", err))
+	}
+	if us != "raw" {
+		t.Fatalf("bytes: Assign = %q, want raw", us)
+	}
+	if err := twindb.Assign(&us, int64(9)); err == nil || !strings.Contains(err.Error(), "unsupported Scan") {
+		t.Fatalf("int64: Assign error = %v, want unsupported Scan", err)
+	}
+	if err := twindb.Assign(&us, true); err == nil || !strings.Contains(err.Error(), "unsupported Scan") {
+		t.Fatalf("bool: Assign error = %v, want unsupported Scan", err)
+	}
+	var ub userDefinedBool
+	if err := twindb.Assign(&ub, true); err != nil {
+		panic(fmt.Sprintf("bool: Assign error = %v", err))
+	}
+	if ub != true {
+		t.Fatalf("bool: Assign = %v, want true", ub)
+	}
+	if err := twindb.Assign(&ub, "true"); err == nil || !strings.Contains(err.Error(), "unsupported Scan") {
+		t.Fatalf("text: Assign error = %v, want unsupported Scan", err)
+	}
+	if err := twindb.Assign(&ub, int64(1)); err == nil || !strings.Contains(err.Error(), "unsupported Scan") {
+		t.Fatalf("int64: Assign error = %v, want unsupported Scan", err)
+	}
+}
+
+func TestAssignFloatPrecision(t *testing.T) {
+	// A float64 source stores untouched: a NaN payload survives where
+	// the text round-trip of the reflective path would drop it.
+	nan := math.Float64frombits(0x7FF8000000000001)
+	var f64 float64
+	if err := twindb.Assign(&f64, nan); err != nil {
+		panic(fmt.Sprintf("nan: Assign error = %v", err))
+	}
+	if math.Float64bits(f64) != math.Float64bits(nan) {
+		t.Fatalf("nan: Assign bits = %x, want %x", math.Float64bits(f64), math.Float64bits(nan))
+	}
+	var f32 float32
+	if err := twindb.Assign(&f32, 0.30000000000000004); err != nil {
+		panic(fmt.Sprintf("f32: Assign error = %v", err))
+	}
+	if f32 != float32(0.30000000000000004) {
+		t.Fatalf("f32: Assign = %v, want %v", f32, float32(0.30000000000000004))
+	}
+}
+
+func TestAssignNullKinds(t *testing.T) {
+	// The comptime Null paths cover the generic and named shapes
+	// without the reflective Scan body.
+	var ni sql.Null[int64]
+	if err := twindb.Assign(&ni, int64(5)); err != nil {
+		panic(fmt.Sprintf("int64: Assign error = %v", err))
+	}
+	if !ni.Valid || ni.V != 5 {
+		t.Fatalf("int64: Null = %+v, want valid 5", ni)
+	}
+	if err := twindb.Assign(&ni, nil); err != nil {
+		panic(fmt.Sprintf("nil: Assign error = %v", err))
+	}
+	if ni.Valid || ni.V != 0 {
+		t.Fatalf("nil: Null = %+v, want cleared", ni)
+	}
+	var nb sql.NullBool
+	if err := twindb.Assign(&nb, true); err != nil {
+		panic(fmt.Sprintf("bool: Assign error = %v", err))
+	}
+	if !nb.Valid || !nb.Bool {
+		t.Fatalf("bool: Null = %+v, want valid true", nb)
+	}
+	when := time.Unix(1690000000, 0).UTC()
+	var nt sql.NullTime
+	if err := twindb.Assign(&nt, when); err != nil {
+		panic(fmt.Sprintf("time: Assign error = %v", err))
+	}
+	if !nt.Valid || !nt.Time.Equal(when) {
+		t.Fatalf("time: Null = %+v, want valid %v", nt, when)
+	}
+	var nu sql.Null[uuid.UUID]
+	u := uuid.MustParse("97b6a4e0-5323-43e9-82c8-88110d6686d6")
+	if err := twindb.Assign(&nu, "97b6a4e0-5323-43e9-82c8-88110d6686d6"); err != nil {
+		panic(fmt.Sprintf("uuid: Assign error = %v", err))
+	}
+	if !nu.Valid || nu.V != u {
+		t.Fatalf("uuid: Null = %+v, want valid %v", nu, u)
+	}
+	if err := twindb.Assign(&nu, nil); err != nil {
+		panic(fmt.Sprintf("uuid nil: Assign error = %v", err))
+	}
+	if nu.Valid {
+		t.Fatalf("uuid nil: Null = %+v, want invalid", nu)
+	}
+}
+
+func TestAssignComplexError(t *testing.T) {
+	var s string
+	checkAssignError(t, "complex", complex(1, 2), &s, `unsupported Scan, storing driver.Value type complex128 into type *string`)
+}
+
+func TestAssignNullThroughScanner(t *testing.T) {
+	var ns sql.Null[string]
+	if err := twindb.Assign(&ns, nil); err != nil {
+		panic("nil: Assign error")
+	}
+	if ns.Valid {
+		t.Fatalf("nil: Null = %+v, want invalid", ns)
+	}
+	if err := twindb.Assign(&ns, "foo"); err != nil {
+		panic("foo: Assign error")
+	}
+	if !ns.Valid || ns.V != "foo" {
+		t.Fatalf("foo: Null = %+v, want valid foo", ns)
+	}
+}
+
+func TestAssignTimeToInterface(t *testing.T) {
+	tm := time.Unix(1, 2).UTC()
+	got := mustAssign[any](t, "time", tm)
+	ts, ok := got.(time.Time)
+	if !ok || !ts.Equal(tm) {
+		t.Fatalf("time: Assign = %#v, want %v", got, tm)
+	}
+}
+
+func TestAssignScalarAllocs(t *testing.T) {
+	srcInt := driver.Value(int64(42))
+	srcStr := driver.Value("42")
+	n := testing.AllocsPerRun(100, func() {
+		var i int64
+		if err := twindb.Assign(&i, srcInt); err != nil {
+			panic(fmt.Sprintf("int: Assign error = %v", err))
+		}
+		if i != 42 {
+			panic(fmt.Sprintf("int: Assign = %d, want 42", i))
+		}
+		var s string
+		if err := twindb.Assign(&s, srcStr); err != nil {
+			panic(fmt.Sprintf("string: Assign error = %v", err))
+		}
+		if s != "42" {
+			panic(fmt.Sprintf("string: Assign = %q, want 42", s))
+		}
+	})
+	t.Logf("scalar Assign allocs per run: %v", n)
+	if n > 2.5 {
+		t.Fatalf("allocs = %v, want at most 2", n)
+	}
+}
