@@ -20,3 +20,8 @@ ok strict-pointer-prefixed
 ok strict-no-fold-missing
 ok strict-default-applied
 ok null-default-untouched
+ok strict-truncated-keeps-default
+ok strict-truncated-keeps-user-default
+ok fold-nodelim-matched
+ok delimsens-missing
+ok strict-dup-pointer-prefixed

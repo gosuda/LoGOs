@@ -7,6 +7,7 @@ package jsonstaticunionoptions
 import (
 	"encoding/json"
 	jsonv2 "encoding/json/v2"
+	"strings"
 	"testing"
 )
 
@@ -69,5 +70,16 @@ func TestStaticOptionsUnionExemptV2Decoding(t *testing.T) {
 		if v.Name != "o" || inner.N != 5 {
 			t.Fatalf("decode %d: got %+v with n=%d, want name o and n 5", i, v, inner.N)
 		}
+	}
+}
+
+// A union member has no reflective representation, so the generated
+// UnmarshalJSONFrom refuses non-default caller options outright instead of
+// misdecoding through a shadow.
+func TestStaticOptionsUnionRefusesNonDefaultOptions(t *testing.T) {
+	var v OmitBox
+	err := jsonv2.Unmarshal([]byte(`{"name":"o","s":{"n":5}}`), &v, jsonv2.RejectUnknownMembers(true))
+	if err == nil || !strings.Contains(err.Error(), "caller options unsupported") {
+		t.Fatalf("non-default options: got %v, want unsupported-options error", err)
 	}
 }
