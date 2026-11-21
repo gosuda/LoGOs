@@ -1685,14 +1685,23 @@ func copySupportDir(src, dst string) {
 	}
 }
 
-// stripEjectedBuildTag removes ejected build lines, so the support copy
-// compiles under plain go with no tags set.
+// ejectedBuildLines are the build lines that hold in every build of the
+// support copy: the copy is the ejected form, and it has no monitored
+// file, so the tag logosconc selects nothing in it.
+var ejectedBuildLines = [][]byte{
+	[]byte("//go:build logosejected"),
+	[]byte("// +build logosejected"),
+	[]byte("//go:build !logosconc"),
+}
+
+// stripEjectedBuildTag removes the ejectedBuildLines, so the support
+// copy compiles under plain go with every set of tags.
 func stripEjectedBuildTag(data []byte) []byte {
 	lines := bytes.Split(data, []byte("\n"))
 	kept := lines[:0]
 	for _, l := range lines {
 		trimmed := bytes.TrimSpace(l)
-		if bytes.Equal(trimmed, []byte("//go:build logosejected")) || bytes.Equal(trimmed, []byte("// +build logosejected")) {
+		if slices.ContainsFunc(ejectedBuildLines, func(line []byte) bool { return bytes.Equal(trimmed, line) }) {
 			continue
 		}
 		kept = append(kept, l)

@@ -1,0 +1,179 @@
+[GOOS:windows] skip 'logos conc needs named pipes'
+[GOOS:plan9] skip 'logos conc needs named pipes'
+
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+cd bank
+
+# Neither the linter nor the race detector sees an inversion that did
+# not deadlock: the two transfers run one after the other.
+logos lint ./...
+! stderr .
+[race] [cgo] env CGO_ENABLED=1
+[race] [cgo] logos test -race -count=1 ./opposite
+[race] [cgo] stdout '^ok '
+
+# The monitor names both goroutines and both locks of each, and the
+# finding makes the exit status 1 although the program exited 0.
+! logos conc run ./opposite
+stdout '^transfers done$'
+stderr '^.*opposite[/\\]main\.lgo:30: \[conc::lock_order_inversion\] '
+stderr '^\t.*main\.lgo:30: '
+stderr '^\t.*main\.lgo:29: '
+stderr '^\t.*main\.lgo:20: '
+stderr '^\t.*main\.lgo:19: '
+stderr '^\tfix: '
+stderr -count=1 'lock_order_inversion'
+
+! logos conc run --json-diagnostics ./opposite
+stderr '^\{"schema_version":"1\.0","severity":"deny","rule_id":"conc::lock_order_inversion","file":".*main\.lgo","span":\{"start_line":30,'
+stderr '"note":"\\t.*main\.lgo:30: .*\\tfix: '
+! stderr '^\t'
+
+! logos conc test -count=1 ./opposite
+stdout '^ok '
+stderr '\[conc::lock_order_inversion\]'
+
+# One order gives no finding, and the status of the program is kept.
+logos conc run ./oneorder
+stdout '^transfers done$'
+! stderr .
+logos conc test -count=1 ./oneorder
+! stderr 'conc::'
+
+! logos conc run ./oneorder fail
+stderr '^exit status 3$'
+! stderr 'conc::'
+
+# A plain build does not carry the monitor.
+logos run ./opposite
+! stderr .
+
+-- bank/go.mod --
+module example.com/bank
+
+go 1.27
+-- bank/opposite/main.lgo --
+package main
+
+import (
+	"context"
+	"fmt"
+	"os"
+
+	"logos/sync"
+)
+
+type account struct{ balance int }
+
+var (
+	checking sync.Locked[account]
+	savings  sync.Locked[account]
+)
+
+func save(amount int) error {
+	checking.WithLock(from => {
+		savings.WithLock(to => {
+			from.balance -= amount
+			to.balance += amount
+		})
+	})
+	return nil
+}
+
+func spend(amount int) error {
+	savings.WithLock(from => {
+		checking.WithLock(to => {
+			from.balance -= amount
+			to.balance += amount
+		})
+	})
+	return nil
+}
+
+func transfers(ctx context.Context) error {
+	go group (ctx) {
+		go save(10)
+	}
+	go group (ctx) {
+		go spend(4)
+	}
+	return nil
+}
+
+func main() {
+	if err := transfers(context.Background()); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
+	fmt.Println("transfers done")
+}
+-- bank/opposite/main_test.lgo --
+package main
+
+import "testing"
+
+func TestTransfers(t *testing.T) {
+	if err := transfers(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+}
+-- bank/oneorder/main.lgo --
+package main
+
+import (
+	"context"
+	"fmt"
+	"os"
+
+	"logos/sync"
+)
+
+type account struct{ balance int }
+
+var (
+	checking sync.Locked[account]
+	savings  sync.Locked[account]
+)
+
+func save(amount int) error {
+	checking.WithLock(from => {
+		savings.WithLock(to => {
+			from.balance -= amount
+			to.balance += amount
+		})
+	})
+	return nil
+}
+
+func transfers(ctx context.Context) error {
+	go group (ctx) {
+		go save(10)
+	}
+	go group (ctx) {
+		go save(-4)
+	}
+	return nil
+}
+
+func main() {
+	if err := transfers(context.Background()); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
+	fmt.Println("transfers done")
+	if len(os.Args) > 1 {
+		os.Exit(3)
+	}
+}
+-- bank/oneorder/main_test.lgo --
+package main
+
+import "testing"
+
+func TestTransfers(t *testing.T) {
+	if err := transfers(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+}

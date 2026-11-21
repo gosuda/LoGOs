@@ -2,6 +2,10 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+// A build with the monitor adds its record to a Group.
+
+//go:build !logosconc
+
 package rt
 
 import (
