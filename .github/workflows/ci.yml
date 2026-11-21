@@ -83,7 +83,7 @@ jobs:
       - uses: "actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131" # v7.0.0
         with:
           name: toolchain
-          path: "~"
+          path: "~/tc"
       - run: bash .latchkey/setup.sh restore py
       - name: Unit tests
         run: bash .latchkey/unit-tests.sh
@@ -109,7 +109,7 @@ jobs:
       - uses: "actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131" # v7.0.0
         with:
           name: toolchain
-          path: "~"
+          path: "~/tc"
       - run: bash .latchkey/setup.sh restore oracles c23
       - name: Full upstream and LoGOs regression (run.bash; includes every cmd/go script test)
         run: bash .latchkey/scripts-regression.sh
@@ -129,7 +129,7 @@ jobs:
       - uses: "actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131" # v7.0.0
         with:
           name: toolchain
-          path: "~"
+          path: "~/tc"
       - run: bash .latchkey/setup.sh restore oracles py c23
       - name: Complete upstream complement under the compact test environment
         run: bash .latchkey/upstream-complement.sh
@@ -146,7 +146,7 @@ jobs:
       - uses: "actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131" # v7.0.0
         with:
           name: toolchain
-          path: "~"
+          path: "~/tc"
       - run: bash .latchkey/setup.sh restore oracles c23
       - name: Automatic vectorization tests
         run: bash .latchkey/autovec-tests.sh
@@ -167,7 +167,7 @@ jobs:
       - uses: "actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131" # v7.0.0
         with:
           name: toolchain
-          path: "~"
+          path: "~/tc"
       - run: bash .latchkey/setup.sh restore oracles c23
       - name: Focused compiler and command checks
         run: bash .latchkey/compiler-checks.sh
@@ -189,7 +189,7 @@ jobs:
       - uses: "actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131" # v7.0.0
         with:
           name: toolchain
-          path: "~"
+          path: "~/tc"
       - run: bash .latchkey/setup.sh restore oracles
       - name: Routed feature gates (feature-gate.sh, minus its own toolchain build)
         run: bash .latchkey/gates-routed.sh
@@ -214,7 +214,7 @@ jobs:
       - uses: "actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131" # v7.0.0
         with:
           name: toolchain
-          path: "~"
+          path: "~/tc"
       - run: bash .latchkey/setup.sh restore
       - name: Runtime GC stability under each experiment
         env:
@@ -243,7 +243,7 @@ jobs:
       - uses: "actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131" # v7.0.0
         with:
           name: toolchain
-          path: "~"
+          path: "~/tc"
       - run: bash .latchkey/setup.sh restore oracles
       - name: "SIMD zero guards: frozen attacks, vet, mutation proof"
         run: bash .latchkey/ssa-zero1.sh
@@ -277,7 +277,7 @@ jobs:
       - uses: "actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131" # v7.0.0
         with:
           name: toolchain
-          path: "~"
+          path: "~/tc"
       - run: bash .latchkey/setup.sh restore oracles
       - name: SIMD standard library at the baseline (v1) and v3 targets
         run: bash .latchkey/simdstd-library.sh
@@ -294,7 +294,7 @@ jobs:
       - uses: "actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131" # v7.0.0
         with:
           name: toolchain
-          path: "~"
+          path: "~/tc"
       - run: bash .latchkey/setup.sh restore oracles
       - name: C compilers (gccgo)
         run: bash .latchkey/cgo-compilers.sh
@@ -318,7 +318,7 @@ jobs:
       - uses: "actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131" # v7.0.0
         with:
           name: toolchain
-          path: "~"
+          path: "~/tc"
       - run: bash .latchkey/setup.sh restore oracles
       - name: C compilers (gccgo)
         run: bash .latchkey/cgo-compilers.sh
@@ -339,7 +339,7 @@ jobs:
       - uses: "actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131" # v7.0.0
         with:
           name: toolchain
-          path: "~"
+          path: "~/tc"
       - run: bash .latchkey/setup.sh restore oracles
       - name: C compilers (gccgo)
         run: bash .latchkey/cgo-compilers.sh
@@ -369,7 +369,7 @@ jobs:
       - uses: "actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131" # v7.0.0
         with:
           name: toolchain
-          path: "~"
+          path: "~/tc"
       - run: bash .latchkey/setup.sh restore nopath
       - name: "Corpus: contracts, exact sources"
         run: bash .latchkey/dogfood-contracts.sh
@@ -410,7 +410,7 @@ jobs:
       - uses: "actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131" # v7.0.0
         with:
           name: toolchain
-          path: "~"
+          path: "~/tc"
       - run: bash .latchkey/setup.sh restore
       - name: "Autovec benchmarks: base vs candidate, measured sequentially"
         run: bash .latchkey/bench-autovec.sh
