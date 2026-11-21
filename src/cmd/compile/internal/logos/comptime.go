@@ -346,6 +346,12 @@ func (fl *fileLower) cfCaseShadowDecls(def *cfGenericDef, b *cfRecordBuilder) []
 				end = fl.off(s.Cases[i+1].Case)
 			}
 			b.shadowed = append(b.shadowed, span{start: fl.off(cs.Case), end: end})
+			if !fl.cfCaseUsesTypeName(cs, rec.Target.Name()) {
+				// The binding is only in the signature: emitting the
+				// alias would shadow a same-named value parameter for
+				// every use in the case body.
+				continue
+			}
 			p := fl.off(cs.Colon) + 1
 			subs = append(subs, splice{
 				start: p,
@@ -1130,8 +1136,14 @@ func (fl *fileLower) cfCaseBoundTypes(n syntax.Node, run *cfRun, parents map[syn
 		t, ok := sites.types[tn.Value]
 		return td, t, ok
 	}
+	pos := offAt(run.ctx.starts, syntax.StartPos(n))
+	// Only declarations before n are in scope: an alias written later
+	// in the same block must not rebind a name the call already uses.
 	blockDecls := func(list []syntax.Stmt) {
 		for _, st := range list {
+			if offAt(run.ctx.starts, syntax.StartPos(st)) >= pos {
+				return
+			}
 			ds, ok := st.(*syntax.DeclStmt)
 			if !ok {
 				continue
@@ -1146,11 +1158,37 @@ func (fl *fileLower) cfCaseBoundTypes(n syntax.Node, run *cfRun, parents map[syn
 			}
 		}
 	}
-	pos := offAt(run.ctx.starts, syntax.StartPos(n))
+	bindBefore := func(list []syntax.Stmt) {
+		for _, st := range list {
+			if offAt(run.ctx.starts, syntax.StartPos(st)) >= pos {
+				return
+			}
+			ds, ok := st.(*syntax.DeclStmt)
+			if !ok {
+				continue
+			}
+			for _, d := range ds.DeclList {
+				td, t, ok := bindType(d)
+				if !ok || blocked[td.Name.Value] {
+					continue
+				}
+				if bound == nil {
+					bound = make(map[string]types2.Type)
+				}
+				if _, dup := bound[td.Name.Value]; !dup {
+					bound[td.Name.Value] = t
+				}
+			}
+		}
+	}
 	for p := parents[n]; p != nil; p = parents[p] {
 		switch p := p.(type) {
 		case *syntax.BlockStmt:
 			blockDecls(p.List)
+		case *syntax.CaseClause:
+			blockDecls(p.Body)
+		case *syntax.CommClause:
+			blockDecls(p.Body)
 		case *syntax.ConstSwitchStmt:
 			for _, cs := range p.Cases {
 				if len(cs.Body) == 0 {
@@ -1164,24 +1202,7 @@ func (fl *fileLower) cfCaseBoundTypes(n syntax.Node, run *cfRun, parents map[syn
 					continue
 				}
 				blockDecls(cs.Body)
-				for _, st := range cs.Body {
-					ds, ok := st.(*syntax.DeclStmt)
-					if !ok {
-						continue
-					}
-					for _, d := range ds.DeclList {
-						td, t, ok := bindType(d)
-						if !ok || blocked[td.Name.Value] {
-							continue
-						}
-						if bound == nil {
-							bound = make(map[string]types2.Type)
-						}
-						if _, dup := bound[td.Name.Value]; !dup {
-							bound[td.Name.Value] = t
-						}
-					}
-				}
+				bindBefore(cs.Body)
 			}
 		}
 	}
@@ -1264,6 +1285,31 @@ func cfHasTypeParam(t types2.Type) bool {
 		return cfHasTypeParam(t.Key()) || cfHasTypeParam(t.Elem())
 	case *types2.Chan:
 		return cfHasTypeParam(t.Elem())
+	}
+	return false
+}
+
+// cfCaseUsesTypeName reports whether the case body references name as a
+// type. The record's generated `type name = bind` alias is needed only
+// then; without a type use it would merely hide a same-named value
+// parameter inside the copy.
+func (fl *fileLower) cfCaseUsesTypeName(cs *syntax.ConstSwitchCase, name string) bool {
+	used := false
+	for _, st := range cs.Body {
+		syntax.Inspect(st, func(n syntax.Node) bool {
+			if used {
+				return false
+			}
+			if id, ok := n.(*syntax.Name); ok && id.Value == name {
+				if _, ok := fl.pkg.info.Uses[id].(*types2.TypeName); ok {
+					used = true
+				}
+			}
+			return !used
+		})
+		if used {
+			return true
+		}
 	}
 	return false
 }
