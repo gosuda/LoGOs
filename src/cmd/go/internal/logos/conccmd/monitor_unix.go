@@ -63,6 +63,7 @@ func monitor(verb string, inv invocation) {
 	child.Stdout = os.Stdout
 	scanner := &exitScanWriter{}
 	var stderrR, stderrW *os.File
+	copyDone := make(chan struct{})
 	if verb == "run" {
 		// `logos run` reports the program's status as a line on
 		// standard error and itself exits 1; watch for the line so
@@ -77,7 +78,10 @@ func monitor(verb string, inv invocation) {
 		}
 		defer stderrR.Close()
 		child.Stderr = stderrW
-		go io.Copy(scanner, stderrR)
+		go func() {
+			io.Copy(scanner, stderrR)
+			close(copyDone)
+		}()
 	} else {
 		child.Stderr = os.Stderr
 	}
@@ -103,7 +107,13 @@ func monitor(verb string, inv invocation) {
 		// pipe, but inherited writers keep it open — drain only what
 		// is buffered, never wait for an EOF that may never come.
 		stderrW.Close()
+		// An expired deadline wakes the background copy but also
+		// prevents it from reading the buffered tail, so retire it
+		// first, then drain under a short grace deadline: buffered
+		// bytes return at once and the wait stays bounded.
 		stderrR.SetReadDeadline(time.Now())
+		<-copyDone
+		stderrR.SetReadDeadline(time.Now().Add(3 * time.Second))
 		io.Copy(scanner, stderrR)
 	}
 
