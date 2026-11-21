@@ -164,6 +164,10 @@ type logosDisqualWalk struct {
 	declared  map[string]bool
 	refTop    map[string]bool
 	hasGoto   bool
+	// frameScopes stacks the scopes index where each enclosing closure's
+	// first scope lands: names declared at or below it belong to the
+	// innermost closure itself, not to a captured frame.
+	frameScopes []int
 }
 
 func (w *logosDisqualWalk) Visit(node syntax.Node) syntax.Visitor {
@@ -176,14 +180,19 @@ func (w *logosDisqualWalk) Visit(node syntax.Node) syntax.Visitor {
 	case *syntax.FuncLit, *syntax.GroupChild:
 		w.clos++
 		w.inner++
+		w.frameScopes = append(w.frameScopes, len(w.scopes))
 	case *syntax.CallExpr:
 		w.markStage(t)
 	case *syntax.LambdaExpr:
 		if w.stage[t] {
 			w.lam++
+			w.frameScopes = append(w.frameScopes, len(w.scopes))
 		}
 		if _, ok := t.Body.(*syntax.BlockStmt); ok {
 			w.inner++
+			if !w.stage[t] {
+				w.frameScopes = append(w.frameScopes, len(w.scopes))
+			}
 		}
 	case *syntax.ForStmt:
 		w.loop++
@@ -230,12 +239,17 @@ func (w *logosDisqualWalk) leave() {
 	case *syntax.FuncLit, *syntax.GroupChild:
 		w.clos--
 		w.inner--
+		w.frameScopes = w.frameScopes[:len(w.frameScopes)-1]
 	case *syntax.LambdaExpr:
 		if w.stage[top] {
 			w.lam--
+			w.frameScopes = w.frameScopes[:len(w.frameScopes)-1]
 		}
 		if _, ok := top.Body.(*syntax.BlockStmt); ok {
 			w.inner--
+			if !w.stage[top] {
+				w.frameScopes = w.frameScopes[:len(w.frameScopes)-1]
+			}
 		}
 	case *syntax.ForStmt:
 		w.loop--
@@ -307,11 +321,20 @@ func (w *logosDisqualWalk) assign(s *syntax.AssignStmt) {
 }
 
 func (w *logosDisqualWalk) assigned(name string) {
-	// Any closure assignment — function literal, group child, or an
-	// ordinary block lambda — can run after a guard is checked, so its
-	// captured target can never narrow; only writes in the frame itself
-	// count as plain outer assignments.
-	if w.inner > 0 {
+	// Any closure assignment — function literal, group child, or a
+	// stage lambda — can run after a guard is checked, so its captured
+	// target can never narrow; only writes in the frame itself count as
+	// plain outer assignments. A name the innermost closure declares — a
+	// parameter or a block local — cannot outlive that closure, so a
+	// write to it is not captured.
+	if w.inner > 0 || w.lam > 0 {
+		if n := len(w.frameScopes); n > 0 {
+			for _, sc := range w.scopes[w.frameScopes[n-1]:] {
+				if sc[name] {
+					return
+				}
+			}
+		}
 		w.inClos[name] = true
 	} else {
 		w.assignOut[name] = true
