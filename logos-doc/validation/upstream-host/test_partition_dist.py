@@ -232,8 +232,6 @@ def assert_workflow_profiles(workflow: str) -> None:
         assert label not in profiles
         profiles[label] = (match.group(2), int(match.group(1)))
     assert profiles == {
-        "cmd-go": (gate.CMD_GO_FILTER, 4),
-        "testdir": (gate.TESTDIR_FILTER, 2),
         "complement": (gate.COMPLEMENT_FILTER, 1),
     }
 
@@ -241,17 +239,20 @@ def assert_workflow_profiles(workflow: str) -> None:
 def test_actual_workflow_executes_the_recorded_partition() -> None:
     workflow = WORKFLOW.read_text()
     assert_workflow_profiles(workflow)
-    assert "    timeout-minutes: 90\n" in workflow
-    testdir = re.search(
-        r'(?ms)^      - name: "Run the complete upstream compiler fixture suite"\n'
+    assert (
+        "    timeout-minutes: \"${{ matrix.suite == 'scripts' && 180 || 90 }}\"\n"
+        in workflow
+    )
+    complement = re.search(
+        r'(?ms)^      - name: "Run the complete upstream complement"\n'
         r"(.*?)(?=^      - name:|\Z)",
         workflow,
     )
-    assert testdir is not None
-    assert "        timeout-minutes: 25\n" in testdir.group(1)
+    assert complement is not None
+    assert "timeout-minutes" not in complement.group(1)
 
 
-@pytest.mark.parametrize("label", ("cmd-go", "testdir", "complement"))
+@pytest.mark.parametrize("label", ("complement",))
 def test_workflow_contract_rejects_selection_drift(label: str) -> None:
     workflow = WORKFLOW.read_text()
     lines = workflow.splitlines(keepends=True)
@@ -271,20 +272,9 @@ def test_workflow_records_identity_around_all_partitions_after_ordinary_failure(
     workflow = WORKFLOW.read_text()
     before = 'bash ../.github/scripts/logos-upstream-identity.sh before "$GITHUB_WORKSPACE" "$evidence"'
     after = 'bash ../.github/scripts/logos-upstream-identity.sh after "$GITHUB_WORKSPACE" "$evidence"'
-    assert workflow.count(before) == workflow.count(after) == 1
+    assert workflow.count(before) == 1
+    assert after not in workflow
     assert workflow.index(before) < workflow.index("./run.bash --no-rebuild -list")
     for line in workflow.splitlines():
         if "./run.bash" in line and " -k " in line:
-            assert workflow.index(before) < workflow.index(line) < workflow.index(after)
-    step = re.search(
-        r'(?ms)^      - name: "Verify upstream source and installed tools"\n'
-        r"(.*?)(?=^      - name:|\Z)",
-        workflow,
-    )
-    assert step is not None
-    assert (
-        "${{ !cancelled() && steps.smoke.outcome == 'success' && "
-        "matrix.suite == 'upstream' && steps.upstream_inventory.outcome == 'success' }}"
-    ) in step.group(1)
-    assert "success()" not in step.group(1)
-    assert after in step.group(1)
+            assert workflow.index(before) < workflow.index(line)

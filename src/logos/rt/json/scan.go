@@ -342,6 +342,44 @@ func (s *Scanner) FoldKey() string {
 	return unsafe.String(&buf[0], len(buf))
 }
 
+// appendFoldedNameNoDelims folds like appendFoldedName and also drops '-'
+// and '_', the form encoding/json/v2 compares when it matches member names
+// case-insensitively without MatchCaseSensitiveDelimiter.
+func appendFoldedNameNoDelims(out []byte, in string) []byte {
+	for i := 0; i < len(in); {
+		if c := in[i]; c < utf8.RuneSelf {
+			if c == '-' || c == '_' {
+				i++
+				continue
+			}
+			if 'a' <= c && c <= 'z' {
+				c -= 'a' - 'A'
+			}
+			out = append(out, c)
+			i++
+			continue
+		}
+		r, n := utf8.DecodeRuneInString(in[i:])
+		out = utf8.AppendRune(out, foldRune(r))
+		i += n
+	}
+	return out
+}
+
+// FoldKeyNoDelims returns the delimiter-insensitive case-folded form of the
+// current key: FoldKey with '-' and '_' removed, the form encoding/json/v2
+// compares under MatchCaseInsensitiveNames when the caller did not ask for
+// MatchCaseSensitiveDelimiter. The result is valid until the next call of
+// FoldKeyNoDelims, FoldKey or Next and does not allocate for keys of up to
+// 32 bytes.
+func (s *Scanner) FoldKeyNoDelims() string {
+	buf := appendFoldedNameNoDelims(s.fold[:0], s.key)
+	if len(buf) == 0 {
+		return ""
+	}
+	return unsafe.String(&buf[0], len(buf))
+}
+
 // Null consumes the current value and returns true if it is the literal
 // null followed by a delimiter; otherwise it returns false and consumes
 // nothing.

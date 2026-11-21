@@ -1,0 +1,26 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+# A two-target receive whose frozen index calls another matched method:
+# the inner cast must compose into the outer cast text, so the store
+# rewrite drains one splice and native and ejected builds agree.
+
+cp $GOROOT/test/logos/run/constswitch_select_nested_recv.lgo a/main.lgo
+
+cd a
+logos run .
+cmp stdout $GOROOT/test/logos/run/constswitch_select_nested_recv.out
+logos eject -o out
+exists out/main.go
+cd out
+go run .
+cmp stdout $GOROOT/test/logos/run/constswitch_select_nested_recv.out
+exec env -u GOROOT $UPROOT1272/bin/go build ./...
+exec $GOROOT/bin/gofmt -l .
+! stdout .
+cd ../..
+
+-- a/go.mod --
+module example.com/cswselectnestedrecv
+
+go 1.27

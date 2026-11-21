@@ -26,12 +26,39 @@ func refreshLogosPolicy(ld *modload.Loader) {
 	f := settings.CommandLine
 	f.Logos, f.Env, f.Roots = cfg.Logos, cfg.LogosStartupEnv(), logosMainRoots(ld)
 	f.RaceRuntime = cfg.BuildRace && cfg.Goos != "darwin"
-	s, err := settings.Load(settings.CWDModuleRoot(), f)
+	modRoot := settings.CWDModuleRoot()
+	s, err := settings.Load(modRoot, f)
 	settings.SetCurrent(s)
 	logosSettingsErr = err
+	if f.Logos {
+		// Plain go skips LoGOs policy (settings.Load above); it must not
+		// take the LoGOs census either.
+		failClosedCensus(f.Roots, modRoot)
+	}
 	cfg.ApplyLogosEnv(s)
 	if s.Cgo.RaceRuntimeOnly {
 		requireRaceRuntimeCompiler()
+	}
+}
+
+// failClosedCensus ends a build whose .lgo census missed entries to a
+// resource failure. The census decides the [build] cgo policy, and a
+// "no .lgo files" answer computed through such a failure could silently
+// drop the policy, including the -race exception, and surface later as a
+// misleading refusal. Routine walk errors still skip their subtree. The
+// roots checked are the effective policy roots: the main-module roots
+// when modload knows them, else the module root above the working
+// directory, exactly as Load derives them.
+func failClosedCensus(roots []string, modRoot string) {
+	if len(roots) == 0 && modRoot != "" {
+		roots = []string{modRoot}
+	}
+	for _, root := range roots {
+		if err := settings.ModuleAt(root).CensusErr(); err != nil {
+			fmt.Fprintf(os.Stderr, "logos: cannot list LoGOs sources under %s: %v (the .lgo census decides the [build] cgo policy)\n", root, err)
+			base.SetExitStatus(2)
+			base.Exit()
+		}
 	}
 }
 
@@ -40,6 +67,7 @@ func refreshLogosPolicy(ld *modload.Loader) {
 // nor logos.toml. Listings decide after loading packages whether build
 // actions will run, so runList calls CheckRaceRuntimeCompiler once it
 // knows; every other command takes the preflight here.
+
 func requireRaceRuntimeCompiler() {
 	if cfg.BuildN || cfg.CmdName == "list" {
 		return

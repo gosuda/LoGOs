@@ -1,0 +1,32 @@
+// run
+package main
+
+import (
+	"comptime"
+	"fmt"
+)
+
+type Pair struct {
+	X int
+	Y int
+}
+
+func Names[T any](v T) string {
+	out := ""
+	const for _, f := range comptime.Fields[T]() {
+		out += f.Name + ":"
+		const for _, g := range comptime.Fields[T]() {
+			const if comptime.IsStruct[g.Type]() {
+				comptime.Error("nested struct field")
+			} else {
+				out += g.Name + ","
+			}
+		}
+		out += "|"
+	}
+	return out
+}
+
+func main() {
+	fmt.Println(Names(Pair{X: 1, Y: 2}))
+}

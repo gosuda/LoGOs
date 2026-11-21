@@ -55,7 +55,8 @@ type monitor struct {
 	mu        sync.Mutex
 	held      map[uint64][]heldLock
 	holding   map[uintptr]lockHold
-	pending   map[uintptr][]pendingWaiter
+	pending   map[uintptr][]uint64
+	waiting   map[uint64]pendingWaiter
 	order     map[lockPair][]pairSite
 	alive     map[uintptr]func() bool
 	sweepAt   int
@@ -66,7 +67,8 @@ type monitor struct {
 var locks = monitor{
 	held:      map[uint64][]heldLock{},
 	holding:   map[uintptr]lockHold{},
-	pending:   map[uintptr][]pendingWaiter{},
+	pending:   map[uintptr][]uint64{},
+	waiting:   map[uint64]pendingWaiter{},
 	order:     map[lockPair][]pairSite{},
 	alive:     map[uintptr]func() bool{},
 	sweepAt:   firstSweepSize,

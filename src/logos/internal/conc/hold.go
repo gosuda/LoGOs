@@ -43,10 +43,12 @@ type lockHold struct {
 // pendingWaiter is one goroutine that has called Acquire for a lock and
 // has not held it since. The monitor keeps waiters outside the current
 // hold, so a waiter that stays queued across a change of holder still
-// counts as waiting on the new hold.
+// counts as waiting on the new hold. A goroutine blocks on at most one
+// lock, so waiting is keyed by goroutine and pending keeps only the
+// order of arrival.
 type pendingWaiter struct {
-	g  uint64
-	pc uintptr
+	key uintptr
+	pc  uintptr
 }
 
 // The monitor has no timer for a hold. It looks at the age of a hold
@@ -59,17 +61,14 @@ type pendingWaiter struct {
 // one value never returns, and the linter rejects it. The caller holds
 // m.mu.
 func (m *monitor) waiterArrived(g uint64, key uintptr, pc uintptr) {
-	ws := m.pending[key]
-	seen := false
-	for i := range ws {
-		if ws[i].g == g {
-			ws[i].pc = pc
-			seen = true
-			break
-		}
-	}
-	if !seen {
-		m.pending[key] = append(ws, pendingWaiter{g: g, pc: pc})
+	// A goroutine waits on one lock at a time, so the membership check
+	// is a map lookup, not a scan of the queue.
+	if w, ok := m.waiting[g]; ok && w.key == key {
+		w.pc = pc
+		m.waiting[g] = w
+	} else {
+		m.pending[key] = append(m.pending[key], g)
+		m.waiting[g] = pendingWaiter{key: key, pc: pc}
 	}
 	hold, held := m.holding[key]
 	if !held {
@@ -85,18 +84,21 @@ func (m *monitor) waiterArrived(g uint64, key uintptr, pc uintptr) {
 // earliest is the waiter of the new hold. The caller holds m.mu.
 func (m *monitor) holdStarted(g uint64, key uintptr, pc uintptr) {
 	hold := lockHold{site: pc, since: time.Now()}
+	delete(m.waiting, g)
 	ws := m.pending[key]
-	for i := range ws {
-		if ws[i].g == g {
-			ws = append(ws[:i], ws[i+1:]...)
+	// Waiters that already held leave a stale queue entry; the first
+	// live entry is the waiter of the new hold.
+	for len(ws) > 0 {
+		if w, ok := m.waiting[ws[0]]; ok && w.key == key {
 			break
 		}
+		ws = ws[1:]
 	}
 	if len(ws) == 0 {
 		delete(m.pending, key)
 	} else {
 		m.pending[key] = ws
-		hold.waiter = ws[0].pc
+		hold.waiter = m.waiting[ws[0]].pc
 	}
 	m.holding[key] = hold
 }

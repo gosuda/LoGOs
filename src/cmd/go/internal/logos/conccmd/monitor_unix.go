@@ -20,6 +20,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	"cmd/go/internal/base"
 	"cmd/go/internal/cfg"
@@ -68,11 +69,26 @@ func monitor(verb string, inv invocation) {
 	child.Stdin = os.Stdin
 	child.Stdout = os.Stdout
 	scanner := &exitScanWriter{}
+	var stderrR, stderrW *os.File
+	copyDone := make(chan struct{})
 	if verb == "run" {
 		// `logos run` reports the program's status as a line on
 		// standard error and itself exits 1; watch for the line so
-		// the command can forward the program's own status.
-		child.Stderr = scanner
+		// the command can forward the program's own status. The child
+		// gets a real pipe, not a copy goroutine: a background helper
+		// that inherits the writer keeps it open forever, and exec.Wait
+		// would hang on the goroutine draining it.
+		var err error
+		stderrR, stderrW, err = os.Pipe()
+		if err != nil {
+			base.Fatalf("logos conc %s: %v", verb, err)
+		}
+		defer stderrR.Close()
+		child.Stderr = stderrW
+		go func() {
+			io.Copy(scanner, stderrR)
+			close(copyDone)
+		}()
 	} else {
 		child.Stderr = os.Stderr
 	}
@@ -93,6 +109,20 @@ func monitor(verb string, inv invocation) {
 	child.Env = append(child.Env, shakeEnv+"="+inv.shake)
 	base.StartSigHandlers()
 	runErr := child.Run()
+	if stderrW != nil {
+		// The run is over and the exit-status line is already in the
+		// pipe, but inherited writers keep it open — drain only what
+		// is buffered, never wait for an EOF that may never come.
+		stderrW.Close()
+		// An expired deadline wakes the background copy but also
+		// prevents it from reading the buffered tail, so retire it
+		// first, then drain under a short grace deadline: buffered
+		// bytes return at once and the wait stays bounded.
+		stderrR.SetReadDeadline(time.Now())
+		<-copyDone
+		stderrR.SetReadDeadline(time.Now().Add(3 * time.Second))
+		io.Copy(scanner, stderrR)
+	}
 
 	if _, err := pipe.WriteString(endOfFindings); err != nil {
 		base.Fatalf("logos conc %s: %v", verb, err)
@@ -145,7 +175,7 @@ func monitor(verb string, inv invocation) {
 
 // exitLine matches the line `logos run` prints when the program it ran
 // exits nonzero.
-var exitLine = regexp.MustCompile(`^exit status ([0-9]+)$`)
+var exitLine = regexp.MustCompile(`exit status ([0-9]+)$`)
 
 // exitScanWriter passes the child's standard error through to standard
 // error while it watches for the "exit status N" line `logos run`
@@ -169,8 +199,12 @@ func (s *exitScanWriter) Write(p []byte) (int, error) {
 		}
 		line := s.tail[:i]
 		s.tail = s.tail[i+1:]
-		if m := exitLine.FindSubmatch(line); m != nil {
-			s.code, _ = strconv.Atoi(string(m[1]))
+		if m := exitLine.FindSubmatchIndex(line); m != nil &&
+			(m[0] == 0 || line[m[0]-1] != ':') {
+			// A build diagnostic such as "error obtaining VCS status:
+			// exit status 128" ends with the same phrase; the colon
+			// keeps it from passing for the wrapper's own report.
+			s.code, _ = strconv.Atoi(string(line[m[2]:m[3]]))
 		}
 	}
 	if len(s.tail) > 4096 {
