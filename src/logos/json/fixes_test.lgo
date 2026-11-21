@@ -7,7 +7,9 @@ package json_test
 import (
 	"bytes"
 	stdjson "encoding/json"
+	"encoding/json/jsontext"
 	"errors"
+	"strings"
 	"testing"
 
 	twinjson "logos/json"
@@ -58,6 +60,43 @@ func TestUnmarshalValidatesBeforeMethod(t *testing.T) {
 	}
 	if methodCalls != 0 {
 		t.Fatalf("option method ran on invalid input")
+	}
+}
+
+// Stream-method probes for the consumption contract: succeeding
+// without reading, and declining after reading, are both violations.
+type lazyStream struct{}
+
+func (*lazyStream) UnmarshalJSONFrom(*jsontext.Decoder) error { return nil }
+
+type rudeStream struct{}
+
+func (*rudeStream) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
+	dec.ReadValue()
+	return errors.ErrUnsupported
+}
+
+type declineStream struct{}
+
+func (*declineStream) UnmarshalJSONFrom(*jsontext.Decoder) error {
+	return errors.ErrUnsupported
+}
+
+func TestStreamingConsumptionContract(t *testing.T) {
+	_, err := twinjson.Unmarshal[lazyStream]([]byte(`7`))
+	if err == nil || !strings.Contains(err.Error(), "exactly one value") {
+		t.Fatalf("success without reading: %v", err)
+	}
+	_, err = twinjson.Unmarshal[rudeStream]([]byte(`7`))
+	if err == nil || !strings.Contains(err.Error(), "must not read or write") {
+		t.Fatalf("decline after reading: %v", err)
+	}
+	// Declining without consuming falls through to the v1 decoder,
+	// which reports a type error for a number into an empty struct.
+	_, err = twinjson.Unmarshal[declineStream]([]byte(`7`))
+	ute := &stdjson.UnmarshalTypeError{}
+	if !errors.As(err, &ute) {
+		t.Fatalf("clean decline: got %T %v, want *UnmarshalTypeError", err, err)
 	}
 }
 
