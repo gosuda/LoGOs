@@ -121,6 +121,18 @@ func (h *groupHoist) send(s *syntax.SendStmt) span {
 		valArmB = at(&syntax.BasicLit{Value: v.Value, Kind: v.Kind}, pos)
 		valTxtA, valTxtB = valText, valText
 	default:
+		// An untyped constant expression (-1, 1 << 3, math.Pi) is pure
+		// and needs the channel element's contextual typing, which a
+		// `:=` snapshot would replace with the constant's default type.
+		if tv, ok := fl.pkg.info.Types[s.Value]; ok && tv.IsUntyped() {
+			if a, okA := parseExprAt(valText.s, pos); okA {
+				if b, okB := parseExprAt(valText.s, pos); okB {
+					valArmA, valArmB = a, b
+					valTxtA, valTxtB = valText, valText
+					break
+				}
+			}
+		}
 		valArmA, valArmB = nameOf(pos, valTmp), nameOf(pos, valTmp)
 		valTxtA, valTxtB = gen(valTmp), gen(valTmp)
 		valDef = defineOf(pos, []syntax.Expr{nameOf(pos, valTmp)}, []syntax.Expr{s.Value})
