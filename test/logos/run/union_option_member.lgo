@@ -57,7 +57,10 @@ func appendMember() bool {
 }
 
 func rangeMember() int {
-	xs := [](Duo?){Duo(Text{}), Duo(Blob{1})}
+	// A named member collection: ranging assigns members into an option
+	// destination, so the element still needs the member-to-option wrap.
+	type Parts []Duo
+	xs := Parts{Text{}, Blob{1}}
 	var e Duo?
 	n := 0
 	for _, e = range xs {
