@@ -770,6 +770,8 @@ A Go-mode callee (the standard library or any Go package, such as `io.Reader.Rea
 
 `T` MUST be assignable to `T?`. [T-202]
 
+A value whose type is a member of a closed union `U` MUST be assignable to `U?`, unless the value's type is itself an option. [T-202]
+
 `T?` MUST NOT be assignable to `T`. An assignment, argument, or result that needs `T` and receives an unnarrowed `T?` MUST fail with `[correctness::nil_deref_unproven]`. [T-202]
 
 `*T?` where `*T` is non-nil MUST lower to `*T` with nil as none and no extra storage. [T-202]
@@ -1313,11 +1315,13 @@ The first failure in completion order MUST win. [T-206]
 
 `Wait` MUST return only after all children exit. [T-206]
 
+`WaitContext(ctx)` MUST join every child and return what `Wait` would return; if `ctx` ends first it MUST stop waiting and return `ctx.Err()`, leaving the children running under the group context and the group joinable by a later `Wait`. [T-206]
+
 The context MUST be cancelled at join. [T-206]
 
 A child panic MUST become `*logos/rt.PanicError` with the value and a stack. [T-206]
 
-`NewGroup`, `Go`, `GoNested`, `Wait`, and `PanicError.Error` MUST form the `Group` API (`NewGroup(ctx, limit)` returns the group and a child context; `Go` and `GoNested` take `func(context.Context) error`, and `GoNested` never blocks its caller on the concurrency limit). [T-206]
+`NewGroup`, `Go`, `GoNested`, `Wait`, `WaitContext`, and `PanicError.Error` MUST form the `Group` API (`NewGroup(ctx, limit)` returns the group and a child context; `Go` and `GoNested` take `func(context.Context) error`, and `GoNested` never blocks its caller on the concurrency limit). [T-206]
 
 A plain channel send, receive, or range directly in a child MUST lower to a `select` with `<-gctx.Done()`. [T-206]
 

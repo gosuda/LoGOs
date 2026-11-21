@@ -241,6 +241,91 @@ func (check *Checker) logosUnionAssign(x *operand, T Type, context string) bool 
 	return true
 }
 
+func (check *Checker) logosUnionMemberOf(x *operand, elem Type, context string) bool {
+	if !check.logosUnionsOK() {
+		return false
+	}
+	tset := logosClosedUnion(elem)
+	if tset == nil {
+		// The import overlay does not restore union terms, so an imported
+		// union has no type set here; its members are in the union facts.
+		return check.logosForeignUnionMemberOf(x, elem, context)
+	}
+	if check.logosReadonlyBoundary(x, elem, context) {
+		return true
+	}
+	from := x.typ()
+	if from == nil {
+		return false
+	}
+	if isUntyped(from) {
+		from = Default(from)
+	}
+	return logosMemberOf(from, tset)
+}
+
+// logosForeignUnionMemberOf reports whether x's type is a recorded member
+// of an imported union elem, whose terms were stripped at export.
+func (check *Checker) logosForeignUnionMemberOf(x *operand, elem Type, context string) bool {
+	if _, imported := logosForeignUnionName(elem); !imported {
+		return false
+	}
+	if check.logosReadonlyBoundary(x, elem, context) {
+		return true
+	}
+	from := x.typ()
+	if from == nil {
+		return false
+	}
+	if isUntyped(from) {
+		from = Default(from)
+	}
+	members, ok := LogosUnionMembers(elem)
+	if !ok {
+		return false
+	}
+	text, hasText := logosMemberTypeText(from)
+	for _, m := range members {
+		if m.Type != nil {
+			if Identical(from, m.Type) {
+				return true
+			}
+			continue
+		}
+		if hasText && m.Text() == text {
+			return true
+		}
+	}
+	return false
+}
+
+// logosMemberTypeText spells a named type the way imported union member
+// facts spell it: "pkgpath.Type", or "*pkgpath.Type" behind a pointer.
+// Const and descendant-readonly views of a member are not that member:
+// spelling them alike would let the union option hand the shared
+// backing storage to writers.
+func logosMemberTypeText(t Type) (string, bool) {
+	u := Unalias(t)
+	switch u.(type) {
+	case *ConstView, *ReadonlyDescendants:
+		return "", false
+	}
+	ptr := false
+	if p, ok := u.(*Pointer); ok {
+		ptr = true
+		u = Unalias(p.Elem())
+	}
+	n, ok := u.(*Named)
+	if !ok || n.Obj() == nil || n.Obj().Pkg() == nil {
+		return "", false
+	}
+	text := n.Obj().Pkg().Path() + "." + n.Obj().Name()
+	if ptr {
+		return "*" + text, true
+	}
+	return text, true
+}
+
 func logosUnionShape(t Type) ([]Type, bool, bool) {
 	if t == nil {
 		return nil, false, false
