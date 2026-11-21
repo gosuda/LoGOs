@@ -79,6 +79,13 @@ type Nilable interface {
 	int | []int
 }
 
+// Duo holds a wrapped member, so Duo? options are rt.Option[Duo] values.
+type Duo interface {
+	Left | Blob
+}
+
+type Blob []byte
+
 type Holder struct {
 	C Choice?
 }
@@ -113,6 +120,12 @@ func Describe(c Choice?) string {
 	}
 	return "absent"
 }
+
+func DuoTake(d Duo?) bool { return d != nil }
+
+func DuoTake2(a, b Duo?) bool { return a != nil && b != nil }
+
+func Pair() (Left, Blob) { return Left{N: 9}, Blob{1} }
 
 func Wrap(c Choice?) Holder {
 	return Holder{C: c}
@@ -147,6 +160,28 @@ func main() {
 	report("scalar-present", scalar != nil)
 	report("nilable-present-nil", Slice(true) != nil)
 	report("nilable-absent", Slice(false) == nil)
+	report("direct-member-arg", Describe(Left{N: 2}) == "left")
+	var direct Choice? = Left{N: 3}
+	report("direct-member-var", Describe(direct) == "left")
+	report("duo-member-arg", DuoTake(Left{N: 4}))
+	report("duo-slice-member", DuoTake(Blob{1}))
+	report("duo-typed-nil", DuoTake(Blob(nil)))
+	report("duo-nil-absent", !DuoTake(nil))
+	report("duo-forward", DuoTake2(Pair()))
+	var da, db Duo?
+	da, db = Pair()
+	report("duo-pair-assign", da != nil && db != nil)
+	var dx [](Duo?)
+	dx = append(dx, Left{}, Blob{1})
+	report("duo-append", len(dx) == 2 && dx[0] != nil && dx[1] != nil)
+	n := 0
+	var de Duo?
+	for _, de = range dx {
+		if de != nil {
+			n++
+		}
+	}
+	report("duo-range", n == 2)
 }
 
 -- x/go.mod --
@@ -177,6 +212,13 @@ type Scalar interface {
 type Nilable interface {
 	int | []int
 }
+
+// Duo holds a wrapped member, so Duo? options are rt.Option[Duo] values.
+type Duo interface {
+	Left | Blob
+}
+
+type Blob []byte
 
 type Holder struct {
 	C Choice?
@@ -212,6 +254,12 @@ func Describe(c Choice?) string {
 	}
 	return "absent"
 }
+
+func DuoTake(d Duo?) bool { return d != nil }
+
+func DuoTake2(a, b Duo?) bool { return a != nil && b != nil }
+
+func Pair() (Left, Blob) { return Left{N: 9}, Blob{1} }
 
 func Wrap(c Choice?) Holder {
 	return Holder{C: c}
@@ -255,6 +303,28 @@ func Run() {
 	report("scalar-present", scalar != nil)
 	report("nilable-present-nil", a.Slice(true) != nil)
 	report("nilable-absent", a.Slice(false) == nil)
+	report("direct-member-arg", a.Describe(a.Left{N: 2}) == "left")
+	var direct a.Choice? = a.Left{N: 3}
+	report("direct-member-var", a.Describe(direct) == "left")
+	report("duo-member-arg", a.DuoTake(a.Left{N: 4}))
+	report("duo-slice-member", a.DuoTake(a.Blob{1}))
+	report("duo-typed-nil", a.DuoTake(a.Blob(nil)))
+	report("duo-nil-absent", !a.DuoTake(nil))
+	report("duo-forward", a.DuoTake2(a.Pair()))
+	var da, db a.Duo?
+	da, db = a.Pair()
+	report("duo-pair-assign", da != nil && db != nil)
+	var dx [](a.Duo?)
+	dx = append(dx, a.Left{}, a.Blob{1})
+	report("duo-append", len(dx) == 2 && dx[0] != nil && dx[1] != nil)
+	n := 0
+	var de a.Duo?
+	for _, de = range dx {
+		if de != nil {
+			n++
+		}
+	}
+	report("duo-range", n == 2)
 }
 
 -- x/main.lgo --
