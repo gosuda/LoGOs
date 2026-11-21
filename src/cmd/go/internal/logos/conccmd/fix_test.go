@@ -7,6 +7,7 @@ package conccmd
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -146,7 +147,7 @@ func slow(ctx context.Context) error {
 		t.Fatal(err)
 	}
 	overlay := map[string]string{logical: actual}
-	raw := `{"rule":"conc::group_child_stalled","message":"stalled","positions":[{"file":"` + logical + `","line":6,"role":"receive"}]}` + "\n"
+	raw := `{"rule":"conc::group_child_stalled","message":"stalled","positions":[{"file":` + strconv.Quote(logical) + `,"line":6,"role":"receive"}]}` + "\n"
 	fixes := collectStalledFixes(raw, overlay)
 	if len(fixes) != 1 || fixes[0].file != actual || fixes[0].line != 6 {
 		t.Fatalf("fixes = %+v, want one fix on the overlay replacement %s:6", fixes, actual)
@@ -158,7 +159,7 @@ func TestOverlayFilesParsesFlag(t *testing.T) {
 	doc := filepath.Join(dir, "overlay.json")
 	logical := filepath.Join(dir, "a.lgo")
 	actual := filepath.Join(dir, "b.lgo")
-	if err := os.WriteFile(doc, []byte(`{"Replace":{"`+logical+`":"`+actual+`"}}`), 0o644); err != nil {
+	if err := os.WriteFile(doc, []byte(`{"Replace":{`+strconv.Quote(logical)+`:`+strconv.Quote(actual)+`}}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	for _, args := range [][]string{
