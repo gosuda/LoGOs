@@ -1,0 +1,41 @@
+// run
+package main
+
+import "fmt"
+
+type Holder struct {
+	Ptr *bool
+}
+
+func (h Holder) M() *bool { return h.Ptr }
+
+func pick[A any, B any](a A, b B) A {
+	return a
+}
+
+var seq int
+
+func next() int {
+	seq++
+	return 0
+}
+
+func recv[T any](s []T, n int?, ch chan T, out *bool) {
+	const switch T {
+	case interface{ M() *bool }:
+		var p interface{ M() *bool }
+		select {
+		case p, *pick(s[next()], (n ?? 0)).M() = <-ch:
+			_ = p
+		default:
+		}
+	}
+}
+
+func main() {
+	ch := make(chan Holder, 1)
+	ch <- Holder{Ptr: new(bool)}
+	hs := []Holder{{Ptr: new(bool)}}
+	recv[Holder](hs, 7, ch, new(bool))
+	fmt.Println("seq", seq)
+}

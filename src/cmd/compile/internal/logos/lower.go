@@ -603,6 +603,203 @@ func spanInside(sp splice, s span) bool {
 	return sp.start >= s.start && sp.end <= s.end && (sp.end > sp.start || (sp.start > s.start && sp.end < s.end))
 }
 
+// chunkOffsetOf maps the source range [start, end) into a lowered text
+// through the origin chunks of that text. It reports the offset only
+// when one verbatim chunk covers the whole range: a chunk boundary
+// inside the range means lowered bytes stand where source stood.
+func chunkOffsetOf(chunks []chunk, start, end int) (int, bool) {
+	for _, c := range chunks {
+		if c.orig <= start && end <= c.orig+c.n {
+			return c.out + start - c.orig, true
+		}
+	}
+	return 0, false
+}
+
+// origRangeOf maps the working-buffer range [start, end) back to its
+// source range through the file origin chunks. Copies of one const for
+// body share the source range from different buffer ranges, so a frozen
+// operand inside an unrolled copy maps to the source its lowered copies
+// derive from. Const-for-substituted bytes are chunkless, so the range
+// may span a gap, and an endpoint may land inside one: a start in a gap
+// maps to the source the gap's substitution began at, an end to where it
+// stopped, so an operand that begins or ends with generated text keeps a
+// source range that covers the substituted source.
+func (fl *fileLower) origRangeOf(start, end int) (int, int, bool) {
+	if end <= start {
+		return 0, 0, false
+	}
+	oS := -1
+	oE := -1
+	for i, c := range fl.srcMap.chunks {
+		if c.out <= start && start < c.out+c.n {
+			oS = c.orig + start - c.out
+		}
+		if oS < 0 && start < c.out && i > 0 {
+			oS = fl.srcMap.chunks[i-1].orig + fl.srcMap.chunks[i-1].n
+		}
+		if c.out < end && end <= c.out+c.n {
+			oE = c.orig + end - c.out
+		}
+		if oE < 0 && end <= c.out && i > 0 {
+			oE = c.orig
+		}
+		if oS >= 0 && oE >= 0 {
+			break
+		}
+	}
+	if oS < 0 || oE < 0 || oE < oS {
+		return 0, 0, false
+	}
+	return oS, oE, true
+}
+
+// loweredSpanOf maps the source range [oStart, oEnd) to the output span
+// covering it in a lowered text. The span includes lowered bytes inserted
+// between the range source bytes, so replacing the whole span drops the
+// duplicate evaluation at the store site.
+func loweredSpanOf(chunks []chunk, oStart, oEnd int) (int, int, bool) {
+	if oEnd <= oStart {
+		return 0, 0, false
+	}
+	sOut := -1
+	eOut := -1
+	for _, c := range chunks {
+		if sOut < 0 && c.orig <= oStart && oStart < c.orig+c.n {
+			sOut = c.out + oStart - c.orig
+		}
+		if c.orig < oEnd && oEnd <= c.orig+c.n {
+			eOut = c.out + oEnd - c.orig
+		}
+		if sOut >= 0 && eOut >= 0 {
+			break
+		}
+	}
+	if sOut < 0 || eOut < 0 || eOut < sOut {
+		return 0, 0, false
+	}
+	return sOut, eOut, true
+}
+
+// loweredAt maps the working-buffer range [sStart, sEnd) into a lowered
+// text holding its source. The fast path covers a verbatim chunk; the
+// span path covers a frozen operand split by an earlier lowering.
+func (fl *fileLower) loweredAt(chunks []chunk, sStart, sEnd int) (int, int, bool) {
+	oS, oE, ok := fl.origRangeOf(sStart, sEnd)
+	if !ok {
+		return 0, 0, false
+	}
+	if at, ok := chunkOffsetOf(chunks, oS, oE); ok {
+		return at, at + (oE - oS), true
+	}
+	return loweredSpanOf(chunks, oS, oE)
+}
+
+// skipLiteral returns the index just past the string or rune literal
+// starting at i, or i itself when the literal is unterminated.
+func skipLiteral(text string, i int) int {
+	q := text[i]
+	j := i + 1
+	for j < len(text) {
+		c := text[j]
+		if q != '`' && c == '\\' {
+			j += 2
+			continue
+		}
+		if c == q {
+			return j + 1
+		}
+		j++
+	}
+	return i
+}
+
+// gapWrapExtend widens a slice computed by loweredAt inside a composed
+// lowered text so the generated wrappers that enclose the operand stay
+// part of it: an opening run like `any(` immediately before the slice
+// and a closing run like `.(caseT)` immediately after are chunkless, so
+// slicing between the operand's first and last verbatim bytes drops the
+// opener while retaining the close. An endpoint strictly inside a
+// verbatim chunk never extends.
+func gapWrapExtend(chunks []chunk, text string, s, e int) (int, int) {
+	inChunk := func(pos int) bool {
+		for _, c := range chunks {
+			if c.out < pos && pos < c.out+c.n {
+				return true
+			}
+		}
+		return false
+	}
+	if !inChunk(e) {
+		hi := len(text)
+		for _, c := range chunks {
+			if c.out >= e && c.out < hi {
+				hi = c.out
+			}
+		}
+		for e < hi {
+			b := text[e]
+			switch {
+			case b == ')' || b == '(' || b == ']' || b == '}' || b == '.':
+				e++
+			case 'a' <= b && b <= 'z' || 'A' <= b && b <= 'Z' || '0' <= b && b <= '9' || b == '_':
+				e++
+			case b == '"' || b == '\'' || b == '`':
+				ne := skipLiteral(text, e)
+				if ne == e {
+					return s, e
+				}
+				e = ne
+			default:
+				return s, e
+			}
+		}
+	}
+	if s > 0 && !inChunk(s) && text[s-1] == '(' {
+		lo := 0
+		for _, c := range chunks {
+			if c.out+c.n <= s && c.out+c.n > lo {
+				lo = c.out + c.n
+			}
+		}
+		// The opener's matching close must live inside the widened slice;
+		// otherwise the wrap belongs to more than this operand and pulling
+		// the opener in leaves the close behind.
+		depth, bal := 0, true
+		for i := lo; i < e; i++ {
+			switch text[i] {
+			case '(':
+				depth++
+			case ')':
+				depth--
+				if depth < 0 {
+					bal = false
+				}
+			case '"', '\'', '`':
+				ni := skipLiteral(text, i)
+				if ni > i {
+					i = ni - 1
+				}
+			case '/':
+				// A quote inside a comment ("don't") would otherwise
+				// start a fake literal that swallows a real opener and
+				// leaves its close to drive depth negative.
+				ni := commentEnd([]byte(text), i)
+				if ni > i {
+					i = ni - 1
+				}
+			}
+			if !bal {
+				break
+			}
+		}
+		if bal && depth == 0 {
+			s = lo
+		}
+	}
+	return s, e
+}
+
 func partitionSplices(list []splice, s span) (kept, inner []splice) {
 	kept = list[:0]
 	for _, sp := range list {
