@@ -1,0 +1,64 @@
+// errorcheck
+
+package p
+
+type Circle struct {
+	Radius float64
+}
+
+type Square struct {
+	Side float64
+}
+
+type Blob struct {
+	Name string
+	Tags []string
+}
+
+type ShapeVal interface {
+	Circle | Square
+}
+
+type ShapeRef interface {
+	Circle | Blob
+}
+
+type HolderVal struct {
+	S  ShapeVal
+	ID int
+}
+
+type HolderRef struct {
+	S    ShapeRef
+	Tags []string
+}
+
+func exprVal(xs const []HolderVal) string {
+	return switch xs[0].S.(type) { // ERROR "cannot use type switch on value with readonly descendants"
+	case Circle => "circle"
+	case Square => "square"
+	case nil => "nil"
+	default => "other"
+	}
+}
+
+func exprRef(xs const []HolderRef) string {
+	return switch xs[0].S.(type) { // ERROR "cannot use type switch on value with readonly descendants"
+	case Circle => "circle"
+	case Blob => "blob"
+	case nil => "nil"
+	default => "other"
+	}
+}
+
+func exprControl() string {
+	holders := []HolderVal{
+		HolderVal{S: Circle{Radius: 1}, ID: 1},
+	}
+	return switch holders[0].S.(type) {
+	case Circle => "circle"
+	case Square => "square"
+	case nil => "nil"
+	default => "other"
+	}
+}

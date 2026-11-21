@@ -1,0 +1,49 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+// Package json is the LoGOs twin of the standard encoding/json entry
+// points.
+//
+// It reuses the generated static MarshalJSON and UnmarshalJSON methods
+// for .lgo structs with json tags as is: for a type that has generated
+// methods the twin calls them. It is the path for what generated methods
+// do not cover (any, interface fields, non-string-key maps) and the
+// generic entry point over them, plus buffer reuse through MarshalWrite.
+// It must not become a second encoder for tagged structs.
+//
+// Compatibility: output bytes equal encoding/json on the same inputs.
+// A struct with generated methods encodes through those methods, which
+// are byte-identical to encoding/json by SPEC 10.1. Every other value
+// encodes and decodes through encoding/json itself, so equality holds
+// by construction. HTML escaping, sorted map keys, cycle errors,
+// invalid UTF-8 handling and error texts are those of encoding/json.
+//
+// Allocation bound: the static struct path calls the generated method
+// directly without a per-field reflect walk. Marshal allocates the
+// generated method's output buffer plus one copy that hands the caller
+// ownership the way encoding/json does — two allocations. MarshalWrite
+// writes that buffer once without the copy — one allocation. Dynamic
+// values (any, interface fields, non-string-key maps) allocate exactly
+// as encoding/json does.
+//
+// Diagnostics: malformed input errors carry the encoding/json offset.
+// DiagnosticsFor converts an offset to line, column and context only
+// when called. Unmarshal never computes line or column, so disabling
+// diagnostics costs nothing.
+//
+// Option rule: an absent option encodes as null (omitted with
+// omitempty or omitzero) and a present option encodes as its payload
+// alone. Top-level options go through MarshalOption and
+// UnmarshalOption in option.lgo, which implement this rule. Struct
+// fields of option type go through the generated methods and need the
+// upstream static-serializer fix (issue 160, repair commit 11cabf3757);
+// until that fix lands they keep the envelope form in both the twin
+// and encoding/json.
+//
+// Failure path: when a MarshalJSON method returns an error, or when its
+// output is not valid JSON, the twin delegates the whole value to
+// encoding/json and returns that result, so the error value, its type
+// field and its text are the original's by construction. The method runs
+// a second time inside that call.
+package json

@@ -11,11 +11,16 @@ import (
 
 	"cmd/compile/internal/syntax"
 	"cmd/compile/internal/types2"
+
+	"internal/buildcfg"
 )
 
 const jsonAlias = "_logos_json"
 
 const jsonImportPath = "logos/rt/json"
+
+const jsontextAlias = "_logos_jsontext"
+const jsontextImportPath = "encoding/json/jsontext"
 
 const jsonRecv = "_logos_v"
 
@@ -101,6 +106,23 @@ func (fl *fileLower) lowerStaticJSONType(td *syntax.TypeDecl) {
 	}
 	js := fl.buildJSONStruct(td.Name.Value, named.Underlying().(*types2.Struct), fields)
 	js.pos = td.Pos()
+	hasOptionUnsafeMarshal := false
+	hasOptionUnsafeUnmarshal := false
+	hasUnionUnsafe := false
+	for _, f := range js.fields {
+		if fieldHasUnsafeOptionForMarshal(f.typ, make(map[types2.Type]bool)) {
+			hasOptionUnsafeMarshal = true
+		}
+		if fieldHasUnsafeOptionForUnmarshal(f.typ, make(map[types2.Type]bool)) {
+			hasOptionUnsafeUnmarshal = true
+		}
+		if f.shape.kind == shapeUnion || hasUnionMembers(f.typ) {
+			hasUnionUnsafe = true
+		}
+		if _, ok := unionContainerOf(f.typ); ok {
+			hasUnionUnsafe = true
+		}
+	}
 	var b strings.Builder
 	if jsonOK && !userDeclaresMethod(named, "MarshalJSON") {
 		plan := fl.planJSONWalk(js, named)
@@ -117,10 +139,28 @@ func (fl *fileLower) lowerStaticJSONType(td *syntax.TypeDecl) {
 		} else {
 			js.marshalText(&b)
 		}
+		if buildcfg.Experiment.JSONv2 && !userDeclaresMethod(named, "MarshalJSONTo") {
+			if hasOptionUnsafeMarshal {
+				js.marshalToRefusalText(&b)
+			} else {
+				js.marshalToText(&b)
+			}
+		}
 	}
 	if jsonOK {
 		if !userDeclaresMethod(named, "UnmarshalJSON") {
 			js.unmarshalText(&b)
+			if buildcfg.Experiment.JSONv2 && !userDeclaresMethod(named, "UnmarshalJSONFrom") {
+				// A union member has no reflective representation either:
+				// the shadow decoder would fill an interface with
+				// map[string]any or reject a valid document, so union
+				// structs refuse non-default options like option structs.
+				if hasOptionUnsafeUnmarshal || hasUnionUnsafe {
+					js.unmarshalFromRefusalText(&b)
+				} else {
+					js.unmarshalFromText(&b)
+				}
+			}
 		}
 		js.keyFuncs(&b)
 		js.missingFunc(&b)
@@ -138,8 +178,116 @@ func (fl *fileLower) lowerStaticJSONType(td *syntax.TypeDecl) {
 	text := b.String()
 	fl.addGeneratedDecls(td.Pos(), text)
 	fl.needJSON = fl.needJSON || strings.Contains(text, jsonAlias+".")
+	fl.needJSONText = fl.needJSONText || strings.Contains(text, jsontextAlias+".")
 	fl.needRT = fl.needRT || strings.Contains(text, rtAlias+".")
 	fl.needBinary = fl.needBinary || strings.Contains(text, "_logos_b")
+}
+
+// fieldHasUnsafeOptionForMarshal reports whether reflection can expose an
+// option value on the marshal path: through pointers, slices, arrays, maps,
+// and named types. Every option but a bare pointer or a union lowers to the
+// method-free rt.Option struct, which the reflective encoder would write as
+// a plain struct, so such a field is unsafe. A named type that declares a
+// valid MarshalJSON method is opaque to the method encoder, which calls the
+// method instead of traversing its contents, so the search stops there.
+// Such a value has no bare reflective representation otherwise (rt.Option
+// has no JSON methods), so the struct holding the field takes the refusal
+// path on marshal. Union members stop the search: the union rule
+// governs them.
+// isBarePointerOption reports whether elem, the payload of an option type,
+// lowers to a bare pointer, the one payload form reflection handles
+// natively with nil as none.
+func isBarePointerOption(elem types2.Type) bool {
+	_, ok := elem.(*types2.Pointer)
+	return ok
+}
+
+// isUnionOption reports whether elem, the payload of an option type, is a
+// closed union, which lowers to the bare interface with nil as none.
+func isUnionOption(elem types2.Type) bool {
+	_, ok := types2.LogosUnionMembers(elem)
+	return ok
+}
+
+func fieldHasUnsafeOptionForMarshal(t types2.Type, seen map[types2.Type]bool) bool {
+	t = unaliasConstView(t)
+	if seen[t] {
+		return false
+	}
+	seen[t] = true
+	if o, ok := t.(*types2.Option); ok {
+		if !types2.LogosOptionIsBare(o.Elem) {
+			return true
+		}
+		if elem := unaliasConstView(o.Elem); !isBarePointerOption(elem) && !isUnionOption(elem) {
+			return true
+		}
+		return fieldHasUnsafeOptionForMarshal(o.Elem, seen)
+	}
+	if _, ok := types2.LogosUnionMembers(t); ok {
+		return false
+	}
+	switch u := t.(type) {
+	case *types2.Pointer:
+		return fieldHasUnsafeOptionForMarshal(u.Elem(), seen)
+	case *types2.Slice:
+		return fieldHasUnsafeOptionForMarshal(u.Elem(), seen)
+	case *types2.Array:
+		return fieldHasUnsafeOptionForMarshal(u.Elem(), seen)
+	case *types2.Map:
+		return fieldHasUnsafeOptionForMarshal(u.Elem(), seen)
+	case *types2.Named:
+		if u.Obj() != nil {
+			if obj, _, _ := types2.LookupFieldOrMethod(u, true, u.Obj().Pkg(), "MarshalJSON"); isMarshalJSONSignature(obj) {
+				return false
+			}
+		}
+		return fieldHasUnsafeOptionForMarshal(u.Underlying(), seen)
+	}
+	return false
+}
+
+// fieldHasUnsafeOptionForUnmarshal reports whether reflection can expose an
+// option value on the unmarshal path. It walks the same shapes as the
+// marshal variant, but the boundary is a valid UnmarshalJSON or
+// UnmarshalJSONFrom method, which the reflective decoder calls instead of
+// traversing. A struct holding a field that stays unsafe takes the refusal
+// path on unmarshal; a struct that is only union-unsafe takes the
+// reflective exempt path.
+func fieldHasUnsafeOptionForUnmarshal(t types2.Type, seen map[types2.Type]bool) bool {
+	t = unaliasConstView(t)
+	if seen[t] {
+		return false
+	}
+	seen[t] = true
+	if o, ok := t.(*types2.Option); ok {
+		if !types2.LogosOptionIsBare(o.Elem) {
+			return true
+		}
+		if elem := unaliasConstView(o.Elem); !isBarePointerOption(elem) && !isUnionOption(elem) {
+			return true
+		}
+		return fieldHasUnsafeOptionForUnmarshal(o.Elem, seen)
+	}
+	if _, ok := types2.LogosUnionMembers(t); ok {
+		return false
+	}
+	switch u := t.(type) {
+	case *types2.Pointer:
+		return fieldHasUnsafeOptionForUnmarshal(u.Elem(), seen)
+	case *types2.Slice:
+		return fieldHasUnsafeOptionForUnmarshal(u.Elem(), seen)
+	case *types2.Array:
+		return fieldHasUnsafeOptionForUnmarshal(u.Elem(), seen)
+	case *types2.Map:
+		return fieldHasUnsafeOptionForUnmarshal(u.Elem(), seen)
+	case *types2.Named:
+		if hasUnmarshalJSON(u) || hasUnmarshalFrom(u) {
+			return false
+		}
+		return fieldHasUnsafeOptionForUnmarshal(u.Underlying(), seen)
+	}
+	return false
 }
 
 func (fl *fileLower) declaredNamed(td *syntax.TypeDecl) *types2.Named {
@@ -527,6 +675,13 @@ func jsonImport(pos syntax.Pos) *syntax.ImportDecl {
 }
 
 const reflectAlias = "_logos_reflect"
+
+func jsontextImport(pos syntax.Pos) *syntax.ImportDecl {
+	return at(&syntax.ImportDecl{
+		LocalPkgName: nameOf(pos, jsontextAlias),
+		Path:         litOf(pos, fmt.Sprintf("%q", jsontextImportPath), syntax.StringLit),
+	}, pos)
+}
 
 func reflectImport(pos syntax.Pos) *syntax.ImportDecl {
 	return at(&syntax.ImportDecl{

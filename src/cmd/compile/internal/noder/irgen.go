@@ -51,6 +51,7 @@ func checkFiles(m posMap, noders []*noder) (*types2.Package, *types2.Info, map[*
 	didMidway := false
 	didLogos := false
 	var logosProvenCarry map[string]bool // logos: invocation-local proof carry.
+	var logosDerivedCarry []string       // logos M3-S5 hook: derived-var names survive the recheck's package rebuild.
 
 recheck:
 	provenForThisCheck := logosProvenCarry
@@ -211,12 +212,17 @@ recheck:
 	if !didLogos {
 		didLogos = true
 		logosLintHook(&m, files, pkg, info, &importer) // logos M9 hook: lints see the unlowered tree.
+		// Capture the carry regardless of which recheck path follows: a
+		// midway (SIMD) rebuild loses the derived marks the same way a
+		// logos recheck does.
+		logosDerivedCarry = types2.LogosDerivedVarNames(pkg)
 		if logosRecheckHook(&conf, pkg, info, files) {
 			logosProvenCarry = conf.LogosProvenReadonly
 			goto recheck
 		}
 	}
 	types2.LogosStampProvenReadonly(pkg, provenForThisCheck)
+	types2.LogosStampDerived(pkg, logosDerivedCarry)
 	logosFinishCgoEject(files)
 
 	if buildcfg.Experiment.SIMD && !didMidway {

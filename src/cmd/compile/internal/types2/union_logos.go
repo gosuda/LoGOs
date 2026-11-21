@@ -434,15 +434,9 @@ func (check *Checker) logosUnionConstMiss(x, y *operand) bool {
 // enabled; a plain Go package keeps the upstream recursive-type rule
 // exactly.
 func (check *Checker) logosIfaceWord(t Type) bool {
-	if !check.conf.LogosUnions {
+	if !check.logosUnionsOK() {
 		return false
 	}
-	switch t := Unalias(t).(type) {
-	case *Named:
-		_, ok := t.Underlying().(*Interface)
-		return ok
-	case *Interface:
-		return true
-	}
-	return false
+	base, _ := logosViewBase(t)
+	return isNonTypeParamInterface(base)
 }
