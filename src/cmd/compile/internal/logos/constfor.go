@@ -1641,6 +1641,9 @@ func (c *cfLeaf) switchCaseType(cs *syntax.ConstSwitchCase, s *syntax.ConstSwitc
 			}
 			return t, true
 		}
+		if c.cfMentionsLocalDecl(cs.Type, s) {
+			return nil, false
+		}
 	}
 	return c.fl.cfResolveTypeExpr(cs.Type, c.active, c.run.sites)
 }
@@ -1694,6 +1697,9 @@ func (c *cfLeaf) cfLocalScopeType(e syntax.Expr, d *syntax.TypeDecl) (types2.Typ
 		}
 		return t, true
 	}
+	if c.cfMentionsLocalDecl(e, d) {
+		return nil, false
+	}
 	return c.fl.cfResolveTypeExpr(e, c.active, c.run.sites)
 }
 
@@ -1732,6 +1738,13 @@ func (c *cfLeaf) cfLocalTypeExpr(e syntax.Expr, ref syntax.Node) (types2.Type, b
 			// side alone decides the bail, a nil on the other side
 			// only means it still needs resolving.
 			if !ki {
+				// A component naming a local declaration (a type, or
+				// a constant such as an array length) must not be
+				// answered from the record's package scope, where a
+				// shadowed package name would win.
+				if c.cfMentionsLocalDecl(e.Key, ref) {
+					return nil, true
+				}
 				kk, ok := c.fl.cfResolveTypeExpr(e.Key, c.active, c.run.sites)
 				if !ok {
 					return nil, true
@@ -1739,6 +1752,9 @@ func (c *cfLeaf) cfLocalTypeExpr(e syntax.Expr, ref syntax.Node) (types2.Type, b
 				k = kk
 			}
 			if !vi {
+				if c.cfMentionsLocalDecl(e.Value, ref) {
+					return nil, true
+				}
 				vv, ok := c.fl.cfResolveTypeExpr(e.Value, c.active, c.run.sites)
 				if !ok {
 					return nil, true
@@ -1746,6 +1762,12 @@ func (c *cfLeaf) cfLocalTypeExpr(e syntax.Expr, ref syntax.Node) (types2.Type, b
 				v = vv
 			}
 			if k == nil || v == nil {
+				return nil, true
+			}
+			if !types2.Comparable(k) {
+				// NewMap does not verify the key; a specialized
+				// field type can be a slice. Leave the case for the
+				// copy's own checker, which reports the invalid key.
 				return nil, true
 			}
 			return types2.NewMap(k, v), true
@@ -1772,7 +1794,7 @@ func (c *cfLeaf) cfLocalTypeExpr(e syntax.Expr, ref syntax.Node) (types2.Type, b
 		// A composite this leaf cannot build (struct, interface, func)
 		// that still names a local type is left for the copy's own
 		// lowering rather than resolved from package scope.
-		if c.cfMentionsLocalType(e, ref) {
+		if c.cfMentionsLocalDecl(e, ref) {
 			return nil, true
 		}
 	}
@@ -1809,6 +1831,35 @@ func (c *cfLeaf) cfMentionsLocalType(e syntax.Expr, ref syntax.Node) bool {
 			return false
 		}
 		if name, ok := n.(*syntax.Name); ok && cfLocalTypeDeclBefore(c.declRoot, ref, name.Value, c.declParents) != nil {
+			found = true
+		}
+		return !found
+	}
+	syntax.Inspect(e, visit)
+	return found
+}
+
+// cfMentionsLocalDecl reports whether any name inside e resolves to a
+// function-local type or const declaration in scope at ref. A local
+// const can size an array type ([N]Elem) or feed a generic argument;
+// answering it from the record's package scope lets a shadowed package
+// name win.
+func (c *cfLeaf) cfMentionsLocalDecl(e syntax.Expr, ref syntax.Node) bool {
+	found := false
+	var visit func(n syntax.Node) bool
+	visit = func(n syntax.Node) bool {
+		if found {
+			return false
+		}
+		if f, ok := n.(*syntax.Field); ok {
+			if f.Type != nil {
+				syntax.Inspect(f.Type, visit)
+			}
+			return false
+		}
+		if name, ok := n.(*syntax.Name); ok &&
+			(cfLocalTypeDeclBefore(c.declRoot, ref, name.Value, c.declParents) != nil ||
+				cfLocalConstDeclBefore(c.declRoot, ref, name.Value, c.declParents) != nil) {
 			found = true
 		}
 		return !found
@@ -1882,6 +1933,82 @@ func cfLocalTypeDeclBefore(body syntax.Node, ref syntax.Node, name string, paren
 				for _, dd := range ds.DeclList {
 					if d, ok := dd.(*syntax.TypeDecl); ok && d.Name != nil && d.Name.Value == name {
 						return d
+					}
+				}
+			}
+		}
+		if p == body {
+			return nil
+		}
+	}
+	return nil
+}
+
+// cfLocalConstDeclBefore returns the function-local const declaration
+// of name in scope at ref, mirroring cfLocalTypeDeclBefore for
+// *syntax.ConstDecl: a sibling declared before ref in an enclosing
+// statement list or const-switch case body, walked out to the function
+// body.
+func cfLocalConstDeclBefore(body syntax.Node, ref syntax.Node, name string, parents map[syntax.Node]syntax.Node) *syntax.ConstDecl {
+	match := func(dd syntax.Decl) bool {
+		d, ok := dd.(*syntax.ConstDecl)
+		if !ok {
+			return false
+		}
+		for _, n := range d.NameList {
+			if n != nil && n.Value == name {
+				return true
+			}
+		}
+		return false
+	}
+	prev := ref
+	for p := parents[prev]; p != nil; prev, p = p, parents[p] {
+		if css, ok := p.(*syntax.ConstSwitchStmt); ok {
+			for _, s := range cfCaseStmtsBefore(css, prev) {
+				ds, ok := s.(*syntax.DeclStmt)
+				if !ok {
+					continue
+				}
+				for _, dd := range ds.DeclList {
+					if match(dd) {
+						return dd.(*syntax.ConstDecl)
+					}
+				}
+			}
+		} else if ds, ok := p.(*syntax.DeclStmt); ok {
+			found := false
+			for _, dd := range ds.DeclList {
+				if syntax.Node(dd) == prev {
+					found = true
+					break
+				}
+				if match(dd) {
+					return dd.(*syntax.ConstDecl)
+				}
+			}
+			if !found {
+				return nil
+			}
+		} else if list := cfListOf(p); list != nil {
+			idx := -1
+			for j, s := range *list {
+				if syntax.Node(s) == prev {
+					idx = j
+					break
+				}
+			}
+			if idx < 0 {
+				return nil
+			}
+			for _, s := range (*list)[:idx] {
+				ds, ok := s.(*syntax.DeclStmt)
+				if !ok {
+					continue
+				}
+				for _, dd := range ds.DeclList {
+					if match(dd) {
+						return dd.(*syntax.ConstDecl)
 					}
 				}
 			}
@@ -2203,6 +2330,9 @@ func (c *cfLeaf) cfLiveTagType(s *syntax.ConstSwitchStmt) (types2.Type, bool) {
 			return nil, false
 		}
 		return t, true
+	}
+	if c.cfMentionsLocalDecl(s.Targ, s) {
+		return nil, false
 	}
 	return c.fl.cfResolveTypeExpr(s.Targ, c.active, c.run.sites)
 }
