@@ -106,10 +106,12 @@ bash ../.github/scripts/logos-upstream-identity.sh after "$GITHUB_WORKSPACE" "$e
 
 A workflow that runs the complete partition must run all three partitions
 independently, retain all exit statuses and raw logs, and keep every other
-selection-affecting setting identical. The `logos` workflow on
-`release-branch.go1.27` deliberately runs only the complement partition with
-the inventory recorded before the run; the `cmd/go` and `testdir` steps and
-the after-run identity check live on the unmerged three-partition branches.
+selection-affecting setting identical. The `upstream` suite of the `logos`
+workflow on `release-branch.go1.27` deliberately runs only the complement
+partition with the inventory recorded before the run (the `scripts` suite
+still runs the full unpartitioned `./run.bash` regression); the `cmd/go` and
+`testdir` steps and the after-run identity check live on the unmerged
+three-partition branches.
 The inventory uses `run.bash` too, because that script sets `GOENV=off` and
 evaluates the installed dist environment before registration.
 `dist -list -run=...` is not a filtered inventory: its list path prints all
