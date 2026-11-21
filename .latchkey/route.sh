@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Path routing. Latchkey has no on.paths filter, so derive one true/false output per suite from the
 # changed files (pull request: vs its base, push: the last commit, dispatch: the "suites" input).
-# A change under .latchkey/ runs every suite, as each old workflow ran when its own file changed.
+# A change under .latchkey/ or .github/workflows/ runs every suite, as each old workflow ran when its own file changed.
 set -euo pipefail
 ev=${LATCHKEY_CI_EVENT_CLASS:-}
 files=; base=; all=false
@@ -19,7 +19,7 @@ case $ev in
     git fetch -q --no-tags --depth=2 origin "$LATCHKEY_CI_SHA"
     files=$(git diff --name-only HEAD~1 HEAD) || files= ;;
 esac
-if grep -q '^\.latchkey/' <<< "$files"; then all=true; fi
+if grep -Eq '^\.latchkey/|^\.github/workflows/' <<< "$files"; then all=true; fi
 want() { [[ " ${LATCHKEY_INPUT_SUITES:-all} " == *" all "* || " ${LATCHKEY_INPUT_SUITES:-all} " == *" $1 "* ]]; }
 hit() { [ $all = true ] || grep -Eq "$1" <<< "$files"; }
 any=false
