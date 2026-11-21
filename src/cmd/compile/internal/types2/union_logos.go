@@ -272,10 +272,14 @@ func (check *Checker) logosForeignUnionMemberOf(x *operand, elem Type, context s
 
 // logosMemberTypeText spells a named type the way imported union member
 // facts spell it: "pkgpath.Type", or "*pkgpath.Type" behind a pointer.
+// Const and descendant-readonly views of a member are not that member:
+// spelling them alike would let the union option hand the shared
+// backing storage to writers.
 func logosMemberTypeText(t Type) (string, bool) {
 	u := Unalias(t)
-	if cv, ok := u.(*ConstView); ok {
-		u = Unalias(cv.Elem)
+	switch u.(type) {
+	case *ConstView, *ReadonlyDescendants:
+		return "", false
 	}
 	ptr := false
 	if p, ok := u.(*Pointer); ok {
