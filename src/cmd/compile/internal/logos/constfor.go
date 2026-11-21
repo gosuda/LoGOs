@@ -1691,9 +1691,10 @@ func (c *cfLeaf) cfLocalTypeExpr(e syntax.Expr, ref syntax.Node) (types2.Type, b
 		k, ki := c.cfLocalTypeExpr(e.Key, ref)
 		v, vi := c.cfLocalTypeExpr(e.Value, ref)
 		if ki || vi {
-			if k == nil || v == nil {
-				return nil, true
-			}
+			// A component the leaf did not consult is resolved from
+			// package scope before any nil bail: a nil on the local
+			// side alone decides the bail, a nil on the other side
+			// only means it still needs resolving.
 			if !ki {
 				kk, ok := c.fl.cfResolveTypeExpr(e.Key, c.active, c.run.sites)
 				if !ok {
@@ -1707,6 +1708,9 @@ func (c *cfLeaf) cfLocalTypeExpr(e syntax.Expr, ref syntax.Node) (types2.Type, b
 					return nil, true
 				}
 				v = vv
+			}
+			if k == nil || v == nil {
+				return nil, true
 			}
 			return types2.NewMap(k, v), true
 		}
