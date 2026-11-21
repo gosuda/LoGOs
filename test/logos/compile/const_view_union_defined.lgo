@@ -51,3 +51,21 @@ func exprFrozen(xs const []HolderFrozen) string {
 func frozenAccept(f FrozenShape) FrozenShape {
 	return f
 }
+
+// A defined const view used as a recursive union member field must
+// unwrap to the union before the recursion check: FrozenTree is an
+// interface field, not a struct cycle.
+type FLeaf struct {
+	Name string
+}
+
+type FNode struct {
+	Child FrozenTree
+	ID    int
+}
+
+type FTree interface {
+	FLeaf | FNode
+}
+
+type FrozenTree const FTree
