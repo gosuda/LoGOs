@@ -124,14 +124,6 @@ go group (ctx) {
 }
 ```
 
-<<<<<<< HEAD
-||||||| 69ec667c04
-A shake schedule fault has no rule id. Treat a test that fails only under `-shake` as an order dependence. Rerun with the printed seed to shake the run again; the seed fixes the yield counts, not the exact schedule.
-
-=======
-A shake schedule fault has no rule id. Treat a test that fails only under `-shake` as an order dependence. Rerun with the printed seed to shake the run again; the same seed can yield differently, so it is a retry, not an exact replay.
-
->>>>>>> origin/feat/logos-conc
 ## Set flags and replay seeds
 
 Pass `-stall` with a Go duration to set how long a cancelled-group child may run before it is reported. Omit it to keep the 5s default. Pass `-hold` with a Go duration to set how long a contested hold may last. Omit it to keep the 100ms default. Use either the space form or the `=` form for both.
