@@ -140,11 +140,36 @@ func (w *rewriter) child(key string, v any, own, ctx *lowered) any {
 			return w.changes(m)
 		}
 	case "documentChanges":
+		// Route before the rewrite renames each entry's uri. Only a
+		// text-edit entry for a remapped file is deduped: resource
+		// operations carry no edits, and identical edits in a plain Go
+		// file are legitimate repeated insertions, not artifacts.
+		routed := map[int]bool{}
+		if l, ok := v.([]any); ok {
+			for i, e := range l {
+				em, ok := e.(map[string]any)
+				if !ok {
+					continue
+				}
+				td, ok := em["textDocument"].(map[string]any)
+				if !ok {
+					continue
+				}
+				if uri, ok := td["uri"].(string); ok && w.route(uri) != nil {
+					routed[i] = true
+				}
+			}
+		}
 		v = w.rewrite(v, own)
 		if l, ok := v.([]any); ok {
-			for _, e := range l {
+			for i, e := range l {
+				if !routed[i] {
+					continue
+				}
 				if em, ok := e.(map[string]any); ok {
-					em["edits"] = dedupEdits(em["edits"])
+					if _, hasEdits := em["edits"]; hasEdits {
+						em["edits"] = dedupEdits(em["edits"])
+					}
 				}
 			}
 		}
@@ -159,10 +184,15 @@ func (w *rewriter) changes(m map[string]any) map[string]any {
 	out := make(map[string]any, len(m))
 	for uri, v := range m {
 		lw := w.route(uri)
+		v = w.rewrite(v, lw)
 		if lw != nil {
+			// Remapping can collapse distinct lowered edits onto one
+			// original range; an unmapped file's identical edits are
+			// legitimate and must survive.
 			uri = w.name(lw)
+			v = dedupEdits(v)
 		}
-		out[uri] = dedupEdits(w.rewrite(v, lw))
+		out[uri] = v
 	}
 	return out
 }
