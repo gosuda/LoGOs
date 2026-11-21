@@ -73,6 +73,9 @@ The conc flags are:
 		the seed comes from the clock and is printed on standard error
 	--json-diagnostics
 		print each finding as one JSON object
+	--fix | --ai-patch
+		apply the mechanical fixes, or print the patch brief without
+		changing files (the two flags are exclusive)
 
 The finding conc::lock_order_inversion names two goroutines that took
 the same two logos/sync.Locked values in opposite orders. Run at the
@@ -80,7 +83,10 @@ same moment, each goroutine waits for the other.
 
 The finding conc::group_child_stalled names a child of a go group that
 did not return after its group was cancelled. The group cannot join
-before that child returns.
+before that child returns. When the child waits on a plain channel
+receive in a function that takes a context, --fix rewrites that line
+into a select on the receive and the context, and --ai-patch prints the
+same edit without changing files. Other waits keep a hint.
 
 The finding conc::group_unbounded names a go group without a limit
 whose children reach 10000 at one time. The count of children then
@@ -119,14 +125,14 @@ See also: logos lint, logos test.
 }
 
 var cmdRun = &base.Command{
-	UsageLine:   "logos conc run [build flags] [-stall duration] [-hold duration] [-shake seed] [--json-diagnostics] package [arguments...]",
+	UsageLine:   "logos conc run [build flags] [-stall duration] [-hold duration] [-shake seed] [--json-diagnostics] [--fix | --ai-patch] package [arguments...]",
 	Short:       "run a program under the concurrency monitor",
 	Long:        "Run is 'logos run' under the concurrency monitor. See 'logos help conc'.\n",
 	CustomFlags: true,
 }
 
 var cmdTest = &base.Command{
-	UsageLine:   "logos conc test [build and test flags] [-stall duration] [-hold duration] [-shake seed] [--json-diagnostics] [packages]",
+	UsageLine:   "logos conc test [build and test flags] [-stall duration] [-hold duration] [-shake seed] [--json-diagnostics] [--fix | --ai-patch] [packages]",
 	Short:       "test packages under the concurrency monitor",
 	Long:        "Test is 'logos test' under the concurrency monitor. See 'logos help conc'.\n",
 	CustomFlags: true,
@@ -156,6 +162,9 @@ func Register(root *base.Command) {
 				}
 				fmt.Fprintf(os.Stderr, "logos conc: shake seed %s\n", inv.shake)
 			}
+			if inv.fix && inv.aiPatch {
+				base.Fatalf("logos conc %s: --fix and --ai-patch are exclusive", verb)
+			}
 			monitor(verb, inv)
 		}
 	}
@@ -165,12 +174,19 @@ func Register(root *base.Command) {
 type invocation struct {
 	arguments []string
 	asJSON    bool
+	// goflags holds the effective GOFLAGS the child resolves, so flag
+	// lookups that live only there (like -overlay) are still visible.
+	goflags string
 	// durations holds the value of each duration flag that the user gave.
 	durations map[string]string
 	// shake holds the value of -shake. shakeBare reports -shake without
 	// a value, which takes its seed from the clock in Register.
 	shake     string
 	shakeBare bool
+	// fix applies the mechanical fixes after the run; aiPatch prints the
+	// patch brief without changing files. The two are exclusive.
+	fix     bool
+	aiPatch bool
 }
 
 // valueFlags reports, for each flag of cmd, whether it takes its value
@@ -200,7 +216,7 @@ func valueFlags(cmd *base.Command) func(name string) bool {
 // so the monitor joins the explicit set when one is present and the
 // GOFLAGS set otherwise.
 func childArguments(verb string, args []string, takesValue func(string) bool, goflags string) invocation {
-	inv := invocation{arguments: []string{verb}, durations: map[string]string{}}
+	inv := invocation{arguments: []string{verb}, durations: map[string]string{}, goflags: goflags}
 	tagged := false
 	countSet := false
 	i := 0
@@ -239,6 +255,10 @@ func childArguments(verb string, args []string, takesValue func(string) bool, go
 		switch {
 		case name == "json-diagnostics":
 			inv.asJSON = !hasValue || value == "true"
+		case name == "fix":
+			inv.fix = !hasValue || value == "true"
+		case name == "ai-patch":
+			inv.aiPatch = !hasValue || value == "true"
 		case durationFlags[name] != "":
 			if !hasValue && i+1 < len(args) {
 				i++
@@ -323,6 +343,28 @@ func goflagsTestCount(goflags string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// goflagsOverlay returns the -overlay file the effective GOFLAGS
+// configures. GOFLAGS holds one flag per entry in -name=value form,
+// so only the = spellings count. The last entry wins, as in the go
+// command. The second result is false when no entry names an overlay.
+func goflagsOverlay(goflags string) (string, bool) {
+	flags, err := quoted.Split(goflags)
+	if err != nil {
+		return "", false
+	}
+	name := ""
+	ok := false
+	for _, flag := range flags {
+		switch {
+		case strings.HasPrefix(flag, "--overlay="):
+			name, ok = flag[len("--overlay="):], true
+		case strings.HasPrefix(flag, "-overlay="):
+			name, ok = flag[len("-overlay="):], true
+		}
+	}
+	return name, ok
 }
 
 // goflagsTags returns the build tags the effective GOFLAGS configures.

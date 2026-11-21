@@ -9,6 +9,7 @@ package conccmd
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -16,6 +17,7 @@ import (
 	"regexp"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -54,8 +56,13 @@ func monitor(verb string, inv invocation) {
 	}
 	defer pipe.Close()
 
+	stream := io.Reader(pipe)
+	var raw strings.Builder
+	if inv.fix || inv.aiPatch {
+		stream = io.TeeReader(pipe, &raw)
+	}
 	findings := make(chan int, 1)
-	go func() { findings <- relay(pipe, os.Stderr, inv.asJSON) }()
+	go func() { findings <- relay(stream, os.Stderr, inv.asJSON) }()
 
 	child := exec.Command(self, inv.arguments...)
 	child.Args[0] = os.Args[0]
@@ -121,6 +128,28 @@ func monitor(verb string, inv invocation) {
 		base.Fatalf("logos conc %s: %v", verb, err)
 	}
 	found := <-findings
+	if inv.fix || inv.aiPatch {
+		var fixes []stalledFix
+		// A declared -overlay that cannot be read hides which file the
+		// compiler really compiled, so no fix is offered at all.
+		// The monitored build also resolves -overlay from GOFLAGS, so
+		// seed the flag scan with it; a command-line -overlay still
+		// wins because overlayFiles keeps the last flag it sees.
+		args := inv.arguments
+		if name, ok := goflagsOverlay(inv.goflags); ok {
+			args = append([]string{"-overlay=" + name}, args...)
+		}
+		if overlay, ok := overlayFiles(args); ok {
+			fixes = collectStalledFixes(raw.String(), overlay)
+		}
+		if inv.aiPatch {
+			printStalledBrief(fixes, inv.asJSON)
+		} else {
+			for _, done := range applyStalledFixes(fixes) {
+				fmt.Fprintf(os.Stderr, "logos conc: fixed %s\n", done)
+			}
+		}
+	}
 
 	var exit *exec.ExitError
 	switch {

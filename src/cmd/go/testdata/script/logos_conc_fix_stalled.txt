@@ -1,0 +1,128 @@
+[GOOS:windows] skip 'logos conc needs named pipes'
+[GOOS:plan9] skip 'logos conc needs named pipes'
+
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+cd fix
+
+# The linter and the race detector accept a child that waits for a
+# sub-deadline while ignoring its group context: a receive from any
+# Done channel is exempt from correctness::unbounded_channel_op, no
+# memory is raced, and the group joins in the end.
+logos lint ./stalled
+! stderr .
+[race] [cgo] env CGO_ENABLED=1
+[race] [cgo] logos test -race -count=1 ./stalled
+[race] [cgo] stdout '^ok '
+
+# The monitor names the statement where the child waits and the fix hint.
+! logos conc test -stall=200ms -count=1 ./stalled
+stdout '^ok '
+stderr '^.*stalled[/\\]main\.lgo:17: \[conc::group_child_stalled\] a group child did not return within 200ms after its group was cancelled'
+stderr 'chan receive'
+stderr '^\tfix: '
+
+# --ai-patch prints the patch brief without changing files, so the rerun
+# below still reports the stall: the clean rerun later is due to the
+# rewrite, not to a benign fixture.
+! logos conc test -stall=200ms -count=1 --ai-patch ./stalled
+stdout '^ok '
+stdout '"line":17'
+stderr '\[conc::group_child_stalled\]'
+! logos conc test -stall=200ms -count=1 ./stalled
+stderr '\[conc::group_child_stalled\]'
+
+# --fix rewrites the plain receive into a select on the group context.
+! logos conc test -stall=200ms -count=1 --fix ./stalled
+stdout '^ok '
+stderr '\[conc::group_child_stalled\]'
+stderr 'logos conc: fixed .*stalled[/\\]main\.lgo:17'
+
+# The rerun joins at cancellation and prints no finding.
+logos conc test -stall=200ms -count=1 ./stalled
+stdout '^ok '
+! stderr .
+
+# A receive on a channel the linter can see is still denied at lint
+# time, so the monitor is not needed there.
+! logos lint ./denied
+stderr '^denied[/\\]main\.lgo:16:2: \[correctness::unbounded_channel_op\] receive from ch may block forever'
+
+-- fix/go.mod --
+module example.com/concfix
+
+go 1.27
+-- fix/stalled/main.lgo --
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"time"
+)
+
+func fail() error {
+	return errors.New("first job failed")
+}
+
+func slow(ctx context.Context) error {
+	inner, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+	defer cancel()
+	<-inner.Done()
+	return nil
+}
+
+func jobs(ctx context.Context) error {
+	go group (ctx) {
+		go fail()
+		go slow(ctx)
+	}
+	return nil
+}
+
+func main() {
+	fmt.Println("jobs done:", jobs(context.Background()))
+}
+-- fix/stalled/main_test.lgo --
+package main
+
+import "testing"
+
+func TestJobs(t *testing.T) {
+	if err := jobs(t.Context()); err == nil {
+		t.Fatal("the first job did not fail the group")
+	}
+}
+-- fix/denied/main.lgo --
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"time"
+)
+
+func fail() error {
+	return errors.New("first job failed")
+}
+
+func slow(ctx context.Context) error {
+	ch := time.After(1500 * time.Millisecond)
+	<-ch
+	return nil
+}
+
+func jobs(ctx context.Context) error {
+	go group (ctx) {
+		go fail()
+		go slow(ctx)
+	}
+	return nil
+}
+
+func main() {
+	fmt.Println("jobs done:", jobs(context.Background()))
+}
