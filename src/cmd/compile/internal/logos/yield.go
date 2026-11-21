@@ -198,6 +198,10 @@ func (fc *funcLower) lowerYieldStmt(s *syntax.YieldStmt) syntax.Stmt {
 			texts = append(texts, gen(", "))
 		}
 		texts = append(texts, gen(head))
+		// A wrapper's opening insertion sits at the operand span's
+		// boundary, which the span copy excludes: drain it here so a
+		// coalescing function keeps its `func() T {` head.
+		texts = append(texts, fl.wrapperHead(v))
 		texts = append(texts, fl.lazyText(fl.exprSpan(v)))
 		texts = append(texts, gen(tail))
 	}
