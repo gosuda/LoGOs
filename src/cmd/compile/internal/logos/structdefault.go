@@ -19,8 +19,8 @@ func (fl *fileLower) lowerStructDefaults() {
 	// field defaults before stripFieldDefaults orphans them, and fill/
 	// factory text then renders the respelled form on its own.
 	fl.lowerTypeParamLits()
-	typeNames := fl.defaultTypeNames()
-	fl.defaultDepScan(typeNames)
+	typeNames := fl.defaultTypeNames(fl.file)
+	fl.defaultDepScan()
 	// Fill before strip: a composite literal inside a field default gets
 	// its own missing fields here, so the factory body rendered from the
 	// default subtree carries the inner defaults. The fill splice inside
@@ -174,9 +174,9 @@ func (fl *fileLower) typeSpell(typ types2.Type) string {
 // this file to its TypeDecl so defaults can bind to declaration-scope
 // factories. Local or anonymous struct types get no entry: they keep the
 // textual default path.
-func (fl *fileLower) defaultTypeNames() map[*syntax.StructType]*syntax.TypeDecl {
+func (fl *fileLower) defaultTypeNames(file *syntax.File) map[*syntax.StructType]*syntax.TypeDecl {
 	m := map[*syntax.StructType]*syntax.TypeDecl{}
-	for _, d := range fl.file.DeclList {
+	for _, d := range file.DeclList {
 		td, ok := d.(*syntax.TypeDecl)
 		if !ok || td.Alias || td.Name == nil {
 			continue
@@ -430,8 +430,21 @@ const defFillBudget = 1 << 20
 // directly requires. A fill that would emit a factory call reaching one of
 // its enclosing keys makes that factory recursive — it never terminates —
 // so the literal is reported instead of filled.
-func (fl *fileLower) defaultDepScan(typeNames map[*syntax.StructType]*syntax.TypeDecl) {
-	syntax.Inspect(fl.file, func(n syntax.Node) bool {
+func (fl *fileLower) defaultDepScan() {
+	if fl.pkg.defScanned {
+		return
+	}
+	fl.pkg.defScanned = true
+	for _, file := range fl.pkg.files {
+		fl.defaultDepScanFile(file, fl.defaultTypeNames(file))
+	}
+}
+
+// defaultDepScanFile records the default-subtree literals and factory
+// edges of one file; defEdges spans files, so a cycle through defaults
+// declared in different files still closes.
+func (fl *fileLower) defaultDepScanFile(file *syntax.File, typeNames map[*syntax.StructType]*syntax.TypeDecl) {
+	syntax.Inspect(file, func(n syntax.Node) bool {
 		st, ok := n.(*syntax.StructType)
 		if !ok {
 			return true
@@ -447,38 +460,72 @@ func (fl *fileLower) defaultDepScan(typeNames map[*syntax.StructType]*syntax.Typ
 				key = td.Name.Value + "." + f.Name.Value
 			}
 			syntax.Inspect(fd.Default, func(m syntax.Node) bool {
+				if c, ok := m.(*syntax.CallExpr); ok && fl.unsafeFoldCall(c) {
+					// unsafe.Sizeof/Alignof/Offsetof fold at check:
+					// their argument literals never evaluate, so they
+					// create no factory dependency.
+					return false
+				}
 				lit, ok := m.(*syntax.CompositeLit)
 				if !ok {
 					return true
 				}
-				if fl.inDefault == nil {
-					fl.inDefault = map[*syntax.CompositeLit]bool{}
+				if fl.pkg.inDefault == nil {
+					fl.pkg.inDefault = map[*syntax.CompositeLit]bool{}
 				}
-				fl.inDefault[lit] = true
+				fl.pkg.inDefault[lit] = true
 				if key == "" {
 					return true
 				}
-				if fl.defInside == nil {
-					fl.defInside = map[*syntax.CompositeLit][]string{}
+				if fl.pkg.defInside == nil {
+					fl.pkg.defInside = map[*syntax.CompositeLit][]string{}
 				}
-				fl.defInside[lit] = append(fl.defInside[lit], key)
+				fl.pkg.defInside[lit] = append(fl.pkg.defInside[lit], key)
 				for _, d := range fl.missingDefaults(lit) {
 					if d.key == "" {
 						continue
 					}
-					if fl.defEdges == nil {
-						fl.defEdges = map[string]map[string]bool{}
+					if fl.pkg.defEdges == nil {
+						fl.pkg.defEdges = map[string]map[string]bool{}
 					}
-					if fl.defEdges[key] == nil {
-						fl.defEdges[key] = map[string]bool{}
+					if fl.pkg.defEdges[key] == nil {
+						fl.pkg.defEdges[key] = map[string]bool{}
 					}
-					fl.defEdges[key][d.key] = true
+					fl.pkg.defEdges[key][d.key] = true
 				}
 				return true
 			})
 		}
 		return true
 	})
+}
+
+// unsafeFoldCall reports whether c is a call the checker folds to a
+// constant: unsafe.Sizeof, unsafe.Alignof, and unsafe.Offsetof never
+// evaluate their arguments, so literals inside them are not factory
+// dependencies.
+func (fl *fileLower) unsafeFoldCall(c *syntax.CallExpr) bool {
+	switch f := syntax.Unparen(c.Fun).(type) {
+	case *syntax.SelectorExpr:
+		switch f.Sel.Value {
+		case "Sizeof", "Alignof", "Offsetof":
+		default:
+			return false
+		}
+		n, ok := f.X.(*syntax.Name)
+		if !ok {
+			return false
+		}
+		pn, ok := fl.pkg.info.Uses[n].(*types2.PkgName)
+		return ok && pn.Imported().Path() == "unsafe"
+	case *syntax.Name:
+		switch f.Value {
+		case "Sizeof", "Alignof", "Offsetof":
+			_, ok := fl.pkg.info.Uses[f].(*types2.Builtin)
+			return ok
+		}
+	}
+	return false
 }
 
 // defReaches reports whether the factory key can reach any of the named
@@ -497,7 +544,7 @@ func (fl *fileLower) defReaches(key string, targets []string) bool {
 				return true
 			}
 		}
-		for next := range fl.defEdges[k] {
+		for next := range fl.pkg.defEdges[k] {
 			if visit(next) {
 				return true
 			}
@@ -508,7 +555,7 @@ func (fl *fileLower) defReaches(key string, targets []string) bool {
 }
 
 func (fl *fileLower) fillStructDefaults(lit *syntax.CompositeLit) {
-	if fl.inDefault[lit] && fl.defFillOver {
+	if fl.pkg.inDefault[lit] && fl.defFillOver {
 		// The expansion budget already reported: stop rendering nested
 		// defaults instead of doing the remaining exponential work.
 		return
@@ -519,7 +566,7 @@ func (fl *fileLower) fillStructDefaults(lit *syntax.CompositeLit) {
 		return
 	}
 	missing := fl.missingDefaults(lit)
-	if targets := fl.defInside[lit]; len(targets) > 0 {
+	if targets := fl.pkg.defInside[lit]; len(targets) > 0 {
 		keep := missing[:0]
 		for _, d := range missing {
 			if d.key != "" && fl.defReaches(d.key, targets) {
@@ -538,7 +585,7 @@ func (fl *fileLower) fillStructDefaults(lit *syntax.CompositeLit) {
 	lit.NKeys += len(native)
 	brace := fl.literalBrace(lit)
 	fl.add(brace+1, brace+1, text)
-	if fl.inDefault[lit] {
+	if fl.pkg.inDefault[lit] {
 		fl.defFillBytes += len(text)
 		if fl.defFillBytes > defFillBudget && !fl.defFillOver {
 			fl.defFillOver = true

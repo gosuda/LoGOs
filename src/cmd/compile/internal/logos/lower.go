@@ -162,10 +162,20 @@ type packageLower struct {
 	freezeCopiers      []freezeEntry
 	freezeSeq          int
 	factoryPlan        map[string]string
-	files              []*syntax.File
-	src                map[*syntax.File][]byte
-	typeDecls          map[*types2.TypeName]*syntax.TypeDecl
-	declSrc            map[*syntax.TypeDecl][]byte
+	// Struct-default fill state, shared across files: inDefault marks
+	// literals inside a field default's subtree, defInside maps such a
+	// literal to the enclosing defaulted-field keys, and defEdges holds
+	// the factory keys each defaulted field's subtree requires. The scan
+	// covers every file of the package so cycles spanning files are
+	// found; defScanned runs it once.
+	inDefault  map[*syntax.CompositeLit]bool
+	defInside  map[*syntax.CompositeLit][]string
+	defEdges   map[string]map[string]bool
+	defScanned bool
+	files      []*syntax.File
+	src        map[*syntax.File][]byte
+	typeDecls  map[*types2.TypeName]*syntax.TypeDecl
+	declSrc    map[*syntax.TypeDecl][]byte
 }
 
 // declOf maps a package-level TypeName back to its TypeDecl and the file's
@@ -247,14 +257,7 @@ type fileLower struct {
 	wrapOwner      map[syntax.Expr]int
 	wrapSeq        int
 	retResults     map[*syntax.ReturnStmt][]types2.Type
-	// Struct-default fill state: inDefault marks literals inside a field
-	// default's subtree, defInside maps such a literal to the enclosing
-	// defaulted-field keys, defEdges holds the factory keys each defaulted
-	// field's subtree requires, and defFillBytes/defFillOver run the
-	// nested-default expansion budget.
-	inDefault    map[*syntax.CompositeLit]bool
-	defInside    map[*syntax.CompositeLit][]string
-	defEdges     map[string]map[string]bool
+	// defFillBytes/defFillOver run the nested-default expansion budget.
 	defFillBytes int
 	defFillOver  bool
 	// optBodyType stashes the checked type of a replaced top-level
