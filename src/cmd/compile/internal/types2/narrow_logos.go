@@ -298,7 +298,9 @@ func (w *logosDisqualWalk) declare(node syntax.Node) {
 func (w *logosDisqualWalk) assign(s *syntax.AssignStmt) {
 	header := false
 	switch w.stack[len(w.stack)-1].(type) {
-	case *syntax.IfStmt, *syntax.ForStmt, *syntax.SwitchStmt:
+	case *syntax.IfStmt, *syntax.ForStmt, *syntax.SwitchStmt, *syntax.SwitchExpr:
+		// A switch expression's initializer declares into the
+		// expression's own scope, like the statement forms.
 		header = true
 	}
 	scope := w.scopes[len(w.scopes)-1]
