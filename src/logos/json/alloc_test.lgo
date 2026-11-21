@@ -1,0 +1,81 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package json_test
+
+import (
+	"bytes"
+	stdjson "encoding/json"
+	"internal/race"
+	"testing"
+
+	twinjson "logos/json"
+)
+
+var twinSink []byte
+
+func twinWantAllocs(t *testing.T, want int, f func()) {
+	t.Helper()
+	if race.Enabled {
+		t.Skip("skipping alloc counts under race; the race runtime adds one")
+	}
+	got := int(testing.AllocsPerRun(100, f))
+	if got != want {
+		t.Errorf("got %d allocs, want %d", got, want)
+	}
+}
+
+func TestTwinAllocs(t *testing.T) {
+	p := twinPerson{Name: "ann", Age: 7, Bio: "x"}
+	// One alloc for the method's own output, one for the copy that
+	// keeps caller ownership equal to encoding/json.
+	twinWantAllocs(t, 2, func() {
+		b, err := twinjson.Marshal(p)
+		if err != nil {
+			return
+		}
+		twinSink = b
+	})
+	// A space inside a string value is significant and stays on the
+	// clean path; it must not push the marshal through Compact's buffer.
+	spaced := twinPerson{Name: "ann", Age: 7, Bio: "hello world"}
+	twinWantAllocs(t, 2, func() {
+		b, err := twinjson.Marshal(spaced)
+		if err != nil {
+			return
+		}
+		twinSink = b
+	})
+	op := oraclePerson(p)
+	var oracleAllocs int
+	if !race.Enabled {
+		oracleAllocs = int(testing.AllocsPerRun(100, func() {
+			b, err := stdjson.Marshal(op)
+			if err != nil {
+				return
+			}
+			twinSink = b
+		}))
+		t.Logf("oracle static struct allocs=%v", oracleAllocs)
+		if oracleAllocs != 3 {
+			t.Errorf("oracle static struct got %v allocs, want 3", oracleAllocs)
+		}
+	}
+	m := map[string]int{"b": 1, "a": 2}
+	twinWantAllocs(t, 6, func() {
+		b, err := twinjson.Marshal(m)
+		if err != nil {
+			return
+		}
+		twinSink = b
+	})
+	var buf bytes.Buffer
+	twinWantAllocs(t, 1, func() {
+		buf.Reset()
+		if err := twinjson.MarshalWrite(&buf, p); err != nil {
+			return
+		}
+		twinSink = buf.Bytes()
+	})
+}

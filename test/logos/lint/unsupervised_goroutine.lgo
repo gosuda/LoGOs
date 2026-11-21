@@ -2,7 +2,10 @@
 
 package p
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 func work() {}
 
@@ -31,5 +34,17 @@ func supervisedCall(ctx context.Context) error {
 	go group (ctx) {
 		go work()
 	}
+	return nil
+}
+
+func afterFuncUnowned(ctx context.Context) error {
+	ctx, cancel := context.WithCancel(ctx)
+	cancel()
+	context.AfterFunc(ctx, work)
+	return nil
+}
+
+func timerUnowned(ctx context.Context) error {
+	time.AfterFunc(time.Second, work)
 	return nil
 }

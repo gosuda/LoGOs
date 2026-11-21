@@ -112,7 +112,7 @@ jobs:
   repro-compare:
     name: "compare-independent-host-digests"
     needs: ["repro-a", "repro-b"]
-    runs-on: "ubuntu-24.04"
+    runs-on: "depot-ubuntu-24.04"
     timeout-minutes: 10
     steps:
       - name: "Check out the exact clean candidate tip"
@@ -145,7 +145,7 @@ jobs:
 
   closure:
     name: "M22-scope-closure"
-    runs-on: "ubuntu-24.04"
+    runs-on: "depot-ubuntu-24.04"
     timeout-minutes: 10
     steps:
       - name: "Check out the exact clean candidate tip"

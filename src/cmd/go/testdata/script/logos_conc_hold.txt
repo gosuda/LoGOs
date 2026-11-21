@@ -1,0 +1,167 @@
+[GOOS:windows] skip 'logos conc needs named pipes'
+[GOOS:plan9] skip 'logos conc needs named pipes'
+
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+cd ledger
+
+# A slow call inside a WithLock callback is no data race and no lint
+# fault: the program is correct, and every other user of the value
+# waits.
+logos lint ./...
+! stderr .
+[race] [cgo] env CGO_ENABLED=1
+[race] [cgo] logos test -race -count=1 ./slow
+[race] [cgo] stdout '^ok '
+
+# The monitor names the WithLock call that holds the value and the call
+# that waits for it. It prints the finding when the waiter comes, while
+# the value is still held.
+! logos conc run -hold 50ms ./slow
+stdout '^balance 9$'
+stderr '^.*slow[/\\]main\.lgo:16: \[conc::lock_held_long\] a goroutine held a Locked value for [1-3][0-9][0-9]ms while another goroutine waited for it; the limit is 50ms$'
+stderr '^\t.*main\.lgo:16: this WithLock call holds the value$'
+stderr '^\t.*main\.lgo:25: another goroutine waits for the value here$'
+stderr '^\tfix: '
+stderr -count=1 'lock_held_long'
+
+! logos conc test -hold=50ms -count=1 ./slow
+stdout '^ok '
+stderr '\[conc::lock_held_long\]'
+
+# The hold of 400ms is below a limit of 2s.
+logos conc run -hold 2s ./slow
+stdout '^balance 9$'
+! stderr .
+
+# The same slow call outside the callback gives no finding.
+logos conc run -hold 50ms ./quick
+stdout '^balance 9$'
+! stderr .
+
+! logos conc run -hold 0s ./quick
+stderr '^logos conc run: -hold "0s" is not a positive duration$'
+! stdout .
+
+-- ledger/go.mod --
+module example.com/ledger
+
+go 1.27
+-- ledger/slow/main.lgo --
+package main
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"logos/sync"
+)
+
+type account struct{ balance int }
+
+var ledger sync.Locked[account]
+
+func audit() error {
+	ledger.WithLock(a => {
+		time.Sleep(400 * time.Millisecond)
+		a.balance += 10
+	})
+	return nil
+}
+
+func pay() error {
+	time.Sleep(150 * time.Millisecond)
+	ledger.WithLock(a => {
+		a.balance--
+	})
+	return nil
+}
+
+func settle(ctx context.Context) (int, error) {
+	go group (ctx) {
+		go audit()
+		go pay()
+	}
+	balance := 0
+	ledger.WithLock(a => {
+		balance = a.balance
+	})
+	return balance, nil
+}
+
+func main() {
+	balance, err := settle(context.Background())
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	fmt.Println("balance", balance)
+}
+-- ledger/slow/main_test.lgo --
+package main
+
+import "testing"
+
+func TestSettle(t *testing.T) {
+	balance, err := settle(t.Context())
+	if err != nil {
+		t.Fatal(err)
+		return
+	}
+	if balance != 9 {
+		t.Fatalf("balance = %d, want 9", balance)
+	}
+}
+-- ledger/quick/main.lgo --
+package main
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"logos/sync"
+)
+
+type account struct{ balance int }
+
+var ledger sync.Locked[account]
+
+func audit() error {
+	time.Sleep(400 * time.Millisecond)
+	ledger.WithLock(a => {
+		a.balance += 10
+	})
+	return nil
+}
+
+func pay() error {
+	time.Sleep(150 * time.Millisecond)
+	ledger.WithLock(a => {
+		a.balance--
+	})
+	return nil
+}
+
+func settle(ctx context.Context) (int, error) {
+	go group (ctx) {
+		go audit()
+		go pay()
+	}
+	balance := 0
+	ledger.WithLock(a => {
+		balance = a.balance
+	})
+	return balance, nil
+}
+
+func main() {
+	balance, err := settle(context.Background())
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	fmt.Println("balance", balance)
+}
