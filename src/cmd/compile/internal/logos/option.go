@@ -2620,18 +2620,32 @@ func (fl *fileLower) lowerOptForRange(f *syntax.ForStmt) {
 	if opStart < 0 {
 		return
 	}
-	texts := make([]otext, 0, 2*len(lhs)+1)
+	texts := make([]otext, 0, 2*len(lhs)+3)
 	texts = append(texts, gen(" "))
 	tmps := make([]syntax.Expr, len(lhs))
-	var assigns []syntax.Stmt
+	vals := make([]syntax.Expr, len(lhs))
+	vtexts := make([]string, len(lhs))
 	for i := range lhs {
-		tmp := fmt.Sprintf("_logos_r%d", i)
+		// _logos_rangeN avoids the _logos_rN result names ensureNamed
+		// emits: a scope defer lowers a return to `_logos_r0 = ...`, and
+		// a same-named loop temp would shadow it.
+		tmp := fmt.Sprintf("_logos_range%d", i)
 		tn := nameOf(pos, tmp)
 		tmps[i] = tn
 		val, head, tail := fl.wrapParts(tn, recs[i], fl.targetOfLHS(lhs[i]), pos)
-		assigns = append(assigns, assignOf(pos, []syntax.Expr{lhs[i]}, []syntax.Expr{val}))
-		texts = append(texts, fl.lazyText(fl.wrapSpanOf(lhs[i])), gen(" = "+head+tmp+tail+"; "))
+		vals[i] = val
+		vtexts[i] = head + tmp + tail
+		texts = append(texts, fl.lazyText(fl.wrapSpanOf(lhs[i])))
+		if i+1 < len(lhs) {
+			texts = append(texts, gen(", "))
+		}
 	}
+	// One multi-assign keeps the two-phase assignment order: every
+	// destination operand (e.g. the i in dst[i]) is evaluated before any
+	// store, so a destination that reads an earlier loop variable still
+	// sees its previous value.
+	assigns := []syntax.Stmt{assignOf(pos, lhs, vals)}
+	texts = append(texts, gen(" = "+strings.Join(vtexts, ", ")+"; "))
 	rc.Lhs = listOf(pos, tmps)
 	rc.Def = true
 	f.Body.List = append(assigns, f.Body.List...)
@@ -2642,9 +2656,15 @@ func (fl *fileLower) lowerOptForRange(f *syntax.ForStmt) {
 }
 
 // rangeRecs returns the types a range clause assigns, index or key first.
+// A defined collection (`type Parts []Text`) ranges by its underlying
+// type, so the switch reads the underlying, not the named surface.
 func (fl *fileLower) rangeRecs(x syntax.Expr) []types2.Type {
 	intT := types2.Typ[types2.Int]
-	switch t := types2.Unalias(fl.optType(x)).(type) {
+	xt := fl.optType(x)
+	if xt == nil {
+		return nil
+	}
+	switch t := types2.Unalias(xt).Underlying().(type) {
 	case *types2.Slice:
 		return []types2.Type{intT, t.Elem()}
 	case *types2.Array:
