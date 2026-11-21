@@ -102,7 +102,14 @@ func monitor(verb string, inv invocation) {
 		var fixes []stalledFix
 		// A declared -overlay that cannot be read hides which file the
 		// compiler really compiled, so no fix is offered at all.
-		if overlay, ok := overlayFiles(inv.arguments); ok {
+		// The monitored build also resolves -overlay from GOFLAGS, so
+		// seed the flag scan with it; a command-line -overlay still
+		// wins because overlayFiles keeps the last flag it sees.
+		args := inv.arguments
+		if name, ok := goflagsOverlay(inv.goflags); ok {
+			args = append([]string{"-overlay=" + name}, args...)
+		}
+		if overlay, ok := overlayFiles(args); ok {
 			fixes = collectStalledFixes(raw.String(), overlay)
 		}
 		if inv.aiPatch {

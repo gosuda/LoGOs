@@ -174,6 +174,9 @@ func Register(root *base.Command) {
 type invocation struct {
 	arguments []string
 	asJSON    bool
+	// goflags holds the effective GOFLAGS the child resolves, so flag
+	// lookups that live only there (like -overlay) are still visible.
+	goflags string
 	// durations holds the value of each duration flag that the user gave.
 	durations map[string]string
 	// shake holds the value of -shake. shakeBare reports -shake without
@@ -213,7 +216,7 @@ func valueFlags(cmd *base.Command) func(name string) bool {
 // so the monitor joins the explicit set when one is present and the
 // GOFLAGS set otherwise.
 func childArguments(verb string, args []string, takesValue func(string) bool, goflags string) invocation {
-	inv := invocation{arguments: []string{verb}, durations: map[string]string{}}
+	inv := invocation{arguments: []string{verb}, durations: map[string]string{}, goflags: goflags}
 	tagged := false
 	countSet := false
 	i := 0
@@ -340,6 +343,28 @@ func goflagsTestCount(goflags string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// goflagsOverlay returns the -overlay file the effective GOFLAGS
+// configures. GOFLAGS holds one flag per entry in -name=value form,
+// so only the = spellings count. The last entry wins, as in the go
+// command. The second result is false when no entry names an overlay.
+func goflagsOverlay(goflags string) (string, bool) {
+	flags, err := quoted.Split(goflags)
+	if err != nil {
+		return "", false
+	}
+	name := ""
+	ok := false
+	for _, flag := range flags {
+		switch {
+		case strings.HasPrefix(flag, "--overlay="):
+			name, ok = flag[len("--overlay="):], true
+		case strings.HasPrefix(flag, "-overlay="):
+			name, ok = flag[len("-overlay="):], true
+		}
+	}
+	return name, ok
 }
 
 // goflagsTags returns the build tags the effective GOFLAGS configures.
