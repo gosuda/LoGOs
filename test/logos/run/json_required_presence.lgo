@@ -1,0 +1,198 @@
+//go:build goexperiment.jsonv2
+
+// run
+
+package main
+
+import (
+	"encoding/json"
+	"encoding/json/jsontext"
+	jsonv2 "encoding/json/v2"
+	"errors"
+	"fmt"
+	"os"
+	"strings"
+
+	"logos/rt"
+)
+
+type PresenceProfile struct {
+	Name string `json:"name"`
+	Age  int64 `json:"age"`
+}
+
+type PresenceUser struct {
+	Name    string           `json:"name"`
+	Profile *PresenceProfile `json:"profile"`
+}
+
+type presenceBox struct {
+	Box PresenceUser `json:"box"`
+}
+
+type DefaultedUser struct {
+	Name  string `json:"name"`
+	Retry int32  = 7 `json:"retry"`
+}
+
+type DefaultedRequired struct {
+	Profile *PresenceProfile `json:"profile"`
+	Retry   int32            = 7 `json:"retry"`
+}
+
+type DelimRequired struct {
+	UserID *int `json:"user_id"`
+}
+
+var failed bool
+
+func check(label string, ok bool, detail string) {
+	if ok {
+		fmt.Println("ok " + label)
+	} else {
+		fmt.Println("FAIL " + label + " " + detail)
+		failed = true
+	}
+}
+
+func strict(doc string, u *PresenceUser) error {
+	return jsonv2.Unmarshal([]byte(doc), u, jsonv2.RejectUnknownMembers(true))
+}
+
+func isMissingField(err error, typ, field string) bool {
+	var mf rt.MissingFieldError
+	return errors.As(err, &mf) && mf.Type == typ && mf.Field == field
+}
+func strictAllowDups(doc string, u *PresenceUser) error {
+	return jsonv2.Unmarshal([]byte(doc), u, jsonv2.RejectUnknownMembers(true), jsontext.AllowDuplicateNames(true))
+}
+
+func isDuplicateError(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "duplicate object member name")
+}
+func strictOffset(doc string) int64 {
+	u := &PresenceUser{Profile: &PresenceProfile{}}
+	err := strict(doc, u)
+	se := &jsonv2.SemanticError{}
+	if !errors.As(err, &se) {
+		return -1
+	}
+	if !strings.Contains(se.Error(), `unknown object member name "bogus"`) {
+		return -2
+	}
+	return se.ByteOffset
+}
+
+func checkFallbackExtras() {
+	check("strict-pointer-prefixed", strictPointer(`{"box":{"profile":{"age":1},"zzz":1}}`) == "/box/zzz", strictPointer(`{"box":{"profile":{"age":1},"zzz":1}}`))
+
+	u11 := &PresenceUser{Profile: &PresenceProfile{}}
+	err := jsonv2.Unmarshal([]byte(`{"name":"n","PROFILE":{"age":1}}`), u11, jsonv2.MatchCaseInsensitiveNames(false))
+	check("strict-no-fold-missing", isMissingField(err, "PresenceUser", "Profile"), fmt.Sprint(err))
+
+	d1 := &DefaultedUser{}
+	err = jsonv2.Unmarshal([]byte(`{}`), d1, jsonv2.RejectUnknownMembers(true))
+	check("strict-default-applied", err == nil && d1.Retry == 7, fmt.Sprint(err, d1.Retry))
+	d2 := &DefaultedUser{Retry: 9}
+	err = json.Unmarshal([]byte(`null`), d2)
+	check("null-default-untouched", err == nil && d2.Retry == 9, fmt.Sprint(err, d2.Retry))
+
+	// A truncated object must not reset fields the defaults already set,
+	// on either the required-fields path or the defaults-only path.
+	dr := &DefaultedRequired{Profile: &PresenceProfile{}, Retry: 9}
+	err = jsonv2.Unmarshal([]byte(`{"profile":{"age":1`), dr, jsonv2.RejectUnknownMembers(true))
+	check("strict-truncated-keeps-default", err != nil && dr.Retry == 9, fmt.Sprint(err, dr.Retry))
+	d3 := &DefaultedUser{Retry: 9}
+	err = jsonv2.Unmarshal([]byte(`{"name":"x","retry":`), d3, jsonv2.RejectUnknownMembers(true))
+	check("strict-truncated-keeps-user-default", err != nil && d3.Retry == 9, fmt.Sprint(err, d3.Retry))
+
+	// v2 folds '-' and '_' away under MatchCaseInsensitiveNames unless the
+	// caller keeps delimiters significant; presence must match that rule.
+	du := &DelimRequired{UserID: new(int)}
+	err = jsonv2.Unmarshal([]byte(`{"USER-ID":3}`), du, jsonv2.MatchCaseInsensitiveNames(true))
+	check("fold-nodelim-matched", err == nil && du.UserID != nil && *du.UserID == 3, fmt.Sprint(err))
+	du2 := &DelimRequired{UserID: new(int)}
+	err = jsonv2.Unmarshal([]byte(`{"USER-ID":3}`), du2, jsonv2.MatchCaseInsensitiveNames(true), json.MatchCaseSensitiveDelimiter(true))
+	check("delimsens-missing", isMissingField(err, "DelimRequired", "UserID"), fmt.Sprint(err))
+
+	// A duplicate member reported by the buffered decode carries the
+	// enclosing member's JSON pointer, not a pointer relative to the buffer.
+	dup := &presenceBox{Box: PresenceUser{Profile: &PresenceProfile{}}}
+	err = jsonv2.Unmarshal([]byte(`{"box":{"name":"n","profile":{"age":1},"name":"m"}}`), dup, jsonv2.RejectUnknownMembers(true))
+	se := &jsontext.SyntacticError{}
+	dupPtr := fmt.Sprint(err)
+	if errors.As(err, &se) {
+		dupPtr = string(se.JSONPointer)
+	}
+	check("strict-dup-pointer-prefixed", dupPtr == "/box/name", dupPtr)
+}
+
+func strictPointer(doc string) string {
+	u := &presenceBox{Box: PresenceUser{Profile: &PresenceProfile{}}}
+	err := jsonv2.Unmarshal([]byte(doc), u, jsonv2.RejectUnknownMembers(true))
+	se := &jsonv2.SemanticError{}
+	if !errors.As(err, &se) {
+		return fmt.Sprint(err)
+	}
+	return string(se.JSONPointer)
+}
+
+func main() {
+	u := &PresenceUser{Name: "ann", Profile: &PresenceProfile{Name: "Ann", Age: 30}}
+	alias := u.Profile
+	err := strict(`{"profile":{}}`, u)
+	check("strict-empty-no-error", err == nil, fmt.Sprint(err))
+	check("strict-empty-keeps-nested", u.Profile.Name == "Ann" && u.Profile.Age == 30, fmt.Sprintf("%+v", u.Profile))
+	check("strict-empty-keeps-alias", alias == u.Profile, "alias broken")
+
+	u2 := &PresenceUser{Name: "ann", Profile: &PresenceProfile{Name: "Ann", Age: 30}}
+	alias2 := u2.Profile
+	err = strict(`{"profile":{"age":31}}`, u2)
+	check("strict-update-no-error", err == nil, fmt.Sprint(err))
+	check("strict-update-value", u2.Profile.Age == 31 && u2.Profile.Name == "Ann", fmt.Sprintf("%+v", u2.Profile))
+	check("strict-update-alias", alias2 == u2.Profile && alias2.Age == 31, "alias missed the update")
+
+	u3 := &PresenceUser{Name: "ann", Profile: &PresenceProfile{Name: "Ann", Age: 30}}
+	err = json.Unmarshal([]byte(`{"profile":{"age":31}}`), u3)
+	check("fast-update-no-error", err == nil, fmt.Sprint(err))
+	check("fast-strict-agree", u3.Profile.Age == u2.Profile.Age && u3.Profile.Name == u2.Profile.Name, fmt.Sprintf("fast %+v strict %+v", u3.Profile, u2.Profile))
+
+	u4 := &PresenceUser{Name: "ann", Profile: &PresenceProfile{Name: "Ann", Age: 30}}
+	err = strict(`{"name":"ann"}`, u4)
+	check("strict-missing", isMissingField(err, "PresenceUser", "Profile"), fmt.Sprint(err))
+	u5 := &PresenceUser{Name: "ann", Profile: &PresenceProfile{Name: "Ann", Age: 30}}
+	err = json.Unmarshal([]byte(`{"name":"ann"}`), u5)
+	check("fast-missing", isMissingField(err, "PresenceUser", "Profile"), fmt.Sprint(err))
+
+	u6 := &PresenceUser{Name: "ann", Profile: &PresenceProfile{Name: "Ann", Age: 30}}
+	err = strict(`{"profile":null}`, u6)
+	check("strict-null-missing", isMissingField(err, "PresenceUser", "Profile"), fmt.Sprint(err))
+
+	u7 := &PresenceUser{Name: "ann", Profile: &PresenceProfile{Name: "Ann", Age: 30}}
+	err = strict(`{"profile":null,"profile":{"age":31}}`, u7)
+	check("strict-duplicate-rejected", isDuplicateError(err), fmt.Sprint(err))
+
+	u8 := &PresenceUser{Name: "ann", Profile: &PresenceProfile{Name: "Ann", Age: 30}}
+	err = strict(`{"profile":{"age":31},"profile":null}`, u8)
+	check("strict-duplicate-rejected-null-last", isDuplicateError(err), fmt.Sprint(err))
+
+	u9 := &PresenceUser{Name: "ann", Profile: &PresenceProfile{Name: "Ann", Age: 30}}
+	alias9 := u9.Profile
+	err = strictAllowDups(`{"profile":null,"profile":{"age":31}}`, u9)
+	check("strict-allowdups-no-error", err == nil, fmt.Sprint(err))
+	check("strict-allowdups-value", u9.Profile.Age == 31 && u9.Profile.Name == "", fmt.Sprintf("%+v", u9.Profile))
+	check("strict-allowdups-alias", alias9 != u9.Profile && alias9.Age == 30 && alias9.Name == "Ann", fmt.Sprintf("%+v", alias9))
+
+	u10 := &PresenceUser{Name: "ann", Profile: &PresenceProfile{Name: "Ann", Age: 30}}
+	err = strictAllowDups(`{"profile":{"age":31},"profile":null}`, u10)
+	check("strict-allowdups-null-last-missing", isMissingField(err, "PresenceUser", "Profile"), fmt.Sprint(err))
+
+	o1 := strictOffset(`{"profile":{},"bogus":1}`)
+	o2 := strictOffset(`   {"profile":{},"bogus":1}`)
+	check("strict-offset-absolute", o1 >= 0 && o2-o1 == 3, fmt.Sprintf("%d %d", o1, o2))
+	checkFallbackExtras()
+
+	if failed {
+		os.Exit(1)
+	}
+}
