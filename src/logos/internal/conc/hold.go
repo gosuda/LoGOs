@@ -89,7 +89,7 @@ func (m *monitor) holdStarted(g uint64, key uintptr, pc uintptr) {
 	// Waiters that already held leave a stale queue entry; the first
 	// live entry is the waiter of the new hold.
 	for len(ws) > 0 {
-		if _, ok := m.waiting[ws[0]]; ok {
+		if w, ok := m.waiting[ws[0]]; ok && w.key == key {
 			break
 		}
 		ws = ws[1:]
