@@ -20,19 +20,24 @@ type acceptAll struct {
 	raw []byte
 }
 
+// methodCalls counts UnmarshalJSON invocations: the decoder writes
+// into a value it owns, so a per-value field cannot observe calls.
+var methodCalls int
+
 func (a *acceptAll) UnmarshalJSON(b []byte) error {
+	methodCalls++
 	a.raw = append(a.raw[:0], b...)
 	return nil
 }
 
 func TestUnmarshalValidatesBeforeMethod(t *testing.T) {
-	var a acceptAll
+	methodCalls = 0
 	_, err := twinjson.Unmarshal[acceptAll]([]byte(`{"x":1} garbage`))
 	if _, isSyn := err.(*stdjson.SyntaxError); !isSyn {
 		t.Fatalf("malformed input: got %T %v, want *SyntaxError", err, err)
 	}
-	if len(a.raw) != 0 {
-		t.Fatalf("method ran on invalid input: %q", a.raw)
+	if methodCalls != 0 {
+		t.Fatalf("method ran on invalid input")
 	}
 
 	// A valid document padded with space reaches the method trimmed,
@@ -46,13 +51,13 @@ func TestUnmarshalValidatesBeforeMethod(t *testing.T) {
 	}
 
 	// The option decoder validates the payload the same way.
-	var a3 acceptAll
+	methodCalls = 0
 	_, err3 := twinjson.UnmarshalOption[acceptAll]([]byte(`{`))
 	if _, isSyn := err3.(*stdjson.SyntaxError); !isSyn {
 		t.Fatalf("option malformed: got %T %v, want *SyntaxError", err3, err3)
 	}
-	if len(a3.raw) != 0 {
-		t.Fatalf("option method ran on invalid input: %q", a3.raw)
+	if methodCalls != 0 {
+		t.Fatalf("option method ran on invalid input")
 	}
 }
 
