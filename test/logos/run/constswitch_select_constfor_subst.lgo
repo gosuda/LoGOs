@@ -1,0 +1,58 @@
+// run
+
+package main
+
+import (
+	"comptime"
+	"fmt"
+)
+
+type Holder struct {
+	Ptr *bool
+}
+
+func (h Holder) M() *bool { return h.Ptr }
+
+func pick[A any, B any](a A, b B) A {
+	return a
+}
+
+var seq int
+
+func next() int {
+	seq++
+	return 0
+}
+
+type Two struct {
+	A     int
+	ABCDE int
+}
+
+func recvFor[T any](s []T, ch chan T) {
+	const for _, f := range comptime.Fields[Two]() {
+		const switch T {
+		case interface{ M() *bool }:
+			var p interface{ M() *bool }
+			select {
+			case p, *pick(s[next()+len(f.Name)], 0).M() = <-ch:
+				_ = p
+			default:
+			}
+		}
+	}
+}
+
+func main() {
+	ch := make(chan Holder, 2)
+	ch <- Holder{Ptr: new(bool)}
+	ch <- Holder{Ptr: new(bool)}
+	hs := []Holder{{Ptr: new(bool)}, {Ptr: new(bool)}, {Ptr: new(bool)}, {Ptr: new(bool)}, {Ptr: new(bool)}, {Ptr: new(bool)}}
+	recvFor[Holder](hs, ch)
+	fmt.Println("seq", seq)
+	if seq == 2 && *hs[1].Ptr && *hs[5].Ptr && !*hs[0].Ptr && !*hs[2].Ptr && !*hs[3].Ptr && !*hs[4].Ptr {
+		fmt.Println("ok constfor-subst-destinations")
+	} else {
+		fmt.Println("FAIL constfor-subst-destinations")
+	}
+}

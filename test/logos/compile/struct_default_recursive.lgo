@@ -1,0 +1,17 @@
+// errorcheck
+
+// Copyright 2026 The LoGOs Authors. All rights reserved.
+
+package main
+
+// A field default whose subtree fills a missing field with the same
+// factory is recursive: emitting it would make the generated factory
+// call itself without end. It is rejected instead of filled.
+
+type Node struct {
+	Children []Node = []Node{{}} // ERROR "recursive"
+}
+
+func main() {
+	_ = Node{}
+}

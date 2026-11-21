@@ -15,7 +15,7 @@ This skill writes only inside the checkout (`bin/`, `pkg/`, build caches). It ne
 
 ## Procedure
 
-1. Pick the bootstrap Go. Take the latest stable upstream Go from go.dev/dl or the system package manager, and read the Install sentence in `README.md` for the release it names as known to work. Go 1.26.8 fails to compile the fork's compiler sources. Done when `go version` prints a release at least as new as the README names and `go env GOROOT` prints a directory outside the checkout.
+1. Pick the bootstrap Go. Take the latest stable upstream Go from go.dev/dl or the system package manager, and read the Installation section of `README.md` for the upstream Go release it names. Go 1.26.8 fails to compile the fork's compiler sources. Done when `go version` prints a release at least as new as the README names and `go env GOROOT` prints a directory outside the checkout.
 2. Settle the source. Run `git fetch origin`, then `git rev-list --left-right --count HEAD...origin/<branch>`; pull only when the left count is zero and the right count is above zero. Leave unrelated modified or deleted files alone. Done when HEAD is known and `sed -n 1p VERSION` prints the baseline, for example `go1.27.4`.
 3. Clean the environment. Run `unset GOROOT GOTOOLCHAIN`, then `export GOROOT_BOOTSTRAP="$(go env GOROOT)"` with the upstream Go first on `PATH`. The checkout's own `bin/go` is never a bootstrap. Done when `echo "$GOROOT_BOOTSTRAP"` prints the upstream root from step 1.
 4. Build from `src/`: `cd src && ./make.bash`. The script exists only in `src/`, so a run from the checkout root cannot start. Run it as a background job with no deadline; it took about 200 seconds at load average 14. Done when the output ends with `Installed commands in <checkout>/bin`.

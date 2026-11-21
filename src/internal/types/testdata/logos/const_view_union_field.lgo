@@ -1,0 +1,29 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package p
+
+type Leaf struct {
+	Name string
+}
+
+type Node struct {
+	Child const Tree
+	ID    int
+}
+
+type Tree interface {
+	Leaf | Node
+}
+
+func classify(v Tree) string {
+	switch v.(type) {
+	case Leaf:
+		return "leaf"
+	case Node:
+		return "node"
+	default:
+		return "other"
+	}
+}

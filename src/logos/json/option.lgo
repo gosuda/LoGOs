@@ -1,0 +1,139 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package json
+
+import (
+	"bytes"
+	"comptime"
+	stdjson "encoding/json"
+	"encoding/json/jsontext"
+	jsonv2 "encoding/json/v2"
+
+	"logos/json/internal/compact"
+	"logos/json/internal/stream"
+	rt "logos/rt"
+)
+
+// MarshalOption returns the JSON encoding of an option value: null when
+// absent, the payload encoding alone when present. This is the
+// null-or-payload rule the static serializer must state (issue 160).
+// Bare-pointer options (*T? lowering to a bare *T) already encode this
+// way through encoding/json and need no helper.
+func MarshalOption[T any](v rt.Option[T]) ([]byte, error) {
+	if !v.Present {
+		return []byte("null"), nil
+	}
+	const if comptime.IsStruct[T]() {
+		const switch T {
+		case jsonv2.MarshalerTo:
+			var buf bytes.Buffer
+			if err := v.Value.MarshalJSONTo(jsontext.NewEncoder(&buf)); err != nil {
+				return stdjson.Marshal(v.Value)
+			}
+			out, cerr := compact.Escaped(buf.Bytes())
+			if cerr != nil {
+				return stdjson.Marshal(v.Value)
+			}
+			return append([]byte(nil), out...), nil
+		case stdjson.Marshaler:
+			b, err := v.Value.MarshalJSON()
+			if err != nil {
+				return stdjson.Marshal(v.Value)
+			}
+			out, cerr := compact.Escaped(b)
+			if cerr != nil {
+				return stdjson.Marshal(v.Value)
+			}
+			return append([]byte(nil), out...), nil
+		}
+	}
+	return stdjson.Marshal(v.Value)
+}
+
+// UnmarshalOption parses data into an option value: JSON null gives an
+// absent option, any other value decodes as the payload. Missing keys
+// are handled by the generated decoder, not here.
+func UnmarshalOption[T any](data []byte) (rt.Option[T], error) {
+	var none rt.Option[T]
+	if compact.IsNull(data) {
+		return none, nil
+	}
+	var payload T
+	const if comptime.IsStruct[T]() {
+		if u, ok := any(&payload).(jsonv2.UnmarshalerFrom); ok {
+			if val, valid := compact.Trimmed(data); valid {
+				declined, err := stream.FromValue(u, val)
+				if err != nil {
+					return none, err
+				}
+				if !declined {
+					return rt.Option[T]{Value: payload, Present: true}, nil
+				}
+				// The method declined without reading; try the next decoder.
+			} else {
+				err := stdjson.Unmarshal(data, &payload)
+				return none, err
+			}
+		}
+		if u, ok := any(&payload).(stdjson.Unmarshaler); ok {
+			if val, valid := compact.Trimmed(data); valid {
+				err := u.UnmarshalJSON(val)
+				if err != nil {
+					return none, err
+				}
+				return rt.Option[T]{Value: payload, Present: true}, nil
+			}
+			err := stdjson.Unmarshal(data, &payload)
+			return none, err
+		}
+	}
+	if err := stdjson.Unmarshal(data, &payload); err != nil {
+		return none, err
+	}
+	return rt.Option[T]{Value: payload, Present: true}, nil
+}
+
+// UnmarshalOptionInto is the statement form for callers that already
+// hold an option variable. It keeps the same null-or-payload rule.
+func UnmarshalOptionInto[T any](data []byte, out *rt.Option[T]) error {
+	if compact.IsNull(data) {
+		*out = rt.Option[T]{}
+		return nil
+	}
+	var payload T
+	const if comptime.IsStruct[T]() {
+		if u, ok := any(&payload).(jsonv2.UnmarshalerFrom); ok {
+			if val, valid := compact.Trimmed(data); valid {
+				declined, err := stream.FromValue(u, val)
+				if err != nil {
+					return err
+				}
+				if !declined {
+					*out = rt.Option[T]{Value: payload, Present: true}
+					return nil
+				}
+				// The method declined without reading; try the next decoder.
+			} else {
+				return stdjson.Unmarshal(data, &payload)
+			}
+		}
+		if u, ok := any(&payload).(stdjson.Unmarshaler); ok {
+			if val, valid := compact.Trimmed(data); valid {
+				if err := u.UnmarshalJSON(val); err != nil {
+					return err
+				}
+				*out = rt.Option[T]{Value: payload, Present: true}
+				return nil
+			}
+			return stdjson.Unmarshal(data, &payload)
+		}
+	}
+	if err := stdjson.Unmarshal(data, &payload); err != nil {
+		return err
+	}
+	*out = rt.Option[T]{Value: payload, Present: true}
+	return nil
+}
+

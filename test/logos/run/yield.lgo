@@ -62,11 +62,11 @@ func Tracked(n int) iter.Seq[int] {
 	steps += 1000
 }
 
-func ReturnSeven(n int) iter.Seq[int] {
+func ReturnEnds(n int) iter.Seq[int] {
 	for i := range n {
 		yield i
 	}
-	return 7
+	return
 }
 
 var lazyLog []string
@@ -103,7 +103,7 @@ func main() {
 		durs = append(durs, d)
 	}
 	seven := 0
-	for v := range ReturnSeven(3) {
+	for v := range ReturnEnds(3) {
 		seven += v
 	}
 	check("sum", sum == 10, sum, 10)

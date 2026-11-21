@@ -259,6 +259,10 @@ func needsLogosRT(p *Package) bool {
 // imported by every logos package.
 const LogosRTPkg = "logos/rt"
 
+// LogosMonitorTag is the build tag that `logos conc` adds. It selects
+// the monitored files of logos/rt and logos/sync.
+const LogosMonitorTag = "logosconc"
+
 // LogosSimdPkg is the import path implicitly imported by every logos
 // package when GOEXPERIMENT=simd, so lowered fixed-array SIMD code can
 // call into it without naming it (M14-S1).

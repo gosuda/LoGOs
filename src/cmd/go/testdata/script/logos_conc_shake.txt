@@ -1,0 +1,147 @@
+[GOOS:windows] skip 'logos conc needs named pipes'
+[GOOS:plan9] skip 'logos conc needs named pipes'
+
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+# One thread only: the fault is the order the spawns give, and stealing
+# the second child onto another thread would hide it.
+env GOMAXPROCS=1
+
+cd shake
+
+# The linter and the race detector accept the order the spawns give:
+# the channel carries the order, and no memory is raced.
+logos lint ./...
+! stderr .
+[race] [cgo] env CGO_ENABLED=1
+# Under -race the runnext slot is randomized and the spawn order does
+# not hold, so this step checks only that both children ran with no race.
+[race] [cgo] logos test -race -count=1 -run TestBothRan ./ord
+[race] [cgo] stdout '^ok '
+
+# Without a shake the child the group started last runs first and takes
+# the lock twice before the other child sends, so the order holds.
+logos conc test -count=1 ./ord
+stdout '^ok '
+! stderr .
+logos conc run ./ord
+stdout '^locked,direct$'
+! stderr .
+
+# With shake seed 1 the lock taker yields at its start and at each
+# acquire, so the direct child sends first and the test fails. The
+# command prints the seed that replays the schedule.
+! logos conc test -shake=1 -count=1 ./ord
+stdout 'order = '
+stderr 'shake seed 1'
+! logos conc test -shake=1 -count=1 ./ord
+stdout 'order = '
+stderr 'shake seed 1'
+
+# The same schedule fault shows in run: the program prints the flipped
+# order and exits 2.
+! logos conc run -shake=1 ./ord
+stdout '^direct,locked$'
+stderr 'shake seed 1'
+
+# Without a value the seed comes from the clock and is printed, so the
+# run can be replayed with -shake=<n>. A clock seed need not flip the
+# order, so this step asserts only the seed line, not the exit status.
+? logos conc test -shake -count=1 ./ord
+stderr 'shake seed [0-9]+'
+
+# A seed that is not a number is a usage error.
+! logos conc test -shake=nope -count=1 ./ord
+stderr 'is not a seed'
+
+-- shake/go.mod --
+module example.com/shake
+
+go 1.27
+-- shake/ord/main.lgo --
+package main
+
+import (
+	"context"
+	"fmt"
+	"os"
+
+	"logos/sync"
+)
+
+type box struct{ n int }
+
+var gate sync.Locked[box]
+
+func locked(first chan string) error {
+	gate.WithLock(b => {
+		b.n++
+	})
+	gate.WithLock(b => {
+		b.n++
+	})
+	select {
+	case first <- "locked":
+	default:
+	}
+	return nil
+}
+
+func direct(first chan string) error {
+	select {
+	case first <- "direct":
+	default:
+	}
+	return nil
+}
+
+func order(ctx context.Context) (string, error) {
+	first := make(chan string, 2)
+	go group (ctx) {
+		go direct(first)
+		go locked(first)
+	}
+	a := <-first
+	b := <-first
+	return a + "," + b, nil
+}
+
+func main() {
+	got, err := order(context.Background())
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+		return
+	}
+	fmt.Println(got)
+	if got != "locked,direct" {
+		os.Exit(2)
+	}
+}
+-- shake/ord/main_test.lgo --
+package main
+
+import "testing"
+
+func TestOrder(t *testing.T) {
+	got, err := order(t.Context())
+	if err != nil {
+		t.Fatal(err)
+		return
+	}
+	if got != "locked,direct" {
+		t.Fatalf("order = %q, want %q", got, "locked,direct")
+	}
+}
+
+func TestBothRan(t *testing.T) {
+	got, err := order(t.Context())
+	if err != nil {
+		t.Fatal(err)
+		return
+	}
+	if got != "locked,direct" && got != "direct,locked" {
+		t.Fatalf("order = %q, want both children to send", got)
+	}
+}
