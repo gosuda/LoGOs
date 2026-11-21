@@ -31,7 +31,7 @@ The `-O` build flag is accepted by both `logos build` and `go build`. In `logos.
 | `O3` | 400 | 4096 B | `-d=inlbudget=400,inlrecursivebudget=80,variablemakethreshold=4096,logosopt=1` |
 | `Os` | 15 | 32 B | `-d=inlbudget=15` |
 
-The Flags column lists the presets `logos` passes for packages outside the standard library. For standard-library packages and test variants of them, the toolchain strips `variablemakethreshold` from each level (`src/cmd/go/internal/work/logos_stdlib_gate.go`).
+The Flags column lists the presets `logos` passes for packages outside the standard library. For standard-library packages — and for test variants of any package whose import path has no dot in its first element, including a dotless user module such as `testonly` — the toolchain strips `variablemakethreshold` from each level (`src/cmd/go/internal/work/logos_stdlib_gate.go`).
 
 Rules:
 
