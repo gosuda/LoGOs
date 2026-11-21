@@ -1324,6 +1324,7 @@ A child panic MUST become `*logos/rt.PanicError` with the value and a stack. [T-
 `NewGroup`, `Go`, `GoNested`, `Wait`, `WaitContext`, and `PanicError.Error` MUST form the `Group` API (`NewGroup(ctx, limit)` returns the group and a child context; `Go` and `GoNested` take `func(context.Context) error`, and `GoNested` never blocks its caller on the concurrency limit). [T-206]
 
 A plain channel send, receive, or range directly in a child MUST lower to a `select` with `<-gctx.Done()`. [T-206]
+A plain channel send whose channel can accept the value without blocking MUST complete the send; cancellation MUST preempt only a send that would block. [T-206]
 
 A user `select` with `default` MUST stay unchanged. [T-206]
 

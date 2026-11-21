@@ -139,6 +139,41 @@ func (w *rewriter) child(key string, v any, own, ctx *lowered) any {
 		if m, ok := v.(map[string]any); ok {
 			return w.changes(m)
 		}
+	case "documentChanges":
+		// Route before the rewrite renames each entry's uri. Only a
+		// text-edit entry for a remapped file is deduped: resource
+		// operations carry no edits, and identical edits in a plain Go
+		// file are legitimate repeated insertions, not artifacts.
+		routed := map[int]bool{}
+		if l, ok := v.([]any); ok {
+			for i, e := range l {
+				em, ok := e.(map[string]any)
+				if !ok {
+					continue
+				}
+				td, ok := em["textDocument"].(map[string]any)
+				if !ok {
+					continue
+				}
+				if uri, ok := td["uri"].(string); ok && w.route(uri) != nil {
+					routed[i] = true
+				}
+			}
+		}
+		v = w.rewrite(v, own)
+		if l, ok := v.([]any); ok {
+			for i, e := range l {
+				if !routed[i] {
+					continue
+				}
+				if em, ok := e.(map[string]any); ok {
+					if _, hasEdits := em["edits"]; hasEdits {
+						em["edits"] = dedupEdits(em["edits"])
+					}
+				}
+			}
+		}
+		return v
 	case "originSelectionRange":
 		return w.rewrite(v, ctx)
 	}
@@ -149,10 +184,37 @@ func (w *rewriter) changes(m map[string]any) map[string]any {
 	out := make(map[string]any, len(m))
 	for uri, v := range m {
 		lw := w.route(uri)
+		v = w.rewrite(v, lw)
 		if lw != nil {
+			// Remapping can collapse distinct lowered edits onto one
+			// original range; an unmapped file's identical edits are
+			// legitimate and must survive.
 			uri = w.name(lw)
+			v = dedupEdits(v)
 		}
-		out[uri] = w.rewrite(v, lw)
+		out[uri] = v
+	}
+	return out
+}
+
+// dedupEdits drops identical text edits. One source token can produce
+// several identical edits after ranges map back to the original file
+// (e.g. a group send value spelled in two select arms), and workspace
+// edits must not overlap.
+func dedupEdits(v any) any {
+	edits, ok := v.([]any)
+	if !ok {
+		return v
+	}
+	seen := make(map[string]bool, len(edits))
+	out := edits[:0]
+	for _, e := range edits {
+		key, _ := json.Marshal(e)
+		if seen[string(key)] {
+			continue
+		}
+		seen[string(key)] = true
+		out = append(out, e)
 	}
 	return out
 }
