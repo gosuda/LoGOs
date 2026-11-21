@@ -70,6 +70,11 @@ func Query[T any](ctx context.Context, q Querier, query string, args ...any) ([]
 	if rows.NextResultSet() {
 		return nil, fmt.Errorf("db: %s: query returned multiple result sets", plan.Type)
 	}
+	// A failed advance records its error on rows, so re-check: an error
+	// here is not an exhausted first result set.
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("db: scan %s: %w", plan.Type, err)
+	}
 	return out, nil
 }
 
@@ -124,6 +129,11 @@ func One[T any](ctx context.Context, q Querier, query string, args ...any) (foun
 	}
 	if rows.NextResultSet() {
 		return nil, fmt.Errorf("db: %s: query returned multiple result sets", plan.Type)
+	}
+	// A failed advance records its error on rows, so re-check: an error
+	// here is not an exhausted first result set.
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("db: scan %s: %w", plan.Type, err)
 	}
 	return out, nil
 }
