@@ -1171,6 +1171,14 @@ func (p *logosEFPass) collectAssigns() {
 			return true
 		}
 		fresh := p.defsIn(f.Body)
+		if rc, ok := f.Init.(*syntax.RangeClause); ok {
+			// A variable a := range clause declares gets a new instance
+			// each iteration; a target of an = range clause or a variable
+			// declared by a three-clause init is one shared instance.
+			for v := range p.defsIn(rc) {
+				fresh[v] = true
+			}
+		}
 		if f.Post != nil {
 			for v := range p.defsIn(f.Post) {
 				fresh[v] = true
