@@ -342,7 +342,9 @@ func storeFloat32Value[T ~float32](dst *T, src driver.Value) error {
 		// as the text path reports.
 		f := float32(v)
 		if math.IsInf(float64(f), 0) && !math.IsInf(v, 0) {
-			return cannotConvertErr(src, "float64", "float32", strconv.ErrRange)
+			// The error names the value, as convertAssign does —
+			// asString renders a float64 with FormatFloat 'g'.
+			return cannotConvertErr(src, strconv.FormatFloat(v, 'g', -1, 64), "float32", strconv.ErrRange)
 		}
 		*dst = T(f)
 		return nil
