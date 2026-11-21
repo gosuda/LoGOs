@@ -808,6 +808,12 @@ func (fl *fileLower) expandLevel(body *syntax.BlockStmt, active cfChain, text ot
 			iterMap := &cfMapper{start: m.start, subs: slices.Clone(m.subs)}
 			one := fl.expandLevel(inner.Body, sub, text.slice(bs-sliceStart, be-sliceStart), bs, iterMap, run)
 			innerParts = append(innerParts, one, gen("\n"))
+			// A nested const for obeys the same terminating cutoff as
+			// the outer unroll: later iterations only emit empty
+			// expansions after a terminating field.
+			if cutAfterTerminatingField(fl.pkg.info.LogosConstFor[inner], ord) {
+				break
+			}
 		}
 		text = cat(text.slice(0, s-sliceStart), cat(innerParts...), text.slice(e-sliceStart, len(text.s)))
 	}
