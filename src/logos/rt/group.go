@@ -10,7 +10,7 @@ import (
 )
 
 // Group is a bound set of goroutines. Build it with NewGroup, spawn
-// children with Go, and join them with Wait.
+// children with Go, and join them with Wait or WaitContext.
 type Group struct {
 	monitor    monitorState
 	ctx        context.Context
@@ -143,6 +143,21 @@ func (g *Group) childDone() {
 	}
 }
 
+// finishJoin releases the runtime slot, cancels the child context, and
+// reports the first child error or panic. The caller holds no lock and
+// has already marked the join complete.
+func (g *Group) finishJoin() error {
+	if !g.parentStop() {
+		<-g.parentDone
+	}
+	monitorJoined(g)
+	logosGroupRelease(g.slot)
+	g.cancel()
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.first
+}
+
 // Wait joins every child, cancels the child context, and reports the
 // first child error or panic, or nil when all children returned nil.
 // Every child has cleared its tag when the join completes, so the slot
@@ -161,13 +176,40 @@ func (g *Group) Wait() error {
 	}
 	g.joined = true
 	g.mu.Unlock()
-	if !g.parentStop() {
-		<-g.parentDone
-	}
-	monitorJoined(g)
-	logosGroupRelease(g.slot)
-	g.cancel()
+	return g.finishJoin()
+}
+
+// WaitContext joins every child and reports what Wait would report. If
+// ctx ends first, it stops waiting and returns ctx.Err(): the children
+// keep running under the group context, the slot stays with the group,
+// and a later Wait completes the join. A WaitContext that runs to
+// completion joins like Wait, and any Wait or WaitContext after a
+// completed join panics with "logos: Group.Wait called twice".
+func (g *Group) WaitContext(ctx context.Context) error {
 	g.mu.Lock()
-	defer g.mu.Unlock()
-	return g.first
+	if g.waited {
+		g.mu.Unlock()
+		panic("logos: Group.Wait called twice")
+	}
+	g.waited = true
+	g.live--
+	stop := context.AfterFunc(ctx, func() {
+		g.mu.Lock()
+		defer g.mu.Unlock()
+		g.cond.Broadcast()
+	})
+	for g.live > 0 {
+		if ctx.Err() != nil {
+			g.live++
+			g.waited = false
+			g.mu.Unlock()
+			stop()
+			return ctx.Err()
+		}
+		g.cond.Wait()
+	}
+	g.joined = true
+	g.mu.Unlock()
+	stop()
+	return g.finishJoin()
 }

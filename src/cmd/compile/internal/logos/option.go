@@ -54,6 +54,8 @@ func (fl *fileLower) lowerOptNode(n syntax.Node) {
 		fl.lowerOptAssign(n)
 		fl.lowerOptFields(n, "Lhs")
 		return
+	case *syntax.ForStmt:
+		fl.lowerOptForRange(n)
 	case *syntax.RangeClause:
 		fl.lowerOptRange(n)
 		fl.lowerOptFields(n, "Lhs")
@@ -761,14 +763,16 @@ func (fl *fileLower) spellLoweredStruct(st *types2.Struct) (string, bool) {
 }
 
 func (fl *fileLower) spellLoweredInterface(it *types2.Interface) (string, bool) {
-	if it.NumMethods() == 0 && it.NumEmbeddeds() == 0 {
+	if it.NumExplicitMethods() == 0 && it.NumEmbeddeds() == 0 {
 		return fl.spellType(it)
 	}
 	var b strings.Builder
 	b.WriteString("interface{ ")
 	sep := ""
-	for i := range it.NumMethods() {
-		m := it.Method(i)
+	// Only explicitly declared methods need spelling: inherited ones
+	// ride in through the embedding spelled by the second loop.
+	for i := range it.NumExplicitMethods() {
+		m := it.ExplicitMethod(i)
 		if !m.Exported() && m.Pkg() != fl.pkg.tpkg {
 			return "", false
 		}
@@ -1557,9 +1561,23 @@ func (fl *fileLower) lowerOptCallExpr(e *syntax.CallExpr) syntax.Expr {
 		return fl.lowerOptCall(e, osel)
 	}
 	e.Fun = fl.lowerOptExpr(e.Fun)
+	sig := fl.callSig(e)
 	var targets []types2.Type
-	if sig := fl.callSig(e); sig != nil {
+	if sig != nil {
 		targets = fl.callTargets(e, sig)
+	}
+	if len(e.ArgList) == 1 && sig != nil && fl.methodExprCallee(e.Fun) == nil {
+		// A lone multi-result argument fills every parameter; per-element
+		// targets decide which results need an option wrap.
+		if tup, ok := types2.Unalias(fl.optType(e.ArgList[0])).(*types2.Tuple); ok && tup.Len() > 1 {
+			params := sig.Params()
+			ts := make([]types2.Type, tup.Len())
+			for i := range ts {
+				ts[i] = fl.paramTarget(params, sig.Variadic(), e.HasDots, tup.Len(), i)
+			}
+			e.ArgList[0] = fl.wrapTuple(fl.lowerOptExpr(e.ArgList[0]), tupleTypes(tup), ts)
+			return e
+		}
 	}
 	for i, a := range e.ArgList {
 		la := fl.lowerOptExpr(a)
@@ -1602,6 +1620,12 @@ func (fl *fileLower) callSig(e *syntax.CallExpr) *types2.Signature {
 					return sig
 				}
 			}
+		}
+		// Builtins record their effective signature on the Name (append
+		// carries ...E, delete carries the map's key), and a func-typed
+		// variable names its own signature.
+		if sig, ok := types2.Unalias(fl.optType(fun)).(*types2.Signature); ok {
+			return sig
 		}
 		return nil
 	case *syntax.SelectorExpr:
@@ -2198,6 +2222,15 @@ func (fl *fileLower) lowerOptAssign(s *syntax.AssignStmt) {
 	lhs, _ := unlist(s.Lhs)
 	rhs, rhsList := unlist(s.Rhs)
 	if len(lhs) > 1 && len(rhs) == 1 {
+		if tup, ok := types2.Unalias(fl.optType(s.Rhs)).(*types2.Tuple); ok && tup.Len() == len(lhs) {
+			targets := make([]types2.Type, len(lhs))
+			for i := range lhs {
+				targets[i] = fl.targetOfLHS(lhs[i])
+			}
+			fl.lowerOptLHS(s.Lhs)
+			s.Rhs = fl.wrapTuple(fl.lowerOptExpr(s.Rhs), tupleTypes(tup), targets)
+			return
+		}
 		fl.lowerOptLHS(s.Lhs)
 		s.Rhs = fl.lowerOptExpr(s.Rhs)
 		return
@@ -2335,6 +2368,85 @@ func tupleTypes(t *types2.Tuple) []types2.Type {
 	return out
 }
 
+// wrapTuple wraps v, an expression evaluating to a tuple, in a call of a
+// function literal that binds the tuple to temporaries and returns them
+// with each option-typed target wrapped. A single multi-result expression
+// cannot carry per-result wrap nodes, so the wrap moves inside the call.
+func (fl *fileLower) wrapTuple(v syntax.Expr, recs, targets []types2.Type) syntax.Expr {
+	n := len(recs)
+	if v == nil || n < 2 || n != len(targets) {
+		return v
+	}
+	need := false
+	for i := range n {
+		if wrap, _ := fl.needsWrap(v, recs[i], targets[i]); wrap {
+			need = true
+			break
+		}
+	}
+	if !need {
+		return v
+	}
+	pos := v.Pos()
+	params := make([]*syntax.Field, n)
+	results := make([]*syntax.Field, n)
+	tmps := make([]syntax.Expr, n)
+	rets := make([]syntax.Expr, n)
+	retTexts := make([]string, n)
+	rTexts := make([]string, n)
+	pTexts := make([]string, n)
+	for i := range n {
+		rt := targets[i]
+		if rt == nil {
+			// A blank destination accepts the produced value untyped:
+			// forward it under its own result type.
+			rt = recs[i]
+		}
+		nt, et, ok := fl.spellLoweredBoth(rt, pos)
+		if !ok {
+			base.Fatalf("logos: cannot spell type %s of the option wrap at %s", rt, pos.String())
+		}
+		results[i] = at(&syntax.Field{Type: nt}, pos)
+		rTexts[i] = et
+		pt, pet, ok := fl.spellLoweredBoth(recs[i], pos)
+		if !ok {
+			base.Fatalf("logos: cannot spell type %s of the option wrap at %s", recs[i], pos.String())
+		}
+		tmp := fmt.Sprintf(optWrapTemp, i)
+		params[i] = at(&syntax.Field{Name: nameOf(pos, tmp), Type: pt}, pos)
+		pTexts[i] = tmp + " " + pet
+		tmps[i] = nameOf(pos, tmp)
+		some, head, tail := fl.wrapParts(tmps[i], recs[i], targets[i], pos)
+		rets[i] = some
+		retTexts[i] = head + tmp + tail
+	}
+	// Binding the tuple through parameters, not a := of the multi-result
+	// call, keeps the generated body free of statements the Inspect walk
+	// would lower a second time.
+	sig := at(&syntax.FuncType{
+		ParamList:  params,
+		ResultList: results,
+	}, pos)
+	lit := at(&syntax.FuncLit{
+		Type: sig,
+		Body: blockOf(pos, []syntax.Stmt{
+			returnOf(pos, rets),
+		}),
+	}, pos)
+	out := callOf(pos, lit, []syntax.Expr{v})
+	vs := fl.wrapSpanOf(v)
+	fl.addT(vs.start, vs.end, cat(
+		gen("func("+strings.Join(pTexts, ", ")+") ("+strings.Join(rTexts, ", ")+") { return "+strings.Join(retTexts, ", ")+" }("),
+		fl.lazyText(vs),
+		gen(")"),
+	))
+	fl.wrapSpan[out] = vs
+	fl.wrapOwner[out] = fl.nextWrapID()
+	// The IIFE has no recorded type: carrying v's tuple type onto it would
+	// make a parent multi-result context wrap the call a second time.
+	return out
+}
+
 func (fl *fileLower) lowerOptReturn(s *syntax.ReturnStmt) {
 	if s.Results == nil {
 		return
@@ -2348,6 +2460,12 @@ func (fl *fileLower) lowerOptReturn(s *syntax.ReturnStmt) {
 	}
 	ll, lowList := unlist(low)
 	ol, _ := unlist(orig)
+	if len(ol) == 1 && len(res) > 1 {
+		if tup, ok := types2.Unalias(fl.optType(orig)).(*types2.Tuple); ok {
+			s.Results = fl.wrapTuple(low, tupleTypes(tup), res)
+		}
+		return
+	}
 	if len(ll) > 1 && len(ol) == 1 {
 		return
 	}
@@ -2368,17 +2486,15 @@ func (fl *fileLower) lowerOptVarValues(names []*syntax.Name, typ, vals syntax.Ex
 	}
 	vl, isList := unlist(vals)
 	if len(vl) != len(names) {
-		return fl.lowerOptExpr(vals)
-	}
-	targets := make([]types2.Type, len(names))
-	for i, name := range names {
-		if obj := fl.pkg.info.Defs[name]; obj != nil {
-			switch obj.(type) {
-			case *types2.Var, *types2.Const:
-				targets[i] = obj.Type()
+		if !isList && len(vl) == 1 && len(names) > 1 {
+			if tup, ok := types2.Unalias(fl.optType(vals)).(*types2.Tuple); ok && tup.Len() == len(names) {
+				targets := fl.varTargets(names)
+				return fl.wrapTuple(fl.lowerOptExpr(vals), tupleTypes(tup), targets)
 			}
 		}
+		return fl.lowerOptExpr(vals)
 	}
+	targets := fl.varTargets(names)
 	for i := range vl {
 		nv := fl.lowerOptExpr(vl[i])
 		nv = fl.wrapKnown(nv, fl.optType(vl[i]), targets[i])
@@ -2389,6 +2505,19 @@ func (fl *fileLower) lowerOptVarValues(names []*syntax.Name, typ, vals syntax.Ex
 		}
 	}
 	return vals
+}
+
+func (fl *fileLower) varTargets(names []*syntax.Name) []types2.Type {
+	targets := make([]types2.Type, len(names))
+	for i, name := range names {
+		if obj := fl.pkg.info.Defs[name]; obj != nil {
+			switch obj.(type) {
+			case *types2.Var, *types2.Const:
+				targets[i] = obj.Type()
+			}
+		}
+	}
+	return targets
 }
 
 func (fl *fileLower) lowerOptSend(s *syntax.SendStmt) {
@@ -2481,6 +2610,122 @@ func (fl *fileLower) lowerOptRange(s *syntax.RangeClause) {
 	if s.Lhs != nil {
 		fl.lowerOptLHS(s.Lhs)
 	}
+}
+
+// lowerOptForRange wraps the range element when a `for lhs = range`
+// clause assigns into an option-typed variable. The clause is rewritten
+// to declare temporaries, and the body opens with the wrapped assignment,
+// because the per-iteration wrap cannot sit on the range clause itself.
+func (fl *fileLower) lowerOptForRange(f *syntax.ForStmt) {
+	rc, ok := f.Init.(*syntax.RangeClause)
+	if !ok || rc.Def || rc.Lhs == nil || f.Body == nil {
+		return
+	}
+	lhs, _ := unlist(rc.Lhs)
+	recs := fl.rangeRecs(rc.X)
+	if len(lhs) == 0 || len(lhs) > len(recs) {
+		return
+	}
+	recs = recs[:len(lhs)]
+	need := false
+	for i := range lhs {
+		if wrap, _ := fl.needsWrap(lhs[i], recs[i], fl.targetOfLHS(lhs[i])); wrap {
+			need = true
+			break
+		}
+	}
+	if !need {
+		return
+	}
+	pos := rc.Pos()
+	vs := fl.wrapSpanOf(rc.Lhs)
+	xOff := fl.off(rc.X.Pos())
+	opStart, opEnd := -1, -1
+	scanSegment(fl.src, vs.end, xOff, func(t tok) bool {
+		if t.comment || t.auto {
+			return true
+		}
+		if t.kind == token.ASSIGN || t.kind == token.DEFINE {
+			opStart, opEnd = t.start, t.end
+			return false
+		}
+		return true
+	})
+	if opStart < 0 {
+		return
+	}
+	texts := make([]otext, 0, 2*len(lhs)+3)
+	texts = append(texts, gen(" "))
+	tmps := make([]syntax.Expr, len(lhs))
+	vals := make([]syntax.Expr, len(lhs))
+	vtexts := make([]string, len(lhs))
+	for i := range lhs {
+		// _logos_rangeN avoids the _logos_rN result names ensureNamed
+		// emits: a scope defer lowers a return to `_logos_r0 = ...`, and
+		// a same-named loop temp would shadow it.
+		tmp := fmt.Sprintf("_logos_range%d", i)
+		tn := nameOf(pos, tmp)
+		tmps[i] = tn
+		val, head, tail := fl.wrapParts(tn, recs[i], fl.targetOfLHS(lhs[i]), pos)
+		vals[i] = val
+		vtexts[i] = head + tmp + tail
+		texts = append(texts, fl.lazyText(fl.wrapSpanOf(lhs[i])))
+		if i+1 < len(lhs) {
+			texts = append(texts, gen(", "))
+		}
+	}
+	// One multi-assign keeps the two-phase assignment order: every
+	// destination operand (e.g. the i in dst[i]) is evaluated before any
+	// store, so a destination that reads an earlier loop variable still
+	// sees its previous value.
+	assigns := []syntax.Stmt{assignOf(pos, lhs, vals)}
+	texts = append(texts, gen(" = "+strings.Join(vtexts, ", ")+"; "))
+	rc.Lhs = listOf(pos, tmps)
+	rc.Def = true
+	f.Body.List = append(assigns, f.Body.List...)
+	fl.add(vs.start, vs.end, strings.Join(tmpNames(tmps), ", "))
+	fl.add(opStart, opEnd, ":=")
+	braceOff := fl.off(f.Body.Pos()) + 1
+	fl.addT(braceOff, braceOff, cat(texts...))
+}
+
+// rangeRecs returns the types a range clause assigns, index or key first.
+// A defined collection (`type Parts []Text`) ranges by its underlying
+// type, so the switch reads the underlying, not the named surface.
+func (fl *fileLower) rangeRecs(x syntax.Expr) []types2.Type {
+	intT := types2.Typ[types2.Int]
+	xt := fl.optType(x)
+	if xt == nil {
+		return nil
+	}
+	switch t := types2.Unalias(xt).Underlying().(type) {
+	case *types2.Slice:
+		return []types2.Type{intT, t.Elem()}
+	case *types2.Array:
+		return []types2.Type{intT, t.Elem()}
+	case *types2.Map:
+		return []types2.Type{t.Key(), t.Elem()}
+	case *types2.Chan:
+		return []types2.Type{t.Elem()}
+	case *types2.Basic:
+		if t.Kind() == types2.String {
+			return []types2.Type{intT, types2.Typ[types2.Rune]}
+		}
+		if t.Info()&types2.IsInteger != 0 {
+			return []types2.Type{intT}
+		}
+	}
+	return nil
+}
+
+func tmpNames(list []syntax.Expr) []string {
+	out := make([]string, len(list))
+	for i, e := range list {
+		if n, ok := e.(*syntax.Name); ok {
+			out[i] = n.Value
+		}
+	}
+	return out
 }
 
 func (fl *fileLower) findCallParens(selEnd int) (lparen, rparen int) {

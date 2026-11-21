@@ -713,6 +713,11 @@ func (check *Checker) arguments(call *syntax.CallExpr, sig *Signature, targs []T
 		check.logosPushGoCall(call) // logos M3-S5 hook.
 		if n > 0 {
 			check.logosPushGenericArgs(targs) // logos M3-S5 hook.
+		} else if rtargs := check.logosReceiverTypeArgs(call); len(rtargs) > 0 {
+			// A method of a generic type fills its declared
+			// type-parameter positions: substituted parameters are
+			// generic positions and take platform arguments.
+			check.logosPushGenericArgs(rtargs) // logos M3-S5 hook.
 		} else {
 			check.logosPushConcreteArgs() // logos M3-S5 hook.
 		}

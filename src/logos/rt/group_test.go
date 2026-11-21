@@ -555,3 +555,180 @@ func TestGroupPanicStackGrows(t *testing.T) {
 		}
 	})
 }
+
+// WaitContext joins every child and reports what Wait would report when
+// the wait context outlives the children: the first error wins, the
+// child context is cancelled at join, and a later Wait panics.
+func TestGroupWaitContextJoinsChildren(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		g, gctx := NewGroup(t.Context(), 0)
+		g.Go(func(ctx context.Context) error { return errGroupSecond })
+		g.Go(func(ctx context.Context) error { return errGroupFirst })
+		if err := g.WaitContext(t.Context()); err != errGroupFirst && err != errGroupSecond {
+			t.Fatalf("WaitContext = %v, want a child error", err)
+		}
+		select {
+		case <-gctx.Done():
+		default:
+			t.Fatal("child context not cancelled at WaitContext join")
+		}
+		func() {
+			defer func() {
+				if recover() == nil {
+					t.Fatal("Wait after WaitContext join did not panic")
+				}
+			}()
+			_ = g.Wait()
+		}()
+	})
+}
+
+// WaitContext returns the group error, not the wait context error, when
+// the last child exits before the bound: the join completes under the
+// bound instead of abandoning it.
+func TestGroupWaitContextErrorBeforeBound(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		g, _ := NewGroup(t.Context(), 0)
+		g.Go(func(ctx context.Context) error { return errGroupFirst })
+		waitCtx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		if err := g.WaitContext(waitCtx); err != errGroupFirst {
+			t.Fatalf("WaitContext = %v, want %v", err, errGroupFirst)
+		}
+	})
+}
+
+// WaitContext stops waiting when the wait context ends first: it returns
+// the wait context error, the child keeps running under the group
+// context, and a later Wait completes the join.
+func TestGroupWaitContextBoundedReturn(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		g, _ := NewGroup(t.Context(), 0)
+		release := make(chan struct{})
+		var exited atomic.Bool
+		g.Go(func(ctx context.Context) error {
+			defer exited.Store(true)
+			select {
+			case <-release:
+				return nil
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		})
+		waitCtx, cancel := context.WithCancel(t.Context())
+		done := make(chan error, 1)
+		go func() { done <- g.WaitContext(waitCtx) }()
+		synctest.Wait()
+		select {
+		case err := <-done:
+			close(release)
+			t.Fatalf("WaitContext returned %v before the wait context ended", err)
+		default:
+		}
+		cancel()
+		synctest.Wait()
+		var waitErr error
+		var waitErrSet bool
+		select {
+		case waitErr = <-done:
+			waitErrSet = true
+		default:
+		}
+		stillRunning := !exited.Load()
+		// Submit the next child while the first is still parked, so the
+		// Go-after-abandoned-WaitContext submission is covered with a
+		// running child, not left to whether the first exited first.
+		var ran atomic.Bool
+		func() {
+			// Release only after the submission, and even if Go panics,
+			// so a panic cannot leave a parked goroutine for synctest to
+			// trip on.
+			defer close(release)
+			g.Go(func(ctx context.Context) error {
+				ran.Store(true)
+				return nil
+			})
+		}()
+		if !waitErrSet {
+			t.Fatal("WaitContext did not return after the wait context ended")
+		}
+		if waitErr != context.Canceled {
+			t.Fatalf("WaitContext = %v, want context.Canceled", waitErr)
+		}
+		if !stillRunning {
+			t.Fatal("child exited when WaitContext gave up; want it still running")
+		}
+		synctest.Wait()
+		if err := g.Wait(); err != nil {
+			t.Fatalf("later Wait = %v, want nil", err)
+		}
+		if !ran.Load() {
+			t.Fatal("Go after an abandoned WaitContext did not run")
+		}
+	})
+}
+
+// A wait context cancelled before the call returns at once without
+// touching the group: the group stays joinable by a later Wait.
+func TestGroupWaitContextPrecancelled(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		g, gctx := NewGroup(t.Context(), 0)
+		release := make(chan struct{})
+		exited := &atomic.Bool{}
+		g.Go(func(ctx context.Context) error {
+			<-release
+			exited.Store(true)
+			return nil
+		})
+		// The child is parked on release, so it is still live when
+		// WaitContext runs: the ordering is fixed, not left to the
+		// scheduler.
+		synctest.Wait()
+		waitCtx, cancel := context.WithCancel(t.Context())
+		cancel()
+		err := g.WaitContext(waitCtx)
+		stillParked := !exited.Load()
+		var groupCancelled bool
+		select {
+		case <-gctx.Done():
+			groupCancelled = true
+		default:
+		}
+		// Unblock the child before any assertion can fail the test, so a
+		// failure cannot leave a parked goroutine for synctest to trip on.
+		close(release)
+		if err != context.Canceled {
+			t.Fatalf("WaitContext = %v, want context.Canceled", err)
+		}
+		if groupCancelled {
+			t.Fatal("precancelled WaitContext cancelled the group context")
+		}
+		if !stillParked {
+			t.Fatal("child exited when WaitContext gave up; want it still running")
+		}
+		synctest.Wait()
+		if err := g.Wait(); err != nil {
+			t.Fatalf("later Wait = %v, want nil", err)
+		}
+		if !exited.Load() {
+			t.Fatal("child parked before the precancelled WaitContext did not run")
+		}
+	})
+}
+
+// A completed Wait makes a WaitContext panic, like a second Wait.
+func TestGroupWaitContextAfterWaitPanics(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		g, _ := NewGroup(t.Context(), 0)
+		if err := g.Wait(); err != nil {
+			t.Fatalf("Wait = %v, want nil", err)
+		}
+		defer func() {
+			r := recover()
+			if r != "logos: Group.Wait called twice" {
+				t.Fatalf("WaitContext after Wait panic = %v, want the double-Wait rule", r)
+			}
+		}()
+		_ = g.WaitContext(t.Context())
+	})
+}
