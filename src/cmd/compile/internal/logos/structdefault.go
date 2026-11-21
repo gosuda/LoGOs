@@ -481,7 +481,7 @@ func (fl *fileLower) defaultDepScanFile(file *syntax.File, typeNames map[*syntax
 					fl.pkg.defInside = map[*syntax.CompositeLit][]string{}
 				}
 				fl.pkg.defInside[lit] = append(fl.pkg.defInside[lit], key)
-				for _, d := range fl.missingDefaults(lit) {
+				for _, d := range fl.missingDefaults(lit, true) {
 					if d.key == "" {
 						continue
 					}
@@ -565,7 +565,7 @@ func (fl *fileLower) fillStructDefaults(lit *syntax.CompositeLit) {
 		// generated default has no source span to reuse as a spread operand.
 		return
 	}
-	missing := fl.missingDefaults(lit)
+	missing := fl.missingDefaults(lit, false)
 	if targets := fl.pkg.defInside[lit]; len(targets) > 0 {
 		keep := missing[:0]
 		for _, d := range missing {
@@ -608,8 +608,12 @@ func (fl *fileLower) structDefaultFields(pos syntax.Pos, defaults []structDefaul
 	return native, text.String()
 }
 
-func (fl *fileLower) missingDefaults(lit *syntax.CompositeLit) []structDefault {
-	all := fl.structDefaultsFor(lit)
+// missingDefaults returns the field defaults a literal omits. keysOnly
+// keeps the factory keys but skips rendering default text: the
+// dependency scan calls it on literals of other files, whose positions
+// this file's line table cannot resolve.
+func (fl *fileLower) missingDefaults(lit *syntax.CompositeLit, keysOnly bool) []structDefault {
+	all := fl.structDefaultsFor(lit, keysOnly)
 	if len(all) == 0 {
 		return nil
 	}
@@ -640,7 +644,7 @@ func (fl *fileLower) missingDefaults(lit *syntax.CompositeLit) []structDefault {
 	return out
 }
 
-func (fl *fileLower) structDefaultsFor(lit *syntax.CompositeLit) []structDefault {
+func (fl *fileLower) structDefaultsFor(lit *syntax.CompositeLit, keysOnly bool) []structDefault {
 	t := fl.pkg.info.TypeOf(lit)
 	if t == nil {
 		return nil
@@ -680,6 +684,9 @@ func (fl *fileLower) structDefaultsFor(lit *syntax.CompositeLit) []structDefault
 	}
 	plan := fl.pkg.defaultFactoryPlan()
 	call := func(d types2.LogosFieldDefault) string {
+		if keysOnly {
+			return ""
+		}
 		fname := plan[d.Owner+"."+d.Field]
 		if fname == "" {
 			return fl.renderDefault(d.Default)
