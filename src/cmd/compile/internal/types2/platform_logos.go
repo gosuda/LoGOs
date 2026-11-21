@@ -732,6 +732,11 @@ func (check *Checker) logosExprIsPlatform(e syntax.Expr) bool {
 	if check.logosPlatformExpr[e] {
 		return true
 	}
+	if call, ok := syntax.Unparen(e).(*syntax.CallExpr); ok && check.logosCallIsConversion(call) && len(call.ArgList) == 1 {
+		// A conversion repackages the value without changing its
+		// provenance: `P(x)` of a platform pointer stays platform.
+		return check.logosExprIsPlatform(call.ArgList[0])
+	}
 	if name, ok := syntax.Unparen(e).(*syntax.Name); ok {
 		if obj := check.lookup(name.Value); obj != nil {
 			if v, ok := obj.(*Var); ok {
