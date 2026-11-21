@@ -183,10 +183,16 @@ func logosViewBase(T Type) (Type, bool) {
 			continue
 		}
 		if n, ok := Unalias(T).(*Named); ok {
-			if seen[n.Origin()] {
-				return T, qualified
+			// Origin revisits bound the expansion of a generic that
+			// wraps itself per unwrap (Grow[*T]); a plain Named is its
+			// own origin, so keying it here would end every defined
+			// type's walk before the first unwrap.
+			if n.inst != nil {
+				if seen[n.Origin()] {
+					return T, qualified
+				}
+				seen[n.Origin()] = true
 			}
-			seen[n.Origin()] = true
 			T = n.Underlying()
 			continue
 		}
