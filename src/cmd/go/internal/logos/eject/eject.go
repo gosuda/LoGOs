@@ -60,6 +60,16 @@ ejected loGo/s dependency module lands under DIR/_logos_deps, and
 the support sources become the shared module
 github.com/gosuda/loGos/rt under DIR/_logos_deps/rt.
 
+The copy holds every other regular file of the main module: each Go
+file that still parses is rewritten to the ejected import paths and
+formatted, and each remaining file is copied byte for byte.
+Dot-prefixed, underscore-prefixed, vendor, testdata, and
+version-control-ignored paths are copied because //go:embed can
+reach them; only package discovery skips those paths. The copy
+leaves out .git contents, logos.toml files, .lgo sources, the
+destination subtree, symlinks and special files, and foreign
+nested modules.
+
 DIR must not exist or must be empty. The ejected tree builds with an
 upstream Go 1.27.2 or newer toolchain. Eject never writes into the
 source tree.
@@ -1675,14 +1685,23 @@ func copySupportDir(src, dst string) {
 	}
 }
 
-// stripEjectedBuildTag removes ejected build lines, so the support copy
-// compiles under plain go with no tags set.
+// ejectedBuildLines are the build lines that hold in every build of the
+// support copy: the copy is the ejected form, and it has no monitored
+// file, so the tag logosconc selects nothing in it.
+var ejectedBuildLines = [][]byte{
+	[]byte("//go:build logosejected"),
+	[]byte("// +build logosejected"),
+	[]byte("//go:build !logosconc"),
+}
+
+// stripEjectedBuildTag removes the ejectedBuildLines, so the support
+// copy compiles under plain go with every set of tags.
 func stripEjectedBuildTag(data []byte) []byte {
 	lines := bytes.Split(data, []byte("\n"))
 	kept := lines[:0]
 	for _, l := range lines {
 		trimmed := bytes.TrimSpace(l)
-		if bytes.Equal(trimmed, []byte("//go:build logosejected")) || bytes.Equal(trimmed, []byte("// +build logosejected")) {
+		if slices.ContainsFunc(ejectedBuildLines, func(line []byte) bool { return bytes.Equal(trimmed, line) }) {
 			continue
 		}
 		kept = append(kept, l)

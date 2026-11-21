@@ -1,0 +1,40 @@
+// errorcheck
+
+package main
+
+import "maps"
+
+type Value interface{ Text | Number }
+type Text struct{ Text string }
+type Number struct{ Number float64 }
+
+func cloneUnionMap(meta const map[string]Value) map[string]Value {
+	out := make(map[string]Value, len(meta))
+	for key, value := range meta {
+		out[key] = value // ERROR "\[correctness::const_view_escape\]"
+	}
+	return out
+}
+
+func cloneUnionMapLib(meta const map[string]Value) map[string]Value {
+	return maps.Clone(meta) // ERROR "\[correctness::const_view_mutation\]"
+}
+
+func clonePlainMapLib(meta const map[string]Text) map[string]Text {
+	return maps.Clone(meta) // ERROR "\[correctness::const_view_mutation\]"
+}
+
+func copyUnionScalar(value const Value) Value {
+	var plain Value = value // ERROR "\[correctness::const_view_escape\]"
+	return plain
+}
+
+func copyPlainStruct(meta const map[string]Text) map[string]Text {
+	out := make(map[string]Text, len(meta))
+	for key, value := range meta {
+		out[key] = value
+	}
+	return out
+}
+
+func main() {}

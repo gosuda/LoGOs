@@ -7,6 +7,7 @@ package types2
 import (
 	"cmd/compile/internal/syntax"
 	. "internal/types/errors"
+	"slices"
 	"strings"
 )
 
@@ -295,15 +296,102 @@ func logosIsCgoName(name string) bool {
 	return false
 }
 
-// logosIsGoObj reports whether obj is declared outside the current
-// package (a Go-mode declaration), or is cgo-generated: named like a cgo
-// declaration or declared in a cgo-generated Go file of the package.
-// Universe objects (builtins, nil) are never Go-mode.
+// LogosImportedIsLogos reports whether the package at path was compiled
+// from loGo/s source (its export facts carry no lang go record). It is
+// set by cmd/compile/internal/logos/facts; a nil hook or a path without
+// facts fails safe to Go.
+var LogosImportedIsLogos func(path string) bool
+
+// LogosImportedDerivedVar reports whether the named exported variable
+// of the package at path was marked holding a Go-derived value when it
+// was compiled (a `derived` export-facts record). It is set by
+// cmd/compile/internal/logos/facts; a nil hook or a missing record
+// fails safe to not-derived.
+var LogosImportedDerivedVar func(path, object string) bool
+
+// LogosPkgDerived reports whether the package-scope variable name was
+// stamped Go-derived while pkg was checked. The facts writer reads it
+// to emit `derived` records.
+func LogosPkgDerived(pkg *Package, name string) bool {
+	return pkg != nil && pkg.logosDerived[name]
+}
+
+// LogosDerivedVarNames returns the sorted names of the package-scope
+// variables stamped holding Go-derived values. The noder carries the
+// names across a logos recheck, which rebuilds the package.
+func LogosDerivedVarNames(pkg *Package) []string {
+	if pkg == nil || len(pkg.logosDerived) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(pkg.logosDerived))
+	for name := range pkg.logosDerived {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+	return names
+}
+
+// LogosStampDerived restores derived-var names on a package rebuilt by
+// a recheck pass, which runs without logos marking.
+func LogosStampDerived(pkg *Package, names []string) {
+	if pkg == nil || len(names) == 0 {
+		return
+	}
+	if pkg.logosDerived == nil {
+		pkg.logosDerived = make(map[string]bool, len(names))
+	}
+	for _, name := range names {
+		pkg.logosDerived[name] = true
+	}
+}
+
+// logosImportedDerived reports whether obj is an exported variable of
+// an imported loGo/s package whose declaration carried a Go-derived
+// initializer. Go-mode objects and same-package vars are answered
+// elsewhere.
+func (check *Checker) logosImportedDerived(obj Object) bool {
+	v, ok := obj.(*Var)
+	if !ok || v.pkg == nil || v.pkg == check.pkg || check.logosIsGoPkg(v.pkg) {
+		return false
+	}
+	return LogosImportedDerivedVar != nil && LogosImportedDerivedVar(v.pkg.Path(), v.Name())
+}
+
+// logosOpaqueReceiver reports whether t is or points to an opaque named
+// type: an imported or cgo-generated named type is platform territory
+// (its fields keep the nullable contract) whichever language mode
+// declared it.
+func (check *Checker) logosOpaqueReceiver(t Type) bool {
+	if p, ok := Unalias(t).(*Pointer); ok {
+		t = p.Elem()
+	}
+	return check.logosOpaqueType(t)
+}
+
+// logosIsGoPkg reports whether pkg is a Go-mode package for the
+// platform-pointer rules: any package other than the one being checked
+// that was not compiled from loGo/s source. Packages without export
+// facts (plain Go, or archives from before the facts member existed)
+// fail safe to Go.
+func (check *Checker) logosIsGoPkg(pkg *Package) bool {
+	if pkg == nil || pkg == check.pkg {
+		return false
+	}
+	if LogosImportedIsLogos != nil && LogosImportedIsLogos(pkg.Path()) {
+		return false
+	}
+	return true
+}
+
+// logosIsGoObj reports whether obj is declared in a Go-mode package,
+// or is cgo-generated: named like a cgo declaration or declared in a
+// cgo-generated Go file of the package. Universe objects (builtins,
+// nil) are never Go-mode.
 func (check *Checker) logosIsGoObj(obj Object) bool {
 	if obj == nil {
 		return false
 	}
-	if pkg := obj.Pkg(); pkg != nil && pkg != check.pkg {
+	if pkg := obj.Pkg(); pkg != nil && check.logosIsGoPkg(pkg) {
 		return true
 	}
 	return logosIsCgoName(obj.Name()) || logosGoModePos(obj.Pos())
@@ -365,7 +453,11 @@ func (check *Checker) logosCalleeIsGo(call *syntax.CallExpr) bool {
 					if pn.imported == nil {
 						return false
 					}
-					return pn.imported.cgo || pn.imported != check.pkg
+					if pn.imported.cgo || check.logosIsGoPkg(pn.imported) {
+						return true
+					}
+					exp := pn.imported.scope.Lookup(sel.Sel.Value)
+					return check.logosImportedDerived(exp)
 				}
 			}
 		}
@@ -391,11 +483,19 @@ func (check *Checker) logosCalleeWasGeneric(call *syntax.CallExpr) bool {
 		return false
 	}
 	fn := check.logosFuncOfExpr(call.Fun)
-	if fn == nil || fn.typ == nil {
+	if fn == nil {
+		return false
+	}
+	if o := fn.Origin(); o != nil {
+		fn = o
+	}
+	if fn.typ == nil {
 		return false
 	}
 	sig, ok := fn.typ.(*Signature)
-	return ok && sig.TypeParams().Len() > 0
+	// A generic receiver can also produce a nil result: a receiver type
+	// parameter instantiated with a pointer yields a nil-able result.
+	return ok && (sig.TypeParams().Len() > 0 || sig.RecvTypeParams().Len() > 0)
 }
 
 // logosCallIsConversion reports whether e is a type conversion (its
@@ -436,6 +536,14 @@ func (check *Checker) logosMarkDerivedVar(v *Var) {
 		check.logosDerivedVar = make(map[*Var]bool)
 	}
 	check.logosDerivedVar[v] = true
+	// Stamp exported package-scope vars on the package so the facts
+	// writer can carry the marker across imports.
+	if v.pkg == check.pkg && v.parent == check.pkg.scope && v.Exported() {
+		if check.pkg.logosDerived == nil {
+			check.pkg.logosDerived = make(map[string]bool)
+		}
+		check.pkg.logosDerived[v.name] = true
+	}
 }
 
 // logosMarkDerivedExpr records a synthetic tuple dummy as Go-derived.
@@ -476,11 +584,17 @@ func (check *Checker) logosExprDerived(e syntax.Expr) bool {
 		if check.logosDerivedVar[v] {
 			return true
 		}
-		return v.pkg != nil && v.pkg != check.pkg
+		return v.pkg != nil && (check.logosIsGoPkg(v.pkg) || check.logosImportedDerived(v))
 	case *syntax.SelectorExpr:
 		if check.Info != nil {
 			if sel := check.Selections[e]; sel != nil {
 				if obj := sel.Obj(); obj != nil && check.logosIsGoObj(obj) {
+					return true
+				}
+				// A field of an opaque (imported or cgo) named type is
+				// platform territory: the zero value may hold a nil
+				// field, so reads keep derivation and its checks.
+				if sel.Kind() == FieldVal && check.logosOpaqueReceiver(sel.Recv()) {
 					return true
 				}
 			}
@@ -489,7 +603,7 @@ func (check *Checker) logosExprDerived(e syntax.Expr) bool {
 			if obj := check.lookup(xn.Value); obj != nil {
 				if pn, ok := obj.(*PkgName); ok && pn.imported != nil {
 					if exp := pn.imported.scope.Lookup(e.Sel.Value); exp != nil {
-						return true
+						return check.logosIsGoPkg(pn.imported) || check.logosImportedDerived(exp)
 					}
 					return false
 				}

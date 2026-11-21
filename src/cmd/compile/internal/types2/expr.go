@@ -1144,11 +1144,15 @@ func (check *Checker) exprInternal(T *target, x *operand, e syntax.Expr, hint Ty
 			check.error(e, InvalidSyntaxTree, "invalid use of AssertExpr")
 			goto Error
 		}
-		if isTypeParam(x.typ()) {
+		if isTypeParam(x.typ()) || (check.conf.Logos && logosViewedTypeParam(x.typ())) {
 			check.errorf(x, InvalidAssert, invalidOp+"cannot use type assertion on type parameter value %s", x)
 			goto Error
 		}
 		if _, ok := x.typ().Underlying().(*Interface); !ok {
+			if check.conf.Logos && logosQualifiedInterface(x.typ()) {
+				check.errorf(e, ImpossibleAssert, "%s cannot erase readonly descendants in a type assertion", logosConstEscape)
+				goto Error
+			}
 			check.errorf(x, InvalidAssert, invalidOp+"%s is not an interface", x)
 			goto Error
 		}

@@ -1,0 +1,33 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package p
+
+type loop /* ERROR "invalid recursive type" */ const loop
+
+func assertLoop(v loop) {
+	_ = v.(int)
+}
+
+func switchLoop(v loop) string {
+	switch v.(type) {
+	case int:
+		return "int"
+	default:
+		return "other"
+	}
+}
+
+func exprLoop(v loop) string {
+	return switch v.(type) {
+	case int => "int"
+	default => "other"
+	}
+}
+
+func assertAfter(v loopAfter) {
+	_ = v.(int)
+}
+
+type loopAfter /* ERROR "invalid recursive type" */ const loopAfter

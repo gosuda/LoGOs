@@ -1,0 +1,144 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package db
+
+import (
+	"comptime"
+	"context"
+	"database/sql"
+	"fmt"
+)
+
+// Querier is the read and write surface the twin scans through. *sql.DB
+// and *sql.Tx both satisfy it without adaptation.
+type Querier interface {
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}
+
+// Query runs the query and scans every row into a T. A struct T takes
+// one column per field in declaration order with nested structs
+// flattened in place; any other T takes exactly one column. Column
+// names are checked against the field plan before the first row is
+// read, so a mismatch fails even when the query returns no rows. The
+// destination vector is bound once and reused for every row; each row
+// is copied out before the next scan overwrites it.
+func Query[T any](ctx context.Context, q Querier, query string, args ...any) ([]T, error) {
+	rows := q.QueryContext(ctx, query, args...)?
+	defer rows.Close()?
+	cols := rows.Columns()?
+	plan := ScanPlan{Type: TypeName[T]()}
+	var row T
+	const if comptime.IsStruct[T]() {
+		if ClaimTop(&row) {
+			plan.Count = 1
+		} else {
+			PlanFields[T](&row, plan.Type, &plan)?
+			plan.Count = len(plan.Names)
+		}
+	} else {
+		var scratch []any
+		ScanLeaf[T](&row, plan.Type, &scratch)?
+		plan.Count = 1
+	}
+	CheckScan(cols, plan)?
+	var dests []any
+	const if comptime.IsStruct[T]() {
+		if !ScanClaimed(&row, plan.Type, &dests) {
+			ScanFields[T](&row, plan.Type, &dests)?
+		}
+	} else {
+		ScanLeaf[T](&row, plan.Type, &dests)?
+	}
+	var out []T
+	var zero T
+	for rows.Next() {
+		// Zero the row each iteration: a Scanner field keeps buffers
+		// bound in earlier dests, so resetting it keeps every
+		// appended row independent of the next scan.
+		row = zero
+		if err := rows.Scan(dests...); err != nil {
+			return nil, fmt.Errorf("db: scan %s: %w", plan.Type, err)
+		}
+		out = append(out, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("db: scan %s: %w", plan.Type, err)
+	}
+	if rows.NextResultSet() {
+		return nil, fmt.Errorf("db: %s: query returned multiple result sets", plan.Type)
+	}
+	// A failed advance records its error on rows, so re-check: an error
+	// here is not an exhausted first result set.
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("db: scan %s: %w", plan.Type, err)
+	}
+	return out, nil
+}
+
+// One runs the query and scans the single row into a T. It returns an
+// absent option when the query returns no rows and an error naming the
+// type when it returns more than one.
+func One[T any](ctx context.Context, q Querier, query string, args ...any) (found T?, err error) {
+	rows := q.QueryContext(ctx, query, args...)?
+	if rows == nil {
+		return nil, fmt.Errorf("db: query returned no rows handle")
+	}
+	defer rows.Close()?
+	cols := rows.Columns()?
+	plan := ScanPlan{Type: TypeName[T]()}
+	var probe T
+	const if comptime.IsStruct[T]() {
+		if ClaimTop(&probe) {
+			plan.Count = 1
+		} else {
+			PlanFields[T](&probe, plan.Type, &plan)?
+			plan.Count = len(plan.Names)
+		}
+	} else {
+		var scratch []any
+		ScanLeaf[T](&probe, plan.Type, &scratch)?
+		plan.Count = 1
+	}
+	CheckScan(cols, plan)?
+	var out T?
+	seen := false
+	for rows.Next() {
+		if seen {
+			return nil, fmt.Errorf("db: %s: query returned more than one row", plan.Type)
+		}
+		var row T
+		var dests []any
+		const if comptime.IsStruct[T]() {
+		if !ScanClaimed(&row, plan.Type, &dests) {
+			ScanFields[T](&row, plan.Type, &dests)?
+		}
+		} else {
+			ScanLeaf[T](&row, plan.Type, &dests)?
+		}
+		if err := rows.Scan(dests...); err != nil {
+			return nil, fmt.Errorf("db: scan %s: %w", plan.Type, err)
+		}
+		out = row
+		seen = true
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("db: scan %s: %w", plan.Type, err)
+	}
+	if rows.NextResultSet() {
+		return nil, fmt.Errorf("db: %s: query returned multiple result sets", plan.Type)
+	}
+	// A failed advance records its error on rows, so re-check: an error
+	// here is not an exhausted first result set.
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("db: scan %s: %w", plan.Type, err)
+	}
+	return out, nil
+}
+
+// Exec runs the statement without scanning and returns its result.
+func Exec(ctx context.Context, q Querier, query string, args ...any) (sql.Result, error) {
+	return q.ExecContext(ctx, query, args...)
+}

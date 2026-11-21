@@ -1,0 +1,213 @@
+// run
+package main
+import (
+	"comptime"
+	"fmt"
+	"reflect"
+)
+
+type Case = int
+
+func ShadowCase[T any]() string {
+	type Case = string
+	const switch T {
+	case Case:
+		_ = comptime.SizeOf[int]()
+		return "case"
+	}
+	return "other"
+}
+
+type Tag = int
+
+func ShadowTag[T any]() string {
+	type Tag = string
+	const switch Tag {
+	case string:
+		_ = comptime.SizeOf[int]()
+		return "tag"
+	}
+	return "other"
+}
+
+func ImportedDead[T any]() string {
+	const switch T {
+	case reflect.Type:
+		comptime.Error("not allowed")
+		return "iface"
+	case int:
+		_ = comptime.SizeOf[int]()
+		return "int"
+	}
+	return "other"
+}
+
+type Local int
+
+func ExactLocal[T any]() string {
+	type Local int
+	const switch Local {
+	case Local:
+		_ = comptime.SizeOf[int]()
+		return "exact"
+	case ~int:
+		comptime.Error("dead")
+		return "dead"
+	}
+	return "other"
+}
+
+type AliasBase = int
+type AliasTag = string
+
+func AliasScope[T any]() string {
+	type AliasBase = string
+	type AliasTag = AliasBase
+	const switch AliasTag {
+	case ~string:
+		_ = comptime.SizeOf[int]()
+		return "alias"
+	case ~int:
+		comptime.Error("dead alias")
+		return "alias-dead"
+	}
+	return "other"
+}
+
+func StructLocal[T any]() string {
+	type Elem int
+	type Alias = struct{ X Elem }
+	type Tag Alias
+	const switch Tag {
+	case Tag:
+		_ = comptime.SizeOf[int]()
+		return "structlocal"
+	}
+	return "other"
+}
+
+type SliceElem = int
+
+func SliceTag[T any]() string {
+	type SliceElem = string
+	type SliceTag = []SliceElem
+	const switch SliceTag {
+	case []SliceElem:
+		_ = comptime.SizeOf[int]()
+		return "slicetag"
+	case any:
+		comptime.Error("dead slice")
+		return "dead"
+	}
+	return "other"
+}
+
+type GroupBase = int
+
+func GroupAlias[T any]() string {
+	type GroupBase = float64
+	{
+		type (
+			GroupBase = string
+			GroupTag = GroupBase
+		)
+		const switch GroupTag {
+		case ~string:
+			_ = comptime.SizeOf[int]()
+			return "groupalias"
+		case ~float64:
+			comptime.Error("dead group")
+			return "dead"
+		}
+	}
+	return "other"
+}
+
+type MapElem = int
+
+func MapTag[T any]() string {
+	type MapElem = string
+	type MapTag = map[string]MapElem
+	const switch MapTag {
+	case map[string]MapElem:
+		_ = comptime.SizeOf[int]()
+		return "maptag"
+	case any:
+		comptime.Error("dead map")
+		return "dead"
+	}
+	return "other"
+}
+
+
+type MapMixElem = int
+
+func MapMix[T any]() string {
+	type MapMixElem = string
+	const switch T {
+	case map[int]MapMixElem:
+		_ = comptime.SizeOf[int]()
+		return "mapmix"
+	case any:
+		comptime.Error("dead mapmix")
+		return "dead"
+	}
+	return "other"
+}
+
+type FieldElem = int
+
+func FieldName[T any]() string {
+	type FieldElem = string
+	const switch T {
+	case struct{ FieldElem int }:
+		_ = comptime.SizeOf[int]()
+		return "fieldname"
+	case any:
+		comptime.Error("dead fieldname")
+		return "dead"
+	}
+	return "other"
+}
+
+
+func ArrLenLit[T any]() string {
+	type ArrElem = int
+	const switch T {
+	case [2]ArrElem:
+		return "arr"
+	case any:
+		comptime.Error("dead arr lit")
+		return "dead"
+	}
+	return "other"
+}
+
+func ArrLenName[T any]() string {
+	const N = 2
+	type ArrElem = int
+	const switch T {
+	case [N]ArrElem:
+		return "arr"
+	case any:
+		comptime.Error("dead arr name")
+		return "dead"
+	}
+	return "other"
+}
+
+func main() {
+	fmt.Println(ShadowCase[string]())
+	fmt.Println(ShadowTag[int]())
+	fmt.Println(ImportedDead[int]())
+	fmt.Println(ExactLocal[string]())
+	fmt.Println(AliasScope[int]())
+	fmt.Println(StructLocal[string]())
+	fmt.Println(SliceTag[int]())
+	fmt.Println(GroupAlias[int]())
+	fmt.Println(MapTag[int]())
+	fmt.Println(MapMix[map[int]string]())
+	fmt.Println(FieldName[struct{ FieldElem int }]())
+	fmt.Println(ArrLenLit[[2]int]())
+	fmt.Println(ArrLenName[[2]int]())
+}

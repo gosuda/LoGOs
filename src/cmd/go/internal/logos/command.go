@@ -9,6 +9,7 @@ import (
 
 	"cmd/go/internal/base"
 	"cmd/go/internal/cfg"
+	"cmd/go/internal/logos/conccmd"
 	"cmd/go/internal/logos/contextcmd"
 	"cmd/go/internal/logos/eject"
 	"cmd/go/internal/logos/lintcmd"
@@ -25,6 +26,7 @@ func ConfigureCommand(cmd *base.Command) {
 		rebrandUsageLine(sub)
 	}
 	contextcmd.Register(cmd)
+	conccmd.Register(cmd)
 	eject.Register(cmd)
 	lintcmd.Register(cmd)
 	lsp.Register(cmd)

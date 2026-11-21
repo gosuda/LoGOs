@@ -64,20 +64,14 @@ func Pairs(xs []int) iter.Seq2[int, int] {
 func Returned(xs []int) iter.Seq[int] {
 	yield xs[0]
 	if len(xs) > 1 {
-		return slices.Values(xs[1:]) // the value is discarded
+		return
 	}
 	yield seven()
 }
 
-func ReturnedLiteral(n int) iter.Seq[int] {
+func ReturnedBare(n int) iter.Seq[int] {
 	yield n
-	return func(yield func(int) bool) {
-		for i := range n {
-			if !yield(i) {
-				return
-			}
-		}
-	}
+	return
 }
 
 func main() {
@@ -92,9 +86,9 @@ func main() {
 	}
 	check("pair-keys", keys, []int{0, 2})
 	check("pair-values", vals, []int{4, 5})
-	check("return-with-values-ends", slices.Collect(Returned([]int{1, 2})), []int{1})
+	check("return-ends", slices.Collect(Returned([]int{1, 2})), []int{1})
 	check("return-not-reached", slices.Collect(Returned([]int{1})), []int{1, 7})
-	check("return-of-literal-ends", slices.Collect(ReturnedLiteral(3)), []int{3})
+	check("return-bare-ends", slices.Collect(ReturnedBare(3)), []int{3})
 	if failed {
 		os.Exit(1)
 	}
