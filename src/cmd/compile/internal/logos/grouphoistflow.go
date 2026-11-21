@@ -6,6 +6,7 @@ package logos
 
 import (
 	"go/token"
+	"slices"
 	"strconv"
 
 	"cmd/compile/internal/syntax"
@@ -152,7 +153,10 @@ func (h *groupHoist) send(s *syntax.SendStmt) span {
 	block := blockOf(pos, blockList)
 	preNative, preText := h.native[nMark:], h.text[tMark:]
 	h.native, h.text = h.native[:nMark], h.text[:tMark]
-	block.List = append(preNative, block.List...)
+	// Clone: append onto preNative may reuse h.native's spare capacity,
+	// and the later h.add(block) would then write the block into its own
+	// first statement and recurse forever in the syntax walk.
+	block.List = append(slices.Clone(preNative), block.List...)
 	selText := cat(gen("select { case "+chTmp+" <- "), valTxtA, gen(": default:\nselect { case "+chTmp+" <- "), valTxtB, gen(": "+fc.groupDoneText(h.top)+" }\n}"))
 	texts := append(preText, cat(gen(chTmp+" := "), chText))
 	if valDef != nil {
