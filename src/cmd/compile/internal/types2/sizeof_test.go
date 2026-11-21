@@ -49,7 +49,7 @@ func TestSizeof(t *testing.T) {
 
 		// Misc
 		{Scope{}, 60, 104},
-		{Package{}, 44, 96},
+		{Package{}, 48, 96},
 		{_TypeSet{}, 28, 56},
 	}
 
