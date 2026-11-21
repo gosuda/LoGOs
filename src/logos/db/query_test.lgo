@@ -7,6 +7,7 @@ package db_test
 import (
 	"database/sql"
 	"database/sql/driver"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -27,8 +28,9 @@ import (
 type fakeTable struct {
 	cols []string
 	rows [][]driver.Value
-	err  error
-	more *fakeTable?
+	err     error
+	more    *fakeTable?
+	moreErr error
 }
 
 type fakeDriver struct {
@@ -129,6 +131,9 @@ func (r *fakeRows) HasNextResultSet() bool {
 }
 
 func (r *fakeRows) NextResultSet() error {
+	if r.table.moreErr != nil {
+		return r.table.moreErr
+	}
 	if r.table.more == nil {
 		return io.EOF
 	}
@@ -147,6 +152,15 @@ func openTwinFake(t *testing.T, name string, cols []string, rows [][]driver.Valu
 		sql.Register("twinfake", twinFake)
 	})
 	twinFake.tables[name] = &fakeTable{cols: cols, rows: rows}
+	return openFakeDB(t, name)
+}
+
+func openTwinFakeAdvanceErr(t *testing.T, name string, cols []string, rows [][]driver.Value, advance error) *sql.DB {
+	t.Helper()
+	twinFakeOnce.Do(func() {
+		sql.Register("twinfake", twinFake)
+	})
+	twinFake.tables[name] = &fakeTable{cols: cols, rows: rows, more: &fakeTable{}, moreErr: advance}
 	return openFakeDB(t, name)
 }
 
@@ -274,6 +288,21 @@ func TestOneRejectsMismatchedColumnsWithoutRows(t *testing.T) {
 type strictRow struct {
 	ID int64  `col:"id"`
 	S  string `col:"s"`
+}
+
+func TestQueryReturnsResultSetAdvanceError(t *testing.T) {
+	// A driver error on NextResultSet is recorded on the rows; the
+	// scan must surface it instead of returning the first set's data.
+	advance := errors.New("driver: advance failed")
+	db := openTwinFakeAdvanceErr(t, "advance_err", []string{"a", "b"}, [][]driver.Value{{"x", "y"}}, advance)
+	_, gotErr := twindb.Query[pairRow](t.Context(), db, "SELECT a, b FROM advance_err")
+	if !errors.Is(gotErr, advance) {
+		t.Fatalf("Query error = %v, want wrapped %v", gotErr, advance)
+	}
+	_, oneErr := twindb.One[pairRow](t.Context(), db, "SELECT a, b FROM advance_err")
+	if !errors.Is(oneErr, advance) {
+		t.Fatalf("One error = %v, want wrapped %v", oneErr, advance)
+	}
 }
 
 func TestQueryRejectsNullInNonOptional(t *testing.T) {
