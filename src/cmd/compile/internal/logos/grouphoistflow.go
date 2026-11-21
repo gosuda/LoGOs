@@ -103,38 +103,62 @@ func (h *groupHoist) send(s *syntax.SendStmt) span {
 	// declaration could shadow.
 	chText, valText := fl.textOf(chSpan), fl.textOf(valSpan)
 	chTmp, valTmp := fc.groupTempName("c"), fc.groupTempName("v")
-	arm := func() *syntax.CommClause {
+	// A leaf value (a name, nil, or a literal) needs no snapshot: the
+	// send arms can spell it directly, which also keeps the channel's
+	// element typing for `ch <- nil` and `ch <- 1` that `v :=` loses.
+	// Any other expression is snapshotted once and the arms share the
+	// temporary.
+	var valArmA, valArmB syntax.Expr
+	var valTxtA, valTxtB otext
+	var valDef syntax.Stmt
+	switch v := syntax.Unparen(s.Value).(type) {
+	case *syntax.Name:
+		valArmA, valArmB = nameOf(pos, v.Value), nameOf(pos, v.Value)
+		valTxtA, valTxtB = valText, valText
+	case *syntax.BasicLit:
+		valArmA = at(&syntax.BasicLit{Value: v.Value, Kind: v.Kind}, pos)
+		valArmB = at(&syntax.BasicLit{Value: v.Value, Kind: v.Kind}, pos)
+		valTxtA, valTxtB = valText, valText
+	default:
+		valArmA, valArmB = nameOf(pos, valTmp), nameOf(pos, valTmp)
+		valTxtA, valTxtB = gen(valTmp), gen(valTmp)
+		valDef = defineOf(pos, []syntax.Expr{nameOf(pos, valTmp)}, []syntax.Expr{s.Value})
+	}
+	armVal := func(valE syntax.Expr) *syntax.CommClause {
 		return at(&syntax.CommClause{Comm: at(&syntax.SendStmt{
 			Chan:  nameOf(pos, chTmp),
-			Value: nameOf(pos, valTmp),
+			Value: valE,
 		}, pos)}, pos)
 	}
 	slow := at(&syntax.SelectStmt{
 		Body: []*syntax.CommClause{
-			arm(),
+			armVal(valArmB),
 			fc.groupDoneClause(pos, h.top),
 		},
 	}, pos)
 	ready := at(&syntax.SelectStmt{
 		Body: []*syntax.CommClause{
-			arm(),
+			armVal(valArmA),
 			at(&syntax.CommClause{Body: []syntax.Stmt{slow}}, pos),
 		},
 	}, pos)
-	block := blockOf(pos, []syntax.Stmt{
+	blockList := []syntax.Stmt{
 		defineOf(pos, []syntax.Expr{nameOf(pos, chTmp)}, []syntax.Expr{s.Chan}),
-		defineOf(pos, []syntax.Expr{nameOf(pos, valTmp)}, []syntax.Expr{s.Value}),
-		ready,
-	})
+	}
+	if valDef != nil {
+		blockList = append(blockList, valDef)
+	}
+	blockList = append(blockList, ready)
+	block := blockOf(pos, blockList)
 	preNative, preText := h.native[nMark:], h.text[tMark:]
 	h.native, h.text = h.native[:nMark], h.text[:tMark]
 	block.List = append(preNative, block.List...)
-	selText := cat(gen("select { case " + chTmp + " <- " + valTmp + ": default:\nselect { case " + chTmp + " <- " + valTmp + ": " + fc.groupDoneText(h.top) + " }\n}"))
-	texts := append(preText,
-		cat(gen(chTmp+" := "), chText),
-		cat(gen(valTmp+" := "), valText),
-		selText,
-	)
+	selText := cat(gen("select { case "+chTmp+" <- "), valTxtA, gen(": default:\nselect { case "+chTmp+" <- "), valTxtB, gen(": "+fc.groupDoneText(h.top)+" }\n}"))
+	texts := append(preText, cat(gen(chTmp+" := "), chText))
+	if valDef != nil {
+		texts = append(texts, cat(gen(valTmp+" := "), valText))
+	}
+	texts = append(texts, selText)
 	h.add([]syntax.Stmt{block}, cat(gen("{\n"), joinO(texts, "\n"), gen("\n}")))
 	return span{start: chSpan.start, end: valSpan.end}
 }
