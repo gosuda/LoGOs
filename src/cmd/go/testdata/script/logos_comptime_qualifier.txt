@@ -1,0 +1,158 @@
+env GOTOOLCHAIN=local
+
+cd w
+logos build ./...
+logos test ./probe/
+logos run ./main
+stdout '^direct leaf:direct$'
+stdout '^fwd leaf:x$'
+logos run ./thin
+stdout '^thin leaf:x$'
+logos run ./shadow
+stdout '^shadow: 2$'
+logos eject -o out
+exists out/main/main.go
+exists out/thin/thin.go
+! grep '_logos_ctimp' out/main/main.go
+! grep '_logos_ctpkg' out/main/main.go
+! grep '_logos_tparam' out/main/main.go
+! grep '_logos_ctimp' out/thin/thin.go
+
+cd out
+go run ./main
+stdout '^direct leaf:direct$'
+stdout '^fwd leaf:x$'
+go run ./thin
+stdout '^thin leaf:x$'
+go test -count=1 ./probe/
+# SPEC 0.3: ejected output builds with upstream go1.27.2 from $UPROOT1272.
+exists $UPROOT1272/bin/go
+exec env -u GOROOT $UPROOT1272/bin/go build ./...
+cd ..
+
+-- w/go.mod --
+module example.com/qualtest
+
+go 1.27
+
+-- w/probe/probe.lgo --
+package probe
+
+import "comptime"
+
+func Leaf() int {
+	return 1
+}
+
+func Plan[F any]() int {
+	var probe F
+	_ = probe
+	const if comptime.IsStruct[F]() {
+		return Leaf()
+	} else {
+		return Leaf()
+	}
+}
+
+-- w/probe/plan_x_test.lgo --
+package probe_test
+
+import (
+	"testing"
+
+	"example.com/qualtest/probe"
+)
+
+func TestDirectPlan(t *testing.T) {
+	if got := probe.Plan[string](); got != 1 {
+		t.Fatalf("Plan = %d, want 1", got)
+	}
+}
+
+-- w/leaf/leaf.lgo --
+package leaf
+
+func Who(v string) string {
+	return "leaf:" + v
+}
+
+-- w/mid/mid.lgo --
+package mid
+
+import (
+	"comptime"
+
+	leafalias "example.com/qualtest/leaf"
+)
+
+type Codec struct {
+	Tag string
+}
+
+func (c Codec) Who(v string) string {
+	return "codec:" + v
+}
+
+func Forward[F any](leaf Codec) string {
+	const if comptime.IsStruct[F]() {
+		return leafalias.Who("x")
+	} else {
+		return leafalias.Who("y")
+	}
+}
+
+-- w/main/main.lgo --
+package main
+
+import (
+	"fmt"
+
+	"example.com/qualtest/leaf"
+	"example.com/qualtest/mid"
+)
+
+type probe struct {
+	Name string
+}
+
+func main() {
+	fmt.Println("direct", leaf.Who("direct"))
+	fmt.Println("fwd", mid.Forward[probe](mid.Codec{}))
+}
+
+-- w/thin/thin.lgo --
+package main
+
+import (
+	"fmt"
+
+	"example.com/qualtest/mid"
+)
+
+type probe struct {
+	Name string
+}
+
+func main() {
+	fmt.Println("thin", mid.Forward[probe](mid.Codec{}))
+}
+
+-- w/shadow/shadow.lgo --
+package main
+
+import (
+	"fmt"
+
+	"example.com/qualtest/probe"
+)
+
+// The erased probe.Plan call was the import's only package use. The local
+// probe shadows the alias, so the scan must not keep the import alive.
+func useLocal() int {
+	probe := struct{ N int }{N: 1}
+	return probe.N
+}
+
+func main() {
+	fmt.Println("shadow:", useLocal()+probe.Plan[string]())
+}

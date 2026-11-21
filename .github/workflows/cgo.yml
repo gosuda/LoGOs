@@ -37,7 +37,7 @@ jobs:
   focused:
     name: cgo focused and probes
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
-    runs-on: ubuntu-26.04
+    runs-on: depot-ubuntu-24.04
     timeout-minutes: 120
     steps:
 
@@ -192,7 +192,7 @@ jobs:
       group: logos-heavy-ci
       queue: max
     needs: focused
-    runs-on: ubuntu-26.04
+    runs-on: depot-ubuntu-24.04
     timeout-minutes: 120
     steps:
 

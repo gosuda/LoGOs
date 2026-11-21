@@ -1,0 +1,69 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+# A const-switch interface case whose select receive target holds an option
+# fallback (`??`) inside a call argument: wrapSelectors drains the fallback's
+# lowering into the cast splice, and the clause rewrite must fold the frozen
+# operands into that composed cast text instead of re-reading the raw gaps.
+# Ejected Go must parse and behave like the native build (issue thread B4).
+
+cp $GOROOT/test/logos/run/constswitch_select_opt.lgo a/main.lgo
+cp $GOROOT/test/logos/run/constswitch_select_opt_noindex.lgo b/main.lgo
+cp $GOROOT/test/logos/run/constswitch_select_opt_noopt.lgo c/main.lgo
+
+cd a
+logos run .
+cmp stdout $GOROOT/test/logos/run/constswitch_select_opt.out
+logos eject -o out
+exists out/main.go
+! exists out/main.lgo
+! grep -n '??' out/main.go
+cd out
+go run .
+cmp stdout $GOROOT/test/logos/run/constswitch_select_opt.out
+# SPEC 0.3: ejected output builds with upstream go1.27.2 from $UPROOT1272.
+exists $UPROOT1272/bin/go
+exec env -u GOROOT $UPROOT1272/bin/go build ./...
+exec $GOROOT/bin/gofmt -l .
+! stdout .
+cd ../..
+
+cd b
+logos run .
+cmp stdout $GOROOT/test/logos/run/constswitch_select_opt_noindex.out
+logos eject -o out
+exists out/main.go
+! grep -n '??' out/main.go
+cd out
+go run .
+cmp stdout $GOROOT/test/logos/run/constswitch_select_opt_noindex.out
+exec env -u GOROOT $UPROOT1272/bin/go build ./...
+exec $GOROOT/bin/gofmt -l .
+! stdout .
+cd ../..
+
+cd c
+logos run .
+cmp stdout $GOROOT/test/logos/run/constswitch_select_opt_noopt.out
+logos eject -o out
+exists out/main.go
+cd out
+go run .
+cmp stdout $GOROOT/test/logos/run/constswitch_select_opt_noopt.out
+exec env -u GOROOT $UPROOT1272/bin/go build ./...
+exec $GOROOT/bin/gofmt -l .
+! stdout .
+cd ../..
+
+-- a/go.mod --
+module example.com/cswselectopta
+
+go 1.27
+-- b/go.mod --
+module example.com/cswselectoptb
+
+go 1.27
+-- c/go.mod --
+module example.com/cswselectoptc
+
+go 1.27

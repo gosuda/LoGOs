@@ -10,3 +10,6 @@ ok shadowed-type-send
 ok goto-skips-send
 ok goto-send-not-evaluated
 ok goto-record-ran
+ok send-nil
+ok send-named-elem
+ok send-untyped-const

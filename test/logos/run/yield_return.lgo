@@ -21,7 +21,7 @@ func check(name string, cond bool, got, want any) {
 
 func Values() iter.Seq[int] {
 	yield 1
-	return 99
+	return
 	yield 2
 }
 

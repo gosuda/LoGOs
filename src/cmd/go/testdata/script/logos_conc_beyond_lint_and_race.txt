@@ -1,0 +1,435 @@
+[GOOS:windows] skip 'logos conc needs named pipes'
+[GOOS:plan9] skip 'logos conc needs named pipes'
+
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+cd proof
+
+# Each package below passes the linter and the race detector and fails
+# only under the monitor. No memory is raced, so every fault is ordering
+# or timing only. Every wait is bounded; the script ends in seconds.
+
+# --- conc::lock_order_inversion ---
+# Two Locked values taken in opposite orders by two code paths that run
+# one after the other in the test: no deadlock happened in this run.
+logos lint ./order
+! stderr .
+[race] [cgo] env CGO_ENABLED=1
+[race] [cgo] logos test -race -count=1 ./order
+[race] [cgo] stdout '^ok '
+! logos conc test -count=1 ./order
+stdout '^ok '
+stderr '\[conc::lock_order_inversion\] two goroutines take the same two Locked values in opposite orders; when both run at once, each waits for the other'
+
+# --- conc::lock_held_long ---
+# A slow call inside a WithLock callback while another goroutine waits.
+logos lint ./hold
+! stderr .
+[race] [cgo] logos test -race -count=1 ./hold
+[race] [cgo] stdout '^ok '
+! logos conc test -hold=50ms -count=1 ./hold
+stdout '^ok '
+stderr '\[conc::lock_held_long\] a goroutine held a Locked value for .* while another goroutine waited for it; the limit is 50ms'
+
+# --- conc::group_child_stalled ---
+# A child that ignores its context still sleeps after the group fails.
+logos lint ./stall
+! stderr .
+[race] [cgo] logos test -race -count=1 ./stall
+[race] [cgo] stdout '^ok '
+! logos conc test -stall=200ms -count=1 ./stall
+stdout '^ok '
+stderr '\[conc::group_child_stalled\] a group child did not return within 200ms after its group was cancelled; the group cannot join before the child returns'
+
+# --- conc::group_unbounded ---
+# A group without a limit runs 10000 children at one time.
+logos lint ./growth
+! stderr .
+[race] [cgo] logos test -race -count=1 ./growth
+[race] [cgo] stdout '^ok '
+! logos conc test -count=1 ./growth
+stdout '^ok '
+stderr '\[conc::group_unbounded\] a group without a limit runs 10000 children at one time; the count follows the work the program gives the group'
+
+# --- conc::goroutine_leak ---
+# A goroutine of a Go helper package waits on a channel nothing holds,
+# as in logos_conc_leak.txt. The LoGOs caller only starts it and sleeps.
+logos lint ./leak
+! stderr .
+[race] [cgo] logos test -race -count=1 ./leak
+[race] [cgo] stdout '^ok '
+! logos conc test -count=1 ./leak
+stdout '^ok '
+stderr '\[conc::goroutine_leak\] a goroutine waits, and no goroutine that can run reaches what it waits for; it never ends'
+
+# --- schedule fault under -shake ---
+# One thread only: the fault is the order the spawns give, and stealing
+# the second child onto another thread would hide it.
+env GOMAXPROCS=1
+
+logos lint ./sched
+! stderr .
+# Under -race the runnext slot is randomized and the spawn order does
+# not hold, so this step checks only that both children ran with no race.
+[race] [cgo] logos test -race -count=1 -run TestBothRan ./sched
+[race] [cgo] stdout '^ok '
+
+# Without a shake the spawn order holds and the monitor stays silent.
+logos conc test -count=1 ./sched
+stdout '^ok '
+! stderr .
+
+# With seed 1 the lock taker yields and the direct child sends first,
+# so the test fails. The command prints the seed that replays it.
+! logos conc test -shake=1 -count=1 ./sched
+stdout 'order = '
+stderr 'shake seed 1'
+
+-- proof/go.mod --
+module example.com/proof
+
+go 1.27
+
+require example.com/proofblocks v0.0.0
+
+replace example.com/proofblocks => ../proofblocks
+-- proofblocks/go.mod --
+module example.com/proofblocks
+
+go 1.27
+-- proofblocks/blocks/blocks.go --
+package blocks
+
+func Subscribe() {
+	updates := make(chan int)
+	go func() {
+		<-updates
+	}()
+}
+-- proof/order/main.lgo --
+package main
+
+import (
+	"context"
+	"fmt"
+	"os"
+
+	"logos/sync"
+)
+
+type account struct{ balance int }
+
+var (
+	checking sync.Locked[account]
+	savings  sync.Locked[account]
+)
+
+func save(amount int) error {
+	checking.WithLock(from => {
+		savings.WithLock(to => {
+			from.balance -= amount
+			to.balance += amount
+		})
+	})
+	return nil
+}
+
+func spend(amount int) error {
+	savings.WithLock(from => {
+		checking.WithLock(to => {
+			from.balance -= amount
+			to.balance += amount
+		})
+	})
+	return nil
+}
+
+func transfers(ctx context.Context) error {
+	go group (ctx) {
+		go save(10)
+	}
+	go group (ctx) {
+		go spend(4)
+	}
+	return nil
+}
+
+func main() {
+	if err := transfers(context.Background()); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
+	fmt.Println("transfers done")
+}
+-- proof/order/main_test.lgo --
+package main
+
+import "testing"
+
+func TestTransfers(t *testing.T) {
+	if err := transfers(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+}
+-- proof/hold/main.lgo --
+package main
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"logos/sync"
+)
+
+type account struct{ balance int }
+
+var ledger sync.Locked[account]
+
+func audit() error {
+	ledger.WithLock(a => {
+		time.Sleep(400 * time.Millisecond)
+		a.balance += 10
+	})
+	return nil
+}
+
+func pay() error {
+	time.Sleep(150 * time.Millisecond)
+	ledger.WithLock(a => {
+		a.balance--
+	})
+	return nil
+}
+
+func settle(ctx context.Context) (int, error) {
+	go group (ctx) {
+		go audit()
+		go pay()
+	}
+	balance := 0
+	ledger.WithLock(a => {
+		balance = a.balance
+	})
+	return balance, nil
+}
+
+func main() {
+	balance, err := settle(context.Background())
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	fmt.Println("balance", balance)
+}
+-- proof/hold/main_test.lgo --
+package main
+
+import "testing"
+
+func TestSettle(t *testing.T) {
+	balance, err := settle(t.Context())
+	if err != nil {
+		t.Fatal(err)
+		return
+	}
+	if balance != 9 {
+		t.Fatalf("balance = %d, want 9", balance)
+	}
+}
+-- proof/stall/main.lgo --
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"time"
+)
+
+func fail() error {
+	return errors.New("first job failed")
+}
+
+func slow() error {
+	time.Sleep(1500 * time.Millisecond)
+	return nil
+}
+
+func jobs(ctx context.Context) error {
+	go group (ctx) {
+		go fail()
+		go slow()
+	}
+	return nil
+}
+
+func main() {
+	fmt.Println("jobs done:", jobs(context.Background()))
+}
+-- proof/stall/main_test.lgo --
+package main
+
+import "testing"
+
+func TestJobs(t *testing.T) {
+	if err := jobs(t.Context()); err == nil {
+		t.Fatal("the first job did not fail the group")
+	}
+}
+-- proof/growth/main.lgo --
+package main
+
+import (
+	"context"
+	"fmt"
+	"sync"
+	"time"
+)
+
+func herd(ctx context.Context) error {
+	var started sync.WaitGroup
+	go group (ctx) {
+		for range 10000 {
+			started.Add(1)
+			go {
+				started.Done()
+				time.Sleep(2 * time.Second)
+			}
+		}
+		started.Wait()
+	}
+	return nil
+}
+
+func main() {
+	if err := herd(context.Background()); err != nil {
+		fmt.Println(err)
+		return
+	}
+	fmt.Println("herd done")
+}
+-- proof/growth/main_test.lgo --
+package main
+
+import "testing"
+
+func TestHerd(t *testing.T) {
+	if err := herd(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+}
+-- proof/leak/main.lgo --
+package main
+
+import (
+	"fmt"
+	"time"
+
+	"example.com/proofblocks/blocks"
+)
+
+func serve() {
+	blocks.Subscribe()
+	time.Sleep(800 * time.Millisecond)
+}
+
+func main() {
+	serve()
+	fmt.Println("served")
+}
+-- proof/leak/main_test.lgo --
+package main
+
+import "testing"
+
+func TestServe(t *testing.T) {
+	serve()
+}
+-- proof/sched/main.lgo --
+package main
+
+import (
+	"context"
+	"fmt"
+	"os"
+
+	"logos/sync"
+)
+
+type box struct{ n int }
+
+var gate sync.Locked[box]
+
+func locked(first chan string) error {
+	gate.WithLock(b => {
+		b.n++
+	})
+	gate.WithLock(b => {
+		b.n++
+	})
+	select {
+	case first <- "locked":
+	default:
+	}
+	return nil
+}
+
+func direct(first chan string) error {
+	select {
+	case first <- "direct":
+	default:
+	}
+	return nil
+}
+
+func order(ctx context.Context) (string, error) {
+	first := make(chan string, 2)
+	go group (ctx) {
+		go direct(first)
+		go locked(first)
+	}
+	a := <-first
+	b := <-first
+	return a + "," + b, nil
+}
+
+func main() {
+	got, err := order(context.Background())
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+		return
+	}
+	fmt.Println(got)
+	if got != "locked,direct" {
+		os.Exit(2)
+	}
+}
+-- proof/sched/main_test.lgo --
+package main
+
+import "testing"
+
+func TestOrder(t *testing.T) {
+	got, err := order(t.Context())
+	if err != nil {
+		t.Fatal(err)
+		return
+	}
+	if got != "locked,direct" {
+		t.Fatalf("order = %q, want %q", got, "locked,direct")
+	}
+}
+
+func TestBothRan(t *testing.T) {
+	got, err := order(t.Context())
+	if err != nil {
+		t.Fatal(err)
+		return
+	}
+	if got != "locked,direct" && got != "direct,locked" {
+		t.Fatalf("order = %q, want both children to send", got)
+	}
+}

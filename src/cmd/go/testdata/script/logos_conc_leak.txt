@@ -1,0 +1,156 @@
+[GOOS:windows] skip 'logos conc needs named pipes'
+[GOOS:plan9] skip 'logos conc needs named pipes'
+
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+cd app
+
+# The linter reads .lgo files, and the race detector needs two accesses
+# to one variable. A goroutine of a Go package that waits on a channel
+# nothing else holds gives neither of them a fault.
+logos lint ./...
+! stderr .
+[race] [cgo] env CGO_ENABLED=1
+[race] [cgo] logos test -race -count=1 ./leaks
+[race] [cgo] stdout '^ok '
+
+# The monitor names the statement where the goroutine waits and the
+# function that the goroutine runs, while the program still runs.
+! logos conc run ./leaks
+stdout '^served$'
+stderr '^.*legacy[/\\]feed\.go:6: \[conc::goroutine_leak\] a goroutine waits, and no goroutine that can run reaches what it waits for; it never ends$'
+stderr '^\t.*feed\.go:6: the goroutine waits here, in runtime\.chanrecv1$'
+stderr '^\t.*feed\.go:5: the goroutine runs the function that starts here$'
+stderr '^\tfix: '
+stderr -count=1 'goroutine_leak'
+
+! logos conc test -count=1 ./leaks
+stdout '^ok '
+stderr '\[conc::goroutine_leak\]'
+
+# A goroutine that the program can still wake is not a leak.
+logos conc run ./stops
+stdout '^served$'
+! stderr .
+
+# The monitor does not keep a deadlocked program alive: the runtime ends
+# it with its own error, as in a plain build.
+! logos conc run ./stuck
+stderr 'all goroutines are asleep - deadlock!'
+! stderr 'conc::'
+! stdout .
+
+# The test binary of a Go module links the monitor too.
+cd ../feeds
+! logos conc test -count=1 ./legacy
+stdout '^ok '
+stderr '^.*legacy[/\\]feed\.go:6: \[conc::goroutine_leak\] '
+
+-- app/go.mod --
+module example.com/app
+
+go 1.27
+
+require example.com/feeds v0.0.0
+
+replace example.com/feeds => ../feeds
+-- feeds/go.mod --
+module example.com/feeds
+
+go 1.27
+-- feeds/legacy/feed.go --
+package legacy
+
+func Subscribe() {
+	updates := make(chan int)
+	go func() {
+		<-updates
+	}()
+}
+-- feeds/legacy/feed_test.go --
+package legacy
+
+import (
+	"testing"
+	"time"
+)
+
+func TestSubscribe(t *testing.T) {
+	Subscribe()
+	time.Sleep(300 * time.Millisecond)
+}
+-- feeds/tidy/feed.go --
+package tidy
+
+func Subscribe() (stop func()) {
+	updates := make(chan int)
+	go func() {
+		<-updates
+	}()
+	return func() { close(updates) }
+}
+-- feeds/gate/gate.go --
+package gate
+
+var open = make(chan int)
+
+func Pass() {
+	<-open
+}
+-- app/leaks/main.lgo --
+package main
+
+import (
+	"fmt"
+	"time"
+
+	"example.com/feeds/legacy"
+)
+
+func serve() {
+	legacy.Subscribe()
+	time.Sleep(800 * time.Millisecond)
+}
+
+func main() {
+	serve()
+	fmt.Println("served")
+}
+-- app/leaks/main_test.lgo --
+package main
+
+import "testing"
+
+func TestServe(t *testing.T) {
+	serve()
+}
+-- app/stops/main.lgo --
+package main
+
+import (
+	"fmt"
+	"time"
+
+	"example.com/feeds/tidy"
+)
+
+func main() {
+	stop := tidy.Subscribe()
+	time.Sleep(800 * time.Millisecond)
+	stop()
+	fmt.Println("served")
+}
+-- app/stuck/main.lgo --
+package main
+
+import (
+	"fmt"
+
+	"example.com/feeds/gate"
+)
+
+func main() {
+	gate.Pass()
+	fmt.Println("passed")
+}

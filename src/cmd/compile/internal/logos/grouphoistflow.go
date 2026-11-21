@@ -88,6 +88,26 @@ func (fl *fileLower) groupHeaderSemis(from, to int) []span {
 	return out
 }
 
+// pureSendValue reports whether e evaluates without side effects or a
+// second read changing the result, so each send arm may spell it: a
+// call, receive, or interpolation can run twice (once per arm), but a
+// name, literal, selector, or arithmetic on them is stable.
+func pureSendValue(e syntax.Expr) bool {
+	pure := true
+	syntax.Inspect(e, func(n syntax.Node) bool {
+		switch n := n.(type) {
+		case *syntax.CallExpr, *syntax.InterpExpr:
+			pure = false
+		case *syntax.Operation:
+			if n.Op == syntax.Recv {
+				pure = false
+			}
+		}
+		return pure
+	})
+	return pure
+}
+
 func (h *groupHoist) send(s *syntax.SendStmt) span {
 	fc := h.fc
 	fl := fc.fl
@@ -121,10 +141,11 @@ func (h *groupHoist) send(s *syntax.SendStmt) span {
 		valArmB = at(&syntax.BasicLit{Value: v.Value, Kind: v.Kind}, pos)
 		valTxtA, valTxtB = valText, valText
 	default:
-		// An untyped constant expression (-1, 1 << 3, math.Pi) is pure
-		// and needs the channel element's contextual typing, which a
-		// `:=` snapshot would replace with the constant's default type.
-		if tv, ok := fl.pkg.info.Types[s.Value]; ok && tv.IsUntyped() {
+		// A pure value is spelled in each send arm: only one arm
+		// evaluates it, and spelling it keeps the channel element's
+		// contextual typing for untyped constants (-1, 1 << 3,
+		// math.Pi) that a `:=` snapshot would give the default type.
+		if pureSendValue(s.Value) {
 			if a, okA := parseExprAt(valText.s, pos); okA {
 				if b, okB := parseExprAt(valText.s, pos); okB {
 					valArmA, valArmB = a, b
