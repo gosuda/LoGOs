@@ -1,0 +1,100 @@
+// run
+
+package main
+
+import (
+	"fmt"
+	"iter"
+	"os"
+)
+
+var failed bool
+
+func check(name string, cond bool, got, want any) {
+	if !cond {
+		failed = true
+		fmt.Println("FAIL", name+":", "got", got, "want", want)
+		return
+	}
+	fmt.Println("ok", name)
+}
+
+var seqOf func(int) iter.Seq[int] = x => {
+	yield x
+	yield x + 1
+	return
+}
+
+var pairOf func(int) iter.Seq2[int, int] = x => {
+	yield x, x * 2
+	return
+}
+
+var early func(int) iter.Seq[int] = x => {
+	if x > 0 {
+		yield x
+	}
+	return
+}
+
+func held() func(int) iter.Seq[int] {
+	return x => {
+		yield x
+		return
+	}
+}
+
+var calls []int
+
+var lazy func(int) iter.Seq[int] = x => {
+	calls = append(calls, x)
+	yield x
+	calls = append(calls, -x)
+	yield x * 10
+	return
+}
+
+func main() {
+	var got []int
+	for v := range seqOf(7) {
+		got = append(got, v)
+	}
+	check("block lambda seq", fmt.Sprint(got) == "[7 8]", fmt.Sprint(got), "[7 8]")
+
+	var pairs []string
+	for k, v := range pairOf(3) {
+		pairs = append(pairs, fmt.Sprint(k, v))
+	}
+	check("block lambda seq2", fmt.Sprint(pairs) == "[3 6]", fmt.Sprint(pairs), "[3 6]")
+
+	got = got[:0]
+	for v := range early(4) {
+		got = append(got, v)
+	}
+	for v := range early(0) {
+		got = append(got, v)
+	}
+	check("early return", fmt.Sprint(got) == "[4]", fmt.Sprint(got), "[4]")
+
+	got = got[:0]
+	for v := range held()(9) {
+		got = append(got, v)
+	}
+	check("returned lambda", fmt.Sprint(got) == "[9]", fmt.Sprint(got), "[9]")
+
+	seq := lazy(5)
+	check("generator body is lazy", len(calls) == 0, fmt.Sprint(calls), "[]")
+	n := 0
+	for v := range seq {
+		_ = v
+		n++
+		if n == 1 {
+			break
+		}
+	}
+	check("early break stops body", fmt.Sprint(calls) == "[5]", fmt.Sprint(calls), "[5]")
+
+	if failed {
+		os.Exit(1)
+	}
+}

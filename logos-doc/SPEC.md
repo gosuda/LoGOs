@@ -394,7 +394,7 @@ A generator MUST supply one value per `yield` for `iter.Seq[T]` and two values p
 Each yielded value MUST be assignable to its element type [T-104.8].
 A generator body MUST NOT run until the sequence the function returns is iterated, MUST run from its first statement once for each iteration of that sequence, and MUST pass each `yield e` to the consumer; an early `break` in the consumer MUST end the body at that `yield` with no further statement of it running [T-104.8].
 A generator body MUST need no `return`: falling off the end ends the sequence [T-104.8].
-A `return` with values inside a generator MUST act as a bare `return`: the values are discarded [T-104.8].
+A `return` with values inside a generator MUST fail with `correctness::generator_return_value` [T-104.8].
 ```go
 func Count(n int) iter.Seq[int] {
 	for i := range n {

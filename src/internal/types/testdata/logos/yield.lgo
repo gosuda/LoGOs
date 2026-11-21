@@ -10,14 +10,14 @@ func seqOK(n int) iter.Seq[int] {
 	for i := range n {
 		yield i
 	}
-	return nil
+	return
 }
 
 func seq2OK(n int) iter.Seq2[int, string] {
 	for i := range n {
 		yield i, "s"
 	}
-	return nil
+	return
 }
 
 func yieldPlain() int {
@@ -41,27 +41,27 @@ func yieldTwoResults() (int, int) {
 
 func yieldWrongType() iter.Seq[int] {
 	yield "s" /* ERRORx "." */
-	return nil
+	return
 }
 
 func yieldSeq2Arity1() iter.Seq2[int, string] {
 	yield /* ERRORx "." */ 1
-	return nil
+	return
 }
 
 func yieldSeqArity2() iter.Seq[int] {
 	yield /* ERRORx "." */ 1, 2
-	return nil
+	return
 }
 
 func yieldSeq2Arity3() iter.Seq2[int, string] {
 	yield /* ERRORx "." */ 1, "s", 3
-	return nil
+	return
 }
 
 func yieldSeq2WrongSecond() iter.Seq2[int, string] {
 	yield 1, 2 /* ERRORx "." */
-	return nil
+	return
 }
 
 func yieldInClosure() iter.Seq[int] {
@@ -69,7 +69,7 @@ func yieldInClosure() iter.Seq[int] {
 		yield /* ERROR "yield_outside_generator" */ 1
 	}
 	_ = f
-	return nil
+	return
 }
 
 func yieldLast() iter.Seq[int] {
@@ -279,4 +279,57 @@ func outsideStringPair() int {
 func outsideParenBinaryPair(a, b int) int {
 	yield /* ERROR "yield_outside_generator" */ (a + b) * 2, -b
 	return 0
+}
+
+func genReturnValue(n int) iter.Seq[int] {
+	for i := range n {
+		yield i
+	}
+	return /* ERROR "generator_return_value" */ 7
+}
+
+func genReturnNil(n int) iter.Seq[int] {
+	for i := range n {
+		yield i
+	}
+	return /* ERROR "generator_return_value" */ nil
+}
+
+func genReturnClosure() iter.Seq2[string, error] {
+	return /* ERROR "generator_return_value" */ func(yield func(string, error) bool) {
+		for _, w := range []string{"a", "b", "c"} {
+			if !yield(w, nil) {
+				return
+			}
+		}
+	}
+}
+
+func genReturnAlias(n int) reservedItems {
+	for i := range n {
+		yield i
+	}
+	return /* ERROR "generator_return_value" */ 7
+}
+
+func genLambdaBlock() func(int) iter.Seq[int] {
+	return x => {
+		yield x
+		return
+	}
+}
+
+func genLambdaBlockValue() func(int) iter.Seq[int] {
+	return x => {
+		yield x
+		return /* ERROR "generator_return_value" */ 7
+	}
+}
+
+func genLambdaExpr() func(int) iter.Seq[int] {
+	return x => x // ERROR "generator_return_value"
+}
+
+func genLambdaExprNil() func(int) iter.Seq[int] {
+	return x => nil // ERROR "generator_return_value"
 }

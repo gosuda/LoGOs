@@ -178,7 +178,7 @@ Rules:
 - Lambdas need a typed function target, else `[correctness::lambda_needs_target]`; arity must match. Block bodies check against the target results. Closures capture like function literals. A lone `Name` without `=>` stays an operand; `(e)` without `=>` stays a `ParenExpr`.
 - Chains on slices: `filter map find any all sortBy first last get take drop sum count`. Consecutive `filter`/`map`/`take`/`drop` fuse into one loop; the receiver evaluates once and lambda parameters are const views (rewriting the parameter or the receiver reports `const_view_mutation`). `find`/`first`/`last`/`get` return `T?`; `take`/`drop`/`get` clamp (`take(-5)` is empty, `get(-1)` is none). `sortBy` is stable with `NaN` first, as `cmp.Compare` orders. Float `.sum()` uses fixed pairwise order. `?` in an expression lambda returns from the enclosing function; a `?` nested in a lambda body, in a `??` fallback, or in a `?.` call argument reports `[correctness::nested_try_capture]`; a `?` mid-block in a block lambda reports `misplaced_try`. When produced elements implement `io.Closer`, failures close the produced prefix in reverse order.
 - Leading-dot continuation: in `.lgo`, a newline followed by blanks and then `.` plus a letter or `_` inserts no semicolon. `x` newline `.5` still breaks; plain Go scanning is unchanged.
-- `yield e` is allowed only directly inside a function returning `iter.Seq[T]` (one value) or `iter.Seq2[K, V]` (two values), else `[correctness::yield_outside_generator]`; a closure inside the generator may not yield. Falling off the end finishes the sequence; a valued `return` acts as bare. Early `break` in the consumer stops the body.
+- `yield e` is allowed only directly inside a function returning `iter.Seq[T]` (one value) or `iter.Seq2[K, V]` (two values), else `[correctness::yield_outside_generator]`; a closure inside the generator may not yield. Falling off the end finishes the sequence; a valued `return` fails with `[correctness::generator_return_value]`. Early `break` in the consumer stops the body.
 - `scope defer f()` runs when control leaves the enclosing block: last in, first out; arguments evaluated at the statement; every exit (`return`, `break`, `continue`, labeled forms, `goto` out of the block, panic) runs it first; a loop body runs it each iteration. Lowering is an armed-flag guarding `defer` plus inline exit stanzas (not a wrapper closure, so plain `defer` tails keep firing at function exit); a `goto` past the statement leaves it disarmed.
 
 ## Syntax (M7)
@@ -263,6 +263,7 @@ Rules:
 | `correctness::lambda_needs_target` | Give the lambda a typed function target. |
 | `correctness::nested_try_capture` | Hoist the `?` out of the nested chain, `??` fallback, or `?.` argument. |
 | `correctness::yield_outside_generator` | Yield only directly inside an `iter.Seq`/`iter.Seq2` function. |
+| `correctness::generator_return_value` | Return without a value inside a generator; pass values with `yield`. |
 | `capabilities::unauthorized_unsafe` | Allowlist the dependency under `transitive_unsafe_allowlist`, or remove it. |
 | `capabilities::unauthorized_exec` | Allowlist the dependency under `transitive_exec_allowlist`, or remove it. |
 | `capabilities::unauthorized_reflect` | Allowlist the dependency under `reflect_allowlist`, or remove it. |
