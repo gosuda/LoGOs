@@ -127,6 +127,29 @@ func outer(parent context.Context) error {
 	}
 }
 
+func TestStalledReplacementIgnoresBracesInLiterals(t *testing.T) {
+	file := writeLGO(t, `package main
+
+import (
+	"context"
+	"fmt"
+)
+
+func slow(ctx context.Context) error {
+	worker := func() {
+		fmt.Println("}")
+		<-inner.Done()
+	}
+	worker()
+	return nil
+}
+`)
+	got, ok := stalledReplacement(file, 10)
+	if ok {
+		t.Fatalf("offered fix %q into a void closure", got)
+	}
+}
+
 func TestCollectStalledFixesFollowsOverlay(t *testing.T) {
 	dir := t.TempDir()
 	logical := filepath.Join(dir, "main.lgo")

@@ -184,8 +184,50 @@ func stalledReplacement(file string, line int) (string, bool) {
 // already closed is a sibling statement, not the enclosing function.
 func headerEncloses(lines []string, idx, line int) bool {
 	depth := 0
+	var inBlock, inRaw, inStr, inRune bool
 	for i := idx; i < line-1; i++ {
-		depth += strings.Count(lines[i], "{") - strings.Count(lines[i], "}")
+		s := lines[i]
+		for j := 0; j < len(s); j++ {
+			c := s[j]
+			switch {
+			case inBlock:
+				if c == '*' && j+1 < len(s) && s[j+1] == '/' {
+					inBlock = false
+					j++
+				}
+			case inRaw:
+				if c == '`' {
+					inRaw = false
+				}
+			case inStr:
+				if c == '\\' {
+					j++
+				} else if c == '"' {
+					inStr = false
+				}
+			case inRune:
+				if c == '\\' {
+					j++
+				} else if c == '\'' {
+					inRune = false
+				}
+			case c == '/' && j+1 < len(s) && s[j+1] == '/':
+				j = len(s)
+			case c == '/' && j+1 < len(s) && s[j+1] == '*':
+				inBlock = true
+				j++
+			case c == '`':
+				inRaw = true
+			case c == '"':
+				inStr = true
+			case c == '\'':
+				inRune = true
+			case c == '{':
+				depth++
+			case c == '}':
+				depth--
+			}
+		}
 	}
 	return depth > 0
 }
