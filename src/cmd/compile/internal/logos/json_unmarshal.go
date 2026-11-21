@@ -142,20 +142,27 @@ func (js *jsonStruct) fallbackDecodeLines() []string {
 			return []string{decl, call}
 		}
 		// Field defaults apply only when the input is an object, matching
-		// the v1 body's position after its Object() check.
+		// the v1 body's position after its Object() check. The object is
+		// buffered first so a malformed object cannot reset the defaults.
 		body := []string{decl, "if _logos_dec.PeekKind() == '{' {"}
+		body = append(body,
+			"\t_logos_raw, _logos_read_err := _logos_dec.ReadValue()",
+			"\tif _logos_read_err != nil {",
+			"\t\treturn _logos_read_err",
+			"\t}")
 		for _, l := range js.defaults {
 			body = append(body, "\t"+l)
 		}
-		return append(body, "}", call)
+		body = append(body,
+			"\t_logos_base := _logos_dec.InputOffset() - int64(len(_logos_raw))",
+			"\t"+fmt.Sprintf("return %s.DecodeDefaultRaw[_logos_shadow_%s, %s](_logos_raw, _logos_dec.Options(), _logos_base, _logos_dec.StackPointer(), (*_logos_shadow_%s)(%s))", jsonAlias, js.name, js.name, js.name, jsonRecv),
+			"}")
+		return append(body, call)
 	}
 	body := []string{decl}
 	body = append(body, "if _logos_dec.PeekKind() != '{' {")
 	body = append(body, "\t"+call)
 	body = append(body, "}")
-	// Same position as the v1 body: defaults run once the input is known
-	// to be an object, before decoding fills it.
-	body = append(body, js.defaults...)
 	body = append(body, "_logos_raw, _logos_read_err := _logos_dec.ReadValue()")
 	body = append(body, "if _logos_read_err != nil {")
 	body = append(body, "\treturn _logos_read_err")
@@ -166,6 +173,11 @@ func (js *jsonStruct) fallbackDecodeLines() []string {
 	body = append(body, "if _logos_scan_err := _logos_pscan.Err(); _logos_scan_err != nil {")
 	body = append(body, "\treturn _logos_scan_err")
 	body = append(body, "}")
+	// Same position as the v1 body: defaults run once the input is known
+	// to be an object, before decoding fills it — but only after the object
+	// buffered and scanned cleanly, so malformed input leaves the
+	// destination untouched.
+	body = append(body, js.defaults...)
 	body = append(body, "_logos_base := _logos_dec.InputOffset() - int64(len(_logos_raw))")
 	body = append(body, fmt.Sprintf("if _logos_fallback_err := %s.DecodeDefaultRaw[_logos_shadow_%s, %s](_logos_raw, _logos_dec.Options(), _logos_base, _logos_dec.StackPointer(), (*_logos_shadow_%s)(%s)); _logos_fallback_err != nil {", jsonAlias, js.name, js.name, js.name, jsonRecv))
 	body = append(body, "\treturn _logos_fallback_err")
