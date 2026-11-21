@@ -763,14 +763,16 @@ func (fl *fileLower) spellLoweredStruct(st *types2.Struct) (string, bool) {
 }
 
 func (fl *fileLower) spellLoweredInterface(it *types2.Interface) (string, bool) {
-	if it.NumMethods() == 0 && it.NumEmbeddeds() == 0 {
+	if it.NumExplicitMethods() == 0 && it.NumEmbeddeds() == 0 {
 		return fl.spellType(it)
 	}
 	var b strings.Builder
 	b.WriteString("interface{ ")
 	sep := ""
-	for i := range it.NumMethods() {
-		m := it.Method(i)
+	// Only explicitly declared methods need spelling: inherited ones
+	// ride in through the embedding spelled by the second loop.
+	for i := range it.NumExplicitMethods() {
+		m := it.ExplicitMethod(i)
 		if !m.Exported() && m.Pkg() != fl.pkg.tpkg {
 			return "", false
 		}
