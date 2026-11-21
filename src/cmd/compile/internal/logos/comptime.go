@@ -24,11 +24,22 @@ const (
 	cfImportMarker   = "_logos_ctimp"
 	cfComptimeMarker = "_logos_ctcomptime"
 	cfTParamMarker   = "_logos_tparam"
+	cfBindMarker     = "_logos_bind"
 	cfCopyInfix      = "_logosct"
 )
 
 func cfMarker(n int) string {
 	return cfTParamMarker + strconv.Itoa(n)
+}
+
+// cfBind names the alias a record declares at the top of a generic's body
+// for parameter n when a case shadow exists: `type _logos_bind0 =
+// _logos_tparam0`. References spelled with it always resolve to the
+// parameter's argument, while the substituted spelling itself
+// materializes only in the bind's right-hand side — at body scope, where
+// no case alias can capture it.
+func cfBind(n int) string {
+	return cfBindMarker + strconv.Itoa(n)
 }
 
 type cfImport struct {
@@ -259,6 +270,7 @@ type cfRecordBuilder struct {
 	tpIndex   map[types2.Object]int
 	imports   []cfImport
 	subs      []splice
+	shadowed  []span // const-switch cases that bind a case shadow, in record offsets
 }
 
 func (fl *fileLower) cfRecordText(def *cfGenericDef, qualifier string) *cfRecord {
@@ -268,6 +280,7 @@ func (fl *fileLower) cfRecordText(def *cfGenericDef, qualifier string) *cfRecord
 			b.tpIndex[o] = i
 		}
 	}
+	b.subs = fl.cfCaseShadowDecls(def, b)
 	syntax.Inspect(def.decl, b.visit)
 	start := fl.cfFuncStart(fl.off(syntax.StartPos(def.decl)))
 	end := fl.off(syntax.EndPos(def.decl)) + 1
@@ -286,6 +299,77 @@ func (fl *fileLower) cfRecordText(def *cfGenericDef, qualifier string) *cfRecord
 		source:  out.s,
 		sourceO: out,
 	}
+}
+
+// cfCaseShadowDecls binds each const-switch case shadow in the record to
+// its parameter's marker. The checker rebinds a switched type parameter
+// inside each case body (logosShadowConstTarget), so uses there resolve
+// to the shadow and keep the parameter's spelling. A `type F =
+// _logos_bind0` alias inside the case keeps that spelling exact — a body
+// type decl cannot capture the parameter's substituted spelling, an
+// unnamed target such as `*int` stays a conversion, and a body alias to
+// the shadow keeps an embedded field's name. The alias points at a bind
+// rather than the marker itself, so the argument's own spelling
+// materializes only in the body's top-level `type _logos_bind0 =
+// _logos_tparam0`: there a type argument named `F` stays the caller's
+// `F` (never `type F = F`), and no case alias captures the same-named
+// spelling of another parameter's argument. Every other parameter
+// reference inside a shadowed case spells the bind name for the same
+// reason; cfRecordBuilder.shadowed marks those cases for visit.
+func (fl *fileLower) cfCaseShadowDecls(def *cfGenericDef, b *cfRecordBuilder) []splice {
+	if fl.pkg.info.LogosConstCases == nil {
+		return nil
+	}
+	names := make(map[string]int)
+	for i, f := range def.decl.TParamList {
+		if f.Name != nil {
+			names[f.Name.Value] = i
+		}
+	}
+	var subs []splice
+	syntax.Inspect(def.decl, func(n syntax.Node) bool {
+		s, ok := n.(*syntax.ConstSwitchStmt)
+		if !ok {
+			return true
+		}
+		for i, cs := range s.Cases {
+			rec, ok := fl.pkg.info.LogosConstCases[cs]
+			if !ok || rec.Target == nil {
+				continue
+			}
+			idx, ok := names[rec.Target.Name()]
+			if !ok {
+				continue
+			}
+			end := fl.off(syntax.EndPos(s)) + 1
+			if i+1 < len(s.Cases) {
+				end = fl.off(s.Cases[i+1].Case)
+			}
+			b.shadowed = append(b.shadowed, span{start: fl.off(cs.Case), end: end})
+			if !fl.cfCaseUsesTypeName(cs, rec.Target.Name()) {
+				// The binding is only in the signature: emitting the
+				// alias would shadow a same-named value parameter for
+				// every use in the case body.
+				continue
+			}
+			p := fl.off(cs.Colon) + 1
+			subs = append(subs, splice{
+				start: p,
+				end:   p,
+				text:  " type " + rec.Target.Name() + " = " + cfBind(idx) + ";",
+			})
+		}
+		return true
+	})
+	if len(b.shadowed) > 0 && def.decl.Body != nil {
+		var text string
+		for i := range def.decl.TParamList {
+			text += " type " + cfBind(i) + " = " + cfMarker(i) + ";"
+		}
+		p := fl.off(syntax.StartPos(def.decl.Body)) + 1
+		subs = append(subs, splice{start: p, end: p, text: text})
+	}
+	return subs
 }
 
 // cfCheckExportedRecord reports each package-level unexported identifier
@@ -383,11 +467,20 @@ func (b *cfRecordBuilder) visit(n syntax.Node) bool {
 	if !ok {
 		return true
 	}
-	text, ok := b.spelling(b.fl.pkg.info.Uses[name])
+	obj := b.fl.pkg.info.Uses[name]
+	text, ok := b.spelling(obj)
 	if !ok {
 		return true
 	}
 	s := b.fl.off(name.Pos())
+	if insideAny(span{start: s, end: s}, b.shadowed) {
+		// Inside a case that binds a shadow, a parameter reference spells
+		// the bind name so the substituted spelling cannot be captured by
+		// the case alias.
+		if idx, ok := b.tpIndex[obj]; ok {
+			text = cfBind(idx)
+		}
+	}
 	b.subs = append(b.subs, splice{start: s, end: s + len(name.Value), text: text})
 	return true
 }
@@ -848,6 +941,7 @@ func (fl *fileLower) cfCopySites(site *cfSite, rec *cfRecord) (*cfSites, bool) {
 	}
 	for i, t := range site.targs {
 		sites.types[cfMarker(i)] = t
+		sites.types[cfBind(i)] = t
 		sites.spell[cfMarker(i)] = fl.cfLazySpelling(func() (string, bool) { return fl.spellType(t) }, func() {
 			fl.cfError(site.pos, "[comptime::generic_targ] cannot spell type argument %s of %s", t, rec.name)
 		})
@@ -1030,7 +1124,7 @@ func cfScopeFunc(scope *types2.Scope, x syntax.Expr) *types2.Func {
 	return fn
 }
 
-func (fl *fileLower) cfNestedSite(call *syntax.CallExpr, active cfChain, run *cfRun) (int, int, string, bool) {
+func (fl *fileLower) cfNestedSite(call *syntax.CallExpr, active cfChain, run *cfRun, parents map[syntax.Node]syntax.Node) (int, int, string, bool) {
 	fun, indexed := call.Fun.(*syntax.IndexExpr)
 	callee := call.Fun
 	if indexed {
@@ -1045,8 +1139,19 @@ func (fl *fileLower) cfNestedSite(call *syntax.CallExpr, active cfChain, run *cf
 		fl.cfError(pos, "[comptime::generic_targ] comptime generic %s needs explicit type arguments here", obj.Name())
 		return 0, 0, "", false
 	}
+	bound := fl.cfCaseBoundTypes(call, run, parents)
 	var targs []types2.Type
 	for _, arg := range syntax.UnpackListExpr(fun.Index) {
+		if n, ok := arg.(*syntax.Name); ok {
+			if t, ok := bound[n.Value]; ok {
+				// A case shadow spelled with the parameter's name: the
+				// case's alias decl binds it to the type argument, so the
+				// nested site specializes for the argument, not for a
+				// same-named package type.
+				targs = append(targs, t)
+				continue
+			}
+		}
 		t, ok := fl.cfResolveTypeExpr(arg, active, run.sites)
 		if !ok {
 			fl.cfError(pos, "[comptime::generic_targ] cannot resolve a type argument of %s", obj.Name())
@@ -1056,6 +1161,105 @@ func (fl *fileLower) cfNestedSite(call *syntax.CallExpr, active cfChain, run *cf
 	}
 	name := fl.cfCopyFor(&cfSite{call: call, fun: fun, targs: targs, obj: obj, pos: pos})
 	return offAt(run.ctx.starts, syntax.StartPos(fun)), cfExactEnd(run.ctx, fun), name, true
+}
+
+// cfCaseBoundTypes maps the names each enclosing const-switch case binds
+// to a parameter's argument. The record spells a case shadow's binding
+// as a `type <name> = _logos_bind<i>` (or `_logos_tparam<i>`) alias at
+// the case's start; the name keeps the parameter's spelling, so looking
+// it up by scope would find a same-named package type instead of the
+// argument. Type declarations in blocks between n and the case rebind
+// those names and block the mapping.
+func (fl *fileLower) cfCaseBoundTypes(n syntax.Node, run *cfRun, parents map[syntax.Node]syntax.Node) map[string]types2.Type {
+	sites := run.sites
+	if sites == nil {
+		return nil
+	}
+	var bound map[string]types2.Type
+	blocked := make(map[string]bool)
+	bindType := func(d syntax.Decl) (*syntax.TypeDecl, types2.Type, bool) {
+		td, ok := d.(*syntax.TypeDecl)
+		if !ok || !td.Alias {
+			return nil, nil, false
+		}
+		tn, ok := td.Type.(*syntax.Name)
+		if !ok || (!strings.HasPrefix(tn.Value, cfBindMarker) && !strings.HasPrefix(tn.Value, cfTParamMarker)) {
+			return nil, nil, false
+		}
+		t, ok := sites.types[tn.Value]
+		return td, t, ok
+	}
+	pos := offAt(run.ctx.starts, syntax.StartPos(n))
+	// Only declarations before n are in scope: an alias written later
+	// in the same block must not rebind a name the call already uses.
+	blockDecls := func(list []syntax.Stmt) {
+		for _, st := range list {
+			if offAt(run.ctx.starts, syntax.StartPos(st)) >= pos {
+				return
+			}
+			ds, ok := st.(*syntax.DeclStmt)
+			if !ok {
+				continue
+			}
+			for _, d := range ds.DeclList {
+				if _, _, ok := bindType(d); ok {
+					continue
+				}
+				if td, ok := d.(*syntax.TypeDecl); ok {
+					blocked[td.Name.Value] = true
+				}
+			}
+		}
+	}
+	bindBefore := func(list []syntax.Stmt) {
+		for _, st := range list {
+			if offAt(run.ctx.starts, syntax.StartPos(st)) >= pos {
+				return
+			}
+			ds, ok := st.(*syntax.DeclStmt)
+			if !ok {
+				continue
+			}
+			for _, d := range ds.DeclList {
+				td, t, ok := bindType(d)
+				if !ok || blocked[td.Name.Value] {
+					continue
+				}
+				if bound == nil {
+					bound = make(map[string]types2.Type)
+				}
+				if _, dup := bound[td.Name.Value]; !dup {
+					bound[td.Name.Value] = t
+				}
+			}
+		}
+	}
+	for p := parents[n]; p != nil; p = parents[p] {
+		switch p := p.(type) {
+		case *syntax.BlockStmt:
+			blockDecls(p.List)
+		case *syntax.CaseClause:
+			blockDecls(p.Body)
+		case *syntax.CommClause:
+			blockDecls(p.Body)
+		case *syntax.ConstSwitchStmt:
+			for _, cs := range p.Cases {
+				if len(cs.Body) == 0 {
+					continue
+				}
+				// ConstSwitchCase is not a syntax.Node, so it never
+				// appears in parents: match the case whose body holds n.
+				bs := offAt(run.ctx.starts, syntax.StartPos(cs.Body[0]))
+				be := offAt(run.ctx.starts, syntax.EndPos(cs.Body[len(cs.Body)-1]))
+				if pos < bs || pos > be {
+					continue
+				}
+				blockDecls(cs.Body)
+				bindBefore(cs.Body)
+			}
+		}
+	}
+	return bound
 }
 
 func (fl *fileLower) cfEmitCopy(text otext, site *cfSite) {
@@ -1134,6 +1338,31 @@ func cfHasTypeParam(t types2.Type) bool {
 		return cfHasTypeParam(t.Key()) || cfHasTypeParam(t.Elem())
 	case *types2.Chan:
 		return cfHasTypeParam(t.Elem())
+	}
+	return false
+}
+
+// cfCaseUsesTypeName reports whether the case body references name as a
+// type. The record's generated `type name = bind` alias is needed only
+// then; without a type use it would merely hide a same-named value
+// parameter inside the copy.
+func (fl *fileLower) cfCaseUsesTypeName(cs *syntax.ConstSwitchCase, name string) bool {
+	used := false
+	for _, st := range cs.Body {
+		syntax.Inspect(st, func(n syntax.Node) bool {
+			if used {
+				return false
+			}
+			if id, ok := n.(*syntax.Name); ok && id.Value == name {
+				if _, ok := fl.pkg.info.Uses[id].(*types2.TypeName); ok {
+					used = true
+				}
+			}
+			return !used
+		})
+		if used {
+			return true
+		}
 	}
 	return false
 }

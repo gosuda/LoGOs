@@ -2076,10 +2076,51 @@ func (c *cfLeaf) subCall(n *syntax.CallExpr) bool {
 	if insideAny(span{start: s, end: e}, c.covered) {
 		return true
 	}
-	if s, e, text, ok := c.fl.cfNestedSite(n, c.active, c.run); ok {
+	if c.cfDeadConstCase(n) {
+		// A const switch that folds to another arm leaves this case
+		// dead; specializing its calls against the bound argument can
+		// diagnose code the instantiation never runs.
+		return true
+	}
+	if s, e, text, ok := c.fl.cfNestedSite(n, c.active, c.run, c.parents); ok {
 		c.add(s, e, text)
 	}
 	return true
+}
+
+// cfDeadConstCase reports whether n sits in a const-switch case the
+// fold provably skips: the tag resolves to a concrete type and a
+// different arm is live, or no case matches at all.
+func (c *cfLeaf) cfDeadConstCase(n syntax.Node) bool {
+	pos := offAt(c.run.ctx.starts, syntax.StartPos(n))
+	for p := c.parents[n]; p != nil; p = c.parents[p] {
+		sw, ok := p.(*syntax.ConstSwitchStmt)
+		if !ok {
+			continue
+		}
+		tag, ok := c.fl.cfResolveTypeExpr(sw.Targ, c.active, c.run.sites)
+		if !ok || tag == nil {
+			return false
+		}
+		var live *syntax.ConstSwitchCase
+		for _, cs := range sw.Cases {
+			typ, ok := c.switchCaseType(cs, sw)
+			if !ok {
+				return false
+			}
+			if typ == nil || types2.LogosConstMatch(tag, typ, cs) {
+				live = cs
+				break
+			}
+		}
+		if live == nil || len(live.Body) == 0 {
+			return live == nil
+		}
+		bs := offAt(c.run.ctx.starts, syntax.StartPos(live.Body[0]))
+		be := offAt(c.run.ctx.starts, syntax.EndPos(live.Body[len(live.Body)-1]))
+		return pos < bs || pos > be
+	}
+	return false
 }
 
 // subComptimeError answers a live comptime.Error call of an expansion:
