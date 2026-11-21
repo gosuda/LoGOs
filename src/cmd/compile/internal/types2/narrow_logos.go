@@ -2448,7 +2448,34 @@ func (p *logosEFPass) seedEntry(k logosEFKey, lit syntax.Node) (logosEFEntry, bo
 	if errV != nil && len(p.assigns[logosEFKey{root: errV}]) == 1 {
 		e.err = errV
 	}
+	if e.err != nil && p.loopLocalErrShared(errV, k, lit) {
+		// A loop-local error names a new instance each iteration, so a
+		// check on the captured one cannot prove a value a later
+		// iteration's store may have failed on.
+		e.err = nil
+	}
 	return e, true
+}
+
+// loopLocalErrShared reports whether errV is declared inside a loop that
+// also holds a store of k which can write the captured value after lit
+// registers: the seed pairs one iteration's error with another's result.
+func (p *logosEFPass) loopLocalErrShared(errV *Var, k logosEFKey, lit syntax.Node) bool {
+	for i := range p.storeErr[k] {
+		pos := p.storePos[k][i]
+		if !p.storeLiveAfter(pos, k, lit) {
+			continue
+		}
+		for f, fresh := range p.loopFresh {
+			if !fresh[errV] {
+				continue
+			}
+			if pos.Cmp(f.Pos()) >= 0 && pos.Cmp(syntax.EndPos(f)) <= 0 {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (p *logosEFPass) lateCaptures(st *logosEFState, lit syntax.Node, inside map[*Var]bool) *logosEFState {
