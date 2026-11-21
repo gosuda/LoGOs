@@ -524,10 +524,22 @@ func (fl *fileLower) cfNamesInUse() map[string]bool {
 		case *syntax.ImportDecl:
 			return false
 		case *syntax.SelectorExpr:
+			// A qualifier counts only when it resolves to a package
+			// name: a local declaration that shadows an import alias
+			// turns the selector into a field access and must not keep
+			// the import alive. An unresolvable name (generated code)
+			// keeps the import.
+			if x, ok := n.X.(*syntax.Name); ok {
+				if obj, found := fl.pkg.info.Uses[x]; found {
+					if pn, ok := obj.(*types2.PkgName); ok {
+						used[pn.Name()] = true
+					}
+				} else {
+					used[x.Value] = true
+				}
+			}
 			syntax.Inspect(n.X, visit)
 			return false
-		case *syntax.Name:
-			used[n.Value] = true
 		}
 		return true
 	}
@@ -842,16 +854,57 @@ func (fl *fileLower) cfCopySites(site *cfSite, rec *cfRecord) (*cfSites, bool) {
 	}
 	for i, imp := range rec.imports {
 		sites.spell[cfImportMarker+strconv.Itoa(i)] = fl.cfLazySpelling(func() (string, bool) {
-			return fl.cfImportQualifier(imp.path, site.pos)
+			return fl.cfCopyQualifier(imp.path, site.pos)
 		}, nil)
 	}
 	if rec.foreign {
 		pkg := site.obj.Pkg()
 		sites.spell[cfPkgMarker] = fl.cfLazySpelling(func() (string, bool) {
-			return fl.cfImportQualifier(pkg.Path(), site.pos)
+			return fl.cfCopyQualifier(pkg.Path(), site.pos)
 		}, nil)
 	}
 	return sites, true
+}
+
+// cfCopyQualifier spells path for one copied body. A name in a copied
+// body resolves to the same object as in the defining package.
+func (fl *fileLower) cfCopyQualifier(path string, pos syntax.Pos) (string, bool) {
+	q, ok := fl.cfImportQualifier(path, pos)
+	if !ok {
+		return "", false
+	}
+	if strings.HasPrefix(q, "_logos_") {
+		return q, true
+	}
+	return fl.cfFreshCopyAlias(path, pos)
+}
+
+// cfFreshCopyAlias mints the reserved import alias the copy carries
+// for path.
+func (fl *fileLower) cfFreshCopyAlias(path string, pos syntax.Pos) (string, bool) {
+	reg := fl.getGenImports()
+	pkg := reg.pkgs[path]
+	if pkg == nil {
+		var err error
+		if pkg, err = fl.cfLoadPackage(path); err != nil || pkg == nil {
+			fl.cfError(pos, "[comptime::generic_import] cannot import %s for the copy: %v", path, err)
+			return "", false
+		}
+		reg.pkgs[path] = pkg
+	}
+	var q string
+	for i := 0; ; i++ {
+		q = fmt.Sprintf("_logos_t%d", i)
+		if !reg.used[q] {
+			break
+		}
+	}
+	reg.used[q] = true
+	reg.qual[path] = q
+	if !slices.Contains(reg.order, path) {
+		reg.order = append(reg.order, path)
+	}
+	return q, true
 }
 
 func (fl *fileLower) cfLazySpelling(compute func() (string, bool), fail func()) func() (string, bool) {
