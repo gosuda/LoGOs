@@ -1,0 +1,86 @@
+// run
+
+package main
+
+import "fmt"
+
+type Part interface { Text | Call }
+type Text struct{ Text string }
+type Call struct{ Name string }
+
+type Chunk struct {
+	Part Part?
+}
+
+func take(p Part?) bool { return p != nil }
+
+func kind(p Part?) string {
+	q := p
+	if q == nil {
+		return "none"
+	}
+	if _, ok := q.(Text); ok {
+		return "text"
+	}
+	if _, ok := q.(Call); ok {
+		return "call"
+	}
+	return "unknown"
+}
+
+// Duo holds a wrapped member so its options are rt.Option[Duo] values, not
+// bare interface pairs.
+type Duo interface { Text | Blob }
+type Blob []byte
+
+func pair() (Text, Blob) { return Text{Text: "pair"}, Blob{1} }
+
+func forward() (Duo?, Duo?) { return pair() }
+
+func take2(a, b Duo?) bool { return a != nil && b != nil }
+
+func pairVar() bool {
+	var a, b Duo? = pair()
+	return a != nil && b != nil
+}
+
+func pairAssign() bool {
+	var a, b Duo?
+	a, b = pair()
+	return a != nil && b != nil
+}
+
+func appendMember() bool {
+	var xs [](Duo?)
+	xs = append(xs, Text{}, Blob{1})
+	return len(xs) == 2 && xs[0] != nil && xs[1] != nil
+}
+
+func rangeMember() int {
+	// A named member collection: ranging assigns members into an option
+	// destination, so the element still needs the member-to-option wrap.
+	type Parts []Duo
+	xs := Parts{Text{}, Blob{1}}
+	var e Duo?
+	n := 0
+	for _, e = range xs {
+		if e != nil {
+			n++
+		}
+	}
+	return n
+}
+
+func main() {
+	plain := Chunk{Part: Part(Text{Text: "explicit"})}
+	direct := Chunk{Part: Text{Text: "direct"}}
+	var held Part? = Call{Name: "held"}
+	held = Text{Text: "reassigned"}
+	fmt.Println(plain.Part != nil, direct.Part != nil)
+	fmt.Println(kind(plain.Part), kind(direct.Part), kind(held))
+	fmt.Println(take(Text{Text: "arg"}), take(Call{Name: "arg"}), take(nil))
+	a, b := forward()
+	fmt.Println(a != nil, b != nil)
+	fmt.Println(take2(pair()), pairVar(), pairAssign(), appendMember(), rangeMember())
+	fmt.Println(take2(Duo(Text{}), Duo(Blob(nil))), take2(Duo(Blob{1}), nil))
+}
