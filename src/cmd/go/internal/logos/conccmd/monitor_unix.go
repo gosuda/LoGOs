@@ -170,8 +170,12 @@ func (s *exitScanWriter) Write(p []byte) (int, error) {
 		}
 		line := s.tail[:i]
 		s.tail = s.tail[i+1:]
-		if m := exitLine.FindSubmatch(line); m != nil {
-			s.code, _ = strconv.Atoi(string(m[1]))
+		if m := exitLine.FindSubmatchIndex(line); m != nil &&
+			(m[0] == 0 || line[m[0]-1] != ':') {
+			// A build diagnostic such as "error obtaining VCS status:
+			// exit status 128" ends with the same phrase; the colon
+			// keeps it from passing for the wrapper's own report.
+			s.code, _ = strconv.Atoi(string(line[m[2]:m[3]]))
 		}
 	}
 	if len(s.tail) > 4096 {
