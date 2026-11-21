@@ -891,6 +891,7 @@ type logosEFPass struct {
 	inLoop      map[logosEFKey]bool
 	loopFresh   map[*syntax.ForStmt]map[*Var]bool
 	loopTuple   map[*syntax.ForStmt]map[logosEFKey]bool
+	reenter     map[*syntax.ForStmt]bool
 }
 
 func (check *Checker) logosErrorFirst(body *syntax.BlockStmt) {
@@ -1096,6 +1097,7 @@ func (p *logosEFPass) collectAssigns() {
 	p.inLoop = make(map[logosEFKey]bool)
 	p.loopFresh = make(map[*syntax.ForStmt]map[*Var]bool)
 	p.loopTuple = make(map[*syntax.ForStmt]map[logosEFKey]bool)
+	p.reenter = make(map[*syntax.ForStmt]bool)
 	mark := func(lhs []syntax.Expr, rhs syntax.Expr) {
 		errV, keys := p.tuple(lhs, rhs)
 		if errV == nil {
@@ -1238,6 +1240,34 @@ func (p *logosEFPass) collectAssigns() {
 		}
 		return true
 	})
+	// A backward goto can run a loop again after its defers registered: a
+	// goto inside or after the labeled statement it targets jumps back,
+	// and a label placed at or before a loop reaches it on the way
+	// forward.
+	labels := make(map[string]syntax.Stmt)
+	var gotos []*syntax.BranchStmt
+	syntax.Inspect(p.body, func(n syntax.Node) bool {
+		switch n := n.(type) {
+		case *syntax.LabeledStmt:
+			labels[n.Label.Value] = n.Stmt
+		case *syntax.BranchStmt:
+			if n.Tok == syntax.Goto && n.Label != nil {
+				gotos = append(gotos, n)
+			}
+		}
+		return true
+	})
+	for _, g := range gotos {
+		ls := labels[g.Label.Value]
+		if ls == nil || g.Pos().Cmp(ls.Pos()) < 0 {
+			continue
+		}
+		for f := range p.loopFresh {
+			if ls.Pos().Cmp(f.Pos()) <= 0 || inSubtree(ls, f) {
+				p.reenter[f] = true
+			}
+		}
+	}
 }
 
 // A logosEFCand is an unproven entry eligible for one diagnostic.
@@ -2375,7 +2405,7 @@ func (p *logosEFPass) storeLiveAfter(pos syntax.Pos, k logosEFKey, lit syntax.No
 		if p.loopFresh[f][k.root] {
 			continue
 		}
-		if p.loopExitsAfterDefer(lit, f) {
+		if !p.reenter[f] && p.loopExitsAfterDefer(lit, f) {
 			continue
 		}
 		if pos.Cmp(f.Pos()) >= 0 && pos.Cmp(syntax.EndPos(f)) <= 0 {
