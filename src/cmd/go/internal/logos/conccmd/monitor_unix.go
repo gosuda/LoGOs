@@ -136,7 +136,7 @@ func monitor(verb string, inv invocation) {
 
 // exitLine matches the line `logos run` prints when the program it ran
 // exits nonzero.
-var exitLine = regexp.MustCompile(`^exit status ([0-9]+)$`)
+var exitLine = regexp.MustCompile(`exit status ([0-9]+)$`)
 
 // exitScanWriter passes the child's standard error through to standard
 // error while it watches for the "exit status N" line `logos run`
