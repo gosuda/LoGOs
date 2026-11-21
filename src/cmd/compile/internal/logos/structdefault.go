@@ -463,7 +463,18 @@ func (fl *fileLower) defaultDepScanFile(file *syntax.File, typeNames map[*syntax
 				if c, ok := m.(*syntax.CallExpr); ok && fl.unsafeFoldCall(c) {
 					// unsafe.Sizeof/Alignof/Offsetof fold at check:
 					// their argument literals never evaluate, so they
-					// create no factory dependency.
+					// create no factory dependency. They still join
+					// inDefault: their text is copied into each emitted
+					// default, which the expansion budget must charge.
+					syntax.Inspect(c, func(u syntax.Node) bool {
+						if l, ok := u.(*syntax.CompositeLit); ok {
+							if fl.pkg.inDefault == nil {
+								fl.pkg.inDefault = map[*syntax.CompositeLit]bool{}
+							}
+							fl.pkg.inDefault[l] = true
+						}
+						return true
+					})
 					return false
 				}
 				lit, ok := m.(*syntax.CompositeLit)
