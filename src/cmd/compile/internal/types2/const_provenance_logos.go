@@ -159,6 +159,8 @@ func logosContainsReadonlyDescendants(T Type) bool {
 // readonly view was seen on the way down. A type that revisits itself,
 // as in `type loop const loop`, ends the walk there, so the traversal
 // always terminates; recursive type checking rejects the declaration.
+// Expanding generics such as `type Grow[T any] const Grow[*T]` produce a
+// fresh instance per unwrap, so origin revisits end the walk as well.
 func logosViewBase(T Type) (Type, bool) {
 	qualified := false
 	seen := make(map[Type]bool)
@@ -181,6 +183,10 @@ func logosViewBase(T Type) (Type, bool) {
 			continue
 		}
 		if n, ok := Unalias(T).(*Named); ok {
+			if seen[n.Origin()] {
+				return T, qualified
+			}
+			seen[n.Origin()] = true
 			T = n.Underlying()
 			continue
 		}
