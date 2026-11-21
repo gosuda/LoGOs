@@ -36,7 +36,9 @@ jobs:
           persist-credentials: false
       - run: for f in .github/scripts/*.sh; do bash -n "$f"; done
       - id: route
-        run: bash .github/scripts/route.sh
+        run: GITHUB_SHA="${{ github.event.pull_request.head.sha || github.sha }}" bash .github/scripts/route.sh
+        env:
+          INPUT_SUITES: ${{ inputs.suites || 'all' }}
 
   build:
     needs: route
@@ -405,3 +407,5 @@ jobs:
       - run: bash .github/scripts/setup.sh restore
       - name: "Autovec benchmarks: base vs candidate, measured sequentially"
         run: bash .github/scripts/bench-autovec.sh
+        env:
+          AUTOVEC_CAND_SHA: ${{ github.event.pull_request.head.sha || github.sha }}

@@ -12,7 +12,7 @@ printf '%s  %s\n' ae2beda2ac99c098427e4f755244552daf20e514422889cca6d44421e2d93c
 tar -xzf "$RUNNER_TEMP/$archive.tar.gz" -C "$RUNNER_TEMP"
 printf '%s\n' "$RUNNER_TEMP/$archive" >> "$GITHUB_PATH"; . .github/scripts/env.sh
 git fetch -q --no-tags --depth=1 origin "$GITHUB_BASE_REF"
-export AUTOVEC_BASE_SHA=$(git rev-parse FETCH_HEAD) AUTOVEC_CAND_SHA=$GITHUB_SHA AUTOVEC_OUT_ROOT=$GITHUB_WORKSPACE/.outline/optimize/autovec
+export AUTOVEC_BASE_SHA=$(git rev-parse FETCH_HEAD) AUTOVEC_CAND_SHA=${AUTOVEC_CAND_SHA:-$GITHUB_SHA} AUTOVEC_OUT_ROOT=$GITHUB_WORKSPACE/.outline/optimize/autovec
 [[ "$AUTOVEC_BASE_SHA" =~ ^[0-9a-f]{40}$ ]]; [[ "$AUTOVEC_CAND_SHA" =~ ^[0-9a-f]{40}$ ]]
 test "$(git rev-parse HEAD)" = "$AUTOVEC_CAND_SHA"; test "$(go env GOARCH)" = amd64
 git worktree add --quiet --detach "$RUNNER_TEMP/autovec-base" "$AUTOVEC_BASE_SHA"
