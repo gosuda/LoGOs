@@ -1626,6 +1626,11 @@ func (p *logosEFPass) reportPromoted(x syntax.Expr, k logosEFKey, st *logosEFSta
 func (p *logosEFPass) readDest(x syntax.Expr, st *logosEFState) {
 	k, ok := p.rawKey(x)
 	if !ok {
+		// A segment below an outer spine is a path step, not a standalone
+		// copy: the outer check decides what the read loads.
+		if p.spines[x.Pos()] {
+			return
+		}
 		if p.valueSpine(x) {
 			p.markSpine(x)
 			if k2, ok := p.promotedKey(x); !ok || !p.reportPromoted(x, k2, st) {
