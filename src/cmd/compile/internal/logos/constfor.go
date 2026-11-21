@@ -379,19 +379,55 @@ func (fl *fileLower) miniCheckCopies(blocks []*syntax.BlockStmt, cf *syntax.Cons
 }
 
 // cfAliases returns the synthesized package aliases of the file so far,
-// each keyed by the package object it names.
+// each keyed by the package object it names. The comptime marker binds
+// as well: copies spell comptime selections under cfComptimeMarker, and
+// an unbound name would check as an undefined identifier instead of
+// reaching the copy's own comptime.Error answer.
 func (fl *fileLower) cfAliases() map[*types2.Package]string {
 	reg := fl.getGenImports()
-	if reg == nil {
-		return nil
-	}
-	out := make(map[*types2.Package]string, len(reg.qual))
-	for path, q := range reg.qual {
-		if pkg := reg.pkgs[path]; pkg != nil && q != "" {
-			out[pkg] = q
+	out := make(map[*types2.Package]string)
+	if reg != nil {
+		for path, q := range reg.qual {
+			if pkg := reg.pkgs[path]; pkg != nil && q != "" {
+				out[pkg] = q
+			}
 		}
 	}
+	if pkg := fl.cfComptimePkg(); pkg != nil {
+		out[pkg] = cfComptimeMarker
+	}
+	if len(out) == 0 {
+		return nil
+	}
 	return out
+}
+
+// cfComptimePkg returns the package a comptime import binds in any file
+// of the package, or nil when nothing imports comptime. A copy of a
+// generic defined in a sibling file can still spell the marker.
+func (fl *fileLower) cfComptimePkg() *types2.Package {
+	for _, file := range fl.pkg.files {
+		for _, decl := range file.DeclList {
+			imp, ok := decl.(*syntax.ImportDecl)
+			if !ok || imp.Path == nil {
+				continue
+			}
+			if path, _ := strconv.Unquote(imp.Path.Value); path != "comptime" {
+				continue
+			}
+			var obj types2.Object
+			if imp.LocalPkgName != nil {
+				obj = fl.pkg.info.Defs[imp.LocalPkgName]
+			}
+			if obj == nil {
+				obj = fl.pkg.info.Implicits[imp]
+			}
+			if pn, ok := obj.(*types2.PkgName); ok {
+				return pn.Imported()
+			}
+		}
+	}
+	return nil
 }
 
 // adoptRegion appends text to the working buffer as a new region and
