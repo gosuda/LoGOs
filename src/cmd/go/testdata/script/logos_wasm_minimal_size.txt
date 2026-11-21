@@ -172,13 +172,15 @@ func main() {
 	minGz := gzSize(os.Args[1])
 	jsonGz := gzSize(os.Args[4])
 	payloadFrac := float64(minS.code+minS.data) / float64(minS.raw)
+	overhead := minS.raw - minS.code - minS.data
 	check(minS.raw < 3000000, "min raw=%d, want < 3000000", minS.raw)
 	check(minGz < 800000, "min gzip=%d, want < 800000", minGz)
 	check(jsonS.raw < 6500000, "json raw=%d, want < 6500000", jsonS.raw)
 	check(jsonGz < 1600000, "json gzip=%d, want < 1600000", jsonGz)
-	check(payloadFrac >= 0.90, "payload frac=%.3f, want >= 0.90", payloadFrac)
-	// Absolute bound, not a ratio: a payload reduction must pass, and a
-	// fixed name section would otherwise fail a shrunken module.
+	// Absolute bound, not a ratio: a payload reduction must keep passing,
+	// and fixed non-payload sections (name and other custom sections)
+	// would otherwise fail a shrunken module.
+	check(overhead <= 300000, "non-payload overhead=%d, want <= 300000", overhead)
 	check(minS.name <= 50000, "name bytes=%d, want <= 50000", minS.name)
 	// The wasm profile overhead stays bounded against plain go at the same
 	// default optimization level.
