@@ -67,6 +67,27 @@ func recvForLead[T any](s []T, ch chan T) {
 	}
 }
 
+var pool = []Holder{{Ptr: new(bool)}}
+
+func values(x string) []Holder {
+	_ = x
+	return pool
+}
+
+// A quoted parenthesis inside the operand is not a bracket of the
+// generated cast wrapper: the widened slice must keep `any(` matched.
+func recvQuoted[T any](ch chan T) {
+	const switch T {
+	case interface{ M() *bool }:
+		var p interface{ M() *bool }
+		select {
+		case p, *values(")")[next()].M() = <-ch:
+			_ = p
+		default:
+		}
+	}
+}
+
 func main() {
 	ch := make(chan Holder, 1)
 	ch <- Holder{Ptr: new(bool), Rank: 0}
@@ -85,5 +106,14 @@ func main() {
 		fmt.Println("ok gap-edges")
 	} else {
 		fmt.Println("FAIL gap-edges")
+	}
+
+	ch3 := make(chan Holder, 1)
+	ch3 <- Holder{Ptr: new(bool)}
+	recvQuoted[Holder](ch3)
+	if *pool[0].Ptr {
+		fmt.Println("ok quoted")
+	} else {
+		fmt.Println("FAIL quoted")
 	}
 }
