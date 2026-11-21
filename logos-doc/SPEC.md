@@ -660,7 +660,7 @@ A `for _, v := range` loop over a constant slice MUST yield constant elements. [
 
 The equality operators `==` and `!=` MUST be defined on operands whose types carry a const-view or readonly-descendants qualification whenever the unqualified operand types are comparable and one unqualified operand type is assignable to the other. A comparison reads its operands; it MUST NOT be reported as a mutation through the view or as a qualification-erasing escape. [T-201]
 
-A `?.` selector on an element reached through a constant view MUST resolve the field or method on the unqualified element type; a selected field keeps the element's qualification, and a selected method follows the receiver rules of this section. [T-201]
+A `?.` selector on an element reached through a constant view MUST resolve the field or method on the unqualified element type; a selected field keeps the element's qualification, and a selected method follows the receiver rules of this section. A function-typed field read through a constant view keeps its plain type; calling it MUST be allowed. [T-201]
 
 A method call on a readonly-descendants value that fails the reference-free or readonly proof of this section MUST fail with `[correctness::const_view_mutation]`, the same diagnostic as the same call through the enclosing constant view. [T-201]
 
@@ -735,6 +735,8 @@ A later assignment MUST end narrowing. [T-202]
 Taking the address of `x` MUST disable narrowing for `x`. [T-202]
 
 Assigning `x` in a function literal, in a `go group` child block, or in a lambda of a chain that opens with `.group(...)` MUST disable narrowing for `x`. [T-202]
+
+A function whose body contains a `goto` statement MUST NOT narrow any of its variables. [T-202]
 
 A function literal or a `go group` child block MUST NOT read `x` as narrowed when `x` is assigned anywhere besides its declaration. [T-202]
 
@@ -880,6 +882,8 @@ The `<T>` of that panic text MUST be the string that `reflect.Type.String` retur
 `nil` MUST go to `case nil`. [T-203.1]
 
 An exhaustive `switch x.(type)` MUST cover every member and `nil`, or carry `default`. [T-203.1]
+
+If the switched operand is a local or parameter that narrowing has proven non-nil from an option whose absence is the interface nil value, an exhaustive `switch x.(type)` MUST cover every member with no `case nil` required. [T-203.1]
 
 A missing member MUST fail with `[correctness::nonexhaustive_switch]` listing misses in declaration order. [T-203.1]
 
@@ -1322,6 +1326,7 @@ A child panic MUST become `*logos/rt.PanicError` with the value and a stack. [T-
 `NewGroup`, `Go`, `GoNested`, `Wait`, `WaitContext`, and `PanicError.Error` MUST form the `Group` API (`NewGroup(ctx, limit)` returns the group and a child context; `Go` and `GoNested` take `func(context.Context) error`, and `GoNested` never blocks its caller on the concurrency limit). [T-206]
 
 A plain channel send, receive, or range directly in a child MUST lower to a `select` with `<-gctx.Done()`. [T-206]
+A plain channel send whose channel can accept the value without blocking MUST complete the send; cancellation MUST preempt only a send that would block. [T-206]
 
 A user `select` with `default` MUST stay unchanged. [T-206]
 

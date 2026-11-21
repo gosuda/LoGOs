@@ -274,6 +274,17 @@ func (check *Checker) callExpr(x *operand, call *syntax.CallExpr) exprKind {
 	// signature may be generic
 	cgocall := x.mode() == cgofunc
 
+	// logos M5-S1 hook: a function value read through a const view carries
+	// the view's qualification, but calling it mutates nothing — unwrap the
+	// qualification so the call sees the plain signature.
+	if check.conf.Logos {
+		if base, descendants, readonly := logosReadonlyBase(x.typ()); descendants || readonly {
+			if _, ok := base.Underlying().(*Signature); ok {
+				x.typ_ = base
+			}
+		}
+	}
+
 	// If the operand type is a type parameter, all types in its type set
 	// must have a common underlying type, which must be a signature.
 	u, err := commonUnder(x.typ(), func(t, u Type) *typeError {

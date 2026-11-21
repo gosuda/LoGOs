@@ -46,6 +46,8 @@ func (check *Checker) logosEnterFuncBody(body *syntax.BlockStmt) {
 		inClos:    make(map[string]bool),
 		refInClos: make(map[string]bool),
 		assignOut: make(map[string]bool),
+		declared:  make(map[string]bool),
+		refTop:    make(map[string]bool),
 	}
 	if sig := check.sig; sig != nil {
 		for _, vars := range []*Tuple{sig.params, sig.results} {
@@ -60,7 +62,7 @@ func (check *Checker) logosEnterFuncBody(body *syntax.BlockStmt) {
 	if body != nil {
 		syntax.Walk(body, dq)
 	}
-	set := make(map[string]bool, len(dq.addr)+len(dq.inLoop)+len(dq.inClos))
+	set := make(map[string]bool, len(dq.addr)+len(dq.inLoop)+len(dq.inClos)+len(dq.declared))
 	for name := range dq.addr {
 		set[name] = true
 	}
@@ -69,6 +71,23 @@ func (check *Checker) logosEnterFuncBody(body *syntax.BlockStmt) {
 	}
 	for name := range dq.inClos {
 		set[name] = true
+	}
+	if dq.hasGoto {
+		for _, name := range dq.params {
+			set[name] = true
+		}
+		for name := range dq.declared {
+			set[name] = true
+		}
+		// A jump can land past a nil guard on a captured variable too:
+		// every name this frame references without declaring it (a
+		// captured local — package objects are never narrowable) loses
+		// its proof as well.
+		for name := range dq.refTop {
+			if !dq.declared[name] {
+				set[name] = true
+			}
+		}
 	}
 	check.logosDisqual = append(check.logosDisqual, set)
 	if body != nil {
@@ -141,11 +160,19 @@ type logosDisqualWalk struct {
 	loop      int
 	clos      int
 	lam       int
+	inner     int
 	addr      map[string]bool
 	inLoop    map[string]bool
 	inClos    map[string]bool
 	refInClos map[string]bool
 	assignOut map[string]bool
+	declared  map[string]bool
+	refTop    map[string]bool
+	hasGoto   bool
+	// frameScopes stacks the scopes index where each enclosing closure's
+	// first scope lands: names declared at or below it belong to the
+	// innermost closure itself, not to a captured frame.
+	frameScopes []int
 }
 
 func (w *logosDisqualWalk) Visit(node syntax.Node) syntax.Visitor {
@@ -157,11 +184,20 @@ func (w *logosDisqualWalk) Visit(node syntax.Node) syntax.Visitor {
 	switch t := node.(type) {
 	case *syntax.FuncLit, *syntax.GroupChild:
 		w.clos++
+		w.inner++
+		w.frameScopes = append(w.frameScopes, len(w.scopes))
 	case *syntax.CallExpr:
 		w.markStage(t)
 	case *syntax.LambdaExpr:
 		if w.stage[t] {
 			w.lam++
+			w.frameScopes = append(w.frameScopes, len(w.scopes))
+		}
+		if _, ok := t.Body.(*syntax.BlockStmt); ok {
+			w.inner++
+			if !w.stage[t] {
+				w.frameScopes = append(w.frameScopes, len(w.scopes))
+			}
 		}
 	case *syntax.ForStmt:
 		w.loop++
@@ -174,11 +210,25 @@ func (w *logosDisqualWalk) Visit(node syntax.Node) syntax.Visitor {
 	case *syntax.Name:
 		if w.clos > 0 && t.Value != "_" {
 			w.refInClos[t.Value] = true
+		} else if w.inner == 0 && t.Value != "_" {
+			w.refTop[t.Value] = true
 		}
 	case *syntax.AssignStmt:
 		w.assign(t)
+	case *syntax.BranchStmt:
+		if t.Tok == syntax.Goto && w.inner == 0 {
+			w.hasGoto = true
+		}
 	case *syntax.RangeClause:
-		if !t.Def {
+		if t.Def {
+			for _, name := range logosAssignNames(t.Lhs) {
+				if w.inner == 0 {
+					w.declared[name] = true
+				}
+				// The for's scope is already on the stack.
+				w.scopes[len(w.scopes)-1][name] = true
+			}
+		} else {
 			for _, name := range logosAssignNames(t.Lhs) {
 				w.inLoop[name] = true
 				w.assigned(name)
@@ -195,13 +245,24 @@ func (w *logosDisqualWalk) leave() {
 	switch top := top.(type) {
 	case *syntax.FuncLit, *syntax.GroupChild:
 		w.clos--
+		w.inner--
+		w.frameScopes = w.frameScopes[:len(w.frameScopes)-1]
 	case *syntax.LambdaExpr:
 		if w.stage[top] {
 			w.lam--
+			w.frameScopes = w.frameScopes[:len(w.frameScopes)-1]
+		}
+		if _, ok := top.Body.(*syntax.BlockStmt); ok {
+			w.inner--
+			if !w.stage[top] {
+				w.frameScopes = w.frameScopes[:len(w.frameScopes)-1]
+			}
 		}
 	case *syntax.ForStmt:
 		w.loop--
-	case *syntax.BlockStmt, *syntax.CaseClause, *syntax.CommClause:
+		w.scopes = w.scopes[:len(w.scopes)-1]
+	case *syntax.BlockStmt, *syntax.CaseClause, *syntax.CommClause,
+		*syntax.IfStmt, *syntax.SwitchStmt, *syntax.SwitchExpr:
 		w.scopes = w.scopes[:len(w.scopes)-1]
 	}
 }
@@ -220,31 +281,50 @@ func (w *logosDisqualWalk) declare(node syntax.Node) {
 				w.params = append(w.params, name.Value)
 			}
 		}
-	case *syntax.BlockStmt, *syntax.CaseClause, *syntax.CommClause:
+	case *syntax.BlockStmt, *syntax.CaseClause, *syntax.CommClause,
+		*syntax.IfStmt, *syntax.ForStmt, *syntax.SwitchStmt, *syntax.SwitchExpr:
+		// Header-bearing statements get a scope too: their initializer
+		// := declares into the statement's own scope, and recording it
+		// is what lets a later closure write to the name stay local
+		// instead of escaping onto a same-named outer variable.
 		scope := make(map[string]bool, len(w.params))
 		for _, name := range w.params {
 			scope[name] = true
+			// Only names of this frame's own function join the goto
+			// disqualification set: a jump here cannot skip a guard
+			// inside a nested literal, and a jump there cannot skip one
+			// here, so closure-declared names stay eligible.
+			if w.inner == 0 {
+				w.declared[name] = true
+			}
 		}
 		w.params = nil
 		w.scopes = append(w.scopes, scope)
 	case *syntax.VarDecl:
 		for _, name := range t.NameList {
 			w.scopes[len(w.scopes)-1][name.Value] = true
+			if w.inner == 0 {
+				w.declared[name.Value] = true
+			}
 		}
 	}
 }
-
 func (w *logosDisqualWalk) assign(s *syntax.AssignStmt) {
 	header := false
 	switch w.stack[len(w.stack)-1].(type) {
-	case *syntax.IfStmt, *syntax.ForStmt, *syntax.SwitchStmt:
+	case *syntax.IfStmt, *syntax.ForStmt, *syntax.SwitchStmt, *syntax.SwitchExpr:
+		// A switch expression's initializer declares into the
+		// expression's own scope, like the statement forms.
 		header = true
 	}
 	scope := w.scopes[len(w.scopes)-1]
 	for _, name := range logosAssignNames(s.Lhs) {
 		if s.Op == syntax.Def {
+			if w.inner == 0 {
+				w.declared[name] = true
+			}
 			redeclared := scope[name] && !header
-			scope[name] = scope[name] || !header
+			scope[name] = true
 			if !redeclared {
 				continue
 			}
@@ -257,7 +337,20 @@ func (w *logosDisqualWalk) assign(s *syntax.AssignStmt) {
 }
 
 func (w *logosDisqualWalk) assigned(name string) {
-	if w.clos > 0 || w.lam > 0 {
+	// Any closure assignment — function literal, group child, or a
+	// stage lambda — can run after a guard is checked, so its captured
+	// target can never narrow; only writes in the frame itself count as
+	// plain outer assignments. A name the innermost closure declares — a
+	// parameter or a block local — cannot outlive that closure, so a
+	// write to it is not captured.
+	if w.inner > 0 || w.lam > 0 {
+		if n := len(w.frameScopes); n > 0 {
+			for _, sc := range w.scopes[w.frameScopes[n-1]:] {
+				if sc[name] {
+					return
+				}
+			}
+		}
 		w.inClos[name] = true
 	} else {
 		w.assignOut[name] = true
@@ -325,7 +418,14 @@ func (check *Checker) logosNilTestOf(cond syntax.Expr) (v *Var, isNeq bool, ok b
 	if name == nil || name.Value == "_" {
 		return nil, false, false
 	}
-	obj := check.lookup(name.Value)
+	// The object the checker bound to this Name is authoritative: a
+	// guard in an `if` initializer shadows an outer variable of the
+	// same name, and re-resolving after that scope closes would attach
+	// the proof to the wrong variable.
+	obj, _ := check.Info.Uses[name]
+	if obj == nil {
+		obj = check.lookup(name.Value)
+	}
 	w, _ := obj.(*Var)
 	if w == nil {
 		return nil, false, false
