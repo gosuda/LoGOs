@@ -9,6 +9,7 @@ package conccmd
 import (
 	"bytes"
 	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,6 +18,7 @@ import (
 	"strconv"
 	"sync"
 	"syscall"
+	"time"
 
 	"cmd/go/internal/base"
 	"cmd/go/internal/cfg"
@@ -60,11 +62,22 @@ func monitor(verb string, inv invocation) {
 	child.Stdin = os.Stdin
 	child.Stdout = os.Stdout
 	scanner := &exitScanWriter{}
+	var stderrR, stderrW *os.File
 	if verb == "run" {
 		// `logos run` reports the program's status as a line on
 		// standard error and itself exits 1; watch for the line so
-		// the command can forward the program's own status.
-		child.Stderr = scanner
+		// the command can forward the program's own status. The child
+		// gets a real pipe, not a copy goroutine: a background helper
+		// that inherits the writer keeps it open forever, and exec.Wait
+		// would hang on the goroutine draining it.
+		var err error
+		stderrR, stderrW, err = os.Pipe()
+		if err != nil {
+			base.Fatalf("logos conc %s: %v", verb, err)
+		}
+		defer stderrR.Close()
+		child.Stderr = stderrW
+		go io.Copy(scanner, stderrR)
 	} else {
 		child.Stderr = os.Stderr
 	}
@@ -85,6 +98,14 @@ func monitor(verb string, inv invocation) {
 	child.Env = append(child.Env, shakeEnv+"="+inv.shake)
 	base.StartSigHandlers()
 	runErr := child.Run()
+	if stderrW != nil {
+		// The run is over and the exit-status line is already in the
+		// pipe, but inherited writers keep it open — drain only what
+		// is buffered, never wait for an EOF that may never come.
+		stderrW.Close()
+		stderrR.SetReadDeadline(time.Now())
+		io.Copy(scanner, stderrR)
+	}
 
 	if _, err := pipe.WriteString(endOfFindings); err != nil {
 		base.Fatalf("logos conc %s: %v", verb, err)
