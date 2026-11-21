@@ -75,7 +75,7 @@ func Unmarshal[T any](data []byte) (T, error) {
 			err := stdjson.Unmarshal(data, &v)
 			return v, err
 		}
-		err := u.UnmarshalJSONFrom(jsontext.NewDecoder(bytes.NewReader(val)))
+		err := u.UnmarshalJSONFrom(jsontext.NewDecoder(bytes.NewReader(val), jsonv2.MatchCaseInsensitiveNames(true)))
 		return v, err
 	}
 	if u, ok := any(&v).(stdjson.Unmarshaler); ok {

@@ -63,7 +63,7 @@ func UnmarshalOption[T any](data []byte) (rt.Option[T], error) {
 	const if comptime.IsStruct[T]() {
 		if u, ok := any(&payload).(jsonv2.UnmarshalerFrom); ok {
 			if val, valid := compact.Trimmed(data); valid {
-				err := u.UnmarshalJSONFrom(jsontext.NewDecoder(bytes.NewReader(val)))
+				err := u.UnmarshalJSONFrom(jsontext.NewDecoder(bytes.NewReader(val), jsonv2.MatchCaseInsensitiveNames(true)))
 				if err != nil {
 					return none, err
 				}
@@ -101,7 +101,7 @@ func UnmarshalOptionInto[T any](data []byte, out *rt.Option[T]) error {
 	const if comptime.IsStruct[T]() {
 		if u, ok := any(&payload).(jsonv2.UnmarshalerFrom); ok {
 			if val, valid := compact.Trimmed(data); valid {
-				if err := u.UnmarshalJSONFrom(jsontext.NewDecoder(bytes.NewReader(val))); err != nil {
+				if err := u.UnmarshalJSONFrom(jsontext.NewDecoder(bytes.NewReader(val), jsonv2.MatchCaseInsensitiveNames(true))); err != nil {
 					return err
 				}
 				*out = rt.Option[T]{Value: payload, Present: true}
