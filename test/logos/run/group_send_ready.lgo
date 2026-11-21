@@ -225,6 +225,72 @@ func gotoPastSend() {
 	check("goto-record-ran", recordCalls.Load() == 1, recordCalls.Load(), 1)
 }
 
+
+func nilSend(ctx context.Context, ch chan []int) error {
+	go group (ctx) {
+		go {
+			ch <- nil
+		}
+	}
+	return nil
+}
+
+type count int
+
+func namedElemSend(ctx context.Context, ch chan count) error {
+	go group (ctx) {
+		go {
+			ch <- 1
+		}
+	}
+	return nil
+}
+
+func floatConstSend(ctx context.Context, ch chan float64) error {
+	go group (ctx) {
+		go {
+			ch <- -1
+		}
+	}
+	return nil
+}
+
+
+func nilSendReady() {
+	ch := make(chan []int, 1)
+	err := nilSend(precancelled(), ch)
+	var got []int
+	got = []int{1}
+	ok := false
+	select {
+	case got, ok = <-ch:
+	default:
+	}
+	check("send-nil", err == nil && ok && got == nil, fmt.Sprint(err, ok, got), "<nil> true <nil>")
+}
+
+func namedElemReady() {
+	ch := make(chan count, 1)
+	err := namedElemSend(precancelled(), ch)
+	var got count = -1
+	select {
+	case got = <-ch:
+	default:
+	}
+	check("send-named-elem", err == nil && got == 1, fmt.Sprint(err, got), "<nil> 1")
+}
+
+func floatConstReady() {
+	ch := make(chan float64, 1)
+	err := floatConstSend(precancelled(), ch)
+	got := 0.0
+	select {
+	case got = <-ch:
+	default:
+	}
+	check("send-untyped-const", err == nil && got == -1, fmt.Sprint(err, got), "<nil> -1")
+}
+
 func main() {
 	watchdog := time.AfterFunc(30*time.Second, func() {
 		fmt.Println("FAIL watchdog")
@@ -239,6 +305,9 @@ func main() {
 	chanSnapshotBeforeValue()
 	shadowedTypeName()
 	gotoPastSend()
+	nilSendReady()
+	namedElemReady()
+	floatConstReady()
 	if failed {
 		os.Exit(1)
 	}
