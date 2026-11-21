@@ -9,6 +9,7 @@ import (
 	"go/constant"
 	. "internal/types/errors"
 	"slices"
+	"strconv"
 )
 
 type LogosConstFor struct {
@@ -24,6 +25,36 @@ type LogosConstFor struct {
 	// for a generic const for, whose expansion is not yet known.
 	Term   []bool
 	Breaks []LogosConstForBreaks
+	// TermRuns holds each check run's Term for a const for nested in
+	// another const for body: the checker checks the same node once per
+	// enclosing field expansion, so a single Term would apply the last
+	// expansion's verdict to every expansion. Keys join the enclosing
+	// struct field ordinals outermost-first; "" holds the top-level run.
+	TermRuns map[string][]bool
+	// runPath is the logosFieldBindPath this record was stored under.
+	runPath string
+}
+
+// logosFieldBindPath joins the enclosing field bindings' struct field
+// ordinals, outermost first; "" outside every const for.
+func (check *Checker) logosFieldBindPath() string {
+	var path string
+	var depth int
+	for b := check.logosFieldBind; b != nil; b = b.outer {
+		depth++
+	}
+	ords := make([]int, 0, depth)
+	for b := check.logosFieldBind; b != nil; b = b.outer {
+		ords = append(ords, b.index)
+	}
+	slices.Reverse(ords)
+	for i, ord := range ords {
+		if i > 0 {
+			path += ","
+		}
+		path += strconv.Itoa(ord)
+	}
+	return path
 }
 
 type LogosCopyContext struct {
@@ -218,6 +249,18 @@ func (check *Checker) logosConstFor(s *syntax.ConstForStmt, ctxt stmtContext) {
 	if check.Info.LogosConstFor == nil {
 		check.Info.LogosConstFor = make(map[syntax.Node]*LogosConstFor)
 	}
+	path := check.logosFieldBindPath()
+	if prev := check.Info.LogosConstFor[s]; prev != nil {
+		// A const for nested in another const for body is checked once
+		// per enclosing field expansion: keep every run's Term under its
+		// enclosing field path so each expansion reads its own verdict.
+		if prev.TermRuns == nil {
+			prev.TermRuns = map[string][]bool{prev.runPath: prev.Term}
+		}
+		info.TermRuns = prev.TermRuns
+		info.TermRuns[path] = info.Term
+	}
+	info.runPath = path
 	check.Info.LogosConstFor[s] = info
 }
 

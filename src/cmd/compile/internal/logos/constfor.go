@@ -278,8 +278,32 @@ type cfActive struct {
 	body  *syntax.BlockStmt
 }
 
-func cutAfterTerminatingField(info *types2.LogosConstFor, ord int) bool {
-	return info != nil && ord < len(info.Term) && info.Term[ord]
+func cutAfterTerminatingField(info *types2.LogosConstFor, path string, ord int) bool {
+	if info == nil {
+		return false
+	}
+	term := info.Term
+	if run, ok := info.TermRuns[path]; ok {
+		term = run
+	}
+	return ord < len(term) && term[ord]
+}
+
+// cfFieldPath joins the enclosing field bindings' struct field ordinals
+// outermost-first, matching types2's logosFieldBindPath for the same
+// expansion.
+func cfFieldPath(active cfChain) string {
+	var path string
+	for _, a := range active {
+		if a.index {
+			continue
+		}
+		if path != "" {
+			path += ","
+		}
+		path += strconv.Itoa(a.field.index)
+	}
+	return path
 }
 
 // unrollConstFor expands one const for over the fields of info with the
@@ -304,7 +328,7 @@ func (fl *fileLower) unrollConstFor(cf *syntax.ConstForStmt, info *types2.LogosC
 		stmts, region := fl.reparseTopCopy(text, cf, fctx)
 		out = append(out, stmts...)
 		host.regions = append(host.regions, region)
-		if cutAfterTerminatingField(info, ord) {
+		if cutAfterTerminatingField(info, "", ord) {
 			break
 		}
 	}
@@ -614,7 +638,7 @@ func (fl *fileLower) unrollConstForFields(cf *syntax.ConstForStmt, fields []cfFi
 		text := fl.expandLevel(cf.Body, active, bodySrc, 0, m, run)
 		out = append(out, fl.reparseStmts(text.s, run.ctx.stamp)...)
 		parts = append(parts, text, gen("\n"))
-		if cutAfterTerminatingField(fl.pkg.info.LogosConstFor[cf], ord) {
+		if cutAfterTerminatingField(fl.pkg.info.LogosConstFor[cf], "", ord) {
 			break
 		}
 	}
@@ -810,8 +834,12 @@ func (fl *fileLower) expandLevel(body *syntax.BlockStmt, active cfChain, text ot
 			innerParts = append(innerParts, one, gen("\n"))
 			// A nested const for obeys the same terminating cutoff as
 			// the outer unroll: later iterations only emit empty
-			// expansions after a terminating field.
-			if cutAfterTerminatingField(fl.pkg.info.LogosConstFor[inner], ord) {
+			// expansions after a terminating field. Each enclosing
+			// expansion reads the verdict recorded for its own field
+			// path: the checker checks the inner statement once per
+			// outer field, and inner termination can depend on the
+			// outer field's value.
+			if cutAfterTerminatingField(fl.pkg.info.LogosConstFor[inner], cfFieldPath(active), ord) {
 				break
 			}
 		}
