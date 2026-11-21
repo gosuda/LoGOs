@@ -7,6 +7,7 @@ package conccmd
 import (
 	"encoding/json"
 	"fmt"
+	"go/token"
 	"os"
 	"path/filepath"
 	"slices"
@@ -177,10 +178,28 @@ func stalledReplacement(file string, line int) (string, bool) {
 // no fix. Only a single-line func header counts; it stops at the
 // nearest header above the line, including a function literal, so a
 // context from an outer function is never taken.
+// headerEncloses reports whether the function header on lines[idx]
+// opens a body that still holds the wait on 1-based line: braces on
+// the lines between the header and the wait stay open. A literal that
+// already closed is a sibling statement, not the enclosing function.
+func headerEncloses(lines []string, idx, line int) bool {
+	depth := 0
+	for i := idx; i < line-1; i++ {
+		depth += strings.Count(lines[i], "{") - strings.Count(lines[i], "}")
+	}
+	return depth > 0
+}
+
 func enclosingChild(lines []string, line int) (ctx, exit string, ok bool) {
 	for idx := line - 2; idx >= 0 && idx >= line-22; idx-- {
 		header := lines[idx]
 		if !strings.Contains(header, "func ") && !strings.Contains(header, "func(") {
+			continue
+		}
+		// Only a header whose body still encloses the wait counts: a
+		// deferred or assigned literal that closed above the line is a
+		// sibling, not the enclosing child.
+		if !headerEncloses(lines, idx, line) {
 			continue
 		}
 		ctx, exit, ok = childContext(header)
@@ -259,6 +278,9 @@ func childContext(header string) (ctx, exit string, ok bool) {
 		return "", "", false
 	}
 	result := strings.TrimSpace(header[end+1:])
+	if i := strings.Index(result, "//"); i >= 0 {
+		result = strings.TrimSpace(result[:i])
+	}
 	result = strings.TrimSpace(strings.TrimSuffix(result, "{"))
 	switch {
 	case result == "":
@@ -272,8 +294,12 @@ func childContext(header string) (ctx, exit string, ok bool) {
 		inner = strings.TrimSpace(inner[1 : len(inner)-1])
 	}
 	if !strings.ContainsAny(inner, ",") {
+		// A single named error result looks like `err error`. Result
+		// types that merely end with the word — func() error, chan
+		// error, <-chan error — must not pass: the rewrite returns a
+		// bare ctx.Err() that would not compile against them.
 		fields := strings.Fields(inner)
-		if len(fields) >= 1 && fields[len(fields)-1] == "error" {
+		if len(fields) == 2 && fields[1] == "error" && token.IsIdentifier(fields[0]) && !token.IsKeyword(fields[0]) {
 			return name, "return " + name + ".Err()", true
 		}
 	}
@@ -338,6 +364,12 @@ func applyStalledFixes(fixes []stalledFix) []string {
 // writeFixedFile stages the new contents next to the file and renames
 // over it, so a failed write cannot leave the source truncated.
 func writeFixedFile(file string, data []byte) error {
+	// Rename over the resolved target, not the link itself: renaming
+	// onto a symlink path would replace the link with a regular file
+	// and leave the shared source unchanged.
+	if target, err := filepath.EvalSymlinks(file); err == nil {
+		file = target
+	}
 	info, err := os.Stat(file)
 	if err != nil {
 		return err
