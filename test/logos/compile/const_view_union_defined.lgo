@@ -1,0 +1,53 @@
+// errorcheck
+
+package p
+
+type Circle struct {
+	Radius float64
+}
+
+type Square struct {
+	Side float64
+}
+
+type ShapeVal interface {
+	Circle | Square
+}
+
+type FrozenShape const ShapeVal
+
+type HolderFrozen struct {
+	S  FrozenShape
+	ID int
+}
+
+func assertFrozen(xs const []HolderFrozen) {
+	if _, ok := xs[0].S.(Circle); ok { // ERROR "cannot erase readonly descendants in a type assertion"
+	}
+}
+
+func switchFrozen(xs const []HolderFrozen) string {
+	switch xs[0].S.(type) { // ERROR "cannot use type switch on value with readonly descendants"
+	case Circle:
+		return "circle"
+	case Square:
+		return "square"
+	case nil:
+		return "nil"
+	default:
+		return "other"
+	}
+}
+
+func exprFrozen(xs const []HolderFrozen) string {
+	return switch xs[0].S.(type) { // ERROR "cannot use type switch on value with readonly descendants"
+	case Circle => "circle"
+	case Square => "square"
+	case nil => "nil"
+	default => "other"
+	}
+}
+
+func frozenAccept(f FrozenShape) FrozenShape {
+	return f
+}
