@@ -1589,6 +1589,25 @@ func (fl *fileLower) lowerOptCallExpr(e *syntax.CallExpr) syntax.Expr {
 	return e
 }
 
+// optSigType strips the const-view and readonly-descendants wrappers the
+// checker records on a callback's type so the signature underneath is
+// visible: calling through a view is unqualified at the call site, so the
+// argument wrapping needs the same unqualified signature.
+func optSigType(t types2.Type) *types2.Signature {
+	for {
+		u := types2.Unalias(t)
+		switch q := u.(type) {
+		case *types2.ConstView:
+			t = q.Elem
+		case *types2.ReadonlyDescendants:
+			t = q.Elem
+		default:
+			sig, _ := u.(*types2.Signature)
+			return sig
+		}
+	}
+}
+
 func (fl *fileLower) callSig(e *syntax.CallExpr) *types2.Signature {
 	if sig := fl.instCallSig(e.Fun); sig != nil {
 		return sig
@@ -1597,7 +1616,7 @@ func (fl *fileLower) callSig(e *syntax.CallExpr) *types2.Signature {
 	case *syntax.Name:
 		if obj := fl.pkg.info.Uses[fun]; obj != nil {
 			if fn, ok := obj.(*types2.Func); ok {
-				if sig, ok := types2.Unalias(fn.Type()).(*types2.Signature); ok {
+				if sig := optSigType(fn.Type()); sig != nil {
 					return sig
 				}
 			}
@@ -1612,20 +1631,14 @@ func (fl *fileLower) callSig(e *syntax.CallExpr) *types2.Signature {
 	case *syntax.SelectorExpr:
 		if sel := fl.pkg.info.Selections[fun]; sel != nil {
 			if fn, ok := sel.Obj().(*types2.Func); ok {
-				if sig, ok := types2.Unalias(fn.Type()).(*types2.Signature); ok {
+				if sig := optSigType(fn.Type()); sig != nil {
 					return sig
 				}
 			}
 		}
-		if sig, ok := types2.Unalias(fl.optType(fun)).(*types2.Signature); ok {
-			return sig
-		}
-		return nil
+		return optSigType(fl.optType(fun))
 	default:
-		if sig, ok := types2.Unalias(fl.optType(fun)).(*types2.Signature); ok {
-			return sig
-		}
-		return nil
+		return optSigType(fl.optType(fun))
 	}
 }
 

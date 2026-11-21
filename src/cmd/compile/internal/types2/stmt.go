@@ -865,10 +865,15 @@ func (check *Checker) typeSwitchStmt(inner stmtContext, s *syntax.SwitchStmt, gu
 
 	// check rhs
 	var sx *operand // switch expression against which cases are compared against; nil if invalid
+	var nilExcused bool
 	{
 		var x operand
 		check.expr(nil, &x, guard.X)
 		sx = check.logosStmtSwitchOperand(&x)
+		// The narrowing state at this program point decides the nil
+		// excuse: a clause body that reassigns the operand must not
+		// bring the nil-case demand back.
+		nilExcused = check.logosSwitchNilExcused(sx)
 	}
 
 	check.multipleSwitchDefaults(s.Body)
@@ -897,7 +902,7 @@ func (check *Checker) typeSwitchStmt(inner stmtContext, s *syntax.SwitchStmt, gu
 		check.stmtList(inner, clause.Body)
 		check.closeScope()
 	}
-	check.logosExhaustiveStmtSwitch(s, sx, seen) // logos M2-S3 hook.
+	check.logosExhaustiveStmtSwitch(s, sx, seen, nilExcused) // logos M2-S3 hook.
 
 	// If lhs exists, we must have at least one lhs variable that was used.
 	// (We can't use check.usage because that only looks at one scope; and

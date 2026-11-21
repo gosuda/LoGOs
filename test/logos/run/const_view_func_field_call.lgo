@@ -1,0 +1,46 @@
+// run
+
+package main
+
+import "fmt"
+
+type CVFunc struct {
+	Name string
+	Call func(x string) string
+	Opt  func(x int?) string
+}
+
+func cvFuncDirect(ts const []CVFunc) string { return ts[0].Call("hi") }
+
+func cvFuncBound(ts const []CVFunc) string {
+	f := ts[1].Call
+	return f("yo")
+}
+
+func cvFuncRange(ts const []CVFunc) string {
+	out := ""
+	for _, t := range ts {
+		out += t.Call("!")
+	}
+	return out
+}
+
+func cvFuncPtr(p const *CVFunc) string { return p.Call("ptr") }
+
+func cvFuncOpt(m const map[string]CVFunc) string {
+	return m["a"]?.Call("opt") ?? "miss"
+}
+
+// A const-view callback called with a plain int where the field takes
+// int?: the call must lower with the option wrapper.
+func cvFuncOptArg(ts const []CVFunc) string { return ts[0].Opt(4) }
+
+func main() {
+	ts := []CVFunc{
+		{Name: "a", Call: func(x string) string { return "a:" + x }, Opt: func(x int?) string { return fmt.Sprintf("a!%d", x ?? -1) }},
+		{Name: "b", Call: func(x string) string { return "b:" + x }},
+	}
+	m := map[string]CVFunc{"a": {Name: "a", Call: func(x string) string { return "a:" + x }}}
+	fmt.Println(cvFuncDirect(ts), cvFuncBound(ts), cvFuncRange(ts), cvFuncPtr(&ts[0]), cvFuncOpt(m))
+	fmt.Println(cvFuncOptArg(ts))
+}

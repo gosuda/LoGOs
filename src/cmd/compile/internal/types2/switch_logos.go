@@ -138,6 +138,9 @@ func (check *Checker) logosTypeArms(e *syntax.SwitchExpr, guard *syntax.TypeSwit
 			}
 		}
 	}
+	// Snapshot the excuse with the operand: an arm body that reassigns the
+	// switched variable must not reintroduce the nil-case demand.
+	nilExcused := check.logosSwitchNilExcused(sx)
 
 	var lhsVars []*Var
 	seen := make(map[Type]syntax.Expr)
@@ -169,12 +172,12 @@ func (check *Checker) logosTypeArms(e *syntax.SwitchExpr, guard *syntax.TypeSwit
 	}
 
 	if sx != nil && len(e.Arms) > 0 && !logosHasDefault(e.Arms) {
-		check.logosCoverage(e, sx, seen)
+		check.logosCoverage(e, sx, seen, nilExcused)
 	}
 	return results
 }
 
-func (check *Checker) logosCoverage(e *syntax.SwitchExpr, sx *operand, seen map[Type]syntax.Expr) {
+func (check *Checker) logosCoverage(e *syntax.SwitchExpr, sx *operand, seen map[Type]syntax.Expr, nilExcused bool) {
 	var misses []string
 	if tset := logosClosedUnion(sx.typ()); tset != nil {
 		for _, term := range tset.terms {
@@ -182,7 +185,7 @@ func (check *Checker) logosCoverage(e *syntax.SwitchExpr, sx *operand, seen map[
 				misses = append(misses, TypeString(term.typ, check.qualifier))
 			}
 		}
-		if _, ok := seen[nil]; !ok {
+		if _, ok := seen[nil]; !ok && !nilExcused {
 			misses = append(misses, "nil")
 		}
 	} else {
