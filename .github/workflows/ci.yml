@@ -1,6 +1,6 @@
 name: CI
 
-# Depot GitHub Actions replacement for the Latchkey CI (see .latchkey/*.sh). One run per commit:
+# Depot GitHub Actions replacement for the Latchkey CI (see .github/scripts/*.sh). One run per commit:
 # route picks suites from the changed paths, build compiles the toolchain once, the suites reuse it.
 on:
   push:
@@ -12,7 +12,7 @@ on:
         description: "core ssa gc gates compiler cgo dogfood, or all"
         default: all
 
-# Latchkey runtime inputs the moved .latchkey/*.sh scripts still read.
+# Latchkey runtime inputs the moved .github/scripts/*.sh scripts still read.
 env:
   LATCHKEY_CI_EVENT_CLASS: ${{ github.event_name == 'pull_request' && 'pr_update' || github.event_name == 'push' && 'branch_push' || 'workflow_dispatch' }}
   LATCHKEY_CI_BASE_REF: ${{ github.base_ref }}
@@ -43,9 +43,9 @@ jobs:
           ref: "${{ github.event.pull_request.head.sha || github.sha }}"
           fetch-depth: 2
           persist-credentials: false
-      - run: for f in .latchkey/*.sh; do bash -n "$f"; done
+      - run: for f in .github/scripts/*.sh; do bash -n "$f"; done
       - id: route
-        run: LATCHKEY_CI_OUTPUT="$GITHUB_OUTPUT" bash .latchkey/route.sh
+        run: LATCHKEY_CI_OUTPUT="$GITHUB_OUTPUT" bash .github/scripts/route.sh
 
   build:
     needs: route
@@ -57,7 +57,7 @@ jobs:
         with:
           ref: "${{ github.event.pull_request.head.sha || github.sha }}"
           persist-credentials: false
-      - run: bash .latchkey/setup.sh build
+      - run: bash .github/scripts/setup.sh build
       - uses: "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9" # v7.0.2
         with:
           name: toolchain
@@ -84,18 +84,18 @@ jobs:
         with:
           name: toolchain
           path: "~/tc"
-      - run: bash .latchkey/setup.sh restore py
+      - run: bash .github/scripts/setup.sh restore py
       - name: Unit tests
-        run: bash .latchkey/unit-tests.sh
+        run: bash .github/scripts/unit-tests.sh
       - name: Compiler fixtures
         if: always()
-        run: bash .latchkey/unit-fixtures.sh
+        run: bash .github/scripts/unit-fixtures.sh
       - name: Lint (gofmt, vet, golangci-lint)
         if: always()
-        run: bash .latchkey/unit-lint.sh
+        run: bash .github/scripts/unit-lint.sh
       - name: Evidence checkers and controls (wasm, tagged facts/methods, field offsets, simd imports, zero arrays)
         if: always()
-        run: bash .latchkey/unit-evidence.sh
+        run: bash .github/scripts/unit-evidence.sh
   scripts:
     needs: [route, build]
     if: needs.route.outputs.regression == 'true'
@@ -110,12 +110,12 @@ jobs:
         with:
           name: toolchain
           path: "~/tc"
-      - run: bash .latchkey/setup.sh restore oracles c23
+      - run: bash .github/scripts/setup.sh restore oracles c23
       - name: Full upstream and LoGOs regression (run.bash; includes every cmd/go script test)
-        run: bash .latchkey/scripts-regression.sh
+        run: bash .github/scripts/scripts-regression.sh
       - name: Installed test subprocess behavior and inline capability ownership
         if: always()
-        run: bash .latchkey/scripts-subprocess.sh
+        run: bash .github/scripts/scripts-subprocess.sh
   upstream:
     needs: [route, build]
     if: needs.route.outputs.core == 'true'
@@ -130,9 +130,9 @@ jobs:
         with:
           name: toolchain
           path: "~/tc"
-      - run: bash .latchkey/setup.sh restore oracles py c23
+      - run: bash .github/scripts/setup.sh restore oracles py c23
       - name: Complete upstream complement under the compact test environment
-        run: bash .latchkey/upstream-complement.sh
+        run: bash .github/scripts/upstream-complement.sh
   autovec:
     needs: [route, build]
     if: needs.route.outputs.core == 'true'
@@ -147,9 +147,9 @@ jobs:
         with:
           name: toolchain
           path: "~/tc"
-      - run: bash .latchkey/setup.sh restore oracles c23
+      - run: bash .github/scripts/setup.sh restore oracles c23
       - name: Automatic vectorization tests
-        run: bash .latchkey/autovec-tests.sh
+        run: bash .github/scripts/autovec-tests.sh
   compiler:
     needs: [route, build]
     if: needs.route.outputs.compiler == 'true'
@@ -168,9 +168,9 @@ jobs:
         with:
           name: toolchain
           path: "~/tc"
-      - run: bash .latchkey/setup.sh restore oracles c23
+      - run: bash .github/scripts/setup.sh restore oracles c23
       - name: Focused compiler and command checks
-        run: bash .latchkey/compiler-checks.sh
+        run: bash .github/scripts/compiler-checks.sh
   gates:
     needs: [route, build]
     if: needs.route.outputs.gate_any == 'true'
@@ -190,9 +190,9 @@ jobs:
         with:
           name: toolchain
           path: "~/tc"
-      - run: bash .latchkey/setup.sh restore oracles
+      - run: bash .github/scripts/setup.sh restore oracles
       - name: Routed feature gates (feature-gate.sh, minus its own toolchain build)
-        run: bash .latchkey/gates-routed.sh
+        run: bash .github/scripts/gates-routed.sh
   gc:
     needs: [route, build]
     if: needs.route.outputs.gc == 'true'
@@ -215,16 +215,16 @@ jobs:
         with:
           name: toolchain
           path: "~/tc"
-      - run: bash .latchkey/setup.sh restore
+      - run: bash .github/scripts/setup.sh restore
       - name: Runtime GC stability under each experiment
         env:
           EXP: ${{ matrix.experiment }}
-        run: bash .latchkey/gc-experiments.sh
+        run: bash .github/scripts/gc-experiments.sh
       - name: Original close-ownership failure probe
         if: matrix.experiment == 'logosarena'
         env:
           EXP: ${{ matrix.experiment }}
-        run: bash .latchkey/gc-probe.sh
+        run: bash .github/scripts/gc-probe.sh
   ssa:
     needs: [route, build]
     if: needs.route.outputs.ssa == 'true'
@@ -244,24 +244,24 @@ jobs:
         with:
           name: toolchain
           path: "~/tc"
-      - run: bash .latchkey/setup.sh restore oracles
+      - run: bash .github/scripts/setup.sh restore oracles
       - name: "SIMD zero guards: frozen attacks, vet, mutation proof"
-        run: bash .latchkey/ssa-zero1.sh
+        run: bash .github/scripts/ssa-zero1.sh
       - name: "SIMD zero guards: native and emulated (qemu) CPUs"
         if: always()
-        run: bash .latchkey/ssa-zero2.sh
+        run: bash .github/scripts/ssa-zero2.sh
       - name: "SIMD gate and dominance scripts (plain and race), wasm runner isolation"
         if: always()
-        run: bash .latchkey/ssa-zero3.sh
+        run: bash .github/scripts/ssa-zero3.sh
       - name: "Autovec native: preflight, faults, memory, GC"
         if: always()
-        run: bash .latchkey/ssa-av1.sh
+        run: bash .github/scripts/ssa-av1.sh
       - name: "Autovec native: mutation proofs and ejection"
         if: always()
-        run: bash .latchkey/ssa-av2.sh
+        run: bash .github/scripts/ssa-av2.sh
       - name: "Autovec native: formatting and generated builtins enforced"
         if: always()
-        run: bash .latchkey/ssa-av3.sh
+        run: bash .github/scripts/ssa-av3.sh
 
   # Stopped by Latchkey after ~15 min in every run so far (cause not found), so manual runs only.
   simdstd:
@@ -278,9 +278,9 @@ jobs:
         with:
           name: toolchain
           path: "~/tc"
-      - run: bash .latchkey/setup.sh restore oracles
+      - run: bash .github/scripts/setup.sh restore oracles
       - name: SIMD standard library at the baseline (v1) and v3 targets
-        run: bash .latchkey/simdstd-library.sh
+        run: bash .github/scripts/simdstd-library.sh
   cgo:
     needs: [route, build]
     if: needs.route.outputs.cgo == 'true'
@@ -295,12 +295,12 @@ jobs:
         with:
           name: toolchain
           path: "~/tc"
-      - run: bash .latchkey/setup.sh restore oracles
+      - run: bash .github/scripts/setup.sh restore oracles
       - name: C compilers (gccgo)
-        run: bash .latchkey/cgo-compilers.sh
+        run: bash .github/scripts/cgo-compilers.sh
       - name: "cgo focused: lint, compat, probes, families, sanitizers, stock oracle"
         if: always()
-        run: bash .latchkey/cgo-focused.sh
+        run: bash .github/scripts/cgo-focused.sh
   cgofull:
     needs: [route, build, cgo]
     if: github.event_name == 'push' && needs.route.outputs.cgo == 'true'
@@ -319,13 +319,13 @@ jobs:
         with:
           name: toolchain
           path: "~/tc"
-      - run: bash .latchkey/setup.sh restore oracles
+      - run: bash .github/scripts/setup.sh restore oracles
       - name: C compilers (gccgo)
-        run: bash .latchkey/cgo-compilers.sh
+        run: bash .github/scripts/cgo-compilers.sh
       - name: cgo full default-short dist under each cgo experiment
         env:
           CGO_EXPERIMENT: ${{ matrix.experiment }}
-        run: bash .latchkey/cgofull-dist.sh
+        run: bash .github/scripts/cgofull-dist.sh
   cgobench:
     needs: [route, build, cgo]
     if: github.event_name == 'push' && needs.route.outputs.cgo == 'true'
@@ -340,11 +340,11 @@ jobs:
         with:
           name: toolchain
           path: "~/tc"
-      - run: bash .latchkey/setup.sh restore oracles
+      - run: bash .github/scripts/setup.sh restore oracles
       - name: C compilers (gccgo)
-        run: bash .latchkey/cgo-compilers.sh
+        run: bash .github/scripts/cgo-compilers.sh
       - name: "cgo benchmark: one frozen sequential campaign per declared row"
-        run: bash .latchkey/cgobench-benchmark.sh
+        run: bash .github/scripts/cgobench-benchmark.sh
   dogfood:
     needs: [route, build]
     if: needs.route.outputs.dogfood == 'true'
@@ -370,27 +370,27 @@ jobs:
         with:
           name: toolchain
           path: "~/tc"
-      - run: bash .latchkey/setup.sh restore nopath
+      - run: bash .github/scripts/setup.sh restore nopath
       - name: "Corpus: contracts, exact sources"
-        run: bash .latchkey/dogfood-contracts.sh
+        run: bash .github/scripts/dogfood-contracts.sh
       - name: "Corpus: build reviewed gglint"
         if: always()
-        run: bash .latchkey/dogfood-gglint.sh
+        run: bash .github/scripts/dogfood-gglint.sh
       - name: "Corpus: tools diagnostics"
         if: always()
-        run: bash .latchkey/dogfood-tools.sh
+        run: bash .github/scripts/dogfood-tools.sh
       - name: "Retain early tools diagnostics"
         if: always()
-        run: bash .latchkey/dogfood-retainearly.sh
+        run: bash .github/scripts/dogfood-retainearly.sh
       - name: "Corpus: replay and assess all 196 cells"
         if: always()
-        run: bash .latchkey/dogfood-replay.sh
+        run: bash .github/scripts/dogfood-replay.sh
       - name: "Corpus: fixtures, backends, FFI, language, lint"
         if: always()
-        run: bash .latchkey/dogfood-corpus.sh
+        run: bash .github/scripts/dogfood-corpus.sh
       - name: "Retain source receipts, reports, and raw evidence"
         if: always()
-        run: bash .latchkey/dogfood-retainevidence.sh
+        run: bash .github/scripts/dogfood-retainevidence.sh
       - uses: "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9" # v7.0.2
         if: always()
         with:
@@ -411,6 +411,6 @@ jobs:
         with:
           name: toolchain
           path: "~/tc"
-      - run: bash .latchkey/setup.sh restore
+      - run: bash .github/scripts/setup.sh restore
       - name: "Autovec benchmarks: base vs candidate, measured sequentially"
-        run: bash .latchkey/bench-autovec.sh
+        run: bash .github/scripts/bench-autovec.sh
