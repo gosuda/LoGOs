@@ -18,20 +18,24 @@ import (
 
 // initOrder computes the Info.InitOrder for package variables.
 func (check *Checker) initOrder() {
+	check.initOrderFor(check.objMap)
+}
+
+func (check *Checker) initOrderFor(objMap map[Object]*declInfo) {
 	// An InitOrder may already have been computed if a package is
 	// built from several calls to (*Checker).Files. Clear it.
 	check.Info.InitOrder = check.Info.InitOrder[:0]
 
 	// Compute the object dependency graph and initialize
 	// a priority queue with the list of graph nodes.
-	pq := nodeQueue(dependencyGraph(check.objMap))
+	pq := nodeQueue(dependencyGraph(objMap))
 	heap.Init(&pq)
 
 	const debug = false
 	if debug {
 		fmt.Printf("Computing initialization order for %s\n\n", check.pkg)
 		fmt.Println("Object dependency graph:")
-		for obj, d := range check.objMap {
+		for obj, d := range objMap {
 			// only print objects that may appear in the dependency graph
 			if obj, _ := obj.(dependency); obj != nil {
 				if len(d.deps) > 0 {
@@ -76,7 +80,7 @@ func (check *Checker) initOrder() {
 
 		// if n still depends on other nodes, we have a cycle
 		if n.ndeps > 0 {
-			cycle := findPath(check.objMap, n.obj, n.obj, make(map[Object]bool))
+			cycle := findPath(objMap, n.obj, n.obj, make(map[Object]bool))
 			// If n.obj is not part of the cycle (e.g., n.obj->b->c->d->c),
 			// cycle will be nil. Don't report anything in that case since
 			// the cycle is reported when the algorithm gets to an object
@@ -102,7 +106,7 @@ func (check *Checker) initOrder() {
 
 		// record the init order for variables with initializers only
 		v, _ := n.obj.(*Var)
-		info := check.objMap[v]
+		info := objMap[v]
 		if v == nil || !info.hasInitializer() {
 			continue
 		}
