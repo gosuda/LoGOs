@@ -1065,3 +1065,59 @@ func efLoopLocalErrSeedsUnproven() {
 	}
 	_ = first
 }
+
+// A defer registered in an earlier iteration checks that iteration's
+// error instance, which cannot prove a field a later iteration's store
+// wrote: the break after the store exits only the store's iteration.
+func efDeferredLoopLocalErrWrongIteration() {
+	h := efHeld{}
+	for i := 0; i < 2; i++ {
+		var err error
+		if i == 0 {
+			defer func() {
+				if err == nil {
+					println(h.stats) // ERROR "result_before_error_check"
+				}
+			}()
+			continue
+		}
+		h.stats, err = efFetchHeld()
+		break
+	}
+}
+
+// A plain write before the defer ends the earlier call's pairing, so the
+// deferred read observes only the later call's result under its own
+// error check and stays accepted.
+func efDeferredResetSeedsLaterError() {
+	h := efHeld{}
+	var first, second error
+	h.stats, first = efFetchHeld()
+	h.stats = 0
+	defer func() {
+		if second == nil {
+			println(h.stats)
+		}
+	}()
+	h.stats, second = efFetchHeld()
+	_ = first
+}
+
+func efPair() (int, bool) {
+	return 0, false
+}
+
+// A multi-value call whose last result is not an error needs no error
+// check, so storing it after the defer does not make the deferred read
+// unproven.
+func efDeferredInfallibleCall() {
+	h := efHeld{}
+	var err error
+	h.stats, err = efFetchHeld()
+	h.stats = 0
+	defer func() {
+		println(h.stats)
+	}()
+	h.stats, _ = efPair()
+	_ = err
+}

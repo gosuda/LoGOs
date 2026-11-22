@@ -992,9 +992,9 @@ type logosEFPass struct {
 	storePos      map[logosEFKey][]syntax.Pos
 	inLoop        map[logosEFKey]bool
 	loopFresh     map[*syntax.ForStmt]map[*Var]bool
+	loopMaybe     map[*syntax.ForStmt]map[*Var]bool
 	loopTuple     map[*syntax.ForStmt]map[logosEFKey]bool
 	reenter       map[*syntax.ForStmt]bool
-	storeStmt     map[logosEFKey][]syntax.Node
 	litLoops      map[syntax.Node]map[*syntax.ForStmt]bool
 	trackedByRoot map[*Var][]logosEFKey
 }
@@ -1143,6 +1143,22 @@ func (p *logosEFPass) tuple(lhs []syntax.Expr, rhs syntax.Expr) (errV *Var, keys
 	return errV, keys
 }
 
+// errCallShape reports whether lhs, rhs is a multi-assignment from a call
+// whose result shape matches the LoGOs trailing-error convention: the
+// tuple has exactly len(lhs) elements, the last one is an error type, and
+// the callee is in LoGOs code. Go-contract calls and calls whose result
+// does not pair a trailing error keep no nil-error store, because their
+// last destination is not an error check.
+func (p *logosEFPass) errCallShape(lhs []syntax.Expr, rhs syntax.Expr) bool {
+	call, ok := syntax.Unparen(rhs).(*syntax.CallExpr)
+	if !ok || len(lhs) < 2 || !p.calleeInLgo(call.Fun) {
+		return false
+	}
+	typ, _, ok := p.check.logosChecked(call)
+	tup, isTuple := typ.(*Tuple)
+	return ok && isTuple && tup.Len() == len(lhs) && Identical(tup.At(tup.Len()-1).typ, universeError)
+}
+
 func (p *logosEFPass) staticFunc(e syntax.Expr) *Func {
 	switch e := syntax.Unparen(e).(type) {
 	case *syntax.Name:
@@ -1199,23 +1215,24 @@ func (p *logosEFPass) collectAssigns() {
 	p.storeErr = make(map[logosEFKey][]*Var)
 	p.sliced = make(map[logosEFKey]bool)
 	p.storePos = make(map[logosEFKey][]syntax.Pos)
-	p.storeStmt = make(map[logosEFKey][]syntax.Node)
 	p.inLoop = make(map[logosEFKey]bool)
 	p.loopFresh = make(map[*syntax.ForStmt]map[*Var]bool)
+	p.loopMaybe = make(map[*syntax.ForStmt]map[*Var]bool)
 	p.loopTuple = make(map[*syntax.ForStmt]map[logosEFKey]bool)
 	p.reenter = make(map[*syntax.ForStmt]bool)
-	mark := func(stmt syntax.Node, lhs []syntax.Expr, rhs syntax.Expr) {
+	mark := func(lhs []syntax.Expr, rhs syntax.Expr) {
 		errV, keys := p.tuple(lhs, rhs)
 		if errV == nil {
-			// A result stored with its error discarded still writes the
-			// destination: record the store without an error identity so
-			// deferred captures know the value can be overwritten.
-			if _, isCall := syntax.Unparen(rhs).(*syntax.CallExpr); isCall && len(lhs) >= 2 {
+			// A LoGOs call whose trailing error is discarded still writes
+			// the destination: record the store without an error identity
+			// so deferred captures know the value can be overwritten.
+			// Calls that do not return a trailing error, and Go-contract
+			// calls, need no check and record nothing.
+			if p.errCallShape(lhs, rhs) {
 				for _, e := range lhs[:len(lhs)-1] {
 					if k, ok := p.destKey(e); ok {
 						p.storePos[k] = append(p.storePos[k], e.Pos())
 						p.storeErr[k] = append(p.storeErr[k], nil)
-						p.storeStmt[k] = append(p.storeStmt[k], stmt)
 					}
 				}
 			}
@@ -1227,7 +1244,6 @@ func (p *logosEFPass) collectAssigns() {
 			}
 			p.storePos[k] = append(p.storePos[k], p.logosEFDestPos(lhs, k))
 			p.storeErr[k] = append(p.storeErr[k], errV)
-			p.storeStmt[k] = append(p.storeStmt[k], stmt)
 		}
 	}
 	note := func(lhs []syntax.Expr, rhs []syntax.Expr, plain bool) {
@@ -1253,13 +1269,13 @@ func (p *logosEFPass) collectAssigns() {
 			rhs := syntax.UnpackListExpr(n.Rhs)
 			note(lhs, rhs, n.Op == 0 || n.Op == syntax.Def)
 			if (n.Op == 0 || n.Op == syntax.Def) && len(rhs) == 1 {
-				mark(n, lhs, rhs[0])
+				mark(lhs, rhs[0])
 			}
 		case *syntax.VarDecl:
 			if n.Values != nil {
 				names := logosEFNames(n)
 				note(names, syntax.UnpackListExpr(n.Values), true)
-				mark(n, names, n.Values)
+				mark(names, n.Values)
 			}
 		case *syntax.RangeClause:
 			note(syntax.UnpackListExpr(n.Lhs), nil, false)
@@ -1292,27 +1308,45 @@ func (p *logosEFPass) collectAssigns() {
 			return true
 		}
 		fresh := p.defsIn(f.Body)
+		// maybe is the possibly-fresh set. Under GOCOMPILEDEBUG=loopvarhash a
+		// clause variable can stay shared even when loopDistinctVars holds,
+		// so the deferred-proof unpairing assumes freshness from
+		// loopDistinctVars alone while the carry checks below require the
+		// certain loopVarsFresh.
+		maybe := p.defsIn(f.Body)
 		// Under Go 1.22 loop-var semantics a variable a := range clause or
 		// a three-clause init declares gets a new instance each iteration;
 		// under earlier semantics it is one shared instance, so a deferred
 		// literal can observe a later iteration's store.
+		distinct := p.loopDistinctVars(f)
+		certain := p.loopVarsFresh(f)
 		if rc, ok := f.Init.(*syntax.RangeClause); ok {
-			if p.loopDistinctVars(f) {
-				for v := range p.defsIn(rc) {
+			for v := range p.defsIn(rc) {
+				if distinct {
+					maybe[v] = true
+				}
+				if certain {
 					fresh[v] = true
 				}
 			}
-		} else if f.Init != nil && p.loopDistinctVars(f) {
+		} else if f.Init != nil {
 			for v := range p.defsIn(f.Init) {
-				fresh[v] = true
+				if distinct {
+					maybe[v] = true
+				}
+				if certain {
+					fresh[v] = true
+				}
 			}
 		}
 		if f.Post != nil {
 			for v := range p.defsIn(f.Post) {
 				fresh[v] = true
+				maybe[v] = true
 			}
 		}
 		p.loopFresh[f] = fresh
+		p.loopMaybe[f] = maybe
 		tuple := p.loopTuple[f]
 		if tuple == nil {
 			tuple = make(map[logosEFKey]bool)
@@ -2573,33 +2607,14 @@ func (p *logosEFPass) loopDistinctVars(f *syntax.ForStmt) bool {
 	return (v == "" || version.Compare(v, "go1.22") >= 0) || lv > 0 && lv != 3
 }
 
-// loopExitsAfterStore reports whether stmt's store inside f's body is the
-// last write of its iteration: every later top-level statement exits the
-// loop through an unlabeled break or a return. It compares statement nodes
-// rather than positions because rewriting-generated nodes do not share the
-// position-table ordering of parse-origin nodes.
-func (p *logosEFPass) loopExitsAfterStore(stmt syntax.Node, f *syntax.ForStmt) bool {
-	if f.Body == nil {
-		return false
-	}
-	for i, s := range f.Body.List {
-		if s != stmt && !inSubtree(s, stmt) {
-			continue
-		}
-		for _, s := range f.Body.List[i+1:] {
-			switch s := s.(type) {
-			case *syntax.BranchStmt:
-				if s.Tok != syntax.Break || s.Label != nil {
-					return false
-				}
-			case *syntax.ReturnStmt:
-			default:
-				return false
-			}
-		}
-		return true
-	}
-	return false
+// loopVarsFresh reports whether f's iteration variables (range clause,
+// for-init, for-post) provably get a new instance each iteration.
+// loopDistinctVars mirrors noder's syntactic eligibility, but ForCapture
+// also hash-gates each variable under GOCOMPILEDEBUG=loopvarhash, so with
+// base.LoopVarHash set a clause variable can stay shared; freshness is
+// then not provable and the analysis must assume sharing.
+func (p *logosEFPass) loopVarsFresh(f *syntax.ForStmt) bool {
+	return base.LoopVarHash == nil && p.loopDistinctVars(f)
 }
 
 // loopsFor memoizes the loops whose bodies contain lit; lateCaptures asks
@@ -2643,14 +2658,9 @@ func (p *logosEFPass) seedEntry(k logosEFKey, lit syntax.Node) (logosEFEntry, bo
 	// cannot pass a value a different call may have failed on.
 	var errV *Var
 	seen := false
-	// The store feeding the captured value may precede the literal: it is
-	// the last store before lit unless a later one overwrites it.
-	latest := -1
-	for i, pos := range p.storePos[k] {
-		if pos.Cmp(lit.Pos()) < 0 {
-			latest = i
-		}
-	}
+	// Only stores that can reach the captured value at function exit
+	// contribute: flow analysis already keeps dead stores out, so a store
+	// absent from st.m at lit names a value overwritten before lit.
 	consider := func(ev *Var) {
 		if seen && errV != ev {
 			errV = nil
@@ -2659,9 +2669,6 @@ func (p *logosEFPass) seedEntry(k logosEFKey, lit syntax.Node) (logosEFEntry, bo
 		}
 		errV = ev
 		seen = true
-	}
-	if latest >= 0 {
-		consider(p.storeErr[k][latest])
 	}
 	for i, ev := range p.storeErr[k] {
 		if !p.storeLiveAfter(p.storePos[k][i], k, lit) {
@@ -2693,19 +2700,17 @@ func (p *logosEFPass) loopLocalErrShared(errV *Var, k logosEFKey, lit syntax.Nod
 		if !p.storeLiveAfter(pos, k, lit) {
 			continue
 		}
-		for f, fresh := range p.loopFresh {
-			if !fresh[errV] {
+		for f, maybe := range p.loopMaybe {
+			if !maybe[errV] {
 				continue
 			}
 			if pos.Cmp(f.Pos()) < 0 || pos.Cmp(syntax.EndPos(f)) > 0 {
 				continue
 			}
-			if !p.reenter[f] && p.loopExitsAfterStore(p.storeStmt[k][i], f) {
-				// The store runs in lit's own iteration and the loop
-				// exits after it: the deferred literal reads exactly the
-				// value this error pairs with.
-				continue
-			}
+			// A break or return after the store exits only the iteration
+			// that wrote the result: a defer registered by an earlier
+			// iteration still observes the field at function exit, so
+			// the pairing is cross-iteration and cannot be proven.
 			return true
 		}
 	}
