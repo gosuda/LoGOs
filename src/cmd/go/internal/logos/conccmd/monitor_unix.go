@@ -105,7 +105,6 @@ func monitor(verb string, inv invocation) {
 	// Always set the shake seed, even when empty: the child inherits
 	// OrigEnv, and an inherited nonzero value would shake the run without
 	// printing a seed. An empty value turns shaking off, matching the
-	// omitted -shake default. Later entries win over inherited ones.
 	child.Env = append(child.Env, shakeEnv+"="+inv.shake)
 	base.StartSigHandlers()
 	runErr := child.Run()
@@ -123,6 +122,7 @@ func monitor(verb string, inv invocation) {
 		stderrR.SetReadDeadline(time.Now().Add(3 * time.Second))
 		io.Copy(scanner, stderrR)
 	}
+	scanner.finish()
 
 	if _, err := pipe.WriteString(endOfFindings); err != nil {
 		base.Fatalf("logos conc %s: %v", verb, err)
@@ -179,8 +179,9 @@ var exitLine = regexp.MustCompile(`exit status ([0-9]+)$`)
 
 // exitScanWriter passes the child's standard error through to standard
 // error while it watches for the "exit status N" line `logos run`
-// prints. The wrapper's own status is 1, so the last such line is the
-// only way to recover the program's status.
+// prints. The wrapper's own status is 1, so the first such line is the
+// only way to recover the program's status; a helper that inherited
+// standard error can print a later one that must not replace it.
 type exitScanWriter struct {
 	mu   sync.Mutex
 	tail []byte
@@ -199,18 +200,44 @@ func (s *exitScanWriter) Write(p []byte) (int, error) {
 		}
 		line := s.tail[:i]
 		s.tail = s.tail[i+1:]
-		if m := exitLine.FindSubmatchIndex(line); m != nil &&
-			(m[0] == 0 || line[m[0]-1] != ':') {
-			// A build diagnostic such as "error obtaining VCS status:
-			// exit status 128" ends with the same phrase; the colon
-			// keeps it from passing for the wrapper's own report.
-			s.code, _ = strconv.Atoi(string(line[m[2]:m[3]]))
-		}
+		s.scan(line)
 	}
 	if len(s.tail) > 4096 {
 		s.tail = s.tail[len(s.tail)-4096:]
 	}
 	return n, err
+}
+
+// finish scans the unterminated tail once the child's standard error
+// is drained: whatever the program or a helper left without a newline
+// still gets one last look for the wrapper's report.
+func (s *exitScanWriter) finish() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.tail) == 0 {
+		return
+	}
+	s.scan(s.tail)
+	s.tail = s.tail[:0]
+}
+
+// scan records the exit status of an "exit status N" line. The first
+// match wins: a helper that inherited standard error can still print a
+// late "exit status N" after the program exited, and it must not
+// replace the program's status. A diagnostic such as "error obtaining
+// VCS status: exit status 128" carries a colon and whitespace before
+// the phrase, which the glued report never has.
+func (s *exitScanWriter) scan(line []byte) {
+	m := exitLine.FindSubmatchIndex(line)
+	if m == nil || s.code != 0 {
+		return
+	}
+	prefix := line[:m[0]]
+	trimmed := bytes.TrimRight(prefix, " \t")
+	if len(trimmed) < len(prefix) && bytes.HasSuffix(trimmed, []byte(":")) {
+		return
+	}
+	s.code, _ = strconv.Atoi(string(line[m[2]:m[3]]))
 }
 
 func (s *exitScanWriter) status() int {
