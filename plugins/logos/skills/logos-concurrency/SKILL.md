@@ -122,12 +122,15 @@ goroutine ever waits on the lock, so no finding prints even at
 
 ## Read conc::group_unbounded
 
-A group without a limit runs 10000 children at one time. The count follows the work the program gives the group. A group with a limit never gets this finding. Repair by giving the group a limit.
+A group without a limit gets this finding when 10000 of its children run at one time; children that finish before later ones start can keep the running count below the threshold, so the demo keeps them alive. A group with a limit never gets this finding. Repair by giving the group a limit.
 
 ```lgo
 go group (ctx) {
   for range 10000 {
-    go { work()? }
+    go {
+      work()?
+      time.Sleep(time.Second)
+    }
   }
 }
 ```
