@@ -2164,11 +2164,27 @@ func (c *cfLeaf) cfDeadConstCase(n syntax.Node) bool {
 				break
 			}
 		}
-		if live == nil || len(live.Body) == 0 {
-			return live == nil
+		if live == nil {
+			return true
 		}
-		bs := offAt(c.run.ctx.starts, syntax.StartPos(live.Body[0]))
-		be := offAt(c.run.ctx.starts, syntax.EndPos(live.Body[len(live.Body)-1]))
+		var bs, be int
+		if len(live.Body) == 0 {
+			// An empty live arm still bounds the dead region: it runs
+			// from its colon to the next case or the switch's close,
+			// and no statement of a sibling arm sits inside it.
+			bs = offAt(c.run.ctx.starts, live.Colon) + 1
+			be = offAt(c.run.ctx.starts, sw.Rbrace)
+			liveCase := offAt(c.run.ctx.starts, live.Case)
+			for _, cs := range sw.Cases {
+				if cs != live && offAt(c.run.ctx.starts, cs.Case) > liveCase {
+					be = offAt(c.run.ctx.starts, cs.Case)
+					break
+				}
+			}
+		} else {
+			bs = offAt(c.run.ctx.starts, syntax.StartPos(live.Body[0]))
+			be = offAt(c.run.ctx.starts, syntax.EndPos(live.Body[len(live.Body)-1]))
+		}
 		return pos < bs || pos > be
 	}
 	return false

@@ -307,6 +307,37 @@ func embeddedIface() []string {
 	return out
 }
 
+// An empty live arm still makes its siblings dead: a comptime call in
+// a dead arm is never specialized, so the comptime.Error inside it
+// cannot fire for the field whose live arm is empty.
+func InnerRejects[T any]() string {
+	const switch T {
+	case int:
+		comptime.Error("InnerRejects rejects int")
+		return "bad"
+	case string:
+		return "ok"
+	}
+	return "other"
+}
+
+type EmptyLive struct {
+	A int
+	B string
+}
+
+func emptyLiveArm[T any]() string {
+	out := ""
+	const for _, f := range comptime.Fields[T]() {
+		const switch f.Type {
+		case int:
+		case string:
+			out += InnerRejects[f.Type]()
+		}
+	}
+	return out
+}
+
 func main() {
 	fmt.Println(tags[App]())
 	var r Rig
@@ -332,4 +363,5 @@ func main() {
 	fmt.Println(tildeConv(&h))
 	fmt.Println(pkgQualified())
 	fmt.Println(embeddedIface())
+	fmt.Println(emptyLiveArm[EmptyLive]())
 }
