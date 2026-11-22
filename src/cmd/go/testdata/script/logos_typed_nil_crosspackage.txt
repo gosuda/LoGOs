@@ -33,6 +33,7 @@ cd derived
 stderr 'platform pointer beta\.Missing \(\*bytes\.Buffer\)'
 stderr 'platform pointer b\.E \(\*example\.com/derived/beta\.MyError\)'
 stderr 'platform pointer beta\.Gen\[\*beta\.MyError\]\{\}\.Zero\(\) \(\*example\.com/derived/beta\.MyError\)'
+stderr 'platform pointer p \(\*example\.com/derived/beta\.MyError\) returned as error result'
 cd ..
 
 -- ok/go.mod --
@@ -156,6 +157,11 @@ func (g Gen[T]) Zero() T {
 	return z
 }
 
+func (g Gen[T]) Pair[U any](u U) (T, U) {
+	var t T
+	return t, u
+}
+
 -- derived/alpha/alpha.lgo --
 package alpha
 
@@ -176,4 +182,15 @@ func ReturnField() error {
 
 func ReturnGeneric() error {
 	return beta.Gen[*beta.MyError]{}.Zero()
+}
+
+func ReturnPairExplicit() error {
+	p, _ := beta.Gen[*beta.MyError]{}.Pair[int](0)
+	return p
+}
+
+func ReturnPairInferred() error {
+	g := beta.Gen[*beta.MyError]{}
+	p, _ := g.Pair(3)
+	return p
 }
