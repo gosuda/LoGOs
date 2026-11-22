@@ -371,11 +371,12 @@ func (f *jsonField) fallbackQuotedValueLines(field string, kind scalarKind) []st
 }
 
 type trialMember struct {
-	keyed   bool
-	spell   string
-	sample  string
-	ptr     bool
-	keyFunc string
+	keyed     bool
+	spell     string
+	sample    string
+	ptr       bool
+	keyFunc   string
+	decodable bool
 }
 
 type jsonUnionClass struct {
@@ -405,11 +406,12 @@ func (js *jsonStruct) unionMembersOf(utyp types2.Type) (jsonUnionClass, bool) {
 	for i, c := range members {
 		sample, isPtr := strings.CutPrefix(c.code, "*")
 		uc.members[i] = trialMember{
-			keyed:   c.keyed,
-			spell:   c.code,
-			sample:  sample,
-			ptr:     isPtr,
-			keyFunc: c.keyFunc,
+			keyed:     c.keyed,
+			spell:     c.code,
+			sample:    sample,
+			decodable: c.decodable,
+			ptr:       isPtr,
+			keyFunc:   c.keyFunc,
 		}
 		if c.keyed {
 			uc.keyed = append(uc.keyed, i)
@@ -519,6 +521,9 @@ func unionKeyScanLines(uc jsonUnionClass) []string {
 
 func unionMemberTrialLines(uc jsonUnionClass, i int) []string {
 	s := uc.members[i]
+	if !s.decodable {
+		return nil
+	}
 	scratch := fmt.Sprintf("_logos_scratch%d", i)
 	decl := fmt.Sprintf("var %s %s", scratch, s.spell)
 	if s.ptr {

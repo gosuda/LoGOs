@@ -14,15 +14,16 @@ import (
 )
 
 type unionMemberClass struct {
-	spell   string
-	code    string
-	bare    string
-	keyFunc string
-	keys    []string
-	hasJSON bool
-	keyed   bool
-	foreign bool
-	typ     types2.Type
+	spell     string
+	code      string
+	bare      string
+	keyFunc   string
+	keys      []string
+	hasJSON   bool
+	decodable bool
+	keyed     bool
+	foreign   bool
+	typ       types2.Type
 }
 
 type unionNames struct {
@@ -101,9 +102,9 @@ func classifyFactMember(holderPkg *types2.Package, member string, codeQual func(
 		keyFunc = "_logos_jsonkey_" + typeName
 	}
 	if !eligible || len(keys) == 0 {
-		return unionMemberClass{spell: spell, code: code, bare: typeName, keyFunc: keyFunc, keyed: false, hasJSON: hasJSON, foreign: foreign}, hasJSON
+		return unionMemberClass{spell: spell, code: code, bare: typeName, keyFunc: keyFunc, keyed: false, hasJSON: hasJSON, decodable: hasJSON, foreign: foreign}, hasJSON
 	}
-	return unionMemberClass{spell: spell, code: code, bare: typeName, keyFunc: keyFunc, keys: keys, hasJSON: true, keyed: true, foreign: foreign}, true
+	return unionMemberClass{spell: spell, code: code, bare: typeName, keyFunc: keyFunc, keys: keys, hasJSON: true, decodable: true, keyed: true, foreign: foreign}, true
 }
 
 func memberPackageFor(holderPkg *types2.Package, path string) *types2.Package {
@@ -150,7 +151,8 @@ func classifyOneMember(holderPkg *types2.Package, staticJSON map[*types2.Named]b
 	}
 	named, ok := unaliasConstView(elem).(*types2.Named)
 	if !ok || named.Obj() == nil || named.Obj().Pkg() == nil {
-		return unionMemberClass{spell: spell, keyed: false, hasJSON: hasUnmarshalMethods(m), typ: m}, hasUnmarshalMethods(m)
+		decodable := hasUnmarshalJSON(m)
+		return unionMemberClass{spell: spell, keyed: false, hasJSON: hasUnmarshalMethods(m), decodable: decodable, typ: m}, decodable
 	}
 	if args := named.TypeArgs(); args != nil && args.Len() > 0 {
 		for i := range args.Len() {
@@ -164,19 +166,23 @@ func classifyOneMember(holderPkg *types2.Package, staticJSON map[*types2.Named]b
 	samePkg := holderPkg != nil && memberPkg != nil && holderPkg.Path() == memberPkg.Path()
 	concreteArgs := named.TypeArgs() != nil && named.TypeArgs().Len() > 0
 	hasJSON := hasUnmarshalMethods(m)
+	decodable := hasUnmarshalJSON(m)
 	var keys []string
 	var eligible bool
 	if samePkg || concreteArgs {
 		keys, eligible = localUnionKeys(staticJSON, named)
 	} else {
-		keys, eligible, hasJSON = foreignUnionKeys(memberPkg, bare, hasJSON)
+		var factDecoder bool
+		keys, eligible, factDecoder = foreignUnionKeys(memberPkg, bare, hasUnmarshalJSON(m))
+		hasJSON = factDecoder || hasJSON
+		decodable = factDecoder || decodable
 	}
 	keyFunc := keyFuncFor(bare, memberPkg, holderPkg)
 	foreign := !samePkg
 	if !eligible || len(keys) == 0 {
-		return unionMemberClass{spell: spell, bare: bare, keyFunc: keyFunc, keyed: false, hasJSON: hasJSON, foreign: foreign, typ: m}, true
+		return unionMemberClass{spell: spell, bare: bare, keyFunc: keyFunc, keyed: false, hasJSON: hasJSON, decodable: decodable, foreign: foreign, typ: m}, true
 	}
-	return unionMemberClass{spell: spell, bare: bare, keyFunc: keyFunc, keys: keys, hasJSON: true, keyed: true, foreign: foreign, typ: m}, true
+	return unionMemberClass{spell: spell, bare: bare, keyFunc: keyFunc, keys: keys, hasJSON: true, decodable: true, keyed: true, foreign: foreign, typ: m}, true
 }
 
 func localUnionKeys(staticJSON map[*types2.Named]bool, named *types2.Named) ([]string, bool) {
