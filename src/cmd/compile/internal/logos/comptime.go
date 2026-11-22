@@ -1124,7 +1124,7 @@ func cfScopeFunc(scope *types2.Scope, x syntax.Expr) *types2.Func {
 	return fn
 }
 
-func (fl *fileLower) cfNestedSite(call *syntax.CallExpr, active cfChain, run *cfRun, parents map[syntax.Node]syntax.Node) (int, int, string, bool) {
+func (fl *fileLower) cfNestedSite(call *syntax.CallExpr, active cfChain, run *cfRun, parents map[syntax.Node]syntax.Node, leaf *cfLeaf) (int, int, string, bool) {
 	fun, indexed := call.Fun.(*syntax.IndexExpr)
 	callee := call.Fun
 	if indexed {
@@ -1150,6 +1150,20 @@ func (fl *fileLower) cfNestedSite(call *syntax.CallExpr, active cfChain, run *cf
 				// same-named package type.
 				targs = append(targs, t)
 				continue
+			}
+			// A function-local type declaration shadows the defining
+			// package's type of the same name: the copy carries that
+			// declaration, so the nested call specializes for the local
+			// type, not the package one.
+			if leaf != nil {
+				if t, handled := leaf.cfLocalType(n.Value, call); handled {
+					if t == nil {
+						fl.cfError(pos, "[comptime::generic_targ] cannot resolve a type argument of %s", obj.Name())
+						return 0, 0, "", false
+					}
+					targs = append(targs, t)
+					continue
+				}
 			}
 		}
 		t, ok := fl.cfResolveTypeExpr(arg, active, run.sites)

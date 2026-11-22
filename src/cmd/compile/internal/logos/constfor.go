@@ -2126,7 +2126,7 @@ func (c *cfLeaf) subCall(n *syntax.CallExpr) bool {
 		// diagnose code the instantiation never runs.
 		return true
 	}
-	if s, e, text, ok := c.fl.cfNestedSite(n, c.active, c.run, c.parents); ok {
+	if s, e, text, ok := c.fl.cfNestedSite(n, c.active, c.run, c.parents, c); ok {
 		c.add(s, e, text)
 	}
 	return true
