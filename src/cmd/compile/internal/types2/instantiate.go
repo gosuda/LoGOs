@@ -273,6 +273,9 @@ func (check *Checker) implements(V, T Type, constraint bool, cause *string) bool
 	}
 	if !constraint {
 		if check.logosPropGate(Ti, Vu) {
+			if tset := logosClosedUnion(T); tset != nil && !logosUnionAdmits(V, tset) {
+				return false
+			}
 			return check.logosImplementsProperty(V, T, Ti, cause, nopos)
 		}
 	}

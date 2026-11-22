@@ -60,6 +60,7 @@ func Lower(pkg *types2.Package, info *types2.Info, files []*syntax.File, src map
 	f := facts.Write(pkg, info, files, src)
 	f.BareUnions = bareUnions(pkg)
 	f.DualUse = dualUseUnionNames(pkg, info, files)
+	f.CheckedUnionTypes = true
 	facts.SetCurrent(f)
 	shared := &packageLower{info: info, tpkg: pkg, files: files, src: src, constMaps: collectConstMaps(files, info)}
 	shared.importedMaps = map[*types2.Var]*constMapGen{}
@@ -67,7 +68,16 @@ func Lower(pkg *types2.Package, info *types2.Info, files []*syntax.File, src map
 	shared.composites, shared.compositeSeq = collectComposites(files, info)
 	shared.importedComposites = map[*types2.Var]*importedComposite{}
 	base.ClearLogosCtClones(pkg.Path())
-	shared.ctExp = newCfExpander(shared, files, src) // comptime generics of every file, registered before any file lowers.
+	newCfExpander(shared, files, src) // comptime generics of every file, registered before any file lowers.
+	var prepared *ctPreparedPackage
+	if info.LogosCtImport != nil && len(info.LogosCtInst) != 0 {
+		var err error
+		prepared, err = stageCtPreparedPackage(pkg, info)
+		if err != nil {
+			base.Fatalf("%v", err)
+		}
+	}
+	var traceFile *syntax.File
 	edits := make(map[*syntax.File][]Edit)
 	tupleFiles := make(map[string]int)
 	changed := false
@@ -75,6 +85,9 @@ func Lower(pkg *types2.Package, info *types2.Info, files []*syntax.File, src map
 		data, ok := src[file]
 		if !ok {
 			continue
+		}
+		if traceFile == nil {
+			traceFile = file
 		}
 		buf := slices.Clone(data)
 		fl := &fileLower{
@@ -101,9 +114,19 @@ func Lower(pkg *types2.Package, info *types2.Info, files []*syntax.File, src map
 			edits[file] = editsOf(data, fl.base, fl.splices)
 		}
 	}
+	if prepared != nil {
+		if len(prepared.sites.decls) != 0 {
+			if traceFile == nil {
+				base.Fatalf("logos: no consumer source file for comptime trace sites")
+			}
+			prepared.sites.appendDecls(traceFile)
+		}
+		info.LogosCtFinish = prepared.finish
+		changed = true
+	}
 	clear(interpKinds) // Kinds of originals a const for replaced are never consumed; drop them with the rest.
 	if !changed {
-		changed = infoHasConstView(info, files) || hasSynthStaticMethods(pkg) // pure-info consts (rt.Freeze results) need a plain recheck.
+		changed = infoHasConstView(info, files) || hasSynthStaticMethods(pkg) || infoHasInferredOption(pkg, info, files)
 	}
 	base.ExitIfErrors()
 	for _, file := range files {
@@ -206,6 +229,7 @@ func (pl *packageLower) declOf(tn *types2.TypeName) (*syntax.TypeDecl, []byte) {
 // fileLower carries the state of lowering one file.
 type fileLower struct {
 	pkg           *packageLower
+	ct            *ctLowerContext
 	file          *syntax.File
 	src           []byte
 	keywords      facts.KeywordIndex
@@ -234,6 +258,7 @@ type fileLower struct {
 	// this file, as parsed nodes and as eject text.
 	constDecls                 []syntax.Decl
 	constText                  string
+	constMapMarks              map[string]constMapTextRef
 	names                      map[*types2.Package]string
 	genImps                    *genImports
 	importsPendingGeneratedUse []*syntax.ImportDecl
@@ -891,6 +916,7 @@ func (fl *fileLower) lowerFile() {
 	fl.scanRodataMarkers() // hand-written //logos:rodata lines.
 	fl.lowerArenaEject()
 	fl.lowerZeroCopy() // zero-copy string/bytes conversions.
+	fl.enrollLoweredConstMaps()
 	fl.lowerCTFE()
 	fl.lowerConstMapRanges()
 	fl.eraseConstViews()  // erase const views and bound recorded slices; also erases readonly interface `const` qualifiers.
@@ -949,6 +975,7 @@ func (fl *fileLower) lowerFile() {
 	fl.resolveChainMoves() // copies of moved chain operands, after every edit inside them.
 	fl.finalizeConstFor()
 	fl.remapRegions()
+	fl.finishConstMapEjectText()
 }
 
 // genImports tracks synthesized and reused imports for one file being lowered.
@@ -1170,6 +1197,7 @@ type funcLower struct {
 	ft               *syntax.FuncType
 	body             *syntax.BlockStmt
 	specs            []resultSpec
+	ctYield          *ctYieldFrame
 	errName          string
 	hasDeferTry      bool
 	hasErrdefer      bool

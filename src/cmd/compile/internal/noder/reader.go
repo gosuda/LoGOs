@@ -21,6 +21,7 @@ import (
 	"cmd/compile/internal/objw"
 	"cmd/compile/internal/pgoir"
 	"cmd/compile/internal/reflectdata"
+	"cmd/compile/internal/staticdata"
 	"cmd/compile/internal/staticinit"
 	"cmd/compile/internal/typecheck"
 	"cmd/compile/internal/types"
@@ -45,6 +46,13 @@ type pkgReader struct {
 	posBases []*src.PosBase
 	pkgs     []*types.Pkg
 	typs     []*types.Type
+
+	logosCtDefinitions map[index]bool
+	logosCtHelpers     map[index]bool
+	logosCtExact       map[string]index
+	logosCtGraph       map[string][]string
+	logosCtMapFuncs    map[index]bool
+	logosCtConstMaps   index
 
 	// offset for rewriting the given (absolute!) index into the output,
 	// but bitwise inverted so we can detect if we're missing the entry
@@ -216,6 +224,11 @@ type readerDict struct {
 	subdicts             []objInfo
 	rtypes               []typeInfo
 	itabs                []itabInfo
+	logosCtBody          bool
+	logosCtTemplate      bool
+	logosCtFuncs         map[int]typeInfo
+	logosCtSemanticSlots map[int]int
+	logosCtVariant       logosCtVariant
 }
 
 type readerMethodExprInfo struct {
@@ -512,6 +525,16 @@ func (r *reader) doTyp() *types.Type {
 		assert(obj.Op() == ir.OTYPE)
 		return obj.Type()
 
+	case pkgbits.TypeNamedCaptured:
+		info := r.objInfo()
+		captures := make([]*types.Type, r.Len())
+		for i := range captures {
+			captures[i] = r.typ()
+		}
+		node := r.p.objIdx(info.idx, captures, r.p.typListIdx(info.explicits, r.dict), false)
+		assert(node.Op() == ir.OTYPE)
+		return node.Type()
+
 	case pkgbits.TypeTypeParam:
 		return r.dict.targs[r.Len()]
 
@@ -640,6 +663,161 @@ func (r *reader) param() *types.Field {
 // that object's definition.
 var objReader = map[*types.Sym]pkgReaderIndex{}
 
+func (pr *pkgReader) registerLogosCtObject(idx index) (string, pkgbits.CodeObj) {
+	path, name, code := pr.PeekObj(idx)
+	assert(code != pkgbits.ObjStub)
+	sym := types.NewPkg(path, "").Lookup(name)
+	if prev, ok := objReader[sym]; pr == localPkgReader || !ok {
+		assert(prev.pr != pr || prev.idx == idx)
+		objReader[sym] = pkgReaderIndex{pr: pr, idx: idx}
+	}
+	return path, code
+}
+
+func (pr *pkgReader) registerLogosCtDefinition(idx index) (string, pkgbits.CodeObj) {
+	if pr.logosCtDefinitions == nil {
+		pr.logosCtDefinitions = make(map[index]bool)
+	}
+	pr.logosCtDefinitions[idx] = true
+	return pr.registerLogosCtObject(idx)
+}
+
+func (pr *pkgReader) addLogosCtExact(id string, idx index) {
+	if pr.logosCtExact == nil {
+		pr.logosCtExact = make(map[string]index)
+	}
+	if previous, ok := pr.logosCtExact[id]; ok {
+		assert(previous == idx)
+		return
+	}
+	pr.logosCtExact[id] = idx
+	_, code := pr.registerLogosCtDefinition(idx)
+	assert(code == pkgbits.ObjFunc)
+}
+
+func (pr *pkgReader) addLogosCtHelper(idx index, readonly bool) string {
+	assert(!pr.logosCtDefinitions[idx])
+	path, code := pr.registerLogosCtDefinition(idx)
+	assert(code == pkgbits.ObjVar || code == pkgbits.ObjFunc && !readonly)
+	if pr.logosCtHelpers == nil {
+		pr.logosCtHelpers = make(map[index]bool)
+	}
+	pr.logosCtHelpers[idx] = readonly
+	return path
+}
+
+func (pr *pkgReader) addLogosCtMapFunc(idx index) {
+	if pr.logosCtMapFuncs[idx] {
+		return
+	}
+	_, code := pr.registerLogosCtObject(idx)
+	assert(code == pkgbits.ObjFunc && !pr.logosCtDefinitions[idx])
+	if pr.logosCtMapFuncs == nil {
+		pr.logosCtMapFuncs = make(map[index]bool)
+	}
+	pr.logosCtMapFuncs[idx] = true
+}
+
+func (pr *pkgReader) readLogosCtConstMaps(idx index) {
+	assert(idx != 0)
+	pr.logosCtConstMaps = idx
+	table := pr.TempDecoder(pkgbits.SectionMeta, idx, pkgbits.SyncPrivate)
+	for range table.Len() {
+		_ = table.String()
+		row := pr.TempDecoder(pkgbits.SectionMeta, table.Reloc(pkgbits.SectionMeta), pkgbits.SyncPrivate)
+		_ = row.Len()
+		_ = row.Bool()
+		for range 3 {
+			pr.addLogosCtMapFunc(row.Reloc(pkgbits.SectionObj))
+		}
+		pr.RetireDecoder(&row)
+	}
+	assert(table.Data.Len() == 0)
+	pr.RetireDecoder(&table)
+}
+
+func (r *reader) readLogosCtObjects() {
+	if r.Data.Len() == 0 {
+		return
+	}
+	for range r.Len() {
+		id := r.String()
+		r.p.addLogosCtExact(id, r.Reloc(pkgbits.SectionObj))
+	}
+	r.readLogosCtGraph()
+	if r.Data.Len() == 0 {
+		return
+	}
+	for range r.Len() {
+		idx := r.Reloc(pkgbits.SectionObj)
+		r.p.addLogosCtHelper(idx, r.Bool())
+	}
+	if r.Data.Len() == 0 {
+		return
+	}
+	for range r.Len() {
+		r.p.addLogosCtMapFunc(r.Reloc(pkgbits.SectionObj))
+	}
+	if r.Data.Len() != 0 {
+		r.p.logosCtConstMaps = r.Reloc(pkgbits.SectionMeta)
+		assert(r.p.logosCtConstMaps != 0 && r.Data.Len() == 0)
+	}
+}
+
+func (r *reader) readLogosCtGraph() {
+	if n := r.Len(); n != 0 {
+		r.p.logosCtGraph = make(map[string][]string, n)
+		for range n {
+			id := r.String()
+			r.p.logosCtGraph[id] = r.Strings()
+		}
+	}
+}
+
+type logosCtVariant struct {
+	p  *pkgReader
+	id string
+}
+
+func (pr *pkgReader) logosCtVariant(id string) logosCtVariant {
+	if _, ok := pr.logosCtGraph[id]; ok {
+		return logosCtVariant{pr, id}
+	}
+	if localPkgReader != nil {
+		if _, ok := localPkgReader.logosCtGraph[id]; ok {
+			return logosCtVariant{localPkgReader, id}
+		}
+	}
+	base.Fatalf("missing comptime forwarding graph for %s", id)
+	panic("unreachable")
+}
+
+func (dict *readerDict) logosCtChild(slot int) logosCtVariant {
+	variant := dict.logosCtVariant
+	if variant.p == nil {
+		return logosCtVariant{}
+	}
+	ordinal, ok := dict.logosCtSemanticSlots[slot]
+	if !ok {
+		return logosCtVariant{}
+	}
+	children := variant.p.logosCtGraph[variant.id]
+	assert(ordinal < len(children))
+	if child := children[ordinal]; child != "" {
+		return logosCtVariant{variant.p, child}
+	}
+	return logosCtVariant{}
+}
+
+func (dict *readerDict) bindLogosCtVariant(variant logosCtVariant) {
+	if variant.p != nil {
+		assert(!dict.shaped)
+		base := dict.baseSym
+		dict.baseSym = base.Pkg.Lookup(base.Name + ".logosct." + variant.id)
+		dict.logosCtVariant = variant
+	}
+}
+
 // obj reads an instantiated object reference from the bitstream.
 func (r *reader) obj() ir.Node {
 	return r.p.objInstIdx(r.objInfo(), r.dict, false)
@@ -694,6 +872,10 @@ func (pr *pkgReader) objIdx(idx index, implicits, explicits []*types.Type, shape
 // Other sources of internal failure (such as duplicate definitions) still fail
 // the build.
 func (pr *pkgReader) objIdxMayFail(idx index, implicits, explicits []*types.Type, shaped bool) (ir.Node, error) {
+	return pr.objIdxVariant(idx, implicits, explicits, shaped, logosCtVariant{})
+}
+
+func (pr *pkgReader) objIdxVariant(idx index, implicits, explicits []*types.Type, shaped bool, variant logosCtVariant) (ir.Node, error) {
 	rname := pr.newReader(pkgbits.SectionName, idx, pkgbits.SyncObject1)
 	_, sym := rname.qualifiedIdent()
 	tag := pkgbits.CodeObj(rname.Code(pkgbits.SyncCodeObj))
@@ -705,19 +887,27 @@ func (pr *pkgReader) objIdxMayFail(idx index, implicits, explicits []*types.Type
 			return sym.Def.(ir.Node), nil
 		}
 		if pri, ok := objReader[sym]; ok {
-			return pri.pr.objIdxMayFail(pri.idx, nil, explicits, shaped)
+			return pri.pr.objIdxVariant(pri.idx, implicits, explicits, shaped, variant)
 		}
 		if sym.Pkg.Path == "runtime" {
 			return typecheck.LookupRuntime(sym.Name), nil
 		}
 		base.Fatalf("unresolved stub: %v", sym)
+	} else if pr != localPkgReader && pr.logosCtDefinitions[idx] {
+		if pri := objReader[sym]; pri.pr != nil && pri.pr == localPkgReader {
+			return pri.pr.objIdxVariant(pri.idx, implicits, explicits, shaped, variant)
+		}
 	}
 
 	dict, err := pr.objDictIdx(sym, idx, implicits, explicits, shaped)
 	if err != nil {
 		return nil, err
 	}
+	if dict.logosCtTemplate {
+		return nil, fmt.Errorf("missing checked comptime instance %v", dict.baseSym)
+	}
 
+	dict.bindLogosCtVariant(variant)
 	sym = dict.baseSym
 	if !sym.IsBlank() && sym.Def != nil {
 		return sym.Def.(*ir.Name), nil
@@ -1109,6 +1299,24 @@ func (pr *pkgReader) objDictIdx(sym *types.Sym, idx index, implicits, explicits 
 	for i := range dict.itabs {
 		dict.itabs[i] = itabInfo{typ: r.typInfo(), iface: r.typInfo()}
 	}
+	if r.Data.Len() != 0 {
+		dict.logosCtBody = r.Bool()
+		dict.logosCtTemplate = r.Bool()
+		if n := r.Len(); n != 0 {
+			dict.logosCtFuncs = make(map[int]typeInfo, n)
+			for range n {
+				slot := r.Len()
+				dict.logosCtFuncs[slot] = r.typInfo()
+			}
+		}
+		if n := r.Len(); n != 0 {
+			dict.logosCtSemanticSlots = make(map[int]int, n)
+			for range n {
+				slot := r.Len()
+				dict.logosCtSemanticSlots[slot] = r.Len()
+			}
+		}
+	}
 
 	return &dict, nil
 }
@@ -1218,7 +1426,12 @@ func (r *reader) funcExt(name *ir.Name, method *types.Sym) {
 	//
 	// That's why name.Defn is set here, so ir.VisitFuncsBottomUp can analyze function.
 	// TODO(mdempsky,cuonglm): find a cleaner way to handle this.
-	if name.Sym().Pkg == types.LocalPkg || r.hasTypeParams() {
+	emit := name.Sym().Pkg == types.LocalPkg
+	if r.dict.logosCtBody {
+		fn.SetDupok(true)
+		emit = r.p == localPkgReader
+	}
+	if emit || r.hasTypeParams() {
 		name.Defn = fn
 	}
 
@@ -1274,7 +1487,7 @@ func (r *reader) typeExt(name *ir.Name) {
 
 	typ := name.Type()
 
-	if r.hasTypeParams() {
+	if r.hasTypeParams() || r.dict.logosCtBody {
 		// Mark type as fully instantiated to ensure the type descriptor is written
 		// out as DUPOK and method wrappers are generated even for imported types.
 		typ.SetIsFullyInstantiated(true)
@@ -1549,12 +1762,27 @@ func (pr *pkgReader) dictNameOf(dict *readerDict) *ir.Name {
 	}
 
 	assertOffset("subdictionaries", dict.subdictsOffset())
-	for _, info := range dict.subdicts {
+	for slot, info := range dict.subdicts {
 		explicits := pr.typListIdx(info.explicits, dict)
+		child := dict.logosCtChild(slot)
+		if _, ok := dict.logosCtFuncs[slot]; ok {
+			var fn *ir.Name
+			if child.p != nil {
+				if idx, ok := child.p.logosCtExact[child.id]; ok {
+					fn = child.p.objIdx(idx, nil, nil, false).(*ir.Name)
+				}
+			}
+			if fn == nil {
+				path, name, _ := pr.PeekObj(info.idx)
+				base.Fatalf("missing checked comptime instance %s.%s%v", path, name, explicits)
+			}
+			ot = objw.SymPtr(lsym, ot, staticdata.FuncLinksym(fn), 0)
+			continue
+		}
 
 		// Careful: Due to subdictionary cycles, name may not be fully
 		// initialized yet.
-		name := pr.objDictName(info.idx, dict.targs, explicits)
+		name := pr.objDictNameVariant(info.idx, dict.targs, explicits, child)
 
 		ot = objw.SymPtr(lsym, ot, name.Linksym(), 0)
 	}
@@ -2490,7 +2718,9 @@ func (r *reader) expr() (res ir.Node) {
 			var shapedFn, dictPtr ir.Node
 			_, shapedFn, dictPtr, typeQueryResult = r.funcInst(pos)
 			fun = shapedFn
-			args.Append(dictPtr)
+			if dictPtr != nil {
+				args.Append(dictPtr)
+			}
 		} else {
 			fun = r.expr()
 		}
@@ -2700,35 +2930,56 @@ func (r *reader) funcInst(pos src.XPos) (wrapperFn, baseFn, dictPtr, typeQueryRe
 		implicits = r.dict.targs
 	}
 
+	var info objInfo
+	var variant logosCtVariant
 	if r.Bool() { // dynamic subdictionary
 		idx := r.Len()
-		info := r.dict.subdicts[idx]
-		explicits := r.p.typListIdx(info.explicits, r.dict)
-
-		baseFn = r.p.objIdx(info.idx, implicits, explicits, true).(*ir.Name)
-
-		// TODO(mdempsky): Is there a more robust way to get the
-		// dictionary pointer type here?
-		dictPtrType := baseFn.Type().Param(0).Type
-		dictPtr = typecheck.Expr(ir.NewConvExpr(pos, ir.OCONVNOP, dictPtrType, r.dictWord(pos, r.dict.subdictsOffset()+idx)))
-
-		return
+		if idx == logosCtStaticInstance {
+			info = r.objInfo()
+			variant = r.p.logosCtVariant(r.String())
+		} else {
+			if sig, ok := r.dict.logosCtFuncs[idx]; ok {
+				typ := r.p.typIdx(sig, r.dict, true)
+				ptr := r.rttiWord(pos, r.dict.subdictsOffset()+idx)
+				fun := typecheck.Expr(ir.NewConvExpr(pos, ir.OCONVNOP, typ, ptr))
+				return fun, fun, nil, nil
+			}
+			info := r.dict.subdicts[idx]
+			explicits := r.p.typListIdx(info.explicits, r.dict)
+			baseFn = r.p.objIdx(info.idx, implicits, explicits, true).(*ir.Name)
+			dictPtrType := baseFn.Type().Param(0).Type
+			dictPtr = typecheck.Expr(ir.NewConvExpr(pos, ir.OCONVNOP, dictPtrType, r.dictWord(pos, r.dict.subdictsOffset()+idx)))
+			return
+		}
+	} else {
+		info = r.objInfo()
 	}
 
-	info := r.objInfo()
 	explicits := r.p.typListIdx(info.explicits, r.dict)
+	if len(explicits) == 0 {
+		fn := r.p.objIdx(info.idx, implicits, nil, false)
+		return fn, fn, nil, nil
+	}
 
-	wrapperFn = r.p.objIdx(info.idx, implicits, explicits, false).(*ir.Name)
+	wrapper, err := r.p.objIdxVariant(info.idx, implicits, explicits, false, variant)
+	if err != nil {
+		base.Fatalf("%v", err)
+	}
+	wrapperFn = wrapper.(*ir.Name)
 	typeQueryResult = logosConcreteImplements(pos, wrapperFn, explicits)
 	baseFn = r.p.objIdx(info.idx, implicits, explicits, true).(*ir.Name)
 
-	dictName := r.p.objDictName(info.idx, implicits, explicits)
+	dictName := r.p.objDictNameVariant(info.idx, implicits, explicits, variant)
 	dictPtr = typecheck.Expr(ir.NewAddrExpr(pos, dictName))
 
 	return
 }
 
 func (pr *pkgReader) objDictName(idx index, implicits, explicits []*types.Type) *ir.Name {
+	return pr.objDictNameVariant(idx, implicits, explicits, logosCtVariant{})
+}
+
+func (pr *pkgReader) objDictNameVariant(idx index, implicits, explicits []*types.Type, variant logosCtVariant) *ir.Name {
 	rname := pr.newReader(pkgbits.SectionName, idx, pkgbits.SyncObject1)
 	_, sym := rname.qualifiedIdent()
 	tag := pkgbits.CodeObj(rname.Code(pkgbits.SyncCodeObj))
@@ -2736,7 +2987,7 @@ func (pr *pkgReader) objDictName(idx index, implicits, explicits []*types.Type) 
 	if tag == pkgbits.ObjStub {
 		assert(!sym.IsBlank())
 		if pri, ok := objReader[sym]; ok {
-			return pri.pr.objDictName(pri.idx, nil, explicits)
+			return pri.pr.objDictNameVariant(pri.idx, nil, explicits, variant)
 		}
 		base.Fatalf("unresolved stub: %v", sym)
 	}
@@ -2745,6 +2996,7 @@ func (pr *pkgReader) objDictName(idx index, implicits, explicits []*types.Type) 
 	if err != nil {
 		base.Fatalf("%v", err)
 	}
+	dict.bindLogosCtVariant(variant)
 
 	return pr.dictNameOf(dict)
 }
@@ -3545,6 +3797,18 @@ func (r *reader) op() ir.Op {
 // @@@ Package initialization
 
 func (r *reader) pkgInit(self *types.Pkg, target *ir.Package) {
+	var ctDecls []index
+	if n := r.Len(); n != 0 {
+		ctDecls = make([]index, 0, n)
+		for range n {
+			id := r.String()
+			def := r.objInfo()
+			assert(len(def.explicits) == 0)
+			r.p.addLogosCtExact(id, def.idx)
+			ctDecls = append(ctDecls, def.idx)
+		}
+	}
+	r.readLogosCtGraph()
 	cgoPragmas := make([][]string, r.Len())
 	for i := range cgoPragmas {
 		cgoPragmas[i] = r.Strings()
@@ -3554,8 +3818,98 @@ func (r *reader) pkgInit(self *types.Pkg, target *ir.Package) {
 	r.pkgInitOrder(target)
 
 	r.pkgDecls(target)
-
 	r.Sync(pkgbits.SyncEOF)
+	r.pkgLogosCt(target)
+
+	for _, def := range ctDecls {
+		fn := r.p.objIdx(def, nil, nil, false).(*ir.Name).Func
+		target.Funcs = append(target.Funcs, fn)
+	}
+}
+
+type logosCtInitGlobal struct {
+	unit string
+	name *ir.Name
+}
+
+func (r *reader) pkgLogosCt(target *ir.Package) {
+	if r.Data.Len() == 0 {
+		return
+	}
+	assert(r.p == localPkgReader)
+	type helperRoot struct {
+		idx  index
+		unit string
+	}
+	var roots []helperRoot
+	units := make([]string, r.Len())
+	// A later unit may be referenced by an earlier unit's initializer.
+	for i := range units {
+		id := r.String()
+		units[i] = id
+		exact, ok := r.p.logosCtExact[id]
+		assert(ok && id != "")
+		owner, _, _ := r.p.PeekObj(exact)
+		for range r.Len() {
+			root := r.objInfo()
+			assert(len(root.explicits) == 0)
+			path := r.p.addLogosCtHelper(root.idx, r.Bool())
+			assert(path == owner)
+			roots = append(roots, helperRoot{idx: root.idx, unit: id})
+		}
+	}
+	globals := make(map[index]logosCtInitGlobal)
+	for _, root := range roots {
+		name := r.p.objIdx(root.idx, nil, nil, false).(*ir.Name)
+		switch name.Class {
+		case ir.PEXTERN:
+			name.SetLogosCtGlobal(true)
+			if r.p.logosCtHelpers[root.idx] {
+				name.MarkReadonly()
+			}
+			target.Externs = append(target.Externs, name)
+			globals[root.idx] = logosCtInitGlobal{unit: root.unit, name: name}
+		case ir.PFUNC:
+			assert(name.Func.Dupok() && name.Defn == name.Func)
+			target.Funcs = append(target.Funcs, name.Func)
+		default:
+			base.FatalfAt(name.Pos(), "unexpected comptime helper class: %v", name.Class)
+		}
+	}
+	for _, id := range units {
+		r.logosCtHelperInit(id, globals)
+	}
+	if r.Data.Len() != 0 {
+		r.p.readLogosCtConstMaps(r.Reloc(pkgbits.SectionMeta))
+		assert(r.Data.Len() == 0)
+	}
+}
+
+func (r *reader) logosCtHelperInit(id string, globals map[index]logosCtInitGlobal) {
+	n := r.Len()
+	if n == 0 {
+		return
+	}
+	s := staticinit.Schedule{
+		Plans: make(map[ir.Node]*staticinit.Plan),
+		Temps: make(map[ir.Node]*ir.Name),
+	}
+	for range n {
+		if r.Len() != 1 {
+			base.Fatalf("comptime instance %q has a multi-result helper initializer", id)
+		}
+		lhs := r.objInfo()
+		global, ok := globals[lhs.idx]
+		assert(len(lhs.explicits) == 0 && ok && global.unit == id && global.name.Defn == nil)
+		name := global.name
+		rhs := r.expr()
+		as := typecheck.Stmt(ir.NewAssignStmt(name.Pos(), name, rhs))
+		name.Defn = as
+		s.StaticInit(as)
+		if len(s.Out) != 0 {
+			base.FatalfAt(name.Pos(), "comptime instance %q helper %v needs dynamic initialization", id, name)
+		}
+	}
 }
 
 // pkgInitOrder creates a synthetic init function to handle any

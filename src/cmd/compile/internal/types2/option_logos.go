@@ -130,6 +130,10 @@ func (check *Checker) logosOptionAssign(x *operand, T Type, context string) bool
 	if Topt == nil && Vopt == nil {
 		return false
 	}
+	if Topt != nil && !x.isNil() && !Identical(x.typ(), T) && logosClosedUnion(Topt.Elem) != nil {
+		check.assignment(x, Topt.Elem, context)
+		return true
+	}
 	if isUntyped(x.typ()) {
 		if x.isNil() {
 			if Topt == nil {

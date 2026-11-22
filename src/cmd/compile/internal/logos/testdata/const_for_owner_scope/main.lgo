@@ -1,0 +1,29 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package main
+
+import (
+	"fmt"
+
+	"example.com/ownerscope/owner"
+)
+
+// The imported generic must not resolve either of these names in main.
+type scoreSeed [7]int
+
+func nextScore(n int) int { return 3*n + 2 }
+
+type Single struct {
+	A int
+}
+
+type Pair struct {
+	A int
+	B int
+}
+
+func main() {
+	fmt.Println(owner.Score[Single](), owner.Score[Pair]())
+}

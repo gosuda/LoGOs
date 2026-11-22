@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"go/token"
 	"slices"
+	"strings"
 
 	"cmd/compile/internal/syntax"
 	"cmd/compile/internal/types2"
@@ -579,29 +580,27 @@ func (fc *funcLower) lowerReturn(s *syntax.ReturnStmt) []syntax.Stmt {
 		fl.add(retOff, retOff, fc.okName+" = true; ")
 		return []syntax.Stmt{assignOf(retPos, []syntax.Expr{nameOf(retPos, fc.okName)}, []syntax.Expr{nameOf(retPos, "true")}), s}
 	}
-	if len(fc.specs) == 0 {
+	if len(fc.specs) == 0 || !returnKeywordAt(fl.src, retOff) {
 		return []syntax.Stmt{s}
 	}
 	end := stmtEnd(fl.src, retOff)
-	for _, sp := range fl.splices {
-		if retOff < sp.end && sp.start < end {
-			return []syntax.Stmt{s}
-		}
-	}
-	trimmed := trimSpan(fl.src, span{start: retOff + len("return"), end: end})
-	resText := fl.lazyText(trimmed)
 	results := syntax.UnpackListExpr(s.Results)
 	temps := fc.nextTemps(len(fc.specs))
 	build := func(rhs []syntax.Expr) []syntax.Stmt {
-		return fc.returnValues(retPos, temps, rhs, nil)
+		return scoped(retPos, fc.returnValues(retPos, temps, rhs, nil))
 	}
 	native := build(slices.Clone(results))
-	tw := &twin{}
-	resMark := tw.mark(retPos, resText)
-	text := renderText(build([]syntax.Expr{resMark}), tw.subs)
-	prefix := leftoverComments(fl, span{start: retOff, end: end}, []span{trimmed})
-	fl.addT(retOff, end, cat(prefix, text))
+	const operandsMark = "_logos_return_operands"
+	text := renderText(build([]syntax.Expr{nameOf(retPos, operandsMark)}), nil)
+	cut := strings.Index(text.s, operandsMark)
+	fl.addT(retOff, retOff+len("return"), text.slice(0, cut))
+	fl.addAfterExpression(end, text.s[cut+len(operandsMark):])
 	return native
+}
+
+func returnKeywordAt(src []byte, off int) bool {
+	end := off + len("return")
+	return end <= len(src) && string(src[off:end]) == "return" && (end == len(src) || !isIdentChar(src[end]))
 }
 
 func (fc *funcLower) returnValues(pos syntax.Pos, temps []string, rhs []syntax.Expr, mid []syntax.Stmt) []syntax.Stmt {
@@ -647,4 +646,282 @@ func skipCloseParens(src []byte, from int) int {
 		return false
 	})
 	return end
+}
+
+func (fc *funcLower) prepareCleanupSyntax() {
+	fc.detectCleanups()
+	groups := fc.collectScopeSyntax()
+	if !fc.hasDeferTry && !fc.hasErrdefer && !fc.hasScopeDefer && !groups {
+		return
+	}
+	names := make(map[types2.Object]string)
+	for i := range fc.specs {
+		sp := &fc.specs[i]
+		spelling := fc.fl.cswName("ctresult")
+		if sp.name == nil {
+			sp.name = nameOf(sp.field.Pos(), spelling)
+			sp.field.Name = sp.name
+		} else {
+			if obj := fc.fl.pkg.info.Defs[sp.name]; obj != nil && sp.name.Value != "_" {
+				names[obj] = spelling
+			}
+			sp.name.Value = spelling
+		}
+	}
+	if len(names) != 0 {
+		syntax.Inspect(fc.body, func(n syntax.Node) bool {
+			if id, ok := n.(*syntax.Name); ok {
+				if spelling := names[fc.fl.pkg.info.Uses[id]]; spelling != "" {
+					id.Value = spelling
+				}
+			}
+			return true
+		})
+	}
+	if len(fc.specs) != 0 {
+		fc.errName = fc.specs[len(fc.specs)-1].name.Value
+	}
+	if fc.hasErrdefer {
+		pos := fc.body.Pos()
+		fc.okName = fc.fl.cswName("ctreturned")
+		fc.hoistTemp(fc.okName, fc.fl.ctBuiltin(pos, "bool"), "")
+	}
+}
+
+func (fc *funcLower) finishCleanupSyntax() {
+	if len(fc.hoisted) == 0 {
+		return
+	}
+	pos := fc.body.Pos()
+	list := make([]syntax.Stmt, 0, len(fc.hoisted)+len(fc.body.List))
+	for _, slot := range fc.hoisted {
+		list = append(list, typedVarDecl(pos, nameOf(pos, slot.name), slot.native))
+	}
+	fc.body.List = append(list, fc.body.List...)
+}
+
+func (fc *funcLower) cleanupReturned(pos syntax.Pos) []syntax.Stmt {
+	if !fc.hasErrdefer {
+		return nil
+	}
+	return []syntax.Stmt{assignOf(pos, []syntax.Expr{nameOf(pos, fc.okName)}, []syntax.Expr{fc.fl.ctBuiltin(pos, "true")})}
+}
+
+func (w ctWalker) lowerCleanupCallSyntax(stmt syntax.Stmt, lower func(syntax.Expr) (syntax.Expr, []syntax.Stmt)) []syntax.Stmt {
+	pos := stmt.Pos()
+	var expr syntax.Expr
+	var conditional bool
+	switch s := stmt.(type) {
+	case *syntax.CallStmt:
+		expr = s.Call
+	case *syntax.ErrdeferStmt:
+		expr, conditional = s.Call, true
+	}
+	try, propagates := syntax.Unparen(expr).(*syntax.TryExpr)
+	if propagates {
+		expr = try.X
+	}
+	call := syntax.Unparen(expr).(*syntax.CallExpr)
+	n := 0
+	if propagates {
+		n = w.tryValueCount(try, call)
+	}
+	lowerCall := func(call *syntax.CallExpr) []syntax.Stmt {
+		return w.cleanupDeferSyntax(stmt, call, n, conditional, propagates, lower)
+	}
+	if out, ok := w.ctOptionCleanup(call, lowerCall); ok {
+		return []syntax.Stmt{blockEndingAt(pos, syntax.EndPos(stmt), out)}
+	}
+	return []syntax.Stmt{blockEndingAt(pos, syntax.EndPos(stmt), lowerCall(call))}
+}
+
+func (w ctWalker) cleanupDeferSyntax(stmt syntax.Stmt, call *syntax.CallExpr, n int, conditional, propagates bool, lower func(syntax.Expr) (syntax.Expr, []syntax.Stmt)) []syntax.Stmt {
+	pos := stmt.Pos()
+	rt := func(name string) syntax.Expr { return w.fl.ctPkgSelector(pos, rtImportPath, name) }
+	target := func() syntax.Expr { return addrOf(pos, nameOf(pos, w.errName)) }
+	if !conditional && n == 0 {
+		_, indexed := syntax.Unparen(call.Fun).(*syntax.IndexExpr)
+		if indexed || w.cleanupMethodValue(call.Fun) != nil {
+			call.Fun = w.cleanupInstantiatedTarget(call.Fun)
+		}
+		invoke, pre := lower(call)
+		join := callOf(pos, rt("DeferTry"), []syntax.Expr{target(), invoke})
+		deferred := deferOf(pos, join)
+		deferred.DeferAt = stmt.(*syntax.CallStmt).DeferAt
+		return append(pre, deferred)
+	}
+	pre := w.cleanupCapture(call, lower)
+	var body []syntax.Stmt
+	if propagates {
+		err := w.nextErr()
+		takeErr := errDefineOf(pos, blankNames(pos, n), call, nameOf(pos, err))
+		join := callOf(pos, rt("DeferTry"), []syntax.Expr{target(), nameOf(pos, err)})
+		body = []syntax.Stmt{takeErr, exprStmtOf(pos, join)}
+	} else {
+		body = []syntax.Stmt{exprStmtOf(pos, call)}
+	}
+	if conditional {
+		aborted := at(&syntax.Operation{Op: syntax.Not, X: nameOf(pos, w.okName)}, pos)
+		failed := at(&syntax.Operation{Op: syntax.Neq, X: nameOf(pos, w.errName), Y: w.fl.ctBuiltin(pos, "nil")}, pos)
+		guard := at(&syntax.Operation{Op: syntax.OrOr, X: aborted, Y: failed}, pos)
+		body = []syntax.Stmt{ifOf(pos, nil, guard, body)}
+	}
+	deferred := deferOf(pos, callOf(pos, deferClosure(pos, body), nil))
+	if s, ok := stmt.(*syntax.CallStmt); ok {
+		deferred.DeferAt = s.DeferAt
+	}
+	return append(pre, deferred)
+}
+
+func (w ctWalker) deferredChainSyntax() chainSyntaxLower {
+	lower := w.chain()
+	lower.capture = true
+	return lower
+}
+
+func (w ctWalker) cleanupCapture(call *syntax.CallExpr, lower func(syntax.Expr) (syntax.Expr, []syntax.Stmt)) []syntax.Stmt {
+	if w.fl.ctChainCall(call) {
+		invoke, pre := w.fl.lowerCtChain(call, w.deferredChainSyntax())
+		if deferred, ok := invoke.(*syntax.CallExpr); ok {
+			*call = *deferred
+			return pre
+		}
+		w.reject(call, "deferred chain did not retain its invocation")
+		return pre
+	}
+	if invoke, pre, handled := w.ctPropertyCall(call); handled {
+		*call = *invoke.(*syntax.CallExpr)
+		return w.captureCleanupArgs(call, nil, pre)
+	}
+	fc := w.funcLower
+	original := call.Fun
+	fun, pre := lower(w.cleanupInstantiatedTarget(original))
+	call.Fun = fun
+	if !isBuiltinExpr(fc, original) && (w.cleanupMethodValue(original) != nil || !cleanupStaticFunction(fc, original)) {
+		pre = append(pre, fc.cleanupBind(&call.Fun))
+	}
+	signature := *call
+	signature.Fun = original
+	return w.captureCleanupArgs(call, &signature, pre)
+}
+
+func (w ctWalker) captureCleanupArgs(call, signature *syntax.CallExpr, pre []syntax.Stmt) []syntax.Stmt {
+	fc := w.funcLower
+	if len(call.ArgList) == 0 {
+		return pre
+	}
+	captured := make([]syntax.Expr, 0, len(call.ArgList))
+	for i, arg := range call.ArgList {
+		kind := argKind(fc, arg)
+		value := arg
+		var target types2.Type
+		if signature != nil {
+			var head []syntax.Stmt
+			target = w.ctOptionTarget(signature, arg, i)
+			value, head = w.expr(arg)
+			pre = append(pre, head...)
+		}
+		switch kind {
+		case argInline:
+			got := w.ctOptionValue(arg, value, target)
+			if got != value {
+				pre = append(pre, fc.cleanupBind(&got))
+			}
+			captured = append(captured, syntax.UnpackListExpr(got)...)
+		case argMulti:
+			names := fc.multiNames(arg)
+			pos := arg.Pos()
+			pre = append(pre, defineOf(pos, tempNodes(pos, names), []syntax.Expr{value}))
+			tup := w.fl.pkg.info.TypeOf(arg).(*types2.Tuple)
+			for index, name := range names {
+				var ref syntax.Expr = nameOf(pos, name)
+				got := ref
+				if signature != nil {
+					got = w.ctOptionValueFrom(ref, tup.At(index).Type(), w.ctOptionTarget(signature, arg, index))
+				}
+				if got != ref {
+					pre = append(pre, fc.cleanupBind(&got))
+				}
+				captured = append(captured, got)
+			}
+		default:
+			got := w.ctOptionValue(arg, value, target)
+			if got == arg {
+				if typ := fc.groupDeclaredType(arg); typ != nil {
+					pos := arg.Pos()
+					name := fc.nextArg()
+					d := at(&syntax.VarDecl{
+						NameList: []*syntax.Name{nameOf(pos, name)},
+						Type:     w.fl.ctTypeExpr(pos, typ),
+						Values:   value,
+					}, pos)
+					pre = append(pre, at(&syntax.DeclStmt{DeclList: []syntax.Decl{d}}, pos))
+					captured = append(captured, nameOf(pos, name))
+					continue
+				}
+			}
+			pre = append(pre, fc.cleanupBind(&got))
+			captured = append(captured, got)
+		}
+	}
+	call.ArgList = captured
+	return pre
+}
+
+func (fc *funcLower) cleanupBind(dst *syntax.Expr) syntax.Stmt {
+	value := *dst
+	pos := value.Pos()
+	name := fc.nextArg()
+	*dst = nameOf(pos, name)
+	return defineOf(pos, []syntax.Expr{nameOf(pos, name)}, []syntax.Expr{value})
+}
+
+func cleanupStaticFunction(fc *funcLower, fun syntax.Expr) bool {
+	if index, ok := syntax.Unparen(fun).(*syntax.IndexExpr); ok && genericTarget(fc, fun) {
+		fun = index.X
+	}
+	_, static := fc.calleeFunc(fun)
+	return static
+}
+
+func (w ctWalker) cleanupMethodValue(fun syntax.Expr) *syntax.SelectorExpr {
+	sel, _, ok := propCallSel(fun)
+	if !ok {
+		return nil
+	}
+	if selection := w.fl.pkg.info.Selections[sel]; selection != nil && selection.Kind() == types2.MethodVal {
+		return sel
+	}
+	return nil
+}
+
+func (w ctWalker) cleanupInstantiatedTarget(fun syntax.Expr) syntax.Expr {
+	if !genericTarget(w.funcLower, fun) {
+		return fun
+	}
+	base := syntax.Unparen(fun)
+	if index, ok := base.(*syntax.IndexExpr); ok {
+		base = syntax.Unparen(index.X)
+	}
+	var ident *syntax.Name
+	switch e := base.(type) {
+	case *syntax.Name:
+		ident = e
+	case *syntax.SelectorExpr:
+		ident = e.Sel
+	}
+	args := w.fl.pkg.info.Instances[ident].TypeArgs
+	if args.Len() == 0 {
+		return fun
+	}
+	// A prelude can require a method value before later arguments run.
+	// The checked instantiation also covers types that source cannot name.
+	pos := fun.Pos()
+	types := make([]syntax.Expr, args.Len())
+	for i := range types {
+		types[i] = w.fl.ctTypeExpr(pos, args.At(i))
+	}
+	bound := at(&syntax.IndexExpr{X: base, Index: listOf(pos, types)}, pos)
+	w.fl.carryType(bound, fun)
+	return bound
 }

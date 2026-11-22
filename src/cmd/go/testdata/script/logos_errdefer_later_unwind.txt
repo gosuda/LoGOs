@@ -1,0 +1,110 @@
+# errdefer runs when a later plain defer starts unwinding after a successful
+# return, by panic and by runtime.Goexit; it stays skipped on a plain success.
+# Native and ejected output must match. SPEC T-104.2.
+
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+cd m
+
+logos run .
+# One anchored semantic check: all required events, in order.
+stdout '(?s)\Aplain ok: cleanup skipped\ndefer-second\ndefer-first\nstart-panic\nerrdefer-ran\nrecovered: late-boom\nerrdefer-ran-goexit\ndone\n\z'
+
+# The ejected run must print the same lines as this native run.
+cp stdout $WORK/native-stdout.txt
+
+logos eject -o out
+exists out/main.go
+! exists out/main.lgo
+
+cd out
+# SPEC 0.3: ejected output builds with upstream go1.27.2 from $UPROOT1272.
+exists $UPROOT1272/bin/go
+exec $UPROOT1272/bin/go version
+stdout '^go version go1\.27\.2 '
+exec env -u GOROOT $UPROOT1272/bin/go build ./...
+exec env -u GOROOT $UPROOT1272/bin/go run .
+cmp stdout $WORK/native-stdout.txt
+exec $GOROOT/bin/gofmt -l .
+! stdout .
+cd ..
+
+-- m/go.mod --
+module example.com/errdeferlaterunwind
+
+go 1.27
+
+-- m/main.lgo --
+package main
+
+import (
+	"context"
+	"fmt"
+	"runtime"
+)
+
+func note(s string) {
+	fmt.Println(s)
+}
+
+func plainSuccess() error {
+	errdefer note("plain-errdefer-must-not-run")
+	return nil
+}
+
+func lifoOrder() error {
+	defer note("defer-first")
+	defer note("defer-second")
+	return nil
+}
+
+func laterPanic() (err error) {
+	errdefer note("errdefer-ran")
+	defer startPanic()
+	return nil
+}
+
+func startPanic() {
+	note("start-panic")
+	panic("late-boom")
+}
+
+func goexitCase() error {
+	ctx := context.Background()
+	go group (ctx, limit = 1) {
+		go exitWorker()
+	}
+	return nil
+}
+
+func exitWorker() (err error) {
+	errdefer note("errdefer-ran-goexit")
+	defer triggerGoexit()
+	return nil
+}
+
+func triggerGoexit() {
+	runtime.Goexit()
+}
+
+//logos:allow(slop::discarded_error)
+func main() {
+	if err := plainSuccess(); err != nil {
+		fmt.Println("plain err:", err)
+	} else {
+		fmt.Println("plain ok: cleanup skipped")
+	}
+	if err := lifoOrder(); err != nil {
+		fmt.Println("lifo err:", err)
+	}
+	func() {
+		defer func() { fmt.Println("recovered:", recover()) }()
+		_ = laterPanic()
+	}()
+	if err := goexitCase(); err != nil {
+		fmt.Println("goexit err:", err)
+	}
+	fmt.Println("done")
+}
+

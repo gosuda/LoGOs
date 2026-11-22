@@ -104,27 +104,28 @@ type AllocFreeFact struct {
 }
 
 type Facts struct {
-	Fingerprint  goobj.FingerprintType
-	Opts         []PathFact
-	Consts       []PathFact
-	Fns          []FnFact
-	Readonlys    []ReadonlyFact
-	Props        []PropFact
-	Conforms     []ConformsFact
-	Comptimes    []ComptimeFact
-	ConstFuncs   []ConstFuncFact
-	ConstMaps    []ConstMapFact
-	ConstComps   []string
-	Defaults     []DefaultFact
-	Locks        []LockFact
-	AllocFrees   []AllocFreeFact
-	JsonMetas    []JsonMetaFact
-	JsonKeys     []JsonKeyFact
-	UnionMembers []UnionMemberFact
-	BareUnions   []string
-	DualUse      []string
-	Deriveds     []string
-	GoPackage    bool
+	Fingerprint       goobj.FingerprintType
+	Opts              []PathFact
+	Consts            []PathFact
+	Fns               []FnFact
+	Readonlys         []ReadonlyFact
+	Props             []PropFact
+	Conforms          []ConformsFact
+	Comptimes         []ComptimeFact
+	ConstFuncs        []ConstFuncFact
+	ConstMaps         []ConstMapFact
+	ConstComps        []string
+	Defaults          []DefaultFact
+	Locks             []LockFact
+	AllocFrees        []AllocFreeFact
+	JsonMetas         []JsonMetaFact
+	JsonKeys          []JsonKeyFact
+	UnionMembers      []UnionMemberFact
+	BareUnions        []string
+	DualUse           []string
+	Deriveds          []string
+	CheckedUnionTypes bool
+	GoPackage         bool
 }
 
 func (f *Facts) empty() bool {
@@ -132,7 +133,8 @@ func (f *Facts) empty() bool {
 		len(f.Readonlys) == 0 && len(f.Props) == 0 && len(f.Conforms) == 0 &&
 		len(f.Comptimes) == 0 && len(f.ConstFuncs) == 0 && len(f.Defaults) == 0 &&
 		len(f.Locks) == 0 && len(f.AllocFrees) == 0 && len(f.JsonMetas) == 0 &&
-		len(f.JsonKeys) == 0 && len(f.UnionMembers) == 0 && len(f.BareUnions) == 0 && len(f.DualUse) == 0 && len(f.ConstMaps) == 0 && len(f.ConstComps) == 0 && len(f.Deriveds) == 0 && !f.GoPackage
+		len(f.JsonKeys) == 0 && len(f.UnionMembers) == 0 && len(f.BareUnions) == 0 && len(f.DualUse) == 0 &&
+		!f.CheckedUnionTypes && len(f.ConstMaps) == 0 && len(f.ConstComps) == 0 && len(f.Deriveds) == 0 && !f.GoPackage
 }
 
 type DefaultFact struct {
@@ -296,6 +298,9 @@ func Encode(fp goobj.FingerprintType, f *Facts) []byte {
 			if ValidObject(d) {
 				recs = append(recs, factRecord{line: "derived " + d})
 			}
+		}
+		if f.CheckedUnionTypes {
+			recs = append(recs, factRecord{line: "union-types 1"})
 		}
 		recs = append(recs, f.jsonRecords()...)
 	}
@@ -673,6 +678,14 @@ func Decode(data []byte) (*Facts, error) {
 				return nil, err
 			}
 			f.AllocFrees = append(f.AllocFrees, AllocFreeFact{Object: fields[1]})
+		case strings.HasPrefix(line, "union-types "):
+			if line != "union-types 1" {
+				return nil, fmt.Errorf("logos facts line %d: unsupported checked union types record %q", ln, line)
+			}
+			if err := d.dup(ln, "union-types", "", "union-types"); err != nil {
+				return nil, err
+			}
+			f.CheckedUnionTypes = true
 		case strings.HasPrefix(line, "unionbare "):
 			if len(fields) != 2 {
 				return nil, fmt.Errorf(`logos facts line %d: bad unionbare record %q (want "unionbare <type>")`, ln, line)

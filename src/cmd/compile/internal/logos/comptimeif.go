@@ -8,168 +8,34 @@ import (
 	"cmd/compile/internal/syntax"
 	"cmd/compile/internal/types2"
 	"go/constant"
-	"go/token"
 	"strconv"
 )
 
-func (fl *fileLower) cfCondValue(e syntax.Expr, active cfChain, sites *cfSites) (constant.Value, bool) {
-	if v, ok := fl.cfDirectValue(e, active, sites); ok {
-		return v, true
-	}
-	return fl.cfRecordedValue(e, active)
-}
-
-func (fl *fileLower) cfDirectValue(e syntax.Expr, active cfChain, sites *cfSites) (constant.Value, bool) {
-	switch e := e.(type) {
-	case *syntax.ParenExpr:
-		return fl.cfCondValue(e.X, active, sites)
-	case *syntax.Name:
-		return cfNameValue(e)
-	case *syntax.Operation:
-		return fl.cfOperationValue(e, active, sites)
-	case *syntax.CallExpr:
-		return fl.cfPredicateValue(e, active, sites)
-	}
-	return nil, false
-}
-
-func cfNameValue(n *syntax.Name) (constant.Value, bool) {
-	switch n.Value {
-	case "true":
-		return constant.MakeBool(true), true
-	case "false":
-		return constant.MakeBool(false), true
-	}
-	return nil, false
-}
-
-func (fl *fileLower) cfOperationValue(e *syntax.Operation, active cfChain, sites *cfSites) (constant.Value, bool) {
-	x, ok := fl.cfCondValue(e.X, active, sites)
+func cfLiveBranch(s *syntax.ConstIfStmt, info *types2.Info) (live *syntax.BlockStmt, ok bool) {
+	keepThen, ok := info.LogosConstIf[s]
 	if !ok {
 		return nil, false
 	}
-	if e.Y == nil {
-		return cfUnaryValue(e.Op, x)
-	}
-	y, ok := fl.cfCondValue(e.Y, active, sites)
-	if !ok {
-		return nil, false
-	}
-	return cfBinaryValue(e.Op, x, y)
-}
-
-func cfUnaryValue(op syntax.Operator, x constant.Value) (constant.Value, bool) {
-	if op != syntax.Not || x.Kind() != constant.Bool {
-		return nil, false
-	}
-	return constant.UnaryOp(token.NOT, x, 0), true
-}
-
-func cfBinaryValue(op syntax.Operator, x, y constant.Value) (constant.Value, bool) {
-	if x.Kind() != y.Kind() {
-		return nil, false
-	}
-	switch op {
-	case syntax.AndAnd:
-		return cfBoolOp(x, token.LAND, y)
-	case syntax.OrOr:
-		return cfBoolOp(x, token.LOR, y)
-	case syntax.Eql:
-		return constant.MakeBool(constant.Compare(x, token.EQL, y)), true
-	case syntax.Neq:
-		return constant.MakeBool(constant.Compare(x, token.NEQ, y)), true
-	}
-	return nil, false
-}
-
-func cfBoolOp(x constant.Value, op token.Token, y constant.Value) (constant.Value, bool) {
-	if x.Kind() != constant.Bool {
-		return nil, false
-	}
-	return constant.BinaryOp(x, op, y), true
-}
-
-func (fl *fileLower) cfPredicateValue(call *syntax.CallExpr, active cfChain, sites *cfSites) (constant.Value, bool) {
-	if v, ok := fl.logosLayoutCallValue(call, active, sites); ok {
-		return v, true
-	}
-	targ, ok := cfPredicateTarget(call, sites)
-	if !ok {
-		return nil, false
-	}
-	t, ok := fl.cfResolveTypeExpr(targ, active, sites)
-	if !ok {
-		return nil, false
-	}
-	_, isStruct := types2.Unalias(t).Underlying().(*types2.Struct)
-	return constant.MakeBool(isStruct), true
-}
-
-func cfPredicateTarget(call *syntax.CallExpr, sites *cfSites) (syntax.Expr, bool) {
-	idx, ok := call.Fun.(*syntax.IndexExpr)
-	if !ok || len(call.ArgList) != 0 || sites == nil {
-		return nil, false
-	}
-	sel, ok := idx.X.(*syntax.SelectorExpr)
-	if !ok || sel.Sel.Value != "IsStruct" {
-		return nil, false
-	}
-	pkg, ok := sel.X.(*syntax.Name)
-	targs := syntax.UnpackListExpr(idx.Index)
-	if !ok || pkg.Value != sites.comptimeName || len(targs) != 1 {
-		return nil, false
-	}
-	return targs[0], true
-}
-
-func (fl *fileLower) cfRecordedValue(e syntax.Expr, active cfChain) (constant.Value, bool) {
-	mentions := false
-	syntax.Inspect(e, func(n syntax.Node) bool {
-		if name, ok := n.(*syntax.Name); ok && cfActiveFor(active, name.Value) != nil {
-			mentions = true
-		}
-		return !mentions
-	})
-	if mentions {
-		return nil, false
-	}
-	return typeConst(fl.pkg.info, e)
-}
-
-func (fl *fileLower) cfLiveBranch(s *syntax.ConstIfStmt, active cfChain, sites *cfSites) (live *syntax.BlockStmt, ok bool) {
-	val, ok := fl.cfCondValue(s.Cond, active, sites)
-	if !ok || val.Kind() != constant.Bool {
-		return nil, false
-	}
-	if constant.BoolVal(val) {
+	if keepThen {
 		return s.Then, true
 	}
 	switch els := s.Else.(type) {
 	case *syntax.BlockStmt:
 		return els, true
 	case *syntax.ConstIfStmt:
-		return fl.cfLiveBranch(els, active, sites)
+		return cfLiveBranch(els, info)
 	}
 	return nil, true
 }
 
-func cfInConstFor(n syntax.Node, parents map[syntax.Node]syntax.Node) bool {
-	for p := parents[n]; p != nil; p = parents[p] {
-		if _, ok := p.(*syntax.ConstForStmt); ok {
-			return true
-		}
-	}
-	return false
-}
-
-func (fl *fileLower) cfPruneConstIf(s *syntax.ConstIfStmt, active cfChain, run *cfRun, add func(int, int, string)) *syntax.BlockStmt {
-	live, ok := fl.cfLiveBranch(s, active, run.sites)
+func (fl *fileLower) cfPruneConstIf(s *syntax.ConstIfStmt, run *cfRun, add func(int, int, string)) *syntax.BlockStmt {
+	live, ok := cfLiveBranch(s, run.info)
 	if !ok {
 		fl.cfError(run.sites.at(s.Cond.Pos()), "[comptime::not_constant] const if condition cannot be evaluated for this instantiation")
 	}
 	starts := run.ctx.starts
 	start := offAt(starts, s.Pos())
-	end := offAt(starts, syntax.EndPos(s))
+	end := cfExactEnd(run.ctx, s)
 	liveStart, liveEnd := end, end
 	if live != nil {
 		liveStart = offAt(starts, live.Pos())
@@ -180,16 +46,19 @@ func (fl *fileLower) cfPruneConstIf(s *syntax.ConstIfStmt, active cfChain, run *
 	return live
 }
 
-func (fl *fileLower) cfInnerConstFors(body *syntax.BlockStmt, active cfChain, sites *cfSites) []*syntax.ConstForStmt {
+func cfInnerConstFors(body *syntax.BlockStmt, info *types2.Info) []*syntax.ConstForStmt {
 	var out []*syntax.ConstForStmt
 	var visit func(syntax.Node) bool
 	visit = func(n syntax.Node) bool {
+		if st, ok := n.(syntax.Stmt); ok && info.LogosConstIfDead[st] {
+			return false
+		}
 		switch n := n.(type) {
 		case *syntax.ConstForStmt:
 			out = append(out, n)
 			return false
 		case *syntax.ConstIfStmt:
-			if live, _ := fl.cfLiveBranch(n, active, sites); live != nil {
+			if live, _ := cfLiveBranch(n, info); live != nil {
 				syntax.Inspect(live, visit)
 			}
 			return false

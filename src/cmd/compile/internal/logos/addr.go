@@ -11,6 +11,15 @@ import (
 	"cmd/compile/internal/syntax"
 )
 
+func (w ctWalker) ctAddrFresh(op *syntax.Operation) (syntax.Expr, []syntax.Stmt, bool) {
+	if op.Op != syntax.And || op.Y != nil || !w.fl.pkg.info.LogosAddrFresh[op] {
+		return nil, nil, false
+	}
+	value, pre := w.expr(op.X)
+	pos := op.Pos()
+	return callOf(pos, w.fl.ctBuiltin(pos, "new"), []syntax.Expr{value}), pre, true
+}
+
 func (fl *fileLower) lowerAddrFresh() {
 	fresh := fl.pkg.info.LogosAddrFresh
 	if len(fresh) == 0 {

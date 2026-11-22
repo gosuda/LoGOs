@@ -184,26 +184,27 @@ func (fc *funcLower) lowerStmt(s syntax.Stmt) []syntax.Stmt {
 func (fc *funcLower) lowerSimple(s syntax.Stmt) []syntax.Stmt {
 	switch s := s.(type) {
 	case *syntax.AssignStmt:
+		scanForLiterals(fc.fl, s)
 		if t, call, ok := tryAssignOf(s); ok {
 			return fc.lowerTryAssign(s, t, call)
 		}
-		scanForLiterals(fc.fl, s)
 		return []syntax.Stmt{s}
 	case *syntax.ExprStmt:
+		scanForLiterals(fc.fl, s)
 		if t, call, ok := tryExprOf(s); ok {
 			return fc.lowerTryExpr(s, t, call)
 		}
-		scanForLiterals(fc.fl, s)
 		return []syntax.Stmt{s}
 	case *syntax.CallStmt:
+		scanForLiterals(fc.fl, s)
 		if s.Tok == syntax.Defer {
 			if t, call, ok := tryCallOf(s); ok {
 				return fc.lowerDeferTry(s, t, call)
 			}
 		}
-		scanForLiterals(fc.fl, s)
 		return []syntax.Stmt{s}
 	case *syntax.ErrdeferStmt:
+		scanForLiterals(fc.fl, s.Call)
 		return fc.lowerErrdefer(s)
 	case *syntax.ReturnStmt:
 		if fc.hasErrdefer {
@@ -418,7 +419,8 @@ func (p *forPost) buildPostAssign(s *syntax.AssignStmt, t *syntax.TryExpr, call 
 	qOff := fl.off(tpos)
 	p.spanStart = fl.off(stmtPos)
 	tw := &twin{}
-	lhsMark := tw.mark(stmtPos, fl.srcUser(p.spanStart, fl.off(s.Pos())).trim())
+	lhsSpan := trimSpan(fl.src, span{start: p.spanStart, end: fl.off(s.Pos())})
+	lhsMark := tw.mark(stmtPos, fl.lazyText(lhsSpan))
 	callMark := tw.mark(tpos, fl.lazyText(span{start: fl.off(leftmostOf(call.Fun)), end: qOff}))
 	withErr := append(slices.Clone(lhs), nameOf(stmtPos, innerErr))
 	native := []syntax.Stmt{blockOf(stmtPos, []syntax.Stmt{
@@ -648,6 +650,333 @@ func skipSemi(src []byte, from int) int {
 	return end
 }
 
+func (fc *funcLower) trySimpleSyntax(s syntax.SimpleStmt) ([]syntax.Stmt, bool) {
+	switch s := s.(type) {
+	case *syntax.AssignStmt:
+		if t, call, ok := tryAssignOf(s); ok {
+			return fc.tryAssignSyntax(s, t, call), true
+		}
+	case *syntax.ExprStmt:
+		if t, call, ok := tryExprOf(s); ok {
+			return fc.tryExprSyntax(s, t, call), true
+		}
+	}
+	return nil, false
+}
+
+func (w ctWalker) tryAssignment(s *syntax.AssignStmt) []syntax.Stmt {
+	t, call, ok := tryAssignOf(s)
+	if !ok {
+		return nil
+	}
+	if out := w.tryPropertyAssignment(s, t, call); out != nil {
+		return out
+	}
+	pre := w.simple(s)
+	if lowered, invoke, ok := tryAssignOf(s); ok {
+		return append(pre, w.tryAssignSyntax(s, lowered, invoke)...)
+	}
+	w.reject(t, "lowered assignment try did not retain its call")
+	return append(pre, s)
+}
+
+func (w ctWalker) tryPropertyAssignment(s *syntax.AssignStmt, t *syntax.TryExpr, call *syntax.CallExpr) []syntax.Stmt {
+	if s.Op != 0 {
+		return nil
+	}
+	targets, ok := w.ctPropertyTargets(s)
+	if !ok && w.tryOptionCommit(s, t) {
+		targets, ok = w.ctPinAssignmentTargets(s), true
+	}
+	if !ok {
+		return nil
+	}
+	invoke, pre := w.expr(call)
+	w.fl.carryType(invoke, call)
+	pos := syntax.StartPos(s)
+	err := w.nextErr()
+	decl := typedVarDecl(pos, nameOf(pos, err), w.fl.ctBuiltin(pos, "error"))
+	list := append(targets.pre, decl)
+	list = append(list, pre...)
+	list = append(list, targets.assign(invoke, nameOf(t.Pos(), err))...)
+	list = append(list, w.tryCheckSyntax(pos, t.Pos(), err))
+	return []syntax.Stmt{blockEndingAt(pos, syntax.EndPos(s), list)}
+}
+
+func (w ctWalker) tryOptionCommit(s *syntax.AssignStmt, t *syntax.TryExpr) bool {
+	for i := range syntax.UnpackListExpr(s.Lhs) {
+		dst := w.ctOptionTarget(s, t, i)
+		if w.fl.asOption(dst) == nil {
+			continue
+		}
+		src := tryResultType(w.fl.pkg.info.TypeOf(t), i)
+		if src != nil && !types2.Identical(src, dst) {
+			return true
+		}
+	}
+	return false
+}
+
+func tryResultType(t types2.Type, i int) types2.Type {
+	if tup, ok := t.(*types2.Tuple); ok {
+		return tup.At(i).Type()
+	}
+	return t
+}
+
+func (w ctWalker) tryHeaderSyntax(host syntax.Stmt, init syntax.SimpleStmt) ([]syntax.Stmt, bool) {
+	switch s := init.(type) {
+	case *syntax.AssignStmt:
+		t, call, ok := tryAssignOf(s)
+		if !ok {
+			return nil, false
+		}
+		if out := w.tryPropertyAssignment(s, t, call); out != nil {
+			clearInit(host)
+			return out, true
+		}
+	case *syntax.ExprStmt:
+		if _, _, ok := tryExprOf(s); !ok {
+			return nil, false
+		}
+	default:
+		return nil, false
+	}
+	pre := w.simple(init)
+	return append(pre, w.tryInitSyntax(host, init)...), true
+}
+
+func (w ctWalker) tryPostAssignment(loop *syntax.ForStmt) ([]syntax.Stmt, bool) {
+	post := loop.Post
+	switch post := post.(type) {
+	case *syntax.AssignStmt:
+		t, call, ok := tryAssignOf(post)
+		if !ok {
+			return nil, false
+		}
+		if steps := w.tryPropertyAssignment(post, t, call); steps != nil {
+			loop.Post = at(&syntax.EmptyStmt{}, post.Pos())
+			w.ctChainPost(loop, steps)
+			return nil, true
+		}
+	case *syntax.ExprStmt:
+		if _, _, ok := tryExprOf(post); !ok {
+			return nil, false
+		}
+	default:
+		return nil, false
+	}
+	if pre := w.simple(post); len(pre) != 0 {
+		w.ctChainPost(loop, pre)
+		return nil, true
+	}
+	if decl := w.tryPostSyntax(loop); decl != nil {
+		return []syntax.Stmt{decl}, true
+	}
+	return nil, true
+}
+
+func (fc *funcLower) tryInitSyntax(host syntax.Stmt, init syntax.SimpleStmt) []syntax.Stmt {
+	loop, isLoop := host.(*syntax.ForStmt)
+	decl, isDecl := init.(*syntax.AssignStmt)
+	if isLoop && isDecl && decl.Op == syntax.Def {
+		if t, call, ok := tryAssignOf(decl); ok {
+			return fc.tryForInitSyntax(loop, decl, t, call)
+		}
+	}
+	list, ok := fc.trySimpleSyntax(init)
+	if !ok {
+		return nil
+	}
+	anchorScopes(list, host.Pos())
+	clearInit(host)
+	return list
+}
+
+func (fc *funcLower) tryForInitSyntax(loop *syntax.ForStmt, decl *syntax.AssignStmt, t *syntax.TryExpr, call *syntax.CallExpr) []syntax.Stmt {
+	pos := decl.Pos()
+	lhs := syntax.UnpackListExpr(decl.Lhs)
+	captures := make([]syntax.Expr, len(lhs)+1)
+	names := make([]syntax.Expr, 0, len(lhs))
+	values := make([]syntax.Expr, 0, len(lhs))
+	for i, l := range lhs {
+		if n, ok := l.(*syntax.Name); ok && n.Value == "_" {
+			captures[i] = l
+			continue
+		}
+		temp := fc.nextArg()
+		captures[i] = nameOf(pos, temp)
+		names = append(names, l)
+		w := ctWalker{fc}
+		src := tryResultType(fc.fl.pkg.info.TypeOf(t), i)
+		values = append(values, w.ctOptionValueFrom(nameOf(pos, temp), src, w.ctOptionTarget(decl, t, i)))
+	}
+	loop.Init = defineOf(pos, names, values)
+	err := fc.nextErr()
+	captures[len(lhs)] = nameOf(t.Pos(), err)
+	list := []syntax.Stmt{
+		defineOf(pos, captures, []syntax.Expr{call}),
+		fc.tryCheckSyntax(pos, t.Pos(), err),
+	}
+	anchorScopes(list, loop.Pos())
+	return list
+}
+
+func (fc *funcLower) tryAssignSyntax(s *syntax.AssignStmt, t *syntax.TryExpr, call *syntax.CallExpr) []syntax.Stmt {
+	lhs := syntax.UnpackListExpr(s.Lhs)
+	pos := syntax.StartPos(s)
+	err := fc.nextErr()
+	check := fc.tryCheckSyntax(pos, t.Pos(), err)
+	if s.Op == syntax.Def {
+		w := ctWalker{fc}
+		if w.tryOptionCommit(s, t) {
+			captures := make([]syntax.Expr, len(lhs))
+			values := make([]syntax.Expr, len(lhs))
+			for i, target := range lhs {
+				if id, ok := target.(*syntax.Name); ok && id.Value == "_" {
+					captures[i] = id
+					values[i] = litOf(pos, "0", syntax.IntLit)
+					continue
+				}
+				name := fc.nextArg()
+				captures[i] = nameOf(pos, name)
+				src := tryResultType(fc.fl.pkg.info.TypeOf(t), i)
+				values[i] = w.ctOptionValueFrom(nameOf(pos, name), src, w.ctOptionTarget(s, t, i))
+			}
+			// Bind all source results as well as the error before committing
+			// any of the short declaration's original targets.
+			return []syntax.Stmt{
+				errDefineOf(pos, captures, call, nameOf(t.Pos(), err)),
+				defineOf(pos, lhs, values),
+				check,
+			}
+		}
+		return []syntax.Stmt{errDefineOf(pos, lhs, call, nameOf(t.Pos(), err)), check}
+	}
+	errType := fc.fl.ctTypeExpr(pos, types2.Universe.Lookup("error").Type())
+	decl := typedVarDecl(pos, nameOf(pos, err), errType)
+	assign := assignOf(pos, append(slices.Clone(lhs), nameOf(t.Pos(), err)), []syntax.Expr{call})
+	return []syntax.Stmt{tryAssignBlock(assign, decl, check, nil)}
+}
+
+func (fc *funcLower) tryExprSyntax(s *syntax.ExprStmt, t *syntax.TryExpr, call *syntax.CallExpr) []syntax.Stmt {
+	pos := syntax.StartPos(s)
+	err := fc.nextErr()
+	check := fc.tryCheckSyntax(pos, t.Pos(), err)
+	check.Init = errDefineOf(pos, blankNames(pos, fc.tryValueCount(t, call)), call, nameOf(t.Pos(), err))
+	return []syntax.Stmt{check}
+}
+
+func (fc *funcLower) tryValueCount(t *syntax.TryExpr, call *syntax.CallExpr) int {
+	switch typ := fc.fl.pkg.info.TypeOf(t).(type) {
+	case *types2.Tuple:
+		return typ.Len()
+	case nil:
+		return fc.callResults(call)
+	default:
+		return 1
+	}
+}
+
+func (fc *funcLower) tryPostSyntax(s *syntax.ForStmt) syntax.Stmt {
+	var lhs []syntax.Expr
+	var t *syntax.TryExpr
+	var call *syntax.CallExpr
+	switch post := s.Post.(type) {
+	case *syntax.AssignStmt:
+		if post.Op != 0 {
+			return nil
+		}
+		t, call, _ = tryAssignOf(post)
+		if t != nil {
+			lhs = slices.Clone(syntax.UnpackListExpr(post.Lhs))
+		}
+	case *syntax.ExprStmt:
+		t, call, _ = tryExprOf(post)
+		if t != nil {
+			lhs = blankNames(post.Pos(), fc.tryValueCount(t, call))
+		}
+	}
+	if t == nil {
+		return nil
+	}
+	pos := t.Pos()
+	err := fc.nextErr()
+	errType := fc.fl.ctTypeExpr(pos, types2.Universe.Lookup("error").Type())
+	decl := typedVarDecl(s.Pos(), nameOf(s.Pos(), err), errType)
+	s.Post = assignOf(s.Post.Pos(), append(lhs, nameOf(pos, err)), []syntax.Expr{call})
+	if s.Cond != nil {
+		cond := at(&syntax.Operation{
+			Op: syntax.Neq, X: nameOf(pos, err), Y: fc.fl.ctBuiltin(pos, "nil"),
+		}, pos)
+		s.Cond = at(&syntax.Operation{Op: syntax.OrOr, X: cond, Y: s.Cond}, s.Cond.Pos())
+	}
+	check := fc.tryCheckSyntax(s.Body.Pos(), pos, err)
+	check.Then.Rbrace = s.Body.Pos()
+	s.Body.List = slices.Insert(s.Body.List, 0, syntax.Stmt(check))
+	return decl
+}
+
+func (fc *funcLower) tryCheckSyntax(pos, exitPos syntax.Pos, err string) *syntax.IfStmt {
+	cond := at(&syntax.Operation{
+		Op: syntax.Neq, X: nameOf(exitPos, err), Y: fc.fl.ctBuiltin(exitPos, "nil"),
+	}, pos)
+	return closeAtExit(ifOf(pos, nil, cond, fc.tryExitSyntax(exitPos, err)), exitPos)
+}
+
+func (fc *funcLower) tryExitSyntax(pos syntax.Pos, err string) []syntax.Stmt {
+	w := ctWalker{fc}
+	out := w.scopeSyntaxExit(pos, len(fc.scopeCtxs), 0, err)
+	out = append(out, fc.tryTraceSyntax(pos, err))
+	return append(out, fc.tryReturnSyntax(pos, err)...)
+}
+
+func (fc *funcLower) tryTraceSyntax(pos syntax.Pos, err string) syntax.Stmt {
+	fl := fc.fl
+	trace := callOf(pos, fl.ctPkgSelector(pos, rtImportPath, "TraceErr"), []syntax.Expr{
+		nameOf(pos, err),
+		addrOf(pos, fl.ctTrySite(pos)),
+	})
+	return exprStmtOf(pos, trace)
+}
+
+func (fc *funcLower) tryReturnSyntax(pos syntax.Pos, err string) []syntax.Stmt {
+	fl := fc.fl
+	results := make([]syntax.Expr, 0, len(fc.specs))
+	for _, sp := range fc.specs {
+		if sp.isErr {
+			continue
+		}
+		typ := fl.ctTypeExpr(pos, sp.typ)
+		newZero := callOf(pos, fl.ctBuiltin(pos, "new"), []syntax.Expr{typ})
+		results = append(results, at(&syntax.Operation{Op: syntax.Mul, X: newZero}, pos))
+	}
+	results = append(results, nameOf(pos, err))
+	return append(fc.cleanupReturned(pos), returnOf(pos, results))
+}
+
+func tryAssignBlock(assign *syntax.AssignStmt, decl *syntax.DeclStmt, check *syntax.IfStmt, hoist *propHoist) *syntax.BlockStmt {
+	if hoist == nil {
+		return blockEndingAt(assign.Pos(), check.Then.Rbrace, []syntax.Stmt{decl, assign, check})
+	}
+	list := make([]syntax.Stmt, 0, 3+len(hoist.pres)+len(hoist.posts))
+	list = append(list, decl)
+	list = append(list, hoist.pres...)
+	list = append(list, assign)
+	list = append(list, hoist.posts...)
+	return blockEndingAt(assign.Pos(), check.Then.Rbrace, append(list, check))
+}
+
+func tryDiscardStmts(pos, exitPos syntax.Pos, n int, call syntax.Expr, err string, exit []syntax.Stmt) []syntax.Stmt {
+	check := closeAtExit(errCheckOf(pos, nameOf(exitPos, err), exit), exitPos)
+	def := errDefineOf(pos, blankNames(pos, n), call, nameOf(exitPos, err))
+	if n == 0 {
+		check.Init = def
+		return []syntax.Stmt{check}
+	}
+	return []syntax.Stmt{def, check}
+}
+
 func (fc *funcLower) lowerTryAssign(s *syntax.AssignStmt, t *syntax.TryExpr, call *syntax.CallExpr) []syntax.Stmt {
 	fl := fc.fl
 	native, text, spanStart, spanEnd := fc.tryAssignCore(s, t, call)
@@ -661,11 +990,10 @@ func (fc *funcLower) tryAssignCore(s *syntax.AssignStmt, t *syntax.TryExpr, call
 	tpos := t.Pos()
 	stmtPos := leftmostOf(syntax.UnpackListExpr(s.Lhs)[0])
 	spanStart := fl.off(stmtPos)
-	opOff := fl.off(s.Pos())
+	lhsSpan := span{start: spanStart, end: fl.off(s.Pos())}
 	qOff := fl.off(tpos)
 	spanEnd := skipCloseParens(src, qOff+1)
 	lhs := syntax.UnpackListExpr(s.Lhs)
-	lhsText := fl.srcUser(spanStart, opOff).trim()
 	callText := fl.lazyText(span{start: fl.off(leftmostOf(call.Fun)), end: qOff})
 	errSpelling := fc.nextErr()
 	siteSpelling := fl.newSite(tpos, tpos.Line())
@@ -673,9 +1001,9 @@ func (fc *funcLower) tryAssignCore(s *syntax.AssignStmt, t *syntax.TryExpr, call
 	var native []syntax.Stmt
 	tw := &twin{}
 	tw.absorb(exitSubs)
-	lhsMark := tw.mark(stmtPos, lhsText)
 	callMark := tw.mark(tpos, callText)
 	if s.Op == syntax.Def {
+		lhsMark := tw.mark(stmtPos, fl.srcUser(lhsSpan.start, lhsSpan.end).trim())
 		native = []syntax.Stmt{
 			errDefineOf(stmtPos, lhs, call, nameOf(tpos, errSpelling)),
 			closeAtExit(errCheckOf(stmtPos, nameOf(tpos, errSpelling), exitNative), tpos),
@@ -688,7 +1016,7 @@ func (fc *funcLower) tryAssignCore(s *syntax.AssignStmt, t *syntax.TryExpr, call
 	}
 	c := &propCollect{hoist: &propHoist{}}
 	assignLhs := slices.Clone(lhs)
-	lhsMarkOf := lhsMark
+	var lhsText otext
 	if spans, ok := fl.propLhsSpans(s, lhs); ok {
 		parts := make([]otext, len(lhs))
 		rooted := false
@@ -697,25 +1025,29 @@ func (fc *funcLower) tryAssignCore(s *syntax.AssignStmt, t *syntax.TryExpr, call
 				assignLhs[i] = nameOf(stmtPos, temp)
 				parts[i] = gen(temp)
 				rooted = true
-				continue
 			}
-			parts[i] = fl.srcUser(spans[i].start, spans[i].end).trim()
 		}
 		if rooted {
-			lhsMarkOf = tw.mark(stmtPos, joinO(parts, ", "))
+			for i, part := range parts {
+				if part.s == "" {
+					parts[i] = fl.lazyText(trimSpan(src, spans[i]))
+				}
+			}
+			lhsText = joinO(parts, ", ")
 		}
 	}
-	stmts := func(assign *syntax.AssignStmt, exit []syntax.Stmt) []syntax.Stmt {
-		list := []syntax.Stmt{errorVarDecl(stmtPos, nameOf(tpos, errSpelling))}
-		list = append(list, c.hoist.pres...)
-		list = append(list, assign)
-		list = append(list, c.hoist.posts...)
-		return append(list, closeAtExit(errCheckOf(stmtPos, nameOf(tpos, errSpelling), exit), tpos))
+	if lhsText.s == "" {
+		lhsText = fl.lazyText(trimSpan(src, lhsSpan))
 	}
-	native = []syntax.Stmt{blockEndingAt(stmtPos, tpos, stmts(
-		assignOf(stmtPos, append(assignLhs, nameOf(tpos, errSpelling)), []syntax.Expr{call}), exitNative))}
-	text := renderText([]syntax.Stmt{blockEndingAt(stmtPos, tpos, stmts(
-		assignOf(stmtPos, []syntax.Expr{lhsMarkOf, nameOf(tpos, errSpelling)}, []syntax.Expr{callMark}), exitText))}, tw.subs)
+	lhsMark := tw.mark(stmtPos, lhsText)
+	build := func(lhs []syntax.Expr, rhs syntax.Expr, exit []syntax.Stmt) *syntax.BlockStmt {
+		decl := errorVarDecl(stmtPos, nameOf(tpos, errSpelling))
+		assign := assignOf(stmtPos, append(lhs, nameOf(tpos, errSpelling)), []syntax.Expr{rhs})
+		check := closeAtExit(errCheckOf(stmtPos, nameOf(tpos, errSpelling), exit), tpos)
+		return tryAssignBlock(assign, decl, check, c.hoist)
+	}
+	native = []syntax.Stmt{build(assignLhs, call, exitNative)}
+	text := renderText([]syntax.Stmt{build([]syntax.Expr{lhsMark}, callMark, exitText)}, tw.subs)
 	return native, text, spanStart, spanEnd
 }
 
@@ -741,20 +1073,7 @@ func (fc *funcLower) tryExprCore(s *syntax.ExprStmt, t *syntax.TryExpr, call *sy
 	tw.absorb(exitSubs)
 	callMark := tw.mark(tpos, callText)
 	n := fc.callResults(call)
-	var native []syntax.Stmt
-	var text otext
-	if n == 0 {
-		native = []syntax.Stmt{closeAtExit(errCheckInitOf(stmtPos, nil, call, nameOf(tpos, errSpelling), exitNative), tpos)}
-		text = renderText([]syntax.Stmt{closeAtExit(errCheckInitOf(stmtPos, nil, callMark, nameOf(tpos, errSpelling), exitText), tpos)}, tw.subs)
-	} else {
-		native = []syntax.Stmt{
-			errDefineOf(stmtPos, blankNames(stmtPos, n), call, nameOf(tpos, errSpelling)),
-			closeAtExit(errCheckOf(stmtPos, nameOf(tpos, errSpelling), exitNative), tpos),
-		}
-		text = renderText([]syntax.Stmt{
-			errDefineOf(stmtPos, blankNames(stmtPos, n), callMark, nameOf(tpos, errSpelling)),
-			closeAtExit(errCheckOf(stmtPos, nameOf(tpos, errSpelling), exitText), tpos),
-		}, tw.subs)
-	}
+	native := tryDiscardStmts(stmtPos, tpos, n, call, errSpelling, exitNative)
+	text := renderText(tryDiscardStmts(stmtPos, tpos, n, callMark, errSpelling, exitText), tw.subs)
 	return native, text, spanStart, spanEnd
 }

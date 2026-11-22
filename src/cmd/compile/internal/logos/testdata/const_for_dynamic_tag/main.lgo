@@ -1,0 +1,42 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package main
+
+import (
+	"comptime"
+	"fmt"
+)
+
+type Record struct {
+	First  int `alpha:"first-alpha" beta:"first-beta"`
+	Second int `alpha:"second-alpha" beta:"second-beta"`
+}
+
+func runtimeKey(i int, calls *[2]int) string {
+	calls[i]++
+	if i == 0 {
+		return "alpha"
+	}
+	return "beta"
+}
+
+func readTags[T any]() ([2]string, [2]int) {
+	var values [2]string
+	var calls [2]int
+	const for i, f := range comptime.Fields[T]() {
+		values[i] = f.Tag.Get(runtimeKey(i, &calls))
+	}
+	return values, calls
+}
+
+func main() {
+	values, calls := readTags[Record]()
+	if want := [2]int{1, 1}; calls != want {
+		panic(fmt.Sprintf("runtime key calls per field = %v, want %v", calls, want))
+	}
+	if want := [2]string{"first-alpha", "second-beta"}; values != want {
+		panic(fmt.Sprintf("tag values = %q, want %q", values, want))
+	}
+}

@@ -1,0 +1,95 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+cd reject
+! logos build .
+stderr 'wrong type for method Put'
+stderr 'wrong type for method Take'
+
+cd ../app
+logos run .
+logos eject -o $WORK/ejected
+
+cd $WORK/ejected
+exists $UPROOT1273/bin/go
+exec env -u GOROOT $UPROOT1273/bin/go run .
+
+-- app/go.mod --
+module example.com/interfaceoption
+
+go 1.27
+
+require example.com/gosink v0.0.0
+
+replace example.com/gosink v0.0.0 => ../gosink
+
+-- app/main.lgo --
+package main
+
+import "example.com/gosink"
+
+type receiver struct {
+	nils int
+	value int
+}
+
+func (r *receiver) Put(p *int?) {
+	if p != nil {
+		r.value = *p
+		return
+	}
+	r.nils++
+}
+
+func main() {
+	direct := &receiver{}
+	gosink.Exercise(direct)
+	if direct.nils != 1 || direct.value != 42 {
+		panic("Go calls through the concrete provider lost a nil or nonnil input")
+	}
+
+	indirect := &receiver{}
+	var optional interface{ Put(*int?) } = indirect
+	var embedded interface{ gosink.Sink } = optional
+	gosink.Exercise(embedded)
+	if indirect.nils != 1 || indirect.value != 42 {
+		panic("Go calls through the interface provider lost a nil or nonnil input")
+	}
+}
+
+-- gosink/go.mod --
+module example.com/gosink
+
+go 1.27
+
+-- gosink/sink.go --
+package gosink
+
+type Sink interface {
+	Put(*int)
+}
+
+func Exercise(s Sink) {
+	s.Put(nil)
+	n := 42
+	s.Put(&n)
+}
+
+-- reject/go.mod --
+module example.com/rejectoption
+
+go 1.27
+
+-- reject/reject.lgo --
+package reject
+
+type optional interface{ Put(*int?) }
+type strict interface{ Take(*int) }
+
+type receiver struct{}
+
+func (receiver) Put(p *int) {}
+func (receiver) Take(p *int?) {}
+
+var _ optional = receiver{}
+var _ strict = receiver{}

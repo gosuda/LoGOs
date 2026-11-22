@@ -610,3 +610,94 @@ func (fl *fileLower) groupBalanced(from, start, end int) span {
 	})
 	return span{start: start, end: end}
 }
+
+func groupNativeHasRecv(nodes ...syntax.Node) bool {
+	for _, node := range nodes {
+		if node == nil {
+			continue
+		}
+		found := false
+		syntax.Inspect(node, func(n syntax.Node) bool {
+			if found {
+				return false
+			}
+			switch n := n.(type) {
+			case *syntax.FuncLit, *syntax.LambdaExpr:
+				return false
+			case *syntax.Operation:
+				found = n.Op == syntax.Recv && n.Y == nil
+			}
+			return !found
+		})
+		if found {
+			return true
+		}
+	}
+	return false
+}
+
+func (w ctWalker) groupLvalueSlots(e syntax.Expr) []*syntax.Expr {
+	info := w.fl.pkg.info
+	switch n := syntax.Unparen(e).(type) {
+	case *syntax.IndexExpr:
+		if t := info.TypeOf(n.X); t != nil {
+			if _, array := types2.CoreType(t).(*types2.Array); array {
+				return append(w.groupLvalueSlots(n.X), &n.Index)
+			}
+		}
+		return []*syntax.Expr{&n.X, &n.Index}
+	case *syntax.SelectorExpr:
+		if t := info.TypeOf(n.X); t != nil {
+			if _, tuple := compositeUnderlying(t).(*types2.LogosTuple); tuple {
+				n.Sel.Value = tupleSelectionName(t, n.Sel.Value)
+				return w.groupLvalueSlots(n.X)
+			}
+			if _, value := types2.CoreType(t).(*types2.Struct); value {
+				return w.groupLvalueSlots(n.X)
+			}
+		}
+		return []*syntax.Expr{&n.X}
+	case *syntax.Operation:
+		if n.Y == nil && n.Op == syntax.Mul {
+			return []*syntax.Expr{&n.X}
+		}
+	}
+	return nil
+}
+
+func (w ctWalker) groupAssign(s *syntax.AssignStmt) ([]syntax.Stmt, bool) {
+	lhs := syntax.UnpackListExpr(s.Lhs)
+	if len(lhs) != 2 || s.Rhs == nil {
+		return nil, false
+	}
+	value, setup, ok := w.groupReceive(s.Rhs, 2)
+	if !ok {
+		return nil, false
+	}
+	var slots []*syntax.Expr
+	if s.Op != syntax.Def {
+		for _, target := range lhs {
+			slots = append(slots, w.groupLvalueSlots(target)...)
+		}
+	}
+	var pre []syntax.Stmt
+	for _, slot := range slots {
+		original := *slot
+		lowered, steps := w.expr(original)
+		pre = append(pre, steps...)
+		*slot = lowered
+		if hold := w.hold(original, slot); hold != nil {
+			pre = append(pre, hold)
+		}
+	}
+	values := syntax.UnpackListExpr(value)
+	if tuple, ok := w.fl.pkg.info.TypeOf(s.Rhs).(*types2.Tuple); ok && tuple.Len() == len(values) {
+		for i, item := range values {
+			if typ := w.ctOptionTarget(s, s.Rhs, i); typ != nil {
+				values[i] = w.ctOptionValueFrom(item, tuple.At(i).Type(), typ)
+			}
+		}
+	}
+	s.Rhs = listOf(s.Pos(), values)
+	return append(pre, setup...), true
+}

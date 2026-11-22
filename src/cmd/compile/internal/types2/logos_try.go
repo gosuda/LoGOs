@@ -231,7 +231,7 @@ func (check *Checker) logosTryInitVars(lhsVars []*Var, t *syntax.TryExpr) {
 		return
 	}
 	for i, lhs := range lhsVars {
-		check.initVar(lhs, results[i], "assignment")
+		check.initVar(lhs, results[i], "assignment", resultSlot{})
 	}
 }
 

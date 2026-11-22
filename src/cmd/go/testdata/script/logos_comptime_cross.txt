@@ -26,11 +26,12 @@ stdout 'comptime Autowire'
 stdout 'comptime Names'
 stdout 'comptime Describe'
 stdout 'const if true && '
-stdout '_logos_ctpkg\.Container'
-stdout '_logos_ctpkg\.Resolve\[f\.Type\]'
-stdout '_logos_tparam0'
+stdout 'func Autowire\[T any\]\(c \*Container\) \*T'
+stdout 'Resolve\[f\.Type\]\(c\)'
 stdout '//logosimp fmt fmt'
-stdout '_logos_ctimp0\.Sprintf'
+stdout 'fmt\.Sprintf\("%d=%s", i, f\.Name\)'
+! stdout '_logos_ct'
+! stdout '_logos_tparam'
 
 -- w/go.mod --
 module example.com/wiretest

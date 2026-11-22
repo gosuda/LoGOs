@@ -11,6 +11,7 @@ import (
 
 	"cmd/compile/internal/base"
 	"cmd/compile/internal/syntax"
+	"cmd/compile/internal/types"
 	"cmd/compile/internal/types2"
 	"cmd/internal/src"
 	"internal/pkgbits"
@@ -19,27 +20,34 @@ import (
 type pkgReader struct {
 	pkgbits.PkgDecoder
 
-	ctxt        *types2.Context
-	imports     map[string]*types2.Package
-	enableAlias bool // whether to use aliases
+	ctxt              *types2.Context
+	imports           map[string]*types2.Package
+	enableAlias       bool // whether to use aliases
+	restoreUnionTypes bool
 
 	posBases []*syntax.PosBase
 	pkgs     []*types2.Package
 	typs     []types2.Type
 }
 
+func (pr *pkgReader) initCaches() {
+	pr.posBases = make([]*syntax.PosBase, pr.NumElems(pkgbits.SectionPosBase))
+	pr.pkgs = make([]*types2.Package, pr.NumElems(pkgbits.SectionPkg))
+	pr.typs = make([]types2.Type, pr.NumElems(pkgbits.SectionType))
+}
+
 func ReadPackage(ctxt *types2.Context, imports map[string]*types2.Package, input pkgbits.PkgDecoder) *types2.Package {
-	pr := pkgReader{
-		PkgDecoder: input,
+	return readPackage(pkgReader{PkgDecoder: input, ctxt: ctxt, imports: imports, enableAlias: true})
+}
 
-		ctxt:        ctxt,
-		imports:     imports,
-		enableAlias: true,
+func ReadLogosPackage(ctxt *types2.Context, imports map[string]*types2.Package, input pkgbits.PkgDecoder) *types2.Package {
+	return readPackage(pkgReader{
+		PkgDecoder: input, ctxt: ctxt, imports: imports, enableAlias: true, restoreUnionTypes: true,
+	})
+}
 
-		posBases: make([]*syntax.PosBase, input.NumElems(pkgbits.SectionPosBase)),
-		pkgs:     make([]*types2.Package, input.NumElems(pkgbits.SectionPkg)),
-		typs:     make([]types2.Type, input.NumElems(pkgbits.SectionType)),
-	}
+func readPackage(pr pkgReader) *types2.Package {
+	pr.initCaches()
 
 	r := pr.newReader(pkgbits.SectionMeta, pkgbits.PublicRootIdx, pkgbits.SyncPublic)
 	pkg := r.pkg()
@@ -66,6 +74,117 @@ func ReadPackage(ctxt *types2.Context, imports map[string]*types2.Package, input
 	return pkg
 }
 
+// LogosCtNamedTypeReader decodes type declaration provenance after import
+// overlays select the canonical Named and its type parameters.
+type LogosCtNamedTypeReader struct {
+	reader pkgReader
+}
+
+func NewLogosCtNamedTypeReader(input pkgbits.PkgDecoder, ctxt *types2.Context, packages map[string]*types2.Package) *LogosCtNamedTypeReader {
+	return &LogosCtNamedTypeReader{reader: pkgReader{
+		PkgDecoder: input,
+		ctxt:       ctxt, imports: packages, enableAlias: true,
+	}}
+}
+
+func (wire *LogosCtNamedTypeReader) Read(idx pkgbits.Index, origin *types2.Named) types2.LogosCtNamedTypeDefaults {
+	return wire.reader.logosNamedTypePayload(idx, origin.Obj().Pkg(), origin.TypeParams().At)
+}
+
+func (pr *pkgReader) logosNamedTypePayload(idx pkgbits.Index, owner *types2.Package, typeParam func(int) *types2.TypeParam) types2.LogosCtNamedTypeDefaults {
+	r := pr.tempReader(pkgbits.SectionObjDict, idx, pkgbits.SyncObject1)
+	defer pr.retireReader(r)
+
+	receivers, params := r.objDictTypeParamCounts()
+	assert(receivers == 0)
+	for range params {
+		r.typInfo()
+	}
+	for range r.Len() {
+		r.derivedInfo()
+	}
+	r.skipLogosCtRuntimeDict(params)
+	if r.Data.Len() == 0 {
+		return types2.LogosCtNamedTypeDefaults{}
+	}
+	assert(!r.Bool() && !r.Bool())                       // no prepared body or function template
+	assert(r.Len() == 0 && r.Len() == 0 && r.Len() == 0) // no function slots or edges
+
+	row := types2.LogosCtNamedTypeDefaults{Fields: make([]types2.LogosCtNamedDefault, r.Len())}
+	for i := range row.Fields {
+		field := r.String()
+		path, name, kind := pr.PeekObj(r.Reloc(pkgbits.SectionObj))
+		pkg := pr.imports[path]
+		assert(kind == pkgbits.ObjFunc && pkg != nil && path == owner.Path())
+		factory, ok := pkg.Scope().Lookup(name).(*types2.Func)
+		assert(ok)
+		row.Fields[i] = types2.LogosCtNamedDefault{Field: field, Factory: factory}
+	}
+	if r.Bool() {
+		if pr.typs == nil {
+			pr.initCaches()
+		}
+		row.RHS = (&logosCtEdgeReader{reader: r, typeParam: typeParam}).semanticType()
+	}
+	assert(r.Data.Len() == 0)
+	return row
+}
+
+func (wire *LogosCtNamedTypeReader) ConstMapIndex(idx pkgbits.Index) map[string]pkgbits.Index {
+	pr := &wire.reader
+	r := pr.tempReader(pkgbits.SectionMeta, idx, pkgbits.SyncPrivate)
+	defer pr.retireReader(r)
+	n := r.Len()
+	rows := make(map[string]pkgbits.Index, n)
+	for range n {
+		name := r.String()
+		_, duplicate := rows[name]
+		assert(!duplicate)
+		rows[name] = r.Reloc(pkgbits.SectionMeta)
+	}
+	assert(r.Data.Len() == 0)
+	return rows
+}
+
+func (wire *LogosCtNamedTypeReader) ConstMap(idx pkgbits.Index, owner *types2.Package, name string) types2.LogosCtConstMap {
+	pr := &wire.reader
+	if pr.typs == nil {
+		pr.initCaches()
+	}
+	r := pr.tempReader(pkgbits.SectionMeta, idx, pkgbits.SyncPrivate)
+	defer pr.retireReader(r)
+	row := types2.LogosCtConstMap{Count: r.Len(), Bearing: r.Bool()}
+	row.Lookup = wire.constMapFunc(r.Reloc(pkgbits.SectionObj), owner)
+	row.Materialize = wire.constMapFunc(r.Reloc(pkgbits.SectionObj), owner)
+	row.Iterate = wire.constMapFunc(r.Reloc(pkgbits.SectionObj), owner)
+	row.Type = (&logosCtEdgeReader{reader: r}).semanticType()
+	row.Binding, _ = owner.Scope().Lookup(name).(*types2.Var)
+	if row.Binding == nil {
+		row.Binding = types2.NewVar(row.Materialize.Pos(), owner, name, row.Type)
+	}
+	assert(r.Data.Len() == 0)
+	return row
+}
+
+func (wire *LogosCtNamedTypeReader) constMapFunc(idx pkgbits.Index, owner *types2.Package) *types2.Func {
+	pr := &wire.reader
+	path, name, kind := pr.PeekObj(idx)
+	assert(kind == pkgbits.ObjFunc && path == owner.Path())
+	if obj, ok := owner.Scope().Lookup(name).(*types2.Func); ok {
+		return obj
+	}
+	r := pr.tempReader(pkgbits.SectionObj, idx, pkgbits.SyncObject1)
+	defer pr.retireReader(r)
+	r.dict = pr.objDictIdx(idx)
+	assert(len(r.dict.tbounds)+len(r.dict.rtbounds) == 0)
+	pos := r.pos()
+	if r.Version().Has(pkgbits.GenericMethods) {
+		assert(!r.Bool())
+	}
+	r.typeParamNames(false, false)
+	return types2.NewFunc(pos, owner, name, r.signature(nil, nil, nil))
+}
+
 type reader struct {
 	pkgbits.Decoder
 
@@ -81,6 +200,7 @@ type readerDict struct {
 
 	tbounds []typeInfo
 	tparams []*types2.TypeParam
+	args    []types2.Type
 
 	derived      []derivedInfo
 	derivedTypes []types2.Type
@@ -259,16 +379,16 @@ func (r *reader) doTyp() (res types2.Type) {
 		return types2.Typ[r.Len()]
 
 	case pkgbits.TypeNamed:
-		obj, targs := r.obj()
-		name := obj.(*types2.TypeName)
-		if len(targs) != 0 {
-			t, _ := types2.Instantiate(r.p.ctxt, name.Type(), targs, false)
-			return t
-		}
-		return name.Type()
+		return r.namedType(false)
+
+	case pkgbits.TypeNamedCaptured:
+		return r.namedType(true)
 
 	case pkgbits.TypeTypeParam:
 		n := r.Len()
+		if r.dict.args != nil {
+			return r.dict.args[n]
+		}
 		if n < len(r.dict.rtbounds) {
 			return r.dict.rtparams[n]
 		}
@@ -381,13 +501,7 @@ func (r *reader) param() *types2.Var {
 // @@@ Objects
 
 func (r *reader) obj() (types2.Object, []types2.Type) {
-	r.Sync(pkgbits.SyncObject)
-
-	if r.Version().Has(pkgbits.DerivedFuncInstance) {
-		assert(!r.Bool())
-	}
-
-	pkg, name := r.p.objIdx(r.Reloc(pkgbits.SectionObj))
+	pkg, name := r.p.objIdx(r.objReloc())
 	obj := pkg.Scope().Lookup(name)
 
 	targs := make([]types2.Type, r.Len())
@@ -398,7 +512,59 @@ func (r *reader) obj() (types2.Object, []types2.Type) {
 	return obj, targs
 }
 
+func (r *reader) namedType(captured bool) types2.Type {
+	idx := r.objReloc()
+	pkg, name, tag := r.p.objName(idx)
+	explicit := make([]types2.Type, r.Len())
+	for i := range explicit {
+		explicit[i] = r.typ()
+	}
+	if baseName, suffix := types.SplitVargenSuffix(name); tag == pkgbits.ObjType && suffix != "" {
+		var captures []types2.Type
+		if captured {
+			captures = make([]types2.Type, r.Len())
+			for i := range captures {
+				captures[i] = r.typ()
+			}
+		} else if dict := r.dict; dict != nil {
+			captures = dict.args
+			if captures == nil {
+				for _, p := range dict.rtparams {
+					captures = append(captures, p)
+				}
+				for _, p := range dict.tparams {
+					captures = append(captures, p)
+				}
+			}
+		}
+		return r.p.logosCtReadABINamed(idx, pkg, baseName, name, captures, explicit, captured)
+	}
+	assert(!captured)
+	r.p.declareObj(idx, pkg, name, tag)
+	typ := pkg.Scope().Lookup(name).Type()
+	if len(explicit) != 0 {
+		typ, _ = types2.Instantiate(r.p.ctxt, typ, explicit, false)
+	}
+	return typ
+}
+
+func (r *reader) objReloc() pkgbits.Index {
+	r.Sync(pkgbits.SyncObject)
+
+	if r.Version().Has(pkgbits.DerivedFuncInstance) {
+		assert(!r.Bool())
+	}
+
+	return r.Reloc(pkgbits.SectionObj)
+}
+
 func (pr *pkgReader) objIdx(idx pkgbits.Index) (*types2.Package, string) {
+	pkg, name, tag := pr.objName(idx)
+	pr.declareObj(idx, pkg, name, tag)
+	return pkg, name
+}
+
+func (pr *pkgReader) objName(idx pkgbits.Index) (*types2.Package, string, pkgbits.CodeObj) {
 	var objPkg *types2.Package
 	var objName string
 	var tag pkgbits.CodeObj
@@ -411,10 +577,17 @@ func (pr *pkgReader) objIdx(idx pkgbits.Index) (*types2.Package, string) {
 		tag = pkgbits.CodeObj(rname.Code(pkgbits.SyncCodeObj))
 		pr.retireReader(rname)
 	}
+	return objPkg, objName, tag
+}
 
+func (pr *pkgReader) declareObj(idx pkgbits.Index, objPkg *types2.Package, objName string, tag pkgbits.CodeObj) {
 	if tag == pkgbits.ObjStub {
 		base.Assertf(objPkg == nil || objPkg == types2.Unsafe, "unexpected stub package: %v", objPkg)
-		return objPkg, objName
+		return
+	}
+
+	if _, suffix := types.SplitVargenSuffix(objName); tag == pkgbits.ObjType && suffix != "" {
+		return // Local declarations have bitstream identity, not package bindings.
 	}
 
 	objPkg.Scope().InsertLazy(objName, func() types2.Object {
@@ -462,6 +635,16 @@ func (pr *pkgReader) objIdx(idx pkgbits.Index) (*types2.Package, string) {
 				// unit tests expected that), but cmd/compile doesn't care
 				// about it, so maybe we can avoid worrying about that here.
 				underlying := r.typ().Underlying()
+				if pr.restoreUnionTypes {
+					if _, ok := underlying.(*types2.Interface); ok {
+						row := pr.logosNamedTypePayload(idx, objPkg, func(i int) *types2.TypeParam { return tparams[i] })
+						if row.RHS != nil {
+							iface, ok := row.RHS.(*types2.Interface)
+							assert(ok)
+							underlying = iface
+						}
+					}
+				}
 
 				type indexedMethod struct {
 					index int // (or -1 in V4)
@@ -535,8 +718,51 @@ func (pr *pkgReader) objIdx(idx pkgbits.Index) (*types2.Package, string) {
 			return types2.NewVar(pos, objPkg, objName, typ)
 		}
 	})
+}
 
-	return objPkg, objName
+func (r *reader) logosCtLocal(pos syntax.Pos, pkg *types2.Package, name, abiName, discriminator string, captures, explicit []types2.Type) (*types2.Named, bool) {
+	return types2.LogosCtNewLocal(pos, pkg, name, abiName, discriminator, captures, explicit)
+}
+
+func (pr *pkgReader) logosCtReadABINamed(idx pkgbits.Index, pkg *types2.Package, name, abiName string, captures, explicit []types2.Type, captured bool) *types2.Named {
+	d := pr.tempReader(pkgbits.SectionObjDict, idx, pkgbits.SyncObject1)
+	nimplicit, nrecv, nexplicit := d.objDictCounts()
+	assert(nrecv == 0 && nexplicit == len(explicit))
+	assert(nimplicit <= len(captures) && (!captured || nimplicit == len(captures)))
+	captures = captures[:nimplicit:nimplicit]
+	for range nexplicit {
+		d.typInfo()
+	}
+	dict := &readerDict{args: slices.Concat(captures, explicit)}
+	dict.derived = make([]derivedInfo, d.Len())
+	dict.derivedTypes = make([]types2.Type, len(dict.derived))
+	for i := range dict.derived {
+		dict.derived[i] = d.derivedInfo()
+	}
+	pr.retireReader(d)
+
+	r := pr.newReader(pkgbits.SectionObj, idx, pkgbits.SyncObject1)
+	r.dict = dict
+	pos := r.pos()
+	t, fresh := types2.LogosCtNewABILocal(pos, pkg, name, abiName, captures, explicit)
+	if !fresh {
+		return t
+	}
+	r.Sync(pkgbits.SyncTypeParamNames)
+	for range explicit {
+		r.pos()
+		r.localIdent()
+	}
+	underlying := r.typ().Underlying()
+	methods := make([]*types2.Func, r.Len())
+	for i := range methods {
+		_, methods[i] = r.method(true)
+	}
+	if r.Version().Has(pkgbits.GenericMethods) {
+		assert(r.Len() == 0) // Methods cannot be declared on a function-local receiver.
+	}
+	types2.LogosCtSetLocal(t, underlying, methods)
+	return t
 }
 
 func (pr *pkgReader) objDictIdx(idx pkgbits.Index) *readerDict {
@@ -544,15 +770,7 @@ func (pr *pkgReader) objDictIdx(idx pkgbits.Index) *readerDict {
 	{
 		r := pr.tempReader(pkgbits.SectionObjDict, idx, pkgbits.SyncObject1)
 
-		if implicits := r.Len(); implicits != 0 {
-			base.Fatalf("unexpected object with %v implicit type parameter(s)", implicits)
-		}
-
-		nreceivers := 0
-		if r.Version().Has(pkgbits.GenericMethods) {
-			nreceivers = r.Len()
-		}
-		nexplicits := r.Len()
+		nreceivers, nexplicits := r.objDictTypeParamCounts()
 
 		dict.rtbounds = make([]typeInfo, nreceivers)
 		for i := range dict.rtbounds {
@@ -567,10 +785,7 @@ func (pr *pkgReader) objDictIdx(idx pkgbits.Index) *readerDict {
 		dict.derived = make([]derivedInfo, r.Len())
 		dict.derivedTypes = make([]types2.Type, len(dict.derived))
 		for i := range dict.derived {
-			dict.derived[i] = derivedInfo{idx: r.Reloc(pkgbits.SectionType)}
-			if r.Version().Has(pkgbits.DerivedInfoNeeded) {
-				assert(!r.Bool())
-			}
+			dict.derived[i] = r.derivedInfo()
 		}
 
 		pr.retireReader(r)
@@ -578,6 +793,30 @@ func (pr *pkgReader) objDictIdx(idx pkgbits.Index) *readerDict {
 	// function references follow, but reader doesn't need those
 
 	return &dict
+}
+
+func (r *reader) objDictTypeParamCounts() (receivers, explicits int) {
+	implicits, receivers, explicits := r.objDictCounts()
+	if implicits != 0 {
+		base.Fatalf("unexpected package-scope object with %v implicit type parameter(s)", implicits)
+	}
+	return receivers, explicits
+}
+
+func (r *reader) objDictCounts() (implicits, receivers, explicits int) {
+	implicits = r.Len()
+	if r.Version().Has(pkgbits.GenericMethods) {
+		receivers = r.Len()
+	}
+	return implicits, receivers, r.Len()
+}
+
+func (r *reader) derivedInfo() derivedInfo {
+	info := derivedInfo{idx: r.Reloc(pkgbits.SectionType)}
+	if r.Version().Has(pkgbits.DerivedInfoNeeded) {
+		assert(!r.Bool())
+	}
+	return info
 }
 
 func (r *reader) typeParamNames(isLazy bool, isGenMeth bool) []*types2.TypeParam {

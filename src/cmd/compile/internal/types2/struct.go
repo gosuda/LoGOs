@@ -79,6 +79,7 @@ func (check *Checker) structType(styp *Struct, e *syntax.StructType) {
 
 	// current field typ and tag
 	var typ Type
+	var abstract Type
 	var tag string
 	add := func(ident *syntax.Name, embedded bool) {
 		if tag != "" && tags == nil {
@@ -91,6 +92,7 @@ func (check *Checker) structType(styp *Struct, e *syntax.StructType) {
 		pos := ident.Pos()
 		name := ident.Value
 		fld := NewField(pos, check.pkg, name, typ, embedded)
+		check.logosCtKeepType(fld, abstract)
 		// spec: "Within a struct, non-blank field names must be unique."
 		if name == "_" || check.declareInSet(&fset, pos, fld) {
 			fields = append(fields, fld)
@@ -104,6 +106,7 @@ func (check *Checker) structType(styp *Struct, e *syntax.StructType) {
 	// (go.dev/issue/25627).
 	addInvalid := func(ident *syntax.Name) {
 		typ = Typ[Invalid]
+		abstract = nil
 		tag = ""
 		add(ident, true)
 	}
@@ -114,6 +117,9 @@ func (check *Checker) structType(styp *Struct, e *syntax.StructType) {
 		// share the same type expression. Only check type if it's a new type.
 		if i == 0 || f.Type != prev {
 			typ = check.logosStructFieldType(f.Type) // logos M6-S3 hook: unwrap `F T = const` to T.
+			if check.logosCtAbstract != nil {
+				abstract = check.logosCtOriginalType(f.Type, 0)
+			}
 			prev = f.Type
 		}
 		tag = ""

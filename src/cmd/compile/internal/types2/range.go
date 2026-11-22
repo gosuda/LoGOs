@@ -134,13 +134,13 @@ func (check *Checker) rangeStmt(inner stmtContext, rangeStmt *syntax.ForStmt, no
 
 			if rangeOverInt {
 				assert(i == 0) // at most one iteration variable (rhs[1] == nil or Typ[Invalid] for rangeOverInt)
-				check.initVar(obj, &x, "range clause")
+				check.initVar(obj, &x, "range clause", resultSlot{})
 			} else {
 				var y operand
 				y.mode_ = value
 				y.expr = lhs // we don't have a better rhs expression to use here
 				y.typ_ = typ
-				check.initVar(obj, &y, "assignment") // error is on variable, use "assignment" not "range clause"
+				check.initVar(obj, &y, "assignment", resultSlot{}) // error is on variable, use "assignment" not "range clause"
 			}
 			assert(obj.typ != nil)
 		}

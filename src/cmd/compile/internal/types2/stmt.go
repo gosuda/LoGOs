@@ -43,9 +43,18 @@ func (check *Checker) funcBody(decl *declInfo, name string, sig *Signature, body
 	defer check.logosPopFuncSig()
 	defer check.logosExitFunc() // logos M3-S4 hook.
 
+	if decl != nil && decl.fdecl != nil && check.conf.Logos && len(decl.fdecl.TParamList) > 0 {
+		if LogosUsesComptime(decl.fdecl, decl.file) {
+			check.logosCtDeclCheck = true
+			defer func() { check.logosCtDeclCheck = false }()
+		}
+		check.logosCtTParamDecl = true
+		defer func() { check.logosCtTParamDecl = false }()
+	}
 	check.stmtList(0, body.List)
+	check.logosRejectGenericMethod(decl, body) // logos comptime hook: a method of a generic type cannot be a comptime generic.
 
-	if check.hasLabel && !check.conf.IgnoreBranchErrors {
+	if !check.logosCtDeclCheck && check.hasLabel && !check.conf.IgnoreBranchErrors {
 		check.labels(body)
 	}
 
@@ -53,16 +62,21 @@ func (check *Checker) funcBody(decl *declInfo, name string, sig *Signature, body
 	if check.logosGeneratorSig(sig) { // logos M6-S9 hook.
 		genExempt = true
 	}
-	if sig.results.Len() > 0 && !genExempt && !check.isTerminating(body, "") {
+	if !check.logosCtDeclCheck && sig.results.Len() > 0 && !genExempt && !check.isTerminating(body, "") {
 		check.error(body.Rbrace, MissingReturn, "missing return")
 	}
 
 	// spec: "Implementation restriction: A compiler may make it illegal to
 	// declare a variable inside a function body if the variable is never used."
-	check.usage(sig.scope)
+	if !check.logosCtDeclCheck {
+		check.usage(sig.scope)
+	}
 }
 
 func (check *Checker) usage(scope *Scope) {
+	if scope.logosUsageDeferred {
+		return
+	}
 	needUse := func(kind VarKind) bool {
 		return !(kind == RecvVar || kind == ParamVar || kind == ResultVar)
 	}
@@ -126,8 +140,14 @@ func (check *Checker) stmtList(ctxt stmtContext, list []syntax.Stmt) {
 	inner := ctxt &^ fallthroughOk
 	list = trimTrailingEmptyStmts(list)   // trailing empty statements are "invisible" to fallthrough analysis
 	narrowBase := check.logosNarrowBase() // logos M3-S4 hook: early-exit narrowing scope.
+	sharedSyntax := check.logosCtSubst != nil || check.logosFieldBind != nil
+	comptimeFlow := sharedSyntax || check.logosCtDeclCheck || check.logosRecordCopy
 	for i, s := range list {
-		s = check.logosStmtYield(&list[i])
+		if sharedSyntax {
+			s = check.logosYieldForm(s)
+		} else {
+			s = check.logosStmtYield(&list[i])
+		}
 		inner := inner
 		if ok && i+1 == len(list) {
 			inner |= fallthroughOk
@@ -136,6 +156,9 @@ func (check *Checker) stmtList(ctxt stmtContext, list []syntax.Stmt) {
 		check.stmt(inner, s)
 		check.logosStmtExit(outerStmt) // logos M3-S4 hook.
 		check.logosAfterStmt(s)        // logos M3-S4 hook: early-exit narrowing for the rest of the list.
+		if comptimeFlow && check.logosCtStopAfter(s, list[i+1:]) {
+			break
+		}
 	}
 	check.logosPopToNarrow(narrowBase) // logos M3-S4 hook.
 }
@@ -444,6 +467,10 @@ func (check *Checker) stmt(ctxt stmtContext, s syntax.Stmt) {
 	// process collected function literals before scope changes
 	defer check.processDelayed(len(check.delayed))
 
+	if check.logosDead(s) {
+		return // dead `const if` branch: never type-checked (SPEC Sec 2.5)
+	}
+
 	// reset context for statements of inner blocks
 	inner := ctxt &^ (fallthroughOk | finalSwitchCase | inTypeSwitch)
 
@@ -456,8 +483,11 @@ func (check *Checker) stmt(ctxt stmtContext, s syntax.Stmt) {
 
 	case *syntax.LabeledStmt:
 		check.hasLabel = true
-		s.Stmt = check.logosYieldForm(s.Stmt)
-		check.stmt(ctxt, s.Stmt)
+		body := check.logosYieldForm(s.Stmt)
+		if check.logosCtSubst == nil && check.logosFieldBind == nil {
+			s.Stmt = body
+		}
+		check.stmt(ctxt, body)
 
 	case *syntax.ExprStmt:
 		if check.logosTryExprStmt(s) { // logos M1-S3 hook.

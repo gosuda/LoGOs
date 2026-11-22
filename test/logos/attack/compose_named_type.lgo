@@ -1,0 +1,26 @@
+// run
+
+package main
+
+import (
+	"comptime"
+	"fmt"
+)
+
+type Box[T any] struct {
+	V T
+}
+
+func Names[T any]() []string {
+	var out []string
+	const for _, f := range comptime.Fields[T]() {
+		out = append(out, f.Name)
+	}
+	return out
+}
+
+func Wrap[T any]() []string { return Names[Box[T]]() }
+
+func main() {
+	fmt.Println(Wrap[int]())
+}

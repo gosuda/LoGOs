@@ -5,6 +5,7 @@
 package logos
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -30,9 +31,12 @@ func TestNextLoopEmptyAndReceiverStayTasks(t *testing.T) {
 	})
 	t.Run("localPure", func(t *testing.T) {
 		body := "func g(xs []int) []int {\n\tvar ys []int\n\tfor i := 0; i < len(xs); i++ {\n\t\tys = append(ys, d(xs[i]))\n\t}\n\treturn ys\n}"
-		edits, _ := scanSnippet(t, imp, "package p\n\nfunc d(x int) int { return x * 2 }\n"+body+"\n")
-		if len(edits) != 1 {
-			t.Fatalf("local pure: got %d edits, want 1", len(edits))
+		edits, tasks := scanSnippet(t, imp, "package p\n\nfunc d(x int) int { return x * 2 }\n"+body+"\n")
+		if len(edits) != 0 || len(tasks) != 1 || tasks[0].Rule != "loop-chain" {
+			t.Fatalf("local pure: edits=%d tasks=%d, want 0 edits and one loop-chain task", len(edits), len(tasks))
+		}
+		if !strings.Contains(tasks[0].Instruction, "keep the append loop unless") {
+			t.Fatalf("local pure: instruction %q", tasks[0].Instruction)
 		}
 	})
 	t.Run("capturedClosure", func(t *testing.T) {

@@ -406,6 +406,49 @@ func TestLocal(t *testing.T) { testDirFiles(t, "testdata/local", 0, false) }
 // parsing with Config.Logos = true from the .lgo names (logosPackageMode).
 func TestLogos(t *testing.T) { testDirFiles(t, "../../../../internal/types/testdata/logos", 0, false) }
 
+func TestLogosDeadUsesRespectScope(t *testing.T) {
+	testenv.MustHaveGoBuild(t)
+	const src = `package p
+import (
+	"comptime"
+	"math/bits"
+	"strconv"
+	shadowed /* ERROR "imported as shadowed and not used" */ "strings"
+)
+
+func Deferred[T any]() {
+	const if comptime.IsStruct[T]() {
+		_ = strconv.IntSize
+		shadowed := struct{ N int }{}
+		_ = shadowed.N
+	}
+	const for _, field := range comptime.Fields[T]() {
+		_ = field.Name
+		_ = bits.UintSize
+	}
+}
+
+func names() {
+	read := 1
+	inInit := 2
+	local /* ERROR "declared and not used: local" */ := 3
+	field /* ERROR "declared and not used: field" */ := 4
+	writeOnly /* ERROR "declared and not used: writeOnly" */ := 5
+	const if false {
+		_ = read
+		inInit := inInit
+		_ = inInit
+		local := 0
+		_ = local
+		_ = struct{ field int }{field: 0}
+		writeOnly = 0
+		missing()
+	}
+}
+`
+	testFiles(t, []string{"deaduses.lgo"}, [][]byte{[]byte(src)}, 0, false)
+}
+
 func testDirFiles(t *testing.T, dir string, colDelta uint, manual bool) {
 	testenv.MustHaveGoBuild(t)
 	dir = filepath.FromSlash(dir)

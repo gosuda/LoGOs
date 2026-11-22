@@ -1,0 +1,25 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package main
+
+import (
+	"fmt"
+
+	"example.com/semanticidentity/consumer"
+	"example.com/semanticidentity/forward"
+	"example.com/semanticidentity/owner"
+)
+
+type optionalIntPointer = *int?
+
+func main() {
+	if !owner.PointerTypesDiffer() {
+		panic("non-nil and optional pointers have the same compile-time type")
+	}
+	fmt.Println("forward", forward.Pair[*int, optionalIntPointer]())
+	fmt.Println("reverse", consumer.Reverse())
+	fmt.Println("shared", consumer.Shared())
+	fmt.Println("named", forward.Pair[owner.FirstID, owner.SecondID]())
+}

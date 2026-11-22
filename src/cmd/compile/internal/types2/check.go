@@ -177,18 +177,29 @@ type Checker struct {
 	logosCSwitch        []logosIfaceCase                // logos M7-S4 hook: active interface-case stack for `const switch`.
 	logosGroup          []logosGroupFrame               // logos M8-S2 hook: lexical go-group nesting per function.
 	logosFieldVars      map[*Var]*LogosConstFor         // logos M7-S2 hook: const-for field variables.
-	logosRegionLit      map[*syntax.FuncLit]bool        // logos M18-S7 hook: literals capturing a region value.
-	logosRegionVar      map[*Var]bool                   // logos M18-S7 hook: locals holding such literals.
-	logosFieldPend      map[*syntax.Name]*Var           // logos M7-S2 hook: bare field-variable uses awaiting consumption.
-	logosFieldBind      *logosFieldBinding              // logos M7-S2 hook: per-iteration field meaning over concrete structs.
-	logosFieldBound     map[syntax.Expr]bool            // logos M7-S2 hook: f.Type exprs resolved to a concrete field type.
-	logosFieldTypeOwner map[syntax.Expr]*LogosConstFor  // logos M7-S2 hook: unbound f.Type exprs and the const for that owns them.
-	logosFieldNarrow    map[*LogosConstFor]Type         // logos M7-S2 hook: field type narrowed by the const-switch case under check.
+	logosIndexVars      map[*Var]bool
+	logosRegionLit      map[*syntax.FuncLit]bool       // logos M18-S7 hook: literals capturing a region value.
+	logosRegionVar      map[*Var]bool                  // logos M18-S7 hook: locals holding such literals.
+	logosFieldPend      map[*syntax.Name]*Var          // logos M7-S2 hook: bare field-variable uses awaiting consumption.
+	logosFieldBind      *logosFieldBinding             // logos M7-S2 hook: per-iteration field meaning over concrete structs.
+	logosFieldBound     map[syntax.Expr]bool           // logos M7-S2 hook: f.Type exprs resolved to a concrete field type.
+	logosFieldTypeOwner map[syntax.Expr]*LogosConstFor // logos M7-S2 hook: unbound f.Type exprs and the const for that owns them.
+	logosFieldNarrow    map[*LogosConstFor]Type        // logos M7-S2 hook: field type narrowed by the const-switch case under check.
 	logosConstForBudget int
 	logosConstForDepth  int
 	logosLambdaPending  map[*syntax.LambdaExpr]bool
 	logosComptimeCallee map[*syntax.SelectorExpr]bool
-	logosPred           logosPredState           // logos M7-S3 hook: `const if` condition context for comptime predicates.
+	logosPred           logosPredState // logos M7-S3 hook: `const if` condition context for comptime predicates.
+	logosDeclInfo       *Info
+	logosRecordCopy     bool
+	logosCtDeclCheck    bool                 // logos comptime instantiation: true while a comptime generic declaration itself is being checked.
+	logosCtTParamDecl   bool                 // logos comptime instantiation: true while any generic declaration is being checked.
+	logosTypeOfDeferred map[syntax.Expr]bool // logos comptime instantiation: TypeOf calls whose argument is still a type parameter.
+	logosCtSubst        map[*TypeParam]Type  // logos comptime instantiation: substitution for the running analysis.
+	logosCtAbstract     map[Object]Type
+	logosCtPos          []syntax.Pos // logos comptime instantiation: call site of the current exact body check.
+	logosCtLocalDefs    map[*syntax.Name]*TypeName
+	logosTypeOfFact     map[syntax.Expr]Type     // logos comptime instantiation: concrete types of comptime.TypeOf calls.
 	methods             map[*TypeName][]*Func    // maps package scope type names to associated non-blank (non-interface) methods
 	untyped             map[syntax.Expr]exprInfo // map of expressions without final type
 	delayed             []action                 // stack of delayed action segments; segments are processed in FIFO order
@@ -511,6 +522,7 @@ func (check *Checker) checkFiles(files []*syntax.File) {
 
 	if check.firstErr == nil {
 		check.monomorph()
+		check.logosCtDrain()
 	} else {
 		// Upstream disables cycle reports once prior errors exist;
 		// still collect the boundary silently so Logos proofs terminate.
@@ -578,33 +590,7 @@ func (check *Checker) cleanup() {
 // types2-specific support for recording type information in the syntax tree.
 func (check *Checker) recordTypeAndValueInSyntax(x syntax.Expr, mode operandMode, typ Type, val constant.Value) {
 	if check.StoreTypesInSyntax {
-		tv := TypeAndValue{mode, typ, val}
-		stv := syntax.TypeAndValue{Type: typ, Value: val}
-		if tv.IsVoid() {
-			stv.SetIsVoid()
-		}
-		if tv.IsType() {
-			stv.SetIsType()
-		}
-		if tv.IsBuiltin() {
-			stv.SetIsBuiltin()
-		}
-		if tv.IsValue() {
-			stv.SetIsValue()
-		}
-		if tv.IsNil() {
-			stv.SetIsNil()
-		}
-		if tv.Addressable() {
-			stv.SetAddressable()
-		}
-		if tv.Assignable() {
-			stv.SetAssignable()
-		}
-		if tv.HasOk() {
-			stv.SetHasOk()
-		}
-		x.SetTypeInfo(stv)
+		x.SetTypeInfo(LogosCtTypeAndValue(TypeAndValue{mode, typ, val}))
 	}
 }
 

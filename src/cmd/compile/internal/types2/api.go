@@ -195,6 +195,13 @@ type Config struct {
 	// Nil for the first user-source check and for plain Go checks.
 	LogosOwnedTypes map[syntax.Expr]LogosOwnedType
 
+	// These maps bind generated syntax nodes when the reduced declaration
+	// is checked in its defining package.
+	LogosCtTypes          map[syntax.Expr]Type
+	LogosCtUses           map[*syntax.Name]Object
+	LogosCtLocalTypes     map[*TypeName]*syntax.Name
+	LogosCtImportConstMap func(path, name string) (LogosCtConstMap, bool)
+
 	// LogosProvenReadonly carries sealed Good/Pure proofs by stable name
 	// (pkgPath\x00T.M|(*T).M|func) from THAT first check to the lowered
 	// recheck and any further rechecks of the same package in THIS
@@ -360,22 +367,43 @@ type Info struct {
 	LogosGroupTerminating map[*syntax.GroupStmt]bool // logos hook: `go group` statements whose block ends in a terminating statement, so the lowering emits no join after it.
 	LogosGroupNested      map[*syntax.GroupStmt]bool // logos hook: `go group` statements nested inside another group body, submitted as children, never terminating the enclosing body.
 
-	LogosConstSlices map[syntax.Expr]bool                   // logos M5-S1 hook: slice expressions over const views with non-constant bounds, for the lowering-time runtime check.
-	LogosPropDecls   []*LogosPropDecl                       // logos M4-S2 hook: asserted property interfaces per declaring struct.
-	LogosCTFE        map[*Const]ctfe.Value                  // logos M5-S2 hook: evaluated const values (scalars and composites) for lowering.
+	LogosConstSlices map[syntax.Expr]bool  // logos M5-S1 hook: slice expressions over const views with non-constant bounds, for the lowering-time runtime check.
+	LogosPropDecls   []*LogosPropDecl      // logos M4-S2 hook: asserted property interfaces per declaring struct.
+	LogosCTFE        map[*Const]ctfe.Value // logos M5-S2 hook: evaluated const values (scalars and composites) for lowering.
+	LogosUnionTypes  map[string]*Interface
 	LogosSpreads     map[*syntax.CompositeLit][]LogosSpread // logos M6-S4 hook: checked `..src` spreads per struct literal.
 
-	LogosConstIfDead  map[syntax.Stmt]bool                             // logos M7-S1 hook: statements of dead `const if` branches, for comptime checks.
-	LogosConstSel     map[*syntax.SelectorExpr]*syntax.ConstSwitchCase // logos M7-S4 hook: interface-case selectors on the switched value, by their case.
-	LogosConstConv    map[syntax.Expr]*syntax.ConstSwitchCase          // logos M7-S4 hook: interface-case operands of the switched type boxed to the case interface, by their case.
-	LogosConstCases   map[*syntax.ConstSwitchCase]LogosConstCase       // logos M7-S4 hook: the case-scope substitution of each `const switch` case.
-	LogosConstFor     map[syntax.Node]*LogosConstFor                   // logos M7-S2 hook: checked `const for` statements for unrolling.
-	LogosDisqual      map[*syntax.BlockStmt][]map[string]bool          // logos M7-S2 hook: narrowing-disqualified names per function body, for copy checks.
-	LogosImporter     Importer                                         // logos M7-S3 hook: the importer of the check, for comptime copies that name packages the checked files do not import.
-	LogosContext      *Context                                         // logos M7-S3 hook: the canonical context of the check, for comptime copies to share instance identity.
-	LogosCTFEMaxSteps int                                              // logos M5-S2 hook: step limit for CTFE and copy checkers.
+	LogosConstIfDead           map[syntax.Stmt]bool // logos M7-S1 hook: statements of dead `const if` branches, for comptime checks.
+	LogosConstIf               map[*syntax.ConstIfStmt]bool
+	LogosTagGet                map[*syntax.CallExpr]LogosTagGet
+	LogosCtInst                map[string]*LogosCtInst
+	LogosCtPrepared            map[*Func]*LogosCtInst
+	LogosCtImports             []string
+	LogosCtFinish              func(*Package, *Info, *Config)
+	LogosCtGenerics            map[*Func]LogosCtGeneric
+	LogosCtImport              func(*Func) (LogosCtGeneric, bool)
+	LogosCtGraph               map[string][]string     // semantic instance ID to forwarding targets in checked edge order
+	LogosCtSiteKeys            map[*syntax.Name]string // exact semantic instance requested at a checked use
+	LogosCtExportNamedDefaults LogosCtNamedDefaults
+	LogosCtImportNamedDefaults func(*Named) LogosCtNamedTypeDefaults
+	LogosCtExportConstMaps     map[string]LogosCtConstMapExport
+	LogosCtImportConstMap      func(path, name string) (LogosCtConstMap, bool)
+	LogosCtConstMapUses        map[*syntax.Name]LogosCtConstMapRef
+	LogosCtGlobalRefs          map[Object]bool
+	LogosCtDefaultOrigin       *Info
+	LogosCtProperties          map[*syntax.SelectorExpr]LogosCtProperty
+	LogosYieldForms            map[syntax.Stmt]*syntax.YieldStmt
+	LogosConstSel              map[*syntax.SelectorExpr]*syntax.ConstSwitchCase // logos M7-S4 hook: interface-case selectors on the switched value, by their case.
+	LogosConstConv             map[syntax.Expr]*syntax.ConstSwitchCase          // logos M7-S4 hook: interface-case operands of the switched type boxed to the case interface, by their case.
+	LogosConstCases            map[*syntax.ConstSwitchCase]LogosConstCase       // logos M7-S4 hook: the case-scope substitution of each `const switch` case.
+	LogosConstFor              map[syntax.Node]*LogosConstFor                   // logos M7-S2 hook: checked `const for` statements for unrolling.
+	LogosDisqual               map[*syntax.BlockStmt][]map[string]bool          // logos M7-S2 hook: narrowing-disqualified names per function body, for copy checks.
+	LogosImporter              Importer                                         // logos M7-S3 hook: the importer of the check, for comptime copies that name packages the checked files do not import.
+	LogosContext               *Context                                         // logos M7-S3 hook: the canonical context of the check, for comptime copies to share instance identity.
+	LogosCTFEMaxSteps          int                                              // logos M5-S2 hook: step limit for CTFE and copy checkers.
 
-	LogosPlatformRets map[syntax.Pos][]LogosPlatformRet // logos M9-S2 hook: start positions of return operands holding platform pointers that convert to an interface result.
+	LogosPlatformRets     map[syntax.Pos][]LogosPlatformRet // logos M9-S2 hook: start positions of return operands holding platform pointers that convert to an interface result.
+	LogosPlatformRetSlots map[*syntax.ReturnStmt]map[int]LogosPlatformRet
 
 	LogosConstCov map[syntax.Expr]Type // original const-slice arguments mapped to target interface elements
 
@@ -391,6 +419,163 @@ type Info struct {
 	// remains the impurity verdict. The first record wins, so a later
 	// observation through a plain declaration cannot downgrade it.
 	LogosConstFuncs map[string]LogosConstFunc
+}
+
+// LogosTagGet records a checked const-for field lookup. A nil Value
+// means that the key must still be evaluated at run time.
+type LogosTagGet struct {
+	Receiver syntax.Expr
+	Tag      string
+	Value    constant.Value
+}
+
+// LogosCtInst holds one concrete check of a comptime generic. Its Info is
+// keyed by the declaration nodes and is separate from declaration-time Info.
+type LogosCtInst struct {
+	Origin   *Func
+	Targs    []Type
+	ABITargs []Type
+	ID       string
+	Decl     *syntax.FuncDecl
+	Helpers  []syntax.Decl
+	Readonly []*Var
+	Sig      *Signature
+	Sym      string
+	Pkg      *Package
+	Info     *Info
+}
+
+// LogosCtGeneric records either a deferred comptime body and its lexical
+// scope, or the checked generic uses in an ordinary generic body.
+type LogosCtGeneric struct {
+	Decl      *syntax.FuncDecl
+	Scope     *Scope
+	GoVersion string
+	Edges     []LogosCtEdge
+}
+
+// LogosCtNamedDefault names a field and its defining-package factory.
+type LogosCtNamedDefault struct {
+	Field       string
+	Factory     *Func
+	FactoryName string
+}
+
+// LogosCtNamedTypeDefaults records either direct defaults or a derived type's
+// declaration RHS, using the type's own binders.
+type LogosCtNamedTypeDefaults struct {
+	Fields []LogosCtNamedDefault
+	RHS    Type
+}
+
+// LogosCtNamedDefaults is the defining package's export snapshot, keyed by
+// the declarations' lexical names.
+type LogosCtNamedDefaults map[string]LogosCtNamedTypeDefaults
+
+// LogosCtConstMap describes the single owning package's native const map.
+// Binding is the lexical semantic object, not a runtime global reference.
+type LogosCtConstMap struct {
+	Type        Type
+	Binding     *Var
+	Count       int
+	Bearing     bool
+	Lookup      *Func
+	Materialize *Func
+	Iterate     *Func
+}
+
+type LogosCtConstMapRole uint8
+
+const (
+	LogosCtMapLookup LogosCtConstMapRole = iota
+	LogosCtMapMaterialize
+	LogosCtMapIterate
+)
+
+// LogosCtConstMapRef binds one generated native identifier to an operation on
+// the original const declaration. It remains valid across checker instances.
+type LogosCtConstMapRef struct {
+	Path string
+	Name string
+	Role LogosCtConstMapRole
+}
+
+// Helper picks the checked native function for this operation.
+func (row LogosCtConstMap) Helper(role LogosCtConstMapRole) *Func {
+	switch role {
+	case LogosCtMapLookup:
+		return row.Lookup
+	case LogosCtMapMaterialize:
+		return row.Materialize
+	case LogosCtMapIterate:
+		return row.Iterate
+	}
+	return nil
+}
+
+// LogosCtConstMapExport records the owner-generated declaration names before
+// the plain Go recheck binds them to exact package objects.
+type LogosCtConstMapExport struct {
+	Type        Type
+	Count       int
+	Bearing     bool
+	Lookup      string
+	Materialize string
+	Iterate     string
+}
+
+// LogosCtProperty preserves a constraint's property dispatch at a checked
+// selector. Getter and Setter bind the accessor selected by the constraint.
+type LogosCtProperty struct {
+	Prop   LogosProp
+	Getter *Func
+	Setter *Func
+}
+
+// LogosCtEdge records one generic use, including inferred instantiations
+// and function values. Its arguments may reference the enclosing binders.
+type LogosCtEdge struct {
+	Origin *Func
+	Targs  []Type
+	Pos    syntax.Pos
+	Site   *syntax.Name
+	info   *Info
+}
+
+// LogosCtTypeAndValue converts isolated checker facts for a concrete syntax node.
+func LogosCtTypeAndValue(tv TypeAndValue) syntax.TypeAndValue {
+	stv := syntax.TypeAndValue{Type: tv.Type, Value: tv.Value}
+	if tv.IsVoid() {
+		stv.SetIsVoid()
+	}
+	if tv.IsType() {
+		stv.SetIsType()
+	}
+	if tv.IsBuiltin() {
+		stv.SetIsBuiltin()
+	}
+	if tv.IsValue() {
+		stv.SetIsValue()
+	}
+	if tv.IsNil() {
+		stv.SetIsNil()
+	}
+	if tv.Addressable() {
+		stv.SetAddressable()
+	}
+	if tv.Assignable() {
+		stv.SetAssignable()
+	}
+	if tv.HasOk() {
+		stv.SetHasOk()
+	}
+	return stv
+}
+
+// LogosComptimePackage returns the shared package for the compiler's
+// comptime pseudo-import.
+func LogosComptimePackage() *Package {
+	return logosComptimePackage()
 }
 
 func (info *Info) recordTypes() bool {

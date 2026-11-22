@@ -1,0 +1,46 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package main
+
+import (
+	"comptime"
+	"fmt"
+
+	"example.com/fieldtags/scan"
+)
+
+type Record struct {
+	A int `key:"alpha" alpha:"one" beta:"wrong"`
+	B int `key:"beta" beta:"two"`
+}
+
+func direct() ([2]string, [2]string) {
+	var tags, arms [2]string
+	const for i, f := range comptime.Fields[Record]() {
+		tags[i] = f.Tag.Get(f.Tag.Get("key"))
+		const if f.Tag.Get(f.Tag.Get("key")) == "one" {
+			arms[i] = "then"
+		} else {
+			arms[i] = "else"
+		}
+	}
+	return tags, arms
+}
+
+func check(path string, tags, arms [2]string) {
+	if want := [2]string{"one", "two"}; tags != want {
+		panic(fmt.Sprintf("%s: tags = %q, want %q", path, tags, want))
+	}
+	if want := [2]string{"then", "else"}; arms != want {
+		panic(fmt.Sprintf("%s: arms = %q, want %q", path, arms, want))
+	}
+}
+
+func main() {
+	tags, arms := direct()
+	check("direct", tags, arms)
+	tags, arms = scan.Tags[Record]()
+	check("imported", tags, arms)
+}
