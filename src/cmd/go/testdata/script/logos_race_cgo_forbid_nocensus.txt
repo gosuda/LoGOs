@@ -23,6 +23,12 @@ stdout '^runtime/race$'
 [!GOOS:windows] [!GOOS:darwin] logos list -race -test -deps -f '{{if eq .ImportPath "net"}}cgo={{.CgoFiles}}{{end}}' ./pure
 [!GOOS:windows] [!GOOS:darwin] ! stderr 'requires cgo'
 [!GOOS:windows] [!GOOS:darwin] stdout 'cgo=\[.+'
+# cgouse imports C directly, so the dep graph holds a cgo user on every
+# platform where CGO_ENABLED=1, darwin included: a forbid policy wrongly
+# applied to a Go module refuses here instead of passing vacuously.
+[cgo] logos list -race -test -deps -f '{{.ImportPath}}' ./pure
+[cgo] ! stderr 'requires cgo'
+[cgo] stdout '^example.com/forbidgomodule/cgouse$'
 
 -- forbid/go.mod --
 module example.com/forbidgomodule
@@ -54,3 +60,31 @@ func TestAdd(t *testing.T) {
 		t.Fatal("127.0.0.1 is not a loopback address")
 	}
 }
+
+-- forbid/pure/pure_cgo_test.go --
+//go:build cgo
+
+package pure
+
+import (
+	"testing"
+
+	"example.com/forbidgomodule/cgouse"
+)
+
+func TestCgoProbe(t *testing.T) {
+	if cgouse.Answer() != 42 {
+		t.Fatal("cgo probe failed")
+	}
+}
+
+-- forbid/cgouse/cgouse.go --
+package cgouse
+
+/*
+int logos_cgo_probe(void) { return 42; }
+*/
+import "C"
+
+// Answer reports the value of the C probe function.
+func Answer() int { return int(C.logos_cgo_probe()) }
