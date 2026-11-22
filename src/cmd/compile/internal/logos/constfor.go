@@ -2142,6 +2142,13 @@ func (c *cfLeaf) cfDeadConstCase(n syntax.Node) bool {
 		if !ok {
 			continue
 		}
+		// A tag naming a function-local type resolves in the switch's
+		// own scope; the record's package scope cannot answer it, so
+		// leave the fold to the copy's own lowering instead of
+		// suppressing specialization of a case that is live there.
+		if c.cfMentionsLocalDecl(sw.Targ, sw) {
+			return false
+		}
 		tag, ok := c.fl.cfResolveTypeExpr(sw.Targ, c.active, c.run.sites)
 		if !ok || tag == nil {
 			return false
