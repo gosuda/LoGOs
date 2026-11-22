@@ -44,7 +44,7 @@ jobs:
     runs-on: "${{ (matrix.suite == 'unit' || matrix.suite == 'autovec') && 'depot-ubuntu-24.04' || matrix.suite == 'scripts' && 'ubuntu-24.04' || 'ubuntu-26.04' }}"
     timeout-minutes: "${{ matrix.suite == 'scripts' && 180 || 90 }}"
     strategy:
-      fail-fast: true
+      fail-fast: false
       matrix:
         # Share one toolchain build across the shorter suites.
         suite: ["unit", "scripts", "upstream", "autovec"]
