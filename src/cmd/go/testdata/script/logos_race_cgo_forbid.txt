@@ -23,8 +23,10 @@ logos test -race -tags=netcgo -count=1 ./clean
 stdout '^ok  '
 logos test -race -tags=netcgo -v -count=1 ./clean
 stdout 'TestNetcgoTagPreserved'
+! stdout 'TestOSUserGoInjected'
 logos test -race -v -count=1 ./clean
 ! stdout 'TestNetcgoTagPreserved'
+! stdout 'TestOSUserGoInjected'
 logos list -race -tags=netcgo -test -deps -f '{{if eq .ImportPath "net"}}cgo={{.CgoFiles}}{{end}}' ./clean
 stdout '^cgo=\[\]$'
 
@@ -199,6 +201,16 @@ package clean
 import "testing"
 
 func TestNetcgoTagPreserved(t *testing.T) {
+}
+
+-- forbid/clean/osusergo_tag_test.lgo --
+//go:build osusergo
+
+package clean
+
+import "testing"
+
+func TestOSUserGoInjected(t *testing.T) {
 }
 
 -- forbid/usesc/usesc.lgo --
