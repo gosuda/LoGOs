@@ -86,7 +86,10 @@ did not return after its group was cancelled. The group cannot join
 before that child returns. When the child waits on a plain channel
 receive in a function that takes a context, --fix rewrites that line
 into a select on the receive and the context, and --ai-patch prints the
-same edit without changing files. Other waits keep a hint.
+same edit without changing files. Other waits keep a hint, and so does
+a receive that --fix cannot prove. --fix refuses a file that is outside
+the main module, generated, multiply linked, or changed during the run,
+and prints the reason as "logos conc: cannot fix file: reason".
 
 The finding conc::group_unbounded names a go group without a limit
 whose children reach 10000 at one time. The count of children then

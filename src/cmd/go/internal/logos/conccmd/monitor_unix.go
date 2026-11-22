@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -24,6 +25,7 @@ import (
 
 	"cmd/go/internal/base"
 	"cmd/go/internal/cfg"
+	"cmd/go/internal/modload"
 )
 
 // monitor runs `logos <verb>` with the monitor tag and relays the
@@ -93,6 +95,9 @@ func monitor(verb string, inv invocation) {
 		child.Stderr = os.Stderr
 	}
 	child.Env = append(slices.Clip(cfg.OrigEnv), sinkEnv+"="+path)
+	if verb == "run" {
+		child.Env = append(child.Env, base.ConcRunExitEnv+"=1")
+	}
 	for name, value := range inv.durations {
 		child.Env = append(child.Env, durationFlags[name]+"="+value)
 	}
@@ -108,6 +113,7 @@ func monitor(verb string, inv invocation) {
 	// omitted -shake default. Later entries win over inherited ones.
 	child.Env = append(child.Env, shakeEnv+"="+inv.shake)
 	base.StartSigHandlers()
+	started := time.Now()
 	runErr := child.Run()
 	if stderrW != nil {
 		// The run is over and the exit-status line is already in the
@@ -145,7 +151,7 @@ func monitor(verb string, inv invocation) {
 		if inv.aiPatch {
 			printStalledBrief(fixes, inv.asJSON)
 		} else {
-			for _, done := range applyStalledFixes(fixes) {
+			for _, done := range applyStalledFixes(fixes, started) {
 				fmt.Fprintf(os.Stderr, "logos conc: fixed %s\n", done)
 			}
 		}
@@ -217,4 +223,210 @@ func (s *exitScanWriter) status() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.code
+}
+
+// applyStalledFixes writes the edits of each file in one rename, latest
+// line first so earlier lines keep their numbers. A file reached through
+// two names gets one edit per line. A file that fixScope.fixFile does
+// not admit keeps its bytes, and its findings keep their hints. It
+// returns one "file:line" per edit written.
+func applyStalledFixes(fixes []stalledFix, started time.Time) []string {
+	byFile := map[string][]stalledFix{}
+	for _, f := range fixes {
+		resolved, err := filepath.EvalSymlinks(f.file)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "logos conc: cannot fix %s: %v\n", f.file, err)
+			continue
+		}
+		byFile[resolved] = append(byFile[resolved], f)
+	}
+	scope, scopeErr := newFixScope()
+	var applied []string
+	for _, resolved := range slices.Sorted(maps.Keys(byFile)) {
+		edits := distinctLines(byFile[resolved])
+		err := scopeErr
+		if err == nil {
+			err = scope.fixFile(resolved, edits, started)
+		}
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "logos conc: cannot fix %s: %v\n", edits[0].file, err)
+			continue
+		}
+		for _, f := range edits {
+			applied = append(applied, fmt.Sprintf("%s:%d", f.file, f.line))
+		}
+	}
+	return applied
+}
+
+// distinctLines orders the edits of one file latest line first and keeps
+// one edit per line.
+func distinctLines(edits []stalledFix) []stalledFix {
+	slices.SortFunc(edits, func(a, b stalledFix) int {
+		if a.line != b.line {
+			return b.line - a.line
+		}
+		return strings.Compare(a.file, b.file)
+	})
+	return slices.CompactFunc(edits, func(a, b stalledFix) bool { return a.line == b.line })
+}
+
+// fixScope holds the resolved directories that decide where a fix may
+// write: inside the main module, outside GOROOT and the module cache.
+type fixScope struct {
+	module, goroot, modcache string
+}
+
+func newFixScope() (fixScope, error) {
+	gomod := modload.FindGoMod(base.Cwd())
+	if gomod == "" {
+		return fixScope{}, errors.New("no main module")
+	}
+	module, err := filepath.EvalSymlinks(filepath.Dir(gomod))
+	if err != nil {
+		return fixScope{}, err
+	}
+	return fixScope{module: module, goroot: resolvedDir(cfg.GOROOT), modcache: resolvedDir(cfg.GOMODCACHE)}, nil
+}
+
+func resolvedDir(dir string) string {
+	if resolved, err := filepath.EvalSymlinks(dir); err == nil {
+		return resolved
+	}
+	return dir
+}
+
+func within(dir, file string) bool {
+	if dir == "" {
+		return false
+	}
+	rel, err := filepath.Rel(dir, file)
+	return err == nil && filepath.IsLocal(rel)
+}
+
+// fixFile writes the edits of the resolved file. It admits only a
+// regular .lgo file of the main module, outside GOROOT and the module
+// cache, with one link, not generated, and not changed since the run
+// started, and it proves each edit again on the bytes it replaces.
+func (s fixScope) fixFile(resolved string, edits []stalledFix, started time.Time) error {
+	switch {
+	case !within(s.module, resolved):
+		return fmt.Errorf("outside the main module %s", s.module)
+	case within(s.goroot, resolved):
+		return errors.New("inside GOROOT")
+	case within(s.modcache, resolved):
+		return errors.New("inside the module cache")
+	case !strings.HasSuffix(resolved, ".lgo"):
+		return errors.New("not a .lgo file")
+	}
+	info, err := os.Lstat(resolved)
+	if err != nil {
+		return err
+	}
+	owner, ok := info.Sys().(*syscall.Stat_t)
+	switch {
+	case !info.Mode().IsRegular():
+		return errors.New("not a regular file")
+	case !ok:
+		return errors.New("unknown owner")
+	case owner.Nlink > 1:
+		return fmt.Errorf("the file has %d hard links", owner.Nlink)
+	case !info.ModTime().Before(started):
+		return errors.New("changed during the run")
+	}
+	data, err := os.ReadFile(resolved)
+	if err != nil {
+		return err
+	}
+	text := string(data)
+	if generated(text) {
+		return errors.New("generated file")
+	}
+	for _, f := range edits {
+		if got, ok := receiveReplacement(data, f.line); !ok || got != f.replacement {
+			return fmt.Errorf("line %d no longer holds the receive the run reported", f.line)
+		}
+	}
+	lines := strings.Split(text, "\n")
+	for _, f := range edits {
+		lines[f.line-1] = f.replacement
+	}
+	return writeFixedFile(resolved, data, []byte(strings.Join(lines, "\n")), info)
+}
+
+// generated reports whether a "// Code generated ... DO NOT EDIT." line
+// comes before the package clause.
+func generated(text string) bool {
+	for line := range strings.SplitSeq(text, "\n") {
+		line = strings.TrimSuffix(line, "\r")
+		if strings.HasPrefix(line, "package ") {
+			return false
+		}
+		if strings.HasPrefix(line, "// Code generated ") && strings.HasSuffix(line, " DO NOT EDIT.") {
+			return true
+		}
+	}
+	return false
+}
+
+// writeFixedFile stages data next to file and renames it over file only
+// while file still holds before, the bytes the edits were proved on, so
+// a failure at any step leaves file whole.
+func writeFixedFile(file string, before, data []byte, info os.FileInfo) error {
+	tmp, err := os.CreateTemp(filepath.Dir(file), ".logosconc-fix-*")
+	if err != nil {
+		return err
+	}
+	name := tmp.Name()
+	keep := false
+	defer func() {
+		if !keep {
+			os.Remove(name)
+		}
+	}()
+	err = stageFixedFile(tmp, data, info)
+	if closeErr := tmp.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		return err
+	}
+	current, err := os.ReadFile(file)
+	if err != nil {
+		return err
+	}
+	if !bytes.Equal(current, before) {
+		return errors.New("changed while the fix was staged")
+	}
+	if err := os.Rename(name, file); err != nil {
+		return err
+	}
+	keep = true
+	return nil
+}
+
+// stageFixedFile writes data to tmp, gives tmp the owner and then the
+// mode of the file it replaces, since a change of owner clears the
+// set-user-ID bit, and syncs tmp to disk.
+func stageFixedFile(tmp *os.File, data []byte, info os.FileInfo) error {
+	want, ok := info.Sys().(*syscall.Stat_t)
+	if !ok {
+		return errors.New("unknown owner")
+	}
+	if _, err := tmp.Write(data); err != nil {
+		return err
+	}
+	staged, err := tmp.Stat()
+	if err != nil {
+		return err
+	}
+	if got, ok := staged.Sys().(*syscall.Stat_t); !ok || got.Uid != want.Uid || got.Gid != want.Gid {
+		if err := tmp.Chown(int(want.Uid), int(want.Gid)); err != nil {
+			return err
+		}
+	}
+	if err := tmp.Chmod(info.Mode()); err != nil {
+		return err
+	}
+	return tmp.Sync()
 }

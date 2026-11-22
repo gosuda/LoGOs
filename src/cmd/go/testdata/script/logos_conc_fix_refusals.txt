@@ -1,0 +1,475 @@
+[GOOS:windows] skip 'logos conc needs named pipes'
+[GOOS:plan9] skip 'logos conc needs named pipes'
+[!symlink] skip 'symlink unavailable'
+
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+cd fix
+
+# --fix writes no file outside the main module. The overlay replaces a
+# package file with one outside the module, and a link in the module
+# points outside it. Both stalls are reported, and the logical file, the
+# replacement and the link target keep their bytes.
+cp ovl/main.lgo $WORK/ovl.orig
+cp ../outside/main.lgo $WORK/outside.orig
+cp ../outside/link.lgo $WORK/link.orig
+symlink link/main.lgo -> ../../outside/link.lgo
+! logos conc test -stall=200ms -count=1 --fix -overlay=overlay.json ./ovl ./link
+stderr '\[conc::group_child_stalled\]'
+stderr 'logos conc: cannot fix .*outside[/\\]main\.lgo: outside the main module'
+stderr 'logos conc: cannot fix .*link[/\\]main\.lgo: outside the main module'
+! stderr 'logos conc: fixed'
+cmp ovl/main.lgo $WORK/ovl.orig
+cmp ../outside/main.lgo $WORK/outside.orig
+cmp ../outside/link.lgo $WORK/link.orig
+
+# A file that changed after the run started is refused: the finding names
+# a line of the bytes the run compiled. The test of this package appends
+# to its own source after the build.
+! logos conc test -stall=200ms -count=1 --fix ./stale
+stdout '^ok '
+stderr 'stale[/\\]main\.lgo:17: \[conc::group_child_stalled\]'
+stderr 'logos conc: cannot fix .*stale[/\\]main\.lgo: changed during the run'
+! stderr 'logos conc: fixed'
+cmp stale/main.lgo want/stale.txt
+
+# A receive whose rewrite the fix cannot prove keeps its hint, and no file
+# changes. In rebound the context gets a new value before the wait, so a
+# select on it does not end with the group. In split the receive is an
+# argument of a call that starts on the line above.
+cp rebound/main.lgo $WORK/rebound.orig
+cp split/main.lgo $WORK/split.orig
+! logos conc test -stall=200ms -count=1 --fix ./rebound ./split
+stderr 'rebound[/\\]main\.lgo:18: \[conc::group_child_stalled\]'
+stderr 'split[/\\]main\.lgo:18: \[conc::group_child_stalled\]'
+stderr '^\tfix: '
+! stderr 'logos conc: (fixed|cannot fix)'
+cmp rebound/main.lgo $WORK/rebound.orig
+cmp split/main.lgo $WORK/split.orig
+
+# Two findings in one file land in one write, latest line first. Package b
+# reaches the same file through a link, so the run reports each line two
+# times; the fix writes each line one time.
+symlink b/main.lgo -> ../a/main.lgo
+! logos conc test -stall=200ms -count=1 --fix ./a ./b
+stderr 'logos conc: fixed .*a[/\\]main\.lgo:24'
+stderr 'logos conc: fixed .*a[/\\]main\.lgo:17'
+! stderr 'logos conc: fixed .*b[/\\]main\.lgo'
+! stderr 'logos conc: cannot fix'
+cmp a/main.lgo want/twice.txt
+logos build ./a ./b
+
+-- fix/go.mod --
+module example.com/concrefuse
+
+go 1.27
+-- fix/overlay.json --
+{
+	"Replace": {
+		"ovl/main.lgo": "../outside/main.lgo"
+	}
+}
+-- fix/ovl/main.lgo --
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"time"
+)
+
+func fail() error {
+	return errors.New("first job failed")
+}
+
+func slow(ctx context.Context) error {
+	inner, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+	defer cancel()
+	select {
+	case <-inner.Done():
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	return nil
+}
+
+func jobs(ctx context.Context) error {
+	go group (ctx) {
+		go fail()
+		go slow(ctx)
+	}
+	return nil
+}
+
+func main() {
+	fmt.Println("jobs done:", jobs(context.Background()))
+}
+-- fix/ovl/main_test.lgo --
+package main
+
+import "testing"
+
+func TestJobs(t *testing.T) {
+	if err := jobs(t.Context()); err == nil {
+		t.Fatal("the first job did not fail the group")
+	}
+}
+-- outside/main.lgo --
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"time"
+)
+
+func fail() error {
+	return errors.New("first job failed")
+}
+
+func slow(ctx context.Context) error {
+	inner, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+	defer cancel()
+	<-inner.Done()
+	return nil
+}
+
+func jobs(ctx context.Context) error {
+	go group (ctx) {
+		go fail()
+		go slow(ctx)
+	}
+	return nil
+}
+
+func main() {
+	fmt.Println("jobs done:", jobs(context.Background()))
+}
+-- outside/link.lgo --
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"time"
+)
+
+func fail() error {
+	return errors.New("first job failed")
+}
+
+func slow(ctx context.Context) error {
+	inner, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+	defer cancel()
+	<-inner.Done()
+	return nil
+}
+
+func jobs(ctx context.Context) error {
+	go group (ctx) {
+		go fail()
+		go slow(ctx)
+	}
+	return nil
+}
+
+func main() {
+	fmt.Println("jobs done:", jobs(context.Background()))
+}
+-- fix/link/main_test.lgo --
+package main
+
+import "testing"
+
+func TestJobs(t *testing.T) {
+	if err := jobs(t.Context()); err == nil {
+		t.Fatal("the first job did not fail the group")
+	}
+}
+-- fix/stale/main.lgo --
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"time"
+)
+
+func fail() error {
+	return errors.New("first job failed")
+}
+
+func slow(ctx context.Context) error {
+	inner, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+	defer cancel()
+	<-inner.Done()
+	return nil
+}
+
+func jobs(ctx context.Context) error {
+	go group (ctx) {
+		go fail()
+		go slow(ctx)
+	}
+	return nil
+}
+
+func main() {
+	fmt.Println("jobs done:", jobs(context.Background()))
+}
+-- fix/stale/main_test.lgo --
+package main
+
+import (
+	"os"
+	"testing"
+)
+
+func TestJobs(t *testing.T) {
+	data, err := os.ReadFile("main.lgo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile("main.lgo", append(data, "\n// edited while the test ran\n"...), 0o666); err != nil {
+		t.Fatal(err)
+	}
+	if err := jobs(t.Context()); err == nil {
+		t.Fatal("the first job did not fail the group")
+	}
+}
+-- fix/rebound/main.lgo --
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"time"
+)
+
+func fail() error {
+	return errors.New("first job failed")
+}
+
+func slow(ctx context.Context) error {
+	ctx = context.WithoutCancel(ctx)
+	inner, cancel := context.WithTimeout(ctx, 1500*time.Millisecond)
+	defer cancel()
+	<-inner.Done()
+	return nil
+}
+
+func jobs(ctx context.Context) error {
+	go group (ctx) {
+		go fail()
+		go slow(ctx)
+	}
+	return nil
+}
+
+func main() {
+	fmt.Println("jobs done:", jobs(context.Background()))
+}
+-- fix/rebound/main_test.lgo --
+package main
+
+import "testing"
+
+func TestJobs(t *testing.T) {
+	if err := jobs(t.Context()); err == nil {
+		t.Fatal("the first job did not fail the group")
+	}
+}
+-- fix/split/main.lgo --
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"time"
+)
+
+func fail() error {
+	return errors.New("first job failed")
+}
+
+func slow(ctx context.Context) error {
+	inner, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+	defer cancel()
+	keep(
+		<-inner.Done(),
+	)
+	return nil
+}
+
+func keep(struct{}) {}
+
+func jobs(ctx context.Context) error {
+	go group (ctx) {
+		go fail()
+		go slow(ctx)
+	}
+	return nil
+}
+
+func main() {
+	fmt.Println("jobs done:", jobs(context.Background()))
+}
+-- fix/split/main_test.lgo --
+package main
+
+import "testing"
+
+func TestJobs(t *testing.T) {
+	if err := jobs(t.Context()); err == nil {
+		t.Fatal("the first job did not fail the group")
+	}
+}
+-- fix/a/main.lgo --
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"time"
+)
+
+func fail() error {
+	return errors.New("first job failed")
+}
+
+func slow(ctx context.Context) error {
+	inner, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+	defer cancel()
+	<-inner.Done()
+	return nil
+}
+
+func slower(ctx context.Context) error {
+	inner, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+	defer cancel()
+	<-inner.Done()
+	return nil
+}
+
+func jobs(ctx context.Context) error {
+	go group (ctx) {
+		go fail()
+		go slow(ctx)
+		go slower(ctx)
+	}
+	return nil
+}
+
+func main() {
+	fmt.Println("jobs done:", jobs(context.Background()))
+}
+-- fix/a/main_test.lgo --
+package main
+
+import "testing"
+
+func TestJobs(t *testing.T) {
+	if err := jobs(t.Context()); err == nil {
+		t.Fatal("the first job did not fail the group")
+	}
+}
+-- fix/b/main_test.lgo --
+package main
+
+import "testing"
+
+func TestJobs(t *testing.T) {
+	if err := jobs(t.Context()); err == nil {
+		t.Fatal("the first job did not fail the group")
+	}
+}
+-- fix/want/stale.txt --
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"time"
+)
+
+func fail() error {
+	return errors.New("first job failed")
+}
+
+func slow(ctx context.Context) error {
+	inner, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+	defer cancel()
+	<-inner.Done()
+	return nil
+}
+
+func jobs(ctx context.Context) error {
+	go group (ctx) {
+		go fail()
+		go slow(ctx)
+	}
+	return nil
+}
+
+func main() {
+	fmt.Println("jobs done:", jobs(context.Background()))
+}
+
+// edited while the test ran
+-- fix/want/twice.txt --
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"time"
+)
+
+func fail() error {
+	return errors.New("first job failed")
+}
+
+func slow(ctx context.Context) error {
+	inner, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+	defer cancel()
+	select {
+	case <-inner.Done():
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	return nil
+}
+
+func slower(ctx context.Context) error {
+	inner, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+	defer cancel()
+	select {
+	case <-inner.Done():
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	return nil
+}
+
+func jobs(ctx context.Context) error {
+	go group (ctx) {
+		go fail()
+		go slow(ctx)
+		go slower(ctx)
+	}
+	return nil
+}
+
+func main() {
+	fmt.Println("jobs done:", jobs(context.Background()))
+}
