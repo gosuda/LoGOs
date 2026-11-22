@@ -16,7 +16,7 @@ LoGOs runs goroutines inside `go group` blocks. Shared state lives in `logos/syn
 
 1. Write group code: start children inside `go group` blocks.
 2. Guard shared state with `logos/sync.Locked`.
-3. Run `logos lint` and `logos test -race` first. `-race` reports only exercised races and gives no universal data-race freedom. The run works under `[build] cgo = "forbid"`: it links only the race runtime and needs a C compiler or `zig` in PATH.
+3. Run `logos lint ./...` and `logos test -race ./...` first; with no package list both cover only the package in the current directory, not the module's subpackages. `-race` reports only exercised races and gives no universal data-race freedom. The run works under `[build] cgo = "forbid"`: it links only the race runtime and needs a C compiler or `zig` in PATH.
 4. Run the program under the monitor only when it is lint-clean and race-clean.
 5. Use `logos conc run` for a program and `logos conc test` for tests.
 6. Read each finding on standard error while the child still runs.
