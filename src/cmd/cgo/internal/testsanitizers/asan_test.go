@@ -37,6 +37,7 @@ func TestASAN(t *testing.T) {
 		{src: "asan_unsafe_fail1.go", memoryAccessError: "use-after-poison", errorLocation: "asan_unsafe_fail1.go:25"},
 		{src: "asan_unsafe_fail2.go", memoryAccessError: "use-after-poison", errorLocation: "asan_unsafe_fail2.go:25"},
 		{src: "asan_unsafe_fail3.go", memoryAccessError: "use-after-poison", errorLocation: "asan_unsafe_fail3.go:18"},
+		{src: "asan_eq_fail.go", memoryAccessError: "heap-use-after-free", errorLocation: "asan_eq_fail.go:28"},
 		{src: "asan_global1_fail.go", memoryAccessError: "global-buffer-overflow", errorLocation: "asan_global1_fail.go:12"},
 		{src: "asan_global2_fail.go", memoryAccessError: "global-buffer-overflow", errorLocation: "asan_global2_fail.go:19"},
 		{src: "asan_global3_fail.go", memoryAccessError: "global-buffer-overflow", errorLocation: "asan_global3_fail.go:13"},
