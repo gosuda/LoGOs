@@ -15,11 +15,14 @@ import (
 	"cmd/compile/internal/types2"
 )
 
-// platformSpanSource is the shape of test/logos/run/region_list.lgo that
-// broke the eject text: a for-post statement assigning a field read to a
-// pointer variable whose declared type forces a MustNonNil check. The
-// post statement has no terminator, so a span scanner that eats the loop
-// brace wraps the body into the check call.
+// platformSpanSource keeps the for-post shape that broke the eject text of
+// test/logos/run/region_list.lgo: a for-post statement storing a platform
+// pointer into a pointer variable whose declared type forces a MustNonNil
+// check. The post statement has no terminator, so a span scanner that eats
+// the loop brace wraps the body into the check call. The post stores tail,
+// which inherits the platform provenance of a generic result; a field read
+// through a platform pointer keeps the LoGOs field contract, so `h =
+// h.next` is no check site.
 const platformSpanSource = `package main
 
 type node struct {
@@ -40,7 +43,7 @@ func f() {
 		tail = n
 	}
 	tail.next = head
-	for h := head.next; h != head; h = h.next {
+	for h := head.next; h != head; h = tail {
 		_ = h.v
 	}
 }
@@ -90,12 +93,12 @@ func TestPlatformSpanEnclosesOperand(t *testing.T) {
 	}
 	reparseLowered(t, "platform_span.lgo", out)
 	text := string(out)
-	for _, want := range []string{`MustNonNil(n, "*main.node", &`, `MustNonNil(h.next, "*main.node", &`} {
+	for _, want := range []string{`MustNonNil(n, "*main.node", &`, `MustNonNil(tail, "*main.node", &`} {
 		if !strings.Contains(text, want) {
 			t.Errorf("lowered text misses %q:\n%s", want, text)
 		}
 	}
-	for _, bad := range []string{"MustNonNil(n {", "MustNonNil(h.next {"} {
+	for _, bad := range []string{"MustNonNil(n {", "MustNonNil(tail {"} {
 		if strings.Contains(text, bad) {
 			t.Errorf("lowered text wraps past its operand %q:\n%s", bad, text)
 		}
