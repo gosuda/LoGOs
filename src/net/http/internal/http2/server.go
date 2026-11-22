@@ -258,6 +258,12 @@ func (s *Server) serveConn(c net.Conn, opts *ServeConnOpts, newf func(*serverCon
 	defer cancel()
 
 	conf := configFromServer(opts.BaseConfig)
+	extendedConnectEnabled := !disableExtendedConnectProtocol
+	if !extendedConnectEnabled {
+		if cfg, ok := opts.BaseConfig.(extendedConnectConfig); ok {
+			extendedConnectEnabled = cfg.ExtendedConnectEnabled()
+		}
+	}
 	sc := &serverConn{
 		srv:                         s,
 		hs:                          opts.BaseConfig,
@@ -282,6 +288,7 @@ func (s *Server) serveConn(c net.Conn, opts *ServeConnOpts, newf func(*serverCon
 		serveG:                      newGoroutineLock(),
 		pushEnabled:                 true,
 		sawClientPreface:            opts.SawClientPreface,
+		extendedConnectEnabled:      extendedConnectEnabled,
 	}
 	if newf != nil {
 		newf(sc)
@@ -423,6 +430,8 @@ type serverConn struct {
 	remoteAddrStr    string
 	writeSched       WriteScheduler
 	countErrorFunc   func(errType string)
+
+	extendedConnectEnabled bool
 
 	// Everything following is owned by the serve loop; use serveG.check():
 	serveG                      goroutineLock // used to verify funcs are on serve()
@@ -773,7 +782,7 @@ func (sc *serverConn) serve(conf Config) {
 		{SettingHeaderTableSize, uint32(conf.MaxDecoderHeaderTableSize)},
 		{SettingInitialWindowSize, uint32(sc.initialStreamRecvWindowSize)},
 	}
-	if !disableExtendedConnectProtocol {
+	if sc.extendedConnectEnabled {
 		settings = append(settings, Setting{SettingEnableConnectProtocol, 1})
 	}
 	if sc.writeSchedIgnoresRFC7540() {
@@ -2116,25 +2125,36 @@ func (sc *serverConn) newStream(id, pusherID uint32, state streamState, priority
 func (sc *serverConn) newWriterAndRequest(st *stream, f *MetaHeadersFrame) (*responseWriter, *ServerRequest, error) {
 	sc.serveG.check()
 
-	rp := httpcommon.ServerRequestParam{
-		Method:    f.PseudoValue("method"),
-		Scheme:    f.PseudoValue("scheme"),
-		Authority: f.PseudoValue("authority"),
-		Path:      f.PseudoValue("path"),
-		Protocol:  f.PseudoValue("protocol"),
+	var rp httpcommon.ServerRequestParam
+	var hasProtocol bool
+	for _, hf := range f.PseudoFields() {
+		switch hf.Name {
+		case ":method":
+			rp.Method = hf.Value
+		case ":scheme":
+			rp.Scheme = hf.Value
+		case ":authority":
+			rp.Authority = hf.Value
+		case ":path":
+			rp.Path = hf.Value
+		case ":protocol":
+			rp.Protocol = hf.Value
+			hasProtocol = true
+		}
 	}
 
-	// extended connect is disabled, so we should not see :protocol
-	if disableExtendedConnectProtocol && rp.Protocol != "" {
-		return nil, nil, sc.countError("bad_connect", streamError(f.StreamID, ErrCodeProtocol))
-	}
-
-	isConnect := rp.Method == "CONNECT"
-	if isConnect {
-		if rp.Protocol == "" && (rp.Path != "" || rp.Scheme != "" || rp.Authority == "") {
+	switch {
+	case hasProtocol:
+		if !sc.extendedConnectEnabled || rp.Method != "CONNECT" ||
+			!httpguts.ValidHeaderFieldName(rp.Protocol) || rp.Authority == "" ||
+			(rp.Scheme != "https" && rp.Scheme != "http") || !strings.HasPrefix(rp.Path, "/") {
 			return nil, nil, sc.countError("bad_connect", streamError(f.StreamID, ErrCodeProtocol))
 		}
-	} else if rp.Method == "" || rp.Path == "" || (rp.Scheme != "https" && rp.Scheme != "http") {
+	case rp.Method == "CONNECT":
+		if rp.Path != "" || rp.Scheme != "" || rp.Authority == "" {
+			return nil, nil, sc.countError("bad_connect", streamError(f.StreamID, ErrCodeProtocol))
+		}
+	case rp.Method == "" || rp.Path == "" || (rp.Scheme != "https" && rp.Scheme != "http"):
 		// See 8.1.2.6 Malformed Requests and Responses:
 		//
 		// Malformed requests or responses that are detected
