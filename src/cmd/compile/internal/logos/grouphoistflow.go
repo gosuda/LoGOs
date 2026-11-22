@@ -108,6 +108,17 @@ func pureSendValue(e syntax.Expr) bool {
 	return pure
 }
 
+// groupConstExpr reports whether e is a constant expression: only
+// those are spelled in each send arm, since a `:=` snapshot gives an
+// untyped constant its default type instead of the channel element's
+// contextual type, while a typed constant snapshots equivalently.
+// Every other value keeps its original checked node so later passes
+// keep the annotations a reparsed clone would lose.
+func (fc *funcLower) groupConstExpr(e syntax.Expr) bool {
+	_, ok := typeConst(fc.fl.pkg.info, e)
+	return ok
+}
+
 func (h *groupHoist) send(s *syntax.SendStmt) span {
 	fc := h.fc
 	fl := fc.fl
@@ -141,11 +152,14 @@ func (h *groupHoist) send(s *syntax.SendStmt) span {
 		valArmB = at(&syntax.BasicLit{Value: v.Value, Kind: v.Kind}, pos)
 		valTxtA, valTxtB = valText, valText
 	default:
-		// A pure value is spelled in each send arm: only one arm
-		// evaluates it, and spelling it keeps the channel element's
-		// contextual typing for untyped constants (-1, 1 << 3,
-		// math.Pi) that a `:=` snapshot would give the default type.
-		if pureSendValue(s.Value) {
+		// Only an untyped constant is spelled in each send arm: only one
+		// arm evaluates it, and spelling it keeps the channel element's
+		// contextual typing (-1, 1 << 3, math.Pi) that a `:=` snapshot
+		// would give the default type. Every other value snapshots through
+		// its original checked node, so later passes keep the annotations
+		// a reparsed clone would lose: fresh addresses, tuple fields, and
+		// property or SIMD facts.
+		if pureSendValue(s.Value) && fc.groupConstExpr(s.Value) {
 			if a, okA := parseExprAt(valText.s, pos); okA {
 				if b, okB := parseExprAt(valText.s, pos); okB {
 					valArmA, valArmB = a, b
