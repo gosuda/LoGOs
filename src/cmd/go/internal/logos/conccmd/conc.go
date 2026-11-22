@@ -63,7 +63,7 @@ The conc flags are:
 
 	-stall duration
 		report a group child that runs this long after its group was
-		cancelled (default 5s)
+		canceled (default 5s)
 	-hold duration
 		report a Locked value that one goroutine holds this long while
 		another goroutine waits for it (default 100ms)
@@ -82,7 +82,7 @@ the same two logos/sync.Locked values in opposite orders. Run at the
 same moment, each goroutine waits for the other.
 
 The finding conc::group_child_stalled names a child of a go group that
-did not return after its group was cancelled. The group cannot join
+did not return after its group was canceled. The group cannot join
 before that child returns. When the child waits on a plain channel
 receive in a function that takes a context, --fix rewrites that line
 into a select on the receive and the context, and --ai-patch prints the
@@ -165,7 +165,7 @@ func Register(root *base.Command) {
 			if inv.fix && inv.aiPatch {
 				base.Fatalf("logos conc %s: --fix and --ai-patch are exclusive", verb)
 			}
-			monitor(verb, inv)
+			monitor(ctx, verb, inv)
 		}
 	}
 	root.Commands = append(root.Commands, CmdConc)
@@ -492,10 +492,10 @@ func printFinding(w io.Writer, line string, asJSON bool) {
 		if err != nil {
 			base.Fatalf("logos conc: %v", err)
 		}
-		w.Write(append(record, '\n'))
+		_, _ = w.Write(append(record, '\n'))
 	case d.RuleID == "":
-		fmt.Fprintln(w, d.Message)
+		_, _ = fmt.Fprintln(w, d.Message)
 	default:
-		fmt.Fprintf(w, "%s:%d: [%s] %s\n%s", d.File, d.Span.StartLine, d.RuleID, d.Message, d.Note)
+		_, _ = fmt.Fprintf(w, "%s:%d: [%s] %s\n%s", d.File, d.Span.StartLine, d.RuleID, d.Message, d.Note)
 	}
 }
