@@ -1268,7 +1268,7 @@ func (fl *fileLower) cfEmitCopy(text otext, site *cfSite) {
 	if len(errs) > 0 || fn == nil {
 		base.Fatalf("logos: cannot parse comptime copy at %s: %v", site.pos.String(), errs)
 	}
-	if !fl.cfCheckCopyFunc(fn, site.pos) {
+	if !fl.cfCheckCopyFunc(fn, site.pos, text) {
 		return
 	}
 	region := fl.adoptRegion(text, site.pos, fn.Pos().FileBase(), 2, []syntax.Node{fn})
@@ -1276,12 +1276,12 @@ func (fl *fileLower) cfEmitCopy(text otext, site *cfSite) {
 	fl.addHost(fl.orig, fl.orig, &cfHost{regions: []*cfRegion{region}, head: "\n\n", tail: "\n"})
 }
 
-func (fl *fileLower) cfCheckCopyFunc(fn *syntax.FuncDecl, pos syntax.Pos) bool {
+func (fl *fileLower) cfCheckCopyFunc(fn *syntax.FuncDecl, pos syntax.Pos, text otext) bool {
 	exp := fl.pkg.ctExp
 	ctx := types2.LogosCopyContext{
 		Scope:     fl.pkg.info.Scopes[fl.file],
 		Funcs:     exp.copyFuncs,
-		Aliases:   fl.cfAliases(),
+		Aliases:   fl.cfCopyCheckAliases(text),
 		MaxSteps:  fl.pkg.info.LogosCTFEMaxSteps,
 		NodeLimit: base.LogosComptimeNodes,
 		Importer:  fl.pkg.info.LogosImporter,
@@ -1295,6 +1295,28 @@ func (fl *fileLower) cfCheckCopyFunc(fn *syntax.FuncDecl, pos syntax.Pos) bool {
 		fl.cfError(pos, "%s", err.Msg)
 	}
 	return len(errs) == 0
+}
+
+// cfCopyCheckAliases returns the import aliases one copy check resolves:
+// the file's synthesized imports plus every runtime alias the copy text
+// names. Copy construction spells some types in lowered form
+// (`_logos_rt.Option[T]` for an option), and the check must resolve
+// those names even though no user import declares them. The file import
+// gate emits the import once the copy is adopted.
+func (fl *fileLower) cfCopyCheckAliases(text otext) map[*types2.Package]string {
+	out := fl.cfAliases()
+	if !strings.Contains(text.s, rtAlias+".") {
+		return out
+	}
+	pkg, err := fl.cfLoadPackage(rtImportPath)
+	if err != nil || pkg == nil {
+		return out
+	}
+	if out == nil {
+		out = make(map[*types2.Package]string)
+	}
+	out[pkg] = rtAlias
+	return out
 }
 
 func (fl *fileLower) cfRetireDefs() {
