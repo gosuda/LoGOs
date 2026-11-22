@@ -241,16 +241,21 @@ The command `logos context <pkg>#<Symbol>` MUST print the declaration plus one l
 `logos context` MUST serve `.lgo` and `.go` packages [T-103].
 The package pattern MUST select exactly one package; zero or multiple matches MUST report the pattern and the match count. [T-103]
 `logos context` MUST report an unknown symbol with text that names the package and the missing symbol [T-103].
-The command `logos next --fix` MUST convert a whole Go module to a LoGOs module [T-103][R-U3].
+The command `logos next --fix` MUST print a reviewable unified patch on standard output [T-103][R-U3].
+When the user applies the patch, the patch MUST convert the whole Go module to a LoGOs module [T-103][R-U3].
 `logos next` MUST use byte-span splicing and MUST keep every comment and build line byte-identical outside rewrites [T-103].
 `logos next` MUST keep each non-standard Go import of the module as an import of a Go package [T-103][R-U2].
 `logos next` MUST change nothing while it only prints a diff [T-103].
-`logos next --fix` MUST rename converted files and MUST rewrite matched patterns [T-103].
+`logos next --fix` MUST run build and test compilation preflight checks before it emits the patch [T-103].
+`logos next --fix` MUST leave all source files unchanged [T-103].
+When the user applies the patch, the patch MUST replace each converted `.go` file with a `.lgo` file [T-103].
+`logos next --ai-patch` MUST print the review plan and write it to `next_tasks.json` [T-103].
+`logos next --ai-patch` MUST NOT change source files [T-103].
 `logos next` MUST leave complex refactors unchanged and MUST list them in `next_tasks.json` [T-103].
-`logos next` MUST rewrite an index-range append loop with a pure body to a map chain [T-103].
+`logos next` MUST leave append loops and explicit error returns unchanged [T-103].
+`logos next` MUST list the conversions of those loops and returns as review guidance [T-103].
 `logos next` MUST leave a loop with jump control or side effects unchanged and MUST list it in `next_tasks.json` [T-103].
 The toolchain MUST NOT add a `logos fmt` rewriting command. [T-103]
-No command except `logos next` MUST rewrite `.lgo` files [T-103].
 
 ### 1.4 RFC-104: Syntactic sugar and desugaring
 Error propagation with `?` MUST be a postfix operator [T-104.1].
@@ -477,6 +482,7 @@ With `--json-diagnostics`, `logos conc` MUST print each finding as one object of
 In that object, `file` and the two line fields of `span` MUST give the first position, the other fields of `span` MUST be 0, and the field `note` MUST hold the position lines and the fix line of the text form [T-106][T-Sec14].
 The exit status of `logos conc` MUST be the exit status of the program or of `logos test` when that status is not 0 [T-106].
 When that status is 0, the exit status MUST be 1 if `logos conc` printed a finding and 0 if it printed no finding [T-106].
+When a signal kills the program, `logos conc run` MUST exit with 128 plus the signal number [T-106].
 A finding line that `logos conc` cannot read MUST count as a finding [T-106].
 The monitor MUST report `conc::lock_order_inversion` when two goroutines took the same two `logos/sync.Locked` values in opposite orders, also when no goroutine waited [T-106].
 The monitor MUST NOT report `conc::lock_order_inversion` when one goroutine took the two values in the two orders [T-106].
@@ -494,6 +500,42 @@ The group MUST hold the record that the monitor keeps of it, and the monitor MUS
 The children of two groups MUST NOT wait for one lock of the monitor when they start and when they return [T-106].
 The monitor MUST NOT start a goroutine for a group whose children all return before the end of their `-stall` durations [T-106].
 A dump of all goroutines for one `conc::group_child_stalled` report MUST NOT be larger than 8 MiB; a child that the dump does not hold MUST get the finding without its frame [T-106].
+The `logos conc` options `--fix` and `--ai-patch` MUST be mutually exclusive [T-106].
+After the program exits, `logos conc --fix` MUST look only at the line of the first position of each `conc::group_child_stalled` finding [T-106].
+`logos conc --fix` MUST rewrite that line only when it is a plain receive statement `<-x` in a `.lgo` file [T-106].
+`logos conc --fix` MUST rewrite that line only when the tokens of `go/scanner` show that `<-` starts a statement and that the operand `x` ends that line [T-106].
+`logos conc --fix` MUST rewrite that line only when its enclosing function has a one-line header with a `context.Context` parameter not named `_` [T-106].
+`logos conc --fix` MUST rewrite that line only when that header is 1 to 21 lines above that line [T-106].
+`logos conc --fix` MUST rewrite that line only when, between that header and that line, no `var` or `const` declaration names the context parameter and no `=` or `:=` assignment has it on the left side [T-106].
+`logos conc --fix` MUST rewrite that line only when that function has no result or one `error` result [T-106].
+`logos conc --fix` MUST replace that line with a `select` that receives from `x` or returns when the `Done` channel of that context closes [T-106].
+For a function with an `error` result, `logos conc --fix` MUST write that return as `return ctx.Err()`, with the name of the context parameter [T-106].
+`logos conc --fix` MUST change no file for a finding that does not meet these conditions, and it MUST NOT print a `cannot fix` line for that finding [T-106].
+Under `-overlay`, from the command line or from `GOFLAGS`, `logos conc --fix` MUST read and rewrite the replacement file that the overlay names [T-106].
+`logos conc --fix` MUST change no file when it cannot read or parse the overlay file [T-106].
+`logos conc --fix` MUST group the edits by the path of each file after it resolves the symbolic links, so that two names of one file give one edit for each line [T-106].
+`logos conc --fix` MUST write all the edits of one file with one rename over that resolved path, from the last line to the first line [T-106].
+For each line that it writes, `logos conc --fix` MUST print `logos conc: fixed <file>:<line>` on standard error [T-106].
+When `logos conc --fix` does not write a file that has an edit, it MUST keep the bytes of that file and print `logos conc: cannot fix <file>: <reason>` on standard error [T-106].
+In these two lines, `<file>` MUST be the file name that the finding or the overlay gives, not the resolved path [T-106].
+When a file system operation fails, the reason MUST be the text of that error [T-106].
+`logos conc --fix` MUST do the checks of the lines that follow in their order, and it MUST print only the reason of the first check that fails [T-106].
+When the `go.mod` search of `logos` from the current directory finds no main module, the reason MUST be `no main module` [T-106].
+When the resolved path is not in the directory tree of the main module, the reason MUST be `outside the main module <dir>`, where `<dir>` is that directory with its symbolic links resolved [T-106].
+When the resolved path is in the directory tree of GOROOT, the reason MUST be `inside GOROOT` [T-106].
+When the resolved path is in the directory tree of the module cache, the reason MUST be `inside the module cache` [T-106].
+When the resolved path does not end in `.lgo`, the reason MUST be `not a .lgo file` [T-106].
+When the file is not a regular file, the reason MUST be `not a regular file` [T-106].
+When the system does not give the owner of the file, the reason MUST be `unknown owner` [T-106].
+When the file has more than one hard link, the reason MUST be `the file has <n> hard links` [T-106].
+When the modification time of the file is not earlier than the time at which `logos conc` started `logos run` or `logos test`, the reason MUST be `changed during the run` [T-106].
+When a line that starts with `// Code generated ` and ends with ` DO NOT EDIT.` comes before the package clause, the reason MUST be `generated file` [T-106].
+`logos conc --fix` MUST prove each edit again on the bytes that it replaces; when an edit fails that proof, the reason MUST be `line <n> no longer holds the receive the run reported` [T-106].
+`logos conc --fix` MUST write the new bytes to a temporary file in the directory of the file and give that temporary file the owner, the group and the mode of the file before the rename [T-106].
+`logos conc --fix` MUST read the file again just before the rename; when its bytes changed, the reason MUST be `changed while the fix was staged` [T-106].
+When a step of the write fails, `logos conc --fix` MUST remove the temporary file and keep the bytes of the file [T-106].
+The `logos conc` option `--ai-patch` MUST NOT modify source files [T-106].
+A command other than `logos conc --fix` MUST NOT rewrite `.lgo` files [T-106].
 The monitor MUST report `conc::group_unbounded` when the children running at one time in a group without a limit reach 10000 [T-106].
 The first position of that finding MUST be the `go group` statement [T-106].
 The second position MUST be the spawn statement of the child that reached the count [T-106].
@@ -1128,7 +1170,15 @@ A closed union MUST use upstream interface equality. [T-204.1][T-203.1]
 
 A non-constant condition MUST fail with `[comptime::not_constant]`. [T-205]
 
-Both branches MUST type-check, except that a `const for` over the fields of a non-struct in a dead branch is not expanded and reports no `const_for_fields`. [T-205]
+When the condition is a boolean constant, the compiler MUST type-check only the live branch. [T-205]
+
+The compiler MUST NOT report type errors in the dead branch. [T-205]
+
+The compiler MUST count a package as used when the dead branch selects from its package name. [T-205]
+
+Outside the declaration check of a comptime generic, when the condition is not a boolean constant, the compiler MUST type-check both branches. [T-205]
+
+In that declaration check, the compiler MUST type-check both branches of such a condition only in each instantiation. [T-205]
 
 Only the live branch MUST reach lowering. [T-205]
 
@@ -1208,7 +1258,23 @@ A circular instantiation MUST fail with `[comptime::circular_instantiation]` nam
 
 A comptime generic MUST be instantiated with concrete type arguments. [T-205]
 
-An instantiation with a type parameter or a call inside an expansion without explicit type arguments MUST fail with `[comptime::generic_targ]`. [T-205]
+An instantiation of a comptime generic with a type parameter MUST occur in the body of a comptime generic or a package-level generic function. A package-level generic function that is not a comptime generic is a forwarding function when it contains such an instantiation, or an instantiation of a forwarding function of its package with a type parameter. [T-205]
+
+The type argument MAY be the type parameter or a pointer, slice, array, map, channel, or instantiated named type that contains it. [T-205]
+
+The compiler MUST expand a forwarding function once for each list of concrete type arguments, in its defining package. [T-205]
+
+The compile-time forms in each expansion MUST evaluate on the substituted type. For example, `*T` with `T` bound to `Triple` gives `*Triple` to the comptime generic. [T-205]
+
+A forwarding function MAY instantiate another forwarding function of its package with its type parameter, to any depth. [T-205]
+
+A forwarding function that instantiates itself with the same type arguments, directly or through other generic functions, MUST fail with `[comptime::circular_instantiation]`. [T-205]
+
+Any other instantiation of a comptime generic with a type parameter MUST fail with `[comptime::generic_targ]`, for example an instantiation in a method of a generic type. [T-205]
+
+A call of a comptime generic without explicit type arguments inside an expansion MUST fail with `[comptime::generic_targ]`. In the expansion of a forwarding function, the compiler MUST instead expand the call with its inferred type arguments. [T-205]
+
+An exported forwarding function MUST NOT travel as source text in `__.LOGOS`. Its body becomes a panic with the message `logos: comptime generic <name> runs only through loGo/s instantiation`, so a call from another package, in LoGOs or Go code, panics at run time. [T-205]
 
 A method of a generic type MUST NOT be a comptime generic. [T-205]
 
