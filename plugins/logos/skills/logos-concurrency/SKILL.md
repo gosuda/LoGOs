@@ -21,7 +21,7 @@ LoGOs runs goroutines inside `go group` blocks. Shared state lives in `logos/syn
 5. Use `logos conc run` for a program and `logos conc test` for tests.
 6. Read each finding on standard error while the child still runs.
 7. Repair the named position, then rerun without `conc` to confirm the behavior.
-8. Retry a shake failure with the printed seed to shake the run again. The seed fixes the yield counts, not the exact goroutine schedule, so treat a rerun as a retry, not an exact replay.
+8. Retry a shake failure with the printed seed to shake the run again. The seed alone does not fix the yield counts: each hook mixes in the goroutine ID and hook count, so a rerun with the same seed is a retry, not an exact replay.
 
 ## Group and lock forms
 
@@ -147,7 +147,7 @@ logos conc run -hold 2s ./slow
 
 Expect exit 1 for the first two: each prints its finding. Expect exit 0 for the third: the 400ms hold stays below the 2s limit.
 
-Pass `-shake` with a decimal seed to yield at group and lock hook points from that seed. Rerun the printed seed to shake the run again. The seed fixes the yield counts, not the exact goroutine schedule. Treat a rerun as a retry, not an exact replay. Pass bare `-shake` to take the seed from the clock; the command prints the seed it used. A bare `-shake` followed by a number takes that number as its seed. Omit `-shake` to turn shaking off. A seed of 0 is a usage error, because seed 0 turns shaking off. A non-numeric seed is a usage error.
+Pass `-shake` with a decimal seed to yield at group and lock hook points from that seed. Rerun the printed seed to shake the run again. The seed alone does not fix the yield counts: each hook mixes in the goroutine ID and hook count, so a rerun with the same seed can yield differently. Treat a rerun as a retry, not an exact replay. Pass bare `-shake` to take the seed from the clock; the command prints the seed it used. A bare `-shake` followed by a number takes that number as its seed. Omit `-shake` to turn shaking off. A seed of 0 is a usage error, because seed 0 turns shaking off. A non-numeric seed is a usage error.
 
 Pin GOMAXPROCS=1 for the seeded runs: one thread stops cross-processor stealing from hiding the order fault. It does not fix the schedule: the run queue still picks among the children that can run, and the seed mixes in goroutine IDs and hook counts.
 
