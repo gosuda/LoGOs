@@ -51,15 +51,23 @@ Set up the example packages before running the commands: create one module with 
 
 ## Read conc::lock_order_inversion
 
-Two goroutines took the same two `Locked` values in opposite orders. Treat it as a deadlock this run may have escaped by timing: the same run can still end with the runtime deadlock error after printing the finding, and the exit status is then the child's. One order everywhere gives no finding. Repair by taking the two values in one order everywhere, or by keeping both in one `Locked` value. Never edit a file under GOROOT to answer one.
+Two goroutines took the same two `Locked` values in opposite orders. The two orders must come from different goroutines; one goroutine that takes both orders is silent. Treat it as a deadlock this run may have escaped by timing: the same run can still end with the runtime deadlock error after printing the finding, and the exit status is then the child's. One order everywhere gives no finding. Repair by taking the two values in one order everywhere, or by keeping both in one `Locked` value. Never edit a file under GOROOT to answer one.
 
 ```lgo
-checking.WithLock(a => {
-  savings.WithLock(b => { move(a, b)? })
-})
-savings.WithLock(a => {
-  checking.WithLock(b => { move(a, b)? })
-})
+go group (ctx) {
+  go {
+    checking.WithLock(a => {
+      savings.WithLock(b => { move(a, b)? })
+    })
+  }
+}
+go group (ctx) {
+  go {
+    savings.WithLock(a => {
+      checking.WithLock(b => { move(a, b)? })
+    })
+  }
+}
 ```
 
 ## Read conc::group_child_stalled
