@@ -151,7 +151,7 @@ func checkComptimeASanTasks(t *testing.T, exe string) {
 			mapTable++
 		case strings.HasSuffix(storage, "_mat"):
 			mapMemo++
-		case strings.HasSuffix(storage, "·logos_backing0") && !strings.Contains(storage, "_sorted·") && !strings.Contains(storage, "_tab·"):
+		case strings.HasSuffix(storage, ".logos_backing0") && !strings.Contains(storage, "_sorted.") && !strings.Contains(storage, "_tab."):
 			sliceBacking++
 		}
 	}
