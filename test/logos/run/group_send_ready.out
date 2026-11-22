@@ -1,0 +1,15 @@
+ok send-ready-wins
+ok send-call-group-nil
+ok send-call-once
+ok blocked-send-cancelled
+ok blocked-call-cancelled
+ok blocked-call-once
+ok interp-send
+ok send-original-chan
+ok shadowed-type-send
+ok goto-skips-send
+ok goto-send-not-evaluated
+ok goto-record-ran
+ok send-nil
+ok send-named-elem
+ok send-untyped-const

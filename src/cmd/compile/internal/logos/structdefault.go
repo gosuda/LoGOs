@@ -19,14 +19,23 @@ func (fl *fileLower) lowerStructDefaults() {
 	// field defaults before stripFieldDefaults orphans them, and fill/
 	// factory text then renders the respelled form on its own.
 	fl.lowerTypeParamLits()
-	stripped := make(map[*syntax.FieldDefault]bool)
-	typeNames := fl.defaultTypeNames()
+	typeNames := fl.defaultTypeNames(fl.file)
+	fl.defaultDepScan()
+	// Fill before strip: a composite literal inside a field default gets
+	// its own missing fields here, so the factory body rendered from the
+	// default subtree carries the inner defaults. The fill splice inside
+	// the erased default span is dropped by stripFieldDefaults while the
+	// appended elements stay in the subtree that renderDefault prints.
 	syntax.Inspect(fl.file, func(n syntax.Node) bool {
-		switch n := n.(type) {
-		case *syntax.StructType:
-			fl.stripFieldDefaults(n, stripped, typeNames)
-		case *syntax.CompositeLit:
-			fl.fillStructDefaults(n)
+		if lit, ok := n.(*syntax.CompositeLit); ok {
+			fl.fillStructDefaults(lit)
+		}
+		return true
+	})
+	stripped := make(map[*syntax.FieldDefault]bool)
+	syntax.Inspect(fl.file, func(n syntax.Node) bool {
+		if st, ok := n.(*syntax.StructType); ok {
+			fl.stripFieldDefaults(st, stripped, typeNames)
 		}
 		return true
 	})
@@ -37,6 +46,25 @@ func (fl *fileLower) lowerStructDefaults() {
 // as *new(T): a concrete substitution in a comptime copy carries the real
 // literal, while a plain generic emits the equivalent allocation.
 func (fl *fileLower) lowerTypeParamLits() {
+	// Field defaults never emit their source: stripFieldDefaults erases
+	// the ` = default` span and renderDefault respells marked literals
+	// for the generated text. Respelling one in place would only corrupt
+	// the default node's end position for that erasure.
+	defaults := map[syntax.Node]bool{}
+	// A marked literal under a unary & needs the pointer form: indexing an
+	// array literal by value is not addressable.
+	underAddr := map[*syntax.CompositeLit]bool{}
+	syntax.Inspect(fl.file, func(n syntax.Node) bool {
+		if fd, ok := n.(*syntax.FieldDefault); ok && fd.Default != nil {
+			defaults[fd.Default] = true
+		}
+		if op, ok := n.(*syntax.Operation); ok && op.Op == syntax.And && op.Y == nil {
+			if lit, ok := syntax.Unparen(op.X).(*syntax.CompositeLit); ok {
+				underAddr[lit] = true
+			}
+		}
+		return true
+	})
 	conv := make(map[syntax.Expr]syntax.Expr)
 	texts := make(map[syntax.Expr]string)
 	strippedWithDefault := make(map[syntax.Expr]bool)
@@ -54,11 +82,19 @@ func (fl *fileLower) lowerTypeParamLits() {
 		return true
 	})
 	syntax.Inspect(fl.file, func(n syntax.Node) bool {
+		if defaults[n] {
+			// The default node itself is erased whole; descending still
+			// respells a marked literal nested inside it ([]int{int{}}), and
+			// its recorded edit inside the erased span is dropped by
+			// stripFieldDefaults while the swapped node renders through
+			// renderExpr for the generated factory and fill text.
+			return true
+		}
 		lit, ok := n.(*syntax.CompositeLit)
 		if !ok || len(lit.ElemList) != 0 || !fl.pkg.info.LogosZeroLit[lit] {
 			return true
 		}
-		text := fl.zeroLitSpell(lit)
+		text := fl.zeroLitSpell(lit, underAddr[lit])
 		node, ok := parseExprAt(text, lit.Pos())
 		if !ok {
 			base.Fatalf("logos: type parameter literal at %s cannot be respelled", lit.Pos().String())
@@ -66,6 +102,13 @@ func (fl *fileLower) lowerTypeParamLits() {
 		fl.carryType(node, lit)
 		conv[lit] = node
 		texts[lit] = text
+		// The respelled node's positions all equal the literal's, so span
+		// walks (option wrap, group extents) would miscompute its extent;
+		// pin the literal's real span so a later wrap covers the whole
+		// respell and drains its splice into the wrap's fused text.
+		litSpan := span{fl.off(syntax.StartPos(lit)), fl.off(syntax.EndPos(lit)) + 1}
+		fl.wrapSpan[lit] = litSpan
+		fl.wrapSpan[node] = litSpan
 		return true
 	})
 	if len(conv) == 0 {
@@ -87,9 +130,12 @@ func (fl *fileLower) lowerTypeParamLits() {
 }
 
 // zeroLitSpell renders the source form a marked zero literal rewrites to:
-// *new(T), or [1](T){}[0] when a declaration in the file shadows the
-// builtin new (the array-index form names no identifier).
-func (fl *fileLower) zeroLitSpell(lit *syntax.CompositeLit) string {
+// *new(T), or an array-index form when a declaration in the file shadows
+// the builtin new (the index names no identifier). The value form
+// ([1](T){})[0] never takes the array's address, so a large element stays
+// on the stack; under a surrounding & the addressable array-pointer form
+// is required.
+func (fl *fileLower) zeroLitSpell(lit *syntax.CompositeLit, addr bool) string {
 	var spell string
 	if lit.Type != nil {
 		start := fl.off(syntax.StartPos(lit.Type))
@@ -100,7 +146,13 @@ func (fl *fileLower) zeroLitSpell(lit *syntax.CompositeLit) string {
 		spell = fl.typeSpell(fl.pkg.info.TypeOf(lit))
 	}
 	if fl.newShadowed() {
-		return "[1](" + spell + "){}[0]"
+		if addr {
+			// Indexing an array pointer yields an addressable element, so
+			// this form still works under a surrounding & (a plain array
+			// literal's element does not).
+			return "(&[1](" + spell + "){})[0]"
+		}
+		return "([1](" + spell + "){})[0]"
 	}
 	return "*new(" + spell + ")"
 }
@@ -125,7 +177,7 @@ func (fl *fileLower) renderDefault(e syntax.Expr) string {
 	if !ok || !fl.pkg.info.LogosZeroLit[lit] {
 		return renderExpr(e)
 	}
-	return fl.zeroLitSpell(lit)
+	return fl.zeroLitSpell(lit, false)
 }
 
 // typeSpell renders a checked type with the file's import qualification, for
@@ -138,9 +190,9 @@ func (fl *fileLower) typeSpell(typ types2.Type) string {
 // this file to its TypeDecl so defaults can bind to declaration-scope
 // factories. Local or anonymous struct types get no entry: they keep the
 // textual default path.
-func (fl *fileLower) defaultTypeNames() map[*syntax.StructType]*syntax.TypeDecl {
+func (fl *fileLower) defaultTypeNames(file *syntax.File) map[*syntax.StructType]*syntax.TypeDecl {
 	m := map[*syntax.StructType]*syntax.TypeDecl{}
-	for _, d := range fl.file.DeclList {
+	for _, d := range file.DeclList {
 		td, ok := d.(*syntax.TypeDecl)
 		if !ok || td.Alias || td.Name == nil {
 			continue
@@ -344,7 +396,13 @@ func (fl *fileLower) stripFieldDefaults(st *syntax.StructType, stripped map[*syn
 		if !stripped[fd] {
 			stripped[fd] = true
 			typeEnd := fl.exprEndNested(fl.off(syntax.StartPos(fd.Type)))
-			fl.add(typeEnd, fl.fieldDefaultEnd(st, i, fd, typeEnd), "")
+			end := fl.fieldDefaultEnd(st, i, fd, typeEnd)
+			// The default's source span is gone: an edit recorded inside
+			// it — the respell of a marked zero literal like `= int{}` —
+			// would overlap the erasure. The respelled form still reaches
+			// generated factory text through renderDefault.
+			fl.dropInner(span{typeEnd, end})
+			fl.add(typeEnd, end, "")
 		}
 		if td == nil || td.Name == nil || f.Name == nil || f.Name.Value == "_" {
 			continue
@@ -371,15 +429,181 @@ func (fl *fileLower) fieldDefaultEnd(st *syntax.StructType, i int, fd *syntax.Fi
 type structDefault struct {
 	field string
 	text  string
+	// key is "owner.field" when text is a package factory call, so a fill
+	// inside a default subtree can tell whether the call re-enters an
+	// enclosing default; "" when the text is the rendered default itself.
+	key string
+}
+
+// defFillBudget caps the text fills append inside field-default subtrees.
+// Chained local defaults render the already-expanded earlier level again,
+// so without a bound a short chain multiplies into unbounded output.
+const defFillBudget = 1 << 20
+
+// defaultDepScan records, for every composite literal sitting inside a
+// field default's subtree, which enclosing defaulted fields of named
+// package types contain it, and the factory keys each such field's subtree
+// directly requires. A fill that would emit a factory call reaching one of
+// its enclosing keys makes that factory recursive — it never terminates —
+// so the literal is reported instead of filled.
+func (fl *fileLower) defaultDepScan() {
+	if fl.pkg.defScanned {
+		return
+	}
+	fl.pkg.defScanned = true
+	for _, file := range fl.pkg.files {
+		fl.defaultDepScanFile(file, fl.defaultTypeNames(file))
+	}
+}
+
+// defaultDepScanFile records the default-subtree literals and factory
+// edges of one file; defEdges spans files, so a cycle through defaults
+// declared in different files still closes.
+func (fl *fileLower) defaultDepScanFile(file *syntax.File, typeNames map[*syntax.StructType]*syntax.TypeDecl) {
+	syntax.Inspect(file, func(n syntax.Node) bool {
+		st, ok := n.(*syntax.StructType)
+		if !ok {
+			return true
+		}
+		td := typeNames[st]
+		for _, f := range st.FieldList {
+			fd, ok := f.Type.(*syntax.FieldDefault)
+			if !ok || fd.Default == nil {
+				continue
+			}
+			key := ""
+			if td != nil && td.Name != nil && f.Name != nil {
+				key = td.Name.Value + "." + f.Name.Value
+			}
+			syntax.Inspect(fd.Default, func(m syntax.Node) bool {
+				if c, ok := m.(*syntax.CallExpr); ok && fl.unsafeFoldCall(c) {
+					// unsafe.Sizeof/Alignof/Offsetof fold at check:
+					// their argument literals never evaluate, so they
+					// create no factory dependency. They still join
+					// inDefault: their text is copied into each emitted
+					// default, which the expansion budget must charge.
+					syntax.Inspect(c, func(u syntax.Node) bool {
+						if l, ok := u.(*syntax.CompositeLit); ok {
+							if fl.pkg.inDefault == nil {
+								fl.pkg.inDefault = map[*syntax.CompositeLit]bool{}
+							}
+							fl.pkg.inDefault[l] = true
+						}
+						return true
+					})
+					return false
+				}
+				lit, ok := m.(*syntax.CompositeLit)
+				if !ok {
+					return true
+				}
+				if fl.pkg.inDefault == nil {
+					fl.pkg.inDefault = map[*syntax.CompositeLit]bool{}
+				}
+				fl.pkg.inDefault[lit] = true
+				if key == "" {
+					return true
+				}
+				if fl.pkg.defInside == nil {
+					fl.pkg.defInside = map[*syntax.CompositeLit][]string{}
+				}
+				fl.pkg.defInside[lit] = append(fl.pkg.defInside[lit], key)
+				for _, d := range fl.missingDefaults(lit, true) {
+					if d.key == "" {
+						continue
+					}
+					if fl.pkg.defEdges == nil {
+						fl.pkg.defEdges = map[string]map[string]bool{}
+					}
+					if fl.pkg.defEdges[key] == nil {
+						fl.pkg.defEdges[key] = map[string]bool{}
+					}
+					fl.pkg.defEdges[key][d.key] = true
+				}
+				return true
+			})
+		}
+		return true
+	})
+}
+
+// unsafeFoldCall reports whether c is a call the checker folds to a
+// constant: unsafe.Sizeof, unsafe.Alignof, and unsafe.Offsetof never
+// evaluate their arguments, so literals inside them are not factory
+// dependencies.
+func (fl *fileLower) unsafeFoldCall(c *syntax.CallExpr) bool {
+	switch f := syntax.Unparen(c.Fun).(type) {
+	case *syntax.SelectorExpr:
+		switch f.Sel.Value {
+		case "Sizeof", "Alignof", "Offsetof":
+		default:
+			return false
+		}
+		n, ok := f.X.(*syntax.Name)
+		if !ok {
+			return false
+		}
+		pn, ok := fl.pkg.info.Uses[n].(*types2.PkgName)
+		return ok && pn.Imported().Path() == "unsafe"
+	case *syntax.Name:
+		switch f.Value {
+		case "Sizeof", "Alignof", "Offsetof":
+			_, ok := fl.pkg.info.Uses[f].(*types2.Builtin)
+			return ok
+		}
+	}
+	return false
+}
+
+// defReaches reports whether the factory key can reach any of the named
+// keys through the default dependency edges — a fill emitting that factory
+// inside one of those defaults would make it recursive.
+func (fl *fileLower) defReaches(key string, targets []string) bool {
+	seen := map[string]bool{}
+	var visit func(k string) bool
+	visit = func(k string) bool {
+		if seen[k] {
+			return false
+		}
+		seen[k] = true
+		for _, t := range targets {
+			if k == t {
+				return true
+			}
+		}
+		for next := range fl.pkg.defEdges[k] {
+			if visit(next) {
+				return true
+			}
+		}
+		return false
+	}
+	return visit(key)
 }
 
 func (fl *fileLower) fillStructDefaults(lit *syntax.CompositeLit) {
+	if fl.pkg.inDefault[lit] && fl.defFillOver {
+		// The expansion budget already reported: stop rendering nested
+		// defaults instead of doing the remaining exponential work.
+		return
+	}
 	if fl.hasSpread(lit) {
 		// Spread lowering emits its initializer and its text together. A
 		// generated default has no source span to reuse as a spread operand.
 		return
 	}
-	missing := fl.missingDefaults(lit)
+	missing := fl.missingDefaults(lit, false)
+	if targets := fl.pkg.defInside[lit]; len(targets) > 0 {
+		keep := missing[:0]
+		for _, d := range missing {
+			if d.key != "" && fl.defReaches(d.key, targets) {
+				base.Errorf("%s: logos: field default %s of %s is recursive", lit.Pos().String(), d.field, d.key)
+				continue
+			}
+			keep = append(keep, d)
+		}
+		missing = keep
+	}
 	if len(missing) == 0 {
 		return
 	}
@@ -388,6 +612,13 @@ func (fl *fileLower) fillStructDefaults(lit *syntax.CompositeLit) {
 	lit.NKeys += len(native)
 	brace := fl.literalBrace(lit)
 	fl.add(brace+1, brace+1, text)
+	if fl.pkg.inDefault[lit] {
+		fl.defFillBytes += len(text)
+		if fl.defFillBytes > defFillBudget && !fl.defFillOver {
+			fl.defFillOver = true
+			base.Errorf("%s: logos: nested field defaults exceed the %d-byte expansion budget", lit.Pos().String(), defFillBudget)
+		}
+	}
 }
 
 func (fl *fileLower) structDefaultFields(pos syntax.Pos, defaults []structDefault) ([]syntax.Expr, string) {
@@ -404,9 +635,13 @@ func (fl *fileLower) structDefaultFields(pos syntax.Pos, defaults []structDefaul
 	return native, text.String()
 }
 
-func (fl *fileLower) missingDefaults(lit *syntax.CompositeLit) []structDefault {
-	names, texts := fl.structDefaultsFor(lit)
-	if len(names) == 0 {
+// missingDefaults returns the field defaults a literal omits. keysOnly
+// keeps the factory keys but skips rendering default text: the
+// dependency scan calls it on literals of other files, whose positions
+// this file's line table cannot resolve.
+func (fl *fileLower) missingDefaults(lit *syntax.CompositeLit, keysOnly bool) []structDefault {
+	all := fl.structDefaultsFor(lit, keysOnly)
+	if len(all) == 0 {
 		return nil
 	}
 	present := make(map[string]bool)
@@ -428,18 +663,18 @@ func (fl *fileLower) missingDefaults(lit *syntax.CompositeLit) []structDefault {
 		}
 	}
 	var out []structDefault
-	for i, name := range names {
-		if !present[name] {
-			out = append(out, structDefault{field: name, text: texts[i]})
+	for _, d := range all {
+		if !present[d.field] {
+			out = append(out, d)
 		}
 	}
 	return out
 }
 
-func (fl *fileLower) structDefaultsFor(lit *syntax.CompositeLit) ([]string, []string) {
+func (fl *fileLower) structDefaultsFor(lit *syntax.CompositeLit, keysOnly bool) []structDefault {
 	t := fl.pkg.info.TypeOf(lit)
 	if t == nil {
-		return nil, nil
+		return nil
 	}
 	u := types2.Unalias(t)
 	st, _ := u.(*types2.Struct)
@@ -451,7 +686,7 @@ func (fl *fileLower) structDefaultsFor(lit *syntax.CompositeLit) ([]string, []st
 		}
 	}
 	if st == nil {
-		return nil, nil
+		return nil
 	}
 	named, _ := u.(*types2.Named)
 	var obj *types2.TypeName
@@ -476,6 +711,9 @@ func (fl *fileLower) structDefaultsFor(lit *syntax.CompositeLit) ([]string, []st
 	}
 	plan := fl.pkg.defaultFactoryPlan()
 	call := func(d types2.LogosFieldDefault) string {
+		if keysOnly {
+			return ""
+		}
 		fname := plan[d.Owner+"."+d.Field]
 		if fname == "" {
 			return fl.renderDefault(d.Default)
@@ -506,22 +744,20 @@ func (fl *fileLower) structDefaultsFor(lit *syntax.CompositeLit) ([]string, []st
 		return qual + fname + "()"
 	}
 	if defs := fl.pkg.info.LogosFieldDefaults[st]; len(defs) > 0 {
-		names := make([]string, 0, len(defs))
-		texts := make([]string, 0, len(defs))
+		out := make([]structDefault, 0, len(defs))
 		for _, d := range defs {
-			names = append(names, d.Field)
-			texts = append(texts, call(d))
+			out = append(out, structDefault{field: d.Field, text: call(d), key: d.Owner + "." + d.Field})
 		}
-		return names, texts
+		return out
 	}
 	if obj == nil || obj.Pkg() == fl.pkg.tpkg {
-		return nil, nil
+		return nil
 	}
 	imp, ok := facts.Lookup(obj.Pkg().Path())
 	if !ok || imp == nil {
-		return nil, nil
+		return nil
 	}
-	var names, texts []string
+	var out []structDefault
 	for _, d := range imp.Defaults {
 		if d.Type != obj.Name() {
 			continue
@@ -546,10 +782,9 @@ func (fl *fileLower) structDefaultsFor(lit *syntax.CompositeLit) ([]string, []st
 		if ownerObj == obj {
 			text = qual + sym + targs + "()"
 		}
-		names = append(names, d.Field)
-		texts = append(texts, text)
+		out = append(out, structDefault{field: d.Field, text: text})
 	}
-	return names, texts
+	return out
 }
 
 func (fl *fileLower) literalBrace(lit *syntax.CompositeLit) int {

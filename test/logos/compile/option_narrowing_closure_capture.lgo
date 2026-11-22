@@ -34,3 +34,38 @@ func captureStableDeferred(o int?) {
 	}
 }
 
+
+func switchLocalShadowStmt(o int?) int {
+	g := func() int {
+		switch o := 1; {
+		case o == 1:
+			o = 2
+			return o
+		}
+		return 0
+	}
+	_ = g
+	if o != nil {
+		return captureTakeInt(o)
+	}
+	return -1
+}
+
+func switchLocalShadowNested(o int?) int {
+	g := func() int {
+		switch {
+		case true:
+			switch o := 1; {
+			case o == 1:
+				o = 2
+				return o
+			}
+		}
+		return 0
+	}
+	_ = g
+	if o != nil {
+		return captureTakeInt(o)
+	}
+	return -1
+}

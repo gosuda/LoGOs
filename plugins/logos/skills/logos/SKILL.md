@@ -73,7 +73,7 @@ A closed union is an interface whose type set is a finite union of non-`~` terms
 | `type U interface { int \| string }` | methods-only interface plus generated membership functions |
 | `U(x)` | conversion; allowed when `x` is a member or a closed union of members |
 | `u == 1`, `u.(int)`, `case int:` | comparison, assertion, and case on a member type |
-| `switch x.(type) { case A: ...; case B: ...; case nil: }` | type switch; without `default` it covers every member and `nil` |
+| `switch x.(type) { case A: ...; case B: ...; case nil: }` | type switch; without `default` it covers every member and `nil`; the `nil` case is unneeded when narrowing proved a bare-option operand non-nil |
 | `r := switch n { case 1 => "one"; default => "many" }` | immediately invoked function returning the chosen arm |
 | `type S struct : I { ... }` | struct plus `var _ I = (*S)(nil)` per asserted interface |
 
@@ -103,7 +103,7 @@ Rules:
 - `nil` and `T` assign into `T?`; `T?` never converts back to `T`. `(T?)?` nests and stays distinct from `T?`; `T??` is rejected, write `(T?)?`. Options whose payload admits nil as a valid value (slices, funcs, chans, interfaces) use `logos/rt.Option[T]` so present-nil stays distinct from absent.
 - `?.` and `??` need an option on the left. A plain method call, field selection, or dereference on an option is an error until narrowing proves `!= nil`. `?.` flattens when the selected field is already an option.
 - `*T` in `.lgo` code is non-nil: `var p *T`, arrays of non-nil pointers without initializers, `make` with nonzero length, `new` of a pointer or of a type with a non-nil field, composite literals missing a non-nil field, and zero-clearing stores are errors. Assigning `nil` to a non-nil location is an error. Use `T?` for a pointer that may be nil.
-- Narrowing: `if x != nil` narrows locals and parameters in the block, through `&&` chains, and after an early exit (`return`, `panic`, `break`, `continue`) on `x == nil`. Assignment ends it. Fields never narrow (copy to a local first). Taking the address or assigning in a closure disables narrowing for that variable only.
+- Narrowing: `if x != nil` narrows locals and parameters in the block, through `&&` chains, and after an early exit (`return`, `panic`, `break`, `continue`) on `x == nil`. Assignment ends it. Fields never narrow (copy to a local first). Taking the address or assigning in a closure disables narrowing for that variable only; a `goto` anywhere in the function body disables narrowing for the whole function.
 - Error-first guard: for a callee declared in `.lgo`, reading a result before the `err` check is an error; the fall-through of `if err != nil { exit }` or the inside of `if err == nil {}` discharges it. Calls into other packages keep their own contracts.
 - Map reads: `m[k] ?? d` types as the element type. `v, ok := m[k]`, stores, `++`, compound assignment, and `delete` keep Go meaning.
 
@@ -178,7 +178,7 @@ Rules:
 - Lambdas need a typed function target, else `[correctness::lambda_needs_target]`; arity must match. Block bodies check against the target results. Closures capture like function literals. A lone `Name` without `=>` stays an operand; `(e)` without `=>` stays a `ParenExpr`.
 - Chains on slices: `filter map find any all sortBy first last get take drop sum count`. Consecutive `filter`/`map`/`take`/`drop` fuse into one loop; the receiver evaluates once and lambda parameters are const views (rewriting the parameter or the receiver reports `const_view_mutation`). `find`/`first`/`last`/`get` return `T?`; `take`/`drop`/`get` clamp (`take(-5)` is empty, `get(-1)` is none). `sortBy` is stable with `NaN` first, as `cmp.Compare` orders. Float `.sum()` uses fixed pairwise order. `?` in an expression lambda returns from the enclosing function; a `?` nested in a lambda body, in a `??` fallback, or in a `?.` call argument reports `[correctness::nested_try_capture]`; a `?` mid-block in a block lambda reports `misplaced_try`. When produced elements implement `io.Closer`, failures close the produced prefix in reverse order.
 - Leading-dot continuation: in `.lgo`, a newline followed by blanks and then `.` plus a letter or `_` inserts no semicolon. `x` newline `.5` still breaks; plain Go scanning is unchanged.
-- `yield e` is allowed only directly inside a function returning `iter.Seq[T]` (one value) or `iter.Seq2[K, V]` (two values), else `[correctness::yield_outside_generator]`; a closure inside the generator may not yield. Falling off the end finishes the sequence; a valued `return` acts as bare. Early `break` in the consumer stops the body.
+- `yield e` is allowed only directly inside a function returning `iter.Seq[T]` (one value) or `iter.Seq2[K, V]` (two values), else `[correctness::yield_outside_generator]`; a closure inside the generator may not yield. Falling off the end finishes the sequence; a valued `return` fails with `[correctness::generator_return_value]`. Early `break` in the consumer stops the body.
 - `scope defer f()` runs when control leaves the enclosing block: last in, first out; arguments evaluated at the statement; every exit (`return`, `break`, `continue`, labeled forms, `goto` out of the block, panic) runs it first; a loop body runs it each iteration. Lowering is an armed-flag guarding `defer` plus inline exit stanzas (not a wrapper closure, so plain `defer` tails keep firing at function exit); a `goto` past the statement leaves it disarmed.
 
 ## Syntax (M7)
@@ -234,7 +234,7 @@ Rules:
 | `correctness::open_union_value` | Use a closed union (no `~` terms, no `comparable`) in value positions. |
 | `correctness::union_nonmember` | Use a member type in the conversion, assertion, or case. |
 | `correctness::union_member_method` | Give the member the declared method (a value member needs a value receiver), or drop the member. |
-| `correctness::nonexhaustive_switch` | Cover the listed members and `nil`, or add `default`. |
+| `correctness::nonexhaustive_switch` | Cover the listed members and `nil`, or add `default`; `nil` is excused for a narrowed bare-option operand. |
 | `correctness::switch_arm_mismatch` | Give every switch-expression arm one common type. |
 | `correctness::switch_expr_needs_default` | Add a `default` arm to the value switch. |
 | `correctness::assertion_failed` | Implement the missing method on `*S`, or drop the interface from the list. |
@@ -263,6 +263,7 @@ Rules:
 | `correctness::lambda_needs_target` | Give the lambda a typed function target. |
 | `correctness::nested_try_capture` | Hoist the `?` out of the nested chain, `??` fallback, or `?.` argument. |
 | `correctness::yield_outside_generator` | Yield only directly inside an `iter.Seq`/`iter.Seq2` function. |
+| `correctness::generator_return_value` | Return without a value inside a generator; pass values with `yield`. |
 | `capabilities::unauthorized_unsafe` | Allowlist the dependency under `transitive_unsafe_allowlist`, or remove it. |
 | `capabilities::unauthorized_exec` | Allowlist the dependency under `transitive_exec_allowlist`, or remove it. |
 | `capabilities::unauthorized_reflect` | Allowlist the dependency under `reflect_allowlist`, or remove it. |
@@ -296,7 +297,7 @@ Rules:
 | `portability::serialized_unsized_int` | Use sized integers (int32, int64) in serialized binary layouts. |
 | `pedantic::exhaustive_union_switch` | Remove redundant default clause from exhaustive switch on closed union. |
 
-The `--json-diagnostics` flag prints one JSON object per line with fields `schema_version` ("1.0"), `severity`, `rule_id`, `file`, and `span`.
+The `--json-diagnostics` flag prints one JSON object per line with fields `schema_version` ("1.0"), `severity`, `rule_id`, `file`, `span`, `message`, `provenance`, and `autofix_candidates`, plus `note` when nonempty.
 This covers both `.lgo` and Go lint targets, and findings report original source positions, never ejected or generated Go.
 
 ## Eject

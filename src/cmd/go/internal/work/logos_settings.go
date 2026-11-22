@@ -5,14 +5,19 @@
 package work
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"golang.org/x/mod/modfile"
 
+	"cmd/go/internal/base"
 	"cmd/go/internal/cfg"
 	"cmd/go/internal/logos/settings"
 	"cmd/go/internal/modload"
+	"cmd/internal/pathcache"
+	"cmd/internal/quoted"
 )
 
 var logosSettingsErr error
@@ -20,10 +25,111 @@ var logosSettingsErr error
 func refreshLogosPolicy(ld *modload.Loader) {
 	f := settings.CommandLine
 	f.Logos, f.Env, f.Roots = cfg.Logos, cfg.LogosStartupEnv(), logosMainRoots(ld)
-	s, err := settings.Load(settings.CWDModuleRoot(), f)
+	f.RaceRuntime = cfg.BuildRace && cfg.Goos != "darwin"
+	modRoot := settings.CWDModuleRoot()
+	s, err := settings.Load(modRoot, f)
 	settings.SetCurrent(s)
 	logosSettingsErr = err
+	if f.Logos {
+		// Plain go skips LoGOs policy (settings.Load above); it must not
+		// take the LoGOs census either.
+		failClosedCensus(f.Roots, modRoot)
+	}
 	cfg.ApplyLogosEnv(s)
+	if s.Cgo.RaceRuntimeOnly {
+		requireRaceRuntimeCompiler()
+	}
+}
+
+// failClosedCensus ends a build whose .lgo census missed entries to a
+// resource failure. The census decides the [build] cgo policy, and a
+// "no .lgo files" answer computed through such a failure could silently
+// drop the policy, including the -race exception, and surface later as a
+// misleading refusal. Routine walk errors still skip their subtree. The
+// roots checked are the effective policy roots: the main-module roots
+// when modload knows them, else the module root above the working
+// directory, exactly as Load derives them.
+func failClosedCensus(roots []string, modRoot string) {
+	if len(roots) == 0 && modRoot != "" {
+		roots = []string{modRoot}
+	}
+	for _, root := range roots {
+		if err := settings.ModuleAt(root).CensusErr(); err != nil {
+			fmt.Fprintf(os.Stderr, "logos: cannot list LoGOs sources under %s: %v (the .lgo census decides the [build] cgo policy)\n", root, err)
+			base.SetExitStatus(2)
+			base.Exit()
+		}
+	}
+}
+
+// requireRaceRuntimeCompiler ends a raced build that would fail later
+// inside runtime/cgo with a message that names neither the race runtime
+// nor logos.toml. Listings decide after loading packages whether build
+// actions will run, so runList calls CheckRaceRuntimeCompiler once it
+// knows; every other command takes the preflight here.
+
+func requireRaceRuntimeCompiler() {
+	if cfg.BuildN || cfg.CmdName == "list" {
+		return
+	}
+	checkRaceRuntimeCompiler()
+}
+
+// CheckRaceRuntimeCompiler runs the race compiler preflight for callers,
+// like runList, that decide after loading packages whether the command
+// will run build actions.
+func CheckRaceRuntimeCompiler() {
+	if cfg.BuildN {
+		return
+	}
+	checkRaceRuntimeCompiler()
+}
+
+func checkRaceRuntimeCompiler() {
+	cc, ok := raceCompilerCommand()
+	if !ok {
+		// The CC setting does not parse. BuildInit validates CC, CXX and FC
+		// and reports the malformed value with its configuration
+		// diagnostic; the preflight stays out of its way.
+		return
+	}
+	if len(cc) > 0 {
+		if _, err := pathcache.LookPath(cc[0]); err == nil {
+			return
+		}
+	}
+	fmt.Fprintf(os.Stderr, "logos: -race links the race runtime through cgo and needs a C compiler; found neither %q nor zig on PATH (the [build] cgo policy of logos.toml still refuses every cgo package)\n", strings.Join(cc, " "))
+	base.SetExitStatus(2)
+	base.Exit()
+}
+
+// raceCompilerCommand reports the CC command for the race preflight. It
+// mirrors envList for CC but returns false instead of panicking when the
+// setting does not parse, so the caller can defer to the configuration
+// diagnostic in BuildInit.
+func raceCompilerCommand() ([]string, bool) {
+	v := cfg.Getenv("CC")
+	if v == "" {
+		v = cfg.DefaultCC(cfg.Goos, cfg.Goarch)
+	}
+	v = logosCompilerFallback("CC", v)
+	args, err := quoted.Split(v)
+	if err != nil {
+		return nil, false
+	}
+	return args, true
+}
+
+// logosRaceNeedsCgoLinkage ends a raced logos build that an explicit
+// CGO_ENABLED=0 keeps without the race runtime. The upstream advice,
+// CGO_ENABLED=1, does not lift a logos.toml cgo policy.
+func logosRaceNeedsCgoLinkage() {
+	if !cfg.Logos || !cfg.BuildRace || cfg.StartupCgoEnabled() != "0" {
+		return
+	}
+	fmt.Fprintln(os.Stderr, "logos: -race links the race runtime through cgo, and CGO_ENABLED=0 is set; unset CGO_ENABLED (the [build] cgo policy of logos.toml still refuses every cgo package)")
+	base.SetExitStatus(2)
+	base.Exit()
 }
 
 func logosMainRoots(ld *modload.Loader) []string {

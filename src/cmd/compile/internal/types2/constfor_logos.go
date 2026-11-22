@@ -9,6 +9,7 @@ import (
 	"go/constant"
 	. "internal/types/errors"
 	"slices"
+	"strconv"
 )
 
 type LogosConstFor struct {
@@ -18,6 +19,42 @@ type LogosConstFor struct {
 	IndexVar  *Var
 	Generic   bool
 	GoVersion string
+	// Term and Breaks record, per visible field in expansion order, the
+	// terminating and break verdict of the body under that field's
+	// predicate values, for the analysis in return.go. They stay empty
+	// for a generic const for, whose expansion is not yet known.
+	Term   []bool
+	Breaks []LogosConstForBreaks
+	// TermRuns holds each check run's Term for a const for nested in
+	// another const for body: the checker checks the same node once per
+	// enclosing field expansion, so a single Term would apply the last
+	// expansion's verdict to every expansion. Keys join the enclosing
+	// struct field ordinals outermost-first; "" holds the top-level run.
+	TermRuns map[string][]bool
+	// runPath is the logosFieldBindPath this record was stored under.
+	runPath string
+}
+
+// logosFieldBindPath joins the enclosing field bindings' struct field
+// ordinals, outermost first; "" outside every const for.
+func (check *Checker) logosFieldBindPath() string {
+	var path string
+	var depth int
+	for b := check.logosFieldBind; b != nil; b = b.outer {
+		depth++
+	}
+	ords := make([]int, 0, depth)
+	for b := check.logosFieldBind; b != nil; b = b.outer {
+		ords = append(ords, b.index)
+	}
+	slices.Reverse(ords)
+	for i, ord := range ords {
+		if i > 0 {
+			path += ","
+		}
+		path += strconv.Itoa(ord)
+	}
+	return path
 }
 
 type LogosCopyContext struct {
@@ -212,6 +249,18 @@ func (check *Checker) logosConstFor(s *syntax.ConstForStmt, ctxt stmtContext) {
 	if check.Info.LogosConstFor == nil {
 		check.Info.LogosConstFor = make(map[syntax.Node]*LogosConstFor)
 	}
+	path := check.logosFieldBindPath()
+	if prev := check.Info.LogosConstFor[s]; prev != nil {
+		// A const for nested in another const for body is checked once
+		// per enclosing field expansion: keep every run's Term under its
+		// enclosing field path so each expansion reads its own verdict.
+		if prev.TermRuns == nil {
+			prev.TermRuns = map[string][]bool{prev.runPath: prev.Term}
+		}
+		info.TermRuns = prev.TermRuns
+		info.TermRuns[path] = info.Term
+	}
+	info.runPath = path
 	check.Info.LogosConstFor[s] = info
 }
 
@@ -319,6 +368,7 @@ func (check *Checker) logosConstForConcrete(s *syntax.ConstForStmt, info *LogosC
 	defer func() { check.conf.Error = saved }()
 	checked := 0
 	bodyNodes := logosCountBodyNodes(s.Body)
+	entry := logosConstIfDeadUnder(check.Info.LogosConstIfDead, s.Body)
 	for i := range info.Struct.NumFields() {
 		if !check.logosConstForCharge(s, bodyNodes) {
 			break
@@ -329,9 +379,12 @@ func (check *Checker) logosConstForConcrete(s *syntax.ConstForStmt, info *LogosC
 		}
 		checked++
 		check.logosFieldBind = &logosFieldBinding{info: info, index: i, field: f, tag: info.Struct.Tag(i), outer: outer}
+		check.logosRestoreConstIfDead(s.Body, entry)
 		check.openScope(s.Body, "const for iteration")
 		check.stmtList(inner, s.Body.List)
 		check.closeScope()
+		info.Term = append(info.Term, check.isTerminatingList(s.Body.List, ""))
+		info.Breaks = append(info.Breaks, check.logosLiveBreaks(s.Body))
 	}
 	if checked == 0 {
 		check.usedVars[info.FieldVar] = true
@@ -449,14 +502,56 @@ func (check *Checker) logosFieldTypeType(e *syntax.SelectorExpr, x *operand) boo
 	check.recordUse(name, obj)
 	check.usedVars[v] = true
 	x.expr = e
-	if b := check.logosFieldBind; b != nil && check.logosFieldVars[v] == b.info {
-		x.mode_ = typexpr
-		x.typ_ = b.field.Type()
-		return true
+	owner := check.logosFieldVars[v]
+	// The owning loop is recorded for bound and unbound f.Type alike so
+	// a case or tag can tell an outer loop's field (still varying per
+	// outer iteration) from the innermost loop's (concrete now).
+	if check.logosFieldTypeOwner == nil {
+		check.logosFieldTypeOwner = make(map[syntax.Expr]*LogosConstFor)
+	}
+	check.logosFieldTypeOwner[e] = owner
+	for b := check.logosFieldBind; b != nil; b = b.outer {
+		if owner == b.info {
+			x.mode_ = typexpr
+			x.typ_ = b.field.Type()
+			if check.logosFieldBound == nil {
+				check.logosFieldBound = make(map[syntax.Expr]bool)
+			}
+			check.logosFieldBound[e] = true
+			return true
+		}
 	}
 	x.mode_ = typexpr
 	x.typ_ = logosComptimeAny
 	return true
+}
+
+// logosFieldTypePend reports whether a type read through owner's field
+// variable is unknown to this check: owner has no binding on the stack
+// (the generic single check). Any bound field — of the innermost loop
+// or of an outer one — resolves to a concrete type for this iteration.
+func (check *Checker) logosFieldTypePend(owner *LogosConstFor) bool {
+	if owner == nil {
+		return false
+	}
+	for b := check.logosFieldBind; b != nil; b = b.outer {
+		if owner == b.info {
+			return false
+		}
+	}
+	return true
+}
+
+// logosFieldTypeVary reports whether a bound field variable belongs to
+// an outer loop of the switch being checked: its type is concrete for
+// this iteration but varies across outer iterations, so static case
+// coverage defers to each iteration while dead-case detection may use
+// the concrete type on hand.
+func (check *Checker) logosFieldTypeVary(owner *LogosConstFor) bool {
+	if owner == nil || check.logosFieldBind == nil {
+		return false
+	}
+	return owner != check.logosFieldBind.info
 }
 
 func (check *Checker) logosFieldProjExpr(x *operand, e *syntax.FieldProjExpr) {
@@ -489,7 +584,7 @@ func (check *Checker) logosFieldProjExpr(x *operand, e *syntax.FieldProjExpr) {
 	if _, ok := xt.(*TypeParam); ok {
 		if info.Generic {
 			x.mode_ = mode
-			x.typ_ = logosComptimeAny
+			x.typ_ = check.logosFieldNarrowOr(info)
 			return
 		}
 		check.errorf(e.Pos(), MissingFieldOrMethod, "[comptime::const_for_projection] cannot project a field of %s", xop.typ())
@@ -501,14 +596,29 @@ func (check *Checker) logosFieldProjExpr(x *operand, e *syntax.FieldProjExpr) {
 		return
 	}
 	x.mode_ = mode
-	if b := check.logosFieldBind; b != nil && info == b.info {
-		x.typ_ = b.field.Type()
-		return
+	for b := check.logosFieldBind; b != nil; b = b.outer {
+		if info == b.info {
+			x.typ_ = b.field.Type()
+			return
+		}
 	}
-	x.typ_ = check.logosFieldProjType(info)
+	x.typ_ = check.logosFieldNarrowOr(info)
+}
+
+// logosFieldNarrowOr answers the field's type as narrowed by the
+// const-switch case under check, or the loop's shared field type when no
+// case narrowed it.
+func (check *Checker) logosFieldNarrowOr(info *LogosConstFor) Type {
+	if n, ok := check.logosFieldNarrow[info]; ok && n != nil {
+		return n
+	}
+	return check.logosFieldProjType(info)
 }
 
 func (check *Checker) logosFieldProjType(info *LogosConstFor) Type {
+	if info.Struct == nil {
+		return logosComptimeAny
+	}
 	var shared Type
 	for i := range info.Struct.NumFields() {
 		t := info.Struct.Field(i).Type()
@@ -522,4 +632,216 @@ func (check *Checker) logosFieldProjType(info *LogosConstFor) Type {
 		return logosComptimeAny
 	}
 	return shared
+}
+
+func (check *Checker) logosConstForExecutes(s *syntax.ConstForStmt) bool {
+	info := check.Info.LogosConstFor[s]
+	if info == nil {
+		return false
+	}
+	if info.Generic && info.Struct == nil {
+		return true
+	}
+	if info.Struct == nil {
+		return false
+	}
+	for i := range info.Struct.NumFields() {
+		f := info.Struct.Field(i)
+		if f.Exported() || f.Pkg() == check.pkg {
+			return true
+		}
+	}
+	return false
+}
+
+// logosTerminatingConstFor reports whether a const for is terminating by
+// its expansion: over a concrete struct the statement stands for the
+// sequence of its per-field bodies, so it terminates when some visible
+// field's body terminates under that field's predicate values, and a
+// struct with no visible fields expands to nothing and never terminates.
+// When no per-field verdict was recorded (a generic const for or a
+// rejected range), it falls back to the shared body, the previous rule.
+// logosConstForConcrete records Term per visible field.
+func (check *Checker) logosTerminatingConstFor(s *syntax.ConstForStmt) bool {
+	info := check.Info.LogosConstFor[s]
+	if info == nil {
+		return false
+	}
+	if len(info.Term) == 0 && info.Struct == nil {
+		return check.isTerminatingList(s.Body.List, "")
+	}
+	for _, term := range info.Term {
+		if term {
+			return true
+		}
+	}
+	return false
+}
+
+// logosHasBreakConstFor reports whether some visible field's live body
+// holds a break that leaves the const for for the label-ed statement or,
+// when implicit is set, the closest outer breakable statement. Only the
+// emitted prefix counts: unrolling stops after the first terminating
+// field, so later fields never run. A struct with no visible fields holds
+// no break. When no per-field verdict was recorded, it falls back to the
+// shared body, the previous rule. logosConstForConcrete records Breaks
+// per visible field.
+func (check *Checker) logosHasBreakConstFor(s *syntax.ConstForStmt, label string, implicit bool) bool {
+	info := check.Info.LogosConstFor[s]
+	if info == nil {
+		return false
+	}
+	if len(info.Breaks) == 0 && info.Struct == nil {
+		return check.hasBreak(s.Body, label, implicit)
+	}
+	for i, brk := range info.Breaks {
+		if implicit && brk.Implicit {
+			return true
+		}
+		if label != "" && slices.Contains(brk.Labels, label) {
+			return true
+		}
+		if i < len(info.Term) && info.Term[i] {
+			break
+		}
+	}
+	return false
+}
+
+// LogosConstForBreaks names the breaks of one field's live body that can
+// leave the const for: Implicit is an unlabeled break of the enclosing
+// breakable statement, Labels are labels not bound inside the body.
+type LogosConstForBreaks struct {
+	Implicit bool
+	Labels   []string
+}
+
+// logosLiveBreaks collects the breaks in a const for body that can leave
+// the statement: an unlabeled break of the enclosing breakable statement,
+// and a labeled break whose label is not bound to a breakable nested in
+// the body (labels are unique per function, so a label not bound inside
+// names a statement outside). Dead const code, which this field's
+// expansion does not run, holds no break; a const switch keeps every
+// case, because its tag is not recorded per field.
+func (check *Checker) logosLiveBreaks(s syntax.Stmt) LogosConstForBreaks {
+	var brk LogosConstForBreaks
+	check.logosLiveBreakWalk(s, false, nil, &brk)
+	return brk
+}
+
+// logosLiveBreakWalk walks s collecting leaving breaks into brk. inner
+// reports whether an unlabeled break under s binds to a breakable nested
+// in the const for body; bound holds the labels of those breakables.
+func (check *Checker) logosLiveBreakWalk(s syntax.Stmt, inner bool, bound map[string]bool, brk *LogosConstForBreaks) {
+	switch s := s.(type) {
+	case *syntax.BranchStmt:
+		if s.Tok != syntax.Break {
+			return
+		}
+		if s.Label == nil {
+			if !inner {
+				brk.Implicit = true
+			}
+			return
+		}
+		if !bound[s.Label.Value] && !slices.Contains(brk.Labels, s.Label.Value) {
+			brk.Labels = append(brk.Labels, s.Label.Value)
+		}
+
+	case *syntax.LabeledStmt:
+		if logosBreakableStmt(s.Stmt) {
+			bound = logosBindLabel(bound, s.Label.Value)
+		}
+		check.logosLiveBreakWalk(s.Stmt, inner, bound, brk)
+
+	case *syntax.BlockStmt:
+		check.logosLiveBreakList(s.List, inner, bound, brk)
+
+	case *syntax.IfStmt:
+		check.logosLiveBreakWalk(s.Then, inner, bound, brk)
+		if s.Else != nil {
+			check.logosLiveBreakWalk(s.Else, inner, bound, brk)
+		}
+
+	case *syntax.ForStmt:
+		check.logosLiveBreakList(s.Body.List, true, bound, brk)
+
+	case *syntax.SwitchStmt:
+		for _, cc := range s.Body {
+			check.logosLiveBreakList(cc.Body, true, bound, brk)
+		}
+
+	case *syntax.SelectStmt:
+		for _, cc := range s.Body {
+			check.logosLiveBreakList(cc.Body, true, bound, brk)
+		}
+
+	case *syntax.ConstIfStmt:
+		if v, ok := check.logosConstIfKnown(s.Cond); ok {
+			if v {
+				check.logosLiveBreakWalk(s.Then, inner, bound, brk)
+			} else if s.Else != nil {
+				check.logosLiveBreakWalk(s.Else, inner, bound, brk)
+			}
+			return
+		}
+		check.logosLiveBreakWalk(s.Then, inner, bound, brk)
+		if s.Else != nil {
+			check.logosLiveBreakWalk(s.Else, inner, bound, brk)
+		}
+
+	case *syntax.ConstSwitchStmt:
+		for _, c := range s.Cases {
+			check.logosLiveBreakList(c.Body, inner, bound, brk)
+		}
+
+	case *syntax.GroupStmt:
+		check.logosLiveBreakList(s.Body.List, inner, bound, brk)
+
+	case *syntax.ConstForStmt:
+		// A nested const for keeps the enclosing label namespace; its own
+		// recorded per-field breaks are the breaks its expansion runs.
+		// Without a record (a generic or rejected nested range) the walk
+		// falls back to the nested body, the previous rule.
+		if ninfo := check.Info.LogosConstFor[s]; ninfo != nil && (len(ninfo.Breaks) > 0 || ninfo.Struct != nil) {
+			for _, nbrk := range ninfo.Breaks {
+				if nbrk.Implicit && !inner {
+					brk.Implicit = true
+				}
+				for _, l := range nbrk.Labels {
+					if !bound[l] && !slices.Contains(brk.Labels, l) {
+						brk.Labels = append(brk.Labels, l)
+					}
+				}
+			}
+		} else {
+			check.logosLiveBreakWalk(s.Body, inner, bound, brk)
+		}
+	}
+}
+
+func (check *Checker) logosLiveBreakList(list []syntax.Stmt, inner bool, bound map[string]bool, brk *LogosConstForBreaks) {
+	for _, s := range list {
+		check.logosLiveBreakWalk(s, inner, bound, brk)
+	}
+}
+
+func logosBreakableStmt(s syntax.Stmt) bool {
+	switch s.(type) {
+	case *syntax.ForStmt, *syntax.SwitchStmt, *syntax.SelectStmt:
+		return true
+	}
+	return false
+}
+
+func logosBindLabel(bound map[string]bool, label string) map[string]bool {
+	if bound[label] {
+		return bound
+	}
+	next := make(map[string]bool, len(bound)+1)
+	for l := range bound {
+		next[l] = true
+	}
+	next[label] = true
+	return next
 }

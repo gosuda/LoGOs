@@ -274,6 +274,17 @@ func (check *Checker) callExpr(x *operand, call *syntax.CallExpr) exprKind {
 	// signature may be generic
 	cgocall := x.mode() == cgofunc
 
+	// logos M5-S1 hook: a function value read through a const view carries
+	// the view's qualification, but calling it mutates nothing — unwrap the
+	// qualification so the call sees the plain signature.
+	if check.conf.Logos {
+		if base, descendants, readonly := logosReadonlyBase(x.typ()); descendants || readonly {
+			if _, ok := base.Underlying().(*Signature); ok {
+				x.typ_ = base
+			}
+		}
+	}
+
 	// If the operand type is a type parameter, all types in its type set
 	// must have a common underlying type, which must be a signature.
 	u, err := commonUnder(x.typ(), func(t, u Type) *typeError {
@@ -702,6 +713,11 @@ func (check *Checker) arguments(call *syntax.CallExpr, sig *Signature, targs []T
 		check.logosPushGoCall(call) // logos M3-S5 hook.
 		if n > 0 {
 			check.logosPushGenericArgs(targs) // logos M3-S5 hook.
+		} else if rtargs := check.logosReceiverTypeArgs(call); len(rtargs) > 0 {
+			// A method of a generic type fills its declared
+			// type-parameter positions: substituted parameters are
+			// generic positions and take platform arguments.
+			check.logosPushGenericArgs(rtargs) // logos M3-S5 hook.
 		} else {
 			check.logosPushConcreteArgs() // logos M3-S5 hook.
 		}

@@ -85,14 +85,22 @@ func (fl *fileLower) lowerLambdaExpr(lam *syntax.LambdaExpr) *syntax.FuncLit {
 		return nil
 	}
 	var hoisted string
+	var yieldSpellings []string
 	if block, ok := lam.Body.(*syntax.BlockStmt); ok {
 		var ok2 bool
-		resultsText, hoisted, ok2 = fl.lowerLambdaFrame(pos, sig, block, cat(params...).s, resultsText)
+		resultsText, hoisted, yieldSpellings, ok2 = fl.lowerLambdaFrame(pos, sig, block, cat(params...).s, resultsText)
 		if !ok2 {
 			return nil
 		}
 	}
 	body, bodyText := fl.lambdaBody(lam, sig, pos)
+	if yieldSpellings != nil {
+		// The body is a generator: lowerYield's text splices land on the
+		// block's brace boundaries, outside the interior span lambdaBody
+		// copies, so the iterator wrapper must be emitted around the body
+		// text here.
+		bodyText = cat(gen(" return func("+yieldParam+" func("+strings.Join(yieldSpellings, ", ")+") bool) {"), bodyText, gen(" }"))
+	}
 	fullText := cat(gen("func("), cat(params...), gen(")"+resultsText+" {"+hoisted+" "), bodyText, gen(" }"))
 	ft, ok := typeExprAt("func("+cat(params...).s+")"+resultsText, pos)
 	if !ok {
@@ -148,6 +156,17 @@ func (fl *fileLower) callBodySpan(call *syntax.CallExpr) span {
 	return span{fl.off(leftmostOf(call)), split.end}
 }
 
+// callBodySpanOr is callBodySpan without the fatal exit: it reports false
+// when call.Pos() does not name a source-level call open, which happens for
+// generated calls (e.g. a lowered ?? chain) carrying an operand position.
+func (fl *fileLower) callBodySpanOr(call *syntax.CallExpr) (span, bool) {
+	split, ok := splitCall(fl.src, fl.off(call.Pos()))
+	if !ok {
+		return span{}, false
+	}
+	return span{fl.off(leftmostOf(call)), split.end}, true
+}
+
 func (fl *fileLower) lambdaCaptureSpan(lam *syntax.LambdaExpr, body syntax.Expr) span {
 	if stashed, ok := fl.optBodySpan[lam]; ok && stashed.end > stashed.start {
 		switch syntax.Unparen(body).(type) {
@@ -174,7 +193,7 @@ func (fl *fileLower) lambdaBody(lam *syntax.LambdaExpr, sig *types2.Signature, p
 		return fl.lambdaTryBody(sig, pos, t)
 	}
 	espan := fl.lambdaCaptureSpan(lam, expr)
-	text := fl.drainBodyWrapper(expr, fl.lazyText(espan))
+	text := fl.drainBodyWrapper(expr, fl.lazyText(espan), espan)
 	if native, done := fl.stagedReplacements[expr]; done {
 		expr = native
 	}
@@ -230,26 +249,26 @@ func (fl *fileLower) lambdaTryBody(sig *types2.Signature, pos syntax.Pos, t *syn
 	return blockOf(pos, []syntax.Stmt{as, branch, ret}), cat(parts...)
 }
 
-func (fl *fileLower) lowerLambdaFrame(pos syntax.Pos, sig *types2.Signature, block *syntax.BlockStmt, paramText, resultsText string) (string, string, bool) {
+func (fl *fileLower) lowerLambdaFrame(pos syntax.Pos, sig *types2.Signature, block *syntax.BlockStmt, paramText, resultsText string) (string, string, []string, bool) {
 	deferTry, errdefer, scopeDefer := cleanupsIn(block)
 	if (deferTry || errdefer || scopeDefer) && sig.Results().Len() > 0 {
 		named, ok := fl.lambdaNamedResults(pos, sig)
 		if !ok {
-			return "", "", false
+			return "", "", nil, false
 		}
 		resultsText = named
 	}
 	ft, ok := typeExprAt("func("+paramText+")"+resultsText, pos)
 	if !ok {
-		return "", "", false
+		return "", "", nil, false
 	}
 	functype, ok := ft.(*syntax.FuncType)
 	if !ok {
-		return "", "", false
+		return "", "", nil, false
 	}
 	fc := newFuncLower(fl, functype, sig, block)
 	fc.lower()
-	return resultsText, fc.prependHoists(), true
+	return resultsText, fc.prependHoists(), fc.yieldSpellings, true
 }
 
 func (fl *fileLower) lambdaNamedResults(pos syntax.Pos, sig *types2.Signature) (string, bool) {

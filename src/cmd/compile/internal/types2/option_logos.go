@@ -162,7 +162,13 @@ func (check *Checker) logosOptionAssign(x *operand, T Type, context string) bool
 				return true
 			}
 		}
-		return Identical(x.typ(), Topt.Elem) || Identical(x.typ(), T)
+		if Identical(x.typ(), Topt.Elem) || Identical(x.typ(), T) {
+			return true
+		}
+		if Vopt != nil {
+			return false
+		}
+		return check.logosUnionMemberOf(x, Topt.Elem, context)
 	}
 	if Vopt != nil && check.logosInGoCall() {
 		if check.logosIsNonNilPointer(Vopt.Elem) && Identical(Vopt.Elem, T) {
@@ -373,7 +379,14 @@ func (check *Checker) logosOptionalCall(x *operand, call *syntax.CallExpr) bool 
 	if opt == nil {
 		return false
 	}
-	sig, ok := Unalias(opt.Elem).(*Signature)
+	// A function field reached through `?.` on a const view carries the
+	// view's qualification; calling it mutates nothing, so read the
+	// signature from underneath.
+	elem := opt.Elem
+	if base, descendants, readonly := logosReadonlyBase(elem); descendants || readonly {
+		elem = base
+	}
+	sig, ok := Unalias(elem).(*Signature)
 	if !ok || sig.TypeParams().Len() > 0 {
 		return false
 	}

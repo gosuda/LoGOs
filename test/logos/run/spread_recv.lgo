@@ -1,0 +1,45 @@
+// run
+
+package main
+
+import "fmt"
+
+type Holder struct {
+	Base bool
+	Ptr  *bool
+}
+
+type Word struct{}
+
+func (Word) M() *bool { return new(bool) }
+
+var base = Holder{Base: true, Ptr: new(bool)}
+var ptrs = []*bool{new(bool)}
+var seq int
+
+func next() int {
+	seq++
+	return 0
+}
+
+func spreadRecv[T any](ch chan T) {
+	const switch T {
+	case interface{ M() *bool }:
+		var p interface{ M() *bool }
+		select {
+		case p, *Holder{..base, Ptr: ptrs[next()]}.Ptr = <-ch:
+			_ = p
+		default:
+		}
+	}
+}
+
+func main() {
+	chBool := make(chan bool, 1)
+	chBool <- true
+	spreadRecv[bool](chBool)
+	chWord := make(chan Word, 1)
+	chWord <- Word{}
+	spreadRecv[Word](chWord)
+	fmt.Println("seq", seq)
+}

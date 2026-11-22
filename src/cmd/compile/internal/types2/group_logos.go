@@ -34,6 +34,12 @@ func (check *Checker) logosGroupStmt(ctxt stmtContext, s *syntax.GroupStmt) {
 		check.error(s, InvalidSyntaxTree, "go group requires logos mode")
 		return
 	}
+	if top, ok := check.logosGroupTop(); ok && !top.child {
+		if check.Info.LogosGroupNested == nil {
+			check.Info.LogosGroupNested = make(map[*syntax.GroupStmt]bool)
+		}
+		check.Info.LogosGroupNested[s] = true
+	}
 	check.logosGroupContext(s)
 	check.logosGroupLimit(s)
 	if !check.logosEnclosingError() {
@@ -42,6 +48,12 @@ func (check *Checker) logosGroupStmt(ctxt stmtContext, s *syntax.GroupStmt) {
 	check.logosGroup = append(check.logosGroup, logosGroupFrame{asig: check.sig})
 	check.openScope(s.Body, "group")
 	check.stmtList(ctxt, s.Body.List)
+	if check.isTerminatingList(s.Body.List, "") {
+		if check.Info.LogosGroupTerminating == nil {
+			check.Info.LogosGroupTerminating = make(map[*syntax.GroupStmt]bool)
+		}
+		check.Info.LogosGroupTerminating[s] = true
+	}
 	check.closeScope()
 	check.logosGroup = check.logosGroup[:len(check.logosGroup)-1]
 }
@@ -162,13 +174,24 @@ func (check *Checker) logosGroupBranches(all *Scope, parent *block, lstmt *synta
 // logosTerminatingGroup reports whether a go group statement is terminating:
 // the parent body runs inline, so the group terminates exactly when its own
 // body does; child bodies are separate function bodies and never count.
+// A group nested anywhere inside another group's body in the same function
+// body, including inside an intervening if, for, or switch, is submitted as
+// a child and falls through to the spawner, so it never terminates the
+// enclosing body even when its own body terminates. A group inside a function
+// literal body or a go child block starts a new scope and is not nested.
 func (check *Checker) logosTerminatingGroup(s *syntax.GroupStmt) bool {
+	if check.Info.LogosGroupNested[s] {
+		return false
+	}
+	if top, ok := check.logosGroupTop(); ok && !top.child {
+		return false
+	}
 	return check.isTerminatingList(s.Body.List, "")
 }
 
 // logosHasBreakGroup searches the group parent body for a break targeting
 // the enclosing breakable statement; child bodies have their own label
 // namespace, so hasBreak never enters a GroupChild (SPEC 2.6).
-func logosHasBreakGroup(s *syntax.GroupStmt, label string, implicit bool) bool {
-	return hasBreakList(s.Body.List, label, implicit)
+func (check *Checker) logosHasBreakGroup(s *syntax.GroupStmt, label string, implicit bool) bool {
+	return check.hasBreakList(s.Body.List, label, implicit)
 }

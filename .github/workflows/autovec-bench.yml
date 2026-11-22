@@ -18,6 +18,9 @@ concurrency:
 jobs:
   benchmark:
     name: "autovec benchmark ${{ matrix.arch }}"
+    concurrency:
+      group: logos-heavy-ci
+      queue: max
     runs-on: "${{ matrix.runner }}"
     timeout-minutes: 90
     strategy:
@@ -25,11 +28,11 @@ jobs:
       matrix:
         include:
           - arch: "amd64"
-            runner: "ubuntu-26.04"
+            runner: "depot-ubuntu-24.04"
             archive: "x86_64-unknown-linux-gnu"
             sha256: "ae2beda2ac99c098427e4f755244552daf20e514422889cca6d44421e2d93c87"
           - arch: "arm64"
-            runner: "ubuntu-26.04-arm"
+            runner: "depot-ubuntu-24.04-arm"
             archive: "aarch64-unknown-linux-gnu"
             sha256: "f8244d1e17f8da23ee6b3ae2cdc04a6a185a450f6b74e09bff12e498038fcbc9"
     env:

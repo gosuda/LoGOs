@@ -154,17 +154,9 @@ func (h *groupHoist) expr(e syntax.Expr) syntax.Expr {
 	return e
 }
 
-func (h *groupHoist) valueTemp(pos syntax.Pos, like syntax.Expr, tmp string, value syntax.Expr, valueText otext) ([]syntax.Stmt, []otext) {
-	fl := h.fc.fl
-	if typ := fl.pkg.info.TypeOf(like); typ != nil {
-		if native, spelled, ok := fl.spellTypeBoth(types2.Default(typ), pos); ok {
-			return []syntax.Stmt{
-					typedVarDecl(pos, nameOf(pos, tmp), native),
-					assignOf(pos, []syntax.Expr{nameOf(pos, tmp)}, []syntax.Expr{value}),
-				},
-				[]otext{gen("var " + tmp + " " + spelled), cat(gen(tmp+" = "), valueText)}
-		}
-	}
+func (h *groupHoist) valueTemp(pos syntax.Pos, _ syntax.Expr, tmp string, value syntax.Expr, valueText otext) ([]syntax.Stmt, []otext) {
+	// `:=` infers the temporary's type from the operand, so no spelled type
+	// name is re-resolved in a scope where a local declaration may shadow it.
 	return []syntax.Stmt{defineOf(pos, []syntax.Expr{nameOf(pos, tmp)}, []syntax.Expr{value})},
 		[]otext{cat(gen(tmp+" := "), valueText)}
 }
@@ -454,8 +446,7 @@ func (fc *funcLower) groupHoistSend(s *syntax.SendStmt, top groupFrame) []syntax
 	fl := fc.fl
 	scanForLiterals(fl, s)
 	h := fc.newGroupHoist(top, fc.groupStmtStart(s))
-	sel, text, sp := h.send(s)
-	h.add([]syntax.Stmt{sel}, text)
+	sp := h.send(s)
 	fl.addT(sp.start, sp.end, joinO(h.text, "\n"))
 	return h.native
 }
@@ -551,6 +542,9 @@ func (fl *fileLower) groupClosingEnd(open int) int {
 }
 
 func (fl *fileLower) groupOperandEnd(e syntax.Expr) int {
+	if ws, ok := fl.wrapSpan[syntax.Unparen(e)]; ok {
+		return ws.end
+	}
 	if closure := fl.groupClosureCall(e); closure != nil {
 		return closure.source.end
 	}

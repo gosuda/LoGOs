@@ -778,3 +778,37 @@ func TestKeyDispatchAtTheSwitchTableBoundary(t *testing.T) {
 		t.Fatalf("table probe lost full-key validation: a1=%d a10=%d a11=%d, want 1, 10 and 11", got9.A1, got9.A10, got9.A11)
 	}
 }
+
+func TestStrictDecodingKeepsRequiredChecks(t *testing.T) {
+	decodeStrict := func(data string) (*User, error) {
+		p := reflect.New(reflect.TypeFor[User]()).Interface().(*User)
+		dec := json.NewDecoder(strings.NewReader(data))
+		dec.DisallowUnknownFields()
+		err := dec.Decode(p)
+		return p, err
+	}
+	if _, err := decodeStrict(`{"id":1,"name":"a"}`); err != missing("User", "Profile") {
+		t.Fatalf("strict missing: got %v, want MissingFieldError{User, Profile}", err)
+	}
+	if _, err := decodeStrict(`{"id":1,"name":"a","profile":null}`); err != missing("User", "Profile") {
+		t.Fatalf("strict null: got %v, want MissingFieldError{User, Profile}", err)
+	}
+	w := User{ID: 1, Name: "a", Profile: &Profile{Bio: "old"}}
+	dec := json.NewDecoder(strings.NewReader(`{"id":1,"name":"a"}`))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&w); err != missing("User", "Profile") {
+		t.Fatalf("strict omitted with non-nil destination: got %v, want MissingFieldError{User, Profile}", err)
+	}
+}
+
+func TestStrictNullDocumentLeavesDestination(t *testing.T) {
+	w := User{ID: 7, Name: "keep", Profile: &Profile{Bio: "keep"}}
+	dec := json.NewDecoder(strings.NewReader(`null`))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&w); err != nil {
+		t.Fatalf("strict null: got %v, want nil", err)
+	}
+	if w.ID != 7 || w.Name != "keep" || w.Profile == nil || w.Profile.Bio != "keep" {
+		t.Fatalf("strict null changed the destination: %+v", w)
+	}
+}

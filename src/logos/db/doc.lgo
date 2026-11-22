@@ -1,0 +1,50 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+// Package db is the LoGOs twin of the scanning path of database/sql.
+//
+// It provides the typed row path without the per-column reflection of
+// convertAssignRows: Assign copies one driver value into a typed address
+// with a comptime-selected converter, and Query and One scan whole rows
+// into structs or scalars by expanding fields at compile time. The only
+// run-time dispatch left is a type switch on the driver value, which is
+// boxed by the driver before the twin ever sees it.
+//
+// The hot path never calls reflect: every question about the destination
+// type is answered by a const switch or a const for over struct fields.
+// The two run-time type assertions that remain are on values whose type
+// is known only at run time: a destination that implements sql.Scanner
+// (for example sql.Null) and the *any destination.
+//
+// Compatibility boundary: Assign covers the destination types the
+// conversion table pins (string, bool, the int, uint and float kinds and
+// their named types, []byte, time.Time, uuid.UUID, RawBytes as an owned
+// copy, *any, and any sql.Scanner). Deliberately absent, each with the
+// reason: pointer destinations (a NULL maps to an absent option field,
+// never to a nil pointer; use T?); named slice types other than the
+// exact []byte (a const switch tilde case needs a basic type per SPEC
+// T-205, so there is no compile-time form for them); decimal compose
+// targets and driver cursor destinations (both interfaces are
+// unexported, so no twin code can name them); driver argument
+// conversion (Valuer, ColumnConverter, NamedValueChecker), which stays
+// in database/sql and database/sql/driver. Query materializes every row,
+// so a RawBytes field holds an owned copy, not pinned driver memory;
+// the zero-allocation pin of rows.rawbuf is a database/sql internal and
+// cannot be named from outside the package.
+//
+// Error contract: plain errors whose texts keep the legacy "db: " cause
+// prefix the spira consumer matches on (column count and name, NULL in
+// a non-option field, more than one row for One, unsupported type, scan
+// wrap). The twin carries no fault codes and no dialect classification;
+// per-column failures additionally carry the standard library wrap
+// "sql: Scan error on column index %d, name %q" around the twin text,
+// because the conversion runs inside rows.Scan.
+//
+// Allocation bound: zero twin-side allocations per scanned column for
+// scalar destinations; one allocation exactly where a new value must be
+// materialized (a formatted number string, a cloned byte slice). The
+// destination vector is built once per query and reused for every row,
+// unlike a per-row rebuild. Dynamic Scanner destinations may allocate
+// exactly as the standard library does.
+package db

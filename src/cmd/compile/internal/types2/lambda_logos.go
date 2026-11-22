@@ -144,7 +144,12 @@ func (check *Checker) logosLambdaTargeted(x *operand, sig *Signature, e *syntax.
 		} else {
 			synth := &syntax.ReturnStmt{Results: expr}
 			synth.SetPos(expr.Pos())
-			check.initVars(sig.results.vars, []syntax.Expr{expr}, synth)
+			// An expression lambda returning an iter.Seq signature is a
+			// generator, so its body is a valued return and is rejected like
+			// `return e` in the block form.
+			if !check.logosGeneratorReturn(synth) {
+				check.initVars(sig.results.vars, []syntax.Expr{expr}, synth)
+			}
 		}
 		check.usage(scope)
 	}

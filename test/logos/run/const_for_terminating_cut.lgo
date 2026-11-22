@@ -1,0 +1,51 @@
+// run
+
+
+package main
+
+import (
+	"comptime"
+	"fmt"
+	"os"
+)
+
+var failed bool
+
+func check(name string, cond bool, got, want any) {
+	if !cond {
+		failed = true
+		fmt.Println("FAIL", name+":", "got", got, "want", want)
+		return
+	}
+	fmt.Println("ok", name)
+}
+
+type Inner struct {
+	V int
+}
+
+type Three struct {
+	First Inner
+	Mid   int
+	Last  string
+}
+
+var effects []string
+
+func cut() int {
+	const for _, f := range comptime.Fields[Three]() {
+		effects = append(effects, f.Name)
+		const if comptime.IsStruct[f.Type]() {
+			return len(effects)
+		}
+	}
+}
+
+func main() {
+	gotCut := cut()
+	check("cut", gotCut == 1, gotCut, 1)
+	check("effects", fmt.Sprint(effects) == "[First]", effects, "[First]")
+	if failed {
+		os.Exit(1)
+	}
+}

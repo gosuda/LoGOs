@@ -1,0 +1,27 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+# A two-target receive whose frozen index holds a checked make length inside
+# a matched selector receiver: the freeze temp must keep the MulLen check the
+# wrap absorbed, so an overflowing length panics in native and ejected builds
+# and a valid length evaluates the operand once.
+
+cp $GOROOT/test/logos/run/constswitch_select_makelen.lgo a/main.lgo
+
+cd a
+logos run .
+cmp stdout $GOROOT/test/logos/run/constswitch_select_makelen.out
+logos eject -o out
+exists out/main.go
+cd out
+go run .
+cmp stdout $GOROOT/test/logos/run/constswitch_select_makelen.out
+exec env -u GOROOT $UPROOT1272/bin/go build ./...
+exec $GOROOT/bin/gofmt -l .
+! stdout .
+cd ../..
+
+-- a/go.mod --
+module example.com/cswselectmakelen
+
+go 1.27

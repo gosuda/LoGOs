@@ -47,10 +47,20 @@ func (check *Checker) validType0(pos syntax.Pos, typ Type, nest, path []*Named) 
 		}
 
 	case *Array:
-		return check.validType0(pos, t.elem, nest, path)
+		if !check.logosIfaceWord(t.elem) { // logos value-union hook: interface-word elements skip the memory nest.
+			return check.validType0(pos, t.elem, nest, path)
+		}
+
+	case *Option: // logos M3-S2 hook: option elements nest like array elements.
+		if !check.logosIfaceWord(t.Elem) { // logos value-union hook: interface-word elements skip the memory nest.
+			return check.validType0(pos, t.Elem, nest, path)
+		}
 
 	case *Struct:
 		for _, f := range t.fields {
+			if check.logosIfaceWord(f.typ) { // logos value-union hook: interface-word fields skip the memory nest.
+				continue
+			}
 			if !check.validType0(pos, f.typ, nest, path) {
 				return false
 			}
@@ -61,6 +71,16 @@ func (check *Checker) validType0(pos syntax.Pos, typ Type, nest, path []*Named) 
 			if !check.validType0(pos, t.typ, nest, path) {
 				return false
 			}
+		}
+
+	case *ConstView:
+		if !check.validType0(pos, t.Elem, nest, path) {
+			return false
+		}
+
+	case *ReadonlyDescendants:
+		if !check.validType0(pos, t.Elem, nest, path) {
+			return false
 		}
 
 	case *Interface:
@@ -162,6 +182,9 @@ func (check *Checker) validType0(pos syntax.Pos, typ Type, nest, path []*Named) 
 				// match in length but be careful in case of errors.
 				if t == tparam && i < inst.TypeArgs().Len() {
 					targ := inst.TypeArgs().At(i)
+					if check.logosIfaceWord(targ) { // logos value-union hook: interface-word arguments skip the memory nest.
+						return true
+					}
 					// The type argument must be valid in the enclosing
 					// type (where inst was instantiated), hence we must
 					// check targ's validity in the type nest excluding

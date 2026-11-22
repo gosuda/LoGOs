@@ -10,7 +10,7 @@ import (
 	"strings"
 )
 
-func (check *Checker) logosExhaustiveStmtSwitch(s *syntax.SwitchStmt, sx *operand, seen map[Type]syntax.Expr) {
+func (check *Checker) logosExhaustiveStmtSwitch(s *syntax.SwitchStmt, sx *operand, seen map[Type]syntax.Expr, nilExcused bool) {
 	if !check.conf.Logos || sx == nil {
 		return
 	}
@@ -29,7 +29,7 @@ func (check *Checker) logosExhaustiveStmtSwitch(s *syntax.SwitchStmt, sx *operan
 			misses = append(misses, TypeString(term.typ, check.qualifier))
 		}
 	}
-	if _, ok := seen[nil]; !ok {
+	if _, ok := seen[nil]; !ok && !nilExcused {
 		misses = append(misses, "nil")
 	}
 	if len(misses) == 0 {

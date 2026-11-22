@@ -6,6 +6,7 @@ package logos
 
 import (
 	"go/token"
+	"slices"
 	"strconv"
 
 	"cmd/compile/internal/syntax"
@@ -87,24 +88,116 @@ func (fl *fileLower) groupHeaderSemis(from, to int) []span {
 	return out
 }
 
-func (h *groupHoist) send(s *syntax.SendStmt) (syntax.Stmt, otext, span) {
+// pureSendValue reports whether e evaluates without side effects or a
+// second read changing the result, so each send arm may spell it: a
+// call, receive, or interpolation can run twice (once per arm), but a
+// name, literal, selector, or arithmetic on them is stable.
+func pureSendValue(e syntax.Expr) bool {
+	pure := true
+	syntax.Inspect(e, func(n syntax.Node) bool {
+		switch n := n.(type) {
+		case *syntax.CallExpr, *syntax.InterpExpr:
+			pure = false
+		case *syntax.Operation:
+			if n.Op == syntax.Recv {
+				pure = false
+			}
+		}
+		return pure
+	})
+	return pure
+}
+
+func (h *groupHoist) send(s *syntax.SendStmt) span {
 	fc := h.fc
 	fl := fc.fl
 	pos := h.scopePos(s.Pos())
 	chSpan, valSpan := h.span(s.Chan), h.span(s.Value)
 	mark := fc.hoistSubMark()
+	nMark, tMark := len(h.native), len(h.text)
 	h.slots([]*syntax.Expr{&s.Chan, &s.Value})
 	fc.hoistSubEmit(fc.hoistSubTake(mark))
+	// Snapshot both operands in source order so each is evaluated once and
+	// the two send arms share no expression nodes; the snapshots live in a
+	// block so no declaration lands in the enclosing scope where a forward
+	// goto might cross it, and `:=` avoids spelling a type that a local
+	// declaration could shadow.
 	chText, valText := fl.textOf(chSpan), fl.textOf(valSpan)
-	send := at(&syntax.SendStmt{Chan: s.Chan, Value: s.Value}, pos)
-	sel := at(&syntax.SelectStmt{
+	chTmp, valTmp := fc.groupTempName("c"), fc.groupTempName("v")
+	// A leaf value (a name, nil, or a literal) needs no snapshot: the
+	// send arms can spell it directly, which also keeps the channel's
+	// element typing for `ch <- nil` and `ch <- 1` that `v :=` loses.
+	// Any other expression is snapshotted once and the arms share the
+	// temporary.
+	var valArmA, valArmB syntax.Expr
+	var valTxtA, valTxtB otext
+	var valDef syntax.Stmt
+	switch v := syntax.Unparen(s.Value).(type) {
+	case *syntax.Name:
+		valArmA, valArmB = nameOf(pos, v.Value), nameOf(pos, v.Value)
+		valTxtA, valTxtB = valText, valText
+	case *syntax.BasicLit:
+		valArmA = at(&syntax.BasicLit{Value: v.Value, Kind: v.Kind}, pos)
+		valArmB = at(&syntax.BasicLit{Value: v.Value, Kind: v.Kind}, pos)
+		valTxtA, valTxtB = valText, valText
+	default:
+		// A pure value is spelled in each send arm: only one arm
+		// evaluates it, and spelling it keeps the channel element's
+		// contextual typing for untyped constants (-1, 1 << 3,
+		// math.Pi) that a `:=` snapshot would give the default type.
+		if pureSendValue(s.Value) {
+			if a, okA := parseExprAt(valText.s, pos); okA {
+				if b, okB := parseExprAt(valText.s, pos); okB {
+					valArmA, valArmB = a, b
+					valTxtA, valTxtB = valText, valText
+					break
+				}
+			}
+		}
+		valArmA, valArmB = nameOf(pos, valTmp), nameOf(pos, valTmp)
+		valTxtA, valTxtB = gen(valTmp), gen(valTmp)
+		valDef = defineOf(pos, []syntax.Expr{nameOf(pos, valTmp)}, []syntax.Expr{s.Value})
+	}
+	armVal := func(valE syntax.Expr) *syntax.CommClause {
+		return at(&syntax.CommClause{Comm: at(&syntax.SendStmt{
+			Chan:  nameOf(pos, chTmp),
+			Value: valE,
+		}, pos)}, pos)
+	}
+	slow := at(&syntax.SelectStmt{
 		Body: []*syntax.CommClause{
-			at(&syntax.CommClause{Comm: send}, pos),
+			armVal(valArmB),
 			fc.groupDoneClause(pos, h.top),
 		},
 	}, pos)
-	text := cat(gen("select { case "), chText, gen(" <- "), valText, gen(": "+fc.groupDoneText(h.top)+" }"))
-	return sel, text, span{start: chSpan.start, end: valSpan.end}
+	ready := at(&syntax.SelectStmt{
+		Body: []*syntax.CommClause{
+			armVal(valArmA),
+			at(&syntax.CommClause{Body: []syntax.Stmt{slow}}, pos),
+		},
+	}, pos)
+	blockList := []syntax.Stmt{
+		defineOf(pos, []syntax.Expr{nameOf(pos, chTmp)}, []syntax.Expr{s.Chan}),
+	}
+	if valDef != nil {
+		blockList = append(blockList, valDef)
+	}
+	blockList = append(blockList, ready)
+	block := blockOf(pos, blockList)
+	preNative, preText := h.native[nMark:], h.text[tMark:]
+	h.native, h.text = h.native[:nMark], h.text[:tMark]
+	// Clone: append onto preNative may reuse h.native's spare capacity,
+	// and the later h.add(block) would then write the block into its own
+	// first statement and recurse forever in the syntax walk.
+	block.List = append(slices.Clone(preNative), block.List...)
+	selText := cat(gen("select { case "+chTmp+" <- "), valTxtA, gen(": default:\nselect { case "+chTmp+" <- "), valTxtB, gen(": "+fc.groupDoneText(h.top)+" }\n}"))
+	texts := append(preText, cat(gen(chTmp+" := "), chText))
+	if valDef != nil {
+		texts = append(texts, cat(gen(valTmp+" := "), valText))
+	}
+	texts = append(texts, selText)
+	h.add([]syntax.Stmt{block}, cat(gen("{\n"), joinO(texts, "\n"), gen("\n}")))
+	return span{start: chSpan.start, end: valSpan.end}
 }
 
 func (h *groupHoist) recvStmt(s *syntax.ExprStmt, op *syntax.Operation) (syntax.Stmt, otext, span) {
@@ -128,8 +221,7 @@ func (h *groupHoist) stmt(s syntax.Stmt, sp span) {
 	mark := fc.hoistSubMark()
 	switch n := s.(type) {
 	case *syntax.SendStmt:
-		sel, text, _ := h.send(n)
-		h.add([]syntax.Stmt{sel}, text)
+		h.send(n)
 		return
 	case *syntax.ExprStmt:
 		if op, ok := groupRecvOp(n.X); ok {

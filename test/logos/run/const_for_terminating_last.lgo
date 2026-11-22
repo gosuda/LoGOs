@@ -1,0 +1,50 @@
+// run
+
+
+package main
+
+import (
+	"comptime"
+	"fmt"
+	"os"
+)
+
+var failed bool
+
+func check(name string, cond bool, got, want any) {
+	if !cond {
+		failed = true
+		fmt.Println("FAIL", name+":", "got", got, "want", want)
+		return
+	}
+	fmt.Println("ok", name)
+}
+
+type Inner struct {
+	V int
+}
+
+type BackLoaded struct {
+	Lead  int
+	Trail Inner
+}
+
+var order []string
+
+func tail() int {
+	const for _, f := range comptime.Fields[BackLoaded]() {
+		order = append(order, f.Name)
+		const if comptime.IsStruct[f.Type]() {
+			return len(order)
+		}
+	}
+}
+
+func main() {
+	gotTail := tail()
+	check("tail", gotTail == 2, gotTail, 2)
+	check("order", fmt.Sprint(order) == "[Lead Trail]", order, "[Lead Trail]")
+	if failed {
+		os.Exit(1)
+	}
+}
