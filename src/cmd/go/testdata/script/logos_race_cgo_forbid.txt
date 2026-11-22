@@ -88,6 +88,15 @@ cd ../resrace
 [cgo] stderr 'not in cgo_allowlist'
 cd ../nokey
 
+# The "all" pattern sees the same pure-Go os/user files the package
+# loader selects: bufio and bytes are imported only by that variant,
+# and this module has no test that would pull them in itself.
+cd ../forbidall
+logos list -race -f '{{.ImportPath}}' all
+stdout '^bufio$'
+stdout '^bytes$'
+cd ../nokey
+
 # With no C compiler and no zig the message names the need and the policy.
 env PATH=$WORK/no-compiler
 ! logos test -race -count=1 ./racy
@@ -225,6 +234,25 @@ func main() {
 	if int(C.answer()) != 42 {
 		panic("wrong answer")
 	}
+}
+
+-- forbidall/go.mod --
+module example.com/forbidall
+
+go 1.27
+
+-- forbidall/logos.toml --
+[build]
+cgo = "forbid"
+
+-- forbidall/lib/lib.lgo --
+package lib
+
+import "os/user"
+
+func Current() error {
+	_, err := user.Current()
+	return err
 }
 
 -- nokey/go.mod --
