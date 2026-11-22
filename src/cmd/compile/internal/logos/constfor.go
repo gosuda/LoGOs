@@ -1817,16 +1817,29 @@ func (c *cfLeaf) cfLocalTypeExpr(e syntax.Expr, ref syntax.Node) (types2.Type, b
 			return types2.NewMap(k, v), true
 		}
 	case *syntax.ArrayType:
-		if t, involved := c.cfLocalTypeExpr(e.Elem, ref); involved {
-			if t == nil {
+		et, einvolved := c.cfLocalTypeExpr(e.Elem, ref)
+		linvolved := c.cfMentionsLocalDecl(e.Len, ref)
+		if !einvolved && !linvolved {
+			return nil, false
+		}
+		var etyp types2.Type
+		if einvolved {
+			if et == nil {
 				return nil, true
 			}
-			n, ok := cfArrayLen(e.Len)
+			etyp = et
+		} else {
+			t, ok := c.fl.cfResolveTypeExpr(e.Elem, c.active, c.run.sites)
 			if !ok {
 				return nil, true
 			}
-			return types2.NewArray(t, n), true
+			etyp = t
 		}
+		n, ok := c.cfArrayLenConst(e.Len, ref, make(map[string]bool))
+		if !ok || n < 0 {
+			return nil, true
+		}
+		return types2.NewArray(etyp, n), true
 	case *syntax.ChanType:
 		if t, involved := c.cfLocalTypeExpr(e.Elem, ref); involved {
 			if t == nil {
@@ -1854,6 +1867,34 @@ func cfArrayLen(e syntax.Expr) (int64, bool) {
 	}
 	n, err := strconv.ParseInt(lit.Value, 0, 64)
 	return n, err == nil
+}
+
+// cfArrayLenConst reads the length of an array type through function-
+// local const declarations: a literal, a name bound to one, or a
+// package constant of the record's scope. Anything else fails so the
+// construct stays for the copy's own lowering.
+func (c *cfLeaf) cfArrayLenConst(e syntax.Expr, ref syntax.Node, seen map[string]bool) (int64, bool) {
+	switch e := syntax.Unparen(e).(type) {
+	case *syntax.BasicLit:
+		return cfArrayLen(e)
+	case *syntax.Name:
+		if seen[e.Value] {
+			return 0, false
+		}
+		if init, anchor, ok := cfLocalConstInitBefore(c.declRoot, ref, e.Value, c.declParents); ok {
+			seen[e.Value] = true
+			defer delete(seen, e.Value)
+			return c.cfArrayLenConst(init, anchor, seen)
+		}
+		if sites := c.run.sites; sites != nil && sites.scope != nil {
+			if obj, ok := sites.scope.Lookup(e.Value).(*types2.Const); ok && obj.Val() != nil && obj.Val().Kind() == constant.Int {
+				if n, ok := constant.Int64Val(obj.Val()); ok {
+					return n, true
+				}
+			}
+		}
+	}
+	return 0, false
 }
 
 // cfMentionsLocalType reports whether any name inside e resolves to a
