@@ -1505,10 +1505,11 @@ func (p *logosEFPass) collectAssigns() {
 	for k := range p.tracked {
 		p.trackedByRoot[k.root] = append(p.trackedByRoot[k.root], k)
 	}
-	// A backward goto can run a loop again after its defers registered: a
-	// goto inside or after the labeled statement it targets jumps back,
-	// and a label placed at or before a loop reaches it on the way
-	// forward.
+	// A backward goto re-enters a loop when its target sits at or before
+	// the loop (the jump runs the whole loop again) or inside the loop
+	// body (the jump re-runs part of the body, recreating a loop-local
+	// error and rewriting a shared result). A label placed at or before a
+	// loop reaches it on the way forward.
 	labels := make(map[string]syntax.Stmt)
 	var gotos []*syntax.BranchStmt
 	syntax.Inspect(p.body, func(n syntax.Node) bool {
@@ -1532,7 +1533,7 @@ func (p *logosEFPass) collectAssigns() {
 				// A goto before the loop cannot run it again.
 				continue
 			}
-			if ls.Pos().Cmp(f.Pos()) <= 0 || inSubtree(ls, f) {
+			if ls.Pos().Cmp(f.Pos()) <= 0 || inSubtree(f, ls) {
 				p.reenter[f] = true
 			}
 		}

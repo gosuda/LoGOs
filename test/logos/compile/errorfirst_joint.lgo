@@ -1227,3 +1227,26 @@ func efMixedFreshShared() {
 	}
 	_ = shared
 }
+
+// A backward goto to a label inside the loop body re-runs the reset and
+// recreates the loop-local error, so the single-iteration break exemption
+// cannot prove the deferred read even though the reset drops the entry the
+// goto's fixpoint join carries.
+func efGotoInnerLabelRetry(done bool) {
+	h := efHeld{}
+	for {
+	retry:
+		h.stats = 0
+		var err error
+		defer func() {
+			if err == nil {
+				println(h.stats) // ERROR "result_before_error_check"
+			}
+		}()
+		h.stats, err = efFetchHeld()
+		if !done {
+			goto retry
+		}
+		break
+	}
+}
